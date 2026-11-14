@@ -7,11 +7,13 @@ import { DRC_ITEMS, drcItemTitle } from "../../canvas/drc-items";
 import { NL } from "./canvas";
 import { projectNetlist } from "./update-pcb";
 import { runZoneFill } from "./zonefill";
-import { checkField, download, fmtLenU, grid, h, messageBox, notebook, openDialog, textEntryBox, textField, type CellValue } from "./ui";
+import { box, checkField, download, fmtLenU, grid, h, messageBox, notebook, openDialog, textEntryBox, textField, type CellValue } from "./ui";
 import { openPopupMenu, type PopupEntry } from "../contextmenu";
 import { adoptProjectFile, canWriteProject, saveProjectFile } from "../projectfile";
 import { editProject, type Plain, type ProjectEdit } from "../../canvas/project-file";
 import { loadBoardHeader, openBoardSetup } from "./board-setup";
+import { loadLibraryFootprint } from "../library";
+import { kicadActionAvailable, runKicadAction } from "../hotkeys";
 
 export interface Marker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; excluded?: boolean; comment?: string; selected?: boolean }
 interface Settings { severities: Record<string, string>; netclasses: Record<string, { clearance?: number }>; clearance: number; edgeClearance: number; minTrackWidth: number; minThroughDrill: number; boardSetup?: unknown }
@@ -29,6 +31,7 @@ interface PcbToolsApi {
   boardStatistics(doc: KDoc): Stats;
   inspectClearance(doc: KDoc, a: string, b: string, settings: unknown): { gap: number | null; required: number; sameNet: boolean; nets: string[] } | null;
   netclassOf(s: Settings, net: string): { clearance?: number };
+  footprintDiffLines(boardFp: SNode, libFp: SNode): string[];
   inspectConstraints(doc: KDoc, id: string, s: Settings, fmt: (mm: number) => string): { title: string; header: string; item: string; lines: string[]; resolved: string }[] | null;
   selectionIds(ctx: ToolCtx): Set<string>;
 }
@@ -444,4 +447,72 @@ export function openConstraints(ctx: ToolCtx): void {
         el.append(rep);
       } }))).el);
     } });
+}
+
+// ---------------------------------------------------------------- Footprint Associations / Compare Footprint with Library
+/** The one selected footprint, or null after the info-bar error KiCad shows. */
+function selectedFootprint(ctx: ToolCtx, error: string): KItem | null {
+  const doc = board(); if (!doc) return null;
+  const ids = Array.from(PT().selectionIds(ctx)), it = ids.length === 1 ? doc.items.get(ids[0]) : null;
+  if (!it || it.kind !== "footprint") { ctx.toast(error); return null; }
+  return it;
+}
+/** The wxGrids here have no column labels (SetColLabelSize( 0 )). */
+const hideHead = (g: { el: HTMLElement }): void => { const head = g.el.querySelector("thead"); if (head) (head as HTMLElement).style.display = "none"; };
+const splitFpid = (it: KItem): { lib: string; name: string } => { const id = String(it.node[1] ?? ""), c = id.indexOf(":"); return c > 0 ? { lib: id.slice(0, c), name: id.slice(c + 1) } : { lib: "", name: id }; };
+
+/**
+ * BOARD_INSPECTION_TOOL::ShowFootprintLinks: DIALOG_FOOTPRINT_ASSOCIATIONS — Library Association (Library: / Footprint:
+ * with the library's and the footprint's descriptions) and Schematic Association (the footprint's sheet path, one
+ * "Sheet:" row per sheet and "Symbol:" last, with what the schematic names it).
+ */
+export function openFootprintAssociations(ctx: ToolCtx): void {
+  const it = selectedFootprint(ctx, "Select a footprint for a footprint associations report."); if (!it) return;
+  const { lib, name } = splitFpid(it);
+  const libRows: Record<string, CellValue>[] = [{ k: "Library: ", v: lib, d: "" }, { k: "Footprint: ", v: name, d: "" }];
+  const path = String((KiCadCanvas.kid(it.node, "path") as SNode | null || [])[1] ?? "").split("/").filter(Boolean);
+  const symRows: Record<string, CellValue>[] = path.map((u, i) => ({ k: i === path.length - 1 ? "Symbol:" : "Sheet: ", v: u, d: "" }));
+  const cols = [{ label: "", key: "k", width: "90px" }, { label: "", key: "v" }, { label: "", key: "d" }];
+  const holder: { g: ReturnType<typeof grid> | null } = { g: null };
+  openDialog({ title: "Footprint Associations", width: 640, noOk: true,
+    build(body) {
+      const libGrid = holder.g = grid(cols, libRows, { ro: true, height: "auto", key: "libraryAssociation" });
+      const symGrid = grid(cols, symRows, { ro: true, height: "auto", key: "schematicAssociation" });
+      for (const g of [libGrid, symGrid]) hideHead(g);
+      body.append(box("Library Association", libGrid.el), box("Schematic Association", symGrid.el));
+    } });
+  // the library row's description (the library table) and the library footprint's (descr …)
+  void (async () => {
+    try { const L = (window as unknown as { KiCadLibrary?: { libraries(k: string): Promise<{ libraries: { name: string; description: string }[] }> } }).KiCadLibrary; if (L) { const t = await L.libraries("footprint"); const row = t.libraries.find((l) => l.name === lib); if (row) libRows[0].d = row.description; } } catch { /* none */ }
+    try { const t = await loadLibraryFootprint(String(it.node[1] ?? "")); const n = t ? KiCadCanvas.parse(t) as SNode : null; const d = n ? KiCadCanvas.kid(n, "descr") as SNode | null : null; if (d) libRows[1].d = String(d[1] ?? ""); } catch { /* none */ }
+    if (holder.g && holder.g.el.isConnected) { holder.g.refresh(); hideHead(holder.g); }
+  })();
+}
+
+/**
+ * BOARD_INSPECTION_TOOL::DiffFootprint in DIALOG_BOOK_REPORTER "Compare Footprint with Library": the Summary page
+ * (the footprint, Library:, Library item:, then FootprintNeedsUpdate's report or "No relevant differences detected.")
+ * and the Apply button relabelled Update Footprint from Library....
+ */
+export function openDiffFootprint(ctx: ToolCtx): void {
+  const it = selectedFootprint(ctx, "Select a footprint to diff with its library equivalent."); if (!it) return;
+  const { lib, name } = splitFpid(it);
+  const rep = h("div", { class: "pd-report", style: "min-height:260px", "data-k": "footprintDiff" });
+  const ln = (t: string, cls = "ln"): void => { rep.append(h("div", { class: cls }, t || "\u00a0")); };
+  ln("Board vs library diff for:", "ln hd");
+  ln("\u2022 " + (it.ref ? `Footprint ${it.ref}` : describeItem(board() as KDoc, it.id)), "ln li"); ln("\u2022 Library: " + lib, "ln li"); ln("\u2022 Library item: " + name, "ln li"); ln("");
+  const waiting = h("div", { class: "ln" }, "Loading the library footprint...");
+  rep.append(waiting);
+  const canUpdate = !ctx.viewOnly && kicadActionAvailable("updateFootprint");
+  openDialog({ title: "Compare Footprint with Library", width: 640, noOk: true,
+    extra: canUpdate ? [{ label: "Update Footprint from Library...", fn: () => { const P = PT() as unknown as { applySelection?(c: ToolCtx, ids: string[]): void }; if (P.applySelection) P.applySelection(ctx, [it.id]); runKicadAction("updateFootprint"); } }] : undefined,
+    build(body) { body.append(notebook([{ label: "Summary", build: (el) => el.append(rep) }]).el); } });
+  void loadLibraryFootprint(String(it.node[1] ?? "")).then((t) => {
+    waiting.remove();
+    const n = t ? KiCadCanvas.parse(t) as SNode : null;
+    if (!n) { ln(`The library no longer contains the item ${name}.`); return; }
+    const lines = PT().footprintDiffLines(it.node, n);
+    if (!lines.length) ln("No relevant differences detected.");
+    for (const l of lines) ln(l);
+  }).catch(() => { waiting.remove(); ln("The library is not included in the current configuration."); });
 }

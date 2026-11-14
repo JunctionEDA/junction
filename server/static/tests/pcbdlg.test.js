@@ -145,3 +145,23 @@ test("Constraints Resolution: board setup, net class and custom rules in EvalRul
     assert.equal(T.inspectConstraints(d, "fp1", s), null);
   } finally { T.setCustomRules(null); }
 });
+
+test("Compare Footprint with Library: FootprintNeedsUpdate's report lines", () => {
+  const lib = `(footprint "Lib:R" (version 20241229) (layer "F.Cu") (attr smd)
+    (fp_line (start -1 -1) (end 1 -1) (stroke (width 0.1) (type solid)) (layer "F.SilkS") (uuid "l1"))
+    (pad "1" smd rect (at -1 0) (size 1 1) (layers "F.Cu" "F.Mask") (uuid "p1"))
+    (pad "2" smd rect (at 1 0) (size 1 1) (layers "F.Cu" "F.Mask") (uuid "p2")))`;
+  // the board copy: placed and rotated (children keep footprint coordinates; a pad's angle is the board's), which
+  // the comparison takes back out
+  const placed = (body) => K.parse(`(footprint "Lib:R" (layer "F.Cu") (uuid "b") (at 10 20 90) (attr smd)
+    (fp_line (start -1 -1) (end 1 -1) (stroke (width 0.1) (type solid)) (layer "F.SilkS") (uuid "x1"))
+    ${body})`);
+  const same = placed(`(pad "1" smd rect (at -1 0 90) (size 1 1) (layers "F.Cu" "F.Mask") (uuid "q1")) (pad "2" smd rect (at 1 0 90) (size 1 1) (layers "F.Cu" "F.Mask") (uuid "q2"))`);
+  assert.deepEqual(T.footprintDiffLines(same, K.parse(lib)), []);
+  const bigger = placed(`(pad "1" smd rect (at -1 0 90) (size 1.2 1) (layers "F.Cu" "F.Mask") (uuid "q1")) (pad "2" smd rect (at 1 0 90) (size 1 1) (layers "F.Cu" "F.Mask") (uuid "q2"))`);
+  assert.deepEqual(T.footprintDiffLines(bigger, K.parse(lib)), ["Pad 1 size differs on layer F.Cu."]);
+  const one = placed(`(pad "1" smd rect (at -1 0 90) (size 1 1) (layers "F.Cu" "F.Mask") (uuid "q1"))`);
+  assert.deepEqual(T.footprintDiffLines(one, K.parse(lib)), ["Pad count differs."]);
+  const dnp = K.parse(K.serialize(same).replace("(attr smd)", "(attr smd dnp)").replace("(uuid \"b\")", "(uuid \"b\") (clearance 0.3)"));
+  assert.deepEqual(T.footprintDiffLines(dnp, K.parse(lib)), ["'Do not populate' settings differ.", "Pad clearance overridden."]);
+});
