@@ -59,6 +59,8 @@ pub(crate) fn allowed_file(name: &str) -> bool {
             | "lib" | "sub" | "cir" | "mod" | "spice" | "ibs"
             // CvPcb footprint association (equivalence) files (DIALOG_CONFIG_EQUFILES)
             | "equ"
+            // the simulator's workbook (SIMULATOR_FRAME_UI::SaveWorkbook, <project>.wbk)
+            | "wbk"
     )
 }
 
@@ -2454,6 +2456,7 @@ mod tests {
         assert!(allowed_file("boards/rev2.kicad_pcb"));
         assert!(allowed_file("sym-lib-table"));
         assert!(!allowed_file("evil.exe"));
+        assert!(allowed_file("rectifier.wbk"));
         assert!(!allowed_file("notes.txt"));
         assert!(allowed_file("models/opamp.lib") && allowed_file("spice/q.SUB") && allowed_file("x.ibs"));
         assert!(allowed_file("footprints.equ") && allowed_file("libs/Passives.EQU"));

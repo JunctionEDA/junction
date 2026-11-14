@@ -117,5 +117,18 @@ test("workbook options <-> command lines; user signals; E series", () => {
   assert.equal(SL.snapToSeries(4600, 24), 4700); assert.equal(SL.eSeries(96).length, 96);
 });
 
+const PL = load(["sim", "plot.ts"]);
+test("plot: tick labels with SI prefixes and units, 1-2-5 steps", () => {
+  assert.equal(PL.tickLabel(0.002, "s", 0.01), "2ms"); assert.equal(PL.tickLabel(0, "V", 2), "0V");
+  assert.equal(PL.tickLabel(-0.4, "V", 2), "-400mV"); assert.equal(PL.tickLabel(1000, "Hz", 1e6), "1KHz");
+  assert.equal(PL.tickLabel(-45, "°", 180), "-45°");
+  assert.equal(PL.niceStep(10, 10), 1); assert.equal(PL.niceStep(0.01, 5), 0.002); assert.equal(PL.niceStep(7, 2), 5);
+});
+test("signals list: no duplicate power rows from .probe p() directives", () => {
+  const c = SL.readCircuit(".title x\n.save all\n.probe alli\n.probe p(R1)\nR1 a 0 1k\nV1 a 0 dc 1\n.end\n");
+  const s = SL.signalsFor("TRAN", c, SL.DEFAULT_OPTIONS);
+  assert.equal(s.filter((x) => x === "P(R1)").length, 1, s.join(","));
+});
+
 module.exports = { test, load, K };
 process.on("exit", () => { console.log(`schdlg: ${passed} passed, ${failed} failed`); if (failed) process.exitCode = 1; });

@@ -202,8 +202,8 @@ export function currentNames(it: CircuitItem): string[] {
 export const OPT_SAVE_V = 0x0040, OPT_SAVE_I = 0x0080, OPT_SAVE_P = 0x0100, OPT_SAVE_EVENTS = 0x0800, OPT_FIX_INCLUDES = 0x0010;
 /** SIMULATOR_FRAME_UI::rebuildSignalsList: the signals the grid offers for an analysis. */
 export function signalsFor(type: SimType, circuit: { items: CircuitItem[]; nets: string[]; directives: string[] }, options: number, userSignals: string[] = []): string[] {
-  const t = type === "Custom" ? "TRAN" : type, out: string[] = [];
-  const add = (s: string): void => { if (t === "AC") out.push(s + " (gain)", s + " (phase)"); else if (t === "SP") out.push(s + " (amplitude)", s + " (phase)"); else out.push(s); };
+  const t = type === "Custom" ? "TRAN" : type, out: string[] = [], seen = new Set<string>();
+  const add = (s: string): void => { if (seen.has(s.toUpperCase())) return; seen.add(s.toUpperCase()); if (t === "AC") out.push(s + " (gain)", s + " (phase)"); else if (t === "SP") out.push(s + " (amplitude)", s + " (phase)"); else out.push(s); };
   if (options & OPT_SAVE_V && (t === "TRAN" || t === "DC" || t === "AC" || t === "FFT"))
     for (const n of circuit.nets) { if (/^gnd$/i.test(n) || n === "0" || n.startsWith("unconnected-_")) continue; add(`V(${n})`); }
   if (options & OPT_SAVE_I && (t === "TRAN" || t === "DC" || t === "AC")) for (const it of circuit.items) for (const c of currentNames(it)) add(c);

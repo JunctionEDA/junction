@@ -2,6 +2,7 @@
 // (pageSettings, findAndReplace, editSymbolFields, generateBOM, assignFootprints, schematicSetup, syncAllSheetsPins,
 // toggleGridOverrides, openPreferences), the group commands on the schematic module, their hotkeys, the project
 // settings the renderer and the ERC honour, and the preferences applied when a document opens.
+import { openSimulator } from "../sim/frame";
 import { E, isSch, requestRender, setToggle, store, toast, toolCtx } from "./editor";
 import { openAssignFootprints } from "./assign-footprints";
 import { openChangeSymbols } from "./change-symbols";
@@ -106,6 +107,8 @@ export function installDialogs(HANDLERS: Record<string, Handler>): void {
     updateSymbols: needDoc(() => openChangeSymbols("update"), true), updateSymbol: needDoc(() => openChangeSymbols("update"), true),
     toggleGridOverrides: (() => { const on = toggleGridOverrides(); toast(on ? "Grid overrides on" : "Grid overrides off"); }) as Handler,
     openPreferences: (() => openPreferences()) as Handler,
+    // SCH_EDITOR_CONTROL::Simulate: Inspect > Simulator (sim/frame.ts)
+    showSimulator: needDoc(() => { void openSimulator(); }, true),
     // ACTIONS::gridProperties ("Edit Grids..."): COMMON_TOOLS::GridProperties opens Preferences on the editor's Grids page
     gridProperties: (() => openPreferences(GRID_PAGE[editorId()])) as Handler,
     gridFast1: (() => { fastGrid(1); }) as Handler, gridFast2: (() => { fastGrid(2); }) as Handler, gridFastCycle: (() => { fastGrid("cycle"); }) as Handler,
