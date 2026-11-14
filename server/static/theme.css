@@ -46,6 +46,7 @@
   --teal: #006464;       /* values and references, editor badge */
   --wire: #128A12;       /* live, ok */
   --warn: #B87A00;       /* warning */
+  --warn-row: #FFF8D4;   /* a list row with a problem (CvPcb's missing footprint, symbols_listbox.cpp) */
   --err: #D2181C;        /* error, destructive */
   --err-2: #B01317;      /* destructive hover and pressed */
   --silk: #F2EDA1;       /* silkscreen: labels drawn on the board canvas */
@@ -111,7 +112,7 @@
     --ink: #FAFAFA; --ink-2: #A1A1AA; --ink-3: #85858E;
     --accent: #FAFAFA; --accent-2: #D4D4D8; --on-accent: #0B0B0C; --blue: #D4D4D8;
     --copper: #E05555; --copper-2: #C83434; --teal: #4FBDBD; --wire: #45C245;
-    --warn: #E5A800; --err: #F0464A; --err-2: #D2383C;
+    --warn: #E5A800; --err: #F0464A; --err-2: #D2383C; --warn-row: #706020;
     --shadow: 0 6px 20px #00000080; --shadow-dialog: 0 18px 48px #000000A6; --scrim: #00000080;
     --tb-hover: color-mix(in srgb, var(--accent) 40%, #000000);
     --tb-on-hover: color-mix(in srgb, var(--accent) 50%, #000000);
@@ -123,7 +124,7 @@
   --ink: #FAFAFA; --ink-2: #A1A1AA; --ink-3: #85858E;
   --accent: #FAFAFA; --accent-2: #D4D4D8; --on-accent: #0B0B0C; --blue: #D4D4D8;
   --copper: #E05555; --copper-2: #C83434; --teal: #4FBDBD; --wire: #45C245;
-  --warn: #E5A800; --err: #F0464A; --err-2: #D2383C;
+  --warn: #E5A800; --err: #F0464A; --err-2: #D2383C; --warn-row: #706020;
   --shadow: 0 6px 20px #00000080; --shadow-dialog: 0 18px 48px #000000A6; --scrim: #00000080;
   --tb-hover: color-mix(in srgb, var(--accent) 40%, #000000);
   --tb-on-hover: color-mix(in srgb, var(--accent) 50%, #000000);

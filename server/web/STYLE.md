@@ -45,6 +45,7 @@ A page never defines a palette of its own; a test in `src/github.rs` fails if on
 | `--accent`, `--accent-2`, `--on-accent` | Primary button fill and any filled selection that carries text; its border, hover and pressed; the text on it |
 | `--blue` | Links, focus ring, active tab underline, tinted selection |
 | `--sel`, `--sel-soft`, `--on`, `--on-line` | Selected row, hovered row, pressed toggle and its border |
+| `--warn-row` | Background of a list row flagged as a warning (CvPcb: a symbol whose footprint is not in any library) |
 | `--wire`, `--warn`, `--err`, `--err-2` | Ok and live, warning, error and destructive, destructive hover |
 | `--teal` | Values and references, the editor role |
 | `--copper`, `--copper-2` | F.Cu, the owner role. Not for buttons |
