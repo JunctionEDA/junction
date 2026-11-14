@@ -33,6 +33,14 @@ interface PropsHelpers {
 }
 interface SchHelpers { autoplaceNode(doc: KDoc, item: KItem, opts?: unknown): SNode | null; symbolPins(doc: KDoc, item: KItem): { number: string; name: string; type: string }[] }
 const PH = (): PropsHelpers => (CollabTools as unknown as { props: { helpers: PropsHelpers } }).props.helpers;
+/** The placed symbol's unit count and current unit (SCH_SYMBOL::GetUnitCount / GetUnit). */
+export function symbolUnits(doc: KDoc, node: SNode): { count: number; unit: number } {
+  const u = L.kid(node, "unit"); return { count: PH().libUnitCount(doc, node), unit: u ? L.num(u[1], 1) : 1 };
+}
+/** SCH_SYMBOL::SetUnitSelection + SetUnit for the sheet instance being edited. */
+export function setSymbolUnitHere(doc: KDoc, node: SNode, unit: number): void {
+  const here = sheetPathNow(doc); PH().setSymbolUnit(node, unit); L.setInstanceData(node, here.path, here.project, { unit });
+}
 const SH = (): SchHelpers | null => { const m = CollabTools.sch; return m && m._ ? m._ as unknown as SchHelpers : null; };
 const MANDATORY_SYMBOL = ["Reference", "Value", "Footprint", "Datasheet", "Description"];
 const nextName = (rows: L.FieldRow[]): string => { let n = 1; const s = new Set(rows.map((r) => r.name)); while (s.has("Field" + n)) n++; return "Field" + n; };
@@ -246,7 +254,7 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
     },
   });
 }
-const unitLetter = (u: number): string => { let s = ""; let n = u; while (n > 0) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); } return s; };
+export const unitLetter = (u: number): string => { let s = ""; let n = u; while (n > 0) { n--; s = String.fromCharCode(65 + (n % 26)) + s; n = Math.floor(n / 26); } return s; };
 /** The symbol editor, when this build has one (SYMBOL_PROPS_EDIT_SCHEMATIC_SYMBOL / _LIBRARY_SYMBOL). */
 function editors(): { editSchematicSymbol(id: string): void; editLibrarySymbol(libId: string): void } | null {
   const w = window as unknown as { KiCadSymbolEditor?: { editSchematicSymbol(id: string): void; editLibrarySymbol(libId: string): void } };

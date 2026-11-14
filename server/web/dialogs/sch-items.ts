@@ -28,7 +28,7 @@ import * as L from "./sch-items-logic";
 import { commitWithOtherUnits } from "./sync-units";
 import { HL, netMap } from "../editor/schnets";
 import { fmtLen, parseLen, unitName } from "../editor/pcbdialogs/ui";
-import { openSheetProperties, openSymbolProperties, sheetPathNow } from "./sch-symbol-sheet";
+import { openSheetProperties, openSymbolProperties, setSymbolUnitHere, sheetPathNow, symbolUnits, unitLetter } from "./sch-symbol-sheet";
 import { openPageSettings } from "./page-settings";
 import { datasheetButton, docFiles, footprintButton, projectVars, sheetFileButton } from "./browse-cells";
 import { isURL, resolveUriVars, type FpChooserFilters } from "../library/fpchoice";
@@ -472,6 +472,7 @@ export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (fi
   const p0 = L.kids(item.node, "property").find((p) => L.fieldName(p) === name); if (!p0) return false;
   const doc = ctx.doc, ro = !!ctx.viewOnly, fx = L.readFx(p0), [x0, y0, r0] = L.atOf(p0), isFile = item.kind === "sheet" && (name === "Sheetfile" || name === "Sheet file");
   const els: Record<string, HTMLElement> = {}; let col: Swatch | null = null;
+  const units0 = name === "Reference" && item.kind === "symbol" ? symbolUnits(doc, item.node) : { count: 1, unit: 1 };
   KD().open({
     title: L.fieldDialogTitle(name, item.kind), width: 560, readOnly: ro,
     build(b) {
@@ -479,6 +480,12 @@ export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (fi
       const text = textInput(L.fieldValue(p0), undefined, { id: "kd-fld-text", style: "width:100%", disabled: ro || isFile }); els.text = text;
       g.append(h("label", null, "Text:"), text, h("span"));
       if (isFile) g.append(h("span"), h("span", { class: "kd-note", id: "kd-fld-note" }, "Sheet filename can only be modified in Sheet Properties dialog."), h("span"));
+      // m_unitLabel / m_unitChoice: the Reference field of a multi-unit symbol also picks the unit (dialog_field_properties.cpp)
+      if (units0.count > 1 && !apply) {
+        const us: [string, string][] = []; for (let u = 1; u <= units0.count; u++) us.push([String(u), unitLetter(u)]);
+        els.unit = select(us, String(Math.min(units0.unit, units0.count)), undefined, { id: "kd-fld-unit", disabled: ro, style: "width:90px" });
+        g.append(h("label", null, "Unit:"), els.unit, h("span"));
+      }
       const vis = checkbox("Visible", !fx.hidden, undefined, { id: "kd-fld-visible" }), sn = checkbox("Show field name", L.yes(p0, "show_name"), undefined, { id: "kd-fld-showname" }), ap = checkbox("Allow automatic placement", !L.yes(p0, "do_not_autoplace"), undefined, { id: "kd-fld-autoplace" });
       els.visible = vis.querySelector("input") as HTMLInputElement; els.showName = sn.querySelector("input") as HTMLInputElement; els.autoplace = ap.querySelector("input") as HTMLInputElement;
       g.append(h("span"), h("span", { style: "display:flex;gap:14px;flex-wrap:wrap" }, vis, sn, ap), h("span"));
@@ -519,6 +526,7 @@ export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (fi
       for (let j = 1; j < staged.length; j++) if (staged[j] === p) staged[j] = np;
       // a symbol's reference also lives in its instance data (SCH_SYMBOL::SetRef)
       if (name === "Reference" && item.kind === "symbol") { const here = sheetPathNow(doc); L.setInstanceData(staged, here.path, here.project, { reference: row.value }); }   // SetUserRef( *aSheetPath, m_text )
+      if (els.unit) { const nu = Number((els.unit as HTMLSelectElement).value); if (nu && nu !== units0.unit) setSymbolUnitHere(doc, staged, nu); }
       let out = staged;
       if (moved) L.drop(out, "fields_autoplaced");
       else if (L.yes(out, "fields_autoplaced") && item.kind === "symbol") {   // the parent is autoplaced again (editFieldText)
