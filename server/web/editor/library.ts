@@ -32,6 +32,7 @@
 // The schematic tool module calls toolChooser() where it used to open its own picker and
 // afterPlace() once a carried symbol is dropped; the board has no place tool of its own, so the
 // footprint carry lives here and placeFootprint / the two browsers are published as module actions.
+import { openSymbolViewer } from "../symview/frame";
 import { setCursorOverride } from "./cursors";
 import { state } from "./appstore";
 import { snapMm } from "./doc";
@@ -303,5 +304,5 @@ export function installLibrary(): void {
   const guard = (fn: () => Promise<void>) => (): boolean => { void fn().catch((e) => toast(message(e), 4000)); return true; };
   const act = (id: string, label: string, key: string, run: () => boolean) => ({ id, label, key, run });
   const sch = window.CollabTools && window.CollabTools.sch;   // the board's placeFootprint / showFootprintBrowser live in pcb-tools.js (its action table is frozen)
-  if (sch && sch.actions) (sch.actions as Record<string, unknown>).showSymbolBrowser = act("showSymbolBrowser", "Symbol Library Browser", "", guard(() => chooseAndPlace("symbol", { browser: true })));
+  if (sch && sch.actions) (sch.actions as Record<string, unknown>).showSymbolBrowser = act("showSymbolBrowser", "Symbol Library Browser", "", guard(() => openSymbolViewer()));
 }

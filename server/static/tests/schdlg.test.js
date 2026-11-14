@@ -200,5 +200,15 @@ test("embedded files: the root sheet's list and font flag", () => {
   assert.deepEqual(e.files, ["a.pdf", 'b \\"x\\".step']); assert.equal(e.fonts, true);
 });
 
+// ---------------------------------------------------------------- Symbol Library Browser
+const SV = load(["symview", "logic.ts"]);
+test("symbol viewer: filters need every token, stepping stops at the ends", () => {
+  assert.equal(SV.tokensMatch("op dual", "LM358 dual opamp"), true); assert.equal(SV.tokensMatch("op quad", "LM358 dual opamp"), false);
+  assert.equal(SV.tokensMatch("  ", "x"), true);
+  assert.equal(SV.symbolSearchText({ name: "R", keywords: "res", description: "Resistor", source: "official" }), "R res Resistor");
+  assert.equal(SV.stepSymbol(["a", "b", "c"], "b", 1), "c"); assert.equal(SV.stepSymbol(["a", "b", "c"], "c", 1), "c");
+  assert.equal(SV.stepSymbol(["a", "b", "c"], "a", -1), "a"); assert.equal(SV.stepSymbol(["a", "b"], "zz", 1), "a");
+});
+
 module.exports = { test, load, K };
 process.on("exit", () => { console.log(`schdlg: ${passed} passed, ${failed} failed`); if (failed) process.exitCode = 1; });

@@ -7,6 +7,7 @@
 // library copy (symedit/schematic.ts; Save writes it back to the schematic).  Each edit sends the whole symbol with
 // the text it was made against; a tab's undo list holds the symbol before and after each of this user's edits, and
 // undo carries back only that change (symedit/merge.ts), leaving what other users changed since in place.
+import { openSymbolViewer } from "../symview/frame";
 import * as M from "./model";
 import { libDocFor } from "./libdoc";
 import { SymDirDoc, symdirOf, type LibBuffer, type DirFile } from "./symdir";
@@ -1291,12 +1292,11 @@ export class SymbolEditor {
   }
   /** View > Symbol Library Browser (SYMBOL_VIEWER_FRAME): browse every library; its Add Symbol to Schematic places the pick on the schematic. */
   private async symbolBrowser(): Promise<void> {
-    type Chosen = { libId?: string; item: { id: string }; symbol?: string; fields?: unknown; unit?: number; keep?: boolean; allUnits?: boolean };
-    const L = (window as unknown as { KiCadLibrary?: { openChooser(kind: "symbol", o?: { browser?: boolean; title?: string }): Promise<Chosen | null>; placeSymbol(o: Record<string, unknown>): Promise<unknown> } }).KiCadLibrary;
-    if (!L) return;
-    const r = await L.openChooser("symbol", { browser: true }); if (!r) return;
-    await this.close(); if (this.isOpen) return;
-    await L.placeSymbol({ libId: r.libId || r.item.id, symbol: r.symbol || "", fields: r.fields, unit: r.unit, keep: r.keep, allUnits: r.allUnits }).catch((e: Error) => messageBox(e.message));
+    const L = (window as unknown as { KiCadLibrary?: { placeSymbol(o: Record<string, unknown>): Promise<unknown> } }).KiCadLibrary;
+    await openSymbolViewer({ onAdd: (libId, symbol, unit) => { void (async () => {
+      await this.close(); if (this.isOpen || !L) return;
+      await L.placeSymbol({ libId, symbol, unit }).catch((e: Error) => messageBox(e.message));
+    })(); } });
   }
   /** EDA_DRAW_FRAME::ChangeUserUnits: kept as symbol_editor's system.units and system.last_imperial_units. */
   setUnits(u: Units): void { E.units = u; if (u !== "mm") E.lastImperial = u; saveUnits("symbol_editor", { units: u, lastImperial: (E.lastImperial === "in" ? "in" : "mil") as Units }); this.renderToolbars(); this.renderMsg(); this.renderStatus(); }
