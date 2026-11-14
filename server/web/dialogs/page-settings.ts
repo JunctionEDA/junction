@@ -3,7 +3,7 @@
 import { E, applyChanges, isSch, publishUndo, redoStack, sendOp, toast, undoStack } from "./editor";
 import { KD, checkbox, h, select, textInput } from "./dom";
 import { datePicker } from "../components/kdate";
-import { PAPER_FORMATS, isoDate, pageSettingsChange, pageSettingsOf, pageSizeError, type PageSettings } from "./logic";
+import { PAPER_FORMATS, isoDate, rootPageChange, pageSettingsChange, pageSettingsOf, pageSizeError, type PageSettings } from "./logic";
 import { currentDocEntry, projectDocs, readDoc, saveProject, sub, submitDocOp } from "./project";
 import { bitmapButton } from "../components/kicon-dom";
 import { lenField, listDialog, messageBox } from "../editor/pcbdialogs/ui";
@@ -24,6 +24,17 @@ export function commitPageSettings(next: PageSettings): boolean {
   if (JSON.stringify(before) === JSON.stringify(after)) return false;
   applyChanges([after]); sendOp([after]);
   undoStack.push({ label: "page settings", changes: [after], inverse: [before] }); if (undoStack.length > 200) undoStack.shift();
+  redoStack.length = 0; publishUndo();
+  return true;
+}
+
+/** The root sheet's page number on the open (root) document, as one undoable step. */
+export function commitRootPage(page: string): boolean {
+  const d = E.kdoc as (KDoc & { pageNumber?: string }) | null; if (!d) return false;
+  const was = String(d.pageNumber || "1"); if (was === page) return false;
+  const after = rootPageChange(page), before = rootPageChange(was);
+  applyChanges([after]); sendOp([after]);
+  undoStack.push({ label: "change sheet page number", changes: [after], inverse: [before] }); if (undoStack.length > 200) undoStack.shift();
   redoStack.length = 0; publishUndo();
   return true;
 }

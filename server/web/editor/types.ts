@@ -57,7 +57,7 @@ export interface PendingOp { docId: string | null; changes: KChange[] }
 export interface ServerError { code?: string; clientOpId?: string; role?: string; docId?: string }
 
 /** A change as it travels (net.ts / doc.ts applyChanges): an item change, or a document-level one (Page Settings). */
-export type WireChange = KChange & { docProps?: { paper?: unknown; titleBlock?: unknown }; itemSexpr?: string };
+export type WireChange = KChange & { docProps?: { paper?: unknown; titleBlock?: unknown; pageNumber?: unknown }; itemSexpr?: string };
 
 /** One plot colour of the desktop-pushed SVG render (E.layers, keyed by the colour's hex). */
 export interface SvgLayer { name: string; nodes: (HTMLElement | SVGElement)[]; visible: boolean }

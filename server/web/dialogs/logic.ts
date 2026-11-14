@@ -54,8 +54,11 @@ export function pageSettingsOf(doc: { paper?: string; portrait?: boolean; page: 
 }
 /** The id every document-level (page settings) change travels under; no item ever has it. */
 export const DOC_PROPS_ID = "00000000-0000-0000-0000-0000000d0c00";
-export interface DocPropsChange { id: string; kind: "MODIFIED"; typeName: "PAGE_SETTINGS"; docProps: { paper: string; titleBlock: string } }
+export interface DocPropsChange { id: string; kind: "MODIFIED"; typeName: "PAGE_SETTINGS"; docProps: { paper?: string; titleBlock?: string; pageNumber?: string } }
 export function pageSettingsChange(p: PageSettings): DocPropsChange { return { id: DOC_PROPS_ID, kind: "MODIFIED", typeName: "PAGE_SETTINGS", docProps: { paper: paperSexpr(p), titleBlock: titleBlockSexpr(p) } }; }
+/** The root sheet's own page number, (sheet_instances (path "/" (page …))) of the root file (SCH_EDIT_TOOL::EditPageNumber
+ *  on the root sheet path); it travels as a document-settings change like the page settings. */
+export function rootPageChange(page: string): DocPropsChange { return { id: DOC_PROPS_ID, kind: "MODIFIED", typeName: "PAGE_SETTINGS", docProps: { pageNumber: page } }; }
 export function isDocPropsChange(c: unknown): c is DocPropsChange { const o = c as { id?: unknown; docProps?: unknown } | null; return !!o && o.id === DOC_PROPS_ID && typeof o.docProps === "object" && o.docProps !== null; }
 /** KiCad's date format for the "<<<" button (DIALOG_PAGES_SETTINGS: FormatISODate). */
 export function isoDate(d: Date): string { const p = (n: number) => String(n).padStart(2, "0"); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`; }

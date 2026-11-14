@@ -11,6 +11,7 @@ import { toast } from "../util";
 import { selectionIds } from "../gestures";
 import { applyHighlight, preferInstance } from "../schnets";
 import { projectJson, saveProject, sub } from "../../dialogs/project";
+import { commitRootPage } from "../../dialogs/page-settings";
 import { KC, currentDocId, isSchDoc, kdoc, openDocs, panelStore, projectId, projectName, textEntry, type DocEntryLite, tctx } from "./core";
 
 interface SheetRef { id: string; name: string; file: string; page: string }
@@ -171,12 +172,19 @@ async function rename(path: string): Promise<void> {
 }
 async function editPage(path: string): Promise<void> {
   const node = find(path); if (!node) return;
-  if (!node.sheetId) { toast("The root sheet's page number is set in the desktop app"); return; }
   // SCH_SHEET_PATH::PathHumanReadable( false ): the root file's stem, then each sheet name, each closed by '/'
   const root = panelStore.get().hierarchy.root, stem = root ? root.file.replace(/\.kicad_sch$/, "") : "";
   const human = stem + "/" + namesTo(path).map((n) => n + "/").join("");
+  if (E.viewOnly) { toast("View-only access"); return; }
   const page = await textEntry("Edit Sheet Page Number", `Enter page number for sheet path${human.length > 20 ? "\n" + human : " " + human}`, node.page, { alnum: true }); if (page === null) return;
   const pg = page.trim(); if (!pg || pg === node.page) return;
+  if (!node.sheetId) {
+    // the root sheet has no sheet symbol: its page is the root file's own (sheet_instances (path "/" (page …)))
+    if (!node.docId) return;
+    if (currentDocId() !== node.docId) { const d = schDocs().find((x) => x.docId === node.docId); if (!d) return; await openDoc(d); }
+    if (currentDocId() === node.docId && commitRootPage(pg)) publishHierarchy();
+    return;
+  }
   await editSheetSymbol(node, "change sheet page number", (n) => setSheetPage(n, pg));
 }
 /**

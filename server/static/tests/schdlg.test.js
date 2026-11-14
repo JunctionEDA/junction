@@ -235,4 +235,10 @@ test("date picker: ISO parse / format, Monday-first month grid, month steps clam
   assert.strictEqual(KDT.isoOf(KDT.addMonths(KDT.parseIso("2024-01-31"), 1)), "2024-02-29");
   assert.strictEqual(KDT.isoOf(KDT.addMonths(KDT.parseIso("2024-01-15"), -1)), "2023-12-15");
 });
+test("root sheet page number travels as a document-settings change", () => {
+  const c = DL.rootPageChange("7");
+  assert.ok(DL.isDocPropsChange(c)); assert.deepStrictEqual(c.docProps, { pageNumber: "7" });
+  const d = K.parseDoc('(kicad_sch (version 20250114) (uuid "r") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))', "kicad_sch");
+  assert.strictEqual(d.pageNumber, "1"); assert.ok(K.applyDocProps(d, c.docProps)); assert.strictEqual(d.pageNumber, "7"); assert.strictEqual(d.paper, "A4");
+});
 process.on("exit", () => { console.log(`schdlg: ${passed} passed, ${failed} failed`); if (failed) process.exitCode = 1; });

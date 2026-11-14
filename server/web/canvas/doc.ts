@@ -107,13 +107,16 @@ export function parseDoc(text: string, docType?: string): Doc {
 // carried so ops for them still match, and so a document round-trip does not lose them.
 /**
  * Document-level settings carried by a collab change ({ docProps: { paper: "(paper …)", titleBlock: "(title_block …)" } },
- * the Page Settings dialog): the same fields parseDoc reads from the file header.  An empty titleBlock clears it.
+ * the Page Settings dialog; { docProps: { pageNumber } } from Edit Sheet Page Number on the root sheet): the same fields
+ * parseDoc reads from the file header.  An empty titleBlock clears it.
  */
-export function applyDocProps(doc: Doc | null | undefined, props: { paper?: unknown; titleBlock?: unknown } | null | undefined): boolean {
+export function applyDocProps(doc: Doc | null | undefined, props: { paper?: unknown; titleBlock?: unknown; pageNumber?: unknown } | null | undefined): boolean {
   if (!doc || !props) return false;
   let any = false;
   if (typeof props.paper === "string" && props.paper) { const node = parse(props.paper); if (node && node[0] === "paper") { doc.page = paperSize(node); doc.paper = str(node[1]) || "A4"; doc.portrait = doc.page[1] > doc.page[0]; any = true; } }
   if (typeof props.titleBlock === "string") { const node = props.titleBlock ? parse(props.titleBlock) : null; doc.titleBlock = node && node[0] === "title_block" ? titleBlockOf(node) : {}; any = true; }
+  // the root sheet's page number: the root path's (page …) of (sheet_instances …)
+  if (typeof props.pageNumber === "string" && props.pageNumber) { (doc as Doc & { pageNumber?: string }).pageNumber = props.pageNumber; any = true; }
   return any;
 }
 
