@@ -32,6 +32,9 @@ const WIDGET_CSS = `
 .kd-grid tr.sel td { background: color-mix(in srgb, var(--blue) 18%, transparent); }
 .kd-grid td.ro { padding: 2px 6px; color: var(--ink-2); }
 .kd-grid td.c { text-align: center; }
+.kd-grid td.kd-icon-cell { width: 24px; }
+.kd-grid .kd-cell-ic { border: 0; background: transparent; padding: 1px; display: inline-flex; cursor: pointer; border-radius: var(--r-1); vertical-align: middle; }
+.kd-grid .kd-cell-ic:hover { background: var(--sel-soft); }
 .kd-body .kd-grid td input[type=text], .kd-body .kd-grid td input[type=number], .kd-body .kd-grid td k-select { border: none; background: transparent; border-radius: 0; padding: 2px 6px; font-family: inherit; }
 .kd-body .kd-grid td input[type=text]:focus, .kd-body .kd-grid td k-select:focus-within { outline: 2px solid var(--blue); outline-offset: -2px; background: var(--panel); }
 .kd-grid td input[type=checkbox] { margin: 0; }
@@ -41,8 +44,12 @@ const WIDGET_CSS = `
 .kd-grid td.kd-btn-cell:focus-within .kd-cell-btn, .kd-grid tr:hover td.kd-btn-cell .kd-cell-btn { visibility: visible; }
 .kd-grid .kd-cell-btn:hover { background: var(--sel-soft); }
 .kd-grid .kd-cell-btn:active { background: var(--on); }
-.kd-grid-btns { display: flex; gap: 4px; margin-top: 4px; }
+.kd-grid-btns { display: flex; gap: 4px; margin-top: 4px; align-items: center; }
 .kd-grid-btns .btn { padding: 1px 7px; min-width: 26px; font-size: 13px; line-height: 18px; }
+.kd-grid-btns .btn.kd-bmp { padding: 0; width: 26px; height: 24px; display: inline-flex; align-items: center; justify-content: center; }
+.kd-grid-btns .btn.kd-bmp:disabled { opacity: .45; }
+.kd-grid-btns .kd-gap { width: 16px; flex: none; }
+.kd-grid-btns .kd-fill { flex: 1; }
 .kd-sb { border: 1px solid var(--line); border-radius: 3px; padding: 14px 10px 8px; margin: 12px 0 8px; position: relative; }
 .kd-sb > .kd-sb-t { position: absolute; top: -9px; left: 8px; background: var(--bench); padding: 0 4px; color: var(--ink-2); font-size: 12px; }
 .kd-row { display: flex; gap: 8px; align-items: center; }
@@ -97,26 +104,40 @@ export function treebook(host: HTMLElement, sections: TreeSection[], opts?: { se
 export function grid<R>(host: HTMLElement, columns: GridColumn<R>[], rows: R[], optsIn?: GridOpts<R>): GridApi<R> {
   ensureCss(); const opts = optsIn || {};
   const wrap = el("div", "kd-grid-wrap"), table = el("table", "kd-grid"); if (opts.height) wrap.style.maxHeight = wrap.style.height = typeof opts.height === "number" ? opts.height + "px" : opts.height;
-  let sel = -1; const api: GridApi<R> = { el: wrap, rows, columns, refresh, selected: () => sel, select };
-  function select(i: number): void { sel = i; [...table.querySelectorAll("tbody tr")].forEach((tr, j) => tr.classList.toggle("sel", j === i)); if (opts.onSelect) opts.onSelect(rows[i] || null, i); }
+  // the grid cursor's row, plus the rows a Shift- or Ctrl-click added (wxGrid::GetSelectedRows, wxGridSelectRows)
+  let sel = -1; let multi = new Set<number>();
+  const api: GridApi<R> = { el: wrap, rows, columns, refresh, selected: () => sel, select, selectedRows: () => (sel >= 0 && !multi.has(sel) ? [...multi, sel] : [...multi]).filter((i) => i < rows.length).sort((a, b) => a - b), selectRows };
+  const paint = (): void => { [...table.querySelectorAll("tbody tr")].forEach((tr, j) => tr.classList.toggle("sel", j === sel || multi.has(j))); };
+  function select(i: number): void { sel = i; multi = new Set(); paint(); if (opts.onSelect) opts.onSelect(rows[i] || null, i); }
+  function selectRows(list: number[]): void { multi = new Set(list.filter((i) => i >= 0 && i < rows.length)); sel = list.length ? list[list.length - 1] : -1; paint(); if (opts.onSelect) opts.onSelect(rows[sel] || null, sel); }
+  /** a row click: Ctrl toggles the row into the selection, Shift extends it from the cursor, a plain click selects only it */
+  function clickRow(i: number, ev: PointerEvent | MouseEvent): void {
+    if (opts.multiSelect && (ev.ctrlKey || ev.metaKey)) { if (sel >= 0) multi.add(sel); if (multi.has(i) && multi.size > 1) multi.delete(i); else multi.add(i); sel = i; paint(); if (opts.onSelect) opts.onSelect(rows[i] || null, i); return; }
+    if (opts.multiSelect && ev.shiftKey && sel >= 0) { const a = Math.min(sel, i), b = Math.max(sel, i); multi = new Set(); for (let k = a; k <= b; k++) multi.add(k); sel = i; paint(); if (opts.onSelect) opts.onSelect(rows[i] || null, i); return; }
+    if (sel !== i || multi.size) select(i);
+  }
   function refresh(): void {
     const cols = api.columns;
     // a column with a browse button keeps its width (the grid scrolls sideways instead of squeezing the text under it)
-    table.innerHTML = `<thead><tr>${cols.map((c) => `<th${c.width ? ` style="width:${c.width}px${c.button ? `;min-width:${c.width}px` : ""}"` : ""}>${esc(c.label)}</th>`).join("")}</tr></thead>`;
+    table.innerHTML = `<thead${opts.noHeader ? ' style="display:none"' : ""}><tr>${cols.map((c) => `<th${c.width ? ` style="width:${c.width}px${c.button ? `;min-width:${c.width}px` : ""}"` : ""}>${esc(c.label)}</th>`).join("")}</tr></thead>`;
     const tb = el("tbody");
     rows.forEach((r, i) => {
-      const tr = el("tr"); if (i === sel) tr.classList.add("sel");
+      const tr = el("tr"); if (i === sel || multi.has(i)) tr.classList.add("sel");
       for (const c of cols) {
         const td = el("td"), ro = opts.readOnly || c.type === "ro" || (c.ro && c.ro(r)), v = (r as Record<string, unknown>)[c.key];   // a row is a plain record keyed by its columns
-        if (c.type === "bool") { td.className = "c"; const cb = el("input") as HTMLInputElement; cb.type = "checkbox"; cb.checked = !!v; cb.disabled = !!ro; cb.dataset.col = c.key; cb.addEventListener("change", () => { (r as Record<string, unknown>)[c.key] = cb.checked; if (opts.onChange) opts.onChange(r, c.key, cb.checked, i); }); td.appendChild(cb); }
+        if (c.type === "icon") { td.className = "c kd-icon-cell"; const spec = c.icon ? c.icon(r) : null;
+          if (spec) { const b = el("button", "kd-cell-ic") as HTMLButtonElement; b.type = "button"; b.title = spec.title; b.dataset.icon = spec.icon; b.dataset.col = c.key; b.appendChild(kicadIcon(spec.icon, 16)); b.tabIndex = -1;
+            b.addEventListener("click", (ev) => { ev.stopPropagation(); if (spec.run) spec.run(); }); td.appendChild(b); } }
+        else if (c.type === "bool") { td.className = "c"; const cb = el("input") as HTMLInputElement; cb.type = "checkbox"; cb.checked = !!v; cb.disabled = !!ro; cb.dataset.col = c.key; cb.addEventListener("change", () => { (r as Record<string, unknown>)[c.key] = cb.checked; if (opts.onChange) opts.onChange(r, c.key, cb.checked, i); }); td.appendChild(cb); }
         else if (ro) { td.className = "ro"; td.textContent = c.format ? c.format(v, r) : str(v); if (c.title) td.title = c.title(r); }
         else if (c.type === "choice") { const s = el("k-select") as HTMLSelectElement; s.dataset.col = c.key; for (const o of (typeof c.options === "function" ? c.options(r) : c.options!)) { const op = el("option") as HTMLOptionElement; op.value = isList(o) ? o[0] : o; op.textContent = isList(o) ? o[1] : o; s.appendChild(op); } s.value = str(v); s.addEventListener("change", () => { (r as Record<string, unknown>)[c.key] = s.value; if (opts.onChange) opts.onChange(r, c.key, s.value, i); }); td.appendChild(s); }
         else { const inp = el("input") as HTMLInputElement; inp.type = "text"; inp.value = c.format ? c.format(v, r) : str(v); inp.dataset.col = c.key; if (c.list) inp.setAttribute("list", c.list); inp.addEventListener("change", () => { (r as Record<string, unknown>)[c.key] = inp.value; if (opts.onChange) opts.onChange(r, c.key, inp.value, i); }); td.appendChild(inp);
           const cb = c.button ? c.button(r) : null; if (cb) cellButton(td, inp, cb); }
         tr.appendChild(td);
       }
-      tr.addEventListener("pointerdown", () => { if (sel !== i) select(i); });
-      tr.addEventListener("focusin", () => { if (sel !== i) select(i); });
+      tr.addEventListener("pointerdown", (ev) => { if (ev.button === 2 && (i === sel || multi.has(i))) return; clickRow(i, ev); });
+      tr.addEventListener("focusin", () => { if (sel !== i && !multi.has(i)) select(i); });
+      if (opts.onContextMenu) tr.addEventListener("contextmenu", (ev) => { ev.preventDefault(); opts.onContextMenu!(ev, i); });
       tb.appendChild(tr);
     });
     table.appendChild(tb);
@@ -125,13 +146,26 @@ export function grid<R>(host: HTMLElement, columns: GridColumn<R>[], rows: R[], 
   wrap.appendChild(table); host.appendChild(wrap); refresh();
   const B = opts.buttons;
   if (B && !opts.readOnly) {
-    const bar = el("div", "kd-grid-btns"); const mk = (txt: string, title: string, fn: () => void): HTMLElement => { const b = el("button", "btn", txt) as HTMLButtonElement; b.title = title; b.type = "button"; b.addEventListener("click", fn); bar.appendChild(b); return b; };
-    if (B.add) mk("+", B.addTitle || "Add", () => { const r = B.add!(); if (r) { rows.push(r); sel = rows.length - 1; refresh(); const f = table.querySelector<HTMLInputElement>("tbody tr:last-child input[type=text]"); if (f) f.focus(); if (opts.onChange) opts.onChange(r, null, null, sel); } });
-    if (B.move) { mk("↑", "Move up", () => { if (sel > 0) { [rows[sel - 1], rows[sel]] = [rows[sel], rows[sel - 1]]; sel--; refresh(); if (opts.onChange) opts.onChange(rows[sel], null, null, sel); } });
-      mk("↓", "Move down", () => { if (sel >= 0 && sel < rows.length - 1) { [rows[sel + 1], rows[sel]] = [rows[sel], rows[sel + 1]]; sel++; refresh(); if (opts.onChange) opts.onChange(rows[sel], null, null, sel); } }); }
-    if (B.remove) mk("🗑", B.removeTitle || "Delete", () => { if (sel < 0 || !rows[sel]) return; if (B.canRemove && !B.canRemove(rows[sel])) return; const gone = rows.splice(sel, 1)[0]; sel = Math.min(sel, rows.length - 1); refresh(); if (opts.onChange) opts.onChange(gone, null, null, -1); });
+    // STD_BITMAP_BUTTONs with KiCad's small_plus / small_up / small_down / small_trash, as every WX_GRID dialog sets them
+    const bar = el("div", "kd-grid-btns"); const mk = (icon: string, title: string, fn: () => void, role: string): HTMLElement => { const b = el("button", "btn kd-bmp") as HTMLButtonElement; b.appendChild(kicadIcon(icon, 16)); b.title = title; b.type = "button"; b.dataset.btn = role; b.setAttribute("aria-label", title); b.addEventListener("click", fn); bar.appendChild(b); return b; };
+    if (B.add) mk("small_plus", B.addTitle || "Add", () => { const r = B.add!(); if (r) { rows.push(r); sel = rows.length - 1; multi = new Set(); refresh(); const f = table.querySelector<HTMLInputElement>("tbody tr:last-child input[type=text]"); if (f) f.focus(); if (opts.onChange) opts.onChange(r, null, null, sel); } }, "add");
+    if (B.add) (B.afterAdd || []).forEach((x) => bar.appendChild(x));
+    if (B.move) { mk("small_up", "Move up", () => { if (sel > 0) { [rows[sel - 1], rows[sel]] = [rows[sel], rows[sel - 1]]; sel--; multi = new Set(); refresh(); if (opts.onChange) opts.onChange(rows[sel], null, null, sel); } }, "up");
+      mk("small_down", "Move down", () => { if (sel >= 0 && sel < rows.length - 1) { [rows[sel + 1], rows[sel]] = [rows[sel], rows[sel + 1]]; sel++; multi = new Set(); refresh(); if (opts.onChange) opts.onChange(rows[sel], null, null, sel); } }, "down"); }
+    if (B.remove) {
+      if (B.gapBeforeRemove) bar.appendChild(el("span", "kd-gap"));
+      // deleteRowHandler: every selected row goes (the rows a canRemove refuses stay), the cursor lands on the row after them
+      mk("small_trash", B.removeTitle || "Delete", () => { removeRows(api.selectedRows()); }, "remove");
+    }
     host.appendChild(bar); api.bar = bar;
   }
+  function removeRows(list: number[]): void {
+    const go = list.filter((i) => rows[i] && !(B && B.canRemove && !B.canRemove(rows[i]))).sort((a, b) => b - a); if (!go.length) return;
+    const first = go[go.length - 1]; let gone: R | undefined;
+    for (const i of go) gone = rows.splice(i, 1)[0];
+    multi = new Set(); sel = Math.min(first, rows.length - 1); refresh(); if (opts.onChange && gone) opts.onChange(gone, null, null, -1);
+  }
+  api.removeRows = removeRows;
   return api;
 }
 /**

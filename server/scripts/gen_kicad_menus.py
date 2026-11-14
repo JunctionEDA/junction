@@ -49,7 +49,18 @@ EXTRA_ICONS = {"import", "export_file", "fabrication", "language", "add_zone", "
                "show_front_assembly_layers", "show_all_front_layers", "show_all_back_layers", "show_back_assembly_layers",
                "tree_sel", "tree_nosel",
                # the Search pane's menu (common/widgets/search_pane.cpp)
-               "zoom_center_on_screen"}
+               "zoom_center_on_screen",
+               # the STD_BITMAP_BUTTONs of the dialog grids (library tables, 3D models, pin table, pad table, fields)
+               "small_new_window",
+               "small_sort_desc", "small_top", "small_bottom", "text_bold", "text_italic", "text_valign_top",
+               "text_valign_center", "text_valign_bottom", "text_mirrored", "options_3drender", "ortho", "axis3d_left", "axis3d_right", "axis3d_front", "axis3d_back",
+               "axis3d_top", "axis3d_bottom", "show_board_body", "lib_previous", "lib_next", "search_tree", "list_nets_16",
+               # PinTypeIcons, PinShapeIcons and PinOrientationIcons (eeschema/pin_type.cpp) for the pin dialogs' icon combos
+               "pintype_input", "pintype_output", "pintype_bidi", "pintype_3states", "pintype_passive", "pintype_nic",
+               "pintype_notspecif", "pintype_powerinput", "pintype_poweroutput", "pintype_opencoll", "pintype_openemit",
+               "pintype_noconnect", "pinshape_normal", "pinshape_invert", "pinshape_clock_normal", "pinshape_clock_invert",
+               "pinshape_active_low_input", "pinshape_clock_active_low", "pinshape_active_low_output", "pinshape_clock_fall",
+               "pinshape_nonlogic", "pinorient_right", "pinorient_left", "pinorient_up", "pinorient_down"}
 
 
 MAC_IF = r"#\s*if(?:def\s+|\s+defined\(\s*)__WX(?:OSX_)?MAC__[ \t]*\)?[^\n]*\n"
