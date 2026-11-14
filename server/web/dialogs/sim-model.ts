@@ -3,6 +3,7 @@
 // It works on a copy of the parent dialog's staged field rows (never the document) and hands back the complete,
 // merged row list (DIALOG_SYMBOL_PROPERTIES::OnEditSpiceModel), so the parent's OK still commits one change and
 // collaboration / undo see an ordinary field edit.  window.KiCadSimModel.open(rows, ctx, done).
+import { bitmapButton } from "./kicon";
 import { trapTab } from "../tools/kicad-dialogs/shell";
 import * as S from "./sim-model-logic";
 import { KD, h, popupMenu } from "./dom";
@@ -29,12 +30,6 @@ export interface SimModelCtx<R> {
 
 // ---------------------------------------------------------------- the ngspice tables (static/dist/sim-ngspice.js)
 let ngLoad: Promise<void> | null = null;
-/** KiCad's small_folder bitmap, drawn in the button's text colour (the menu icon pack does not carry it). */
-function folderIcon(): SVGSVGElement {
-  const NS = "http://www.w3.org/2000/svg", svg = document.createElementNS(NS, "svg"); svg.setAttribute("viewBox", "0 0 16 16"); svg.setAttribute("width", "16"); svg.setAttribute("height", "16"); svg.setAttribute("aria-hidden", "true");
-  const p = document.createElementNS(NS, "path"); p.setAttribute("d", "M1.5 3.5h4.5l1.5 1.5h7v8h-13z"); p.setAttribute("fill", "none"); p.setAttribute("stroke", "currentColor"); p.setAttribute("stroke-width", "1.2"); p.setAttribute("stroke-linejoin", "round");
-  svg.append(p); return svg;
-}
 export function loadNgspice(): Promise<void> {
   if (S.hasNgspiceData()) return Promise.resolve();
   const w = window as unknown as { KiCadSimNgspice?: Record<string, NgspiceModelInfo> };
@@ -120,7 +115,7 @@ function build<R extends S.FieldLike>(rows0: R[], ctx: SimModelCtx<R>, done: (ro
   const rbLib = h("input", { type: "radio", name: "kd-sim-src", id: "kd-sim-rb-lib", style: "width:auto;margin:0", disabled: ro }) as HTMLInputElement;
   const rbBuiltin = h("input", { type: "radio", name: "kd-sim-src", id: "kd-sim-rb-builtin", style: "width:auto;margin:0", disabled: ro }) as HTMLInputElement;
   const pathText = h("input", { type: "text", id: "kd-sim-file", style: "flex:1", disabled: ro }) as HTMLInputElement;
-  const browseBtn = h("button", { type: "button", class: "btn", id: "kd-sim-browse", title: "Browse", style: "padding:2px 6px;display:inline-flex;align-items:center", disabled: ro }, folderIcon());
+  const browseBtn = bitmapButton("small_folder", "Browse", null, { id: "kd-sim-browse", disabled: ro });
   const filter = h("input", { type: "text", id: "kd-sim-filter", placeholder: "Filter", style: "width:100%", disabled: ro }) as HTMLInputElement;
   const modelList = h("k-select", { size: 6, id: "kd-sim-models", style: "width:100%;font-size:12px", disabled: ro }) as HTMLSelectElement;
   // the IBIS rows (shown only when the library is an IBIS file)

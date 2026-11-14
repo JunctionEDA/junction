@@ -12,6 +12,7 @@
 //
 // kicad-dialogs.js asks KDialogs.schItemDialog / schFieldDialog first (openItem / openNew / openField), so the
 // double-click, E and the tools' creation paths all reach these.  The document edits are in sch-items-logic.ts.
+import { bitmapButton } from "./kicon";
 import { trapTab } from "../tools/kicad-dialogs/shell";
 import { schTableDialog } from "../editor/tabledialogs";
 import { keyName } from "../keys";
@@ -78,8 +79,9 @@ export const rgbaToSwatch = (c: RGBA): L.Color => (c.r === 0 && c.g === 0 && c.b
  *  choice, font-picker.ts, adds every Google Font). */
 export function fontFaces(doc: KDoc | null): string[] { return [L.KICAD_FONT, ...facesUsed(doc)]; }
 /** A BITMAP_BUTTON toggle (bold / italic / alignment); `group` makes it a radio among its siblings. */
-function toggle(label: string, title: string, on: boolean, id: string, style = ""): HTMLButtonElement {
-  const b = h("button", { type: "button", class: "btn kd-tog" + (on ? " on" : ""), title, id, "aria-pressed": on ? "true" : "false", style: "min-width:28px;padding:1px 6px;" + style }, label);
+/** BITMAP_BUTTON (IsToggle / SetIsRadioButton when it has a data-group): KiCad's `icon` from the icon pack. */
+function toggle(icon: string, title: string, on: boolean, id: string): HTMLButtonElement {
+  const b = bitmapButton(icon, title, null, { id, flat: true, cls: "kd-tog" + (on ? " on" : "") }); b.setAttribute("aria-pressed", on ? "true" : "false");
   b.addEventListener("click", () => { if (b.dataset.group) { for (const s of Array.from(b.parentElement ? b.parentElement.querySelectorAll(`[data-group="${b.dataset.group}"]`) : [])) { s.classList.remove("on"); s.setAttribute("aria-pressed", "false"); } b.classList.add("on"); b.setAttribute("aria-pressed", "true"); } else { const now = !b.classList.contains("on"); b.classList.toggle("on", now); b.setAttribute("aria-pressed", now ? "true" : "false"); } });
   return b;
 }
@@ -114,7 +116,7 @@ const INDETERMINATE_ACTION = "-- leave unchanged --";
 const lenValue = (i: HTMLInputElement): number | undefined => { const t = i.value.trim(); if (!t) return undefined; const v = parseLen(t); return Number.isFinite(v) ? v : undefined; };
 const units = () => h("span", { class: "kd-note" }, unitName());
 const ensureCss = (() => { let done = false; return () => { if (done) return; done = true; document.head.append(h("style", { id: "kd-schitems-css" }, `
-.kd-tog.on { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.kd-tog.on { background: var(--on, var(--sel-soft)); border-color: var(--on-line, var(--sel)); }
 .kd-fmt { display: grid; grid-template-columns: max-content auto max-content; gap: 5px 8px; align-items: center; }
 .kd-sep { display: inline-block; width: 1px; height: 18px; background: var(--line); margin: 0 4px; vertical-align: middle; }
 .kd-help { font-size: 12px; color: var(--ink-2); }
@@ -282,15 +284,16 @@ export function openLabelDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
       if (shapes.length) { const sh = h("div"); const box = KD().staticBox(sh, "Shape"); box.append(radioGroup("kd-lbl-shape", shapes, st.shape, undefined, 1)); bottom.append(sh); }   // m_shapeSizer is wxVERTICAL
       const fm = h("div", { style: "flex:1" }); const fbox = KD().staticBox(fm, "Formatting");
       const grd = h("div", { class: "kd-fmt" });
-      boldB = toggle("B", "Bold", st.bold, "kd-lbl-bold", "font-weight:700"); italB = toggle("I", "Italic", st.italic, "kd-lbl-italic", "font-style:italic");
+      boldB = toggle("text_bold", "Bold", st.bold, "kd-lbl-bold"); italB = toggle("text_italic", "Italic", st.italic, "kd-lbl-italic");
       const spinNames = dir ? ["Down", "Up", "Right", "Left"] : ["Align right", "Align left", "Align bottom", "Align top"];
-      const spinGlyph = ["→", "←", "↑", "↓"];
+      // the bitmaps DIALOG_LABEL_PROPERTIES gives m_spin0..3 per label type
+      const spinIcon = dir ? ["pinorient_down", "pinorient_up", "pinorient_right", "pinorient_left"] : kind === "global_label" || kind === "hierarchical_label" ? ["label_align_left", "label_align_right", "label_align_bottom", "label_align_top"] : ["text_align_left", "text_align_right", "text_align_bottom", "text_align_top"];
       // m_spin0..3: RIGHT, LEFT, UP, BOTTOM (SPIN_STYLE 0, 2, 1, 3)
       const spinVal = [0, 2, 1, 3] as const;
       // m_iconBar: separator, bold, italic, separator, the four spin buttons, Auto, separator
       const bar = h("span", { style: "display:inline-flex;gap:2px;align-items:center" });
       if (!dir) bar.append(h("span", { class: "kd-sep" }), boldB, italB, h("span", { class: "kd-sep" }));
-      spinVal.forEach((sv, i) => { const btn = toggle(spinGlyph[i], spinNames[i], st.spin === sv, "kd-lbl-spin" + i); btn.dataset.group = "spin"; btn.dataset.spin = String(sv); spins.push(btn); bar.append(btn); });
+      spinVal.forEach((sv, i) => { const btn = toggle(spinIcon[i], spinNames[i], st.spin === sv, "kd-lbl-spin" + i); btn.dataset.group = "spin"; btn.dataset.spin = String(sv); spins.push(btn); bar.append(btn); });
       if (kind === "global_label" || kind === "hierarchical_label") {
         const S = CollabTools.sch ? CollabTools.sch.state as { lastAutoRotate?: boolean } : {};
         const a = checkbox("Auto", isNew ? !!S.lastAutoRotate : st.autoRotate, undefined, { id: "kd-lbl-auto", title: "Automatically rotate the label to face away from the wire or pin it is placed on" });
@@ -375,10 +378,10 @@ export function openTextDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
       }
       const g = h("div", { class: "kd-fmt", style: "margin-top:6px" });
       const fontSel = fontPicker(doc, fx.font, { id: "kd-txt-font", style: "width:200px", disabled: ro }); els.font = fontSel;
-      const bold = toggle("B", "Bold", fx.bold, "kd-txt-bold", "font-weight:700"), ital = toggle("I", "Italic", fx.italic, "kd-txt-italic", "font-style:italic"); els.bold = bold; els.italic = ital;
-      const hb = (["left", "center", "right"] as const).map((v, i) => { const t = toggle(["⇤", "↔", "⇥"][i], ["Align left", "Align horizontal center", "Align right"][i], fx.h === v, "kd-txt-h-" + v); t.dataset.group = "h"; t.dataset.v = v; return t; });
-      const vb = (["top", "center", "bottom"] as const).map((v, i) => { const t = toggle(["⤒", "↕", "⤓"][i], ["Align top", "Align vertical center", "Align bottom"][i], fx.v === v, "kd-txt-v-" + v); t.dataset.group = "v"; t.dataset.v = v; return t; });
-      const hz = toggle("A", "Horizontal text", !vertical, "kd-txt-horiz"), vt = toggle("A↑", "Vertical text", vertical, "kd-txt-vert"); hz.dataset.group = "o"; vt.dataset.group = "o";
+      const bold = toggle("text_bold", "Bold", fx.bold, "kd-txt-bold"), ital = toggle("text_italic", "Italic", fx.italic, "kd-txt-italic"); els.bold = bold; els.italic = ital;
+      const hb = (["left", "center", "right"] as const).map((v, i) => { const t = toggle(["text_align_left", "text_align_center", "text_align_right"][i], ["Align left", "Align horizontal center", "Align right"][i], fx.h === v, "kd-txt-h-" + v); t.dataset.group = "h"; t.dataset.v = v; return t; });
+      const vb = (["top", "center", "bottom"] as const).map((v, i) => { const t = toggle(["text_valign_top", "text_valign_center", "text_valign_bottom"][i], ["Align top", "Align vertical center", "Align bottom"][i], fx.v === v, "kd-txt-v-" + v); t.dataset.group = "v"; t.dataset.v = v; return t; });
+      const hz = toggle("text_horizontal", "Horizontal text", !vertical, "kd-txt-horiz"), vt = toggle("text_vertical", "Vertical text", vertical, "kd-txt-vert"); hz.dataset.group = "o"; vt.dataset.group = "o";
       hb.forEach((t, i) => { els["h" + i] = t; }); vb.forEach((t, i) => { els["v" + i] = t; }); els.horiz = hz; els.vert = vt;
       const bar = h("span", { style: "display:inline-flex;gap:2px;align-items:center;flex-wrap:wrap" }, bold, ital, h("span", { class: "kd-sep" }), ...hb, h("span", { class: "kd-sep" }), ...vb, h("span", { class: "kd-sep" }), hz, vt);
       g.append(h("label", null, "Font:"), h("span", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, fontSel, bar), h("span"));
@@ -463,11 +466,11 @@ export function openFieldDialog(ctx: Ctx, item: KItem, name: string, apply?: (fi
       els.visible = vis.querySelector("input") as HTMLInputElement; els.showName = sn.querySelector("input") as HTMLInputElement; els.autoplace = ap.querySelector("input") as HTMLInputElement;
       g.append(h("span"), h("span", { style: "display:flex;gap:14px;flex-wrap:wrap" }, vis, sn, ap), h("span"));
       const font = fontPicker(doc, fx.font, { id: "kd-fld-font", style: "width:200px", disabled: ro }); els.font = font;
-      const bold = toggle("B", "Bold", fx.bold, "kd-fld-bold", "font-weight:700"), ital = toggle("I", "Italic", fx.italic, "kd-fld-italic", "font-style:italic"); els.bold = bold; els.italic = ital;
+      const bold = toggle("text_bold", "Bold", fx.bold, "kd-fld-bold"), ital = toggle("text_italic", "Italic", fx.italic, "kd-fld-italic"); els.bold = bold; els.italic = ital;
       const vertical = Math.round(r0) % 180 !== 0;
-      const hz = toggle("A", "Horizontal text", !vertical, "kd-fld-horiz"), vt = toggle("A↑", "Vertical text", vertical, "kd-fld-vert"); hz.dataset.group = "o"; vt.dataset.group = "o"; els.vert = vt;
-      const hb = (["left", "center", "right"] as const).map((v, i) => { const t = toggle(["⇤", "↔", "⇥"][i], ["Align left", "Align horizontal center", "Align right"][i], fx.h === v, "kd-fld-h-" + v); t.dataset.group = "h"; els["h" + i] = t; return t; });
-      const vb = (["top", "center", "bottom"] as const).map((v, i) => { const t = toggle(["⤒", "↕", "⤓"][i], ["Align top", "Align vertical center", "Align bottom"][i], fx.v === v, "kd-fld-v-" + v); t.dataset.group = "v"; els["v" + i] = t; return t; });
+      const hz = toggle("text_horizontal", "Horizontal text", !vertical, "kd-fld-horiz"), vt = toggle("text_vertical", "Vertical text", vertical, "kd-fld-vert"); hz.dataset.group = "o"; vt.dataset.group = "o"; els.vert = vt;
+      const hb = (["left", "center", "right"] as const).map((v, i) => { const t = toggle(["text_align_left", "text_align_center", "text_align_right"][i], ["Align left", "Align horizontal center", "Align right"][i], fx.h === v, "kd-fld-h-" + v); t.dataset.group = "h"; els["h" + i] = t; return t; });
+      const vb = (["top", "center", "bottom"] as const).map((v, i) => { const t = toggle(["text_valign_top", "text_valign_center", "text_valign_bottom"][i], ["Align top", "Align vertical center", "Align bottom"][i], fx.v === v, "kd-fld-v-" + v); t.dataset.group = "v"; els["v" + i] = t; return t; });
       g.append(h("label", null, "Font:"), h("span", { style: "display:flex;gap:6px;align-items:center;flex-wrap:wrap" }, font, bold, ital, h("span", { class: "kd-sep" }), hz, vt), h("span"));
       const size = lenBox(fx.size, "kd-fld-size"); els.size = size;
       g.append(h("label", null, "Text size:"), h("span", { style: "display:flex;gap:6px;align-items:center" }, size, units()), h("span"));

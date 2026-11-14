@@ -6,6 +6,7 @@
 //   Renumber Pads          DIALOG_ENUM_PADS (the parameters; the clicking is the pad tool's)
 //   Footprint Checker      DIALOG_FOOTPRINT_CHECKER (markers list, Run Checks, Delete All Markers)
 // The logic is pcb-tools' (fp-props.ts, fp-pads.ts, fp-check.ts); these build the controls and commit the changes.
+import { bitmapButton } from "../../dialogs/kicon";
 import { zstdDecompress } from "../../dialogs/zstd";
 import { box, checkField, download, errorMessage, fmtLenU, form, grid, gridButtons, h, iconButton, lenField, messageBox, note, notebook, numField, openDialog, parseLen, selectField, textField, unitLabel, type CellValue } from "./ui";
 import { models3dPanel, whenGone } from "./model3d";
@@ -111,7 +112,8 @@ export function footprintPropertiesDialog(ctx: ToolCtx, host: FpPropsHost = {}):
       const ref = (n: string) => "kicad-embed://" + n;
       efGrid = grid([{ label: "Filename", key: "name", readOnly: () => true }, { label: "Embedded Reference", key: "ref", readOnly: () => true }], efRows, { ro: true, height: "260px" });
       let efSel = -1; efGrid.el.addEventListener("click", (ev) => { const tr = (ev.target as HTMLElement).closest("tr"); if (tr && tr.parentElement && tr.parentElement.tagName === "TBODY") efSel = Array.from(tr.parentElement.children).indexOf(tr); });
-      const del = iconButton("trash", "Remove embedded file", () => { const rows = efGrid!.rows(); if (efSel < 0 || efSel >= rows.length) return; rows.splice(efSel, 1); efSel = Math.min(efSel, rows.length - 1); efGrid!.refresh(); }, ro); del.setAttribute("data-k", "efDelete");
+      const del = bitmapButton("small_trash", "Remove embedded file", null, { key: "efDelete", disabled: ro });
+      del.addEventListener("click", () => { const rows = efGrid!.rows(); if (efSel < 0 || efSel >= rows.length) return; rows.splice(efSel, 1); efSel = Math.min(efSel, rows.length - 1); efGrid!.refresh(); });
       const exp = h("button", { type: "button", class: "kbtn", "data-k": "efExport" }, "Export...");
       exp.addEventListener("click", () => {
         const rows = efGrid!.rows(); const names = efSel >= 0 && efSel < rows.length ? [String(rows[efSel].name)] : rows.map((r) => String(r.name));

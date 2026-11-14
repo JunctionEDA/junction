@@ -148,7 +148,7 @@ export function grid<R>(host: HTMLElement, columns: GridColumn<R>[], rows: R[], 
   const B = opts.buttons;
   if (B && !opts.readOnly) {
     // STD_BITMAP_BUTTONs with KiCad's small_plus / small_up / small_down / small_trash, as every WX_GRID dialog sets them
-    const bar = el("div", "kd-grid-btns"); const mk = (icon: string, title: string, fn: () => void, role: string): HTMLElement => { const b = el("button", "btn kd-bmp") as HTMLButtonElement; b.appendChild(kicadIcon(icon, 16)); b.title = title; b.type = "button"; b.dataset.btn = role; b.setAttribute("aria-label", title); b.addEventListener("click", fn); bar.appendChild(b); return b; };
+    const bar = el("div", "kd-grid-btns"); const mk = (icon: string, title: string, fn: () => void, role: string): HTMLElement => { const b = el("button", "btn kd-bmp") as HTMLButtonElement; b.appendChild(kicadIcon(icon, 16)); b.title = title; b.type = "button"; b.dataset.btn = role; b.dataset.k = "grid-" + icon.replace(/^small_/, ""); b.setAttribute("aria-label", title); b.addEventListener("click", fn); bar.appendChild(b); return b; };
     if (B.add) mk("small_plus", B.addTitle || "Add", () => { const r = B.add!(); if (r) { rows.push(r); sel = rows.length - 1; multi = new Set(); refresh(); const f = table.querySelector<HTMLInputElement>("tbody tr:last-child input[type=text]"); if (f) f.focus(); if (opts.onChange) opts.onChange(r, null, null, sel); } }, "add");
     if (B.add) (B.afterAdd || []).forEach((x) => bar.appendChild(x));
     if (B.move) { mk("small_up", "Move up", () => { if (sel > 0) { [rows[sel - 1], rows[sel]] = [rows[sel], rows[sel - 1]]; sel--; multi = new Set(); refresh(); if (opts.onChange) opts.onChange(rows[sel], null, null, sel); } }, "up");

@@ -2,6 +2,7 @@
 // (DIALOG_PIN_PROPERTIES), Symbol Properties (DIALOG_LIB_SYMBOL_PROPERTIES), New Symbol (DIALOG_LIB_NEW_SYMBOL),
 // Save As, New Library, Rename, Pin Table (DIALOG_LIB_EDIT_PIN_TABLE), the Symbol Checker report, the field / text /
 // shape properties and the import / export commands.
+import { bitmapButton } from "../dialogs/kicon";
 import * as M from "./model";
 import { KD, h, checkbox, select, textInput, form, promptText, confirmBox, download, type GridColumn, type GridApi, type NotebookApi } from "../dialogs/dom";
 import { messageBox, fieldsGrid, openFieldDialog, openTextDialog, swatch } from "../dialogs/sch-items";
@@ -363,8 +364,8 @@ function fpFiltersPage(pg: HTMLElement, get: () => string[], set: (f: string[]) 
     if (pats.length) void FF.loadFootprintIndex();
     show();
   };
-  const btn = (txt: string, title: string, fn: () => void, id: string) => { const b = h("button", { type: "button", class: "btn", title, id, disabled: ro }, txt); b.addEventListener("click", fn); return b; };
-  const bar = h("div", { style: "display:flex;gap:5px;margin-top:5px" }, btn("+", "Add footprint filter", () => void add(), "sp-fpf-add"), btn("✎", "Edit footprint filter", () => void edit(), "sp-fpf-edit"), h("span", { style: "width:20px" }), btn("🗑", "Delete footprint filter", del, "sp-fpf-del"));
+  const btn = (icon: string, title: string, fn: () => void, id: string) => bitmapButton(icon, title, fn, { id, disabled: ro });
+  const bar = h("div", { style: "display:flex;gap:5px;margin-top:5px" }, btn("small_plus", "Add footprint filter", () => void add(), "sp-fpf-add"), btn("small_edit", "Edit footprint filter", () => void edit(), "sp-fpf-edit"), h("span", { style: "width:20px" }), btn("small_trash", "Delete footprint filter", del, "sp-fpf-del"));
   pg.append(h("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:14px;height:100%" },
     h("div", { style: "display:flex;flex-direction:column" }, h("div", { style: "margin-bottom:4px" }, "Footprint filters:"), list, bar),
     h("div", { style: "display:flex;flex-direction:column" }, label, matches)));

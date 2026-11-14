@@ -2,6 +2,7 @@
 // that mean something in a browser.  Common > Mouse and Touchpad (common/dialogs/panel_mouse_settings), Hotkeys
 // (panel_hotkeys_editor, read-only here); Schematic Editor > Display Options, Grids, Editing Options, Colors;
 // PCB Editor > Display Options, Grids, Origins & Axes, Editing Options.  Everything is kept in localStorage (prefs.ts) and applied on OK.
+import { bitmapButton } from "./kicon";
 import { trapTab } from "../tools/kicad-dialogs/shell";
 import { E, toast } from "./editor";
 import { IS_MAC, keyName, modName } from "../keys";

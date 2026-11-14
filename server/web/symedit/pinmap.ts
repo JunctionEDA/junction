@@ -2,6 +2,7 @@
 // footprint row binding each map to a footprint (associated_footprints), one row per logical pin (stacked pins
 // expanded).  A blank or identical pad resolves 1:1; a malformed bracketed pad is flagged red.  The column menu has
 // Rename Map..., Reset '<map>' to 1:1 and Copy From...; a double click on a map's header renames it.
+import { bitmapButton } from "../dialogs/kicon";
 import * as M from "./model";
 import { h, promptText, confirmBox } from "../dialogs/dom";
 import { messageBox } from "../dialogs/sch-items";
@@ -30,8 +31,8 @@ const validLibId = (s: string): boolean => { const k = s.indexOf(":"); return k 
 export function pinMapPage(pg: HTMLElement, st: PinMapState, ro: boolean): void {
   let curCol = -1;
   const box = h("div", { id: "sp-pinmap", style: "height:300px;overflow:auto;border:1px solid var(--line);background:var(--panel)" });
-  const add = h("button", { class: "btn", type: "button", id: "sp-pinmap-add", title: "Add pin map", disabled: ro, onclick: () => { st.maps.push({ name: uniqueMapName(st), pads: st.pins.map((p) => p.number) }); st.dirty = true; render(); } }, "+");
-  const remove = h("button", { class: "btn", type: "button", id: "sp-pinmap-remove", title: "Remove pin map", style: "margin-left:25px", disabled: ro, onclick: () => void removeMap() }, "🗑");
+  const add = bitmapButton("small_plus", "Add pin map", () => { st.maps.push({ name: uniqueMapName(st), pads: st.pins.map((p) => p.number) }); st.dirty = true; render(); }, { id: "sp-pinmap-add", disabled: ro });
+  const remove = bitmapButton("small_trash", "Remove pin map", () => void removeMap(), { id: "sp-pinmap-remove", disabled: ro }); remove.style.marginLeft = "25px";
   pg.append(box, h("div", { class: "kd-grid-btns", style: "display:flex;margin-top:6px" }, add, remove));
 
   const footprintOf = (name: string) => (st.assocs.find((a) => a.map === name) || { fpid: "" }).fpid;

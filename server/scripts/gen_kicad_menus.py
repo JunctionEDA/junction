@@ -60,7 +60,19 @@ EXTRA_ICONS = {"import", "export_file", "fabrication", "language", "add_zone", "
                "pintype_notspecif", "pintype_powerinput", "pintype_poweroutput", "pintype_opencoll", "pintype_openemit",
                "pintype_noconnect", "pinshape_normal", "pinshape_invert", "pinshape_clock_normal", "pinshape_clock_invert",
                "pinshape_active_low_input", "pinshape_clock_active_low", "pinshape_active_low_output", "pinshape_clock_fall",
-               "pinshape_nonlogic", "pinorient_right", "pinorient_left", "pinorient_up", "pinorient_down"}
+               "pinshape_nonlogic", "pinorient_right", "pinorient_left", "pinorient_up", "pinorient_down",
+               # dialog STD_BITMAP_BUTTONs (grid add / move / delete, browse, refresh) and the text formatting BITMAP_BUTTONs
+               "text_align_center", "text_align_right", "text_align_top", "text_align_bottom",
+               "text_horizontal", "text_vertical",
+               "label_align_left", "label_align_right", "label_align_top", "label_align_bottom",
+               # PINTYPE_COMBOBOX / PINSHAPE_COMBOBOX and the line style wxBitmapComboBoxes
+               "stroke_solid", "stroke_dash", "stroke_dot", "stroke_dashdot", "stroke_dashdotdot", "stroke_none",
+               # SIMULATOR_FRAME's toolbar and menus, TUNER_SLIDER
+               "directory_open", "save_as", "sim_add_plot", "sim_command", "sim_run", "sim_stop", "zoom_in_horizontally",
+               "zoom_out_horizontally", "zoom_in_vertically", "zoom_out_vertically", "sim_probe", "sim_tune", "sim_add_signal", "netlist",
+               "export_png", "text", "copy", "e_24", "e_48", "e_96", "e_192",
+               # SYMBOL_VIEWER_FRAME's toolbar
+               "pin_show_etype", "pin", "datasheet", "add_symbol_to_schematic", "library_browser"}
 
 
 MAC_IF = r"#\s*if(?:def\s+|\s+defined\(\s*)__WX(?:OSX_)?MAC__[ \t]*\)?[^\n]*\n"

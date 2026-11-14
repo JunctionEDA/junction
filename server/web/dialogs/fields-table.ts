@@ -3,6 +3,7 @@
 // "Edit" (the grouped, filterable grid; a cell edit applies to every symbol of its row) and "Export" (the BOM:
 // delimiters, format presets, preview, Export downloads the file).  The field list on the left sets each column's
 // BOM name, whether it is included and whether rows group by it; view presets are KiCad's built-ins plus the project's.
+import { bitmapButton } from "./kicon";
 import { E, appState, toast, toolCtx, cloneNode } from "./editor";
 import { KD, checkbox, download, h, promptFields, promptText, select, textInput, type GridApi, type GridColumn } from "./dom";
 import { messageBox } from "./sch-items";
@@ -24,16 +25,8 @@ const stackedPrompts: VariantPrompts = {
     return r ? { name: r["variant-name"] || "", desc: r["variant-desc"] || "" } : null;
   },
 };
-// KiCad's small_plus / small_edit / copy / text / small_trash bitmaps (DIALOG_FIELDS_TABLE's variant buttons), drawn
-// in the button's text colour
-const vIcon = (inner: string): SVGSVGElement => { const t = document.createElement("template"); t.innerHTML = `<svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`; return t.content.firstChild as SVGSVGElement; };
-const V_ICONS: Record<string, string> = {
-  plus: '<path d="M8 2v12M14 8H2" stroke-width="2"/>',
-  edit: '<path d="M10.5 2.5l3 3L6 13H3v-3z"/><path d="M9 4l3 3"/>',
-  copy: '<rect x="5.5" y="5.5" width="8" height="9" rx="1"/><path d="M3.5 10.5h-1v-9h8v1"/>',
-  text: '<path d="M3 3.5h10M8 3.5V14M6 14h4" stroke-width="1.8"/>',
-  trash: '<path d="M4 13.2L3.5 5.5h9l-.5 7.7c-.05.7-.6 1.3-1.3 1.3H5.3c-.7 0-1.2-.6-1.3-1.3z" fill="currentColor" stroke-width="1"/><path d="M13.6 2h-3.2l-.25-.65A.65.65 0 009.6 1H6.5a.65.65 0 00-.58.35L5.67 2H2.43A.43.43 0 002 2.43v1.14c0 .24.2.43.43.43h11.2c.24 0 .43-.19.43-.43V2.43A.43.43 0 0013.6 2z" fill="currentColor" stroke="none"/>',
-};
+// DIALOG_FIELDS_TABLE's variant buttons: KiCad's small_plus / small_edit / copy / text / small_trash bitmaps
+const V_ICONS: Record<string, string> = { plus: "small_plus", edit: "small_edit", copy: "copy", text: "text", trash: "small_trash" };
 
 interface Member { docId: string; id: string }
 interface Row extends SymRow { members: Member[] }
@@ -207,12 +200,12 @@ export function openFieldsTable(exportTab = false): void {
       fieldGrid = KD().grid<BomField>(left, [{ key: "name", label: "Field", type: "ro", format: (v) => (v === QTY ? "Quantity" : v === ITEM_NO ? "Item Number" : str(v)) }, { key: "label", label: "BOM Name", type: "text" }, { key: "show", label: "Include", type: "bool", width: 52 }, { key: "group_by", label: "Group By", type: "bool", width: 62 }],
         preset.fields_ordered, { height: "40vh", onChange() { markUnsaved(); preset.fields_ordered = fieldGrid!.rows; refreshGrid(); refreshPreview(); }, buttons: { move: true } });
       const bar = fieldGrid.bar || h("div", { class: "kd-grid-btns" }); if (!fieldGrid.bar) left.append(bar);
-      const fbtn = (txt: string, title: string, id: string, fn: () => void) => { const b = h("button", { class: "btn", type: "button", title, id, disabled: ro, onclick: fn }, txt); bar.prepend(b); return b; };
-      fbtn("🗑", "Remove selected field", "kd-sft-removefield", () => { const f = preset.fields_ordered[fieldGrid!.selected()]; if (!f) return;
+      const fbtn = (icon: string, title: string, id: string, fn: () => void) => { const b = bitmapButton(icon, title, fn, { id, disabled: ro }); bar.prepend(b); return b; };
+      fbtn("small_trash", "Remove selected field", "kd-sft-removefield", () => { const f = preset.fields_ordered[fieldGrid!.selected()]; if (!f) return;
         if (["Reference", "Value", "Footprint", "Datasheet", "Description", QTY, ITEM_NO].includes(f.name) || ATTR_FIELDS[f.name]) { toast(`The ${f.name} field is mandatory and cannot be removed`); return; }
         preset.fields_ordered.splice(fieldGrid!.selected(), 1); for (const r of rows) { if (r.values[f.name] !== undefined && r.values[f.name] !== "") { r.values[f.name] = ""; for (const m of r.members) editOf(m).values[f.name] = ""; } } markUnsaved(); refreshFields(); refreshGrid(); });
-      fbtn("✎", "Rename selected field", "kd-sft-renamefield", () => { const f = preset.fields_ordered[fieldGrid!.selected()]; if (!f) return; void promptText("Rename Field", "New field name:", f.label).then((n) => { if (n) { f.label = n; markUnsaved(); refreshFields(); refreshGrid(); } }); });
-      fbtn("+", "Add a new field", "kd-sft-addfield", () => { void promptText("Add Field", "New field name:").then((n) => {
+      fbtn("small_edit", "Rename selected field", "kd-sft-renamefield", () => { const f = preset.fields_ordered[fieldGrid!.selected()]; if (!f) return; void promptText("Rename Field", "New field name:", f.label).then((n) => { if (n) { f.label = n; markUnsaved(); refreshFields(); refreshGrid(); } }); });
+      fbtn("small_plus", "Add a new field", "kd-sft-addfield", () => { void promptText("Add Field", "New field name:").then((n) => {
         // DIALOG_FIELDS_TABLE::OnAddField: Cancel does nothing; an empty or taken name is a DisplayError box
         if (n === null) return;
         if (!n) { void messageBox("Field must have a name."); return; }
@@ -237,8 +230,8 @@ export function openFieldsTable(exportTab = false): void {
         if (sel !== null) { const i = variantNamesForUI().indexOf(sel); if (i >= 0) vlist.selectedIndex = i; }
         updateBtns(); refreshAll(); }, 300);
       const vbtn = (icon: string, title: string, id: string, fn: (names: string[], index: number, prompts: VariantPrompts) => Promise<string | null> | void, needsVariant: boolean) => {
-        const b = h("button", { class: "btn sm", type: "button", title, id, disabled: ro, "data-needs-variant": needsVariant ? "1" : "",
-          onclick: () => { const names = variantNamesForUI(); const r = fn(names, vlist.selectedIndex, stackedPrompts); if (r) void r.then((sel) => afterCmd(sel)); } }, vIcon(V_ICONS[icon])) as HTMLButtonElement;
+        const b = bitmapButton(V_ICONS[icon], title, () => { const names = variantNamesForUI(); const r = fn(names, vlist.selectedIndex, stackedPrompts); if (r) void r.then((sel) => afterCmd(sel)); }, { id, disabled: ro });
+        if (needsVariant) b.dataset.needsVariant = "1";
         btns.push(b); return b;
       };
       const updateBtns = () => { for (const b of btns) if (b.dataset.needsVariant) b.disabled = ro || vlist.selectedIndex <= 0; };
@@ -264,7 +257,7 @@ export function openFieldsTable(exportTab = false): void {
       KD().notebook(right, [
         { label: "Edit", build(page) {
           const scopeSel = select(SCOPES, scope, (v) => { scope = v as Scope; refreshAll(); }, { id: "kd-sft-scope", style: "width:190px" });
-          page.append(h("div", { class: "kd-row", style: "margin-bottom:6px;flex-wrap:wrap" }, filter, scopeSel, groupCb, h("button", { class: "btn sm", type: "button", title: "Refresh Grouping", id: "kd-sft-refresh", onclick: () => refreshAll() }, "↻")),
+          page.append(h("div", { class: "kd-row", style: "margin-bottom:6px;flex-wrap:wrap" }, filter, scopeSel, groupCb, bitmapButton("small_refresh", "Refresh Grouping", () => refreshAll(), { id: "kd-sft-refresh" })),
             h("div", { class: "kd-row", style: "margin-bottom:6px;gap:18px" }, dnpCb, exclCb, (countEl = h("span", { style: "margin-left:auto;color:var(--ink-2)", id: "kd-sft-count" }))));
           gridHost = h("div", { id: "kd-sft-grid" }); page.append(gridHost); refreshGrid();
         } },
@@ -281,7 +274,7 @@ export function openFieldsTable(exportTab = false): void {
             h("div", { class: "kd-row", style: "gap:18px;margin:8px 0" }, fc("keep_tabs", "Keep tabs", "kd-sft-tabs"), fc("keep_line_breaks", "Keep line breaks", "kd-sft-lb"), fc("include_bom", "Include byte order mark", "kd-sft-bom", "Can increase compatibility with older software that does not import UTF-8 correctly, such as Excel. Can worsen compatibility in some cases.")),
             h("div", { class: "kd-row", style: "margin:8px 0;border-top:1px solid var(--line);padding-top:8px" }, h("label", { style: "color:var(--ink-2)" }, "Format presets:"), fmtSel),
             h("div", { class: "kd-row", style: "margin:8px 0" }, h("label", { style: "white-space:nowrap;color:var(--ink-2)" }, "Output file:"), textInput(outFile, (v) => { outFile = v; dirtySettings = true; }, { id: "kd-sft-out" })),
-            h("div", { class: "kd-row", style: "justify-content:space-between" }, h("label", { style: "color:var(--ink-2)" }, "Preview:"), h("button", { class: "btn sm", type: "button", title: "Refresh preview", onclick: refreshPreview }, "↻")),
+            h("div", { class: "kd-row", style: "justify-content:space-between" }, h("label", { style: "color:var(--ink-2)" }, "Preview:"), bitmapButton("small_refresh", "Refresh preview", () => refreshPreview(), { key: "refresh-preview" })),
             (previewEl = h("textarea", { id: "kd-sft-preview", readonly: true, wrap: "off", style: "height:34vh;margin-top:4px;white-space:pre;font-size:12px" })));
           fillFmtSel(); syncFmtInputs(); refreshPreview();
         } },

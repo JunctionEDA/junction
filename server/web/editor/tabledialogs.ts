@@ -11,6 +11,7 @@
 // Several cells at once: a value the cells disagree on shows "-- mixed values --" (INDETERMINATE_STATE) and is left
 // alone unless it is edited; bold / italic only change when toggled, an alignment only when one of its buttons is
 // down.  A cell whose values do not change keeps its bytes.  Each OK is one change of the table node.
+import { bitmapButton } from "../dialogs/kicon";
 import { LINE_STYLES, tableDialog } from "./pcbdialogs/table";
 import { fontField } from "../dialogs/font-picker";
 import { box, checkField, errorMessage, fmtLen, form, h, lenField, messageBox, openDialog, parseLen, selectField, unitLabel, unitName, type Field } from "./pcbdialogs/ui";
@@ -125,15 +126,11 @@ export function applyCellPatch(table: SNode, isPcb: boolean, cells: number[], pa
 }
 
 // ---------------------------------------------------------------- small widgets
-const ICON: Record<string, string> = {
-  left: "M2 3h12M2 6h8M2 9h12M2 12h8", center: "M2 3h12M4 6h8M2 9h12M4 12h8", right: "M2 3h12M6 6h8M2 9h12M6 12h8",
-  top: "M2 2h12M5 5h6M5 8h6", vcenter: "M2 8h12M5 5h6M5 11h6", bottom: "M2 14h12M5 8h6M5 11h6",
-};
+// DIALOG_TABLECELL_PROPERTIES' BITMAP_BUTTONs: KiCad's bitmaps from the icon pack
+const ICON: Record<string, string> = { left: "text_align_left", center: "text_align_center", right: "text_align_right", top: "text_valign_top", vcenter: "text_valign_center", bottom: "text_valign_bottom", bold: "text_bold", italic: "text_italic" };
 function toggle(label: string, title: string, on: boolean, ro: boolean, key: string, path?: string): { el: HTMLButtonElement; get(): boolean; set(v: boolean): void } {
-  const b = h("button", { type: "button", class: "btn tc-toggle", title, "data-k": key, disabled: ro, style: "min-width:28px;height:26px;padding:0 6px" }) as HTMLButtonElement;
-  if (path) b.innerHTML = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4"><path d="${path}"/></svg>`;
-  else b.textContent = label;
-  let cur = on; const paint = () => { b.classList.toggle("primary", cur); b.setAttribute("aria-pressed", String(cur)); };
+  const b = bitmapButton(path || ICON[label] || label, title, null, { key, disabled: ro, flat: true, cls: "tc-toggle" });
+  let cur = on; const paint = () => { b.classList.toggle("on", cur); b.setAttribute("aria-pressed", String(cur)); };
   b.addEventListener("click", () => { cur = !cur; paint(); b.dispatchEvent(new Event("change")); }); paint();
   return { el: b, get: () => cur, set(v) { cur = v; paint(); } };
 }
@@ -223,8 +220,7 @@ export function cellPropsDialog(ctx: ToolCtx, item: KItem, cells: number[], isPc
       if (isMixed("face")) fontExtra.unshift([MIXED, MIXED]);
       const font = fontField(doc, isMixed("face") ? MIXED : (v.face || ""), { ro, key: "font", extra: fontExtra, kicadValue: isPcb ? "" : "KiCad Font" });
       (font.el as HTMLElement).style.cssText = "width:auto;min-width:160px;max-width:240px";
-      const bold = toggle("B", "Bold", !isMixed("bold") && v.bold, ro, "bold"), italic = toggle("I", "Italic", !isMixed("italic") && v.italic, ro, "italic");
-      bold.el.style.fontWeight = "700"; italic.el.style.fontStyle = "italic";
+      const bold = toggle("bold", "Bold", !isMixed("bold") && v.bold, ro, "bold"), italic = toggle("italic", "Italic", !isMixed("italic") && v.italic, ro, "italic");
       let boldTouched = false, italicTouched = false;
       bold.el.addEventListener("change", () => { boldTouched = true; }); italic.el.addEventListener("change", () => { italicTouched = true; });
       const hAlign = alignGroup([["left", "Align left", "left"], ["center", "Align horizontal center", "center"], ["right", "Align right", "right"]], isMixed("hAlign") ? null : v.hAlign, ro, "halign");

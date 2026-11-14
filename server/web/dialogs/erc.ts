@@ -9,6 +9,7 @@
 //
 // Exclusions are kept in the project's erc_exclusions (ERC_SETTINGS::m_ErcExclusions) in the form its erc schema
 // already uses, so a re-run excludes the same violations again (SCHEMATIC::ResolveERCExclusions).
+import { bitmapButton } from "./kicon";
 import { E, appState, applyView, centerOn, openDocId, requestRender, store, toast, toolCtx } from "./editor";
 import { preferInstance } from "../editor/schnets";
 import { setStatusBar } from "../editor/appstore";
@@ -343,7 +344,7 @@ export function openErc(): void {
     title: "Electrical Rules Checker", width: 640, modeless: true,
     build(body) {
       // m_bMenu: the options button at the top right (DIALOG_ERC::OnMenu)
-      const gear = h("button", { class: "btn sm", type: "button", title: "Options", id: "kd-erc-options", style: "padding:2px 6px", "aria-label": "Options" }, "⋯");
+      const gear = bitmapButton("config", "Options", null, { id: "kd-erc-options", flat: true });
       gear.addEventListener("click", () => { const r = gear.getBoundingClientRect(); popupMenu(r.left, r.bottom, [
         { label: "Cross-probe Selected Items", check: true, checked: opts.crossprobe, run: () => { opts.crossprobe = !opts.crossprobe; saveOpts(); } },
         { label: "Center on Cross-probe", check: true, checked: opts.scrollOnCrossprobe, run: () => { opts.scrollOnCrossprobe = !opts.scrollOnCrossprobe; saveOpts(); } },
