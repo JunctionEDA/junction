@@ -171,13 +171,14 @@ export function stripModels(fpText: string): string {
  * dialog's model list in place of its own, on a board of the given thickness.  `fpText` null: a bare footprint
  * holding the models only (the picker's preview of one file).
  */
-export function previewBoardText(fpText: string | null, models: PreviewModel[], thickness = 1.6, outline?: [number, number, number, number]): string {
+/** `extra`: more footprint children for the preview, such as the extruded 3D body's (model (type extruded) …). */
+export function previewBoardText(fpText: string | null, models: PreviewModel[], thickness = 1.6, outline?: [number, number, number, number], extra = ""): string {
   // the bare holder: the 3D viewer draws a footprint's models when it is a part (two pads and a courtyard; bodies.ts)
   const bare = '(footprint "preview" (layer "F.Cu") (attr smd) (fp_rect (start -0.5 -0.5) (end 0.5 0.5) (stroke (width 0.05) (type solid)) (fill no) (layer "F.CrtYd"))'
     + ' (pad "1" smd rect (at 0 0) (size 0.01 0.01) (layers)) (pad "2" smd rect (at 0 0) (size 0.01 0.01) (layers)))';
   const body = fpText ? stripModels(fpText).trim() : bare;
   const close = body.lastIndexOf(")");
-  const fp = body.slice(0, close) + (models.length ? " " + models.map(modelSexpr).join(" ") : "") + ")";
+  const fp = body.slice(0, close) + (extra ? " " + extra : "") + (models.length ? " " + models.map(modelSexpr).join(" ") : "") + ")";
   // the footprint editor writes no placement; the board wants it at the origin on the front
   const head = fp.slice(0, Math.max(0, fp.search(/\((?:property|pad|fp_|attr|descr|tags|zone|group|model|embedded)\b/)) || fp.length);
   const placed = /\(at\s/.test(head) ? fp : fp.replace(/^\(footprint\s+("(?:[^"\\]|\\.)*"|\S+)/, (m) => m + " (at 0 0)");

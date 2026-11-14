@@ -8,7 +8,8 @@
 // The pure parts (path checks, steps, the preview board) are library/model3d.ts.
 import * as M from "../../library/model3d";
 import { loadViewer, type EmbeddedViewer3D } from "../viewer3d-loader";
-import { box, currentUnits, form, grid, gridButtons, h, iconButton, lenField, messageBox, numField, openDialog, selectField, unitLabel, unitName, type CellValue, type DialogApi, type Field } from "./ui";
+import { box, checkField, currentUnits, form, grid, gridButtons, h, iconButton, lenField, messageBox, numField, openDialog, selectField, unitLabel, unitName, type CellValue, type DialogApi, type Field } from "./ui";
+import { colorPicker, type RGBA } from "./color-picker";
 import { kicadIcon } from "../../components/kicon-dom";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -239,13 +240,22 @@ export interface Models3dOpts {
   /** the footprint in library form (at the origin, front side, unrotated), for the preview's dummy board */
   footprintText?(): string;
   previewKey: string;
+  /** the footprint's extruded 3D body ((model (type extruded) …)), null for none */
+  extruded?: FpExtruded | null;
 }
+/** EXTRUDED_3D_BODY: layer "auto" (UNDEFINED_LAYER), "pad_bbox" (UNSELECTED_LAYER) or a layer name; color null = unspecified */
+export interface FpExtruded { show: boolean; height: number; standoff: number; layer: string; material: "plastic" | "matte" | "metal" | "copper"; color: number[] | null }
+/** m_extrusionLayers: UNDEFINED_LAYER, F_CrtYd, F_Fab, F_SilkS, UNSELECTED_LAYER */
+const EXTRUSION_LAYERS: [string, string][] = [["auto", "Auto"], ["F.CrtYd", "Courtyard layer"], ["F.Fab", "Fabrication layer"], ["F.SilkS", "Silkscreen layer"], ["pad_bbox", "Pin bounding box"]];
+const MATERIALS: [string, string][] = [["plastic", "Plastic"], ["matte", "Matte"], ["metal", "Metal"], ["copper", "Copper"]];
+interface FpModelsApi { extrudedText(e: FpExtruded): string }
+const extrudedSexpr = (e: FpExtruded | null): string => { const PT = (window as unknown as { PcbTools?: { fpModels?: FpModelsApi } }).PcbTools; return e && PT && PT.fpModels ? PT.fpModels.extrudedText(e) : ""; };
 /**
  * PANEL_FP_PROPERTIES_3D_MODEL with its PANEL_PREVIEW_3D_MODEL: the model grid (status, file with its picker, Show),
  * add / browse / remove, the configured path choice, Configure Paths..., the Scale / Rotation / Offset / Opacity of the
  * selected model and the live preview.  Both DIALOG_FOOTPRINT_PROPERTIES (board) and the footprint editor's dialog use it.
  */
-export function models3dPanel(o: Models3dOpts): { build(el: HTMLElement): void; models(): Any[]; dispose(): void } {
+export function models3dPanel(o: Models3dOpts): { build(el: HTMLElement): void; models(): Any[]; extruded(): FpExtruded | null; validate(): string | null; dispose(): void } {
   const ro = o.ro;
   const host = { projectModels: o.projectModels, footprintText: o.footprintText };
   const models = o.models.map((x: Any) => ({ ...x, offset: x.offset.slice(), scale: x.scale.slice(), rotate: x.rotate.slice() }));
@@ -263,11 +273,20 @@ export function models3dPanel(o: Models3dOpts): { build(el: HTMLElement): void; 
     const x = models[modelSel]; if (!x) return;
     x.scale = [mf.sx.get(), mf.sy.get(), mf.sz.get()]; x.rotate = [mf.rx.get(), mf.ry.get(), mf.rz.get()]; x.offset = [mf.ox.get(), mf.oy.get(), mf.oz.get()]; x.opacity = Number(opacity.value) / 100;
   };
+  // the Extruded 3D Body box (PANEL_FP_PROPERTIES_3D_MODEL's m_extrusionSizer)
+  const ex = o.extruded || null;
+  const exEnable = checkField(!!ex, "Enable", { ro, key: "enableExtrusion", tip: "Enable extruded 3D model for this footprint" });
+  const exShow = checkField(ex ? ex.show : true, "Show", { ro, key: "showExtrusion", tip: "Show extruded 3D model" });
+  const exHeight = lenField(ex ? ex.height : NaN, { ro, key: "componentHeight", allowEmpty: true }), exStandoff = lenField(ex ? ex.standoff : NaN, { ro, key: "standoffHeight", allowEmpty: true });
+  const exLayer = selectField<string>(ex ? ex.layer : "auto", EXTRUSION_LAYERS, { ro, key: "extrusionLayer" });
+  const exMaterial = selectField<string>(ex ? ex.material : "plastic", MATERIALS, { ro, key: "extrusionMaterial" });
+  let exColor: number[] | null = ex ? ex.color : null;
+  const extruded = (): FpExtruded | null => (exEnable.get() ? { show: exShow.get(), height: exHeight.get(), standoff: isFinite(exStandoff.get()) ? exStandoff.get() : 0, layer: exLayer.get(), material: exMaterial.get() as FpExtruded["material"], color: exColor } : null);
   let preview: ReturnType<typeof modelPreview> | null = null;
   const updatePreview = (): void => {   // UpdateDummyFootprint
     if (!preview || !host.footprintText) return;
     saveModel();
-    preview.update(M.previewBoardText(host.footprintText(), models.filter((x: Any) => x.file).map((x: Any) => ({ file: x.file, show: x.show, opacity: x.opacity, offset: x.offset, scale: x.scale, rotate: x.rotate })), preview.thickness()));
+    preview.update(M.previewBoardText(host.footprintText(), models.filter((x: Any) => x.file).map((x: Any) => ({ file: x.file, show: x.show, opacity: x.opacity, offset: x.offset, scale: x.scale, rotate: x.rotate })), preview.thickness(), undefined, extrudedSexpr(extruded())));
   };
   const showModel = (i: number): void => {
     saveModel(); modelSel = i; const x = models[i];
@@ -314,14 +333,41 @@ export function models3dPanel(o: Models3dOpts): { build(el: HTMLElement): void; 
     const cfg = h("button", { type: "button", class: "kbtn", "data-k": "configure3dPaths" }, "Configure Paths...");
     cfg.addEventListener("click", () => { void import("../../dialogs/configure-paths").then((x) => x.configurePaths(() => updatePreview())); });
     preview = modelPreview({ buttons: true, reload: updatePreview, key: o.previewKey });
+    // Extruded 3D Body: Enable / Show, Overall height / Standoff height, Extrusion source / Material with its colour
+    const swatch = h("button", { type: "button", class: "pd-iconbtn", title: "Color of the extruded body. Overrides the material default.", "data-k": "extrusionColor", disabled: ro }, h("span", { class: "pd-swatch" })) as HTMLButtonElement;
+    const paint = (): void => { const sp = swatch.firstChild as HTMLElement; sp.style.background = exColor ? `rgba(${Math.round(exColor[0] * 255)},${Math.round(exColor[1] * 255)},${Math.round(exColor[2] * 255)},${exColor[3]})` : "transparent"; };
+    swatch.addEventListener("click", () => {
+      const cur: RGBA | null = exColor ? { r: exColor[0], g: exColor[1], b: exColor[2], a: exColor[3] } : null;
+      colorPicker(cur, true, (c) => { exColor = [c.r, c.g, c.b, c.a]; paint(); updatePreview(); });
+    });
+    paint();
+    const exportBtn = h("button", { type: "button", class: "btn", title: "Export generated 3D model", "data-k": "exportExtruded", disabled: true }, "Export...") as HTMLButtonElement;
+    const exSync = (): void => { const on = exEnable.get() && !ro; for (const c of [exShow.input, exHeight.input, exStandoff.input, exLayer.input, exMaterial.input]) (c as HTMLElement & { disabled: boolean }).disabled = !on; swatch.disabled = !on; };   // updateExtrusionControls
+    exEnable.input.addEventListener("change", () => { exSync(); updatePreview(); });
+    for (const c of [exShow.input, exHeight.input, exStandoff.input, exLayer.input, exMaterial.input]) c.addEventListener("change", updatePreview);
+    exSync();
+    const extrusionBox = box("Extruded 3D Body", h("div", { class: "pd-row" }, exEnable.el, exShow.el),
+      h("div", { style: "display:grid;grid-template-columns:auto auto auto;gap:4px 24px;align-items:center" },
+        form([["Overall height:", exHeight.el, unitLabel()], ["Standoff height:", exStandoff.el, unitLabel()]]),
+        form([["Extrusion source:", exLayer.el], ["Material:", h("span", { class: "pd-inline", style: "gap:6px" }, exMaterial.el, swatch)]], true),
+        exportBtn));
     ["sx", "sy", "sz", "rx", "ry", "rz", "ox", "oy", "oz"].forEach((k) => mf[k].input.addEventListener("change", updatePreview));
     opacity.addEventListener("input", updatePreview);
-    el.append(modelGrid.el, h("div", { class: "pd-row", style: "margin:2px 0 6px" }, bar, h("span", { style: "flex:1" }), pathChoice.el, cfg),
+    el.append(modelGrid.el, h("div", { class: "pd-row", style: "margin:2px 0 6px" }, bar, h("span", { style: "flex:1" }), pathChoice.el, cfg), extrusionBox,
       h("div", { style: "display:flex;gap:8px;min-height:340px" },
         h("div", { style: "flex:none;width:220px;display:flex;flex-direction:column" }, xyz("Scale", "sx", "sy", "sz", ""), xyz("Rotation", "rx", "ry", "rz", "deg"), xyz("Offset", "ox", "oy", "oz", unitName()), box("Opacity", opacity)),
         h("div", { style: "flex:1;min-width:0;display:flex;flex-direction:column" }, h("div", { class: "pd-lbl", style: "padding:4px 0" }, "Preview"), h("div", { style: "flex:1;min-height:300px;display:flex" }, preview.el))));
     if (models.length) { modelGrid.select(0); }
     updatePreview();
   };
-  return { build, models: () => { syncModels(); return models.filter((x: Any) => x.file); }, dispose: () => { if (preview) preview.dispose(); } };
+  return { build, models: () => { syncModels(); return models.filter((x: Any) => x.file); }, extruded,
+    // PANEL_FP_PROPERTIES_3D_MODEL::Validate
+    validate: () => {
+      if (!exEnable.get()) return null;
+      const hgt = exHeight.get(), so = exStandoff.get();
+      if (!isFinite(hgt) || hgt <= 0) return "Component height must be greater than zero.";
+      if (isFinite(so) && so >= hgt) return "Standoff height must be less than the overall height.";
+      return null;
+    },
+    dispose: () => { if (preview) preview.dispose(); } };
 }

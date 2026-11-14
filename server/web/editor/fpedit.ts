@@ -1080,6 +1080,24 @@ function editFpInFpEditor(): void {
   window.open(`/p/${state.project.projectId}/edit?fp=${encodeURIComponent(boardCopyId(state.docId, it.id))}`, "_blank");
 }
 
+/**
+ * PCB_ACTIONS::editLibFpInFpEditor on the board (Footprint Properties' Edit Library Footprint...):
+ * FOOTPRINT_EDIT_FRAME::LoadFootprintFromLibrary( fp->GetFPID() ) — the selected footprint's library footprint in a
+ * Footprint Editor window: the project's own library document when it has one, else the global library's.
+ */
+function editLibFpFromBoard(): void {
+  if (!E.kdoc || isFpEdit() || !state.project) return;
+  let id = E.selected ? E.selected.id : null;
+  if (!id) for (const s of E.selection) { const it = E.kdoc.items.get(s); if (it && it.kind === "footprint") { id = s; break; } }
+  const it = id ? E.kdoc.items.get(id) : null;
+  if (!it || it.kind !== "footprint") { toast("Select a footprint first"); return; }
+  const fpid = String(it.node[1] ?? ""), colon = fpid.indexOf(":");
+  if (colon <= 0) { toast(`Footprint '${fpid}' has no library nickname.`); return; }
+  const lib = fpid.slice(0, colon), name = fpid.slice(colon + 1);
+  const own = state.project.docs.find((d) => d.docType === "footprint" && d.path.endsWith(`${lib}.pretty/${name}.kicad_mod`));
+  window.open(`/p/${state.project.projectId}/edit?fp=${encodeURIComponent(own ? own.docId : libCopyId(lib, name))}`, "_blank");
+}
+
 /** FOOTPRINT_EDIT_FRAME::OnCloseWindow: leaving a modified footprint asks first (themed, never the browser's). */
 export async function canLeaveFootprint(): Promise<boolean> {
   if (!isFpEdit() || !E.kdoc || !FD().footprintModified(E.kdoc)) return true;
@@ -1149,6 +1167,7 @@ export function installFpEditHandlers(HANDLERS: Record<string, ActionHandler>): 
   setAnchor: fpOnly(() => setTool("anchor")),
   showLibraryTree: fpOnly(() => showPane("libtree")),
   editFpInFpEditor: () => { if (!isFpEdit()) editFpInFpEditor(); },
+  editLibFpInFpEditor_board: () => { if (!isFpEdit()) editLibFpFromBoard(); },
   showFootprintEditor: () => { void showFootprintEditor(); },
   showDatasheet: ((a) => { if (isFpEdit()) { showDatasheet(); return; } if (prevDatasheet) { prevDatasheet(a); return; } boardDatasheet(); }) as ActionHandler,
   editLibFpInFpEditor: fpOnly(() => { if (isFpPrivate()) void editLibraryFootprint(); }),

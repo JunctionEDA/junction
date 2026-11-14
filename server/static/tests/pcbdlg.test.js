@@ -93,3 +93,33 @@ test("Zone Manager: automatically assign zone priorities", () => {
   // apart: no overlap, no change
   assert.equal(T.autoZonePriorities(board(Z(1, "GND", 0, 0, 5, 5, 0) + Z(2, "VCC", 10, 10, 20, 20, 1))), null);
 });
+
+test("Footprint Properties 3D Models: models and the extruded body read and written", () => {
+  const M = T.fpModels;
+  const fp = K.parse(`(footprint "Lib:C" (layer "F.Cu") (uuid "f") (at 0 0) (descr "d") (property "Reference" "C1" (at 0 0 0) (layer "F.SilkS") (uuid "r"))
+    (model "\${KICAD10_3DMODEL_DIR}/A.3dshapes/a.step" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))
+    (embedded_files (file (name "a.pdf") (type datasheet) (data |abc|)) (file (name "b.step") (type model) (data |def|))))`);
+  const models = M.readModels(fp);
+  assert.equal(models.length, 1);
+  assert.equal(M.readExtruded(fp), null);
+  const before = K.serialize(fp);
+  assert.equal(M.writeModels(fp, models, null), false, "unchanged models leave the node alone");
+  assert.equal(K.serialize(fp), before);
+  models[0].show = false;
+  assert.ok(M.writeModels(fp, models, { show: true, height: 3, standoff: 0.5, layer: "F.CrtYd", material: "metal", color: null }));
+  const t = K.serialize(fp);
+  assert.match(t, /\(model "\$\{KICAD10_3DMODEL_DIR\}\/A\.3dshapes\/a\.step" \(hide yes\)/);
+  assert.match(t, /\(model \(type extruded\) \(uuid "[^"]+"\) \(hide no\) \(overall_height 3\) \(body_pcb_gap 0\.5\) \(layer "F\.CrtYd"\) \(material metal\) \(color unspecified\)/);
+  assert.ok(t.indexOf("(type extruded)") < t.indexOf("a.step"), "the body goes before the file models");
+  const e = M.readExtruded(fp);
+  assert.equal(e.height, 3); assert.equal(e.material, "metal"); assert.equal(e.layer, "F.CrtYd");
+  // removing the body
+  assert.ok(M.writeModels(fp, M.readModels(fp), null));
+  assert.equal(M.readExtruded(fp), null);
+  // embedded files: only removal
+  assert.deepEqual(M.embeddedFileNames(fp), ["a.pdf", "b.step"]);
+  assert.ok(M.keepEmbeddedFiles(fp, ["b.step"]));
+  assert.deepEqual(M.embeddedFileNames(fp), ["b.step"]);
+  assert.ok(M.keepEmbeddedFiles(fp, []));
+  assert.equal(K.kid(fp, "embedded_files"), null);
+});

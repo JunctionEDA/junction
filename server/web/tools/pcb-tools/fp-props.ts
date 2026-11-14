@@ -9,6 +9,8 @@
 // node (and so its text in the file).
 type SAtom = string | number | SNode;
 import type { BoardDoc, PcbChange } from "./types";
+import * as FM from "./fp-models";
+import { readExtruded, type FpExtruded } from "./fp-models";
 import { K } from "./state";
 import { addedChange, removedChange, replacedChange } from "./changes";
 import { clone, isList, r6 } from "./util";
@@ -41,6 +43,8 @@ export interface FpPropsModel {
   privateLayers: string[]; customStackup: boolean; copperCount: number; userLayers: string[];
   netTieGroups: string[]; dupPadsAreJumpers: boolean; jumperGroups: string[];
   models: Fp3DModel[];
+  /** the extruded 3D body (undefined: left as it is) */
+  extruded?: FpExtruded | null;
   fields: FpFieldRow[];
   /** attr tokens this dialog does not edit (kept as they are) */
   otherAttrs: string[];
@@ -71,23 +75,11 @@ function fieldRow(it: KItem): FpFieldRow {
 
 function xyz(n: SNode | null, key: string, d: number): number[] { const k = n ? K.kid(n, key) : null; const v = k ? K.kid(k, "xyz") : null; return v ? [num(v[1], d), num(v[2], d), num(v[3], d)] : [d, d, d]; }
 
-/** A footprint node's (model …) entries (FOOTPRINT::Models), in the footprint editor or on a board. */
-export function readModels(h: SNode): Fp3DModel[] {
-  return K.kids(h, "model").filter((m: SNode) => typeof m[1] === "string").map((m: SNode) => {
-    const hide = K.kid(m, "hide"); const op = K.kid(m, "opacity");
-    return { file: str(m[1]), show: !(hide ? yes(hide) : m.includes("hide")), opacity: op ? num(op[1], 1) : 1, offset: xyz(m, "offset", 0), scale: xyz(m, "scale", 1), rotate: xyz(m, "rotate", 0) };
-  });
-}
-/** PANEL_FP_PROPERTIES_3D_MODEL::TransferDataFromWindow into a footprint node (a copy): nothing is touched unless the list differs. */
-export function writeModels(h: SNode, models: Fp3DModel[]): void {
-  const before = readModels(h);
-  if (models.map(modelSig).join() === before.map(modelSig).join()) return;
-  // the models keep the place of the first one (the writer orders the header anyway)
-  const old = h.filter((c, j) => j > 1 && isList(c) && c[0] === "model" && typeof c[1] === "string") as SNode[];
-  const oldBySig = new Map<string, SNode>(); old.forEach((n, i) => oldBySig.set(modelSig(before[i]), n));
-  for (const n of old) h.splice(h.indexOf(n), 1);
-  for (const mm of models.filter((x) => x.file)) h.push(oldBySig.get(modelSig(mm)) || modelNode(mm));
-}
+/** A footprint node's (model …) entries (FOOTPRINT::Models), in the footprint editor or on a board (fp-models.ts). */
+export const readModels = (h: SNode): Fp3DModel[] => FM.readModels(h);
+/** PANEL_FP_PROPERTIES_3D_MODEL::TransferDataFromWindow into a footprint node (a copy): unchanged models keep their nodes,
+ *  and the extruded body stays as it is unless one is given. */
+export function writeModels(h: SNode, models: Fp3DModel[], extruded?: FpExtruded | null): void { FM.writeModels(h, models, extruded === undefined ? readExtruded(h) : extruded); }
 
 /** DIALOG_FOOTPRINT_PROPERTIES_FP_EDITOR::TransferDataToWindow. */
 export function readFpProps(doc: BoardDoc): FpPropsModel {
@@ -115,7 +107,7 @@ export function readFpProps(doc: BoardDoc): FpPropsModel {
     userLayers: stack ? stackLayers.filter((l: string) => /^User\.\d+$/.test(l)) : Array.from(usedLayers).filter((l) => /^User\.\d+$/.test(l)),
     netTieGroups: nt ? nt.slice(1).map(str).filter(Boolean) : [], dupPadsAreJumpers: yes(one("duplicate_pad_numbers_are_jumpers")),
     jumperGroups: jg ? jg.slice(1).filter(isList).map((g: SNode) => g.map(str).join(", ")) : [],
-    models, fields: fieldItems(doc).map(fieldRow), otherAttrs: attrs.filter((a: string) => !known.includes(a)),
+    models, extruded: readExtruded(h), fields: fieldItems(doc).map(fieldRow), otherAttrs: attrs.filter((a: string) => !known.includes(a)),
     embeddedFiles: K.kids(one("embedded_files") || ["embedded_files"], "file").map((f: SNode) => str((K.kid(f, "name") || [])[1])).filter(Boolean),
     embedFonts: yes(one("embedded_fonts")),
   };
@@ -203,12 +195,6 @@ function setHeader(h: SNode, key: string, vals: SAtom[] | string | null): void {
 }
 const optNum = (h: SNode, key: string, v: number) => { const cur = K.kid(h, key); if (isFinite(v)) { if (!cur || num(cur[1], NaN) !== r6(v)) setHeader(h, key, [r6(v)]); } else if (cur) setHeader(h, key, null); };
 
-function modelNode(m: Fp3DModel): SNode {
-  const xyzT = (v: number[]) => `(xyz ${v.map(r6).join(" ")})`;
-  return mk(`(model ${qs(m.file)}${m.show ? "" : " (hide yes)"}${m.opacity !== 1 ? ` (opacity ${m.opacity.toFixed(4)})` : ""} (offset ${xyzT(m.offset)}) (scale ${xyzT(m.scale)}) (rotate ${xyzT(m.rotate)}))`);
-}
-const modelSig = (m: Fp3DModel) => JSON.stringify([m.file, m.show, +m.opacity.toFixed(4), m.offset.map(r6), m.scale.map(r6), m.rotate.map(r6)]);
-
 /** The new field's node: PCB_FIELD with the layer's text defaults (the caller fills the row from them). */
 function newFieldNode(r: FpFieldRow): SNode {
   return mk(`(property ${qs(r.name)} ${qs(r.value)} (at ${r6(r.x)} ${r6(r.y)} ${r6(r.rot)}) (layer ${qs(r.layer)})${r.unconstrained ? " (unlocked yes)" : ""}${r.show ? "" : " (hide yes)"}`
@@ -281,7 +267,8 @@ export function fpPropsChanges(doc: BoardDoc, m: FpPropsModel): PcbChange[] {
   const jg = m.jumperGroups.map((g) => Array.from(new Set(splitPadList(g))).sort()).filter((g) => g.length > 1);
   const jgBefore = before.jumperGroups.map((g) => Array.from(new Set(splitPadList(g))).sort());
   if (JSON.stringify(jg) !== JSON.stringify(jgBefore)) setHeader(h, "jumper_pad_groups", jg.length ? jg.map((g) => "(" + g.map(qs).join(" ") + ")").join(" ") : null);
-  writeModels(h, m.models);
+  // the file models and the extruded body (PANEL_FP_PROPERTIES_3D_MODEL::TransferDataFromWindow)
+  writeModels(h, m.models, m.extruded === undefined ? readExtruded(h) : m.extruded);
   if (m.embedFonts !== before.embedFonts) setHeader(h, "embedded_fonts", [m.embedFonts ? "yes" : "no"]);
   if ((m.embeddedFiles || []).join("\n") !== before.embeddedFiles.join("\n")) {
     // only removal happens here: a file dropped from the list goes, and an empty list drops (embedded_files) as the writer does
