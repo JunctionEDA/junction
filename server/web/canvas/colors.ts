@@ -125,6 +125,8 @@ export const PCB_BG = "#001023", PCB_GRID = "#848484", PCB_GRID_AXES = "#C2C2C2"
 // The board's drawing sheet and page outline: LAYER_DRAWINGSHEET / LAYER_PAGE_LIMITS
 // (builtin_color_themes.h:178-179).  pcbnew draws the same sheet as eeschema, in these colours.
 export const PCB_SHEET = "#C872AB", PCB_PAGE_LIMITS = "#848484";
+/** LAYER_CURSOR of the board theme (builtin_color_themes.h: COLOR4D( WHITE )): the crosshair of the footprint viewers. */
+export const PCB_CURSOR = "#FFFFFF";
 
 export const PCB_HIDDEN_DEFAULT = new Set(["F.Mask", "B.Mask", "F.Paste", "B.Paste", "F.Adhes", "B.Adhes", "F.Fab", "B.Fab", "F.CrtYd", "B.CrtYd", "Margin", "Eco1.User", "Eco2.User"]);
 

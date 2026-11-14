@@ -48,6 +48,14 @@ export function renderSymbolPreview(canvas: HTMLCanvasElement, libId: string, sy
   draw(canvas, doc, {}, 24);
 }
 
+/** A library footprint (.kicad_mod text) placed at the origin of an otherwise empty board (the footprint viewers' model). */
+export function footprintPreviewDoc(fpid: string, footprint: string): KDoc {
+  const node = footprintInstance({ fpid, footprint, at: [0, 0], uuid: "00000000-0000-4000-8000-000000000002" });
+  return K().parseDoc(`(kicad_pcb (version 20260206) (generator "pcbnew") ${PREVIEW_LAYERS} ${K().serialize(node)})`);
+}
+/** An empty board with the preview layer stack. */
+export function emptyPreviewDoc(): KDoc { return K().parseDoc(`(kicad_pcb (version 20260206) (generator "pcbnew") ${PREVIEW_LAYERS})`); }
+
 /** A library footprint (.kicad_mod text), every layer shown. */
 export function renderFootprintPreview(canvas: HTMLCanvasElement, fpid: string, footprint: string, zoom = 1): void {
   const node = footprintInstance({ fpid, footprint, at: [0, 0], uuid: "00000000-0000-4000-8000-000000000002" });

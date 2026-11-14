@@ -74,7 +74,7 @@ export function unitsMsg(units: Units): string { return units === "in" ? "inches
  * The KiCad application whose settings file keeps the units: each has its own "system.units" and
  * "system.last_imperial_units" (common/settings/app_settings.cpp), so switching units in one editor leaves the others.
  */
-export type UnitsApp = "eeschema" | "pcbnew" | "footprint_editor" | "symbol_editor";
+export type UnitsApp = "eeschema" | "pcbnew" | "footprint_editor" | "symbol_editor" | "cvpcb";
 export interface UnitsSettings { units: Units; lastImperial: Units }
 const unitsKey = (app: UnitsApp): string => "kui.units." + app;
 /** The application of a document type: the schematic is eeschema, a board pcbnew, a footprint the footprint editor. */

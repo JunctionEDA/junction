@@ -127,6 +127,12 @@ export function show3DViewer(): void {
   }).catch((e: unknown) => { console.warn(e); toast("The 3D viewer could not be loaded"); });
 }
 
+/** EDA_3D_VIEWER_FRAME on another frame's board (CvPcb's footprint viewer: a board holding the one footprint). */
+export function show3DViewerOn(opts: Viewer3DOpenOptions): void {
+  loadViewer().then((viewer) => { viewer.open(opts); }).catch((e: unknown) => { console.warn(e); toast("The 3D viewer could not be loaded"); });
+}
+export function close3DViewer(): void { const v = viewerGlobal(); if (v && v.isOpen()) v.close(); }
+
 // Alt+3, KiCad's hotkey for show3DViewer (matched on the physical key: Alt+3 types a symbol on some layouts)
 document.addEventListener("keydown", (ev) => {
   if (!ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.code !== "Digit3") return;
