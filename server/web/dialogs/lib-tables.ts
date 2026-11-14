@@ -159,7 +159,6 @@ export function pluginOptionsDialog(nickname: string, options: string, choices: 
 
 // ---------------------------------------------------------------- the dialog
 const CSS = `
-.kd-libtable .kd-grid td.ro { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 420px; }
 .kd-libtable .kd-split .btn:disabled { opacity: .45; }
 `;
 let cssDone = false;
@@ -479,7 +478,7 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
 
   let closing = false; let dlgApi: { close(): void } | null = null;
   KD().open({
-    title: sym ? "Symbol Libraries" : "Footprint Libraries", width: 1000, cls: "kd-wide kd-libtable", readOnly: ro, geomKey: sym ? "DIALOG_EDIT_LIBRARY_TABLES:sym" : "DIALOG_EDIT_LIBRARY_TABLES:fp",
+    title: sym ? "Symbol Libraries" : "Footprint Libraries", width: 1000, cls: "kd-wide kd-libtable kd-nowrap", readOnly: ro, geomKey: sym ? "DIALOG_EDIT_LIBRARY_TABLES:sym" : "DIALOG_EDIT_LIBRARY_TABLES:fp",
     build(body, a) {
       dlgApi = a;
       body.append(nb);

@@ -115,7 +115,7 @@ export class SymbolEditor {
   /** SYMBOL_EDITOR_DRAWING_TOOLS::TwoClickPlace: a new pin or text follows the cursor (IS_NEW | IS_MOVING) until the second click. */
   private floating: { kind: "pin"; pin: M.PinInfo } | { kind: "text"; node: M.Node; body: number; unit?: number } | null = null;
   private draw: { kind: ToolId; pts: number[][] } | null = null;
-  private officialList: { name: string; description: string }[] | null = null;
+  officialList: { name: string; description: string }[] | null = null;
   private officialFailed = "";
   private keyHook = (ev: KeyboardEvent) => this.onKey(ev);
   /** the schematic editor puts the focus back on its own canvas when a dialog closes: the frame takes it back */

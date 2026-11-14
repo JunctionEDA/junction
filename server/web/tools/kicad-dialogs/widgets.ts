@@ -32,6 +32,7 @@ const WIDGET_CSS = `
 .kd-grid tr.sel td { background: color-mix(in srgb, var(--blue) 18%, transparent); }
 .kd-grid td.ro { padding: 2px 6px; color: var(--ink-2); }
 .kd-grid td.c { text-align: center; }
+.kd-nowrap .kd-grid td.ro { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 420px; }
 .kd-grid td.kd-icon-cell { width: 24px; }
 .kd-grid .kd-cell-ic { border: 0; background: transparent; padding: 1px; display: inline-flex; cursor: pointer; border-radius: var(--r-1); vertical-align: middle; }
 .kd-grid .kd-cell-ic:hover { background: var(--sel-soft); }

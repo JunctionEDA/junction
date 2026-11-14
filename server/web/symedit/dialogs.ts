@@ -617,34 +617,117 @@ export function newSymbol(se: SymbolEditor, parentName?: string): void {
   });
 }
 /** Save As / Save Copy As: the current symbol (flattened when its parent stays behind) into a project library under a name. */
-export function saveSymbolAs(se: SymbolEditor, copy: boolean): void {
+/**
+ * SAVE_SYMBOL_AS_DIALOG (SYMBOL_EDIT_FRAME::saveSymbolCopyAs): an EDA_LIST_DIALOG with the symbol's "Name:" on top,
+ * "Save in library:" over the Library / Description list (GetLibraryItemsForListDialog: pinned libraries first), its
+ * filter, the "Flatten/remove symbol inheritance" check for a derived symbol, and New Library... left of Cancel /
+ * Save.  The name is trimmed, spaces become '_' and it is escaped for a LIB_ID.  Saving a derived symbol into another
+ * library copies its parents too (SYMBOL_SAVE_AS_HANDLER), and parents the target already has are overwritten or
+ * renamed as the user chooses.
+ */
+export function saveSymbolAs(se: SymbolEditor, copy: boolean, params?: { name: string; lib: string; flatten: boolean }): void {
   const t = se.tab; const sym = se.symbol(); if (!t || !sym) return;
-  const libs = se.projectLibs().filter((l) => l.doc && l.doc.canEdit);
-  const lib0 = se.libs.get(t.lib); const start = lib0 && libs.includes(lib0) ? lib0.nick : libs.length ? libs[0].nick : "";
-  const libSel = select(libs.map((l) => l.nick), start, undefined, { id: "sa-lib" }); const name = textInput(M.unescapeLibId(M.symName(sym)), undefined, { id: "sa-name" });
-  KD().open({
-    title: copy ? "Save Symbol Copy As" : "Save Symbol As", width: 460,
-    build(body) { body.append(form([["Library:", libSel], ["Name:", name]])); name.focus(); name.select(); },
+  const srcLib = se.libMap(se.libs.get(t.lib) || null);
+  const symbolName = M.symName(sym);
+  // GetParentChain( symbol, false ): every parent of a derived symbol, nearest first
+  const parentChain: M.Node[] = []; { let cur: M.Node | null = sym; const seen = new Set<string>(); while (cur && M.isDerived(cur) && srcLib) { const pn: string = M.parentNameOf(cur)!; if (seen.has(pn)) break; seen.add(pn); cur = srcLib.symbols.get(pn) || null; if (cur) parentChain.push(cur); } }
+  const valueFollowsName = (() => { const v = M.fieldOf(sym, "Value"); return !!v && String(v[2]) === symbolName; })();
+  const pinned = se.pinnedLibs();
+  const descr = (nick: string): string => { const o = (se.officialList || []).find((l) => l.name === nick); return o ? o.description : ""; };
+  const all = [...se.libs.values()].map((l) => l.nick);
+  const items = [...all.filter((n) => pinned.has(n)).sort(M.numCompare), ...all.filter((n) => !pinned.has(n)).sort(M.numCompare)];
+  const p = params || { name: symbolName, lib: t.lib || "", flatten: false };
+  const rows = items.map((n) => ({ lib: (pinned.has(n) ? "☆ " : "") + n, nick: n, descr: descr(n) }));
+  let shown = rows.slice();
+  const nameIn = textInput(M.unescapeLibId(p.name), undefined, { id: "sa-name", style: "flex:1" });
+  const filter = textInput("", undefined, { id: "sa-filter", placeholder: "Filter", style: "width:100%;box-sizing:border-box" });
+  const flat = parentChain.length ? checkbox(`Flatten/remove symbol inheritance (current parent symbols: ${parentChain.map((n) => M.unescapeLibId(M.symName(n))).join(", ")})`, p.flatten, undefined, { id: "sa-flatten" }) : null;
+  let g: GridApi<{ lib: string; nick: string; descr: string }> | null = null;
+  const chosen = (): string => { const i = g ? g.selected() : -1; return i >= 0 && shown[i] ? shown[i].nick : ""; };
+  let busy = false;
+  const api = KD().open({
+    title: "Save Symbol As", width: 520, okLabel: "Save", cls: "kd-nowrap",
+    extra: [{ label: "New Library...", id: "sa-newlib", fn: () => {
+      // ID_MAKE_NEW_LIBRARY: the dialog ends, a library is made, and the dialog comes back on it
+      const keep = { name: nameIn.value, lib: chosen(), flatten: !!(flat && (flat.querySelector("input") as HTMLInputElement).checked) };
+      KD().close();
+      void newLibrary(se).then((l) => saveSymbolAs(se, copy, { ...keep, lib: l ? l.nick : keep.lib }));
+    } }],
+    build(body) {
+      body.append(h("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:8px" }, h("span", null, "Name:"), nameIn),
+        h("div", { style: "margin:4px 0" }, "Save in library:"));
+      g = KD().grid(body, [{ key: "lib", label: "Library", type: "ro", width: 200 }, { key: "descr", label: "Description", type: "ro", width: 280 }], shown, { readOnly: true, height: 260 });
+      g.el.dataset.k = "sa-libs";
+      g.el.addEventListener("dblclick", () => { api.finish(true); });
+      body.append(h("div", { style: "margin-top:6px" }, filter));
+      if (flat) body.append(h("div", { style: "margin-top:6px" }, flat));
+      // EDA_LIST_DIALOG::textChangeInFilterBox: "*filter*" over the first column
+      filter.addEventListener("input", () => {
+        const re = new RegExp("^" + ("*" + filter.value.toLowerCase() + "*").replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
+        const keep = chosen(); shown = rows.filter((r) => re.test(r.lib.toLowerCase())); g!.rows.splice(0, g!.rows.length, ...shown); g!.refresh();
+        const at = shown.findIndex((r) => r.nick === keep); g!.select(at >= 0 ? at : shown.length ? 0 : -1);
+      });
+      const at = shown.findIndex((r) => r.nick === p.lib); if (at >= 0) g.select(at);
+      setTimeout(() => { const r = g && g.el.querySelector<HTMLElement>("tbody tr.sel"); if (r && r.scrollIntoView) r.scrollIntoView({ block: "center" }); }, 0);
+      setTimeout(() => { nameIn.focus(); nameIn.select(); }, 0);
+    },
     ok() {
-      // SAVE_AS_DIALOG::getSymbolName: trimmed, spaces to '_', EscapeString( …, CTX_LIBID )
-      const nm = M.escapeLibId(name.value.trim().replace(/ /g, "_")); const l = se.libs.get(libSel.value);
-      if (!l || !libSel.value) { void messageBox("A library must be specified.", "Message"); return false; }
+      if (busy) return false;
+      const flatten = !!(flat && (flat.querySelector("input") as HTMLInputElement).checked);
+      // getSymbolName: trimmed, spaces to '_', EscapeString( …, CTX_LIBID )
+      const nm = M.escapeLibId(nameIn.value.trim().replace(/ /g, "_")); const newLib = chosen(); const l = se.libs.get(newLib);
+      if (!newLib || !l) { void messageBox("A library must be specified.", "Message"); return false; }
       if (!nm) { void messageBox("Symbol must have a name.", "Message"); return false; }
-      const go = () => {
-        const srcLib = se.libMap(se.libs.get(t.lib) || null);
-        let s = M.node(M.text(sym));
-        const parent = M.parentNameOf(s);
-        if (parent && (t.origin || !srcLib || l.nick !== t.lib)) s = M.flatten(srcLib, s);
-        const tmp = { symbols: new Map([[M.symName(s), s]]) } as unknown as M.SymLib; M.renameSymbol(tmp, M.symName(s), nm); s = tmp.symbols.get(nm)!;
-        void l.doc!.commit([[nm, M.text(s)]]).then(() => { l.rows = null; se.renderTree(); });
-        l.rows = null;
+      if (l.kind === "official" || !l.doc || !l.doc.canEdit) { void messageBox(`Library '${newLib}' is read-only. Choose a different library to save the symbol '${M.unescapeLibId(nm)}' to.`, "Message"); return false; }
+      const target = l.doc.lib;
+      // CheckSavingIntoOwnInheritance: into the same library, over an ancestor or a descendant
+      if (newLib === t.lib && !t.origin) {
+        if (parentChain.some((n) => M.symName(n) === nm)) { void messageBox(`Symbol '${M.unescapeLibId(symbolName)}' cannot replace another symbol '${M.unescapeLibId(nm)}' that it descends from`, "Message"); return false; }
+        if (M.derivedOf(target, symbolName).includes(nm)) { void messageBox(`Symbol '${M.unescapeLibId(symbolName)}' cannot replace another symbol '${M.unescapeLibId(nm)}' that is a descendent of it.`, "Message"); return false; }
+      }
+      // CheckForParentalChainConflicts
+      const copyParents = !flatten && newLib !== t.lib && parentChain.length > 0;
+      const conflicts: string[] = [];
+      if (target.symbols.has(nm)) conflicts.push(nm);
+      if (copyParents) for (const n of parentChain) if (target.symbols.has(M.symName(n))) conflicts.push(M.symName(n));
+      const run = (strategy: "overwrite" | "rename"): void => { busy = false; api.close(); void doSave(strategy); };
+      const doSave = async (strategy: "overwrite" | "rename"): Promise<void> => {
+        const inUse = (n: string, taken: Set<string>) => target.symbols.has(n) || taken.has(n);
+        const resolve = (n: string, taken: Set<string>): string => { if (strategy === "overwrite") return n; let k = 1; while (inUse(`${n}_${k}`, taken)) k++; return `${n}_${k}`; };
+        // DoSave: flattened, the leaf alone (same library), or the whole chain from the root down
+        const sameLib = newLib === t.lib && !t.origin;
+        const chain: M.Node[] = flatten || t.origin || (M.isDerived(sym) && !parentChain.length) ? [M.flatten(srcLib, sym)]
+          : sameLib ? [M.node(M.text(sym))] : [M.node(M.text(sym)), ...parentChain.map((n) => M.node(M.text(n)))];
+        const out: [string, string][] = []; const taken = new Set<string>(); const names: string[] = [];
+        for (let i = chain.length - 1; i >= 0; i--) {
+          let s = chain[i]; const old = M.symName(s);
+          const newName = resolve(i === 0 ? nm : old, taken);
+          const tmp = { symbols: new Map([[old, s]]) } as unknown as M.SymLib;
+          if (old !== newName) { M.renameSymbol(tmp, old, newName); s = tmp.symbols.get(newName)!; }
+          // m_valueFollowsName: the value is the new name whenever it was the old one
+          const v = M.fieldOf(s, "Value"); if (valueFollowsName && v) v[2] = newName;
+          if (i < chain.length - 1 && names.length) M.setParentName(s, names[names.length - 1]);
+          taken.add(newName); names.push(newName); out.push([newName, M.text(s)]);
+        }
+        await l.doc!.commit(out); l.rows = null;
+        const leaf = names[names.length - 1];
         // an unsaved symbol's tab is promoted: it becomes the library symbol's tab
         if (t.scratch && !t.origin) { const i = se.tabs.indexOf(t); if (i >= 0) se.tabs.splice(i, 1); if (se.cur >= se.tabs.length) se.cur = se.tabs.length - 1; }
-        if (!copy || (t.scratch && !t.origin)) { void se.loadSymbol(l.nick, nm); }
+        if (!copy || (t.scratch && !t.origin)) await se.loadSymbol(l.nick, leaf);
         else se.renderTree();
       };
-      if (l.doc && l.doc.lib.symbols.has(nm)) { void confirmBox("Confirmation", `Symbol '${M.unescapeLibId(nm)}' already exists in library '${l.nick}'. Do you want to overwrite it?`, "Overwrite").then((ok) => { if (ok) { KD().close(); go(); } }); return false; }
-      go(); return true;
+      if (conflicts.length === 1 && conflicts[0] === nm) {
+        busy = true;
+        void confirmBox("Confirmation", `Symbol '${M.unescapeLibId(nm)}' already exists in library '${newLib}'. Do you want to overwrite it?`, "Overwrite").then((ok) => { busy = false; if (ok) run("overwrite"); });
+        return false;
+      }
+      if (conflicts.length) {
+        busy = true;
+        const msg = `The following symbols in the inheritance chain of '${M.unescapeLibId(symbolName)}' already exist in library '${newLib}':\n` + conflicts.map((c) => `  ${M.unescapeLibId(c)}\n`).join("") + "\nDo you want to overwrite all of them, or rename the new symbols?";
+        void choiceBox("Confirmation", msg, ["Cancel", "Rename All", "Overwrite All"], { def: 2, esc: 0 }).then((c) => { busy = false; if (c.index === 2) run("overwrite"); else if (c.index === 1) run("rename"); });
+        return false;
+      }
+      void doSave("overwrite"); return true;
     },
   });
 }
