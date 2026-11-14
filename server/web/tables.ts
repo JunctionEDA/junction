@@ -193,6 +193,8 @@ export const MODULE_DUPLICATES: Record<Editor, string[]> = {
     // the ERC dialog's Delete All Markers button (DIALOG_ERC::OnDeleteAllClick); eeschema's Inspect menu has no entry
     "clearMarkers"],
   pcb: ["skip",   // Tab while moving individually: the move's own command
+    // the selected tracks' width / via size form: Edit Track & Via Properties is DIALOG_GLOBAL_EDIT_TRACKS_AND_VIAS now
+    "changeTrackWidth",
     // context menus only (board_editor_control.cpp ZONE_CONTEXT_MENU, the selection tool's menu, EDIT_TOOL's menu)
     "getAndPlace", "copyWithReference", "drawZoneCutout", "drawSimilarZone",
     // ROUTER_TOOL's context menu (router_tool.cpp:700-708) and the selection tool's (unrouteSegment)
