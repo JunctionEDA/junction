@@ -226,4 +226,13 @@ test("hyperlink combo: page entries map to #<page>, the separator restores the t
   assert.strictEqual(L.hyperlinkPick("---", pages, "https://x"), "https://x");
   assert.strictEqual(L.hyperlinkPick("file://", pages, ""), "file://");
 });
+const KDT = load(["components", "kdate.ts"]);
+test("date picker: ISO parse / format, Monday-first month grid, month steps clamp the day", () => {
+  assert.strictEqual(KDT.parseIso("2024-02-30"), null); assert.strictEqual(KDT.parseIso("x"), null);
+  assert.strictEqual(KDT.isoOf(KDT.parseIso("2024-2-9")), "2024-02-09");
+  const g = KDT.monthGrid(2024, 1);   // February 2024 starts on a Thursday
+  assert.strictEqual(g.length, 42); assert.strictEqual(KDT.isoOf(g[0].date), "2024-01-29"); assert.strictEqual(g[0].inMonth, false); assert.strictEqual(KDT.isoOf(g[3].date), "2024-02-01");
+  assert.strictEqual(KDT.isoOf(KDT.addMonths(KDT.parseIso("2024-01-31"), 1)), "2024-02-29");
+  assert.strictEqual(KDT.isoOf(KDT.addMonths(KDT.parseIso("2024-01-15"), -1)), "2023-12-15");
+});
 process.on("exit", () => { console.log(`schdlg: ${passed} passed, ${failed} failed`); if (failed) process.exitCode = 1; });

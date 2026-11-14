@@ -2,6 +2,7 @@
 // OK sends one document-level change (see project.ts) carrying the new (paper …) and (title_block …).
 import { E, applyChanges, isSch, publishUndo, redoStack, sendOp, toast, undoStack } from "./editor";
 import { KD, checkbox, h, select, textInput } from "./dom";
+import { datePicker } from "../components/kdate";
 import { PAPER_FORMATS, isoDate, pageSettingsChange, pageSettingsOf, pageSizeError, type PageSettings } from "./logic";
 import { currentDocEntry, projectDocs, readDoc, saveProject, sub, submitDocOp } from "./project";
 import { bitmapButton } from "../components/kicon-dom";
@@ -103,9 +104,10 @@ export function openPageSettings(): void {
         let ctl: HTMLElement = inp;
         if (k === "date") {
           inp.style.flex = "1"; inp.style.minWidth = "90px";
-          const pick = h("input", { type: "date", id: "kd-ps-datepick", style: "width:128px;flex:none", disabled: ro, value: isoDate(new Date()) });
-          const set = h("button", { class: "btn sm", type: "button", title: "Use the date on the right", disabled: ro, id: "kd-ps-dateset", onclick: () => { const v = (pick as HTMLInputElement).value || isoDate(new Date()); inp.value = v; setTb(p, k, v); } }, "<<<");
-          ctl = h("div", { class: "kd-row" }, inp, set, pick);
+          // m_PickDate (wxDatePickerCtrl, today) and m_ApplyDate "<<<", which copies it as FormatISODate
+          const pick = datePicker(isoDate(new Date()), { id: "kd-ps-datepick", disabled: ro });
+          const set = h("button", { class: "btn sm", type: "button", title: "Use the date on the right", disabled: ro, id: "kd-ps-dateset", onclick: () => { const v = pick.value || isoDate(new Date()); inp.value = v; setTb(p, k, v); } }, "<<<");
+          ctl = h("div", { class: "kd-row" }, inp, set, pick.el);
         }
         tb.append(h("label", null, label), ctl);
         if (others.length) tb.append(checkbox("Export to other sheets", false, (on) => { if (on) exportTo.add(k); else exportTo.delete(k); }, { disabled: ro }));
