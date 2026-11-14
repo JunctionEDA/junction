@@ -36,11 +36,10 @@ export interface Prefs {
     autoPan: boolean; autoPanSpeed: number; zoomAccel: boolean; leftDrag: "select" | "dragSelected" | "dragAny"; motionPanMod: ScrollMod;
     touchpadMode: "native" | "scroll"; zoomMod: ScrollMod; panHMod: ScrollMod; panVMod: ScrollMod; reverseZoom: boolean; reversePanH: boolean; horizontalPan: boolean };
   schDisplay: { showHiddenPins: boolean; showHiddenFields: boolean; showPageLimits: boolean;
-    /** PANEL_EESCHEMA_DISPLAY_OPTIONS (EESCHEMA_SETTINGS appearance / selection / cross_probing, PANEL_GAL_OPTIONS' grid) */
+    /** PANEL_EESCHEMA_DISPLAY_OPTIONS (EESCHEMA_SETTINGS appearance / selection / cross_probing; PANEL_GAL_OPTIONS' grid and cursor are gal.sch) */
     defaultFont?: string; remappedPinNumbers?: boolean; selDrawChildren?: boolean; selFill?: boolean; selWidth?: number; highlightWidth?: number; collisionWidth?: number;
     highlightNetclass?: boolean; colorHighlightThickness?: number; colorHighlightOpacity?: number;
-    crossProbeSelect?: boolean; crossProbeCenter?: boolean; crossProbeZoom?: boolean; crossProbeHighlight?: boolean; crossProbeFlash?: boolean;
-    gridStyle?: "dots" | "lines" | "crosses"; gridThickness?: number; gridMinSpacing?: number; showMajorGrid?: boolean; alwaysCrosshair?: boolean };
+    crossProbeSelect?: boolean; crossProbeCenter?: boolean; crossProbeZoom?: boolean; crossProbeHighlight?: boolean; crossProbeFlash?: boolean };
   /** PANEL_SIMULATOR_PREFERENCES (SIM_PREFERENCES mouse_wheel_actions): what the wheel does over a plot, per modifier */
   sim: { vNone: SimWheel; vCtrl: SimWheel; vShift: SimWheel; vAlt: SimWheel; h: SimWheel };
   /** EESCHEMA_SETTINGS (panel_eeschema_editing_options): drawing.line_mode, input.drag_is_move (inverted),
@@ -58,6 +57,8 @@ export interface Prefs {
   schColors: { theme: SchThemeId; followDark: boolean; /** the themes made with New Theme... (KiCad's colors/*.json) */ user: UserSchTheme[] };
   /** the inactive layer mode is not here: it is the project's ("board.high_contrast_mode", Appearance panel) */
   pcbDisplay: { showPadNumbers: boolean; showNetNames: boolean; showPageLimits: boolean;
+    /** pcb_display.net_names_mode: 0 Do not show, 1 Show on pads, 2 Show on tracks, 3 Show on pads & tracks (default) */
+    netNamesMode: number;
     /** pcb_display.track_clearance_mode: 0 do not show, 1 while routing, 2 with via while routing (default), 3 while routing and editing, 4 always */
     trackClearance: number;
     /** pcb_display.pad_clearance: Show pad clearance (on by default) */
@@ -111,7 +112,7 @@ export const DEFAULT_PREFS: Prefs = {
     arcEditMode: "center", autoPlaceSheetPins: true, unconstrainedPinSwaps: false, sheetBorder: "", sheetBackground: "", newPowerSymbols: "default", pinSelectsSymbol: true,
     autoplaceFields: true, autoplaceJustify: true, autoplaceAlign: true, footprintPreview: true, neverShowRescue: false },
   schColors: { theme: "default", followDark: false, user: [] },
-  pcbDisplay: { showPadNumbers: true, showNetNames: true, showPageLimits: true, trackClearance: 2, padClearance: true },
+  pcbDisplay: { showPadNumbers: true, showNetNames: true, showPageLimits: true, netNamesMode: 3, trackClearance: 2, padClearance: true },
   common: { hcDimming: 0.8 },
   symDisplay: { showHiddenPins: true, showHiddenFields: true, showETypes: true, showAltIcons: true },
   symEditing: { lineWidth: 0, textSize: 50 * 0.0254, pinLength: 100 * 0.0254, pinNumSize: 50 * 0.0254, pinNameSize: 50 * 0.0254, pinPitch: 100 * 0.0254, labelDelta: 1, dragPinsWithEdges: true },
@@ -291,8 +292,7 @@ export function applyPrefs(full = true): void {
     E.renderOpts.gridAxes = !!g.axes;
     // PANEL_GAL_OPTIONS: GAL_DISPLAY_OPTIONS' grid look and the cursor
     const ga = p.gal[ed];
-    // (the board's style and spacing are PCB Editor > Display Options' own: pcbDisplay)
-    if (ed === "sch" || ed === "fp") Object.assign(E.renderOpts, { gridStyle: ga.style, gridMinSpacing: ga.minSpacing, gridLineWidth: ga.lineWidth, gridShowMajor: ga.showMajor });
+    Object.assign(E.renderOpts, { gridStyle: ga.style, gridMinSpacing: ga.minSpacing, gridLineWidth: ga.lineWidth, gridShowMajor: ga.showMajor });
     if (full) { E.crosshairMode = ga.crosshair; E.alwaysShowCursor = ga.alwaysShow; syncCrosshairRadio(); }
     if (!full) { /* grids and colours only */ }
     else if (isSch()) {
@@ -304,6 +304,7 @@ export function applyPrefs(full = true): void {
           st.repeatOffset = [p.schEditing.repeatX, p.schEditing.repeatY]; st.repeatIncrement = p.schEditing.repeatIncrement; syncSchModes(); } catch (e) { console.warn(e); } }
     } else {
       E.renderOpts.padNumbers = p.pcbDisplay.showPadNumbers; E.renderOpts.netNames = p.pcbDisplay.showNetNames; E.renderOpts.pageLimits = p.pcbDisplay.showPageLimits;
+      E.renderOpts.netNamesMode = p.pcbDisplay.netNamesMode;
       (E.renderOpts as { hcDimming?: number }).hcDimming = p.common.hcDimming;
       E.renderOpts.ratsnestThickness = Math.max(0.5, Math.min(10, +p.pcbEditing.ratsnestThickness || 0.5));   // the spin control's 0.5..10
       E.escClearsHighlight = p.pcbEditing.escClearsNetHighlight; E.ctrlClickHighlight = p.pcbEditing.ctrlClickHighlight;

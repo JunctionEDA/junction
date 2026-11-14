@@ -102,6 +102,7 @@ export function tracePad(ctx: PathSink, g: PadGeom): void {
  *                                or LAYER_ERC_ERR/WARN/EXCLUSION, on top of everything but the selection;
  *                                board markers get the LAYER_MARKER_SHADOWS outline (background @ 0.5, one
  *                                scale unit wide).  markerAt() / markerScale() serve hover look-ups;
+ *   netNamesMode   (board)     — pcb_display.net_names_mode under netNames: 0 none, 1 pads, 2 tracks, 3 both (default)
  *   netNames       (board)     — net names on tracks per PCB_PAINTER::renderNetNameForSegment: glyph size
  *                                0.55 × track width, pen width/12, centred and rotated along the segment
  *                                (angle normalised to (−90°, 90°]), one label per viewport-width of track,
@@ -354,6 +355,9 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   const skip = opts.skip && opts.skip.size ? opts.skip : null;   // items a peer is dragging: drawn as ghosts elsewhere
   const netColors = isPcb && opts.netColors && opts.netColors.size ? opts.netColors : null;
   const netNames = isPcb && opts.netNames !== false,   // pcbnew default: net names on pads and tracks ("pcb_display.net_names_mode" 3)
+   // pcb_display.net_names_mode (PCB_PAINTER): pads at 1 and 3, tracks at 2 and above, vias at anything but 0
+   nnMode = opts.netNamesMode === undefined ? 3 : opts.netNamesMode,
+   padNetNames = netNames && (nnMode === 1 || nnMode === 3), trackNetNames = netNames && nnMode >= 2, viaNetNames = netNames && nnMode !== 0,
    zoneFill = isPcb && !!opts.zoneFill, flip = isPcb && !!opts.flip;
   const rats = isPcb && opts.ratsnest && opts.ratsnest.length ? opts.ratsnest : null, ratsNets = opts.ratsnestNets || null;
   // eeschema's show_erc_errors / show_erc_warnings (on by default) and show_erc_exclusions (off) filter the markers
@@ -549,7 +553,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
       if (g.padText) {
         // PAD::ViewGetLOD (netname layer): the pad must be flashed on a visible layer (the high-contrast one in
         // that mode) and its smaller side at least 0.5 mm at zoom 1; pad net names follow the net-names option
-        if (g.padNum ? !padNumbers : !netNames) continue;
+        if (g.padNum ? !padNumbers : !padNetNames) continue;
         if ((g as TextGeom).padMin! * sCss < PAD_NETNAME_MM * PX_PER_MM_ZOOM1) continue;   // pad labels are text records with both set
         const pl = (g as TextGeom).padLayers!; let vis = false;
         if (hcLayer) vis = pl.indexOf(hcLayer) >= 0; else for (let i = 0; i < pl.length; i++) if (!hidden.has(pl[i])) { vis = true; break; }
@@ -579,8 +583,8 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
       if (outsideGeoms && !isSel && !entered!.has(it.id)) outsideGeoms.add(g);
       if (rollId === it.id && g.t === "text" && (!opts.rolloverGeom || opts.rolloverGeom === g)) rollGeoms!.add(g);
       if (netNames && g.net! > 0) {
-        if (g.track && !sketchTracks) bucket(NAME_BUCKETS, pcbZ(g.layer) + 3.5 + topOf(g.layer)).push(g);
-        else if (g.viaLabel) bucket(NAME_BUCKETS, zViaName).push(g);
+        if (g.track && !sketchTracks) { if (trackNetNames) bucket(NAME_BUCKETS, pcbZ(g.layer) + 3.5 + topOf(g.layer)).push(g); }
+        else if (g.viaLabel) { if (viaNetNames) bucket(NAME_BUCKETS, zViaName).push(g); }
       }
       if (zoneFill) {
         if (g.zoneUnfilled) previews!.push(g);

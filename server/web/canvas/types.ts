@@ -260,7 +260,7 @@ export interface RenderOpts {
   /** board: the entered group's member ids; everything else is drawn at outsideGroupOpacity */
   enteredGroup?: Set<string> | null; outsideGroupOpacity?: number;
   ids?: Set<string> | string[] | null; skip?: Set<string> | null;
-  netColors?: Map<number, string> | null; netNames?: boolean; zoneFill?: boolean; flip?: boolean;
+  netColors?: Map<number, string> | null; netNames?: boolean; netNamesMode?: number; zoneFill?: boolean; flip?: boolean;
   ratsnest?: RatsLine[] | null; ratsnestNets?: Set<number> | null; markers?: Marker[] | null;
   layerColors?: Map<string, string> | null; objects?: ObjectsOpt | null;
   /** Appearance > Objects colours the user changed (ratsnest, drcWarnings, drcErrors, drcExclusions, anchors, boardArea, drawingSheet, grid) */

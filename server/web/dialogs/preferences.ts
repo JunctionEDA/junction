@@ -93,7 +93,7 @@ export function resetPage(key: string, st: Staged): void {
     case "Footprint Editor/Display Options": st.p.gal.fp = d.gal.fp; break;
     case "Footprint Editor/Grids": st.p.grids.fp = d.grids.fp; break;
     case "Footprint Editor/Editing Options": st.p.fpEditing = d.fpEditing; break;
-    case "PCB Editor/Display Options": st.p.pcbDisplay = d.pcbDisplay; break;
+    case "PCB Editor/Display Options": st.p.pcbDisplay = { ...d.pcbDisplay, showPageLimits: st.p.pcbDisplay.showPageLimits }; st.p.gal.pcb = d.gal.pcb; break;
     case "PCB Editor/Grids": st.p.grids.pcb = d.grids.pcb; break;
     case "PCB Editor/Origins & Axes": st.p.pcbOrigin = d.pcbOrigin; break;
     case "PCB Editor/Editing Options": st.p.pcbEditing = d.pcbEditing; st.p.pcbDisplay.showPageLimits = d.pcbDisplay.showPageLimits; st.arcEdit = 0; st.hv45 = true; st.curved = false; break;
@@ -323,14 +323,20 @@ export function openPreferences(page?: string, staged?: Staged): void {
         ] },
         { label: "PCB Editor", pages: [
           { label: "Display Options", build(pg) {
-            const ap = KD().staticBox(pg, "Annotations");
-            ap.append(checkbox("Show pad numbers", p.pcbDisplay.showPadNumbers, (on) => { p.pcbDisplay.showPadNumbers = on; }, { id: "kd-pref-padnumbers" }), checkbox("Show net names", p.pcbDisplay.showNetNames, (on) => { p.pcbDisplay.showNetNames = on; }, { id: "kd-pref-netnames" }),
-              checkbox("High-contrast display mode", contrast !== "normal", (on) => { contrast = on ? (contrast === "normal" ? "dim" : contrast) : "normal"; }, { id: "kd-pref-contrast" }));
-            // panel_display_options: Clearance Outlines ▸ Tracks (clearanceModeMap: the choice index is the mode)
-            const cl = KD().staticBox(pg, "Clearance Outlines");
-            cl.append(h("div", { class: "kd-row" }, h("label", { style: "color:var(--ink-2)" }, "Tracks:"),
-              select([["0", "Do not show clearances"], ["1", "Show when routing"], ["2", "Show when routing w/ via clearance at end"], ["3", "Show when routing and editing"], ["4", "Show always"]], String(p.pcbDisplay.trackClearance), (v) => { p.pcbDisplay.trackClearance = +v; }, { id: "kd-pref-trackclearance", style: "width:320px" })),
-              checkbox("Show pad clearance", p.pcbDisplay.padClearance !== false, (on) => { p.pcbDisplay.padClearance = on; }, { id: "kd-pref-padclearance" }));
+            // panel_display_options (PCB Editor page): PANEL_GAL_OPTIONS on the left; Clearance Outlines, Annotations
+            // and the rest on the right
+            const d = p.pcbDisplay;
+            const [, R] = displayCols(pg, "pcb");
+            const row = (label: string, ...ctl: Node[]) => h("div", { class: "kd-row", style: "margin-bottom:6px;gap:6px" }, h("label", { style: "color:var(--ink-2)" }, label), ...ctl);
+            const cl = KD().staticBox(R, "Clearance Outlines");
+            cl.append(row("Tracks:", select([["0", "Do not show clearances"], ["1", "Show when routing"], ["2", "Show when routing w/ via clearance at end"], ["3", "Show when routing and editing"], ["4", "Show always"]], String(d.trackClearance), (v) => { d.trackClearance = +v; }, { id: "kd-pref-trackclearance", style: "width:320px" })),
+              checkbox("Show pad clearance", d.padClearance !== false, (on) => { d.padClearance = on; }, { id: "kd-pref-padclearance" }));
+            const ap = KD().staticBox(R, "Annotations");
+            // m_ShowNetNamesOption: the choice index is pcb_display.net_names_mode
+            ap.append(row("Net names:", select([["0", "Do not show"], ["1", "Show on pads"], ["2", "Show on tracks"], ["3", "Show on pads & tracks"]], String(d.netNamesMode), (v) => { d.netNamesMode = +v; d.showNetNames = +v !== 0; }, { id: "kd-pref-netnamesmode", style: "width:220px" })),
+              checkbox("Show pad numbers", d.showPadNumbers, (on) => { d.showPadNumbers = on; }, { id: "kd-pref-padnumbers" }));
+            const hc = KD().staticBox(R, "Layer Display");
+            hc.append(checkbox("High-contrast display mode", contrast !== "normal", (on) => { contrast = on ? (contrast === "normal" ? "dim" : contrast) : "normal"; }, { id: "kd-pref-contrast" }));
           } },
           { label: "Grids", build: gridsPage("pcb") },
           { label: "Origins & Axes", build(pg) {
