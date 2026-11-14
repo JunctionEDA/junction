@@ -6,7 +6,7 @@ import { installTransformDialogs } from "./transform-dialogs";
 import { openBoardSetup } from "./board-setup";
 import "./find";   // Edit > Find (DIALOG_FIND): registers E.hooks.boardFind / boardFindNext
 import { openFootprintFields } from "./fp-fields";
-import { clearDrcMarkers, drcReport, excludeMarker, nextMarker, openBoardStatistics, openClearance, openDrc, prevMarker } from "./inspect";
+import { clearDrcMarkers, drcReport, excludeMarker, nextMarker, openBoardStatistics, openClearance, openConstraints, openDrc, prevMarker } from "./inspect";
 import { showPane } from "../panes";
 import { fpFieldDialog, newTextDialog, newZoneDialog, openZoneManager, pcbItemDialog } from "./item-props";
 import { tracksOnly, trackViaDialog } from "./track-via";
@@ -80,6 +80,7 @@ export function installPcbDialogs(): void {
   action("editVertices", "Edit Corners...", "", () => { openVertexEditor(); });
   action("boardStatistics", "Board Statistics", "", openBoardStatistics);
   action("inspectClearance", "Clearance Resolution", "", openClearance);
+  action("inspectConstraints", "Constraints Resolution", "", openConstraints);
   // ZONE_FILLER_TOOL: the browser's own filler (web/fab/zonefill.ts)
   action("zoneFillAll", "Fill All Zones", "B", zoneFillAll);
   action("zoneFill", "Draft Fill Selected Zone(s)", "", zoneFillSelected);

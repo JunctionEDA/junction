@@ -123,3 +123,25 @@ test("Footprint Properties 3D Models: models and the extruded body read and writ
   assert.ok(M.keepEmbeddedFiles(fp, []));
   assert.equal(K.kid(fp, "embedded_files"), null);
 });
+
+test("Constraints Resolution: board setup, net class and custom rules in EvalRules order", () => {
+  const d = doc(), s = settings();
+  s.minTrackWidth = 0.1; s.minViaDiameter = 0.4; s.minThroughDrill = 0.2; s.minViaAnnular = 0.1;
+  T.setCustomRules('(version 1)\n(rule wide (constraint track_width (min 0.3mm) (opt 0.4mm)) (condition "A.NetName == \'GND\'"))\n(rule other (constraint track_width (min 1mm)) (condition "A.NetName == \'VCC\'"))');
+  try {
+    const p = T.inspectConstraints(d, "s1", s);
+    assert.equal(p.length, 1); assert.equal(p[0].title, "Track Width");
+    const t = p[0].lines.join("\n");
+    assert.match(t, /Checking board setup constraints track width: min 0\.1 mm\.\nUnconditional constraint applied\./);
+    assert.match(t, /Checking netclass 'Default' track width: opt 0\.3 mm\.\nConstraint applied\./);
+    assert.match(t, /Checking rule 'wide': min 0\.3 mm; opt 0\.4 mm; max <i>undefined<\/i>\.\nChecking rule condition 'A\.NetName == 'GND''\.\nRule applied; overrides previous constraints\./);
+    assert.match(t, /Checking rule 'other'[^\n]*\n[^\n]*\nCondition not satisfied; rule ignored\./);
+    assert.equal(p[0].resolved, "Resolved width constraints: min 0.3 mm; opt 0.4 mm; max <i>undefined</i>.");
+    // a microvia: the micro-via board setup constraint and the uvia net class sizes
+    const v = T.inspectConstraints(d, "v2", s);
+    assert.deepEqual(v.map((x) => x.title), ["Via Diameter", "Via Annular Width", "Hole Size"]);
+    assert.match(v[0].lines.join("\n"), /Checking netclass 'Default' uvia via diameter: opt 0\.25 mm\./);
+    assert.match(T.inspectConstraints(d, "v1", s)[0].lines.join("\n"), /micro-via via diameter: min 0\.2 mm\.\nMembership not satisfied; constraint ignored\./);
+    assert.equal(T.inspectConstraints(d, "fp1", s), null);
+  } finally { T.setCustomRules(null); }
+});

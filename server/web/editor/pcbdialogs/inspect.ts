@@ -29,6 +29,7 @@ interface PcbToolsApi {
   boardStatistics(doc: KDoc): Stats;
   inspectClearance(doc: KDoc, a: string, b: string, settings: unknown): { gap: number | null; required: number; sameNet: boolean; nets: string[] } | null;
   netclassOf(s: Settings, net: string): { clearance?: number };
+  inspectConstraints(doc: KDoc, id: string, s: Settings, fmt: (mm: number) => string): { title: string; header: string; item: string; lines: string[]; resolved: string }[] | null;
   selectionIds(ctx: ToolCtx): Set<string>;
 }
 const PT = (): PcbToolsApi => (window as unknown as { PcbTools: PcbToolsApi }).PcbTools;
@@ -412,5 +413,35 @@ export function openClearance(ctx: ToolCtx): void {
       const rep = h("div", { class: "pd-report", style: "min-height:220px" });
       for (const l of lines) rep.append(Array.isArray(l) ? h("div", { class: l[0] === "h" ? "ln hd" : "ln li" }, (l[0] === "li" ? "• " : "") + l[1]) : h("div", { class: "ln" }, l || " "));
       body.append(notebook([{ label: "Clearance", build: (el) => el.append(rep) }]).el);
+    } });
+}
+
+// ---------------------------------------------------------------- Constraints Resolution
+/**
+ * BOARD_INSPECTION_TOOL::InspectConstraints in DIALOG_BOOK_REPORTER "Constraints Report": one page per constraint the
+ * selected track, arc or via has, each the header, the item, what EvalRules checked and the resolved min / opt / max.
+ */
+export function openConstraints(ctx: ToolCtx): void {
+  const doc = board(); if (!doc) return;
+  const ids = Array.from(PT().selectionIds(ctx));
+  if (ids.length !== 1) { ctx.toast("Select a single item for a constraints resolution report."); return; }
+  const pages = PT().inspectConstraints(doc, ids[0], settings(), fmtLenU);
+  if (!pages) { ctx.toast("Constraints resolution covers tracks, arcs and vias."); return; }
+  // the report's <i>undefined</i> stays italic; everything else is text
+  const line = (text: string, cls: string): HTMLElement => {
+    const el = h("div", { class: cls });
+    text.split(/(<i>undefined<\/i>)/).forEach((part) => { if (part === "<i>undefined</i>") el.append(h("i", null, "undefined")); else if (part) el.append(document.createTextNode(part)); });
+    if (!text) el.textContent = "\u00a0";
+    return el;
+  };
+  openDialog({ title: "Constraints Report", width: 640, noOk: true,
+    build(body) {
+      body.append(notebook(pages.map((pg) => ({ label: pg.title, build: (el: HTMLElement) => {
+        const rep = h("div", { class: "pd-report", style: "min-height:260px", "data-k": "constraintsReport" });
+        rep.append(line(pg.header, "ln hd"), line("\u2022 " + pg.item, "ln li"));
+        for (const l of pg.lines) rep.append(line(l, "ln"));
+        rep.append(line("", "ln"), line(pg.resolved, "ln"));
+        el.append(rep);
+      } }))).el);
     } });
 }
