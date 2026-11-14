@@ -74,7 +74,10 @@ EXTRA_ICONS = {"import", "export_file", "fabrication", "language", "add_zone", "
                # SYMBOL_VIEWER_FRAME's toolbar
                "pin_show_etype", "pin", "datasheet", "add_symbol_to_schematic", "library_browser",
                # PANEL_EESCHEMA_ANNOTATION_OPTIONS' sort order bitmaps
-               "annotate_down_right", "annotate_right_down"}
+               "annotate_down_right", "annotate_right_down",
+               # STD_BITMAP_BUTTON / BITMAP_BUTTON bitmaps of the board dialogs (grid add / delete / move, browse, refresh, warning)
+               # the selection menu's Shape Modification sub-menu (EDIT_TOOL, ctxmenus.ts), whose actions no menu bar lists
+               "fillet", "chamfer", "merge_polygons", "subtract_polygons", "intersect_polygons"}
 
 
 MAC_IF = r"#\s*if(?:def\s+|\s+defined\(\s*)__WX(?:OSX_)?MAC__[ \t]*\)?[^\n]*\n"

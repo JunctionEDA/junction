@@ -102,6 +102,7 @@ import { autoZonePriorities } from "./zone-priority";
 import { fpModelsApi } from "./fp-models";
 import { inspectConstraints } from "./inspect-constraints";
 import { footprintDiffLines } from "./fp-diff";
+import { shapeModifyApi } from "./shape-modify";
 import { FILTER_SELECTION_DEFAULTS, filterSelectionIds } from "./filter-selection";
 import { repairBoard } from "./repair";
 import { geomPages, setShapeGeom, shapeGeomOf } from "./shape-geom";
@@ -563,7 +564,7 @@ root.PcbTools = { OffsetItemState, snapAnchors, textGraphics: textGraphicsApi, l
   // netTable, editPoints and editPointNode are listed above (the script named them twice, to the same values)
   shapeGap, coreDist, segsIntersect, polyPolyDist, padShape, padCopperLayers, viaLayers, arcPoints, arcLength, conductors, clusterRoots, netlist, ratsnest, localRatsnest, netInspector, netLengths, copperStack, stackupItems, layerDistance, netItemIds, netHighlightIds, msgPanelInfo, boardLayerName, itemDescription, dynamicRatsnest, selMode, addCornerChanges, removeCornerChanges, canAddCorner, canRemoveCorner, connectedCopperIds,
   sliverMarkers, sliverPoints, clipperArea, PolygonTest, padAnnulus, connectionWidthMarkers, boxGrid, boxesTouch, circleOutside, ovalOutside, circleApprox, ovalApprox, splitCollinearOutlines,
-  designSettings, netclassName, netclassOf, netClearance, DEFAULT_SETTINGS, edgeShapes, chainLoops, boardOutline, courtyards, drc, trackEditChanges, trackLayerChanges, breakTrackChanges, cleanupPlan, cleanupChanges, unusedPadLayerChanges, graphicsCleanup, teardropEditChanges, globalTrackViaChanges, autoZonePriorities, fpModels: fpModelsApi, inspectConstraints, footprintDiffLines, filterSelectionIds, FILTER_SELECTION_DEFAULTS, repairBoard, geomPages, shapeGeomOf, setShapeGeom, geographicalReannotate, reannotateOrder,
+  designSettings, netclassName, netclassOf, netClearance, DEFAULT_SETTINGS, edgeShapes, chainLoops, boardOutline, courtyards, drc, trackEditChanges, trackLayerChanges, breakTrackChanges, cleanupPlan, cleanupChanges, unusedPadLayerChanges, graphicsCleanup, teardropEditChanges, globalTrackViaChanges, autoZonePriorities, fpModels: fpModelsApi, inspectConstraints, footprintDiffLines, shapeModify: shapeModifyApi, filterSelectionIds, FILTER_SELECTION_DEFAULTS, repairBoard, geomPages, shapeGeomOf, setShapeGeom, geographicalReannotate, reannotateOrder,
   layersBlock, referencePoint, clipboardText, parseClipboard, freshUuids, rewriteNets, annotate, pasteChanges, duplicateChanges, arrayChanges, arraySize, arrayTransform, arrayStacked, arrayOrigin, pickInteractively, cursorPoint,
   adjustColor, courtyardConflicts, drawSnapIndicator, gridOriginColor, snapTypeOf, startLayerOf, groupBox, enteredGroupIds, withinEnteredGroup, drawGroupFrames, clearanceOutlines, drawClearanceOutlines, drawStatusNote, statusNoteDims,
   padAt, padProperties, convertChanges, selectionLoops, justifyChanges, zonePriorityChanges, footprintAttrChanges, boardStatistics, idsOnLayer, filterIds, SELECTION_TYPES, inspectClearance, VIA_SIZES, PCB_KINDS };

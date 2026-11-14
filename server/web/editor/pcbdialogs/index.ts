@@ -22,6 +22,7 @@ import { openCleanupGraphics } from "./cleanup-graphics";
 import { openEditTeardrops } from "./teardrops";
 import { openGlobalEditTracks } from "./global-tracks";
 import { openFilterSelection } from "./filter-selection";
+import { booleanPolygons, chamferLines, extendLines, filletLines, simplifyPolygons } from "./shape-modify";
 import { repairBoard } from "./repair";
 import { openReannotate } from "./reannotate";
 import { openUpdatePcb, projectNetlist, updatePcbFromSchematicEditor } from "./update-pcb";
@@ -55,6 +56,14 @@ export function installPcbDialogs(): void {
   action("cleanupGraphics", "Cleanup Graphics...", "", openCleanupGraphics);   // GLOBAL_EDIT_TOOL::CleanupGraphics
   action("editTracksAndVias", "Edit Track & Via Properties...", "", openGlobalEditTracks);   // GLOBAL_EDIT_TOOL::EditTracksAndVias
   action("filterSelection", "Filter Selected Items...", "", openFilterSelection);   // PCB_SELECTION_TOOL::filterSelection
+  // EDIT_TOOL's Shape Modification sub-menu
+  action("filletLines", "Fillet Lines...", "", filletLines);
+  action("chamferLines", "Chamfer Lines...", "", chamferLines);
+  action("extendLines", "Extend Lines to Meet", "", extendLines);
+  action("simplifyPolygons", "Simplify Polygons", "", simplifyPolygons);
+  action("mergePolygons", "Merge Polygons", "", booleanPolygons("mergePolygons"));
+  action("subtractPolygons", "Subtract Polygons", "", booleanPolygons("subtractPolygons"));
+  action("intersectPolygons", "Intersect Polygons", "", booleanPolygons("intersectPolygons"));
   action("editTeardrops", "Edit Teardrops...", "", openEditTeardrops);   // GLOBAL_EDIT_TOOL::EditTeardrops
   action("repairBoard", "Repair Board", "", repairBoard);   // BOARD_EDITOR_CONTROL::RepairBoard
   action("boardReannotate", "Geographical Reannotate...", "", openReannotate);   // BOARD_REANNOTATE_TOOL::ShowReannotateDialog

@@ -245,7 +245,7 @@ export const NEEDS_SELECTION = new Set(["cut", "copy", "copyAsText", "doDelete",
 /** Entries that never change the document: everything else is greyed out for a view-only visitor, as in a read-only frame. */
 export const READ_ONLY_OK = new Set(["compareSchematicWithFile", "compareSchematicWithHistory", "compareBoardWithFile", "compareBoardWithHistory", "saveCurrSheetCopyAs", "saveCopy", "drawSheetOnClipboard", "exportNetlist", "collabCopyLink", "collabComments", "collabFollow", "collabHistory", "collabLeave", "collabLeaveSession", "collabJoinSession", "collabCompare", "collabGithub", "close", "pluginsReload", "pluginsShowFolder", "showGitCommitPane", "archive", "clone",
   "openInKicad", "print", "plot", "home", "copy", "copyAsText", "selectAll", "unselectAll", "selectConnection", "selectNode", "nextNetItem", "previousNetItem", "find", "showDatasheet",
-  "selectNet", "deselectNet", "selectSameSheet", "module:selectAllOnLayer", "selectUnconnected", "filterSelection", "runERC", "runDRC", "clearMarkers", "boardStatistics", "measureTool", "inspectClearance",
+  "selectNet", "deselectNet", "selectSameSheet", "module:selectAllOnLayer", "selectUnconnected", "filterSelection", "runERC", "runDRC", "clearMarkers", "boardStatistics", "measureTool", "inspectClearance", "inspectConstraints", "showFootprintAssociations", "diffFootprint",
   "highlightNetTool", "highlightNet", "clearHighlight", "toggleNetHighlight", "localRatsnestTool", "hideNetInRatsnest", "showNetInRatsnest", "showPcbNew", "showEeschema", "theme", "themeLight", "themeDark", "themeSystem", "languageEnglish",
   "layerTop", "layerBottom", "layerNext", "layerPrev", "showNetInspector", "showBusSyntaxHelp", "findNetInInspector"]);
 /**

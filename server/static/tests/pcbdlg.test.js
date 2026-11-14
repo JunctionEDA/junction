@@ -165,3 +165,43 @@ test("Compare Footprint with Library: FootprintNeedsUpdate's report lines", () =
   const dnp = K.parse(K.serialize(same).replace("(attr smd)", "(attr smd dnp)").replace("(uuid \"b\")", "(uuid \"b\") (clearance 0.3)"));
   assert.deepEqual(T.footprintDiffLines(dnp, K.parse(lib)), ["'Do not populate' settings differ.", "Pad clearance overridden."]);
 });
+
+test("Shape Modification: fillet, chamfer, extend, simplify and polygon booleans", () => {
+  const M = T.shapeModify;
+  const B = (body) => K.parseDoc(`(kicad_pcb (version 20241229) (layers (0 "F.Cu" signal) (44 "Edge.Cuts" user)) ${body})`, "kicad_pcb");
+  const L = (id, a, b) => `(gr_line (start ${a}) (end ${b}) (stroke (width 0.1) (type default)) (layer "Edge.Cuts") (uuid "${id}"))`;
+  const nodes = (r) => r.changes.filter((c) => c.kind !== "REMOVED").map(nodeOf);
+  // a right-angle corner at (10, 0): the 2 mm fillet's arc runs from (8, 0) to (10, 2)
+  let d = B(L("a", "0 0", "10 0") + L("b", "10 0", "10 10"));
+  let r = M.modifyLines(d, ["a", "b"], "filletLines", 2);
+  assert.equal(r.label, "Fillet Lines"); assert.equal(r.message, null);
+  const arc = nodes(r).find((n) => n[0] === "gr_arc");
+  assert.deepEqual([K.kid(arc, "start").slice(1), K.kid(arc, "end").slice(1)], [[8, 0], [10, 2]]);
+  const mid = K.kid(arc, "mid").slice(1); assert.ok(Math.abs(Math.hypot(mid[0] - 8, mid[1] - 2) - 2) < 1e-4, "the arc's middle is on the 2 mm circle");
+  // too large a radius: nothing changes
+  r = M.modifyLines(d, ["a", "b"], "filletLines", 50); assert.equal(r.changes.length, 0); assert.equal(r.message, "Unable to fillet the selected lines.");
+  // chamfer a rectangle: its four edges and four chamfers
+  d = B(`(gr_rect (start 0 0) (end 10 10) (stroke (width 0.1) (type default)) (fill no) (layer "Edge.Cuts") (uuid "r"))`);
+  r = M.modifyLines(d, ["r"], "chamferLines", 1);
+  assert.equal(nodes(r).filter((n) => n[0] === "gr_line").length, 8);
+  assert.ok(r.changes.some((c) => c.kind === "REMOVED" && c.id === "r"));
+  // extend two lines to meet; a single line is refused
+  d = B(L("a", "0 0", "5 0") + L("b", "10 2", "10 8"));
+  r = M.modifyLines(d, ["a", "b"], "extendLines", 0);
+  const ends = nodes(r).map((n) => [K.kid(n, "start").slice(1), K.kid(n, "end").slice(1)]);
+  assert.deepEqual(ends, [[[0, 0], [10, 0]], [[10, 8], [10, 0]]]);
+  assert.deepEqual(M.modifyLines(d, ["a"], "extendLines", 0), { error: "Exactly two lines must be selected to extend them." });
+  // simplify drops the collinear point
+  d = B(`(gr_poly (pts (xy 0 0) (xy 5 0.001) (xy 10 0) (xy 10 10) (xy 0 10)) (stroke (width 0.1) (type default)) (fill no) (layer "Edge.Cuts") (uuid "p"))`);
+  r = M.simplifyPolygons(d, ["p"], 0.1);
+  assert.equal(K.kids(K.kid(nodes(r)[0], "pts"), "xy").length, 4);
+  // merge two overlapping squares into one polygon; subtract a hole-free bite
+  d = B(`(gr_rect (start 0 0) (end 10 10) (stroke (width 0.1) (type default)) (fill no) (layer "Edge.Cuts") (uuid "r1")) (gr_rect (start 5 5) (end 15 15) (stroke (width 0.1) (type default)) (fill no) (layer "Edge.Cuts") (uuid "r2"))`);
+  r = M.booleanPolygons(d, ["r1", "r2"], "mergePolygons");
+  assert.equal(r.label, "Merge Polygons"); assert.equal(nodes(r).length, 1); assert.equal(K.kids(K.kid(nodes(r)[0], "pts"), "xy").length, 8);
+  assert.equal(r.changes.filter((c) => c.kind === "REMOVED").length, 2);
+  r = M.booleanPolygons(d, ["r2", "r1"], "subtractPolygons");   // r1 last: r1 minus r2
+  assert.equal(K.kids(K.kid(nodes(r)[0], "pts"), "xy").length, 6);
+  r = M.booleanPolygons(d, ["r1", "r2"], "intersectPolygons");
+  assert.equal(K.kids(K.kid(nodes(r)[0], "pts"), "xy").length, 4);
+});

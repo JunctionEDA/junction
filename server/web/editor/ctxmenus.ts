@@ -359,6 +359,18 @@ const pcbConvertMenu = () => new CondMenu("Create from Selection", "convert")
   .item("PCB_ACTIONS::convertToLines", hasTypes(PCB_POLY)).item("PCB_ACTIONS::outsetItems", hasTypes(PCB_SHAPES)).sep()
   .item("PCB_ACTIONS::convertToTracks", hasTypes(PCB_TO_TRACK)).item("PCB_ACTIONS::convertToArc", onlyTypes(set("gr_line", "segment"))).sep()
   .item("PCB_ACTIONS::createArray", notEmpty);
+/** makeShapeModificationMenu (edit_tool.cpp): shape cleanup, corner modifications, point editor corners, polygon booleans. */
+const FILLET_TYPES = set("gr_poly", "gr_rect", "gr_line"), SIMPLIFY_TYPES = set("gr_poly", "zone"), BOOLEAN_TYPES = set("gr_rect", "gr_poly", "gr_circle");
+const shapeBoolean = and(onlyTypes(BOOLEAN_TYPES), moreThan(1));
+const pcbShapeModMenu = () => new CondMenu("Shape Modification")
+  .item("PCB_ACTIONS::simplifyPolygons", hasTypes(SIMPLIFY_TYPES)).sep(onlyTypes(FILLET_TYPES))
+  .item("PCB_ACTIONS::filletLines", onlyTypes(FILLET_TYPES)).item("PCB_ACTIONS::chamferLines", onlyTypes(FILLET_TYPES))
+  .item("PCB_ACTIONS::extendLines", and(onlyTypes(set("gr_line")), count(2))).sep(count(1))
+  .item("PCB_ACTIONS::pointEditorAddCorner", and(count(1), (c) => !!c.canAddCorner)).item("PCB_ACTIONS::pointEditorRemoveCorner", and(count(1), (c) => !!c.canRemoveCorner))
+  .item("PCB_ACTIONS::editVertices", (c) => !!c.editableCorners)
+  .sep(shapeBoolean).item("PCB_ACTIONS::mergePolygons", shapeBoolean).item("PCB_ACTIONS::subtractPolygons", shapeBoolean).item("PCB_ACTIONS::intersectPolygons", shapeBoolean);
+/** shapeModificationCondition: the sub-menu shows when any of its items would. */
+const shapeModVisible = or(hasTypes(SIMPLIFY_TYPES), onlyTypes(FILLET_TYPES), and(count(1), (c) => !!c.canAddCorner || !!c.canRemoveCorner), (c) => !!c.editableCorners, shapeBoolean);
 /** CONSTRAINT_EDIT_TOOL's menu. */
 const pcbConstraintMenu = () => new CondMenu("Constraints", "measurement").item("PCB_ACTIONS::manageConstraints");
 
@@ -378,15 +390,13 @@ function pcbSelectionMenu(): CondMenu {
   m.item("PCB_ACTIONS::drag45Degree", and(count(1), onlyTypes(PCB_DRAGGABLE))).item("PCB_ACTIONS::dragFreeAngle", and(count(1), onlyTypes(PCB_DRAGGABLE), not(onlyTypes(PCB_FOOTPRINT))));
   m.item("PCB_ACTIONS::flip", notEmpty).item("PCB_ACTIONS::swap", moreThan(1)).sep();
   m.item("PCB_ACTIONS::breakTrack", and(count(1), onlyTypes(PCB_TRACKS))).item("PCB_ACTIONS::filletTracks", onlyTypes(PCB_TRACKS)).sep();
-  // PCB_POINT_EDITOR::Init
-  m.item("PCB_ACTIONS::pointEditorAddCorner", and(count(1), (c) => !!c.canAddCorner)).item("PCB_ACTIONS::pointEditorRemoveCorner", and(count(1), (c) => !!c.canRemoveCorner));
-  m.item("PCB_ACTIONS::editVertices", (c) => !!c.editableCorners);
+  // PCB_POINT_EDITOR::Init (its corner items live in the Shape Modification sub-menu)
   m.item("ACTIONS::cycleArcEditMode", and(count(1), onlyTypes(set("gr_arc")))).sep();
   m.item("PCB_ACTIONS::packAndMoveFootprints", and(moreThan(1), hasTypes(PCB_FOOTPRINT))).item("PCB_ACTIONS::assignNetClass", and(onlyTypes(PCB_CONNECTED), not(inFpEditor))).item("PCB_ACTIONS::inspectClearance", count(2));
   m.sep();
   m.item("PCB_ACTIONS::editFpInFpEditor", pcbSingleFootprint).item("PCB_ACTIONS::updateFootprint", pcbSingleFootprint).item("PCB_ACTIONS::updateFootprints", pcbMultipleFootprints);
   m.item("PCB_ACTIONS::changeFootprint", pcbSingleFootprint).item("PCB_ACTIONS::changeFootprints", pcbMultipleFootprints).sub(pcbFpAttributesMenu(), or(pcbSingleFootprint, pcbMultipleFootprints));
-  m.sep(100).sub(pcbRoutingMenu(), pcbRoutable, 100).sub(pcbMirrorRotateMenu(), pcbCanMirror, 100).sub(pcbPositionMenu(), idleSelection, 100);
+  m.sep(100).sub(pcbRoutingMenu(), pcbRoutable, 100).sub(pcbMirrorRotateMenu(), pcbCanMirror, 100).sub(pcbShapeModMenu(), shapeModVisible, 100).sub(pcbPositionMenu(), idleSelection, 100);
   m.sep(150).item("ACTIONS::cut", notEmpty, 150).item("ACTIONS::copy", notEmpty, 150).item("PCB_ACTIONS::copyWithReference", idleSelection, 150).item("ACTIONS::copyAsText", onlyTypes(PCB_COPY_TEXT), 150);
   m.item("ACTIONS::paste", noActiveTool, 150).item("ACTIONS::pasteSpecial", and(noActiveTool, not(inFpEditor)), 150).item("ACTIONS::duplicate", notEmpty, 150).item("ACTIONS::doDelete", notEmpty, 150);
   m.sep(2000).item("PCB_ACTIONS::properties", pcbProperties, 2000);
