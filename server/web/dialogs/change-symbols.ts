@@ -8,6 +8,7 @@
 // (KiCadLibrary.fetch), embedded in the sheet's lib_symbols, and each matching symbol rebuilt from it with the
 // options (change-symbols-logic.ts updateSymbolNode).  The sheet on screen is one commit; the other sheets are
 // edited through their own documents, each step on that sheet's undo list, as Annotate does.
+import { reportPanel, type ReportLine } from "../editor/pcbdialogs/ui";
 import { bitmapButton } from "./kicon";
 import { E, appState, pushUndoFor, toolCtx } from "./editor";
 import { KD, checkbox, h, textInput, type DlgApi } from "./dom";
@@ -65,11 +66,13 @@ export function openChangeSymbols(mode: Mode): void {
   const word = C ? "Change" : "Update";
   let refText = "", valText = "", idText = "", newId = "";
   if (symbol) { refText = L.symbolRefs(symbol.node)[0] || ""; const v = L.fieldOf(symbol.node, "Value"); valText = v ? L.propValue(v) : ""; idText = L.libIdOf(symbol.node); }
-  let api: DlgApi | null = null, fieldsHost: HTMLElement | null = null, report: HTMLElement | null = null;
+  let api: DlgApi | null = null, fieldsHost: HTMLElement | null = null, report: ReturnType<typeof reportPanel> | null = null;
+  let lines: ReportLine[] = [];
   const checks = new Map<string, HTMLInputElement>();
   const optBoxes = new Map<keyof L.UpdateOptions, HTMLInputElement>();
 
-  const say = (text: string, sev: "error" | "action" | "info" = "action") => { if (!report) return; report.append(h("div", { style: sev === "error" ? "color:var(--err)" : "" }, text)); report.scrollTop = report.scrollHeight; };
+  // WX_HTML_REPORT_PANEL (SetLazyUpdate: the lines show on Flush, at the end of the run)
+  const say = (text: string, sev: "error" | "action" | "info" = "action") => { lines.push({ severity: sev, text }); if (report) report.set(lines); };
 
   const matching = (sheets: { doc: KDoc; current: boolean }[]): KItem[] => {
     const arg = scope === "reference" ? refText : scope === "value" ? valText : idText;
@@ -111,7 +114,7 @@ export function openChangeSymbols(mode: Mode): void {
 
   const run = async (): Promise<void> => {
     if (!report) return;
-    report.replaceChildren();
+    lines = []; report.set(lines);
     if (E.viewOnly) { say("View-only access", "error"); return; }
     o.fields = new Set(Array.from(checks).filter(([, cb]) => cb.checked).map(([k]) => k));
     mem.scope = scope; mem.checked = new Set(o.fields);
@@ -197,8 +200,9 @@ export function openChangeSymbols(mode: Mode): void {
         h("button", { class: "btn", type: "button", style: "margin-top:6px", onclick: () => setAll(false) }, "Uncheck All Update Options"));
       ob.append(h("div", { style: "display:flex;gap:14px" }, colA, colB));
       body.append(h("div", { style: "display:flex;gap:10px" }, fieldsBox, optsBox));
-      report = h("div", { id: "kd-chs-report", style: "margin-top:10px;height:200px;overflow:auto;border:1px solid var(--line);background:var(--panel);padding:4px 6px;font-size:12px" });
-      body.append(report);
+      report = reportPanel("200px", { fileName: "report.txt", empty: "" });
+      (report.el.firstElementChild as HTMLElement).id = "kd-chs-report";
+      body.append(h("div", { style: "margin-top:10px" }, report.el));
       void refreshFields();
     },
     buttons: [
