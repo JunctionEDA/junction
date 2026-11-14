@@ -17,7 +17,7 @@ const WIDGET_CSS = `
 .kd-nb-tab { padding: 5px 14px; border: 1px solid transparent; border-bottom: none; border-radius: 4px 4px 0 0; cursor: pointer; color: var(--ink-2); margin-bottom: -1px; user-select: none; }
 .kd-nb-tab.on { background: var(--bench); border-color: var(--line); color: var(--ink); font-weight: 600; }
 .kd-nb-page { padding: 10px 4px 2px; min-height: 0; }
-.kd-tb { display: grid; grid-template-columns: 190px 1fr; min-height: 420px; }
+.kd-tb { display: grid; grid-template-columns: minmax(190px, max-content) 1fr; min-height: 420px; }
 .kd-tb-tree { border-right: 1px solid var(--line); background: var(--panel); padding: 6px 0; overflow: auto; user-select: none; }
 .kd-tb-node { padding: 3px 10px; cursor: default; white-space: nowrap; color: var(--ink); }
 .kd-tb-node.child { padding-left: 26px; cursor: pointer; }

@@ -72,7 +72,9 @@ EXTRA_ICONS = {"import", "export_file", "fabrication", "language", "add_zone", "
                "zoom_out_horizontally", "zoom_in_vertically", "zoom_out_vertically", "sim_probe", "sim_tune", "sim_add_signal", "netlist",
                "export_png", "text", "copy", "e_24", "e_48", "e_96", "e_192",
                # SYMBOL_VIEWER_FRAME's toolbar
-               "pin_show_etype", "pin", "datasheet", "add_symbol_to_schematic", "library_browser"}
+               "pin_show_etype", "pin", "datasheet", "add_symbol_to_schematic", "library_browser",
+               # PANEL_EESCHEMA_ANNOTATION_OPTIONS' sort order bitmaps
+               "annotate_down_right", "annotate_right_down"}
 
 
 MAC_IF = r"#\s*if(?:def\s+|\s+defined\(\s*)__WX(?:OSX_)?MAC__[ \t]*\)?[^\n]*\n"

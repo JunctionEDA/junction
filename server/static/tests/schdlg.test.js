@@ -156,5 +156,49 @@ test("back-annotation: unmatched footprints and symbols, nothing selected, re-li
   assert.deepEqual(rl.relinks, [{ fpRef: "R9", path: "/a" }]);
 });
 
+// ---------------------------------------------------------------- Schematic Setup pages
+const SP = load(["dialogs", "schematic-setup-logic.ts"]);
+test("annotation: separator choice and settings round-trip", () => {
+  assert.equal(SP.separatorChoice(undefined, undefined), 0);
+  assert.equal(SP.separatorChoice(49, 95), 6); assert.equal(SP.separatorChoice(65, 46), 1);
+  const sch = { subpart_first_id: 49, subpart_id_separator: 45, annotation: { sort_order: 1, method: 2 }, annotate_start_num: 7 };
+  const a = SP.annotationOf(sch);
+  assert.deepEqual(a, { notation: 5, sortY: true, method: 2, startNum: 7, reuse: true, suffixes: false, incrementPasted: true });
+  a.notation = 3; a.sortY = false; a.suffixes = true; SP.writeAnnotation(sch, a);
+  assert.equal(sch.subpart_first_id, 65); assert.equal(sch.subpart_id_separator, 95);
+  assert.deepEqual(sch.annotation, { sort_order: 0, method: 2, reused_sheet_suffixes: true, increment_pasted_suffix: true });
+});
+test("compare symbols: KiCad's defaults, file values win", () => {
+  const p = SP.parityOf({ compare_symbols: { extra_fields: true, missing_fields: false } });
+  assert.equal(p.extra_fields, true); assert.equal(p.missing_fields, false); assert.equal(p.field_texts, true); assert.equal(p.dnp_flags, false);
+  assert.equal(Object.keys(p).length, 12);
+});
+test("net chains: rows from the root sheet, class assignments written back", () => {
+  const K = globalThis.KiCadCanvas;
+  const top = K.parseAll(`(kicad_sch (version 20250000) (net_chain "SIG" (from "U1" "3") (to "J1" "1") (net_class "HS") (color 255 0 0 1) (nets "A" "B")) (net_chain "CLK" (from "U1" "4") (to "J1" "2")))`)[0];
+  const st = { chains: SP.chainsOf(top, { SIG: "fast", GONE: "fast", OLD: "dropped" }), classes: ["fast"] };
+  assert.equal(st.chains.length, 2); assert.deepEqual(st.chains[0].nets, ["A", "B"]); assert.equal(st.chains[0].netClass, "HS");
+  assert.equal(st.chains[0].color, "rgba(255, 0, 0, 1)"); assert.equal(st.chains[0].chainClass, "fast"); assert.equal(st.chains[1].chainClass, "");
+  st.chains[1].chainClass = "fast";
+  assert.deepEqual(SP.chainClassesJson(st, { SIG: "fast", GONE: "fast", OLD: "dropped" }), { GONE: "fast", SIG: "fast", CLK: "fast" });
+  assert.equal(SP.chainClassError(["a", "a"]), "Duplicate class name 'a' on row 2."); assert.equal(SP.chainClassError(["a", " "]), "Class on row 2 cannot have an empty name.");
+  assert.equal(SP.validChainName("a b"), false); assert.equal(SP.validChainName("ok_1"), true);
+});
+test("import settings: only the chosen sections are copied", () => {
+  const to = { schematic: { drawing: { default_text_size: 50, field_names: [{ name: "Keep" }] }, bus_aliases: { X: ["a"] } }, erc: { pin_map: [[0]] }, text_variables: { V: "1" } };
+  const from = { schematic: { drawing: { default_text_size: 60, junction_size_choice: 1, field_names: [{ name: "Other" }] }, annotation: { method: 1 }, annotate_start_num: 100, bus_aliases: { Y: ["b"] } }, erc: { rule_severities: { a: "ignore" }, pin_map: [[1]] }, net_settings: { classes: [{ name: "Default" }], netclass_patterns: [] }, text_variables: { W: "2" } };
+  SP.importSections(to, from, ["formatting", "annotation", "severities"]);
+  assert.deepEqual(to.schematic.drawing, { default_text_size: 60, junction_size_choice: 1, field_names: [{ name: "Keep" }] });
+  assert.deepEqual(to.schematic.annotation, { method: 1 }); assert.equal(to.schematic.annotate_start_num, 100);
+  assert.deepEqual(to.schematic.bus_aliases, { X: ["a"] }); assert.deepEqual(to.erc.pin_map, [[0]]); assert.deepEqual(to.erc.rule_severities, { a: "ignore" });
+  assert.deepEqual(to.text_variables, { V: "1" });
+  SP.importSections(to, from, ["fieldNames", "textVars", "netClasses"]);
+  assert.deepEqual(to.schematic.drawing.field_names, [{ name: "Other" }]); assert.deepEqual(to.text_variables, { W: "2" }); assert.deepEqual(to.net_settings.classes, [{ name: "Default" }]);
+});
+test("embedded files: the root sheet's list and font flag", () => {
+  const e = SP.embeddedOf(`(kicad_sch (embedded_fonts yes) (lib_symbols (symbol "x" (embedded_files (file (name "lib.pdf"))))) (embedded_files (file (name "a.pdf") (type datasheet)) (file (name "b \\"x\\".step"))) (symbol (file (name "no"))))`);
+  assert.deepEqual(e.files, ["a.pdf", 'b \\"x\\".step']); assert.equal(e.fonts, true);
+});
+
 module.exports = { test, load, K };
 process.on("exit", () => { console.log(`schdlg: ${passed} passed, ${failed} failed`); if (failed) process.exitCode = 1; });
