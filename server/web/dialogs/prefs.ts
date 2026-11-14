@@ -35,12 +35,25 @@ export interface Prefs {
   mouse: { autoZoomSpeed: boolean; zoomSpeed: number; middleDrag: "pan" | "zoom" | "none"; rightDrag: "pan" | "zoom" | "none"; centerOnZoom: boolean;
     autoPan: boolean; autoPanSpeed: number; zoomAccel: boolean; leftDrag: "select" | "dragSelected" | "dragAny"; motionPanMod: ScrollMod;
     touchpadMode: "native" | "scroll"; zoomMod: ScrollMod; panHMod: ScrollMod; panVMod: ScrollMod; reverseZoom: boolean; reversePanH: boolean; horizontalPan: boolean };
-  schDisplay: { showHiddenPins: boolean; showHiddenFields: boolean; showPageLimits: boolean };
+  schDisplay: { showHiddenPins: boolean; showHiddenFields: boolean; showPageLimits: boolean;
+    /** PANEL_EESCHEMA_DISPLAY_OPTIONS (EESCHEMA_SETTINGS appearance / selection / cross_probing, PANEL_GAL_OPTIONS' grid) */
+    defaultFont?: string; remappedPinNumbers?: boolean; selDrawChildren?: boolean; selFill?: boolean; selWidth?: number; highlightWidth?: number; collisionWidth?: number;
+    highlightNetclass?: boolean; colorHighlightThickness?: number; colorHighlightOpacity?: number;
+    crossProbeSelect?: boolean; crossProbeCenter?: boolean; crossProbeZoom?: boolean; crossProbeHighlight?: boolean; crossProbeFlash?: boolean;
+    gridStyle?: "dots" | "lines" | "crosses"; gridThickness?: number; gridMinSpacing?: number; showMajorGrid?: boolean; alwaysCrosshair?: boolean };
+  /** PANEL_SIMULATOR_PREFERENCES (SIM_PREFERENCES mouse_wheel_actions): what the wheel does over a plot, per modifier */
+  sim: { vNone: SimWheel; vCtrl: SimWheel; vShift: SimWheel; vAlt: SimWheel; h: SimWheel };
   /** EESCHEMA_SETTINGS (panel_eeschema_editing_options): drawing.line_mode, input.drag_is_move (inverted),
    *  drawing.auto_start_wires, input.esc_clears_net_highlight, annotation.automatic, drawing.default_repeat_offset_x / _y
    *  (mm here, mils in KiCad's file) and drawing.repeat_label_increment */
   schEditing: { lineMode: "free" | "90" | "45"; mouseDragIsDrag: boolean; autoAnnotate: boolean; autoStartWires: boolean; escClearsNetHighlight: boolean;
-    repeatX: number; repeatY: number; repeatIncrement: number };
+    repeatX: number; repeatY: number; repeatIncrement: number;
+    /** drawing.arc_edit_mode, drawing.auto_place_sheet_pins, input.allow_unconstrained_pin_swaps, drawing.default_sheet_border_color /
+     *  _background_color (empty: the theme's), drawing.new_power_symbols, selection.select_pin_selects_symbol, autoplace_fields.*,
+     *  appearance.footprint_preview and the rescue tool's never_show */
+    arcEditMode?: "center" | "endpoints" | "radius"; autoPlaceSheetPins?: boolean; unconstrainedPinSwaps?: boolean; sheetBorder?: string; sheetBackground?: string;
+    newPowerSymbols?: "default" | "global" | "local"; pinSelectsSymbol?: boolean; autoplaceFields?: boolean; autoplaceJustify?: boolean; autoplaceAlign?: boolean;
+    footprintPreview?: boolean; neverShowRescue?: boolean };
   /** the schematic canvas colours (Preferences > Schematic Editor > Colors): a theme, and whether a dark UI swaps in the dark sheet */
   schColors: { theme: SchThemeId; followDark: boolean; /** the themes made with New Theme... (KiCad's colors/*.json) */ user: UserSchTheme[] };
   /** the inactive layer mode is not here: it is the project's ("board.high_contrast_mode", Appearance panel) */
@@ -72,12 +85,21 @@ function schGrids(): GridPrefs { return { sizes: [100 * MIL, 50 * MIL, 25 * MIL,
 function pcbGrids(): GridPrefs { return { sizes: PCB_GRID_SIZES.slice(), names: Array(PCB_GRID_SIZES.length).fill(""), last: PCB_DEFAULT_GRID_IDX, fast1: PCB_DEFAULT_GRID_IDX, fast2: PCB_DEFAULT_GRID_IDX + 1, overrides: { ...PCB_GRID_OVERRIDES }, axes: false }; }
 /** APP_SETTINGS_BASE::DefaultGridSizeList for pcbnew and the footprint editor: 1000 mil down to 1 mil, then 5 mm down to 0.01 mm. */
 const PCB_GRID_SIZES = PCB_DEFAULT_GRIDS;
+/** SIM_MOUSE_WHEEL_ACTION (eeschema/sim/sim_preferences.h) */
+export type SimWheel = "none" | "panLR" | "panRL" | "panUD" | "zoom" | "zoomH" | "zoomV";
+/** SIM_MOUSE_WHEEL_ACTION_SET::GetMouseDefaults / GetTrackpadDefaults */
+export const SIM_MOUSE_DEFAULTS = { vNone: "zoom" as SimWheel, vCtrl: "panLR" as SimWheel, vShift: "panUD" as SimWheel, vAlt: "none" as SimWheel, h: "none" as SimWheel };
+export const SIM_TRACKPAD_DEFAULTS = { vNone: "panUD" as SimWheel, vCtrl: "zoom" as SimWheel, vShift: "panLR" as SimWheel, vAlt: "none" as SimWheel, h: "panLR" as SimWheel };
 export const DEFAULT_PREFS: Prefs = {
   mouse: { autoZoomSpeed: true, zoomSpeed: IS_MAC ? 5 : 1, middleDrag: "pan", rightDrag: "pan", centerOnZoom: false, autoPan: false, autoPanSpeed: 5, zoomAccel: false, leftDrag: "dragSelected", motionPanMod: "",
     // TOUCHPAD_MODE: native gestures by default on Windows only
     touchpadMode: IS_WIN ? "native" : "scroll", zoomMod: "", panHMod: "ctrl", panVMod: "shift", reverseZoom: false, reversePanH: false, horizontalPan: true },
-  schDisplay: { showHiddenPins: false, showHiddenFields: false, showPageLimits: true },
-  schEditing: { lineMode: "90", mouseDragIsDrag: true, autoAnnotate: true, autoStartWires: true, escClearsNetHighlight: true, repeatX: 0, repeatY: 100 * 0.0254, repeatIncrement: 1 },
+  schDisplay: { showHiddenPins: false, showHiddenFields: false, showPageLimits: true, defaultFont: "", remappedPinNumbers: false, selDrawChildren: true, selFill: false, selWidth: 3, highlightWidth: 2, collisionWidth: 4,
+    highlightNetclass: true, colorHighlightThickness: 15, colorHighlightOpacity: 60, crossProbeSelect: true, crossProbeCenter: true, crossProbeZoom: true, crossProbeHighlight: true, crossProbeFlash: false },
+  sim: SIM_MOUSE_DEFAULTS,
+  schEditing: { lineMode: "90", mouseDragIsDrag: true, autoAnnotate: true, autoStartWires: true, escClearsNetHighlight: true, repeatX: 0, repeatY: 100 * 0.0254, repeatIncrement: 1,
+    arcEditMode: "center", autoPlaceSheetPins: true, unconstrainedPinSwaps: false, sheetBorder: "", sheetBackground: "", newPowerSymbols: "default", pinSelectsSymbol: true,
+    autoplaceFields: true, autoplaceJustify: true, autoplaceAlign: true, footprintPreview: true, neverShowRescue: false },
   schColors: { theme: "default", followDark: false, user: [] },
   pcbDisplay: { showPadNumbers: true, showNetNames: true, showPageLimits: true, trackClearance: 2, padClearance: true },
   common: { hcDimming: 0.8 },

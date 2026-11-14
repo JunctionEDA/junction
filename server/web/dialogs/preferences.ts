@@ -2,9 +2,9 @@
 // that mean something in a browser.  Common > Mouse and Touchpad (common/dialogs/panel_mouse_settings), Hotkeys
 // (panel_hotkeys_editor, read-only here); Schematic Editor > Display Options, Grids, Editing Options, Colors;
 // PCB Editor > Display Options, Grids, Origins & Axes, Editing Options.  Everything is kept in localStorage (prefs.ts) and applied on OK.
-import { bitmapButton } from "./kicon";
 import { trapTab } from "../tools/kicad-dialogs/shell";
-import { E, toast } from "./editor";
+import { E, isSch, requestRender, setToggles, store, toast } from "./editor";
+import { colorPicker, fromHex, toHex } from "../editor/pcbdialogs/color-picker";
 import { IS_MAC, keyName, modName } from "../keys";
 import { hotkeysPanel } from "./hotkeys-panel";
 import type { UserHotkeys } from "../menuspec";
@@ -13,7 +13,7 @@ import { SCH_COLOR_ITEMS, hiddenByBackground, newUserTheme, schExtraColors, same
 import { colorSwatch, colorText, parseColor, type RGBA } from "../components/colorswatch";
 import { lenField, messageBox } from "../editor/pcbdialogs/ui";
 import { loadUnits, messageText, unitName } from "../units";
-import { DEFAULT_PREFS, schThemeList, GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clonePrefs, editorId, gridLabel, savePrefs, scaleOf, type EditorId, type GalPrefs, type Prefs } from "./prefs";
+import { DEFAULT_PREFS, SIM_MOUSE_DEFAULTS, SIM_TRACKPAD_DEFAULTS, schThemeList, GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clonePrefs, editorId, gridLabel, savePrefs, scaleOf, type EditorId, type GalPrefs, type Prefs, type SimWheel } from "./prefs";
 import { clearDialogState, clearDontShowAgain, clearFileHistory, resetProgramSettings } from "./maintenance";
 import { askConfirm } from "../components/msgbox";
 import type { Units } from "../store";
@@ -70,7 +70,7 @@ const ratsnestState = (): { curvedRatsnest: boolean; setCurvedRatsnest(on: boole
 const pcbTools = (): ArcEditTools | null => { const t = (window as unknown as { PcbTools?: Partial<ArcEditTools> }).PcbTools; return t && t.arcEditMode && t.setArcEditMode ? (t as ArcEditTools) : null; };
 
 /** The edits of an open Preferences dialog, kept when a page is reset (the dialog is rebuilt around them). */
-interface Staged { p: Prefs; uiMode: ThemeMode; arcEdit: number; hv45?: boolean; curved?: boolean; contrast: ReturnType<typeof getInactiveMode>; hotkeys?: UserHotkeys }
+interface Staged { view?: SchView; p: Prefs; uiMode: ThemeMode; arcEdit: number; hv45?: boolean; curved?: boolean; contrast: ReturnType<typeof getInactiveMode>; hotkeys?: UserHotkeys }
 /** PAGED_DIALOG's g_lastPage: the page the dialog was last closed on, for the next opening in this session. */
 let lastPage: string | null = null;
 /** The defaults a page's Reset to Defaults puts back (RESETTABLE_PANEL::ResetPanel of that page only). */
@@ -80,7 +80,8 @@ export function resetPage(key: string, st: Staged): void {
     case "Common/Common": st.uiMode = "system"; st.p.common = d.common; break;
     case "Common/Mouse and Touchpad": st.p.mouse = d.mouse; break;
     case "Symbol Editor/Grids": st.p.grids.sym = d.grids.sym; break;
-    case "Schematic Editor/Display Options": st.p.schDisplay = d.schDisplay; st.p.gal.sch = d.gal.sch; break;
+    case "Schematic Editor/Display Options": st.p.schDisplay = d.schDisplay; st.p.gal.sch = d.gal.sch; st.view = Object.assign({}, SCH_VIEW_DEFAULTS); break;
+    case "Schematic Editor/Simulator": st.p.sim = d.sim; break;
     case "Schematic Editor/Grids": st.p.grids.sch = d.grids.sch; break;
     case "Schematic Editor/Editing Options": st.p.schEditing = d.schEditing; break;
     case "Schematic Editor/Colors": st.p.schColors = { ...d.schColors, user: st.p.schColors.user }; break;
@@ -99,6 +100,8 @@ export function resetPage(key: string, st: Staged): void {
 export function openPreferences(page?: string, staged?: Staged): void {
   const p: Prefs = staged ? staged.p : clonePrefs();
   let uiMode: ThemeMode = staged ? staged.uiMode : getThemeMode();
+  // the schematic's View options (EESCHEMA_SETTINGS appearance): the same settings as View > Show …, live in the render options
+  const view: SchView = staged && staged.view ? staged.view : schViewNow();
   let arcEdit = staged ? staged.arcEdit : pcbTools() ? pcbTools()!.arcEditMode() : 0;
   // m_AngleSnapMode != LEADER_MODE::DIRECT, and the curved ratsnest: the board tools' live state, written back on OK when changed
   const snap0 = pcbTools() && pcbTools()!.angleSnapMode ? pcbTools()!.angleSnapMode!() : "45";
@@ -233,8 +236,8 @@ export function openPreferences(page?: string, staged?: Staged): void {
     paint();
   };
   /** A Display Options page's two columns: PANEL_GAL_OPTIONS on the left, the frame's own options on the right. */
-  const displayCols = (pg: HTMLElement, ed: EditorId): HTMLElement => {
-    const L = h("div"), R = h("div"); pg.append(h("div", { style: "display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px" }, L, R)); galPanel(L, ed); return R;
+  const displayCols = (pg: HTMLElement, ed: EditorId): [HTMLElement, HTMLElement] => {
+    const L = h("div"), R = h("div"); pg.append(h("div", { style: "display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px" }, L, R)); galPanel(L, ed); return [L, R];
   };
   KD().open({ title: "Preferences", width: 900, cls: "kd-wide kd-flush",
     // PAGED_DIALOG::onResetButton: only the page on show goes back to its defaults, and nothing is saved before OK
@@ -242,7 +245,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
       const key = pageKey();
       if (key === "Common/Hotkeys") { if (hk) hk.resetToDefaults(); return; }
       if (key === "Common/WakaTime") return;   // nothing local to reset: the key is removed with Remove Key
-      const st: Staged = { p, uiMode, arcEdit, hv45, curved, contrast, hotkeys: hk ? hk.staged() : undefined };
+      const st: Staged = { view, p, uiMode, arcEdit, hv45, curved, contrast, hotkeys: hk ? hk.staged() : undefined };
       resetPage(key, st); KD().close(); openPreferences(key, st);
     } }],
     cancel() { lastPage = pageKey() || lastPage; },
@@ -287,33 +290,10 @@ export function openPreferences(page?: string, staged?: Staged): void {
           { label: "Grids", build: gridsPage("sym") },
         ] },
         { label: "Schematic Editor", pages: [
-          { label: "Display Options", build(pg) {
-            const ap = KD().staticBox(displayCols(pg, "sch"), "Appearance");
-            ap.append(checkbox("Show hidden pins", p.schDisplay.showHiddenPins, (on) => { p.schDisplay.showHiddenPins = on; }, { id: "kd-pref-hiddenpins" }), checkbox("Show hidden fields", p.schDisplay.showHiddenFields, (on) => { p.schDisplay.showHiddenFields = on; }, { id: "kd-pref-hiddenfields" }));
-          } },
+          { label: "Display Options", build(pg) { const [L, R] = displayCols(pg, "sch"); schDisplayPage(L, R, p, view); } },
           { label: "Grids", build: gridsPage("sch") },
-          { label: "Editing Options", build(pg) {
-            // PANEL_EESCHEMA_EDITING_OPTIONS
-            const se = p.schEditing, ed = KD().staticBox(pg, "Editing");
-            ed.append(h("div", { class: "kd-row", style: "margin-bottom:6px" }, h("label", { style: "color:var(--ink-2)" }, "Line drawing mode:"), select([["free", "Free Angle"], ["90", "90 deg Angle"], ["45", "45 deg Angle"]], se.lineMode, (v) => { se.lineMode = v as "free" | "90" | "45"; }, { id: "kd-pref-linemode", style: "width:160px" })),
-              checkbox("Mouse drag performs Drag (G) operation", se.mouseDragIsDrag, (on) => { se.mouseDragIsDrag = on; }, { id: "kd-pref-dragmode", title: "If unchecked, mouse drag will perform move (M) operation" }),
-              checkbox("Automatically start wires on unconnected pins", se.autoStartWires, (on) => { se.autoStartWires = on; }, { id: "kd-pref-autowires", title: "When enabled, you can start wiring by clicking on unconnected pins even when the wire tool is not active" }),
-              checkbox("<ESC> clears net highlighting", se.escClearsNetHighlight, (on) => { se.escClearsNetHighlight = on; }, { id: "kd-pref-escnet", title: "First <ESC> in selection tool clears selection, next clears net highlighting" }),
-              checkbox("Automatically annotate symbols", se.autoAnnotate, (on) => { se.autoAnnotate = on; }, { id: "kd-pref-autoannotate" }));
-            // Repeated Items: the pitches through UNIT_BINDER in the schematic editor's units, the label step a spin control
-            const su = loadUnits("eeschema").units, uname = unitName(su);
-            const pitch = (id: string, mm: number, set: (v: number) => void): HTMLInputElement => {
-              const f = lenField(mm, { units: su, onChange: set }); f.input.id = id; f.input.style.width = "90px";
-              return f.input as HTMLInputElement;
-            };
-            const inc = h("input", { type: "number", id: "kd-pref-repeatinc", min: "-100000", max: "100000", step: "1", value: String(se.repeatIncrement), style: "width:90px" }) as HTMLInputElement;
-            inc.addEventListener("change", () => { const v = Math.round(+inc.value); if (isFinite(v)) { se.repeatIncrement = Math.max(-100000, Math.min(100000, v)); inc.value = String(se.repeatIncrement); } });
-            const ri = KD().staticBox(pg, "Repeated Items");
-            ri.append(h("div", { style: "display:grid;grid-template-columns:max-content max-content max-content;gap:6px 8px;align-items:center" },
-              h("label", null, "Horizontal pitch:"), pitch("kd-pref-repeatx", se.repeatX, (v) => { se.repeatX = v; }), h("span", { class: "ro" }, uname),
-              h("label", null, "Vertical pitch:"), pitch("kd-pref-repeaty", se.repeatY, (v) => { se.repeatY = v; }), h("span", { class: "ro" }, uname),
-              h("label", null, "Label increment:"), inc, h("span", null)));
-          } },
+          { label: "Editing Options", build(pg) { schEditingPage(pg, p); } },
+          { label: "Simulator", build(pg) { simulatorPage(pg, p); } },
           { label: "Colors", build(pg) { colorsPage(pg); } },
         ] },
         // PANEL_FP_GRIDS: the Footprint Editor's own window settings
@@ -407,7 +387,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
           .then((yes) => { if (yes && okBtn) { bgConfirmed = true; okBtn.click(); } });
         return false;
       }
-      lastPage = pageKey() || lastPage; if (hk) hk.apply(); if (uiMode !== getThemeMode()) setThemeMode(uiMode); savePrefs(p); if (contrast !== getInactiveMode()) setInactiveMode(contrast); if (pcbTools() && arcEdit !== pcbTools()!.arcEditMode()) pcbTools()!.setArcEditMode(arcEdit);
+      lastPage = pageKey() || lastPage; if (hk) hk.apply(); if (uiMode !== getThemeMode()) setThemeMode(uiMode); savePrefs(p); applySchView(view, p); if (contrast !== getInactiveMode()) setInactiveMode(contrast); if (pcbTools() && arcEdit !== pcbTools()!.arcEditMode()) pcbTools()!.setArcEditMode(arcEdit);
       // PANEL_EDIT_OPTIONS::TransferDataFromWindow: m_AngleSnapMode = checked ? DEG45 : DIRECT (only when the box changed, so a 90 degree mode stays)
       const t = pcbTools(); if (t && t.setAngleSnap && hv45 !== (snap0 !== "free")) t.setAngleSnap(null, hv45 ? "45" : "free");
       const rs = ratsnestState(); if (rs && curved !== curved0) rs.setCurvedRatsnest(curved); toast("Preferences saved");
@@ -541,4 +521,145 @@ function actionPluginsPage(pg: HTMLElement, rows: PluginRow[], plug: { actionPlu
       btn("🗀", "Open Plugin Directory", "kd-pref-plugin-dir", () => { if (plug && plug.openManager) plug.openManager(); }),
       btn("⟳", "Reload Plugins", "kd-pref-plugin-reload", () => { if (plug && plug.refresh) void plug.refresh().then(() => { const was = new Map(rows.map((r) => [r.id, r.visible] as [string, boolean])); const fresh = plug.actionPluginRows("pcb").map((r) => Object.assign(r, was.has(r.id) ? { visible: was.get(r.id) } : {})); rows.splice(0, rows.length, ...fresh); sel = rows.length ? 0 : -1; fill(); }); })));
   fill();
+}
+
+// ---------------------------------------------------------------- Schematic Editor > Display Options
+/** The View-menu settings the page shows (their render option, KiCad's default). */
+interface SchView { directiveLabels: boolean; ercErrors: boolean; ercWarnings: boolean; ercExclusions: boolean; simExclusions: boolean; opVoltages: boolean; opCurrents: boolean; pinAltIcons: boolean }
+const SCH_VIEW_DEFAULTS: SchView = { directiveLabels: true, ercErrors: true, ercWarnings: true, ercExclusions: false, simExclusions: true, opVoltages: true, opCurrents: true, pinAltIcons: true };
+const VIEW_KEYS: [keyof SchView, string, string][] = [["directiveLabels", "showDirectiveLabels", "toggleDirectiveLabels"], ["ercErrors", "showErcErrors", "toggleERCErrors"], ["ercWarnings", "showErcWarnings", "toggleERCWarnings"],
+  ["ercExclusions", "showErcExclusions", "toggleERCExclusions"], ["simExclusions", "markSimExclusions", "markSimExclusions"], ["opVoltages", "showOpVoltages", "toggleOPVoltages"], ["opCurrents", "showOpCurrents", "toggleOPCurrents"], ["pinAltIcons", "showPinAltIcons", "togglePinAltIcons"]];
+function schViewNow(): SchView {
+  const ro = (E.renderOpts || {}) as Record<string, unknown>, v = Object.assign({}, SCH_VIEW_DEFAULTS);
+  for (const [k, key] of VIEW_KEYS) if (ro[key] !== undefined) (v as unknown as Record<string, boolean>)[k] = !!ro[key];
+  return v;
+}
+function applySchView(v: SchView, p: Prefs): void {
+  const ro = E.renderOpts as Record<string, unknown>; const tog: Record<string, boolean> = {};
+  for (const [k, key, id] of VIEW_KEYS) { const on = (v as unknown as Record<string, boolean>)[k]; ro[key] = on; tog[id] = on; }
+  setToggles(tog);
+  try { KiCadCanvas.setSchDisplay({ pinAltIcons: v.pinAltIcons }, E.kdoc && isSch() ? E.kdoc : null); } catch { /* no schematic */ }
+  store.slice("viewport", { renderOpts: Object.assign({}, E.renderOpts) }); (E as unknown as { renderFull: boolean }).renderFull = true; requestRender();
+}
+/** PANEL_EESCHEMA_DISPLAY_OPTIONS: PANEL_GAL_OPTIONS (galPanel) and Cross-probing on the left, Appearance and Selection && Highlighting on the right. */
+function schDisplayPage(L: HTMLElement, R: HTMLElement, p: Prefs, v: SchView): void {
+  const d = p.schDisplay, D = DEFAULT_PREFS.schDisplay;
+  const val = <K extends keyof Prefs["schDisplay"]>(k: K): NonNullable<Prefs["schDisplay"][K]> => (d[k] ?? D[k]) as NonNullable<Prefs["schDisplay"][K]>;
+  const cb = (label: string, on: boolean, set: (on: boolean) => void, id: string, title?: string): HTMLElement => checkbox(label, on, set, { id: "kd-pref-" + id, title });
+  const vcb = (label: string, k: keyof SchView, id: string, title?: string): HTMLElement => cb(label, !!v[k], (on) => { (v as unknown as Record<string, boolean>)[k] = on; }, id, title);
+  const spin = (k: "selWidth" | "highlightWidth" | "collisionWidth" | "colorHighlightThickness" | "colorHighlightOpacity", min: number, max: number, step: number, id: string): HTMLInputElement => {
+    const i = h("input", { type: "number", min: String(min), max: String(max), step: String(step), value: String(val(k)), id: "kd-pref-" + id, style: "width:80px" }) as HTMLInputElement;
+    i.addEventListener("change", () => { const x = Math.max(min, Math.min(max, +i.value)); if (isFinite(x)) { (d as Record<string, unknown>)[k] = x; i.value = String(x); } });
+    return i;
+  };
+  const head = (host: HTMLElement, title: string): HTMLElement => { const box = h("div", { style: "margin-bottom:10px" }); box.append(h("div", { style: "font-weight:600;margin:4px 0 2px" }, title), h("div", { style: "border-top:1px solid var(--line);margin:0 0 6px" })); host.append(box); return box; };
+  const grid = (...rows: [string, HTMLElement, string?][]): HTMLElement => h("div", { style: "display:grid;grid-template-columns:max-content max-content max-content;gap:4px 8px;align-items:center;margin:4px 0 4px 4px" }, ...rows.flatMap(([l, c, u]) => [h("label", null, l), c, h("span", { class: "ro" }, u || "")]));
+  // PANEL_GAL_OPTIONS is the left column's top (displayCols)
+  const cp = head(L, "Cross-probing");
+  cp.append(cb("Select/highlight objects corresponding to PCB selection", val("crossProbeSelect"), (on) => { d.crossProbeSelect = on; }, "xpselect", "Highlight symbols corresponding to selected footprints"),
+    cb("Center view on cross-probed items", val("crossProbeCenter"), (on) => { d.crossProbeCenter = on; }, "xpcenter", "Ensures that cross-probed symbols are visible in the current view"),
+    cb("Zoom to fit cross-probed items", val("crossProbeZoom"), (on) => { d.crossProbeZoom = on; }, "xpzoom"),
+    cb("Highlight cross-probed nets", val("crossProbeHighlight"), (on) => { d.crossProbeHighlight = on; }, "xphighlight", "Highlight nets when they are highlighted in the PCB editor"),
+    cb("Flash cross-probed selection", val("crossProbeFlash"), (on) => { d.crossProbeFlash = on; }, "xpflash", "Temporarily flash the newly cross-probed selection 3 times"));
+  // Appearance
+  const ap = head(R, "Appearance");
+  ap.append(h("div", { class: "kd-row", style: "margin:0 0 4px" }, h("label", null, "Default font:"), select([["", "KiCad Font"]], val("defaultFont"), (x) => { d.defaultFont = x; }, { id: "kd-pref-defaultfont", style: "width:180px" })),
+    cb("Show hidden pins", d.showHiddenPins, (on) => { d.showHiddenPins = on; }, "hiddenpins"),
+    cb("Show original pin numbers when remapped", val("remappedPinNumbers"), (on) => { d.remappedPinNumbers = on; }, "remappedpins"),
+    cb("Show hidden fields", d.showHiddenFields, (on) => { d.showHiddenFields = on; }, "hiddenfields"),
+    vcb("Show directive labels", "directiveLabels", "directivelabels"), vcb("Show ERC errors", "ercErrors", "ercerrors"), vcb("Show ERC warnings", "ercWarnings", "ercwarnings"),
+    vcb("Show ERC exclusions", "ercExclusions", "ercexclusions"), vcb("Mark items which are excluded from simulation", "simExclusions", "simexclusions"),
+    vcb("Show OP voltages", "opVoltages", "opvoltages"), vcb("Show OP currents", "opCurrents", "opcurrents"), vcb("Show pin alternate mode indicator icons", "pinAltIcons", "pinalticons"),
+    cb("Show page limits", d.showPageLimits, (on) => { d.showPageLimits = on; }, "sch-pagelimits"));
+  const se = head(R, "Selection && Highlighting".replace("&&", "&"));
+  se.append(cb("Draw selected child items", val("selDrawChildren"), (on) => { d.selDrawChildren = on; }, "selchildren"), cb("Fill selected shapes", val("selFill"), (on) => { d.selFill = on; }, "selfill"),
+    grid(["Selection thickness:", spin("selWidth", 0, 50, 1, "selwidth")], ["Highlight thickness:", spin("highlightWidth", 0, 50, 1, "hlwidth")], ["Net collision marker width:", spin("collisionWidth", 1, 50, 1, "collisionwidth")]),
+    h("div", { class: "ro", style: "margin:0 0 6px 4px" }, "(selection color can be edited in the \"Colors\" page)"),
+    cb("Highlight netclass colors", val("highlightNetclass"), (on) => { d.highlightNetclass = on; }, "hlnetclass"),
+    grid(["Color highlight thickness:", spin("colorHighlightThickness", 0, 50, 1, "colhlthick")], ["Color highlight opacity:", spin("colorHighlightOpacity", 0, 100, 1, "colhlopacity"), "%"]));
+}
+
+// ---------------------------------------------------------------- Schematic Editor > Simulator
+const SIM_ACTIONS: [SimWheel, string][] = [["none", "No action"], ["panLR", "Pan left/right"], ["panRL", "Pan right/left"], ["panUD", "Pan up/down"], ["zoom", "Zoom"], ["zoomH", "Zoom horizontally"], ["zoomV", "Zoom vertically"]];
+const SIM_H_ACTIONS: [SimWheel, string][] = [["none", "No action"], ["panLR", "Pan left/right"], ["zoomH", "Zoom horizontally"]];
+/** PANEL_SIMULATOR_PREFERENCES: Scroll Gestures (vertical by modifier, horizontal) and the two reset buttons. */
+function simulatorPage(pg: HTMLElement, p: Prefs): void {
+  const box = KD().staticBox(pg, "Scroll Gestures");
+  const host = h("div");
+  const draw = (): void => {
+    host.replaceChildren();
+    const s = p.sim;
+    const row = (mod: string, key: keyof Prefs["sim"], acts: [SimWheel, string][]): HTMLElement[] => [h("label", null, mod), select(acts, s[key], (v) => { s[key] = v as SimWheel; }, { id: "kd-pref-sim-" + key, style: "width:200px" })];
+    host.append(h("div", { style: "font-weight:600;margin:2px 0 6px" }, "Vertical Touchpad or Scroll Wheel Movement"),
+      h("div", { style: "display:grid;grid-template-columns:max-content max-content;gap:4px 12px;align-items:center;margin-left:8px" },
+        h("span", { class: "ro" }, "Modifier"), h("span", { class: "ro" }, "Action"),
+        ...row("None:", "vNone", SIM_ACTIONS), ...row(IS_MAC ? "Cmd:" : "Ctrl:", "vCtrl", SIM_ACTIONS), ...row("Shift:", "vShift", SIM_ACTIONS), ...row(IS_MAC ? "Option:" : "Alt:", "vAlt", SIM_ACTIONS)),
+      h("div", { style: "font-weight:600;margin:12px 0 6px" }, "Horizontal Touchpad Movement"),
+      h("div", { style: "display:grid;grid-template-columns:max-content max-content;gap:4px 12px;align-items:center;margin-left:8px" },
+        h("span", { class: "ro" }, "Modifier"), h("span", { class: "ro" }, "Action"), ...row("Any:", "h", SIM_H_ACTIONS)),
+      h("div", { style: "display:flex;gap:8px;margin-top:12px" },
+        h("button", { class: "btn", type: "button", id: "kd-pref-sim-mouse", onclick: () => { p.sim = Object.assign({}, SIM_MOUSE_DEFAULTS); draw(); } }, "Reset to Mouse Defaults"),
+        h("button", { class: "btn", type: "button", id: "kd-pref-sim-trackpad", onclick: () => { p.sim = Object.assign({}, SIM_TRACKPAD_DEFAULTS); draw(); } }, "Reset to Trackpad Defaults")));
+  };
+  box.append(host); draw();
+}
+
+// ---------------------------------------------------------------- Schematic Editor > Editing Options
+/** PANEL_EESCHEMA_EDITING_OPTIONS: Editing, Defaults for New Objects, Selection and the left click commands on the
+ *  left; Symbol Field Automatic Placement, Repeated Items and Dialog Preferences on the right. */
+function schEditingPage(pg: HTMLElement, p: Prefs): void {
+  const se = p.schEditing, D = DEFAULT_PREFS.schEditing;
+  const v = <K extends keyof Prefs["schEditing"]>(k: K): NonNullable<Prefs["schEditing"][K]> => (se[k] ?? D[k]) as NonNullable<Prefs["schEditing"][K]>;
+  const flag = (label: string, k: "mouseDragIsDrag" | "autoStartWires" | "escClearsNetHighlight" | "autoAnnotate" | "autoPlaceSheetPins" | "unconstrainedPinSwaps" | "pinSelectsSymbol" | "autoplaceFields" | "autoplaceJustify" | "autoplaceAlign" | "footprintPreview" | "neverShowRescue", id: string, title?: string): HTMLElement =>
+    checkbox(label, !!v(k), (on) => { (se as Record<string, unknown>)[k] = on; }, { id: "kd-pref-" + id, title });
+  const L = h("div", { style: "flex:1;min-width:0" }), R = h("div", { style: "flex:1;min-width:0" });
+  pg.append(h("div", { style: "display:flex;gap:16px" }, L, R));
+  const row = (label: string, ctl: HTMLElement): HTMLElement => h("div", { class: "kd-row", style: "margin-bottom:6px" }, h("label", { style: "color:var(--ink-2);min-width:130px" }, label), ctl);
+  const ed = KD().staticBox(L, "Editing");
+  ed.append(row("Line drawing mode:", select([["free", "Free Angle"], ["90", "90 deg Angle"], ["45", "45 deg Angle"]], se.lineMode, (x) => { se.lineMode = x as "free" | "90" | "45"; }, { id: "kd-pref-linemode", style: "width:200px" })),
+    row("Arc editing mode:", select([["center", "Keep center, adjust radius"], ["endpoints", "Keep endpoints or direction of starting point"], ["radius", "Keep center and radius, adjust endpoints"]], v("arcEditMode"), (x) => { se.arcEditMode = x as "center" | "endpoints" | "radius"; }, { id: "kd-pref-sch-arcedit", style: "width:200px" })),
+    flag("Mouse drag performs Drag (G) operation", "mouseDragIsDrag", "dragmode", "If unchecked, mouse drag will perform move (M) operation"),
+    flag("Automatically start wires on unconnected pins", "autoStartWires", "autowires", "When enabled, you can start wiring by clicking on unconnected pins even when the wire tool is not active"),
+    flag("<ESC> clears net highlighting", "escClearsNetHighlight", "escnet", "First <ESC> in selection tool clears selection, next clears net highlighting"),
+    flag("Automatically annotate symbols", "autoAnnotate", "autoannotate"),
+    flag("Automatically place sheet pins", "autoPlaceSheetPins", "autosheetpins", "Place pins for hierarchical labels when placing sheets or design blocks as sheets."),
+    flag("Allow unconstrained pin swaps", "unconstrainedPinSwaps", "pinswaps", "Allows swapping symbol pins' positions. May cause invalid design changes; use with caution."));
+  // Defaults for New Objects: COLOR_SWATCHes (an unset colour is the theme's)
+  const swatch = (k: "sheetBorder" | "sheetBackground", id: string): HTMLElement => {
+    const b = h("button", { type: "button", class: "btn", id: "kd-pref-" + id, style: "width:48px;height:20px;padding:0" }) as HTMLButtonElement;
+    const paint = (): void => { const c = v(k); b.style.background = c || "transparent"; b.title = c || "Default"; };
+    b.addEventListener("click", () => { const cur = v(k) ? fromHex(v(k)) : null; colorPicker(cur, true, (c) => { se[k] = toHex(c); paint(); }); });
+    paint(); return b;
+  };
+  const dn = KD().staticBox(L, "Defaults for New Objects");
+  dn.append(row("Sheet border:", swatch("sheetBorder", "sheetborder")), row("Sheet background:", swatch("sheetBackground", "sheetbg")),
+    row("Power symbols:", select([["default", "Default"], ["global", "Global"], ["local", "Local"]], v("newPowerSymbols"), (x) => { se.newPowerSymbols = x as "default" | "global" | "local"; }, { id: "kd-pref-powertype", style: "width:120px" })));
+  const sl = KD().staticBox(L, "Selection");
+  sl.append(flag("Clicking on a pin selects the symbol", "pinSelectsSymbol", "pinselects", "In schematic editor:\nIf enabled, clicking on a pin select the parent symbol.\nIf disabled, clicking on a pin select only the pin."));
+  const lc = KD().staticBox(L, "Left Click Mouse Commands");
+  lc.append(...schLeftClick());
+  const ap = KD().staticBox(R, "Symbol Field Automatic Placement");
+  ap.append(flag("Automatically place symbol fields", "autoplaceFields", "autoplace"), flag("Allow field autoplace to change justification", "autoplaceJustify", "autoplacejustify"),
+    flag("Always align autoplaced fields to the 50 mil grid", "autoplaceAlign", "autoplacealign"));
+  // Repeated Items: the pitches through UNIT_BINDER in the schematic editor's units, the label step a spin control
+  const su = loadUnits("eeschema").units, uname = unitName(su);
+  const pitch = (id: string, mm: number, set: (x: number) => void): HTMLInputElement => { const f = lenField(mm, { units: su, onChange: set }); f.input.id = id; f.input.style.width = "90px"; return f.input as HTMLInputElement; };
+  const inc = h("input", { type: "number", id: "kd-pref-repeatinc", min: "-100000", max: "100000", step: "1", value: String(se.repeatIncrement), style: "width:90px" }) as HTMLInputElement;
+  inc.addEventListener("change", () => { const x = Math.round(+inc.value); if (isFinite(x)) { se.repeatIncrement = Math.max(-100000, Math.min(100000, x)); inc.value = String(se.repeatIncrement); } });
+  const ri = KD().staticBox(R, "Repeated Items");
+  ri.append(h("div", { style: "display:grid;grid-template-columns:max-content max-content max-content;gap:6px 8px;align-items:center" },
+    h("label", null, "Horizontal pitch:"), pitch("kd-pref-repeatx", se.repeatX, (x) => { se.repeatX = x; }), h("span", { class: "ro" }, uname),
+    h("label", null, "Vertical pitch:"), pitch("kd-pref-repeaty", se.repeatY, (x) => { se.repeatY = x; }), h("span", { class: "ro" }, uname),
+    h("label", null, "Label increment:"), inc, h("span", null)));
+  const dp = KD().staticBox(R, "Dialog Preferences");
+  dp.append(flag("Show footprint previews in Symbol Chooser", "footprintPreview", "fppreview"), flag("Never show Rescue Symbols tool", "neverShowRescue", "neverrescue"));
+}
+/** the schematic's "Left Click Mouse Commands" page: KiCad lists Long Click, Shift, Ctrl+Shift (and Option on a Mac). */
+function schLeftClick(): HTMLElement[] {
+  const ctrlK = modName("Ctrl"), shiftK = modName("Shift"), altK = modName("Alt");
+  const cmds: [string, string][] = [["Long Click", "Clarify selection from menu"], [shiftK, "Add item(s) to selection"], [IS_MAC ? `${shiftK}+${ctrlK}` : `${ctrlK}+${shiftK}`, "Remove item(s) from selection"]];
+  if (IS_MAC) cmds.push([altK, "Clarify selection from menu"]);
+  const note = IS_MAC ? `Left click (and drag) actions depend on 3 modifier keys:\n${altK}, ${shiftK} and ${ctrlK}` : `Left click (and drag) actions depend on 2 modifier keys:\n${shiftK} and ${ctrlK}`;
+  return [h("div", { style: "white-space:pre-line;margin:2px 0 6px" }, note),
+    h("div", { style: "display:grid;grid-template-columns:max-content 1fr;gap:3px 16px;margin-left:8px" }, ...cmds.flatMap(([k, d]) => [h("span", null, k), h("span", null, d)]))];
 }

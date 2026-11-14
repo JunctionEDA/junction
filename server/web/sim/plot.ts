@@ -29,6 +29,7 @@ export const TRACE_COLORS = ["#E41A1C", "#377EB8", "#4DAF4A", "#984EA3", "#FF7F0
 
 const SI: [number, string][] = [[1e12, "T"], [1e9, "G"], [1e6, "M"], [1e3, "K"], [1, ""], [1e-3, "m"], [1e-6, "u"], [1e-9, "n"], [1e-12, "p"], [1e-15, "f"]];
 /** LIN_SCALE / LOG_SCALE tick labels: the value with the SI prefix that fits the axis span and the unit. */
+export type WheelAction = "none" | "panLR" | "panRL" | "panUD" | "zoom" | "zoomH" | "zoomV";
 export function tickLabel(v: number, units: string, span: number): string {
   if (v === 0 || !Number.isFinite(v)) return "0" + units;
   if (units === "°" || units === "dB" || units === "°C") { const d = span >= 10 ? 0 : span >= 1 ? 1 : 2; return v.toFixed(d) + units; }
@@ -143,13 +144,23 @@ export class SimPlot {
 
   // ------------------------------------------------------------ mouse
   private local(e: MouseEvent): [number, number] { const r = this.canvas.getBoundingClientRect(); return [e.clientX - r.left, e.clientY - r.top]; }
+  /** the scroll gestures (Preferences > Schematic Editor > Simulator): the action per modifier for vertical scrolling, and for horizontal */
+  gestures: () => { vNone: WheelAction; vCtrl: WheelAction; vShift: WheelAction; vAlt: WheelAction; h: WheelAction } = () => ({ vNone: "zoom", vCtrl: "panLR", vShift: "panUD", vAlt: "none", h: "panLR" });
   private wheel(e: WheelEvent): void {
-    e.preventDefault(); const p = this.local(e), d = e.deltaY || e.deltaX; if (!d) return;
+    e.preventDefault(); const p = this.local(e);
+    const g = this.gestures(), horiz = Math.abs(e.deltaX) > Math.abs(e.deltaY);
+    const d = horiz ? e.deltaX : e.deltaY; if (!d) return;
+    const act: WheelAction = horiz ? g.h : e.ctrlKey || e.metaKey ? g.vCtrl : e.shiftKey ? g.vShift : e.altKey ? g.vAlt : g.vNone;
     const a = this.area();
-    if (e.ctrlKey || e.metaKey) { this.push(this.pan(d > 0 ? -a.w * 0.1 : a.w * 0.1, 0, this.cur())); return; }
-    if (e.shiftKey) { this.push(this.pan(0, d > 0 ? -a.h * 0.1 : a.h * 0.1, this.cur())); return; }
-    if (e.altKey) return;
-    this.zoom(d < 0 ? 1.5 : 1 / 1.5, "both", p);
+    switch (act) {
+      case "panLR": this.push(this.pan(d > 0 ? -a.w * 0.1 : a.w * 0.1, 0, this.cur())); break;
+      case "panRL": this.push(this.pan(d > 0 ? a.w * 0.1 : -a.w * 0.1, 0, this.cur())); break;
+      case "panUD": this.push(this.pan(0, d > 0 ? -a.h * 0.1 : a.h * 0.1, this.cur())); break;
+      case "zoom": this.zoom(d < 0 ? 1.5 : 1 / 1.5, "both", p); break;
+      case "zoomH": this.zoom(d < 0 ? 1.5 : 1 / 1.5, "h", p); break;
+      case "zoomV": this.zoom(d < 0 ? 1.5 : 1 / 1.5, "v", p); break;
+      default: break;
+    }
   }
   private cursorNear(px: number): 0 | 1 | null {
     for (const i of [0, 1] as const) { const x = this.cursorX[i]; if (x !== null && this.traces.some((t) => (i ? t.cursor2 : t.cursor1)) && Math.abs(this.sx(x) - px) <= 5) return i; }

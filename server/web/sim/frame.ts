@@ -15,6 +15,7 @@ import { projectSpiceNetlist } from "../editor/export-netlist";
 import { worldMm } from "../editor/view";
 import { convertToSpiceMarkup } from "./spice-netlist";
 import { openPreferences } from "../dialogs/preferences";
+import { prefs } from "../dialogs/prefs";
 import { nameOfPick } from "../editor/schnets";
 import { colorPicker, fromHex, toHex } from "../editor/pcbdialogs/color-picker";
 import { canWriteProject, projectDocs, saveTextDocument } from "../editor/projectfile";
@@ -457,7 +458,7 @@ function renderPlot(): void {
   const type = tabType(t);
   if (type === "OP" || type === "PZ" || type === "NOISE" && false) { area.append(h("div", { class: "sim-op", id: "sim-op" }, t.opText || "Run the simulation to see the results.")); return; }
   if (!t.plot) {
-    const p = new SimPlot(); t.plot = p;
+    const p = new SimPlot(); t.plot = p; p.gestures = () => prefs().sim;
     p.onChange = () => { renderCursors(); };
     p.onContextMenu = (x, y) => plotMenu(t, x, y);
   }
