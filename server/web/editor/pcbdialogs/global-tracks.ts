@@ -1,190 +1,124 @@
 // pcbdialogs/global-tracks — Edit > Edit Track & Via Properties... (GLOBAL_EDIT_TOOL::EditTracksAndVias,
-// DIALOG_GLOBAL_EDIT_TRACKS_AND_VIAS, dialog_global_edit_tracks_and_vias_base.fbp): Scope (Tracks, Vias and the four
-// via types), Filter Items (net, net class, layer, track width, via diameter, selected items only) and Action ("Set to
-// specified values" with every choice starting at "-- leave unchanged --", or "Set to net class / custom rule values").
-// Apply and Close stores one "Edit Track and Via Properties" step over every track, arc and via that passes.
+// DIALOG_GLOBAL_EDIT_TRACKS_AND_VIAS, dialog_global_edit_tracks_and_vias_base.fbp "Set Track and Via Properties"):
+// Scope (Tracks; Vias with the four via types under it as a three-state parent), Filter Items (net, net class,
+// layer, track width, via diameter, selected items only) and the Action: the specified values (Layer, Track width,
+// Via size, Via annular rings, Via protection features, each starting at "-- leave unchanged --") or the net class
+// / custom rule values.  Apply writes one "Edit Track & Via Properties" commit and keeps the dialog; Apply and
+// Close does the same and closes.  The net and net class filters are remembered for the session (g_netFilter,
+// g_netclassFilter).
 import { E } from "../state";
-import { pcbState } from "../gestures";
-import { boardSelection } from "./exchange";
-import { checkField, errorMessage, h, openDialog, parseLen, selectField, unitName, currentUnits, type Field } from "./ui";
-import * as M from "./track-via-model";
+import { pcbState, selectionIds } from "../gestures";
+import { IPC4761 } from "./track-via-model";
+import { box, checkField, h, lenField, openDialog, selectField, unitLabel, type Field } from "./ui";
 
-interface Rules { track_width?: number; via_diameter?: number; via_drill?: number; uvia_diameter?: number; uvia_drill?: number }
-interface Settings { netclasses: Record<string, unknown> }
+interface Job { scope: Record<string, boolean>; filter: Record<string, unknown>; specified: boolean; values: Record<string, unknown>; settings: unknown }
 interface PcbToolsApi {
-  designSettings(src: unknown): Settings; netclassName(s: Settings, net: string): string; netclassOf(s: Settings, net: string): Rules;
-  boardLayerName(doc: KDoc, name: string): string; expandGroups?(doc: KDoc, ids: string[]): Iterable<string>;
+  globalTrackViaChanges(doc: KDoc, job: Job): KChange[]; designSettings(src: unknown): { netclasses: Record<string, unknown> };
+  boardLayerName(doc: KDoc, name: string): string; expandGroups?(doc: KDoc, ids: string[]): string[];
 }
-interface PropsHelpers { netNameOf(doc: KDoc, node: SNode): string; boardNetNames(doc: KDoc): string[] }
+interface Sizes { trackWidths: number[]; vias: { diameter: number; drill: number }[] }
+interface SizesApi { state: { sizes: Sizes }; trackWidthLabels(s: Sizes, u: string, li: string): string[]; viaSizeLabels(s: Sizes, u: string, li: string): string[] }
 const PT = (): PcbToolsApi => (window as unknown as { PcbTools: PcbToolsApi }).PcbTools;
-const PH = (): PropsHelpers => (CollabTools as unknown as { props: { helpers: PropsHelpers } }).props.helpers;
-const K = (): KiCadCanvasApi => KiCadCanvas;
-const parse: M.Parse = (t) => K().parse(t) as SNode;
-const LEAVE = "-- leave unchanged --";
-const near = (a: number, b: number): boolean => Math.abs(a - b) < 1e-6;
-const viaTypeOf = (n: SNode): string => (typeof n[1] === "string" && ["blind", "buried", "micro"].includes(String(n[1])) ? String(n[1]) : "through");
-const numOf = (n: SNode, key: string): number => { const c = M.kid(n, key); return c ? +c[1] : 0; };
-// g_netclassFilter / g_netFilter: the dialog's statics
+const PS = (): SizesApi => (KiCadCanvas as unknown as { pcbSizes: SizesApi }).pcbSizes;
+/** INDETERMINATE_ACTION (include/widgets/ui_common.h) */
+export const LEAVE = "-- leave unchanged --";
 const memory = { net: "", netclass: "" };
 
-export interface GlobalTrackJob {
-  tracks: boolean; through: boolean; micro: boolean; blind: boolean; buried: boolean;
-  net: string | null; netclass: string | null; layer: string | null; trackWidth: number | null; viaSize: number | null; selected: Set<string> | null;
-  specified: boolean;
-  /** the specified values; null leaves the property alone */
-  width: number | null; via: { diameter: number; drill: number } | null; annular: number | null; protection: number | null; toLayer: string | null;
-}
-
-/** TransferDataFromWindow → visitItem → processItem over the board's tracks, arcs and vias: [id, new node] per changed item. */
-export function globalTrackEdits(doc: KDoc, job: GlobalTrackJob, settings: Settings): [string, SNode][] {
-  const out: [string, SNode][] = [];
-  for (const it of doc.items.values()) {
-    const isVia = it.kind === "via", isTrack = it.kind === "segment" || it.kind === "arc";
-    if (!isVia && !isTrack) continue;
-    const n = it.node as SNode;
-    if (isTrack) { if (!job.tracks) continue; }
-    else { const t = viaTypeOf(n); if (!(t === "through" ? job.through : t === "micro" ? job.micro : t === "blind" ? job.blind : job.buried)) continue; }
-    // visitItem
-    if (job.selected && !job.selected.has(it.id)) continue;
-    const net = PH().netNameOf(doc, n);
-    if (job.net !== null && net !== job.net) continue;
-    if (job.netclass !== null && PT().netclassName(settings, net) !== job.netclass) continue;
-    if (job.layer !== null) { const l = isVia ? String((M.kid(n, "layers") || [0, ""])[1]) : M.trackLayer(n); if (l !== job.layer) continue; }
-    if (isVia) { if (job.viaSize !== null && !near(numOf(n, "size"), job.viaSize)) continue; }
-    else if (job.trackWidth !== null && !near(numOf(n, "width"), job.trackWidth)) continue;
-    // processItem
-    const next = JSON.parse(JSON.stringify(n)) as SNode;
-    const setSize = (diameter: number, drill: number): void => {
-      if (diameter > 0 && !near(diameter, numOf(next, "size"))) M.setChild(next, "size", `(size ${M.f6(diameter)})`, M.VIA_ORDER, parse);
-      if (drill > 0 && !near(drill, numOf(next, "drill"))) M.setChild(next, "drill", `(drill ${M.f6(drill)})`, M.VIA_ORDER, parse);
-    };
-    if (job.specified) {
-      if (isTrack && job.width !== null && job.width > 0 && !near(job.width, numOf(next, "width"))) M.setChild(next, "width", `(width ${M.f6(job.width)})`, M.TRACK_ORDER, parse);
-      if (isVia && job.via) {
-        // SetTrackSegmentWidth: a microvia takes its net class's microvia size, any other via the chosen pre-defined size
-        if (viaTypeOf(n) === "micro") { const nc = PT().netclassOf(settings, net); setSize(nc.uvia_diameter || 0, nc.uvia_drill || 0); }
-        else setSize(job.via.diameter, job.via.drill);
-      }
-      if (isVia && job.annular !== null) M.setAnnularMode(next, job.annular, parse);
-      if (isVia && job.protection !== null) M.setProtectionPreset(next, job.protection, parse);
-      if (isTrack && job.toLayer && M.trackLayer(next) !== job.toLayer) { const l = M.kid(next, "layer"); if (l) l[1] = job.toLayer; }
-    } else {
-      const nc = PT().netclassOf(settings, net);
-      if (isTrack) { const w = nc.track_width || 0; if (w > 0 && !near(w, numOf(next, "width"))) M.setChild(next, "width", `(width ${M.f6(w)})`, M.TRACK_ORDER, parse); }
-      else if (viaTypeOf(n) === "micro") setSize(nc.uvia_diameter || 0, nc.uvia_drill || 0);
-      else setSize(nc.via_diameter || 0, nc.via_drill || 0);
-    }
-    if (JSON.stringify(next) !== JSON.stringify(n)) out.push([it.id, next]);
-  }
-  return out;
-}
-
-export function openGlobalTracksAndVias(ctx: ToolCtx): void {
+export function openGlobalEditTracks(ctx: ToolCtx): void {
   const doc = E.kdoc as KDoc | null;
-  if (!doc || doc.type !== "pcb") { ctx.toast("This needs a board"); return; }
-  const ro = !!E.viewOnly;
+  if (!doc || doc.type !== "pcb") { ctx.toast("Edit Track & Via Properties needs a board"); return; }
+  if (E.viewOnly) { ctx.toast("This board is read-only"); return; }
   const settings = PT().designSettings(E.proSettings || null);
-  const st = pcbState() as { highlightNet?: unknown } | null;
-  const sizes = K().pcbSizes && K().pcbSizes.state ? K().pcbSizes.state.sizes : { trackWidths: [0], vias: [{ diameter: 0, drill: 0 }] };
-  const units = currentUnits() as "mm" | "in" | "mil", lastImperial = E.lastImperial === "in" ? "in" : "mil";
-  const trackLabels = K().pcbSizes ? K().pcbSizes.trackWidthLabels(sizes as never, units, lastImperial).slice(1) : [];
-  const viaLabels = K().pcbSizes ? K().pcbSizes.viaSizeLabels(sizes as never, units, lastImperial).slice(1) : [];
-  const copper = (doc.copper && doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"]) as string[];
-  const layerName = (l: string): string => PT().boardLayerName(doc, l);
+  const st = pcbState();
+  const selection = (): Set<string> => { const ids = selectionIds(); return new Set(PT().expandGroups ? PT().expandGroups!(doc, ids) : ids); };
+  const nodup = (f: Field<unknown>): void => { f.input.setAttribute("data-nopersist", ""); };
 
-  // Scope: m_vias is a 3-state box over the four via types
+  // ---- Scope
   const tracks = checkField(true, "Tracks", { key: "tracks" });
-  const viaTypes: Field<boolean>[] = [];
-  const viasInput = h("input", { type: "checkbox", "data-k": "vias", "data-nopersist": "" }) as HTMLInputElement;
-  const updateVias = (): void => { const c = viaTypes.filter((f) => f.get()).length; viasInput.indeterminate = c > 0 && c < 4; viasInput.checked = c === 4; };
-  for (const [k, label] of [["throughVias", "Through vias"], ["microVias", "Microvias"], ["blindVias", "Blind vias"], ["buriedVias", "Buried vias"]]) viaTypes.push(checkField(true, label, { key: k, onChange: updateVias }));
-  viasInput.addEventListener("click", () => { const on = viasInput.checked; for (const f of viaTypes) f.set(on); updateVias(); });   // onVias
-  const [through, micro, blind, buried] = viaTypes;
+  const vias = checkField(true, "Vias", { key: "vias" });
+  const kinds = { throughVias: checkField(true, "Through vias", { key: "throughVias" }), microVias: checkField(true, "Microvias", { key: "microVias" }),
+    blindVias: checkField(true, "Blind vias", { key: "blindVias" }), buriedVias: checkField(true, "Buried vias", { key: "buriedVias" }) };
+  const kindList = Object.values(kinds);
+  // onVias: the parent sets all four; updateViasCheckbox: the parent shows none / all / some
+  vias.input.addEventListener("change", () => { for (const k of kindList) k.set(vias.get()); });
+  const updateVias = (): void => { const n = kindList.filter((k) => k.get()).length; const v = vias.input as HTMLInputElement; v.indeterminate = n > 0 && n < 4; v.checked = n === 4; };
+  for (const k of kindList) k.input.addEventListener("change", updateVias);
 
-  // Filter Items
-  const nets = PH().boardNetNames(doc).filter((n) => n);
-  const hl = st && typeof st.highlightNet === "string" ? st.highlightNet : "";
+  // ---- Filter Items
+  const nets = Array.from(new Set(Array.from((doc as unknown as { nets?: Map<number, string> }).nets?.values() || []).filter((n) => n))).sort();
+  const hl = (st as { highlightNet?: unknown } | null)?.highlightNet;
   const netOpt = checkField(false, "Filter items by net:", { key: "netFilterOpt" });
-  const net = selectField<string>(memory.net && nets.includes(memory.net) ? memory.net : hl && nets.includes(hl) ? hl : nets[0] || "", nets.map((n): [string, string] => [n, n]), { key: "netFilter", onChange: (v) => { memory.net = v; netOpt.set(true); } });
+  const net = selectField<string>(memory.net && nets.includes(memory.net) ? memory.net : typeof hl === "string" && nets.includes(hl) ? hl : nets[0] || "", nets.map((n): [string, string] => [n, n]),
+    { key: "netFilter", onChange: (v) => { memory.net = v; netOpt.set(true); } });   // OnNetFilterSelect
   const classes = ["Default", ...Object.keys(settings.netclasses).filter((n) => n !== "Default")];
   const ncOpt = checkField(false, "Filter items by net class:", { key: "netclassFilterOpt" });
-  const nc = selectField<string>(memory.netclass && classes.includes(memory.netclass) ? memory.netclass : "Default", classes.map((n): [string, string] => [n, n]), { key: "netclassFilter", onChange: (v) => { memory.netclass = v; ncOpt.set(true); } });
+  const nc = selectField<string>(memory.netclass && classes.includes(memory.netclass) ? memory.netclass : "Default", classes.map((n): [string, string] => [n, n]),
+    { key: "netclassFilter", onChange: (v) => { memory.netclass = v; ncOpt.set(true); } });
+  const copper = (doc as unknown as { copper?: string[] }).copper || ["F.Cu", "B.Cu"];
+  const layerOpts = copper.map((l): [string, string] => [l, PT().boardLayerName(doc, l)]);
   const layerOpt = checkField(false, "Filter items by layer:", { key: "layerFilterOpt" });
-  const layer = selectField<string>(copper.includes(ctx.activeLayer || "") ? ctx.activeLayer! : copper[0], copper.map((l): [string, string] => [l, layerName(l)]), { key: "layerFilter", onChange: () => layerOpt.set(true) });
-  for (const s of [net, nc, layer]) s.input.setAttribute("data-nopersist", "");
+  const layer = selectField<string>(copper.includes(ctx.activeLayer || "") ? ctx.activeLayer! : copper[0], layerOpts, { key: "layerFilter", onChange: () => layerOpt.set(true) });
   const widthOpt = checkField(false, "Filter tracks by width:", { key: "filterByTrackWidth" });
-  const widthText = h("input", { type: "text", "data-k": "trackWidthFilter", style: "width:110px" }) as HTMLInputElement;
-  widthText.addEventListener("input", () => widthOpt.set(true));
-  const viaOpt = checkField(false, "Filter vias by diameter:", { key: "filterByViaSize" });
-  const viaText = h("input", { type: "text", "data-k": "viaSizeFilter", style: "width:110px" }) as HTMLInputElement;
-  viaText.addEventListener("input", () => viaOpt.set(true));
+  const width = lenField(0, { key: "trackWidthFilter", onChange: () => widthOpt.set(true) });
+  const diaOpt = checkField(false, "Filter vias by diameter:", { key: "filterByViaSize" });
+  const dia = lenField(0, { key: "viaSizeFilter", onChange: () => diaOpt.set(true) });
   const selOnly = checkField(false, "Selected items only", { key: "selectedItemsFilter" });
+  for (const f of [net, nc, layer]) nodup(f as Field<unknown>);
 
-  // Action
+  // ---- Action
   const radio = (label: string, key: string): Field<boolean> => {
     const input = h("input", { type: "radio", name: "gtv-action", "data-k": key }) as HTMLInputElement;
     return { el: h("label", { class: "pd-check" }, input, label), input, get: () => input.checked, set: (v) => { input.checked = v; } };
   };
-  const specified = radio("Set to specified values:", "setToSpecifiedValues"), rules = radio("Set to net class / custom rule values", "setToDesignRuleValues");
+  const specified = radio("Set to specified values:", "setToSpecifiedValues");
+  const rules = radio("Set to net class / custom rule values", "setToDesignRuleValues");
   specified.set(true);
-  const choice = (key: string, labels: string[]): Field<string> => {
-    const f = selectField<string>("", [...labels.map((l, i): [string, string] => [String(i), l]), ["", LEAVE]], { key });
-    f.input.setAttribute("data-nopersist", ""); return f;
-  };
-  const toLayer = selectField<string>("", [["", LEAVE], ...copper.map((l): [string, string] => [l, layerName(l)])], { key: "layerCtrl" });
-  toLayer.input.setAttribute("data-nopersist", "");
-  const trackCtrl = choice("trackWidthCtrl", trackLabels), viaCtrl = choice("viaSizesCtrl", viaLabels);
-  const ringCtrl = choice("annularRingsCtrl", ["All copper layers", "Start, end, and connected layers", "Connected layers only", "Start and end layers only"]);
-  const protCtrl = choice("protectionFeatures", M.IPC4761.map(([name]) => name));
-  (protCtrl.input as HTMLElement).title = "Select which protection feature according to IPC-4761 the via should have.";
-  const lbl = (t: string): HTMLElement => h("span", { class: "pd-lbl" }, t);
-  const actionRows: [HTMLElement, Field<string>][] = [[lbl("Layer:"), toLayer], [lbl("Track width:"), trackCtrl], [lbl("Via size:"), viaCtrl], [lbl("Via annular rings:"), ringCtrl]];
-  const onAction = (): void => {   // onActionButtonChange: the protection choice stays enabled, as in KiCad
-    const on = specified.get();
-    for (const [l, f] of actionRows) { l.classList.toggle("disabled", !on); (f.input as HTMLElement).toggleAttribute("disabled", !on || ro); }
-  };
-  specified.input.addEventListener("change", onAction); rules.input.addEventListener("change", onAction);
+  const sizes = PS().state.sizes, units = E.units === "in" || E.units === "mil" ? E.units : "mm", li = E.lastImperial === "in" ? "in" : "mil";
+  // UpdateTrackWidthSelectBox( …, false, false ) + INDETERMINATE_ACTION, which TransferDataToWindow selects
+  const twLabels = PS().trackWidthLabels(sizes, units, li).slice(1), vsLabels = PS().viaSizeLabels(sizes, units, li).slice(1);
+  const trackW = selectField<number>(-1, [...twLabels.map((l, i): [number, string] => [i, l]), [-1, LEAVE]], { key: "trackWidth" });
+  const viaS = selectField<number>(-1, [...vsLabels.map((l, i): [number, string] => [i, l]), [-1, LEAVE]], { key: "viaSizes" });
+  const rings = selectField<number>(-1, [[0, "All copper layers"], [1, "Start, end, and connected layers"], [2, "Connected layers only"], [3, "Start and end layers only"], [-1, LEAVE]], { key: "annularRings" });
+  const prot = selectField<number>(-1, [...IPC4761.map(([name], i): [number, string] => [i, name]), [-1, LEAVE]], { key: "protectionFeatures" });
+  prot.input.title = "Select which protection feature according to IPC-4761 the via should have.";
+  const newLayer = selectField<string>("", [["", LEAVE], ...layerOpts], { key: "layerCtrl" });
+  for (const f of [trackW, viaS, rings, prot, newLayer]) nodup(f as Field<unknown>);
+  const actionRows: [string, Field<unknown>][] = [["Layer:", newLayer as Field<unknown>], ["Track width:", trackW as Field<unknown>], ["Via size:", viaS as Field<unknown>],
+    ["Via annular rings:", rings as Field<unknown>], ["Via protection features:", prot as Field<unknown>]];
+  const labels: HTMLElement[] = [];
+  const actionGrid = h("div", { style: "display:grid;grid-template-columns:max-content minmax(240px,1fr);gap:6px 10px;align-items:center;margin:6px 0 8px 25px" });
+  for (const [l, f] of actionRows) { const lab = h("label", null, l); labels.push(lab); actionGrid.append(lab, f.el); }
+  // onActionButtonChange: Layer, Track width, Via size and Via annular rings follow the action; the protection
+  // features choice stays enabled, as KiCad leaves it
+  const sync = (): void => { const on = specified.get(); actionRows.slice(0, 4).forEach(([, f], i) => { (f.input as HTMLElement & { disabled: boolean }).disabled = !on; labels[i].classList.toggle("pd-dim", !on); }); };
 
-  openDialog({ title: "Set Track and Via Properties", width: 760, okLabel: "Apply and Close", cancelLabel: "Close", readOnly: ro, persist: true,
+  const apply = (): void => {
+    const s = selection();
+    const job: Job = {
+      scope: { tracks: tracks.get(), throughVias: kinds.throughVias.get(), microVias: kinds.microVias.get(), blindVias: kinds.blindVias.get(), buriedVias: kinds.buriedVias.get() },
+      filter: { net: netOpt.get() ? net.get() : null, netclass: ncOpt.get() ? nc.get() : null, layer: layerOpt.get() ? layer.get() : null,
+        trackWidth: widthOpt.get() ? width.get() : null, viaDiameter: diaOpt.get() ? dia.get() : null, selection: selOnly.get() ? s : null },
+      specified: specified.get(), settings,
+      values: { layer: newLayer.get() || null, trackWidth: trackW.get() >= 0 ? sizes.trackWidths[trackW.get() + 1] : null,
+        via: viaS.get() >= 0 ? sizes.vias[viaS.get() + 1] : null, annular: rings.get() >= 0 ? rings.get() : null, protection: prot.get() >= 0 ? prot.get() : null },
+    };
+    const changes = PT().globalTrackViaChanges(doc, job);
+    if (changes.length) ctx.commit(changes, "Edit Track & Via Properties");
+    ctx.requestRender();
+  };
+
+  openDialog({ title: "Set Track and Via Properties", width: 760, okLabel: "Apply and Close", cancelLabel: "Close", persist: true,
+    extra: [{ label: "Apply", fn: apply }],
     build(body) {
-      const unit = (): HTMLElement => h("span", { class: "unit" }, unitName());
-      const scope = h("div", { class: "pd-box" }, h("div", { class: "hd" }, "Scope"), tracks.el, h("label", { class: "pd-check" }, viasInput, "Vias"),
-        h("div", { style: "margin-left:22px" }, ...viaTypes.map((f) => f.el)));
-      const filters = h("div", { class: "pd-box" }, h("div", { class: "hd" }, "Filter Items"),
-        h("div", { style: "display:grid;grid-template-columns:auto 1fr auto;gap:4px 8px;align-items:center" },
-          netOpt.el, net.el, h("span"), ncOpt.el, nc.el, h("span"), layerOpt.el, layer.el, h("span"),
-          widthOpt.el, widthText, unit(), viaOpt.el, viaText, unit(), selOnly.el, h("span"), h("span")));
-      const grid = h("div", { style: "display:grid;grid-template-columns:auto 1fr;gap:4px 10px;align-items:center;margin:4px 0 8px 22px" },
-        ...actionRows.flatMap(([l, f]) => [l, f.el]), lbl("Via protection features:"), protCtrl.el);
-      body.append(h("div", { style: "display:grid;grid-template-columns:auto 1fr;gap:0 16px" }, scope, filters),
-        h("div", { class: "pd-box" }, h("div", { class: "hd" }, "Action"), specified.el, grid, rules.el));
-      updateVias(); onAction();
+      const filters = h("div", { style: "display:grid;grid-template-columns:max-content minmax(160px,1fr) max-content;gap:3px 6px;align-items:center" });
+      filters.append(netOpt.el, net.el, h("span"), ncOpt.el, nc.el, h("span"), layerOpt.el, layer.el, h("span"),
+        widthOpt.el, width.el, unitLabel(), diaOpt.el, dia.el, unitLabel());
+      const scope = box("Scope", tracks.el, h("div", { style: "height:10px" }), vias.el, ...kindList.map((k) => h("div", { style: "margin-left:20px" }, k.el)));
+      body.append(h("div", { style: "display:grid;grid-template-columns:1fr 2fr;gap:0 10px;align-items:stretch" }, scope, box("Filter Items", filters, h("div", { style: "height:5px" }), selOnly.el)),
+        box("Action", specified.el, actionGrid, rules.el));
+      body.addEventListener("change", sync);
+      updateVias(); sync();
     },
-    restored() { updateVias(); onAction(); },
-    ok() {
-      if (ro) return true;
-      const len = (on: boolean, inp: HTMLInputElement, label: string): number | null | string => {
-        if (!on) return null; const v = parseLen(inp.value.trim());
-        if (!inp.value.trim() || !isFinite(v)) { inp.focus(); return `${label} must be a number.`; } return v;
-      };
-      const tw = len(widthOpt.get(), widthText, "Track width"), vs = len(viaOpt.get(), viaText, "Via diameter");
-      for (const v of [tw, vs]) if (typeof v === "string") { errorMessage(v); return false; }
-      const pick = (f: Field<string>): number | null => (f.get() === "" ? null : +f.get());
-      const ti = pick(trackCtrl), vi = pick(viaCtrl);
-      const sel = boardSelection(ctx);
-      const job: GlobalTrackJob = {
-        tracks: tracks.get(), through: through.get(), micro: micro.get(), blind: blind.get(), buried: buried.get(),
-        net: netOpt.get() && net.get() ? net.get() : null, netclass: ncOpt.get() && nc.get() ? nc.get() : null, layer: layerOpt.get() ? layer.get() : null,
-        trackWidth: tw as number | null, viaSize: vs as number | null,
-        selected: selOnly.get() ? new Set(PT().expandGroups ? PT().expandGroups!(doc, Array.from(sel)) : sel) : null,
-        specified: specified.get(),
-        width: ti !== null ? sizes.trackWidths[ti + 1] ?? null : null, via: vi !== null ? sizes.vias[vi + 1] ?? null : null,
-        annular: pick(ringCtrl), protection: pick(protCtrl), toLayer: toLayer.get() || null,
-      };
-      const changes: KChange[] = [];
-      for (const [id, node] of globalTrackEdits(doc, job, settings)) { const it = doc.items.get(id); if (it) changes.push(K().replaceChange(doc, { ...it, node })); }
-      if (changes.length) ctx.commit(changes, "Edit Track and Via Properties");
-      ctx.requestRender();
-      return true;
-    } });
+    restored() { updateVias(); sync(); },
+    ok() { apply(); return true; } });
 }

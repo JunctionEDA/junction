@@ -882,6 +882,30 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
   }, undefined, "Edit Footprint Properties");
 }
 
+// ---------------------------------------------------------------- Target Properties
+/**
+ * DIALOG_TARGET_PROPERTIES (dialog_target_properties_base.fbp) over a PCB_TARGET: Size, Thickness and the Shape
+ * choice "+" / "X"; OK writes them as one "Edit Alignment Target" commit (format( PCB_TARGET* ): (target plus|x
+ * (at …) (size …) (width …) …), the width omitted at 0).
+ */
+export function targetDialog(ctx: ToolCtx, item: KItem): boolean {
+  return itemDialog(ctx, item, "Target Properties", 360, (node, body, ro) => {
+    const size = lenField(nval(kid(node, "size"), 1, 5), { ro, key: "size" });
+    const width = lenField(nval(kid(node, "width"), 1, 0), { ro, key: "thickness" });
+    const shape = selectField<number>(sval(node) === "x" ? 1 : 0, [[0, "+"], [1, "X"]], { ro, key: "shape" });
+    body.append(form([["Size:", size.el, unitLabel()], ["Thickness:", width.el, unitLabel()], ["Shape:", shape.el]]));
+    setTimeout(() => { (size.input as HTMLInputElement).focus(); (size.input as HTMLInputElement).select(); }, 0);   // SetInitialFocus( m_sizeCtrl )
+    return (n) => {
+      const s = size.get(), w = width.get();
+      if (!(s > 0)) return "Size must be greater than 0.";
+      n[1] = shape.get() ? "x" : "plus";
+      put(n, "size", `(size ${f6(s)})`, ["width", "layer", "uuid"]);
+      put(n, "width", w > 0 ? `(width ${f6(w)})` : null, ["layer", "uuid"]);
+      return undefined;
+    };
+  }, undefined, "Edit Alignment Target");
+}
+
 /** The KiCad dialog for a board item; false when this module has none for it (the caller falls back). */
 export function pcbItemDialog(ctx: ToolCtx, item: KItem): boolean {
   if (!ctx.doc || ctx.doc.type !== "pcb" || !item) return false;
@@ -897,6 +921,7 @@ export function pcbItemDialog(ctx: ToolCtx, item: KItem): boolean {
     case "gr_line": case "gr_rect": case "gr_circle": case "gr_arc": case "gr_poly": case "gr_curve": return shapeDialog(ctx, item);
     case "footprint": return footprintDialog(ctx, item);
     case "dimension": return dimensionDialog(ctx, item);
+    case "target": return targetDialog(ctx, item);
     default: return false;
   }
 }

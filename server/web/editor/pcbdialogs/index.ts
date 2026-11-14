@@ -20,7 +20,8 @@ import { openTextAndGraphics } from "./text-graphics";
 import { openUnusedPads } from "./unused-pads";
 import { openCleanupGraphics } from "./cleanup-graphics";
 import { openEditTeardrops } from "./teardrops";
-import { openGlobalTracksAndVias } from "./global-tracks";
+import { openGlobalEditTracks } from "./global-tracks";
+import { openFilterSelection } from "./filter-selection";
 import { repairBoard } from "./repair";
 import { openReannotate } from "./reannotate";
 import { openUpdatePcb, projectNetlist, updatePcbFromSchematicEditor } from "./update-pcb";
@@ -52,6 +53,8 @@ export function installPcbDialogs(): void {
   action("zonesManager", "Zone Manager...", "", (ctx) => { openZoneManager(ctx); });   // GLOBAL_EDIT_TOOL::ZonesManager (Tools > Zone Manager...)
   action("zoneManager", "Zone Manager...", "", (ctx) => { openZoneManager(ctx); });
   action("cleanupGraphics", "Cleanup Graphics...", "", openCleanupGraphics);   // GLOBAL_EDIT_TOOL::CleanupGraphics
+  action("editTracksAndVias", "Edit Track & Via Properties...", "", openGlobalEditTracks);   // GLOBAL_EDIT_TOOL::EditTracksAndVias
+  action("filterSelection", "Filter Selected Items...", "", openFilterSelection);   // PCB_SELECTION_TOOL::filterSelection
   action("editTeardrops", "Edit Teardrops...", "", openEditTeardrops);   // GLOBAL_EDIT_TOOL::EditTeardrops
   action("repairBoard", "Repair Board", "", repairBoard);   // BOARD_EDITOR_CONTROL::RepairBoard
   action("boardReannotate", "Geographical Reannotate...", "", openReannotate);   // BOARD_REANNOTATE_TOOL::ShowReannotateDialog
@@ -62,7 +65,6 @@ export function installPcbDialogs(): void {
   action("updateFootprints", "Update Footprints from Library...", "", (ctx) => { openExchangeFootprints(ctx, "updateFootprints"); });
   action("changeFootprint", "Change Footprint...", "", (ctx) => { openExchangeFootprints(ctx, "changeFootprint"); });
   action("changeFootprints", "Change Footprints...", "", (ctx) => { openExchangeFootprints(ctx, "changeFootprints"); });
-  action("editTracksAndVias", "Edit Track & Via Properties...", "", openGlobalTracksAndVias);   // GLOBAL_EDIT_TOOL::EditTracksAndVias
   action("editTextAndGraphics", "Edit Text & Graphics Properties...", "", openTextAndGraphics);   // GLOBAL_EDIT_TOOL::EditTextAndGraphics
   action("globalDeletions", "Global Deletions...", "", openGlobalDeletions);   // GLOBAL_EDIT_TOOL::GlobalDeletions
   action("editFootprintFields", "Bulk Edit Footprint Fields...", "", openFootprintFields);

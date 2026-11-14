@@ -470,7 +470,6 @@ act("changeTrackWidth", "Change Track Width / Via Size…", "", (ctx: PcbCtx) =>
     { k: "l0", label: "Via start layer", type: "select", value: vl[0], options: copper }, { k: "l1", label: "Via end layer", type: "select", value: vl[1] || copper[copper.length - 1], options: copper }],
     apply: (v: { netclass: boolean; width: number; viaSize: number; viaDrill: number; viaType: string; l0: string; l1: string }) => commitSel(ctx, trackEditChanges(ctx.doc, ids, { netclass: v.netclass, width: num0(v.width, 0), viaSize: num0(v.viaSize, 0), viaDrill: num0(v.viaDrill, 0), viaType: v.viaType, viaLayers: [v.l0, v.l1] }, settingsOf(ctx)), "track width") });
 });
-alias("editTracksAndVias", "changeTrackWidth");
 act("setTrackWidthFromNetclass", "Set Track / Via Sizes from Netclass", "", (ctx: PcbCtx) => { const ids = selectionOrToast(ctx, "Select tracks or vias first"); if (!ids) return true; return commitSel(ctx, trackEditChanges(ctx.doc, ids, { netclass: true }, settingsOf(ctx)), "netclass sizes"); });
 act("trackWidthInc", "Increase Track Width", "W", (ctx: PcbCtx) => { if (canEdit(ctx)) cycleWidth(ctx, 1); return true; });
 act("trackWidthDec", "Decrease Track Width", "Shift+W", (ctx: PcbCtx) => { if (canEdit(ctx)) cycleWidth(ctx, -1); return true; });
