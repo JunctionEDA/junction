@@ -159,6 +159,11 @@ textarea.pd-text { width: 100%; min-height: 260px; font-family: var(--mono); fon
 .pd-layercell k-select { flex: 1; }
 .pd-report .ln.sel { background: var(--sel-soft); }
 .pd-report .ln[tabindex] { cursor: pointer; }
+.pd-kicon { display: block; flex: none; }
+.pd-kicon .dk { display: none; }
+:root[data-theme="dark"] .pd-kicon .lt { display: none; } :root[data-theme="dark"] .pd-kicon .dk { display: inline; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pd-kicon .lt { display: none; } :root:not([data-theme="light"]) .pd-kicon .dk { display: inline; } }
+.pd-vline { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
 .pd-reann-dirs { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 8px; }
 .pd-reann-dir { display: flex; align-items: center; gap: 4px; cursor: pointer; }
 .pd-reann-pic { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); }
@@ -522,6 +527,34 @@ export function iconToggle(icon: keyof typeof ICONS, title: string, on: boolean,
 export function iconButton(icon: keyof typeof ICONS, title: string, fn: () => void, disabled?: boolean): HTMLButtonElement {
   const b = h("button", { class: "pd-iconbtn", type: "button", title, disabled: !!disabled });
   b.appendChild(kicadIcon(ICONS[icon], 16)); b.addEventListener("click", fn); return b;
+}
+
+// ---------------------------------------------------------------- KiCad icon-pack bitmaps (STD_BITMAP_BUTTON, wxStaticBitmap)
+interface IconSpecLite { vb?: string; light?: string; dark?: string }
+interface IconGlobals { KiCadIconFor?: (name: string) => IconSpecLite | undefined; KiCadIconsReady?: Promise<void> }
+const iconWaiting = new Set<{ el: SVGSVGElement; name: string }>();
+let iconHooked = false;
+function fillIcon(el: SVGSVGElement, ic: IconSpecLite): void {
+  el.setAttribute("viewBox", ic.vb || "0 0 24 24");
+  el.innerHTML = `<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`;
+}
+/** KiCad's bitmap `name` from the web's icon pack (KiCadIconFor, published by ui.js) as an inline SVG, filled in when the pack arrives. */
+export function kicon(name: string, size = 16): SVGSVGElement {
+  const el = document.createElementNS("http://www.w3.org/2000/svg", "svg") as SVGSVGElement;
+  el.setAttribute("class", "pd-kicon"); el.setAttribute("aria-hidden", "true"); el.setAttribute("viewBox", "0 0 24 24");
+  el.setAttribute("width", String(size)); el.setAttribute("height", String(size)); el.setAttribute("data-icon", name);
+  const g = window as unknown as IconGlobals; const ic = g.KiCadIconFor ? g.KiCadIconFor(name) : undefined;
+  if (ic) fillIcon(el, ic);
+  else {
+    iconWaiting.add({ el, name });
+    if (!iconHooked && g.KiCadIconsReady) { iconHooked = true; g.KiCadIconsReady.then(() => { for (const w of iconWaiting) { const i = (window as unknown as IconGlobals).KiCadIconFor?.(w.name); if (i) fillIcon(w.el, i); } iconWaiting.clear(); }).catch(() => undefined); }
+  }
+  return el;
+}
+/** STD_BITMAP_BUTTON with KiBitmapBundle( BITMAPS::<name> ): a small square button drawing the icon-pack bitmap. */
+export function bitmapButton(name: string, title: string, fn: () => void, opts?: { key?: string; disabled?: boolean }): HTMLButtonElement {
+  const b = h("button", { class: "pd-iconbtn", type: "button", title, "data-k": opts && opts.key, "data-icon": name, disabled: !!(opts && opts.disabled) });
+  b.append(kicon(name)); b.addEventListener("click", fn); return b;
 }
 
 export type CellValue = string | number | boolean;

@@ -76,3 +76,20 @@ test("Filter Selected Items: KiCad's eight options", () => {
   assert.deepEqual(keep(Object.assign({}, off, { includePcbTexts: true })), ["t1"]);
   assert.deepEqual(keep(Object.assign({}, off, { includeZones: true, includeTracks: true })), ["s1", "s2", "z1"]);
 });
+test("Zone Manager: automatically assign zone priorities", () => {
+  const Z = (net, name, x0, y0, x1, y1, prio) => `(zone (net ${net}) (net_name "${name}") (layer "F.Cu") (uuid "z${name}")${prio ? ` (priority ${prio})` : ""} (connect_pads (clearance 0.5)) (min_thickness 0.25) (fill (thermal_gap 0.5) (thermal_bridge_width 0.5)) (polygon (pts (xy ${x0} ${y0}) (xy ${x1} ${y0}) (xy ${x1} ${y1}) (xy ${x0} ${y1}))))`;
+  const board = (zones, extra = "") => K.parseDoc(`(kicad_pcb (version 20241229) (layers (0 "F.Cu" signal) (2 "B.Cu" signal)) (net 0 "") (net 1 "GND") (net 2 "VCC") ${zones} ${extra})`, "kicad_pcb");
+  // the small VCC zone inside the big GND one, both without pads: the smaller zone wins
+  let d = board(Z(1, "GND", 0, 0, 50, 50, 1) + Z(2, "VCC", 10, 10, 20, 20, 0));
+  let p = T.autoZonePriorities(d);
+  assert.ok(p.get("zVCC") > p.get("zGND"), JSON.stringify([...p]));
+  // already in that order: nothing changes
+  assert.equal(T.autoZonePriorities(board(Z(1, "GND", 0, 0, 50, 50, 0) + Z(2, "VCC", 10, 10, 20, 20, 1))), null);
+  // GND vias in the overlap outnumber the VCC ones: GND goes on top
+  const vias = [11, 12, 13, 14].map((x, i) => `(via (at ${x} 15) (size 0.6) (drill 0.3) (layers "F.Cu" "B.Cu") (net 1) (uuid "v${i}"))`).join(" ");
+  d = board(Z(1, "GND", 0, 0, 50, 50, 0) + Z(2, "VCC", 10, 10, 20, 20, 1), vias);
+  p = T.autoZonePriorities(d);
+  assert.ok(p.get("zGND") > p.get("zVCC"), JSON.stringify([...p]));
+  // apart: no overlap, no change
+  assert.equal(T.autoZonePriorities(board(Z(1, "GND", 0, 0, 5, 5, 0) + Z(2, "VCC", 10, 10, 20, 20, 1))), null);
+});

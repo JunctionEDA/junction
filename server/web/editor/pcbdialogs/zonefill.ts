@@ -166,6 +166,22 @@ function fillChanges(doc: KDoc, results: ZoneFillResult[], F: KiCadFabApi): KCha
   return out;
 }
 
+/**
+ * DIALOG_ZONE_MANAGER::OnUpdateDisplayedZonesClick: the fills of `ids` as they would be with the zones' staged nodes
+ * (the dialog's clones), the board left as it is.  Layer by layer per zone, or null when it failed.
+ */
+export async function previewZoneFill(doc: KDoc, staged: Map<string, SNode>, ids: string[]): Promise<Map<string, { layer: string; outlines: number[][][] }[]> | null> {
+  try {
+    const F = await loadFab();
+    const items = new Map(doc.items);
+    for (const [id, node] of staged) { const it = items.get(id); if (it) items.set(id, { ...it, node, geom: [], bbox: null } as unknown as KItem); }
+    const copy = { ...(doc as unknown as Record<string, unknown>), items } as unknown as KDoc;
+    const results = await computeFill(copy, ids, null, F);
+    if (!results) return null;
+    return new Map(results.map((r) => [r.id, r.layers.map((l) => ({ layer: l.layer, outlines: l.outlines as unknown as number[][][] }))]));
+  } catch (e) { console.warn("zone preview fill:", e); return null; }
+}
+
 let inProgress = false;
 export const fillInProgress = (): boolean => inProgress;
 

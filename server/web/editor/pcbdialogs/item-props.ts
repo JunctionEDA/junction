@@ -7,7 +7,7 @@
 // keep pcb-tools' Pad Properties; dimensions open Dimension Properties from ./dimension).
 import { KICAD_FONT, faceOfFont, fontField, setFaceOfFont } from "../../dialogs/font-picker";
 import { trackViaDialog } from "./track-via";
-import { box, checkField, errorMessage, fmtLenU, form, grid, gridButtons, h, coordField, iconToggle, lenField, messageBox, notebook, numField, openDialog, selectField, textField, unitLabel, type CellValue, type Field } from "./ui";
+import { bitmapButton, box, checkField, errorMessage, fmtLenU, form, grid, gridButtons, h, coordField, iconToggle, lenField, messageBox, notebook, numField, openDialog, selectField, textField, unitLabel, type CellValue, type Field } from "./ui";
 import { comboBox } from "../../components/kcombo";
 import { E } from "../state";
 import { kicadActionAvailable, runKicadAction } from "../hotkeys";
@@ -21,6 +21,7 @@ import { refImageDialog } from "./refimage";
 import { zoneSettingsPanel, type ZoneDefaults } from "./board-setup-pages";
 import { models3dPanel, whenGone } from "./model3d";
 import { state } from "../appstore";
+import { previewZoneFill } from "./zonefill";
 
 const isList = Array.isArray;
 const K = (): KiCadCanvasApi => KiCadCanvas;
@@ -350,27 +351,85 @@ export function openZoneManager(ctx: ToolCtx): boolean {
   const doc = ctx.doc as KDoc; if (!doc) return false;
   const ro = !!ctx.viewOnly;
   const isCopperZone = (it: KItem): boolean => it.kind === "zone" && !kid(it.node, "keepout") && Array.from(zoneLayerSet(doc, it.node)).some((l) => /\.Cu$/.test(l));
-  interface Row { item: KItem; name: string; net: string; layers: string[]; v0: ZoneDefaults; v: ZoneDefaults; prio0: number }
-  const rows: Row[] = Array.from(doc.items.values()).filter(isCopperZone).map((it) => ({ item: it, name: sval(kid(it.node, "name")), net: PH().netNameOf(doc, it.node) || "", layers: Array.from(zoneLayerSet(doc, it.node)).filter((l) => /\.Cu$/.test(l)),
-    v0: zoneValues(it.node), v: zoneValues(it.node), prio0: nval(kid(it.node, "priority")) }));
+  interface Row { item: KItem; name: string; net: string; locked: boolean; layers: string[]; v0: ZoneDefaults; v: ZoneDefaults; prio0: number; fill: { layer: string; outlines: number[][][] }[] | null }
+  const rows: Row[] = Array.from(doc.items.values()).filter(isCopperZone).map((it) => ({ item: it, name: sval(kid(it.node, "name")), net: PH().netNameOf(doc, it.node) || "", locked: PT().isLocked(it.node),
+    layers: Array.from(zoneLayerSet(doc, it.node)).filter((l) => /\.Cu$/.test(l)), v0: zoneValues(it.node), v: zoneValues(it.node), prio0: nval(kid(it.node, "priority")), fill: null }));
   rows.sort((a, b) => b.prio0 - a.prio0);   // ZONE_SETTINGS_BAG: the highest priority first
   if (!rows.length) { errorMessage("No copper zones on this board."); return true; }
+  const deleted: Row[] = [];   // m_zonesToDelete: removed on OK
   let sel = 0, panel: ReturnType<typeof zoneSettingsPanel> | null = null;
   const filter = h("input", { type: "search", class: "kd-input", placeholder: "Filter", "data-k": "zoneFilter", style: "width:100%" });
   const byName = checkField(true, "Name", { key: "filterName" }), byNet = checkField(true, "Net", { key: "filterNet" });
   const layerFilter = selectField<string>("", [["", "All Layers"], ...doc.copper.map((l): [string, string] => [l, layerLabel(doc, l)])], { key: "layerFilter" });
-  const table = h("tbody"), right = h("div", { style: "min-width:0" });
+  const table = h("tbody"), right = h("div", { style: "min-width:0;display:flex;flex-direction:column" });
   const visible = (r: Row): boolean => {
     const t = filter.value.trim().toLowerCase();
     if (t && !((byName.get() && r.name.toLowerCase().includes(t)) || (byNet.get() && r.net.toLowerCase().includes(t)))) return false;
     return !layerFilter.get() || r.layers.includes(layerFilter.get());
   };
-  const keep = (): void => { if (panel && rows[sel]) rows[sel].v = panel.get(); };
+  // PANEL_ZONE_PROPERTIES' header for the selected zone: Zone name, Net name, Locked
+  let head: { name: Field<string>; net: Field<string>; locked: Field<boolean> } | null = null;
+  const keep = (): void => {
+    const r = rows[sel]; if (!r) return;
+    if (panel) r.v = panel.get();
+    if (head) { r.name = head.name.get().trim(); r.net = head.net.get(); r.locked = head.locked.get(); }
+  };
   const selectOnCanvas = checkField(false, "Select on canvas", { key: "autoSelect", tip: "Select and focus the highlighted zone on the board canvas" });
+  // ZONE_PREVIEW_NOTEBOOK: a page per layer of the zone, drawing the board outline, the zone's outline and its fill
+  const preview = h("div", { style: "margin-top:6px" });
+  const edges: number[][][] = [];
+  for (const it of doc.items.values()) if (/^gr_(line|arc|rect|poly|circle)$/.test(String(it.kind)) && sval(kid(it.node, "layer")) === "Edge.Cuts") for (const g of (it.geom || []) as unknown as Record<string, number & number[][]>[]) {
+    if (g.t as unknown === "line") edges.push([[g.x1, g.y1], [g.x2, g.y2]]);
+    else if (g.t as unknown === "poly" && g.pts) edges.push(g.close as unknown ? [...g.pts, g.pts[0]] : g.pts);
+    else if (g.t as unknown === "circle" || g.t as unknown === "arc") {
+      const a0 = g.t as unknown === "arc" ? g.a0 : 0, a1 = g.t as unknown === "arc" ? g.a1 : 2 * Math.PI, pts: number[][] = [];
+      let span = a1 - a0; if (g.t as unknown === "arc" && g.anticlockwise as unknown) span = -((2 * Math.PI - span) % (2 * Math.PI));
+      for (let k = 0; k <= 32; k++) { const t = a0 + (span * k) / 32; pts.push([g.x + g.r * Math.cos(t), g.y + g.r * Math.sin(t)]); }
+      edges.push(pts);
+    }
+  }
+  const drawPreview = (r: Row | undefined): void => {
+    preview.replaceChildren();
+    if (!r) return;
+    const nb = notebook(r.layers.map((layer) => ({ label: layerLabel(doc, layer), build: (el: HTMLElement) => {
+      const cv = h("canvas", { width: 520, height: 200, "data-k": "zonePreview", style: "width:100%;height:200px;display:block;border:1px solid var(--line);border-radius:var(--r-2);background:var(--canvas)" }) as HTMLCanvasElement;
+      el.append(cv);
+      requestAnimationFrame(() => {
+        const w = cv.clientWidth || 520, hh = cv.clientHeight || 200, dpr = window.devicePixelRatio || 1;
+        cv.width = Math.round(w * dpr); cv.height = Math.round(hh * dpr);
+        const g = cv.getContext("2d"); if (!g) return;
+        const outline = K().kids(r.item.node, "polygon").map((p: SNode) => K().ptsOf(p) as number[][]).filter((o: number[][]) => o.length > 2);
+        const fills = r.fill ? (r.fill.find((f) => f.layer === layer) || { outlines: [] }).outlines
+          : K().kids(r.item.node, "filled_polygon").filter((fp: SNode) => !kid(fp, "layer") || sval(kid(fp, "layer")) === layer).map((fp: SNode) => K().ptsOf(fp) as number[][]);
+        const all = [...outline, ...edges].flat(); if (!all.length) return;
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (const [x, y] of all) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+        const sc = Math.min((cv.width - 16 * dpr) / Math.max(1e-6, x1 - x0), (cv.height - 16 * dpr) / Math.max(1e-6, y1 - y0));
+        const ox = (cv.width - (x1 - x0) * sc) / 2 - x0 * sc, oy = (cv.height - (y1 - y0) * sc) / 2 - y0 * sc;
+        const path = (pts: number[][], close: boolean): void => { g.beginPath(); pts.forEach(([x, y], i) => (i ? g.lineTo(x * sc + ox, y * sc + oy) : g.moveTo(x * sc + ox, y * sc + oy))); if (close) g.closePath(); };
+        const color = (KiCadCanvas as unknown as { pcbColor(l: string): string }).pcbColor(layer);
+        g.lineWidth = Math.max(1, dpr);
+        g.strokeStyle = (KiCadCanvas as unknown as { pcbColor(l: string): string }).pcbColor("Edge.Cuts"); for (const e of edges) { path(e, false); g.stroke(); }
+        g.fillStyle = color; g.globalAlpha = 0.85;
+        g.beginPath(); for (const f of fills) f.forEach(([x, y], i) => (i ? g.lineTo(x * sc + ox, y * sc + oy) : g.moveTo(x * sc + ox, y * sc + oy))); g.fill("evenodd");
+        g.globalAlpha = 1; g.strokeStyle = color; for (const o of outline) { path(o, true); g.stroke(); }
+      });
+    } })), { fill: false });
+    preview.append(nb.el);
+  };
   const showPanel = (): void => {
-    const r = rows[sel]; if (!r) { right.replaceChildren(); panel = null; return; }
+    const r = rows[sel]; if (!r) { right.replaceChildren(); panel = null; head = null; preview.replaceChildren(); return; }
     panel = zoneSettingsPanel(r.v, ro);
-    right.replaceChildren(h("div", { class: "pd-colhead" }, r.name || "(unnamed zone)", r.net ? `  [${r.net}]` : ""), panel.el);
+    const name = textField(r.name, { ro, key: "zoneName" }); name.input.title = "A unique name for this zone, used to identify it in DRC rules";
+    const names = PH().boardNetNames(doc).filter((n) => n);
+    const net = selectField<string>(r.net, [["", "<no net>"], ...withCurrent(names.map((n): [string, string] => [n, n]), r.net)], { ro, key: "zoneNet" });
+    const locked = checkField(r.locked, "Locked", { ro, key: "zoneLocked" });
+    head = { name, net, locked };
+    // OnZoneNameUpdate / OnZoneNetUpdate: the list follows
+    const relist = (): void => { keep(); draw(); };
+    name.input.addEventListener("input", relist); net.input.addEventListener("change", relist);
+    right.replaceChildren(form([["Zone name:", name.el, null, "A unique name for this zone, used to identify it in DRC rules"], ["Net name:", net.el]], true), locked.el, panel.el, preview);
+    drawPreview(r);
     if (selectOnCanvas.get() && CollabTools.pcb) { (CollabTools.pcb.state as unknown as { sel: Set<string> }).sel = new Set([r.item.id]); ctx.requestRender(); }
   };
   const draw = (): void => {
@@ -387,17 +446,61 @@ export function openZoneManager(ctx: ToolCtx): boolean {
     const [r] = rows.splice(sel, 1); rows.splice(j, 0, r); sel = j; draw();
   };
   const TIP = "Top zone has the highest priority. When a zone is inside another zone, if its priority is higher, its outlines are removed from the other zone.";
-  const mv = (label: string, fn: (i: number) => number): HTMLButtonElement => { const b = h("button", { type: "button", class: "btn", title: TIP, disabled: ro }, label); b.addEventListener("click", () => move(fn)); return b; };
+  const mv = (icon: string, key: string, fn: (i: number) => number): HTMLButtonElement => bitmapButton(icon, TIP, () => move(fn), { key, disabled: ro });
+  // OnAutoAssignClick: AutoAssignZonePriorities over the list's order, the list re-sorted by the result
+  const autoAssign = (): void => {
+    keep();
+    const cur = new Map(rows.map((r, i) => [r.item.id, rows.length - 1 - i]));
+    const pr = (window as unknown as { PcbTools: { autoZonePriorities(d: KDoc, c: Map<string, number>): Map<string, number> | null } }).PcbTools.autoZonePriorities(doc, cur);
+    if (!pr) return;
+    const picked = rows[sel];
+    rows.sort((a, b) => (pr.get(b.item.id) ?? 0) - (pr.get(a.item.id) ?? 0) || (cur.get(b.item.id)! - cur.get(a.item.id)!));
+    sel = Math.max(0, rows.indexOf(picked)); draw(); showPanel();
+  };
+  // OnDeleteClick: "Delete zone '%s'?", then the zone leaves the list (and the board on OK)
+  const del = (): void => {
+    const r = rows[sel]; if (!r) return;
+    messageBox("Confirmation", `Delete zone '${r.name}'?`, [{ label: "Cancel" }, { label: "OK", fn: () => {
+      deleted.push(r); rows.splice(sel, 1); sel = Math.min(sel, rows.length - 1); draw(); showPanel(); syncButtons();
+    } }]);
+  };
+  const autoBtn = bitmapButton("small_sort_desc", "Automatically assign zone priorities based on connectivity analysis of overlapping regions.", autoAssign, { key: "autoAssign", disabled: ro });
+  const delBtn = bitmapButton("small_trash", "Delete selected zone", del, { key: "deleteZone", disabled: ro });
+  const moveBtns = [mv("small_top", "moveTop", () => 0), mv("small_up", "moveUp", (i) => i - 1), mv("small_down", "moveDown", (i) => i + 1), mv("small_bottom", "moveBottom", () => rows.length - 1)];
+  // OnZonesTableRowCountChange: the priority buttons need two zones
+  const syncButtons = (): void => { for (const b of [...moveBtns, autoBtn]) b.disabled = ro || rows.length < 2; delBtn.disabled = ro || !rows.length; };
   filter.addEventListener("input", draw); byName.input.addEventListener("change", draw); byNet.input.addEventListener("change", draw); layerFilter.input.addEventListener("change", draw);
   const refill = checkField(true, "Refill zones", { key: "repour", tip: "Refill zones after changes made on board" });
-  openDialog({ title: "Zone Manager", width: 1000, readOnly: ro, persist: true,
+  /** a zone row as it will be written */
+  const stagedNode = (r: Row, i: number): SNode => {
+    const node = (K().cloneNode as (n: SNode) => SNode)(r.item.node);
+    writeZone(node, r.v, r.v0);
+    const prio = rows.length - 1 - i;   // the top of the list is the highest priority
+    if (prio !== r.prio0) { if (prio) put(node, "priority", `(priority ${prio})`, ["connect_pads", "min_thickness"]); else put(node, "priority", null); }
+    if (r.name !== sval(kid(node, "name"))) { if (r.name) put(node, "name", `(name ${quote(r.name)})`, ["hatch", "priority", "connect_pads"]); else put(node, "name", null); }
+    if (r.net !== (PH().netNameOf(doc, node) || "")) setNet(doc, node, r.net);
+    if (r.locked !== PT().isLocked(node)) { const out = PT().setLocked(node, r.locked); if (out && out !== node) node.splice(0, node.length, ...out); }
+    return node;
+  };
+  // OnUpdateDisplayedZonesClick: refill the clones with the current settings and show them
+  const update = h("button", { type: "button", class: "btn", "data-k": "updateDisplayedZones", title: "Update filled areas shown in dialog, according to the new current settings" }, "Update Displayed Zones") as HTMLButtonElement;
+  update.addEventListener("click", () => {
+    keep(); update.disabled = true;
+    const staged = new Map(rows.map((r, i) => [r.item.id, stagedNode(r, i)]));
+    void previewZoneFill(doc, staged, rows.map((r) => r.item.id)).then((res) => {
+      update.disabled = false; if (!res) return;
+      for (const r of rows) r.fill = res.get(r.item.id) || [];
+      drawPreview(rows[sel]);
+    });
+  });
+  openDialog({ title: "Zone Manager", width: 1100, readOnly: ro, persist: true,
     build(body) {
-      const list = h("div", { class: "pd-grid", style: "max-height:360px" }, h("table", null, h("thead", null, h("tr", null, h("th", null, "Name"), h("th", null, "Net"), h("th", null, "Layers"))), table));
+      const list = h("div", { class: "pd-grid", style: "max-height:420px;min-height:200px" }, h("table", null, h("thead", null, h("tr", null, h("th", null, "Name"), h("th", null, "Net"), h("th", null, "Layers"))), table));
       body.append(h("div", { class: "pd-cols2", style: "grid-template-columns:2fr 3fr;gap:12px" },
         h("div", null, filter, h("div", { class: "pd-row" }, byName.el, byNet.el, h("label", { style: "margin-left:auto" }, "Layer:"), layerFilter.el), list,
-          h("div", { class: "pd-row", style: "margin-top:6px;flex-wrap:wrap" }, mv("Move to Top", () => 0), mv("Move Up", (i) => i - 1), mv("Move Down", (i) => i + 1), mv("Move to Bottom", () => rows.length - 1))),
-        right), h("div", { class: "pd-row", style: "margin-top:8px" }, refill.el, selectOnCanvas.el));
-      draw(); showPanel();
+          h("div", { class: "pd-row", style: "margin-top:6px;gap:4px" }, ...moveBtns, h("span", { class: "pd-vline" }), autoBtn, h("span", { style: "flex:1" }), delBtn)),
+        right), h("hr", { class: "pd-sep" }), h("div", { class: "pd-row", style: "margin-top:4px" }, refill.el, selectOnCanvas.el, h("span", { style: "flex:1" }), update));
+      draw(); showPanel(); syncButtons();
     },
     ok() {
       if (ro) return true;
@@ -405,12 +508,10 @@ export function openZoneManager(ctx: ToolCtx): boolean {
       const bad = panel ? panel.validate() : null; if (bad) { showApplyError({ msg: bad.msg, focus: bad.ctrl || null }); return false; }
       const changes: KChange[] = [];
       rows.forEach((r, i) => {
-        const node = (K().cloneNode as (n: SNode) => SNode)(r.item.node), before = K().serialize(node);
-        writeZone(node, r.v, r.v0);
-        const prio = rows.length - 1 - i;   // the top of the list is the highest priority
-        if (prio !== r.prio0) { if (prio) put(node, "priority", `(priority ${prio})`, ["connect_pads", "min_thickness"]); else put(node, "priority", null); }
-        if (K().serialize(node) !== before) changes.push(K().replaceChange(doc, { ...r.item, node, geom: [], bbox: null }));
+        const node = stagedNode(r, i);
+        if (K().serialize(node) !== K().serialize(r.item.node)) changes.push(K().replaceChange(doc, { ...r.item, node, geom: [], bbox: null }));
       });
+      for (const r of deleted) changes.push(K().removeChange(r.item));
       if (changes.length) ctx.commit(changes, "Zone Manager");
       if (refill.get() && changes.length) setTimeout(() => runKicadAction("zoneFillAll"), 0);
       return true;
