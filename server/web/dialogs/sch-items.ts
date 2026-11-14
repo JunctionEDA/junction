@@ -392,7 +392,7 @@ export function openTextDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
       g.append(h("label", null, "Text size:"), h("span", { style: "display:flex;gap:6px;align-items:center" }, size, units(), h("label", { style: "margin-left:15px" }, "Color:"), tcol.el), h("span"));
       if (box) {
         const bw = lenBox(stroke.width, "kd-txt-bwidth"); els.bwidth = bw; bcol = swatch(stroke.color, "kd-txt-bcolor", undefined, ro);
-        const bst = select(L.LINE_STYLES, stroke.style, undefined, { id: "kd-txt-bstyle", disabled: ro }); els.bstyle = bst;
+        const bst = select(L.LINE_STYLES, stroke.style, undefined, { id: "kd-txt-bstyle", disabled: ro, icons: L.LINE_STYLE_ICONS }); els.bstyle = bst;
         const border = checkbox("Border", stroke.width >= 0, undefined, { id: "kd-txt-border" }); els.border = border.querySelector("input") as HTMLInputElement;
         g.append(h("span"), border, h("span"), h("label", null, "Width:"), h("span", { style: "display:flex;gap:6px;align-items:center" }, bw, units()), h("span"),
           h("label", null, "Color:"), bcol.el, h("span"), h("label", null, "Style:"), bst, h("span"));
@@ -596,7 +596,7 @@ function strokeDialog(ctx: Ctx, items: KItem[], kind: "lines" | "wires"): void {
       g.append(h("label", null, kind === "lines" ? "Width:" : "Wire/bus width:"), h("span", { style: "display:flex;gap:6px;align-items:center" }, width, units()), h("span"));
       col = swatch(c === undefined ? null : c, "kd-ln-color", () => { colTouched = true; }, ro);
       g.append(h("label", null, "Color:"), col.el, h("span"));
-      style = select(styles, sty0, undefined, { id: "kd-ln-style", disabled: ro });
+      style = select(styles, sty0, undefined, { id: "kd-ln-style", disabled: ro, icons: L.LINE_STYLE_ICONS });
       g.append(h("label", null, "Style:"), style, h("span"));
       if (kind === "wires") {
         jsize = lenBox(jd, "kd-ln-jsize"); jsize.disabled = ro || !juncs.length; if (juncs.length && jd === undefined) jsize.value = INDETERMINATE_ACTION;
@@ -668,7 +668,7 @@ function shapeDialog(ctx: Ctx, item: KItem): void {
     build(b) {
       const g = h("div", { class: "kd-fmt" });
       const bw = lenBox(st.width >= 0 ? st.width : 0, "kd-sh-width"); els.width = bw;
-      const style = select(L.LINE_STYLES, st.style, undefined, { id: "kd-sh-style", disabled: ro }); els.style = style;
+      const style = select(L.LINE_STYLES, st.style, undefined, { id: "kd-sh-style", disabled: ro, icons: L.LINE_STYLE_ICONS }); els.style = style;
       bc = swatch(st.color, "kd-sh-bcolor", undefined, ro);
       const border = checkbox("Border", st.width >= 0, (on) => { bw.disabled = !on; style.disabled = !on; if (bc) bc.enable(on); if (on && !lenValue(bw)) bw.value = fmtLen(0); }, { id: "kd-sh-border" });
       els.border = border.querySelector("input") as HTMLInputElement;

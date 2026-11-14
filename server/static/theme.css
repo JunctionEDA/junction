@@ -220,6 +220,7 @@ k-select.input { min-height: var(--h-md); height: auto; }
             background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-3);
             box-shadow: var(--shadow); user-select: none; -webkit-user-select: none; }
 .ksel-opt { padding: 3px 10px; white-space: nowrap; cursor: default; line-height: 1.35; }
+.ksel-opt.ic { display: flex; align-items: center; gap: 5px; }
 .ksel-opt.on { background: var(--sel); }
 .ksel-opt.hi { background: var(--accent); color: var(--on-accent); }
 .ksel-opt.dis { color: var(--ink-3); }

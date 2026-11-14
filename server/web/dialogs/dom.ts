@@ -88,9 +88,10 @@ export function checkbox(label: string, checked: boolean, onchange?: (on: boolea
   if (onchange) cb.addEventListener("change", () => onchange(cb.checked));
   return h("label", { class: "kd-chk", title: opts?.title }, cb, label);
 }
-export function select(options: (string | [string, string])[], value: string, onchange?: (v: string) => void, opts?: { disabled?: boolean; id?: string; style?: string }): HTMLSelectElement {
+/** A <k-select>; `icons` maps option values to KiCad pack icons drawn before their text (wxBitmapComboBox). */
+export function select(options: (string | [string, string])[], value: string, onchange?: (v: string) => void, opts?: { disabled?: boolean; id?: string; style?: string; icons?: Record<string, string> }): HTMLSelectElement {
   const s = h("k-select", { disabled: opts?.disabled, id: opts?.id, style: opts?.style });
-  for (const o of options) s.append(h("option", { value: Array.isArray(o) ? o[0] : o }, Array.isArray(o) ? o[1] : o));
+  for (const o of options) { const v = Array.isArray(o) ? o[0] : o; s.append(h("option", { value: v, "data-icon": opts?.icons?.[v] }, Array.isArray(o) ? o[1] : o)); }
   s.value = value; if (onchange) s.addEventListener("change", () => onchange(s.value));
   return s;
 }

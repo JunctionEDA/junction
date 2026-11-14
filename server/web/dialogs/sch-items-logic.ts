@@ -22,6 +22,8 @@ export type HAlign = "left" | "center" | "right";
 export type VAlign = "top" | "center" | "bottom";
 export const KICAD_FONT = "KiCad Font";
 export const LINE_STYLES: [string, string][] = [["default", "Default"], ["solid", "Solid"], ["dash", "Dashed"], ["dot", "Dotted"], ["dash_dot", "Dash-Dot"], ["dash_dot_dot", "Dash-Dot-Dot"]];
+/** lineTypeNames' bitmaps (common/stroke_params.cpp): the Default entry has none. */
+export const LINE_STYLE_ICONS: Record<string, string> = { solid: "stroke_solid", dash: "stroke_dash", dot: "stroke_dot", dash_dot: "stroke_dashdot", dash_dot_dot: "stroke_dashdotdot" };
 
 // ---------------------------------------------------------------- generic child edits
 const idx = (n: SNode, k: string): number => { for (let j = 1; j < n.length; j++) { const c = n[j]; if (isList(c) && c[0] === k) return j; } return -1; };

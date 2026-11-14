@@ -13,12 +13,15 @@
 //   open       while the list is up the host carries data-popup-open, so dialogs leave the first Escape to it
 //   keyboard   Space / Alt+Down / Up / Down open; in the list Up, Down, Home, End, PageUp, PageDown move, Enter picks,
 //              Escape and Tab close; typing jumps to the first entry that starts with the typed text
+//   icons      an option with data-icon="<pack icon>" shows KiCad's bitmap before its text (wxBitmapComboBox: line
+//              styles, pin types / shapes / orientations), in the closed control and in the list
 //   separator  a disabled option whose text is "---" (how wxChoice lists are filled) or that has data-sep is a rule
 //   listbox    size > 1 draws the list in place, like a wxListBox: click or arrows pick, double-click bubbles
 //
 // Each bundle that builds a select imports this file; the first one to load defines the element.
 
 import { menuArrowPad, menuScroller } from "../menufit";
+import { kicon } from "../dialogs/kicon";
 
 export const KSELECT_TAG = "k-select";
 
@@ -43,11 +46,29 @@ const SHADOW_CSS = `
 .r.dis { color: var(--ink-3); }
 .r.sep { height: 1px; padding: 0; margin: 3px 4px; background: var(--line); }
 .r.hd { color: var(--ink-2); font-weight: 600; }
+.ic { display: inline-flex; align-items: center; gap: 5px; }
+.ic > svg { flex: none; }
+.sz > span.ic::before { content: ""; display: inline-block; width: 16px; }
 `;
 const CARET = '<svg class="c" viewBox="0 0 8 8" aria-hidden="true"><path d="M1 2.5h6L4 6z" fill="currentColor"/></svg>';
 
 type OptionList = HTMLOptionElement[] & { item(i: number): HTMLOptionElement | null; namedItem(name: string): HTMLOptionElement | null };
 
+/** The option's KiCad icon: the variant of the current theme only (the shadow tree does not see the page's theme rules). */
+function optionIcon(o: HTMLOptionElement): SVGSVGElement | null {
+  const name = o.getAttribute("data-icon"); if (!name) return null;
+  const el = kicon(name, 16), root = document.documentElement, theme = root.getAttribute("data-theme");
+  const dark = theme === "dark" || (theme !== "light" && typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches);
+  const drop = (): void => { const g = el.querySelector(dark ? ".lt" : ".dk"); if (g) g.remove(); const k = el.querySelector(dark ? ".dk" : ".lt") as SVGElement | null; if (k) k.style.display = "inline"; };
+  drop(); if (!el.querySelector("g")) { const mo = new MutationObserver(() => { if (el.querySelector("g")) { mo.disconnect(); drop(); } }); mo.observe(el, { childList: true }); }
+  return el;
+}
+/** Fill a row (or the closed control's label) with the option's icon and text. */
+function fillRow(r: HTMLElement, o: HTMLOptionElement | null): void {
+  const text = o ? o.label || o.text : "", ic = o ? optionIcon(o) : null;
+  if (!ic) { r.classList.remove("ic"); r.textContent = text; return; }
+  r.classList.add("ic"); const t = document.createElement("span"); t.textContent = text; r.replaceChildren(ic, t);
+}
 let popSeq = 0;
 let openOne: { close(): void } | null = null;
 
@@ -181,9 +202,10 @@ export function defineKSelect(): void {
       const dis = this.disabled;
       if (this.btn) {
         this.btn.tabIndex = dis ? -1 : 0; this.btn.setAttribute("aria-disabled", dis ? "true" : "false");
-        const os = this.options, s = this.current(); if (this.label) this.label.textContent = s ? s.label || s.text : "";
-        const all = os.filter((o) => !this.isSep(o)).map((o) => o.label || o.text), key = all.join("\u0001");
-        if (this.sizer && key !== this.sizedFor) { this.sizedFor = key; this.sizer.replaceChildren(...all.map((t) => { const e = document.createElement("span"); e.textContent = t; return e; })); }
+        const os = this.options, s = this.current(); if (this.label) fillRow(this.label, s);
+        const icons = os.some((o) => o.hasAttribute("data-icon"));
+        const all = os.filter((o) => !this.isSep(o)).map((o) => o.label || o.text), key = (icons ? "\u0003" : "") + all.join("\u0001");
+        if (this.sizer && key !== this.sizedFor) { this.sizedFor = key; this.sizer.replaceChildren(...all.map((t) => { const e = document.createElement("span"); e.textContent = t; if (icons) e.className = "ic"; return e; })); }
         if (this.pop) this.fillPop();
       } else if (this.lb) {
         this.lb.tabIndex = dis ? -1 : 0;
@@ -192,7 +214,7 @@ export function defineKSelect(): void {
           const r = document.createElement("div"); r.dataset.i = String(i); r.setAttribute("role", "option");
           const hd = this.head(o, os[i - 1], "r hd");
           if (this.isSep(o)) { r.className = "r sep"; return hd ? [hd, r] : [r]; }
-          r.className = "r" + (o === s ? " on" : "") + (this.pickable(o) ? "" : " dis"); r.textContent = o.label || o.text; r.setAttribute("aria-selected", o === s ? "true" : "false");
+          r.className = "r" + (o === s ? " on" : "") + (this.pickable(o) ? "" : " dis"); fillRow(r, o); r.setAttribute("aria-selected", o === s ? "true" : "false");
           return hd ? [hd, r] : [r];
         }));
         if (!this.style.height) this.lb.style.minHeight = `calc(${this.size} * 1.45em + 2px)`;
@@ -259,7 +281,7 @@ export function defineKSelect(): void {
         if (this.isSep(o)) { const r = document.createElement("div"); r.className = "ksel-sep"; r.setAttribute("role", "separator"); return hd ? [hd, r] : [r]; }
         const r = document.createElement("div"); r.className = "ksel-opt" + (o === s ? " on" : "") + (i === this.hi ? " hi" : "") + (this.pickable(o) ? "" : " dis");
         r.dataset.i = String(i); r.id = pop.id + "-" + i; r.setAttribute("role", "option"); r.setAttribute("aria-selected", o === s ? "true" : "false");
-        r.textContent = o.label || o.text; if (o.title) r.title = o.title;
+        fillRow(r, o); if (o.title) r.title = o.title;
         if (o.parentElement && o.parentElement.tagName === "OPTGROUP") r.classList.add("ind");
         return hd ? [hd, r] : [r];
       }));

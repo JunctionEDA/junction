@@ -40,6 +40,12 @@ export const PIN_SHAPES: [string, string][] = [
 ];
 /** PinOrientationName: file angle -> name. */
 export const PIN_ORIENTATIONS: [number, string][] = [[0, "Right"], [180, "Left"], [90, "Up"], [270, "Down"]];
+/** PINTYPE_COMBOBOX / PINSHAPE_COMBOBOX / the orientation combo's bitmaps (ElectricalPinTypeGetBitmap, PinShapeGetBitmap, PinOrientationIcons). */
+export const PIN_TYPE_ICONS: Record<string, string> = { input: "pintype_input", output: "pintype_output", bidirectional: "pintype_bidi", tri_state: "pintype_3states", passive: "pintype_passive",
+  free: "pintype_nic", unspecified: "pintype_notspecif", power_in: "pintype_powerinput", power_out: "pintype_poweroutput", open_collector: "pintype_opencoll", open_emitter: "pintype_openemit", no_connect: "pintype_noconnect" };
+export const PIN_SHAPE_ICONS: Record<string, string> = { line: "pinshape_normal", inverted: "pinshape_invert", clock: "pinshape_clock_normal", inverted_clock: "pinshape_clock_invert", input_low: "pinshape_active_low_input",
+  clock_low: "pinshape_clock_active_low", output_low: "pinshape_active_low_output", edge_clock_high: "pinshape_clock_fall", non_logic: "pinshape_nonlogic" };
+export const PIN_ORIENT_ICONS: Record<string, string> = { 0: "pinorient_right", 180: "pinorient_left", 90: "pinorient_up", 270: "pinorient_down" };
 
 // ---------------------------------------------------------------- text helpers
 export const q = (s: string): string => '"' + String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';

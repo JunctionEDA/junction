@@ -54,9 +54,9 @@ export function pinDialog(se: SymbolEditor, p: M.PinInfo, existing: M.Node | nul
     const out: M.PinInfo = { ...p, alternates: p.alternates.map((a) => ({ ...a })) };
     const name = textInput(p.name, undefined, { id: "pin-name" }), number = textInput(p.number, undefined, { id: "pin-number" });
     const px = lenInput(p.x, "pin-x"), py = lenInput(-p.y, "pin-y"), len = lenInput(p.length, "pin-length"), ns = lenInput(p.nameSize, "pin-name-size"), nus = lenInput(p.numSize, "pin-num-size");
-    const orient = select(M.PIN_ORIENTATIONS.map(([a, l]) => [String(a), l] as [string, string]), String(p.orient), undefined, { id: "pin-orient" });
-    const type = select(M.PIN_TYPES.map(([a, l]) => [a, l] as [string, string]), p.type, undefined, { id: "pin-type" });
-    const shape = select(M.PIN_SHAPES.map(([a, l]) => [a, l] as [string, string]), p.shape, undefined, { id: "pin-shape" });
+    const orient = select(M.PIN_ORIENTATIONS.map(([a, l]) => [String(a), l] as [string, string]), String(p.orient), undefined, { id: "pin-orient", icons: M.PIN_ORIENT_ICONS });
+    const type = select(M.PIN_TYPES.map(([a, l]) => [a, l] as [string, string]), p.type, undefined, { id: "pin-type", icons: M.PIN_TYPE_ICONS });
+    const shape = select(M.PIN_SHAPES.map(([a, l]) => [a, l] as [string, string]), p.shape, undefined, { id: "pin-shape", icons: M.PIN_SHAPE_ICONS });
     const allUnits = checkbox("Common to all units in symbol", multiUnit && p.unit === 0, () => { syncMsg(); preview(); }, { disabled: !multiUnit, id: "pin-all-units",
       title: se.synchronizePins() ? "Synchronized pins mode is enabled.\nSimilar pins will be edited regardless of this option." : multiUnit ? "If checked, this pin will exist in all units." : "This symbol only has one unit. This control has no effect." });
     if (!multiUnit) allUnits.title = "This symbol only has one unit. This control has no effect.";
@@ -254,7 +254,7 @@ export function editShape(se: SymbolEditor, id: string): void {
   const ref = M.findRef(sym, n)!;
   const ro = se.readOnly();
   const width = lenInput(Math.max(0, st.width), "shape-width");
-  const style = select(L.LINE_STYLES.map(([v, l]) => [v, l] as [string, string]), st.style, undefined, { id: "shape-style" });
+  const style = select(L.LINE_STYLES.map(([v, l]) => [v, l] as [string, string]), st.style, undefined, { id: "shape-style", icons: L.LINE_STYLE_ICONS });
   // the fill swatch follows the radios (TransferDataToWindow / onFillRadioButton / onBorderSwatch): the border colour or
   // LAYER_DEVICE for an outline fill, LAYER_DEVICE_BACKGROUND for a background fill, unspecified for no fill
   const layer = (k: "outline" | "body"): L.Color => L.hexToColor(K().SCH[k] || (k === "outline" ? "#840000" : "#FFFFC2"));
