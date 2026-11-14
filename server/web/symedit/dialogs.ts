@@ -20,6 +20,7 @@ import { openSimModel } from "../dialogs/sim-model";
 import { embeddedModelFiles, projectModelFiles, refPrefix, simPinsOfLib } from "../dialogs/sim-files";
 import { libDocFor } from "./libdoc";
 import type { Units } from "../store";
+import { choiceBox, manageLibraries } from "../dialogs/lib-tables";
 import { chooserPins, netlistFilters, netlistOf, symbolFpFilters, type FpChooserFilters } from "../library/fpchoice";
 
 const K = (): KiCadCanvasApi => window.KiCadCanvas;
@@ -932,57 +933,19 @@ export function checker(se: SymbolEditor): void {
 /** Preferences > Manage Symbol Libraries... (DIALOG_EDIT_LIBRARY_TABLES with PANEL_SYM_LIB_TABLE).  The global table is
  *  the KiCad libraries the server provides (read-only here); the project table is the project's sym-lib-table. */
 export async function manageSymbolLibraries(se: SymbolEditor): Promise<void> {
-  const proj = appState.project; if (!proj) return;
-  const table = proj.docs.find((d) => d.path === "sym-lib-table");
-  let oldText = "";
-  if (table) { try { const r = await fetch(`/api/docs/${table.docId}/content`, { credentials: "same-origin" }); if (r.ok) oldText = await r.text(); } catch (e) { /* empty table */ } }
-  const projRows: M.LibTableRow[] = oldText ? M.parseLibTable(oldText) : [];
-  const globalRows: M.LibTableRow[] = [...se.libs.values()].filter((l) => l.kind === "official").map((l) => ({ enabled: true, visible: true, nickname: l.nick, uri: "${KICAD10_SYMBOL_DIR}/" + l.nick + ".kicad_sym", type: "KiCad", options: "", descr: "" }));
-  const ro = !!E.viewOnly;
-  const cols = (readOnly: boolean): GridColumn<M.LibTableRow>[] => [
-    { key: "enabled", label: "Enable", type: "bool", width: 50 }, { key: "visible", label: "Show", type: "bool", width: 46 },
-    { key: "nickname", label: "Nickname", width: 140 }, { key: "uri", label: "Library Path", width: 300 },
-    { key: "type", label: "Library Format", type: "choice", options: (r: M.LibTableRow) => { const o = ["KiCad", "Legacy", "Database", "Table"]; return o.includes(r.type) ? o : [...o, r.type]; }, width: 110 },
-    { key: "options", label: "Options", width: 70 }, { key: "descr", label: "Description", width: 180 },
-  ].map((c) => (readOnly ? { ...c, ro: () => true } : c)) as GridColumn<M.LibTableRow>[];
-  let nb: NotebookApi | null = null; let projGrid: GridApi<M.LibTableRow> | null = null;
-  KD().open({
-    title: "Symbol Libraries", width: 960, cls: "kd-wide", readOnly: ro,
-    build(body) {
-      nb = KD().notebook(body, [
-        { label: "Global Libraries (read-only)", build(pg) { KD().grid(pg, cols(true), globalRows, { readOnly: true, height: 300 }); } },
-        { label: "Project Specific Libraries", build(pg) {
-          projGrid = KD().grid(pg, cols(ro), projRows, { readOnly: ro, height: 300, buttons: ro ? undefined : { add: () => ({ enabled: true, visible: true, nickname: "", uri: "", type: "KiCad", options: "", descr: "" }), addTitle: "Add empty row to table", remove: true, removeTitle: "Remove library from table", move: true } });
-        } },
-      ], { selected: 1 });
-      const subs = KD().staticBox(body, "Available path substitutions:");
-      KD().grid(subs, [{ key: "name", label: "Name", type: "ro", width: 220 }, { key: "value", label: "Value", type: "ro", width: 520 }],
-        [{ name: "KICAD10_SYMBOL_DIR", value: "(the KiCad symbol libraries this server provides)" }, { name: "KIPRJMOD", value: "(the project folder)" }], { readOnly: true, height: 70 });
-    },
-    ok() {
-      if (ro) return true;
-      const v = M.verifyLibTable(projRows);
-      if (v.error) { nb && nb.select(1); if (projGrid && v.row !== undefined) projGrid.select(v.row); void messageBox(v.error, "Library Nickname Error"); return false; }
-      projRows.splice(0, projRows.length, ...v.rows); projGrid && projGrid.refresh();
-      const before = oldText ? M.parseLibTable(oldText) : [];
-      if (JSON.stringify(before) === JSON.stringify(v.rows)) return true;
-      const text = M.formatLibTable(v.rows);
-      void (async () => {
-        try {
-          if (table) { if (!(await saveTextDocument(table.docId, text, { id: "table", kind: "MODIFIED", typeName: "LIB_TABLE", properties: [] } as unknown as KChange))) throw new Error("not saved"); }
-          else {
-            const d = await api(`/api/projects/${proj.projectId}/docs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: "sym-lib-table" }) }) as { docId: string; path: string; docType: string };
-            if (!(await firstSnapshot(d.docId, text))) throw new Error("not saved");
-            proj.docs.push({ docId: d.docId, path: d.path, docType: d.docType || "lib_table" });
-          }
-          se.reloadLibTable(v.rows);
-        } catch (e) { await messageBox("Error saving project library table:\n\n" + (e as Error).message, "File Save Error"); }
-      })();
-      return true;
-    },
-  });
+  if (!appState.project) return;
+  // InvokeSchEditSymbolLibTable: unsaved library changes are saved or discarded before the table can change
+  const modified = se.projectLibs().filter((l) => l.doc && l.doc.isModified);
+  if (modified.length) {
+    const c = await choiceBox("Save Changes?", "Modifications have been made to one or more symbol libraries.\nChanges must be saved or discarded before the symbol library table can be modified.",
+      ["Discard Changes", "Cancel", "Save"], { def: 2, esc: 1, detail: "If you don't save, all your changes will be permanently lost." });
+    if (c.index === 1) return;
+    if (c.index === 2) await se.saveAll();
+    else for (const l of modified) if (l.doc) await l.doc.revert().catch(() => 0);
+    se.renderAll();
+  }
+  await manageLibraries("symbol", { readOnly: !!E.viewOnly, loadError: (r) => { const l = se.libs.get(r.nickname); return l && l.error ? String(l.error) : null; }, onSaved: (rows) => se.reloadLibTable(rows) });
 }
-
 // ---------------------------------------------------------------- Update Symbol Fields
 /** DIALOG_UPDATE_SYMBOL_FIELDS: reset a derived symbol's fields from its parent (LIB_SYMBOL::SyncFieldsFromParent). */
 export function updateSymbolFields(se: SymbolEditor): void {

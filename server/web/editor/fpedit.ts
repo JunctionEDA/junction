@@ -1171,6 +1171,8 @@ export function installFpEditHandlers(HANDLERS: Record<string, ActionHandler>): 
   } as Record<string, ActionHandler>);
 }
 
+/** The library table dialog wrote fp-lib-table: the Libraries pane follows it (FOOTPRINT_EDIT_FRAME::SyncLibraryTree). */
+window.addEventListener("kc-libtable-changed", ((ev: CustomEvent) => { if (ev.detail && ev.detail.kind === "footprint") void libTableRows(true).then(() => publishLibs()); }) as EventListener);
 window.addEventListener("kc-fpedit-pick", ((ev: CustomEvent) => { const id = ev.detail && ev.detail.docId; if (id && isFpEdit() && id !== state.docId) openFootprintDoc(id); }) as EventListener);
 /** The Libraries pane's click (and New Footprint / Save As) opens a footprint in place. */
 window.addEventListener("kc-fpedit-open", ((ev: CustomEvent) => {

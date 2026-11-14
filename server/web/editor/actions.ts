@@ -119,6 +119,9 @@ export const HANDLERS: Record<string, ActionHandler> = {
   generateGerbers: () => { void openPlotDialog({ gerber: true }); }, generateDrillFiles: () => { void openGendrill(); }, generatePosFile: () => { void openPosFile(); }, generateODBPPFile: () => { void openOdbpp(); },
   fabPackage: () => openFabOutputs("gerber"),
   print: () => printDialog(),
+  // Preferences > Manage Symbol / Footprint Libraries (DIALOG_EDIT_LIBRARY_TABLES)
+  showSymbolLibTable: () => { void import("../dialogs/lib-tables").then((m) => m.manageLibraries("symbol", { readOnly: !!E.viewOnly })); },
+  showFootprintLibTable: () => { void import("../dialogs/lib-tables").then((m) => m.manageLibraries("footprint", { readOnly: !!E.viewOnly })); },
   // Tools > Variants (SCH_EDIT_FRAME::AddVariant … CopyVariant)
   addVariant: () => { if (isSch()) addVariant(); }, removeVariant: () => { if (isSch()) void removeVariant(); }, editVariantDescription: () => { if (isSch()) void editVariantDescription(); },
   renameVariant: () => { if (isSch()) void renameVariant(); }, copyVariant: () => { if (isSch()) void copyVariant(); },
