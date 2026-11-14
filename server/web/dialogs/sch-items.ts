@@ -21,6 +21,7 @@ import { refImageDialog } from "../editor/pcbdialogs/refimage";
 import { E, toast, toolCtx } from "./editor";
 import { KD, popupMenu, checkbox, confirmBox, h, select, textInput } from "./dom";
 import { comboBox } from "../components/kcombo";
+import { pageNumbersAndNames } from "../editor/panels/hierarchy";
 import { colorPicker, type RGBA } from "../editor/pcbdialogs/color-picker";
 import { facesUsed, fontPicker, type FontPickerEl } from "./font-picker";
 import * as L from "./sch-items-logic";
@@ -408,10 +409,24 @@ export function openTextDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
         const ab = checkbox("Common to all body styles", se.multiBody && se.allBodies, undefined, { id: "kd-txt-allbodies", disabled: !se.multiBody }); els.allBodies = ab.querySelector("input") as HTMLInputElement;
         g.append(h("span"), h("span", { style: "display:flex;flex-direction:column;gap:3px;margin-top:6px" }, priv, au, ab), h("span"));
       } else {
-        const href = textInput(fx.href, undefined, { id: "kd-txt-link", style: "width:100%", disabled: ro }); els.link = href;
-        g.append(h("label", null, "Link:"), href, h("span"));
-        const hyper = checkbox("Make this text item a clickable hyperlink", !!fx.href, (on) => { if (!on) (href as HTMLInputElement).value = ""; }, { id: "kd-txt-hyper" });
-        g.append(h("span"), hyper, h("span"));
+        // m_hyperlinkCb "Link:" + the editable m_hyperlinkCombo: the sheet pages as "#<page>", then file:// http:// https://
+        const href = textInput(fx.href, undefined, { id: "kd-txt-link", style: "width:100%", disabled: ro }) as HTMLInputElement; els.link = href;
+        const pages = pageNumbersAndNames();
+        let lastLink = "", prev = fx.href;
+        const hyper = checkbox("Link:", !!fx.href, (on) => {
+          // onHyperlinkChecked: ticking an empty link starts it with https://; unticking keeps the text to restore later
+          if (on && !href.value) { href.value = lastLink || "https://"; href.focus(); href.setSelectionRange(href.value.length, href.value.length); }
+          else if (!on && href.value) { lastLink = href.value; href.value = ""; }
+          prev = href.value;
+        }, { id: "kd-txt-hyper", disabled: ro });
+        const cb = hyper.querySelector("input") as HTMLInputElement;
+        comboBox(href, L.hyperlinkChoices(pages));
+        href.addEventListener("input", () => {
+          const v = L.hyperlinkPick(href.value, pages, prev);
+          if (v !== href.value) { href.value = v; href.setSelectionRange(v.length, v.length); }
+          prev = href.value; cb.checked = !!href.value;   // onHyperlinkText
+        });
+        g.append(hyper, href, h("span"));
       }
       b.append(g);
       initialFocus(ta);

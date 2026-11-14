@@ -585,3 +585,15 @@ export function fieldNamesAreDuplicates(a: string, b: string): boolean {
   if (a.toLowerCase() !== b.toLowerCase()) return false;
   return ["reference", "value", "footprint", "datasheet", "description"].includes(a.toLowerCase());
 }
+
+/** DIALOG_TEXT_PROPERTIES' hyperlink combo (dialog_text_properties.cpp): one "Page <n> (<sheet>)" entry per sheet page,
+ *  a "---" separator, then the file://, http:// and https:// stems. */
+export function hyperlinkChoices(pages: [string, string][]): string[] {
+  return [...pages.map(([p, n]) => `Page ${p} (${n})`), "---", "file://", "http://", "https://"];
+}
+/** onHyperlinkCombo: a page entry becomes "#<page>"; the separator restores the previous text; anything else stays. */
+export function hyperlinkPick(choice: string, pages: [string, string][], prev: string): string {
+  const i = pages.findIndex(([p, n]) => choice === `Page ${p} (${n})`);
+  if (i >= 0) return "#" + pages[i][0];
+  return choice === "---" ? prev : choice;
+}

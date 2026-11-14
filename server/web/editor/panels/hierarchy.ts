@@ -217,3 +217,12 @@ export function hierarchyDispatch(a: PanelAction): boolean {
     default: return false;
   }
 }
+
+/** SCHEMATIC::GetPageNumbersAndNames: every sheet instance's page number with its sheet name, in hierarchy order
+ *  (the hyperlink destinations DIALOG_TEXT_PROPERTIES offers as "#<page>"). */
+export function pageNumbersAndNames(): [string, string][] {
+  const out: [string, string][] = [];
+  const walk = (n: HierNode | null): void => { if (!n) return; if (n.page && !out.some((x) => x[0] === n.page)) out.push([n.page, n.name]); for (const c of n.children) walk(c); };
+  walk(panelStore.get().hierarchy.root);
+  return out;
+}

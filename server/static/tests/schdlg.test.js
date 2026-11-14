@@ -219,4 +219,11 @@ test("pushFindHistory: newest first, repeats move up, empty skipped, capped at 1
   for (let i = 0; i < 20; i++) l = DL.pushFindHistory(l, "x" + i);
   assert.strictEqual(l.length, DL.FIND_HISTORY_MAX); assert.strictEqual(l[0], "x19");
 });
+test("hyperlink combo: page entries map to #<page>, the separator restores the text", () => {
+  const pages = [["1", "Root"], ["2", "sub"]];
+  assert.deepStrictEqual(L.hyperlinkChoices(pages), ["Page 1 (Root)", "Page 2 (sub)", "---", "file://", "http://", "https://"]);
+  assert.strictEqual(L.hyperlinkPick("Page 2 (sub)", pages, ""), "#2");
+  assert.strictEqual(L.hyperlinkPick("---", pages, "https://x"), "https://x");
+  assert.strictEqual(L.hyperlinkPick("file://", pages, ""), "file://");
+});
 process.on("exit", () => { console.log(`schdlg: ${passed} passed, ${failed} failed`); if (failed) process.exitCode = 1; });
