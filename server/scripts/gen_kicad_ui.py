@@ -16,8 +16,10 @@ import json, os, re, sys, xml.etree.ElementTree as ET
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 OUT = os.path.join(ROOT, "server", "web", "generated", "kicad-ui-spec.json")
 
-ACTION_SOURCES = ["common/tool/actions.cpp", "eeschema/tools/sch_actions.cpp", "pcbnew/tools/pcb_actions.cpp"]
-TOOLBAR_SOURCES = {"sch": "eeschema/toolbars_sch_editor.cpp", "pcb": "pcbnew/toolbars_pcb_editor.cpp", "symedit": "eeschema/symbol_editor/toolbars_symbol_editor.cpp", "fpedit": "pcbnew/toolbars_footprint_editor.cpp"}
+ACTION_SOURCES = ["common/tool/actions.cpp", "eeschema/tools/sch_actions.cpp", "pcbnew/tools/pcb_actions.cpp", "cvpcb/tools/cvpcb_actions.cpp"]
+TOOLBAR_SOURCES = {"sch": "eeschema/toolbars_sch_editor.cpp", "pcb": "pcbnew/toolbars_pcb_editor.cpp", "symedit": "eeschema/symbol_editor/toolbars_symbol_editor.cpp", "fpedit": "pcbnew/toolbars_footprint_editor.cpp",
+                   # CvPcb (Assign Footprints) and its footprint viewer (DISPLAY_FOOTPRINTS_FRAME)
+                   "cvpcb": "cvpcb/toolbars_cvpcb.cpp", "fpviewer": "cvpcb/toolbars_display_footprints.cpp"}
 LOCS = {"TOP_MAIN": "top", "TOP_AUX": "aux", "LEFT": "left", "RIGHT": "right"}
 # Standalone-only or debug-only entries the desktop hides in project mode.
 SKIP = {"ACTIONS::doNew", "ACTIONS::open", "PCB_ACTIONS::importNetlist", "ACTIONS::toggleBoundingBoxes",
@@ -197,7 +199,10 @@ def main():
               "cursor_shape", "hidden_pin", "grid", "show_all_layers", "visibility", "visibility_off", "checked_ok",
               "color_materials", "left", "right", "up", "down", "refresh", "add_comment", "cancel", "distribute_horizontal",
               "save", "undo", "redo", "search", "edit", "group_enter", "group_leave", "annotate", "unlocked", "locked",
-              "kicad_icon_small", "icon_eeschema_24", "icon_pcbnew_24", "list_nets", "language", "reload", "auto_associate"}
+              "kicad_icon_small", "icon_eeschema_24", "icon_pcbnew_24", "list_nets", "language", "reload", "auto_associate",
+              # CvPcb: the footprint filter toggles its toolbar control adds, its context menus, DIALOG_CONFIG_EQUFILES' bitmap buttons
+              "module_filtered_list", "module_pin_filtered_list", "module_library_list", "delete_association", "show_footprint", "cut", "copy",
+              "paste", "small_folder", "small_edit", "small_trash", "small_up", "small_down", "icon_cvpcb", "exit"}
     icons = collect_icons(names)
     # keep only the metadata the UI needs for actions that made it into a toolbar, plus a few menu entries
     used = {it["act"]: {k: it[k] for k in ("id", "label", "tip", "icon", "key")} for bars in toolbars.values() for items in bars.values() for it in walk(items) if "act" in it}
@@ -206,7 +211,9 @@ def main():
                   "SCH_ACTIONS::navigateUp", "SCH_ACTIONS::leaveSheet", "SCH_ACTIONS::enterSheet",
                   "ACTIONS::gridProperties", "ACTIONS::showSearch", "SCH_ACTIONS::showNetNavigator", "PCB_ACTIONS::showNetInspector",
                   "ACTIONS::about", "ACTIONS::help", "ACTIONS::gettingStarted", "ACTIONS::reportBug", "ACTIONS::donate",
-                  "ACTIONS::openPreferences", "ACTIONS::showLibraryBrowser"):
+                  "ACTIONS::openPreferences", "ACTIONS::showLibraryBrowser", "ACTIONS::paste", "ACTIONS::configurePaths", "ACTIONS::showFootprintLibTable",
+                  "CVPCB_ACTIONS::FilterFPbyFPFilters", "CVPCB_ACTIONS::filterFPbyPin", "CVPCB_ACTIONS::FilterFPbyLibrary", "CVPCB_ACTIONS::associate",
+                  "CVPCB_ACTIONS::deleteAssoc", "CVPCB_ACTIONS::showEquFileTable", "CVPCB_ACTIONS::saveAssociationsToFile"):
         if extra in actions:
             used[extra] = actions[extra]
     # The web chrome (server/web/spec.ts) imports this JSON as a typed module (KicadUiSpec);

@@ -72,6 +72,9 @@ export function menuMeta(editor: EditorKind | null, id: string): MenuActionMeta 
   return ACTIONS[`ACTIONS::${id}`] || (editor ? null : ACTIONS[`SCH_ACTIONS::${id}`] || ACTIONS[`PCB_ACTIONS::${id}`] || null);
 }
 
+/** An action by its table name ("CVPCB_ACTIONS::associate"): the frames with a class of their own (CvPcb, its footprint viewer). */
+export function actionByName(name: string): MenuActionMeta | null { return ACTIONS[name] || null; }
+
 export interface HotkeyRow { section: string; id: string; label: string; key: string; alt: string; tip: string; name?: string }
 /** Every action of an editor's frame in KiCad's hotkey-list order: the common section, then the editor's own. */
 export function hotkeyRows(editor: EditorKind): HotkeyRow[] {
