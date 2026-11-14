@@ -185,6 +185,46 @@ export function labelShapes(kind: string): [string, string][] {
   if (kind === "global_label" || kind === "hierarchical_label" || kind === "sheet_pin") return [["input", "Input"], ["output", "Output"], ["bidirectional", "Bidirectional"], ["tri_state", "Tri-state"], ["passive", "Passive"]];
   return [];
 }
+// ---------------------------------------------------------------- sheet pins (DIALOG_SHEET_PIN_PROPERTIES)
+/** A sheet pin's dialog state: (pin "name" <shape> (at x y a) (effects (font …)) (uuid …)) inside the sheet. */
+export interface SheetPinState { text: string; shape: string; font: string; size: number; bold: boolean; italic: boolean; color: Color }
+export const SHEET_PIN_SHAPES = new Set(["input", "output", "bidirectional", "tri_state", "passive"]);
+export function readSheetPin(pin: SNode): SheetPinState {
+  const fx = readFx(pin), e = kid(pin, "effects"), f = e && kid(e, "font"), sz = f && kid(f, "size");
+  const shape = str(pin[2]);
+  // eeschema uses only the text width as the text size (TransferDataToWindow: GetTextWidth)
+  return { text: str(pin[1]), shape: SHEET_PIN_SHAPES.has(shape) ? shape : "input", font: fx.font, size: sz ? num(sz[1], 1.27) : 1.27, bold: fx.bold, italic: fx.italic, color: fx.color };
+}
+/** TransferDataFromWindow: name (EscapeString CTX_NETNAME), font, size (w = h), bold, italic, colour, shape. */
+export function writeSheetPin(pin: SNode, s: SheetPinState): void {
+  pin[1] = escapeNetName(s.text) as unknown as SNode;
+  pin[2] = (SHEET_PIN_SHAPES.has(s.shape) ? s.shape : "input") as unknown as SNode;
+  const cur = readSheetPin(pin);
+  writeFx(pin, { font: s.font, size: Math.abs(cur.size - s.size) > 1e-9 ? s.size : undefined, bold: s.bold, italic: s.italic, color: s.color });
+}
+/** "Sheet pin name can not be empty." when the trimmed name is empty, else null. */
+export function sheetPinNameError(text: string): string | null { return text.trim() ? null : "Sheet pin name can not be empty."; }
+/**
+ * SCH_SHEET_PIN::HitTest: the pin under `p` (index among the sheet's (pin …) children), or -1.  The pin's box runs
+ * from its anchor on the sheet edge inwards over its flag and name (SCH_HIERLABEL's body: the flag is one text height,
+ * the name about 0.7 of it per character), one text height across.
+ */
+export function sheetPinAt(sheet: SNode, p: [number, number], tol = 0): number {
+  const pins = kids(sheet, "pin");
+  for (let i = 0; i < pins.length; i++) {
+    const pin = pins[i], [x, y, a] = atOf(pin), st = readSheetPin(pin), sz = st.size;
+    const len = sz * 1.2 + sz * 0.72 * Math.max(1, unescapeString(st.text).length);
+    const ang = ((Math.round(a) % 360) + 360) % 360;
+    // a pin on the right edge (0) reads leftwards into the sheet, on the left edge (180) rightwards; top (90) down, bottom (270) up
+    const dx = ang === 0 ? -1 : ang === 180 ? 1 : 0, dy = ang === 90 ? 1 : ang === 270 ? -1 : 0;
+    const x0 = Math.min(x, x + dx * len), x1 = Math.max(x, x + dx * len), y0 = Math.min(y, y + dy * len), y1 = Math.max(y, y + dy * len);
+    const half = sz * 0.6;
+    const bx0 = dx ? x0 : x - half, bx1 = dx ? x1 : x + half, by0 = dy ? y0 : y - half, by1 = dy ? y1 : y + half;
+    if (p[0] >= bx0 - tol && p[0] <= bx1 + tol && p[1] >= by0 - tol && p[1] <= by1 + tol) return i;
+  }
+  return -1;
+}
+
 /** SPIN_STYLE from the label's angle: 0 RIGHT, 1 UP, 2 LEFT, 3 BOTTOM (the file angle / 90). */
 export function spinOf(n: SNode): 0 | 1 | 2 | 3 { const r = ((Math.round(atOf(n)[2]) % 360) + 360) % 360; return (Math.round(r / 90) % 4) as 0 | 1 | 2 | 3; }
 /** SCH_LABEL_BASE::SetSpinStyle: the angle, and the justification it implies (a local label also sits on its baseline). */

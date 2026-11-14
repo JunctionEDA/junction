@@ -73,7 +73,7 @@ export function openSyncSheetPins(): void {
 }
 
 /** The project document a sheet symbol on the open page names (its Sheetfile beside this page, else by file name). */
-function sheetFileEntry(it: KItem) {
+export function sheetFileEntry(it: KItem) {
   const here = projectDocs().find((d) => d.docId === S.docId), dir = here ? here.path.split("/").slice(0, -1).join("/") : "";
   const f = it.file || "", path = dir ? `${dir}/${f}` : f, all = projectDocs().filter((d) => d.docType === "kicad_sch");
   return all.find((d) => d.path === path) || all.find((d) => d.path.split("/").pop() === f.split("/").pop()) || null;

@@ -152,6 +152,9 @@ stage.addEventListener("dblclick", (ev) => {
   if (isSch() && CollabTools.sch && CollabTools.sch.enterGroupAt) {         // a double-click on a group enters it (KiCad), it does not open a dialog
     const g = hitAny([x, y]); try { if (g && CollabTools.sch.enterGroupAt(ctx, g.id)) return; } catch (e) { console.warn(e); }
   }
+  // SCH_SELECTION_TOOL picks the SCH_SHEET_PIN_T under the cursor ahead of its sheet: its properties dialog (sch_edit_tool.cpp:3246)
+  const spin = (KDialogs as unknown as { schSheetPinAt?: (c: ToolCtx, p: [number, number]) => boolean }).schSheetPinAt;
+  if (isSch() && spin && spin(ctx, [x, y])) return;
   const f = KiCadCanvas.fieldAt(E.kdoc, x, y, E.hiddenLayers);
   if (f) { KDialogs!.openField(ctx, f.item, f.name); return; }
   const best = nearestFootprint(x, y, 5 / Math.max(1, E.zoom * 0.6));

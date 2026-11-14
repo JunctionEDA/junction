@@ -32,6 +32,8 @@ import { openPageSettings } from "./page-settings";
 import { datasheetButton, docFiles, footprintButton, projectVars, sheetFileButton } from "./browse-cells";
 import { isURL, resolveUriVars, type FpChooserFilters } from "../library/fpchoice";
 import type { GridCellButton } from "./dom";
+import { sheetFileEntry } from "./sync-pins";
+import { readDoc } from "./project";
 
 type Ctx = ToolCtx & { doc: KDoc };
 interface ItemOpts { onCreate?(node: SNode, more?: SNode[]): boolean | void; cancel?(): void; title?: string; label?: string; generic?: boolean; isNew?: boolean; symbolEditor?: SymEditorTextOpts; pinMapPage?: boolean }
@@ -702,6 +704,82 @@ function shapeDialog(ctx: Ctx, item: KItem): void {
 /** DIALOG_IMAGE_PROPERTIES: the board's reference-image dialog in its eeschema form (refimage.ts). */
 function imageDialog(ctx: Ctx, item: KItem): void { refImageDialog(ctx as unknown as ToolCtx, item, true); }
 
+// ---------------------------------------------------------------- DIALOG_SHEET_PIN_PROPERTIES
+/**
+ * Sheet Pin Properties (dialog_sheet_pin_properties_base.cpp, SCH_EDIT_TOOL::Properties on a SCH_SHEET_PIN_T): Name
+ * (a wxComboBox of the sub-sheet's hierarchical label names; picking one takes that label's shape) with "Syntax help",
+ * the Shape radios and Formatting (font, bold / italic, text size, colour).  The pin is a child of the sheet, so the
+ * commit modifies the sheet (commit.Modify( m_sheetPin->GetParent() )).
+ */
+export function openSheetPinDialog(ctx: Ctx, sheet: KItem, index: number): boolean {
+  const pin0 = L.kids(sheet.node, "pin")[index]; if (!pin0) return false;
+  ensureCss();
+  const ro = !!ctx.viewOnly, st = L.readSheetPin(pin0), doc = ctx.doc;
+  const labels: { name: string; shape: string }[] = [];
+  let nameIn: HTMLInputElement | null = null, combo: ReturnType<typeof comboBox> | null = null, fontSel: FontPickerEl | null = null, sizeIn: HTMLInputElement | null = null;
+  let boldB: HTMLButtonElement | null = null, italB: HTMLButtonElement | null = null, color: Swatch | null = null, body: HTMLElement | null = null;
+  // TransferDataToWindow: every hierarchical label of the sheet's screen, once each
+  const entry = sheetFileEntry(sheet);
+  if (entry) void readDoc(entry.docId, "kicad_sch").then((sub: KDoc | null) => {
+    if (!sub) return;
+    for (const it of sub.items.values()) if (it.kind === "hierarchical_label") { const n = L.str(it.node[1]); if (!labels.some((l) => l.name === n)) { const sh = L.kid(it.node, "shape"); labels.push({ name: n, shape: sh ? L.str(sh[1]) : "input" }); } }
+    if (combo) combo.setOptions(labels.map((l) => l.name));
+  }).catch(() => undefined);
+  KD().open({
+    title: "Sheet Pin Properties", width: 560, readOnly: ro,
+    build(b) {
+      body = b;
+      nameIn = textInput(L.unescapeString(st.text), undefined, { id: "kd-spin-name", disabled: ro, style: "width:100%" });
+      const nameHost = h("div", { style: "min-width:0" }, nameIn);
+      combo = comboBox(nameIn, labels.map((l) => l.name));   // wraps the input where it stands
+      // onComboBox: a name matching a hierarchical label (case-insensitively) takes the label's shape
+      nameIn.addEventListener("change", () => {
+        const v = (nameIn as HTMLInputElement).value.toLowerCase(), lab = labels.find((l) => l.name.toLowerCase() === v); if (!lab || !body) return;
+        const r = body.querySelector(`input[name="kd-spin-shape"][value="${lab.shape}"]`) as HTMLInputElement | null; if (r) r.checked = true;
+      });
+      const link = h("a", { href: "#", "data-k": "syntax-help", title: "Show syntax help window", onclick: (ev: Event) => { ev.preventDefault(); syntaxHelp(false); } }, "Syntax help");
+      b.append(h("div", { style: "display:grid;grid-template-columns:max-content 1fr;gap:4px 8px;align-items:center" },
+        h("label", null, "Name:"), nameHost, h("span"), h("span", { style: "text-align:right;padding-right:2px" }, link)));
+      const row = h("div", { style: "display:flex;gap:12px;align-items:stretch;margin-top:4px" });
+      const sh = h("div"); KD().staticBox(sh, "Shape").append(radioGroup("kd-spin-shape", L.labelShapes("sheet_pin"), st.shape, undefined, 1)); row.append(sh);
+      const fm = h("div", { style: "flex:1" }), fbox = KD().staticBox(fm, "Formatting"), grd = h("div", { class: "kd-fmt" });
+      fontSel = fontPicker(doc, st.font, { id: "kd-spin-font", style: "width:200px", disabled: ro });
+      boldB = toggle("text_bold", "Bold", st.bold, "kd-spin-bold"); italB = toggle("text_italic", "Italic", st.italic, "kd-spin-italic");
+      grd.append(h("label", null, "Font:"), h("span", { style: "display:flex;gap:6px;align-items:center" }, fontSel, h("span", { class: "kd-sep" }), boldB, italB, h("span", { class: "kd-sep" })), h("span"));
+      sizeIn = lenBox(st.size, "kd-spin-size"); color = swatch(st.color, "kd-spin-color", undefined, ro);
+      grd.append(h("label", null, "Text size:"), h("span", { style: "display:flex;gap:3px;align-items:center" }, sizeIn, units(), h("label", { style: "margin-left:15px;margin-right:2px" }, "Color:"), color.el), h("span"));
+      fbox.append(grd); row.append(fm); b.append(row);
+      initialFocus(nameIn);
+    },
+    ok() {
+      if (ro || !body || !nameIn) return;
+      const err = L.sheetPinNameError(nameIn.value); if (err) { void messageBox(err); return false; }
+      const size = sizeIn ? lenValue(sizeIn) : st.size;
+      if (size === undefined || size < 0.01 || size > 1000) { void messageBox(`The value must be between ${fmtLen(0.01)} and ${fmtLen(1000)} ${unitName()}.`); return false; }
+      const cur = ctx.doc.items.get(sheet.id) || sheet, n = L.clone(cur.node), pin = L.kids(n, "pin")[index]; if (!pin) return;
+      L.writeSheetPin(pin, { text: nameIn.value, shape: radioValue(body, "kd-spin-shape") || st.shape, font: fontSel ? fontSel.value : st.font, size,
+        bold: boldB ? isOn(boldB) : st.bold, italic: italB ? isOn(italB) : st.italic, color: color ? color.get() : st.color });
+      commitItem(ctx, cur, n, "Edit Sheet Pin Properties");
+      return undefined;
+    },
+  });
+  return true;
+}
+/** The sheet pin of `sheet` under `p` (or the cursor): the selection tool picks the sheet, KiCad the pin. */
+function sheetPinUnderCursor(ctx: Ctx, sheet: KItem, p?: [number, number]): number {
+  const S = CollabTools.sch ? CollabTools.sch.state as { cursor?: [number, number] } : null, cur = p || (S && S.cursor); if (!cur) return -1;
+  return L.sheetPinAt(sheet.node, cur, 3 / ((ctx as Ctx & { pxPerMm?: number }).pxPerMm || 4));
+}
+/** A double-click: the Sheet Pin Properties of the pin under `p` on any sheet of the page; true when one opened. */
+export function schSheetPinAt(ctx: ToolCtx, p: [number, number]): boolean {
+  if (!ctx.doc || ctx.doc.type !== "sch") return false;
+  for (const it of ctx.doc.items.values()) {
+    if (it.kind !== "sheet") continue;
+    const i = sheetPinUnderCursor(ctx as Ctx, it, p); if (i >= 0) return openSheetPinDialog(ctx as Ctx, it, i);
+  }
+  return false;
+}
+
 // ---------------------------------------------------------------- dispatch
 const SHAPE_KINDS = new Set(["rectangle", "circle", "arc", "bezier", "rule_area"]);
 /** kicad-dialogs.js openItem asks this first; true when an eeschema dialog took the item. */
@@ -718,6 +796,7 @@ export function schItemDialog(ctx: ToolCtx, item: KItem, opts: ItemOpts = {}): b
   if (SHAPE_KINDS.has(k)) { shapeDialog(c, item); return true; }
   if (k === "image") { imageDialog(c, item); return true; }
   if (k === "no_connect") return true;              // SCH_NO_CONNECT_T: nothing happens
+  if (k === "sheet" && !opts.onCreate) { const pin = sheetPinUnderCursor(c, item); if (pin >= 0 && openSheetPinDialog(c, item, pin)) return true; }
   if (k === "sheet") { openSheetProperties(c, item, opts); return true; }
   if (k === "symbol") { openSymbolProperties(c, item, { pinMapPage: !!opts.pinMapPage }); return true; }
   if (k === "table") { schTableDialog(ctx, item); return true; }   // SCH_EDIT_TOOL::Properties, SCH_TABLE_T: DIALOG_TABLE_PROPERTIES
@@ -762,6 +841,6 @@ export function overDrawingSheet(p: [number, number]): boolean {
 /** Hook the dialogs into kicad-dialogs.js (called once from dialogs/index.ts). */
 export function installSchItemDialogs(): void {
   const kd = (window as unknown as { KDialogs?: Record<string, unknown> }).KDialogs; if (!kd) return;
-  kd.schItemDialog = schItemDialog; kd.schFieldDialog = schFieldDialog; kd.confirm = confirmBox; kd.schProperties = schProperties; kd.overDrawingSheet = overDrawingSheet;
+  kd.schItemDialog = schItemDialog; kd.schFieldDialog = schFieldDialog; kd.schSheetPinAt = schSheetPinAt; kd.confirm = confirmBox; kd.schProperties = schProperties; kd.overDrawingSheet = overDrawingSheet;
   void HL;
 }
