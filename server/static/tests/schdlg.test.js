@@ -211,4 +211,12 @@ test("symbol viewer: filters need every token, stepping stops at the ends", () =
 });
 
 module.exports = { test, load, K };
+const DL = load(["dialogs", "logic.ts"]);
+test("pushFindHistory: newest first, repeats move up, empty skipped, capped at 10", () => {
+  let l = [];
+  for (const s of ["a", "b", "", "c", "a"]) l = DL.pushFindHistory(l, s);
+  assert.deepStrictEqual(l, ["a", "c", "b"]);
+  for (let i = 0; i < 20; i++) l = DL.pushFindHistory(l, "x" + i);
+  assert.strictEqual(l.length, DL.FIND_HISTORY_MAX); assert.strictEqual(l[0], "x19");
+});
 process.on("exit", () => { console.log(`schdlg: ${passed} passed, ${failed} failed`); if (failed) process.exitCode = 1; });

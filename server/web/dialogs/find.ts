@@ -4,7 +4,8 @@
 // (when allowed), values, fields, labels and text as ordinary collab changes.
 import { E, appState, applyView, centerOn, openDocId, pushUndoFor, toolCtx, cloneNode } from "./editor";
 import { KD, checkbox, h, textInput, type DlgApi } from "./dom";
-import { findHits, replaceInNode, str, type FindHit, type FindOpts } from "./logic";
+import { findHits, replaceInNode, str, pushFindHistory, type FindHit, type FindOpts } from "./logic";
+import { comboBox } from "../components/kcombo";
 import { projectDocs, readDoc, submitDocOp } from "./project";
 import { keyName } from "../keys";
 
@@ -15,6 +16,18 @@ export const findSearchesAllSheets = (): boolean => !F.currentSheetOnly && !F.se
 let last: { docId: string | null; key: string } | null = null;   // the hit the cursor sits on
 let api: DlgApi | null = null, statusEl: HTMLElement | null = null;
 const otherDocs = new Map<string, KDoc>();
+// The Search for / Replace with history (EDA_DRAW_FRAME::m_findStringHistoryList / m_replaceStringHistoryList), kept per
+// viewer as KiCad keeps it in the app settings.
+const HIST_KEY = "kc-find-history";
+const hist: { find: string[]; replace: string[] } = (() => {
+  try { const v = JSON.parse(localStorage.getItem(HIST_KEY) || "null"); if (v && Array.isArray(v.find) && Array.isArray(v.replace)) return { find: v.find.filter((x: unknown) => typeof x === "string"), replace: v.replace.filter((x: unknown) => typeof x === "string") }; } catch { /* no storage */ }
+  return { find: [], replace: [] };
+})();
+function remember(): void {
+  hist.find = pushFindHistory(hist.find, F.query);
+  hist.replace = pushFindHistory(hist.replace, F.replacement);
+  try { localStorage.setItem(HIST_KEY, JSON.stringify(hist)); } catch { /* no storage */ }
+}
 const resolveLib = (d: Pick<KDoc, "items" | "lib">, name: string) => KiCadCanvas.resolveLib(d as KDoc, name);
 const keyOf = (hit: FindHit) => `${hit.id}\u0000${hit.what}\u0000${hit.field || ""}`;
 const S = appState;
@@ -100,8 +113,15 @@ export function openFind(replace: boolean): void {
     build(body, a) {
       a.foot.style.display = "none";
       const q = textInput(F.query, (v) => { F.query = v; last = null; }, { id: "kd-find-q" });
-      q.addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); F.query = q.value; void findNext(ev.shiftKey); } });
+      q.addEventListener("keydown", (ev) => { if (ev.key === "Enter" && !qc.isOpen()) { ev.preventDefault(); run(() => findNext(ev.shiftKey)); } });
       const rw = textInput(F.replacement, (v) => { F.replacement = v; }, { id: "kd-find-r", disabled: ro });
+      // m_comboFind / m_comboReplace are wxComboBox with the search history; picking an entry sets the text
+      const qc = comboBox(q, () => hist.find), rc = comboBox(rw, () => hist.replace);
+      q.addEventListener("input", () => { F.query = q.value; last = null; });
+      rw.addEventListener("input", () => { F.replacement = rw.value; });
+      q.addEventListener("change", () => { F.query = q.value; last = null; });
+      rw.addEventListener("change", () => { F.replacement = rw.value; });
+      const run = (fn: () => Promise<unknown>): void => { F.query = q.value; if (replace) F.replacement = rw.value; remember(); qc.setOptions(hist.find); rc.setOptions(hist.replace); void fn(); };
       const opt = (label: string, key: keyof FindState, id: string) => checkbox(label, !!F[key], (on) => { (F as unknown as Record<string, boolean>)[key] = on; last = null; }, { id });
       const fields = h("div", { class: "kv", style: "margin-bottom:10px" }, h("label", null, "Search for:"), q);
       if (replace) fields.append(h("label", null, "Replace with:"), rw);
@@ -112,9 +132,9 @@ export function openFind(replace: boolean): void {
             opt("Search pin names and numbers", "pins", "kd-find-pins"), opt("Include hidden fields", "hiddenFields", "kd-find-hidden"), opt("Search the current sheet only", "currentSheetOnly", "kd-find-sheet"),
             opt("Search the current selection only", "selectionOnly", "kd-find-sel"), replace ? opt("Replace matches in reference designators", "replaceRefs", "kd-find-refs") : null, opt("Search net names", "netNames", "kd-find-nets"))));
       const btn = (label: string, id: string, fn: () => void, primary = false, disabled = false) => h("button", { class: "btn" + (primary ? " primary" : ""), type: "button", id, disabled, style: "width:104px", onclick: fn }, label);
-      const right = h("div", { style: "display:flex;flex-direction:column;gap:6px;flex:none" }, btn("Find", "kd-find-next", () => { F.query = q.value; void findNext(); }, true),
-        replace ? btn("Replace", "kd-find-replace", () => { F.query = q.value; F.replacement = rw.value; void replaceOne(); }, false, ro) : null,
-        replace ? btn("Replace All", "kd-find-replaceall", () => { F.query = q.value; F.replacement = rw.value; void replaceAll(); }, false, ro) : null,
+      const right = h("div", { style: "display:flex;flex-direction:column;gap:6px;flex:none" }, btn("Find", "kd-find-next", () => run(() => findNext()), true),
+        replace ? btn("Replace", "kd-find-replace", () => run(replaceOne), false, ro) : null,
+        replace ? btn("Replace All", "kd-find-replaceall", () => run(replaceAll), false, ro) : null,
         btn("Close", "kd-find-close", () => a.finish(false)));
       statusEl = h("div", { id: "kd-find-status", style: "margin-top:8px;min-height:16px;color:var(--ink-2)" });
       // m_searchPanelLink: "Show search panel (Ctrl+G)" under a rule, at the right (ACTIONS::showSearch's hotkey)

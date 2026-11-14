@@ -330,3 +330,10 @@ export function pageSizeError(label: string, mm: number, sch: boolean, units: "m
   return null;
 }
 
+/** DIALOG_SCH_FIND's search / replace history (m_findStringHistoryList): the newest string first, a repeated string
+ *  moves to the top, empty strings are skipped and at most 10 are kept (MAX_FIND_HISTORY in common/frame). */
+export const FIND_HISTORY_MAX = 10;
+export function pushFindHistory(list: string[], s: string): string[] {
+  if (!s) return list.slice(0, FIND_HISTORY_MAX);
+  return [s, ...list.filter((x) => x !== s)].slice(0, FIND_HISTORY_MAX);
+}
