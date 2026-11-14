@@ -5,6 +5,7 @@ import type { GridApi, GridCellButton, GridColumn, GridOpts, NotebookApi, Notebo
 import { esc, isList, str } from "./sexpr";
 import { el } from "./shell";
 import { kicadIcon, setKicadIcon } from "../../components/kicon-dom";
+import { popupMenu } from "../../dialogs/dom";
 import "../../components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 
 const WIDGET_CSS = `
@@ -145,6 +146,7 @@ export function grid<R>(host: HTMLElement, columns: GridColumn<R>[], rows: R[], 
     if (opts.onHeader) [...table.querySelectorAll<HTMLElement>("th")].forEach((th, i) => { th.style.cursor = "pointer"; th.addEventListener("click", () => opts.onHeader!(cols[i], i)); });
   }
   wrap.appendChild(table); host.appendChild(wrap); refresh();
+  installGridTricks(table, api, opts, () => sel, (i) => { sel = i; });
   const B = opts.buttons;
   if (B && !opts.readOnly) {
     // STD_BITMAP_BUTTONs with KiCad's small_plus / small_up / small_down / small_trash, as every WX_GRID dialog sets them
@@ -196,3 +198,84 @@ function cellButton(td: HTMLElement, inp: HTMLInputElement, spec: GridCellButton
 }
 /** wxStaticBoxSizer: a titled frame; returns the element to fill. */
 export function staticBox(host: HTMLElement, title: string): HTMLElement { ensureCss(); const b = el("div", "kd-sb"); b.appendChild(el("span", "kd-sb-t", esc(title))); host.appendChild(b); return b; }
+
+// ---------------------------------------------------------------- GRID_TRICKS (common/grid_tricks.cpp)
+/** The block a grid trick works on: the selected rows (Select All) or the one cell. */
+interface Block { r0: number; r1: number; c0: number; c1: number }
+/** The text of a cell as GRID_TRICKS copies it (a checkbox is "1" or "0"). */
+export function cellText(v: unknown, type?: string): string { return type === "bool" ? (v ? "1" : "0") : str(v); }
+/** Clipboard text as GRID_TRICKS::paste_text reads it: rows by line, cells by tab. */
+export function parseClip(text: string): string[][] { const lines = text.replace(/\r\n?/g, "\n").split("\n"); if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop(); return lines.map((l) => l.split("\t")); }
+function installGridTricks<R>(table: HTMLElement, api: GridApi<R>, opts: GridOpts<R>, getSel: () => number, setSel: (i: number) => void): void {
+  let all = false;
+  const cols = (): GridColumn<R>[] => api.columns;
+  const editable = (r: R, c: GridColumn<R>): boolean => !opts.readOnly && c.type !== "ro" && !(c.ro && c.ro(r));
+  const block = (at: { r: number; c: number } | null): Block | null => {
+    if (all && api.rows.length) return { r0: 0, r1: api.rows.length - 1, c0: 0, c1: cols().length - 1 };
+    return at ? { r0: at.r, r1: at.r, c0: at.c, c1: at.c } : null;
+  };
+  const textOf = (b: Block): string => {
+    const out: string[] = [];
+    for (let r = b.r0; r <= b.r1; r++) { const row = api.rows[r] as Record<string, unknown>; const cells: string[] = []; for (let c = b.c0; c <= b.c1; c++) { const col = cols()[c]; cells.push(cellText(row[col.key], col.type)); } out.push(cells.join("\t")); }
+    return out.join("\n");
+  };
+  const set = (r: number, c: number, v: string): boolean => {
+    const row = api.rows[r], col = cols()[c]; if (!row || !col || !editable(row, col)) return false;
+    const rec = row as Record<string, unknown>;
+    if (col.type === "bool") rec[col.key] = v === "1" || /^true$/i.test(v);
+    else if (col.type === "choice") { const o = typeof col.options === "function" ? col.options(row) : col.options || []; const vals = o.map((x) => (Array.isArray(x) ? x[0] : x)); if (!vals.includes(v)) return false; rec[col.key] = v; }
+    else rec[col.key] = v;
+    if (opts.onChange) opts.onChange(row, col.key, rec[col.key], r);
+    return true;
+  };
+  const clear = (b: Block): void => { for (let r = b.r0; r <= b.r1; r++) for (let c = b.c0; c <= b.c1; c++) { const col = cols()[c]; if (col.type === "choice") continue; set(r, c, col.type === "bool" ? "0" : ""); } api.refresh(); markAll(); };
+  const copy = (b: Block): void => { const t = textOf(b); if (navigator.clipboard) void navigator.clipboard.writeText(t).catch(() => undefined); };
+  const paste = (at: { r: number; c: number }): void => {
+    if (!navigator.clipboard || !navigator.clipboard.readText) return;
+    void navigator.clipboard.readText().then((t) => {
+      const data = parseClip(t), b = block(at); if (!b) return;
+      const r0 = b.r0, c0 = b.c0;
+      // a single value pasted over a block fills it; a table lands at the block's top-left cell
+      if (data.length === 1 && data[0].length === 1 && (b.r1 > b.r0 || b.c1 > b.c0)) { for (let r = b.r0; r <= b.r1; r++) for (let c = b.c0; c <= b.c1; c++) set(r, c, data[0][0]); }
+      else data.forEach((cells, dr) => cells.forEach((v, dc) => { if (r0 + dr < api.rows.length && c0 + dc < cols().length) set(r0 + dr, c0 + dc, v); }));
+      api.refresh(); markAll();
+    }).catch(() => undefined);
+  };
+  const markAll = (): void => { if (all) for (const tr of Array.from(table.querySelectorAll("tbody tr"))) tr.classList.add("sel"); };
+  const selectAll = (): void => { all = true; markAll(); };
+  const cellAt = (t: EventTarget | null): { r: number; c: number } | null => {
+    const td = (t as Element | null)?.closest ? (t as Element).closest("td") : null; if (!td || !table.contains(td)) return null;
+    const tr = td.parentElement as HTMLTableRowElement; const r = Array.from(tr.parentElement!.children).indexOf(tr), c = Array.from(tr.children).indexOf(td);
+    return r >= 0 && c >= 0 ? { r, c } : null;
+  };
+  table.addEventListener("pointerdown", (ev) => { if ((ev as PointerEvent).button === 0 && all) { all = false; const s = getSel(); for (const [j, tr] of Array.from(table.querySelectorAll("tbody tr")).entries()) tr.classList.toggle("sel", j === s); } });
+  table.addEventListener("contextmenu", (ev) => {
+    // a grid with a menu of its own (LIB_TABLE_GRID_TRICKS, the fields grids…) shows that one instead
+    if (opts.onContextMenu || ev.defaultPrevented) return;
+    const at = cellAt(ev.target); if (!at) return;
+    ev.preventDefault();
+    if (!all && getSel() !== at.r) { setSel(at.r); api.select(at.r); }
+    const b = block(at)!, row = api.rows[at.r], col = cols()[at.c];
+    const canEdit = !opts.readOnly && !!row && !!col && (all || editable(row, col));
+    popupMenu((ev as MouseEvent).clientX, (ev as MouseEvent).clientY, [
+      { label: "Cut", key: "Ctrl+X", disabled: !canEdit, run: () => { copy(b); clear(b); } },
+      { label: "Copy", key: "Ctrl+C", run: () => copy(b) },
+      { label: "Paste", key: "Ctrl+V", disabled: !canEdit || !(navigator.clipboard && navigator.clipboard.readText), run: () => paste(at) },
+      { label: "Delete", key: "Del", disabled: !canEdit, run: () => clear(b) },
+      { sep: true },
+      { label: "Select All", key: "Ctrl+A", run: selectAll },
+    ]);
+  });
+  table.addEventListener("keydown", (ev) => {
+    const t = ev.target as HTMLElement, inText = t.tagName === "INPUT" && (t as HTMLInputElement).type === "text";
+    const mod = ev.ctrlKey || ev.metaKey, k = ev.key.toLowerCase();
+    if (inText && !all) return;   // the cell editor keeps its own clipboard keys
+    const at = cellAt(t) || (getSel() >= 0 ? { r: getSel(), c: 0 } : null); if (!at) return;
+    const b = block(at)!;
+    if (mod && k === "a") { ev.preventDefault(); selectAll(); }
+    else if (mod && k === "c") { ev.preventDefault(); copy(b); }
+    else if (mod && k === "x" && !opts.readOnly) { ev.preventDefault(); copy(b); clear(b); }
+    else if (mod && k === "v" && !opts.readOnly) { ev.preventDefault(); paste(at); }
+    else if ((ev.key === "Delete" || ev.key === "Backspace") && all && !opts.readOnly) { ev.preventDefault(); clear(b); }
+  });
+}
