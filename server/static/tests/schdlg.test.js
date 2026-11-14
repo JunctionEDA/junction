@@ -130,5 +130,31 @@ test("signals list: no duplicate power rows from .probe p() directives", () => {
   assert.equal(s.filter((x) => x === "P(R1)").length, 1, s.join(","));
 });
 
+const BA = load(["dialogs", "update-from-pcb-logic.ts"]);
+const sym = (o) => Object.assign({ key: "/a", keys: ["/a"], ref: "R1", power: false, value: "1k", footprint: "R:R_0603", dnp: false, inBom: true, inPos: true, onBoard: true, fields: new Map(), pins: new Map([["1", "/IN"]]) }, o);
+const ALL = { relink: false, references: true, footprints: true, values: true, netNames: true, attributes: true, otherFields: true };
+test("back-annotation: value, footprint, reference, attributes, fields, net label; report lines", () => {
+  const fp = BA.fpData(K.parse('(footprint "R:R_0805" (path "/a") (property "Reference" "R5") (property "Value" "2k2") (property "MPN" "X1") (property "ki_fp_filters" "R_*") (attr smd dnp exclude_from_bom) (pad "1" smd rect (net 3 "/VIN")))'));
+  assert.equal(fp.fpid, "R:R_0805"); assert.equal(fp.dnp, true); assert.ok(!fp.fields.has("ki_fp_filters"));
+  const r = BA.backAnnotate([sym({ fields: new Map([["Old", "x"]]) })], [fp], ALL);
+  const t = r.lines.map((l) => l.text);
+  assert.ok(t.includes("Change R1 reference designator to 'R5'."), t.join("\n"));
+  assert.ok(t.includes("Change R1 footprint assignment from 'R:R_0603' to 'R:R_0805'."));
+  assert.ok(t.includes("Change R1 value from '1k' to '2k2'."));
+  assert.ok(t.includes("Change R1 'Do not populate' from 'false' to 'true'."));
+  assert.ok(t.includes("Change R1 'Exclude from bill of materials' from 'false' to 'true'."));
+  assert.ok(t.includes("Add R1 field 'MPN' with value 'X1'.")); assert.ok(t.includes("Delete R1 field 'Old.'"));
+  assert.ok(t.includes("Change R1 pin 1 net label from '/IN' to '/VIN'."));
+  assert.equal(r.edits[0].ref, "R5"); assert.equal(r.labels[0].to, "/VIN");
+});
+test("back-annotation: unmatched footprints and symbols, nothing selected, re-link by reference", () => {
+  const fp = { ref: "R9", path: "/zz", fpid: "R:R", value: "1k", dnp: false, excludeFromBom: false, excludeFromPos: false, fields: new Map(), pads: new Map() };
+  const r = BA.backAnnotate([sym()], [fp], ALL);
+  assert.deepEqual(r.lines.map((l) => l.severity + ":" + l.text), ["error:Cannot find symbol for footprint 'R9'.", "warning:Footprint 'R1' is not present on PCB. Corresponding symbols in schematic must be manually deleted (if desired)."]);
+  assert.equal(BA.backAnnotate([sym()], [fp], { relink: false, references: false, footprints: false, values: false, netNames: false, attributes: false, otherFields: false }).lines[0].text, "Select at least one property to back annotate.");
+  const rl = BA.backAnnotate([sym({ ref: "R9" })], [fp], Object.assign({}, ALL, { relink: true, references: false }));
+  assert.deepEqual(rl.relinks, [{ fpRef: "R9", path: "/a" }]);
+});
+
 module.exports = { test, load, K };
 process.on("exit", () => { console.log(`schdlg: ${passed} passed, ${failed} failed`); if (failed) process.exitCode = 1; });

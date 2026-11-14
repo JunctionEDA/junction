@@ -25,8 +25,8 @@ const schH = (): SchHelpers | null => { const m = CollabTools.sch; return m && m
 /** What each mode remembers between openings (DIALOG_SHIM saves the controls' state). */
 const remembered: Record<Mode, { scope: L.Scope; opts: L.UpdateOptions; checked: Set<string> | null } | undefined> = { update: undefined, change: undefined };
 
-interface Sheet { docId: string; path: string; doc: KDoc; current: boolean }
-async function allSheets(): Promise<Sheet[]> {
+export interface Sheet { docId: string; path: string; doc: KDoc; current: boolean }
+export async function allSheets(): Promise<Sheet[]> {
   const out: Sheet[] = [{ docId: String(appState.docId || ""), path: "", doc: E.kdoc as KDoc, current: true }];
   for (const d of projectDocs().filter((x) => x.docType === "kicad_sch" && x.docId !== appState.docId)) {
     try { out.push({ docId: d.docId, path: d.path, doc: await readDoc(d.docId, "kicad_sch"), current: false }); } catch (e) { /* unreadable sheet: left alone */ }
@@ -41,8 +41,8 @@ function selectedIds(): Set<string> {
 }
 
 /** Fetch and flatten a library symbol, embedded under its lib id (null: not found). */
-const libCache = new Map<string, SNode | null>();
-async function libSymbol(libId: string): Promise<SNode | null> {
+export const libCache = new Map<string, SNode | null>();
+export async function libSymbol(libId: string): Promise<SNode | null> {
   if (libCache.has(libId)) return libCache.get(libId) as SNode | null;
   const api = libApi(); let out: SNode | null = null;
   // the project's own symbol libraries first (its sym-lib-table entries), then the official ones

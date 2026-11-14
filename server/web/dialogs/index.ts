@@ -3,6 +3,8 @@
 // toggleGridOverrides, openPreferences), the group commands on the schematic module, their hotkeys, the project
 // settings the renderer and the ERC honour, and the preferences applied when a document opens.
 import { openSimulator } from "../sim/frame";
+import { openEditSymbolsLibId } from "./edit-libid";
+import { openUpdateFromPcb } from "./update-from-pcb";
 import { E, isSch, requestRender, setToggle, store, toast, toolCtx } from "./editor";
 import { openAssignFootprints } from "./assign-footprints";
 import { openChangeSymbols } from "./change-symbols";
@@ -71,7 +73,7 @@ function typing(ev: KeyboardEvent): boolean { const t = ev.target as HTMLElement
 export function installDialogs(HANDLERS: Record<string, Handler>): void {
   installSubSheets(); installIntersheetRefs();
   const needDoc = (fn: () => void, schOnly = false): Handler => () => { if (!E.kdoc) { toast("Open a document first"); return; } if (schOnly && !isSch()) { toast("This command belongs to the schematic editor"); return; } fn(); };
-  const find = HANDLERS.find;
+  const find = HANDLERS.find, prevUpdateSch = HANDLERS.updateSchematicFromPcb;
   Object.assign(HANDLERS, {
     pageSettings: needDoc(openPageSettings),
     find: ((a?: Parameters<Handler>[0]) => { if (E.kdoc && isSch()) openFind(false); else if (E.kdoc && !(E.kdoc as KDoc).fpEditor) openBoardFind(); else if (find) find(a); }) as Handler,   // the footprint editor has no Find (FOOTPRINT_EDIT_FRAME)
@@ -109,6 +111,10 @@ export function installDialogs(HANDLERS: Record<string, Handler>): void {
     openPreferences: (() => openPreferences()) as Handler,
     // SCH_EDITOR_CONTROL::Simulate: Inspect > Simulator (sim/frame.ts)
     showSimulator: needDoc(() => { void openSimulator(); }, true),
+    // SCH_EDITOR_CONTROL::EditSymbolLibraryLinks (DIALOG_EDIT_SYMBOLS_LIBID)
+    editSymbolLibraryLinks: needDoc(() => { void openEditSymbolsLibId(); }, true),
+    // SCH_EDITOR_CONTROL::UpdateFromPCB (DIALOG_UPDATE_FROM_PCB); the board editor's entry is its own module's
+    updateSchematicFromPcb: (() => { if (E.kdoc && isSch()) openUpdateFromPcb(); else if (prevUpdateSch) prevUpdateSch(); else toast("Open the schematic to update it from the PCB"); }) as Handler,
     // ACTIONS::gridProperties ("Edit Grids..."): COMMON_TOOLS::GridProperties opens Preferences on the editor's Grids page
     gridProperties: (() => openPreferences(GRID_PAGE[editorId()])) as Handler,
     gridFast1: (() => { fastGrid(1); }) as Handler, gridFast2: (() => { fastGrid(2); }) as Handler, gridFastCycle: (() => { fastGrid("cycle"); }) as Handler,
