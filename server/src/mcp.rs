@@ -1005,11 +1005,11 @@ mod tests {
     fn catalog_is_complete_and_well_formed() {
         let tools = catalog();
         let names: Vec<&str> = tools.iter().map(|t| t.def["name"].as_str().unwrap()).collect();
-        for want in ["list_projects", "get_design_overview", "list_components", "run_checks", "render_view", "apply_changes", "undo_changes", "add_comment"] {
+        for want in ["list_projects", "get_design_overview", "list_components", "run_checks", "render_view", "apply_changes", "undo_changes", "add_comment", "highlight", "get_selection", "trace_net", "export_fab"] {
             assert!(names.contains(&want), "{want} is missing");
         }
         // What only makes sense inside the editor is not offered.
-        for gone in ["get_selection", "focus_view", "open_document", "propose_changes", "list_plugin_tools", "call_plugin_tool"] {
+        for gone in ["focus_view", "open_document", "propose_changes", "list_plugin_tools", "call_plugin_tool"] {
             assert!(!names.contains(&gone), "{gone} should not be offered");
         }
         let mut seen = std::collections::HashSet::new();
