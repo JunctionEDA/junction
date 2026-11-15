@@ -84,7 +84,13 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     if place:
         # a board laid out before is laid out again from its parts: its old copper comes up first, so a second run of
         # the script needs no board.clear() (what comes out the same is left alone when the plan is drawn)
-        step("take up", lambda: self.unroute(keep=()))
+        def take_up():
+            n = self.unroute(keep=())
+            for z in self._call("get_items", kinds=["zone"]).get("items", []):      # the pours and keep-outs are drawn again for the new placement
+                self._edit({"op": "remove", "id": z["id"]}); n += 1
+            self.flush()
+            return n
+        step("take up", take_up)
         kw = {"groups": groups, "near": {**plan["place"].get("near", {}), **(near or {})}, "edges": {**plan["place"].get("edges", {}), **(edges or {})},
               "fixed": fixed, "rotations": rotations, "fit": bool(outline) if fit is None else fit}
         if outline:
