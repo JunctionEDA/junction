@@ -11,6 +11,9 @@ version it is based on.
   libraries are found, Junction offers to download the standard KiCad
   libraries and project templates (about 60 MB) and uses them at once, without a restart.
   Preferences, Download Standard Libraries does the same later.
+  A download cut short by closing Junction, sleep or a lost connection
+  continues at the next start from what it already has; a failed connection
+  is retried by itself a few times, and the download window has Retry.
 - The project manager program itself is named Junction on every system
   (Junction inside the Mac app, junction.exe on Windows, Junction on Linux
   with a Junction desktop entry and icon), so Activity Monitor, Task Manager

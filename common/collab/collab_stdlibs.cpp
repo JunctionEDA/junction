@@ -20,6 +20,7 @@
 #include <collab/collab_stdlibs.h>
 
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
 
@@ -78,27 +79,72 @@ wxString declinedMarker()
 }
 
 
+wxString downloadFolder()
+{
+    return PATHS::GetManagedLibrariesPath() + wxFileName::GetPathSeparator() + wxS( "download" );
+}
+
+
 bool removeDir( const wxString& aDir )
 {
     return !wxFileName::DirExists( aDir ) || wxFileName::Rmdir( aDir, wxPATH_RMDIR_RECURSIVE );
 }
 
 
-/// Download one repository archive to a file.  @return an empty string, or what went wrong.
-wxString download( const ARCHIVE& aArchive, const wxString& aTarget,
-                   const COLLAB_STDLIBS::PROGRESS& aProgress, int aStep )
+wxString stoppedMessage()
+{
+    return _( "The download was stopped." );
+}
+
+
+wxFileOffset fileSize( const wxString& aFile )
+{
+    return wxFileName::FileExists( aFile ) ? (wxFileOffset) wxFileName::GetSize( aFile ).GetValue() : 0;
+}
+
+
+/// Append one file to another.
+bool appendFile( const wxString& aFrom, const wxString& aTo )
+{
+    wxFFileInputStream  in( aFrom );
+    wxFFileOutputStream out( aTo, wxS( "ab" ) );
+
+    if( !in.IsOk() || !out.IsOk() )
+        return false;
+
+    in.Read( out );
+    return out.IsOk() && out.Close();
+}
+
+
+/**
+ * One attempt at one repository archive.  What an earlier attempt (or an earlier run of the
+ * program) already fetched stays in "<target>.part"; the server is asked for the rest, and
+ * when it sends the whole file anyway the part is replaced.
+ *
+ * @return an empty string once "<target>" is complete, or what went wrong.
+ */
+wxString downloadOnce( const ARCHIVE& aArchive, const wxString& aTarget,
+                       const COLLAB_STDLIBS::PROGRESS& aProgress, int aStep )
 {
     const wxString ref = libraryRef();
     const wxString url = wxString::Format(
             wxS( "https://gitlab.com/kicad/libraries/%s/-/archive/%s/%s-%s.zip" ),
             aArchive.repository, ref, aArchive.repository, ref );
 
-    std::ofstream out( aTarget.fn_str(), std::ios::binary | std::ios::trunc );
+    const wxString     part = aTarget + wxS( ".part" );
+    const wxString     piece = aTarget + wxS( ".piece" );
+    const wxFileOffset have = fileSize( part );
+
+    std::ofstream out( piece.fn_str(), std::ios::binary | std::ios::trunc );
 
     if( !out.is_open() )
-        return wxString::Format( _( "Cannot write '%s'." ), aTarget );
+        return wxString::Format( _( "Cannot write '%s'." ), piece );
 
-    bool stopped = false;
+    bool       stopped = false;
+    bool       stalled = false;
+    size_t     lastNow = 0;
+    wxLongLong lastMoved = wxGetLocalTimeMillis();
 
     KICAD_CURL_EASY curl;
 
@@ -107,16 +153,32 @@ wxString download( const ARCHIVE& aArchive, const wxString& aTarget,
     curl.SetFollowRedirects( true );
     curl.SetConnectTimeout( 15 );
     curl.SetOutputStream( &out );
+
+    if( have > 0 )
+        curl.SetHeader( "Range", wxString::Format( wxS( "bytes=%lld-" ), (long long) have ).ToStdString() );
+
     curl.SetTransferCallback(
             [&]( size_t aTotal, size_t aNow, size_t, size_t ) -> int
             {
+                // A connection that went quiet is given up, so the next attempt can start.
+                if( aNow != lastNow )
+                {
+                    lastNow = aNow;
+                    lastMoved = wxGetLocalTimeMillis();
+                }
+                else if( wxGetLocalTimeMillis() - lastMoved > 30000 )
+                {
+                    stalled = true;
+                    return 1;
+                }
+
                 const wxString what = wxString::Format( _( "Downloading the %s (%.0f MB)..." ),
                                                         wxString( aArchive.folder ),
-                                                        aNow / 1048576.0 );
+                                                        ( have + aNow ) / 1048576.0 );
                 int percent = aStep * 33;
 
                 if( aTotal > 0 )
-                    percent += (int) ( 16.0 * aNow / aTotal );
+                    percent += (int) ( 16.0 * ( have + aNow ) / ( have + aTotal ) );
 
                 if( aProgress && !aProgress( what, percent ) )
                 {
@@ -129,22 +191,83 @@ wxString download( const ARCHIVE& aArchive, const wxString& aTarget,
             250000L );
 
     const int result = curl.Perform();
+    const int status = curl.GetResponseStatusCode();
 
     out.close();
 
-    if( stopped )
-        return _( "The download was stopped." );
+    // Whatever arrived is kept for the next attempt: after the part when the server continued
+    // it (206), in its place when the server started over (200).
+    if( status == 206 )
+    {
+        appendFile( piece, part );
+    }
+    else if( status == 200 && fileSize( piece ) > 0 )
+    {
+        wxRemoveFile( part );
+        wxRenameFile( piece, part, true );
+    }
+    else if( status == 416 )
+    {
+        // The part is already as long as the file, or belongs to an older archive.
+        wxRemoveFile( part );
+    }
 
-    if( result != 0 || curl.GetResponseStatusCode() != 200 )
+    wxRemoveFile( piece );
+
+    if( stopped )
+        return stoppedMessage();
+
+    if( stalled )
+        return wxString::Format( _( "The connection to gitlab.com stopped answering while "
+                                    "downloading the %s." ),
+                                 wxString( aArchive.folder ) );
+
+    if( result != 0 || ( status != 200 && status != 206 ) )
     {
         return wxString::Format( _( "The %s could not be downloaded from gitlab.com (%s)." ),
                                  wxString( aArchive.folder ),
                                  result != 0 ? wxString::FromUTF8( curl.GetErrorText( result ) )
-                                             : wxString::Format( wxS( "HTTP %d" ),
-                                                                 curl.GetResponseStatusCode() ) );
+                                             : wxString::Format( wxS( "HTTP %d" ), status ) );
     }
 
+    if( !wxRenameFile( part, aTarget, true ) )
+        return wxString::Format( _( "Cannot write '%s'." ), aTarget );
+
     return wxEmptyString;
+}
+
+
+/// Download one repository archive, trying again after a pause when the connection fails.
+wxString download( const ARCHIVE& aArchive, const wxString& aTarget,
+                   const COLLAB_STDLIBS::PROGRESS& aProgress, int aStep )
+{
+    // An archive a run before this one finished is not fetched again.
+    if( wxFileName::FileExists( aTarget ) )
+        return wxEmptyString;
+
+    const int pauses[] = { 2, 5, 15, 30 };
+    wxString  error;
+
+    for( int attempt = 0; ; attempt++ )
+    {
+        error = downloadOnce( aArchive, aTarget, aProgress, aStep );
+
+        if( error.IsEmpty() || error == stoppedMessage() || attempt >= (int) std::size( pauses ) )
+            return error;
+
+        for( int left = pauses[attempt] * 10; left > 0; left-- )
+        {
+            if( aProgress
+                && !aProgress( wxString::Format( _( "%s Trying again in %d s..." ), error,
+                                                 ( left + 9 ) / 10 ),
+                               -1 ) )
+            {
+                return stoppedMessage();
+            }
+
+            wxMilliSleep( 100 );
+        }
+    }
 }
 
 
@@ -238,7 +361,7 @@ wxString unpack( const ARCHIVE& aArchive, const wxString& aZip, const wxString& 
                                                      wxString( aArchive.folder ), libraries ),
                                    percent ) )
                 {
-                    return _( "The download was stopped." );
+                    return stoppedMessage();
                 }
             }
 
@@ -285,6 +408,20 @@ bool COLLAB_STDLIBS::Needed()
 }
 
 
+bool COLLAB_STDLIBS::Interrupted()
+{
+    return Needed()
+           && wxFileName::FileExists( downloadFolder() + wxFileName::GetPathSeparator()
+                                      + wxS( "in-progress" ) );
+}
+
+
+void COLLAB_STDLIBS::Forget()
+{
+    removeDir( downloadFolder() );
+}
+
+
 bool COLLAB_STDLIBS::Declined()
 {
     return wxFileName::FileExists( declinedMarker() );
@@ -322,12 +459,25 @@ bool COLLAB_STDLIBS::Install( const PROGRESS& aProgress, wxString* aError )
 
     const wxString root = PATHS::GetManagedLibrariesPath();
     const wxString sep = wxFileName::GetPathSeparator();
-    const wxString incoming = root + sep + wxString::Format( wxS( "incoming-%lu" ), wxGetProcessId() );
+    const wxString downloads = downloadFolder();
+    const wxString incoming = root + sep + wxS( "incoming" );
 
+    // The archives are kept in the download folder until everything is in place, so a run
+    // that was cut short (the program closed, the computer slept, the network went away)
+    // continues from what it has.  Unpacking is quick and always starts clean.
     if( !removeDir( incoming )
-        || !wxFileName::Mkdir( incoming + sep + wxS( "template" ), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL ) )
+        || !wxFileName::Mkdir( incoming + sep + wxS( "template" ), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL )
+        || ( !wxFileName::DirExists( downloads )
+             && !wxFileName::Mkdir( downloads, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL ) ) )
     {
         return fail( wxString::Format( _( "Cannot write to '%s'." ), root ) );
+    }
+
+    {
+        wxFFile marker( downloads + sep + wxS( "in-progress" ), wxS( "w" ) );
+
+        if( marker.IsOpened() )
+            marker.Write( libraryRef() + wxS( "\n" ) );
     }
 
     wxString error;
@@ -335,21 +485,38 @@ bool COLLAB_STDLIBS::Install( const PROGRESS& aProgress, wxString* aError )
 
     for( const ARCHIVE& archive : ARCHIVES )
     {
-        const wxString zip = incoming + sep + wxString( archive.repository ) + wxS( ".zip" );
+        const wxString zip = downloads + sep
+                             + wxString::Format( wxS( "%s-%s.zip" ), archive.repository,
+                                                 libraryRef() );
 
-        error = download( archive, zip, aProgress, step );
-
-        if( error.IsEmpty() )
+        // An archive that does not unpack (damaged on the way, or cut off) is fetched once more.
+        for( int round = 0; round < 2; round++ )
         {
+            error = download( archive, zip, aProgress, step );
+
+            if( !error.IsEmpty() )
+                break;
+
+            removeDir( incoming + sep + wxString( archive.folder ) );
+
             error = unpack( archive, zip, incoming + sep + wxString( archive.folder ),
                             incoming + sep + wxS( "template" ), aProgress, step );
-        }
 
-        wxRemoveFile( zip );
+            if( error.IsEmpty() || error == stoppedMessage() )
+                break;
+
+            wxRemoveFile( zip );
+        }
 
         if( !error.IsEmpty() )
         {
             removeDir( incoming );
+
+            // Stopped by the user: nothing continues by itself at the next start.  The
+            // archives stay, so asking again is quick.
+            if( error == stoppedMessage() )
+                wxRemoveFile( downloads + sep + wxS( "in-progress" ) );
+
             return fail( error );
         }
 
@@ -372,6 +539,7 @@ bool COLLAB_STDLIBS::Install( const PROGRESS& aProgress, wxString* aError )
     }
 
     removeDir( incoming );
+    removeDir( downloads );
     return true;
 }
 

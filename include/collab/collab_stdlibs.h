@@ -44,6 +44,13 @@ using PROGRESS = std::function<bool( const wxString& aMessage, int aPercent )>;
 /// @return true when no standard libraries are found anywhere, so a download would help.
 KICOMMON_API bool Needed();
 
+/// @return true when a download was cut short (the program was closed, or the computer or the
+/// network went away) and should simply be continued.  A download the user stopped is not.
+KICOMMON_API bool Interrupted();
+
+/// Drop what a download that was cut short left behind.
+KICOMMON_API void Forget();
+
 /// @return true when the user said not to ask again.
 KICOMMON_API bool Declined();
 
@@ -54,6 +61,9 @@ KICOMMON_API void SetDeclined( bool aDeclined );
  *
  * Nothing the running program uses is touched until the very end, when the finished folders
  * are moved into place, so a stopped or failed download leaves no half library behind.
+ * What was fetched is kept beside them: a later call continues from it (the rest of a file
+ * when the server gives ranges, otherwise from the first archive that is not complete).  A
+ * failed connection is tried again a few times, with a growing pause, before giving up.
  *
  * @return true when the libraries are in place.  @p aError says what went wrong otherwise.
  */
