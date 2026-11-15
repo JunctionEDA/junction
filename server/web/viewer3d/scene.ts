@@ -10,7 +10,7 @@
 import * as THREE from "three";
 import { Body, BodyClass, boardBodies } from "./bodies";
 import { ModelRef, ModelStore, placeMesh } from "./models";
-import { EXTRA_LAYERS, LAYER_COLORS, RGBA } from "./colors";
+import { EXTRA_LAYERS, RGBA, colorStamp, layerColor } from "./colors";
 import { BoardShape, Hole, Pt, assignHoles, boardHoles, boardShape, polyArea } from "./outline";
 import { FaceComposer, FaceLayers, Side, TextureExtent, textureExtent } from "./textures";
 
@@ -292,12 +292,12 @@ export class BoardScene {
       const faces = triangulate(contour, holeLoops);   // the costly step on a board with thousands of holes: once for both faces
       cap(top, contour, holeLoops, 0, true, undefined, uvOf, faces);
       cap(bottom, contour, holeLoops, -thickness, false, undefined, uvOf, faces);
-      wall(edge, contour, 0, -thickness, LAYER_COLORS.board, false);
-      for (const c of cuts) wall(edge, c, 0, -thickness, LAYER_COLORS.board, true);
+      wall(edge, contour, 0, -thickness, layerColor("board"), false);
+      for (const c of cuts) wall(edge, c, 0, -thickness, layerColor("board"), true);
       for (const h of drills) {
         const loop = h.pts.map(toModel); const centre = toModel([h.x, h.y]);
-        if (h.plated) wall(barrels, loop, 0, -thickness, LAYER_COLORS.copper, true, centre);
-        else wall(edge, loop, 0, -thickness, LAYER_COLORS.board, true, centre);
+        if (h.plated) wall(barrels, loop, 0, -thickness, layerColor("copper"), true, centre);
+        else wall(edge, loop, 0, -thickness, layerColor("board"), true, centre);
       }
     });
 
@@ -431,7 +431,7 @@ export class BoardScene {
     if (rebuild) this.buildBodies();
     for (const side of ["F", "B"] as Side[]) {
       const mesh = this.faces[side], canvas = this.faceCanvas[side], tex = this.texture[side]; if (!mesh || !canvas || !tex) continue;
-      const layers = this.faceLayers(side, v); const key = JSON.stringify(layers) + JSON.stringify(LAYER_COLORS);
+      const layers = this.faceLayers(side, v); const key = JSON.stringify(layers) + colorStamp();
       if (recompose && key !== this.faceKey[side]) { this.composer.compose(side, layers, this.painted, canvas); tex.needsUpdate = true; this.faceKey[side] = key; }
       mesh.visible = layers.body || layers.copper || layers.mask || layers.silk || layers.paste || !!(layers.extra && layers.extra.length);
     }

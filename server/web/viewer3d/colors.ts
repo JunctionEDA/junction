@@ -67,3 +67,48 @@ export const DEFAULT_LAYER_COLORS: LayerColors = { board: BOARD_BODY, copper: SU
 export const LAYER_COLORS: LayerColors = cloneLayerColors(DEFAULT_LAYER_COLORS);
 export function cloneLayerColors(c: LayerColors): LayerColors { const out: LayerColors = {}; for (const k of Object.keys(c)) out[k] = c[k].slice() as RGBA; return out; }
 export function setLayerColors(c: Partial<LayerColors>): void { for (const k of Object.keys(c)) { const v = c[k]; if (v && v.length === 4 && k in DEFAULT_LAYER_COLORS) LAYER_COLORS[k] = v.slice() as RGBA; } }
+
+/**
+ * Colours that stand in for the user's while an Appearance option asks for them: "Use board stackup colors"
+ * (BOARD_ADAPTER::InitSettings reads the stackup's silkscreen, mask and dielectric colours) and "Use PCB editor
+ * copper colors" (copperTop / copperBottom from the board editor's F.Cu / B.Cu).
+ */
+let OVERRIDE: Partial<LayerColors> = {};
+export function setColorOverride(c: Partial<LayerColors> | null): void { OVERRIDE = c ? { ...c } : {}; }
+/** The colour a layer is drawn with now: an override, else the user's colour; copperTop / copperBottom fall back to copper. */
+export function layerColor(key: string): RGBA {
+  const o = OVERRIDE[key]; if (o) return o;
+  if ((key === "copperTop" || key === "copperBottom")) return OVERRIDE.copper || LAYER_COLORS.copper;
+  return LAYER_COLORS[key] || DEFAULT_LAYER_COLORS[key] || BOARD_BODY;
+}
+export function colorStamp(): string { return JSON.stringify(LAYER_COLORS) + JSON.stringify(OVERRIDE); }
+
+/** GetStandardColors() of stackup_predefined_prms.cpp: the solder mask / silkscreen names and the dielectric materials. */
+const STACKUP_COLORS: Record<string, [number, number, number, number]> = {
+  Green: [60, 150, 80, 255], Red: [128, 0, 0, 255], Blue: [0, 0, 128, 255], Purple: [80, 0, 80, 255], Black: [20, 20, 20, 255], White: [200, 200, 200, 255], Yellow: [128, 128, 0, 255],
+  "FR4 natural": [109, 116, 75, 212], "PTFE natural": [252, 252, 250, 230], Polyimide: [205, 130, 0, 170], "Phenolic natural": [92, 17, 6, 230], Aluminum: [213, 213, 213, 255],
+};
+/** A stackup colour ("Green", "#3C9650FF", "R60G150B80") as RGBA, or null. */
+export function stackupColor(name: string | undefined, alpha?: number): RGBA | null {
+  if (!name) return null;
+  const std = STACKUP_COLORS[name];
+  let c: number[] | null = std ? std : null;
+  const hx = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(name);
+  if (hx) { const n = parseInt(hx[1], 16); c = [n >> 16, (n >> 8) & 255, n & 255, hx[2] ? parseInt(hx[2], 16) : 255]; }
+  const rgb = /^R(\d+)G(\d+)B(\d+)(?:A(\d+))?$/.exec(name);
+  if (rgb) c = [+rgb[1], +rgb[2], +rgb[3], rgb[4] ? +rgb[4] : 255];
+  if (!c) return null;
+  return [c[0] / 255, c[1] / 255, c[2] / 255, alpha !== undefined ? alpha : c[3] / 255];
+}
+/** The stackup's colours as layer overrides: silkscreen, solder mask (KiCad's mask opacity kept) and the board body (the first dielectric). */
+export function stackupOverride(layers: { name: string; type?: string; color?: string }[]): Partial<LayerColors> {
+  const out: Partial<LayerColors> = {};
+  for (const l of layers) {
+    if (l.name === "F.SilkS") { const c = stackupColor(l.color); if (c) out.silkTop = c; }
+    else if (l.name === "B.SilkS") { const c = stackupColor(l.color); if (c) out.silkBottom = c; }
+    else if (l.name === "F.Mask") { const c = stackupColor(l.color, SOLDER_MASK[3]); if (c) out.maskTop = c; }
+    else if (l.name === "B.Mask") { const c = stackupColor(l.color, SOLDER_MASK[3]); if (c) out.maskBottom = c; }
+    else if (/^dielectric/.test(l.name) && !out.board) { const c = stackupColor(l.color); if (c) out.board = c; }
+  }
+  return out;
+}

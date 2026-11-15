@@ -2,7 +2,7 @@
 // own 2D geometry, one technical layer at a time, drawn by the editor's canvas painter
 // (KiCadCanvas.render, server/web/canvas/render.ts) as a white stencil and tinted with KiCad's 3D
 // colours: board body, copper (surface finish), solder mask with its openings, silkscreen, solder paste.  The stack order is the 3D viewer's: body, copper, mask, silk, paste.
-import { EXTRA_LAYERS, HOLE_SHADE, LAYER_COLORS, RGBA, css, extraSide } from "./colors";
+import { EXTRA_LAYERS, HOLE_SHADE, RGBA, css, extraSide, layerColor } from "./colors";
 import type { Hole } from "./outline";
 
 export type Side = "F" | "B";
@@ -100,26 +100,26 @@ export class FaceComposer {
     this.scratch(true);
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, W, H);
-    if (show.body) { ctx.fillStyle = css(LAYER_COLORS.board, 1); ctx.fillRect(0, 0, W, H); }
-    if (show.copper && this.stencil(this.a, L.cu)) { this.tint(this.a, LAYER_COLORS.copper); ctx.drawImage(this.a, 0, 0); }
+    if (show.body) { ctx.fillStyle = css(layerColor("board"), 1); ctx.fillRect(0, 0, W, H); }
+    if (show.copper && this.stencil(this.a, L.cu)) { this.tint(this.a, layerColor(side === "F" ? "copperTop" : "copperBottom")); ctx.drawImage(this.a, 0, 0); }
     const openings = show.mask ? this.stencil(this.b, L.mask) : false;
     if (show.mask) {
       const actx = this.a.getContext("2d");
       if (actx) {
         actx.globalCompositeOperation = "source-over"; actx.clearRect(0, 0, W, H);
-        const mask = side === "F" ? LAYER_COLORS.maskTop : LAYER_COLORS.maskBottom;
+        const mask = layerColor(side === "F" ? "maskTop" : "maskBottom");
         actx.fillStyle = css(mask, 1); actx.fillRect(0, 0, W, H);
         if (openings) { actx.globalCompositeOperation = "destination-out"; actx.drawImage(this.b, 0, 0); actx.globalCompositeOperation = "source-over"; }
-        ctx.globalAlpha = side === "F" ? LAYER_COLORS.maskTop[3] : LAYER_COLORS.maskBottom[3]; ctx.drawImage(this.a, 0, 0); ctx.globalAlpha = 1;
+        ctx.globalAlpha = mask[3]; ctx.drawImage(this.a, 0, 0); ctx.globalAlpha = 1;
       }
     }
     // silkscreen is not clipped at the mask openings: KiCad's default (render.subtract_mask_from_silk = false)
-    if (show.silk && this.stencil(this.a, L.silk)) { this.tint(this.a, side === "F" ? LAYER_COLORS.silkTop : LAYER_COLORS.silkBottom); ctx.drawImage(this.a, 0, 0); }
-    if (show.paste && this.stencil(this.a, L.paste)) { this.tint(this.a, LAYER_COLORS.paste); ctx.drawImage(this.a, 0, 0); }
+    if (show.silk && this.stencil(this.a, L.silk)) { this.tint(this.a, layerColor(side === "F" ? "silkTop" : "silkBottom")); ctx.drawImage(this.a, 0, 0); }
+    if (show.paste && this.stencil(this.a, L.paste)) { this.tint(this.a, layerColor("paste")); ctx.drawImage(this.a, 0, 0); }
     // the technical and user layers the Appearance panel turned on, each on its own face
     for (const x of EXTRA_LAYERS) {
       if (!show.extra || !show.extra.includes(x.key)) continue;
-      for (const layer of x.layers) if (extraSide(layer) === side && this.stencil(this.a, layer)) { const c = LAYER_COLORS[x.key] || x.color; this.tint(this.a, c); ctx.globalAlpha = c[3]; ctx.drawImage(this.a, 0, 0); ctx.globalAlpha = 1; }
+      for (const layer of x.layers) if (extraSide(layer) === side && this.stencil(this.a, layer)) { const c = layerColor(x.key); this.tint(this.a, c); ctx.globalAlpha = c[3]; ctx.drawImage(this.a, 0, 0); ctx.globalAlpha = 1; }
     }
     if (painted.length) {
       ctx.setTransform(e.pxPerMm, 0, 0, e.pxPerMm, -e.x0 * e.pxPerMm, -e.y0 * e.pxPerMm);

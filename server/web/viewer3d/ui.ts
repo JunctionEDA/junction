@@ -2,7 +2,7 @@
 // draggable, resizable panel over the board editor.  Menus follow 3d-viewer/3d_viewer/3d_menubar.cpp,
 // the top toolbar toolbars_3d.cpp, the labels / tooltips / hotkeys / icons tools/eda_3d_actions.cpp, and
 // the right-hand panel the rows of dialogs/appearance_controls_3D.cpp that the web viewer can draw.
-import { BACKGROUND_BOTTOM, BACKGROUND_TOP, DEFAULT_LAYER_COLORS, EXTRA_LAYERS, LAYER_COLORS, RGBA, cloneLayerColors, css, setLayerColors } from "./colors";
+import { BACKGROUND_BOTTOM, BACKGROUND_TOP, DEFAULT_LAYER_COLORS, EXTRA_LAYERS, LAYER_COLORS, RGBA, cloneLayerColors, css, setColorOverride, setLayerColors, stackupOverride, type LayerColors } from "./colors";
 import { GRID3D_CHOICES, type Grid3D } from "./grid";
 import ICONS from "./icons.json";
 import { BoardStats, DEFAULT_VISIBILITY, Visibility } from "./scene";
@@ -39,6 +39,10 @@ export interface OpenOptions {
   layerVisible?(layer: string): boolean;
   /** Follow PCB Plot Settings: the layers the plot dialog plots */
   plotLayers?(): Promise<string[] | null>;
+  /** Use board stackup colors: the board's physical stackup (Board Setup), name / type / color per layer */
+  stackupLayers?(): Promise<{ name: string; type?: string; color?: string }[] | null>;
+  /** Use PCB editor copper colors: the board editor's colour of a layer (CSS) */
+  editorColor?(layer: string): string | null;
 }
 
 interface IconDef { vb?: string; light?: string; dark?: string }
@@ -174,6 +178,15 @@ export function visibilityFromLayers(on: (layer: string) => boolean, cur: Visibi
   return v;
 }
 
+/** "#rrggbb", "#rrggbbaa" or "rgb(a)(…)" to RGBA. */
+function parseCss(c: string | null): RGBA | null {
+  if (!c) return null;
+  const hx = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(c.trim());
+  if (hx) { const n = parseInt(hx[1], 16); return [(n >> 16) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255, hx[2] ? parseInt(hx[2], 16) / 255 : 1]; }
+  const m = /rgba?\(\s*([\d.]+)[ ,]+([\d.]+)[ ,]+([\d.]+)(?:[ ,/]+([\d.]+))?/i.exec(c);
+  return m ? [+m[1] / 255, +m[2] / 255, +m[3] / 255, m[4] ? +m[4] : 1] : null;
+}
+
 export class ViewerWindow {
   readonly root: HTMLDivElement;
   readonly viewer: Viewer | null = null;
@@ -264,6 +277,7 @@ export class ViewerWindow {
     root.focus({ preventScroll: true });
     if (opts.subscribe) this.unsubscribe = opts.subscribe(() => this.scheduleReload());
     this.reload(true);
+    if (this.settings.useStackup || this.settings.useEditorCopper) void this.refreshOverrides();
   }
 
   // ---------------------------------------------------------------- actions
@@ -460,7 +474,7 @@ export class ViewerWindow {
     // the display options under the list (m_cbUseBoardStackupColors, m_cbUseBoardEditorCopperColors)
     const opt = (label: string, tip: string, key: "useStackup" | "useEditorCopper") => {
       const r = el("label", "v3d-opt"); r.title = tip; const cb = el("input"); cb.type = "checkbox"; cb.dataset.opt = key; cb.checked = !!this.settings[key];
-      cb.addEventListener("change", () => { this.settings[key] = cb.checked; this.save(); this.reload(false); });
+      cb.addEventListener("change", () => { this.settings[key] = cb.checked; this.save(); void this.refreshOverrides(); });
       r.append(cb, el("span", undefined, label)); side.appendChild(r);
     };
     opt("Use board stackup colors", "Use the colors of the board's physical stackup (Board Setup)", "useStackup");
@@ -476,6 +490,16 @@ export class ViewerWindow {
       "Save and restore color and visibility combinations.");
     this.viewportSel = choice("Viewports (Alt+Tab):", "v3d-viewports", (sel) => this.fillViewports(sel), (value) => this.onViewport(value),
       "Save and restore camera position and zoom.");
+  }
+
+  /** The colours the two display options stand in (stackup, editor copper), then the board drawn again. */
+  async refreshOverrides(): Promise<void> {
+    const o: Partial<LayerColors> = {};
+    if (this.settings.useStackup && this.opts.stackupLayers) { try { const l = await this.opts.stackupLayers(); if (l) Object.assign(o, stackupOverride(l)); } catch { /* no stackup */ } }
+    if (this.settings.useEditorCopper && this.opts.editorColor) {
+      for (const [key, layer] of [["copperTop", "F.Cu"], ["copperBottom", "B.Cu"]] as const) { const c = parseCss(this.opts.editorColor(layer)); if (c) o[key] = c; }
+    }
+    setColorOverride(o); this.reload(false);
   }
 
   /** The board's enabled layers by name (for the User.N rows), null before a board is shown. */
