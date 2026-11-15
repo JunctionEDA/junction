@@ -10,6 +10,7 @@ import { zstdDecompress } from "../../dialogs/zstd";
 import { box, checkField, currentUnits, download, errorMessage, fmtLenU, form, grid, gridButtons, h, iconButton, lenField, messageBox, note, notebook, numField, openDialog, parseLen, selectField, textField, unitLabel, unitName, type CellValue, type Field } from "./ui";
 import * as M3 from "../../library/model3d";
 import { modelLibItems, modelPreview, pick3DModel, stepper, whenGone } from "./model3d";
+import { E } from "../state";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Any = any;
@@ -182,8 +183,7 @@ export function footprintPropertiesDialog(ctx: ToolCtx, host: FpPropsHost = {}):
       const ref = (n: string) => "kicad-embed://" + n;
       efGrid = grid([{ label: "Filename", key: "name", readOnly: () => true }, { label: "Embedded Reference", key: "ref", readOnly: () => true }], efRows, { ro: true, height: "260px" });
       let efSel = -1; efGrid.el.addEventListener("click", (ev) => { const tr = (ev.target as HTMLElement).closest("tr"); if (tr && tr.parentElement && tr.parentElement.tagName === "TBODY") efSel = Array.from(tr.parentElement.children).indexOf(tr); });
-      const del = h("button", { type: "button", class: "kbtn", disabled: ro, title: "Remove embedded file", "data-k": "efDelete" }, "🗑");
-      del.addEventListener("click", () => { const rows = efGrid!.rows(); if (efSel < 0 || efSel >= rows.length) return; rows.splice(efSel, 1); efSel = Math.min(efSel, rows.length - 1); efGrid!.refresh(); });
+      const del = iconButton("trash", "Remove embedded file", () => { const rows = efGrid!.rows(); if (efSel < 0 || efSel >= rows.length) return; rows.splice(efSel, 1); efSel = Math.min(efSel, rows.length - 1); efGrid!.refresh(); }, ro); del.setAttribute("data-k", "efDelete");
       const exp = h("button", { type: "button", class: "kbtn", "data-k": "efExport" }, "Export...");
       exp.addEventListener("click", () => {
         const rows = efGrid!.rows(); const names = efSel >= 0 && efSel < rows.length ? [String(rows[efSel].name)] : rows.map((r) => String(r.name));
@@ -235,8 +235,22 @@ export function padTableDialog(ctx: ToolCtx): boolean {
   const g = grid([{ label: "Number", key: "number", width: "70px" }, { label: "Type", key: "type", type: "select", options: PADS().PAD_TYPES }, { label: "Shape", key: "shape", type: "select", options: PADS().PAD_SHAPES },
     { label: "X Position", key: "x", type: "len" }, { label: "Y Position", key: "y", type: "len" }, { label: "Size X", key: "w", type: "len" }, { label: "Size Y", key: "h", type: "len" },
     { label: "Drill X", key: "dx", type: "len", readOnly: (r) => !PADS().drillsEditable(String(r.type)) }, { label: "Drill Y", key: "dy", type: "len", readOnly: (r) => !PADS().drillsEditable(String(r.type)) },
-    { label: "Pad->Die Length", key: "dieLen", type: "len" }, { label: "Pad->Die Delay", key: "dieDelay", type: "num" }], rows, { ro, height: "360px", onChange: () => { refresh(); g.refresh(); } });
+    { label: "Pad->Die Length", key: "dieLen", type: "len" }, { label: "Pad->Die Delay", key: "dieDelay", type: "num" }], rows, { ro, height: "360px", onChange: () => { refresh(); g.refresh(); },
+    onSelect: (i) => brighten(i) });
+  // OnSelectCell: the row's pad is brightened on the canvas while the dialog is open
+  const ES = E as { dialogBrightened?: Set<string> | null };
+  const brighten = (i: number): void => { const r = g.rows()[i]; ES.dialogBrightened = r && r.id ? new Set([String(r.id)]) : null; ctx.requestRender(); };
   refresh();
+  // OnAddRow: a copy of the last pad, one grid step lower; OnDeleteRow: the selected pad goes
+  const addPad = (): void => {
+    const all = g.rows(); const last = all[all.length - 1];
+    const row: Record<string, CellValue> = last ? { ...last, id: "", from: String(last.from || last.id || ""), y: Number(last.y) + (ctx.gridPitch || 0) } : { id: "", number: "", type: "smd", shape: "roundrect", x: 0, y: 0, w: 1, h: 1, dx: NaN, dy: NaN, dieLen: NaN, dieDelay: NaN };
+    all.push(row); g.refresh(); refresh(); g.select(all.length - 1);
+    const inp = g.el.querySelector("tbody tr:last-child input[data-col=number]") as HTMLInputElement | null; if (inp) { inp.focus(); inp.select(); }
+  };
+  const delPad = (): void => { const all = g.rows(), i = g.selected(); if (i < 0 || i >= all.length) return; all.splice(i, 1); g.refresh(); refresh(); if (all.length) g.select(Math.min(i, all.length - 1)); else brighten(-1); };
+  const addB = iconButton("plus", "Add pad", addPad, ro), delB = iconButton("trash", "Delete pad", delPad, ro);
+  addB.setAttribute("data-k", "padAdd"); delB.setAttribute("data-k", "padDelete");
   const fmtCell = (r: Record<string, CellValue>, k: string): string => { const v = r[k]; if (k === "type") return (PADS().PAD_TYPES.find((t: [string, string]) => t[0] === v) || [0, String(v)])[1]; if (k === "shape") return (PADS().PAD_SHAPES.find((t: [string, string]) => t[0] === v) || [0, String(v)])[1]; if (typeof v === "number") return isFinite(v) ? (k === "dieDelay" ? String(v) : fmtLenU(v)) : ""; return String(v ?? ""); };
   const exportTable = async (toFile: boolean): Promise<void> => {
     const pads = g.rows().filter((r) => !r.complex);
@@ -280,7 +294,11 @@ export function padTableDialog(ctx: ToolCtx): boolean {
   fileInput.addEventListener("change", () => { const f = fileInput.files && fileInput.files[0]; if (f) void f.text().then(importTable); fileInput.value = ""; });
   const btn = (label: string, k: string, fn: () => void) => { const b = h("button", { type: "button", class: "kbtn", "data-k": k }, label); b.addEventListener("click", fn); return b; };
   return !!openDialog({ title: "Pad Table", width: 1100, readOnly: ro, noEnter: true,
-    build(body) {
+    build(body, dlgApi) {
+      // m_buttonAdd and m_buttonDelete sit left of OK / Cancel (bSizer91: 2 px, then 25 px apart)
+      const foot = dlgApi.dialog.querySelector(".kd-foot"); if (foot) foot.prepend(h("span", { class: "pd-row", style: "gap:25px;margin-left:2px" }, addB, delB));
+      whenGone(body, () => { ES.dialogBrightened = null; ctx.requestRender(); });
+      if (g.rows().length) setTimeout(() => g.select(0), 0);   // the first row is selected on open
       body.append(form([["Pad numbers:", summary], ["Pad count:", count], ["Duplicate pads:", dups]], true), g.el,
         h("div", { class: "pd-cols2" },
           box("Export", h("div", { class: "pd-row" }, btn("To File...", "exportFile", () => void exportTable(true)), btn("To Clipboard", "exportClipboard", () => void exportTable(false)))),
@@ -289,8 +307,14 @@ export function padTableDialog(ctx: ToolCtx): boolean {
     },
     ok() {
       if (ro) return true;
-      const out = g.rows().map((r) => ({ ...r, x: Number(r.x), y: Number(r.y), w: Number(r.w), h: Number(r.h), dx: Number(r.dx), dy: Number(r.dy), dieLen: Number(r.dieLen), dieDelay: Number(r.dieDelay), number: String(r.number), type: String(r.type), shape: String(r.shape), id: String(r.id || "") }));
-      const ch = PADS().padTableChanges(doc, out, () => PT().pad.masterPad(doc, "smd", null));
+      const out = g.rows().map((r) => ({ ...r, from: r.from ? String(r.from) : "", x: Number(r.x), y: Number(r.y), w: Number(r.w), h: Number(r.h), dx: Number(r.dx), dy: Number(r.dy), dieLen: Number(r.dieLen), dieDelay: Number(r.dieDelay), number: String(r.number), type: String(r.type), shape: String(r.shape), id: String(r.id || "") }));
+      // a pad added with the Add button copies the pad it was made from (PAD::Duplicate), with a new uuid
+      const fromNode = (r: Record<string, CellValue>): SNode => {
+        const src = r.from ? doc.items.get(String(r.from)) : null;
+        if (!src) return PT().pad.masterPad(doc, "smd", null);
+        const n = KiCadCanvas.cloneNode(src.node); const u = KiCadCanvas.kid(n, "uuid"); if (u) u[1] = KiCadCanvas.newUuid(); return n;
+      };
+      const ch = PADS().padTableChanges(doc, out, fromNode);
       if (ch.length) ctx.commit(ch, "Edit Pads");
       return true;
     } });

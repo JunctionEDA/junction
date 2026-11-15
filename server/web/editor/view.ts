@@ -120,6 +120,8 @@ function boardBrightened(): Set<string> | null {
   if (isSch()) return null;
   const out = new Set<string>();
   if (E.hoverPinned && E.hoverId) out.add(E.hoverId as string);
+  // a dialog's row brightens its item (DIALOG_FP_EDIT_PAD_TABLE::OnSelectCell)
+  const dlg = (E as { dialogBrightened?: Set<string> | null }).dialogBrightened; if (dlg) for (const id of dlg) out.add(id);
   const pcb = CollabTools.pcb; if (pcb && pcb.brightenedIds) { try { for (const id of pcb.brightenedIds()) out.add(id); } catch (e) { /* older module */ } }
   return out.size ? out : null;
 }
