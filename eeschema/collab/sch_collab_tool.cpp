@@ -240,13 +240,24 @@ void SCH_COLLAB_TOOL::tryAutoJoin()
     std::string           tokenUtf8 = token.ToStdString( wxConvUTF8 );
     std::string           projectIdUtf8 = projectId.ToStdString( wxConvUTF8 );
     std::string           pathUtf8 = projectPath.ToStdString( wxConvUTF8 );
+    std::string           nameUtf8 = m_frame->Prj().GetProjectName().ToStdString( wxConvUTF8 );
 
     session.RunAsync(
-            [this, alive, serverUtf8, tokenUtf8, projectIdUtf8, pathUtf8]()
+            [this, alive, serverUtf8, tokenUtf8, projectIdUtf8, pathUtf8, nameUtf8]()
             {
                 std::optional<nlohmann::json> project = COLLAB_REST::GetProject(
                         wxString::FromUTF8( serverUtf8 ), wxString::FromUTF8( tokenUtf8 ),
                         wxString::FromUTF8( projectIdUtf8 ) );
+
+                // Files renamed in the local folder since the last session keep their online
+                // documents: the server is told before the documents are matched by path.
+                if( project )
+                {
+                    COLLAB_PROJECT::ReconcileLocalRenames(
+                            wxString::FromUTF8( serverUtf8 ), wxString::FromUTF8( tokenUtf8 ),
+                            wxString::FromUTF8( pathUtf8 ), wxString::FromUTF8( nameUtf8 ),
+                            *project );
+                }
 
                 wxTheApp->CallAfter(
                         [this, alive, tokenUtf8, projectIdUtf8, pathUtf8, project]()

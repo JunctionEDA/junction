@@ -549,10 +549,32 @@ try {
   r = await call(alice, 'GET', `/api/projects/${sKeybit}/github/diff?path=${encodeURIComponent('../lib/lcsc.kicad_sym')}`);
   check('the change list works for a shared file', r.status === 200 && r.j.path === '../lib/lcsc.kicad_sym', JSON.stringify(r.j));
 
-  // ============================================================ a download never writes outside the project folder
+  // ============================================================ files renamed in a local copy (the desktop app reports them)
+  const before2 = await docsOf(alice, panel);
+  r = await call(alice, 'POST', `/api/projects/${panel}/renamed`, { renames: [{ from: 'p1.kicad_pcb', to: 'panel.kicad_pcb' }] });
+  const after2 = await docsOf(alice, panel);
+  check('a file renamed in a local copy is the same online document under its new name', r.status === 200 && r.j.renamed.length === 1 && after2['panel.kicad_pcb'] === before2['p1.kicad_pcb'] && !after2['p1.kicad_pcb']
+    && Object.keys(after2).length === Object.keys(before2).length, JSON.stringify(r.j));
+  r = await call(alice, 'POST', `/api/projects/${panel}/renamed`, { renames: [{ from: 'p1.kicad_pcb', to: 'panel.kicad_pcb' }] });
+  check('reporting it again changes nothing', r.status === 200 && r.j.renamed.length === 0, JSON.stringify(r.j));
+  st = await status(alice, panel);
+  check('…and GitHub sync sees one renamed file to push, not a new file and a deleted one', file(st, 'panel.kicad_pcb').renamedFrom === 'p1.kicad_pcb' && file(st, 'panel.kicad_pcb').state === 'push', JSON.stringify(notSynced(st)));
+  r = await call(alice, 'POST', `/api/projects/${panel}/renamed`, { renames: [{ from: 'p1.kicad_pro', to: 'panel.kicad_pcb' }] });
+  check('a rename onto an existing file, or to another file type, is refused', r.status === 400, JSON.stringify(r.j));
+  r = await call(alice, 'POST', `/api/projects/${panel}/renamed`, { renames: [{ from: 'panel.kicad_pcb', to: '../panel.kicad_pcb' }] });
+  check('…and so is one that leaves the project folder', r.status === 400, JSON.stringify(r.j));
+  r = await call(bob, 'POST', `/api/projects/${panel}/renamed`, { renames: [{ from: 'panel.kicad_pcb', to: 'x.kicad_pcb' }] });
+  check('…and one from someone who cannot edit the project', r.status === 403, JSON.stringify(r.j));
+
+  // ============================================================ a download keeps the shared library beside the project
   const zip = await fetch(`${BASE}/api/projects/${keybit}/archive`, { headers: { Authorization: `Bearer ${alice}` } });
   const zipText = Buffer.from(await zip.arrayBuffer()).toString('latin1');
-  check('the project download leaves out files that live outside the project folder', zip.status === 200 && zipText.includes('keybit.kicad_pcb') && !zipText.includes('../lib'), String(zip.status));
+  check('the project download holds the project in its folder and the shared library beside it, as in the repository',
+    zip.status === 200 && zipText.includes('keybit/keybit.kicad_pcb') && zipText.includes('lib/lcsc.kicad_sym') && zipText.includes('keybit/collab-manifest.json'), String(zip.status));
+  check('…with no entry that climbs out of where it is unpacked', !zipText.includes('../'));
+  const flat = await fetch(`${BASE}/api/projects/${panel}/archive`, { headers: { Authorization: `Bearer ${alice}` } });
+  const flatText = Buffer.from(await flat.arrayBuffer()).toString('latin1');
+  check('a project that shares nothing still downloads as its plain folder', flat.status === 200 && flatText.includes('p1.kicad_pro') && !flatText.includes('p1/p1.kicad_pro'));
 } finally {
   await db.query('DELETE FROM projects WHERE owner_id = ANY($1)', [[aliceId, bobId]]).catch(() => {});
   await db.query('DELETE FROM ops WHERE author_id = ANY($1)', [[aliceId, bobId]]).catch(() => {});

@@ -23,6 +23,8 @@
 #include <functional>
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <kicommon.h>
 #include <nlohmann/json.hpp>
@@ -206,5 +208,31 @@ KICOMMON_API void RefreshSyncBaseFromDisk( const wxString& aProjectPath,
 /// Base every board and schematic of the project on its current on-disk state —
 /// right after an upload or a download, when both sides are known to match.
 KICOMMON_API void SeedSyncBases( const wxString& aProjectPath, const wxString& aProjectName );
+
+/**
+ * Files of the local copy that were renamed on disk since it last matched the online
+ * project: (old project-relative path, new one) for each project file, schematic and board
+ * the online project lists (aDocs: [ { path, docType, ... } ]) that is gone from the folder
+ * while a file of the same kind the project does not list has appeared.  A file identical
+ * to the sync base of a missing one is that one; otherwise a pair is made only when exactly
+ * one file of a kind is missing and exactly one is new.  A board or schematic this copy
+ * never held (it has no sync base) is never taken for a renamed one.
+ */
+KICOMMON_API std::vector<std::pair<wxString, wxString>>
+FindLocalRenames( const wxString& aProjectPath, const wxString& aProjectName,
+                  const nlohmann::json& aDocs );
+
+/**
+ * Tell the server about the renames FindLocalRenames() sees, so each online document keeps
+ * its history under the new name instead of the editors finding "no matching document".
+ * On success aProject's document paths (the GET /api/projects/{id} answer) and the sync
+ * bases are updated to match.  Synchronous; call it off the UI thread.
+ *
+ * @return true if anything was renamed.
+ */
+KICOMMON_API bool ReconcileLocalRenames( const wxString& aServer, const wxString& aToken,
+                                         const wxString& aProjectPath,
+                                         const wxString& aProjectName,
+                                         nlohmann::json& aProject );
 
 } // namespace COLLAB_PROJECT

@@ -337,6 +337,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/docs/{id}/preview.svg", get(http::doc_preview_svg))
         .route("/api/docs/{id}/items", get(http::doc_items))
         .route("/api/projects/{id}/docs", post(http::create_doc))
+        .route("/api/projects/{id}/renamed", post(http::renamed_files))
         .route("/api/docs/{id}/content", get(http::doc_content))
         .route("/api/docs/{id}", delete(http::delete_doc).patch(http::move_doc))
         .route("/api/projects/{id}/clone", post(http::clone_project))

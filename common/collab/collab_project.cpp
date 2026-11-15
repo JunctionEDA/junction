@@ -38,6 +38,7 @@
 #include <wx/window.h>
 
 #include <map>
+#include <set>
 #include <thread>
 
 
@@ -493,6 +494,181 @@ void COLLAB_PROJECT::SeedSyncBases( const wxString& aProjectPath, const wxString
         if( !skip )
             RefreshSyncBaseFromDisk( aProjectPath, aProjectName, rel.GetFullPath( wxPATH_UNIX ) );
     }
+}
+
+
+std::vector<std::pair<wxString, wxString>>
+COLLAB_PROJECT::FindLocalRenames( const wxString& aProjectPath, const wxString& aProjectName,
+                                  const nlohmann::json& aDocs )
+{
+    std::vector<std::pair<wxString, wxString>> renames;
+
+    if( aProjectPath.IsEmpty() || !aDocs.is_array() || !wxFileName::DirExists( aProjectPath ) )
+        return renames;
+
+    static const wxString kinds[] = { wxS( "kicad_pro" ), wxS( "kicad_sch" ), wxS( "kicad_pcb" ) };
+
+    auto localFile =
+            [&]( const wxString& aRel )
+            {
+                return aProjectPath + wxFileName::GetPathSeparator()
+                       + wxFileName( aRel, wxPATH_UNIX ).GetFullPath();
+            };
+
+    for( const wxString& kind : kinds )
+    {
+        std::set<wxString>    known;
+        std::vector<wxString> missing;
+        std::vector<wxString> appeared;
+
+        for( const nlohmann::json& doc : aDocs )
+        {
+            wxString path = wxString::FromUTF8( doc.value( "path", "" ) );
+
+            // Files shared from outside the folder (../lib/...) are not this copy's to rename.
+            if( path.IsEmpty() || path.Contains( wxS( ".." ) )
+                || wxFileName( path, wxPATH_UNIX ).GetExt().Lower() != kind )
+            {
+                continue;
+            }
+
+            known.insert( path );
+
+            // A document this copy never held (someone added a sheet online) is not a local
+            // rename either: boards and schematics that were here have a sync base.
+            if( !wxFileName::FileExists( localFile( path ) )
+                && ( kind == wxS( "kicad_pro" )
+                     || !ReadSyncBase( aProjectPath, aProjectName, path ).empty() ) )
+            {
+                missing.push_back( path );
+            }
+        }
+
+        if( missing.empty() )
+            continue;
+
+        wxArrayString files;
+        wxDir::GetAllFiles( aProjectPath, &files, wxS( "*." ) + kind, wxDIR_FILES | wxDIR_DIRS );
+
+        for( const wxString& file : files )
+        {
+            wxFileName rel( file );
+            rel.MakeRelativeTo( aProjectPath );
+
+            bool localState = false;
+
+            for( const wxString& dir : rel.GetDirs() )
+            {
+                if( dir.EndsWith( wxS( ".collab" ) ) || dir.EndsWith( wxS( "-backups" ) )
+                    || dir.StartsWith( wxS( "." ) ) )
+                {
+                    localState = true;
+                    break;
+                }
+            }
+
+            wxString path = rel.GetFullPath( wxPATH_UNIX );
+
+            if( !localState && !rel.GetName().StartsWith( wxS( "_autosave-" ) )
+                && !known.count( path ) )
+            {
+                appeared.push_back( path );
+            }
+        }
+
+        // A new file that is byte for byte what a missing one was when it last matched the
+        // online project is that file under a new name.
+        for( auto m = missing.begin(); m != missing.end(); )
+        {
+            std::string base = ReadSyncBase( aProjectPath, aProjectName, *m );
+            auto        hit = appeared.end();
+            int         hits = 0;
+
+            if( !base.empty() )
+            {
+                for( auto a = appeared.begin(); a != appeared.end(); ++a )
+                {
+                    if( readWholeFile( localFile( *a ) ) == base )
+                    {
+                        hit = a;
+                        hits++;
+                    }
+                }
+            }
+
+            if( hits == 1 )
+            {
+                renames.emplace_back( *m, *hit );
+                appeared.erase( hit );
+                m = missing.erase( m );
+            }
+            else
+            {
+                ++m;
+            }
+        }
+
+        // Edited since, or never based: one gone and one new of the same kind is a rename.
+        if( missing.size() == 1 && appeared.size() == 1 )
+            renames.emplace_back( missing.front(), appeared.front() );
+    }
+
+    return renames;
+}
+
+
+bool COLLAB_PROJECT::ReconcileLocalRenames( const wxString& aServer, const wxString& aToken,
+                                            const wxString& aProjectPath,
+                                            const wxString& aProjectName,
+                                            nlohmann::json& aProject )
+{
+    if( !aProject.contains( "docs" ) || !aProject[ "docs" ].is_array() )
+        return false;
+
+    std::vector<std::pair<wxString, wxString>> renames =
+            FindLocalRenames( aProjectPath, aProjectName, aProject[ "docs" ] );
+
+    if( renames.empty() )
+        return false;
+
+    wxString projectId = wxString::FromUTF8( aProject.value( "projectId", "" ) );
+
+    std::optional<nlohmann::json> answer =
+            COLLAB_REST::ReportRenames( aServer, aToken, projectId, renames );
+
+    if( !answer || !answer->value( "ok", false ) )
+    {
+        wxLogTrace( traceCollab, wxS( "local renames were not accepted by the server" ) );
+        return false;
+    }
+
+    for( const auto& [from, to] : renames )
+    {
+        for( nlohmann::json& doc : aProject[ "docs" ] )
+        {
+            if( wxString::FromUTF8( doc.value( "path", "" ) ) == from )
+                doc[ "path" ] = to.ToStdString( wxConvUTF8 );
+        }
+
+        // The base follows the file, so the next merge still has its third side.
+        wxString oldBase = syncBasePath( aProjectPath, aProjectName, from );
+        wxString newBase = syncBasePath( aProjectPath, aProjectName, to );
+
+        if( !oldBase.IsEmpty() && !newBase.IsEmpty() && wxFileName::FileExists( oldBase ) )
+        {
+            wxFileName target( newBase );
+
+            if( target.DirExists()
+                || wxFileName::Mkdir( target.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL ) )
+            {
+                wxRenameFile( oldBase, newBase, true );
+            }
+        }
+
+        wxLogTrace( traceCollab, wxS( "local rename '%s' -> '%s' reported" ), from, to );
+    }
+
+    return true;
 }
 
 

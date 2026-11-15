@@ -21,6 +21,8 @@
 
 #include <optional>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include <kicommon.h>
 #include <nlohmann/json.hpp>
@@ -270,6 +272,13 @@ KICOMMON_API std::optional<nlohmann::json> CreateDoc( const wxString& aServerUrl
                                                       const wxString& aToken,
                                                       const wxString& aProjectId,
                                                       const wxString& aPath );
+
+/// POST /api/projects/{id}/renamed — files of the local copy were renamed on disk; each
+/// online document takes its new path and stays the same document.  Returns
+/// { ok, renamed: [ { docId, from, path, docType } ] }.
+KICOMMON_API std::optional<nlohmann::json> ReportRenames(
+        const wxString& aServerUrl, const wxString& aToken, const wxString& aProjectId,
+        const std::vector<std::pair<wxString, wxString>>& aRenames );
 
 /// GET /api/docs/{id}/content — the latest snapshot bytes (empty on failure).
 KICOMMON_API std::string FetchDocContent( const wxString& aServerUrl, const wxString& aToken,

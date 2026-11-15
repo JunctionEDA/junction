@@ -1443,6 +1443,39 @@ pub async fn get_project(
     .into_response())
 }
 
+/// The folders an archived project sits in when it reaches `up` levels above itself:
+/// the last `up` folders of its place in the repository, else its own name.
+fn archive_home(subdir: &str, project: &str, up: usize) -> Vec<String> {
+    let clean = |s: &str| -> String {
+        let t: String = s.chars().map(|c| if c.is_alphanumeric() || "-_. ".contains(c) { c } else { '_' }).collect();
+        let t = t.trim().trim_matches('.').to_string();
+        if t.is_empty() { "project".into() } else { t }
+    };
+    let mut home: Vec<String> = subdir.split('/').filter(|s| !s.is_empty()).map(clean).collect();
+    if home.is_empty() {
+        home.push(clean(project));
+    }
+    while home.len() < up {
+        home.insert(0, "shared".into());
+    }
+    home.split_off(home.len() - up)
+}
+
+/// Where a project path lands in an archive whose project folder is `home`.
+fn archive_place(home: &[String], path: &str) -> String {
+    let mut at: Vec<&str> = home.iter().map(String::as_str).collect();
+    for seg in path.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                at.pop();
+            }
+            s => at.push(s),
+        }
+    }
+    at.join("/")
+}
+
 pub async fn download_archive(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -1464,12 +1497,6 @@ pub async fn download_archive(
     let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
     let mut manifest_docs = serde_json::Map::new();
     for d in &docs {
-        // A file the project shares from outside its folder (GitHub sync brings a library at
-        // `../lib/…` along) has no place inside an archive of the folder: left out, so
-        // unpacking never writes above the folder it is unpacked into.
-        if d.path.starts_with("../") {
-            continue;
-        }
         if let Some((seq, content)) = persist::latest_snapshot(&state.pool, d.id).await? {
             manifest_docs.insert(
                 d.path.clone(),
@@ -1489,6 +1516,21 @@ pub async fn download_archive(
     // the schematics' own copies of its symbols, as a file of the download only (not a document)
     let rebuilt = crate::projectlibs::rebuild_symbol_libraries(&entries);
     entries.extend(rebuilt);
+    // A project that shares files from outside its folder (GitHub sync brings a library at
+    // `../lib/…` along) is archived one level up: the project in a folder named as in its
+    // repository, the shared files beside it, so every `${KIPRJMOD}/../…` reference works
+    // where it is unpacked and nothing is ever written above that place.
+    let up = entries.iter().map(|(p, _)| p.split('/').take_while(|s| *s == "..").count()).max().unwrap_or(0);
+    if up > 0 {
+        let subdir: Option<String> = sqlx::query_scalar("SELECT subdir FROM project_github WHERE project_id = $1")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?;
+        let home = archive_home(subdir.as_deref().unwrap_or(""), &project.name, up);
+        for (name, _) in entries.iter_mut() {
+            *name = archive_place(&home, name);
+        }
+    }
 
     let zip_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
         let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));
@@ -2221,6 +2263,64 @@ pub async fn move_doc(
 }
 
 #[derive(Deserialize)]
+pub struct RenamedFile {
+    pub from: String,
+    pub to: String,
+}
+
+#[derive(Deserialize)]
+pub struct RenamedFilesRequest {
+    pub renames: Vec<RenamedFile>,
+}
+
+/// POST /api/projects/{id}/renamed {renames: [{from, to}]}: files of a local copy were
+/// renamed on disk (the desktop app sees its board or schematic under a new name).  Each
+/// document takes the new path and stays the same document, so its history, comments and
+/// GitHub link follow; nothing is copied and nothing is deleted.  A rename that was
+/// already made is skipped, so the call can be repeated.
+pub async fn renamed_files(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Path(id): Path<Uuid>,
+    LenientJson(req): LenientJson<RenamedFilesRequest>,
+) -> AppResult<Response> {
+    let role = persist::effective_role(&state.pool, user.id, id).await?.ok_or(AppError::Forbidden)?;
+    if role != "editor" {
+        return Err(AppError::Forbidden);
+    }
+    if req.renames.len() > 200 {
+        return Err(AppError::BadRequest("too many renames at once".into()));
+    }
+    let mut done = Vec::new();
+    for r in &req.renames {
+        let Some(to) = safe_zip_name(&r.to) else {
+            return Err(AppError::BadRequest(format!("bad path: {}", r.to)));
+        };
+        if !allowed_file(&to) || is_local_state_path(&to) {
+            return Err(AppError::BadRequest(format!("file type not allowed: {to}")));
+        }
+        let docs = persist::project_documents(&state.pool, id).await?;
+        let taken = docs.iter().any(|d| d.path.eq_ignore_ascii_case(&to));
+        let Some(doc) = docs.iter().find(|d| d.path == r.from) else {
+            if taken {
+                continue; // made before
+            }
+            return Err(AppError::BadRequest(format!("the project has no file at {}", r.from)));
+        };
+        if taken && !doc.path.eq_ignore_ascii_case(&to) {
+            return Err(AppError::BadRequest(format!("the project already has a file at {to}")));
+        }
+        if doc_type_for(&to) != doc.doc_type {
+            return Err(AppError::BadRequest("a file keeps its type when it is renamed".into()));
+        }
+        if let Some(moved) = persist::rename_document(&state.pool, doc.id, &to).await? {
+            done.push(json!({ "docId": moved.id, "from": r.from, "path": moved.path, "docType": moved.doc_type }));
+        }
+    }
+    Ok(Json(json!({ "ok": true, "renamed": done })).into_response())
+}
+
+#[derive(Deserialize)]
 pub struct PreviewUploadQuery {
     pub seq: i64,
     #[serde(default)]
@@ -2321,6 +2421,21 @@ pub async fn healthz(State(state): State<AppState>) -> AppResult<&'static str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn archive_layout_for_shared_files() {
+        let home = archive_home("hardware/keybit", "Keybit", 1);
+        assert_eq!(home, vec!["keybit"]);
+        assert_eq!(archive_place(&home, "keybit.kicad_pro"), "keybit/keybit.kicad_pro");
+        assert_eq!(archive_place(&home, "../lib/lcsc.kicad_sym"), "lib/lcsc.kicad_sym");
+        let home = archive_home("hardware/keybit", "Keybit", 2);
+        assert_eq!(archive_place(&home, "../../common/x.kicad_sym"), "common/x.kicad_sym");
+        assert_eq!(archive_place(&home, "../lib/x.kicad_sym"), "hardware/lib/x.kicad_sym");
+        // not linked, or linked at the repository root: named after the project
+        assert_eq!(archive_home("", "My: board", 1), vec!["My_ board"]);
+        assert_eq!(archive_place(&archive_home("", "a", 2), "../../x"), "x");
+        assert_eq!(archive_place(&archive_home("", "a", 2), "a.kicad_pro"), "shared/a/a.kicad_pro");
+    }
 
     #[test]
     fn zip_name_safety() {

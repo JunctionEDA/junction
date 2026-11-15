@@ -727,6 +727,28 @@ std::optional<nlohmann::json> COLLAB_REST::CreateDoc( const wxString& aServerUrl
 }
 
 
+std::optional<nlohmann::json> COLLAB_REST::ReportRenames(
+        const wxString& aServerUrl, const wxString& aToken, const wxString& aProjectId,
+        const std::vector<std::pair<wxString, wxString>>& aRenames )
+{
+    KICAD_CURL_EASY curl;
+    setupRequest( curl, aServerUrl + wxS( "/api/projects/" ) + aProjectId + wxS( "/renamed" ),
+                  aToken );
+
+    nlohmann::json renames = nlohmann::json::array();
+
+    for( const auto& [from, to] : aRenames )
+    {
+        renames.push_back( { { "from", from.ToStdString( wxConvUTF8 ) },
+                             { "to", to.ToStdString( wxConvUTF8 ) } } );
+    }
+
+    setJsonBody( curl, { { "renames", renames } } );
+
+    return performJson( curl );
+}
+
+
 std::string COLLAB_REST::FetchDocContent( const wxString& aServerUrl, const wxString& aToken,
                                           const wxString& aDocId )
 {

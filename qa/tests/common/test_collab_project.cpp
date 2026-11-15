@@ -19,8 +19,11 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <map>
+
 #include <collab/collab_outbox.h>
 #include <collab/collab_project.h>
+#include <nlohmann/json.hpp>
 #include <wx/ffile.h>
 #include <wx/filename.h>
 #include <wx/utils.h>
@@ -142,6 +145,62 @@ BOOST_AUTO_TEST_CASE( ARenamedProjectFileKeepsItsLink )
     BOOST_CHECK( COLLAB_PROJECT::ReadLocalLink( dir.GetPath(), wxS( "Other" ), server ).IsEmpty() );
     BOOST_CHECK_EQUAL( COLLAB_PROJECT::ReadLocalLink( dir.GetPath(), wxS( "Gizmo" ), server ),
                        wxString( wxS( "proj-1" ) ) );
+}
+
+
+BOOST_AUTO_TEST_CASE( FilesRenamedInTheFolderAreFoundAsRenames )
+{
+    SCRATCH_DIR projects( wxS( "renames" ) );
+
+    wxString   pro = makeLocalCopy( projects.path, wxS( "kb" ), wxS( "proj-1" ) );
+    wxString   dir = wxFileName( pro ).GetPath();
+    wxFileName::Mkdir( dir + wxS( "/sheets" ), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL );
+
+    auto put = [&]( const wxString& aRel, const wxString& aText )
+               {
+                   wxFFile out( dir + wxS( "/" ) + aRel, wxS( "w" ) );
+                   out.Write( aText );
+                   out.Close();
+               };
+
+    put( wxS( "kb.kicad_pcb" ), wxS( "(pcb 1)" ) );
+    put( wxS( "kb.kicad_sch" ), wxS( "(sch root)" ) );
+    put( wxS( "sheets/psu.kicad_sch" ), wxS( "(sch psu)" ) );
+    put( wxS( "sheets/usb.kicad_sch" ), wxS( "(sch usb)" ) );
+    COLLAB_PROJECT::SeedSyncBases( dir, wxS( "kb" ) );
+
+    nlohmann::json docs = nlohmann::json::parse( R"([
+        { "path": "kb.kicad_pro" }, { "path": "kb.kicad_pcb" }, { "path": "kb.kicad_sch" },
+        { "path": "sheets/psu.kicad_sch" }, { "path": "sheets/usb.kicad_sch" },
+        { "path": "online-only.kicad_sch" }, { "path": "../lib/x.kicad_sym" } ])" );
+
+    BOOST_CHECK( COLLAB_PROJECT::FindLocalRenames( dir, wxS( "kb" ), docs ).empty() );
+
+    // A sheet added online that this copy never had, and a sheet created here: two
+    // different files, not one renamed.
+    put( wxS( "new-local.kicad_sch" ), wxS( "(sch new)" ) );
+    BOOST_CHECK( COLLAB_PROJECT::FindLocalRenames( dir, wxS( "kb" ), docs ).empty() );
+
+    wxRenameFile( dir + wxS( "/kb.kicad_pro" ), dir + wxS( "/main.kicad_pro" ) );
+    wxRenameFile( dir + wxS( "/kb.kicad_pcb" ), dir + wxS( "/main.kicad_pcb" ) );
+    wxRenameFile( dir + wxS( "/kb.kicad_sch" ), dir + wxS( "/main.kicad_sch" ) );
+    wxRenameFile( dir + wxS( "/sheets/psu.kicad_sch" ), dir + wxS( "/sheets/power.kicad_sch" ) );
+    wxRenameFile( dir + wxS( "/sheets/usb.kicad_sch" ), dir + wxS( "/sheets/usb-c.kicad_sch" ) );
+    put( wxS( "main.kicad_pcb" ), wxS( "(pcb 1 edited)" ) ); // renamed, then edited
+
+    std::map<wxString, wxString> found;
+
+    for( const auto& [from, to] : COLLAB_PROJECT::FindLocalRenames( dir, wxS( "main" ), docs ) )
+        found[from] = to;
+
+    BOOST_CHECK_EQUAL( found.size(), 5 );
+    BOOST_CHECK_EQUAL( found[wxS( "kb.kicad_pro" )], wxString( wxS( "main.kicad_pro" ) ) );
+    BOOST_CHECK_EQUAL( found[wxS( "kb.kicad_pcb" )], wxString( wxS( "main.kicad_pcb" ) ) );
+    BOOST_CHECK_EQUAL( found[wxS( "kb.kicad_sch" )], wxString( wxS( "main.kicad_sch" ) ) );
+    BOOST_CHECK_EQUAL( found[wxS( "sheets/psu.kicad_sch" )],
+                       wxString( wxS( "sheets/power.kicad_sch" ) ) );
+    BOOST_CHECK_EQUAL( found[wxS( "sheets/usb.kicad_sch" )],
+                       wxString( wxS( "sheets/usb-c.kicad_sch" ) ) );
 }
 
 
