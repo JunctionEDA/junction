@@ -21,15 +21,25 @@ version it is based on.
   one by one. A cached file that is not a model is fetched again.
 - Publishing a project that is larger than an online project can hold says so
   before anything is sent.
+- The message that a local copy went to Junction's own data folder has a
+  button that shows the folder.
 
 ### Web
+- 3D viewer: the parts named in the status line (closest model used, plain
+  shape) are links that select the part on the board.
+- Footprint editor, Footprint Properties, 3D Models: Use Closest Library Model
+  finds the model in KiCad's 3D library that comes closest to the footprint.
+- Vendor parts: stock and price say which vendor they are from.
+- Opening a schematic no longer raises a page error that stopped the other
+  sheets' nets from being read.
 - Upload: when a project names libraries or 3D models of its own that were
   not among the uploaded files, the upload dialog lists them and takes the
   missing files or the project folder to add them.
-- One file of an online project can now be 100 MB (was 30 MB) and a project
-  250 MB (was 100 MB). A file or project over the limit is refused before the
-  upload starts, with its size and the limit; saving a document that large no
-  longer fails at 50 MB.
+- One file of an online project can now be 200 MB (was 30 MB) and a project
+  500 MB (was 100 MB). Uploads are written to disk as they arrive instead of
+  being held in memory. A file or project over the limit is refused before
+  the upload starts, with its size and the limit; saving a document that
+  large no longer fails at 50 MB.
 
 ## 2.1.2 (2026-11-15)
 

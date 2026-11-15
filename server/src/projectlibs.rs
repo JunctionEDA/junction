@@ -10,7 +10,7 @@
 //! Footprint libraries are rebuilt by the desktop, not here: a footprint on a board is a placed
 //! instance (moved texts, pad nets, a side and a rotation), and KiCad's own code turns it back
 //! into a library footprint (COLLAB_PROJECT::EnsureLibraryFolders, then pcbnew's
-//! KIFACE_REBUILD_FOOTPRINT_LIBRARIES).  `missing_project_files` lists what an upload left out.
+//! KIFACE_REBUILD_FOOTPRINT_LIBRARIES).  `MissingScan` lists what an upload left out.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -147,34 +147,30 @@ pub fn rebuild_symbol_libraries(entries: &[(String, Vec<u8>)]) -> Vec<(String, V
 }
 
 /// What a project names as its own and did not bring along: `${KIPRJMOD}` symbol and footprint
-/// libraries of its library tables, and `${KIPRJMOD}` 3D models of its boards and footprints.
-/// Each is `{ "kind": "symbol_library" | "footprint_library" | "model", "path": … }`, at most 200.
-pub fn missing_project_files(entries: &[(String, Vec<u8>)]) -> Vec<serde_json::Value> {
-    let have: HashSet<String> = entries.iter().map(|(p, _)| p.to_lowercase()).collect();
-    let dir_of = |path: &str| path.rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default();
-    let mut seen = HashSet::new();
-    let mut out = Vec::new();
-    let mut add = |kind: &str, path: String, out: &mut Vec<serde_json::Value>| {
-        if out.len() < 200 && seen.insert(path.to_lowercase()) {
-            out.push(serde_json::json!({ "kind": kind, "path": path }));
-        }
-    };
-    for (path, content) in entries {
+/// libraries of its library tables, and `${KIPRJMOD}` 3D models of its boards.  Files are added
+/// one at a time (an upload never holds them all), and `finish` answers
+/// `{ "kind": "symbol_library" | "footprint_library" | "model", "path": … }`, at most 200.
+#[derive(Default)]
+pub struct MissingScan {
+    have: HashSet<String>,
+    /// (kind, path) a file named, in the order met
+    named: Vec<(&'static str, String)>,
+}
+
+impl MissingScan {
+    pub fn add(&mut self, path: &str, content: &[u8]) {
+        self.have.insert(path.to_lowercase());
         let base = path.rsplit('/').next().unwrap_or(path);
-        let Ok(text) = std::str::from_utf8(content) else { continue };
-        let dir = dir_of(path);
+        let dir = path.rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default();
+        let is_board = base.to_ascii_lowercase().ends_with(".kicad_pcb");
+        if base != "sym-lib-table" && base != "fp-lib-table" && !is_board { return; }
+        let text = String::from_utf8_lossy(content);
         if base == "sym-lib-table" {
-            for (_, rel) in project_libs(text, ".kicad_sym") {
-                let full = format!("{dir}{rel}");
-                if !have.contains(&full.to_lowercase()) { add("symbol_library", full, &mut out); }
-            }
+            for (_, rel) in project_libs(&text, ".kicad_sym") { self.named.push(("symbol_library", format!("{dir}{rel}"))); }
         } else if base == "fp-lib-table" {
-            for (_, rel) in project_libs(text, ".pretty") {
-                let folder = format!("{dir}{rel}/").to_lowercase();
-                if !have.iter().any(|p| p.starts_with(&folder)) { add("footprint_library", format!("{dir}{rel}"), &mut out); }
-            }
-        } else if base.to_ascii_lowercase().ends_with(".kicad_pcb") {
-            // a board's ${KIPRJMOD} is its own folder; a library footprint's is not known here
+            for (_, rel) in project_libs(&text, ".pretty") { self.named.push(("footprint_library", format!("{dir}{rel}"))); }
+        } else {
+            // a board's ${KIPRJMOD} is its own folder
             let mut at = 0;
             while let Some(i) = text[at..].find("(model ") {
                 at += i + 7;
@@ -184,12 +180,30 @@ pub fn missing_project_files(entries: &[(String, Vec<u8>)]) -> Vec<serde_json::V
                 let Some(rel) = name.strip_prefix("${KIPRJMOD}/").or_else(|| name.strip_prefix("$(KIPRJMOD)/")) else { continue };
                 let rel = rel.replace('\\', "/");
                 if rel.is_empty() || rel.split('/').any(|p| p.is_empty() || p == "." || p == "..") { continue; }
-                let full = format!("{dir}{rel}");
-                if !have.contains(&full.to_lowercase()) { add("model", full, &mut out); }
+                self.named.push(("model", format!("{dir}{rel}")));
             }
         }
     }
-    out
+
+    pub fn finish(self) -> Vec<serde_json::Value> {
+        let mut seen = HashSet::new();
+        let mut out = Vec::new();
+        for (kind, path) in self.named {
+            let lower = path.to_lowercase();
+            let held = if kind == "footprint_library" { let folder = format!("{lower}/"); self.have.iter().any(|p| p.starts_with(&folder)) } else { self.have.contains(&lower) };
+            if !held && out.len() < 200 && seen.insert(lower) {
+                out.push(serde_json::json!({ "kind": kind, "path": path }));
+            }
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+pub fn missing_project_files(entries: &[(String, Vec<u8>)]) -> Vec<serde_json::Value> {
+    let mut scan = MissingScan::default();
+    for (path, content) in entries { scan.add(path, content); }
+    scan.finish()
 }
 
 #[cfg(test)]

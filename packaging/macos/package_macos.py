@@ -68,6 +68,9 @@ def main():
     if os.path.exists(version_file):
         default_version = open(version_file).read().strip() or default_version
     ap.add_argument("--version", default=default_version)
+    ap.add_argument("--app-only", action="store_true",
+                    help="stop after the app bundle (out_dir/staging/Junction.app): no DMG. "
+                         "For running a development build under its real name, with its schema files.")
     args = ap.parse_args()
 
     build_dir = os.path.realpath(args.build_dir)
@@ -285,6 +288,10 @@ def main():
     for macho in shipped_machos():
         run("codesign", "--force", "--sign", "-", macho)
     run("codesign", "--force", "--sign", "-", app)
+
+    if args.app_only:
+        print(f"done: {app}")
+        return
 
     os.symlink("/Applications", os.path.join(staging, "Applications"))
     with open(os.path.join(staging, "READ ME.txt"), "w") as f:

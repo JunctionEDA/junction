@@ -18,9 +18,10 @@ export type Json = null | boolean | number | string | Json[] | { [k: string]: Js
 export type JsonObj = { [k: string]: Json };
 interface DocEntry { docId: string; path: string; docType: string }
 interface ProjectState { project: { projectId: string; name: string; docs: DocEntry[] } | null; docs: DocEntry[]; docId: string | null; me: unknown; role: string | null }
-const S = appState;
+// appState is read where it is used: this module can be evaluated before ./editor (an import cycle),
+// and a copy taken here would then stay undefined for good.
 
-export function proDoc(): DocEntry | null { return S.project ? S.project.docs.find((d) => d.docType === "kicad_pro") || null : null; }
+export function proDoc(): DocEntry | null { return appState.project ? appState.project.docs.find((d) => d.docType === "kicad_pro") || null : null; }
 /** The parsed .kicad_pro ({} when the project has none or it has not arrived yet). */
 export function projectJson(): JsonObj {
   try { const j = E.proSettings ? JSON.parse(E.proSettings) : null; return j && typeof j === "object" && !Array.isArray(j) ? j as JsonObj : {}; } catch (e) { return {}; }
@@ -107,8 +108,9 @@ export function adoptProject(text: string): void {
   if (E.kdoc) { applySheetContext(E.kdoc); requestRender(); }
   for (const fn of listeners) { try { fn(); } catch (e) { console.warn(e); } }
 }
-export function currentDocEntry(): DocEntry | null { return S.docs.find((d) => d.docId === S.docId) || null; }
-export function projectDocs(): DocEntry[] { return S.docs; }
-export function projectName(): string { const p = proDoc(); return p ? p.path.split("/").pop()!.replace(/\.kicad_pro$/, "") : (S.project ? S.project.name : ""); }
+// The document list arrives with the project, which can be after the first document is drawn.
+export function currentDocEntry(): DocEntry | null { return (appState.docs || []).find((d) => d.docId === appState.docId) || null; }
+export function projectDocs(): DocEntry[] { return appState.docs || []; }
+export function projectName(): string { const p = proDoc(); return p ? p.path.split("/").pop()!.replace(/\.kicad_pro$/, "") : (appState.project ? appState.project.name : ""); }
 /** A document's base as the server holds it: the snapshot text and every op after it (for a copy of the file). */
 export function docBase(docId: string): Promise<{ file: string | null; ops: { changes: unknown[] }[] }> { return sideSession(docId).then((r) => ({ file: r.file, ops: r.thenOps })); }

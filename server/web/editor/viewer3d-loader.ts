@@ -4,12 +4,15 @@
 import { state, store } from "./appstore";
 import { E } from "./state";
 import { toast } from "./util";
+import { toolCtx } from "./tools";
+import { centerOn } from "./comments";
 
 interface Viewer3DOpenOptions {
   getDoc(): KDoc | null;
   getName?(): string;
   subscribe?(onChange: () => void): () => void;
   toast?(text: string, ms?: number): void;
+  selectRef?(ref: string): void;
 }
 interface Viewer3DGlobal { open(opts: Viewer3DOpenOptions): unknown; close(): void; isOpen(): boolean }
 
@@ -52,12 +55,24 @@ function boardName(): string {
   return d && d.path ? String(d.path).split("/").pop() || "" : "";
 }
 
+/** Select the footprint with this reference on the board and bring it into view (the 3D viewer's status links). */
+function selectRef(ref: string): void {
+  const doc = boardDoc(); if (!doc) return;
+  for (const it of doc.items.values() as Iterable<KItem & { ref?: string }>) {
+    if (it.ref !== ref || !it.bbox) continue;
+    (toolCtx() as unknown as { setSelection(ids: string[]): void }).setSelection([it.id]);
+    centerOn((it.bbox[0] + it.bbox[2]) / 2, (it.bbox[1] + it.bbox[3]) / 2);
+    return;
+  }
+  toast(`${ref} is not on the board any more`);
+}
+
 /** Open (or focus) the 3D viewer on the board being edited. */
 export function show3DViewer(): void {
   if (!boardDoc()) { toast("The 3D viewer shows a board: open the PCB editor first"); return; }
   loadViewer().then((viewer) => {
     viewer.open({
-      getDoc: boardDoc, getName: boardName, toast,
+      getDoc: boardDoc, getName: boardName, toast, selectRef,
       // An applied change — local or a collaborator's — bumps document.version (doc.ts bumpDoc); the board
       // editor's own footprint drag commits without it but records an undo step, and a remote op counts
       // in connection.edits: any of them moving means the board may have changed.

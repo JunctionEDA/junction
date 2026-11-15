@@ -148,12 +148,12 @@ std::optional<nlohmann::json> COLLAB_PROJECT::CreateAndShare( const wxString& aS
 
     // The server's upload limit (server/src/http.rs MAX_TOTAL_BYTES).  More than this is cut off
     // while it is being sent, which reads as a lost connection, so it is said here instead.
-    const size_t maxUpload = 250u * 1024 * 1024;
+    const size_t maxUpload = 500u * 1024 * 1024;
 
     if( zipBytes.size() > maxUpload )
     {
         aError = wxString::Format( _( "The project's files come to %.0f MB zipped, and an online project can hold "
-                                      "250 MB.\n\nLeave out 3D models that are not needed, or split the project." ),
+                                      "500 MB.\n\nLeave out 3D models that are not needed, or split the project." ),
                                    zipBytes.size() / 1048576.0 );
         return std::nullopt;
     }

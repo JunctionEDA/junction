@@ -85,19 +85,20 @@ await page.waitForSelector('.hp-item-name:has-text("Valve amp")');
 check('closing the step shows the project in the list', true);
 
 // too large: said before anything is sent
+const MB = Math.round(limits.maxFileBytes / 1048576);
 const big = path.join(TMP, 'big.kicad_pcb'); const fd = fs.openSync(big, 'w'); fs.ftruncateSync(fd, limits.maxFileBytes + 1024); fs.closeSync(fd);
 await page.click('.hp-head-acts .btn.primary');
 await page.locator('.hp-modal input[type=file]').first().setInputFiles(big);
 await page.waitForSelector('.hp-note.err');
 const said = await page.locator('.hp-note.err').textContent();
-check('a file over the limit is refused before upload, with the size and the limit', /big\.kicad_pcb is 100\.0 MB.*at most 100 MB/.test(said) && await page.locator('.hp-modal-f .btn.primary').isDisabled(), said);
+check('a file over the limit is refused before upload, with the size and the limit', new RegExp(`big\\.kicad_pcb is ${MB}\\.0 MB.*at most ${MB} MB`).test(said) && await page.locator('.hp-modal-f .btn.primary').isDisabled(), said);
 if (SHOTS) await page.screenshot({ path: `${SHOTS}/upload-too-large.png` });
 
 // the server says the same to a client that sends it anyway
 const form = new FormData(); form.append('file', new Blob([fs.readFileSync(big)]), 'big.kicad_pcb');
 const r = await fetch(BASE + '/api/projects', { method: 'POST', headers: { authorization: `Bearer ${jwt}` }, body: form });
 const text = await r.text();
-check('the server answers a too-large file with a readable reason, not a dropped connection', r.status === 400 && /big\.kicad_pcb is 100\.0 MB/.test(text), `${r.status} ${text.slice(0, 200)}`);
+check('the server answers a too-large file with a readable reason, not a dropped connection', r.status === 400 && new RegExp(`big\\.kicad_pcb is ${MB}\\.0 MB`).test(text), `${r.status} ${text.slice(0, 200)}`);
 
 await browser.close();
 await db.query('DELETE FROM projects WHERE owner_id = $1', [uid]);

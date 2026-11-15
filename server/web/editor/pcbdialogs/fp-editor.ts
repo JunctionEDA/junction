@@ -126,7 +126,30 @@ export function footprintPropertiesDialog(ctx: ToolCtx, host: FpPropsHost = {}):
         if (W.KiCadLibrary && W.KiCadLibrary.pick3DModel) W.KiCadLibrary.pick3DModel().then((p: string) => { if (p) pick(p); }).catch(() => {});
         else pick("${KICAD10_3DMODEL_DIR}/");
       });
-      el.append(modelGrid.el, h("div", { class: "pd-row" }, gridButtons(modelGrid, () => ({ i: -1, file: "", show: true }), { ro, addTip: "Add 3D model", delTip: "Remove 3D model", onChange: syncModels }), browse),
+      // Not in KiCad: the model KiCad's 3D library holds that comes closest to the selected row's file (or, with no
+      // row, to the footprint's own name), for a part whose own model is not in the library.
+      const closest = h("button", { type: "button", class: "kbtn", disabled: ro, "data-k": "model-closest", title: "Find the model in KiCad's 3D library that comes closest to this footprint and use it" }, "Use Closest Library Model");
+      closest.addEventListener("click", () => {
+        syncModels();
+        const cur = modelSel >= 0 && models[modelSel] ? String(models[modelSel].file || "") : "";
+        const named = /([^/\\]+)\.3dshapes[/\\]([^/\\]+?)\.(?:step|stp|wrl|wrz)$/i.exec(cur);
+        const own = name.get().trim(); const lib = named ? named[1] : own.includes(":") ? own.split(":")[0] : String((host as Any).libName || "");
+        const item = named ? named[2] : own.includes(":") ? own.slice(own.indexOf(":") + 1) : own;
+        if (!lib || !item) { errorMessage("The footprint has no library and name to look a model up by."); return; }
+        (closest as HTMLButtonElement).disabled = true;
+        fetch(`/api/kicad-lib/model-match?lib=${encodeURIComponent(lib)}&name=${encodeURIComponent(item)}`, { credentials: "same-origin" })
+          .then((r) => (r.ok ? r.json() : r.status === 404 ? null : Promise.reject(new Error(String(r.status)))))
+          .then((hit: { library?: string; name?: string } | null) => {
+            if (!hit || !hit.library || !hit.name) { errorMessage(`KiCad's 3D library has no model close to ${lib}:${item}.`); return; }
+            const file = "${KICAD10_3DMODEL_DIR}/" + hit.library + ".3dshapes/" + hit.name + ".step";
+            const rows = modelGrid.rows();
+            if (modelSel >= 0 && rows[modelSel]) rows[modelSel].file = file; else rows.push({ i: -1, file, show: true });
+            modelGrid.refresh(); modelGrid.select(modelSel >= 0 ? modelSel : rows.length - 1); syncModels();
+          })
+          .catch(() => errorMessage("The 3D library could not be reached. Try again in a moment."))
+          .finally(() => { (closest as HTMLButtonElement).disabled = ro; });
+      });
+      el.append(modelGrid.el, h("div", { class: "pd-row" }, gridButtons(modelGrid, () => ({ i: -1, file: "", show: true }), { ro, addTip: "Add 3D model", delTip: "Remove 3D model", onChange: syncModels }), browse, closest),
         h("div", { style: "display:grid;grid-template-columns:repeat(3,1fr);gap:0 12px" }, xyz("Scale", "sx", "sy", "sz", ""), xyz("Rotation", "rx", "ry", "rz", "deg"), xyz("Offset", "ox", "oy", "oz", "mm")),
         form([["Opacity:", opacity]]));
       modelGrid.el.addEventListener("change", () => syncModels());

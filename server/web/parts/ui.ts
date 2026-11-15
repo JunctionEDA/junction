@@ -283,8 +283,8 @@ class PartsDialog {
             r.item && !r.item.cached ? h("span", { class: "kp-badge warn", title: "Not in the cache yet: it is fetched when you open it" }, "not fetched") : null,
             r.item && r.item.cached && !r.item.has_cad ? h("span", { class: "kp-badge warn" }, "no drawings") : null),
           h("td", null, r.package),
-          h("td", { class: "kp-num" }, stockText(r.stock)),
-          h("td", { class: "kp-num" }, p ? money(p.price, p.currency) : "—"),
+          h("td", { class: "kp-num", title: `In stock at ${r.vendor_name}` }, stockText(r.stock)),
+          h("td", { class: "kp-num", title: p ? `${r.vendor_name} price for ${p.qty.toLocaleString("en-US")} or more` : `${r.vendor_name} lists no price` }, p ? money(p.price, p.currency) : "—"),
           h("td", null, this.vendorBadge(r.vendor, r.vendor_name), " ", h("span", { class: "kp-mono" }, r.vendor_id), r.assembly === "basic" || r.assembly === "preferred" ? h("div", null, h("span", { class: `kp-badge ${r.assembly}`, title: "JLCPCB assembly class" }, r.assembly === "basic" ? "Basic" : "Preferred")) : null),
           lib ? h("td", null, lib.can_edit && r.item ? h("button", { class: "kp-btn sm", type: "button", title: "Remove from this library", onclick: (ev: Event) => { ev.stopPropagation(); void this.removeItem(r.item!); } }, "Remove") : null) : null);
       })));
@@ -308,8 +308,10 @@ class PartsDialog {
     const facts = h("dl", { class: "kp-facts" });
     const fact = (k: string, v: Child | Child[]) => { if (v === "" || v === null || v === undefined || v === false) return; facts.append(h("dt", null, k), h("dd", null, v)); };
     fact("Package", p.package);
-    fact("Stock", p.stock === null ? "" : stockText(p.stock));
-    if (p.prices.length) fact("Price", p.prices.slice(0, 5).map((b) => h("div", null, `${b.qty.toLocaleString("en-US")}+  ${money(b.price, b.currency)}`)));
+    // the stock and prices are the listing vendor's; the drawings can come from somewhere else (said under Drawings)
+    const at = p.vendor_name ? ` at ${p.vendor_name}` : "";
+    fact("Stock" + at, p.stock === null ? "" : stockText(p.stock));
+    if (p.prices.length) fact("Price" + at, p.prices.slice(0, 5).map((b) => h("div", null, `${b.qty.toLocaleString("en-US")}+  ${money(b.price, b.currency)}`)));
     fact("Category", p.category);
     fact("Lifecycle", p.lifecycle);
     for (const [k, v] of Object.entries(p.attributes || {}).slice(0, 10)) fact(k, v);
@@ -465,8 +467,8 @@ class PartsDialog {
         h("td", { title: l.refs.join(", ") }, refList(l.refs)), h("td", { class: "kp-num" }, String(need)),
         h("td", null, h("div", null, l.value), h("div", { class: "kp-dim", title: l.footprint }, l.footprint.includes(":") ? l.footprint.slice(l.footprint.indexOf(":") + 1) : l.footprint)),
         h("td", null, ...part),
-        h("td", { class: "kp-num", style: p && p.stock !== null && p.stock < need ? "color:var(--err)" : "" }, p && p.stock !== null ? stockText(p.stock) : ""),
-        h("td", { class: "kp-num" }, pr ? money(pr.price, pr.currency) : ""), h("td", { class: "kp-num" }, pr ? money(pr.price * need, pr.currency) : "")));
+        h("td", { class: "kp-num", title: p ? `In stock at ${p.vendor_name}` : "", style: p && p.stock !== null && p.stock < need ? "color:var(--err)" : "" }, p && p.stock !== null ? stockText(p.stock) : ""),
+        h("td", { class: "kp-num", title: p && pr ? `${p.vendor_name} price for ${pr.qty.toLocaleString("en-US")} or more` : "" }, pr ? money(pr.price, pr.currency) : ""), h("td", { class: "kp-num" }, pr ? money(pr.price * need, pr.currency) : "")));
     }
     const empty = !lines.length ? h("div", { class: "kp-empty" }, h("b", null, `No parts on ${what}.`), h("p", null, "Symbols marked “exclude from BOM” or “do not populate”, and power symbols, are left out.")) : null;
     return h("div", { class: "kp-main" }, bar, this.bom === null ? h("div", { class: "kp-empty" }, h("span", { class: "kp-spin" }), "Reading the design…") : null,

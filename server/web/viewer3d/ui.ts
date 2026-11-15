@@ -17,6 +17,8 @@ export interface OpenOptions {
   /** called with a function to run whenever the document changes; returns the unsubscribe */
   subscribe?(onChange: () => void): () => void;
   toast?(text: string, ms?: number): void;
+  /** select the part with this reference in the board editor and bring it into view */
+  selectRef?(ref: string): void;
 }
 
 interface IconDef { vb?: string; light?: string; dark?: string }
@@ -73,6 +75,8 @@ const CSS = `
 .v3d-side hr{border:0;border-top:1px solid var(--line);margin:6px 0}
 .v3d-status{display:flex;gap:16px;padding:3px 10px;border-top:1px solid var(--line);background:var(--bench);color:var(--ink-2);font:11px var(--mono);flex:none;white-space:nowrap;overflow:hidden}
 .v3d-status .grow{flex:1;overflow:hidden;text-overflow:ellipsis}
+.v3d-status a.v3d-ref{color:inherit;text-decoration:underline dotted;cursor:pointer}
+.v3d-status a.v3d-ref:hover{color:var(--ink)}
 .v3d-grip{position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;z-index:2;
   background:linear-gradient(135deg,transparent 50%,var(--ink-3) 50%,var(--ink-3) 58%,transparent 58%,transparent 70%,var(--ink-3) 70%,var(--ink-3) 78%,transparent 78%)}
 `;
@@ -104,11 +108,24 @@ function keyMatches(ev: KeyboardEvent, key: string): boolean {
   return ev.key.toUpperCase() === k.toUpperCase();
 }
 
-/** The status bar's line about the parts' 3D models. */
-function modelStatus(st: BoardStats): string {
-  const few = (l: string[]): string => `${l.slice(0, 8).join(", ")}${l.length > 8 ? ` and ${l.length - 8} more` : ""}`;
-  const n = st.missingModels.length, r = (st.replacedModels || []).length;
-  return `3D models: ${st.models} of ${st.bodies} parts` + (r ? `  —  closest library model used for ${few(st.replacedModels)}` : "") + (n ? `  —  plain shape for ${few(st.missingModels)}` : "");
+/** The status bar's line about the parts' 3D models.  With `pick`, each reference is a link that selects its part. */
+function modelStatus(st: BoardStats, pick?: (ref: string) => void): Node[] {
+  const out: Node[] = [document.createTextNode(`3D models: ${st.models} of ${st.bodies} parts`)];
+  const list = (lead: string, refs: string[], what: string) => {
+    if (!refs.length) return;
+    out.push(document.createTextNode(`  —  ${lead} `));
+    refs.slice(0, 8).forEach((ref, i) => {
+      if (i) out.push(document.createTextNode(", "));
+      if (!pick) { out.push(document.createTextNode(ref)); return; }
+      const a = document.createElement("a"); a.href = "#"; a.className = "v3d-ref"; a.textContent = ref; a.title = `Select ${ref} in the board editor (${what})`;
+      a.addEventListener("click", (ev) => { ev.preventDefault(); pick(ref); });
+      out.push(a);
+    });
+    if (refs.length > 8) out.push(document.createTextNode(` and ${refs.length - 8} more`));
+  };
+  list("closest library model used for", st.replacedModels || [], "its own model is not in the library");
+  list("plain shape for", st.missingModels, "no model could be found");
+  return out;
 }
 
 export class ViewerWindow {
@@ -152,7 +169,7 @@ export class ViewerWindow {
     try {
       this.viewer = new Viewer(this.stage);
       this.viewer.useModels(true);
-      this.viewer.onModels = (st) => this.setStatus(modelStatus(st));
+      this.viewer.onModels = (st) => this.statusEl.replaceChildren(...modelStatus(st, this.opts.selectRef));
     }
     catch (e) { console.warn("3D viewer: WebGL is not available", e); const m = el("div", "v3d-msg", "The 3D viewer needs WebGL, which this browser could not start."); this.stage.appendChild(m); }
     this.defineActions();

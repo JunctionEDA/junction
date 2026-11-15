@@ -17,8 +17,8 @@ use crate::persist;
 use crate::AppState;
 
 pub(crate) const MAX_FILES: usize = 200;
-pub(crate) const MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
-pub(crate) const MAX_TOTAL_BYTES: u64 = 250 * 1024 * 1024;
+pub(crate) const MAX_FILE_BYTES: u64 = 200 * 1024 * 1024;
+pub(crate) const MAX_TOTAL_BYTES: u64 = 500 * 1024 * 1024;
 /// The request body the upload routes read: every file of a project plus the multipart framing.
 pub(crate) const MAX_UPLOAD_BODY_BYTES: usize = MAX_TOTAL_BYTES as usize + 8 * 1024 * 1024;
 /// One file sent on its own (a saved document's snapshot).
@@ -114,7 +114,7 @@ pub(crate) fn safe_zip_name(name: &str) -> Option<String> {
 /// Drop a directory every file shares ("board/board.kicad_pro" -> "board.kicad_pro"),
 /// but only when the project file itself sits inside it: nested sheet folders
 /// of a project uploaded from its root must keep their paths.
-fn strip_common_dir(files: Vec<(String, Vec<u8>)>) -> Vec<(String, Vec<u8>)> {
+fn strip_common_dir<T>(files: Vec<(String, T)>) -> Vec<(String, T)> {
     let Some(first) = files.first().and_then(|(n, _)| n.split_once('/').map(|(d, _)| d.to_string()))
     else {
         return files;
@@ -132,18 +132,56 @@ fn strip_common_dir(files: Vec<(String, Vec<u8>)>) -> Vec<(String, Vec<u8>)> {
 
 // ---------- Projects ----------
 
+/// The folder an upload is spooled into, removed when the request ends however it ends.
+struct SpoolDir(std::path::PathBuf);
+impl SpoolDir {
+    fn new() -> std::io::Result<Self> {
+        let dir = std::env::temp_dir().join(format!("junction-upload-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir)?;
+        Ok(Self(dir))
+    }
+    fn next(&self, n: usize) -> std::path::PathBuf { self.0.join(n.to_string()) }
+}
+impl Drop for SpoolDir {
+    fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+}
+
+/// Write one multipart part to `to` as it arrives, at most `cap` bytes.  Ok(None) when the part
+/// is larger: the rest of it has been read and dropped, so the request can still be answered
+/// with a sentence instead of a closed connection.
+async fn spool_field(mut field: axum::extract::multipart::Field<'_>, to: &std::path::Path, cap: u64) -> AppResult<Option<u64>> {
+    use tokio::io::AsyncWriteExt;
+    let mut out = tokio::fs::File::create(to).await.map_err(|e| anyhow::anyhow!("upload spool: {e}"))?;
+    let (mut len, mut over) = (0u64, false);
+    while let Some(chunk) = field.chunk().await.map_err(|e| AppError::BadRequest(format!("file read failed: {e}")))? {
+        len += chunk.len() as u64;
+        if len > cap { over = true; continue; }
+        out.write_all(&chunk).await.map_err(|e| anyhow::anyhow!("upload spool: {e}"))?;
+    }
+    out.flush().await.map_err(|e| anyhow::anyhow!("upload spool: {e}"))?;
+    Ok(if over { None } else { Some(len) })
+}
+
 pub async fn create_project(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
     mut multipart: Multipart,
 ) -> AppResult<Response> {
-    let mut archive: Option<Vec<u8>> = None;
+    // Nothing of an upload is held in memory: each file is written to a spool folder as it
+    // arrives (a zip is unpacked there entry by entry) and read back one at a time when it is
+    // stored, so a 200 MB board costs one copy of itself, not one per step.
+    let spool = SpoolDir::new().map_err(|e| anyhow::anyhow!("upload spool: {e}"))?;
+    let mut spooled = 0usize;
+    let mut archive: Option<std::path::PathBuf> = None;
     let mut name: Option<String> = None;
     // Loose files (the web's folder / multi-file upload): each `file` part
     // carries its project-relative path as the part's file name.
-    let mut loose: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut loose: Vec<(String, std::path::PathBuf)> = Vec::new();
     let mut loose_bytes: u64 = 0;
     let mut skipped: Vec<String> = Vec::new();
+    // The first reason to refuse the upload.  The rest of the body is still read (and dropped),
+    // so the client gets the reason rather than a connection closed under it.
+    let mut refused: Option<String> = None;
     while let Some(field) = multipart
         .next_field()
         .await
@@ -151,53 +189,71 @@ pub async fn create_project(
     {
         match field.name() {
             Some("archive") => {
-                archive = Some(
-                    field
-                        .bytes()
-                        .await
-                        .map_err(|e| AppError::BadRequest(format!("archive read failed: {e}")))?
-                        .to_vec(),
-                )
+                let to = spool.next(spooled);
+                spooled += 1;
+                match spool_field(field, &to, if refused.is_some() { 0 } else { MAX_TOTAL_BYTES }).await? {
+                    Some(_) => archive = Some(to),
+                    None => { refused.get_or_insert_with(project_too_large); }
+                }
             }
             Some("name") => name = field.text().await.ok(),
             Some("file") => {
                 let raw = field.file_name().unwrap_or("").to_string();
-                let bytes = field
-                    .bytes()
-                    .await
-                    .map_err(|e| AppError::BadRequest(format!("file read failed: {e}")))?;
                 let Some(path) = safe_zip_name(&raw) else {
                     return Err(AppError::BadRequest(format!("unsafe file path: {raw}")));
                 };
-                if is_local_state_path(&path) {
-                    continue;
-                }
-                if !allowed_file(&path) {
-                    skipped.push(path);
+                if refused.is_some() || is_local_state_path(&path) || !allowed_file(&path) {
+                    if refused.is_none() && !is_local_state_path(&path) { skipped.push(path); }
+                    let mut field = field;
+                    while field.chunk().await.map_err(|e| AppError::BadRequest(format!("file read failed: {e}")))?.is_some() {}
                     continue;
                 }
                 if loose.len() >= MAX_FILES {
-                    return Err(AppError::BadRequest(format!("too many files (max {MAX_FILES})")));
+                    refused = Some(format!("too many files (max {MAX_FILES})"));
+                    continue;
                 }
-                loose_bytes += bytes.len() as u64;
-                if bytes.len() as u64 > MAX_FILE_BYTES {
-                    return Err(AppError::BadRequest(file_too_large(&path, bytes.len() as u64)));
+                let to = spool.next(spooled);
+                spooled += 1;
+                let mut probe = field;
+                let mut declared = 0u64;
+                // spool_field drops what is over the cap; the size it would have had is counted here
+                let len = {
+                    use tokio::io::AsyncWriteExt;
+                    let mut out = tokio::fs::File::create(&to).await.map_err(|e| anyhow::anyhow!("upload spool: {e}"))?;
+                    while let Some(chunk) = probe.chunk().await.map_err(|e| AppError::BadRequest(format!("file read failed: {e}")))? {
+                        declared += chunk.len() as u64;
+                        if declared <= MAX_FILE_BYTES { out.write_all(&chunk).await.map_err(|e| anyhow::anyhow!("upload spool: {e}"))?; }
+                    }
+                    out.flush().await.map_err(|e| anyhow::anyhow!("upload spool: {e}"))?;
+                    declared
+                };
+                if len > MAX_FILE_BYTES {
+                    refused = Some(file_too_large(&path, len));
+                    continue;
                 }
+                loose_bytes += len;
                 if loose_bytes > MAX_TOTAL_BYTES {
-                    return Err(AppError::BadRequest(project_too_large()));
+                    refused = Some(project_too_large());
+                    continue;
                 }
-                loose.push((path, bytes.to_vec()));
+                loose.push((path, to));
             }
             _ => {}
         }
     }
+    if let Some(reason) = refused {
+        return Err(AppError::BadRequest(reason));
+    }
 
-    let files = if let Some(archive) = archive {
-        // Unzip + validate off the async runtime.
+    let files: Vec<(String, std::path::PathBuf)> = if let Some(archive) = archive {
+        // Unzip + validate off the async runtime, each entry into its own spool file.
+        let dir = spool.0.clone();
+        let first = spooled;
         let (files, zip_skipped) = tokio::task::spawn_blocking(
-            move || -> Result<(Vec<(String, Vec<u8>)>, Vec<String>), String> {
+            move || -> Result<(Vec<(String, std::path::PathBuf)>, Vec<String>), String> {
+                let file = std::fs::File::open(&archive).map_err(|e| e.to_string())?;
                 let mut zip =
-                    zip::ZipArchive::new(Cursor::new(archive)).map_err(|e| e.to_string())?;
+                    zip::ZipArchive::new(std::io::BufReader::new(file)).map_err(|e| e.to_string())?;
                 if zip.len() > MAX_FILES {
                     return Err(format!("too many files (max {MAX_FILES})"));
                 }
@@ -226,17 +282,18 @@ pub async fn create_project(
                         continue;
                     }
                     // f.size() is attacker-declared header metadata, not a decode
-                    // limit — cap the reader itself or a zip bomb OOMs the container.
+                    // limit — cap the reader itself or a zip bomb fills the disk.
                     let cap = MAX_FILE_BYTES.min(budget);
                     let declared = f.size();
-                    let mut buf = Vec::new();
-                    (&mut f).take(cap + 1).read_to_end(&mut buf).map_err(|e| e.to_string())?;
-                    if buf.len() as u64 > cap {
+                    let to = dir.join((first + i).to_string());
+                    let mut dest = std::fs::File::create(&to).map_err(|e| e.to_string())?;
+                    let wrote = std::io::copy(&mut (&mut f).take(cap + 1), &mut dest).map_err(|e| e.to_string())?;
+                    if wrote > cap {
                         return Err(if cap < MAX_FILE_BYTES { project_too_large() }
-                                   else { file_too_large(&name, declared.max(buf.len() as u64)) });
+                                   else { file_too_large(&name, declared.max(wrote)) });
                     }
-                    budget -= buf.len() as u64;
-                    out.push((name, buf));
+                    budget -= wrote;
+                    out.push((name, to));
                 }
                 Ok((out, skipped))
             },
@@ -288,11 +345,15 @@ pub async fn create_project(
 
     let project = persist::create_project(&state.pool, user.id, &project_name).await?;
     let mut docs = Vec::new();
-    for (path, content) in &files {
+    // Libraries and 3D models the project names as its own and did not bring along.
+    let mut lacking = crate::projectlibs::MissingScan::default();
+    for (path, at) in &files {
         let stored = async {
+            let content = tokio::fs::read(at).await.map_err(sqlx::Error::Io)?;
+            lacking.add(path, &content);
             let doc =
                 persist::create_document(&state.pool, project.id, path, doc_type_for(path)).await?;
-            persist::insert_snapshot(&state.pool, doc.id, 0, content, None, Some(user.id)).await?;
+            persist::insert_snapshot(&state.pool, doc.id, 0, &content, None, Some(user.id)).await?;
             Ok::<_, sqlx::Error>(doc)
         }
         .await;
@@ -308,8 +369,7 @@ pub async fn create_project(
         }
     }
 
-    // Libraries and 3D models the project names as its own and did not bring along.
-    let missing = crate::projectlibs::missing_project_files(&files);
+    let missing = lacking.finish();
 
     Ok(Json(json!({
         "projectId": project.id, "name": project.name, "docs": docs, "skipped": skipped, "missing": missing,

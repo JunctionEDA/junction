@@ -48,6 +48,7 @@
 #include <wx/log.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
+#include <launch_ext.h>
 #include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/statline.h>
@@ -2370,11 +2371,22 @@ void ONLINE_PROJECTS_PANE::openProject( const nlohmann::json& aProject, bool aCh
 
         if( canWriteInto( fallback ) )
         {
-            wxMessageBox( wxString::Format( _( "Junction is not allowed to save into\n\n%s\n\n"
-                                               "so the local copy of '%s' is kept in\n\n%s\n\n"
-                                               "Use Open In Folder... to choose another place." ),
-                                            parentDir, name, fallback ),
-                          _( "Open Online Project" ), wxOK | wxICON_INFORMATION, this );
+            wxMessageDialog note( this,
+                                  wxString::Format( _( "Junction is not allowed to save into\n\n%s\n\n"
+                                                       "so the local copy of '%s' is kept in\n\n%s\n\n"
+                                                       "Use Open In Folder... to choose another place." ),
+                                                    parentDir, name, fallback ),
+                                  _( "Open Online Project" ), wxYES_NO | wxYES_DEFAULT | wxICON_INFORMATION );
+#ifdef __APPLE__
+            note.SetYesNoLabels( _( "OK" ), _( "Reveal in Finder" ) );
+#else
+            note.SetYesNoLabels( _( "OK" ), _( "Open Directory in File Explorer" ) );
+#endif
+
+            // The second button shows the folder; the project opens either way.
+            if( note.ShowModal() == wxID_NO )
+                LaunchExternal( fallback );
+
             parentDir = fallback;
         }
     }

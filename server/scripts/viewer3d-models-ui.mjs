@@ -82,6 +82,12 @@ try {
   check('the replaced one is named as such', JSON.stringify(st.replaced.slice().sort()) === JSON.stringify(['R2']), JSON.stringify(st));
   check('a part nothing comes close to keeps the plain shape', JSON.stringify(st.missing) === JSON.stringify(['U1']), JSON.stringify(st));
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'viewer3d-models.png') });
+  // the references in the status line are links that select the part on the board
+  const links = await page.locator('.v3d-status a.v3d-ref').allTextContents();
+  check('the status line names R2 and U1 as links', links.includes('R2') && links.includes('U1'), links.join(','));
+  await page.locator('.v3d-status a.v3d-ref', { hasText: /^U1$/ }).click();
+  const picked = await page.evaluate(() => { const E = window.CollabEditor; const ids = [...(E.selection || [])]; if (E.selected && E.selected.id) ids.push(E.selected.id); const sel = window.PcbTools && window.PcbTools.state && window.PcbTools.state.sel; if (sel) ids.push(...sel); return ids.map((id) => (E.kdoc.items.get(id) || {}).ref).filter(Boolean); });
+  check('clicking U1 selects U1 on the board', picked.includes('U1'), JSON.stringify(picked));
   check('no page errors', errors.length === 0, errors.slice(0, 3).join(' | '));
 } catch (e) { check('test ran to the end', false, (e.stack || String(e)) + ' ERRORS ' + errors.join(' | ')); if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'viewer3d-models-failure.png') }); }
 await browser.close(); await db.end();

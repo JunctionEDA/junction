@@ -127,7 +127,7 @@ export interface UploadResult { projectId: string; name: string; docs: unknown[]
 
 /** What an upload may hold (GET /api/limits); the defaults are the server's own, for a server that predates the route. */
 export interface Limits { maxFiles: number; maxFileBytes: number; maxTotalBytes: number; maxUploadBytes: number }
-export const DEFAULT_LIMITS: Limits = { maxFiles: 200, maxFileBytes: 100 * 1048576, maxTotalBytes: 250 * 1048576, maxUploadBytes: 258 * 1048576 };
+export const DEFAULT_LIMITS: Limits = { maxFiles: 200, maxFileBytes: 200 * 1048576, maxTotalBytes: 500 * 1048576, maxUploadBytes: 508 * 1048576 };
 let limitsOnce: Promise<Limits> | null = null;
 export const getLimits = (): Promise<Limits> =>
   (limitsOnce ||= api<Partial<Limits>>("/api/limits").then((l) => ({ ...DEFAULT_LIMITS, ...(l && typeof l === "object" ? l : {}) })).catch(() => DEFAULT_LIMITS));

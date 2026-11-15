@@ -59,6 +59,13 @@ machine without Homebrew (verified: `DYLD_PRINT_LIBRARIES` shows zero
 `/opt/homebrew` loads). The build is ad-hoc signed, not notarized:
 first launch needs right-click → Open.
 
+To run a development build, do not start `build/kicad/KiCad.app` itself: it is
+named KiCad and has no schema files. `ninja -C build junction-dev` (or the
+script with `--app-only`) makes `build/dev/staging/Junction.app`, the same
+bundle under its real name. With `KICAD_CONFIG_HOME` pointing at a scratch
+folder it has its own settings and its own sign-in
+(`junction-session.json` lives in the settings folder).
+
 ## Windows
 
 Built in CI: the `windows-installer` GitHub Actions workflow builds the
