@@ -54,7 +54,7 @@ export function loadNgspiceTables(): Promise<void> {
 }
 
 /** The SPICE netlist of the project's hierarchy (or of the current sheet's subtree) with its libraries read. */
-export async function projectSpiceNetlist(options: number, report: (m: string, sev: "error" | "warning") => void, model = false): Promise<string | null> {
+export async function projectSpiceNetlist(options: number, report: (m: string, sev: "error" | "warning") => void, model = false, items?: (list: SP.SimItemInfo[]) => void): Promise<string | null> {
   const [res] = await Promise.all([projectNetlist(), loadNgspiceTables()]);
   if ("error" in res) { report(res.error, "error"); return null; }
   const sch = CollabTools.sch as (SchToolModule & SchInternals) | undefined, hp = sch && sch._;
@@ -90,7 +90,7 @@ export async function projectSpiceNetlist(options: number, report: (m: string, s
     }
     libs.set(p, text === null ? null : S.isIbisPath(p) ? S.parseIbisLibrary(text, p) : S.parseSpiceLibrary(text));
   }
-  return SP.spiceNetlist({ symbols, texts, options, library: (p) => libs.get(p) || null, report, subckt: model ? { name: projectName(), ports } : undefined });
+  return SP.spiceNetlist({ symbols, texts, options, library: (p) => libs.get(p) || null, report, subckt: model ? { name: projectName(), ports } : undefined, items });
 }
 
 /** GetBuildVersion() as the netlist headers carry it */

@@ -183,7 +183,7 @@ export function parseCommand(cmd: string): ParsedCommand {
 
 // ---------------------------------------------------------------- the circuit (from the netlist text)
 /** A SPICE element of the netlist: its name as written ("R1", "XU1") and the nodes it connects. */
-export interface CircuitItem { name: string; nodes: string[] }
+export interface CircuitItem { name: string; nodes: string[]; currents?: string[] }
 const NODE_COUNT: Record<string, number> = { R: 2, C: 2, L: 2, V: 2, I: 2, D: 2, B: 2, F: 2, H: 2, E: 4, G: 4, Q: 3, J: 3, Z: 3, M: 4, S: 4, W: 2, T: 4, O: 4, U: 3, K: 0, A: 0, N: 0, P: 0, Y: 0 };
 /** The elements and nets of a netlist: lines joined over "+", .subckt bodies and dot-cards skipped. */
 export function readCircuit(netlist: string): { items: CircuitItem[]; nets: string[]; directives: string[] } {
@@ -207,12 +207,14 @@ export function readCircuit(netlist: string): { items: CircuitItem[]; nets: stri
   }
   return { items, nets: [...nets].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), directives };
 }
-/** SPICE_GENERATOR::CurrentNames: one I(<name>) (the transistor models name their terminals). */
+/** SPICE_GENERATOR::CurrentNames of an item: the exporter's own list (spice-netlist SimItemInfo) when the circuit
+ *  carries it, else what the element letter tells (SPICE_GENERATOR_NGSPICE's I(Q1:c), I(M1:d) …; a subcircuit's
+ *  pins are unknown from the netlist alone). */
 export function currentNames(it: CircuitItem): string[] {
+  if (it.currents) return it.currents.slice();
   const k = it.name[0].toUpperCase();
-  if (k === "Q") return ["Ic", "Ib", "Ie"].map((p) => `${p}(${it.name})`);
-  if (k === "M") return ["Id", "Ig", "Is"].map((p) => `${p}(${it.name})`);
-  if (k === "J") return ["Id", "Ig", "Is"].map((p) => `${p}(${it.name})`);
+  if (k === "Q") return ["c", "b", "e"].map((p) => `I(${it.name}:${p})`);
+  if (k === "M" || k === "J" || k === "Z") return ["d", "g", "s"].map((p) => `I(${it.name}:${p})`);
   if (k === "X") return [];
   return [`I(${it.name})`];
 }

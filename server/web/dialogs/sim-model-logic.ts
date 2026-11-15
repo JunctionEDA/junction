@@ -582,6 +582,26 @@ export function itemName(m: SimModel, item: SpiceItem): string {
   const t = m.cls === "rawspice" ? m.getParam(0).value : spiceInfo(m.type).itemType;
   return item.refName !== "" && item.refName.startsWith(t) ? item.refName : t + item.refName;
 }
+/** SPICE_GENERATOR::CurrentNames and its overrides: what ngspice names the item's currents.
+ *  SPICE_GENERATOR_NGSPICE: a BJT's I(<item>:c|b|e), a JFET / MESFET / MOSFET's I(<item>:d|g|s), R C L D one I(<item>),
+ *  any other built-in device none; SPICE_GENERATOR_SUBCKT (and the multi-unit one): I(<item>) for two pins, else
+ *  I(<item>:<model pin>) per pin; SPICE_GENERATOR_IBIS: one per pin; every other generator one I(<item>). */
+export function currentNames(m: SimModel, item: SpiceItem): string[] {
+  const name = itemName(m, item);
+  const perPin = (): string[] => m.pins.map((p) => `I(${name}:${p.name})`);
+  if (m.fallback) return [`I(${name})`];
+  if (m.cls === "ngspice") {
+    switch (m.deviceType) {
+      case "NPN": case "PNP": return ["c", "b", "e"].map((t) => `I(${name}:${t})`);
+      case "NJFET": case "PJFET": case "NMES": case "PMES": case "NMOS": case "PMOS": return ["d", "g", "s"].map((t) => `I(${name}:${t})`);
+      case "R": case "C": case "L": case "D": return [`I(${name})`];
+      default: return [];
+    }
+  }
+  if (m.cls === "subckt" || m.cls === "multiunit") return m.pins.length === 2 ? [`I(${name})`] : perPin();
+  if (m.cls === "ibis") return perPin();
+  return [`I(${name})`];
+}
 function itemPins(m: SimModel, item: SpiceItem): string {
   // SPICE_GENERATOR::ItemPins: each model pin's symbol pin, looked up in the item's pin numbers; the dialog's
   // SPICE_ITEM carries no pin numbers, so there every model pin is printed as NC-<ref>-<n>

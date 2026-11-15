@@ -41,11 +41,11 @@ function exportFile(file, options = ALL) {
   const nl = N.buildNetlist(get(path.basename(file)), (f) => get(f), helpers, name);
   const sheets = nl.instances.map((i) => ({ index: i.index, uuidPath: i.uuidPath, doc: get(i.file).doc }));
   const { symbols, texts } = SP.readHierarchy({ sheets, netMap: nl.netMap, symbolPins: helpers.symbolPins, isPower: helpers.isPower, project: name });
-  const msgs = [];
-  const out = SP.spiceNetlist({ symbols, texts, options, report: (m) => msgs.push(m), library: (p) => {
+  const msgs = []; let items = [];
+  const out = SP.spiceNetlist({ symbols, texts, options, report: (m) => msgs.push(m), items: (l) => { items = l; }, library: (p) => {
     const b = BL.builtinLibrary(p); if (b !== null) return SL.parseSpiceLibrary(b);
     const f = path.join(dir, p.replace(/^\$\{KIPRJMOD\}\//, "")); return fs.existsSync(f) ? SL.parseSpiceLibrary(fs.readFileSync(f, "utf8")) : null; } });
-  return { out, msgs, lines: out.split("\n") };
+  return { out, msgs, lines: out.split("\n"), items };
 }
 const fields = (o) => Object.entries(o).map(([name, value]) => ({ name, value }));
 const infer = (prefix, value, extra = {}, pins = ["1", "2"]) => SL.inferSimModel(prefix, pins, fields({ Value: value, ...extra }));
@@ -122,6 +122,19 @@ test("ToSpiceString: wxString::FromCDouble's %g of the normalised base, StripZer
   assert.strictEqual(L.fromCDouble(1e-5), "1e-05"); assert.strictEqual(L.fromCDouble(123456789), "1.23457e+08"); assert.strictEqual(L.fromCDouble(0.0001), "0.0001");
   assert.strictEqual(L.formatValue(-2.69e-26, { precision: 3, range: "~V" }), "-2.69e-11fV");
 });
+test("CurrentNames: SPICE_GENERATOR_NGSPICE's terminals, a subcircuit's model pins, one I() otherwise", () => {
+  const pins = (m, list) => { list.forEach((n, i) => m.pins.push({ name: n, symbolPinNumber: String(i + 1) })); return m; };
+  const it = (ref) => ({ refName: ref, modelName: "", baseModelName: "" });
+  assert.deepStrictEqual(SL.currentNames(SL.createModel("NPN_GUMMELPOON"), it("Q1")), ["I(Q1:c)", "I(Q1:b)", "I(Q1:e)"]);
+  assert.deepStrictEqual(SL.currentNames(SL.createModel("NMOS_MOS1"), it("M1")), ["I(M1:d)", "I(M1:g)", "I(M1:s)"]);
+  assert.deepStrictEqual(SL.currentNames(SL.createModel("D"), it("D1")), ["I(D1)"]);
+  assert.deepStrictEqual(SL.currentNames(SL.createModel("R"), it("R1")), ["I(R1)"]);
+  const sub = pins(new SL.SimModel("SUBCKT", "subckt"), ["in+", "in-", "vcc", "vee", "out"]);
+  assert.deepStrictEqual(SL.currentNames(sub, it("U1")), ["I(XU1:in+)", "I(XU1:in-)", "I(XU1:vcc)", "I(XU1:vee)", "I(XU1:out)"]);
+  assert.deepStrictEqual(SL.currentNames(pins(new SL.SimModel("SUBCKT", "subckt"), ["a", "b"]), it("X1")), ["I(X1)"]);
+  assert.deepStrictEqual(L.currentNames({ name: "Q2", nodes: [] }), ["I(Q2:c)", "I(Q2:b)", "I(Q2:e)"]);
+});
+
 // ---------------------------------------------------------------- the demos, line by line
 const demo = (rel) => path.join(DEMOS, rel);
 const haveDemos = fs.existsSync(DEMOS);
@@ -136,6 +149,14 @@ if (haveDemos) {
     const out = expectItems("rectifier/rectifier.kicad_sch", [".title KiCad schematic", '.include "diode.mod"', ".save all", ".probe alli", ".tran 1u 10m",
       "V1 /signal_in GND DC 0 SIN( 0 1 1k 0 0 0 ) AC 1  ", "R1 /signal_in Net-_D1-A_ 1k", "D1 Net-_D1-A_ /rect_out 1N4148", "C1 /rect_out GND 100n", "R2 /rect_out GND 100k", ".end"]);
     assert.strictEqual(out.split("\n")[0], ".title KiCad schematic");
+  });
+  test("demo items: the transistors' and the op-amp's currents as their generators name them, model pins by symbol pin", () => {
+    const amp = exportFile(demo("amplifier-ac/amplifier-ac.kicad_sch")).items.find((i) => i.ref === "Q1");
+    assert.deepStrictEqual(amp.currents, ["I(Q1:c)", "I(Q1:b)", "I(Q1:e)"]);
+    assert.deepStrictEqual(amp.pins, [{ symbolPin: "1", modelPin: "C" }, { symbolPin: "2", modelPin: "B" }, { symbolPin: "3", modelPin: "E" }]);
+    const u1 = exportFile(demo("generic_models/generic_opamp_bip.kicad_sch")).items.find((i) => i.ref === "U1");
+    assert.strictEqual(u1.name, "XU1");
+    assert.deepStrictEqual(u1.currents, ["I(XU1:in+)", "I(XU1:in-)", "I(XU1:vcc)", "I(XU1:vee)", "I(XU1:out)"]);
   });
   test("demo amplifier-ac: the VDC with only Value 12V, 1UF / 10nF / 2.2k values, BJTs from the library", () => {
     expectItems("amplifier-ac/amplifier-ac.kicad_sch", ['.include "2n2222.model"', ".ac dec 100 10 1Meg", "V3 +12V GND DC 12 ", "C1 /VIN Net-_C1-Pad2_ 1U", "C4 VOUT Net-_C4-Pad2_ 10n",
@@ -266,6 +287,14 @@ if (fs.existsSync(ENGINE)) {
       assert.ok(r.plot, r.r.err.join("\n"));
       const g = 20 * Math.log10(at(r.plot, 100, "V(/out)") / at(r.plot, 100, "V(/in)"));
       assert.ok(Math.abs(g - 20) < 0.1, `gain ${g} dB`);
+    });
+    test("ngspice: .probe alli writes the currents CurrentNames names (I(Q1:c), I(XU1:out)) and findVector finds them", async () => {
+      const r = await simulate(demo("amplifier-ac/amplifier-ac.kicad_sch"), ".tran 10u 1m", ["set ngbehavior=ltpsa"]);
+      assert.ok(r.plot, r.r.err.join("\n"));
+      for (const s of ["I(Q1:c)", "I(Q1:b)", "I(Q1:e)"]) assert.ok(L.findVector(r.plot, s), `${s} not in ${r.plot.vectors.map((v) => v.name).join(" ")}`);
+      const o = await simulate(demo("generic_models/generic_opamp_bip.kicad_sch"), ".tran 10u 1m", ["set ngbehavior=ltpsa"]);
+      assert.ok(o.plot, o.r.err.join("\n"));
+      for (const s of ["I(XU1:out)", "I(XU1:in+)"]) assert.ok(L.findVector(o.plot, s), `${s} not in ${o.plot.vectors.map((v) => v.name).join(" ")}`);
     });
     test("ngspice: demo laser_driver's TRAN runs (POLY sources, the laser diode's extra model parameters)", async () => {
       const r = await simulate(demo("laser_driver/laser_driver.kicad_sch"), "", ["set ngbehavior=ltpsa"]);

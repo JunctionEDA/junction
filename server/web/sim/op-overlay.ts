@@ -12,6 +12,7 @@ import { netsOfItems } from "../editor/schnets";
 import { schExtraColors } from "../dialogs/color-themes";
 import { convertToSpiceMarkup } from "./spice-netlist";
 import { formatValue } from "./sim-logic";
+import type { SimItemInfo } from "./spice-netlist";
 
 type SNode = unknown[];
 interface KItem { id: string; kind: string; node: SNode }
@@ -26,13 +27,9 @@ interface SchApi { _: { symbolPins(doc: unknown, it: KItem): PinGeom[] } }
 /** SCHEMATIC::m_operatingPoints: lower-case signal → value (empty: no operating point). */
 const points = new Map<string, number>();
 let installed = false;
-/** The netlist's item names (SPICE_GENERATOR::ItemName), from the simulator's reading of the netlist. */
-let itemNames: string[] = [];
-export function setItemNames(names: string[]): void { itemNames = names.slice(); }
-function itemName(ref: string): string {
-  const r = ref.toLowerCase();
-  return itemNames.find((n) => n.toLowerCase() === r) || itemNames.find((n) => n.length === ref.length + 1 && n.slice(1).toLowerCase() === r) || ref;
-}
+/** The netlist's items (SIM_LIB_MGR::CreateModel's model of each symbol: its item name and model pins), by reference. */
+const simItems = new Map<string, SimItemInfo>();
+export function setSimItems(list: SimItemInfo[]): void { simItems.clear(); for (const x of list) simItems.set(x.ref, x); }
 
 /** The vectors of an OP run (ngspice's names: v(net), i(item), i(item:pin), item#branch, @item[i]) as the schematic's
  *  operating points; an empty list clears them (SCHEMATIC::ClearOperatingPoints). */
@@ -121,14 +118,11 @@ export function operatingPointTexts(textSize: number): OpText[] {
         else out.push({ x: mx, y: my - off * 1.2, text: op, rot: 90, h: "left", v: "center", kind: "I" });
       };
       if (pins.length === 2) { put(pins[0], operatingPoint(ref, f.iPrec, f.iRange)); continue; }
-      // the model's pins: Sim.Pins "<symbol pin>=<model pin>", the item named as the netlist names it
-      const map = prop(it.node, "Sim.Pins"); if (!map) continue;
-      // SPICE_GENERATOR::ItemName: the reference, prefixed with the device letter when it does not start with it
-      const item = itemName(ref);
-      for (const pair of map.trim().split(/\s+/)) {
-        const [num, model] = pair.split("="); if (!num || !model) continue;
-        const pin = pins.find((p) => p.number === num); if (!pin) continue;
-        put(pin, operatingPoint(`${item}:${model}`, f.iPrec, f.iRange));
+      // the model's pins (SIM_MODEL::GetPins, mapped by Sim.Pins or by default), the item as ItemName names it
+      const item = simItems.get(ref); if (!item) continue;
+      for (const mp of item.pins) {
+        const pin = pins.find((p) => p.number === mp.symbolPin); if (!pin) continue;
+        put(pin, operatingPoint(`${item.name}:${mp.modelPin}`, f.iPrec, f.iRange));
       }
     }
   }
@@ -158,3 +152,4 @@ function draw(ctx: CanvasRenderingContext2D): void {
 }
 
 function install(): void { if (installed) return; installed = true; overlayHooks.push(draw); }
+

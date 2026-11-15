@@ -37,7 +37,12 @@ export interface SpiceNetlistInput {
   report?(message: string, severity: "error" | "warning"): void;
   /** NETLIST_EXPORTER_SPICE_MODEL: the .subckt's name (the project's) and its ports (readHierarchy's ports) */
   subckt?: { name: string; ports: Map<string, SpicePort> };
+  /** receives the exporter's items (SPICE_CIRCUIT_MODEL::GetItems) as the simulator reads them */
+  items?(list: SimItemInfo[]): void;
 }
+/** A netlist item as the simulator and the schematic's operating point use it: the symbol's reference, the item's
+ *  name (SPICE_GENERATOR::ItemName), its currents (CurrentNames) and its model pins with the symbol pin each takes. */
+export interface SimItemInfo { ref: string; name: string; enabled: boolean; currents: string[]; pins: { symbolPin: string; modelPin: string }[] }
 /** A hierarchical label as a .subckt port: its text and LABEL_FLAG_SHAPE. */
 export interface SpicePort { name: string; shape: string }
 const PORT_DIR: Record<string, string> = { input: "input", output: "output", bidirectional: "inout", tri_state: "tristate", passive: "passive" };
@@ -149,6 +154,9 @@ export function spiceNetlist(inp: SpiceNetlistInput): string {
     const modelName = baseModelName === "" ? generate(proposed) : needsLine ? generate(proposed) : baseModelName;
     items.push({ ref: sym.ref, model, modelName, baseModelName, pinNumbers, pinNetNames });
   }
+  const spiceItem = (it: Item): S.SpiceItem => ({ refName: it.ref, modelName: it.modelName, baseModelName: it.baseModelName, pinNumbers: it.pinNumbers, pinNetNames: it.pinNetNames });
+  if (inp.items) inp.items(items.map((it) => ({ ref: it.ref, name: S.itemName(it.model, spiceItem(it)), enabled: it.model.enabled, currents: S.currentNames(it.model, spiceItem(it)),
+    pins: it.model.pins.map((p) => ({ symbolPin: p.symbolPinNumber, modelPin: p.name })) })));
   const directives = readDirectives(inp.texts);
   let out = ".title KiCad schematic\n";
   if (inp.subckt) {
@@ -159,7 +167,6 @@ export function spiceNetlist(inp: SpiceNetlistInput): string {
   }
   // writeIncludes: the libraries by path (std::map order), each through writeInclude's expansion
   for (const p of [...libsUsed].sort()) out += `.include "${expandIncludePath(p)}"\n`;
-  const spiceItem = (it: Item): S.SpiceItem => ({ refName: it.ref, modelName: it.modelName, baseModelName: it.baseModelName, pinNumbers: it.pinNumbers, pinNetNames: it.pinNetNames });
   for (const it of items) if (it.model.enabled) out += S.modelLine(it.model, spiceItem(it));
   if (items.length) {
     if (inp.options & OPTION_SAVE_ALL_VOLTAGES) out += ".save all\n";

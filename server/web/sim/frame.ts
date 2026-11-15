@@ -16,7 +16,8 @@ import { pxPerMm, worldMm } from "../editor/view";
 import { convertToSpiceMarkup } from "./spice-netlist";
 import { builtinLibrary } from "./builtin-libs";
 import { forWasmNgspice } from "./ngspice-wasm";
-import { clearOperatingPoints, setItemNames, setOperatingPoints } from "./op-overlay";
+import { clearOperatingPoints, setOperatingPoints, setSimItems } from "./op-overlay";
+import type { SimItemInfo } from "./spice-netlist";
 import { editProject } from "../canvas/project-file";
 import { openPreferences } from "../dialogs/preferences";
 import { prefs } from "../dialogs/prefs";
@@ -28,7 +29,7 @@ import { open as openSpice, type SpiceSession } from "../plugins/spice";
 import { SimPlot, TRACE_COLORS, type PlotTrace } from "./plot";
 import { COMPAT_MODES, openFormatValue, openSimCommand, openUserDefinedSignals, type PlotSetup } from "./dialogs";
 import {
-  DEFAULT_OPTIONS, OPT_SAVE_EVENTS, OPT_SAVE_I, currentNames, OPT_SAVE_P, OPT_SAVE_V, acPart, commandToSimType, commandsFromOptions, eSeries, findVector,
+  DEFAULT_OPTIONS, OPT_SAVE_EVENTS, OPT_SAVE_I, OPT_SAVE_P, OPT_SAVE_V, acPart, commandToSimType, commandsFromOptions, eSeries, findVector,
   formatFromString, formatToString, formatValue, isPlottable, measCommand, measurementFor, measurementUnits, optionsFromCommands, parseCommand,
   parseRaw, parseSpiceValue, readCircuit, signalKind, signalsFor, snapToSeries, splitSignal, toSpiceString, typeToName, unitsOf, updateUnits,
   userSignalLet, userVectorName, xAxisOf, type CircuitItem, type RawPlot, type SimType, type ValueFormat, type WbTab, type Workbook,
@@ -50,7 +51,7 @@ type Circuit = { items: CircuitItem[]; nets: string[]; directives: string[] };
 const S = {
   root: null as HTMLElement | null, tabs: [] as Tab[], cur: -1, userSignals: [] as string[], circuit: { items: [], nets: [], directives: [] } as Circuit,
   netlist: "", schCommand: "", spice: null as SpiceSession | null, running: false, sidePanel: true, console: true, darkPlots: false, compat: "User configuration",
-  tuners: [] as Tuner[], wbName: "", dirty: false, filter: "", probing: null as null | "probe" | "tune", colorN: 0, simulated: false,
+  simItems: [] as SimItemInfo[], tuners: [] as Tuner[], wbName: "", dirty: false, filter: "", probing: null as null | "probe" | "tune", colorN: 0, simulated: false,
 };
 const NGSPICE_URL = "/static/pyodide/ngspice.mjs";   // served by src/pcm.rs runtime() (static/dist/pyodide in the build, /usr/local/share/kicad-collab/pyodide in the image)
 const SIM_OPTS = OPT_SAVE_V | OPT_SAVE_I | OPT_SAVE_P | OPT_SAVE_EVENTS;
@@ -196,9 +197,15 @@ function onKey(ev: KeyboardEvent): void {
 // ---------------------------------------------------------------- the circuit
 async function loadCircuit(): Promise<void> {
   const msgs: string[] = [];
-  const withCmd = await projectSpiceNetlist(SIM_OPTS | 0x0400, (m) => msgs.push(m));
+  let simItems: SimItemInfo[] = [];
+  const withCmd = await projectSpiceNetlist(SIM_OPTS | 0x0400, (m) => msgs.push(m), false, (list) => { simItems = list; });
   const text = withCmd || "";
   S.circuit = readCircuit(text);
+  S.simItems = simItems;
+  // each element's currents as its generator names them (SPICE_GENERATOR::CurrentNames)
+  const byName = new Map(simItems.map((x) => [x.name.toLowerCase(), x]));
+  for (const it of S.circuit.items) { const x = byName.get(it.name.toLowerCase()); if (x) it.currents = x.currents; }
+  setSimItems(simItems);
   // SPICE_CIRCUIT_MODEL::GetDirectives: the schematic's own directives, not the .save / .probe lines the options add
   S.circuit.directives = S.circuit.directives.filter((d) => !/^\.save\s+all$/i.test(d) && !/^\.probe\s+all[ip]?$/i.test(d) && !/^\.probe\s+p\([^()\s]+\)$/i.test(d));
   const sim = S.circuit.directives.filter((d) => /^\.(ac|dc|tran|op|noise|pz|sp|disto|sens|tf|fft)\b/i.test(d));
@@ -441,7 +448,6 @@ async function operatingPointResults(t: Tab, sp: SpiceSession): Promise<void> {
   }
   t.opText = lines.length ? lines.join("\n") + "\n" : "No operating point results.";
   log("\n\nSimulation results:\n\n" + (lines.length ? lines.join("\n") + "\n" : ""));
-  setItemNames(S.circuit.items.map((i) => i.name));
   setOperatingPoints(vectors);
 }
 /** ngspice's interactive prompts ("ngspice 12 -> ") are not part of what it says. */
@@ -833,17 +839,15 @@ function probeClick(ev: PointerEvent): void {
   // SCH_EDITOR_CONTROL::SimProbe: a pin (GetNode) probes the symbol's current, anything on a net its voltage
   const pinHit = pinUnder(mm, Math.max(0.3, 5 / pxPerMm()));
   if (pinHit) {
-    const { ref, number, simPins } = pinHit;
-    const it = S.circuit.items.find((i) => i.name.toLowerCase() === ref.toLowerCase()) || S.circuit.items.find((i) => i.name.length === ref.length + 1 && i.name.slice(1).toLowerCase() === ref.toLowerCase());
-    if (!it) return;
-    const names = currentNames(it);
+    const { ref, number } = pinHit;
+    // SIM_LIB_MGR::CreateModel's model of the symbol (as the netlist built it): one current for the item, else the
+    // current of the model pin the clicked pin is wired to (FindModelPinIndex)
+    const item = S.simItems.find((x) => x.ref === ref); if (!item) return;
+    const names = item.currents;
     if (!names.length) return;
     if (names.length === 1) { addProbe(names[0]); return; }
-    // the model pin of the clicked pin (Sim.Pins "<pin>=<model pin>"; else the pin's position), its current
-    const pairs = simPins.trim().split(/\s+/).map((x) => x.split("=")).filter((x) => x.length === 2);
-    const idx = pairs.findIndex((x) => x[0] === number), model = idx >= 0 ? pairs[idx][1] : "";
-    const name = names.find((n) => model && n[1].toLowerCase() === model[0].toLowerCase()) || (idx >= 0 ? names[idx] : null);
-    if (name) addProbe(name);
+    const idx = item.pins.findIndex((p) => p.symbolPin === number);
+    if (idx >= 0 && idx < names.length) addProbe(names[idx]);
     return;
   }
   const pick = sch._.pickNet(ctx, mm); if (!pick) return;
@@ -854,12 +858,12 @@ function probeClick(ev: PointerEvent): void {
   addProbe(`V(${S.circuit.nets.find((n) => n.toLowerCase() === net.toLowerCase()) || net})`);
 }
 /** The symbol pin whose line (body root to connection point) passes within `tol` of the point. */
-function pinUnder(mm: number[], tol: number): { ref: string; number: string; simPins: string } | null {
+function pinUnder(mm: number[], tol: number): { ref: string; number: string } | null {
   const doc = E.kdoc as unknown as { items: Map<string, { id: string; kind: string; node: unknown[] }> } | null;
   const K = (window as unknown as { KiCadCanvas: { kids(n: unknown, k: string): unknown[][]; str(v: unknown): string } }).KiCadCanvas;
   const sch = (window as unknown as { CollabTools?: { sch?: { _: { symbolPins(d: unknown, it: unknown): { x: number; y: number; root: number[]; number: string; hidden: boolean }[] } } } }).CollabTools?.sch;
   if (!doc || !sch || !sch._) return null;
-  let best: { ref: string; number: string; simPins: string } | null = null, bd = tol;
+  let best: { ref: string; number: string } | null = null, bd = tol;
   for (const it of doc.items.values()) {
     if (it.kind !== "symbol") continue;
     const prop = (n: string): string => { const p = K.kids(it.node, "property").find((q) => K.str(q[1]) === n); return p ? K.str(p[2]) : ""; };
@@ -869,7 +873,7 @@ function pinUnder(mm: number[], tol: number): { ref: string; number: string; sim
       const ax = p.root[0], ay = p.root[1], dx = p.x - ax, dy = p.y - ay, l2 = dx * dx + dy * dy;
       const u = l2 ? Math.max(0, Math.min(1, ((mm[0] - ax) * dx + (mm[1] - ay) * dy) / l2)) : 0;
       const d = Math.hypot(ax + u * dx - mm[0], ay + u * dy - mm[1]);
-      if (d < bd) { bd = d; best = { ref, number: p.number, simPins: prop("Sim.Pins") }; }
+      if (d < bd) { bd = d; best = { ref, number: p.number }; }
     }
   }
   return best;
