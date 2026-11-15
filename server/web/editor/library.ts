@@ -46,7 +46,7 @@ import * as core from "../library/core";
 import { fetchItem, officialIndex, officialLibraries, projectFootprintByLibId, projectLibraries, registerSource, rememberRecent, unregisterSource } from "../library/sources";
 import type { FetchedItem, LibItem, LibKind, LibrarySource, SourceContext } from "../library/sources";
 
-export interface PlaceSymbolRequest { libId: string; symbol: string; fields?: Record<string, string>; unit?: number; keep?: boolean; allUnits?: boolean }
+export interface PlaceSymbolRequest { libId: string; symbol: string; fields?: Record<string, string>; unit?: number; bodyStyle?: number; keep?: boolean; allUnits?: boolean }
 export interface PlaceFootprintRequest { fpid: string; footprint: string; fields?: Record<string, string> }
 
 type Pt = [number, number];
@@ -76,7 +76,7 @@ const cursorMm = (): Pt => { const c = (E.lastCursorMm as Pt) || [0, 0]; const s
 
 // ---------------------------------------------------------------- schematic: a library symbol on the cursor
 
-interface SymbolSession { libId: string; lib: SNode; fields?: Record<string, string>; unit: number; units: number; keep: boolean; allUnits: boolean; reference: string; nodeId: string; doc: KDoc }
+interface SymbolSession { libId: string; lib: SNode; fields?: Record<string, string>; unit: number; units: number; bodyStyle: number; keep: boolean; allUnits: boolean; reference: string; nodeId: string; doc: KDoc }
 let session: SymbolSession | null = null;
 
 function schReady(): { ctx: ToolCtx; doc: KDoc; sch: SchToolModule; h: SchHelpers } {
@@ -103,7 +103,7 @@ function carrySymbol(s: SymbolSession, sameReference: boolean): void {
   for (const it of doc.items.values()) if (it.kind === "symbol" && it.ref) used.push(it.ref);
   if (!sameReference) s.reference = core.nextReference(core.symbolInfo(s.lib).reference, used, !!sch.state.annotateAuto);
   const home = instanceHome(doc, h);
-  let node = core.symbolInstance({ libId: s.libId, symbol: s.lib, at, unit: s.unit, fields: s.fields, reference: s.reference, project: home.project, path: home.path });
+  let node = core.symbolInstance({ libId: s.libId, symbol: s.lib, at, unit: s.unit, bodyStyle: s.bodyStyle, fields: s.fields, reference: s.reference, project: home.project, path: home.path });
   // SCH_DRAWING_TOOLS::PlaceSymbol autoplaces the fields of a new symbol
   try {
     const ghost = K().addItem(doc, node);
@@ -132,7 +132,8 @@ export async function placeSymbol(req: PlaceSymbolRequest): Promise<void> {
   if (!lib) { lib = core.embedSymbol(req.libId, core.flattenSymbol(core.symbolNodeOf(req.symbol, core.parseLibId(req.libId).name))); doc.lib.set(req.libId, lib); }
   const units = core.symbolInfo(lib).units;
   const unit = Math.min(units, Math.max(1, Math.round(req.unit || 1)));
-  session = { libId: req.libId, lib, fields: req.fields, unit, units, keep: !!req.keep, allUnits: !!req.allUnits && units > 1, reference: "", nodeId: "", doc };
+  const bodyStyle = Math.min(Math.max(1, core.symbolInfo(lib).bodyStyles), Math.max(1, Math.round(req.bodyStyle || 1)));
+  session = { libId: req.libId, lib, fields: req.fields, unit, units, bodyStyle, keep: !!req.keep, allUnits: !!req.allUnits && units > 1, reference: "", nodeId: "", doc };
   carrySymbol(session, false);
 }
 
@@ -255,7 +256,7 @@ export async function chooseAndPlace(kind: LibKind, opts?: ChooserOptions): Prom
   if (!chosen) return;
   try {
     rememberRecent(kind, chosen.item);
-    if (kind === "symbol") await placeSymbol({ libId: chosen.libId || chosen.item.id, symbol: chosen.symbol || "", fields: chosen.fields, unit: chosen.unit, keep: chosen.keep, allUnits: chosen.allUnits });
+    if (kind === "symbol") await placeSymbol({ libId: chosen.libId || chosen.item.id, symbol: chosen.symbol || "", fields: chosen.fields, unit: chosen.unit, bodyStyle: chosen.bodyStyle, keep: chosen.keep, allUnits: chosen.allUnits });
     else void placeFootprint({ fpid: chosen.fpid || chosen.item.id, footprint: chosen.footprint || "", fields: chosen.fields }).catch((e) => toast(message(e), 3500));
   } catch (e) { toast(message(e), 4000); }
 }

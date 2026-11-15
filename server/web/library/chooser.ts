@@ -5,14 +5,14 @@
 // Item / Description columns, the details pane under it, the preview on the right (symbol unit
 // over its default footprint, or the footprint alone), "Place repeated copies" / "Place all
 // units" and Cancel / OK.  A double click or Enter on an item accepts it.
-import { isPowerRow, parseLibId, searchScore, symbolInfo, unitName } from "./core";
+import { bodyStyleNames, isPowerRow, parseLibId, pushRecentSearch, searchScore, symbolInfo, unitName } from "./core";
 import { clearPreview, renderFootprintPreview, renderSymbolPreview } from "./preview";
 import { fetchItem, libraryIndex, officialLibraries, onSourcesChanged, placedItems, projectLibraries, recentItems, registeredSources, rememberRecent } from "./sources";
 import type { FetchedItem, LibItem, LibKind, LibraryEntry, LibrarySource, SourceContext } from "./sources";
 import { filterLabels, footprintPasses, type FpChooserFilters } from "./fpchoice";
-import { popupMenu } from "../dialogs/dom";
-import { kicadIcon } from "../components/kicon-dom";
 import "../components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
+import { popupMenu, type PopItem } from "../dialogs/dom";
+import { bitmapButton } from "../dialogs/kicon";
 
 export interface ChooserOptions {
   /** The power tool's chooser: only power symbols. */
@@ -38,6 +38,8 @@ export interface ChooserOptions {
 export interface Chosen {
   kind: LibKind;
   item: LibItem;
+  /** PANEL_SYMBOL_CHOOSER's "Body style:" choice (1 when the symbol has one body style). */
+  bodyStyle?: number;
   libId?: string;
   fpid?: string;
   symbol?: string;
@@ -71,10 +73,13 @@ const CSS = `
 .klib-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(320px, 1.15fr) 5px minmax(240px, 1fr); padding: 8px 10px 0; }
 .klib-left { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .klib-split { cursor: col-resize; }
-.klib-filterrow { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
-.klib-filter { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-2); padding: 0 6px; }
-.klib-gear { flex: none; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 1px solid transparent; border-radius: var(--r-2); background: transparent; color: var(--ink-2); cursor: default; }
-.klib-gear:hover { background: var(--panel); border-color: var(--line); }
+.klib-search { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.klib-search .klib-filter { flex: 1; min-width: 0; margin-bottom: 0; }
+.klib-search .klib-vsep { width: 1px; align-self: stretch; margin: 3px 0; background: var(--line); }
+.klib-filter .klib-recent { cursor: pointer; }
+.klib-bodysel { display: flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.klib-bodysel k-select { flex: 1; min-width: 0; }
+.klib-filter { display: flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-2); padding: 0 6px; margin-bottom: 6px; }
 .klib-filter:focus-within { border-color: var(--blue); }
 .klib-filter svg { flex: none; color: var(--ink-2); }
 .klib-filter input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 12px var(--font); padding: 5px 0; }
@@ -127,6 +132,22 @@ function ensureCss(): void {
   const st = document.createElement("style"); st.id = "klib-css"; st.textContent = CSS; document.head.appendChild(st);
 }
 
+// ---- per-viewer tree settings: the sort mode (LIB_TREE_MODEL_ADAPTER::SetSortMode), the pinned libraries
+// (PROJECT::PinLibrary keeps them in the common settings' session), the recent searches (g_recentSearches)
+type SortMode = "best" | "alpha";
+/** LIB_TREE_MODEL_ADAPTER::GetPinningSymbol */
+export const PIN_MARK = "\u2606 ";
+const recentByKind = new Map<string, string[]>();
+function store(): Storage | null { try { return window.localStorage; } catch { return null; } }
+function loadSort(kind: LibKind): SortMode { try { return store()?.getItem("kui.libtree.sort." + kind) === "alpha" ? "alpha" : "best"; } catch { return "best"; } }
+function saveSort(kind: LibKind, m: SortMode): void { try { store()?.setItem("kui.libtree.sort." + kind, m); } catch { /* private window */ } }
+function loadPinned(kind: LibKind): Set<string> {
+  try { const v = JSON.parse(store()?.getItem("kui.libtree.pinned." + kind) || "[]"); return new Set(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []); } catch { return new Set(); }
+}
+function savePinned(kind: LibKind, s: Set<string>): void { try { store()?.setItem("kui.libtree.pinned." + kind, JSON.stringify([...s])); } catch { /* private window */ } }
+function rememberSearch(kind: LibKind, q: string): void { recentByKind.set(kind, pushRecentSearch(recentByKind.get(kind) || [], q)); }
+function recentSearches(kind: LibKind): string[] { return recentByKind.get(kind) || []; }
+
 let openDialog: { close(): void } | null = null;
 /** Whether a chooser is on screen. */
 export function chooserOpen(): boolean { return !!openDialog; }
@@ -142,12 +163,6 @@ function loadFpFilterPrefs(): { pins: boolean; filters: boolean } {
   try { const j = JSON.parse(localStorage.getItem(FP_FILTER_KEY) || "{}") as { pins?: unknown; filters?: unknown }; return { pins: j.pins === true, filters: j.filters === true }; } catch { return { pins: false, filters: false }; }
 }
 function saveFpFilterPrefs(v: { pins: boolean; filters: boolean }): void { try { localStorage.setItem(FP_FILTER_KEY, JSON.stringify(v)); } catch { /* no storage */ } }
-
-/** LIB_TREE_MODEL_ADAPTER::SORT_MODE: best match or alphabetic, kept per browser. */
-type SortMode = "best" | "alpha";
-const SORT_KEY = "kui.libtree.sort";
-function loadSortMode(): SortMode { try { return localStorage.getItem(SORT_KEY) === "alpha" ? "alpha" : "best"; } catch (e) { return "best"; } }
-function saveSortMode(m: SortMode): void { try { localStorage.setItem(SORT_KEY, m); } catch (e) { /* no storage */ } }
 
 /** Open the chooser; resolves with the chosen item (its s-expression fetched) or null on Cancel. */
 export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOptions = {}): Promise<Chosen | null> {
@@ -165,8 +180,8 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
       <div class="kd-title"><span class="klib-title"></span><span class="kd-x" title="Close (Esc)">×</span></div>
       <div class="klib-main">
         <div class="klib-left">
-          <div class="klib-filterrow"><div class="klib-filter"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/></svg>
-            <input type="text" placeholder="Filter" spellcheck="false" autocomplete="off" aria-label="Filter"><span class="klib-clear" title="Clear filter">×</span></div><button type="button" class="klib-gear" aria-label="Sort and expand options" data-icon="config"></button></div>
+          <div class="klib-search"><div class="klib-filter"><svg class="klib-recent" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Recent searches</title><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/></svg>
+            <input type="text" placeholder="Filter" spellcheck="false" autocomplete="off" aria-label="Filter"><span class="klib-clear" title="Clear filter">×</span></div><span class="klib-vsep"></span></div>
           ${labels.filters || labels.pins ? `<div class="klib-filters">${labels.filters ? `<label><input type="checkbox" class="klib-by-filters"${fpOn.filters ? " checked" : ""}> ${esc(labels.filters)}</label>` : ""}${labels.pins ? `<label><input type="checkbox" class="klib-by-pins"${fpOn.pins ? " checked" : ""}> ${esc(labels.pins)}</label>` : ""}</div>` : ""}
           <div class="klib-head"><span>Item</span><span>Description</span></div>
           <div class="klib-tree" tabindex="0"><div class="klib-rows"></div></div>
@@ -175,7 +190,7 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
         <div class="klib-split"></div>
         <div class="klib-right">
           <div class="klib-pane klib-pane-main"><canvas></canvas><div class="klib-msg"></div></div>
-          ${isSym ? `<div class="klib-fpsel"><span>Footprint:</span><k-select disabled><option>No default footprint</option></k-select></div>
+          ${isSym ? `<div class="klib-bodysel"><span>Body style:</span><k-select disabled aria-label="Body style"></k-select></div><div class="klib-fpsel"><span>Footprint:</span><k-select disabled><option>No default footprint</option></k-select></div>
           <div class="klib-pane klib-pane-fp"><canvas></canvas><div class="klib-msg"></div></div>` : ""}
         </div>
       </div>
@@ -196,32 +211,31 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
     if (unitsBox) unitsBox.checked = CHOOSER_DEFAULTS.allUnits;
     if (opts.viewOnly) { okBtn.disabled = true; okBtn.title = "This document is read-only"; }
     if (opts.filter) { input.value = opts.filter; filterBox.classList.add("has-text"); }
-
-    // LIB_TREE's sort button (config): Sort by Best Match / Sort Alphabetically, then Expand All / Collapse All.  The
-    // last two are wxMenu::Append( id, ACTIONS::expandAll.GetMenuItem() ): GetMenuItem() is only the label (with the
-    // action's hotkey, which these have none of), so the rows carry no bitmap
-    let sortMode = loadSortMode();
-    const gear = $<HTMLButtonElement>(".klib-gear"); gear.append(kicadIcon("config", 16));
-    gear.addEventListener("click", () => {
-      const r = gear.getBoundingClientRect();
-      popupMenu(r.left, r.bottom + 2, [
-        { label: "Sort by Best Match", check: true, checked: sortMode === "best", run: () => { sortMode = "best"; saveSortMode(sortMode); refresh(true); } },
-        { label: "Sort Alphabetically", check: true, checked: sortMode === "alpha", run: () => { sortMode = "alpha"; saveSortMode(sortMode); refresh(true); } },
+    const bodySelect = isSym ? $<HTMLSelectElement>(".klib-bodysel k-select") : null;
+    let selectedBodyStyle = 1;      // PANEL_SYMBOL_CHOOSER::m_selectedBodyStyle: kept across selections, clamped per symbol
+    let sortMode: SortMode = loadSort(kind);
+    const pinned = loadPinned(kind);
+    // LIB_TREE's BITMAPS::config button: the sort mode and Expand All / Collapse All
+    const configBtn = bitmapButton("config", "", (ev) => {
+      const r = configBtn.getBoundingClientRect(); ev.stopPropagation();
+      popupMenu(r.left, r.bottom, [
+        { label: "Sort by Best Match", check: true, checked: sortMode === "best", run: () => { sortMode = "best"; saveSort(kind, sortMode); refresh(); } },
+        { label: "Sort Alphabetically", check: true, checked: sortMode === "alpha", run: () => { sortMode = "alpha"; saveSort(kind, sortMode); refresh(); } },
         { sep: true },
         { label: "Expand All", run: () => expandAll(true) },
         { label: "Collapse All", run: () => expandAll(false) },
       ]);
+    }, { flat: true, cls: "klib-config" });
+    configBtn.removeAttribute("title"); configBtn.setAttribute("aria-label", "Tree options");
+    $<HTMLElement>(".klib-search").append(configBtn);
+    // wxSearchCtrl::SetMenu: the recent searches of this tree (LIB_TREE::updateRecentSearchMenu)
+    $<HTMLElement>(".klib-recent").addEventListener("mousedown", (ev) => {
+      ev.preventDefault(); ev.stopPropagation();
+      const r = (ev.currentTarget as Element).getBoundingClientRect(), list = recentSearches(kind);
+      const items: PopItem[] = list.length ? list.map((q) => ({ label: q, run: () => { input.value = q; input.dispatchEvent(new Event("input")); input.focus(); } })) : [{ label: "recent searches", disabled: true }];
+      popupMenu(r.left, r.bottom + 4, items);
     });
-    /** LIB_TREE::ExpandAll / CollapseAll: every library (a search keeps its "closed by hand" marks) */
-    function expandAll(open: boolean): void {
-      const searching = !!query || filtering();
-      for (const g of groups) {
-        if (searching) { if (open) expanded.delete("-" + g.key); else expanded.add("-" + g.key); }
-        else if (open) { expanded.add(g.key); void loadGroup(g); } else expanded.delete(g.key);
-      }
-      if (!open) for (const k of Array.from(expanded)) if (k.includes("/")) expanded.delete(k);   // the multi-unit items too
-      refresh();
-    }
+    const noteSearch = () => { rememberSearch(kind, input.value); };
 
     // ---- the model
     const groups: Group[] = [];
@@ -263,24 +277,22 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
         const all = visibleItems(g);
         // a registered source filters on its side: its results are taken as they come
         const scored = all.map((it) => ({ it, score: g.type === "source" ? 1 : searchScore({ name: it.name, description: it.description, keywords: it.keywords, library: it.library }, query) })).filter((x) => x.score > 0);
-        // SORT_MODE: BEST_MATCH ranks a search's results by score; ALPHABETIC keeps names in order
-        if (sortMode === "alpha") scored.sort((a, b) => a.it.name.localeCompare(b.it.name, undefined, { numeric: true }));
-        else if (query) scored.sort((a, b) => b.score - a.score || a.it.name.localeCompare(b.it.name));
+        if (query && sortMode === "best") scored.sort((a, b) => b.score - a.score || a.it.name.localeCompare(b.it.name));
+        else if (sortMode === "alpha" && g.type !== "recent") scored.sort((a, b) => a.it.name.localeCompare(b.it.name, undefined, { numeric: true }));
         const best = scored.length ? scored[0].score : 0;
         if (g.type === "lib") { if ((query || power || filtering()) && !scored.length) continue; }
         else if (g.type === "source") { if (!scored.length && !g.loading && !g.error && !query) continue; }
         else if (!scored.length) continue;
         ranked.push({ g, items: scored, best });
       }
-      if (query && sortMode === "best") {
-        // best match first, the pinned groups staying on top like KiCad's "-- Recently Used --"
-        const rank = (r: { g: Group; best: number }) => (r.g.type === "recent" ? 3e9 : r.g.type === "placed" ? 2e9 : r.best);
-        ranked.sort((a, b) => rank(b) - rank(a));
-      }
+      // LIB_TREE_NODE::Compare: "-- " groups first, then pinned libraries, then by score (best match with a filter)
+      // or by name; Array.prototype.sort is stable, so equal ranks keep the library table's order
+      const tier = (g: Group) => (g.type === "recent" ? 4 : g.type === "placed" ? 3 : g.type === "source" ? 2 : pinned.has(g.label) ? 1 : 0);
+      ranked.sort((a, b) => tier(b.g) - tier(a.g) || (query && sortMode === "best" ? b.best - a.best : sortMode === "alpha" && a.g.type === "lib" && b.g.type === "lib" ? a.g.label.localeCompare(b.g.label, undefined, { numeric: true }) : 0));
       for (const { g, items } of ranked) {
         const open = query || filtering() ? !expanded.has("-" + g.key) : expanded.has(g.key);
         const count = g.items ? items.length : -1;
-        out.push({ key: g.key, depth: 0, group: g, label: g.label, description: g.description, expandable: count !== 0 || g.loading || !!g.error || !g.items, expanded: open });
+        out.push({ key: g.key, depth: 0, group: g, label: (g.type === "lib" && pinned.has(g.label) ? PIN_MARK : "") + g.label, description: g.description, expandable: count !== 0 || g.loading || !!g.error || !g.items, expanded: open });
         if (!open) continue;
         // a vendor search keeps its "Searching…" row above the previous results until the new ones arrive
         if (g.loading && (!items.length || g.type === "source")) out.push({ key: g.key + "/@loading", depth: 1, group: g, label: g.type === "source" ? `Searching ${g.label.replace(/\s*\(.*$/, "")}…` : "Loading…", description: g.type === "source" && query ? `for "${query}"` : "", expandable: false, expanded: false });
@@ -393,17 +405,34 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
         if (closed || token !== previewToken) return;
         shown = { row, got }; mainMsg.textContent = "";
         try {
-          if (isSym) { renderSymbolPreview(mainCanvas, got.libId || it.id, got.symbol || "", row.unit || 1); renderDetails(it, row.unit, got); showDefaultFootprint(got, token); }
+          if (isSym) { fillBodyStyles(got); renderSymbolPreview(mainCanvas, got.libId || it.id, got.symbol || "", row.unit || 1, currentBodyStyle()); renderDetails(it, row.unit, got); showDefaultFootprint(got, token); }
           else renderFootprintPreview(mainCanvas, got.fpid || it.id, got.footprint || "");
         } catch (e) { clearPreview(mainCanvas, kind); mainMsg.textContent = "Cannot draw this " + kind + ": " + ((e as Error).message || e); }
       }, (e: Error) => { if (closed || token !== previewToken) return; clearPreview(mainCanvas, kind); mainMsg.textContent = e.message || String(e); });
     }
+    // PANEL_SYMBOL_CHOOSER::populateBodyStyleChoice
+    function fillBodyStyles(got: FetchedItem | null): void {
+      if (!bodySelect) return;
+      let n = 1; try { n = got && got.symbol ? Math.max(1, symbolInfo(got.symbol).bodyStyles) : 1; } catch { n = 1; }
+      bodySelect.innerHTML = "";
+      if (n > 1) {
+        bodyStyleNames(n).forEach((name, i) => { const o = document.createElement("option"); o.value = String(i + 1); o.textContent = name; bodySelect.append(o); });
+        if (selectedBodyStyle > n) selectedBodyStyle = 1;
+        bodySelect.value = String(selectedBodyStyle);
+      }
+      bodySelect.disabled = n <= 1;
+    }
+    const currentBodyStyle = (): number => (bodySelect && !bodySelect.disabled ? Math.max(1, Number(bodySelect.value) || 1) : 1);
+    if (bodySelect) bodySelect.addEventListener("change", () => {
+      selectedBodyStyle = currentBodyStyle();
+      if (shown && isSym) { try { renderSymbolPreview(mainCanvas, shown.got.libId || shown.row.item!.id, shown.got.symbol || "", shown.row.unit || 1, selectedBodyStyle); } catch { /* drawn on the next selection */ } }
+    });
     /** The default-footprint pane belongs to the symbol shown above it: it empties as soon as another row is picked,
      *  so a symbol that is still loading (or cannot be fetched) never sits over the previous symbol's footprint. */
     function blankFp(): void {
       if (fpCanvas && fpMsg && fpSelect) { clearPreview(fpCanvas, "footprint"); fpMsg.textContent = ""; fpSelect.innerHTML = "<option>No default footprint</option>"; }
     }
-    function blank(): void { clearPreview(mainCanvas, kind); mainMsg.textContent = ""; blankFp(); }
+    function blank(): void { clearPreview(mainCanvas, kind); mainMsg.textContent = ""; fillBodyStyles(null); blankFp(); }
     function renderDetails(it: LibItem, unit: number | undefined, got: FetchedItem | null): void {
       const rowsHtml: string[] = [];
       const add = (k: string, v: string, html?: boolean) => { if (v) rowsHtml.push(`<tr><td>${esc(k)}</td><td>${html ? v : esc(v)}</td></tr>`); };
@@ -502,13 +531,24 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
     openDialog = handle;
     function accept(): void {
       const row = selectedRow(); if (!row || !row.item || opts.viewOnly) return;
+      noteSearch();
       const it = row.item;
       if (opts.history) rememberRecent(kind, it);
       const finish = (got: FetchedItem) => close({ kind, item: it, libId: got.libId || (isSym ? it.id : undefined), fpid: got.fpid || (isSym ? undefined : it.id), symbol: got.symbol, footprint: got.footprint,
-        fields: got.fields, unit: row.unit || 1, keep: !!(keepBox && keepBox.checked), allUnits: !!(unitsBox && unitsBox.checked && !unitsBox.disabled) });
+        fields: got.fields, unit: row.unit || 1, bodyStyle: isSym ? currentBodyStyle() : undefined, keep: !!(keepBox && keepBox.checked), allUnits: !!(unitsBox && unitsBox.checked && !unitsBox.disabled) });
       if (shown && shown.row.key === row.key) { finish(shown.got); return; }
       okBtn.disabled = true; status.textContent = "Loading " + it.name + "…";
       fetchItem(kind, it, ctx).then((got) => { if (!closed) finish(got); }, (e: Error) => { if (closed) return; okBtn.disabled = false; status.textContent = e.message || String(e); });
+    }
+    /** LIB_TREE::ExpandAll / CollapseAll: every library (a search keeps its "closed by hand" marks) */
+    function expandAll(open: boolean): void {
+      const searching = !!query || filtering();
+      for (const g of groups) {
+        if (searching) { if (open) expanded.delete("-" + g.key); else expanded.add("-" + g.key); }
+        else if (open) { expanded.add(g.key); void loadGroup(g); } else expanded.delete(g.key);
+      }
+      if (!open) for (const k of Array.from(expanded)) if (k.includes("/")) expanded.delete(k);
+      refresh();
     }
     function toggle(row: Row): void {
       if (!row.expandable) return;
@@ -529,6 +569,16 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
       const el = (ev.target as HTMLElement).closest<HTMLElement>(".klib-row"); if (!el) return;
       const row = rows[+el.dataset.i!]; if (!row || (ev.target as HTMLElement).classList.contains("klib-tw")) return;
       if (row.item) accept(); else toggle(row);
+    });
+    // LIB_TREE::onItemContextMenu: Pin Library / Unpin Library on a library node
+    rowsEl.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      const el = (ev.target as HTMLElement).closest<HTMLElement>(".klib-row"); if (!el) return;
+      const row = rows[+el.dataset.i!]; if (!row) return;
+      select(row.key);
+      if (row.depth !== 0 || row.group.type !== "lib") return;
+      const name = row.group.label, on = pinned.has(name);
+      popupMenu(ev.clientX, ev.clientY, [{ label: on ? "Unpin Library" : "Pin Library", run: () => { if (on) pinned.delete(name); else pinned.add(name); savePinned(kind, pinned); refresh(); } }]);
     });
     tree.addEventListener("scroll", queueDraw);
     const onFilterToggle = () => { saveFpFilterPrefs(fpFiltering()); tree.scrollTop = 0; refresh(); };
@@ -556,17 +606,17 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
     // The dialog is modal: it sees every key first, so the editor's hotkeys stay asleep behind it.
     function onKey(ev: KeyboardEvent): void {
       if (closed) return;
-      if (document.querySelector(".kd-pop")) return;   // the sort menu is up: its keys (Esc closes it) are its own
+      if (document.querySelector(".kd-pop")) return;     // a popup menu of the tree (config, recent searches, pin) has the keys
       const inDialog = dlg.contains(ev.target as Node), inText = ev.target === input;
       const page = Math.max(1, Math.floor((tree.clientHeight || 300) / ROW_H) - 1);
       const row = selectedRow();
       let handled = true;
       switch (ev.key) {
         // LIB_TREE: Esc in a filter holding text clears it; otherwise the dialog closes
-        case "Escape": if (inText && input.value) { input.value = ""; input.dispatchEvent(new Event("input")); } else close(null); break;
+        case "Escape": if (dlg.querySelector("[data-popup-open]")) { handled = false; break; } if (inText && input.value) { input.value = ""; input.dispatchEvent(new Event("input")); } else close(null); break;
         case "Enter": if (ev.target instanceof HTMLButtonElement) { handled = false; break; } if (row && row.item) accept(); else if (row) toggle(row); break;
-        case "ArrowDown": move(1); break;
-        case "ArrowUp": move(-1); break;
+        case "ArrowDown": noteSearch(); move(1); break;
+        case "ArrowUp": noteSearch(); move(-1); break;
         case "PageDown": move(page); break;
         case "PageUp": move(-page); break;
         case "ArrowRight": if (inText) { handled = false; break; } if (row && row.expandable && !row.expanded) toggle(row); else move(1); break;

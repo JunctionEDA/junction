@@ -41,9 +41,9 @@ export function clearPreview(canvas: HTMLCanvasElement, kind: "symbol" | "footpr
 }
 
 /** One unit of a library symbol (flattened text), with its visible fields as a new instance would show them. */
-export function renderSymbolPreview(canvas: HTMLCanvasElement, libId: string, symbol: string, unit: number): void {
+export function renderSymbolPreview(canvas: HTMLCanvasElement, libId: string, symbol: string, unit: number, bodyStyle = 1): void {
   const lib = embedSymbol(libId, symbol);
-  const inst = symbolInstance({ libId, symbol: lib, at: [0, 0], unit, reference: symbolInfo(lib).reference || "U", uuid: "00000000-0000-4000-8000-000000000001" });
+  const inst = symbolInstance({ libId, symbol: lib, at: [0, 0], unit, bodyStyle, reference: symbolInfo(lib).reference || "U", uuid: "00000000-0000-4000-8000-000000000001" });
   const doc = K().parseDoc(`(kicad_sch (version 20260101) (generator "eeschema") (paper "A4") (lib_symbols ${K().serialize(lib)}) ${K().serialize(inst)})`);
   draw(canvas, doc, {}, 24);
 }

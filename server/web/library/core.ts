@@ -183,6 +183,8 @@ export interface SymbolInstanceOpts {
   symbol: SNode;
   at: [number, number];
   unit?: number;
+  /** The body style (1 standard, 2 De Morgan alternate, …): the chooser's "Body style:" choice. */
+  bodyStyle?: number;
   /** Field values over the library's; names the symbol does not have become new (hidden) fields. */
   fields?: Record<string, string>;
   /** The full designator ("R?", "U3"); the library prefix + "?" when absent. */
@@ -205,7 +207,7 @@ export function symbolInstance(o: SymbolInstanceOpts): SNode {
   const prefix = info.reference || "U";
   const reference = o.reference || prefix + "?";
   const over = o.fields || {};
-  const out: string[] = [`(symbol (lib_id ${q(o.libId)}) (at ${mm(x)} ${mm(y)} 0) (unit ${unit}) (body_style 1)`,
+  const out: string[] = [`(symbol (lib_id ${q(o.libId)}) (at ${mm(x)} ${mm(y)} 0) (unit ${unit}) (body_style ${o.bodyStyle && o.bodyStyle > 1 ? Math.round(o.bodyStyle) : 1})`,
     flag("exclude_from_sim", false), flag("in_bom", true), flag("on_board", true), flag("in_pos_files", true), "(dnp no)", `(uuid ${q(o.uuid || K().newUuid())})`];
   const field = (name: string, value: string, lp: SNode | null, hiddenDefault: boolean) => {
     const a = lp ? kid(lp, "at") : null;
@@ -363,3 +365,13 @@ export function searchScore(row: SearchRow, query: string): number {
 export function isPowerRow(row: { power?: boolean; reference?: string }): boolean {
   return !!row.power || row.reference === "#PWR" || row.reference === "#FLG";
 }
+
+const RECENT_SEARCHES_MAX = 10;
+/** LIB_TREE::updateRecentSearchMenu: a non-empty search moves to the front, at most RECENT_SEARCHES_MAX kept. */
+export function pushRecentSearch(list: string[], entry: string): string[] {
+  const e = entry.trim(); if (!e) return list;
+  const out = list.filter((x) => x !== e); out.unshift(e);
+  return out.slice(0, RECENT_SEARCHES_MAX);
+}
+/** LIB_SYMBOL::GetBodyStyleDescription: De Morgan symbols are Standard / Alternate. */
+export function bodyStyleNames(n: number): string[] { return n === 2 ? ["Standard", "Alternate"] : Array.from({ length: n }, (_, i) => `Body style ${i + 1}`); }

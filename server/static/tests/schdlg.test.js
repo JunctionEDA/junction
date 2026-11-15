@@ -241,4 +241,24 @@ test("root sheet page number travels as a document-settings change", () => {
   const d = K.parseDoc('(kicad_sch (version 20250114) (uuid "r") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))', "kicad_sch");
   assert.strictEqual(d.pageNumber, "1"); assert.ok(K.applyDocProps(d, c.docProps)); assert.strictEqual(d.pageNumber, "7"); assert.strictEqual(d.paper, "A4");
 });
+
+// ---- symbol chooser (LIB_TREE / PANEL_SYMBOL_CHOOSER)
+const LC = load(["library", "core.ts"]);
+test("pushRecentSearch: newest first, no duplicates, empty ignored, at most 10", () => {
+  let l = [];
+  for (const q of ["a", "b", "a", "", "  "]) l = LC.pushRecentSearch(l, q);
+  assert.deepStrictEqual(l, ["a", "b"]);
+  for (let i = 0; i < 15; i++) l = LC.pushRecentSearch(l, "q" + i);
+  assert.strictEqual(l.length, 10); assert.strictEqual(l[0], "q14");
+});
+test("bodyStyleNames: De Morgan is Standard / Alternate", () => {
+  assert.deepStrictEqual(LC.bodyStyleNames(2), ["Standard", "Alternate"]);
+  assert.deepStrictEqual(LC.bodyStyleNames(3), ["Body style 1", "Body style 2", "Body style 3"]);
+});
+test("symbolInstance: the chosen body style goes into (body_style N)", () => {
+  const lib = K.parse('(symbol "X:G" (property "Reference" "U" (at 0 0 0)) (symbol "G_1_1" (pin input line (at 0 0 0) (length 2) (name "A") (number "1"))) (symbol "G_1_2" (pin input line (at 0 0 0) (length 2) (name "A") (number "1"))))');
+  const n = LC.symbolInstance({ libId: "X:G", symbol: lib, at: [0, 0], unit: 1, bodyStyle: 2, uuid: "u" });
+  assert.ok(/\(body_style 2\)/.test(K.serialize(n)));
+  assert.ok(/\(body_style 1\)/.test(K.serialize(LC.symbolInstance({ libId: "X:G", symbol: lib, at: [0, 0], uuid: "u" }))));
+});
 process.on("exit", () => { console.log(`schdlg: ${passed} passed, ${failed} failed`); if (failed) process.exitCode = 1; });
