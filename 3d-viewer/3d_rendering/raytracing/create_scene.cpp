@@ -2303,7 +2303,12 @@ void RENDER_3D_RAYTRACE_BASE::load3DModels( CONTAINER_3D& aDstContainer, bool aS
 
             const wxString footprintBasePath = m_boardAdapter.GetFootprintLibraryPath( fp );
 
-            bool placeholderAdded = false;
+            // A footprint whose listed model files cannot be loaded gets the generic placeholder
+            // whatever the "show missing models" setting says: an online project opened without
+            // its 3D files would otherwise show bare pads with no hint that parts are missing.
+            bool  anyLoaded = false;
+            bool  anyMissing = false;
+            float missingOpacity = 1.0f;
 
             for( FP_3DMODEL& model : fp->Models() )
             {
@@ -2328,13 +2333,19 @@ void RENDER_3D_RAYTRACE_BASE::load3DModels( CONTAINER_3D& aDstContainer, bool aS
 
                     addModels( aDstContainer, modelPtr, modelMatrix, (float) model.m_Opacity,
                                aSkipMaterialInformation, fp );
+                    anyLoaded = true;
                 }
-                else if( m_boardAdapter.ShowMissingModels() && !placeholderAdded )
+                else if( !anyMissing )
                 {
-                    addPlaceholderToRaytracer( aDstContainer, fp, fpMatrix, hasExtrudedBody, (float) model.m_Opacity );
-                    placeholderAdded = true;
+                    anyMissing = true;
+                    missingOpacity = (float) model.m_Opacity;
                 }
             }
+
+            // One placeholder stands in for the whole footprint, and only when nothing of it
+            // could be drawn (an alternative model of the same part that did load is enough).
+            if( anyMissing && !anyLoaded )
+                addPlaceholderToRaytracer( aDstContainer, fp, fpMatrix, hasExtrudedBody, missingOpacity );
 
             // Footprint with no models assigned at all
             if( !hasModels && m_boardAdapter.ShowMissingModels() )

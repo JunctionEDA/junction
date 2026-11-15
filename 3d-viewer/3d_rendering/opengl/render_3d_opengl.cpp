@@ -1216,8 +1216,13 @@ void RENDER_3D_OPENGL::get3dModelsFromFootprint( std::list<MODELTORENDER> &aDstR
     {
         const glm::mat4 fpMatrix = m_boardAdapter.GetFootprintMatrix( *aFootprint );
 
-        // The placeholder stands in for the whole footprint, so several missing models share one.
-        bool placeholderAdded = false;
+        // The placeholder stands in for the whole footprint, so several missing models share one,
+        // and it is drawn only when no model of the footprint could be loaded.  This does not wait
+        // for the "show missing models" setting: a listed model file that is not there (an online
+        // project opened without its 3D files) should not leave bare pads.
+        bool  anyLoaded = false;
+        bool  anyMissing = false;
+        float missingOpacity = 1.0f;
 
         // Get the list of model files for this model
         for( const FP_3DMODEL& sM : aFootprint->Models() )
@@ -1228,17 +1233,18 @@ void RENDER_3D_OPENGL::get3dModelsFromFootprint( std::list<MODELTORENDER> &aDstR
             // Check if the model is present in our cache map
             auto cache_i = m_3dModelMap.find( sM.m_Filename );
 
-            if( cache_i == m_3dModelMap.end() )
+            if( cache_i == m_3dModelMap.end() || !cache_i->second )
             {
-                if( !placeholderAdded )
+                if( !anyMissing )
                 {
-                    renderPlaceholderForFootprint( aDstRenderList, fpMatrix, aFootprint, aRenderTransparentOnly,
-                                                   aIsSelected, aRenderTransparentOnly ? sM.m_Opacity : 1.0f );
-                    placeholderAdded = true;
+                    anyMissing = true;
+                    missingOpacity = aRenderTransparentOnly ? sM.m_Opacity : 1.0f;
                 }
 
                 continue;
             }
+
+            anyLoaded = true;
 
             if( const std::shared_ptr<MODEL_3D_DEFERRED>& modelPtrDef = cache_i->second )
             {
@@ -1284,8 +1290,14 @@ void RENDER_3D_OPENGL::get3dModelsFromFootprint( std::list<MODELTORENDER> &aDstR
                 }
             }
         }
+
+        if( anyMissing && !anyLoaded )
+        {
+            renderPlaceholderForFootprint( aDstRenderList, fpMatrix, aFootprint, aRenderTransparentOnly,
+                                           aIsSelected, missingOpacity );
+        }
     }
-    else
+    else if( m_boardAdapter.ShowMissingModels() )
     {
         const glm::mat4 fpMatrix = m_boardAdapter.GetFootprintMatrix( *aFootprint );
 
@@ -1299,7 +1311,8 @@ void RENDER_3D_OPENGL::renderPlaceholderForFootprint( std::list<MODELTORENDER>& 
                                                       const glm::mat4& aFpMatrix, const FOOTPRINT* aFootprint,
                                                       bool aRenderTransparentOnly, bool aIsSelected, float aOpacity )
 {
-    if( !m_boardAdapter.ShowMissingModels() || !m_placeholderModel )
+    // The callers decide whether a placeholder is wanted (see get3dModelsFromFootprint).
+    if( !m_placeholderModel )
         return;
 
     // Suppress placeholder if a valid extruded body was built
