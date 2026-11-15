@@ -380,9 +380,9 @@ static wxString ownEDALibraryPath()
     wxString path;
 
 #if defined( __WXMAC__ )
-    path = GetOSXKicadMachineDataDir();
+    path = PATHS::GetOSXKicadMachineDataDir();
 #elif defined( __WXMSW__ )
-    path = GetStockDataPath( false );
+    path = PATHS::GetStockDataPath( false );
 #else
     if( wxGetEnv( wxT( "APPDIR" ), &path ) )
         path += wxT( "/share/kicad" );
