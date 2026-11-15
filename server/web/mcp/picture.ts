@@ -37,7 +37,7 @@ class Recorder {
 
 const IDENTITY = [1, 0, 0, 1, 0, 0];
 
-function textPaths(g: any, hairline: number, bg: string): string {
+export function textPaths(g: any, hairline: number, bg: string): string {
   if (!g.text && !g.raw) return "";
   const rec = new Recorder();
   drawTextStroke(rec as any, g, hairline, g.color, IDENTITY, false, bg);

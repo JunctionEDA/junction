@@ -453,6 +453,7 @@ How it is built:
 | `trace_net` | one net end to end: pads, length per layer, vias, islands, open connections |
 | `compare_versions` | what changed since a checkpoint, as a list and a picture with each change boxed (or the two versions side by side) |
 | `get_bom` | the bill of materials priced at the vendors' breaks for a number of boards, with stock shortfalls and parts not yet chosen |
+| `simulate` | the schematic (KiCad's own SPICE netlist of the hierarchy) or a given netlist run through ngspice (the WebAssembly build the plugin runtime ships, in a worker thread with a time limit): a few numbers per signal (settling time, frequency, -3 dB points, bias voltages) and one plot as a picture |
 | `export_fab` | the fabrication package (Gerbers, drill, BOM, placement) for JLCPCB, PCBWay or KiCad defaults as a zip behind a download link (`/api/exports/{id}`, table `project_exports`), with the DRC result |
 | `apply_changes` with `propose: true` | the change is not applied: it is stored (`/api/docs/{id}/proposals`, table `design_proposals`) and everyone in the document sees it drawn over the design in a Proposed changes panel with Accept and Reject; accepting applies it as that person's edit, one undo step |
 | `list_proposals` | the proposals and their outcome (pending, accepted, rejected with the reason, stale, withdrawn); waits for one decision with `wait_s`, takes one back with `withdraw` |

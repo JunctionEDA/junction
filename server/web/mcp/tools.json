@@ -191,6 +191,28 @@
     }
   },
   {
+    "name": "simulate",
+    "title": "Simulate the circuit",
+    "write": false,
+    "description": "Runs the schematic through ngspice (KiCad's own SPICE netlist of the whole hierarchy, with each symbol's Sim model fields and the project's model files) and answers with a few numbers per signal and one plot: for a transient the minimum, maximum, mean, final value, frequency of an oscillation or settling time; for an AC sweep gain and phase at the ends, the peak and the -3 dB points; for .op every node voltage and source current. command is the analysis (.op, .tran, .ac or .dc line); without it the schematic's own simulation command is used. probes names what to report and plot, e.g. V(OUT), I(R1); other_signals lists the rest. To try an idea without touching the design, pass netlist: any complete SPICE netlist is simulated instead of the schematic. Parts need SPICE models: resistors, capacitors, inductors and sources work as drawn, other parts by their Sim.Device / Sim.Library fields.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name." },
+        "document": { "type": "string", "description": "The root sheet to simulate (default: the project's root schematic)." },
+        "command": { "type": "string", "description": "One analysis line, e.g. \".tran 10u 20m\", \".ac dec 20 10 1meg\", \".dc V1 0 5 0.1\", \".op\"." },
+        "probes": { "type": "array", "items": { "type": "string" }, "description": "Up to 8 signals to report and plot: V(net), I(part) or a vector name. Default: the named nets' voltages." },
+        "netlist": { "type": "string", "description": "A complete SPICE netlist to simulate instead of the schematic." },
+        "netlist_only": { "type": "boolean", "description": "Return the netlist that would be run, without running it." },
+        "plot": { "type": "boolean", "description": "false leaves the picture out." },
+        "timeout_s": { "type": "number", "description": "Seconds the run may take (default 40, 120 at most)." },
+        "width_px": { "type": "integer", "description": "Width of the plot in pixels (default 1500)." }
+      },
+      "required": ["project"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "propose_fixes",
     "title": "Offer fixes for rule violations",
     "write": true,

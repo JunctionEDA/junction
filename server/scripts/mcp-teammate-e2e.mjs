@@ -364,12 +364,59 @@ await open(sch.id);
   }
 }
 
+// ------------------------------------------------------------------ simulation
+
+{
+  const rc = '* RC low-pass\nV1 in 0 dc 0 ac 1 pulse(0 5 1m 1u 1u 50m 100m)\nR1 in out 1k\nC1 out 0 1u\n';
+  const ac = await call('simulate', { project: NAME, netlist: rc, command: '.ac dec 20 1 100k', probes: ['V(out)'] });
+  if (process.env.DEBUG) console.log(ac.text.slice(0, 1500));
+  const f3 = ac.data && ac.data.signals && ac.data.signals['v(out)'] && ac.data.signals['v(out)'].minus_3db_at;
+  check('simulate: an AC sweep of a netlist reports the -3 dB point (159 Hz for 1k and 1u)', !ac.isError && !!f3 && /^1(5\d|6\d)Hz$/.test(f3[0]) && ac.data.points > 50, ac.text.slice(0, 600));
+  check('with a plot as a picture, and a small answer', !!ac.image && Math.max(...pngSize(ac)) >= 1000 && ac.text.length < 1500, `${ac.text.length} characters`);
+  savePng(ac, '20-simulate-ac.png');
+  const tr = await call('simulate', { project: NAME, netlist: rc, command: '.tran 20u 10m', probes: ['V(in)', 'V(out)', 'I(V1)'], width_px: 1200 });
+  if (process.env.DEBUG) console.log(tr.text.slice(0, 1500));
+  const out = tr.data && tr.data.signals && tr.data.signals['v(out)'];
+  check('a transient reports where each signal starts, ends and settles', !tr.isError && !!out && out.start === '0V' && /^(4\.9\d|5)V$/.test(out.end) && /ms$/.test(out.settles_within_2pct_at || '') && Object.keys(tr.data.signals).length === 3 && Math.max(...pngSize(tr)) === 1200, tr.text.slice(0, 700));
+  savePng(tr, '21-simulate-tran.png');
+  const op = await call('simulate', { project: NAME, netlist: 'divider\nV1 a 0 9\nR1 a mid 2k\nR2 mid 0 1k\n', command: '.op' });
+  check('.op gives every node voltage without a picture', !op.isError && op.data.signals['v(mid)'] === '3V' && !op.image, op.text.slice(0, 400));
+  const bad = await call('simulate', { project: NAME, netlist: 'broken\nR1 a b\n', command: '.op' });
+  check('a netlist ngspice refuses comes back as an error with its message', bad.isError && bad.text.length < 2500, bad.text.slice(0, 300));
+  const none = await call('simulate', { project: NAME, netlist: rc });
+  check('no analysis: asks for a command', none.isError && /command/.test(none.text), none.text.slice(0, 200));
+
+  // the schematic itself: a divider drawn with the harness, simulated from KiCad's own netlist
+  await db.query(`DELETE FROM projects WHERE owner_id = $1 AND name = 'teammate-sim'`, [ada]);
+  await call('create_project', { name: 'teammate-sim' });
+  const code = `sch = project.schematic()
+sch.build(parts={
+  "V1": {"lib": "Simulation_SPICE:VDC", "fields": {"Sim.Params": "dc=9"}},
+  "R1": {"lib": "Device:R", "value": "2k"},
+  "R2": {"lib": "Device:R", "value": "1k"},
+}, nets={"VIN": ["V1.1", "R1.1"], "MID": ["R1.2", "R2.1"], "GND": ["V1.2", "R2.2"]}, labels=["MID"], review=False)
+print("ok")`;
+  let r = await call('run_python', { project: 'teammate-sim', code, live: false, timeout_s: 200 });
+  while (r.data && r.data.running) r = await call('get_run', { run_id: r.data.run_id });
+  if (r.isError) console.log('  (the test schematic could not be drawn: ' + r.text.slice(0, 500) + ')');
+  if (process.env.DEBUG) console.log((await call('get_component', { project: 'teammate-sim', document: 'teammate-sim.kicad_sch', ref: 'V1' })).text.slice(0, 700));
+  const text = await call('simulate', { project: 'teammate-sim', command: '.op', netlist_only: true });
+  if (process.env.DEBUG) console.log(text.text.slice(0, 1200));
+  const sim = await call('simulate', { project: 'teammate-sim', command: '.op' });
+  if (process.env.DEBUG) console.log(sim.text.slice(0, 1200));
+  const mid = sim.data && sim.data.signals && Object.entries(sim.data.signals).find(([n]) => /mid/i.test(n));
+  check('the schematic is simulated from KiCad\'s own SPICE netlist (9 V over 2k and 1k: 3 V)', !sim.isError && !!mid && mid[1] === '3V', sim.text.slice(0, 700));
+  const sweep = await call('simulate', { project: 'teammate-sim', command: '.dc V1 0 9 0.5', probes: ['V(MID)'] });
+  check('a DC sweep of the schematic, probed by net name', !sweep.isError && !!sweep.image && Object.values(sweep.data.signals)[0].end === '3V', sweep.text.slice(0, 500));
+  savePng(sweep, '22-simulate-schematic-dc.png');
+}
+
 // ------------------------------------------------------------------ a connection that may only read
 
 {
   const tools = (await (await fetch(`${BASE}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${adaJwt}` }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })).json()).result.tools;
   const by = Object.fromEntries(tools.map((t) => [t.name, t]));
-  check('the new tools are in the catalog as read-only tools', ['highlight', 'get_selection', 'trace_net', 'compare_versions', 'get_bom', 'view_datasheet', 'export_fab', 'list_proposals'].every((n) => by[n] && by[n].annotations.readOnlyHint === true), Object.keys(by).join(' '));
+  check('the new tools are in the catalog as read-only tools', ['highlight', 'get_selection', 'trace_net', 'compare_versions', 'get_bom', 'view_datasheet', 'export_fab', 'list_proposals', 'simulate'].every((n) => by[n] && by[n].annotations.readOnlyHint === true), Object.keys(by).join(' '));
 }
 
 desk.ws.close(); await browser.close(); await db.end();

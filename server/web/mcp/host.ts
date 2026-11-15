@@ -29,6 +29,10 @@ import { reviewDesign } from "../ai/review";
 import * as library from "../ai/library";
 import { buildProposal, staleReason, writeRules } from "../ai/proposals";
 import { planFixes } from "./fixes";
+import { eng, findVector, plotOf, runSpice, summarize, type SimRun, type Vector } from "./simulate";
+import * as NK from "../sim/netlist-kicad";
+import * as SP from "../sim/spice-netlist";
+import * as SM from "../dialogs/sim-model-logic";
 import { diffDocs } from "../review/diff";
 import { getBom } from "./bom";
 import { buildPackage, packageZip } from "../fab/index";
@@ -323,6 +327,96 @@ async function proposeFixes(req: Request): Promise<Reply> {
       note: proposed.length ? "Nothing was changed. Each fix waits as its own proposal for a person to Accept or Reject in the editor; list_proposals gives the outcome. Run the check again after they decide."
         : rows.length ? "None of these violations has a mechanical fix. Work through left_for_you: each needs a design decision; propose your change with apply_changes propose: true." : "The check is clean: nothing to fix." } };
   });
+}
+
+// ---------------------------------------------------------------- simulation
+
+const ANALYSIS = /^\s*\.(tran|ac|dc|op)\b/i;
+
+/** KiCad's SPICE netlist of the project's schematic hierarchy (editor/export-netlist.ts projectSpiceNetlist), read from the live documents. */
+async function schematicSpice(req: Request, p: Project, withCommands: boolean, notes: string[]): Promise<{ netlist: string; files: [string, string][] }> {
+  const schs = p.docs.filter((d) => d.docType === "kicad_sch"); if (!schs.length) throw new ToolError("This project has no schematic to simulate. Pass a netlist instead.");
+  const pro = p.docs.find((d) => d.docType === "kicad_pro"); const stem = (x: string) => x.replace(/\.[^./]+$/, "");
+  const root = (req.args.document ? findDocument(p, req.args.document) : null) || (pro && schs.find((d) => stem(d.path) === stem(pro.path)))
+    || schs.slice().sort((x, y) => x.path.split("/").length - y.path.split("/").length || x.path.length - y.path.length)[0]!;
+  if (root.docType !== "kicad_sch") throw new ToolError("Simulation reads a schematic: name a sheet, or leave document out for the root sheet.");
+  return withDocument(req, root.path, async (_sess, doc, ed) => {
+    const k = K(), sch = W.CollabTools && W.CollabTools.sch, hp = sch && sch._; if (!hp || !hp.symbolPins) throw new ToolError("The schematic tools are not loaded.");
+    const files = new Map<string, { doc: any; uuid: string; file: string }>();
+    for (const d of schs) { try { const dd = d.path === root.path ? doc : (await design.resolveDoc(d.path)).doc; files.set(d.path, { doc: dd, uuid: dd.uuid || "", file: d.path }); } catch { /* reported as a missing sheet */ } }
+    const rootFile = files.get(root.path)!;
+    const resolve = (file: string, parent: { file: string }) => {
+      const parts = [...parent.file.split("/").slice(0, -1), ...file.split("/")].filter((x) => x && x !== "."); const out: string[] = [];
+      for (const x of parts) { if (x === "..") out.pop(); else out.push(x); }
+      return files.get(out.join("/")) || files.get(file) || null;
+    };
+    const isPower = (d: any, it: any) => hp.isPowerSymbol(d, String((k.kid(it.node, "lib_id") || [])[1]));
+    const nl = k.pcbNetlist.buildNetlist(rootFile, resolve, { symbolPins: hp.symbolPins, isPower }, root.path.split("/").pop()!.replace(/\.kicad_sch$/, ""));
+    const insts: any[] = nl.instances || []; const docOf = (f: string) => { const x = files.get(f); return x ? x.doc : null; };
+    const placed = new Map<string, any>(NK.nlSheets(insts, docOf).map((x: any) => [x.uuidPath.join("/"), x]));
+    const parentDoc = (u: string[]) => { const par = insts.find((i) => i.uuidPath.length === u.length - 1 && i.uuidPath.every((x: string, j: number) => u[j] === x)); return par ? docOf(par.file) : null; };
+    const sheets = insts.map((i) => { const pl = placed.get(i.uuidPath.join("/")), pd = parentDoc(i.uuidPath);
+      return { index: i.index, uuidPath: i.uuidPath, doc: docOf(i.file), sheetNode: pl ? pl.sheetNode : null, parentVersion: pd ? pd.version : undefined }; }).filter((x) => x.doc);
+    let textVars: Record<string, string> = {}; try { textVars = ((ed.proSettings ? JSON.parse(ed.proSettings) : {}).text_variables as Record<string, string>) || {}; } catch { textVars = {}; }
+    const { symbols, texts } = SP.readHierarchy({ sheets, netMap: nl.netMap || new Map(), symbolPins: hp.symbolPins, isPower, textVars } as any);
+    // the project's SPICE model files: parsed for the exporter, and handed to ngspice where the netlist includes them
+    const models = p.docs.filter((d) => d.docType === "spice_model" || /\.(lib|sub|cir|mod|spice|ibs)$/i.test(d.path));
+    const norm = (x: string) => x.replace(/\\/g, "/").replace(/^\$\{KIPRJMOD\}\//, "").replace(/^\.\//, "");
+    const loaded = new Map<string, string | null>(); let bytes = 0;
+    const load = async (d: DocEntry) => { if (!loaded.has(d.path)) { let t: string | null = null; try { t = await readTextDocument(conn, d.docId); } catch { t = null; } if (t !== null && (bytes += t.length) > 8e6) t = null; loaded.set(d.path, t); } return loaded.get(d.path)!; };
+    const find = (path: string) => models.find((x) => norm(x.path) === norm(path)) || models.find((x) => norm(path).endsWith("/" + norm(x.path))) || null;
+    const libs = new Map<string, any>();
+    for (const sym of symbols) {
+      const path = (sym.fields.find((f: any) => f.name === SM.F.LIBRARY) || { value: "" }).value; if (!path || libs.has(path)) continue;
+      const f = find(path); let text = f ? await load(f) : null;
+      if (text !== null && !SM.isIbisPath(path)) text = await SM.expandSpiceIncludes(text, path, async (cands: string[]) => { for (const c of cands) { const g = find(c); if (g) { const t = await load(g); if (t !== null) return t; } } return null; }, []);
+      if (text === null) notes.push(`The model library ${path} is not in the project.`);
+      libs.set(path, text === null ? null : SM.isIbisPath(path) ? SM.parseIbisLibrary(text, path) : SM.parseSpiceLibrary(text));
+    }
+    let netlist = SP.spiceNetlist({ symbols, texts, options: SP.OPTION_SAVE_ALL_VOLTAGES | SP.OPTION_SAVE_ALL_CURRENTS | (withCommands ? SP.OPTION_SIM_COMMAND : 0), library: (x) => libs.get(x) || null,
+      report: (m, sev) => { if (notes.length < 12) notes.push(`${sev === "error" ? "Error" : "Warning"}: ${m}`); } });
+    for (const d of models) await load(d);
+    const given: [string, string][] = [];
+    for (const [path, text] of loaded) if (text !== null) given.push([`/proj/${norm(path)}`, text]);
+    netlist = netlist.replace(/^(\s*\.(?:include|lib)\s+)"([^"]+)"/gim, (all, head, path) => { const f = find(path); return f ? `${head}"/proj/${norm(f.path)}"` : all; });
+    return { netlist, files: given };
+  });
+}
+
+async function simulate(req: Request): Promise<Reply> {
+  const p = needProject(req), a = req.args || {}; const notes: string[] = [];
+  const cmd = String(a.command || "").trim();
+  if (cmd && !ANALYSIS.test(cmd)) throw new ToolError("command is one ngspice analysis line: .op, .tran <step> <stop>, .ac dec <points> <fstart> <fstop> or .dc <source> <start> <stop> <step>.");
+  let netlist: string, files: [string, string][] = [];
+  if (typeof a.netlist === "string" && a.netlist.trim()) { netlist = a.netlist; if (netlist.length > 400000) throw new ToolError("The netlist is too long (400,000 characters at most)."); if (!/^\s*\.end\s*$/im.test(netlist)) netlist += "\n.end\n"; }
+  else ({ netlist, files } = await schematicSpice(req, p, !cmd, notes));
+  if (cmd) { const lines = netlist.split("\n").filter((l) => !ANALYSIS.test(l)); let end = lines.findIndex((l) => /^\s*\.end\s*$/i.test(l)); if (end < 0) end = lines.length; lines.splice(end, 0, cmd); netlist = lines.join("\n"); }
+  const lineOf = netlist.split("\n").find((l) => ANALYSIS.test(l));
+  if (!lineOf) throw new ToolError("There is no analysis to run: the schematic has no simulation command in a text. Pass command, for example \".tran 10u 10m\" or \".ac dec 20 10 1meg\".");
+  if (netlist.split("\n").filter((l) => ANALYSIS.test(l)).length > 1) throw new ToolError("One analysis per call: pass command to choose it.");
+  if (a.netlist_only === true) return { result: { netlist, notes: notes.length ? notes : undefined } };
+  const limit = Math.max(5, Math.min(120, Number(a.timeout_s) || 40)) * 1000;
+  let run: SimRun;
+  try { run = await runSpice(netlist, files, String(process.env.KC_PYODIDE_DIR || ""), limit); }
+  catch (e) { if (e instanceof ToolError && typeof a.netlist !== "string") throw new ToolError(`${e.message}${notes.length ? ` Notes from the netlist: ${notes.join(" ")}` : ""}`); throw e; }
+  const problems = run.errors.map((x) => x.trim()).filter((x) => x && !/^(Note:|Using SPARSE|No compatibility mode|Warning: No job)/i.test(x)).slice(0, 10);
+  if (!run.vectors.length || !run.points) throw new ToolError(`ngspice produced no result. ${problems.concat(notes).join(" ").slice(0, 1500) || "Check that the circuit has a ground (net 0 or GND), a source, and a model for every part (the Sim fields of each symbol)."} Pass netlist_only: true to read the netlist that was run.`);
+  const sweep = run.vectors[0]!, rest = run.kind === "op" ? run.vectors : run.vectors.slice(1);
+  const missing: string[] = []; let shown: Vector[] = [];
+  if (Array.isArray(a.probes) && a.probes.length) for (const pr of a.probes.slice(0, 8)) { const v = findVector(run, String(pr)); if (v && v !== sweep) { if (!shown.includes(v)) shown.push(v); } else missing.push(String(pr)); }
+  else {
+    const volts = rest.filter((v) => /^v\(/i.test(v.name) || /voltage/i.test(v.type));
+    const named = volts.filter((v) => !/net-\(|unconnected|#/i.test(v.name));
+    shown = (named.length ? named : volts.length ? volts : rest).slice(0, run.kind === "op" ? 60 : 6);
+  }
+  if (run.kind === "op" && !(Array.isArray(a.probes) && a.probes.length)) shown = rest.slice(0, 80);
+  const signals: Record<string, unknown> = {}; for (const v of shown) signals[v.name] = run.kind === "op" ? (summarize(run, v) as any).value : summarize(run, v);
+  const others = rest.filter((v) => !shown.includes(v)).map((v) => v.name);
+  const result: any = { analysis: lineOf.trim(), points: run.points, sweep: run.kind === "op" ? undefined : `${sweep.name} ${eng(sweep.re[0]!)} to ${eng(sweep.re[sweep.re.length - 1]!)}`, signals,
+    not_found: missing.length ? missing : undefined, other_signals: others.length ? others.slice(0, 60) : undefined, more: others.length > 60 ? others.length - 60 : undefined,
+    warnings: problems.concat(notes).length ? problems.concat(notes).slice(0, 12) : undefined };
+  const svg = a.plot === false ? null : plotOf(run, shown, `${p.name}: ${lineOf.trim()}`);
+  return svg ? { result, svg } : { result };
 }
 
 async function undoChanges(req: Request): Promise<Reply> {
@@ -802,6 +896,7 @@ const TOOLS: Record<string, (req: Request) => Promise<Reply>> = {
   get_bom: bomTool,
   export_fab: exportFab,
   list_proposals: listProposals,
+  simulate,
   propose_fixes: proposeFixes,
   trace_net: (req) => withDocument(req, req.args.document, async (sess, doc) => {
     const res: any = traceNet(doc, sess.entry.path, req.args.net);
