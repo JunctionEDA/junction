@@ -245,7 +245,7 @@ export interface Models3dOpts {
   extruded?: FpExtruded | null;
   /** the frame's board thickness, the dummy board's starting thickness (panel_preview_3d_model.cpp: SetBoardThickness) */
   thickness?: number;
-  /** the footprint's library and name (the footprint editor): adds Use Closest Library Model */
+  /** the footprint's library and name (its library link): adds Use Closest Library Model */
   footprintId?(): { lib: string; name: string };
 }
 /** EXTRUDED_3D_BODY: layer "auto" (UNDEFINED_LAYER), "pad_bbox" (UNSELECTED_LAYER) or a layer name; color null = unspecified */

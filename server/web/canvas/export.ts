@@ -338,9 +338,13 @@ export function serialize(node: SAtom): string {
   // in the file" — KiCad's parsers demand T_STRING where the format says string.
   // Hand-built nodes carry no mask and fall back to the shape heuristic.
   const q = quotedMask(node); let out = "(";
+  // An embedded file's (data |…|) (EMBEDDED_FILES::WriteEmbeddedFiles): bare base64 lines between bars, which the
+  // reader takes as one DSN_BAR-delimited run (NeedBAR) and refuses quoted
+  const bars = node[0] === "data" && typeof node[1] === "string" && node[1].startsWith("|");
   for (let j = 0; j < node.length; j++) {
     if (j) out += " ";
     const c = node[j];
+    if (bars && typeof c === "string" && !(j < 30 && ((q >> j) & 1) === 1) && /^\|?[A-Za-z0-9+/=]*\|?$/.test(c)) { out += c; continue; }
     out += isList(c) ? serialize(c) : atomText(c, (j < 30 && ((q >> j) & 1) === 1) || stringSlot(node, j) || (!q && typeof c === "string" && isStringSlot(node, j)));
   }
   return out + ")";

@@ -50,6 +50,8 @@ export interface FpPropsModel {
   otherAttrs: string[];
   /** PANEL_EMBEDDED_FILES: the footprint's (embedded_files (file (name …) …)) by name, and (embedded_fonts) */
   embeddedFiles: string[]; embedFonts: boolean;
+  /** the (file …) forms of the files added on the Embedded Files page */
+  embeddedAdded?: string[];
 }
 
 const header = (doc: BoardDoc): SNode | null => { const st = (doc as unknown as { fpState?: { fp: SNode } }).fpState; return st ? st.fp : null; };
@@ -276,6 +278,7 @@ export function fpPropsChanges(doc: BoardDoc, m: FpPropsModel): PcbChange[] {
     if (ef) { for (let j = ef.length - 1; j >= 1; j--) { const c = ef[j]; if (isList(c) && c[0] === "file" && !keepNames.has(str((K.kid(c, "name") || [])[1]))) ef.splice(j, 1); }
       if (!K.kids(ef, "file").length) setHeader(h, "embedded_files", null); }
   }
+  FM.addEmbeddedFiles(h, m.embeddedAdded || []);
   const changes: PcbChange[] = [];
   if (K.serialize(h) !== K.serialize(h0)) changes.push({ id: "footprint", kind: "MODIFIED", typeName: "FOOTPRINT", sexpr: K.serialize(h) } as PcbChange);
   // fields: FOOTPRINT::UpdateFields — reused by id, the rest added, the missing ones removed

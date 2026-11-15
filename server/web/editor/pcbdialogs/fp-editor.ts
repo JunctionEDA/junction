@@ -65,7 +65,7 @@ export function footprintPropertiesDialog(ctx: ToolCtx, host: FpPropsHost = {}):
   const jgGrid = grid([{ label: "Explicit jumper pad groups:", key: "g" }], jgRows, { ro, height: "120px" });
   // Embedded Files (PANEL_EMBEDDED_FILES, shared with the board's dialog; declared first: the 3D Models tab reads them)
   const fpNode = (): SNode | null => (doc as unknown as { fpState?: { fp: SNode } }).fpState?.fp || null;
-  let efPanel: { el: HTMLElement; get(): string[] } | null = null;
+  let efPanel: ReturnType<typeof embeddedFilesPanel> | null = null;
   // 3D Models (PANEL_FP_PROPERTIES_3D_MODEL with PANEL_PREVIEW_3D_MODEL)
   const fpEmbedded = (): string[] => (efPanel ? efPanel.get() : m.embeddedFiles);
   const models3d = models3dPanel({ ro, models: m.models, extruded: m.extruded ?? null, projectModels: host.projectModels, embedded: fpEmbedded, footprintText: host.footprintText, previewKey: "fpPreview3d",
@@ -122,7 +122,7 @@ export function footprintPropertiesDialog(ctx: ToolCtx, host: FpPropsHost = {}):
     const p = FPP().parsePaste(pasteT.get(), parseLen); if (p) { out.pasteMargin = p.offset; out.pasteRatio = p.ratio; }
     out.netTieGroups = ntGrid.rows().map((r) => String(r.g || "")); out.dupPadsAreJumpers = dupJ.get(); out.jumperGroups = jgGrid.rows().map((r) => String(r.g || "")).filter((g) => g.trim());
     out.models = models3d.models(); out.extruded = models3d.extruded();
-    out.embeddedFiles = efPanel ? efPanel.get() : m.embeddedFiles; out.embedFonts = embedFonts.get();
+    out.embeddedFiles = efPanel ? efPanel.get() : m.embeddedFiles; out.embeddedAdded = efPanel ? efPanel.added().map((a) => a.sexpr) : []; out.embedFonts = embedFonts.get();
     out.fields = (fieldsGrid ? fieldsGrid.rows() : fieldRows).map((r: Record<string, CellValue>) => ({ ...r, w: Number(r.w), h: Number(r.h), thick: Number(r.thick), rot: Number(r.rot) || 0, x: Number(r.x) || 0, y: Number(r.y) || 0, show: !!r.show, italic: !!r.italic, unconstrained: !!r.unconstrained, name: String(r.name), value: String(r.value), layer: String(r.layer), id: String(r.id || "") }));
     return out;
   };

@@ -8,10 +8,13 @@
 // is tessellated here by OpenCascade compiled to WebAssembly (occt-import-js), in a worker, on first use.
 // A model KiCad's library does not have is answered by the server with the closest one it does have (a footprint
 // variant's base package, the same name in another library, another make of the same connector family), and a
-// footprint that names no model at all is looked up under its own name the same way.
+// footprint that names no model at all is looked up under its own name the same way.  A kicad-embed://<file> model is
+// the footprint's own (embedded_files …) copy (EMBEDDED_FILES::GetTemporaryFileName), read from the file's data.
 // A footprint whose model cannot be had even so keeps the stand-in solids of parts.ts.
 //
 // footprintModels / placeMesh are pure (no DOM), for the node tests; ModelStore is the browser half.
+
+import { zstdDecompress } from "../dialogs/zstd";
 
 export type V3 = [number, number, number];
 
@@ -19,8 +22,9 @@ export type V3 = [number, number, number];
 export interface ModelRef {
   /** where the STEP file is read from; also the key the tessellated mesh is kept under */
   url: string;
-  /** "kicad" for KiCad's 3D library, "vendor" for a vendor part's model, "project" for a model file kept in the project */
-  source: "kicad" | "vendor" | "project";
+  /** "kicad" for KiCad's 3D library, "vendor" for a vendor part's model, "project" for a model file kept in the project,
+   *  "embedded" for a file embedded in the footprint */
+  source: "kicad" | "vendor" | "project" | "embedded";
   /** Library/Name as the footprint wrote it, for messages */
   name: string;
   offset: V3; scale: V3; rotate: V3;
@@ -63,6 +67,25 @@ function projectModel(path: string): string | null {
   try { return typeof fn === "function" ? fn(stem) || null : null; } catch { return null; }
 }
 
+/** kicad-embed://<name>.step|stp: the footprint's embedded copy as an object URL, one per file content (its checksum). */
+const embedUrls = new Map<string, string | null>();
+function embeddedModel(node: SNode, path: string): string | null {
+  const m = /^kicad-embed:\/\/([^/\\]+\.(?:step|stp))$/i.exec(path); if (!m) return null;
+  const ef = kid(node, "embedded_files"); if (!ef) return null;
+  const f = ef.find((c) => Array.isArray(c) && c[0] === "file" && String((kid(c as SNode, "name") || [])[1] ?? "") === m[1]) as SNode | undefined;
+  const d = f ? kid(f, "data") : null; if (!f || !d) return null;
+  const b64 = d.slice(1).map((x) => String(x)).join("").replace(/[|\s]/g, "");
+  const key = m[1] + "\n" + String((kid(f, "checksum") || [])[1] ?? "") + "\n" + b64.length + b64.slice(0, 48) + b64.slice(-48);
+  if (embedUrls.has(key)) return embedUrls.get(key)!;
+  let url: string | null = null;
+  try {
+    const bin = atob(b64), raw = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
+    const bytes = zstdDecompress(raw);
+    if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/step" }));
+  } catch { url = null; }
+  embedUrls.set(key, url); return url;
+}
+
 /** Where KiCad's library model `lib`/`name` is read from; the server answers a missing one with its closest replacement. */
 export const kicadModelUrl = (lib: string, name: string): string => `/api/kicad-lib/model?lib=${encodeURIComponent(lib)}&name=${encodeURIComponent(name)}&fallback=1`;
 
@@ -78,6 +101,8 @@ export function footprintModels(node: SNode, guess = true): ModelRef[] {
     named = true;
     const hide = kid(c as SNode, "hide"); if (hide && String(hide[1]) !== "no") continue;
     const path = String(c[1] ?? "");
+    const emb = /^kicad-embed:\/\//i.test(path) ? embeddedModel(node, path) : null;
+    if (emb) { out.push({ name: path.slice("kicad-embed://".length), offset: xyzOf(c as SNode, "offset", 0), scale: xyzOf(c as SNode, "scale", 1), rotate: xyzOf(c as SNode, "rotate", 0), source: "embedded", url: emb }); continue; }
     const own = projectModel(path);
     if (own) { out.push({ name: path.replace(/^\$[{(]KIPRJMOD[})][\/\\]/i, ""), offset: xyzOf(c as SNode, "offset", 0), scale: xyzOf(c as SNode, "scale", 1), rotate: xyzOf(c as SNode, "rotate", 0), source: "project", url: own }); continue; }
     const m = /([^\/\\${}]+)\.3dshapes[\/\\]([^\/\\]+)\.(?:step|stp|wrl)$/i.exec(path); if (!m) continue;

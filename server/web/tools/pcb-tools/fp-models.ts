@@ -86,4 +86,19 @@ export function keepEmbeddedFiles(fp: SNode, keep: string[]): boolean {
   if (!K.kids(ef, "file").length) { fp.splice(fp.indexOf(ef), 1); did = true; }
   return did;
 }
-export const fpModelsApi = { readModels, readExtruded, writeModels, modelText, extrudedText, embeddedFileNames, keepEmbeddedFiles };
+/**
+ * PANEL_EMBEDDED_FILES::TransferDataFromWindow for the files added in the dialog: each (file …) form replaces the file of
+ * its name or joins (embedded_files …), which is made before the 3D models (format( FOOTPRINT* )) when there is none.
+ */
+export function addEmbeddedFiles(fp: SNode, files: string[]): boolean {
+  if (!files.length) return false;
+  let ef = K.kid(fp, "embedded_files");
+  if (!ef) { ef = ["embedded_files"]; const m = fp.findIndex((c, j) => j > 1 && isList(c) && c[0] === "model"); fp.splice(m > 0 ? m : fp.length, 0, ef); }
+  for (const text of files) {
+    const node = K.parse(text) as SNode, name = str((K.kid(node, "name") || [])[1]);
+    const i = ef.findIndex((c: unknown, j: number) => j > 0 && isList(c) && c[0] === "file" && str((K.kid(c as SNode, "name") || [])[1]) === name);
+    if (i > 0) ef[i] = node; else ef.push(node);
+  }
+  return true;
+}
+export const fpModelsApi = { readModels, readExtruded, writeModels, modelText, extrudedText, embeddedFileNames, keepEmbeddedFiles, addEmbeddedFiles };

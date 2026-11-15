@@ -899,8 +899,8 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
     const height = lenField(hgt0 > 0 ? hgt0 : NaN, { ro, key: "componentHeight", allowEmpty: true });
     height.input.title = "Optional overall height specification for the footprint, independent from any 3D models.";
     // the 3D Models and Embedded Files pages (PANEL_FP_PROPERTIES_3D_MODEL, PANEL_EMBEDDED_FILES)
-    const FM = (PT() as unknown as { fpModels: { readModels(n: SNode): FpModel[]; readExtruded(n: SNode): FpExtruded | null; writeModels(n: SNode, m: FpModel[], e: FpExtruded | null): boolean; embeddedFileNames(n: SNode): string[]; keepEmbeddedFiles(n: SNode, keep: string[]): boolean } }).fpModels;
-    let efPanel: { el: HTMLElement; get(): string[] } | null = null;
+    const FM = (PT() as unknown as { fpModels: { readModels(n: SNode): FpModel[]; readExtruded(n: SNode): FpExtruded | null; writeModels(n: SNode, m: FpModel[], e: FpExtruded | null): boolean; embeddedFileNames(n: SNode): string[]; keepEmbeddedFiles(n: SNode, keep: string[]): boolean; addEmbeddedFiles(n: SNode, files: string[]): boolean } }).fpModels;
+    let efPanel: ReturnType<typeof embeddedFilesPanel> | null = null;
     const attrs = PH().footprintAttrs(node);
     const type = selectField<string>(attrs.type, [["through_hole", "Through hole"], ["smd", "SMD"], ["", "Unspecified"]], { ro, key: "fpType" });
     const FLAGS: [string, string][] = [["exclude_from_sim", "Exclude from simulation"], ["board_only", "Not in schematic"], ["dnp", "Do not populate"], ["exclude_from_bom", "Exclude from bill of materials"], ["exclude_from_pos_files", "Exclude from position files"]];
@@ -926,7 +926,10 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
     const models3d = models3dPanel({ ro, models: FM.readModels(node), extruded: FM.readExtruded(node), embedded: fpEmbedded, previewKey: "boardFpPreview3d",
       thickness: Number((doc as { thickness?: number }).thickness) || 1.6,
       projectModels: () => (state.project ? state.project.docs : []).filter((d) => d.docType === "model3d").map((d) => d.path),
-      footprintText: () => K().serialize(PTX.PcbTools.exchange.editableCopy(node).node) });
+      // with the Embedded Files page's adds and removals, so a model embedded just now previews
+      footprintText: () => { const c = PTX.PcbTools.exchange.editableCopy(node).node; if (efPanel) { FM.keepEmbeddedFiles(c, efPanel.get()); FM.addEmbeddedFiles(c, efPanel.added().map((a) => a.sexpr)); } return K().serialize(c); },
+      // the footprint's library link (FOOTPRINT::GetFPID), for Use Closest Library Model
+      footprintId: () => { const id = String(node[1] ?? ""), c = id.indexOf(":"); return c >= 0 ? { lib: id.slice(0, c), name: id.slice(c + 1) } : { lib: "", name: id }; } });
     const tabs = notebook([{ label: "General", build: (el) => el.append(general) }, { label: "Clearance Overrides & Pad Connections", build: (el) => el.append(clearances) },
       { label: "3D Models", build: (el) => models3d.build(el) },
       { label: "Embedded Files", build: (el) => { efPanel = embeddedFilesPanel({ names: FM.embeddedFileNames(node), ro, bytes: (nm) => embeddedFileBytes(node, nm) }); el.append(efPanel.el); } }]);
@@ -997,7 +1000,7 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
       const hv = height.get(), hNow = isFinite(hv) && hv > 0 ? hv : 0;
       if (hNow !== hgt0) put(n, "height", hNow > 0 ? `(height ${f6(hNow)})` : null, ["property", "path", "sheetname", "sheetfile", "solder_mask_margin", ...AFTER]);
       FM.writeModels(n, models3d.models(), models3d.extruded());
-      if (efPanel) FM.keepEmbeddedFiles(n, efPanel.get());
+      if (efPanel) { FM.keepEmbeddedFiles(n, efPanel.get()); FM.addEmbeddedFiles(n, efPanel.added().map((a) => a.sexpr)); }
       return undefined;
     };
   }, undefined, "Edit Footprint Properties");
