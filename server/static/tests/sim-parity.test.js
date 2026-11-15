@@ -159,6 +159,19 @@ if (haveDemos) {
   });
 }
 
+// ---------------------------------------------------------------- the simulator's reading of the netlist
+test("the simulator's circuit: a .control block's commands are no elements (sallen_key's \"version\" is not a source)", () => {
+  const c = L.readCircuit(".title x\nV1 a 0 DC 1\nR1 a b 1k\n.control\nversion\nlet x = 1\n.endc\n.ac dec 10 1 1Meg\n.end\n");
+  assert.deepStrictEqual(c.items.map((i) => i.name), ["V1", "R1"]);
+  assert.ok(c.directives.includes(".ac dec 10 1 1Meg"));
+});
+test("SPICE_VALUE::ToString: precision, auto range, and the shortest form of a value below the femto range", () => {
+  assert.strictEqual(L.formatValue(8.971283830006410, { precision: 3, range: "~V" }), "8.97V");
+  assert.strictEqual(L.formatValue(3.692116178111382e-03, { precision: 3, range: "~A" }), "3.69mA");
+  assert.strictEqual(L.formatValue(0, { precision: 3, range: "~A" }), "0.00A");
+  assert.strictEqual(L.formatValue(-2.6914e-31, { precision: 3, range: "~A" }), "-2.69e-16fA");
+});
+
 // ---------------------------------------------------------------- the simulator's copy for this ngspice
 test("POLY sources become B sources with the SPICE2 coefficient order", () => {
   assert.strictEqual(W.polyToB("EOS 3 1 POLY(1) 53 98 1.7E-3 1"), "BEOS 3 1 V=(1.7E-3)+(1)*V(53,98)");

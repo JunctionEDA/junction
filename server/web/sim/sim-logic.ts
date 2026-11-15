@@ -60,7 +60,8 @@ export function formatValue(v: number, f: ValueFormat): string {
   mant = Math.round(mant * Math.pow(10, f.precision - 1));
   mant *= Math.pow(10, scale - f.precision + 1);
   let res = mant.toFixed(Math.max(0, f.precision - scale - 1));
-  if (res.length > f.precision + scale + 1 && res.length > 12) res = String(mant);
+  // "an excessively long number": wxString::FromCDouble's shortest form (scientific for tiny values)
+  if (res.length > f.precision + scale + 1) res = String(Number(mant.toPrecision(15)));
   return res + range;
 }
 
@@ -175,9 +176,12 @@ const NODE_COUNT: Record<string, number> = { R: 2, C: 2, L: 2, V: 2, I: 2, D: 2,
 export function readCircuit(netlist: string): { items: CircuitItem[]; nets: string[]; directives: string[] } {
   const lines: string[] = [];
   for (const raw of netlist.split(/\r?\n/)) { if (/^\+/.test(raw) && lines.length) lines[lines.length - 1] += " " + raw.slice(1); else lines.push(raw); }
-  const items: CircuitItem[] = [], nets = new Set<string>(), directives: string[] = []; let depth = 0;
+  const items: CircuitItem[] = [], nets = new Set<string>(), directives: string[] = []; let depth = 0, control = false;
   for (const l of lines) {
     const t = l.trim(); if (!t || t[0] === "*") continue;
+    // a .control … .endc block holds ngspice commands ("version", "let …"), not elements
+    if (/^\.control\b/i.test(t)) { control = true; continue; } if (/^\.endc\b/i.test(t)) { control = false; continue; }
+    if (control) continue;
     if (/^\.subckt\b/i.test(t)) { depth++; continue; } if (/^\.ends\b/i.test(t)) { depth = Math.max(0, depth - 1); continue; }
     if (depth) continue;
     if (t[0] === ".") { directives.push(t); continue; }

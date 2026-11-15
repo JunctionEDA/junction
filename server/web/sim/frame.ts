@@ -5,17 +5,18 @@
 // (TUNER_SLIDER).  The circuit is the project's SPICE netlist (editor/export-netlist.ts) run by ngspice compiled to
 // WebAssembly (plugins/spice.ts); the results come back as ngspice's ASCII raw file.  Probe and Tune pick on the
 // schematic canvas the way SIMULATOR_CONTROL::Probe / Tune do.  The workbook (.wbk JSON, version 8) holds the tabs.
-import { KD, h, popupMenu, promptText, download, type PopItem } from "../dialogs/dom";
+import { KD, h, popupMenu, promptText, download, confirmBox, type PopItem } from "../dialogs/dom";
 import { E, api, isSch, requestRender, toast, toolCtx } from "../dialogs/editor";
 import { messageBox } from "../dialogs/sch-items";
 import { bitmapButton, bitmapToggle, kicadIcon } from "../components/kicon-dom";
 import { ensureStyle, icon, meta, showMenu, closeMenus, type MenuEntry } from "../symedit/ui";
 import { menuKey } from "../keys";
 import { projectSpiceNetlist } from "../editor/export-netlist";
-import { worldMm } from "../editor/view";
+import { pxPerMm, worldMm } from "../editor/view";
 import { convertToSpiceMarkup } from "./spice-netlist";
 import { builtinLibrary } from "./builtin-libs";
 import { forWasmNgspice } from "./ngspice-wasm";
+import { clearOperatingPoints, setItemNames, setOperatingPoints } from "./op-overlay";
 import { editProject } from "../canvas/project-file";
 import { openPreferences } from "../dialogs/preferences";
 import { prefs } from "../dialogs/prefs";
@@ -27,7 +28,7 @@ import { open as openSpice, type SpiceSession } from "../plugins/spice";
 import { SimPlot, TRACE_COLORS, type PlotTrace } from "./plot";
 import { COMPAT_MODES, openFormatValue, openSimCommand, openUserDefinedSignals, type PlotSetup } from "./dialogs";
 import {
-  DEFAULT_OPTIONS, OPT_SAVE_EVENTS, OPT_SAVE_I, OPT_SAVE_P, OPT_SAVE_V, acPart, commandToSimType, commandsFromOptions, eSeries, findVector,
+  DEFAULT_OPTIONS, OPT_SAVE_EVENTS, OPT_SAVE_I, currentNames, OPT_SAVE_P, OPT_SAVE_V, acPart, commandToSimType, commandsFromOptions, eSeries, findVector,
   formatFromString, formatToString, formatValue, isPlottable, measCommand, measurementFor, measurementUnits, optionsFromCommands, parseCommand,
   parseRaw, parseSpiceValue, readCircuit, signalKind, signalsFor, snapToSeries, splitSignal, toSpiceString, typeToName, unitsOf, updateUnits,
   userSignalLet, userVectorName, xAxisOf, type CircuitItem, type RawPlot, type SimType, type ValueFormat, type WbTab, type Workbook,
@@ -40,6 +41,8 @@ interface Tab {
   command: string; options: number; traces: Trace[]; meas: Meas[];
   plot: SimPlot | null; data: RawPlot | null; opText: string;
   setup: PlotSetup; cursorFmt: [ValueFormat, ValueFormat];
+  /** SIM_TAB::m_lastSchTextSimCommand: the schematic's directive this tab last took (the first tab follows it) */
+  lastSch: string;
 }
 interface Tuner { name: string; value: number; min: number; max: number; steps: number; multi: boolean; series: 0 | 24 | 48 | 96 | 192; orig: string; symId: string | null; el?: HTMLElement }
 
@@ -160,7 +163,7 @@ export async function openSimulator(): Promise<void> {
     if (d) { try { const t = await api(`/api/docs/${d.docId}/content`); wb = JSON.parse(typeof t === "string" ? t : JSON.stringify(t)) as Workbook; S.wbName = d.path; } catch { wb = null; } }
   }
   if (wb && wb.tabs && wb.tabs.length) applyWorkbook(wb);
-  else if (S.schCommand) { newTab(S.schCommand, DEFAULT_OPTIONS); }
+  else if (S.schCommand) { newTab(S.schCommand, DEFAULT_OPTIONS).lastSch = S.schCommand; }
   renderAll();
   window.addEventListener("keydown", onKey, true);
 }
@@ -194,6 +197,8 @@ async function loadCircuit(): Promise<void> {
   const withCmd = await projectSpiceNetlist(SIM_OPTS | 0x0400, (m) => msgs.push(m));
   const text = withCmd || "";
   S.circuit = readCircuit(text);
+  // SPICE_CIRCUIT_MODEL::GetDirectives: the schematic's own directives, not the .save / .probe lines the options add
+  S.circuit.directives = S.circuit.directives.filter((d) => !/^\.save\s+all$/i.test(d) && !/^\.probe\s+all[ip]?$/i.test(d) && !/^\.probe\s+p\([^()\s]+\)$/i.test(d));
   const sim = S.circuit.directives.filter((d) => /^\.(ac|dc|tran|op|noise|pz|sp|disto|sens|tf|fft)\b/i.test(d));
   S.schCommand = sim[0] || "";
   S.netlist = (await projectSpiceNetlist(SIM_OPTS, () => undefined)) || text;
@@ -206,7 +211,7 @@ const resistors = (): string[] => S.circuit.items.filter((i) => /^r/i.test(i.nam
 // ---------------------------------------------------------------- tabs
 function defaultSetup(): PlotSetup { return { axes: [null, null, null], fixed: [null, null, null], grid: true, legend: false, dotted: true, margins: { left: 70, top: 30, right: 70, bottom: 45 } }; }
 function newTab(command: string, options: number): Tab {
-  const t: Tab = { command, options, traces: [], meas: [], plot: null, data: null, opText: "", setup: defaultSetup(), cursorFmt: [{ precision: 3, range: "~s" }, { precision: 3, range: "~V" }] };
+  const t: Tab = { command, options, traces: [], meas: [], plot: null, data: null, opText: "", lastSch: "", setup: defaultSetup(), cursorFmt: [{ precision: 3, range: "~s" }, { precision: 3, range: "~V" }] };
   S.tabs.push(t); S.cur = S.tabs.length - 1; S.dirty = true;
   return t;
 }
@@ -231,7 +236,11 @@ function setCompat(mode: string): void {
   S.compat = mode;
   const i = COMPAT_MODES.indexOf(mode); if (i >= 0) void saveNgSettings({ model_mode: i });
 }
-function closeTab(i: number): void { S.tabs.splice(i, 1); if (S.cur >= S.tabs.length) S.cur = S.tabs.length - 1; S.dirty = true; renderAll(); }
+function closeTab(i: number): void {
+  S.tabs.splice(i, 1); if (S.cur >= S.tabs.length) S.cur = S.tabs.length - 1; S.dirty = true; renderAll();
+  // onPlotClosed: the schematic's operating point goes with the last OP tab in front
+  if (tabType(curTab()) !== "OP" || !curTab()) clearOperatingPoints();
+}
 function syncSetup(t: Tab): void {
   if (!t.plot) return;
   t.setup.axes = t.plot.opts.y.map((a) => (a ? [a.name, a.units] as [string, string] : null));
@@ -328,18 +337,31 @@ function circuitFor(t: Tab): string {
   if (!(t.options & OPT_SAVE_V)) net = net.replace(/^\.save all\n/m, "");
   if (!(t.options & OPT_SAVE_I)) net = net.replace(/^\.probe alli\n/m, "");
   if (!(t.options & OPT_SAVE_P)) net = net.replace(/^\.probe p\(.*\)\n/gm, "");
-  const cmd = type === "FFT" ? (S.schCommand || ".tran 1u 1m") : t.command;
+  // FFT: the transform of the TRAN tab's results (SIMULATOR_FRAME::StartSimulation sets ngspice on that tab's plot)
+  const tran = type === "FFT" ? S.tabs.find((x) => tabType(x) === "TRAN") : null;
+  const cmd = type === "FFT" ? (tran ? tran.command : ".tran 1u 1m") : t.command;
   return net.replace(/^\.end\s*$/m, cmd + "\n.end");
 }
 let tuneTimer = 0;
 /** SIMULATOR_FRAME::StartSimulation: the netlist with the tab's command, the tuners' values, then the results. */
-export async function runSimulation(): Promise<void> {
+export async function runSimulation(reuse = false): Promise<void> {
   const t = curTab();
   if (!t) { await newAnalysisTab(); if (!curTab()) return; return runSimulation(); }
   if (S.running) return;
+  if (tabType(t) === "FFT" && !S.tabs.some((x) => tabType(x) === "TRAN" && x.data)) {
+    void messageBox("You must run a TRAN simulation first; its results will be used for the fast Fourier transform."); return;
+  }
   S.running = true; renderToolbar();
   try {
-    if (!S.netlist) await loadCircuit();
+    // StartSimulation: the netlist of the schematic as it is now (a tuner's rerun keeps the loaded circuit)
+    if (!reuse || !S.netlist) await loadCircuit();
+    // the first tab follows the schematic's simulation directive, asking once it had taken an earlier one
+    if (!reuse && S.tabs.indexOf(t) === 0 && S.schCommand && S.schCommand !== t.lastSch) {
+      if (!t.lastSch || await confirmBox("Confirmation", "Schematic sheet simulation command directive has changed.  Do you wish to update the Simulation Command?")) {
+        if (commandToSimType(S.schCommand) !== tabType(t)) { t.traces = []; t.data = null; }
+        t.command = S.schCommand; t.lastSch = S.schCommand; S.dirty = true; renderTabs();
+      }
+    }
     const sp = await session();
     const multi = S.tuners.find((x) => x.multi);
     const steps = multi ? Math.max(2, multi.steps) : 1;
@@ -352,17 +374,18 @@ export async function runSimulation(): Promise<void> {
       await sp.exec(["destroy all", "remcirc"]).catch(() => undefined);
       const lines = [...COMPAT_COMMANDS[compatIndex()], "source /sim.cir", ...S.tuners.map((x) => `alter ${x.name.toLowerCase()} = ${toSpiceString(x.value)}`), "run"];
       const r = await sp.exec(lines);
-      if (r.out.trim()) log(r.out.endsWith("\n") ? r.out : r.out + "\n");
+      const said = noPrompts(r.out); if (said.trim()) log(said.endsWith("\n") ? said : said + "\n");
       for (const e of r.err) if (e.trim() && !/^(Note|Warning: can't find)/.test(e)) log(e + "\n");
       const type = tabType(t);
       if (type === "FFT") { const f = await sp.exec(t.command.split(/\n/).map((l) => l.trim()).filter(Boolean)); if (f.out.trim()) log(f.out); }
       const lets = S.userSignals.map((s, i) => userSignalLet(i, s));
       if (lets.length) { const u = await sp.exec(lets); for (const e of u.err) if (e.trim()) log(e + "\n"); }
-      if (type === "OP") {
-        const p = await sp.exec(["print all"]);
-        t.opText = p.out.trim() ? p.out : "No operating point results.";
-        log(p.out);
-        t.data = null; continue;
+      if (type === "OP") { await operatingPointResults(t, sp); t.data = null; continue; }
+      // the other analyses without a plot (PZ, TF, SENS, DISTO): ngspice's own listing, as KiCad prints PZ's
+      if (!isPlottable(type) && type !== "Custom" && type !== "FFT") {
+        const p = await sp.exec(["print all"]); const said2 = noPrompts(p.out);
+        log("\n\nSimulation results:\n\n" + said2 + (said2.endsWith("\n") ? "" : "\n"));
+        t.opText = said2.trim() ? said2 : "No results."; t.data = null; continue;
       }
       sp.remove("/out.raw");
       await sp.exec(["set filetype=ascii", "write /out.raw"]);
@@ -385,6 +408,36 @@ export async function runSimulation(): Promise<void> {
     S.running = false; renderAll();
   }
 }
+/** SIMULATOR_FRAME_UI::OnSimRefresh (ST_OP): "Simulation results:" in the console, one line per vector (the signal
+ *  padded to 25 characters, the value with its unit), and each value on the schematic (SetOperatingPoint). */
+async function operatingPointResults(t: Tab, sp: SpiceSession): Promise<void> {
+  sp.remove("/out.raw");
+  await sp.exec(["set filetype=ascii", "write /out.raw"]);
+  const raw = sp.read("/out.raw");
+  const plot = raw ? parseRaw(new TextDecoder().decode(raw)).pop() || null : null;
+  const lines: string[] = [], vectors: { name: string; value: number }[] = [];
+  for (const v of plot ? plot.vectors : []) {
+    if (!v.re.length) continue;
+    const n = v.name; let signal: string, unit: string;
+    let m: RegExpExecArray | null;
+    if ((m = /^v\((.*)\)$/i.exec(n))) { signal = `V(${m[1]})`; unit = "V"; }
+    else if ((m = /^i\((.*)\)$/i.exec(n))) { signal = `I(${m[1]})`; unit = "A"; }
+    else if ((m = /^(.*)#branch$/i.exec(n))) { signal = `I(${m[1]})`; unit = "A"; }
+    else if ((m = /^(.*):power$/i.exec(n))) { signal = `P(${m[1]})`; unit = "W"; }
+    else if ((m = /^@(\w*[.\w+]*)\[(i\w*)\]$/i.exec(n))) { signal = `I${m[2].slice(1)}(${m[1].toUpperCase()})`; unit = "A"; }
+    else if (/^@/.test(n)) { signal = n; unit = "?"; }
+    else { signal = `V(${n})`; unit = "V"; }
+    if (lines.some((l) => l.startsWith(signal + ":"))) continue;
+    lines.push((signal + ":").padEnd(Math.max(signal.length + 1, 25)) + toSpiceString(v.re[0]) + unit);
+    if (unit !== "?") vectors.push({ name: unit === "W" ? `${signal.slice(2, -1)}:power` : n, value: v.re[0] });
+  }
+  t.opText = lines.length ? lines.join("\n") + "\n" : "No operating point results.";
+  log("\n\nSimulation results:\n\n" + (lines.length ? lines.join("\n") + "\n" : ""));
+  setItemNames(S.circuit.items.map((i) => i.name));
+  setOperatingPoints(vectors);
+}
+/** ngspice's interactive prompts ("ngspice 12 -> ") are not part of what it says. */
+function noPrompts(s: string): string { return s.replace(/^\s*ngspice \d+ -> ?$/gm, "").replace(/(?:ngspice \d+ -> )+/g, "").replace(/\n{3,}/g, "\n\n"); }
 function stopSimulation(): void { if (S.running) log("Simulation stopped.\n"); S.running = false; renderToolbar(); }
 async function updateMeasurements(t: Tab, sp: SpiceSession): Promise<void> {
   const type = tabType(t);
@@ -396,7 +449,7 @@ async function updateMeasurements(t: Tab, sp: SpiceSession): Promise<void> {
     else m.value = "";
   }
 }
-function scheduleTune(): void { if (!S.simulated) return; clearTimeout(tuneTimer); tuneTimer = window.setTimeout(() => void runSimulation(), 250); }
+function scheduleTune(): void { if (!S.simulated) return; clearTimeout(tuneTimer); tuneTimer = window.setTimeout(() => void runSimulation(true), 250); }
 
 // ---------------------------------------------------------------- layout
 let els: { menubar: HTMLElement; toolbar: HTMLElement; tabs: HTMLElement; area: HTMLElement; console: HTMLTextAreaElement; side: HTMLElement; signals: HTMLElement; cursors: HTMLElement; meas: HTMLElement; tuners: HTMLElement; split: HTMLElement; splitH: HTMLElement; filter: HTMLInputElement };
@@ -444,7 +497,7 @@ function menus(): [string, MenuEntry[]][] {
   return [
     ["File", [A("newAnalysisTab", () => void newAnalysisTab()), SEP, A("openWorkbook", openWorkbook), A("saveWorkbook", () => void saveWorkbook(false)), A("saveWorkbookAs", () => void saveWorkbook(true)), SEP,
       A("exportPlotAsPNG", exportPng, hasPlot), A("exportPlotAsCSV", exportCsv, hasPlot), SEP, A("exportPlotToClipboard", () => void exportClipboard(), hasPlot),
-      { ...A("exportPlotToSchematic", () => undefined, () => false), run: undefined }, SEP,
+      A("exportPlotToSchematic", exportToSchematic, () => hasPlot() && canWriteProject()), SEP,
       { label: "Close", icon: "exit", tip: "Close Simulator", key: "Ctrl+W", run: closeSimulator, enabled: () => true }]],
     ["View", [A("toggleSimSidePanel", () => { S.sidePanel = !S.sidePanel; renderAll(); }, undefined, () => S.sidePanel), A("toggleSimConsole", () => { S.console = !S.console; renderAll(); }, undefined, () => S.console), SEP,
       A("zoomUndo", zoomCmd("zoomUndo"), () => !!t()?.plot?.canUndo()), A("zoomRedo", zoomCmd("zoomRedo"), () => !!t()?.plot?.canRedo()), SEP,
@@ -510,7 +563,7 @@ function renderPlot(): void {
     return;
   }
   const type = tabType(t);
-  if (type === "OP" || type === "PZ" || type === "NOISE" && false) { area.append(h("div", { class: "sim-op", id: "sim-op" }, t.opText || "Run the simulation to see the results.")); return; }
+  if (!isPlottable(type) && type !== "Custom" && type !== "FFT") { area.append(h("div", { class: "sim-op", id: "sim-op" }, t.opText || "Run the simulation to see the results.")); return; }
   if (!t.plot) {
     const p = new SimPlot(); t.plot = p; p.gestures = () => prefs().sim;
     p.onChange = () => { renderCursors(); };
@@ -560,7 +613,7 @@ function renderSignals(): void {
   const { table: tbl, body } = table(["Signal", "Plot", "Y Scale", "Color", "Cursor 1", "Cursor 2"]); tbl.id = "sim-signals-grid";
   if (!t) { host.append(tbl); return; }
   const type = tabType(t), q = S.filter.trim().toLowerCase();
-  const list = type === "OP" || type === "PZ" ? [] : allSignalsFor(type, t.options);
+  const list = !isPlottable(type) && type !== "Custom" && type !== "FFT" ? [] : allSignalsFor(type, t.options);
   for (const tr of t.traces) if (!list.includes(tr.signal)) list.push(tr.signal);
   const axes = axesFor(t);
   for (const sig of list) {
@@ -770,21 +823,49 @@ function probeClick(ev: PointerEvent): void {
     if (ref) addTuner(K.str(ref[2]), id);
     return;
   }
-  const pick = sch._.pickNet(ctx, mm); if (!pick) return;
-  if (pick.item.kind === "symbol" && pick.pin) {
-    const ref = K.kids(pick.item.node, "property").find((p) => K.str(p[1]) === "Reference");
-    const name = ref ? K.str(ref[2]) : "";
-    const it = S.circuit.items.find((i) => i.name.toLowerCase() === name.toLowerCase() || i.name.toLowerCase().endsWith(name.toLowerCase()));
-    if (it) {
-      const cur = it.name[0].toUpperCase() === "Q" ? ["Ic", "Ib", "Ie"] : it.name[0].toUpperCase() === "M" || it.name[0].toUpperCase() === "J" ? ["Id", "Ig", "Is"] : null;
-      addProbe(cur ? `${cur[0]}(${it.name})` : `I(${it.name})`); return;
-    }
+  // SCH_EDITOR_CONTROL::SimProbe: a pin (GetNode) probes the symbol's current, anything on a net its voltage
+  const pinHit = pinUnder(mm, Math.max(0.3, 5 / pxPerMm()));
+  if (pinHit) {
+    const { ref, number, simPins } = pinHit;
+    const it = S.circuit.items.find((i) => i.name.toLowerCase() === ref.toLowerCase()) || S.circuit.items.find((i) => i.name.length === ref.length + 1 && i.name.slice(1).toLowerCase() === ref.toLowerCase());
+    if (!it) return;
+    const names = currentNames(it);
+    if (!names.length) return;
+    if (names.length === 1) { addProbe(names[0]); return; }
+    // the model pin of the clicked pin (Sim.Pins "<pin>=<model pin>"; else the pin's position), its current
+    const pairs = simPins.trim().split(/\s+/).map((x) => x.split("=")).filter((x) => x.length === 2);
+    const idx = pairs.findIndex((x) => x[0] === number), model = idx >= 0 ? pairs[idx][1] : "";
+    const name = names.find((n) => model && n[1].toLowerCase() === model[0].toLowerCase()) || (idx >= 0 ? names[idx] : null);
+    if (name) addProbe(name);
+    return;
   }
+  const pick = sch._.pickNet(ctx, mm); if (!pick) return;
   const r = nameOfPick(pick as never); if (!r || !r.name) return;
   // the net as the netlist names it (NETLIST_EXPORTER_SPICE::ConvertToSpiceMarkup); ground has no voltage to plot
   const net = convertToSpiceMarkup(r.name);
   if (net === "0" || /^gnd$/i.test(net)) return;
   addProbe(`V(${S.circuit.nets.find((n) => n.toLowerCase() === net.toLowerCase()) || net})`);
+}
+/** The symbol pin whose line (body root to connection point) passes within `tol` of the point. */
+function pinUnder(mm: number[], tol: number): { ref: string; number: string; simPins: string } | null {
+  const doc = E.kdoc as unknown as { items: Map<string, { id: string; kind: string; node: unknown[] }> } | null;
+  const K = (window as unknown as { KiCadCanvas: { kids(n: unknown, k: string): unknown[][]; str(v: unknown): string } }).KiCadCanvas;
+  const sch = (window as unknown as { CollabTools?: { sch?: { _: { symbolPins(d: unknown, it: unknown): { x: number; y: number; root: number[]; number: string; hidden: boolean }[] } } } }).CollabTools?.sch;
+  if (!doc || !sch || !sch._) return null;
+  let best: { ref: string; number: string; simPins: string } | null = null, bd = tol;
+  for (const it of doc.items.values()) {
+    if (it.kind !== "symbol") continue;
+    const prop = (n: string): string => { const p = K.kids(it.node, "property").find((q) => K.str(q[1]) === n); return p ? K.str(p[2]) : ""; };
+    const ref = prop("Reference"); if (!ref || ref.startsWith("#")) continue;
+    for (const p of sch._.symbolPins(E.kdoc, it)) {
+      if (p.hidden) continue;
+      const ax = p.root[0], ay = p.root[1], dx = p.x - ax, dy = p.y - ay, l2 = dx * dx + dy * dy;
+      const u = l2 ? Math.max(0, Math.min(1, ((mm[0] - ax) * dx + (mm[1] - ay) * dy) / l2)) : 0;
+      const d = Math.hypot(ax + u * dx - mm[0], ay + u * dy - mm[1]);
+      if (d < bd) { bd = d; best = { ref, number: p.number, simPins: prop("Sim.Pins") }; }
+    }
+  }
+  return best;
 }
 function mmAt(ev: PointerEvent): number[] | null { try { return worldMm(ev); } catch { return null; } }
 function addProbe(signal: string): void {
@@ -808,6 +889,20 @@ function showNetlist(): void {
 }
 function exportPng(): void { const p = curTab()?.plot; if (!p) return; const a = document.createElement("a"); a.href = p.pngDataUrl(); a.download = "plot.png"; a.click(); }
 function exportCsv(): void { const p = curTab()?.plot; if (!p) return; download("plot.csv", p.csv()); }
+/** SIMULATOR_CONTROL::ExportPlotToSchematic: the plot's PNG as an (image …) on the clipboard, pasted into the schematic
+ *  (it rides the cursor until the click that places it), the schematic brought forward. */
+function exportToSchematic(): void {
+  const p = curTab()?.plot; if (!p) return;
+  const b64 = p.pngDataUrl().replace(/^data:image\/png;base64,/, "");
+  let text = "(image (at 0 0)\n  (data\n";
+  for (let i = 0; i < b64.length; i += 76) text += `    "${b64.slice(i, i + 76)}"\n`;
+  text += "  )\n)\n";
+  void navigator.clipboard?.writeText(text).catch(() => undefined);
+  const sch = (window as unknown as { CollabTools?: { sch?: { _: { pasteText(ctx: unknown, text: string, opts?: unknown): boolean } } } }).CollabTools?.sch;
+  if (!sch || !sch._ || !sch._.pasteText) return;
+  if (S.root) S.root.hidden = true;
+  if (!sch._.pasteText(toolCtx(), text, { label: "Export Plot to Schematic" }) && S.root) S.root.hidden = false;
+}
 async function exportClipboard(): Promise<void> {
   const p = curTab()?.plot; if (!p) return;
   const blob = await new Promise<Blob | null>((ok) => p.canvas.toBlob(ok, "image/png"));
@@ -834,7 +929,7 @@ export function workbook(): Workbook {
       return wt;
     }),
     user_defined_signals: S.userSignals.slice(),
-    last_sch_text_sim_command: S.schCommand,
+    last_sch_text_sim_command: S.tabs.length ? S.tabs[0].lastSch : "",
   };
 }
 /** SIM_TRACE_TYPE bits: SPT_VOLTAGE 0x01, SPT_CURRENT 0x02, SPT_AC_PHASE 0x04, SPT_AC_GAIN 0x08, SPT_POWER 0x10, SPT_SP_AMP 0x20 … */
@@ -866,6 +961,7 @@ export function applyWorkbook(wb: Workbook): void {
     t.setup.fixed = [wt.fixedY1scale || null, wt.fixedY2scale || null, wt.fixedY3scale || null];
     if (wt.margins) t.setup.margins = { ...t.setup.margins, ...wt.margins };
   }
+  if (S.tabs.length) S.tabs[0].lastSch = typeof wb.last_sch_text_sim_command === "string" ? wb.last_sch_text_sim_command : "";
   S.cur = S.tabs.length ? 0 : -1; S.dirty = false;
 }
 function cssHex(c: string): string { const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c); return m ? "#" + [m[1], m[2], m[3]].map((x) => Number(x).toString(16).padStart(2, "0")).join("").toUpperCase() : c.slice(0, 7); }
