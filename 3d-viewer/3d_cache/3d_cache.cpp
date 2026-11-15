@@ -36,6 +36,8 @@
 #include <wx/filename.h>
 #include <wx/log.h>
 #include <wx/stdpaths.h>
+#include <wx/time.h>
+#include <wx/utils.h>
 
 #include "3d_cache.h"
 #include "3d_info.h"
@@ -210,7 +212,8 @@ static wxString fetchLibraryModel( const wxString& aModelFile )
 
     static std::mutex         s_mutex;
     static std::set<wxString> s_misses;
-    static bool               s_offline = false;
+    // No answer from the server: fetching pauses until this time (ms), then is tried again.
+    static wxLongLong         s_offlineUntil = 0;
     static bool               s_tokenRead = false;
     static wxString           s_server;
     static wxString           s_token;
@@ -238,7 +241,7 @@ static wxString fetchLibraryModel( const wxString& aModelFile )
             wxRemoveFile( cached.GetFullPath() );
         }
 
-        if( s_offline || s_misses.count( key ) )
+        if( wxGetLocalTimeMillis() < s_offlineUntil || s_misses.count( key ) )
             return wxEmptyString;
 
         if( !s_tokenRead )
@@ -261,7 +264,7 @@ static wxString fetchLibraryModel( const wxString& aModelFile )
         std::lock_guard<std::mutex> lock( s_mutex );
 
         if( aOffline )
-            s_offline = true;
+            s_offlineUntil = wxGetLocalTimeMillis() + 60000;
         else
             s_misses.insert( key );
 
@@ -269,7 +272,20 @@ static wxString fetchLibraryModel( const wxString& aModelFile )
     };
 
     bool                       noAnswer = false;
-    std::optional<std::string> bytes = COLLAB_REST::DownloadLibraryModel( server, token, library, name, &noAnswer );
+    std::optional<std::string> bytes;
+
+    // A connection that fails is tried again by itself before the model is given up for now;
+    // the next time the viewer needs it (a minute or more later) it is asked for again.
+    for( int attempt = 0; attempt < 3; attempt++ )
+    {
+        noAnswer = false;
+        bytes = COLLAB_REST::DownloadLibraryModel( server, token, library, name, &noAnswer );
+
+        if( bytes || !noAnswer )
+            break;
+
+        wxMilliSleep( attempt == 0 ? 1000 : 3000 );
+    }
 
     if( !bytes )
         return miss( noAnswer );
