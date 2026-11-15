@@ -41,7 +41,9 @@ export interface GridColumn<R> { key: string; label: string; type?: "text" | "bo
   icon?(row: R): GridIconCell | null; options?: (string | [string, string])[] | ((row: R) => (string | [string, string])[]); width?: number; list?: string; ro?(row: R): boolean; format?(v: unknown, row: R): string; title?(row: R): string;
   /** a text cell of this row gets a browse button (GRID_CELL_FPID_EDITOR, GRID_CELL_URL_EDITOR) */
   button?(row: R): GridCellButton | null }
-export interface GridOpts<R> { readOnly?: boolean; onHeader?(column: GridColumn<R>, index: number): void; height?: number | string; onChange?(row: R, key: string | null, value: unknown, index: number): void; onSelect?(row: R | null, index: number): void;
+export interface GridOpts<R> { readOnly?: boolean; onHeader?(column: GridColumn<R>, index: number): void;
+  /** A subclass's showPopupMenu: entries put above GRID_TRICKS' Cut / Copy / Paste / Delete / Select All for the cell. */
+  cellMenu?(row: R, column: GridColumn<R>): PopItem[]; height?: number | string; onChange?(row: R, key: string | null, value: unknown, index: number): void; onSelect?(row: R | null, index: number): void;
   /** Shift- and Ctrl-click select several rows (wxGrid::wxGridSelectRows); Delete then removes them all */
   multiSelect?: boolean;
   /** SetColLabelSize( 0 ): no header row */
@@ -141,6 +143,19 @@ export function promptFields(title: string, fields: { key: string; label: string
     const ov = h("div", { class: "kd-overlay kd-prompt", style: "z-index:70" }, dlg);
     ov.addEventListener("keydown", (ev) => { ev.stopPropagation(); if (ev.key === "Tab") trapTab(ev, ov); if (ev.key === "Enter" && !(ev.target instanceof HTMLTextAreaElement)) { ev.preventDefault(); done(true); } else if (ev.key === "Escape") { ev.preventDefault(); done(false); } });
     document.body.append(ov); if (inputs[0]) inputs[0].el.focus();
+  });
+}
+/** confirm.cpp UnsavedChangesDialog: "Save Changes?" with Save / Discard Changes / Cancel. */
+export function unsavedChangesBox(message: string): Promise<"save" | "discard" | "cancel"> {
+  return new Promise((resolve) => {
+    const done = (v: "save" | "discard" | "cancel") => { ov.remove(); resolve(v); };
+    const save = h("button", { class: "btn primary", id: "kd-unsaved-save", onclick: () => done("save") }, "Save"), discard = h("button", { class: "btn", id: "kd-unsaved-discard", onclick: () => done("discard") }, "Discard Changes"), cancel = h("button", { class: "btn", onclick: () => done("cancel") }, "Cancel");
+    const dlg = h("div", { class: "kd-dialog", style: "width:440px;min-width:0" }, h("div", { class: "kd-title" }, h("span", null, "Save Changes?")),
+      h("div", { class: "kd-body" }, h("p", { style: "margin:4px 0;font-weight:600" }, message), h("p", { style: "margin:4px 0" }, "If you don't save, all your changes will be permanently lost.")),
+      h("div", { class: "kd-foot" }, discard, h("span", { class: "spacer" }), cancel, save));
+    const ov = h("div", { class: "kd-overlay kd-prompt", style: "z-index:70" }, dlg);
+    ov.addEventListener("keydown", (ev) => { ev.stopPropagation(); if (ev.key === "Tab") trapTab(ev, ov); if (ev.key === "Escape") { ev.preventDefault(); done("cancel"); } });
+    document.body.append(ov); save.focus();
   });
 }
 export function confirmBox(title: string, message: string, okLabel = "OK"): Promise<boolean> {

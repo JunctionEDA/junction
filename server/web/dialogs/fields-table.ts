@@ -5,12 +5,12 @@
 // BOM name, whether it is included and whether rows group by it; view presets are KiCad's built-ins plus the project's.
 import { bitmapButton } from "./kicon";
 import { E, appState, toast, toolCtx, cloneNode } from "./editor";
-import { KD, checkbox, download, h, promptFields, promptText, select, textInput, type GridApi, type GridColumn } from "./dom";
+import { KD, checkbox, download, h, popupMenu, promptFields, promptText, select, textInput, unsavedChangesBox, type GridApi, type GridColumn } from "./dom";
 import { messageBox } from "./sch-items";
 import { datasheetButton, docFiles, footprintButton } from "./browse-cells";
 import { commonChooserFilters, type FpChooserFilters } from "../library/fpchoice";
 import { fieldNamesAreDuplicates } from "./sch-items-logic";
-import { ATTR_FIELDS, BOM_FMT_PRESETS, BOM_PRESETS, ITEM_NO, QTY, bomExport, bomRows, fieldNames, str, symbolRows, withAllFields, type BomField, type BomFmt, type BomPreset, type BomRow, type SymRow } from "./logic";
+import { ATTR_FIELDS, BOM_FMT_PRESETS, BOM_PRESETS, ITEM_NO, QTY, bomExport, bomRows, fieldNames, str, symbolRows, withAllFields, type BomField, type BomFilterScope, type BomFmt, type BomPreset, type BomRow, type SymRow } from "./logic";
 import { loadProject, obj, projectDocs, projectName, readDoc, saveProject, sub, submitDocOp, type Json, type JsonObj } from "./project";
 import { variantDocView, variantEditNode } from "./variant-edits";
 import * as VM from "../canvas/variant-model";
@@ -40,13 +40,13 @@ const clone = <T,>(v: T): T => JSON.parse(JSON.stringify(v)) as T;
 function presetFromJson(j: Json | undefined): BomPreset | null {
   const o = obj(j); if (!Array.isArray(o.fields_ordered) || !o.fields_ordered.length) return null;
   return { name: str(o.name), fields_ordered: (o.fields_ordered as JsonObj[]).map((f) => ({ name: str(f.name), label: str(f.label), show: !!f.show, group_by: !!f.group_by })), sort_field: str(o.sort_field), sort_asc: o.sort_asc !== false,
-    filter_string: str(o.filter_string), group_symbols: o.group_symbols !== false, exclude_dnp: !!o.exclude_dnp, include_excluded_from_bom: !!o.include_excluded_from_bom };
+    filter_string: str(o.filter_string), filter_scope: o.filter_scope === "visible" || o.filter_scope === "all" ? o.filter_scope : "reference", group_symbols: o.group_symbols !== false, exclude_dnp: !!o.exclude_dnp, include_excluded_from_bom: !!o.include_excluded_from_bom };
 }
 function fmtFromJson(j: Json | undefined): BomFmt | null {
   const o = obj(j); if (typeof o.field_delimiter !== "string") return null;
   return { name: str(o.name), field_delimiter: str(o.field_delimiter), string_delimiter: str(o.string_delimiter), ref_delimiter: str(o.ref_delimiter), ref_range_delimiter: str(o.ref_range_delimiter), keep_tabs: !!o.keep_tabs, keep_line_breaks: !!o.keep_line_breaks, include_bom: !!o.include_bom };
 }
-const presetJson = (p: BomPreset): JsonObj => ({ exclude_dnp: p.exclude_dnp, fields_ordered: p.fields_ordered.map((f) => ({ group_by: f.group_by, label: f.label, name: f.name, show: f.show })), filter_string: p.filter_string, group_symbols: p.group_symbols, include_excluded_from_bom: p.include_excluded_from_bom, name: p.name, sort_asc: p.sort_asc, sort_field: p.sort_field });
+const presetJson = (p: BomPreset): JsonObj => ({ exclude_dnp: p.exclude_dnp, fields_ordered: p.fields_ordered.map((f) => ({ group_by: f.group_by, label: f.label, name: f.name, show: f.show })), filter_string: p.filter_string, filter_scope: p.filter_scope || "reference", group_symbols: p.group_symbols, include_excluded_from_bom: p.include_excluded_from_bom, name: p.name, sort_asc: p.sort_asc, sort_field: p.sort_field });
 const fmtJson = (f: BomFmt): JsonObj => ({ field_delimiter: f.field_delimiter, keep_line_breaks: f.keep_line_breaks, keep_tabs: f.keep_tabs, name: f.name, ref_delimiter: f.ref_delimiter, ref_range_delimiter: f.ref_range_delimiter, string_delimiter: f.string_delimiter });
 /** The sheets a sheet file reaches through its (sheet …) items, itself included. */
 function sheetAndDown(docs: Map<string, KDoc>, docId: string): Set<string> {
@@ -59,6 +59,12 @@ function sheetAndDown(docs: Map<string, KDoc>, docId: string): Set<string> {
   }
   return out;
 }
+
+// m_filterScope's choices, in BOM_FILTER_SCOPE order
+const FILTER_SCOPES: [BomFilterScope, string][] = [["reference", "References"], ["visible", "Visible"], ["all", "All"]];
+/** EESCHEMA_SETTINGS field_editor.selection_mode: 0 highlight, 1 select, 2 neither on cross-probe. */
+function crossProbeMode(): number { try { const v = Number(localStorage.getItem("kui.fieldsTable.selectionMode")); return v === 1 || v === 2 ? v : 0; } catch { return 0; } }
+function setCrossProbeMode(v: number): void { try { localStorage.setItem("kui.fieldsTable.selectionMode", String(v)); } catch { /* private window */ } }
 
 export function openFieldsTable(exportTab = false): void {
   if (!E.kdoc) return;
@@ -131,7 +137,18 @@ export function openFieldsTable(exportTab = false): void {
     gridHost.replaceChildren();
     grid = KD().grid<GRow>(gridHost, cols, data, { readOnly: ro, height: "46vh",
       onHeader(c) { if (preset.sort_field === c.key || (!preset.sort_field && c.key === "Reference")) preset.sort_asc = preset.sort_asc === false; else { preset.sort_field = c.key; preset.sort_asc = true; } markUnsaved(); refreshGrid(); },
-      onSelect(r) { if (!r) return; const ids = r._g.rows.flatMap((x) => (x as Row).members).filter((m) => m.docId === here).map((m) => m.id); if (ids.length) { try { toolCtx().setSelection(ids); } catch (e) { /* cross-probe is best effort */ } } },
+      // DIALOG_SYMBOL_FIELDS_TABLE::OnTableSelectionChanged: highlight (FindSymbolAndItem HIGHLIGHT_SYMBOL) or select
+      onSelect(r) {
+        const mode = crossProbeMode(); if (mode === 2) return;
+        const ids = r ? r._g.rows.flatMap((x) => (x as Row).members).filter((m) => m.docId === here).map((m) => m.id) : [];
+        try { if (mode === 0) toolCtx().setHighlight(ids.length ? new Set(ids.slice(0, 1)) : null); else if (ids.length) toolCtx().setSelection(ids); else toolCtx().setSelection([]); } catch (e) { /* cross-probe is best effort */ }
+      },
+      // FIELDS_EDITOR_GRID_TRICKS::showFieldsTablePopupMenu: Show Datasheet on the Datasheet column
+      cellMenu(r, c) {
+        if (c.key !== "Datasheet") return [];
+        const url = str(r[c.key]).trim();
+        return [{ label: "Show Datasheet", disabled: !url || url === "~", run: () => { if (/^https?:/i.test(url)) window.open(url, "_blank", "noopener"); else toast("Datasheet: " + url); } }];
+      },
       onChange(r, key, value) {
         if (!key) return; const a = ATTR_FIELDS[key];
         for (const x of r._g.rows as Row[]) {
@@ -250,15 +267,27 @@ export function openFieldsTable(exportTab = false): void {
       const right = h("div", { style: "flex:1;min-width:0" });
       const filter = textInput(preset.filter_string, (v) => { preset.filter_string = v; refreshGrid(); }, { id: "kd-sft-filter", placeholder: "Filter", style: "width:170px" });
       const groupCb = checkbox("Group symbols", preset.group_symbols, (on) => { preset.group_symbols = on; markUnsaved(); refreshGrid(); refreshPreview(); }, { id: "kd-sft-group", title: "Group symbols together based on common properties" });
-      const dnpCb = checkbox("Include 'DNP' Symbols", !preset.exclude_dnp, (on) => { preset.exclude_dnp = !on; markUnsaved(); refreshGrid(); refreshPreview(); }, { id: "kd-sft-dnp" });
-      const exclCb = checkbox("Include 'Exclude from BOM' Symbols", preset.include_excluded_from_bom, (on) => { preset.include_excluded_from_bom = on; markUnsaved(); refreshGrid(); refreshPreview(); }, { id: "kd-sft-excl" });
-      const syncEditBar = () => { filter.value = preset.filter_string; (groupCb.firstChild as HTMLInputElement).checked = preset.group_symbols; (dnpCb.firstChild as HTMLInputElement).checked = !preset.exclude_dnp; (exclCb.firstChild as HTMLInputElement).checked = preset.include_excluded_from_bom; };
+      const filterScope = select(FILTER_SCOPES, preset.filter_scope || "reference", (v) => { preset.filter_scope = v as BomFilterScope; markUnsaved(); refreshGrid(); refreshPreview(); }, { id: "kd-sft-filterscope", style: "width:110px" });
+      // m_bMenu (BITMAPS::config): DIALOG_SYMBOL_FIELDS_TABLE::OnMenu
+      const menuBtn = bitmapButton("config", "", () => {
+        const r = menuBtn.getBoundingClientRect(), mode = crossProbeMode();
+        popupMenu(r.left, r.bottom, [
+          { label: "Include 'DNP' Symbols", check: true, checked: !preset.exclude_dnp, run: () => { preset.exclude_dnp = !preset.exclude_dnp; markUnsaved(); refreshGrid(); refreshPreview(); } },
+          { label: "Include 'Exclude from BOM' Symbols", check: true, checked: preset.include_excluded_from_bom, run: () => { preset.include_excluded_from_bom = !preset.include_excluded_from_bom; markUnsaved(); refreshGrid(); refreshPreview(); } },
+          { sep: true },
+          { label: "Highlight on Cross-probe", check: true, checked: mode === 0, run: () => setCrossProbeMode(mode !== 0 ? 0 : 2) },
+          { label: "Select on Cross-probe", check: true, checked: mode === 1, run: () => setCrossProbeMode(mode !== 1 ? 1 : 2) },
+        ]);
+      }, { id: "kd-sft-menu" });
+      menuBtn.removeAttribute("title");
+      const syncEditBar = () => { filter.value = preset.filter_string; filterScope.value = preset.filter_scope || "reference"; (groupCb.firstChild as HTMLInputElement).checked = preset.group_symbols; };
       syncBar = syncEditBar;
       KD().notebook(right, [
         { label: "Edit", build(page) {
           const scopeSel = select(SCOPES, scope, (v) => { scope = v as Scope; refreshAll(); }, { id: "kd-sft-scope", style: "width:190px" });
-          page.append(h("div", { class: "kd-row", style: "margin-bottom:6px;flex-wrap:wrap" }, filter, scopeSel, groupCb, bitmapButton("small_refresh", "Refresh Grouping", () => refreshAll(), { id: "kd-sft-refresh" })),
-            h("div", { class: "kd-row", style: "margin-bottom:6px;gap:18px" }, dnpCb, exclCb, (countEl = h("span", { style: "margin-left:auto;color:var(--ink-2)", id: "kd-sft-count" }))));
+          const vsep = () => h("span", { class: "kbmp-sep", style: "height:22px" });
+          page.append(h("div", { class: "kd-row", style: "margin-bottom:6px;flex-wrap:wrap;align-items:center" }, filter, filterScope, vsep(), scopeSel, vsep(), groupCb, vsep(), bitmapButton("small_refresh", "Refresh Grouping", () => refreshAll(), { id: "kd-sft-refresh" }), menuBtn),
+            h("div", { class: "kd-row", style: "margin-bottom:6px;gap:18px" }, (countEl = h("span", { style: "margin-left:auto;color:var(--ink-2)", id: "kd-sft-count" }))));
           gridHost = h("div", { id: "kd-sft-grid" }); page.append(gridHost); refreshGrid();
         } },
         { label: "Export", build(page) {
@@ -282,8 +311,13 @@ export function openFieldsTable(exportTab = false): void {
       body.append(h("div", { style: "display:flex;gap:14px" }, left, right));
       if (exportTab) refreshPreview();
     },
-    ok() { void apply(); } });
-  void api;
+    ok() { void apply(); },
+    // DIALOG_SYMBOL_FIELDS_TABLE::OnClose: HandleUnsavedChanges( "Save changes?" ) over edits not applied yet
+    cancel() {
+      if (ro || !edits.size) return true;
+      void unsavedChangesBox("Save changes?").then((r) => { if (r === "cancel") return; if (r === "save") void apply().then((ok) => { if (ok) api.close(); }); else { edits.clear(); api.close(); } });
+      return false;
+    } });
 
   // the project's stored BOM settings and presets, then the other sheets
   void loadProject().then((pro) => {

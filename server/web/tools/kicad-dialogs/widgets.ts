@@ -257,7 +257,8 @@ function installGridTricks<R>(table: HTMLElement, api: GridApi<R>, opts: GridOpt
     if (!all && getSel() !== at.r) { setSel(at.r); api.select(at.r); }
     const b = block(at)!, row = api.rows[at.r], col = cols()[at.c];
     const canEdit = !opts.readOnly && !!row && !!col && (all || editable(row, col));
-    popupMenu((ev as MouseEvent).clientX, (ev as MouseEvent).clientY, [
+    const own = opts.cellMenu && row && col ? opts.cellMenu(row, col) : [];
+    popupMenu((ev as MouseEvent).clientX, (ev as MouseEvent).clientY, [...own, ...(own.length ? [{ sep: true }] : []),
       { label: "Cut", key: "Ctrl+X", disabled: !canEdit, run: () => { copy(b); clear(b); } },
       { label: "Copy", key: "Ctrl+C", run: () => copy(b) },
       { label: "Paste", key: "Ctrl+V", disabled: !canEdit || !(navigator.clipboard && navigator.clipboard.readText), run: () => paste(at) },

@@ -261,4 +261,19 @@ test("symbolInstance: the chosen body style goes into (body_style N)", () => {
   assert.ok(/\(body_style 2\)/.test(K.serialize(n)));
   assert.ok(/\(body_style 1\)/.test(K.serialize(LC.symbolInstance({ libId: "X:G", symbol: lib, at: [0, 0], uuid: "u" }))));
 });
+
+// ---- Symbol Fields Table filter scope (BOM_FILTER_SCOPE)
+const DLG = load(["dialogs", "logic.ts"]);
+test("bomRows: the filter matches the Reference, the shown columns, or every column", () => {
+  const row = (ref, value, fp) => ({ id: ref, ids: [ref], ref, values: { Reference: ref, Value: value, Footprint: fp }, dnp: false, excludeBom: false, excludeBoard: false, excludeSim: false, excludePos: false, sheet: "", editable: true });
+  const rows = [row("U1", "LM358", "DIP-8"), row("R1", "10k", "R_0603"), row("R2", "10k", "R_0805")];
+  const preset = Object.assign(JSON.parse(JSON.stringify(DLG.BOM_PRESETS[0])), { group_symbols: false });
+  preset.fields_ordered = [{ name: "Reference", label: "Reference", show: true, group_by: false }, { name: "Value", label: "Value", show: true, group_by: true }, { name: "Footprint", label: "Footprint", show: false, group_by: false }];
+  const refs = (p) => DLG.bomRows(rows, p).map((r) => r.rows[0].ref).sort();
+  assert.deepStrictEqual(refs(Object.assign({}, preset, { filter_string: "10k" })), []);
+  assert.deepStrictEqual(refs(Object.assign({}, preset, { filter_string: "10k", filter_scope: "visible" })), ["R1", "R2"]);
+  assert.deepStrictEqual(refs(Object.assign({}, preset, { filter_string: "0805", filter_scope: "visible" })), []);
+  assert.deepStrictEqual(refs(Object.assign({}, preset, { filter_string: "0805", filter_scope: "all" })), ["R2"]);
+  assert.deepStrictEqual(refs(Object.assign({}, preset, { filter_string: "u1" })), ["U1"]);
+});
 process.on("exit", () => { console.log(`schdlg: ${passed} passed, ${failed} failed`); if (failed) process.exitCode = 1; });

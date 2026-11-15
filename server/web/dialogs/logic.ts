@@ -147,7 +147,9 @@ export function replaceInNode(node: SNode, hit: Pick<FindHit, "what" | "field" |
 
 // ---------------------------------------------------------------- symbol fields table / BOM
 export interface BomField { name: string; label: string; show: boolean; group_by: boolean }
-export interface BomPreset { name: string; fields_ordered: BomField[]; sort_field: string; sort_asc: boolean; filter_string: string; group_symbols: boolean; exclude_dnp: boolean; include_excluded_from_bom: boolean; readOnly?: boolean }
+/** BOM_FILTER_SCOPE (bom_settings.h): the filter matches the Reference, the shown columns, or every column. */
+export type BomFilterScope = "reference" | "visible" | "all";
+export interface BomPreset { name: string; fields_ordered: BomField[]; sort_field: string; sort_asc: boolean; filter_string: string; filter_scope?: BomFilterScope; group_symbols: boolean; exclude_dnp: boolean; include_excluded_from_bom: boolean; readOnly?: boolean }
 export interface BomFmt { name: string; field_delimiter: string; string_delimiter: string; ref_delimiter: string; ref_range_delimiter: string; keep_tabs: boolean; keep_line_breaks: boolean; include_bom?: boolean; readOnly?: boolean }
 const F = (name: string, label: string, show: boolean, group_by: boolean): BomField => ({ name, label, show, group_by });
 /** BOM_PRESET::BuiltInPresets (common/settings/bom_settings.cpp). */
@@ -213,7 +215,11 @@ function natCmp(a: string, b: string): number { return a.localeCompare(b, undefi
  */
 export function bomRows(rows: SymRow[], preset: BomPreset, refDelim = ", ", refRange = "-"): BomRow[] {
   const flt = str(preset.filter_string).trim(); const fm = flt ? matcher({ query: /[*?]/.test(flt) ? (flt.startsWith("*") ? "" : "*") + flt + (flt.endsWith("*") ? "" : "*") : flt }) : null;
-  const kept = rows.filter((r) => (!preset.exclude_dnp || !r.dnp) && (preset.include_excluded_from_bom || !r.excludeBom) && (!fm || fm(r.ref)));
+  // FIELDS_TABLE_DATA_MODEL::MatchesFilter: the Reference alone, or each (shown) column's text, attributes by their names
+  const scope = preset.filter_scope || "reference";
+  const cols = scope === "reference" ? [] : preset.fields_ordered.filter((f) => (scope === "all" || f.show) && f.name !== QTY && f.name !== ITEM_NO);
+  const matches = (r: SymRow): boolean => (scope === "reference" ? fm!(r.ref) : cols.some((c) => fm!(c.name === "Reference" ? r.ref : cellOf(r, c.name))));
+  const kept = rows.filter((r) => (!preset.exclude_dnp || !r.dnp) && (preset.include_excluded_from_bom || !r.excludeBom) && (!fm || matches(r)));
   const groupCols = preset.fields_ordered.filter((f) => f.group_by && f.name !== "Reference" && f.name !== QTY && f.name !== ITEM_NO);
   const groups: SymRow[][] = [];
   if (preset.group_symbols) {
