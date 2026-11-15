@@ -1156,7 +1156,7 @@ export class SymbolEditor {
     const tool = (t: ToolId) => () => this.setTool(t);
     const A: Record<string, (() => void) | undefined> = {
       newLibrary: () => void D.newLibrary(this), addLibrary: () => void D.addLibrary(this),
-      openPreferences: () => openPreferences(), showSymbolLibTable: () => void D.manageSymbolLibraries(this),
+      openPreferences: () => openPreferences(), configurePaths: () => { void import("../dialogs/configure-paths").then((m) => m.configurePaths()); }, showSymbolLibTable: () => void D.manageSymbolLibraries(this),
       showSymbolBrowser: () => void this.symbolBrowser(), saveLibraryAs: () => { const l = this.currentLib(); if (l) void D.saveLibraryAs(this, l); },
       newSymbol: () => void D.newSymbol(this), editLibSymbolWithLibEdit: () => { const t = this.tab; if (t && t.origin) void this.editLibrarySymbol(t.origin.libId); },
       save: () => void this.save(), saveSymbolAs: () => void D.saveSymbolAs(this, false), saveSymbolCopyAs: () => void D.saveSymbolAs(this, true), saveAll: () => void this.saveAll(),

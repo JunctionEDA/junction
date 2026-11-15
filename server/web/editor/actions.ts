@@ -122,6 +122,8 @@ export const HANDLERS: Record<string, ActionHandler> = {
   // Preferences > Manage Symbol / Footprint Libraries (DIALOG_EDIT_LIBRARY_TABLES)
   showSymbolLibTable: () => { void import("../dialogs/lib-tables").then((m) => m.manageLibraries("symbol", { readOnly: !!E.viewOnly })); },
   showFootprintLibTable: () => { void import("../dialogs/lib-tables").then((m) => m.manageLibraries("footprint", { readOnly: !!E.viewOnly })); },
+  // Preferences > Configure Paths... (DIALOG_CONFIGURE_PATHS)
+  configurePaths: () => { void import("../dialogs/configure-paths").then((m) => m.configurePaths()); },
   // Tools > Variants (SCH_EDIT_FRAME::AddVariant … CopyVariant)
   addVariant: () => { if (isSch()) addVariant(); }, removeVariant: () => { if (isSch()) void removeVariant(); }, editVariantDescription: () => { if (isSch()) void editVariantDescription(); },
   renameVariant: () => { if (isSch()) void renameVariant(); }, copyVariant: () => { if (isSch()) void copyVariant(); },
