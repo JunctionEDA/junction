@@ -22,6 +22,7 @@ import { openGendrill } from "./pcbdialogs/gendrill";
 import { openPosFile } from "./pcbdialogs/posfile";
 import { openOdbpp } from "./pcbdialogs/odbpp";
 import { openIpc2581 } from "./pcbdialogs/ipc2581";
+import { openDrcRuleEditor } from "./pcbdialogs/drc-rule-editor";
 import { openPlotSchematic } from "../dialogs/plot-schematic";
 import { printDialog } from "./print";
 import { openCalculator } from "../calculator";
@@ -117,7 +118,7 @@ export const HANDLERS: Record<string, ActionHandler> = {
   plot: () => { if (isSch()) void openPlotSchematic(); else void openPlotDialog(); },
   show3DViewer: () => show3DViewer(),
   // DIALOG_PLOT set to Gerber, DIALOG_GENDRILL, DIALOG_GEN_FOOTPRINT_POSITION; the order-form package is the web's own entry
-  generateGerbers: () => { void openPlotDialog({ gerber: true }); }, generateDrillFiles: () => { void openGendrill(); }, generatePosFile: () => { void openPosFile(); }, generateODBPPFile: () => { void openOdbpp(); }, generateIPC2581File: () => { void openIpc2581(); },
+  generateGerbers: () => { void openPlotDialog({ gerber: true }); }, generateDrillFiles: () => { void openGendrill(); }, generatePosFile: () => { void openPosFile(); }, generateODBPPFile: () => { void openOdbpp(); }, generateIPC2581File: () => { void openIpc2581(); }, drcRuleEditor: () => { void openDrcRuleEditor(toolCtx() as ToolCtx); },
   fabPackage: () => openFabOutputs("gerber"),
   print: () => printDialog(),
   // Preferences > Manage Symbol / Footprint Libraries (DIALOG_EDIT_LIBRARY_TABLES)
