@@ -8,7 +8,7 @@
 // dialog does not show.  The web editor itself honours the text variables, the junction dot size, the dash / gap
 // ratios, the rule severities and the pin conflicts map; the other values are stored for the desktop.
 import { E, api, rootSchematic, toast } from "./editor";
-import { KD, checkbox, h, select, textInput, type GridApi } from "./dom";
+import { KD, checkbox, h, popupMenu, select, textInput, type GridApi } from "./dom";
 import { messageBox } from "./sch-items";
 import { canWriteProject } from "../editor/projectfile";
 import { state as appState } from "../editor/appstore";
@@ -16,6 +16,8 @@ import { allNetNames, loadSheets } from "../editor/schnets";
 import { netclassPatternMatches } from "../canvas/pcb-sizes";
 import { infoBar } from "../editor/pcbdialogs/ui";
 import { SCH_IMPORT_OPTIONS, annotationOf, annotationPage, chainClassError, chainClassesJson, chainsOf, embeddedFilesPage, importSections, netChainsPage, parityOf, parityPage, writeAnnotation, type ChainState } from "./schematic-setup-pages";
+import { kicadIcon } from "../components/kicon-dom";
+import { colorPicker, type RGBA } from "../editor/pcbdialogs/color-picker";
 import { PIN_MAP_BMP } from "./pinmap-bitmaps";
 import { effectiveTheme } from "../theme";
 import { DEFAULT_PIN_MAP, ERC_RULES, PIN_TYPE_NAMES, defaultSeverity, type Severity } from "./erc-rules";
@@ -26,7 +28,30 @@ const MIL = 0.0254;
 const JUNCTION_SIZES = ["None", "Smallest", "Small", "Default", "Large", "Largest"], HOP_SIZES = ["None", "Smallest", "Small", "Medium", "Large", "Largest"];
 /** EESCHEMA_SETTINGS::m_Drawing.junction_size_mult_list: the dot's diameter as a multiple of the default wire width. */
 export const JUNCTION_MULT = [0, 1.7, 4, 6, 9, 12];
-const LINE_STYLES = ["Solid", "Dashed", "Dotted", "Dash-Dot", "Dash-Dot-Dot"];
+/** PANEL_SETUP_NETCLASSES' g_lineStyleIcons / g_lineStyleNames by LINE_STYLE (DEFAULT is -1): what the Line Style cells draw. */
+const LINE_STYLES: [number, string, string][] = [[-1, "<Not defined>", "stroke_none"], [0, "Solid", "stroke_solid"], [1, "Dashed", "stroke_dash"], [2, "Dotted", "stroke_dot"], [3, "Dash-Dot", "stroke_dashdot"], [4, "Dash-Dot-Dot", "stroke_dashdotdot"]];
+const lineStyle = (v: number): [number, string, string] => LINE_STYLES.find((x) => x[0] === v) || LINE_STYLES[1];
+const cssOf = (c: RGBA): string => `rgba(${Math.round(c.r * 255)}, ${Math.round(c.g * 255)}, ${Math.round(c.b * 255)}, ${c.a.toFixed(3)})`;
+function rgbaOf(css: string): RGBA | null {
+  const m = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*(?:,\s*([\d.]+))?\s*\)/.exec(css || "");
+  return m ? { r: +m[1] / 255, g: +m[2] / 255, b: +m[3] / 255, a: m[4] === undefined ? 1 : +m[4] } : null;
+}
+/** GRID_CELL_COLOR_RENDERER: the colour as a swatch over a checkerboard (transparent shows the board through), a click edits it. */
+function colorCell(td: HTMLElement, css: string, ro: boolean, commit: (css: string) => void): void {
+  const sw = h("span", { style: "position:relative;display:inline-block;width:36px;height:14px;border:1px solid var(--line-2);background-image:linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%),linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%);background-size:8px 8px;background-position:0 0,4px 4px" });
+  const fillEl = h("i", { style: `position:absolute;inset:0;background:${css || "transparent"}` }); sw.append(fillEl);
+  const b = h("button", { type: "button", class: "kd-cell-swatch", title: css, "aria-label": "Color", "data-color": css, disabled: ro, style: "display:inline-flex;align-items:center;padding:2px 4px;border:0;background:transparent;cursor:pointer" }, sw) as HTMLButtonElement;
+  b.addEventListener("click", () => colorPicker(rgbaOf(css), true, (c) => { css = cssOf(c); fillEl.style.background = css; b.title = css; b.dataset.color = css; commit(css); }, { r: 0, g: 0, b: 0, a: 0 }));
+  td.append(b);
+}
+/** GRID_CELL_ICON_TEXT_POPUP: the line style's bitmap and name; the editor is the bitmap combo of the six styles. */
+function lineStyleCell(td: HTMLElement, value: number, ro: boolean, commit: (v: number) => void): void {
+  const b = h("button", { type: "button", class: "kd-cell-style", disabled: ro, "data-style": String(value), style: "display:inline-flex;align-items:center;gap:6px;width:100%;padding:2px 4px;border:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer" }) as HTMLButtonElement;
+  const draw = (v: number): void => { const [, name, bmp] = lineStyle(v); b.replaceChildren(h("span", { "data-bitmap": bmp, style: "display:inline-flex;flex:none" }, kicadIcon(bmp, 40, 10)), name); b.dataset.style = String(v); };
+  draw(value);
+  b.addEventListener("click", () => { const r = b.getBoundingClientRect(); popupMenu(r.left, r.bottom, LINE_STYLES.map(([v, name, bmp]) => ({ label: name, icon: bmp, iconW: 40, iconH: 10, run: () => { draw(v); commit(v); } }))); });
+  td.append(b);
+}
 const V_RANGES = ["Auto", "fV", "pV", "nV", "uV", "mV", "V", "KV", "MV", "GV", "TV", "PV"], I_RANGES = ["Auto", "fA", "pA", "nA", "uA", "mA", "A", "KA", "MA", "GA", "TA", "PA"];
 const DRAWING_DEFAULTS: Record<string, Json> = { default_text_size: 50, overbar_offset_ratio: 1.23, text_offset_ratio: 0.15, label_size_ratio: 0.375, default_line_thickness: 6, pin_symbol_size: 25, show_dnp_markers: true,
   junction_size_choice: 3, hop_over_size_choice: 0, intersheets_ref_show: false, intersheets_ref_own_page: true, intersheets_ref_short: false, intersheets_ref_prefix: "[", intersheets_ref_suffix: "]",
@@ -52,7 +77,7 @@ export function schRenderSettings(pro: JsonObj): SchRenderSettings {
 
 interface FieldTpl { name: string; visible: boolean; url: boolean }
 interface NameRow { name: string }
-interface NetClassRow { name: string; wire: string; bus: string; color: string; style: string; src: JsonObj }
+interface NetClassRow { name: string; wire: string; bus: string; color: string; style: number; src: JsonObj }
 interface PatternRow { pattern: string; netclass: string }
 interface VarRow { name: string; value: string }
 
@@ -80,7 +105,7 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
   const sev: Record<string, Severity> = {}; const stored = obj(erc.rule_severities);
   for (const r of ERC_RULES) if (r[1]) { const s = stored[r[1]]; sev[r[1]] = s === "error" || s === "warning" || s === "ignore" ? s : defaultSeverity(r[1]); }
   const pinMap: number[][] = DEFAULT_PIN_MAP.map((row, i) => row.map((v, j) => { const pm = erc.pin_map as number[][] | undefined; const x = Array.isArray(pm) && Array.isArray(pm[i]) ? pm[i][j] : undefined; return x === 0 || x === 1 || x === 2 || x === 3 ? x : v; }));   // ERC_SETTINGS takes OK .. UNCONNECTED
-  const classes: NetClassRow[] = (Array.isArray(net.classes) ? net.classes as JsonObj[] : [{ name: "Default", wire_width: 6, bus_width: 12, line_style: 0, schematic_color: "rgba(0, 0, 0, 0.000)" }]).map((c) => ({ name: str(c.name), wire: numOf(c.wire_width, 6) + " mils", bus: numOf(c.bus_width, 12) + " mils", color: str(c.schematic_color || "rgba(0, 0, 0, 0.000)"), style: LINE_STYLES[numOf(c.line_style, 0)] || "Solid", src: c }));
+  const classes: NetClassRow[] = (Array.isArray(net.classes) ? net.classes as JsonObj[] : [{ name: "Default", wire_width: 6, bus_width: 12, line_style: 0, schematic_color: "rgba(0, 0, 0, 0.000)" }]).map((c) => ({ name: str(c.name), wire: numOf(c.wire_width, 6) + " mils", bus: numOf(c.bus_width, 12) + " mils", color: str(c.schematic_color || "rgba(0, 0, 0, 0.000)"), style: lineStyle(numOf(c.line_style, 0))[0], src: c }));
   const classes0 = classes.map((c) => c.src);
   const patterns: PatternRow[] = (Array.isArray(net.netclass_patterns) ? net.netclass_patterns as JsonObj[] : []).map((p) => ({ pattern: str(p.pattern), netclass: str(p.netclass) }));
   const aliases: { name: string; members: NameRow[] }[] = Object.entries(obj(sch.bus_aliases)).map(([name, m]) => ({ name, members: (Array.isArray(m) ? m : []).map((x) => ({ name: str(x) })) }));
@@ -112,7 +137,7 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
     e.rule_severities = Object.assign({}, obj(e.rule_severities), sev); e.pin_map = pinMap;
     // NETCLASS priorities follow the grid order once the move buttons changed it
     const moved = classes.map((c) => c.src).some((src, i) => src !== classes0[i]);
-    n.classes = classes.filter((c) => c.name.trim()).map((c, i) => Object.assign({}, c.src, moved ? { priority: c.name.trim() === "Default" ? 2147483647 : i } : {}, { name: c.name.trim(), wire_width: parseFloat(c.wire) || 6, bus_width: parseFloat(c.bus) || 12, schematic_color: c.color || "rgba(0, 0, 0, 0.000)", line_style: Math.max(0, LINE_STYLES.indexOf(c.style)) }));
+    n.classes = classes.filter((c) => c.name.trim()).map((c, i) => Object.assign({}, c.src, moved ? { priority: c.name.trim() === "Default" ? 2147483647 : i } : {}, { name: c.name.trim(), wire_width: parseFloat(c.wire) || 6, bus_width: parseFloat(c.bus) || 12, schematic_color: c.color || "rgba(0, 0, 0, 0.000)", line_style: c.style }));
     n.netclass_patterns = patterns.filter((x) => x.pattern.trim()).map((x) => ({ netclass: x.netclass, pattern: x.pattern.trim() }));
     const cc = chainClassesJson(chains, chainClasses); if (chainsLoaded && JSON.stringify(cc) !== JSON.stringify(chainClasses)) n.net_chain_classes = cc;
     const tv: JsonObj = {}; for (const v of vars) if (v.name.trim()) tv[v.name.trim()] = v.value; p.text_variables = tv;
@@ -233,8 +258,14 @@ function build(pro: JsonObj, page?: string, root?: Promise<string>): void {
             const top = h("div", { id: "kd-ss-nc-top", style: "height:250px;min-height:160px;overflow:auto;resize:vertical;padding-bottom:6px" }), bottom = h("div", { style: "min-height:160px" });
             pg.append(top, h("div", { class: "kd-sash", style: "height:4px;border-top:1px solid var(--line);margin:2px 0 6px" }), bottom);
             top.append(h("div", { style: "font-weight:600;margin-bottom:6px" }, "Netclasses"));
-            KD().grid<NetClassRow>(top, [{ key: "name", label: "Name", type: "text", ro: (r) => r.name === "Default" && r.src.name === "Default" }, { key: "wire", label: "Wire Thickness", type: "text", width: 120 }, { key: "bus", label: "Bus Thickness", type: "text", width: 120 }, { key: "color", label: "Color", type: "text", width: 170 }, { key: "style", label: "Line Style", type: "choice", options: LINE_STYLES, width: 120 }], classes,
-              { readOnly: ro, height: 150, buttons: { add: () => ({ name: "NewClass", wire: classes[0] ? classes[0].wire : "6 mils", bus: classes[0] ? classes[0].bus : "12 mils", color: "rgba(0, 0, 0, 0.000)", style: "Solid", src: Object.assign({}, classes[0] ? classes[0].src : {}, { name: "NewClass", priority: classes.length - 1 }) }), move: true, remove: true, canRemove: (r) => { if (r.name === "Default") { toast("The default net class is required."); return false; } return true; } } });
+            // PANEL_SETUP_NETCLASSES: Color is a swatch (GRID_CELL_COLOR_RENDERER), Line Style the stroke_* bitmap and its
+            // name; Move Up / Move Down (small_up / small_down) move any class but Default, and nothing past it
+            const isDefault = (r: NetClassRow): boolean => r.name === "Default" && r.src.name === "Default";
+            KD().grid<NetClassRow>(top, [{ key: "name", label: "Name", type: "text", ro: isDefault }, { key: "wire", label: "Wire Thickness", type: "text", width: 120 }, { key: "bus", label: "Bus Thickness", type: "text", width: 120 },
+              { key: "color", label: "Color", width: 80, render: (td, r, cro, commit) => colorCell(td, r.color, cro || isDefault(r), commit) },
+              { key: "style", label: "Line Style", width: 150, render: (td, r, cro, commit) => lineStyleCell(td, r.style, cro || isDefault(r), commit) }], classes,
+              { readOnly: ro, height: 150, buttons: { add: () => ({ name: "NewClass", wire: classes[0] ? classes[0].wire : "6 mils", bus: classes[0] ? classes[0].bus : "12 mils", color: "rgba(0, 0, 0, 0.000)", style: 0, src: Object.assign({}, classes[0] ? classes[0].src : {}, { name: "NewClass", priority: classes.length - 1 }) }), move: true, remove: true,
+                canMove: (r, other) => !isDefault(r) && !isDefault(other), canRemove: (r) => { if (r.name === "Default") { toast("The default net class is required."); return false; } return true; } } });
             top.append(h("p", { class: "kd-note", style: "margin:6px 0 0" }, "Set color to transparent to use KiCad default color."));
             bottom.append(h("div", { style: "font-weight:600;margin-bottom:6px" }, "Netclass Assignments"));
             const report = h("div", { id: "kd-ss-nc-matches", style: "flex:1;min-width:180px;height:150px;overflow:auto;border:1px solid var(--line);border-radius:var(--r-1);background:var(--field);padding:4px 6px" });

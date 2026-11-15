@@ -129,7 +129,8 @@ export function grid<R>(host: HTMLElement, columns: GridColumn<R>[], rows: R[], 
       const tr = el("tr"); if (i === sel || multi.has(i)) tr.classList.add("sel");
       for (const c of cols) {
         const td = el("td"), ro = opts.readOnly || c.type === "ro" || (c.ro && c.ro(r)), v = (r as Record<string, unknown>)[c.key];   // a row is a plain record keyed by its columns
-        if (c.type === "icon") { td.className = "c kd-icon-cell"; const spec = c.icon ? c.icon(r) : null;
+        if (c.render) c.render(td, r, !!ro, (value) => { (r as Record<string, unknown>)[c.key] = value; if (opts.onChange) opts.onChange(r, c.key, value, i); });
+        else if (c.type === "icon") { td.className = "c kd-icon-cell"; const spec = c.icon ? c.icon(r) : null;
           if (spec) { const b = el("button", "kd-cell-ic") as HTMLButtonElement; b.type = "button"; b.title = spec.title; b.dataset.icon = spec.icon; b.dataset.col = c.key; b.appendChild(kicadIcon(spec.icon, 16)); b.tabIndex = -1;
             b.addEventListener("click", (ev) => { ev.stopPropagation(); if (spec.run) spec.run(); }); td.appendChild(b); } }
         else if (c.type === "bool") { td.className = "c"; const cb = el("input") as HTMLInputElement; cb.type = "checkbox"; cb.checked = !!v; cb.disabled = !!ro; cb.dataset.col = c.key; cb.addEventListener("change", () => { (r as Record<string, unknown>)[c.key] = cb.checked; if (opts.onChange) opts.onChange(r, c.key, cb.checked, i); }); td.appendChild(cb); }
@@ -155,8 +156,9 @@ export function grid<R>(host: HTMLElement, columns: GridColumn<R>[], rows: R[], 
     const bar = el("div", "kd-grid-btns"); const mk = (icon: string, title: string, fn: () => void, role: string): HTMLElement => { const b = bitmapButton(icon, title, fn, { key: "grid-" + icon.replace(/^small_/, "") }); b.dataset.btn = role; bar.appendChild(b); return b; };
     if (B.add) mk("small_plus", B.addTitle || "Add", () => { const r = B.add!(); if (r) { rows.push(r); sel = rows.length - 1; multi = new Set(); refresh(); const f = table.querySelector<HTMLInputElement>("tbody tr:last-child input[type=text]"); if (f) f.focus(); if (opts.onChange) opts.onChange(r, null, null, sel); } }, "add");
     if (B.add) (B.afterAdd || []).forEach((x) => bar.appendChild(x));
-    if (B.move) { mk("small_up", "Move up", () => { if (sel > 0) { [rows[sel - 1], rows[sel]] = [rows[sel], rows[sel - 1]]; sel--; multi = new Set(); refresh(); if (opts.onChange) opts.onChange(rows[sel], null, null, sel); } }, "up");
-      mk("small_down", "Move down", () => { if (sel >= 0 && sel < rows.length - 1) { [rows[sel + 1], rows[sel]] = [rows[sel], rows[sel + 1]]; sel++; multi = new Set(); refresh(); if (opts.onChange) opts.onChange(rows[sel], null, null, sel); } }, "down"); }
+    const movable = (i: number, j: number): boolean => !B.canMove || B.canMove(rows[i], rows[j]);
+    if (B.move) { mk("small_up", "Move up", () => { if (sel > 0 && movable(sel, sel - 1)) { [rows[sel - 1], rows[sel]] = [rows[sel], rows[sel - 1]]; sel--; multi = new Set(); refresh(); if (opts.onChange) opts.onChange(rows[sel], null, null, sel); } }, "up");
+      mk("small_down", "Move down", () => { if (sel >= 0 && sel < rows.length - 1 && movable(sel, sel + 1)) { [rows[sel + 1], rows[sel]] = [rows[sel], rows[sel + 1]]; sel++; multi = new Set(); refresh(); if (opts.onChange) opts.onChange(rows[sel], null, null, sel); } }, "down"); }
     if (B.remove) {
       if (B.gapBeforeRemove) bar.appendChild(el("span", "kd-gap"));
       // deleteRowHandler: every selected row goes (the rows a canRemove refuses stay), the cursor lands on the row after them
