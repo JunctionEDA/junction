@@ -563,6 +563,12 @@ export function iconToggle(icon: keyof typeof ICONS, title: string, on: boolean,
   });
   return { el: b, input: b as unknown as HTMLInputElement, get: () => b.classList.contains("on"), set };
 }
+/** iconToggle with a KiCad icon-pack bitmap (BITMAP_BUTTON::SetIsCheckButton over KiBitmapBundle( BITMAPS::name )). */
+export function kiconToggle(name: string, title: string, on: boolean, opts?: { key?: string; group?: string; ro?: boolean; onChange?(on: boolean): void }): Field<boolean> & { el: HTMLButtonElement } {
+  const f = iconToggle("bold", title, on, opts);
+  f.el.replaceChildren(kicon(name, 16));
+  return f;
+}
 export function iconButton(icon: keyof typeof ICONS, title: string, fn: () => void, disabled?: boolean): HTMLButtonElement {
   const b = h("button", { class: "pd-iconbtn", type: "button", title, disabled: !!disabled });
   b.appendChild(kicadIcon(ICONS[icon], 16)); b.addEventListener("click", fn); return b;

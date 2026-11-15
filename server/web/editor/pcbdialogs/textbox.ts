@@ -10,7 +10,7 @@ import { comboBox } from "../../components/kcombo";
 import { faceOfFont, fontField, setFaceOfFont } from "../../dialogs/font-picker";
 import { boardXref } from "./xref";
 import { syntaxHelpLink } from "../syntax-help";
-import { checkField, errorMessage, fmtLenU, form, h, lenField, numField, openDialog, selectField, unitLabel, type Field } from "./ui";
+import { checkField, errorMessage, fmtLenU, form, h, kiconToggle, lenField, numField, openDialog, selectField, unitLabel, type Field } from "./ui";
 
 const isList = Array.isArray;
 const K = (): KiCadCanvasApi => KiCadCanvas;
@@ -159,10 +159,10 @@ export function textBoxDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode |
   let text: HTMLTextAreaElement | null = null;
   const current = (): TextBoxValues => {
     const g = (k: string): unknown => fields[k].get();
-    const pick = (keys: string[], d: string): string => keys.find((a) => (fields["align-" + a] as Field<boolean>).get()) || d;
+    const pick = (pre: string, keys: string[], d: string): string => keys.find((a) => (fields[pre + a] as Field<boolean>).get()) || d;
     return { text: text ? text.value : v0.text, locked: !!g("locked"), layer: String(g("layer")), angle: Number(g("angle")), textW: Number(g("textW")), textH: Number(g("textH")),
       autoThickness: !!g("autoThickness"), textThick: Number(g("textThick")), bold: !!g("bold"), italic: !!g("italic"), face: String(g("face")),
-      hJustify: pick(["left", "center", "right"], v0.hJustify), vJustify: pick(["top", "center", "bottom"], v0.vJustify), mirrored: !!g("mirrored"),
+      hJustify: pick("align-", ["left", "center", "right"], v0.hJustify), vJustify: pick("valign-", ["top", "center", "bottom"], v0.vJustify), mirrored: !!g("mirrored"),
       border: !!g("border"), borderWidth: Number(g("borderWidth")), borderStyle: String(g("borderStyle")) };
   };
   return !!openDialog({ title: "Text Box Properties", width: 640, readOnly: ro, noEnter: true,
@@ -176,12 +176,12 @@ export function textBoxDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode |
       const layer = reg("layer", selectField<string>(v0.layer, layerOptions(doc, v0.layer), { ro, key: "layer" }));
       const angle = reg("angle", numField(v0.angle, { ro, key: "angle", digits: 3 })); angle.input.title = "Text orientation";
       comboBox(angle.input as HTMLInputElement, () => ["0.0", "90.0", "-90.0", "180.0"]);   // the orientation combo's presets
-      const bold = reg("bold", checkField(v0.bold, "Bold", { ro, key: "bold" })), italic = reg("italic", checkField(v0.italic, "Italic", { ro, key: "italic" }));
-      const radio = (group: string[], cur: string, labels: Record<string, string>): Field<boolean>[] => group.map((a) => reg("align-" + a, checkField(cur === a, labels[a], { ro, key: "align-" + a,
-        onChange: (on) => { if (on) for (const b of group) { if (b !== a) fields["align-" + b].set(false); } } })));   // onHalignButton / onValignButton: one at most
-      const hal = radio(["left", "center", "right"], v0.hJustify, { left: "Align left", center: "Align center", right: "Align right" });
-      const val = radio(["top", "center", "bottom"], v0.vJustify, { top: "Align top", center: "Align middle", bottom: "Align bottom" });
-      const mirrored = reg("mirrored", checkField(v0.mirrored, "Mirrored", { ro, key: "mirrored" }));
+      // the BITMAP_BUTTON style bar: Bold, Italic, the h / v alignment groups (one at most of each) and Mirrored
+      const bold = reg("bold", kiconToggle("text_bold", "Bold", v0.bold, { ro, key: "bold" })), italic = reg("italic", kiconToggle("text_italic", "Italic", v0.italic, { ro, key: "italic" }));
+      const radio = (group: string[], cur: string, icons: Record<string, string>, labels: Record<string, string>, g: string): Field<boolean>[] => group.map((a) => reg((g === "v" ? "valign-" : "align-") + a, kiconToggle(icons[a], labels[a], cur === a, { ro, key: (g === "v" ? "valign-" : "align-") + a, group: g })));
+      const hal = radio(["left", "center", "right"], v0.hJustify, { left: "text_align_left", center: "text_align_center", right: "text_align_right" }, { left: "Align left", center: "Align center", right: "Align right" }, "h");
+      const val = radio(["top", "center", "bottom"], v0.vJustify, { top: "text_valign_top", center: "text_valign_center", bottom: "text_valign_bottom" }, { top: "Align top", center: "Align middle", bottom: "Align bottom" }, "v");
+      const mirrored = reg("mirrored", kiconToggle("text_mirrored", "Mirrored", v0.mirrored, { ro, key: "mirrored" }));
       const tw = reg("textW", lenField(v0.textW, { ro, key: "textW" })), tht = reg("textH", lenField(v0.textH, { ro, key: "textH" }));
       const thick = reg("textThick", lenField(v0.textThick, { ro: ro || v0.autoThickness, key: "textThick" }));
       const auto = reg("autoThickness", checkField(v0.autoThickness, "Auto", { ro, key: "autoThickness", tip: "Adjust the text thickness",
@@ -195,7 +195,8 @@ export function textBoxDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode |
           if (on && !(bw.get() > 0)) { const PTx = window as unknown as { PcbTools?: { gfxWidth?(l: string): number } }; const lw = PTx.PcbTools && PTx.PcbTools.gfxWidth ? PTx.PcbTools.gfxWidth(layer.get()) : 0.1; bw.set(lw); }
           bw.input.disabled = bs.input.disabled = ro || !on;
         } }));
-      const tools = h("span", { class: "pd-inline", style: "flex-wrap:wrap;gap:4px 10px" }, bold.el, italic.el, ...hal.map((f) => f.el), ...val.map((f) => f.el), mirrored.el);
+      const sep = (): HTMLElement => h("span", { class: "pd-vsep", style: "width:1px;align-self:stretch;background:var(--line);margin:0 4px" });
+      const tools = h("span", { class: "pd-inline", style: "flex-wrap:wrap;gap:2px" }, bold.el, italic.el, sep(), ...hal.map((f) => f.el), sep(), ...val.map((f) => f.el), sep(), mirrored.el);
       const help = syntaxHelpLink(true); help.style.margin = "3px";
       body.append(h("label", { class: "pd-lbl" }, "Text:"), text, h("div", null, help),
         h("div", { class: "pd-row", style: "margin:8px 0" }, locked.el),

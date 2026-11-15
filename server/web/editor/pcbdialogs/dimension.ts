@@ -7,7 +7,7 @@
 // way to make, so the Value choice offers Driven and Arbitrary as KiCad does for an unbound dimension.
 import { comboBox } from "../../components/kcombo";
 import { faceOfFont, fontField, setFaceOfFont } from "../../dialogs/font-picker";
-import { box, checkField, form, h, coordField, lenField, numField, openDialog, selectField, textField, unitLabel, type Field } from "./ui";
+import { box, checkField, form, h, coordField, kiconToggle, lenField, numField, openDialog, selectField, textField, unitLabel, type Field } from "./ui";
 import { boardXref } from "./xref";
 
 const isList = Array.isArray;
@@ -169,10 +169,11 @@ export function dimensionDialog(ctx: ToolCtx, item: KItem): boolean {
           form([["Units:", units.el, null, unitsTip], ["Units format:", ufmt.el, null, "Choose how to display the units"], ["Precision:", prec.el, null, "Choose how many digits of precision to display"], zeroes.el], true))));
       }
       if (!center) {
-        const bold = reg("bold", checkField(v0.bold, "Bold", { ro, key: "bold" })), italic = reg("italic", checkField(v0.italic, "Italic", { ro, key: "italic" }));
-        const mirrored = reg("mirrored", checkField(v0.mirrored, "Mirrored", { ro, key: "mirrored" }));
-        const aligns = (["left", "center", "right"] as const).map((a) => { const f = reg("align-" + a, checkField(v0.hJustify === a, a === "left" ? "Left" : a === "center" ? "Center" : "Right", { ro, key: "align-" + a,
-          onChange: (on) => { if (on) for (const b of ["left", "center", "right"]) if (b !== a) fields["align-" + b].set(false); else fields["align-" + a].set(true); } })); f.input.title = "Align " + a; return f; });
+        const bold = reg("bold", kiconToggle("text_bold", "Bold", v0.bold, { ro, key: "bold" })), italic = reg("italic", kiconToggle("text_italic", "Italic", v0.italic, { ro, key: "italic" }));
+        const mirrored = reg("mirrored", kiconToggle("text_mirrored", "Mirrored", v0.mirrored, { ro, key: "mirrored" }));
+        // onAlignButton: exactly one of the three stays pressed
+        const aligns = (["left", "center", "right"] as const).map((a) => reg("align-" + a, kiconToggle("text_align_" + a, "Align " + a, v0.hJustify === a, { ro, key: "align-" + a, group: "h",
+          onChange: (on) => { if (!on) fields["align-" + a].set(true); } })));
         const tw = reg("textW", lenField(v0.textW, { ro, key: "textW" })), tht = reg("textH", lenField(v0.textH, { ro, key: "textH" }));
         const thick = reg("textThick", lenField(v0.textThick, { ro: ro || v0.autoThickness, key: "textThick" }));
         const auto = reg("autoThickness", checkField(v0.autoThickness, "Auto", { ro, key: "autoThickness", tip: "Adjust the text thickness",
