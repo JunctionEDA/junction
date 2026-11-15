@@ -6,7 +6,7 @@
 // lead with "☆ ", the description column follows the name, and the on-canvas footprint (or its collapsed library)
 // is outlined.  The context menus are FOOTPRINT_EDITOR_CONTROL::Init's (editor/fptree.ts).  The model is
 // web/editor/fpedit.ts (store slice fpLibs).
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useApp, type FpLibRow } from "../../store";
 import { cx } from "../../util";
 import { menuMeta } from "../../menuspec";
@@ -35,6 +35,16 @@ export function LibrariesPane() {
   const setSel = (s: Sel) => { setSelState(s); cmd({ cmd: "select", lib: s ? s.lib : undefined, docId: s ? s.docId : undefined }); };
   const open = (docId: string) => window.dispatchEvent(new CustomEvent("kc-fpedit-pick", { detail: { docId } }));
   const [menu, setMenu] = useState<MenuAt | null>(null);
+  // LIB_TREE's hover preview (onHoverTimer): after a pause over a footprint row the editor shows it beside the tree
+  const hoverTimer = useRef(0);
+  const unhover = () => { window.clearTimeout(hoverTimer.current); hoverTimer.current = 0; cmd({ cmd: "unhover" }); };
+  const hover = (ev: React.PointerEvent, docId: string) => {
+    unhover();
+    const row = (ev.currentTarget as HTMLElement).getBoundingClientRect(), tree = (ev.currentTarget as HTMLElement).closest(".kbody");
+    const right = tree ? tree.getBoundingClientRect().right : row.right;
+    hoverTimer.current = window.setTimeout(() => cmd({ cmd: "hover", docId, x: String(right + 4), y: String(row.top) }), 500);
+  };
+  useEffect(() => () => unhover(), []);   // eslint-disable-line react-hooks/exhaustive-deps
   // LIB_TREE's context menu (FOOTPRINT_EDITOR_CONTROL::Init): rows whose condition is false are left out
   const showMenu = (ev: React.MouseEvent, lib: FpLibRow, docId?: string) => {
     ev.preventDefault(); setSel({ lib: lib.name, docId });
@@ -93,7 +103,8 @@ export function LibrariesPane() {
                 const cur = f.docId === current, mod = cur && modified;
                 return (
                   <div key={f.docId} className={cx("node flex items-center h-[20px] pr-1.5 cursor-default whitespace-nowrap hover:bg-panel cur:bg-sel", sel && sel.docId === f.docId && "cur")} style={{ paddingLeft: 4 + 14 }}
-                    data-fp={f.docId} title={l.name + ":" + f.name} onClick={() => setSel({ lib: l.name, docId: f.docId })} onDoubleClick={() => open(f.docId)} onContextMenu={(ev) => showMenu(ev, l, f.docId)}>
+                    data-fp={f.docId} title={l.name + ":" + f.name} onClick={() => setSel({ lib: l.name, docId: f.docId })} onDoubleClick={() => { unhover(); open(f.docId); }} onContextMenu={(ev) => { unhover(); showMenu(ev, l, f.docId); }}
+                    onPointerEnter={(ev) => hover(ev, f.docId)} onPointerLeave={unhover} onPointerDown={unhover}>
                     <Twist open={false} leaf onToggle={() => undefined} />
                     <span className={cx("flex-none", mod && "font-semibold", cur && "canvas-item")}>{f.name + (mod ? " *" : "")}</span>
                     {f.descr ? <span className="ml-2 min-w-0 overflow-hidden text-ellipsis text-ink-3">{f.descr}</span> : null}

@@ -21,6 +21,7 @@ import { commitObservers, setTool, toolCtx, undoStack } from "./tools";
 import { api, toast } from "./util";
 import { liveDocument, saveTextDocument, sendDocOps } from "./projectfile";
 import { confirmBox, promptText } from "../dialogs/dom";
+import { renderFootprintPreview } from "../library/preview";
 import { listDialog, messageBox } from "./pcbdialogs/ui";
 import { enumPadsDialog, footprintCheckerDialog, footprintUsersDialog, footprintPropertiesDialog, padTableDialog, pushPadDialog } from "./pcbdialogs/fp-editor";
 import type { DocEntry, ProjectInfo } from "../store";
@@ -751,6 +752,21 @@ async function footprintTextOf(docId: string): Promise<string | null> {
   try { const live = await liveDocument(docId); if (!live.ops.length) return live.file; const fd = KiCadCanvas.parseDoc(live.file, "footprint"); for (const op of live.ops) for (const c of op.changes || []) { try { KiCadCanvas.applyChange(fd, c, 1e6); } catch { /* skipped */ } } return FD().serializeFootprintDoc(fd); }
   catch { const r = await fetch(`/api/docs/${docId}/content?v=${Date.now()}`, { credentials: "same-origin" }).catch(() => null); return r && r.ok ? r.text() : null; }
 }
+/** LIB_TREE::showPreview: a 240 x 200 footprint preview beside the tree; the next hover, or leaving, takes it away. */
+let hoverPop: HTMLElement | null = null, hoverSeq = 0;
+function hideHoverPreview(): void { hoverSeq++; if (hoverPop) { hoverPop.remove(); hoverPop = null; } }
+async function showHoverPreview(docId: string, x: number, y: number): Promise<void> {
+  hideHoverPreview(); const seq = hoverSeq;
+  const text = await footprintTextOf(docId).catch(() => null);
+  if (!text || seq !== hoverSeq) return;
+  const W = 240, H = 200, M = 8;
+  const pop = document.createElement("div"); pop.className = "kfp-hoverprev"; pop.dataset.preview = docId;
+  pop.style.cssText = `position:fixed;z-index:60;left:${Math.min(window.innerWidth - W - M, x)}px;top:${Math.max(M, Math.min(window.innerHeight - H - M, y))}px;width:${W}px;height:${H}px;background:var(--canvas);border:1px solid var(--line);box-shadow:0 6px 18px rgba(0,0,0,.25);pointer-events:none`;
+  const cv = document.createElement("canvas"); cv.style.cssText = `display:block;width:${W - 2}px;height:${H - 2}px`; pop.append(cv);
+  document.body.append(pop); hoverPop = pop;
+  try { renderFootprintPreview(cv, "Preview:footprint", text); }
+  catch (e) { hideHoverPreview(); }
+}
 /** FOOTPRINT_EDITOR_CONTROL::m_copiedFootprint. */
 let copiedFootprint: { name: string; text: string } | null = null;
 const readOnlyError = (lib: string) => messageBox("Error", `Library '${lib}' is read only.`, [{ label: "OK" }]);
@@ -793,6 +809,8 @@ window.addEventListener("kc-fpedit-lib", ((ev: CustomEvent) => {
   const id = m.docId as string | undefined; const ro = !!(id && id.startsWith("lib:"));
   switch (m.cmd) {
   case "loadLib": if (m.lib) void loadOfficialLib(m.lib); break;
+  case "hover": if (id) void showHoverPreview(id, Number(m.x) || 0, Number(m.y) || 0); break;
+  case "unhover": hideHoverPreview(); break;
   case "delete": if (id) { if (ro) readOnlyError(id.slice(4).split(":")[0]); else void deleteFootprint(id); } break;
   case "rename": if (id) { if (ro) readOnlyError(id.slice(4).split(":")[0]); else void renameFootprint(id); } break;
   case "new": if (m.lib && !projectFpLibs().some((l) => l.name === m.lib)) readOnlyError(m.lib); else void newFootprint(m.lib); break;
