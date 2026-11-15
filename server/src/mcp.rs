@@ -181,7 +181,7 @@ fn build_catalog() -> Vec<Tool> {
         let title = t["title"].as_str().unwrap_or(&name).to_string();
         let write = t["write"].as_bool().unwrap_or(false);
         let project = t["input_schema"]["properties"].get("project").is_some();
-        let host = !matches!(name.as_str(), "list_projects" | "get_project" | "list_changes" | "get_design_guide" | "get_run");
+        let host = !matches!(name.as_str(), "list_projects" | "get_project" | "list_changes" | "get_design_guide" | "get_run" | "view_datasheet");
         out.push(Tool {
             def: json!({ "name": name, "title": title, "description": t["description"], "inputSchema": t["input_schema"],
                          "annotations": annotations(&title, write, name == "undo_changes" || name == "redo_changes") }),
@@ -194,7 +194,7 @@ fn build_catalog() -> Vec<Tool> {
     // The order a model reads them in: find the project, read, look, change, then the rest.
     let order = [
         "list_projects", "get_project", "get_design_overview", "get_design_guide", "list_components", "get_component", "list_nets",
-        "get_items", "run_checks", "review_design", "check_layout", "get_board_info", "render_view", "highlight", "get_selection", "trace_net", "find_datasheets", "read_datasheet", "find_parts", "get_library_part", "run_python", "get_run", "apply_changes",
+        "get_items", "run_checks", "review_design", "check_layout", "get_board_info", "render_view", "highlight", "get_selection", "trace_net", "compare_versions", "get_bom", "find_datasheets", "read_datasheet", "view_datasheet", "find_parts", "get_library_part", "run_python", "get_run", "apply_changes",
         "undo_changes", "redo_changes", "list_changes", "read_document", "list_comments", "add_comment", "resolve_comment", "list_checkpoints",
         "create_checkpoint", "create_project", "get_geometry",
     ];
@@ -719,6 +719,16 @@ async fn call_tool(state: &AppState, caller: &Caller, site: &str, tool: &Tool, n
         "get_project" => return Ok(json!([text_content(&get_project(state, site, project.as_ref().expect("project")).await?)])),
         "list_changes" => return Ok(json!([text_content(&list_changes(state, caller, project.as_ref().expect("project"), &args).await?)])),
         "get_design_guide" => return Ok(json!([{ "type": "text", "text": guide(args["topic"].as_str().unwrap_or(""))? }])),
+        "view_datasheet" => {
+            let url = args["url"].as_str().unwrap_or("").trim().to_string();
+            if url.is_empty() || url.len() > 2000 { return Err("Give the https address of the PDF as url.".into()); }
+            let pages: Option<Vec<usize>> = args["pages"].as_array().map(|l| l.iter().filter_map(Value::as_u64).map(|n| n as usize).collect());
+            let px = args["width_px"].as_u64().unwrap_or(1300).clamp(600, 2000) as u32;
+            let (pics, total, note) = crate::datasheet::page_images(state, &url, pages, args["query"].as_str(), px).await?;
+            let mut content: Vec<Value> = pics.iter().map(|(_, png)| json!({ "type": "image", "data": base64::engine::general_purpose::STANDARD.encode(png), "mimeType": "image/png" })).collect();
+            content.push(text_content(&json!({ "url": url, "pages_shown": pics.iter().map(|(n, _)| *n).collect::<Vec<_>>(), "page_count": total, "note": note })));
+            return Ok(Value::Array(content));
+        }
         _ => {}
     }
     debug_assert!(tool.host);
@@ -845,6 +855,16 @@ async fn call_tool(state: &AppState, caller: &Caller, site: &str, tool: &Tool, n
         result["change_id"] = json!(id);
     }
 
+    if let Some(svgs) = reply["svgs"].as_array() {
+        let mut content = Vec::new();
+        for svg in svgs.iter().filter_map(Value::as_str).take(4) {
+            let svg = svg.to_string();
+            let png = tokio::task::spawn_blocking(move || rasterize(&svg, width_px)).await.map_err(internal)??;
+            content.push(json!({ "type": "image", "data": base64::engine::general_purpose::STANDARD.encode(&png.0), "mimeType": "image/png" }));
+        }
+        content.push(text_content(&result));
+        return Ok(Value::Array(content));
+    }
     if let Some(svg) = reply["svg"].as_str() {
         let svg = svg.to_string();
         let png = tokio::task::spawn_blocking(move || rasterize(&svg, width_px)).await.map_err(internal)??;

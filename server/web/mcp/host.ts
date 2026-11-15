@@ -28,6 +28,8 @@ import { checkLayout } from "../ai/layout";
 import { reviewDesign } from "../ai/review";
 import * as library from "../ai/library";
 import { buildProposal, staleReason, writeRules } from "../ai/proposals";
+import { diffDocs } from "../review/diff";
+import { getBom } from "./bom";
 import { renderPicture, type Emphasis } from "./picture";
 import { findPerson, highlight, people, resolveTargets, settle, traceNet } from "./teammate";
 import { DocSession, editProjectFile, readTextDocument, type Conn, type DocEntry, type UndoRecord } from "./session";
@@ -40,7 +42,7 @@ const K = (): any => W.KiCadCanvas;
 
 interface Project { projectId: string; name: string; role: string; docs: DocEntry[] }
 interface Request { id: number; base: string; token: string; agent: string; canWrite: boolean; user: { id: number; login: string; name: string }; tool: string; project: Project | null; args: any }
-interface Reply { result: unknown; record?: unknown; records?: unknown[]; swap?: unknown; svg?: string }
+interface Reply { result: unknown; record?: unknown; records?: unknown[]; swap?: unknown; svg?: string; svgs?: string[] }
 
 const SESSION_IDLE_MS = 5 * 60 * 1000, PROCESS_IDLE_MS = 15 * 60 * 1000;
 
@@ -498,6 +500,64 @@ async function renderView(req: Request): Promise<Reply> {
   });
 }
 
+/**
+ * compare_versions: what changed in a document between a saved version (a named checkpoint, or any point of the
+ * version history) and now, as the Compare window lists it, with a picture of the changed area: the document as
+ * it is now with each change boxed in its colour, and on request the older version beside it.
+ */
+async function compareVersions(req: Request): Promise<Reply> {
+  const p = needProject(req); const a = req.args || {};
+  const rows: any[] = (await api(`/api/projects/${p.projectId}/versions`)).versions || [];
+  return withDocument(req, a.document, async (sess, doc) => {
+    const mine = rows.map((v) => ({ v, d: (v.docs || []).find((x: any) => x.docId === sess.entry.docId) })).filter((x) => x.d);
+    const names = () => mine.filter((x) => x.v.name).slice(0, 12).map((x) => x.v.name);
+    if (!mine.length) throw new ToolError(`${sess.entry.path} has no saved version to compare with yet. create_checkpoint saves one.`);
+    let pick = mine[0];
+    if (typeof a.with === "string" && a.with.trim() && !/^(last|latest|previous)$/i.test(a.with.trim())) {
+      const q = a.with.trim().toLowerCase();
+      const hit = mine.find((x) => String(x.v.name || "").toLowerCase() === q) || mine.find((x) => String(x.v.id) === q) || mine.find((x) => String(x.v.name || "").toLowerCase().includes(q));
+      if (!hit) throw new ToolError(`There is no checkpoint "${a.with}" of ${sess.entry.path}. The named ones are: ${names().join(", ") || "(none)"}.`);
+      pick = hit;
+    } else if (/^(last|latest|previous)$/i.test(String(a.with || "").trim()) || a.with === undefined) {
+      // the newest saved version that differs from now: the one a person means by "since the last checkpoint"
+      pick = mine.find((x) => x.v.name) || mine[0];
+    }
+    const k = K(); const j = await api(`/api/docs/${sess.entry.docId}/at/${pick.d.seq}`);
+    let old: any; try { old = k.parseDoc(j.file, sess.entry.docType); } catch { throw new ToolError("That version could not be read."); }
+    for (const op of j.ops || []) for (const c of op.changes || []) { try { k.applyChange(old, c, sess.IU); } catch { /* an edit that does not replay leaves the item as the snapshot had it */ } }
+    k.computeBBox(old);
+    const diff = diffDocs(k, old, doc); const cap = Math.max(5, Math.min(200, Number(a.limit) || 60));
+    const result: any = { document: sess.entry.path, compared_with: pick.v.name || `version of ${pick.v.createdAt}`, saved: pick.v.createdAt, by: pick.v.author || undefined,
+      added: diff.counts.added, removed: diff.counts.removed, modified: diff.counts.modified,
+      changes: diff.changes.slice(0, cap).map((c) => ({ change: c.category, what: c.label, detail: c.detail || undefined, ref: c.ref, net: c.net, box: c.bbox ? c.bbox.map(r3) : undefined })),
+      truncated: diff.changes.length > cap ? `showing ${cap} of ${diff.changes.length}; raise limit or give an area` : undefined };
+    if (!diff.changes.length) { result.note = "Nothing differs: the document is as that version left it."; return { result }; }
+    if (a.picture === false) return { result };
+    let box: number[] | null = Array.isArray(a.area) && a.area.length === 4 ? [Math.min(a.area[0], a.area[2]), Math.min(a.area[1], a.area[3]), Math.max(a.area[0], a.area[2]), Math.max(a.area[1], a.area[3])] : null;
+    if (!box) { for (const c of diff.changes) { const b = c.bbox; if (b) box = box ? [Math.min(box[0], b[0]), Math.min(box[1], b[1]), Math.max(box[2], b[2]), Math.max(box[3], b[3])] : b.slice(); }
+      if (box) { const m = Math.max(doc.type === "sch" ? 8 : 3, 0.15 * Math.max(box[2] - box[0], box[3] - box[1])); box = [box[0] - m, box[1] - m, box[2] + m, box[3] + m]; } }
+    const COLORS = { added: "#22C55E", removed: "#EF4444", modified: "#F59E0B" };
+    const boxes = (cats: string[]) => diff.changes.filter((c) => c.bbox && cats.includes(c.category)).slice(0, 300).map((c) => [...(c.bbox as number[]), COLORS[c.category]]);
+    const hidden = doc.type === "pcb" ? new Set(Array.from(k.PCB_HIDDEN_DEFAULT || [])) : undefined;
+    const opts = (cats: string[]) => Object.assign({ hidden, emphasis: { boxes: boxes(cats) } }, box ? { bbox: box, margin: 0 } : {});
+    sheetContext(old, sess.entry, p, await projectFile(p));
+    const after = renderPicture(doc, opts(["added", "modified", "removed"]));
+    result.picture = "The document as it is now. Green boxes: added. Amber: changed or moved. Red: where something was removed.";
+    if (a.side_by_side === true) { result.picture = "Two pictures of the same area: first the saved version (red: removed since, amber: changed), then now (green: added, amber: changed)."; return { svgs: [renderPicture(old, opts(["removed", "modified"])), renderPicture(doc, opts(["added", "modified"]))], result }; }
+    return { svg: after, result };
+  });
+}
+
+/** get_bom: the bill of materials of the whole schematic (or of the board), priced and checked for stock. */
+async function bomTool(req: Request): Promise<Reply> {
+  const p = needProject(req); const a = req.args || {};
+  const name = a.document || (rootSchematic(p) || p.docs.find((d) => d.docType === "kicad_pcb") || { path: "" }).path;
+  const entry = findDocument(p, name); const others: { name: string; doc: any }[] = [];
+  // a schematic's parts are spread over its sheets: the other sheets are read as well
+  if (entry.docType === "kicad_sch") for (const d of p.docs.filter((x) => x.docType === "kicad_sch" && x.docId !== entry.docId).slice(0, 40)) { try { others.push({ name: d.path, doc: await session(d).current() }); } catch { /* a sheet that will not open is left out */ } }
+  return withDocument(req, entry.path, async (sess, doc) => ({ result: Object.assign({ document: sess.entry.path }, await getBom(K(), doc, others, a, (path) => api(path)) as object) }));
+}
+
 /** Who is in the project's documents right now: one document when named, else every sheet and the board. */
 async function getSelection(req: Request): Promise<Reply> {
   const p = needProject(req); const a = req.args || {};
@@ -620,6 +680,8 @@ const TOOLS: Record<string, (req: Request) => Promise<Reply>> = {
   render_view: renderView,
   highlight: (req) => withDocument(req, req.args.document, async (sess, doc) => ({ result: await highlight(sess, doc, req.args || {}) })),
   get_selection: getSelection,
+  compare_versions: compareVersions,
+  get_bom: bomTool,
   trace_net: (req) => withDocument(req, req.args.document, async (sess, doc) => {
     const res: any = traceNet(doc, sess.entry.path, req.args.net);
     if (req.args.highlight === true) res.highlight = await highlight(sess, doc, { nets: [req.args.net], note: req.args.note, seconds: req.args.seconds });

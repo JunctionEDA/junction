@@ -207,12 +207,61 @@ await open(sch.id);
   await call('highlight', { project: NAME, document: sch.path, clear: true });
 }
 
+// ------------------------------------------------------------------ compare with a checkpoint, the BOM, datasheet pages
+
+{
+  const cp = await call('create_checkpoint', { project: NAME, name: `before-${Date.now()}` });
+  const same = await call('compare_versions', { project: NAME, document: 'board' });
+  check('compare_versions right after a checkpoint: nothing differs', !cp.isError && !same.isError && same.data.added + same.data.removed + same.data.modified === 0 && !same.image, same.text.slice(0, 300));
+  const comp = (await call('get_component', { project: NAME, document: 'board', ref: 'SW2' })).data;
+  const moved = await call('apply_changes', { project: NAME, document: 'board', title: 'Nudge SW2, add a note', edits: [{ op: 'move', ref: 'SW2', x: (comp.x ?? comp.position?.x ?? comp.at?.[0]) + 1.5, y: comp.y ?? comp.position?.y ?? comp.at?.[1] }, { op: 'add_text', text: 'REV B', x: 100, y: 55 }] });
+  const diff = await call('compare_versions', { project: NAME, document: 'board', width_px: 900 });
+  check('compare_versions lists what changed since the checkpoint, with a picture', !moved.isError && !diff.isError && diff.data.added >= 1 && diff.data.modified >= 1 && diff.data.changes.some((c) => c.change === 'modified' && /SW2/.test(c.what + (c.ref || ''))) && !!diff.image && /before-/.test(diff.data.compared_with), (moved.isError ? moved.text : diff.text).slice(0, 600));
+  savePng(diff, '12-compare-with-checkpoint.png');
+  const r = await (await fetch(`${BASE}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${adaJwt}` }, body: JSON.stringify({ jsonrpc: '2.0', id: 9, method: 'tools/call', params: { name: 'compare_versions', arguments: { project: NAME, document: 'board', side_by_side: true, width_px: 700 } } }) })).json();
+  check('side_by_side returns the saved version and now as two pictures', r.result && r.result.content.filter((c) => c.type === 'image').length === 2);
+  const none = await call('compare_versions', { project: NAME, document: 'board', with: 'no such checkpoint' });
+  check('an unknown checkpoint names the ones there are', none.isError && /before-/.test(none.text), none.text);
+  await call('undo_changes', { project: NAME });
+
+  const plain = await call('get_bom', { project: NAME, prices: false });
+  const caps = plain.data && plain.data.lines.find((l) => l.value === '100nF');
+  check('get_bom: one line per part, references as runs, without asking vendors', !plain.isError && plain.data.totals.parts >= 30 && !!caps && caps.qty >= 8 && /C\d+-C\d+/.test(caps.refs), plain.text.slice(0, 500));
+  // one part gets a vendor number (the fake vendor has C25804), then the BOM is priced
+  await call('apply_changes', { project: NAME, document: sch.path, title: 'Choose the 10k resistor', edits: [{ op: 'set_field', ref: 'R5', field: 'LCSC', value: 'C25804' }, { op: 'set_field', ref: 'R8', field: 'LCSC', value: 'C25804' }] });
+  const bom = await call('get_bom', { project: NAME, boards: 10 });
+  const line = bom.data && bom.data.lines.find((l) => l.part === 'lcsc C25804');
+  if (bom.data && bom.data.lines.some((l) => /lookup/.test(Object.keys(l).join())) && !line?.unit) console.log('  (the vendor lookup did not answer: start the server with the fake vendors to test prices)');
+  else check('get_bom prices a chosen part at the break for the quantity and totals the cost', !bom.isError && !!line && line.qty === 2 && line.unit > 0 && Math.abs(line.total - line.unit * 20) < 1e-6 && /for 10 boards/.test(bom.data.totals.cost) && bom.data.no_part_chosen.length > 3, bom.text.slice(0, 700));
+  check('get_bom is a small answer', bom.text.length < 9000, `${bom.text.length} characters`);
+  await call('undo_changes', { project: NAME });
+
+  const http = await import('node:http');
+  const pdfPage = await ctx.newPage();
+  await pdfPage.setContent('<style>section{break-after:page;font:16px sans-serif}</style><section><h1>XR1 Datasheet</h1></section><section><h2>Pin configuration</h2><svg width="300" height="200"><rect x="60" y="20" width="180" height="160" fill="none" stroke="black" stroke-width="3"/><text x="110" y="105">XR1</text><text x="10" y="50">1 VIN</text><text x="250" y="50">8 VOUT</text></svg></section><section><h2>Typical application</h2><p>Place 10 uF at VIN.</p></section>');
+  const bytes = await pdfPage.pdf({ format: 'A4' }); await pdfPage.close();
+  const srv = http.createServer((req, res) => { res.writeHead(200, { 'content-type': 'application/pdf' }); res.end(bytes); });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const url = `http://127.0.0.1:${srv.address().port}/xr1.pdf?t=${Date.now()}`;
+  const pic = await call('view_datasheet', { url, query: 'pin configuration', width_px: 900 });
+  if (pic.isError && /https link/.test(pic.text)) console.log('  (skipped: start the server with AI_DATASHEET_ALLOW_LOCAL=1 to test view_datasheet)');
+  else {
+    check('view_datasheet draws the page that answers the query', !pic.isError && !!pic.image && pic.data.pages_shown[0] === 2 && pic.data.page_count === 3 && Math.max(...pngSize(pic)) === 900, pic.text.slice(0, 300));
+    savePng(pic, '13-datasheet-page.png');
+    const two = await (await fetch(`${BASE}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${adaJwt}` }, body: JSON.stringify({ jsonrpc: '2.0', id: 10, method: 'tools/call', params: { name: 'view_datasheet', arguments: { url, pages: [1, 3], width_px: 600 } } }) })).json();
+    check('view_datasheet by page numbers returns each page', two.result.content.filter((c) => c.type === 'image').length === 2);
+    const off = await call('view_datasheet', { url, query: 'zzzqqq nonexistent' });
+    check('a query no page answers says so', off.isError && /No page has those words/.test(off.text), off.text);
+  }
+  srv.close();
+}
+
 // ------------------------------------------------------------------ a connection that may only read
 
 {
   const tools = (await (await fetch(`${BASE}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${adaJwt}` }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })).json()).result.tools;
   const by = Object.fromEntries(tools.map((t) => [t.name, t]));
-  check('the new tools are in the catalog as read-only tools', ['highlight', 'get_selection', 'trace_net'].every((n) => by[n] && by[n].annotations.readOnlyHint === true), Object.keys(by).join(' '));
+  check('the new tools are in the catalog as read-only tools', ['highlight', 'get_selection', 'trace_net', 'compare_versions', 'get_bom', 'view_datasheet'].every((n) => by[n] && by[n].annotations.readOnlyHint === true), Object.keys(by).join(' '));
 }
 
 desk.ws.close(); await browser.close(); await db.end();

@@ -21,7 +21,7 @@ COPY --from=web /web/static/dist ./static/dist
 RUN cargo build --release && cp target/release/kicad-collab-server /srv-bin
 
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 # node runs the headless editor behind the MCP endpoint (src/mcp_host.rs); same Debian release as the web stage
 COPY --from=web /usr/local/bin/node /usr/local/bin/node

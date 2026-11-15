@@ -135,6 +135,45 @@
     }
   },
   {
+    "name": "compare_versions",
+    "title": "Compare with a checkpoint",
+    "write": false,
+    "description": "What changed in a schematic sheet or the board since a saved version: each change as one line (added, removed or modified, what it is, what changed about it: \"moved 2.54 mm\", \"Value: 10k to 22k\") with counts, and a picture of the changed area as it is now with every change boxed (green added, amber changed, red removed). Use it to answer \"what did I change since the last checkpoint\", to review somebody's work, or to check your own edits against where you started. Without `with` it compares with the newest named checkpoint.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name." },
+        "document": { "type": "string", "description": "Document path as listed by get_project, or \"board\"." },
+        "with": { "type": "string", "description": "The checkpoint's name (list_checkpoints gives them). Default: the newest named checkpoint, or the newest saved version when none is named." },
+        "area": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "Only picture this rectangle, [x0, y0, x1, y1] in millimetres." },
+        "side_by_side": { "type": "boolean", "description": "Return two pictures of the same area, the saved version and now, instead of one." },
+        "picture": { "type": "boolean", "description": "false returns the list only, which is cheaper." },
+        "limit": { "type": "integer", "minimum": 5, "maximum": 200, "description": "How many changes to list (default 60)." },
+        "width_px": { "type": "integer", "minimum": 400, "maximum": 2000, "description": "Longest side of each picture in pixels (default 1500)." }
+      },
+      "required": ["project", "document"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_bom",
+    "title": "Bill of materials",
+    "write": false,
+    "description": "The bill of materials with cost and stock: one line per distinct part (references as runs like C3-C10, quantity, value, footprint, the vendor part or manufacturer part number its fields name), each priced at the vendor's break for the quantity needed and checked against the vendor's stock, with the total for the number of boards, the lines that are short of stock and the lines that have no part chosen yet. Covers every sheet of the schematic, or the board when document is the board. Parts marked do-not-populate or excluded from the BOM are left out.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name." },
+        "document": { "type": "string", "description": "\"board\" to take the BOM from the board's footprints; the schematic (all sheets) when omitted." },
+        "boards": { "type": "integer", "minimum": 1, "description": "How many boards are being built (default 1): sets the price break and the stock needed." },
+        "prices": { "type": "boolean", "description": "false lists the parts without asking the vendors, which is faster." },
+        "vendor": { "type": "string", "enum": ["lcsc", "mouser", "digikey"], "description": "Look manufacturer part numbers up at this vendor only." }
+      },
+      "required": ["project"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "read_document",
     "title": "Read source",
     "write": false,
@@ -367,6 +406,23 @@
         "silk": { "type": "boolean", "description": "Board only: also list the boxes of everything printed on the silkscreen, as [x0, y0, x1, y1, layer]." }
       },
       "required": ["project", "document"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "view_datasheet",
+    "title": "Look at datasheet pages",
+    "write": false,
+    "description": "Pages of a PDF datasheet as pictures, for what read_datasheet's text cannot carry: the pinout drawing, the typical application circuit, a graph, the package outline or land pattern, a timing diagram. Give page numbers (read_datasheet reports which pages answer a question), or a query and the best matching page is drawn. Up to three pages per call; a page is a large picture, so ask for the one you need.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "url": { "type": "string", "description": "The https address of the PDF, usually the part's Datasheet field (find_datasheets lists them)." },
+        "pages": { "type": "array", "items": { "type": "integer" }, "description": "Page numbers to draw (up to 3)." },
+        "query": { "type": "string", "description": "Without pages: what to find, in the datasheet's own words (\"typical application\", \"pin configuration\", \"land pattern\")." },
+        "width_px": { "type": "integer", "minimum": 600, "maximum": 2000, "description": "Longest side of each page in pixels (default 1300, enough to read a pin table)." }
+      },
+      "required": ["url"],
       "additionalProperties": false
     }
   }

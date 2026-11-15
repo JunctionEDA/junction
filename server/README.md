@@ -451,6 +451,9 @@ How it is built:
 | `highlight` | outlines parts, nets or a region live for everyone in the document, in the assistant's peer colour with a note beside its name tag; clears by itself |
 | `get_selection` | who has the project open, what each has selected and where each is looking |
 | `trace_net` | one net end to end: pads, length per layer, vias, islands, open connections |
+| `compare_versions` | what changed since a checkpoint, as a list and a picture with each change boxed (or the two versions side by side) |
+| `get_bom` | the bill of materials priced at the vendors' breaks for a number of boards, with stock shortfalls and parts not yet chosen |
+| `view_datasheet` | pages of a PDF datasheet as pictures (pinout, typical application, graphs); the server image needs `poppler-utils` (`pdftoppm`, or `KC_PDFTOPPM`) |
 | `find_parts`, `get_library_part`, `find_datasheets` | KiCad libraries, vendor parts, datasheet links |
 | `read_datasheet` | the pages of a PDF datasheet that answer a question (fetched and indexed once on the server) |
 | `run_python` | a Python script on the design with `kicad_harness`: the cheap way to do anything beyond a couple of edits (see above) |

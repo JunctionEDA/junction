@@ -407,6 +407,82 @@ fn answer(doc: &[String], url: &str, cached: bool, req: &Req) -> Value {
     out
 }
 
+// ------------------------------------------------------------------ pages as pictures
+
+/// Pages of a datasheet drawn as PNG (poppler's `pdftoppm`), for what its text does not carry: pinout
+/// drawings, typical application circuits, graphs, package outlines.  Returns the pictures with their page
+/// numbers and the page count.  The page texts are kept in the database, the file itself is not: it is
+/// downloaded again when it is not among the few kept on disk.
+pub(crate) async fn page_images(state: &AppState, url: &str, pages: Option<Vec<usize>>, query: Option<&str>, longest_px: u32) -> Result<(Vec<(usize, Vec<u8>)>, usize, Option<String>), String> {
+    let say = |e: AppError| match e {
+        AppError::Api(_, _, m) => m,
+        AppError::BadRequest(m) => m,
+        other => { tracing::warn!("datasheet pictures: {other:?}"); "The datasheet could not be read.".to_string() }
+    };
+    let (doc, _) = load(state, url).await.map_err(say)?;
+    let total = doc.len();
+    let mut note = None;
+    let mut want: Vec<usize> = pages.unwrap_or_default().into_iter().filter(|n| *n >= 1 && *n <= total).collect();
+    want.dedup();
+    if want.is_empty() {
+        let q = query.unwrap_or("").trim();
+        if q.is_empty() {
+            want.push(1);
+        } else {
+            let ranked = rank(&doc, q);
+            match ranked.first() {
+                Some((i, _)) => {
+                    want.push(i + 1);
+                    let more: Vec<usize> = ranked.iter().skip(1).take(6).map(|(i, _)| i + 1).collect();
+                    if !more.is_empty() { note = Some(format!("Other pages that match: {more:?}.")); }
+                }
+                None => return Err("No page has those words. Give page numbers, or the datasheet's own terms (a figure title, a pin name).".into()),
+            }
+        }
+    }
+    want.truncate(3);
+
+    let bare = url.split('#').next().unwrap_or(url).trim().to_string();
+    let key: String = Sha256::digest(bare.as_bytes()).iter().map(|b| format!("{b:02x}")).collect();
+    let dir = std::env::temp_dir().join("kc-datasheets");
+    tokio::fs::create_dir_all(&dir).await.map_err(|e| format!("The server has nowhere to keep the datasheet ({e})."))?;
+    let file = dir.join(format!("{key}.pdf"));
+    let fresh = tokio::fs::metadata(&file).await.ok().and_then(|m| m.modified().ok()).and_then(|t| t.elapsed().ok()).is_some_and(|age| age.as_secs() < 7 * 86400);
+    if !fresh {
+        let bytes = download(&bare).await.map_err(say)?;
+        // a few dozen files at most: the oldest go first
+        if let Ok(mut rd) = tokio::fs::read_dir(&dir).await {
+            let mut all = Vec::new();
+            while let Ok(Some(e)) = rd.next_entry().await {
+                if let Ok(m) = e.metadata().await { all.push((m.modified().unwrap_or(std::time::UNIX_EPOCH), e.path())); }
+            }
+            all.sort();
+            for (_, old) in all.iter().rev().skip(40) { let _ = tokio::fs::remove_file(old).await; }
+        }
+        tokio::fs::write(&file, &bytes).await.map_err(|e| format!("The datasheet could not be kept for drawing ({e})."))?;
+    }
+    let mut out = Vec::new();
+    for n in want {
+        let stem = dir.join(format!("{key}-{n}-{longest_px}-{}", std::process::id()));
+        let run = tokio::process::Command::new(std::env::var("KC_PDFTOPPM").unwrap_or_else(|_| "pdftoppm".into()))
+            .args(["-png", "-singlefile", "-f", &n.to_string(), "-l", &n.to_string(), "-scale-to", &longest_px.to_string()])
+            .arg(&file).arg(&stem).stdin(std::process::Stdio::null()).kill_on_drop(true).output();
+        let done = match tokio::time::timeout(std::time::Duration::from_secs(40), run).await {
+            Err(_) => return Err(format!("Page {n} took too long to draw.")),
+            Ok(Err(_)) => return Err("Datasheet pages cannot be drawn on this server (pdftoppm is not installed). read_datasheet returns their text.".into()),
+            Ok(Ok(o)) => o,
+        };
+        let png = stem.with_extension("png");
+        let bytes = tokio::fs::read(&png).await;
+        let _ = tokio::fs::remove_file(&png).await;
+        match bytes {
+            Ok(b) if done.status.success() && !b.is_empty() => out.push((n, b)),
+            _ => return Err(format!("Page {n} could not be drawn.")),
+        }
+    }
+    Ok((out, total, note))
+}
+
 /// `POST /api/ai/datasheet` — the pages of a PDF datasheet that answer a query, or pages by number.
 pub async fn read(State(state): State<AppState>, _user: AuthUser, Json(req): Json<Req>) -> AppResult<Json<Value>> {
     if req.url.len() > 2000 {
