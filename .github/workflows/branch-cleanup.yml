@@ -1,0 +1,56 @@
+name: Branch cleanup
+
+# Deletes claude/* branches whose commits are all in master already, so
+# finished work does not leave branches behind. Run it by hand with a list of
+# branch names to also delete branches that landed on master under another
+# commit (rebased work).
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+    inputs:
+      branches:
+        description: Extra branches to delete, separated by spaces
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+concurrency:
+  group: branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete branches that are already in master
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          EXTRA: ${{ inputs.branches }}
+        run: |
+          set -u
+          gh api --paginate "repos/$REPO/git/matching-refs/heads/claude/" --jq '.[].ref' |
+            sed 's#^refs/heads/##' > merged-candidates.txt
+          while read -r branch; do
+            [ -n "$branch" ] || continue
+            ahead=$(gh api "repos/$REPO/compare/master...$branch" --jq '.ahead_by') || continue
+            if [ "$ahead" = "0" ]; then
+              echo "Deleting $branch (everything is in master)"
+              gh api -X DELETE "repos/$REPO/git/refs/heads/$branch" || echo "Could not delete $branch"
+            else
+              echo "Keeping $branch ($ahead commits not in master)"
+            fi
+          done < merged-candidates.txt
+          for branch in $EXTRA; do
+            case "$branch" in
+              master|launch-screenshots)
+                echo "Refusing to delete $branch"
+                continue ;;
+            esac
+            echo "Deleting $branch (asked for by hand)"
+            gh api -X DELETE "repos/$REPO/git/refs/heads/$branch" || echo "Could not delete $branch"
+          done
