@@ -44,6 +44,9 @@ export function hotkeySections(): HotkeySection[] {
   for (const [name, a] of allHotkeyActions()) {
     if (!a.label) continue;
     const cls = name.split("::")[0], toolName = a.name || `${APP_OF_CLASS[cls] || "common"}.${a.id}`;
+    // EDA_BASE_FRAME::ShowPreferences collects the common, schematic, board, Gerber and drawing sheet kifaces'
+    // actions only: CvPcb's (cvpcb.*) keep their hotkeys but are not listed
+    if (toolName.startsWith("cvpcb.")) continue;
     entries.push({ name, section: sectionName(toolName), label: a.label, tip: a.tip || "", key: a.key || "", alt: a.alt || "", origKey: a.key || "", origAlt: a.alt || "", defKey: a.defKey || "", defAlt: a.defAlt || "", toolName });
   }
   entries.sort((x, y) => (x.toolName < y.toolName ? -1 : x.toolName > y.toolName ? 1 : 0));
