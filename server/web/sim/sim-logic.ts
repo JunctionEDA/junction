@@ -23,15 +23,28 @@ export function normalizeSpice(v: number): { base: number; exp: number } {
 }
 const SPICE_PFX: Record<number, string> = { [-15]: "f", [-12]: "p", [-9]: "n", [-6]: "u", [-3]: "m", 0: "", 3: "k", 6: "Meg", 9: "G", 12: "T" };
 const SI_PFX: Record<number, string> = { [-15]: "f", [-12]: "p", [-9]: "n", [-6]: "u", [-3]: "m", 0: "", 3: "K", 6: "M", 9: "G", 12: "T" };
-/** wxString::FromCDouble( x ) then StripZeros: up to 6 significant decimals, trailing zeros gone. */
-function cDouble(x: number): string {
-  if (!Number.isFinite(x)) return String(x);
-  let s = x.toFixed(6);
-  if (s.includes(".")) s = s.replace(/0+$/, "").replace(/\.$/, "");
-  return s === "-0" ? "0" : s;
+/** wxString::FromCDouble( x ) with no precision: a C-locale std::ostream at its default precision, i.e. printf's "%g"
+ *  (6 significant digits, scientific below 1e-4 or from 1e6, the exponent signed and at least two digits). */
+export function fromCDouble(x: number): string {
+  if (Number.isNaN(x)) return "nan";
+  if (!Number.isFinite(x)) return x < 0 ? "-inf" : "inf";
+  if (x === 0) return Object.is(x, -0) ? "-0" : "0";
+  const P = 6, e = Number(x.toExponential(P - 1).split("e")[1]);
+  const strip = (m: string): string => (m.includes(".") ? m.replace(/0+$/, "").replace(/\.$/, "") : m);
+  if (e < -4 || e >= P) {
+    const [m, ex] = x.toExponential(P - 1).split("e"), n = Number(ex);
+    return strip(m) + "e" + (n < 0 ? "-" : "+") + String(Math.abs(n)).padStart(2, "0");
+  }
+  return strip(x.toFixed(Math.max(0, P - 1 - e)));
+}
+/** SPICE_VALUE::StripZeros: with a decimal point, trailing zeros and then the point go. */
+function stripZeros(s: string): string {
+  if (!s.includes(".") && !s.includes(",")) return s;
+  s = s.replace(/0+$/, "");
+  return s.endsWith(".") || s.endsWith(",") ? s.slice(0, -1) : s;
 }
 /** SPICE_VALUE::ToSpiceString: "1u", "4.7k", "10Meg". */
-export function toSpiceString(v: number): string { const { base, exp } = normalizeSpice(v); return cDouble(base) + (SPICE_PFX[exp] ?? ""); }
+export function toSpiceString(v: number): string { const { base, exp } = normalizeSpice(v); return stripZeros(fromCDouble(base)) + (SPICE_PFX[exp] ?? ""); }
 /** SPICE_VALUE( string ).ToSpiceString(): a field's text as the command writes it ("" stays ""). */
 export function spiceText(s: string): string { const v = parseSpiceValue(s); return Number.isFinite(v) ? toSpiceString(v) : s.trim(); }
 /** SPICE_VALUE_FORMAT: significant digits and a range ("~V" auto prefix + units, "mV", "°", …). */
@@ -60,8 +73,8 @@ export function formatValue(v: number, f: ValueFormat): string {
   mant = Math.round(mant * Math.pow(10, f.precision - 1));
   mant *= Math.pow(10, scale - f.precision + 1);
   let res = mant.toFixed(Math.max(0, f.precision - scale - 1));
-  // "an excessively long number": wxString::FromCDouble's shortest form (scientific for tiny values)
-  if (res.length > f.precision + scale + 1) res = String(Number(mant.toPrecision(15)));
+  // "an excessively long number": wxString::FromCDouble( mantissa ), "%g" (scientific for tiny values)
+  if (res.length > f.precision + scale + 1) res = fromCDouble(mant);
   return res + range;
 }
 

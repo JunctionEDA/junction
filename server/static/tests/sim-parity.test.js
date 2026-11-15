@@ -114,6 +114,14 @@ test("the netlist: ${KICAD*_SYMBOL_DIR}/Simulation_SPICE.sp is the installed lib
   assert.strictEqual(BL.builtinLibrary("${KIPRJMOD}/Simulation_SPICE.sp"), null);
 });
 
+// ---------------------------------------------------------------- SPICE_VALUE::ToSpiceString, the OP console
+test("ToSpiceString: wxString::FromCDouble's %g of the normalised base, StripZeros, the SPICE prefix", () => {
+  assert.strictEqual(L.toSpiceString(-2.69e-26), "-2.69e-11f");   // below the femto range: the digits stay
+  assert.strictEqual(L.toSpiceString(1.234567e-3), "1.23457m");
+  assert.strictEqual(L.toSpiceString(4700), "4.7k"); assert.strictEqual(L.toSpiceString(0), "0");
+  assert.strictEqual(L.fromCDouble(1e-5), "1e-05"); assert.strictEqual(L.fromCDouble(123456789), "1.23457e+08"); assert.strictEqual(L.fromCDouble(0.0001), "0.0001");
+  assert.strictEqual(L.formatValue(-2.69e-26, { precision: 3, range: "~V" }), "-2.69e-11fV");
+});
 // ---------------------------------------------------------------- the demos, line by line
 const demo = (rel) => path.join(DEMOS, rel);
 const haveDemos = fs.existsSync(DEMOS);

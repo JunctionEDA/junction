@@ -367,7 +367,7 @@ export async function runSimulation(reuse = false): Promise<void> {
     const sp = await session();
     const multi = S.tuners.find((x) => x.multi);
     const steps = multi ? Math.max(2, multi.steps) : 1;
-    let merged: RawPlot | null = null; const multiTraces: PlotTrace[] = [];
+    let merged: RawPlot | null = null, listing = false; const multiTraces: PlotTrace[] = [];
     for (let k = 0; k < steps; k++) {
       if (multi) multi.value = multi.min + ((multi.max - multi.min) * k) / (steps - 1);
       const cir = circuitFor(t);
@@ -376,6 +376,9 @@ export async function runSimulation(reuse = false): Promise<void> {
       await sp.exec(["destroy all", "remcirc"]).catch(() => undefined);
       const lines = [...COMPAT_COMMANDS[compatIndex()], "source /sim.cir", ...S.tuners.map((x) => `alter ${x.name.toLowerCase()} = ${toSpiceString(x.value)}`), "run"];
       const r = await sp.exec(lines);
+      // SIMULATOR_FRAME::onSimFinished: every finished run clears the schematic's operating point; only an OP run's
+      // results (OnSimRefresh) set it again
+      clearOperatingPoints();
       const said = noPrompts(r.out); if (said.trim()) log(said.endsWith("\n") ? said : said + "\n");
       for (const e of r.err) if (e.trim() && !/^(Note|Warning: can't find)/.test(e)) log(e + "\n");
       const type = tabType(t);
@@ -387,7 +390,7 @@ export async function runSimulation(reuse = false): Promise<void> {
       if (!isPlottable(type) && type !== "Custom" && type !== "FFT") {
         const p = await sp.exec(["print all"]); const said2 = noPrompts(p.out);
         log("\n\nSimulation results:\n\n" + said2 + (said2.endsWith("\n") ? "" : "\n"));
-        t.opText = said2.trim() ? said2 : "No results."; t.data = null; continue;
+        t.opText = said2.trim() ? said2 : "No results."; t.data = null; listing = true; continue;
       }
       sp.remove("/out.raw");
       await sp.exec(["set filetype=ascii", "write /out.raw"]);
@@ -403,7 +406,8 @@ export async function runSimulation(reuse = false): Promise<void> {
     t.data = merged; S.simulated = true;
     await updateMeasurements(t, sp);
     (t as Tab & { multi?: PlotTrace[] }).multi = multi ? multiTraces : undefined;
-    if (!t.data && tabType(t) !== "OP") log("Error: the simulation produced no results.\n");
+    // OP and the listing analyses (PZ, TF, SENS, DISTO) have no plot to produce
+    if (!t.data && tabType(t) !== "OP" && !listing) log("Error: the simulation produced no results.\n");
   } catch (e) {
     log("Error: " + (e instanceof Error ? e.message : String(e)) + "\n");
   } finally {
@@ -430,7 +434,9 @@ async function operatingPointResults(t: Tab, sp: SpiceSession): Promise<void> {
     else if (/^@/.test(n)) { signal = n; unit = "?"; }
     else { signal = `V(${n})`; unit = "V"; }
     if (lines.some((l) => l.startsWith(signal + ":"))) continue;
-    lines.push((signal + ":").padEnd(Math.max(signal.length + 1, 25)) + toSpiceString(v.re[0]) + unit);
+    // ( signal + ":" ).Pad( padding ): padding = 25 - len (1 from 25 characters on) spaces after the colon
+    const padding = signal.length < 25 ? 25 - signal.length : 1;
+    lines.push(signal + ":" + " ".repeat(padding) + toSpiceString(v.re[0]) + unit);
     if (unit !== "?") vectors.push({ name: unit === "W" ? `${signal.slice(2, -1)}:power` : n, value: v.re[0] });
   }
   t.opText = lines.length ? lines.join("\n") + "\n" : "No operating point results.";
