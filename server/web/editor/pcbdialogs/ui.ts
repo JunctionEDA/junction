@@ -264,6 +264,28 @@ export function messageBox(title: string, message: string, buttons: { label: str
   return ov;
 }
 /**
+ * A modal sub-dialog over the dialog that opened it (the parent stays open beneath, as a wxDialog's ShowModal child):
+ * its own overlay with the body `build` fills and Cancel / OK.  ok() returning false keeps it open.
+ */
+export function subDialog(title: string, width: number, build: (body: HTMLElement) => void, ok: () => boolean | void, opts?: { key?: string }): HTMLElement | null {
+  if (typeof document === "undefined") return null;
+  ensureCss();
+  const ov = h("div", { class: "kd-overlay", style: "z-index:10040", "data-k": (opts && opts.key) || "subdialog" });
+  const dlg = h("div", { class: "kd-dialog", style: `width:${width}px;max-width:calc(100vw - 32px)`, tabIndex: -1 });
+  const body = h("div", { class: "kd-body" });
+  const cancel = h("button", { class: "btn", type: "button", "data-k": "sub-cancel" }, "Cancel"), okB = h("button", { class: "btn primary", type: "button", "data-k": "sub-ok" }, "OK");
+  cancel.addEventListener("click", () => ov.remove());
+  okB.addEventListener("click", () => { if (ok() !== false) ov.remove(); });
+  dlg.append(h("div", { class: "kd-title" }, h("span", null, title)), body, h("div", { class: "kd-foot" }, h("span", { class: "spacer" }), cancel, okB)); ov.append(dlg);
+  ov.addEventListener("keydown", (ev) => {
+    ev.stopPropagation(); if (ev.key === "Tab") trapTab(ev, ov);
+    if (ev.key === "Escape") { ev.preventDefault(); ov.remove(); }
+  });
+  build(body);
+  document.body.append(ov); dlg.focus();
+  return ov;
+}
+/**
  * WX_TEXT_ENTRY_DIALOG over the dialog that asked for it: a caption, a (multi-line) text field and Cancel / OK.
  * OK hands the text to onOk; Cancel or Escape leaves it alone.
  */

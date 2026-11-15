@@ -244,3 +244,40 @@ test("barcode item: the QR modules are drawn, scaled to (size)", () => {
   const xs = it.geom.flatMap((g) => g.pts.map((p) => p[0]));
   assert.equal(Math.min(...xs), -0.5); assert.equal(Math.max(...xs), 20.5);   // 21 modules of 1 mm about x = 10
 });
+const IPC = loadTs("fab/ipc2581.ts");
+test("ipc2581: function mode sections follow Table 4 and ResolveSections", () => {
+  const S = (mode, req) => IPC.sectionKeyString(IPC.resolveSections("C", mode, new Set(req)).included);
+  assert.equal(S("USERDEF", IPC.recommendedSections("USERDEF")), "KBCASUMPLRDOIEF");
+  assert.equal(S("FABRICATION", IPC.recommendedSections("FABRICATION")), "KSUMLROIEFY");
+  assert.equal(S("BOM", []), "B");
+  assert.equal(S("ASSEMBLY", ["K", "P"]), "KBCAUPLRO");
+  assert.deepEqual(IPC.resolveSections("C", "USERDEF", new Set(["A"])).conflicts, ["Cannot export assembly data without outer copper layers."]);
+  assert.match(IPC.resolveSections("B", "USERDEF", new Set(["A", "O"])).conflicts[0], /cannot be exported without component packages in IPC-2581B/);
+  assert.deepEqual(IPC.resolveSections("C", "USERDEF", new Set()).conflicts, ["No IPC-2581 content selected."]);
+});
+test("ipc2581: a board's file", () => {
+  const FAB = loadTs("fab/index.ts");
+  const d = K.parseDoc(`(kicad_pcb (version 20241229) (generator "pcbnew") (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (25 "Edge.Cuts" user))
+    (net 0 "") (net 1 "GND")
+    (gr_rect (start 0 0) (end 20 10) (layer "Edge.Cuts") (stroke (width 0.1) (type solid)) (uuid "e1"))
+    (footprint "R:R_0603" (layer "F.Cu") (uuid "f1") (at 5 5) (property "Reference" "R1" (at 0 0 0) (layer "F.SilkS") (uuid "p1")) (property "Value" "10k" (at 0 0 0) (layer "F.Fab") (uuid "p2"))
+      (attr smd) (pad "1" smd rect (at -0.8 0) (size 0.8 0.9) (layers "F.Cu" "F.Mask") (net 1 "GND") (uuid "a1")) (pad "2" smd roundrect (at 0.8 0) (size 0.8 0.9) (roundrect_rratio 0.25) (layers "F.Cu" "F.Mask") (uuid "a2")))
+    (via (at 10 5) (size 0.6) (drill 0.3) (layers "F.Cu" "B.Cu") (net 1) (uuid "v1"))
+    (segment (start 4.2 5) (end 10 5) (width 0.25) (layer "F.Cu") (net 1) (uuid "s1")))`, "kicad_pcb");
+  const r = FAB.ipc2581({ doc: d, projectName: "demo", date: new Date(2026, 0, 2, 3, 4, 5) }, { rev: "C", inch: false, precision: 6, mode: "USERDEF", sections: IPC.recommendedSections("USERDEF"), anonymizeNets: false, omitRefDes: false, internalId: "", mpn: "", mfg: "", distPn: "", dist: "N/A", bomRev: "" });
+  assert.deepEqual(r.errors, []);
+  const x = r.xml;
+  assert.match(x, /<FunctionMode mode="USERDEF" sectionKey="KBCASUMPLRDOIEF"\/>/);
+  assert.match(x, /<Component refDes="R1" packageRef="R_R_0603" part="R_R_0603_10k" layerRef="F.Cu" mountType="SMT">/);
+  assert.match(x, /<RectCenter width="0.8" height="0.9"\/>/);
+  assert.match(x, /<RectRound width="0.8" height="0.9" radius="0.2"/);
+  assert.match(x, /<Set net="GND">/);
+  assert.match(x, /<PinRef componentRef="R1" pin="1"\/>/);
+  assert.match(x, /<Hole name="H1" diameter="0.3" platingStatus="VIA" plusTol="0.0" minusTol="0.0" x="10.0" y="-5.0"\/>/);
+  assert.match(x, /<BomItem OEMDesignNumberRef="R_R_0603_10k" quantity="1" pinCount="2" category="ELECTRICAL">/);
+  assert.match(x, /<Profile>\s*<Polygon>\s*<PolyBegin x="0.0" y="0.0"\/>/);
+  const anon = FAB.ipc2581({ doc: d, projectName: "demo" }, { rev: "B", inch: true, precision: 4, mode: "FABRICATION", sections: IPC.recommendedSections("FABRICATION"), anonymizeNets: true, omitRefDes: true, internalId: "", mpn: "", mfg: "", distPn: "", dist: "", bomRev: "" }).xml;
+  assert.match(anon, /<IPC-2581 revision="B"/); assert.match(anon, /<FunctionMode mode="FABRICATION" level="3"/);
+  assert.match(anon, /<Set net="NET_1">/); assert.doesNotMatch(anon, /GND|<Component |<BomItem /);
+  assert.match(anon, /diameter="0.0118"/);
+});

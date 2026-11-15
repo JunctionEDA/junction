@@ -32,6 +32,7 @@ import { type FillProgress, type FillRules, type ZoneFillResult, ZoneFiller, fil
 
 import { meshVrml, vrmlModels, writeVrml, type VrmlOptions } from "./vrml";
 import { type OdbResult, legalEntityName, writeOdb } from "./odb";
+import { type Ipc2581Options, type Ipc2581Result, MODES as IPC_MODES, SECTION_KEYS as IPC_SECTION_KEYS, optionalSections as ipcOptionalSections, recommendedSections as ipcRecommendedSections, requiredSections as ipcRequiredSections, resolveSections as ipcResolveSections, writeIpc2581 } from "./ipc2581";
 export const VERSION_SUFFIX = "-web";
 
 // ---------------------------------------------------------------- layer names
@@ -236,7 +237,13 @@ export function odb(ctx: FabContext, o: { inch?: boolean; precision?: number; or
   return writeOdb(modelOf(ctx), setupNode(ctx.setup), { inch: !!o.inch, precision: o.precision, origin: o.origin, productModelName: o.productName ? legalEntityName(o.productName) : "", layers: plottableLayers(ctx.doc), nameOf: (l) => layerDisplayName(ctx.doc, l), version: kicadVersion(ctx.doc), date: ctx.date || new Date() });
 }
 
-export const api = { odb, outlineText, vrmlModels: (ctx: FabContext) => vrmlModels(modelOf(ctx)), writeVrml: (ctx: FabContext, o: VrmlOptions, meshOf: Parameters<typeof writeVrml>[2]) => writeVrml(modelOf(ctx), o, meshOf), meshVrml, plotBoard, pluginPlot, drillJob, drillReport, markerParts, pnpGerber, pnpFileName, DEFAULT_VARIANT, variantNames: (variants: Node | null | undefined): string[] => boardVariantNames(variants || null, refCompare), writeSvg, writePdf, writePs, writeDxf, dxfTextString, writePng, paintPage, gerberJobFile, boardPage, plotFileName, outputPath, fillZones, filledZoneNode, storedFill, polyArea, PRESETS, presetById, plottableLayers, layerDisplayName, layerAttrs, protelExtension, model: modelOf, plotGerbers, drillFiles: drill, positions, bom: billOfMaterials, placementCsv, placementAscii, bomCsv,
+/** The board as an IPC-2581 file (PCB_IO_IPC2581). */
+export function ipc2581(ctx: FabContext, o: Omit<Ipc2581Options, "layers" | "nameOf" | "boardName" | "version" | "date">): Ipc2581Result {
+  return writeIpc2581(modelOf(ctx), setupNode(ctx.setup), { ...o, layers: plottableLayers(ctx.doc), nameOf: (l) => layerDisplayName(ctx.doc, l), boardName: projectNameOf(ctx), version: kicadVersion(ctx.doc), date: ctx.date || new Date() });
+}
+export const ipc2581Sections = { MODES: IPC_MODES, KEYS: IPC_SECTION_KEYS, optional: ipcOptionalSections, required: ipcRequiredSections, recommended: ipcRecommendedSections, resolve: ipcResolveSections };
+
+export const api = { odb, ipc2581, ipc2581Sections, outlineText, vrmlModels: (ctx: FabContext) => vrmlModels(modelOf(ctx)), writeVrml: (ctx: FabContext, o: VrmlOptions, meshOf: Parameters<typeof writeVrml>[2]) => writeVrml(modelOf(ctx), o, meshOf), meshVrml, plotBoard, pluginPlot, drillJob, drillReport, markerParts, pnpGerber, pnpFileName, DEFAULT_VARIANT, variantNames: (variants: Node | null | undefined): string[] => boardVariantNames(variants || null, refCompare), writeSvg, writePdf, writePs, writeDxf, dxfTextString, writePng, paintPage, gerberJobFile, boardPage, plotFileName, outputPath, fillZones, filledZoneNode, storedFill, polyArea, PRESETS, presetById, plottableLayers, layerDisplayName, layerAttrs, protelExtension, model: modelOf, plotGerbers, drillFiles: drill, positions, bom: billOfMaterials, placementCsv, placementAscii, bomCsv,
   jlcPlacement, buildPackage, packageZip, zip, tar, gzip, crc32, writeGerber, primPolys };
 export type KiCadFabApi = typeof api & { open?: () => void };
 // the canvas stores a text's outlines with it when it writes the item (canvas/export.ts ensureRenderCaches)
