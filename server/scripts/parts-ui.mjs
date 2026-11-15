@@ -93,6 +93,9 @@ await A.click('[data-menu="tools"] > button');
 check('the Tools menu offers vendor parts and part libraries', await A.getByText('Add Part from Vendor...', { exact: true }).isVisible() && await A.getByText('Part Libraries...', { exact: true }).isVisible());
 await shot(A, '01-tools-menu');
 await A.getByText('Add Part from Vendor...', { exact: true }).click(); await A.waitForSelector('#kp-dialog');
+// the dialog takes the keyboard: typing straight away goes to the search field, not to the editor's hotkeys
+await A.waitForTimeout(150); await A.keyboard.type('pa');
+check('typing right after it opens lands in the search field and runs no editor hotkey', await A.inputValue('#kp-q') === 'pa' && await A.evaluate(() => window.CollabApp.getState().tool.current === 'select' && !document.querySelector('.klib-dialog')), await A.inputValue('#kp-q'));
 await search(A, 'STM32F103C8T6');
 const firstRow = await A.locator('#kp-results tr.kp-row').first().innerText();
 check('searching finds the part at LCSC with stock and price', /STM32F103C8T6/.test(firstRow) && /C8734/.test(firstRow) && /\$\d/.test(firstRow) && /LQFP-48/.test(firstRow), firstRow.replace(/\s+/g, ' '));

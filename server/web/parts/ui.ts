@@ -147,14 +147,27 @@ class PartsDialog {
   // the bill of materials of the open document, and the line a search is looking for a part for
   private bom: BomLine[] | null = null; private boards = 1; private bomSheets = 1; private assign: { ids: string[]; refs: string[] } | null = null;
   // an open drop-down list takes the first Escape
-  private onKey = (ev: KeyboardEvent) => { if (ev.key === "Escape" && !ev.defaultPrevented && !document.querySelector(".kp-ask") && !(ev.target as HTMLElement | null)?.closest?.("[data-popup-open]")) { ev.stopPropagation(); this.close(); } };
+  private onKey = (ev: KeyboardEvent) => {
+    if (ev.key === "Escape" && !ev.defaultPrevented && !document.querySelector(".kp-ask") && !(ev.target as HTMLElement | null)?.closest?.("[data-popup-open]")) { ev.stopPropagation(); this.close(); return; }
+    // The dialog is modal: a key pressed while the focus is still on the page behind it (the menu that opened the
+    // dialog gave it back to the editor) must not run an editor hotkey.  It goes to the dialog's first field instead.
+    const t = ev.target as HTMLElement | null;
+    if (t && t.closest && (this.root.contains(t) || t.closest(".kp-ask, [data-popup-open], .k-select-list, [role=listbox]"))) return;
+    ev.stopImmediatePropagation();
+    if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey || ev.key === "Tab") this.focusFirst();
+  };
+  /** Put the keyboard in the dialog: the open tab's first field, else the tab itself. */
+  private focusFirst() {
+    const el = this.bodyEl.querySelector<HTMLElement>("#kp-q, input:not([type=hidden]):not([disabled]), textarea") || this.tabs[this.tab] || null;
+    if (el && document.activeElement !== el) { el.focus(); if (el instanceof HTMLInputElement) try { el.select(); } catch { /* not a text field */ } }
+  }
 
   constructor(opts: Opts) {
     this.ctx = opts.ctx || null; this.tab = opts.tab || "search"; this.q = opts.query || "";
     if (!document.getElementById("kp-style")) document.head.append(h("style", { id: "kp-style" }, CSS));
     const tab = (id: Tab, label: string) => (this.tabs[id] = h("button", { class: "kp-tab", type: "button", "data-tab": id, onclick: () => this.setTab(id) }, label));
     this.bodyEl = h("div", { class: "kp-body" });
-    const box = h("div", { class: "kp", role: "dialog", "aria-label": "Vendor Parts" },
+    const box = h("div", { class: "kp", role: "dialog", "aria-label": "Vendor Parts", tabindex: "-1", style: "outline:none" },
       h("div", { class: "kp-head" }, h("span", { class: "kp-title" }, "Vendor Parts"), tab("search", "Search"), tab("libraries", "My Libraries"), this.ctx && this.ctx.doc ? tab("bom", "BOM") : null, tab("keys", "API Keys"),
         h("button", { class: "kp-x", type: "button", title: "Close (Esc)", onclick: () => this.close() }, "×")),
       this.bodyEl);
@@ -164,6 +177,16 @@ class PartsDialog {
     document.body.append(this.root);
     document.addEventListener("keydown", this.onKey, true);
     this.render();
+    this.focusFirst();
+    // the menu that opened the dialog hands the focus back to the editor as it closes: take it again
+    setTimeout(() => { if (current === this && !this.root.contains(document.activeElement)) this.focusFirst(); }, 0);
+    // and keep it: the focus leaving for the page behind (a click on the dialog's own blank space, a control that
+    // went away on a redraw) would put the editor's hotkeys back under the keyboard
+    this.root.addEventListener("focusout", () => setTimeout(() => {
+      if (current !== this || !this.root.isConnected) return;
+      const a = document.activeElement as HTMLElement | null;
+      if (!a || a === document.body || a.id === "canvas" || a.id === "stage") box.focus();
+    }, 0));
     void this.load();
   }
 
