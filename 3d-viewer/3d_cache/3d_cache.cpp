@@ -22,10 +22,14 @@
 #define GLM_FORCE_RADIANS
 
 #include <mutex>
+#include <optional>
+#include <set>
 #include <utility>
 
 #include <wx/datetime.h>
 #include <wx/dir.h>
+#include <wx/ffile.h>
+#include <wx/filename.h>
 #include <wx/log.h>
 #include <wx/stdpaths.h>
 
@@ -37,6 +41,9 @@
 #include "plugins/3dapi/ifsg_api.h"
 
 #include <advanced_config.h>
+#include <collab/collab_auth.h>
+#include <collab/collab_rest.h>
+#include <collab/collab_session.h>
 #include <common.h>     // For ExpandEnvVarSubstitutions
 #include <filename_resolver.h>
 #include <mmh3_hash.h>
@@ -137,6 +144,117 @@ S3D_CACHE::~S3D_CACHE()
 }
 
 
+/**
+ * A model of KiCad's standard 3D library ("<Library>.3dshapes/<Name>.<ext>") that is not on this
+ * computer, fetched from the collaboration server into the user cache and returned as that
+ * file's path; empty when there is nothing to show.
+ *
+ * Junction ships without the 3D library, so a board drawn where the library was installed
+ * would otherwise show bare pads.  Nothing is asked of the network when nobody is signed in,
+ * each model is asked for once per run, and the first request the server does not answer at
+ * all ends the asking for this run, so a dead connection costs one short timeout, not one per
+ * part.  The board is never changed: only where the file is read from.
+ */
+static wxString fetchLibraryModel( const wxString& aModelFile )
+{
+    wxString norm = aModelFile;
+    norm.Replace( wxS( "\\" ), wxS( "/" ) );
+
+    const size_t libEnd = norm.rfind( wxS( ".3dshapes/" ) );
+
+    if( libEnd == wxString::npos )
+        return wxEmptyString;
+
+    const size_t libStart = norm.rfind( wxS( '/' ), libEnd );
+    wxString     library = norm.Mid( libStart == wxString::npos ? 0 : libStart + 1,
+                                     libEnd - ( libStart == wxString::npos ? 0 : libStart + 1 ) );
+    wxFileName   item( norm.Mid( libEnd + 10 ) );
+    wxString     ext = item.GetExt().Lower();
+    wxString     name = item.GetName();
+
+    // A project's own "<x>.3dshapes" folder is not the standard library: its files travel with
+    // the project, and asking the server for them would only find a namesake.
+    if( aModelFile.StartsWith( wxS( "${KIPRJMOD}" ) ) || library.IsEmpty() || name.IsEmpty()
+        || item.GetDirCount() > 0
+        || ( ext != wxS( "wrl" ) && ext != wxS( "step" ) && ext != wxS( "stp" ) && ext != wxS( "wrz" ) ) )
+    {
+        return wxEmptyString;
+    }
+
+    static std::mutex         s_mutex;
+    static std::set<wxString> s_misses;
+    static bool               s_offline = false;
+    static bool               s_tokenRead = false;
+    static wxString           s_server;
+    static wxString           s_token;
+
+    std::lock_guard<std::mutex> lock( s_mutex );
+
+    wxFileName cached( PATHS::GetUserCachePath(), name + wxS( ".step" ) );
+    cached.AppendDir( wxS( "3d-models" ) );
+    cached.AppendDir( library + wxS( ".3dshapes" ) );
+
+    if( cached.FileExists() )
+        return cached.GetFullPath();
+
+    const wxString key = library + wxS( "/" ) + name;
+
+    if( s_offline || s_misses.count( key ) )
+        return wxEmptyString;
+
+    if( !s_tokenRead )
+    {
+        s_tokenRead = true;
+        s_server = COLLAB_SESSION::ServerUrl();
+        s_token = COLLAB_AUTH::StoredToken( s_server );
+    }
+
+    if( s_token.IsEmpty() )
+        return wxEmptyString;
+
+    bool                       noAnswer = false;
+    std::optional<std::string> bytes =
+            COLLAB_REST::DownloadLibraryModel( s_server, s_token, library, name, &noAnswer );
+
+    if( !bytes )
+    {
+        if( noAnswer )
+            s_offline = true;
+        else
+            s_misses.insert( key );
+
+        return wxEmptyString;
+    }
+
+    wxLogNull noLog;
+
+    // Written beside its final name and moved into place, so a half-written file is never read.
+    wxFileName partial( cached );
+    partial.SetFullName( cached.GetFullName() + wxS( ".part" ) );
+
+    if( !wxFileName::Mkdir( cached.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL ) )
+        return wxEmptyString;
+
+    {
+        wxFFile out( partial.GetFullPath(), wxS( "wb" ) );
+
+        if( !out.IsOpened() || out.Write( bytes->data(), bytes->size() ) != bytes->size() || !out.Close() )
+        {
+            s_misses.insert( key );
+            return wxEmptyString;
+        }
+    }
+
+    if( !wxRenameFile( partial.GetFullPath(), cached.GetFullPath(), true ) )
+    {
+        s_misses.insert( key );
+        return wxEmptyString;
+    }
+
+    return cached.GetFullPath();
+}
+
+
 SCENEGRAPH* S3D_CACHE::load( const wxString& aModelFile, const wxString& aBasePath, S3D_CACHE_ENTRY** aCachePtr,
                              std::vector<const EMBEDDED_FILES*> aEmbeddedFilesStack, S3DMODEL** aRenderModel )
 {
@@ -173,6 +291,9 @@ SCENEGRAPH* S3D_CACHE::load( const wxString& aModelFile, const wxString& aBasePa
             full3Dpath = subst;
         }
     }
+
+    if( full3Dpath.empty() )
+        full3Dpath = fetchLibraryModel( aModelFile );
 
     if( full3Dpath.empty() )
     {

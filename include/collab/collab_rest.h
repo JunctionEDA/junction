@@ -89,6 +89,16 @@ KICOMMON_API std::optional<std::string> DownloadProjectFont( const wxString& aSe
                                                              const wxString& aFamily, bool aBold,
                                                              bool aItalic );
 
+/// GET /api/kicad-lib/model?lib=&name=&fallback=1 -> the STEP file of KiCad's 3D model library
+/// aLibrary.3dshapes/aName, or the closest model the library has when it lacks that one.
+/// aNoAnswer is set when the server gave no HTTP answer at all (offline, timed out), as
+/// opposed to answering that it has no such model.  Short timeout: the caller is drawing.
+KICOMMON_API std::optional<std::string> DownloadLibraryModel( const wxString& aServerUrl,
+                                                              const wxString& aToken,
+                                                              const wxString& aLibrary,
+                                                              const wxString& aName,
+                                                              bool* aNoAnswer = nullptr );
+
 /// PUT /api/projects/{id}/fonts/file?family=&bold=&italic=&index=&name= with the font file:
 /// keep a font of this computer with the project.  Refused (403, with the reason) when the
 /// font's embedding permission forbids it.
