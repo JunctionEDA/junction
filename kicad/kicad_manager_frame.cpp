@@ -1600,6 +1600,16 @@ private:
         if( !done )
         {
             refresh();
+
+            // While the download waits to try a failed connection again, Retry tries now.
+            const bool waiting = COLLAB_STDLIBS::Waiting() && !stop;
+
+            if( waiting != m_retry->IsShown() )
+            {
+                m_retry->Show( waiting );
+                Layout();
+            }
+
             return;
         }
 
@@ -1616,8 +1626,8 @@ private:
         }
         else
         {
-            // Automatic retries are used up: say why and leave the next try to the user.  What
-            // was downloaded is kept, so Retry continues from it.
+            // Not a connection problem (those are retried without end): say why and leave the
+            // next try to the user.  What was downloaded is kept, so Retry continues from it.
             m_failed = true;
             m_continuing = true;
             m_message->SetLabel( error + wxS( " " )
@@ -1635,6 +1645,8 @@ private:
     {
         if( m_failed )
             start();
+        else
+            COLLAB_STDLIBS::RetryNow();
     }
 
     void onCancel( wxCommandEvent& )

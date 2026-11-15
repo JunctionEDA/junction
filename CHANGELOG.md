@@ -13,7 +13,8 @@ version it is based on.
   Preferences, Download Standard Libraries does the same later.
   A download cut short by closing Junction, sleep or a lost connection
   continues at the next start from what it already has; a failed connection
-  is retried by itself a few times, and the download window has Retry.
+  is retried by itself until it works (waiting up to a minute between
+  tries), and Retry in the download window tries again at once.
 - The project manager program itself is named Junction on every system
   (Junction inside the Mac app, junction.exe on Windows, Junction on Linux
   with a Junction desktop entry and icon), so Activity Monitor, Task Manager

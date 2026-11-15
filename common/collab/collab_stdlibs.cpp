@@ -19,6 +19,8 @@
 
 #include <collab/collab_stdlibs.h>
 
+#include <algorithm>
+#include <atomic>
 #include <fstream>
 #include <iterator>
 #include <map>
@@ -89,6 +91,11 @@ bool removeDir( const wxString& aDir )
 {
     return !wxFileName::DirExists( aDir ) || wxFileName::Rmdir( aDir, wxPATH_RMDIR_RECURSIVE );
 }
+
+
+/// Set while the download waits before another try, and to cut that wait short.
+std::atomic<bool> s_waiting( false );
+std::atomic<bool> s_retryNow( false );
 
 
 wxString stoppedMessage()
@@ -245,28 +252,42 @@ wxString download( const ARCHIVE& aArchive, const wxString& aTarget,
     if( wxFileName::FileExists( aTarget ) )
         return wxEmptyString;
 
-    const int pauses[] = { 2, 5, 15, 30 };
+    // A connection that fails is tried again for as long as it takes, with a pause that grows
+    // to a minute: the network coming back is all it needs.  Only the user stops it.
+    const int pauses[] = { 2, 5, 15, 30, 60 };
     wxString  error;
 
     for( int attempt = 0; ; attempt++ )
     {
         error = downloadOnce( aArchive, aTarget, aProgress, aStep );
 
-        if( error.IsEmpty() || error == stoppedMessage() || attempt >= (int) std::size( pauses ) )
+        if( error.IsEmpty() || error == stoppedMessage() )
             return error;
 
-        for( int left = pauses[attempt] * 10; left > 0; left-- )
+        // A disk that cannot be written will not get better by waiting.
+        if( error.StartsWith( _( "Cannot write" ) ) )
+            return error;
+
+        const int pause = pauses[std::min( attempt, (int) std::size( pauses ) - 1 )];
+
+        s_retryNow = false;
+        s_waiting = true;
+
+        for( int left = pause * 10; left > 0 && !s_retryNow; left-- )
         {
             if( aProgress
                 && !aProgress( wxString::Format( _( "%s Trying again in %d s..." ), error,
                                                  ( left + 9 ) / 10 ),
                                -1 ) )
             {
+                s_waiting = false;
                 return stoppedMessage();
             }
 
             wxMilliSleep( 100 );
         }
+
+        s_waiting = false;
     }
 }
 
@@ -413,6 +434,18 @@ bool COLLAB_STDLIBS::Interrupted()
     return Needed()
            && wxFileName::FileExists( downloadFolder() + wxFileName::GetPathSeparator()
                                       + wxS( "in-progress" ) );
+}
+
+
+bool COLLAB_STDLIBS::Waiting()
+{
+    return s_waiting;
+}
+
+
+void COLLAB_STDLIBS::RetryNow()
+{
+    s_retryNow = true;
 }
 
 
