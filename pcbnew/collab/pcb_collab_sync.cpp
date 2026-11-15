@@ -2178,7 +2178,9 @@ std::string PCB_COLLAB_SYNC::plotPreviewSvg( bool aFitPageToBoard )
 
     std::string svg;
 
-    if( plotter.Plot( tmp, layers, LSEQ(), false, true ) )
+    // One file with every layer on the one page (PCB_PLOTTER::Plot: Gerber extensions off,
+    // all layers to a single file, all layers forced onto a single page).
+    if( plotter.Plot( tmp, layers, LSEQ(), false, true, true ) )
     {
         wxFFile file( tmp, wxS( "rb" ) );
 
