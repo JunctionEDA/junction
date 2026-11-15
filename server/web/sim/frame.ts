@@ -46,7 +46,7 @@ const S = {
   netlist: "", schCommand: "", spice: null as SpiceSession | null, running: false, sidePanel: true, console: true, darkPlots: false, compat: "User configuration",
   tuners: [] as Tuner[], wbName: "", dirty: false, filter: "", probing: null as null | "probe" | "tune", colorN: 0, simulated: false,
 };
-const NGSPICE_URL = "/static/dist/pyodide/ngspice.mjs";
+const NGSPICE_URL = "/static/pyodide/ngspice.mjs";   // served by src/pcm.rs runtime() (static/dist/pyodide in the build, /usr/local/share/kicad-collab/pyodide in the image)
 const SIM_OPTS = OPT_SAVE_V | OPT_SAVE_I | OPT_SAVE_P | OPT_SAVE_EVENTS;
 const curTab = (): Tab | null => S.tabs[S.cur] || null;
 const tabType = (t: Tab | null): SimType => (t ? commandToSimType(t.command) : "TRAN");

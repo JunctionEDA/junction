@@ -815,11 +815,9 @@ pub(crate) fn runtime_dir() -> Option<&'static std::path::PathBuf> {
     }).as_ref()
 }
 
-/// `GET /static/pyodide/{file}` — the interpreter, its standard library and our shim modules.
-/// The sandbox frame has an opaque origin, so these are readable from anywhere; they hold
-/// nothing that is not already public.
-pub async fn runtime(Path(file): Path<String>) -> Response {
-    let kind = match file.as_str() {
+/// The content type of a runtime file `GET /static/pyodide/{file}` serves, or None for a file it does not serve.
+fn runtime_kind(file: &str) -> Option<&'static str> {
+    Some(match file {
         // occt-import-js: the STEP reader behind the 3D viewer's real part models (web/viewer3d/models.ts)
         "pyodide.js" | "pyodide.asm.mjs" | "ngspice.mjs" | "occt-import-js.js" => "application/javascript; charset=utf-8",
         "pyodide.asm.wasm" | "occt-import-js.wasm" => "application/wasm",
@@ -827,8 +825,15 @@ pub async fn runtime(Path(file): Path<String>) -> Response {
         "pyodide-lock.json" | "kicad-python.json" => "application/json; charset=utf-8",
         // a package a plugin imports (numpy, requests, …): a wheel or archive the build put beside the interpreter
         f if (f.ends_with(".whl") || f.ends_with(".zip")) && f.len() <= 160 && !f.starts_with('.') && f.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-' | b'+')) => "application/zip",
-        _ => return StatusCode::NOT_FOUND.into_response(),
-    };
+        _ => return None,
+    })
+}
+
+/// `GET /static/pyodide/{file}` — the interpreter, its standard library and our shim modules.
+/// The sandbox frame has an opaque origin, so these are readable from anywhere; they hold
+/// nothing that is not already public.
+pub async fn runtime(Path(file): Path<String>) -> Response {
+    let Some(kind) = runtime_kind(&file) else { return StatusCode::NOT_FOUND.into_response() };
     let Some(dir) = runtime_dir() else { return (StatusCode::SERVICE_UNAVAILABLE, "the Python runtime is not built on this server (npm run build)").into_response() };
     let Ok(body) = tokio::fs::read(dir.join(&file)).await else { return StatusCode::NOT_FOUND.into_response() };
     // The shim changes with every build of ours; the interpreter only with its version.
@@ -839,6 +844,33 @@ pub async fn runtime(Path(file): Path<String>) -> Response {
 #[cfg(test)]
 mod net_tests {
     use super::*;
+
+    /// Every runtime file the web app fetches is one this route serves, under /static/pyodide/ (the
+    /// build's static/dist/pyodide is not routed: the simulator once asked for /static/dist/pyodide/ngspice.mjs
+    /// and failed on the live site).
+    #[test]
+    fn web_runtime_urls_are_served() {
+        fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(d).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() { if p.file_name().is_some_and(|n| n != "generated" && n != "node_modules") { walk(&p, out) } }
+                else if p.extension().is_some_and(|x| x == "ts" || x == "tsx") { out.push(p) }
+            }
+        }
+        let mut files = Vec::new();
+        walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("web"), &mut files);
+        assert!(!files.is_empty());
+        for f in files {
+            let src = std::fs::read_to_string(&f).unwrap();
+            assert!(!src.contains("/static/dist/pyodide"), "{}: /static/dist/pyodide is not served; use /static/pyodide/", f.display());
+            for (i, _) in src.match_indices("/static/pyodide/") {
+                let rest = &src[i + "/static/pyodide/".len()..];
+                let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+')).collect();
+                if name.is_empty() { continue } // a prefix the code appends a name to
+                assert!(runtime_kind(&name).is_some(), "{}: /static/pyodide/{name} is not served by runtime()", f.display());
+            }
+        }
+    }
 
     #[test]
     fn approvable_hosts() {
