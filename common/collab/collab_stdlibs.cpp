@@ -75,7 +75,8 @@ wxString libraryRef()
     if( wxGetEnv( wxS( "JUNCTION_LIBRARIES_REF" ), &ref ) && !ref.IsEmpty() )
         return ref;
 
-    return wxS( "master" );
+    // The release the collaboration server keeps too (KC_LIBS_REF there).
+    return wxS( "10.0.8" );
 }
 
 
@@ -142,9 +143,9 @@ struct SOURCE
 
 /// The archive at the KiCad library repositories.  Its server ignores Range, so a download
 /// that was cut short starts that archive again.
-SOURCE gitlabSource( const ARCHIVE& aArchive )
+SOURCE gitlabSource( const ARCHIVE& aArchive, const wxString& aRef )
 {
-    const wxString ref = libraryRef();
+    const wxString ref = aRef.IsEmpty() ? libraryRef() : aRef;
     SOURCE         source;
 
     source.url = wxString::Format(
@@ -162,7 +163,7 @@ SOURCE gitlabSource( const ARCHIVE& aArchive )
  *
  * @return by archive folder name; empty when the server cannot be reached or has none.
  */
-std::map<wxString, SOURCE> serverSources()
+std::map<wxString, SOURCE> serverSources( wxString* aRef )
 {
     std::map<wxString, SOURCE> sources;
 
@@ -217,6 +218,9 @@ std::map<wxString, SOURCE> serverSources()
                                             wxString::FromUTF8( ref ) );
             sources[wxString::FromUTF8( kind )] = source;
         }
+
+        if( !sources.empty() )
+            *aRef = wxString::FromUTF8( ref );
     }
     catch( ... )
     {
@@ -266,8 +270,10 @@ std::string sha256Of( const wxString& aFile )
  * @return an empty string once "<target>" is complete, or what went wrong.
  */
 wxString downloadOnce( const ARCHIVE& aArchive, const SOURCE& aSource, const wxString& aTarget,
-                       const COLLAB_STDLIBS::PROGRESS& aProgress, int aStep )
+                       const COLLAB_STDLIBS::PROGRESS& aProgress, int aStep, bool* aDamaged )
 {
+    *aDamaged = false;
+
     const wxString& url = aSource.url;
     const wxString  part = aTarget + wxS( ".part" );
     const wxString  piece = aTarget + wxS( ".piece" );
@@ -289,6 +295,7 @@ wxString downloadOnce( const ARCHIVE& aArchive, const SOURCE& aSource, const wxS
                     || ( !aSource.sha256.empty() && sha256Of( part ) != aSource.sha256 ) )
                 {
                     wxRemoveFile( part );
+                    *aDamaged = true;
                     return wxString::Format( _( "The %s arrived damaged from %s." ),
                                              wxString( aArchive.folder ), aSource.host );
                 }
@@ -298,6 +305,18 @@ wxString downloadOnce( const ARCHIVE& aArchive, const SOURCE& aSource, const wxS
 
                 return wxEmptyString;
             };
+
+    // A program that was closed (or died) in the middle of an attempt leaves what it had
+    // fetched in the piece.  With no part beside it the piece began at the start of the file
+    // and becomes the part; beside a part it may be either a continuation or a new start, so
+    // it is dropped.
+    if( wxFileExists( piece ) )
+    {
+        if( !wxFileExists( part ) && fileSize( piece ) > 0 )
+            wxRenameFile( piece, part, true );
+        else
+            wxRemoveFile( piece );
+    }
 
     const wxFileOffset have = fileSize( part );
 
@@ -374,16 +393,21 @@ wxString downloadOnce( const ARCHIVE& aArchive, const SOURCE& aSource, const wxS
     }
     else if( status == 200 && fileSize( piece ) > 0 )
     {
-        wxRemoveFile( part );
+        if( wxFileExists( part ) )
+            wxRemoveFile( part );
+
         wxRenameFile( piece, part, true );
     }
     else if( status == 416 )
     {
         // The part is already as long as the file, or belongs to an older archive.
-        wxRemoveFile( part );
+        if( wxFileExists( part ) )
+            wxRemoveFile( part );
     }
 
-    wxRemoveFile( piece );
+    // (Removing a file that is not there is reported to the user as an error.)
+    if( wxFileExists( piece ) )
+        wxRemoveFile( piece );
 
     if( stopped )
         return stoppedMessage();
@@ -435,7 +459,15 @@ wxString download( const ARCHIVE& aArchive, const std::vector<SOURCE>& aSources,
         for( const SOURCE& source : aSources )
         {
             *aFile = aFolder + wxFileName::GetPathSeparator() + source.file;
-            error = downloadOnce( aArchive, source, *aFile, aProgress, aStep );
+
+            // A file that fails its checksum is fetched again from the same place at once,
+            // before another source (which may hold another release) is asked.
+            bool damaged = false;
+
+            error = downloadOnce( aArchive, source, *aFile, aProgress, aStep, &damaged );
+
+            if( damaged )
+                error = downloadOnce( aArchive, source, *aFile, aProgress, aStep, &damaged );
 
             if( error.IsEmpty() || error == stoppedMessage() )
                 return error;
@@ -690,10 +722,10 @@ bool COLLAB_STDLIBS::Install( const PROGRESS& aProgress, wxString* aError )
             marker.Write( libraryRef() + wxS( "\n" ) );
     }
 
-    if( aProgress )
-        aProgress( _( "Looking for the libraries..." ), 0 );
-
-    const std::map<wxString, SOURCE> fromServer = serverSources();
+    // The release the server holds is the one asked of the fallback too, so the three parts
+    // always belong together.
+    wxString                         serverRef;
+    const std::map<wxString, SOURCE> fromServer = serverSources( &serverRef );
 
     wxString error;
     int      step = 0;
@@ -707,7 +739,7 @@ bool COLLAB_STDLIBS::Install( const PROGRESS& aProgress, wxString* aError )
         if( auto it = fromServer.find( wxString( archive.folder ) ); it != fromServer.end() )
             sources.push_back( it->second );
 
-        sources.push_back( gitlabSource( archive ) );
+        sources.push_back( gitlabSource( archive, serverRef ) );
 
         wxString zip;
 
