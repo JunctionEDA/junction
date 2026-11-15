@@ -559,7 +559,8 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
       const row = selectedRow();
       let handled = true;
       switch (ev.key) {
-        case "Escape": close(null); break;
+        // LIB_TREE: Esc in a filter holding text clears it; otherwise the dialog closes
+        case "Escape": if (inText && input.value) { input.value = ""; input.dispatchEvent(new Event("input")); } else close(null); break;
         case "Enter": if (ev.target instanceof HTMLButtonElement) { handled = false; break; } if (row && row.item) accept(); else if (row) toggle(row); break;
         case "ArrowDown": move(1); break;
         case "ArrowUp": move(-1); break;

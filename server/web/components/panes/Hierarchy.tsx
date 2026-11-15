@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { HierNode } from "../../panels-api";
 import { useApp } from "../../store";
 import { cx } from "../../util";
+import { KIcon } from "../Icon";
 import { ContextMenu, Twist, pdispatch, useContextMenu, usePanels, type MenuItem } from "./widgets";
 
 // The pane body (the `.kbody` contract): scrolls, sheet-coloured, 12px type.
@@ -47,6 +48,8 @@ export function HierarchyPane() {
           data-doc={n.docId || undefined} data-path={n.path} data-net-mark={marked && marked.includes(n.path) ? "" : undefined} title={n.file}
           onClick={() => pdispatch({ t: "hierOpen", path: n.path })} onContextMenu={(ev) => menu.open(ev, items(n))}>
           <Twist open={open} leaf={!n.children.length} onToggle={() => toggle(n.path)} />
+          {/* HIERARCHY_PANE's image list: tree_sel on the sheet being edited, tree_nosel on the others */}
+          <span className="flex-none mr-1 inline-flex" data-icon={n.current ? "tree_sel" : "tree_nosel"}><KIcon name={n.current ? "tree_sel" : "tree_nosel"} size={16} /></span>
           <span>{n.name}{n.page ? ` (page ${n.page})` : ""}</span>
         </div>
         {open ? n.children.map((c) => row(c, depth + 1)) : null}
