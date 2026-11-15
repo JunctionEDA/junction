@@ -42,7 +42,7 @@ def deps_of(path):
 
 
 def wants_relocation(dep, build_dir):
-    return dep.startswith(BREW_PREFIXES) or dep.startswith(build_dir)
+    return dep.startswith(BREW_PREFIXES) or dep.startswith(build_dir + os.sep)
 
 
 def resolve(dep, referrer):
@@ -181,7 +181,7 @@ def main():
                 if dep.startswith(("@loader_path/", "@rpath/")) and base in by_name:
                     changes.append((dep, fw_ref + by_name[base]))
                 continue
-            if real.startswith(build_dir):
+            if real.startswith(build_dir + os.sep):
                 # Build-tree Frameworks reference: same file already shipped.
                 changes.append((dep, fw_ref + os.path.basename(real)))
                 continue
