@@ -1190,5 +1190,7 @@ window.addEventListener("kc-fpedit-open", ((ev: CustomEvent) => {
 export const fpEditApi = { footprintDocUrl, repairChanges, treeLibs, doc: () => E.kdoc, ctx: () => toolCtx(), commit: (changes: KChange[], label?: string) => toolCtx().commit(changes, label), isFpEdit, isFpPrivate, saveFootprint, revertFootprint, saveToBoard, newFootprintText, parseLibTable, projectFpLibs, fpLibIdOf, exchangeChange, refreshTitle, FP,
   /** Run an editor action by id (as a menu item does). */
   undoLabels: () => undoStack.map((e) => e.label),
+  /** A tree row's footprint text, for the Libraries pane's hover preview (LIB_TREE::showPreview). */
+  footprintText: (docId: string): Promise<string | null> => footprintTextOf(docId),
   action: (id: string) => { const h = handlersRef && handlersRef[id]; if (h) h(null); return !!h; } };
 (window as unknown as { KiCadFpEdit?: typeof fpEditApi }).KiCadFpEdit = fpEditApi;

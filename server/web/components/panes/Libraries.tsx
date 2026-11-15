@@ -14,6 +14,8 @@ import { fpTreeMenu } from "../../editor/fptree";
 import { ContextMenu, Twist, type MenuAt, type MenuItem } from "./widgets";
 import { libTreeFilter, loadSortMode, type LibTreeFilter } from "../libtree-filter";
 import { filterItems, libraryScore, sortLibraries, type SortMode } from "../../library/libtree";
+import { bindTreePreview } from "../libtree-preview";
+import { renderFootprintPreview } from "../../library/preview";
 
 const NONE: FpLibRow[] = [];
 type Sel = { lib: string; docId?: string } | null;
@@ -50,6 +52,23 @@ export function LibrariesPane() {
     filterApi.current = f; host.replaceChildren(f.el);
   }, []);
   const libsRef = useRef(libs); libsRef.current = libs;
+  // LIB_TREE's hover preview: a footprint row other than the open one (FP_TREE_SYNCHRONIZING_ADAPTER::HasPreview)
+  const treeRef = useRef<HTMLDivElement | null>(null);
+  const currentRef = useRef(current); currentRef.current = current;
+  const preview = useRef<{ hide(): void } | null>(null);
+  useEffect(() => {
+    const el = treeRef.current; if (!el || preview.current) return;
+    preview.current = bindTreePreview(el, {
+      rowAt: (t) => { const row = t.closest("[data-fp]") as HTMLElement | null; const id = row && row.dataset.fp; return row && id && id !== currentRef.current ? { row, key: id } : null; },
+      async draw(canvas, docId) {
+        const api = (window as unknown as { KiCadFpEdit?: { footprintText?(id: string): Promise<string | null> } }).KiCadFpEdit;
+        const text = api && api.footprintText ? await api.footprintText(docId) : null; if (!text) return false;
+        const lib = (libsRef.current.find((l) => l.footprints.some((f) => f.docId === docId)) || { name: "" }).name;
+        const name = (libsRef.current.flatMap((l) => l.footprints).find((f) => f.docId === docId) || { name: "" }).name;
+        renderFootprintPreview(canvas, lib + ":" + name, text); return true;
+      },
+    });
+  }, []);
   const cmd = (detail: Record<string, string | undefined>) => window.dispatchEvent(new CustomEvent("kc-fpedit-lib", { detail }));
   const toggle = (name: string) => {
     const n = new Set(flipped); if (n.has(name)) n.delete(name); else n.add(name); setFlipped(n);
@@ -107,7 +126,7 @@ export function LibrariesPane() {
   return (
     <div className="kbody flex flex-col min-h-0 flex-auto bg-paper text-sm">
       <div className="flex-none" ref={filterHost} />
-      <div className="ktree overflow-auto min-h-0 flex-auto py-1 outline-none" id="fpLibTree" tabIndex={0} onKeyDown={onKey}>
+      <div className="ktree overflow-auto min-h-0 flex-auto py-1 outline-none" id="fpLibTree" tabIndex={0} onKeyDown={onKey} ref={treeRef}>
         {shown.length ? null : <div className="px-2 py-1 text-ink-3">{libs.length ? "No matches" : "The project has no footprint libraries. File > New Library... adds one."}</div>}
         {shown.map((l) => {
           const has = l.footprints.some((f) => f.docId === current); const o = isOpen(l.name, has);

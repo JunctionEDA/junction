@@ -28,6 +28,8 @@ import { kicadIcon, setKicadIcon } from "../components/kicon-dom";
 import { renderSymbolPreview } from "../library/preview";
 import { symCanvasMenu, symTreeMenu, type SymMenuCtx } from "./ctxmenu";
 import { libTreeFilter } from "../components/libtree-filter";
+import { bindTreePreview } from "../components/libtree-preview";
+import { renderSymbolPreview } from "../library/preview";
 import * as LT from "../library/libtree";
 import { filterItems, sortLibraries, type SortMode } from "../library/libtree";
 import { ZOOM_LIST, LINKS, LOCAL_LABELS } from "../tables";
@@ -569,6 +571,11 @@ export class SymbolEditor {
     const filter = ftr.input;
     const list = h("div", { class: "se-list", id: "se-list", tabindex: 0 });
     list.addEventListener("keydown", (ev) => this.onTreeKey(ev as KeyboardEvent, false));
+    // LIB_TREE's hover preview: a symbol row other than the one on the canvas (SYMBOL_TREE_SYNCHRONIZING_ADAPTER::HasPreview)
+    bindTreePreview(list, {
+      rowAt: (t) => { const row = t.closest(".se-row[data-sym]") as HTMLElement | null; const key = row && row.dataset.sym; const c = this.tab && !this.tab.origin ? this.tab.lib + ":" + this.tab.name : ""; return row && key && key !== c ? { row, key } : null; },
+      draw: (canvas, key) => this.drawTreePreview(canvas, key),
+    });
     tree.append(ftr.el, list);
     const centre = h("div", { class: "se-centre" });
     const tabs = h("div", { class: "se-tabs", id: "se-tabs" });
@@ -875,6 +882,23 @@ export class SymbolEditor {
     list.innerHTML = ""; list.append(frag);
     this.treeRows = order;
     const cur = list.querySelector(".se-row.cur") as HTMLElement | null; if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+  }
+  /** The hover preview of a tree row: the symbol's first unit, flattened, as the chooser draws it. */
+  private async drawTreePreview(canvas: HTMLCanvasElement, key: string): Promise<boolean> {
+    const at = key.indexOf(":"); const nick = key.slice(0, at), name = key.slice(at + 1);
+    const lib = this.libs.get(nick); if (!lib) return false;
+    let sym = lib.doc ? lib.doc.lib.symbols.get(name) || null : lib.syms.get(name) || null;
+    if (!sym && lib.kind === "official") {
+      try {
+        const r = await fetch(`/api/libs/symbols/${encodeURIComponent(nick)}/${encodeURIComponent(name)}`, { credentials: "same-origin" }); if (!r.ok) return false;
+        const j = await r.json() as { symbol: string; parents?: string[] };
+        for (const p of j.parents || []) { try { const n = M.node(p); lib.syms.set(M.symName(n), n); } catch { /* skip */ } }
+        sym = M.node(j.symbol); lib.syms.set(M.symName(sym), sym);
+      } catch { return false; }
+    }
+    if (!sym) return false;
+    renderSymbolPreview(canvas, key, M.text(M.flatten(this.libMap(lib), sym)), 1);
+    return true;
   }
   /** Expand All / Collapse All (the filter row's config menu): KiCad's libraries are listed when they open. */
   private expandAll(open: boolean): void {
