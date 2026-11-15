@@ -3,16 +3,17 @@
 // PCB_NET_INSPECTOR_PANEL's menus: the configure menu, the header menu (Auto-fit / Show-Hide columns) and the row
 // menu.  A double click (or Enter) highlights the selected nets (OnNetsListItemActivated).  The model is
 // editor/panels/netinsp.ts behind window.CollabPanels.
-import { useMemo, useRef, useState, type MouseEvent as RMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as RMouseEvent } from "react";
 import type { NetInspColumn, NetInspModel, NetInspRow } from "../../panels-api";
 import { useApp } from "../../store";
 import { cx } from "../../util";
 import { popupMenu, type PopItem } from "../../dialogs/dom";
 import { KIcon } from "../Icon";
+import { moveColumn, orderColumns } from "./columns";
 import { panels, usePanels } from "./widgets";
 
 const EMPTY: NetInspModel = { columns: [], rows: [], settings: { filter_by_net_name: true, filter_by_netclass: true, group_by_netclass: false, group_by_net_chain: false, custom_group_rules: [],
-  show_zero_pad_nets: false, show_unconnected_nets: false, show_time_domain_details: false, sorting_column: -1, sort_order_asc: true, col_hidden: {}, expanded_rows: [] }, highlighted: false };
+  show_zero_pad_nets: false, show_unconnected_nets: false, show_time_domain_details: false, sorting_column: -1, sort_order_asc: true, col_hidden: {}, expanded_rows: [] }, highlighted: false, highlightNets: [] };
 const LAST_STATIC_COL = 10;
 const cmd = (c: Parameters<NonNullable<ReturnType<typeof panels>>["netInspectorCmd"]>[0]) => { const p = panels(); if (p) p.netInspectorCmd(c); };
 
@@ -29,15 +30,52 @@ export function NetInspectorPane() {
   const units = useApp((s) => s.viewport.units);
   const shown = useApp((s) => !!s.panes.netinsp);
   const ver = usePanels((s) => s.selVersion);
+  const hlVer = usePanels((s) => s.hlVersion || 0);
   const [q, setQ] = useState("");
   const [sel, setSel] = useState<string[]>([]);
-  const [widths, setWidths] = useState<Record<number, number>>({});
+  const [widths, setWidthsState] = useState<Record<number, number>>({});
+  const [drag, setDrag] = useState<{ col: number; over: number | null } | null>(null);
   const anchor = useRef<string | null>(null);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
   const model: NetInspModel = useMemo(() => { const p = panels(); return p && shown ? p.netInspector() : EMPTY; },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [docV, docId, units, shown, ver, q]);
-  const cols = model.columns.filter((c) => !c.hidden);
+    [docV, docId, units, shown, ver, hlVer, q]);
   const s = model.settings;
+  // NET_INSPECTOR_PANEL settings col_widths: restored once per document, saved after each resize
+  const savedW = useRef("");
+  useEffect(() => {
+    const key = docId + ":" + JSON.stringify(s.col_widths || {});
+    if (savedW.current === key) return;
+    savedW.current = key;
+    const w: Record<number, number> = {};
+    for (const [k, v] of Object.entries(s.col_widths || {})) if (v > 0) w[+k] = v;
+    setWidthsState(w);
+  }, [docId, s.col_widths]);
+  const widthsRef = useRef(widths);
+  widthsRef.current = widths;
+  const setWidths = (f: (w: Record<number, number>) => Record<number, number>, persist = true) => {
+    const n = f(widthsRef.current);
+    widthsRef.current = n;
+    setWidthsState(n);
+    if (persist) { savedW.current = docId + ":" + JSON.stringify(n); cmd({ t: "colWidths", widths: n }); }
+  };
+  // the view's column order (wxDATAVIEW_COL_REORDERABLE, saved as col_order)
+  const cols = orderColumns(model.columns, s.col_order).filter((c) => !c.hidden);
+  // PCB_NET_INSPECTOR_PANEL::OnBoardHighlightNetChanged: select the highlighted nets' rows and reveal them,
+  // or unselect everything when the board highlight goes away.
+  const hlKey = model.highlightNets.join("\n");
+  useEffect(() => {
+    if (!shown) return;
+    if (!model.highlightNets.length) { setSel([]); return; }
+    const want = new Set(model.highlightNets);
+    const keys = model.rows.filter((r) => !r.group && r.nets.some((n) => want.has(n))).map((r) => r.key);
+    setSel(keys);
+    if (keys.length) requestAnimationFrame(() => {
+      const el = bodyRef.current && bodyRef.current.querySelector(`[data-netinsp-row="${CSS.escape(keys[0])}"]`);
+      if (el) (el as HTMLElement).scrollIntoView({ block: "nearest" });
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hlKey, hlVer, shown]);
   const selRows = model.rows.filter((r) => sel.includes(r.key));
   const nets = (rows: NetInspRow[]) => Array.from(new Set(rows.flatMap((r) => r.nets)));
 
@@ -69,7 +107,7 @@ export function NetInspectorPane() {
     ev.preventDefault();
     popupMenu(ev.clientX, ev.clientY, [
       { label: "Auto-fit Column", run: () => setWidths((w) => { const n = Object.assign({}, w); delete n[col]; return n; }) },
-      { label: "Auto-fit All Columns", run: () => setWidths({}) },
+      { label: "Auto-fit All Columns", run: () => setWidths(() => ({})) },
       { sep: true },
       ...showHideItems(model.columns),
     ]);
@@ -103,8 +141,32 @@ export function NetInspectorPane() {
   const resize = (ev: React.PointerEvent, col: number) => {
     ev.preventDefault(); ev.stopPropagation();
     const th = (ev.currentTarget as HTMLElement).parentElement!, w0 = th.getBoundingClientRect().width, x0 = ev.clientX;
-    const move = (m: PointerEvent) => setWidths((w) => Object.assign({}, w, { [col]: Math.max(30, w0 + m.clientX - x0) }));
-    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); };
+    const move = (m: PointerEvent) => setWidths((w) => Object.assign({}, w, { [col]: Math.max(30, w0 + m.clientX - x0) }), false);
+    const up = () => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); setWidths((w) => w); };
+    window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+  };
+  // header drag: a press that moves more than a few pixels drags the column instead of sorting
+  const dragged = useRef(false);
+  const headerDown = (ev: React.PointerEvent, col: number) => {
+    if (ev.button !== 0) return;
+    const x0 = ev.clientX, y0 = ev.clientY, row = (ev.currentTarget as HTMLElement).parentElement!;
+    dragged.current = false;
+    let over: number | null = null;
+    const move = (m: PointerEvent) => {
+      if (!dragged.current && Math.hypot(m.clientX - x0, m.clientY - y0) < 5) return;
+      dragged.current = true;
+      over = null;
+      for (const th of Array.from(row.children) as HTMLElement[]) {
+        const r = th.getBoundingClientRect();
+        if (m.clientX >= r.left && m.clientX < r.right) over = +(th.dataset.col || 0);
+      }
+      setDrag({ col, over });
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up);
+      setDrag(null);
+      if (dragged.current && over !== null && over !== col) cmd({ t: "colOrder", order: moveColumn(orderColumns(model.columns, s.col_order).map((c) => c.id), col, over) });
+    };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
   };
   const sortCol = s.sorting_column >= 0 ? s.sorting_column : 0;
@@ -118,14 +180,16 @@ export function NetInspectorPane() {
         <span className="self-stretch w-px bg-line mx-0.5" />
         <button type="button" id="netInspectorConfig" title="Configure netlist inspector" className="flex-none p-0.5 border-0 rounded-xs bg-transparent hover:bg-panel" onClick={configMenu}><KIcon name="config" size={16} /></button>
       </div>
-      <div className="flex-auto min-h-0 overflow-auto" tabIndex={0}
+      <div className="flex-auto min-h-0 overflow-auto" tabIndex={0} ref={bodyRef}
         onKeyDown={(ev) => { if (ev.key === "Enter" && selRows.length) { ev.preventDefault(); ev.stopPropagation(); cmd({ t: "highlight", nets: nets(selRows) }); } }}>
         <table className="w-max min-w-full border-collapse text-sm" data-netinsp-table>
           <thead>
             <tr>{cols.map((c) => (
               <th key={c.id} data-col={c.id} style={widths[c.id] ? { width: widths[c.id], minWidth: widths[c.id] } : undefined}
-                className={cx("sticky top-0 z-[1] relative px-2 py-0.5 font-semibold whitespace-nowrap bg-bench border-b border-r border-line cursor-default select-none hover:bg-paper", c.center ? "text-center" : "text-left")}
-                onClick={() => cmd({ t: "sort", col: c.id })} onContextMenu={(ev) => headerMenu(ev, c.id)}>
+                className={cx("sticky top-0 z-[1] relative px-2 py-0.5 font-semibold whitespace-nowrap bg-bench border-b border-r border-line cursor-default select-none hover:bg-paper", c.center ? "text-center" : "text-left",
+                  drag && drag.col === c.id && "opacity-60", drag && drag.over === c.id && drag.col !== c.id && "shadow-[inset_2px_0_0_var(--accent)]")}
+                onPointerDown={(ev) => headerDown(ev, c.id)}
+                onClick={() => { if (dragged.current) { dragged.current = false; return; } cmd({ t: "sort", col: c.id }); }} onContextMenu={(ev) => headerMenu(ev, c.id)}>
                 {c.label}{sortCol === c.id ? <span className="ml-1 text-ink-3">{s.sort_order_asc ? "▴" : "▾"}</span> : null}
                 <span className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize" onPointerDown={(ev) => resize(ev, c.id)} onClick={(ev) => ev.stopPropagation()} />
               </th>))}

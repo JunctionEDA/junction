@@ -64,10 +64,14 @@ function follow(s: { document: { docId: string | null; hasDoc: boolean; version:
 }
 
 // ---- follow the selection (the tool modules keep their own picks, which no store slice carries)
-let selSig = "", navSig = "";
+let selSig = "", navSig = "", hlSig = "";
 setInterval(() => {
   if (!E.kdoc) return;
   const sig = selectionSignature(), nav = netNavSignature();
   if (sig !== selSig) { selSig = sig; panelStore.set({ selVersion: panelStore.get().selVersion + 1 }); if (E.DOC_TYPE === "kicad_sch") publishNetNav(); }
   if (nav !== navSig) { navSig = nav; publishNetNav(); }
+  // the board's net highlight (PCB_NET_INSPECTOR_PANEL::OnBoardHighlightNetChanged follows it)
+  const P = (window as unknown as { PcbTools?: { state: { highlightNet?: string | null } } }).PcbTools;
+  const hl = E.highlightIds ? String(P && P.state.highlightNet || "") + ":" + (E.highlightIds as Set<string>).size : "";
+  if (hl !== hlSig) { hlSig = hl; panelStore.set({ hlVersion: (panelStore.get().hlVersion || 0) + 1 }); }
 }, 120);

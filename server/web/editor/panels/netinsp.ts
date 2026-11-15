@@ -20,8 +20,11 @@ export interface NetInspSettings {
   filter_by_net_name: boolean; filter_by_netclass: boolean; group_by_netclass: boolean; group_by_net_chain: boolean;
   custom_group_rules: string[]; show_zero_pad_nets: boolean; show_unconnected_nets: boolean; show_time_domain_details: boolean;
   sorting_column: number; sort_order_asc: boolean; col_hidden: Record<string, boolean>; expanded_rows: string[];
+  /** NET_INSPECTOR_PANEL settings col_order / col_widths: the dragged column order and widths (by column id) */
+  col_order?: number[]; col_widths?: Record<string, number>;
 }
-export interface NetInspModel { columns: NetInspColumn[]; rows: NetInspRow[]; settings: NetInspSettings; highlighted: boolean }
+/** highlightNets: the board's highlighted nets (OnBoardHighlightNetChanged selects their rows) */
+export interface NetInspModel { columns: NetInspColumn[]; rows: NetInspRow[]; settings: NetInspSettings; highlighted: boolean; highlightNets: string[] }
 
 const DEFAULTS: NetInspSettings = { filter_by_net_name: true, filter_by_netclass: true, group_by_netclass: false, group_by_net_chain: false, custom_group_rules: [],
   show_zero_pad_nets: false, show_unconnected_nets: false, show_time_domain_details: false, sorting_column: -1, sort_order_asc: true, col_hidden: {}, expanded_rows: [] };
@@ -89,7 +92,7 @@ export function filterValue(): string { return filterText; }
 export function netInspectorModel(expandAll = false): NetInspModel {
   const doc = kdoc(), P = PT(), s = settings(), td = s.show_time_domain_details;
   const cols = columns(doc, td);
-  const model: NetInspModel = { columns: cols, rows: [], settings: s, highlighted: !!E.highlightIds };
+  const model: NetInspModel = { columns: cols, rows: [], settings: s, highlighted: !!E.highlightIds, highlightNets: highlightedNets() };
   if (!doc || doc.type !== "pcb" || !P) return model;
   const stack = P.copperStack(doc.copper || []);
   const rows = P.netLengths(doc, null, { includeZeroPadNets: s.show_zero_pad_nets }).filter((r) => !!r.name);   // netFilterMatches: never the unconnected net (code 0, no name)
@@ -174,7 +177,8 @@ export type NetInspCmd =
   | { t: "sort"; col: number } | { t: "column"; col: number } | { t: "expand"; key: string }
   | { t: "addGroup" } | { t: "removeGroup"; key: string } | { t: "removeGroups" }
   | { t: "highlight"; nets: string[] } | { t: "clearHighlight" }
-  | { t: "rename"; net: string } | { t: "delete"; nets: string[]; group?: string } | { t: "addNet" } | { t: "report" };
+  | { t: "rename"; net: string } | { t: "delete"; nets: string[]; group?: string } | { t: "addNet" } | { t: "report" }
+  | { t: "colOrder"; order: number[] } | { t: "colWidths"; widths: Record<string, number> };
 
 export function netInspectorCmd(c: NetInspCmd): void {
   const s = settings();
@@ -193,10 +197,21 @@ export function netInspectorCmd(c: NetInspCmd): void {
     case "delete": void deleteNets(c.nets, c.group); return;
     case "addNet": void addNet(); return;
     case "report": report(); return;
+    case "colOrder": s.col_order = c.order.slice(); save(); return;
+    case "colWidths": s.col_widths = Object.assign({}, c.widths); save(); return;
   }
+}
+let inspHighlight: string[] = [];
+/** BOARD::GetHighLightNetCodes as names: the nets this pane highlighted, else the net highlighted on the canvas. */
+function highlightedNets(): string[] {
+  if (!E.highlightIds) return [];
+  const P = pcbTools(), h = P ? P.state.highlightNet : null;
+  if (h && inspHighlight.includes(h)) return inspHighlight.slice();
+  return h ? [h] : [];
 }
 /** highlightSelectedNets: every selected net (a group's children) highlighted on the board. */
 function highlight(nets: string[]): void {
+  inspHighlight = nets.slice();
   if (!nets.length) { tctx().setHighlight(null); bump(); return; }
   netCommand("highlight", nets, unescapeString(nets[0])); bump();
 }

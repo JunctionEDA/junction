@@ -11,6 +11,7 @@ function load(file) {
 const S = load("editor/panels/search-model.ts");
 const PT = load("components/panes/prop-text.ts");
 const SF = load("symedit/selfilter.ts");
+const COL = load("components/panes/columns.ts");
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + (e.stack || e).toString().split("\n").slice(0, 4).join("\n       ")); } }
 console.log("docked panes under node");
@@ -75,6 +76,19 @@ test("Symbol Editor selection filter: Only <kind>, All items", () => {
   assert.ok(!SF.symAllChecked(f) && SF.symPasses(f, "arc") && !SF.symPasses(f, "pin"));
   f = SF.symSetFilter(f, "all", true); assert.ok(SF.symAllChecked(f));
   f = SF.symSetFilter(f, "text", false); assert.ok(!SF.symPasses(f, "property") && !SF.symAllChecked(f));
+});
+
+test("net inspector column order: saved order first, unnamed columns after in model order", () => {
+  const cols = [0, 1, 2, 3, 4].map((id) => ({ id }));
+  assert.deepStrictEqual(COL.orderColumns(cols, []).map((c) => c.id), [0, 1, 2, 3, 4]);
+  assert.deepStrictEqual(COL.orderColumns(cols, [2, 0, 1]).map((c) => c.id), [2, 0, 1, 3, 4]);
+  assert.deepStrictEqual(COL.orderColumns(cols, [9, 3]).map((c) => c.id), [3, 0, 1, 2, 4]);
+});
+test("net inspector header drop moves the column to the target's slot", () => {
+  assert.deepStrictEqual(COL.moveColumn([0, 1, 2, 3], 2, 0), [2, 0, 1, 3]);
+  assert.deepStrictEqual(COL.moveColumn([0, 1, 2, 3], 0, 2), [1, 2, 0, 3]);
+  assert.deepStrictEqual(COL.moveColumn([0, 1, 2, 3], 1, 1), [0, 1, 2, 3]);
+  assert.deepStrictEqual(COL.moveColumn([0, 1, 2, 3], 5, 1), [0, 1, 2, 3]);
 });
 
 console.log(`${passed} passed, ${failed} failed`);
