@@ -37,8 +37,8 @@ const CSS = `
 .pd-tree { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); overflow: auto; padding: 4px 0; user-select: none; }
 .pd-tree .grp { padding: 4px 8px; font-weight: 600; cursor: default; }
 .pd-tree .leaf { padding: 3px 8px 3px 24px; cursor: pointer; white-space: nowrap; }
-.pd-tree .leaf:hover { background: var(--panel-2); }
-.pd-tree .leaf.on { background: var(--accent); color: var(--on-accent); }
+.pd-tree .leaf:hover { background: var(--sel-soft); }
+.pd-tree .leaf.on, .pd-tree .leaf.on:hover { background: var(--sel); color: var(--ink); }
 .pd-page { overflow: auto; min-height: 0; padding-right: 4px; }
 .pd-box { margin: 0 0 12px; }
 .pd-box > .hd { font-weight: 600; margin: 0 0 6px; padding-bottom: 3px; border-bottom: 1px solid var(--line); }

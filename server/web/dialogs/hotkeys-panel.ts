@@ -151,7 +151,7 @@ export function hotkeysPanel(pg: HTMLElement, staged?: UserHotkeys): { apply(): 
     for (const s of sections) {
       const shown = s.rows.filter((e) => filterMatches(e, filter.value));
       const open = !collapsed.has(s.name);
-      const tw = h("span", { style: "display:inline-block;width:14px;cursor:pointer" }, open ? "▾" : "▸");
+      const tw = h("span", { class: open ? "kd-twist" : "kd-twist shut", "aria-hidden": "true" });
       const head = h("tr", { class: "hk-sec", "data-section": s.name }, h("td", { colspan: 4, style: "font-weight:600;background:var(--panel-2);cursor:default" }, tw, s.name));
       head.addEventListener("click", () => { if (open) collapsed.add(s.name); else collapsed.delete(s.name); draw(); });
       rows.push(head);

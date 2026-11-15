@@ -122,14 +122,34 @@ export async function saveActionOrder(rows: [string, boolean][]): Promise<void> 
 }
 /**
  * EDA_DRAW_FRAME::GetOrderedPluginActions: the actions named in the settings first, in that order, then the others.
- * PCB_EDIT_FRAME::GetPluginActionButtonVisible: the setting if there is one, otherwise the action's own show_button.
+ * PCB_EDIT_FRAME::GetPluginActionButtonVisible: the setting if there is one (the person's own choice, kept), otherwise
+ * the action's default.  Here an action shows its button unless it says it does not: a plugin.json action with
+ * "show-button": false, or a footprint wizard (which opens from the Footprint Wizard, not the toolbar).  A Python
+ * plugin's show_toolbar_button is False whenever it leaves ActionPlugin's default alone, so it is not a "no".
  */
 export function orderActions<T extends { uiId: string }>(acts: T[], s: PluginState = S): T[] {
   const at = new Map(s.actionOrder.map(([id], i) => [id, i] as [string, number]));
   return acts.map((a, i) => ({ a, i })).sort((x, y) => (at.has(x.a.uiId) ? at.get(x.a.uiId)! : 1e6 + x.i) - (at.has(y.a.uiId) ? at.get(y.a.uiId)! : 1e6 + y.i)).map((x) => x.a);
 }
 export function buttonVisible(a: ActionContribution, s: PluginState = S): boolean {
-  const row = s.actionOrder.find(([id]) => id === a.uiId); return row ? row[1] : !!a.action["show-button"];
+  const row = s.actionOrder.find(([id]) => id === a.uiId); if (row) return row[1];
+  if (a.action.scopes && a.action.scopes.includes("footprint_wizard")) return false;
+  const p = s.installed.find((x) => x.identifier === a.plugin); if (p && isPython(p.manifest)) return true;
+  return a.action["show-button"] !== false;
+}
+/**
+ * PANEL_PCBNEW_ACTION_PLUGINS' Show Plugin Errors: what went wrong loading or running the installed plugins (the
+ * button is hidden when there is nothing), one entry per plugin with its error and its error log lines.
+ */
+export function pluginErrors(): { plugin: string; text: string }[] {
+  const out: { plugin: string; text: string }[] = [];
+  for (const p of S.installed) {
+    const run = S.running[p.identifier], lines = (S.logs[p.identifier] || []).filter((l) => l.level === "error").map((l) => l.text);
+    const head = run && run.failed ? (run.error || "It failed to start.") : "";
+    const all = [head, ...lines].filter((t, i, a) => t && a.indexOf(t) === i);
+    if (all.length) out.push({ plugin: p.manifest.name || p.identifier, text: all.join("\n") });
+  }
+  return out;
 }
 /** The rows of the Action Plugins grid for the board editor: Action (with its icon), Show Button, Plugin, Description. */
 export function actionPluginRows(editor = "pcb"): { id: string; name: string; plugin: string; description: string; visible: boolean; icon: string | null }[] {
@@ -944,5 +964,5 @@ export function initPlugins(): void {
   }, true);
 
   // Other parts of the editor (and the tests) reach plugins and their declared tools through this object.
-  W.KcPlugins = { actionPluginRows, saveActionOrder, store: pluginStore, tools: assistantTools, callTool: callAssistantTool, openManager, runUi: runPluginUi, runAction, refresh, loadProject };
+  W.KcPlugins = { actionPluginRows, saveActionOrder, pluginErrors, store: pluginStore, tools: assistantTools, callTool: callAssistantTool, openManager, runUi: runPluginUi, runAction, refresh, loadProject };
 }

@@ -23,8 +23,12 @@ const WIDGET_CSS = `
 .kd-tb-node { padding: 3px 10px; cursor: default; white-space: nowrap; color: var(--ink); }
 .kd-tb-node.child { padding-left: 26px; cursor: pointer; }
 .kd-tb-node.parent { cursor: pointer; }
-.kd-tb-node.parent::before { content: "▾"; display: inline-block; width: 12px; color: var(--ink-3); font-size: 10px; }
-.kd-tb-node.on { background: var(--accent); color: var(--on-accent); }
+.kd-tb-node.parent::before, .kd-twist::before { content: ""; display: inline-block; width: 0; height: 0; margin: 0 5px 2px 1px; vertical-align: middle; border-style: solid; border-width: 5px 4px 0 4px; border-color: var(--ink-3) transparent transparent transparent; }
+.kd-twist { display: inline-block; width: 14px; cursor: pointer; }
+.kd-twist.shut::before { border-width: 4px 0 4px 5px; border-color: transparent transparent transparent var(--ink-3); margin-left: 2px; }
+/* wxTreebook's selection: the selected-row colour with the normal text (readable in both themes), a lighter one on hover */
+.kd-tb-node.child:hover, .kd-tb-node.parent:hover { background: var(--sel-soft); }
+.kd-tb-node.on, .kd-tb-node.on:hover { background: var(--sel); color: var(--ink); }
 .kd-tb-page { padding: 12px 16px; overflow: auto; max-height: 68vh; }
 .kd-grid-wrap { border: 1px solid var(--line); overflow: auto; background: var(--panel); }
 .kd-grid { border-collapse: collapse; width: 100%; font-size: 12px; }

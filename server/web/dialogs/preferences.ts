@@ -22,9 +22,10 @@ import { getInactiveMode, setInactiveMode } from "../editor/panels/appearance";
 import { wakatimePage, type WakaPage } from "./wakatime";
 import { cleanFieldTemplates, fieldTemplatesPage, symColorsPage, symDisplayPage, symEditingPage } from "./preferences-sym";
 import { assignScrollMod, type ScrollMod } from "../editor/wheel-model";
-import { bitmapButton } from "../components/kicon-dom";
+import { bitmapButton, kicadIcon } from "../components/kicon-dom";
 
 const MIL = 0.0254;
+
 
 const units = (): Units => (E.units === "in" || E.units === "mil" ? E.units : "mm") as Units;
 /** A length typed in a grid field: a number in the user units, or with its own unit ("25 mil", "0.5mm", "0.1 in"). */
@@ -117,7 +118,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
   let contrast = staged ? staged.contrast : getInactiveMode();
   let waka: WakaPage | null = null;
   // PANEL_PCBNEW_ACTION_PLUGINS: the plugin actions in the person's order, saved to their account on OK
-  const plug = (window as unknown as { KcPlugins?: { actionPluginRows(editor?: string): PluginRow[]; saveActionOrder(rows: [string, boolean][]): Promise<void>; openManager?: () => void; refresh?: () => Promise<void> } }).KcPlugins;
+  const plug = (window as unknown as { KcPlugins?: PluginHost }).KcPlugins;
   const plugRows0: PluginRow[] = plug ? plug.actionPluginRows("pcb") : [];
   const plugRows: PluginRow[] = plugRows0.map((r) => Object.assign({}, r));
   let hk: ReturnType<typeof hotkeysPanel> | null = null, body0: HTMLElement | null = null;
@@ -473,7 +474,8 @@ function mousePage(pg: HTMLElement, p: Prefs): void {
   sg.append(h("div", { class: "kd-row" }, h("label", { style: "white-space:nowrap" }, "Touchpad navigation:"), touch),
     h("p", { class: "kd-note", style: "margin:4px 0 8px" }, "Native gestures use two-finger movement to pan and pinch to zoom. Mouse wheel mappings remain active in both modes."),
     h("div", { style: "margin-bottom:4px" }, "Vertical touchpad or scroll wheel movement:"));
-  const warn = h("div", { class: "kd-note", id: "kd-pref-scrollwarn", style: "color:var(--err);display:none" }, "Only one action can be assigned to each column");
+  // m_scrollWarning: BITMAPS::small_warning with the message as its tooltip (and, here, beside it)
+  const warn = h("div", { class: "kd-note", id: "kd-pref-scrollwarn", title: "Only one action can be assigned to each column", style: "color:var(--err);display:none;align-items:center;gap:5px" }, kicadIcon("small_warning", 16), "Only one action can be assigned to each column");
   const grid = h("div", { id: "kd-pref-scrollgrid", style: "display:grid;grid-template-columns:max-content repeat(4, 42px) max-content;gap:4px 0;align-items:center;justify-items:center" });
   // panel_mouse_settings.cpp: the column labels are Cmd and Option on macOS
   const MODS: [ScrollMod, string][] = [["", "--"], ["ctrl", modName("Ctrl")], ["shift", modName("Shift")], ["alt", modName("Alt")]];
@@ -483,7 +485,7 @@ function mousePage(pg: HTMLElement, p: Prefs): void {
   const sync = () => {
     for (const [row, key] of Object.entries(rowKey)) radios[row]!.forEach((r, i) => { r.checked = m[key] === MODS[i]![0]; });
     reverse.zoom!.checked = m.reverseZoom; reverse.panh!.checked = m.reversePanH; hzPan.checked = m.horizontalPan;
-    warn.style.display = scrollModsValid(m) ? "none" : "";
+    warn.style.display = scrollModsValid(m) ? "none" : "flex";
   };
   grid.append(h("span"), ...MODS.map(([, l]) => h("label", { style: "color:var(--ink-2)" }, l)), h("span"));
   for (const [row, label] of [["zoom", "Zoom:"], ["panv", "Pan up/down:"], ["panh", "Pan left/right:"]] as const) {
@@ -513,41 +515,60 @@ function mousePage(pg: HTMLElement, p: Prefs): void {
 
 /** One row of the Action Plugins grid. */
 interface PluginRow { id: string; name: string; plugin: string; description: string; visible: boolean; icon: string | null }
-/** KiCad's puzzle_piece bitmap, for an action without an icon of its own (as the panel's m_genericIcon). */
-const PUZZLE_SVG = '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="M5 8h3.2a2 2 0 1 1 3.6 0H15v3.2a2 2 0 1 1 0 3.6V18h-3.2a2 2 0 1 0-3.6 0H5v-3.2a2 2 0 1 0 0-3.6z"/></svg>';
+/** What the Action Plugins page asks of the plugin host (plugins/host.ts, window.KcPlugins). */
+interface PluginHost { actionPluginRows(editor?: string): PluginRow[]; saveActionOrder(rows: [string, boolean][]): Promise<void>; openManager?: (tab?: "installed" | "browse" | "official" | "project" | "publish" | "review") => void; refresh?: () => Promise<void>; pluginErrors?: () => { plugin: string; text: string }[] }
 /**
  * PANEL_PCBNEW_ACTION_PLUGINS (pcbnew/dialogs/panel_pcbnew_action_plugins.cpp): the grid of the board editor's
- * plugin actions (Action with its icon, Show Button, Plugin, Description) in the order the toolbar and Tools >
- * External Plugins show them, Move Up / Move Down (WX_GRID::OnMoveRowUp/Down keep the moved row selected), then
- * Open Plugin Directory (here the Plugin and Content Manager, where the plugins live) and Reload Plugins.
+ * plugin actions (Action with its icon, or BITMAPS::puzzle_piece for one without, Show Button, Plugin, Description)
+ * in the order the toolbar and Tools > External Plugins show them; Move Up / Move Down (small_up / small_down;
+ * WX_GRID::OnMoveRowUp/Down keep the moved row selected); Open Plugin Directory (small_folder: the folder the
+ * plugins are installed in is the Plugin and Content Manager's Installed list here); Reload Plugins (small_refresh);
+ * Show Plugin Errors (small_warning), shown only when a plugin has failed, as KiCad hides it with no errors.
  */
-function actionPluginsPage(pg: HTMLElement, rows: PluginRow[], plug: { actionPluginRows(editor?: string): PluginRow[]; openManager?: () => void; refresh?: () => Promise<void> } | undefined): void {
+function actionPluginsPage(pg: HTMLElement, rows: PluginRow[], plug: PluginHost | undefined): void {
   let sel = rows.length ? 0 : -1;
   const tb = h("tbody", { id: "kd-pref-plugins" });
   const fill = (): void => {
     tb.replaceChildren(...rows.map((r, i) => {
       const box = h("input", { type: "checkbox", "data-show": r.id, "aria-label": `Show ${r.name} button` }) as HTMLInputElement; box.checked = r.visible;
       box.addEventListener("change", () => { r.visible = box.checked; });
-      const icon = r.icon ? h("img", { src: r.icon, alt: "", width: "20", height: "20", style: "width:20px;height:20px;object-fit:contain;flex:none" }) : h("span", { style: "display:inline-flex;flex:none;color:var(--ink-2)" });
-      if (!r.icon) (icon as HTMLElement).innerHTML = PUZZLE_SVG;
+      const icon = r.icon ? h("img", { src: r.icon, alt: "", width: "20", height: "20", style: "width:20px;height:20px;object-fit:contain;flex:none" }) : kicadIcon("puzzle_piece", 20);
+      if (r.icon) icon.addEventListener("error", () => icon.replaceWith(kicadIcon("puzzle_piece", 20)), { once: true });
       const tr = h("tr", { "data-action": r.id, class: i === sel ? "sel" : "" },
-        h("td", null, h("span", { style: "display:inline-flex;align-items:center;gap:6px" }, icon, r.name)),
-        h("td", { style: "text-align:center" }, box), h("td", null, r.plugin), h("td", { style: "color:var(--ink-2)" }, r.description));
+        h("td", null, h("span", { style: "display:inline-flex;align-items:center;gap:6px;padding:1px 4px" }, icon, r.name)),
+        h("td", { style: "text-align:center" }, box), h("td", { class: "ro" }, r.plugin), h("td", { class: "ro" }, r.description));
       tr.addEventListener("click", (ev) => { if ((ev.target as HTMLElement).tagName === "INPUT") return; sel = i; fill(); });
       return tr;
     }));
     up.disabled = sel <= 0; down.disabled = sel < 0 || sel >= rows.length - 1;
+    const errs = plug && plug.pluginErrors ? plug.pluginErrors() : [];
+    errBtn.style.display = errs.length ? "" : "none";
   };
   const move = (d: number): void => { const j = sel + d; if (sel < 0 || j < 0 || j >= rows.length) return; const t = rows[sel]!; rows[sel] = rows[j]!; rows[j] = t; sel = j; fill(); };
   // PANEL_PCBNEW_ACTION_PLUGINS: m_moveUpButton / m_moveDownButton draw BITMAPS::small_up / small_down
   const up = bitmapButton("small_up", "Move Up", () => move(-1), { id: "kd-pref-plugin-up" }), down = bitmapButton("small_down", "Move Down", () => move(1), { id: "kd-pref-plugin-down" });
+  const dir = bitmapButton("small_folder", "Open Plugin Directory", () => { if (plug && plug.openManager) plug.openManager("installed"); }, { id: "kd-pref-plugin-dir" });
+  const reload = bitmapButton("small_refresh", "Reload Plugins", () => {
+    if (!plug || !plug.refresh) return;
+    reload.disabled = true;
+    void plug.refresh().then(() => {
+      // the order and the boxes on screen are kept; plugins that came or went join or leave the list
+      const was = new Map(rows.map((r) => [r.id, r] as [string, PluginRow])), fresh = plug.actionPluginRows("pcb");
+      const kept = rows.filter((r) => fresh.some((f) => f.id === r.id)).map((r) => Object.assign(fresh.find((f) => f.id === r.id)!, { visible: r.visible }));
+      const added = fresh.filter((f) => !was.has(f.id));
+      rows.splice(0, rows.length, ...kept, ...added); sel = rows.length ? Math.min(Math.max(sel, 0), rows.length - 1) : -1; fill();
+    }).finally(() => { reload.disabled = false; });
+  }, { id: "kd-pref-plugin-reload" });
+  const errBtn = bitmapButton("small_warning", "Show Plugin Errors", () => {
+    const errs = plug && plug.pluginErrors ? plug.pluginErrors() : [];
+    messageBox("Plugin Errors", errs.length ? errs.map((e) => `${e.plugin}:\n${e.text}`).join("\n\n") : "No plugin reported an error.");
+  }, { id: "kd-pref-plugin-errors" });
+  if (!plug) for (const b of [dir, reload]) b.disabled = true;
   const th = (t: string, w?: number) => h("th", w ? { style: `width:${w}px` } : null, t);
   const table = h("table", { class: "kd-grid", style: "width:100%" }, h("thead", null, h("tr", null, th("Action"), th("Show Button", 100), th("Plugin"), th("Description"))), tb);
   pg.append(h("div", { class: "kd-grid-wrap", style: "height:380px;overflow:auto" }, table),
     rows.length ? "" : h("p", { class: "kd-note", style: "margin:8px 0 0" }, "No plugin adds an action to the PCB Editor.  Install plugins from the Plugin and Content Manager."),
-    h("div", { class: "kd-grid-btns", style: "margin-top:5px" }, up, down, h("span", { style: "width:15px" }),
-      bitmapButton("small_folder", "Open Plugin Directory", () => { if (plug && plug.openManager) plug.openManager(); }, { id: "kd-pref-plugin-dir" }),
-      bitmapButton("small_refresh", "Reload Plugins", () => { if (plug && plug.refresh) void plug.refresh().then(() => { const was = new Map(rows.map((r) => [r.id, r.visible] as [string, boolean])); const fresh = plug.actionPluginRows("pcb").map((r) => Object.assign(r, was.has(r.id) ? { visible: was.get(r.id) } : {})); rows.splice(0, rows.length, ...fresh); sel = rows.length ? 0 : -1; fill(); }); }, { id: "kd-pref-plugin-reload" })));
+    h("div", { class: "kd-grid-btns", style: "margin-top:5px" }, up, down, h("span", { style: "width:15px" }), dir, reload, errBtn));
   fill();
 }
 
