@@ -784,7 +784,11 @@ void COLLAB_PROJECT::EnsureLibraryFolders( const wxString& aProjectPath )
     std::string bytes( static_cast<size_t>( in.GetLength() ), '\0' );
     in.Read( bytes.data(), bytes.size() );
 
-    const wxString text = wxString::FromUTF8( bytes.data(), in.LastRead() );
+    wxString text = wxString::FromUTF8( bytes.data(), in.LastRead() );
+
+    // Older tables write the variable as $(KIPRJMOD).
+    text.Replace( wxS( "\"$(KIPRJMOD)/" ), wxS( "\"${KIPRJMOD}/" ) );
+
     const wxString marker = wxS( "\"${KIPRJMOD}/" );
     size_t         pos = 0;
 

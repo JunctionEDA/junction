@@ -174,7 +174,14 @@ static wxString fetchLibraryModel( const wxString& aModelFile )
 
     // A project's own "<x>.3dshapes" folder is not the standard library: its files travel with
     // the project, and asking the server for them would only find a namesake.
-    if( aModelFile.StartsWith( wxS( "${KIPRJMOD}" ) ) || library.IsEmpty() || name.IsEmpty()
+    // Only KiCad's own library is on the server: a third-party folder (${KICAD9_3RD_PARTY},
+    // an absolute path on somebody's computer) would only cost a request to be told so.
+    const wxString head = aModelFile.BeforeFirst( '/' ).Upper();
+    const bool     standard = head.StartsWith( wxS( "${KICAD" ) ) ? head.EndsWith( wxS( "_3DMODEL_DIR}" ) )
+                                                                  : ( head == wxS( "${KISYS3DMOD}" )
+                                                                      || head == wxS( "$(KISYS3DMOD)" ) );
+
+    if( !standard || library.IsEmpty() || name.IsEmpty()
         || item.GetDirCount() > 0
         || ( ext != wxS( "wrl" ) && ext != wxS( "step" ) && ext != wxS( "stp" ) && ext != wxS( "wrz" ) ) )
     {
