@@ -17,172 +17,7 @@ import { RULES_HELP_MD } from "../../generated/rules-help";
 import { keysInText } from "../../keys";
 import { bitmapButton, checkField, ensureCss, fmtLen, h, messageBox, parseLen, selectField, textField, unitName, type Field } from "./ui";
 
-// ---------------------------------------------------------------- the constraint types (buildRuleTreeNodes)
-type Panel = "num" | "int" | "minmax" | "minoptmax" | "viastyle" | "text" | "diffpair" | "matchlen" | "layers" | "orient" | "smdvias" | "custom";
-export interface RuleType { id: string; label: string; code: string; panel: Panel; two: boolean; cat: string[]; unitless?: boolean; field?: string }
-export const RULE_TYPES: RuleType[] = [
-  { id: "MINIMUM_CLEARANCE", label: "Minimum clearance", code: "clearance", panel: "num", two: true, cat: ["Electrical", "Clearance"] },
-  { id: "COPPER_TO_EDGE_CLEARANCE", label: "Copper to edge clearance", code: "edge_clearance", panel: "num", two: false, cat: ["Electrical", "Clearance"] },
-  { id: "COURTYARD_CLEARANCE", label: "Courtyard clearance", code: "courtyard_clearance", panel: "num", two: true, cat: ["Electrical", "Clearance"] },
-  { id: "PHYSICAL_CLEARANCE", label: "Physical clearance", code: "physical_clearance", panel: "num", two: true, cat: ["Electrical", "Clearance"] },
-  { id: "CREEPAGE_DISTANCE", label: "Creepage distance", code: "creepage", panel: "num", two: true, cat: ["Electrical", "Clearance"] },
-  { id: "MINIMUM_CONNECTION_WIDTH", label: "Minimum connection width", code: "connection_width", panel: "num", two: false, cat: ["Electrical"] },
-  { id: "COPPER_TO_HOLE_CLEARANCE", label: "Copper to hole clearance", code: "hole_clearance", panel: "num", two: true, cat: ["Electrical"] },
-  { id: "MINIMUM_THERMAL_RELIEF_SPOKE_COUNT", label: "Minimum thermal relief spoke count", code: "min_resolved_spokes", panel: "int", two: false, cat: ["Electrical"], unitless: true },
-  { id: "MINIMUM_ANNULAR_WIDTH", label: "Minimum annular width", code: "annular_width", panel: "num", two: false, cat: ["Manufacturability"] },
-  { id: "MINIMUM_DRILL_SIZE", label: "Minimum drill size", code: "hole_size", panel: "num", two: false, cat: ["Manufacturability", "Hole"] },
-  { id: "HOLE_TO_HOLE_DISTANCE", label: "Hole to hole distance", code: "hole_to_hole", panel: "num", two: true, cat: ["Manufacturability", "Hole"] },
-  { id: "VIA_STYLE", label: "Via style", code: "via_style", panel: "viastyle", two: false, cat: ["Manufacturability", "Hole"] },
-  { id: "HOLE_ASPECT_RATIO", label: "Maximum aspect ratio", code: "hole_aspect_ratio", panel: "int", two: false, cat: ["Manufacturability", "Hole"], unitless: true },
-  { id: "MICROVIA_STACK_DEPTH", label: "Maximum stack depth", code: "microvia_stack_depth", panel: "int", two: false, cat: ["Manufacturability", "Microvia"], unitless: true },
-  { id: "MINIMUM_TEXT_HEIGHT_AND_THICKNESS", label: "Minimum text height and thickness", code: "text_height", panel: "text", two: false, cat: ["Manufacturability"] },
-  { id: "SILK_TO_SILK_CLEARANCE", label: "Silk to silk clearance", code: "silk_clearance", panel: "num", two: true, cat: ["Manufacturability"] },
-  { id: "SILK_TO_SOLDERMASK_CLEARANCE", label: "Silk to soldermask clearance", code: "silk_clearance", panel: "num", two: true, cat: ["Manufacturability"] },
-  { id: "MINIMUM_SOLDERMASK_SLIVER", label: "Minimum soldermask sliver", code: "solder_mask_sliver", panel: "num", two: false, cat: ["Manufacturability"] },
-  { id: "SOLDERMASK_EXPANSION", label: "Soldermask expansion", code: "solder_mask_expansion", panel: "num", two: false, cat: ["Manufacturability"] },
-  { id: "SOLDERPASTE_EXPANSION", label: "Solderpaste expansion", code: "solder_paste_abs_margin", panel: "num", two: false, cat: ["Manufacturability"] },
-  { id: "ROUTING_WIDTH", label: "Routing width", code: "track_width", panel: "minoptmax", two: false, cat: ["Highspeed design"] },
-  { id: "MAXIMUM_VIA_COUNT", label: "Maximum via count", code: "via_count", panel: "int", two: false, cat: ["Highspeed design"], unitless: true },
-  { id: "ROUTING_DIFF_PAIR", label: "Routing diff pair", code: "diff_pair_gap", panel: "diffpair", two: false, cat: ["Highspeed design"] },
-  { id: "MATCHED_LENGTH_DIFF_PAIR", label: "Matched length diff pair", code: "length", panel: "matchlen", two: false, cat: ["Highspeed design"] },
-  { id: "ABSOLUTE_LENGTH", label: "Absolute length", code: "length", panel: "minmax", two: false, cat: ["Highspeed design"] },
-  { id: "PERMITTED_LAYERS", label: "Permitted layers", code: "permitted_layers", panel: "layers", two: false, cat: ["Footprints"] },
-  { id: "ALLOWED_ORIENTATION", label: "Allowed orientation", code: "allowed_orientation", panel: "orient", two: false, cat: ["Footprints"] },
-  { id: "VIAS_UNDER_SMD", label: "Vias under SMD", code: "disallow_via", panel: "smdvias", two: false, cat: ["Footprints"] },
-  { id: "CUSTOM_RULE", label: "Custom rule", code: "", panel: "custom", two: false, cat: ["Custom"] },
-];
-const typeById = (id: string): RuleType => RULE_TYPES.find((t) => t.id === id) || RULE_TYPES[RULE_TYPES.length - 1];
-
-// ---------------------------------------------------------------- the rule model
-export type CondKind = "any" | "net" | "netclass" | "area" | "custom";
-export interface Cond { op: "&&" | "||" | "&& !" | "|| !"; obj: "A" | "B"; kind: CondKind; value: string }
-export interface Rule { type: string; name: string; comment: string; layer: string; severity: string; conds: Cond[]; v: Record<string, number | boolean | null>; text: string }
-
-/** formatRuleName: quoted when it is a number or has characters other than letters, digits, _ - . */
-export function formatRuleName(n: string): string {
-  if (!n) return '""';
-  if (/^[+-]?(\d+\.?\d*|\.\d+)$/.test(n) || !/^[\w.-]+$/.test(n)) return `"${n.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
-  return n;
-}
-const num = (v: number): string => { let s = (Math.round(v * 1e6) / 1e6).toFixed(6); if (s.includes(".")) s = s.replace(/0+$/, "").replace(/\.$/, ""); return s; };
-const mm = (v: number | boolean | null | undefined): string => num(Number(v) || 0) + "mm";
-/** DRC_RE_CONDITION_GROUP_PANEL::BuildCondition */
-export function buildCondition(conds: Cond[], two: boolean): string {
-  let out = "";
-  for (const c of conds) {
-    const p = two ? c.obj : "A";
-    const e = c.kind === "net" ? (c.value ? `${p}.NetName == '${c.value}'` : "") : c.kind === "netclass" ? (c.value ? `${p}.hasNetclass('${c.value}')` : "") : c.kind === "area" ? (c.value ? `${p}.intersectsArea('${c.value}')` : "") : c.kind === "custom" ? c.value : "";
-    if (!e) continue;
-    if (out) out += c.op === "&&" ? " && " : c.op === "||" ? " || " : c.op === "&& !" ? " && !" : " || !";
-    out += e;
-  }
-  return out;
-}
-/** ParseCondition / ParseExpression: top-level && / || parts become rows, anything else one Custom Query row */
-export function parseCondition(expr: string): Cond[] {
-  const s = expr.trim(); if (!s) return [{ op: "&&", obj: "A", kind: "any", value: "" }];
-  const parts: { op: Cond["op"]; e: string }[] = []; let depth = 0, q = "", start = 0, op: Cond["op"] = "&&";
-  for (let i = 0; i < s.length; i++) {
-    const c = s[i];
-    if (q) { if (c === q) q = ""; continue; }
-    if (c === "'" || c === '"') { q = c; continue; }
-    if (c === "(") depth++; else if (c === ")") depth--;
-    else if (depth === 0 && (s.startsWith("&&", i) || s.startsWith("||", i))) {
-      parts.push({ op, e: s.slice(start, i).trim() });
-      op = s[i] === "&" ? "&&" : "||"; i += 2; while (s[i] === " ") i++;
-      if (s[i] === "!") { op = op === "&&" ? "&& !" : "|| !"; i++; }
-      start = i; i--;
-    }
-  }
-  parts.push({ op, e: s.slice(start).trim() });
-  const rows: Cond[] = [];
-  for (const p of parts) {
-    let m: RegExpExecArray | null;
-    if ((m = /^([AB])\.NetName\s*==\s*'([^']*)'$/.exec(p.e))) rows.push({ op: p.op, obj: m[1] as "A" | "B", kind: "net", value: m[2] });
-    else if ((m = /^([AB])\.hasNetclass\('([^']*)'\)$/.exec(p.e))) rows.push({ op: p.op, obj: m[1] as "A" | "B", kind: "netclass", value: m[2] });
-    else if ((m = /^([AB])\.intersectsArea\('([^']*)'\)$/.exec(p.e))) rows.push({ op: p.op, obj: m[1] as "A" | "B", kind: "area", value: m[2] });
-    else rows.push({ op: p.op, obj: "A", kind: "custom", value: p.e });   // ParseExpression: no match -> CUSTOM
-  }
-  return rows;
-}
-/** The constraint clauses of a rule (GetConstraintClauses of each *_CONSTRAINT_DATA) */
-export function constraintClauses(r: Rule): string[] {
-  const t = typeById(r.type), v = r.v;
-  const mmm = (code: string, a: string, b: string, c: string): string => `(constraint ${code} (min ${mm(v[a])}) (opt ${mm(v[b])}) (max ${mm(v[c])}))`;
-  switch (t.panel) {
-    case "num": return [`(constraint ${t.code} (min ${mm(v.value)}))`];
-    case "int": return t.code === "min_resolved_spokes" ? [`(constraint ${t.code} ${num(Number(v.value) || 0)})`] : [`(constraint ${t.code} (max ${num(Number(v.value) || 0)}))`];
-    case "minmax": return [`(constraint ${t.code} (min ${mm(v.min)}) (max ${mm(v.max)}))`];
-    case "minoptmax": return [mmm(t.code, "min", "opt", "max")];
-    case "viastyle": return [mmm("via_diameter", "dmin", "dopt", "dmax"), mmm("hole_size", "hmin", "hopt", "hmax")];
-    case "text": return [`(constraint text_height (min ${mm(v.height)}))`, `(constraint text_thickness (min ${mm(v.thickness)}))`];
-    case "diffpair": return [mmm("track_width", "wmin", "wopt", "wmax"), mmm("diff_pair_gap", "gmin", "gopt", "gmax"), `(constraint diff_pair_uncoupled (max ${mm(v.uncoupled)}))`];
-    case "matchlen": return [mmm("length", "min", "opt", "max"), `(constraint skew (max ${mm(v.skew)})${v.within ? " (within_diff_pairs)" : ""})`];
-    case "layers": { const a = [v.top ? "A.Layer == 'F.Cu'" : "", v.bottom ? "A.Layer == 'B.Cu'" : ""].filter(Boolean); return a.length ? [`(constraint assertion "${a.join(" || ")}")`] : []; }
-    case "orient": { const a = [0, 90, 180, 270].filter((d) => v["o" + d]).map((d) => `A.Orientation == ${d} deg`); return a.length ? [`(constraint assertion "${a.join(" || ")}")`] : []; }
-    case "smdvias": {
-      const ks = [["through", "through_via"], ["micro", "micro_via"], ["blind", "blind_via"], ["buried", "buried_via"]].filter(([k]) => v[k]);
-      return !ks.length ? [] : ks.length === 4 ? ["(constraint disallow via)"] : [`(constraint disallow ${ks.map(([, c]) => c).join(" ")})`];
-    }
-    default: return [];
-  }
-}
-/** buildRule: (rule name, the comment lines as # comments, the layer, the clauses, the condition) */
-export function ruleText(r: Rule): string {
-  const t = typeById(r.type);
-  if (t.panel === "custom") return r.text.trim();
-  let s = `(rule ${formatRuleName(r.name)}\n`;
-  for (const line of r.comment.split("\n")) if (line) s += `\t# ${line}\n`;
-  if (r.layer) s += `\t(layer ${/^(outer|inner)$/.test(r.layer) ? r.layer : `"${r.layer}"`})\n`;
-  for (const c of constraintClauses(r)) s += `\t${c}\n`;
-  if (r.severity) s += `\t(severity ${r.severity})\n`;
-  const cond = buildCondition(r.conds, t.two);
-  if (cond) s += `\t(condition "${cond.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}")\n`;
-  return s + ")";
-}
-export const rulesText = (rules: Rule[]): string => "(version 1)\n\n" + rules.map(ruleText).filter(Boolean).join("\n\n") + "\n";
-
-/** DRC_RULE_LOADER + DRC_RE_PANEL_MATCHER: a .kicad_dru's rules as editor entries (an unmatched rule is a Custom rule) */
-export function loadRules(text: string): Rule[] {
-  const out: Rule[] = [];
-  let root: SNode;
-  try { root = KiCadCanvas.parse("(dru " + text + "\n)") as SNode; } catch (e) { return out; }
-  // the raw text of each top-level (rule …) for Custom rules
-  const raws: string[] = []; { let depth = 0, q = false, st = -1; for (let i = 0; i < text.length; i++) { const c = text[i]; if (q) { if (c === "\\") i++; else if (c === '"') q = false; continue; } if (c === '"') q = true; else if (c === "#" && depth === 0) { const j = text.indexOf("\n", i); i = j < 0 ? text.length : j; } else if (c === "(") { if (depth === 0) st = i; depth++; } else if (c === ")") { depth--; if (depth === 0 && st >= 0) { raws.push(text.slice(st, i + 1)); st = -1; } } } }
-  const tops = raws.filter((r) => /^\(\s*rule\b/.test(r));
-  let ri = 0;
-  for (const r of root.slice(1)) {
-    if (!Array.isArray(r) || r[0] !== "rule") continue;
-    const raw = tops[ri++] || "";
-    const S = (x: unknown): string => String(x ?? "");
-    const rule: Rule = { type: "CUSTOM_RULE", name: S(r[1]), comment: "", layer: "", severity: "", conds: [], v: {}, text: raw };
-    const comments = /\(rule[^\n]*\n((?:\s*#[^\n]*\n)*)/.exec(raw); if (comments) rule.comment = comments[1].split("\n").map((l) => l.replace(/^\s*#\s?/, "")).filter(Boolean).join("\n");
-    const cons: SNode[] = []; let cond = "";
-    for (const c of r.slice(2)) { if (!Array.isArray(c)) continue; if (c[0] === "constraint") cons.push(c as SNode); else if (c[0] === "condition") cond = S(c[1]); else if (c[0] === "layer") rule.layer = S(c[1]); else if (c[0] === "severity") rule.severity = S(c[1]); }
-    const bound = (c: SNode | undefined, k: string): number | null => { if (!c) return null; const b = c.find((x) => Array.isArray(x) && x[0] === k) as SNode | undefined; if (!b) return null; const m = /^(-?[\d.]+)\s*(mm|mil|mils|in|um)?$/.exec(S(b[1])); if (!m) return null; const f = m[2] === "mil" || m[2] === "mils" ? 0.0254 : m[2] === "in" ? 25.4 : m[2] === "um" ? 0.001 : 1; return +m[1] * f; };
-    const by = (code: string): SNode | undefined => cons.find((c) => c[1] === code);
-    const codes = cons.map((c) => S(c[1])).sort().join(",");
-    const set = (type: string, v: Record<string, number | boolean | null>): void => { rule.type = type; rule.v = v; };
-    if (codes === "hole_size,via_diameter") { const d = by("via_diameter"), hh = by("hole_size"); set("VIA_STYLE", { dmin: bound(d, "min"), dopt: bound(d, "opt"), dmax: bound(d, "max"), hmin: bound(hh, "min"), hopt: bound(hh, "opt"), hmax: bound(hh, "max") }); }
-    else if (codes === "text_height,text_thickness") set("MINIMUM_TEXT_HEIGHT_AND_THICKNESS", { height: bound(by("text_height"), "min"), thickness: bound(by("text_thickness"), "min") });
-    else if (codes === "diff_pair_gap,diff_pair_uncoupled,track_width") { const w = by("track_width"), g = by("diff_pair_gap"); set("ROUTING_DIFF_PAIR", { wmin: bound(w, "min"), wopt: bound(w, "opt"), wmax: bound(w, "max"), gmin: bound(g, "min"), gopt: bound(g, "opt"), gmax: bound(g, "max"), uncoupled: bound(by("diff_pair_uncoupled"), "max") }); }
-    else if (codes === "length,skew") { const l = by("length"), sk = by("skew"); set("MATCHED_LENGTH_DIFF_PAIR", { min: bound(l, "min"), opt: bound(l, "opt"), max: bound(l, "max"), skew: bound(sk, "max"), within: !!sk && sk.some((x) => Array.isArray(x) && x[0] === "within_diff_pairs") }); }
-    else if (cons.length === 1) {
-      const c = cons[0], code = S(c[1]);
-      if (code === "assertion" && /A\.Layer == /.test(S(c[2]))) set("PERMITTED_LAYERS", { top: /'F\.Cu'/.test(S(c[2])), bottom: /'B\.Cu'/.test(S(c[2])) });
-      else if (code === "assertion" && /A\.Orientation == /.test(S(c[2]))) { const v: Record<string, boolean> = {}; for (const d of [0, 90, 180, 270]) v["o" + d] = new RegExp(`== ${d} deg`).test(S(c[2])); set("ALLOWED_ORIENTATION", v); }
-      else if (code === "disallow") { const items = c.slice(2).map(S); const all = items.includes("via"); set("VIAS_UNDER_SMD", { through: all || items.includes("through_via"), micro: all || items.includes("micro_via"), blind: all || items.includes("blind_via"), buried: all || items.includes("buried_via") }); }
-      else if (code === "track_width") set("ROUTING_WIDTH", { min: bound(c, "min"), opt: bound(c, "opt"), max: bound(c, "max") });
-      else if (code === "length") set("ABSOLUTE_LENGTH", { min: bound(c, "min"), max: bound(c, "max") });
-      else if (code === "min_resolved_spokes") set("MINIMUM_THERMAL_RELIEF_SPOKE_COUNT", { value: +S(c[2]) || 0 });
-      else if (code === "via_count" || code === "microvia_stack_depth" || code === "hole_aspect_ratio") set(RULE_TYPES.find((t) => t.code === code)!.id, { value: bound(c, "max") });
-      else { const t = RULE_TYPES.find((x) => x.panel === "num" && x.code === code); if (t && bound(c, "min") !== null && c.length === 3) set(t.id, { value: bound(c, "min") }); }
-    }
-    if (rule.type !== "CUSTOM_RULE") rule.conds = parseCondition(cond); else rule.conds = [];
-    out.push(rule);
-  }
-  return out;
-}
+import { RULE_TYPES, formatRuleName, loadRules, ruleEdited, ruleText, rulesText, savedText, typeById, type Cond, type CondKind, type Rule, type RuleType } from "./drc-rule-model";
 
 // ---------------------------------------------------------------- the dialog
 const CSS = `
@@ -283,6 +118,7 @@ export async function openDrcRuleEditor(ctx: ToolCtx): Promise<void> {
   const copyRule = (): void => {
     if (sel.kind !== "rule" || ro) return;
     const src = rules[sel.i], copy: Rule = JSON.parse(JSON.stringify(src)); copy.name = uniqueName(src.name + "_copy");
+    delete copy.raw; delete copy.gen; delete copy.lead;
     if (typeById(copy.type).panel === "custom") copy.text = copy.text.replace(/^\(rule\s+("[^"]*"|\S+)/, `(rule ${formatRuleName(copy.name)}`);
     rules.splice(sel.i + 1, 0, copy); saved.splice(sel.i + 1, 0, ""); sel = { kind: "rule", i: sel.i + 1 }; refresh();
   };
@@ -414,7 +250,7 @@ export async function openDrcRuleEditor(ctx: ToolCtx): Promise<void> {
   };
   type Tools = { parseDru?: (t: string) => { errors: string[] }; ruleMatchingItems?: (d: KDoc, s: unknown, t: string, n: string) => string[] | null; designSettings?: (p: unknown) => unknown };
   const tools = (): Tools => ((globalThis as { PcbTools?: Tools }).PcbTools || {});
-  const checkSyntax = (r: Rule): string[] => { const text = "(version 1)\n" + ruleText(r); const t = tools(); if (!t.parseDru) return []; const res = t.parseDru(text); return res.errors; };
+  const checkSyntax = (r: Rule): string[] => { const text = "(version 1)\n" + savedText(r); const t = tools(); if (!t.parseDru) return []; const res = t.parseDru(text); return res.errors; };
 
   function rulePanel(r: Rule): HTMLElement {
     const t = typeById(r.type);
@@ -425,7 +261,7 @@ export async function openDrcRuleEditor(ctx: ToolCtx): Promise<void> {
     showBtn.addEventListener("click", () => {
       const tl = tools(); const errs = checkSyntax(r);
       if (errs.length || !tl.ruleMatchingItems) { showBtn.textContent = "Show Matches (error)"; return; }
-      const ids = tl.ruleMatchingItems(E.kdoc as KDoc, tl.designSettings ? tl.designSettings(E.proSettings || null) : {}, "(version 1)\n" + ruleText(r), r.name);
+      const ids = tl.ruleMatchingItems(E.kdoc as KDoc, tl.designSettings ? tl.designSettings(E.proSettings || null) : {}, "(version 1)\n" + savedText(r), r.name);
       if (!ids) { showBtn.textContent = "Show Matches (error)"; return; }
       showBtn.textContent = `Show Matches (${ids.length})`;
       ctx.setHighlight(new Set(ids)); ctx.requestRender();
@@ -462,7 +298,8 @@ export async function openDrcRuleEditor(ctx: ToolCtx): Promise<void> {
 
   const save = async (): Promise<boolean> => {
     if (ro) return false;
-    for (const r of rules) { const e = validate(r); if (e.length) { messageBox("Error", `Cannot save due to validation errors in rule '${r.name}':\n\n${e.join("\n")}`); return false; } }
+    // a rule nobody edited is written back as it was read, so only edited rules are validated
+    for (const r of rules) { if (!ruleEdited(r)) continue; const e = validate(r); if (e.length) { messageBox("Error", `Cannot save due to validation errors in rule '${r.name}':\n\n${e.join("\n")}`); return false; } }
     const text = rulesText(rules);
     let ok = false;
     if (dru) ok = await saveTextDocument(dru.docId, text, { id: "rules", kind: "MODIFIED", typeName: "DESIGN_RULES_FILE", properties: [{ name: "text", after: { type: "string", v: text } }] });
@@ -472,7 +309,7 @@ export async function openDrcRuleEditor(ctx: ToolCtx): Promise<void> {
       ok = E.api && E.api.saveCustomRules ? await E.api.saveCustomRules(path, text) : false;
     }
     if (!ok) { ctx.toast("Could not save the custom rules"); return false; }
-    E.druText = text; saved = rules.map(ruleText); deletedAny = false; refresh(); ctx.toast("Custom rules saved");
+    E.druText = text; for (const r of rules) { r.raw = savedText(r); r.gen = ruleText(r); } saved = rules.map(ruleText); deletedAny = false; refresh(); ctx.toast("Custom rules saved");
     return true;
   };
 
