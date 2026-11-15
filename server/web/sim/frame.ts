@@ -5,7 +5,7 @@
 // (TUNER_SLIDER).  The circuit is the project's SPICE netlist (editor/export-netlist.ts) run by ngspice compiled to
 // WebAssembly (plugins/spice.ts); the results come back as ngspice's ASCII raw file.  Probe and Tune pick on the
 // schematic canvas the way SIMULATOR_CONTROL::Probe / Tune do.  The workbook (.wbk JSON, version 8) holds the tabs.
-import { KD, h, popupMenu, promptText, download, confirmBox, type PopItem } from "../dialogs/dom";
+import { KD, h, popupMenu, promptText, download, confirmBox, unsavedChangesBox, type PopItem } from "../dialogs/dom";
 import { E, api, isSch, requestRender, toast, toolCtx } from "../dialogs/editor";
 import { messageBox } from "../dialogs/sch-items";
 import { bitmapButton, bitmapToggle, kicadIcon } from "../components/kicon-dom";
@@ -56,7 +56,6 @@ const NGSPICE_URL = "/static/pyodide/ngspice.mjs";   // served by src/pcm.rs run
 const SIM_OPTS = OPT_SAVE_V | OPT_SAVE_I | OPT_SAVE_P | OPT_SAVE_EVENTS;
 const curTab = (): Tab | null => S.tabs[S.cur] || null;
 const tabType = (t: Tab | null): SimType => (t ? commandToSimType(t.command) : "TRAN");
-const storeKey = (): string => "kc-sim-wbk:" + location.pathname;
 
 // ---------------------------------------------------------------- the project's simulator settings
 /** NGSPICE_SETTINGS (spice_settings.cpp): the .kicad_pro's schematic.ngspice — model_mode (NGSPICE_COMPATIBILITY_MODE,
@@ -156,20 +155,23 @@ export async function openSimulator(): Promise<void> {
     if (d) { try { const t = await api(`/api/docs/${d.docId}/content`); wb = JSON.parse(typeof t === "string" ? t : JSON.stringify(t)) as Workbook; S.wbName = d.path; } catch { wb = null; } }
     else log(`Workbook file '${cfg.workbook_filename}' not found. Loading simulation settings from schematic.\n`);
   }
-  // this viewer's unsaved workbook of the project, then any workbook the project has
-  if (!wb) { try { const t = localStorage.getItem(storeKey()); if (t) wb = JSON.parse(t) as Workbook; } catch { /* nothing kept */ } }
-  if (!wb && !cfg.workbook_filename) {
-    const d = wbkDocs()[0];
-    if (d) { try { const t = await api(`/api/docs/${d.docId}/content`); wb = JSON.parse(typeof t === "string" ? t : JSON.stringify(t)) as Workbook; S.wbName = d.path; } catch { wb = null; } }
-  }
+  // no workbook named (or it could not be read): the settings come from the schematic, its simulation directive as
+  // the first tab
   if (wb && wb.tabs && wb.tabs.length) applyWorkbook(wb);
   else if (S.schCommand) { newTab(S.schCommand, DEFAULT_OPTIONS).lastSch = S.schCommand; }
+  S.dirty = false;
   renderAll();
   window.addEventListener("keydown", onKey, true);
 }
-export function closeSimulator(): void {
+/** SIMULATOR_FRAME::canCloseWindow: a modified workbook asks to be saved first. */
+export async function closeSimulator(): Promise<void> {
   if (!S.root) return;
-  keep();
+  if (S.dirty && S.tabs.length) {
+    const c = await unsavedChangesBox("Save changes to workbook?");
+    if (c === "cancel") return;
+    if (c === "save") { await saveWorkbook(false); if (S.dirty) return; }
+  }
+  if (!S.root) return;
   stopProbe();
   S.root.remove(); S.root = null; S.tabs = []; S.cur = -1; S.tuners = []; S.simulated = false;
   window.removeEventListener("keydown", onKey, true);
@@ -186,7 +188,7 @@ function onKey(ev: KeyboardEvent): void {
   else if (mod && !ev.shiftKey && k === "o") run = () => openWorkbook();
   else if (mod && !ev.shiftKey && k === "s") run = () => void saveWorkbook(false);
   else if (mod && ev.shiftKey && k === "s") run = () => void saveWorkbook(true);
-  else if (mod && k === "w") run = () => closeSimulator();
+  else if (mod && k === "w") run = () => void closeSimulator();
   if (!run) return;
   ev.preventDefault(); ev.stopPropagation(); run();
 }
@@ -498,7 +500,7 @@ function menus(): [string, MenuEntry[]][] {
     ["File", [A("newAnalysisTab", () => void newAnalysisTab()), SEP, A("openWorkbook", openWorkbook), A("saveWorkbook", () => void saveWorkbook(false)), A("saveWorkbookAs", () => void saveWorkbook(true)), SEP,
       A("exportPlotAsPNG", exportPng, hasPlot), A("exportPlotAsCSV", exportCsv, hasPlot), SEP, A("exportPlotToClipboard", () => void exportClipboard(), hasPlot),
       A("exportPlotToSchematic", exportToSchematic, () => hasPlot() && canWriteProject()), SEP,
-      { label: "Close", icon: "exit", tip: "Close Simulator", key: "Ctrl+W", run: closeSimulator, enabled: () => true }]],
+      { label: "Close", icon: "exit", tip: "Close Simulator", key: "Ctrl+W", run: () => void closeSimulator(), enabled: () => true }]],
     ["View", [A("toggleSimSidePanel", () => { S.sidePanel = !S.sidePanel; renderAll(); }, undefined, () => S.sidePanel), A("toggleSimConsole", () => { S.console = !S.console; renderAll(); }, undefined, () => S.console), SEP,
       A("zoomUndo", zoomCmd("zoomUndo"), () => !!t()?.plot?.canUndo()), A("zoomRedo", zoomCmd("zoomRedo"), () => !!t()?.plot?.canRedo()), SEP,
       ...["zoomInCenter", "zoomOutCenter", "zoomInHorizontally", "zoomOutHorizontally", "zoomInVertically", "zoomOutVertically", "zoomFitScreen"].map((id) => A(id, zoomCmd(id), hasPlot)), SEP,
@@ -541,7 +543,6 @@ function renderAll(): void {
   renderToolbar(); renderTabs(); renderPlot(); renderSignals(); renderCursors(); renderMeas(); renderTuners();
   els.side.hidden = !S.sidePanel; els.split.hidden = !S.sidePanel;
   els.console.hidden = !S.console; els.splitH.hidden = !S.console;
-  keep();
 }
 function renderTabs(): void {
   els.tabs.innerHTML = "";
@@ -965,7 +966,6 @@ export function applyWorkbook(wb: Workbook): void {
   S.cur = S.tabs.length ? 0 : -1; S.dirty = false;
 }
 function cssHex(c: string): string { const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(c); return m ? "#" + [m[1], m[2], m[3]].map((x) => Number(x).toString(16).padStart(2, "0")).join("").toUpperCase() : c.slice(0, 7); }
-function keep(): void { if (!S.root) return; try { localStorage.setItem(storeKey(), JSON.stringify(workbook())); } catch { /* storage off */ } }
 function wbkDocs(): { docId: string; path: string }[] { return (projectDocs() as { docId: string; path: string }[]).filter((d) => /\.wbk$/i.test(d.path)); }
 /** File > Open Workbook…: a project's .wbk, or one from the computer. */
 function openWorkbook(): void {
@@ -989,7 +989,6 @@ function loadWorkbookText(text: string, name: string): void {
 /** File > Save Workbook (As…): the .wbk next to the project file (SIMULATOR_FRAME::SaveWorkbook), or a download for a viewer. */
 async function saveWorkbook(as: boolean): Promise<void> {
   const text = JSON.stringify(workbook(), null, 2) + "\n";
-  keep();
   const docs = projectDocs() as { docId: string; path: string; docType: string }[];
   const pro = docs.find((d) => d.docType === "kicad_pro");
   const dir = pro && pro.path.includes("/") ? pro.path.slice(0, pro.path.lastIndexOf("/") + 1) : "";
@@ -1000,7 +999,7 @@ async function saveWorkbook(as: boolean): Promise<void> {
     if (name === null) return;
     path = dir + (/\.wbk$/i.test(name.trim()) ? name.trim() : name.trim() + ".wbk");
   }
-  if (!canWriteProject()) { download(path.split("/").pop()!, text, "application/json"); S.wbName = path; log(`Downloaded workbook ${path}\n`); return; }
+  if (!canWriteProject()) { download(path.split("/").pop()!, text, "application/json"); S.wbName = path; S.dirty = false; log(`Downloaded workbook ${path}\n`); return; }
   try {
     const have = docs.find((d) => d.path === path);
     if (have) { if (!(await saveTextDocument(have.docId, text, { id: "workbook", kind: "MODIFIED", typeName: "WORKBOOK_FILE", properties: [] } as never))) throw new Error("not saved"); }
