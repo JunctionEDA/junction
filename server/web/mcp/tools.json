@@ -57,7 +57,7 @@
     "name": "render_view",
     "title": "Render image",
     "write": false,
-    "description": "A picture of a schematic sheet or of the board as it is right now, drawn the way the editor draws it (KiCad's colours and stroke font). Use it to see layout, readability and placement that lists of coordinates do not show, and to check your own changes after applying them. Without area or refs it shows the whole sheet or board; a schematic sheet is large, so ask for the part you care about to be able to read values and pin names.",
+    "description": "A picture of a schematic sheet or of the board as it is right now, drawn the way the editor draws it (KiCad's colours and stroke font). Use it to see layout, readability and placement that lists of coordinates do not show, and to check your own changes after applying them. Scope it to what you need, since a smaller picture costs less to look at: an area, parts (refs), nets (cropped to the net, which is drawn at full strength over a dimmed board or sheet), board layers, or view_of a person to see exactly what they are looking at with their selection outlined. violations: true numbers the findings of the rules check on the picture and lists them. Without any of these it shows the whole sheet or board; a schematic sheet is large, so ask for the part you care about to be able to read values and pin names.",
     "input_schema": {
       "type": "object",
       "properties": {
@@ -65,10 +65,72 @@
         "document": { "type": "string", "description": "Document path as listed by get_project, or \"board\"." },
         "area": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "The rectangle to show, [x0, y0, x1, y1] in millimetres." },
         "refs": { "type": "array", "items": { "type": "string" }, "description": "Show these components and their surroundings instead of an area." },
+        "nets": { "type": "array", "items": { "type": "string" }, "description": "Show these nets, by the names list_nets gives: cropped to them, with their wires or copper, pads and pins standing out and the rest dimmed." },
+        "ids": { "type": "array", "items": { "type": "string" }, "description": "Show these items, by the ids get_items or get_selection gives." },
+        "emphasize": { "type": "boolean", "description": "Dim everything except the refs, nets and ids asked for. Default: true for nets, false otherwise." },
+        "view_of": { "type": "string", "description": "The name or login of a person who has the document open (get_selection lists them), or \"anyone\": shows what they are looking at right now, their selection outlined in their colour and their cursor with their name." },
+        "violations": { "type": "boolean", "description": "Run the rules check (ERC on a sheet, DRC on the board) and mark each finding in view with its number; the answer lists them." },
         "layers": { "type": "array", "items": { "type": "string" }, "description": "Board only: draw just these layers, for example [\"F.Cu\", \"Edge.Cuts\"]. Default: every layer the editor shows by default." },
-        "width_px": { "type": "integer", "minimum": 400, "maximum": 2000, "description": "Longest side of the image in pixels (default 1500)." }
+        "width_px": { "type": "integer", "minimum": 400, "maximum": 2000, "description": "Longest side of the image in pixels (default 1500). 800 is enough for a close-up and costs about a quarter as much to look at." }
       },
       "required": ["project", "document"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "highlight",
+    "title": "Highlight for everyone",
+    "write": false,
+    "description": "Point at something so the people in the document see what you mean: the parts, nets, items or region are outlined live on everyone's canvas (browser and desktop) in your colour with your name tag, the way a collaborator's selection shows, and anyone following you has their view brought there. Add a short note to say why (\"C5 is 9 mm from U1's VDD pin\"). It changes nothing in the design and clears by itself after `seconds`; a new highlight replaces the last, and clear: true removes it. Use it whenever you refer to a place in the design while people are working in it, instead of describing where it is. The answer says who has the document open.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name." },
+        "document": { "type": "string", "description": "Document path as listed by get_project, or \"board\"." },
+        "refs": { "type": "array", "items": { "type": "string" }, "description": "Components to outline, by reference." },
+        "nets": { "type": "array", "items": { "type": "string" }, "description": "Nets to trace: their wires or tracks are lit and their pins or pads outlined." },
+        "ids": { "type": "array", "items": { "type": "string" }, "description": "Items by id (from get_items, get_selection or a violation)." },
+        "area": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "A region to frame, [x0, y0, x1, y1] in millimetres." },
+        "at": { "type": "array", "items": { "type": "number" }, "minItems": 2, "maxItems": 2, "description": "A point to ring, [x, y] in millimetres: where a check found something." },
+        "note": { "type": "string", "description": "What you are saying about it, up to 140 characters, shown beside your name tag." },
+        "seconds": { "type": "integer", "minimum": 5, "maximum": 300, "description": "How long it stays (default 45)." },
+        "clear": { "type": "boolean", "description": "Remove your highlight from this document now." }
+      },
+      "required": ["project", "document"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "get_selection",
+    "title": "See who is here",
+    "write": false,
+    "description": "The people who have the project open right now: for each, whether they are in the browser or the desktop editor, what they have selected (references, or item kinds with ids and nets), where their cursor is and the area they are looking at. Call it when the person says \"this\", \"here\" or \"what I selected\", then read those items with the other tools or look with render_view view_of. Without a document it covers every sheet and the board.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name." },
+        "document": { "type": "string", "description": "Only this document; every sheet and the board when omitted." }
+      },
+      "required": ["project"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "trace_net",
+    "title": "Trace a net",
+    "write": false,
+    "description": "One net end to end, in a compact answer. On the board: every pad with its position and side, the routed length in total and per layer, track widths in use, vias, zones, how many separate islands of copper it is in, each connection still open (from which pad to which, and how far), and any net it is shorted to. On a sheet: its pins with their types, its labels and whether it leaves the sheet. highlight: true also lights the net up for the people in the document.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name." },
+        "document": { "type": "string", "description": "Document path as listed by get_project, or \"board\"." },
+        "net": { "type": "string", "description": "The net's name, as list_nets gives it." },
+        "highlight": { "type": "boolean", "description": "Also highlight the net live for everyone in the document." },
+        "note": { "type": "string", "description": "With highlight: the note shown beside your name tag." },
+        "seconds": { "type": "integer", "minimum": 5, "maximum": 300 }
+      },
+      "required": ["project", "document", "net"],
       "additionalProperties": false
     }
   },
@@ -224,17 +286,17 @@
     "input_schema": {
       "type": "object",
       "properties": {
-        "project": {"type": "string", "description": "Project id or exact name."},
-        "code": {"type": "string", "description": "The Python script. With `script`, it is stored under that name and run."},
-        "script": {"type": "string", "description": "Name of a script kept with the project. Send `code` with it once to store the script; after that give only the name to run it again, or the name and `edits` to change it and run. get_project lists the stored scripts."},
-        "edits": {"type": "array", "description": "Changes to the stored script before it runs: each `old` text (it must occur exactly once) is replaced by `new`, and the result is stored.", "items": {"type": "object", "properties": {"old": {"type": "string"}, "new": {"type": "string"}}, "required": ["old", "new"], "additionalProperties": false}},
-        "run": {"type": "boolean", "description": "false stores or edits the script without running it (default true)."},
-        "show": {"type": "boolean", "description": "true returns the stored script's text under script.code (default false)."},
-        "title": {"type": "string", "description": "A few words naming what the script does. It is what the person sees in the list of changes."},
-        "live": {"type": "boolean", "description": "Draw the edits step by step with a moving cursor (default true)."},
-        "plan": {"type": "boolean", "description": "Work the edits out first and draw each item once, at its final place, when the script ends or calls project.publish() (default true). false sends each batch as it is made."},
-        "keep_on_error": {"type": "boolean", "description": "Keep the edits made before a failure instead of taking them back (default false)."},
-        "timeout_s": {"type": "number", "description": "Time limit in seconds (default 180, at most 400)."}
+        "project": { "type": "string", "description": "Project id or exact name." },
+        "code": { "type": "string", "description": "The Python script. With `script`, it is stored under that name and run." },
+        "script": { "type": "string", "description": "Name of a script kept with the project. Send `code` with it once to store the script; after that give only the name to run it again, or the name and `edits` to change it and run. get_project lists the stored scripts." },
+        "edits": { "type": "array", "description": "Changes to the stored script before it runs: each `old` text (it must occur exactly once) is replaced by `new`, and the result is stored.", "items": { "type": "object", "properties": { "old": { "type": "string" }, "new": { "type": "string" } }, "required": ["old", "new"], "additionalProperties": false } },
+        "run": { "type": "boolean", "description": "false stores or edits the script without running it (default true)." },
+        "show": { "type": "boolean", "description": "true returns the stored script's text under script.code (default false)." },
+        "title": { "type": "string", "description": "A few words naming what the script does. It is what the person sees in the list of changes." },
+        "live": { "type": "boolean", "description": "Draw the edits step by step with a moving cursor (default true)." },
+        "plan": { "type": "boolean", "description": "Work the edits out first and draw each item once, at its final place, when the script ends or calls project.publish() (default true). false sends each batch as it is made." },
+        "keep_on_error": { "type": "boolean", "description": "Keep the edits made before a failure instead of taking them back (default false)." },
+        "timeout_s": { "type": "number", "description": "Time limit in seconds (default 180, at most 400)." }
       },
       "required": ["project"],
       "additionalProperties": false
@@ -248,10 +310,10 @@
     "input_schema": {
       "type": "object",
       "properties": {
-        "project": {"type": "string", "description": "Project id or exact name."},
-        "document": {"type": "string", "description": "Which sheet (its path or file name), or \"board\"."},
-        "level": {"type": "string", "enum": ["error", "warning", "note"], "description": "List only findings at least this serious (note, the default, lists all)."},
-        "rule": {"type": "string", "description": "List only one rule or family of rules, for example \"power\" or \"caps.voltage\"."}
+        "project": { "type": "string", "description": "Project id or exact name." },
+        "document": { "type": "string", "description": "Which sheet (its path or file name), or \"board\"." },
+        "level": { "type": "string", "enum": ["error", "warning", "note"], "description": "List only findings at least this serious (note, the default, lists all)." },
+        "rule": { "type": "string", "description": "List only one rule or family of rules, for example \"power\" or \"caps.voltage\"." }
       },
       "required": ["project", "document"],
       "additionalProperties": false
@@ -265,13 +327,13 @@
     "input_schema": {
       "type": "object",
       "properties": {
-        "project": {"type": "string", "description": "Project id or exact name."},
-        "document": {"type": "string", "description": "Which sheet: its path or file name."},
-        "within": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4, "description": "Measure only the items wholly inside this box [x0, y0, x1, y1] in mm."},
-        "of": {"type": "array", "items": {"type": "string"}, "description": "Measure these parts (references) with what hangs on their pins."},
-        "wrap": {"type": "array", "items": {"type": "object", "properties": {"text": {"type": "string"}, "size": {"type": "number"}, "width": {"type": "number"}}, "required": ["text", "width"], "additionalProperties": false}, "description": "Notes to break into lines no wider than width mm at this text size."},
-        "free": {"type": "object", "properties": {"near": {"type": "string"}, "w": {"type": "number"}, "h": {"type": "number"}}, "required": ["w", "h"], "additionalProperties": false, "description": "Find free room for a box of w by h mm, beside the part named in near when given; the answer's free is its top left corner."},
-        "limit": {"type": "integer", "minimum": 1, "maximum": 200, "description": "How many findings to list (40 by default); the counts are always complete."}
+        "project": { "type": "string", "description": "Project id or exact name." },
+        "document": { "type": "string", "description": "Which sheet: its path or file name." },
+        "within": { "type": "array", "items": { "type": "number" }, "minItems": 4, "maxItems": 4, "description": "Measure only the items wholly inside this box [x0, y0, x1, y1] in mm." },
+        "of": { "type": "array", "items": { "type": "string" }, "description": "Measure these parts (references) with what hangs on their pins." },
+        "wrap": { "type": "array", "items": { "type": "object", "properties": { "text": { "type": "string" }, "size": { "type": "number" }, "width": { "type": "number" } }, "required": ["text", "width"], "additionalProperties": false }, "description": "Notes to break into lines no wider than width mm at this text size." },
+        "free": { "type": "object", "properties": { "near": { "type": "string" }, "w": { "type": "number" }, "h": { "type": "number" } }, "required": ["w", "h"], "additionalProperties": false, "description": "Find free room for a box of w by h mm, beside the part named in near when given; the answer's free is its top left corner." },
+        "limit": { "type": "integer", "minimum": 1, "maximum": 200, "description": "How many findings to list (40 by default); the counts are always complete." }
       },
       "required": ["project", "document"],
       "additionalProperties": false
@@ -285,8 +347,8 @@
     "input_schema": {
       "type": "object",
       "properties": {
-        "run_id": {"type": "string", "description": "The run_id from the answer that said running: true."},
-        "wait_s": {"type": "integer", "description": "How long to wait for it this time, in seconds (default 45, at most 50)."}
+        "run_id": { "type": "string", "description": "The run_id from the answer that said running: true." },
+        "wait_s": { "type": "integer", "description": "How long to wait for it this time, in seconds (default 45, at most 50)." }
       },
       "required": ["run_id"],
       "additionalProperties": false
@@ -300,9 +362,9 @@
     "input_schema": {
       "type": "object",
       "properties": {
-        "project": {"type": "string", "description": "Project id or exact name."},
-        "document": {"type": "string", "description": "Which document: its path, or \"board\" for the board."},
-        "silk": {"type": "boolean", "description": "Board only: also list the boxes of everything printed on the silkscreen, as [x0, y0, x1, y1, layer]."}
+        "project": { "type": "string", "description": "Project id or exact name." },
+        "document": { "type": "string", "description": "Which document: its path, or \"board\" for the board." },
+        "silk": { "type": "boolean", "description": "Board only: also list the boxes of everything printed on the silkscreen, as [x0, y0, x1, y1, layer]." }
       },
       "required": ["project", "document"],
       "additionalProperties": false

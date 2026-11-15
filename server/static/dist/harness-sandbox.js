@@ -449,6 +449,28 @@ class _Doc:
                 f.write(r["svg"])
         return r["svg"]
 
+    def highlight(self, refs=None, nets=None, area=None, at=None, note: str | None = None, seconds: int | None = None, ids=None) -> dict:
+        """Point at parts, nets, a region [x0, y0, x1, y1] or a point [x, y] for the people who have the document open:
+        outlined live on their canvas with the note beside the assistant's name tag, cleared after \`seconds\` (45).
+        On local files there is nobody to show, and the call does nothing."""
+        one = lambda v: [v] if isinstance(v, str) else list(v) if v else None  # noqa: E731
+        args = {"refs": one(refs), "nets": one(nets), "ids": one(ids), "area": list(area) if area else None, "at": list(at) if at else None, "note": note, "seconds": seconds}
+        return self._call("highlight", **{k: v for k, v in args.items() if v is not None})
+
+    def clear_highlight(self) -> dict:
+        """Take the highlight off now instead of waiting for it to clear."""
+        return self._call("highlight", clear=True)
+
+    def trace(self, net: str, highlight: bool = False, note: str | None = None) -> dict:
+        """One net end to end: on the board its pads, routed length per layer, vias, islands and open connections;
+        on a sheet its pins and labels.  \`highlight=True\` also lights it up for the people in the document."""
+        args = {"net": net}
+        if highlight:
+            args["highlight"] = True
+        if note:
+            args["note"] = note
+        return self._call("trace_net", **args)
+
     def add_item(self, sexpr: str) -> None:
         """Escape hatch for an item the other calls do not cover: one complete KiCad s-expression."""
         self._edit({"op": "add_item", "sexpr": sexpr})
@@ -1797,7 +1819,8 @@ class Board(_Doc):
         pins a clear way to the parts they go to: a capacitor standing in front of I/O pins sends every one of those
         nets to another layer.  \`board.autoplace\` and \`board.swap_pins\` call it themselves; call it by hand after moving
         a chip.  ref=None does every chip that has supply pins with capacitors; \`caps\` names the capacitors (default:
-        the two-pad C parts between one of the chip's supply nets and ground that have no nearer chip on that net).
+        the two-pad C parts between one of the chip's supply nets and ground that have no nearer chip, regulator or
+        oscillator on that net: an oscillator's own capacitor stays with it).
 
         Every supply pin gets one capacitor first (the smallest box, so the small-value part), the rest join the pin of
         their net that has fewest.  A spot costs its distance from capacitor pad to pin plus 4 mm for each signal pin
@@ -1845,7 +1868,7 @@ class Board(_Doc):
                     continue
                 if n not in {q[3] for q in pins}:
                     continue
-                near = min((math.hypot(c["x"] - q[1], c["y"] - q[2]), o["ref"]) for o in parts if len(o["pads"]) >= 4 and o["ref"][:1] in ("U", "I", "Q") for q in o["pads"] if q[3] == n)
+                near = min((math.hypot(c["x"] - q[1], c["y"] - q[2]), o["ref"]) for o in parts if len(o["pads"]) >= 3 and o["ref"][:1] in ("U", "I", "Q", "X", "Y") for q in o["pads"] if q[3] == n)
                 if near[1] == me["ref"]:
                     mine.append(r)
             routed = {n: bool((self._call("get_items", net=n, kinds=["segment"]) or {}).get("items")) for n in {supply_of(two[r]) for r in mine}}

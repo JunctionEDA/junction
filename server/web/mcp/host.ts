@@ -28,7 +28,8 @@ import { checkLayout } from "../ai/layout";
 import { reviewDesign } from "../ai/review";
 import * as library from "../ai/library";
 import { buildProposal, staleReason, writeRules } from "../ai/proposals";
-import { renderPicture } from "./picture";
+import { renderPicture, type Emphasis } from "./picture";
+import { findPerson, highlight, people, resolveTargets, settle, traceNet } from "./teammate";
 import { DocSession, editProjectFile, readTextDocument, type Conn, type DocEntry, type UndoRecord } from "./session";
 
 declare const process: any;
@@ -273,7 +274,7 @@ const PY_OUTPUT_MAX = 6000, PY_DEFAULT_S = 180, PY_MAX_S = 400;
 const HARNESS_CALLS: Record<string, string> = {
   overview: "get_design_overview", list_components: "list_components", get_component: "get_component", list_nets: "list_nets", get_geometry: "get_geometry", check_layout: "check_layout", review_design: "review_design",
   run_checks: "run_checks", get_board_info: "get_board_info", get_items: "get_items", find_datasheets: "find_datasheets", find_parts: "find_parts",
-  get_library_part: "get_library_part", read_datasheet: "read_datasheet",
+  get_library_part: "get_library_part", read_datasheet: "read_datasheet", highlight: "highlight", trace_net: "trace_net",
 };
 
 interface ChangeRecord { docId: string; title: string; edits: string[]; undo: UndoRecord & { rules?: unknown } }
@@ -449,15 +450,30 @@ async function readDocument(req: Request): Promise<Reply> {
 
 async function renderView(req: Request): Promise<Reply> {
   const a = req.args || {};
-  return withDocument(req, a.document, (sess, doc) => {
-    const k = K(); const opts: any = {}; let box: number[] | null = null;
+  return withDocument(req, a.document, async (sess, doc) => {
+    const k = K(); const opts: any = {}; let box: number[] | null = null; const em: Emphasis = {}; const result: any = { document: sess.entry.path };
+    const pad = (b: number[]) => { const m = Math.max(doc.type === "sch" ? 12 : 4, 0.25 * Math.max(b[2] - b[0], b[3] - b[1])); return [b[0] - m, b[1] - m, b[2] + m, b[3] + m]; };
     if (Array.isArray(a.area) && a.area.length === 4 && a.area.every((v: unknown) => typeof v === "number" && isFinite(v as number))) box = [Math.min(a.area[0], a.area[2]), Math.min(a.area[1], a.area[3]), Math.max(a.area[0], a.area[2]), Math.max(a.area[1], a.area[3])];
-    const missing: string[] = [];
-    if (!box && Array.isArray(a.refs) && a.refs.length) {
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const r of a.refs) { const hits = design.findByRef(doc, String(r)); if (!hits.length) missing.push(String(r)); for (const it of hits) { const b = it.bbox || [it.x, it.y, it.x, it.y]; x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[2]); y1 = Math.max(y1, b[3]); } }
-      if (!isFinite(x0)) throw new ToolError(`Not on ${sess.entry.path}: ${missing.join(", ")}.`);
-      const m = Math.max(doc.type === "sch" ? 12 : 4, 0.25 * Math.max(x1 - x0, y1 - y0)); box = [x0 - m, y0 - m, x1 + m, y1 + m];
+    // parts, nets and items: the picture is cropped to them (unless an area says otherwise) and can make them stand out
+    const scoped = (Array.isArray(a.refs) && a.refs.length) || (Array.isArray(a.nets) && a.nets.length) || (Array.isArray(a.ids) && a.ids.length);
+    if (scoped) {
+      const t = resolveTargets(doc, { refs: a.refs, nets: a.nets, ids: a.ids });
+      if (!t.box) throw new ToolError(`Not on ${sess.entry.path}: ${t.missing.join(", ")}.`);
+      if (t.missing.length) result.not_on_this_document = t.missing;
+      if (!box) box = pad(t.box);
+      const nets = Array.isArray(a.nets) && a.nets.length > 0;
+      if (a.emphasize === undefined ? nets : a.emphasize === true) { em.dim = true; em.ids = new Set(t.ids); em.boxes = t.boxes.slice(0, 400); if (doc.type === "sch") em.segs = t.segs.slice(0, 600); result.emphasized = t.what; }
+    }
+    // what a person in the document is looking at, with their selection outlined and their cursor
+    if (typeof a.view_of === "string" && a.view_of.trim()) {
+      await settle(sess); const p = findPerson(sess, a.view_of);
+      if (!p) { const here = Array.from(sess.peers.values()).filter((q) => q.user && q.user.client !== "mcp").map((q) => q.user.name || q.user.login); throw new ToolError(here.length ? `${a.view_of} does not have ${sess.entry.path} open. In it now: ${here.join(", ")}.` : `Nobody else has ${sess.entry.path} open right now, so there is no view to show.`); }
+      const st = p.state || {}, IU = sess.IU, color = (p.user && p.user.color) || "#4477ee", name = p.user.name || p.user.login || "peer";
+      if (!box && Array.isArray(st.viewport) && st.viewport.length >= 4 && st.viewport[2] > 0) box = [st.viewport[0] / IU, st.viewport[1] / IU, (st.viewport[0] + st.viewport[2]) / IU, (st.viewport[1] + st.viewport[3]) / IU];
+      const sel: string[] = Array.isArray(st.selection) ? st.selection : []; em.boxes = em.boxes || [];
+      for (const id of sel) { const b = doc.items.get(id)?.bbox; if (b) em.boxes.push([b[0], b[1], b[2], b[3], color]); }
+      if (Array.isArray(st.cursor)) em.tags = [{ x: st.cursor[0] / IU, y: st.cursor[1] / IU, label: name, color }];
+      result.view_of = name; result.their_selection = sel.length ? sel.map((id) => doc.items.get(id)).filter(Boolean).slice(0, 30).map((it: any) => it.ref || `${it.kind} ${it.id}`) : "nothing selected";
     }
     if (box) { if (box[2] - box[0] < 0.5 || box[3] - box[1] < 0.5) throw new ToolError("The area is too small to draw; give at least half a millimetre each way."); opts.bbox = box; opts.margin = 0; }
     if (doc.type === "pcb" && Array.isArray(a.layers) && a.layers.length) {
@@ -466,12 +482,31 @@ async function renderView(req: Request): Promise<Reply> {
       if (unknown.length) throw new ToolError(`Not layers of this board: ${unknown.join(", ")}. It has: ${all.map((l) => l.name).join(", ")}.`);
       opts.hidden = new Set(all.filter((l) => !want.has(String(l.name).toLowerCase())).map((l) => l.key));
     } else if (doc.type === "pcb") opts.hidden = new Set(Array.from(k.PCB_HIDDEN_DEFAULT || []));
+    // the findings of the rules check, numbered on the picture in the order run_checks lists them
+    if (a.violations === true) {
+      const res: any = await design.runChecks({}); const rows: any[] = res.violations || []; const inBox = (m: any) => !box || (m.x >= box[0] && m.x <= box[2] && m.y >= box[1] && m.y <= box[3]);
+      em.marks = []; const listed: any[] = [];
+      rows.forEach((m, i) => { if (typeof m.x !== "number" || typeof m.y !== "number" || !inBox(m) || em.marks!.length >= 60) return; em.marks!.push({ x: m.x, y: m.y, label: String(i + 1), color: m.severity === "error" ? "#FF2A2A" : "#FFB000" }); listed.push({ n: i + 1, severity: m.severity, message: m.message, x: m.x, y: m.y, refs: m.refs && m.refs.length ? m.refs : undefined }); });
+      result.violations = listed; result.violations_total = rows.length;
+    }
+    if (em.dim || (em.boxes && em.boxes.length) || (em.marks && em.marks.length) || (em.tags && em.tags.length)) opts.emphasis = em;
     const svg: string = renderPicture(doc, opts);
     const vb = /viewBox="([-\d.]+) ([-\d.]+) ([-\d.]+) ([-\d.]+)"/.exec(svg);
-    const shown = vb ? [Number(vb[1]), Number(vb[2]), Number(vb[1]) + Number(vb[3]), Number(vb[2]) + Number(vb[4])].map(r3) : box;
-    return { svg, result: { document: sess.entry.path, shown_mm: shown, not_on_this_document: missing.length ? missing : undefined,
-      note: "Coordinates in the image run from the top left of shown_mm, x to the right and y down, in millimetres." } };
+    result.shown_mm = vb ? [Number(vb[1]), Number(vb[2]), Number(vb[1]) + Number(vb[3]), Number(vb[2]) + Number(vb[4])].map(r3) : box;
+    result.note = "Coordinates in the image run from the top left of shown_mm, x to the right and y down, in millimetres.";
+    return { svg, result };
   });
+}
+
+/** Who is in the project's documents right now: one document when named, else every sheet and the board. */
+async function getSelection(req: Request): Promise<Reply> {
+  const p = needProject(req); const a = req.args || {};
+  if (typeof a.document === "string" && a.document.trim()) return withDocument(req, a.document, async (sess, doc) => ({ result: await people(sess, doc) }));
+  const docs = p.docs.filter(drawable).slice(0, 16); const out: any[] = [];
+  // joined together, so the wait for each document's people is spent once
+  await Promise.all(docs.map((d) => session(d).current().catch(() => null)));
+  for (const d of docs) { try { const r = await withDocument(req, d.path, (sess, doc) => people(sess, doc)); if (r.people.length) out.push({ document: r.document, people: r.people }); } catch { /* a document that would not open has nobody to report */ } }
+  return { result: { project: p.name, documents: out, note: out.length ? "Coordinates are millimetres. Only documents somebody has open are listed." : "Nobody else has a document of this project open right now." } };
 }
 
 // ---------------------------------------------------------------- comments, checkpoints, projects
@@ -583,6 +618,13 @@ const TOOLS: Record<string, (req: Request) => Promise<Reply>> = {
   redo_changes: undoChanges,
   read_document: readDocument,
   render_view: renderView,
+  highlight: (req) => withDocument(req, req.args.document, async (sess, doc) => ({ result: await highlight(sess, doc, req.args || {}) })),
+  get_selection: getSelection,
+  trace_net: (req) => withDocument(req, req.args.document, async (sess, doc) => {
+    const res: any = traceNet(doc, sess.entry.path, req.args.net);
+    if (req.args.highlight === true) res.highlight = await highlight(sess, doc, { nets: [req.args.net], note: req.args.note, seconds: req.args.seconds });
+    return { result: res };
+  }),
   list_comments: listComments,
   add_comment: addComment,
   resolve_comment: resolveComment,

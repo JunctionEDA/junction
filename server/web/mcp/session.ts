@@ -18,6 +18,8 @@ export interface UndoRecord { inverse: any[]; after: Record<string, string | nul
 const JOIN_TIMEOUT_MS = 20000, ACK_TIMEOUT_MS = 30000;
 // Live drawing: at most this many steps per change, this long between them, and about this long for a whole change.
 const LIVE_STEPS = 24, LIVE_PAUSE_MS = 110, LIVE_TOTAL_MS = 2200;
+/** How long the mark on what an edit just drew stays up. */
+const EDIT_MARK_MS = 60000;
 const pause = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 let opN = 0;
 
@@ -35,6 +37,12 @@ export class DocSession {
   private acks = new Map<string, { ok(seq: number): void; fail(e: Error): void }>();
   private presence: any = null;
   private beat: any = 0;
+  private fade: any = 0;
+  private clientId = "";
+  /** When this copy joined: the people already in the document are announced just after. */
+  joinedAt = 0;
+  /** The other people in the document as the server announces them: who they are, and their cursor, view and selection. */
+  peers = new Map<string, { user: any; state: any }>();
   /** Bumped whenever the document changes under us; readers that cache derived data key on it. */
   version = 0;
 
@@ -62,12 +70,13 @@ export class DocSession {
       const timer = setTimeout(() => done(new ToolError(`The server did not open ${this.entry.path} in time. Try again.`)), JOIN_TIMEOUT_MS);
       let sock: any;
       try { sock = new W.WebSocket(this.conn.base.replace(/^http/, "ws") + "/ws"); } catch (e) { done(new ToolError("The collaboration server could not be reached.")); return; }
-      this.ws = sock; this.joined = false; this.kdoc = null; this.lastSeq = 0;
-      sock.onopen = () => sock.send(JSON.stringify({ type: "hello", proto: 1, token: this.conn.token, clientId: "mcp-" + Math.random().toString(36).slice(2, 10), linkToken: null, client: "mcp", agent: this.conn.agent }));
+      this.ws = sock; this.joined = false; this.kdoc = null; this.lastSeq = 0; this.peers.clear();
+      this.clientId = "mcp-" + Math.random().toString(36).slice(2, 10);
+      sock.onopen = () => sock.send(JSON.stringify({ type: "hello", proto: 1, token: this.conn.token, clientId: this.clientId, linkToken: null, client: "mcp", agent: this.conn.agent }));
       sock.onerror = () => { if (this.ws === sock) done(new ToolError("The collaboration server could not be reached.")); };
       sock.onclose = () => {
         if (this.ws !== sock) return;
-        this.ws = null; this.joined = false; clearInterval(this.beat);
+        this.ws = null; this.joined = false; clearInterval(this.beat); clearTimeout(this.fade); this.peers.clear();
         for (const a of this.acks.values()) a.fail(new ToolError("The connection to the server dropped before the change was confirmed. Read the document again to see whether it was applied."));
         this.acks.clear();
         done(new ToolError(`The connection closed while opening ${this.entry.path}.`));
@@ -77,7 +86,7 @@ export class DocSession {
         let msg: any; try { msg = JSON.parse(String(ev.data)); } catch { return; }
         switch (msg.type) {
           case "hello_ok": sock.send(JSON.stringify({ type: "join_doc", docId: this.entry.docId })); break;
-          case "doc_info": this.joined = true; if (typeof msg.role === "string") this.role = msg.role; break;
+          case "doc_info": this.joined = true; this.joinedAt = Date.now(); if (typeof msg.role === "string") this.role = msg.role; break;
           case "snapshot":
             if (typeof msg.file !== "string") break;
             try { this.load(msg.file, Number(msg.seq) || 0, msg.thenOps || []); } catch (e) { done(new ToolError(`${this.entry.path} could not be parsed.`)); break; }
@@ -87,6 +96,14 @@ export class DocSession {
           case "ops": for (const op of msg.ops || []) if (!this.remote(op)) break; break;
           case "ack": { const a = msg.clientOpId && this.acks.get(msg.clientOpId); if (a) { this.acks.delete(msg.clientOpId); this.lastSeq = Math.max(this.lastSeq, Number(msg.seq) || 0); a.ok(Number(msg.seq) || 0); } break; }
           case "reset": this.resync(); break;
+          case "presence":
+            for (const [cid, e] of Object.entries(msg.peers || {})) {
+              if (cid === this.clientId || cid.endsWith(":" + this.clientId)) continue;
+              if (e === null) this.peers.delete(cid); else this.peers.set(cid, e as any);
+            }
+            break;
+          case "peer_joined": if (msg.peer && msg.peer.clientId && msg.peer.clientId !== this.clientId && !this.peers.has(msg.peer.clientId)) this.peers.set(msg.peer.clientId, { user: msg.peer, state: null }); break;
+          case "peer_left": if (msg.clientId) this.peers.delete(msg.clientId); break;
           case "error": {
             const a = msg.clientOpId && this.acks.get(msg.clientOpId);
             if (a) { this.acks.delete(msg.clientOpId); a.fail(new ToolError(refusal(msg.code))); this.resync(); }
@@ -273,19 +290,38 @@ export class DocSession {
       if (sel.length < 60) { sel.push(id); boxes.push([Math.round(b[0] * IU), Math.round(b[1] * IU), Math.round((b[2] - b[0]) * IU), Math.round((b[3] - b[1]) * IU)]); }
     }
     if (!isFinite(x0)) return;
-    this.presence = { cursor: [Math.round(((x0 + x1) / 2) * IU), Math.round(((y0 + y1) / 2) * IU)], selection: sel, boxes, sheetFile: this.entry.path };
+    this.mark({ cursor: [Math.round(((x0 + x1) / 2) * IU), Math.round(((y0 + y1) / 2) * IU)], selection: sel, boxes }, EDIT_MARK_MS);
+  }
+
+  /**
+   * Put this peer's mark on the document for everyone in it: a cursor, a selection, lines and a view, the same
+   * presence a person's editor sends.  It is taken off again after `ms`, so nothing an assistant pointed at stays
+   * marked once the conversation has moved on.
+   */
+  mark(state: any, ms: number): void {
+    this.presence = Object.assign({}, state, { sheetFile: this.entry.path });
     this.sendPresence();
-    // the server forgets a silent peer after 30 s; keep the mark up while this document stays open here
-    clearInterval(this.beat);
+    // the server forgets a silent peer after 30 s; keep the mark up until it is due to go
+    clearInterval(this.beat); clearTimeout(this.fade);
     this.beat = setInterval(() => this.sendPresence(), 10000);
-    if (this.beat && typeof this.beat.unref === "function") this.beat.unref();
+    this.fade = setTimeout(() => this.unmark(), ms);
+    for (const t of [this.beat, this.fade]) if (t && typeof t.unref === "function") t.unref();
+  }
+
+  /** Take the mark off: the peer stays in the document, pointing at nothing. */
+  unmark(): boolean {
+    clearInterval(this.beat); clearTimeout(this.fade);
+    const had = !!this.presence && (!!this.presence.cursor || !!(this.presence.selection && this.presence.selection.length));
+    this.presence = { selection: [], ghost: [], sheetFile: this.entry.path };
+    this.sendPresence();
+    return had;
   }
   private sendPresence(): void {
     if (this.open && this.presence) this.ws.send(JSON.stringify({ type: "presence", docId: this.entry.docId, state: this.presence }));
   }
 
   close(): void {
-    clearInterval(this.beat);
+    clearInterval(this.beat); clearTimeout(this.fade); this.peers.clear();
     const s = this.ws; this.ws = null; this.joined = false;
     if (s) { try { s.onclose = null; s.close(); } catch { /* already closed */ } }
     for (const a of this.acks.values()) a.fail(new ToolError("The connection to the document was closed."));

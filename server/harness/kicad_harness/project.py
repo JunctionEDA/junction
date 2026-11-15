@@ -352,6 +352,28 @@ class _Doc:
                 f.write(r["svg"])
         return r["svg"]
 
+    def highlight(self, refs=None, nets=None, area=None, at=None, note: str | None = None, seconds: int | None = None, ids=None) -> dict:
+        """Point at parts, nets, a region [x0, y0, x1, y1] or a point [x, y] for the people who have the document open:
+        outlined live on their canvas with the note beside the assistant's name tag, cleared after `seconds` (45).
+        On local files there is nobody to show, and the call does nothing."""
+        one = lambda v: [v] if isinstance(v, str) else list(v) if v else None  # noqa: E731
+        args = {"refs": one(refs), "nets": one(nets), "ids": one(ids), "area": list(area) if area else None, "at": list(at) if at else None, "note": note, "seconds": seconds}
+        return self._call("highlight", **{k: v for k, v in args.items() if v is not None})
+
+    def clear_highlight(self) -> dict:
+        """Take the highlight off now instead of waiting for it to clear."""
+        return self._call("highlight", clear=True)
+
+    def trace(self, net: str, highlight: bool = False, note: str | None = None) -> dict:
+        """One net end to end: on the board its pads, routed length per layer, vias, islands and open connections;
+        on a sheet its pins and labels.  `highlight=True` also lights it up for the people in the document."""
+        args = {"net": net}
+        if highlight:
+            args["highlight"] = True
+        if note:
+            args["note"] = note
+        return self._call("trace_net", **args)
+
     def add_item(self, sexpr: str) -> None:
         """Escape hatch for an item the other calls do not cover: one complete KiCad s-expression."""
         self._edit({"op": "add_item", "sexpr": sexpr})

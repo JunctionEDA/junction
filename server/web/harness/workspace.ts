@@ -12,6 +12,7 @@
 // MCP endpoint's run_python reaches the same tool modules through its live sessions instead.
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { traceNet } from "../mcp/teammate";
 import * as design from "../ai/design";
 import { ToolError } from "../ai/design";
 import { checkLayout } from "../ai/layout";
@@ -167,6 +168,8 @@ export class Workspace {
       case "review_design": return on(() => reviewDesign(rest()));
       case "render": { const h = this.find(args.document); const ed = this.open(h); return { document: h.path, svg: renderPicture(ed.kdoc, args.box ? { bbox: args.box, frame: false } : {}) }; }
       case "run_checks": return on(() => design.runChecks(rest()));
+      case "trace_net": { const h = this.find(args.document); const ed = this.open(h); return traceNet(ed.kdoc, h.path, args.net); }
+      case "highlight": return { document: this.find(args.document).path, highlighted: [], note: "These are files on disk: nobody has them open, so there is nobody to show a highlight to." };
       case "get_board_info": { const b = this.docs.find((d) => d.docType === "kicad_pcb"); if (!b) throw new ToolError("This project has no board."); this.open(b); return design.boardInfo(); }
       case "get_items": return on(() => design.getItems(rest()));
       case "find_datasheets": return on(() => design.findDatasheets(rest()));

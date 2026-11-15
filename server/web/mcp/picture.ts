@@ -46,7 +46,42 @@ function textPaths(g: any, hairline: number, bg: string): string {
   return `<g${op}>${rec.out.join("")}</g>`;
 }
 
-/** Same options as KiCadCanvas.renderSvg: bbox, ids, margin, hidden, background, frame. */
+/** What a picture can point out on top of the drawing (all in mm). */
+export interface Emphasis {
+  /** items drawn again at full strength over a dimmed drawing */ ids?: Set<string>;
+  /** dim everything that is not emphasised */ dim?: boolean;
+  /** outlines: [x0, y0, x1, y1, colour?] */ boxes?: (number | string)[][];
+  /** lines: [x1, y1, x2, y2, width, colour?] */ segs?: (number | string)[][];
+  /** numbered rings: where a check found something */ marks?: { x: number; y: number; label: string; color?: string }[];
+  /** name tags: a person's cursor */ tags?: { x: number; y: number; label: string; color: string }[];
+}
+
+function emphasisSvg(doc: any, e: Emphasis, x0: number, y0: number, w: number, h: number, hairline: number, bg: string, one: (g: any) => string, hidden: Set<string>): string[] {
+  const out: string[] = []; const isPcb = doc.type === "pcb"; const u = Math.max(w, h) / 500;   // a pen that reads at any zoom
+  const ink = isPcb ? "#FFFFFF" : "#D0109A";
+  if (e.dim) out.push(`<rect x="${fmt(x0)}" y="${fmt(y0)}" width="${fmt(w)}" height="${fmt(h)}" fill="${bg || PCB_BG}" opacity="0.72"/>`);
+  if (e.ids && e.ids.size && e.dim) {
+    const buckets = new Map<number, any[]>();
+    for (const id of e.ids) { const it = doc.items.get(id); if (!it) continue; for (const g of it.geom) { if (hidden.has(g.layer)) continue; const z = g.z === undefined ? 0 : g.z; let arr = buckets.get(z); if (!arr) buckets.set(z, arr = []); arr.push(g); } }
+    for (const z of Array.from(buckets.keys()).sort((a, b) => a - b)) for (const g of buckets.get(z)!) { const s = one(g); if (s) out.push(s); }
+  }
+  for (const s of e.segs || []) out.push(`<line x1="${fmt(+s[0])}" y1="${fmt(+s[1])}" x2="${fmt(+s[2])}" y2="${fmt(+s[3])}" stroke="${s[5] || ink}" stroke-opacity="0.6" stroke-width="${fmt(Math.max(+s[4] || 0, 1.6 * u))}" stroke-linecap="round"/>`);
+  for (const b of e.boxes || []) out.push(`<rect x="${fmt(+b[0])}" y="${fmt(+b[1])}" width="${fmt(Math.max(+b[2] - +b[0], u))}" height="${fmt(Math.max(+b[3] - +b[1], u))}" fill="none" stroke="${b[4] || ink}" stroke-width="${fmt(1.4 * u)}"/>`);
+  const label = (x: number, y: number, text: string, color: string, size: number) => textPaths({ t: "text", x, y, text, size, w: size * 0.16, color, rot: 0, h: "left", v: "center", bold: true }, hairline, bg);
+  for (const m of e.marks || []) {
+    const c = m.color || "#FF2A2A", r = 5 * u;
+    out.push(`<circle cx="${fmt(m.x)}" cy="${fmt(m.y)}" r="${fmt(r)}" fill="none" stroke="${c}" stroke-width="${fmt(1.6 * u)}"/>`);
+    out.push(label(m.x + r * 1.25, m.y - r * 1.1, m.label, c, 7 * u));
+  }
+  for (const t of e.tags || []) {
+    const s = 9 * u;
+    out.push(`<path d="M${fmt(t.x)} ${fmt(t.y)}L${fmt(t.x + 0.38 * s)} ${fmt(t.y + s)}L${fmt(t.x + s)} ${fmt(t.y + 0.38 * s)}Z" fill="${t.color}" stroke="#fff" stroke-width="${fmt(0.5 * u)}"/>`);
+    out.push(label(t.x + s * 1.1, t.y + s * 1.3, t.label, t.color, 6.5 * u));
+  }
+  return out;
+}
+
+/** Same options as KiCadCanvas.renderSvg: bbox, ids, margin, hidden, background, frame; and `emphasis`. */
 export function renderPicture(doc: any, opts: any): string {
   opts = opts || {}; const isPcb = doc.type === "pcb"; const hidden: Set<string> = opts.hidden || new Set();
   const { ids, x0, y0, w, h } = exportBox(doc, opts) as any; const x1 = x0 + w, y1 = y0 + h;
@@ -78,6 +113,7 @@ export function renderPicture(doc: any, opts: any): string {
     const s = one(g); if (!s) continue;
     out.push(g.hiddenText ? `<g opacity="${HIDDEN_TEXT_ALPHA}">${s}</g>` : s);
   }
+  if (opts.emphasis) out.push(...emphasisSvg(doc, opts.emphasis, x0, y0, w, h, hairline, bg, one, hidden));
   out.push("</svg>");
   return out.join("\n");
 }

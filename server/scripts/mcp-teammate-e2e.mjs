@@ -1,0 +1,220 @@
+// End-to-end test of the MCP tools that make the assistant a visible collaborator (web/mcp/teammate.ts):
+// highlight, get_selection, trace_net and the scoped pictures of render_view.  Two real clients are in the
+// documents while the tools run: a browser signed in as a second person (Playwright), and a bare
+// collaboration socket, so that "everyone sees it" is checked on the wire and on the canvas.
+//
+// Server and libraries as for mcp-e2e.mjs (see its header), then:
+//   E2E_PG_URL=… E2E_JWT_SECRET=testsecret [SHOTS=dir] [KEEP=1] node mcp-teammate-e2e.mjs
+// KEEP=1 reuses the project of an earlier run instead of designing the board again (about two minutes).
+//
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import pg from 'pg';
+
+const BASE = (process.env.E2E_BASE || 'http://127.0.0.1:8099').replace(/\/$/, '');
+const SECRET = process.env.E2E_JWT_SECRET, PG_URL = process.env.E2E_PG_URL, SHOTS = process.env.SHOTS || '';
+if (!SECRET || !PG_URL) { console.error('E2E_JWT_SECRET and E2E_PG_URL are required.'); process.exit(2); }
+if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
+
+let pass = 0, fail = 0;
+const check = (name, ok, detail = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail && !ok ? ' — ' + String(detail).slice(0, 500) : ''}`); ok ? pass++ : fail++; return ok; };
+const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const until = async (fn, ms = 8000) => { const t = Date.now(); while (Date.now() - t < ms) { if (await fn()) return true; await sleep(100); } return false; };
+function mintJwt(sub, login) {
+  const now = Math.floor(Date.now() / 1000); const head = b64({ alg: 'HS256', typ: 'JWT' }), body = b64({ sub, login, iat: now, exp: now + 7200 });
+  return `${head}.${body}.${crypto.createHmac('sha256', SECRET).update(`${head}.${body}`).digest('base64url')}`;
+}
+pg.types.setTypeParser(20, (v) => parseInt(v, 10));
+const db = new pg.Client({ connectionString: PG_URL, ssl: false }); await db.connect();
+const user = async (gid, login, name) => (await db.query(`INSERT INTO users (github_id, login, name) VALUES ($1, $2, $3)
+  ON CONFLICT (github_id) DO UPDATE SET login = EXCLUDED.login, name = EXCLUDED.name RETURNING id`, [gid, login, name])).rows[0].id;
+const ada = await user(9521, 'tm-ada', 'Ada'), bob = await user(9522, 'tm-bob', 'Bob');
+const adaJwt = mintJwt(ada, 'tm-ada'), bobJwt = mintJwt(bob, 'tm-bob');
+
+let rpcId = 0;
+async function call(name, args) {
+  const r = await (await fetch(`${BASE}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json', authorization: `Bearer ${adaJwt}`, 'mcp-protocol-version': '2025-06-18' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: ++rpcId, method: 'tools/call', params: { name, arguments: args } }) })).json();
+  if (!r.result) return { isError: true, text: JSON.stringify(r.error) };
+  const text = (r.result.content.find((c) => c.type === 'text') || {}).text || ''; let data = null; try { data = JSON.parse(text); } catch { /* prose */ }
+  return { isError: !!r.result.isError, text, data, image: r.result.content.find((c) => c.type === 'image') };
+}
+const savePng = (r, name) => { if (SHOTS && r.image) fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.image.data, 'base64')); };
+/** Width and height of a PNG, from its header. */
+const pngSize = (r) => { const b = Buffer.from(r.image.data, 'base64'); return [b.readUInt32BE(16), b.readUInt32BE(20)]; };
+
+// ------------------------------------------------------------------ a design to point at
+
+const NAME = 'teammate-e2e';
+let projectId = (await db.query(`SELECT id FROM projects WHERE owner_id = $1 AND name = $2 AND deleted_at IS NULL`, [ada, NAME])).rows[0]?.id;
+if (!projectId || !process.env.KEEP) {
+  await db.query(`DELETE FROM projects WHERE owner_id = $1`, [ada]);
+  const made = await call('create_project', { name: NAME }); projectId = made.data && made.data.project_id;
+  check('create_project', !!projectId, made.text);
+  const here = path.dirname(new URL(import.meta.url).pathname);
+  const code = fs.readFileSync(path.join(here, '../harness/examples/rp2040_devboard.py'), 'utf8').replace(/^project = kh\.new.*$/m, '');
+  let r = await call('run_python', { project: NAME, code, live: false, timeout_s: 400, keep_on_error: true });
+  while (r.data && r.data.running) r = await call('get_run', { run_id: r.data.run_id });
+  check('the example board is designed through run_python', !r.isError && r.data && r.data.changed && r.data.changed.length === 2, r.text.slice(0, 600));
+}
+await db.query(`INSERT INTO permissions (project_id, user_id, role, created_by) VALUES ($1, $2, 'editor', $3) ON CONFLICT DO NOTHING`, [projectId, bob, ada]);
+const docs = (await db.query(`SELECT id, doc_type, path FROM documents WHERE project_id = $1`, [projectId])).rows;
+const sch = docs.find((d) => d.doc_type === 'kicad_sch'), pcb = docs.find((d) => d.doc_type === 'kicad_pcb');
+
+// ------------------------------------------------------------------ the second and third client
+
+/** A collaboration client as the desktop is one: joins a document, remembers the presence it is sent. */
+function watch(docId, jwt, kind = 'desktop') {
+  const ws = new WebSocket(BASE.replace(/^http/, 'ws') + '/ws'); const w = { presence: {}, ws, docId };
+  w.ready = new Promise((resolve, reject) => {
+    ws.onopen = () => ws.send(JSON.stringify({ type: 'hello', proto: 1, token: jwt, clientId: 'watch-' + crypto.randomBytes(4).toString('hex'), linkToken: null, client: kind }));
+    ws.onerror = () => reject(new Error('watcher socket failed'));
+    ws.onmessage = (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.type === 'hello_ok') ws.send(JSON.stringify({ type: 'join_doc', docId }));
+      else if (m.type === 'snapshot') resolve(w);
+      else if (m.type === 'presence') for (const [k, v] of Object.entries(m.peers)) { if (v === null) delete w.presence[k]; else w.presence[k] = v; }
+      else if (m.type === 'peer_left') delete w.presence[m.clientId];
+    };
+  });
+  w.say = (state) => ws.send(JSON.stringify({ type: 'presence', docId, state }));
+  /** The assistant's presence as this client has it. */
+  w.agent = () => Object.values(w.presence).find((p) => p && p.user && p.user.client === 'mcp');
+  return w.ready;
+}
+
+const { chromium } = createRequire(import.meta.url)('playwright');
+const browser = await chromium.launch(); const ctx = await browser.newContext({ viewport: { width: 1500, height: 950 }, deviceScaleFactor: SHOTS ? 2 : 1 });
+const page = await ctx.newPage();
+await page.goto(`${BASE}/auth/dev?jwt=${bobJwt}&next=/`);
+const open = async (docId) => { await page.goto(`${BASE}/p/${projectId}/edit?doc=${docId}`); await page.waitForFunction(() => window.CollabEditor && window.CollabEditor.kdoc, null, { timeout: 30000 }); await page.waitForTimeout(1500); };
+const shot = async (name) => { if (SHOTS) await page.screenshot({ path: path.join(SHOTS, name) }); };
+/** What the browser has drawn for the assistant: its outlines, its lines, its note. */
+const drawn = () => page.evaluate(() => {
+  const E = window.CollabEditor; const agent = Object.values(E.peerState || {}).find((p) => p.user && p.user.client === 'mcp');
+  return { marks: document.querySelectorAll('rect.ai-mark').length, note: (document.querySelector('g.ai-note') || { textContent: '' }).textContent, name: agent && agent.user.name,
+    lines: agent && agent.state && agent.state.ghost ? agent.state.ghost.length : 0, selection: agent && agent.state && agent.state.selection ? agent.state.selection.length : 0 };
+});
+
+// ------------------------------------------------------------------ the board
+
+await open(pcb.id);
+const desk = await watch(pcb.id, bobJwt);
+// a client is announced to the others by its first presence message: the desktop sends one as it opens the board, the browser on the first mouse move
+desk.say({ cursor: [110e6, 80e6], viewport: [80e6, 40e6, 70e6, 70e6], selection: [], sheetFile: pcb.path });
+await page.mouse.move(640, 400); await page.mouse.move(660, 420); await sleep(500);
+{
+  const h = await call('highlight', { project: NAME, document: 'board', refs: ['U1', 'Y1'], note: 'The crystal sits 9 mm from the MCU: move it closer to pins 20 and 21', seconds: 40 });
+  check('highlight: parts on the board', !h.isError && h.data.highlighted.join() === 'U1,Y1' && h.data.clears_in_s === 40, h.text);
+  check('highlight says who has the board open', !h.isError && Array.isArray(h.data.seen_by) && h.data.seen_by.some((n) => /Bob \(browser\)/.test(n)) && h.data.seen_by.some((n) => /Bob \(desktop\)/.test(n)), h.text);
+  const seen = await until(async () => (await drawn()).marks === 2);
+  const d = await drawn();
+  check('the browser outlines each highlighted part in the assistant\'s colour', seen && d.selection === 2, JSON.stringify(d));
+  check('with the note beside its name tag', /crystal sits 9 mm/.test(d.note) && /Ada \(/.test(d.name || ''), JSON.stringify(d));
+  await shot('01-board-parts-highlighted.png');
+  const a = desk.agent();
+  check('a desktop client gets it as ordinary presence: cursor, selection by id, the sheet', !!a && a.state.selection.length === 2 && Array.isArray(a.state.cursor) && a.state.sheetFile === pcb.path && !a.state.boxes && a.state.viewport.length === 4, JSON.stringify(a && a.state).slice(0, 300));
+
+  const nets = (await call('list_nets', { project: NAME, document: 'board' })).data.nets;
+  const net = nets.filter((n) => n.tracks >= 4 && n.pads.length >= 3 && n.pads.length <= 5 && !n.zones).sort((p, q) => q.routed_length_mm - p.routed_length_mm)[0];
+  const t = await call('trace_net', { project: NAME, document: 'board', net: net.name, highlight: true, note: `${net.name}: ${net.routed_length_mm} mm of track` });
+  check('trace_net: pads, length per layer, vias, open connections', !t.isError && t.data.pad_count === net.pads.length && Math.abs(t.data.routed_length_mm - net.routed_length_mm) < 0.01 && Object.keys(t.data.by_layer).length >= 1 && t.data.vias === net.vias && Array.isArray(t.data.box), t.text.slice(0, 500));
+  check('trace_net is a small answer', t.text.length < 6000, `${t.text.length} characters`);
+  const lit = await until(async () => { const x = await drawn(); return x.lines >= net.tracks && /mm of track/.test(x.note); });
+  check('trace_net with highlight lights the net for the browser: its tracks as lines, its pads outlined', lit, JSON.stringify(await drawn()));
+  const a2 = desk.agent();
+  check('and for the desktop, inside the 8 KB the server takes', !!a2 && a2.state.ghost.length >= net.tracks + 4 * net.pads.length && JSON.stringify(a2.state).length < 8192, a2 && `${a2.state.ghost.length} lines, ${JSON.stringify(a2.state).length} bytes`);
+  await shot('02-board-net-highlighted.png');
+
+  const big = await call('highlight', { project: NAME, document: 'board', nets: ['GND'], seconds: 20 });
+  const a3 = desk.agent();
+  check('a net too large for one presence message is marked in part, and says so', !big.isError && JSON.stringify(a3.state).length < 8192 && (big.data.partly === undefined || /large/.test(big.data.partly)), big.text.slice(0, 300));
+
+  const area = await call('highlight', { project: NAME, document: 'board', area: [t.data.box[0], t.data.box[1], t.data.box[0] + 6, t.data.box[1] + 4], at: [t.data.box[2], t.data.box[3]], seconds: 5 });
+  check('highlight: a region and a point', !area.isError && area.data.highlighted.length === 2 && await until(() => desk.agent().state.ghost.length === 8, 3000), area.text);
+  const gone = await until(async () => { const s = desk.agent(); return !!s && !s.state.cursor && !(s.state.ghost || []).length && (await drawn()).lines === 0; }, 9000);
+  check('the highlight clears by itself when its time is up', gone, JSON.stringify(desk.agent()));
+  const again = await call('highlight', { project: NAME, document: 'board', refs: ['U2'] });
+  const cleared = await call('highlight', { project: NAME, document: 'board', clear: true });
+  check('clear: true removes it at once', !again.isError && cleared.data.cleared === true && await until(async () => (await drawn()).marks === 0, 3000), cleared.text);
+  const nothing = await call('highlight', { project: NAME, document: 'board', refs: ['U99'] });
+  check('a part that is not there is an error the model can read', nothing.isError && /Not on .*U99/.test(nothing.text), nothing.text);
+
+  // Bob selects something in his browser and looks at a corner of the board; the assistant is asked "what is this?"
+  const picked = await page.evaluate(() => {
+    const E = window.CollabEditor; const it = Array.from(E.kdoc.items.values()).find((i) => i.ref === 'U3');
+    E.selection = new Set([it.id]); return it.id;
+  });
+  await page.mouse.move(700, 450); await page.mouse.move(720, 470); await page.waitForTimeout(400);
+  const who = await call('get_selection', { project: NAME, document: 'board' });
+  const bobWeb = who.data && who.data.people.find((p) => p.name === 'Bob' && p.with === 'browser');
+  check('get_selection: the person in the browser, their selection by reference, cursor and view', !who.isError && !!bobWeb && bobWeb.selected && bobWeb.selected[0].ref === 'U3' && bobWeb.looking_at.length === 4 && bobWeb.cursor.length === 2, who.text.slice(0, 600));
+  check('get_selection lists the desktop client too, and not the assistant itself', who.data.people.some((p) => p.with === 'desktop') && !who.data.people.some((p) => p.with === 'assistant'), who.text.slice(0, 400));
+  const all = await call('get_selection', { project: NAME });
+  check('get_selection without a document covers the project', !all.isError && all.data.documents.some((d) => d.document === pcb.path && d.people.length >= 2), all.text.slice(0, 400));
+  const view = await call('render_view', { project: NAME, document: 'board', view_of: 'bob', width_px: 900 });
+  check('render_view view_of: what Bob is looking at, his selection named', !view.isError && !!view.image && view.data.view_of === 'Bob' && view.data.their_selection.includes('U3') && Math.abs(view.data.shown_mm[0] - bobWeb.looking_at[0]) < 0.01, view.text.slice(0, 400));
+  savePng(view, '03-render-view-of-bob.png');
+  const nobody = await call('render_view', { project: NAME, document: 'board', view_of: 'carol' });
+  check('view_of someone who is not there names who is', nobody.isError && /Bob/.test(nobody.text), nobody.text);
+
+  const whole = await call('render_view', { project: NAME, document: 'board', width_px: 800 });
+  const scoped = await call('render_view', { project: NAME, document: 'board', nets: [net.name], width_px: 800 });
+  check('render_view nets: cropped to the net, which is named as emphasised', !scoped.isError && scoped.data.emphasized[0] === `net ${net.name}` && (scoped.data.shown_mm[2] - scoped.data.shown_mm[0]) < (whole.data.shown_mm[2] - whole.data.shown_mm[0]), scoped.text.slice(0, 300));
+  check('pictures are PNG at the size asked for', Math.max(...pngSize(scoped)) === 800 && Math.max(...pngSize(whole)) === 800);
+  savePng(scoped, '04-render-net-emphasised.png'); savePng(whole, '05-render-whole-board.png');
+  const parts = await call('render_view', { project: NAME, document: 'board', refs: ['U1'], emphasize: true, layers: ['F.Cu', 'Edge.Cuts'], width_px: 800 });
+  check('render_view refs with emphasize and layers', !parts.isError && parts.data.emphasized[0] === 'U1' && !!parts.image, parts.text.slice(0, 300));
+  savePng(parts, '06-render-part-emphasised.png');
+  const viol = await call('render_view', { project: NAME, document: 'board', violations: true, width_px: 1200 });
+  const checks = await call('run_checks', { project: NAME, document: 'board' });
+  check('render_view violations: the findings of the rules check, numbered as run_checks lists them', !viol.isError && viol.data.violations_total === checks.data.errors + checks.data.warnings && (viol.data.violations.length === 0 || viol.data.violations[0].message === checks.data.violations[viol.data.violations[0].n - 1].message), viol.text.slice(0, 400));
+  savePng(viol, '07-render-violations.png');
+}
+
+// ------------------------------------------------------------------ the schematic
+
+await open(sch.id);
+{
+  const nets = (await call('list_nets', { project: NAME, document: sch.path })).data.nets;
+  const net = nets.find((n) => /XIN|XOUT|QSPI|USB/i.test(n.name) && n.pins.length >= 2) || nets.find((n) => n.pins.length >= 3);
+  const ref = net.pins[0].split('.')[0];
+  const h = await call('highlight', { project: NAME, document: sch.path, refs: [ref], nets: [net.name], note: `${net.name} and ${ref}` });
+  check('highlight on a sheet: a part and a net together', !h.isError && h.data.highlighted.length === 2, h.text);
+  const seen = await until(async () => { const d = await drawn(); return d.marks >= 1 && d.lines >= 4; });
+  check('the browser shows it on the sheet', seen, JSON.stringify(await drawn()));
+  await shot('08-schematic-highlighted.png');
+  const follow = await page.evaluate(() => {
+    const E = window.CollabEditor; const cid = Object.keys(E.peerState).find((c) => E.peerState[c].user && E.peerState[c].user.client === 'mcp');
+    const before = [E.zoom, E.panX, E.panY].join(); window.CollabApp && window.CollabApp.followPeer ? window.CollabApp.followPeer(cid) : (E.followPeer = cid);
+    return { cid, before };
+  });
+  const moved = await call('highlight', { project: NAME, document: sch.path, refs: ['J1'], note: 'Following me takes you here' });
+  const took = await until(() => page.evaluate((b) => { const E = window.CollabEditor; return [E.zoom, E.panX, E.panY].join() !== b; }, follow.before), 5000);
+  check('someone following the assistant has their view brought to what it points at', !moved.isError && took);
+  await page.waitForTimeout(500); await shot('09-schematic-following-the-assistant.png');
+  const t = await call('trace_net', { project: NAME, document: sch.path, net: net.name });
+  check('trace_net on a sheet: pins with types, labels', !t.isError && t.data.pins.length === net.pins.length && Array.isArray(t.data.labels), t.text.slice(0, 400));
+  const pic = await call('render_view', { project: NAME, document: sch.path, nets: [net.name], width_px: 1000 });
+  check('render_view nets on a sheet', !pic.isError && !!pic.image && pic.data.emphasized[0] === `net ${net.name}`, pic.text.slice(0, 300));
+  savePng(pic, '10-render-schematic-net.png');
+  const v = await call('render_view', { project: NAME, document: sch.path, violations: true, width_px: 1400 });
+  check('render_view violations on a sheet', !v.isError && typeof v.data.violations_total === 'number', v.text.slice(0, 300));
+  savePng(v, '11-render-schematic-violations.png');
+  await call('highlight', { project: NAME, document: sch.path, clear: true });
+}
+
+// ------------------------------------------------------------------ a connection that may only read
+
+{
+  const tools = (await (await fetch(`${BASE}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${adaJwt}` }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })).json()).result.tools;
+  const by = Object.fromEntries(tools.map((t) => [t.name, t]));
+  check('the new tools are in the catalog as read-only tools', ['highlight', 'get_selection', 'trace_net'].every((n) => by[n] && by[n].annotations.readOnlyHint === true), Object.keys(by).join(' '));
+}
+
+desk.ws.close(); await browser.close(); await db.end();
+console.log(`\n${pass} passed, ${fail} failed`);
+process.exit(fail ? 1 : 0);

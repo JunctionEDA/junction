@@ -369,6 +369,19 @@ export function drawPeers(peers: Record<string, PeerEntry>) {
     let own = (st.boxes || []).filter((b, i: number) => !(dragAdded.size && dragAdded.has(sel[i])));
     // a peer that names what it selected without boxes (the web at rest): outline our own copy of those items
     if (!st.boxes && sel.length && E.kdoc) own = peerBoxesOf(sel);
+    // An assistant pointing at things (the MCP highlight tool, state.ai): each item gets its own outline with a
+    // light wash of the peer colour, since "these three capacitors" is not the box around all of them.
+    const ai = st.ai && typeof st.ai === "object" ? st.ai : null;
+    if (ai && own.length) {
+      for (const b of own.slice(0, 80)) {
+        const rect = document.createElementNS(NS, "rect"); const g = 3 / s * E.IU;
+        rect.setAttribute("x", mm(b[0] - g)); rect.setAttribute("y", mm(b[1] - g)); rect.setAttribute("width", mm(b[2] + 2 * g)); rect.setAttribute("height", mm(b[3] + 2 * g)); rect.setAttribute("rx", 2 / s);
+        rect.setAttribute("fill", color); rect.setAttribute("fill-opacity", "0.14"); rect.setAttribute("stroke", color); rect.setAttribute("stroke-opacity", "0.95"); rect.setAttribute("stroke-width", 2 / s);
+        rect.setAttribute("class", "ai-mark");
+        peersG.appendChild(rect);
+      }
+      own = [];
+    }
     if (own.length) {
       let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
       for (const b of own) { x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[0] + b[2]); y1 = Math.max(y1, b[1] + b[3]); }
@@ -401,6 +414,23 @@ export function drawPeers(peers: Record<string, PeerEntry>) {
       let tw = 0; try { tw = label.getComputedTextLength(); } catch { /* not laid out */ }
       if (!(tw > 0)) tw = label.textContent.length * 0.6 * th;
       chip.setAttribute("width", tw + 2 * pad);
+      // what the assistant says about what it is pointing at: a second chip under its name, wrapped to a few lines
+      const said = ai && typeof ai.note === "string" ? ai.note.trim().slice(0, 140) : "";
+      if (said) {
+        const lines: string[] = []; let cur = "";
+        for (const w of said.split(/\s+/)) { if (cur && (cur + " " + w).length > 38) { lines.push(cur); cur = w; } else cur = cur ? cur + " " + w : w; }
+        if (cur) lines.push(cur);
+        const lh = th * 1.3, ny = cy + th + 2 * pad + 3 / s, nh = lines.length * lh + 2 * pad;
+        const box = document.createElementNS(NS, "rect"), txt = document.createElementNS(NS, "text");
+        box.setAttribute("x", cx); box.setAttribute("y", ny); box.setAttribute("height", nh); box.setAttribute("rx", 2 / s);
+        box.setAttribute("fill", "#16161a"); box.setAttribute("fill-opacity", "0.94"); box.setAttribute("stroke", color); box.setAttribute("stroke-width", 1 / s);
+        txt.setAttribute("font-size", th); txt.setAttribute("font-family", "system-ui, sans-serif"); txt.setAttribute("fill", "#f2f2f4");
+        lines.forEach((ln, i) => { const ts = document.createElementNS(NS, "tspan"); ts.setAttribute("x", cx + pad); ts.setAttribute("y", ny + pad + lh * i + lh / 2); ts.setAttribute("dominant-baseline", "central"); ts.textContent = ln; txt.appendChild(ts); });
+        const note = document.createElementNS(NS, "g"); note.setAttribute("class", "ai-note"); note.appendChild(box); note.appendChild(txt); peersG.appendChild(note);
+        let nw = 0; try { nw = txt.getBBox().width; } catch { /* not laid out */ }
+        if (!(nw > 0)) nw = Math.max(...lines.map((l) => l.length)) * 0.55 * th;
+        box.setAttribute("width", nw + 2 * pad);
+      }
       tag.addEventListener("click", (ev) => { ev.stopPropagation(); E.followPeer = E.followPeer === cid ? null : cid; toast(E.followPeer ? `Following ${name}` : "Stopped following"); renderPeers(); });
     }
   }

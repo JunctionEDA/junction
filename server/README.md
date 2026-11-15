@@ -434,6 +434,11 @@ How it is built:
   applies immediately (with `dry_run` to look first). Every call is recorded (`mcp_changes`) with what it takes to
   reverse it, so `undo_changes` and `redo_changes` take a whole call back or put it back; both are refused when
   somebody has edited the same items since, so nobody's newer work is overwritten.
+- **A visible collaborator**: `highlight` sends ordinary presence (cursor, selection, lines, viewport) with an
+  `ai` note, so every client that draws a person's presence draws the assistant's: the browser outlines each
+  item and shows the note, the desktop editors show the cursor, name, outline and net lines. The mark is taken
+  off after its time (and an edit's mark after a minute). The host also keeps the presence the server sends
+  it, which is what `get_selection` and `render_view view_of` read (`web/mcp/teammate.ts`).
 - **Pictures**: `render_view` draws the sheet or board from the editor's own geometry as SVG with stroke-font
   text (`web/mcp/picture.ts`) and the server rasterises it (resvg), so the model can look at what it changed.
 
@@ -442,7 +447,10 @@ How it is built:
 | `list_projects`, `get_project`, `create_project` | find, open and start projects |
 | `get_design_overview`, `list_components`, `get_component`, `list_nets`, `get_items`, `get_board_info`, `read_document` | read a design |
 | `run_checks` | ERC on a sheet, DRC on the board |
-| `render_view` | a PNG of a sheet, the board, an area or some components |
+| `render_view` | a PNG of a sheet or the board, scoped to an area, components, nets (the rest dimmed), board layers or what a person is looking at (`view_of`); `violations` numbers the ERC/DRC findings on it |
+| `highlight` | outlines parts, nets or a region live for everyone in the document, in the assistant's peer colour with a note beside its name tag; clears by itself |
+| `get_selection` | who has the project open, what each has selected and where each is looking |
+| `trace_net` | one net end to end: pads, length per layer, vias, islands, open connections |
 | `find_parts`, `get_library_part`, `find_datasheets` | KiCad libraries, vendor parts, datasheet links |
 | `read_datasheet` | the pages of a PDF datasheet that answer a question (fetched and indexed once on the server) |
 | `run_python` | a Python script on the design with `kicad_harness`: the cheap way to do anything beyond a couple of edits (see above) |

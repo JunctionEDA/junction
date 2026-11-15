@@ -47,7 +47,8 @@ const MAX_UNDO_BYTES: usize = 6 * 1024 * 1024;
 const INSTRUCTIONS: &str = "Junction: the person's online KiCad projects (schematics and boards), shared live with their collaborators. \
 Start with list_projects, then get_design_overview for the project. Every design tool takes the project (id or exact name) and usually a document (a path from get_project, or \"board\"). \
 Read the design with the tools instead of guessing: coordinates are millimetres with Y down, schematic items sit on a 1.27 mm grid, and pins connect only when a wire end or label lands exactly on the pin's connection point. \
-render_view shows a sheet or the board as a picture. apply_changes edits the design at once and everyone in the project sees it live, so change only what the person asked for, use dry_run when unsure, check the result with run_checks and render_view, and take a wrong change back with undo_changes. \
+render_view shows a sheet or the board as a picture; scope it (area, refs, nets, layers, view_of a person) to keep it small. \
+The people in the project see you as a collaborator: when you talk about a place in the design, call highlight so it is outlined on their canvas with a short note, and when they say \"this\" or \"here\", call get_selection to see what they have selected and where they are looking. apply_changes edits the design at once and everyone in the project sees it live, so change only what the person asked for, use dry_run when unsure, check the result with run_checks and render_view, and take a wrong change back with undo_changes. \
 Before drawing or rearranging a schematic, laying out or routing a board, or reviewing a design, read get_design_guide once; its schematic drawing rules are the owner's and are not optional.";
 
 // ------------------------------------------------------------------ the catalog
@@ -193,7 +194,7 @@ fn build_catalog() -> Vec<Tool> {
     // The order a model reads them in: find the project, read, look, change, then the rest.
     let order = [
         "list_projects", "get_project", "get_design_overview", "get_design_guide", "list_components", "get_component", "list_nets",
-        "get_items", "run_checks", "review_design", "check_layout", "get_board_info", "render_view", "find_datasheets", "read_datasheet", "find_parts", "get_library_part", "run_python", "get_run", "apply_changes",
+        "get_items", "run_checks", "review_design", "check_layout", "get_board_info", "render_view", "highlight", "get_selection", "trace_net", "find_datasheets", "read_datasheet", "find_parts", "get_library_part", "run_python", "get_run", "apply_changes",
         "undo_changes", "redo_changes", "list_changes", "read_document", "list_comments", "add_comment", "resolve_comment", "list_checkpoints",
         "create_checkpoint", "create_project", "get_geometry",
     ];

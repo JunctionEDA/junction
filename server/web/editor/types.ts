@@ -17,6 +17,8 @@ export interface PresenceState {
   /** a schematic drag's stretched wires: uuid, x1, y1, x2, y2, width, layer */
   dragLines?: [string, number, number, number, number, number?, string?][];
   dragAdded?: string[];
+  /** an assistant pointing at its selection (MCP highlight): what it says about it, and when the mark goes (epoch ms) */
+  ai?: { note?: string; what?: string; until?: number };
 }
 
 export interface PeerUser { name?: string; login?: string; color?: string }
