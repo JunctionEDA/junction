@@ -9,7 +9,7 @@ function load(file) {
   const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
-const F = load("library/embedded-file.ts"), Z = load("dialogs/zstd.ts"), C = load("dialogs/zstd-compress.ts"), S = load("canvas/sexpr.ts"), X = load("canvas/export.ts");
+const F = load("library/embedded-file.ts"), Z = load("dialogs/zstd.ts"), C = load("dialogs/zstd-compress.ts"), B = load("canvas/board-setup.ts"), S = load("canvas/sexpr.ts"), X = load("canvas/export.ts");
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + (e.stack || String(e)).split("\n").slice(0, 6).join("\n       ")); } }
 console.log("embedded-file: Embedded Files > Add");
@@ -94,5 +94,43 @@ test("the serializer keeps (data |…|) bare, as KiCad's NeedBAR reader requires
   assert.ok(!/\(data [^)]*"/.test(X.serialize(S.parse(big))));
   // a reference image's data is not an embedded file: its quoted lines stay quoted
   assert.match(X.serialize(S.parse('(image (data "iVBO/+w=" "AA+A"))')), /^\(image \(data "iVBO\/\+w=" "AA\+A"\)\)$/);
+});
+// a board KiCad saved (CTL_FOR_BOARD): the footprint's (file …) without data, the data once in the board's own section
+const BOARD_FILE = (data) => S.parse(`(embedded_files ${F.embeddedFileSexpr("m.step", data)} ${F.embeddedFileSexpr("other.pdf", Buffer.from("%PDF-1.4"))})`);
+const FP_NO_DATA = () => S.parse('(footprint "L:F" (embedded_fonts no) (embedded_files (file (name "m.step") (type model) (checksum "0"))) (model "kicad-embed://m.step"))');
+test("FixupEmbeddedData: a footprint file without data reads the board's file of its name", () => {
+  const step = stepText(5000), board = BOARD_FILE(step), fp = FP_NO_DATA();
+  assert.equal(F.embeddedFileData(fp, "m.step"), null, "the footprint alone has none");
+  assert.ok(Buffer.from(F.decodeEmbedded(F.embeddedFileData(fp, "m.step", board))).equals(step));
+  assert.equal(F.embeddedFileData(fp, "other.pdf", board), null, "a board file the footprint does not have is not its file");
+  // the board's copy wins over the footprint's own, as FixupEmbeddedData overwrites it on load
+  const own = S.parse(`(footprint "L:F" (embedded_files ${F.embeddedFileSexpr("m.step", Buffer.from("old"))}))`);
+  assert.ok(Buffer.from(F.decodeEmbedded(F.embeddedFileData(own, "m.step", board))).equals(step));
+  assert.ok(Buffer.from(F.decodeEmbedded(F.embeddedFileData(own, "m.step", null))).equals(Buffer.from("old")));
+  // onto a copy: data and checksum taken, the footprint's other children kept
+  const c = FP_NO_DATA(); assert.ok(F.fixupEmbeddedData(c, board));
+  const f = S.kid(S.kid(c, "embedded_files"), "file");
+  assert.equal(S.kid(f, "checksum")[1], F.mmh3Hash(step)); assert.equal(S.kid(f, "type")[1], "model");
+  assert.match(X.serialize(c), /\(file \(name "m\.step"\) \(type model\) \(data \|KLUv\//);
+});
+test("the 3D viewer finds a KiCad-saved board footprint's embedded model in the board's section", () => {
+  const M = load("viewer3d/models.ts"), step = stepText(5000), fp = FP_NO_DATA();
+  global.URL.createObjectURL = (b) => "blob:" + b.size;
+  assert.equal(M.footprintModels(fp, false).length, 0, "no data: nothing to show");
+  const refs = M.footprintModels(fp, false, BOARD_FILE(step));
+  assert.equal(refs.length, 1); assert.equal(refs[0].source, "embedded"); assert.equal(refs[0].url, "blob:" + step.length);
+});
+test("an embedded_file board setup change replaces the board's file of its name, or adds it", () => {
+  const step = stepText(3000), doc = { type: "pcb", layers: new Map(), copper: [], embeddedFiles: BOARD_FILE(step) };
+  const next = F.embeddedFileSexpr("m.step", Buffer.from("new content"));
+  const ch = B.embeddedFilesChange([next]);
+  assert.equal(ch.typeName, "BOARD_SETUP"); assert.equal(ch.properties[0].name, "embedded_file");
+  assert.ok(B.applyBoardSetup(doc, ch));
+  const files = S.kids(doc.embeddedFiles, "file");
+  assert.deepEqual(files.map((f) => S.kid(f, "name")[1]), ["m.step", "other.pdf"], "in place");
+  assert.ok(Buffer.from(F.decodeEmbedded(F.fileData(files[0]))).equals(Buffer.from("new content")));
+  assert.equal(doc.copper.length, 0, "the layer table is not touched");
+  const fresh = { type: "pcb", layers: new Map(), copper: [] };
+  B.applyBoardSetup(fresh, B.embeddedFilesChange([next])); assert.equal(S.kids(fresh.embeddedFiles, "file").length, 1);
 });
 console.log(`${passed} passed, ${failed} failed`); if (failed) process.exit(1);

@@ -326,6 +326,23 @@ export function boardSetupChange(sections: { layers?: string; setup?: string; ge
   for (const name of ["general", "layers", "setup"] as const) { const v = sections[name]; if (v) properties.push({ name, after: { type: "sexpr", v } }); }
   return { id: "board-setup", kind: "MODIFIED", typeName: BOARD_SETUP_TYPE, properties };
 }
+/**
+ * The board's own embedded files are a section too ((embedded_files …) after the items): a property "embedded_file"
+ * carries one (file …) that replaces the board's file of its name, or joins them.  A board KiCad saved keeps there the
+ * data of every footprint's embedded file (BOARD::FixupEmbeddedData copies it back into the footprints by name on load),
+ * so a footprint file replaced in the web goes there as well, or KiCad would load the old one over it.
+ */
+export const EMBEDDED_FILE_PROP = "embedded_file";
+export function embeddedFilesChange(files: string[]): KChange {
+  return { id: "board-setup", kind: "MODIFIED", typeName: BOARD_SETUP_TYPE, properties: files.map((v) => ({ name: EMBEDDED_FILE_PROP, after: { type: "sexpr", v } })) };
+}
+/** The (file …) `file` into `files` (an (embedded_files …) node): in place of the one of its name, else last. */
+export function putEmbeddedFile(files: SNode, file: SNode): void {
+  const nameOf = (f: SNode): string => kidStr(f, "name");
+  const name = nameOf(file);
+  for (let j = 1; j < files.length; j++) { const c = files[j]; if (isList(c) && c[0] === "file" && nameOf(c as SNode) === name) { files[j] = file; return; } }
+  files.push(file);
+}
 /** Lay a BOARD_SETUP change over header sections (a journal replay). */
 export function applyHeaderChange(header: BoardHeader, change: KChange): BoardHeader {
   const out = { ...header };
@@ -350,7 +367,13 @@ export function applyBoardSetup(doc: KDoc, change: KChange): boolean {
       if (/\.Cu$/.test(name) && type !== "user") doc.copper.push(name);
     }
   }
-  const d = doc as KDoc & { boardSetup?: BoardHeader; setupNode?: SNode | null; generalNode?: SNode | null; stackup?: SNode | null };
+  const d = doc as KDoc & { boardSetup?: BoardHeader; setupNode?: SNode | null; generalNode?: SNode | null; stackup?: SNode | null; embeddedFiles?: SNode | null };
+  for (const p of change.properties || []) {
+    if (p.name !== EMBEDDED_FILE_PROP || !p.after || typeof p.after.v !== "string") continue;
+    const f = parse(p.after.v) as SNode | null; if (!f || f[0] !== "file") continue;
+    if (!d.embeddedFiles) d.embeddedFiles = ["embedded_files"];
+    putEmbeddedFile(d.embeddedFiles, f);
+  }
   d.boardSetup = applyHeaderChange(d.boardSetup || { general: null, layers: null, setup: null, version: 0 }, change);
   for (const p of change.properties || []) {
     // the physical stackup and the board thickness follow the sections (impedance work and the 3D view read them)
@@ -487,4 +510,4 @@ export function adjustDielectrics(layers: StackupLayer[], target: number): strin
 }
 
 export const boardSetup = { boardHeader, layerRows, layersText, setCopperCount, copperNames, layerNameError, defaultLayerName, modernLayerIds, stackupRows, stackupThickness, boardFinish, maskPaste, dashRatios,
-  editSetup, sectionText, setupWithPlotParams, validateDesignRules, designRuleWarnings, validateViaParameters, unitText, stackupLayers, stackupText, setupWithStackup, stackupLayersThickness, stackupFixedThickness, adjustDielectrics, drillProfile, DRILL_GROUP_KEYS, DRILL_MARK_POLICIES, DRILL_PROFILE_DEFAULT, readPlotParams, plotParamsText, boardSetupChange, applyHeaderChange, applyBoardSetup, COPPER_FINISHES, COPPER_TYPES, USER_TYPES, BOARD_SETUP_TYPE };
+  editSetup, sectionText, setupWithPlotParams, validateDesignRules, designRuleWarnings, validateViaParameters, unitText, stackupLayers, stackupText, setupWithStackup, stackupLayersThickness, stackupFixedThickness, adjustDielectrics, drillProfile, DRILL_GROUP_KEYS, DRILL_MARK_POLICIES, DRILL_PROFILE_DEFAULT, readPlotParams, plotParamsText, boardSetupChange, embeddedFilesChange, putEmbeddedFile, EMBEDDED_FILE_PROP, applyHeaderChange, applyBoardSetup, COPPER_FINISHES, COPPER_TYPES, USER_TYPES, BOARD_SETUP_TYPE };

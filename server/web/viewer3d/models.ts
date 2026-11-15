@@ -9,12 +9,13 @@
 // A model KiCad's library does not have is answered by the server with the closest one it does have (a footprint
 // variant's base package, the same name in another library, another make of the same connector family), and a
 // footprint that names no model at all is looked up under its own name the same way.  A kicad-embed://<file> model is
-// the footprint's own (embedded_files …) copy (EMBEDDED_FILES::GetTemporaryFileName), read from the file's data.
+// the footprint's own (embedded_files …) copy (EMBEDDED_FILES::GetTemporaryFileName), read from the file's data, which a
+// board KiCad saved keeps in the board's (embedded_files …) instead (BOARD::FixupEmbeddedData).
 // A footprint whose model cannot be had even so keeps the stand-in solids of parts.ts.
 //
 // footprintModels / placeMesh are pure (no DOM), for the node tests; ModelStore is the browser half.
 
-import { zstdDecompress } from "../dialogs/zstd";
+import { decodeEmbedded, embeddedFileData } from "../library/embedded-file";
 
 export type V3 = [number, number, number];
 
@@ -67,22 +68,20 @@ function projectModel(path: string): string | null {
   try { return typeof fn === "function" ? fn(stem) || null : null; } catch { return null; }
 }
 
-/** kicad-embed://<name>.step|stp: the footprint's embedded copy as an object URL, one per file content (its checksum). */
+/**
+ * kicad-embed://<name>.step|stp: the footprint's embedded copy as an object URL, one per file content.
+ * `boardFiles` is the board's own (embedded_files …), where a board KiCad saved keeps the data of its footprints' files
+ * (BOARD::FixupEmbeddedData reads it from there).
+ */
 const embedUrls = new Map<string, string | null>();
-function embeddedModel(node: SNode, path: string): string | null {
+function embeddedModel(node: SNode, path: string, boardFiles: SNode | null): string | null {
   const m = /^kicad-embed:\/\/([^/\\]+\.(?:step|stp))$/i.exec(path); if (!m) return null;
-  const ef = kid(node, "embedded_files"); if (!ef) return null;
-  const f = ef.find((c) => Array.isArray(c) && c[0] === "file" && String((kid(c as SNode, "name") || [])[1] ?? "") === m[1]) as SNode | undefined;
-  const d = f ? kid(f, "data") : null; if (!f || !d) return null;
-  const b64 = d.slice(1).map((x) => String(x)).join("").replace(/[|\s]/g, "");
-  const key = m[1] + "\n" + String((kid(f, "checksum") || [])[1] ?? "") + "\n" + b64.length + b64.slice(0, 48) + b64.slice(-48);
+  const b64 = embeddedFileData(node, m[1], boardFiles); if (!b64) return null;
+  const key = m[1] + "\n" + b64.length + b64.slice(0, 48) + b64.slice(-48) + b64.slice(b64.length >> 1, (b64.length >> 1) + 48);
   if (embedUrls.has(key)) return embedUrls.get(key)!;
   let url: string | null = null;
-  try {
-    const bin = atob(b64), raw = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
-    const bytes = zstdDecompress(raw);
-    if (typeof URL !== "undefined" && typeof URL.createObjectURL === "function") url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/step" }));
-  } catch { url = null; }
+  const bytes = decodeEmbedded(b64);
+  if (bytes && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/step" }));
   embedUrls.set(key, url); return url;
 }
 
@@ -94,14 +93,14 @@ export const kicadModelUrl = (lib: string, name: string): string => `/api/kicad-
  * With `guess` (the default), a footprint that names no model at all gets one looked up under its own
  * "Library:Name", which is where KiCad's library keeps the model of a footprint of its own.
  */
-export function footprintModels(node: SNode, guess = true): ModelRef[] {
+export function footprintModels(node: SNode, guess = true, boardFiles: SNode | null = null): ModelRef[] {
   const out: ModelRef[] = []; let named = false;
   for (const c of node) {
     if (!Array.isArray(c) || c[0] !== "model") continue;
     named = true;
     const hide = kid(c as SNode, "hide"); if (hide && String(hide[1]) !== "no") continue;
     const path = String(c[1] ?? "");
-    const emb = /^kicad-embed:\/\//i.test(path) ? embeddedModel(node, path) : null;
+    const emb = /^kicad-embed:\/\//i.test(path) ? embeddedModel(node, path, boardFiles) : null;
     if (emb) { out.push({ name: path.slice("kicad-embed://".length), offset: xyzOf(c as SNode, "offset", 0), scale: xyzOf(c as SNode, "scale", 1), rotate: xyzOf(c as SNode, "rotate", 0), source: "embedded", url: emb }); continue; }
     const own = projectModel(path);
     if (own) { out.push({ name: path.replace(/^\$[{(]KIPRJMOD[})][\/\\]/i, ""), offset: xyzOf(c as SNode, "offset", 0), scale: xyzOf(c as SNode, "scale", 1), rotate: xyzOf(c as SNode, "rotate", 0), source: "project", url: own }); continue; }

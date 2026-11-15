@@ -162,10 +162,13 @@ const compose = (q1: Quat, q2: Quat): Quat => [
   q2[3] * q1[2] + q2[2] * q1[3] + q2[0] * q1[1] - q2[1] * q1[0],
   q2[3] * q1[3] - q2[0] * q1[0] - q2[1] * q1[1] - q2[2] * q1[2]];
 
+/** The board's own (embedded_files …): where a board KiCad saved keeps its footprints' embedded models. */
+const boardFiles = (m: BoardModel): SNode | null => (m.doc as KDoc & { embeddedFiles?: SNode | null }).embeddedFiles || null;
+
 /** The models a board's footprints name, for the caller to have their meshes ready: one entry per file. */
 export function vrmlModels(m: BoardModel): ModelRef[] {
   const seen = new Set<string>(); const out: ModelRef[] = [];
-  for (const fp of m.footprints) for (const r of footprintModels(fp.node)) if (!seen.has(r.url)) { seen.add(r.url); out.push(r); }
+  for (const fp of m.footprints) for (const r of footprintModels(fp.node, true, boardFiles(m))) if (!seen.has(r.url)) { seen.add(r.url); out.push(r); }
   return out;
 }
 
@@ -265,7 +268,7 @@ export function writeVrml(m: BoardModel, o: VrmlOptions, meshOf: (url: string) =
     if (!o.includeUnspecified && !fp.smd && !fp.throughHole) continue;
     if (!o.includeDnp && fp.dnp) continue;
     const flipped = fp.side === "B.Cu";
-    for (const ref of footprintModels(fp.node)) {
+    for (const ref of footprintModels(fp.node, true, boardFiles(m))) {
       const mesh = meshOf(ref.url);
       if (!mesh) { if (!missing.includes(ref.name)) missing.push(ref.name); continue; }
       let rx = -ref.rotate[0], ry = -ref.rotate[1], rz = -ref.rotate[2];

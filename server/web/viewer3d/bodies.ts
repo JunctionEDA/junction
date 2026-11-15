@@ -84,8 +84,11 @@ function layerExtent(item: KItem, layer: string): Extent {
   return { pts, circle: circles > 0 && others === 0 ? circle : null };
 }
 
-/** The placeholder body of one footprint, or null when it has nothing to stand on (no courtyard / fab outline). */
-export function footprintBody(item: KItem, withDnp = false): Body | null {
+/**
+ * The placeholder body of one footprint, or null when it has nothing to stand on (no courtyard / fab outline).
+ * `boardFiles` is the board's (embedded_files …), which holds the data of the footprints' embedded models.
+ */
+export function footprintBody(item: KItem, withDnp = false, boardFiles: SNode | null = null): Body | null {
   if (item.kind !== "footprint") return null;
   const attrs = footprintAttrs(item.node);
   // board-only footprints (logos, mounting holes, test points drawn in copper) have no part; DNP parts
@@ -102,7 +105,7 @@ export function footprintBody(item: KItem, withDnp = false): Body | null {
   if (ext.pts.length < 2) { ext = layerExtent(item, back ? "B.Fab" : "F.Fab"); inset = 0; }
   if (ext.pts.length < 2) return null;
   const ref = item.ref || "";
-  const stand = { models: footprintModels(item.node), x: num(item.x), y: num(item.y), rot: num(item.rot), dnp: attrs.has("dnp"), notInPos: attrs.has("exclude_from_pos_files") };
+  const stand = { models: footprintModels(item.node, true, boardFiles), x: num(item.x), y: num(item.y), rot: num(item.rot), dnp: attrs.has("dnp"), notInPos: attrs.has("exclude_from_pos_files") };
   const solids = modelSolids(item, cls === "smd" || (cls === "virtual" && !hasDrill(item)), back);
   if (ext.circle) {
     const r = Math.max(0.15, ext.circle.r - inset); const n = 32; const pts: Pt[] = [];
@@ -155,6 +158,7 @@ function hasDrill(item: KItem): boolean { return item.geom.some((g) => !!g.hole)
 /** The parts of a board; `withDnp` keeps the DNP ones too (flagged), for the viewer's "Models marked DNP" row. */
 export function boardBodies(doc: KDoc, withDnp = false): Body[] {
   const out: Body[] = [];
-  for (const it of doc.items.values()) { const b = footprintBody(it, withDnp); if (b) out.push(b); }
+  const files = (doc as KDoc & { embeddedFiles?: SNode | null }).embeddedFiles || null;
+  for (const it of doc.items.values()) { const b = footprintBody(it, withDnp, files); if (b) out.push(b); }
   return out;
 }

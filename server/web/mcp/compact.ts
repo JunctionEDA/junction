@@ -37,6 +37,8 @@ const PCB_KINDS = new Set(["footprint", "segment", "arc", "via", "zone", "gr_lin
 /** Sections that close a file: new items go in before them. */
 const TRAILERS = new Set(["sheet_instances", "symbol_instances", "embedded_fonts", "embedded_files"]);
 const BOARD_SECTIONS = ["general", "layers", "setup"] as const;
+/** A BOARD_SETUP property carrying one (file …) for the board's own (embedded_files …) (canvas/board-setup.ts). */
+const EMBEDDED_FILE_PROP = "embedded_file";
 
 class Refuse extends Error {}
 const refuse = (why: string): never => { throw new Refuse(why); };
@@ -167,6 +169,7 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
 
   // ---- the edits
   let paper: string | null = null, title: string | null = null; const sections: Record<string, string> = {};
+  const embeds = new Map<string, string>();   // the board's embedded files an edit replaced or added, by name
   const fragText = new Map<string, string>();   // the text an edit carried for an item or a library symbol
   const replacedBy = new Map<string, string>();   // an item given a new id (an ADDED with replaces): it takes the old one's place
   const noteFragment = (frag: string): void => fragmentParts(frag, kinds, (id, t) => fragText.set(id, t), (name, t) => fragText.set("lib:" + name, t));
@@ -181,6 +184,11 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
     if (c.typeName === "BOARD_SETUP") {
       if (sch) continue;
       for (const p of c.properties || []) {
+        if (p && p.name === EMBEDDED_FILE_PROP && p.after && typeof p.after.v === "string") {
+          const l = cut(p.after.v); const name = l && headOf(p.after.v.trim()) === "file" ? directValue(l, "name") : null;
+          if (name === null) refuse("a board embedded file edit without a (file (name …) …)");
+          embeds.set(name!, p.after.v.trim()); continue;
+        }
         if (!p || !(BOARD_SECTIONS as readonly string[]).includes(p.name) || !p.after || typeof p.after.v !== "string") continue;
         const n = k.parse(p.after.v); if (!n) continue;
         if (n[0] !== p.name) refuse("a board setup edit names " + p.name + " but carries " + String(n[0]));
@@ -216,10 +224,10 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
   const fresh = Array.from(freshById.values());
 
   // where additions go: after the last item of the stored file, else before the sections that close it, else at the end
-  let lastItem = -1, firstTrailer = -1, paperAt = -1, titleAt = -1, libAt = -1; const sectionAt: Record<string, number> = {};
+  let lastItem = -1, firstTrailer = -1, paperAt = -1, titleAt = -1, libAt = -1, filesAt = -1; const sectionAt: Record<string, number> = {};
   top.children.forEach((c, i) => {
     if (kinds.has(c.head)) lastItem = i;
-    else if (TRAILERS.has(c.head)) { if (firstTrailer < 0) firstTrailer = i; }
+    else if (TRAILERS.has(c.head)) { if (firstTrailer < 0) firstTrailer = i; if (c.head === "embedded_files" && filesAt < 0) filesAt = i; }
     else if (c.head === "paper") { if (paperAt < 0) paperAt = i; }
     else if (c.head === "title_block") { if (titleAt < 0) titleAt = i; }
     else if (c.head === "lib_symbols") { if (libAt < 0) libAt = i; }
@@ -252,6 +260,22 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
 
   const add = (texts: string[]): void => { for (const t of texts) out.push("\n\t" + t); };
   const same = (a: string, b: string): boolean => { try { return canon(a) === canon(b); } catch { return false; } };
+  // the board's own embedded files: the stored section with the files an edit carried in place of theirs, new ones last
+  let filesText: string | null = null;   // null: as stored
+  if (!sch && embeds.size) {
+    const l = filesAt >= 0 ? cut(top.children[filesAt].text) : null;
+    if (filesAt >= 0 && !l) refuse("unreadable (embedded_files …)");
+    const parts: string[] = [], done = new Set<string>(); let touched = false;
+    if (l) for (const c of l.children) {
+      const inner = c.head === "file" ? cut(c.text) : null, name = inner ? directValue(inner, "name") : null;
+      const put = name !== null ? embeds.get(name) : undefined;
+      if (put === undefined) { parts.push(c.lead + c.text); continue; }
+      done.add(name!);
+      if (same(put, c.text)) parts.push(c.lead + c.text); else { touched = true; parts.push(c.lead + laidOut(put, 2, mode)); }
+    }
+    for (const [name, t] of embeds) if (!done.has(name)) { touched = true; parts.push("\n\t\t" + laidOut(t, 2, mode)); }
+    if (touched) { changed++; filesText = (l ? l.open : "(embedded_files") + parts.join("") + (l ? l.tail : "\n\t)"); }
+  }
   let freshDone = false;
   top.children.forEach((c, i) => {
     if (i === firstTrailer && lastItem < 0 && !freshDone) { if (libText !== null && libAt < 0) out.push("\n\t" + libText); add(fresh); freshDone = true; }
@@ -263,6 +287,7 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
       else { changed++; if (title) out.push(c.lead + laidOut(title, 1, mode)); }
     } else if (i === libAt && sch) out.push(c.lead + (libText !== null ? libText : c.text));
     else if (!sch && sectionAt[c.head] === i && sections[c.head] !== undefined && !same(sections[c.head], c.text)) { out.push(c.lead + laidOut(sections[c.head], 1, mode)); changed++; }
+    else if (i === filesAt && filesText !== null) out.push(c.lead + filesText);
     else if (kinds.has(c.head)) {
       const id = ids[i];
       if (!id || !inDoc(i)) out.push(c.lead + c.text);                          // not named by any edit: as stored
@@ -276,6 +301,7 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
     if (i === lastItem && !freshDone) { if (libText !== null && libAt < 0) out.push("\n\t" + libText); add(fresh); freshDone = true; }
   });
   if (!freshDone) { if (libText !== null && libAt < 0) out.push("\n\t" + libText); add(fresh); }
+  if (filesText !== null && filesAt < 0) out.push("\n\t" + filesText);   // a board with no embedded files: the section closes it
   out.push(top.tail);
   const text = out.join("");
   if (!changed) return { ok: true, text: file, changed: 0 };
@@ -310,7 +336,7 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
     if (back.lib.size !== wantLib.size) refuse("the new file has a different set of library symbols");
     for (const [name, w] of wantLib) { const b = back.lib.get(name); if (!b || ser(b) !== w) refuse("library symbol " + name + " reads back differently"); }
   }
-  const kept = (l: ListSpans): string[] => l.children.filter((c) => !kinds.has(c.head) && c.head !== "paper" && c.head !== "title_block" && c.head !== "lib_symbols" && !(!sch && (BOARD_SECTIONS as readonly string[]).includes(c.head))).map((c) => c.text);
+  const kept = (l: ListSpans): string[] => l.children.filter((c) => !kinds.has(c.head) && c.head !== "paper" && c.head !== "title_block" && c.head !== "lib_symbols" && !(!sch && (BOARD_SECTIONS as readonly string[]).includes(c.head)) && !(filesText !== null && c.head === "embedded_files")).map((c) => c.text);
   const a = kept(top), b = kept(topBack!);
   if (a.length !== b.length || a.some((t, i) => t !== b[i]) || top.open !== topBack!.open) refuse("a section no edit touched came out differently");
   const section = (l: ListSpans, name: string): string | null => { const c = l.children.find((x) => x.head === name); return c ? c.text : null; };
@@ -321,5 +347,15 @@ function fold(k: CanvasApi, docType: string, file: string, ops: FoldOp[]): FoldR
   };
   expect("paper", paper); expect("title_block", title);
   if (!sch) for (const name of BOARD_SECTIONS) expect(name, sections[name]);
+  if (filesText !== null) {
+    // the files no edit carried as stored, the ones an edit carried as it carried them
+    const was = filesAt >= 0 ? cut(top.children[filesAt].text) : null, is = topBack!.children.filter((c) => c.head === "embedded_files");
+    const back = is.length === 1 ? cut(is[0].text) : null; if (!back) refuse("the (embedded_files …) section reads back differently");
+    const files = (x: ListSpans | null): Map<string, string> => { const m = new Map<string, string>(); if (x) for (const c of x.children) { const inner = c.head === "file" ? cut(c.text) : null; const n = inner ? directValue(inner, "name") : null; m.set(n ?? "#" + m.size, c.text); } return m; };
+    const a0 = files(was), b0 = files(back);
+    for (const [name, t] of embeds) a0.set(name, t);
+    if (a0.size !== b0.size) refuse("the (embedded_files …) section reads back differently");
+    for (const [name, t] of a0) { const b1 = b0.get(name); if (b1 === undefined || (embeds.has(name) ? !same(t, b1) : t !== b1)) refuse("embedded file " + name + " reads back differently"); }
+  }
   return { ok: true, text, changed };
 }

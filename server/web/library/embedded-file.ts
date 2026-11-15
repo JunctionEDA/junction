@@ -4,8 +4,14 @@
 //   embeddedFileSexpr   the (file (name …) (type …) (data |…|) (checksum …)) form: the bytes compressed into a zstd frame
 //                       with its content size (CompressAndEncode's ZSTD_compress, dialogs/zstd-compress.ts), base64 in
 //                       MIME_BASE64_LENGTH lines
+//   embeddedFileData    where a board footprint's file content is: a board KiCad saved (CTL_FOR_BOARD) writes each
+//                       footprint's files without data and keeps the data once in the board's own (embedded_files …),
+//                       which BOARD::FixupEmbeddedData copies back into the footprints by name on load
+//   fixupEmbeddedData   that copy, onto a footprint node
+//   decodeEmbedded      DecompressAndDecode: the bytes of a (data |…|)
 
 import { zstdCompress } from "../dialogs/zstd-compress";
+import { zstdDecompress } from "../dialogs/zstd";
 
 /** EMBEDDED_FILES::Seed */
 export const EMBED_SEED = 0xabba2345;
@@ -60,4 +66,52 @@ export function embeddedFileSexpr(name: string, data: Uint8Array): string {
   const enc = base64(zstdCompress(data)), lines: string[] = [];
   for (let i = 0; i < enc.length; i += LINE) lines.push(enc.slice(i, i + LINE));
   return `(file (name ${quote(name)}) (type ${embeddedFileType(name)}) (data |${lines.join("\n")}|) (checksum ${quote(mmh3Hash(data))}))`;
+}
+
+type Node = unknown[];
+const isList = Array.isArray;
+const child = (n: Node, key: string): Node | null => { for (let j = 1; j < n.length; j++) { const c = n[j]; if (isList(c) && c[0] === key) return c as Node; } return null; };
+/** The (file …) of `files` (an (embedded_files …) node) named `name`. */
+export function embeddedFileNode(files: Node | null | undefined, name: string): Node | null {
+  if (!files) return null;
+  for (let j = 1; j < files.length; j++) { const c = files[j]; if (isList(c) && c[0] === "file" && String((child(c as Node, "name") || [])[1] ?? "") === name) return c as Node; }
+  return null;
+}
+/** The base64 text of a (file …)'s (data |…|), or null when it carries none. */
+export function fileData(file: Node | null): string | null {
+  const d = file ? child(file, "data") : null; if (!d) return null;
+  const b64 = d.slice(1).map((x) => String(x)).join("").replace(/[|\s]/g, "");
+  return b64 || null;
+}
+/**
+ * The data of `owner`'s (a footprint's) embedded file `name` as KiCad has it after loading the board: the board's own
+ * file of that name when there is one (FixupEmbeddedData), else the footprint's.  `boardFiles` is the board's
+ * top-level (embedded_files …).
+ */
+export function embeddedFileData(owner: Node, name: string, boardFiles?: Node | null): string | null {
+  const own = embeddedFileNode(child(owner, "embedded_files"), name); if (!own) return null;
+  return fileData(embeddedFileNode(boardFiles, name)) ?? fileData(own);
+}
+/** EMBEDDED_FILES::DecompressAndDecode: base64, then the zstd frame; null when it does not read. */
+export function decodeEmbedded(b64: string | null): Uint8Array | null {
+  if (!b64) return null;
+  try { const bin = atob(b64), raw = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i); return zstdDecompress(raw); } catch { return null; }
+}
+/**
+ * BOARD::FixupEmbeddedData on one footprint node: each of its files the board also has takes the board's data and
+ * checksum.  The (data …) and (checksum …) nodes are the board's own, shared (not copied, so the quoting marks the
+ * reader keeps beside them hold): meant for a copy that is read or written out, not edited further.
+ */
+export function fixupEmbeddedData(fp: Node, boardFiles: Node | null | undefined): boolean {
+  const ef = child(fp, "embedded_files"); if (!ef || !boardFiles) return false;
+  let did = false;
+  for (let j = 1; j < ef.length; j++) {
+    const f = ef[j]; if (!isList(f) || f[0] !== "file") continue;
+    const b = embeddedFileNode(boardFiles, String((child(f as Node, "name") || [])[1] ?? "")); const d = b ? child(b, "data") : null; if (!b || !d) continue;
+    const g = (f as Node).filter((c) => !(isList(c) && (c[0] === "data" || c[0] === "checksum")));
+    const sum = child(b, "checksum");
+    g.push(d); if (sum) g.push(sum);
+    ef[j] = g; did = true;
+  }
+  return did;
 }

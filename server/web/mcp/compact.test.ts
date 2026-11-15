@@ -3,6 +3,7 @@
 // the editor's own applier makes of those edits, nothing an edit did not touch moved by a byte, and the
 // format version is the stored one.
 import { foldOps, type CanvasApi, type FoldOp } from "./compact";
+import { embeddedFileSexpr } from "../library/embedded-file";
 
 declare const require: (m: string) => unknown;
 declare const process: { exit(code: number): void; env: Record<string, string | undefined>; cwd(): string };
@@ -120,6 +121,31 @@ function sliceOf(file: string, head: string): string { const i = file.indexOf("\
 for (const [demo, name, type] of [["stickhub", "StickHub.kicad_sch", "kicad_sch"], ["stickhub", "StickHub.kicad_pcb", "kicad_pcb"], ["video", "video.kicad_sch", "kicad_sch"]] as const) {
   if (!fs.existsSync(path.join(DEMOS, demo, name))) { console.log("skip " + demo + "/" + name); continue; }
   const t = Date.now(); run(demo, name, type); console.log(`${demo}/${name}: ${Date.now() - t} ms`);
+}
+
+// ---- the board's own embedded files: an "embedded_file" board setup edit replaces the file of its name in the board's
+// (embedded_files …), or adds it; the other files and the rest of the file stay byte for byte
+{
+  const bytes = (n: number, m: number): Uint8Array => { const b = new Uint8Array(n); for (let i = 0; i < n; i++) b[i] = (i * m + (i >> 4)) & 255; return b; };
+  const fileA = embeddedFileSexpr("a.step", bytes(900, 7)), fileB = embeddedFileSexpr("b.step", bytes(700, 11)), fileA2 = embeddedFileSexpr("a.step", bytes(1200, 13));
+  const board = '(kicad_pcb\n\t(version 20241229)\n\t(generator "pcbnew")\n\t(general\n\t\t(thickness 1.6)\n\t)\n\t(gr_line\n\t\t(start 0 0)\n\t\t(end 10 0)\n\t\t(layer "Edge.Cuts")\n\t\t(uuid "11111111-2222-4333-8444-555555555555")\n\t)\n\t(embedded_fonts no)\n\t(embedded_files\n\t\t'
+    + fileA + '\n\t\t' + fileB + '\n\t)\n)\n';
+  const edit = (v: string): FoldOp[] => [{ seq: 1, changes: [{ id: "board-setup", kind: "MODIFIED", typeName: "BOARD_SETUP", properties: [{ name: "embedded_file", after: { type: "sexpr", v } }] }] }];
+  const r = foldOps(k, "kicad_pcb", board, edit(fileA2));
+  ok(r.ok, "embedded file: a replaced board file folds" + (r.ok ? "" : " (" + (r as any).reason + ")"));
+  if (r.ok) {
+    const ef = kid(parse(r.text), "embedded_files"), files = kids(ef, "file");
+    ok(files.length === 2 && str(kid(files[0], "name")[1]) === "a.step" && str(kid(files[1], "name")[1]) === "b.step", "embedded file: in place, the others kept");
+    ok(str(kid(files[0], "checksum")[1]) === str(kid(parse(fileA2), "checksum")[1]), "embedded file: the new checksum");
+    ok(serialize(files[0]) === serialize(parse(fileA2)), "embedded file: the new data");
+    ok(r.text.includes(fileB), "embedded file: the other file byte for byte");
+    ok(r.text.slice(0, r.text.indexOf("(embedded_files")) === board.slice(0, board.indexOf("(embedded_files")), "embedded file: the rest of the file byte for byte");
+    ok(!/\(data "/.test(r.text) && /\(data \|KLUv\/[A-Za-z0-9+\/=]*\n\t\t\t\t[A-Za-z0-9+\/=]+\n/.test(r.text), "embedded file: the data lines bare, one per line, as WriteEmbeddedFiles lays them out");
+    const again = foldOps(k, "kicad_pcb", r.text, edit(fileA2));
+    ok(again.ok && again.text === r.text, "embedded file: the same file again changes nothing");
+  }
+  const add = foldOps(k, "kicad_pcb", board.replace(/\n\t\(embedded_files[\s\S]*\n\t\)\n\)\n$/, "\n)\n"), edit(fileB));
+  ok(add.ok && kids(kid(parse((add as any).text), "embedded_files"), "file").length === 1, "embedded file: a board without embedded files gets the section" + (add.ok ? "" : " (" + (add as any).reason + ")"));
 }
 
 // ---- what the serializer writes, KiCad's parsers read: no token changes between bare and quoted

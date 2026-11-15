@@ -24,6 +24,10 @@ import { models3dPanel, whenGone } from "./model3d";
 import { state } from "../appstore";
 import { previewZoneFill } from "./zonefill";
 import { embeddedFileBytes, embeddedFilesPanel } from "./fp-3d-panel";
+import { embeddedFileNode, fixupEmbeddedData } from "../../library/embedded-file";
+import { docFiles } from "../../dialogs/browse-cells";
+import { applyChanges } from "../doc";
+import { sendOp } from "../net";
 import type { FpExtruded } from "./model3d";
 import type { PreviewModel as FpModel } from "../../library/model3d";
 
@@ -901,6 +905,8 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
     // the 3D Models and Embedded Files pages (PANEL_FP_PROPERTIES_3D_MODEL, PANEL_EMBEDDED_FILES)
     const FM = (PT() as unknown as { fpModels: { readModels(n: SNode): FpModel[]; readExtruded(n: SNode): FpExtruded | null; writeModels(n: SNode, m: FpModel[], e: FpExtruded | null): boolean; embeddedFileNames(n: SNode): string[]; keepEmbeddedFiles(n: SNode, keep: string[]): boolean; addEmbeddedFiles(n: SNode, files: string[]): boolean } }).fpModels;
     let efPanel: ReturnType<typeof embeddedFilesPanel> | null = null;
+    // the board's own (embedded_files …): a board KiCad saved keeps its footprints' file data there (FixupEmbeddedData)
+    const boardFiles = docFiles(doc);
     const attrs = PH().footprintAttrs(node);
     const type = selectField<string>(attrs.type, [["through_hole", "Through hole"], ["smd", "SMD"], ["", "Unspecified"]], { ro, key: "fpType" });
     const FLAGS: [string, string][] = [["exclude_from_sim", "Exclude from simulation"], ["board_only", "Not in schematic"], ["dnp", "Do not populate"], ["exclude_from_bom", "Exclude from bill of materials"], ["exclude_from_pos_files", "Exclude from position files"]];
@@ -927,12 +933,19 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
       thickness: Number((doc as { thickness?: number }).thickness) || 1.6,
       projectModels: () => (state.project ? state.project.docs : []).filter((d) => d.docType === "model3d").map((d) => d.path),
       // with the Embedded Files page's adds and removals, so a model embedded just now previews
-      footprintText: () => { const c = PTX.PcbTools.exchange.editableCopy(node).node; if (efPanel) { FM.keepEmbeddedFiles(c, efPanel.get()); FM.addEmbeddedFiles(c, efPanel.added().map((a) => a.sexpr)); } return K().serialize(c); },
+      // and the board's data of its files, as KiCad has the footprint after FixupEmbeddedData
+      footprintText: () => {
+        const c = PTX.PcbTools.exchange.editableCopy(node).node;
+        if (efPanel) FM.keepEmbeddedFiles(c, efPanel.get());
+        fixupEmbeddedData(c, boardFiles);
+        if (efPanel) FM.addEmbeddedFiles(c, efPanel.added().map((a) => a.sexpr));
+        return K().serialize(c);
+      },
       // the footprint's library link (FOOTPRINT::GetFPID), for Use Closest Library Model
       footprintId: () => { const id = String(node[1] ?? ""), c = id.indexOf(":"); return c >= 0 ? { lib: id.slice(0, c), name: id.slice(c + 1) } : { lib: "", name: id }; } });
     const tabs = notebook([{ label: "General", build: (el) => el.append(general) }, { label: "Clearance Overrides & Pad Connections", build: (el) => el.append(clearances) },
       { label: "3D Models", build: (el) => models3d.build(el) },
-      { label: "Embedded Files", build: (el) => { efPanel = embeddedFilesPanel({ names: FM.embeddedFileNames(node), ro, bytes: (nm) => embeddedFileBytes(node, nm) }); el.append(efPanel.el); } }]);
+      { label: "Embedded Files", build: (el) => { efPanel = embeddedFilesPanel({ names: FM.embeddedFileNames(node), ro, bytes: (nm) => embeddedFileBytes(node, nm, boardFiles) }); el.append(efPanel.el); } }]);
     body.append(tabs.el);
     whenGone(body, () => models3d.dispose());
     return (n) => {
@@ -1000,7 +1013,14 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
       const hv = height.get(), hNow = isFinite(hv) && hv > 0 ? hv : 0;
       if (hNow !== hgt0) put(n, "height", hNow > 0 ? `(height ${f6(hNow)})` : null, ["property", "path", "sheetname", "sheetfile", "solder_mask_margin", ...AFTER]);
       FM.writeModels(n, models3d.models(), models3d.extruded());
-      if (efPanel) { FM.keepEmbeddedFiles(n, efPanel.get()); FM.addEmbeddedFiles(n, efPanel.added().map((a) => a.sexpr)); }
+      if (efPanel) {
+        FM.keepEmbeddedFiles(n, efPanel.get());
+        const added = efPanel.added(); FM.addEmbeddedFiles(n, added.map((a) => a.sexpr));
+        // a replaced file the board also keeps goes into the board's (embedded_files …) too: KiCad's FixupEmbeddedData
+        // would otherwise give the footprint the board's old file of that name when the board is next loaded
+        const onBoard = added.filter((a) => embeddedFileNode(boardFiles, a.name));
+        if (onBoard.length) { const change = (K() as unknown as { boardSetup: { embeddedFilesChange(files: string[]): KChange } }).boardSetup.embeddedFilesChange(onBoard.map((a) => a.sexpr)); sendOp([change], false); applyChanges([change]); }
+      }
       return undefined;
     };
   }, undefined, "Edit Footprint Properties");

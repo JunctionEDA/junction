@@ -1,17 +1,16 @@
 // pcbdialogs/fp-3d-panel — the Embedded Files notebook page both Footprint Properties dialogs share
 // (PANEL_EMBEDDED_FILES: Filename / Embedded Reference, the add and delete bitmap buttons, Embed fonts, Export...).  The 3D
 // Models page is model3d.ts' models3dPanel; the node work is pcb-tools' (fp-models.ts).
-import { zstdDecompress } from "../../dialogs/zstd";
-import { embeddedFileSexpr } from "../../library/embedded-file";
+import { decodeEmbedded, embeddedFileData, embeddedFileSexpr } from "../../library/embedded-file";
 import { bitmapButton, errorMessage, grid, h, messageBox, type CellValue, type Field } from "./ui";
 
-/** EMBEDDED_FILES::DecompressAndDecode of a footprint's file `name`: base64, then the zstd frame. */
-export function embeddedFileBytes(fp: SNode, name: string): Uint8Array | null {
-  const ef = KiCadCanvas.kid(fp, "embedded_files"); if (!ef) return null;
-  const f = (KiCadCanvas.kids(ef, "file") as SNode[]).find((x) => String((KiCadCanvas.kid(x, "name") || [])[1] ?? "") === name); if (!f) return null;
-  const d = KiCadCanvas.kid(f, "data"); if (!d) return null;
-  const b64 = d.slice(1).map((x) => String(x)).join("").replace(/[|\s]/g, "");
-  try { const bin = atob(b64); const raw = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i); return zstdDecompress(raw); } catch { return null; }
+/**
+ * EMBEDDED_FILES::DecompressAndDecode of a footprint's file `name`: base64, then the zstd frame.  On a board the data is
+ * the board's own file of that name when it has one (`boardFiles`, its (embedded_files …): a board KiCad saved keeps the
+ * data there and BOARD::FixupEmbeddedData copies it into the footprints).
+ */
+export function embeddedFileBytes(fp: SNode, name: string, boardFiles?: SNode | null): Uint8Array | null {
+  return decodeEmbedded(embeddedFileData(fp, name, boardFiles));
 }
 
 /** A file added on the page, written into (embedded_files …) when the dialog's OK applies: the (file …) form. */
