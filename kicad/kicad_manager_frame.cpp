@@ -36,6 +36,11 @@
 #include <thread>
 #include <wx/richmsgdlg.h>
 #include <wx/timer.h>
+#include <wx/button.h>
+#include <wx/dialog.h>
+#include <wx/gauge.h>
+#include <wx/sizer.h>
+#include <wx/stattext.h>
 #include <wx/clipbrd.h>
 #include <dialogs/dialog_git_mr_review.h>
 #include <widgets/git_commit_pane.h>
@@ -1443,6 +1448,104 @@ void KICAD_MANAGER_FRAME::OnEditAdvancedCfg( wxCommandEvent& WXUNUSED( event ) )
 }
 
 
+/// What the standard libraries download worker and its progress dialog share.
+struct STDLIBS_DOWNLOAD_STATE
+{
+    std::mutex mutex;
+    wxString   message;
+    int        percent = 0;
+    bool       done = false;
+    bool       ok = false;
+    wxString   error;
+    bool       stop = false;
+};
+
+
+/// Shows what the download worker is doing and closes when it has finished.
+class STDLIBS_PROGRESS_DIALOG : public wxDialog
+{
+public:
+    STDLIBS_PROGRESS_DIALOG( wxWindow* aParent, std::shared_ptr<STDLIBS_DOWNLOAD_STATE> aState ) :
+            wxDialog( aParent, wxID_ANY, _( "Standard Libraries" ), wxDefaultPosition,
+                      wxDefaultSize, wxCAPTION ),
+            m_state( std::move( aState ) ),
+            m_timer( this )
+    {
+        wxBoxSizer* sizer = new wxBoxSizer( wxVERTICAL );
+
+        m_message = new wxStaticText( this, wxID_ANY, wxEmptyString, wxDefaultPosition,
+                                      wxSize( FromDIP( 420 ), -1 ), wxST_NO_AUTORESIZE );
+        m_gauge = new wxGauge( this, wxID_ANY, 100, wxDefaultPosition,
+                               wxSize( FromDIP( 420 ), -1 ) );
+        m_cancel = new wxButton( this, wxID_CANCEL, _( "Cancel" ) );
+
+        sizer->Add( m_message, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, FromDIP( 12 ) );
+        sizer->Add( m_gauge, 0, wxEXPAND | wxALL, FromDIP( 12 ) );
+        sizer->Add( m_cancel, 0, wxALIGN_RIGHT | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP( 12 ) );
+
+        SetSizerAndFit( sizer );
+        CentreOnParent();
+
+        Bind( wxEVT_TIMER, &STDLIBS_PROGRESS_DIALOG::onTimer, this );
+        m_cancel->Bind( wxEVT_BUTTON, &STDLIBS_PROGRESS_DIALOG::onCancel, this );
+
+        refresh();
+        m_timer.Start( 100 );
+    }
+
+private:
+    /// @return true once the worker has finished.
+    bool refresh()
+    {
+        wxString message;
+        int      percent = 0;
+        bool     done = false;
+
+        {
+            std::lock_guard<std::mutex> lock( m_state->mutex );
+            message = wxString( m_state->message.wc_str() );
+            percent = m_state->percent;
+            done = m_state->done;
+        }
+
+        if( message != m_message->GetLabel() )
+            m_message->SetLabel( message );
+
+        if( percent != m_gauge->GetValue() )
+            m_gauge->SetValue( std::clamp( percent, 0, 100 ) );
+
+        return done;
+    }
+
+    void onTimer( wxTimerEvent& )
+    {
+        if( refresh() )
+        {
+            m_timer.Stop();
+            EndModal( wxID_OK );
+        }
+    }
+
+    void onCancel( wxCommandEvent& )
+    {
+        // The worker stops at its next step; the dialog closes when it has.
+        {
+            std::lock_guard<std::mutex> lock( m_state->mutex );
+            m_state->stop = true;
+        }
+
+        m_cancel->Disable();
+        m_message->SetLabel( _( "Stopping..." ) );
+    }
+
+    std::shared_ptr<STDLIBS_DOWNLOAD_STATE> m_state;
+    wxStaticText*                           m_message = nullptr;
+    wxGauge*                                m_gauge = nullptr;
+    wxButton*                               m_cancel = nullptr;
+    wxTimer                                 m_timer;
+};
+
+
 void KICAD_MANAGER_FRAME::OnDownloadStandardLibraries( wxCommandEvent& WXUNUSED( event ) )
 {
     DownloadStandardLibraries( false );
@@ -1505,18 +1608,7 @@ void KICAD_MANAGER_FRAME::DownloadStandardLibraries( bool aOffer )
             return;
     }
 
-    struct STATE
-    {
-        std::mutex mutex;
-        wxString   message;
-        int        percent = 0;
-        bool       done = false;
-        bool       ok = false;
-        wxString   error;
-        bool       stop = false;
-    };
-
-    auto state = std::make_shared<STATE>();
+    auto state = std::make_shared<STDLIBS_DOWNLOAD_STATE>();
 
     state->message = _( "Contacting gitlab.com..." );
 
@@ -1555,47 +1647,21 @@ void KICAD_MANAGER_FRAME::DownloadStandardLibraries( bool aOffer )
             } )
             .detach();
 
+    // A real modal event loop with a timer that looks at the worker: the application keeps
+    // answering and Cancel is an ordinary button.
+    STDLIBS_PROGRESS_DIALOG progress( this, state );
+
+    progress.ShowModal();
+
     bool     ok = false;
     bool     stopped = false;
     wxString error;
 
     {
-        APP_PROGRESS_DIALOG progress( _( "Standard Libraries" ), state->message, 100, this, false,
-                                      wxPD_APP_MODAL | wxPD_AUTO_HIDE | wxPD_CAN_ABORT );
-
-        for( ;; )
-        {
-            wxString message;
-            int      percent = 0;
-            bool     done = false;
-
-            {
-                std::lock_guard<std::mutex> lock( state->mutex );
-                message = wxString( state->message.wc_str() );
-                percent = state->percent;
-                done = state->done;
-                ok = state->ok;
-                error = wxString( state->error.wc_str() );
-            }
-
-            if( done )
-                break;
-
-            // 100 would close the dialog; the last step is still running.
-            if( !progress.Update( std::min( percent, 99 ), message ) && !stopped )
-            {
-                stopped = true;
-
-                std::lock_guard<std::mutex> lock( state->mutex );
-                state->stop = true;
-            }
-
-            // Update() repaints but does not run the event loop on every platform: let the
-            // dialog (and only the dialog) have its events, so the application stays responsive
-            // and Cancel is seen.
-            wxSafeYield( &progress, true );
-            wxMilliSleep( 20 );
-        }
+        std::lock_guard<std::mutex> lock( state->mutex );
+        ok = state->ok;
+        stopped = state->stop;
+        error = wxString( state->error.wc_str() );
     }
 
     if( !ok )

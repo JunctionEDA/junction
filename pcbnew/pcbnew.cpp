@@ -326,19 +326,40 @@ static int rebuildFootprintLibraries( const wxString& aBoardFile, const std::map
         if( !board )
             return 0;
 
-        std::set<wxString> done;
+        // One placement stands for each library footprint.  A copy on the front, unrotated, is
+        // the library footprint as it was; a flipped or turned one has to be brought back, and
+        // its texts do not always land exactly where the library had them.
+        std::map<wxString, std::pair<int, FOOTPRINT*>> chosen;
+        std::vector<wxString>                          order;
 
         for( FOOTPRINT* footprint : board->Footprints() )
         {
             const wxString nickname = footprint->GetFPID().GetUniStringLibNickname();
             const wxString name = footprint->GetFPID().GetUniStringLibItemName();
-            auto           library = aLibraries.find( nickname );
 
-            if( library == aLibraries.end() || name.IsEmpty() )
+            if( aLibraries.find( nickname ) == aLibraries.end() || name.IsEmpty() )
                 continue;
 
-            if( !done.insert( nickname + wxS( ":" ) + name ).second )
-                continue;
+            const int score = ( footprint->IsFlipped() ? 0 : 2 )
+                              + ( footprint->GetOrientation().IsZero() ? 1 : 0 );
+            const wxString key = nickname + wxS( ":" ) + name;
+            auto           it = chosen.find( key );
+
+            if( it == chosen.end() )
+            {
+                chosen[key] = { score, footprint };
+                order.push_back( key );
+            }
+            else if( score > it->second.first )
+            {
+                it->second = { score, footprint };
+            }
+        }
+
+        for( const wxString& key : order )
+        {
+            FOOTPRINT* footprint = chosen[key].second;
+            auto       library = aLibraries.find( footprint->GetFPID().GetUniStringLibNickname() );
 
             try
             {
