@@ -7,6 +7,7 @@
 // editor bundles (it is reachable from the desktop app's browser hand-off too).
 
 import "../components/kselect";   // <k-select>, the themed drop-down the page uses in place of <select>
+import { askConfirm } from "../components/msgbox";
 
 // ---------------------------------------------------------------- what the server sends (src/github.rs)
 interface GithubApp { name: string; slug: string; url: string }
@@ -596,8 +597,9 @@ function bindCommon(): void {
   const rf = $<HTMLButtonElement>("#refresh"); if (rf) rf.onclick = () => busy(rf, async () => { lastResult = null; await loadStatus(); });
   const un = $<HTMLButtonElement>("#unlink");
   if (un) un.onclick = () => {
-    if (!confirm("Unlink this project from its repository? Nothing is deleted on either side.")) return;
-    busy(un, async () => { await api(`/api/projects/${projectId}/github`, { method: "DELETE" }); lastResult = null; await loadStatus(); });
+    void askConfirm("Unlink Repository", "Unlink this project from its repository? Nothing is deleted on either side.", { ok: "Unlink" }).then((yes) => {
+      if (yes) busy(un, async () => { await api(`/api/projects/${projectId}/github`, { method: "DELETE" }); lastResult = null; await loadStatus(); });
+    });
   };
 }
 

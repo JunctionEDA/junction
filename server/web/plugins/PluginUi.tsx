@@ -2,6 +2,7 @@
 // their actions, the dialogs the host draws on their behalf, and the manager (KiCad's Plugin and
 // Content Manager, for the web): what is installed, what it may do, a catalog, and a developer tab.
 import { Select } from "../components/Select";
+import { askConfirm } from "../components/msgbox";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useApp } from "../store";
@@ -317,7 +318,7 @@ function Detail({ p }: { p: InstalledPlugin }) {
       <div className="plg-row">
         {p.source.startsWith("kicad") ? <PcmIcon identifier={p.identifier} has /> : null}
         <h2>{m.name}</h2><span className="plg-muted">{m.version || ""}</span><span className="grow" />
-        <label className="plg-switch"><input type="checkbox" id="pluginEnabled" checked={p.enabled} onChange={(e) => { if (e.target.checked && p.withdrawn && !confirm(`The administrators took ${m.name} out of the registry:\n\n${p.withdrawn}\n\nSwitch it on anyway?`)) return; void setEnabled(p.identifier, e.target.checked); }} /> Enabled</label>
+        <label className="plg-switch"><input type="checkbox" id="pluginEnabled" checked={p.enabled} onChange={(e) => { const on = e.target.checked; if (on && p.withdrawn) { void askConfirm("Withdrawn Plugin", `The administrators took ${m.name} out of the registry:\n\n${p.withdrawn}\n\nSwitch it on anyway?`, { ok: "Switch On" }).then((yes) => { if (yes) void setEnabled(p.identifier, true); }); return; } void setEnabled(p.identifier, on); }} /> Enabled</label>
       </div>
       {p.withdrawn ? <p className="plg-warn bad" id="pluginWithdrawn">The administrators took this plugin out of the community registry, and your copy was switched off. Their reason: {p.withdrawn} The copy is still yours: uninstall it, or switch it back on if you trust it.</p> : null}
       <p className="plg-muted">{m.identifier}{m.author ? ` · by ${m.author}` : ""}{scopesOf(m) ? ` · ${scopesOf(m)}` : ""}{m.homepage && /^https:\/\//.test(m.homepage) ? <> · <a href={m.homepage} target="_blank" rel="noreferrer noopener">homepage ↗</a></> : null}</p>
@@ -335,10 +336,10 @@ function Detail({ p }: { p: InstalledPlugin }) {
             ) : pub && !mine ? <p className="plg-muted">In the community registry, published by {pub.publisher} (version {pub.version || "?"}).</p> : pub ? (
               <div className="plg-row"><span className="grow">You published version {pub.version || "?"} to the community registry.</span>
                 {(m.version || "") !== pub.version ? <button type="button" className="btn sm" id="pluginPublish" disabled={busy} onClick={() => void act(() => publish(p.identifier))}>Publish {m.version || "this copy"}</button> : null}
-                <button type="button" className="btn sm danger" id="pluginUnpublish" disabled={busy} onClick={() => { if (confirm(`Remove ${m.name} from the registry? People who installed it keep their copy.`)) void act(() => unpublish(p.identifier)); }}>Unpublish</button></div>
+                <button type="button" className="btn sm danger" id="pluginUnpublish" disabled={busy} onClick={() => { void askConfirm("Unpublish Plugin", `Remove ${m.name} from the registry? People who installed it keep their copy.`, { ok: "Unpublish", danger: true }).then((yes) => { if (yes) void act(() => unpublish(p.identifier)); }); }}>Unpublish</button></div>
             ) : (
               <div className="plg-row"><span className="grow plg-muted">Only you have this plugin. Publishing lists this copy in the community registry under your name, for anyone to install.</span>
-                <button type="button" className="btn sm" id="pluginPublish" disabled={busy} onClick={() => { if (confirm(`Publish ${m.name} ${m.version || ""} to the community registry as ${me ? me.login : "you"}? Anyone will be able to see and install it.`)) void act(() => publish(p.identifier)); }}>Publish…</button></div>
+                <button type="button" className="btn sm" id="pluginPublish" disabled={busy} onClick={() => { void askConfirm("Publish Plugin", `Publish ${m.name} ${m.version || ""} to the community registry as ${me ? me.login : "you"}? Anyone will be able to see and install it.`, { ok: "Publish" }).then((yes) => { if (yes) void act(() => publish(p.identifier)); }); }}>Publish…</button></div>
             )}
             {s.project.id && s.project.canEdit ? (
               <label className="plg-check" title={origin ? "Collaborators are shown it and choose for themselves. It never installs or runs for them on its own." : "Publish it first: collaborators need somewhere to get it from."}>
@@ -355,7 +356,7 @@ function Detail({ p }: { p: InstalledPlugin }) {
       <div className="plg-row end">
         <button type="button" className="btn sm" onClick={() => clearLog(p.identifier)}>Clear log</button>
         <button type="button" className="btn sm" disabled={!p.enabled} onClick={() => restart(p.identifier)}>Restart</button>
-        <button type="button" className="btn sm danger" id="pluginUninstall" onClick={() => { if (confirm(`Uninstall ${m.name}? Its stored settings are removed too.`)) void uninstall(p.identifier); }}>Uninstall</button>
+        <button type="button" className="btn sm danger" id="pluginUninstall" onClick={() => { void askConfirm("Uninstall Plugin", `Uninstall ${m.name}? Its stored settings are removed too.`, { ok: "Uninstall", danger: true }).then((yes) => { if (yes) void uninstall(p.identifier); }); }}>Uninstall</button>
       </div>
     </div>
   );
@@ -490,7 +491,7 @@ function ModerationTab() {
 function ModerationCard({ e }: { e: ModerationEntry }) {
   const [reason, setReason] = useState(""); const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null); const m = e.manifest;
   const act = async (action: "hide" | "restore" | "remove" | "dismiss") => {
-    if (action === "remove" && !confirm(`Remove ${m.name} from the registry for good? Its files are dropped and the identifier cannot be published again.`)) return;
+    if (action === "remove" && !(await askConfirm("Remove Plugin", `Remove ${m.name} from the registry for good? Its files are dropped and the identifier cannot be published again.`, { ok: "Remove", danger: true }))) return;
     setBusy(true); const r = await moderate(e.identifier, action, reason); setBusy(false); setErr(r); if (!r) setReason("");
   };
   const needs = reason.trim().length < 5;

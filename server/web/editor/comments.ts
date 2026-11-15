@@ -1,4 +1,5 @@
 import { netLabel } from "../review/names";
+import { askConfirm } from "../components/msgbox";
 // comments.ts — design review threads on the open document.
 //
 // A thread is pinned to a part or any other item (by uuid), to a net (by name), or to a bare spot.
@@ -293,8 +294,8 @@ export function showThread(rootId: number, keepPlace = false): void {
       const del = el("button", "del", "Delete"); del.type = "button";
       del.addEventListener("click", () => {
         const whole = c.id === rootId && thread.length > 1;
-        if (!confirm(whole ? "Delete this thread and its replies?" : "Delete this comment?")) return;
-        void call(`/api/comments/${c.id}`, "DELETE");
+        void askConfirm("Delete Comment", whole ? "Delete this thread and its replies?" : "Delete this comment?", { ok: "Delete", danger: true })
+          .then((yes) => { if (yes) void call(`/api/comments/${c.id}`, "DELETE"); });
       });
       acts.appendChild(del); meta.appendChild(acts);
     }
