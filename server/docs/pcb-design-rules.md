@@ -7,7 +7,8 @@ placement or routing by `board.plan()`; rules marked **manual** are printed in t
 they cannot be read from the copper.
 
 Code: `server/web/ai/review-physics.ts` (checks and plans), `server/harness/kicad_harness/physics.py` (calls and sums),
-`server/harness/kicad_harness/stackups.py` (stackups, materials, fabricators). Tests: `server/harness/tests/test_physics.py`,
+`server/harness/kicad_harness/stackups.py` (stackups, materials, fabricators), `server/web/ai/review-craft.ts` and
+`server/harness/kicad_harness/craft.py` (workshop practice and the one-call layout). Tests: `server/harness/tests/test_physics.py`,
 `test_stackups.py`.
 
 ## Sources, and how far to trust them
@@ -306,6 +307,76 @@ fabricator does not offer on that kind of board.
   (`dfm.via_in_pad`).
 - Fiducials, test points, readable silkscreen, one passive size where possible, parts in stock: the layout
   checklist in the guide covers these.
+
+## Workshop practice (Phil's Lab)
+
+Source: the board walk-throughs and PCB routing videos of Phil's Lab (Philip Salmony, youtube.com/@PhilsLab), read
+as transcripts in 2026-11 and distilled here in our own words. Twenty-one videos were read; the channel has about
+forty more board walk-throughs that were not, because the same rules repeat in each. Read:
+
+| # | Video | Link |
+|---|---|---|
+| 112 | PCB Traces 101 | youtu.be/xEVntmYLARw |
+| 77 | PCB Vias 101 | youtu.be/WPT96w3eLAM |
+| 176 | Copper Pours 101 | youtu.be/Ao2HUjjhlmQ |
+| 175 | Via Fencing and Edge Plating | youtu.be/fQ1BTyvXfKw |
+| 156 | Crosstalk | youtu.be/lLknjLemY-M |
+| 83 | Differential Pairs | youtu.be/xwrdvhm4vgw |
+| 137 | 2-Layer PCB Design Tips | youtu.be/M6_an34wQJk |
+| 144 | QFN PCB Design Tips | youtu.be/hOamoJ15hmA |
+| 95 | BGA PCB Design Tips | youtu.be/0KbINAq0hcU |
+| 60 | Switching Regulator PCB Design | youtu.be/AmfLhT5SntE |
+| 75 | ESD Protection | youtu.be/MmG_m4xVNfQ |
+| 25 | High-Speed PCB Design Tips | youtu.be/VRJI0X-6yTg |
+| 19 | Practical RF Hardware and PCB Design Tips | youtu.be/_Hfzq1QES-Q |
+| 18 | Common PCB Design Mistakes | youtu.be/IclJ9nbtYgI |
+| 43 | Critiquing My Own PCB Designs | youtu.be/eQYJLRH4WPs |
+| 84 | Aesthetic PCB Design Tips | youtu.be/D2UaRPkRExw |
+| 88 | Mixed-Signal Hardware and PCB Design Tips | youtu.be/v6fTa6LRJLI |
+| 131 | PCB Design Final Touches (Tips and Checklist) | youtu.be/g4m91gv-4oQ |
+| 166 | KiCad 9 Hardware Design Tutorial, part 2 (PCB) | youtu.be/igQWdVGZGpI |
+| 128 | KiCad 7 STM32 Bluetooth Hardware Design, part 2 (PCB) | youtu.be/PlXd3lLZ4vc |
+
+Most of what the videos teach was already in the harness from the references above (unbroken ground and never a
+split, return vias, pairs, crystals, converter loops, ESD first at the connector, fences at a twentieth of a
+wavelength, thermal pad vias, stitching, fiducials, silkscreen). What they added:
+
+**Checked** by `board.review()` (`server/web/ai/review-craft.ts`, tests in `harness/tests/test_craft.py`):
+
+- `tracks.minimum`: signal tracks are 0.2 to 0.3 mm, never the fabricator's minimum, and neck down only at a
+  fine-pitch pad row. Reported when a net has 5 mm or more below 0.15 mm further than 2 mm from a fine-pitch pad.
+- `crosstalk.victims`: reset, crystal, reference and analog lines keep three track widths, centre to centre, from
+  clocks, fast lines and switch nodes over any run above 5 mm. An unstitched guard track does not help.
+- `vias.slot`: neighbouring vias leave room for plane copper between their clearance holes (two clearances plus
+  0.15 mm). Four or more in a merged row longer than 4 mm are reported as a slot in the ground.
+- `bypass.order`: the supply reaches the pin through the capacitor (via, capacitor, pin), on a short pad-wide track.
+- `pads.entry`: a track leaves a fine-pitch pad through its end, in line with the pad, not sideways towards the
+  next pin.
+- `power.return`: a supply via has a ground via within 2.5 mm (a note, not a warning).
+- `planes.signals`: no signal on an inner ground plane layer.
+
+**Applied** by `board.design()` (`harness/kicad_harness/craft.py`), which runs the whole order of work in one call:
+plan, stackup, placement, ground on both outer layers and on both inner layers of a four-layer board (signal,
+ground, ground, signal), antenna keep-outs, routing with the plan's order, a second pass at what is left open,
+`finish()`, `cleanup()`, `silkscreen()`, the DRC and a one-line-per-finding review (`board.brief()`).
+
+**Manual** (printed in the review's checklist): place and route in order of criticality with supplies and the pour
+last; read the Gerbers layer by layer; compare hand-made footprints with the datasheet.
+
+**Where the owner's rules differ, the owner's rules hold:**
+
+| Subject | Phil's Lab | This project |
+|---|---|---|
+| Default via | 0.7 mm pad, 0.3 mm drill | 0.4 mm pad, 0.25 mm drill |
+| Fan-out of a fine-pitch part | spread out, room between vias | tight and orderly, grouped (and `vias.slot` asks only for the plane sliver between them) |
+| Decoupling on the back under the chip | common | all parts on the top side unless two sides cannot be avoided |
+| Silkscreen text | 1 mm or more | 0.5 mm references allowed on dense boards |
+| Board corners | always rounded | rounded only on product boards |
+
+**Left to the router** (not automatic yet): preferring three track widths of spacing wherever there is room;
+breaking parallel tracks apart right after a pad row; a ground via placed beside each supply via; never cutting a
+back-side jump under a pair or a clock when a DC net could be crossed instead; teardrops; pour clearance of three
+dielectric heights beside impedance-controlled tracks.
 
 ## What is not automatic yet
 

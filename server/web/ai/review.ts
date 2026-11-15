@@ -12,6 +12,7 @@ import { ED, K, ToolError, fieldsOf, projectErc, resolveDoc, schNets } from "./d
 import { checkLayout } from "./layout";
 import { PHYSICS_MANUAL, PHYSICS_RULES, PHYSICS_SOURCE, physicsPlan, reviewPhysics } from "./review-physics";
 import { CIRCUIT_MANUAL, CIRCUIT_RULES, reviewCircuit } from "./review-circuit";
+import { CRAFT_MANUAL, CRAFT_RULES, CRAFT_SOURCE, reviewCraft } from "./review-craft";
 
 const W = window as any;
 const SCH = (): any => (W.CollabTools && W.CollabTools.sch) || null;
@@ -543,7 +544,9 @@ export async function reviewBoard(doc: any, path: string): Promise<any> {
   }
   // ---- the physics of the layout: RF, return paths, converters, heat, isolation (review-physics.ts)
   try { reviewPhysics(doc, P, k, settings, add); } catch (err) { add("drc", "note", `The layout physics checks could not run: ${(err as Error).message}`); }
-  const r = report("layout review", path, PCB_RULES.concat(PHYSICS_RULES), out, PCB_MANUAL.concat(PHYSICS_MANUAL)); r.source += " " + PHYSICS_SOURCE; return r;
+  // ---- workshop practice: widths, crosstalk, via rows, capacitor order, pad entry (review-craft.ts)
+  try { reviewCraft(doc, P, k, settings, add); } catch (err) { add("drc", "note", `The layout practice checks could not run: ${(err as Error).message}`); }
+  const r = report("layout review", path, PCB_RULES.concat(PHYSICS_RULES, CRAFT_RULES), out, PCB_MANUAL.concat(PHYSICS_MANUAL, CRAFT_MANUAL)); r.source += " " + PHYSICS_SOURCE + " " + CRAFT_SOURCE; return r;
 }
 
 function report(check: string, path: string, rules: Rule[], findings: Finding[], manual: string[]) {

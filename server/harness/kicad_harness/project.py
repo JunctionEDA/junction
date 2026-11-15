@@ -1976,18 +1976,18 @@ class Board(_Doc):
             rows = [v for v in self._call("run_checks").get("violations", []) if v["code"] == "starved_thermal"]
             todo: dict = {}
             for v in rows:
-                best = None
+                near: list = []
                 for ref in v.get("refs") or []:
                     try:
                         pads = self.pads(ref)
                     except HarnessError:
                         continue
-                    for q in pads:
-                        d = (q["x"] - v["x"]) ** 2 + (q["y"] - v["y"]) ** 2
-                        if best is None or d < best[0]:
-                            best = (d, q["ref"], q["number"])
-                if best and f"{best[1]}.{best[2]}" not in done:
-                    todo.setdefault(best[1], []).append(best[2])
+                    near += [((q["x"] - v["x"]) ** 2 + (q["y"] - v["y"]) ** 2, q["ref"], q["number"]) for q in pads]
+                near.sort()
+                # every pad at that spot: a USB-C socket has two pads (A12 and B1) on one piece of copper
+                for d, ref, num in [q for q in near if q[0] <= near[0][0] + 0.01]:
+                    if f"{ref}.{num}" not in done:
+                        todo.setdefault(ref, []).append(num)
             if not todo:
                 break
             for ref, nums in todo.items():

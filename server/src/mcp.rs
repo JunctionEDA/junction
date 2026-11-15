@@ -49,7 +49,7 @@ Start with list_projects, then get_design_overview for the project. Every design
 Read the design with the tools instead of guessing: coordinates are millimetres with Y down, schematic items sit on a 1.27 mm grid, and pins connect only when a wire end or label lands exactly on the pin's connection point. \
 render_view shows a sheet or the board as a picture; scope it (area, refs, nets, layers, view_of a person) to keep it small. \
 The people in the project see you as a collaborator: when you talk about a place in the design, call highlight so it is outlined on their canvas with a short note, and when they say \"this\" or \"here\", call get_selection to see what they have selected and where they are looking. When the person wants to review a change first, or you offer something they did not ask for, pass propose: true to apply_changes: they see it drawn over the design and Accept or Reject it (list_proposals gives the outcome; propose_fixes offers fixes for rule violations the same way). apply_changes edits the design at once and everyone in the project sees it live, so change only what the person asked for, use dry_run when unsure, check the result with run_checks and render_view, and take a wrong change back with undo_changes. \
-Before drawing or rearranging a schematic, laying out or routing a board, or reviewing a design, read get_design_guide once; its schematic drawing rules are the owner's and are not optional.";
+Before drawing or rearranging a schematic, laying out or routing a board, or reviewing a design, read get_design_guide once (topic \"quick\" when the job is to lay out or route a whole board: one harness call, board.design(), does it and holds the rules); its schematic drawing rules are the owner's and are not optional.";
 
 // ------------------------------------------------------------------ the catalog
 
@@ -628,13 +628,20 @@ fn find_doc<'a>(p: &'a ProjectCtx, name: &str) -> Result<&'a persist::Document, 
 fn guide(topic: &str) -> Result<String, String> {
     let heading = match topic {
         "" | "all" => return Ok(GUIDE.to_string()),
+        // The short way to a finished board: one harness call that holds the rules, so this topic comes alone.
+        "quick" => {
+            let start = GUIDE.find("## A board in one call").unwrap_or(0);
+            let rest = &GUIDE[start..];
+            let end = rest[2..].find("\n## ").map(|i| i + 2).unwrap_or(rest.len());
+            return Ok(format!("{}\n", rest[..end].trim_end()));
+        }
         "schematic" => "## Drawing schematics",
         "board" => "## Designing a board from a prompt",
         "routing" => "## Routing a board",
         "layout" => "## Laying out a board by the physics",
         "review" => "## Reviewing a design",
         "python" => "## Scripting with Python",
-        other => return Err(format!("There is no topic \"{other}\". Topics: all, python, schematic, board, routing, layout, review.")),
+        other => return Err(format!("There is no topic \"{other}\". Topics: all, quick, python, schematic, board, routing, layout, review.")),
     };
     // Every topic comes with the opening section: how changes work here applies to all of them.
     let section = |h: &str| -> &str {
@@ -1048,6 +1055,8 @@ mod tests {
         assert!(routing.contains("## Laying out a board by the physics"));
         let layout = guide("layout").unwrap();
         assert!(layout.contains("board.plan(") && layout.contains("board.stackup(") && !layout.contains("## Routing a board"));
+        let quick = guide("quick").unwrap();
+        assert!(quick.starts_with("## A board in one call") && quick.contains("board.design(") && !quick.contains("## Drawing schematics") && quick.len() < 4000, "{}", quick.len());
         assert!(guide("nope").is_err());
     }
 

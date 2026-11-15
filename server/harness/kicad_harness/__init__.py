@@ -32,6 +32,8 @@ _physics.install(Project, Schematic, Board)
 from . import stackups as _stackups
 from .stackups import BUILDS, FABS, FINISHES, MATERIALS, materials
 _stackups.install(Board)
+from . import craft as _craft
+_craft.install(Board)
 
 __all__ = ["open", "connect", "current", "Project", "Schematic", "Board", "Pin", "HarnessError", "parts"]
 __version__ = "0.1.0"

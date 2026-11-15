@@ -48,7 +48,7 @@
     "input_schema": {
       "type": "object",
       "properties": {
-        "topic": { "type": "string", "enum": ["all", "python", "schematic", "board", "routing", "layout", "review"], "description": "Which part to read; all when omitted." }
+        "topic": { "type": "string", "enum": ["all", "quick", "python", "schematic", "board", "routing", "layout", "review"], "description": "Which part to read; all when omitted. quick is the short way to lay out and route a whole board with one harness call (board.design): read it first and the long board, routing and layout topics only when a finding sends you there." }
       },
       "additionalProperties": false
     }
