@@ -46,6 +46,8 @@ pub struct SymbolOut {
     pub hide_pin_numbers: bool,
     /// The pins were rearranged into KiCad library style ([`super::tidy`]).
     pub tidied: bool,
+    /// The drawing was replaced by KiCad's transistor symbol of this kind ([`super::transistor`]).
+    pub transistor: Option<super::transistor::Kind>,
 }
 
 #[derive(Debug, Clone)]
@@ -467,6 +469,8 @@ struct PinStats {
     /// the pins as read, and what else the unit draws, for [`super::tidy::arrange`]
     pins: Vec<super::tidy::RawPin>,
     art: super::tidy::Art,
+    /// filled triangles (arrowheads), symbol coordinates, for [`super::transistor::redraw`]
+    tris: Vec<[[f64; 2]; 3]>,
 }
 
 /// One unit's shapes → its graphics and pins, appended to `out`.
@@ -607,6 +611,16 @@ fn symbol_shapes(shapes: &[Value], cx: &mut SymCtx, out: &mut String, stats: &mu
                 if pts.len() < 2 {
                     continue;
                 }
+                if fl[0] == "PG" {
+                    let mut corners = pts.clone();
+                    if corners.len() == 4 && corners.first() == corners.last() {
+                        corners.pop();
+                    }
+                    if corners.len() == 3 {
+                        let c: Vec<[f64; 2]> = corners.iter().map(|p| [(p[0] - cx.ox) * U, -(p[1] - cx.oy) * U]).collect();
+                        stats.tris.push([c[0], c[1], c[2]]);
+                    }
+                }
                 if fl[0] == "PG" && pts.first() != pts.last() {
                     pts.push(pts[0]);
                 }
@@ -717,9 +731,9 @@ fn grid_shift(shapes: &[Value], ox: f64, oy: f64) -> (f64, f64) {
     (0.0, 0.0)
 }
 
-fn convert_symbol(name: &str, prefix: &str, units: &[&Value], tidy: bool) -> Option<SymbolOut> {
+fn convert_symbol(name: &str, prefix: &str, units: &[&Value], tidy: bool, hint: &str) -> Option<SymbolOut> {
     let mut body = String::new();
-    let mut stats = PinStats { passive: passive_part(prefix), count: 0, names_hidden: 0, numbers_hidden: 0, pins: Vec::new(), art: Default::default() };
+    let mut stats = PinStats { passive: passive_part(prefix), count: 0, names_hidden: 0, numbers_hidden: 0, pins: Vec::new(), art: Default::default(), tris: Vec::new() };
     let mut bbox = BBox::empty();
     let mut n_units = 0;
     for data in units {
@@ -746,7 +760,18 @@ fn convert_symbol(name: &str, prefix: &str, units: &[&Value], tidy: bool) -> Opt
     }
     // one plain box: redraw it in KiCad library style (power up, ground down, ports in order)
     let mut tidied = false;
+    let mut transistor = None;
     if tidy && n_units == 1 {
+        // a single MOSFET or BJT: KiCad's own transistor symbol, the vendor's pin numbers on its terminals
+        if let Some(t) = super::transistor::redraw(&stats.pins, &stats.tris, prefix, hint) {
+            body = format!("\t\t(symbol {}\n{}\t\t)\n", q(&format!("{name}_1_1")), t.unit);
+            bbox = BBox::empty();
+            bbox.add(t.bbox[0], t.bbox[1]);
+            bbox.add(t.bbox[2], t.bbox[3]);
+            transistor = Some(t.kind);
+        }
+    }
+    if tidy && n_units == 1 && transistor.is_none() {
         if let Some(t) = super::tidy::arrange(&stats.pins, &stats.art, prefix) {
             body = format!("\t\t(symbol {}\n{}\t\t)\n", q(&format!("{name}_1_1")), t.unit);
             bbox = BBox::empty();
@@ -755,15 +780,17 @@ fn convert_symbol(name: &str, prefix: &str, units: &[&Value], tidy: bool) -> Opt
             tidied = true;
         }
     }
+    let is_q = transistor.is_some();
     Some(SymbolOut {
         tidied,
+        transistor,
         name: name.to_string(),
         body,
         units: n_units,
         pins: stats.count,
         bbox: bbox.arr(),
-        hide_pin_names: stats.count > 0 && stats.names_hidden == stats.count,
-        hide_pin_numbers: stats.count > 0 && stats.numbers_hidden == stats.count,
+        hide_pin_names: is_q || stats.count > 0 && stats.names_hidden == stats.count,
+        hide_pin_numbers: is_q || stats.count > 0 && stats.numbers_hidden == stats.count,
     })
 }
 
@@ -1197,10 +1224,11 @@ pub fn clean_maker(s: &str) -> String {
     if head.is_empty() { s.trim().to_string() } else { head.to_string() }
 }
 
-/// Whether imported box symbols are redrawn in KiCad library style.  Off unless the
-/// server runs with `KC_TIDY_SYMBOLS=1`, until the owner has reviewed the results.
+/// Whether imported symbols are redrawn in KiCad library style: box symbols rearranged
+/// ([`super::tidy`]), transistors given KiCad's transistor symbols ([`super::transistor`]).
+/// On unless the server runs with `KC_TIDY_SYMBOLS=0`.
 pub fn tidy_enabled() -> bool {
-    std::env::var("KC_TIDY_SYMBOLS").map(|v| matches!(v.trim(), "1" | "true" | "yes" | "on")).unwrap_or(false)
+    std::env::var("KC_TIDY_SYMBOLS").map(|v| !matches!(v.trim(), "0" | "false" | "no" | "off")).unwrap_or(true)
 }
 
 /// Convert the `result` object of EasyEDA's `/api/products/<Cnnn>/components` answer.
@@ -1210,6 +1238,12 @@ pub fn convert(result: &Value) -> Result<Converted, String> {
 
 /// [`convert`], choosing whether box symbols are tidied ([`super::tidy`]).
 pub fn convert_with(result: &Value, tidy: bool) -> Result<Converted, String> {
+    convert_hinted(result, tidy, "")
+}
+
+/// [`convert_with`], with what the vendor's listing says about the part (description,
+/// category), which tells an N-channel MOSFET from a P-channel one when the listing says so.
+pub fn convert_hinted(result: &Value, tidy: bool, hint: &str) -> Result<Converted, String> {
     let data = result.get("dataStr").ok_or("the vendor answer has no symbol data")?;
     let cpara = data.get("head").and_then(|h| h.get("c_para")).cloned().unwrap_or(Value::Null);
     let title = vstr(result, "title");
@@ -1229,7 +1263,8 @@ pub fn convert_with(result: &Value, tidy: bool) -> Result<Converted, String> {
     if units.is_empty() {
         units.push(data);
     }
-    let symbol = convert_symbol(&name, &prefix, &units, tidy);
+    let hint = format!("{hint} {} {}", vstr(result, "description"), result.get("tags").map(|t| t.to_string()).unwrap_or_default());
+    let symbol = convert_symbol(&name, &prefix, &units, tidy, &hint);
 
     let pkg = result.get("packageDetail");
     let pkg_data = pkg.and_then(|p| p.get("dataStr"));
@@ -1273,7 +1308,7 @@ pub fn symbol_sexpr(sym: &SymbolOut, reference: &str, value: &str, footprint: &s
     if sym.hide_pin_numbers {
         o.push_str("\t\t(pin_numbers (hide yes))\n");
     }
-    o.push_str(&format!("\t\t(pin_names (offset 1.016){})\n", if sym.hide_pin_names { " (hide yes)" } else { "" }));
+    o.push_str(&format!("\t\t(pin_names (offset {}){})\n", if sym.transistor.is_some() { "0" } else { "1.016" }, if sym.hide_pin_names { " (hide yes)" } else { "" }));
     o.push_str("\t\t(exclude_from_sim no)\n\t\t(in_bom yes)\n\t\t(on_board yes)\n");
     let prop = |name: &str, val: &str, y: f64, hide: bool| {
         format!(
@@ -1286,8 +1321,15 @@ pub fn symbol_sexpr(sym: &SymbolOut, reference: &str, value: &str, footprint: &s
     };
     // 50 mil grid, clear of the body
     let snap = |v: f64| (v / 1.27).round() * 1.27;
-    o.push_str(&prop("Reference", reference, snap(y1 + 2.54), false));
-    o.push_str(&prop("Value", value, snap(y0 - 2.54), false));
+    if sym.transistor.is_some() {
+        // beside the symbol, as KiCad's Device:Q_* have them
+        for (k, v, y) in [("Reference", reference, 1.27), ("Value", value, -1.27)] {
+            o.push_str(&format!("\t\t(property {} {} (at 5.08 {} 0) (effects (font (size 1.27 1.27)) (justify left)))\n", q(k), q(v), fnum(y)));
+        }
+    } else {
+        o.push_str(&prop("Reference", reference, snap(y1 + 2.54), false));
+        o.push_str(&prop("Value", value, snap(y0 - 2.54), false));
+    }
     o.push_str(&prop("Footprint", footprint, snap(y0 - 5.08), true));
     o.push_str(&prop("Datasheet", if datasheet.is_empty() { "~" } else { datasheet }, snap(y0 - 7.62), true));
     o.push_str(&prop("Description", description, snap(y0 - 10.16), true));
@@ -1395,7 +1437,7 @@ mod tests {
                 "P~show~0~2~430~290~0~gge6~0^^430~290^^M 430 290 h -10~#880000^^1~416~294~0~OUT~end~~~#0000FF^^1~420~289~0~2~start~~~#0000FF^^0~423~290^^0~M 420 287 L 417 290 L 420 293"
             ]
         });
-        let sym = convert_symbol("T", "U", &[&data], false).unwrap();
+        let sym = convert_symbol("T", "U", &[&data], false, "").unwrap();
         assert_eq!(sym.pins, 2);
         // left pin: 30 units left of the origin, runs toward +x
         assert!(sym.body.contains("(at -7.62 2.54 0) (length 2.54) (name \"VCC\""), "{}", sym.body);
@@ -1555,7 +1597,7 @@ mod fixture_tests {
                 let Some(s) = c.symbol.as_ref() else { continue };
                 let sx = symbol_sexpr(s, &c.prefix, &c.name, "", "", "", &[]);
                 std::fs::write(format!("{out}/{stem}.{tag}.kicad_sym"), &sx).unwrap();
-                println!("TIDY {stem} {} {tag} tidied={} pins={}", c.name, s.tidied, s.pins);
+                println!("TIDY {stem} {} {tag} tidied={} transistor={:?} pins={}", c.name, s.tidied, s.transistor, s.pins);
             }
         }
     }

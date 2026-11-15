@@ -21,6 +21,7 @@
 
 pub mod easyeda;
 pub mod tidy;
+pub mod transistor;
 pub mod vendors;
 
 use std::io::{Cursor, Write};
@@ -440,7 +441,8 @@ struct Drawings {
 /// Convert the cached vendor drawing data into KiCad library items for library `lib`.
 fn drawings(info: &PartInfo, src: &PartRow, lib: &str) -> Option<Drawings> {
     let raw = src.cad_raw.as_ref()?;
-    let conv = easyeda::convert(raw).ok()?;
+    let hint = format!("{} {} {}", info.description, info.category, info.mpn);
+    let conv = easyeda::convert_hinted(raw, easyeda::tidy_enabled(), &hint).ok()?;
     let fields = part_fields(info, Some(&src.vendor_id));
     let fp_ref = conv.footprint.as_ref().map(|f| format!("{lib}:{}", f.name)).unwrap_or_default();
     let datasheet = if info.datasheet.is_empty() { conv.datasheet.clone() } else { info.datasheet.clone() };

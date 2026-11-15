@@ -645,8 +645,8 @@ pub fn arrange(pins: &[RawPin], art: &Art, prefix: &str) -> Option<Tidied> {
     let (nt, nb) = (top.len(), bottom.len());
     let side_need = lr_name_w(wl) + lr_name_w(wr) + G;
     // the width that keeps the top and bottom pins' names clear of the side names
-    // (the top and bottom pins sit centred, so the wider side decides; 1.9 mm keeps the vertical names apart)
-    let clear_w = |n: usize| if n == 0 { 0.0 } else { 2.0 * lr_name_w(wl).max(lr_name_w(wr)) + span(n) + 2.0 * 1.9 };
+    // (the top and bottom pins sit centred, so the wider side decides; 3.2 mm keeps the vertical names well apart)
+    let clear_w = |n: usize| if n == 0 { 0.0 } else { 2.0 * lr_name_w(wl).max(lr_name_w(wr)) + span(n) + 2.0 * 3.2 };
     let base_w = side_need.max(span(nt) + 2.0 * G).max(span(nb) + 2.0 * G).max(5.08 * 2.0);
     let rows = left.len().max(right.len());
     let has_sides = rows > 0;
@@ -660,7 +660,7 @@ pub fn arrange(pins: &[RawPin], art: &Art, prefix: &str) -> Option<Tidied> {
         }
         let widen = (clear_w(n) - w).max(0.0);
         let lower = (vert(d) - G).max(0.0);
-        if widen <= lower * 1.5 {
+        if widen <= lower * 0.5 {
             w = w.max(clear_w(n));
         } else if is_top {
             top_m = vert(d);
