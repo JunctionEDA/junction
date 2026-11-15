@@ -570,7 +570,8 @@ function show(x: number, y: number, mm: Mm, clarify: boolean): void {
  */
 export function openContextMenu(ev: { clientX: number; clientY: number }): void {
   if (!E.kdoc || state.view !== "editor") return;
-  if (window.KDialogs && window.KDialogs.isOpen()) return;
+  // a modal dialog takes the input; a modeless pane (PCB_VERTEX_EDITOR_PANE, Find, DRC) leaves the canvas menu working
+  if (window.KDialogs && (window.KDialogs.isModalOpen ? window.KDialogs.isModalOpen() : window.KDialogs.isOpen())) return;
   const mm = worldMm(ev);
   E.lastCursorMm = mm;
   if ((E.tool === "select" || E.tool === "highlight") && !interactionBusy() && tableMenu.pick(mm)) { /* a table cell under the cursor (selectPoint collects cells) */ }

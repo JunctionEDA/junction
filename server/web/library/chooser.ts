@@ -143,12 +143,13 @@ function loadFpFilterPrefs(): { pins: boolean; filters: boolean } {
 }
 function saveFpFilterPrefs(v: { pins: boolean; filters: boolean }): void { try { localStorage.setItem(FP_FILTER_KEY, JSON.stringify(v)); } catch { /* no storage */ } }
 
-/** Open the chooser; resolves with the chosen item (its s-expression fetched) or null on Cancel. */
+/** LIB_TREE_MODEL_ADAPTER::SORT_MODE: best match or alphabetic, kept per browser. */
 type SortMode = "best" | "alpha";
 const SORT_KEY = "kui.libtree.sort";
 function loadSortMode(): SortMode { try { return localStorage.getItem(SORT_KEY) === "alpha" ? "alpha" : "best"; } catch (e) { return "best"; } }
 function saveSortMode(m: SortMode): void { try { localStorage.setItem(SORT_KEY, m); } catch (e) { /* no storage */ } }
 
+/** Open the chooser; resolves with the chosen item (its s-expression fetched) or null on Cancel. */
 export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOptions = {}): Promise<Chosen | null> {
   if (openDialog) openDialog.close();
   ensureCss();
@@ -196,7 +197,9 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
     if (opts.viewOnly) { okBtn.disabled = true; okBtn.title = "This document is read-only"; }
     if (opts.filter) { input.value = opts.filter; filterBox.classList.add("has-text"); }
 
-    // LIB_TREE's sort button (config): Sort by Best Match / Sort Alphabetically, then Expand All / Collapse All
+    // LIB_TREE's sort button (config): Sort by Best Match / Sort Alphabetically, then Expand All / Collapse All.  The
+    // last two are wxMenu::Append( id, ACTIONS::expandAll.GetMenuItem() ): GetMenuItem() is only the label (with the
+    // action's hotkey, which these have none of), so the rows carry no bitmap
     let sortMode = loadSortMode();
     const gear = $<HTMLButtonElement>(".klib-gear"); gear.append(kicadIcon("config", 16));
     gear.addEventListener("click", () => {

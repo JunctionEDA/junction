@@ -10,10 +10,10 @@
 import { type DialogCtx, type DialogItem, type ItemOpts, TITLES, openField, openItem, openNew } from "./items";
 import { fieldAt, fieldEffects, fieldHidden, fieldLayer, fieldNode, fieldText, fieldUnlocked, setFieldAt, setFieldEffects, setFieldHidden, setFieldLayer, setFieldText, setFieldUnlocked } from "./fields";
 import { exportToNode, root } from "../root";
-import { close, isOpen, open } from "./shell";
+import { close, isModalOpen, isOpen, open } from "./shell";
 import { ensureCss, grid, notebook, staticBox, treebook } from "./widgets";
 
-const kdialogs = { open, close, openItem, openNew, openField, isOpen, TITLES, notebook, treebook, grid, staticBox, ensureCss,
+const kdialogs = { open, close, openItem, openNew, openField, isOpen, isModalOpen, TITLES, notebook, treebook, grid, staticBox, ensureCss,
   _: { fieldNode, fieldEffects, setFieldEffects, fieldAt, setFieldAt, fieldHidden, setFieldHidden, fieldUnlocked, setFieldUnlocked, fieldLayer, setFieldLayer, fieldText, setFieldText } };
 
 /** window.KDialogs: this script's API plus the hooks other bundles hang on it (they are asked first). */

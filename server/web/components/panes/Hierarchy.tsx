@@ -12,7 +12,8 @@ import { ContextMenu, Twist, pdispatch, useContextMenu, usePanels, type MenuItem
 const BODY = "kbody ktree overflow-auto min-h-0 flex-auto py-1 bg-paper text-sm";
 const NODE = "node flex items-center h-[20px] pr-1.5 cursor-default whitespace-nowrap hover:bg-panel cur:bg-sel cur:font-semibold";
 
-// LAYER_BRIGHTENED in the default schematic theme (builtin_color_themes.h CSS_COLOR( 255, 0, 255, 1 ))
+// LAYER_BRIGHTENED of the default schematic theme (builtin_color_themes.h CSS_COLOR( 255, 0, 255, 1 )), until the
+// editor publishes the current theme's
 const BRIGHTENED = "#FF00FF";
 
 function allPaths(n: HierNode, out: string[] = []): string[] { if (n.children.length) out.push(n.path); for (const c of n.children) allPaths(c, out); return out; }
@@ -20,6 +21,7 @@ function allPaths(n: HierNode, out: string[] = []): string[] { if (n.children.le
 export function HierarchyPane() {
   const root = usePanels((s) => s.hierarchy.root);
   const marked = usePanels((s) => s.hierarchy.marked);
+  const markColor = usePanels((s) => s.hierarchy.markColor) || BRIGHTENED;
   const viewOnly = useApp((s) => s.viewOnly);
   const [closed, setClosed] = useState<Set<string>>(() => new Set());
   const menu = useContextMenu();
@@ -43,8 +45,8 @@ export function HierarchyPane() {
     const open = !closed.has(n.path);
     return (
       <div key={n.path}>
-        {/* a sheet holding the highlighted net: LAYER_BRIGHTENED text (the schematic theme's "brightened", magenta) */}
-        <div className={cx(NODE, n.current && "cur", !n.docId && "text-ink-3")} style={{ paddingLeft: 4 + depth * 14, color: marked && marked.includes(n.path) ? BRIGHTENED : undefined }}
+        {/* a sheet holding the highlighted net: LAYER_BRIGHTENED text (the schematic theme's "brightened") */}
+        <div className={cx(NODE, n.current && "cur", !n.docId && "text-ink-3")} style={{ paddingLeft: 4 + depth * 14, color: marked && marked.includes(n.path) ? markColor : undefined }}
           data-doc={n.docId || undefined} data-path={n.path} data-net-mark={marked && marked.includes(n.path) ? "" : undefined} title={n.file}
           onClick={() => pdispatch({ t: "hierOpen", path: n.path })} onContextMenu={(ev) => menu.open(ev, items(n))}>
           <Twist open={open} leaf={!n.children.length} onToggle={() => toggle(n.path)} />

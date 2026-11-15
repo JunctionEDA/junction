@@ -19,7 +19,8 @@ import { chooseFootprint, noFileBrowsing, openDatasheet } from "../../dialogs/br
 import { chooserFilters, datasheetLink, type FpChooserFilters } from "../../library/fpchoice";
 import { toast } from "../util";
 import { colorText, parseColorText } from "../../components/panes/prop-text";
-import { PIN_MAP_VERSION, readOverride, readPinMaps } from "../../dialogs/sym-props-logic";
+import { PIN_MAP_VERSION, activeAssociatedFootprint, associatedFootprints, defaultOverride, effectivePadNumber, readOverride, readPinMaps, writeOverride, type PinMapMode, type PinMapOverride } from "../../dialogs/sym-props-logic";
+import { expandStacked } from "../../symedit/model";
 
 type Raw = string | number | boolean | null;
 interface PropDef {
@@ -191,11 +192,13 @@ function symbolProps(it: KItem, doc: KDoc): PropDef[] {
   return out;
 }
 /**
- * SCH_SYMBOL's "Pin Map Mode" / "Pin Map Name" (the symbol's pin_map_override), shown for a symbol whose library
- * symbol carries pin maps in a file new enough to hold them; they are changed through the Pin Map page that the
- * category's "Edit Pin Map..." button opens.
+ * SCH_SYMBOL::GetDynamicProperties' "Pin Map" category (Pin Map Footprint, Pin Map Mode, Pin Map Name) and its
+ * "Effective Pin Map" rows (one read-only "Pin <n>" per pin of the instance's unit), shown for a symbol whose library
+ * symbol has an associated footprint (HasEffectiveAssociatedFootprint) in a file new enough to hold pin maps.  The
+ * category's "Edit Pin Map..." button opens the Symbol Properties dialog's Pin Map page.
  */
-const PIN_MAP_MODES: [string, string][] = [["library_default", "Library Default"], ["named_map", "Named Map"], ["identity", "Identity"], ["delegate", "Delegate"]];
+/** SCH_SYMBOL_PIN_MAP_MODE_PROPERTY::BuildChoices: DELEGATE_TO_UNIT_1 is internal and never offered. */
+const PIN_MAP_MODES: [string, string][] = [["library_default", "Library default"], ["named_map", "Named map"], ["identity", "Identity"]];
 function ownLibOf(doc: KDoc, n: SNode): SNode | null {
   const h = H(), name = h.str((h.kid(n, "lib_name") || [])[1]) || h.str((h.kid(n, "lib_id") || [])[1]);
   const lib = (doc as KDoc & { lib?: Map<string, SNode> }).lib;
@@ -203,14 +206,63 @@ function ownLibOf(doc: KDoc, n: SNode): SNode | null {
 }
 export function hasPinMaps(doc: KDoc, it: KItem): boolean {
   if (it.kind !== "symbol" || (Number((doc as KDoc & { version?: number }).version) || 0) < PIN_MAP_VERSION) return false;
-  const lib = ownLibOf(doc, it.node); return !!lib && readPinMaps(lib).maps.length > 0;
+  return associatedFootprints(ownLibOf(doc, it.node)).length > 0;
+}
+const symUnit = (n: SNode): number => { const k = H().kid(n, "unit"); return k ? H().num(k[1], 1) : 1; };
+const footprintFieldOf = (n: SNode): string => { const f = H().fieldList(n).find((q) => H().str(q[1]) === "Footprint"); return f ? H().str(f[2]) : ""; };
+/** SCH_SYMBOL::GetPinMapOverride: units 2..N that delegate follow unit 1's record (resolveDelegatedPinMapOverride). */
+function pinMapOverride(doc: KDoc, it: KItem): PinMapOverride {
+  const o = readOverride(it.node) || defaultOverride(); if (o.mode !== "delegate") return o;
+  const ref = String(it.ref || "").toLowerCase();
+  for (const sib of doc.items.values()) {
+    if (sib === it || sib.kind !== "symbol" || symUnit(sib.node) !== 1 || String(sib.ref || "").toLowerCase() !== ref) continue;
+    const u1 = readOverride(sib.node) || defaultOverride(); return u1.mode === "delegate" ? defaultOverride() : u1;
+  }
+  return defaultOverride();
+}
+/** SCH_SYMBOL::GetPins: the library pins of the instance's unit and body style (plus the common ones). */
+function instancePinNumbers(lib: SNode, n: SNode): string[] {
+  const h = H(), unit = symUnit(n), bk = h.kid(n, "body_style") || h.kid(n, "convert"), body = bk ? h.num(bk[1], 1) : 1, out: string[] = [];
+  for (const u of h.kids(lib, "symbol")) {
+    const m = /_(\d+)_(\d+)$/.exec(h.str(u[1])); if (!m) continue;
+    if ((+m[1] !== 0 && +m[1] !== unit) || (+m[2] !== 0 && +m[2] !== body)) continue;
+    for (const p of h.kids(u, "pin")) { const k = h.kid(p, "number"); out.push(k ? h.str(k[1]) : ""); }
+  }
+  return out;
 }
 function pinMapProps(it: KItem, doc: KDoc): PropDef[] {
   if (!hasPinMaps(doc, it)) return [];
-  return [
-    { group: "Pin Map", name: "Pin Map Mode", type: "enum", choices: PIN_MAP_MODES, get: (x) => { const o = readOverride(x.node); return o ? o.mode : "library_default"; } },
-    { group: "Pin Map", name: "Pin Map Name", type: "text", get: (x) => { const o = readOverride(x.node); return o ? o.map : ""; } },
+  const G = "Pin Map", lib = ownLibOf(doc, it.node) as SNode;
+  const names = readPinMaps(lib).maps.map((m) => m.name);
+  const out: PropDef[] = [
+    { group: G, name: "Pin Map Footprint", type: "text", get: (x) => { const a = activeAssociatedFootprint(lib, footprintFieldOf(x.node)); return a ? a.footprint : ""; } },
+    { group: G, name: "Pin Map Mode", type: "enum", choices: PIN_MAP_MODES, get: (x) => { const m = pinMapOverride(doc, x).mode; return m === "delegate" ? "library_default" : m; },
+      set: (n, v, x) => {
+        const o = pinMapOverride(doc, x); o.mode = String(v) as PinMapMode;
+        // the active map name is seeded from the active associated footprint when switching to a named map
+        if (o.mode === "named_map" && !o.map) { const a = activeAssociatedFootprint(lib, footprintFieldOf(n)); if (a) o.map = a.map; }
+        writeOverride(n, o);
+      } },
   ];
+  if (names.length > 1) out.push({ group: G, name: "Pin Map Name", type: "enum", choices: names.map((m) => [m, m] as [string, string]),
+    get: (x) => {
+      const o = pinMapOverride(doc, x); let active = o.mode === "named_map" ? o.map : "";
+      if (!names.includes(active)) { const a = activeAssociatedFootprint(lib, footprintFieldOf(x.node)); if (a) active = a.map; }
+      return names.includes(active) ? active : names[0];
+    },
+    set: (n, v, x) => { if (!names.includes(String(v))) return false; const o = pinMapOverride(doc, x); o.mode = "named_map"; o.map = String(v); writeOverride(n, o); } });
+  // one read-only row per (stacked) pin number: the pad its pin resolves to
+  const seen = new Set<string>();
+  for (const pin of instancePinNumbers(lib, it.node)) {
+    for (const number of expandStacked(pin).pins) {
+      if (!number || seen.has(number)) continue; seen.add(number);
+      out.push({ group: "Effective Pin Map", name: "Pin " + number, type: "text", get: (x) => {
+        const pad = effectivePadNumber(lib, pinMapOverride(doc, x), footprintFieldOf(x.node), pin);
+        return pad === number ? `${pad} (identity)` : pad;
+      } });
+    }
+  }
+  return out;
 }
 function schLineProps(it: KItem): PropDef[] {
   const pt = (name: string, end: boolean, i: 0 | 1): PropDef => ({ group: BASIC, name, type: "coord",

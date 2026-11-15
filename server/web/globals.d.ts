@@ -280,6 +280,8 @@ interface KDialogsApi {
   openItem(ctx: ToolCtx, item: KItem, opts?: unknown): unknown;
   openField(ctx: ToolCtx, item: KItem, name: string): unknown;
   isOpen(): boolean;
+  /** a modal dialog is open (modeless ones leave the canvas and its context menu working) */
+  isModalOpen?(): boolean;
   TITLES: Record<string, string>;
   _: Record<string, unknown>;
   schProperties?(): boolean;

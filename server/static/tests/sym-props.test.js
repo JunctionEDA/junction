@@ -105,6 +105,23 @@ test("pin maps: read, edit (identity not stored), rename-safe write in KiCad's o
   const ov = P.readOverride(N(`(symbol (pin_map_override (mode named_map) (map "SOT23") (edit "1" "2")))`));
   assert.deepStrictEqual([ov.mode, ov.map, Array.from(ov.edits)], ["named_map", "SOT23", [["1", "2"]]]);
 });
+test("Properties pin map: active footprint, effective pads, override written after (dnp) and dropped when default", () => {
+  const lib = N(`(symbol "Q:NPN" (associated_footprints (footprint "P:TO-92" (map "TO92")) (footprint "P:SOT-23" (map "SOT23"))) (pin_maps (pin_map "TO92" (entry "1" "3") (entry "3" "1")) (pin_map "SOT23" (entry "2" "1"))))`);
+  assert.strictEqual(P.activeAssociatedFootprint(lib, "P:SOT-23").map, "SOT23");
+  assert.strictEqual(P.activeAssociatedFootprint(lib, "Other:X").footprint, "P:TO-92", "no match: the first association");
+  const dflt = P.defaultOverride();
+  assert.strictEqual(P.effectivePadNumber(lib, dflt, "P:TO-92", "1"), "3");
+  assert.strictEqual(P.effectivePadNumber(lib, dflt, "Other:X", "1"), "1", "library default resolves through the footprint only");
+  assert.strictEqual(P.effectivePadNumber(lib, { mode: "named_map", map: "SOT23", edits: new Map() }, "P:TO-92", "2"), "1");
+  assert.strictEqual(P.effectivePadNumber(lib, { mode: "identity", map: "", edits: new Map([["1", "9"]]) }, "P:TO-92", "1"), "1", "identity ignores edits");
+  assert.strictEqual(P.effectivePadNumber(lib, { mode: "library_default", map: "", edits: new Map([["1", "9"]]) }, "P:TO-92", "1"), "9");
+  const sym = N(`(symbol (lib_id "Q:NPN") (in_bom yes) (on_board yes) (dnp no) (uuid "u"))`);
+  P.writeOverride(sym, { mode: "named_map", map: "SOT23", edits: new Map() });
+  assert.ok(S(sym).includes('(dnp no) (pin_map_override (mode named_map) (map "SOT23")) (uuid'), S(sym));
+  P.writeOverride(sym, { mode: "identity", map: "SOT23", edits: new Map() });
+  assert.ok(S(sym).includes("(pin_map_override (mode identity))"), "the map name only in named-map mode: " + S(sym));
+  P.writeOverride(sym, dflt); assert.ok(!S(sym).includes("pin_map_override"), S(sym));
+});
 const L = load("dialogs/sch-items-logic.ts");
 test("ChangeSheetFile linking an existing file: new sheet path instances with the annotation cleared, sub-sheets paged", () => {
   const doc = K.parseDoc(`(kicad_sch (version 20250114) (generator "eeschema") (uuid "sub-uuid") (paper "A4") (lib_symbols)

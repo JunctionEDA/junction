@@ -85,7 +85,7 @@ export function publishHierarchy(): void {
   let root: HierNode | null = null;
   try { root = build(); } catch (e) { console.warn(e); }
   const h = panelStore.get().hierarchy;
-  panelStore.set({ hierarchy: { root, version: h.version + 1, marked: h.marked } });
+  panelStore.set({ hierarchy: { root, version: h.version + 1, marked: h.marked, markColor: h.markColor } });
 }
 
 /** The human sheet path of a tree path ("/" for the root, "/Sub/Inner/" below it), as the net map names instances. */

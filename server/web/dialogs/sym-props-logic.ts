@@ -190,3 +190,33 @@ export function readOverride(n: SNode): { mode: PinMapMode; map: string; edits: 
   const m = kid(o, "mode"), mp = kid(o, "map"); const edits = new Map<string, string>(); for (const e of kids(o, "edit")) edits.set(str(e[1]), str(e[2]));
   return { mode: (m ? str(m[1]) : "library_default") as PinMapMode, map: mp ? str(mp[1]) : "", edits };
 }
+export type PinMapOverride = NonNullable<ReturnType<typeof readOverride>>;
+export const defaultOverride = (): PinMapOverride => ({ mode: "library_default", map: "", edits: new Map() });
+/** formatPinMapOverride: omitted when IsDefault (library default, no edits); the map name only in named-map mode;
+ *  written after (dnp …). */
+export function writeOverride(n: SNode, o: PinMapOverride): void {
+  drop(n, "pin_map_override");
+  if (o.mode === "library_default" && !o.edits.size) return;
+  const node = parse("(pin_map_override (mode " + o.mode + ")" + (o.mode === "named_map" && o.map ? " (map " + q(o.map) + ")" : "")
+    + Array.from(o.edits).map(([pin, pad]) => " (edit " + q(pin) + " " + q(pad) + ")").join("") + ")");
+  const at = n.findIndex((c, j) => j > 0 && isList(c) && c[0] === "dnp");
+  if (at > 0) n.splice(at + 1, 0, node); else put(n, "pin_map_override", node.slice(1), ["passthrough", "locked", "fields_autoplaced", "uuid", "property"]);
+}
+/** LIB_SYMBOL::GetEffectiveAssociatedFootprints, in file order. */
+export function associatedFootprints(lib: SNode | null): { footprint: string; map: string }[] {
+  const af = lib && kid(lib, "associated_footprints"); if (!af) return [];
+  return kids(af, "footprint").map((f) => { const m = kid(f, "map"); return { footprint: str(f[1]), map: m ? str(m[1]) : "" }; });
+}
+/** activeAssociatedFootprint (sch_symbol.cpp): the one whose footprint is the symbol's Footprint field, else the first. */
+export function activeAssociatedFootprint(lib: SNode | null, footprintField: string): { footprint: string; map: string } | null {
+  const af = associatedFootprints(lib); return af.find((a) => a.footprint === footprintField) || af[0] || null;
+}
+/** SCH_PIN::GetEffectivePadNumber with no footprint pads (the painter / Properties path): a named map, else the map
+ *  associated with the symbol's footprint, patched by the instance's edits unless identity is forced. */
+export function effectivePadNumber(lib: SNode | null, o: PinMapOverride, footprintField: string, pinNumber: string): string {
+  const st = readPinMaps(lib); let map: PinMap | undefined;
+  if (o.mode === "named_map") map = st.maps.find((m) => m.name === o.map);
+  if (!map && o.mode !== "identity") { const a = associatedFootprints(lib).find((x) => x.footprint === footprintField); if (a) map = st.maps.find((m) => m.name === a.map); }
+  if (o.mode !== "identity" && o.edits.has(pinNumber)) return o.edits.get(pinNumber) as string;
+  return map && map.entries.has(pinNumber) ? map.entries.get(pinNumber) as string : pinNumber;
+}

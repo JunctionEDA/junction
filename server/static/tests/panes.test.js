@@ -80,6 +80,11 @@ test("Symbol Editor selection filter: Only <kind>, All items", () => {
   assert.ok(!SF.symAllChecked(f) && SF.symPasses(f, "arc") && !SF.symPasses(f, "pin"));
   f = SF.symSetFilter(f, "all", true); assert.ok(SF.symAllChecked(f));
   f = SF.symSetFilter(f, "text", false); assert.ok(!SF.symPasses(f, "property") && !SF.symAllChecked(f));
+  // Locked items is special: All items neither sets it nor depends on it (SCH_SELECTION_FILTER_OPTIONS::All).
+  f = SF.symSetFilter(SF.defaultSymFilter(), "lockedItems", false); assert.ok(SF.symAllChecked(f));
+  f = SF.symSetFilter(f, "all", false); assert.strictEqual(f.lockedItems, false);
+  f = SF.symSetFilter(f, "all", true); assert.ok(f.lockedItems === false && SF.symAllChecked(f));
+  f = SF.symSetFilter(SF.defaultSymFilter(), "all", false); assert.strictEqual(f.lockedItems, true);
 });
 
 test("net inspector column order: saved order first, unnamed columns after in model order", () => {

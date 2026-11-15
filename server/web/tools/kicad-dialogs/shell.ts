@@ -11,6 +11,8 @@ interface OpenDialog { ov: HTMLElement; dlg: HTMLElement; body: HTMLElement; spe
 const stack: OpenDialog[] = [];
 const top = (): OpenDialog | null => (stack.length ? stack[stack.length - 1] : null);
 export const isOpen = (): boolean => stack.length > 0;
+/** A modal dialog is open: a modeless one (a floating pane such as Edit Vertices, Find, DRC) leaves the canvas live. */
+export const isModalOpen = (): boolean => stack.some((d) => !d.spec.modeless);
 export function el(tag: string, cls?: string, html?: string): HTMLElement { const e = document.createElement(tag); if (cls) e.className = cls; if (html !== undefined) e.innerHTML = html; return e; }
 /** Close one dialog and the child windows it opened (a wxWindow's children go with it). */
 function closeEntry(d: OpenDialog): void { const i = stack.indexOf(d); if (i < 0) return; for (const x of stack.splice(i).reverse()) x.ov.remove(); }

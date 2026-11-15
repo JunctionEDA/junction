@@ -122,6 +122,8 @@ export function SearchPane() {
     { label: "Zoom to Selection", title: "Toggle zooming to selections in the search pane", icon: "zoom_fit_to_objects", check: settings.zoom === "zoom", run: () => setting({ zoom: settings.zoom === "zoom" ? "none" : "zoom" }) },
     { label: "Pan to Selection", title: "Toggle panning to selections in the search pane", icon: "zoom_center_on_screen", check: settings.zoom === "pan", run: () => setting({ zoom: settings.zoom === "pan" ? "none" : "pan" }) },
     "-",
+    // BITMAPS::invisible_text: KiCad registers no artwork for it (common/bitmap_info.cpp, resources/bitmaps_png), so
+    // its menu shows the image-not-found placeholder; the icon pack has nothing to draw
     { label: "Search Hidden Fields", check: settings.hidden, run: () => setting({ hidden: !settings.hidden }) },
     { label: "Search Metadata", title: "Search library links, descriptions and keywords", icon: "library", check: settings.metadata, run: () => setting({ metadata: !settings.metadata }) },
   ];
@@ -142,7 +144,7 @@ export function SearchPane() {
         <span className="ml-auto self-center pr-2 text-ink-3 text-xs" data-search-count>{result.total > rows.length ? `${rows.length} of ${result.total}` : `${result.total}`}</span>
       </div>
       <div ref={list} className="flex-auto min-h-0 overflow-auto outline-none focus-visible:shadow-[inset_0_0_0_1px_var(--color-blue)]" tabIndex={0} data-search-list onKeyDown={onListKey}
-        onContextMenu={(ev) => menu.open(ev, [{ label: "Copy", icon: "copy", disabled: !sel.length, run: copySel }])}>
+        onContextMenu={(ev) => menu.open(ev, [{ label: "Copy", run: copySel }])}>{/* SEARCH_PANE_LISTVIEW::OnContextMenu: a plain wxID_COPY, always enabled */}
         <table className="border-collapse text-sm table-fixed select-none" style={{ width: colW.reduce((a, b) => a + b, 0) || undefined }} data-search-table={active}>
           <colgroup>{colW.map((w, i) => <col key={i} style={{ width: w }} />)}</colgroup>
           <thead>

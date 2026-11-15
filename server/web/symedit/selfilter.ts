@@ -20,12 +20,12 @@ export function symFilterClass(type: string): SymFilterKey {
   return "otherItems";
 }
 export function symPasses(f: SymSelFilter, type: string): boolean { return f[symFilterClass(type)]; }
-/** "All items" is checked when every kind is (PANEL_SCH_SELECTION_FILTER::setCheckboxStatesFromOptions). */
-export function symAllChecked(f: SymSelFilter): boolean { return SYM_FILTER_KINDS.every((k) => f[k]) && f.lockedItems; }
-/** onAllItemsCheckbox / a kind's checkbox / onPopupSelection ("Only <kind>"). */
+/** "All items" is checked when every kind is (SCH_SELECTION_FILTER_OPTIONS::All); Locked items is special and left out. */
+export function symAllChecked(f: SymSelFilter): boolean { return SYM_FILTER_KINDS.every((k) => f[k]); }
+/** PANEL_SCH_SELECTION_FILTER::OnFilterChanged / onPopupSelection ("Only <kind>"): neither touches Locked items. */
 export function symSetFilter(f: SymSelFilter, key: SymFilterKey | "all" | `only:${SymFilterKey}`, on: boolean): SymSelFilter {
   const n = { ...f };
-  if (key === "all") { for (const k of SYM_FILTER_KINDS) n[k] = on; n.lockedItems = on; return n; }
+  if (key === "all") { for (const k of SYM_FILTER_KINDS) n[k] = on; return n; }
   if (key.startsWith("only:")) { const only = key.slice(5) as SymFilterKey; for (const k of SYM_FILTER_KINDS) n[k] = k === only; return n; }
   n[key as SymFilterKey] = on; return n;
 }

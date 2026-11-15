@@ -88,11 +88,14 @@ export function netSheetPaths(name: string | null): string[] {
   }
   return [...out].sort();
 }
+/** The render settings' LAYER_BRIGHTENED colour, which follows the schematic colour theme. */
+const brightened = (): string => (typeof KiCadCanvas !== "undefined" && KiCadCanvas.SCH && KiCadCanvas.SCH.brightened) || "#FF00FF";
 function publishNetSheets(): void {
-  const marked = netSheetPaths(HL.name || null), h = panelStore.get().hierarchy;
-  if ((h.marked || []).join("\n") !== marked.join("\n")) panelStore.set({ hierarchy: Object.assign({}, h, { marked }) });
+  const marked = netSheetPaths(HL.name || null), markColor = brightened(), h = panelStore.get().hierarchy;
+  if ((h.marked || []).join("\n") !== marked.join("\n") || h.markColor !== markColor) panelStore.set({ hierarchy: Object.assign({}, h, { marked, markColor }) });
 }
-export function netNavSignature(): string { return (HL.name || "-") + (HL.busMembers ? "+" : "") + (HL.nav ? HL.nav.id + (HL.nav.pin || "") : ""); }
+/** What the net navigator and the hierarchy marks follow: the highlighted net, the navigator's item, the theme's brightened colour. */
+export function netNavSignature(): string { return (HL.name || "-") + (HL.busMembers ? "+" : "") + (HL.nav ? HL.nav.id + (HL.nav.pin || "") : "") + "|" + brightened(); }
 
 export function netNavDispatch(a: PanelAction): boolean {
   if (a.t === "netNavRefresh") { publishNetNav(); return true; }

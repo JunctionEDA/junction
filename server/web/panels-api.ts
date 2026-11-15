@@ -87,8 +87,9 @@ export interface NetNavState { root: NetNavNode | null; version: number; selecte
 // ---------------------------------------------------------------- the store
 export interface PanelsState {
   appearance: AppearanceState;
-  /** marked: the paths of the sheets holding the highlighted net (HIERARCHY_PANE::UpdateNetHighlight) */
-  hierarchy: { root: HierNode | null; version: number; marked?: string[] };
+  /** marked: the paths of the sheets holding the highlighted net (HIERARCHY_PANE::UpdateNetHighlight), drawn in
+   *  markColor: the schematic theme's LAYER_BRIGHTENED */
+  hierarchy: { root: HierNode | null; version: number; marked?: string[]; markColor?: string };
   netNav: NetNavState;
   /** bumped when the selection (the app's or a tool module's) or the units change: the Properties pane re-reads */
   selVersion: number;
