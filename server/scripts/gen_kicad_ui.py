@@ -159,7 +159,12 @@ def clean_svg(path, prefix):
     inner = "".join(ET.tostring(c, encoding="unicode") for c in root)
     inner = re.sub(r'\s+xmlns(:\w+)?="[^"]*"', "", inner)
     inner = re.sub(r"\s+", " ", inner).strip()
-    return root.get("viewBox", "0 0 24 24"), scope_classes(inner, prefix)
+    # an Inkscape source with no viewBox (small_trash is 16x16, add_barcode 26x26) draws in its own width x height
+    vb = root.get("viewBox")
+    if not vb:
+        num = lambda v: re.sub(r"(px)?$", "", (v or "24").strip())
+        vb = f"0 0 {num(root.get('width'))} {num(root.get('height'))}"
+    return vb, scope_classes(inner, prefix)
 
 
 def collect_icons(names):
