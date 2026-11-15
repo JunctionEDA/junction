@@ -410,13 +410,21 @@ void KICAD_MANAGER_FRAME::offerStandardLibraries()
         {
             std::shared_ptr<bool> alive = m_collabAlive;
 
-            // Look again in a moment (the timer object deletes itself after it fires).
-            new wxCallLater( 1000,
-                    [this, alive]()
+            // Look again in a moment.  The timer is deleted once it has fired, from the event
+            // loop and not from inside its own handler.
+            wxTimer* timer = new wxTimer();
+
+            timer->Bind( wxEVT_TIMER,
+                    [this, alive, timer]( wxTimerEvent& )
                     {
+                        if( wxTheApp )
+                            wxTheApp->CallAfter( [timer]() { delete timer; } );
+
                         if( *alive )
                             offerStandardLibraries();
                     } );
+
+            timer->StartOnce( 1000 );
 
             return;
         }
