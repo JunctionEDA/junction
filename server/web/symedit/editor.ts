@@ -16,6 +16,7 @@ import { messageBox } from "../dialogs/sch-items";
 import { E, appState, api } from "../dialogs/editor";
 import { comboOf } from "../editor/hotkeys";
 import { keyName } from "../keys";
+import { clickMode, hasModifier, modifiersState } from "../editor/selmodes";
 import { fmtCoord, unitName, messageText, unitsMsg, gridChoiceText, loadUnits, saveUnits } from "../units";
 import { toolCursor } from "../editor/cursors";
 import { ensureStyle, icon, meta, showMenu, closeMenus, type MenuEntry } from "./ui";
@@ -122,7 +123,13 @@ export class SymbolEditor {
   private preview: M.Node | null = null;
   private kcache: { key: string; doc: KDoc } | null = null;
   private mouse = { x: 0, y: 0, in: false };           // doc mm (Y down)
-  private drag: { mode: "pan" | "band" | "move" | "zoom" | "pedit"; sx: number; sy: number; x0: number; y0: number; px?: number; py?: number; moved?: boolean; ids?: string[]; handle?: number } | null = null;
+  private drag: { mode: "pan" | "band" | "move" | "zoom" | "pedit"; sx: number; sy: number; x0: number; y0: number; px?: number; py?: number; moved?: boolean; ids?: string[]; handle?: number;
+    /** a press with a modifier (SELECTION_TOOL::hasModifier): released in place it runs selectPoint with this mode on `hit` */
+    click?: { mode: "add" | "toggle" | "remove"; hit: string | null } | null;
+    /** the box's SelectMultiple: m_drag_additive keeps the selection, m_drag_subtractive takes the boxed items out */
+    keep?: boolean; sub?: boolean } | null = null;
+  /** m_disambiguateTimer: a press held still over more than one item opens Clarify Selection */
+  private lpTimer = 0;
   private carry: { ids: string[]; sx: number; sy: number; label: string; amend: boolean; base: string } | null = null;
   /** SYMBOL_EDITOR_DRAWING_TOOLS::TwoClickPlace: a new pin or text follows the cursor (IS_NEW | IS_MOVING) until the second click. */
   private floating: { kind: "pin"; pin: M.PinInfo } | { kind: "text"; node: M.Node; body: number; unit?: number } | null = null;
@@ -1600,7 +1607,7 @@ export class SymbolEditor {
     closeMenus(); this.el.cwrap.focus({ preventScroll: true });
     const [x, y] = this.toDoc(ev.clientX, ev.clientY); this.mouse.x = x; this.mouse.y = y;
     const v = this.view();
-    if (ev.button === 1 || (ev.button === 0 && ev.altKey)) { this.drag = { mode: "pan", sx: ev.clientX, sy: ev.clientY, x0: v.px, y0: v.py }; (ev.target as Element).setPointerCapture(ev.pointerId); ev.preventDefault(); return; }
+    if (ev.button === 1) { this.drag = { mode: "pan", sx: ev.clientX, sy: ev.clientY, x0: v.px, y0: v.py }; (ev.target as Element).setPointerCapture(ev.pointerId); ev.preventDefault(); return; }
     if (ev.button === 2) { this.contextMenu(ev, x, y); return; }
     if (ev.button !== 0) return;
     if (this.tool === "zoom") { this.drag = { mode: "zoom", sx: ev.clientX, sy: ev.clientY, x0: x, y0: y }; (ev.target as Element).setPointerCapture(ev.pointerId); return; }
@@ -1610,13 +1617,22 @@ export class SymbolEditor {
     if (this.floating) { void this.placeFloating(fx, fy); return; }
     switch (this.tool) {
       case "select": {
-        const ph = this.editHandleAt(x, y);
+        // SCH_SELECTION_TOOL (m_isSymbolEditor) with SELECTION_TOOL::setModifiersState
+        const ms = modifiersState(ev), mode = clickMode(ms);
+        // the point editor takes plain presses only; a press with a modifier belongs to the selection tool
+        const ph = hasModifier(ms) ? null : this.editHandleAt(x, y);
         if (ph && !this.readOnly()) { this.drag = { mode: "pedit", sx: ev.clientX, sy: ev.clientY, x0: x, y0: y, ids: [ph.id], handle: ph.h }; (ev.target as Element).setPointerCapture(ev.pointerId); return; }
         const hit = this.hitAt(x, y);
-        if (hit) {
-          if (ev.shiftKey) t.sel.add(hit); else if (ev.ctrlKey || ev.metaKey) { if (t.sel.has(hit)) t.sel.delete(hit); else t.sel.add(hit); } else if (!t.sel.has(hit)) t.sel = new Set([hit]);
+        // Alt (Option): m_skip_heuristics, the Clarify Selection menu whenever more than one item is under the cursor
+        if (ms.skipHeuristics) { const c = this.candidatesAt(x, y); if (c.length > 1) { ev.preventDefault(); this.clarify(ev.clientX, ev.clientY, c, mode); return; } }
+        this.startLongPress(ev, x, y, mode);
+        if (hasModifier(ms)) {
+          // the press only arms: a click runs selectPoint with the modifiers, a drag draws a box whatever it starts on
+          this.drag = { mode: "band", sx: ev.clientX, sy: ev.clientY, x0: x, y0: y, click: { mode: mode!, hit }, keep: ms.dragAdditive || ms.dragSubtractive, sub: ms.dragSubtractive };
+        } else if (hit) {
+          if (!t.sel.has(hit)) t.sel = new Set([hit]);
           this.drag = { mode: "move", sx: ev.clientX, sy: ev.clientY, x0: x, y0: y, ids: [...t.sel] };
-        } else { if (!ev.shiftKey && !ev.ctrlKey) t.sel.clear(); this.drag = { mode: "band", sx: ev.clientX, sy: ev.clientY, x0: x, y0: y }; }
+        } else { t.sel.clear(); this.drag = { mode: "band", sx: ev.clientX, sy: ev.clientY, x0: x, y0: y, keep: false }; }
         (ev.target as Element).setPointerCapture(ev.pointerId);
         this.selChanged(); return;
       }
@@ -1630,6 +1646,7 @@ export class SymbolEditor {
   private onMove(ev: PointerEvent): void {
     const [x, y] = this.toDoc(ev.clientX, ev.clientY); this.mouse.x = x; this.mouse.y = y; this.mouse.in = true;
     const d = this.drag;
+    if (d && this.lpTimer && Math.hypot(ev.clientX - d.sx, ev.clientY - d.sy) > 4) this.cancelLongPress();
     if (d && d.mode === "pan") { const v = this.view(); v.px = d.x0 + ev.clientX - d.sx; v.py = d.y0 + ev.clientY - d.sy; this.paint(); return; }
     if (d && d.mode === "pedit") { this.rectEditPreview(d.ids![0], d.handle!, d.x0, d.y0, x, y); }
     else if (d && d.mode === "move" && !this.readOnly()) {
@@ -1641,8 +1658,15 @@ export class SymbolEditor {
     this.renderStatus(); this.paint();
   }
   private onUp(ev: PointerEvent): void {
+    this.cancelLongPress();
     const d = this.drag; this.drag = null; if (!d) return;
     const [x, y] = this.toDoc(ev.clientX, ev.clientY);
+    // IsClick with a modifier: selectPoint( ..., m_additive, m_subtractive, m_exclusive_or ); nothing under the cursor
+    // leaves the selection as it was
+    if (d.mode === "band" && d.click && Math.hypot(ev.clientX - d.sx, ev.clientY - d.sy) < 4) {
+      const t = this.tab; if (t && d.click.hit) this.pickMode(d.click.hit, d.click.mode);
+      this.paint(); return;
+    }
     if (d.mode === "move" && d.moved) {
       const [fx0, fy0] = this.snapFile(d.x0, d.y0), [fx1, fy1] = this.snapFile(x, y); const ids = d.ids || [];
       this.preview = null; this.kcache = null;
@@ -1660,13 +1684,56 @@ export class SymbolEditor {
       const t = this.tab; const doc = this.kdoc(); if (!t || !doc) return;
       const x0 = Math.min(d.x0, x), x1 = Math.max(d.x0, x), y0 = Math.min(d.y0, y), y1 = Math.max(d.y0, y);
       if (x1 - x0 > 0.01 || y1 - y0 > 0.01) {
+        // SelectMultiple( area, m_drag_subtractive, false ): left-to-right takes what the box encloses, right-to-left
+        // what it touches; without a kept selection (no Ctrl / Shift, or Alt) the box replaces it
         const inside = x >= d.x0;
-        for (const it of doc.items.values()) { if (!it.movable || !it.bbox || !this.passesFilter(it.id)) continue; const b = it.bbox; const hit = inside ? b[0] >= x0 && b[2] <= x1 && b[1] >= y0 && b[3] <= y1 : K().itemTouchesRect(it, x0, y0, x1, y1); if (hit) t.sel.add(it.id); }
+        if (d.click && !d.keep) t.sel.clear();
+        for (const it of doc.items.values()) { if (!it.movable || !it.bbox || !this.passesFilter(it.id)) continue; const b = it.bbox; const hit = inside ? b[0] >= x0 && b[2] <= x1 && b[1] >= y0 && b[3] <= y1 : K().itemTouchesRect(it, x0, y0, x1, y1); if (hit) { if (d.sub) t.sel.delete(it.id); else t.sel.add(it.id); } }
       }
       this.selChanged();
     }
     this.paint();
   }
+  /** selectPoint with a modifier for one item: Shift adds, Ctrl (Cmd) toggles, Ctrl+Shift removes. */
+  private pickMode(id: string, mode: "add" | "toggle" | "remove" | null): void {
+    const t = this.tab; if (!t) return;
+    if (!mode) t.sel = new Set([id]); else if (mode === "add") t.sel.add(id); else if (mode === "remove") t.sel.delete(id); else if (t.sel.has(id)) t.sel.delete(id); else t.sel.add(id);
+    this.selChanged();
+  }
+  /** Every movable item under the cursor, best first (SCH_COLLECTOR without GuessSelectionCandidates' narrowing). */
+  private candidatesAt(x: number, y: number): string[] {
+    const doc = this.kdoc(); if (!doc) return []; const slop = 4 / this.view().s;
+    const geomHit = (K() as unknown as { geomHit: (g: unknown, x: number, y: number, tol: number) => boolean }).geomHit;
+    const best = this.hitAt(x, y); const out: string[] = best ? [best] : [];
+    for (const it of doc.items.values()) {
+      if (!it.movable || !it.bbox || it.id === best) continue; const b = it.bbox;
+      if (x < b[0] - slop || x > b[2] + slop || y < b[1] - slop || y > b[3] + slop) continue;
+      if (it.geom.some((g) => !g.padText && !g.padNum && !g.noBox && geomHit(g, x, y, slop))) out.push(it.id);
+    }
+    return out;
+  }
+  /** SELECTION_TOOL::doSelectionMenu: the candidates, the first nine numbered, then Select All; the pick goes through selectPoint. */
+  private clarify(cx: number, cy: number, ids: string[], mode: "add" | "toggle" | "remove" | null): void {
+    const doc = this.kdoc(); if (!doc) return;
+    const S = (window as unknown as { CollabTools?: { sch?: { itemDescription?: (d: unknown, id: string, u: string) => string } } }).CollabTools;
+    const describe = (id: string): string => {
+      try { const d = S && S.sch && S.sch.itemDescription ? S.sch.itemDescription(doc, id, "mm") : ""; if (d) return d; } catch { /* no description */ }
+      const it = doc.items.get(id); return it ? it.kind.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase()) : id;
+    };
+    const items: MenuEntry[] = ids.slice(0, 100).map((id, i) => ({ label: i < 9 ? `${i + 1}  ${describe(id)}` : describe(id), run: () => this.pickMode(id, mode) }));
+    items.push({ sep: true }, { label: "Select All", run: () => { const t = this.tab; if (!t) return; if (!mode) t.sel = new Set(); for (const id of ids) { if (mode === "remove") t.sel.delete(id); else if (mode === "toggle" && t.sel.has(id)) t.sel.delete(id); else t.sel.add(id); } this.selChanged(); this.paint(); } });
+    showMenu(cx, cy, items);
+  }
+  private startLongPress(ev: PointerEvent, x: number, y: number, mode: "add" | "toggle" | "remove" | null): void {
+    this.cancelLongPress();
+    this.lpTimer = window.setTimeout(() => {
+      this.lpTimer = 0; const d = this.drag; if (!d || d.moved) return;
+      const c = this.candidatesAt(x, y); if (c.length < 2) return;
+      this.drag = null; this.preview = null; this.kcache = null;   // the press becomes the disambiguation
+      this.clarify(ev.clientX, ev.clientY, c, mode); this.paint();
+    }, 500);
+  }
+  private cancelLongPress(): void { if (this.lpTimer) window.clearTimeout(this.lpTimer); this.lpTimer = 0; }
   private onDbl(ev: MouseEvent): void {
     if (this.draw) { this.finishDraw(); return; }
     if (this.tool !== "select") return;
