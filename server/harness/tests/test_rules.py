@@ -158,6 +158,27 @@ class Rules(unittest.TestCase):
             self.assertNotIn(rule, bad, rv["findings"])
         self.assertEqual(set(self.project.review()), set(self.project.documents()) - {d for d in self.project.documents() if d.endswith(".kicad_pro")})
 
+    def test_interchangeable_pins_are_reassigned_so_nets_do_not_cross(self):
+        sch = self.project.schematic()
+        H = "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
+        sch.place("Connector_Generic:Conn_01x04", ref="J1", at=(101.6, 76.2), footprint=H)
+        sch.place("Connector_Generic:Conn_01x04", ref="J2", at=(152.4, 76.2), footprint=H)
+        for i, n in enumerate(("A", "B", "C", "D")):       # wired crossed: J1.1 to J2.4, J1.2 to J2.3, ...
+            sch.net(n, f"J1.{i + 1}", f"J2.{4 - i}")
+        sch.flush()
+        board = self.project.board()
+        board.sync()
+        board.outline(100, 100, 130, 120)
+        board.autoplace(outline=(100, 100, 130, 120), fixed={"J1": (105, 105, 0), "J2": (120, 105, 0)})
+        plan = board.swap_pins("J1", ["A", "B", "C", "D"])
+        self.assertEqual(plan["pins"], {"1": "D", "2": "C", "3": "B", "4": "A"})
+        self.assertLess(plan["after_mm"], plan["before_mm"])
+        self.assertEqual([sch.net_of(f"J1.{i}") for i in (1, 2, 3, 4)], ["D", "C", "B", "A"])
+        self.assertEqual({p["number"]: p["net"].lstrip("/") for p in board.pads("J1")}, {"1": "D", "2": "C", "3": "B", "4": "A"})
+        self.assertEqual(board.swap_pins("J1", ["A", "B", "C", "D"])["pins"], {})      # already the best: nothing to do
+        with self.assertRaises(kh.HarnessError):
+            sch.assign_pins("J1", {"1": "A", "9": "B"})
+
 
 if __name__ == "__main__":
     unittest.main()

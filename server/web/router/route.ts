@@ -136,8 +136,9 @@ export class Router {
   G!: Grid; rim: Uint8Array | null = null; nets: NetInfo[] = []; conns: Conn[] = []; pref: number[] = []; W: Weights; allowVias: boolean; s: any;
   stopped = false; zoneCovered = 0; dropped: any[] = []; stat: Record<string, number> = { noSoft: 0, noBlockers: 0, tooMany: 0, ripped: 0, ripLimit: 0 };
   constructor(public K: any, public P: any, public doc: any, settings: any, public opts: RouteOptions = {}) {
-    // the weights were fitted to how people route; a via is then charged double, because a board with few layer changes is what is asked for
-    this.W = Object.assign({}, TRAINED, { via: TRAINED.via * 2 }, opts.weights || {}); this.allowVias = opts.allowVias !== false;
+    // the weights were fitted to how people route; a via is then charged four times over, because a board with few layer
+    // changes is what is asked for: a track goes round on its own layer for up to ~19 mm before it changes layer
+    this.W = Object.assign({}, TRAINED, { via: TRAINED.via * 4 }, opts.weights || {}); this.allowVias = opts.allowVias !== false;
     this.s = settings && settings.netclasses ? settings : P.designSettings(settings);
     this.build();
   }

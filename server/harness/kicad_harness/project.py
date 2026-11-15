@@ -409,6 +409,54 @@ class Schematic(_Doc):
     def net_of(self, spec: str) -> str:
         return self.pin(spec)["net"]
 
+    def assign_pins(self, ref: str, mapping: dict) -> int:
+        """Move nets between the interchangeable pins of a chip (an FPGA's or a microcontroller's I/O, a connector whose
+        pin order is yours to choose): mapping is {pin number: net name}.  Each of those pins must carry its net as a
+        label, on the pin or at the end of the wire that leaves it; the label is renamed, nothing else moves, so the
+        sheet keeps its looks.  Returns how many pins changed.  `board.swap_pins()` works the mapping out from the layout."""
+        g = self.geometry(); labelled = {(round(l[1], 2), round(l[2], 2)) for l in g["labels"]}; plan = []
+
+        def label_point(pt):
+            seen = set()
+            for _ in range(8):
+                k = (round(pt[0], 2), round(pt[1], 2))
+                if k in labelled:
+                    return pt
+                seen.add(k); nxt = None
+                for w in g["wires"]:
+                    for a0, b0 in (((w[0], w[1]), (w[2], w[3])), ((w[2], w[3]), (w[0], w[1]))):
+                        if (round(a0[0], 2), round(a0[1], 2)) == k and (round(b0[0], 2), round(b0[1], 2)) not in seen:
+                            nxt = b0
+                if nxt is None:
+                    return None
+                pt = nxt
+            return None
+
+        for num, net in mapping.items():
+            pin = self.pin(f"{ref}.{num}"); net = str(net).lstrip("/")
+            if (pin["net"] or "").lstrip("/") == net:
+                continue
+            pt = label_point(pin.at); hit = None
+            if pt is not None:
+                for it in self._call("get_items", kinds=["label", "global_label", "hierarchical_label"], near={"x": pt[0], "y": pt[1], "radius": 0.3}).get("items", []):
+                    m = re.match(r'\((\w+) "((?:[^"\\]|\\.)*)"(?: \(shape (\w+)\))? \(at ([-\d.]+) ([-\d.]+) ([-\d.]+)\)', it["sexpr"])
+                    if m and abs(float(m[4]) - pt[0]) < 0.01 and abs(float(m[5]) - pt[1]) < 0.01:
+                        hit = (it["id"], m); break
+            if not hit:
+                raise HarnessError(f"{ref} pin {num} ({pin['net'] or 'no net'}) is not named by a label on the pin or on the wire leaving it, so its net cannot be moved to another pin. Nothing was changed.")
+            plan.append((hit[0], hit[1], net))
+        for lid, m, net in plan:
+            self._edit({"op": "remove", "id": lid})
+        for lid, m, net in plan:
+            e = {"op": "add_label", "kind": m[1], "text": net, "x": float(m[4]), "y": float(m[5]), "rotation": float(m[6])}
+            if m[3]:
+                e["shape"] = m[3]
+            self._edit(e)
+        if plan:
+            self.flush()
+            self.project.note(f"{self.path}: {ref}: {len(plan)} pins given another net")
+        return len(plan)
+
     def unconnected(self) -> list:
         """Pins that are on no net and carry no no-connect flag."""
         g = self.geometry()
@@ -1591,6 +1639,61 @@ class Board(_Doc):
                 return q
         raise HarnessError(f"{ref} has no pad {num}.")
 
+    def swap_pins(self, ref: str, nets: list, apply: bool = True, sheet: str | None = None) -> dict:
+        """Choose the pin each net uses on a chip whose pins are interchangeable, from where the parts sit: every net in
+        `nets` lands on the pin that faces the part it goes to, so the connections leave the chip side by side instead of
+        crossing each other, which is what forces vias.  Call it after placement and before routing, with only the nets
+        that may move (general I/O; not supplies, configuration, clock or dedicated-function pins, and lay out a
+        differential pair's two pins yourself).  The pins stay the set those nets are on now.
+
+        apply=True renames the labels in the schematic (`sch.assign_pins`), takes up the tracks of the nets that moved
+        and syncs the board.  Returns {"pins": {pin: net} that changed, "before_mm", "after_mm"} (summed straight-line
+        length from each pin's way out to its nearest target pad)."""
+        import math
+        want = {str(n).lstrip("/") for n in nets}; parts = self.geometry()["parts"]
+        me = next((p for p in parts if p["ref"].lower() == ref.lower()), None)
+        if me is None:
+            raise HarnessError(f"There is no footprint {ref} on the board.")
+        cx, cy = me["x"], me["y"]; mine: dict = {}; targets: dict = {}
+        for q in me["pads"]:
+            n = (q[3] or "").lstrip("/")
+            if n in want:
+                mine.setdefault(n, []).append(q)
+        mine = {n: v[0] for n, v in mine.items() if len(v) == 1}
+        for p in parts:
+            if p is me:
+                continue
+            for q in p["pads"]:
+                n = (q[3] or "").lstrip("/")
+                if n in mine:
+                    targets.setdefault(n, []).append((q[1], q[2]))
+        names = [n for n in mine if n in targets]; pins = [mine[n] for n in names]
+
+        def way_out(q):      # a pin leaves its chip straight out from the side it is on
+            dx, dy = q[1] - cx, q[2] - cy
+            return (q[1] + math.copysign(2, dx), q[2]) if abs(dx) >= abs(dy) else (q[1], q[2] + math.copysign(2, dy))
+
+        outs = [way_out(q) for q in pins]
+        cost = [[min(math.hypot(o[0] - t[0], o[1] - t[1]) for t in targets[n]) for n in names] for o in outs]
+        at = list(range(len(names))); before = sum(cost[i][i] for i in at); moved = True
+        while moved:         # swap any two that are shorter the other way round; two that cross always are
+            moved = False
+            for i in range(len(at)):
+                for j in range(i + 1, len(at)):
+                    if cost[i][at[j]] + cost[j][at[i]] < cost[i][at[i]] + cost[j][at[j]] - 1e-6:
+                        at[i], at[j] = at[j], at[i]; moved = True
+        change = {pins[i][0]: names[at[i]] for i in range(len(at)) if at[i] != i}
+        out = {"pins": change, "before_mm": round(before, 1), "after_mm": round(sum(cost[i][at[i]] for i in range(len(at))), 1)}
+        if apply and change:
+            try:
+                self.unroute(*sorted(set(change.values())))
+            except HarnessError:
+                pass
+            self.project.schematic(sheet).assign_pins(me["ref"], change) if sheet else self.project.schematic().assign_pins(me["ref"], change)
+            self.sync()
+            self.project.note(f"board: {me['ref']}: {len(change)} pins reassigned so their nets leave towards their parts ({out['before_mm']} to {out['after_mm']} mm)")
+        return out
+
     def nets(self, filter: str | None = None) -> dict:
         """name -> {"pads": [...], "unrouted": n, "length_mm": x}"""
         r = self._call("list_nets", **({"filter": filter} if filter else {}))
@@ -1904,12 +2007,14 @@ class Board(_Doc):
     def route(self, nets: list | None = None, order: list | None = None, widths: dict | None = None, layers: list | None = None,
               net_options: dict | None = None, keepouts: list | None = None, allow_vias: bool = True, time_s: float | None = None,
               fill: bool = True, max_vias: int | None = None, kinds: dict | None = None, separate=None, fence=None,
-              ground_vias: bool = True, fanout_lanes=None) -> dict:
+              ground_vias: bool = True, fanout_lanes=None, via_cost: float | None = None) -> dict:
         """Autoroute the missing connections (every unrouted net by default) and report what was done.
 
         order: the few nets to lay first (USB pair, crystal); widths: {net: mm} for supply nets; net_options and
         keepouts are passed to the engine as they are.  Route a whole board in one call.
         max_vias: the most vias one pad-to-pad connection may use (2 keeps every track to one trip to the other side).
+        via_cost: how many millimetres of extra track a via is worth (19 by default: the engine goes round on the pad's
+        own layer before it changes layer); lower it only for a board that cannot route otherwise.
 
         Signal domains.  The engine tells analog nets (ADC, VREF, crystal, sense, feedback), RF nets (ANT, RF),
         switching nodes (SW, LX), fast nets (clocks, differential pairs) and plain digital ones apart by name, and
@@ -1974,6 +2079,8 @@ class Board(_Doc):
             e["separate"] = separate
         if fanout_lanes is not None:
             e["fanout_lanes"] = fanout_lanes
+        if via_cost is not None:
+            e["via_cost"] = via_cost
         if fence is not None:
             e["fence"] = dict(fence, nets=[fix(n) for n in fence["nets"]]) if isinstance(fence, dict) and fence.get("nets") else fence
         pre = None
