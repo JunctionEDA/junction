@@ -60,6 +60,7 @@ store.subscribe(() => { const on = shown(); if (on && !wasShown && stale) setTim
 let stale = true, userSel: string | null = null, lastNav: unknown = null;
 /** RefreshNetNavigator: rebuilt when shown (a hidden navigator is only marked stale, as KiCad does). */
 export function publishNetNav(): void {
+  publishNetSheets();
   if (!shown()) { stale = true; return; }
   stale = false;
   let r: { root: NetNavNode | null; selected: string | null } = { root: null, selected: null };
@@ -70,6 +71,27 @@ export function publishNetNav(): void {
   panelStore.set({ netNav: { root: r.root, version: cur.version + 1, selected, filter: filterState.text, filterEnabled: !HL.name, wildcard: filterState.wildcard } });
 }
 onNetsChanged(() => publishNetNav());
+
+/**
+ * HIERARCHY_PANE::UpdateNetHighlight: the hierarchy tree paths ("/" root, "/uuid/…/" below) of the sheets that hold the
+ * highlighted net (NAVIGATION_QUERY::NetSheets), drawn in LAYER_BRIGHTENED there.
+ */
+export function netSheetPaths(name: string | null): string[] {
+  const c = name ? netMap() : null; if (!c || !name) return [];
+  const e = c.map.get(name); if (!e) return [];
+  const out = new Set<string>();
+  // the net map's uuid paths start with the root sheet's own uuid, which the hierarchy tree leaves out
+  const root = c.instances.find((i) => i.human === "/"), skip = root ? root.uuidPath.length : 0;
+  for (const m of e.members) {
+    const inst = c.instances.find((i) => i.index === m.inst); if (!inst) continue;
+    const u = inst.uuidPath.slice(skip); out.add(u.length ? "/" + u.join("/") + "/" : "/");
+  }
+  return [...out].sort();
+}
+function publishNetSheets(): void {
+  const marked = netSheetPaths(HL.name || null), h = panelStore.get().hierarchy;
+  if ((h.marked || []).join("\n") !== marked.join("\n")) panelStore.set({ hierarchy: Object.assign({}, h, { marked }) });
+}
 export function netNavSignature(): string { return (HL.name || "-") + (HL.busMembers ? "+" : "") + (HL.nav ? HL.nav.id + (HL.nav.pin || "") : ""); }
 
 export function netNavDispatch(a: PanelAction): boolean {

@@ -7,7 +7,7 @@ import { loadHistory, restoreCheckpoint } from "./history";
 import { navigate } from "./home";
 import { chooseTrackWidth, chooseViaSize, chooseViaStack } from "./pcbrouting";
 import { setCrosshair, setTheme, setUnitsAction, showPane, syncSchModes, toggleTheme } from "./panes";
-import { contextMenuAction, openArcEditModeMenu, openGridButtonMenu, openRouterModeMenu } from "./contextmenu";
+import { contextMenuAction, openArcEditModeMenu, openGridButtonMenu, openZoneButtonMenu, openRouterModeMenu } from "./contextmenu";
 import { cycleFollow, followAction } from "./peers";
 import { setFilter } from "./selection";
 import { E } from "./state";
@@ -92,7 +92,7 @@ export const HANDLERS: Record<string, ActionHandler> = {
   mirrorV: () => orientSelected("mv"), mirrorH: () => orientSelected("mh"),
   showPcbNew: () => switchEditor(), showEeschema: () => switchEditor(),
   showCalculatorTools: () => openCalculator(),
-  toggleGrid: () => { E.gridOn = !E.gridOn; updateGridStatus(); requestRender(); }, "toggleGrid:menu": (a) => openGridButtonMenu(a),
+  toggleGrid: () => { E.gridOn = !E.gridOn; updateGridStatus(); requestRender(); }, "toggleGrid:menu": (a) => openGridButtonMenu(a), "drawZone:menu": (a) => openZoneButtonMenu(a),
   "routeSingleTrack:menu": (a) => openRouterModeMenu(a), "routeDiffPair:menu": (a) => openRouterModeMenu(a),
   // the Arc group's menu, whichever drawing mode its button shows
   "drawArcCenter:menu": (a) => openArcEditModeMenu(a), "drawArcStartEndMid:menu": (a) => openArcEditModeMenu(a), "drawArcStartEndCenter:menu": (a) => openArcEditModeMenu(a),

@@ -617,6 +617,17 @@ export function openRouterModeMenu(at?: { left: number; bottom: number } | null)
   requestRender();
 }
 
+/** The Draw Zone button's menu (toolbars_pcb_editor.cpp drawZone WithContextMenu): Fill All, Unfill All, Zone Manager. */
+export function openZoneButtonMenu(at?: { left: number; bottom: number } | null): void {
+  if (!E.kdoc || state.view !== "editor" || isSch()) return;
+  const c = menuCtx();
+  const items: CtxItem[] = [row("PCB_ACTIONS::zoneFillAll", false, c), row("PCB_ACTIONS::zoneUnfillAll", false, c), { sep: true }, row("PCB_ACTIONS::zonesManager", false, c)];
+  const x = at ? at.left : stage.getBoundingClientRect().left + 40, y = at ? at.bottom : stage.getBoundingClientRect().top + 40;
+  E.contextMenuOpen = true; anchor = null;
+  store.set({ contextMenu: { id: ++menuId, x, y, items } });
+  requestRender();
+}
+
 /**
  * The left toolbar's grid button menu: eeschema's holds Edit Grids... alone (toolbars_sch_editor.cpp), pcbnew's adds
  * Grid Origin... (toolbars_pcb_editor.cpp).
