@@ -39,6 +39,8 @@ interface PropDef {
   key?: "field" | "custom";
   /** PROPERTY<…, std::optional<T>>: an empty cell is "no value" (the setter gets null), and 0 is a value */
   optional?: boolean;
+  /** an editable combo's predefined values in mm (a track's Width: BOARD_DESIGN_SETTINGS::m_TrackWidthList) */
+  suggest?(): number[];
 }
 
 /** props.js's node editors (static/props.js `helpers`). */
@@ -250,6 +252,12 @@ function lockedProp(): PropDef {
 }
 function layerProp(doc: KDoc, copperOnly: boolean, def: string): PropDef {
   return { group: BASIC, name: "Layer", type: "enum", choices: layerChoices(doc, copperOnly), get: (it) => H().str((H().kid(it.node, "layer") || [])[1] || def), set: (n, v) => { H().setLayer(n, String(v)); } };
+}
+/** BOARD_DESIGN_SETTINGS::m_TrackWidthList past its netclass entry: Board Setup's predefined track widths (mm). */
+function trackWidthList(): number[] {
+  const K = (window as unknown as { KiCadCanvas?: { pcbSizes?: { state?: { sizes?: { trackWidths?: number[] } } } } }).KiCadCanvas;
+  const tw = K && K.pcbSizes && K.pcbSizes.state && K.pcbSizes.state.sizes ? K.pcbSizes.state.sizes.trackWidths || [] : [];
+  return tw.slice(1).filter((w) => w > 0);
 }
 function netProps(doc: KDoc): PropDef[] {
   // BOARD_CONNECTED_ITEM's "Net" is a net selector: the board's nets, <no net> first
@@ -756,7 +764,7 @@ function pcbProps(it: KItem, doc: KDoc, single: boolean): PropDef[] {
   switch (it.kind) {
     case "footprint": return footprintProps(it, doc, single);
     case "segment": case "arc": return [xyProp(BASIC, "Start X", "start", 1), xyProp(BASIC, "Start Y", "start", 2), xyProp(BASIC, "End X", "end", 1), xyProp(BASIC, "End Y", "end", 2),
-      { group: BASIC, name: "Width", type: "length", get: (x) => h.num((h.kid(x.node, "width") || [])[1], 0.25), set: (n, v) => { if (!((v as number) > 0)) return false; h.setWidth(n, v as number); } },
+      { group: BASIC, name: "Width", type: "length", get: (x) => h.num((h.kid(x.node, "width") || [])[1], 0.25), set: (n, v) => { if (!((v as number) > 0)) return false; h.setWidth(n, v as number); }, suggest: trackWidthList },
       layerProp(doc, true, "F.Cu"), lockedProp(), ...netProps(doc)];
     case "via": return viaProps(doc);
     case "pad": if ((doc as unknown as { fpEditor?: boolean }).fpEditor) return fpEditorPadProps(doc, it); break;
@@ -851,6 +859,8 @@ export function propGrid(): PropGrid {
     });
     const row: PropRow = { id, name: d.name, type: d.type, value: mixed ? "" : value, mixed, readOnly: ro || !writable, choices: d.choices };
     if (d.key && !ro && items.length === 1) row.keyEditable = true;   // isKeyEditable looks at the front item
+    if (d.type === "enum" && d.group === "Net" && d.name === "Net") row.netSelector = true;   // PG_NET_SELECTOR_EDITOR
+    if (d.suggest) { const u = String(E.units || "mm"); row.suggest = d.suggest().map((mm) => H().formatLength(mm, u)); }
     // SCH_PROPERTIES_PANEL / PCB_PROPERTIES_PANEL::createPGProperty: the Footprint and Datasheet properties get
     // PG_FPID_EDITOR and PG_URL_EDITOR (an editor only an editable row opens)
     if (d.group === "Fields" && d.type === "text" && !row.readOnly) { if (d.name === "Footprint") row.browse = "footprint"; else if (d.name === "Datasheet") row.browse = "url"; }

@@ -49,6 +49,10 @@ export interface PropRow {
   keyEditable?: boolean;
   /** the value editor carries a browse button: PG_FPID_EDITOR ("footprint") or PG_URL_EDITOR ("url") */
   browse?: "footprint" | "url";
+  /** an enum row edited with a NET_SELECTOR (the board's nets, with a filter entry) */
+  netSelector?: boolean;
+  /** an editable combo's list in the current units (a track's Width: Board Setup's predefined track widths) */
+  suggest?: string[];
 }
 /** add: the category's "+" button and context-menu entry ("Add Field", "Add Custom Property") */
 export interface PropGroup { name: string; rows: PropRow[]; add?: "Add Field" | "Add Custom Property" }

@@ -13,6 +13,7 @@ import { useApp } from "../../store";
 import { cx } from "../../util";
 import { rowValueText } from "./prop-text";
 import { KIcon } from "../Icon";
+import { comboBox, type KCombo } from "../kcombo";
 import { ContextMenu, Swatch, panels, pickColor, useContextMenu, usePanels, type MenuItem } from "./widgets";
 
 const MIXED = "<...>";
@@ -99,6 +100,8 @@ function Editor({ row, onDone }: { row: PropRow; onDone: () => void }) {
       </button>
     );
   }
+  if (row.type === "enum" && row.choices && row.netSelector) return <ComboEditor row={row} commit={commit} filter />;
+  if (row.suggest && row.suggest.length && !row.readOnly) return <ComboEditor row={row} commit={commit} />;
   if (row.type === "enum" && row.choices) {
     return (
       <Select className={cx(CELL, "rounded-none")} data={{ prop: row.id }} disabled={row.readOnly} value={row.mixed ? "\u0001" : row.value}
@@ -145,6 +148,72 @@ function Editor({ row, onDone }: { row: PropRow; onDone: () => void }) {
       {err ? <span className="absolute right-0 top-full z-10 px-1.5 py-0.5 bg-panel border border-err text-err text-xs whitespace-nowrap shadow-panel" data-prop-error>{err}</span> : null}
     </>
   );
+}
+
+/**
+ * A combo cell editor built on kcombo.ts:
+ *  - filter: PG_NET_SELECTOR_EDITOR / NET_SELECTOR (pcb_properties_panel.cpp): the net list with a "Filter:" entry, the
+ *    entry itself read-only; a click, Alt+Down or F4 opens it, a pick commits it.
+ *  - otherwise: an editable wxComboBox (a track's Width offers Board Setup's predefined track widths): typing and Enter
+ *    commit like a text cell, the list's entries go straight in.
+ * The input is the combo's own (kcombo wraps it), so React only hosts it; the grid's Enter / Up / Down / Tab / Esc keys
+ * are taken before the combo sees them while its list is closed.
+ */
+function ComboEditor({ row, commit, filter }: { row: PropRow; commit: (text: string) => boolean; filter?: boolean }) {
+  const host = useRef<HTMLSpanElement | null>(null);
+  const live = useRef({ row, commit }); live.current = { row, commit };
+  const combo = useRef<KCombo | null>(null);
+  const labelOf = (r: PropRow): string => (r.mixed ? "" : filter && r.choices ? (r.choices.find(([v]) => v === r.value) || [r.value, r.value])[1] : r.value);
+  const valueOf = (r: PropRow, text: string): string => (filter && r.choices ? (r.choices.find(([, l]) => l === text) || [text])[0] : text);
+  useEffect(() => {
+    const h = host.current; if (!h) return;
+    const input = document.createElement("input");
+    input.type = "text"; input.className = CELL; input.dataset.prop = row.id; input.spellcheck = false; input.autocomplete = "off";
+    if (filter) input.dataset.netSelector = "";
+    h.replaceChildren(input);
+    const options = (): string[] => { const r = live.current.row; return filter ? (r.choices || []).map(([, l]) => l) : (r.suggest || []); };
+    const cb = comboBox(input, options, { filter: !!filter });
+    cb.el.style.height = "100%";
+    combo.current = cb;
+    let settled = false;
+    const take = (text: string): boolean => {
+      const r = live.current.row;
+      if (!r.mixed && text === labelOf(r)) return true;
+      const ok = live.current.commit(valueOf(r, text));
+      input.style.boxShadow = ok ? "" : "inset 0 0 0 1px var(--color-err)";
+      return ok;
+    };
+    const revert = (): void => { input.value = labelOf(live.current.row); input.style.boxShadow = ""; };
+    input.addEventListener("change", () => { if (settled) { settled = false; return; } take(input.value); });
+    input.addEventListener("focus", () => { if (!input.readOnly) input.select(); });
+    if (filter) input.addEventListener("click", () => { if (!live.current.row.readOnly && !cb.isOpen()) cb.open(); });
+    // PROPERTIES_PANEL::onCharHook runs before the editor: the grid keys while the list is closed
+    const key = (ev: KeyboardEvent): void => {
+      if (cb.isOpen()) { ev.stopPropagation(); return; }
+      if (ev.key === "ArrowDown" && ev.altKey) return;   // the combo opens its list
+      if (copyRow({ key: ev.key, ctrlKey: ev.ctrlKey, metaKey: ev.metaKey, shiftKey: ev.shiftKey, altKey: ev.altKey, currentTarget: input, preventDefault: () => ev.preventDefault(), stopPropagation: () => ev.stopImmediatePropagation() }, live.current.row)) return;
+      const nav = navOf(ev);
+      if (nav) {
+        ev.preventDefault(); ev.stopImmediatePropagation();
+        if (filter || take(input.value)) { settled = true; moveFrom(input, nav); if (document.activeElement === input) settled = false; } else input.select();
+      } else if (ev.key === "Escape") { ev.preventDefault(); ev.stopImmediatePropagation(); revert(); settled = true; releaseKeyboard(input); }
+      else ev.stopPropagation();
+    };
+    input.addEventListener("keydown", key, true);
+    h.addEventListener("keydown", (ev) => { if (ev.target === input) ev.stopPropagation(); });
+    return () => { cb.close(); combo.current = null; h.replaceChildren(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row.id, filter]);
+  // the shown value follows the model unless the user is typing in it
+  useEffect(() => {
+    const cb = combo.current; if (!cb) return;
+    const input = cb.input;
+    input.readOnly = !!filter || row.readOnly; input.disabled = !!filter && row.readOnly;
+    input.placeholder = row.mixed ? MIXED : "";
+    if (document.activeElement !== input || filter) { input.value = labelOf(row); input.style.boxShadow = ""; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [row.value, row.mixed, row.readOnly, row.choices, row.suggest]);
+  return <span ref={host} className="flex w-full h-full min-w-0 [&_.kcombo-btn]:border-0 [&_.kcombo-btn]:bg-transparent [&_.kcombo-btn]:rounded-none" data-prop-combo={filter ? "net" : "edit"} />;
 }
 
 /**
