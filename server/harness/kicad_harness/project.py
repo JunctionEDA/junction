@@ -2165,19 +2165,24 @@ class Board(_Doc):
         d = next((x["auto_place"] for x in res.get("details") or [] if "auto_place" in x), {})
         out = {"placed": len(d.get("placements", [])), "score": d.get("score"), "outline": d.get("outline"), "unknown_refs": d.get("unknown_refs") or []}
         self.project.note(f"board: placed {out['placed']} footprints, score {out['score']}")
-        # the small parts, in the order a person seats them: what has one right place first (a pull-down in front of its
-        # pin, the matching network at the radio pin, the crystal at its oscillator pins), then the bypass capacitors,
-        # which only need to be beside their supply pins, and last whatever still stands on something else
+        # the small parts, in the order a person seats them: the matching network at the radio pin, the bypass capacitors
+        # at their supply pins, then the crystal at its oscillator pins and the parts that serve one pin (a pull-down in
+        # front of its connector pin), and last whatever still stands on something else
         hold = tuple(fixed or {}); caps: tuple = ()
         if bypass:
             self._geom = None
             caps = tuple(c for v in self.place_bypass(skip=hold + tuple(self._hangers()), apply=False).values() for c in v)
-        if seat:
+        radio: tuple = ()
+        if seat:      # the radio's matching network first: it has exactly one place, in line from the radio pin to the feed
             self._geom = None
-            out["seated"] = self.seat(skip=hold + caps, giveway=caps)
-        if bypass:
+            radio = tuple(r for r in self._radio() if r not in hold)
+            out["seated"] = self.seat(refs=list(radio), skip=hold + caps, giveway=tuple(self._serving())) if radio else {}
+        if bypass:    # then the bypass capacitors, each at its supply pin, before a crystal or a pull-up takes the spot
             self._geom = None
-            out["bypass"] = self.place_bypass(skip=hold + tuple(self._hangers()) + tuple(r for r, v in (out.get("seated") or {}).items() if "at" in v))
+            out["bypass"] = self.place_bypass(skip=hold + tuple(self._hangers()) + radio)
+        if seat:      # then the crystal and every other part that serves a pin
+            self._geom = None
+            out["seated"].update(self.seat(skip=hold + caps + radio))
         if seat or bypass:
             moved = self.settle(skip=hold)
             if moved:

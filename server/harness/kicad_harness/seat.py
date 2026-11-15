@@ -154,13 +154,18 @@ class _Survey:
 
 
 def _ways(S: _Survey, anchor, skip_nets) -> list:
-    """The way each signal pin of a part takes out of it and on to its partner, as line pieces."""
+    """The way each signal pin of a part takes out of it and on to its partner, as line pieces, and the spot in front
+    of each supply pin of a chip."""
     ways = []
     for q in anchor["pads"]:
         n = q[3] or ""
-        if S.rail(n) or n in skip_nets:
+        if not n or n in skip_nets or _gnd(n) or n.startswith("unconnected-"):
             continue
         _, out = S.out_of(anchor, q)
+        if S.rail(n):      # a supply pin: the spot in front of it is its bypass capacitor's
+            if len(anchor["pads"]) >= 8 and not re.match(r"^(J|P|CN|USB|X)\d", anchor["ref"], re.I):
+                ways.append([(q[1], q[2]), (q[1] + 1.3 * out[0], q[2] + 1.3 * out[1])])
+            continue
         o = (q[1] + 2 * out[0], q[2] + 2 * out[1])
         t = [(u[1], u[2]) for p, u in S.net.get(n, []) if p is not anchor]
         way = [(q[1], q[2]), o]
@@ -421,6 +426,31 @@ def _hangers(self) -> list:
     return [j["ref"] for j in S.jobs()[1]]
 
 
+def _serving(self) -> list:
+    """Every two-pad part seat() would place."""
+    S = _Survey(self); first, later = S.jobs()
+    return [j["ref"] for j in first + later]
+
+
+def _radio(self) -> list:
+    """The small parts between an antenna and its radio pin: the series parts of the matching network and the shunts
+    that hang on it."""
+    S = _Survey(self); out: list = []
+    for a in S.parts:
+        if not S.antenna(a):
+            continue
+        nets = [q[3] for q in a["pads"] if q[3] and not _gnd(q[3]) and not q[3].startswith("unconnected-")]
+        for n in nets:      # grows while the walk goes through series parts
+            for o, u in S.net.get(n, []):
+                if not S.small(o) or o["ref"] in out:
+                    continue
+                out.append(o["ref"])
+                for q in o["pads"]:
+                    if q[3] and q[3] not in nets and not S.rail(q[3]) and len(nets) < 8:
+                        nets.append(q[3])
+    return out
+
+
 def _seating(self) -> dict:
     """Measure what `seat()` arranges, on the board as it is: {"errors": n, "findings": [one line each]}.
 
@@ -447,7 +477,7 @@ def _seating(self) -> dict:
         p = S.by_ref[job["ref"]]; hot = p["pads"][job["hot"]]
         d, name = min((math.hypot(hot[1] - q[1], hot[2] - q[2]), f"{o['ref']}.{q[0]}") for o, q in job["pins"])
         other = p["pads"][1 - job["hot"]][3]; conn = any(re.match(r"^(J|P|CN|USB)\d", o["ref"], re.I) for o, _ in job["pins"])
-        if d > (LIMITS["serve_pull"] if S.rail(other) and not _gnd(other) and not conn else LIMITS["serve"]):
+        if d > (LIMITS["serve_pull"] if S.rail(other) and not _gnd(other) else LIMITS["serve"]):
             far.append(f"{p['ref']} is {round(d, 1)} mm from {name}")
         elif d > LIMITS["serve_note"]:
             near.append(f"{p['ref']} is {round(d, 1)} mm from {name}")
@@ -508,4 +538,6 @@ def install(Board) -> None:
     Board.seat = _seat
     Board.seating = _seating
     Board._hangers = _hangers
+    Board._serving = _serving
+    Board._radio = _radio
     Board.settle = _settle
