@@ -16,7 +16,7 @@ import { netClearance } from "./drc";
 import { routableItems } from "./edit-commands";
 import { angleSnapDirections, beginSelectDrag, bestDragOrigin, snapCursor } from "./grid-helper";
 import { MOVE_SNAP_MSG, angleSnapMode, displayConstraintsMsg } from "./draw-modes";
-import { applySelection, expandGroups, selectionIds } from "./groups";
+import { applySelection, expandGroups, selectionIds, topParentOf } from "./groups";
 import { beginInlineDrag, dragMove, finishDrag } from "./inline-drag";
 import { editHandleMove, editHandleUp } from "./point-editor";
 import { padCovers, padsOf } from "./route-geom";
@@ -270,7 +270,13 @@ export function onStagePointerMove(ev: PointerEvent) {
   else if (S.move) { S.move.mods = { shiftKey: !!ev.shiftKey, ctrlKey: !!ev.ctrlKey, metaKey: !!ev.metaKey }; selectMoveTo(ctx, ctx.worldMm(ev)); }
 }
 export function onStagePointerUp(ev?: PointerEvent | null) {
-  const ctx = lastCtx; S.pending = null; if (!ctx) return;
+  const ctx = lastCtx; const pd = S.pending; S.pending = null; if (!ctx) return;
+  // IsClick on an item of a multi-selection (the press only armed a drag): selectPoint clears the selection and
+  // selects what was clicked (its top-level group with it)
+  if (pd && !pd.app && pd.item && ev && ev.type === "pointerup" && ctx.doc && S.sel.size > 1 && Math.hypot(ev.clientX - pd.client[0], ev.clientY - pd.client[1]) <= DRAG_PX) {
+    const pick = topParentOf(ctx.doc, pd.item.id) ? Array.from(expandGroups(ctx.doc, [pd.item.id])) : [pd.item.id];
+    S.sel = new Set(pick); if (ctx.setSelection) ctx.setSelection([]); ctx.requestRender();
+  }
   if (S.pedit) { if (ev) { ev.stopImmediatePropagation(); editHandleMove(ctx, ctx.worldMm(ev)); } editHandleUp(ctx, !!ev && ev.type === "pointerup"); return; }
   if (S.stickyUp) { S.stickyUp = false; if (ev) { ev.stopImmediatePropagation(); ev.preventDefault(); } return; }   // the release of the click that dropped a Move
   if (S.drag && S.drag.bySelect) { if (ev) dragMove(ctx, ctx.worldMm(ev)); finishDrag(ctx, true, !!(ev && (ev.ctrlKey || ev.metaKey))); }   // Ctrl on release commits a drag in violation

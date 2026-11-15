@@ -14,7 +14,10 @@ const ev = (o) => Object.assign({ shiftKey: false, ctrlKey: false, metaKey: fals
 test("box drag on the board: SelectMultiple( area, m_subtractive, m_exclusive_or ) — Ctrl toggles, Ctrl+Shift removes, Shift adds", () => {
   assert.equal(M.dragModifier(ev({}), false), null);
   assert.equal(M.dragModifier(ev({ ctrlKey: true }), false), "toggle");
-  assert.equal(M.dragModifier(ev({ metaKey: true }), false), "toggle");
+  // MD_CTRL is Control off macOS (the Super key is MD_SUPER) and Command on macOS
+  assert.equal(M.dragModifier(ev({ metaKey: true }), false), null);
+  assert.equal(M.dragModifier(ev({ metaKey: true }), false, { mac: true }), "toggle");
+  assert.equal(M.dragModifier(ev({ ctrlKey: true }), false, { mac: true }), null);
   assert.equal(M.dragModifier(ev({ shiftKey: true }), false), "add");
   assert.equal(M.dragModifier(ev({ ctrlKey: true, shiftKey: true }), false), "remove");
 });

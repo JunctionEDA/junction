@@ -36,7 +36,8 @@ export type SheetEntry = import("../store").SheetSummary & { page?: string };
 
 /** A box / lasso selection in progress (E.boxSel). */
 export interface BoxSel { start: number[]; cur: number[]; startClient: number[]; lasso?: boolean; pts: number[][]; add?: boolean; mode?: string;
-  /** a Ctrl press with m_CtrlClickHighlight: released without a drag it highlights the net under the press */ clickHighlight?: boolean }
+  /** a Ctrl press with m_CtrlClickHighlight: released without a drag it highlights the net under the press */ clickHighlight?: boolean;
+  /** a press with a modifier: released without a drag it runs selectPoint with that mode (index.ts modifierClick) */ modClick?: { mode: "add" | "toggle" | "remove"; ev: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey?: boolean; clientX: number; clientY: number; button: number; pointerId: number; pointerType: string } } }
 
 /** One step on the undo / redo lists (tools.ts): what was applied and how to take it back. */
 export interface UndoEntry {

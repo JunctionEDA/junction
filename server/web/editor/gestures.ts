@@ -190,6 +190,39 @@ export function selectItemId(id: string): void {
   else { const p = pcbState(); if (p) p.sel = new Set([id]); }
 }
 
+/**
+ * selectPoint( ..., aAdd, aSubtract, aExclusiveOr ) for one item: Shift adds it, Ctrl toggles it, Ctrl+Shift takes it
+ * out, and everything else selected stays.  The schematic module's single pick (a wire, a label …) joins the editor's
+ * set first, so the selection can mix symbols with anything else; on the board the footprints stay in the editor's
+ * set and the rest in the module's, as a plain click leaves them.  `end` is selectPoint's STARTPOINT / ENDPOINT for
+ * a line clicked near one end (null: the whole line).
+ */
+export function applyPickMode(id: string, mode: "add" | "toggle" | "remove", end: 0 | 1 | null = null): void {
+  const d = doc(); if (!d || !d.items.has(id)) return;
+  E.selField = null; E.selPins = [];
+  const sch = isSch(), s = sch ? schState() : null, p = sch ? null : pcbState();
+  if (s && s.sel) { if (d.items.has(s.sel)) E.selection.add(s.sel); s.sel = null; }   // its selEnds entry stays with it
+  if (p && (p as { padSel?: string | null }).padSel && mode !== "add") (p as { padSel?: string | null }).padSel = null;
+  if (E.selected) E.selection.add(E.selected.id);
+  const fp = (E.items as { id: string }[]).find((f) => f.id === id);
+  const set: Set<string> = !sch && !fp && p ? p.sel : E.selection;
+  const on = mode === "add" ? true : mode === "remove" ? false : !set.has(id);
+  if (on) set.add(id); else set.delete(id);
+  const m = sch ? (CollabTools.sch as unknown as { putSelEnd?: (id: string, end: 0 | 1 | null) => void } | undefined) : null;
+  if (m && m.putSelEnd) m.putSelEnd(id, on ? end : null);
+  if (on && fp) E.selected = fp as typeof E.selected;
+  else if (E.selected && !E.selection.has(E.selected.id)) E.selected = null;
+  if (!E.selected) for (const sid of E.selection) { const f = (E.items as { id: string }[]).find((q) => q.id === sid); if (f) { E.selected = f as typeof E.selected; break; } }
+  selectionChanged();
+}
+/** Everything selected, the editor's set and the tool module's own picks together (ids, pads as "fp#n"). */
+export function selectedAnywhere(): Set<string> {
+  const out = new Set<string>(E.selection); if (E.selected) out.add(E.selected.id);
+  if (isSch()) { const s = schState(); if (s && s.sel) out.add(s.sel); }
+  else { const p = pcbState(); if (p) { for (const id of p.sel) out.add(id); const ps = (p as { padSel?: string | null }).padSel; if (ps) out.add(ps); } }
+  return out;
+}
+
 /** Union bbox (mm) of the selection, or null. */
 export function selectionBox(): [number, number, number, number] | null {
   let b: [number, number, number, number] | null = null;

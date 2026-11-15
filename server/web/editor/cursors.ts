@@ -10,7 +10,8 @@
 // the stock cursors (GetStockCursor).
 import { KICURSOR_IMAGES } from "./kicursors.generated";
 import { E } from "./state";
-import { stage } from "./view";
+import { isSch, stage } from "./view";
+import { ctrlDown, modifierCursorOf, modifiersState } from "./selmodes";
 import { activeModule, moduleTool, toolCtx } from "./tools";
 
 // wxCURSOR_BULLSEYE (a stock cursor the browser does not have): a target with its hotspot in the middle
@@ -35,7 +36,7 @@ export function toolCursor(declared: string): string {
 /** The modifier keys as the last key or pointer event left them (wxGetMouseState in OnIdle). */
 const mods = { shift: false, ctrl: false, alt: false };
 export function noteModifiers(ev: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }): void {
-  const c = ev.ctrlKey || ev.metaKey;
+  const c = ctrlDown(ev);   // MD_CTRL: Cmd on macOS, Control elsewhere
   if (mods.shift === ev.shiftKey && mods.ctrl === c && mods.alt === ev.altKey) return;
   mods.shift = ev.shiftKey; mods.ctrl = c; mods.alt = ev.altKey;
   refreshCursor();
@@ -45,8 +46,9 @@ export function noteModifiers(ev: { shiftKey: boolean; ctrlKey: boolean; metaKey
 /** The modifier state as the cursor logic last saw it. */
 export function heldModifiers(): { shift: boolean; ctrl: boolean; alt: boolean } { return { shift: mods.shift, ctrl: mods.ctrl, alt: mods.alt }; }
 
-export function modifierCursor(shift: boolean, ctrl: boolean): string | null {
-  return ctrl && shift ? "SUBTRACT" : shift ? "ADD" : ctrl ? "XOR" : null;
+export function modifierCursor(shift: boolean, ctrl: boolean, ctrlHighlights = false): string | null {
+  // the modifier state as booleans: Ctrl is already MD_CTRL here, so hand modifiersState a Control key on any platform
+  return modifierCursorOf(modifiersState({ shiftKey: shift, ctrlKey: ctrl, metaKey: false }, { mac: false, ctrlHighlights }));
 }
 
 type CursorModule = { cursorNow?: (ctx: unknown) => string | null; state?: { autoCursor?: string | null; hyperHover?: unknown } };
@@ -67,7 +69,7 @@ export function currentCursor(): string {
     const m = activeModule() as CursorModule | null;
     if ((E.drag && E.drag.moved) || (E.fdrag && E.fdrag.moved)) return "MOVING";
     if (m && m.cursorNow) { try { const c = m.cursorNow(toolCtx()); if (c) return c; } catch (e) { console.warn(e); } }
-    const mc = modifierCursor(mods.shift, mods.ctrl); if (mc) return mc;
+    const mc = modifierCursor(mods.shift, mods.ctrl, !isSch() && !!E.ctrlClickHighlight && E.DOC_TYPE !== "footprint"); if (mc) return mc;
     const st = m && m.state;
     if (st && st.autoCursor) return st.autoCursor;
     if ((st && st.hyperHover) || E.hyperHover) return "HAND";   // SCH_ITEM::HasHoveredHypertext (editor/hypertext.ts)

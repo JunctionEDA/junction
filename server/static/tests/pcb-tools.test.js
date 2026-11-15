@@ -1436,7 +1436,7 @@ test("dynamic ratsnest: one line per net from the moving pads to the nearest sta
 
 test("selection modifiers as SELECTION_TOOL::setModifiersState: Shift adds, Ctrl toggles, Ctrl+Shift removes", () => {
   assert.equal(P.selMode(ev()), null); assert.equal(P.selMode(ev({ shiftKey: true })), "add");
-  assert.equal(P.selMode(ev({ ctrlKey: true })), "toggle"); assert.equal(P.selMode(ev({ metaKey: true })), "toggle", "Cmd on macOS");
+  assert.equal(P.selMode(ev({ ctrlKey: true })), "toggle"); assert.equal(P.selMode(ev({ metaKey: true })), null, "MD_CTRL is Control off macOS: the Super key toggles nothing");
   assert.equal(P.selMode(ev({ ctrlKey: true, shiftKey: true })), "remove");
   const doc = fixture(); const { ctx } = fakeCtx(doc); pcb.onDocChanged(ctx); P.state.sel.clear();
   pcb.onSelectDown(ev(), [112, 50], ctx); assert.deepEqual([...P.state.sel], ["s-1"]);

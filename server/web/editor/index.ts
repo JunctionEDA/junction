@@ -24,12 +24,12 @@ import { state, store } from "./appstore";
 import { closeThread, placeComment } from "./comments";
 import { noteModifiers, refreshCursor } from "./cursors";
 import { followHypertext } from "./hypertext-follow";
-import { dragKeeps, dragModifier, selModifier } from "./selmodes";
+import { IS_WINDOWS, clickMode, dragKeeps, dragModifier, hasModifier, modifiersState, type ModKeys, type ModOpts } from "./selmodes";
 import { renderObjects, snapMm, syncItemsFromDoc, updateGridStatus, applyChanges, enterSheet, openDoc } from "./doc";
 import { $ } from "./dom";
 import { IS_MAC } from "../keys";
-import { cancelLongPress, moveLongPress, openClarifyMenu, openContextMenu, startLongPress } from "./contextmenu";
-import { DRAG_THRESHOLD_PX, cancelInteraction, clearAllSelection, markerUnder, rotateFieldMove, startFieldMove, copperUnderBeatsFootprint, installGestures, pinForClick, registerPointerUp, selectionChanged, selectionIds, startMove } from "./gestures";
+import { cancelLongPress, candidatesAt, moveLongPress, openClarifyMenu, openContextMenu, startLongPress } from "./contextmenu";
+import { DRAG_THRESHOLD_PX, cancelInteraction, clearAllSelection, markerUnder, rotateFieldMove, startFieldMove, copperUnderBeatsFootprint, installGestures, pinForClick, registerPointerUp, selectionChanged, selectionIds, startMove, applyPickMode, selectedAnywhere } from "./gestures";
 import { loadMe, navigate, route } from "./home";
 import { sendOp } from "./net";
 import { applyTheme, syncSchModes } from "./panes";
@@ -44,7 +44,7 @@ import "./panels/index";
 import { activeModule, commitChanges, commitObservers, deleteSelected, deleteSelection, moduleTool, moveOp, publishUndo, redoLast, redoStack, rotateSelected, runModuleHotkey, selectAll, setTool, toolCtx, undoLast, undoStack, unlockedForEdit } from "./tools";
 import { api, closePopover, toast } from "./util";
 import { saveTextDocument } from "./projectfile";
-import { applyView, cmtPanel, dragG, fitView, isSch, pxPerMm, requestRender, stage, world, worldMm, zoomBy } from "./view";
+import { applyView, cmtPanel, dragG, fitView, isSch, pxPerMm, requestRender, requestRepaint, stage, world, worldMm, zoomBy } from "./view";
 import type { ItemSummary, SheetEntry } from "./types";
 /** The schematic module's drag in flight (sch-tools S.drag), as far as the app reads it. */
 type SchDrag = { moved?: boolean; last: number[]; kind?: string };
@@ -175,10 +175,12 @@ window.addEventListener("pointerup", () => cancelLongPress(), true);
 window.addEventListener("pointercancel", () => cancelLongPress(), true);
 
 // Alt+click: KiCad's Clarify Selection popup when more than one item is under the cursor (window capture, ahead of the
-// tool modules' own stage listeners)
+// tool modules' own stage listeners).  SELECTION_TOOL::setModifiersState: m_skip_heuristics = Alt, never on MS Windows
+// (Alt is the system menu's there); with Shift / Ctrl held too the pick is added / toggled / removed (m_additive ...)
 window.addEventListener("pointerdown", (ev) => {
-  if (ev.button !== 0 || !ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey || !(ev.target instanceof Element) || !stage.contains(ev.target) || ev.target.closest("#cmtPanel")) return;
-  if (openClarifyMenu(ev)) { ev.stopImmediatePropagation(); ev.preventDefault(); }
+  if (ev.button !== 0 || !ev.altKey || IS_WINDOWS || !(ev.target instanceof Element) || !stage.contains(ev.target) || ev.target.closest("#cmtPanel")) return;
+  const ms = modifiersState(ev, modOpts()); if (ms.highlight) return;
+  if (openClarifyMenu(ev, clickMode(ms))) { ev.stopImmediatePropagation(); ev.preventDefault(); }
 }, true);
 
 // SCH_SELECTION_TOOL: a click (IsClick: press and release without a drag) on hypertext under the cursor
@@ -211,7 +213,8 @@ window.addEventListener("pointerup", (ev) => {
 }, true);
 
 stage.addEventListener("pointerdown", (ev) => {
-  if (ev.button !== 0 || E.tool !== "select" || !E.kdoc || E.selection.size < 2 || E.viewOnly || ev.shiftKey || ev.ctrlKey || ev.metaKey) return;   // a modifier edits the selection
+  if (ev.button !== 0 || E.tool !== "select" || !E.kdoc || E.selection.size < 2 || E.viewOnly) return;
+  { const ms = modifiersState(ev, modOpts()); if (hasModifier(ms) || ms.highlight) return; }   // a modifier edits the selection (or highlights)
   if (isSch() && CollabTools.sch && CollabTools.sch.state.drag) return;   // a Move / paste is following the cursor: this click drops it (sch-tools)
   const mm = worldMm(ev); const hit = hitAny(mm);
   if (!hit || !E.selection.has(hit.id)) return;
@@ -238,16 +241,28 @@ stage.addEventListener("pointerdown", (ev) => {
   if (mod && moduleTool(E.tool) && mod.onPointerDown) { if (E.viewOnly && E.tool !== "highlight") { toast("View-only access"); return; } try { if (mod.onPointerDown(ev, [x, y], toolCtx())) { stage.setPointerCapture(ev.pointerId); ev.preventDefault(); return; } } catch (e) { console.warn(e); } }
   // PCB_SELECTION_TOOL::Main: with "Ctrl+click highlights net" (m_CtrlClickHighlight, not in the Footprint Editor) a
   // Ctrl+click (no Shift) runs highlightNet at the click instead of toggling the selection.  Only the click does
-  // (evt->IsClick( BUT_LEFT )): m_drag_additive stays Ctrl||Shift, so a Ctrl+drag still draws a toggling box
-  if (selModifier(ev) === "toggle" && !isSch() && E.ctrlClickHighlight && E.DOC_TYPE !== "footprint" && E.tool === "select" && E.kdoc) {
+  // (evt->IsClick( BUT_LEFT )): m_drag_additive stays Ctrl||Shift, so a Ctrl+drag still draws a box, one that adds
+  // (SelectMultiple( area, m_subtractive, m_exclusive_or ) with m_exclusive_or false under this setting)
+  if (E.tool === "select" && E.kdoc && modifiersState(ev, modOpts()).highlight) {
     const pm = CollabTools.pcb as unknown as { highlightNetAt?: (c: unknown, at: number[]) => unknown } | undefined;
     if (pm && pm.highlightNetAt) {
       const pst = CollabTools.pcb && (CollabTools.pcb.state as { downHandled?: unknown } | undefined); if (pst) pst.downHandled = ev;
-      E.boxSel = { start: [x, y], cur: [x, y], pts: [[x, y]], lasso: E.selMode === "lasso", add: dragKeeps(ev), mode: dragModifier(ev, false), startClient: [ev.clientX, ev.clientY], clickHighlight: true };
+      E.boxSel = { start: [x, y], cur: [x, y], pts: [[x, y]], lasso: E.selMode === "lasso", add: dragKeeps(ev, modOpts()), mode: dragModifier(ev, false, modOpts()), startClient: [ev.clientX, ev.clientY], clickHighlight: true };
       stage.setPointerCapture(ev.pointerId); ev.preventDefault(); return;
     }
   }
-  if (E.tool === "select" && E.kdoc && !ev.shiftKey && window.KDialogs) {   // KiCad: a click on a field selects (and drags) the field, not its symbol
+  // SELECTION_TOOL with a modifier (hasModifier): the press only arms.  A click (IsClick) runs selectPoint with the
+  // modifiers on the release (modifierClick), whatever lies under it, and a drag (IsDrag) draws a selection box
+  // even when it starts on an item, selected or not (SCH_SELECTION_TOOL / PCB_SELECTION_TOOL: hasModifier() ->
+  // selectMultiple), with the drag's own modifiers (m_drag_additive, m_drag_subtractive)
+  if (E.tool === "select" && E.kdoc && hasModifier(modifiersState(ev, modOpts()))) {
+    const pst = !isSch() && CollabTools.pcb && (CollabTools.pcb.state as { downHandled?: unknown } | undefined); if (pst) pst.downHandled = ev;
+    const ms = modifiersState(ev, modOpts());
+    E.boxSel = { start: [x, y], cur: [x, y], pts: [[x, y]], lasso: E.selMode === "lasso", add: dragKeeps(ev, modOpts()), mode: dragModifier(ev, isSch(), modOpts()), startClient: [ev.clientX, ev.clientY],
+      modClick: { mode: clickMode(ms)!, ev: { shiftKey: ev.shiftKey, ctrlKey: ev.ctrlKey, metaKey: ev.metaKey, altKey: ev.altKey, clientX: ev.clientX, clientY: ev.clientY, button: 0, pointerId: ev.pointerId, pointerType: ev.pointerType } } };
+    stage.setPointerCapture(ev.pointerId); ev.preventDefault(); return;
+  }
+  if (E.tool === "select" && E.kdoc && window.KDialogs) {   // KiCad: a click on a field selects (and drags) the field, not its symbol
     const f = KiCadCanvas.fieldAt(E.kdoc, x, y, E.hiddenLayers);
     const won = f && !isSch() && E.hooks.fieldWins ? E.hooks.fieldWins([x, y], f.item.id, f.name, ev) : "field";
     if (won === "menu") { const pst = CollabTools.pcb && (CollabTools.pcb.state as { downHandled?: unknown } | undefined); if (pst) pst.downHandled = ev; ev.preventDefault(); return; }   // doSelectionMenu: the pick comes from the menu
@@ -263,19 +278,6 @@ stage.addEventListener("pointerdown", (ev) => {
     }
   }
   let pinPromote: { id: string; number: string } | null = null, pinClick: { id: string; number: string } | null = null;
-  // Shift+click adds a pin to the selected pins, Ctrl+click toggles it, Ctrl+Shift+click removes it (SCH_SELECTION_TOOL
-  // with the pin ahead of its symbol), while the selection holds only pins
-  const pinMode = E.tool === "select" && E.kdoc && isSch() && !ev.altKey ? selModifier(ev) : null;
-  if (pinMode && !E.selection.size && !E.selected && !E.selField) {
-    const pin = pinForClick([x, y]);
-    if (pin) {
-      const pins = E.selPins as { id: string; number: string }[]; const i = pins.findIndex((p) => p.id === pin.id && p.number === pin.number);
-      if (pinMode === "add") { if (i < 0) E.selPins = [...pins, pin]; }
-      else if (pinMode === "remove") { if (i >= 0) E.selPins = pins.filter((_p, j) => j !== i); }
-      else E.selPins = i >= 0 ? pins.filter((_p, j) => j !== i) : [...pins, pin];
-      drawSelection(); renderProps(); renderObjects(); requestRender(); ev.preventDefault(); return;
-    }
-  }
   if (E.tool === "select" && E.kdoc && isSch() && !ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
     // SCH_SELECTION_TOOL: a pin under the cursor is selected on its own, ahead of its symbol's body
     const pin = pinForClick([x, y]);
@@ -312,7 +314,7 @@ stage.addEventListener("pointerdown", (ev) => {
   // footprint it is FOOTPRINT::HitTest( point, margin ): its bounding box grown by the 20 px grip margin, so a press up
   // to 20 px outside a selected footprint (even on another item) drags the selection
   let gripSelected = false;
-  if (!isSch() && E.tool === "select" && E.kdoc && !smodeOf(ev) && !(best && selectedSet()?.has(best.id))) {
+  if (!isSch() && E.tool === "select" && E.kdoc && !(best && selectedSet()?.has(best.id))) {
     const sel = selectedSet(), m = 20 / Math.max(1e-9, pxPerMm());
     if (sel) for (const id of sel) {
       const it = E.kdoc.items.get(id); const b = it && it.kind === "footprint" ? it.bbox : null; if (!b) continue;
@@ -326,7 +328,7 @@ stage.addEventListener("pointerdown", (ev) => {
   // HitTest takes its pads), so a drag moves the selection; only the click (released where it was pressed) picks the
   // pad, as selectPoint does on the button-up
   let padClick: string | null = null;
-  if (!isSch() && E.tool === "select" && best && !smodeOf(ev) && selectedSet()?.has(best.id)) {
+  if (!isSch() && E.tool === "select" && best && selectedSet()?.has(best.id)) {
     let pad: { item?: KItem; index?: number } | null = null;
     try { pad = KiCadCanvas.padAt ? KiCadCanvas.padAt(E.kdoc, x, y) : null; } catch (e) { pad = null; }
     const f = store.get().filter as Record<string, boolean>;
@@ -335,10 +337,7 @@ stage.addEventListener("pointerdown", (ev) => {
   if (!isSch() && E.tool === "select" && mod && mod.selectPadAt && !padClick && !gripSelected) {
     const ps = CollabTools.pcb && CollabTools.pcb.state;
     let r: unknown = false;
-    const padMode = smodeOf(ev);
-    if (!padMode || padMode === "add") { try { r = mod.selectPadAt(ev, [x, y], toolCtx()); } catch (e) { console.warn(e); } }
-    // Shift+click on a pad adds it to the pads (and items) already selected (PCB_SELECTION_TOOL selectPoint, add mode)
-    if (r && padMode === "add") { drawSelection(); renderProps(); renderObjects(); requestRender(); ev.preventDefault(); return; }
+    try { r = mod.selectPadAt(ev, [x, y], toolCtx()); } catch (e) { console.warn(e); }
     if (r === "box") { E.selection.clear(); E.selected = null; E.selField = null; E.selPins = []; drawSelection(); renderProps(); renderObjects(); requestRender(); startModuleBox(ev, x, y); return; }
     // a press on the selected pad: a move promotes it to its footprint (FilterCollectorForFreePads, allow free pads off)
     padWasSelected = r === true;
@@ -348,24 +347,15 @@ stage.addEventListener("pointerdown", (ev) => {
   // (KiCad picks the item whose geometry is under the cursor; the footprint wins on its own pads and outline).
   // A press on a footprint that is already selected drags the selection, whatever is under it (DRAG_SELECTED:
   // PCB_SELECTION_TOOL's SelectionContains( DragOrigin ) check comes before any new pick)
-  const pressOnSelected = !isSch() && !!best && !smodeOf(ev) && !!selectedSet()?.has(best.id);
+  const pressOnSelected = !isSch() && !!best && !!selectedSet()?.has(best.id);
   if (!isSch() && best && !pressOnSelected && E.lastFpHit && (!E.lastFpHit.onGeom || copperUnderBeatsFootprint([x, y])) && mod && mod.onSelectDown && E.tool === "select") {
     try { const r = mod.onSelectDown(ev, [x, y], toolCtx()); if (r) { E.selection.clear(); E.selected = null; E.selField = null; E.selPins = []; drawSelection();   /* the footprint the box reached is dropped, the module's own pick stays (clearSelection would clear it too) */ renderProps(); renderObjects(); if (r === "box") startModuleBox(ev, x, y); else { stage.setPointerCapture(ev.pointerId); ev.preventDefault(); } return; } } catch (e) { console.warn(e); }
   }
   if (!best && mod && mod.onSelectDown) { try { const r = mod.onSelectDown(ev, [x, y], toolCtx()); if (r) { if (r === "box") startModuleBox(ev, x, y); else { stage.setPointerCapture(ev.pointerId); ev.preventDefault(); } return; } } catch (e) { console.warn(e); } }
-  const smode = selModifier(ev);
   if (!best) {
-    if (!smode) { clearSelection(); drawSelection(); renderProps(); renderObjects(); }
-    if (E.tool === "select" && E.kdoc) { { const dm = dragModifier(ev, isSch()); E.boxSel = { start: [x, y], cur: [x, y], pts: [[x, y]], lasso: E.selMode === "lasso", add: dragKeeps(ev), mode: dm, startClient: [ev.clientX, ev.clientY] }; } stage.setPointerCapture(ev.pointerId); ev.preventDefault(); }
+    clearSelection(); drawSelection(); renderProps(); renderObjects();
+    if (E.tool === "select" && E.kdoc) { E.boxSel = { start: [x, y], cur: [x, y], pts: [[x, y]], lasso: E.selMode === "lasso", add: dragKeeps(ev, modOpts()), mode: dragModifier(ev, isSch(), modOpts()), startClient: [ev.clientX, ev.clientY] }; stage.setPointerCapture(ev.pointerId); ev.preventDefault(); }
     return;
-  }
-  if (smode) {                                         // KiCad: Shift+click adds, Ctrl+click toggles, Ctrl+Shift+click removes
-    E.selPins = [];                                    // (the pin selection does not mix with whole items here)
-    if (E.selected) E.selection.add(E.selected.id);   // the single selection joins the set it is being extended to
-    if (smode === "add") E.selection.add(best.id); else if (smode === "remove") E.selection.delete(best.id); else if (E.selection.has(best.id)) E.selection.delete(best.id); else E.selection.add(best.id);
-    E.selected = E.selection.has(best.id) ? best : (E.selected && E.selected.id === best.id ? null : E.selected);
-    if (!E.selected) for (const id of E.selection) { const f = E.items.find((q: ItemSummary) => q.id === id); if (f) { E.selected = f; break; } }
-    drawSelection(); renderProps(); renderObjects(); requestRender(); return;
   }
   // KiCad's default left drag (MOUSE_DRAG_ACTION::DRAG_SELECTED): with nothing selected a drag draws a selection
   // box even when it starts on a part; only an existing selection moves.  The press still selects, as the click would.
@@ -378,7 +368,7 @@ stage.addEventListener("pointerdown", (ev) => {
   if (E.viewOnly || !E.ws || E.ws.readyState !== 1) return;
   if (!isSch() && !unlockedForEdit([best.id], true).length) return;   // a locked footprint is selected by the click but does not follow a drag
   { const g = groupExpand([best.id]); if (g.size > 1) { E.selection = g; drawSelection(); renderObjects(); startGroupDrag({ id: best.id, fp: best }, [x, y], ev); return; } }   // a group member moves its group
-  E.drag = { fp: best, startMm: [x, y], curMm: [best.x / E.IU, best.y / E.IU], moved: false, grabOff: [x - best.x / E.IU, y - best.y / E.IU], wires: [], engine: false, clickPin: pinClick, clickPad: padClick };
+  E.drag = { fp: best, startMm: [x, y], curMm: [best.x / E.IU, best.y / E.IU], moved: false, grabOff: [x - best.x / E.IU, y - best.y / E.IU], wires: [], engine: false, clickPin: pinClick, clickPad: padClick, clickAt: gripSelected ? [x, y] : null };
   // Schematic moves run through sch-tools' connected drag: attached wires stretch (with bends in
   // 90° mode), a pin or junction under a moved pin gets a new wire, no-connects follow — KiCad's drag.
   if (E.kdoc && isSch() && CollabTools.sch && CollabTools.sch.beginDrag) {
@@ -394,13 +384,83 @@ function selectPinOnly(pin: { id: string; number: string }): void {
   clearSelection(); E.selPins = [pin]; drawSelection(); renderProps(); renderObjects(); requestRender();
 }
 
+/**
+ * A press the selection's grip margin took (SelectionContains( DragOrigin ): a drag would move the selection) that
+ * ends as a click: IsClick runs selectPoint there, which picks what is really under the cursor (or nothing).
+ */
+function clickSelectAt(mm: [number, number]): void {
+  clearAllSelection(false);
+  modifierClick(mm, { mode: "add", ev: { shiftKey: false, ctrlKey: false, metaKey: false, altKey: false, clientX: 0, clientY: 0, button: 0, pointerId: 1, pointerType: "mouse" } });
+  selectionChanged();
+}
+
 /** selectPoint on a pad of the selected footprint: the click (no drag) leaves that pad alone selected. */
 function selectPadOnly(key: string): void {
   const ps = CollabTools.pcb && CollabTools.pcb.state; if (!E.kdoc || !ps || !E.kdoc.items.has(key.slice(0, key.lastIndexOf("#")))) return;
   clearSelection(); ps.padSel = key; drawSelection(); renderProps(); renderObjects(); requestRender();
 }
 
-const smodeOf = (ev: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => selModifier(ev);
+/** setModifiersState's options here: ctrlClickHighlights() in the board editor (not the Footprint Editor). */
+function modOpts(): ModOpts { return { ctrlHighlights: !isSch() && !!E.ctrlClickHighlight && E.DOC_TYPE !== "footprint" }; }
+
+/**
+ * SCH_SELECTION_TOOL / PCB_SELECTION_TOOL on IsClick( BUT_LEFT ) with a modifier held: selectPoint( where, m_additive,
+ * m_subtractive, m_exclusive_or ) on what the plain click would pick there.  Shift adds, Ctrl (Cmd) toggles, Ctrl+Shift
+ * removes; nothing under the cursor leaves the selection as it was.
+ */
+type ModClick = { mode: "add" | "toggle" | "remove"; ev: ModKeys & { clientX: number; clientY: number; button: number; pointerId: number; pointerType: string } };
+function modifierClick(mm: [number, number], mc: ModClick): void {
+  if (!E.kdoc) return;
+  const [x, y] = mm, mode = mc.mode, ctx = toolCtx(), mod = activeModule();
+  const fake = Object.assign({}, mc.ev, { preventDefault() { /* replayed */ }, stopPropagation() { /* replayed */ }, stopImmediatePropagation() { /* replayed */ } }) as unknown as PointerEvent;
+  const slop = 5 / Math.max(1, E.zoom * 0.6);
+  if (isSch()) {
+    const sm = CollabTools.sch as unknown as { state?: { sel?: string | null }; _?: { pickNonSymbol?: (c: unknown, p: number[]) => KItem | null; lineEndAt?: (it: KItem, p: number[], t: number) => 0 | 1 | null; selectThreshold?: (c: unknown) => number } } | undefined;
+    // pins: while the selection holds nothing but pins, a pin under the cursor (ahead of its symbol) is what changes
+    if (!E.selection.size && !E.selected && !E.selField && !(sm && sm.state && sm.state.sel)) {
+      const pin = pinForClick([x, y]);
+      if (pin) {
+        const pins = E.selPins as { id: string; number: string }[]; const i = pins.findIndex((p) => p.id === pin.id && p.number === pin.number);
+        if (mode === "add") { if (i < 0) E.selPins = [...pins, pin]; }
+        else if (mode === "remove") { if (i >= 0) E.selPins = pins.filter((_p, j) => j !== i); }
+        else E.selPins = i >= 0 ? pins.filter((_p, j) => j !== i) : [...pins, pin];
+        selectionChanged(); return;
+      }
+    }
+    // the module's items (wires, labels, junctions, text, graphics, sheets' pins ...) come first, as its own press does
+    let hit: KItem | null = null; try { hit = sm && sm._ && sm._.pickNonSymbol ? sm._.pickNonSymbol(ctx, [x, y]) : null; } catch (e) { console.warn(e); }
+    if (hit) {
+      let end: 0 | 1 | null = null; try { if (sm && sm._ && sm._.lineEndAt && sm._.selectThreshold) end = sm._.lineEndAt(hit, [x, y], sm._.selectThreshold(ctx)); } catch (e) { end = null; }
+      applyPickMode(hit.id, mode, end); return;
+    }
+    let best = nearestFootprint(x, y, slop) as ItemSummary | null;
+    // a symbol's field: this selection model keeps fields out of a multi-selection, so its symbol stands in for it
+    if (!best) { const f = KiCadCanvas.fieldAt(E.kdoc, x, y, E.hiddenLayers); if (f) best = (E.items as ItemSummary[]).find((q) => q.id === f.item.id) || null; }
+    if (best) applyPickMode(best.id, mode);
+    return;
+  }
+  // the board: PCB_SELECTION_TOOL::selectPoint with m_SelectedOnly = m_subtractive (Ctrl+Shift looks only at what is
+  // selected under the cursor, so it can take out an item that lies beneath an unselected one)
+  if (CollabTools.pcb && CollabTools.pcb.leaveGroupOutside) { try { CollabTools.pcb.leaveGroupOutside([x, y], ctx); } catch (e) { console.warn(e); } }
+  if (mode === "remove") {
+    const sel = selectedAnywhere(); let ids: string[] = [];
+    try { ids = candidatesAt([x, y]).filter((id) => sel.has(id)); } catch (e) { console.warn(e); }
+    const fp = nearestFootprint(x, y, slop) as ItemSummary | null; if (!ids.length && fp && sel.has(fp.id)) ids = [fp.id];
+    const id = ids[0]; if (!id) return;
+    const ps = CollabTools.pcb && (CollabTools.pcb.state as { padSel?: string | null } | undefined);
+    if (id.includes("#")) { if (ps && ps.padSel === id) ps.padSel = null; selectionChanged(); return; }
+    applyPickMode(id, "remove"); return;
+  }
+  const best = nearestFootprint(x, y, slop) as ItemSummary | null;
+  // Shift on a pad adds the pad to the pads (and items) already selected
+  if (mode === "add" && mod && mod.selectPadAt) { let r: unknown = false; try { r = mod.selectPadAt(fake, [x, y], ctx); } catch (e) { console.warn(e); } if (r) { selectionChanged(); return; } }
+  // a track / via / graphic under the cursor beats a footprint whose only claim is its bounding box
+  if (mod && mod.onSelectDown && (!best || (E.lastFpHit && (!E.lastFpHit.onGeom || copperUnderBeatsFootprint([x, y]))))) {
+    let r: unknown = false; try { r = mod.onSelectDown(fake, [x, y], ctx); } catch (e) { console.warn(e); }
+    if (r) { selectionChanged(); return; }
+  }
+  if (best) applyPickMode(best.id, mode);
+}
 /** PCB_SELECTION_TOOL::selectMultiple re-reads the modifiers on every event: Shift / Ctrl pressed or let go mid-drag change the mode. */
 function boxSelModifiers(ev: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean; altKey: boolean }): void {
   const b = E.boxSel as { add?: boolean; mode?: string | null } | null; if (!b) return;
@@ -514,6 +574,9 @@ const onPointerUp = (ev: PointerEvent) => {
   if (E.pan) { E.pan = null; return; }
   if (E.fdrag) { if (!E.fdrag.sticky) commitFieldDrag(); return; }   // a Move (M) drops on the next click instead
   if (E.zoomRect) { finishZoomRect(ev); return; }
+  if (E.boxSel && E.boxSel.modClick && Math.hypot(ev.clientX - E.boxSel.startClient[0], ev.clientY - E.boxSel.startClient[1]) < 4) {
+    const b = E.boxSel; E.boxSel = null; requestRepaint(); modifierClick(b.start as [number, number], b.modClick as ModClick); return;   // IsClick: selectPoint with the modifiers
+  }
   if (E.boxSel) { finishBoxSel(ev); return; }
   if (E.tool === "measure" && ev.button === 0) { measureUp(ev); return; }
   const modU = activeModule();
@@ -529,11 +592,11 @@ const onPointerUp = (ev: PointerEvent) => {
     if (E.kdoc) syncItemsFromDoc(); E.selected = E.items.find((f: ItemSummary) => f.id === fpE.id) || E.selected; drawSelection(); renderProps(); requestRender();
     return;
   }
-  const fp = E.drag.fp, wasMoved = E.drag.moved, wires = E.drag.wires || [], clickPin0 = E.drag.clickPin as { id: string; number: string } | null, clickPad0 = (E.drag.clickPad as string | null) || null;
+  const fp = E.drag.fp, wasMoved = E.drag.moved, wires = E.drag.wires || [], clickPin0 = E.drag.clickPin as { id: string; number: string } | null, clickPad0 = (E.drag.clickPad as string | null) || null, clickAt0 = (E.drag.clickAt as [number, number] | null) || null;
   const nx = Math.round(E.drag.curMm[0] * E.IU), ny = Math.round(E.drag.curMm[1] * E.IU);
   E.drag = null; dragG.replaceChildren();
   sendPresence([nx / E.IU, ny / E.IU], []);
-  if (!wasMoved) { if (clickPin0) selectPinOnly(clickPin0); else if (clickPad0) selectPadOnly(clickPad0); return; }
+  if (!wasMoved) { if (clickPin0) selectPinOnly(clickPin0); else if (clickPad0) selectPadOnly(clickPad0); else if (clickAt0) clickSelectAt(clickAt0); return; }
   const changes: KChange[] = [];
   if (nx !== fp.x || ny !== fp.y) changes.push(moveOp(fp, nx, ny));
   for (const w of wires) changes.push({ id: w.item.id, kind: "MODIFIED", typeName: "SCH_LINE", sexpr: KiCadCanvas.serializeItem(E.kdoc, w.item) });

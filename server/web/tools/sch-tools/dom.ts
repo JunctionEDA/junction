@@ -1,6 +1,7 @@
 import type { SchCtx, Pt, Mods, PtrEvent } from "./types";
 import { lineEndAt, selectThreshold, setSelEnd } from "./line-ends";
 import { root } from "../root";
+import { hasModifier, modifiersState } from "../../editor/selmodes";
 import { cancelCarry, placeText, startCarry } from "./carry";
 import { cancelPinPlace } from "./sheets";
 import { schArcUndo } from "./arcs";
@@ -130,7 +131,11 @@ export function onDownCapture(ev: PointerEvent) {
     if (!(S.drag.brk && breakAgain(ctx))) endDrag(ctx, true);
     ev.stopImmediatePropagation(); ev.preventDefault(); return;
   }
-  if (!ev.shiftKey && pointEditStart(ctx, mm, ev)) { ev.stopImmediatePropagation(); ev.preventDefault(); return; }   // SCH_POINT_EDITOR runs ahead of the selection tool
+  // SCH_SELECTION_TOOL::Main: with a modifier held (hasModifier) the press belongs to the selection tool, even over an
+  // edit point ("Distinguish point editor from selection modification by checking modifiers") and over a wire, label
+  // or anything else this module picks: the editor arms it, and the click adds / toggles / removes (or the drag boxes)
+  if (hasModifier(modifiersState(ev))) return;
+  if (pointEditStart(ctx, mm, ev)) { ev.stopImmediatePropagation(); ev.preventDefault(); return; }   // SCH_POINT_EDITOR runs ahead of the selection tool
   // SCH_SELECTION_TOOL runs autostartEvent only for IsClick( BUT_LEFT ): remember the press, and start the line on
   // the release if the pointer has not travelled (a press-drag from the same place box-selects or moves instead)
   S.autoPress = autostartAt(ctx, mm, ev, true) ? { mm, client: [ev.clientX, ev.clientY], mods: ev } : null;
@@ -141,7 +146,9 @@ export function onDownCapture(ev: PointerEvent) {
   // already selected keeps the selection as it is, so a drag moves what was selected (SCH_SELECTION_TOOL::Main only
   // re-selects on a click, which onUpCapture does)
   const already = S.sel === hit.id;
-  S.sel = hit.id; S.hover = null; ctx.setSelected(null);
+  S.sel = hit.id; S.hover = null;
+  // selectPoint without a modifier: ClearSelection() first, so symbols (or other items) selected with it go
+  if (ctx.selection && ctx.selection.size && ctx.setSelection) { const keepEnds = S.selEnds; ctx.setSelection([]); S.selEnds = keepEnds; } else ctx.setSelected(null);
   if (!already) setSelEnd(hit.id, lineEndAt(hit, mm, selectThreshold(ctx)));
   S.pending = { item: hit, mm };
   try { ctx.stage.setPointerCapture(ev.pointerId); } catch (e) { /* not a real pointer */ }

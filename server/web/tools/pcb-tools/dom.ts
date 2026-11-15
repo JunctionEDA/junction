@@ -1,4 +1,5 @@
 // pcb-tools/dom.ts — DOM: select-mode picking, stolen keys, the layer chip, the text prompt and the image picker.
+import { clickMode, modifiersState } from "../../editor/selmodes";
 import type { Hover, PcbCtx, Pt, PtrEvent } from "./types";
 
 /** The inline prompt: done(text) on Enter, done(null) on Escape or a blur; options are suggestions. */
@@ -61,7 +62,7 @@ export function onStagePointerDown(ev: PointerEvent) {
   ctx.requestRender();
 }
 /** SELECTION_TOOL::setModifiersState: Shift adds, Ctrl (Cmd on macOS) toggles, Ctrl+Shift removes; null replaces. */
-export function selMode(ev: PtrEvent) { const c = !!(ev && (ev.ctrlKey || ev.metaKey)), sh = !!(ev && ev.shiftKey); return c && sh ? "remove" : c ? "toggle" : sh ? "add" : null; }
+export function selMode(ev: PtrEvent) { return ev ? clickMode(modifiersState({ shiftKey: !!ev.shiftKey, ctrlKey: !!ev.ctrlKey, metaKey: !!ev.metaKey, altKey: !!ev.altKey })) : null; }
 export function applySelMode(set: Set<string>, id: string, mode: string | null) { if (mode === "add") set.add(id); else if (mode === "remove") set.delete(id); else if (mode === "toggle") { if (set.has(id)) set.delete(id); else set.add(id); } }
 // KiCad's Ctrl+Shift chords (app.js swallows every Ctrl combo) and Alt+Z, the macOS zone hotkey — Ctrl+Shift+Z is
 // the web's redo — are re-posted under names of our own.

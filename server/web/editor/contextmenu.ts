@@ -17,7 +17,7 @@ import { APP_TOOLS, state, store } from "./appstore";
 import { enterSheet, rootSchematic, setGridPitch } from "./doc";
 import { FP } from "./fpedit";
 import { ARC_EDIT_MODE_MENU, evaluate, GRID_ORIGIN, menuFor, type MenuCtx, type MenuDef, type Resolved } from "./ctxmenus";
-import { activeModuleTool, clearAllSelection, hitsAt, markerUnder, interactionBusy, pcbState, pickAt, schState, selectAt, selectionBox, selectionChanged, selectionIds, selectionItems, selectItemId, stage, startFieldMove, startMove, toolCtx, worldMm, zoomBy } from "./gestures";
+import { activeModuleTool, applyPickMode, clearAllSelection, hitsAt, markerUnder, interactionBusy, pcbState, pickAt, schState, selectAt, selectionBox, selectionChanged, selectionIds, selectionItems, selectItemId, stage, startFieldMove, startMove, toolCtx, worldMm, zoomBy } from "./gestures";
 import { E } from "./state";
 import { HIT_PX, nearestFootprint } from "./selection";
 import { activeModule, deleteSelection, moduleTool, runModuleAction, selectAll, setTool } from "./tools";
@@ -28,6 +28,7 @@ export const tableMenu: { state(): { n: number; block: boolean; merged: boolean;
 import { toast } from "./util";
 import { IS_MAC } from "../keys";
 import { editableCornersSelected } from "./pcbdialogs/vertex-editor";
+import { clickMode, modifiersState } from "./selmodes";
 
 type Mm = [number, number];
 type Run = () => void;
@@ -337,7 +338,7 @@ function describe(it: KItem | string): string {
  * The candidates under the cursor, as ids: on a board a pad under the cursor is its own candidate
  * ("footprintId#padIndex", ahead of its footprint), as PCB_SELECTION_TOOL's collector lists PCB_PAD_T.
  */
-function candidatesAt(mm: Mm, withFields = false): string[] {
+export function candidatesAt(mm: Mm, withFields = false): string[] {
   const hits = hitsAt(mm); const ids = hits.map((it) => it.id);
   if (isSch() || !E.kdoc) return ids;
   // FOOTPRINT::HitTest: a footprint is hit inside its bounding hull, not only on its drawn shapes (as a left click's pickAt)
@@ -452,12 +453,14 @@ function clarifyRows(mm: Mm): CtxItem | null {
  * the cursor in KiCad's "Clarify Selection" popup (doSelectionMenu) — numbered rows, then Select All.  False when the
  * click is not ambiguous, and the click selects as usual.
  */
-export function openClarifyMenu(ev: { clientX: number; clientY: number }): boolean {
+export function openClarifyMenu(ev: { clientX: number; clientY: number }, mode: PickMode | null = null): boolean {
   if (!E.kdoc || state.view !== "editor" || (E.tool !== "select" && E.tool !== "highlight") || interactionBusy()) return false;
   const mm = worldMm(ev); E.lastCursorMm = mm;
   const ids = candidatesAt(mm, true).slice(0, 100); if (ids.length < 2) return false;
-  clarifyPopup(ev, ids, null); return true;
+  clarifyPopup(ev, ids, null, null, mode); return true;
 }
+/** selectPoint's m_additive / m_subtractive / m_exclusive_or for what the Clarify Selection menu picks. */
+type PickMode = "add" | "toggle" | "remove";
 /** BOARD_ITEM::GetMenuImage for a board candidate id (a pad key, a field key or an item id); undefined on a schematic. */
 const SHAPE_KINDS = new Set(["gr_line", "gr_rect", "gr_circle", "gr_arc", "gr_poly", "gr_curve", "gr_bbox", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve"]);
 function menuImage(id: string): string | undefined {
@@ -490,15 +493,21 @@ function menuImage(id: string): string | undefined {
  * candidates aside (COLLECTOR::HasAdditionalItems), Show More Choices... (M), which opens the menu again over all of
  * them.  `then` runs after a pick (the context menu).
  */
-function clarifyPopup(ev: { clientX: number; clientY: number }, ids: string[], then: (() => void) | null, all?: string[] | null): void {
+function clarifyPopup(ev: { clientX: number; clientY: number }, ids: string[], then: (() => void) | null, all?: string[] | null, mode: PickMode | null = null): void {
   runners = new Map(); anchor = null;
   ids = ids.slice(0, 100);
   const hoverOf = candidateHover;
-  const pick = (list: string[]): void => { clearAllSelection(false); for (const id of list) selectCandidate(id); selectionChanged(); if (then) then(); };
+  // selectPoint after doSelectionMenu: without a modifier the pick replaces the selection, with one it is added,
+  // toggled or taken out (a pad or a field, which this selection model keeps on its own, still replaces)
+  const pick = (list: string[]): void => {
+    const items = list.filter((id) => !id.includes("#") && !id.includes("@field:"));
+    if (mode && items.length === list.length) { for (const id of items) applyPickMode(id, mode); if (then) then(); return; }
+    clearAllSelection(false); for (const id of list) selectCandidate(id); selectionChanged(); if (then) then();
+  };
   const items: CtxItem[] = ids.map((id, i): CtxItem => ({ label: i < 9 && !IS_MAC ? `${i + 1}  ${describe(id)}` : describe(id), key: i < 9 ? String(i + 1) : undefined, icon: menuImage(id), hover: hoverOf(id), run: runRow(() => pick([id])) }));
   items.push({ sep: true }, { label: "Select All", key: "A", run: runRow(() => pick(ids.filter((id) => !id.includes("#")))) });
   const more = all ? all.filter((id) => !ids.includes(id)) : [];
-  if (more.length) items.push({ label: "Show More Choices...", key: "M", run: runRow(() => clarifyPopup(ev, ids.concat(more), then, null)) });
+  if (more.length) items.push({ label: "Show More Choices...", key: "M", run: runRow(() => clarifyPopup(ev, ids.concat(more), then, null, mode)) });
   E.contextMenuOpen = true; E.hoverId = null; stage.classList.remove("over-sel");
   store.set({ contextMenu: { id: ++menuId, x: ev.clientX, y: ev.clientY, items } });
   requestRender();
@@ -524,23 +533,35 @@ function reviewRows(mm: Mm, c: MenuCtx): CtxItem[] {
 }
 
 // ---------------------------------------------------------------- long-press disambiguation
-// PCB_SELECTION_TOOL's m_disambiguateTimer: a left press held still for m_DisambiguationMenuDelay (500 ms) over more
-// than one candidate opens the Clarify Selection popup; moving or releasing first cancels it.
+// SCH_SELECTION_TOOL's and PCB_SELECTION_TOOL's m_disambiguateTimer: a left press held still for
+// m_DisambiguationMenuDelay (500 ms) over more than one candidate opens the Clarify Selection popup; moving or
+// releasing first cancels it.  The timer runs with Shift / Ctrl held too, and disambiguateCursor's selectPoint then
+// adds, toggles or removes the pick; a press the point editor took starts none (HasPoint without a modifier).
 let lpTimer = 0, lpAt: { x: number; y: number } | null = null;
 export function startLongPress(ev: PointerEvent): void {
   cancelLongPress();
-  if (ev.button !== 0 || ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey || isSch() || E.tool !== "select" || !E.kdoc) return;
+  if (ev.button !== 0 || ev.altKey || E.tool !== "select" || !E.kdoc) return;
+  const ms = modifiersState(ev, { ctrlHighlights: !isSch() && !!E.ctrlClickHighlight && E.DOC_TYPE !== "footprint" });
+  if (ms.highlight) return;   // a Ctrl click that highlights a net
+  const mode = clickMode(ms);
   lpAt = { x: ev.clientX, y: ev.clientY };
   const at = lpAt;
   lpTimer = window.setTimeout(() => {
     lpTimer = 0; if (!lpAt || lpAt !== at) return;
-    const g = E.drag as { moved?: boolean } | null; if (g && g.moved) return;
-    const ps = pcbState() as unknown as { drag?: { moved?: boolean } | null; move?: unknown; pending?: unknown } | null;
-    if (ps && ((ps.drag && ps.drag.moved) || ps.move)) return;
+    const g = E.drag as { moved?: boolean; engine?: boolean } | null; if (g && g.moved) return;
+    const ps = pcbState() as unknown as { drag?: { moved?: boolean } | null; move?: unknown; pending?: unknown; pedit?: unknown } | null;
+    const ss = schState() as unknown as { drag?: { moved?: boolean } | null; pending?: unknown; pedit?: unknown; wire?: unknown } | null;
+    if (isSch() ? (ss && (ss.pedit || ss.wire || (ss.drag && ss.drag.moved))) : (ps && ((ps.drag && ps.drag.moved) || ps.move || ps.pedit))) return;
+    if (E.fdrag && E.fdrag.moved) return;
     if (candidatesAt(worldMm({ clientX: at.x, clientY: at.y } as PointerEvent), true).length < 2) return;
     // the press becomes the disambiguation: whatever it started (a box, a pending drag) is dropped
     E.boxSel = null; if (g) E.drag = null; if (ps) ps.pending = null; E.fdrag = null;
-    openClarifyMenu({ clientX: at.x, clientY: at.y });
+    if (isSch() && ss) {
+      ss.pending = null;
+      const sm = CollabTools.sch as unknown as { endDrag?: (c: unknown, commit: boolean) => void } | undefined;
+      if (ss.drag && sm && sm.endDrag) { try { sm.endDrag(toolCtx(), false); } catch (e) { console.warn(e); } }
+    }
+    openClarifyMenu({ clientX: at.x, clientY: at.y }, mode);
   }, 500);
 }
 export function moveLongPress(ev: PointerEvent): void { if (lpAt && Math.hypot(ev.clientX - lpAt.x, ev.clientY - lpAt.y) > 4) cancelLongPress(); }

@@ -202,6 +202,12 @@ export function finishBoxSel(ev: { clientX: number; clientY: number }) {
   scopeToEnteredGroup(picked);
   const pcbSel = CollabTools.pcb && CollabTools.pcb.state && CollabTools.pcb.state.sel;
   if (schM && schM.state && !b.add) schM.state.selEnds = null;
+  // a kept selection (m_drag_additive) joins the box as one set: the single primary item, and the schematic module's
+  // own pick (a wire or label clicked before; its partial-end entry stays)
+  if (b.add) {
+    if (E.selected) E.selection.add(E.selected.id);
+    const ss = schM && (schM.state as { sel?: string | null } | undefined); if (ss && ss.sel) { if (E.kdoc.items.has(ss.sel)) E.selection.add(ss.sel); ss.sel = null; }
+  }
   if (!b.add) { E.selPins = []; E.selected = null; E.selection.clear(); if (pcbSel) pcbSel.clear(); if (CollabTools.pcb && CollabTools.pcb.state) CollabTools.pcb.state.padSel = null; }   // a box replaces the board module's own pick too
   // SelectMultiple(area, subtractive, exclusive_or): Ctrl+Shift takes the boxed items out, Ctrl toggles them, Shift adds;
   // on the board Alt only drops the kept selection (m_drag_additive), so Alt+Ctrl+Shift takes out of nothing
