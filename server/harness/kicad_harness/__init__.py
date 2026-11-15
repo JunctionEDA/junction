@@ -32,6 +32,8 @@ _physics.install(Project, Schematic, Board)
 from . import stackups as _stackups
 from .stackups import BUILDS, FABS, FINISHES, MATERIALS, materials
 _stackups.install(Board)
+from . import seat as _seat
+_seat.install(Board)
 from . import craft as _craft
 _craft.install(Board)
 

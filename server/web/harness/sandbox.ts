@@ -23,6 +23,7 @@ import rulesPy from "../../harness/kicad_harness/rules.py";
 import physicsPy from "../../harness/kicad_harness/physics.py";
 import stackupsPy from "../../harness/kicad_harness/stackups.py";
 import craftPy from "../../harness/kicad_harness/craft.py";
+import seatPy from "../../harness/kicad_harness/seat.py";
 import partsInitPy from "../../harness/kicad_harness/parts/__init__.py";
 import datasheetPy from "../../harness/kicad_harness/parts/datasheet.py";
 import footprintPy from "../../harness/kicad_harness/parts/footprint.py";
@@ -66,7 +67,7 @@ function writeLine(msg: unknown): void {
 }
 
 const FILES: [string, string][] = [
-  ["kicad_harness/__init__.py", initPy], ["kicad_harness/project.py", projectPy], ["kicad_harness/transport.py", transportPy], ["kicad_harness/sheet.py", sheetPy], ["kicad_harness/rules.py", rulesPy], ["kicad_harness/physics.py", physicsPy], ["kicad_harness/stackups.py", stackupsPy], ["kicad_harness/craft.py", craftPy],
+  ["kicad_harness/__init__.py", initPy], ["kicad_harness/project.py", projectPy], ["kicad_harness/transport.py", transportPy], ["kicad_harness/sheet.py", sheetPy], ["kicad_harness/rules.py", rulesPy], ["kicad_harness/physics.py", physicsPy], ["kicad_harness/stackups.py", stackupsPy], ["kicad_harness/craft.py", craftPy], ["kicad_harness/seat.py", seatPy],
   ["kicad_harness/parts/__init__.py", partsInitPy], ["kicad_harness/parts/datasheet.py", datasheetPy], ["kicad_harness/parts/footprint.py", footprintPy],
   ["kicad_harness/parts/search.py", searchPy], ["kicad_harness/parts/symbol.py", symbolPy],
 ];
@@ -79,14 +80,19 @@ sys.path.insert(0, "/kh")
 import kicad_harness as kh
 from kicad_harness import parts
 
-def __kc_run(code):
+def __kc_run(code, dry=False):
     out = {"ok": True}
     project = None
     try:
         project = kh.current()
+        project.dry_run = bool(dry)
         g = {"__name__": "__main__", "kh": kh, "project": project, "parts": parts}
         exec(compile(code, "<script>", "exec"), g)
         project.commit()
+        if project.refused:
+            if not dry:      # a layout the checks refuse is never drawn: the script fails and its edits are taken back
+                raise kh.HarnessError(project.refusal())
+            out["refused"] = list(project.refused)
         if "result" in g:
             try:
                 out["result"] = json.loads(json.dumps(g["result"], default=str))
@@ -118,7 +124,7 @@ async function main(): Promise<void> {
   py.runPython(RUNNER);
   const run = py.globals.get("__kc_run");
   let out: any;
-  try { out = JSON.parse(String(run(String(first.code || "")))); }
+  try { out = JSON.parse(String(run(String(first.code || ""), first.dry === true))); }
   catch (e: any) { out = { ok: false, error: String((e && e.message) || e).split("\n").filter(Boolean).slice(-1)[0] || "The script failed." }; }
   out.done = true; out.output = printed.join("\n");
   writeLine(out);

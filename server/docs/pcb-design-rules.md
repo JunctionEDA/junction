@@ -117,6 +117,28 @@ layers or a coplanar feed. **checked** (`rf.feed` compares each RF track's width
 - LNA and PA stages: input and output on opposite sides, ground vias at every ground pad, supply decoupled per
   stage with the smallest capacitor nearest the pin, DC feed through a choke.
 
+## Parts that serve a pin
+
+Said by the owner 2026-11-15 after a board where the CC resistors, the crystal and the matching network were
+placed by typed coordinates. One rule covers them all: a small part whose job is one pin of a larger part sits in
+front of that pin, turned so its far end points where its other net goes. `board.seat()` (run by `autoplace` and
+`design`) places them; `board.seating()` checks them; `design()` refuses a board that fails.
+
+- USB-C configuration resistors (5.1 k on CC1 and CC2) sit directly in front of their CC pins, ground ends
+  towards the outer edges of the connector. **planned**, **checked** (`usb.cc`).
+- Pull-ups, pull-downs, series resistors, LED resistors, regulator input and output capacitors and ESD parts sit
+  within 3 mm of the pin they serve. **planned**, **checked** (`serve.near`).
+- A crystal sits beside the oscillator pins, turned so its pads face the pins in the same order, so both nets
+  reach it on the top layer without a via; load capacitors on the far side, grounded at once. **planned**,
+  **checked** (`crystal.near`, `crystal.vias`).
+- A matching network runs in a straight line from the RF pin to the antenna feed, series parts in line, shunts
+  beside the line with their ground ends away from it; the whole RF net no longer than 12 mm. Other nets do not
+  cross the antenna's clear area. **planned**, **checked** (`rf.match`, `rf.feed`).
+- No part outside the board outline, none on top of another. **checked** (`placement.outside`,
+  `placement.clash`).
+- A layout that fails any of these, has open connections, DRC errors or review errors is refused by `design()`
+  and is not published or saved. Try layouts with a dry run, never on the live project.
+
 ## High-speed digital and interfaces
 
 `kh.calc.interface(name)` returns each row with its notes. Differential impedance in ohm, skew within the pair,

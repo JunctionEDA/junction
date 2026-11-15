@@ -118,6 +118,13 @@ class Project:
         self.footprints: dict = {}   # generated footprints by id, handed to the board when it syncs
         self.custom_power: dict = {}  # power symbols made for supply names KiCad's power library does not have: name -> symbol text
         self.net_pins: dict = {}     # net name given to build -> one of its pins, for nets that carry no label on the sheet
+        self.refused: list = []      # why the checks refuse the design as it stands (board.design fills it): it is not drawn or saved while this is not empty
+        self.dry_run = False         # run_python with dry_run: nothing is drawn, so a refusal is reported instead of raised
+
+    def refusal(self) -> str:
+        """The refusal as one message: what is wrong and that nothing was kept."""
+        return ("The layout was refused and nothing was drawn: a board with these faults is not shown to anyone. Fix what is named (in the placement where it says so) and run again; "
+                "use dry_run until nothing is refused.\n" + "\n".join("- " + r for r in self.refused[:12]) + (f"\n- and {len(self.refused) - 12} more" if len(self.refused) > 12 else ""))
 
     # ---- documents
     def documents(self) -> list:
@@ -168,16 +175,20 @@ class Project:
     def publish(self) -> int:
         """Draw what has been planned so far for the people watching.  Inside run_python the edits of a script are worked
         out in the host's copy of each document (every read sees them) and drawn live, each item once at its final place,
-        when the script ends; build(), autoplace() and route() call this when they finish, so a sheet is drawn as soon as
-        it is planned while the board is still being worked on.  Returns how many items were drawn (0 elsewhere)."""
+        when the script ends.  Nothing in the harness calls this by itself: a script is one planned change, drawn once, and a
+        dry run draws nothing.  Call it only where a finished stage should be seen before a long one starts (the sheet
+        before the board is routed).  Returns how many items were drawn (0 elsewhere, and in a dry run)."""
         self.commit()
         if getattr(self.transport, "kind", "") != "host":
             return 0
         return int((self.transport.call("publish", {}) or {}).get("drawn") or 0)
 
-    def save(self) -> list:
-        """Commit, then write changed files back (local projects; an online project is always saved)."""
+    def save(self, force: bool = False) -> list:
+        """Commit, then write changed files back (local projects; an online project is always saved).  A layout the
+        checks refuse (board.design) is not written unless force=True."""
         self.commit()
+        if self.refused and not force:
+            raise HarnessError(self.refusal())
         return self.transport.save()
 
     def close(self) -> None:
@@ -1235,6 +1246,8 @@ class Schematic(_Doc):
         passives beside them.  notes: {"Block title": "why ..." or [..]} puts notes in that section; write one wherever
         a choice is not the standard one (an unusual value, a part left out, a pin tied off) so a reader knows why.
         Every pin gets a power symbol or a net label on a short stub, so the result is correct by construction.
+        A sheet that already holds a design is redrawn (do not call clear() first): run again, items that come out
+        identical are not touched in the live document.
 
         Blocks are drawn off the page, measured as drawn (fields, labels and all), and then packed onto the page, so
         nothing overlaps; the page starts at A3 (11 x 17 in) and grows when the design needs it.  Labels that leave a block are
@@ -1243,6 +1256,8 @@ class Schematic(_Doc):
         (sch.review()) still finds, so fix that before reporting the sheet done (review=False skips it).  Returns counts, anything that did
         not connect, and "overlaps": what the layout check still finds (0 for a clean sheet).
         """
+        if set(parts) & set(self.refs()):      # these parts are on the sheet already: it is the same design run again, so the
+            self.clear()                       # sheet is redrawn, and what comes out identical is left alone when the plan is drawn
         named = bool(groups)
         groups = dict(groups or {"main": list(parts)})
         seen = {r for rs in groups.values() for r in rs}
@@ -1250,6 +1265,38 @@ class Schematic(_Doc):
         if rest:
             groups["Other"] = rest
         notes = dict(notes or {})
+        # a crystal is a block of its own (with its load capacitors and series resistor), joined to its chip by the net
+        # names: drawn inside the chip's block its two wires loop round everything else there
+        if named:
+            pins_of: dict = {}
+            for net, pins in nets.items():
+                for pin in pins:
+                    pins_of.setdefault(str(pin).partition(".")[0], []).append(net)
+            split: dict = {}
+            for g, rs in groups.items():
+                keep = list(rs)
+                for y in list(rs):
+                    lib = parts[y].get("lib") if isinstance(parts.get(y), dict) else parts.get(y)
+                    if not (re.match(r"^(Y|XTAL)\d", y, re.I) or (isinstance(lib, str) and re.search(r"crystal|resonator", lib, re.I))) or len(keep) < 2:
+                        continue
+                    if not any(len(pins_of.get(r, [])) > 4 for r in keep if r != y):      # only out of a block that holds a chip
+                        continue
+                    ynets = {n for n in pins_of.get(y, []) if not _GROUND.search(n)}
+                    mine = [y] + [r for r in keep if r != y and re.match(r"^(C|R)\d", r, re.I) and len(pins_of.get(r, [])) == 2 and any(n in ynets for n in pins_of[r])
+                                  and all(n in ynets or _GROUND.search(n) or len(nets.get(n, [])) <= 3 for n in pins_of[r])]
+                    keep = [r for r in keep if r not in mine]
+                    val = str(parts[y].get("value") or "") if isinstance(parts.get(y), dict) else ""
+                    split.setdefault(g, []).append((f"{val} crystal" if val else "Crystal", mine))
+                groups[g] = keep
+            if split:
+                out_groups: dict = {}
+                for g, rs in groups.items():
+                    out_groups[g] = rs
+                    for name, mine in split.get(g, []):
+                        while name in out_groups or name in groups:
+                            name += " " + mine[0]
+                        out_groups[name] = mine
+                groups = out_groups
         for r, spec in parts.items():   # a note given with a part belongs to its block
             if isinstance(spec, dict) and spec.get("note"):
                 g = next((n for n, rs in groups.items() if r in rs), None)
@@ -1380,7 +1427,6 @@ class Schematic(_Doc):
             out["overlap_list"] = [f"{o['what']}: {o['a']} / {o['b']} at ({o['x']}, {o['y']})" for o in lay.get("overlaps", [])]
         self.project.note(f"{self.path}: built {len(placed)} parts and {len(nets)} nets in {out['sections']} sections on {paper[0]}"
                           + (f", {len(out['problems'])} problems" if out["problems"] else "") + (f", {out['overlaps']} overlaps" if out["overlaps"] else ""))
-        self.project.publish()
         return out
 
     def _miswired(self, nets: dict) -> list:
@@ -1733,7 +1779,7 @@ class Board(_Doc):
         parts = self.geometry()["parts"]; ol = self.geometry().get("outline"); out: dict = {}
         gnd = lambda n: (n or "").lstrip("/").upper().startswith(("GND", "AGND", "DGND", "PGND", "VSS"))
         two = {p["ref"]: p for p in parts if p["ref"][:1] == "C" and len(p["pads"]) == 2}
-        chips = [p for p in parts if len(p["pads"]) >= 4 and p["ref"][:1] in ("U", "I", "Q")]
+        chips = [p for p in parts if len(p["pads"]) >= 3 and p["ref"][:1] in ("U", "I", "Q")]      # a three-pin regulator has its capacitors too
         if ref is not None:
             chips = [p for p in chips if p["ref"].lower() == ref.lower()]
             if not chips and not any(p["ref"].lower() == ref.lower() for p in parts):
@@ -1913,7 +1959,24 @@ class Board(_Doc):
         return out
 
     def outline(self, x0: float, y0: float, x1: float, y1: float) -> None:
-        """Draw a rectangular board outline on Edge.Cuts."""
+        """Draw a rectangular board outline on Edge.Cuts.  A board has one outline: rectangles already on Edge.Cuts are
+        taken off first, and calling it again with the same box changes nothing."""
+        self.flush()
+        want = (_r(min(x0, x1)), _r(min(y0, y1)), _r(max(x0, x1)), _r(max(y0, y1))); same = False
+        for it in self._call("get_items", kinds=["gr_rect"]).get("items", []):
+            sx = it.get("sexpr", "")
+            if '"Edge.Cuts"' not in sx:
+                continue
+            m = re.search(r"\(start ([-\d.]+) ([-\d.]+)\) \(end ([-\d.]+) ([-\d.]+)\)", sx)
+            box = m and tuple(float(v) for v in m.groups())
+            if box and not same and all(abs(a - b) < 1e-4 for a, b in zip((min(box[0], box[2]), min(box[1], box[3]), max(box[0], box[2]), max(box[1], box[3])), want)):
+                same = True
+                continue
+            self._edit({"op": "remove", "id": it["id"]})
+        self._geom = None
+        if same:
+            self.flush()
+            return
         self.add_item(f'(gr_rect (start {_r(x0)} {_r(y0)}) (end {_r(x1)} {_r(y1)}) (stroke (width 0.05) (type solid)) (fill no) (layer "Edge.Cuts") (uuid "{_uuid.uuid4()}"))')
 
     def rules(self, **rules) -> None:
@@ -1930,6 +1993,14 @@ class Board(_Doc):
             raise HarnessError("The board has no outline yet; draw one or give the zone a box.")
         pts = " ".join(f"(xy {_r(x)} {_r(y)})" for x, y in ((b[0], b[1]), (b[2], b[1]), (b[2], b[3]), (b[0], b[3])))
         net = self._net(net)
+        self.flush()
+        for z in self._call("get_items", kinds=["zone"]).get("items", []):      # one pour of a net on a layer over a box: asking again adds nothing
+            sx = z.get("sexpr", "")
+            if "keepout" in sx or f'"{layer}"' not in sx or not re.search(r'\(net(_name)? "?' + re.escape(net) + r'"?\)', sx):
+                continue
+            pts = [(float(a), float(c)) for a, c in re.findall(r"\(xy ([-\d.]+) ([-\d.]+)\)", sx.split("(filled_polygon")[0])]
+            if pts and abs(min(p[0] for p in pts) - min(b[0], b[2])) < 0.01 and abs(max(p[0] for p in pts) - max(b[0], b[2])) < 0.01 and abs(min(p[1] for p in pts) - min(b[1], b[3])) < 0.01 and abs(max(p[1] for p in pts) - max(b[1], b[3])) < 0.01:
+                return
         self.add_item(f'(zone (net "{net}") (layer "{layer}") (uuid "{_uuid.uuid4()}") (hatch edge 0.5) (connect_pads{' yes' if connect == 'solid' else ''} (clearance {clearance})) (min_thickness 0.25) '
                       f'(fill (thermal_gap 0.3) (thermal_bridge_width 0.4)) (polygon (pts {pts})))')
 
@@ -2041,7 +2112,7 @@ class Board(_Doc):
 
     def autoplace(self, groups: dict | None = None, near: dict | None = None, edges: dict | None = None, fixed: dict | None = None,
                   outline=None, spacing: float | None = None, only: list | None = None, fit: bool = False, max_fill: float | None = None,
-                  rotations: dict | None = None, bypass: bool = True) -> dict:
+                  rotations: dict | None = None, bypass: bool = True, seat: bool = True) -> dict:
         """Place footprints with the placement engine: blocks packed around their anchors, blocks arranged inside the outline.
 
         groups: {block: [refs]} (first ref is the anchor) in addition to those declared with group(); near: {ref: ref}
@@ -2051,6 +2122,10 @@ class Board(_Doc):
         board outline in round the parts (the smallest rectangle in whole millimetres every block fits in, connectors
         still on their edges) and redraws Edge.Cuts to it; give the outline first as the largest the board may be.  max_fill
         is how much of the board the courtyards may cover (0.45 by default; the person's densest boards reach 0.46).
+        Every footprint is placed unless `only` names the ones to place.  Afterwards the bypass capacitors go to their
+        supply pins (place_bypass) and every other small part goes in front of the pin it serves (seat): a pull-down
+        at its connector pin with its ground end out, a crystal turned to its oscillator pins, a matching network in
+        line at the radio pin.  bypass=False / seat=False leave those out.
         """
         specs: dict = {}
         allg = dict(self._groups)
@@ -2071,6 +2146,9 @@ class Board(_Doc):
         if only:
             for r in only:
                 specs.setdefault(r, {"ref": r})
+        elif specs:      # a part nobody named is still placed: the engine puts it with the part it shares its nets with
+            for r in self.refs():
+                specs.setdefault(r, {"ref": r})
         e: dict = {"op": "auto_place"}
         if specs:
             e["parts"] = list(specs.values())
@@ -2087,10 +2165,23 @@ class Board(_Doc):
         d = next((x["auto_place"] for x in res.get("details") or [] if "auto_place" in x), {})
         out = {"placed": len(d.get("placements", [])), "score": d.get("score"), "outline": d.get("outline"), "unknown_refs": d.get("unknown_refs") or []}
         self.project.note(f"board: placed {out['placed']} footprints, score {out['score']}")
+        # the small parts, in the order a person seats them: what has one right place first (a pull-down in front of its
+        # pin, the matching network at the radio pin, the crystal at its oscillator pins), then the bypass capacitors,
+        # which only need to be beside their supply pins, and last whatever still stands on something else
+        hold = tuple(fixed or {}); caps: tuple = ()
         if bypass:
             self._geom = None
-            out["bypass"] = self.place_bypass(skip=tuple(fixed or {}))
-        self.project.publish()
+            caps = tuple(c for v in self.place_bypass(skip=hold + tuple(self._hangers()), apply=False).values() for c in v)
+        if seat:
+            self._geom = None
+            out["seated"] = self.seat(skip=hold + caps, giveway=caps)
+        if bypass:
+            self._geom = None
+            out["bypass"] = self.place_bypass(skip=hold + tuple(self._hangers()) + tuple(r for r, v in (out.get("seated") or {}).items() if "at" in v))
+        if seat or bypass:
+            moved = self.settle(skip=hold)
+            if moved:
+                out["settled"] = moved
         return out
 
     # ---- copper
@@ -2287,7 +2378,6 @@ class Board(_Doc):
         if "left" not in out:
             out["left"] = self.unrouted()
         self.project.note(f"board: routed {out['routed']} of {out['connections']} connections, {out['vias']} vias, {out['length_mm']} mm" + (f", {len(out['unrouted'])} left" if out["unrouted"] else ""))
-        self.project.publish()
         return out
 
     def _autoroute(self, e: dict) -> dict:

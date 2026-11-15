@@ -45747,9 +45747,9 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
   }
 });
 
-// ../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.js
+// node_modules/opentype.js/dist/opentype.js
 var require_opentype = __commonJS({
-  "../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
+  "node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
     (function(global, factory) {
       typeof exports2 === "object" && typeof module2 !== "undefined" ? factory(exports2) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global = global || self, factory(global.opentype = {}));
     })(exports2, (function(exports3) {
@@ -86072,6 +86072,40 @@ var Router = class _Router {
       for (let iy = cb[1]; iy <= cb[3]; iy++) q.fill(1, iy * W11 + cb[0], iy * W11 + cb[2] + 1);
       for (const n2 of nets) if (n2) this.xtalNets.add(n2);
     }
+    for (const it of doc.items.values()) {
+      if (it.kind !== "footprint") continue;
+      const ref = refOf(K8, it.node) || "";
+      const what = String(it.lib || "") + " " + String(it.value || "");
+      if (!(/^(AE|ANT)\d/i.test(ref) || /antenna/i.test(what)) || /u\.?fl|sma|ipex|mmcx|coax/i.test(what)) continue;
+      const pads2 = P.padsOf(it);
+      if (!pads2.length) continue;
+      const cx = pads2.reduce((a, p) => a + p.x, 0) / pads2.length, cy = pads2.reduce((a, p) => a + p.y, 0) / pads2.length;
+      const inside2 = (pts) => {
+        let c = false;
+        for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) if (pts[i][1] > cy !== pts[j][1] > cy && cx < (pts[j][0] - pts[i][0]) * (cy - pts[i][1]) / (pts[j][1] - pts[i][1]) + pts[i][0]) c = !c;
+        return c;
+      };
+      const q = G4.quiet || (G4.quiet = new Uint8Array(W11 * H));
+      let marked = false;
+      for (const z2 of doc.items.values()) {
+        if (z2.kind !== "zone" || !K8.kid(z2.node, "keepout")) continue;
+        const polys = K8.kids(z2.node, "polygon").map((poly) => K8.ptsOf(poly)).filter((pts) => pts.length >= 3);
+        if (!polys.some(inside2)) continue;
+        const t = cellsIn(polys);
+        for (let i = 0; i < t.length; i++) if (t[i]) q[i] = 1;
+        marked = true;
+      }
+      if (!marked) {
+        let b = [Infinity, Infinity, -Infinity, -Infinity];
+        for (const p of pads2) b = [Math.min(b[0], p.x - 2.5), Math.min(b[1], p.y - 2.5), Math.max(b[2], p.x + 2.5), Math.max(b[3], p.y + 2.5)];
+        const cb = this.cellBox(b);
+        if (cb) for (let iy = cb[1]; iy <= cb[3]; iy++) q.fill(1, iy * W11 + cb[0], iy * W11 + cb[2] + 1);
+      }
+      for (const p of pads2) {
+        const n2 = nl.table.key(p.net) || "";
+        if (n2) this.xtalNets.add(n2);
+      }
+    }
     for (const it of doc.items.values()) if (it.kind === "footprint") {
       const ref = refOf(K8, it.node);
       for (const p of P.padsOf(it)) this.padNames.set(p.x.toFixed(3) + "," + p.y.toFixed(3), (ref || "?") + "." + p.number);
@@ -86465,7 +86499,7 @@ var Router = class _Router {
     const tr = traceOn(stack, outer);
     if (!tr) return;
     const model = `${tr.kind} on ${tr.layer} over ${tr.reference.join(" and ")}, ${+tr.h.toFixed(3)} mm of \u03B5r ${+tr.er.toFixed(2)}${stack.assumed ? " (stackup assumed: the board carries none)" : ""}`;
-    const planned = (k) => +(((this.opts.netOpts || {})[k] || {}).impedance || 0);
+    const planned2 = (k) => +(((this.opts.netOpts || {})[k] || {}).impedance || 0);
     const by = /* @__PURE__ */ new Map();
     const single = [];
     for (const key3 of keys) {
@@ -86484,7 +86518,7 @@ var Router = class _Router {
         single.push(...e);
         continue;
       }
-      const target2 = planned(e[0].key) || planned(e[1].key) || usualImpedance(e[0].key, true);
+      const target2 = planned2(e[0].key) || planned2(e[1].key) || usualImpedance(e[0].key, true);
       if (!target2) continue;
       const clr = Math.max(P.netClearance(s, e[0].key), P.netClearance(s, e[1].key), s.minClearance || 0);
       const cw = this.classFor(e[0].key).width;
@@ -86508,7 +86542,7 @@ var Router = class _Router {
       this.zReports.push(rep);
     }
     for (const net of single) {
-      const target2 = planned(net.key) || usualImpedance(net.key, false);
+      const target2 = planned2(net.key) || usualImpedance(net.key, false);
       if (!target2) continue;
       const cw = this.classFor(net.key).width;
       const w = widthFor(tr, target2);
@@ -87098,10 +87132,10 @@ var Router = class _Router {
       }
       if (members.length) groups.push({ name: g2.nets.join(", "), members, tol: tolOf(g2.tolerance), length: g2.length });
     }
-    const planned = new Set((this.opts.match || []).flatMap((g2) => g2.nets));
+    const planned2 = new Set((this.opts.match || []).flatMap((g2) => g2.nets));
     const bus = /* @__PURE__ */ new Map();
     for (const pr of pairs) {
-      if (planned.has(pr.p.key)) continue;
+      if (planned2.has(pr.p.key)) continue;
       const k = pairName(pr.p.key).base.replace(/~.*$/, "").replace(/[_\-]?(D|TX|RX|TD|RD|CLK|CK|LANE|L|MDI|DATA|TMDS)?_?\d*$/i, "").replace(/[_\-]+$/, "");
       if (!k || /^\/?$/.test(k)) continue;
       const e = bus.get(k) || [];
@@ -87126,7 +87160,7 @@ var Router = class _Router {
         return l;
       };
       for (const pr of pairs) {
-        if (planned.has(pr.p.key)) continue;
+        if (planned2.has(pr.p.key)) continue;
         const b = bare3(pairName(pr.p.key).base.replace(/~.*$/, ""));
         let q = /^(.*?)_?(?:L|U)?DQS_?(\d*)_?$/i.exec(b);
         if (q) {
@@ -87141,7 +87175,7 @@ var Router = class _Router {
         }
       }
       for (const net of this.nets) {
-        if (planned.has(net.key) || !net.conns.some((c) => c.nodes) || this.pairList?.some((pr) => pr.p === net || pr.n === net)) continue;
+        if (planned2.has(net.key) || !net.conns.some((c) => c.nodes) || this.pairList?.some((pr) => pr.p === net || pr.n === net)) continue;
         const b = bare3(net.key);
         const mb = { nets: [net.key], conns: net.conns.filter((c) => c.nodes) };
         let q = /^(.*?)_?DQ_?(\d+)$/i.exec(b);
@@ -90897,7 +90931,7 @@ function drillFiles(m, baseName3, opt, ext = "drl") {
   return out;
 }
 
-// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Core.js
+// node_modules/clipper2-ts/dist/Core.js
 var ClipType;
 (function(ClipType2) {
   ClipType2[ClipType2["NoClip"] = 0] = "NoClip";
@@ -91556,7 +91590,7 @@ var RectDUtils = {
 var InvalidRect64 = Object.freeze(Rect64Utils.createInvalid());
 var InvalidRectD = Object.freeze(RectDUtils.createInvalid());
 
-// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Engine.js
+// node_modules/clipper2-ts/dist/Engine.js
 var B02 = BigInt(0);
 var B22 = BigInt(2);
 var B42 = BigInt(4);
@@ -94421,7 +94455,7 @@ var Clipper = {
   }
 };
 
-// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Offset.js
+// node_modules/clipper2-ts/dist/Offset.js
 var JoinType;
 (function(JoinType2) {
   JoinType2[JoinType2["Miter"] = 0] = "Miter";
@@ -95037,7 +95071,7 @@ var ClipperOffset = class _ClipperOffset {
   }
 };
 
-// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Clipper.js
+// node_modules/clipper2-ts/dist/Clipper.js
 var B23 = BigInt(2);
 function intersectD(subject, clip2, fillRule, precision = 2) {
   return booleanOpD(ClipType.Intersection, subject, clip2, fillRule, precision);
@@ -101260,7 +101294,7 @@ function statAreas(m, o) {
   return { hasOutline, boardArea, frontCopper: total(front), backCopper: total(back), frontCourtyard: total(union2(fc)), backCourtyard: total(union2(bc)) };
 }
 
-// ../../../kicad-collaborative/server/node_modules/three/src/extras/lib/earcut.js
+// node_modules/three/src/extras/lib/earcut.js
 function earcut(data, holeIndices, dim = 2) {
   const hasHoles = holeIndices && holeIndices.length;
   const outerLen = hasHoles ? holeIndices[0] * dim : data.length;
@@ -101681,7 +101715,7 @@ function signedArea2(data, start, end, dim) {
   return sum;
 }
 
-// ../../../kicad-collaborative/server/node_modules/three/src/extras/Earcut.js
+// node_modules/three/src/extras/Earcut.js
 var Earcut = class {
   /**
    * Triangulates the given shape definition by returning an array of triangles.
@@ -106477,6 +106511,7 @@ var cache2 = /* @__PURE__ */ new Map();
 function forgetDocs() {
   cache2.clear();
 }
+var planned = { doc: null };
 async function resolveDoc(name) {
   const open2 = openEntry();
   const live = ED()?.kdoc;
@@ -106486,6 +106521,8 @@ async function resolveDoc(name) {
   }
   const entry = findDoc(name);
   if (!entry) throw new ToolError(`There is no document "${name}" in this project. The documents are: ${projectDocs().map((d) => d.path).join(", ") || "(none)"}.`);
+  const mine = planned.doc ? planned.doc(entry.docId) : null;
+  if (mine) return { doc: mine, path: entry.path, docId: entry.docId, open: false };
   const hit5 = cache2.get(entry.docId);
   if (hit5 && Date.now() - hit5.at < 8e3) return { doc: hit5.doc, path: entry.path, docId: entry.docId, open: false };
   const r = await fetch(`/api/docs/${entry.docId}/content?v=${Date.now()}`);
@@ -112226,7 +112263,7 @@ function build(input) {
             changes.push(modified(doc, it, node));
             ids.push(it.id);
           }
-          lines.push({ kind: "modify", text: `Move the fields of ${ids.length} symbol${ids.length === 1 ? "" : "s"} clear of what they were drawn over`, ids });
+          if (ids.length) lines.push({ kind: "modify", text: `Move the fields of ${ids.length} symbol${ids.length === 1 ? "" : "s"} clear of what they were drawn over`, ids });
           break;
         }
         case "cleanup": {

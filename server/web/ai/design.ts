@@ -43,6 +43,9 @@ export function findDoc(name: string): { docId: string; path: string; docType: s
 const cache = new Map<string, { at: number; doc: any }>();
 /** Forget the parsed copies of the project's other documents (the harness changes them between two reads). */
 export function forgetDocs(): void { cache.clear(); }
+/** A copy of another document that is newer than the server's: the MCP host gives the documents a running script has
+ *  planned and not yet drawn, so a board synced in the same script as its schematic reads that schematic. */
+export const planned: { doc: ((docId: string) => any) | null } = { doc: null };
 
 /**
  * The document a tool should read.  The open one is the live in-memory document; any other is
@@ -57,6 +60,8 @@ export async function resolveDoc(name?: string): Promise<DocRef> {
   }
   const entry = findDoc(name);
   if (!entry) throw new ToolError(`There is no document "${name}" in this project. The documents are: ${projectDocs().map((d) => d.path).join(", ") || "(none)"}.`);
+  const mine = planned.doc ? planned.doc(entry.docId) : null;
+  if (mine) return { doc: mine, path: entry.path, docId: entry.docId, open: false };
   const hit = cache.get(entry.docId);
   if (hit && Date.now() - hit.at < 8000) return { doc: hit.doc, path: entry.path, docId: entry.docId, open: false };
   const r = await fetch(`/api/docs/${entry.docId}/content?v=${Date.now()}`);

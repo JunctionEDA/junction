@@ -39,7 +39,8 @@ def _brief(self, level: str | None = "warning", limit: int = 12, rule: str | Non
 def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, edge: str = "top", edges: dict | None = None, near: dict | None = None,
             groups: dict | None = None, fixed: dict | None = None, rotations: dict | None = None, swap: dict | None = None, fit: bool | None = None,
             order: list | None = None, widths: dict | None = None, kinds: dict | None = None, time_s: float | None = None, max_vias: int = 2,
-            stitch: float | None = 10.0, name: str | bool | None = None, rev: str | None = None, silk: bool = True, place: bool = True, route: bool = True) -> dict:
+            stitch: float | None = 10.0, name: str | bool | None = None, rev: str | None = None, silk: bool = True, place: bool = True, route: bool = True,
+            accept: list | None = None) -> dict:
     """Lay the whole board out in one call and say how it came out.
 
     outline: (x0, y0, x1, y1), the largest the board may be (fit=True, the default when an outline is given, pulls it in
@@ -52,7 +53,13 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     Returns {"size_mm", "layers", "placed", "routed": {"routed", "connections", "vias", "length_mm", "left"},
     "added": {ground vias, fences, thermal vias, stitching}, "drc": {"errors", "by_kind"}, "review": {"errors",
     "warnings", "findings": [one line each]}, "notes": [what the plan could not do], "skipped": {step: why}}.
-    Fix what "review" and "left" name and call the single step again; do not run design() twice on one board."""
+    Fix what "review" and "left" name and call the single step again; do not run design() twice on one board.
+
+    The result is judged before anyone sees it.  "refused" lists what makes the layout unacceptable: a part off the
+    board or on another part, a pin-serving part or crystal away from its pin, a via on a crystal or CC net, a matching
+    network away from the radio pin, an open connection, a DRC error, a review error.  While it is not empty the script
+    fails at its end and every edit is taken back (a dry run reports it instead), so work in a dry run until "refused"
+    is gone.  accept=["rf.feed"] waives the named rules, only for a fault the person has agreed to live with."""
     out: dict = {"skipped": {}}
 
     def step(what, fn):
@@ -75,6 +82,9 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         step("layers", lambda: self.layers(want, planes=list(INNER_GROUND) if want >= 4 else None))
     step("stackup", lambda: self.stackup(fab=fab, **rec))
     if place:
+        # a board laid out before is laid out again from its parts: its old copper comes up first, so a second run of
+        # the script needs no board.clear() (what comes out the same is left alone when the plan is drawn)
+        step("take up", lambda: self.unroute(keep=()))
         kw = {"groups": groups, "near": {**plan["place"].get("near", {}), **(near or {})}, "edges": {**plan["place"].get("edges", {}), **(edges or {})},
               "fixed": fixed, "rotations": rotations, "fit": bool(outline) if fit is None else fit}
         if outline:
@@ -142,6 +152,40 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     rv = step("review", lambda: _brief(self))
     if rv:
         out["review"] = rv
+    # the gate: what nobody should be shown
+    waived = {str(a).lower() for a in (accept or [])}; refused: list = []
+    def refuse(rule: str, text: str) -> None:
+        if rule.lower() not in waived:
+            refused.append(f"{rule}: {text}")
+    try:
+        for a, b, ox, oy in self.clashes():
+            refuse("placement.clash", f"{a} stands on {b} (courtyards overlap by {min(ox, oy)} mm). Move one of them or make the board larger.")
+    except HarnessError:
+        pass
+    try:
+        for f in self.seating()["findings"]:
+            if f.startswith("error "):
+                rule, _, text = f[6:].partition(": ")
+                refuse(rule, text)
+    except HarnessError:
+        pass
+    if route:
+        left = (out.get("routed") or {}).get("left") or {}
+        if left:
+            refuse("routing.open", f"{sum(left.values())} connections are not routed ({', '.join(f'{n} {c}' for n, c in list(left.items())[:8])}). An open net is a crossing: move or turn the part it starts at, or give swap= more nets, then route again.")
+        if (out.get("drc") or {}).get("errors"):
+            kinds = {k: v for k, v in out["drc"]["by_kind"].items() if k != "unconnected_items" or not left}
+            if kinds:
+                refuse("drc", f"{sum(kinds.values())} DRC errors ({', '.join(f'{k} {v}' for k, v in kinds.items())}). First: {'; '.join(out['drc']['first'][:2])}")
+        for f in (out.get("review") or {}).get("findings", []):
+            if f.startswith("error ") and not f.startswith("error drc"):
+                rule, _, text = f[6:].partition(": ")
+                refuse(rule, text)
+    elif "skipped" in out and out["skipped"].get("place"):
+        refuse("placement", out["skipped"]["place"])
+    if refused:
+        out["refused"] = refused
+    self.project.refused = [r for r in self.project.refused if not r.startswith("board ")] + ["board " + r for r in refused]
     if not out["skipped"]:
         del out["skipped"]
     self.project.note(f"board: design() {out.get('routed', {}).get('routed', 0)} connections routed, {out.get('vias')} vias, DRC {out.get('drc', {}).get('errors', '?')} errors, review {out.get('review', {}).get('errors', '?')} errors")

@@ -286,6 +286,24 @@ export class Router {
       for (let iy = cb[1]; iy <= cb[3]; iy++) q.fill(1, iy * W + cb[0], iy * W + cb[2] + 1);
       for (const n of nets) if (n) this.xtalNets.add(n);
     }
+    // An antenna's clear area takes nothing but the antenna's own feed: the keep-out round it lets tracks in so that
+    // the feed can reach the pad, and every other net would otherwise take the short cut through it.
+    for (const it of doc.items.values()) {
+      if (it.kind !== "footprint") continue; const ref = refOf(K, it.node) || ""; const what = String(it.lib || "") + " " + String(it.value || "");
+      if (!(/^(AE|ANT)\d/i.test(ref) || /antenna/i.test(what)) || /u\.?fl|sma|ipex|mmcx|coax/i.test(what)) continue;
+      const pads: any[] = P.padsOf(it); if (!pads.length) continue;
+      const cx = pads.reduce((a, p) => a + p.x, 0) / pads.length, cy = pads.reduce((a, p) => a + p.y, 0) / pads.length;
+      const inside = (pts: Pt[]) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) if ((pts[i][1] > cy) !== (pts[j][1] > cy) && cx < ((pts[j][0] - pts[i][0]) * (cy - pts[i][1])) / (pts[j][1] - pts[i][1]) + pts[i][0]) c = !c; return c; };
+      const q = G.quiet || (G.quiet = new Uint8Array(W * H)); let marked = false;
+      for (const z of doc.items.values()) {
+        if (z.kind !== "zone" || !K.kid(z.node, "keepout")) continue;
+        const polys: Pt[][] = K.kids(z.node, "polygon").map((poly: any) => K.ptsOf(poly) as Pt[]).filter((pts: Pt[]) => pts.length >= 3);
+        if (!polys.some(inside)) continue; const t = cellsIn(polys); for (let i = 0; i < t.length; i++) if (t[i]) q[i] = 1; marked = true;
+      }
+      if (!marked) { let b: Box = [Infinity, Infinity, -Infinity, -Infinity]; for (const p of pads) b = [Math.min(b[0], p.x - 2.5), Math.min(b[1], p.y - 2.5), Math.max(b[2], p.x + 2.5), Math.max(b[3], p.y + 2.5)];
+        const cb = this.cellBox(b); if (cb) for (let iy = cb[1]; iy <= cb[3]; iy++) q.fill(1, iy * W + cb[0], iy * W + cb[2] + 1); }
+      for (const p of pads) { const n = nl.table.key(p.net) || ""; if (n) this.xtalNets.add(n); }
+    }
     for (const it of doc.items.values()) if (it.kind === "footprint") { const ref = refOf(K, it.node); for (const p of P.padsOf(it)) this.padNames.set(p.x.toFixed(3) + "," + p.y.toFixed(3), (ref || "?") + "." + p.number); }
     this.pref = hv.map(([h, v]) => h + v > 20 ? (h - v) / (h + v) : 0);
     // An empty board has no habit yet: give it the usual one, alternate layers running across and along.

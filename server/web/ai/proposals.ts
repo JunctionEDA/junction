@@ -674,7 +674,7 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
             for (const m of moves) { const p = k.kids(node, "property").find((q: any) => k.str(q[1]) === m.field); const at = p && k.kid(p, "at"); if (!at) continue; at[1] = r4(k.num(at[1]) + m.dx); at[2] = r4(k.num(at[2]) + m.dy); any = true; }
             if (!any) continue; touch(it, e.op); changes.push(modified(doc, it, node)); ids.push(it.id);
           }
-          lines.push({ kind: "modify", text: `Move the fields of ${ids.length} symbol${ids.length === 1 ? "" : "s"} clear of what they were drawn over`, ids });
+          if (ids.length) lines.push({ kind: "modify", text: `Move the fields of ${ids.length} symbol${ids.length === 1 ? "" : "s"} clear of what they were drawn over`, ids });      // nothing moved is not an edit worth a line in the history
           break;
         }
         case "cleanup": {

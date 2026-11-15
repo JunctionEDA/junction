@@ -250,7 +250,7 @@ export class DocSession {
 
   /** The stage as one list of changes from the document as it was to the document as planned; this copy goes back
    *  to how it was (the changes are not applied here), ready for commit().  Null when nothing differs. */
-  private takeStage(): any[] | null {
+  private takeStage(symbols = true): any[] | null {
     const st = this.stage; this.stage = null; if (!st) return null;
     const k = K(), doc = this.kdoc; const gone: any[] = [], drawn: any[] = [], back: any[] = [];
     for (const id of st.order) {
@@ -266,19 +266,32 @@ export class DocSession {
       back.push({ id: st.page.id, kind: "MODIFIED", typeName: st.page.typeName, docProps: { paper: st.page.was.paper, titleBlock: typeof st.page.was.titleBlock === "string" ? st.page.was.titleBlock : st.page.now.titleBlock } });
     } else if (st.page && st.page.was) back.push({ id: st.page.id, kind: "MODIFIED", typeName: st.page.typeName, docProps: { paper: st.page.was.paper, titleBlock: typeof st.page.was.titleBlock === "string" ? st.page.was.titleBlock : st.page.now.titleBlock } });
     this.apply(back.reverse());
+    // A rebuild that puts back what it took off is not a change.  A script that clears a sheet or a board and draws
+    // it again makes every item anew under a new id; an item that comes back exactly as it was (the same text but
+    // for its ids) keeps its old self, so only what really differs is sent, drawn and recorded.  Schematic symbols
+    // are matched only when this is the one document the script changed: a board synced in the same script already
+    // points at the new symbols.
+    if (gone.length && drawn.length) {
+      const same = (sx: string) => sx.replace(/\((uuid|tstamp) "?[0-9a-fA-F-]{8,}"?\)/g, "");
+      const old = new Map<string, any[]>();
+      for (const g of gone) { const was = st.before.get(g.id); if (typeof was !== "string" || (!symbols && /^\(symbol\b/.test(was))) continue; const key = same(was); const l = old.get(key); if (l) l.push(g); else old.set(key, [g]); }
+      const kept = new Set<any>(); const fresh: any[] = [];
+      for (const d of drawn) { const l = d.kind === "ADDED" && typeof d.sexpr === "string" ? old.get(same(d.sexpr)) : undefined; if (l && l.length) kept.add(l.shift()); else fresh.push(d); }
+      if (kept.size) { const rest = gone.filter((g) => !kept.has(g)); gone.length = 0; gone.push(...rest); drawn.length = 0; drawn.push(...fresh); }
+    }
     const all = [...page, ...gone, ...drawn];
     return all.length ? all : null;
   }
 
   /** Draw what the stage planned, live, and close it.  Returns the undo record, or null when nothing changed. */
-  async publishStage(live: boolean): Promise<UndoRecord | null> {
-    const changes = this.takeStage(); if (!changes) return null;
+  async publishStage(live: boolean, symbols = true): Promise<UndoRecord | null> {
+    const changes = this.takeStage(symbols); if (!changes) return null;
     // a whole drawing gets more steps and time than one batch: a block at a time, about a dozen seconds at most
     return this.commit(changes, live, live ? { steps: Math.min(changes.length, Math.max(LIVE_STEPS, Math.min(160, Math.ceil(changes.length / 4)))), totalMs: 12000 } : undefined);
   }
 
   /** Throw the plan away: this copy goes back to the document as it was, and nothing was sent. */
-  dropStage(): void { this.takeStage(); }
+  dropStage(): number { const c = this.takeStage(); return c ? c.length : 0; }
 
   /** Tell the others where the work is: a cursor on what was just changed, with those items marked as this peer's selection. */
   private show(ids: string[]): void {
