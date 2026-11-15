@@ -1,0 +1,170 @@
+//! Project libraries that a project's library table names but the project does not hold.
+//!
+//! A project uploaded as loose files (the web upload) can arrive with its `sym-lib-table` and
+//! without the `${KIPRJMOD}/<name>.kicad_sym` the table points at.  The desktop then reports the
+//! library as missing on every open and the rules check warns once per symbol.  A schematic keeps
+//! a full copy of every symbol it uses (`lib_symbols`), so the library can be written back from
+//! those copies: `rebuild_symbol_libraries` returns the files to add to a download.  Nothing
+//! stored is changed, and a library the project does hold is never touched.
+//!
+//! Footprint libraries are not rebuilt: a footprint on a board is a placed instance (moved
+//! texts, pad nets, a side and a rotation), not the library's copy, and the desktop makes the
+//! empty library folder itself (COLLAB_PROJECT::EnsureLibraryFolders).
+
+use std::collections::{BTreeMap, HashSet};
+
+/// The index just past the list that opens at `open` (which must be a `(`), strings respected.
+fn list_end(text: &[u8], open: usize) -> Option<usize> {
+    let (mut depth, mut i, mut quoted) = (0usize, open, false);
+    while i < text.len() {
+        let c = text[i];
+        if quoted {
+            if c == b'\\' { i += 1; } else if c == b'"' { quoted = false; }
+        } else if c == b'"' {
+            quoted = true;
+        } else if c == b'(' {
+            depth += 1;
+        } else if c == b')' {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 { return Some(i + 1); }
+        }
+        i += 1;
+    }
+    None
+}
+
+/// The first quoted string at or after `from`, unescaped, and the index just past it.
+fn quoted_at(text: &str, from: usize) -> Option<(String, usize)> {
+    let b = text.as_bytes();
+    let start = from + text[from..].find('"')? + 1;
+    let (mut i, mut out) = (start, Vec::new());
+    while i < b.len() {
+        match b[i] {
+            b'\\' if i + 1 < b.len() => { out.push(b[i + 1]); i += 2; }
+            b'"' => return Some((String::from_utf8(out).ok()?, i + 1)),
+            c => { out.push(c); i += 1; }
+        }
+    }
+    None
+}
+
+/// The lists directly inside the list `text[open..end]`, as (start, end) byte ranges.
+fn children(text: &[u8], open: usize, end: usize) -> Vec<(usize, usize)> {
+    let (mut out, mut i, mut quoted) = (Vec::new(), open + 1, false);
+    while i + 1 < end {
+        let c = text[i];
+        if quoted {
+            if c == b'\\' { i += 1; } else if c == b'"' { quoted = false; }
+        } else if c == b'"' {
+            quoted = true;
+        } else if c == b'(' {
+            match list_end(text, i) { Some(e) if e <= end => { out.push((i, e)); i = e; continue; } _ => break }
+        }
+        i += 1;
+    }
+    out
+}
+
+/// `(name "X") … (uri "${KIPRJMOD}/path.kicad_sym")` rows of a sym-lib-table: nickname → project path.
+fn project_symbol_libs(table: &str) -> Vec<(String, String)> {
+    let b = table.as_bytes();
+    let Some(root) = table.find('(') else { return Vec::new() };
+    let Some(end) = list_end(b, root) else { return Vec::new() };
+    let mut out = Vec::new();
+    for (s, e) in children(b, root, end) {
+        let row = &table[s..e];
+        if !row.starts_with("(lib") { continue; }
+        let field = |key: &str| row.find(&format!("({key} ")).and_then(|at| quoted_at(row, at)).map(|(v, _)| v);
+        let (Some(name), Some(uri)) = (field("name"), field("uri")) else { continue };
+        if let Some(t) = field("type") { if !t.eq_ignore_ascii_case("kicad") { continue; } }
+        let Some(rel) = uri.strip_prefix("${KIPRJMOD}/").or_else(|| uri.strip_prefix("$(KIPRJMOD)/")) else { continue };
+        let rel = rel.replace('\\', "/");
+        if rel.is_empty() || !rel.to_ascii_lowercase().ends_with(".kicad_sym") || rel.split('/').any(|p| p.is_empty() || p == "." || p == "..") { continue; }
+        out.push((name, rel));
+    }
+    out
+}
+
+/// The symbol library file format this server writes; a schematic older than it keeps its own date.
+const SYMBOL_LIB_VERSION: u64 = 20241209;
+const OLDEST_SYMBOL_LIB_VERSION: u64 = 20211014;
+
+/// The files to add to a download of `entries` (path, content): one `.kicad_sym` per project
+/// symbol library that a `sym-lib-table` names and the project does not hold, holding every
+/// symbol of that library the schematics use.  A library no schematic uses is left out.
+pub fn rebuild_symbol_libraries(entries: &[(String, Vec<u8>)]) -> Vec<(String, Vec<u8>)> {
+    let have: HashSet<&str> = entries.iter().map(|(p, _)| p.as_str()).collect();
+    let mut out = Vec::new();
+    for (table_path, table) in entries.iter().filter(|(p, _)| p.rsplit('/').next() == Some("sym-lib-table")) {
+        let Ok(table) = std::str::from_utf8(table) else { continue };
+        let dir = table_path.rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default();
+        let wanted: Vec<(String, String)> = project_symbol_libs(table).into_iter()
+            .map(|(n, rel)| (n, format!("{dir}{rel}"))).filter(|(_, p)| !have.contains(p.as_str())).collect();
+        if wanted.is_empty() { continue; }
+        // nickname → symbol name → its text with the library prefix taken off the name
+        let mut found: BTreeMap<&str, BTreeMap<String, String>> = BTreeMap::new();
+        let mut version = SYMBOL_LIB_VERSION;
+        for (path, content) in entries.iter().filter(|(p, _)| p.to_ascii_lowercase().ends_with(".kicad_sch")) {
+            let _ = path;
+            let Ok(text) = std::str::from_utf8(content) else { continue };
+            let b = text.as_bytes();
+            let Some(at) = text.find("(lib_symbols") else { continue };
+            let Some(end) = list_end(b, at) else { continue };
+            if let Some(v) = text.find("(version ").and_then(|i| text[i + 9..].split(')').next()).and_then(|v| v.trim().parse::<u64>().ok()) {
+                version = version.min(v.max(OLDEST_SYMBOL_LIB_VERSION));
+            }
+            for (s, e) in children(b, at, end) {
+                let sym = &text[s..e];
+                if !sym.starts_with("(symbol") { continue; }
+                let Some((id, after)) = quoted_at(sym, 0) else { continue };
+                let Some((nick, name)) = id.split_once(':') else { continue };
+                let Some((lib, _)) = wanted.iter().find(|(n, _)| n == nick) else { continue };
+                let quote = |s: &str| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""));
+                let body = format!("(symbol {}{}", quote(name), &sym[after..]);
+                found.entry(lib.as_str()).or_default().entry(name.to_string()).or_insert(body);
+            }
+        }
+        for (nick, path) in &wanted {
+            let Some(symbols) = found.get(nick.as_str()) else { continue };
+            let mut file = format!("(kicad_symbol_lib\n\t(version {version})\n\t(generator \"junction\")\n\t(generator_version \"10.0\")\n");
+            for body in symbols.values() { file.push('\t'); file.push_str(body); file.push('\n'); }
+            file.push_str(")\n");
+            out.push((path.clone(), file.into_bytes()));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const TABLE: &str = "(sym_lib_table\n  (version 7)\n  (lib (name \"mine\")(type \"KiCad\")(uri \"${KIPRJMOD}/mine.kicad_sym\")(options \"\")(descr \"\"))\n  (lib (name \"std\")(type \"KiCad\")(uri \"${KICAD9_SYMBOL_DIR}/Device.kicad_sym\")(options \"\")(descr \"\"))\n  (lib (name \"up\")(type \"KiCad\")(uri \"${KIPRJMOD}/../x.kicad_sym\")(options \"\")(descr \"\"))\n)\n";
+    const SCH: &str = "(kicad_sch\n\t(version 20250114)\n\t(generator \"eeschema\")\n\t(lib_symbols\n\t\t(symbol \"mine:VALVE (odd)\"\n\t\t\t(property \"Reference\" \"U\" (at 0 0 0))\n\t\t\t(symbol \"VALVE (odd)_1_1\" (pin input line (at 0 0 0) (length 2.54) (name \"a)\\\"b\") (number \"1\")))\n\t\t)\n\t\t(symbol \"Device:R\" (property \"Reference\" \"R\" (at 0 0 0)))\n\t\t(symbol \"mine:B\" (property \"Reference\" \"B\" (at 0 0 0)))\n\t)\n\t(symbol (lib_id \"mine:B\") (at 1 1 0))\n)\n";
+
+    fn entry(p: &str, c: &str) -> (String, Vec<u8>) { (p.to_string(), c.as_bytes().to_vec()) }
+
+    #[test]
+    fn a_missing_project_symbol_library_is_written_from_the_schematic() {
+        let out = rebuild_symbol_libraries(&[entry("sym-lib-table", TABLE), entry("a.kicad_sch", SCH)]);
+        assert_eq!(out.len(), 1, "only the project's own library, and never a path that leaves the project");
+        assert_eq!(out[0].0, "mine.kicad_sym");
+        let text = String::from_utf8(out[0].1.clone()).unwrap();
+        assert!(text.starts_with("(kicad_symbol_lib\n\t(version 20241209)"), "{text}");
+        assert!(text.contains("(symbol \"B\" (property \"Reference\" \"B\""), "{text}");
+        assert!(text.contains("(symbol \"VALVE (odd)\"\n") && text.contains("(symbol \"VALVE (odd)_1_1\"") && text.contains("(name \"a)\\\"b\")"), "{text}");
+        assert!(!text.contains("Device") && !text.contains("mine:"), "{text}");
+        assert_eq!(list_end(text.as_bytes(), 0), Some(text.len() - 1), "one balanced list");
+    }
+
+    #[test]
+    fn a_library_the_project_holds_or_does_not_use_is_left_alone() {
+        assert!(rebuild_symbol_libraries(&[entry("sym-lib-table", TABLE), entry("a.kicad_sch", SCH), entry("mine.kicad_sym", "(kicad_symbol_lib)")]).is_empty());
+        assert!(rebuild_symbol_libraries(&[entry("sym-lib-table", TABLE), entry("a.kicad_sch", "(kicad_sch (version 20211123) (lib_symbols))")]).is_empty());
+        assert!(rebuild_symbol_libraries(&[entry("a.kicad_sch", SCH)]).is_empty());
+        // a table in a sub-folder names files beside itself; an older schematic keeps its own format date
+        let out = rebuild_symbol_libraries(&[entry("sub/sym-lib-table", TABLE), entry("sub/a.kicad_sch", &SCH.replace("20250114", "20230121"))]);
+        assert_eq!(out[0].0, "sub/mine.kicad_sym");
+        assert!(String::from_utf8(out[0].1.clone()).unwrap().contains("(version 20230121)"));
+    }
+}

@@ -70,7 +70,8 @@ KICOMMON_API std::optional<nlohmann::json> GetProject( const wxString& aServerUr
 KICOMMON_API std::optional<nlohmann::json> CreateProject( const wxString& aServerUrl,
                                                           const wxString& aToken,
                                                           const wxString& aName,
-                                                          const std::string& aZipBytes );
+                                                          const std::string& aZipBytes,
+                                                          ERROR_INFO* aError = nullptr );
 
 /// POST /api/projects/{id}/links { role, expiresInDays? } -> { token, url, role }.
 /// The link never expires unless aExpiresInDays is positive.

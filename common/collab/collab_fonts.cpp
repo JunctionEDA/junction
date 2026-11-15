@@ -24,6 +24,7 @@
 #include <font/fontconfig.h>
 #include <font/kicad_font_name.h>
 #include <kicad_curl/kicad_curl_easy.h>
+#include <paths.h>
 
 #include <algorithm>
 #include <chrono>
@@ -500,6 +501,41 @@ void onMissingFont( const wxString& aFamily )
 }
 
 
+/// The fonts whose upload the server refused, one "project id<TAB>family" per line, kept in
+/// the user cache.  Each editor is a process of its own, so without this file the refusal
+/// was reported (and the font file sent) again on every open of the project.
+wxString refusedFontsFile()
+{
+    return wxFileName( PATHS::GetUserCachePath(), wxS( "collab-fonts-refused.txt" ) ).GetFullPath();
+}
+
+
+bool refusedBefore( const wxString& aProjectId, const wxString& aFamily )
+{
+    wxLogNull noLog;
+    wxFFile   in( refusedFontsFile(), wxS( "rb" ) );
+    wxString  text;
+
+    if( !in.IsOpened() || !in.ReadAll( &text, wxConvUTF8 ) )
+        return false;
+
+    return ( wxS( "\n" ) + text ).Contains( wxS( "\n" ) + aProjectId + wxS( "\t" ) + aFamily.Lower()
+                                           + wxS( "\n" ) );
+}
+
+
+void rememberRefused( const wxString& aProjectId, const wxString& aFamily )
+{
+    wxLogNull noLog;
+    wxFileName::Mkdir( PATHS::GetUserCachePath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL );
+
+    wxFFile out( refusedFontsFile(), wxS( "ab" ) );
+
+    if( out.IsOpened() )
+        out.Write( aProjectId + wxS( "\t" ) + aFamily.Lower() + wxS( "\n" ), wxConvUTF8 );
+}
+
+
 /// Keep a font of this computer with the project (background thread).
 void uploadFamily( const wxString& aFamily, const std::vector<fontconfig::FONTCONFIG::FAMILY_FILE>& aFiles,
                    const ONLINE_PROJECT& aProject )
@@ -516,6 +552,10 @@ void uploadFamily( const wxString& aFamily, const std::vector<fontconfig::FONTCO
             }
         }
     }
+
+    // Refused for this project before (its licence forbids embedding): the user was told then.
+    if( refusedBefore( aProject.id, aFamily ) )
+        return;
 
     for( const fontconfig::FONTCONFIG::FAMILY_FILE& file : aFiles )
     {
@@ -555,6 +595,9 @@ void uploadFamily( const wxString& aFamily, const std::vector<fontconfig::FONTCO
                 std::lock_guard<std::mutex> lock( s.mutex );
                 first = s.refused.insert( aFamily.Lower() ).second;
             }
+
+            if( first )
+                rememberRefused( aProject.id, aFamily );
 
             if( first && wxTheApp )
             {

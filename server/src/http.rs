@@ -1388,6 +1388,10 @@ pub async fn download_archive(
         "docs": manifest_docs,
     });
     entries.push(("collab-manifest.json".into(), serde_json::to_vec_pretty(&manifest).unwrap()));
+    // a project library the tables name and the project was uploaded without: written back from
+    // the schematics' own copies of its symbols, as a file of the download only (not a document)
+    let rebuilt = crate::projectlibs::rebuild_symbol_libraries(&entries);
+    entries.extend(rebuilt);
 
     let zip_bytes = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
         let mut writer = zip::ZipWriter::new(Cursor::new(Vec::new()));

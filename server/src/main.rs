@@ -21,6 +21,7 @@ mod pages;
 mod pcm;
 mod parts;
 mod persist;
+mod projectlibs;
 mod plugins;
 mod registry;
 mod relay;

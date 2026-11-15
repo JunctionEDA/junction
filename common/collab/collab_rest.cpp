@@ -205,7 +205,8 @@ std::optional<nlohmann::json> COLLAB_REST::GetProject( const wxString& aServerUr
 std::optional<nlohmann::json> COLLAB_REST::CreateProject( const wxString& aServerUrl,
                                                           const wxString& aToken,
                                                           const wxString& aName,
-                                                          const std::string& aZipBytes )
+                                                          const std::string& aZipBytes,
+                                                          ERROR_INFO* aError )
 {
     KICAD_CURL_EASY curl;
     setupRequest( curl, aServerUrl + wxS( "/api/projects" ), aToken );
@@ -226,7 +227,7 @@ std::optional<nlohmann::json> COLLAB_REST::CreateProject( const wxString& aServe
 
     curl_easy_setopt( curl.GetCurl(), CURLOPT_MIMEPOST, mime );
 
-    std::optional<nlohmann::json> result = performJson( curl );
+    std::optional<nlohmann::json> result = performJson( curl, aError );
 
     curl_mime_free( mime );
 

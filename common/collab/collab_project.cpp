@@ -145,12 +145,20 @@ std::optional<nlohmann::json> COLLAB_PROJECT::CreateAndShare( const wxString& aS
         return std::nullopt;
     }
 
+    COLLAB_REST::ERROR_INFO uploadError;
+
     std::optional<nlohmann::json> project =
-            COLLAB_REST::CreateProject( aServer, aToken, aProjectName, zipBytes );
+            COLLAB_REST::CreateProject( aServer, aToken, aProjectName, zipBytes, &uploadError );
 
     if( !project )
     {
         aError = _( "Uploading the project to the collaboration server failed." );
+
+        // The server's own reason (a file over the size limit, too many files, no room left)
+        // is what the user can act on.
+        if( !uploadError.message.IsEmpty() )
+            aError += wxS( "\n\n" ) + uploadError.message;
+
         return std::nullopt;
     }
 
