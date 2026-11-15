@@ -33,6 +33,8 @@ import { eng, findVector, plotOf, runSpice, summarize, type SimRun, type Vector 
 import * as NK from "../sim/netlist-kicad";
 import * as SP from "../sim/spice-netlist";
 import * as SM from "../dialogs/sim-model-logic";
+import { NGSPICE } from "../dialogs/sim-model-ngspice";
+import { builtinLibrary } from "../sim/builtin-libs";
 import { diffDocs } from "../review/diff";
 import { getBom } from "./bom";
 import { buildPackage, packageZip } from "../fab/index";
@@ -380,6 +382,7 @@ async function schematicSpice(req: Request, p: Project, withCommands: boolean, n
     const sheets = insts.map((i) => { const pl = placed.get(i.uuidPath.join("/")), pd = parentDoc(i.uuidPath);
       return { index: i.index, uuidPath: i.uuidPath, doc: docOf(i.file), sheetNode: pl ? pl.sheetNode : null, parentVersion: pd ? pd.version : undefined }; }).filter((x) => x.doc);
     let textVars: Record<string, string> = {}; try { textVars = ((ed.proSettings ? JSON.parse(ed.proSettings) : {}).text_variables as Record<string, string>) || {}; } catch { textVars = {}; }
+    if (!SM.hasNgspiceData()) SM.setNgspiceData(NGSPICE);   // the ngspice models' parameters (instance l=/w=, .model overrides)
     const { symbols, texts } = SP.readHierarchy({ sheets, netMap: nl.netMap || new Map(), symbolPins: hp.symbolPins, isPower, textVars } as any);
     // the project's SPICE model files: parsed for the exporter, and handed to ngspice where the netlist includes them
     const models = p.docs.filter((d) => d.docType === "spice_model" || /\.(lib|sub|cir|mod|spice|ibs)$/i.test(d.path));
@@ -390,7 +393,7 @@ async function schematicSpice(req: Request, p: Project, withCommands: boolean, n
     const libs = new Map<string, any>();
     for (const sym of symbols) {
       const path = (sym.fields.find((f: any) => f.name === SM.F.LIBRARY) || { value: "" }).value; if (!path || libs.has(path)) continue;
-      const f = find(path); let text = f ? await load(f) : null;
+      const f = find(path); let text = builtinLibrary(path); if (text === null) text = f ? await load(f) : null;
       if (text !== null && !SM.isIbisPath(path)) text = await SM.expandSpiceIncludes(text, path, async (cands: string[]) => { for (const c of cands) { const g = find(c); if (g) { const t = await load(g); if (t !== null) return t; } } return null; }, []);
       if (text === null) notes.push(`The model library ${path} is not in the project.`);
       libs.set(path, text === null ? null : SM.isIbisPath(path) ? SM.parseIbisLibrary(text, path) : SM.parseSpiceLibrary(text));
@@ -400,6 +403,7 @@ async function schematicSpice(req: Request, p: Project, withCommands: boolean, n
     for (const d of models) await load(d);
     const given: [string, string][] = [];
     for (const [path, text] of loaded) if (text !== null) given.push([`/proj/${norm(path)}`, text]);
+    for (const m of netlist.matchAll(/^\s*\.include\s+"([^"]+)"/gim)) { const b = builtinLibrary(m[1]); if (b !== null) given.push([m[1], b]); }
     netlist = netlist.replace(/^(\s*\.(?:include|lib)\s+)"([^"]+)"/gim, (all, head, path) => { const f = find(path); return f ? `${head}"/proj/${norm(f.path)}"` : all; });
     return { netlist, files: given };
   });

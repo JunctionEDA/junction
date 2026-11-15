@@ -14,6 +14,8 @@ export interface SpiceSession {
   list(dir: string): string[];
   remove(path: string): void;
   version: string;
+  /** ngspice ended (a fatal error: it called exit); the session takes no more commands and a new one is needed */
+  readonly dead: boolean;
 }
 
 /** ngspice's own chatter about every start: not errors, and not for the console. */
@@ -32,20 +34,26 @@ export async function open(url: string): Promise<SpiceSession> {
   const fs: any = sim.__getSpiceModuleForTests().FS;
   const version = (/ngspice-([\w.]+)/.exec(String(sim.getInitInfo())) || ["", ""])[1];
   let busy: Promise<unknown> = Promise.resolve();
+  let dead = false;
+  const fatal = (): boolean => (sim.error as string[]).some((e) => /fatal error in ngspice/i.test(String(e)));
   const exec = (commands: string[]): Promise<SpiceResult> => {
     const turn = busy.then(() => quietly(async () => {
+      if (dead) return { out: "", err: ["ngspice has stopped; start it again."] };
       sim.info = ""; sim.error = [];
       sim.commandList = [" ", ...commands.map((c) => (c === "source test.cir" ? "source ./test.cir" : c))];
       const finished = new Promise<void>((ok) => { done = ok; });
+      // a fatal error ends ngspice (controlled_exit) without its asking for more: the turn ends there
+      const watch = setInterval(() => { if (fatal()) { dead = true; const d = done; done = null; if (d) d(); } }, 50);
       sim.continueRun();
       await finished;
+      clearInterval(watch);
       return { out: String(sim.info), err: (sim.error as string[]).slice() };
     }));
     busy = turn.catch(() => undefined);
     return turn;
   };
   return {
-    exec, version,
+    exec, version, get dead() { return dead; },
     write(path, data) { const dir = path.slice(0, path.lastIndexOf("/")); if (dir) fs.mkdirTree(dir); fs.writeFile(path, data); },
     read(path) { try { return fs.readFile(path) as Uint8Array; } catch { return null; } },
     list(dir) { try { return (fs.readdir(dir) as string[]).filter((n) => n !== "." && n !== ".."); } catch { return []; } },

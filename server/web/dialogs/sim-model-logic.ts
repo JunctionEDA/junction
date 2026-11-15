@@ -586,6 +586,8 @@ function itemPins(m: SimModel, item: SpiceItem): string {
   // SPICE_GENERATOR::ItemPins: each model pin's symbol pin, looked up in the item's pin numbers; the dialog's
   // SPICE_ITEM carries no pin numbers, so there every model pin is printed as NC-<ref>-<n>
   let out = "", nc = 0; const nums = item.pinNumbers || [], nets = item.pinNetNames || [];
+  // SPICE_GENERATOR_RAW_SPICE::ItemPins: a raw model that knows none of its pins takes the symbol's pins in order
+  if (!m.fallback && m.cls === "rawspice" && !m.pins.length) { for (const n of nets) out += ` ${n}`; return out; }
   for (let i = 0; i < m.pins.length; i++) {
     const k = nums.indexOf(m.pins[i].symbolPinNumber);
     out += k < 0 ? ` NC-${item.refName}-${nc++}` : ` ${nets[k]}`;
@@ -743,6 +745,19 @@ export function typeFromSpiceStrings(typeString: string, level = "", version = "
     }
   }
   return "RAWSPICE";
+}
+/** The model parameter names ngspice takes on a .model line of this type (its device table, every alias), or null
+ *  when the type is not one of ngspice's own device models or the tables are not loaded. */
+export function ngspiceModelParamNames(typeString: string, level: string, version: string): Set<string> | null {
+  let type = typeFromSpiceStrings(typeString, level, version);
+  if (type === "RAWSPICE") type = typeFromSpiceStrings(typeString, level, version, false);
+  const mi = NG && NG[NGSPICE_MODEL_OF[type]]; if (!mi) return null;
+  const names = new Set<string>(["level", "version"]);
+  for (const t of mi.modelParams) {
+    const n = String(t[0]).toLowerCase(); names.add(n); if (n.endsWith("_")) names.add(n.slice(0, -1));
+    const alias = String(t[10] || "").toLowerCase(); if (alias) names.add(alias);
+  }
+  return names;
 }
 function canSilentlyIgnore(m: SimModel, n: string): boolean {
   const l = n.toLowerCase();

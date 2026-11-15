@@ -14,11 +14,14 @@ import { menuKey } from "../keys";
 import { projectSpiceNetlist } from "../editor/export-netlist";
 import { worldMm } from "../editor/view";
 import { convertToSpiceMarkup } from "./spice-netlist";
+import { builtinLibrary } from "./builtin-libs";
+import { forWasmNgspice } from "./ngspice-wasm";
+import { editProject } from "../canvas/project-file";
 import { openPreferences } from "../dialogs/preferences";
 import { prefs } from "../dialogs/prefs";
 import { nameOfPick } from "../editor/schnets";
 import { colorPicker, fromHex, toHex } from "../editor/pcbdialogs/color-picker";
-import { canWriteProject, projectDocs, saveTextDocument } from "../editor/projectfile";
+import { adoptProjectFile, canWriteProject, loadProjectFile, projectDocs, saveProjectFile, saveTextDocument } from "../editor/projectfile";
 import { state } from "../editor/appstore";
 import { open as openSpice, type SpiceSession } from "../plugins/spice";
 import { SimPlot, TRACE_COLORS, type PlotTrace } from "./plot";
@@ -51,6 +54,34 @@ const SIM_OPTS = OPT_SAVE_V | OPT_SAVE_I | OPT_SAVE_P | OPT_SAVE_EVENTS;
 const curTab = (): Tab | null => S.tabs[S.cur] || null;
 const tabType = (t: Tab | null): SimType => (t ? commandToSimType(t.command) : "TRAN");
 const storeKey = (): string => "kc-sim-wbk:" + location.pathname;
+
+// ---------------------------------------------------------------- the project's simulator settings
+/** NGSPICE_SETTINGS (spice_settings.cpp): the .kicad_pro's schematic.ngspice — model_mode (NGSPICE_COMPATIBILITY_MODE,
+ *  LT_PSPICE by default), workbook_filename (relative to the project), fix_include_paths. */
+interface NgSettings { model_mode: number; workbook_filename: string; fix_include_paths: boolean }
+function ngSettings(): NgSettings {
+  const d: NgSettings = { model_mode: 4, workbook_filename: "", fix_include_paths: true };
+  try {
+    const j = JSON.parse(String(E.proSettings || "{}")) as { schematic?: { ngspice?: Partial<NgSettings> } };
+    const n = (j.schematic && j.schematic.ngspice) || {};
+    if (typeof n.model_mode === "number" && n.model_mode >= 0 && n.model_mode <= 5) d.model_mode = n.model_mode;
+    if (typeof n.workbook_filename === "string") d.workbook_filename = n.workbook_filename;
+    if (typeof n.fix_include_paths === "boolean") d.fix_include_paths = n.fix_include_paths;
+  } catch { /* no project file: the defaults */ }
+  return d;
+}
+/** The changed simulator settings into the .kicad_pro (the project is saved with them, as KiCad's is). */
+async function saveNgSettings(edits: Partial<NgSettings>): Promise<void> {
+  if (!canWriteProject()) return;
+  try {
+    const text = await loadProjectFile(); if (!text) return;
+    const res = editProject(text, Object.entries(edits).map(([k, v]) => ({ path: ["schematic", "ngspice", k], value: v as never })));
+    if (res.changed.length && await saveProjectFile(res.text, res.changed)) adoptProjectFile(res.text);
+  } catch (e) { log(`Warning: the simulator settings were not saved to the project file (${e instanceof Error ? e.message : String(e)}).\n`); }
+}
+/** NGSPICE::GetSettingCommands: the compatibility mode as ngspice's ngbehavior. */
+const COMPAT_COMMANDS: string[][] = [[], ["unset ngbehavior"], ["set ngbehavior=psa"], ["set ngbehavior=lta"], ["set ngbehavior=ltpsa"], ["set ngbehavior=hsa"]];
+const compatIndex = (): number => Math.max(0, COMPAT_MODES.indexOf(S.compat));
 
 const CSS = `
 #simframe[hidden],#simframe [hidden]{display:none !important}
@@ -110,11 +141,21 @@ export async function openSimulator(): Promise<void> {
   const root = h("div", { class: "se-root", id: "simframe" }); S.root = root;
   document.body.append(root);
   layout();
+  // SIMULATOR_FRAME: the project's ngspice settings (a project without a workbook simulates in LTspice/PSpice mode)
+  const cfg = ngSettings();
+  S.compat = COMPAT_MODES[cfg.workbook_filename ? cfg.model_mode : 4] || COMPAT_MODES[4];
   await loadCircuit();
   let wb: Workbook | null = null;
-  try { const t = localStorage.getItem(storeKey()); if (t) wb = JSON.parse(t) as Workbook; } catch { /* nothing kept */ }
-  if (!wb) {
-    // SIMULATOR_FRAME::LoadSimulator: the project's own workbook (<project>.wbk) when there is one
+  // SIMULATOR_FRAME_UI::InitWorkbook: the workbook the project names (workbook_filename, relative to the project)
+  if (cfg.workbook_filename) {
+    const docs = wbkDocs(), want = cfg.workbook_filename.replace(/\\/g, "/").replace(/^\.\//, "");
+    const d = docs.find((x) => x.path === want || x.path.endsWith("/" + want)) || null;
+    if (d) { try { const t = await api(`/api/docs/${d.docId}/content`); wb = JSON.parse(typeof t === "string" ? t : JSON.stringify(t)) as Workbook; S.wbName = d.path; } catch { wb = null; } }
+    else log(`Workbook file '${cfg.workbook_filename}' not found. Loading simulation settings from schematic.\n`);
+  }
+  // this viewer's unsaved workbook of the project, then any workbook the project has
+  if (!wb) { try { const t = localStorage.getItem(storeKey()); if (t) wb = JSON.parse(t) as Workbook; } catch { /* nothing kept */ } }
+  if (!wb && !cfg.workbook_filename) {
     const d = wbkDocs()[0];
     if (d) { try { const t = await api(`/api/docs/${d.docId}/content`); wb = JSON.parse(typeof t === "string" ? t : JSON.stringify(t)) as Workbook; S.wbName = d.path; } catch { wb = null; } }
   }
@@ -172,17 +213,23 @@ function newTab(command: string, options: number): Tab {
 async function newAnalysisTab(): Promise<void> {
   const r = await openSimCommand({ command: "*", options: DEFAULT_OPTIONS, nets: S.circuit.nets, vSources: vSources(), iSources: iSources(), resistors: resistors(), signals: allSignalsFor("TRAN", DEFAULT_OPTIONS), schDirectives: S.circuit.directives.join("\n"), compat: S.compat, plot: null });
   if (!r) return;
-  S.compat = r.compat; newTab(r.command, r.options); renderAll();
+  setCompat(r.compat); newTab(r.command, r.options); renderAll();
 }
 async function editAnalysisTab(): Promise<void> {
   const t = curTab(); if (!t) return;
   syncSetup(t);
   const r = await openSimCommand({ command: t.command, options: t.options, nets: S.circuit.nets, vSources: vSources(), iSources: iSources(), resistors: resistors(), signals: allSignalsFor("TRAN", t.options), schDirectives: S.circuit.directives.join("\n"), compat: S.compat, plot: isPlottable(tabType(t)) ? t.setup : null });
   if (!r) return;
-  S.compat = r.compat;
+  setCompat(r.compat);
   if (commandToSimType(r.command) !== tabType(t)) { t.traces = []; t.data = null; }
   t.command = r.command; t.options = r.options; if (r.plot) t.setup = r.plot; S.dirty = true;
   renderAll();
+}
+/** DIALOG_SIM_COMMAND::TransferDataFromWindow: a new compatibility mode is the project's (NGSPICE_SETTINGS). */
+function setCompat(mode: string): void {
+  if (mode === S.compat) return;
+  S.compat = mode;
+  const i = COMPAT_MODES.indexOf(mode); if (i >= 0) void saveNgSettings({ model_mode: i });
 }
 function closeTab(i: number): void { S.tabs.splice(i, 1); if (S.cur >= S.tabs.length) S.cur = S.tabs.length - 1; S.dirty = true; renderAll(); }
 function syncSetup(t: Tab): void {
@@ -255,7 +302,12 @@ function removeTrace(signal: string): void { const t = curTab(); if (!t) return;
 // ---------------------------------------------------------------- running ngspice
 function log(s: string): void { const c = S.root && S.root.querySelector<HTMLTextAreaElement>(".sim-console"); if (c) { c.value += s; c.scrollTop = c.scrollHeight; } }
 async function session(): Promise<SpiceSession> {
-  if (!S.spice) { log("Loading ngspice...\n"); S.spice = await openSpice(NGSPICE_URL); log(`Note: using ngspice ${S.spice.version}\n`); }
+  if (S.spice && S.spice.dead) { S.spice = null; S.simulated = false; }
+  if (!S.spice) {
+    log("Loading ngspice...\n"); S.spice = await openSpice(NGSPICE_URL); log(`Note: using ngspice ${S.spice.version}\n`);
+    // NGSPICE::init_dll's workarounds, sent whatever the init script says
+    await S.spice.exec(["set noaskquit", "set nomoremode"]);
+  }
   return S.spice;
 }
 /** The .include files the netlist names, written into ngspice's file system from the project's documents. */
@@ -263,9 +315,11 @@ async function stageIncludes(sp: SpiceSession, netlist: string): Promise<void> {
   const docs = projectDocs() as { docId: string; path: string }[];
   for (const m of netlist.matchAll(/^\.include\s+"([^"]+)"/gim)) {
     const p = m[1], base = p.split("/").pop() || p;
+    const builtin = builtinLibrary(p);
+    if (builtin !== null) { sp.write(p.startsWith("/") ? p : "/" + p, forWasmNgspice(builtin)); continue; }
     const doc = docs.find((d) => d.path === p || d.path.endsWith("/" + base) || d.path === base);
     if (!doc) { log(`Warning: library '${p}' is not part of the project.\n`); continue; }
-    try { const txt = await api(`/api/docs/${doc.docId}/content`); sp.write(p.startsWith("/") ? p : "/" + p, typeof txt === "string" ? txt : JSON.stringify(txt)); } catch { log(`Warning: could not read '${p}'.\n`); }
+    try { const txt = await api(`/api/docs/${doc.docId}/content`); sp.write(p.startsWith("/") ? p : "/" + p, forWasmNgspice(typeof txt === "string" ? txt : JSON.stringify(txt), (w) => log(w + "\n"))); } catch { log(`Warning: could not read '${p}'.\n`); }
   }
 }
 function circuitFor(t: Tab): string {
@@ -294,9 +348,9 @@ export async function runSimulation(): Promise<void> {
       if (multi) multi.value = multi.min + ((multi.max - multi.min) * k) / (steps - 1);
       const cir = circuitFor(t);
       await stageIncludes(sp, cir);
-      sp.write("/sim.cir", cir);
+      sp.write("/sim.cir", forWasmNgspice(cir.replace(/^(\s*\.include\s+")(?!\/)/gim, "$1/"), (w) => log(w + "\n")));
       await sp.exec(["destroy all", "remcirc"]).catch(() => undefined);
-      const lines = ["source /sim.cir", ...S.tuners.map((x) => `alter ${x.name.toLowerCase()} = ${toSpiceString(x.value)}`), "run"];
+      const lines = [...COMPAT_COMMANDS[compatIndex()], "source /sim.cir", ...S.tuners.map((x) => `alter ${x.name.toLowerCase()} = ${toSpiceString(x.value)}`), "run"];
       const r = await sp.exec(lines);
       if (r.out.trim()) log(r.out.endsWith("\n") ? r.out : r.out + "\n");
       for (const e of r.err) if (e.trim() && !/^(Note|Warning: can't find)/.test(e)) log(e + "\n");
@@ -864,6 +918,9 @@ async function saveWorkbook(as: boolean): Promise<void> {
       if (!project.docs.some((d) => d.docId === res.docId)) project.docs.push({ docId: res.docId, path: res.path || path, docType: "other" });
     }
     S.wbName = path; S.dirty = false; log(`Saved workbook ${path}\n`);
+    // SaveWorkbook: the saved workbook is the project's (workbook_filename, relative to the project)
+    const rel = dir && path.startsWith(dir) ? path.slice(dir.length) : path;
+    if (ngSettings().workbook_filename !== rel) await saveNgSettings({ workbook_filename: rel });
   } catch (e) { void messageBox(`Error saving workbook ${path}: ${e instanceof Error ? e.message : String(e)}`); }
 }
 

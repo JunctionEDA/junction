@@ -13,6 +13,7 @@
 // KiCad defines with a .model line are made unique with NAME_GENERATOR ("name", "name#1", …).
 import * as S from "../dialogs/sim-model-logic";
 import { ruleAreasAround } from "./netlist-kicad";
+import { expandIncludePath } from "./builtin-libs";
 
 export const OPTION_SAVE_ALL_VOLTAGES = 0x0040, OPTION_SAVE_ALL_CURRENTS = 0x0080, OPTION_SAVE_ALL_DISSIPATIONS = 0x0100,
   OPTION_CUR_SHEET_AS_ROOT = 0x0200, OPTION_SIM_COMMAND = 0x0400, OPTION_SAVE_ALL_EVENTS = 0x0800;
@@ -97,7 +98,8 @@ export function readDirectives(texts: string[]): string[] {
   return out;
 }
 
-const SIM_FIELDS = [S.F.DEVICE, S.F.TYPE, S.F.PINS, S.F.PARAMS, S.F.LIBRARY, S.F.NAME];
+/** std::sort of wxStrings: code-unit order. */
+const byteCmp = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 interface Item { ref: string; model: S.SimModel; modelName: string; baseModelName: string; pinNumbers: string[]; pinNetNames: string[] }
 
@@ -110,12 +112,17 @@ export function spiceNetlist(inp: SpiceNetlistInput): string {
   for (const sym of inp.symbols) {
     let rows = sym.fields.map((f) => ({ name: f.name, value: f.value }));
     const pinNumbers = sym.pins.map((p) => p.number);
-    // SIM_LIB_MGR::CreateModel: a symbol without simulation fields is inferred from its reference and value
-    if (!SIM_FIELDS.some((k) => S.getFieldValue(rows, k) !== "")) {
-      const inf = S.inferSimModel(sym.ref.replace(/[^A-Za-z].*$/, ""), pinNumbers, rows);
-      if (inf.ok) {
-        rows = rows.concat([{ name: S.F.DEVICE, value: inf.deviceType }, ...(inf.modelType ? [{ name: S.F.TYPE, value: inf.modelType }] : []), { name: S.F.PARAMS, value: inf.params }, { name: S.F.PINS, value: inf.pinMap }]);
-      }
+    // SIM_LIB_MGR::CreateModel: InferSimModel runs on every symbol (with the inference pins, the symbol's pin
+    // numbers in std::sort order); RLC and VI models it infers write Sim.Device, Sim.Type (when it has one),
+    // Sim.Params and Sim.Pins over the fields (getOrCreateField) and are stored in the value
+    let storeInValue = false;
+    const inf = S.inferSimModel(sym.ref.replace(/[^A-Za-z].*$/, ""), pinNumbers.slice().sort(byteCmp), rows);
+    if (inf.ok) {
+      const put = (name: string, value: string): void => { const f = rows.find((r) => r.name === name); if (f) f.value = value; else rows.push({ name, value }); };
+      put(S.F.DEVICE, inf.deviceType);
+      if (inf.modelType) put(S.F.TYPE, inf.modelType);
+      put(S.F.PARAMS, inf.params); put(S.F.PINS, inf.pinMap);
+      storeInValue = true;
     }
     let model: S.SimModel, baseModelName = "";
     const libPath = S.getFieldValue(rows, S.F.LIBRARY);
@@ -131,6 +138,7 @@ export function spiceNetlist(inp: SpiceNetlistInput): string {
       const r = S.createFromFields(rows, pinNumbers); model = r.model;
       if (r.error) report(r.error, "error");
     }
+    model.storedInValue = storeInValue;
     // GenerateItemPinNetName (the model exporter names a port's net after the port first)
     const ports = inp.subckt ? inp.subckt.ports : null;
     const pinNetNames = sym.pins.map((p) => { const n = convertToSpiceMarkup(ports && ports.has(p.net) ? (ports.get(p.net) as SpicePort).name : p.net); return n === "" ? `NC-${nc++}` : n; });
@@ -149,7 +157,8 @@ export function spiceNetlist(inp: SpiceNetlistInput): string {
     for (const [, port] of [...inp.subckt.ports.entries()].sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0))) out += `+       ${port.name} ; ${PORT_DIR[port.shape] || "passive"}\n`;
     out += "\n\n";
   }
-  for (const p of [...libsUsed].sort()) out += `.include "${p.replace(/\\/g, "/")}"\n`;
+  // writeIncludes: the libraries by path (std::map order), each through writeInclude's expansion
+  for (const p of [...libsUsed].sort()) out += `.include "${expandIncludePath(p)}"\n`;
   const spiceItem = (it: Item): S.SpiceItem => ({ refName: it.ref, modelName: it.modelName, baseModelName: it.baseModelName, pinNumbers: it.pinNumbers, pinNetNames: it.pinNetNames });
   for (const it of items) if (it.model.enabled) out += S.modelLine(it.model, spiceItem(it));
   if (items.length) {
