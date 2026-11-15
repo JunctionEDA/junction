@@ -907,6 +907,9 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
     let efPanel: ReturnType<typeof embeddedFilesPanel> | null = null;
     // the board's own (embedded_files …): a board KiCad saved keeps its footprints' file data there (FixupEmbeddedData)
     const boardFiles = docFiles(doc);
+    // PANEL_EMBEDDED_FILES' m_cbEmbedFonts, the footprint's (embedded_fonts yes|no)
+    const efNode = kid(node, "embedded_fonts"), fonts0 = !!efNode && sval(efNode) === "yes";
+    const embedFonts = checkField(fonts0, "Embed fonts", { ro, key: "embedFonts", tip: "Store a copy of all fonts used" });
     const attrs = PH().footprintAttrs(node);
     const type = selectField<string>(attrs.type, [["through_hole", "Through hole"], ["smd", "SMD"], ["", "Unspecified"]], { ro, key: "fpType" });
     const FLAGS: [string, string][] = [["exclude_from_sim", "Exclude from simulation"], ["board_only", "Not in schematic"], ["dnp", "Do not populate"], ["exclude_from_bom", "Exclude from bill of materials"], ["exclude_from_pos_files", "Exclude from position files"]];
@@ -945,7 +948,7 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
       footprintId: () => { const id = String(node[1] ?? ""), c = id.indexOf(":"); return c >= 0 ? { lib: id.slice(0, c), name: id.slice(c + 1) } : { lib: "", name: id }; } });
     const tabs = notebook([{ label: "General", build: (el) => el.append(general) }, { label: "Clearance Overrides & Pad Connections", build: (el) => el.append(clearances) },
       { label: "3D Models", build: (el) => models3d.build(el) },
-      { label: "Embedded Files", build: (el) => { efPanel = embeddedFilesPanel({ names: FM.embeddedFileNames(node), ro, bytes: (nm) => embeddedFileBytes(node, nm, boardFiles) }); el.append(efPanel.el); } }]);
+      { label: "Embedded Files", build: (el) => { efPanel = embeddedFilesPanel({ names: FM.embeddedFileNames(node), ro, bytes: (nm) => embeddedFileBytes(node, nm, boardFiles), embedFonts }); el.append(efPanel.el); } }]);
     body.append(tabs.el);
     whenGone(body, () => models3d.dispose());
     return (n) => {
@@ -1021,6 +1024,8 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
         const onBoard = added.filter((a) => embeddedFileNode(boardFiles, a.name));
         if (onBoard.length) { const change = (K() as unknown as { boardSetup: { embeddedFilesChange(files: string[]): KChange } }).boardSetup.embeddedFilesChange(onBoard.map((a) => a.sexpr)); sendOp([change], false); applyChanges([change]); }
       }
+      // SetAreFontsEmbedded: format( FOOTPRINT* ) writes (embedded_fonts …) before the embedded files and the 3D models
+      if (embedFonts.get() !== fonts0) put(n, "embedded_fonts", `(embedded_fonts ${embedFonts.get() ? "yes" : "no"})`, ["embedded_files", "model"]);
       return undefined;
     };
   }, undefined, "Edit Footprint Properties");
