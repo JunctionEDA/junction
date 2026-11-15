@@ -9,7 +9,7 @@ version it is based on.
 ### Desktop
 - Works on a computer with no KiCad installed: when no symbol or footprint
   libraries are found, Junction offers to download the standard KiCad
-  libraries (about 60 MB) and uses them at once, without a restart.
+  libraries and project templates (about 60 MB) and uses them at once, without a restart.
   Preferences, Download Standard Libraries does the same later.
 - The project manager program itself is named Junction on every system
   (Junction inside the Mac app, junction.exe on Windows, Junction on Linux

@@ -459,14 +459,7 @@ wxString PATHS::GetStockTemplatesPath()
 {
     wxFileName fn;
     
-    // The downloaded libraries bring library tables only; the project templates are the ones
-    // this program ships (LIBRARY_MANAGER::StockTablePath looks in both places).
-    wxString base = GetStockEDALibraryPath();
-
-    if( wxFileName::DirName( base ).SameAs( wxFileName::DirName( GetManagedLibrariesPath() ) ) )
-        base = ownEDALibraryPath();
-
-    fn.AssignDir( base );
+    fn.AssignDir( GetStockEDALibraryPath() );
     fn.AppendDir( "template" );
 
     return fn.GetPathWithSep();

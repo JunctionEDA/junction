@@ -18,7 +18,7 @@ PANEL_STARTWIZARD_SETTINGS_BASE::PANEL_STARTWIZARD_SETTINGS_BASE( wxWindow* pare
 	wxBoxSizer* bSizer6;
 	bSizer6 = new wxBoxSizer( wxVERTICAL );
 
-	m_staticText2 = new wxStaticText( this, wxID_ANY, _("How would you like to configure KiCad?"), wxDefaultPosition, wxDefaultSize, 0 );
+	m_staticText2 = new wxStaticText( this, wxID_ANY, _("How would you like to configure Junction?"), wxDefaultPosition, wxDefaultSize, 0 );
 	m_staticText2->Wrap( -1 );
 	bSizer6->Add( m_staticText2, 0, wxALL|wxEXPAND, 5 );
 

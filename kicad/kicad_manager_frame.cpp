@@ -35,6 +35,7 @@
 #include <mutex>
 #include <thread>
 #include <wx/richmsgdlg.h>
+#include <wx/timer.h>
 #include <wx/clipbrd.h>
 #include <dialogs/dialog_git_mr_review.h>
 #include <widgets/git_commit_pane.h>
@@ -392,9 +393,36 @@ KICAD_MANAGER_FRAME::KICAD_MANAGER_FRAME( wxWindow* parent, const wxString& titl
         CallAfter(
                 [this]()
                 {
-                    DownloadStandardLibraries( true );
+                    offerStandardLibraries();
                 } );
     }
+}
+
+
+void KICAD_MANAGER_FRAME::offerStandardLibraries()
+{
+    // The first-run setup (or any other dialog) goes first: ask once it is out of the way.
+    for( wxWindow* window : wxTopLevelWindows )
+    {
+        wxDialog* dialog = dynamic_cast<wxDialog*>( window );
+
+        if( dialog && dialog->IsShown() && dialog->IsModal() )
+        {
+            std::shared_ptr<bool> alive = m_collabAlive;
+
+            // Look again in a moment (the timer object deletes itself after it fires).
+            new wxCallLater( 1000,
+                    [this, alive]()
+                    {
+                        if( *alive )
+                            offerStandardLibraries();
+                    } );
+
+            return;
+        }
+    }
+
+    DownloadStandardLibraries( true );
 }
 
 
@@ -1425,7 +1453,7 @@ void KICAD_MANAGER_FRAME::DownloadStandardLibraries( bool aOffer )
         wxRichMessageDialog ask( this,
                                  _( "No symbol or footprint libraries were found on this computer.\n\n"
                                     "Junction can download the standard KiCad libraries now "
-                                    "(about 60 MB to download, 400 MB on disk). Projects open "
+                                    "and project templates (about 60 MB to download, 450 MB on disk). Projects open "
                                     "without them, but there is nothing to place from." ),
                                  _( "Standard Libraries" ), wxYES_NO | wxICON_QUESTION );
 

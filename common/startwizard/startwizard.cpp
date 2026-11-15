@@ -253,7 +253,7 @@ void STARTWIZARD::CheckAndRun( wxWindow* aParent )
     m_wizard->Bind( wxEVT_WIZARD_CANCEL,
             [&]( wxWizardEvent& aEvt )
             {
-                if( IsOK( aParent, _( "Are you sure?  If you cancel KiCad setup, default settings "
+                if( IsOK( aParent, _( "Are you sure?  If you cancel Junction setup, default settings "
                                       "will be chosen for you." ) ) )
                 {
                     for( std::unique_ptr<STARTWIZARD_PROVIDER>& provider : m_providers )

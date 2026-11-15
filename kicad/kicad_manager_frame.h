@@ -110,6 +110,9 @@ public:
      */
     void DownloadStandardLibraries( bool aOffer );
 
+    /// Offer the download at start, after any dialog that is already up has closed.
+    void offerStandardLibraries();
+
     /// Open DIALOG_GIT_MR_REVIEW so the user can pick two refs and review
     /// the changed-file list between them.
     void OnCompareProjectBranches( wxCommandEvent& event );

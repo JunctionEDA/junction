@@ -20,7 +20,7 @@ PANEL_STARTWIZARD_PRIVACY_BASE::PANEL_STARTWIZARD_PRIVACY_BASE( wxWindow* parent
 	wxStaticBoxSizer* sbSizer1;
 	sbSizer1 = new wxStaticBoxSizer( new wxStaticBox( this, wxID_ANY, _("Updates") ), wxVERTICAL );
 
-	m_stIntro = new wxStaticText( sbSizer1->GetStaticBox(), wxID_ANY, _("Allow connections to the Internet to check for updated versions of KiCad and packages installed through the Plugin and Content Manager?"), wxDefaultPosition, wxDefaultSize, 0 );
+	m_stIntro = new wxStaticText( sbSizer1->GetStaticBox(), wxID_ANY, _("Allow connections to the Internet to check for updated versions of Junction and packages installed through the Plugin and Content Manager?"), wxDefaultPosition, wxDefaultSize, 0 );
 	m_stIntro->Wrap( 550 );
 	sbSizer1->Add( m_stIntro, 0, wxALL|wxEXPAND, 5 );
 

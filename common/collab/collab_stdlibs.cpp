@@ -51,7 +51,10 @@ struct ARCHIVE
     const char* table;          ///< the library table at the top of the repository
 };
 
+// The project templates and drawing sheets come first and the symbols last: the symbols folder
+// is what marks the set as installed.
 const ARCHIVE ARCHIVES[] = {
+    { "kicad-templates", "templates", "", "" },
     { "kicad-footprints", "footprints", ".pretty", "fp-lib-table" },
     { "kicad-symbols", "symbols", ".kicad_symdir", "sym-lib-table" },
 };
@@ -110,10 +113,10 @@ wxString download( const ARCHIVE& aArchive, const wxString& aTarget,
                 const wxString what = wxString::Format( _( "Downloading the %s (%.0f MB)..." ),
                                                         wxString( aArchive.folder ),
                                                         aNow / 1048576.0 );
-                int percent = aStep * 50;
+                int percent = aStep * 33;
 
                 if( aTotal > 0 )
-                    percent += (int) ( 25.0 * aNow / aTotal );
+                    percent += (int) ( 16.0 * aNow / aTotal );
 
                 if( aProgress && !aProgress( what, percent ) )
                 {
@@ -183,7 +186,25 @@ wxString unpack( const ARCHIVE& aArchive, const wxString& aZip, const wxString& 
 
         wxString target;
 
-        if( name == table )
+        if( table.IsEmpty() )
+        {
+            // The templates repository: project templates and drawing sheets, which an
+            // installed KiCad keeps side by side in its template folder.
+            wxString rest;
+
+            if( !name.StartsWith( wxS( "Projects/" ), &rest )
+                && !name.StartsWith( wxS( "Worksheets/" ), &rest ) )
+            {
+                continue;
+            }
+
+            if( rest.IsEmpty() )
+                continue;
+
+            target = aTemplateDir + wxFileName::GetPathSeparator()
+                     + wxFileName( rest, wxPATH_UNIX ).GetFullPath();
+        }
+        else if( name == table )
         {
             target = aTemplateDir + wxFileName::GetPathSeparator() + table;
             haveTable = true;
@@ -207,10 +228,10 @@ wxString unpack( const ARCHIVE& aArchive, const wxString& aZip, const wxString& 
                 lastLibrary = library;
                 libraries++;
 
-                int percent = aStep * 50 + 25;
+                int percent = aStep * 33 + 16;
 
                 if( size > 0 )
-                    percent += (int) ( 25.0 * file.TellI() / size );
+                    percent += (int) ( 16.0 * file.TellI() / size );
 
                 if( aProgress
                     && !aProgress( wxString::Format( _( "Unpacking the %s (%d libraries)..." ),
@@ -243,7 +264,7 @@ wxString unpack( const ARCHIVE& aArchive, const wxString& aZip, const wxString& 
         files++;
     }
 
-    if( files == 0 || !haveTable )
+    if( files == 0 || ( !haveTable && !table.IsEmpty() ) )
     {
         return wxString::Format( _( "The downloaded %s archive is not a KiCad library set." ),
                                  wxString( aArchive.folder ) );
@@ -363,6 +384,7 @@ void COLLAB_STDLIBS::Activate()
         { PATHS::GetStockFootprintsPath(), wxS( "footprints" ) },
         { PATHS::GetStock3dmodelsPath(), wxS( "3dmodels" ) },
         { PATHS::GetStockDesignBlocksPath(), wxS( "blocks" ) },
+        { PATHS::GetStockTemplatesPath(), wxS( "template" ) },
     };
 
     PATHS::ForgetStockLibraryProbe();
@@ -372,6 +394,7 @@ void COLLAB_STDLIBS::Activate()
         { wxS( "footprints" ), PATHS::GetStockFootprintsPath() },
         { wxS( "3dmodels" ), PATHS::GetStock3dmodelsPath() },
         { wxS( "blocks" ), PATHS::GetStockDesignBlocksPath() },
+        { wxS( "template" ), PATHS::GetStockTemplatesPath() },
     };
 
     // A variable the user (or the environment) pointed somewhere else keeps its value; one
