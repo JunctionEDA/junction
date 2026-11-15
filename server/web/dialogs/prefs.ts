@@ -62,6 +62,16 @@ export interface Prefs {
     trackClearance: number;
     /** pcb_display.pad_clearance: Show pad clearance (on by default) */
     padClearance?: boolean };
+  /** SYMBOL_EDITOR_SETTINGS show_hidden_lib_pins / show_hidden_lib_fields / show_pin_electrical_type / show_pin_alt_icons
+   *  (Preferences > Symbol Editor > Display Options, the same switches as the frame's View toggles) */
+  symDisplay: { showHiddenPins: boolean; showHiddenFields: boolean; showETypes: boolean; showAltIcons: boolean };
+  /** SYMBOL_EDITOR_SETTINGS defaults.* (mm here, mils in KiCad's file), repeat.pin_step / label_delta and
+   *  drag_pins_along_with_edges (Preferences > Symbol Editor > Editing Options) */
+  symEditing: { lineWidth: number; textSize: number; pinLength: number; pinNumSize: number; pinNameSize: number; pinPitch: number; labelDelta: number; dragPinsWithEdges: boolean };
+  /** SYMBOL_EDITOR_SETTINGS use_eeschema_color_settings and color_theme (Preferences > Symbol Editor > Colors) */
+  symColors: { useSch: boolean; theme: SchThemeId };
+  /** EESCHEMA_SETTINGS drawing.field_names: the global Field Name Templates (Preferences > Schematic Editor) */
+  schFieldNames: { name: string; visible: boolean; url: boolean }[];
   /** COMMON_SETTINGS appearance.hicontrast_dimming_factor (0.8) */
   common: { hcDimming: number };
   /** PCB Editor > Origins & Axes (PCBNEW_SETTINGS m_Display.m_DisplayOrigin, m_DisplayInvertXAxis / YAxis) */
@@ -103,6 +113,10 @@ export const DEFAULT_PREFS: Prefs = {
   schColors: { theme: "default", followDark: false, user: [] },
   pcbDisplay: { showPadNumbers: true, showNetNames: true, showPageLimits: true, trackClearance: 2, padClearance: true },
   common: { hcDimming: 0.8 },
+  symDisplay: { showHiddenPins: true, showHiddenFields: true, showETypes: true, showAltIcons: true },
+  symEditing: { lineWidth: 0, textSize: 50 * 0.0254, pinLength: 100 * 0.0254, pinNumSize: 50 * 0.0254, pinNameSize: 50 * 0.0254, pinPitch: 100 * 0.0254, labelDelta: 1, dragPinsWithEdges: true },
+  symColors: { useSch: true, theme: "default" },
+  schFieldNames: [],
   pcbOrigin: { origin: "page", invertX: false, invertY: false },
   pcbEditing: { rotationAngle: 90, trackDragAction: "drag", ctrlClickHighlight: false, ratsnestThickness: 0.5, escClearsNetHighlight: true, showCourtyardCollisions: true, autoRefillZones: false },
   fpEditing: { rotationAngle: 90 },

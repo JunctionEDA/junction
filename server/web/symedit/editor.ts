@@ -39,7 +39,7 @@ import { saveToSchematic } from "./schematic";
 import { mergeSymbolText } from "./merge";
 import { SYM_FILTER_ROWS, defaultSymFilter, symAllChecked, symPasses, symSetFilter, type SymFilterKey, type SymSelFilter } from "./selfilter";
 import { openPreferences } from "../dialogs/preferences";
-import { GRID_PAGE, clonePrefs, defaultGrid, gridDefs, prefs, rememberGrid, savePrefs } from "../dialogs/prefs";
+import { GRID_PAGE, clonePrefs, defaultGrid, gridDefs, prefs, rememberCursor, rememberGrid, savePrefs } from "../dialogs/prefs";
 import { gridPitchFor, type GridClass } from "../dialogs/logic";
 import { ARC_MODE_ACTIONS, ARC_START_DIR_END, ARC_START_END_CENTER, ARC_START_END_MID, ARC_TANGENT, arcFromStartEndCenterDrag, arcFromStartEndMidDrag, arcFromStartTangentEnd, fromNm, toNm, type ArcSol } from "../tools/arc-geom";
 
@@ -93,7 +93,7 @@ export class SymbolEditor {
   propSplit = ((): number => { try { const v = Number(localStorage.getItem("kui.symedit.propsplit")); return v > 0.1 && v < 0.9 ? v : 0.5; } catch (e) { return 0.5; } })();
   symOpen = new Set<string>();
   /** the window's grid.show and cursor shape (COMMON_TOOLS::ToggleGrid, CursorSmall/Full/45Crosshairs), remembered per browser */
-  showGrid = viewPref("grid", true) as boolean; crosshair = viewPref("crosshair", "small") as "small" | "full" | "45";
+  showGrid = viewPref("grid", true) as boolean; crosshair: "small" | "full" | "45" = prefs().gal.sym.crosshair;
   /** ACTION_TOOLBAR groups: the action each group's button shows (SelectToolbarAction) */
   private groupCurrent: Record<string, string> = {};
   /** grid.last_size of the symbol editor's window settings, in mm */
@@ -154,6 +154,7 @@ export class SymbolEditor {
       const us = loadUnits("symbol_editor"); E.units = us.units; E.lastImperial = us.lastImperial;
       this.gridMm = defaultGrid("sym");
       window.addEventListener("kc:prefs", this.prefsHook);
+      this.applySymPrefs();
     }
     window.addEventListener("keydown", this.keyHook, true);
     document.addEventListener("focusin", this.focusHook, true);
@@ -522,6 +523,11 @@ export class SymbolEditor {
   private raf = 0;
   paint(): void { if (this.raf) return; this.raf = requestAnimationFrame(() => { this.raf = 0; this.paintNow(); }); }
   paintNow(): void {
+    // PANEL_SYM_COLOR_SETTINGS "Use theme:": the frame draws with its own theme, the schematic keeps the editor's
+    const th = this.symTheme;
+    if (th && K().withSchTheme) K().withSchTheme(th, () => this.paintFrame()); else this.paintFrame();
+  }
+  private paintFrame(): void {
     const c = this.cv; if (!c || !this.isOpen) return; this.resize();
     const ctx = c.getContext("2d"); if (!ctx) return;
     const t = this.tab; const doc = this.kdoc(); const dpr = window.devicePixelRatio || 1;
@@ -530,7 +536,8 @@ export class SymbolEditor {
     const v = this.view(); const view = { ppm: 1, zoom: v.s, panX: v.px, panY: v.py, x0: 0, y0: 0, dpr };
     const sel = new Set([...t.sel].filter((id) => doc.items.has(id)));
     // the selection shadow is drawn by the canvas pass, under the items (SCH_PAINTER's LAYER_SELECTION_SHADOWS)
-    K().render(doc, ctx, view, { grid: this.showGrid ? this.gridMm : 0, gridAxes: true, frame: false, showHiddenPins: this.showHiddenPins, selected: sel.size ? sel : undefined } as KRenderOpts);
+    const ga = prefs().gal.sym;   // PANEL_GAL_OPTIONS of the Symbol Editor (Preferences > Symbol Editor > Display Options)
+    K().render(doc, ctx, view, { grid: this.showGrid ? this.gridMm : 0, gridStyle: ga.style, gridMinSpacing: ga.minSpacing, gridLineWidth: ga.lineWidth, gridShowMajor: ga.showMajor, gridAxes: true, frame: false, showHiddenPins: this.showHiddenPins, selected: sel.size ? sel : undefined } as KRenderOpts);
     const s = K().setViewTransform(ctx, view);
     // the symbol anchor (LAYER_SCHEMATIC_ANCHOR cross at the origin)
     const a = 6 * dpr / s; ctx.strokeStyle = ANCHOR; ctx.lineWidth = dpr / s; ctx.beginPath(); ctx.moveTo(-a, 0); ctx.lineTo(a, 0); ctx.moveTo(0, -a); ctx.lineTo(0, a); ctx.stroke();
@@ -1214,10 +1221,10 @@ export class SymbolEditor {
       pinTable: () => void D.pinTable(this),
       showProperties: () => { this.showProps = !this.showProps; this.renderToolbars(); this.paint(); }, showLibraryTree: () => { this.showTree = !this.showTree; this.renderToolbars(); this.paint(); },
       zoomInCenter: () => this.zoomAt(1.3), zoomOutCenter: () => this.zoomAt(1 / 1.3), zoomFitScreen: () => this.zoomFit(), zoomRedraw: () => { this.kcache = null; this.paint(); },
-      showHiddenPins: () => { this.showHiddenPins = !this.showHiddenPins; this.kcache = null; this.renderToolbars(); this.paint(); },
-      showHiddenFields: () => { this.showHiddenFields = !this.showHiddenFields; this.kcache = null; this.renderToolbars(); this.paint(); },
-      showElectricalTypes: () => { this.showETypes = !this.showETypes; this.kcache = null; this.renderToolbars(); this.paint(); },
-      togglePinAltIcons: () => { this.showAltIcons = !this.showAltIcons; this.kcache = null; this.renderToolbars(); this.paint(); },
+      showHiddenPins: () => { this.showHiddenPins = !this.showHiddenPins; this.kcache = null; this.saveDisplayPrefs(); this.renderToolbars(); this.paint(); },
+      showHiddenFields: () => { this.showHiddenFields = !this.showHiddenFields; this.kcache = null; this.saveDisplayPrefs(); this.renderToolbars(); this.paint(); },
+      showElectricalTypes: () => { this.showETypes = !this.showETypes; this.kcache = null; this.saveDisplayPrefs(); this.renderToolbars(); this.paint(); },
+      togglePinAltIcons: () => { this.showAltIcons = !this.showAltIcons; this.kcache = null; this.saveDisplayPrefs(); this.renderToolbars(); this.paint(); },
       toggleSyncedPinsMode: () => { if (!this.multiUnitMode()) return; this.syncPins = !this.syncPins; this.renderToolbars(); },
       nextSymbolTab: () => { if (this.tabs.length) { this.cur = (this.cur + 1) % this.tabs.length; this.afterTabChange(); } },
       prevSymbolTab: () => { if (this.tabs.length) { this.cur = (this.cur - 1 + this.tabs.length) % this.tabs.length; this.afterTabChange(); } },
@@ -1257,7 +1264,7 @@ export class SymbolEditor {
     return (this._actions = A);
   }
   /** COMMON_TOOLS::CursorSmallCrosshairs / CursorFullCrosshairs / Cursor45Crosshairs. */
-  setCrosshair(m: "small" | "full" | "45"): void { this.crosshair = m; saveViewPref("crosshair", m); this.renderToolbars(); this.paint(); }
+  setCrosshair(m: "small" | "full" | "45"): void { this.crosshair = m; rememberCursor({ crosshair: m }, "sym"); this.renderToolbars(); this.paint(); }
   /** COMMON_TOOLS::GridNext / GridPrev / GridPreset: the index wraps around the grid list. */
   setGridIdx(i: number): void {
     const l = symGrids(), n = l.length; if (!n) return; const k = ((i % n) + n) % n;
@@ -1267,7 +1274,32 @@ export class SymbolEditor {
   setGrid(mm: number): void { this.gridMm = mm; rememberGrid(mm, "sym"); this.renderStatus(); this.paint(); }
   gridIdx(): number { return symGrids().findIndex((mm) => Math.abs(mm - this.gridMm) < 1e-9); }
   /** Preferences saved: the grid list may have changed; the window's grid.last_size is the grid in use. */
-  private prefsHook = (): void => { if (!this.isOpen) return; const mm = defaultGrid("sym"); if (Math.abs(mm - this.gridMm) > 1e-9) { this.gridMm = mm; this.renderStatus(); this.paint(); } };
+  /**
+   * SYMBOL_EDITOR_SETTINGS as Preferences > Symbol Editor leaves them: the display switches, the defaults of new
+   * pins, texts and graphics, the repeat pitch / label step, and the colour theme (null: the schematic editor's).
+   */
+  symTheme: string | null = null;
+  applySymPrefs(): void {
+    const p = prefs(), d = p.symDisplay, e = p.symEditing;
+    if (this.showHiddenPins !== d.showHiddenPins || this.showHiddenFields !== d.showHiddenFields || this.showETypes !== d.showETypes || this.showAltIcons !== d.showAltIcons) this.kcache = null;
+    this.showHiddenPins = d.showHiddenPins; this.showHiddenFields = d.showHiddenFields; this.showETypes = d.showETypes; this.showAltIcons = d.showAltIcons;
+    const was = { length: M.DEFAULTS.pinLength, nameSize: M.DEFAULTS.pinNameSize, numSize: M.DEFAULTS.pinNumSize };
+    Object.assign(M.DEFAULTS, { lineWidth: e.lineWidth, textSize: e.textSize, pinLength: e.pinLength, pinNumSize: e.pinNumSize, pinNameSize: e.pinNameSize, pinStep: e.pinPitch, labelDelta: e.labelDelta });
+    // the next new pin starts from the new defaults unless a pin dialog already set its own
+    if (this.lastPin.length === was.length) this.lastPin.length = e.pinLength;
+    if (this.lastPin.nameSize === was.nameSize) this.lastPin.nameSize = e.pinNameSize;
+    if (this.lastPin.numSize === was.numSize) this.lastPin.numSize = e.pinNumSize;
+    this.crosshair = p.gal.sym.crosshair;
+    const th = p.symColors.useSch ? null : p.symColors.theme;
+    if (th !== this.symTheme) { this.symTheme = th; this.kcache = null; }
+    if (this.isOpen) { this.renderToolbars(); this.paint(); }
+  }
+  /** The View toggles write the same settings the Display Options page edits (SYMBOL_EDITOR_SETTINGS m_Show*). */
+  private saveDisplayPrefs(): void {
+    const p = clonePrefs(); p.symDisplay = { showHiddenPins: this.showHiddenPins, showHiddenFields: this.showHiddenFields, showETypes: this.showETypes, showAltIcons: this.showAltIcons };
+    savePrefs(p);
+  }
+  private prefsHook = (): void => { if (!this.isOpen) return; this.applySymPrefs(); const mm = defaultGrid("sym"); if (Math.abs(mm - this.gridMm) > 1e-9) { this.gridMm = mm; this.renderStatus(); this.paint(); } };
   /** GRID_MENU (EDA_DRAW_FRAME::AddStandardSubMenus): every grid as GRID_MENU::BuildChoiceList writes it, the one in use checked. */
   private gridMenu(): MenuEntry {
     const u = this.units, li = (E.lastImperial === "in" ? "in" : "mil") as Units;

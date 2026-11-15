@@ -20,6 +20,7 @@ import type { Units } from "../store";
 import { getThemeMode, setThemeMode, type ThemeMode } from "../theme";
 import { getInactiveMode, setInactiveMode } from "../editor/panels/appearance";
 import { wakatimePage, type WakaPage } from "./wakatime";
+import { cleanFieldTemplates, fieldTemplatesPage, symColorsPage, symDisplayPage, symEditingPage } from "./preferences-sym";
 import { assignScrollMod, type ScrollMod } from "../editor/wheel-model";
 import { bitmapButton } from "../components/kicon-dom";
 
@@ -80,6 +81,10 @@ export function resetPage(key: string, st: Staged): void {
     case "Common/Common": st.uiMode = "system"; st.p.common = d.common; break;
     case "Common/Mouse and Touchpad": st.p.mouse = d.mouse; break;
     case "Symbol Editor/Grids": st.p.grids.sym = d.grids.sym; break;
+    case "Symbol Editor/Display Options": st.p.symDisplay = d.symDisplay; st.p.gal.sym = d.gal.sym; break;
+    case "Symbol Editor/Editing Options": st.p.symEditing = d.symEditing; break;
+    case "Symbol Editor/Colors": st.p.symColors = d.symColors; break;
+    case "Schematic Editor/Field Name Templates": st.p.schFieldNames = d.schFieldNames; break;
     case "Schematic Editor/Display Options": st.p.schDisplay = d.schDisplay; st.p.gal.sch = d.gal.sch; st.view = Object.assign({}, SCH_VIEW_DEFAULTS); break;
     case "Schematic Editor/Simulator": st.p.sim = d.sim; break;
     case "Schematic Editor/Grids": st.p.grids.sch = d.grids.sch; break;
@@ -287,14 +292,18 @@ export function openPreferences(page?: string, staged?: Staged): void {
         ] },
         // PANEL_SYM_EDIT_GRIDS: the Symbol Editor's own window settings
         { label: "Symbol Editor", pages: [
+          { label: "Display Options", build(pg) { const [, R] = displayCols(pg, "sym"); symDisplayPage(R, p); } },
           { label: "Grids", build: gridsPage("sym") },
+          { label: "Editing Options", build(pg) { symEditingPage(pg, p); } },
+          { label: "Colors", build(pg) { symColorsPage(pg, p); } },
         ] },
         { label: "Schematic Editor", pages: [
           { label: "Display Options", build(pg) { const [L, R] = displayCols(pg, "sch"); schDisplayPage(L, R, p, view); } },
           { label: "Grids", build: gridsPage("sch") },
           { label: "Editing Options", build(pg) { schEditingPage(pg, p); } },
-          { label: "Simulator", build(pg) { simulatorPage(pg, p); } },
           { label: "Colors", build(pg) { colorsPage(pg); } },
+          { label: "Field Name Templates", build(pg) { fieldTemplatesPage(pg, p); } },
+          { label: "Simulator", build(pg) { simulatorPage(pg, p); } },
         ] },
         // PANEL_FP_GRIDS: the Footprint Editor's own window settings
         { label: "Footprint Editor", pages: [
@@ -379,6 +388,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
     ok() {
       // PANEL_MOUSE_SETTINGS::TransferDataFromWindow: one modifier per vertical scroll action
       if (!scrollModsValid(p.mouse)) { toast("Only one action can be assigned to each vertical scroll setting", 4000); return false; }
+      p.schFieldNames = cleanFieldTemplates(p.schFieldNames);
       // PANEL_EESCHEMA_COLOR_SETTINGS::validateSave: a user theme with items in the background colour asks first
       const ut = p.schColors.user.find((u) => u.id === p.schColors.theme);
       if (ut && !bgConfirmed && hiddenByBackground(ut.colors).length) {

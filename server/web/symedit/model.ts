@@ -916,7 +916,7 @@ export function applyPinRows(sym: Node, rows: PinRow[]): void {
 
 // ---------------------------------------------------------------- shapes
 /** A new graphic as SaveSymbol writes it (stroke width 0 = default, type default; fill none). */
-export function shapeNode(kind: "rectangle" | "circle" | "arc" | "polyline" | "bezier", pts: number[][], fill = "none", width = 0): Node {
+export function shapeNode(kind: "rectangle" | "circle" | "arc" | "polyline" | "bezier", pts: number[][], fill = "none", width = DEFAULTS.lineWidth): Node {
   const st = ` (stroke (width ${fmt(width)}) (type default)) (fill (type ${fill}))`;
   if (kind === "rectangle") return node(`(rectangle (start ${fmt(pts[0][0])} ${fmt(pts[0][1])}) (end ${fmt(pts[1][0])} ${fmt(pts[1][1])})${st})`);
   if (kind === "circle") { const r = Math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]); return node(`(circle (center ${fmt(pts[0][0])} ${fmt(pts[0][1])}) (radius ${fmt(r)})${st})`); }
