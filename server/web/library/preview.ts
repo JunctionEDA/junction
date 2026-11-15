@@ -62,3 +62,29 @@ export function renderFootprintPreview(canvas: HTMLCanvasElement, fpid: string, 
   const doc = K().parseDoc(`(kicad_pcb (version 20260206) (generator "pcbnew") ${PREVIEW_LAYERS} ${K().serialize(node)})`);
   draw(canvas, doc, { hidden: new Set<string>() }, 60, zoom);
 }
+
+/**
+ * SYMBOL_DIFF_WIDGET: the schematic copy and the library symbol drawn over each other at one scale.  `pct` is the
+ * slider (0 schematic only … 0.5 both … 1 library only): below the middle the library fades out, above it the
+ * schematic does (onSlider's forced transparencies).
+ */
+export function renderSymbolDiff(canvas: HTMLCanvasElement, sch: KDoc, lib: KDoc, pct: number): void {
+  const g = canvas.getContext("2d"); if (!g) return;
+  const { w, h, dpr } = sizeToBox(canvas);
+  const a = boundsOf(sch), c = boundsOf(lib);
+  const b = a && c ? [Math.min(a[0], c[0]), Math.min(a[1], c[1]), Math.max(a[2], c[2]), Math.max(a[3], c[3])] : a || c || [-5, -5, 5, 5];
+  const bw = Math.max(0.5, b[2] - b[0]), bh = Math.max(0.5, b[3] - b[1]);
+  const ppm = Math.min(24, (w * 0.84) / bw, (h * 0.84) / bh);
+  const view: KView = { ppm, zoom: 1, panX: 0, panY: 0, x0: (b[0] + b[2]) / 2 - w / 2 / ppm, y0: (b[1] + b[3]) / 2 - h / 2 / ppm, dpr };
+  const render = K().render as unknown as Render;
+  render(K().parseDoc('(kicad_sch (version 20260101) (generator "eeschema") (paper "A4"))'), g, view, { frame: false, grid: 0, hidden: new Set<string>() });
+  const layer = (doc: KDoc, alpha: number): void => {
+    if (alpha <= 0) return;
+    const off = document.createElement("canvas"); off.width = canvas.width; off.height = canvas.height;
+    const o = off.getContext("2d"); if (!o) return;
+    render(doc, o, view, { frame: false, grid: 0, background: null });
+    g.save(); g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = alpha; g.drawImage(off, 0, 0); g.restore();
+  };
+  layer(sch, 1 - (pct < 0.5 ? 0 : (pct - 0.5) * 2));
+  layer(lib, 1 - (pct > 0.5 ? 0 : 1 - pct * 2));
+}

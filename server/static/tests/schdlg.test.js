@@ -308,4 +308,41 @@ test("Import Sheet: the sheet file relative to the current sheet, the group name
   assert.strictEqual(C.uniqueGroupName(doc, "x"), "x");
   assert.strictEqual(C.uniqueGroupName(doc, "pic"), "pic2");
 });
+test("compareSymbols: LIB_SYMBOL::Compare's report with the parity settings", () => {
+  const D = load(["dialogs", "diff-symbol-logic.ts"]);
+  const LIB = `(symbol "Device:R" (pin_numbers (hide yes)) (pin_names (offset 0)) (exclude_from_sim no) (in_bom yes) (on_board yes)
+    (property "Reference" "R" (at 2.032 0 90) (effects (font (size 1.27 1.27))))
+    (property "Value" "R" (at 0 0 90) (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at -1.778 0 90) (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "ki_keywords" "R res resistor" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "ki_fp_filters" "R_*" (at 0 0 0) (effects (font (size 1.27 1.27)) (hide yes)))
+    (symbol "R_0_1" (rectangle (start -1.016 -2.54) (end 1.016 2.54) (stroke (width 0.254) (type default)) (fill (type none))))
+    (symbol "R_1_1" (pin passive line (at 0 3.81 270) (length 1.27) (name "~" (effects (font (size 1.27 1.27)))) (number "1" (effects (font (size 1.27 1.27)))))
+      (pin passive line (at 0 -3.81 90) (length 1.27) (name "~" (effects (font (size 1.27 1.27)))) (number "2" (effects (font (size 1.27 1.27)))))))`;
+  const lib = K.parse(LIB), parity = {};
+  const inst = (val, extra = "") => K.parse(`(symbol (lib_id "Device:R") (at 100 50 0) (unit 1)
+    (property "Reference" "R1" (at 102.032 50 90) (effects (font (size 1.27 1.27))))
+    (property "Value" "${val}" (at 100 50 90) (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 98.222 50 90) (effects (font (size 1.27 1.27)) (hide yes))) ${extra})`);
+  assert.deepStrictEqual(D.compareSymbols(lib, lib, parity, inst("R")), []);
+  assert.deepStrictEqual(D.compareSymbols(lib, lib, parity, inst("10k")), ["Field 'Value' differs: 10k; R."]);
+  // extra fields are only reported when the setting asks for them
+  const ex = inst("R", '(property "MPN" "x" (at 0 0 0) (effects (font (size 1.27 1.27))))');
+  assert.deepStrictEqual(D.compareSymbols(lib, lib, parity, ex), []);
+  assert.deepStrictEqual(D.compareSymbols(lib, lib, { extra_fields: true }, ex), ["Extra field in schematic symbol: MPN."]);
+  // field positions: library Y up, placed fields relative to the symbol
+  assert.deepStrictEqual(D.compareSymbols(lib, lib, { field_positions: true }, inst("R")), []);
+  const sch = K.parse(LIB.replace('(at 0 -3.81 90) (length 1.27)', '(at 0 -3.81 90) (length 2.54)').replace("(end 1.016 2.54)", "(end 1.016 3.54)"));
+  const out = D.compareSymbols(sch, lib, parity, inst("R"));
+  assert.deepStrictEqual(out, ["Graphic item differs: Rectangle, width 2.032 mm height 6.080 mm; Rectangle, width 2.032 mm height 5.080 mm.",
+    "Pin 2 differs: Pin 2 [Passive, Line]; Pin 2 [Passive, Line]"]);
+  const noPin = K.parse(LIB.replace(/\(pin passive line \(at 0 -3\.81[^\n]*\n?/, "").replace(/\)\)\)\)\)\)$/, ")))))"));
+  assert.ok(D.compareSymbols(noPin, lib, parity, inst("R")).includes("Missing pin in schematic symbol: Pin 2 [Passive, Line]."));
+  const flags = K.parse(LIB.replace("(on_board yes)", "(on_board no)").replace('"R res resistor"', '"R"'));
+  assert.deepStrictEqual(D.compareSymbols(flags, lib, parity, inst("R")), ["Symbol keywords differ.", "Exclude from board settings differ."]);
+  assert.deepStrictEqual(D.compareSymbols(flags, lib, { exclude_from_board_flags: false }, inst("R")), ["Symbol keywords differ."]);
+  // the diff's schematic side: unrotated at the origin, fields moved with it
+  const o = D.instanceAtOrigin(K.parse(`(symbol (lib_id "Device:R") (at 100 50 90) (mirror x) (property "Value" "R" (at 103 50 0)))`));
+  assert.strictEqual(K.serialize(o).replace(/\s+/g, " "), '(symbol (lib_id "Device:R") (at 0 0 0) (property "Value" "R" (at 3 0 0)))');
+});
 process.on("exit", () => { console.log(`schdlg: ${passed} passed, ${failed} failed`); if (failed) process.exitCode = 1; });
