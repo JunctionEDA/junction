@@ -1058,8 +1058,9 @@ void COLLAB_STDLIBS::Activate()
         Pgm().SetLocalEnvVariables();
     }
 
-    // A global table written while there were no libraries is an empty list.  Give it the
-    // standard set now; a table that already lists anything is the user's and stays.
+    // A global table written while there were no libraries is an empty list: give it the
+    // standard set now.  A table that already lists libraries of the user's own keeps them and
+    // gets the standard set added when it is not in it yet.
     LIBRARY_MANAGER& manager = Pgm().GetLibraryManager();
 
     for( LIBRARY_TABLE_TYPE type : { LIBRARY_TABLE_TYPE::SYMBOL, LIBRARY_TABLE_TYPE::FOOTPRINT } )
@@ -1070,7 +1071,28 @@ void COLLAB_STDLIBS::Activate()
         std::optional<LIBRARY_TABLE*> table = manager.Table( type, LIBRARY_TABLE_SCOPE::GLOBAL );
 
         if( !table || !*table || ( *table )->Rows().empty() )
+        {
             LIBRARY_MANAGER::CreateGlobalTable( type, true );
+            continue;
+        }
+
+        bool listed = false;
+
+        for( const LIBRARY_TABLE_ROW& row : ( *table )->Rows() )
+        {
+            if( row.Type() == LIBRARY_TABLE_ROW::TABLE_TYPE_NAME )
+                listed = true;
+        }
+
+        if( listed )
+            continue;
+
+        LIBRARY_TABLE_ROW& chained = ( *table )->InsertRow();
+        chained.SetType( LIBRARY_TABLE_ROW::TABLE_TYPE_NAME );
+        chained.SetNickname( wxT( "KiCad" ) );
+        chained.SetDescription( _( "KiCad Default Libraries" ) );
+        chained.SetURI( LIBRARY_MANAGER::StockTableReferenceURI( type ) );
+        ( *table )->Save();
     }
 
     manager.LoadGlobalTables();
