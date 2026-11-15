@@ -406,3 +406,33 @@ test("an RF track gets a fence of ground vias where the ground pour lies on both
   const bare = R.route(K, P, make(), null, { impedance: false }); assert.equal(bare.items.filter((i) => i.kind === "via").length, 0); assert.match(bare.fences[0].note, /no ground pour/);
   const wide = R.route(K, P, make(...pours), null, { impedance: false, fence: { spacing: 5 } }); assert.ok(wide.fences[0].fence <= 8 && wide.fences[0].fence >= 6);
 });
+
+// A 0.5 mm via in a 0.5 mm pitch row: with 0.2 mm tracks and 0.15 mm clearance the lane beside the via is met to the
+// micron (0.25 + 0.15 + 0.1 = 0.5).  The grid's margin for bends must not close a lane that runs straight past.
+const FINE = { board: { design_settings: { rules: { min_through_hole_diameter: 0.2, min_via_diameter: 0.4 } } }, net_settings: { classes: [{ name: "Default", clearance: 0.15, track_width: 0.2, via_diameter: 0.5, via_drill: 0.2 }] } };
+const pin = (x, y, net) => `(footprint "T:Q" (layer "F.Cu") (uuid "fp-${++n}") (at ${x} ${y})
+    (pad "1" smd rect (at 0 0) (size 0.25 0.8) (layers "F.Cu" "F.Mask") (net "${net}") (uuid "pad-${n}")))`;
+const wall = (x, y0, y1, id) => `(segment (start ${x} ${y0}) (end ${x} ${y1}) (width 0.2) (layer "F.Cu") (net "W-${id}") (uuid "${id}"))`;
+test("a track passes a 0.5 mm via in a 0.5 mm pitch row at exactly the clearance, at full width", () => {
+  const settings = P.designSettings(FINE);
+  const doc = board(pin(100, 50, "A"), pin(100.5, 50, "B"), pin(101, 50, "C"), pin(100, 43, "A"), pin(101, 43, "C"),
+    `(segment (start 100.5 50) (end 100.5 47.5) (width 0.2) (layer "F.Cu") (net "B") (uuid "stub"))`,
+    `(via (at 100.5 47.5) (size 0.5) (drill 0.2) (layers "F.Cu" "B.Cu") (net "B") (uuid "via-b"))`,
+    wall(99.6, 49, 45, "wl"), wall(101.4, 49, 45, "wr"));   // the only lanes are x = 100 and x = 101, straight past the via
+  const res = R.route(K, P, doc, settings, { layers: ["F.Cu"], allowVias: false, pitch: 0.125 });
+  assert.equal(res.routed, 2, JSON.stringify(res.failed)); assert.equal(res.vias, 0);
+  for (const i of res.items) if (i.kind === "segment") assert.equal(K.num(K.kid(i.node, "width")[1]), 0.2, "not necked down to get past");
+  for (const i of res.items) assert.equal(K.kid(i.node, "start")[1], K.kid(i.node, "end")[1], "straight up its own lane, not round the outside");
+  apply(doc, res); assert.deepEqual(errors(doc, settings), []); assert.equal(P.ratsnest(doc).length, 0);
+});
+
+test("a fine-pitch pin boxed in by its neighbours gets the row laid again in pin order: all four nest through the one gap", () => {
+  const settings = P.designSettings(FINE);
+  const doc = board(pin(100, 50, "A"), pin(100.5, 50, "B"), pin(101, 50, "C"), pin(101.5, 50, "D"),
+    smd(97, 58, "A"), smd(99, 58, "B"), smd(101, 58, "C"), smd(103, 58, "D"),
+    `(footprint "T:C" (layer "F.Cu") (uuid "fp-cap") (at 101.6 52.5) (pad "1" smd rect (at 0 0) (size 0.9 0.9) (layers "F.Cu" "F.Mask") (net "X") (uuid "pad-cap")))`,
+    `(segment (start 99.35 54) (end 99.35 48) (width 0.2) (layer "F.Cu") (net "BOX") (uuid "box1"))`, `(segment (start 99.35 48) (end 102.6 48) (width 0.2) (layer "F.Cu") (net "BOX") (uuid "box2"))`, `(segment (start 102.6 48) (end 102.6 54) (width 0.2) (layer "F.Cu") (net "BOX") (uuid "box3"))`);   // between the wall and the capacitor there is room for exactly four tracks
+  const res = R.route(K, P, doc, settings, { layers: ["F.Cu"], allowVias: false, pitch: 0.125 });
+  assert.equal(res.routed, 4, JSON.stringify(res.failed)); assert.equal(res.vias, 0);
+  apply(doc, res); assert.deepEqual(errors(doc, settings), []); assert.equal(P.ratsnest(doc).length, 0);
+});

@@ -82968,6 +82968,8 @@ var Router = class _Router {
     this.nets = [];
     this.conns = [];
     this.pref = [];
+    this.tight = false;
+    // while a fine-pitch row is laid again in pin order: each track takes the lane next to the last
     this.stopped = false;
     this.zoneCovered = 0;
     this.dropped = [];
@@ -84556,7 +84558,8 @@ var Router = class _Router {
         };
       }
       if (!collect && !soft && this.opts.bundle !== false && !isSupply(conn.net) && this.kindOf(conn.net) === "digital" && !/DDR|SDRAM|DRAM|(^|[\/_])DQ[SM]?_?\d/i.test(conn.net) && !(this.opts.match || []).some((g2) => g2.nets.includes(conn.net))) {
-        const full = conn.cls.full, before = extra, R2 = Math.max(2, Math.round(0.5 / G2.g)), GW = G2.W, GH = G2.H;
+        const tight = this.tight;
+        const full = conn.cls.full, before = extra, R2 = tight ? 1 : Math.max(2, Math.round(0.5 / G2.g)), GW = G2.W, GH = G2.H;
         extra = (nodes) => {
           let alone = 0;
           for (let i = 0; i + 1 < nodes.length; i++) {
@@ -84576,7 +84579,7 @@ var Router = class _Router {
               if (!beside) alone += step;
             }
           }
-          return alone * BUNDLE_COST * this.W.length + (before ? before(nodes) : 0);
+          return alone * (tight ? 4 : 1) * BUNDLE_COST * this.W.length + (before ? before(nodes) : 0);
         };
       }
       const mate = conn.partner && conn.partner.nodes && conn.partner.nodes.length > 1 ? conn.partner.nodes : null;
@@ -85156,10 +85159,15 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
         for (const b of row2) if (b.nodes) this.rip(b, ripped);
         const all2 = [c, ...ripped.filter((r) => r !== c)].sort((p, q) => late(p) - late(q) || (late(p) === 2 ? 0 : dir * (key3(p) - key3(q))) || p.id - q.id);
         let good = true;
-        for (const r of all2) if (!r.nodes && !lay(r)) {
-          good = false;
-          if (globalThis.process?.env?.KC_ROUTER_WORK) console.error("comb", c.net, dir, "row", all2.map((x) => x.net + "@" + key3(x)).join(" "), "failed at", r.net);
-          break;
+        this.tight = true;
+        try {
+          for (const r of all2) if (!r.nodes && !lay(r)) {
+            good = false;
+            if (globalThis.process?.env?.KC_ROUTER_WORK) console.error("comb", c.net, dir, "row", all2.map((x) => x.net + "@" + key3(x)).join(" "), "failed at", r.net);
+            break;
+          }
+        } finally {
+          this.tight = false;
         }
         if (good && conns.filter((x) => x.nodes).length > n0) {
           this.stat.combed = (this.stat.combed || 0) + 1;
@@ -98719,10 +98727,12 @@ function fieldOf2(node, name) {
 }
 function projectModel(path2) {
   const m = /^\$[{(]KIPRJMOD[})][\/\\](.+)\.(?:step|stp|wrl)$/i.exec(path2);
-  if (!m || m[1].includes("..")) return null;
+  if (!m) return null;
+  const stem = m[1].replace(/\\/g, "/").replace(/^\.\//, "");
+  if (stem.replace(/^(?:\.\.\/)+/, "").split("/").includes("..")) return null;
   const fn = globalThis.KiCadProjectModel;
   try {
-    return typeof fn === "function" ? fn(m[1].replace(/\\/g, "/")) || null : null;
+    return typeof fn === "function" ? fn(stem) || null : null;
   } catch {
     return null;
   }

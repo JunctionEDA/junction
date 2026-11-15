@@ -141,6 +141,7 @@ const r6 = (v: number) => { const x = +(+v).toFixed(6); return x === 0 ? 0 : x; 
 
 export class Router {
   G!: Grid; rim: Uint8Array | null = null; nets: NetInfo[] = []; conns: Conn[] = []; pref: number[] = []; W: Weights; allowVias: boolean; s: any;
+  tight = false;   // while a fine-pitch row is laid again in pin order: each track takes the lane next to the last
   stopped = false; zoneCovered = 0; dropped: any[] = []; stat: Record<string, number> = { noSoft: 0, noBlockers: 0, tooMany: 0, ripped: 0, ripLimit: 0 };
   constructor(public K: any, public P: any, public doc: any, settings: any, public opts: RouteOptions = {}) {
     // the weights were fitted to how people route; a via is then charged four times over, because a board with few layer
@@ -936,13 +937,13 @@ export class Router {
         // Tracks keep together: every mm a signal runs out in the open, with nothing beside it within about half a
         // millimetre, costs a little, so the escapes of a fine-pitch chip leave side by side as one bus and its vias
         // sit in a row, the way a person draws them.  The copper they do not scatter over stays one piece of ground.
-        const full = conn.cls.full, before = extra, R = Math.max(2, Math.round(0.5 / G.g)), GW = G.W, GH = G.H;
+        const tight = this.tight; const full = conn.cls.full, before = extra, R = tight ? 1 : Math.max(2, Math.round(0.5 / G.g)), GW = G.W, GH = G.H;   // tight: the very next lane (a fan-out being combed)
         extra = (nodes) => { let alone = 0;
           for (let i = 0; i + 1 < nodes.length; i++) { const a = nodes[i], b = nodes[i + 1]; if (a.l !== b.l) continue; const n = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy); const step = Math.hypot(sx, sy) * G.g; const m = full[a.l]; if (!m) continue;
             for (let k = 0; k < n; k++) { const x = a.ix + sx * k, y = a.iy + sy * k; let beside = false;
               for (let j = 1; j <= R && !beside; j++) { const x1 = x - sy * j, y1 = y + sx * j, x2 = x + sy * j, y2 = y - sx * j; if ((x1 >= 0 && y1 >= 0 && x1 < GW && y1 < GH && m[y1 * GW + x1]) || (x2 >= 0 && y2 >= 0 && x2 < GW && y2 < GH && m[y2 * GW + x2])) beside = true; }
               if (!beside) alone += step; } }
-          return alone * BUNDLE_COST * this.W.length + (before ? before(nodes) : 0); };
+          return alone * (tight ? 4 : 1) * BUNDLE_COST * this.W.length + (before ? before(nodes) : 0); };
       }
       const mate = conn.partner && conn.partner.nodes && conn.partner.nodes.length > 1 ? conn.partner.nodes : null;
       if (mate && !collect) {   // the second line of a pair keeps beside the first: every mm farther than a pair pitch from it costs
@@ -1248,7 +1249,7 @@ export class Router {
       for (const dir of [1, -1]) {
         const ripped: Conn[] = []; for (const b of row) if (b.nodes) this.rip(b, ripped);
         const all = [c, ...ripped.filter((r) => r !== c)].sort((p, q) => late(p) - late(q) || (late(p) === 2 ? 0 : dir * (key(p) - key(q))) || p.id - q.id);
-        let good = true; for (const r of all) if (!r.nodes && !lay(r)) { good = false; if ((globalThis as any).process?.env?.KC_ROUTER_WORK) console.error('comb', c.net, dir, 'row', all.map((x) => x.net + '@' + key(x)).join(' '), 'failed at', r.net); break; }
+        let good = true; this.tight = true; try { for (const r of all) if (!r.nodes && !lay(r)) { good = false; if ((globalThis as any).process?.env?.KC_ROUTER_WORK) console.error('comb', c.net, dir, 'row', all.map((x) => x.net + '@' + key(x)).join(' '), 'failed at', r.net); break; } } finally { this.tight = false; }
         if (good && conns.filter((x) => x.nodes).length > n0) { this.stat.combed = (this.stat.combed || 0) + 1; break; }
         back(snap);
       }
