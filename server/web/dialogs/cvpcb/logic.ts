@@ -202,11 +202,18 @@ export class AssocHistory {
     const rev = e.map((a) => ({ index: a.index, old: a.now, now: a.old }));
     this.redoList.push(rev); return rev;
   }
-  /** RedoAssociation: the reversed entry reversed again, recorded as a new undo entry (AssociateFootprint with aNewEntry). */
+  /** RedoAssociation: the reversed entry reversed again, recorded as a new undo entry (AssociateFootprint with aNewEntry);
+   *  that clears the rest of the redo list, as in KiCad. */
   redo(): Association[] | null {
     const e = this.redoList.pop(); if (!e) return null;
     const fwd = e.map((a) => ({ index: a.index, old: a.now, now: a.old }));
-    const keep = this.redoList; this.undoList.push(fwd); this.redoList = keep; return fwd;
+    // AssociateFootprint( assoc, firstAssoc ) adds the undo item, which clears m_redoList
+    this.undoList.push(fwd); this.redoList = []; return fwd;
+  }
+  /** The symbols' rows moved (the list was rebuilt): each association's index through `map`; -1 drops it. */
+  remap(map: (index: number) => number): void {
+    const f = (list: Association[][]) => list.map((e) => e.map((a) => ({ ...a, index: map(a.index) })).filter((a) => a.index >= 0)).filter((e) => e.length > 0);
+    this.undoList = f(this.undoList); this.redoList = f(this.redoList);
   }
   clear(): void { this.undoList = []; this.redoList = []; }
 }

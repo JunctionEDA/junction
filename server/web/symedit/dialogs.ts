@@ -20,7 +20,7 @@ import { openSimModel } from "../dialogs/sim-model";
 import { embeddedModelFiles, projectModelFiles, refPrefix, simPinsOfLib } from "../dialogs/sim-files";
 import { libDocFor } from "./libdoc";
 import type { Units } from "../store";
-import { choiceBox, manageLibraries } from "../dialogs/lib-tables";
+import { choiceBox, firstSnapshot, manageLibraries } from "../dialogs/lib-tables";
 import { chooserPins, netlistFilters, netlistOf, symbolFpFilters, type FpChooserFilters } from "../library/fpchoice";
 
 const K = (): KiCadCanvasApi => window.KiCadCanvas;
@@ -823,10 +823,6 @@ export async function importSymbolLibraries(files: { path: string; text: string 
   return out;
 }
 /** A document just created holds nothing the server can join yet: its first content is the snapshot at sequence 0. */
-async function firstSnapshot(docId: string, text: string): Promise<boolean> {
-  try { const r = await fetch(`/api/docs/${docId}/snapshots?seq=0`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/octet-stream" }, body: text }); if (r.ok) return true; } catch (e) { /* fall through */ }
-  return saveTextDocument(docId, text, { id: "lib", kind: "MODIFIED", typeName: "LIB_SAVED", properties: [] } as unknown as KChange);
-}
 async function addToLibTable(nick: string, path: string): Promise<void> {
   const proj = appState.project; if (!proj) return;
   const table = proj.docs.find((d) => d.path === "sym-lib-table");
@@ -1012,7 +1008,7 @@ export function checker(se: SymbolEditor): void {
   });
 }
 
-// ---------------------------------------------------------------- Manage Symbol Libraries
+// ---------------------------------------------------------------- Manage Symbol / Footprint Libraries
 /** Preferences > Manage Symbol Libraries... (DIALOG_EDIT_LIBRARY_TABLES with PANEL_SYM_LIB_TABLE).  The global table is
  *  the KiCad libraries the server provides (read-only here); the project table is the project's sym-lib-table. */
 export async function manageSymbolLibraries(se: SymbolEditor): Promise<void> {

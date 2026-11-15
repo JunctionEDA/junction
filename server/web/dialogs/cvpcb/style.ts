@@ -6,7 +6,7 @@ import { ensureStyle } from "../../symedit/ui";
 const CSS = `
 .se-menu{z-index:58}
 .cv-frame{position:fixed;z-index:55;display:flex;flex-direction:column;min-width:520px;min-height:300px;background:var(--bench);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-3);box-shadow:var(--shadow-dialog);font:var(--fs-sm) var(--font);overflow:hidden}
-.cv-frame.cv-top{z-index:56}
+.cv-frame.cv-top,.v3d-win.cv-top{z-index:56}
 .cv-frame *{box-sizing:border-box}
 .cv-title{flex:none;display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--paper);border-bottom:1px solid var(--line);font-weight:600;cursor:move;user-select:none}
 .cv-title .cv-x{margin-left:auto;padding:0 4px;color:var(--ink-2);font-size:15px;line-height:1;cursor:pointer}

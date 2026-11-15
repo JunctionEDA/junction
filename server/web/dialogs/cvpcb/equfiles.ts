@@ -5,7 +5,7 @@
 // resolved in the project (${KIPRJMOD} or a relative path), read and parsed (logic.ts parseEquFile).
 import { E, appState, toast } from "../editor";
 import { KD, h, promptText } from "../dom";
-import { projectDocs, projectName } from "../project";
+import { projectName } from "../project";
 import { icon } from "../../symedit/ui";
 import { loadProjectFile, saveProjectFile, adoptProjectFile, saveTextDocument } from "../../editor/projectfile";
 import { editProject } from "../../canvas/project-file";
@@ -14,7 +14,8 @@ import * as L from "./logic";
 import { messageBox } from "./widgets";
 
 interface Doc { docId: string; path: string; docType: string }
-const docsNow = () => projectDocs() as Doc[];
+/** Every document of the project, the .equ files among them (project.ts projectDocs lists only schematics and boards). */
+const docsNow = () => (appState.project ? appState.project.docs : []) as Doc[];
 const FP_DIR = "KICAD10_FOOTPRINT_DIR";
 /** The project folder as the picker's paths are rooted (documents are project-relative). */
 const PROJECT_ROOT = "/project";

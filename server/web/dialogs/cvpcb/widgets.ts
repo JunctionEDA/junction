@@ -43,6 +43,19 @@ export function saveSettings(s: CvpcbSettings): void { try { localStorage.setIte
 // ---------------------------------------------------------------- a top-level window
 export interface CvWindow { root: HTMLElement; body: HTMLElement; setTitle(t: string): void; close(): void; front(): void }
 const open = new Set<HTMLElement>();
+/**
+ * Bring one of the CvPcb windows, or the 3D viewer opened from the footprint viewer (.v3d-win, a bundle of its own),
+ * to the front: the one raised gets cv-top, every other loses it.
+ */
+export function raiseWindow(el: HTMLElement): void {
+  for (const f of [...open, ...Array.from(document.querySelectorAll<HTMLElement>(".v3d-win"))]) f.classList.toggle("cv-top", f === el);
+}
+let v3dHooked = false;
+/** A click into the 3D viewer raises it above the CvPcb windows, as a click into one of them raises that one. */
+function hook3D(): void {
+  if (v3dHooked) return; v3dHooked = true;
+  document.addEventListener("pointerdown", (ev) => { const w = ev.target instanceof Element ? ev.target.closest<HTMLElement>(".v3d-win") : null; if (w) raiseWindow(w); }, true);
+}
 export function cvWindow(o: { id: string; title: string; geomKey: string; width: number; height: number; cls?: string; onCloseBox(): void; offset?: number }): CvWindow {
   const x = h("span", { class: "cv-x", title: "Close" }, "×");
   const titleText = h("span", null, o.title);
@@ -67,7 +80,8 @@ export function cvWindow(o: { id: string; title: string; geomKey: string; width:
   grip.addEventListener("pointermove", (ev) => { if (!size) return; const r = root.getBoundingClientRect(); root.style.width = Math.max(520, Math.min(window.innerWidth - r.left, size[2] + ev.clientX - size[0])) + "px"; root.style.height = Math.max(300, Math.min(window.innerHeight - r.top, size[3] + ev.clientY - size[1])) + "px"; root.dispatchEvent(new Event("cv-resize")); });
   grip.addEventListener("pointerup", () => { if (size) save(); size = null; });
   x.addEventListener("click", () => o.onCloseBox());
-  const front = () => { for (const f of open) f.classList.toggle("cv-top", f === root); };
+  const front = () => raiseWindow(root);
+  hook3D();
   root.addEventListener("pointerdown", front, true);
   document.body.append(root); open.add(root); front();
   return { root, body, setTitle(t) { titleText.textContent = t; root.setAttribute("aria-label", t); }, close() { open.delete(root); root.remove(); }, front };

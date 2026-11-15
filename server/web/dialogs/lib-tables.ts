@@ -50,6 +50,11 @@ async function readDoc(docId: string): Promise<string> {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return r.text();
 }
+/** A new document's first contents: its seq-0 snapshot, else an ordinary text save. */
+export async function firstSnapshot(docId: string, text: string): Promise<boolean> {
+  try { const r = await fetch(`/api/docs/${docId}/snapshots?seq=0`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/octet-stream" }, body: text }); if (r.ok) return true; } catch (e) { /* fall through */ }
+  return saveTextDocument(docId, text, { id: "lib", kind: "MODIFIED", typeName: "LIB_SAVED", properties: [] } as unknown as KChange);
+}
 /** Write a project text file: the next snapshot of its document, or a new document with this as its first snapshot. */
 export async function writeProjectText(path: string, text: string): Promise<string | null> {
   const proj = appState.project; if (!proj) return null;

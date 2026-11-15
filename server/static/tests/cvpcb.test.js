@@ -97,6 +97,22 @@ test("CVPCB_UNDO_REDO_ENTRIES: one entry per action, undo reverses it, redo re-a
   h.undo(); h.record({ index: 2, old: "", now: "X:x" }, true);
   assert.ok(!h.canRedo());
 });
+test("RedoAssociation adds the undo item through AssociateFootprint, which clears the rest of the redo list", () => {
+  const h = new L.AssocHistory();
+  h.record({ index: 0, old: "", now: "A:a" }, true); h.record({ index: 1, old: "", now: "B:b" }, true);
+  h.undo(); h.undo(); assert.strictEqual(h.redoList.length, 2);
+  assert.deepStrictEqual(h.redo(), [{ index: 0, old: "", now: "A:a" }]);
+  assert.ok(!h.canRedo() && h.canUndo());
+});
+test("AssocHistory.remap: entries follow their symbols to the rebuilt rows; a symbol that is gone drops out", () => {
+  const h = new L.AssocHistory();
+  h.record({ index: 4, old: "x:p8", now: "" }, true); h.record({ index: 2, old: "", now: "y:c" }, true); h.record({ index: 3, old: "", now: "z:z" }, false);
+  h.undo();
+  h.remap((i) => (i === 4 ? 92 : i === 2 ? 7 : -1));
+  assert.deepStrictEqual(h.undoList, [[{ index: 92, old: "x:p8", now: "" }]]);
+  assert.deepStrictEqual(h.redoList, [[{ index: 7, old: "y:c", now: "" }]]);
+  assert.deepStrictEqual(h.undo(), [{ index: 92, old: "", now: "x:p8" }]);
+});
 test("equivalence files: quoted value and footprint per line, spaces in the value become '_', sorted by value descending", () => {
   const e = L.parseEquFile("# comment\n'100 nF' 'Capacitor_SMD:C_0603'\n'LM358' 'Package_SO:SOIC-8_3.9x4.9mm_P1.27mm'\nbroken 'x'\n'only'\n");
   assert.deepStrictEqual(e, [{ value: "100_nF", fpid: "Capacitor_SMD:C_0603" }, { value: "LM358", fpid: "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm" }]);

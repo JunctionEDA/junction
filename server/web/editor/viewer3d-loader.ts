@@ -128,8 +128,8 @@ export function show3DViewer(): void {
 }
 
 /** EDA_3D_VIEWER_FRAME on another frame's board (CvPcb's footprint viewer: a board holding the one footprint). */
-export function show3DViewerOn(opts: Viewer3DOpenOptions): void {
-  loadViewer().then((viewer) => { viewer.open(opts); }).catch((e: unknown) => { console.warn(e); toast("The 3D viewer could not be loaded"); });
+export function show3DViewerOn(opts: Viewer3DOpenOptions): Promise<void> {
+  return loadViewer().then((viewer) => { viewer.open(opts); }).catch((e: unknown) => { console.warn(e); toast("The 3D viewer could not be loaded"); });
 }
 export function close3DViewer(): void { const v = viewerGlobal(); if (v && v.isOpen()) v.close(); }
 

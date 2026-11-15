@@ -57,7 +57,7 @@ pub(crate) fn allowed_file(name: &str) -> bool {
             | "kicad_dru" | "kicad_wks" | "step" | "stp" | "wrl" | "wrz"
             // SPICE / IBIS simulation model libraries (DIALOG_SIM_MODEL's "Browse Models" filter)
             | "lib" | "sub" | "cir" | "mod" | "spice" | "ibs"
-            // footprint association files (CvPcb's Automatically Assign Footprints)
+            // CvPcb footprint association (equivalence) files (DIALOG_CONFIG_EQUFILES)
             | "equ"
     )
 }
@@ -2456,6 +2456,7 @@ mod tests {
         assert!(!allowed_file("evil.exe"));
         assert!(!allowed_file("notes.txt"));
         assert!(allowed_file("models/opamp.lib") && allowed_file("spice/q.SUB") && allowed_file("x.ibs"));
+        assert!(allowed_file("footprints.equ") && allowed_file("libs/Passives.EQU"));
         assert_eq!(doc_type_for("models/opamp.lib"), "spice_model");
         assert_eq!(doc_type_for("sim/test.CIR"), "spice_model");
     }

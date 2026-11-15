@@ -6,7 +6,7 @@
 // zoom, units).  The canvas is the document renderer on a board holding the one footprint (library/preview.ts).
 import { h } from "../dom";
 import { icon, showMenu, closeMenus, type MenuEntry } from "../../symedit/ui";
-import { keyName } from "../../keys";
+import { hotkeyKey, keyName, shiftedPunctCombo } from "../../keys";
 import { gridChoiceText, loadUnits, messageText, saveUnits, unitsMsg, type UnitsSettings } from "../../units";
 import { PCB_DEFAULT_GRIDS } from "../logic";
 import { ZOOM_LIST } from "../../tables";
@@ -14,7 +14,7 @@ import { PCB_CURSOR, PCB_GRID_AXES } from "../../canvas/colors";
 import { emptyPreviewDoc, footprintPreviewDoc } from "../../library/preview";
 import { show3DViewerOn } from "../../editor/viewer3d-loader";
 import * as L from "./logic";
-import { cvMeta, cvWindow, loadSettings, saveSettings, type CvLib } from "./widgets";
+import { cvMeta, cvWindow, loadSettings, raiseWindow, saveSettings, type CvLib } from "./widgets";
 
 export interface FpViewerHost {
   /** GetSelectedFootprint, else the selected symbol's FPID. */
@@ -95,7 +95,9 @@ export function openFpViewer(host: FpViewerHost): FpViewer {
     if (measure) {
       g.strokeStyle = PCB_GRID_AXES; g.fillStyle = PCB_GRID_AXES; g.beginPath(); g.moveTo(sx(measure.a[0]), sy(measure.a[1])); g.lineTo(sx(measure.b[0]), sy(measure.b[1])); g.stroke();
       const dist = Math.hypot(measure.b[0] - measure.a[0], measure.b[1] - measure.a[1]);
-      g.font = `${12 * dpr}px var(--mono), monospace`; g.fillText(messageText(dist, units.units, "pcb"), sx(measure.b[0]) + 6 * dpr, sy(measure.b[1]) - 6 * dpr);
+      // a canvas font cannot name a CSS variable: the theme's monospace family, resolved
+      const mono = getComputedStyle(document.documentElement).getPropertyValue("--mono").trim() || "monospace";
+      g.font = `${12 * dpr}px ${mono}`; g.fillText(messageText(dist, units.units, "pcb"), sx(measure.b[0]) + 6 * dpr, sy(measure.b[1]) - 6 * dpr);
     }
     if (zoomRect) { g.strokeStyle = PCB_GRID_AXES; g.setLineDash([4 * dpr, 4 * dpr]); const x = sx(Math.min(zoomRect.a[0], zoomRect.b[0])), y = sy(Math.min(zoomRect.a[1], zoomRect.b[1])); g.strokeRect(x, y, Math.abs(zoomRect.b[0] - zoomRect.a[0]) * ppm * dpr, Math.abs(zoomRect.b[1] - zoomRect.a[1]) * ppm * dpr); g.setLineDash([]); }
     if (cursor) {
@@ -186,7 +188,8 @@ export function openFpViewer(host: FpViewerHost): FpViewer {
   const A: Record<string, () => void> = {
     zoomRedraw: () => redraw(), zoomInCenter: () => zoomBy(1.3), zoomOutCenter: () => zoomBy(1 / 1.3), zoomFitScreen: () => fit(),
     zoomTool: () => { tool = tool === "zoom" ? "select" : "zoom"; renderTop(); renderLeft(); },
-    show3DViewer: () => { show3DViewerOn({ getDoc: () => (raw ? doc : null), getName: () => shown }); },
+    // the 3D viewer opens (or is focused) above this window
+    show3DViewer: () => { void show3DViewerOn({ getDoc: () => (raw ? doc : null), getName: () => shown }).then(() => { const w = document.querySelector<HTMLElement>(".v3d-win"); if (w) raiseWindow(w); }); },
     fpAutoZoom: () => { vs.autozoom = !vs.autozoom; save(); renderTop(); if (vs.autozoom) fit(); },
     selectionTool: () => { tool = "select"; measure = null; renderTop(); renderLeft(); redraw(); },
     measureTool: () => { tool = "measure"; measure = null; renderTop(); renderLeft(); redraw(); },
@@ -298,13 +301,21 @@ export function openFpViewer(host: FpViewerHost): FpViewer {
       { label: "Zoom", icon: "zoom_selection", sub: ZOOM_LIST.pcb.map((f) => ({ label: `Zoom ${f.toFixed(2)}`, check: () => Math.abs(ppm / PPM_PER_ZOOM - f) / f < 0.01, run: () => { ppm = f * PPM_PER_ZOOM; save(); renderTop(); redraw(); }, enabled: () => true })) },
       { label: "Grid", icon: "grid_select", sub: PCB_DEFAULT_GRIDS.map((mm, i) => ({ label: gridChoiceText({ mm }, units.units, units.lastImperial, "pcb"), check: () => vs.grid_idx === i, run: () => { vs.grid_idx = i; save(); renderTop(); redraw(); }, enabled: () => true })) }];
   };
-  const hot = (id: string, ev: KeyboardEvent): boolean => { const k = cvMeta(id).key; if (!k) return false; const combo = [ev.ctrlKey || ev.metaKey ? "Ctrl" : "", ev.shiftKey ? "Shift" : "", ev.altKey ? "Alt" : "", ev.key.length === 1 ? ev.key.toUpperCase() : ev.key].filter(Boolean).join("+"); return combo === k; };
+  // the event in the spec's notation, as editor/hotkeys.ts comboOf spells it: Shift is part of typing a printable
+  // character (Ctrl+Shift+= is "Ctrl++"), Alt matches the physical key (keys.ts hotkeyKey)
+  const comboOf = (ev: KeyboardEvent): string => {
+    let k = hotkeyKey(ev); if (!k || k === "Control" || k === "Shift" || k === "Alt" || k === "Meta") return "";
+    const letter = k.length === 1 && /[a-z]/i.test(k); if (letter) k = k.toUpperCase();
+    const printable = k.length === 1 && !letter && !/[0-9]/.test(k);
+    return [ev.ctrlKey || ev.metaKey ? "Ctrl" : "", ev.shiftKey && !printable ? "Shift" : "", ev.altKey ? "Alt" : "", k].filter(Boolean).join("+");
+  };
+  const hot = (id: string, ev: KeyboardEvent): boolean => { const k = cvMeta(id).key; if (!k) return false; return comboOf(ev) === k || shiftedPunctCombo(ev) === k; };
   win.root.addEventListener("keydown", (ev) => {
     ev.stopPropagation();
     if (ev.target && (ev.target as HTMLElement).tagName === "K-SELECT") return;
     if (ev.key === "Escape") { if (measure || zoomRect) { measure = null; zoomRect = null; redraw(); } else if (tool !== "select") A.selectionTool!(); ev.preventDefault(); return; }
     if (ev.key === " " && cursor) { origin = cursor; redraw(); ev.preventDefault(); return; }   // ACTIONS::resetLocalCoords
-    for (const id of ["zoomIn", "zoomOut", "zoomFitScreen", "zoomRedraw", "toggleUnits", "togglePolarCoords", "measureTool", "toggleGrid"]) if (hot(id, ev)) {
+    for (const id of ["zoomIn", "zoomOut", "zoomFitScreen", "zoomRedraw", "toggleUnits", "togglePolarCoords", "measureTool", "toggleGrid", "show3DViewer"]) if (hot(id, ev)) {
       ev.preventDefault();
       if (id === "zoomIn") zoomBy(1.3, cursor || undefined); else if (id === "zoomOut") zoomBy(1 / 1.3, cursor || undefined);
       else if (id === "toggleUnits") setUnits(units.units === "mm" ? (units.lastImperial === "in" ? "in" : "mil") : "mm");

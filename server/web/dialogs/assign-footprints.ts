@@ -9,7 +9,7 @@
 import { E, appState, toast, toolCtx } from "./editor";
 import { h } from "./dom";
 import { libPins, refCmp, str, symbolRows, type SymRow } from "./logic";
-import { projectDocs, projectJson, loadProject, readDoc, submitDocOp } from "./project";
+import { projectJson, loadProject, readDoc, submitDocOp } from "./project";
 import { openPreferences } from "./preferences";
 import * as L from "./cvpcb/logic";
 import { ensureCvStyle } from "./cvpcb/style";
@@ -22,6 +22,7 @@ import { appClipboard } from "../editor/tools";
 import { LINKS, LOCAL_LABELS } from "../tables";
 import * as src from "../library/sources";
 import * as core from "../library/core";
+import { manageLibraries } from "./lib-tables";
 
 interface Member { docId: string; id: string }
 interface Row { ref: string; value: string; fp: string; orig: string; pins: number; filters: string[]; members: Member[]; editable: boolean }
@@ -29,6 +30,8 @@ type Focus = "lib" | "sym" | "fp";
 
 const OFFICIAL_URI = (lib: string) => "${KICAD10_FOOTPRINT_DIR}/" + lib + ".pretty";
 const fpKey = (fp: L.FpInfo) => fp.lib + ":" + fp.name;
+/** Every document of the project (project.ts projectDocs lists only the schematics and boards the editor opens). */
+const allDocs = () => (appState.project ? appState.project.docs : []) as { docId: string; path: string; docType: string }[];
 
 let current: { close(force?: boolean): Promise<boolean>; front(): void } | null = null;
 /** true while the frame is up (the rig and the editor's own Esc order ask). */
@@ -109,6 +112,7 @@ export function openAssignFootprints(): void {
 
   // ------------------------------------------------------------ cross-probing (SendComponentSelectionToSch)
   const crossProbe = (clear = false) => {
+    if (appState.docId !== here) return;   // the editor shows another sheet now: nothing of it to select
     const ids: string[] = [];
     if (!clear) for (const i of sel) for (const m of rows[i]?.members || []) if (m.docId === here) ids.push(m.id);
     try { toolCtx().setSelection(ids); } catch (e) { /* best effort */ }
@@ -193,11 +197,13 @@ export function openAssignFootprints(): void {
     if (viewer) { viewer.front(); viewer.update(); return; }
     viewer = openFpViewer({
       selectedFootprint: () => { const fp = selectedFp(); if (fp) return fpKey(fp); const s = symbol(); return s ? s.fp : ""; },
-      info: (fpid) => byId.get(fpid) || null, lib: (name) => libs.find((l) => l.name === name) || null, docs: () => projectDocs(),
+      info: (fpid) => byId.get(fpid) || null, lib: (name) => libs.find((l) => l.name === name) || null, docs: () => allDocs(),
       onClose: () => { viewer = null; },
     });
   };
   act.showEquFileTable = () => { void openEquFiles(); };
+  // InvokePcbLibTableEditor: the project's fp-lib-table; saving it reloads the libraries (KiwayMailIn MAIL_RELOAD_LIB)
+  act.showFootprintLibTable = () => { void manageLibraries("footprint", { readOnly: !!E.viewOnly, onSaved: () => { if (current) void loadLibraries(); } }); };
   act.openPreferences = () => openPreferences();
   act.close = () => { void doClose(false); };
   const setFilter = (bit: number) => { flags ^= bit; cfg.filter_footprint = flags; saveSettings(cfg); renderToolbar(); onSelectComponent(); };
@@ -225,8 +231,12 @@ export function openAssignFootprints(): void {
     for (const r of rows) if (r.fp !== r.orig) for (const m of r.members) { const l = byDoc.get(m.docId) || []; l.push({ id: m.id, values: { Footprint: r.fp } }); byDoc.set(m.docId, l); }
     try {
       for (const [docId, edits] of byDoc) {
-        const d = docs.get(docId); if (!d) continue; const ch = sch.fieldsTableChanges(d, edits); if (!ch.length) continue;
-        if (docId === here) toolCtx().commit(ch, "assign footprints"); else { await submitDocOp(docId, ch); docs.set(docId, await readDoc(docId, "kicad_sch")); }
+        if (!docs.has(docId)) continue;
+        // the sheet the editor shows now (which may no longer be the one the frame opened on) goes through its own
+        // undo history; any other sheet as it stands on the server now, through a side session
+        if (docId === appState.docId && E.kdoc) { const ch = sch.fieldsTableChanges(E.kdoc as KDoc, edits); if (ch.length) toolCtx().commit(ch, "assign footprints"); docs.set(docId, E.kdoc as KDoc); continue; }
+        const d = await readDoc(docId, "kicad_sch"); const ch = sch.fieldsTableChanges(d, edits); if (!ch.length) continue;
+        await submitDocOp(docId, ch); docs.set(docId, await readDoc(docId, "kicad_sch"));
       }
     } catch (e) { await messageBox("Error", "Could not assign the footprints: " + (e as Error).message); return false; }
     for (const r of rows) r.orig = r.fp;
@@ -261,7 +271,7 @@ export function openAssignFootprints(): void {
       case "undo": return !ro && history.canUndo();
       case "redo": return !ro && history.canRedo();
       case "autoAssociate": case "deleteAll": return !ro && rows.length > 0;
-      case "showFootprintLibTable": return false;
+      case "showFootprintLibTable": return !!appState.project;
     }
     return !!act[id];
   };
@@ -303,7 +313,7 @@ export function openAssignFootprints(): void {
   const menus = (): [string, MenuEntry[]][] => [
     ["File", [mi("saveAssociationsToSchematic"), S, { id: "close", label: "Close", icon: "exit", tip: "Close Assign Footprints", key: "Ctrl+W", run: act.close, enabled: () => true }]],
     ["Edit", [mi("undo"), mi("redo"), S, mi("cut", () => !ro && focus === "sym" && !!symbol() && L.parseFpid(symbol()!.fp).valid), mi("copy", () => true), mi("paste", () => !ro && sel.length > 0)]],
-    ["Preferences", [mi("configurePaths"), mi("showFootprintLibTable"), mi("showEquFileTable", () => !ro && !!appState.project), mi("openPreferences", () => true), S, { label: "Set Language" }]],
+    ["Preferences", [mi("configurePaths"), mi("showFootprintLibTable", () => !!appState.project), mi("showEquFileTable", () => !ro && !!appState.project), mi("openPreferences", () => true), S, { label: "Set Language" }]],
     ["Help", [link("help"), link("gettingStarted"), { ...mi("listHotKeys"), run: () => dispatch("listHotKeys"), enabled: () => true }, link("getInvolved"), link("donate"), link("reportBug"), S,
       { id: "about", label: LOCAL_LABELS.about || "About", icon: "about", run: () => dispatch("about"), enabled: () => true }]],
   ];
@@ -455,8 +465,9 @@ export function openAssignFootprints(): void {
   current = { close: (force?: boolean) => doClose(!!force), front: () => win && win.front() };
 
   // the first unassigned symbol is selected on open (readwrite_dlgs.cpp ReadNetListAndFpFiles)
+  // (SetSelection only when firstUnassigned >= 0: with every symbol assigned nothing is selected)
   const firstUn = rows.findIndex((r) => !r.fp);
-  sel = rows.length ? [firstUn >= 0 ? firstUn : 0] : []; cur = anchor = sel.length ? sel[0]! : -1;
+  sel = firstUn >= 0 ? [firstUn] : []; cur = anchor = sel.length ? sel[0]! : -1;
   setFocus("sym"); onSelectComponent(); if (cur >= 0) symList.scrollTo(cur);
 
   // ------------------------------------------------------------ the footprint libraries (LoadFootprintFiles, BuildLibrariesList)
@@ -472,7 +483,7 @@ export function openAssignFootprints(): void {
     const entries: CvLib[] = [];
     try { const t = await src.officialLibraries("footprint"); for (const l of t.libraries) entries.push({ name: l.name, pinned: false, source: "official", descr: l.description || "", uri: OFFICIAL_URI(l.name) }); } catch (e) { /* the server offers none */ }
     // the project's own libraries: its fp-lib-table rows that point into the project, then *.pretty folders it does not name
-    const pdocs = projectDocs() as { docId: string; path: string; docType: string }[];
+    const pdocs = allDocs();
     const table = pdocs.find((d) => d.path === "fp-lib-table");
     let tableRows: { name: string; uri: string }[] = [];
     if (table) { try { const r = await fetch(`/api/docs/${table.docId}/content`, { credentials: "same-origin" }); if (r.ok) tableRows = src.libTableRows(await r.text()); } catch (e) { /* no table */ } }
@@ -518,15 +529,19 @@ export function openAssignFootprints(): void {
   };
   void loadLibraries();
   // KiwayMailIn MAIL_RELOAD_LIB: the library table changed
-  const onLibChanged = (ev: CustomEvent) => { const id = ev.detail && (ev.detail.savedDocId || ev.detail.docId); const t = (projectDocs() as { docId: string; path: string }[]).find((d) => d.path === "fp-lib-table"); if (t && id === t.docId) void loadLibraries(); };
+  const onLibChanged = (ev: CustomEvent) => { const id = ev.detail && (ev.detail.savedDocId || ev.detail.docId); const t = allDocs().find((d) => d.path === "fp-lib-table"); if (t && id === t.docId) void loadLibraries(); };
   window.addEventListener("kc-doc-saved", onLibChanged as EventListener);
   void loadProject().then(() => { if (current) { const pins = pinnedLibs(); if (libs.some((l) => l.pinned !== pins.has(l.name))) { const o = L.libraryOrder(libs.map((l) => l.name), pins); const m = new Map(libs.map((l) => [l.name, l])); libs = o.map((x) => Object.assign(m.get(x.name)!, { pinned: x.pinned })); libList.refresh(); } } });
 
   // the other sheets of the project
-  const others = (projectDocs() as { docId: string; docType: string }[]).filter((d) => d.docType === "kicad_sch" && d.docId !== here);
+  const others = allDocs().filter((d) => d.docType === "kicad_sch" && d.docId !== here);
   if (others.length) void Promise.all(others.map((d) => readDoc(d.docId, "kicad_sch").then((od) => { docs.set(d.docId, od); }, () => { /* left out */ }))).then(() => {
     if (!current) return;
-    const keep = sel.map((i) => rows[i]?.ref); build();
+    const before = rows, keep = sel.map((i) => rows[i]?.ref); build();
+    // the rows are rebuilt and re-sorted: the undo / redo entries follow their symbols to the new rows
+    const key = (r: Row) => r.members[0]!.docId + "\u0000" + r.members[0]!.id;
+    const now = new Map(rows.map((r, i) => [key(r), i]));
+    history.remap((i) => { const r = before[i]; const j = r ? now.get(key(r)) : undefined; return j === undefined ? -1 : j; });
     sel = keep.map((r) => rows.findIndex((x) => x.ref === r)).filter((i) => i >= 0);
     if (!sel.length) { const f = rows.findIndex((r) => !r.fp); if (f >= 0) sel = [f]; }
     cur = anchor = sel.length ? sel[0]! : -1; onSelectComponent(); if (cur >= 0) symList.scrollTo(cur);

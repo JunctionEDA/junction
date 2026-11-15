@@ -39,8 +39,9 @@ def parse_actions():
             cls, name, body = m.groups()
 
             def field(key):
-                r = re.search(r"\." + key + r"\(\s*_?\(?\s*\"((?:[^\"\\]|\\.)*)\"", body)
-                return r.group(1).replace('\\"', '"') if r else None
+                # a C++ string may be split over adjacent literals: _( "first part " "second part" )
+                r = re.search(r"\." + key + r"\(\s*_?\(?\s*((?:\"(?:[^\"\\]|\\.)*\"\s*)+)", body)
+                return "".join(re.findall(r"\"((?:[^\"\\]|\\.)*)\"", r.group(1))).replace('\\"', '"') if r else None
 
             icon = re.search(r"\.Icon\(\s*BITMAPS::(\w+)", body)
             hk = re.search(r"\.DefaultHotkey\(\s*([^)]*)\)", body)
