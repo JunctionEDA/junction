@@ -6,6 +6,8 @@ import { costOf, dirOf, Features, featuresOf, Node, probe, ProbeResult, Terminal
 
 /** Search steps an ordinary machine takes per millisecond of routing: turns the time allowed into a work budget. */
 const STEPS_PER_MS = 12000;
+/** What a millimetre of signal track with nothing beside it costs, in millimetres of length: tracks bundle. */
+const BUNDLE_COST = 0.3;
 import { TRAINED, Weights } from "./weights";
 import { cornerAngle, SQUARE_MAX } from "./corners";
 import { stackupOf, traceOn, usualImpedance, widthFor, z0, zdiff } from "./impedance";
@@ -78,6 +80,7 @@ export interface RouteOptions {
   /** false keeps every via at its net class's size.  By default a connection that cannot be made with it may use
    *  the smallest via Board Setup's constraints permit. */
   smallVias?: boolean;           // after routing, lay each route that changes layer again without (or with fewer) vias where the finished board leaves room; default true
+  bundle?: boolean;              // signals prefer to run beside what is already there (other tracks, pads) rather than out in the open; default true
   planarFirst?: boolean;         // lay each signal without a via first, pushing others aside; only what cannot be made on one layer changes layer; default true
   timeMs?: number;               // stop starting new connections after this long
   zones?: boolean;               // let a route end in the net's own copper zone; default true
@@ -928,6 +931,18 @@ export class Router {
         const rim = this.rim, before = extra;
         extra = (nodes) => { let run = 0; for (let i = 0; i + 1 < nodes.length; i++) { const a = nodes[i], b = nodes[i + 1]; if (a.l !== b.l) continue; const n = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy); const step = Math.hypot(sx, sy) * G.g; for (let k = 0; k < n; k++) if (rim[(a.iy + sy * k) * G.W + a.ix + sx * k] && rim[(a.iy + sy * (k + 1)) * G.W + a.ix + sx * (k + 1)]) run += step; }
           return Math.max(0, run - RIM_FREE_MM) * RIM_COST * this.W.length + (before ? before(nodes) : 0); };
+      }
+      if (!collect && !soft && this.opts.bundle !== false && !isSupply(conn.net) && this.kindOf(conn.net) === "digital" && !/DDR|SDRAM|DRAM|(^|[\/_])DQ[SM]?_?\d/i.test(conn.net) && !(this.opts.match || []).some((g) => g.nets.includes(conn.net))) {   // plain signals only: fast, analog and RF lines keep their distance, and a line that is to be length-matched keeps room for its serpentine
+        // Tracks keep together: every mm a signal runs out in the open, with nothing beside it within about half a
+        // millimetre, costs a little, so the escapes of a fine-pitch chip leave side by side as one bus and its vias
+        // sit in a row, the way a person draws them.  The copper they do not scatter over stays one piece of ground.
+        const full = conn.cls.full, before = extra, R = Math.max(2, Math.round(0.5 / G.g)), GW = G.W, GH = G.H;
+        extra = (nodes) => { let alone = 0;
+          for (let i = 0; i + 1 < nodes.length; i++) { const a = nodes[i], b = nodes[i + 1]; if (a.l !== b.l) continue; const n = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy); const step = Math.hypot(sx, sy) * G.g; const m = full[a.l]; if (!m) continue;
+            for (let k = 0; k < n; k++) { const x = a.ix + sx * k, y = a.iy + sy * k; let beside = false;
+              for (let j = 1; j <= R && !beside; j++) { const x1 = x - sy * j, y1 = y + sx * j, x2 = x + sy * j, y2 = y - sx * j; if ((x1 >= 0 && y1 >= 0 && x1 < GW && y1 < GH && m[y1 * GW + x1]) || (x2 >= 0 && y2 >= 0 && x2 < GW && y2 < GH && m[y2 * GW + x2])) beside = true; }
+              if (!beside) alone += step; } }
+          return alone * BUNDLE_COST * this.W.length + (before ? before(nodes) : 0); };
       }
       const mate = conn.partner && conn.partner.nodes && conn.partner.nodes.length > 1 ? conn.partner.nodes : null;
       if (mate && !collect) {   // the second line of a pair keeps beside the first: every mm farther than a pair pitch from it costs

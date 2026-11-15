@@ -27,6 +27,7 @@ export interface PlaceResult { placements: Placement[]; score: PlaceScore; outli
 interface Pad { x: number; y: number; net: string; thru: boolean }
 interface Part {
   ref: string; id: string; node: any; sheet: string; cur: [number, number, number]; flip: boolean; back: boolean; thru: boolean;
+  edgeBox?: Box;   // the box up to where the board's edge belongs, on a connector that hangs over it
   pads: Pad[]; box: Box; padBox: Box; holes: Box[];   // in the part's own frame; holes: what its drilled pads take on the other side (origin at its anchor, rotation 0)
   spec: PlaceSpec | null; movable: boolean; group: string;
   x: number; y: number; rot: number; placed: boolean;   // in its block's frame, then on the board
@@ -68,8 +69,24 @@ function partOf(K: any, P: any, doc: any, it: any, spec: PlaceSpec | null): Part
   for (const k of Object.keys(cy)) for (const loop of cy[k]) for (const q of loop) { take(q[0], q[1], 0); any = true; }
   if (!any) for (const p of P.padsOf({ node })) take(p.x, p.y, Math.max(p.w, p.h) / 2 + 0.25);
   if (x0 > x1) { x0 = y0 = -0.5; x1 = y1 = 0.5; }
+  // Where the edge of the board belongs on a connector that hangs over it.  The footprint says so itself when it draws
+  // a "PCB Edge" line on a user layer; a USB, HDMI, card or jack receptacle that draws none hangs over by what its
+  // body has in front of its pads, a millimetre at most, so that the plug reaches it past the edge of the board.
+  let edgeBox: Box | undefined; const cut = (side: number, v: number) => { const e: Box = [x0, y0, x1, y1]; e[side] = v; edgeBox = e; };
+  if (K.kids(node, "fp_text").some((t: any) => /pcb.?edge|board.?edge/i.test(K.str(t[2])))) {
+    for (const ln of K.kids(node, "fp_line")) {
+      const ly = K.kid(ln, "layer"), a = K.kid(ln, "start"), b = K.kid(ln, "end"); if (!ly || !a || !b || !/\.User$/.test(K.str(ly[1]))) continue;
+      const ax = K.num(a[1]), ay = K.num(a[2]), bx = K.num(b[1]), by = K.num(b[2]);
+      if (Math.abs(ay - by) < 1e-3 && Math.abs(ax - bx) >= (x1 - x0) / 2 && ay > y0 && ay < y1) cut(ay > (y0 + y1) / 2 ? 3 : 1, ay);
+      else if (Math.abs(ax - bx) < 1e-3 && Math.abs(ay - by) >= (y1 - y0) / 2 && ax > x0 && ax < x1) cut(ax > (x0 + x1) / 2 ? 2 : 0, ax);
+    }
+  }
+  if (!edgeBox && pads.length && /USB|HDMI|DisplayPort|RJ\d\d|SD_?Card|microSD|Jack/i.test(K.str(node[1]) || "") && !/Vertical/i.test(K.str(node[1]) || "")) {
+    const front = [pb[0] - x0, pb[1] - y0, x1 - pb[2], y1 - pb[3]]; const side = front.indexOf(Math.max(...front)); const over = Math.min(1, front[side] - 0.75);
+    if (over >= 0.2) cut(side, side < 2 ? [x0, y0][side] + over : [x1, y1][side - 2] - over);
+  }
   const sh = K.kid(it.node, "sheetname") || K.kid(it.node, "path");
-  return { ref: refOf(K, it.node), id: it.id, node: it.node, sheet: sh ? K.str(sh[1]).replace(/\/[^/]*$/, "") : "", cur, flip, back: wantBack, thru, pads, box: [x0, y0, x1, y1], padBox: pb[0] <= pb[2] ? pb : [x0, y0, x1, y1], holes, spec, movable: false, group: "", x: 0, y: 0, rot: 0, placed: false };
+  return { edgeBox, ref: refOf(K, it.node), id: it.id, node: it.node, sheet: sh ? K.str(sh[1]).replace(/\/[^/]*$/, "") : "", cur, flip, back: wantBack, thru, pads, box: [x0, y0, x1, y1], padBox: pb[0] <= pb[2] ? pb : [x0, y0, x1, y1], holes, spec, movable: false, group: "", x: 0, y: 0, rot: 0, placed: false };
 }
 
 export function place(K: any, P: any, doc: any, settings: any, opts: PlaceOptions = {}): PlaceResult {
@@ -265,8 +282,8 @@ export function place(K: any, P: any, doc: any, settings: any, opts: PlaceOption
     let best: { c: number; rot: number; x: number; y: number } | null = null;
     for (const rot of rots) {
       const tb = turnBox(b.edge ? b.box : b.padBox, rot);
-      if (b.edge) {   // slide along the edge, the named part's body flush with it
-        const [ax, ay] = rotv(rot, ap.x, ap.y); const abx = turnBox(ap.box, ap.rot + rot); const horiz = b.edge === "top" || b.edge === "bottom";
+      if (b.edge) {   // slide along the edge, the named part's body flush with it (or hanging over it by what the footprint asks for)
+        const [ax, ay] = rotv(rot, ap.x, ap.y); const abx = turnBox(ap.edgeBox || ap.box, ap.rot + rot); const horiz = b.edge === "top" || b.edge === "bottom";
         const fx = b.edge === "left" ? O[0] - (ax + abx[0]) : O[2] - (ax + abx[2]), fy = b.edge === "top" ? O[1] - (ay + abx[1]) : O[3] - (ay + abx[3]);
         const lo = horiz ? O[0] + inset - tb[0] : O[1] + inset - tb[1], hi = horiz ? O[2] - inset - tb[2] : O[3] - inset - tb[3];
         for (let v = Math.ceil(lo / grid) * grid; v <= hi + 1e-6; v += grid / 2) { const x = horiz ? v : fx, y = horiz ? fy : v; if (!legal(b, rot, x, y)) continue; const c = costAt(pads, rot, x, y); if (!best || c < best.c) best = { c, rot, x, y }; }

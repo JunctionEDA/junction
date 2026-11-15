@@ -205,6 +205,40 @@ class Rules(unittest.TestCase):
             self.assertFalse(box[0] - 0.15 < q["x"] + 2 and box[2] + 0.15 > q["x"] and box[1] - 0.15 < q["y"] < box[3] + 0.15, n)
         self.assertEqual(board.place_bypass("U1")["U1"]["C1"]["at"], spot["at"])       # settled: a second call keeps it
 
+    def test_a_usb_connector_on_an_edge_hangs_over_it_as_its_footprint_asks(self):
+        sch = self.project.schematic()
+        sch.place("Connector:USB_C_Receptacle_USB2.0_16P", ref="J1", at=(101.6, 101.6), footprint="Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal")
+        sch.place("Device:R", ref="R1", at=(152.4, 76.2), footprint=R)
+        sch.net("CC1", "J1.A5", "R1.1"); sch.net("GND", "J1.A1", "R1.2")
+        sch.flush()
+        board = self.project.board()
+        board.sync()
+        board.outline(100, 100, 130, 125)
+        board.autoplace(outline=(100, 100, 130, 125), edges={"J1": "left"})
+        box = board.courtyards("J1")["J1"]
+        self.assertAlmostEqual(box[0], 100 - 0.505, delta=0.03)          # the footprint's "PCB Edge" line lies on the outline
+        self.assertTrue(all(p["x"] > 100.3 for p in board.pads("J1")))    # every pad still on the board
+        self.assertEqual(board.check()["by_kind"].get("copper_edge_clearance", 0), 0)
+
+    def test_finish_pours_ground_on_both_sides_of_a_two_layer_board_and_stitches_it(self):
+        sch = self.project.schematic()
+        H = "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
+        sch.place("Connector_Generic:Conn_01x04", ref="J1", at=(101.6, 76.2), footprint=H)
+        sch.place("Connector_Generic:Conn_01x04", ref="J2", at=(152.4, 76.2), footprint=H)
+        for i, n in enumerate(("A", "B", "C", "GND")):
+            sch.net(n, f"J1.{i + 1}", f"J2.{i + 1}")
+        sch.flush()
+        board = self.project.board()
+        board.sync()
+        board.outline(100, 100, 140, 125)
+        board.autoplace(outline=(100, 100, 140, 125), fixed={"J1": (105, 105, 0), "J2": (135, 105, 0)})
+        board.route(time_s=10)
+        done = board.finish()
+        self.assertEqual(done.get("ground_poured"), ["F.Cu", "B.Cu"])
+        self.assertGreater(done.get("stitching", 0), 0)
+        self.assertEqual(board.check()["errors"], 0)
+        self.assertNotIn("ground_poured", board.finish())          # nothing to pour the second time
+
 
 if __name__ == "__main__":
     unittest.main()

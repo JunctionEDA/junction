@@ -22,6 +22,7 @@ The methods are attached to Board when the package is imported.
 from __future__ import annotations
 
 import math
+import re
 
 from . import rules as _rules
 from .transport import HarnessError
@@ -183,7 +184,8 @@ def _prepare(self) -> dict:
 
 def _finish(self, stitch: float | None = 10.0) -> dict:
     """After routing: what the copper still owes the physics.  Antenna edges get the vias the routing left room for,
-    every routed RF net gets its fence, exposed pads get their via arrays, the ground pours are stitched (every
+    every routed RF net gets its fence, exposed pads get their via arrays, ground is poured on both outer layers where
+    it is not yet (two-layer boards too: what the tracks leave free becomes ground), the ground pours are stitched (every
     `stitch` mm; None leaves that out) and the zones are filled again.  Returns what each step added; follow it with
     board.review()."""
     out: dict = {"antennas": {}, "fences": {}, "thermal": {}}
@@ -204,7 +206,25 @@ def _finish(self, stitch: float | None = 10.0) -> dict:
         out["thermal"] = {k: v["vias"] for k, v in self.thermal_vias().items()}
     except HarnessError:
         pass
-    try:      # every ground pad its own via to the plane, so none hangs on a piece of pour alone
+    # ground on both outer layers: what the tracks leave free becomes ground, and the two pours are stitched into one
+    # (stitching vias are wanted; they are not layer changes of a signal)
+    try:
+        gnd = next((n for n in self.nets() if re.fullmatch(r"/?(GND|AGND|DGND|PGND|VSS)", n, re.I)), None)
+        if gnd and self.geometry().get("outline"):
+            have = set()
+            for z in self._call("get_items", kinds=["zone"]).get("items", []):
+                sx = z.get("sexpr", "")
+                if "keepout" not in sx and re.search(r'\(net(_name)? "?/?(GND|AGND|DGND|PGND|VSS)"?\)', sx, re.I):
+                    have.update(re.findall(r'"([FB]\.Cu)"', sx))
+            poured = [l for l in ("F.Cu", "B.Cu") if l not in have]
+            for l in poured:
+                self.zone(gnd, l)
+            if poured:
+                self.flush()
+                out["ground_poured"] = poured
+    except HarnessError:
+        pass
+    try:      # ground pads that hang on a piece of pour alone get a via to the plane (pads on one piece share it)
         out["ground_pads"] = self.ground_pads()["vias"]
     except HarnessError:
         out["ground_pads"] = 0

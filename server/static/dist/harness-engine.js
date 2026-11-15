@@ -82913,6 +82913,7 @@ function usualImpedance(net, paired) {
 
 // web/router/route.ts
 var STEPS_PER_MS = 12e3;
+var BUNDLE_COST = 0.3;
 var isSupply = (net) => /^\/?(.*\/)?(A|D|P)?(GND|VSS|VEE)\w*$|^\/?(.*\/)?[+-]?\d+(V\d*|\.\d+V)\w*$|^\/?(.*\/)?(VCC|VDD|VBUS|VBAT|VIN|VSYS|VPP|VAA|VREF|VOUT|V\d+V\d*|PWR|\+BATT|-BATT)\w*$/i.test(net) && !/(_|\b)(EN|SENSE|SNS|FB|PG|OK|DET|MON|ADC)\w*$/i.test(net);
 function netKind(net, paired = /(\+|-|_P|_N)\)?$/.test(net)) {
   if (isSupply(net)) return "supply";
@@ -84537,6 +84538,30 @@ var Router = class _Router {
             for (let k = 0; k < n2; k++) if (rim[(a.iy + sy * k) * G2.W + a.ix + sx * k] && rim[(a.iy + sy * (k + 1)) * G2.W + a.ix + sx * (k + 1)]) run += step;
           }
           return Math.max(0, run - RIM_FREE_MM) * RIM_COST * this.W.length + (before ? before(nodes) : 0);
+        };
+      }
+      if (!collect && !soft && this.opts.bundle !== false && !isSupply(conn.net) && this.kindOf(conn.net) === "digital" && !/DDR|SDRAM|DRAM|(^|[\/_])DQ[SM]?_?\d/i.test(conn.net) && !(this.opts.match || []).some((g2) => g2.nets.includes(conn.net))) {
+        const full = conn.cls.full, before = extra, R2 = Math.max(2, Math.round(0.5 / G2.g)), GW = G2.W, GH = G2.H;
+        extra = (nodes) => {
+          let alone = 0;
+          for (let i = 0; i + 1 < nodes.length; i++) {
+            const a = nodes[i], b = nodes[i + 1];
+            if (a.l !== b.l) continue;
+            const n2 = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy);
+            const step = Math.hypot(sx, sy) * G2.g;
+            const m = full[a.l];
+            if (!m) continue;
+            for (let k = 0; k < n2; k++) {
+              const x = a.ix + sx * k, y = a.iy + sy * k;
+              let beside = false;
+              for (let j = 1; j <= R2 && !beside; j++) {
+                const x12 = x - sy * j, y12 = y + sx * j, x2 = x + sy * j, y2 = y - sx * j;
+                if (x12 >= 0 && y12 >= 0 && x12 < GW && y12 < GH && m[y12 * GW + x12] || x2 >= 0 && y2 >= 0 && x2 < GW && y2 < GH && m[y2 * GW + x2]) beside = true;
+              }
+              if (!beside) alone += step;
+            }
+          }
+          return alone * BUNDLE_COST * this.W.length + (before ? before(nodes) : 0);
         };
       }
       const mate = conn.partner && conn.partner.nodes && conn.partner.nodes.length > 1 ? conn.partner.nodes : null;
@@ -86844,8 +86869,29 @@ function partOf(K8, P, doc, it, spec) {
     x0 = y0 = -0.5;
     x1 = y1 = 0.5;
   }
+  let edgeBox;
+  const cut = (side, v) => {
+    const e = [x0, y0, x1, y1];
+    e[side] = v;
+    edgeBox = e;
+  };
+  if (K8.kids(node, "fp_text").some((t) => /pcb.?edge|board.?edge/i.test(K8.str(t[2])))) {
+    for (const ln of K8.kids(node, "fp_line")) {
+      const ly = K8.kid(ln, "layer"), a = K8.kid(ln, "start"), b = K8.kid(ln, "end");
+      if (!ly || !a || !b || !/\.User$/.test(K8.str(ly[1]))) continue;
+      const ax = K8.num(a[1]), ay = K8.num(a[2]), bx = K8.num(b[1]), by = K8.num(b[2]);
+      if (Math.abs(ay - by) < 1e-3 && Math.abs(ax - bx) >= (x1 - x0) / 2 && ay > y0 && ay < y1) cut(ay > (y0 + y1) / 2 ? 3 : 1, ay);
+      else if (Math.abs(ax - bx) < 1e-3 && Math.abs(ay - by) >= (y1 - y0) / 2 && ax > x0 && ax < x1) cut(ax > (x0 + x1) / 2 ? 2 : 0, ax);
+    }
+  }
+  if (!edgeBox && pads.length && /USB|HDMI|DisplayPort|RJ\d\d|SD_?Card|microSD|Jack/i.test(K8.str(node[1]) || "") && !/Vertical/i.test(K8.str(node[1]) || "")) {
+    const front = [pb[0] - x0, pb[1] - y0, x1 - pb[2], y1 - pb[3]];
+    const side = front.indexOf(Math.max(...front));
+    const over = Math.min(1, front[side] - 0.75);
+    if (over >= 0.2) cut(side, side < 2 ? [x0, y0][side] + over : [x1, y1][side - 2] - over);
+  }
   const sh = K8.kid(it.node, "sheetname") || K8.kid(it.node, "path");
-  return { ref: refOf(K8, it.node), id: it.id, node: it.node, sheet: sh ? K8.str(sh[1]).replace(/\/[^/]*$/, "") : "", cur: cur2, flip, back: wantBack, thru, pads, box: [x0, y0, x1, y1], padBox: pb[0] <= pb[2] ? pb : [x0, y0, x1, y1], holes, spec, movable: false, group: "", x: 0, y: 0, rot: 0, placed: false };
+  return { edgeBox, ref: refOf(K8, it.node), id: it.id, node: it.node, sheet: sh ? K8.str(sh[1]).replace(/\/[^/]*$/, "") : "", cur: cur2, flip, back: wantBack, thru, pads, box: [x0, y0, x1, y1], padBox: pb[0] <= pb[2] ? pb : [x0, y0, x1, y1], holes, spec, movable: false, group: "", x: 0, y: 0, rot: 0, placed: false };
 }
 function place(K8, P, doc, settings, opts = {}) {
   void settings;
@@ -87297,7 +87343,7 @@ function place(K8, P, doc, settings, opts = {}) {
         const tb = turnBox(b.edge ? b.box : b.padBox, rot3);
         if (b.edge) {
           const [ax, ay] = rotv(rot3, ap.x, ap.y);
-          const abx = turnBox(ap.box, ap.rot + rot3);
+          const abx = turnBox(ap.edgeBox || ap.box, ap.rot + rot3);
           const horiz = b.edge === "top" || b.edge === "bottom";
           const fx = b.edge === "left" ? O2[0] - (ax + abx[0]) : O2[2] - (ax + abx[2]), fy = b.edge === "top" ? O2[1] - (ay + abx[1]) : O2[3] - (ay + abx[3]);
           const lo = horiz ? O2[0] + inset - tb[0] : O2[1] + inset - tb[1], hi = horiz ? O2[2] - inset - tb[2] : O2[3] - inset - tb[3];
