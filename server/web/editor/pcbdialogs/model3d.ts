@@ -9,7 +9,7 @@
 import * as M from "../../library/model3d";
 // the loader is fetched when a preview opens: a static import would pull editor/actions.ts in while doc.ts loads
 import type { EmbeddedViewer3D } from "../viewer3d-loader";
-import { box, checkField, currentUnits, form, grid, gridButtons, h, iconButton, lenField, messageBox, numField, openDialog, selectField, unitLabel, unitName, type CellValue, type DialogApi, type Field } from "./ui";
+import { box, checkField, currentUnits, errorMessage, form, grid, gridButtons, h, iconButton, lenField, messageBox, numField, openDialog, selectField, unitLabel, unitName, type CellValue, type DialogApi, type Field } from "./ui";
 import { colorPicker, type RGBA } from "./color-picker";
 import { bitmapButton } from "../../components/kicon-dom";
 
@@ -245,6 +245,8 @@ export interface Models3dOpts {
   extruded?: FpExtruded | null;
   /** the frame's board thickness, the dummy board's starting thickness (panel_preview_3d_model.cpp: SetBoardThickness) */
   thickness?: number;
+  /** the footprint's library and name (the footprint editor): adds Use Closest Library Model */
+  footprintId?(): { lib: string; name: string };
 }
 /** EXTRUDED_3D_BODY: layer "auto" (UNDEFINED_LAYER), "pad_bbox" (UNSELECTED_LAYER) or a layer name; color null = unspecified */
 export interface FpExtruded { show: boolean; height: number; standoff: number; layer: string; material: "plastic" | "matte" | "metal" | "copper"; color: number[] | null }
@@ -333,6 +335,33 @@ export function models3dPanel(o: Models3dOpts): { build(el: HTMLElement): void; 
     const [addB, delB] = [bar.firstElementChild as HTMLElement, bar.lastElementChild as HTMLElement];
     const browseB = iconButton("folder", "Select 3D Model", browse, ro); browseB.setAttribute("data-k", "browse3d");
     bar.replaceChildren(addB, browseB, h("span", { style: "width:20px" }), delB);
+    // Not in KiCad: the model KiCad's 3D library holds that comes closest to the selected row's file (or, with no
+    // row, to the footprint's own name), for a part whose own model is not in the library.
+    let closest: HTMLButtonElement | null = null;
+    if (o.footprintId) {
+      const fpId = o.footprintId;
+      const b = h("button", { type: "button", class: "kbtn", disabled: ro, "data-k": "model-closest", title: "Find the model in KiCad's 3D library that comes closest to this footprint and use it" }, "Use Closest Library Model") as HTMLButtonElement;
+      b.addEventListener("click", () => {
+        syncModels();
+        const cur = modelSel >= 0 && models[modelSel] ? String(models[modelSel].file || "") : "";
+        const named = /([^/\\]+)\.3dshapes[/\\]([^/\\]+?)\.(?:step|stp|wrl|wrz)$/i.exec(cur);
+        const own = fpId(); const lib = named ? named[1] : own.lib, item = named ? named[2] : own.name;
+        if (!lib || !item) { errorMessage("The footprint has no library and name to look a model up by."); return; }
+        b.disabled = true;
+        fetch(`/api/kicad-lib/model-match?lib=${encodeURIComponent(lib)}&name=${encodeURIComponent(item)}`, { credentials: "same-origin" })
+          .then((r) => (r.ok ? r.json() : r.status === 404 ? null : Promise.reject(new Error(String(r.status)))))
+          .then((hit: { library?: string; name?: string } | null) => {
+            if (!hit || !hit.library || !hit.name) { errorMessage(`KiCad's 3D library has no model close to ${lib}:${item}.`); return; }
+            const file = "${KICAD10_3DMODEL_DIR}/" + hit.library + ".3dshapes/" + hit.name + ".step";
+            const rows = modelGrid.rows();
+            if (modelSel >= 0 && rows[modelSel]) rows[modelSel].file = file; else rows.push({ i: -1, file, show: true });
+            modelGrid.refresh(); modelGrid.select(modelSel >= 0 ? modelSel : rows.length - 1); syncModels(); updatePreview();
+          })
+          .catch(() => errorMessage("The 3D library could not be reached. Try again in a moment."))
+          .finally(() => { b.disabled = ro; });
+      });
+      closest = b;
+    }
     const cfg = h("button", { type: "button", class: "kbtn", "data-k": "configure3dPaths" }, "Configure Paths...");
     cfg.addEventListener("click", () => { void import("../../dialogs/configure-paths").then((x) => x.configurePaths(() => updatePreview())); });
     preview = modelPreview({ buttons: true, reload: updatePreview, key: o.previewKey, thickness: o.thickness });
@@ -356,7 +385,7 @@ export function models3dPanel(o: Models3dOpts): { build(el: HTMLElement): void; 
         exportBtn));
     ["sx", "sy", "sz", "rx", "ry", "rz", "ox", "oy", "oz"].forEach((k) => mf[k].input.addEventListener("change", updatePreview));
     opacity.addEventListener("input", updatePreview);
-    el.append(modelGrid.el, h("div", { class: "pd-row", style: "margin:2px 0 6px" }, bar, h("span", { style: "flex:1" }), pathChoice.el, cfg), extrusionBox,
+    el.append(modelGrid.el, h("div", { class: "pd-row", style: "margin:2px 0 6px" }, bar, ...(closest ? [closest] : []), h("span", { style: "flex:1" }), pathChoice.el, cfg), extrusionBox,
       h("div", { style: "display:flex;gap:8px;min-height:340px" },
         h("div", { style: "flex:none;width:220px;display:flex;flex-direction:column" }, xyz("Scale", "sx", "sy", "sz", ""), xyz("Rotation", "rx", "ry", "rz", "deg"), xyz("Offset", "ox", "oy", "oz", unitName()), box("Opacity", opacity)),
         h("div", { style: "flex:1;min-width:0;display:flex;flex-direction:column" }, h("div", { class: "pd-lbl", style: "padding:4px 0" }, "Preview"), h("div", { style: "flex:1;min-height:300px;display:flex" }, preview.el))));

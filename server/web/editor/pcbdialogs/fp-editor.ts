@@ -68,7 +68,8 @@ export function footprintPropertiesDialog(ctx: ToolCtx, host: FpPropsHost = {}):
   let efPanel: { el: HTMLElement; get(): string[] } | null = null;
   // 3D Models (PANEL_FP_PROPERTIES_3D_MODEL with PANEL_PREVIEW_3D_MODEL)
   const fpEmbedded = (): string[] => (efPanel ? efPanel.get() : m.embeddedFiles);
-  const models3d = models3dPanel({ ro, models: m.models, extruded: m.extruded ?? null, projectModels: host.projectModels, embedded: fpEmbedded, footprintText: host.footprintText, previewKey: "fpPreview3d" });
+  const models3d = models3dPanel({ ro, models: m.models, extruded: m.extruded ?? null, projectModels: host.projectModels, embedded: fpEmbedded, footprintText: host.footprintText, previewKey: "fpPreview3d",
+    footprintId: () => { const own = name.get().trim(); return own.includes(":") ? { lib: own.split(":")[0], name: own.slice(own.indexOf(":") + 1) } : { lib: String((host as Any).libName || ""), name: own }; } });
 
   let api: Any = null;
   const embedFonts = checkField(m.embedFonts, "Embed fonts", { ro, key: "embedFonts", tip: "Store a copy of all fonts used" });
