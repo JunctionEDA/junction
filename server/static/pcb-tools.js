@@ -40695,7 +40695,23 @@ Press <esc> to cancel all; double-click to finish`;
     }
     return did;
   }
-  var fpModelsApi = { readModels, readExtruded, writeModels, modelText, extrudedText, embeddedFileNames, keepEmbeddedFiles };
+  function addEmbeddedFiles(fp, files) {
+    if (!files.length) return false;
+    let ef = K.kid(fp, "embedded_files");
+    if (!ef) {
+      ef = ["embedded_files"];
+      const m = fp.findIndex((c, j) => j > 1 && isList(c) && c[0] === "model");
+      fp.splice(m > 0 ? m : fp.length, 0, ef);
+    }
+    for (const text of files) {
+      const node = K.parse(text), name = str7((K.kid(node, "name") || [])[1]);
+      const i = ef.findIndex((c, j) => j > 0 && isList(c) && c[0] === "file" && str7((K.kid(c, "name") || [])[1]) === name);
+      if (i > 0) ef[i] = node;
+      else ef.push(node);
+    }
+    return true;
+  }
+  var fpModelsApi = { readModels, readExtruded, writeModels, modelText, extrudedText, embeddedFileNames, keepEmbeddedFiles, addEmbeddedFiles };
 
   // web/tools/pcb-tools/fp-props.ts
   var str8 = (v) => v === void 0 || v === null ? "" : String(v);
@@ -41061,6 +41077,7 @@ Please remove the objects that use these layers first.`, page: 1 };
         if (!K.kids(ef, "file").length) setHeader(h, "embedded_files", null);
       }
     }
+    addEmbeddedFiles(h, m.embeddedAdded || []);
     const changes = [];
     if (K.serialize(h) !== K.serialize(h0)) changes.push({ id: "footprint", kind: "MODIFIED", typeName: "FOOTPRINT", sexpr: K.serialize(h) });
     const modern = (doc.version || 20240108) >= 2023e4;

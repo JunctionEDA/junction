@@ -194,7 +194,7 @@ var require_pcb_tools = __commonJS({
         if (ctx && ctx.K) K8 = ctx.K;
         if (ctx) ensureDom(ctx);
       }
-      var isList6 = Array.isArray;
+      var isList7 = Array.isArray;
       var r64 = (v) => {
         const x = +(+v).toFixed(6);
         return x === 0 ? 0 : x;
@@ -297,7 +297,7 @@ var require_pcb_tools = __commonJS({
         const l = Math.hypot(v[0], v[1]);
         return l ? [v[0] / l, v[1] / l] : [0, 0];
       };
-      var ANGLED = (c) => isList6(c) && (c[0] === "pad" || c[0] === "property" || c[0] === "fp_text") && !!K8.kid(c, "at");
+      var ANGLED = (c) => isList7(c) && (c[0] === "pad" || c[0] === "property" || c[0] === "fp_text") && !!K8.kid(c, "at");
       function setAngle(c, a) {
         const at3 = K8.kid(c, "at");
         a = norm1803(r64(a));
@@ -327,7 +327,7 @@ var require_pcb_tools = __commonJS({
         }
         const pts = K8.kid(g2, "pts");
         if (pts) for (const p of pts.slice(1)) {
-          if (!isList6(p)) continue;
+          if (!isList7(p)) continue;
           if (p[0] === "xy") p[1] = r64(-K8.num(p[1]));
           else mirrorShapeX(p);
         }
@@ -366,7 +366,7 @@ var require_pcb_tools = __commonJS({
         const lay = K8.kid(node, "layer");
         if (lay) lay[1] = flipLayerName(K8.str(lay[1]));
         for (const c of node) {
-          if (!isList6(c)) continue;
+          if (!isList7(c)) continue;
           const t = c[0];
           if (ANGLED(c)) {
             const at3 = K8.kid(c, "at");
@@ -380,7 +380,7 @@ var require_pcb_tools = __commonJS({
             if (off) off[1] = r64(-K8.num(off[1]));
             const prims = K8.kid(c, "primitives");
             if (prims) {
-              for (const p of prims.slice(1)) if (isList6(p)) mirrorShapeX(p);
+              for (const p of prims.slice(1)) if (isList7(p)) mirrorShapeX(p);
             }
           } else if (t === "property" || t === "fp_text") {
             if (ANGLED(c)) {
@@ -415,7 +415,7 @@ var require_pcb_tools = __commonJS({
         const mapPts = (n2) => {
           const p = K8.kid(n2, "pts");
           if (p) {
-            for (const xy3 of p.slice(1)) if (isList6(xy3) && xy3[0] === "xy") {
+            for (const xy3 of p.slice(1)) if (isList7(xy3) && xy3[0] === "xy") {
               const [x, y] = fn(K8.num(xy3[1]), K8.num(xy3[2]));
               xy3[1] = r64(x);
               xy3[2] = r64(y);
@@ -710,7 +710,7 @@ var require_pcb_tools = __commonJS({
         const items = ids.map((id) => doc.items.get(id)).filter(Boolean);
         const dx = opts.dx || 0, dy = opts.dy || 0, rot32 = opts.rotation || 0;
         const b = bboxUnion(items);
-        let c = opts.about === "anchor" ? null : isList6(opts.about) ? opts.about : b ? [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] : selectionCenter(items);
+        let c = opts.about === "anchor" ? null : isList7(opts.about) ? opts.about : b ? [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] : selectionCenter(items);
         if (c) c = [c[0] + dx, c[1] + dy];
         return transformChanges(doc, ids, (n2, it) => {
           translateNode(n2, dx, dy);
@@ -845,7 +845,7 @@ var require_pcb_tools = __commonJS({
         if (rd) rd[2] = r64(-K8.num(rd[2]));
         const prims = K8.kid(node, "primitives");
         if (prims) {
-          for (const p of prims.slice(1)) if (isList6(p)) mirrorShapeX(p);
+          for (const p of prims.slice(1)) if (isList7(p)) mirrorShapeX(p);
         }
         setAngleKid(node, -angleKid(node));
       }
@@ -2888,13 +2888,13 @@ var require_pcb_tools = __commonJS({
             if (left >= length)
               break;
             const right = left + 1;
-            let child = left;
+            let child2 = left;
             if (right < length && this.data[right] > this.data[left])
-              child = right;
-            if (this.data[child] <= val)
+              child2 = right;
+            if (this.data[child2] <= val)
               break;
-            this.data[index] = this.data[child];
-            index = child;
+            this.data[index] = this.data[child2];
+            index = child2;
           }
           this.data[index] = val;
         }
@@ -23298,7 +23298,7 @@ var require_pcb_tools = __commonJS({
         return !!c && (c.length === 1 || K8.str(c[1]) === "yes");
       };
       var fieldOf4 = (fp, name) => {
-        const ps = fp.filter((c) => isList6(c) && c[0] === "property");
+        const ps = fp.filter((c) => isList7(c) && c[0] === "property");
         const p = ps.find((c) => K8.str(c[1]) === name) || ps.find((c) => K8.str(c[1]).toLowerCase() === name.toLowerCase());
         return p ? K8.str(p[2]) : null;
       };
@@ -23313,7 +23313,7 @@ var require_pcb_tools = __commonJS({
       var PAD_PROP = { pad_prop_bga: "BGA pad", pad_prop_fiducial_glob: "Fiducial, global to board", pad_prop_fiducial_loc: "Fiducial, local to footprint", pad_prop_testpoint: "Test point pad", pad_prop_heatsink: "Heatsink pad", pad_prop_castellated: "Castellated pad", pad_prop_mechanical: "Mechanical pad", pad_prop_pressfit: "Press-fit pad" };
       var VIA_TYPE = { blind: "Blind", buried: "Buried", micro: "Micro" };
       var viaTypeOf = (n2) => {
-        const w = n2.slice(1).find((c) => !isList6(c));
+        const w = n2.slice(1).find((c) => !isList7(c));
         const s = w === void 0 ? "" : K8.str(w);
         return VIA_TYPE[s] ? s : kidStr3(n2, "type") || "through";
       };
@@ -23344,7 +23344,7 @@ var require_pcb_tools = __commonJS({
           case "layer":
             return str22(it.layer || layerOf2(n2) || "");
           case "locked":
-            return bool(yes6(n2, "locked") || n2.slice(1).some((c) => !isList6(c) && K8.str(c) === "locked"));
+            return bool(yes6(n2, "locked") || n2.slice(1).some((c) => !isList7(c) && K8.str(c) === "locked"));
           case "parent": {
             const fp = fpOf(it);
             return fp && !isFp ? str22(fieldOf4(fp.node, "Reference") || "") : U;
@@ -23484,7 +23484,7 @@ var require_pcb_tools = __commonJS({
             return isZone ? kidNum2(n2, "min_thickness") : U;
           case "text": {
             const t = n2[1];
-            return it.kind === "property" ? str22(K8.str(n2[2])) : t !== void 0 && !isList6(t) ? str22(K8.str(t)) : U;
+            return it.kind === "property" ? str22(K8.str(n2[2])) : t !== void 0 && !isList7(t) ? str22(K8.str(t)) : U;
           }
           case "height":
           case "thickness": {
@@ -24440,16 +24440,16 @@ var require_pcb_tools = __commonJS({
       var FP_DRAWN = /* @__PURE__ */ new Set(["property", "fp_text", "fp_text_box", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve", "fp_ellipse", "fp_ellipse_arc", "barcode", "dimension", "zone", "table"]);
       var expand = (names, copper) => names.flatMap((n2) => n2 === "*.Cu" ? copper : n2 === "F&B.Cu" ? ["F.Cu", "B.Cu"] : n2.startsWith("*.") ? ["F" + n2.slice(1), "B" + n2.slice(1)] : [n2]);
       var isRuleArea = (n2) => !!K8.kid(n2, "keepout");
-      function childGeoms(doc, fp, child) {
+      function childGeoms(doc, fp, child2) {
         const n2 = fp.node;
         const body = [];
         for (let i = 2; i < n2.length; i++) {
           const g2 = n2[i];
-          if (!isList6(g2)) continue;
+          if (!isList7(g2)) continue;
           if (g2[0] === "layer" || g2[0] === "at" || g2[0] === "transform") body.push(g2);
-          else if (g2[0] === "property") body.push(g2 === child ? g2 : g2.concat([["hide", "yes"]]));
+          else if (g2[0] === "property") body.push(g2 === child2 ? g2 : g2.concat([["hide", "yes"]]));
         }
-        if (child[0] !== "property") body.push(child);
+        if (child2[0] !== "property") body.push(child2);
         const item = { id: fp.id, kind: "footprint", node: [n2[0], n2[1], ...body], geom: [], bbox: null, movable: true, docType: "pcb" };
         try {
           K8.buildGeom(doc, item);
@@ -24492,7 +24492,7 @@ var require_pcb_tools = __commonJS({
           if (it.kind === "footprint") {
             for (let i = 2; i < n2.length; i++) {
               const g2 = n2[i];
-              if (!isList6(g2) || !FP_DRAWN.has(String(g2[0]))) continue;
+              if (!isList7(g2) || !FP_DRAWN.has(String(g2[0]))) continue;
               if (g2[0] === "zone") {
                 if (isRuleArea(g2)) continue;
                 if (!expand(zoneLayers(g2), copper).some((l) => layers.has(l))) continue;
@@ -26145,7 +26145,7 @@ var require_pcb_tools = __commonJS({
             if (t) take(t, it.id, ident2, void 0, layerOf2(n2, "Dwgs.User"));
           } else if (it.kind === "footprint") {
             const tf2 = fpTf(it);
-            for (const g2 of n2) if (isList6(g2) && (g2[0] === "property" || g2[0] === "fp_text" || g2[0] === "fp_text_box") && K8.kid(g2, "layer")) take(g2, it.id, tf2, it);
+            for (const g2 of n2) if (isList7(g2) && (g2[0] === "property" || g2[0] === "fp_text" || g2[0] === "fp_text_box") && K8.kid(g2, "layer")) take(g2, it.id, tf2, it);
           }
         }
         return out;
@@ -26196,7 +26196,7 @@ var require_pcb_tools = __commonJS({
         const tf2 = fpTf(fp);
         const chains = { "F.CrtYd": [], "B.CrtYd": [] };
         for (const g2 of fp.node) {
-          if (!isList6(g2) || !/^fp_(line|rect|circle|arc|poly)$/.test(g2[0])) continue;
+          if (!isList7(g2) || !/^fp_(line|rect|circle|arc|poly)$/.test(g2[0])) continue;
           const layer = layerOf2(g2, "");
           if (!chains[layer]) continue;
           const kind = g2[0].slice(3);
@@ -26321,7 +26321,7 @@ var require_pcb_tools = __commonJS({
           if (it.kind === "zone") take(it.node, it.id, ident2, null);
           else if (it.kind === "footprint") {
             const tf2 = fpTf(it);
-            for (const g2 of it.node) if (isList6(g2) && g2[0] === "zone") take(g2, it.id, tf2, it);
+            for (const g2 of it.node) if (isList7(g2) && g2[0] === "zone") take(g2, it.id, tf2, it);
           }
         }
         return out;
@@ -26756,7 +26756,7 @@ var require_pcb_tools = __commonJS({
         const dflt = src.board && src.board.design_settings && src.board.design_settings.defaults;
         if (dflt) layerDefaults(dflt);
         const ns = src.net_settings;
-        if (ns && isList6(ns.classes)) {
+        if (ns && isList7(ns.classes)) {
           for (const c of ns.classes) if (c && c.name) s.netclasses[c.name] = {
             clearance: c.clearance !== void 0 ? c.clearance : s.clearance,
             track_width: c.track_width !== void 0 ? c.track_width : s.trackWidth,
@@ -26772,7 +26772,7 @@ var require_pcb_tools = __commonJS({
             s.viaDrill = s.netclasses.Default.via_drill;
           }
           if (ns.netclass_assignments) for (const [net, cls] of Object.entries(ns.netclass_assignments)) s.netclassOf[net] = cls;
-          if (isList6(ns.netclass_patterns)) {
+          if (isList7(ns.netclass_patterns)) {
             for (const p of ns.netclass_patterns) if (p && p.pattern) s.patterns.push({ re: new RegExp("^" + String(p.pattern).replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$"), netclass: p.netclass });
           }
         }
@@ -26858,7 +26858,7 @@ var require_pcb_tools = __commonJS({
               const [dx, dy] = R2(x, y);
               return [fx + dx, fy + dy];
             };
-            for (const g2 of n2) if (isList6(g2) && /^fp_(line|rect|circle|arc|poly|curve)$/.test(g2[0])) take(g2[0].slice(3), g2, tf2, layerOf2(g2, "F.SilkS"));
+            for (const g2 of n2) if (isList7(g2) && /^fp_(line|rect|circle|arc|poly|curve)$/.test(g2[0])) take(g2[0].slice(3), g2, tf2, layerOf2(g2, "F.SilkS"));
           }
           for (let i = before; i < shapes2.length; i++) ids.push(it.id);
         }
@@ -26932,7 +26932,7 @@ var require_pcb_tools = __commonJS({
         };
         const out = { "F.CrtYd": [], "B.CrtYd": [] };
         for (const g2 of n2) {
-          if (!isList6(g2) || !/^fp_(line|rect|circle|arc|poly)$/.test(g2[0])) continue;
+          if (!isList7(g2) || !/^fp_(line|rect|circle|arc|poly)$/.test(g2[0])) continue;
           const layer = layerOf2(g2, "");
           if (!out[layer]) continue;
           const kind = g2[0].slice(3);
@@ -27362,7 +27362,7 @@ var require_pcb_tools = __commonJS({
       function strip(n2) {
         for (let i = n2.length - 1; i > 0; i--) {
           const c = n2[i];
-          if (isList6(c) && (c[0] === "uuid" || c[0] === "tstamp" || c[0] === "net" || c[0] === "pinfunction" || c[0] === "pintype")) n2.splice(i, 1);
+          if (isList7(c) && (c[0] === "uuid" || c[0] === "tstamp" || c[0] === "net" || c[0] === "pinfunction" || c[0] === "pintype")) n2.splice(i, 1);
         }
         return n2;
       }
@@ -27407,7 +27407,7 @@ var require_pcb_tools = __commonJS({
             for (const poly of K8.kids(n2, "polygon").concat(K8.kids(n2, "filled_polygon"))) {
               const p = K8.kid(poly, "pts");
               if (p) {
-                for (const xy3 of p.slice(1)) if (isList6(xy3) && xy3[0] === "xy") {
+                for (const xy3 of p.slice(1)) if (isList7(xy3) && xy3[0] === "xy") {
                   xy3[1] = r64(K8.num(xy3[1]) + dx);
                   xy3[2] = r64(K8.num(xy3[2]) + dy);
                 }
@@ -27500,10 +27500,10 @@ var require_pcb_tools = __commonJS({
         }
         const nodes = [], codeToName = /* @__PURE__ */ new Map();
         for (const t of trees || []) {
-          if (!isList6(t)) continue;
+          if (!isList7(t)) continue;
           if (t[0] === "kicad_pcb") {
             for (const c of t.slice(1)) {
-              if (!isList6(c)) continue;
+              if (!isList7(c)) continue;
               if (c[0] === "net" && typeof c[1] === "number") codeToName.set(c[1], K8.str(c[2]));
               else if (PCB_KINDS2.has(c[0])) nodes.push(c);
             }
@@ -27516,7 +27516,7 @@ var require_pcb_tools = __commonJS({
         const walk2 = (n2) => {
           for (let i = 1; i < n2.length; i++) {
             const c = n2[i];
-            if (!isList6(c)) continue;
+            if (!isList7(c)) continue;
             if ((c[0] === "uuid" || c[0] === "tstamp") && c.length > 1) {
               const old = K8.str(c[1]);
               if (!map.has(old)) map.set(old, K8.newUuid());
@@ -27540,7 +27540,7 @@ var require_pcb_tools = __commonJS({
         const walk2 = (n2) => {
           for (let i = 1; i < n2.length; i++) {
             const c = n2[i];
-            if (!isList6(c)) continue;
+            if (!isList7(c)) continue;
             if (c[0] === "net" && c.length > 1 && n2[0] !== "kicad_pcb") {
               const name = typeof c[1] === "number" ? c.length > 2 ? K8.str(c[2]) : codeToName.get(c[1]) || "" : K8.str(c[1]);
               if (style === "name") n2[i] = ["net", name];
@@ -27602,7 +27602,7 @@ var require_pcb_tools = __commonJS({
         const walk2 = (n2) => {
           for (let i = n2.length - 1; i > 0; i--) {
             const c = n2[i];
-            if (!isList6(c)) continue;
+            if (!isList7(c)) continue;
             if (c[0] === "net" && n2[0] !== "kicad_pcb") {
               if (n2[0] === "pad") n2.splice(i, 1);
               else n2[i] = netNode(doc, null);
@@ -28732,14 +28732,14 @@ var require_pcb_tools = __commonJS({
         if (k === "gr_poly" || k === "zone" || k === "gr_curve") {
           const P4 = K8.kid(k === "zone" ? K8.kid(n2, "polygon") || n2 : n2, "pts");
           if (P4) {
-            for (const xy3 of P4.slice(1)) if (isList6(xy3) && xy3[0] === "xy") add2([K8.num(xy3[1]), K8.num(xy3[2])], "corner");
+            for (const xy3 of P4.slice(1)) if (isList7(xy3) && xy3[0] === "xy") add2([K8.num(xy3[1]), K8.num(xy3[2])], "corner");
           }
           return out;
         }
         if (k === "dimension") {
           const P4 = K8.kid(n2, "pts");
           if (P4) {
-            for (const xy3 of P4.slice(1)) if (isList6(xy3) && xy3[0] === "xy") add2([K8.num(xy3[1]), K8.num(xy3[2])], "none");
+            for (const xy3 of P4.slice(1)) if (isList7(xy3) && xy3[0] === "xy") add2([K8.num(xy3[1]), K8.num(xy3[2])], "none");
           }
           return out;
         }
@@ -28767,7 +28767,7 @@ var require_pcb_tools = __commonJS({
         const [fx, fy, fa] = K8.atOf(it.node);
         const R2 = rotator2(fa);
         for (const c of it.node) {
-          if (!isList6(c)) continue;
+          if (!isList7(c)) continue;
           const kind = FP_SHAPES[String(c[0])];
           if (!kind) continue;
           const l = K8.kid(c, "layer");
@@ -31764,7 +31764,7 @@ var require_pcb_tools = __commonJS({
           }
           if (a) a.splice(1, a.length - 1, ...toks);
           else {
-            const before = n2.find((c) => isList6(c) && /^(fp_|pad|model|embedded_fonts)/.test(c[0]));
+            const before = n2.find((c) => isList7(c) && /^(fp_|pad|model|embedded_fonts)/.test(c[0]));
             n2.splice(before ? n2.indexOf(before) : n2.length, 0, ["attr", ...toks]);
           }
         });
@@ -32257,10 +32257,10 @@ var require_pcb_tools = __commonJS({
         return true;
       }
       function footprintFieldNode(fp, name) {
-        for (const c of fp) if (isList6(c) && c[0] === "property" && K8.str(c[1]) === name) return c;
+        for (const c of fp) if (isList7(c) && c[0] === "property" && K8.str(c[1]) === name) return c;
         const t = name === "Reference" ? "reference" : name === "Value" ? "value" : null;
         if (t) {
-          for (const c of fp) if (isList6(c) && c[0] === "fp_text" && K8.str(c[1]) === t) return c;
+          for (const c of fp) if (isList7(c) && c[0] === "fp_text" && K8.str(c[1]) === t) return c;
         }
         return null;
       }
@@ -33173,7 +33173,7 @@ var require_pcb_tools = __commonJS({
         if (!pts) return out;
         for (let i = 1; i < pts.length; i++) {
           const c = pts[i];
-          if (!isList6(c)) continue;
+          if (!isList7(c)) continue;
           if (c[0] === "xy") out.push([K8.num(c[1]), K8.num(c[2])]);
           else if (c[0] === "arc") {
             const g2 = (k) => {
@@ -33240,10 +33240,10 @@ var require_pcb_tools = __commonJS({
       var xy2 = (p) => ["xy", r64(p[0]), r64(p[1])];
       function withOutline(node, outline, holes = []) {
         const n2 = clone3(node);
-        const at3 = n2.findIndex((c) => isList6(c) && c[0] === "polygon");
+        const at3 = n2.findIndex((c) => isList7(c) && c[0] === "polygon");
         for (let i = n2.length - 1; i > 0; i--) {
           const c = n2[i];
-          if (isList6(c) && (c[0] === "polygon" || c[0] === "filled_polygon" || c[0] === "fill_segments")) n2.splice(i, 1);
+          if (isList7(c) && (c[0] === "polygon" || c[0] === "filled_polygon" || c[0] === "fill_segments")) n2.splice(i, 1);
         }
         const polys = [outline, ...holes].map((ch) => ["polygon", ["pts", ...ch.map(xy2)]]);
         n2.splice(at3 > 0 ? Math.min(at3, n2.length) : n2.length, 0, ...polys);
@@ -33275,7 +33275,7 @@ var require_pcb_tools = __commonJS({
         const n2 = withOutline(src, outline);
         for (let i = n2.length - 1; i > 0; i--) {
           const c = n2[i];
-          if (isList6(c) && c[0] === "attr") n2.splice(i, 1);
+          if (isList7(c) && c[0] === "attr") n2.splice(i, 1);
         }
         freshUuid(n2);
         const nm32 = K8.kid(n2, "name");
@@ -36505,8 +36505,8 @@ var require_pcb_tools = __commonJS({
                 inp = document.createElement("k-select");
                 for (const o of f2.options) {
                   const op = document.createElement("option");
-                  op.value = isList6(o) ? o[0] : o;
-                  op.textContent = isList6(o) ? o[1] : o;
+                  op.value = isList7(o) ? o[0] : o;
+                  op.textContent = isList7(o) ? o[1] : o;
                   inp.appendChild(op);
                 }
                 inp.value = f2.value;
@@ -39364,7 +39364,7 @@ Press <esc> to cancel all; double-click to finish`;
       function eachChildUuid(n2, fn) {
         for (let i = 1; i < n2.length; i++) {
           const c = n2[i];
-          if (!isList6(c)) continue;
+          if (!isList7(c)) continue;
           if ((c[0] === "uuid" || c[0] === "tstamp") && c.length > 1) fn(c);
           else eachChildUuid(c, fn);
         }
@@ -39375,7 +39375,7 @@ Press <esc> to cancel all; double-click to finish`;
       function setLocked2(n2, on2) {
         for (let i = n2.length - 1; i > 0; i--) {
           const c = n2[i];
-          if (c === "locked" || isList6(c) && c[0] === "locked") n2.splice(i, 1);
+          if (c === "locked" || isList7(c) && c[0] === "locked") n2.splice(i, 1);
         }
         if (on2) {
           const lay = K8.kid(n2, "layer");
@@ -39385,7 +39385,7 @@ Press <esc> to cancel all; double-click to finish`;
       function stripNets(n2) {
         for (let i = n2.length - 1; i > 0; i--) {
           const c = n2[i];
-          if (isList6(c) && c[0] === "net") n2.splice(i, 1);
+          if (isList7(c) && c[0] === "net") n2.splice(i, 1);
         }
       }
       function scaleOf3(n2) {
@@ -39427,11 +39427,11 @@ Press <esc> to cancel all; double-click to finish`;
           }
         }
         setLocked2(n2, false);
-        for (const c of n2) if (isList6(c) && c[0] === "pad") {
+        for (const c of n2) if (isList7(c) && c[0] === "pad") {
           setLocked2(c, false);
           stripNets(c);
         }
-        for (const c of n2) if (isList6(c) && c[0] === "zone") stripNets(c);
+        for (const c of n2) if (isList7(c) && c[0] === "zone") stripNets(c);
         const [, , rot32] = K8.atOf(n2);
         setFootprintAt(n2, 0, 0, rot32);
         if (str6((K8.kid(n2, "layer") || [])[1]) !== "F.Cu") flipFootprintNode(n2);
@@ -39507,7 +39507,7 @@ Press <esc> to cancel all; double-click to finish`;
         }
         for (let i = n2.length - 1; i > 1; i--) {
           const c = n2[i];
-          if (isList6(c) && (c[0] === "version" || c[0] === "generator" || c[0] === "generator_version")) n2.splice(i, 1);
+          if (isList7(c) && (c[0] === "version" || c[0] === "generator" || c[0] === "generator_version")) n2.splice(i, 1);
         }
         return n2;
       }
@@ -39518,8 +39518,8 @@ Press <esc> to cancel all; double-click to finish`;
       var isField = (c) => c[0] === "property" || c[0] === "fp_text" && (str6(c[1]) === "reference" || str6(c[1]) === "value");
       var fieldName2 = (c) => c[0] === "fp_text" ? str6(c[1]) === "reference" ? "Reference" : "Value" : str6(c[1]);
       var isRefOrValue = (c) => isField(c) && (fieldName2(c) === "Reference" || fieldName2(c) === "Value");
-      var extraFields = (fp) => fp.filter((c) => isList6(c) && isField(c) && !isRefOrValue(c) && !/^ki_/.test(fieldName2(c)));
-      var graphical = (fp) => fp.filter((c) => isList6(c) && (c[0] === "fp_text" && !isField(c) || c[0] === "fp_text_box" || SHAPES.test(String(c[0])) || c[0] === "dimension" || c[0] === "image" || c[0] === "table"));
+      var extraFields = (fp) => fp.filter((c) => isList7(c) && isField(c) && !isRefOrValue(c) && !/^ki_/.test(fieldName2(c)));
+      var graphical = (fp) => fp.filter((c) => isList7(c) && (c[0] === "fp_text" && !isField(c) || c[0] === "fp_text_box" || SHAPES.test(String(c[0])) || c[0] === "dimension" || c[0] === "image" || c[0] === "table"));
       var typeOf2 = (c) => SHAPES.test(String(c[0])) ? "shape" : String(c[0]);
       var textOf = (n2) => str6(n2[2]);
       function levenshteinRatio(a, b) {
@@ -39558,7 +39558,7 @@ Press <esc> to cancel all; double-click to finish`;
         if (a[0] === "fp_text" || a[0] === "fp_text_box") return textSimilarity(a, b);
         let s = a[0] === b[0] ? 1 : 0.9;
         const keys = /* @__PURE__ */ new Set();
-        for (const n2 of [a, b]) for (const c of n2) if (isList6(c) && c[0] !== "uuid" && c[0] !== "tstamp") keys.add(String(c[0]));
+        for (const n2 of [a, b]) for (const c of n2) if (isList7(c) && c[0] !== "uuid" && c[0] !== "tstamp") keys.add(String(c[0]));
         for (const k of keys) if (kidText(a, k) !== kidText(b, k)) s *= 0.9;
         return s;
       }
@@ -39620,12 +39620,12 @@ Press <esc> to cancel all; double-click to finish`;
       function setHidden(n2, on2) {
         for (let i = n2.length - 1; i > 0; i--) {
           const c = n2[i];
-          if (c === "hide" || isList6(c) && c[0] === "hide") n2.splice(i, 1);
+          if (c === "hide" || isList7(c) && c[0] === "hide") n2.splice(i, 1);
         }
         const e = K8.kid(n2, "effects");
         if (e) for (let i = e.length - 1; i > 0; i--) {
           const c = e[i];
-          if (c === "hide" || isList6(c) && c[0] === "hide") e.splice(i, 1);
+          if (c === "hide" || isList7(c) && c[0] === "hide") e.splice(i, 1);
         }
         if (on2) {
           const at3 = K8.kid(n2, "uuid") || K8.kid(n2, "effects");
@@ -39689,7 +39689,7 @@ Press <esc> to cancel all; double-click to finish`;
         }
         for (let i = dest.length - 1; i > 0; i--) {
           const k = dest[i];
-          if (isList6(k) && k[0] === "locked") dest.splice(i, 1);
+          if (isList7(k) && k[0] === "locked") dest.splice(i, 1);
         }
         if (isLockedText(src)) {
           const at3 = K8.kid(dest, "at");
@@ -39735,14 +39735,14 @@ Press <esc> to cancel all; double-click to finish`;
           n2[n2.indexOf(cur2)] = node;
           return;
         }
-        const before = n2.findIndex((c, i) => i > 1 && isList6(c) && ["fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve", "fp_text", "fp_text_box", "pad", "zone", "group", "model", "embedded_files"].includes(String(c[0])));
+        const before = n2.findIndex((c, i) => i > 1 && isList7(c) && ["fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve", "fp_text", "fp_text_box", "pad", "zone", "group", "model", "embedded_files"].includes(String(c[0])));
         n2.splice(before > 0 ? before : n2.length, 0, node);
       }
       var FP_CLEARANCE = ["clearance", "solder_mask_margin", "solder_paste_margin", "solder_paste_margin_ratio", "solder_paste_ratio", "zone_connect"];
       var PAD_CLEARANCE = ["clearance", "solder_mask_margin", "solder_paste_margin", "solder_paste_margin_ratio", "solder_paste_ratio", "zone_connect", "thermal_bridge_width", "thermal_width", "thermal_gap"];
       var ITEM_KEYS = /* @__PURE__ */ new Set(["fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve", "fp_text", "fp_text_box", "pad", "zone", "group", "model", "embedded_files", "dimension", "image", "table", "point"]);
       function insertFpKid(n2, kid42) {
-        const i = n2.findIndex((c, j) => j > 1 && isList6(c) && ITEM_KEYS.has(String(c[0])));
+        const i = n2.findIndex((c, j) => j > 1 && isList7(c) && ITEM_KEYS.has(String(c[0])));
         n2.splice(i > 0 ? i : n2.length, 0, kid42);
       }
       function copyFpKid(n2, from, key3) {
@@ -39752,15 +39752,15 @@ Press <esc> to cancel all; double-click to finish`;
         else if (src) insertFpKid(n2, K8.cloneNode(src));
       }
       function canon(n2, depth = 0) {
-        if (!isList6(n2)) return JSON.stringify(n2);
+        if (!isList7(n2)) return JSON.stringify(n2);
         const l = n2;
         if (l[0] === "at" && l.length === 4 && K8.num(l[3]) === 0) return canon(l.slice(0, 3), depth);
         if (depth > 0) return K8.serialize(l);
-        const atoms = l.filter((c) => !isList6(c)).map((c) => canon(c)), lists = l.filter((c) => isList6(c)).map((c) => canon(c, depth + 1)).sort();
+        const atoms = l.filter((c) => !isList7(c)).map((c) => canon(c)), lists = l.filter((c) => isList7(c)).map((c) => canon(c, depth + 1)).sort();
         return "(" + atoms.concat(lists).join(" ") + ")";
       }
       function canonical2(n2) {
-        return n2.slice(2).filter((c) => !(isList6(c) && (c[0] === "version" || c[0] === "generator" || c[0] === "generator_version"))).map((c) => canon(c)).sort().join("\n");
+        return n2.slice(2).filter((c) => !(isList7(c) && (c[0] === "version" || c[0] === "generator" || c[0] === "generator_version"))).map((c) => canon(c)).sort().join("\n");
       }
       var EXCHANGE_DEFAULTS = {
         matchPadPositions: true,
@@ -39852,7 +39852,7 @@ Press <esc> to cancel all; double-click to finish`;
         for (const b of newFields) if (!fieldPairs.some((pp) => pp[1] === b)) freshUuid2(b);
         const handled = /* @__PURE__ */ new Set();
         const insertItem = (c) => {
-          const i = n2.findIndex((k, j) => j > 1 && isList6(k) && (k[0] === "pad" || k[0] === "zone" || k[0] === "group" || k[0] === "model" || k[0] === "embedded_files"));
+          const i = n2.findIndex((k, j) => j > 1 && isList7(k) && (k[0] === "pad" || k[0] === "zone" || k[0] === "group" || k[0] === "model" || k[0] === "embedded_files"));
           n2.splice(i > 0 ? i : n2.length, 0, c);
         };
         for (const ot of oldDraw) {
@@ -39876,7 +39876,7 @@ Press <esc> to cancel all; double-click to finish`;
         const insertField2 = (c) => {
           let last = -1;
           n2.forEach((k, j) => {
-            if (isList6(k) && isField(k)) last = j;
+            if (isList7(k) && isField(k)) last = j;
           });
           n2.splice(last > 0 ? last + 1 : n2.length, 0, c);
         };
@@ -39916,7 +39916,7 @@ Press <esc> to cancel all; double-click to finish`;
         } else {
           for (let i = n2.length - 1; i > 1; i--) {
             const c = n2[i];
-            if (isList6(c) && c[0] === "model") n2.splice(i, 1);
+            if (isList7(c) && c[0] === "model") n2.splice(i, 1);
           }
           for (const m of models(existing)) n2.push(K8.cloneNode(m));
           const ee = K8.kid(existing, "embedded_files");
@@ -39933,7 +39933,7 @@ Press <esc> to cancel all; double-click to finish`;
               const name = fileName(f2);
               for (let i = ne.length - 1; i > 0; i--) {
                 const c = ne[i];
-                if (isList6(c) && c[0] === "file" && fileName(c) === name) ne.splice(i, 1);
+                if (isList7(c) && c[0] === "file" && fileName(c) === name) ne.splice(i, 1);
               }
               ne.push(K8.cloneNode(f2));
             }
@@ -40146,7 +40146,7 @@ Press <esc> to cancel all; double-click to finish`;
       function setFontFlag(f2, key3, on2) {
         for (let i = f2.length - 1; i > 0; i--) {
           const c = f2[i];
-          if (c === key3 || isList6(c) && c[0] === key3) f2.splice(i, 1);
+          if (c === key3 || isList7(c) && c[0] === key3) f2.splice(i, 1);
         }
         if (on2) f2.push([key3, "yes"]);
       }
@@ -40196,12 +40196,12 @@ Press <esc> to cancel all; double-click to finish`;
       function setHidden2(n2, hidden2) {
         for (let i = n2.length - 1; i > 0; i--) {
           const c = n2[i];
-          if (c === "hide" || isList6(c) && c[0] === "hide") n2.splice(i, 1);
+          if (c === "hide" || isList7(c) && c[0] === "hide") n2.splice(i, 1);
         }
         const e = K8.kid(n2, "effects");
         if (e) for (let i = e.length - 1; i > 0; i--) {
           const c = e[i];
-          if (c === "hide" || isList6(c) && c[0] === "hide") e.splice(i, 1);
+          if (c === "hide" || isList7(c) && c[0] === "hide") e.splice(i, 1);
         }
         if (hidden2) {
           const at3 = K8.kid(n2, "uuid") || K8.kid(n2, "effects");
@@ -40211,7 +40211,7 @@ Press <esc> to cancel all; double-click to finish`;
       function setKeepUpright(n2, upright) {
         for (let i = n2.length - 1; i > 0; i--) {
           const c = n2[i];
-          if (isList6(c) && c[0] === "unlocked") n2.splice(i, 1);
+          if (isList7(c) && c[0] === "unlocked") n2.splice(i, 1);
         }
         const at3 = K8.kid(n2, "at");
         if (at3) {
@@ -40320,7 +40320,7 @@ Press <esc> to cancel all; double-click to finish`;
             put("precision", DIM_DEFAULTS.precision);
             for (let i = fmt32.length - 1; i > 0; i--) {
               const c = fmt32[i];
-              if (c === "suppress_zeroes" || isList6(c) && c[0] === "suppress_zeroes") fmt32.splice(i, 1);
+              if (c === "suppress_zeroes" || isList7(c) && c[0] === "suppress_zeroes") fmt32.splice(i, 1);
             }
             if (DIM_DEFAULTS.suppressZeroes) fmt32.push(["suppress_zeroes", "yes"]);
           }
@@ -40331,7 +40331,7 @@ Press <esc> to cancel all; double-click to finish`;
             else style.push(["text_position_mode", DIM_DEFAULTS.textPosition]);
             for (let i = style.length - 1; i > 0; i--) {
               const c = style[i];
-              if (c === "keep_text_aligned" || isList6(c) && c[0] === "keep_text_aligned") style.splice(i, 1);
+              if (c === "keep_text_aligned" || isList7(c) && c[0] === "keep_text_aligned") style.splice(i, 1);
             }
             if (DIM_DEFAULTS.keepAligned) style.push(["keep_text_aligned", "yes"]);
           }
@@ -40370,7 +40370,7 @@ Press <esc> to cancel all; double-click to finish`;
             if (K8.serialize(c) !== before) changed = true;
           };
           for (const c of n2) {
-            if (!isList6(c)) continue;
+            if (!isList7(c)) continue;
             const node = c;
             if (isField2(node)) {
               const name = fieldName22(node);
@@ -40434,8 +40434,8 @@ Press <esc> to cancel all; double-click to finish`;
         const v = k ? K8.kid(k, "xyz") : null;
         return v ? [num42(v[1], d), num42(v[2], d), num42(v[3], d)] : [d, d, d];
       }
-      var isFileModel = (c) => isList6(c) && c[0] === "model" && typeof c[1] === "string";
-      var isExtruded = (c) => isList6(c) && c[0] === "model" && isList6(c[1]) && c[1][0] === "type" && str7(c[1][1]) === "extruded";
+      var isFileModel = (c) => isList7(c) && c[0] === "model" && typeof c[1] === "string";
+      var isExtruded = (c) => isList7(c) && c[0] === "model" && isList7(c[1]) && c[1][0] === "type" && str7(c[1][1]) === "extruded";
       function readModels(fp) {
         return fp.filter(isFileModel).map((m) => {
           const hide = K8.kid(m, "hide"), op = K8.kid(m, "opacity");
@@ -40510,7 +40510,7 @@ Press <esc> to cancel all; double-click to finish`;
         let did = false;
         for (let j = ef.length - 1; j >= 1; j--) {
           const c = ef[j];
-          if (isList6(c) && c[0] === "file" && !names.has(str7((K8.kid(c, "name") || [])[1]))) {
+          if (isList7(c) && c[0] === "file" && !names.has(str7((K8.kid(c, "name") || [])[1]))) {
             ef.splice(j, 1);
             did = true;
           }
@@ -40521,7 +40521,23 @@ Press <esc> to cancel all; double-click to finish`;
         }
         return did;
       }
-      var fpModelsApi = { readModels, readExtruded, writeModels, modelText, extrudedText, embeddedFileNames, keepEmbeddedFiles };
+      function addEmbeddedFiles(fp, files) {
+        if (!files.length) return false;
+        let ef = K8.kid(fp, "embedded_files");
+        if (!ef) {
+          ef = ["embedded_files"];
+          const m = fp.findIndex((c, j) => j > 1 && isList7(c) && c[0] === "model");
+          fp.splice(m > 0 ? m : fp.length, 0, ef);
+        }
+        for (const text2 of files) {
+          const node = K8.parse(text2), name = str7((K8.kid(node, "name") || [])[1]);
+          const i = ef.findIndex((c, j) => j > 0 && isList7(c) && c[0] === "file" && str7((K8.kid(c, "name") || [])[1]) === name);
+          if (i > 0) ef[i] = node;
+          else ef.push(node);
+        }
+        return true;
+      }
+      var fpModelsApi = { readModels, readExtruded, writeModels, modelText, extrudedText, embeddedFileNames, keepEmbeddedFiles, addEmbeddedFiles };
       var str8 = (v) => v === void 0 || v === null ? "" : String(v);
       var num52 = (v, d = 0) => typeof v === "number" ? v : v !== void 0 && v !== null && v !== "" && isFinite(Number(v)) ? Number(v) : d;
       var yes32 = (n2) => !!n2 && (n2.length < 2 || str8(n2[1]) !== "no");
@@ -40623,7 +40639,7 @@ Press <esc> to cancel all; double-click to finish`;
           userLayers: stack ? stackLayers.filter((l) => /^User\.\d+$/.test(l)) : Array.from(usedLayers).filter((l) => /^User\.\d+$/.test(l)),
           netTieGroups: nt ? nt.slice(1).map(str8).filter(Boolean) : [],
           dupPadsAreJumpers: yes32(one2("duplicate_pad_numbers_are_jumpers")),
-          jumperGroups: jg ? jg.slice(1).filter(isList6).map((g2) => g2.map(str8).join(", ")) : [],
+          jumperGroups: jg ? jg.slice(1).filter(isList7).map((g2) => g2.map(str8).join(", ")) : [],
           models,
           extruded: readExtruded(h),
           fields: fieldItems(doc).map(fieldRow),
@@ -40727,7 +40743,7 @@ Please remove the objects that use these layers first.`, page: 1 };
       var qs2 = (v) => '"' + v.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';
       var mk = (text2) => K8.parse(text2);
       function setHeader(h, key3, vals) {
-        const i = h.findIndex((c, j) => j > 1 && isList6(c) && c[0] === key3);
+        const i = h.findIndex((c, j) => j > 1 && isList7(c) && c[0] === key3);
         if (vals === null) {
           if (i > 0) h.splice(i, 1);
           return;
@@ -40880,11 +40896,12 @@ Please remove the objects that use these layers first.`, page: 1 };
           if (ef) {
             for (let j = ef.length - 1; j >= 1; j--) {
               const c = ef[j];
-              if (isList6(c) && c[0] === "file" && !keepNames.has(str8((K8.kid(c, "name") || [])[1]))) ef.splice(j, 1);
+              if (isList7(c) && c[0] === "file" && !keepNames.has(str8((K8.kid(c, "name") || [])[1]))) ef.splice(j, 1);
             }
             if (!K8.kids(ef, "file").length) setHeader(h, "embedded_files", null);
           }
         }
+        addEmbeddedFiles(h, m.embeddedAdded || []);
         const changes = [];
         if (K8.serialize(h) !== K8.serialize(h0)) changes.push({ id: "footprint", kind: "MODIFIED", typeName: "FOOTPRINT", sexpr: K8.serialize(h) });
         const modern = (doc.version || 20240108) >= 2023e4;
@@ -40968,7 +40985,7 @@ Please remove the objects that use these layers first.`, page: 1 };
           const t = K8.kid(target2, k), m = K8.kid(n2, k);
           if (t && m) n2[n2.indexOf(m)] = clone3(t);
           else if (m) n2.splice(n2.indexOf(m), 1);
-          else if (t) setKid22(n2, k, clone3(t).slice(1), k === "uuid" || k === "tstamp" ? n2.filter(isList6).map((c) => str9(c[0])) : after(k));
+          else if (t) setKid22(n2, k, clone3(t).slice(1), k === "uuid" || k === "tstamp" ? n2.filter(isList7).map((c) => str9(c[0])) : after(k));
         }
         n2[1] = canHaveNumber(n2) ? target2[1] : "";
         const [x, y] = atOf22(target2);
@@ -41067,7 +41084,7 @@ Please remove the objects that use these layers first.`, page: 1 };
         if (str9(pad2[3]) === "custom") {
           const prims = K8.kid(pad2, "primitives");
           const layer = principalLayer(pad2);
-          for (const g2 of prims ? prims.slice(1) : []) if (isList6(g2) && /^gr_/.test(str9(g2[0])) && g2[0] !== "gr_bbox") out.push(addedChange(doc, primitiveToShape(g2, pad2, layer)));
+          for (const g2 of prims ? prims.slice(1) : []) if (isList7(g2) && /^gr_/.test(str9(g2[0])) && g2[0] !== "gr_bbox") out.push(addedChange(doc, primitiveToShape(g2, pad2, layer)));
           const opts = K8.kid(pad2, "options");
           const anchor = opts ? K8.kid(opts, "anchor") : null;
           pad2[3] = anchor ? str9(anchor[1]) : "circle";
@@ -41100,7 +41117,7 @@ Please remove the objects that use these layers first.`, page: 1 };
           const c = K8.kid(n2, key3);
           return c ? [num62(c[1]), num62(c[2])] : null;
         };
-        if (k === "gr_poly" || k === "gr_curve") return (K8.kid(n2, "pts") || []).slice(1).filter((xy3) => isList6(xy3) && xy3[0] === "xy").map((xy3) => [num62(xy3[1]), num62(xy3[2])]);
+        if (k === "gr_poly" || k === "gr_curve") return (K8.kid(n2, "pts") || []).slice(1).filter((xy3) => isList7(xy3) && xy3[0] === "xy").map((xy3) => [num62(xy3[1]), num62(xy3[2])]);
         if (k === "gr_rect") {
           const a = p("start"), b = p("end");
           return a && b ? [a, [b[0], a[1]], b, [a[0], b[1]]] : [];
@@ -42934,7 +42951,7 @@ Press <esc> to cancel all; double-click to finish`;
       var SHAPES3 = ["fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "fp_curve"];
       var SHAPE_NAME = { fp_line: "Line", fp_rect: "Rectangle", fp_circle: "Circle", fp_arc: "Arc", fp_poly: "Polygon", fp_curve: "Bezier" };
       function shapeKey(n2) {
-        return K8.serialize(n2.filter((c) => !(isList6(c) && (c[0] === "uuid" || c[0] === "tstamp" || c[0] === "locked"))));
+        return K8.serialize(n2.filter((c) => !(isList7(c) && (c[0] === "uuid" || c[0] === "tstamp" || c[0] === "locked"))));
       }
       function shapeDesc(n2) {
         return `${SHAPE_NAME[str13(n2[0])] || "Graphic"} on ${str13((K8.kid(n2, "layer") || [])[1])}`;
@@ -43011,23 +43028,23 @@ Press <esc> to cancel all; double-click to finish`;
         if (kidText2(a, "stackup") !== kidText2(b, "stackup")) out.push("Footprint stackup differs.");
         for (const [k, msg] of OVERRIDES) if (K8.kid(a, k) && kidText2(a, k) !== kidText2(b, k)) out.push(msg);
         if (kidText2(a, "net_tie_pad_groups") !== kidText2(b, "net_tie_pad_groups")) out.push("Net tie pad groups differ.");
-        const shapes2 = (n2) => n2.filter((c) => isList6(c) && SHAPES3.includes(str13(c[0]))).map((c) => ({ n: c, k: shapeKey(c) })).sort((x, y) => x.k < y.k ? -1 : x.k > y.k ? 1 : 0);
+        const shapes2 = (n2) => n2.filter((c) => isList7(c) && SHAPES3.includes(str13(c[0]))).map((c) => ({ n: c, k: shapeKey(c) })).sort((x, y) => x.k < y.k ? -1 : x.k > y.k ? 1 : 0);
         const sa = shapes2(a), sb = shapes2(b);
         if (sa.length !== sb.length) out.push("Graphic item count differs.");
         else sa.forEach((s, i) => {
           if (s.k !== sb[i].k) out.push(`${shapeDesc(s.n)} differs.`);
         });
-        const bar = (n2) => n2.filter((c) => isList6(c) && c[0] === "barcode");
+        const bar = (n2) => n2.filter((c) => isList7(c) && c[0] === "barcode");
         const ba = bar(a).map(shapeKey).sort(), bb = bar(b).map(shapeKey).sort();
         if (ba.length !== bb.length) out.push("Barcode count differs.");
         else ba.forEach((k, i) => {
           if (k !== bb[i]) out.push("Barcode differs.");
         });
-        const pads = (n2) => n2.filter((c) => isList6(c) && c[0] === "pad").sort(cmpPads2);
+        const pads = (n2) => n2.filter((c) => isList7(c) && c[0] === "pad").sort(cmpPads2);
         const pa = pads(a), pb = pads(b);
         if (pa.length !== pb.length) out.push("Pad count differs.");
         else pa.forEach((p, i) => out.push(...padLines(p, pb[i])));
-        const zones = (n2) => n2.filter((c) => isList6(c) && c[0] === "zone").map(shapeKey).sort();
+        const zones = (n2) => n2.filter((c) => isList7(c) && c[0] === "zone").map(shapeKey).sort();
         const za = zones(a), zb = zones(b);
         if (za.length !== zb.length) out.push("Rule area count differs.");
         else za.forEach((k, i) => {
@@ -43192,8 +43209,8 @@ Press <esc> to cancel all; double-click to finish`;
           const n2 = clone3(it.node);
           let did = false;
           const fix = (ptsNode) => {
-            if (!ptsNode || ptsNode.some((c) => isList6(c) && c[0] === "arc")) return;
-            const pts = ptsNode.slice(1).filter((c) => isList6(c) && c[0] === "xy").map((c) => [K8.num(c[1]), K8.num(c[2])]);
+            if (!ptsNode || ptsNode.some((c) => isList7(c) && c[0] === "arc")) return;
+            const pts = ptsNode.slice(1).filter((c) => isList7(c) && c[0] === "xy").map((c) => [K8.num(c[1]), K8.num(c[2])]);
             if (pts.length < 4) return;
             const s = simplifyLoop(pts, tol);
             if (s.length === pts.length) return;
@@ -67172,9 +67189,14 @@ function serialize(node) {
   if (!isList(node)) return atomText(node, false);
   const q = quotedMask(node);
   let out = "(";
+  const bars2 = node[0] === "data" && typeof node[1] === "string" && node[1].startsWith("|");
   for (let j = 0; j < node.length; j++) {
     if (j) out += " ";
     const c = node[j];
+    if (bars2 && typeof c === "string" && !(j < 30 && (q >> j & 1) === 1) && /^\|?[A-Za-z0-9+/=]*\|?$/.test(c)) {
+      out += c;
+      continue;
+    }
     out += isList(c) ? serialize(c) : atomText(c, j < 30 && (q >> j & 1) === 1 || stringSlot(node, j) || !q && typeof c === "string" && isStringSlot(node, j));
   }
   return out + ")";
@@ -69552,6 +69574,22 @@ function boardSetupChange(sections) {
   }
   return { id: "board-setup", kind: "MODIFIED", typeName: BOARD_SETUP_TYPE, properties };
 }
+var EMBEDDED_FILE_PROP = "embedded_file";
+function embeddedFilesChange(files) {
+  return { id: "board-setup", kind: "MODIFIED", typeName: BOARD_SETUP_TYPE, properties: files.map((v) => ({ name: EMBEDDED_FILE_PROP, after: { type: "sexpr", v } })) };
+}
+function putEmbeddedFile(files, file) {
+  const nameOf2 = (f2) => kidStr(f2, "name");
+  const name = nameOf2(file);
+  for (let j = 1; j < files.length; j++) {
+    const c = files[j];
+    if (isList2(c) && c[0] === "file" && nameOf2(c) === name) {
+      files[j] = file;
+      return;
+    }
+  }
+  files.push(file);
+}
 function applyHeaderChange(header, change) {
   const out = { ...header };
   if (change.typeName !== BOARD_SETUP_TYPE) return out;
@@ -69581,6 +69619,13 @@ function applyBoardSetup(doc, change) {
     }
   }
   const d = doc;
+  for (const p of change.properties || []) {
+    if (p.name !== EMBEDDED_FILE_PROP || !p.after || typeof p.after.v !== "string") continue;
+    const f2 = parse(p.after.v);
+    if (!f2 || f2[0] !== "file") continue;
+    if (!d.embeddedFiles) d.embeddedFiles = ["embedded_files"];
+    putEmbeddedFile(d.embeddedFiles, f2);
+  }
   d.boardSetup = applyHeaderChange(d.boardSetup || { general: null, layers: null, setup: null, version: 0 }, change);
   for (const p of change.properties || []) {
     if (p.name === "setup" && d.boardSetup.setup) {
@@ -69779,6 +69824,9 @@ var boardSetup = {
   readPlotParams,
   plotParamsText,
   boardSetupChange,
+  embeddedFilesChange,
+  putEmbeddedFile,
+  EMBEDDED_FILE_PROP,
   applyHeaderChange,
   applyBoardSetup,
   COPPER_FINISHES,
@@ -70781,7 +70829,7 @@ function buildNetlist(root4, loadSheet, h, project) {
       } else if (k === "netclass_flag" || k === "directive_label") {
         addMem(terminal(atOf(n2).slice(0, 2), false), { inst: I, id: it.id, kind: k, text: str(n2[1]) });
       } else if (k === "sheet") {
-        const child = childOf.get(I + "|" + it.id);
+        const child2 = childOf.get(I + "|" + it.id);
         for (const pin of kids(n2, "pin")) {
           const text2 = str(pin[1]), p = atOf(pin).slice(0, 2), bus = isBusText(text2);
           const t = terminal(p, bus);
@@ -70790,11 +70838,11 @@ function buildNetlist(root4, loadSheet, h, project) {
             const l = busLabels.get(t) || [];
             busLabels.set(t, l);
             l.push({ text: text2, prio: P_SHEET_PIN, inst });
-            if (child !== void 0) uf.union(t, keyNode(`${child}|hbus:${text2}`));
+            if (child2 !== void 0) uf.union(t, keyNode(`${child2}|hbus:${text2}`));
           } else {
             sheetPinNodes.add(t);
             addDriver(t, { prio: P_SHEET_PIN, name: inst.human + escapeNetName(text2), depth: inst.depth });
-            if (child !== void 0) uf.union(t, keyNode(`${child}|hier:${text2}`));
+            if (child2 !== void 0) uf.union(t, keyNode(`${child2}|hier:${text2}`));
           }
         }
       } else if (k === "symbol") {
@@ -73891,10 +73939,10 @@ root.KiCadCanvas = api;
     for (let i = 1; i < p.length; i++) out.push([p[i - 1], p[i]]);
     return out;
   }
-  function replaceKid(node, child) {
-    const i = node.findIndex((c) => Array.isArray(c) && c[0] === child[0]);
-    if (i >= 0) node[i] = child;
-    else node.push(child);
+  function replaceKid(node, child2) {
+    const i = node.findIndex((c) => Array.isArray(c) && c[0] === child2[0]);
+    if (i >= 0) node[i] = child2;
+    else node.push(child2);
   }
   function dropKid(node, key3) {
     const i = node.findIndex((c) => Array.isArray(c) && c[0] === key3);
@@ -81451,17 +81499,17 @@ Link '${target2}' to this file?`)) return null;
       return [];
     }
   }
-  var isList6 = Array.isArray;
+  var isList7 = Array.isArray;
   var str22 = (v) => v === void 0 || v === null ? "" : String(v);
   var kid22 = (n2, key3) => {
     if (!n2) return null;
     for (let i = 1; i < n2.length; i++) {
       const c = n2[i];
-      if (isList6(c) && c[0] === key3) return c;
+      if (isList7(c) && c[0] === key3) return c;
     }
     return null;
   };
-  var kids32 = (n2, key3) => n2 ? n2.filter((c) => isList6(c) && c[0] === key3) : [];
+  var kids32 = (n2, key3) => n2 ? n2.filter((c) => isList7(c) && c[0] === key3) : [];
   var clone3 = (n2) => JSON.parse(JSON.stringify(n2));
   var boolOf3 = (k, dflt) => k ? k.length < 2 || /^(yes|true)$/.test(str22(k[1])) : dflt;
   var cmpCode2 = (a, b) => a < b ? -1 : a > b ? 1 : 0;
@@ -81530,9 +81578,9 @@ Link '${target2}' to this file?`)) return null;
     for (const [key3, f2, inv] of keys) if (st.flags[f2] !== base[f2]) node.push([key3, (inv ? !st.flags[f2] : st.flags[f2]) ? "yes" : "no"]);
     for (const k of [...st.fields.keys()].sort(cmpCode2)) node.push(["field", ["name", k], ["value", st.fields.get(k)]]);
     if (old) {
-      for (const c of old.slice(1)) if (isList6(c) && !["name", "dnp", "exclude_from_sim", "in_bom", "on_board", "in_pos_files", "field"].includes(str22(c[0]))) node.push(c);
+      for (const c of old.slice(1)) if (isList7(c) && !["name", "dnp", "exclude_from_sim", "in_bom", "on_board", "in_pos_files", "field"].includes(str22(c[0]))) node.push(c);
     }
-    const differs = node.length > 2 && (keys.some(([, f2]) => st.flags[f2] !== base[f2]) || [...st.fields].some(([k, v]) => baseField(k) !== v) || node.slice(2).some((c) => isList6(c) && !["field"].includes(str22(c[0]))));
+    const differs = node.length > 2 && (keys.some(([, f2]) => st.flags[f2] !== base[f2]) || [...st.fields].some(([k, v]) => baseField(k) !== v) || node.slice(2).some((c) => isList7(c) && !["field"].includes(str22(c[0]))));
     if (old) {
       if (differs) inst[inst.indexOf(old)] = node;
       else inst.splice(inst.indexOf(old), 1);
@@ -91564,13 +91612,13 @@ var ScanlineHeap = class {
       if (left >= length)
         break;
       const right = left + 1;
-      let child = left;
+      let child2 = left;
       if (right < length && this.data[right] > this.data[left])
-        child = right;
-      if (this.data[child] <= val)
+        child2 = right;
+      if (this.data[child2] <= val)
         break;
-      this.data[index] = this.data[child];
-      index = child;
+      this.data[index] = this.data[child2];
+      index = child2;
     }
     this.data[index] = val;
   }
@@ -101649,6 +101697,500 @@ var Earcut = class {
   }
 };
 
+// web/dialogs/zstd.ts
+var Out = class {
+  constructor() {
+    this.buf = new Uint8Array(1 << 12);
+    this.len = 0;
+  }
+  grow(n2) {
+    if (this.len + n2 <= this.buf.length) return;
+    let c = this.buf.length;
+    while (c < this.len + n2) c *= 2;
+    const b = new Uint8Array(c);
+    b.set(this.buf.subarray(0, this.len));
+    this.buf = b;
+  }
+  push(src, from, n2) {
+    this.grow(n2);
+    this.buf.set(src.subarray(from, from + n2), this.len);
+    this.len += n2;
+  }
+  fill(v, n2) {
+    this.grow(n2);
+    this.buf.fill(v, this.len, this.len + n2);
+    this.len += n2;
+  }
+  /** A match: `n` bytes from `off` back, overlapping copies byte by byte as LZ77 means them. */
+  copy(off, n2) {
+    if (off < 1 || off > this.len) throw new Error("zstd: offset out of range");
+    this.grow(n2);
+    const b = this.buf;
+    let s = this.len - off;
+    for (let i = 0; i < n2; i++) b[this.len++] = b[s++];
+  }
+};
+function bitsAt(src, base, start, n2) {
+  let v = 0, mul2 = 1, i = start, rem = n2;
+  while (rem > 0) {
+    if (i < 0) {
+      const k2 = Math.min(rem, -i);
+      mul2 *= 2 ** k2;
+      i += k2;
+      rem -= k2;
+      continue;
+    }
+    const off = i & 7, k = Math.min(8 - off, rem);
+    v += (src[base + (i >> 3)] >> off & (1 << k) - 1) * mul2;
+    mul2 *= 2 ** k;
+    i += k;
+    rem -= k;
+  }
+  return v;
+}
+var highBit = (v) => 31 - Math.clz32(v);
+var BackBits = class {
+  constructor(src, base, len) {
+    this.src = src;
+    this.base = base;
+    if (len < 1) throw new Error("zstd: empty bit stream");
+    const last = src[base + len - 1];
+    if (!last) throw new Error("zstd: bit stream without end marker");
+    this.pos = (len - 1) * 8 + highBit(last);
+  }
+  read(n2) {
+    if (!n2) return 0;
+    this.pos -= n2;
+    return bitsAt(this.src, this.base, this.pos, n2);
+  }
+  peek(n2) {
+    return bitsAt(this.src, this.base, this.pos - n2, n2);
+  }
+  skip(n2) {
+    this.pos -= n2;
+  }
+};
+function fseTable(norm3, log) {
+  const size = 1 << log;
+  const sym = new Uint8Array(size), bits2 = new Uint8Array(size), base = new Uint32Array(size);
+  let high = size - 1;
+  const next = [];
+  norm3.forEach((c, s) => {
+    if (c === -1) {
+      sym[high--] = s;
+      next[s] = 1;
+    } else next[s] = c;
+  });
+  const step = (size >> 1) + (size >> 3) + 3, mask = size - 1;
+  let pos = 0;
+  norm3.forEach((c, s) => {
+    for (let i = 0; i < c; i++) {
+      sym[pos] = s;
+      do
+        pos = pos + step & mask;
+      while (pos > high);
+    }
+  });
+  if (pos !== 0) throw new Error("zstd: bad FSE table");
+  for (let u = 0; u < size; u++) {
+    const s = sym[u];
+    const ns = next[s]++;
+    const nb = log - highBit(ns);
+    bits2[u] = nb;
+    base[u] = (ns << nb) - size;
+  }
+  return { log, sym, bits: bits2, base };
+}
+var rleTable = (s) => ({ log: 0, sym: Uint8Array.of(s), bits: Uint8Array.of(0), base: Uint32Array.of(0) });
+function readFse(src, at3, end, maxSym, maxLog) {
+  let bit = 0;
+  const get = (n2) => {
+    const v = bitsAt(src, at3, bit, n2);
+    bit += n2;
+    return v;
+  };
+  const log = get(4) + 5;
+  if (log > maxLog) throw new Error("zstd: FSE accuracy too large");
+  let remaining = (1 << log) + 1, threshold = 1 << log, nb = log + 1, s = 0, prev0 = false;
+  const norm3 = [];
+  while (remaining > 1 && s <= maxSym) {
+    if (prev0) {
+      let r;
+      while ((r = get(2)) === 3) {
+        for (let k = 0; k < 3; k++) norm3[s++] = 0;
+      }
+      for (let k = 0; k < r; k++) norm3[s++] = 0;
+      if (s > maxSym) break;
+    }
+    const max = 2 * threshold - 1 - remaining;
+    let c;
+    const low = bitsAt(src, at3, bit, nb - 1);
+    if ((low & threshold - 1) < max) {
+      c = low & threshold - 1;
+      bit += nb - 1;
+    } else {
+      c = bitsAt(src, at3, bit, nb) & 2 * threshold - 1;
+      if (c >= threshold) c -= max;
+      bit += nb;
+    }
+    c--;
+    remaining -= c < 0 ? -c : c;
+    norm3[s++] = c;
+    prev0 = c === 0;
+    while (remaining < threshold) {
+      nb--;
+      threshold >>= 1;
+    }
+  }
+  if (remaining !== 1) throw new Error("zstd: bad FSE counts");
+  const used = bit + 7 >> 3;
+  if (at3 + used > end) throw new Error("zstd: truncated FSE table");
+  return [fseTable(norm3, log), used];
+}
+function readHuffman(src, at3, end) {
+  const hb = src[at3];
+  const w = [];
+  let used;
+  if (hb >= 128) {
+    const n2 = hb - 127;
+    used = 1 + (n2 + 1 >> 1);
+    if (at3 + used > end) throw new Error("zstd: truncated weights");
+    for (let i = 0; i < n2; i++) {
+      const b = src[at3 + 1 + (i >> 1)];
+      w.push(i & 1 ? b & 15 : b >> 4);
+    }
+  } else {
+    used = 1 + hb;
+    if (at3 + used > end) throw new Error("zstd: truncated weights");
+    const [t, tl] = readFse(src, at3 + 1, at3 + used, 255, 6);
+    const bs = new BackBits(src, at3 + 1 + tl, hb - tl);
+    let s1 = bs.read(t.log), s2 = bs.read(t.log);
+    const step = (s) => t.base[s] + bs.read(t.bits[s]);
+    for (; ; ) {
+      w.push(t.sym[s1]);
+      s1 = step(s1);
+      if (bs.pos < 0) {
+        w.push(t.sym[s2]);
+        break;
+      }
+      w.push(t.sym[s2]);
+      s2 = step(s2);
+      if (bs.pos < 0) {
+        w.push(t.sym[s1]);
+        break;
+      }
+      if (w.length > 255) throw new Error("zstd: too many weights");
+    }
+  }
+  let total2 = 0;
+  for (const x of w) if (x) total2 += 1 << x - 1;
+  if (!total2) throw new Error("zstd: empty Huffman tree");
+  const maxBits = highBit(total2) + 1, rest = (1 << maxBits) - total2;
+  if (rest & rest - 1) throw new Error("zstd: bad Huffman weights");
+  w.push(highBit(rest) + 1);
+  if (maxBits > 11) throw new Error("zstd: Huffman depth too large");
+  const size = 1 << maxBits, sym = new Uint8Array(size), bits2 = new Uint8Array(size);
+  const count = new Array(maxBits + 2).fill(0);
+  for (const x of w) if (x) count[x]++;
+  const start = [];
+  let p = 0;
+  for (let x = 1; x <= maxBits; x++) {
+    start[x] = p;
+    p += count[x] << x - 1;
+  }
+  w.forEach((x, s) => {
+    if (!x) return;
+    const n2 = 1 << x - 1;
+    for (let i = 0; i < n2; i++) {
+      sym[start[x] + i] = s;
+      bits2[start[x] + i] = maxBits + 1 - x;
+    }
+    start[x] += n2;
+  });
+  return [{ maxBits, sym, bits: bits2 }, used];
+}
+function huffStream(src, at3, len, h, n2, out, o) {
+  const bs = new BackBits(src, at3, len);
+  for (let i = 0; i < n2; i++) {
+    const k = bs.peek(h.maxBits);
+    out[o + i] = h.sym[k];
+    bs.skip(h.bits[k]);
+  }
+}
+var LL_BASE = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 18, 20, 22, 24, 28, 32, 40, 48, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536];
+var LL_BITS = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+var ML_BASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 37, 39, 41, 43, 47, 51, 59, 67, 83, 99, 131, 259, 515, 1027, 2051, 4099, 8195, 16387, 32771, 65539];
+var ML_BITS = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 3, 3, 4, 4, 5, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16];
+var LL_NORM = [4, 3, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 3, 2, 1, 1, 1, 1, 1, -1, -1, -1, -1];
+var LL_DEFAULT = fseTable(LL_NORM, 6);
+var ML_NORM = [1, 4, 3, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1, -1, -1];
+var ML_DEFAULT = fseTable(ML_NORM, 6);
+var OF_NORM = [1, 1, 1, 1, 1, 1, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, -1, -1, -1, -1, -1];
+var OF_DEFAULT = fseTable(OF_NORM, 5);
+function literals(src, at3, end, st) {
+  const b0 = src[at3], type = b0 & 3, sf = b0 >> 2 & 3;
+  if (type < 2) {
+    let n2, hl2;
+    if (sf === 0 || sf === 2) {
+      n2 = b0 >> 3;
+      hl2 = 1;
+    } else if (sf === 1) {
+      n2 = (b0 >> 4) + (src[at3 + 1] << 4);
+      hl2 = 2;
+    } else {
+      n2 = (b0 >> 4) + (src[at3 + 1] << 4) + (src[at3 + 2] << 12);
+      hl2 = 3;
+    }
+    if (type === 0) {
+      if (at3 + hl2 + n2 > end) throw new Error("zstd: truncated literals");
+      return [src.slice(at3 + hl2, at3 + hl2 + n2), hl2 + n2];
+    }
+    return [new Uint8Array(n2).fill(src[at3 + hl2]), hl2 + 1];
+  }
+  let regen, comp, hl;
+  const b1 = src[at3 + 1], b2 = src[at3 + 2];
+  if (sf < 2) {
+    hl = 3;
+    regen = b0 >> 4 | (b1 & 63) << 4;
+    comp = b1 >> 6 | b2 << 2;
+  } else if (sf === 2) {
+    hl = 4;
+    regen = b0 >> 4 | b1 << 4 | (b2 & 3) << 12;
+    comp = b2 >> 2 | src[at3 + 3] << 6;
+  } else {
+    hl = 5;
+    regen = b0 >> 4 | b1 << 4 | (b2 & 63) << 12;
+    comp = b2 >> 6 | src[at3 + 3] << 2 | src[at3 + 4] << 10;
+  }
+  let p = at3 + hl;
+  const stop = p + comp;
+  if (stop > end) throw new Error("zstd: truncated literals");
+  if (type === 2) {
+    const [h2, used] = readHuffman(src, p, stop);
+    st.huff = h2;
+    p += used;
+  } else if (!st.huff) throw new Error("zstd: treeless literals without a table");
+  const h = st.huff;
+  const out = new Uint8Array(regen);
+  if (sf === 0) huffStream(src, p, stop - p, h, regen, out, 0);
+  else {
+    const s1 = src[p] | src[p + 1] << 8, s2 = src[p + 2] | src[p + 3] << 8, s3 = src[p + 4] | src[p + 5] << 8;
+    p += 6;
+    const s4 = stop - p - s1 - s2 - s3;
+    if (s4 < 1) throw new Error("zstd: bad jump table");
+    const q = regen + 3 >> 2;
+    huffStream(src, p, s1, h, q, out, 0);
+    huffStream(src, p + s1, s2, h, q, out, q);
+    huffStream(src, p + s1 + s2, s3, h, q, out, 2 * q);
+    huffStream(src, p + s1 + s2 + s3, s4, h, regen - 3 * q, out, 3 * q);
+  }
+  return [out, stop - at3];
+}
+function compressedBlock(src, at3, end, st, out) {
+  const [lit, lused] = literals(src, at3, end, st);
+  let p = at3 + lused;
+  let nSeq = src[p++];
+  if (nSeq >= 128) {
+    if (nSeq === 255) {
+      nSeq = src[p] + (src[p + 1] << 8) + 32512;
+      p += 2;
+    } else {
+      nSeq = (nSeq - 128 << 8) + src[p++];
+    }
+  }
+  if (!nSeq) {
+    out.push(lit, 0, lit.length);
+    return;
+  }
+  const modes = src[p++];
+  const table = (mode, def, prev, maxSym, maxLog) => {
+    if (mode === 0) return def;
+    if (mode === 1) return rleTable(src[p++]);
+    if (mode === 2) {
+      const [t, used] = readFse(src, p, end, maxSym, maxLog);
+      p += used;
+      return t;
+    }
+    if (!prev) throw new Error("zstd: repeat table without a previous one");
+    return prev;
+  };
+  st.ll = table(modes >> 6, LL_DEFAULT, st.ll, 35, 9);
+  st.of = table(modes >> 4 & 3, OF_DEFAULT, st.of, 31, 8);
+  st.ml = table(modes >> 2 & 3, ML_DEFAULT, st.ml, 52, 9);
+  const LL = st.ll, OF = st.of, ML = st.ml, rep = st.rep;
+  const bs = new BackBits(src, p, end - p);
+  let sl = bs.read(LL.log), so = bs.read(OF.log), sm = bs.read(ML.log);
+  let lp = 0;
+  for (let i = 0; i < nSeq; i++) {
+    const ofCode = OF.sym[so], mlCode = ML.sym[sm], llCode = LL.sym[sl];
+    if (ofCode > 31 || mlCode > 52 || llCode > 35) throw new Error("zstd: bad sequence code");
+    const ofValue = 2 ** ofCode + bs.read(ofCode);
+    const ml = ML_BASE[mlCode] + bs.read(ML_BITS[mlCode]), ll = LL_BASE[llCode] + bs.read(LL_BITS[llCode]);
+    let off;
+    if (ofValue > 3) {
+      off = ofValue - 3;
+      rep[2] = rep[1];
+      rep[1] = rep[0];
+      rep[0] = off;
+    } else {
+      const idx = ofValue - 1 + (ll === 0 ? 1 : 0);
+      if (idx === 0) off = rep[0];
+      else {
+        off = idx === 3 ? rep[0] - 1 : rep[idx];
+        if (idx === 1) rep[1] = rep[0];
+        else {
+          rep[2] = rep[1];
+          rep[1] = rep[0];
+        }
+        rep[0] = off;
+      }
+    }
+    if (lp + ll > lit.length) throw new Error("zstd: literals overrun");
+    out.push(lit, lp, ll);
+    lp += ll;
+    out.copy(off, ml);
+    if (i + 1 < nSeq) {
+      sl = LL.base[sl] + bs.read(LL.bits[sl]);
+      sm = ML.base[sm] + bs.read(ML.bits[sm]);
+      so = OF.base[so] + bs.read(OF.bits[so]);
+    }
+  }
+  out.push(lit, lp, lit.length - lp);
+}
+function zstdDecompress(src) {
+  const out = new Out();
+  let p = 0;
+  const u32 = (i) => (src[i] | src[i + 1] << 8 | src[i + 2] << 16 | src[i + 3] << 24) >>> 0;
+  while (p < src.length) {
+    if (p + 4 > src.length) throw new Error("zstd: truncated frame");
+    const magic = u32(p);
+    p += 4;
+    if ((magic & 4294967280) >>> 0 === 407710288) {
+      p += 4 + u32(p);
+      continue;
+    }
+    if (magic !== 4247762216) throw new Error("zstd: not a zstd frame");
+    const d = src[p++];
+    const fcsFlag = d >> 6, single = d >> 5 & 1, checksum = d >> 2 & 1, dictFlag = d & 3;
+    if (d & 8) throw new Error("zstd: reserved bit set");
+    if (!single) p++;
+    const dictLen = [0, 1, 2, 4][dictFlag];
+    let dict = 0;
+    for (let i = 0; i < dictLen; i++) dict += src[p + i] * 2 ** (8 * i);
+    p += dictLen;
+    if (dict) throw new Error("zstd: frames that need a dictionary are not supported");
+    p += [single ? 1 : 0, 2, 4, 8][fcsFlag];
+    const st = { rep: [1, 4, 8], huff: null, ll: null, of: null, ml: null };
+    for (; ; ) {
+      if (p + 3 > src.length) throw new Error("zstd: truncated block");
+      const h = src[p] | src[p + 1] << 8 | src[p + 2] << 16;
+      p += 3;
+      const last = h & 1, type = h >> 1 & 3, size = h >>> 3;
+      if (type === 0) {
+        if (p + size > src.length) throw new Error("zstd: truncated block");
+        out.push(src, p, size);
+        p += size;
+      } else if (type === 1) {
+        out.fill(src[p], size);
+        p += 1;
+      } else if (type === 2) {
+        if (p + size > src.length) throw new Error("zstd: truncated block");
+        compressedBlock(src, p, p + size, st, out);
+        p += size;
+      } else throw new Error("zstd: reserved block type");
+      if (last) break;
+    }
+    if (checksum) p += 4;
+  }
+  return out.buf.slice(0, out.len);
+}
+
+// web/dialogs/zstd-compress.ts
+var BLOCK = 128 * 1024;
+var WINDOW = 1 << 26;
+var highBit2 = (v) => 31 - Math.clz32(v);
+function fseCTable(norm3, log) {
+  const size = 1 << log, mask = size - 1, step = (size >> 1) + (size >> 3) + 3;
+  const sym = new Uint8Array(size), cumul = [0];
+  let high = size - 1;
+  for (let u = 1; u <= norm3.length; u++) {
+    if (norm3[u - 1] === -1) {
+      cumul[u] = cumul[u - 1] + 1;
+      sym[high--] = u - 1;
+    } else cumul[u] = cumul[u - 1] + norm3[u - 1];
+  }
+  let pos = 0;
+  norm3.forEach((c, s) => {
+    for (let i = 0; i < c; i++) {
+      sym[pos] = s;
+      do
+        pos = pos + step & mask;
+      while (pos > high);
+    }
+  });
+  const state = new Uint16Array(size);
+  for (let u = 0; u < size; u++) state[cumul[sym[u]]++] = size + u;
+  const deltaNb = new Int32Array(norm3.length), deltaFind = new Int32Array(norm3.length);
+  let total2 = 0;
+  norm3.forEach((c, s) => {
+    if (c === 0) deltaNb[s] = (log + 1 << 16) - size;
+    else if (c === -1 || c === 1) {
+      deltaNb[s] = (log << 16) - size;
+      deltaFind[s] = total2 - 1;
+      total2++;
+    } else {
+      const maxOut = log - highBit2(c - 1), minPlus = c << maxOut;
+      deltaNb[s] = (maxOut << 16) - minPlus;
+      deltaFind[s] = total2 - c;
+      total2 += c;
+    }
+  });
+  return { log, state, deltaNb, deltaFind };
+}
+var LL_C = fseCTable(LL_NORM, 6);
+var ML_C = fseCTable(ML_NORM, 6);
+var OF_C = fseCTable(OF_NORM, 5);
+
+// web/library/embedded-file.ts
+var M64 = (1n << 64n) - 1n;
+var isList6 = Array.isArray;
+var child = (n2, key3) => {
+  for (let j = 1; j < n2.length; j++) {
+    const c = n2[j];
+    if (isList6(c) && c[0] === key3) return c;
+  }
+  return null;
+};
+function embeddedFileNode(files, name) {
+  if (!files) return null;
+  for (let j = 1; j < files.length; j++) {
+    const c = files[j];
+    if (isList6(c) && c[0] === "file" && String((child(c, "name") || [])[1] ?? "") === name) return c;
+  }
+  return null;
+}
+function fileData(file) {
+  const d = file ? child(file, "data") : null;
+  if (!d) return null;
+  const b64 = d.slice(1).map((x) => String(x)).join("").replace(/[|\s]/g, "");
+  return b64 || null;
+}
+function embeddedFileData(owner, name, boardFiles2) {
+  const own = embeddedFileNode(child(owner, "embedded_files"), name);
+  if (!own) return null;
+  return fileData(embeddedFileNode(boardFiles2, name)) ?? fileData(own);
+}
+function decodeEmbedded(b64) {
+  if (!b64) return null;
+  try {
+    const bin = atob(b64), raw = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i);
+    return zstdDecompress(raw);
+  } catch {
+    return null;
+  }
+}
+
 // web/viewer3d/models.ts
 var VENDOR_FIELDS = [["LCSC", "lcsc"], ["Mouser", "mouser"], ["DigiKey", "digikey"]];
 var num7 = (v, d = 0) => {
@@ -101688,8 +102230,22 @@ function projectModel(path2) {
     return null;
   }
 }
+var embedUrls = /* @__PURE__ */ new Map();
+function embeddedModel(node, path2, boardFiles2) {
+  const m = /^kicad-embed:\/\/([^/\\]+\.(?:step|stp))$/i.exec(path2);
+  if (!m) return null;
+  const b64 = embeddedFileData(node, m[1], boardFiles2);
+  if (!b64) return null;
+  const key3 = m[1] + "\n" + b64.length + b64.slice(0, 48) + b64.slice(-48) + b64.slice(b64.length >> 1, (b64.length >> 1) + 48);
+  if (embedUrls.has(key3)) return embedUrls.get(key3);
+  let url = null;
+  const bytes = decodeEmbedded(b64);
+  if (bytes && typeof URL !== "undefined" && typeof URL.createObjectURL === "function") url = URL.createObjectURL(new Blob([bytes], { type: "application/step" }));
+  embedUrls.set(key3, url);
+  return url;
+}
 var kicadModelUrl = (lib, name) => `/api/kicad-lib/model?lib=${encodeURIComponent(lib)}&name=${encodeURIComponent(name)}&fallback=1`;
-function footprintModels(node, guess = true) {
+function footprintModels(node, guess = true, boardFiles2 = null) {
   const out = [];
   let named = false;
   for (const c of node) {
@@ -101698,6 +102254,11 @@ function footprintModels(node, guess = true) {
     const hide = kid4(c, "hide");
     if (hide && String(hide[1]) !== "no") continue;
     const path2 = String(c[1] ?? "");
+    const emb = /^kicad-embed:\/\//i.test(path2) ? embeddedModel(node, path2, boardFiles2) : null;
+    if (emb) {
+      out.push({ name: path2.slice("kicad-embed://".length), offset: xyzOf(c, "offset", 0), scale: xyzOf(c, "scale", 1), rotate: xyzOf(c, "rotate", 0), source: "embedded", url: emb });
+      continue;
+    }
     const own = projectModel(path2);
     if (own) {
       out.push({ name: path2.replace(/^\$[{(]KIPRJMOD[})][\/\\]/i, ""), offset: xyzOf(c, "offset", 0), scale: xyzOf(c, "scale", 1), rotate: xyzOf(c, "rotate", 0), source: "project", url: own });
@@ -101889,10 +102450,11 @@ var compose = (q1, q2) => [
   q2[3] * q1[2] + q2[2] * q1[3] + q2[0] * q1[1] - q2[1] * q1[0],
   q2[3] * q1[3] - q2[0] * q1[0] - q2[1] * q1[1] - q2[2] * q1[2]
 ];
+var boardFiles = (m) => m.doc.embeddedFiles || null;
 function vrmlModels(m) {
   const seen = /* @__PURE__ */ new Set();
   const out = [];
-  for (const fp of m.footprints) for (const r of footprintModels(fp.node)) if (!seen.has(r.url)) {
+  for (const fp of m.footprints) for (const r of footprintModels(fp.node, true, boardFiles(m))) if (!seen.has(r.url)) {
     seen.add(r.url);
     out.push(r);
   }
@@ -102026,7 +102588,7 @@ function writeVrml(m, o, meshOf) {
     if (!o.includeUnspecified && !fp.smd && !fp.throughHole) continue;
     if (!o.includeDnp && fp.dnp) continue;
     const flipped = fp.side === "B.Cu";
-    for (const ref of footprintModels(fp.node)) {
+    for (const ref of footprintModels(fp.node, true, boardFiles(m))) {
       const mesh = meshOf(ref.url);
       if (!mesh) {
         if (!missing.includes(ref.name)) missing.push(ref.name);
@@ -105295,7 +105857,7 @@ function segHitsBox(a, b, bx) {
   }
   return true;
 }
-function measure(doc, fp, child) {
+function measure(doc, fp, child2) {
   const k = K4(), P = PCB2();
   const n2 = fp.node;
   const body = [];
@@ -105303,22 +105865,22 @@ function measure(doc, fp, child) {
     const g2 = n2[i];
     if (!Array.isArray(g2)) continue;
     if (g2[0] === "layer" || g2[0] === "at" || g2[0] === "transform") body.push(g2);
-    else if (g2[0] === "property") body.push(child[0] === "property" && k.str(g2[1]) === k.str(child[1]) ? child : g2.concat([["hide", "yes"]]));
+    else if (g2[0] === "property") body.push(child2[0] === "property" && k.str(g2[1]) === k.str(child2[1]) ? child2 : g2.concat([["hide", "yes"]]));
   }
-  if (child[0] !== "property") body.push(child);
+  if (child2[0] !== "property") body.push(child2);
   const item = { id: fp.id, kind: "footprint", node: [n2[0], n2[1], ...body], geom: [], bbox: null, movable: true, docType: "pcb" };
   try {
     k.buildGeom(doc, item);
   } catch {
     return null;
   }
-  const lay = k.kid(child, "layer");
+  const lay = k.kid(child2, "layer");
   const layer = lay ? k.str(lay[1]) : "F.SilkS";
   return shapesBox(P.geomShapes(item.geom, layer));
 }
-function styled2(child, lx, ly, ang, size, text2) {
+function styled2(child2, lx, ly, ang, size, text2) {
   const k = K4();
-  const node = k.cloneNode(child);
+  const node = k.cloneNode(child2);
   if (text2 !== void 0) node[2] = text2;
   for (let i = node.length - 1; i >= 2; i--) if (Array.isArray(node[i]) && node[i][0] === "hide") node.splice(i, 1);
   let at3 = k.kid(node, "at");
@@ -105343,9 +105905,9 @@ function styled2(child, lx, ly, ang, size, text2) {
   font.splice(1, 0, ["size", size, size], ["thickness", Math.max(0.1, Math.round(size * 15) / 100)]);
   return node;
 }
-function toSide(child, side) {
+function toSide(child2, side) {
   const k = K4();
-  const node = k.cloneNode(child);
+  const node = k.cloneNode(child2);
   const lay = k.parseAll(`(layer "${side}.SilkS")`)[0];
   const li = node.findIndex((g2) => Array.isArray(g2) && g2[0] === "layer");
   if (li >= 0) node[li] = lay;
@@ -105367,14 +105929,14 @@ var hiddenText = (node) => {
   return !!fx && fx.some((x) => x === "hide" || Array.isArray(x) && x[0] === "hide" && k.str(x[1]) !== "no");
 };
 var Frame = class {
-  constructor(doc, fp, child, ang, size, text2) {
+  constructor(doc, fp, child2, ang, size, text2) {
     this.doc = doc;
     this.fp = fp;
-    this.child = child;
+    this.child = child2;
     this.ang = ang;
     this.size = size;
     this.text = text2;
-    const at3 = (x, y) => measure(doc, fp, styled2(child, x, y, ang, size, text2));
+    const at3 = (x, y) => measure(doc, fp, styled2(child2, x, y, ang, size, text2));
     const b0 = at3(0, 0), b1 = at3(1, 0), b2 = at3(0, 1);
     this.ok = !!(b0 && b1 && b2);
     const c = (b) => b ? [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] : [0, 0];
