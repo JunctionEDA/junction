@@ -47,7 +47,9 @@ EXTRA_ICONS = {"import", "export_file", "fabrication", "language", "add_zone", "
                # (common/widgets/properties_panel.cpp), the hierarchy tree's row icons (eeschema/widgets/hierarchy_pane.cpp)
                "list_nets", "options_generic", "show_all_copper_layers", "show_no_copper_layers", "show_all_layers", "show_no_layers",
                "show_front_assembly_layers", "show_all_front_layers", "show_all_back_layers", "show_back_assembly_layers",
-               "tree_sel", "tree_nosel"}
+               "tree_sel", "tree_nosel",
+               # the Search pane's menu (common/widgets/search_pane.cpp)
+               "zoom_center_on_screen"}
 
 
 MAC_IF = r"#\s*if(?:def\s+|\s+defined\(\s*)__WX(?:OSX_)?MAC__[ \t]*\)?[^\n]*\n"

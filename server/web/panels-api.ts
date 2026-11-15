@@ -58,9 +58,13 @@ export interface PropGrid {
 }
 
 // ---------------------------------------------------------------- Search (SEARCH_PANE and its handlers)
-export interface SearchTab { id: string; label: string; columns: string[] }
-export interface SearchRow { key: string; ids: string[]; cells: string[]; docId?: string }
+/** A handler's columns with their proportions (tenths of the list's width) and alignment (wxLIST_FORMAT_LEFT / CENTER / RIGHT). */
+export interface SearchTab { id: string; label: string; columns: string[]; props: number[]; align: ("left" | "center" | "right")[] }
+export interface SearchRow { key: string; ids: string[]; cells: string[]; docId?: string; /** the texts the query matches (else the cells) */ match?: string[] }
 export interface SearchResult { tab: string; rows: SearchRow[]; total: number }
+/** APP_SETTINGS_BASE::SEARCH_PANE plus the list's sort column (-1: the handler's own order). */
+export interface SearchOpts { hidden: boolean; metadata: boolean; sortCol: number; ascending: boolean }
+export type SelectionZoom = "zoom" | "pan" | "none";
 
 // ---------------------------------------------------------------- Hierarchy (HIERARCHY_PANE)
 export interface HierNode {
@@ -111,7 +115,8 @@ export type PanelAction =
   | { t: "hierOpen"; path: string }
   | { t: "hierRename"; path: string }
   | { t: "hierPage"; path: string }
-  | { t: "searchSelect"; row: SearchRow; zoom: boolean }
+  | { t: "searchSelect"; rows: SearchRow[]; zoom: SelectionZoom }
+  | { t: "searchActivate"; row: SearchRow; zoom: SelectionZoom }
   | { t: "netNavSelect"; ids: string[]; key?: string }
   | { t: "netNavFilter"; text?: string; wildcard?: boolean }
   | { t: "netNavRefresh" };
@@ -137,7 +142,7 @@ export interface PanelsApi {
    *  when it was cleared (no default) or set back to the default; nothing on Cancel. */
   pickColor(color: string | null, def: string | null, opacity: boolean, done: (c: string | null) => void): void;
   searchTabs(): SearchTab[];
-  search(tab: string, query: string): SearchResult;
+  search(tab: string, query: string, opts?: SearchOpts): SearchResult;
   /** The board's Net Inspector pane: its columns and rows (editor/panels/netinsp.ts). */
   netInspector(): NetInspModel;
   netInspectorCmd(c: NetInspCmd): void;

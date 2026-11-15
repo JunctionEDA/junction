@@ -78,3 +78,50 @@ export function groupLeafIds(node: N, groupsById: Map<string, N>, seen = new Set
 }
 /** A group's name ((group "name" …)). */
 export const groupName = (node: N): string => str(node[1]);
+
+// ---------------------------------------------------------------- EDA_SEARCH_DATA: hidden fields and metadata
+/** `(hide yes)` / `(hide)` / a bare `hide` token, on the field itself or in its (effects …). */
+function hiddenFlag(n: N): boolean {
+  const h = kid(n, "hide"); if (h) return h.length < 2 || str(h[1]) !== "no";
+  if (n.some((c) => c === "hide")) return true;
+  const e = kid(n, "effects"); if (e) { const eh = kid(e, "hide"); if (eh) return eh.length < 2 || str(eh[1]) !== "no"; if (e.some((c) => c === "hide")) return true; }
+  return false;
+}
+export interface FieldText { name: string; value: string; hidden: boolean }
+/** A footprint's or symbol's fields: (property "Name" "Value" …), and a legacy footprint's (fp_text reference|value|user …). */
+export function itemFields(node: N): FieldText[] {
+  const out: FieldText[] = [];
+  for (const p of kids(node, "property")) out.push({ name: str(p[1]), value: str(p[2]), hidden: hiddenFlag(p) });
+  for (const t of kids(node, "fp_text")) {
+    const kind = str(t[1]);
+    if (kind === "reference" || kind === "value") { const nm = kind === "reference" ? "Reference" : "Value"; if (!out.some((f) => f.name === nm)) out.push({ name: nm, value: str(t[2]), hidden: hiddenFlag(t) }); }
+  }
+  return out;
+}
+/**
+ * The texts an item's search matches (FOOTPRINT / SCH_SYMBOL ::Matches and their fields' Matches): the fields that
+ * are shown, every field with "Search Hidden Fields", and the library link, description and keywords with "Search
+ * Metadata" (searchMetadata).
+ */
+export function searchTexts(fields: FieldText[], meta: string[], opts: { hidden: boolean; metadata: boolean }): string[] {
+  const out = fields.filter((f) => f.value && (opts.hidden || !f.hidden)).map((f) => f.value);
+  if (opts.metadata) for (const m of meta) if (m) out.push(m);
+  return out;
+}
+/** StrNumCmp( a, b, CMP_T::IGNORE_CASE ): runs of digits compare by value. */
+export function strNumCmp(a: string, b: string): number {
+  const re = /(\d+)|(\D+)/g, ta = a.toLowerCase().match(re) || [], tb = b.toLowerCase().match(re) || [];
+  for (let i = 0; i < Math.min(ta.length, tb.length); i++) {
+    const x = ta[i], y = tb[i];
+    if (/^\d/.test(x) && /^\d/.test(y)) { const d = Number(x) - Number(y); if (d) return d < 0 ? -1 : 1; continue; }
+    if (x !== y) return x < y ? -1 : 1;
+  }
+  return ta.length - tb.length;
+}
+/** SEARCH_HANDLER::Sort: by one column (the first when none), ascending or descending, stable. */
+export function sortRows<R extends { cells: string[] }>(rows: R[], col: number, ascending: boolean): R[] {
+  const c = Math.max(0, col);
+  return rows.map((r, i) => [r, i] as const).sort((p, q) => { const d = ascending ? strNumCmp(p[0].cells[c] || "", q[0].cells[c] || "") : strNumCmp(q[0].cells[c] || "", p[0].cells[c] || ""); return d || p[1] - q[1]; }).map((p) => p[0]);
+}
+/** SEARCH_PANE_LISTVIEW::CopySelectionToClipboard: the selected rows, columns tab-separated, one line per row. */
+export function rowsAsText(rows: { cells: string[] }[]): string { return rows.map((r) => r.cells.join("\t") + "\n").join(""); }

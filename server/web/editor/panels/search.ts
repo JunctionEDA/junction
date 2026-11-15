@@ -3,7 +3,9 @@
 // the handler's columns, a filter box matching any cell, and rows that select and zoom to their item.
 // The schematic tabs cover every sheet of the project (the sheets that are not open come from the
 // hierarchy's cache); a row on another sheet opens that sheet first.
-import type { PanelAction, SearchResult, SearchRow, SearchTab } from "../../panels-api";
+import type { PanelAction, SearchOpts, SearchResult, SearchRow, SearchTab, SelectionZoom } from "../../panels-api";
+import { openSelectionProperties } from "../pointer";
+import { openBoardSetup } from "../pcbdialogs/board-setup";
 import { centerOn } from "../comments";
 import { openDoc } from "../doc";
 import { E } from "../state";
@@ -11,32 +13,38 @@ import { fitBox } from "../view";
 import { layerDisplayName, netClassOf } from "./appearance";
 import { KC, currentDocId, isSchDoc, kdoc, pcbTools, tctx } from "./core";
 import { pageOfDoc, schDocs, sheetDoc } from "./hierarchy";
-import { drillCells, drillLines, groupLeafIds, groupName } from "./search-model";
+import { drillCells, drillLines, groupLeafIds, groupName, itemFields, searchTexts, sortRows } from "./search-model";
 
 interface PropsHelpers { formatLength(mm: number, unit: string): string; netNameOf(doc: KDoc, n: SNode): string; yes(n: SNode, k: string, d: boolean): boolean }
 const H = (): PropsHelpers => (window.CollabTools.props as unknown as { helpers: PropsHelpers }).helpers;
 const len = (v: number) => H().formatLength(v, String(E.units || "mm"));
 
+type Col = [string, number, "left" | "center" | "right"];
+const tab = (id: string, label: string, cols: Col[]): SearchTab => ({ id, label, columns: cols.map((c) => c[0]), props: cols.map((c) => c[1]), align: cols.map((c) => c[2]) });
+const L = "left" as const, C = "center" as const, R = "right" as const;
+// m_columns of each handler: name, proportion, wxLIST_FORMAT (pcbnew/widgets/search_handlers.cpp)
 const PCB_TABS: SearchTab[] = [
-  { id: "footprints", label: "Footprints", columns: ["Reference", "Value", "Layer", "X", "Y", "Library Link", "Library Description"] },
-  { id: "zones", label: "Zones", columns: ["Name", "Net", "Layer", "Priority", "X", "Y", "Area"] },
-  { id: "nets", label: "Nets", columns: ["Name", "Class"] },
-  { id: "ratsnest", label: "Ratsnest", columns: ["Name", "Class"] },
-  { id: "text", label: "Text", columns: ["Type", "Text", "Layer", "X", "Y"] },
-  { id: "groups", label: "Groups", columns: ["Type", "Name", "X", "Y"] },
-  { id: "drills", label: "Drills", columns: ["Count", "Shape", "X Size", "Y Size", "Plated", "Via/Pad", "Start Layer", "Stop Layer"] },
+  tab("footprints", "Footprints", [["Reference", 2, L], ["Value", 6, L], ["Layer", 2, C], ["X", 3, C], ["Y", 3, C], ["Library Link", 8, L], ["Library Description", 10, L]]),
+  tab("zones", "Zones", [["Name", 6, L], ["Net", 6, L], ["Layer", 3, C], ["Priority", 2, C], ["X", 3, C], ["Y", 3, C], ["Area", 3, R]]),
+  tab("nets", "Nets", [["Name", 6, L], ["Class", 6, L]]),
+  tab("ratsnest", "Ratsnest", [["Name", 6, L], ["Class", 6, L]]),
+  tab("text", "Text", [["Type", 2, L], ["Text", 12, L], ["Layer", 3, C], ["X", 3, C], ["Y", 3, C]]),
+  tab("groups", "Groups", [["Type", 2, L], ["Name", 6, L], ["X", 3, C], ["Y", 3, C]]),
+  tab("drills", "Drills", [["Count", 2, R], ["Shape", 3, L], ["X Size", 3, C], ["Y Size", 3, C], ["Plated", 2, C], ["Via/Pad", 2, C], ["Start Layer", 4, C], ["Stop Layer", 4, C]]),
 ];
+// eeschema/widgets/search_handlers.cpp
 const SCH_TABS: SearchTab[] = [
-  { id: "symbols", label: "Symbols", columns: ["Reference", "Value", "Footprint", "Page", "X", "Y", "Excl. Sim", "Excl. BOM", "Excl. Board", "Excl. Pos Files", "DNP", "Library Link", "Library Description"] },
-  { id: "power", label: "Power", columns: ["Reference", "Value", "Page", "X", "Y"] },
-  { id: "text", label: "Text", columns: ["Type", "Text", "Page", "X", "Y"] },
-  { id: "labels", label: "Labels", columns: ["Type", "Name", "Page", "X", "Y"] },
-  { id: "groups", label: "Groups", columns: ["Name", "Page", "X", "Y"] },
+  tab("symbols", "Symbols", [["Reference", 2, L], ["Value", 6, L], ["Footprint", 10, L], ["Page", 1, C], ["X", 3, C], ["Y", 3, C], ["Excl. Sim", 2, C], ["Excl. BOM", 2, C], ["Excl. Board", 2, C],
+    ["Excl. Pos Files", 2, C], ["DNP", 2, C], ["Library Link", 8, L], ["Library Description", 10, L]]),
+  tab("power", "Power", [["Reference", 2, L], ["Value", 6, L], ["Page", 1, C], ["X", 3, C], ["Y", 3, C]]),
+  tab("text", "Text", [["Type", 2, L], ["Text", 12, L], ["Page", 1, C], ["X", 3, C], ["Y", 3, C]]),
+  tab("labels", "Labels", [["Type", 2, L], ["Name", 6, L], ["Page", 2, C], ["X", 3, C], ["Y", 3, C]]),
+  tab("groups", "Groups", [["Name", 6, L], ["Page", 2, C], ["X", 3, C], ["Y", 3, C]]),
 ];
 export function searchTabs(): SearchTab[] { return isSchDoc() ? SCH_TABS : PCB_TABS; }
 
 /** EDA_SEARCH_MATCH_MODE::PERMISSIVE, near enough: a case-insensitive substring, or a * / ? wildcard over the whole cell. */
-function matcher(query: string): (cells: string[]) => boolean {
+export function matcher(query: string): (cells: string[]) => boolean {
   const q = query.trim().toLowerCase(); if (!q) return () => true;
   if (/[*?]/.test(q)) { const re = new RegExp("^" + q.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$", "i"); return (cells) => cells.some((c) => re.test(c)); }
   return (cells) => cells.some((c) => c.toLowerCase().includes(q));
@@ -44,11 +52,14 @@ function matcher(query: string): (cells: string[]) => boolean {
 const field = (n: SNode, name: string): string => { const K = KC(); const p = K.kids(n, "property").find((q) => K.str(q[1]) === name); return p ? K.str(p[2]) : ""; };
 function polyArea(pts: [number, number][]): number { let a = 0; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) a += (pts[j][0] + pts[i][0]) * (pts[j][1] - pts[i][1]); return Math.abs(a) / 2; }
 
-function pcbRows(tab: string, doc: KDoc): SearchRow[] {
+const DEFAULT_OPTS: SearchOpts = { hidden: false, metadata: false, sortCol: -1, ascending: true };
+function pcbRows(tab: string, doc: KDoc, o: SearchOpts): SearchRow[] {
   const K = KC(), rows: SearchRow[] = [];
   if (tab === "footprints") {
     for (const it of doc.items.values()) { if (it.kind !== "footprint") continue; const [x, y] = K.atOf(it.node);
-      rows.push({ key: it.id, ids: [it.id], cells: [it.ref || field(it.node, "Reference"), it.value || field(it.node, "Value"), layerDisplayName(doc, it.layer || "F.Cu"), len(x), len(y), K.str(it.node[1]), K.str((K.kid(it.node, "descr") || [])[1])] }); }
+      const lib = K.str(it.node[1]), descr = K.str((K.kid(it.node, "descr") || [])[1]), tags = K.str((K.kid(it.node, "tags") || [])[1]);
+      rows.push({ key: it.id, ids: [it.id], cells: [it.ref || field(it.node, "Reference"), it.value || field(it.node, "Value"), layerDisplayName(doc, it.layer || "F.Cu"), len(x), len(y), lib, descr],
+        match: searchTexts(itemFields(it.node as unknown[]), [lib, descr, tags], o) }); }
     rows.sort((a, b) => a.cells[0].localeCompare(b.cells[0], undefined, { numeric: true }));
   } else if (tab === "zones") {
     for (const it of doc.items.values()) { if (it.kind !== "zone") continue; const n = it.node;
@@ -85,16 +96,22 @@ function pcbRows(tab: string, doc: KDoc): SearchRow[] {
 
 const yn = (b: boolean) => (b ? "X" : "");
 const LABEL_TYPES: Record<string, string> = { label: "Local", global_label: "Global", hierarchical_label: "Hierarchical", netclass_flag: "Directive", directive_label: "Directive" };
-function schRows(tab: string): SearchRow[] {
+/** The symbol's library keywords (ki_keywords of its lib_symbols entry), for "Search Metadata". */
+function symbolKeywords(doc: KDoc, lib: string): string {
+  const K = KC(), def = doc.lib && doc.lib.get(lib); if (!def) return "";
+  const kw = K.kids(def, "property").find((q) => K.str(q[1]) === "ki_keywords"); return kw ? K.str(kw[2]) : "";
+}
+function schRows(tab: string, o: SearchOpts): SearchRow[] {
   const K = KC(), rows: SearchRow[] = [];
   for (const d of schDocs()) {
     const doc = sheetDoc(d.docId); if (!doc) continue; const page = pageOfDoc(d.docId); const here = d.docId === currentDocId();
     for (const it of doc.items.values()) {
-      const n = it.node, at = () => K.atOf(n); const row = (cells: string[]) => rows.push({ key: d.docId + ":" + it.id, ids: [it.id], cells, docId: here ? undefined : d.docId });
+      const n = it.node, at = () => K.atOf(n); const row = (cells: string[], match?: string[]) => rows.push({ key: d.docId + ":" + it.id, ids: [it.id], cells, docId: here ? undefined : d.docId, match });
       if (it.kind === "symbol") {
         const lib = K.str((K.kid(n, "lib_id") || [])[1]); const ref = field(n, "Reference"); const power = ref.startsWith("#") || /^power:/.test(lib);
-        if (tab === "symbols" && !power) row([ref, field(n, "Value"), field(n, "Footprint"), page, len(at()[0]), len(at()[1]), yn(H().yes(n, "exclude_from_sim", false)), yn(!H().yes(n, "in_bom", true)), yn(!H().yes(n, "on_board", true)), yn(!H().yes(n, "in_pos_files", true)), yn(H().yes(n, "dnp", false)), lib, field(n, "Description")]);
-        if (tab === "power" && power) row([ref, field(n, "Value"), page, len(at()[0]), len(at()[1])]);
+        const match = (): string[] => searchTexts(itemFields(n as unknown[]), [lib, field(n, "Description"), symbolKeywords(doc, lib)], o);
+        if (tab === "symbols" && !power) row([ref, field(n, "Value"), field(n, "Footprint"), page, len(at()[0]), len(at()[1]), yn(H().yes(n, "exclude_from_sim", false)), yn(!H().yes(n, "in_bom", true)), yn(!H().yes(n, "on_board", true)), yn(!H().yes(n, "in_pos_files", true)), yn(H().yes(n, "dnp", false)), lib, field(n, "Description")], match());
+        if (tab === "power" && power) row([ref, field(n, "Value"), page, len(at()[0]), len(at()[1])], match());
       } else if (tab === "text" && (it.kind === "text" || it.kind === "text_box")) row([it.kind === "text" ? "Text" : "Text Box", K.str(n[1]), page, len(at()[0]), len(at()[1])]);
       else if (tab === "labels" && LABEL_TYPES[it.kind]) row([LABEL_TYPES[it.kind], K.str(n[1]), page, len(at()[0]), len(at()[1])]);
       else if (tab === "groups" && it.kind === "group") {
@@ -110,17 +127,23 @@ function schRows(tab: string): SearchRow[] {
 }
 
 const MAX_ROWS = 500;
-export function search(tab: string, query: string): SearchResult {
+export function search(tab: string, query: string, opts?: SearchOpts): SearchResult {
   const doc = kdoc(); if (!doc) return { tab, rows: [], total: 0 };
+  const o = opts || DEFAULT_OPTS;
   let rows: SearchRow[] = [];
-  try { rows = isSchDoc() ? schRows(tab) : pcbRows(tab, doc); } catch (e) { console.warn(e); }
-  const m = matcher(query); rows = rows.filter((r) => m(r.cells));
+  try { rows = isSchDoc() ? schRows(tab, o) : pcbRows(tab, doc, o); } catch (e) { console.warn(e); }
+  const m = matcher(query); rows = rows.filter((r) => m(r.match || r.cells));
+  if (o.sortCol >= 0) rows = sortRows(rows, o.sortCol, o.ascending);
   return { tab, rows: rows.slice(0, MAX_ROWS), total: rows.length };
 }
 
-/** Select the row's items and bring them into view: zoom to their box (KiCad's "Zoom to Selection"), else just centre. */
-function selectAndShow(ids: string[], zoom: boolean): void {
-  const doc = kdoc(); if (!doc || !ids.length) return;
+/**
+ * SEARCH_HANDLER::SelectItems: select the rows' items, then (APP_SETTINGS_BASE::SEARCH_PANE::selection_zoom) zoom to
+ * the selection (zoomFitSelection), centre it (centerSelection) or leave the view alone.
+ */
+function selectAndShow(ids: string[], zoom: SelectionZoom): void {
+  const doc = kdoc(); if (!doc) return;
+  if (!ids.length) { const P0 = pcbTools(); if (P0) P0.state.sel.clear(); (tctx() as unknown as { setSelection(ids: string[]): void }).setSelection([]); return; }
   const ctx = tctx() as unknown as { setSelection(ids: string[]): void };
   const P = pcbTools(); if (P) P.state.sel.clear();
   if (window.CollabTools.sch && isSchDoc()) window.CollabTools.sch.select(null);
@@ -128,22 +151,29 @@ function selectAndShow(ids: string[], zoom: boolean): void {
   const b = KC().bboxOf(doc, ids); if (!b) return;
   const w = Math.max(b[2] - b[0], 1), h = Math.max(b[3] - b[1], 1);
   E.viewTouched = true;
-  if (zoom) fitBox([b[0], b[1], w, h], isSchDoc() ? 0.25 : 0.35); else centerOn((b[0] + b[2]) / 2, (b[1] + b[3]) / 2);
+  if (zoom === "zoom") fitBox([b[0], b[1], w, h], isSchDoc() ? 0.25 : 0.35); else if (zoom === "pan") centerOn((b[0] + b[2]) / 2, (b[1] + b[3]) / 2);
 }
 
 export function searchDispatch(a: PanelAction): boolean {
-  if (a.t !== "searchSelect") return false;
-  const row = a.row;
-  if (row.key.startsWith("net:")) {   // a net row highlights the net, as selecting it in KiCad's Nets tab does
+  if (a.t !== "searchSelect" && a.t !== "searchActivate") return false;
+  const rows = a.t === "searchSelect" ? a.rows : [a.row];
+  const after = a.t === "searchActivate" ? () => { setTimeout(() => openSelectionProperties(), 0); } : () => {};
+  if (rows.some((r) => r.key.startsWith("net:"))) {
+    // NETS_SEARCH_HANDLER::SelectItems highlights every selected net; ActivateItem opens Board Setup at Net Classes
+    if (a.t === "searchActivate") { void openBoardSetup(tctx() as never, "netclasses"); return true; }
     const doc = kdoc(), P = pcbTools(); if (!doc || !P) return true;
-    const ids = P.netItemIds(doc, row.key.slice(4)); tctx().setHighlight(ids.size ? ids : null); P.state.highlightNet = row.key.slice(4);
+    const ids = new Set<string>(); for (const r of rows) for (const id of P.netItemIds(doc, r.key.slice(4))) ids.add(id);
+    tctx().setHighlight(ids.size ? ids : null); P.state.highlightNet = rows.length ? rows[0].key.slice(4) : null;
     return true;
   }
-  if (row.docId) {
-    const d = schDocs().find((x) => x.docId === row.docId); if (!d) return true;
-    void (openDoc(d) as Promise<void>).then(() => { setTimeout(() => selectAndShow(row.ids, a.zoom), 50); });
+  // a schematic row on another sheet opens that sheet first (KiCad selects the hits of the current sheet path)
+  const away = rows.find((r) => r.docId);
+  if (away) {
+    const d = schDocs().find((x) => x.docId === away.docId); if (!d) return true;
+    const ids = rows.filter((r) => r.docId === away.docId).flatMap((r) => r.ids);
+    void (openDoc(d) as Promise<void>).then(() => { setTimeout(() => { selectAndShow(ids, a.zoom); after(); }, 50); });
     return true;
   }
-  selectAndShow(row.ids, a.zoom);
+  selectAndShow(Array.from(new Set(rows.flatMap((r) => r.ids))), a.zoom); after();
   return true;
 }
