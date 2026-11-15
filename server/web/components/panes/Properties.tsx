@@ -12,6 +12,7 @@ import type { PropGrid, PropGroupButton, PropRow } from "../../panels-api";
 import { useApp } from "../../store";
 import { cx } from "../../util";
 import { rowValueText } from "./prop-text";
+import { navTarget, propNavOf, type PropNav } from "./prop-nav";
 import { KIcon } from "../Icon";
 import { comboBox, type KCombo } from "../kcombo";
 import { ContextMenu, Swatch, panels, pickColor, useContextMenu, usePanels, type MenuItem } from "./widgets";
@@ -23,22 +24,9 @@ const CELL = "w-full h-full min-w-0 m-0 px-1 py-0 border-0 outline-none bg-trans
 function releaseKeyboard(el: HTMLElement): void { el.blur(); }
 
 /** A key that leaves the cell for another property: "next" / "prev" (Enter, Down / Up), "tab" / "backtab". */
-type Nav = "next" | "prev" | "tab" | "backtab";
-function navOf(ev: { key: string; shiftKey: boolean; ctrlKey: boolean; altKey: boolean; metaKey: boolean }): Nav | null {
-  if (ev.ctrlKey || ev.altKey || ev.metaKey) return null;
-  if (ev.key === "Tab") return ev.shiftKey ? "backtab" : "tab";
-  if (ev.shiftKey) return null;
-  return ev.key === "Enter" || ev.key === "ArrowDown" ? "next" : ev.key === "ArrowUp" ? "prev" : null;
-}
-/** The cell editor a navigation key lands on, from the one it left (PROPERTIES_PANEL::onCharHook). */
-export function navTarget(cells: { readOnly: boolean }[], from: number, nav: Nav): number {
-  const n = cells.length; if (!n) return -1;
-  if (nav === "next") return Math.min(n - 1, from + 1);
-  if (nav === "prev") return Math.max(0, from - 1);
-  const step = nav === "tab" ? 1 : -1;
-  for (let k = 1; k <= n; k++) { const i = ((from + step * k) % n + n) % n; if (!cells[i].readOnly) return i; }
-  return from;
-}
+type Nav = PropNav;
+const navOf = propNavOf;
+export { navTarget };
 /** PROPERTIES_PANEL::onCharHook Ctrl+C: with no editor text selected, the selected property's value goes to the clipboard. */
 function copyRow(ev: { key: string; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean; altKey: boolean; currentTarget: EventTarget | null; preventDefault(): void; stopPropagation(): void }, row: PropRow): boolean {
   if (ev.key.toLowerCase() !== "c" || !(ev.ctrlKey || ev.metaKey) || ev.shiftKey || ev.altKey) return false;

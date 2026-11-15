@@ -11,7 +11,9 @@ import * as L from "../dialogs/sch-items-logic";
 
 type Node = M.Node;
 export type SPType = "text" | "length" | "coord" | "int" | "bool" | "enum";
-export interface SPRow { group: string; name: string; type: SPType; value: string; choices?: [string, string][]; readOnly?: boolean }
+export interface SPRow { group: string; name: string; type: SPType; value: string; choices?: [string, string][]; readOnly?: boolean;
+  /** a user field: its name may be edited in the label column, and it can be removed (SCH_PROPERTIES_PANEL::isKeyEditable) */
+  key?: "field" }
 export interface SPItem { node: Node; unit: number; body: number }
 
 export const BASIC = "Basic Properties";
@@ -157,6 +159,8 @@ export function symbolRows(sym: Node, root: Node): SPRow[] {
     { group: "Fields", name: "Footprint", type: "text", value: M.fieldValue(sym, "Footprint") },
     { group: "Fields", name: "Datasheet", type: "text", value: M.fieldValue(sym, "Datasheet") },
     { group: "Fields", name: "Keywords", type: "text", value: M.fieldValue(sym, "ki_keywords") },
+    // the symbol's user fields (LIB_SYMBOL's dynamic field properties), in field order
+    ...userFieldNames(sym).map((name): SPRow => ({ group: "Fields", name, type: "text", value: M.fieldValue(sym, name), key: "field" })),
     { group: "Symbol Definition", name: "Define as Power Symbol", type: "bool", value: b(hd.power === "global"), readOnly: derived },
     { group: "Symbol Definition", name: "Define as Local Power Symbol", type: "bool", value: b(hd.power === "local"), readOnly: derived },
     { group: "Pin Display", name: "Show Pin Number", type: "bool", value: b(hd.showPinNumbers), readOnly: derived },
@@ -263,11 +267,34 @@ export function setItemProp(sym: Node, it: SPItem, name: string, value: string):
 }
 
 /** Change one of LIB_SYMBOL's properties on `sym` (a copy); false when refused. */
+/** The symbol's own user fields: not mandatory, not metadata (ki_*). */
+export function userFieldNames(sym: Node): string[] {
+  return kids(sym, "property").map((p) => str(p[1])).filter((n) => !M.MANDATORY_FIELDS.includes(n) && !n.startsWith("ki_"));
+}
+const fieldTaken = (sym: Node, name: string): boolean => kids(sym, "property").some((p) => str(p[1]) === name) || ["Keywords"].includes(name);
+/** addBlankField: a hidden empty user field after the symbol's last one, named Field0, Field1, … (the first free). */
+export function addSymbolField(sym: Node): string {
+  let name = ""; for (let n = 0; ; n++) { name = "Field" + n; if (!fieldTaken(sym, name)) break; }
+  let last = 1; for (let j = 1; j < sym.length; j++) if (isList(sym[j]) && (sym[j] as Node)[0] === "property") last = j;
+  sym.splice(last + 1, 0, M.fieldNode(name, "", 0, 0, true));
+  return name;
+}
+/** onLabelEditEnding: a user field takes a new name that no other field has; a blank name is refused. */
+export function renameSymbolField(sym: Node, from: string, to: string): boolean {
+  if (!to.trim() || to === from || !userFieldNames(sym).includes(from) || fieldTaken(sym, to) || M.MANDATORY_FIELDS.includes(to) || to.startsWith("ki_")) return false;
+  const p = M.fieldOf(sym, from); if (!p) return false; p[1] = to; return true;
+}
+/** Remove Field: only a user field goes. */
+export function removeSymbolField(sym: Node, name: string): boolean {
+  if (!userFieldNames(sym).includes(name)) return false;
+  const p = M.fieldOf(sym, name); if (!p) return false; sym.splice(sym.indexOf(p), 1); return true;
+}
 export function setSymbolProp(sym: Node, name: string, value: string): boolean {
   const on = value === "1"; const v = Number(value);
   const fields: Record<string, string> = { Reference: "Reference", Value: "Value", Footprint: "Footprint", Datasheet: "Datasheet" };
   if (fields[name]) { const p = M.fieldOf(sym, fields[name]); if (!p) return false; p[L.fieldName(p as unknown as SNode) !== str(p[1]) ? 3 : 2] = value; return true; }
   if (name === "Keywords") { M.setMetaField(sym, "ki_keywords", value); return true; }
+  if (userFieldNames(sym).includes(name)) { M.setFieldValue(sym, name, value); return true; }
   if (M.isDerived(sym)) return false;
   const hd = M.symHeader(sym);
   switch (name) {

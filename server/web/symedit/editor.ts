@@ -21,6 +21,7 @@ import { ensureStyle, icon, meta, showMenu, closeMenus, type MenuEntry } from ".
 import { fitMenu } from "../menufit";
 import * as D from "./dialogs";
 import * as SP from "./props";
+import { navTarget, propNavOf, type PropNav } from "../components/panes/prop-nav";
 import { FP_BROWSE_TIP, chooseFootprint, noFileBrowsing, openDatasheet, urlIcon, urlTip } from "../dialogs/browse-cells";
 import { datasheetLink } from "../library/fpchoice";
 import { kicadIcon, setKicadIcon } from "../components/kicon-dom";
@@ -82,6 +83,8 @@ export class SymbolEditor {
   tool: ToolId = "select";
   showHiddenPins = true; showHiddenFields = true; showETypes = true; showAltIcons = true; syncPins = true; showTree = true; showProps = true;
   propsCollapsed = new Set<string>();
+  /** the name / value splitter (PROPERTIES_PANEL's CenterSplitter, then where it was dragged) */
+  propSplit = ((): number => { try { const v = Number(localStorage.getItem("kui.symedit.propsplit")); return v > 0.1 && v < 0.9 ? v : 0.5; } catch (e) { return 0.5; } })();
   symOpen = new Set<string>();
   /** the window's grid.show and cursor shape (COMMON_TOOLS::ToggleGrid, CursorSmall/Full/45Crosshairs), remembered per browser */
   showGrid = viewPref("grid", true) as boolean; crosshair = viewPref("crosshair", "small") as "small" | "full" | "45";
@@ -929,12 +932,48 @@ export class SymbolEditor {
       if (!ok) this.infoBarError(`Invalid value for ${row.name}`);
       this.renderProps();
     };
+    // the symbol's own rows (nothing selected): user fields are added, renamed and removed here
+    const canAddField = !items.length && !ro;
+    const fieldEdit = (label: string, fn: (s: M.Node) => boolean): boolean => { let ok = true; this.edit(label, (s) => { if (fn(s)) return; ok = false; return false; }); return ok; };
+    const addField = (): void => {
+      let name = "";
+      if (!fieldEdit("Add Field", (s) => { name = SP.addSymbolField(s); return true; })) return;
+      this.renderProps();
+      // renderProps built a new grid: the row is looked up in the panel
+      const row = p.querySelector<HTMLElement>(`[data-prop-row="Fields/${CSS.escape(name)}"]`); if (row) labelEdit(row, name, true);
+    };
+    const removeField = (name: string): void => { if (fieldEdit("Remove Field", (s) => SP.removeSymbolField(s, name))) this.renderProps(); };
+    // wxPropertyGrid::BeginLabelEdit: Enter or leaving renames (onLabelEditEnding), Esc keeps the old name; a field just
+    // added that is left blank (or given a name in use) is taken away again (onNewItemLeftBlank)
+    const labelEdit = (row: HTMLElement, name: string, pending: boolean): void => {
+      const k = row.querySelector<HTMLElement>(".k"); if (!k) return;
+      const inp = h("input", { type: "text", class: "se-plabel", value: pending ? "" : name, spellcheck: "false", autocomplete: "off", "data-prop-label-edit": name }) as HTMLInputElement;
+      k.append(inp); inp.focus(); inp.select();
+      let done = false;
+      const finish = (commitIt: boolean): void => {
+        if (done) return; done = true;
+        const to = inp.value.trim();
+        const ok = commitIt && to && to !== name ? fieldEdit("Rename Property", (s) => SP.renameSymbolField(s, name, to)) : commitIt && to === name;
+        if (pending && !ok) removeField(name); else this.renderProps();
+      };
+      inp.addEventListener("keydown", (ev) => { ev.stopPropagation(); if (ev.key === "Enter") { ev.preventDefault(); finish(true); } else if (ev.key === "Escape") { ev.preventDefault(); finish(false); } });
+      inp.addEventListener("blur", () => finish(true));
+      inp.addEventListener("click", (ev) => ev.stopPropagation());
+    };
+    grid.style.setProperty("--se-split", (this.propSplit * 100).toFixed(2) + "%");
     let group = "";
     for (const r of rows) {
       if (r.group !== group) {
         group = r.group; const g = group; const shut = this.propsCollapsed.has(g);
-        const head = h("div", { class: "se-pgroup", "data-prop-group": g }, h("span", { class: "tw" }, shut ? "\u25b8" : "\u25be"), g);
+        const head = h("div", { class: "se-pgroup", "data-prop-group": g }, h("span", { class: "tw" }, shut ? "\u25b8" : "\u25be"), h("span", { class: "nm" }, g));
         head.addEventListener("click", () => { if (this.propsCollapsed.has(g)) this.propsCollapsed.delete(g); else this.propsCollapsed.add(g); this.renderProps(); });
+        // SCH_PROPERTIES_PANEL's "Add Field" category button (small_plus) and context menu, on the symbol's own rows
+        if (g === "Fields" && canAddField) {
+          const add = h("button", { type: "button", class: "se-padd", title: "Add Field", "data-prop-add": g, "data-icon": "small_plus" }, kicadIcon("small_plus", 14)) as HTMLButtonElement;
+          add.addEventListener("click", (ev) => { ev.stopPropagation(); addField(); });
+          head.append(add);
+          head.addEventListener("contextmenu", (ev) => { ev.preventDefault(); showMenu(ev.clientX, ev.clientY, [{ label: "Add Field", run: addField }]); });
+        }
         grid.append(head);
       }
       if (this.propsCollapsed.has(group)) continue;
@@ -960,7 +999,13 @@ export class SymbolEditor {
           else if (r.type === "int") { if (!/^\s*\d+\s*$/.test(v)) { i.value = shown; return; } v = String(parseInt(v, 10)); }
           commit(r, v); committed = i.value;
         };
-        i.addEventListener("keydown", (ev) => { ev.stopPropagation(); if (ev.key === "Enter") { ev.preventDefault(); done(); } else if (ev.key === "Escape") { i.value = shown; i.blur(); } });
+        i.addEventListener("keydown", (ev) => {
+          ev.stopPropagation();
+          // PROPERTIES_PANEL::onCharHook: Enter / Down / Up / Tab commit, then move to another property
+          const nav = propNavOf(ev);
+          if (nav) { ev.preventDefault(); const to = propTarget(i, nav); done(); focusProp(to); }
+          else if (ev.key === "Escape") { i.value = shown; i.blur(); }
+        });
         i.addEventListener("change", done); ed = i;
         // SCH_PROPERTIES_PANEL: PG_FPID_EDITOR on Footprint, PG_URL_EDITOR on Datasheet (the symbol editor's selection
         // holds no placed symbol, so the chooser gets no netlist and shows no filter toggles)
@@ -979,9 +1024,44 @@ export class SymbolEditor {
           ed = h("span", { class: "se-pbtn" }, i, b);
         }
       }
-      grid.append(h("div", { class: "se-prow" + (dis ? " ro" : ""), "data-prop-row": r.group + "/" + r.name }, h("span", { class: "k", title: r.name }, r.name), h("span", { class: "v" }, ed)));
+      if (r.type === "bool" || r.type === "enum") {
+        const ctl = (r.type === "bool" ? ed.querySelector("input") : ed) as HTMLElement | null;
+        if (ctl) ctl.addEventListener("keydown", (ev) => { const nav = propNavOf(ev); if (nav) { ev.preventDefault(); ev.stopPropagation(); focusProp(propTarget(ctl, nav)); } });
+      }
+      const k = h("span", { class: "k", title: r.name, tabindex: "-1" }, r.name);
+      const split = h("span", { class: "se-psplit" });
+      split.addEventListener("pointerdown", (ev) => dragSplit(ev as PointerEvent));
+      k.append(split);
+      const row = h("div", { class: "se-prow" + (dis ? " ro" : ""), "data-prop-row": r.group + "/" + r.name }, k, h("span", { class: "v" }, ed));
+      if (r.key === "field" && canAddField) {
+        const nm = r.name;
+        k.addEventListener("dblclick", () => labelEdit(row, nm, false));
+        k.addEventListener("keydown", (ev) => { if (ev.key === "F2") { ev.preventDefault(); ev.stopPropagation(); labelEdit(row, nm, false); } });
+        row.addEventListener("contextmenu", (ev) => { ev.preventDefault(); showMenu(ev.clientX, ev.clientY, [{ label: "Remove Field", run: () => removeField(nm) }, { label: "Add Field", run: addField }]); });
+      } else if (r.group === "Fields" && canAddField) row.addEventListener("contextmenu", (ev) => { ev.preventDefault(); showMenu(ev.clientX, ev.clientY, [{ label: "Add Field", run: addField }]); });
+      grid.append(row);
     }
     grid.scrollTop = scroll;
+    /** The row a navigation key goes to (by its id: a commit re-renders the grid before the focus moves). */
+    function propTarget(from: HTMLElement, nav: PropNav): string | null {
+      const cells = Array.from(grid.querySelectorAll<HTMLElement>("[data-prop]"));
+      const to = navTarget(cells.map((c) => ({ readOnly: (c as HTMLInputElement).disabled })), cells.indexOf(from), nav);
+      const t = cells[to]; if (!t || t === from) return null;
+      const row = t.closest<HTMLElement>("[data-prop-row]"); return row ? row.dataset.propRow || null : null;
+    }
+    function focusProp(rowId: string | null): void {
+      if (!rowId) return;
+      const t = p.querySelector<HTMLElement>(`[data-prop-row="${CSS.escape(rowId)}"] [data-prop]`); if (!t) return;
+      t.focus(); if (t instanceof HTMLInputElement && t.type === "text") t.select();
+    }
+    const self = this;
+    function dragSplit(ev: PointerEvent): void {
+      ev.preventDefault(); ev.stopPropagation();
+      const box = grid.getBoundingClientRect();
+      const move = (m: PointerEvent): void => { self.propSplit = Math.min(0.85, Math.max(0.15, (m.clientX - box.left) / Math.max(1, box.width))); grid.style.setProperty("--se-split", (self.propSplit * 100).toFixed(2) + "%"); };
+      const up = (): void => { window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", up); try { localStorage.setItem("kui.symedit.propsplit", String(self.propSplit)); } catch (e) { /* no storage */ } };
+      window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
+    }
   }
   renderMsg(): void {
     const el = this.el.msg; if (!el) return; el.innerHTML = "";

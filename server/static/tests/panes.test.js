@@ -12,6 +12,9 @@ const S = load("editor/panels/search-model.ts");
 const PT = load("components/panes/prop-text.ts");
 const SF = load("symedit/selfilter.ts");
 const COL = load("components/panes/columns.ts");
+const NAV = load("components/panes/prop-nav.ts");
+const SP = load("symedit/props.ts");
+const SM = load("symedit/model.ts");
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + (e.stack || e).toString().split("\n").slice(0, 4).join("\n       ")); } }
 console.log("docked panes under node");
@@ -89,6 +92,36 @@ test("net inspector header drop moves the column to the target's slot", () => {
   assert.deepStrictEqual(COL.moveColumn([0, 1, 2, 3], 0, 2), [1, 2, 0, 3]);
   assert.deepStrictEqual(COL.moveColumn([0, 1, 2, 3], 1, 1), [0, 1, 2, 3]);
   assert.deepStrictEqual(COL.moveColumn([0, 1, 2, 3], 5, 1), [0, 1, 2, 3]);
+});
+
+test("properties keys: Enter / Down / Up / Tab moves (PROPERTIES_PANEL::onCharHook)", () => {
+  const k = (key, shiftKey = false) => NAV.propNavOf({ key, shiftKey, ctrlKey: false, altKey: false, metaKey: false });
+  assert.deepStrictEqual([k("Enter"), k("ArrowDown"), k("ArrowUp"), k("Tab"), k("Tab", true), k("a")], ["next", "next", "prev", "tab", "backtab", null]);
+  const cells = [{ readOnly: false }, { readOnly: true }, { readOnly: false }];
+  assert.strictEqual(NAV.navTarget(cells, 0, "next"), 1);
+  assert.strictEqual(NAV.navTarget(cells, 0, "tab"), 2);
+  assert.strictEqual(NAV.navTarget(cells, 2, "tab"), 0);
+  assert.strictEqual(NAV.navTarget(cells, 0, "backtab"), 2);
+});
+test("symbol editor fields: add, rename, set and remove a user field", () => {
+  const sym = SM.node('(symbol "R" (property "Reference" "R" (at 0 0 0)) (property "Value" "R" (at 0 0 0)) (property "Footprint" "" (at 0 0 0)) (property "Datasheet" "" (at 0 0 0)) (property "ki_keywords" "res" (at 0 0 0)) (symbol "R_0_1"))');
+  assert.deepStrictEqual(SP.userFieldNames(sym), []);
+  assert.strictEqual(SP.addSymbolField(sym), "Field0");
+  assert.strictEqual(SP.addSymbolField(sym), "Field1");
+  assert.deepStrictEqual(SP.userFieldNames(sym), ["Field0", "Field1"]);
+  assert.ok(!SP.renameSymbolField(sym, "Field0", "Value"), "a mandatory name is refused");
+  assert.ok(!SP.renameSymbolField(sym, "Field0", "Field1"), "a name in use is refused");
+  assert.ok(!SP.renameSymbolField(sym, "Reference", "X"), "a mandatory field keeps its name");
+  assert.ok(SP.renameSymbolField(sym, "Field0", "MPN"));
+  assert.ok(SP.setSymbolProp(sym, "MPN", "RC0805"));
+  const rows = SP.symbolRows(sym, sym).filter((r) => r.group === "Fields").map((r) => r.name + "=" + r.value + (r.key ? "*" : ""));
+  assert.deepStrictEqual(rows, ["Reference=R", "Value=R", "Footprint=", "Datasheet=", "Keywords=res", "MPN=RC0805*", "Field1=*"]);
+  assert.ok(!SP.removeSymbolField(sym, "Value"));
+  assert.ok(SP.removeSymbolField(sym, "Field1"));
+  assert.deepStrictEqual(SP.userFieldNames(sym), ["MPN"]);
+  // the new field sits after the last property, hidden
+  const f = sym.find((c) => Array.isArray(c) && c[1] === "MPN");
+  assert.ok(sym.indexOf(f) < sym.findIndex((c) => Array.isArray(c) && c[0] === "symbol"));
 });
 
 console.log(`${passed} passed, ${failed} failed`);

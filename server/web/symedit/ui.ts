@@ -78,9 +78,15 @@ export const CSS = `
 .se-pgrid{flex:auto;min-height:0;overflow:auto;border-top:1px solid var(--line)}
 .se-pgroup{display:flex;align-items:center;height:20px;padding:0 4px;background:var(--bench);border-bottom:1px solid var(--line);font-weight:600;cursor:default;user-select:none}
 .se-pgroup .tw{display:inline-block;width:14px;color:var(--ink-2);font-size:var(--fs-xs,11px)}
-.se-prow{display:grid;grid-template-columns:minmax(0,45%) minmax(0,1fr);height:21px;border-bottom:1px solid var(--line-soft,var(--line))}
-.se-prow .k{padding:0 4px 0 18px;line-height:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-right:1px solid var(--line-soft,var(--line))}
+.se-prow{display:grid;grid-template-columns:minmax(0,var(--se-split,50%)) minmax(0,1fr);height:21px;border-bottom:1px solid var(--line-soft,var(--line))}
+.se-prow .k{position:relative;outline:none;padding:0 4px 0 18px;line-height:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-right:1px solid var(--line-soft,var(--line))}
 .se-prow.ro .k{color:var(--ink-3)}
+.se-prow .k:focus{background:var(--sel)}
+.se-psplit{position:absolute;right:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:1}
+.se-plabel{position:absolute;inset:0;width:100%;height:100%;border:0;margin:0;padding:0 4px 0 18px;font:inherit;color:var(--ink);background:var(--canvas);box-shadow:inset 0 0 0 1px var(--blue);outline:none;z-index:2}
+.se-pgroup .nm{flex:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.se-padd{flex:none;display:flex;align-items:center;justify-content:center;width:16px;height:16px;padding:0;border:1px solid transparent;background:transparent;color:var(--ink-2);border-radius:2px}
+.se-padd:hover{background:var(--panel);border-color:var(--line)}
 .se-prow .v{position:relative;min-width:0;display:flex;align-items:center}
 .se-prow .v input[type=text],.se-prow .v k-select{width:100%;height:20px;border:0;background:transparent;color:var(--ink);font:inherit;padding:0 4px;border-radius:0}
 .se-prow .v input[type=text]:focus{outline:none;box-shadow:inset 0 0 0 1px var(--blue)}
