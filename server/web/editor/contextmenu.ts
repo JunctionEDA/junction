@@ -27,6 +27,7 @@ import { openSelectionProperties } from "./pointer";
 export const tableMenu: { state(): { n: number; block: boolean; merged: boolean; structure: boolean } | null; pick(mm: Mm): boolean; actions: Record<string, () => boolean> } = { state: () => null, pick: () => false, actions: {} };
 import { toast } from "./util";
 import { IS_MAC } from "../keys";
+import { editableCornersSelected } from "./pcbdialogs/vertex-editor";
 
 type Mm = [number, number];
 type Run = () => void;
@@ -95,7 +96,7 @@ function menuCtx(): MenuCtx {
     editor: editor(), kinds, tool: E.tool, drawingLine, routing,
     fpEditor: !sch && !!(E.kdoc && E.kdoc.fpEditor), padEdit: !sch && !!FP.padEdit,
     busy: interactionBusy() || drawingLine || routing || !!draw || (sch && !!s && !!s.carry),
-    canAddCorner, canRemoveCorner,
+    canAddCorner, canRemoveCorner, editableCorners: !sch && editableCornersSelected(),
     canClose: outline && n >= 3, canUndoPoint: (outline || (!!draw && (draw.shape === "lines" || draw.shape === "gcurve"))) && n >= 1,
     pinAlts: !!(E.selPins.length === 1 && E.kdoc && schPins() && schPins()!.pinAlternates(E.kdoc as KDoc, E.selPins[0])),   // ALT_PIN_FUNCTION_MENU: one pin only
     highlight: !!E.highlightIds, belowRoot: !!root && (state as { doc?: unknown }).doc !== root,

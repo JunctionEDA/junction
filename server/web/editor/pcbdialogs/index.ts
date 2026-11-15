@@ -26,6 +26,7 @@ import { openReannotate } from "./reannotate";
 import { openUpdatePcb, projectNetlist, updatePcbFromSchematicEditor } from "./update-pcb";
 import { noteCommit, runZoneFill, zoneFillAll, zoneFillSelected } from "./zonefill";
 import { commitObservers, toolCtx } from "../tools";
+import { openVertexEditor } from "./vertex-editor";
 
 type Run = (ctx: ToolCtx) => void | boolean;
 function action(id: string, label: string, key: string, run: Run): void {
@@ -73,6 +74,8 @@ export function installPcbDialogs(): void {
   // View > Panels > Net Inspector: the docked panel (PCB_EDIT_FRAME's m_netInspectorPanel), a check item
   action("netInspector", "Net Inspector", "", () => showPane("netinsp"));
   action("showNetInspector", "Net Inspector", "", () => showPane("netinsp"));
+  // EDIT_TOOL::EditVertices: the Edit Vertices pane for the one selected zone or polygon
+  action("editVertices", "Edit Corners...", "", () => { openVertexEditor(); });
   action("boardStatistics", "Board Statistics", "", openBoardStatistics);
   action("inspectClearance", "Clearance Resolution", "", openClearance);
   // ZONE_FILLER_TOOL: the browser's own filler (web/fab/zonefill.ts)

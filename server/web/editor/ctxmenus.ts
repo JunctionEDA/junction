@@ -31,6 +31,8 @@ export interface MenuCtx {
   canClose: boolean; canUndoPoint: boolean;
   /** PCB_POINT_EDITOR::addCornerCondition / removeCornerCondition for the single selected item at the cursor */
   canAddCorner?: boolean; canRemoveCorner?: boolean;
+  /** EDIT_TOOL's selectionHasEditableCorners: one polygon or non-teardrop zone */
+  editableCorners?: boolean;
   highlight: boolean;
   /** PCB_TOOL_BASE::m_isFootprintEditor: the board tools run in the Footprint Editor */
   fpEditor?: boolean;
@@ -378,6 +380,7 @@ function pcbSelectionMenu(): CondMenu {
   m.item("PCB_ACTIONS::breakTrack", and(count(1), onlyTypes(PCB_TRACKS))).item("PCB_ACTIONS::filletTracks", onlyTypes(PCB_TRACKS)).sep();
   // PCB_POINT_EDITOR::Init
   m.item("PCB_ACTIONS::pointEditorAddCorner", and(count(1), (c) => !!c.canAddCorner)).item("PCB_ACTIONS::pointEditorRemoveCorner", and(count(1), (c) => !!c.canRemoveCorner));
+  m.item("PCB_ACTIONS::editVertices", (c) => !!c.editableCorners);
   m.item("ACTIONS::cycleArcEditMode", and(count(1), onlyTypes(set("gr_arc")))).sep();
   m.item("PCB_ACTIONS::packAndMoveFootprints", and(moreThan(1), hasTypes(PCB_FOOTPRINT))).item("PCB_ACTIONS::assignNetClass", and(onlyTypes(PCB_CONNECTED), not(inFpEditor))).item("PCB_ACTIONS::inspectClearance", count(2));
   m.sep();

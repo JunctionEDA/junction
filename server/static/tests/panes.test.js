@@ -15,6 +15,7 @@ const COL = load("components/panes/columns.ts");
 const NAV = load("components/panes/prop-nav.ts");
 const SP = load("symedit/props.ts");
 const SM = load("symedit/model.ts");
+const VX = load("editor/pcbdialogs/vertex-model.ts");
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + (e.stack || e).toString().split("\n").slice(0, 4).join("\n       ")); } }
 console.log("docked panes under node");
@@ -122,6 +123,24 @@ test("symbol editor fields: add, rename, set and remove a user field", () => {
   // the new field sits after the last property, hidden
   const f = sym.find((c) => Array.isArray(c) && c[1] === "MPN");
   assert.ok(sym.indexOf(f) < sym.findIndex((c) => Array.isArray(c) && c[0] === "symbol"));
+});
+
+test("vertex editor: zone rows cover every outline, an edit unfills the zone", () => {
+  const zone = ["zone", ["net", 0], ["fill", "yes"], ["polygon", ["pts", ["xy", 0, 0], ["xy", 10, 0], ["xy", 10, 5]]], ["polygon", ["pts", ["xy", 2, 1], ["xy", 3, 1], ["xy", 3, 2]]], ["filled_polygon", ["layer", "F.Cu"], ["pts", ["xy", 0, 0]]]];
+  assert.ok(VX.hasEditableCorners("zone", zone));
+  assert.ok(!VX.hasEditableCorners("zone", ["zone", ["attr", ["teardrop", ["type", "padvia"]]]]), "a teardrop is not edited");
+  assert.ok(VX.hasEditableCorners("gr_poly", ["gr_poly"]) && !VX.hasEditableCorners("gr_rect", ["gr_rect"]));
+  const rows = VX.vertexRows(zone);
+  assert.deepStrictEqual(rows.map((r) => [r.x, r.y]), [[0, 0], [10, 0], [10, 5], [2, 1], [3, 1], [3, 2]]);
+  assert.ok(!VX.setVertex(zone, 1, 0, 10), "an unchanged value is no edit");
+  assert.ok(VX.setVertex(zone, 4, 1, 1.25));
+  assert.deepStrictEqual(VX.vertexRows(zone)[4], { list: 1, at: 1, x: 3, y: 1.25 });
+  assert.ok(!zone.some((c) => Array.isArray(c) && c[0] === "filled_polygon"), "filled areas dropped");
+  assert.deepStrictEqual(zone.find((c) => Array.isArray(c) && c[0] === "fill"), ["fill"]);
+  assert.ok(!VX.setVertex(zone, 9, 0, 1), "no such corner");
+});
+test("vertex editor: parseCellValue wants a digit in the leading number", () => {
+  assert.deepStrictEqual(["12.5", "-0.3 mm", ".5", "", "abc", "mm", "-", "+,7"].map(VX.hasLeadingDigit), [true, true, true, false, false, false, false, true]);
 });
 
 console.log(`${passed} passed, ${failed} failed`);
