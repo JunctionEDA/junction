@@ -1700,7 +1700,8 @@ class Board(_Doc):
         pins a clear way to the parts they go to: a capacitor standing in front of I/O pins sends every one of those
         nets to another layer.  `board.autoplace` and `board.swap_pins` call it themselves; call it by hand after moving
         a chip.  ref=None does every chip that has supply pins with capacitors; `caps` names the capacitors (default:
-        the two-pad C parts between one of the chip's supply nets and ground that have no nearer chip on that net).
+        the two-pad C parts between one of the chip's supply nets and ground that have no nearer chip, regulator or
+        oscillator on that net: an oscillator's own capacitor stays with it).
 
         Every supply pin gets one capacitor first (the smallest box, so the small-value part), the rest join the pin of
         their net that has fewest.  A spot costs its distance from capacitor pad to pin plus 4 mm for each signal pin
@@ -1748,7 +1749,7 @@ class Board(_Doc):
                     continue
                 if n not in {q[3] for q in pins}:
                     continue
-                near = min((math.hypot(c["x"] - q[1], c["y"] - q[2]), o["ref"]) for o in parts if len(o["pads"]) >= 4 and o["ref"][:1] in ("U", "I", "Q") for q in o["pads"] if q[3] == n)
+                near = min((math.hypot(c["x"] - q[1], c["y"] - q[2]), o["ref"]) for o in parts if len(o["pads"]) >= 3 and o["ref"][:1] in ("U", "I", "Q", "X", "Y") for q in o["pads"] if q[3] == n)
                 if near[1] == me["ref"]:
                     mine.append(r)
             routed = {n: bool((self._call("get_items", net=n, kinds=["segment"]) or {}).get("items")) for n in {supply_of(two[r]) for r in mine}}
