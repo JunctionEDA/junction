@@ -9,7 +9,7 @@ function load(file) {
   const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
-const F = load("library/embedded-file.ts"), Z = load("dialogs/zstd.ts"), S = load("canvas/sexpr.ts"), X = load("canvas/export.ts");
+const F = load("library/embedded-file.ts"), Z = load("dialogs/zstd.ts"), C = load("dialogs/zstd-compress.ts"), S = load("canvas/sexpr.ts"), X = load("canvas/export.ts");
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + (e.stack || String(e)).split("\n").slice(0, 6).join("\n       ")); } }
 console.log("embedded-file: Embedded Files > Add");
@@ -34,15 +34,43 @@ test("MurmurHash3_x64_128 as MMH3_HASH / HASH_128::ToString", () => {
     assert.equal(F.mmh3Hash(Buffer.concat([ws, Buffer.alloc(3)])), m[2]);
   }
 });
-test("the stored frame reads back through zstd.ts and node's zstd, with its content size", () => {
-  const inputs = [new Uint8Array(0), Buffer.from("x"), Buffer.alloc(131072, 5), Buffer.alloc(300001).map((_, i) => (i * 7) & 255)];
+// a deterministic stand-in for incompressible bytes (xorshift32)
+function noise(n, seed = 2463534242) { const b = Buffer.alloc(n); let x = seed >>> 0; for (let i = 0; i < n; i++) { x ^= x << 13; x >>>= 0; x ^= x >>> 17; x ^= x << 5; x >>>= 0; b[i] = x & 255; } return b; }
+// STEP-like text: what a 3D model is, and what CompressAndEncode shrinks several times over
+function stepText(n) { let s = "ISO-10303-21;\nHEADER;\nENDSEC;\nDATA;\n", i = 1; while (s.length < n) { s += `#${i}=CARTESIAN_POINT('',(${(i * 0.137 % 9).toFixed(3)},${(i * 0.071 % 5).toFixed(3)},0.));\n#${i + 1}=DIRECTION('',(0.,0.,1.));\n`; i += 2; } return Buffer.from(s.slice(0, n)); }
+test("the frame (ZSTD_compress) reads back through zstd.ts and node's zstd, with its content size", () => {
+  const inputs = [new Uint8Array(0), Buffer.from("x"), Buffer.from("abcabcabcabcabcabcabcabc"), Buffer.alloc(131072, 5), Buffer.alloc(300001).map((_, i) => (i * 7) & 255),
+    noise(200000), noise(5000).map((x) => 48 + (x % 10)), noise(3000).map((x) => x % 129), stepText(1023), stepText(1024), stepText(16384), stepText(400000)];
   for (const inp of inputs) {
-    const fr = F.zstdStore(inp);
+    const fr = C.zstdCompress(inp);
     assert.deepEqual(Array.from(fr.subarray(0, 5)), [0x28, 0xb5, 0x2f, 0xfd, 0xe0]);
     assert.equal(Number(Buffer.from(fr.subarray(5, 13)).readBigUInt64LE()), inp.length, "Frame_Content_Size");
     assert.ok(Buffer.from(Z.zstdDecompress(fr)).equals(Buffer.from(inp)), "zstd.ts, length " + inp.length);
     if (typeof zlib.zstdDecompressSync === "function") assert.ok(zlib.zstdDecompressSync(Buffer.from(fr)).equals(Buffer.from(inp)), "node zstd, length " + inp.length);
   }
+});
+test("a block stored raw leaves the repeat offsets as the decoder has them", () => {
+  // block 1 sets offset 3; block 2 is noise with one 5-byte repeat 1000 back (not worth a compressed block, so stored
+  // raw); block 3 repeats with period 1000 from its start: offset 1000 is a repeat offset only if block 2's match counted
+  const B = 131072, b1 = Buffer.from("abc".repeat(B / 3 + 1)).subarray(0, B), b2 = noise(B, 99); b2.copy(b2, 2000, 1000, 1005);
+  const b3 = Buffer.alloc(B); noise(1000, 7).copy(b3, 0); for (let i = 1000; i < B; i++) b3[i] = i % 50 === 0 ? b3[i - 1000] ^ 0x55 : b3[i - 1000];
+  const inp = Buffer.concat([b1, b2, b3]), fr = C.zstdCompress(inp);
+  assert.ok(Buffer.from(Z.zstdDecompress(fr)).equals(inp), "zstd.ts");
+  if (typeof zlib.zstdDecompressSync === "function") assert.ok(zlib.zstdDecompressSync(Buffer.from(fr)).equals(inp), "node zstd");
+});
+test("the data is compressed as KiCad's is: a STEP model takes a fraction of its size, noise about its own size", () => {
+  const step = stepText(400000), fr = C.zstdCompress(step);
+  assert.ok(fr.length * 4 < step.length, `STEP text ${step.length} -> ${fr.length}`);
+  if (typeof zlib.zstdCompressSync === "function") { const ref = zlib.zstdCompressSync(step).length; assert.ok(fr.length < ref * 2.5, `within reach of libzstd (${fr.length} vs ${ref})`); }
+  // a real model (a vendor part's STEP file): KiCad's level-15 frame is about an eighth of it
+  const real = path.join(__dirname, "..", "..", "tests", "fixtures", "vendor", "model_C25804.step");
+  if (require("fs").existsSync(real)) {
+    const b = require("fs").readFileSync(real), f = C.zstdCompress(b);
+    assert.ok(f.length * 5 < b.length, `model_C25804.step ${b.length} -> ${f.length}`);
+    assert.ok(Buffer.from(Z.zstdDecompress(f)).equals(b));
+  }
+  const n = noise(100000); assert.ok(C.zstdCompress(n).length < n.length + 64, "incompressible data is stored, not grown");
+  const t = F.embeddedFileSexpr("m.step", step); assert.ok(t.length * 3 < step.length, `the (file …) form ${t.length} for ${step.length} bytes`);
 });
 test("the (file …) form: name, type, bar-delimited base64 lines of 76, checksum", () => {
   const data = Buffer.alloc(500).map((_, i) => (i * 13) & 255);
@@ -62,7 +90,7 @@ test("the serializer keeps (data |…|) bare, as KiCad's NeedBAR reader requires
   assert.ok(data.startsWith("|KLUv/") && data.endsWith("|"));
   assert.equal(X.serialize(S.parse(out)), out, "stable round trip");
   // 40 lines: past the reader's 30-slot quote mask, still bare
-  const big = F.embeddedFileSexpr("b.bin", Buffer.alloc(2400).map((_, i) => (i * 37 + (i >> 3)) & 255));
+  const big = F.embeddedFileSexpr("b.bin", noise(2400));
   assert.ok(!/\(data [^)]*"/.test(X.serialize(S.parse(big))));
   // a reference image's data is not an embedded file: its quoted lines stay quoted
   assert.match(X.serialize(S.parse('(image (data "iVBO/+w=" "AA+A"))')), /^\(image \(data "iVBO\/\+w=" "AA\+A"\)\)$/);

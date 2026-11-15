@@ -1,9 +1,11 @@
 // library/embedded-file — EMBEDDED_FILES::AddFile and WriteEmbeddedFiles for one file (common/embedded_files.cpp):
 //   embeddedFileType    the (type …) AddFile picks from the extension (model / font / datasheet / worksheet / other)
 //   mmh3Hash            MMH3_HASH( EMBEDDED_FILES::Seed() ) over the bytes, HASH_128::ToString's 32 upper-case hex digits
-//   zstdStore           a zstd frame holding the bytes in raw blocks, with the content size KiCad's reader requires
-//                       (ZSTD_getFrameContentSize); KiCad compresses at level 15, any valid frame reads back the same
-//   embeddedFileSexpr   the (file (name …) (type …) (data |…|) (checksum …)) form, the data in MIME_BASE64_LENGTH lines
+//   embeddedFileSexpr   the (file (name …) (type …) (data |…|) (checksum …)) form: the bytes compressed into a zstd frame
+//                       with its content size (CompressAndEncode's ZSTD_compress, dialogs/zstd-compress.ts), base64 in
+//                       MIME_BASE64_LENGTH lines
+
+import { zstdCompress } from "../dialogs/zstd-compress";
 
 /** EMBEDDED_FILES::Seed */
 export const EMBED_SEED = 0xabba2345;
@@ -47,22 +49,6 @@ export function mmh3Hash(data: Uint8Array, seed = EMBED_SEED): string {
   return (h1.toString(16).padStart(16, "0") + h2.toString(16).padStart(16, "0")).toUpperCase();
 }
 
-/** A single-segment zstd frame with an 8-byte content size and the data in raw blocks of at most 128 KiB. */
-export function zstdStore(data: Uint8Array): Uint8Array {
-  const BLOCK = 128 * 1024, n = data.length;
-  const blocks = Math.max(1, Math.ceil(n / BLOCK));
-  const out = new Uint8Array(4 + 1 + 8 + blocks * 3 + n);
-  out.set([0x28, 0xb5, 0x2f, 0xfd, 0xe0], 0);   // magic; FHD: FCS 8 bytes, single segment
-  let size = n; for (let i = 0; i < 8; i++) { out[5 + i] = size % 256; size = Math.floor(size / 256); }
-  let p = 13;
-  for (let b = 0; b < blocks; b++) {
-    const len = Math.min(BLOCK, n - b * BLOCK), hdr = (len << 3) | (b === blocks - 1 ? 1 : 0);   // raw block, last flag
-    out[p] = hdr & 0xff; out[p + 1] = (hdr >> 8) & 0xff; out[p + 2] = (hdr >> 16) & 0xff; p += 3;
-    out.set(data.subarray(b * BLOCK, b * BLOCK + len), p); p += len;
-  }
-  return out;
-}
-
 function base64(bytes: Uint8Array): string {
   let s = ""; for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + 0x8000)));
   return btoa(s);
@@ -71,7 +57,7 @@ const quote = (s: string): string => '"' + s.replace(/\\/g, "\\\\").replace(/"/g
 
 /** WriteEmbeddedFiles for one file: the form to put in (embedded_files …). */
 export function embeddedFileSexpr(name: string, data: Uint8Array): string {
-  const enc = base64(zstdStore(data)), lines: string[] = [];
+  const enc = base64(zstdCompress(data)), lines: string[] = [];
   for (let i = 0; i < enc.length; i += LINE) lines.push(enc.slice(i, i + LINE));
   return `(file (name ${quote(name)}) (type ${embeddedFileType(name)}) (data |${lines.join("\n")}|) (checksum ${quote(mmh3Hash(data))}))`;
 }
