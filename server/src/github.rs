@@ -264,8 +264,17 @@ impl Gh {
 
     /// The commit a branch points at; None when the branch (or any commit) is missing.
     async fn branch_head(&self, repo: &RepoRef, branch: &str) -> Result<Option<String>, GhErr> {
+        Ok(self.branch_ref(repo, branch).await?.map(|(sha, _)| sha))
+    }
+
+    /// The head of a branch and the name it has now: GitHub goes on answering under the
+    /// old name of a branch that was renamed there.
+    async fn branch_ref(&self, repo: &RepoRef, branch: &str) -> Result<Option<(String, String)>, GhErr> {
         match self.get(&format!("/repos/{}/git/ref/heads/{}", repo.slug(), enc_path(branch))).await {
-            Ok(v) => Ok(v["object"]["sha"].as_str().map(str::to_string)),
+            Ok(v) => Ok(v["object"]["sha"].as_str().map(|sha| {
+                let name = v["ref"].as_str().and_then(|r| r.strip_prefix("refs/heads/")).unwrap_or(branch);
+                (sha.to_string(), name.to_string())
+            })),
             // 404: no such branch.  409: the repository has no commits at all.
             Err(e) if e.status == 404 || e.status == 409 => Ok(None),
             Err(e) => Err(e),
@@ -988,6 +997,11 @@ async fn view(state: &AppState, gh: &Gh, id: Uuid, mut link: Link) -> AppResult<
     let mut missing = None;
     let mut moved = None;
     let mut branch_moved = None;
+    // Renamed on GitHub: it still answers under the old name, and says its new one.
+    if let Some(now) = remote.branch.clone().filter(|b| *b != link.branch) {
+        sqlx::query("UPDATE project_github SET branch = $2 WHERE project_id = $1").bind(id).bind(&now).execute(&state.pool).await?;
+        branch_moved = Some((std::mem::replace(&mut link.branch, now.clone()), now));
+    }
     // The branch is gone: renamed on GitHub (master to main), or merged and deleted.
     // The link follows when the project is plainly there: always after a rename, and on
     // the default branch when it holds at least half the files as they were last synced.

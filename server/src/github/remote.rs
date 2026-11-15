@@ -71,6 +71,8 @@ pub(super) struct Remote {
     pub links: Vec<(String, usize, String)>,
     /// Project paths that are Git LFS pointers on GitHub: left alone both ways.
     pub lfs: BTreeSet<String>,
+    /// The name the branch has now (GitHub answers under a renamed branch's old name too).
+    pub branch: Option<String>,
     /// Where the linked repository's `.gitmodules` says its submodules are.
     pub module_paths: Vec<String>,
 }
@@ -843,12 +845,12 @@ async fn blob_refs(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, doc_path: &str,
 /// part of the project even when nothing names it any more (a library table row
 /// removed is not the library deleted).
 pub(super) async fn read(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, branch: &str, subdir: &str, known: &[(String, String)]) -> AppResult<Remote> {
-    let Some(head) = gh.branch_head(repo, branch).await? else {
+    let Some((head, now)) = gh.branch_ref(repo, branch).await? else {
         return Ok(Remote::default());
     };
     let tree = gh.commit_tree(repo, &head).await?;
     let mut w = Walker::new(gh, repo, &head, &tree);
-    let mut remote = Remote { head: Some(head), tree: Some(tree), ..Default::default() };
+    let mut remote = Remote { head: Some(head), tree: Some(tree), branch: Some(now), ..Default::default() };
 
     let folder = w.locate(0, subdir).await?;
     let Loc::Dir { src, tree: folder_tree, path: folder_path } = folder else {
@@ -1179,6 +1181,7 @@ pub(super) async fn scan(gh: &Gh, repo: &RepoRef, branch: &str) -> AppResult<(Re
         notes: w.notes,
         nested: Vec::new(),
         folder_exists: true,
+        branch: None,
         module_paths: w.modules.get(&0).map(|m| m.keys().cloned().collect()).unwrap_or_default(),
         links: w.links,
         lfs: BTreeSet::new(),

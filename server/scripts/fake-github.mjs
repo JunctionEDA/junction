@@ -418,8 +418,10 @@ const server = http.createServer(async (req, res) => {
   let mm;
   if ((mm = rest.match(/^\/git\/ref\/heads\/(.+)$/)) && req.method === 'GET') {
     if (empty) return send(res, 409, { message: 'Git Repository is empty.' });
-    const sha = repo.refs.get(mm[1]);
-    return sha ? send(res, 200, { ref: `refs/heads/${mm[1]}`, object: { type: 'commit', sha } }) : notFound(res);
+    // Like the real thing, a renamed branch still answers under its old name (FAKE_NO_REF_FORWARD=1 turns that off).
+    const name = repo.refs.has(mm[1]) || process.env.FAKE_NO_REF_FORWARD ? mm[1] : repo.renamedBranches?.get(mm[1]) || mm[1];
+    const sha = repo.refs.get(name);
+    return sha ? send(res, 200, { ref: `refs/heads/${name}`, object: { type: 'commit', sha } }) : notFound(res);
   }
   const dr = rest.match(/^\/git\/refs\/heads\/(.+)$/);
   if (dr && req.method === 'DELETE') {
@@ -437,6 +439,7 @@ const server = http.createServer(async (req, res) => {
   }
   if ((mm = rest.match(/^\/git\/refs\/heads\/(.+)$/)) && req.method === 'PATCH') {
     if (!needPush()) return;
+    if (!repo.refs.has(mm[1]) && !process.env.FAKE_NO_REF_FORWARD && repo.renamedBranches?.has(mm[1])) mm[1] = repo.renamedBranches.get(mm[1]);
     const cur = repo.refs.get(mm[1]);
     if (!cur) return send(res, 422, { message: 'Reference does not exist' });
     // Fast-forward only unless forced, like the real thing.
@@ -484,7 +487,7 @@ const server = http.createServer(async (req, res) => {
     if (!needPush()) return;
     const map = new Map(body.base_tree ? trees.get(body.base_tree) : []);
     for (const e of body.tree || []) {
-      if (e.sha === null) map.delete(e.path);
+      if (e.sha === null) { if (!map.has(e.path)) return send(res, 422, { message: 'GitRPC::BadObjectState' }); map.delete(e.path); }   // like the real thing: what is not there cannot be removed
       else if (e.type === 'commit') { if (e.mode !== '160000') return send(res, 422, { message: 'a commit entry needs mode 160000' }); map.set(e.path, 'commit:' + e.sha); }
       else {
         if (!blobs.has(e.sha)) return send(res, 422, { message: 'tree.sha is not a valid blob' });

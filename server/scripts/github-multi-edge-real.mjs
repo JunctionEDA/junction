@@ -31,7 +31,8 @@ const SECRET = process.env.E2E_JWT_SECRET, PG_URL = process.env.E2E_PG_URL;
 const REPO = process.env.REAL_REPO, GH_ID = Number(process.env.REAL_GH_ID);
 const LOGIN = process.env.REAL_LOGIN || 'whoever';
 if (!SECRET || !PG_URL || !REPO || !GH_ID) { console.error('E2E_JWT_SECRET, E2E_PG_URL, REAL_REPO and REAL_GH_ID are required.'); process.exit(2); }
-const STAMP = new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
+// REAL_STAMP with REAL_CLEAN_ONLY=1 removes what an interrupted run of that stamp left behind.
+const STAMP = process.env.REAL_STAMP || new Date().toISOString().replace(/[-:]/g, '').slice(0, 15);
 const ROOT = `edge/${STAMP}`, A = `${ROOT}/hw/a`, COMMON = `${ROOT}/hw/common`, LIB_BRANCH = `edgelib-${STAMP}`, BR = `edge-${STAMP}`;
 let directToken = process.env.GH_TOKEN || '';
 
@@ -165,6 +166,7 @@ try {
   MAIN = ok(gh('GET', `/repos/${REPO}`), 'repo').default_branch;
   mainBefore = ghHead();
   modulesBefore = ghText('.gitmodules');
+  if (process.env.REAL_CLEAN_ONLY) throw Object.assign(new Error('clean only'), { cleanOnly: true });
 
   // ============================================================ symbolic links, a Git LFS pointer, paths of every kind
   ghCommit({
@@ -279,14 +281,21 @@ try {
   const log = ok(gh('GET', `/repos/${REPO}/commits?sha=${MAIN}&per_page=60`), 'log').map((c) => c.sha);
   check('the default branch only ever moved forward', log.includes(mainBefore));
 } catch (e) {
-  check('run completed', false, e.stack || String(e));
+  if (!e.cleanOnly) check('run completed', false, e.stack || String(e));
 } finally {
   // leave the repository as it was found
   try {
-    if (mainBefore) ghCommit({ ...dropDir(ROOT), '.gitmodules': modulesBefore }, `Sync edge test ${STAMP}: clean up`);
-    for (const b of [...madeBranches, LIB_BRANCH]) dropBranch(b);
+    if (mainBefore) {
+      const drop = dropDir(ROOT);
+      // (a path that is not there cannot be removed: GitHub answers 422 BadObjectState)
+      const mods = ghText('.gitmodules');
+      const entry = `[submodule "${COMMON}"]`;
+      if (mods && mods.includes(entry)) drop['.gitmodules'] = mods.slice(0, mods.indexOf(entry)) || null;
+      if (Object.keys(drop).length) ghCommit(drop, `Sync edge test ${STAMP}: clean up`);
+    }
+    for (const b of [BR, `${BR}-renamed`, `${BR}-rewritten`, LIB_BRANCH]) dropBranch(b);
     const left = branches().filter((b) => b.includes(STAMP));
-    check('the repository is tidied up', Object.keys(ghTree(ROOT + '/')).length === 0 && ghText('.gitmodules') === modulesBefore && left.length === 0, JSON.stringify(left));
+    check('the repository is tidied up', Object.keys(ghTree(ROOT + '/')).length === 0 && !(ghText('.gitmodules') || '').includes(COMMON) && left.length === 0, JSON.stringify(left));
   } catch (e) { check('the repository is tidied up', false, String(e)); }
   for (const id of made) if (id) await call(alice, 'DELETE', `/api/projects/${id}`).catch(() => {});
   await db.query('DELETE FROM projects WHERE owner_id = ANY($1)', [[aliceId, bobId]]).catch(() => {});
