@@ -100,6 +100,15 @@ public:
 
     void OnOpenFileInTextEditor( wxCommandEvent& event );
     void OnEditAdvancedCfg( wxCommandEvent& event );
+    void OnDownloadStandardLibraries( wxCommandEvent& event );
+
+    /**
+     * Download the standard symbol and footprint libraries for a computer with no KiCad on it.
+     *
+     * @param aOffer true at start: ask first, only when no libraries are found and the user
+     *               has not said to stop asking.  false from the menu: explain and download.
+     */
+    void DownloadStandardLibraries( bool aOffer );
 
     /// Open DIALOG_GIT_MR_REVIEW so the user can pick two refs and review
     /// the changed-file list between them.

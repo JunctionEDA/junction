@@ -7,6 +7,12 @@ version it is based on.
 ## 2.1.3 (unreleased)
 
 ### Desktop
+- Works on a computer with no KiCad installed: when no symbol or footprint
+  libraries are found, Junction offers to download the standard KiCad
+  libraries (about 60 MB) and uses them at once, without a restart.
+  Preferences, Download Standard Libraries does the same later.
+- macOS: the program inside the app is named Junction, so Activity Monitor,
+  Force Quit and system messages say Junction instead of kicad.
 - Changes an assistant proposes through the MCP server now show in the board
   and schematic editors: a bar names the proposal with Show (draws it over the
   design), Details, Accept and Reject, and File, Proposed Changes brings it

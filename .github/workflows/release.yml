@@ -160,7 +160,7 @@ jobs:
           ditto /Volumes/Junction/Junction.app "$HOME/Applications/Junction.app"
           hdiutil detach /Volumes/Junction
           app="$HOME/Applications/Junction.app"
-          "$app/Contents/MacOS/kicad" > shots/kicad.log 2>&1 &
+          "$app/Contents/MacOS/Junction" > shots/kicad.log 2>&1 &
           pid=$!
           sleep 60
           screencapture -x shots/kicad.png || true

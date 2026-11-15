@@ -99,6 +99,19 @@ public:
     static wxString GetStockEDALibraryPath();
 
     /**
+     * Where Junction keeps the standard symbol and footprint libraries it downloaded itself,
+     * laid out like an installed KiCad's library folder (symbols, footprints, template).
+     * Used when no installed KiCad is found.
+     */
+    static wxString GetManagedLibrariesPath();
+
+    /**
+     * Look for the standard libraries again on the next GetStockEDALibraryPath(), after they
+     * were downloaded while the program runs.
+     */
+    static void ForgetStockLibraryProbe();
+
+    /**
      * Gets the default path for PCM packages
      */
     static wxString GetDefault3rdPartyPath();

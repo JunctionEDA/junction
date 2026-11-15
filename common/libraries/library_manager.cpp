@@ -463,6 +463,19 @@ wxString LIBRARY_MANAGER::DefaultGlobalTablePath( LIBRARY_TABLE_TYPE aType )
     wxFileName fn( basePath, tableFileName( aType ) );
     fn.Normalize( FN_NORMALIZE_FLAGS | wxPATH_NORM_ENV_VARS );
 
+    // Standard libraries Junction downloaded itself keep their tables beside them, while the
+    // templates folder stays the program's own.
+    if( !fn.IsFileReadable() )
+    {
+        wxFileName beside;
+        beside.AssignDir( PATHS::GetStockEDALibraryPath() );
+        beside.AppendDir( wxS( "template" ) );
+        beside.SetFullName( tableFileName( aType ) );
+
+        if( beside.IsFileReadable() )
+            return beside.GetFullPath();
+    }
+
     return fn.GetFullPath();
 }
 

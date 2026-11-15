@@ -960,7 +960,7 @@ void COMMON_SETTINGS::InitializeEnvironment()
     // That install's global library tables reference ITS versioned variables
     // (e.g. ${KICAD9_SYMBOL_DIR}), so define those names for past majors too.
     // The current major's real entries were added above and are not touched.
-    for( int major = 7; major <= 10; major++ )
+    for( int major = 7; major <= 11; major++ )
     {
         auto addAlias =
                 [&]( const wxString& aBase, const wxString& aValue )

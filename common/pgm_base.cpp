@@ -403,6 +403,11 @@ bool PGM_BASE::InitPgm( bool aHeadless, bool aIsUnitTest )
     else
         pgm_name = wxFileName( App().argv[0] ).GetName().Lower();
 
+    // The packaged project manager is named Junction; everything keyed on the program name
+    // (settings, app ids, lock files) keeps the name it always had.
+    if( pgm_name == wxT( "junction" ) )
+        pgm_name = wxT( "kicad" );
+
     APP_MONITOR::SENTRY::Instance()->AddTag( "kicad.app", pgm_name );
 
     wxInitAllImageHandlers();

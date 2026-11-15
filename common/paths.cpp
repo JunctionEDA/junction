@@ -240,12 +240,57 @@ wxString PATHS::GetWindowsBaseSharePath()
 #endif
 
 
+static bool     s_stockProbed = false;
+static wxString s_stockFound;
+
+
+wxString PATHS::GetManagedLibrariesPath()
+{
+    wxString dir;
+
+    // Tests point this somewhere of their own.
+    if( wxGetEnv( wxS( "JUNCTION_LIBRARIES_DIR" ), &dir ) && !dir.IsEmpty() )
+        return dir;
+
+    wxFileName fn;
+
+#if defined( __WXMAC__ )
+    fn.AssignDir( GetOSXKicadUserDataDir() );
+    fn.RemoveLastDir();
+    fn.AppendDir( wxS( "Junction" ) );
+#elif defined( __WXMSW__ )
+    fn.AssignDir( wxStandardPaths::Get().GetUserLocalDataDir() );
+    fn.RemoveLastDir();
+    fn.AppendDir( wxS( "Junction" ) );
+#else
+    wxString dataHome;
+
+    if( !wxGetEnv( wxS( "XDG_DATA_HOME" ), &dataHome ) || dataHome.IsEmpty() )
+        dataHome = wxGetHomeDir() + wxS( "/.local/share" );
+
+    fn.AssignDir( dataHome );
+    fn.AppendDir( wxS( "junction" ) );
+#endif
+
+    fn.AppendDir( wxS( "standard-libraries" ) );
+    return fn.GetPath();
+}
+
+
+void PATHS::ForgetStockLibraryProbe()
+{
+    s_stockProbed = false;
+    s_stockFound.clear();
+}
+
+
 /**
- * Junction ships without the stock symbol/footprint libraries.
  * When our own EDA-library dir has none, quietly fall back to an installed
  * stock KiCad's share dir so libraries, 3D models and library-table
- * templates resolve out of the box.  The probe runs once per process; a
- * bundle that does ship a symbols dir disables it naturally.
+ * templates resolve out of the box, and after that to the copy of the
+ * standard libraries Junction downloaded itself (GetManagedLibrariesPath).
+ * The probe runs once per process, or again after ForgetStockLibraryProbe();
+ * a bundle that does ship a symbols dir disables it naturally.
  */
 static wxString withStockInstallFallback( const wxString& aOwnPath )
 {
@@ -256,12 +301,10 @@ static wxString withStockInstallFallback( const wxString& aOwnPath )
     if( probe.DirExists() )
         return aOwnPath;
 
-    static bool     s_probed = false;
-    static wxString s_found;
-
-    if( !s_probed )
+    if( !s_stockProbed )
     {
-        s_probed = true;
+        s_stockProbed = true;
+        s_stockFound.clear();
 
         wxArrayString candidates;
 
@@ -270,7 +313,7 @@ static wxString withStockInstallFallback( const wxString& aOwnPath )
         candidates.Add( wxGetHomeDir()
                         + wxS( "/Applications/KiCad/KiCad.app/Contents/SharedSupport" ) );
 #elif defined( __WXMSW__ )
-        // Official installers: C:\Program Files\KiCad\<version>\share\kicad
+        // Official installers: C:\\Program Files\\KiCad\\<version>\\share\\kicad
         wxString programFiles;
 
         if( !wxGetEnv( wxS( "ProgramW6432" ), &programFiles ) || programFiles.IsEmpty() )
@@ -307,6 +350,12 @@ static wxString withStockInstallFallback( const wxString& aOwnPath )
         candidates.Add( wxS( "/usr/local/share/kicad" ) );
 #endif
 
+        // A test (or a user who wants Junction's own copy) can leave installed KiCads out.
+        if( wxGetEnv( wxS( "JUNCTION_IGNORE_KICAD_INSTALL" ), nullptr ) )
+            candidates.clear();
+
+        candidates.Add( PATHS::GetManagedLibrariesPath() );
+
         for( const wxString& candidate : candidates )
         {
             wxFileName fn;
@@ -315,17 +364,18 @@ static wxString withStockInstallFallback( const wxString& aOwnPath )
 
             if( fn.DirExists() )
             {
-                s_found = candidate;
+                s_stockFound = candidate;
                 break;
             }
         }
     }
 
-    return s_found.IsEmpty() ? aOwnPath : s_found;
+    return s_stockFound.IsEmpty() ? aOwnPath : s_stockFound;
 }
 
 
-wxString PATHS::GetStockEDALibraryPath()
+/// The library folder of this program itself, whether or not it holds any libraries.
+static wxString ownEDALibraryPath()
 {
     wxString path;
 
@@ -340,7 +390,13 @@ wxString PATHS::GetStockEDALibraryPath()
         path = wxString::FromUTF8Unchecked( KICAD_LIBRARY_DATA );
 #endif
 
-    return withStockInstallFallback( path );
+    return path;
+}
+
+
+wxString PATHS::GetStockEDALibraryPath()
+{
+    return withStockInstallFallback( ownEDALibraryPath() );
 }
 
 
@@ -403,7 +459,14 @@ wxString PATHS::GetStockTemplatesPath()
 {
     wxFileName fn;
     
-    fn.AssignDir( GetStockEDALibraryPath() );
+    // The downloaded libraries bring library tables only; the project templates are the ones
+    // this program ships (LIBRARY_MANAGER::StockTablePath looks in both places).
+    wxString base = GetStockEDALibraryPath();
+
+    if( wxFileName::DirName( base ).SameAs( wxFileName::DirName( GetManagedLibrariesPath() ) ) )
+        base = ownEDALibraryPath();
+
+    fn.AssignDir( base );
     fn.AppendDir( "template" );
 
     return fn.GetPathWithSep();

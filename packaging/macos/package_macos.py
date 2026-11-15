@@ -268,6 +268,14 @@ def main():
     plist_path = os.path.join(contents, "Info.plist")
     with open(plist_path, "rb") as f:
         plist = plistlib.load(f)
+    # The program itself is named Junction too, so Activity Monitor, "Force
+    # Quit" and system messages ("Junction cannot be opened ...") say Junction
+    # instead of kicad.  PGM_BASE maps the name back for settings and app ids.
+    old_exe = os.path.join(contents, "MacOS", plist.get("CFBundleExecutable", "kicad"))
+    new_exe = os.path.join(contents, "MacOS", APP_NAME)
+    if os.path.exists(old_exe) and old_exe != new_exe:
+        os.rename(old_exe, new_exe)
+        plist["CFBundleExecutable"] = APP_NAME
     plist["CFBundleName"] = APP_NAME
     plist["CFBundleDisplayName"] = APP_NAME
     plist["CFBundleIdentifier"] = BUNDLE_ID

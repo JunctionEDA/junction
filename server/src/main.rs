@@ -473,8 +473,13 @@ async fn main() -> anyhow::Result<()> {
         .layer(tower_http::compression::CompressionLayer::new())
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", port)).await?;
-    tracing::info!("kicad-collab-server listening on 0.0.0.0:{port}");
+    // KC_BIND_ADDR narrows where the server listens (a test server on one machine uses 127.0.0.1).
+    let bind_addr = std::env::var("KC_BIND_ADDR")
+        .ok()
+        .filter(|a| !a.trim().is_empty())
+        .unwrap_or_else(|| "0.0.0.0".to_string());
+    let listener = tokio::net::TcpListener::bind((bind_addr.trim(), port)).await?;
+    tracing::info!("kicad-collab-server listening on {}:{port}", bind_addr.trim());
     axum::serve(listener, app).await?;
     Ok(())
 }

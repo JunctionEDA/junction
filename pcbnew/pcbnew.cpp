@@ -348,6 +348,12 @@ static int rebuildFootprintLibraries( const wxString& aBoardFile, const std::map
                 copy->SetReference( wxS( "REF**" ) );
                 copy->SetParentGroup( nullptr );
 
+                // What belongs to this one placement on the board stays out of the library.
+                copy->SetPath( KIID_PATH() );
+                copy->SetSheetname( wxEmptyString );
+                copy->SetSheetfile( wxEmptyString );
+                copy->SetFilters( wxEmptyString );
+
                 for( ZONE* zone : copy->Zones() )
                     zone->Move( -copy->GetPosition() );
 

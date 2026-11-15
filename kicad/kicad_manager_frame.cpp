@@ -30,6 +30,11 @@
 #include <collab/collab_project.h>
 #include <collab/collab_rest.h>
 #include <collab/collab_session.h>
+#include <collab/collab_stdlibs.h>
+#include <paths.h>
+#include <mutex>
+#include <thread>
+#include <wx/richmsgdlg.h>
 #include <wx/clipbrd.h>
 #include <dialogs/dialog_git_mr_review.h>
 #include <widgets/git_commit_pane.h>
@@ -124,6 +129,7 @@ BEGIN_EVENT_TABLE( KICAD_MANAGER_FRAME, EDA_BASE_FRAME )
     EVT_MENU( wxID_EXIT, KICAD_MANAGER_FRAME::OnExit )
     EVT_MENU( ID_EDIT_LOCAL_FILE_IN_TEXT_EDITOR, KICAD_MANAGER_FRAME::OnOpenFileInTextEditor )
     EVT_MENU( ID_EDIT_ADVANCED_CFG, KICAD_MANAGER_FRAME::OnEditAdvancedCfg )
+    EVT_MENU( ID_DOWNLOAD_STANDARD_LIBRARIES, KICAD_MANAGER_FRAME::OnDownloadStandardLibraries )
     EVT_MENU( ID_IMPORT_CADSTAR_ARCHIVE_PROJECT, KICAD_MANAGER_FRAME::OnImportCadstarArchiveFiles )
     EVT_MENU( ID_IMPORT_EAGLE_PROJECT, KICAD_MANAGER_FRAME::OnImportEagleFiles )
     EVT_MENU( ID_IMPORT_EASYEDA_PROJECT, KICAD_MANAGER_FRAME::OnImportEasyEdaFiles )
@@ -377,6 +383,18 @@ KICAD_MANAGER_FRAME::KICAD_MANAGER_FRAME( wxWindow* parent, const wxString& titl
     m_acceptedExts.emplace( FILEEXT::DrillFileExtension, &KICAD_MANAGER_ACTIONS::viewDroppedGerbers );
 
     DragAcceptFiles( true );
+
+    // On a computer with no KiCad there are no symbols or footprints to place: offer them once
+    // the window is up.
+    if( COLLAB_STDLIBS::Needed() && !COLLAB_STDLIBS::Declined()
+        && !wxGetEnv( wxS( "JUNCTION_NO_LIBRARY_OFFER" ), nullptr ) )
+    {
+        CallAfter(
+                [this]()
+                {
+                    DownloadStandardLibraries( true );
+                } );
+    }
 }
 
 
@@ -1386,6 +1404,181 @@ void KICAD_MANAGER_FRAME::OnEditAdvancedCfg( wxCommandEvent& WXUNUSED( event ) )
 {
     DIALOG_EDIT_CFG dlg( this );
     dlg.ShowModal();
+}
+
+
+void KICAD_MANAGER_FRAME::OnDownloadStandardLibraries( wxCommandEvent& WXUNUSED( event ) )
+{
+    DownloadStandardLibraries( false );
+}
+
+
+void KICAD_MANAGER_FRAME::DownloadStandardLibraries( bool aOffer )
+{
+    const bool needed = COLLAB_STDLIBS::Needed();
+
+    if( aOffer )
+    {
+        if( !needed || COLLAB_STDLIBS::Declined() )
+            return;
+
+        wxRichMessageDialog ask( this,
+                                 _( "No symbol or footprint libraries were found on this computer.\n\n"
+                                    "Junction can download the standard KiCad libraries now "
+                                    "(about 60 MB to download, 400 MB on disk). Projects open "
+                                    "without them, but there is nothing to place from." ),
+                                 _( "Standard Libraries" ), wxYES_NO | wxICON_QUESTION );
+
+        ask.SetYesNoLabels( _( "Download" ), _( "Not Now" ) );
+        ask.ShowCheckBox( _( "Do not ask again" ) );
+
+        const int answer = ask.ShowModal();
+
+        if( answer != wxID_YES )
+        {
+            // Preferences > Download Standard Libraries stays available either way.
+            if( ask.IsCheckBoxChecked() )
+                COLLAB_STDLIBS::SetDeclined( true );
+
+            return;
+        }
+    }
+    else if( !needed )
+    {
+        wxFileName own = wxFileName::DirName( PATHS::GetManagedLibrariesPath() );
+        wxFileName used = wxFileName::DirName( PATHS::GetStockEDALibraryPath() );
+
+        if( !own.SameAs( used ) )
+        {
+            wxMessageBox( wxString::Format( _( "The standard libraries are already on this "
+                                               "computer, in\n%s\n\nThere is nothing to "
+                                               "download." ),
+                                            used.GetPath() ),
+                          _( "Standard Libraries" ), wxOK | wxICON_INFORMATION, this );
+            return;
+        }
+
+        wxMessageDialog again( this,
+                               _( "Junction downloaded the standard libraries before. Download "
+                                  "them again to get the newest parts?" ),
+                               _( "Standard Libraries" ), wxYES_NO | wxICON_QUESTION );
+
+        again.SetYesNoLabels( _( "Download" ), _( "Cancel" ) );
+
+        if( again.ShowModal() != wxID_YES )
+            return;
+    }
+
+    struct STATE
+    {
+        std::mutex mutex;
+        wxString   message;
+        int        percent = 0;
+        bool       done = false;
+        bool       ok = false;
+        wxString   error;
+        bool       stop = false;
+    };
+
+    auto state = std::make_shared<STATE>();
+
+    state->message = _( "Contacting gitlab.com..." );
+
+    std::thread(
+            [state]()
+            {
+                wxString error;
+                bool     ok = false;
+
+                try
+                {
+                    ok = COLLAB_STDLIBS::Install(
+                            [state]( const wxString& aMessage, int aPercent )
+                            {
+                                std::lock_guard<std::mutex> lock( state->mutex );
+
+                                // wxString shares its buffer between copies: hand over a deep one.
+                                state->message = wxString( aMessage.wc_str() );
+
+                                if( aPercent >= 0 )
+                                    state->percent = aPercent;
+
+                                return !state->stop;
+                            },
+                            &error );
+                }
+                catch( ... )
+                {
+                    error = _( "Downloading the libraries failed." );
+                }
+
+                std::lock_guard<std::mutex> lock( state->mutex );
+                state->ok = ok;
+                state->error = wxString( error.wc_str() );
+                state->done = true;
+            } )
+            .detach();
+
+    bool     ok = false;
+    bool     stopped = false;
+    wxString error;
+
+    {
+        APP_PROGRESS_DIALOG progress( _( "Standard Libraries" ), state->message, 100, this, false,
+                                      wxPD_APP_MODAL | wxPD_AUTO_HIDE | wxPD_CAN_ABORT );
+
+        for( ;; )
+        {
+            wxString message;
+            int      percent = 0;
+            bool     done = false;
+
+            {
+                std::lock_guard<std::mutex> lock( state->mutex );
+                message = wxString( state->message.wc_str() );
+                percent = state->percent;
+                done = state->done;
+                ok = state->ok;
+                error = wxString( state->error.wc_str() );
+            }
+
+            if( done )
+                break;
+
+            // 100 would close the dialog; the last step is still running.
+            if( !progress.Update( std::min( percent, 99 ), message ) && !stopped )
+            {
+                stopped = true;
+
+                std::lock_guard<std::mutex> lock( state->mutex );
+                state->stop = true;
+            }
+
+            wxMilliSleep( 80 );
+        }
+    }
+
+    if( !ok )
+    {
+        if( !stopped )
+        {
+            wxMessageBox( error + wxS( "\n\n" )
+                                  + _( "Nothing was changed. Try again from Preferences > "
+                                       "Download Standard Libraries." ),
+                          _( "Standard Libraries" ), wxOK | wxICON_ERROR, this );
+        }
+
+        return;
+    }
+
+    COLLAB_STDLIBS::SetDeclined( false );
+    COLLAB_STDLIBS::Activate();
+    PreloadAllLibraries();
+
+    wxMessageBox( _( "The standard symbol and footprint libraries are ready to use.\n\n"
+                     "An editor that is already open shows them after it is closed and opened "
+                     "again." ),
+                  _( "Standard Libraries" ), wxOK | wxICON_INFORMATION, this );
 }
 
 

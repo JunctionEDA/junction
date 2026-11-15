@@ -318,6 +318,11 @@ void KICAD_MANAGER_FRAME::doReCreateMenuBar()
     prefsMenu->Add( ACTIONS::showSymbolLibTable );
     prefsMenu->Add( ACTIONS::showFootprintLibTable );
     prefsMenu->Add( ACTIONS::showDesignBlockLibTable );
+    prefsMenu->Add( _( "Download Standard Libraries..." ),
+                    _( "Download the standard KiCad symbol and footprint libraries, for a "
+                       "computer that has no KiCad installed" ),
+                    ID_DOWNLOAD_STANDARD_LIBRARIES,
+                    BITMAPS::library );
     prefsMenu->Add( ACTIONS::openPreferences );
 
     prefsMenu->AppendSeparator();
