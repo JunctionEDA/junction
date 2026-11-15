@@ -16,6 +16,7 @@ import { getThemeMode, setThemeMode, type ThemeMode } from "../theme";
 import { getInactiveMode, setInactiveMode } from "../editor/panels/appearance";
 import { wakatimePage, type WakaPage } from "./wakatime";
 import { assignScrollMod, type ScrollMod } from "../editor/wheel-model";
+import { bitmapButton } from "../components/kicon-dom";
 
 const MIL = 0.0254;
 
@@ -138,14 +139,15 @@ export function openPreferences(page?: string, staged?: Staged): void {
       void gridSettingsDialog({ mm: g.sizes[row], name: g.names![row] }, ed).then((r) => { if (!r) return; if (exists(r.mm, row)) { dup(r.mm); return; } g.sizes[row] = r.mm; g.names![row] = r.name; fill(row); }); };
     const swap = (i: number, j: number): void => { [g.sizes[i], g.sizes[j]] = [g.sizes[j], g.sizes[i]]; [g.names![i], g.names![j]] = [g.names![j], g.names![i]]; };
     list.addEventListener("dblclick", edit);
-    const btn = (icon: string, title: string, id: string, fn: () => void) => h("button", { class: "btn kd-bmp", type: "button", title, "aria-label": title, id, onclick: fn }, icon);
-    L.append(h("div", { style: "font-weight:600;margin-bottom:6px" }, "Grids"), list, h("div", { class: "kd-grid-btns" },
-      btn("+", "Add", `${pre}-gridadd`, add),
-      btn("✎", "Edit", `${pre}-gridedit`, edit),
-      btn("↑", "Move up", `${pre}-gridup`, () => { const i = list.selectedIndex; if (i > 0) { swap(i - 1, i); fill(i - 1); } }),
-      btn("↓", "Move down", `${pre}-griddown`, () => { const i = list.selectedIndex; if (i >= 0 && i < g.sizes.length - 1) { swap(i + 1, i); fill(i + 1); } }),
-      btn("🗑", "Remove", `${pre}-griddel`, () => { const i = list.selectedIndex; if (i < 0 || g.sizes.length <= 1) return; g.sizes.splice(i, 1); g.names!.splice(i, 1);
-        g.fast1 = Math.min(g.fast1 > i ? g.fast1 - 1 : g.fast1, g.sizes.length - 1); g.fast2 = Math.min(g.fast2 > i ? g.fast2 - 1 : g.fast2, g.sizes.length - 1); fill(i !== 0 ? i - 1 : 0); })));
+    // PANEL_GRID_SETTINGS' STD_BITMAP_BUTTONs: small_plus, edit, small_up, small_down, then small_trash apart
+    L.append(h("div", { style: "font-weight:600;margin-bottom:6px" }, "Grids"), list, h("div", { class: "kd-grid-btns", style: "display:flex;gap:5px;margin-top:6px" },
+      bitmapButton("small_plus", "Add", add, { id: `${pre}-gridadd` }),
+      bitmapButton("edit", "Edit", edit, { id: `${pre}-gridedit` }),
+      bitmapButton("small_up", "Move up", () => { const i = list.selectedIndex; if (i > 0) { swap(i - 1, i); fill(i - 1); } }, { id: `${pre}-gridup` }),
+      bitmapButton("small_down", "Move down", () => { const i = list.selectedIndex; if (i >= 0 && i < g.sizes.length - 1) { swap(i + 1, i); fill(i + 1); } }, { id: `${pre}-griddown` }),
+      h("span", { style: "flex:1" }),
+      bitmapButton("small_trash", "Remove", () => { const i = list.selectedIndex; if (i < 0 || g.sizes.length <= 1) return; g.sizes.splice(i, 1); g.names!.splice(i, 1);
+        g.fast1 = Math.min(g.fast1 > i ? g.fast1 - 1 : g.fast1, g.sizes.length - 1); g.fast2 = Math.min(g.fast2 > i ? g.fast2 - 1 : g.fast2, g.sizes.length - 1); fill(i !== 0 ? i - 1 : 0); }, { id: `${pre}-griddel` })));
     const fb = KD().staticBox(R, "Fast Grid Switching");
     fb.append(h("div", { style: "display:grid;grid-template-columns:max-content minmax(0,240px) max-content;gap:6px 10px;align-items:center" }, h("label", null, "Grid 1:"), fast1, h("span", { class: "ro" }, `(${keyName("Alt+1")})`), h("label", null, "Grid 2:"), fast2, h("span", { class: "ro" }, `(${keyName("Alt+2")})`)));
     const ob = KD().staticBox(R, "Grid Overrides"), og = h("div", { style: "display:grid;grid-template-columns:max-content minmax(0,240px);gap:6px 10px;align-items:center" });

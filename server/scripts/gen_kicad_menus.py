@@ -33,7 +33,13 @@ EXTRA_ICONS = {"import", "export_file", "fabrication", "language", "add_zone", "
                # Clarify Selection rows: the item icons of BOARD_ITEM::GetMenuImage with no action of their own
                "add_dashed_line", "show_mod_edge", "drc", "add_pcb_target", "grid_select", "add_point",
                # the browse buttons of the grid cell editors (common/widgets/grid_text_button_helpers.cpp)
-               "small_library", "small_folder", "www"}
+               "small_library", "small_folder", "www",
+               # the small bitmap buttons of grids and file fields (WX_GRID add / edit / move / delete)
+               "small_plus", "small_trash", "small_up", "small_down", "small_edit", "small_refresh", "small_warning", "edit",
+               # DIALOG_ABOUT's notebook images (dialog_about.cpp:63-71)
+               "info", "recent", "preference", "editor", "library", "color_materials", "zip", "tools", "bug",
+               # the Calculator Tools frame (pcb_calculator_frame.cpp)
+               "calculator"}
 
 
 MAC_IF = r"#\s*if(?:def\s+|\s+defined\(\s*)__WX(?:OSX_)?MAC__[ \t]*\)?[^\n]*\n"

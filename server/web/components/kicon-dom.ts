@@ -39,3 +39,12 @@ export function setKicadIcon(el: SVGSVGElement, name: string): void {
   if (ic) { fill(el, ic); return; }
   if (g.KiCadIconsReady) void g.KiCadIconsReady.then(() => { if (el.dataset.want !== name) return; const i = G().KiCadIconFor?.(name); if (i) fill(el, i); }).catch(() => undefined);
 }
+
+/** A STD_BITMAP_BUTTON / BITMAP_BUTTON: a small themed button (.kd-bmp) showing one of KiCad's bitmaps, with a tooltip. */
+export function bitmapButton(name: string, title: string, onClick: () => void, opts: { id?: string; disabled?: boolean; size?: number } = {}): HTMLButtonElement {
+  const b = document.createElement("button"); b.type = "button"; b.className = "btn kd-bmp"; b.title = title; b.setAttribute("aria-label", title);
+  if (opts.id) b.id = opts.id;
+  if (opts.disabled) b.disabled = true;
+  b.append(kicadIcon(name, opts.size ?? 16)); b.addEventListener("click", (ev) => { ev.preventDefault(); onClick(); });
+  return b;
+}
