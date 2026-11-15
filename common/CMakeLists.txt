@@ -941,6 +941,7 @@ set( COMMON_SRCS
     board_printout.cpp
     clipboard.cpp
     collab/collab_cursor_item.cpp
+    collab/collab_proposals.cpp
     column_formatter.cpp
     commit.cpp
     draw_panel_gal.cpp

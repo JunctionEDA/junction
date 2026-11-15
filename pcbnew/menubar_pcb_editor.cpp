@@ -201,6 +201,7 @@ void PCB_EDIT_FRAME::doReCreateMenuBar()
     fileMenu->Add( PCB_ACTIONS::collabJoinSession );
     fileMenu->Add( PCB_ACTIONS::collabCopyLink );
     fileMenu->Add( PCB_ACTIONS::collabComments );
+    fileMenu->Add( PCB_ACTIONS::collabProposals );
     fileMenu->Add( PCB_ACTIONS::collabFollow );
     fileMenu->Add( PCB_ACTIONS::collabHistory );
     fileMenu->Add( PCB_ACTIONS::collabCompare );

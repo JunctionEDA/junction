@@ -82,6 +82,9 @@ public:
     virtual void OnJoinRefused( const wxString& aDocId, const wxString& aCode ) {}
     /// A comment thread changed (REST-driven; relayed live by the server).
     virtual void OnComment( const nlohmann::json& aMsg ) {}
+    /// An assistant proposed a change on this document, or somebody decided one
+    /// (the server's "proposal" notice: {action: "added" | "decided", proposal}).
+    virtual void OnProposal( const nlohmann::json& aMsg ) {}
     virtual void OnSessionStateChanged() {}
 };
 

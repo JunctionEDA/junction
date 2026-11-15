@@ -2095,6 +2095,12 @@ TOOL_ACTION SCH_ACTIONS::collabComments( TOOL_ACTION_ARGS()
         .FriendlyName( _( "Comments..." ) )
         .Tooltip( _( "Browse, answer and resolve the shared project's comment threads" ) ) );
 
+TOOL_ACTION SCH_ACTIONS::collabProposals( TOOL_ACTION_ARGS()
+        .Name( "eeschema.Collab.proposals" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Proposed Changes" ) )
+        .Tooltip( _( "Show the changes an assistant proposed on this sheet, to preview, accept or reject" ) ) );
+
 TOOL_ACTION SCH_ACTIONS::collabFollow( TOOL_ACTION_ARGS()
         .Name( "eeschema.Collab.follow" )
         .Scope( AS_GLOBAL )

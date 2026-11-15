@@ -1247,6 +1247,7 @@ void PCB_EDIT_FRAME::setupUIConditions()
     mgr->SetConditions( PCB_ACTIONS::collabGithub,       ENABLE( collabLive ) );
     mgr->SetConditions( PCB_ACTIONS::collabCompare,      ENABLE( collabLive ) );
     mgr->SetConditions( PCB_ACTIONS::collabComments,     ENABLE( collabLive ) );
+    mgr->SetConditions( PCB_ACTIONS::collabProposals,    ENABLE( collabLive ) );
     mgr->SetConditions( PCB_ACTIONS::collabFollow,       ENABLE( collabLive ) );
     mgr->SetConditions( PCB_ACTIONS::collabHistory,      ENABLE( collabLive ) );
 

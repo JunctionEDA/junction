@@ -884,7 +884,8 @@ void SCH_COLLAB::ApplyRemoteOp( SCHEMATIC& aSchematic, SCH_SCREEN* aScreen,
                                 const nlohmann::json& aChanges,
                                 const std::vector<const nlohmann::json*>& aNewerOwnChanges,
                                 TOOL_MANAGER* aToolMgr,
-                                const std::function<void( SCH_ITEM* )>& aBeforeFree )
+                                const std::function<void( SCH_ITEM* )>& aBeforeFree,
+                                const wxString& aLocalMessage )
 {
     SCH_COMMIT commit( aToolMgr );
     bool       sheetArrived = false;
@@ -1018,6 +1019,22 @@ void SCH_COLLAB::ApplyRemoteOp( SCHEMATIC& aSchematic, SCH_SCREEN* aScreen,
 
         if( !seen )
             detached.emplace_back( item, dynamic_cast<SCH_SCREEN*>( entry.m_screen ) );
+    }
+
+    if( !aLocalMessage.IsEmpty() )
+    {
+        // A local edit, pushed like one: the undo list takes what the push removes, so
+        // nothing is freed, and the usual cleanup runs and is sent along with it.
+        if( !commit.Empty() )
+            commit.Push( aLocalMessage );
+
+        if( sheetArrived )
+        {
+            aSchematic.RefreshHierarchy();
+            addMissingSymbolInstances( aSchematic );
+        }
+
+        return;
     }
 
     if( !commit.Empty() )
@@ -2665,6 +2682,69 @@ bool SCH_COLLAB_SYNC::applyOp( const PENDING_OP& aOp )
 
     saveMissingLibraries( aOp.changes );
     ensureSheetDocs( aOp.docId, aOp.changes, false );
+
+    return true;
+}
+
+
+bool SCH_COLLAB_SYNC::HasItem( const wxString& aDocId, const KIID& aId ) const
+{
+    SCH_SCREEN* screen = screenForDocId( aDocId );
+
+    if( !screen )
+        return false;
+
+    for( SCH_ITEM* item : screen->Items() )
+    {
+        if( item->m_Uuid == aId )
+            return true;
+    }
+
+    return false;
+}
+
+
+bool SCH_COLLAB_SYNC::ApplyLocalChanges( const wxString& aDocId, const nlohmann::json& aChanges,
+                                         const wxString& aMessage )
+{
+    SCH_SCREEN* screen = screenForDocId( aDocId );
+
+    if( !screen || m_applyingRemote || !aChanges.is_array() || aMessage.IsEmpty() )
+        return false;
+
+    if( aChanges.empty() )
+        return true;
+
+    // As in applyOp(): the overlay may hold pointers to items this edit replaces.
+    SCH_COLLAB_TOOL* collabTool = m_frame->GetToolManager()
+                                          ? m_frame->GetToolManager()->GetTool<SCH_COLLAB_TOOL>()
+                                          : nullptr;
+
+    if( collabTool )
+        collabTool->ForgetGhostItems();
+
+    // Not under m_applyingRemote: the push is to be captured and sent like any local edit
+    // (which also registers the document of a sheet it adds).
+    SCH_COLLAB::ApplyRemoteOp( m_frame->Schematic(), screen, aChanges, {},
+                               m_frame->GetToolManager(), {}, aMessage );
+
+    if( collabTool )
+        collabTool->RefreshOverlay();
+
+    if( m_frame->GetCanvas() )
+    {
+        std::function<void( SCH_ITEM* )> repaint =
+                [this]( SCH_ITEM* aItem )
+                {
+                    m_frame->GetCanvas()->GetView()->Update( aItem, KIGFX::REPAINT );
+                };
+
+        SCH_SHEET_PATH path = m_frame->Schematic().Hierarchy().FindSheetForScreen( screen );
+        screen->TestDanglingEnds( path.size() > 0 ? &path : nullptr, &repaint );
+        m_frame->GetCanvas()->Refresh();
+    }
+
+    saveMissingLibraries( aChanges );
 
     return true;
 }

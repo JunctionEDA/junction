@@ -151,11 +151,17 @@ bool ApplyItemChange( SCHEMATIC& aSchematic, SCH_SCREEN* aScreen, const nlohmann
  * Freeing by what was *asked* for instead left freed items in the screen's RTree, where
  * the next sheet plot walked them.  @p aBeforeFree runs for each item about to be freed
  * (the frame purges it from the undo stacks there).
+ *
+ * With @p aLocalMessage the same changes are made as a local edit of that name instead: an
+ * ordinary, undoable push (so the undo list owns what it removes and nothing is freed
+ * here), which the capture hooks send to the others like anything the person drew.  That
+ * is how an accepted proposal lands -- see SCH_COLLAB_SYNC::ApplyLocalChanges().
  */
 void ApplyRemoteOp( SCHEMATIC& aSchematic, SCH_SCREEN* aScreen, const nlohmann::json& aChanges,
                     const std::vector<const nlohmann::json*>& aNewerOwnChanges,
                     TOOL_MANAGER* aToolMgr,
-                    const std::function<void( SCH_ITEM* )>& aBeforeFree = {} );
+                    const std::function<void( SCH_ITEM* )>& aBeforeFree = {},
+                    const wxString& aLocalMessage = wxEmptyString );
 
 /**
  * The server project id a session must be left with once @p aProject has been folded in.
@@ -198,6 +204,20 @@ public:
 
     /// True while a remote op batch is being applied (echo suppression).
     bool IsApplyingRemote() const { return m_applyingRemote; }
+
+    /**
+     * Make wire-format changes on the sheet of @p aDocId as one local edit: one undo step
+     * named @p aMessage, sent to the session like any edit made by hand.  For a change that
+     * reached this editor some other way than as an op -- a proposal the person accepted.
+     *
+     * @return false when it cannot be made now (the sheet is not open here, or a remote op
+     *         is being applied).
+     */
+    bool ApplyLocalChanges( const wxString& aDocId, const nlohmann::json& aChanges,
+                            const wxString& aMessage );
+
+    /// Whether the sheet of @p aDocId holds an item with this uuid.
+    bool HasItem( const wxString& aDocId, const KIID& aId ) const;
 
     /**
      * SCH_COMMIT::Push hook, called before pushSchEdit() while the before-images in

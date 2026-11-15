@@ -103,11 +103,17 @@ bool ApplyItemChange( BOARD* aBoard, const nlohmann::json& aChange, BOARD_COMMIT
  * Freeing by what was *asked* for instead left freed items in the board's containers.
  * @p aBeforeFree runs for each item about to be freed (the frame purges it from the undo
  * stacks there).
+ *
+ * With @p aLocalMessage the same changes are made as a local edit of that name instead: an
+ * ordinary, undoable push (so the undo list owns what it removes and nothing is freed
+ * here), which the capture hooks send to the others like anything the person drew.  That
+ * is how an accepted proposal lands -- see PCB_COLLAB_SYNC::ApplyLocalChanges().
  */
 void ApplyRemoteOp( BOARD* aBoard, const nlohmann::json& aChanges,
                     const std::vector<const nlohmann::json*>& aNewerOwnChanges,
                     TOOL_MANAGER* aToolMgr, KIGFX::PCB_VIEW* aView = nullptr,
-                    const std::function<void( BOARD_ITEM* )>& aBeforeFree = {} );
+                    const std::function<void( BOARD_ITEM* )>& aBeforeFree = {},
+                    const wxString& aLocalMessage = wxEmptyString );
 
 } // namespace PCB_COLLAB
 
@@ -129,6 +135,15 @@ public:
 
     /// True while a remote op batch is being applied (echo suppression).
     bool IsApplyingRemote() const { return m_applyingRemote; }
+
+    /**
+     * Make wire-format changes as one local edit: one undo step named @p aMessage, sent to
+     * the session like any edit made by hand.  For a change that reached this editor some
+     * other way than as an op -- a proposal the person accepted.
+     *
+     * @return false when it cannot be made now (no board, or a remote op is being applied).
+     */
+    bool ApplyLocalChanges( const nlohmann::json& aChanges, const wxString& aMessage );
 
     /**
      * BOARD_COMMIT::Push hook, called before the entries are applied while the

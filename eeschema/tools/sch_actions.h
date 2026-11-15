@@ -367,6 +367,7 @@ public:
     static TOOL_ACTION collabCompare;
     static TOOL_ACTION collabVendorParts;
     static TOOL_ACTION collabComments;
+    static TOOL_ACTION collabProposals;
     static TOOL_ACTION collabFollow;
     static TOOL_ACTION collabStartSession;
     static TOOL_ACTION collabJoinSession;

@@ -668,7 +668,8 @@ bool PCB_COLLAB::ApplyItemChange( BOARD* aBoard, const nlohmann::json& aChange,
 void PCB_COLLAB::ApplyRemoteOp( BOARD* aBoard, const nlohmann::json& aChanges,
                                 const std::vector<const nlohmann::json*>& aNewerOwnChanges,
                                 TOOL_MANAGER* aToolMgr, KIGFX::PCB_VIEW* aView,
-                                const std::function<void( BOARD_ITEM* )>& aBeforeFree )
+                                const std::function<void( BOARD_ITEM* )>& aBeforeFree,
+                                const wxString& aLocalMessage )
 {
     BOARD_COMMIT commit( aToolMgr );
 
@@ -800,6 +801,15 @@ void PCB_COLLAB::ApplyRemoteOp( BOARD* aBoard, const nlohmann::json& aChanges,
 
         if( item && std::find( detached.begin(), detached.end(), item ) == detached.end() )
             detached.push_back( item );
+    }
+
+    if( !aLocalMessage.IsEmpty() )
+    {
+        // A local edit: the undo list takes what the push removes, so nothing is freed.
+        if( !commit.Empty() )
+            commit.Push( aLocalMessage );
+
+        return;
     }
 
     if( !commit.Empty() )
@@ -2340,6 +2350,44 @@ void PCB_COLLAB_SYNC::applyOp( const PENDING_OP& aOp )
         collabTool->RefreshOverlay();
 
     saveMissingLibraries( aOp.changes );
+}
+
+
+bool PCB_COLLAB_SYNC::ApplyLocalChanges( const nlohmann::json& aChanges, const wxString& aMessage )
+{
+    BOARD* board = m_frame->GetBoard();
+
+    if( !board || m_applyingRemote || !aChanges.is_array() || aMessage.IsEmpty() )
+        return false;
+
+    if( aChanges.empty() )
+        return true;
+
+    KIGFX::PCB_VIEW* view = nullptr;
+
+    if( m_frame->GetCanvas() )
+        view = static_cast<KIGFX::PCB_VIEW*>( m_frame->GetCanvas()->GetView() );
+
+    // As in applyOp(): the overlay may hold pointers to items this edit replaces.
+    PCB_COLLAB_TOOL* collabTool = m_frame->GetToolManager()
+                                          ? m_frame->GetToolManager()->GetTool<PCB_COLLAB_TOOL>()
+                                          : nullptr;
+
+    if( collabTool )
+        collabTool->ForgetGhostItems();
+
+    // Not under m_applyingRemote: the push is to be captured and sent like any local edit.
+    PCB_COLLAB::ApplyRemoteOp( board, aChanges, {}, m_frame->GetToolManager(), view, {}, aMessage );
+
+    if( collabTool )
+        collabTool->RefreshOverlay();
+
+    saveMissingLibraries( aChanges );
+
+    if( m_frame->GetCanvas() )
+        m_frame->GetCanvas()->Refresh();
+
+    return true;
 }
 
 

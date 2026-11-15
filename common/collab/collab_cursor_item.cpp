@@ -31,6 +31,7 @@
 #include <math/util.h>
 #include <render_settings.h>
 #include <view/view.h>
+#include <wx/arrstr.h>
 
 using KIGFX::COLOR4D;
 
@@ -60,8 +61,12 @@ void COLLAB_CURSOR_ITEM::ViewDraw( int aLayer, KIGFX::VIEW* aView ) const
     KIGFX::GAL*  gal = aView->GetGAL();
     const double scale = gal->GetWorldScale();
 
-    if( scale <= 0.0 || ( m_peers.empty() && m_commentPins.empty() ) )
+    if( scale <= 0.0
+        || ( m_peers.empty() && m_commentPins.empty() && m_proposalBoxes.empty()
+             && m_proposalSegs.empty() ) )
+    {
         return;
+    }
 
     // World units per screen pixel, so everything holds a constant on-screen size.
     const double w = 1.0 / scale;
@@ -70,6 +75,46 @@ void COLLAB_CURSOR_ITEM::ViewDraw( int aLayer, KIGFX::VIEW* aView ) const
     const double textPx = 16.0;      // name tag glyph height
     const double selLinePx = 1.5;    // selection outline width
     const double padPx = 5.0;        // name tag padding
+
+    // The preview of a proposed change, under everything a person is doing: the lines it
+    // would add, then one outline per touched item -- green for new, amber for changed,
+    // red for removed, the colours the web editor uses for the same preview.
+    if( !m_proposalBoxes.empty() || !m_proposalSegs.empty() )
+    {
+        const COLOR4D addColor( 0.12, 0.62, 0.33, 1.0 );
+        const COLOR4D modifyColor( 0.85, 0.56, 0.02, 1.0 );
+        const COLOR4D removeColor( 0.84, 0.27, 0.27, 1.0 );
+
+        gal->SetIsFill( false );
+        gal->SetIsStroke( true );
+        gal->SetStrokeColor( addColor.WithAlpha( 0.75 ) );
+
+        for( const REMOTE_GHOST_SEG& seg : m_proposalSegs )
+        {
+            gal->SetLineWidth( static_cast<float>(
+                    std::max( static_cast<double>( seg.width ), 2.0 * w ) ) );
+            gal->DrawLine( seg.a, seg.b );
+        }
+
+        for( const PROPOSAL_BOX& entry : m_proposalBoxes )
+        {
+            const COLOR4D color = entry.kind == PROPOSAL_BOX::ADD      ? addColor
+                                  : entry.kind == PROPOSAL_BOX::REMOVE ? removeColor
+                                                                       : modifyColor;
+            BOX2I box = entry.box;
+
+            // A wire or a track is as thin as its box: give the outline room to show.
+            box.Inflate( KiROUND( 3.0 * w ) );
+
+            gal->SetIsFill( true );
+            gal->SetIsStroke( true );
+            gal->SetFillColor( color.WithAlpha( 0.12 ) );
+            gal->SetStrokeColor( color.WithAlpha( 0.95 ) );
+            gal->SetLineWidth( static_cast<float>( 2.0 * w ) );
+            gal->DrawRectangle( VECTOR2D( box.GetLeft(), box.GetTop() ),
+                                VECTOR2D( box.GetRight(), box.GetBottom() ) );
+        }
+    }
 
     for( const REMOTE_PEER_DRAW& peer : m_peers )
     {
@@ -188,7 +233,8 @@ void COLLAB_CURSOR_ITEM::ViewDraw( int aLayer, KIGFX::VIEW* aView ) const
             {
                 gal->SetStrokeColor( peer.color.WithAlpha( 0.9 ) );
                 gal->SetLineWidth( static_cast<float>( selLinePx * w ) );
-                gal->DrawRectangle( box );
+                gal->DrawRectangle( VECTOR2D( box.GetLeft(), box.GetTop() ),
+                                VECTOR2D( box.GetRight(), box.GetBottom() ) );
             }
         }
 
@@ -258,6 +304,75 @@ void COLLAB_CURSOR_ITEM::ViewDraw( int aLayer, KIGFX::VIEW* aView ) const
                         VECTOR2I( KiROUND( chipOrigin.x + pad ),
                                   KiROUND( ( chipOrigin.y + chipEnd.y ) / 2.0 ) ),
                         textAttrs, KIFONT::METRICS::Default() );
+        }
+
+        if( peer.note.IsEmpty() )
+            continue;
+
+        // An assistant's note about what it points at: a dark chip under the name tag,
+        // outlined in the peer colour, broken into lines of about forty characters.
+        std::vector<wxString> lines;
+        wxString              line;
+
+        for( const wxString& word : wxSplit( peer.note, ' ' ) )
+        {
+            if( !line.IsEmpty() && line.length() + word.length() + 1 > 40 )
+            {
+                lines.push_back( line );
+                line.clear();
+            }
+
+            if( !line.IsEmpty() )
+                line += wxS( " " );
+
+            line += word;
+        }
+
+        if( !line.IsEmpty() )
+            lines.push_back( line );
+
+        if( lines.size() > 4 )
+            lines.resize( 4 );
+
+        double noteWidth = 0.0;
+
+        for( const wxString& text : lines )
+        {
+            const VECTOR2I size = font->StringBoundaryLimits( text, textAttrs.m_Size,
+                                                              textAttrs.m_StrokeWidth, false, false,
+                                                              KIFONT::METRICS::Default() );
+            noteWidth = std::max( noteWidth, static_cast<double>( size.x ) );
+        }
+
+        const double   lineH = 1.45 * textH;
+        const VECTOR2D noteOrigin( chipOrigin.x, chipEnd.y + 0.5 * pad );
+        const VECTOR2D noteEnd = noteOrigin + VECTOR2D( noteWidth + 2.0 * pad,
+                                                        lineH * lines.size() + 2.0 * pad
+                                                                - ( lineH - textH ) );
+
+        gal->SetIsFill( true );
+        gal->SetIsStroke( true );
+        gal->SetFillColor( COLOR4D( 0.07, 0.07, 0.08, 0.92 ) );
+        gal->SetStrokeColor( peer.color );
+        gal->SetLineWidth( static_cast<float>( 1.0 * w ) );
+        gal->DrawRectangle( noteOrigin, noteEnd );
+
+        gal->SetIsFill( false );
+        gal->SetIsStroke( true );
+        gal->SetStrokeColor( COLOR4D( 1.0, 1.0, 1.0, 1.0 ) );
+        gal->SetLineWidth( static_cast<float>( textAttrs.m_StrokeWidth ) );
+
+        {
+            KIGFX::GAL_SCOPED_ATTRS depthScope( *gal, KIGFX::GAL_SCOPED_ATTRS::LAYER_DEPTH );
+            gal->AdvanceDepth();
+
+            for( size_t ii = 0; ii < lines.size(); ++ii )
+            {
+                font->Draw( gal, lines[ii],
+                            VECTOR2I( KiROUND( noteOrigin.x + pad ),
+                                      KiROUND( noteOrigin.y + pad + 0.5 * textH + ii * lineH ) ),
+                            textAttrs, KIFONT::METRICS::Default() );
+            }
         }
     }
 

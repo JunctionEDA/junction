@@ -18,6 +18,13 @@
  */
 
 #include "pcb_collab_tool.h"
+#include <algorithm>
+#include <cmath>
+#include <base_units.h>
+#include <board.h>
+#include <board_design_settings.h>
+#include <netclass.h>
+#include <project/net_settings.h>
 #include <pcb_shape.h>
 
 #include "pcb_collab_sync.h"
@@ -768,6 +775,7 @@ void PCB_COLLAB_TOOL::joinDoc( const wxString& aDocId, const wxString& aDocPath 
     }
 
     fetchComments();
+    proposals()->Refresh();
 
     // Surface the version history beside the canvas for the session.
     if( COLLAB_HISTORY_PANEL* panel = historyPanel() )
@@ -1009,6 +1017,181 @@ long long jsonNumber( const nlohmann::json& aObj, const char* aKey, long long aD
     return it != aObj.end() && it->is_number() ? it->get<long long>() : aDefault;
 }
 } // anonymous namespace
+
+
+/// Bring an area into view with room around it.
+static void focusOnArea( EDA_DRAW_FRAME* aFrame, KIGFX::VIEW* aView, const BOX2I& aArea, int aMargin )
+{
+    if( !aFrame || !aView || !aFrame->GetCanvas() )
+        return;
+
+    BOX2I box = aArea;
+    box.Inflate( std::max( box.GetWidth(), box.GetHeight() ) / 2 + aMargin );
+
+    wxSize   client = aFrame->GetCanvas()->GetClientSize();
+    VECTOR2D world = aView->ToWorld( VECTOR2D( client.x, client.y ), false );
+
+    if( box.GetWidth() > 0 && box.GetHeight() > 0 && world.x > 0 && world.y > 0 )
+    {
+        aView->SetScale( aView->GetScale() * std::min( std::abs( world.x ) / box.GetWidth(),
+                                                       std::abs( world.y ) / box.GetHeight() ) );
+    }
+
+    aView->SetCenter( VECTOR2D( box.Centre().x, box.Centre().y ) );
+    aFrame->GetCanvas()->Refresh();
+}
+
+
+COLLAB_PROPOSALS* PCB_COLLAB_TOOL::proposals()
+{
+    if( m_proposals )
+        return m_proposals.get();
+
+    COLLAB_PROPOSALS::HOST host;
+
+    host.docId = [this]() { return m_docId; };
+    host.iuPerMm = pcbIUScale.IU_PER_MM;
+
+    host.hasItem = [this]( const std::string& aId )
+    {
+        return board() && board()->ResolveItem( KIID( wxString::FromUTF8( aId ) ), true ) != nullptr;
+    };
+
+    host.apply = [this]( const nlohmann::json& aChanges, const wxString& aMessage )
+    {
+        return m_sync && m_sync->ApplyLocalChanges( aChanges, aMessage );
+    };
+
+    // The rules a proposal carries are the project's: the Default (or named) net class
+    // and the board minimums, in millimetres -- what the web editor writes into the
+    // project file.  Here they go into the board's design settings, saved with the board.
+    host.applyRules = [this]( const nlohmann::json& aRules )
+    {
+        if( !board() || !aRules.is_object() )
+            return;
+
+        BOARD_DESIGN_SETTINGS& bds = board()->GetDesignSettings();
+
+        auto number = [&]( const char* aKey ) -> std::optional<int>
+        {
+            if( aRules.contains( aKey ) && aRules[ aKey ].is_number() )
+                return pcbIUScale.mmToIU( aRules[ aKey ].get<double>() );
+
+            return std::nullopt;
+        };
+
+        if( bds.m_NetSettings )
+        {
+            wxString name = aRules.contains( "net_class" ) && aRules[ "net_class" ].is_string()
+                                    ? wxString::FromUTF8( aRules[ "net_class" ].get<std::string>() )
+                                    : wxString( NETCLASS::Default );
+
+            std::shared_ptr<NETCLASS> netclass;
+
+            if( name == NETCLASS::Default )
+            {
+                netclass = bds.m_NetSettings->GetDefaultNetclass();
+            }
+            else if( bds.m_NetSettings->HasNetclass( name ) )
+            {
+                netclass = bds.m_NetSettings->GetNetclasses().at( name );
+            }
+            else
+            {
+                netclass = std::make_shared<NETCLASS>( name );
+                bds.m_NetSettings->SetNetclass( name, netclass );
+            }
+
+            if( netclass )
+            {
+                if( auto v = number( "clearance" ) )
+                    netclass->SetClearance( *v );
+
+                if( auto v = number( "track_width" ) )
+                    netclass->SetTrackWidth( *v );
+
+                if( auto v = number( "via_diameter" ) )
+                {
+                    netclass->SetViaDiameter( *v );
+
+                    // A via the net class asks for is one the board's minimums allow.
+                    if( bds.m_ViasMinSize > *v )
+                        bds.m_ViasMinSize = *v;
+                }
+
+                if( auto v = number( "via_drill" ) )
+                {
+                    netclass->SetViaDrill( *v );
+
+                    if( bds.m_MinThroughDrill > *v )
+                        bds.m_MinThroughDrill = *v;
+                }
+
+                if( netclass->HasViaDiameter() && netclass->HasViaDrill()
+                    && netclass->GetViaDiameter() > netclass->GetViaDrill() )
+                {
+                    int annular = ( netclass->GetViaDiameter() - netclass->GetViaDrill() ) / 2;
+
+                    if( bds.m_ViasMinAnnularWidth > annular )
+                        bds.m_ViasMinAnnularWidth = annular;
+                }
+            }
+        }
+
+        if( auto v = number( "min_track_width" ) )
+            bds.m_TrackMinWidth = *v;
+
+        if( auto v = number( "min_clearance" ) )
+            bds.m_MinClearance = *v;
+
+        if( auto v = number( "edge_clearance" ) )
+            bds.m_CopperEdgeClearance = *v;
+
+        if( auto v = number( "hole_clearance" ) )
+            bds.m_HoleClearance = *v;
+
+        if( auto v = number( "min_text_height" ) )
+            bds.m_MinSilkTextHeight = *v;
+
+        frame<PCB_EDIT_FRAME>()->OnModify();
+    };
+
+    host.setPreview = [this]( std::vector<PROPOSAL_BOX>&& aBoxes,
+                              std::vector<REMOTE_GHOST_SEG>&& aSegs )
+    {
+        m_cursorItem.SetProposalPreview( std::move( aBoxes ), std::move( aSegs ) );
+        rebuildOverlay();
+    };
+
+    host.focus = [this]( const BOX2I& aArea )
+    {
+        focusOnArea( frame<PCB_EDIT_FRAME>(), getView(), aArea, pcbIUScale.mmToIU( 3 ) );
+    };
+
+    m_proposals = std::make_unique<COLLAB_PROPOSALS>( frame<PCB_EDIT_FRAME>(), std::move( host ) );
+    return m_proposals.get();
+}
+
+
+void PCB_COLLAB_TOOL::OnProposal( const nlohmann::json& aMsg )
+{
+    if( !m_docId.IsEmpty() )
+        proposals()->OnNotice( aMsg );
+}
+
+
+int PCB_COLLAB_TOOL::ShowProposals( const TOOL_EVENT& aEvent )
+{
+    if( m_docId.IsEmpty() )
+    {
+        frame<PCB_EDIT_FRAME>()->ShowInfoBarMsg(
+                _( "Proposed changes live on shared projects; start or join a session first." ) );
+        return 0;
+    }
+
+    proposals()->ShowBanner();
+    return 0;
+}
 
 
 void PCB_COLLAB_TOOL::fetchComments()
@@ -1409,6 +1592,12 @@ void PCB_COLLAB_TOOL::endSession()
 void PCB_COLLAB_TOOL::leaveDoc()
 {
     m_sync.reset();
+
+    if( m_proposals )
+    {
+        m_cursorItem.SetProposalPreview( {}, {} );
+        m_proposals->Clear();
+    }
 
     if( !m_docId.IsEmpty() )
         COLLAB_SESSION::Get().LeaveDoc( m_docId );
@@ -2184,6 +2373,10 @@ void PCB_COLLAB_TOOL::rebuildOverlay()
             draw.label = peer.name.IsEmpty() ? peer.login : peer.name;
             draw.color = COLLAB_CURSOR_ITEM::ParsePeerColor( peer.color );
 
+            // An assistant's highlight carries a short note about what it points at.
+            if( peer.state.contains( "ai" ) && peer.state[ "ai" ].is_object() )
+                draw.note = wxString::FromUTF8( peer.state[ "ai" ].value( "note", "" ) );
+
             if( peer.state.contains( "cursor" ) && peer.state[ "cursor" ].is_array()
                 && peer.state[ "cursor" ].size() >= 2 )
             {
@@ -2435,6 +2628,7 @@ void PCB_COLLAB_TOOL::setTransitions()
     Go( &PCB_COLLAB_TOOL::JoinSession,       PCB_ACTIONS::collabJoinSession.MakeEvent() );
     Go( &PCB_COLLAB_TOOL::LeaveSession,      PCB_ACTIONS::collabLeaveSession.MakeEvent() );
     Go( &PCB_COLLAB_TOOL::ShowComments,      PCB_ACTIONS::collabComments.MakeEvent() );
+    Go( &PCB_COLLAB_TOOL::ShowProposals,     PCB_ACTIONS::collabProposals.MakeEvent() );
     Go( &PCB_COLLAB_TOOL::ShowHistory,       PCB_ACTIONS::collabHistory.MakeEvent() );
     Go( &PCB_COLLAB_TOOL::CopyShareLink,     PCB_ACTIONS::collabCopyLink.MakeEvent() );
     Go( &PCB_COLLAB_TOOL::OpenGithubSync,    PCB_ACTIONS::collabGithub.MakeEvent() );

@@ -330,6 +330,29 @@ KICOMMON_API std::optional<nlohmann::json> CreateComment( const wxString& aServe
 KICOMMON_API bool SetCommentResolved( const wxString& aServerUrl, const wxString& aToken,
                                       long long aCommentId, bool aResolved );
 
+/// GET /api/docs/{id}/proposals?status=pending -> { proposals: [...] }: the changes an
+/// assistant proposed on a document that nobody has decided yet, newest first, without
+/// their change lists.
+KICOMMON_API std::optional<nlohmann::json> ListProposals( const wxString& aServerUrl,
+                                                          const wxString& aToken,
+                                                          const wxString& aDocId );
+
+/// GET /api/proposals/{id}: one proposal with its body (changes, preview) and "stale",
+/// the server's word on whether an item it changes was edited since.
+KICOMMON_API std::optional<nlohmann::json> GetProposal( const wxString& aServerUrl,
+                                                        const wxString& aToken,
+                                                        const wxString& aProposalId,
+                                                        ERROR_INFO* aError = nullptr );
+
+/// PATCH /api/proposals/{id} {status, reason}: settle a pending proposal ("accepted",
+/// "rejected", "stale").  Fails with status 409 when someone else decided it first.
+KICOMMON_API std::optional<nlohmann::json> DecideProposal( const wxString& aServerUrl,
+                                                           const wxString& aToken,
+                                                           const wxString& aProposalId,
+                                                           const wxString& aStatus,
+                                                           const wxString& aReason,
+                                                           ERROR_INFO* aError = nullptr );
+
 KICOMMON_API std::optional<nlohmann::json> Me( const wxString& aServerUrl,
                                               const wxString& aToken,
                                                ERROR_INFO* aError = nullptr );

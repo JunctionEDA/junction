@@ -26,6 +26,7 @@
 
 #include <collab/collab_auth.h>
 #include <collab/collab_cursor_item.h>
+#include <collab/collab_proposals.h>
 #include <collab/collab_session.h>
 #include <sch_edit_frame.h>
 #include <tools/sch_tool_base.h>
@@ -78,6 +79,10 @@ public:
     void OnAck( const wxString& aClientOpId, long long aSeq ) override;
     void OnOpRejected( const wxString& aClientOpId, const wxString& aCode ) override;
     void OnComment( const nlohmann::json& aMsg ) override;
+    void OnProposal( const nlohmann::json& aMsg ) override;
+
+    ///< Bring back the banner of the changes an assistant proposed on this sheet.
+    int ShowProposals( const TOOL_EVENT& aEvent );
 
     ///< Toggle the version-history sidebar pane.
     int ShowHistory( const TOOL_EVENT& aEvent );
@@ -203,6 +208,12 @@ private:
     COLLAB_CURSOR_ITEM m_cursorItem;
 
     std::unique_ptr<SCH_COLLAB_SYNC> m_sync;      ///< live while a session is active
+
+    ///< The proposals of the sheet on display (banner, preview, Accept/Reject), made on
+    ///< first use.
+    COLLAB_PROPOSALS* proposals();
+
+    std::unique_ptr<COLLAB_PROPOSALS> m_proposals;
 
     std::map<wxString, wxString> m_docIdByPath;   ///< project-relative path -> server doc id
 

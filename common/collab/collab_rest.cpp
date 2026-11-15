@@ -891,6 +891,50 @@ bool COLLAB_REST::SetCommentResolved( const wxString& aServerUrl, const wxString
 }
 
 
+std::optional<nlohmann::json> COLLAB_REST::ListProposals( const wxString& aServerUrl,
+                                                           const wxString& aToken,
+                                                           const wxString& aDocId )
+{
+    KICAD_CURL_EASY curl;
+    setupRequest( curl,
+                  aServerUrl + wxS( "/api/docs/" ) + aDocId + wxS( "/proposals?status=pending" ),
+                  aToken );
+
+    return performJson( curl );
+}
+
+
+std::optional<nlohmann::json> COLLAB_REST::GetProposal( const wxString& aServerUrl,
+                                                         const wxString& aToken,
+                                                         const wxString& aProposalId,
+                                                         ERROR_INFO* aError )
+{
+    KICAD_CURL_EASY curl;
+    setupRequest( curl, aServerUrl + wxS( "/api/proposals/" ) + aProposalId, aToken );
+
+    return performJson( curl, aError );
+}
+
+
+std::optional<nlohmann::json> COLLAB_REST::DecideProposal( const wxString& aServerUrl,
+                                                            const wxString& aToken,
+                                                            const wxString& aProposalId,
+                                                            const wxString& aStatus,
+                                                            const wxString& aReason,
+                                                            ERROR_INFO* aError )
+{
+    KICAD_CURL_EASY curl;
+    setupRequest( curl, aServerUrl + wxS( "/api/proposals/" ) + aProposalId, aToken );
+
+    nlohmann::json body = { { "status", aStatus.ToStdString( wxConvUTF8 ) },
+                            { "reason", aReason.ToStdString( wxConvUTF8 ) } };
+    setJsonBody( curl, body );
+    curl_easy_setopt( curl.GetCurl(), CURLOPT_CUSTOMREQUEST, "PATCH" );
+
+    return performJson( curl, aError );
+}
+
+
 std::optional<nlohmann::json> COLLAB_REST::Me( const wxString& aServerUrl, const wxString& aToken,
                                                ERROR_INFO* aError )
 {

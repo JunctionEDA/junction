@@ -682,6 +682,11 @@ void COLLAB_SESSION::routeMessage( const nlohmann::json& aMsg )
         if( adapter )
             adapter->OnComment( aMsg );
     }
+    else if( type == "proposal" )
+    {
+        if( adapter )
+            adapter->OnProposal( aMsg );
+    }
 }
 
 

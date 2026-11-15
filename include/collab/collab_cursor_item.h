@@ -75,11 +75,26 @@ struct COMMENT_PIN
 };
 
 
+/// One item a proposed change touches, drawn as an outline in the colour of what would
+/// happen to it (see COLLAB_PROPOSALS).
+struct PROPOSAL_BOX
+{
+    enum KIND { ADD, MODIFY, REMOVE };
+
+    BOX2I box;
+    KIND  kind = MODIFY;
+};
+
+
 struct REMOTE_PEER_DRAW
 {
     VECTOR2I                       cursor;
     bool                           hasCursor = false;
     wxString                       label;
+
+    /// What an assistant says about the place it points at (presence state.ai.note),
+    /// drawn as a second chip under the name tag.  Empty for people.
+    wxString                       note;
     KIGFX::COLOR4D                 color;
     std::vector<BOX2I>             selectionBoxes;
     std::vector<REMOTE_GHOST_SEG>  ghostSegs;
@@ -113,6 +128,14 @@ public:
 
     void SetCommentPins( std::vector<COMMENT_PIN>&& aPins ) { m_commentPins = std::move( aPins ); }
 
+    /// The preview of a proposed change: an outline per touched item, and the tracks or
+    /// wires it would add as lines.  Empty clears it.
+    void SetProposalPreview( std::vector<PROPOSAL_BOX>&& aBoxes, std::vector<REMOTE_GHOST_SEG>&& aSegs )
+    {
+        m_proposalBoxes = std::move( aBoxes );
+        m_proposalSegs = std::move( aSegs );
+    }
+
     /**
      * Parse a server-supplied peer colour.
      *
@@ -144,4 +167,6 @@ public:
 private:
     std::vector<REMOTE_PEER_DRAW> m_peers;
     std::vector<COMMENT_PIN>      m_commentPins;
+    std::vector<PROPOSAL_BOX>     m_proposalBoxes;
+    std::vector<REMOTE_GHOST_SEG> m_proposalSegs;
 };

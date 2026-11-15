@@ -21,6 +21,9 @@
 
 #include "sch_collab_sync.h"
 
+#include <algorithm>
+#include <cmath>
+#include <base_units.h>
 #include <widgets/wx_infobar.h>
 #include <wx/hyperlink.h>
 #include <collab/collab_project.h>
@@ -716,6 +719,7 @@ void SCH_COLLAB_TOOL::beginSession( const nlohmann::json& aProject, const wxStri
     }
 
     fetchComments();
+    proposals()->Refresh();
 
     // Surface the version history beside the canvas for the session.
     if( COLLAB_HISTORY_PANEL* panel = historyPanel() )
@@ -771,6 +775,12 @@ void SCH_COLLAB_TOOL::endSession()
     m_timer.Stop();
     m_autoJoinRetry.Stop();
     m_sync.reset();
+
+    if( m_proposals )
+    {
+        m_cursorItem.SetProposalPreview( {}, {} );
+        m_proposals->Clear();
+    }
 
     // The checkpoint list and its Restore button belong to the project we are leaving.
     if( m_historyPanel )
@@ -1040,6 +1050,10 @@ void SCH_COLLAB_TOOL::onTimer( wxTimerEvent& aEvent )
     {
         m_lastSheetFile = sheetFile;
         rebuildOverlay();
+
+        // Another sheet is another document, with proposals of its own.
+        if( m_sync )
+            proposals()->Refresh();
     }
 
     auto docIt = m_docIdByPath.find( sheetFile );
@@ -1982,6 +1996,89 @@ int SCH_COLLAB_TOOL::ShowHistory( const TOOL_EVENT& aEvent )
 }
 
 
+/// Bring an area into view with room around it.
+static void focusOnArea( EDA_DRAW_FRAME* aFrame, KIGFX::VIEW* aView, const BOX2I& aArea, int aMargin )
+{
+    if( !aFrame || !aView || !aFrame->GetCanvas() )
+        return;
+
+    BOX2I box = aArea;
+    box.Inflate( std::max( box.GetWidth(), box.GetHeight() ) / 2 + aMargin );
+
+    wxSize   client = aFrame->GetCanvas()->GetClientSize();
+    VECTOR2D world = aView->ToWorld( VECTOR2D( client.x, client.y ), false );
+
+    if( box.GetWidth() > 0 && box.GetHeight() > 0 && world.x > 0 && world.y > 0 )
+    {
+        aView->SetScale( aView->GetScale() * std::min( std::abs( world.x ) / box.GetWidth(),
+                                                       std::abs( world.y ) / box.GetHeight() ) );
+    }
+
+    aView->SetCenter( VECTOR2D( box.Centre().x, box.Centre().y ) );
+    aFrame->GetCanvas()->Refresh();
+}
+
+
+COLLAB_PROPOSALS* SCH_COLLAB_TOOL::proposals()
+{
+    if( m_proposals )
+        return m_proposals.get();
+
+    COLLAB_PROPOSALS::HOST host;
+
+    // One sheet file is one document: the proposals on show are those of the sheet on
+    // display, and they follow it as the person moves through the hierarchy.
+    host.docId = [this]() { return currentDocId(); };
+    host.iuPerMm = schIUScale.IU_PER_MM;
+
+    host.hasItem = [this]( const std::string& aId )
+    {
+        return m_sync && m_sync->HasItem( currentDocId(), KIID( wxString::FromUTF8( aId ) ) );
+    };
+
+    host.apply = [this]( const nlohmann::json& aChanges, const wxString& aMessage )
+    {
+        return m_sync && m_sync->ApplyLocalChanges( currentDocId(), aChanges, aMessage );
+    };
+
+    host.setPreview = [this]( std::vector<PROPOSAL_BOX>&& aBoxes,
+                              std::vector<REMOTE_GHOST_SEG>&& aSegs )
+    {
+        m_cursorItem.SetProposalPreview( std::move( aBoxes ), std::move( aSegs ) );
+        rebuildOverlay();
+    };
+
+    host.focus = [this]( const BOX2I& aArea )
+    {
+        focusOnArea( m_frame, getView(), aArea, schIUScale.mmToIU( 10 ) );
+    };
+
+    m_proposals = std::make_unique<COLLAB_PROPOSALS>( m_frame, std::move( host ) );
+    return m_proposals.get();
+}
+
+
+void SCH_COLLAB_TOOL::OnProposal( const nlohmann::json& aMsg )
+{
+    if( m_sync )
+        proposals()->OnNotice( aMsg );
+}
+
+
+int SCH_COLLAB_TOOL::ShowProposals( const TOOL_EVENT& aEvent )
+{
+    if( !m_sync || currentDocId().IsEmpty() )
+    {
+        m_frame->ShowInfoBarMsg(
+                _( "Proposed changes live on shared projects; start or join a session first." ) );
+        return 0;
+    }
+
+    proposals()->ShowBanner();
+    return 0;
+}
+
+
 void SCH_COLLAB_TOOL::fetchComments()
 {
     std::shared_ptr<bool> alive = m_alive;
@@ -2185,6 +2282,10 @@ void SCH_COLLAB_TOOL::rebuildOverlay()
             REMOTE_PEER_DRAW draw;
             draw.label = peer.name.IsEmpty() ? peer.login : peer.name;
             draw.color = COLLAB_CURSOR_ITEM::ParsePeerColor( peer.color );
+
+            // An assistant's highlight carries a short note about what it points at.
+            if( peer.state.contains( "ai" ) && peer.state[ "ai" ].is_object() )
+                draw.note = wxString::FromUTF8( peer.state[ "ai" ].value( "note", "" ) );
 
             if( peer.state.contains( "cursor" ) && peer.state[ "cursor" ].is_array()
                 && peer.state[ "cursor" ].size() >= 2 )
@@ -2608,6 +2709,7 @@ void SCH_COLLAB_TOOL::setTransitions()
     Go( &SCH_COLLAB_TOOL::OpenCompare,       SCH_ACTIONS::collabCompare.MakeEvent() );
     Go( &SCH_COLLAB_TOOL::OpenVendorParts,   SCH_ACTIONS::collabVendorParts.MakeEvent() );
     Go( &SCH_COLLAB_TOOL::ShowComments,      SCH_ACTIONS::collabComments.MakeEvent() );
+    Go( &SCH_COLLAB_TOOL::ShowProposals,     SCH_ACTIONS::collabProposals.MakeEvent() );
     Go( &SCH_COLLAB_TOOL::FollowNextPeer,    SCH_ACTIONS::collabFollow.MakeEvent() );
 
     Go( &SCH_COLLAB_TOOL::onSelectionChange, EVENTS::PointSelectedEvent );

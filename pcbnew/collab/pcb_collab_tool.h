@@ -29,6 +29,7 @@
 
 #include <collab/collab_auth.h>
 #include <collab/collab_cursor_item.h>
+#include <collab/collab_proposals.h>
 #include <collab/collab_session.h>
 #include <tools/pcb_tool_base.h>
 
@@ -95,6 +96,10 @@ public:
     void OnAck( const wxString& aClientOpId, long long aSeq ) override;
     void OnOpRejected( const wxString& aClientOpId, const wxString& aCode ) override;
     void OnComment( const nlohmann::json& aMsg ) override;
+    void OnProposal( const nlohmann::json& aMsg ) override;
+
+    ///< Bring back the banner of the changes an assistant proposed on this board.
+    int ShowProposals( const TOOL_EVENT& aEvent );
 
     ///< Open the comment-threads dialog (modeless view over m_comments).
     int ShowComments( const TOOL_EVENT& aEvent );
@@ -321,6 +326,11 @@ class DIALOG_COLLAB_COMMENTS* m_commentsDlg = nullptr;
     void resolveComment( long long aRootId, bool aResolved );
 
     std::unique_ptr<PCB_COLLAB_SYNC> m_sync;  ///< live while the board doc is joined
+
+    ///< The proposals of the joined board (banner, preview, Accept/Reject), made on first use.
+    COLLAB_PROPOSALS* proposals();
+
+    std::unique_ptr<COLLAB_PROPOSALS> m_proposals;
 
     wxString       m_docId;      ///< server doc id of the joined board doc; empty when not joined
     wxString       m_docPath;    ///< project-relative board path the doc was joined for

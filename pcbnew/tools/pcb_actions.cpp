@@ -3472,6 +3472,12 @@ TOOL_ACTION PCB_ACTIONS::collabComments( TOOL_ACTION_ARGS()
         .FriendlyName( _( "Comments..." ) )
         .Tooltip( _( "Browse, answer and resolve the shared project's comment threads" ) ) );
 
+TOOL_ACTION PCB_ACTIONS::collabProposals( TOOL_ACTION_ARGS()
+        .Name( "pcbnew.Collab.proposals" )
+        .Scope( AS_GLOBAL )
+        .FriendlyName( _( "Proposed Changes" ) )
+        .Tooltip( _( "Show the changes an assistant proposed on this board, to preview, accept or reject" ) ) );
+
 TOOL_ACTION PCB_ACTIONS::collabHistory( TOOL_ACTION_ARGS()
         .Name( "pcbnew.Collab.history" )
         .Scope( AS_GLOBAL )

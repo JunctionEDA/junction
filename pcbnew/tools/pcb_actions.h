@@ -733,6 +733,7 @@ public:
     static TOOL_ACTION collabJoinSession;
     static TOOL_ACTION collabLeaveSession;
     static TOOL_ACTION collabComments;
+    static TOOL_ACTION collabProposals;
     static TOOL_ACTION collabHistory;
     static TOOL_ACTION collabCopyLink;
     static TOOL_ACTION collabGithub;
