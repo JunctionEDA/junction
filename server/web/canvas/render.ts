@@ -135,8 +135,8 @@ export function tracePad(ctx: PathSink, g: PadGeom): void {
  *                                through the document origin in the theme's grid_axes colour, grid shown or not;
  *   gridStyle      (both)      — "dots" (default), "lines" or "crosses" (KiCad's grid.style 0 / 1 / 2); gridMinSpacing
  *                                is the minimum spacing of drawn grid marks in px (default 10); gridLineWidth the
- *                                mark thickness in device px (grid.line_width, 1); gridShowMajor false draws every
- *                                mark minor (grid.show_major);
+ *                                mark thickness (grid.line_width, 1: gridMinorPx); gridShowMajor false is GAL's
+ *                                m_gridTick 0 (grid.show_major): no major marks, the grid thinned by 2 (gridTick);
  *   showHiddenText (board)     — draw the hidden fp_text / properties (kept in item.hiddenGeom, tagged
  *                                hiddenText, outside the hit boxes) at HIDDEN_TEXT_ALPHA; KiCad has no
  *                                painter rule for this (this version dropped LAYER_HIDDEN_TEXT).
@@ -406,21 +406,21 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     vx0 = Math.max(fx0, Math.min(rx0, rx1)); vx1 = Math.min(fx1, Math.max(rx0, rx1));
     vy0 = Math.max(fy0, (region[1] - m - ty) / s); vy1 = Math.min(fy1, (region[3] + m - ty) / s);
   }
-  // grid: GAL::DrawGrid.  The pitch is multiplied by the coarse tick (10) until grid marks are more than
-  // grid.min_spacing (10 px; 20 for small crosses) apart; every 10th row / column of the drawn grid is major:
-  // twice the dot size, line width or cross size.  Styles: "dots" (KiCad's default), "lines", "crosses".
+  // grid: GAL::DrawGrid.  The pitch is multiplied by the coarse tick (10; 2 with Show major grid off) until grid
+  // marks are more than grid.min_spacing (10 px; 20 for small crosses) apart; every 10th row / column of the drawn
+  // grid is major (none with Show major grid off): twice the dot size, line width or cross size.  Styles: "dots" (KiCad's default), "lines", "crosses".
   // the background grid is the last, unbounded source of drawGridSources: the grid items' coverage masks it out
   const gridClaims = isPcb && opts.subgrids !== false && opts.grid! > 0 ? gridItemList(doc).filter((g) => !(opts.selected && opts.selected.has(g.id!))) : [];
   if (gridClaims.length) { ctx.save(); clipOutsideGrids(ctx, gridClaims, [vx0, vy0, vx1, vy1]); }
   if (opts.grid! > 0) {   // undefined > 0 is false: no grid
     const style = opts.gridStyle === "lines" || opts.gridStyle === "crosses" ? opts.gridStyle : "dots";
     const minSpacing = (opts.gridMinSpacing! > 0 ? opts.gridMinSpacing! : GRID_MIN_SPACING) * (style === "crosses" ? 2 : 1) / sCss;
-    let pitch = opts.grid!; let guard = 0;
-    while (pitch <= minSpacing && guard++ < 12) pitch *= GRID_TICK;
+    // GAL::updatedGalDisplayOptions: m_gridTick is 10, or 0 with Show major grid off, and AutoSparsePitch then thins by 2
+    const tick = gridTick(opts), pitch = autoSparsePitch(opts.grid!, tick, minSpacing);
     const go = opts.gridOrigin || [0, 0], gx = go[0], gy = go[1];   // BOARD_DESIGN_SETTINGS::m_GridOrigin: the grid is laid out from it
     const i0 = Math.floor((vx0 - gx) / pitch), i1 = Math.ceil((vx1 - gx) / pitch), j0 = Math.floor((vy0 - gy) / pitch), j1 = Math.ceil((vy1 - gy) / pitch);
-    const px1 = Math.max(1, dpr) * gridLineWidth(opts) / s;   // grid.line_width device pixels (1.0 by default)
-    const isMajor = (n: number): boolean => opts.gridShowMajor !== false && n % GRID_TICK === 0;
+    const px1 = gridMinorPx(opts, dpr) / s;   // GAL::gridMinorLineWidth
+    const isMajor = (n: number): boolean => tick > 0 && n % tick === 0;
     const gridColor = opts.gridColor || (isPcb ? PCB_GRID : SCH.grid);
     if ((Math.ceil((fx1 - gx) / pitch) - Math.floor((fx0 - gx) / pitch)) * (Math.ceil((fy1 - gy) / pitch) - Math.floor((fy0 - gy) / pitch)) < 400000) {   // the whole view's count, region or not
       if (style === "dots") {
@@ -908,6 +908,13 @@ export const SUBGRID_COLOR = "#C2C200", GRID_DIM_ALPHA = 0.4, GRID_EDGE_DARKEN =
  */
 /** GAL_DISPLAY_OPTIONS::m_gridLineWidth (Preferences > Display Options > Grid thickness, 0.5..10 px) */
 function gridLineWidth(opts: RenderOpts): number { const w = +(opts.gridLineWidth ?? 1); return w > 0 && w <= 10 ? w : 1; }
+/**
+ * A minor grid mark's width in device pixels: GAL keeps m_gridLineWidth = scaleFactor * line_width + 0.25 and
+ * gridMinorLineWidth takes at least 1 of it, which the shaders round to whole pixels (a major mark is twice that).
+ */
+export function gridMinorPx(opts: RenderOpts, dpr: number): number { return Math.max(1, Math.round(Math.max(1, dpr) * gridLineWidth(opts) + 0.25)); }
+/** GAL's m_gridTick: every 10th line major, or 0 (no major lines, the grid thinned by 2) with Show major grid off. */
+export function gridTick(opts: RenderOpts): number { return opts.gridShowMajor === false ? 0 : GRID_TICK; }
 function drawGridItems(ctx: Ctx2D, doc: Doc, opts: RenderOpts, s: number, dpr: number, sCss: number, vr: number[], bg: string): void {
   const list = gridItemList(doc);
   if (!list.length) return;
@@ -916,11 +923,12 @@ function drawGridItems(ctx: Ctx2D, doc: Doc, opts: RenderOpts, s: number, dpr: n
   const order = [...list.filter((g) => !isSel(g)), ...list.filter(isSel)];   // precedence order: the first drawn wins, selected ones last
   const style = opts.gridStyle === "lines" || opts.gridStyle === "crosses" ? opts.gridStyle : "dots";
   const threshold = (opts.gridMinSpacing! > 0 ? opts.gridMinSpacing! : GRID_MIN_SPACING) * (style === "crosses" ? 2 : 1) / sCss;
-  const px1 = Math.max(1, dpr) * gridLineWidth(opts) / s, base = opts.gridItemColor || SUBGRID_COLOR;
+  const px1 = gridMinorPx(opts, dpr) / s, base = opts.gridItemColor || SUBGRID_COLOR;
   ctx.save(); ctx.setLineDash([]); ctx.lineCap = "butt";
   for (const g of order) {
     const hi = isSel(g), color = hi ? brightened(base, GRID_SELECTED_BRIGHTEN) : base;
-    const tick = g.tick > 0 ? g.tick : GRID_TICK, major = (i: number) => opts.gridShowMajor !== false && tick > 0 && i % tick === 0;
+    // GAL::gridLattice: lattice.tick = aSrc.tick > 0 ? aSrc.tick : m_gridTick (a grid item's own tick keeps its majors)
+    const tick = g.tick > 0 ? g.tick : gridTick(opts), major = (i: number) => tick > 0 && i % tick === 0;
     // the lattice (gridLattice): both cartesian axes thin by one factor; polar radius and angle each on their own
     let dx: number, dy: number;
     if (g.kind === "polar") { dx = autoSparsePitch(g.pitch[0], tick, threshold); dy = g.extent[0] > 0 ? autoSparsePitch(g.pitch[1], tick, threshold / g.extent[0]) : g.pitch[1]; }

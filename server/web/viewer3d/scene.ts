@@ -17,6 +17,8 @@ import { FaceComposer, FaceLayers, Side, TextureExtent, textureExtent } from "./
 /** The rows of the Appearance panel (KiCad: 3d-viewer/dialogs/appearance_controls_3D.cpp). */
 export interface Visibility {
   board: boolean; barrels: boolean; copperTop: boolean; copperBottom: boolean; paste: boolean;
+  /** the inner copper layers (APPEARANCE_CONTROLS_3D Show / Hide All Inner Layers); not drawn by the web viewer */
+  copperInner?: boolean;
   silkTop: boolean; silkBottom: boolean; maskTop: boolean; maskBottom: boolean;
   tht: boolean; smd: boolean; virtual: boolean;
   /** LAYER_3D_MODELS_NOT_IN_POS ("Models not in POS File") and LAYER_3D_MODELS_MARKED_DNP ("Models marked DNP") */

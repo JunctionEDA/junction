@@ -43,10 +43,12 @@ test("Display Options: PANEL_GAL_OPTIONS' defaults and ranges (app_settings.cpp,
   assert.strictEqual(G.clampGal({ style: "lines", lineWidth: NaN, minSpacing: 1 }).lineWidth, 1);
   assert.strictEqual(G.clampGal({ style: "lines", lineWidth: NaN, minSpacing: 1 }).minSpacing, 5);
 });
-test("Maintenance: dialog state and program settings are told apart; designs and hints are kept", () => {
-  const keys = ["kd.geom.plot", "kd.state.find", "pd.state.track", "kui.prefs", "kui.v3d", "kc.drc.options", "kicad.fab.preset", "kicad-collab:lib-recent:sym", "kui.boardDocs", "kc.onboard.mini", "admin.range", "other"];
-  assert.deepStrictEqual(M.dialogStateKeys(keys), ["kd.geom.plot", "kd.state.find", "pd.state.track"]);
-  assert.deepStrictEqual(M.programSettingKeys(keys), ["kd.geom.plot", "kd.state.find", "pd.state.track", "kui.prefs", "kui.v3d", "kc.drc.options", "kicad.fab.preset", "kicad-collab:lib-recent:sym"]);
+test("Maintenance: dialog state, histories and program settings are told apart; designs, guide and clipboard are kept", () => {
+  const keys = ["kd.geom.plot", "kd.state.find", "pd.state.track", "kui.prefs", "kui.v3d", "kc.drc.options", "kicad.fab.preset", "kicad-collab:lib-recent:sym", "kui.pcbFindHistory", "kc.plugins.recommended.seen.p1", "kui.boardDocs", "kc.onboard.mini", "kc.guide", "kui.clipboard", "admin.range", "other"];
+  assert.deepStrictEqual(M.dialogStateKeys(keys), ["kd.geom.plot", "kd.state.find", "pd.state.track", "kc.plugins.recommended.seen.p1"]);
+  assert.deepStrictEqual(M.dontShowAgainKeys(keys), ["kc.plugins.recommended.seen.p1"]);
+  assert.deepStrictEqual(M.historyKeys(keys), ["kicad-collab:lib-recent:sym", "kui.pcbFindHistory"]);
+  assert.deepStrictEqual(M.programSettingKeys(keys), ["kd.geom.plot", "kd.state.find", "pd.state.track", "kui.prefs", "kui.v3d", "kc.drc.options", "kicad.fab.preset", "kicad-collab:lib-recent:sym", "kui.pcbFindHistory", "kc.plugins.recommended.seen.p1"]);
 });
 
 test("Colors: New Theme names (FOOTPRINT_NAME_VALIDATOR, Theme already exists!) and ids", () => {
@@ -59,12 +61,22 @@ test("Colors: New Theme names (FOOTPRINT_NAME_VALIDATOR, Theme already exists!) 
   const u = T.newUserTheme(" Night ", { bg: "#000000", wire: "#00FF00" }, []);
   assert.deepStrictEqual(u, { id: "user:night", name: "Night", colors: { bg: "#000000", wire: "#00FF00" } });
 });
-test("Colors: validateSave finds items drawn in the background colour (not the body fill)", () => {
-  assert.deepStrictEqual(T.hiddenByBackground({ bg: "#F5F4EF", wire: "#f5f4ef", body: "#F5F4EF", bus: "#000084" }), ["wire"]);
+test("Colors: validateSave finds items drawn in the background colour (all but Sheet backgrounds)", () => {
+  assert.deepStrictEqual(T.hiddenByBackground({ bg: "#F5F4EF", wire: "#f5f4ef", body: "#F5F4EF", sheetBg: "#F5F4EF", bus: "#000084" }).sort(), ["body", "wire"]);
   assert.deepStrictEqual(T.hiddenByBackground({ bg: "#F5F4EF", wire: "rgba(245,244,239,0.5)" }), []);
   assert.ok(T.sameColor("#0000ff", "rgb(0, 0, 255)"));
   assert.ok(T.isDarkBackground("#1C1D20")); assert.ok(!T.isDarkBackground("#F5F4EF"));
-  assert.strictEqual(T.SCH_COLOR_ITEMS.length, 35); assert.ok(T.SCH_COLOR_ITEMS.some(([k, n]) => k === "bg" && n === "Background"));
+  assert.ok(T.SCH_COLOR_ITEMS.some(([k, n]) => k === "bg" && n === "Background"));
+});
+test("Colors: createSwatches' 48 layers (all SCH layers but g_excludedLayers), sorted by LayerName, Axes marked", () => {
+  const names = T.SCH_COLOR_ITEMS.map(([, n]) => n);
+  assert.strictEqual(names.length, 48);
+  assert.deepStrictEqual(names.slice(0, 5), ["Anchors", "Axes (symbol editor only)", "Background", "Bus junctions", "Buses"]);
+  assert.strictEqual(names[names.length - 1], "Wires");
+  for (const n of ["Sheet references", "Shape fills", "Sheet backgrounds", "ERC warnings", "ERC errors", "ERC exclusions", "Helper items", "Cursor", "Drag net collisions", "Operating point voltages", "Operating point currents"]) assert.ok(names.includes(n), n);
+  for (const n of ["Schematic text && graphics backgrounds", "Net color highlight"]) assert.ok(!names.includes(n), n);
+  assert.deepStrictEqual(names.slice().sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), names);
+  assert.strictEqual(T.schExtraColors("classic").ercWarn, "rgba(0,255,0,0.8)"); assert.strictEqual(T.schExtraColors("default").ercWarn, "rgba(209,146,0,0.8)");
 });
 
 const close = (a, b, rel = 1e-6) => assert.ok(Math.abs(a - b) <= Math.abs(b) * rel, `${a} != ${b}`);
@@ -90,15 +102,53 @@ test("Calculator: via size, fusing current, wavelength (panel formulas)", () => 
   assert.ok(isNaN(C.fusingCurrent({ ambient: 2000, melting: 1084, width: 1, thickness: 1, current: 1, time: 1 }, "current").value), "melting below ambient is an Error");
   const wl = C.wavelength(1e9, 4, 1); close(wl.vacuum, 0.299792458); close(wl.medium, 0.149896229); close(wl.period, 1e-9);
 });
-test("Calculator: E-series decades, board classes, colour bands, %g", () => {
+test("Calculator: E-series decades, board classes, color code columns, unit selectors, %g", () => {
   assert.deepStrictEqual(C.eSeries(3), [100, 220, 470]);
   assert.deepStrictEqual(C.eSeries(6), [100, 150, 220, 330, 470, 680]);
   assert.strictEqual(C.eSeries(96).length, 96); assert.strictEqual(C.eSeries(48)[1], 105); assert.strictEqual(C.eSeries(1)[0], 100);
   assert.strictEqual(C.BOARD_CLASSES.length, 6); close(C.BOARD_CLASSES[2][2], 0.45e-3); assert.strictEqual(C.BOARD_CLASSES[0][2], null);
-  assert.deepStrictEqual(C.resistorBands(4700, 2), ["Yellow", "Violet", "Red"]);
-  assert.deepStrictEqual(C.resistorBands(4.7, 2), ["Yellow", "Violet", "Gold"]);
-  assert.deepStrictEqual(C.resistorBands(10000, 3), ["Brown", "Black", "Black", "Red"]);
+  assert.deepStrictEqual(C.colorCodeColumns(0).map((c) => c.label), ["1st Band", "2nd Band", "3rd Band", "Multiplier", "Tolerance"]);
+  assert.deepStrictEqual(C.colorCodeColumns(1).map((c) => c.label), ["1st Band", "2nd Band", "3rd Band", "4th Band", "Multiplier", "Tolerance"]);
+  assert.deepStrictEqual(C.colorCodeColumns(1).map((c) => c.bitmap), ["color_code_value_and_name", "color_code_value", "color_code_value", "color_code_value", "color_code_multiplier", "color_code_tolerance"]);
+  assert.deepStrictEqual(C.LEN_CABLE_UNITS.map((u) => u[0]), ["cm", "m", "km", "inch", "feet"]);
+  assert.deepStrictEqual(C.TIME_UNITS.map((u) => u[0]), ["ns", "ps"]); assert.deepStrictEqual(C.SPEED_UNITS.map((u) => u[0]), ["m/s", "ft/s", "km/h", "mi/h"]);
+  assert.deepStrictEqual(C.RESISTOR_UNITS.map((u) => u[0]), ["Ω", "kΩ"]); assert.strictEqual(C.THICKNESS_UNITS[5][0], "oz/ft²");
+  assert.deepStrictEqual(C.DIELECTRIC_CONSTANTS[0], ["4.5", "FR4"]); assert.deepStrictEqual(C.RESISTIVITIES[1], ["1.72e-8", "copper"]);
   assert.strictEqual(C.fmtG(1.72e-8), "1.72e-08"); assert.strictEqual(C.fmtG(0.2), "0.2"); assert.strictEqual(C.fmtG(1234567), "1.23457e+06"); assert.strictEqual(C.fmtG(12.5), "12.5");
+});
+
+let Rn = null; try { Rn = load(["canvas", "render.ts"]); } catch (e) { Rn = null; }
+test("Grid: GAL's grid tick and minor line width (graphics_abstraction_layer.cpp:150-162, .h:1462)", () => {
+  assert.ok(Rn && Rn.gridTick, "canvas/render.ts loads");
+  assert.strictEqual(Rn.gridTick({}), 10); assert.strictEqual(Rn.gridTick({ gridShowMajor: false }), 0);
+  assert.strictEqual(Rn.autoSparsePitch(1, 0, 3), 4, "show major off thins by 2");
+  assert.strictEqual(Rn.autoSparsePitch(1, 10, 3), 10);
+  assert.strictEqual(Rn.gridMinorPx({ gridLineWidth: 0.5 }, 1), 1, "0.5 px is clamped to 1 px");
+  assert.strictEqual(Rn.gridMinorPx({}, 1), 1); assert.strictEqual(Rn.gridMinorPx({}, 2), 2);
+  assert.strictEqual(Rn.gridMinorPx({ gridLineWidth: 2 }, 1), 2); assert.strictEqual(Rn.gridMinorPx({ gridLineWidth: 1.5 }, 2), 3);
+});
+
+const V = load(["viewer3d", "colors.ts"]);
+test("3D: Use board stackup colors reads BOARD_ADAPTER's tables, mixes every dielectric and takes the finish", () => {
+  const near = (a, b) => assert.ok(a.every((x, i) => Math.abs(x - b[i]) < 1e-6), JSON.stringify(a) + " vs " + JSON.stringify(b));
+  near(V.stackupColor("Green", "mask"), [20 / 255, 51 / 255, 36 / 255, 0.83]);
+  near(V.stackupColor("Red", "mask"), [181 / 255, 19 / 255, 21 / 255, 0.83]);
+  near(V.stackupColor("White", "silk"), [245 / 255, 245 / 255, 245 / 255, 1]);
+  near(V.stackupColor(undefined, "silk"), [245 / 255, 245 / 255, 245 / 255, 1]);
+  near(V.stackupColor("Light Green", "mask"), [91 / 255, 168 / 255, 12 / 255, 0.83]);
+  near(V.stackupColor("#102030C0", "board"), [16 / 255, 32 / 255, 48 / 255, 0xC0 / 255]);
+  near(V.stackupColor("Mystery", "board"), [0, 0, 0, 1]);
+  const one = V.stackupOverride([{ name: "dielectric 1", type: "core", color: "FR4 natural" }]);
+  near(one.board, [109 / 255, 116 / 255, 75 / 255, 0.83 + 0.17 * 0.83 / 2]);
+  const two = V.stackupOverride([{ name: "dielectric 1", type: "core", color: "FR4 natural" }, { name: "dielectric 2", type: "prepreg", color: "Polyimide" }]);
+  const a1 = 0.83 + 0.17 * 0.83 / 2, pi = [205 / 255, 130 / 255, 0], fr = [109 / 255, 116 / 255, 75 / 255], f = 1 - 0.68;
+  near(two.board, [pi[0] * (1 - f) + fr[0] * f, pi[1] * (1 - f) + fr[1] * f, pi[2] * (1 - f) + fr[2] * f, a1 + (1 - a1) * 0.68 / 2]);
+  near(V.stackupOverride([], "ENIG").copper, [178 / 255, 156 / 255, 0, 1]);
+  near(V.stackupOverride([], "HAL lead-free").copper, [160 / 255, 160 / 255, 160 / 255, 1]);
+  near(V.stackupOverride([], "Immersion silver").copper, [213 / 255, 213 / 255, 213 / 255, 1]);
+  near(V.stackupOverride([], "OSP").copper, [184 / 255, 115 / 255, 50 / 255, 1]);
+  assert.strictEqual(V.stackupOverride([], "None").copper, undefined);
+  assert.strictEqual(V.stackupOverride([], "User defined").copper, undefined);
 });
 
 console.log(`feat-common: ${passed} passed, ${failed} failed`);

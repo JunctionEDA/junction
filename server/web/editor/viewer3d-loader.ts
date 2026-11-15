@@ -30,6 +30,7 @@ interface Viewer3DOpenOptions {
   layerVisible?(layer: string): boolean;
   plotLayers?(): Promise<string[] | null>;
   stackupLayers?(): Promise<{ name: string; type?: string; color?: string }[] | null>;
+  stackupFinish?(): Promise<string | null>;
   editorColor?(layer: string): string | null;
 }
 interface Viewer3DGlobal { open(opts: Viewer3DOpenOptions): unknown; close(): void; isOpen(): boolean }
@@ -102,6 +103,7 @@ export function show3DViewer(): void {
       layerVisible: (layer) => !(E.hiddenLayers as Set<string>).has(layer),
       // the plot dialog's layer selection (PCB_PLOT_PARAMS m_layerSelection) as the board stores it
       stackupLayers: async () => { const h = await loadBoardHeader(); return h ? BS().stackupLayers(h.setup) : null; },
+      stackupFinish: async () => { const h = await loadBoardHeader(); return h ? BS().boardFinish(h.setup).copperFinish : null; },
       // the Appearance panel's colour of the layer (the user's, else the board editor's theme colour)
       editorColor: (layer) => { const own = E.renderOpts.layerColors as Map<string, string> | undefined; return (own && own.get(layer)) || KiCadCanvas.PCB_COLORS[layer] || null; },
       plotLayers: async () => { const h = await loadBoardHeader(); return h ? BS().readPlotParams(h.setup, h.version).layerSelection : null; },

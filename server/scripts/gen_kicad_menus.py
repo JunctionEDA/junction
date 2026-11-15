@@ -39,7 +39,9 @@ EXTRA_ICONS = {"import", "export_file", "fabrication", "language", "add_zone", "
                # DIALOG_ABOUT's notebook images (dialog_about.cpp:63-71)
                "info", "recent", "preference", "editor", "library", "color_materials", "zip", "tools", "bug",
                # the Calculator Tools frame (pcb_calculator_frame.cpp)
-               "calculator"}
+               "calculator",
+               # PANEL_COLOR_CODE's band pictures (panel_color_code.cpp ThemeChanged)
+               "color_code_value_and_name", "color_code_value", "color_code_multiplier", "color_code_tolerance"}
 
 
 MAC_IF = r"#\s*if(?:def\s+|\s+defined\(\s*)__WX(?:OSX_)?MAC__[ \t]*\)?[^\n]*\n"

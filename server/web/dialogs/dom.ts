@@ -3,6 +3,7 @@
 import { trapTab } from "../tools/kicad-dialogs/shell";
 import "../components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 import { fitMenu } from "../menufit";
+import { kicadIcon } from "../components/kicon-dom";
 
 export interface DlgButton { label: string; fn?: () => void; primary?: boolean; isDefault?: boolean; close?: boolean; id?: string }
 export interface DlgSpec {
@@ -135,7 +136,8 @@ export function confirmBox(title: string, message: string, okLabel = "OK"): Prom
   });
 }
 /** A wxMenu popped up inside a dialog (grid header / cell right-click): check items, separators and submenus. */
-export interface PopItem { label?: string; sep?: boolean; check?: boolean; checked?: boolean; disabled?: boolean; run?: () => void; sub?: PopItem[] }
+/** A popup menu row; `icon` is one of KiCad's bitmaps from the icon pack (KIUI::AddMenuItem's aImage). */
+export interface PopItem { label?: string; sep?: boolean; check?: boolean; checked?: boolean; disabled?: boolean; icon?: string; run?: () => void; sub?: PopItem[] }
 export function popupMenu(x: number, y: number, items: PopItem[]): HTMLElement {
   for (const old of Array.from(document.querySelectorAll(".kd-pop"))) old.remove();
   const build = (list: PopItem[], px: number, py: number, depth: number): HTMLElement => {
@@ -143,7 +145,7 @@ export function popupMenu(x: number, y: number, items: PopItem[]): HTMLElement {
     for (const it of list) {
       if (it.sep) { m.append(h("div", { style: "height:1px;background:var(--line);margin:3px 0" })); continue; }
       const row = h("div", { class: "kd-pop-row", role: "menuitem", "aria-disabled": it.disabled ? "true" : undefined, style: `display:flex;gap:6px;align-items:center;padding:3px 12px 3px 6px;cursor:default;white-space:nowrap;${it.disabled ? "opacity:.45;" : ""}` },
-        h("span", { style: "width:14px;display:inline-block;text-align:center" }, it.check ? (it.checked ? "✓" : "") : ""), h("span", { style: "flex:1" }, it.label || ""), it.sub ? h("span", null, "▸") : null);
+        h("span", { style: "width:16px;display:inline-flex;justify-content:center" }, it.check ? (it.checked ? "✓" : "") : it.icon ? kicadIcon(it.icon, 16) as unknown as Node : ""), h("span", { style: "flex:1" }, it.label || ""), it.sub ? h("span", null, "▸") : null);
       row.addEventListener("pointerenter", () => { row.style.background = "var(--accent)"; row.style.color = "var(--on-accent)"; for (const o of Array.from(document.querySelectorAll(".kd-pop"))) if (Number((o as HTMLElement).dataset.depth) > depth) o.remove();
         if (it.sub && !it.disabled) { const r = row.getBoundingClientRect(), sub = build(it.sub, r.right - 2, r.top - 3, depth + 1); document.body.append(sub); fitMenu(sub, { row: r, parent: m.getBoundingClientRect(), overlap: 2 }); } });
       row.addEventListener("pointerleave", () => { row.style.background = ""; row.style.color = ""; });

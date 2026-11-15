@@ -8,12 +8,12 @@ import { IS_MAC, keyName, modName } from "../keys";
 import { hotkeysPanel } from "./hotkeys-panel";
 import type { UserHotkeys } from "../menuspec";
 import { KD, checkbox, h, popupMenu, promptText, select, textInput } from "./dom";
-import { SCH_COLOR_ITEMS, hiddenByBackground, newUserTheme, sameColor, themeNameError, type UserSchTheme } from "./color-themes";
+import { SCH_COLOR_ITEMS, hiddenByBackground, newUserTheme, schExtraColors, sameColor, themeNameError, type UserSchTheme } from "./color-themes";
 import { colorSwatch, colorText, parseColor, type RGBA } from "../components/colorswatch";
 import { lenField, messageBox } from "../editor/pcbdialogs/ui";
 import { loadUnits, messageText, unitName } from "../units";
 import { DEFAULT_PREFS, schThemeList, GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clonePrefs, editorId, gridLabel, savePrefs, scaleOf, type EditorId, type GalPrefs, type Prefs } from "./prefs";
-import { clearDialogState, resetProgramSettings } from "./maintenance";
+import { clearDialogState, clearDontShowAgain, clearFileHistory, resetProgramSettings } from "./maintenance";
 import { askConfirm } from "../components/msgbox";
 import type { Units } from "../store";
 import { getThemeMode, setThemeMode, type ThemeMode } from "../theme";
@@ -190,7 +190,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
     const sc = p.schColors, saved = JSON.parse(JSON.stringify(sc.user)) as UserSchTheme[];
     const NEW = "__new__";
     const userOf = (id: string): UserSchTheme | undefined => sc.user.find((u) => u.id === id);
-    const colorsOf = (id: string): Record<string, string> => { const u = userOf(id); return u ? { ...KiCadCanvas.schThemeColors("default"), ...u.colors } : KiCadCanvas.schThemeColors(id); };
+    const colorsOf = (id: string): Record<string, string> => { const u = userOf(id); return u ? { ...KiCadCanvas.schThemeColors("default"), ...schExtraColors("default"), ...u.colors } : { ...KiCadCanvas.schThemeColors(id), ...schExtraColors(id) }; };
     const choices = (): [string, string][] => [...schThemeList(p).map(([id, n]) => [id, userOf(id) ? n : `${n} (read-only)`] as [string, string]), [NEW, "New Theme..."]];
     const theme = select(choices(), sc.theme, (v) => {
       if (v !== NEW) { sc.theme = v; paint(); return; }
@@ -198,6 +198,8 @@ export function openPreferences(page?: string, staged?: Staged): void {
       void promptText("Add Color Theme", "New theme name:", "", (name) => { const err = themeNameError(name, schThemeList(p).map(([, n]) => n)); if (err) { messageBox("Add Color Theme", err); return false; } return true; }).then((name) => {
         if (name === null) return;
         const u = newUserTheme(name, colorsOf(sc.theme), schThemeList(p).map(([id]) => id)); sc.user.push(u); sc.theme = u.id;
+        // OnThemeChanged saves the new theme's file at once, so its colours are the saved ones Revert goes back to
+        saved.push(JSON.parse(JSON.stringify(u)) as UserSchTheme);
         theme.replaceChildren(...choices().map(([v2, l]) => h("option", { value: v2 }, l))); theme.value = u.id; paint();
       });
     }, { id: "kd-pref-theme", style: "width:260px" });
@@ -215,9 +217,9 @@ export function openPreferences(page?: string, staged?: Staged): void {
           ev.preventDefault();
           const was = (saved.find((x) => x.id === sc.theme)?.colors || {})[k], cur = u ? u.colors[k] : C[k];
           popupMenu(ev.clientX, ev.clientY, [
-            { label: "Copy color", run: () => { copied = parseColor(cur); } },
-            ...(u && copied ? [{ label: "Paste color", run: () => { u.colors[k] = colorText(copied!); paint(); } }] : []),
-            ...(u && was && !sameColor(was, cur) ? [{ label: "Revert to saved color", run: () => { u.colors[k] = was; paint(); } }] : []),
+            { label: "Copy color", icon: "copy", run: () => { copied = parseColor(cur); } },
+            ...(u && copied ? [{ label: "Paste color", icon: "paste", run: () => { u.colors[k] = colorText(copied!); paint(); } }] : []),
+            ...(u && was && !sameColor(was, cur) ? [{ label: "Revert to saved color", icon: "undo", run: () => { u.colors[k] = was; paint(); } }] : []),
           ]);
         });
         grid.append(sw.el, h("span", null, label.replace("&&", "&")));
@@ -265,9 +267,12 @@ export function openPreferences(page?: string, staged?: Staged): void {
           { label: "WakaTime", build(pg) { waka = wakatimePage(pg, (host, title) => KD().staticBox(host, title)); } },
           // PANEL_MAINTENANCE: the settings KiCad keeps in its files are this browser's storage here
           { label: "Maintenance", build(pg) {
-            const row = (label: string, id: string, fn: () => void): HTMLElement => { const b = h("button", { type: "button", class: "btn", id }, label) as HTMLButtonElement; b.addEventListener("click", fn); return h("div", { style: "margin:0 0 8px" }, b); };
-            const box = KD().staticBox(pg, "Settings");
-            box.append(
+            // panel_maintenance_base: a column of buttons, no box (the 3D cache duration has no browser counterpart)
+            const row = (label: string, id: string, fn: () => void, title?: string): HTMLElement => { const b = h("button", { type: "button", class: "btn", id, title }, label) as HTMLButtonElement; b.addEventListener("click", fn); return h("div", { style: "margin:0 0 8px" }, b); };
+            pg.append(
+              row("Clear \"Open Recent\" History", "kd-pref-clearhistory", () => { clearFileHistory(); toast("File history cleared."); },
+                "The web editor has no Open Recent menu; this clears the histories this browser keeps (board Find, the library choosers' recently used)"),
+              row("Reset \"Don't Show Again\" Dialogs", "kd-pref-cleardontshow", () => { clearDontShowAgain(); toast("\"Don't show again\" dialogs reset."); }),
               row("Reset All Dialogs to Defaults", "kd-pref-resetdialogs", () => { clearDialogState(); toast("All dialogs reset to defaults."); }),
               row("Reset All Program Settings to Defaults", "kd-pref-resetall", () => {
                 void askConfirm("Reset All Program Settings", "Reset every preference, dialog setting, panel layout and hotkey this browser keeps to its default?  Your designs and projects are not changed.  The page reloads afterwards.", { ok: "Reset", danger: true })

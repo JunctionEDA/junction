@@ -7,7 +7,7 @@ import { currentDocEntry, projectDocs, readDoc, saveProject, sub, submitDocOp } 
 import { bitmapButton } from "../components/kicon-dom";
 import { lenField, listDialog, messageBox } from "../editor/pcbdialogs/ui";
 import { loadUnits, unitName } from "../units";
-import { applyDrawingSheet, drawingSheetName, projectWorksheets, resolveWorksheet, wksKey, worksheetNow } from "../editor/drawingsheet";
+import { applyDrawingSheet, drawingSheetName, forgetWorksheet, onWorksheetChange, projectWorksheets, resolveWorksheet, wksKey, worksheetNow } from "../editor/drawingsheet";
 import { requestRender } from "../editor/view";
 
 type TbKey = "date" | "rev" | "title" | "company" | `comment${number}`;
@@ -104,7 +104,7 @@ export function openPageSettings(): void {
         if (k === "date") {
           inp.style.flex = "1"; inp.style.minWidth = "90px";
           const pick = h("input", { type: "date", id: "kd-ps-datepick", style: "width:128px;flex:none", disabled: ro, value: isoDate(new Date()) });
-          const set = h("button", { class: "btn sm", type: "button", title: "Use the date on the right", disabled: ro, id: "kd-ps-dateset", onclick: () => { const v = (pick as HTMLInputElement).value || isoDate(new Date()); inp.value = v; setTb(p, k, v); redraw(); } }, "<<<");
+          const set = h("button", { class: "btn sm", type: "button", title: "Use the date on the right", disabled: ro, id: "kd-ps-dateset", onclick: () => { const v = (pick as HTMLInputElement).value || isoDate(new Date()); inp.value = v; setTb(p, k, v); } }, "<<<");
           ctl = h("div", { class: "kd-row" }, inp, set, pick);
         }
         tb.append(h("label", null, label), ctl);
@@ -113,8 +113,10 @@ export function openPageSettings(): void {
       const right = h("div", { style: "flex:1;min-width:0" }, h("h3", null, "Title Block"),
         h("div", { class: "kd-row", style: "justify-content:space-between;margin-bottom:8px;color:var(--ink-2)" }, h("span", null, `Number of sheets: ${doc.sheetCount || 1}`), h("span", null, `Sheet number: ${doc.pageNumber || "1"}`)), tb);
       body.append(h("div", { style: "display:flex;gap:22px" }, left, right)); redraw();
-      // a sheet file still loading: draw again once it is in
-      if (wksName && !wksDoc()) setTimeout(redraw, 600);
+      // DIALOG_PAGES_SETTINGS reads the sheet file when it opens: read the project's sheet files again, and draw the
+      // preview again whenever one comes in (still loading, or changed by a collaborator while the dialog is up)
+      const off = onWorksheetChange(() => { if (preview && preview.isConnected) redraw(); else off(); });
+      for (const ws of sheets) forgetWorksheet(ws.docId);
     },
     ok() {
       if (ro) return;

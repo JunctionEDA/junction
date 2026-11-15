@@ -7,6 +7,21 @@ export const UNIT = { m: 1, cm: 1e-2, mm: 1e-3, um: 1e-6, inch: 2.54e-2, mil: 2.
 export const LEN_UNITS: [string, number][] = [["mm", UNIT.mm], ["um", UNIT.um], ["cm", UNIT.cm], ["mil", UNIT.mil], ["inch", UNIT.inch]];
 export const THICKNESS_UNITS: [string, number][] = [["mm", UNIT.mm], ["µm", UNIT.um], ["cm", UNIT.cm], ["mil", UNIT.mil], ["inch", UNIT.inch], ["oz/ft²", UNIT.ozsqft]];
 export const FREQ_UNITS: [string, number][] = [["GHz", UNIT.GHz], ["MHz", UNIT.MHz], ["kHz", UNIT.kHz], ["Hz", UNIT.Hz]];
+/** UNIT_SELECTOR_LEN_CABLE: cm, m, km, inch, feet (UNIT_FEET 0.3048) */
+export const LEN_CABLE_UNITS: [string, number][] = [["cm", UNIT.cm], ["m", UNIT.m], ["km", 1e3], ["inch", UNIT.inch], ["feet", 0.3048]];
+/** UNIT_SELECTOR_TIME: ns, ps */
+export const TIME_UNITS: [string, number][] = [["ns", 1e-9], ["ps", 1e-12]];
+/** UNIT_SELECTOR_SPEED: m/s, ft/s, km/h, mi/h, scaled by units_scales.h as KiCad does (UNIT_MILES_PER_HOUR is 1609.34) */
+export const SPEED_UNITS: [string, number][] = [["m/s", 1], ["ft/s", 0.3048], ["km/h", 1 / 3.6], ["mi/h", 1609.34]];
+/** UNIT_SELECTOR_RESISTOR: Ω, kΩ */
+export const RESISTOR_UNITS: [string, number][] = [["Ω", 1], ["kΩ", 1e3]];
+/** common_data.cpp StandardRelativeDielectricConstantList: "value \tmaterial" */
+export const DIELECTRIC_CONSTANTS: [string, string][] = [["4.5", "FR4"], ["3.67", "Isola FR408"], ["4.04", "Isola 370HR"], ["3.55", "Rogers RO4003C"], ["3.66", "Rogers R4350B"],
+  ["9.8", "alumina (Al2O3)"], ["3.78", "fused quartz"], ["3.38", "RO4003"], ["2.2", "RT/duroid 5880"], ["10.2", "RT/duroid 6010LM"], ["2.1", "teflon (PTFE)"], ["4.0", "PVC"],
+  ["2.3", "PE"], ["6.6", "beryllia (BeO)"], ["8.7", "aluminum nitride"], ["11.9", "silicon"], ["12.9", "GaAs"]];
+/** common_data.cpp StandardResistivityList */
+export const RESISTIVITIES: [string, string][] = [["2.4e-8", "gold"], ["1.72e-8", "copper"], ["1.62e-8", "silver"], ["12.4e-8", "tin"], ["10.5e-8", "platinum"], ["2.62e-8", "aluminum"],
+  ["6.9e-8", "nickel"], ["3.9e-8", "brass (66Cu 34Zn)"], ["9.71e-8", "iron"], ["6.0e-8", "zinc"]];
 
 /** panel_track_width.cpp copper_resistivity */
 export const COPPER_RESISTIVITY = 1.72e-8;
@@ -111,32 +126,11 @@ export function eSeries(n: ESeries): number[] {
   return base.filter((_, i) => i % step === 0);
 }
 
-// ---- Color Code: the chart PANEL_COLOR_CODE shows (IEC 60062)
-export interface BandColor { name: string; css: string; digit: number | null; multiplier: string | null; tolerance: string | null }
-export const COLOR_CODE: BandColor[] = [
-  { name: "Black", css: "#000000", digit: 0, multiplier: "1", tolerance: null },
-  { name: "Brown", css: "#8B4513", digit: 1, multiplier: "10", tolerance: "1%" },
-  { name: "Red", css: "#E00000", digit: 2, multiplier: "100", tolerance: "2%" },
-  { name: "Orange", css: "#FF8C00", digit: 3, multiplier: "1k", tolerance: null },
-  { name: "Yellow", css: "#FFE600", digit: 4, multiplier: "10k", tolerance: null },
-  { name: "Green", css: "#00A000", digit: 5, multiplier: "100k", tolerance: "0.5%" },
-  { name: "Blue", css: "#0050FF", digit: 6, multiplier: "1M", tolerance: "0.25%" },
-  { name: "Violet", css: "#8A2BE2", digit: 7, multiplier: "10M", tolerance: "0.1%" },
-  { name: "Grey", css: "#808080", digit: 8, multiplier: null, tolerance: "0.05%" },
-  { name: "White", css: "#FFFFFF", digit: 9, multiplier: null, tolerance: null },
-  { name: "Gold", css: "#CFB53B", digit: null, multiplier: "0.1", tolerance: "5%" },
-  { name: "Silver", css: "#C0C0C0", digit: null, multiplier: "0.01", tolerance: "10%" },
-];
-/** The bands of a resistance (ohms) for 3 significant digits (<= 2 %) or 2 (10 % / 5 %): colour names, null when it cannot be coded. */
-export function resistorBands(ohms: number, digits: 2 | 3): string[] | null {
-  if (!(ohms > 0) || !isFinite(ohms)) return null;
-  let exp = Math.floor(Math.log10(ohms)) - (digits - 1);
-  let mant = Math.round(ohms / Math.pow(10, exp));
-  if (mant >= Math.pow(10, digits)) { mant /= 10; exp++; }
-  if (exp < -2 || exp > 7) return null;
-  const ds = String(mant).padStart(digits, "0").split("").map((d) => COLOR_CODE[+d].name);
-  const mult = exp === -1 ? "Gold" : exp === -2 ? "Silver" : COLOR_CODE[exp].name;
-  return [...ds, mult];
+// ---- Color Code: PANEL_COLOR_CODE shows KiCad's color_code_* bitmaps (the chart is the picture), nothing computed.
+/** PANEL_COLOR_CODE::ToleranceSelection: the band columns shown, the 4th band only for "<= 2%" (selection 1). */
+export function colorCodeColumns(tolerance: 0 | 1): { label: string; bitmap: string }[] {
+  return [{ label: "1st Band", bitmap: "color_code_value_and_name" }, { label: "2nd Band", bitmap: "color_code_value" }, { label: "3rd Band", bitmap: "color_code_value" },
+    ...(tolerance ? [{ label: "4th Band", bitmap: "color_code_value" }] : []), { label: "Multiplier", bitmap: "color_code_multiplier" }, { label: "Tolerance", bitmap: "color_code_tolerance" }];
 }
 
 /** wxString::Format("%g"): six significant digits, trailing zeros dropped. */

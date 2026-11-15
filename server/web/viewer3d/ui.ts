@@ -7,9 +7,17 @@ import { GRID3D_CHOICES, type Grid3D } from "./grid";
 import ICONS from "./icons.json";
 import { BoardStats, DEFAULT_VISIBILITY, Visibility } from "./scene";
 import { Viewer } from "./viewer";
-import { keyName, menuKey } from "../keys";
+import { IS_MAC, keyName, menuKey } from "../keys";
+import { advance, switcherFor, type SwitcherKind } from "../editor/view-switcher-model";
 import { fitMenu, type MenuAnchor } from "../menufit";
 import "../components/kselect";   // <k-select>, the themed drop-down (Presets, Viewports)
+
+/** Move a name to the front of an MRU. */
+function toFront(list: string[], name: string): void { const i = list.indexOf(name); if (i >= 0) list.splice(i, 1); list.unshift(name); }
+/** KeyNameFromKeyCode( PRESET_SWITCH_KEY / VIEWPORT_SWITCH_KEY ): WXK_RAW_CONTROL and WXK_ALT on macOS, WXK_CONTROL and WXK_SHIFT elsewhere. */
+export function switchKeyName(kind: SwitcherKind): string {
+  return keyName(kind === "preset" ? (IS_MAC ? "RawCtrl+X" : "Ctrl+X") : (IS_MAC ? "Alt+X" : "Shift+X")).slice(0, -2);
+}
 
 export interface OpenOptions {
   /** the board document to show (window.KiCadCanvas doc); null when no board is open */
@@ -41,6 +49,8 @@ export interface OpenOptions {
   plotLayers?(): Promise<string[] | null>;
   /** Use board stackup colors: the board's physical stackup (Board Setup), name / type / color per layer */
   stackupLayers?(): Promise<{ name: string; type?: string; color?: string }[] | null>;
+  /** Use board stackup colors: the stackup's copper_finish (BOARD_STACKUP m_FinishType) */
+  stackupFinish?(): Promise<string | null>;
   /** Use PCB editor copper colors: the board editor's colour of a layer (CSS) */
   editorColor?(layer: string): string | null;
 }
@@ -163,7 +173,6 @@ export interface Settings3D { vis?: Partial<Visibility>; colors?: Record<string,
 const SETTINGS_KEY = "kui.v3d";
 export function loadSettings3D(): Settings3D { try { const v = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null"); return v && typeof v === "object" ? v as Settings3D : {}; } catch { return {}; } }
 function saveSettings3D(s: Settings3D): void { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* no storage */ } }
-/** PRESET_SWITCH_KEY / VIEWPORT_SWITCH_KEY: Ctrl+Tab cycles the layer presets, Alt+Tab the viewports */
 const FOLLOW_PCB = "Follow PCB Editor", FOLLOW_PLOT = "Follow PCB Plot Settings";
 
 /**
@@ -205,6 +214,11 @@ export class ViewerWindow {
   private settings: Settings3D = loadSettings3D();
   /** the layer preset shown in the Presets choice ("" when the appearance was changed since) */
   private presetName = "";
+  /** APPEARANCE_CONTROLS_3D m_presetMRU / m_viewportMRU: names applied most recently first (this session) */
+  private psMru: string[] = [];
+  private vpMru: string[] = [];
+  /** the open EDA_VIEW_SWITCHER */
+  private switcher: { kind: SwitcherKind; items: string[]; sel: number; el: HTMLElement; list: HTMLElement; key: "Control" | "Shift" | "Alt" } | null = null;
   private presetSel: HTMLElement | null = null;
   private viewportSel: HTMLElement | null = null;
   /** the last build's statistics and time (tests) */
@@ -267,6 +281,8 @@ export class ViewerWindow {
       this.closeMenu(); this.showMenu(this.contextItems(), { at: { x: ev.clientX, y: ev.clientY } }, 0);
     });
     root.addEventListener("keydown", (ev) => this.onKey(ev));
+    root.addEventListener("keyup", (ev) => this.onKeyUp(ev));
+    root.addEventListener("focusout", (ev) => { if (!root.contains(ev.relatedTarget as Node | null)) this.closeSwitcher(false); });
     // keep the keyboard on the viewer while the pointer works in it (the board editor's keys must not fire)
     root.addEventListener("pointerdown", (ev) => { const t = ev.target as HTMLElement; if (!t.closest("input,select,k-select,textarea")) setTimeout(() => { if (!this.closed && !root.contains(document.activeElement)) root.focus({ preventScroll: true }); }, 0); }, true);
     document.addEventListener("pointerdown", this.onDocPointer, true);
@@ -333,7 +349,7 @@ export class ViewerWindow {
     add({ id: "getInvolved", label: "Get Involved", tip: "Open \"Contribute to KiCad\" in a web browser", icon: "info", run: link("getInvolved") });
     add({ id: "donate", label: "Donate", tip: "Open \"Donate to KiCad\" in a web browser", run: link("donate") });
     add({ id: "reportBug", label: "Report Bug", tip: "Report a problem with KiCad", icon: "bug", run: link("reportBug") });
-    add({ id: "about", label: "About KiCad", icon: "about", run: () => { if (this.opts.runAction) this.opts.runAction("about"); } });
+    add({ id: "about", label: "About Junction", icon: "about", run: () => { if (this.opts.runAction) this.opts.runAction("about"); } });
     add({ id: "close", label: "Close", icon: "exit", run: () => this.close() });
   }
 
@@ -398,15 +414,19 @@ export class ViewerWindow {
     const side = this.side; side.replaceChildren(); const v = this.viewer;
     side.appendChild(el("h4", undefined, "Appearance"));
     const layers = el("div", "v3d-layers"); side.appendChild(layers);
-    // APPEARANCE_CONTROLS_3D::OnLayerContextMenu: Show / Hide All Copper Layers, Show / Hide All Inner Layers (the
-    // web viewer draws the outer copper only, so the inner-layer pair stays disabled as for a two-layer board)
+    // APPEARANCE_CONTROLS_3D::OnLayerContextMenu: Show / Hide All Copper Layers, and Show / Hide All Inner Layers,
+    // enabled when GetCopperLayerCount() > 2.  The inner layers' visibility is kept (copperInner) and saved with the
+    // presets; the web viewer does not draw inner copper, so it has nothing to show or hide yet.
     layers.addEventListener("contextmenu", (ev) => {
       ev.preventDefault();
-      const copper = (on: boolean) => () => { if (v) { v.setVisibility({ copperTop: on, copperBottom: on }); this.appearanceChanged(); } };
+      const set = (vis: Partial<Visibility>) => () => { if (v) { v.setVisibility(vis); this.appearanceChanged(); } };
+      const doc = this.opts.getDoc(), inner = !!doc && Array.isArray((doc as { copper?: string[] }).copper) && (doc as { copper: string[] }).copper.length > 2;
+      const noInner = inner ? undefined : "The board has no inner copper layers";
       this.closeMenu();
-      this.showMenu([{ id: "showAllCopper", label: "Show All Copper Layers", run: copper(true) }, { id: "hideAllCopper", label: "Hide All Copper Layers", run: copper(false) }, "-",
-        { id: "showAllInner", label: "Show All Inner Layers", run: () => {}, disabled: "The board has no inner copper layers in the 3D view" },
-        { id: "hideAllInner", label: "Hide All Inner Layers", run: () => {}, disabled: "The board has no inner copper layers in the 3D view" }], { at: { x: ev.clientX, y: ev.clientY } }, 0);
+      this.showMenu([{ id: "showAllCopper", label: "Show All Copper Layers", run: set({ copperTop: true, copperBottom: true, ...(inner ? { copperInner: true } : {}) }) },
+        { id: "hideAllCopper", label: "Hide All Copper Layers", run: set({ copperTop: false, copperBottom: false, ...(inner ? { copperInner: false } : {}) }) }, "-",
+        { id: "showAllInner", label: "Show All Inner Layers", run: set({ copperInner: true }), disabled: noInner },
+        { id: "hideAllInner", label: "Hide All Inner Layers", run: set({ copperInner: false }), disabled: noInner }], { at: { x: ev.clientX, y: ev.clientY } }, 0);
     });
     const enabled = this.enabledLayers();
     // a swatch (left double click or middle click opens the colour picker), the eye checkbox, the label
@@ -486,16 +506,21 @@ export class ViewerWindow {
       fill(sel); sel.addEventListener("change", () => pick((sel as unknown as HTMLSelectElement).value, sel));
       side.appendChild(sel); return sel;
     };
-    this.presetSel = choice("Presets (Ctrl+Tab):", "v3d-presets", (sel) => this.fillPresets(sel), (value) => this.onPreset(value),
-      "Save and restore color and visibility combinations.");
-    this.viewportSel = choice("Viewports (Alt+Tab):", "v3d-viewports", (sel) => this.fillViewports(sel), (value) => this.onViewport(value),
-      "Save and restore camera position and zoom.");
+    // the labels and tooltips name PRESET_SWITCH_KEY / VIEWPORT_SWITCH_KEY (include/dialogs/eda_view_switcher.h) by
+    // KeyNameFromKeyCode: Ctrl and Shift, or on macOS the Control key and Option
+    const pk = switchKeyName("preset"), vk = switchKeyName("viewport");
+    this.presetSel = choice(`Presets (${pk}+Tab):`, "v3d-presets", (sel) => this.fillPresets(sel), (value) => this.onPreset(value),
+      `Save and restore color and visibility combinations.\nUse ${pk}+Tab to activate selector.\nSuccessive Tabs while holding ${pk} down will cycle through presets in the popup.`);
+    this.viewportSel = choice(`Viewports (${vk}+Tab):`, "v3d-viewports", (sel) => this.fillViewports(sel), (value) => this.onViewport(value),
+      `Save and restore camera position and zoom.\nUse ${vk}+Tab to activate selector.\nSuccessive Tabs while holding ${vk} down will cycle through viewports in the popup.`);
   }
 
   /** The colours the two display options stand in (stackup, editor copper), then the board drawn again. */
   async refreshOverrides(): Promise<void> {
     const o: Partial<LayerColors> = {};
-    if (this.settings.useStackup && this.opts.stackupLayers) { try { const l = await this.opts.stackupLayers(); if (l) Object.assign(o, stackupOverride(l)); } catch { /* no stackup */ } }
+    if (this.settings.useStackup && this.opts.stackupLayers) {
+      try { const l = await this.opts.stackupLayers(), f = this.opts.stackupFinish ? await this.opts.stackupFinish() : null; if (l) Object.assign(o, stackupOverride(l, f)); } catch { /* no stackup */ }
+    }
     if (this.settings.useEditorCopper && this.opts.editorColor) {
       for (const [key, layer] of [["copperTop", "F.Cu"], ["copperBottom", "B.Cu"]] as const) { const c = parseCss(this.opts.editorColor(layer)); if (c) o[key] = c; }
     }
@@ -531,15 +556,15 @@ export class ViewerWindow {
   private onPreset(value: string): void {
     const v = this.viewer; if (!v) return;
     const refill = () => { if (this.presetSel) this.fillPresets(this.presetSel); };
-    if (value === FOLLOW_PCB) { const on = this.opts.layerVisible; if (on) { v.setVisibility(visibilityFromLayers(on, v.visibility)); } this.presetName = FOLLOW_PCB; this.afterPreset(); return; }
+    if (value === FOLLOW_PCB) { const on = this.opts.layerVisible; if (on) { v.setVisibility(visibilityFromLayers(on, v.visibility)); } this.presetName = FOLLOW_PCB; toFront(this.psMru, FOLLOW_PCB); this.afterPreset(); return; }
     if (value === FOLLOW_PLOT) {
       const get = this.opts.plotLayers;
-      if (get) void get().then((list) => { if (!list || !this.viewer) return; const set = new Set(list); this.viewer.setVisibility(visibilityFromLayers((l) => set.has(l), this.viewer.visibility)); this.presetName = FOLLOW_PLOT; this.afterPreset(); });
+      if (get) void get().then((list) => { if (!list || !this.viewer) return; const set = new Set(list); this.viewer.setVisibility(visibilityFromLayers((l) => set.has(l), this.viewer.visibility)); this.presetName = FOLLOW_PLOT; toFront(this.psMru, FOLLOW_PLOT); this.afterPreset(); });
       return;
     }
     if (value.startsWith("p:")) {
       const p = (this.settings.presets || []).find((x) => x.name === value.slice(2)); if (!p) return;
-      v.setVisibility({ ...p.vis }); setLayerColors(p.colors); this.presetName = p.name; this.afterPreset(true); return;
+      v.setVisibility({ ...p.vis }); setLayerColors(p.colors); this.presetName = p.name; toFront(this.psMru, p.name); this.afterPreset(true); return;
     }
     if (value === "save") {
       // wxTextEntryDialog( "Layer preset name:", "Save Layer Preset" ); an existing name asks "Overwrite existing preset?"
@@ -548,7 +573,7 @@ export class ViewerWindow {
         const name = text.trim(); if (!name || !this.viewer) { refill(); return; }
         const list = this.settings.presets = this.settings.presets || [];
         const put = () => { const at = list.findIndex((x) => x.name === name); const p: Preset3D = { name, vis: { ...this.viewer!.visibility }, colors: cloneLayerColors(LAYER_COLORS) };
-          if (at >= 0) list[at] = p; else list.push(p); this.presetName = name; this.save(); refill(); };
+          if (at >= 0) list[at] = p; else list.push(p); this.presetName = name; toFront(this.psMru, name); this.save(); refill(); };
         if (list.some((x) => x.name === name) && this.opts.confirm) this.opts.confirm("Overwrite existing preset?", put); else put();
       });
       refill(); return;
@@ -568,7 +593,7 @@ export class ViewerWindow {
   private onViewport(value: string): void {
     const v = this.viewer; if (!v) return;
     const refill = () => { if (this.viewportSel) this.fillViewports(this.viewportSel); };
-    if (value.startsWith("v:")) { const p = (this.settings.viewports || []).find((x) => x.name === value.slice(2)); if (p) { v.setCamera(p); this.syncToggles(); } return; }
+    if (value.startsWith("v:")) { const p = (this.settings.viewports || []).find((x) => x.name === value.slice(2)); if (p) { v.setCamera(p); this.syncToggles(); toFront(this.vpMru, p.name); } return; }
     if (value === "save") {
       const ask = this.opts.textEntry; if (!ask) { refill(); return; }
       ask("Save Viewport", "Viewport name:", "", (text) => {
@@ -576,7 +601,7 @@ export class ViewerWindow {
         const list = this.settings.viewports = this.settings.viewports || [];
         const c = this.viewer.getCamera(), p: Viewport3D = { name, q: c.q, cam: c.cam, ortho: c.ortho };
         const at = list.findIndex((x) => x.name === name); if (at >= 0) list[at] = p; else list.push(p);
-        this.save(); refill(); if (this.viewportSel) (this.viewportSel as unknown as HTMLSelectElement).value = "v:" + name;
+        toFront(this.vpMru, name); this.save(); refill(); if (this.viewportSel) (this.viewportSel as unknown as HTMLSelectElement).value = "v:" + name;
       });
       refill(); return;
     }
@@ -658,10 +683,61 @@ export class ViewerWindow {
 
   // ---------------------------------------------------------------- keyboard
 
+  /** The MRU of a switcher: the names applied most recently first, then the rest in list order (as rebuilt on load). */
+  private mru(kind: SwitcherKind): string[] {
+    const all = kind === "viewport" ? (this.settings.viewports || []).map((x) => x.name) : [FOLLOW_PCB, FOLLOW_PLOT, ...(this.settings.presets || []).map((x) => x.name)];
+    const list = kind === "viewport" ? this.vpMru : this.psMru;
+    const out = list.filter((n) => all.includes(n)); for (const n of all) if (!out.includes(n)) out.push(n);
+    list.splice(0, list.length, ...out); return out;
+  }
+  /** EDA_VIEW_SWITCHER: a borderless list centred on the window; false when the MRU is empty. */
+  private openSwitcher(kind: SwitcherKind, shift: boolean): boolean {
+    const items = this.mru(kind); if (!items.length) return false;
+    const key: "Control" | "Shift" | "Alt" = kind === "preset" ? "Control" : IS_MAC ? "Alt" : "Shift";
+    const el = document.createElement("div"); el.className = "vsw kview-switcher v3d-switcher"; el.setAttribute("role", "dialog"); el.dataset.switcher = kind;
+    const title = document.createElement("div"); title.className = "vsw-title"; title.textContent = "View Preset Switcher";
+    const list = document.createElement("div"); list.className = "vsw-list"; list.setAttribute("role", "listbox");
+    el.append(title, list);
+    // without key-state polling the Tab that opened the switcher is counted now
+    this.switcher = { kind, items, sel: advance(0, items.length, shift, key), el, list, key };
+    this.paintSwitcher(); document.body.append(el);
+    const r = this.root.getBoundingClientRect(), w = el.offsetWidth, h = el.offsetHeight;
+    el.style.left = Math.round(Math.max(4, Math.min(window.innerWidth - w - 4, r.left + (r.width - w) / 2))) + "px";
+    el.style.top = Math.round(Math.max(4, Math.min(window.innerHeight - h - 4, r.top + (r.height - h) / 2))) + "px";
+    return true;
+  }
+  private paintSwitcher(): void {
+    const sw = this.switcher; if (!sw) return;
+    sw.list.replaceChildren(...sw.items.map((name, i) => { const row = document.createElement("div"); row.className = "vsw-row kview-row" + (i === sw.sel ? " on" : ""); row.setAttribute("role", "option"); row.setAttribute("aria-selected", String(i === sw.sel)); row.textContent = name; return row; }));
+  }
+  /** Releasing the switch key applies the row (wxID_OK); Esc or losing the focus cancels. */
+  private closeSwitcher(apply: boolean): void {
+    const sw = this.switcher; if (!sw) return; this.switcher = null; sw.el.remove();
+    const name = sw.items[sw.sel]; if (!apply || name === undefined) return;
+    if (sw.kind === "viewport") this.onViewport("v:" + name);
+    else this.onPreset(name === FOLLOW_PCB || name === FOLLOW_PLOT ? name : "p:" + name);
+  }
+  private onKeyUp(ev: KeyboardEvent): void {
+    const sw = this.switcher; if (!sw) return;
+    if (ev.key === sw.key || (sw.key === "Control" && !ev.ctrlKey) || (sw.key === "Shift" && !ev.shiftKey) || (sw.key === "Alt" && !ev.altKey)) { ev.preventDefault(); ev.stopPropagation(); this.closeSwitcher(true); }
+  }
+
   private onKey(ev: KeyboardEvent): void {
     const t = ev.target as HTMLElement;
     // the window owns the keyboard while it has the focus: nothing reaches the board editor's shortcuts
     ev.stopPropagation();
+    if (this.switcher) {
+      ev.preventDefault();
+      const sw = this.switcher;
+      if (ev.key === "Tab" || (sw.kind === "preset" && ev.code === "Backquote")) { sw.sel = advance(sw.sel, sw.items.length, ev.shiftKey, sw.key); this.paintSwitcher(); }
+      else if (ev.key === "Escape") this.closeSwitcher(false);
+      return;
+    }
+    // EDA_3D_VIEWER_FRAME::TryBefore: PRESET_SWITCH_KEY / VIEWPORT_SWITCH_KEY with Tab opens EDA_VIEW_SWITCHER over the
+    // MRU (browsers keep Ctrl+Tab, so the preset switcher also opens on Ctrl+`, as in the board editor)
+    let kind = switcherFor(ev);
+    if (!kind && ev.code === "Backquote" && ev.ctrlKey && !ev.metaKey && !ev.altKey) kind = "preset";
+    if (kind && !(t && /^(INPUT|SELECT|K-SELECT|TEXTAREA)$/.test(t.tagName)) && this.openSwitcher(kind, ev.shiftKey)) { ev.preventDefault(); return; }
     if (t && /^(INPUT|SELECT|K-SELECT|TEXTAREA)$/.test(t.tagName) && (t as HTMLInputElement).type !== "checkbox") return;
     if (ev.key === "Escape") { if (this.menu.length) { this.closeMenu(); ev.preventDefault(); } return; }
     if ((ev.key === "=" || ev.key === "+") && !ev.ctrlKey && !ev.metaKey) { this.run("zoomInCenter"); ev.preventDefault(); return; }

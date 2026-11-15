@@ -83,32 +83,67 @@ export function layerColor(key: string): RGBA {
 }
 export function colorStamp(): string { return JSON.stringify(LAYER_COLORS) + JSON.stringify(OVERRIDE); }
 
-/** GetStandardColors() of stackup_predefined_prms.cpp: the solder mask / silkscreen names and the dielectric materials. */
-const STACKUP_COLORS: Record<string, [number, number, number, number]> = {
-  Green: [60, 150, 80, 255], Red: [128, 0, 0, 255], Blue: [0, 0, 128, 255], Purple: [80, 0, 80, 255], Black: [20, 20, 20, 255], White: [200, 200, 200, 255], Yellow: [128, 128, 0, 255],
-  "FR4 natural": [109, 116, 75, 212], "PTFE natural": [252, 252, 250, 230], Polyimide: [205, 130, 0, 170], "Phenolic natural": [92, 17, 6, 230], Aluminum: [213, 213, 213, 255],
-};
-/** A stackup colour ("Green", "#3C9650FF", "R60G150B80") as RGBA, or null. */
-export function stackupColor(name: string | undefined, alpha?: number): RGBA | null {
-  if (!name) return null;
-  const std = STACKUP_COLORS[name];
-  let c: number[] | null = std ? std : null;
-  const hx = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(name);
-  if (hx) { const n = parseInt(hx[1], 16); c = [n >> 16, (n >> 8) & 255, n & 255, hx[2] ? parseInt(hx[2], 16) : 255]; }
-  const rgb = /^R(\d+)G(\d+)B(\d+)(?:A(\d+))?$/.exec(name);
-  if (rgb) c = [+rgb[1], +rgb[2], +rgb[3], rgb[4] ? +rgb[4] : 255];
-  if (!c) return null;
-  return [c[0] / 255, c[1] / 255, c[2] / 255, alpha !== undefined ? alpha : c[3] / 255];
-}
-/** The stackup's colours as layer overrides: silkscreen, solder mask (KiCad's mask opacity kept) and the board body (the first dielectric). */
-export function stackupOverride(layers: { name: string; type?: string; color?: string }[]): Partial<LayerColors> {
-  const out: Partial<LayerColors> = {};
-  for (const l of layers) {
-    if (l.name === "F.SilkS") { const c = stackupColor(l.color); if (c) out.silkTop = c; }
-    else if (l.name === "B.SilkS") { const c = stackupColor(l.color); if (c) out.silkBottom = c; }
-    else if (l.name === "F.Mask") { const c = stackupColor(l.color, SOLDER_MASK[3]); if (c) out.maskTop = c; }
-    else if (l.name === "B.Mask") { const c = stackupColor(l.color, SOLDER_MASK[3]); if (c) out.maskBottom = c; }
-    else if (/^dielectric/.test(l.name) && !out.board) { const c = stackupColor(l.color); if (c) out.board = c; }
+/**
+ * BOARD_ADAPTER's own colour tables (3d-viewer/3d_canvas/board_adapter.cpp:170-210: g_SilkColors, g_MaskColors,
+ * g_FinishColors, g_BoardColors), r, g, b in 0..255 and alpha in 0..1, which a stackup colour name is looked up in.
+ * The first silkscreen and mask rows are NotSpecifiedPrm() ("Not specified").
+ */
+type Named = [string, number, number, number, number];
+const NOT_SPECIFIED = "Not specified";
+const SILK_COLORS: Named[] = [[NOT_SPECIFIED, 245, 245, 245, 1], ["Green", 20, 51, 36, 1], ["Red", 181, 19, 21, 1], ["Blue", 2, 59, 162, 1], ["Black", 11, 11, 11, 1],
+  ["White", 245, 245, 245, 1], ["Purple", 32, 2, 53, 1], ["Yellow", 194, 195, 0, 1]];
+const MASK_COLORS: Named[] = [[NOT_SPECIFIED, 20, 51, 36, 0.83], ["Green", 20, 51, 36, 0.83], ["Light Green", 91, 168, 12, 0.83], ["Saturated Green", 13, 104, 11, 0.83],
+  ["Red", 181, 19, 21, 0.83], ["Light Red", 210, 40, 14, 0.83], ["Red/Orange", 239, 53, 41, 0.83], ["Blue", 2, 59, 162, 0.83], ["Light Blue 1", 54, 79, 116, 0.83],
+  ["Light Blue 2", 61, 85, 130, 0.83], ["Green/Blue", 21, 70, 80, 0.83], ["Black", 11, 11, 11, 0.83], ["White", 245, 245, 245, 0.83], ["Purple", 32, 2, 53, 0.83],
+  ["Light Purple", 119, 31, 91, 0.83], ["Yellow", 194, 195, 0, 0.83]];
+const FINISH_COLORS: Named[] = [["Copper", 184, 115, 50, 1], ["Gold", 178, 156, 0, 1], ["Silver", 213, 213, 213, 1], ["Tin", 160, 160, 160, 1]];
+const BOARD_COLORS: Named[] = [["FR4 natural, dark", 51, 43, 22, 0.83], ["FR4 natural", 109, 116, 75, 0.83], ["PTFE natural", 252, 252, 250, 0.90], ["Polyimide", 205, 130, 0, 0.68],
+  ["Phenolic natural", 92, 17, 6, 0.90], ["Brown 1", 146, 99, 47, 0.83], ["Brown 2", 160, 123, 54, 0.83], ["Brown 3", 146, 99, 47, 0.83], ["Aluminum", 213, 213, 213, 1]];
+/**
+ * BOARD_ADAPTER::GetLayerColors' findColor: "#RRGGBB" / "#RRGGBBAA" as written, else the name in the table, else
+ * COLOR4D() (opaque black), as KiCad does for a name the table lacks.
+ */
+export function stackupColor(name: string | undefined, table: "silk" | "mask" | "board" | "finish"): RGBA {
+  const n = name === undefined || name === "" ? NOT_SPECIFIED : name;
+  if (n.startsWith("#")) {
+    const hx = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(n);
+    if (hx) { const v = parseInt(hx[1], 16); return [(v >> 16) / 255, ((v >> 8) & 255) / 255, (v & 255) / 255, hx[2] ? parseInt(hx[2], 16) / 255 : 1]; }
+    return [0, 0, 0, 1];
   }
+  const set = table === "silk" ? SILK_COLORS : table === "mask" ? MASK_COLORS : table === "board" ? BOARD_COLORS : FINISH_COLORS;
+  const row = set.find((c) => c[0] === n);
+  return row ? [row[1] / 255, row[2] / 255, row[3] / 255, row[4]] : [0, 0, 0, 1];
+}
+/** The finish colour of a stackup copper_finish (board_adapter.cpp:796-815), or null when the copper keeps its colour. */
+export function finishColor(finish: string | null | undefined): RGBA | null {
+  const f = finish || "";
+  if (f.endsWith("OSP")) return stackupColor("Copper", "finish");
+  if (f.endsWith("IG") || f.endsWith("gold")) return stackupColor("Gold", "finish");
+  if (f.startsWith("HAL") || f.startsWith("HASL") || f.endsWith("tin") || f.endsWith("nickel")) return stackupColor("Tin", "finish");
+  if (f.endsWith("silver")) return stackupColor("Silver", "finish");
+  return null;
+}
+/**
+ * "Use board stackup colors" (BOARD_ADAPTER::GetLayerColors with m_UseStackupColors): silkscreen and solder mask by
+ * name, the board body mixed from every dielectric layer (COLOR4D::Mix by 1 - alpha, alpha raised by half the layer's),
+ * and the copper from the surface finish.
+ */
+export function stackupOverride(layers: { name: string; type?: string; color?: string }[], finish?: string | null): Partial<LayerColors> {
+  const out: Partial<LayerColors> = {};
+  let body: RGBA | null = null;
+  for (const l of layers) {
+    if (l.name === "F.SilkS") out.silkTop = stackupColor(l.color, "silk");
+    else if (l.name === "B.SilkS") out.silkBottom = stackupColor(l.color, "silk");
+    else if (l.name === "F.Mask") out.maskTop = stackupColor(l.color, "mask");
+    else if (l.name === "B.Mask") out.maskBottom = stackupColor(l.color, "mask");
+    else if (/^dielectric/.test(l.name) || l.type === "core" || l.type === "prepreg") {
+      const c = stackupColor(l.color, "board");
+      if (!body) body = c.slice() as RGBA;
+      else { const f = 1 - c[3]; body = [c[0] * (1 - f) + body[0] * f, c[1] * (1 - f) + body[1] * f, c[2] * (1 - f) + body[2] * f, body[3]]; }
+      body[3] += (1 - body[3]) * c[3] / 2;
+    }
+  }
+  if (body && !(body[0] === 0 && body[1] === 0 && body[2] === 0 && body[3] === 0)) out.board = body;
+  const fc = finishColor(finish); if (fc) out.copper = fc;
   return out;
 }
