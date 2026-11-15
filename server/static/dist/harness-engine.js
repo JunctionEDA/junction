@@ -101574,11 +101574,19 @@ function fieldOf2(node, name) {
   return "";
 }
 function projectModel(path2) {
-  const m = /^\$[{(]KIPRJMOD[})][\/\\](.+)\.(?:step|stp|wrl)$/i.exec(path2);
+  const fn = globalThis.KiCadProjectModel;
+  const abs = /^((?:[A-Za-z]:)?[\/\\].+)\.(?:step|stp|wrl|wrz)$/i.exec(path2);
+  if (abs) {
+    try {
+      return typeof fn === "function" ? fn(abs[1].replace(/\\/g, "/")) || null : null;
+    } catch {
+      return null;
+    }
+  }
+  const m = /^\$[{(]KIPRJMOD[})][\/\\](.+)\.(?:step|stp|wrl|wrz)$/i.exec(path2);
   if (!m) return null;
   const stem = m[1].replace(/\\/g, "/").replace(/^\.\//, "");
   if (stem.replace(/^(?:\.\.\/)+/, "").split("/").includes("..")) return null;
-  const fn = globalThis.KiCadProjectModel;
   try {
     return typeof fn === "function" ? fn(stem) || null : null;
   } catch {
