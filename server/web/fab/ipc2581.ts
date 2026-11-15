@@ -7,14 +7,18 @@
 // LogicalNet, LayerFeature per layer with a Set per net, and the drill LayerFeatures with their Holes).  The sections
 // follow the function mode table (fab_sections.cpp TABLE_4) and ResolveSections (ipc2581_function_mode.cpp).
 //
-// What differs from the desktop: padstack definitions (PadStackDef) and the physical netlist (PhyNetGroup) are not
-// written; a pad's shape is its standard primitive (Circle / RectCenter / Oval / RectRound) or a filled Polygon for
-// custom and chamfered shapes; the profile's arcs are polylines (the web outline is chained from polygonised
+// Padstacks (addPadStack): a PadStackDef per distinct pad or via, with its round hole (PadstackHoleDef) and a
+// PadstackPadDef per layer of its layer set; the Pad elements of the layer features name it in padstackDefRef.  The
+// physical netlist (generatePhyNetGroup) lists every pad and via that can be probed from an outer side.
+//
+// What differs from the desktop: the via filling / capping / plugging / covering / tenting pad definitions are not
+// written (the web writer has no layers for them); a pad's shape in the layer features is its standard primitive
+// (Circle / RectCenter / Oval / RectRound) or a filled Polygon for custom and chamfered shapes; the profile's arcs are polylines (the web outline is chained from polygonised
 // Edge.Cuts); a package outline is the courtyard or else the box of the pads.
 import { stackupRows, stackupThickness } from "../canvas/board-setup";
 import { boardShape } from "../viewer3d/outline";
-import { type BoardModel, type Footprint, type Node, type Pad, type Track, type Via, type ZoneFill, isCopper } from "./model";
-import { Connections, PlotLog, plotLayer } from "./plot";
+import { type BoardModel, type Footprint, type Node, type Pad, type Track, type Via, type ZoneFill, isCopper, padShapeOn } from "./model";
+import { Connections, PlotLog, flashed, padPrims, plotLayer } from "./plot";
 import { courtyardLoops } from "./pnp";
 import { primPolys } from "./poly";
 import { type Prim, type Pt, norm360, rot } from "./prims";
@@ -49,9 +53,10 @@ export function resolveSections(rev: "B" | "C", mode: Mode, requested: Set<strin
   const has = (k: string): boolean => out.included.has(k);
   if (has("A") && !has("O")) out.conflicts.push("Cannot export assembly data without outer copper layers.");
   if (has("Y") && !has("O")) out.conflicts.push("Cannot export physical netlist without outer copper layers.");
+  if (!has("K")) out.suppress.add("PAD_PADSTACKDEFREF");
   if (has("B") && !has("C")) out.suppress.add("BOM_REFDES_PACKAGEREF");
   if (has("B") && !has("O")) out.suppress.add("BOM_REFDES_LAYERREF");
-  if (rev === "C") { if (!has("B")) { out.suppress.add("COMPONENT_REFDES"); out.suppress.add("PINREF_COMPONENTREF"); } }
+  if (rev === "C") { if (!has("B")) { out.suppress.add("COMPONENT_REFDES"); out.suppress.add("PINREF_COMPONENTREF"); } if (!has("C")) out.suppress.add("COMPONENT_PACKAGEREF"); }
   else {
     if (has("A") && !has("C")) out.conflicts.push("Component assembly data cannot be exported without component packages in IPC-2581B.");
     if (!has("A")) { out.suppress.add("PINREF_COMPONENTREF"); if (has("B")) out.suppress.add("BOM_REFDES"); }
@@ -243,6 +248,73 @@ export function writeIpc2581(m: BoardModel, setup: Node | null, o: Ipc2581Option
     if (p.k === "td") return;
     for (const poly of primPolys(p)) polygon(parent, poly);
   };
+  // user primitives (addShape into DictionaryUser): a pad shape that is no standard primitive, in the pad's frame
+  const userShapes = new Map<string, string>();
+  const userRef = (parent: X, p: Prim, unrot = 0): void => {
+    const px = (p as { x?: number }).x || 0, py = (p as { y?: number }).y || 0;
+    const polys = primPolys(p).map((q) => q.map(([x, y]): Pt => rot(x - px, y - py, -unrot)));
+    const key = "P" + JSON.stringify(polys.map((q) => q.map(([x, y]) => `${fv(x)},${fv(y)}`)));
+    let id = userShapes.get(key);
+    if (!id) { id = `SHAPE_${userShapes.size + 1}`; userShapes.set(key, id); const sp = userD.add("EntryUser").a("id", id).add("UserSpecial"); for (const q of polys) polygon(sp, q); }
+    parent.add("UserPrimitiveRef").a("id", id);
+  };
+  const shapeRef = (parent: X, p: Prim | null | undefined, unrot = 0): void => { if (p && !stdRef(parent, p) && "x" in p) userRef(parent, p, unrot); };
+  /** addShape of a PCB_SHAPE circle (a via's pad, an unflashed pad layer): an outlined UCIRCLE user primitive */
+  const userCircle = (parent: X, d: number, cx = 0, cy = 0): void => {
+    const key = `C${fv(d)}@${fv(cx)},${fv(cy)}`; let id = userShapes.get(key);
+    if (!id) { id = `UCIRCLE_${userShapes.size + 1}`; userShapes.set(key, id); const c = userD.add("EntryUser").a("id", id).add("UserSpecial").add("Circle").a("diameter", fv(d)); c.add("LineDesc").a("lineWidth", fv(0.1)).a("lineEnd", "ROUND"); c.add("FillDesc").a("fillProperty", "HOLLOW"); }
+    parent.add("UserPrimitiveRef").a("id", id);
+  };
+  // padstacks (addPadStack): one PadStackDef per distinct pad or via, numbered in the order they are met
+  const conn = new Connections(m);
+  const LAYER_IDS: Record<string, number> = { "F.Mask": 1, "B.Mask": 3, "F.SilkS": 5, "B.SilkS": 7, "F.Adhes": 9, "B.Adhes": 11, "F.Paste": 13, "B.Paste": 15, "Dwgs.User": 17, "Cmts.User": 19, "Eco1.User": 21, "Eco2.User": 23, "Edge.Cuts": 25, "Margin": 27, "B.CrtYd": 29, "F.CrtYd": 31, "B.Fab": 33, "F.Fab": 35 };
+  /** LSET::Seq: the layers by PCB_LAYER_ID (F.Cu 0, F.Mask 1, B.Cu 2, B.Mask 3, In1.Cu 4 …) */
+  const layerId = (l: string): number => { if (l === "F.Cu") return 0; if (l === "B.Cu") return 2; const i = /^In(\d+)\.Cu$/.exec(l); if (i) return 2 + 2 * +i[1]; const u = /^User\.(\d+)$/.exec(l); return u ? 37 + 2 * +u[1] : LAYER_IDS[l] ?? 1000; };
+  const bySeq = (a: string, b: string): number => layerId(a) - layerId(b);
+  const layerOk = (l: string): boolean => (isCopper(l) ? m.copper.includes(l) : !o.layers.length || o.layers.includes(l)) && layerIncluded(l);
+  const nm = (v: number): number => Math.round(v * 1e6);
+  const padstackNames = new Map<string, string>(), pkgStacks: X[] = [], featStacks: X[] = [];
+  let stackList = pkgStacks;
+  const register = (def: X): string => {
+    const text: string[] = []; def.write(0, text); const key = text.join("\n");
+    let name = padstackNames.get(key); if (name) return name;
+    name = `PADSTACK_${padstackNames.size + 1}`; padstackNames.set(key, name);
+    def.attrs.unshift(["name", name]); stackList.push(def); return name;
+  };
+  const padStack = (p: Pad): string => {
+    const def = new X("PadStackDef"), dr = p.drill;
+    // only round holes: IPC-2581 has no slotted padstack hole, slots go to the slot layer
+    if (dr && dr.w > 0 && !(dr.oval && Math.abs(dr.w - dr.h) > 1e-9)) {
+      const dh = dr.h > 0 ? dr.h : dr.w, off = padShapeOn(p, "F.Cu", m.copper).offset;
+      xy(def.add("PadstackHoleDef").a("name", `${p.type === "thru_hole" ? "PTH" : "NPTH"}${nm(dr.w)}_${nm(dh)}`).a("diameter", fv(Math.min(dr.w, dh))).a("platingStatus", p.type === "thru_hole" ? "PLATED" : "NONPLATED").a("plusTol", "0.0").a("minusTol", "0.0"), off[0], off[1]);
+    }
+    for (const l of [...p.layers].sort(bySeq)) {
+      if (!layerOk(l)) continue;
+      const shape = padShapeOn(p, l, m.copper), off = shape.offset;
+      const pd = def.add("PadstackPadDef").a("layerRef", layerName(l)).a("padUse", "REGULAR"); xy(pd.add("Location"), off[0], off[1]);
+      if (isCopper(l) && p.type === "thru_hole" && dr && !flashed(p.removeUnused, p.keepEnds, p.zoneLayers, l, m.copper[0], m.copper[m.copper.length - 1], p.x, p.y, Math.max(shape.w, shape.h) / 2, conn)) {
+        userCircle(pd, Math.min(dr.w, dr.h > 0 ? dr.h : dr.w), off[0], off[1]); continue;
+      }
+      const prims: Prim[] = []; padPrims(p, l, m, prims); shapeRef(pd, prims[0], p.rot);
+    }
+    return register(def);
+  };
+  const viaStack = (v: Via): string => {
+    const def = new X("PadStackDef");
+    def.add("PadstackHoleDef").a("name", `PH${nm(v.drill)}`).a("diameter", fv(v.drill)).a("platingStatus", "VIA").a("plusTol", "0.0").a("minusTol", "0.0").a("x", "0.0").a("y", "0.0");
+    // PCB_VIA::GetLayerSet: the copper it spans, and the masks of an untented outer side
+    const ls = [...v.layers];
+    if (!(v.tentFront ?? m.settings.tentFront) && ls.includes("F.Cu")) ls.push("F.Mask");
+    if (!(v.tentBack ?? m.settings.tentBack) && ls.includes("B.Cu")) ls.push("B.Mask");
+    for (const l of ls.sort(bySeq)) {
+      if (!layerOk(l)) continue;
+      const d = (v.sizes && v.sizes.get(isCopper(l) ? l : l === "B.Mask" ? "B.Cu" : "F.Cu")) || v.size;
+      if (isCopper(l) && !flashed(v.removeUnused, v.keepEnds, v.zoneLayers, l, v.layers[0], v.layers[v.layers.length - 1], v.x, v.y, d / 2, conn)) continue;
+      const pd = def.add("PadstackPadDef").a("layerRef", layerName(l)).a("padUse", "REGULAR"); xy(pd.add("Location"), 0, 0);
+      userCircle(pd, d);
+    }
+    return register(def);
+  };
   // packages and components (generateComponents / addPackage)
   const pkgOf = new Map<Footprint, string>(); const pkgNodes: X[] = [], compNodes: X[] = [];
   const pkgSeen = new Map<string, string>();
@@ -264,6 +336,8 @@ export function writeIpc2581(m: BoardModel, setup: Node | null, o: Ipc2581Option
       if (!isFinite(x0)) { x0 = y0 = -0.5; x1 = y1 = 0.5; }
       const pn = new X("Package").a("name", pkg).a("type", "OTHER").a("pinOne", fp.pads.length ? pinName(fp.pads[0]) : "1").a("pinOneOrientation", "OTHER").a("height", fv(parseFloat(fp.props.get("Height") || "0") || 0));
       const ol = pn.add("Outline"); polygon(ol, outline || [[x0, y0], [x1, y0], [x1, y1], [x0, y1]]); ol.add("LineDesc").a("lineWidth", fv(0)).a("lineEnd", "ROUND");
+      // addPackage asks for each pad's padstack: they come first in the Step
+      for (const p of fp.pads) padStack(p);
       for (const p of fp.pads) { const pin = pn.add("Pin").a("number", pinName(p)).a("type", p.drill ? "THRU" : "SURFACE").a("electricalType", p.type === "np_thru_hole" ? "MECHANICAL" : "ELECTRICAL"); const [lx, ly] = local([p.x, p.y]); xy(pin.add("Location"), lx, ly); }
       pkgNodes.push(pn);
     }
@@ -279,10 +353,57 @@ export function writeIpc2581(m: BoardModel, setup: Node | null, o: Ipc2581Option
   }
   if (inc("C")) step.kids.push(...pkgNodes);
   if (inc("A")) step.kids.push(...compNodes);
-  if (inc("A") && refDesOut) step.add("NonstandardAttribute").a("name", "FOOTPRINT_COUNT").a("type", "INTEGER").a("value", m.footprints.length);
+  // FOOTPRINT_COUNT goes at the start of the Step and the later padstacks follow it (m_last_padstack)
+  const countAttr = inc("A") && refDesOut ? new X("NonstandardAttribute").a("name", "FOOTPRINT_COUNT").a("type", "INTEGER").a("value", m.footprints.length) : null;
+  if (countAttr) stackList = featStacks;
   if (inc("G")) for (const [net, pins] of netPins) { const n = step.add("LogicalNet").a("name", netName(net)); for (const [c, p] of pins) { const r = n.add("PinRef"); if (!sup("PINREF_COMPONENTREF") && refDesOut) r.a("componentRef", c); r.a("pin", p); } }
+  // the physical netlist (generatePhyNetGroup over FabTestPoints): every probe-able pad and via, pads first
+  if (inc("Y")) {
+    const shapeOf = (parent: X, p: Prim | null, unrot = 0): void => shapeRef(parent, p, unrot);
+    const near = (a: number, b: number): boolean => Math.abs(a - b) < 1e-6;
+    interface NetPoint { x: number; y: number; layer: string; secondary: string | null; exposure: string; end: boolean; via: boolean; shape: Prim | null; rot: number }
+    const byNet = new Map<string, NetPoint[]>();
+    const exposure = (front: boolean, back: boolean, fm: boolean, bm: boolean): string => {
+      const fo = !front || fm, bo = !back || bm;
+      return fo && bo ? "EXPOSED" : bo ? "COVERED_PRIMARY" : fo ? "COVERED_SECONDARY" : "COVERED";
+    };
+    const push = (net: string, pt: NetPoint): void => { if (!byNet.has(net)) byNet.set(net, []); byNet.get(net)!.push(pt); };
+    for (const fp of m.footprints) for (const p of fp.pads) {
+      const front = p.layers.has("F.Cu"), back = p.layers.has("B.Cu");
+      if (!p.net || (!front && !back)) continue;   // inner-only pads cannot be probed
+      const layer = front ? "F.Cu" : "B.Cu", prims: Prim[] = [];
+      padPrims(p, layer, m, prims);
+      push(p.net, { x: p.x, y: p.y, layer, secondary: front && back ? "B.Cu" : null, exposure: exposure(front, back, p.layers.has("F.Mask"), p.layers.has("B.Mask")), end: true, via: false, shape: prims[0] || null, rot: p.rot });
+    }
+    for (const v of m.vias) {
+      const front = v.layers.includes("F.Cu"), back = v.layers.includes("B.Cu");
+      if (!v.net || (!front && !back)) continue;   // buried vias cannot be probed
+      const tf = v.tentFront ?? m.settings.tentFront, tb = v.tentBack ?? m.settings.tentBack;
+      // a via with more copper after it is a midpoint (GetConnectedItemsAtAnchor of tracks and arcs)
+      const tracks = m.tracks.filter((t) => v.layers.includes(t.layer) && ((near(t.x1, v.x) && near(t.y1, v.y)) || (near(t.x2, v.x) && near(t.y2, v.y)))).length;
+      const layer = front ? "F.Cu" : "B.Cu", d = (v.sizes && v.sizes.get(layer)) || v.size;
+      push(v.net, { x: v.x, y: v.y, layer, secondary: front && back ? "B.Cu" : null, exposure: exposure(front, back, front && !tf, back && !tb), end: tracks < 2, via: true, shape: { k: "circle", x: v.x, y: v.y, d } as Prim, rot: 0 });
+    }
+    if (byNet.size) {
+      const codes = new Map<string, number>(); const docNets = (m.doc as unknown as { nets?: Map<number, string> }).nets;
+      if (docNets) for (const [c, n] of docNets) if (!codes.has(n)) codes.set(n, c);
+      const order = [...byNet.keys()].sort((a, b) => (codes.get(a) ?? 1e9) - (codes.get(b) ?? 1e9) || (a < b ? -1 : a > b ? 1 : 0));
+      const group = step.add("PhyNetGroup").a("name", "NETS");
+      for (const net of order) {
+        // NetKey is one key for LogicalNet@name and PhyNet@name, so the physical net takes a suffix
+        const pn = group.add("PhyNet").a("name", o.anonymizeNets ? (anon.get(net) || "NET_0") + "_PHY" : gen(net + "_PHY", "NET"));
+        for (const pt of byNet.get(net)!) {
+          const n = xy(pn.add("PhyNetPoint"), pt.x, pt.y).a("layerRef", layerName(pt.layer));
+          if (pt.secondary) n.a("secondaryLayerRef", layerName(pt.secondary));
+          n.a("netNode", pt.end ? "END" : "MIDDLE").a("exposure", pt.exposure);
+          if (pt.via) n.a("via", "true");
+          shapeOf(n, pt.shape, pt.rot);
+        }
+      }
+    }
+  }
   // layer features (generateLayerFeatures / generateLayerSetNet)
-  const log = new PlotLog(), conn = new Connections(m);
+  const log = new PlotLog();
   const padSet = new Set<unknown>(), viaSet = new Set<unknown>(m.vias), trackSet = new Set<unknown>(m.tracks), fillSet = new Set<unknown>(m.fills);
   for (const fp of m.footprints) for (const p of fp.pads) padSet.add(p);
   const netOfSrc = (s: unknown): string => (padSet.has(s) ? (s as Pad).net : viaSet.has(s) ? (s as Via).net : trackSet.has(s) ? (s as Track).net || "" : fillSet.has(s) ? (s as ZoneFill).net || "" : "");
@@ -301,6 +422,9 @@ export function writeIpc2581(m: BoardModel, setup: Node | null, o: Ipc2581Option
       const src = p.meta ? p.meta.src : undefined, net = isCopper(l) ? netOfSrc(src) : "";
       if (src && (padSet.has(src) || viaSet.has(src)) && (p.k === "circle" || p.k === "rect" || p.k === "oval" || p.k === "roundrect")) {
         const set = setFor(net, "p"); const pd = set.add("Pad");
+        // addPad / addVia: the padstack first (padstackDefRef), then the rotation, location and shape
+        const stackName = padSet.has(src) ? padStack(src as Pad) : viaStack(src as Via);
+        if (!sup("PAD_PADSTACKDEFREF")) pd.a("padstackDefRef", stackName);
         const deg = p.k === "circle" ? 0 : p.rot; if (deg) pd.add("Xform").a("rotation", fv(norm360(deg) / scale));
         xy(pd.add("Location"), p.x, p.y); stdRef(pd, p);
         if (padSet.has(src)) { const pad = src as Pad, pr = pd.add("PinRef"); if (!sup("PINREF_COMPONENTREF") && refDesOut) pr.a("componentRef", cmpName(pad.fp)); pr.a("pin", pinName(pad)); }
@@ -329,6 +453,9 @@ export function writeIpc2581(m: BoardModel, setup: Node | null, o: Ipc2581Option
       }
     }
   }
+  // the Step starts with FOOTPRINT_COUNT and the padstacks met after it, then those of the packages (insertNode /
+  // insertNodeAfter( m_last_padstack ))
+  step.kids.unshift(...(countAttr ? [countAttr] : []), ...(inc("K") ? featStacks : []), ...(inc("K") ? pkgStacks : []));
   const haveLayer = cad.kids.some((k) => k.name === "Layer");
   if (!needsCad || !haveLayer) { ecad.kids = ecad.kids.filter((k) => k !== cad); content.kids = content.kids.filter((k) => k.name !== "StepRef"); }
   else { const refs = cad.kids.filter((k) => k.name === "Layer").map((k) => new X("LayerRef").a("name", k.attrs[0][1])); for (const r of refs) content.insert(r, (k) => k.name.startsWith("Dictionary")); }
@@ -364,8 +491,9 @@ export function writeIpc2581(m: BoardModel, setup: Node | null, o: Ipc2581Option
     }
   }
   if (!ecad.kids.some((k) => k.name === "CadData") && !inc("S") && !inc("E")) { /* the CadHeader alone stays: Ecad needs it */ }
-  // the sectionKey names what the file carries (emittedSections)
-  const emitted = new Set([...res.included].filter((k) => k !== "B" || root.kids.some((x) => x.name === "Bom")));
+  // the sectionKey names what the file carries (emittedSections): B only with a Bom, Y only with a PhyNetGroup
+  const has = (name: string): boolean => { const walk = (x: X): boolean => x.name === name || x.kids.some(walk); return walk(root); };
+  const emitted = new Set([...res.included].filter((k) => (k !== "B" || root.kids.some((x) => x.name === "Bom")) && (k !== "Y" || has("PhyNetGroup"))));
   fm.a("sectionKey", sectionKeyString(emitted));
   const out: string[] = ['<?xml version="1.0" encoding="UTF-8"?>']; root.write(0, out);
   return { xml: out.join("\n") + "\n", warnings, errors };

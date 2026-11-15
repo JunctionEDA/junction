@@ -381,6 +381,9 @@ export function openBoardStatistics(ctx: ToolCtx): void {
   const row = (t: HTMLElement, cells: (string | number)[], cls?: string): void => { t.append(h("tr", cls ? { class: cls } : null, ...cells.map((c, i) => h("td", i ? { class: "n" } : null, String(c))))); };
   const unknownOr = (v: number | null): string => (v === null ? "unknown" : fmtLenU(v));
   const pct = (v: number): string => `${v.toFixed(2)} %`;
+  // GetStackupOrDefault().BuildBoardThicknessFromStackup(): the stackup's layers (read with the areas), else the
+  // default stackup, whose total is the board's thickness
+  const stackupT = (): number => { const a = areas as (StatAreas & { stackupThickness?: number | null }) | null; return a && typeof a.stackupThickness === "number" ? a.stackupThickness : Number(doc.thickness) || 1.6; };
   const boardRows = (): [string, string][] => {
     const A = areas, pending = "…";
     return [
@@ -388,7 +391,7 @@ export function openBoardStatistics(ctx: ToolCtx): void {
       ["Area:", !data.hasOutline ? "unknown" : A ? areaText(A.boardArea) : pending],
       ["Front copper area:", A ? areaText(A.frontCopper) : pending], ["Back copper area:", A ? areaText(A.backCopper) : pending],
       ["Min track clearance:", unknownOr(data.minClearance)], ["Min track width:", unknownOr(data.minTrackWidth)], ["Min drill diameter:", unknownOr(data.minDrill)],
-      ["Board stackup thickness:", fmtLenU(Number(doc.thickness) || 1.6)],
+      ["Board stackup thickness:", fmtLenU(stackupT())],
       ["Front footprint area:", A ? areaText(A.frontCourtyard) : pending], ["Front footprint density:", !data.hasOutline ? "unknown" : A && A.boardArea > 0 ? pct(A.frontCourtyard * 100 / A.boardArea) : pending],
       ["Back footprint area:", A ? areaText(A.backCourtyard) : pending], ["Back footprint density:", !data.hasOutline ? "unknown" : A && A.boardArea > 0 ? pct(A.backCourtyard * 100 / A.boardArea) : pending],
     ];
@@ -412,13 +415,15 @@ export function openBoardStatistics(ctx: ToolCtx): void {
     drillHost.replaceChildren(grid([{ label: "Count", key: "count" }, { label: "Shape", key: "shape" }, { label: "X Size", key: "x", type: "len" }, { label: "Y Size", key: "y", type: "len" }, { label: "Plated", key: "plated" },
       { label: "Via/Pad", key: "kind" }, { label: "Start Layer", key: "start" }, { label: "Stop Layer", key: "stop" }], rows, { ro: true, height: "320px" }).el);
   };
+  /** the Default net class's clearance (m_NetSettings->GetDefaultNetclass()->GetClearance()) */
+  const defaultClearance = (): number => { const c = ((E.proSettings || {}) as { net_settings?: { classes?: { name: string; clearance?: number }[] } }).net_settings?.classes?.find((x) => x.name === "Default"); return c && typeof c.clearance === "number" ? c.clearance : 0.2; };
   // the areas come from the plotters' geometry (web/fab), fetched with the fab bundle
   const loadAreas = async (): Promise<void> => {
     const seq = ++areaSeq; areas = null; draw();
     try {
       const F = await loadFab(); const fctx = await fabContext(); if (!fctx || seq !== areaSeq) return;
       projectName = fctx.projectName || "";
-      const a = F.statAreas(fctx, { subtractHolesFromBoard: statsState.subtractHoles, subtractHolesFromCopper: statsState.subtractHolesFromCopper, courtyards: (fp: KItem) => P.PcbTools.courtyards(fp) });
+      const a = F.statAreas(fctx, { subtractHolesFromBoard: statsState.subtractHoles, subtractHolesFromCopper: statsState.subtractHolesFromCopper, courtyards: (fp: KItem) => P.PcbTools.courtyards(fp), defaultClearance: defaultClearance() });
       if (seq === areaSeq) { areas = a; draw(); }
     } catch (e) { console.warn("board statistics: areas", e); }
   };
@@ -434,7 +439,7 @@ export function openBoardStatistics(ctx: ToolCtx): void {
     if (data.hasOutline) L.push(`- Width: ${fmtLenU(data.width)}`, `- Height: ${fmtLenU(data.height)}`, `- Area: ${A ? areaText(A.boardArea) : "unknown"}`);
     else L.push("- Dimensions: unknown", "- Area: unknown");
     L.push(`- Front copper area: ${A ? areaText(A.frontCopper) : "unknown"}`, `- Back copper area: ${A ? areaText(A.backCopper) : "unknown"}`, `- Min track clearance: ${unknownOr(data.minClearance)}`,
-      `- Min track width: ${unknownOr(data.minTrackWidth)}`, `- Min drill diameter: ${unknownOr(data.minDrill)}`, `- Board stackup thickness: ${fmtLenU(Number(doc.thickness) || 1.6)}`, "",
+      `- Min track width: ${unknownOr(data.minTrackWidth)}`, `- Min drill diameter: ${unknownOr(data.minDrill)}`, `- Board stackup thickness: ${fmtLenU(stackupT())}`, "",
       `- Front footprint area: ${A ? areaText(A.frontCourtyard) : "unknown"}`, `- Back footprint area: ${A ? areaText(A.backCourtyard) : "unknown"}`,
       `- Front component density: ${data.hasOutline && A && A.boardArea > 0 ? pct(A.frontCourtyard * 100 / A.boardArea) : "unknown"}`,
       `- Back component density: ${data.hasOutline && A && A.boardArea > 0 ? pct(A.backCourtyard * 100 / A.boardArea) : "unknown"}`, "Pads\n----");

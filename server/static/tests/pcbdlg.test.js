@@ -224,6 +224,9 @@ const ZINT = [
   ["dm", "12345", 0, 10, "1ddcecb7d09905c7"],
   ["dm", "R1 10k 0603", 0, 14, "4b81097b653594b8"],
   ["dm", "0123456789ABCD", 0, 8, "ee04ec6aaef79d43"],          // 8x32: two data regions
+  ["dm", "KICAD PCB BARCODE TEST 2026", 0, 20, "7a030a379e5c9644"],   // C40 run: 20x20 where ASCII needs 22x22
+  ["dm", "SN:00012345 LOT:ABC-77", 0, 12, "dd1f147e7932a905"],        // 12x26 rectangle
+  ["dm", "x" + "y".repeat(100), 0, 36, "4eda45a5baa2cad4"],           // Text encodation
 ];
 test("barcode2d: QR, Micro QR and Data Matrix modules match Zint", () => {
   for (const [k, text, ecc, rows, sha] of ZINT) {
@@ -268,6 +271,15 @@ test("ipc2581: a board's file", () => {
   assert.deepEqual(r.errors, []);
   const x = r.xml;
   assert.match(x, /<FunctionMode mode="USERDEF" sectionKey="KBCASUMPLRDOIEF"\/>/);
+  // padstacks (addPadStack): the package's two pads, then the via; each layer feature Pad names its padstack
+  assert.match(x, /<Step name="demo" type="BOARD">\s*<NonstandardAttribute name="FOOTPRINT_COUNT" type="INTEGER" value="1"\/>\s*<PadStackDef name="PADSTACK_3">/);
+  assert.match(x, /<PadStackDef name="PADSTACK_1">\s*<PadstackPadDef layerRef="F.Cu" padUse="REGULAR">\s*<Location x="0.0" y="0.0"\/>\s*<StandardPrimitiveRef id="RECT_\d+"\/>\s*<\/PadstackPadDef>\s*<\/PadStackDef>/);   // F.Mask is no board layer here
+  assert.match(x, /<PadStackDef name="PADSTACK_3">\s*<PadstackHoleDef name="PH300000" diameter="0.3" platingStatus="VIA" plusTol="0.0" minusTol="0.0" x="0.0" y="0.0"\/>\s*<PadstackPadDef layerRef="F.Cu" padUse="REGULAR">\s*<Location x="0.0" y="0.0"\/>\s*<UserPrimitiveRef id="UCIRCLE_\d+"\/>/);
+  assert.match(x, /<EntryUser id="UCIRCLE_\d+">\s*<UserSpecial>\s*<Circle diameter="0.6">\s*<LineDesc lineWidth="0.1" lineEnd="ROUND"\/>\s*<FillDesc fillProperty="HOLLOW"\/>/);
+  assert.match(x, /<Pad padstackDefRef="PADSTACK_1">/); assert.match(x, /<Pad padstackDefRef="PADSTACK_3">/);
+  assert.ok(x.indexOf("<PadStackDef") < x.indexOf("<Datum"), "the padstacks open the Step");
+  const noK = FAB.ipc2581({ doc: d, projectName: "demo" }, { rev: "C", inch: false, precision: 6, mode: "USERDEF", sections: new Set(["O"]), anonymizeNets: false, omitRefDes: false, internalId: "", mpn: "", mfg: "", distPn: "", dist: "", bomRev: "" }).xml;
+  assert.doesNotMatch(noK, /PadStackDef|padstackDefRef/);
   assert.match(x, /<Component refDes="R1" packageRef="R_R_0603" part="R_R_0603_10k" layerRef="F.Cu" mountType="SMT">/);
   assert.match(x, /<RectCenter width="0.8" height="0.9"\/>/);
   assert.match(x, /<RectRound width="0.8" height="0.9" radius="0.2"/);
@@ -280,6 +292,14 @@ test("ipc2581: a board's file", () => {
   assert.match(anon, /<IPC-2581 revision="B"/); assert.match(anon, /<FunctionMode mode="FABRICATION" level="3"/);
   assert.match(anon, /<Set net="NET_1">/); assert.doesNotMatch(anon, /GND|<Component |<BomItem /);
   assert.match(anon, /diameter="0.0118"/);
+  // FABRICATION requires the physical netlist (PhyNetGroup): anonymised names take the _PHY suffix
+  assert.match(anon, /<FunctionMode mode="FABRICATION" level="3" sectionKey="[A-Z]*Y[A-Z]*"/);
+  assert.match(anon, /<PhyNetGroup name="NETS">\s*<PhyNet name="NET_1_PHY">/);
+  const phy = FAB.ipc2581({ doc: d, projectName: "demo" }, { rev: "C", inch: false, precision: 6, mode: "USERDEF", sections: new Set(["O", "G", "Y"]), anonymizeNets: false, omitRefDes: false, internalId: "", mpn: "", mfg: "", distPn: "", dist: "", bomRev: "" }).xml;
+  assert.match(phy, /sectionKey="OGY"/);
+  // pads first, then vias; a pad on F.Cu with its mask open is EXPOSED, the tented through via COVERED and a net end
+  assert.match(phy, /<PhyNet name="GND_PHY">\s*<PhyNetPoint x="4.2" y="-5.0" layerRef="F.Cu" netNode="END" exposure="EXPOSED">\s*<StandardPrimitiveRef id="RECT_\d+"\/>\s*<\/PhyNetPoint>\s*<PhyNetPoint x="10.0" y="-5.0" layerRef="F.Cu" secondaryLayerRef="B.Cu" netNode="END" exposure="COVERED" via="true">\s*<StandardPrimitiveRef id="CIRCLE_\d+"\/>/);
+  assert.ok(phy.indexOf("<PhyNetGroup") < phy.indexOf("<LayerFeature"), "PhyNetGroup before the layer features");
 });
 test("fab reports: .cmp, legacy BOM, footprint report and IPC-D-356A", () => {
   const FAB = loadTs("fab/index.ts");
@@ -407,4 +427,19 @@ test("Board Statistics: counts, minimums, drill lines and the fab areas", () => 
   const holes = 2 * Math.PI * 0.15 * 0.15 + Math.PI * 0.4 * 0.4 + (0.8 * 0.8 + Math.PI * 0.4 * 0.4);
   assert.ok(Math.abs(400 - b.boardArea - holes) < 0.01, `${400 - b.boardArea} vs ${holes}`);
   assert.ok(a.frontCopper > 5 && b.frontCopper < a.frontCopper, `${a.frontCopper} ${b.frontCopper}`);
+  // footprint areas: each plated pad's copper grown by the default clearance (0.2) on both sides, no courtyards here:
+  // a 2.0 circle and a 2.0 x 2.8 oval
+  const fpArea = Math.PI + (2.0 * 0.8 + Math.PI);
+  assert.ok(Math.abs(a.frontCourtyard - fpArea) < 0.05 && Math.abs(a.backCourtyard - fpArea) < 0.05, `${a.frontCourtyard} ${a.backCourtyard} vs ${fpArea}`);
+  // a blind via's drill comes off only the outer layer it reaches
+  const bl = K.parseDoc(`(kicad_pcb (version 20241229) (generator "pcbnew") (layers (0 "F.Cu" signal) (4 "In1.Cu" signal) (6 "In2.Cu" signal) (2 "B.Cu" signal) (25 "Edge.Cuts" user))
+    (net 0 "") (net 1 "A")
+    (via blind (at 5 5) (size 0.6) (drill 0.3) (layers "F.Cu" "In1.Cu") (net 1) (uuid "v1"))
+    (segment (start 4 5) (end 6 5) (width 0.5) (layer "B.Cu") (net 1) (uuid "s1"))
+    (gr_rect (start 0 0) (end 10 10) (stroke (width 0.1) (type default)) (fill no) (layer "Edge.Cuts") (uuid "e")))`, "kicad_pcb");
+  const bctx = { doc: bl, projectName: "demo", date: new Date(2026, 0, 1) };
+  const b0 = FAB.api.statAreas(bctx, { subtractHolesFromBoard: false, subtractHolesFromCopper: false });
+  const b1 = FAB.api.statAreas(bctx, { subtractHolesFromBoard: false, subtractHolesFromCopper: true });
+  assert.ok(Math.abs(b0.frontCopper - b1.frontCopper - Math.PI * 0.15 * 0.15) < 0.005, `front ${b0.frontCopper} ${b1.frontCopper}`);
+  assert.ok(Math.abs(b0.backCopper - b1.backCopper) < 1e-9, `back ${b0.backCopper} ${b1.backCopper}`);
 });

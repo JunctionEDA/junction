@@ -7,7 +7,7 @@
 // with the same stroke font the canvas draws) and a board document parsed by KiCadCanvas.parseDoc.  The
 // (setup …) section of the board — solder mask and paste clearances, via tenting, the drill / place origin —
 // is passed beside the document, because the editor's document keeps items only.
-import { boardHeader } from "../canvas/board-setup";
+import { boardHeader, stackupRows, stackupThickness } from "../canvas/board-setup";
 import { type DrillFile, type DrillOptions, boardHoles, drillFiles } from "./drill";
 import { type GerberAttrs, projectGuid, writeGerber } from "./gerber";
 import { type BoardModel, type FabDoc, type Node, DEFAULT_VARIANT, boardModel, boardVariantNames, isCopper } from "./model";
@@ -103,6 +103,8 @@ function setupNode(setup: Node | string | null | undefined): Node | null {
 }
 /** The (setup …) node of a context. */
 export function setupOf(ctx: FabContext): Node | null { return setupNode(ctx.setup); }
+/** BOARD_STACKUP::BuildBoardThicknessFromStackup of the board's (stackup …); null when it has none (the default stackup) */
+export function boardStackupThickness(ctx: FabContext): number | null { const rows = stackupRows(setupOf(ctx) as unknown as SNode | null); return rows.length ? stackupThickness(rows) : null; }
 /** The board model for a context (read afresh: the document may have changed since the last call). */
 export function modelOf(ctx: FabContext): BoardModel { return boardModel(ctx.doc, setupNode(ctx.setup), ctx.variant); }
 function isoDate(d: Date): string {
@@ -253,7 +255,7 @@ export const reports = {
   d356: (ctx: FabContext, skipUnconnected: boolean): string => { const m = modelOf(ctx); return d356(m, { job: projectNameOf(ctx), auxOrigin: m.settings.auxOrigin, skipUnconnected }); },
 };
 
-export const api = { statAreas: (ctx: FabContext, o: Parameters<typeof statAreas>[1]) => statAreas(modelOf(ctx), o), odb, ipc2581, ipc2581Sections, reports, outlineText, vrmlModels: (ctx: FabContext) => vrmlModels(modelOf(ctx)), writeVrml: (ctx: FabContext, o: VrmlOptions, meshOf: Parameters<typeof writeVrml>[2]) => writeVrml(modelOf(ctx), o, meshOf), meshVrml, plotBoard, pluginPlot, drillJob, drillReport, markerParts, pnpGerber, pnpFileName, DEFAULT_VARIANT, variantNames: (variants: Node | null | undefined): string[] => boardVariantNames(variants || null, refCompare), writeSvg, writePdf, writePs, writeDxf, dxfTextString, writePng, paintPage, gerberJobFile, boardPage, plotFileName, outputPath, fillZones, filledZoneNode, storedFill, polyArea, PRESETS, presetById, plottableLayers, layerDisplayName, layerAttrs, protelExtension, model: modelOf, plotGerbers, drillFiles: drill, positions, bom: billOfMaterials, placementCsv, placementAscii, bomCsv,
+export const api = { statAreas: (ctx: FabContext, o: Parameters<typeof statAreas>[1]) => ({ ...statAreas(modelOf(ctx), o), stackupThickness: boardStackupThickness(ctx) }), odb, ipc2581, ipc2581Sections, reports, outlineText, vrmlModels: (ctx: FabContext) => vrmlModels(modelOf(ctx)), writeVrml: (ctx: FabContext, o: VrmlOptions, meshOf: Parameters<typeof writeVrml>[2]) => writeVrml(modelOf(ctx), o, meshOf), meshVrml, plotBoard, pluginPlot, drillJob, drillReport, markerParts, pnpGerber, pnpFileName, DEFAULT_VARIANT, variantNames: (variants: Node | null | undefined): string[] => boardVariantNames(variants || null, refCompare), writeSvg, writePdf, writePs, writeDxf, dxfTextString, writePng, paintPage, gerberJobFile, boardPage, plotFileName, outputPath, fillZones, filledZoneNode, storedFill, polyArea, PRESETS, presetById, plottableLayers, layerDisplayName, layerAttrs, protelExtension, model: modelOf, plotGerbers, drillFiles: drill, positions, bom: billOfMaterials, placementCsv, placementAscii, bomCsv,
   jlcPlacement, buildPackage, packageZip, zip, tar, gzip, crc32, writeGerber, primPolys };
 export type KiCadFabApi = typeof api & { open?: () => void };
 // the canvas stores a text's outlines with it when it writes the item (canvas/export.ts ensureRenderCaches)

@@ -431,7 +431,7 @@ export class Connections {
 }
 
 /** PAD::FlashLayer / PCB_VIA::FlashLayer on a copper layer. */
-function flashed(removeUnused: boolean, keepEnds: boolean, zoneLayers: Set<string>, layer: string, first: string, last: string, x: number, y: number, r: number, conn: Connections): boolean {
+export function flashed(removeUnused: boolean, keepEnds: boolean, zoneLayers: Set<string>, layer: string, first: string, last: string, x: number, y: number, r: number, conn: Connections): boolean {
   if (!removeUnused) return true;
   if (keepEnds && (layer === first || layer === last)) return true;
   if (zoneLayers.has(layer)) return true;

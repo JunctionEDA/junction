@@ -1,8 +1,8 @@
 // barcode2d.ts — the 2D symbologies of PCB_BARCODE (QR Code, Micro QR Code, Data Matrix ECC 200), encoded as the
 // Zint library KiCad links encodes them (thirdparty/zint/backend/qr.c, dmatrix.c): the same mode optimisation, version
 // choice, Reed-Solomon blocks, module placement and mask scoring, so a (barcode …) item draws the modules pcbnew does.
-// Data Matrix uses ASCII encodation (digit pairs, upper shift); Zint's minimal encodation may pick C40 / Text for
-// long upper-case runs and so a smaller symbol, but both decode to the same text.
+// Data Matrix follows Zint's default minimal encodation (dm_minimalenc: the cheapest mix of ASCII, C40, Text, X12,
+// EDIFACT and Base 256 with its end-of-data rules), so it picks the same codewords and symbol size.
 
 /** A module matrix: rows[y][x] true = dark; row 0 is the top. */
 export interface Matrix2D { rows: boolean[][]; error?: undefined }
@@ -345,20 +345,228 @@ const DM_SIZES: [number, number, number, number, number, number, number, number]
   [104, 104, 26, 26, 816, 136, 56, 0], [120, 120, 20, 20, 1050, 175, 68, 0], [132, 132, 22, 22, 1304, 163, 62, 0], [144, 144, 24, 24, 1558, 156, 62, 0],
 ];
 
-/** ASCII encodation: digit pairs as 130 + nn, extended characters behind Upper Shift (235); UTF-8 text under ECI 26. */
-function dmAscii(text: string): number[] {
-  const cps = [...text].map((c) => c.codePointAt(0)!);
-  const out: number[] = [];
-  let bytes: number[];
-  if (cps.every((c) => c < 128)) bytes = cps;
-  else { out.push(241, 27); bytes = [...new TextEncoder().encode(text)]; }   // ECI 26 + 1
-  for (let i = 0; i < bytes.length; i++) {
-    const c = bytes[i];
-    if (c >= 48 && c <= 57 && i + 1 < bytes.length && bytes[i + 1] >= 48 && bytes[i + 1] <= 57) { out.push(130 + (c - 48) * 10 + bytes[i + 1] - 48); i++; }
-    else if (c > 127) out.push(235, c - 127);
-    else out.push(c + 1);
+// ---- Zint's minimal encodation (dm_minimalenc, dm_define_mode, dm_encode) ----
+const DM_ASCII = 1, DM_C40 = 2, DM_TEXT = 3, DM_X12 = 4, DM_EDIFACT = 5, DM_BASE256 = 6, DM_NUM_MODES = 6;
+const tbl = (s: string): number[] => s.split(",").map(Number);
+// dm_c40_shift / dm_c40_value / dm_text_shift / dm_text_value (Tables C.1 and C.2)
+const DM_C40_SHIFT = tbl("1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3");
+const DM_C40_VALUE = tbl("0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,3,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,22,23,24,25,26,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31");
+const DM_TEXT_SHIFT = tbl("1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,0,0,0,0,0,0,0,0,0,0,2,2,2,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,3,2,2,2,2,2,3,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3,3,3,3,3");
+const DM_TEXT_VALUE = tbl("0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,3,0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,4,5,6,7,8,9,10,11,12,13,15,16,17,18,19,20,21,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,22,23,24,25,26,0,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,27,28,29,30,31");
+const isDigit = (c: number): boolean => c >= 48 && c <= 57, isUpper = (c: number): boolean => c >= 65 && c <= 90, isLower = (c: number): boolean => c >= 97 && c <= 122;
+const dmIsC40 = (c: number): boolean => (c <= 57 ? c >= 48 || c === 32 : isUpper(c));
+const dmIsText = (c: number): boolean => (c <= 57 ? c >= 48 || c === 32 : isLower(c));
+const dmIsC40Text = (mode: number, c: number): boolean => (mode === DM_C40 ? dmIsC40(c) : dmIsText(c));
+const dmIsX12 = (c: number): boolean => dmIsC40(c) || c === 13 || c === 42 || c === 62;
+const dmIsEdifact = (c: number): boolean => c >= 32 && c <= 94;
+const twoDigits = (s: number[], i: number): boolean => i + 1 < s.length && isDigit(s[i]) && isDigit(s[i + 1]);
+/** dm_get_symbolsize (automatic size, no DMRE): the smallest size holding `minimum` codewords */
+function dmSymbolSize(minimum: number): number {
+  if (minimum > 1304) return minimum <= 1558 ? DM_SIZES.length - 1 : 0;
+  let i = minimum >= 62 ? 23 : 0;
+  while (minimum > DM_SIZES[i][4]) i++;
+  while (DM_SIZES[i][7]) i++;
+  return i;
+}
+const dmRemaining = (tp: number, processP: number): number => DM_SIZES[dmSymbolSize(tp + processP)][4] - tp;
+/** dm_last_ascii: 1 to 4 chars at the end that take 1 or 2 ASCII codewords */
+function dmLastAscii(s: number[], from: number): number {
+  const n = s.length;
+  if (n - from > 4 || from >= n) return 0;
+  if (n - from === 1) return s[from] & 0x80 ? 0 : 1;
+  if (n - from === 2) { if ((s[from] & 0x80) || (s[from + 1] & 0x80)) return 0; return isDigit(s[from]) && isDigit(s[from + 1]) ? 1 : 2; }
+  if (n - from === 3) {
+    if (isDigit(s[from]) && isDigit(s[from + 1]) && !(s[from + 2] & 0x80)) return 2;
+    if (isDigit(s[from + 1]) && isDigit(s[from + 2]) && !(s[from] & 0x80)) return 2;
+    return 0;
   }
-  return out;
+  return isDigit(s[from]) && isDigit(s[from + 1]) && isDigit(s[from + 2]) && isDigit(s[from + 3]) ? 2 : 0;
+}
+interface DmEdge { mode: number; endMode: number; from: number; len: number; size: number; bytes: number; previous: DmEdge | null }
+/** dm_getNumberOfC40Words: codewords for whole C40/Text triplets from `from` (or to the end); [cwds, chars] */
+function dmC40Words(s: number[], from: number, mode: number): [number, number] {
+  let thirds = 0;
+  for (let i = from; i < s.length; i++) {
+    const ci = s[i];
+    if (dmIsC40Text(mode, ci)) thirds++; else if (!(ci & 0x80)) thirds += 2; else if (dmIsC40Text(mode, ci & 0x7f)) thirds += 3; else thirds += 4;
+    const rem = thirds % 3;
+    if (rem === 0 || (rem === 2 && i + 1 === s.length)) return [Math.floor((thirds + 2) / 3) * 2, i - from + 1];
+  }
+  return [0, 0];
+}
+/** dm_new_Edge */
+function dmNewEdge(s: number[], mode: number, from: number, len: number, previous: DmEdge | null, cwds: number): DmEdge {
+  const n = s.length;
+  const e: DmEdge = { mode, endMode: mode, from, len, size: 0, bytes: 0, previous };
+  const prevMode = previous ? previous.endMode : DM_ASCII;
+  let size = previous ? previous.size : 0;
+  const unlatch = (): void => { if (prevMode !== DM_ASCII && prevMode !== DM_BASE256) size++; };
+  switch (mode) {
+    case DM_ASCII: size++; if (s[from] & 0x80) size++; unlatch(); break;
+    case DM_BASE256:
+      size++;
+      if (prevMode !== DM_BASE256) { size += 2; unlatch(); e.bytes = 1; }
+      else { e.bytes = 1 + previous!.bytes; if (e.bytes === 250) size++; }
+      break;
+    case DM_C40: case DM_TEXT:
+      size += cwds;
+      if (prevMode !== mode) { size++; unlatch(); }
+      if (from + len + 2 >= n) { const la = dmLastAscii(s, from + len); if (dmRemaining(size + la, 0) > 0) size++; }
+      break;
+    case DM_X12:
+      size += 2;
+      if (prevMode !== DM_X12) { size++; unlatch(); }
+      if (from + len + 2 >= n) { const la = dmLastAscii(s, from + len); if (la === 2) size++; else if (dmRemaining(size + la, 0) > 0) size++; }
+      break;
+    case DM_EDIFACT:
+      size += 3;
+      if (prevMode !== DM_EDIFACT) { size++; unlatch(); }
+      // dm_getEndMode
+      if (len < 4) e.endMode = DM_ASCII;
+      else { const la = dmLastAscii(s, from + len); if (la && dmRemaining(size + la, 0) <= 2 - la) e.endMode = DM_ASCII; }
+      break;
+  }
+  e.size = size;
+  return e;
+}
+/** dm_define_mode: the cheapest mode per input character (Alex Geller's Dijkstra-based search) */
+function dmDefineModes(s: number[]): number[] {
+  const n = s.length, edges: (DmEdge | null)[] = new Array((n + 1) * DM_NUM_MODES).fill(null);
+  const add = (mode: number, from: number, len: number, prev: DmEdge | null, cwds: number): void => {
+    const e = dmNewEdge(s, mode, from, len, prev, cwds), k = (from + len) * DM_NUM_MODES + e.endMode - 1;
+    if (!edges[k] || edges[k]!.size > e.size) edges[k] = e;
+  };
+  const addEdges = (from: number, prev: DmEdge | null): void => {
+    if (!prev || prev.endMode !== DM_EDIFACT) {
+      if (isDigit(s[from]) && from + 1 < n && isDigit(s[from + 1])) { add(DM_ASCII, from, 2, prev, 0); if (prev && prev.mode === DM_ASCII) return; }
+      else add(DM_ASCII, from, 1, prev, 0);
+      for (const m of [DM_C40, DM_TEXT]) { const [cwds, len] = dmC40Words(s, from, m); if (cwds) add(m, from, len, prev, cwds); }
+      if (from + 2 < n && dmIsX12(s[from]) && dmIsX12(s[from + 1]) && dmIsX12(s[from + 2])) add(DM_X12, from, 3, prev, 0);
+      add(DM_BASE256, from, 1, prev, 0);
+    }
+    if (dmIsEdifact(s[from])) for (let i = 1, pos = from + 1; i < 4 && pos < n && dmIsEdifact(s[pos]); i++, pos++) add(DM_EDIFACT, from, i + 1, prev, 0);
+  };
+  addEdges(0, null);
+  for (let i = 1; i < n; i++) for (let j = 0; j < DM_NUM_MODES; j++) { const e = edges[i * DM_NUM_MODES + j]; if (e) addEdges(i, e); }
+  let best: DmEdge | null = null;
+  for (let j = 0; j < DM_NUM_MODES; j++) { const e = edges[n * DM_NUM_MODES + j]; if (e && (!best || e.size < best.size)) best = e; }
+  const modes = new Array<number>(n).fill(0);
+  for (let e = best; e; e = e.previous) for (let i = e.from; i < e.from + e.len; i++) modes[i] = e.mode;
+  return modes;
+}
+/** dm_ctx_buffer_xfer: whole C40 / Text / X12 triplets out of the buffer */
+function dmCtxXfer(buf: number[], t: number[]): void {
+  const e = Math.floor(buf.length / 3) * 3;
+  for (let i = 0; i < e; i += 3) { const iv = 1600 * buf[i] + 40 * buf[i + 1] + buf[i + 2] + 1; t.push(iv >> 8, iv & 0xff); }
+  buf.splice(0, e);
+}
+/** dm_edi_buffer_xfer: whole EDIFACT quadruplets out of the buffer; `empty` flushes the rest */
+function dmEdiXfer(buf: number[], t: number[], empty: boolean): void {
+  const e = Math.floor(buf.length / 4) * 4;
+  for (let i = 0; i < e; i += 4) t.push(((buf[i] << 2) | ((buf[i + 1] & 0x30) >> 4)) & 0xff, (((buf[i + 1] & 0x0f) << 4) | ((buf[i + 2] & 0x3c) >> 2)) & 0xff, (((buf[i + 2] & 0x03) << 6) | buf[i + 3]) & 0xff);
+  buf.splice(0, e);
+  if (buf.length && empty) {
+    if (buf.length === 3) t.push(((buf[0] << 2) | ((buf[1] & 0x30) >> 4)) & 0xff, (((buf[1] & 0x0f) << 4) | ((buf[2] & 0x3c) >> 2)) & 0xff, ((buf[2] & 0x03) << 6) & 0xff);
+    else if (buf.length === 2) t.push(((buf[0] << 2) | ((buf[1] & 0x30) >> 4)) & 0xff, ((buf[1] & 0x0f) << 4) & 0xff);
+    else t.push((buf[0] << 2) & 0xff);
+    buf.length = 0;
+  }
+}
+/** dm_update_b256_field_length, then B.2.1's 255-state randomising of the Base 256 field */
+function dmB256Close(t: number[], start: number, fieldLength: boolean): void {
+  if (fieldLength) {
+    const count = t.length - (start + 1);
+    if (count <= 249) t[start] = count;
+    else { t.splice(start + 1, 0, count % 250); t[start] = 249 + Math.floor(count / 250); }
+  }
+  for (let i = start; i < t.length; i++) t[i] = (t[i] + ((149 * (i + 1)) % 255) + 1) & 0xff;
+}
+const asciiCw = (t: number[], s: number[], sp: number): number => {
+  if (twoDigits(s, sp)) { t.push(10 * (s[sp] - 48) + (s[sp + 1] - 48) + 130); return 2; }
+  if (s[sp] & 0x80) t.push(235, s[sp] - 128 + 1); else t.push(s[sp] + 1);
+  return 1;
+};
+/** dm_encode_segs + dm_encode for one segment: ECI, the Macro 05 / 06 header, minimal encodation, the end of data */
+function dmEncode(s: number[], eci: number): number[] | string {
+  const t: number[] = [];
+  if (s.length > 3116) return `Input length ${s.length} too long (maximum 3116)`;
+  // "[)>RS05GS...RSEOT" -> 236, "[)>RS06GS...RSEOT" -> 237
+  if (s.length >= 9 && s[0] === 91 && s[1] === 41 && s[2] === 62 && s[3] === 0x1e && s[4] === 48 && (s[5] === 53 || s[5] === 54) && s[6] === 0x1d && s[s.length - 1] === 0x04 && s[s.length - 2] === 0x1e) {
+    t.push(s[5] === 53 ? 236 : 237); s = s.slice(7, s.length - 2);
+  }
+  if (eci > 0) {
+    t.push(241);
+    if (eci <= 126) t.push(eci + 1);
+    else if (eci <= 16382) t.push(Math.floor((eci - 127) / 254) + 128, ((eci - 127) % 254) + 1);
+    else t.push(Math.floor((eci - 16383) / 64516) + 192, (Math.floor((eci - 16383) / 254) % 254) + 1, ((eci - 16383) % 254) + 1);
+  }
+  const n = s.length, modes = n ? dmDefineModes(s) : [];
+  const buf: number[] = [];
+  let sp = 0, mode = DM_ASCII, b256Start = 0;
+  while (sp < n) {
+    if (modes[sp] !== mode) {
+      if (mode === DM_C40 || mode === DM_TEXT || mode === DM_X12) { buf.length = 0; t.push(254); }
+      else if (mode === DM_EDIFACT) {
+        const la = dmLastAscii(s, sp);
+        if (!la || dmRemaining(t.length + la, buf.length) > 2 - la) buf.push(31);
+        dmEdiXfer(buf, t, true);
+      } else if (mode === DM_BASE256) dmB256Close(t, b256Start, true);
+      const next = modes[sp];
+      if (next === DM_C40) t.push(230); else if (next === DM_TEXT) t.push(239); else if (next === DM_X12) t.push(238); else if (next === DM_EDIFACT) t.push(240);
+      else if (next === DM_BASE256) { t.push(231); b256Start = t.length; t.push(0); }
+    }
+    mode = modes[sp];
+    if (mode === DM_ASCII) sp += asciiCw(t, s, sp);
+    else if (mode === DM_C40 || mode === DM_TEXT) {
+      const sh = mode === DM_C40 ? DM_C40_SHIFT : DM_TEXT_SHIFT, va = mode === DM_C40 ? DM_C40_VALUE : DM_TEXT_VALUE;
+      let c = s[sp];
+      if (c & 0x80) { buf.push(1, 30); c -= 128; }   // Shift 2, Upper Shift
+      if (sh[c]) buf.push(sh[c] - 1);
+      buf.push(va[c]);
+      if (buf.length >= 3) dmCtxXfer(buf, t);
+      sp++;
+    } else if (mode === DM_X12) {
+      const c = s[sp];
+      buf.push(isDigit(c) ? c - 48 + 4 : isUpper(c) ? c - 65 + 14 : "\r*> ".indexOf(String.fromCharCode(c)));
+      if (buf.length >= 3) dmCtxXfer(buf, t);
+      sp++;
+    } else if (mode === DM_EDIFACT) {
+      const c = s[sp++]; buf.push(c >= 64 ? c - 64 : c);
+      if (buf.length >= 4) dmEdiXfer(buf, t, false);
+    } else { t.push(s[sp++]); }
+    if (t.length > 1558) return "Input too long, requires too many codewords (maximum 1558)";
+  }
+  // the end of data
+  const left = dmRemaining(t.length, buf.length);
+  if (mode === DM_C40 || mode === DM_TEXT) {
+    if (!buf.length) { if (left > 0) t.push(254); }
+    else if (buf.length === 2 && left === 2) { buf.push(0); dmCtxXfer(buf, t); }
+    else if (buf.length === 1 && left <= 2 && dmIsC40Text(mode, s[n - 1])) { if (left > 1) t.push(254); t.push(s[n - 1] + 1); }
+    else {
+      // backtrack to the last whole triplet and finish in ASCII
+      let p = buf.length, total = 0;
+      while (sp > 0 && p % 3) {
+        sp--;
+        let c = s[sp], cnt = 1;
+        if (c & 0x80) { cnt += 2; c -= 128; }
+        if ((mode === DM_C40 && DM_C40_SHIFT[c]) || (mode === DM_TEXT && DM_TEXT_SHIFT[c])) cnt++;
+        total += cnt; p -= cnt;
+      }
+      t.length -= Math.floor(total / 3) * 2;
+      t.push(254);
+      while (sp < n) sp += asciiCw(t, s, sp);
+    }
+  } else if (mode === DM_X12) {
+    if (left === 1 && buf.length === 1) t.push(s[n - 1] + 1);
+    else {
+      if (left > 0) t.push(254);
+      if (buf.length === 1) t.push(s[n - 1] + 1); else if (buf.length === 2) t.push(s[n - 2] + 1, s[n - 1] + 1);
+    }
+  } else if (mode === DM_EDIFACT) {
+    if (left <= 2 && buf.length <= left) { if (buf.length === 1) t.push(s[n - 1] + 1); else if (buf.length === 2) t.push(s[n - 2] + 1, s[n - 1] + 1); }
+    else { if (buf.length <= 3) buf.push(31); dmEdiXfer(buf, t, true); }
+  } else if (mode === DM_BASE256) dmB256Close(t, b256Start, left > 0);
+  return t;
 }
 
 /** ECC 200 module placement (ISO/IEC 16022 Annex F): codeword-bit ids per data-region module, 10 * chr + bit. */
@@ -392,23 +600,26 @@ function dmPlacement(nrow: number, ncol: number): number[] {
 /** BARCODE_DATAMATRIX, automatic size (square and standard rectangular, no DMRE). */
 export function dataMatrix(text: string): Barcode2DResult {
   if (!text) return { error: "No input data" };
-  const cw = dmAscii(text);
-  const si = DM_SIZES.findIndex((s) => !s[7] && s[4] >= cw.length);
-  if (si < 0) return { error: `Input too long, requires ${cw.length} codewords (maximum 1558)` };
+  // PCB_BARCODE: UNICODE_MODE, and ECI 26 (UTF-8) for text that is not ASCII
+  const ascii = [...text].every((c) => c.codePointAt(0)! < 128);
+  const cw = dmEncode(ascii ? [...text].map((c) => c.charCodeAt(0)) : [...new TextEncoder().encode(text)], ascii ? 0 : 26);
+  if (typeof cw === "string") return { error: cw };
+  const si = dmSymbolSize(cw.length);
+  if (cw.length > DM_SIZES[si][4]) return { error: `Input too long, requires ${cw.length} codewords (maximum 1558)` };
   const [H, W, FH, FW, bytes, dataBlock, rsBlock] = DM_SIZES[si];
   const data = cw.slice();
   if (data.length < bytes) {
     data.push(129);
     while (data.length < bytes) { let p = ((149 * (data.length + 1)) % 253) + 1 + 129; if (p > 254) p -= 254; data.push(p); }
   }
-  const blocks = Math.ceil(bytes / dataBlock), full = new Array<number>(bytes + blocks * rsBlock).fill(0);
+  // dm_ecc: interleaved blocks; 144x144 rotates its ECC codewords (Zint's default, not DM_ISO_144)
+  const blocks = Math.floor((bytes + 2) / dataBlock), full = new Array<number>(bytes + blocks * rsBlock).fill(0), skew = H === 144;
   for (let i = 0; i < bytes; i++) full[i] = data[i];
   for (let b = 0; b < blocks; b++) {
     const blk: number[] = []; for (let n = b; n < bytes; n += blocks) blk.push(data[n]);
     const ecc = rsEncode(GF_DM, blk, rsBlock, 1);
-    for (let n = 0; n < rsBlock; n++) full[bytes + b + n * blocks] = ecc[n];
+    for (let n = b, p = 0; n < blocks * rsBlock; n += blocks, p++) full[bytes + n + (skew ? (b < 8 ? 2 : -8) : 0)] = ecc[p];
   }
-  // 144x144: the last 8 blocks are one data codeword shorter (dm_ecc), already handled by the strided split above
   const NR = H - 2 * (H / FH), NC = W - 2 * (W / FW), place = dmPlacement(NR, NC);
   const rows: boolean[][] = []; for (let y = 0; y < H; y++) rows.push(new Array<boolean>(W).fill(false));
   for (let y = 0; y < H; y += FH) {
