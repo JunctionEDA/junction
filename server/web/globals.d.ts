@@ -65,6 +65,8 @@ interface KiCadCanvasApi {
   presenceSelection(doc: KDoc | null, selection: Iterable<string> | null, IU: number, moving: boolean, max?: number): { selection: string[]; boxes?: [number, number, number, number][] } | null;
   /** DS_PROXY_VIEW_ITEM::HitTestDrawingSheetItems (canvas/sheet.ts) */
   hitTestDrawingSheet(doc: KDoc, x: number, y: number, tol: number): boolean;
+  /** a (kicad_wks …) file, parsed (canvas/sheet.ts parseDrawingSheet) */
+  parseDrawingSheet(text: string): unknown;
   parse(text: string): SNode | null;
   parseAll(text: string): SNode[];
   serialize(node: SNode): string;

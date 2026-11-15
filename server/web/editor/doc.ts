@@ -12,6 +12,7 @@ import { setupEditorChrome, storedAngleSnap } from "./panes";
 import { renderPeers, stopPresenceKeepalive } from "./peers";
 import { drawSelection, renderProps } from "./selection";
 import { E } from "./state";
+import { applyDrawingSheet } from "./drawingsheet";
 import { activeModule, bindUndoDoc, renderModuleTools, toolCtx } from "./tools";
 import { api, toast } from "./util";
 import { notePreviewDirty } from "./thumbpush";
@@ -119,6 +120,7 @@ export function applySheetContext(d: SheetContextDoc) {
   d.filePath = doc ? doc.path : "";
   d.projectName = state.project ? state.project.name : "";
   d.projectVars = projectTextVars();
+  applyDrawingSheet(d as KDoc & { drawingSheet?: unknown });
   if (d.type !== "sch") { d.sheetName = ""; d.sheetPath = ""; d.sheetCount = 1; return; }
   const sch = state.docs!.filter((x) => x.docType === "kicad_sch");
   d.sheetCount = sch.length || 1;

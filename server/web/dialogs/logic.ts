@@ -3,6 +3,7 @@
 // replace matching (EDA_ITEM::Matches / Replace, SCH_*::Matches), the Symbol Fields Table's data
 // model and BOM export (common/dialogs/fields_table_data_model.cpp, common/settings/bom_settings.cpp),
 // schematic groups (SCH_IO_KICAD_SEXPR::saveGroup) and the grid overrides (EE_GRID_HELPER).
+import { messageText } from "../units";
 // Everything here runs under node too — server/static/tests/schdialogs.test.js bundles this file.
 
 const isList = Array.isArray;
@@ -313,3 +314,19 @@ export function schParamInRange(v: unknown, dflt: number, lo: number, hi: number
   const x = int ? Math.trunc(v) : v;
   return x > hi || x < lo ? dflt : x;
 }
+
+/** MIN_PAGE_SIZE_MM and MAX_PAGE_SIZE_EESCHEMA_MM / MAX_PAGE_SIZE_PCBNEW_MM (include/page_info.h). */
+export const MIN_PAGE_MM = 25.4;
+export const maxPageMm = (sch: boolean): number => (sch ? 120000 : 48000) * 0.0254;
+/**
+ * UNIT_BINDER::Validate( MIN_PAGE_SIZE_MILS, m_maxPageSizeMils ) for the custom size: the error text for a value
+ * out of range ("Height must be at least 25.4 mm." / "Width must be less than 1219.2 mm."), or null.
+ */
+export function pageSizeError(label: string, mm: number, sch: boolean, units: "mm" | "mil" | "in"): string | null {
+  // RANGE_BOUND::displayText is StringFromValue: the unit label, trailing zeros trimmed ("1219.2 mm")
+  const fmt = (v: number): string => messageText(v, units, sch ? "sch" : "pcb").replace(/(\.\d*?)0+(\s)/, "$1$2").replace(/\.(\s)/, "$1");
+  if (!(mm >= MIN_PAGE_MM - 1e-9)) return `${label} must be at least ${fmt(MIN_PAGE_MM)}.`;
+  if (mm > maxPageMm(sch) + 1e-9) return `${label} must be less than ${fmt(maxPageMm(sch))}.`;
+  return null;
+}
+

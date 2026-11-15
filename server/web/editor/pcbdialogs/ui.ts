@@ -191,6 +191,8 @@ export interface DialogSpec {
   noEnter?: boolean;
   /** a modeless dialog: the canvas and the menus stay usable while it is open (DIALOG_DRC) */
   modeless?: boolean;
+  /** a child of the open dialog: it opens over it instead of replacing it (DlgSpec.child) */
+  child?: boolean;
 }
 interface KDialogOpenApi { body: HTMLElement; close(): void }
 /** KDialogs.open with KiCad's button wording and a size beyond the default cap. */
@@ -198,7 +200,7 @@ export function openDialog(spec: DialogSpec): DialogApi | null {
   if (typeof KDialogs === "undefined" || !KDialogs) return null;
   ensureCss();
   let out: DialogApi | null = null;
-  KDialogs.open({ title: spec.title, width: spec.width, okLabel: spec.okLabel, readOnly: spec.readOnly, extra: spec.extra, ok: spec.ok, cancel: spec.cancel, modeless: spec.modeless, persist: spec.persist, restored: spec.restored,
+  KDialogs.open({ title: spec.title, width: spec.width, okLabel: spec.okLabel, readOnly: spec.readOnly, extra: spec.extra, ok: spec.ok, cancel: spec.cancel, modeless: spec.modeless, child: spec.child, persist: spec.persist, restored: spec.restored,
     build(body: HTMLElement, a: KDialogOpenApi) {
       const dlg = body.parentElement as HTMLElement;
       if (spec.width) dlg.style.maxWidth = "96vw";
@@ -647,6 +649,8 @@ export interface ListDialogOpts {
   validate?(row: string[] | null, name: string): boolean | Promise<boolean>;
   /** OK with the row and the name (when there is a name field) */
   onOk?(row: string[] | null, name: string): void;
+  /** opened from a dialog: over it, which stays open (DlgSpec.child) */
+  child?: boolean;
 }
 export function listDialog(title: string, headers: string[], items: string[][], onPick: (row: string[]) => void, opts?: ListDialogOpts): DialogApi | null {
   const cols: GridColumn[] = headers.map((label, i) => ({ key: "c" + i, label, type: "ro" as const }));
@@ -671,7 +675,7 @@ export function listDialog(title: string, headers: string[], items: string[][], 
     if (opts.onOk) opts.onOk(r, name); else if (r) onPick(r);
     return true;
   };
-  api = openDialog({ title, width: opts && opts.width || 400, okLabel: opts && opts.okLabel, extra: opts && opts.extra,
+  api = openDialog({ title, width: opts && opts.width || 400, okLabel: opts && opts.okLabel, extra: opts && opts.extra, child: !!(opts && opts.child),
     build(body) {
       if (nameIn) body.append(h("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:8px" }, h("span", { class: "pd-lbl" }, opts!.name!.label), nameIn));
       body.append(filter, h("div", { class: "pd-lbl", style: "margin-bottom:4px" }, (opts && opts.listLabel) || "Items:"), g.el);
