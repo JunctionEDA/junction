@@ -25,7 +25,7 @@ import { DEFAULTS_DEFAULTS, DIMENSION_DEFAULTS, LAYER_CLASSES, NETCLASS_DEFAULTS
 import type { BoardHeader, LayerRow } from "../../canvas/board-setup";
 import { adoptProjectFile, canWriteProject, liveDocument, loadProjectFile, projectDoc, saveProjectFile, saveTextDocument } from "../projectfile";
 import { BS } from "./canvas";
-import { put, box, checkField, currentUnits, focusError, form, grid, gridButtons, h, iconButton, infoBar, lenField, messageBox, note, numField, openDialog, selectField, spinField, textEntryBox, unitLabel, unitName, fmtLen, fmtLenU, parseLen, swatch, type CellValue, type Field, type TreeGroup, treeBook } from "./ui";
+import { put, box, checkField, currentUnits, focusError, form, grid, gridButtons, h, iconButton, bitmapButton, staticBitmap, infoBar, lenField, messageBox, note, numField, openDialog, selectField, spinField, textEntryBox, unitLabel, unitName, fmtLen, fmtLenU, parseLen, swatch, type CellValue, type Field, type TreeGroup, treeBook } from "./ui";
 import { colorPicker, fromHex, toHex, type RGBA } from "./color-picker";
 import { drillChartPage, viaStacksPage, zonesPage, tuningPatternsPage, tuningProfilesPage, componentClassesPage, embeddedFilesPage, IMPORT_OPTIONS, type PageError, type SetupCtx } from "./board-setup-pages";
 import { ruleAtLine, ruleErrors, rulesEditor } from "./rules-editor";
@@ -192,7 +192,9 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       host.replaceChildren();
       if (!stack || !stack.length) { host.append(note("This board has no physical stackup.")); total.textContent = ""; return; }
       const table = h("table");
+      // the header of the thickness-lock column is m_bitmapLockThickness (BITMAPS::locked), not text
       const head = h("tr"); for (const t of ["Layer", "Id", "Type", "Material", "Thickness", "", "Color", "Epsilon R", "Loss Tan"]) head.append(h("th", null, t));
+      const lockHead = head.children[5] as HTMLElement; lockHead.title = "Lock the thickness of this layer when adjusting dielectric thickness"; lockHead.style.cssText = "min-width:26px;width:26px;text-align:center;padding:0 4px"; lockHead.append(staticBitmap("locked", 16, 16, "vertical-align:middle"));
       table.append(h("thead", null, head));
       const body = h("tbody");
       let row = 0;
@@ -408,10 +410,13 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
   // ------------------------------------------------------------ Design Rules
   const constraintsPage = (el: HTMLElement): void => {
     const fields: { key: string; f: Field<number> | Field<boolean>; int?: boolean; warn?: { set(m: string | null): void } }[] = [];
-    const len = (key: string, label: string, tip: string): [string, HTMLElement, HTMLElement, string] => {
+    // PANEL_SETUP_CONSTRAINTS: a 24 px bitmap beside each feature constraint (m_bitmapClearance, ...); a row without one
+    // keeps the bitmap column empty, as the wxFlexGridSizer does
+    const label = (text: string, bitmap: string | null): HTMLElement => h("span", { class: "pd-bmplabel" }, bitmap ? staticBitmap(bitmap, 24) : h("span", { class: "pd-bitmap", style: "width:24px" }), text);
+    const len = (key: string, text: string, tip: string, bitmap: string | null = null): [HTMLElement, HTMLElement, HTMLElement, string] => {
       const f = lenField(numOr(rules[key], Number(RULE_DEFAULTS[key])), { ro: roPro, key }); fields.push({ key, f, warn: f.warn });
       f.input.title = tip;
-      return [label, h("span", { style: "display:inline-flex;align-items:center;width:100%" }, f.el, f.warn.el), unitLabel(), tip];
+      return [label(text, bitmap), h("span", { style: "display:inline-flex;align-items:center;width:100%" }, f.el, f.warn.el), unitLabel(), tip];
     };
     const chk = (key: string, label: string, tip: string, where: "rules" | "top"): HTMLElement => { const src = where === "rules" ? rules[key] : ds[key]; const f = checkField(boolOr(src, where === "rules" ? !!RULE_DEFAULTS[key] : false), label, { ro: roPro, key, tip }); fields.push({ key: where === "top" ? "^" + key : key, f }); return f.el; };
     const spokes = spinField(numOr(rules.min_resolved_spokes, 2), { min: 0, max: 99, ro: roPro, key: "min_resolved_spokes" }); fields.push({ key: "min_resolved_spokes", f: spokes, int: true });
@@ -421,26 +426,28 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     put(el, h("div", { class: "pd-cols2" },
       h("div", null,
         box("Copper", form([
-          len("min_clearance", "Minimum clearance:", "The minimum clearance between copper items which do not belong to the same net. " + R),
-          len("min_track_width", "Minimum track width:", "The minimum track width. " + R),
-          len("min_connection", "Minimum connection width:", "The minimum copper width of connected copper items."),
-          len("min_via_annular_width", "Minimum annular width:", "The minimum annular ring width. " + R),
-          len("min_via_diameter", "Minimum via diameter:", "The minimum via diameter. " + R),
-          len("min_hole_clearance", "Copper to hole clearance:", "The minimum clearance between a hole and an unassociated copper item. " + R),
-          len("min_copper_edge_clearance", "Copper to edge clearance:", "The minimum clearance between the board edge and any copper item. " + R),
+          len("min_clearance", "Minimum clearance:", "The minimum clearance between copper items which do not belong to the same net. " + R, "ps_diff_pair_gap"),
+          len("min_track_width", "Minimum track width:", "The minimum track width. " + R, "width_track"),
+          len("min_connection", "Minimum connection width:", "The minimum copper width of connected copper items.", "width_conn"),
+          len("min_via_annular_width", "Minimum annular width:", "The minimum annular ring width. " + R, "via_annulus"),
+          len("min_via_diameter", "Minimum via diameter:", "The minimum via diameter. " + R, "via_diameter"),
+          len("min_hole_clearance", "Copper to hole clearance:", "The minimum clearance between a hole and an unassociated copper item. " + R, "hole_to_copper_clearance"),
+          len("min_copper_edge_clearance", "Copper to edge clearance:", "The minimum clearance between the board edge and any copper item. " + R, "edge_to_copper_clearance"),
           len("min_groove_width", "Minimum groove for creepage:", "The minimum slot width from DRC creepage checks")])),
         box("Holes", form([
-          len("min_through_hole_diameter", "Minimum drill size:", "The minimum drill size. " + R),
-          len("min_hole_to_hole", "Hole to hole clearance:", "The minimum clearance between two drilled holes. " + R + " (Note: does not apply to milled holes.)")])),
+          len("min_through_hole_diameter", "Minimum drill size:", "The minimum drill size. " + R, "via_hole_diameter"),
+          len("min_hole_to_hole", "Hole to hole clearance:", "The minimum clearance between two drilled holes. " + R + " (Note: does not apply to milled holes.)", "hole_to_hole_clearance")])),
         box("uVias", form([
-          len("min_microvia_diameter", "Minimum uVia diameter:", "The minimum diameter for micro-vias. " + R),
-          len("min_microvia_drill", "Minimum uVia hole:", "The minimum micro-via hole size. " + R)]))),
+          len("min_microvia_diameter", "Minimum uVia diameter:", "The minimum diameter for micro-vias. " + R, "via_diameter"),
+          len("min_microvia_drill", "Minimum uVia hole:", "The minimum micro-via hole size. " + R, "via_hole_diameter")]))),
       h("div", null,
         box("Silk", form([
           len("min_silk_clearance", "Minimum item clearance:", "Minimum clearance between two items on the same silkscreen layer. If set this can improve legibility.  (Note: does not apply to multiple shapes within a single footprint.)"),
           len("min_text_height", "Minimum text height:", ""), len("min_text_thickness", "Minimum text thickness:", "")])),
         box("Arc/Circle Approximations", form([len("max_error", "Maximum allowed deviation:", "The maximum allowed deviation between a true arc or circle and segments used to approximate it.  Smaller values produce smoother graphics at the expense of performance."), slow])),
-        box("Zone Fill Strategy", chk("zones_allow_external_fillets", "Allow fillets/chamfers outside zone outline", "", "top"), form([["Minimum thermal relief spoke count:", spokes.el]])),
+        // m_filletBitmap (zone_fillet) beside the fillets option, m_spokeBitmap (thermal_spokes) beside the spoke count
+        box("Zone Fill Strategy", h("div", { class: "pd-row", style: "align-items:center" }, staticBitmap("zone_fillet", 24), chk("zones_allow_external_fillets", "Allow fillets/chamfers outside zone outline", "", "top")),
+          form([[label("Minimum thermal relief spoke count:", "thermal_spokes"), spokes.el]])),
         box("Length Tuning", chk("use_height_for_length_calcs", "Include stackup height in track length calculations", "When enabled, the distance between copper layers will be included in track length calculations for tracks with vias.  When disabled, via stackup height is ignored.", "rules")))));
     const values = (): Record<string, number> => { const o: Record<string, number> = {}; for (const x of fields) if (x.key[0] !== "^" && typeof x.f.get() === "number") o[x.key] = x.f.get() as number; return o; };
     // updateWarnings, debounced so a half-typed value does not flash a warning
@@ -500,7 +507,7 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
     const params = arr(ds.teardrop_parameters).map(obj);
     const find = (target: string): Obj => params.find((p) => p.td_target_name === target) || {};
     const sets: { target: string; get(): Obj; ratios: [Field<number>, string][] }[] = [];
-    const one = (title: string, target: string, span: string, sizeTip: string, d: string): HTMLElement => {
+    const one = (title: string, target: string, span: string, sizeTip: string, d: string, bitmap: string): HTMLElement => {
       const p = find(target), ro = roPro;
       const pct = (k: string, def: number, key: string): Field<number> => numField(+(numOr(p[k], def) * 100).toFixed(2), { ro, key: target + "-" + key });
       const bestL = pct("td_length_ratio", 0.5, "bestLength"), maxL = lenField(numOr(p.td_maxlen, 1), { ro, key: target + "-maxLength" });
@@ -512,15 +519,17 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       const ratio = unitLabel(`%( ${d} )`);
       sets.push({ target, ratios: [[bestL, "best_length_ratio"], [bestW, "best_width_ratio"], [limit, "width_to_size_filter_ratio"]], get: () => ({ ...p, td_target_name: target, td_maxlen: maxL.get(), td_maxheight: maxW.get(), td_length_ratio: +(bestL.get() / 100).toFixed(6), td_height_ratio: +(bestW.get() / 100).toFixed(6),
         td_curve_segcount: curved.get() ? 1 : 0, td_width_to_size_filter_ratio: +(limit.get() / 100).toFixed(6), td_allow_use_two_tracks: two.get(), td_on_pad_in_zone: !zone.get(), td_enabled: p.td_enabled === undefined ? true : p.td_enabled }) });
-      return box(title, form([
+      // m_bitmapTeardrop / 1 / 2: KiCad's picture of L, W and d (or w) beside the values, 275 x 130
+      return box(title, h("div", { style: "display:flex;gap:16px;align-items:flex-start" }, staticBitmap(bitmap, 275, 130, "flex:none;margin:0 5px"), form([
         ["Best length (L):", bestL.el, ratio], ["Maximum length (L):", maxL.el, unitLabel()],
         ["Best width (W):", bestW.el, unitLabel(`%( ${d} )`)], ["Maximum width (W):", maxW.el, unitLabel()],
-        zone.el, ["Track width limit:", limit.el, unitLabel(`%( ${d} )`), sizeTip], two.el, curved.el]));
+        zone.el, ["Track width limit:", limit.el, unitLabel(`%( ${d} )`), sizeTip], two.el, curved.el])));
     };
     const tdTip = (pad: boolean): string => `Max ${pad ? "pad/via size to track width" : "track width"} ratio to create a teardrop.\n100 always creates a teardrop.`;
-    put(el, h("div", { class: "pd-cols3" }, one("Default Properties for Round Shapes", "td_round_shape", "Allow teardrop to span two track segments", tdTip(true), "d"),
-      one("Default Properties for Rectangular Shapes", "td_rect_shape", "Allow teardrop to span track segments", tdTip(true), "w"),
-      one("Properties for Track-to-Track Teardrops", "td_track_end", "Allow teardrop to span track segments", tdTip(false), "w")));
+    // PANEL_SETUP_TEARDROPS: the three sections one under the other, each picture left of its values
+    put(el, h("div", null, one("Default Properties for Round Shapes", "td_round_shape", "Allow teardrop to span two track segments", tdTip(true), "d", "teardrop_sizes"),
+      one("Default Properties for Rectangular Shapes", "td_rect_shape", "Allow teardrop to span track segments", tdTip(true), "w", "teardrop_rect_sizes"),
+      one("Properties for Track-to-Track Teardrops", "td_track_end", "Allow teardrop to span track segments", tdTip(false), "w", "teardrop_track_sizes")));
     register("Teardrops", { edits: () => {
       const names = ["td_round_shape", "td_rect_shape", "td_track_end"];
       const out = names.map((n) => { const s = sets.find((x) => x.target === n); return s ? s.get() : find(n); });
@@ -637,9 +646,12 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       const md = keysInText(RULES_HELP_MD);   // panel_setup_rules.cpp: Ctrl+ reads Cmd+ on a Mac
       if (typeof KDialogs !== "undefined" && KDialogs) KDialogs.open({ title: "Syntax Help", width: 760, modeless: true, child: true, buttons: [], build(body: HTMLElement) { const d = h("div", { class: "kd-help", "data-k": "rules-help", style: "max-height:70vh;overflow:auto;font-size:12px;line-height:1.35" }); d.innerHTML = markdownToHtml(md); body.append(d); } });
     });
-    const btn = h("button", { type: "button", class: "btn", "data-k": "checkSyntax" }, "Check rule syntax"); btn.addEventListener("click", check);
+    // m_compileButton: a STD_BITMAP_BUTTON with BITMAPS::drc, "Check rule syntax" its tooltip, left of the errors report
+    const btn = bitmapButton("drc", "Check rule syntax", check); btn.dataset.k = "checkSyntax";
+    report.style.flex = "1 1 auto"; report.style.minWidth = "0";
     el.style.cssText = "display:flex;flex-direction:column;height:100%;min-height:420px";
-    put(el, h("div", { class: "pd-row" }, h("span", { class: "pd-lbl", style: "font-weight:600" }, "DRC Rules"), h("span", { style: "flex:1" }), help), rulesEd.el, report, h("div", { class: "pd-row", style: "margin-top:6px" }, btn));
+    put(el, h("div", { class: "pd-row" }, h("span", { class: "pd-lbl", style: "font-weight:600" }, "DRC Rules"), h("span", { style: "flex:1" }), help), rulesEd.el,
+      h("div", { class: "pd-row", style: "align-items:flex-start;margin-top:5px" }, btn, report));
   };
 
   const severityPage = (el: HTMLElement): void => {
@@ -660,7 +672,28 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
   };
 
   let drillEdit: DrillProfile | null = null;
-  const sctx = (): SetupCtx => ({ pro, ds, header, roPro, roBoard, boardText, register: (label, edits) => register(label, { edits }), validate, layerRows: () => layerRows, setDrillProfile: (p) => { drillEdit = p; } });
+  const sctx = (): SetupCtx => ({ pro, ds, header, roPro, roBoard, boardText, register: (label, edits) => register(label, { edits }), validate, layerRows: () => layerRows, setDrillProfile: (p) => { drillEdit = p; },
+    selectionRefs: () => {
+      const sel = (CollabTools as unknown as { pcb?: { state?: { sel?: Set<string> } } }).pcb?.state?.sel, doc = E.kdoc;
+      if (!sel || !doc) return [];
+      const refs = new Set<string>();
+      for (const id of sel) { const it = doc.items.get(id) as { kind?: string; ref?: string } | undefined; if (it && it.kind === "footprint" && it.ref) refs.add(it.ref); }
+      return [...refs].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    },
+    highlightFootprints: (condition) => {
+      const doc = E.kdoc; if (!doc) return 0;
+      const fps = [...doc.items.values()].filter((it) => it.kind === "footprint").map((it) => it.id);
+      let ids = fps;
+      if (condition !== null) {
+        // COMPONENT_CLASS_MANAGER::CompileAssignmentRule: the condition compiled as a DRC rule condition, evaluated for each footprint
+        const tools = (globalThis as { PcbTools?: { ruleMatchingItems?: (d: KDoc, s: unknown, t: string, n: string) => string[] | null; designSettings?: (p: unknown) => unknown } }).PcbTools;
+        const text = `(version 1)\n(rule "component_class_highlight"\n  (condition "${condition.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"))\n`;
+        const hit = tools && tools.ruleMatchingItems ? tools.ruleMatchingItems(doc, tools.designSettings ? tools.designSettings(E.proSettings || null) : {}, text, "component_class_highlight") : null;
+        const set = new Set(hit || []); ids = fps.filter((id) => set.has(id));
+      }
+      E.highlightIds = ids.length ? new Set(ids) : null; ctx.requestRender();
+      return ids.length;
+    } });
   const groups: TreeGroup[] = [
     { label: "Board Stackup", pages: [{ label: "Board Editor Layers", build: layersPage }, { label: "Physical Stackup", build: stackupPage }, { label: "Board Finish", build: finishPage }, { label: "Solder Mask/Paste", build: maskPage }, { label: "Drill Chart", build: (el) => drillChartPage(sctx())(el) }] },
     { label: "Text & Graphics", pages: [{ label: "Defaults", build: defaultsPage }, { label: "Formatting", build: formattingPage }, { label: "Text Variables", build: variablesPage }] },

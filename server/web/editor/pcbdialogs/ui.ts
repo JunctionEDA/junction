@@ -81,6 +81,9 @@ const CSS = `
 .pd-iconbtn:not(.kbmp):hover { border-color: var(--ink-3, var(--ink-2)); }
 .pd-iconbtn:not(.kbmp):disabled { opacity: .4; cursor: default; }
 .pd-3dbtns .pd-iconbtn.on { background: var(--on); border-color: var(--on-line); }
+.pd-bitmap { display: inline-flex; flex: none; align-items: center; justify-content: center; }
+.pd-bitmap > svg.kicon-dom { display: block; max-width: 100%; height: auto; }
+.pd-bmplabel { display: inline-flex; align-items: center; gap: 6px; }
 .pd-togrow { display: flex; align-items: center; gap: 2px; }
 .pd-togrow .vsep { width: 1px; height: 18px; background: var(--line); margin: 0 5px; }
 .pd-report { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); overflow: auto; font-size: 12px; padding: 4px 8px; min-height: 120px; }
@@ -446,7 +449,7 @@ export function radioBox(title: string, choices: string[], v: number, opts?: { r
     enable(on) { enabled = on; el.classList.toggle("disabled", !on); sync(); }, enableItem(i, on) { itemOn[i] = on; sync(); } };
 }
 /** A label / control / unit grid; rows are [label, control, unit?] or a single element spanning the row. */
-export function form(rows: ([string, Child, Child?, string?] | Child)[], wide?: boolean): HTMLElement {
+export function form(rows: ([string | Node, Child, Child?, string?] | Child)[], wide?: boolean): HTMLElement {
   const f = h("div", { class: "pd-form" + (wide ? " wide" : "") });
   for (const r of rows) {
     if (Array.isArray(r)) { f.append(h("label", r[3] ? { title: r[3] } : null, r[0]), (r[1] as Node) || h("span"), (r[2] as Node) || h("span")); }
@@ -563,6 +566,11 @@ export function kiconToggle(name: string, title: string, on: boolean, opts?: { k
   const f = iconToggle("bold", title, on, opts);
   f.el.replaceChildren(kicadIcon(name, 16)); f.el.dataset.icon = name;
   return f;
+}
+/** wxStaticBitmap: one of KiCad's bitmaps drawn at `w` x `hgt` px (KiBitmapBundle( BITMAPS::name, size )). */
+export function staticBitmap(bitmap: string, w: number, hgt = w, style?: string): HTMLElement {
+  const s = h("span", { class: "pd-bitmap", "data-bitmap": bitmap, style: style || null });
+  s.append(kicadIcon(bitmap, w, hgt)); return s;
 }
 export function iconButton(icon: keyof typeof ICONS, title: string, fn: () => void, disabled?: boolean): HTMLButtonElement {
   return bitmapButton(ICONS[icon], title, fn, { disabled: !!disabled, cls: "pd-iconbtn" });

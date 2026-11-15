@@ -10,7 +10,9 @@ import type { Plain, ProjectEdit } from "../../canvas/project-file";
 import type { BoardHeader, DrillProfile, LayerRow } from "../../canvas/board-setup";
 import { BS } from "./canvas";
 import { E } from "../state";
-import { box, checkField, form, grid, gridButtons, h, iconButton, lenField, note, numField, openDialog, put, selectField, spinField, textEntryBox, textField, unitLabel, unitName, fmtLen, errorMessage, type CellValue, type Field } from "./ui";
+import { popupMenu } from "../../dialogs/dom";
+import { zstdDecompress } from "../../dialogs/zstd";
+import { box, checkField, form, grid, gridButtons, h, iconButton, bitmapButton, staticBitmap, lenField, note, numField, openDialog, put, selectField, spinField, textEntryBox, textField, unitLabel, unitName, fmtLen, errorMessage, type CellValue, type Field } from "./ui";
 
 type Obj = { [key: string]: Plain };
 const isObj = (v: Plain | undefined): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
@@ -30,6 +32,13 @@ export interface SetupCtx {
   setDrillProfile(p: DrillProfile | null): void;
   /** the full text of the board file, for the embedded files */
   boardText: string;
+  /** PANEL_ASSIGN_COMPONENT_CLASSES' m_selectionRefs: the references of the footprints selected on the board, sorted */
+  selectionRefs(): string[];
+  /**
+   * PANEL_COMPONENT_CLASS_ASSIGNMENT::OnHighlightItemsClick: brighten the footprints a condition (a DRC expression, or
+   * null for an assignment without one) matches and no others.  Returns how many matched.
+   */
+  highlightFootprints(condition: string | null): number;
 }
 const DS = ["board", "design_settings"];
 const copperNames = (ctx: SetupCtx): [string, string][] => ctx.layerRows().filter((r) => r.copper).map((r): [string, string] => [r.name, r.userName || r.name]);
@@ -193,17 +202,20 @@ export function tuningPatternsPage(ctx: SetupCtx) {
   return (el: HTMLElement): void => {
     const t = obj(ctx.ds.tuning_pattern_settings), ro = ctx.roPro;
     const sets: { key: string; title: string; f: { min: Field<number>; max: Field<number>; spacing: Field<number>; corner: Field<number>; radius: Field<number>; single: Field<boolean> } }[] = [];
-    const one = (key: string, title: string, d: { min: number; max: number; spacing: number }): HTMLElement => {
+    const one = (key: string, title: string, d: { min: number; max: number; spacing: number }, legend: string, legendH: number): HTMLElement => {
       const s = obj(t[key]);
       const f = { min: lenField(numOr(s.min_amplitude, d.min), { ro, key: key + "-min" }), max: lenField(numOr(s.max_amplitude, d.max), { ro, key: key + "-max" }), spacing: lenField(numOr(s.spacing, d.spacing), { ro, key: key + "-spacing" }),
         corner: selectField<number>(numOr(s.corner_style, 1), [[0, "Chamfer"], [1, "Fillet"]], { ro, key: key + "-corner" }), radius: numField(numOr(s.corner_radius_percentage, 80), { ro, key: key + "-radius", digits: 0 }),
         single: checkField(boolOr(s.single_sided, false), "Single-sided", { ro, key: key + "-single" }) };
       sets.push({ key, title, f });
-      return box(title, form([["Minimum amplitude (A):", f.min.el, unitLabel()], ["Maximum amplitude (A):", f.max.el, unitLabel()],
-        ["Spacing (s):", f.spacing.el, unitLabel(), "Minimum spacing between adjacent tuning segments. The resulting spacing may be greater based on design rules."], ["Corner style:", f.corner.el], ["Radius (r):", f.radius.el, unitLabel("%")], f.single.el]));
+      // m_singleTrackLegend / m_diffPairLegend / m_skewLegend: the legend of A, s and r beside the values
+      return box(title, h("div", { style: "display:flex;gap:16px;align-items:flex-start" }, staticBitmap(legend, 250, legendH, "flex:none;margin:0 15px"), form([["Minimum amplitude (A):", f.min.el, unitLabel()], ["Maximum amplitude (A):", f.max.el, unitLabel()],
+        ["Spacing (s):", f.spacing.el, unitLabel(), "Minimum spacing between adjacent tuning segments. The resulting spacing may be greater based on design rules."], ["Corner style:", f.corner.el], ["Radius (r):", f.radius.el, unitLabel("%")], f.single.el])));
     };
-    put(el, h("div", { class: "pd-cols3" }, one("single_track_defaults", "Default Properties for Single Track Tuning", { min: 0.1, max: 1, spacing: 0.6 }),
-      one("diff_pair_defaults", "Default Properties for Differential Pairs", { min: 0.1, max: 1, spacing: 0.6 }), one("diff_pair_skew_defaults", "Default Properties for Differential Pair Skews", { min: 0.1, max: 1, spacing: 0.6 })));
+    // PANEL_SETUP_TUNING_PATTERNS: the three sections one under the other, each legend left of its values
+    put(el, h("div", null, one("single_track_defaults", "Default Properties for Single Track Tuning", { min: 0.1, max: 1, spacing: 0.6 }, "tune_single_track_length_legend", 156),
+      one("diff_pair_defaults", "Default Properties for Differential Pairs", { min: 0.1, max: 1, spacing: 0.6 }, "tune_diff_pair_length_legend", 156),
+      one("diff_pair_skew_defaults", "Default Properties for Differential Pair Skews", { min: 0.1, max: 1, spacing: 0.6 }, "tune_diff_pair_skew_legend", 110)));
     ctx.register("Length-tuning Patterns", () => {
       const out: Obj = {};
       for (const s of sets) out[s.key] = { corner_radius_percentage: Math.round(s.f.radius.get()), corner_style: s.f.corner.get(), max_amplitude: s.f.max.get(), min_amplitude: s.f.min.get(), single_sided: s.f.single.get(), spacing: s.f.spacing.get() };
@@ -272,30 +284,83 @@ export function tuningProfilesPage(ctx: SetupCtx) {
 
 // ------------------------------------------------------------ Design Rules > Component Classes
 const COND_TYPES: [string, string, string?][] = [["REFERENCE", "Reference:"], ["SIDE", "Side:"], ["ROTATION", "Rotation:", "deg"], ["FOOTPRINT", "Footprint:"], ["FOOTPRINT_FIELD", "Footprint field:"], ["CUSTOM", "Custom:"], ["SHEET_NAME", "Sheet name:"]];
+/** PANEL_COMPONENT_CLASS_ASSIGNMENT::OnAddConditionClick: the menu of condition types, in KiCad's order. */
+const ADD_CONDITION_MENU: [string, string][] = [["REFERENCE", "Add Reference Condition"], ["FOOTPRINT", "Add Footprint Condition"], ["SIDE", "Add Side Condition"], ["ROTATION", "Add Rotation Condition"],
+  ["FOOTPRINT_FIELD", "Add Footprint Field Value Condition"], ["SHEET_NAME", "Add Sheet Condition"], ["CUSTOM", "Add Custom Expression Condition"]];
+interface CcCond { type: string; primary: string; secondary: string }
+/**
+ * COMPONENT_CLASS_ASSIGNMENT_DATA::GetAssignmentInBoardExprFormat's condition: each condition as a DRC expression,
+ * joined with && (Match all) or || (Match any).  undefined when the assignment has no class (nothing compiles), null
+ * when no condition says anything (the class applies to every footprint).
+ */
+export function componentClassCondition(cls: string, op: string, conds: CcCond[]): string | null | undefined {
+  if (!cls.trim()) return undefined;
+  const out: string[] = [];
+  for (const c of conds) {
+    const p = c.primary.trim(), q = c.secondary.trim();
+    let e = "";
+    if (c.type === "REFERENCE") { const refs = p ? p.split(",").map((r) => `A.Reference == '${r.trim()}'`) : []; if (refs.length) e = `( ${refs.join(" || ")} )`; }
+    else if (c.type === "FOOTPRINT") { if (p) e = `( A.Library_Link == '${p}' )`; }
+    else if (c.type === "SIDE") { if (c.primary !== "Any") e = `( A.Layer == '${c.primary === "Front" ? "F.Cu" : "B.Cu"}' )`; }
+    else if (c.type === "ROTATION") { if (p && p !== "Any" && /^[-+]?\d+$/.test(p)) e = `( A.Orientation == ${p} deg )`; }
+    else if (c.type === "FOOTPRINT_FIELD") { if (p && q) e = `( A.getField('${p}') == '${q}' )`; }
+    else if (c.type === "CUSTOM") { if (p) e = `( ${p} )`; }
+    else if (c.type === "SHEET_NAME") { if (p) e = `( A.memberOfSheet('${p}') )`; }
+    if (e) out.push(e);
+  }
+  return out.length ? out.join(op === "ANY" ? " || " : " && ") : null;
+}
 export function componentClassesPage(ctx: SetupCtx) {
   return (el: HTMLElement): void => {
     const ro = ctx.roPro, cc = obj(ctx.pro.component_class_settings);
     const sheet = checkField(boolOr(obj(cc.sheet_component_classes).enabled, false), "Assign component class per sheet", { ro, key: "sheetClasses" });
-    interface Cond { type: string; primary: string; secondary: string }
-    interface Assign { cls: string; op: string; conds: Cond[] }
+    interface Assign { cls: string; op: string; conds: CcCond[] }
     const assigns: Assign[] = arr(cc.assignments).map(obj).map((a) => ({ cls: strOr(a.component_class, ""), op: strOr(a.conditions_operator, "ALL"), conds: Object.entries(obj(a.conditions)).map(([k, v]) => ({ type: k.replace(/-\d+$/, ""), primary: strOr(obj(v).primary, ""), secondary: strOr(obj(v).secondary, "") })) }));
     const list = h("div", { style: "display:flex;flex-direction:column;gap:8px" });
+    let radioSeq = 0;
     const draw = (): void => {
       list.replaceChildren();
       assigns.forEach((a, ai) => {
         const cls = textField(a.cls, { ro, key: `cc-${ai}-class` }); cls.input.addEventListener("input", () => { a.cls = cls.get(); });
-        const op = selectField<string>(a.op, [["ALL", "Match all"], ["ANY", "Match any"]], { ro, key: `cc-${ai}-op`, onChange: (v) => { a.op = v; } });
-        const addCond = h("k-select", { disabled: ro, "data-k": `cc-${ai}-add` }); addCond.append(h("option", { value: "" }, "Add Condition"), ...COND_TYPES.map(([t, l]) => h("option", { value: t }, l.replace(/:$/, ""))));
-        addCond.addEventListener("change", () => { const t = (addCond as unknown as { value: string }).value; if (t) { a.conds.push({ type: t, primary: t === "SIDE" ? "Any" : "", secondary: "" }); draw(); } });
+        cls.el.style.flex = "1 1 auto";
+        // m_radioAll / m_radioAny
+        const group = `cc-op-${++radioSeq}`;
+        const radio = (value: string, text: string): HTMLElement => {
+          const r = h("input", { type: "radio", name: group, value, disabled: ro, "data-k": `cc-${ai}-op-${value}` }) as HTMLInputElement; r.checked = a.op === value;
+          r.addEventListener("change", () => { if (r.checked) a.op = value; });
+          return h("label", { class: "pd-row", style: "gap:4px;align-items:center" }, r, text);
+        };
+        // m_buttonAddCondition (small_plus): the menu of condition types
+        const addCond = bitmapButton("small_plus", "Add Condition", (ev) => {
+          const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+          popupMenu(r.left, r.bottom, ADD_CONDITION_MENU.map(([t, label]) => ({ label, run: () => { a.conds.push({ type: t, primary: t === "SIDE" ? "Any" : "", secondary: "" }); draw(); } })));
+        }, { disabled: ro, cls: "pd-iconbtn" });
+        addCond.dataset.k = `cc-${ai}-add`;
+        // m_buttonHighlightItems (net_highlight): the footprints the assignment matches, brightened on the board
+        const highlight = bitmapButton("net_highlight", "Highlight matching footprints", () => {
+          const cond = componentClassCondition(a.cls, a.op, a.conds);
+          if (cond === undefined) return;
+          ctx.highlightFootprints(cond);
+        });
+        highlight.dataset.k = `cc-${ai}-highlight`;
         const rows = a.conds.map((c, ci) => {
           const spec = COND_TYPES.find((x) => x[0] === c.type) || [c.type, c.type + ":"];
           const p = c.type === "SIDE" ? selectField<string>(c.primary || "Any", [["Any", "Any"], ["Front", "Front"], ["Back", "Back"]], { ro, onChange: (v) => { c.primary = v; } }) : textField(c.primary, { ro });
           if (c.type !== "SIDE") p.input.addEventListener("input", () => { c.primary = String(p.get()); });
           const extra = c.type === "FOOTPRINT_FIELD" ? (() => { const s = textField(c.secondary, { ro }); s.input.addEventListener("input", () => { c.secondary = s.get(); }); return [h("label", null, "Field value:"), s.el]; })() : [];
-          return h("div", { class: "pd-row" }, h("label", { style: "min-width:110px" }, c.type === "FOOTPRINT_FIELD" ? "Footprint field:" : spec[1]), p.el, spec[2] ? unitLabel(spec[2]) : null, ...extra, iconButton("trash", "Delete row", () => { a.conds.splice(ci, 1); draw(); }, ro));
+          // PANEL_COMPONENT_CLASS_CONDITION_REFERENCE's m_buttonImportRefs (config): the selected footprints' references
+          const importRefs = c.type === "REFERENCE" ? bitmapButton("config", "Import references", (ev) => {
+            const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(), refs = ctx.selectionRefs();
+            popupMenu(r.left, r.bottom, [{ label: "Import references from selection", disabled: !refs.length, run: () => { if (!refs.length) return; c.primary = refs.join(","); p.set(c.primary as never); } }]);
+          }, { disabled: ro, cls: "pd-iconbtn" }) : null;
+          if (importRefs) importRefs.dataset.k = `cc-${ai}-${ci}-import`;
+          return h("div", { class: "pd-row" }, h("label", { style: "min-width:110px" }, c.type === "FOOTPRINT_FIELD" ? "Footprint field:" : spec[1]), p.el, spec[2] ? unitLabel(spec[2]) : null, ...extra, importRefs,
+            h("span", { style: "flex:1" }), iconButton("trash", "Delete row", () => { a.conds.splice(ci, 1); draw(); }, ro));
         });
-        list.append(h("div", { class: "pd-box", style: "border:1px solid var(--line);border-radius:var(--r-2);padding:8px" },
-          h("div", { class: "pd-row" }, h("label", null, "Component class:"), cls.el, op.el, addCond, h("button", { type: "button", class: "btn", disabled: true, title: "Highlights the footprints this assignment matches on the board" }, "Highlight matching footprints"), h("span", { style: "flex:1" }), iconButton("trash", "Delete row", () => { assigns.splice(ai, 1); draw(); }, ro)),
+        list.append(h("div", { class: "pd-box", "data-k": `cc-${ai}`, style: "border:1px solid var(--line);border-radius:var(--r-2);padding:8px" },
+          h("div", { class: "pd-row" }, h("label", null, "Component class:"), cls.el, h("span", { style: "width:20px" }), iconButton("trash", "Delete row", () => { assigns.splice(ai, 1); draw(); }, ro)),
+          h("div", { class: "pd-row", style: "margin-top:5px;align-items:center" }, addCond, h("span", { style: "flex:1" }), highlight,
+            h("span", { style: "align-self:stretch;width:1px;background:var(--line);margin:0 5px" }), radio("ALL", "Match all"), radio("ANY", "Match any")),
           ...rows));
       });
     };
@@ -308,17 +373,52 @@ export function componentClassesPage(ctx: SetupCtx) {
 }
 
 // ------------------------------------------------------------ Board Data > Embedded Files
+/** The (embedded_files (file (name ..) (data ..))) entries of the board file, by name, with their base64 data. */
+function boardEmbeddedFiles(text: string): { name: string; data: string }[] {
+  const at = text.indexOf("(embedded_files"); if (at < 0) return [];
+  let node: SNode | null = null;
+  try { node = (KiCadCanvas.parse(text.slice(at, sexprEnd(text, at))) as SNode) || null; } catch { node = null; }
+  if (!node) return [];
+  return (KiCadCanvas.kids(node, "file") as SNode[]).map((f) => {
+    const d = KiCadCanvas.kid(f, "data");
+    return { name: String((KiCadCanvas.kid(f, "name") || [])[1] ?? ""), data: d ? d.slice(1).map((x) => String(x)).join("").replace(/[|\s]/g, "") : "" };
+  }).filter((f) => f.name);
+}
+/** End (exclusive) of the balanced list that starts at i. */
+function sexprEnd(s: string, i: number): number {
+  let depth = 0;
+  for (let j = i; j < s.length; j++) {
+    const c = s[j];
+    if (c === "\"") { j++; while (j < s.length && s[j] !== "\"") { if (s[j] === "\\") j++; j++; } continue; }
+    if (c === "(") depth++; else if (c === ")" && --depth === 0) return j + 1;
+  }
+  return s.length;
+}
+/** EMBEDDED_FILES::DecompressAndDecode: base64, then the zstd frame. */
+function embeddedBytes(b64: string): Uint8Array | null {
+  try { const bin = atob(b64); const raw = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i); return zstdDecompress(raw); } catch { return null; }
+}
 export function embeddedFilesPage(ctx: SetupCtx) {
   return (el: HTMLElement): void => {
-    const files: Record<string, CellValue>[] = [];
-    const text = ctx.boardText || "";
-    const at = text.indexOf("(embedded_files");
-    if (at >= 0) { const re = /\(file\s*\(name\s+"((?:[^"\\]|\\.)*)"\)/g; re.lastIndex = at; let m: RegExpExecArray | null; while ((m = re.exec(text))) { if (text.lastIndexOf("(embedded_files", m.index) !== at) break; files.push({ name: m[1], ref: "kicad-embed://" + m[1] }); } }
-    const fonts = /\(embedded_fonts\s+yes\)/.test(text);
+    const all = boardEmbeddedFiles(ctx.boardText || "");
+    const files: Record<string, CellValue>[] = all.map((f) => ({ name: f.name, ref: "kicad-embed://" + f.name }));
+    const fonts = /\(embedded_fonts\s+yes\)/.test(ctx.boardText || "");
     const g = grid([{ label: "Filename", key: "name", type: "ro" }, { label: "Embedded Reference", key: "ref", type: "ro" }], files, { height: "340px" });
     const embed = checkField(fonts, "Embed fonts", { ro: true, key: "embedFonts", tip: "Store a copy of all fonts used" });
-    put(el, g.el, h("div", { class: "pd-gridbar" }, iconButton("plus", "Add embedded file", () => undefined, true), iconButton("trash", "Remove embedded file", () => undefined, true), h("span", { style: "flex:1" }), embed.el,
-      h("button", { type: "button", class: "btn", disabled: true }, "Export...")), note("Files are embedded in the board file; adding and removing them is done in the desktop application."));
+    // PANEL_EMBEDDED_FILES::onExportFiles: the selected file, or every file, saved where the person chooses (a download here)
+    const exportFiles = (): void => {
+      const i = g.selected(), pick = i >= 0 && files[i] ? [String(files[i].name)] : files.map((f) => String(f.name));
+      for (const n of pick) {
+        const f = all.find((x) => x.name === n), bytes = f ? embeddedBytes(f.data) : null;
+        if (!bytes) { errorMessage(`Could not read the embedded file '${n}'.`); continue; }
+        const a = h("a", { href: URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/octet-stream" })), download: n }) as HTMLAnchorElement;
+        document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+      }
+    };
+    // m_browse_button "Add embedded file" draws BITMAPS::small_folder, m_delete_button small_trash
+    const add = bitmapButton("small_folder", "Add embedded file", () => undefined, { disabled: true, cls: "pd-iconbtn" }), del = iconButton("trash", "Remove embedded file", () => undefined, true);
+    const exp = h("button", { type: "button", class: "btn", "data-k": "efExport", disabled: !files.length, onclick: exportFiles }, "Export...");
+    put(el, g.el, h("div", { class: "pd-gridbar" }, add, del, h("span", { style: "flex:1" }), embed.el, exp), note("Files are embedded in the board file; adding and removing them is done in the desktop application."));
     void E;
   };
 }
