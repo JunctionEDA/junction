@@ -409,6 +409,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/projects/{id}/github/push", post(github::push))
         .route("/api/projects/{id}/github/settings", post(github::settings))
         .route("/api/projects/{id}/github/pull", post(github::pull))
+        .route("/api/projects/{id}/github/relocate", post(github::relocate))
+        .route("/api/projects/{id}/github/restore-file", post(github::restore_file))
         // The design assistant (ai.rs)
         .route("/api/ai/datasheet", post(datasheet::read))
         .route("/api/fonts/catalog", get(fonts::catalog_json))

@@ -115,6 +115,36 @@ BOOST_AUTO_TEST_CASE( GoneOrRepurposedCopiesAreNotReused )
 }
 
 
+BOOST_AUTO_TEST_CASE( ARenamedProjectFileKeepsItsLink )
+{
+    SCRATCH_DIR projects( wxS( "rename" ) );
+
+    wxString   pro = makeLocalCopy( projects.path, wxS( "Widget" ), wxS( "proj-1" ) );
+    wxFileName dir( pro );
+    wxString   server;
+
+    // The project file takes a new name; the link was written under the old one.
+    wxRenameFile( pro, wxFileName( dir.GetPath(), wxS( "Gizmo.kicad_pro" ) ).GetFullPath() );
+
+    BOOST_CHECK_EQUAL( COLLAB_PROJECT::ReadLocalLink( dir.GetPath(), wxS( "Gizmo" ), server ),
+                       wxString( wxS( "proj-1" ) ) );
+    BOOST_CHECK_EQUAL( server, wxString( wxS( "http://server.test" ) ) );
+    BOOST_CHECK( !wxFileName::DirExists( dir.GetPath() + wxFileName::GetPathSeparator()
+                                         + wxS( "Widget.collab" ) ) );
+
+    // A second project file in the same folder is its own project: it does not take
+    // the link of the one beside it.
+    wxFFile other( wxFileName( dir.GetPath(), wxS( "Other.kicad_pro" ) ).GetFullPath(),
+                   wxS( "w" ) );
+    other.Write( wxS( "{}" ) );
+    other.Close();
+
+    BOOST_CHECK( COLLAB_PROJECT::ReadLocalLink( dir.GetPath(), wxS( "Other" ), server ).IsEmpty() );
+    BOOST_CHECK_EQUAL( COLLAB_PROJECT::ReadLocalLink( dir.GetPath(), wxS( "Gizmo" ), server ),
+                       wxString( wxS( "proj-1" ) ) );
+}
+
+
 BOOST_AUTO_TEST_CASE( CorruptRegistryRecovers )
 {
     SCRATCH_DIR registry( wxS( "reg" ) );

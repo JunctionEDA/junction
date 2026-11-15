@@ -50,9 +50,13 @@ function fieldOf(node: SNode, name: string): string {
  * keeps the .step, as with KiCad's own library.
  */
 function projectModel(path: string): string | null {
-  const m = /^\$[{(]KIPRJMOD[})][\/\\](.+)\.(?:step|stp|wrl)$/i.exec(path); if (!m || m[1].includes("..")) return null;
+  const m = /^\$[{(]KIPRJMOD[})][\/\\](.+)\.(?:step|stp|wrl)$/i.exec(path); if (!m) return null;
+  // a library shared with other projects sits beside the project folder (${KIPRJMOD}/../lib/…) and is kept under that
+  // same path; ".." anywhere but at the front is not a path the project keeps
+  const stem = m[1].replace(/\\/g, "/").replace(/^\.\//, "");
+  if (stem.replace(/^(?:\.\.\/)+/, "").split("/").includes("..")) return null;
   const fn = (globalThis as { KiCadProjectModel?: (stem: string) => string | null }).KiCadProjectModel;
-  try { return typeof fn === "function" ? fn(m[1].replace(/\\/g, "/")) || null : null; } catch { return null; }
+  try { return typeof fn === "function" ? fn(stem) || null : null; } catch { return null; }
 }
 
 /** Where KiCad's library model `lib`/`name` is read from; the server answers a missing one with its closest replacement. */

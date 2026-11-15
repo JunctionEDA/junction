@@ -20,6 +20,9 @@
   header .mark svg { width: 20px; height: 20px; display: block; }
   header b { font-weight: 600; }
   header .crumb { color: var(--ink-2); }
+  header .backlink { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px 3px 6px; border: 1px solid var(--line); border-radius: var(--r-2);
+           color: var(--ink-2); text-decoration: none; font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; }
+  header .backlink:hover { color: var(--ink); border-color: var(--line-2); background: var(--sel-soft); }
   header .sp { flex: 1; }
   main { max-width: 980px; margin: 0 auto; padding: var(--s-5) var(--s-4) var(--s-7); display: grid; gap: var(--s-4); }
   h1 { margin: 0 0 4px; font-size: var(--fs-xl); font-weight: 600; letter-spacing: -.01em; }
@@ -72,6 +75,7 @@
 <body>
 <header>
   <a class="mark" href="/" title="Home">{{MARK}}</a>
+  <a class="backlink" href="/" id="toProjects" title="Back to your projects"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M9.5 3.5 5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Projects</a>
   <b>Junction</b>
   <span class="crumb">Style guide</span>
   <span class="sp"></span>

@@ -296,8 +296,64 @@ wxString COLLAB_PROJECT::ParseLinkToken( const wxString& aInput )
 }
 
 
+/**
+ * A project file renamed on disk keeps its online link.  The link is kept in
+ * <project name>.collab, so after a rename it sits under the old name: when this project
+ * has no .collab folder of its own and the folder holds exactly one that belongs to no
+ * project file any more, that one is this project's and takes the new name.  A folder
+ * with several projects in it (each with its own project file) is left as it is.
+ */
+static void adoptRenamedCollabDir( const wxString& aProjectPath, const wxString& aProjectName )
+{
+    if( aProjectPath.IsEmpty() || aProjectName.IsEmpty() )
+        return;
+
+    wxFileName own( aProjectPath, wxEmptyString );
+    own.AppendDir( aProjectName + wxS( ".collab" ) );
+
+    if( own.DirExists()
+        || !wxFileName( aProjectPath, aProjectName, wxS( "kicad_pro" ) ).FileExists() )
+    {
+        return;
+    }
+
+    wxDir folder( aProjectPath );
+
+    if( !folder.IsOpened() )
+        return;
+
+    wxString orphan;
+    wxString name;
+
+    for( bool more = folder.GetFirst( &name, wxS( "*.collab" ), wxDIR_DIRS ); more;
+         more = folder.GetNext( &name ) )
+    {
+        wxString stem = name.BeforeLast( '.' );
+
+        wxFileName candidate( aProjectPath, wxEmptyString );
+        candidate.AppendDir( name );
+
+        if( stem.IsEmpty() || wxFileName( aProjectPath, stem, wxS( "kicad_pro" ) ).FileExists()
+            || !wxFileName( candidate.GetPath(), wxS( "link.json" ) ).FileExists() )
+        {
+            continue;
+        }
+
+        if( !orphan.IsEmpty() )
+            return; // more than one: which was this project's cannot be told
+
+        orphan = candidate.GetPath();
+    }
+
+    if( !orphan.IsEmpty() )
+        wxRenameFile( orphan, own.GetPath(), false );
+}
+
+
 static wxString collabDirPath( const wxString& aProjectPath, const wxString& aProjectName )
 {
+    adoptRenamedCollabDir( aProjectPath, aProjectName );
+
     wxFileName dir( aProjectPath, wxEmptyString );
     dir.AppendDir( aProjectName + wxS( ".collab" ) );
 

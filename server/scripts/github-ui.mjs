@@ -99,10 +99,12 @@ try {
   await page.fill('#repoQ', 'pre');
   check('typing filters the list', await page.locator('#repoList .it').count() === 1);
   await page.click('[data-repo="ui-dana/preamp"]');
-  await page.waitForSelector('[data-import]');
-  check('scan lists the two KiCad projects in the repository', await page.locator('[data-import]').count() === 2);
+  await page.waitForSelector('[data-pick]');
+  check('scan lists the two KiCad projects in the repository, none picked yet', await page.locator('[data-pick]').count() === 2 && await page.isDisabled('#doImport'));
+  await page.check('[data-pick="0"]');
   await shot(page, '02-import');
-  await page.click('[data-import="0"]');
+  check('the header has a way back to the projects', await page.getAttribute('#toProjects', 'href') === '/' && (await page.textContent('#toProjects')).trim() === 'Projects');
+  await page.click('#doImport');
   await page.waitForURL(/\/p\/[0-9a-f-]{36}\/github$/);
   await page.waitForSelector('table.files');
   const pid = page.url().match(/\/p\/([0-9a-f-]{36})/)[1];
@@ -122,7 +124,7 @@ try {
   await page.waitForFunction(() => document.querySelector('.chip.pull b')?.textContent === '2');
   const chips = await page.$$eval('.chip b', (els) => els.map((e) => e.textContent).join(','));
   check('the page shows what differs: 1 to push, 2 to pull, 1 changed on both, 1 in sync', chips === '1,2,1,1', chips);
-  check('the file changed on both sides offers a choice, defaulting to merge', (await page.inputValue('[data-resolve="preamp.kicad_pcb"]')) === 'merge');
+  check('the file changed on both sides offers a choice, defaulting to merge', (await page.$eval('[data-resolve="preamp.kicad_pcb"]', (e) => e.value)) === 'merge');
   await page.click('[data-diff="preamp.kicad_pcb"]');
   await page.waitForSelector('ul.changes');
   const sides = await page.$$eval('.diffrow .side', (els) => els.map((e) => e.textContent.replace(/\s+/g, ' ').trim()));
@@ -131,7 +133,7 @@ try {
 
   // ---- pull (with a merge)
   await page.click('#pull');
-  await page.waitForSelector('#result .note.ok');
+  await page.waitForSelector('#result .callout.ok');
   const result = await page.textContent('#result');
   check('pull reports the merge and the one item both sides changed', /preamp\.kicad_pcb — merged/.test(result) && /footprint R1 › at — kept the online version/.test(result) && /amp\.kicad_sch — added/.test(result), result);
   check('…and says where the previous versions went', /kept in History/.test(result));
@@ -143,9 +145,9 @@ try {
   // ---- push
   await page.fill('#msg', 'Merge online edits');
   await page.click('#push');
-  await page.waitForSelector('#result .note.ok');
+  await page.waitForSelector('#result .callout.ok');
   await page.waitForFunction(() => document.querySelector('.chip.synced b')?.textContent === '5');
-  check('push reports the commit and everything is in sync', /Pushed 2 files to main/.test(await page.textContent('#result')));
+  check('push reports the commit and everything is in sync', /Pushed 2 files on main/.test(await page.textContent('#result')));
   const gh = await ctl('files?repo=ui-dana/preamp');
   check('GitHub holds the merged board under our commit message', gh.files['hardware/preamp.kicad_pcb'] === merged && gh.message === 'Merge online edits');
   check('the commit shows in the recent commits', (await page.textContent('.commit .msg')) === 'Merge online edits');
@@ -174,7 +176,7 @@ try {
   await phone.goto(`${BASE}/github`);
   await phone.waitForSelector('[data-repo="ui-dana/preamp"]');
   await phone.click('[data-repo="ui-dana/preamp"]');
-  await phone.waitForSelector('[data-import]');
+  await phone.waitForSelector('#scanList');
   check('phone: the import page fits the screen width', await fits(phone));
   await shot(phone, '09-phone-import');
 
@@ -252,8 +254,8 @@ try {
   // ---- error surfaces
   await ctl('revoke', { login: 'ui-dana' });
   await page.click('#refresh');
-  await page.waitForSelector('.note.err');
-  check('a revoked connection is explained on the page', /Connect your repositories again/.test(await page.textContent('.note.err')));
+  await page.waitForSelector('.callout.err');
+  check('a revoked connection is explained on the page', /Connect your repositories again/.test(await page.textContent('.callout.err')));
   await shot(page, '12-revoked');
 
   // ---- the editor's File menu leads here

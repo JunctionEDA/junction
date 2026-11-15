@@ -1464,6 +1464,12 @@ pub async fn download_archive(
     let mut entries: Vec<(String, Vec<u8>)> = Vec::new();
     let mut manifest_docs = serde_json::Map::new();
     for d in &docs {
+        // A file the project shares from outside its folder (GitHub sync brings a library at
+        // `../lib/…` along) has no place inside an archive of the folder: left out, so
+        // unpacking never writes above the folder it is unpacked into.
+        if d.path.starts_with("../") {
+            continue;
+        }
         if let Some((seq, content)) = persist::latest_snapshot(&state.pool, d.id).await? {
             manifest_docs.insert(
                 d.path.clone(),

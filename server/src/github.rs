@@ -40,14 +40,14 @@ use uuid::Uuid;
 use crate::auth::AuthUser;
 use crate::doc_actor::DocMsg;
 use crate::error::{AppError, AppResult};
-use crate::http::{
-    allowed_file, doc_type_for, is_local_state_path, safe_zip_name, MAX_FILES, MAX_FILE_BYTES,
-    MAX_TOTAL_BYTES,
-};
+use crate::http::{doc_type_for, MAX_FILES, MAX_FILE_BYTES, MAX_TOTAL_BYTES};
 use crate::lenient_json::LenientJson;
 use crate::merge::{self, Prefer};
 use crate::persist::{self, Document, User};
 use crate::AppState;
+
+mod remote;
+use remote::Remote;
 
 const B64: base64::engine::GeneralPurpose = base64::engine::general_purpose::STANDARD;
 
@@ -193,6 +193,8 @@ struct Gh {
     token: String,
     /// "app" when the token is a GitHub App user token (chosen repositories only).
     kind: String,
+    /// Host of the GitHub web site, for telling which submodule URLs are GitHub's.
+    web_host: String,
 }
 
 /// Percent-encode a path segment sequence, keeping `/`.
@@ -222,6 +224,7 @@ impl Gh {
                 .map_err(|e| anyhow::anyhow!("http client: {e}"))?,
             api: state.cfg.github_api_url.clone(),
             token,
+            web_host: state.cfg.github_web_url.split("://").last().unwrap_or("").trim_end_matches('/').to_string(),
         })
     }
 
@@ -311,19 +314,6 @@ impl Gh {
             }
         }
         Ok(Some(cur))
-    }
-
-    /// Several blobs at once, a few requests at a time, in the order asked for.
-    async fn blobs(&self, repo: &RepoRef, shas: &[String]) -> Result<Vec<Vec<u8>>, GhErr> {
-        let mut out = Vec::with_capacity(shas.len());
-        for group in shas.chunks(6) {
-            let mut jobs = Vec::with_capacity(group.len());
-            for sha in group {
-                jobs.push(self.blob(repo, sha));
-            }
-            out.extend(futures_util::future::try_join_all(jobs).await?);
-        }
-        Ok(out)
     }
 
     async fn blob(&self, repo: &RepoRef, sha: &str) -> Result<Vec<u8>, GhErr> {
@@ -422,15 +412,6 @@ struct Link {
 }
 
 impl Link {
-    /// Repository path of a project file.
-    fn repo_path(&self, doc_path: &str) -> String {
-        if self.subdir.is_empty() {
-            doc_path.to_string()
-        } else {
-            format!("{}/{}", self.subdir, doc_path)
-        }
-    }
-
     fn web_url(&self, state: &AppState) -> String {
         let mut url = format!(
             "{}/{}/tree/{}",
@@ -520,30 +501,37 @@ pub async fn linked_repos(pool: &sqlx::PgPool, ids: &[Uuid]) -> AppResult<HashMa
         .collect())
 }
 
-async fn load_base(state: &AppState, project_id: Uuid) -> AppResult<HashMap<String, String>> {
-    let rows = sqlx::query("SELECT path, blob_sha FROM project_github_files WHERE project_id = $1")
+/// What the last sync recorded for a file: its blob id, and the document it was.
+#[derive(Debug, Clone)]
+struct BaseRow {
+    sha: String,
+    doc_id: Option<Uuid>,
+}
+
+/// (project path, blob id, document) the two sides now agree on.
+type Agreed = (String, String, Option<Uuid>);
+
+async fn load_base(state: &AppState, project_id: Uuid) -> AppResult<HashMap<String, BaseRow>> {
+    let rows = sqlx::query("SELECT path, blob_sha, doc_id FROM project_github_files WHERE project_id = $1")
         .bind(project_id)
         .fetch_all(&state.pool)
         .await?;
-    Ok(rows.into_iter().map(|r| (r.get("path"), r.get("blob_sha"))).collect())
+    Ok(rows.into_iter().map(|r| (r.get("path"), BaseRow { sha: r.get("blob_sha"), doc_id: r.get("doc_id") })).collect())
 }
 
 /// Record the blob ids the two sides now agree on, and the commit that was synced with.
-async fn save_base(
-    state: &AppState,
-    project_id: Uuid,
-    agreed: &[(String, String)],
-    commit: Option<&str>,
-) -> AppResult<()> {
+async fn save_base(state: &AppState, project_id: Uuid, agreed: &[Agreed], commit: Option<&str>) -> AppResult<()> {
     let mut tx = state.pool.begin().await?;
-    for (path, sha) in agreed {
+    for (path, sha, doc_id) in agreed {
         sqlx::query(
-            "INSERT INTO project_github_files (project_id, path, blob_sha) VALUES ($1, $2, $3)
-             ON CONFLICT (project_id, path) DO UPDATE SET blob_sha = EXCLUDED.blob_sha",
+            "INSERT INTO project_github_files (project_id, path, blob_sha, doc_id) VALUES ($1, $2, $3, $4)
+             ON CONFLICT (project_id, path) DO UPDATE
+               SET blob_sha = EXCLUDED.blob_sha, doc_id = COALESCE(EXCLUDED.doc_id, project_github_files.doc_id)",
         )
         .bind(project_id)
         .bind(path)
         .bind(sha)
+        .bind(doc_id)
         .execute(&mut *tx)
         .await?;
     }
@@ -555,6 +543,19 @@ async fn save_base(
             .await?;
     }
     tx.commit().await?;
+    Ok(())
+}
+
+/// Forget what the last sync recorded for these paths (a file that was deleted or renamed).
+async fn drop_base(state: &AppState, project_id: Uuid, paths: &[String]) -> AppResult<()> {
+    if paths.is_empty() {
+        return Ok(());
+    }
+    sqlx::query("DELETE FROM project_github_files WHERE project_id = $1 AND path = ANY($2)")
+        .bind(project_id)
+        .bind(paths)
+        .execute(&state.pool)
+        .await?;
     Ok(())
 }
 
@@ -619,31 +620,6 @@ async fn freshen(state: &AppState, project_id: Uuid) -> AppResult<()> {
     Ok(())
 }
 
-/// The remote side: the branch head and the project files under the linked folder,
-/// keyed by project-relative path.
-struct Remote {
-    head: Option<String>,
-    tree: Option<String>,
-    files: BTreeMap<String, (String, u64)>,
-    truncated: bool,
-}
-
-async fn remote_files(gh: &Gh, link: &Link) -> Result<Remote, GhErr> {
-    let Some(head) = gh.branch_head(&link.repo, &link.branch).await? else {
-        return Ok(Remote { head: None, tree: None, files: BTreeMap::new(), truncated: false });
-    };
-    let tree = gh.commit_tree(&link.repo, &head).await?;
-    let Some(folder) = gh.subtree(&link.repo, &tree, &link.subdir).await? else {
-        return Ok(Remote { head: Some(head), tree: Some(tree), files: BTreeMap::new(), truncated: false });
-    };
-    let (all, truncated) = gh.tree(&link.repo, &folder).await?;
-    let files = all
-        .into_iter()
-        .filter(|(rel, _)| allowed_file(rel) && !is_local_state_path(rel) && safe_zip_name(rel).is_some())
-        .collect();
-    Ok(Remote { head: Some(head), tree: Some(tree), files, truncated })
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Change {
     Synced,
@@ -666,56 +642,342 @@ impl Change {
     }
 }
 
+/// What carrying a change over does to the other side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Op {
+    /// The file's content (or the file itself, where it is new) goes across.
+    Edit,
+    /// The file was deleted on one side; carrying that over deletes it on the other.
+    Delete,
+}
+
 /// Where a file stands, from its blob id online, on GitHub and at the last sync.
-fn classify(local: Option<&str>, remote: Option<&str>, base: Option<&str>) -> Option<(Change, &'static str)> {
+/// A file one side no longer has, that both had at the last sync, was deleted there.
+fn classify(local: Option<&str>, remote: Option<&str>, base: Option<&str>) -> Option<(Change, Op, &'static str)> {
     Some(match (local, remote) {
         (None, None) => return None,
-        (Some(l), Some(r)) if l == r => (Change::Synced, "identical"),
-        (Some(_), None) => match base {
-            Some(_) => (Change::Push, "deleted on GitHub; pushing puts it back"),
-            None => (Change::Push, "new online"),
+        (Some(l), Some(r)) if l == r => (Change::Synced, Op::Edit, "identical"),
+        (Some(l), None) => match base {
+            Some(b) if b == l => (Change::Pull, Op::Delete, "deleted on GitHub"),
+            Some(_) => (Change::Conflict, Op::Delete, "deleted on GitHub, changed online"),
+            None => (Change::Push, Op::Edit, "new online"),
         },
-        (None, Some(_)) => (Change::Pull, "new on GitHub"),
+        (None, Some(r)) => match base {
+            Some(b) if b == r => (Change::Push, Op::Delete, "deleted online"),
+            Some(_) => (Change::Conflict, Op::Delete, "deleted online, changed on GitHub"),
+            None => (Change::Pull, Op::Edit, "new on GitHub"),
+        },
         (Some(l), Some(r)) => match base {
-            Some(b) if b == r => (Change::Push, "changed online"),
-            Some(b) if b == l => (Change::Pull, "changed on GitHub"),
-            Some(_) => (Change::Conflict, "changed on both sides"),
-            None => (Change::Conflict, "differs, and the two were never synced"),
+            Some(b) if b == r => (Change::Push, Op::Edit, "changed online"),
+            Some(b) if b == l => (Change::Pull, Op::Edit, "changed on GitHub"),
+            Some(_) => (Change::Conflict, Op::Edit, "changed on both sides"),
+            None => (Change::Conflict, Op::Edit, "differs, and the two were never synced"),
         },
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    Online,
+    GitHub,
+}
+
+#[derive(Debug, Clone)]
 struct Entry {
+    /// The file's path as it is now (its new path, when it was renamed).
     path: String,
     change: Change,
+    op: Op,
     detail: &'static str,
     local: Option<String>,
     remote: Option<String>,
     remote_size: u64,
+    /// The path it had at the last sync, and which side renamed it.
+    renamed: Option<(String, Side)>,
 }
 
-fn compare(
-    local: &BTreeMap<String, LocalFile>,
-    remote: &Remote,
-    base: &HashMap<String, String>,
-) -> Vec<Entry> {
+impl Entry {
+    /// The path the online project has it under.
+    fn local_path(&self) -> &str {
+        match &self.renamed {
+            Some((old, Side::GitHub)) => old,
+            _ => &self.path,
+        }
+    }
+
+    /// The path GitHub has it under.
+    fn remote_path(&self) -> &str {
+        match &self.renamed {
+            Some((old, Side::Online)) => old,
+            _ => &self.path,
+        }
+    }
+
+    /// The path the last sync recorded it under.
+    fn base_path(&self) -> &str {
+        match &self.renamed {
+            Some((old, _)) => old,
+            None => &self.path,
+        }
+    }
+}
+
+/// Every file's standing.  A file that is gone under one name and present, unchanged,
+/// under another is the same file renamed: one entry, not a delete and a new file.
+fn compare(local: &BTreeMap<String, LocalFile>, remote: &Remote, base: &HashMap<String, BaseRow>) -> Vec<Entry> {
+    // Renamed online: the document the last sync knew under one path now has another.
+    let by_id: HashMap<Uuid, &String> = local.iter().map(|(p, f)| (f.doc.id, p)).collect();
+    let mut renamed_online: HashMap<String, String> = HashMap::new(); // new -> old
+    for (old, b) in base {
+        if local.contains_key(old) {
+            continue;
+        }
+        if let Some(new) = b.doc_id.and_then(|id| by_id.get(&id)) {
+            // Only while GitHub still has it where it was, untouched or not; a file gone
+            // there too is simply a new file online.
+            if !base.contains_key(*new) && remote.sha(new).is_none() && remote.sha(old).is_some() {
+                renamed_online.insert((*new).clone(), old.clone());
+            }
+        }
+    }
+    // Renamed on GitHub: gone from its path, and the very same content sits at a path
+    // neither side knew.  (A rename with edits is found by `fuzzy_renames`.)
+    let taken: HashSet<&String> = renamed_online.values().collect();
+    let mut fresh: Vec<&String> =
+        remote.files.keys().filter(|q| !local.contains_key(*q) && !base.contains_key(*q)).collect();
+    let mut renamed_remote: HashMap<String, String> = HashMap::new(); // new -> old
+    for (old, b) in base {
+        if !local.contains_key(old) || remote.sha(old).is_some() || taken.contains(old) {
+            continue;
+        }
+        let same = |q: &&&String| remote.sha(q) == Some(b.sha.as_str()) && doc_type_for(q) == doc_type_for(old);
+        let name = old.rsplit('/').next();
+        let hit = fresh.iter().find(|q| same(q) && q.rsplit('/').next() == name).or_else(|| fresh.iter().find(same)).copied();
+        if let Some(new) = hit {
+            fresh.retain(|q| *q != new);
+            renamed_remote.insert(new.clone(), old.clone());
+        }
+    }
+    let olds: HashSet<&String> = renamed_online.values().chain(renamed_remote.values()).collect();
+
     let paths: std::collections::BTreeSet<&String> = local.keys().chain(remote.files.keys()).collect();
+    let size = |p: &str| remote.files.get(p).map(|f| f.size).unwrap_or(0);
     paths
         .into_iter()
+        .filter(|p| !olds.contains(p))
         .filter_map(|path| {
+            if let Some(old) = renamed_online.get(path) {
+                let (l, r, b) = (local[path].sha.as_str(), remote.sha(old)?, base[old].sha.as_str());
+                let (change, detail) = if r == b || l == r {
+                    (Change::Push, "renamed online")
+                } else {
+                    (Change::Conflict, "renamed online, changed on GitHub")
+                };
+                return Some(Entry {
+                    path: path.clone(), change, op: Op::Edit, detail,
+                    local: Some(l.to_string()), remote: Some(r.to_string()), remote_size: size(old),
+                    renamed: Some((old.clone(), Side::Online)),
+                });
+            }
+            if let Some(old) = renamed_remote.get(path) {
+                let (l, r, b) = (local[old].sha.as_str(), remote.sha(path)?, base[old].sha.as_str());
+                // The content on GitHub is what the last sync had (an exact rename), so
+                // only the name comes across; edits made online stay, to be pushed after.
+                let detail = if l == b { "renamed on GitHub" } else { "renamed on GitHub, changed online" };
+                return Some(Entry {
+                    path: path.clone(), change: Change::Pull, op: Op::Edit, detail,
+                    local: Some(l.to_string()), remote: Some(r.to_string()), remote_size: size(path),
+                    renamed: Some((old.clone(), Side::GitHub)),
+                });
+            }
             let l = local.get(path).map(|f| f.sha.as_str());
-            let r = remote.files.get(path).map(|(s, _)| s.as_str());
-            let (change, detail) = classify(l, r, base.get(path).map(String::as_str))?;
+            let r = remote.sha(path);
+            let (change, op, detail) = classify(l, r, base.get(path).map(|b| b.sha.as_str()))?;
             Some(Entry {
-                path: path.clone(),
-                change,
-                detail,
-                local: l.map(str::to_string),
-                remote: r.map(str::to_string),
-                remote_size: remote.files.get(path).map(|(_, s)| *s).unwrap_or(0),
+                path: path.clone(), change, op, detail,
+                local: l.map(str::to_string), remote: r.map(str::to_string), remote_size: size(path),
+                renamed: None,
             })
         })
         .collect()
+}
+
+/// Renames on GitHub that also changed the file: a file deleted there and a new one of
+/// the same kind that is recognisably the same file (remote::similar) become one entry.
+async fn fuzzy_renames(state: &AppState, gh: &Gh, v: &mut View) -> AppResult<()> {
+    const MOST: usize = 6;
+    const LIMIT: u64 = 40 * 1024 * 1024;
+    let gone: Vec<usize> = v.entries.iter().enumerate()
+        .filter(|(_, e)| e.op == Op::Delete && e.remote.is_none() && e.local.is_some() && e.renamed.is_none())
+        .map(|(i, _)| i).take(MOST).collect();
+    let fresh: Vec<usize> = v.entries.iter().enumerate()
+        .filter(|(_, e)| e.change == Change::Pull && e.op == Op::Edit && e.local.is_none() && e.remote_size <= LIMIT)
+        .map(|(i, _)| i).take(MOST * 2).collect();
+    if gone.is_empty() || fresh.is_empty() {
+        return Ok(());
+    }
+    let mut pairs: Vec<(usize, usize)> = Vec::new();
+    let mut used: HashSet<usize> = HashSet::new();
+    let mut theirs: HashMap<usize, Vec<u8>> = HashMap::new();
+    for g in gone {
+        let old = &v.entries[g];
+        let kind = doc_type_for(&old.path);
+        if matches!(kind, "model3d" | "other") {
+            continue;
+        }
+        let Some(lf) = v.local.get(&old.path) else { continue };
+        let candidates: Vec<usize> = fresh.iter().copied()
+            .filter(|f| !used.contains(f) && doc_type_for(&v.entries[*f].path) == kind).collect();
+        if candidates.is_empty() {
+            continue;
+        }
+        let Some((_, ours)) = persist::latest_snapshot(&state.pool, lf.doc.id).await? else { continue };
+        for f in candidates {
+            if !theirs.contains_key(&f) {
+                let Some(bytes) = v.remote.blob(gh, &v.entries[f].path).await? else { continue };
+                theirs.insert(f, bytes);
+            }
+            if remote::similar(&ours, &theirs[&f]) {
+                used.insert(f);
+                pairs.push((g, f));
+                break;
+            }
+        }
+    }
+    let mut drop: Vec<usize> = Vec::new();
+    for (g, f) in pairs {
+        let old = v.entries[g].clone();
+        let new = &mut v.entries[f];
+        let untouched = v.base.get(&old.path).is_some_and(|b| Some(&b.sha) == old.local.as_ref());
+        new.local = old.local.clone();
+        new.renamed = Some((old.path.clone(), Side::GitHub));
+        (new.change, new.detail) = if untouched {
+            (Change::Pull, "renamed and changed on GitHub")
+        } else {
+            (Change::Conflict, "renamed on GitHub, changed on both sides")
+        };
+        drop.push(g);
+    }
+    drop.sort_unstable();
+    for g in drop.into_iter().rev() {
+        v.entries.remove(g);
+    }
+    Ok(())
+}
+
+/// The project is no longer where the link says it is.
+struct Missing {
+    /// "branch", "folder" or "project".
+    reason: &'static str,
+    message: String,
+    /// Folders of the branch that look like the project, when it is not clear which it moved to.
+    candidates: Vec<String>,
+}
+
+/// Both sides of a linked project, compared.
+struct View {
+    link: Link,
+    remote: Remote,
+    local: BTreeMap<String, LocalFile>,
+    base: HashMap<String, BaseRow>,
+    entries: Vec<Entry>,
+    missing: Option<Missing>,
+    /// The folder was found somewhere else and the link followed it: (from, to).
+    moved: Option<(String, String)>,
+}
+
+/// Whether what the last sync knew of the project is gone from GitHub: no files of the
+/// folder left, or its project file gone without another in its place.
+fn project_gone(remote: &Remote, base: &HashMap<String, BaseRow>) -> bool {
+    let own = |p: &&String| !p.starts_with("../");
+    if !base.keys().any(|p| own(&p)) {
+        return false;
+    }
+    if !remote.files.keys().any(|p| own(&p)) {
+        return true;
+    }
+    let is_pro = |p: &&String| p.ends_with(".kicad_pro") && !p.contains('/');
+    let had_pro = base.keys().any(|p| is_pro(&p));
+    had_pro && !remote.files.keys().any(|p| is_pro(&p))
+}
+
+/// Read both sides.  When the folder is gone, look for where it went: a single match
+/// is followed (the link moves with the folder, its history with it); otherwise the
+/// project is reported missing and nothing is compared — nothing is ever deleted
+/// online because a folder disappeared.
+async fn view(state: &AppState, gh: &Gh, id: Uuid, mut link: Link) -> AppResult<View> {
+    let base = load_base(state, id).await?;
+    let known: Vec<String> = base.keys().filter(|p| p.starts_with("../")).cloned().collect();
+    let mut remote = remote::read(&state.pool, gh, &link.repo, &link.branch, &link.subdir, &known).await?;
+    let mut missing = None;
+    let mut moved = None;
+    if project_gone(&remote, &base) {
+        let shas: HashMap<String, String> = base.iter().map(|(p, b)| (p.clone(), b.sha.clone())).collect();
+        let (mut candidates, clear) = match &remote.tree {
+            Some(tree) => remote::find_moved(gh, &link.repo, tree, &shas, &link.subdir).await?,
+            None => (Vec::new(), false),
+        };
+        if clear {
+            let to = candidates.remove(0);
+            sqlx::query("UPDATE project_github SET subdir = $2 WHERE project_id = $1")
+                .bind(id)
+                .bind(&to)
+                .execute(&state.pool)
+                .await?;
+            let from = std::mem::replace(&mut link.subdir, to.clone());
+            moved = Some((from, to));
+            remote = remote::read(&state.pool, gh, &link.repo, &link.branch, &link.subdir, &known).await?;
+        } else {
+            let at = if link.subdir.is_empty() { "the repository root".to_string() } else { link.subdir.clone() };
+            let (reason, what) = if remote.head.is_none() {
+                ("branch", format!("The branch {} is no longer on GitHub.", link.branch))
+            } else if !remote.folder_exists {
+                ("folder", format!("{at} is no longer in {} ({}).", link.repo.slug(), link.branch))
+            } else {
+                ("project", format!("The project is no longer in {at} of {} ({}).", link.repo.slug(), link.branch))
+            };
+            missing = Some(Missing {
+                reason,
+                message: format!("{what} Nothing online was changed, and syncing is paused until you choose what to do."),
+                candidates,
+            });
+        }
+    }
+    let local = local_files(state, id).await?;
+    let entries = if missing.is_some() { Vec::new() } else { compare(&local, &remote, &base) };
+    let mut v = View { link, remote, local, base, entries, missing, moved };
+    if v.missing.is_none() {
+        fuzzy_renames(state, gh, &mut v).await?;
+    }
+    Ok(v)
+}
+
+fn project_missing(m: &Missing) -> AppError {
+    api_err(StatusCode::CONFLICT, "project_missing", m.message.clone())
+}
+
+/// A file a pull is about to remove: keep its content so it can be put back.
+async fn keep_removed(state: &AppState, project_id: Uuid, user_id: i64, doc: &Document) -> AppResult<()> {
+    let Some((_, content)) = persist::latest_snapshot(&state.pool, doc.id).await? else { return Ok(()) };
+    sqlx::query(
+        "INSERT INTO project_github_removed (project_id, path, doc_type, content, removed_by) VALUES ($1, $2, $3, $4, $5)",
+    )
+    .bind(project_id)
+    .bind(&doc.path)
+    .bind(&doc.doc_type)
+    .bind(content)
+    .bind(user_id)
+    .execute(&state.pool)
+    .await?;
+    // Keep the most recent few dozen.
+    sqlx::query(
+        "DELETE FROM project_github_removed WHERE project_id = $1 AND id NOT IN
+           (SELECT id FROM project_github_removed WHERE project_id = $1 ORDER BY removed_at DESC, id DESC LIMIT 60)",
+    )
+    .bind(project_id)
+    .execute(&state.pool)
+    .await?;
+    Ok(())
 }
 
 // ------------------------------------------------------------------ access
@@ -865,7 +1127,31 @@ pub struct ScanQuery {
     pub branch: Option<String>,
 }
 
-/// Folders of a repository that hold a KiCad project, so one can be picked.
+/// The online projects the caller can open that are already linked to a folder of this branch.
+async fn linked_here(state: &AppState, user: &User, repo: &RepoRef, branch: &str) -> AppResult<HashMap<String, (Uuid, String)>> {
+    let rows = sqlx::query(
+        "SELECT g.project_id, g.subdir, p.name FROM project_github g JOIN projects p ON p.id = g.project_id
+         WHERE lower(g.repo_owner) = lower($1) AND lower(g.repo_name) = lower($2) AND g.branch = $3
+           AND p.deleted_at IS NULL ORDER BY g.created_at",
+    )
+    .bind(&repo.owner)
+    .bind(&repo.name)
+    .bind(branch)
+    .fetch_all(&state.pool)
+    .await?;
+    let mut out = HashMap::new();
+    for r in rows {
+        let pid: Uuid = r.get("project_id");
+        if persist::effective_role(&state.pool, user.id, pid).await?.is_some() {
+            out.entry(r.get::<String, _>("subdir")).or_insert((pid, r.get::<String, _>("name")));
+        }
+    }
+    Ok(out)
+}
+
+/// Folders of a repository that hold a KiCad project, so one or several can be picked.
+/// Every folder with a project file is listed, submodules included; each says what it
+/// shares with the others (a library outside its folder) and whether it is online already.
 pub async fn scan_repo(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -888,44 +1174,32 @@ pub async fn scan_repo(
         .filter_map(|b| b["name"].as_str().map(str::to_string))
         .collect();
 
-    let link = Link {
-        repo: repo.clone(),
-        branch: branch.clone(),
-        subdir: String::new(),
-        linked_by: None,
-        base_commit: None,
-        synced_at: None,
-        auto_push: false,
-        last_auto: None,
-    };
-    let remote = remote_files(&gh, &link).await?;
-
-    // A project is a folder with a .kicad_pro in it; its files are everything
-    // usable at or below that folder.
-    let mut folders: BTreeMap<String, String> = BTreeMap::new();
-    for path in remote.files.keys() {
-        if let Some(stem) = path.strip_suffix(".kicad_pro") {
-            let (dir, name) = match stem.rsplit_once('/') {
-                Some((d, n)) => (d.to_string(), n.to_string()),
-                None => (String::new(), stem.to_string()),
-            };
-            folders.entry(dir).or_insert(name);
-        }
-    }
-    // KiCad files but no project file anywhere: offer the root as it is.
-    if folders.is_empty() && !remote.files.is_empty() {
-        folders.insert(String::new(), repo.name.clone());
-    }
-    let projects: Vec<Value> = folders
+    let (remote, found) = remote::scan(&gh, &repo, &branch).await?;
+    let online = linked_here(&state, &user, &repo, &branch).await?;
+    let projects: Vec<Value> = found
         .iter()
-        .map(|(dir, name)| {
-            let prefix = if dir.is_empty() { String::new() } else { format!("{dir}/") };
-            let files = remote.files.keys().filter(|p| p.starts_with(&prefix)).count();
-            json!({ "path": dir, "name": name, "files": files })
+        .map(|f| {
+            let mut p = json!({ "path": f.path, "name": f.name, "files": f.files });
+            if f.project_files.len() > 1 {
+                p["projectFiles"] = json!(f.project_files);
+            }
+            if let Some(inside) = &f.inside {
+                p["inside"] = json!(inside);
+            }
+            if let Some(sub) = &f.submodule {
+                p["submodule"] = json!(sub);
+            }
+            if !f.shared.is_empty() {
+                p["shared"] = f.shared.iter().map(|(path, at, found)| json!({ "path": path, "repoPath": at, "found": found })).collect();
+            }
+            if let Some((pid, name)) = online.get(&f.path) {
+                p["online"] = json!({ "projectId": pid, "name": name });
+            }
+            p
         })
         .collect();
 
-    Ok(Json(json!({
+    let mut out = json!({
         "repo": repo.slug(),
         "private": info["private"].as_bool().unwrap_or(false),
         "canPush": info["permissions"]["push"].as_bool().unwrap_or(false),
@@ -935,8 +1209,11 @@ pub async fn scan_repo(
         "branches": branches,
         "projects": projects,
         "truncated": remote.truncated,
-    }))
-    .into_response())
+    });
+    if !remote.notes.is_empty() {
+        out["notes"] = json!(remote.notes);
+    }
+    Ok(Json(out).into_response())
 }
 
 // ------------------------------------------------------------------ import
@@ -947,10 +1224,94 @@ pub struct ImportRequest {
     pub branch: Option<String>,
     #[serde(default)]
     pub path: String,
+    /// Several folders at once, each becoming its own online project.
+    pub paths: Option<Vec<String>>,
     pub name: Option<String>,
+    /// Bring a folder online again although a project the caller can open is linked to it.
+    #[serde(default)]
+    pub duplicate: bool,
 }
 
-/// Create an online project from a repository folder, already linked and in sync.
+/// Download files of the GitHub side, a few at a time, in the order asked for.
+async fn fetch_files(gh: &Gh, remote: &Remote, paths: &[String]) -> Result<Vec<Vec<u8>>, GhErr> {
+    let mut out = Vec::with_capacity(paths.len());
+    for group in paths.chunks(6) {
+        let jobs = group.iter().map(|p| {
+            let f = &remote.files[p];
+            gh.blob(remote.repo_of(f), &f.sha)
+        });
+        out.extend(futures_util::future::try_join_all(jobs).await?);
+    }
+    Ok(out)
+}
+
+/// One repository folder brought online: a new project, linked and in sync.
+async fn import_one(
+    state: &AppState,
+    user: &User,
+    gh: &Gh,
+    repo: &RepoRef,
+    branch: &str,
+    subdir: &str,
+    name: Option<&str>,
+) -> AppResult<Value> {
+    let remote = remote::read(&state.pool, gh, repo, branch, subdir, &[]).await?;
+    let head = remote.head.clone().ok_or_else(|| {
+        AppError::BadRequest(format!("{} has no branch named {branch}.", repo.slug()))
+    })?;
+    if remote.files.is_empty() {
+        // A folder that is a submodule Junction cannot open says so itself.
+        let why = remote.notes.first().and_then(|n| n["message"].as_str()).map(str::to_string);
+        return Err(AppError::BadRequest(why.unwrap_or_else(|| "There are no KiCad files in that folder.".into())));
+    }
+    if remote.files.len() > MAX_FILES {
+        return Err(AppError::BadRequest(format!(
+            "That project has too many files with the libraries it shares ({}, max {MAX_FILES}).",
+            remote.files.len()
+        )));
+    }
+    let total: u64 = remote.files.values().map(|f| f.size).sum();
+    if total > MAX_TOTAL_BYTES || remote.files.values().any(|f| f.size > MAX_FILE_BYTES) {
+        return Err(AppError::BadRequest("That project is too large to bring online.".into()));
+    }
+
+    // Download everything before creating anything, so a failure leaves no half project.
+    let paths: Vec<String> = remote.files.keys().cloned().collect();
+    let contents = fetch_files(gh, &remote, &paths).await?;
+
+    let folder = subdir.rsplit('/').next().filter(|s| !s.is_empty());
+    let pros: Vec<&str> = paths.iter().filter(|p| !p.contains('/')).filter_map(|p| p.strip_suffix(".kicad_pro")).collect();
+    let name = name
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .map(str::to_string)
+        // the project file named like its folder, else the first one, else the folder
+        .or_else(|| pros.iter().find(|p| Some(**p) == folder).or(pros.first()).map(|p| p.to_string()))
+        .unwrap_or_else(|| folder.unwrap_or(&repo.name).to_string());
+
+    let project = persist::create_project(&state.pool, user.id, &name).await?;
+    let mut agreed = Vec::new();
+    for (path, content) in paths.iter().zip(&contents) {
+        let doc = persist::create_document(&state.pool, project.id, path, doc_type_for(path)).await?;
+        persist::insert_snapshot(&state.pool, doc.id, 0, content, None, Some(user.id)).await?;
+        agreed.push((path.clone(), remote.files[path].sha.clone(), Some(doc.id)));
+    }
+    save_link(state, project.id, repo, branch, subdir, user.id).await?;
+    save_base(state, project.id, &agreed, Some(&head)).await?;
+
+    let mut out = json!({ "projectId": project.id, "name": project.name, "files": contents.len(), "path": subdir });
+    let shared = paths.iter().filter(|p| p.starts_with("../")).count();
+    if shared > 0 {
+        out["shared"] = json!(shared);
+    }
+    if !remote.notes.is_empty() {
+        out["notes"] = json!(remote.notes);
+    }
+    Ok(out)
+}
+
+/// Create online projects from repository folders, already linked and in sync.  With
+/// `paths`, one project per folder; a folder that fails does not stop the others.
 pub async fn import_project(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
@@ -958,7 +1319,6 @@ pub async fn import_project(
 ) -> AppResult<Response> {
     let gh = Gh::for_user(&state, &user).await?;
     let repo = RepoRef::parse(&req.repo)?;
-    let subdir = clean_subdir(&req.path)?;
     let branch = match req.branch.as_deref().map(str::trim).filter(|b| !b.is_empty()) {
         Some(b) => clean_branch(b)?,
         None => gh.get(&format!("/repos/{}", repo.slug())).await?["default_branch"]
@@ -966,57 +1326,42 @@ pub async fn import_project(
             .unwrap_or("main")
             .to_string(),
     };
-    let link = Link { repo: repo.clone(), branch: branch.clone(), subdir: subdir.clone(), linked_by: None, base_commit: None, synced_at: None, auto_push: false, last_auto: None };
-    let remote = remote_files(&gh, &link).await?;
-    let head = remote.head.clone().ok_or_else(|| {
-        AppError::BadRequest(format!("{} has no branch named {branch}.", repo.slug()))
-    })?;
-    if remote.files.is_empty() {
-        return Err(AppError::BadRequest("There are no KiCad files in that folder.".into()));
-    }
-    if remote.files.len() > MAX_FILES {
-        return Err(AppError::BadRequest(format!("That folder has too many files (max {MAX_FILES}).")));
-    }
-    let total: u64 = remote.files.values().map(|(_, s)| *s).sum();
-    if total > MAX_TOTAL_BYTES || remote.files.values().any(|(_, s)| *s > MAX_FILE_BYTES) {
-        return Err(AppError::BadRequest("That project is too large to bring online.".into()));
-    }
+    let online = linked_here(&state, &user, &repo, &branch).await?;
+    let already = |subdir: &str| -> Option<&(Uuid, String)> { if req.duplicate { None } else { online.get(subdir) } };
 
-    // Download everything before creating anything, so a failure leaves no half project.
-    let shas: Vec<String> = remote.files.values().map(|(sha, _)| sha.clone()).collect();
-    let contents: Vec<(String, String, Vec<u8>)> = remote
-        .files
-        .keys()
-        .cloned()
-        .zip(shas.iter().cloned())
-        .zip(gh.blobs(&repo, &shas).await?)
-        .map(|((path, sha), bytes)| (path, sha, bytes))
-        .collect();
+    let Some(paths) = &req.paths else {
+        let subdir = clean_subdir(&req.path)?;
+        if let Some((_, name)) = already(&subdir) {
+            return Err(api_err(
+                StatusCode::CONFLICT,
+                "already_online",
+                format!("That folder is already online as \"{name}\". Open that project instead of making a second copy."),
+            ));
+        }
+        let out = import_one(&state, &user, &gh, &repo, &branch, &subdir, req.name.as_deref()).await?;
+        return Ok(Json(out).into_response());
+    };
 
-    let name = req
-        .name
-        .as_deref()
-        .map(str::trim)
-        .filter(|n| !n.is_empty())
-        .map(str::to_string)
-        .or_else(|| {
-            remote.files.keys().find(|p| p.ends_with(".kicad_pro") && !p.contains('/')).map(|p| {
-                p.trim_end_matches(".kicad_pro").to_string()
-            })
-        })
-        .unwrap_or_else(|| subdir.rsplit('/').next().filter(|s| !s.is_empty()).unwrap_or(&repo.name).to_string());
-
-    let project = persist::create_project(&state.pool, user.id, &name).await?;
-    let mut agreed = Vec::new();
-    for (path, sha, content) in &contents {
-        let doc = persist::create_document(&state.pool, project.id, path, doc_type_for(path)).await?;
-        persist::insert_snapshot(&state.pool, doc.id, 0, content, None, Some(user.id)).await?;
-        agreed.push((path.clone(), sha.clone()));
+    if paths.is_empty() || paths.len() > 40 {
+        return Err(AppError::BadRequest("Choose between 1 and 40 projects.".into()));
     }
-    save_link(&state, project.id, &repo, &branch, &subdir, user.id).await?;
-    save_base(&state, project.id, &agreed, Some(&head)).await?;
-
-    Ok(Json(json!({ "projectId": project.id, "name": project.name, "files": contents.len() })).into_response())
+    let mut seen = HashSet::new();
+    let mut results = Vec::new();
+    for raw in paths {
+        let subdir = clean_subdir(raw)?;
+        if !seen.insert(subdir.clone()) {
+            continue;
+        }
+        if let Some((pid, name)) = already(&subdir) {
+            results.push(json!({ "path": subdir, "projectId": pid, "name": name, "existing": true }));
+            continue;
+        }
+        match import_one(&state, &user, &gh, &repo, &branch, &subdir, None).await {
+            Ok(v) => results.push(v),
+            Err(e) => results.push(json!({ "path": subdir, "error": e.to_string() })),
+        }
+    }
+    Ok(Json(json!({ "projects": results })).into_response())
 }
 
 // ------------------------------------------------------------------ link / unlink
@@ -1152,7 +1497,7 @@ pub async fn project_status(
         },
         "link": Value::Null,
     });
-    let Some(link) = load_link(&state, id).await? else {
+    let Some(mut link) = load_link(&state, id).await? else {
         return Ok(Json(out).into_response());
     };
     out["link"] = link_json(&state, &link);
@@ -1170,24 +1515,45 @@ pub async fn project_status(
         }
         Err(e) => return Err(e.into()),
     };
-    let remote = remote_files(&gh, &link).await?;
-    let local = local_files(&state, id).await?;
-    let base = load_base(&state, id).await?;
-    let entries = compare(&local, &remote, &base);
+    // A repository renamed or moved to another owner still answers under its old name;
+    // the link takes the new one.
+    if let Some(now) = info["full_name"].as_str().and_then(|n| RepoRef::parse(n).ok()) {
+        if !now.slug().eq_ignore_ascii_case(&link.repo.slug()) {
+            sqlx::query("UPDATE project_github SET repo_owner = $2, repo_name = $3 WHERE project_id = $1")
+                .bind(id)
+                .bind(&now.owner)
+                .bind(&now.name)
+                .execute(&state.pool)
+                .await?;
+            out["renamedRepo"] = json!({ "from": link.repo.slug(), "to": now.slug() });
+            link.repo = now;
+        }
+    }
+    let v = view(&state, &gh, id, link).await?;
+    out["link"] = link_json(&state, &v.link);
+    let (link, remote, local, base, entries) = (&v.link, &v.remote, &v.local, &v.base, &v.entries);
 
     // Files that are identical right now are a common ancestor whether or not a
     // push or pull ever recorded one (a project linked to a repository that already
     // held the same files).  Remember it, or the next edit on one side would look
     // like "differs, never synced" instead of a plain change.
-    let newly_agreed: Vec<(String, String)> = entries
+    let newly_agreed: Vec<Agreed> = entries
         .iter()
         .filter(|e| e.change == Change::Synced)
-        .filter_map(|e| e.local.clone().map(|s| (e.path.clone(), s)))
-        .filter(|(p, s)| base.get(p) != Some(s))
+        .filter_map(|e| e.local.clone().map(|s| (e.path.clone(), s, local.get(&e.path).map(|f| f.doc.id))))
+        .filter(|(p, s, d)| base.get(p).is_none_or(|b| b.sha != *s || (b.doc_id.is_none() && d.is_some())))
         .collect();
     if !newly_agreed.is_empty() {
         save_base(&state, id, &newly_agreed, None).await?;
     }
+    // What the last sync knew and neither side has any more is forgotten.
+    let stale: Vec<String> = if v.missing.is_some() {
+        Vec::new()
+    } else {
+        let live: HashSet<&str> = entries.iter().flat_map(|e| [e.path.as_str(), e.base_path()]).collect();
+        base.keys().filter(|p| !live.contains(p.as_str())).cloned().collect()
+    };
+    drop_base(&state, id, &stale).await?;
 
     let commits: Vec<Value> = match &remote.head {
         Some(_) => {
@@ -1219,8 +1585,8 @@ pub async fn project_status(
     let files: Vec<Value> = entries
         .iter()
         .map(|e| {
-            let l = local.get(&e.path);
-            json!({
+            let l = local.get(e.local_path());
+            let mut f = json!({
                 "path": e.path,
                 "state": e.change.as_str(),
                 "detail": e.detail,
@@ -1229,7 +1595,22 @@ pub async fn project_status(
                 "size": l.map(|f| f.size as u64).unwrap_or(e.remote_size),
                 "unsavedOps": l.map(|f| f.unsaved_ops).unwrap_or(0),
                 "mergeable": merge::mergeable(doc_type_for(&e.path)),
-            })
+            });
+            if e.op == Op::Delete {
+                f["deleted"] = json!(if e.local.is_none() { "online" } else { "github" });
+            }
+            if let Some((old, side)) = &e.renamed {
+                f["renamedFrom"] = json!(old);
+                f["renamedOn"] = json!(if *side == Side::Online { "online" } else { "github" });
+            }
+            if e.path.starts_with("../") {
+                f["shared"] = json!(true);
+            }
+            // The repository the file is in, when that is a submodule.
+            if let Some((src, _)) = remote.place(&link.subdir, e.remote_path()).filter(|(s, _)| *s != 0) {
+                f["submodule"] = json!(remote.sources[src].repo.slug());
+            }
+            f
         })
         .collect();
 
@@ -1249,7 +1630,104 @@ pub async fn project_status(
         "conflict": count(Change::Conflict), "synced": count(Change::Synced),
         "unsaved": local.values().filter(|f| f.unsaved_ops > 0).count(),
     });
+    if !remote.notes.is_empty() {
+        out["notes"] = json!(remote.notes);
+    }
+    if !remote.nested.is_empty() {
+        out["nested"] = json!(remote.nested);
+    }
+    let subs: Vec<Value> = remote.sources.iter().skip(1)
+        .map(|s| json!({ "path": s.mount, "repo": s.repo.slug(), "commit": s.commit, "branch": s.branch }))
+        .collect();
+    if !subs.is_empty() {
+        out["submodules"] = json!(subs);
+    }
+    if let Some(m) = &v.missing {
+        out["missing"] = json!({ "reason": m.reason, "message": m.message, "candidates": m.candidates });
+    }
+    if let Some((from, to)) = &v.moved {
+        out["moved"] = json!({ "from": from, "to": to });
+    }
+    let removed = sqlx::query(
+        "SELECT r.id, r.path, r.removed_at, octet_length(r.content) AS size, u.login
+         FROM project_github_removed r LEFT JOIN users u ON u.id = r.removed_by
+         WHERE r.project_id = $1 ORDER BY r.removed_at DESC, r.id DESC LIMIT 60",
+    )
+    .bind(id)
+    .fetch_all(&state.pool)
+    .await?;
+    if !removed.is_empty() {
+        out["removed"] = removed
+            .iter()
+            .map(|r| {
+                json!({
+                    "id": r.get::<i64, _>("id"), "path": r.get::<String, _>("path"),
+                    "at": r.get::<chrono::DateTime<chrono::Utc>, _>("removed_at").to_rfc3339(),
+                    "size": r.get::<Option<i32>, _>("size"), "by": r.get::<Option<String>, _>("login"),
+                })
+            })
+            .collect();
+    }
     Ok(Json(out).into_response())
+}
+
+#[derive(Deserialize)]
+pub struct RelocateRequest {
+    pub path: String,
+}
+
+/// Point the link at the folder the project moved to.  Unlike linking afresh, what
+/// the last sync recorded is kept: the files are the same files in a new place.
+pub async fn relocate(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Path(id): Path<Uuid>,
+    LenientJson(req): LenientJson<RelocateRequest>,
+) -> AppResult<Response> {
+    let a = access(&state, &user, id).await?;
+    require_editor(&a)?;
+    let subdir = clean_subdir(&req.path)?;
+    let done = sqlx::query("UPDATE project_github SET subdir = $2 WHERE project_id = $1")
+        .bind(id)
+        .bind(&subdir)
+        .execute(&state.pool)
+        .await?;
+    if done.rows_affected() == 0 {
+        return Err(AppError::BadRequest("This project is not linked to a repository.".into()));
+    }
+    Ok(Json(json!({ "ok": true, "path": subdir })).into_response())
+}
+
+#[derive(Deserialize)]
+pub struct RestoreFileRequest {
+    pub id: i64,
+}
+
+/// Put back a file a pull removed.  It returns as a file that is new online, so the
+/// next push adds it to GitHub again.
+pub async fn restore_file(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    Path(id): Path<Uuid>,
+    LenientJson(req): LenientJson<RestoreFileRequest>,
+) -> AppResult<Response> {
+    let a = access(&state, &user, id).await?;
+    require_editor(&a)?;
+    let row = sqlx::query("SELECT path, doc_type, content FROM project_github_removed WHERE id = $1 AND project_id = $2")
+        .bind(req.id)
+        .bind(id)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let (path, doc_type, content): (String, String, Vec<u8>) = (row.get("path"), row.get("doc_type"), row.get("content"));
+    if persist::project_documents(&state.pool, id).await?.iter().any(|d| d.path.eq_ignore_ascii_case(&path)) {
+        return Err(AppError::BadRequest(format!("The project has a file at {path} again. Rename or remove it first.")));
+    }
+    let doc = persist::create_document(&state.pool, id, &path, &doc_type).await?;
+    persist::insert_snapshot(&state.pool, doc.id, 0, &content, None, Some(user.id)).await?;
+    drop_base(&state, id, std::slice::from_ref(&path)).await?;
+    sqlx::query("DELETE FROM project_github_removed WHERE id = $1").bind(req.id).execute(&state.pool).await?;
+    Ok(Json(json!({ "ok": true, "path": path, "docId": doc.id })).into_response())
 }
 
 // ------------------------------------------------------------------ what changed inside a file
@@ -1289,24 +1767,34 @@ pub async fn file_diff(
     access(&state, &user, id).await?;
     let link = load_link(&state, id).await?.ok_or_else(|| AppError::BadRequest("This project is not linked to a repository.".into()))?;
     let gh = Gh::for_user(&state, &user).await?;
-    let path = safe_zip_name(&q.path).ok_or_else(|| AppError::BadRequest("bad path".into()))?;
+    let path = remote::sync_path(&q.path).ok_or_else(|| AppError::BadRequest("bad path".into()))?;
 
-    let remote = remote_files(&gh, &link).await?;
-    let local = match persist::project_documents(&state.pool, id).await?.into_iter().find(|d| d.path == path) {
-        Some(doc) => persist::latest_snapshot(&state.pool, doc.id).await?.map(|(_, c)| c),
+    let v = view(&state, &gh, id, link).await?;
+    // A renamed file is one file: its two sides are compared under their own names.
+    let entry = v.entries.iter().find(|e| e.path == path);
+    let (local_path, remote_path, base_path) = match entry {
+        Some(e) => (e.local_path().to_string(), e.remote_path().to_string(), e.base_path().to_string()),
+        None => (path.clone(), path.clone(), path.clone()),
+    };
+    let remote = &v.remote;
+    let local = match v.local.get(&local_path) {
+        Some(lf) => persist::latest_snapshot(&state.pool, lf.doc.id).await?.map(|(_, c)| c),
         None => None,
     };
-    let theirs = match remote.files.get(&path) {
-        Some((sha, size)) if *size <= MAX_FILE_BYTES => Some(gh.blob(&link.repo, sha).await?),
+    let theirs = match remote.files.get(&remote_path) {
+        Some(f) if f.size <= MAX_FILE_BYTES => remote.blob(&gh, &remote_path).await?,
         _ => None,
     };
     if local.is_none() && theirs.is_none() {
         return Err(AppError::NotFound);
     }
-    let base = match load_base(&state, id).await?.get(&path) {
+    let base = match v.base.get(&base_path) {
         // GitHub has not moved: the base is the copy just downloaded.
-        Some(sha) if remote.files.get(&path).is_some_and(|(r, _)| r == sha) => theirs.clone(),
-        Some(sha) => gh.blob(&link.repo, sha).await.ok(),
+        Some(b) if remote.sha(&remote_path) == Some(b.sha.as_str()) => theirs.clone(),
+        Some(b) => {
+            let repo = remote.place(&v.link.subdir, &remote_path).map(|(s, _)| remote.sources[s].repo.clone()).unwrap_or_else(|| v.link.repo.clone());
+            gh.blob(&repo, &b.sha).await.ok()
+        }
         None => None,
     };
 
@@ -1344,16 +1832,20 @@ pub async fn file_commits(
     access(&state, &user, id).await?;
     let link = load_link(&state, id).await?.ok_or_else(|| AppError::BadRequest("This project is not linked to a repository.".into()))?;
     let gh = Gh::for_user(&state, &user).await?;
-    let path = safe_zip_name(&q.path).ok_or_else(|| AppError::BadRequest("bad path".into()))?;
+    let path = remote::sync_path(&q.path).ok_or_else(|| AppError::BadRequest("bad path".into()))?;
     let limit = q.limit.unwrap_or(30).clamp(1, 100);
 
+    // The file's own repository: the linked one, or the submodule it is in (whose
+    // history is followed from the commit the submodule is pinned to).
+    let known: Vec<String> = load_base(&state, id).await?.into_keys().collect();
+    let remote = remote::read(&state.pool, &gh, &link.repo, &link.branch, &link.subdir, &known).await?;
+    let (src, at) = remote.place(&link.subdir, &path).ok_or(AppError::NotFound)?;
+    let (repo, from) = match remote.sources.get(src) {
+        Some(s) if src != 0 => (s.repo.clone(), s.commit.clone()),
+        _ => (link.repo.clone(), link.branch.clone()),
+    };
     let list = match gh
-        .get(&format!(
-            "/repos/{}/commits?sha={}&path={}&per_page={limit}",
-            link.repo.slug(),
-            enc(&link.branch),
-            enc(&link.repo_path(&path)),
-        ))
+        .get(&format!("/repos/{}/commits?sha={}&path={}&per_page={limit}", repo.slug(), enc(&from), enc(&at)))
         .await
     {
         Ok(v) => v,
@@ -1381,7 +1873,7 @@ pub async fn file_commits(
 
     Ok(Json(json!({
         "path": path,
-        "repo": link.repo.slug(),
+        "repo": repo.slug(),
         "branch": link.branch,
         "commits": commits,
     }))
@@ -1405,19 +1897,23 @@ pub async fn file_at_commit(
     access(&state, &user, id).await?;
     let link = load_link(&state, id).await?.ok_or_else(|| AppError::BadRequest("This project is not linked to a repository.".into()))?;
     let gh = Gh::for_user(&state, &user).await?;
-    let path = safe_zip_name(&q.path).ok_or_else(|| AppError::BadRequest("bad path".into()))?;
+    let path = remote::sync_path(&q.path).ok_or_else(|| AppError::BadRequest("bad path".into()))?;
     if q.sha.len() < 7 || q.sha.len() > 64 || !q.sha.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err(AppError::BadRequest("bad commit id".into()));
     }
 
-    let tree = gh.commit_tree(&link.repo, &q.sha).await?;
-    let repo_path = link.repo_path(&path);
+    // The commit is one of the file's own repository (file_commits): a submodule's for a file in one.
+    let known: Vec<String> = load_base(&state, id).await?.into_keys().collect();
+    let remote = remote::read(&state.pool, &gh, &link.repo, &link.branch, &link.subdir, &known).await?;
+    let (src, repo_path) = remote.place(&link.subdir, &path).ok_or(AppError::NotFound)?;
+    let repo = remote.sources.get(src).map(|s| s.repo.clone()).unwrap_or_else(|| link.repo.clone());
+    let tree = gh.commit_tree(&repo, &q.sha).await?;
     let (dir, name) = match repo_path.rsplit_once('/') {
         Some((d, n)) => (d, n),
         None => ("", repo_path.as_str()),
     };
-    let folder = gh.subtree(&link.repo, &tree, dir).await?.ok_or(AppError::NotFound)?;
-    let listing = gh.get(&format!("/repos/{}/git/trees/{folder}", link.repo.slug())).await?;
+    let folder = gh.subtree(&repo, &tree, dir).await?.ok_or(AppError::NotFound)?;
+    let listing = gh.get(&format!("/repos/{}/git/trees/{folder}", repo.slug())).await?;
     let entry = listing["tree"]
         .as_array()
         .into_iter()
@@ -1428,7 +1924,7 @@ pub async fn file_at_commit(
         return Err(AppError::BadRequest("That file is too large to compare.".into()));
     }
     let sha = entry["sha"].as_str().ok_or(AppError::NotFound)?;
-    let content = gh.blob(&link.repo, sha).await?;
+    let content = gh.blob(&repo, sha).await?;
 
     Ok(([(axum::http::header::CONTENT_TYPE, "application/octet-stream")], content).into_response())
 }
@@ -1446,6 +1942,9 @@ pub struct PushRequest {
     /// Commit to a new branch and open a pull request instead of committing to the linked branch.
     #[serde(default, rename = "pullRequest")]
     pub pull_request: bool,
+    /// The project is gone from GitHub (its folder or branch was deleted): put it back.
+    #[serde(default)]
+    pub restore: bool,
 }
 
 pub async fn push(
@@ -1485,8 +1984,9 @@ pub async fn settings(
 
 /// Called when a checkpoint is saved: if the project asks for it, push what
 /// changed to GitHub in the background, as the person who saved the checkpoint.
-/// Files changed on both sides are left for the sync page.  Returns whether a
-/// push was started.
+/// Files changed on both sides are left for the sync page, and so is a project
+/// whose folder is gone from GitHub (it is never put back unasked).  Returns
+/// whether a push was started.
 pub async fn push_on_checkpoint(state: &AppState, user: &User, project_id: Uuid, checkpoint: &str) -> bool {
     match load_link(state, project_id).await {
         Ok(Some(link)) if link.auto_push => {}
@@ -1496,14 +1996,14 @@ pub async fn push_on_checkpoint(state: &AppState, user: &User, project_id: Uuid,
     tokio::spawn(async move {
         let req = PushRequest { message: Some(format!("Checkpoint: {name}")), ..Default::default() };
         let mut report = match push_as(&state, &user, project_id, req).await {
-            Ok(v) => json!({
-                "ok": true,
-                "message": match v["pushed"].as_array().map_or(0, Vec::len) {
-                    1 => "Pushed 1 file".to_string(),
-                    n => format!("Pushed {n} files"),
-                },
-                "commit": v["commit"], "commitUrl": v["commitUrl"],
-            }),
+            Ok(v) => {
+                let n = v["pushed"].as_array().map_or(0, Vec::len) + v["deleted"].as_array().map_or(0, Vec::len);
+                let mut message = if n == 1 { "Pushed 1 file".to_string() } else { format!("Pushed {n} files") };
+                if let Some(b) = v["blocked"].as_array().filter(|b| !b.is_empty()) {
+                    message.push_str(&format!("; {} held back: {}", b.len(), b[0]["reason"].as_str().unwrap_or("")));
+                }
+                json!({ "ok": true, "message": message, "commit": v["commit"], "commitUrl": v["commitUrl"] })
+            }
             Err(AppError::Api(_, "nothing_to_push", _)) => json!({ "ok": true, "message": "Nothing had changed" }),
             Err(e) => json!({ "ok": false, "message": e.to_string() }),
         };
@@ -1522,19 +2022,81 @@ pub async fn push_on_checkpoint(state: &AppState, user: &User, project_id: Uuid,
     true
 }
 
+/// One file of a push: written (with its content) or removed, at a path of one repository.
+struct PushItem {
+    doc_path: String,
+    repo_path: String,
+    /// Blob id and bytes to write; None removes the file.
+    content: Option<(String, Vec<u8>)>,
+}
+
+/// Upload the blobs of `items` to `repo` and build a tree on top of `base_tree`.
+async fn build_tree(gh: &Gh, repo: &RepoRef, base_tree: &str, items: &[&PushItem], extra: &[Value]) -> AppResult<String> {
+    let mut tree_items: Vec<Value> = extra.to_vec();
+    for it in items {
+        match &it.content {
+            Some((sha, content)) => {
+                let v = gh
+                    .post(
+                        &format!("/repos/{}/git/blobs", repo.slug()),
+                        json!({ "content": B64.encode(content), "encoding": "base64" }),
+                    )
+                    .await?;
+                if v["sha"].as_str() != Some(sha.as_str()) {
+                    return Err(anyhow::anyhow!("github stored {} under an unexpected blob id", it.doc_path).into());
+                }
+                tree_items.push(json!({ "path": it.repo_path, "mode": "100644", "type": "blob", "sha": sha }));
+            }
+            None => tree_items.push(json!({ "path": it.repo_path, "mode": "100644", "type": "blob", "sha": Value::Null })),
+        }
+    }
+    let tree = gh
+        .post(&format!("/repos/{}/git/trees", repo.slug()), json!({ "base_tree": base_tree, "tree": tree_items }))
+        .await?;
+    tree["sha"].as_str().map(str::to_string).ok_or_else(|| anyhow::anyhow!("github returned no tree").into())
+}
+
+async fn build_commit(gh: &Gh, repo: &RepoRef, tree: &str, parent: &str, message: &str) -> AppResult<(String, Value)> {
+    let commit = gh
+        .post(
+            &format!("/repos/{}/git/commits", repo.slug()),
+            json!({ "message": message, "tree": tree, "parents": [parent] }),
+        )
+        .await?;
+    Ok((commit["sha"].as_str().unwrap_or("").to_string(), commit["html_url"].clone()))
+}
+
+fn remote_moved(e: GhErr) -> AppError {
+    match e.status {
+        422 | 409 => api_err(
+            StatusCode::CONFLICT,
+            "remote_moved",
+            "The branch changed on GitHub while pushing. Refresh and try again.",
+        ),
+        _ => e.into(),
+    }
+}
+
 async fn push_as(state: &AppState, user: &User, id: Uuid, req: PushRequest) -> AppResult<Value> {
     let (state, user) = (state.clone(), user.clone());
     let a = access(&state, &user, id).await?;
     require_editor(&a)?;
     let link = load_link(&state, id).await?.ok_or_else(|| AppError::BadRequest("This project is not linked to a repository.".into()))?;
     let gh = Gh::for_user(&state, &user).await?;
-    let repo = &link.repo;
 
     freshen(&state, id).await?;
-    let remote = remote_files(&gh, &link).await?;
-    let local = local_files(&state, id).await?;
-    let base = load_base(&state, id).await?;
-    let entries = compare(&local, &remote, &base);
+    let mut v = view(&state, &gh, id, link).await?;
+    if let Some(m) = &v.missing {
+        if !req.restore {
+            return Err(project_missing(m));
+        }
+        // Putting the project back: forget what the last sync knew, so every file is
+        // simply new online.
+        sqlx::query("DELETE FROM project_github_files WHERE project_id = $1").bind(id).execute(&state.pool).await?;
+        v = view(&state, &gh, id, v.link).await?;
+    }
+    let (link, remote, local, entries) = (&v.link, &v.remote, &v.local, &v.entries);
+    let repo = &link.repo;
 
     let overwrite: HashSet<&str> = req.overwrite.iter().map(String::as_str).collect();
     let only: Option<HashSet<&str>> = req.paths.as_ref().map(|p| p.iter().map(String::as_str).collect());
@@ -1551,15 +2113,82 @@ async fn push_as(state: &AppState, user: &User, id: Uuid, req: PushRequest) -> A
         return Err(api_err(StatusCode::CONFLICT, "nothing_to_push", "There is nothing to push."));
     }
 
-    // Read the files to commit.  The blob id must still be the one compared above:
-    // a snapshot landing in between would otherwise be recorded as synced unseen.
-    let mut files: Vec<(String, String, Vec<u8>)> = Vec::new();
+    // What goes where.  The blob id of a file to write must still be the one compared
+    // above: a snapshot landing in between would otherwise be recorded as synced unseen.
+    let mut blocked: Vec<Value> = Vec::new();
+    let mut per_src: BTreeMap<usize, Vec<PushItem>> = BTreeMap::new();
     for e in &targets {
-        let lf = &local[&e.path];
-        let (_, content) = persist::latest_snapshot(&state.pool, lf.doc.id)
-            .await?
-            .ok_or(AppError::NotFound)?;
-        files.push((e.path.clone(), blob_sha(&content), content));
+        let outside = |blocked: &mut Vec<Value>| {
+            blocked.push(json!({ "path": e.path, "reason": format!("{} is outside the repository.", e.path) }));
+        };
+        match local.get(&e.path) {
+            Some(lf) => {
+                let Some((src, at)) = remote.place(&link.subdir, &e.path) else {
+                    outside(&mut blocked);
+                    continue;
+                };
+                let (_, content) = persist::latest_snapshot(&state.pool, lf.doc.id).await?.ok_or(AppError::NotFound)?;
+                per_src.entry(src).or_default().push(PushItem { doc_path: e.path.clone(), repo_path: at, content: Some((blob_sha(&content), content)) });
+                // Renamed online: the old name goes in the same commit.
+                if let Some((old, Side::Online)) = &e.renamed {
+                    if let Some(f) = remote.files.get(old) {
+                        per_src.entry(f.src).or_default().push(PushItem { doc_path: old.clone(), repo_path: f.path.clone(), content: None });
+                    }
+                }
+            }
+            // Deleted online.
+            None => {
+                let Some(f) = remote.files.get(&e.path) else { continue };
+                per_src.entry(f.src).or_default().push(PushItem { doc_path: e.path.clone(), repo_path: f.path.clone(), content: None });
+            }
+        }
+    }
+
+    // Files inside a submodule are committed to the submodule's own repository, on the
+    // branch it follows, and the linked repository is moved to that commit — but only
+    // where that is plainly safe; otherwise those files are held back and say why.
+    let mut sub_plans: Vec<(usize, String)> = Vec::new(); // (source, branch)
+    for src in per_src.keys().copied().filter(|s| *s != 0).collect::<Vec<_>>() {
+        let s = &remote.sources[src];
+        let slug = s.repo.slug();
+        let reason: Option<String> = if req.pull_request {
+            Some(format!("{} is a submodule ({slug}); its files can't go into a pull request of {}. Push normally.", s.mount, repo.slug()))
+        } else if s.parent.as_ref().is_none_or(|(p, _)| *p != 0) {
+            Some(format!("{} is a submodule inside another submodule. Push it from a project linked to {slug} itself.", s.mount))
+        } else {
+            match gh.get(&format!("/repos/{slug}")).await {
+                Err(_) => Some(format!("{} is a submodule ({slug}) that your GitHub connection cannot read.", s.mount)),
+                Ok(info) if !info["permissions"]["push"].as_bool().unwrap_or(false) => Some(format!(
+                    "{} is a submodule ({slug}), and you can't write to that repository{}.",
+                    s.mount,
+                    if gh.kind == "app" { " (it may need adding to Junction's repositories)" } else { "" }
+                )),
+                Ok(info) => {
+                    let branch = s.branch.clone().unwrap_or_else(|| info["default_branch"].as_str().unwrap_or("main").to_string());
+                    match gh.branch_head(&s.repo, &branch).await? {
+                        Some(head) if head == s.commit => {
+                            sub_plans.push((src, branch));
+                            None
+                        }
+                        Some(_) => Some(format!(
+                            "{} is a submodule pinned to a commit that is not the tip of {slug}'s branch {branch}. \
+                             Update the submodule in {} first, then pull and push.",
+                            s.mount, repo.slug()
+                        )),
+                        None => Some(format!("{} is a submodule of {slug}, which has no branch {branch}.", s.mount)),
+                    }
+                }
+            }
+        };
+        if let Some(reason) = reason {
+            for it in per_src.remove(&src).unwrap_or_default() {
+                blocked.push(json!({ "path": it.doc_path, "reason": reason }));
+            }
+        }
+    }
+    if per_src.is_empty() {
+        let why = blocked.first().and_then(|b| b["reason"].as_str()).unwrap_or("Nothing could be pushed.").to_string();
+        return Err(api_err(StatusCode::CONFLICT, "push_blocked", why));
     }
 
     let message = req
@@ -1577,6 +2206,30 @@ async fn push_as(state: &AppState, user: &User, id: Uuid, req: PushRequest) -> A
         )));
     }
 
+    // The submodules first: each gets a commit on its branch.  The linked repository's
+    // commit then points at them.
+    let mut gitlinks: Vec<Value> = Vec::new();
+    let mut sub_reports: Vec<Value> = Vec::new();
+    for (src, branch) in &sub_plans {
+        let s = &remote.sources[*src];
+        let items: Vec<&PushItem> = per_src[src].iter().collect();
+        let tree = build_tree(&gh, &s.repo, &s.tree, &items, &[]).await?;
+        let (sha, url) = build_commit(&gh, &s.repo, &tree, &s.commit, &message).await?;
+        gh.call(
+            reqwest::Method::PATCH,
+            &format!("/repos/{}/git/refs/heads/{}", s.repo.slug(), enc_path(branch)),
+            Some(json!({ "sha": sha, "force": false })),
+        )
+        .await
+        .map_err(remote_moved)?;
+        let at = s.parent.as_ref().map(|(_, p)| p.clone()).unwrap_or_default();
+        gitlinks.push(json!({ "path": at, "mode": "160000", "type": "commit", "sha": sha }));
+        sub_reports.push(json!({ "path": s.mount, "repo": s.repo.slug(), "branch": branch, "commit": sha, "commitUrl": url }));
+    }
+
+    let main_items: Vec<&PushItem> = per_src.get(&0).map(|v| v.iter().collect()).unwrap_or_default();
+    let writes: Vec<&PushItem> = main_items.iter().copied().filter(|i| i.content.is_some()).collect();
+
     // Where the commit goes: the linked branch, created from the default branch if
     // it does not exist yet — or seeded with a first commit in an empty repository.
     let mut parent = remote.head.clone();
@@ -1593,11 +2246,12 @@ async fn push_as(state: &AppState, user: &User, id: Uuid, req: PushRequest) -> A
             _ => {
                 // No commits at all: git's object API refuses an empty repository,
                 // the contents API does not.  It makes the first commit with one file.
-                let (path, _, content) = &files[0];
+                let first = writes.first().ok_or_else(|| AppError::BadRequest("There is nothing to start the repository with.".into()))?;
+                let (_, content) = first.content.as_ref().expect("a write has content");
                 let v = gh
                     .call(
                         reqwest::Method::PUT,
-                        &format!("/repos/{}/contents/{}", repo.slug(), enc_path(&link.repo_path(path))),
+                        &format!("/repos/{}/contents/{}", repo.slug(), enc_path(&first.repo_path)),
                         Some(json!({ "message": message, "content": B64.encode(content), "branch": link.branch })),
                     )
                     .await?;
@@ -1608,10 +2262,14 @@ async fn push_as(state: &AppState, user: &User, id: Uuid, req: PushRequest) -> A
             }
         }
     }
-    let parent = parent.expect("parent commit resolved above");
+    let mut parent = parent.expect("parent commit resolved above");
+    let mut parent_tree = parent_tree.expect("parent tree resolved above");
 
-    let rest: Vec<&(String, String, Vec<u8>)> =
-        files.iter().skip(if seeded.is_some() { 1 } else { 0 }).collect();
+    let rest: Vec<&PushItem> = main_items
+        .iter()
+        .copied()
+        .filter(|i| !(seeded.is_some() && std::ptr::eq(*i, writes[0])))
+        .collect();
     let mut commit_sha = parent.clone();
     let mut commit_url = Value::Null;
 
@@ -1621,65 +2279,51 @@ async fn push_as(state: &AppState, user: &User, id: Uuid, req: PushRequest) -> A
         link.branch.clone()
     };
 
-    if !rest.is_empty() {
-        let mut tree_items = Vec::new();
-        for (path, sha, content) in &rest {
-            let v = gh
-                .post(
-                    &format!("/repos/{}/git/blobs", repo.slug()),
-                    json!({ "content": B64.encode(content), "encoding": "base64" }),
-                )
-                .await?;
-            if v["sha"].as_str() != Some(sha.as_str()) {
-                return Err(anyhow::anyhow!("github stored {path} under an unexpected blob id").into());
-            }
-            tree_items.push(json!({ "path": link.repo_path(path), "mode": "100644", "type": "blob", "sha": sha }));
-        }
-        let tree = gh
-            .post(
-                &format!("/repos/{}/git/trees", repo.slug()),
-                json!({ "base_tree": parent_tree, "tree": tree_items }),
-            )
-            .await?;
-        let commit = gh
-            .post(
-                &format!("/repos/{}/git/commits", repo.slug()),
-                json!({ "message": message, "tree": tree["sha"], "parents": [parent] }),
-            )
-            .await?;
-        commit_sha = commit["sha"].as_str().unwrap_or("").to_string();
-        commit_url = commit["html_url"].clone();
-
-        // Move the branch — never forced.  If GitHub's branch moved since it was
-        // read, this fails and nothing is recorded.
-        let moved = |e: GhErr| match e.status {
-            422 | 409 => api_err(
-                StatusCode::CONFLICT,
-                "remote_moved",
-                "The branch changed on GitHub while pushing. Refresh and try again.",
-            ),
-            _ => e.into(),
-        };
+    if !rest.is_empty() || !gitlinks.is_empty() {
+        // Move the branch — never forced.  If GitHub's branch moved since it was read,
+        // this fails and nothing is recorded.  With a submodule already committed the
+        // push is tried once more on top of the new head, so the submodule's commit is
+        // not left behind unreferenced.
         let exists = !req.pull_request && (remote.head.is_some() || seeded.is_some());
-        if exists {
-            gh.call(
-                reqwest::Method::PATCH,
-                &format!("/repos/{}/git/refs/heads/{}", repo.slug(), enc_path(&target_branch)),
-                Some(json!({ "sha": commit_sha, "force": false })),
-            )
-            .await
-            .map_err(moved)?;
-        } else {
-            gh.post(
-                &format!("/repos/{}/git/refs", repo.slug()),
-                json!({ "ref": format!("refs/heads/{target_branch}"), "sha": commit_sha }),
-            )
-            .await
-            .map_err(moved)?;
+        let tries = if gitlinks.is_empty() { 1 } else { 2 };
+        for attempt in 1..=tries {
+            let tree = build_tree(&gh, repo, &parent_tree, &rest, &gitlinks).await?;
+            let (sha, url) = build_commit(&gh, repo, &tree, &parent, &message).await?;
+            let moved = if exists {
+                gh.call(
+                    reqwest::Method::PATCH,
+                    &format!("/repos/{}/git/refs/heads/{}", repo.slug(), enc_path(&target_branch)),
+                    Some(json!({ "sha": sha, "force": false })),
+                )
+                .await
+            } else {
+                gh.post(
+                    &format!("/repos/{}/git/refs", repo.slug()),
+                    json!({ "ref": format!("refs/heads/{target_branch}"), "sha": sha }),
+                )
+                .await
+            };
+            match moved {
+                Ok(_) => {
+                    commit_sha = sha;
+                    commit_url = url;
+                    break;
+                }
+                Err(e) if attempt < tries && matches!(e.status, 422 | 409) => {
+                    let Some(head) = gh.branch_head(repo, &target_branch).await? else { return Err(remote_moved(e)) };
+                    parent_tree = gh.commit_tree(repo, &head).await?;
+                    parent = head;
+                }
+                Err(e) => return Err(remote_moved(e)),
+            }
         }
     }
 
-    let pushed: Vec<&str> = files.iter().map(|(p, _, _)| p.as_str()).collect();
+    let all: Vec<&PushItem> = per_src.values().flatten().collect();
+    let pushed: Vec<&str> = all.iter().filter(|i| i.content.is_some()).map(|i| i.doc_path.as_str()).collect();
+    // A rename's old name is not reported as a deletion: the file is still there.
+    let renamed_from: HashSet<&str> = targets.iter().filter_map(|e| e.renamed.as_ref().map(|(o, _)| o.as_str())).collect();
+    let deleted: Vec<&str> = all.iter().filter(|i| i.content.is_none() && !renamed_from.contains(i.doc_path.as_str())).map(|i| i.doc_path.as_str()).collect();
 
     if req.pull_request {
         // The linked branch has not moved, so nothing is recorded as synced: the
@@ -1694,29 +2338,35 @@ async fn push_as(state: &AppState, user: &User, id: Uuid, req: PushRequest) -> A
                     "body": format!(
                         "Changes to **{}** made in Junction.\n\nFiles:\n{}",
                         a.project.name,
-                        pushed.iter().map(|p| format!("- `{}`", link.repo_path(p))).collect::<Vec<_>>().join("\n")
+                        all.iter().map(|i| format!("- `{}`{}", i.repo_path, if i.content.is_none() { " (removed)" } else { "" })).collect::<Vec<_>>().join("\n")
                     ),
                 }),
             )
             .await?;
         return Ok(json!({
-            "ok": true, "pushed": pushed, "commit": commit_sha, "branch": target_branch,
+            "ok": true, "pushed": pushed, "deleted": deleted, "blocked": blocked, "commit": commit_sha, "branch": target_branch,
             "pullRequest": { "number": pr["number"], "url": pr["html_url"] },
         }));
     }
 
     // Now level: what was pushed, plus everything that was already identical.
-    let mut agreed: Vec<(String, String)> = files.iter().map(|(p, s, _)| (p.clone(), s.clone())).collect();
+    let mut agreed: Vec<Agreed> = all
+        .iter()
+        .filter_map(|i| i.content.as_ref().map(|(sha, _)| (i.doc_path.clone(), sha.clone(), local.get(&i.doc_path).map(|f| f.doc.id))))
+        .collect();
     agreed.extend(
         entries
             .iter()
             .filter(|e| e.change == Change::Synced)
-            .filter_map(|e| e.local.clone().map(|s| (e.path.clone(), s))),
+            .filter_map(|e| e.local.clone().map(|s| (e.path.clone(), s, local.get(&e.path).map(|f| f.doc.id)))),
     );
+    let gone: Vec<String> = all.iter().filter(|i| i.content.is_none()).map(|i| i.doc_path.clone()).collect();
+    drop_base(&state, id, &gone).await?;
     save_base(&state, id, &agreed, Some(&commit_sha)).await?;
 
     Ok(json!({
-        "ok": true, "pushed": pushed, "commit": commit_sha, "commitUrl": commit_url, "branch": target_branch,
+        "ok": true, "pushed": pushed, "deleted": deleted, "blocked": blocked,
+        "commit": commit_sha, "commitUrl": commit_url, "branch": target_branch, "submodules": sub_reports,
     }))
 }
 
@@ -1747,16 +2397,16 @@ pub async fn pull(
     require_editor(&a)?;
     let link = load_link(&state, id).await?.ok_or_else(|| AppError::BadRequest("This project is not linked to a repository.".into()))?;
     let gh = Gh::for_user(&state, &user).await?;
-    let repo = &link.repo;
 
     freshen(&state, id).await?;
-    let remote = remote_files(&gh, &link).await?;
+    let v = view(&state, &gh, id, link).await?;
+    if let Some(m) = &v.missing {
+        return Err(project_missing(m));
+    }
+    let (link, remote, local, base, entries) = (&v.link, &v.remote, &v.local, &v.base, &v.entries);
     let head = remote.head.clone().ok_or_else(|| {
-        AppError::BadRequest(format!("{} has no branch named {} yet. Push first.", repo.slug(), link.branch))
+        AppError::BadRequest(format!("{} has no branch named {} yet. Push first.", link.repo.slug(), link.branch))
     })?;
-    let local = local_files(&state, id).await?;
-    let base = load_base(&state, id).await?;
-    let entries = compare(&local, &remote, &base);
     let only: Option<HashSet<&str>> = req.paths.as_ref().map(|p| p.iter().map(String::as_str).collect());
     let prefer = if req.prefer.as_deref() == Some("github") { Prefer::Theirs } else { Prefer::Ours };
 
@@ -1767,19 +2417,71 @@ pub async fn pull(
     let stamp = format!("Before GitHub pull {}", chrono::Utc::now().format("%Y-%m-%d %H:%M"));
     let mut updated = Vec::new();
     let mut skipped = Vec::new();
-    let mut agreed: Vec<(String, String)> = Vec::new();
+    let mut agreed: Vec<Agreed> = Vec::new();
+    let mut forget: Vec<String> = Vec::new();
 
-    for e in &entries {
+    for e in entries {
         if !matches!(e.change, Change::Pull | Change::Conflict) {
             continue;
         }
         if only.as_ref().is_some_and(|o| !o.contains(e.path.as_str())) {
             continue;
         }
-        let remote_sha = e.remote.clone().expect("pull/conflict entries exist remotely");
-        let lf = local.get(&e.path);
+        let lf = local.get(e.local_path());
         let mut skip = |why: &str| skipped.push(json!({ "path": e.path, "reason": why }));
+        let wanted = req.resolve.get(&e.path).map(String::as_str);
 
+        // ---- a file one side deleted
+        if e.op == Op::Delete {
+            match (&e.remote, lf) {
+                // Deleted on GitHub: it goes online too, its content kept for putting back.
+                (None, Some(lf)) => {
+                    let choice = if e.change == Change::Pull { Some("github") } else { wanted };
+                    match choice {
+                        Some("github") => {
+                            if lf.unsaved_ops > 0 && !req.force {
+                                skip("has live edits that are not saved yet; save in the desktop app, or pull anyway");
+                                continue;
+                            }
+                            keep_removed(&state, id, user.id, &lf.doc).await?;
+                            persist::delete_document(&state.pool, lf.doc.id).await?;
+                            forget.push(e.path.clone());
+                            updated.push(json!({ "path": e.path, "action": "removed" }));
+                        }
+                        Some("online") => {
+                            // Kept: it is a file GitHub does not have, to push.
+                            forget.push(e.path.clone());
+                            updated.push(json!({ "path": e.path, "action": "kept online" }));
+                        }
+                        _ => skip("deleted on GitHub but changed online; choose to keep it or remove it"),
+                    }
+                }
+                // Deleted online, changed on GitHub.
+                (Some(remote_sha), None) => match wanted {
+                    Some("github") => {
+                        if e.remote_size > MAX_FILE_BYTES {
+                            skip("too large");
+                            continue;
+                        }
+                        let content = remote.blob(&gh, &e.path).await?.ok_or(AppError::NotFound)?;
+                        let doc = persist::create_document(&state.pool, id, &e.path, doc_type_for(&e.path)).await?;
+                        persist::insert_snapshot(&state.pool, doc.id, 0, &content, None, Some(user.id)).await?;
+                        agreed.push((e.path.clone(), remote_sha.clone(), Some(doc.id)));
+                        updated.push(json!({ "path": e.path, "action": "added" }));
+                    }
+                    Some("online") => {
+                        // GitHub's change has been seen; the file stays deleted, to push.
+                        agreed.push((e.path.clone(), remote_sha.clone(), None));
+                        updated.push(json!({ "path": e.path, "action": "kept deleted" }));
+                    }
+                    _ => skip("deleted online but changed on GitHub; choose to bring it back or delete it there"),
+                },
+                _ => {}
+            }
+            continue;
+        }
+
+        let remote_sha = e.remote.clone().expect("an edit to pull exists remotely");
         if e.remote_size > MAX_FILE_BYTES {
             skip("too large");
             continue;
@@ -1787,7 +2489,7 @@ pub async fn pull(
 
         let choice = match e.change {
             Change::Pull => "github",
-            _ => match req.resolve.get(&e.path).map(String::as_str) {
+            _ => match wanted {
                 Some(c @ ("merge" | "github" | "online")) => c,
                 _ if merge::mergeable(doc_type_for(&e.path)) => "merge",
                 _ => {
@@ -1797,10 +2499,17 @@ pub async fn pull(
             },
         };
 
+        // Where the last sync is recorded for this file afterwards: under its new
+        // name, except for a file renamed online, which GitHub still has under the old.
+        let record_as = match &e.renamed {
+            Some((old, Side::Online)) => old.clone(),
+            _ => e.path.clone(),
+        };
+
         // Keeping ours changes nothing online; it only records that GitHub's
         // version has been seen, so the file becomes a plain "changed online".
-        if choice == "online" {
-            agreed.push((e.path.clone(), remote_sha));
+        if choice == "online" && !matches!(e.renamed, Some((_, Side::GitHub))) {
+            agreed.push((record_as, remote_sha, lf.map(|f| f.doc.id)));
             updated.push(json!({ "path": e.path, "action": "kept online" }));
             continue;
         }
@@ -1812,16 +2521,43 @@ pub async fn pull(
             }
         }
 
-        let theirs = gh.blob(repo, &remote_sha).await?;
         let mut report = json!({ "path": e.path, "action": "updated" });
+
+        // Renamed on GitHub: the document takes the new name and keeps everything else —
+        // its history, its comments, the people who have it open.
+        if let (Some((old, Side::GitHub)), Some(lf)) = (&e.renamed, lf) {
+            if local.contains_key(&e.path) {
+                skip("renamed on GitHub to a name another file here already has");
+                continue;
+            }
+            persist::rename_document(&state.pool, lf.doc.id, &e.path).await?;
+            forget.push(old.clone());
+            report = json!({ "path": e.path, "action": "renamed", "from": old });
+            // The project is named after its project file: it follows the rename.
+            if let (Some(was), Some(now)) = (old.strip_suffix(".kicad_pro"), e.path.strip_suffix(".kicad_pro")) {
+                if !was.contains('/') && !now.contains('/') && a.project.name == was {
+                    persist::update_project(&state.pool, id, Some(now), None, None).await?;
+                    report["project"] = json!(now);
+                }
+            }
+            // Only the name changed on GitHub (or ours is kept): the content stays.
+            let same_as_base = base.get(old).is_some_and(|b| b.sha == remote_sha);
+            if same_as_base || choice == "online" || e.local.as_deref() == Some(remote_sha.as_str()) {
+                agreed.push((e.path.clone(), remote_sha, Some(lf.doc.id)));
+                updated.push(report);
+                continue;
+            }
+        }
+
+        let theirs = remote.blob(&gh, e.remote_path()).await?.ok_or(AppError::NotFound)?;
         let content = if choice == "merge" {
             let lf = lf.expect("a conflict has a local file");
             let (_, ours) = persist::latest_snapshot(&state.pool, lf.doc.id).await?.ok_or(AppError::NotFound)?;
             // The common ancestor, if GitHub still has it; without one the merge
             // is two-way (every difference is a conflict, nothing is deleted).
-            let base_bytes = match base.get(&e.path) {
-                Some(sha) => gh.blob(repo, sha).await.ok(),
-                None => None,
+            let base_bytes = match (base.get(e.base_path()), remote.files.get(e.remote_path())) {
+                (Some(b), Some(f)) => gh.blob(remote.repo_of(f), &b.sha).await.ok(),
+                _ => None,
             };
             let merged = match (std::str::from_utf8(&ours), std::str::from_utf8(&theirs)) {
                 (Ok(o), Ok(t)) => merge::merge3(
@@ -1833,13 +2569,24 @@ pub async fn pull(
                 _ => None,
             };
             let Some(m) = merged else {
+                // A rename already applied stays applied; the content waits for a choice.
+                if report["action"] == "renamed" {
+                    if let Some(b) = base.get(e.base_path()) {
+                        agreed.push((e.path.clone(), b.sha.clone(), Some(lf.doc.id)));
+                    }
+                    updated.push(report);
+                }
                 skip("could not be merged automatically; choose which version to keep");
                 continue;
             };
+            let from = report.get("from").cloned();
             report = json!({
                 "path": e.path, "action": "merged",
                 "fromGithub": m.from_theirs, "fromOnline": m.from_ours, "conflicts": m.conflicts,
             });
+            if let Some(from) = from {
+                report["from"] = from;
+            }
             m.text.into_bytes()
         } else {
             theirs
@@ -1853,16 +2600,17 @@ pub async fn pull(
                     crate::versions::keep_doc(&state.pool, id, user.id, &stamp, &lf.doc).await?;
                     crate::versions::reset_to_content(&state, user.id, lf.doc.id, &content).await?;
                 }
+                agreed.push((record_as, remote_sha, Some(lf.doc.id)));
             }
             None => {
                 let doc = persist::create_document(&state.pool, id, &e.path, doc_type_for(&e.path)).await?;
                 persist::insert_snapshot(&state.pool, doc.id, 0, &content, None, Some(user.id)).await?;
                 report["action"] = json!("added");
+                agreed.push((record_as, remote_sha, Some(doc.id)));
             }
         }
         // GitHub's version is now the common ancestor (a merge result that differs
         // from it shows as "changed online", ready to push).
-        agreed.push((e.path.clone(), remote_sha));
         updated.push(report);
     }
 
@@ -1870,8 +2618,9 @@ pub async fn pull(
         entries
             .iter()
             .filter(|e| e.change == Change::Synced)
-            .filter_map(|e| e.local.clone().map(|s| (e.path.clone(), s))),
+            .filter_map(|e| e.local.clone().map(|s| (e.path.clone(), s, local.get(&e.path).map(|f| f.doc.id)))),
     );
+    drop_base(&state, id, &forget).await?;
     save_base(&state, id, &agreed, Some(&head)).await?;
 
     Ok(Json(json!({
@@ -1945,7 +2694,8 @@ mod tests {
     #[test]
     fn classification() {
         use Change::*;
-        let c = |l, r, b| classify(l, r, b).map(|(c, _)| c);
+        let c = |l, r, b| classify(l, r, b).map(|(c, _, _)| c);
+        let op = |l, r, b| classify(l, r, b).map(|(c, o, _)| (c, o));
         assert_eq!(c(None, None, None), None);
         assert_eq!(c(Some("a"), Some("a"), None), Some(Synced));
         assert_eq!(c(Some("a"), Some("a"), Some("z")), Some(Synced));
@@ -1954,8 +2704,13 @@ mod tests {
         assert_eq!(c(Some("b"), Some("c"), Some("a")), Some(Conflict));
         assert_eq!(c(Some("b"), Some("c"), None), Some(Conflict));
         assert_eq!(c(Some("a"), None, None), Some(Push));
-        assert_eq!(c(Some("a"), None, Some("a")), Some(Push));
         assert_eq!(c(None, Some("a"), None), Some(Pull));
+        // A file both sides had and one no longer has was deleted there; it is never put back unasked.
+        assert_eq!(op(Some("a"), None, Some("a")), Some((Pull, Op::Delete)), "deleted on GitHub");
+        assert_eq!(op(Some("b"), None, Some("a")), Some((Conflict, Op::Delete)), "deleted on GitHub, changed online");
+        assert_eq!(op(None, Some("a"), Some("a")), Some((Push, Op::Delete)), "deleted online");
+        assert_eq!(op(None, Some("b"), Some("a")), Some((Conflict, Op::Delete)), "deleted online, changed on GitHub");
+        assert_eq!(op(Some("a"), None, None), Some((Push, Op::Edit)), "new online");
     }
 
     #[test]

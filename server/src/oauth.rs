@@ -886,7 +886,7 @@ pub async fn connect_page(State(state): State<AppState>, headers: HeaderMap, jar
   ul.can {{ columns: 2; column-gap: 28px; padding-left: 18px; line-height: 1.6; }}
   @media (max-width: 640px) {{ ul.can {{ columns: 1; }} table.apps th:nth-child(3), table.apps td:nth-child(3) {{ display: none; }} }}
 </style></head><body><main>
-<header class="top"><span class="mark">{MARK}</span><b>Junction</b><a href="/">Back to projects</a></header>
+<header class="top"><a class="mark" href="/" title="Home">{MARK}</a><b>Junction</b><a href="/">Back to projects</a></header>
 <h1>Connect an AI assistant</h1>
 <p class="lead">Any AI model or service can open your online projects, read schematics and boards, run the rule checks, look parts
 up, and make changes that everyone in the project sees live, with its own cursor. It connects over MCP, the open standard that

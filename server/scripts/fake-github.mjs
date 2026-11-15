@@ -26,6 +26,7 @@ const users = new Map();     // login -> { id, login, name }
 const tokens = new Map();    // token -> { login, scopes: Set }
 const codes = new Map();     // oauth code -> { login, scope }
 const repos = new Map();     // "owner/name" -> repo
+const moved = new Map();     // old "owner/name" -> new, after a rename (GitHub redirects the old name)
 const blobs = new Map();     // sha -> Buffer
 const trees = new Map();     // sha -> Map(path -> blob sha)   (flat: a whole tree per id)
 const commits = new Map();   // sha -> { tree, parents, message, author, date }
@@ -86,7 +87,13 @@ function commitFiles(repo, branch, files, message, author) {
   const parent = repo.refs.get(branch) || null;
   const map = new Map(parent ? trees.get(commits.get(parent).tree) : []);
   for (const [path, content] of Object.entries(files)) {
-    if (content === null) map.delete(path); else map.set(path, putBlob(content));
+    if (content === null) { for (const k of [...map.keys()]) if (k === path || k.startsWith(path + '/')) map.delete(k); }   // a file or a whole folder
+    // A submodule: { submodule: 'owner/name', commit? } pins that repository's commit (its head by default) as a gitlink.
+    else if (typeof content === 'object' && !Buffer.isBuffer(content) && content.submodule) {
+      const sub = repos.get(content.submodule);
+      map.set(path, 'commit:' + (content.commit || (sub && sub.refs.get(sub.defaultBranch)) || '0'.repeat(40)));
+    }
+    else map.set(path, putBlob(content));
   }
   const sha = putCommit(putTree(map), parent ? [parent] : [], message, author);
   repo.refs.set(branch, sha);
@@ -158,7 +165,7 @@ const server = http.createServer(async (req, res) => {
   if (path.startsWith('/__ctl/')) {
     const what = path.slice(7);
     if (what === 'reset') {
-      users.clear(); tokens.clear(); codes.clear(); repos.clear(); blobs.clear(); trees.clear(); commits.clear();
+      users.clear(); tokens.clear(); codes.clear(); repos.clear(); moved.clear(); blobs.clear(); trees.clear(); commits.clear();
       browserUser = null; calls = []; nextPr = 1;
       ghApp = null; manifestCodes.clear(); installations.clear(); refreshTokens.clear(); nextInstall = 1; installChoice = null;
       return send(res, 200, { ok: true });
@@ -179,13 +186,23 @@ const server = http.createServer(async (req, res) => {
       const head = repo && repo.refs.get(q.get('branch') || repo.defaultBranch);
       if (!head) return send(res, 200, { head: null, files: {} });
       const files = {};
-      for (const [p, s] of trees.get(commits.get(head).tree)) files[p] = blobs.get(s).toString();
+      for (const [p, s] of trees.get(commits.get(head).tree)) files[p] = s.startsWith('commit:') ? '@' + s : blobs.get(s).toString();
       return send(res, 200, { head, parents: commits.get(head).parents, message: commits.get(head).message, files });
     }
     if (what === 'state') {
       const repo = repos.get(q.get('repo'));
       return send(res, 200, { branches: repo ? Object.fromEntries(repo.refs) : {}, pulls: repo ? repo.pulls : [], calls });
     }
+    if (what === 'rename-repo') {
+      const repo = repos.get(body.fullName);
+      if (!repo) return notFound(res);
+      repos.delete(body.fullName);
+      [repo.owner, repo.name] = body.to.split('/'); repo.fullName = body.to;
+      repos.set(body.to, repo); moved.set(body.fullName, body.to);
+      for (const i of installations.values()) if (i.repos.delete(body.fullName)) i.repos.add(body.to);
+      return send(res, 200, { ok: true });
+    }
+    if (what === 'delete-branch') { repos.get(body.fullName)?.refs.delete(body.branch); return send(res, 200, { ok: true }); }
     if (what === 'install-choice') { installChoice = body.repos; return send(res, 200, { ok: true }); }
     if (what === 'installations') return send(res, 200, [...installations.values()].map((i) => ({ ...i, repos: [...i.repos] })));
     if (what === 'app') return send(res, 200, ghApp && { ...ghApp, publicKey: undefined });
@@ -337,7 +354,7 @@ const server = http.createServer(async (req, res) => {
 
   const m = path.match(/^\/repos\/([^/]+)\/([^/]+)(\/.*)?$/);
   if (!m) return notFound(res);
-  const repo = repos.get(`${m[1]}/${m[2]}`);
+  const repo = repos.get(`${m[1]}/${m[2]}`) || repos.get(moved.get(`${m[1]}/${m[2]}`));
   const perms = repo && reach(t, repo);
   if (!perms) return notFound(res);
   const rest = m[3] || '';
@@ -348,7 +365,8 @@ const server = http.createServer(async (req, res) => {
   if (rest === '/branches') return send(res, 200, [...repo.refs.keys()].map((name) => ({ name, commit: { sha: repo.refs.get(name) } })));
 
   if (rest === '/commits' && req.method === 'GET') {
-    let sha = repo.refs.get(q.get('sha') || repo.defaultBranch);
+    const from = q.get('sha') || repo.defaultBranch;
+    let sha = repo.refs.get(from) || (commits.has(from) ? from : undefined);   // a branch or, as on GitHub, a commit
     if (!sha) return send(res, 409, { message: 'Git Repository is empty.' });
     const out = [];
     const only = q.get('path') || '', prefix = only ? only + '/' : '';
@@ -399,7 +417,8 @@ const server = http.createServer(async (req, res) => {
   if ((mm = rest.match(/^\/git\/trees\/([0-9a-f]+)$/)) && req.method === 'GET') {
     const tree = trees.get(mm[1]);
     if (!tree) return notFound(res);
-    const blobEntry = ([p, s]) => ({ path: p, mode: '100644', type: 'blob', sha: s, size: blobs.get(s).length });
+    const blobEntry = ([p, s]) => s.startsWith('commit:') ? { path: p, mode: '160000', type: 'commit', sha: s.slice(7) }
+      : { path: p, mode: '100644', type: 'blob', sha: s, size: blobs.get(s).length };
     if (q.get('recursive')) return send(res, 200, { sha: mm[1], truncated: false, tree: [...tree.entries()].map(blobEntry) });
     // Like GitHub: without ?recursive only the direct children, folders as "tree" entries.
     const out = [], dirs = new Map();
@@ -428,6 +447,7 @@ const server = http.createServer(async (req, res) => {
     const map = new Map(body.base_tree ? trees.get(body.base_tree) : []);
     for (const e of body.tree || []) {
       if (e.sha === null) map.delete(e.path);
+      else if (e.type === 'commit') { if (e.mode !== '160000') return send(res, 422, { message: 'a commit entry needs mode 160000' }); map.set(e.path, 'commit:' + e.sha); }
       else { if (!blobs.has(e.sha)) return send(res, 422, { message: 'tree.sha is not a valid blob' }); map.set(e.path, e.sha); }
     }
     return send(res, 201, { sha: putTree(map) });

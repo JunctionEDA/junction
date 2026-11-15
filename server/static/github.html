@@ -18,6 +18,9 @@
   header .mark svg { width: 20px; height: 20px; display: block; }
   header b { font-weight: 600; }
   header .crumb { color: var(--ink-2); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  header .backlink { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px 3px 6px; border: 1px solid var(--line); border-radius: var(--r-2);
+           color: var(--ink-2); text-decoration: none; font-size: var(--fs-sm); font-weight: 500; white-space: nowrap; }
+  header .backlink:hover { color: var(--ink); border-color: var(--line-2); background: var(--sel-soft); }
   header .sp { flex: 1; }
   header .who { font: var(--fs-sm) var(--mono); color: var(--ink-3); white-space: nowrap; }
   main { max-width: 860px; margin: 0 auto; padding: 20px var(--s-4) 60px; display: grid; gap: var(--s-4); }
@@ -74,6 +77,18 @@
   .commit { display: flex; gap: 10px; align-items: baseline; padding: 6px 14px; border-bottom: 1px solid var(--line); font-size: var(--fs-base); }
   .commit:last-child { border-bottom: 0; }
   .commit .msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* A project to pick in a repository: a tick box, its name and folder, and what it shares. */
+  .list .it.pick { align-items: flex-start; cursor: pointer; }
+  .list .it.pick.isOnline { cursor: default; }
+  .list .it.pick input[type=checkbox], .list .it.pick .tick { margin: 3px 0 0; flex: 0 0 auto; width: 14px; height: 14px; }
+  .list .it.pick .what { min-width: 0; display: grid; gap: 2px; }
+  .list .it.pick .line { display: flex; gap: 10px; align-items: baseline; min-width: 0; flex-wrap: wrap; }
+  .list .it.pick .about { font-size: var(--fs-sm); overflow-wrap: anywhere; }
+  .list .it.pick > .muted, .list .it.pick > .btn { flex: 0 0 auto; white-space: nowrap; }
+  .warnText { color: var(--warn); }
+  td.path .was { font-size: var(--fs-xs); }
+  td.path .tags { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
+  .callout ul { margin: 4px 0 0; padding-left: 18px; }
   .hide { display: none !important; }
   @media (max-width: 600px) {
     main { padding: 12px 10px 50px; gap: 12px; }
@@ -98,11 +113,12 @@
 <body>
 <header>
   <a class="mark" href="/" title="Home">{{MARK}}</a>
+  <a class="backlink" href="/" id="toProjects" title="Back to your projects"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M9.5 3.5 5 8l4.5 4.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>Projects</a>
   <b>GitHub</b>
   <span class="crumb" id="crumb"></span>
   <span class="sp"></span>
   <span class="who" id="who"></span>
-  <a class="btn small" id="back" href="/">Projects</a>
+  <a class="btn small hide" id="back" href="/">Open project</a>
 </header>
 <main id="app"><div class="muted">Loading…</div></main>
 <script src="/static/github.js"></script>

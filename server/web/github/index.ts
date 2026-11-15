@@ -20,26 +20,66 @@ interface Connection {
   legacy?: boolean;
 }
 interface Repo { fullName: string; private: boolean; pushedAt?: string; defaultBranch?: string }
-interface ScanProject { path: string; name: string; files: number }
-interface Scan { repo: string; branch: string; branches: string[]; projects: ScanProject[]; truncated: boolean }
+/** Something the person should know about the repository: a submodule that cannot be read, a library that is not there. */
+interface Note { kind: string; path: string; repo?: string | null; message: string }
+interface ScanProject {
+  path: string; name: string; files: number;
+  /** Every project file in the folder, when there are several (they travel as one online project). */
+  projectFiles?: string[];
+  /** The project folder this one is inside. */
+  inside?: string;
+  /** The submodule repository the folder is in. */
+  submodule?: string;
+  /** Libraries its tables name outside its folder. */
+  shared?: { path: string; repoPath?: string | null; found: boolean }[];
+  /** The online project already linked to this folder. */
+  online?: { projectId: string; name: string };
+}
+interface Scan { repo: string; branch: string; branches: string[]; projects: ScanProject[]; truncated: boolean; notes?: Note[] }
+interface Imported { path: string; projectId?: string; name?: string; files?: number; shared?: number; existing?: boolean; error?: string; notes?: Note[] }
 interface LastAuto { ok: boolean; message?: string; at: string; by?: string; checkpoint?: string; commitUrl?: string | null }
 interface Link {
   repo: string; branch: string; path: string; url: string; linkedBy?: string | null; syncedAt?: string | null;
   autoPush: boolean; lastAuto?: LastAuto | null;
 }
 type FileState = "push" | "pull" | "conflict" | "synced";
-interface FileEntry { path: string; state: FileState; detail: string; size: number; unsavedOps: number; mergeable: boolean }
+interface FileEntry {
+  path: string; state: FileState; detail: string; size: number; unsavedOps: number; mergeable: boolean;
+  /** The side that deleted the file. */
+  deleted?: "online" | "github";
+  renamedFrom?: string; renamedOn?: "online" | "github";
+  /** Lives outside the project folder (a library several projects share). */
+  shared?: boolean;
+  /** The repository the file is really in, when that is a submodule. */
+  submodule?: string;
+}
 interface Commit { sha: string; message: string; author?: string; date: string; url?: string }
 interface Remote { reachable: boolean; reason?: string; branchExists: boolean; truncated: boolean; canPush: boolean; commits?: Commit[] }
 interface Summary { push: number; pull: number; conflict: number; synced: number; unsaved: number }
 interface ProjectInfo { projectId: string; name: string; isOwner: boolean; role: string }
-interface Status { project: ProjectInfo; github: Connection; link: Link | null; remote: Remote; summary: Summary; files: FileEntry[] }
+interface Missing { reason: "branch" | "folder" | "project"; message: string; candidates: string[] }
+interface Removed { id: number; path: string; at: string; size?: number | null; by?: string | null }
+interface Status {
+  project: ProjectInfo; github: Connection; link: Link | null; remote: Remote; summary: Summary; files: FileEntry[];
+  notes?: Note[]; nested?: string[]; submodules?: { path: string; repo: string; commit: string; branch?: string | null }[];
+  /** The project is gone from where the link says it is; syncing is paused. */
+  missing?: Missing;
+  /** The folder was found elsewhere and the link followed it. */
+  moved?: { from: string; to: string };
+  renamedRepo?: { from: string; to: string };
+  /** Files a pull removed, kept so they can be put back. */
+  removed?: Removed[];
+}
 interface Change { kind: "added" | "removed" | "changed"; item: string; parts?: string[] }
 interface Side { opaque?: boolean; oldSize: number; newSize: number; total: number; changes: Change[] }
 interface Diff { hasBase: boolean; online?: Side; github?: Side; between?: Side }
-interface PushResult { pushed: string[]; commit: string; commitUrl?: string | null; branch: string; pullRequest?: { number: number; url: string } }
+interface PushResult {
+  pushed: string[]; deleted?: string[]; blocked?: { path: string; reason: string }[];
+  submodules?: { path: string; repo: string; commit: string; commitUrl?: string | null }[];
+  commit: string; commitUrl?: string | null; branch: string; pullRequest?: { number: number; url: string };
+}
 interface PullConflict { item: string; kept: "github" | "online" }
-interface PullUpdate { path: string; action: string; fromGithub: number; fromOnline: number; conflicts: PullConflict[] }
+interface PullUpdate { path: string; action: string; from?: string; fromGithub: number; fromOnline: number; conflicts: PullConflict[] }
 interface PullResult { updated: PullUpdate[]; skipped: { path: string; reason: string }[]; checkpoint?: string | null }
 interface ListedProject { projectId: string; name: string; ownerLogin: string; updatedAt: string }
 type Resolution = "merge" | "github" | "online" | "";
@@ -230,6 +270,10 @@ async function renderImport(): Promise<void> {
   }).catch((e) => { need("#mine").innerHTML = `<div class="in muted">${esc(message(e))}</div>`; });
 }
 
+const notesHtml = (notes: Note[] | undefined): string =>
+  (notes || []).map((n) => `<div class="callout warn" data-note="${esc(n.kind)}">${esc(n.message)}${
+    n.kind === "submodule_no_access" && conn?.via === "app" ? ` <a href="${installUrl()}">Choose repositories</a>` : ""}</div>`).join("");
+
 async function scan(full: string, branch: string | null): Promise<void> {
   const el = need("#scan");
   el.innerHTML = `<div class="muted"><span class="spinner"></span> Looking for KiCad projects in ${esc(full)}…</div>`;
@@ -237,22 +281,62 @@ async function scan(full: string, branch: string | null): Promise<void> {
   try { s = await api<Scan>(`/api/github/scan?repo=${encodeURIComponent(full)}${branch ? "&branch=" + encodeURIComponent(branch) : ""}`); }
   catch (e) { el.innerHTML = `<div class="callout err">${esc(message(e))}</div>`; return; }
   const branches = s.branches.includes(s.branch) ? s.branches : [s.branch].concat(s.branches);
+  const fresh = s.projects.filter((p) => !p.online);
+  // What a row says about its project beyond the name: where it sits, what it shares, whether it is online.
+  const about = (p: ScanProject): string => {
+    const bits: string[] = [];
+    if (p.projectFiles) bits.push(`${p.projectFiles.length} project files in this folder (${esc(p.projectFiles.join(", "))}), kept together as one online project`);
+    if (p.inside !== undefined) bits.push(`inside the project in <span class="mono">${esc(p.inside || "/")}</span>; its files stay its own`);
+    if (p.submodule) bits.push(`a submodule: <span class="mono">${esc(p.submodule)}</span>`);
+    for (const l of p.shared || []) bits.push(l.found
+      ? `shares <span class="mono">${esc(l.repoPath || l.path)}</span>, which comes along`
+      : `<span class="warnText">names <span class="mono">${esc(l.path)}</span>, which is not in the repository</span>`);
+    return bits.length ? `<div class="about muted">${bits.join(" · ")}</div>` : "";
+  };
   el.innerHTML = `<div class="row" style="margin-bottom:8px">
       <label class="f">Branch <k-select id="scanBranch">${branches.map((b) => `<option${b === s.branch ? " selected" : ""}>${esc(b)}</option>`).join("")}</k-select></label>
       <div class="grow muted">${s.projects.length ? `${plural(s.projects.length, "KiCad project")} in <b>${esc(s.repo)}</b>` : ""}</div></div>
     ${s.truncated ? `<div class="callout warn">This repository is too large for GitHub to list completely; some folders may be missing.</div>` : ""}
-    <div class="list">${s.projects.length ? s.projects.map((p, i) => `<div class="it" style="cursor:default">
-        <span class="nm">${esc(p.name)}</span><span class="muted mono">${esc(p.path || "/")}</span><span class="sp"></span>
-        <span class="muted">${plural(p.files, "file")}</span>
-        <button class="btn small primary" data-import="${i}">Bring online</button></div>`).join("")
-      : `<div class="empty">No KiCad files on this branch.</div>`}</div>`;
+    ${notesHtml(s.notes)}
+    <div class="list" id="scanList">${s.projects.length ? s.projects.map((p, i) => `<label class="it pick${p.online ? " isOnline" : ""}">
+        ${p.online ? `<span class="tick"></span>` : `<input type="checkbox" data-pick="${i}"${fresh.length === 1 ? " checked" : ""}>`}
+        <span class="what"><span class="line"><span class="nm">${esc(p.name)}</span><span class="muted mono">${esc(p.path || "/")}</span></span>${about(p)}</span>
+        <span class="sp"></span><span class="muted">${plural(p.files, "file")}</span>
+        ${p.online ? `<a class="btn small" href="/p/${esc(p.online.projectId)}/github" data-open="${i}">Online · open</a>` : ""}</label>`).join("")
+      : `<div class="empty">No KiCad files on this branch.</div>`}</div>
+    ${fresh.length ? `<div class="row actions" style="margin-top:10px">
+      ${fresh.length > 1 ? `<label class="muted" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pickAll"> Select all</label>` : ""}
+      <span class="grow muted" id="pickNote">Each project becomes its own online project, linked to its folder.</span>
+      <button class="btn primary" id="doImport" disabled>Bring online</button></div>` : ""}
+    <div id="imported"></div>`;
   const pick = need<HTMLSelectElement>("#scanBranch");
   pick.onchange = () => scan(full, pick.value);
-  $$<HTMLButtonElement>("[data-import]", el).forEach((b) => (b.onclick = () => busy(b, async () => {
-    const p = s.projects[Number(b.dataset.import)];
-    const j = await api<{ projectId: string }>("/api/github/import", { method: "POST", body: { repo: s.repo, branch: s.branch, path: p.path, name: p.name } });
-    location.href = `/p/${j.projectId}/github`;
-  })));
+  const boxes = $$<HTMLInputElement>("[data-pick]", el);
+  const go = $<HTMLButtonElement>("#doImport"), all = $<HTMLInputElement>("#pickAll");
+  const chosen = (): ScanProject[] => boxes.filter((b) => b.checked).map((b) => s.projects[Number(b.dataset.pick)]);
+  const sync = (): void => {
+    const n = chosen().length;
+    if (go) { go.disabled = !n; go.textContent = n > 1 ? `Bring ${n} projects online` : "Bring online"; }
+    if (all) { all.checked = n === boxes.length; all.indeterminate = n > 0 && n < boxes.length; }
+  };
+  boxes.forEach((b) => (b.onchange = sync));
+  if (all) all.onchange = () => { boxes.forEach((b) => (b.checked = all.checked)); sync(); };
+  sync();
+  if (go) go.onclick = () => busy(go, async () => {
+    const picks = chosen();
+    const j = await api<{ projects: Imported[] }>("/api/github/import", { method: "POST", body: { repo: s.repo, branch: s.branch, paths: picks.map((p) => p.path) } });
+    const made = j.projects.filter((p) => p.projectId && !p.error);
+    // One project with nothing to tell: straight to it.
+    if (j.projects.length === 1 && made.length === 1 && !(made[0].notes || []).length) { location.href = `/p/${made[0].projectId}/github`; return; }
+    await scan(full, s.branch);
+    need("#imported").innerHTML = `<div class="callout ${j.projects.some((p) => p.error) ? "warn" : "ok"}" id="importResult" style="margin-top:10px">
+      ${made.length ? `Brought ${plural(made.filter((p) => !p.existing).length, "project")} online:` : "Nothing was brought online:"}
+      <ul>${j.projects.map((p) => p.error
+        ? `<li><span class="mono">${esc(p.path || "/")}</span> — ${esc(p.error)}</li>`
+        : `<li><a href="/p/${esc(p.projectId)}/github"><b>${esc(p.name)}</b></a> <span class="muted mono">${esc(p.path || "/")}</span> — ${
+            p.existing ? "was online already" : `${plural(p.files || 0, "file")}${p.shared ? `, ${p.shared} of them shared from outside its folder` : ""}`}${
+            (p.notes || []).map((n) => `<div class="muted">${esc(n.message)}</div>`).join("")}</li>`).join("")}</ul></div>`;
+  });
 }
 
 function renderSignedOut(e: unknown): void {
@@ -326,7 +410,7 @@ function render(): void {
   document.title = `${p.name} — GitHub — Junction`;
   need("#crumb").textContent = "· " + p.name;
   need("#who").textContent = gh.login;
-  const back = need<HTMLAnchorElement>("#back"); back.textContent = "Open project"; back.href = `/p/${p.projectId}/edit`;
+  const back = need<HTMLAnchorElement>("#back"); back.classList.remove("hide"); back.href = `/p/${p.projectId}/edit`;
 
   let html = `<div id="flash">${flashHtml()}</div>`;
   if (lastResult) { html += lastResult; }
@@ -369,6 +453,30 @@ function render(): void {
 
   const s = status.summary, files = status.files;
   const canWrite = p.role === "editor";
+  if (status.renamedRepo) html += `<div class="callout ok" id="renamedRepo">The repository was renamed on GitHub from <b>${esc(status.renamedRepo.from)}</b> to <b>${esc(status.renamedRepo.to)}</b>. The link follows it.</div>`;
+  if (status.moved) html += `<div class="callout ok" id="moved">The project's folder moved on GitHub from <span class="mono">${esc(status.moved.from || "/")}</span> to <span class="mono">${esc(status.moved.to || "/")}</span>. The link follows it, and nothing was duplicated.</div>`;
+
+  // Gone from where the link points: nothing is compared, nothing is pushed or pulled until the person says what to do.
+  const missing = status.missing;
+  if (missing) {
+    html += `<section class="box" id="missing"><h2>The project is no longer on GitHub where it was</h2><div class="in">
+      <div class="callout warn">${esc(missing.message)}</div>
+      ${missing.candidates.length ? `<p style="margin-top:10px">It may have moved. Folders on <b>${esc(link.branch)}</b> that hold its files:</p>
+        <div class="list">${missing.candidates.map((c) => `<div class="it" style="cursor:default"><span class="nm mono">${esc(c || "/")}</span><span class="sp"></span>
+          ${canWrite ? `<button class="btn small primary" data-relocate="${esc(c)}">Link to this folder</button>` : ""}</div>`).join("")}</div>` : ""}
+      ${canWrite ? `<div class="row actions" style="margin-top:12px">
+        <span class="grow muted">${missing.reason === "branch" ? "Putting it back creates the branch again." : "Putting it back adds the online project's files to the repository again, in a new commit."} Your online project is untouched either way.</span>
+        ${r.canPush ? `<button class="btn" id="restoreProject">Put it back on GitHub</button>` : ""}</div>` : ""}
+    </div></section>`;
+    html += notesHtml(status.notes);
+    html += removedHtml(status, canWrite);
+    app.innerHTML = html;
+    bindCommon(); bindMissing();
+    return;
+  }
+  html += notesHtml(status.notes);
+  if (status.nested && status.nested.length) html += `<div class="callout" id="nested">${status.nested.length === 1 ? "The folder" : "The folders"} ${status.nested.map((n) => `<span class="mono">${esc(n)}</span>`).join(", ")} ${status.nested.length === 1 ? "is a project of its own" : "are projects of their own"} and ${status.nested.length === 1 ? "is" : "are"} not part of this one. <a href="/github">Bring ${status.nested.length === 1 ? "it" : "them"} online</a> separately.</div>`;
+  if (status.submodules && status.submodules.length) html += `<div class="callout" id="submodules">Some of these files are in ${status.submodules.length === 1 ? "a submodule" : "submodules"}: ${status.submodules.map((m) => `<span class="mono">${esc(m.path)}</span> (<b>${esc(m.repo)}</b>)`).join(", ")}. A push commits them to that repository and moves <b>${esc(link.repo)}</b> to the new commit.</div>`;
   const chip = (cls: string, n: number, text: string): string => `<div class="chip ${n ? cls : "zero"}"><b>${n}</b><span>${text}</span></div>`;
   html += `<div class="chips">${chip("push", s.push, "to push")}${chip("pull", s.pull, "to pull")}${chip("conflict", s.conflict, "changed on both")}${chip("synced", s.synced, "in sync")}</div>`;
 
@@ -402,16 +510,22 @@ function render(): void {
   html += `<section class="box"><h2>Files<span class="sp"></span><span class="muted" style="font-weight:400">${plural(files.length, "file")}</span></h2>
     <table class="files"><thead><tr><th>File</th><th>State</th><th>What changed</th><th></th></tr></thead><tbody>
     ${files.map((f) => `<tr>
-      <td class="path">${esc(f.path)}</td>
+      <td class="path">${esc(f.path)}${f.renamedFrom ? `<div class="muted was">was ${esc(f.renamedFrom)}</div>` : ""}${
+        f.shared || f.submodule ? `<div class="tags">${f.shared ? `<span class="pill" title="Outside the project folder: a file this project shares with others">shared</span>` : ""}${
+          f.submodule ? `<span class="pill" title="This file is in a submodule">${esc(f.submodule)}</span>` : ""}</div>` : ""}</td>
       <td class="st"><span class="pill ${f.state}">${STATE_LABEL[f.state]}</span></td>
       <td class="detail">${esc(f.detail)}${f.unsavedOps > 0 ? ` · ${plural(f.unsavedOps, "unsaved edit")}` : ""} <span class="muted">· ${kb(f.size)}</span></td>
       <td class="act">${f.state === "conflict" && canWrite ? `<k-select data-resolve="${esc(f.path)}" aria-label="How to resolve ${esc(f.path)}">
-          ${f.mergeable ? `<option value="merge">Merge both</option>` : `<option value="">Choose…</option>`}
-          <option value="github">Use GitHub's</option><option value="online">Keep online</option></k-select>` : ""}${
-          f.state !== "synced" ? `<button class="btn small" data-diff="${esc(f.path)}" aria-expanded="${openDiffs.has(f.path)}">Changes</button>` : ""}</td></tr>
+          ${f.deleted === "github" ? `<option value="">Choose…</option><option value="online">Keep it online</option><option value="github">Remove it online too</option>`
+            : f.deleted === "online" ? `<option value="">Choose…</option><option value="github">Bring it back</option><option value="online">Delete on GitHub too</option>`
+            : `${f.mergeable ? `<option value="merge">Merge both</option>` : `<option value="">Choose…</option>`}
+          <option value="github">Use GitHub's</option><option value="online">Keep online</option>`}</k-select>` : ""}${
+          f.state !== "synced" && !f.deleted ? `<button class="btn small" data-diff="${esc(f.path)}" aria-expanded="${openDiffs.has(f.path)}">Changes</button>` : ""}</td></tr>
       ${f.state !== "synced" && openDiffs.has(f.path) ? `<tr class="diffrow"><td colspan="4" data-diffbody="${esc(f.path)}">${diffHtml(f.path)}</td></tr>` : ""}`).join("")
       || `<tr><td colspan="4" class="muted">No KiCad files on either side yet.</td></tr>`}
     </tbody></table></section>`;
+
+  html += removedHtml(status, canWrite);
 
   if (r.commits && r.commits.length) {
     html += `<section class="box"><h2>Recent commits on ${esc(link.branch)}</h2>
@@ -420,7 +534,7 @@ function render(): void {
   }
 
   app.innerHTML = html;
-  bindCommon();
+  bindCommon(); bindRemoved();
   $$<HTMLSelectElement>("[data-resolve]").forEach((sel) => {
     const path = sel.dataset.resolve || "";
     const chosen = resolve[path];
@@ -448,6 +562,36 @@ function render(): void {
   if (pushBtn) pushBtn.onclick = () => busy(pushBtn, doPush);
 }
 
+/** Files a pull removed because they were deleted on GitHub, each with a way back. */
+function removedHtml(status: Status, canWrite: boolean): string {
+  if (!status.removed || !status.removed.length) return "";
+  return `<section class="box" id="removed"><h2>Removed by a pull<span class="sp"></span><span class="muted" style="font-weight:400">kept so they can be put back</span></h2>
+    ${status.removed.map((x) => `<div class="commit"><span class="mono msg">${esc(x.path)}</span>
+      <span class="muted">${x.size != null ? kb(x.size) + " · " : ""}${esc(ago(x.at))}${x.by ? ` · ${esc(x.by)}` : ""}</span>
+      ${canWrite ? `<button class="btn small" data-putback="${x.id}">Put back</button>` : ""}</div>`).join("")}</section>`;
+}
+function bindRemoved(): void {
+  $$<HTMLButtonElement>("[data-putback]").forEach((b) => (b.onclick = () => busy(b, async () => {
+    const j = await api<{ path: string }>(`/api/projects/${projectId}/github/restore-file`, { method: "POST", body: { id: Number(b.dataset.putback) } });
+    lastResult = `<div class="callout ok" id="result"><span class="mono">${esc(j.path)}</span> is back in the project. Push to add it to GitHub again.</div>`;
+    await loadStatus();
+  })));
+}
+function bindMissing(): void {
+  bindRemoved();
+  $$<HTMLButtonElement>("[data-relocate]").forEach((b) => (b.onclick = () => busy(b, async () => {
+    await api(`/api/projects/${projectId}/github/relocate`, { method: "POST", body: { path: b.dataset.relocate || "" } });
+    lastResult = `<div class="callout ok" id="result">Linked to <span class="mono">${esc(b.dataset.relocate || "/")}</span>. What was synced before still counts.</div>`;
+    await loadStatus();
+  })));
+  const rs = $<HTMLButtonElement>("#restoreProject");
+  if (rs) rs.onclick = () => busy(rs, async () => {
+    const j = await api<PushResult>(`/api/projects/${projectId}/github/push`, { method: "POST", body: { restore: true } });
+    lastResult = pushedHtml(j);
+    await loadStatus();
+  });
+}
+
 function bindCommon(): void {
   const rf = $<HTMLButtonElement>("#refresh"); if (rf) rf.onclick = () => busy(rf, async () => { lastResult = null; await loadStatus(); });
   const un = $<HTMLButtonElement>("#unlink");
@@ -457,13 +601,24 @@ function bindCommon(): void {
   };
 }
 
+/** What a push did: files written and removed, where, and what was held back and why. */
+function pushedHtml(j: PushResult): string {
+  const sha = String(j.commit).slice(0, 7);
+  const n = j.pushed.length, d = (j.deleted || []).length;
+  const what = [n || !d ? `Pushed ${plural(n, "file")}` : "", d ? `${n ? "removed" : "Removed"} ${plural(d, "file")}` : ""].filter(Boolean).join(" and ");
+  const subs = (j.submodules || []).map((m) => ` The files in <span class="mono">${esc(m.path)}</span> went to <b>${esc(m.repo)}</b>${
+    m.commitUrl ? ` (<a class="mono" href="${esc(m.commitUrl)}" target="_blank" rel="noreferrer">${esc(String(m.commit).slice(0, 7))}</a>)` : ""}.`).join("");
+  const held = (j.blocked || []).length
+    ? `<div class="callout warn" id="blocked" style="margin-top:8px">Held back:<ul>${(j.blocked || []).map((b) => `<li><span class="mono">${esc(b.path)}</span> — ${esc(b.reason)}</li>`).join("")}</ul></div>` : "";
+  return `<div id="result">` + (j.pullRequest
+    ? `<div class="callout ok">${what} to <b>${esc(j.branch)}</b> and opened <a href="${esc(j.pullRequest.url)}" target="_blank" rel="noreferrer">pull request #${esc(j.pullRequest.number)}</a>. The files show as in sync once it is merged.</div>`
+    : `<div class="callout ok">${what} on <b>${esc(j.branch)}</b> as ${j.commitUrl ? `<a class="mono" href="${esc(j.commitUrl)}" target="_blank" rel="noreferrer">${esc(sha)}</a>` : `<span class="mono">${esc(sha)}</span>`}.${subs}</div>`) + held + `</div>`;
+}
+
 async function doPush(): Promise<void> {
   const body = { message: need<HTMLInputElement>("#msg").value, pullRequest: need<HTMLInputElement>("#asPr").checked };
   const j = await api<PushResult>(`/api/projects/${projectId}/github/push`, { method: "POST", body });
-  const sha = String(j.commit).slice(0, 7);
-  lastResult = j.pullRequest
-    ? `<div class="callout ok" id="result">Pushed ${plural(j.pushed.length, "file")} to <b>${esc(j.branch)}</b> and opened <a href="${esc(j.pullRequest.url)}" target="_blank" rel="noreferrer">pull request #${esc(j.pullRequest.number)}</a>. The files show as in sync once it is merged.</div>`
-    : `<div class="callout ok" id="result">Pushed ${plural(j.pushed.length, "file")} to <b>${esc(j.branch)}</b> as ${j.commitUrl ? `<a class="mono" href="${esc(j.commitUrl)}" target="_blank" rel="noreferrer">${esc(sha)}</a>` : `<span class="mono">${esc(sha)}</span>`}.</div>`;
+  lastResult = pushedHtml(j);
   await loadStatus();
 }
 
@@ -477,7 +632,8 @@ async function doPull(force: boolean): Promise<void> {
   });
   const j = await api<PullResult>(`/api/projects/${projectId}/github/pull`, { method: "POST", body: { resolve: res, prefer, force } });
   const lines = j.updated.map((u) => {
-    let t = `<span class="mono">${esc(u.path)}</span> — ${esc(u.action)}`;
+    let t = `<span class="mono">${esc(u.path)}</span> — ${esc(u.action)}${u.from ? ` (was <span class="mono">${esc(u.from)}</span>)` : ""}`;
+    if (u.action === "removed") t += "; its content is kept below, to put back";
     if (u.action === "merged") {
       t += `: ${plural(u.fromGithub, "change")} from GitHub, ${plural(u.fromOnline, "change")} kept from online`;
       if (u.conflicts.length) {
