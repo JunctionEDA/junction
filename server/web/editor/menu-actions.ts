@@ -143,7 +143,7 @@ export const MENU_HANDLERS: Record<string, ActionHandler> = {
   toggleERCErrors: () => schView("showErcErrors", "toggleERCErrors"),
   toggleERCWarnings: () => schView("showErcWarnings", "toggleERCWarnings"),
   toggleERCExclusions: () => schView("showErcExclusions", "toggleERCExclusions", false),
-  // the operating point the simulator leaves on the schematic (sim/op-overlay.ts)
+  // no simulation results are kept here, so the operating-point labels have nothing to show either way
   toggleOPVoltages: () => schView("showOpVoltages", "toggleOPVoltages"),
   toggleOPCurrents: () => schView("showOpCurrents", "toggleOPCurrents"),
   togglePinAltIcons: () => {
