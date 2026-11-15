@@ -48,11 +48,11 @@ export interface PreviewApi { el: HTMLElement; update(boardText: string): void; 
  * A 3D canvas showing a board text (an FPHOLDER board with the footprint).  `buttons` adds PANEL_PREVIEW_3D_MODEL's
  * column of STD_BITMAP_BUTTONs on its right; `reload` rebuilds the board text (the Reload button).
  */
-export function modelPreview(opts: { buttons?: boolean; reload?(): void; key?: string; height?: string; board?: boolean } = {}): PreviewApi {
+export function modelPreview(opts: { buttons?: boolean; reload?(): void; key?: string; height?: string; board?: boolean; thickness?: number } = {}): PreviewApi {
   const host = h("div", { class: "pd-3dprev", "data-k": opts.key || "preview3d", style: `height:${opts.height || "100%"}` });
   const status = h("div", { class: "pd-3dprev-msg" }, "Loading 3D viewer...");
   host.append(status);
-  let viewer: EmbeddedViewer3D | null = null, pending: string | null = null, gone = false, fit = true, thickness = 1.6, bodyShown = opts.board !== false;
+  let viewer: EmbeddedViewer3D | null = null, pending: string | null = null, gone = false, fit = true, thickness = opts.thickness && opts.thickness > 0 ? opts.thickness : 1.6, bodyShown = opts.board !== false;
   const draw = (text: string): void => {
     if (!viewer) { pending = text; return; }
     const doc = parseDoc(text); if (!doc) return;
@@ -243,6 +243,8 @@ export interface Models3dOpts {
   previewKey: string;
   /** the footprint's extruded 3D body ((model (type extruded) …)), null for none */
   extruded?: FpExtruded | null;
+  /** the frame's board thickness, the dummy board's starting thickness (panel_preview_3d_model.cpp: SetBoardThickness) */
+  thickness?: number;
 }
 /** EXTRUDED_3D_BODY: layer "auto" (UNDEFINED_LAYER), "pad_bbox" (UNSELECTED_LAYER) or a layer name; color null = unspecified */
 export interface FpExtruded { show: boolean; height: number; standoff: number; layer: string; material: "plastic" | "matte" | "metal" | "copper"; color: number[] | null }
@@ -333,7 +335,7 @@ export function models3dPanel(o: Models3dOpts): { build(el: HTMLElement): void; 
     bar.replaceChildren(addB, browseB, h("span", { style: "width:20px" }), delB);
     const cfg = h("button", { type: "button", class: "kbtn", "data-k": "configure3dPaths" }, "Configure Paths...");
     cfg.addEventListener("click", () => { void import("../../dialogs/configure-paths").then((x) => x.configurePaths(() => updatePreview())); });
-    preview = modelPreview({ buttons: true, reload: updatePreview, key: o.previewKey });
+    preview = modelPreview({ buttons: true, reload: updatePreview, key: o.previewKey, thickness: o.thickness });
     // Extruded 3D Body: Enable / Show, Overall height / Standoff height, Extrusion source / Material with its colour
     const swatch = h("button", { type: "button", class: "pd-iconbtn", title: "Color of the extruded body. Overrides the material default.", "data-k": "extrusionColor", disabled: ro }, h("span", { class: "pd-swatch" })) as HTMLButtonElement;
     const paint = (): void => { const sp = swatch.firstChild as HTMLElement; sp.style.background = exColor ? `rgba(${Math.round(exColor[0] * 255)},${Math.round(exColor[1] * 255)},${Math.round(exColor[2] * 255)},${exColor[3]})` : "transparent"; };

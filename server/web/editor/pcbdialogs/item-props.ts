@@ -924,6 +924,7 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
     const PTX = window as unknown as { PcbTools: { exchange: { editableCopy(n: SNode): { node: SNode } } } };
     const fpEmbedded = (): string[] => (efPanel ? efPanel.get() : FM.embeddedFileNames(node));
     const models3d = models3dPanel({ ro, models: FM.readModels(node), extruded: FM.readExtruded(node), embedded: fpEmbedded, previewKey: "boardFpPreview3d",
+      thickness: Number((doc as { thickness?: number }).thickness) || 1.6,
       projectModels: () => (state.project ? state.project.docs : []).filter((d) => d.docType === "model3d").map((d) => d.path),
       footprintText: () => K().serialize(PTX.PcbTools.exchange.editableCopy(node).node) });
     const tabs = notebook([{ label: "General", build: (el) => el.append(general) }, { label: "Clearance Overrides & Pad Connections", build: (el) => el.append(clearances) },
