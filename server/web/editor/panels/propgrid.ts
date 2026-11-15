@@ -917,6 +917,17 @@ function resolve(): Resolved {
   return { items, defs, shared };
 }
 
+/**
+ * DIALOG_FIND_BY_PROPERTIES::itemMatchesPropertyCriteria's value of one property of any item, as the grid shows it;
+ * undefined when the item has no such property (PROPERTY_MANAGER::GetProperty / IsAvailableFor).
+ */
+export function itemPropText(it: KItem, id: string): string | undefined {
+  const doc = kdoc(); if (!doc) return undefined;
+  const d = defsOf(it, doc, false).find((x) => defId(x) === id); if (!d || (d.avail && !d.avail(it))) return undefined;
+  let raw: Raw = null; try { raw = d.get(it); } catch (e) { raw = null; }
+  return show(d, raw);
+}
+
 export function propGrid(): PropGrid {
   const doc = kdoc();
   if (!doc) return { title: "No objects selected", count: 0, groups: [], readOnly: true };

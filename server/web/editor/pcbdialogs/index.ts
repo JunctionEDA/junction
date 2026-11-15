@@ -6,6 +6,7 @@ import { installTransformDialogs } from "./transform-dialogs";
 import { openBoardSetup } from "./board-setup";
 import "./find";   // Edit > Find (DIALOG_FIND): registers E.hooks.boardFind / boardFindNext
 import { openExportVrml } from "./vrml";
+import { openFindByProperties } from "./find-by-props";
 import { exportCmpFile, generateBomLegacy, generateD356, generateFootprintReport } from "./fab-reports";
 import { openFootprintFields } from "./fp-fields";
 import { clearDrcMarkers, drcReport, excludeMarker, nextMarker, openBoardStatistics, openClearance, openConstraints, openDiffFootprint, openFootprintAssociations, openDrc, prevMarker } from "./inspect";
@@ -65,6 +66,7 @@ export function installPcbDialogs(): void {
   action("generateBOMLegacy", "Bill of Materials (legacy)...", "", (ctx) => { void generateBomLegacy(ctx); });
   action("filterSelection", "Filter Selected Items...", "", openFilterSelection);   // PCB_SELECTION_TOOL::filterSelection
   // EDIT_TOOL's Shape Modification sub-menu
+  action("findByProperties", "Find by Properties...", "", openFindByProperties);   // PCB_EDIT_FRAME::ShowFindByPropertiesDialog
   action("outsetItems", "Outset Items...", "", outsetItems);   // CONVERT_TOOL::OutsetItems
   action("filletLines", "Fillet Lines...", "", filletLines);
   action("chamferLines", "Chamfer Lines...", "", chamferLines);
