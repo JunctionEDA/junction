@@ -919,6 +919,8 @@ function footprintProperties(): void {
   const lib = !isFpPrivate() && state.doc ? fpLibIdOf(state.doc.path).lib : "";
   const libFps = projectFpLibs().find((l) => l.name === lib);
   footprintPropertiesDialog(toolCtx() as unknown as ToolCtx, {
+    projectModels: () => (state.project ? state.project.docs : []).filter((d) => d.docType === "model3d").map((d) => d.path),
+    footprintText: () => FD().serializeFootprintDoc(doc),
     libHas: (name: string) => !!libFps && libFps.footprints.some((f) => f.name === name && f.docId !== state.docId),
     overwrite: async (name: string) => { const f = libFps && libFps.footprints.find((x) => x.name === name); if (!f) return true; return deleteFootprintDoc(f.docId, true); },
     activeLayer: E.activeLayer || "F.Fab",

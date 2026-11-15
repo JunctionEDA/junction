@@ -33,7 +33,9 @@ interface Viewer3DOpenOptions {
   stackupFinish?(): Promise<string | null>;
   editorColor?(layer: string): string | null;
 }
-interface Viewer3DGlobal { open(opts: Viewer3DOpenOptions): unknown; close(): void; isOpen(): boolean }
+export interface Viewer3DGlobal { open(opts: Viewer3DOpenOptions): unknown; close(): void; isOpen(): boolean; embed?(host: HTMLElement, opts?: { wheel?: boolean }): EmbeddedViewer3D }
+/** The bare 3D canvas (viewer3d/viewer.ts Viewer) a dialog embeds: the 3D model previews. */
+export interface EmbeddedViewer3D { setDoc(doc: KDoc, fit: boolean): unknown; useModels(on: boolean): void; setVisibility(patch: Record<string, boolean>): void; view(name: string): void; ortho: boolean; setOrtho(on: boolean): void; modelsSettled(): Promise<void>; requestRender(): void; resize(): void; dispose(): void; zoomBy(f: number): void }
 
 interface EditorState { kdoc: KDoc | null }
 interface AppStore {
@@ -50,7 +52,7 @@ let loading: Promise<Viewer3DGlobal> | null = null;
 function viewerGlobal(): Viewer3DGlobal | undefined { return (window as unknown as { KiCadViewer3D?: Viewer3DGlobal }).KiCadViewer3D; }
 
 /** Fetch the viewer bundle once; its URL carries the same cache-busting version as the editor's own script. */
-function loadViewer(): Promise<Viewer3DGlobal> {
+export function loadViewer(): Promise<Viewer3DGlobal> {
   const ready = viewerGlobal(); if (ready) return Promise.resolve(ready);
   if (loading) return loading;
   loading = new Promise<Viewer3DGlobal>((resolve, reject) => {

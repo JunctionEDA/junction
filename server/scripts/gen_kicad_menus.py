@@ -52,7 +52,7 @@ EXTRA_ICONS = {"import", "export_file", "fabrication", "language", "add_zone", "
                "zoom_center_on_screen",
                # the STD_BITMAP_BUTTONs of the dialog grids (library tables, 3D models, pin table, pad table, fields)
                "small_new_window",
-               "small_sort_desc", "small_top", "small_bottom", "text_bold", "text_italic", "text_valign_top",
+               "small_sort_desc", "small_top", "small_bottom", "ercerr", "ercwarn", "text_bold", "text_italic", "text_valign_top",
                "text_valign_center", "text_valign_bottom", "text_mirrored", "options_3drender", "ortho", "axis3d_left", "axis3d_right", "axis3d_front", "axis3d_back",
                "axis3d_top", "axis3d_bottom", "show_board_body", "lib_previous", "lib_next", "search_tree", "list_nets_16",
                # PinTypeIcons, PinShapeIcons and PinOrientationIcons (eeschema/pin_type.cpp) for the pin dialogs' icon combos

@@ -65,12 +65,23 @@ const CSS = `
 .pd-grid td input[type=text] { min-width: 84px; }
 .pd-grid td.chk { text-align: center; }
 .pd-grid td.chk input { width: auto; margin: 0; }
+.pd-grid td.ico { width: 22px; text-align: center; vertical-align: middle; padding: 0 2px; }
+.pd-grid td.ico .kicon, .pd-grid td.ico svg, .pd-grid td.ico img { display: block; margin: auto; }
+.pd-cellwrap { display: flex; align-items: center; }
+.pd-3dwrap { display: flex; flex: 1; min-width: 0; min-height: 0; gap: 4px; }
+.pd-3dprev { position: relative; flex: 1; min-width: 0; min-height: 200px; background: var(--canvas); border: 1px solid var(--line); overflow: hidden; }
+.pd-3dprev-msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); font-size: var(--fs-sm); }
+.pd-3dbtns { display: flex; flex-direction: column; gap: 4px; flex: none; }
+.pd-cellwrap input[type=text] { flex: 1; min-width: 0; }
+.pd-cellbtn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: none; background: transparent; color: var(--ink); cursor: pointer; border-radius: var(--r-1); }
+.pd-cellbtn:hover { background: var(--sel-soft); }
 .pd-gridbar { display: flex; gap: 4px; margin: 4px 0 0; }
 .pd-iconbtn { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); color: var(--ink); padding: 0; }
 .pd-iconbtn:hover { border-color: var(--ink-3, var(--ink-2)); }
 .pd-iconbtn:disabled { opacity: .4; cursor: default; }
 .pd-iconbtn.pd-tog { border-color: transparent; background: transparent; }
 .pd-iconbtn.pd-tog.on { background: var(--sel-soft, var(--paper)); border-color: var(--line-2); }
+.pd-3dbtns .pd-iconbtn.on { background: var(--on); border-color: var(--on-line); }
 .pd-togrow { display: flex; align-items: center; gap: 2px; }
 .pd-togrow .vsep { width: 1px; height: 18px; background: var(--line); margin: 0 5px; }
 .pd-report { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); overflow: auto; font-size: 12px; padding: 4px 8px; min-height: 120px; }
@@ -517,7 +528,11 @@ export type CellValue = string | number | boolean;
 export interface GridColumn {
   label: string; key: string; width?: string;
   /** text (default), a length in the editor's units, a number, a checkbox, a choice or read-only text */
-  type?: "text" | "len" | "num" | "check" | "select" | "ro" | "color";
+  type?: "text" | "len" | "num" | "check" | "select" | "ro" | "color" | "icon";
+  /** an "icon" cell (GRID_CELL_STATUS_ICON_RENDERER): the icon-pack bitmap and its tooltip, or nothing */
+  icon?(row: Record<string, CellValue>, index: number): { icon: string; title: string } | null;
+  /** a text cell's button (GRID_CELL_RUN_FUNCTION_EDITOR): `set` writes the cell and reports the change */
+  button?: { icon: string; title: string; run(row: Record<string, CellValue>, index: number, set: (v: string) => void): void };
   options?: [string | number, string][];
   /** the column header's tooltip (PANEL_SETUP_NETCLASSES::onmouseMove) */
   tip?: string;
@@ -569,7 +584,10 @@ export function grid(columns: GridColumn[], rows: Record<string, CellValue>[], o
       shown().forEach((c, ci) => {
         const ro = !!(opts && opts.ro) || c.type === "ro" || (c.readOnly ? c.readOnly(row, i) : false);
         const v = row[c.key];
-        if (c.type === "check") {
+        if (c.type === "icon") {
+          const ic = c.icon ? c.icon(row, i) : null;
+          tr.append(h("td", { class: "ico", title: ic ? ic.title : null }, ic ? kicadIcon(ic.icon, 16) : null));
+        } else if (c.type === "check") {
           const cb = h("input", { type: "checkbox", checked: !!v, disabled: ro }); cb.addEventListener("change", () => { row[c.key] = cb.checked; changed(); });
           tr.append(h("td", { class: "chk" }, cb));
         } else if (c.type === "color") {
@@ -611,7 +629,12 @@ export function grid(columns: GridColumn[], rows: Record<string, CellValue>[], o
               });
             }
           });
-          tr.append(h("td", null, inp));
+          if (c.button) {
+            const bt = c.button;
+            const b = h("button", { type: "button", class: "pd-cellbtn", title: bt.title, tabindex: "-1" }, kicadIcon(bt.icon, 16));
+            b.addEventListener("click", () => bt.run(row, i, (val) => { row[c.key] = val; inp.value = val; changed(); }));
+            tr.append(h("td", { class: "withbtn" }, h("div", { class: "pd-cellwrap" }, inp, b)));
+          } else tr.append(h("td", null, inp));
         }
       });
       body.append(tr);
