@@ -1,0 +1,99 @@
+name: Loads in desktop
+
+# Every kind of file the server writes (blank projects, templates, downloads
+# with rebuilt libraries, downloads after web or assistant edits) is opened by
+# the desktop's own reader: kicad-cli from the latest published Junction build.
+# A writer bug that makes a file the desktop cannot read fails here, before a
+# release, instead of on somebody's computer.
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'server/**'
+      - 'demos/**'
+      - '.github/workflows/loads-in-desktop.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: loads-in-desktop
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: collabtest
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: The desktop reader (latest published Junction build)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$HOME/dl" "$HOME/Apps"
+          gh release download --repo "$GITHUB_REPOSITORY" --pattern 'Junction-*-linux-x64.tar.gz' --dir "$HOME/dl"
+          tar -C "$HOME/Apps" -xzf "$HOME"/dl/Junction-*-linux-x64.tar.gz
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends $(cat "$HOME/Apps/usr/share/junction/ubuntu-packages.txt") unzip
+          "$HOME/Apps/usr/bin/junction" kicad-cli version
+
+      - name: Cache the server build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            server/target
+          key: server-${{ runner.os }}-${{ hashFiles('server/Cargo.lock') }}
+          restore-keys: server-${{ runner.os }}-
+
+      - name: Build the server
+        working-directory: server
+        run: |
+          npm ci
+          npm install --no-save pg
+          cargo build
+
+      - name: Make the files and open each one
+        working-directory: server
+        env:
+          DATABASE_URL: postgres://postgres:test@127.0.0.1:5432/collabtest
+          JWT_SECRET: testsecret
+          PUBLIC_URL: http://127.0.0.1:8099
+          PORT: 8099
+          KC_DEV_LOGIN: 1
+          E2E_PG_URL: postgres://postgres:test@127.0.0.1:5432/collabtest
+          E2E_JWT_SECRET: testsecret
+        run: |
+          ./target/debug/kicad-collab-server > server.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:8099/healthz > /dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:8099/healthz > /dev/null || { cat server.log; exit 1; }
+          OUT="$RUNNER_TEMP/files" KICAD_CLI="$HOME/Apps/usr/bin/junction kicad-cli" node scripts/desktop-load-check.mjs
+
+      - name: Keep the files and the server log when it fails
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: loads-in-desktop-files
+          path: |
+            ${{ runner.temp }}/files
+            server/server.log
+          retention-days: 7

@@ -41,6 +41,11 @@ version it is based on.
   the upload starts, with its size and the limit; saving a document that
   large no longer fails at 50 MB.
 
+### Checks
+- A "Loads in desktop" run on every server change makes a blank project,
+  every template, and demo projects downloaded with rebuilt libraries and
+  after edits, and opens each file with the desktop's own reader.
+
 ## 2.1.2 (2026-11-15)
 
 Desktop fixes found by opening online projects end to end, and 3D models that
