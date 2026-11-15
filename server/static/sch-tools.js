@@ -1845,8 +1845,18 @@
     return SCROLLERS.has(el2) && el2.scrollHeight > el2.clientHeight + 1 ? ARROW + 2 : 0;
   }
 
+  // web/components/icon-ids.ts
+  var G = globalThis;
+  var REF = /\b(k-[A-Za-z0-9_]+-[ld]-r\d+)\b/g;
+  function uniqueIconIds(markup) {
+    if (markup.indexOf("-r") < 0 || !REF.test(markup)) return markup;
+    REF.lastIndex = 0;
+    const n = (G.__kcIconIdSeq = (G.__kcIconIdSeq || 0) + 1).toString(36);
+    return markup.replace(REF, (id) => `${id}-u${n}`);
+  }
+
   // web/components/kicon-dom.ts
-  var G = () => typeof window === "undefined" ? {} : window;
+  var G2 = () => typeof window === "undefined" ? {} : window;
   var NS = "http://www.w3.org/2000/svg";
   var CSS2 = `
 .kic{flex:none;vertical-align:middle}
@@ -1876,17 +1886,17 @@
   }
   function fill(el2, ic) {
     el2.setAttribute("viewBox", ic.vb || "0 0 24 24");
-    el2.innerHTML = `<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`;
+    el2.innerHTML = uniqueIconIds(`<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`);
     el2.dataset.icon = el2.dataset.want || "";
   }
-  function kicadIcon(name, size = 16) {
+  function kicadIcon(name, size = 16, height = size) {
     ensureIconCss();
     const el2 = document.createElementNS(NS, "svg");
     el2.setAttribute("class", "kic kicon-dom");
     el2.setAttribute("aria-hidden", "true");
     el2.setAttribute("viewBox", "0 0 24 24");
     el2.setAttribute("width", String(size));
-    el2.setAttribute("height", String(size));
+    el2.setAttribute("height", String(height));
     setKicadIcon(el2, name);
     return el2;
   }
@@ -1894,14 +1904,14 @@
     if (el2.dataset.want === name && el2.dataset.icon === name) return;
     el2.dataset.want = name;
     el2.dataset.icon = name;
-    const g = G(), ic = g.KiCadIconFor ? g.KiCadIconFor(name) : void 0;
+    const g = G2(), ic = g.KiCadIconFor ? g.KiCadIconFor(name) : void 0;
     if (ic) {
       fill(el2, ic);
       return;
     }
     if (g.KiCadIconsReady) void g.KiCadIconsReady.then(() => {
       if (el2.dataset.want !== name) return;
-      const i = G().KiCadIconFor?.(name);
+      const i = G2().KiCadIconFor?.(name);
       if (i) fill(el2, i);
     }).catch(() => void 0);
   }

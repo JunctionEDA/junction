@@ -24358,8 +24358,8 @@ var require_pcb_tools = __commonJS({
       var touch = (a, b, slop) => !(b[0] > a[2] + slop || b[2] < a[0] - slop || b[1] > a[3] + slop || b[3] < a[1] - slop);
       var centre = (a, b) => [(Math.max(a[0], b[0]) + Math.min(a[2], b[2])) / 2, (Math.max(a[1], b[1]) + Math.min(a[3], b[3])) / 2];
       function elementGrid(els) {
-        const G22 = 2, grid = /* @__PURE__ */ new Map();
-        const cell = (v) => Math.floor(v / G22);
+        const G32 = 2, grid = /* @__PURE__ */ new Map();
+        const cell = (v) => Math.floor(v / G32);
         els.forEach((e, i) => {
           if (!isFinite(e.bbox[0])) return;
           for (let gx = cell(e.bbox[0]); gx <= cell(e.bbox[2]); gx++) for (let gy = cell(e.bbox[1]); gy <= cell(e.bbox[3]); gy++) {
@@ -24376,8 +24376,8 @@ var require_pcb_tools = __commonJS({
         };
       }
       function polyIndex(pts) {
-        const G22 = 1, cells = /* @__PURE__ */ new Map(), rows = /* @__PURE__ */ new Map();
-        const cell = (v) => Math.floor(v / G22);
+        const G32 = 1, cells = /* @__PURE__ */ new Map(), rows = /* @__PURE__ */ new Map();
+        const cell = (v) => Math.floor(v / G32);
         for (let i = 0; i < pts.length; i++) {
           const a = pts[i], b = pts[(i + 1) % pts.length];
           for (let gx = cell(Math.min(a[0], b[0])); gx <= cell(Math.max(a[0], b[0])); gx++) for (let gy = cell(Math.min(a[1], b[1])); gy <= cell(Math.max(a[1], b[1])); gy++) {
@@ -26076,8 +26076,8 @@ var require_pcb_tools = __commonJS({
         if (!conds.length) return out;
         const holes = boardHoles3(doc);
         const reach = Math.max(min0, worstRule, 0.01);
-        const G22 = 2, grid = /* @__PURE__ */ new Map();
-        const cell = (v) => Math.floor(v / G22);
+        const G32 = 2, grid = /* @__PURE__ */ new Map();
+        const cell = (v) => Math.floor(v / G32);
         conds.forEach((c, i) => {
           for (let gx = cell(c.bbox[0]); gx <= cell(c.bbox[2]); gx++) for (let gy = cell(c.bbox[1]); gy <= cell(c.bbox[3]); gy++) {
             const k = gx + "," + gy;
@@ -35738,7 +35738,15 @@ var require_pcb_tools = __commonJS({
       function menuArrowPad2(el) {
         return SCROLLERS2.has(el) && el.scrollHeight > el.clientHeight + 1 ? ARROW2 + 2 : 0;
       }
-      var G3 = () => typeof window === "undefined" ? {} : window;
+      var G4 = globalThis;
+      var REF2 = /\b(k-[A-Za-z0-9_]+-[ld]-r\d+)\b/g;
+      function uniqueIconIds2(markup) {
+        if (markup.indexOf("-r") < 0 || !REF2.test(markup)) return markup;
+        REF2.lastIndex = 0;
+        const n2 = (G4.__kcIconIdSeq = (G4.__kcIconIdSeq || 0) + 1).toString(36);
+        return markup.replace(REF2, (id) => `${id}-u${n2}`);
+      }
+      var G22 = () => typeof window === "undefined" ? {} : window;
       var NS2 = "http://www.w3.org/2000/svg";
       var CSS22 = `
 .kic{flex:none;vertical-align:middle}
@@ -35768,17 +35776,17 @@ var require_pcb_tools = __commonJS({
       }
       function fill2(el, ic) {
         el.setAttribute("viewBox", ic.vb || "0 0 24 24");
-        el.innerHTML = `<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`;
+        el.innerHTML = uniqueIconIds2(`<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`);
         el.dataset.icon = el.dataset.want || "";
       }
-      function kicadIcon2(name, size = 16) {
+      function kicadIcon2(name, size = 16, height = size) {
         ensureIconCss2();
         const el = document.createElementNS(NS2, "svg");
         el.setAttribute("class", "kic kicon-dom");
         el.setAttribute("aria-hidden", "true");
         el.setAttribute("viewBox", "0 0 24 24");
         el.setAttribute("width", String(size));
-        el.setAttribute("height", String(size));
+        el.setAttribute("height", String(height));
         setKicadIcon2(el, name);
         return el;
       }
@@ -35786,14 +35794,14 @@ var require_pcb_tools = __commonJS({
         if (el.dataset.want === name && el.dataset.icon === name) return;
         el.dataset.want = name;
         el.dataset.icon = name;
-        const g2 = G3(), ic = g2.KiCadIconFor ? g2.KiCadIconFor(name) : void 0;
+        const g2 = G22(), ic = g2.KiCadIconFor ? g2.KiCadIconFor(name) : void 0;
         if (ic) {
           fill2(el, ic);
           return;
         }
         if (g2.KiCadIconsReady) void g2.KiCadIconsReady.then(() => {
           if (el.dataset.want !== name) return;
-          const i = G3().KiCadIconFor?.(name);
+          const i = G22().KiCadIconFor?.(name);
           if (i) fill2(el, i);
         }).catch(() => void 0);
       }
@@ -60952,8 +60960,8 @@ function gf(poly) {
 }
 var GF_QR = gf(285);
 var GF_DM = gf(301);
-function rsEncode(G3, data, nsym, index) {
-  const { alog, log } = G3;
+function rsEncode(G4, data, nsym, index) {
+  const { alog, log } = G4;
   const poly = new Array(nsym + 1).fill(0);
   poly[0] = 1;
   for (let i = 1; i <= nsym; i++) {
@@ -64600,8 +64608,8 @@ function mixColor(c, other, f2) {
   const key3 = f2 + c + "|" + other;
   let v = MIX_CACHE.get(key3);
   if (v) return v;
-  const [r, g2, b, a] = parseColor(c), [R2, G3, B] = parseColor(other), m = (x, y) => Math.round(y * (1 - f2) + x * f2);
-  v = rgba(m(r, R2), m(g2, G3), m(b, B), a);
+  const [r, g2, b, a] = parseColor(c), [R2, G4, B] = parseColor(other), m = (x, y) => Math.round(y * (1 - f2) + x * f2);
+  v = rgba(m(r, R2), m(g2, G4), m(b, B), a);
   if (MIX_CACHE.size < 4096) MIX_CACHE.set(key3, v);
   return v;
 }
@@ -64651,16 +64659,16 @@ var SEL_CACHE = /* @__PURE__ */ new Map();
 function selectedColor(c) {
   let v = SEL_CACHE.get(c);
   if (v) return v;
-  const [r, g2, b, a] = parseColor(c), R2 = r / 255, G3 = g2 / 255, B = b / 255;
-  const bright = (x, y, z2) => 0.299 * x + 0.587 * y + 0.114 * z2, br = bright(R2, G3, B);
+  const [r, g2, b, a] = parseColor(c), R2 = r / 255, G4 = g2 / 255, B = b / 255;
+  const bright = (x, y, z2) => 0.299 * x + 0.587 * y + 0.114 * z2, br = bright(R2, G4, B);
   if (br < 0.05) v = c;
   else {
     const f2 = Math.min(1, 0.25 + br * br * br), up = (x) => x * (1 - f2) + f2;
-    let sr = up(R2), sg = up(G3), sb = up(B);
+    let sr = up(R2), sg = up(G4), sb = up(B);
     if (Math.abs(bright(sr, sg, sb) - br) < 0.05) {
       const d = (x) => x * (1 - 0.2);
       sr = d(R2);
-      sg = d(G3);
+      sg = d(G4);
       sb = B * (1 - f2) + f2;
     }
     v = rgba(Math.round(sr * 255), Math.round(sg * 255), Math.round(sb * 255), a);
@@ -75612,7 +75620,15 @@ root.KiCadCanvas = api;
   function menuArrowPad2(el2) {
     return SCROLLERS2.has(el2) && el2.scrollHeight > el2.clientHeight + 1 ? ARROW2 + 2 : 0;
   }
-  var G3 = () => typeof window === "undefined" ? {} : window;
+  var G4 = globalThis;
+  var REF2 = /\b(k-[A-Za-z0-9_]+-[ld]-r\d+)\b/g;
+  function uniqueIconIds2(markup) {
+    if (markup.indexOf("-r") < 0 || !REF2.test(markup)) return markup;
+    REF2.lastIndex = 0;
+    const n2 = (G4.__kcIconIdSeq = (G4.__kcIconIdSeq || 0) + 1).toString(36);
+    return markup.replace(REF2, (id) => `${id}-u${n2}`);
+  }
+  var G22 = () => typeof window === "undefined" ? {} : window;
   var NS2 = "http://www.w3.org/2000/svg";
   var CSS22 = `
 .kic{flex:none;vertical-align:middle}
@@ -75642,17 +75658,17 @@ root.KiCadCanvas = api;
   }
   function fill2(el2, ic) {
     el2.setAttribute("viewBox", ic.vb || "0 0 24 24");
-    el2.innerHTML = `<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`;
+    el2.innerHTML = uniqueIconIds2(`<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`);
     el2.dataset.icon = el2.dataset.want || "";
   }
-  function kicadIcon2(name, size = 16) {
+  function kicadIcon2(name, size = 16, height = size) {
     ensureIconCss2();
     const el2 = document.createElementNS(NS2, "svg");
     el2.setAttribute("class", "kic kicon-dom");
     el2.setAttribute("aria-hidden", "true");
     el2.setAttribute("viewBox", "0 0 24 24");
     el2.setAttribute("width", String(size));
-    el2.setAttribute("height", String(size));
+    el2.setAttribute("height", String(height));
     setKicadIcon2(el2, name);
     return el2;
   }
@@ -75660,14 +75676,14 @@ root.KiCadCanvas = api;
     if (el2.dataset.want === name && el2.dataset.icon === name) return;
     el2.dataset.want = name;
     el2.dataset.icon = name;
-    const g2 = G3(), ic = g2.KiCadIconFor ? g2.KiCadIconFor(name) : void 0;
+    const g2 = G22(), ic = g2.KiCadIconFor ? g2.KiCadIconFor(name) : void 0;
     if (ic) {
       fill2(el2, ic);
       return;
     }
     if (g2.KiCadIconsReady) void g2.KiCadIconsReady.then(() => {
       if (el2.dataset.want !== name) return;
-      const i = G3().KiCadIconFor?.(name);
+      const i = G22().KiCadIconFor?.(name);
       if (i) fill2(el2, i);
     }).catch(() => void 0);
   }
@@ -85064,8 +85080,8 @@ function pieces(s) {
   } else out.push(s);
   return out;
 }
-function exact(G3, s, grow6, px, py) {
-  const m = G3.margin;
+function exact(G4, s, grow6, px, py) {
+  const m = G4.margin;
   if (!(m > 0)) return false;
   const need = grow6 - m - 1e-6;
   if (s.t === "circle") return Math.abs(px - s.x) - s.r >= need || Math.abs(py - s.y) - s.r >= need;
@@ -85075,19 +85091,19 @@ function exact(G3, s, grow6, px, py) {
   }
   return false;
 }
-function stamp(G3, map, s, grow6, sign2, far = grow6, near) {
+function stamp(G4, map, s, grow6, sign2, far = grow6, near) {
   if (far > grow6 && near) {
     for (const p of pieces(s)) {
       const b = bboxOf2(p);
-      const x0 = Math.max(0, Math.ceil((b[0] - far - G3.ox) / G3.g)), x1 = Math.min(G3.W - 1, Math.floor((b[2] + far - G3.ox) / G3.g));
-      const y0 = Math.max(0, Math.ceil((b[1] - far - G3.oy) / G3.g)), y1 = Math.min(G3.H - 1, Math.floor((b[3] + far - G3.oy) / G3.g));
+      const x0 = Math.max(0, Math.ceil((b[0] - far - G4.ox) / G4.g)), x1 = Math.min(G4.W - 1, Math.floor((b[2] + far - G4.ox) / G4.g));
+      const y0 = Math.max(0, Math.ceil((b[1] - far - G4.oy) / G4.g)), y1 = Math.min(G4.H - 1, Math.floor((b[3] + far - G4.oy) / G4.g));
       for (let iy = y0; iy <= y1; iy++) {
-        const y = G3.oy + iy * G3.g;
-        let row2 = iy * G3.W + x0;
+        const y = G4.oy + iy * G4.g;
+        let row2 = iy * G4.W + x0;
         for (let ix = x0; ix <= x1; ix++, row2++) {
-          const x = G3.ox + ix * G3.g;
+          const x = G4.ox + ix * G4.g;
           const d = pointGap(p, x, y);
-          if (d <= grow6 && !exact(G3, p, grow6, x, y) || d <= far && !near[row2]) map[row2] += sign2;
+          if (d <= grow6 && !exact(G4, p, grow6, x, y) || d <= far && !near[row2]) map[row2] += sign2;
         }
       }
     }
@@ -85095,28 +85111,28 @@ function stamp(G3, map, s, grow6, sign2, far = grow6, near) {
   }
   for (const p of pieces(s)) {
     const b = bboxOf2(p);
-    const x0 = Math.max(0, Math.ceil((b[0] - grow6 - G3.ox) / G3.g)), x1 = Math.min(G3.W - 1, Math.floor((b[2] + grow6 - G3.ox) / G3.g));
-    const y0 = Math.max(0, Math.ceil((b[1] - grow6 - G3.oy) / G3.g)), y1 = Math.min(G3.H - 1, Math.floor((b[3] + grow6 - G3.oy) / G3.g));
+    const x0 = Math.max(0, Math.ceil((b[0] - grow6 - G4.ox) / G4.g)), x1 = Math.min(G4.W - 1, Math.floor((b[2] + grow6 - G4.ox) / G4.g));
+    const y0 = Math.max(0, Math.ceil((b[1] - grow6 - G4.oy) / G4.g)), y1 = Math.min(G4.H - 1, Math.floor((b[3] + grow6 - G4.oy) / G4.g));
     for (let iy = y0; iy <= y1; iy++) {
-      const y = G3.oy + iy * G3.g;
-      let row2 = iy * G3.W + x0;
+      const y = G4.oy + iy * G4.g;
+      let row2 = iy * G4.W + x0;
       for (let ix = x0; ix <= x1; ix++, row2++) {
-        const x = G3.ox + ix * G3.g;
-        if (pointGap(p, x, y) <= grow6 && !exact(G3, p, grow6, x, y)) map[row2] += sign2;
+        const x = G4.ox + ix * G4.g;
+        if (pointGap(p, x, y) <= grow6 && !exact(G4, p, grow6, x, y)) map[row2] += sign2;
       }
     }
   }
 }
-function fillPoly(G3, pts, span) {
+function fillPoly(G4, pts, span) {
   let y0 = Infinity, y1 = -Infinity;
   for (const p of pts) {
     if (p[1] < y0) y0 = p[1];
     if (p[1] > y1) y1 = p[1];
   }
-  const iy0 = Math.max(0, Math.ceil((y0 - G3.oy) / G3.g)), iy1 = Math.min(G3.H - 1, Math.floor((y1 - G3.oy) / G3.g));
+  const iy0 = Math.max(0, Math.ceil((y0 - G4.oy) / G4.g)), iy1 = Math.min(G4.H - 1, Math.floor((y1 - G4.oy) / G4.g));
   const xs = [];
   for (let iy = iy0; iy <= iy1; iy++) {
-    const y = G3.oy + iy * G3.g + 1e-7;
+    const y = G4.oy + iy * G4.g + 1e-7;
     xs.length = 0;
     for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
       const yi = pts[i][1], yj = pts[j][1];
@@ -85124,7 +85140,7 @@ function fillPoly(G3, pts, span) {
     }
     xs.sort((a, b) => a - b);
     for (let k = 0; k + 1 < xs.length; k += 2) {
-      const a = Math.max(0, Math.ceil((xs[k] - G3.ox) / G3.g)), b = Math.min(G3.W - 1, Math.floor((xs[k + 1] - G3.ox) / G3.g));
+      const a = Math.max(0, Math.ceil((xs[k] - G4.ox) / G4.g)), b = Math.min(G4.W - 1, Math.floor((xs[k + 1] - G4.ox) / G4.g));
       if (a <= b) span(a, b, iy);
     }
   }
@@ -85164,53 +85180,53 @@ function pickGrid(pads, bounds, nLayers, forced) {
   const ox = bounds[0] - ((bounds[0] - best.ox) % best.g + best.g) % best.g, oy = bounds[1] - ((bounds[1] - best.oy) % best.g + best.g) % best.g;
   return { g: best.g, ox, oy };
 }
-var growFor = (G3, c, o) => (o.edge ? G3.edgeClr : Math.max(c.clr, o.clr)) + c.width / 2 + G3.margin;
-var growVia = (G3, c, o) => (o.edge ? G3.edgeClr + c.viaD / 2 : Math.max(Math.max(c.clr, o.clr) + c.viaD / 2, (G3.holeClr || 0) + c.viaDrill / 2)) + G3.margin;
-var domainGap = (G3, c, o) => {
-  if (!c.kind || !G3.kinds || !G3.sep || o.pad || o.edge || !o.net) return 0;
-  const k = G3.kinds.get(o.net);
+var growFor = (G4, c, o) => (o.edge ? G4.edgeClr : Math.max(c.clr, o.clr)) + c.width / 2 + G4.margin;
+var growVia = (G4, c, o) => (o.edge ? G4.edgeClr + c.viaD / 2 : Math.max(Math.max(c.clr, o.clr) + c.viaD / 2, (G4.holeClr || 0) + c.viaDrill / 2)) + G4.margin;
+var domainGap = (G4, c, o) => {
+  if (!c.kind || !G4.kinds || !G4.sep || o.pad || o.edge || !o.net) return 0;
+  const k = G4.kinds.get(o.net);
   if (!k || k === c.kind) return 0;
-  return Math.max(0, G3.sep(c.kind, k) - Math.max(c.clr, o.clr));
+  return Math.max(0, G4.sep(c.kind, k) - Math.max(c.clr, o.clr));
 };
-function stampObstacle(G3, c, o, sign2, t, v) {
-  const gt = growFor(G3, c, o), gv = growVia(G3, c, o), x = domainGap(G3, c, o);
+function stampObstacle(G4, c, o, sign2, t, v) {
+  const gt = growFor(G4, c, o), gv = growVia(G4, c, o), x = domainGap(G4, c, o);
   for (const l of o.layers) {
-    stamp(G3, t[l], o.shape, gt, sign2, gt + x, G3.nearPad);
-    stamp(G3, v[l], o.shape, gv, sign2, gv + x, G3.nearPad);
+    stamp(G4, t[l], o.shape, gt, sign2, gt + x, G4.nearPad);
+    stamp(G4, v[l], o.shape, gv, sign2, gv + x, G4.nearPad);
   }
 }
-function stampClass(G3, c, o, sign2, fixed) {
-  stampObstacle(G3, c, o, sign2, c.full, c.vfull);
-  if (fixed) stampObstacle(G3, c, o, sign2, c.fixed, c.vfixed);
+function stampClass(G4, c, o, sign2, fixed) {
+  stampObstacle(G4, c, o, sign2, c.full, c.vfull);
+  if (fixed) stampObstacle(G4, c, o, sign2, c.fixed, c.vfixed);
 }
-function buildClass(G3, key3, width, clr, viaD, viaDrill, kind, open2 = true) {
-  const n2 = G3.W * G3.H;
+function buildClass(G4, key3, width, clr, viaD, viaDrill, kind, open2 = true) {
+  const n2 = G4.W * G4.H;
   const c = { key: key3, width, clr, viaD, viaDrill, kind, open: open2, full: [], fixed: [], vfull: [], vfixed: [] };
-  for (let l = 0; l < G3.layers.length; l++) {
+  for (let l = 0; l < G4.layers.length; l++) {
     const m = new Uint16Array(n2);
-    if (G3.outside) {
-      for (let i = 0; i < n2; i++) if (G3.outside[i]) m[i] = 1;
+    if (G4.outside) {
+      for (let i = 0; i < n2; i++) if (G4.outside[i]) m[i] = 1;
     }
-    const k = G3.keep[l];
+    const k = G4.keep[l];
     if (k) {
       for (let i = 0; i < n2; i++) if (k[i]) m[i]++;
     }
-    if (!open2 && G3.quiet) {
-      for (let i = 0; i < n2; i++) if (G3.quiet[i]) m[i]++;
+    if (!open2 && G4.quiet) {
+      for (let i = 0; i < n2; i++) if (G4.quiet[i]) m[i]++;
     }
     c.fixed.push(m);
     c.vfixed.push(m.slice());
   }
-  for (const list of G3.obstacles.values()) for (const o of list) stampObstacle(G3, c, o, 1, c.fixed, c.vfixed);
-  for (let l = 0; l < G3.layers.length; l++) {
+  for (const list of G4.obstacles.values()) for (const o of list) stampObstacle(G4, c, o, 1, c.fixed, c.vfixed);
+  for (let l = 0; l < G4.layers.length; l++) {
     c.full.push(c.fixed[l].slice());
     c.vfull.push(c.vfixed[l].slice());
   }
-  G3.classes.set(key3, c);
+  G4.classes.set(key3, c);
   return c;
 }
-function viaFits(G3, vmaps, gi) {
-  if (G3.noVia[gi]) return false;
+function viaFits(G4, vmaps, gi) {
+  if (G4.noVia[gi]) return false;
   for (let l = 0; l < vmaps.length; l++) if (vmaps[l][gi]) return false;
   return true;
 }
@@ -85218,20 +85234,20 @@ function viaFits(G3, vmaps, gi) {
 // web/router/probe.ts
 var work = { steps: 0 };
 var costOf = (f2, W11) => f2.length * W11.length + f2.vias * W11.via + f2.b45 * W11.bend45 + f2.b90 * W11.bend90 + f2.wrong * W11.wrongDir;
-function featuresOf(G3, nodes, pref) {
+function featuresOf(G4, nodes, pref) {
   const f2 = { length: 0, vias: 0, b45: 0, b90: 0, wrong: 0 };
   let prev = -1;
   for (let i = 0; i + 1 < nodes.length; i++) {
     const a = nodes[i], b = nodes[i + 1];
     if (a.l !== b.l) {
-      if (!G3.thru[a.iy * G3.W + a.ix]) f2.vias++;
+      if (!G4.thru[a.iy * G4.W + a.ix]) f2.vias++;
       prev = -1;
       continue;
     }
     const dx = b.ix - a.ix, dy = b.iy - a.iy;
     if (!dx && !dy) continue;
     const diag = dx !== 0 && dy !== 0;
-    const len = Math.max(Math.abs(dx), Math.abs(dy)) * G3.g * (diag ? Math.SQRT2 : 1);
+    const len = Math.max(Math.abs(dx), Math.abs(dy)) * G4.g * (diag ? Math.SQRT2 : 1);
     const dir = dirOf(dx, dy);
     f2.length += len;
     const p = pref[a.l] || 0;
@@ -85252,9 +85268,9 @@ function dirOf(dx, dy) {
   return 0;
 }
 function probe(inp) {
-  const { G: G3, maps, vmaps, win, W: W11 } = inp;
-  const RT = inp.routable || G3.routable;
-  const ww = win.x1 - win.x0 + 1, wh = win.y1 - win.y0 + 1, n2 = ww * wh, L = G3.layers.length;
+  const { G: G4, maps, vmaps, win, W: W11 } = inp;
+  const RT = inp.routable || G4.routable;
+  const ww = win.x1 - win.x0 + 1, wh = win.y1 - win.y0 + 1, n2 = ww * wh, L = G4.layers.length;
   if (ww <= 0 || wh <= 0) return null;
   const inWin = (t) => t.ix >= win.x0 && t.ix <= win.x1 && t.iy >= win.y0 && t.iy <= win.y1;
   if (!inWin(inp.src) || inp.tgt && !inWin(inp.tgt)) return null;
@@ -85297,7 +85313,7 @@ function probe(inp) {
     return out;
   };
   const consider = (nodes, corners, onTerm) => {
-    const feat = featuresOf(G3, nodes, inp.pref);
+    const feat = featuresOf(G4, nodes, inp.pref);
     meets++;
     if (feat.vias > maxVias) return;
     const cost = costOf(feat, W11) + (inp.extra ? inp.extra(nodes) : 0);
@@ -85325,13 +85341,13 @@ function probe(inp) {
   const addRay = (side, l, d, sx, sy, startLi, parent, level) => {
     const m = maps[l], sn = seen[side][l], ow = own[side][l], oo = own[1 - side][l], tm = side === 0 ? term[l] : null, bit = 1 << d;
     let x = sx + DX[d], y = sy + DY[d];
-    if (x < 0 || y < 0 || x >= ww || y >= wh || m[(y + win.y0) * G3.W + x + win.x0] || sn[y * ww + x] & bit) {
+    if (x < 0 || y < 0 || x >= ww || y >= wh || m[(y + win.y0) * G4.W + x + win.x0] || sn[y * ww + x] & bit) {
       steps++;
       return;
     }
     const id = rl2.length;
     let len = 0, lastMeet = -2;
-    const dx = DX[d], dy = DY[d], dl = dy * ww + dx, dg = dy * G3.W + dx;
+    const dx = DX[d], dy = DY[d], dl = dy * ww + dx, dg = dy * G4.W + dx;
     rl2.push(l);
     rd.push(d);
     rs.push(startLi);
@@ -85339,7 +85355,7 @@ function probe(inp) {
     rp.push(parent);
     rv.push(level);
     rside.push(side);
-    let li = y * ww + x, gi = (y + win.y0) * G3.W + x + win.x0;
+    let li = y * ww + x, gi = (y + win.y0) * G4.W + x + win.x0;
     while (x >= 0 && y >= 0 && x < ww && y < wh) {
       if (m[gi] || sn[li] & bit) break;
       sn[li] |= bit;
@@ -85386,7 +85402,7 @@ function probe(inp) {
   const viaOk = (li, x, y) => {
     let v = viaCache[li];
     if (!v) {
-      v = viaFits(G3, vmaps, (y + win.y0) * G3.W + x + win.x0) ? 1 : 2;
+      v = viaFits(G4, vmaps, (y + win.y0) * G4.W + x + win.x0) ? 1 : 2;
       viaCache[li] = v;
     }
     return v === 1;
@@ -85408,8 +85424,8 @@ function probe(inp) {
         }
       }
       if (!multi) continue;
-      const gi = (y + win.y0) * G3.W + x + win.x0;
-      const free = G3.thru[gi] !== 0;
+      const gi = (y + win.y0) * G4.W + x + win.x0;
+      const free = G4.thru[gi] !== 0;
       if (!free && !(inp.allowVias && viaOk(li, x, y))) continue;
       for (let l2 = 0; l2 < L; l2++) if (l2 !== l && RT[l2] && !maps[l2][gi] && seen[side][l2][li] !== 255) hub(side, l2, x, y, id, lvl + (free ? 1 : viaLevel));
     }
@@ -85844,7 +85860,7 @@ var Router = class _Router {
     const routable = copper.map((name) => allow ? allow.includes(name) : (doc.layers.get(name) || { type: "signal" }).type !== "power");
     if (!routable.some(Boolean)) routable.fill(true);
     const rmin = s.clearance + s.trackWidth / 2;
-    const G3 = this.G = {
+    const G4 = this.G = {
       g: pg.g,
       ox: pg.ox,
       oy: pg.oy,
@@ -85864,12 +85880,12 @@ var Router = class _Router {
       weights: this.W
     };
     if (outline) {
-      const out = G3.outside = new Uint8Array(W11 * H).fill(1);
-      fillPoly(G3, outline, (x0, x1, iy) => out.fill(0, iy * W11 + x0, iy * W11 + x1 + 1));
+      const out = G4.outside = new Uint8Array(W11 * H).fill(1);
+      fillPoly(G4, outline, (x0, x1, iy) => out.fill(0, iy * W11 + x0, iy * W11 + x1 + 1));
     }
     {
       const r = Math.max(1, Math.round(RIM_MM / pg.g));
-      const out = G3.outside;
+      const out = G4.outside;
       const rim = this.rim = new Uint8Array(W11 * H);
       const off = (ix, iy) => ix < 0 || iy < 0 || ix >= W11 || iy >= H || (out ? out[iy * W11 + ix] === 1 : false);
       let front = [];
@@ -85897,8 +85913,8 @@ var Router = class _Router {
         front = next;
       }
     }
-    for (const sh of smd) stamp(G3, G3.noVia, sh, 0, 1);
-    for (const sh of chip) stamp(G3, G3.noVia, sh, 0.15, 1);
+    for (const sh of smd) stamp(G4, G4.noVia, sh, 0, 1);
+    for (const sh of chip) stamp(G4, G4.noVia, sh, 0.15, 1);
     const zoneLayers = (n2) => {
       const l = K8.kid(n2, "layer"), ls = K8.kid(n2, "layers");
       const names = l ? [K8.str(l[1])] : ls ? ls.slice(1).map(K8.str) : [];
@@ -85915,7 +85931,7 @@ var Router = class _Router {
     const zones = [];
     const cellsIn = (polys) => {
       const t = new Uint8Array(W11 * H);
-      for (const pts of polys) fillPoly(G3, pts, (x0, x1, iy) => {
+      for (const pts of polys) fillPoly(G4, pts, (x0, x1, iy) => {
         for (let i = iy * W11 + x0; i <= iy * W11 + x1; i++) t[i] ^= 1;
       });
       return t;
@@ -85933,11 +85949,11 @@ var Router = class _Router {
           x1 = Math.max(x1, p[0]);
           y1 = Math.max(y1, p[1]);
         }
-        const ix0 = Math.max(0, Math.floor((x0 - r - G3.ox) / G3.g)), ix1 = Math.min(W11 - 1, Math.ceil((x1 + r - G3.ox) / G3.g)), iy0 = Math.max(0, Math.floor((y0 - r - G3.oy) / G3.g)), iy1 = Math.min(H - 1, Math.ceil((y1 + r - G3.oy) / G3.g));
+        const ix0 = Math.max(0, Math.floor((x0 - r - G4.ox) / G4.g)), ix1 = Math.min(W11 - 1, Math.ceil((x1 + r - G4.ox) / G4.g)), iy0 = Math.max(0, Math.floor((y0 - r - G4.oy) / G4.g)), iy1 = Math.min(H - 1, Math.ceil((y1 + r - G4.oy) / G4.g));
         for (let iy = iy0; iy <= iy1; iy++) for (let ix = ix0; ix <= ix1; ix++) {
           const i = iy * W11 + ix;
           if (t[i]) continue;
-          const x = G3.ox + ix * G3.g, y = G3.oy + iy * G3.g;
+          const x = G4.ox + ix * G4.g, y = G4.oy + iy * G4.g;
           for (let k = 0, j = pts.length - 1; k < pts.length; j = k++) {
             const a = pts[j], b = pts[k], dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
             const u = l2 ? Math.max(0, Math.min(1, ((x - a[0]) * dx + (y - a[1]) * dy) / l2)) : 0;
@@ -85966,11 +85982,11 @@ var Router = class _Router {
         const t = cellsIn(polys);
         const tt = band(polys, t, maxTrack / 2), tv = band(polys, t, maxVia / 2);
         if (no("tracks")) for (const l of layers) {
-          const m = G3.keep[l] || (G3.keep[l] = new Uint8Array(W11 * H));
+          const m = G4.keep[l] || (G4.keep[l] = new Uint8Array(W11 * H));
           for (let i = 0; i < tt.length; i++) if (tt[i]) m[i] = 1;
         }
         if (no("vias")) {
-          for (let i = 0; i < tv.length; i++) if (tv[i]) G3.noVia[i]++;
+          for (let i = 0; i < tv.length; i++) if (tv[i]) G4.noVia[i]++;
         }
       } else if (layers.length) {
         const cp2 = K8.kid(n2, "connect_pads"), cc = cp2 && K8.kid(cp2, "clearance"), mt = K8.kid(n2, "min_thickness");
@@ -85982,10 +85998,10 @@ var Router = class _Router {
       if (!b) continue;
       const ls = ko.layers && ko.layers.length ? ko.layers.map((nm3) => copper.indexOf(nm3)).filter((i) => i >= 0) : all2;
       for (const l of ls) {
-        const m = G3.keep[l] || (G3.keep[l] = new Uint8Array(W11 * H));
+        const m = G4.keep[l] || (G4.keep[l] = new Uint8Array(W11 * H));
         for (let iy = b[1]; iy <= b[3]; iy++) m.fill(1, iy * W11 + b[0], iy * W11 + b[2] + 1);
       }
-      for (let iy = b[1]; iy <= b[3]; iy++) for (let ix = b[0]; ix <= b[2]; ix++) G3.noVia[iy * W11 + ix]++;
+      for (let iy = b[1]; iy <= b[3]; iy++) for (let ix = b[0]; ix <= b[2]; ix++) G4.noVia[iy * W11 + ix]++;
     }
     for (const it of doc.items.values()) {
       if (it.kind !== "footprint") continue;
@@ -86004,7 +86020,7 @@ var Router = class _Router {
       b = [b[0] - 0.1, b[1] - 0.1, b[2] + 0.1, b[3] + 0.1];
       const cb = this.cellBox(b);
       if (!cb) continue;
-      const q = G3.quiet || (G3.quiet = new Uint8Array(W11 * H));
+      const q = G4.quiet || (G4.quiet = new Uint8Array(W11 * H));
       for (let iy = cb[1]; iy <= cb[3]; iy++) q.fill(1, iy * W11 + cb[0], iy * W11 + cb[2] + 1);
       for (const n2 of nets) if (n2) this.xtalNets.add(n2);
     }
@@ -86032,8 +86048,8 @@ var Router = class _Router {
           const layers = Array.from(c.layers).map((l) => copper.indexOf(l)).filter((i) => i >= 0);
           if (!layers.length) continue;
           for (const p of c.anchors) {
-            const ix = Math.round((p[0] - G3.ox) / G3.g), iy = Math.round((p[1] - G3.oy) / G3.g);
-            if (ix < 0 || iy < 0 || ix >= W11 || iy >= H || G3.outside && G3.outside[iy * W11 + ix]) continue;
+            const ix = Math.round((p[0] - G4.ox) / G4.g), iy = Math.round((p[1] - G4.oy) / G4.g);
+            if (ix < 0 || iy < 0 || ix >= W11 || iy >= H || G4.outside && G4.outside[iy * W11 + ix]) continue;
             anchors2.push({ p: [p[0], p[1]], layers, shape: c.kind === "pad" || c.kind === "via" ? c.shape : { t: "circle", x: p[0], y: p[1], r: (c.width || 0.2) / 2 }, cluster: 0, narrow: c.kind === "pad" && c.pad.type === "smd" ? Math.min(c.pad.w, c.pad.h) : void 0, axis: c.kind === "pad" && c.pad.type === "smd" ? padAxis(c.pad) : void 0 });
           }
         }
@@ -86132,7 +86148,7 @@ var Router = class _Router {
   }
   /** The rule class a net routes with (its netclass's track width, clearance and via), built on first use. */
   classFor(netKey, cap = Infinity, want = 0, smallVia = false) {
-    const { P, s, G: G3 } = this;
+    const { P, s, G: G4 } = this;
     const nc = P.netclassOf(s, netKey);
     const plan = (this.opts.netOpts || {})[netKey];
     const pw = plan && +plan.width > 0 ? +plan.width : 0;
@@ -86150,13 +86166,13 @@ var Router = class _Router {
       }
     }
     const kind = this.relax ? void 0 : this.kindFor(netKey);
-    const open2 = !G3.quiet || this.xtalNets.has(netKey) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(netKey);
+    const open2 = !G4.quiet || this.xtalNets.has(netKey) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(netKey);
     const key3 = `${width}/${clr}/${viaD}/${viaDrill}` + (kind ? "/" + kind : "") + (open2 ? "" : "/q");
-    let c = G3.classes.get(key3);
+    let c = G4.classes.get(key3);
     if (!c) {
-      c = buildClass(G3, key3, width, clr, viaD, viaDrill, kind, open2);
+      c = buildClass(G4, key3, width, clr, viaD, viaDrill, kind, open2);
       if (this.conns.length) {
-        for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G3, c, sh, 1, false);
+        for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G4, c, sh, 1, false);
       }
     }
     return c;
@@ -86174,9 +86190,9 @@ var Router = class _Router {
   /** The kind a net's rule class carries: none when the board has nothing sensitive on it (or separation is off),
    *  and none for supply nets, which every domain shares. */
   kindFor(netKey) {
-    const G3 = this.G;
+    const G4 = this.G;
     if (this.domains === null) {
-      const names = /* @__PURE__ */ new Set([...G3.obstacles.keys(), ...Object.keys(this.opts.netOpts || {})]);
+      const names = /* @__PURE__ */ new Set([...G4.obstacles.keys(), ...Object.keys(this.opts.netOpts || {})]);
       names.delete("");
       {
         const by = /* @__PURE__ */ new Map();
@@ -86204,16 +86220,16 @@ var Router = class _Router {
         const quiet = o.quiet !== void 0 ? o.quiet : Math.max(2 * base, 0.3), noisy = o.noisy !== void 0 ? o.noisy : Math.max(3 * base, 0.5);
         this.sepGaps = { quiet, noisy };
         const sens = (k2) => k2 === "analog" || k2 === "rf", loud = (k2) => k2 === "switching" || k2 === "fast";
-        G3.kinds = new Proxy(/* @__PURE__ */ new Map(), { get: (_t, prop2) => prop2 === "get" ? (n2) => {
+        G4.kinds = new Proxy(/* @__PURE__ */ new Map(), { get: (_t, prop2) => prop2 === "get" ? (n2) => {
           const k2 = this.kindOf(n2);
           return k2 === "supply" ? void 0 : k2;
         } : void 0 });
         {
-          const near = G3.nearPad = new Uint8Array(G3.W * G3.H);
+          const near = G4.nearPad = new Uint8Array(G4.W * G4.H);
           const reach = o.nearPads !== void 0 ? o.nearPads : 1.2;
-          for (const list of G3.obstacles.values()) for (const ob of list) if (ob.pad) stamp(G3, near, ob.shape, reach, 1);
+          for (const list of G4.obstacles.values()) for (const ob of list) if (ob.pad) stamp(G4, near, ob.shape, reach, 1);
         }
-        G3.sep = (a, b) => a === b || a === "supply" || b === "supply" ? 0 : sens(a) && sens(b) ? quiet : sens(a) ? loud(b) ? noisy : quiet : sens(b) ? loud(a) ? noisy : quiet : 0;
+        G4.sep = (a, b) => a === b || a === "supply" || b === "supply" ? 0 : sens(a) && sens(b) ? quiet : sens(a) ? loud(b) ? noisy : quiet : sens(b) ? loud(a) ? noisy : quiet : 0;
       }
     }
     if (!this.domains) return void 0;
@@ -86232,19 +86248,19 @@ var Router = class _Router {
     return o && o > 0 ? o : Math.min(0.5, Math.max(0.3, w * 2));
   }
   cellBox(b) {
-    const G3 = this.G;
+    const G4 = this.G;
     if (!b || b.length < 4) return null;
-    const x0 = Math.max(0, Math.ceil((Math.min(b[0], b[2]) - G3.ox) / G3.g)), x1 = Math.min(G3.W - 1, Math.floor((Math.max(b[0], b[2]) - G3.ox) / G3.g));
-    const y0 = Math.max(0, Math.ceil((Math.min(b[1], b[3]) - G3.oy) / G3.g)), y1 = Math.min(G3.H - 1, Math.floor((Math.max(b[1], b[3]) - G3.oy) / G3.g));
+    const x0 = Math.max(0, Math.ceil((Math.min(b[0], b[2]) - G4.ox) / G4.g)), x1 = Math.min(G4.W - 1, Math.floor((Math.max(b[0], b[2]) - G4.ox) / G4.g));
+    const y0 = Math.max(0, Math.ceil((Math.min(b[1], b[3]) - G4.oy) / G4.g)), y1 = Math.min(G4.H - 1, Math.floor((Math.max(b[1], b[3]) - G4.oy) / G4.g));
     return x0 <= x1 && y0 <= y1 ? [x0, y0, x1, y1] : null;
   }
   /** The plan's wishes for a net, resolved against this board. */
   guideFor(netKey) {
-    const G3 = this.G, plan = (this.opts.netOpts || {})[netKey] || {};
+    const G4 = this.G, plan = (this.opts.netOpts || {})[netKey] || {};
     const rank = (this.opts.order || []).indexOf(netKey);
     let allowed = null;
     if (plan.layers && plan.layers.length) {
-      allowed = G3.layers.map((nm3) => plan.layers.includes(nm3));
+      allowed = G4.layers.map((nm3) => plan.layers.includes(nm3));
       if (!allowed.some(Boolean)) allowed = null;
     }
     const usbData = plan.maxVias === void 0 && usualImpedance(netKey, true) === 90 && /USB|(^|[\/_(])D[+\-PM]\)?$/i.test(netKey) && !!pairName(netKey);
@@ -86271,41 +86287,41 @@ var Router = class _Router {
     return this.nets.find((n2) => n2.key === key3);
   }
   lift(net, sign2, c = net.cls) {
-    const G3 = this.G;
-    for (const o of G3.obstacles.get(net.key) || []) {
-      stampClass(G3, c, o, -sign2, true);
+    const G4 = this.G;
+    for (const o of G4.obstacles.get(net.key) || []) {
+      stampClass(G4, c, o, -sign2, true);
       if (o.thru) {
-        const ix = Math.round((o.thru[0] - G3.ox) / G3.g), iy = Math.round((o.thru[1] - G3.oy) / G3.g);
-        if (ix >= 0 && iy >= 0 && ix < G3.W && iy < G3.H) G3.thru[iy * G3.W + ix] = sign2 > 0 ? 1 : 0;
+        const ix = Math.round((o.thru[0] - G4.ox) / G4.g), iy = Math.round((o.thru[1] - G4.oy) / G4.g);
+        if (ix >= 0 && iy >= 0 && ix < G4.W && iy < G4.H) G4.thru[iy * G4.W + ix] = sign2 > 0 ? 1 : 0;
       }
     }
-    for (const b of net.guide.avoid) for (const maps of [c.full, c.fixed, c.vfull, c.vfixed]) for (const m of maps) for (let iy = b[1]; iy <= b[3]; iy++) for (let i = iy * G3.W + b[0]; i <= iy * G3.W + b[2]; i++) m[i] += sign2;
+    for (const b of net.guide.avoid) for (const maps of [c.full, c.fixed, c.vfull, c.vfixed]) for (const m of maps) for (let iy = b[1]; iy <= b[3]; iy++) for (let i = iy * G4.W + b[0]; i <= iy * G4.W + b[2]; i++) m[i] += sign2;
     for (const conn of net.conns) if (conn.nodes) {
-      for (const o of conn.shapes) stampClass(G3, c, o, -sign2, false);
-      for (const gi of conn.viaCells) G3.thru[gi] = sign2 > 0 ? 1 : 0;
+      for (const o of conn.shapes) stampClass(G4, c, o, -sign2, false);
+      for (const gi of conn.viaCells) G4.thru[gi] = sign2 > 0 ? 1 : 0;
     }
   }
   place(conn, sign2) {
-    const G3 = this.G;
-    for (const c of G3.classes.values()) for (const o of conn.shapes) stampClass(G3, c, o, sign2, false);
+    const G4 = this.G;
+    for (const c of G4.classes.values()) for (const o of conn.shapes) stampClass(G4, c, o, sign2, false);
   }
   mm(n2) {
     return [r62(this.G.ox + n2.ix * this.G.g), r62(this.G.oy + n2.iy * this.G.g)];
   }
   /** The free cell a route starts from at an anchor: its own cell, else the nearest free one still on the pad. */
   access(a, maps, rt = this.G.routable) {
-    const G3 = this.G;
-    const cx = (a.p[0] - G3.ox) / G3.g, cy = (a.p[1] - G3.oy) / G3.g;
+    const G4 = this.G;
+    const cx = (a.p[0] - G4.ox) / G4.g, cy = (a.p[1] - G4.oy) / G4.g;
     const layers = a.layers.filter((l) => rt[l]);
     if (!layers.length) return null;
     let best = null, bd = Infinity;
-    const R2 = a.shape ? Math.min(6, Math.ceil(1 / G3.g)) : 0;
+    const R2 = a.shape ? Math.min(6, Math.ceil(1 / G4.g)) : 0;
     for (let iy = Math.round(cy) - R2; iy <= Math.round(cy) + R2; iy++) for (let ix = Math.round(cx) - R2; ix <= Math.round(cx) + R2; ix++) {
-      if (ix < 0 || iy < 0 || ix >= G3.W || iy >= G3.H) continue;
+      if (ix < 0 || iy < 0 || ix >= G4.W || iy >= G4.H) continue;
       const d = Math.hypot(ix - cx, iy - cy);
       if (d >= bd) continue;
-      if (R2 && d > 0.71 && pointGap(a.shape, G3.ox + ix * G3.g, G3.oy + iy * G3.g) > 0) continue;
-      const free = layers.filter((l) => !maps[l][iy * G3.W + ix]);
+      if (R2 && d > 0.71 && pointGap(a.shape, G4.ox + ix * G4.g, G4.oy + iy * G4.g) > 0) continue;
+      const free = layers.filter((l) => !maps[l][iy * G4.W + ix]);
       if (!free.length) continue;
       bd = d;
       best = { ix, iy, layers: free };
@@ -86319,14 +86335,14 @@ var Router = class _Router {
    */
   escape(a, maps, layers) {
     if (!a.axis || !this.cur) return null;
-    const G3 = this.G, w = this.cur.cls.width, net = this.cur.net, clr = this.cur.cls.clr;
-    for (let t = G3.g; t <= 3; t += G3.g / 2) for (const sgn of [1, -1]) {
+    const G4 = this.G, w = this.cur.cls.width, net = this.cur.net, clr = this.cur.cls.clr;
+    for (let t = G4.g; t <= 3; t += G4.g / 2) for (const sgn of [1, -1]) {
       const q = [r62(a.p[0] + a.axis[0] * t * sgn), r62(a.p[1] + a.axis[1] * t * sgn)];
-      const ix = Math.round((q[0] - G3.ox) / G3.g), iy = Math.round((q[1] - G3.oy) / G3.g);
-      if (ix < 0 || iy < 0 || ix >= G3.W || iy >= G3.H) continue;
-      const free = layers.filter((l) => !maps[l][iy * G3.W + ix]);
+      const ix = Math.round((q[0] - G4.ox) / G4.g), iy = Math.round((q[1] - G4.oy) / G4.g);
+      if (ix < 0 || iy < 0 || ix >= G4.W || iy >= G4.H) continue;
+      const free = layers.filter((l) => !maps[l][iy * G4.W + ix]);
       if (!free.length) continue;
-      const c = [r62(G3.ox + ix * G3.g), r62(G3.oy + iy * G3.g)];
+      const c = [r62(G4.ox + ix * G4.g), r62(G4.oy + iy * G4.g)];
       const ok2 = free.filter((l) => this.clearOf({ t: "seg", a: a.p, b: q, r: w / 2 }, l, net, clr) && this.clearOf({ t: "seg", a: q, b: c, r: w / 2 }, l, net, clr));
       if (ok2.length) return { ix, iy, layers: ok2, esc: q };
     }
@@ -86335,7 +86351,7 @@ var Router = class _Router {
   /** The widest track that can leave a fine-pitch pad along its axis and keep the clearance to what is beside it. */
   roomAt(a, net) {
     if (!a.axis || !a.narrow || a.narrow > 0.35) return Infinity;
-    const G3 = this.G, P = this.P;
+    const G4 = this.G, P = this.P;
     const clr = Math.max(P.netClearance(this.s, net), this.s.minClearance || 0);
     this.index();
     let half = Infinity;
@@ -86350,16 +86366,16 @@ var Router = class _Router {
         if (seen.has(e)) continue;
         seen.add(e);
         if (e.o.net && e.o.net === net || !e.o.layers.some((l) => a.layers.includes(l))) continue;
-        const v = P.shapeGap(e.o.shape, sh) - (e.o.edge ? G3.edgeClr : Math.max(e.o.clr, clr));
+        const v = P.shapeGap(e.o.shape, sh) - (e.o.edge ? G4.edgeClr : Math.max(e.o.clr, clr));
         if (v < h) h = v;
       }
       if (sgn === 1 || h > half) half = sgn === 1 ? h : Math.max(half, h);
     }
-    return half === Infinity ? Infinity : Math.max(0, 2 * (half - G3.margin - 4e-3));
+    return half === Infinity ? Infinity : Math.max(0, 2 * (half - G4.margin - 4e-3));
   }
   index() {
     if (this.oidx) return;
-    const G3 = this.G, B = 2;
+    const G4 = this.G, B = 2;
     const idx = this.oidx = /* @__PURE__ */ new Map();
     const full = (s) => {
       if (s.t === "circle") return [s.x - s.r, s.y - s.r, s.x + s.r, s.y + s.r];
@@ -86385,7 +86401,7 @@ var Router = class _Router {
         l.push(e);
       }
     };
-    for (const list of G3.obstacles.values()) for (const o of list) {
+    for (const list of G4.obstacles.values()) for (const o of list) {
       if (o.shape.t === "path" && o.shape.pts.length > 2) {
         for (let i = 0; i + 1 < o.shape.pts.length; i++) add({ net: o.net, layers: o.layers, clr: o.clr, edge: o.edge, shape: { t: "seg", a: o.shape.pts[i], b: o.shape.pts[i + 1], r: o.shape.r || 0 } });
       } else add(o);
@@ -86395,9 +86411,9 @@ var Router = class _Router {
    *  this stackup.  A geometry the board cannot reasonably carry is reported and left at the class width. */
   sizeForImpedance(keys) {
     if (this.opts.impedance === false) return;
-    const { K: K8, P, s, doc, G: G3 } = this;
+    const { K: K8, P, s, doc, G: G4 } = this;
     const stack = stackupOf(K8, doc);
-    const outer = G3.layers.find((_, l) => G3.routable[l]) || G3.layers[0];
+    const outer = G4.layers.find((_, l) => G4.routable[l]) || G4.layers[0];
     const tr = traceOn(stack, outer);
     if (!tr) return;
     const model = `${tr.kind} on ${tr.layer} over ${tr.reference.join(" and ")}, ${+tr.h.toFixed(3)} mm of \u03B5r ${+tr.er.toFixed(2)}${stack.assumed ? " (stackup assumed: the board carries none)" : ""}`;
@@ -86553,10 +86569,10 @@ var Router = class _Router {
    *  fan-out from those pads to the vias on their own layer, and from the vias the pair goes on as one coupled run on
    *  the other end's layer.  Both lines change layer at the same place through matched vias. */
   layPairVias(pr) {
-    const G3 = this.G, P = this.P, { cp: cp2, cn } = pr;
+    const G4 = this.G, P = this.P, { cp: cp2, cn } = pr;
     const w = Math.min(cp2.cls.width, cn.cls.width), clr = Math.max(cp2.cls.clr, cn.cls.clr), gap = Math.max(clr, this.opts.pairGap || 0, this.zGap.get(pr.p.key) || 0);
-    const viaD = Math.max(cp2.cls.viaD, cn.cls.viaD), drill2 = Math.max(cp2.cls.viaDrill, cn.cls.viaDrill), clrV = Math.max(clr, (G3.holeClr || 0) - (viaD - drill2) / 2), pitch = viaD + Math.max(clrV, gap);
-    const all2 = G3.layers.map((_, l) => l).filter((l) => G3.routable[l]);
+    const viaD = Math.max(cp2.cls.viaD, cn.cls.viaD), drill2 = Math.max(cp2.cls.viaDrill, cn.cls.viaDrill), clrV = Math.max(clr, (G4.holeClr || 0) - (viaD - drill2) / 2), pitch = viaD + Math.max(clrV, gap);
+    const all2 = G4.layers.map((_, l) => l).filter((l) => G4.routable[l]);
     if (!this.allowVias || !pr.p.guide.allowVias || !pr.n.guide.allowVias) return "its pads are not all on one layer and vias are not allowed";
     const nEnd = (e) => pr.swap ? e === "a" ? "b" : "a" : e;
     const half = (a) => {
@@ -86585,7 +86601,7 @@ var Router = class _Router {
       const s1 = Math.max(half(pv), half(nv)) + clr + viaD / 2;
       for (const t of [s1, s1 + 0.3, s1 + 0.6, s1 + 1, s1 + 1.6, s1 + 2.4, s1 + 3.2, s1 + 4]) for (const side of [0, 0.5, -0.5, 1, -1, 1.6, -1.6, 2.4, -2.4]) for (const dir of [1, -1]) for (const bend of [false, true]) {
         const cx = mx + ex * t * dir + ux * side, cy = my + ey * t * dir + uy * side;
-        const cell = (x, y) => ({ ix: Math.round((x - G3.ox) / G3.g), iy: Math.round((y - G3.oy) / G3.g) });
+        const cell = (x, y) => ({ ix: Math.round((x - G4.ox) / G4.g), iy: Math.round((y - G4.oy) / G4.g) });
         const kp = cell(cx - ux * pitch / 2, cy - uy * pitch / 2), kn = cell(cx + ux * pitch / 2, cy + uy * pitch / 2);
         const vp = this.mm(kp), vn = this.mm(kn);
         if (Math.hypot(vp[0] - vn[0], vp[1] - vn[1]) < viaD + clr - 1e-6) continue;
@@ -86625,7 +86641,7 @@ var Router = class _Router {
               c.nodes = nodes;
               c.viaCells = [];
               c.stubs = [];
-              c.feat = featuresOf(G3, nodes, this.pref);
+              c.feat = featuresOf(G4, nodes, this.pref);
               c.landed = -1;
               c.zoneEnd = false;
               c.pair = true;
@@ -86636,7 +86652,7 @@ var Router = class _Router {
             set(cp2, tp);
             set(cn, tn);
             const lp = Math.hypot(tp.a[0] - tp.b[0], tp.a[1] - tp.b[1]), ln = Math.hypot(tn.a[0] - tn.b[0], tn.a[1] - tn.b[1]);
-            this.pairReports.set(cp2.id + "/" + cn.id, { p: pr.p.key, n: pr.n.key, coupled: true, layer: G3.layers[l], width: w, gap: +gap.toFixed(4), lengthP: +lp.toFixed(3), lengthN: +ln.toFixed(3), skew: +Math.abs(lp - ln).toFixed(3) });
+            this.pairReports.set(cp2.id + "/" + cn.id, { p: pr.p.key, n: pr.n.key, coupled: true, layer: G4.layers[l], width: w, gap: +gap.toFixed(4), lengthP: +lp.toFixed(3), lengthN: +ln.toFixed(3), skew: +Math.abs(lp - ln).toFixed(3) });
             r = "";
           }
         }
@@ -86660,7 +86676,7 @@ var Router = class _Router {
             len += Math.hypot(x.a[0] - x.b[0], x.a[1] - x.b[1]);
           }
           c.shapes.push({ net: c.net, layers: all2.slice(), shape: via(v), clr: clrV });
-          c.viaCells = [k.iy * G3.W + k.ix];
+          c.viaCells = [k.iy * G4.W + k.ix];
           this.place(c, 1);
           return len;
         };
@@ -86719,17 +86735,17 @@ var Router = class _Router {
     return { tp, tn };
   }
   layPair(pr) {
-    const G3 = this.G, P = this.P, { cp: cp2, cn } = pr;
+    const G4 = this.G, P = this.P, { cp: cp2, cn } = pr;
     const w = Math.min(cp2.cls.width, cn.cls.width), clr = Math.max(cp2.cls.clr, cn.cls.clr);
     const gap = Math.max(clr, this.opts.pairGap || 0, this.zGap.get(pr.p.key) || 0), d = (w + gap) / 2;
     const Pa = cp2.a, Pb = cp2.b, Na = pr.swap ? cn.b : cn.a, Nb = pr.swap ? cn.a : cn.b;
-    const layers = G3.layers.map((_, l) => l).filter((l) => G3.routable[l] && [Pa, Pb, Na, Nb].every((a) => a.layers.includes(l)));
+    const layers = G4.layers.map((_, l) => l).filter((l) => G4.routable[l] && [Pa, Pb, Na, Nb].every((a) => a.layers.includes(l)));
     if (!layers.length) return this.layPairVias(pr);
     const key3 = `pair/${w}/${gap}/${clr}` + (cp2.cls.open === false ? "/q" : "");
-    let wide = G3.classes.get(key3);
+    let wide = G4.classes.get(key3);
     if (!wide) {
-      wide = buildClass(G3, key3, 2 * w + gap, clr, cp2.cls.viaD, cp2.cls.viaDrill, cp2.cls.kind, cp2.cls.open !== false);
-      for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G3, wide, sh, 1, false);
+      wide = buildClass(G4, key3, 2 * w + gap, clr, cp2.cls.viaD, cp2.cls.viaDrill, cp2.cls.kind, cp2.cls.open !== false);
+      for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G4, wide, sh, 1, false);
     }
     const half = (a) => {
       const sh = a.shape;
@@ -86745,10 +86761,10 @@ var Router = class _Router {
       const out = [];
       const fwd = (toward.p[0] - mx) * ex + (toward.p[1] - my) * ey >= 0 ? 1 : -1;
       for (const sh of [0, 0.4, -0.4, 0.8, -0.8]) for (const sg of [fwd, -fwd]) {
-        const tq = s1 + jog + Math.abs(sh) + 0.05, t = tq + 2 * d + 0.1 + G3.g;
+        const tq = s1 + jog + Math.abs(sh) + 0.05, t = tq + 2 * d + 0.1 + G4.g;
         const ox = mx - ey * sh, oy = my + ex * sh;
         const p = [r62(ox + ex * t * sg), r62(oy + ey * t * sg)];
-        out.push({ g: { p, layers, shape: { t: "circle", x: p[0], y: p[1], r: G3.g * 1.5 }, cluster: 0 }, e: [ex * sg, ey * sg], q: [r62(ox + ex * tq * sg), r62(oy + ey * tq * sg)], s: s1 });
+        out.push({ g: { p, layers, shape: { t: "circle", x: p[0], y: p[1], r: G4.g * 1.5 }, cluster: 0 }, e: [ex * sg, ey * sg], q: [r62(ox + ex * tq * sg), r62(oy + ey * tq * sg)], s: s1 });
       }
       return out;
     };
@@ -86757,11 +86773,11 @@ var Router = class _Router {
     this.lift(pr.n, 1, wide);
     let laid = null;
     const wall = (m, at3, cell, sign2) => {
-      const R2 = Math.max(1.5, Math.hypot(Pa.p[0] - Na.p[0], Pa.p[1] - Na.p[1])), n2 = Math.ceil(R2 / G3.g), cx = cell.ix, cy = cell.iy;
+      const R2 = Math.max(1.5, Math.hypot(Pa.p[0] - Na.p[0], Pa.p[1] - Na.p[1])), n2 = Math.ceil(R2 / G4.g), cx = cell.ix, cy = cell.iy;
       for (let dy = -n2; dy <= n2; dy++) for (let dx = -n2; dx <= n2; dx++) {
         const ix = cx + dx, iy = cy + dy;
-        if (ix < 0 || iy < 0 || ix >= G3.W || iy >= G3.H) continue;
-        if ((dx * at3.e[0] + dy * at3.e[1]) * G3.g < -G3.g * 0.6) m[iy * G3.W + ix] += sign2;
+        if (ix < 0 || iy < 0 || ix >= G4.W || iy >= G4.H) continue;
+        if ((dx * at3.e[0] + dy * at3.e[1]) * G4.g < -G4.g * 0.6) m[iy * G4.W + ix] += sign2;
       }
     };
     try {
@@ -86772,7 +86788,7 @@ var Router = class _Router {
         const ga = gather(Pa, Na, Pb)[0], gb = gather(Pb, Nb, Pa)[0];
         const span = Math.hypot(gb.q[0] - ga.q[0], gb.q[1] - ga.q[1]);
         if (span < 0.1 || span > 6) continue;
-        const cell = (q) => ({ ix: Math.round((q[0] - G3.ox) / G3.g), iy: Math.round((q[1] - G3.oy) / G3.g), l });
+        const cell = (q) => ({ ix: Math.round((q[0] - G4.ox) / G4.g), iy: Math.round((q[1] - G4.oy) / G4.g), l });
         const nodes = [cell(ga.q), cell(gb.q)];
         const lead = [{ e: ga.e, s: ga.s }, { e: gb.e, s: gb.s }];
         for (const L1 of [0.4, 0.3, 0.2]) {
@@ -86792,7 +86808,7 @@ var Router = class _Router {
               continue;
             }
             pr.laid = { c, l, w, d, clr, sgn, lead };
-            laid = { l, nodes, feat: featuresOf(G3, nodes, this.pref), tp: r.tp, tn: r.tn };
+            laid = { l, nodes, feat: featuresOf(G4, nodes, this.pref), tp: r.tp, tn: r.tn };
             break;
           }
         }
@@ -86802,7 +86818,7 @@ var Router = class _Router {
         if (laid) break search;
         this.cur = Object.assign({}, cp2, { cls: wide });
         this.curSoft = false;
-        const rt = G3.routable.map((_, i) => i === l);
+        const rt = G4.routable.map((_, i) => i === l);
         const src = this.access(ga.g, wide.full, rt), tgt = this.access(gb.g, wide.full, rt);
         if (this.opts.debugPairs) console.log("combo", pr.p.key, JSON.stringify(ga.g.p), JSON.stringify(gb.g.p), !!src, !!tgt);
         if (!src || !tgt) continue;
@@ -86810,7 +86826,7 @@ var Router = class _Router {
         wall(wide.full[l], gb, tgt, 1);
         let res = null;
         try {
-          if (!wide.full[l][src.iy * G3.W + src.ix] && !wide.full[l][tgt.iy * G3.W + tgt.ix]) res = probe({ G: G3, maps: wide.full, vmaps: wide.vfull, src, tgt, term: [], win: { x0: 0, y0: 0, x1: G3.W - 1, y1: G3.H - 1 }, pref: this.pref, W: this.W, allowVias: false, maxSteps: 6e6, routable: rt });
+          if (!wide.full[l][src.iy * G4.W + src.ix] && !wide.full[l][tgt.iy * G4.W + tgt.ix]) res = probe({ G: G4, maps: wide.full, vmaps: wide.vfull, src, tgt, term: [], win: { x0: 0, y0: 0, x1: G4.W - 1, y1: G4.H - 1 }, pref: this.pref, W: this.W, allowVias: false, maxSteps: 6e6, routable: rt });
         } finally {
           wall(wide.full[l], ga, src, -1);
           wall(wide.full[l], gb, tgt, -1);
@@ -86826,7 +86842,7 @@ var Router = class _Router {
         }
         if (c.length < 2) continue;
         if (Math.hypot(c[0][0] - ga.g.p[0], c[0][1] - ga.g.p[1]) > Math.hypot(c[c.length - 1][0] - ga.g.p[0], c[c.length - 1][1] - ga.g.p[1])) c = c.slice().reverse();
-        const back = (p, e) => [r62(p[0] - e[0] * (2 * d + 0.1 + G3.g)), r62(p[1] - e[1] * (2 * d + 0.1 + G3.g))];
+        const back = (p, e) => [r62(p[0] - e[0] * (2 * d + 0.1 + G4.g)), r62(p[1] - e[1] * (2 * d + 0.1 + G4.g))];
         c = [back(c[0], ga.e), ...c, back(c[c.length - 1], gb.e)];
         for (const sgn of [1, -1]) {
           const lead = [{ e: ga.e, s: ga.s }, { e: gb.e, s: gb.s }];
@@ -86865,7 +86881,7 @@ var Router = class _Router {
       return len;
     };
     const lp = put(cp2, laid.tp), ln = put(cn, laid.tn);
-    this.pairReports.set(cp2.id + "/" + cn.id, { p: pr.p.key, n: pr.n.key, coupled: true, layer: G3.layers[laid.l], width: w, gap: +gap.toFixed(4), lengthP: +lp.toFixed(3), lengthN: +ln.toFixed(3), skew: +Math.abs(lp - ln).toFixed(3) });
+    this.pairReports.set(cp2.id + "/" + cn.id, { p: pr.p.key, n: pr.n.key, coupled: true, layer: G4.layers[laid.l], width: w, gap: +gap.toFixed(4), lengthP: +lp.toFixed(3), lengthN: +ln.toFixed(3), skew: +Math.abs(lp - ln).toFixed(3) });
     return "";
   }
   /** A run of n serpentine humps on the piece a→b, swinging A to one side: square humps S wide and S apart with
@@ -87129,18 +87145,18 @@ var Router = class _Router {
   }
   /** Exact: does a piece of track keep its clearance to the board's copper, holes and edges, and to this run's routes? */
   clearOf(shape3, layer, net, clr, why) {
-    const G3 = this.G, P = this.P, B = 2;
+    const G4 = this.G, P = this.P, B = 2;
     const bbOf = (s) => s.t === "circle" ? [s.x - s.r, s.y - s.r, s.x + s.r, s.y + s.r] : s.t === "seg" ? [Math.min(s.a[0], s.b[0]) - s.r, Math.min(s.a[1], s.b[1]) - s.r, Math.max(s.a[0], s.b[0]) + s.r, Math.max(s.a[1], s.b[1]) + s.r] : null;
     this.index();
     const bb = bbOf(shape3);
-    const m = Math.max(clr, this.s.clearance, G3.edgeClr) + 0.3;
+    const m = Math.max(clr, this.s.clearance, G4.edgeClr) + 0.3;
     const seen = /* @__PURE__ */ new Set();
     for (let y = Math.floor((bb[1] - m) / B); y <= Math.floor((bb[3] + m) / B); y++) for (let x = Math.floor((bb[0] - m) / B); x <= Math.floor((bb[2] + m) / B); x++) for (const e of this.oidx.get(x + "," + y) || []) {
       if (seen.has(e)) continue;
       seen.add(e);
       if (e.o.net && e.o.net === net) continue;
       if (!e.o.layers.includes(layer)) continue;
-      const need = (e.o.edge ? G3.edgeClr : Math.max(e.o.clr, clr)) - 5e-5;
+      const need = (e.o.edge ? G4.edgeClr : Math.max(e.o.clr, clr)) - 5e-5;
       if (e.bb[0] > bb[2] + need || e.bb[2] < bb[0] - need || e.bb[1] > bb[3] + need || e.bb[3] < bb[1] - need) continue;
       const gap = P.shapeGap(e.o.shape, shape3);
       if (gap < need) {
@@ -87178,7 +87194,7 @@ var Router = class _Router {
     return parent.map((_, i) => find(i));
   }
   cellsOf(conn, out, owner) {
-    const G3 = this.G, nodes = conn.nodes;
+    const G4 = this.G, nodes = conn.nodes;
     if (conn.pair) return;
     for (let i = 0; i + 1 < nodes.length; i++) {
       const a = nodes[i], b = nodes[i + 1];
@@ -87187,14 +87203,14 @@ var Router = class _Router {
       for (let k = 0; k <= n2; k++) {
         const ix = a.ix + sx * k, iy = a.iy + sy * k;
         out.push({ ix, iy, l: a.l });
-        owner.set(a.l * G3.W * G3.H + iy * G3.W + ix, conn.id);
+        owner.set(a.l * G4.W * G4.H + iy * G4.W + ix, conn.id);
       }
     }
   }
   // ------------------------------------------------------------------ one connection
   /** Search a route for the connection in the given maps (the net's own copper is lifted while it runs). */
   find(conn, soft, collect) {
-    const G3 = this.G, net = this.netOf(conn.net);
+    const G4 = this.G, net = this.netOf(conn.net);
     this.lift(net, 1, conn.cls);
     this.cur = conn;
     this.curSoft = soft;
@@ -87218,14 +87234,14 @@ var Router = class _Router {
       }
       const A = flip ? conn.b : conn.a, B = flip ? conn.a : conn.b;
       const gd = net.guide;
-      let rt = G3.routable, extra;
+      let rt = G4.routable, extra;
       if (gd.allowed && !collect) {
-        const want = gd.allowed.map((v, l) => v && G3.routable[l]);
+        const want = gd.allowed.map((v, l) => v && G4.routable[l]);
         const open2 = want.slice();
         let relaxed = false;
         if (want.some(Boolean)) {
           for (const e of [A, B]) if (!e.layers.some((l) => want[l])) {
-            for (const l of e.layers) if (G3.routable[l] && !open2[l]) {
+            for (const l of e.layers) if (G4.routable[l] && !open2[l]) {
               open2[l] = true;
               relaxed = true;
             }
@@ -87235,7 +87251,7 @@ var Router = class _Router {
             let off = 0;
             for (let i = 0; i + 1 < nodes.length; i++) {
               const a = nodes[i], b = nodes[i + 1];
-              if (a.l === b.l && !want[a.l]) off += Math.hypot(b.ix - a.ix, b.iy - a.iy) * G3.g;
+              if (a.l === b.l && !want[a.l]) off += Math.hypot(b.ix - a.ix, b.iy - a.iy) * G4.g;
             }
             return off * 4 * this.W.length;
           };
@@ -87250,9 +87266,9 @@ var Router = class _Router {
             if (a.l !== b.l) continue;
             const n2 = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy);
             const m = full[a.l];
-            for (let k = 0; k <= n2; k++) if (m[(a.iy + sy * k) * G3.W + a.ix + sx * k]) hit5++;
+            for (let k = 0; k <= n2; k++) if (m[(a.iy + sy * k) * G4.W + a.ix + sx * k]) hit5++;
           }
-          return hit5 * G3.g * 12 * this.W.length + (plan ? plan(nodes) : 0);
+          return hit5 * G4.g * 12 * this.W.length + (plan ? plan(nodes) : 0);
         };
       }
       if (!collect && this.rim && this.opts.edgeRuns !== true) {
@@ -87263,22 +87279,22 @@ var Router = class _Router {
             const a = nodes[i], b = nodes[i + 1];
             if (a.l !== b.l) continue;
             const n2 = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy);
-            const step = Math.hypot(sx, sy) * G3.g;
-            for (let k = 0; k < n2; k++) if (rim[(a.iy + sy * k) * G3.W + a.ix + sx * k] && rim[(a.iy + sy * (k + 1)) * G3.W + a.ix + sx * (k + 1)]) run += step;
+            const step = Math.hypot(sx, sy) * G4.g;
+            for (let k = 0; k < n2; k++) if (rim[(a.iy + sy * k) * G4.W + a.ix + sx * k] && rim[(a.iy + sy * (k + 1)) * G4.W + a.ix + sx * (k + 1)]) run += step;
           }
           return Math.max(0, run - RIM_FREE_MM) * RIM_COST * this.W.length + (before ? before(nodes) : 0);
         };
       }
       if (!collect && !soft && this.opts.bundle !== false && !isSupply(conn.net) && this.kindOf(conn.net) === "digital" && !/DDR|SDRAM|DRAM|(^|[\/_])DQ[SM]?_?\d/i.test(conn.net) && !(this.opts.match || []).some((g2) => g2.nets.includes(conn.net))) {
         const tight = this.tight;
-        const full = conn.cls.full, before = extra, R2 = tight ? 1 : Math.max(2, Math.round(0.5 / G3.g)), GW = G3.W, GH = G3.H;
+        const full = conn.cls.full, before = extra, R2 = tight ? 1 : Math.max(2, Math.round(0.5 / G4.g)), GW = G4.W, GH = G4.H;
         extra = (nodes) => {
           let alone = 0;
           for (let i = 0; i + 1 < nodes.length; i++) {
             const a = nodes[i], b = nodes[i + 1];
             if (a.l !== b.l) continue;
             const n2 = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy);
-            const step = Math.hypot(sx, sy) * G3.g;
+            const step = Math.hypot(sx, sy) * G4.g;
             const m = full[a.l];
             if (!m) continue;
             for (let k = 0; k < n2; k++) {
@@ -87296,7 +87312,7 @@ var Router = class _Router {
       }
       const mate = conn.partner && conn.partner.nodes && conn.partner.nodes.length > 1 ? conn.partner.nodes : null;
       if (mate && !collect) {
-        const reach = (2 * conn.cls.width + 2 * conn.cls.clr + 0.3) / G3.g, before = extra;
+        const reach = (2 * conn.cls.width + 2 * conn.cls.clr + 0.3) / G4.g, before = extra;
         const near = (ix, iy, l) => {
           for (let i = 0; i + 1 < mate.length; i++) {
             const a = mate[i], b = mate[i + 1];
@@ -87313,7 +87329,7 @@ var Router = class _Router {
             const a = nodes[i], b = nodes[i + 1];
             if (a.l !== b.l) continue;
             const n2 = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy);
-            const step = Math.hypot(sx, sy) * G3.g;
+            const step = Math.hypot(sx, sy) * G4.g;
             for (let k = 0; k < n2; k++) if (!near(a.ix + sx * k, a.iy + sy * k, a.l)) lone += step;
           }
           return lone * 3 * this.W.length + (before ? before(nodes) : 0);
@@ -87331,7 +87347,7 @@ var Router = class _Router {
         zoneSet = /* @__PURE__ */ new Set();
         term = tb.slice();
         let own = false;
-        for (const z2 of net.zoneCells) if (!maps[z2.l][z2.iy * G3.W + z2.ix]) {
+        for (const z2 of net.zoneCells) if (!maps[z2.l][z2.iy * G4.W + z2.ix]) {
           if (!rt[z2.l]) {
             if (!own) {
               rt = rt.slice();
@@ -87340,27 +87356,27 @@ var Router = class _Router {
             rt[z2.l] = true;
           }
           term.push(z2);
-          zoneSet.add(z2.l * G3.W * G3.H + z2.iy * G3.W + z2.ix);
+          zoneSet.add(z2.l * G4.W * G4.H + z2.iy * G4.W + z2.ix);
         }
       }
       if (!tgt && !term.length) return null;
       const x0 = Math.min(src.ix, tgt ? tgt.ix : src.ix), x1 = Math.max(src.ix, tgt ? tgt.ix : src.ix), y0 = Math.min(src.iy, tgt ? tgt.iy : src.iy), y1 = Math.max(src.iy, tgt ? tgt.iy : src.iy);
       const span = Math.max(x1 - x0, y1 - y0);
-      const margins = [Math.max(14, Math.round(span * 0.35)), Math.max(50, Math.round(span * 1.2)), Math.max(G3.W, G3.H)];
+      const margins = [Math.max(14, Math.round(span * 0.35)), Math.max(50, Math.round(span * 1.2)), Math.max(G4.W, G4.H)];
       for (let i = 0; i < margins.length; i++) {
         const m = margins[i];
-        const win = { x0: Math.max(0, x0 - m), y0: Math.max(0, y0 - m), x1: Math.min(G3.W - 1, x1 + m), y1: Math.min(G3.H - 1, y1 + m) };
-        const res = probe({ G: G3, maps, vmaps, src, tgt, term, win, pref: this.pref, W: this.W, allowVias: gd.allowVias && maxVias > 0, maxSteps: 6e6, collect, routable: rt, maxVias: maxVias === Infinity ? void 0 : maxVias, extra });
+        const win = { x0: Math.max(0, x0 - m), y0: Math.max(0, y0 - m), x1: Math.min(G4.W - 1, x1 + m), y1: Math.min(G4.H - 1, y1 + m) };
+        const res = probe({ G: G4, maps, vmaps, src, tgt, term, win, pref: this.pref, W: this.W, allowVias: gd.allowVias && maxVias > 0, maxSteps: 6e6, collect, routable: rt, maxVias: maxVias === Infinity ? void 0 : maxVias, extra });
         if (res) {
           res.nodes = this.mitre(simplify(res.nodes), maps);
           if (res.onTerm) {
             const e = res.nodes[res.nodes.length - 1];
-            const k = e.l * G3.W * G3.H + e.iy * G3.W + e.ix;
+            const k = e.l * G4.W * G4.H + e.iy * G4.W + e.ix;
             if (zoneSet && zoneSet.has(k) && !owner.has(k)) res.zoneEnd = true;
           }
           return { res, owner, flip, esc: [src.esc, tgt ? tgt.esc : void 0] };
         }
-        if (win.x0 === 0 && win.y0 === 0 && win.x1 === G3.W - 1 && win.y1 === G3.H - 1) break;
+        if (win.x0 === 0 && win.y0 === 0 && win.x1 === G4.W - 1 && win.y1 === G4.H - 1) break;
       }
       return null;
     } finally {
@@ -87369,8 +87385,8 @@ var Router = class _Router {
   }
   /** Chamfer the 90° corners the search was forced into, as far as the neighbouring copper allows. */
   mitre(nodes, maps) {
-    const G3 = this.G;
-    const maxCells = Math.max(1, Math.round(this.W.mitre / G3.g));
+    const G4 = this.G;
+    const maxCells = Math.max(1, Math.round(this.W.mitre / G4.g));
     const out = [nodes[0]];
     const run = (a, b) => Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy));
     const corner = (i) => {
@@ -87394,7 +87410,7 @@ var Router = class _Router {
           const p1 = { ix: b.ix - ia[0] * m, iy: b.iy - ia[1] * m, l: b.l }, p2 = { ix: b.ix + oc[0] * m, iy: b.iy + oc[1] * m, l: b.l };
           const sx = Math.sign(p2.ix - p1.ix), sy = Math.sign(p2.iy - p1.iy), n2 = run(p1, p2);
           let ok2 = true;
-          for (let k = 1; k < n2 && ok2; k++) if (maps[b.l][(p1.iy + sy * k) * G3.W + p1.ix + sx * k]) ok2 = false;
+          for (let k = 1; k < n2 && ok2; k++) if (maps[b.l][(p1.iy + sy * k) * G4.W + p1.ix + sx * k]) ok2 = false;
           if (ok2) {
             if (p1.ix !== a.ix || p1.iy !== a.iy) out.push(p1);
             out.push(p2);
@@ -87517,24 +87533,24 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
   }
   /** Lay a found route: its copper becomes an obstacle for every other net. */
   commit(conn, found) {
-    const G3 = this.G, { res, flip } = found;
+    const G4 = this.G, { res, flip } = found;
     const nodes = res.nodes;
     const w = conn.cls.width;
-    const all2 = G3.layers.map((_, i) => i);
+    const all2 = G4.layers.map((_, i) => i);
     const shapes2 = [], viaCells = [];
     const clr = conn.cls.clr;
     const net = this.netOf(conn.net);
     const holes = /* @__PURE__ */ new Set();
-    for (const o of G3.obstacles.get(conn.net) || []) if (o.thru) holes.add(Math.round((o.thru[1] - G3.oy) / G3.g) * G3.W + Math.round((o.thru[0] - G3.ox) / G3.g));
+    for (const o of G4.obstacles.get(conn.net) || []) if (o.thru) holes.add(Math.round((o.thru[1] - G4.oy) / G4.g) * G4.W + Math.round((o.thru[0] - G4.ox) / G4.g));
     this.lift(net, 1, conn.cls);
     for (let i = 0; i + 1 < nodes.length; i++) {
       const a = nodes[i], b = nodes[i + 1];
       if (a.l !== b.l) {
-        const gi = a.iy * G3.W + a.ix;
-        if ((!G3.thru[gi] || !holes.has(gi)) && !viaCells.includes(gi)) {
+        const gi = a.iy * G4.W + a.ix;
+        if ((!G4.thru[gi] || !holes.has(gi)) && !viaCells.includes(gi)) {
           viaCells.push(gi);
           const p = this.mm(a);
-          shapes2.push({ net: conn.net, layers: all2, shape: { t: "circle", x: p[0], y: p[1], r: conn.cls.viaD / 2 }, clr: Math.max(clr, (G3.holeClr || 0) - (conn.cls.viaD - conn.cls.viaDrill) / 2) });
+          shapes2.push({ net: conn.net, layers: all2, shape: { t: "circle", x: p[0], y: p[1], r: conn.cls.viaD / 2 }, clr: Math.max(clr, (G4.holeClr || 0) - (conn.cls.viaD - conn.cls.viaDrill) / 2) });
         }
       } else shapes2.push({ net: conn.net, layers: [a.l], shape: { t: "seg", a: this.mm(a), b: this.mm(b), r: w / 2 }, clr });
     }
@@ -87543,7 +87559,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     conn.shapes = shapes2;
     conn.viaCells = viaCells;
     conn.stubs = [];
-    conn.feat = featuresOf(G3, nodes, this.pref);
+    conn.feat = featuresOf(G4, nodes, this.pref);
     conn.zoneEnd = !!res.zoneEnd;
     const A = flip ? conn.b : conn.a, B = flip ? conn.a : conn.b;
     const first = nodes[0], last = nodes[nodes.length - 1];
@@ -87565,7 +87581,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     if (!res.onTerm) stub(B, last, esc3[1]);
     conn.landed = -1;
     if (res.onTerm) {
-      const o = found.owner.get(last.l * G3.W * G3.H + last.iy * G3.W + last.ix);
+      const o = found.owner.get(last.l * G4.W * G4.H + last.iy * G4.W + last.ix);
       if (o !== void 0) conn.landed = o;
     }
     this.place(conn, 1);
@@ -87590,7 +87606,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
   }
   /** Routes of other nets laid in this run that a candidate route would run into. */
   blockers(conn, res) {
-    const G3 = this.G, P = this.P;
+    const G4 = this.G, P = this.P;
     const w = conn.cls.width;
     const mine = [];
     const nodes = res.nodes;
@@ -87601,7 +87617,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       if (a.l !== b.l) {
         const p = this.mm(a);
         s = { t: "circle", x: p[0], y: p[1], r: conn.cls.viaD / 2 };
-        l = G3.layers.map((_, k) => k);
+        l = G4.layers.map((_, k) => k);
       } else {
         s = { t: "seg", a: this.mm(a), b: this.mm(b), r: w / 2 };
         l = [a.l];
@@ -87611,7 +87627,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     const out = [];
     for (const o of this.conns) {
       if (!o.nodes || o.net === conn.net) continue;
-      const need = Math.max(conn.cls.clr, o.cls.clr) + G3.margin + G3.g * 1.5;
+      const need = Math.max(conn.cls.clr, o.cls.clr) + G4.margin + G4.g * 1.5;
       let hit5 = false;
       for (const sh of o.shapes) {
         const ob = bb(sh.shape);
@@ -87631,18 +87647,18 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
   }
   /** Is every cell of a route free in the full map (after its blockers were ripped)? */
   fits(conn, res) {
-    const G3 = this.G, net = this.netOf(conn.net);
+    const G4 = this.G, net = this.netOf(conn.net);
     this.lift(net, 1, conn.cls);
     try {
       const maps = conn.cls.full, nodes = res.nodes;
       for (let i = 0; i + 1 < nodes.length; i++) {
         const a = nodes[i], b = nodes[i + 1];
         if (a.l !== b.l) {
-          if (!G3.thru[a.iy * G3.W + a.ix] && !viaFits(G3, conn.cls.vfull, a.iy * G3.W + a.ix)) return false;
+          if (!G4.thru[a.iy * G4.W + a.ix] && !viaFits(G4, conn.cls.vfull, a.iy * G4.W + a.ix)) return false;
           continue;
         }
         const n2 = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy);
-        for (let k = 0; k <= n2; k++) if (maps[a.l][(a.iy + sy * k) * G3.W + a.ix + sx * k]) return false;
+        for (let k = 0; k <= n2; k++) if (maps[a.l][(a.iy + sy * k) * G4.W + a.ix + sx * k]) return false;
       }
       return true;
     } finally {
@@ -87952,13 +87968,13 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
    *  or a track end that sits in a piece is joined only to what else sits in that piece.  Returns which of the net's
    *  original islands end up joined (through pour pieces and this run's tracks), and the pieces of the main body. */
   pourState(net) {
-    const G3 = this.G, W11 = G3.W, H = G3.H, pour = net.pour;
+    const G4 = this.G, W11 = G4.W, H = G4.H, pour = net.pour;
     const nc = net.cls;
     const key3 = `pour/${pour.width}/${pour.clr}`;
-    let cls = G3.classes.get(key3);
+    let cls = G4.classes.get(key3);
     if (!cls) {
-      cls = buildClass(G3, key3, pour.width, pour.clr, nc.viaD, nc.viaDrill);
-      for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G3, cls, sh, 1, false);
+      cls = buildClass(G4, key3, pour.width, pour.clr, nc.viaD, nc.viaDrill);
+      for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G4, cls, sh, 1, false);
     }
     const label = pour.mask.map(() => null);
     let pieces3 = 0;
@@ -88009,8 +88025,8 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     for (const a of anchors) {
       const sh = a.shape;
       const r = sh ? sh.t === "circle" ? sh.r : Math.min(sh.w || 0, sh.h || 0) / 2 || sh.r || 0 : 0;
-      const n2 = Math.max(0, Math.floor(r / G3.g));
-      const cx = Math.round((a.p[0] - G3.ox) / G3.g), cy = Math.round((a.p[1] - G3.oy) / G3.g);
+      const n2 = Math.max(0, Math.floor(r / G4.g));
+      const cx = Math.round((a.p[0] - G4.ox) / G4.g), cy = Math.round((a.p[1] - G4.oy) / G4.g);
       for (const l of a.layers) for (let dy = -n2; dy <= n2; dy++) for (let dx = -n2; dx <= n2; dx++) {
         if (dx * dx + dy * dy > n2 * n2) continue;
         const id = at3(l, cx + dx, cy + dy);
@@ -88172,7 +88188,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
   }
   /** The exact check: every new track and via against the real shapes, at the real clearances.  Offenders are dropped. */
   validate() {
-    const G3 = this.G, P = this.P;
+    const G4 = this.G, P = this.P;
     const B = 2;
     const idx = /* @__PURE__ */ new Map();
     const bbOf = (s) => {
@@ -88199,13 +88215,13 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
         l.push(e);
       }
     };
-    for (const list of G3.obstacles.values()) for (const o of list) {
+    for (const list of G4.obstacles.values()) for (const o of list) {
       if (o.shape.t === "path" && o.shape.pts.length > 2) {
         for (let i = 0; i + 1 < o.shape.pts.length; i++) add({ net: o.net, layers: o.layers, clr: o.clr, edge: o.edge, shape: { t: "seg", a: o.shape.pts[i], b: o.shape.pts[i + 1], r: o.shape.r || 0 } }, -1);
       } else add(o, -1);
     }
     const bad = /* @__PURE__ */ new Set();
-    const maxClr = Math.max(G3.edgeClr, ...Array.from(G3.classes.values()).map((c) => c.clr), this.s.clearance);
+    const maxClr = Math.max(G4.edgeClr, ...Array.from(G4.classes.values()).map((c) => c.clr), this.s.clearance);
     for (const c of this.conns) {
       if (!c.nodes) continue;
       for (const o of c.shapes) {
@@ -88217,7 +88233,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
             seen.add(e);
             if (e.o.net && e.o.net === o.net) continue;
             if (!e.o.layers.some((l) => o.layers.includes(l))) continue;
-            const need = (e.o.edge ? G3.edgeClr : Math.max(e.o.clr, o.clr)) - 1e-4;
+            const need = (e.o.edge ? G4.edgeClr : Math.max(e.o.clr, o.clr)) - 1e-4;
             if (e.bb[0] > bb[2] + need || e.bb[2] < bb[0] - need || e.bb[1] > bb[3] + need || e.bb[3] < bb[1] - need) continue;
             const gap = P.shapeGap(e.o.shape, o.shape);
             if (gap < need) {
@@ -88250,7 +88266,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
    *  two layers (else it would join nothing), keeps every clearance in the exact check, and stays a hole's width from
    *  the other ground vias. */
   fence() {
-    const G3 = this.G, W11 = G3.W, o = this.opts.fence;
+    const G4 = this.G, W11 = G4.W, o = this.opts.fence;
     const fo = typeof o === "object" && o ? o : {};
     const spacing = Math.max(0.6, fo.spacing || 2);
     const named = new Set(fo.nets || []);
@@ -88271,26 +88287,26 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     }
     const pour = gnd.pour, cls = gnd.cls;
     const pkey2 = `pour/${pour.width}/${pour.clr}`;
-    let pcls = G3.classes.get(pkey2);
+    let pcls = G4.classes.get(pkey2);
     if (!pcls) {
-      pcls = buildClass(G3, pkey2, pour.width, pour.clr, cls.viaD, cls.viaDrill);
-      for (const c of this.conns) if (c.nodes) for (const sh of c.shapes) stampClass(G3, pcls, sh, 1, false);
+      pcls = buildClass(G4, pkey2, pour.width, pour.clr, cls.viaD, cls.viaDrill);
+      for (const c of this.conns) if (c.nodes) for (const sh of c.shapes) stampClass(G4, pcls, sh, 1, false);
     }
     const holes = [];
-    for (const ob of G3.obstacles.get(gnd.key) || []) if (ob.thru) holes.push(ob.thru);
+    for (const ob of G4.obstacles.get(gnd.key) || []) if (ob.thru) holes.push(ob.thru);
     for (const c of gnd.conns) if (c.nodes) for (const gi of c.viaCells) holes.push(this.mm({ ix: gi % W11, iy: gi / W11 | 0 }));
     const apart = cls.viaD + 0.25;
     const r = cls.viaD / 2;
-    const all2 = G3.layers.map((_, i) => i);
+    const all2 = G4.layers.map((_, i) => i);
     this.lift(gnd, 1, cls);
     this.lift(gnd, 1, pcls);
     this.cur = null;
     this.curSoft = false;
     const tryAt = (x, y) => {
-      const ix = Math.round((x - G3.ox) / G3.g), iy = Math.round((y - G3.oy) / G3.g);
-      if (ix < 1 || iy < 1 || ix >= W11 - 1 || iy >= G3.H - 1) return false;
+      const ix = Math.round((x - G4.ox) / G4.g), iy = Math.round((y - G4.oy) / G4.g);
+      if (ix < 1 || iy < 1 || ix >= W11 - 1 || iy >= G4.H - 1) return false;
       const gi = iy * W11 + ix;
-      if (!viaFits(G3, cls.vfull, gi)) return false;
+      if (!viaFits(G4, cls.vfull, gi)) return false;
       let n2 = 0;
       for (let l = 0; l < pour.mask.length; l++) {
         const m = pour.mask[l];
@@ -88321,12 +88337,12 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
             const dx = g2.b[0] - g2.a[0], dy = g2.b[1] - g2.a[1], len = Math.hypot(dx, dy);
             if (len < 1e-6) continue;
             const ux = dx / len, uy = dy / len;
-            const off = g2.r + clr + r + G3.g;
+            const off = g2.r + clr + r + G4.g;
             for (let t = carry; t <= len; t += spacing) {
               for (const sgn of [1, -1]) {
                 wanted++;
                 const bx = g2.a[0] + ux * t, by = g2.a[1] + uy * t;
-                for (const [dt, extra] of [[0, 0], [0, G3.g * 2], [spacing / 4, 0], [-spacing / 4, 0], [0, G3.g * 4]]) if (tryAt(bx + ux * dt - uy * sgn * (off + extra), by + uy * dt + ux * sgn * (off + extra))) {
+                for (const [dt, extra] of [[0, 0], [0, G4.g * 2], [spacing / 4, 0], [-spacing / 4, 0], [0, G4.g * 4]]) if (tryAt(bx + ux * dt - uy * sgn * (off + extra), by + uy * dt + ux * sgn * (off + extra))) {
                   rep.fence++;
                   break;
                 }
@@ -88338,9 +88354,9 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
         }
         if (wantRet(net)) for (const c of conns) for (const gi of c.viaCells) {
           const v = this.mm({ ix: gi % W11, iy: gi / W11 | 0 });
-          const d0 = c.cls.viaD / 2 + clr + r + G3.g;
+          const d0 = c.cls.viaD / 2 + clr + r + G4.g;
           let done = false;
-          for (const d of [d0, d0 + 2 * G3.g, d0 + 0.4, d0 + 0.8]) {
+          for (const d of [d0, d0 + 2 * G4.g, d0 + 0.4, d0 + 0.8]) {
             for (let k = 0; k < 8 && !done; k++) {
               const a = k * Math.PI / 4;
               if (tryAt(v[0] + Math.cos(a) * d, v[1] + Math.sin(a) * d)) done = true;
@@ -88356,7 +88372,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       this.lift(gnd, -1, pcls);
       this.lift(gnd, -1, cls);
     }
-    for (const c of G3.classes.values()) for (const ob of this.fenceShapes) stampClass(G3, c, ob, 1, false);
+    for (const c of G4.classes.values()) for (const ob of this.fenceShapes) stampClass(G4, c, ob, 1, false);
   }
   /** Why each connection that is still open failed: what is in its way, or that there is no way at all. */
   explain() {
@@ -88436,11 +88452,11 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
   }
   result() {
     const ms = this.ms, passes = this.passes;
-    const { P, doc, G: G3 } = this;
+    const { P, doc, G: G4 } = this;
     const items = [];
     let segments = 0, vias = 0, length = 0, zoneEnds = 0;
     const failed = [];
-    const span = [G3.layers[0], G3.layers[G3.layers.length - 1]];
+    const span = [G4.layers[0], G4.layers[G4.layers.length - 1]];
     const connections = [];
     const end = (p) => {
       const pad2 = this.padNames.get(p[0].toFixed(3) + "," + p[1].toFixed(3));
@@ -88470,14 +88486,14 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
         rep.length = +len.toFixed(3);
         rep.vias = c.viaCells.length;
         rep.bends = c.feat ? c.feat.b45 + c.feat.b90 : 0;
-        rep.layers = Array.from(ls).sort().map((l) => G3.layers[l]);
+        rep.layers = Array.from(ls).sort().map((l) => G4.layers[l]);
         rep.detourRatio = c.len > 1e-6 ? +(len / c.len).toFixed(2) : 1;
       }
       const net = this.netOf(c.net).obj;
       if (c.zoneEnd) zoneEnds++;
       const seg = (a, b, l, w) => {
         if (Math.hypot(a[0] - b[0], a[1] - b[1]) < 1e-6) return;
-        items.push({ kind: "segment", node: P.segmentNode(doc, a, b, w, G3.layers[l], net), net, netName: c.net, conn: c.id });
+        items.push({ kind: "segment", node: P.segmentNode(doc, a, b, w, G4.layers[l], net), net, netName: c.net, conn: c.id });
         segments++;
         length += Math.hypot(a[0] - b[0], a[1] - b[1]);
       };
@@ -88489,7 +88505,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
         const vk = c.net + "\n" + gi;
         if (viaSeen.has(vk)) continue;
         viaSeen.add(vk);
-        const p = this.mm({ ix: gi % G3.W, iy: gi / G3.W | 0 });
+        const p = this.mm({ ix: gi % G4.W, iy: gi / G4.W | 0 });
         items.push({ kind: "via", node: P.viaNode(doc, p[0], p[1], c.cls.viaD, c.cls.viaDrill, net, span), net, netName: c.net, conn: c.id });
         vias++;
       }
@@ -88511,7 +88527,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       passes,
       zoneEnds,
       zoneCovered: this.zoneCovered,
-      grid: { pitch: G3.g, w: G3.W, h: G3.H, layers: G3.layers.filter((_, i) => G3.routable[i]) },
+      grid: { pitch: G4.g, w: G4.W, h: G4.H, layers: G4.layers.filter((_, i) => G4.routable[i]) },
       nets: this.nets.length,
       connections,
       pairs: Array.from(this.pairReports.values()),
@@ -88661,8 +88677,18 @@ function menuArrowPad(el) {
   return SCROLLERS.has(el) && el.scrollHeight > el.clientHeight + 1 ? ARROW + 2 : 0;
 }
 
+// web/components/icon-ids.ts
+var G2 = globalThis;
+var REF = /\b(k-[A-Za-z0-9_]+-[ld]-r\d+)\b/g;
+function uniqueIconIds(markup) {
+  if (markup.indexOf("-r") < 0 || !REF.test(markup)) return markup;
+  REF.lastIndex = 0;
+  const n2 = (G2.__kcIconIdSeq = (G2.__kcIconIdSeq || 0) + 1).toString(36);
+  return markup.replace(REF, (id) => `${id}-u${n2}`);
+}
+
 // web/components/kicon-dom.ts
-var G2 = () => typeof window === "undefined" ? {} : window;
+var G3 = () => typeof window === "undefined" ? {} : window;
 var NS = "http://www.w3.org/2000/svg";
 var CSS2 = `
 .kic{flex:none;vertical-align:middle}
@@ -88692,17 +88718,17 @@ function ensureIconCss() {
 }
 function fill(el, ic) {
   el.setAttribute("viewBox", ic.vb || "0 0 24 24");
-  el.innerHTML = `<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`;
+  el.innerHTML = uniqueIconIds(`<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`);
   el.dataset.icon = el.dataset.want || "";
 }
-function kicadIcon(name, size = 16) {
+function kicadIcon(name, size = 16, height = size) {
   ensureIconCss();
   const el = document.createElementNS(NS, "svg");
   el.setAttribute("class", "kic kicon-dom");
   el.setAttribute("aria-hidden", "true");
   el.setAttribute("viewBox", "0 0 24 24");
   el.setAttribute("width", String(size));
-  el.setAttribute("height", String(size));
+  el.setAttribute("height", String(height));
   setKicadIcon(el, name);
   return el;
 }
@@ -88710,14 +88736,14 @@ function setKicadIcon(el, name) {
   if (el.dataset.want === name && el.dataset.icon === name) return;
   el.dataset.want = name;
   el.dataset.icon = name;
-  const g2 = G2(), ic = g2.KiCadIconFor ? g2.KiCadIconFor(name) : void 0;
+  const g2 = G3(), ic = g2.KiCadIconFor ? g2.KiCadIconFor(name) : void 0;
   if (ic) {
     fill(el, ic);
     return;
   }
   if (g2.KiCadIconsReady) void g2.KiCadIconsReady.then(() => {
     if (el.dataset.want !== name) return;
-    const i = G2().KiCadIconFor?.(name);
+    const i = G3().KiCadIconFor?.(name);
     if (i) fill(el, i);
   }).catch(() => void 0);
 }
@@ -89593,7 +89619,7 @@ function report(ctx, s) {
 function drawPreview(c, K8) {
   const r = running && !running.done ? running.router : null;
   if (!r) return;
-  const G3 = r.G;
+  const G4 = r.G;
   c.save();
   c.lineCap = "round";
   c.lineJoin = "round";
@@ -89602,7 +89628,7 @@ function drawPreview(c, K8) {
     if (!conn.nodes) continue;
     for (const o of conn.shapes) {
       const sh = o.shape;
-      const layer = G3.layers[o.layers[0]];
+      const layer = G4.layers[o.layers[0]];
       if (sh.t === "seg") {
         c.strokeStyle = K8.PCB_COLORS && K8.PCB_COLORS[layer] || "#C83434";
         c.lineWidth = sh.r * 2;
@@ -97574,8 +97600,8 @@ var ACI = [
 function aciOf(c) {
   const [r, g2, b] = rgbOf(c);
   let best = 7, bd = Infinity;
-  for (const [R2, G3, B, i] of ACI) {
-    const d = (R2 - r) ** 2 + (G3 - g2) ** 2 + (B - b) ** 2;
+  for (const [R2, G4, B, i] of ACI) {
+    const d = (R2 - r) ** 2 + (G4 - g2) ** 2 + (B - b) ** 2;
     if (d < bd) {
       bd = d;
       best = i;
@@ -98499,10 +98525,10 @@ function gerberJobFile(o) {
 
 // web/fab/raster.ts
 function makeCanvas2(w, h) {
-  const G3 = globalThis;
-  if (G3.OffscreenCanvas) return new G3.OffscreenCanvas(w, h);
-  if (G3.document) {
-    const c = G3.document.createElement("canvas");
+  const G4 = globalThis;
+  if (G4.OffscreenCanvas) return new G4.OffscreenCanvas(w, h);
+  if (G4.document) {
+    const c = G4.document.createElement("canvas");
     c.width = w;
     c.height = h;
     return c;
@@ -106852,7 +106878,7 @@ function fieldShifts(doc, input = {}) {
   const out = [];
   const want = input.refs && input.refs.length ? new Set(input.refs.map((r) => r.toLowerCase())) : null;
   const within = input.within && input.within.length === 4 ? input.within : null;
-  const T = 0.2, B = 0.3, G3 = 1.27;
+  const T = 0.2, B = 0.3, G4 = 1.27;
   const blocked = (me, box) => {
     const t = shrink(box, T);
     for (const o of list) {
@@ -106866,7 +106892,7 @@ function fieldShifts(doc, input = {}) {
     return false;
   };
   const steps = [];
-  for (let i = -10; i <= 10; i++) for (let j = -10; j <= 10; j++) if (i || j) steps.push([i * G3, j * G3]);
+  for (let i = -10; i <= 10; i++) for (let j = -10; j <= 10; j++) if (i || j) steps.push([i * G4, j * G4]);
   steps.sort((a, b) => Math.hypot(a[0], a[1] * 1.01) - Math.hypot(b[0], b[1] * 1.01));
   for (const p of list) {
     if (!p.field) continue;

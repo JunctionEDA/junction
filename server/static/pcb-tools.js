@@ -24408,8 +24408,8 @@
   var touch = (a, b, slop) => !(b[0] > a[2] + slop || b[2] < a[0] - slop || b[1] > a[3] + slop || b[3] < a[1] - slop);
   var centre = (a, b) => [(Math.max(a[0], b[0]) + Math.min(a[2], b[2])) / 2, (Math.max(a[1], b[1]) + Math.min(a[3], b[3])) / 2];
   function elementGrid(els) {
-    const G2 = 2, grid = /* @__PURE__ */ new Map();
-    const cell = (v) => Math.floor(v / G2);
+    const G3 = 2, grid = /* @__PURE__ */ new Map();
+    const cell = (v) => Math.floor(v / G3);
     els.forEach((e, i) => {
       if (!isFinite(e.bbox[0])) return;
       for (let gx = cell(e.bbox[0]); gx <= cell(e.bbox[2]); gx++) for (let gy = cell(e.bbox[1]); gy <= cell(e.bbox[3]); gy++) {
@@ -24426,8 +24426,8 @@
     };
   }
   function polyIndex(pts) {
-    const G2 = 1, cells = /* @__PURE__ */ new Map(), rows = /* @__PURE__ */ new Map();
-    const cell = (v) => Math.floor(v / G2);
+    const G3 = 1, cells = /* @__PURE__ */ new Map(), rows = /* @__PURE__ */ new Map();
+    const cell = (v) => Math.floor(v / G3);
     for (let i = 0; i < pts.length; i++) {
       const a = pts[i], b = pts[(i + 1) % pts.length];
       for (let gx = cell(Math.min(a[0], b[0])); gx <= cell(Math.max(a[0], b[0])); gx++) for (let gy = cell(Math.min(a[1], b[1])); gy <= cell(Math.max(a[1], b[1])); gy++) {
@@ -26136,8 +26136,8 @@
     if (!conds.length) return out;
     const holes = boardHoles(doc);
     const reach = Math.max(min0, worstRule, 0.01);
-    const G2 = 2, grid = /* @__PURE__ */ new Map();
-    const cell = (v) => Math.floor(v / G2);
+    const G3 = 2, grid = /* @__PURE__ */ new Map();
+    const cell = (v) => Math.floor(v / G3);
     conds.forEach((c, i) => {
       for (let gx = cell(c.bbox[0]); gx <= cell(c.bbox[2]); gx++) for (let gy = cell(c.bbox[1]); gy <= cell(c.bbox[3]); gy++) {
         const k = gx + "," + gy;
@@ -35875,8 +35875,18 @@
     return SCROLLERS.has(el) && el.scrollHeight > el.clientHeight + 1 ? ARROW + 2 : 0;
   }
 
+  // web/components/icon-ids.ts
+  var G = globalThis;
+  var REF = /\b(k-[A-Za-z0-9_]+-[ld]-r\d+)\b/g;
+  function uniqueIconIds(markup) {
+    if (markup.indexOf("-r") < 0 || !REF.test(markup)) return markup;
+    REF.lastIndex = 0;
+    const n = (G.__kcIconIdSeq = (G.__kcIconIdSeq || 0) + 1).toString(36);
+    return markup.replace(REF, (id) => `${id}-u${n}`);
+  }
+
   // web/components/kicon-dom.ts
-  var G = () => typeof window === "undefined" ? {} : window;
+  var G2 = () => typeof window === "undefined" ? {} : window;
   var NS = "http://www.w3.org/2000/svg";
   var CSS2 = `
 .kic{flex:none;vertical-align:middle}
@@ -35906,17 +35916,17 @@
   }
   function fill(el, ic) {
     el.setAttribute("viewBox", ic.vb || "0 0 24 24");
-    el.innerHTML = `<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`;
+    el.innerHTML = uniqueIconIds(`<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`);
     el.dataset.icon = el.dataset.want || "";
   }
-  function kicadIcon(name, size = 16) {
+  function kicadIcon(name, size = 16, height = size) {
     ensureIconCss();
     const el = document.createElementNS(NS, "svg");
     el.setAttribute("class", "kic kicon-dom");
     el.setAttribute("aria-hidden", "true");
     el.setAttribute("viewBox", "0 0 24 24");
     el.setAttribute("width", String(size));
-    el.setAttribute("height", String(size));
+    el.setAttribute("height", String(height));
     setKicadIcon(el, name);
     return el;
   }
@@ -35924,14 +35934,14 @@
     if (el.dataset.want === name && el.dataset.icon === name) return;
     el.dataset.want = name;
     el.dataset.icon = name;
-    const g = G(), ic = g.KiCadIconFor ? g.KiCadIconFor(name) : void 0;
+    const g = G2(), ic = g.KiCadIconFor ? g.KiCadIconFor(name) : void 0;
     if (ic) {
       fill(el, ic);
       return;
     }
     if (g.KiCadIconsReady) void g.KiCadIconsReady.then(() => {
       if (el.dataset.want !== name) return;
-      const i = G().KiCadIconFor?.(name);
+      const i = G2().KiCadIconFor?.(name);
       if (i) fill(el, i);
     }).catch(() => void 0);
   }

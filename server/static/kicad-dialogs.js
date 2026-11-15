@@ -174,8 +174,18 @@
     if (hidden) setKid(p, "hide", ["yes"], ["uuid", "effects"]);
   }
 
+  // web/components/icon-ids.ts
+  var G = globalThis;
+  var REF = /\b(k-[A-Za-z0-9_]+-[ld]-r\d+)\b/g;
+  function uniqueIconIds(markup) {
+    if (markup.indexOf("-r") < 0 || !REF.test(markup)) return markup;
+    REF.lastIndex = 0;
+    const n = (G.__kcIconIdSeq = (G.__kcIconIdSeq || 0) + 1).toString(36);
+    return markup.replace(REF, (id) => `${id}-u${n}`);
+  }
+
   // web/components/kicon-dom.ts
-  var G = () => typeof window === "undefined" ? {} : window;
+  var G2 = () => typeof window === "undefined" ? {} : window;
   var NS = "http://www.w3.org/2000/svg";
   var CSS2 = `
 .kic{flex:none;vertical-align:middle}
@@ -205,17 +215,17 @@
   }
   function fill(el2, ic) {
     el2.setAttribute("viewBox", ic.vb || "0 0 24 24");
-    el2.innerHTML = `<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`;
+    el2.innerHTML = uniqueIconIds(`<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`);
     el2.dataset.icon = el2.dataset.want || "";
   }
-  function kicadIcon(name, size = 16) {
+  function kicadIcon(name, size = 16, height = size) {
     ensureIconCss();
     const el2 = document.createElementNS(NS, "svg");
     el2.setAttribute("class", "kic kicon-dom");
     el2.setAttribute("aria-hidden", "true");
     el2.setAttribute("viewBox", "0 0 24 24");
     el2.setAttribute("width", String(size));
-    el2.setAttribute("height", String(size));
+    el2.setAttribute("height", String(height));
     setKicadIcon(el2, name);
     return el2;
   }
@@ -223,14 +233,14 @@
     if (el2.dataset.want === name && el2.dataset.icon === name) return;
     el2.dataset.want = name;
     el2.dataset.icon = name;
-    const g = G(), ic = g.KiCadIconFor ? g.KiCadIconFor(name) : void 0;
+    const g = G2(), ic = g.KiCadIconFor ? g.KiCadIconFor(name) : void 0;
     if (ic) {
       fill(el2, ic);
       return;
     }
     if (g.KiCadIconsReady) void g.KiCadIconsReady.then(() => {
       if (el2.dataset.want !== name) return;
-      const i = G().KiCadIconFor?.(name);
+      const i = G2().KiCadIconFor?.(name);
       if (i) fill(el2, i);
     }).catch(() => void 0);
   }
@@ -1071,7 +1081,7 @@
         const row = h(
           "div",
           { class: "kd-pop-row", role: "menuitem", "aria-disabled": it.disabled ? "true" : void 0, style: `display:flex;gap:6px;align-items:center;padding:3px 12px 3px 6px;cursor:default;white-space:nowrap;${it.disabled ? "opacity:.45;" : ""}` },
-          h("span", { style: "width:16px;display:inline-flex;justify-content:center" }, it.check ? it.checked ? "\u2713" : "" : it.icon ? kicadIcon(it.icon, 16) : ""),
+          h("span", { style: `${it.icon && it.iconW ? "" : "width:16px;"}display:inline-flex;flex:none;justify-content:center` }, it.check ? it.checked ? "\u2713" : "" : it.icon ? kicadIcon(it.icon, it.iconW || 16, it.iconH || it.iconW || 16) : ""),
           h("span", { style: "flex:1" }, it.label || ""),
           it.key ? h("span", { class: "kd-pop-key", style: "margin-left:24px;opacity:.7" }, menuKey(it.key)) : null,
           it.sub ? h("span", null, "\u25B8") : null
@@ -1144,8 +1154,12 @@
 .kd-tb-node { padding: 3px 10px; cursor: default; white-space: nowrap; color: var(--ink); }
 .kd-tb-node.child { padding-left: 26px; cursor: pointer; }
 .kd-tb-node.parent { cursor: pointer; }
-.kd-tb-node.parent::before { content: "\u25BE"; display: inline-block; width: 12px; color: var(--ink-3); font-size: 10px; }
-.kd-tb-node.on { background: var(--accent); color: var(--on-accent); }
+.kd-tb-node.parent::before, .kd-twist::before { content: ""; display: inline-block; width: 0; height: 0; margin: 0 5px 2px 1px; vertical-align: middle; border-style: solid; border-width: 5px 4px 0 4px; border-color: var(--ink-3) transparent transparent transparent; }
+.kd-twist { display: inline-block; width: 14px; cursor: pointer; }
+.kd-twist.shut::before { border-width: 4px 0 4px 5px; border-color: transparent transparent transparent var(--ink-3); margin-left: 2px; }
+/* wxTreebook's selection: the selected-row colour with the normal text (readable in both themes), a lighter one on hover */
+.kd-tb-node.child:hover, .kd-tb-node.parent:hover { background: var(--sel-soft); }
+.kd-tb-node.on, .kd-tb-node.on:hover { background: var(--sel); color: var(--ink); }
 .kd-tb-page { padding: 12px 16px; overflow: auto; max-height: 68vh; }
 .kd-grid-wrap { border: 1px solid var(--line); overflow: auto; background: var(--panel); }
 .kd-grid { border-collapse: collapse; width: 100%; font-size: 12px; }
@@ -1312,7 +1326,11 @@
         if (i === sel || multi.has(i)) tr.classList.add("sel");
         for (const c of cols) {
           const td = el("td"), ro = opts.readOnly || c.type === "ro" || c.ro && c.ro(r), v = r[c.key];
-          if (c.type === "icon") {
+          if (c.render) c.render(td, r, !!ro, (value) => {
+            r[c.key] = value;
+            if (opts.onChange) opts.onChange(r, c.key, value, i);
+          });
+          else if (c.type === "icon") {
             td.className = "c kd-icon-cell";
             const spec = c.icon ? c.icon(r) : null;
             if (spec) {
@@ -1423,9 +1441,10 @@
         }
       }, "add");
       if (B.add) (B.afterAdd || []).forEach((x) => bar.appendChild(x));
+      const movable = (i, j) => !B.canMove || B.canMove(rows[i], rows[j]);
       if (B.move) {
         mk("small_up", "Move up", () => {
-          if (sel > 0) {
+          if (sel > 0 && movable(sel, sel - 1)) {
             [rows[sel - 1], rows[sel]] = [rows[sel], rows[sel - 1]];
             sel--;
             multi = /* @__PURE__ */ new Set();
@@ -1434,7 +1453,7 @@
           }
         }, "up");
         mk("small_down", "Move down", () => {
-          if (sel >= 0 && sel < rows.length - 1) {
+          if (sel >= 0 && sel < rows.length - 1 && movable(sel, sel + 1)) {
             [rows[sel + 1], rows[sel]] = [rows[sel], rows[sel + 1]];
             sel++;
             multi = /* @__PURE__ */ new Set();
