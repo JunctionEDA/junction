@@ -281,3 +281,33 @@ test("ipc2581: a board's file", () => {
   assert.match(anon, /<Set net="NET_1">/); assert.doesNotMatch(anon, /GND|<Component |<BomItem /);
   assert.match(anon, /diameter="0.0118"/);
 });
+test("fab reports: .cmp, legacy BOM, footprint report and IPC-D-356A", () => {
+  const FAB = loadTs("fab/index.ts");
+  const d = K.parseDoc(`(kicad_pcb (version 20241229) (generator "pcbnew") (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (25 "Edge.Cuts" user) (1 "F.Mask" user))
+    (net 0 "") (net 1 "GND") (net 2 "/very/long/hierarchical/net")
+    (footprint "R:R_0603" (layer "F.Cu") (uuid "f1") (at 5 5) (path "/a1") (property "Reference" "R2" (at 0 0 0) (layer "F.SilkS") (uuid "p1")) (property "Value" "10k" (at 0 0 0) (layer "F.Fab") (uuid "p2"))
+      (attr smd) (pad "1" smd rect (at -0.8 0) (size 0.8 0.9) (layers "F.Cu" "F.Mask") (net 1 "GND") (uuid "a1")) (pad "2" smd roundrect (at 0.8 0) (size 0.8 0.9) (roundrect_rratio 0.25) (layers "F.Cu" "F.Mask") (net 2 "/very/long/hierarchical/net") (uuid "a2")))
+    (footprint "R:R_0603" (layer "F.Cu") (uuid "f2") (at 9 5) (property "Reference" "R1" (at 0 0 0) (layer "F.SilkS") (uuid "p3")) (property "Value" "10k" (at 0 0 0) (layer "F.Fab") (uuid "p4")) (attr smd))
+    (footprint "C:C_THT" (layer "F.Cu") (uuid "f3") (at 2 2 90) (property "Reference" "C1" (at 0 0 0) (layer "F.SilkS") (uuid "p5")) (property "Value" "1u" (at 0 0 0) (layer "F.Fab") (uuid "p6")) (attr through_hole)
+      (pad "1" thru_hole circle (at 0 0 90) (size 1.6 1.6) (drill 0.8) (layers "*.Cu" "*.Mask") (net 1 "GND") (uuid "a3")))
+    (via (at 10 5) (size 0.6) (drill 0.3) (layers "F.Cu" "B.Cu") (net 1) (uuid "v1")))`, "kicad_pcb");
+  const ctx = { doc: d, projectName: "demo", date: new Date(2026, 0, 2, 3, 4, 5) };
+  const cmp = FAB.reports.cmp(ctx);
+  assert.match(cmp, /^Cmp-Mod V01 Created by PcbNew   date = 2026-01-02T03:04:05/);
+  assert.match(cmp, /\nBeginCmp\nTimeStamp = f1\nPath = \/a1\nReference = R2;\nValeurCmp = 10k;\nIdModule  = R:R_0603;\nEndCmp\n/);
+  assert.ok(cmp.endsWith("\nEndListe\n"));
+  assert.equal(FAB.reports.legacyBom(ctx), '"Id";"Designator";"Footprint";"Quantity";"Designation";"Supplier and ref";\n1;"C1";"C_THT";1;"1u";;;\n2;"R1, R2";"R_0603";2;"10k";;;\n');
+  const rpt = FAB.reports.footprintReport(ctx, true, [0, 0]);
+  assert.match(rpt, /\$MODULE C1\nreference C1\nvalue 1u\nfootprint C:C_THT\nattribut none\nposition  2\.000000  2\.000000  orientation 90\.00\nlayer front\n\$PAD "1"\nShape Circle Layer both\nposition  0\.000000  0\.000000 size  1\.600000  1\.600000 orientation 90\.00\ndrill  0\.800000\n/);
+  assert.ok(rpt.indexOf("$MODULE C1") < rpt.indexOf("$MODULE R1") && rpt.indexOf("$MODULE R1") < rpt.indexOf("$MODULE R2"));
+  const dn = FAB.reports.d356(ctx, false).split("\n");
+  assert.equal(dn[0], "P  JOB   demo".padEnd(80));
+  assert.equal(dn[5], "P  IMAGE PRIMARY".padEnd(80));
+  assert.equal(dn[6], "P  NNAMEM0000 /very/long/hierarchical/net".padEnd(80));
+  assert.ok(dn.includes("317GND              VIA        MD0118PA00X+003937Y-001969X0236Y0000R000 S3      "), dn.join("\n"));
+  assert.ok(dn.includes("327GND              R2    -1          A01X+001654Y-001969X0315Y0354R000 S2      "), dn.join("\n"));
+  assert.ok(dn.includes("327M0000            R2    -2          A01X+002283Y-001969X0315Y0354R000 S2      "));
+  assert.ok(dn.includes("317GND              C1    -1    D0315PA00X+000787Y-000787X0630Y0000R270 S0      "), dn.join("\n"));
+  assert.equal(dn[dn.length - 2], "999".padEnd(80));
+  assert.equal(FAB.reports.d356(ctx, true).includes("R1"), false);
+});

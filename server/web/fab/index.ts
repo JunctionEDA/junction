@@ -32,6 +32,7 @@ import { type FillProgress, type FillRules, type ZoneFillResult, ZoneFiller, fil
 
 import { meshVrml, vrmlModels, writeVrml, type VrmlOptions } from "./vrml";
 import { type OdbResult, legalEntityName, writeOdb } from "./odb";
+import { cmpFile, d356, footprintReport, legacyBom } from "./reports";
 import { type Ipc2581Options, type Ipc2581Result, MODES as IPC_MODES, SECTION_KEYS as IPC_SECTION_KEYS, optionalSections as ipcOptionalSections, recommendedSections as ipcRecommendedSections, requiredSections as ipcRequiredSections, resolveSections as ipcResolveSections, writeIpc2581 } from "./ipc2581";
 export const VERSION_SUFFIX = "-web";
 
@@ -243,7 +244,15 @@ export function ipc2581(ctx: FabContext, o: Omit<Ipc2581Options, "layers" | "nam
 }
 export const ipc2581Sections = { MODES: IPC_MODES, KEYS: IPC_SECTION_KEYS, optional: ipcOptionalSections, required: ipcRequiredSections, recommended: ipcRecommendedSections, resolve: ipcResolveSections };
 
-export const api = { odb, ipc2581, ipc2581Sections, outlineText, vrmlModels: (ctx: FabContext) => vrmlModels(modelOf(ctx)), writeVrml: (ctx: FabContext, o: VrmlOptions, meshOf: Parameters<typeof writeVrml>[2]) => writeVrml(modelOf(ctx), o, meshOf), meshVrml, plotBoard, pluginPlot, drillJob, drillReport, markerParts, pnpGerber, pnpFileName, DEFAULT_VARIANT, variantNames: (variants: Node | null | undefined): string[] => boardVariantNames(variants || null, refCompare), writeSvg, writePdf, writePs, writeDxf, dxfTextString, writePng, paintPage, gerberJobFile, boardPage, plotFileName, outputPath, fillZones, filledZoneNode, storedFill, polyArea, PRESETS, presetById, plottableLayers, layerDisplayName, layerAttrs, protelExtension, model: modelOf, plotGerbers, drillFiles: drill, positions, bom: billOfMaterials, placementCsv, placementAscii, bomCsv,
+/** File > Export > Footprint Association (.cmp) File, File > Fabrication Outputs > IPC-D-356, Footprint Report and legacy BOM. */
+export const reports = {
+  cmp: (ctx: FabContext): string => cmpFile(modelOf(ctx), ctx.date || new Date()),
+  legacyBom: (ctx: FabContext): string | null => legacyBom(modelOf(ctx)),
+  footprintReport: (ctx: FabContext, mm: boolean, bbox: [number, number]): string => footprintReport(modelOf(ctx), { mm, date: ctx.date || new Date(), version: kicadVersion(ctx.doc), bbox }),
+  d356: (ctx: FabContext, skipUnconnected: boolean): string => { const m = modelOf(ctx); return d356(m, { job: projectNameOf(ctx), auxOrigin: m.settings.auxOrigin, skipUnconnected }); },
+};
+
+export const api = { odb, ipc2581, ipc2581Sections, reports, outlineText, vrmlModels: (ctx: FabContext) => vrmlModels(modelOf(ctx)), writeVrml: (ctx: FabContext, o: VrmlOptions, meshOf: Parameters<typeof writeVrml>[2]) => writeVrml(modelOf(ctx), o, meshOf), meshVrml, plotBoard, pluginPlot, drillJob, drillReport, markerParts, pnpGerber, pnpFileName, DEFAULT_VARIANT, variantNames: (variants: Node | null | undefined): string[] => boardVariantNames(variants || null, refCompare), writeSvg, writePdf, writePs, writeDxf, dxfTextString, writePng, paintPage, gerberJobFile, boardPage, plotFileName, outputPath, fillZones, filledZoneNode, storedFill, polyArea, PRESETS, presetById, plottableLayers, layerDisplayName, layerAttrs, protelExtension, model: modelOf, plotGerbers, drillFiles: drill, positions, bom: billOfMaterials, placementCsv, placementAscii, bomCsv,
   jlcPlacement, buildPackage, packageZip, zip, tar, gzip, crc32, writeGerber, primPolys };
 export type KiCadFabApi = typeof api & { open?: () => void };
 // the canvas stores a text's outlines with it when it writes the item (canvas/export.ts ensureRenderCaches)

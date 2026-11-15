@@ -5,6 +5,7 @@
 import { installTransformDialogs } from "./transform-dialogs";
 import { openBoardSetup } from "./board-setup";
 import "./find";   // Edit > Find (DIALOG_FIND): registers E.hooks.boardFind / boardFindNext
+import { exportCmpFile, generateBomLegacy, generateD356, generateFootprintReport } from "./fab-reports";
 import { openFootprintFields } from "./fp-fields";
 import { clearDrcMarkers, drcReport, excludeMarker, nextMarker, openBoardStatistics, openClearance, openConstraints, openDiffFootprint, openFootprintAssociations, openDrc, prevMarker } from "./inspect";
 import { showPane } from "../panes";
@@ -56,6 +57,10 @@ export function installPcbDialogs(): void {
   action("zoneManager", "Zone Manager...", "", (ctx) => { openZoneManager(ctx); });
   action("cleanupGraphics", "Cleanup Graphics...", "", openCleanupGraphics);   // GLOBAL_EDIT_TOOL::CleanupGraphics
   action("editTracksAndVias", "Edit Track & Via Properties...", "", openGlobalEditTracks);   // GLOBAL_EDIT_TOOL::EditTracksAndVias
+  action("exportCmpFile", "Footprint Association (.cmp) File...", "", (ctx) => { void exportCmpFile(ctx); });
+  action("generateD356File", "IPC-D-356 Netlist File...", "", (ctx) => { void generateD356(ctx); });
+  action("generateReportFile", "Footprint Report...", "", (ctx) => { void generateFootprintReport(ctx); });
+  action("generateBOMLegacy", "Bill of Materials (legacy)...", "", (ctx) => { void generateBomLegacy(ctx); });
   action("filterSelection", "Filter Selected Items...", "", openFilterSelection);   // PCB_SELECTION_TOOL::filterSelection
   // EDIT_TOOL's Shape Modification sub-menu
   action("filletLines", "Fillet Lines...", "", filletLines);
