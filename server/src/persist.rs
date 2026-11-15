@@ -957,6 +957,45 @@ pub fn repair_private_properties(content: Vec<u8>) -> Vec<u8> {
     out
 }
 
+/// The same repair made permanent: every stored snapshot of a schematic or symbol library that carries the
+/// quoted keyword is rewritten in place with only those quote marks removed.  Runs once at start-up; a store
+/// with nothing to repair costs one query.  Returns how many snapshots changed.
+pub async fn repair_stored_private_properties(pool: &PgPool) -> DbResult<usize> {
+    let rows = sqlx::query(
+        "SELECT s.doc_id, s.seq FROM snapshots s JOIN documents d ON d.id = s.doc_id
+         WHERE (d.path LIKE '%.kicad_sch' OR d.path LIKE '%.kicad_sym') AND position($1::bytea in s.content) > 0
+         ORDER BY s.doc_id, s.seq",
+    )
+    .bind(&b"(property \"private\""[..])
+    .fetch_all(pool)
+    .await?;
+    let mut changed = 0;
+    for r in rows {
+        let (doc_id, seq): (Uuid, i64) = (r.get("doc_id"), r.get("seq"));
+        let Some(row) = sqlx::query("SELECT content FROM snapshots WHERE doc_id = $1 AND seq = $2")
+            .bind(doc_id)
+            .bind(seq)
+            .fetch_optional(pool)
+            .await?
+        else {
+            continue;
+        };
+        let before: Vec<u8> = row.get("content");
+        let after = repair_private_properties(before.clone());
+        if after != before {
+            sqlx::query("UPDATE snapshots SET content = $3 WHERE doc_id = $1 AND seq = $2")
+                .bind(doc_id)
+                .bind(seq)
+                .bind(&after)
+                .execute(pool)
+                .await?;
+            changed += 1;
+            tracing::info!("private property keyword repaired in snapshot {doc_id} seq {seq} ({} quote marks)", before.len() - after.len());
+        }
+    }
+    Ok(changed)
+}
+
 #[cfg(test)]
 mod repair_tests {
     use super::repair_private_properties as fix;

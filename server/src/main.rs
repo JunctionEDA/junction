@@ -231,6 +231,18 @@ async fn main() -> anyhow::Result<()> {
 
     fonts::spawn_refresh();
 
+    // Stored schematics written before 2026-11-15 can carry a quoted `private` keyword KiCad refuses.
+    {
+        let pool = pool.clone();
+        tokio::spawn(async move {
+            match persist::repair_stored_private_properties(&pool).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!("private property keyword repaired in {n} stored snapshots"),
+                Err(e) => tracing::error!("private property repair failed: {e}"),
+            }
+        });
+    }
+
     // Daily pruning of ops/snapshots behind snapshot coverage.
     {
         let pool = pool.clone();
