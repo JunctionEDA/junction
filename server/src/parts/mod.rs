@@ -416,7 +416,44 @@ fn info_of(row: &PartRow) -> PartInfo {
     let mut info: PartInfo = serde_json::from_value(row.info.clone()).unwrap_or_default();
     info.vendor = row.vendor.clone();
     info.vendor_id = row.vendor_id.clone();
+    if standard::is_packaging(&info.package) {
+        info.package.clear(); // rows cached when Mouser's "Packaging" was taken for the package
+    }
     info
+}
+
+/// Vendors that were asked for a part's package and had none, and when: not asked again for a day.
+static NO_PACKAGE: std::sync::Mutex<Option<std::collections::HashMap<String, std::time::Instant>>> = std::sync::Mutex::new(None);
+
+/// Mouser does not say what package a part comes in.  DigiKey does, for the same
+/// manufacturer part number; the answer is kept on the part.
+async fn package_from_digikey(state: &AppState, keys: &Keys, info: &mut PartInfo) {
+    if info.vendor == "digikey" || info.mpn.is_empty() || !keys.has("digikey") {
+        return;
+    }
+    let memo = format!("{}:{}", info.vendor, info.vendor_id);
+    {
+        let mut g = NO_PACKAGE.lock().unwrap_or_else(|e| e.into_inner());
+        let m = g.get_or_insert_with(Default::default);
+        if m.get(&memo).is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(86_400)) {
+            return;
+        }
+        m.insert(memo, std::time::Instant::now());
+    }
+    let found = match vendors::search("digikey", keys, &info.mpn, 5).await {
+        Ok(hits) => hits.into_iter().find(|h| h.mpn.eq_ignore_ascii_case(&info.mpn) && !h.package.is_empty()),
+        Err(_) => None,
+    };
+    let Some(dk) = found else { return };
+    info.package = dk.package.clone();
+    if let Some(sdp) = dk.attributes.get("Supplier Device Package") {
+        info.attributes.entry("Supplier Device Package".into()).or_insert_with(|| sdp.clone());
+    }
+    if info.category.is_empty() {
+        info.category = dk.category.clone();
+    }
+    let patch = json!({ "package": info.package, "attributes": info.attributes, "category": info.category });
+    let _ = sqlx::query("UPDATE parts SET info = info || $3 WHERE vendor = $1 AND vendor_id = $2").bind(&info.vendor).bind(&info.vendor_id).bind(&patch).execute(&state.pool).await;
 }
 
 /// The fields a placed symbol carries so the part can be found, ordered and refetched.
@@ -468,10 +505,16 @@ fn lib_nick(raw: Option<&str>) -> String {
 ///
 /// A part no vendor has drawings for takes them from KiCad's standard library, matched by
 /// its package ([`standard`]).
-async fn part_view(row: &PartRow, src: Option<&PartRow>, lib: &str, stale: Option<String>) -> Value {
-    let info = info_of(row);
+async fn part_view(state: &AppState, keys: &Keys, row: &PartRow, src: Option<&PartRow>, lib: &str, stale: Option<String>) -> Value {
+    let mut info = info_of(row);
     let d = src.and_then(|s| drawings(&info, s, lib));
     let field_list = part_fields(&info, d.as_ref().map(|d| d.source_id.as_str()));
+    if info.package.is_empty() {
+        match src.filter(|_| d.is_some()) {
+            Some(s) => info.package = info_of(s).package, // the LCSC twin's
+            None => package_from_digikey(state, keys, &mut info).await,
+        }
+    }
     let fallback = if d.is_none() { standard::cad(&info, lib, &field_list).await } else { None };
     let fields: serde_json::Map<String, Value> = field_list.into_iter().map(|(k, v)| (k, json!(v))).collect();
     let cad = d.map(|d| {
@@ -618,7 +661,7 @@ pub async fn get_part(State(state): State<AppState>, AuthUser(user): AuthUser, Q
     let (row, stale) = ensure_part(&state, &keys, vendor, &id, truthy(&q.refresh)).await?;
     let info = info_of(&row);
     let src = cad_source(&state, &keys, &row, &info).await?;
-    Ok(Json(part_view(&row, src.as_ref(), &lib_nick(q.lib.as_deref()), stale).await))
+    Ok(Json(part_view(&state, &keys, &row, src.as_ref(), &lib_nick(q.lib.as_deref()), stale).await))
 }
 
 #[derive(Deserialize)]
@@ -659,7 +702,7 @@ pub async fn link_cad(State(state): State<AppState>, AuthUser(user): AuthUser, Q
     let row = load_part(&state, vendor, &id).await?.ok_or(AppError::NotFound)?;
     let info = info_of(&row);
     let src = cad_source(&state, &keys, &row, &info).await?;
-    Ok(Json(part_view(&row, src.as_ref(), &lib_nick(q.lib.as_deref()), None).await))
+    Ok(Json(part_view(&state, &keys, &row, src.as_ref(), &lib_nick(q.lib.as_deref()), None).await))
 }
 
 /// The STEP model behind a part's footprint, fetched once and kept.

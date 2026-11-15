@@ -492,7 +492,8 @@ fn mouser_part(p: &Value) -> Option<PartInfo> {
             }
         }
     }
-    let package = attributes.get("Package / Case").or(attributes.get("Packaging")).cloned().unwrap_or_default();
+    // Mouser's search says how a part is packed ("Packaging": reel, tray), not its package.
+    let package = attributes.get("Package / Case").cloned().unwrap_or_default();
     let prices = p
         .get("PriceBreaks")
         .and_then(Value::as_array)

@@ -93,6 +93,32 @@ fn family_and_pins(p: &str) -> Option<(String, u32)> {
 
 /// The KiCad standard footprint a vendor's package wording names, when it names exactly one.
 pub fn footprint_for(package: &str, kind: Kind) -> Option<(&'static str, String)> {
+    // DigiKey lists a package under each of its names ("SC-74A, SOT-753"): any one will do.
+    // A comma inside brackets belongs to one name ("8-SOIC (0.154\", 3.90mm Width)").
+    let mut names: Vec<String> = vec![String::new()];
+    let mut depth = 0;
+    for c in package.chars() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            _ => {}
+        }
+        if c == ',' && depth <= 0 {
+            names.push(String::new());
+        } else {
+            names.last_mut().unwrap().push(c);
+        }
+    }
+    names.iter().find_map(|n| footprint_for_name(n, kind))
+}
+
+/// Wording that says how the part is shipped, which Mouser gives where others give the package.
+pub fn is_packaging(p: &str) -> bool {
+    let t = p.trim().to_ascii_lowercase();
+    ["mousereel", "reel", "tray", "tube", "bulk", "cut tape", "ammo", "ammo pack", "bag", "box", "each", "tape & reel (tr)", "cut tape (ct)"].contains(&t.as_str())
+}
+
+fn footprint_for_name(package: &str, kind: Kind) -> Option<(&'static str, String)> {
     let p = package.trim().to_ascii_uppercase().replace('\u{2011}', "-");
     if p.is_empty() {
         return None;
@@ -116,7 +142,12 @@ pub fn footprint_for(package: &str, kind: Kind) -> Option<(&'static str, String)
     }
 
     // Small-signal and power packages with one land pattern.
-    const FIXED: [(&str, &str, &str); 24] = [
+    const FIXED: [(&str, &str, &str); 29] = [
+        ("SOT-753", "Package_TO_SOT_SMD", "SOT-23-5"),
+        ("SC-74A", "Package_TO_SOT_SMD", "SOT-23-5"),
+        ("SOT-457", "Package_TO_SOT_SMD", "SOT-23-6"),
+        ("SC-74", "Package_TO_SOT_SMD", "SOT-23-6"),
+        ("TSOT-23-5", "Package_TO_SOT_SMD", "TSOT-23-5"),
         ("SOT-23-3", "Package_TO_SOT_SMD", "SOT-23"),
         ("SOT-23-5", "Package_TO_SOT_SMD", "SOT-23-5"),
         ("SOT-23-6", "Package_TO_SOT_SMD", "SOT-23-6"),
@@ -142,7 +173,7 @@ pub fn footprint_for(package: &str, kind: Kind) -> Option<(&'static str, String)
         ("SOD-323", "Diode_SMD", "D_SOD-323"),
         ("SOD-523", "Diode_SMD", "D_SOD-523"),
     ];
-    let head = squashed.split(['(', ',']).next().unwrap_or("");
+    let head = squashed.split('(').next().unwrap_or("");
     // the longest name first, so "SOT-23-5" is not taken for "SOT-23"
     let mut fixed: Vec<&(&str, &str, &str)> = FIXED.iter().collect();
     fixed.sort_by_key(|f| std::cmp::Reverse(f.0.len()));
@@ -194,6 +225,11 @@ pub fn footprint_for(package: &str, kind: Kind) -> Option<(&'static str, String)
     };
     let (lib, fp) = name.split_once(':')?;
     Some((lib, fp.to_string()))
+}
+
+/// The footprint for a part: by its package, else by DigiKey's "Supplier Device Package".
+pub fn footprint_of(info: &PartInfo, kind: Kind) -> Option<(&'static str, String)> {
+    footprint_for(&info.package, kind).or_else(|| info.attributes.get("Supplier Device Package").and_then(|p| footprint_for(p, kind)))
 }
 
 /// The pad numbers of a KiCad footprint, each once, in natural order.
@@ -255,7 +291,7 @@ fn generic_symbol(name: &str, pads: &[String]) -> SymbolOut {
 /// package names one of its footprints.  `lib` is the library the generic symbol goes in.
 pub async fn cad(info: &PartInfo, lib: &str, fields: &[(String, String)]) -> Option<Value> {
     let kind = kind_of(info);
-    let (fp_lib, fp_name) = footprint_for(&info.package, kind)?;
+    let (fp_lib, fp_name) = footprint_of(info, kind)?;
     let libs = crate::libs::shared();
     let fp: Value = serde_json::from_str(&libs.footprint_json(fp_lib, &fp_name).await.ok()?).ok()?;
     let fp_text = fp.get("footprint")?.as_str()?.to_string();
@@ -304,7 +340,10 @@ mod tests {
         assert_eq!(fp("16-SOIC (0.295\", 7.50mm Width)", Kind::Other).as_deref(), Some("Package_SO:SOIC-16W_7.5x10.3mm_P1.27mm"));
         assert_eq!(fp("SOT-23-3", Kind::Other).as_deref(), Some("Package_TO_SOT_SMD:SOT-23"));
         assert_eq!(fp("TO-236-3, SC-59, SOT-23-3", Kind::Other).as_deref(), Some("Package_TO_SOT_SMD:SOT-23"));
-        assert_eq!(fp("SC-74A, SOT-753", Kind::Other), None);
+        assert_eq!(fp("SC-74A, SOT-753", Kind::Other).as_deref(), Some("Package_TO_SOT_SMD:SOT-23-5"));
+        assert_eq!(fp("SC-74, SOT-457", Kind::Other).as_deref(), Some("Package_TO_SOT_SMD:SOT-23-6"));
+        assert_eq!(fp("TO-206AA, TO-18-3 Metal Can", Kind::Other), None);
+        assert!(is_packaging("MouseReel") && is_packaging("Tray") && !is_packaging("SOT-23-5"));
         assert_eq!(fp("TO-220-3", Kind::Other).as_deref(), Some("Package_TO_SOT_THT:TO-220-3_Vertical"));
         assert_eq!(fp("8-DIP (0.300\", 7.62mm)", Kind::Other).as_deref(), Some("Package_DIP:DIP-8_W7.62mm"));
         assert_eq!(fp("28-DIP (0.300\", 7.62mm)", Kind::Other).as_deref(), Some("Package_DIP:DIP-28_W7.62mm"));

@@ -55,8 +55,8 @@ const mouserParts = [
   { mpn: 'AMS1117-3.3', mfr: 'Advanced Monolithic Systems', no: '926-AMS1117-3.3', desc: 'LDO Voltage Regulators 1A Low Dropout Regulator 3.3V', stock: 12040, pkg: 'SOT-223-3', price: [[1, 0.48], [100, 0.31]] },
   { mpn: 'RP2040', mfr: 'Raspberry Pi', no: '358-SC0914(13)', desc: 'ARM Microcontrollers - MCU Dual core ARM Cortex-M0+ 133MHz', stock: 88000, pkg: 'QFN-56', price: [[1, 1.0], [500, 0.8]] },
   // no LCSC twin: the drawings come from KiCad's standard library, by package
-  { mpn: 'LMV321IDBVR', mfr: 'Texas Instruments', no: '595-LMV321IDBVR', desc: 'Operational Amplifiers - Op Amps Single Low-Voltage Rail-to-Rail Output', stock: 30210, pkg: 'SOT-23-5', price: [[1, 0.42], [100, 0.21]] },
-  { mpn: 'CRCW060310K0FKEA', mfr: 'Vishay', no: '71-CRCW0603-10K-E3', desc: 'Thick Film Resistors - SMD 1/10watt 10Kohms 1%', stock: 2400000, pkg: '0603 (1608 metric)', price: [[1, 0.1], [100, 0.012]] },
+  { mpn: 'LMV321IDBVR', mfr: 'Texas Instruments', no: '595-LMV321IDBVR', desc: 'Operational Amplifiers - Op Amps Single Low-Voltage Rail-to-Rail Output', stock: 30210, pkg: '', price: [[1, 0.42], [100, 0.21]] },
+  { mpn: 'CRCW060310K0FKEA', mfr: 'Vishay', no: '71-CRCW0603-10K-E3', desc: 'Thick Film Resistors - SMD 1/10watt 10Kohms 1%', stock: 2400000, pkg: '', price: [[1, 0.1], [100, 0.012]] },
   { mpn: 'LT8640SEV#PBF', mfr: 'Analog Devices', no: '584-LT8640SEV#PBF', desc: 'Switching Voltage Regulators 42V, 5A Synchronous Step-Down Silent Switcher 2', stock: 950, pkg: 'LQFN-20', price: [[1, 11.87], [25, 9.2]] },
 ];
 const mouserJson = (p) => ({
@@ -64,9 +64,11 @@ const mouserJson = (p) => ({
   Description: p.desc, ImagePath: '', Category: 'Semiconductors', LifecycleStatus: null, Manufacturer: p.mfr, ManufacturerPartNumber: p.mpn,
   MouserPartNumber: p.no, ProductDetailUrl: `https://www.mouser.com/ProductDetail/${encodeURIComponent(p.no)}`, ROHSStatus: 'RoHS Compliant',
   PriceBreaks: p.price.map(([q, v]) => ({ Quantity: q, Price: `$${v.toFixed(2)}`, Currency: 'USD' })),
-  ProductAttributes: [{ AttributeName: 'Package / Case', AttributeValue: p.pkg }, { AttributeName: 'Packaging', AttributeValue: 'Tray' }],
+  ProductAttributes: [...(p.pkg ? [{ AttributeName: 'Package / Case', AttributeValue: p.pkg }] : []), { AttributeName: 'Packaging', AttributeValue: p.pkg ? 'Tray' : 'MouseReel' }],
 });
-const dkParts = mouserParts.map((p, i) => ({ ...p, dk: ['497-6063-ND', 'AMS1117-3.3TR-ND', '2648-SC0914(13)CT-ND', 'LT8640SEV#PBF-ND'][i] }));
+// DigiKey's own numbers, and its package wording where Mouser gives none
+const dkOwn = { 'STM32F103C8T6': ['497-6063-ND'], 'AMS1117-3.3': ['AMS1117-3.3TR-ND'], 'RP2040': ['2648-SC0914(13)CT-ND'], 'LT8640SEV#PBF': ['LT8640SEV#PBF-ND'], 'LMV321IDBVR': ['296-9567-1-ND', 'SC-74A, SOT-753'], 'CRCW060310K0FKEA': ['541-10.0KHCT-ND', '0603 (1608 Metric)'] };
+const dkParts = mouserParts.map((p) => ({ ...p, dk: dkOwn[p.mpn][0], pkg: dkOwn[p.mpn][1] || p.pkg }));
 const dkJson = (p) => ({
   Description: { ProductDescription: p.desc.slice(0, 40), DetailedDescription: p.desc }, Manufacturer: { Id: 1, Name: p.mfr },
   ManufacturerProductNumber: p.mpn, UnitPrice: p.price[0][1], ProductUrl: `https://www.digikey.com/en/products/detail/x/${1000 + p.stock}`,
