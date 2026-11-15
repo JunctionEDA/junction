@@ -219,7 +219,14 @@ let stm;
   check('the symbol carries the Mouser number', p.j.cad.symbol.sexpr.includes('(property "Mouser" "511-STM32F103C8T6"'));
 
   const odd = await part(alice, 'mouser', '584-LT8640SEV#PBF');
-  eq('a part with no LCSC twin has data but no drawings', [odd.status, odd.j.mpn, odd.j.cad], [200, 'LT8640SEV#PBF', null]);
+  const amp = await part(alice, 'mouser', '595-LMV321IDBVR');
+  eq('a part LCSC lacks takes its footprint from KiCad\'s standard library by package', [amp.status, amp.j.cad?.source?.vendor, amp.j.cad?.footprint?.fpid, amp.j.cad?.footprint?.pads], [200, 'kicad', 'Package_TO_SOT_SMD:SOT-23-5', 5]);
+  eq('… with a numbered-pin symbol, one pin per pad, pointing at that footprint', [amp.j.cad?.symbol?.generic, amp.j.cad?.symbol?.pins, amp.j.cad?.symbol?.lib_id, amp.j.cad.symbol.sexpr.includes('(property "Footprint" "Package_TO_SOT_SMD:SOT-23-5"'), amp.j.cad.symbol.sexpr.includes('(property "Mouser" "595-LMV321IDBVR"')], [true, 5, 'LCSC:LMV321IDBVR', true, true]);
+  eq('… and still Mouser\'s stock and price', [amp.j.stock, amp.j.prices[0]], [30210, { qty: 1, price: 0.42, currency: 'USD' }]);
+  const res = await part(alice, 'mouser', '71-CRCW0603-10K-E3');
+  eq('a chip resistor gets KiCad\'s Device:R and the 0603 footprint', [res.j.cad?.source?.vendor, res.j.cad?.symbol?.lib_id, res.j.cad?.footprint?.fpid, res.j.cad?.reference], ['kicad', 'Device:R', 'Resistor_SMD:R_0603_1608Metric', 'R']);
+
+  eq('a part whose package names no single footprint has data but no drawings', [odd.status, odd.j.mpn, odd.j.cad], [200, 'LT8640SEV#PBF', null]);
   const linked = await call(alice, 'PUT', `/api/parts/cad?vendor=mouser&id=${encodeURIComponent('584-LT8640SEV#PBF')}`, { lcsc: 'C6186' });
   eq('drawings can be linked by hand', [linked.status, linked.j.cad?.source?.vendor_id, !!linked.j.cad?.footprint], [200, 'C6186', true]);
   eq('linking to a part that does not exist is refused', (await call(alice, 'PUT', `/api/parts/cad?vendor=mouser&id=${encodeURIComponent('584-LT8640SEV#PBF')}`, { lcsc: 'C999999999' })).status, 404);

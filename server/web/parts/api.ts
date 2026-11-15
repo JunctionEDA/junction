@@ -10,8 +10,9 @@ export interface PartInfo {
 }
 
 export interface PartCad {
-  source: { vendor: string; vendor_id: string }; lib: string; reference: string;
-  symbol: { name: string; lib_id: string; sexpr: string; units: number; pins: number } | null;
+  /** `vendor` is "lcsc", or "kicad" when the drawings are KiCad's standard library matched by package. */
+  source: { vendor: string; vendor_id: string; package?: string }; lib: string; reference: string;
+  symbol: { name: string; lib_id: string; sexpr: string; units: number; pins: number; generic?: boolean } | null;
   footprint: { name: string; fpid: string; sexpr: string; pads: number; through_hole: boolean } | null;
   model: { title: string; url: string } | null;
 }

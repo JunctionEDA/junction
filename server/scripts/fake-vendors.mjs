@@ -54,6 +54,9 @@ const mouserParts = [
   { mpn: 'STM32F103C8T6', mfr: 'STMicroelectronics', no: '511-STM32F103C8T6', desc: 'ARM Microcontrollers - MCU 32BIT Cortex M3 64K Flash 20K RAM', stock: 6609, pkg: 'LQFP-48', price: [[1, 5.61], [10, 4.2], [100, 3.56]] },
   { mpn: 'AMS1117-3.3', mfr: 'Advanced Monolithic Systems', no: '926-AMS1117-3.3', desc: 'LDO Voltage Regulators 1A Low Dropout Regulator 3.3V', stock: 12040, pkg: 'SOT-223-3', price: [[1, 0.48], [100, 0.31]] },
   { mpn: 'RP2040', mfr: 'Raspberry Pi', no: '358-SC0914(13)', desc: 'ARM Microcontrollers - MCU Dual core ARM Cortex-M0+ 133MHz', stock: 88000, pkg: 'QFN-56', price: [[1, 1.0], [500, 0.8]] },
+  // no LCSC twin: the drawings come from KiCad's standard library, by package
+  { mpn: 'LMV321IDBVR', mfr: 'Texas Instruments', no: '595-LMV321IDBVR', desc: 'Operational Amplifiers - Op Amps Single Low-Voltage Rail-to-Rail Output', stock: 30210, pkg: 'SOT-23-5', price: [[1, 0.42], [100, 0.21]] },
+  { mpn: 'CRCW060310K0FKEA', mfr: 'Vishay', no: '71-CRCW0603-10K-E3', desc: 'Thick Film Resistors - SMD 1/10watt 10Kohms 1%', stock: 2400000, pkg: '0603 (1608 metric)', price: [[1, 0.1], [100, 0.012]] },
   { mpn: 'LT8640SEV#PBF', mfr: 'Analog Devices', no: '584-LT8640SEV#PBF', desc: 'Switching Voltage Regulators 42V, 5A Synchronous Step-Down Silent Switcher 2', stock: 950, pkg: 'LQFN-20', price: [[1, 11.87], [25, 9.2]] },
 ];
 const mouserJson = (p) => ({

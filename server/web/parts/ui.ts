@@ -290,7 +290,10 @@ class PartsDialog {
     fact("Category", p.category);
     fact("Lifecycle", p.lifecycle);
     for (const [k, v] of Object.entries(p.attributes || {}).slice(0, 10)) fact(k, v);
-    if (cad && cad.source.vendor_id !== p.vendor_id) fact("Drawings", ["from LCSC ", h("span", { class: "kp-mono" }, cad.source.vendor_id), " (same manufacturer part number) ", h("a", { href: "#", onclick: (ev: Event) => { ev.preventDefault(); void this.relink(); } }, "change")]);
+    const useLcsc = h("a", { href: "#", onclick: (ev: Event) => { ev.preventDefault(); void this.relink(); } }, "Use an LCSC part's drawings instead");
+    if (cad && cad.source.vendor === "kicad") fact("Drawings", ["KiCad standard library, matched by package", cad.symbol && cad.symbol.generic ? ". The symbol is a plain box with numbered pins: check it against the datasheet. " : ". ", useLcsc]);
+    else if (!cad && p.vendor !== "lcsc") fact("Drawings", ["None found at LCSC or in KiCad's standard library for this package. ", useLcsc]);
+    else if (cad && cad.source.vendor_id !== p.vendor_id) fact("Drawings", ["from LCSC ", h("span", { class: "kp-mono" }, cad.source.vendor_id), " (same manufacturer part number) ", h("a", { href: "#", onclick: (ev: Event) => { ev.preventDefault(); void this.relink(); } }, "change")]);
     if (p.fetched_at) fact("Fetched", new Date(p.fetched_at).toLocaleString());
 
     const detail = h("div", { class: "kp-detail" },
@@ -353,7 +356,7 @@ class PartsDialog {
 
   private async relink() {
     const p = this.part; if (!p) return;
-    const cur = p.cad ? p.cad.source.vendor_id : "";
+    const cur = p.cad && p.cad.source.vendor === "lcsc" ? p.cad.source.vendor_id : "";
     const v = await ask({ title: "Symbol and footprint", text: `LCSC part number whose symbol and footprint to use for ${p.mpn || p.vendor_id}. Leave it empty to look it up again by manufacturer part number.`, input: cur, placeholder: "C8734", ok: "Use" });
     if (v === null) return;
     try { this.part = await api.linkCad(p.vendor, p.vendor_id, v.trim() || null, this.sel ? this.sel.lib : undefined); this.partErr = ""; } catch (e) { this.partErr = errText(e); }

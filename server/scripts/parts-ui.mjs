@@ -227,6 +227,10 @@ check('a search now covers all four vendors', vendorsSeen === 'digikey,farnell,l
 await pick(A, '511-STM32F103C8T6');
 check('a Mouser part shows LCSC\'s drawings for the same manufacturer part number', await drawn(A, '#kp-sym') && /from LCSC\s*C8734/.test(await A.locator('#kp-side').innerText()));
 await shot(A, '14-mouser-part');
+await search(A, 'LMV321IDBVR'); await pick(A, '595-LMV321IDBVR');
+const side = await A.locator('#kp-side').innerText();
+check('a part LCSC lacks shows a KiCad standard footprint matched by package, and says the symbol is generic', await drawn(A, '#kp-sym') && await drawn(A, '#kp-fp') && /KiCad standard library, matched by package/.test(side) && /numbered pins/.test(side) && /5 pins/.test(side) && /5 pads/.test(side), side.replace(/\s+/g, ' ').slice(0, 400));
+await shot(A, '14b-standard-library-part');
 await A.keyboard.press('Escape');
 
 // ---------------------------------------------------------------- links that open the dialog (what the desktop app's menu entry opens)

@@ -20,6 +20,7 @@
 //! same manufacturer part number when there is one.
 
 pub mod easyeda;
+pub mod standard;
 pub mod tidy;
 pub mod transistor;
 pub mod vendors;
@@ -464,10 +465,15 @@ fn lib_nick(raw: Option<&str>) -> String {
     }
 }
 
-fn part_view(row: &PartRow, src: Option<&PartRow>, lib: &str, stale: Option<String>) -> Value {
+///
+/// A part no vendor has drawings for takes them from KiCad's standard library, matched by
+/// its package ([`standard`]).
+async fn part_view(row: &PartRow, src: Option<&PartRow>, lib: &str, stale: Option<String>) -> Value {
     let info = info_of(row);
     let d = src.and_then(|s| drawings(&info, s, lib));
-    let fields: serde_json::Map<String, Value> = part_fields(&info, d.as_ref().map(|d| d.source_id.as_str())).into_iter().map(|(k, v)| (k, json!(v))).collect();
+    let field_list = part_fields(&info, d.as_ref().map(|d| d.source_id.as_str()));
+    let fallback = if d.is_none() { standard::cad(&info, lib, &field_list).await } else { None };
+    let fields: serde_json::Map<String, Value> = field_list.into_iter().map(|(k, v)| (k, json!(v))).collect();
     let cad = d.map(|d| {
         let model_qs = format!("vendor={}&id={}", row.vendor, urlencode(&row.vendor_id));
         json!({
@@ -488,7 +494,7 @@ fn part_view(row: &PartRow, src: Option<&PartRow>, lib: &str, stale: Option<Stri
     let mut v = serde_json::to_value(&info).unwrap_or_else(|_| json!({}));
     let o = v.as_object_mut().expect("part info is an object");
     o.insert("vendor_name".into(), json!(vendors::vendor_label(&info.vendor)));
-    o.insert("cad".into(), cad.unwrap_or(Value::Null));
+    o.insert("cad".into(), cad.or(fallback).unwrap_or(Value::Null));
     o.insert("fields".into(), Value::Object(fields));
     o.insert("fetched_at".into(), json!(row.info_fetched_at));
     o.insert("stale".into(), json!(stale.is_some()));
@@ -612,7 +618,7 @@ pub async fn get_part(State(state): State<AppState>, AuthUser(user): AuthUser, Q
     let (row, stale) = ensure_part(&state, &keys, vendor, &id, truthy(&q.refresh)).await?;
     let info = info_of(&row);
     let src = cad_source(&state, &keys, &row, &info).await?;
-    Ok(Json(part_view(&row, src.as_ref(), &lib_nick(q.lib.as_deref()), stale)))
+    Ok(Json(part_view(&row, src.as_ref(), &lib_nick(q.lib.as_deref()), stale).await))
 }
 
 #[derive(Deserialize)]
@@ -653,7 +659,7 @@ pub async fn link_cad(State(state): State<AppState>, AuthUser(user): AuthUser, Q
     let row = load_part(&state, vendor, &id).await?.ok_or(AppError::NotFound)?;
     let info = info_of(&row);
     let src = cad_source(&state, &keys, &row, &info).await?;
-    Ok(Json(part_view(&row, src.as_ref(), &lib_nick(q.lib.as_deref()), None)))
+    Ok(Json(part_view(&row, src.as_ref(), &lib_nick(q.lib.as_deref()), None).await))
 }
 
 /// The STEP model behind a part's footprint, fetched once and kept.

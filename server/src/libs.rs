@@ -1025,6 +1025,11 @@ impl RepoZip {
 
 // ---------------------------------------------------------------- handlers
 
+/// The process-wide libraries, for server code that reads them directly (vendor parts' fallback).
+pub fn shared() -> &'static Libs {
+    libs()
+}
+
 fn libs() -> &'static Libs {
     static LIBS: OnceLock<Libs> = OnceLock::new();
     LIBS.get_or_init(Libs::from_env)
