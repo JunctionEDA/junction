@@ -4,6 +4,49 @@ Releases of Junction, which was called KiCad Collaborative up to 1.0.9. The
 version here is the product version (`packaging/VERSION`), not the KiCad
 version it is based on.
 
+## 2.1.2 (2026-11-15)
+
+Desktop fixes found by opening online projects end to end, and 3D models that
+show without a KiCad installation.
+
+### Desktop
+- 3D viewer: a standard library model that is not on this computer is fetched
+  from the server once and kept in the user cache, so boards show their parts
+  without KiCad's 3D library installed. When KiCad's library has no model
+  under that name, the closest one is used. A part whose model cannot be had
+  at all is drawn as a generic box instead of bare pads.
+- An online project whose footprint library table names an empty project
+  library no longer reports "Footprint library ... not found" on every open.
+- A project that was uploaded without its project symbol library gets the
+  library written back from the schematic's own copies of the symbols when it
+  is downloaded.
+- When the projects folder cannot be written (macOS not allowing Documents),
+  the local copy of an online project goes to Junction's own data folder and a
+  message says where, instead of the download failing.
+- The browser page shown after signing in has Junction's look and a button to
+  close the tab.
+- A font whose licence forbids embedding is reported once per project, not on
+  every open.
+- When the server refuses an upload (a file over the size limit), the message
+  says why.
+
+### Web and assistant
+- The 3D view shows the closest library model for a part whose own model is
+  missing, looks up a model by the footprint's name when the footprint names
+  none, and says in the status bar which parts were replaced.
+- New edit `assign_models` and harness call `board.assign_models()` write the
+  closest model into the footprint.
+
+### Downloads
+
+| Platform | File | Notes |
+|---|---|---|
+| macOS (Apple Silicon, macOS 15+) | `Junction-2.1.2-macos.dmg` | Ad-hoc signed: first launch is right-click, Open. Replace the old app in Applications. |
+| Windows x64 | `Junction-2.1.2-windows-x64.exe` | Installer; upgrades earlier versions in place. |
+| Linux x64 (Ubuntu 24.04 LTS) | `Junction-2.1.2-linux-x64.tar.gz` | Extract anywhere, install the packages listed in `usr/share/junction/ubuntu-packages.txt` (`sudo apt install $(cat usr/share/junction/ubuntu-packages.txt)`), run `usr/bin/junction`. |
+
+Symbol and footprint libraries are not bundled; point the library tables at an existing KiCad 10 install.
+
 ## 2.1.1 (2026-11-15)
 
 A small desktop fix on top of 2.1.0.
