@@ -458,11 +458,30 @@ async fn save_link(
 ) -> AppResult<()> {
     let mut tx = state.pool.begin().await?;
     // A new link starts with no shared history: whatever the old one remembered
-    // describes a different folder.
-    sqlx::query("DELETE FROM project_github_files WHERE project_id = $1")
-        .bind(project_id)
-        .execute(&mut *tx)
-        .await?;
+    // describes a different folder.  Linking again to the very place the project was
+    // linked to (now, or before it was unlinked) keeps it: an edit made in between is
+    // then a change to push, not two files that were never synced.
+    let same: bool = sqlx::query_scalar(
+        "SELECT EXISTS (
+           SELECT 1 FROM (SELECT repo_owner, repo_name, branch, subdir FROM project_github WHERE project_id = $1
+                          UNION ALL
+                          SELECT repo_owner, repo_name, branch, subdir FROM project_github_last WHERE project_id = $1) was
+           WHERE lower(was.repo_owner) = lower($2) AND lower(was.repo_name) = lower($3) AND was.branch = $4 AND was.subdir = $5)",
+    )
+    .bind(project_id)
+    .bind(&repo.owner)
+    .bind(&repo.name)
+    .bind(branch)
+    .bind(subdir)
+    .fetch_one(&mut *tx)
+    .await?;
+    if !same {
+        sqlx::query("DELETE FROM project_github_files WHERE project_id = $1")
+            .bind(project_id)
+            .execute(&mut *tx)
+            .await?;
+    }
+    sqlx::query("DELETE FROM project_github_last WHERE project_id = $1").bind(project_id).execute(&mut *tx).await?;
     sqlx::query(
         "INSERT INTO project_github (project_id, repo_owner, repo_name, branch, subdir, linked_by)
          VALUES ($1, $2, $3, $4, $5, $6)
@@ -957,7 +976,14 @@ fn project_gone(remote: &Remote, base: &HashMap<String, BaseRow>) -> bool {
 /// online because a folder disappeared.
 async fn view(state: &AppState, gh: &Gh, id: Uuid, mut link: Link) -> AppResult<View> {
     let base = load_base(state, id).await?;
-    let known: Vec<String> = base.keys().cloned().collect();
+    let local = local_files(state, id).await?;
+    // A file outside the folder that was renamed with git is looked for by its content —
+    // unless its document was deleted online, which a rename must not bring back.
+    let live: HashSet<Uuid> = local.values().map(|l| l.doc.id).collect();
+    let known: Vec<(String, String)> = base
+        .iter()
+        .map(|(p, b)| (p.clone(), if b.doc_id.is_some_and(|d| live.contains(&d)) { b.sha.clone() } else { String::new() }))
+        .collect();
     let mut remote = remote::read(&state.pool, gh, &link.repo, &link.branch, &link.subdir, &known).await?;
     let mut missing = None;
     let mut moved = None;
@@ -1019,7 +1045,6 @@ async fn view(state: &AppState, gh: &Gh, id: Uuid, mut link: Link) -> AppResult<
             });
         }
     }
-    let local = local_files(state, id).await?;
     let mut entries = if missing.is_some() { Vec::new() } else { compare(&local, &remote, &base) };
     // A Git LFS file is never written over or taken for deleted.
     entries.retain(|e| !remote.lfs.contains(&e.path));
@@ -1531,7 +1556,16 @@ pub async fn unlink_project(
     if !a.is_owner {
         return Err(api_err(StatusCode::FORBIDDEN, "forbidden", "Only the project's owner can unlink it."));
     }
-    sqlx::query("DELETE FROM project_github_files WHERE project_id = $1").bind(id).execute(&state.pool).await?;
+    // What the last sync knew stays, with where it was: linking to the same place again picks it up.
+    sqlx::query(
+        "INSERT INTO project_github_last (project_id, repo_owner, repo_name, branch, subdir)
+         SELECT project_id, repo_owner, repo_name, branch, subdir FROM project_github WHERE project_id = $1
+         ON CONFLICT (project_id) DO UPDATE SET repo_owner = EXCLUDED.repo_owner, repo_name = EXCLUDED.repo_name,
+           branch = EXCLUDED.branch, subdir = EXCLUDED.subdir",
+    )
+    .bind(id)
+    .execute(&state.pool)
+    .await?;
     sqlx::query("DELETE FROM project_github WHERE project_id = $1").bind(id).execute(&state.pool).await?;
     Ok(Json(json!({ "ok": true })).into_response())
 }
@@ -1924,7 +1958,7 @@ pub async fn file_commits(
 
     // The file's own repository: the linked one, or the submodule it is in (whose
     // history is followed from the commit the submodule is pinned to).
-    let known: Vec<String> = load_base(&state, id).await?.into_keys().collect();
+    let known: Vec<(String, String)> = load_base(&state, id).await?.into_iter().map(|(p, b)| (p, b.sha)).collect();
     let remote = remote::read(&state.pool, &gh, &link.repo, &link.branch, &link.subdir, &known).await?;
     let (src, at) = remote.place(&link.subdir, &path).ok_or(AppError::NotFound)?;
     let (repo, from) = match remote.sources.get(src) {
@@ -1990,7 +2024,7 @@ pub async fn file_at_commit(
     }
 
     // The commit is one of the file's own repository (file_commits): a submodule's for a file in one.
-    let known: Vec<String> = load_base(&state, id).await?.into_keys().collect();
+    let known: Vec<(String, String)> = load_base(&state, id).await?.into_iter().map(|(p, b)| (p, b.sha)).collect();
     let remote = remote::read(&state.pool, &gh, &link.repo, &link.branch, &link.subdir, &known).await?;
     let (src, repo_path) = remote.place(&link.subdir, &path).ok_or(AppError::NotFound)?;
     let repo = remote.sources.get(src).map(|s| s.repo.clone()).unwrap_or_else(|| link.repo.clone());

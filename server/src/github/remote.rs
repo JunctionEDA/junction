@@ -842,7 +842,7 @@ async fn blob_refs(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, doc_path: &str,
 /// outside files the project already has: one that is still in the repository stays
 /// part of the project even when nothing names it any more (a library table row
 /// removed is not the library deleted).
-pub(super) async fn read(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, branch: &str, subdir: &str, known: &[String]) -> AppResult<Remote> {
+pub(super) async fn read(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, branch: &str, subdir: &str, known: &[(String, String)]) -> AppResult<Remote> {
     let Some(head) = gh.branch_head(repo, branch).await? else {
         return Ok(Remote::default());
     };
@@ -871,7 +871,7 @@ pub(super) async fn read(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, branch: &
         let (keep, aside): (BTreeMap<_, _>, BTreeMap<_, _>) = files
             .into_iter()
             // what the project already has stays with it when a project file appears beside it later
-            .partition(|(p, _)| under(&nested, p).is_none() || (!p.ends_with(".kicad_pro") && known.contains(p)));
+            .partition(|(p, _)| under(&nested, p).is_none() || (!p.ends_with(".kicad_pro") && known.iter().any(|(k, _)| k == p)));
         files = keep;
         set_aside = aside;
     }
@@ -1002,14 +1002,33 @@ pub(super) async fn read(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, branch: &
         }
     }
 
-    for path in known {
+    for (path, sha) in known {
         if !path.starts_with("../") || files.contains_key(path) || !usable(path) {
             continue;
         }
         let Some(at) = repo_path(subdir, path) else { continue };
         let notes = w.notes.len();
-        if let Loc::File(f) = w.locate(0, &at).await? {
-            files.insert(path.clone(), f);
+        match w.locate(0, &at).await? {
+            Loc::File(f) => {
+                files.insert(path.clone(), f);
+            }
+            // Gone from where it was.  The very same file under another name in the same
+            // folder is that file renamed with git (the table that names it not updated
+            // yet): it comes along, so it shows as a rename instead of vanishing.
+            _ if sha.is_empty() => {}
+            _ => {
+                if let Loc::Dir { src, tree, path: dir } = w.locate(0, dir_of(&at)).await? {
+                    let same: Vec<TreeEntry> = w.entries(src, &tree, false).await?.into_iter().filter(|e| e.kind == Kind::Blob && e.sha == *sha).collect();
+                    if let [e] = same.as_slice() {
+                        let doc_dir = dir_of(path);
+                        let new_path = if doc_dir.is_empty() { e.path.clone() } else { format!("{doc_dir}/{}", e.path) };
+                        if usable(&new_path) && !files.contains_key(&new_path) {
+                            let inside = if dir.is_empty() { e.path.clone() } else { format!("{dir}/{}", e.path) };
+                            files.insert(new_path, RemoteFile { sha: e.sha.clone(), size: e.size, src, path: inside });
+                        }
+                    }
+                }
+            }
         }
         w.forget_notes(notes);
     }

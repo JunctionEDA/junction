@@ -378,6 +378,16 @@ const server = http.createServer(async (req, res) => {
   if (rest === '' && req.method === 'GET') return send(res, 200, repoJson(repo, perms));
   if (rest === '/branches') return send(res, 200, [...repo.refs.keys()].map((name) => ({ name, commit: { sha: repo.refs.get(name) } })));
 
+  // POST /branches/<name>/rename { new_name }: the old name forwards to the new one afterwards.
+  const br = rest.match(/^\/branches\/(.+)\/rename$/);
+  if (br && req.method === 'POST') {
+    if (!needPush()) return;
+    if (!repo.refs.has(br[1])) return send(res, 404, { message: 'Branch not found' });
+    repo.refs.set(body.new_name, repo.refs.get(br[1])); repo.refs.delete(br[1]);
+    if (repo.defaultBranch === br[1]) repo.defaultBranch = body.new_name;
+    (repo.renamedBranches ||= new Map()).set(br[1], body.new_name);
+    return send(res, 201, { name: body.new_name, commit: { sha: repo.refs.get(body.new_name) } });
+  }
   const bm = rest.match(/^\/branches\/(.+)$/);
   if (bm && req.method === 'GET') {
     const name = repo.refs.has(bm[1]) ? bm[1] : repo.renamedBranches?.get(bm[1]);
@@ -410,6 +420,12 @@ const server = http.createServer(async (req, res) => {
     if (empty) return send(res, 409, { message: 'Git Repository is empty.' });
     const sha = repo.refs.get(mm[1]);
     return sha ? send(res, 200, { ref: `refs/heads/${mm[1]}`, object: { type: 'commit', sha } }) : notFound(res);
+  }
+  const dr = rest.match(/^\/git\/refs\/heads\/(.+)$/);
+  if (dr && req.method === 'DELETE') {
+    if (!needPush()) return;
+    if (!repo.refs.delete(dr[1])) return send(res, 422, { message: 'Reference does not exist' });
+    res.writeHead(204); return res.end();
   }
   if (rest === '/git/refs' && req.method === 'POST') {
     if (!needPush()) return;

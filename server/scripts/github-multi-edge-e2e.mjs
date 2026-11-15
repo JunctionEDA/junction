@@ -384,6 +384,20 @@ try {
   r = await call(alice, 'PUT', `/api/projects/${pa}/github`, { repo: 'gh-alice/odd', branch: 'trunk', path: 'hw/a' });
   st = await status(alice, pa);
   eq('unlinked and linked again to the same folder: identical files are simply in sync, nothing doubled', [r.status, notSynced(st), Object.keys(await docsOf(alice, pa)).length], [200, {}, n]);
+  await call(alice, 'DELETE', `/api/projects/${pa}/github`);
+  docs = await docsOf(alice, pa);
+  await saveOnline(docs['a.kicad_pcb'], board([fpItem('R', 31, 140)]));
+  await commit('gh-alice/odd', { 'hw/a/sym-lib-table': aTable.replace('(descr "")', '(descr "meanwhile")') }, 'Meanwhile on GitHub');
+  await call(alice, 'PUT', `/api/projects/${pa}/github`, { repo: 'gh-alice/odd', branch: 'trunk', path: 'hw/a' });
+  st = await status(alice, pa);
+  eq('unlinked, edited, and linked again to the same folder: the edit is a push and what changed on GitHub meanwhile a pull, not conflicts', [notSynced(st), st.summary.push, st.summary.conflict], [{ 'a.kicad_pcb': 'push', 'sym-lib-table': 'pull' }, 1, 0]);
+  r = await push(alice, pa, { message: 'After linking again' });
+  check('…and the push goes through', r.status === 200 && (await ghFiles('gh-alice/odd', 'trunk')).files['hw/a/a.kicad_pcb'] === board([fpItem('R', 31, 140)]), JSON.stringify(r.j));
+  await call(alice, 'DELETE', `/api/projects/${pa}/github`);
+  await saveOnline(docs['a.kicad_pcb'], board([fpItem('R', 31, 150)]));
+  await call(alice, 'PUT', `/api/projects/${pa}/github`, { repo: 'gh-alice/odd', branch: 'trunk', path: 'hw' });
+  await call(alice, 'PUT', `/api/projects/${pa}/github`, { repo: 'gh-alice/odd', branch: 'trunk', path: 'hw/a' });
+  eq('linked somewhere else in between: what was known is forgotten, so a file that differs is a question again', notSynced(await status(alice, pa))['a.kicad_pcb'], 'conflict');
 //BODY
 } finally {
   await db.query('DELETE FROM projects WHERE owner_id = ANY($1)', [[aliceId, bobId]]).catch(() => {});
