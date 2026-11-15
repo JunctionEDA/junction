@@ -59,12 +59,13 @@ struct ARCHIVE
     const char* table;          ///< the library table at the top of the repository
 };
 
-// The project templates and drawing sheets come first and the symbols last: the symbols folder
-// is what marks the set as installed.
+// In the order they are downloaded: the footprints and symbols, which a design cannot do
+// without, before the project templates and drawing sheets.  (Putting them in place has its
+// own order, with the symbols folder last: it is what marks the set as installed.)
 const ARCHIVE ARCHIVES[] = {
-    { "kicad-templates", "templates", "", "" },
     { "kicad-footprints", "footprints", ".pretty", "fp-lib-table" },
     { "kicad-symbols", "symbols", ".kicad_symdir", "sym-lib-table" },
+    { "kicad-templates", "templates", "", "" },
 };
 
 
@@ -688,6 +689,34 @@ bool COLLAB_STDLIBS::Needed()
     symbols.AssignDir( PATHS::GetStockSymbolsPath() );
 
     return !symbols.DirExists();
+}
+
+
+bool COLLAB_STDLIBS::IsDownloadableLibraryError( const wxString& aMessage )
+{
+    // A standard library that is not on this computer is not a fault to warn about while the
+    // set can be downloaded (or is on its way): the download is the answer, and it brings the
+    // library.  Anything else that fails to load is still reported.
+    if( !Running() && !Needed() )
+        return false;
+
+    wxString message = aMessage;
+    message.Replace( wxS( "\\" ), wxS( "/" ) );
+
+    for( wxString dir : { PATHS::GetStockSymbolsPath(), PATHS::GetStockFootprintsPath(),
+                          PATHS::GetStockDesignBlocksPath(), PATHS::GetStock3dmodelsPath(),
+                          PATHS::GetManagedLibrariesPath() } )
+    {
+        dir.Replace( wxS( "\\" ), wxS( "/" ) );
+
+        while( dir.EndsWith( wxS( "/" ) ) )
+            dir.RemoveLast();
+
+        if( !dir.IsEmpty() && message.Contains( dir + wxS( "/" ) ) )
+            return true;
+    }
+
+    return false;
 }
 
 

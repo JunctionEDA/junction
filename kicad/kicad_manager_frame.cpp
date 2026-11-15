@@ -1697,6 +1697,9 @@ void KICAD_MANAGER_FRAME::startStandardLibrariesDownload( bool aContinuing )
     state->job->m_reporter->Report( state->message );
     s_stdlibsDownload = state;
 
+    // Libraries that are on their way are nothing to warn about.
+    Pgm().ClearLibraryLoadMessages();
+
     Pgm().GetNotificationsManager().CreateOrUpdate(
             STDLIBS_NOTIFICATION,
             _( "Downloading the standard symbols, footprints and templates" ),
@@ -1790,6 +1793,10 @@ void KICAD_MANAGER_FRAME::standardLibrariesDownloadEnded( bool aOk, bool aStoppe
         // library lists again, so the parts show up without closing anything.
         COLLAB_STDLIBS::SetDeclined( false );
         COLLAB_STDLIBS::Activate();
+
+        // Warnings about libraries that were not here yet are over; whatever still fails to
+        // load is reported again by the reload.
+        Pgm().ClearLibraryLoadMessages();
         PreloadAllLibraries();
 
         notifications.CreateOrUpdate(

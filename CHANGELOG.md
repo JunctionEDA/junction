@@ -10,6 +10,11 @@ version it is based on.
 - The library download says what it is fetching, how much of the whole it
   has and how long it still takes ("Downloading symbols: 21 of 61 MB, about
   40 s left"), short enough to read in the editors' status bar too.
+- No more "Error loading library ... not found" warnings for standard
+  libraries that are not on the computer yet: while they can be downloaded
+  or are downloading nothing is reported, and warnings shown before are
+  cleared when the download starts and when it ends. The symbols and
+  footprints are downloaded first, the project templates last.
 - A 3D model fetched for the viewer is kept for good: it is saved into the
   library folder on this computer (3dmodels/<Library>.3dshapes, beside the
   downloaded symbols and footprints), so it is downloaded once and is there
