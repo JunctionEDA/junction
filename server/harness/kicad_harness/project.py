@@ -1853,11 +1853,34 @@ class Board(_Doc):
                 "track_length_mm": lay.get("track_length_mm"), "clearance": rules.get("clearance"), "min_track_width": rules.get("min_track_width")}
 
     def models(self) -> dict:
-        """Which parts show as their real 3D model: {"parts", "from_kicad_library", "from_vendor", "without_model": [{"ref", "footprint", "reason"}]}.
+        """Which parts show as their real 3D model: {"parts", "from_kicad_library", "from_vendor", "replaced": [{"ref", "footprint",
+        "model", "match"}], "without_model": [{"ref", "footprint", "reason"}]}.
         A footprint from KiCad's library or from a vendor brings its model with it; the 3D view loads it by itself.
-        Parts listed under without_model are drawn as a plain stand-in shape."""
+        Parts under replaced are shown with the closest model KiCad's library has (`assign_models()` writes it into the
+        footprint); parts under without_model are drawn as a plain stand-in shape."""
         self.flush()
         return self.project.transport.call("get_board_info", {}).get("models_3d") or {}
+
+    def assign_models(self, refs: list[str] | None = None, similar: bool = True) -> dict:
+        """Give every part whose own 3D model KiCad's library does not have (or whose footprint names none) the closest
+        model the library does have, written into the footprint so the desktop and the web 3D view both show it: the
+        base package of a footprint variant (`..._HandSolder`), the same name in another library, the plainest model a
+        short name begins, or another part of the same family in the same library (`similar=False` leaves those out).
+        `refs` limits it to those parts.  Returns {"assigned": [{"ref", "model", "match"}], "without_model": [{"ref",
+        "reason"}]}; parts left without a model keep a plain stand-in shape in the 3D view."""
+        self.flush()
+        e: dict = {"op": "assign_models", "similar": bool(similar)}
+        if refs:
+            e["refs"] = [str(r) for r in refs]
+        self._edit(e)
+        try:
+            res = self.flush() or {}
+        except HarnessError as err:
+            if "already shows its own 3D model" in str(err) or "no replacement model was found" in str(err):
+                left = (self.models().get("without_model") or [])
+                return {"assigned": [], "without_model": [{"ref": m.get("ref"), "reason": m.get("reason")} for m in left if not refs or m.get("ref") in refs]}
+            raise
+        return dict(next((x["assign_models"] for x in res.get("details") or [] if "assign_models" in x), {"assigned": [], "without_model": []}))
 
     # ---- setting up
     def sync(self, placements: dict | None = None) -> dict:

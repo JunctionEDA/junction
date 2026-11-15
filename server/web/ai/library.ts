@@ -56,6 +56,23 @@ export async function modelNames(lib: string): Promise<Set<string> | null> {
   } catch { return null; }
 }
 
+/**
+ * The model the 3D view shows for `lib`/`name` of KiCad's 3D library: itself (match "exact") or, when the library has no
+ * such model, the closest one it has ("same" name in another library, the "base" package of a footprint variant, the plainest
+ * "variant" of a short name, a "similar" part of the same family).  null when nothing comes close; undefined when the
+ * library cannot be asked from here.
+ */
+export async function modelMatch(lib: string, name: string): Promise<{ library: string; name: string; match: string } | null | undefined> {
+  try {
+    const r: any = await once(`model-match:${lib}:${name}`, async () => {
+      try { return await getJson(`/api/kicad-lib/model-match?lib=${encodeURIComponent(lib)}&name=${encodeURIComponent(name)}`, `3D model ${lib}/${name}`); }
+      catch (err) { if (/not found|404/i.test(String((err as Error)?.message || err))) return { none: true }; throw err; }
+    });
+    if (!r || r.none) return null;
+    return typeof r.library === "string" && typeof r.name === "string" ? { library: r.library, name: r.name, match: String(r.match || "") } : null;
+  } catch { return undefined; }
+}
+
 /** One library symbol as its own node, with a derived symbol ("extends") folded into its parent's drawing. */
 async function rawSymbol(lib: string, name: string, depth = 0): Promise<any> {
   const k = K(); const it = await libItem("symbol", lib, name);

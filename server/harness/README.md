@@ -81,7 +81,9 @@ guards a change of looks and raises, saying what differs, if the circuit is not 
 
 3D models: a footprint from KiCad's library or from a vendor names its model, and the web 3D view loads it by
 itself (KiCad's 3D library first, the vendor's STEP file for a vendor part). `board.models()` says how many
-parts show as their real model and lists under `without_model` the ones drawn as a stand-in shape, with the reason.
+parts show as their real model, lists under `replaced` the ones shown with the closest model the library has
+(their own is not there) and under `without_model` the ones drawn as a stand-in shape, with the reason.
+`board.assign_models()` writes those closest models into the footprints, so KiCad on the desktop shows them too.
 
 `build` swaps pins for a clean drawing, as a person does in the symbol editor: on the left and right of an IC (up to
 24 pins) supply straps go to the top, then pins whose parts rise to a supply, supply pins, signals, pins whose parts

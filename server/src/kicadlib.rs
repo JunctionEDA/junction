@@ -143,7 +143,8 @@ async fn index(kind: Kind) -> AppResult<std::sync::Arc<Vec<String>>> {
     type Slot = tokio::sync::Mutex<Option<(Instant, std::sync::Arc<Vec<String>>)>>;
     static SYM: OnceLock<Slot> = OnceLock::new();
     static FP: OnceLock<Slot> = OnceLock::new();
-    let slot = if kind == Kind::Symbol { &SYM } else { &FP }.get_or_init(|| tokio::sync::Mutex::new(None));
+    static MODEL: OnceLock<Slot> = OnceLock::new();
+    let slot = match kind { Kind::Symbol => &SYM, Kind::Footprint => &FP, Kind::Model => &MODEL }.get_or_init(|| tokio::sync::Mutex::new(None));
     let mut guard = slot.lock().await;   // one build at a time; later callers wait for it and then read
     if let Some((at, v)) = guard.as_ref() { if at.elapsed() < ITEM_TTL { return Ok(v.clone()); } }
     let page_url = |page: usize| format!("{}/api/v4/projects/kicad%2Flibraries%2F{}/repository/tree?ref={}&recursive=true&per_page=100&page={page}", base(), kind.repo(), enc(git_ref()));
@@ -217,39 +218,157 @@ pub async fn item(AuthUser(_user): AuthUser, Query(q): Query<ItemQuery>) -> AppR
 }
 
 #[derive(Deserialize)]
-pub struct ModelQuery { lib: String, name: String }
+pub struct ModelQuery { lib: String, name: String, fallback: Option<String> }
 
 const MAX_MODEL_BYTES: usize = 24 * 1024 * 1024;
 
-/// `GET /api/kicad-lib/model?lib=NAME&name=ITEM` — the STEP model of KiCad's 3D library
-/// (`NAME.3dshapes/ITEM.step`), for the 3D viewer.  Fetched once and kept beside the vendor
-/// models, since a model never changes under its name and a board asks for the same few
-/// dozen again and again; a model the library does not have is remembered for a while too.
-pub async fn model(State(state): State<AppState>, AuthUser(_user): AuthUser, Query(q): Query<ModelQuery>) -> AppResult<Response> {
-    let (lib, name) = (safe(q.lib.trim())?, safe(q.name.trim())?);
+fn name_tokens(name: &str) -> Vec<String> {
+    name.to_ascii_lowercase().split('_').filter(|t| !t.is_empty()).map(str::to_string).collect()
+}
+
+/// The model to show for a part whose own model (`lib`/`name`) KiCad's 3D library does not have,
+/// out of `all` ("Library:Name", every model of the library).  In order:
+/// the same name in another library; the longest model name that is the start of the wanted one
+/// (a footprint variant such as `..._HandSolder` or `..._ThermalVias` shares its base package's
+/// model); the shortest model name the wanted one is the start of (`SOIC-8` → `SOIC-8_3.9x4.9mm_P1.27mm`);
+/// then, in the same library only, the model sharing the most leading words, when that is at least
+/// three and at least half of the wanted name (another make of the same connector family).
+/// The second value says how close it is: "same", "base", "variant" or "similar".
+pub fn pick_replacement(lib: &str, name: &str, all: &[String]) -> Option<(String, String, &'static str)> {
+    let want = name_tokens(name);
+    if want.is_empty() { return None; }
+    let split = |id: &'_ String| id.split_once(':').map(|(l, n)| (l.to_string(), n.to_string()));
+    let same_lib = |l: &str| l.eq_ignore_ascii_case(lib);
+    // 1. the very name, in another library (or this one under another letter case)
+    let mut same: Vec<(String, String)> = all.iter().filter_map(split).filter(|(_, n)| n.eq_ignore_ascii_case(name)).collect();
+    same.sort_by_key(|(l, _)| (!same_lib(l), l.clone()));
+    if let Some((l, n)) = same.into_iter().next() { return Some((l, n, "same")); }
+    let mut base: Option<(usize, bool, String, String)> = None;       // longest prefix of the wanted name
+    let mut variant: Option<(usize, bool, String, String)> = None;    // shortest name the wanted one starts
+    let mut similar: Option<(usize, usize, String, String)> = None;   // most shared leading words, same library
+    for id in all {
+        let Some((l, n)) = split(id) else { continue };
+        let have = name_tokens(&n);
+        if have.is_empty() { continue; }
+        let common = want.iter().zip(have.iter()).take_while(|(a, b)| a == b).count();
+        let here = same_lib(&l);
+        // one word alone names a package only when it carries a number (SOIC-8, 0603), never "R" or "USB"
+        let telling = |t: &[String]| t.len() >= 2 || t[0].chars().any(|c| c.is_ascii_digit());
+        if common == have.len() && have.len() < want.len() && telling(&have) {
+            let better = match &base { None => true, Some((len, h, ..)) => have.len() > *len || (have.len() == *len && here && !*h) };
+            if better { base = Some((have.len(), here, l.clone(), n.clone())); }
+        } else if common == want.len() && have.len() > want.len() && telling(&want) {
+            let better = match &variant { None => true, Some((len, h, ..)) => (here && !*h) || (here == *h && have.len() < *len) };
+            if better { variant = Some((have.len(), here, l.clone(), n.clone())); }
+        } else if here && common >= 3 && common * 2 >= want.len() {
+            let gap = have.len().abs_diff(want.len());
+            let better = match &similar { None => true, Some((c, g, ..)) => common > *c || (common == *c && gap < *g) };
+            if better { similar = Some((common, gap, l.clone(), n.clone())); }
+        }
+    }
+    if let Some((_, _, l, n)) = base { return Some((l, n, "base")); }
+    if let Some((_, _, l, n)) = variant { return Some((l, n, "variant")); }
+    similar.map(|(_, _, l, n)| (l, n, "similar"))
+}
+
+/// The STEP file of `lib`/`name`: from the store, else from KiCad's library (and then stored).
+/// `Ok(None)` when the library has no such model.
+async fn model_bytes(state: &AppState, lib: &str, name: &str) -> AppResult<Option<Vec<u8>>> {
     let key = format!("kicad:{}:{lib}/{name}", git_ref());
-    let reply = |bytes: Vec<u8>| ([(header::CONTENT_TYPE, "model/step"), (header::CACHE_CONTROL, "private, max-age=604800")], bytes).into_response();
     if let Some(bytes) = sqlx::query_scalar::<_, Vec<u8>>("SELECT step FROM part_models WHERE uuid = $1").bind(&key).fetch_optional(&state.pool).await? {
-        return Ok(reply(bytes));
+        return Ok(Some(bytes));
     }
     let miss = format!("model-miss:{key}");
-    if cached(&miss, ITEM_TTL).is_some() { return Err(AppError::NotFound); }
+    if cached(&miss, ITEM_TTL).is_some() { return Ok(None); }
     let url = format!("{}/kicad/libraries/{}/-/raw/{}/{}{}/{}{}", base(), Kind::Model.repo(), enc(git_ref()), enc(lib), Kind::Model.dir_ext(), enc(name), Kind::Model.file_ext());
     let resp = http().get(&url).send().await.map_err(|_| unreachable("a 3D model"))?;
-    if resp.status() == StatusCode::NOT_FOUND { remember(miss, &Value::Bool(true)); return Err(AppError::NotFound); }
+    if resp.status() == StatusCode::NOT_FOUND { remember(miss, &Value::Bool(true)); return Ok(None); }
     if !resp.status().is_success() { return Err(unreachable("a 3D model")); }
     let bytes = resp.bytes().await.map_err(|_| unreachable("a 3D model"))?.to_vec();
     if bytes.len() > MAX_MODEL_BYTES || !bytes.starts_with(b"ISO-10303-21") {
         remember(miss, &Value::Bool(true));
-        return Err(AppError::NotFound);   // a sign-in page or an error page, not a STEP file
+        return Ok(None);   // a sign-in page or an error page, not a STEP file
     }
     sqlx::query("INSERT INTO part_models (uuid, step) VALUES ($1, $2) ON CONFLICT (uuid) DO NOTHING").bind(&key).bind(&bytes).execute(&state.pool).await?;
-    Ok(reply(bytes))
+    Ok(Some(bytes))
+}
+
+/// The replacement for a model the library does not have, remembered per name (the answer only
+/// changes when the library does).
+async fn replacement(lib: &str, name: &str) -> AppResult<Option<(String, String, String)>> {
+    let key = format!("model-match:{}:{lib}/{name}", git_ref());
+    if let Some(v) = cached(&key, ITEM_TTL) {
+        return Ok(v.as_array().and_then(|a| Some((a.first()?.as_str()?.to_string(), a.get(1)?.as_str()?.to_string(), a.get(2)?.as_str()?.to_string()))));
+    }
+    let all = index(Kind::Model).await?;
+    let hit = pick_replacement(lib, name, &all).map(|(l, n, how)| (l, n, how.to_string()));
+    remember(key, &match &hit { Some((l, n, how)) => json!([l, n, how]), None => Value::Null });
+    Ok(hit)
+}
+
+/// `GET /api/kicad-lib/model?lib=NAME&name=ITEM[&fallback=1]` — the STEP model of KiCad's 3D library
+/// (`NAME.3dshapes/ITEM.step`), for the 3D viewer.  Fetched once and kept beside the vendor
+/// models, since a model never changes under its name and a board asks for the same few
+/// dozen again and again; a model the library does not have is remembered for a while too.
+/// With `fallback`, a model the library does not have is answered with the closest one it does
+/// have (see `pick_replacement`), named in the `X-Model-Replacement` header as `Library/Name`.
+pub async fn model(State(state): State<AppState>, AuthUser(_user): AuthUser, Query(q): Query<ModelQuery>) -> AppResult<Response> {
+    let (lib, name) = (safe(q.lib.trim())?, safe(q.name.trim())?);
+    let reply = |bytes: Vec<u8>| ([(header::CONTENT_TYPE, "model/step"), (header::CACHE_CONTROL, "private, max-age=604800")], bytes).into_response();
+    if let Some(bytes) = model_bytes(&state, lib, name).await? { return Ok(reply(bytes)); }
+    if q.fallback.as_deref().map(|v| !v.is_empty() && v != "0").unwrap_or(false) {
+        if let Some((l, n, how)) = replacement(lib, name).await? {
+            if let (Ok(l), Ok(n)) = (safe(&l), safe(&n)) {
+                if let Some(bytes) = model_bytes(&state, l, n).await? {
+                    let mut resp = reply(bytes);
+                    if let Ok(v) = header::HeaderValue::from_str(&format!("{l}/{n}")) { resp.headers_mut().insert("x-model-replacement", v); }
+                    if let Ok(v) = header::HeaderValue::from_str(&how) { resp.headers_mut().insert("x-model-match", v); }
+                    return Ok(resp);
+                }
+            }
+        }
+    }
+    Err(AppError::NotFound)
+}
+
+/// `GET /api/kicad-lib/model-match?lib=NAME&name=ITEM` — which model the 3D view shows for that
+/// name: `{library, name, match}` with match "exact" when the library has it, else the kind of
+/// replacement ("same", "base", "variant", "similar"); 404 when nothing comes close.
+pub async fn model_match(State(_state): State<AppState>, AuthUser(_user): AuthUser, Query(q): Query<ModelQuery>) -> AppResult<Json<Value>> {
+    let (lib, name) = (safe(q.lib.trim())?, safe(q.name.trim())?);
+    let all = index(Kind::Model).await?;
+    let id = format!("{lib}:{name}");
+    if all.binary_search(&id).is_ok() { return Ok(Json(json!({ "library": lib, "name": name, "match": "exact" }))); }
+    match replacement(lib, name).await? {
+        Some((l, n, how)) => Ok(Json(json!({ "library": l, "name": n, "match": how }))),
+        None => Err(AppError::NotFound),
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn replacement_models() {
+        let all: Vec<String> = ["Resistor_SMD:R_0603_1608Metric", "Resistor_SMD:R_0805_2012Metric", "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm", "Package_SO:SOIC-8_5.3x5.3mm_P1.27mm_Wide",
+            "Connector_USB:USB_C_Receptacle_GCT_USB4085", "Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal", "Connector_USB:USB_Micro-B_Molex_47346-0001", "Button_Switch_SMD:SW_SPST_B3U-1000P"]
+            .iter().map(|s| s.to_string()).collect();
+        let pick = |l: &str, n: &str| pick_replacement(l, n, &all).map(|(l, n, how)| format!("{l}/{n} {how}"));
+        // a hand-solder variant of a footprint shares the base package's model
+        assert_eq!(pick("Resistor_SMD", "R_0603_1608Metric_Pad0.98x0.95mm_HandSolder").as_deref(), Some("Resistor_SMD/R_0603_1608Metric base"));
+        // the same name under a library of the project's own
+        assert_eq!(pick("MyParts", "SW_SPST_B3U-1000P").as_deref(), Some("Button_Switch_SMD/SW_SPST_B3U-1000P same"));
+        // a short package name: the plainest model that begins with it
+        assert_eq!(pick("Package_SO", "SOIC-8").as_deref(), Some("Package_SO/SOIC-8_3.9x4.9mm_P1.27mm variant"));
+        // another make of the same connector family, in the same library only
+        assert_eq!(pick("Connector_USB", "USB_C_Receptacle_HRO_TYPE-C-31-M-12").as_deref(), Some("Connector_USB/USB_C_Receptacle_GCT_USB4085 similar"));
+        assert_eq!(pick("Other", "USB_C_Receptacle_HRO_TYPE-C-31-M-12"), None);
+        // one word without a number names nothing, and a different size is never offered
+        assert_eq!(pick("Resistor_SMD", "R"), None);
+        assert_eq!(pick("Resistor_SMD", "R_1206_3216Metric"), None);
+        assert_eq!(pick("LCSC", "C2040_QFN-56"), None);
+    }
 
     #[test]
     fn names_cannot_leave_the_library() {

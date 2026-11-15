@@ -373,7 +373,26 @@ const pcbWatch = await watch(pcbDocId, adaJwt);
   const cls = (i) => (i.data.design_rules.net_classes || {}).Default || {};
   check('set_rules writes the project file and the board reads them back', !rules.isError && rules.data.applied && info1.data.design_rules.min_track_width === 0.15 && cls(info1).track_width === 0.3, JSON.stringify(info1.data.design_rules).slice(0, 400));
   check('get_board_info: outline, footprints, what is unrouted', info1.data.size_mm.width > 19 && info1.data.statistics && info1.data.unrouted_connections >= 1, JSON.stringify(info1.data.size_mm) + ' unrouted ' + info1.data.unrouted_connections);
-  check('get_board_info: which parts have a 3D model', info1.data.models_3d && info1.data.models_3d.parts >= 1 && Array.isArray(info1.data.models_3d.without_model) && info1.data.models_3d.from_kicad_library + info1.data.models_3d.without_model.length + (info1.data.models_3d.not_checked || 0) >= info1.data.models_3d.parts, JSON.stringify(info1.data.models_3d) + ' keys ' + Object.keys(info1.data).join());
+  check('get_board_info: which parts have a 3D model', info1.data.models_3d && info1.data.models_3d.parts >= 1 && Array.isArray(info1.data.models_3d.without_model) && info1.data.models_3d.from_kicad_library + info1.data.models_3d.without_model.length + (info1.data.models_3d.replaced || []).length + (info1.data.models_3d.not_checked || 0) >= info1.data.models_3d.parts, JSON.stringify(info1.data.models_3d) + ' keys ' + Object.keys(info1.data).join());
+
+  // a part whose own model KiCad's library does not have: reported with the closest one, which assign_models writes into the footprint
+  const m3 = (i) => (i.data && i.data.models_3d) || {};
+  if (!m3(info1).not_checked) {
+    const odd = await call(T(), 'apply_changes', { project: NAME, document: pcbPath, title: 'A hand-solder variant', edits: [{ op: 'add_item', sexpr: '(footprint "Custom:R_0603_1608Metric_Pad0.98x0.95mm_HandSolder" (layer "F.Cu") (at 104 92) (property "Reference" "R99" (at 0 -1.5) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15)))) (attr smd) (pad "1" smd rect (at -0.8 0) (size 0.9 0.95) (layers "F.Cu" "F.Paste" "F.Mask")) (pad "2" smd rect (at 0.8 0) (size 0.9 0.95) (layers "F.Cu" "F.Paste" "F.Mask")) (model "${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0603_1608Metric_Pad0.98x0.95mm_HandSolder.step" (offset (xyz 0 0.1 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 90))))' }] });
+    const info2 = await call(T(), 'get_board_info', { project: NAME });
+    const rep = (m3(info2).replaced || []).find((r) => r.ref === 'R99');
+    check('get_board_info: a missing model is shown with the closest one of the library', !odd.isError && rep && rep.model === 'Resistor_SMD/R_0603_1608Metric' && rep.match === 'base', odd.text.slice(0, 200) + ' ' + JSON.stringify(m3(info2)));
+    const give = await call(T(), 'apply_changes', { project: NAME, document: pcbPath, title: 'Closest 3D models', edits: [{ op: 'assign_models' }] });
+    const gd = give.data && give.data.details && give.data.details[0] && give.data.details[0].assign_models;
+    const info3 = await call(T(), 'get_board_info', { project: NAME });
+    const src = await call(T(), 'get_items', { project: NAME, document: pcbPath, refs: ['R99'] });
+    check('assign_models writes the closest model into the footprint and keeps its offset and rotation', !give.isError && gd && gd.assigned.some((a) => a.ref === 'R99' && a.model === 'Resistor_SMD/R_0603_1608Metric')
+      && !(m3(info3).replaced || []).some((r) => r.ref === 'R99') && m3(info3).from_kicad_library === m3(info2).from_kicad_library + 1, give.text.slice(0, 300) + ' ' + JSON.stringify(m3(info3)) + ' ' + (src.text || '').slice(0, 200));
+    const again = await call(T(), 'apply_changes', { project: NAME, document: pcbPath, title: 'Closest 3D models again', edits: [{ op: 'assign_models' }] });
+    check('assign_models with nothing to do says so', again.isError && /already shows|no replacement/.test(again.text), again.text.slice(0, 200));
+    const gone = await call(T(), 'apply_changes', { project: NAME, document: pcbPath, title: 'Take the variant out', edits: [{ op: 'remove', ref: 'R99' }] });
+    check('the test part is removed again', !gone.isError && gone.data.applied, gone.text.slice(0, 200));
+  }
 
   const before = pcbWatch.ops.length;
   const route = await call(T(), 'apply_changes', { project: NAME, document: pcbPath, title: 'Route the divider', edits: [{ op: 'autoroute', time_s: 10 }] }, { sse: true });

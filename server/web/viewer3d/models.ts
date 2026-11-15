@@ -6,7 +6,10 @@
 // where the KiCad project publishes it); a vendor part's footprint points at ${KICAD_COLLAB_3DMODELS} and its
 // model comes from the vendor through /api/parts/model.step.  A STEP file is solid geometry, not triangles, so it
 // is tessellated here by OpenCascade compiled to WebAssembly (occt-import-js), in a worker, on first use.
-// A footprint whose model cannot be had keeps the stand-in solids of parts.ts.
+// A model KiCad's library does not have is answered by the server with the closest one it does have (a footprint
+// variant's base package, the same name in another library, another make of the same connector family), and a
+// footprint that names no model at all is looked up under its own name the same way.
+// A footprint whose model cannot be had even so keeps the stand-in solids of parts.ts.
 //
 // footprintModels / placeMesh are pure (no DOM), for the node tests; ModelStore is the browser half.
 
@@ -21,6 +24,8 @@ export interface ModelRef {
   /** Library/Name as the footprint wrote it, for messages */
   name: string;
   offset: V3; scale: V3; rotate: V3;
+  /** the footprint names no model: this one is looked up under the footprint's own library name */
+  guess?: boolean;
 }
 
 /** A tessellated model in its own frame: millimetres, Z up, per-vertex normals and colours (linear 0..1 RGB as in the file). */
@@ -50,11 +55,19 @@ function projectModel(path: string): string | null {
   try { return typeof fn === "function" ? fn(m[1].replace(/\\/g, "/")) || null : null; } catch { return null; }
 }
 
-/** The models a footprint names, in file order; hidden ones and paths that name no library file are left out. */
-export function footprintModels(node: SNode): ModelRef[] {
-  const out: ModelRef[] = [];
+/** Where KiCad's library model `lib`/`name` is read from; the server answers a missing one with its closest replacement. */
+export const kicadModelUrl = (lib: string, name: string): string => `/api/kicad-lib/model?lib=${encodeURIComponent(lib)}&name=${encodeURIComponent(name)}&fallback=1`;
+
+/**
+ * The models a footprint names, in file order; hidden ones and paths that name no library file are left out.
+ * With `guess` (the default), a footprint that names no model at all gets one looked up under its own
+ * "Library:Name", which is where KiCad's library keeps the model of a footprint of its own.
+ */
+export function footprintModels(node: SNode, guess = true): ModelRef[] {
+  const out: ModelRef[] = []; let named = false;
   for (const c of node) {
     if (!Array.isArray(c) || c[0] !== "model") continue;
+    named = true;
     const hide = kid(c as SNode, "hide"); if (hide && String(hide[1]) !== "no") continue;
     const path = String(c[1] ?? "");
     const own = projectModel(path);
@@ -64,9 +77,16 @@ export function footprintModels(node: SNode): ModelRef[] {
     if (/KICAD_COLLAB_3DMODELS/.test(path)) {
       const hit = VENDOR_FIELDS.map(([f, v]) => [v, fieldOf(node, f)]).find(([, id]) => id); if (!hit) continue;
       out.push({ ...ref, source: "vendor", url: `/api/parts/model.step?vendor=${hit[0]}&id=${encodeURIComponent(hit[1])}` });
-    } else out.push({ ...ref, source: "kicad", url: `/api/kicad-lib/model?lib=${encodeURIComponent(m[1])}&name=${encodeURIComponent(m[2])}` });
+    } else out.push({ ...ref, source: "kicad", url: kicadModelUrl(m[1], m[2]) });
   }
+  if (!named && guess) { const g = guessedModel(node); if (g) out.push(g); }
   return out;
+}
+
+/** The model to try for a footprint that names none: its own "Library:Name" in KiCad's 3D library (or the closest to it). */
+export function guessedModel(node: SNode): ModelRef | null {
+  const m = /^([^:\/\\${}]+):([^:\/\\]+)$/.exec(String(node[1] ?? "")); if (!m) return null;
+  return { name: `${m[1]}/${m[2]}`, offset: [0, 0, 0], scale: [1, 1, 1], rotate: [0, 0, 0], source: "kicad", url: kicadModelUrl(m[1], m[2]), guess: true };
 }
 
 /** Where a footprint stands, for placeMesh: model space is millimetres with Y up and Z out of the front face. */
@@ -146,6 +166,7 @@ export type ModelState = ModelMesh | "missing";
 /** Fetches and tessellates models, one at a time, and keeps them for the life of the page. */
 export class ModelStore {
   private have = new Map<string, ModelState>();
+  private swapped = new Map<string, string>();
   private asked = new Map<string, Promise<void>>();
   private worker: Worker | null = null;
   private waiting = new Map<number, (r: { result?: any; error?: string }) => void>();
@@ -158,6 +179,9 @@ export class ModelStore {
 
   /** The mesh when it is here, "missing" when it cannot be had, undefined while unknown or on its way. */
   get(url: string): ModelState | undefined { return this.have.get(url); }
+
+  /** "Library/Name" of the model the server gave in place of the one asked for, when it had to. */
+  replacement(url: string): string | undefined { return this.swapped.get(url); }
 
   /** Ask for these models; those not seen before are fetched in the background. */
   want(refs: ModelRef[]): void {
@@ -174,7 +198,7 @@ export class ModelStore {
       if (resp.ok) {
         const bytes = await resp.arrayBuffer();
         const mesh = flattenOcct(await this.tessellate(bytes));
-        if (mesh) state = mesh;
+        if (mesh) { state = mesh; const rep = resp.headers.get("x-model-replacement"); if (rep) this.swapped.set(url, rep); }
       }
     } catch { /* stays missing: the stand-in solid is drawn */ }
     this.have.set(url, state); this.asked.delete(url);

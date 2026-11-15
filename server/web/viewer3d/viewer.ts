@@ -134,7 +134,7 @@ export class Viewer {
     if (!this.models) return;
     await this.models.settled();
     if (this.modelTimer) { clearTimeout(this.modelTimer); this.modelTimer = 0; }
-    if (this.board && !this.disposed) { this.board.refreshBodies(); this.requestRender(); }
+    if (this.board && !this.disposed) { this.board.refreshBodies(); this.requestRender(); if (this.onModels) this.onModels(this.board.stats); }
   }
 
   // several models usually land together (one fetch each, one tessellation after another): redraw once for the lot

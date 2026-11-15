@@ -9,7 +9,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { globalizeLabels } from "./labels";
-import { ED, K, ToolError, centreOn, fieldsOf, findByRef, openEntry, schNets } from "./design";
+import { ED, K, ToolError, centreOn, fieldsOf, findByRef, openEntry, partModels, schNets } from "./design";
 import { projectDocs, resolveDoc } from "./design";
 import { footprintNode, kicadFootprint, kicadSymbol, vendorPart, vendorSymbol } from "./library";
 import { fieldShifts, inlineFieldShifts, snugFieldShifts, itemsWithin } from "./layout";
@@ -353,6 +353,7 @@ async function fetchSources(edits: Edit[] | undefined): Promise<void> {
         else if (typeof e.lib_id === "string" && !K().resolveLib(doc, e.lib_id)) e.__lib = { libId: e.lib_id, node: await kicadSymbol(e.lib_id) };
       } else if (e.op === "update_from_schematic" && doc.type === "pcb") e.__sync = await planSync(doc, e);
       else if (e.op === "fill_zones" && doc.type === "pcb") e.__fill = await planFill(doc, edits.length);
+      else if (e.op === "assign_models" && doc.type === "pcb") e.__models = await partModels(doc);
     } catch (err) { e.__error = err instanceof Error ? err.message : String(err); }
   }));
 }
@@ -702,6 +703,31 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
           const rp = plan.report; const nl = Object.values(rp.pin_labels).reduce((n, l) => n + l.length, 0);
           lines.push({ kind: "modify", text: `Silkscreen: ${rp.references} reference${rp.references === 1 ? "" : "s"} placed clear of pads, other silkscreen, other parts and the edge (${Object.keys(rp.resized).length} made smaller, ${rp.turned.length} turned, ${rp.hidden.length} hidden)${nl ? `, ${nl} pin name${nl === 1 ? "" : "s"} printed` : ""}`, ids });
           details.push({ silkscreen: rp });
+          break;
+        }
+        case "assign_models": {
+          // a part whose own 3D model KiCad's library does not have gets the closest model it does have written into its footprint
+          pcbOnly(e.op); const plan: any[] = Array.isArray(e.__models) ? e.__models : [];
+          const only = Array.isArray(e.refs) ? new Set(e.refs.map(String)) : null; const loose = e.similar !== false;
+          const ids: string[] = []; const done: { ref: string; model: string; match: string }[] = []; const left: { ref: string; reason: string }[] = [];
+          for (const p of plan) {
+            const it = doc.items.get(p.it.id); if (!it || (only && !only.has(it.ref))) continue;
+            if (p.state === "none") { left.push({ ref: it.ref || "?", reason: p.reason || "no model comes close" }); continue; }
+            if (p.state !== "replaced" || !p.replacement) continue;
+            if (!loose && p.replacement.match === "similar") { left.push({ ref: it.ref || "?", reason: `only a similar part's model is there (${p.replacement.library}/${p.replacement.name})` }); continue; }
+            if (touched.has(it.id)) continue;
+            const path = "${KICAD10_3DMODEL_DIR}/" + `${p.replacement.library}.3dshapes/${p.replacement.name}.step`;
+            const node = k.cloneNode(it.node); const [wl, wn] = String(p.wanted || "").split("/");
+            // the entry that names the missing model keeps its offset, scale and rotation and takes the new path
+            const old = k.kids(node, "model").find((m: any) => { const s = k.str(m[1]).replace(/\\/g, "/"); return !!wl && s.includes(`${wl}.3dshapes/${wn}.`); });
+            if (old) old[1] = k.parse(`(model ${JSON.stringify(path)})`)[1];
+            else node.push(k.parse(`(model ${JSON.stringify(path)} (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`));
+            touch(it, e.op); changes.push(modified(doc, it, node)); ids.push(it.id);
+            done.push({ ref: it.ref || "?", model: `${p.replacement.library}/${p.replacement.name}`, match: p.replacement.match });
+          }
+          if (!ids.length) { if (e.if_needed === true) { details.push({ assign_models: { assigned: [], without_model: left } }); break; } throw new ToolError(left.length ? `no replacement model was found: ${left.slice(0, 6).map((l) => `${l.ref} (${l.reason})`).join("; ")}` : "every part already shows its own 3D model"); }
+          lines.push({ kind: "modify", text: `3D models: ${done.length} part${done.length === 1 ? "" : "s"} given the closest model of KiCad's library (${done.slice(0, 4).map((d) => d.ref).join(", ")}${done.length > 4 ? ", ..." : ""})`, ids });
+          details.push({ assign_models: { assigned: done, without_model: left } });
           break;
         }
         case "move_region": {

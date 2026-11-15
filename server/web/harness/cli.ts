@@ -109,6 +109,22 @@ async function modelList(lib: string): Promise<string[] | null> {
   return names;
 }
 
+/** The closest model to `name` among one library's `items`: its base package, the plainest variant of it, or a part of the same family. */
+function closestModel(name: string, items: string[]): [string, string] | null {
+  const toks = (n: string) => n.toLowerCase().split("_").filter(Boolean); const want = toks(name); if (!want.length) return null;
+  const telling = (t: string[]) => t.length >= 2 || /\d/.test(t[0]);
+  let base: [number, string] | null = null, variant: [number, string] | null = null, similar: [number, number, string] | null = null;
+  for (const n of items) {
+    const have = toks(n); if (!have.length) continue;
+    if (n.toLowerCase() === name.toLowerCase()) return [n, "same"];
+    let common = 0; while (common < want.length && common < have.length && want[common] === have[common]) common++;
+    if (common === have.length && have.length < want.length && telling(have)) { if (!base || have.length > base[0]) base = [have.length, n]; }
+    else if (common === want.length && have.length > want.length && telling(want)) { if (!variant || have.length < variant[0]) variant = [have.length, n]; }
+    else if (common >= 3 && common * 2 >= want.length) { const gap = Math.abs(have.length - want.length); if (!similar || common > similar[0] || (common === similar[0] && gap < similar[1])) similar = [common, gap, n]; }
+  }
+  return base ? [base[1], "base"] : variant ? [variant[1], "variant"] : similar ? [similar[2], "similar"] : null;
+}
+
 async function gitlab(kind: string, lib: string, name: string): Promise<string | null> {
   const repo = kind === "symbol" ? "kicad-symbols" : "kicad-footprints";
   const rel = kind === "symbol" ? `${lib}.kicad_symdir/${name}.kicad_sym` : `${lib}.pretty/${name}.kicad_mod`;
@@ -143,6 +159,14 @@ async function backend(url: string, init?: { method?: string; body?: string }): 
     const here = localList(kind, lib); if (here) return ok(lib ? { kind, library: lib, items: here } : { kind, libraries: here });
     const s = await server(url); if (s) return s;
     return miss("Listing KiCad's libraries needs a KiCad installation on this computer (set KICAD_SYMBOL_DIR and KICAD_FOOTPRINT_DIR) or a server.");
+  }
+  if (u.pathname === "/api/kicad-lib/model-match") {
+    // the server knows every library; without one, the wanted model's own library is searched (kicadlib.rs pick_replacement)
+    const lib = q.get("lib") || "", name = q.get("name") || "";
+    const s = await server(url); if (s && (s.ok || s.status === 404)) return s;
+    const items = await modelList(lib); if (!items) return miss(`3D model ${lib}/${name}: KiCad's 3D model library could not be listed from here.`, 502);
+    if (items.includes(name)) return ok({ library: lib, name, match: "exact" });
+    const hit = closestModel(name, items); return hit ? ok({ library: lib, name: hit[0], match: hit[1] }) : miss(`3D model ${lib}/${name}: not found.`);
   }
   if (u.pathname === "/api/kicad-lib/search") {
     const kind = q.get("kind") || "symbol"; const ws = (q.get("q") || "").toLowerCase().split(/\s+/).filter(Boolean);

@@ -98663,10 +98663,13 @@ function projectModel(path2) {
     return null;
   }
 }
-function footprintModels(node) {
+var kicadModelUrl = (lib, name) => `/api/kicad-lib/model?lib=${encodeURIComponent(lib)}&name=${encodeURIComponent(name)}&fallback=1`;
+function footprintModels(node, guess = true) {
   const out = [];
+  let named = false;
   for (const c of node) {
     if (!Array.isArray(c) || c[0] !== "model") continue;
+    named = true;
     const hide = kid4(c, "hide");
     if (hide && String(hide[1]) !== "no") continue;
     const path2 = String(c[1] ?? "");
@@ -98682,9 +98685,18 @@ function footprintModels(node) {
       const hit5 = VENDOR_FIELDS.map(([f2, v]) => [v, fieldOf2(node, f2)]).find(([, id]) => id);
       if (!hit5) continue;
       out.push({ ...ref, source: "vendor", url: `/api/parts/model.step?vendor=${hit5[0]}&id=${encodeURIComponent(hit5[1])}` });
-    } else out.push({ ...ref, source: "kicad", url: `/api/kicad-lib/model?lib=${encodeURIComponent(m[1])}&name=${encodeURIComponent(m[2])}` });
+    } else out.push({ ...ref, source: "kicad", url: kicadModelUrl(m[1], m[2]) });
+  }
+  if (!named && guess) {
+    const g2 = guessedModel(node);
+    if (g2) out.push(g2);
   }
   return out;
+}
+function guessedModel(node) {
+  const m = /^([^:\/\\${}]+):([^:\/\\]+)$/.exec(String(node[1] ?? ""));
+  if (!m) return null;
+  return { name: `${m[1]}/${m[2]}`, offset: [0, 0, 0], scale: [1, 1, 1], rotate: [0, 0, 0], source: "kicad", url: kicadModelUrl(m[1], m[2]), guess: true };
 }
 
 // web/fab/vrml.ts
@@ -101001,6 +101013,22 @@ async function modelNames(lib) {
     return null;
   }
 }
+async function modelMatch(lib, name) {
+  try {
+    const r = await once(`model-match:${lib}:${name}`, async () => {
+      try {
+        return await getJson(`/api/kicad-lib/model-match?lib=${encodeURIComponent(lib)}&name=${encodeURIComponent(name)}`, `3D model ${lib}/${name}`);
+      } catch (err) {
+        if (/not found|404/i.test(String(err?.message || err))) return { none: true };
+        throw err;
+      }
+    });
+    if (!r || r.none) return null;
+    return typeof r.library === "string" && typeof r.name === "string" ? { library: r.library, name: r.name, match: String(r.match || "") } : null;
+  } catch {
+    return void 0;
+  }
+}
 async function rawSymbol(lib, name, depth = 0) {
   const k = K4();
   const it = await libItem("symbol", lib, name);
@@ -102417,56 +102445,82 @@ async function boardInfo() {
     design_rules: { clearance: s.clearance, edge_clearance: s.edgeClearance, min_track_width: s.minTrackWidth, min_via_diameter: s.minViaDiameter, min_via_drill: s.minThroughDrill, net_classes: s.netclasses }
   };
 }
-async function boardModels(doc) {
-  let parts = 0, kicad = 0, vendor = 0, own = 0, unchecked = 0;
-  const missing = [];
+async function partModels(doc) {
+  const out = [];
   for (const it of doc.items.values()) {
     if (it.kind !== "footprint") continue;
     let pads = 0;
     for (const c of it.node) if (Array.isArray(c) && c[0] === "pad") pads++;
     const attr = it.node.find((c) => Array.isArray(c) && c[0] === "attr");
     if (pads < 2 || attr && (attr.includes("board_only") || attr.includes("dnp"))) continue;
-    parts++;
-    const refs = footprintModels(it.node);
+    const refs = footprintModels(it.node, false);
     const named = it.node.some((c) => Array.isArray(c) && c[0] === "model");
-    if (!refs.length) {
-      missing.push({ ref: it.ref || "?", footprint: it.lib || "", reason: named ? "its model path names no library file, or is hidden" : "the footprint names no 3D model" });
-      continue;
-    }
-    let found = false, unknown = false, why = "";
+    let state = "", unknown = false, wanted = "", why = "";
     for (const r of refs) {
       if (r.source === "vendor") {
-        found = true;
-        vendor++;
+        state = "vendor";
         break;
       }
       if (r.source === "project") {
-        found = true;
-        own++;
+        state = "project";
         break;
       }
-      const [lib, name] = r.name.split("/");
-      const names = await modelNames(lib);
+      const [lib2, name2] = r.name.split("/");
+      const names = await modelNames(lib2);
       if (!names) unknown = true;
-      else if (names.has(name)) {
-        found = true;
-        kicad++;
+      else if (names.has(name2)) {
+        state = "kicad";
         break;
-      } else why = `KiCad's 3D library has no ${lib}.3dshapes/${name}`;
+      } else {
+        wanted = wanted || r.name;
+        why = `KiCad's 3D library has no ${lib2}.3dshapes/${name2}`;
+      }
     }
-    if (found) continue;
-    if (unknown) unchecked++;
-    else missing.push({ ref: it.ref || "?", footprint: it.lib || "", reason: why });
+    if (state) {
+      out.push({ it, state });
+      continue;
+    }
+    if (unknown && !wanted) {
+      out.push({ it, state: "unknown" });
+      continue;
+    }
+    if (!refs.length) {
+      if (named) {
+        out.push({ it, state: "none", reason: "its model path names no library file, or is hidden" });
+        continue;
+      }
+      const g2 = guessedModel(it.node);
+      why = "the footprint names no 3D model";
+      if (!g2) {
+        out.push({ it, state: "none", reason: why });
+        continue;
+      }
+      wanted = g2.name;
+    }
+    const [lib, name] = wanted.split("/");
+    const rep = await modelMatch(lib, name);
+    if (rep === void 0) out.push({ it, state: "unknown", wanted });
+    else if (rep) out.push({ it, state: "replaced", wanted, replacement: rep, reason: why });
+    else out.push({ it, state: "none", wanted, reason: why + (named ? "" : ", and KiCad's 3D library has none under the footprint's name") });
   }
-  missing.sort((a, b) => a.ref.localeCompare(b.ref, void 0, { numeric: true }));
+  return out;
+}
+async function boardModels(doc) {
+  const all2 = await partModels(doc);
+  const count = (s) => all2.filter((p) => p.state === s).length;
+  const byRef2 = (a, b) => a.ref.localeCompare(b.ref, void 0, { numeric: true });
+  const missing = all2.filter((p) => p.state === "none").map((p) => ({ ref: p.it.ref || "?", footprint: p.it.lib || "", reason: p.reason || "" })).sort(byRef2);
+  const replaced = all2.filter((p) => p.state === "replaced").map((p) => ({ ref: p.it.ref || "?", footprint: p.it.lib || "", model: `${p.replacement.library}/${p.replacement.name}`, match: p.replacement.match, reason: p.reason || "" })).sort(byRef2);
+  const unchecked = count("unknown"), own = count("project");
   return {
-    parts,
-    from_kicad_library: kicad,
-    from_vendor: vendor,
+    parts: all2.length,
+    from_kicad_library: count("kicad"),
+    from_vendor: count("vendor"),
     from_project: own || void 0,
     not_checked: unchecked || void 0,
+    replaced: replaced.length ? replaced : void 0,
     without_model: missing,
-    note: unchecked ? "KiCad's 3D library could not be listed from here, so those parts were not checked." : missing.length ? "Parts without a model are drawn as a plain stand-in shape in the 3D view." : void 0
+    note: unchecked ? "KiCad's 3D library could not be listed from here, so those parts were not checked." : replaced.length ? "Replaced parts are shown with the closest model KiCad's 3D library has; the assign_models edit writes that model into the footprint so every viewer shows it. Parts without a model are drawn as a plain stand-in shape." : missing.length ? "Parts without a model are drawn as a plain stand-in shape in the 3D view." : void 0
   };
 }
 var clip = (s, n2) => s.length > n2 ? s.slice(0, n2) + ` \u2026 (${s.length - n2} more characters)` : s;
@@ -106768,6 +106822,7 @@ async function fetchSources(edits) {
         else if (typeof e.lib_id === "string" && !K4().resolveLib(doc, e.lib_id)) e.__lib = { libId: e.lib_id, node: await kicadSymbol(e.lib_id) };
       } else if (e.op === "update_from_schematic" && doc.type === "pcb") e.__sync = await planSync(doc, e);
       else if (e.op === "fill_zones" && doc.type === "pcb") e.__fill = await planFill(doc, edits.length);
+      else if (e.op === "assign_models" && doc.type === "pcb") e.__models = await partModels(doc);
     } catch (err) {
       e.__error = err instanceof Error ? err.message : String(err);
     }
@@ -107382,6 +107437,52 @@ function build(input) {
           const nl = Object.values(rp.pin_labels).reduce((n2, l) => n2 + l.length, 0);
           lines.push({ kind: "modify", text: `Silkscreen: ${rp.references} reference${rp.references === 1 ? "" : "s"} placed clear of pads, other silkscreen, other parts and the edge (${Object.keys(rp.resized).length} made smaller, ${rp.turned.length} turned, ${rp.hidden.length} hidden)${nl ? `, ${nl} pin name${nl === 1 ? "" : "s"} printed` : ""}`, ids });
           details.push({ silkscreen: rp });
+          break;
+        }
+        case "assign_models": {
+          pcbOnly(e.op);
+          const plan = Array.isArray(e.__models) ? e.__models : [];
+          const only = Array.isArray(e.refs) ? new Set(e.refs.map(String)) : null;
+          const loose = e.similar !== false;
+          const ids = [];
+          const done = [];
+          const left = [];
+          for (const p of plan) {
+            const it = doc.items.get(p.it.id);
+            if (!it || only && !only.has(it.ref)) continue;
+            if (p.state === "none") {
+              left.push({ ref: it.ref || "?", reason: p.reason || "no model comes close" });
+              continue;
+            }
+            if (p.state !== "replaced" || !p.replacement) continue;
+            if (!loose && p.replacement.match === "similar") {
+              left.push({ ref: it.ref || "?", reason: `only a similar part's model is there (${p.replacement.library}/${p.replacement.name})` });
+              continue;
+            }
+            if (touched.has(it.id)) continue;
+            const path2 = `\${KICAD10_3DMODEL_DIR}/${p.replacement.library}.3dshapes/${p.replacement.name}.step`;
+            const node = k.cloneNode(it.node);
+            const [wl, wn] = String(p.wanted || "").split("/");
+            const old = k.kids(node, "model").find((m) => {
+              const s = k.str(m[1]).replace(/\\/g, "/");
+              return !!wl && s.includes(`${wl}.3dshapes/${wn}.`);
+            });
+            if (old) old[1] = k.parse(`(model ${JSON.stringify(path2)})`)[1];
+            else node.push(k.parse(`(model ${JSON.stringify(path2)} (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`));
+            touch(it, e.op);
+            changes.push(modified(doc, it, node));
+            ids.push(it.id);
+            done.push({ ref: it.ref || "?", model: `${p.replacement.library}/${p.replacement.name}`, match: p.replacement.match });
+          }
+          if (!ids.length) {
+            if (e.if_needed === true) {
+              details.push({ assign_models: { assigned: [], without_model: left } });
+              break;
+            }
+            throw new ToolError(left.length ? `no replacement model was found: ${left.slice(0, 6).map((l) => `${l.ref} (${l.reason})`).join("; ")}` : "every part already shows its own 3D model");
+          }
+          lines.push({ kind: "modify", text: `3D models: ${done.length} part${done.length === 1 ? "" : "s"} given the closest model of KiCad's library (${done.slice(0, 4).map((d) => d.ref).join(", ")}${done.length > 4 ? ", ..." : ""})`, ids });
+          details.push({ assign_models: { assigned: done, without_model: left } });
           break;
         }
         case "move_region": {
@@ -108081,6 +108182,29 @@ async function modelList(lib) {
   fs.writeFileSync(file, JSON.stringify(names));
   return names;
 }
+function closestModel(name, items) {
+  const toks = (n2) => n2.toLowerCase().split("_").filter(Boolean);
+  const want = toks(name);
+  if (!want.length) return null;
+  const telling = (t) => t.length >= 2 || /\d/.test(t[0]);
+  let base = null, variant = null, similar = null;
+  for (const n2 of items) {
+    const have = toks(n2);
+    if (!have.length) continue;
+    if (n2.toLowerCase() === name.toLowerCase()) return [n2, "same"];
+    let common = 0;
+    while (common < want.length && common < have.length && want[common] === have[common]) common++;
+    if (common === have.length && have.length < want.length && telling(have)) {
+      if (!base || have.length > base[0]) base = [have.length, n2];
+    } else if (common === want.length && have.length > want.length && telling(want)) {
+      if (!variant || have.length < variant[0]) variant = [have.length, n2];
+    } else if (common >= 3 && common * 2 >= want.length) {
+      const gap = Math.abs(have.length - want.length);
+      if (!similar || common > similar[0] || common === similar[0] && gap < similar[1]) similar = [common, gap, n2];
+    }
+  }
+  return base ? [base[1], "base"] : variant ? [variant[1], "variant"] : similar ? [similar[2], "similar"] : null;
+}
 async function gitlab(kind, lib, name) {
   const repo = kind === "symbol" ? "kicad-symbols" : "kicad-footprints";
   const rel = kind === "symbol" ? `${lib}.kicad_symdir/${name}.kicad_sym` : `${lib}.pretty/${name}.kicad_mod`;
@@ -108123,6 +108247,16 @@ async function backend(url, init) {
     const s2 = await server(url);
     if (s2) return s2;
     return miss("Listing KiCad's libraries needs a KiCad installation on this computer (set KICAD_SYMBOL_DIR and KICAD_FOOTPRINT_DIR) or a server.");
+  }
+  if (u.pathname === "/api/kicad-lib/model-match") {
+    const lib = q.get("lib") || "", name = q.get("name") || "";
+    const s2 = await server(url);
+    if (s2 && (s2.ok || s2.status === 404)) return s2;
+    const items = await modelList(lib);
+    if (!items) return miss(`3D model ${lib}/${name}: KiCad's 3D model library could not be listed from here.`, 502);
+    if (items.includes(name)) return ok({ library: lib, name, match: "exact" });
+    const hit5 = closestModel(name, items);
+    return hit5 ? ok({ library: lib, name: hit5[0], match: hit5[1] }) : miss(`3D model ${lib}/${name}: not found.`);
   }
   if (u.pathname === "/api/kicad-lib/search") {
     const kind = q.get("kind") || "symbol";

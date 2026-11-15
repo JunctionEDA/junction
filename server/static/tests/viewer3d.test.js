@@ -200,14 +200,18 @@ test("a footprint's 3D models: KiCad's library by library and name, a vendor par
   const first = (d) => Array.from(d.items.values()).find((it) => it.kind === "footprint");
   const k = G.footprintModels(first(fp(`(model "\${KICAD10_3DMODEL_DIR}/Button_Switch_SMD.3dshapes/SW_Push_SPST_NO_Alps_SKRK.step" (offset (xyz 0 0.5 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 -90)))`)).node);
   assert.strictEqual(k.length, 1); assert.strictEqual(k[0].source, "kicad");
-  assert.strictEqual(k[0].url, "/api/kicad-lib/model?lib=Button_Switch_SMD&name=SW_Push_SPST_NO_Alps_SKRK");
+  assert.strictEqual(k[0].url, "/api/kicad-lib/model?lib=Button_Switch_SMD&name=SW_Push_SPST_NO_Alps_SKRK&fallback=1", "a model the library lacks is answered with its closest");
   assert.deepStrictEqual(k[0].offset, [0, 0.5, 0]); assert.deepStrictEqual(k[0].rotate, [0, 0, -90]); assert.deepStrictEqual(k[0].scale, [1, 1, 1]);
   const old = G.footprintModels(first(fp(`(model "\${KISYS3DMOD}/Crystal.3dshapes/Crystal_SMD_3225-4Pin_3.2x2.5mm.wrl" (at (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`)).node);
-  assert.strictEqual(old[0].url, "/api/kicad-lib/model?lib=Crystal&name=Crystal_SMD_3225-4Pin_3.2x2.5mm", "an old .wrl path names the same library model");
+  assert.strictEqual(old[0].url, "/api/kicad-lib/model?lib=Crystal&name=Crystal_SMD_3225-4Pin_3.2x2.5mm&fallback=1", "an old .wrl path names the same library model");
   const v = G.footprintModels(first(fp(`(model "\${KICAD_COLLAB_3DMODELS}/Parts.3dshapes/TS-1187A.step" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`, `(property "LCSC" "C318884" (at 0 0) (layer "F.Fab") (hide yes))`)).node);
   assert.strictEqual(v[0].source, "vendor"); assert.strictEqual(v[0].url, "/api/parts/model.step?vendor=lcsc&id=C318884");
   assert.strictEqual(G.footprintModels(first(fp(`(model "\${KICAD10_3DMODEL_DIR}/A.3dshapes/B.step" (hide yes))`)).node).length, 0, "a hidden model is not drawn");
-  assert.strictEqual(G.footprintModels(first(fp("")).node).length, 0);
+  // a footprint that names no model is looked up under its own library name, unless the caller wants only what the file names
+  const bare = first(fp("")).node; const g = G.footprintModels(bare);
+  assert.strictEqual(g.length, 1); assert.strictEqual(g[0].guess, true); assert.strictEqual(g[0].name, String(bare[1]).replace(":", "/"));
+  assert.ok(g[0].url.endsWith("&fallback=1")); assert.deepStrictEqual([g[0].offset, g[0].scale, g[0].rotate], [[0, 0, 0], [1, 1, 1], [0, 0, 0]]);
+  assert.strictEqual(G.footprintModels(bare, false).length, 0);
   // a model kept in the project: the page says where the file is read from; the .wrl name finds the .step kept
   const own = `(model "\${KIPRJMOD}/packages3D/R_0603.wrl" (offset (xyz 1 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`;
   assert.strictEqual(G.footprintModels(first(fp(own)).node).length, 0, "without a project the path names nothing");

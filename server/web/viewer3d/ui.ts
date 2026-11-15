@@ -106,8 +106,9 @@ function keyMatches(ev: KeyboardEvent, key: string): boolean {
 
 /** The status bar's line about the parts' 3D models. */
 function modelStatus(st: BoardStats): string {
-  const n = st.missingModels.length;
-  return `3D models: ${st.models} of ${st.bodies} parts` + (n ? `  —  no model for ${st.missingModels.slice(0, 8).join(", ")}${n > 8 ? ` and ${n - 8} more` : ""}` : "");
+  const few = (l: string[]): string => `${l.slice(0, 8).join(", ")}${l.length > 8 ? ` and ${l.length - 8} more` : ""}`;
+  const n = st.missingModels.length, r = (st.replacedModels || []).length;
+  return `3D models: ${st.models} of ${st.bodies} parts` + (r ? `  —  closest library model used for ${few(st.replacedModels)}` : "") + (n ? `  —  plain shape for ${few(st.missingModels)}` : "");
 }
 
 export class ViewerWindow {

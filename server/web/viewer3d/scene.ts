@@ -27,7 +27,7 @@ export const DEFAULT_VISIBILITY: Visibility = {
   tht: true, smd: true, virtual: true,
 };
 
-export interface BoardStats { outlines: number; cutouts: number; holes: number; holesPainted: number; bodies: number; models: number; missingModels: string[]; fallbackOutline: boolean; texture: [number, number]; thickness: number }
+export interface BoardStats { outlines: number; cutouts: number; holes: number; holesPainted: number; bodies: number; models: number; missingModels: string[]; replacedModels: string[]; fallbackOutline: boolean; texture: [number, number]; thickness: number }
 
 /** Accumulates indexed triangles with per-vertex normals, colours and (optionally) texture coordinates. */
 class MeshData {
@@ -295,7 +295,7 @@ export class BoardScene {
     if (barrelGeo) { this.barrels = new THREE.Mesh(barrelGeo, material({ vertexColors: true, shininess: 60, specular: new THREE.Color(0x554422) })); this.barrels.name = "barrels"; this.group.add(this.barrels); }
 
     this.bodyList = boardBodies(doc); this.toModel = toModel; this.thickness = thickness; this.models = models || null; this.vis = vis;
-    this.stats = { outlines: shape.outlines.length, cutouts, holes: drilled, holesPainted: rest.length, bodies: this.bodyList.length, models: 0, missingModels: [],
+    this.stats = { outlines: shape.outlines.length, cutouts, holes: drilled, holesPainted: rest.length, bodies: this.bodyList.length, models: 0, missingModels: [], replacedModels: [],
       fallbackOutline: shape.fallback, texture: [e.width, e.height], thickness };
     this.reusedGeometry = !!reuse;
     this.buildBodies();
@@ -318,9 +318,14 @@ export class BoardScene {
     }
     const data: Record<BodyClass, MeshData> = { tht: new MeshData(), smd: new MeshData(), virtual: new MeshData() };
     const lift = 0.04;   // parts sit on the pads, a copper-and-mask thickness above the laminate
-    let real = 0; const missing: string[] = [];
+    let real = 0; const missing: string[] = []; const replaced: string[] = [];
     for (const body of this.bodyList) {
-      if (this.addModels(data[body.cls], body, lift)) { real++; continue; }
+      if (this.addModels(data[body.cls], body, lift)) {
+        real++;
+        // drawn with a model other than the one its footprint (or, when it names none, its own name) asks for
+        if (this.models && body.models.some((r) => { const m = this.models!.get(r.url); return !!m && m !== "missing" && this.models!.replacement(r.url) !== undefined; })) replaced.push(body.ref);
+        continue;
+      }
       // no model named, or none of those named can be had (still on their way does not count as missing)
       if (!body.models.length || (this.models && body.models.every((r) => this.models!.get(r.url) === "missing"))) missing.push(body.ref);
       this.addBody(data[body.cls], body, this.toModel, this.thickness, lift);
@@ -330,7 +335,7 @@ export class BoardScene {
       const mesh = new THREE.Mesh(data[cls].geometry(), material({ vertexColors: true, shininess: 40, specular: new THREE.Color(0x333333) }));
       mesh.name = "bodies-" + cls; this.bodies[cls] = mesh; this.group.add(mesh);
     }
-    this.stats.models = real; this.stats.missingModels = missing;
+    this.stats.models = real; this.stats.missingModels = missing; this.stats.replacedModels = replaced;
   }
 
   /** The footprint's loaded models, placed as KiCad's viewer places them; false when none has loaded. */

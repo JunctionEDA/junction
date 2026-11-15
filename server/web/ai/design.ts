@@ -5,8 +5,8 @@
 // geometry, sch-tools for pins, connectivity and ERC, pcb-tools for the board netlist, ratsnest
 // and DRC — so what the assistant is told agrees with what the person sees on the canvas.
 
-import { footprintModels } from "../viewer3d/models";
-import { modelNames } from "./library";
+import { footprintModels, guessedModel } from "../viewer3d/models";
+import { modelMatch, modelNames } from "./library";
 import { silkBoxes } from "./silkscreen";
 import { applySeverities } from "../dialogs/erc-rules";
 
@@ -340,33 +340,66 @@ export async function boardInfo(): Promise<unknown> {
     design_rules: { clearance: s.clearance, edge_clearance: s.edgeClearance, min_track_width: s.minTrackWidth, min_via_diameter: s.minViaDiameter, min_via_drill: s.minThroughDrill, net_classes: s.netclasses } };
 }
 
-/**
- * Which parts the 3D view can show as their real model: the footprint names one (KiCad's 3D library, or the vendor's
- * for a vendor part) and that library has it.  The rest are drawn as a plain stand-in shape and are listed with the reason.
- */
-async function boardModels(doc: any): Promise<unknown> {
-  let parts = 0, kicad = 0, vendor = 0, own = 0, unchecked = 0; const missing: { ref: string; footprint: string; reason: string }[] = [];
+/** One part of the board and how the 3D view shows it. */
+export interface PartModel {
+  it: any;
+  /** "kicad", "vendor", "project": the footprint's own model is there; "replaced": the closest library model stands in; "none": a plain stand-in shape; "unknown": could not be checked */
+  state: "kicad" | "vendor" | "project" | "replaced" | "none" | "unknown";
+  /** Library/Name the footprint asks for (its model path, or its own name when it names no model) */
+  wanted?: string;
+  /** state "replaced": the model shown instead, and how close it is */
+  replacement?: { library: string; name: string; match: string };
+  reason?: string;
+}
+
+/** Every part of the board (a footprint with two pads or more that is a component) with the model the 3D view shows for it. */
+export async function partModels(doc: any): Promise<PartModel[]> {
+  const out: PartModel[] = [];
   for (const it of doc.items.values()) {
     if (it.kind !== "footprint") continue;
     let pads = 0; for (const c of it.node) if (Array.isArray(c) && c[0] === "pad") pads++;
     const attr = (it.node as any[]).find((c) => Array.isArray(c) && c[0] === "attr") as any[] | undefined;
     if (pads < 2 || (attr && (attr.includes("board_only") || attr.includes("dnp")))) continue;   // no component: a mounting hole, a test point, a logo
-    parts++;
-    const refs = footprintModels(it.node); const named = (it.node as any[]).some((c) => Array.isArray(c) && c[0] === "model");
-    if (!refs.length) { missing.push({ ref: it.ref || "?", footprint: it.lib || "", reason: named ? "its model path names no library file, or is hidden" : "the footprint names no 3D model" }); continue; }
-    let found = false, unknown = false, why = "";
+    const refs = footprintModels(it.node, false); const named = (it.node as any[]).some((c) => Array.isArray(c) && c[0] === "model");
+    let state: PartModel["state"] | "" = "", unknown = false, wanted = "", why = "";
     for (const r of refs) {
-      if (r.source === "vendor") { found = true; vendor++; break; }
-      if (r.source === "project") { found = true; own++; break; }
+      if (r.source === "vendor") { state = "vendor"; break; }
+      if (r.source === "project") { state = "project"; break; }
       const [lib, name] = r.name.split("/"); const names = await modelNames(lib);
-      if (!names) unknown = true; else if (names.has(name)) { found = true; kicad++; break; } else why = `KiCad's 3D library has no ${lib}.3dshapes/${name}`;
+      if (!names) unknown = true; else if (names.has(name)) { state = "kicad"; break; } else { wanted = wanted || r.name; why = `KiCad's 3D library has no ${lib}.3dshapes/${name}`; }
     }
-    if (found) continue;
-    if (unknown) unchecked++; else missing.push({ ref: it.ref || "?", footprint: it.lib || "", reason: why });
+    if (state) { out.push({ it, state }); continue; }
+    if (unknown && !wanted) { out.push({ it, state: "unknown" }); continue; }
+    if (!refs.length) {
+      if (named) { out.push({ it, state: "none", reason: "its model path names no library file, or is hidden" }); continue; }
+      const g = guessedModel(it.node); why = "the footprint names no 3D model";
+      if (!g) { out.push({ it, state: "none", reason: why }); continue; }
+      wanted = g.name;
+    }
+    const [lib, name] = wanted.split("/"); const rep = await modelMatch(lib, name);
+    if (rep === undefined) out.push({ it, state: "unknown", wanted });
+    else if (rep) out.push({ it, state: "replaced", wanted, replacement: rep, reason: why });
+    else out.push({ it, state: "none", wanted, reason: why + (named ? "" : ", and KiCad's 3D library has none under the footprint's name") });
   }
-  missing.sort((a, b) => a.ref.localeCompare(b.ref, undefined, { numeric: true }));
-  return { parts, from_kicad_library: kicad, from_vendor: vendor, from_project: own || undefined, not_checked: unchecked || undefined, without_model: missing,
-    note: unchecked ? "KiCad's 3D library could not be listed from here, so those parts were not checked." : missing.length ? "Parts without a model are drawn as a plain stand-in shape in the 3D view." : undefined };
+  return out;
+}
+
+/**
+ * Which parts the 3D view can show as their real model: the footprint names one (KiCad's 3D library, or the vendor's
+ * for a vendor part) and that library has it.  A part whose own model is not there is shown with the closest model the
+ * library has (listed under replaced); the rest are drawn as a plain stand-in shape and are listed with the reason.
+ */
+async function boardModels(doc: any): Promise<unknown> {
+  const all = await partModels(doc); const count = (s: string) => all.filter((p) => p.state === s).length;
+  const byRef = (a: { ref: string }, b: { ref: string }) => a.ref.localeCompare(b.ref, undefined, { numeric: true });
+  const missing = all.filter((p) => p.state === "none").map((p) => ({ ref: p.it.ref || "?", footprint: p.it.lib || "", reason: p.reason || "" })).sort(byRef);
+  const replaced = all.filter((p) => p.state === "replaced").map((p) => ({ ref: p.it.ref || "?", footprint: p.it.lib || "", model: `${p.replacement!.library}/${p.replacement!.name}`, match: p.replacement!.match, reason: p.reason || "" })).sort(byRef);
+  const unchecked = count("unknown"), own = count("project");
+  return { parts: all.length, from_kicad_library: count("kicad"), from_vendor: count("vendor"), from_project: own || undefined, not_checked: unchecked || undefined,
+    replaced: replaced.length ? replaced : undefined, without_model: missing,
+    note: unchecked ? "KiCad's 3D library could not be listed from here, so those parts were not checked."
+      : replaced.length ? "Replaced parts are shown with the closest model KiCad's 3D library has; the assign_models edit writes that model into the footprint so every viewer shows it. Parts without a model are drawn as a plain stand-in shape."
+      : missing.length ? "Parts without a model are drawn as a plain stand-in shape in the 3D view." : undefined };
 }
 
 export function getSelection(): unknown {
