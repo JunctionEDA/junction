@@ -45747,9 +45747,9 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
   }
 });
 
-// node_modules/opentype.js/dist/opentype.js
+// ../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.js
 var require_opentype = __commonJS({
-  "node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
+  "../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
     (function(global, factory) {
       typeof exports2 === "object" && typeof module2 !== "undefined" ? factory(exports2) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global = global || self, factory(global.opentype = {}));
     })(exports2, (function(exports3) {
@@ -60112,6 +60112,21 @@ var hasEndings = (n2) => {
 
 // web/canvas/geom-sch.ts
 var SIM_VARS = /* @__PURE__ */ new Set(["SIM.DEVICE", "SIM.TYPE", "SIM.PINS", "SIM.PARAMS", "SIM.LIBRARY", "SIM.NAME"]);
+var opVars = { resolve: null };
+function labelOpText(item, text2) {
+  const fn = opVars.resolve;
+  if (!fn || text2.indexOf("${OP") < 0) return text2;
+  return text2.replace(/\$\{(OP[^}]*)\}/g, (m, tok) => {
+    const r = fn("label", item, tok);
+    return r === null ? m : r;
+  });
+}
+function hasOpTextVar(item) {
+  const n2 = item.node;
+  if (!n2) return false;
+  if ((item.kind === "label" || item.kind === "global_label" || item.kind === "hierarchical_label" || item.kind === "directive_label" || item.kind === "netclass_flag") && str(n2[1]).indexOf("${OP") >= 0) return true;
+  return kids(n2, "property").some((p) => str(p[2]).indexOf("${OP") >= 0);
+}
 function expandDocVars(doc, text2) {
   if (!text2 || text2.indexOf("${") < 0) return text2;
   try {
@@ -60182,7 +60197,7 @@ function fieldColor(ef, layerColor) {
 function labelFields(item, n2, color2, layer, z2, doc, labelLen = 0) {
   for (const p of kids(n2, "property")) {
     const ef = effectsOf(p);
-    let val = str(p[2]);
+    let val = labelOpText(item, str(p[2]));
     if (item.kind === "global_label" && INTERSHEET_FIELD.test(str(p[1])) && /\$\{INTERSHEET_REFS\}/.test(val)) {
       const refs = doc && doc.intersheetRefs;
       if (!refs || !refs.show) continue;
@@ -60427,7 +60442,7 @@ function shapeGeom(item, g2, gk, tf2, color2, layer, z2, zBg, w, bodyFill, inver
 function buildLabelGeom(item, n2, k, doc) {
   const [x, y, rot3] = atOf(n2);
   const ef = effectsOf(n2);
-  const text2 = str(n2[1]);
+  const text2 = labelOpText(item, str(n2[1]));
   const size = ef.size;
   const spin = SPIN[(Math.round(rot3) % 360 + 360) % 360] || "R";
   const st = spinText(spin);
@@ -60718,6 +60733,10 @@ function buildSymbolGeom(doc, item) {
     let shown = isRef && unitCount2 > 1 ? val + unitLetter(unit2) : val;
     if (shown.indexOf("${") >= 0) shown = expandTextVars(shown, (tok) => {
       const up = tok.toUpperCase();
+      if (opVars.resolve && tok.startsWith("OP")) {
+        const r = opVars.resolve("symbol", item, tok);
+        if (r !== null) return r;
+      }
       if (up === "UNIT") return unitCount2 > 1 ? unitLetter(unit2) : "";
       for (const q of kids(n2, "property")) if (str(q[1]).toUpperCase() === up && q !== p) return str(q[2]);
       if (SIM_VARS.has(tok)) return "";
@@ -73593,6 +73612,20 @@ var api = {
     if (!doc || doc.type !== "sch") return;
     doc.intersheetRefs = refs || null;
     for (const it of doc.items.values()) if (it.kind === "global_label") {
+      try {
+        buildGeom(doc, it);
+      } catch (e) {
+      }
+    }
+  },
+  // ${OP} text variables: the host's resolver (sim/op-overlay.ts), and a rebuild of the items of `doc` that use one
+  // once the operating point changes (SCH_EDIT_FRAME::RefreshOperatingPointDisplay)
+  setOpTextVar(fn) {
+    opVars.resolve = fn;
+  },
+  refreshOpTextVars(doc) {
+    if (!doc || doc.type !== "sch") return;
+    for (const it of doc.items.values()) if (hasOpTextVar(it)) {
       try {
         buildGeom(doc, it);
       } catch (e) {
@@ -90931,7 +90964,7 @@ function drillFiles(m, baseName3, opt, ext = "drl") {
   return out;
 }
 
-// node_modules/clipper2-ts/dist/Core.js
+// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Core.js
 var ClipType;
 (function(ClipType2) {
   ClipType2[ClipType2["NoClip"] = 0] = "NoClip";
@@ -91590,7 +91623,7 @@ var RectDUtils = {
 var InvalidRect64 = Object.freeze(Rect64Utils.createInvalid());
 var InvalidRectD = Object.freeze(RectDUtils.createInvalid());
 
-// node_modules/clipper2-ts/dist/Engine.js
+// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Engine.js
 var B02 = BigInt(0);
 var B22 = BigInt(2);
 var B42 = BigInt(4);
@@ -94455,7 +94488,7 @@ var Clipper = {
   }
 };
 
-// node_modules/clipper2-ts/dist/Offset.js
+// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Offset.js
 var JoinType;
 (function(JoinType2) {
   JoinType2[JoinType2["Miter"] = 0] = "Miter";
@@ -95071,7 +95104,7 @@ var ClipperOffset = class _ClipperOffset {
   }
 };
 
-// node_modules/clipper2-ts/dist/Clipper.js
+// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Clipper.js
 var B23 = BigInt(2);
 function intersectD(subject, clip2, fillRule, precision = 2) {
   return booleanOpD(ClipType.Intersection, subject, clip2, fillRule, precision);
@@ -101294,7 +101327,7 @@ function statAreas(m, o) {
   return { hasOutline, boardArea, frontCopper: total(front), backCopper: total(back), frontCourtyard: total(union2(fc)), backCourtyard: total(union2(bc)) };
 }
 
-// node_modules/three/src/extras/lib/earcut.js
+// ../../../kicad-collaborative/server/node_modules/three/src/extras/lib/earcut.js
 function earcut(data, holeIndices, dim = 2) {
   const hasHoles = holeIndices && holeIndices.length;
   const outerLen = hasHoles ? holeIndices[0] * dim : data.length;
@@ -101715,7 +101748,7 @@ function signedArea2(data, start, end, dim) {
   return sum;
 }
 
-// node_modules/three/src/extras/Earcut.js
+// ../../../kicad-collaborative/server/node_modules/three/src/extras/Earcut.js
 var Earcut = class {
   /**
    * Triangulates the given shape definition by returning an array of triangles.
