@@ -28,7 +28,6 @@ def many(lib, fp, table):
 many("Device:C", C0402, {"1uF": "C1 C4 C5 C10 C13", "100nF": "C7 C8 C9 C11 C18 C19 C20 C21", "12pF": "C14 C15", "1.0pF": "C16 C17"})
 many("Device:C", C0603, {"4.7uF": "C2 C3", "10uF": "C6"})
 many("Device:R", R0402, {"5.1k": "R1 R2", "3.6k": "R3", "3.24k": "R4", "10k": "R5 R7 R8 R9 R10", "1k": "R6", "4.7k": "R13 R14", "220k": "R15 R16"})
-# what to order: maker and part number on every part, the voltage rating on every capacitor, the crystal's load capacitance
 YAGEO = {"5.1k": "5K1", "3.6k": "3K6", "3.24k": "3K24", "10k": "10K", "1k": "1K", "4.7k": "4K7", "220k": "220K"}
 CAPS = {("1uF", C0402): ("CL05A105KA5NQNC", "25V"), ("100nF", C0402): ("CL05B104KO5NNNC", "16V"), ("12pF", C0402): ("CL05C120JB5NNNC", "50V"),
         ("1.0pF", C0402): ("CL05C010CB5NNNC", "50V"), ("4.7uF", C0603): ("CL10A475KO8NNNC", "16V"), ("10uF", C0603): ("CL10A106KP8NNNC", "10V")}
@@ -82,7 +81,7 @@ G = {
     "Battery voltage sense": "R15 R16",
     "Pico-style edge pins": "J2 J3",
 }
-NOTES = {      # only the power limits: what may go in and what comes out
+NOTES = {
     "USB-C input": ["In: 5 V from USB, 500 mA max (limit set by R4 on the charger)."],
     "LiPo charger and power path (TI BQ24075)": [
         "In: VBUS 4.35 to 6.4 V (survives 28 V), 500 mA max = 1610 / R4.",

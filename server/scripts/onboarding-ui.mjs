@@ -218,15 +218,15 @@ const canvas = m.locator('#hero canvas'); await canvas.scrollIntoViewIfNeeded();
 await m.click('#hero [data-tool-btn="route"]');
 await m.waitForTimeout(1500);   // the page's reveal animation
 // The canvas keeps its view to itself, so the track is drawn where the board is known to be: the
-// editor starts fitted to the board (127,91.5 42x27 mm).  Clicks are placed by proportion of the fitted view.
+// editor starts fitted to the board and the margin beside it (96.7,97 49.3x25 mm).  Clicks are placed by proportion of the fitted view.
 const fitted = await m.evaluate(() => { const c = document.querySelector('#hero canvas').getBoundingClientRect(); return { x: c.left, y: c.top, w: c.width, h: c.height }; });
 const toMini = (x, y) => {
-  const box = [124, 88.5, 172, 121.5];
+  const box = [96.7, 97, 146, 122];
   const k = Math.min(fitted.w / (box[2] - box[0]), fitted.h / (box[3] - box[1]));
   const ox = fitted.x + (fitted.w - k * (box[2] - box[0])) / 2, oy = fitted.y + (fitted.h - k * (box[3] - box[1])) / 2;
   return [ox + (x - box[0]) * k, oy + (y - box[1]) * k];
 };
-for (const p of [[147.5, 111.75], [147.5, 113.1], [148.4, 114], [151.163, 114]]) { const [sx, sy] = toMini(p[0], p[1]); await m.mouse.move(sx, sy); await m.waitForTimeout(80); await m.mouse.click(sx, sy); await m.waitForTimeout(150); }
+for (const p of [[140.415, 116.8], [139.21, 116.8]]) { const [sx, sy] = toMini(p[0], p[1]); await m.mouse.move(sx, sy); await m.waitForTimeout(80); await m.mouse.click(sx, sy); await m.waitForTimeout(150); }
 await m.keyboard.press('Escape');
 const unr = await m.textContent('[data-unrouted]');
 check('a connection routed in the small editor', /Unrouted 3/.test(unr), unr);

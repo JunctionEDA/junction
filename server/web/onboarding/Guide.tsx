@@ -100,12 +100,13 @@ function Panel({ guide }: { guide: GuideState }) {
   const show = (docId: string | undefined) => { if (docId) dispatch({ type: "openDoc", docId }); };
   const run = (id: string) => dispatch({ type: "action", id });
   const done = stepsDone(guide), finished = !current;
+  const stm32 = guide.template === "stm32-usbc-devboard";
 
   const body: Record<StepId, ReactNode> = {
     schematic: (
       <>
-        <p>Every board starts as a schematic: what is connected to what. This one is a 555 timer that blinks an LED about once a second.</p>
-        <p>{editor === "sch" ? <>Click a part, for example <b>U1</b>, the timer. Its properties show beside the drawing.</> : "Open it and have a look around."}</p>
+        <p>Every board starts as a schematic: what is connected to what. {stm32 ? "This one is a small STM32 board that plugs into a breadboard and takes power and data from USB-C." : "This one is a 555 timer that blinks an LED about once a second."}</p>
+        <p>{editor === "sch" ? <>Click a part, for example <b>U1</b>, the {stm32 ? "microcontroller" : "timer"}. Its properties show beside the drawing.</> : "Open it and have a look around."}</p>
         {editor !== "sch" ? <div className="kg-acts"><button type="button" className="btn primary sm" onClick={() => show(sch?.docId)} disabled={!sch}>Open the schematic</button></div> : null}
       </>
     ),

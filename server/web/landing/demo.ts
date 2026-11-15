@@ -31,20 +31,20 @@ export const BOARD = meta.board;
 
 export const loadSch = (): KDoc => K.parseDoc(SCH_TEXT);
 export const loadPcb = (): KDoc => K.parseDoc(PCB_TEXT);
-/** The same board with its pour not yet filled, for the editor where copper moves under it. */
-export function loadPcbOpen(): KDoc {
-  const tree = K.parse(PCB_TEXT);
+/** A board with its pours not yet filled, for an editor where copper moves under them. */
+export function openOf(text: string): KDoc {
+  const tree = K.parse(text);
   for (const z of K.kids(tree, "zone")) for (let i = z.length - 1; i >= 0; i--) if (Array.isArray(z[i]) && z[i][0] === "filled_polygon") z.splice(i, 1);
   return K.parseDoc(K.serialize(tree));
 }
 
 /**
- * The board as a .kicad_pcb again, for carrying it into a real project: the file's own header and
+ * A board as a .kicad_pcb again, for carrying it into a real project: the file's own header and
  * order, each item as the editor left it, tracks that were taken out gone, new ones at the end with
- * proper ids.  The pour keeps the fill KiCad gave it (the editor here works with it left off).
+ * proper ids.  The pours keep the fill KiCad gave them (the editor here works with it left off).
  */
-export function boardText(doc: KDoc): string {
-  const tree = K.parse(PCB_TEXT), out: any[] = [], seen = new Set<string>(), items = loadPcb().items;
+export function boardTextOf(text: string, doc: KDoc): string {
+  const tree = K.parse(text), out: any[] = [], seen = new Set<string>(), items = K.parseDoc(text).items;
   for (const node of tree) {
     const id = Array.isArray(node) ? K.uuidOf(node) : "";
     if (!id || !items.has(id)) { out.push(node); continue; }

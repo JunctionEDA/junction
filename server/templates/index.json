@@ -24,6 +24,25 @@
       }
     },
     {
+      "id": "stm32-usbc-devboard",
+      "title": "STM32 USB-C dev board",
+      "summary": "The board from the top of the home page: an STM32F042 with USB-C, a 3.3 V regulator, reset and boot buttons and breadboard pin rows.",
+      "detail": "A small microcontroller board that needs no crystal for USB. The data pair runs straight from the connector through its ESD protection into the chip, the pins fan out in order to two rows of header pins, and ground is poured on both sides and stitched together.",
+      "level": "Intermediate",
+      "tags": [
+        "Microcontroller",
+        "USB-C"
+      ],
+      "parts": 22,
+      "nets": 27,
+      "size": [
+        41.8,
+        19
+      ],
+      "layers": 2,
+      "stem": "stm32-usbc-devboard"
+    },
+    {
       "id": "usb-c-3v3-regulator",
       "title": "USB-C 3.3 V regulator",
       "summary": "A USB-C power inlet, an AMS1117-3.3 linear regulator and a power LED, broken out to a three-pin header.",

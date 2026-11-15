@@ -256,6 +256,22 @@ function buildBlinker() {
   return { t: BLINKER, dir, stem, guided, open, parts: 12, nets: 9 };
 }
 
+/** The home page's hero board (server/web/landing/hero, designed by scripts/landing-hero) is a template as it stands,
+ *  so that the board a visitor works on in the home page's small editor fits the project it is handed to. */
+const HERO_DIR = path.join(HERE, "..", "..", "web", "landing", "hero");
+const HERO = {
+  title: "STM32 USB-C dev board",
+  summary: "The board from the top of the home page: an STM32F042 with USB-C, a 3.3 V regulator, reset and boot buttons and breadboard pin rows.",
+  detail: "A small microcontroller board that needs no crystal for USB. The data pair runs straight from the connector through its ESD protection into the chip, the pins fan out in order to two rows of header pins, and ground is poured on both sides and stitched together.",
+  level: "Intermediate", tags: ["Microcontroller", "USB-C"], size: [41.8, 19, 0],
+};
+function buildHero() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kc-template-")), stem = "stm32-usbc-devboard";
+  for (const ext of ["kicad_sch", "kicad_pcb", "kicad_pro"]) fs.copyFileSync(path.join(HERO_DIR, `stm32.${ext}`), path.join(dir, `${stem}.${ext}`));
+  const meta = JSON.parse(fs.readFileSync(path.join(HERO_DIR, "stm32.json"), "utf8"));
+  return { t: HERO, dir, stem, parts: meta.parts.length, nets: meta.nets };
+}
+
 const count = (out, what) => { const m = new RegExp(`Found (\\d+) ${what}`).exec(out); return m ? +m[1] : -1; };
 /** KiCad's verdict on a finished template folder: ERC, and DRC with schematic parity, at every severity. */
 function verify(dir, stem) {
@@ -291,10 +307,11 @@ async function previews(dir, stem) {
 const args = process.argv.slice(2), want = args.filter((a) => !a.startsWith("--")), check = args.includes("--check");
 const index = [];
 let bad = 0;
-for (const id of ["blinker", ...Object.keys(TEMPLATES)]) {
+for (const id of ["blinker", "stm32-usbc-devboard", ...Object.keys(TEMPLATES)]) {
   if (want.length && !want.includes(id)) continue;
   let b;
   if (id === "blinker") b = buildBlinker();
+  else if (id === "stm32-usbc-devboard") b = buildHero();
   else {
     b = build(id);
     // KiCad fills the pour and saves the board, then saves the schematic: both files are KiCad's own writing
@@ -308,7 +325,7 @@ for (const id of ["blinker", ...Object.keys(TEMPLATES)]) {
   const files = [`${b.stem}.kicad_pro`, `${b.stem}.kicad_sch`, `${b.stem}.kicad_pcb`];
   const out = path.join(OUT, id);
   if (check) {
-    for (const f of files) if (!fs.existsSync(path.join(out, f)) || (id === "blinker" && f !== files[0] && fs.readFileSync(path.join(out, f), "utf8") !== fs.readFileSync(path.join(b.dir, f), "utf8"))) { console.log(`  ${id}/${f} is not what the generator writes now`); bad++; }
+    for (const f of files) if (!fs.existsSync(path.join(out, f)) || ((id === "blinker" || id === "stm32-usbc-devboard") && f !== files[0] && fs.readFileSync(path.join(out, f), "utf8") !== fs.readFileSync(path.join(b.dir, f), "utf8"))) { console.log(`  ${id}/${f} is not what the generator writes now`); bad++; }
   } else {
     await previews(b.dir, b.stem);
     fs.mkdirSync(out, { recursive: true });

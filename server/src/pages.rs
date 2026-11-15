@@ -322,7 +322,9 @@ pub async fn brand_file(Path((v, name)): Path<(String, String)>) -> Response {
 
 pub async fn landing_image(Path(name): Path<String>) -> Response {
     let bytes: &'static [u8] = match name.as_str() {
-        "editor.webp" => include_bytes!("../static/landing/editor.webp"),
+        // The "Working together" pictures (scripts/landing-together/shoot.mjs).
+        "board.webp" => include_bytes!("../static/landing/board.webp"),
+        "schematic.webp" => include_bytes!("../static/landing/schematic.webp"),
         // The AI chapter's recorded run (scripts/landing-ai/record.mjs), fetched when it comes near.
         "ai-esp32.kicad_sch" | "ai-esp32.kicad_pcb" | "ai-timeline.json" => {
             let text: &'static str = match name.as_str() {

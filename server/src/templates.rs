@@ -53,6 +53,7 @@ macro_rules! template {
 
 pub static TEMPLATES: &[Template] = &[
     template!("blinker", "blinker", Some(include_str!("../templates/blinker/blinker.guided.kicad_pcb"))),
+    template!("stm32-usbc-devboard", "stm32-usbc-devboard", None),
     template!("usb-c-3v3-regulator", "usb-c-3v3-regulator", None),
     template!("i2c-sensor-breakout", "i2c-sensor-breakout", None),
     template!("attiny85-dev-board", "attiny85-dev-board", None),
@@ -60,7 +61,7 @@ pub static TEMPLATES: &[Template] = &[
 
 const INDEX: &str = include_str!("../templates/index.json");
 
-/// The largest board the home page's small editor may hand over (the blinker is about 75 kB).
+/// The largest board the home page's small editor may hand over (its STM32 board is about 260 kB).
 const MAX_HANDED_BOARD: usize = 1024 * 1024;
 
 fn find(id: &str) -> Option<&'static Template> {
@@ -214,6 +215,15 @@ mod tests {
                 assert!(t[key].as_str().is_some_and(|s| !s.is_empty()), "{} has {key}", t["id"]);
             }
         }
+    }
+
+    #[test]
+    fn the_stm32_template_is_the_home_page_hero_board() {
+        // the board a visitor works on in the home page's small editor is handed to a project made from this template
+        let t = find("stm32-usbc-devboard").unwrap();
+        assert_eq!(t.sch, include_str!("../web/landing/hero/stm32.kicad_sch"), "run node scripts/templates/gen.mjs stm32-usbc-devboard after the hero board changes");
+        assert_eq!(t.pcb, include_str!("../web/landing/hero/stm32.kicad_pcb"), "run node scripts/templates/gen.mjs stm32-usbc-devboard after the hero board changes");
+        assert!(t.pcb.len() < MAX_HANDED_BOARD / 2);
     }
 
     #[test]

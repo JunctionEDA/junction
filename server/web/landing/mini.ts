@@ -1,59 +1,72 @@
-// The hero: a cut-down board editor the visitor can use.  It is the demo board with
-// nothing on it yet but its outline, painted by the editor's renderer, with just enough tools to finish
-// it: move a footprint or a text, route a track, drop a via, switch layer, undo.  Three scripted
-// collaborators design the board from scratch as teammates would in a real project: they take
-// the parts out of the pile and place them, route every connection, add the labels and pour
-// the ground plane, and then review it: redo a track, try a part somewhere else, drag selection boxes and pin comments, each
-// with a pointer that moves like a hand on a mouse and never does the same thing twice.  When
-// the visitor has changed something one of them comes over and puts it back by hand.
+// The hero: a cut-down board editor the visitor can use.  It is a real board (an STM32 USB-C
+// devboard, ./hero) with nothing on it yet but its outline, painted by the editor's renderer, with
+// just enough tools to work on it: move a footprint or a text, route a track, drop a via, switch
+// layer, undo.  Three scripted collaborators design the board from scratch as teammates would in a
+// real project: they take the parts out of the pile and place them, route every connection, pour
+// the ground planes and stitch them, and add the silkscreen.  Nothing they do is idle: every
+// selection is the start of an edit.  On the way one of them leaves a review comment on something
+// that is not right yet (a capacitor in too small a package, a part the wrong way round, a thin
+// supply track), another one makes the change, and the comment is resolved.  Each has a pointer
+// that moves like a hand on a mouse and never does the same thing twice.  When the visitor has
+// changed something one of them comes over and puts it back by hand.
 
 import {
-  BOARD, Box, HIDDEN, K, PEERS, boardText, Pt, Rat, View, clamp, clash, copperAt, dist, drawCursor, fit, lerp, loadPcb, loadPcbOpen, meta, mixBox, ratsnest, toMm, toPx, trackAt,
+  Box, HIDDEN, K, PEERS, Pt, Rat, View, clamp, clash, copperAt, dist, drawCursor, fit, lerp, mixBox, ratsnest, toMm, toPx, trackAt,
 } from "./demo";
+import { BOARD, boardText, loadPcb, loadPcbOpen, meta } from "./hero";
 import { keysInText } from "../keys";
 import { SANS, Stage, makeStage, reducedMotion } from "./stage";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Tool = "select" | "route" | "via";
 type Layer = "F.Cu" | "B.Cu";
-const GRID = 0.25, VIA = { size: 0.6, drill: 0.3 };
+const GRID = 0.25, VIA = { size: 0.4, drill: 0.25 };
 /** The board's net class clearance: new copper keeps this far from every other net. */
-const CLEARANCE = 0.2;
+const CLEARANCE = 0.15;
 const LAYER_COLOR: Record<Layer, string> = { "F.Cu": "#C83434", "B.Cu": "#4D7FC4" };
-const HOME: Box = [BOARD.x - 3, BOARD.y - 3, BOARD.x + BOARD.w + 3, BOARD.y + BOARD.h + 3];
-/** The view while the board is being built: the board and, beside it, the pile its parts start in. */
-/** Where a part waits in the pile: the demo's pile, spread a little so the big parts do not overlap. */
-const pileAt = (p: { pile: Pt }): Pt => [175 + (p.pile[0] - 175) * 1.3, p.pile[1]];
-const BUILD: Box = [HOME[0], HOME[1], Math.max(...meta.parts.map((p) => pileAt(p)[0])) + 4.5, HOME[3]];
+/** The back silkscreen (the pin names under the headers) would read mirrored through the board. */
+const HID = new Set([...HIDDEN, "B.SilkS"]);
+const HOME: Box = [BOARD.x - 4.5, BOARD.y - 3, BOARD.x + BOARD.w + 3, BOARD.y + BOARD.h + 3];
+/** Where a part waits before it is placed: the pile is laid out in rows under the board. */
+const pileAt = (p: { pile: Pt }): Pt => p.pile;
+/** The view while the board is being built: the board and, under it, the pile its parts start in. */
+const BUILD: Box = [HOME[0], HOME[1], HOME[2], meta.pileBottom + 2.5];
 /** For each connection, the earlier ones it starts or ends on (a via, a track it tees into):
  *  those have to be on the board before it can be routed. */
-const NEEDS: number[][] = meta.routes.map((r, j) => {
-  const ends = [r.pts[0], r.pts[r.pts.length - 1]];
-  const on = (e: Pt, a: Pt, b: Pt): boolean => { const dx = b[0] - a[0], dy = b[1] - a[1], l = dx * dx + dy * dy, t = l ? clamp(((e[0] - a[0]) * dx + (e[1] - a[1]) * dy) / l) : 0; return Math.hypot(e[0] - a[0] - t * dx, e[1] - a[1] - t * dy) < 0.01; };
-  return meta.routes.map((_, i) => i).filter((i) => i < j && ends.some((e) => meta.routes[i].pts.some((p, k, all) => k > 0 && on(e, all[k - 1], p))));
-});
-/** Connections the board always starts without: the output, the LED, its ground, and the
- *  back-layer jumper. */
-const OPEN = [26, 27, 28, 20];
-/** Connections that stand on their own (pad to pad, or pad to a via into the pour), so one can
- *  be taken out and laid again without leaving another track hanging.  A few more of these are
- *  open at the start, different ones each visit, and the teammates redo one now and then. */
-const LOOSE = [0, 1, 2, 3, 6, 10, 11, 12, 13, 14, 15, 17, 18, 21, 22, 23, 24, 25];
-const REDO = [...LOOSE, 26, 27, 28];
+const NEEDS: number[][] = meta.routes.map((r) => r.needs);
+/** Connections the board starts without when the visitor has it to themselves (`?hero=alone`):
+ *  the two LEDs and the two CC resistors, each a short track from pad to pad. */
+const OPEN = meta.routes.map((r, i) => (r.loose && !r.via && /^Net-\((D1|D2)-A\)$|^Net-\(J1-CC[12]\)$/.test(r.net) ? i : -1)).filter((i) => i >= 0);
 const PARTS = new Set(meta.parts.map((p) => p.id));
+const TEXTS = new Set(meta.texts.map((t) => t.id));
+/** The width each net is routed at: what the board's own tracks have. */
+const WIDTH = new Map<string, number>(); for (const r of meta.routes) WIDTH.set(r.net, Math.max(WIDTH.get(r.net) || 0, r.w));
+const PLANES = [{ net: meta.ground, layers: ["F.Cu", "B.Cu"] }];
 const snap = (v: number, o: number): number => o + Math.round((v - o) / GRID) * GRID;
 
-/** What a scripted teammate can be busy with.  All up to "nudge" change the board and are seen
+/** What a scripted teammate can be busy with.  All up to "fix" change the board and are seen
  *  through to the end; the rest can be dropped when the visitor's change needs taking back. */
-type Task = "undo" | "place" | "route" | "label" | "pour" | "redo" | "nudge" | "look" | "sweep" | "note" | "rest";
-const HARD = new Set<Task>(["undo", "place", "route", "label", "pour", "redo", "nudge"]);
+type Task = "undo" | "place" | "route" | "label" | "pour" | "stitch" | "fix" | "note" | "rest";
+const HARD = new Set<Task>(["undo", "place", "route", "label", "pour", "stitch", "fix"]);
 /** How each of them handles a mouse: Mara is quick and overshoots, Jun is slower and exact. */
 const HANDS = [{ tempo: 0.86, miss: 1.3 }, { tempo: 1.2, miss: 0.55 }, { tempo: 1, miss: 1 }];
-/** Review comments they leave on parts, as in a real project. */
-const NOTES: [string, string][] = [
-  ["R5", "330R puts about 9 mA through the LED"], ["C2", "Could C2 move closer to pin 8?"], ["J1", "5k1 on both CC pins, checked"],
-  ["R4", "47k with 10u blinks at about 1.4 Hz"], ["D1", "Is D1 the right way round?"], ["U1", "Pin 5 has its 10n"], ["C3", "Timing cap, keep it near pin 6"],
-  ["R3", "10k is fine here"], ["C1", "Bulk cap could be 0805"],
+/**
+ * Review comments, each a small story with an end: the board starts with the thing not right
+ * yet, one teammate says so in a comment on the part, another makes the change, and the comment
+ * is resolved with `done`.
+ *   swap:  the part comes out of the pile in the footprint of `like` (same pads, smaller package)
+ *   turn:  it is placed half a turn round
+ *   move:  it is placed `off` its place
+ *   width: the net's tracks are laid at `thin` mm
+ *   label: the silkscreen texts `texts` are still missing when the board is otherwise done
+ */
+interface Story { kind: "swap" | "turn" | "move" | "width" | "label"; ref: string; text: string; done: string; like?: string; off?: Pt; net?: string; thin?: number; texts?: string[]; state: 0 | 1 | 2; by: number }
+const STORIES: Omit<Story, "state" | "by">[] = [
+  { kind: "swap", ref: "C4", like: "C6", text: "C4 is 4.7 uF: that needs 0603, not 0402", done: "C4 is 0603 now" },
+  { kind: "turn", ref: "U3", text: "U3 is the wrong way round: pin 1 is VBUS", done: "Turned U3 round" },
+  { kind: "move", ref: "C5", off: [2.4, -2.75], text: "C5 belongs right at pin 5", done: "C5 moved next to pin 5" },
+  { kind: "width", ref: "U3", net: "VBUS", thin: 0.2, text: "VBUS is thin for 500 mA: make it 0.4 mm", done: "VBUS is 0.4 mm now" },
+  { kind: "label", ref: "SW1", texts: ["RST", "BOOT"], text: "Which button is reset? Label them", done: "Buttons labelled" },
 ];
 /** A change the visitor made, kept so that it can be taken back: by them, or by a teammate. */
 type Edit = { kind: "move"; id: string; from: Pt } | { kind: "add"; ids: string[] } | { kind: "del"; item: any };
@@ -65,11 +78,13 @@ interface Step { dur: number; to: Pt; c?: [Pt, Pt]; skew?: number; wob?: number;
 interface Pull { a: Pt; b: Pt; at: Pt; layer: Layer; w: number }
 interface Actor {
   who: number; at: Pt; from: Pt; steps: Step[]; i: number; t0: number; task: Task; last: Task;
-  marks: string[]; held: string | null; pull: Pull | null; poly: Pt[] | null; box: [Pt, Pt] | null; boxed: string[];
-  move: { id: string; from: Pt } | null; route: number | null;
+  marks: string[]; held: string | null; pull: Pull | null; poly: Pt[] | null;
+  move: { id: string; from: Pt } | null; route: number | null; story: Story | null;
 }
-interface Note { who: number; at: Pt; text: string; n: number; born: number; dies: number }
+/** A comment pinned on the board: typed by `who`, kept until its story is resolved (`ok`). */
+interface Note { who: number; at: Pt; text: string; n: number; born: number; dies: number; ok: boolean }
 const IDLE = 2200, GAP = 900;                       // ms the visitor is left alone before, and between, undos
+const AGAIN = 16000;                                // ms a finished board is left to be looked at before they start over
 const minJerk = (u: number): number => u <= 0 ? 0 : u >= 1 ? 1 : u * u * u * (10 - 15 * u + 6 * u * u);
 const rnd = (a: number, b: number): number => a + Math.random() * (b - a);
 const chance = (p: number): boolean => Math.random() < p;
@@ -96,7 +111,7 @@ export function startMini(root: HTMLElement): void {
   const edits: Edit[] = [];
   const actors: Actor[] = []; const gone = new Set<number>();
   let note: Note | null = null;
-  let lastAct = 0, nextUndo = 0, nextRedo = 0, nextNote = 0, stillTimer = 0, blocked: number | null = null;
+  let lastAct = 0, nextUndo = 0, stillTimer = 0, doneAt = 0, blocked: number | null = null;
   let base: HTMLCanvasElement | null = null, t0 = 0, serial = 0;
 
   /** The tracks and vias taken off the board at the start, for the teammates to lay again. */
@@ -107,28 +122,88 @@ export function startMini(root: HTMLElement): void {
     for (const id of [...r.ids, ...(r.via ? [r.via] : [])]) { const it = doc.items.get(id); if (it) { spare.set(id, it); doc.items.delete(id); } }
     gone.add(i);
   }
-  /** Parts still in the pile, and the labels and the ground pour not yet made: the teammates
-   *  start from the bare outline and design the board while the visitor watches. */
-  const unplaced = new Set<string>(), shelf = new Map<string, any>();
+  /** Parts still in the pile, and the labels, the ground pours and their stitching vias not
+   *  yet made: the teammates start from the bare outline and design the board while the
+   *  visitor watches. */
+  const unplaced = new Set<string>(), shelf = new Map<string, any>(), stitches: string[] = [];
   let poured = true, fitTo: Box = HOME, own = false, glide: { from: Box; t0: number } | null = null;
+  /** The review stories of this run, and for each part or track that starts out not right yet
+   *  the real one, kept for when a teammate makes the change. */
+  let stories: Story[] = [];
+  const real = new Map<string, any>(), pending = new Set<string>();
+  const refId = (ref: string): string => meta.parts.find((p) => p.ref === ref)!.id;
+  const home = (id: string): Pt => { const q = meta.parts.find((p) => p.id === id)!; return [q.x, q.y]; };
+  /** Where a part is put down: its place, or beside it while its "move" story is open. */
+  const spotOf = (id: string): Pt => { const h = home(id), st = stories.find((x) => x.kind === "move" && x.state < 2 && refId(x.ref) === id); return st ? [h[0] + st.off![0], h[1] + st.off![1]] : h; };
   /** The parts each connection reaches, which have to be placed before it is routed. */
   const reaches: string[][] = (() => {
     const full = loadPcb();
     return meta.routes.map((r) => { const ids = new Set<string>(); for (const p of r.pts) { const c = copperAt(full, p[0], p[1], r.layer); if (c && c.kind === "pad") ids.add(c.id); } return [...ids]; });
   })();
+  /** Connections that pass where a part waits beside its place: they wait until it has moved. */
+  const crowded = new Map<number, string>();
+  /** A copy of an item's node with one thing changed, as an item of its own under the same id. */
+  function variant(it: any, change: (node: any[]) => void): any {
+    const node = K.parse(K.serialize(it.node)); change(node);
+    doc.items.delete(it.id); const v = K.addItem(doc, node, it.id); doc.items.delete(it.id);
+    return v;
+  }
   function open(): void {
-    spare.clear(); gone.clear(); unplaced.clear(); shelf.clear(); poured = true; fitTo = HOME; own = false; glide = null;
+    spare.clear(); gone.clear(); unplaced.clear(); shelf.clear(); stitches.length = 0; real.clear(); pending.clear(); crowded.clear(); stories = [];
+    poured = true; fitTo = HOME; own = false; glide = null; doneAt = 0;
     if (still) return;                                   // without motion the board is simply complete
     if (alone) { for (const i of OPEN) lift(i); return; }
+    stories = STORIES.map((x) => ({ ...x, state: 0, by: -1 }));
     meta.routes.forEach((_, i) => lift(i));
+    for (const st of stories) {
+      const id = refId(st.ref), it = doc.items.get(id);
+      if (st.kind === "swap" && it) {
+        // the smaller package: the neighbour's footprint under this part's name, pads on the same nets
+        const like = doc.items.get(refId(st.like!))!, q = meta.parts.find((x) => x.id === id)!;
+        const v = variant({ id, node: like.node }, (node) => { for (const p of K.kids(node, "property")) { if (p[1] === "Reference") p[2] = q.ref; else if (p[1] === "Value") p[2] = q.value; } });
+        real.set(id, it); doc.items.set(id, v); K.moveItem(doc, v, q.x, q.y, 1e6); pending.add(id);
+      } else if (st.kind === "turn" && it) {
+        const v = variant(it, (node) => { const at = K.kid(node, "at"); at[3] = ((+at[3] || 0) + 180) % 360; });
+        real.set(id, it); doc.items.set(id, v); pending.add(id);
+      } else if (st.kind === "move") {
+        pending.add(id); const c = spotOf(id);
+        meta.routes.forEach((r, i) => { if (r.pts.some((p, k) => k > 0 && nearLine(c, r.pts[k - 1], p) < 1.5)) crowded.set(i, id); });
+      } else if (st.kind === "width") {
+        for (const r of meta.routes) if (r.net === st.net) for (const sid of r.ids) {
+          const thick = spare.get(sid); if (!thick || (thick.geom as any[])[0].w <= st.thin!) continue;
+          real.set(sid, thick); spare.set(sid, variant(thick, (node) => { K.kid(node, "width")[1] = st.thin; }));
+        }
+      }
+    }
     for (const q of meta.parts) { const it = doc.items.get(q.id); if (it) { const at = pileAt(q); K.moveItem(doc, it, at[0], at[1], 1e6); unplaced.add(q.id); } }
-    for (const it of [...doc.items.values()]) if (it.kind === "gr_text" || it.id === meta.zone) { shelf.set(it.id, it); doc.items.delete(it.id); }
+    for (const id of [...TEXTS, ...meta.zones, ...meta.stitch]) { const it = doc.items.get(id); if (it) { shelf.set(id, it); doc.items.delete(id); } }
+    stitches.push(...meta.stitch);
     poured = false; fitTo = BUILD;
+  }
+  function nearLine(e: Pt, a: Pt, b: Pt): number { const dx = b[0] - a[0], dy = b[1] - a[1], l = dx * dx + dy * dy, t = l ? clamp(((e[0] - a[0]) * dx + (e[1] - a[1]) * dy) / l) : 0; return Math.hypot(e[0] - a[0] - t * dx, e[1] - a[1] - t * dy); }
+  /** Brings every open story to its end at once: what the board is handed on as is the real one. */
+  function settle(): void {
+    for (const st of stories) { if (st.state < 2) finish(st); st.state = 2; }
+    note = null;
+  }
+  /** The change a story asks for, made. */
+  function finish(st: Story): void {
+    const id = refId(st.ref);
+    if (st.kind === "swap" || st.kind === "turn") {
+      const it = real.get(id), cur = doc.items.get(id);
+      if (it && cur) { const at = posOf(cur); doc.items.set(id, it); K.moveItem(doc, it, at[0], at[1], 1e6); real.delete(id); }
+    } else if (st.kind === "move") {
+      const it = doc.items.get(id), h = home(id); if (it && !unplaced.has(id)) K.moveItem(doc, it, h[0], h[1], 1e6);
+      for (const [i, pid] of [...crowded]) if (pid === id) crowded.delete(i);
+    } else if (st.kind === "width") {
+      for (const r of meta.routes) if (r.net === st.net) for (const sid of r.ids) { const it = real.get(sid); if (!it) continue; if (doc.items.has(sid)) doc.items.set(sid, it); else if (spare.has(sid)) spare.set(sid, it); real.delete(sid); }
+    }
+    pending.delete(id);
   }
   open(); box = fitTo.slice() as Box;
 
   const netName = (net: number): string => { const n = (doc as any).nets && (doc as any).nets.get ? (doc as any).nets.get(net) : null; return typeof n === "string" && n ? n : `net ${net}`; };
-  const netWidth = (net: number): number => net === 1 || net === 2 ? 0.4 : 0.25;
+  const netWidth = (net: number): number => WIDTH.get(netName(net)) || 0.2;
   const newId = (): string => `mini-${++serial}-${Math.random().toString(36).slice(2, 8)}`;
   const f3 = (v: number): number => Math.round(v * 1000) / 1000;
   function addSegment(a: Pt, b: Pt, net: number, on: Layer): string {
@@ -144,15 +219,15 @@ export function startMini(root: HTMLElement): void {
   const posOf = (it: any): Pt => { const at = K.atOf(it.node); return [at[0], at[1]]; };
   /** What a press with the arrow tool takes hold of: the item under it, and a text anywhere in its box. */
   function pick(at: Pt): string | null {
-    const hit: string | null = K.hitTest(doc, at[0], at[1], 0.3, { hidden: HIDDEN });
+    const hit: string | null = K.hitTest(doc, at[0], at[1], 0.3, { hidden: HID });
     // A track or via under the pointer beats a part that is only hit by its outline, as in
     // PCB_SELECTION_TOOL::GuessSelectionCandidates: on a pad the part still wins.
     if (hit && PARTS.has(hit)) {
       const tr = trackAt(doc, at[0], at[1], 0), it = tr ? doc.items.get(tr) : null;
       if (it) { const on = it.kind === "via" ? layer : (it.geom as any[])[0].layer, c = copperAt(doc, at[0], at[1], on); if (!c || c.kind !== "pad") return tr; }
     }
-    if (hit && (PARTS.has(hit) || doc.items.get(hit)?.kind === "gr_text")) return hit;
-    for (const it of doc.items.values()) if (it.kind === "gr_text" && it.bbox && at[0] >= it.bbox[0] && at[0] <= it.bbox[2] && at[1] >= it.bbox[1] && at[1] <= it.bbox[3]) return it.id;
+    if (hit && (PARTS.has(hit) || TEXTS.has(hit))) return hit;
+    for (const it of doc.items.values()) if (TEXTS.has(it.id) && it.bbox && at[0] >= it.bbox[0] && at[0] <= it.bbox[2] && at[1] >= it.bbox[1] && at[1] <= it.bbox[3]) return it.id;
     return hit;
   }
   /** The other net whose copper is under the pointer while a track is being laid, if any. */
@@ -161,7 +236,7 @@ export function startMini(root: HTMLElement): void {
     const c = copperAt(doc, at[0], at[1], route.layer);
     return c && c.net !== route.net ? c.net : null;
   }
-  const movable = (id: string | null): boolean => !!id && (PARTS.has(id) || doc.items.get(id)?.kind === "gr_text");
+  const movable = (id: string | null): boolean => !!id && (PARTS.has(id) || TEXTS.has(id));
   /** One undo step that takes back everything added since `made` was started. */
   function remember(made: string[]): void { if (made.length) edits.push({ kind: "add", ids: made }); }
   function revert(e: Edit): void {
@@ -184,7 +259,6 @@ export function startMini(root: HTMLElement): void {
 
   // ------------------------------------------------------------------ teammates
 
-  const refId = (ref: string): string | undefined => meta.parts.find((p) => p.ref === ref)?.id;
   const inset = (m: number): Pt => [rnd(BOARD.x + m, BOARD.x + BOARD.w - m), rnd(BOARD.y + m, BOARD.y + BOARD.h - m)];
   /** The point of the line a-b nearest the pointer, on the grid along it; a little past `b` is
    *  allowed, since a hand runs over the corner before it comes back to click. */
@@ -277,20 +351,21 @@ export function startMini(root: HTMLElement): void {
 
   /** Puts the three of them on the board, each waiting a different moment before starting. */
   function cast(now: number): void {
-    actors.length = 0; note = null; nextRedo = now + 6000; nextNote = now + 5000;
+    actors.length = 0; note = null;
     if (alone) return;
-    const at: Pt[] = unplaced.size ? [[179, BOARD.y + 5], [187, BOARD.y + 17], [177, BOARD.y + 23]] : [[BOARD.x + 11, BOARD.y + 12], [BOARD.x + 36, BOARD.y + 13], [BOARD.x + 21, BOARD.y + 22]];
+    const py = BOARD.y + BOARD.h + 8;
+    const at: Pt[] = unplaced.size ? [[BOARD.x + 9, py], [BOARD.x + 31, py + 3], [BOARD.x + 20, py - 2]] : [[BOARD.x + 9, BOARD.y + 4], [BOARD.x + 34, BOARD.y + 6], [BOARD.x + 17, BOARD.y + 14]];
     PEERS.forEach((_, who) => {
       const p: Pt = still ? at[who] : [at[who][0] + gauss() * 3, at[who][1] + gauss() * 2];
-      actors.push({ who, at: p, from: p, steps: [{ dur: 0.5 + who * 0.8 + rnd(0, 0.5), to: p }], i: 0, t0: now, task: "rest", last: "rest", marks: [], held: null, pull: null, poly: null, box: null, boxed: [], move: null, route: null });
+      actors.push({ who, at: p, from: p, steps: [{ dur: 0.5 + who * 0.8 + rnd(0, 0.5), to: p }], i: 0, t0: now, task: "rest", last: "rest", marks: [], held: null, pull: null, poly: null, move: null, route: null, story: null });
     });
   }
   /** Lets go of whatever a teammate holds or shows. */
   function drop(a: Actor, now: number): void {
-    if (a.task === "note" && note && note.who === a.who) note.dies = Math.min(note.dies, now + 300);
+    if (a.task === "note" && a.story && a.story.state === 0 && note && !note.ok) note = null;   // interrupted while typing: it is written again later
     if (a.task === "undo") nextUndo = now + GAP;
     a.last = a.task; a.task = "rest"; a.steps = []; a.i = 0; a.t0 = now; a.from = a.at;
-    a.marks = []; a.held = null; a.pull = null; a.poly = null; a.box = null; a.boxed = []; a.move = null; a.route = null;
+    a.marks = []; a.held = null; a.pull = null; a.poly = null; a.move = null; a.route = null; a.story = null;
   }
   /** Moves a teammate along to `now`, running what their steps do, and has them pick the next
    *  thing when one is finished. */
@@ -372,42 +447,17 @@ export function startMini(root: HTMLElement): void {
     p.rest(rnd(0.3, 0.9));
     return true;
   }
-  /** Selects a finished connection, deletes it, thinks, and routes it again. */
-  function planRedo(a: Actor, p: Plan, ri: number): boolean {
-    const r = meta.routes[ri], pts = r.pts as Pt[], ids = [...r.ids, ...(r.via ? [r.via] : [])];
-    let k = 0; for (let i = 1; i < pts.length - 1; i++) if (dist(pts[i], pts[i + 1]) > dist(pts[k], pts[k + 1])) k = i;
-    const u = rnd(0.3, 0.7);
-    a.route = ri;
-    p.go([lerp(pts[k][0], pts[k + 1][0], u), lerp(pts[k][1], pts[k + 1][1], u)]).click(() => { a.marks = ids; });
-    p.wait(rnd(0.4, 1), () => { a.marks = []; lift(ri); redraw(); });
-    p.rest(rnd(0.5, 1.5));
-    return planRoute(a, p, ri);
-  }
-  /** Tries a part or a label a little to one side, looks, and puts it back. */
-  function planNudge(a: Actor, p: Plan, id: string): boolean {
-    const it = doc.items.get(id); if (!it) return false;
-    const home = posOf(it), ang = rnd(0, Math.PI * 2), far = rnd(0.75, 2);
-    const to: Pt = [snap(home[0] + Math.cos(ang) * far, home[0]), snap(home[1] + Math.sin(ang) * far, home[1])];
-    a.move = { id, from: home };
-    p.go(home).click(() => { a.held = id; });
-    p.pull(to, rnd(2.5, 4), (c) => carry(it, c, home), 0.5, 1.4);
-    p.rest(rnd(0.5, 1.4));
-    if (chance(0.55)) p.pull(home, rnd(3, 5), (c) => carry(it, c, home), 0.4, 1.2);
-    p.wait(0.06, () => { K.moveItem(doc, it, home[0], home[1], 1e6); redraw(); });
-    p.wait(rnd(0.2, 0.5), () => { a.held = null; a.move = null; });
-    return true;
-  }
   /** Takes a part out of the pile and puts it in its place, sometimes a little off first. */
   function planPlace(a: Actor, p: Plan, id: string): boolean {
-    const it = doc.items.get(id), q = meta.parts.find((x) => x.id === id); if (!it || !q) return false;
-    const home: Pt = [q.x, q.y], tick = (c: Pt): void => carry(it, c, home);
-    a.move = { id, from: home };
+    const it = doc.items.get(id); if (!it || !PARTS.has(id)) return false;
+    const to = spotOf(id), tick = (c: Pt): void => carry(it, c, to);
+    a.move = { id, from: to };
     p.go(posOf(it)).click(() => { a.held = id; });
     if (chance(0.35 * HANDS[a.who].miss)) {
-      p.pull([home[0] + gauss() * 1.6, home[1] + gauss() * 1.2], rnd(26, 36), tick, 0.6, 1.7).rest(rnd(0.2, 0.6));
-      p.pull(home, 3, tick, 0.25, 0.6);
-    } else p.pull(home, rnd(26, 36), tick, 0.6, 1.7);
-    p.click(() => { K.moveItem(doc, it, home[0], home[1], 1e6); unplaced.delete(id); a.held = null; a.move = null; redraw(); });
+      p.pull([to[0] + gauss() * 1.6, to[1] + gauss() * 1.2], rnd(26, 36), tick, 0.6, 1.7).rest(rnd(0.2, 0.6));
+      p.pull(to, 3, tick, 0.25, 0.6);
+    } else p.pull(to, rnd(26, 36), tick, 0.6, 1.7);
+    p.click(() => { K.moveItem(doc, it, to[0], to[1], 1e6); unplaced.delete(id); a.held = null; a.move = null; redraw(); });
     p.rest(rnd(0.1, 0.5));
     return true;
   }
@@ -421,10 +471,10 @@ export function startMini(root: HTMLElement): void {
     p.rest(rnd(0.2, 0.6));
     return true;
   }
-  /** Draws the ground plane: a click in each corner of the board on the back layer, and the
-   *  zone fills when its outline closes. */
+  /** Draws the ground planes: a click in each corner of the board, and the zones fill, front
+   *  and back, when the outline closes. */
   function planPour(a: Actor, p: Plan): boolean {
-    const z = shelf.get(meta.zone); if (!z) return false;
+    const zs = meta.zones.map((id) => shelf.get(id)).filter(Boolean); if (!zs.length) return false;
     const B = BOARD, c: Pt[] = [[B.x, B.y], [B.x + B.w, B.y], [B.x + B.w, B.y + B.h], [B.x, B.y + B.h]];
     const k = Math.floor(rnd(0, 4)), ring = chance(0.5) ? [0, 1, 2, 3, 4] : [0, 3, 2, 1, 4], at = (i: number): Pt => c[(k + ring[i]) % 4];
     p.go(at(0)).rest(rnd(0.3, 0.8)).go(at(0)).click(() => { a.poly = [at(0)]; a.pull = { a: at(0), b: at(1), at: at(0), layer: "B.Cu", w: 0.2 }; });
@@ -433,77 +483,99 @@ export function startMini(root: HTMLElement): void {
       p.pull(t, rnd(16, 24), (q) => { if (a.pull) a.pull.at = along(s, t, q); }, 0.5, 1.6);
       p.click(() => {
         if (i < 4) { a.poly!.push(t); a.pull = { a: t, b: at(i + 1), at: t, layer: "B.Cu", w: 0.2 }; return; }
-        a.poly = null; a.pull = null; shelf.delete(z.id); doc.items.set(z.id, z); poured = true; redraw();
+        a.poly = null; a.pull = null; for (const z of zs) { shelf.delete(z.id); doc.items.set(z.id, z); } poured = true; redraw();
       });
       if (i < 4 && chance(0.3)) p.wait(rnd(0.15, 0.4));
     }
     p.rest(rnd(0.8, 1.6));
     return true;
   }
-  /** Goes to a part and looks it over, selected or just under the pointer. */
-  function planLook(a: Actor, p: Plan, id: string): boolean {
-    const it = doc.items.get(id); if (!it) return false;
-    const at = posOf(it);
-    p.go([at[0] + gauss() * 0.5, at[1] + gauss() * 0.4]);
-    if (chance(0.65)) p.click(() => { a.held = id; });
-    p.rest(rnd(1.1, 3.2));
+  /** Ties the two ground planes together: a run of vias, one click each, the nearest first. */
+  function planStitch(a: Actor, p: Plan): boolean {
+    const mine: string[] = []; let at = a.at;
+    const where = (id: string): Pt => { const g = (shelf.get(id).geom as any[])[0]; return [g.x, g.y]; };
+    for (let n = Math.round(rnd(4, 8)); n > 0 && stitches.length; n--) {
+      let k = 0; for (let i = 1; i < stitches.length; i++) if (dist(where(stitches[i]), at) < dist(where(stitches[k]), at)) k = i;
+      const id = stitches.splice(k, 1)[0]; mine.push(id); at = where(id);
+    }
+    if (!mine.length) return false;
+    for (const id of mine) p.go(where(id)).click(() => { const v = shelf.get(id); if (v) { shelf.delete(id); doc.items.set(id, v); redraw(); } });
+    p.rest(rnd(0.3, 0.8));
     return true;
   }
-  /** Drags a selection box over a part and its neighbours, then lets the selection go. */
-  function planSweep(a: Actor, p: Plan, id: string): boolean {
-    const me = doc.items.get(id); if (!me || !me.bbox) return false;
-    const near = meta.parts.map((q) => doc.items.get(q.id)).filter((it) => it && it.bbox && it.id !== id && dist(posOf(it), posOf(me)) < 8.5) as any[];
-    const b = me.bbox.slice() as Box, m = rnd(0.6, 1.5);
-    for (const it of near.slice(0, chance(0.5) ? 1 : 2)) { b[0] = Math.min(b[0], it.bbox[0]); b[1] = Math.min(b[1], it.bbox[1]); b[2] = Math.max(b[2], it.bbox[2]); b[3] = Math.max(b[3], it.bbox[3]); }
-    const left = chance(0.6), top = chance(0.7);
-    const c0: Pt = [left ? b[0] - m : b[2] + m, top ? b[1] - m : b[3] + m], c1: Pt = [left ? b[2] + m : b[0] - m, top ? b[3] + m : b[1] - m];
-    const inside = (c: Pt): string[] => {
-      const x0 = Math.min(c0[0], c[0]), x1 = Math.max(c0[0], c[0]), y0 = Math.min(c0[1], c[1]), y1 = Math.max(c0[1], c[1]);
-      return meta.parts.filter((q) => { const it = doc.items.get(q.id), bb = it && it.bbox; return bb && bb[0] >= x0 && bb[2] <= x1 && bb[1] >= y0 && bb[3] <= y1; }).map((q) => q.id);
-    };
-    p.go(c0).click(() => { a.box = [c0, c0]; });
-    p.pull(c1, rnd(9, 14), (c) => { if (a.box) { a.box = [c0, c]; a.boxed = inside(c); } }, 0.45, 1.3);
-    p.click(() => { a.box = null; });
-    p.rest(rnd(0.8, 2.2));
-    p.go([c1[0] + rnd(1, 3) * (left ? 1 : -1), c1[1] + gauss() * 2]).click(() => { a.boxed = []; });
-    return true;
+  /** Where a story's comment is pinned: on its part, or on the first track of its net. */
+  function pinOf(st: Story): Pt | null {
+    if (st.kind === "width") { for (const r of meta.routes) if (r.net === st.net && r.ids.every((id) => doc.items.has(id))) { const i = Math.floor(r.pts.length / 2); return [(r.pts[i - 1][0] + r.pts[i][0]) / 2, (r.pts[i - 1][1] + r.pts[i][1]) / 2]; } return null; }
+    const it = doc.items.get(refId(st.ref)); return it ? posOf(it) : null;
   }
-  /** Pins a comment on a part and types it. */
-  function planNote(a: Actor, p: Plan, ref: string, text: string): boolean {
-    const it = doc.items.get(refId(ref) || ""); if (!it) return false;
-    const c = posOf(it), at: Pt = [c[0] + gauss() * 0.3, c[1] + gauss() * 0.3];
-    const n: Note = { who: a.who, at, text, n: 0, born: 0, dies: Infinity };
-    p.go(at).click(() => { n.born = performance.now(); note = n; });
+  /** Pins a review comment where the trouble is and types it.  It stays until someone has made the change. */
+  function planNote(a: Actor, p: Plan, st: Story): boolean {
+    const c = pinOf(st); if (!c) return false;
+    const at: Pt = [c[0] + gauss() * 0.2, c[1] + gauss() * 0.2], text = st.text;
+    const n: Note = { who: a.who, at, text, n: 0, born: 0, dies: Infinity, ok: false };
+    a.story = st;
+    p.go(at).rest(rnd(0.5, 1.1)).go(at).click(() => { n.born = performance.now(); note = n; });
     p.wait(rnd(0.4, 0.9));                                    // hands go to the keyboard
-    for (let i = 0; i < text.length; i++) p.wait((/[ ,?]/.test(text[i]) ? rnd(0.09, 0.22) : rnd(0.035, 0.1)) * (chance(0.06) ? 4 : 1), () => { n.n = i + 1; });
-    p.wait(rnd(2, 3.2), () => { n.dies = performance.now() + 350; });
+    for (let i = 0; i < text.length; i++) p.wait((/[ ,?:]/.test(text[i]) ? rnd(0.09, 0.22) : rnd(0.035, 0.1)) * (chance(0.06) ? 4 : 1), () => { n.n = i + 1; });
+    p.wait(rnd(0.5, 0.9), () => { st.state = 1; st.by = a.who; });
+    return true;
+  }
+  /** Does what a comment asks for, and resolves it. */
+  function planFix(a: Actor, p: Plan, st: Story): boolean {
+    const id = refId(st.ref), c = pinOf(st); if (!c) return false;
+    const resolved = (): void => { finish(st); st.state = 2; a.marks = []; a.held = null; a.move = null; note = { who: a.who, at: note ? note.at : c, text: st.done, n: st.done.length, born: performance.now() - 200, dies: performance.now() + 3200, ok: true }; redraw(); };
+    a.story = st;
+    p.go([c[0] + rnd(1.5, 3), c[1] + rnd(1, 2.5)]).rest(rnd(0.7, 1.4));         // reads the comment
+    if (st.kind === "move") {
+      const it = doc.items.get(id)!, h = home(id);
+      a.move = { id, from: h };
+      p.go(posOf(it)).click(() => { a.held = id; });
+      p.pull(h, rnd(3.5, 5), (q) => carry(it, q, h), 0.6, 1.8);
+      p.click(resolved);
+    } else if (st.kind === "swap" || st.kind === "turn") {
+      p.go(c).click(() => { a.marks = [id]; });
+      p.wait(rnd(0.7, 1.2), resolved);                        // Change Footprint, or R twice
+    } else if (st.kind === "width") {
+      const ids = meta.routes.filter((r) => r.net === st.net).flatMap((r) => r.ids);
+      p.go(c).click(() => { a.marks = ids.filter((x) => doc.items.has(x)); });
+      p.wait(rnd(0.8, 1.3), resolved);
+    } else {
+      const ids = meta.texts.filter((t) => st.texts!.includes(t.text)).map((t) => t.id);
+      for (const tid of ids) planLabel(a, p, tid);
+      p.wait(0.1, resolved);
+    }
+    p.rest(rnd(0.5, 1));
     return true;
   }
 
-  /** What a teammate turns to next: open connections first, otherwise whatever a person
-   *  reviewing a board might do, picked by weighted chance and rarely the same thing twice. */
+  /** What a teammate turns to next.  There is always board work to do until the board is done:
+   *  parts to place, connections to route, the planes, the stitching, the labels; and a comment
+   *  to write where something is not right yet, or one of a colleague's to act on. */
   function think(a: Actor, now: number): void {
     const others = actors.filter((o) => o !== a), doing = (t: Task): boolean => others.some((o) => o.task === t);
-    const building = unplaced.size > 0 || !poured;
-    const quiet = !edits.length && !drag && !route && !pan && now - lastAct > 1200 && others.filter((o) => HARD.has(o.task)).length < (building ? 3 : 2);
-    const open = [...gone].filter((i) => !others.some((o) => o.route === i) && NEEDS[i].every((k) => !gone.has(k)) && reaches[i].every((id) => !unplaced.has(id)));
-    const whole = REDO.filter((i) => !gone.has(i) && meta.routes[i].ids.every((id) => doc.items.has(id)));
-    const taken = new Set<string>(); for (const o of others) { if (o.held) taken.add(o.held); if (o.move) taken.add(o.move.id); for (const id of o.boxed) taken.add(id); }
-    const pile = meta.parts.filter((q) => unplaced.has(q.id) && !taken.has(q.id) && !(drag && drag.id === q.id)).slice(0, 3);
-    const texts = [...shelf.values()].filter((it) => it.kind === "gr_text").map((it) => it.id);
-    const parts = meta.parts.filter((q) => !taken.has(q.id) && !unplaced.has(q.id)), small = parts.filter((q) => /^[RCD]/.test(q.ref));
-    const labels = [...doc.items.values()].filter((it) => it.kind === "gr_text").map((it) => it.id);
-    const opts: [Task, number][] = [["look", building ? 0.5 : 2], ["rest", building ? 0.3 : 0.7]];
+    const quiet = !edits.length && !drag && !route && !pan && now - lastAct > 1200;
+    const settled = (id: string): boolean => !unplaced.has(id) && !pending.has(id);
+    const open = [...gone].filter((i) => !others.some((o) => o.route === i) && NEEDS[i].every((k) => !gone.has(k)) && reaches[i].every(settled) && !crowded.has(i));
+    const taken = new Set<string>(); for (const o of others) { if (o.held) taken.add(o.held); if (o.move) taken.add(o.move.id); }
+    const pile = meta.parts.filter((q) => unplaced.has(q.id) && !taken.has(q.id) && !(drag && drag.id === q.id)).slice(0, 4);
+    const kept = new Set(stories.filter((x) => x.kind === "label" && x.state < 2).flatMap((x) => x.texts!));
+    const texts = meta.texts.filter((t) => shelf.has(t.id) && !kept.has(t.text)).map((t) => t.id);
+    const routed = !gone.size && !unplaced.size;
+    // A story can be told once what it is about is on the board: the part placed, half the net's tracks laid, the board all but done.
+    const told = (st: Story): boolean => st.kind === "width" ? meta.routes.filter((r) => r.net === st.net).length > 1 && meta.routes.filter((r, i) => r.net === st.net && !gone.has(i)).length >= 3 && !!pinOf(st)
+      : st.kind === "label" ? routed && poured && !stitches.length && !texts.length : !unplaced.has(refId(st.ref)) && !taken.has(refId(st.ref));
+    const tell = !note ? stories.filter((x) => x.state === 0 && told(x)) : [];
+    const fix = stories.filter((x) => x.state === 1 && x.by !== a.who && !others.some((o) => o.story === x));
+    const opts: [Task, number][] = [["rest", 0.25]];
     if (quiet && pile.length) opts.push(["place", 10]);
     if (quiet && open.length) opts.push(["route", 9]);
-    if (quiet && !unplaced.size && texts.length && !doing("label")) opts.push(["label", 3]);
-    if (quiet && !unplaced.size && !gone.size && !poured && !doing("pour")) opts.push(["pour", 40]);
-    if (quiet && !building && !open.length && gone.size < 2 && whole.length && !doing("redo") && now > nextRedo) opts.push(["redo", 3]);
-    if (quiet && !building && !doing("nudge") && small.length) opts.push(["nudge", 0.8]);
-    if (!doing("sweep") && parts.length) opts.push(["sweep", 0.9]);
-    if (!note && now > nextNote) opts.push(["note", 1.1]);
-    let sum = 0; for (const o of opts) { if (o[0] === a.last && o[0] !== "route" && o[0] !== "place") o[1] *= 0.2; sum += o[1]; }
-    let pick = Math.random() * sum, task: Task = "look";
+    if (quiet && routed && !poured && !doing("pour")) opts.push(["pour", 40]);
+    if (quiet && poured && stitches.length) opts.push(["stitch", 8]);
+    if (quiet && routed && texts.length && !doing("label")) opts.push(["label", 4]);
+    if (quiet && tell.length && !doing("note")) opts.push(["note", 14]);
+    if (quiet && fix.length) opts.push(["fix", 60]);
+    let sum = 0; for (const o of opts) sum += o[1];
+    let pick = Math.random() * sum, task: Task = "rest";
     for (const o of opts) { pick -= o[1]; if (pick <= 0) { task = o[0]; break; } }
 
     const p = plan(a.who, a.at); let ok = false;
@@ -511,13 +583,12 @@ export function startMini(root: HTMLElement): void {
     if (task === "place") ok = planPlace(a, p, any1(pile).id);
     else if (task === "label") ok = planLabel(a, p, any1(texts));
     else if (task === "pour") ok = planPour(a, p);
-    else if (task === "route") ok = planRoute(a, p, any1(open));
-    else if (task === "redo") { ok = planRedo(a, p, any1(whole)); nextRedo = now + rnd(5000, 11000); }
-    else if (task === "nudge") ok = planNudge(a, p, chance(0.25) && labels.length ? any1(labels) : any1(small).id);
-    else if (task === "sweep") ok = planSweep(a, p, any1(parts).id);
-    else if (task === "note") { const free = NOTES.filter(([ref]) => !taken.has(refId(ref) || "") && !unplaced.has(refId(ref) || "")); ok = free.length > 0 && (() => { const n = any1(free); return planNote(a, p, n[0], n[1]); })(); nextNote = now + rnd(9000, 16000); }
-    else if (task === "look" && parts.length) ok = planLook(a, p, any1(parts).id);
-    if (!ok) { task = "rest"; p.go(inset(4)).rest(rnd(1, 3)); }
+    else if (task === "stitch") ok = planStitch(a, p);
+    else if (task === "route") ok = planRoute(a, p, open.reduce((b, i) => (dist(meta.routes[i].pts[0], a.at) * rnd(0.6, 1.4) < dist(meta.routes[b].pts[0], a.at) ? i : b), any1(open)));
+    else if (task === "note") ok = planNote(a, p, tell[0]);
+    else if (task === "fix") ok = planFix(a, p, fix[0]);
+    // Nothing to do just now: the hand waits near where the work is, on nothing in particular.
+    if (!ok) { task = "rest"; if (chance(0.4)) p.go(inset(3)); p.rest(rnd(0.8, 2.2)); }
     a.task = task; a.steps = p.steps; a.i = 0; a.t0 = now; a.from = a.at;
   }
   /** One of those not in the middle of board work comes over to take back the visitor's change. */
@@ -548,8 +619,8 @@ export function startMini(root: HTMLElement): void {
     const next = "/?start=mini";
     keep.href = document.documentElement.dataset.me ? next : "/auth/github/login?next=" + encodeURIComponent(next);
     keep.addEventListener("click", () => {
-      endRoute();
-      try { localStorage.setItem("kc.onboard.mini", JSON.stringify({ board: boardText(doc), at: Date.now() })); } catch { /* without it the project starts from the same board, some connections open */ }
+      endRoute(); settle();
+      try { localStorage.setItem("kc.onboard.mini", JSON.stringify({ board: boardText(doc), template: "stm32-usbc-devboard", at: Date.now() })); } catch { /* without it the project starts from the same board, some connections open */ }
     });
   }
 
@@ -640,10 +711,10 @@ export function startMini(root: HTMLElement): void {
     const u = q<HTMLButtonElement>("[data-act=undo]"); if (u) u.disabled = !edits.length && !route;
     const r = q<HTMLButtonElement>("[data-act=reset]"); if (r) r.disabled = !touched;
     if (toolName) toolName.textContent = tool === "route" ? (route ? (foreign(hover) !== null ? `Route Tracks: ${netName(route.net)} cannot connect to ${netName(foreign(hover)!)}` : `Route Tracks: ${netName(route.net)}, click to place, double-click to finish`) : "Route Tracks: click a pad or a track to start") : tool === "via" ? "Add Via" : "Select item(s)";
-    if (dirty) rats = ratsnest(doc, { poured: poured ? 1 : 0 });
+    if (dirty) rats = ratsnest(doc, { planes: poured ? PLANES : [] });
     if (counts) {
       let vias = 0, segs = 0; for (const it of doc.items.values()) { if (it.kind === "via") vias++; else if (it.kind === "segment") segs++; }
-      counts.textContent = `Pads 42   Vias ${vias}   Track Segments ${segs}   Nets 9`;
+      counts.textContent = `Pads ${meta.pads}   Vias ${vias}   Track Segments ${segs}   Nets ${meta.nets}`;
       if (unrouted) { unrouted.textContent = `Unrouted ${rats.length}`; unrouted.classList.toggle("ok", rats.length === 0); }
     }
   }
@@ -658,8 +729,8 @@ export function startMini(root: HTMLElement): void {
     if (!base) base = document.createElement("canvas");
     if (base.width !== canvas.width || base.height !== canvas.height) { base.width = canvas.width; base.height = canvas.height; dirty = true; }
     if (dirty) {
-      rats = ratsnest(doc, { poured: poured ? 1 : 0 });
-      K.render(doc, base.getContext("2d")!, view, { hidden: HIDDEN, grid: 1, ratsnest: rats, selected: selected ? new Set([selected]) : null, zoneFill: true, activeLayer: layer });
+      rats = ratsnest(doc, { planes: poured ? PLANES : [] });
+      K.render(doc, base.getContext("2d")!, view, { hidden: HID, grid: 1, ratsnest: rats, selected: selected ? new Set([selected]) : null, zoneFill: true, activeLayer: layer });
       dirty = false;
       if (zoomOut) zoomOut.textContent = `Z ${(view.ppm / 3.78).toFixed(2)}`;
     }
@@ -702,7 +773,6 @@ export function startMini(root: HTMLElement): void {
     for (const a of actors) {
       const color = PEERS[a.who].color;
       for (const id of a.marks) frame(id, color);
-      for (const id of a.boxed) frame(id, color);
       if (a.held) frame(a.held, color);
       if (a.poly) {
         // The zone outline drawn so far.
@@ -714,27 +784,32 @@ export function startMini(root: HTMLElement): void {
         ctx.strokeStyle = LAYER_COLOR[a.pull.layer] || LAYER_COLOR["F.Cu"]; ctx.globalAlpha = 0.85; ctx.lineWidth = Math.max(1.5, a.pull.w * view.ppm); ctx.lineCap = "round";
         ctx.beginPath(); ctx.moveTo(s[0], s[1]); ctx.lineTo(t[0], t[1]); ctx.stroke(); ctx.globalAlpha = 1;
       }
-      if (a.box) {
-        const s = px(a.box[0]), t = px(a.box[1]);
-        ctx.fillStyle = color; ctx.globalAlpha = 0.12; ctx.fillRect(s[0], s[1], t[0] - s[0], t[1] - s[1]);
-        ctx.globalAlpha = 1; ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(Math.round(s[0]) + 0.5, Math.round(s[1]) + 0.5, Math.round(t[0] - s[0]), Math.round(t[1] - s[1]));
-      }
     }
+    // The board is done: it is left to be looked at for a while, then they start over (not while the visitor is at work on it).
+    if (!still && !alone && !touched && !unplaced.size && !gone.size && poured && !stitches.length && ![...TEXTS].some((id) => shelf.has(id)) && stories.every((x) => x.state === 2)) {
+      if (!doneAt) doneAt = now; else if (now - doneAt > AGAIN && !drag && !pan && !route) { reset(); own = false; }
+    } else doneAt = 0;
     if (note && now >= note.dies) note = null;
     if (note) {
-      // A comment pinned to a part, typed as its author writes it.
+      // A comment pinned to a part, typed as its author writes it; once the change is made it
+      // reads what was done, with a tick, in the name of who did it.
       const peer = PEERS[note.who], c = px(note.at), typing = note.n < note.text.length;
       const text = note.text.slice(0, note.n) + (typing && Math.floor(now / 400) % 2 ? "|" : "");
       ctx.save(); ctx.globalAlpha = clamp(Math.min((now - note.born) / 160, (note.dies - now) / 350));
       ctx.font = `12px ${SANS}`; ctx.textBaseline = "middle"; ctx.textAlign = "left";
-      const w = Math.max(30, ctx.measureText(note.text.slice(0, note.n) + "|").width) + 42, hgt = 28;
-      const x = Math.round(c[0] + 12 + w > W - 6 ? c[0] - 12 - w : c[0] + 12), y = Math.round(Math.max(6, c[1] - hgt - 8));
+      const w = Math.max(30, ctx.measureText(note.text.slice(0, note.n) + "|").width) + (note.ok ? 62 : 42), hgt = 28;
+      const x = Math.round(clamp(c[0] + 12, 6, W - 6 - w)), y = Math.round(c[1] - hgt - 10 < 6 ? c[1] + 12 : c[1] - hgt - 10);
       ctx.beginPath(); ctx.arc(c[0], c[1], 5, 0, 6.3); ctx.fillStyle = peer.color; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.4; ctx.stroke(); ctx.fill();
       ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 0.5, y + 0.5, w, hgt, 8); else ctx.rect(x + 0.5, y + 0.5, w, hgt);
-      ctx.fillStyle = "#111113"; ctx.fill(); ctx.strokeStyle = "#FFFFFF3D"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.fillStyle = "#111113"; ctx.fill(); ctx.strokeStyle = note.ok ? "#3FB37F" : "#FFFFFF3D"; ctx.lineWidth = 1; ctx.stroke();
       ctx.beginPath(); ctx.arc(x + 15, y + hgt / 2 + 0.5, 8, 0, 6.3); ctx.fillStyle = peer.color; ctx.fill();
       ctx.fillStyle = "#fff"; ctx.font = `600 10px ${SANS}`; ctx.textAlign = "center"; ctx.fillText(peer.name[0], x + 15, y + hgt / 2 + 1);
-      ctx.fillStyle = "#FAFAFA"; ctx.font = `12px ${SANS}`; ctx.textAlign = "left"; ctx.fillText(text, x + 30, y + hgt / 2 + 1);
+      let tx = x + 30;
+      if (note.ok) {
+        const cy = y + hgt / 2 + 0.5; ctx.strokeStyle = "#3FB37F"; ctx.lineWidth = 2; ctx.lineCap = "round"; ctx.lineJoin = "round";
+        ctx.beginPath(); ctx.moveTo(tx + 1, cy); ctx.lineTo(tx + 5, cy + 4); ctx.lineTo(tx + 12, cy - 4); ctx.stroke(); tx += 20;
+      }
+      ctx.fillStyle = "#FAFAFA"; ctx.font = `12px ${SANS}`; ctx.textAlign = "left"; ctx.fillText(text, tx, y + hgt / 2 + 1);
       ctx.restore();
     }
     for (const a of actors) { const c = px(a.at); drawCursor(ctx, c[0], c[1], PEERS[a.who].name, PEERS[a.who].color, SANS); }

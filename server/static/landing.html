@@ -202,6 +202,8 @@
   .ai[data-phase="pcb"] .ai-scene { background: #001023; }
 
   /* ---- together ---- */
+  .shots { display: grid; gap: 28px; min-width: 0; }
+  .shots figure { margin: 0; }
   .together-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(0, 1fr); gap: clamp(28px, 4vw, 60px); margin-top: 44px; align-items: start; }
   .shot { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: var(--bench);
           box-shadow: 0 30px 60px -32px #0009, 0 8px 18px -10px #0004; }
@@ -371,7 +373,7 @@
 
     <div class="win rv" style="--i:4" id="hero" data-tool="select" data-layer="F.Cu">
       <div class="win-bar">
-        <b>blinker.kicad_pcb</b><span class="app">PCB Editor</span>
+        <b>stm32-usbc.kicad_pcb</b><span class="app">PCB Editor</span>
         <span class="sp"></span>
         <span class="live">live</span>
         <span class="avs" aria-label="Mara, Jun and Ada are in this file with you"><i style="--c:#A45BD6">M</i><i style="--c:#149C94">J</i><i style="--c:#D9822B">A</i><i class="you">You</i></span>
@@ -391,17 +393,17 @@
         <button type="button" class="tb text" data-act="reset" title="Put the board back as it was" disabled><img class="il" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:none;stroke:%231a81c4;stroke-linecap:round;stroke-linejoin:round;stroke-width:2px;}%3C/style%3E%3C/defs%3E%3Cpath class='cls-1' d='M 2.95,16.43 A 10.2024,10.2024 0 0 0 21.5675,15.4465' /%3E%3Cpath class='cls-1' d='M 21.0361,7.65 A 10.1937,10.1937 0 0 0 2.0809,9.4958' /%3E%3Cpolyline class='cls-1' points='17.701 8.519 22.198 8.922 23.071 4.262' transform='translate(-1,-1)' /%3E%3Cpolyline class='cls-1' points='8.441 17.769 3.945 17.366 3.071 22.026' transform='translate(-1,-1)' /%3E%3C/svg%3E"><img class="id" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:none;stroke:%2342B8EB;stroke-linecap:round;stroke-linejoin:round;stroke-width:2px;}%3C/style%3E%3C/defs%3E%3Cpath class='cls-1' d='M 2.95,16.43 A 10.2024,10.2024 0 0 0 21.5675,15.4465' /%3E%3Cpath class='cls-1' d='M 21.0361,7.65 A 10.1937,10.1937 0 0 0 2.0809,9.4958' /%3E%3Cpolyline class='cls-1' points='17.701 8.519 22.198 8.922 23.071 4.262' transform='translate(-1,-1)' /%3E%3Cpolyline class='cls-1' points='8.441 17.769 3.945 17.366 3.071 22.026' transform='translate(-1,-1)' /%3E%3C/svg%3E"><span>Start over</span></button>
       </div>
       <div class="win-body">
-        <canvas tabindex="0" aria-label="A small board editor. The board is a 555 LED blinker. Three scripted teammates design it from the bare outline: they place the parts from a pile, route every connection, add the labels and pour the ground plane, then review it and leave comments. Drag a footprint to move it, or pick the route tool and click two pads to join them; a teammate then puts your change back."></canvas>
+        <canvas tabindex="0" aria-label="A small board editor. The board is an STM32 USB-C development board. Three scripted teammates design it from the bare outline: they place the parts from a pile, route every connection, pour and stitch the ground planes and add the labels. On the way one of them leaves a review comment, another makes the change and the comment is resolved. Drag a footprint to move it, or pick the route tool and click two pads to join them; a teammate then puts your change back."></canvas>
         <div class="win-side" role="toolbar" aria-label="Tools" aria-orientation="vertical">
           <button type="button" class="tb" data-tool-btn="select" aria-pressed="true" title="Select and move (Esc)" aria-label="Select and move"><img class="il" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:%23545454;}%3C/style%3E%3C/defs%3E%3Cpath class='cls-1' d='m 7,4 4.18e-4,13.636621 3.013224,-2.910219 c 0.40646,0.927255 1.002473,2.296662 1.523834,3.492113 a 1.5317443,1.5317443 0 0 0 2.031021,0.78694 v 0 a 1.5537557,1.5537557 0 0 0 0.792899,-2.03839 C 13.840175,15.77142 13.243405,14.399854 12.836027,13.469757 L 17,13.184675 Z' style='stroke-width:1' /%3E%3C/svg%3E"><img class="id" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:%23DED3DD;}%3C/style%3E%3C/defs%3E%3Cpath class='cls-1' d='m 7,4 4.18e-4,13.636621 3.013224,-2.910219 c 0.40646,0.927255 1.002473,2.296662 1.523834,3.492113 a 1.5317443,1.5317443 0 0 0 2.031021,0.78694 v 0 a 1.5537557,1.5537557 0 0 0 0.792899,-2.03839 C 13.840175,15.77142 13.243405,14.399854 12.836027,13.469757 L 17,13.184675 Z' style='stroke-width:1;fill:%23DED3DD;fill-opacity:1' /%3E%3C/svg%3E"></button>
           <button type="button" class="tb" data-tool-btn="route" aria-pressed="false" title="Route tracks (X)" aria-label="Route tracks"><img class="il" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:none;stroke:%23545454;stroke-linecap:round;stroke-linejoin:round;stroke-width:2px;}%3C/style%3E%3C/defs%3E%3Cpath style='fill:none;stroke:%231a81c4;stroke-width:2px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1' transform='translate(-1,-1)' d='M 23,3 18.5,13 H 7.5 L 3,23' class='cls-1' /%3E%3C/svg%3E"><img class="id" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:none;stroke:%23DED3DD;stroke-linecap:round;stroke-linejoin:round;stroke-width:2px;}%3C/style%3E%3C/defs%3E%3Cpath style='fill:none;stroke:%2342B8EB;stroke-width:2px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1' transform='translate(-1,-1)' d='M 23,3 18.5,13 H 7.5 L 3,23' class='cls-1' /%3E%3C/svg%3E"></button>
           <button type="button" class="tb" data-tool-btn="via" aria-pressed="false" title="Add via (V)" aria-label="Add via"><img class="il" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:%23f29100;}.cls-2{fill:%23b9b9b9;}%3C/style%3E%3C/defs%3E%3Ccircle class='cls-1' cx='12' cy='12' r='7' /%3E%3Ccircle class='cls-2' cx='12' cy='12' style='fill:%23ffffff;fill-opacity:1;stroke-width:1' r='3' /%3E%3C/svg%3E"><img class="id" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:%23f29100;}.cls-2{fill:%238f8f8f;}%3C/style%3E%3C/defs%3E%3Ccircle class='cls-1' cx='12' cy='12' r='7' /%3E%3Ccircle class='cls-2' cx='12' cy='12' style='fill:%23e0e0e0;fill-opacity:1;stroke-width:1' r='3' /%3E%3C/svg%3E"></button>
         </div>
       </div>
-      <div class="win-status"><span class="hide-s" data-counts>Pads 42</span><span data-unrouted>Unrouted 29</span><span class="sp"></span><span class="hide-s" data-z>Z 1.00</span><span data-xy>X --.--  Y --.--</span><span class="hide-s">grid 0.25</span><span class="hide-s">mm</span><span class="hide-m" data-toolname>Select item(s)</span></div>
+      <div class="win-status"><span class="hide-s" data-counts>Pads 100</span><span data-unrouted>Unrouted 73</span><span class="sp"></span><span class="hide-s" data-z>Z 1.00</span><span data-xy>X --.--  Y --.--</span><span class="hide-s">grid 0.25</span><span class="hide-s">mm</span><span class="hide-m" data-toolname>Select item(s)</span></div>
     </div>
     <div class="keep">
-      <p class="cap">Try it: this is the web editor's renderer on a real .kicad_pcb. Mara, Jun and Ada are designing this board from the bare outline: placing the parts, routing them, pouring the ground plane, then reviewing it. Drag a part or a label, route a track (X), change layer and drop a via (V), and one of them comes over to put it back. Here they are scripted; in a project they are your teammates.</p>
+      <p class="cap">Try it: this is the web editor's renderer on a real .kicad_pcb, an STM32 USB-C board. Mara, Jun and Ada are designing it from the bare outline: placing the parts, routing them, pouring the ground planes. When one of them leaves a review comment, another makes the change. Drag a part or a label, route a track (X), change layer and drop a via (V), and one of them comes over to put it back. Here they are scripted; in a project they are your teammates.</p>
       <a class="btn" data-keep href="/auth/github/login?next=%2F%3Fstart%3Dmini" title="Makes a project of this board, with its schematic, and opens it in the editor">Keep going in a real project</a>
     </div>
   </div>
@@ -469,10 +471,16 @@
     <div class="sheet-h rv"><h2 data-stroke>Working together</h2><span class="sheet-n">Sheet 3 / 4</span></div>
     <p class="lead rv" style="--i:1; margin-top:18px">What you see when someone else is in the file.</p>
     <div class="together-grid">
-      <figure class="rv">
-        <div class="shot"><img src="/static/landing/editor.webp" width="1600" height="1000" loading="lazy" alt="The web PCB editor in dark mode, zoomed in on a routed board. Jun has selected diode D11, which is outlined on Ada's screen, and Jun's named cursor is beside it."></div>
-        <figcaption class="cap" style="margin-top:10px">The web PCB editor. Ada's window; Jun has D11 selected.</figcaption>
-      </figure>
+      <div class="shots">
+        <figure class="rv">
+          <div class="shot"><img src="/static/landing/board.webp" width="2400" height="1500" loading="lazy" alt="The web PCB editor in dark mode on a small STM32 USB-C board. Jun has the regulator U3 selected, which is outlined on Ada's screen with Jun's named cursor beside it. Mara's cursor is on the boot button, and a numbered comment pin sits on a capacitor."></div>
+          <figcaption class="cap" style="margin-top:10px">The web PCB editor, Ada's window. Jun has U3 selected, Mara is at the boot button, and a comment is pinned to C4.</figcaption>
+        </figure>
+        <figure class="rv" style="--i:1">
+          <div class="shot"><img src="/static/landing/schematic.webp" width="2400" height="1500" loading="lazy" alt="The web schematic editor on the same project. Jun has the microcontroller U1 selected, Mara's named cursor is on the USB-C connector, and a comment pin sits on the boot resistor."></div>
+          <figcaption class="cap" style="margin-top:10px">The schematic of the same project, a moment later. Jun has U1 selected.</figcaption>
+        </figure>
+      </div>
       <ol class="notes rv" style="--i:1">
         <li><div><b>Named cursors and selections</b><span>Everyone gets a colour. Their pointer and whatever they have selected are drawn in it on your canvas.</span></div></li>
         <li><div><b>Edits before they land</b><span>A track being routed, a wire being drawn or a part being dragged shows as a preview until it is committed.</span></div></li>

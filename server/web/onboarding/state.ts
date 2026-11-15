@@ -12,6 +12,8 @@ export interface GuideState {
   projectId: string;
   /** where it was started: the projects home, or the small editor on the home page */
   from: "home" | "mini";
+  /** the template it was made from (older guides have none: the blinker) */
+  template?: string;
   /** steps finished or skipped */
   done: Partial<Record<StepId, "done" | "skipped">>;
   /** the panel is folded down to its title */
@@ -55,13 +57,14 @@ export const nextStep = (g: GuideState): StepId | null => STEPS.find((s) => !g.d
 export const stepsDone = (g: GuideState): number => STEPS.filter((s) => g.done[s]).length;
 
 /** The board left by the home page's small editor, if there is one and it is recent enough to still be wanted. */
-export function miniBoard(): string | null {
+export function miniBoard(): { board: string; template: string } | null {
   try {
     const raw = localStorage.getItem(MINI_KEY); if (!raw) return null;
-    const j = JSON.parse(raw) as { board?: string; at?: number };
+    const j = JSON.parse(raw) as { board?: string; template?: string; at?: number };
     if (!j || typeof j.board !== "string" || !j.board.startsWith("(kicad_pcb")) return null;
     if (typeof j.at === "number" && Date.now() - j.at > 24 * 3600 * 1000) return null;
-    return j.board;
+    // the template whose schematic and project file go with that board: the small editor names it
+    return { board: j.board, template: typeof j.template === "string" && /^[a-z0-9-]{1,60}$/.test(j.template) ? j.template : GUIDED_TEMPLATE };
   } catch { return null; }
 }
 export function clearMiniBoard(): void { try { localStorage.removeItem(MINI_KEY); } catch { /* nothing kept */ } }
@@ -71,9 +74,9 @@ export function clearMiniBoard(): void { try { localStorage.removeItem(MINI_KEY)
  * board; otherwise with the blinker and four connections left to route.
  */
 export async function startGuidedProject(from: "home" | "mini"): Promise<{ projectId: string; name: string }> {
-  const board = from === "mini" ? miniBoard() : null;
-  const r = await createFromTemplate({ template: GUIDED_TEMPLATE, name: "My first board", guided: !board, board: board || undefined });
-  if (board) clearMiniBoard();
-  setGuide({ projectId: r.projectId, from: board ? "mini" : "home", done: {} });
+  const mini = from === "mini" ? miniBoard() : null;
+  const r = await createFromTemplate({ template: mini ? mini.template : GUIDED_TEMPLATE, name: "My first board", guided: !mini, board: mini ? mini.board : undefined });
+  if (mini) clearMiniBoard();
+  setGuide({ projectId: r.projectId, from: mini ? "mini" : "home", template: mini ? mini.template : GUIDED_TEMPLATE, done: {} });
   return { projectId: r.projectId, name: r.name };
 }
