@@ -1,13 +1,14 @@
-// The hero: a cut-down board editor the visitor can use.  It is the demo board with some
-// connections left open, painted by the editor's renderer, with just enough tools to finish
+// The hero: a cut-down board editor the visitor can use.  It is the demo board with
+// nothing on it yet but its outline, painted by the editor's renderer, with just enough tools to finish
 // it: move a footprint or a text, route a track, drop a via, switch layer, undo.  Three scripted
-// collaborators work on the board as teammates would in a real project: they route what is
-// open, redo a track, try a part somewhere else, drag selection boxes and pin comments, each
+// collaborators design the board from scratch as teammates would in a real project: they take
+// the parts out of the pile and place them, route every connection, add the labels and pour
+// the ground plane, and then review it: redo a track, try a part somewhere else, drag selection boxes and pin comments, each
 // with a pointer that moves like a hand on a mouse and never does the same thing twice.  When
 // the visitor has changed something one of them comes over and puts it back by hand.
 
 import {
-  BOARD, Box, HIDDEN, K, PEERS, boardText, Pt, Rat, View, clamp, clash, copperAt, dist, drawCursor, fit, lerp, loadPcbOpen, meta, ratsnest, toMm, toPx, trackAt,
+  BOARD, Box, HIDDEN, K, PEERS, boardText, Pt, Rat, View, clamp, clash, copperAt, dist, drawCursor, fit, lerp, loadPcb, loadPcbOpen, meta, mixBox, ratsnest, toMm, toPx, trackAt,
 } from "./demo";
 import { keysInText } from "../keys";
 import { SANS, Stage, makeStage, reducedMotion } from "./stage";
@@ -20,6 +21,17 @@ const GRID = 0.25, VIA = { size: 0.6, drill: 0.3 };
 const CLEARANCE = 0.2;
 const LAYER_COLOR: Record<Layer, string> = { "F.Cu": "#C83434", "B.Cu": "#4D7FC4" };
 const HOME: Box = [BOARD.x - 3, BOARD.y - 3, BOARD.x + BOARD.w + 3, BOARD.y + BOARD.h + 3];
+/** The view while the board is being built: the board and, beside it, the pile its parts start in. */
+/** Where a part waits in the pile: the demo's pile, spread a little so the big parts do not overlap. */
+const pileAt = (p: { pile: Pt }): Pt => [175 + (p.pile[0] - 175) * 1.3, p.pile[1]];
+const BUILD: Box = [HOME[0], HOME[1], Math.max(...meta.parts.map((p) => pileAt(p)[0])) + 4.5, HOME[3]];
+/** For each connection, the earlier ones it starts or ends on (a via, a track it tees into):
+ *  those have to be on the board before it can be routed. */
+const NEEDS: number[][] = meta.routes.map((r, j) => {
+  const ends = [r.pts[0], r.pts[r.pts.length - 1]];
+  const on = (e: Pt, a: Pt, b: Pt): boolean => { const dx = b[0] - a[0], dy = b[1] - a[1], l = dx * dx + dy * dy, t = l ? clamp(((e[0] - a[0]) * dx + (e[1] - a[1]) * dy) / l) : 0; return Math.hypot(e[0] - a[0] - t * dx, e[1] - a[1] - t * dy) < 0.01; };
+  return meta.routes.map((_, i) => i).filter((i) => i < j && ends.some((e) => meta.routes[i].pts.some((p, k, all) => k > 0 && on(e, all[k - 1], p))));
+});
 /** Connections the board always starts without: the output, the LED, its ground, and the
  *  back-layer jumper. */
 const OPEN = [26, 27, 28, 20];
@@ -31,10 +43,10 @@ const REDO = [...LOOSE, 26, 27, 28];
 const PARTS = new Set(meta.parts.map((p) => p.id));
 const snap = (v: number, o: number): number => o + Math.round((v - o) / GRID) * GRID;
 
-/** What a scripted teammate can be busy with.  The first four change the board and are seen
+/** What a scripted teammate can be busy with.  All up to "nudge" change the board and are seen
  *  through to the end; the rest can be dropped when the visitor's change needs taking back. */
-type Task = "undo" | "route" | "redo" | "nudge" | "look" | "sweep" | "note" | "rest";
-const HARD = new Set<Task>(["undo", "route", "redo", "nudge"]);
+type Task = "undo" | "place" | "route" | "label" | "pour" | "redo" | "nudge" | "look" | "sweep" | "note" | "rest";
+const HARD = new Set<Task>(["undo", "place", "route", "label", "pour", "redo", "nudge"]);
 /** How each of them handles a mouse: Mara is quick and overshoots, Jun is slower and exact. */
 const HANDS = [{ tempo: 0.86, miss: 1.3 }, { tempo: 1.2, miss: 0.55 }, { tempo: 1, miss: 1 }];
 /** Review comments they leave on parts, as in a real project. */
@@ -53,7 +65,7 @@ interface Step { dur: number; to: Pt; c?: [Pt, Pt]; skew?: number; wob?: number;
 interface Pull { a: Pt; b: Pt; at: Pt; layer: Layer; w: number }
 interface Actor {
   who: number; at: Pt; from: Pt; steps: Step[]; i: number; t0: number; task: Task; last: Task;
-  marks: string[]; held: string | null; pull: Pull | null; box: [Pt, Pt] | null; boxed: string[];
+  marks: string[]; held: string | null; pull: Pull | null; poly: Pt[] | null; box: [Pt, Pt] | null; boxed: string[];
   move: { id: string; from: Pt } | null; route: number | null;
 }
 interface Note { who: number; at: Pt; text: string; n: number; born: number; dies: number }
@@ -95,13 +107,25 @@ export function startMini(root: HTMLElement): void {
     for (const id of [...r.ids, ...(r.via ? [r.via] : [])]) { const it = doc.items.get(id); if (it) { spare.set(id, it); doc.items.delete(id); } }
     gone.add(i);
   }
+  /** Parts still in the pile, and the labels and the ground pour not yet made: the teammates
+   *  start from the bare outline and design the board while the visitor watches. */
+  const unplaced = new Set<string>(), shelf = new Map<string, any>();
+  let poured = true, fitTo: Box = HOME, own = false, glide: { from: Box; t0: number } | null = null;
+  /** The parts each connection reaches, which have to be placed before it is routed. */
+  const reaches: string[][] = (() => {
+    const full = loadPcb();
+    return meta.routes.map((r) => { const ids = new Set<string>(); for (const p of r.pts) { const c = copperAt(full, p[0], p[1], r.layer); if (c && c.kind === "pad") ids.add(c.id); } return [...ids]; });
+  })();
   function open(): void {
-    spare.clear(); gone.clear();
+    spare.clear(); gone.clear(); unplaced.clear(); shelf.clear(); poured = true; fitTo = HOME; own = false; glide = null;
     if (still) return;                                   // without motion the board is simply complete
-    const more = alone ? [] : LOOSE.slice().sort(() => Math.random() - 0.5).slice(0, 5);
-    for (const i of [...OPEN, ...more]) lift(i);
+    if (alone) { for (const i of OPEN) lift(i); return; }
+    meta.routes.forEach((_, i) => lift(i));
+    for (const q of meta.parts) { const it = doc.items.get(q.id); if (it) { const at = pileAt(q); K.moveItem(doc, it, at[0], at[1], 1e6); unplaced.add(q.id); } }
+    for (const it of [...doc.items.values()]) if (it.kind === "gr_text" || it.id === meta.zone) { shelf.set(it.id, it); doc.items.delete(it.id); }
+    poured = false; fitTo = BUILD;
   }
-  open();
+  open(); box = fitTo.slice() as Box;
 
   const netName = (net: number): string => { const n = (doc as any).nets && (doc as any).nets.get ? (doc as any).nets.get(net) : null; return typeof n === "string" && n ? n : `net ${net}`; };
   const netWidth = (net: number): number => net === 1 || net === 2 ? 0.4 : 0.25;
@@ -255,10 +279,10 @@ export function startMini(root: HTMLElement): void {
   function cast(now: number): void {
     actors.length = 0; note = null; nextRedo = now + 6000; nextNote = now + 5000;
     if (alone) return;
-    const at: Pt[] = [[BOARD.x + 11, BOARD.y + 12], [BOARD.x + 36, BOARD.y + 13], [BOARD.x + 21, BOARD.y + 22]];
+    const at: Pt[] = unplaced.size ? [[179, BOARD.y + 5], [187, BOARD.y + 17], [177, BOARD.y + 23]] : [[BOARD.x + 11, BOARD.y + 12], [BOARD.x + 36, BOARD.y + 13], [BOARD.x + 21, BOARD.y + 22]];
     PEERS.forEach((_, who) => {
       const p: Pt = still ? at[who] : [at[who][0] + gauss() * 3, at[who][1] + gauss() * 2];
-      actors.push({ who, at: p, from: p, steps: [{ dur: 0.5 + who * 0.8 + rnd(0, 0.5), to: p }], i: 0, t0: now, task: "rest", last: "rest", marks: [], held: null, pull: null, box: null, boxed: [], move: null, route: null });
+      actors.push({ who, at: p, from: p, steps: [{ dur: 0.5 + who * 0.8 + rnd(0, 0.5), to: p }], i: 0, t0: now, task: "rest", last: "rest", marks: [], held: null, pull: null, poly: null, box: null, boxed: [], move: null, route: null });
     });
   }
   /** Lets go of whatever a teammate holds or shows. */
@@ -266,7 +290,7 @@ export function startMini(root: HTMLElement): void {
     if (a.task === "note" && note && note.who === a.who) note.dies = Math.min(note.dies, now + 300);
     if (a.task === "undo") nextUndo = now + GAP;
     a.last = a.task; a.task = "rest"; a.steps = []; a.i = 0; a.t0 = now; a.from = a.at;
-    a.marks = []; a.held = null; a.pull = null; a.box = null; a.boxed = []; a.move = null; a.route = null;
+    a.marks = []; a.held = null; a.pull = null; a.poly = null; a.box = null; a.boxed = []; a.move = null; a.route = null;
   }
   /** Moves a teammate along to `now`, running what their steps do, and has them pick the next
    *  thing when one is finished. */
@@ -373,6 +397,49 @@ export function startMini(root: HTMLElement): void {
     p.wait(rnd(0.2, 0.5), () => { a.held = null; a.move = null; });
     return true;
   }
+  /** Takes a part out of the pile and puts it in its place, sometimes a little off first. */
+  function planPlace(a: Actor, p: Plan, id: string): boolean {
+    const it = doc.items.get(id), q = meta.parts.find((x) => x.id === id); if (!it || !q) return false;
+    const home: Pt = [q.x, q.y], tick = (c: Pt): void => carry(it, c, home);
+    a.move = { id, from: home };
+    p.go(posOf(it)).click(() => { a.held = id; });
+    if (chance(0.35 * HANDS[a.who].miss)) {
+      p.pull([home[0] + gauss() * 1.6, home[1] + gauss() * 1.2], rnd(26, 36), tick, 0.6, 1.7).rest(rnd(0.2, 0.6));
+      p.pull(home, 3, tick, 0.25, 0.6);
+    } else p.pull(home, rnd(26, 36), tick, 0.6, 1.7);
+    p.click(() => { K.moveItem(doc, it, home[0], home[1], 1e6); unplaced.delete(id); a.held = null; a.move = null; redraw(); });
+    p.rest(rnd(0.1, 0.5));
+    return true;
+  }
+  /** Adds one of the silkscreen texts: it appears on the pointer and is set down where it goes. */
+  function planLabel(a: Actor, p: Plan, id: string): boolean {
+    const it = shelf.get(id); if (!it) return false;
+    const home = posOf(it), from: Pt = [home[0] + rnd(-7, 7), home[1] + rnd(3, 6) * (home[1] > BOARD.y + BOARD.h / 2 ? -1 : 1)];
+    p.go(from).wait(rnd(0.3, 0.7), () => { shelf.delete(id); doc.items.set(id, it); carry(it, from, home); a.held = id; a.move = { id, from: home }; redraw(); });
+    p.pull(home, rnd(7, 10), (c) => carry(it, c, home), 0.5, 1.4);
+    p.click(() => { K.moveItem(doc, it, home[0], home[1], 1e6); a.held = null; a.move = null; redraw(); });
+    p.rest(rnd(0.2, 0.6));
+    return true;
+  }
+  /** Draws the ground plane: a click in each corner of the board on the back layer, and the
+   *  zone fills when its outline closes. */
+  function planPour(a: Actor, p: Plan): boolean {
+    const z = shelf.get(meta.zone); if (!z) return false;
+    const B = BOARD, c: Pt[] = [[B.x, B.y], [B.x + B.w, B.y], [B.x + B.w, B.y + B.h], [B.x, B.y + B.h]];
+    const k = Math.floor(rnd(0, 4)), ring = chance(0.5) ? [0, 1, 2, 3, 4] : [0, 3, 2, 1, 4], at = (i: number): Pt => c[(k + ring[i]) % 4];
+    p.go(at(0)).rest(rnd(0.3, 0.8)).go(at(0)).click(() => { a.poly = [at(0)]; a.pull = { a: at(0), b: at(1), at: at(0), layer: "B.Cu", w: 0.2 }; });
+    for (let i = 1; i <= 4; i++) {
+      const s = at(i - 1), t = at(i);
+      p.pull(t, rnd(16, 24), (q) => { if (a.pull) a.pull.at = along(s, t, q); }, 0.5, 1.6);
+      p.click(() => {
+        if (i < 4) { a.poly!.push(t); a.pull = { a: t, b: at(i + 1), at: t, layer: "B.Cu", w: 0.2 }; return; }
+        a.poly = null; a.pull = null; shelf.delete(z.id); doc.items.set(z.id, z); poured = true; redraw();
+      });
+      if (i < 4 && chance(0.3)) p.wait(rnd(0.15, 0.4));
+    }
+    p.rest(rnd(0.8, 1.6));
+    return true;
+  }
   /** Goes to a part and looks it over, selected or just under the pointer. */
   function planLook(a: Actor, p: Plan, id: string): boolean {
     const it = doc.items.get(id); if (!it) return false;
@@ -417,29 +484,38 @@ export function startMini(root: HTMLElement): void {
    *  reviewing a board might do, picked by weighted chance and rarely the same thing twice. */
   function think(a: Actor, now: number): void {
     const others = actors.filter((o) => o !== a), doing = (t: Task): boolean => others.some((o) => o.task === t);
-    const quiet = !edits.length && !drag && !route && !pan && now - lastAct > 1200 && others.filter((o) => HARD.has(o.task)).length < 2;
-    const open = [...gone].filter((i) => !others.some((o) => o.route === i));
+    const building = unplaced.size > 0 || !poured;
+    const quiet = !edits.length && !drag && !route && !pan && now - lastAct > 1200 && others.filter((o) => HARD.has(o.task)).length < (building ? 3 : 2);
+    const open = [...gone].filter((i) => !others.some((o) => o.route === i) && NEEDS[i].every((k) => !gone.has(k)) && reaches[i].every((id) => !unplaced.has(id)));
     const whole = REDO.filter((i) => !gone.has(i) && meta.routes[i].ids.every((id) => doc.items.has(id)));
     const taken = new Set<string>(); for (const o of others) { if (o.held) taken.add(o.held); if (o.move) taken.add(o.move.id); for (const id of o.boxed) taken.add(id); }
-    const parts = meta.parts.filter((q) => !taken.has(q.id)), small = parts.filter((q) => /^[RCD]/.test(q.ref));
+    const pile = meta.parts.filter((q) => unplaced.has(q.id) && !taken.has(q.id) && !(drag && drag.id === q.id)).slice(0, 3);
+    const texts = [...shelf.values()].filter((it) => it.kind === "gr_text").map((it) => it.id);
+    const parts = meta.parts.filter((q) => !taken.has(q.id) && !unplaced.has(q.id)), small = parts.filter((q) => /^[RCD]/.test(q.ref));
     const labels = [...doc.items.values()].filter((it) => it.kind === "gr_text").map((it) => it.id);
-    const opts: [Task, number][] = [["look", 2], ["rest", 0.7]];
+    const opts: [Task, number][] = [["look", building ? 0.5 : 2], ["rest", building ? 0.3 : 0.7]];
+    if (quiet && pile.length) opts.push(["place", 10]);
     if (quiet && open.length) opts.push(["route", 9]);
-    if (quiet && !open.length && gone.size < 2 && whole.length && !doing("redo") && now > nextRedo) opts.push(["redo", 3]);
-    if (quiet && !doing("nudge") && small.length) opts.push(["nudge", 0.8]);
+    if (quiet && !unplaced.size && texts.length && !doing("label")) opts.push(["label", 3]);
+    if (quiet && !unplaced.size && !gone.size && !poured && !doing("pour")) opts.push(["pour", 40]);
+    if (quiet && !building && !open.length && gone.size < 2 && whole.length && !doing("redo") && now > nextRedo) opts.push(["redo", 3]);
+    if (quiet && !building && !doing("nudge") && small.length) opts.push(["nudge", 0.8]);
     if (!doing("sweep") && parts.length) opts.push(["sweep", 0.9]);
     if (!note && now > nextNote) opts.push(["note", 1.1]);
-    let sum = 0; for (const o of opts) { if (o[0] === a.last && o[0] !== "route") o[1] *= 0.2; sum += o[1]; }
+    let sum = 0; for (const o of opts) { if (o[0] === a.last && o[0] !== "route" && o[0] !== "place") o[1] *= 0.2; sum += o[1]; }
     let pick = Math.random() * sum, task: Task = "look";
     for (const o of opts) { pick -= o[1]; if (pick <= 0) { task = o[0]; break; } }
 
     const p = plan(a.who, a.at); let ok = false;
-    if (a.last !== "route" || chance(0.5)) p.rest(rnd(0.15, 0.8));
-    if (task === "route") ok = planRoute(a, p, any1(open));
+    if (!HARD.has(a.last) || chance(0.5)) p.rest(rnd(0.15, 0.8));
+    if (task === "place") ok = planPlace(a, p, any1(pile).id);
+    else if (task === "label") ok = planLabel(a, p, any1(texts));
+    else if (task === "pour") ok = planPour(a, p);
+    else if (task === "route") ok = planRoute(a, p, any1(open));
     else if (task === "redo") { ok = planRedo(a, p, any1(whole)); nextRedo = now + rnd(5000, 11000); }
     else if (task === "nudge") ok = planNudge(a, p, chance(0.25) && labels.length ? any1(labels) : any1(small).id);
     else if (task === "sweep") ok = planSweep(a, p, any1(parts).id);
-    else if (task === "note") { const free = NOTES.filter(([ref]) => !taken.has(refId(ref) || "")); const n = any1(free.length ? free : NOTES); ok = planNote(a, p, n[0], n[1]); nextNote = now + rnd(9000, 16000); }
+    else if (task === "note") { const free = NOTES.filter(([ref]) => !taken.has(refId(ref) || "") && !unplaced.has(refId(ref) || "")); ok = free.length > 0 && (() => { const n = any1(free); return planNote(a, p, n[0], n[1]); })(); nextNote = now + rnd(9000, 16000); }
     else if (task === "look" && parts.length) ok = planLook(a, p, any1(parts).id);
     if (!ok) { task = "rest"; p.go(inset(4)).rest(rnd(1, 3)); }
     a.task = task; a.steps = p.steps; a.i = 0; a.t0 = now; a.from = a.at;
@@ -459,7 +535,7 @@ export function startMini(root: HTMLElement): void {
    *  item still has to get home some time. */
   function yieldTo(id: string): void {
     const a = actors.find((o) => o.move && o.move.id === id); if (!a || !a.move) return;
-    if (!edits.some((e) => e.kind === "move" && e.id === id)) edits.push({ kind: "move", id, from: a.move.from });
+    if (!unplaced.has(id) && !edits.some((e) => e.kind === "move" && e.id === id)) edits.push({ kind: "move", id, from: a.move.from });
     drop(a, performance.now());
   }
   cast(performance.now());
@@ -536,14 +612,14 @@ export function startMini(root: HTMLElement): void {
   }
   function endRoute(): void { if (route) { remember(route.made); route = null; change(); } }
   function reset(): void {
-    doc = loadPcbOpen(); open(); edits.length = 0; cast(performance.now()); clearTimeout(stillTimer); route = null; drag = null; selected = null; box = HOME.slice() as Box; tool = "select"; layer = "F.Cu";
+    doc = loadPcbOpen(); open(); edits.length = 0; cast(performance.now()); clearTimeout(stillTimer); route = null; drag = null; selected = null; box = fitTo.slice() as Box; tool = "select"; layer = "F.Cu";
     dirty = true; touched = false; nextUndo = performance.now() + 1800; sync(); stage.invalidate();
   }
   function zoom(k: number, about?: Pt): void {
     const cx = about ? about[0] : (box[0] + box[2]) / 2, cy = about ? about[1] : (box[1] + box[3]) / 2;
     const w = clamp((box[2] - box[0]) * k, (HOME[2] - HOME[0]) / 6, (HOME[2] - HOME[0]) * 1.5), r = w / (box[2] - box[0]);
     box = [cx - (cx - box[0]) * r, cy - (cy - box[1]) * r, cx + (box[2] - cx) * r, cy + (box[3] - cy) * r];
-    dirty = true; stage.invalidate();
+    own = true; glide = null; dirty = true; stage.invalidate();
   }
   function removeSelected(): void {
     if (!selected) return;
@@ -564,7 +640,7 @@ export function startMini(root: HTMLElement): void {
     const u = q<HTMLButtonElement>("[data-act=undo]"); if (u) u.disabled = !edits.length && !route;
     const r = q<HTMLButtonElement>("[data-act=reset]"); if (r) r.disabled = !touched;
     if (toolName) toolName.textContent = tool === "route" ? (route ? (foreign(hover) !== null ? `Route Tracks: ${netName(route.net)} cannot connect to ${netName(foreign(hover)!)}` : `Route Tracks: ${netName(route.net)}, click to place, double-click to finish`) : "Route Tracks: click a pad or a track to start") : tool === "via" ? "Add Via" : "Select item(s)";
-    if (dirty) rats = ratsnest(doc, { poured: 1 });
+    if (dirty) rats = ratsnest(doc, { poured: poured ? 1 : 0 });
     if (counts) {
       let vias = 0, segs = 0; for (const it of doc.items.values()) { if (it.kind === "via") vias++; else if (it.kind === "segment") segs++; }
       counts.textContent = `Pads 42   Vias ${vias}   Track Segments ${segs}   Nets 9`;
@@ -575,11 +651,14 @@ export function startMini(root: HTMLElement): void {
   const stage: Stage = makeStage(canvas, (s, now) => {
     if (!t0) { t0 = now; nextUndo = now + 1800; }
     const { ctx, w: W, h: H, dpr } = s;
+    // Once the pile is empty the view closes in on the board, unless the visitor has set their own.
+    if (!unplaced.size && fitTo !== HOME) { fitTo = HOME; if (!own) glide = { from: box.slice() as Box, t0: now }; }
+    if (glide) { const k = minJerk((now - glide.t0) / 1400); box = mixBox(glide.from, HOME, k); dirty = true; if (k >= 1) glide = null; }
     view = fit(W, H, dpr, box);
     if (!base) base = document.createElement("canvas");
     if (base.width !== canvas.width || base.height !== canvas.height) { base.width = canvas.width; base.height = canvas.height; dirty = true; }
     if (dirty) {
-      rats = ratsnest(doc, { poured: 1 });
+      rats = ratsnest(doc, { poured: poured ? 1 : 0 });
       K.render(doc, base.getContext("2d")!, view, { hidden: HIDDEN, grid: 1, ratsnest: rats, selected: selected ? new Set([selected]) : null, zoneFill: true, activeLayer: layer });
       dirty = false;
       if (zoomOut) zoomOut.textContent = `Z ${(view.ppm / 3.78).toFixed(2)}`;
@@ -625,6 +704,11 @@ export function startMini(root: HTMLElement): void {
       for (const id of a.marks) frame(id, color);
       for (const id of a.boxed) frame(id, color);
       if (a.held) frame(a.held, color);
+      if (a.poly) {
+        // The zone outline drawn so far.
+        ctx.strokeStyle = LAYER_COLOR["B.Cu"]; ctx.globalAlpha = 0.85; ctx.lineWidth = Math.max(1.5, 0.2 * view.ppm); ctx.lineJoin = "round";
+        ctx.beginPath(); a.poly.forEach((q, i) => { const c = px(q); if (i) ctx.lineTo(c[0], c[1]); else ctx.moveTo(c[0], c[1]); }); ctx.stroke(); ctx.globalAlpha = 1;
+      }
       if (a.pull) {
         const s = px(a.pull.a), t = px(a.pull.at);
         ctx.strokeStyle = LAYER_COLOR[a.pull.layer] || LAYER_COLOR["F.Cu"]; ctx.globalAlpha = 0.85; ctx.lineWidth = Math.max(1.5, a.pull.w * view.ppm); ctx.lineCap = "round";
@@ -675,7 +759,7 @@ export function startMini(root: HTMLElement): void {
         canvas.setPointerCapture(e.pointerId);
       } else {
         selected = trackAt(doc, at[0], at[1], 0.25);
-        if (!selected) { pan = { at: [e.clientX, e.clientY], box: box.slice() as Box }; canvas.setPointerCapture(e.pointerId); }
+        if (!selected) { pan = { at: [e.clientX, e.clientY], box: box.slice() as Box }; own = true; glide = null; canvas.setPointerCapture(e.pointerId); }
       }
       dirty = true; stage.invalidate();
     } else if (tool === "via") {
@@ -717,7 +801,8 @@ export function startMini(root: HTMLElement): void {
   const release = () => {
     if (drag && drag.moved) {
       // One entry per item, holding where it first was, so it goes all the way home in one carry.
-      const d = drag; if (!edits.some((e) => e.kind === "move" && e.id === d.id)) edits.push({ kind: "move", id: d.id, from: d.from });
+      // A part still waiting in the pile has no place to go back to: a teammate places it from wherever it was left.
+      const d = drag; if (!unplaced.has(d.id) && !edits.some((e) => e.kind === "move" && e.id === d.id)) edits.push({ kind: "move", id: d.id, from: d.from });
       change();
     }
     drag = null; pan = null;
@@ -742,7 +827,7 @@ export function startMini(root: HTMLElement): void {
     else if (k === "delete" || k === "backspace") { e.preventDefault(); removeSelected(); }
     else if (k === "+" || k === "=") zoom(1 / 1.25);
     else if (k === "-") zoom(1.25);
-    else if (k === "home") { e.preventDefault(); box = HOME.slice() as Box; dirty = true; stage.invalidate(); }
+    else if (k === "home") { e.preventDefault(); box = fitTo.slice() as Box; own = false; glide = null; dirty = true; stage.invalidate(); }
   });
 
   function act(name: string): void {
@@ -751,7 +836,7 @@ export function startMini(root: HTMLElement): void {
       else { const u = edits.pop(); if (u) { revert(u); selected = null; change(); } }
     } else if (name === "zoom-in") zoom(1 / 1.25);
     else if (name === "zoom-out") zoom(1.25);
-    else if (name === "zoom-fit") { box = HOME.slice() as Box; dirty = true; stage.invalidate(); }
+    else if (name === "zoom-fit") { box = fitTo.slice() as Box; own = false; glide = null; dirty = true; stage.invalidate(); }
     else if (name === "reset") reset();
   }
   root.querySelectorAll<HTMLElement>("[data-tool-btn]").forEach((b) => b.addEventListener("click", () => setTool(b.dataset.toolBtn as Tool)));
