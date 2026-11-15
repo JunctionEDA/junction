@@ -19,6 +19,7 @@
  */
 
 #include <eda_shape.h>
+#include <collab/collab_stdlibs.h>
 #include <tool/tool_manager.h>
 #include "sch_sheet_path.h"
 #include <limits>
@@ -372,6 +373,11 @@ int SCH_DRAWING_TOOLS::PlaceSymbol( const TOOL_EVENT& aEvent )
 
                 // Pick the symbol to be placed
                 bool footprintPreviews = m_frame->eeconfig()->m_Appearance.footprint_preview;
+                // The standard libraries may still be on their way: say so, since their
+                // symbols are not in the chooser until the download has finished.
+                if( wxString notice = COLLAB_STDLIBS::StillDownloadingNotice(); !notice.IsEmpty() )
+                    m_frame->ShowInfoBarMsg( notice, true );
+
                 PICKED_SYMBOL sel = m_frame->PickSymbolFromLibrary( &filter, *historyList, alreadyPlaced,
                                                                     footprintPreviews );
 

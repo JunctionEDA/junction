@@ -17,7 +17,14 @@ version it is based on.
   A download cut short by closing Junction, sleep or a lost connection
   continues at the next start from what it already has; a failed connection
   is retried by itself until it works (waiting up to a minute between
-  tries), and Retry in the download window tries again at once.
+  tries).
+  The download runs in the background, so you keep working while it runs:
+  the status bar of the project manager and of the editors shows how far it
+  is, the notifications say when it starts and when the libraries are ready,
+  and Preferences, Download Standard Libraries shows the progress with Try
+  Now and Stop Download. Until the download has finished its symbols and
+  footprints are not in the choosers (the editor says so), and they appear
+  there by themselves afterwards.
 - The project manager program itself is named Junction on every system
   (Junction inside the Mac app, junction.exe on Windows, Junction on Linux
   with a Junction desktop entry and icon), so Activity Monitor, Task Manager

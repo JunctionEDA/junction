@@ -48,6 +48,20 @@ KICOMMON_API bool Needed();
 /// network went away) and should simply be continued.  A download the user stopped is not.
 KICOMMON_API bool Interrupted();
 
+/// @return true while an Install() is running, in any window of the program.
+KICOMMON_API bool Running();
+
+/// Tell the running Install() that the program is closing: when its progress callback then
+/// stops it, the download counts as interrupted and continues at the next start.
+KICOMMON_API void Suspend();
+
+/// @return how far the running Install() is, 0 to 100.
+KICOMMON_API int Percent();
+
+/// @return what to tell someone who opens a part chooser while the libraries are still
+/// downloading, or an empty string when nothing is downloading.
+KICOMMON_API wxString StillDownloadingNotice();
+
 /// @return true while a running Install() waits before trying a failed connection again.
 KICOMMON_API bool Waiting();
 

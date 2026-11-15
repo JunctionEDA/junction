@@ -99,6 +99,7 @@
 #include <wx/process.h>
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <update_manager.h>
 #include <jobs/jobset.h>
 #include <widgets/wx_aui_art_providers.h>
@@ -126,6 +127,24 @@
 
 
 // Menubar and toolbar event table
+/// What the standard libraries download worker and the window share.
+struct STDLIBS_DOWNLOAD_STATE
+{
+    std::shared_ptr<BACKGROUND_JOB> job;
+    std::atomic<bool>               stop{ false };
+    std::atomic<bool>               done{ false };
+
+    std::mutex mutex;
+    wxString   message;
+};
+
+
+/// The one download of the standard libraries, while it runs.
+static std::shared_ptr<STDLIBS_DOWNLOAD_STATE> s_stdlibsDownload;
+
+static const wxString STDLIBS_NOTIFICATION = wxS( "junction-standard-libraries" );
+
+
 BEGIN_EVENT_TABLE( KICAD_MANAGER_FRAME, EDA_BASE_FRAME )
     // Window events
     EVT_SIZE( KICAD_MANAGER_FRAME::OnSize )
@@ -443,6 +462,20 @@ void KICAD_MANAGER_FRAME::offerStandardLibraries()
 KICAD_MANAGER_FRAME::~KICAD_MANAGER_FRAME()
 {
     *m_collabAlive = false;   // drop async identity results after this point
+
+    // A library download that is still running is put down cleanly: it counts as interrupted
+    // and continues at the next start.  The worker stops at its next step, which is quick.
+    if( std::shared_ptr<STDLIBS_DOWNLOAD_STATE> download = s_stdlibsDownload )
+    {
+        COLLAB_STDLIBS::Suspend();
+        download->stop = true;
+
+        for( int i = 0; i < 50 && !download->done; i++ )
+            wxMilliSleep( 100 );
+
+        Pgm().GetBackgroundJobMonitor().Remove( download->job );
+        s_stdlibsDownload.reset();
+    }
 
     Unbind( wxEVT_CHAR, &TOOL_DISPATCHER::DispatchWxEvent, m_toolDispatcher );
     Unbind( wxEVT_CHAR_HOOK, &TOOL_DISPATCHER::DispatchWxEvent, m_toolDispatcher );
@@ -1449,28 +1482,14 @@ void KICAD_MANAGER_FRAME::OnEditAdvancedCfg( wxCommandEvent& WXUNUSED( event ) )
 }
 
 
-/// What the standard libraries download worker and its progress dialog share.
-struct STDLIBS_DOWNLOAD_STATE
-{
-    std::mutex mutex;
-    wxString   message;
-    int        percent = 0;
-    bool       done = false;
-    bool       ok = false;
-    wxString   error;
-    bool       stop = false;
-};
-
-
-/// Runs the standard libraries download and shows what it is doing.  It closes by itself when
-/// the libraries are in place; when the download fails it stays, says why and offers Retry.
-class STDLIBS_PROGRESS_DIALOG : public wxDialog
+/// What Preferences > Download Standard Libraries shows while the download runs in the
+/// background: how far it is, with a way to try a failed connection at once and to stop.
+class STDLIBS_STATUS_DIALOG : public wxDialog
 {
 public:
-    STDLIBS_PROGRESS_DIALOG( wxWindow* aParent, bool aContinuing ) :
-            wxDialog( aParent, wxID_ANY, _( "Standard Libraries" ), wxDefaultPosition,
-                      wxDefaultSize, wxCAPTION ),
-            m_continuing( aContinuing ),
+    STDLIBS_STATUS_DIALOG( wxWindow* aParent, std::shared_ptr<STDLIBS_DOWNLOAD_STATE> aState ) :
+            wxDialog( aParent, wxID_ANY, _( "Standard Libraries" ) ),
+            m_state( std::move( aState ) ),
             m_timer( this )
     {
         wxBoxSizer* sizer = new wxBoxSizer( wxVERTICAL );
@@ -1481,96 +1500,60 @@ public:
         m_gauge = new wxGauge( this, wxID_ANY, 100, wxDefaultPosition,
                                wxSize( FromDIP( 460 ), -1 ) );
 
+        wxStaticText* hint = new wxStaticText( this, wxID_ANY,
+                _( "The download runs in the background. You can close this window and keep "
+                   "working; the progress is also shown in the status bar." ) );
+        hint->Wrap( FromDIP( 460 ) );
+
         wxBoxSizer* buttons = new wxBoxSizer( wxHORIZONTAL );
 
-        m_retry = new wxButton( this, wxID_RETRY, _( "Retry" ) );
-        m_cancel = new wxButton( this, wxID_CANCEL, _( "Cancel" ) );
+        m_retry = new wxButton( this, wxID_RETRY, _( "Try Now" ) );
+        m_stop = new wxButton( this, wxID_STOP, _( "Stop Download" ) );
+        wxButton* close = new wxButton( this, wxID_CANCEL, _( "Close" ) );
+        buttons->Add( m_stop, 0 );
         buttons->AddStretchSpacer();
         buttons->Add( m_retry, 0, wxRIGHT, FromDIP( 8 ) );
-        buttons->Add( m_cancel, 0 );
+        buttons->Add( close, 0 );
 
         sizer->Add( m_message, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, FromDIP( 12 ) );
         sizer->Add( m_gauge, 0, wxEXPAND | wxALL, FromDIP( 12 ) );
+        sizer->Add( hint, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP( 12 ) );
         sizer->Add( buttons, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP( 12 ) );
 
         SetSizerAndFit( sizer );
         CentreOnParent();
+        close->SetDefault();
 
-        Bind( wxEVT_TIMER, &STDLIBS_PROGRESS_DIALOG::onTimer, this );
-        m_cancel->Bind( wxEVT_BUTTON, &STDLIBS_PROGRESS_DIALOG::onCancel, this );
-        m_retry->Bind( wxEVT_BUTTON, &STDLIBS_PROGRESS_DIALOG::onRetry, this );
-
-        start();
-    }
-
-    /// True when the user stopped the download (as opposed to it failing).
-    bool Stopped() const { return m_stopped; }
-
-private:
-    void start()
-    {
-        m_state = std::make_shared<STDLIBS_DOWNLOAD_STATE>();
-        m_state->message = m_continuing ? _( "Continuing the download of the standard libraries..." )
-                                        : _( "Looking for the libraries..." );
-        m_failed = false;
-        m_stopped = false;
-        m_retry->Hide();
-        m_cancel->SetLabel( _( "Cancel" ) );
-        m_cancel->Enable();
-        Layout();
-
-        std::shared_ptr<STDLIBS_DOWNLOAD_STATE> state = m_state;
-
-        std::thread(
-                [state]()
+        Bind( wxEVT_TIMER, &STDLIBS_STATUS_DIALOG::onTimer, this );
+        m_retry->Bind( wxEVT_BUTTON,
+                []( wxCommandEvent& )
                 {
-                    wxString error;
-                    bool     ok = false;
-
-                    try
-                    {
-                        ok = COLLAB_STDLIBS::Install(
-                                [state]( const wxString& aMessage, int aPercent )
-                                {
-                                    std::lock_guard<std::mutex> lock( state->mutex );
-
-                                    // wxString shares its buffer between copies: hand over a
-                                    // deep one.
-                                    state->message = wxString( aMessage.wc_str() );
-
-                                    if( aPercent >= 0 )
-                                        state->percent = aPercent;
-
-                                    return !state->stop;
-                                },
-                                &error );
-                    }
-                    catch( ... )
-                    {
-                        error = _( "Downloading the libraries failed." );
-                    }
-
-                    std::lock_guard<std::mutex> lock( state->mutex );
-                    state->ok = ok;
-                    state->error = wxString( error.wc_str() );
-                    state->done = true;
-                } )
-                .detach();
+                    COLLAB_STDLIBS::RetryNow();
+                } );
+        m_stop->Bind( wxEVT_BUTTON,
+                [this]( wxCommandEvent& )
+                {
+                    // The worker stops at its next step; what was downloaded is kept.
+                    m_state->stop = true;
+                    m_stop->Disable();
+                } );
 
         refresh();
-        m_timer.Start( 100 );
+        m_timer.Start( 200 );
     }
 
+private:
     void refresh()
     {
         wxString message;
-        int      percent = 0;
 
         {
             std::lock_guard<std::mutex> lock( m_state->mutex );
             message = wxString( m_state->message.wc_str() );
-            percent = std::clamp( m_state->percent, 0, 100 );
         }
+
+        if( m_state->stop )
+            message = _( "Stopping..." );
 
         if( message != m_message->GetLabel() )
         {
@@ -1578,103 +1561,32 @@ private:
             m_message->Wrap( m_message->GetClientSize().x );
         }
 
+        const int percent = std::clamp( COLLAB_STDLIBS::Percent(), 0, 100 );
+
         if( percent != m_gauge->GetValue() )
             m_gauge->SetValue( percent );
+
+        // While the download waits to try a failed connection again, Try Now tries at once.
+        m_retry->Enable( COLLAB_STDLIBS::Waiting() && !m_state->stop );
     }
 
     void onTimer( wxTimerEvent& )
     {
-        bool     done = false;
-        bool     ok = false;
-        bool     stop = false;
-        wxString error;
-
+        if( m_state->done )
         {
-            std::lock_guard<std::mutex> lock( m_state->mutex );
-            done = m_state->done;
-            ok = m_state->ok;
-            stop = m_state->stop;
-            error = wxString( m_state->error.wc_str() );
-        }
-
-        if( !done )
-        {
-            refresh();
-
-            // While the download waits to try a failed connection again, Retry tries now.
-            const bool waiting = COLLAB_STDLIBS::Waiting() && !stop;
-
-            if( waiting != m_retry->IsShown() )
-            {
-                m_retry->Show( waiting );
-                Layout();
-            }
-
-            return;
-        }
-
-        m_timer.Stop();
-
-        if( ok )
-        {
+            m_timer.Stop();
             EndModal( wxID_OK );
-        }
-        else if( stop )
-        {
-            m_stopped = true;
-            EndModal( wxID_CANCEL );
-        }
-        else
-        {
-            // Not a connection problem (those are retried without end): say why and leave the
-            // next try to the user.  What was downloaded is kept, so Retry continues from it.
-            m_failed = true;
-            m_continuing = true;
-            m_message->SetLabel( error + wxS( " " )
-                                 + _( "What was downloaded so far is kept." ) );
-            m_message->Wrap( m_message->GetClientSize().x );
-            m_retry->Show();
-            m_cancel->SetLabel( _( "Close" ) );
-            m_cancel->Enable();
-            Layout();
-            m_retry->SetFocus();
-        }
-    }
-
-    void onRetry( wxCommandEvent& )
-    {
-        if( m_failed )
-            start();
-        else
-            COLLAB_STDLIBS::RetryNow();
-    }
-
-    void onCancel( wxCommandEvent& )
-    {
-        if( m_failed )
-        {
-            EndModal( wxID_CANCEL );
             return;
         }
 
-        // The worker stops at its next step; the dialog closes when it has.
-        {
-            std::lock_guard<std::mutex> lock( m_state->mutex );
-            m_state->stop = true;
-        }
-
-        m_cancel->Disable();
-        m_message->SetLabel( _( "Stopping..." ) );
+        refresh();
     }
 
     std::shared_ptr<STDLIBS_DOWNLOAD_STATE> m_state;
-    bool                                    m_continuing = false;
-    bool                                    m_failed = false;
-    bool                                    m_stopped = false;
     wxStaticText*                           m_message = nullptr;
     wxGauge*                                m_gauge = nullptr;
     wxButton*                               m_retry = nullptr;
-    wxButton*                               m_cancel = nullptr;
+    wxButton*                               m_stop = nullptr;
     wxTimer                                 m_timer;
 };
 
@@ -1687,6 +1599,19 @@ void KICAD_MANAGER_FRAME::OnDownloadStandardLibraries( wxCommandEvent& WXUNUSED(
 
 void KICAD_MANAGER_FRAME::DownloadStandardLibraries( bool aOffer )
 {
+    // Already at work in the background: the menu command shows how far it is, a start-up
+    // offer has nothing to add.
+    if( s_stdlibsDownload || COLLAB_STDLIBS::Running() )
+    {
+        if( !aOffer && s_stdlibsDownload )
+        {
+            STDLIBS_STATUS_DIALOG status( this, s_stdlibsDownload );
+            status.ShowModal();
+        }
+
+        return;
+    }
+
     const bool needed = COLLAB_STDLIBS::Needed();
 
     // A download that was cut short by closing the program (or by the computer or the network
@@ -1707,8 +1632,10 @@ void KICAD_MANAGER_FRAME::DownloadStandardLibraries( bool aOffer )
                                     "Junction can download the standard KiCad libraries and "
                                     "project templates now (about 60 MB to download, 450 MB on "
                                     "disk). Projects open without them, but there is nothing to "
-                                    "place from.\n\nIf Junction is closed before the download "
-                                    "has finished, it continues the next time Junction starts." ),
+                                    "place from.\n\nThe download runs in the background, so you "
+                                    "can keep working; the status bar shows how far it is. If "
+                                    "Junction is closed before the download has finished, it "
+                                    "continues the next time Junction starts." ),
                                  _( "Standard Libraries" ), wxYES_NO | wxICON_QUESTION );
 
         ask.SetYesNoLabels( _( "Download" ), _( "Not Now" ) );
@@ -1751,26 +1678,139 @@ void KICAD_MANAGER_FRAME::DownloadStandardLibraries( bool aOffer )
             return;
     }
 
-    // A real modal event loop with a timer that looks at the worker: the application keeps
-    // answering, Cancel is an ordinary button, and a failed download offers Retry there.
-    STDLIBS_PROGRESS_DIALOG progress( this, continuing );
+    startStandardLibrariesDownload( continuing );
+}
 
-    if( progress.ShowModal() != wxID_OK )
-    {
-        // Stopped by the user: nothing continues by itself, and what was downloaded stays for
-        // Preferences > Download Standard Libraries.  Closed after a failure: the next start
-        // continues from what was downloaded.
+
+void KICAD_MANAGER_FRAME::startStandardLibrariesDownload( bool aContinuing )
+{
+    if( s_stdlibsDownload || COLLAB_STDLIBS::Running() )
         return;
+
+    // The download never holds the window: it is a background job with its progress in the
+    // status bar (of the editors too), and the notifications say when it starts and ends.
+    std::shared_ptr<STDLIBS_DOWNLOAD_STATE> state = std::make_shared<STDLIBS_DOWNLOAD_STATE>();
+
+    state->job = Pgm().GetBackgroundJobMonitor().Create( _( "Standard Libraries" ) );
+    state->message = aContinuing ? _( "Continuing the download of the standard libraries..." )
+                                 : _( "Looking for the libraries..." );
+    state->job->m_reporter->Report( state->message );
+    s_stdlibsDownload = state;
+
+    Pgm().GetNotificationsManager().CreateOrUpdate(
+            STDLIBS_NOTIFICATION, _( "Standard libraries are downloading" ),
+            _( "You can keep working. The standard symbols and footprints can be chosen as "
+               "soon as the download has finished; the status bar shows how far it is." ) );
+
+    std::shared_ptr<bool> alive = m_collabAlive;
+
+    std::thread(
+            [this, state, alive]()
+            {
+                wxString error;
+                bool     ok = false;
+
+                std::shared_ptr<BACKGROUND_JOB_REPORTER> reporter = state->job->m_reporter;
+                auto     shown = std::chrono::steady_clock::now() - std::chrono::seconds( 1 );
+                wxString shownMessage;
+                int      shownPercent = -1;
+
+                try
+                {
+                    ok = COLLAB_STDLIBS::Install(
+                            [&]( const wxString& aMessage, int aPercent )
+                            {
+                                {
+                                    std::lock_guard<std::mutex> lock( state->mutex );
+
+                                    // wxString shares its buffer between copies: hand over
+                                    // a deep one.
+                                    state->message = wxString( aMessage.wc_str() );
+                                }
+
+                                // The status bar is told a few times a second at most.
+                                const auto now = std::chrono::steady_clock::now();
+
+                                if( now - shown >= std::chrono::milliseconds( 250 )
+                                    && ( aMessage != shownMessage || aPercent != shownPercent ) )
+                                {
+                                    shown = now;
+                                    shownMessage = wxString( aMessage.wc_str() );
+                                    shownPercent = aPercent;
+
+                                    if( aPercent >= 0 )
+                                        reporter->SetCurrentProgress( aPercent / 100.0 );
+
+                                    reporter->Report( wxString( aMessage.wc_str() ) );
+                                }
+
+                                return !state->stop && !reporter->IsCancelled();
+                            },
+                            &error );
+                }
+                catch( ... )
+                {
+                    error = _( "Downloading the libraries failed." );
+                }
+
+                state->done = true;
+
+                if( !wxTheApp || !*alive )
+                    return;
+
+                const wxString reason( error.wc_str() );
+
+                wxTheApp->CallAfter(
+                        [this, state, alive, ok, reason]()
+                        {
+                            if( *alive )
+                                standardLibrariesDownloadEnded( ok, state->stop, reason );
+                        } );
+            } )
+            .detach();
+}
+
+
+void KICAD_MANAGER_FRAME::standardLibrariesDownloadEnded( bool aOk, bool aStopped,
+                                                          const wxString& aError )
+{
+    if( s_stdlibsDownload )
+    {
+        Pgm().GetBackgroundJobMonitor().Remove( s_stdlibsDownload->job );
+        s_stdlibsDownload.reset();
     }
 
-    COLLAB_STDLIBS::SetDeclined( false );
-    COLLAB_STDLIBS::Activate();
-    PreloadAllLibraries();
+    NOTIFICATIONS_MANAGER& notifications = Pgm().GetNotificationsManager();
 
-    wxMessageBox( _( "The standard symbol and footprint libraries are ready to use.\n\n"
-                     "An editor that is already open shows them after it is closed and opened "
-                     "again." ),
-                  _( "Standard Libraries" ), wxOK | wxICON_INFORMATION, this );
+    if( aOk )
+    {
+        // The libraries are registered and loaded here; open editors are told to read their
+        // library lists again, so the parts show up without closing anything.
+        COLLAB_STDLIBS::SetDeclined( false );
+        COLLAB_STDLIBS::Activate();
+        PreloadAllLibraries();
+
+        notifications.CreateOrUpdate(
+                STDLIBS_NOTIFICATION, _( "Standard libraries are ready" ),
+                _( "The standard symbols, footprints and project templates are on this "
+                   "computer and can be used now." ) );
+    }
+    else if( aStopped )
+    {
+        // Stopped by the user: nothing continues by itself, and what was downloaded stays for
+        // Preferences > Download Standard Libraries.
+        notifications.Remove( STDLIBS_NOTIFICATION );
+    }
+    else
+    {
+        // Not a connection problem (those are tried again without end): say why.  What was
+        // downloaded is kept, and the next start continues from it.
+        notifications.CreateOrUpdate(
+                STDLIBS_NOTIFICATION, _( "Standard libraries could not be downloaded" ),
+                aError + wxS( " " )
+                        + _( "What was downloaded so far is kept. Preferences > Download "
+                             "Standard Libraries tries again." ) );
+    }
 }
 
 

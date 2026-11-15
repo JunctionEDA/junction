@@ -113,6 +113,12 @@ public:
     /// Offer the download at start, after any dialog that is already up has closed.
     void offerStandardLibraries();
 
+    /// Start the download of the standard libraries as a background job.
+    void startStandardLibrariesDownload( bool aContinuing );
+
+    /// The background download has ended: put the libraries to use, or say why not.
+    void standardLibrariesDownloadEnded( bool aOk, bool aStopped, const wxString& aError );
+
     /// Open DIALOG_GIT_MR_REVIEW so the user can pick two refs and review
     /// the changed-file list between them.
     void OnCompareProjectBranches( wxCommandEvent& event );

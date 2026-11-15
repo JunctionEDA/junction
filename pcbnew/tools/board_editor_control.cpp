@@ -22,6 +22,7 @@
 #include "board_editor_control.h"
 
 #include <algorithm>
+#include <collab/collab_stdlibs.h>
 #include <climits>
 #include <functional>
 #include <memory>
@@ -1493,6 +1494,11 @@ int BOARD_EDITOR_CONTROL::PlaceFootprint( const TOOL_EVENT& aEvent )
             if( !fp )
             {
                 // Pick the footprint to be placed
+                // The standard libraries may still be on their way: say so, since their
+                // footprints are not in the chooser until the download has finished.
+                if( wxString notice = COLLAB_STDLIBS::StillDownloadingNotice(); !notice.IsEmpty() )
+                    m_frame->ShowInfoBarMsg( notice, true );
+
                 fp = m_frame->SelectFootprintFromLibrary();
 
                 if( fp == nullptr )

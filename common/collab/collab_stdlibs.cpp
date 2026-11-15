@@ -103,6 +103,14 @@ bool removeDir( const wxString& aDir )
 std::atomic<bool> s_waiting( false );
 std::atomic<bool> s_retryNow( false );
 
+/// Set while Install() runs, with how far it is.
+std::atomic<bool> s_running( false );
+std::atomic<int>  s_percent( 0 );
+
+/// Set when the program closes during a download: the stop that follows is not the user's
+/// "no", so the download continues at the next start.
+std::atomic<bool> s_suspended( false );
+
 
 wxString stoppedMessage()
 {
@@ -688,7 +696,79 @@ void COLLAB_STDLIBS::SetDeclined( bool aDeclined )
 }
 
 
+bool COLLAB_STDLIBS::Running()
+{
+    return s_running;
+}
+
+
+void COLLAB_STDLIBS::Suspend()
+{
+    s_suspended = true;
+}
+
+
+int COLLAB_STDLIBS::Percent()
+{
+    return s_percent;
+}
+
+
+wxString COLLAB_STDLIBS::StillDownloadingNotice()
+{
+    if( !Running() )
+        return wxEmptyString;
+
+    return wxString::Format( _( "The standard libraries are still downloading (%d%%). Their "
+                                "parts cannot be chosen yet; they appear in the list by "
+                                "themselves when the download has finished." ),
+                             Percent() );
+}
+
+
+static bool install( const COLLAB_STDLIBS::PROGRESS& aProgress, wxString* aError );
+
+
 bool COLLAB_STDLIBS::Install( const PROGRESS& aProgress, wxString* aError )
+{
+    // One at a time: a second caller is told the first is at work.
+    if( s_running.exchange( true ) )
+    {
+        if( aError )
+            *aError = _( "The standard libraries are already being downloaded." );
+
+        return false;
+    }
+
+    s_percent = 0;
+    s_suspended = false;
+
+    bool ok = false;
+
+    try
+    {
+        ok = install(
+                [&]( const wxString& aMessage, int aPercent )
+                {
+                    if( aPercent >= 0 )
+                        s_percent = std::clamp( aPercent, 0, 100 );
+
+                    return !aProgress || aProgress( aMessage, aPercent );
+                },
+                aError );
+    }
+    catch( ... )
+    {
+        s_running = false;
+        throw;
+    }
+
+    s_running = false;
+    return ok;
+}
+
+
+static bool install( const COLLAB_STDLIBS::PROGRESS& aProgress, wxString* aError )
 {
     auto fail =
             [&]( const wxString& aMessage )
@@ -768,7 +848,7 @@ bool COLLAB_STDLIBS::Install( const PROGRESS& aProgress, wxString* aError )
 
             // Stopped by the user: nothing continues by itself at the next start.  The
             // archives stay, so asking again is quick.
-            if( error == stoppedMessage() )
+            if( error == stoppedMessage() && !s_suspended )
                 wxRemoveFile( downloads + sep + wxS( "in-progress" ) );
 
             return fail( error );
