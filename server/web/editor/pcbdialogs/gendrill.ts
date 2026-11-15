@@ -15,7 +15,7 @@ import { loadBoardHeader } from "./board-setup";
 import { PLOT } from "./canvas";
 import { saveToBoard } from "./plot";
 import { deliver, docDir, loadPrefs, saveBlob, savePrefs } from "./plot-out";
-import { box, checkField, ensureCss, h, selectField, textField } from "./ui";
+import { bitmapButton, box, checkField, ensureCss, h, selectField, textField } from "./ui";
 
 interface DrillPrefs { gerber: boolean; mirror: boolean; minimal: boolean; merge: boolean; altOval: boolean; tenting: boolean; genMap: boolean; mapFormat: number; metric: boolean; zeros: number }
 const KEY = "kicad.gendrill";
@@ -104,7 +104,7 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
     build(body: HTMLElement) {
       ensureCss();
       body.append(
-        h("div", { class: "pd-row", style: "margin-bottom:8px" }, lbl("Output folder:"), outDir.el),
+        h("div", { class: "pd-row", style: "margin-bottom:8px" }, lbl("Output folder:"), outDir.el, bitmapButton("small_folder", "A browser saves the files into its download folder", () => undefined, { key: "browse", disabled: true })),
         h("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:0 16px" },
           box("Format",
             h("label", { class: "pd-check" }, rbExcellon, "Excellon"),

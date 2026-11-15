@@ -30,7 +30,7 @@ import { openDrc } from "./inspect";
 import { runZoneFill, zoneFillsDirty } from "./zonefill";
 import { openGendrill } from "./gendrill";
 import { deliver, docDir, loadPrefs, projectLastPlotPath, savePrefs, saveProjectLastPlotPath, whenDialogsClosed } from "./plot-out";
-import { box, checkField, ensureCss as kitCss, errorMessage, h, iconButton, numField, reportPanel, selectField, textField, type Field, type ReportLine } from "./ui";
+import { bitmapButton, box, checkField, ensureCss as kitCss, errorMessage, h, iconButton, numField, reportPanel, selectField, textField, type Field, type ReportLine } from "./ui";
 
 interface LayerRow { key: string; name: string; color: string }
 const layerRows = (): LayerRow[] => ((store as unknown as { get(): { document: { layers?: LayerRow[] } } }).get().document.layers || []);
@@ -210,7 +210,7 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
   const boardSetupLink = h("a", { href: "#", title: "File > Board Setup...", "data-k": "boardSetup" }, "Board setup");
   const alert = h("div", { class: "pl-alert", "data-k": "maskAlert" },
     h("span", { class: "pl-warn" }, "⚠"), h("div", null, h("div", null, "Global solder mask minimum width and/or margin are not set to 0. "), h("div", null, "Most board manufacturers expect 0 and use their own constraints for solder mask minimum width.")), boardSetupLink);
-  const report = reportPanel("150px"); report.set(lastReport);
+  const report = reportPanel("150px", { fileName: "report.txt" }); report.set(lastReport);
   const status = h("div", { class: "pl-status", "data-k": "status" });
   const markers = (E.markers || []) as { excluded?: boolean }[];
   const excl = markers.filter((m) => m.excluded).length, known = markers.length - excl;
@@ -346,7 +346,8 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
       kitCss(); ensureCss();
       body.classList.add("pl-body");
       body.append(
-        h("div", { class: "pl-top" }, h("span", { class: "pd-lbl" }, "Plot format:"), fmtSel.el, h("span", { class: "pd-lbl" }, "Design variant:"), variantSel.el, h("span", { class: "pd-lbl" }, "Output directory:"), outDir.el),
+        h("div", { class: "pl-top" }, h("span", { class: "pd-lbl" }, "Plot format:"), fmtSel.el, h("span", { class: "pd-lbl" }, "Design variant:"), variantSel.el, h("span", { class: "pd-lbl" }, "Output directory:"), outDir.el,
+          bitmapButton("small_folder", "A browser saves the files into its download folder", () => undefined, { key: "browse", disabled: true }), bitmapButton("small_new_window", "Open output directory", () => undefined, { key: "openDir", disabled: true })),
         h("div", { class: "pl-mid" },
           box("Include Layers", layerList),
           box("Plot on All Layers", allList, h("div", { class: "pd-row" }, upBtn, downBtn)),

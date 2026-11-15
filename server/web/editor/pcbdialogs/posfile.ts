@@ -12,7 +12,7 @@ import { fabContext, loadFab } from "../fab-outputs";
 import { loadBoardHeader } from "./board-setup";
 import { PLOT } from "./canvas";
 import { deliver, docDir, loadPrefs, savePrefs } from "./plot-out";
-import { checkField, ensureCss, h, messageBox, reportPanel, selectField, textField, type ReportLine } from "./ui";
+import { bitmapButton, checkField, ensureCss, h, messageBox, reportPanel, selectField, textField, type ReportLine } from "./ui";
 
 interface PosPrefs { format: number; mm: boolean; smdOnly: boolean; excludeTH: boolean; excludeDnp: boolean; excludeBom: boolean; boardEdge: boolean; auxOrigin: boolean; negateX: boolean; single: boolean; outputDir: string | null }
 const KEY = "kicad.posfile";
@@ -119,7 +119,7 @@ function show(fab: KiCadFabApi, boardOutDir: string, plotAux: boolean, variants:
       ensureCss();
       body.append(
         h("div", { class: "pd-row", style: "margin-bottom:8px" }, lbl("Design variant:"), variant.el),
-        h("div", { class: "pd-row", style: "margin-bottom:8px" }, lbl("Output directory:"), outDir.el),
+        h("div", { class: "pd-row", style: "margin-bottom:8px" }, lbl("Output directory:"), outDir.el, bitmapButton("small_folder", "A browser saves the files into its download folder", () => undefined, { key: "browse", disabled: true })),
         h("div", { style: "display:grid;grid-template-columns:max-content 1fr;gap:6px 8px;align-items:center;margin-bottom:8px" }, lbl("Format:"), format.el, lbl("Units:"), units.el),
         smdOnly.el, excludeTH.el, excludeDnp.el, excludeBom.el, boardEdge.el, h("div", { style: "height:8px" }), auxOrigin.el, negateX.el, single.el,
         h("div", { style: "height:8px" }), report.el);
