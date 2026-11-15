@@ -5,6 +5,7 @@
 import { installTransformDialogs } from "./transform-dialogs";
 import { openBoardSetup } from "./board-setup";
 import "./find";   // Edit > Find (DIALOG_FIND): registers E.hooks.boardFind / boardFindNext
+import { openExportVrml } from "./vrml";
 import { exportCmpFile, generateBomLegacy, generateD356, generateFootprintReport } from "./fab-reports";
 import { openFootprintFields } from "./fp-fields";
 import { clearDrcMarkers, drcReport, excludeMarker, nextMarker, openBoardStatistics, openClearance, openConstraints, openDiffFootprint, openFootprintAssociations, openDrc, prevMarker } from "./inspect";
@@ -57,6 +58,7 @@ export function installPcbDialogs(): void {
   action("zoneManager", "Zone Manager...", "", (ctx) => { openZoneManager(ctx); });
   action("cleanupGraphics", "Cleanup Graphics...", "", openCleanupGraphics);   // GLOBAL_EDIT_TOOL::CleanupGraphics
   action("editTracksAndVias", "Edit Track & Via Properties...", "", openGlobalEditTracks);   // GLOBAL_EDIT_TOOL::EditTracksAndVias
+  action("exportVRML", "VRML...", "", (ctx) => { void openExportVrml(ctx); });   // BOARD_EDITOR_CONTROL::ExportVRML
   action("exportCmpFile", "Footprint Association (.cmp) File...", "", (ctx) => { void exportCmpFile(ctx); });
   action("generateD356File", "IPC-D-356 Netlist File...", "", (ctx) => { void generateD356(ctx); });
   action("generateReportFile", "Footprint Report...", "", (ctx) => { void generateFootprintReport(ctx); });
