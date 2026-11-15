@@ -4,7 +4,7 @@ Releases of Junction, which was called KiCad Collaborative up to 1.0.9. The
 version here is the product version (`packaging/VERSION`), not the KiCad
 version it is based on.
 
-## 2.1.3 (unreleased)
+## 2.1.3 (2026-11-15)
 
 ### Desktop
 - Works on a computer with no KiCad installed: when no symbol or footprint
@@ -61,6 +61,14 @@ version it is based on.
 - A "Loads in desktop" run on every server change makes a blank project,
   every template, and demo projects downloaded with rebuilt libraries and
   after edits, and opens each file with the desktop's own reader.
+
+### Downloads
+
+| Platform | File | Notes |
+|---|---|---|
+| macOS (Apple Silicon, macOS 15+) | `Junction-2.1.3-macos.dmg` | Ad-hoc signed: first launch is right-click, Open. Replace the old app in Applications. |
+| Windows x64 | `Junction-2.1.3-windows-x64.exe` | Installer; upgrades earlier versions in place. |
+| Linux x64 (Ubuntu 24.04 LTS) | `Junction-2.1.3-linux-x64.tar.gz` | Extract anywhere, install the packages listed in `usr/share/junction/ubuntu-packages.txt` (`sudo apt install $(cat usr/share/junction/ubuntu-packages.txt)`), run `usr/bin/junction`. |
 
 ## 2.1.2 (2026-11-15)
 

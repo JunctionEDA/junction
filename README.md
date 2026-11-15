@@ -21,7 +21,7 @@ https://github.com/user-attachments/assets/048096a4-82aa-4844-ad54-ccb67b8257e7
 | You want | Do this |
 |---|---|
 | The browser editor | Open [kicad.notaroomba.dev](https://kicad.notaroomba.dev) and sign in with GitHub. Nothing to install. |
-| The desktop app | Download Junction 2.1.2 for macOS, Windows or Linux from the [latest release](https://github.com/notaroomba/junction/releases/latest). |
+| The desktop app | Download Junction 2.1.3 for macOS, Windows or Linux from the [latest release](https://github.com/notaroomba/junction/releases/latest). |
 | An AI app that designs with you | Add `https://kicad.notaroomba.dev/mcp` as an MCP server (commands [below](#design-with-an-ai)). |
 | Your own server | `cargo run` in [`server/`](server/README.md#running) with a Postgres database. |
 
@@ -88,7 +88,7 @@ script prints, so a design costs few tokens. The Pico board in the video was dra
 
 ## Status
 
-Junction 2.1.2 is the current release (the name changed from KiCad Collaborative at 2.0.0). What to know:
+Junction 2.1.3 is the current release (the name changed from KiCad Collaborative at 2.0.0). What to know:
 
 - **It is a fork.** Collaboration is built into the editors, so you run Junction's build, not a plugin for stock
   KiCad. It follows upstream KiCad master (merged through 2026-11-10); About says "based on KiCad 10".

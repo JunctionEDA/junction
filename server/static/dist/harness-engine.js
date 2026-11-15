@@ -45687,9 +45687,9 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
   }
 });
 
-// ../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.js
+// node_modules/opentype.js/dist/opentype.js
 var require_opentype = __commonJS({
-  "../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
+  "node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
     (function(global, factory) {
       typeof exports2 === "object" && typeof module2 !== "undefined" ? factory(exports2) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global = global || self, factory(global.opentype = {}));
     })(exports2, (function(exports3) {
@@ -90754,7 +90754,7 @@ function drillFiles(m, baseName3, opt, ext = "drl") {
   return out;
 }
 
-// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Core.js
+// node_modules/clipper2-ts/dist/Core.js
 var ClipType;
 (function(ClipType2) {
   ClipType2[ClipType2["NoClip"] = 0] = "NoClip";
@@ -91413,7 +91413,7 @@ var RectDUtils = {
 var InvalidRect64 = Object.freeze(Rect64Utils.createInvalid());
 var InvalidRectD = Object.freeze(RectDUtils.createInvalid());
 
-// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Engine.js
+// node_modules/clipper2-ts/dist/Engine.js
 var B02 = BigInt(0);
 var B22 = BigInt(2);
 var B42 = BigInt(4);
@@ -94278,7 +94278,7 @@ var Clipper = {
   }
 };
 
-// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Offset.js
+// node_modules/clipper2-ts/dist/Offset.js
 var JoinType;
 (function(JoinType2) {
   JoinType2[JoinType2["Miter"] = 0] = "Miter";
@@ -94894,7 +94894,7 @@ var ClipperOffset = class _ClipperOffset {
   }
 };
 
-// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Clipper.js
+// node_modules/clipper2-ts/dist/Clipper.js
 var B23 = BigInt(2);
 function intersectD(subject, clip2, fillRule, precision = 2) {
   return booleanOpD(ClipType.Intersection, subject, clip2, fillRule, precision);
@@ -101117,7 +101117,7 @@ function statAreas(m, o) {
   return { hasOutline, boardArea, frontCopper: total(front), backCopper: total(back), frontCourtyard: total(union2(fc)), backCourtyard: total(union2(bc)) };
 }
 
-// ../../../kicad-collaborative/server/node_modules/three/src/extras/lib/earcut.js
+// node_modules/three/src/extras/lib/earcut.js
 function earcut(data, holeIndices, dim = 2) {
   const hasHoles = holeIndices && holeIndices.length;
   const outerLen = hasHoles ? holeIndices[0] * dim : data.length;
@@ -101538,7 +101538,7 @@ function signedArea2(data, start, end, dim) {
   return sum;
 }
 
-// ../../../kicad-collaborative/server/node_modules/three/src/extras/Earcut.js
+// node_modules/three/src/extras/Earcut.js
 var Earcut = class {
   /**
    * Triangulates the given shape definition by returning an array of triangles.
