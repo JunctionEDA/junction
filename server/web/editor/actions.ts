@@ -23,6 +23,7 @@ import { openPosFile } from "./pcbdialogs/posfile";
 import { openOdbpp } from "./pcbdialogs/odbpp";
 import { openPlotSchematic } from "../dialogs/plot-schematic";
 import { printDialog } from "./print";
+import { openCalculator } from "../calculator";
 import type { AppAction } from "../store";
 import type { ActionAnchor, ActionHandler } from "./types";
 // ---- actions (the home menu's entries and the collab items of the editor menus) ----
@@ -90,6 +91,7 @@ export const HANDLERS: Record<string, ActionHandler> = {
   rotateCCW: () => orientSelected("ccw"), rotateCW: () => orientSelected("cw"), rotateCcw: () => orientSelected("ccw"), rotateCw: () => orientSelected("cw"),
   mirrorV: () => orientSelected("mv"), mirrorH: () => orientSelected("mh"),
   showPcbNew: () => switchEditor(), showEeschema: () => switchEditor(),
+  showCalculatorTools: () => openCalculator(),
   toggleGrid: () => { E.gridOn = !E.gridOn; updateGridStatus(); requestRender(); }, "toggleGrid:menu": (a) => openGridButtonMenu(a),
   "routeSingleTrack:menu": (a) => openRouterModeMenu(a), "routeDiffPair:menu": (a) => openRouterModeMenu(a),
   // the Arc group's menu, whichever drawing mode its button shows
