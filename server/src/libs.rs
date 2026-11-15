@@ -76,6 +76,8 @@ pub fn routes() -> Router<AppState> {
         .route("/api/libs/footprints", get(footprint_libraries))
         .route("/api/libs/footprints/{lib}", get(footprint_index))
         .route("/api/libs/footprints/{lib}/{name}", get(footprint))
+        .route("/api/libs/archive", get(archive_manifest))
+        .route("/api/libs/archive/{kind}", get(archive_file))
 }
 
 // ---------------------------------------------------------------- errors
@@ -1269,4 +1271,196 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+}
+
+
+// ---------------------------------------------------------------- archives for the desktop
+//
+// The desktop application downloads the standard libraries when no KiCad is installed.  It takes
+// them from here first: these are the same archives this server already keeps for the web
+// editor (plus the project templates), served with byte ranges, so a download that was cut
+// short continues in the middle of a file, and with their size and SHA-256, so a damaged one is
+// noticed.  (GitLab's archive endpoint ignores Range.)  No sign-in: the content is public.
+
+const DEFAULT_TEMPLATES_URL: &str = "https://gitlab.com/kicad/libraries/kicad-templates/-/archive/{ref}/kicad-templates-{ref}.zip";
+const ARCHIVE_KINDS: [&str; 3] = ["templates", "footprints", "symbols"];
+
+fn archive_facts() -> &'static Mutex<HashMap<PathBuf, (u64, String)>> {
+    static FACTS: OnceLock<Mutex<HashMap<PathBuf, (u64, String)>>> = OnceLock::new();
+    FACTS.get_or_init(Default::default)
+}
+
+impl Libs {
+    /// The archive of one kind on disk, fetched from upstream when it is not there yet.
+    async fn archive_path(&self, kind: &str) -> LibResult<PathBuf> {
+        match kind {
+            "symbols" | "footprints" => {
+                let k = if kind == "symbols" { Kind::Symbols } else { Kind::Footprints };
+                if self.local_dir(k).is_some() {
+                    return Err(LibError::NotFound);
+                }
+                self.repo(k).await?;
+                Ok(self.cache_path(k, "repository.zip"))
+            }
+            "templates" => {
+                static FETCHING: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+                let _guard = FETCHING.get_or_init(Default::default).lock().await;
+                let path = self.cache_path(Kind::Symbols, "repository.zip");
+                // beside the symbols' folder: <cache>/templates/<ref>/repository.zip
+                let path = match (path.parent().and_then(|p| p.file_name()), self.cache_dir.join("templates")) {
+                    (Some(reference), dir) => dir.join(reference).join("repository.zip"),
+                    _ => return Err(LibError::NotFound),
+                };
+                if tokio::fs::metadata(&path).await.is_err() {
+                    let url = env_or("KC_LIBS_TEMPLATES_URL", DEFAULT_TEMPLATES_URL).replace("{ref}", &urlencode(&self.reference));
+                    if !url.starts_with("http://") && !url.starts_with("https://") {
+                        return Err(LibError::NotFound);
+                    }
+                    self.download(&url, &path)
+                        .await
+                        .map_err(|e| LibError::Busy(RETRY_AFTER.as_secs(), format!("could not fetch the KiCad project templates from upstream: {e}")))?;
+                }
+                Ok(path)
+            }
+            _ => Err(LibError::NotFound),
+        }
+    }
+
+    /// Size and SHA-256 of an archive, worked out once.
+    async fn archive_facts(&self, path: &FsPath) -> LibResult<(u64, String)> {
+        if let Some(f) = archive_facts().lock().unwrap().get(path) {
+            return Ok(f.clone());
+        }
+        let p = path.to_path_buf();
+        let facts = tokio::task::spawn_blocking(move || -> std::io::Result<(u64, String)> {
+            use sha2::{Digest, Sha256};
+            let mut file = std::fs::File::open(&p)?;
+            let mut hasher = Sha256::new();
+            let mut buf = vec![0u8; 1 << 20];
+            let mut size = 0u64;
+            loop {
+                let n = file.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                size += n as u64;
+                hasher.update(&buf[..n]);
+            }
+            Ok((size, hasher.finalize().iter().map(|b| format!("{b:02x}")).collect()))
+        })
+        .await
+        .map_err(|e| LibError::Upstream(e.to_string()))?
+        .map_err(|e| LibError::Upstream(e.to_string()))?;
+        archive_facts().lock().unwrap().insert(path.to_path_buf(), facts.clone());
+        Ok(facts)
+    }
+}
+
+/// `{ ref, archives: [{ kind, size, sha256, url }] }`: what the desktop can take from here.
+async fn archive_manifest() -> Response {
+    let libs = libs();
+    let mut archives = Vec::new();
+    for kind in ARCHIVE_KINDS {
+        let path = match libs.archive_path(kind).await {
+            Ok(p) => p,
+            Err(e) => return e.into_response(),
+        };
+        match libs.archive_facts(&path).await {
+            Ok((size, sha256)) => archives.push(json!({ "kind": kind, "size": size, "sha256": sha256, "url": format!("/api/libs/archive/{kind}") })),
+            Err(e) => return e.into_response(),
+        }
+    }
+    Json(json!({ "ref": libs.reference, "archives": archives })).into_response()
+}
+
+/// `bytes=N-` or `bytes=N-M` against a file of `size` bytes: the first and last byte to send.
+fn byte_range(value: &str, size: u64) -> Option<(u64, u64)> {
+    let spec = value.trim().strip_prefix("bytes=")?;
+    if spec.contains(',') {
+        return None;
+    }
+    let (a, b) = spec.split_once('-')?;
+    let last = size.checked_sub(1)?;
+    if a.is_empty() {
+        // the last N bytes
+        let n: u64 = b.trim().parse().ok()?;
+        if n == 0 {
+            return None;
+        }
+        return Some((size.saturating_sub(n), last));
+    }
+    let start: u64 = a.trim().parse().ok()?;
+    let end = if b.trim().is_empty() { last } else { b.trim().parse::<u64>().ok()?.min(last) };
+    (start <= end).then_some((start, end))
+}
+
+async fn archive_file(Path(kind): Path<String>, headers: axum::http::HeaderMap) -> Response {
+    use std::io::{Seek, SeekFrom};
+    let libs = libs();
+    let path = match libs.archive_path(&kind).await {
+        Ok(p) => p,
+        Err(e) => return e.into_response(),
+    };
+    let (size, sha256) = match libs.archive_facts(&path).await {
+        Ok(f) => f,
+        Err(e) => return e.into_response(),
+    };
+    let wanted = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
+    let range = match wanted {
+        None => None,
+        Some(v) => match byte_range(v, size) {
+            Some(r) => Some(r),
+            None => {
+                return (StatusCode::RANGE_NOT_SATISFIABLE, [(header::CONTENT_RANGE, format!("bytes */{size}"))]).into_response();
+            }
+        },
+    };
+    let (start, end) = range.unwrap_or((0, size.saturating_sub(1)));
+    let length = if size == 0 { 0 } else { end - start + 1 };
+    let read = tokio::task::spawn_blocking(move || -> std::io::Result<Vec<u8>> {
+        let mut file = std::fs::File::open(&path)?;
+        file.seek(SeekFrom::Start(start))?;
+        let mut buf = vec![0u8; length as usize];
+        file.read_exact(&mut buf)?;
+        Ok(buf)
+    })
+    .await;
+    let bytes = match read {
+        Ok(Ok(b)) => b,
+        _ => return LibError::Upstream("the archive could not be read".into()).into_response(),
+    };
+    let mut response = (
+        if range.is_some() { StatusCode::PARTIAL_CONTENT } else { StatusCode::OK },
+        [
+            (header::CONTENT_TYPE, "application/zip".to_string()),
+            (header::ACCEPT_RANGES, "bytes".to_string()),
+            (header::ETAG, format!("\"{sha256}\"")),
+            (header::CACHE_CONTROL, "public, max-age=86400".to_string()),
+        ],
+        bytes,
+    )
+        .into_response();
+    if range.is_some() {
+        if let Ok(v) = format!("bytes {start}-{end}/{size}").parse() {
+            response.headers_mut().insert(header::CONTENT_RANGE, v);
+        }
+    }
+    response
+}
+
+#[cfg(test)]
+mod archive_tests {
+    use super::byte_range;
+
+    #[test]
+    fn ranges() {
+        assert_eq!(byte_range("bytes=0-", 10), Some((0, 9)));
+        assert_eq!(byte_range("bytes=4-", 10), Some((4, 9)));
+        assert_eq!(byte_range("bytes=4-6", 10), Some((4, 6)));
+        assert_eq!(byte_range("bytes=4-99", 10), Some((4, 9)));
+        assert_eq!(byte_range("bytes=-3", 10), Some((7, 9)));
+        assert_eq!(byte_range("bytes=10-", 10), None);
+        assert_eq!(byte_range("bytes=0-1,4-5", 10), None);
+        assert_eq!(byte_range("items=0-1", 10), None);
+    }
 }

@@ -11,6 +11,9 @@ version it is based on.
   libraries are found, Junction offers to download the standard KiCad
   libraries and project templates (about 60 MB) and uses them at once, without a restart.
   Preferences, Download Standard Libraries does the same later.
+  The archives come from the Junction server (checked against their
+  SHA-256, and continued in the middle of a file after an interruption) and
+  from the KiCad library repositories when it cannot deliver.
   A download cut short by closing Junction, sleep or a lost connection
   continues at the next start from what it already has; a failed connection
   is retried by itself until it works (waiting up to a minute between

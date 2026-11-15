@@ -1511,7 +1511,7 @@ private:
     {
         m_state = std::make_shared<STDLIBS_DOWNLOAD_STATE>();
         m_state->message = m_continuing ? _( "Continuing the download of the standard libraries..." )
-                                        : _( "Contacting gitlab.com..." );
+                                        : _( "Looking for the libraries..." );
         m_failed = false;
         m_stopped = false;
         m_retry->Hide();

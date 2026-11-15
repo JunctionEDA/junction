@@ -25,16 +25,21 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <vector>
 
 #include <wx/dir.h>
 #include <wx/ffile.h>
 #include <wx/filename.h>
 #include <wx/intl.h>
+#include <wx/uri.h>
 #include <wx/utils.h>
 #include <wx/wfstream.h>
 #include <wx/zipstrm.h>
 
+#include <collab/collab_session.h>
 #include <kicad_curl/kicad_curl_easy.h>
+#include <nlohmann/json.hpp>
+#include <picosha2.h>
 #include <libraries/library_manager.h>
 #include <libraries/library_table.h>
 #include <paths.h>
@@ -124,6 +129,135 @@ bool appendFile( const wxString& aFrom, const wxString& aTo )
 }
 
 
+/// Where one archive is fetched from.
+struct SOURCE
+{
+    wxString    url;
+    wxString    host;           ///< for messages
+    wxString    file;           ///< its name in the download folder
+    long long   size = -1;      ///< -1 when the source does not say
+    std::string sha256;         ///< empty when the source does not say
+};
+
+
+/// The archive at the KiCad library repositories.  Its server ignores Range, so a download
+/// that was cut short starts that archive again.
+SOURCE gitlabSource( const ARCHIVE& aArchive )
+{
+    const wxString ref = libraryRef();
+    SOURCE         source;
+
+    source.url = wxString::Format(
+            wxS( "https://gitlab.com/kicad/libraries/%s/-/archive/%s/%s-%s.zip" ),
+            aArchive.repository, ref, aArchive.repository, ref );
+    source.host = wxS( "gitlab.com" );
+    source.file = wxString::Format( wxS( "%s-%s.zip" ), aArchive.repository, ref );
+    return source;
+}
+
+
+/**
+ * The archives the collaboration server keeps: the same library release, served with byte
+ * ranges (a download continues in the middle of a file) and with size and SHA-256.
+ *
+ * @return by archive folder name; empty when the server cannot be reached or has none.
+ */
+std::map<wxString, SOURCE> serverSources()
+{
+    std::map<wxString, SOURCE> sources;
+
+    if( wxGetEnv( wxS( "JUNCTION_LIBRARIES_REF" ), nullptr )
+        || wxGetEnv( wxS( "JUNCTION_LIBRARIES_FROM_GITLAB" ), nullptr ) )
+    {
+        return sources;     // a particular upstream ref was asked for
+    }
+
+    try
+    {
+        wxString server = COLLAB_SESSION::ServerUrl();
+
+        while( server.EndsWith( wxS( "/" ) ) )
+            server.RemoveLast();
+
+        if( server.IsEmpty() )
+            return sources;
+
+        KICAD_CURL_EASY curl;
+
+        curl.SetURL( ( server + wxS( "/api/libs/archive" ) ).ToStdString( wxConvUTF8 ) );
+        curl.SetUserAgent( "junction-libraries/1" );
+        curl.SetFollowRedirects( true );
+        curl.SetConnectTimeout( 10 );
+        curl.SetTimeout( 120 );     // the first request after a deploy makes the server fetch them
+
+        if( curl.Perform() != 0 || curl.GetResponseStatusCode() != 200 )
+            return sources;
+
+        const nlohmann::json manifest = nlohmann::json::parse( curl.GetBuffer() );
+        const std::string    ref = manifest.value( "ref", std::string() );
+
+        for( const nlohmann::json& entry : manifest.at( "archives" ) )
+        {
+            const std::string kind = entry.value( "kind", std::string() );
+            const std::string url = entry.value( "url", std::string() );
+            SOURCE            source;
+
+            source.size = entry.value( "size", -1LL );
+            source.sha256 = entry.value( "sha256", std::string() );
+
+            if( kind.empty() || url.empty() || ref.empty() || source.size <= 0
+                || source.sha256.size() != 64 )
+            {
+                continue;
+            }
+
+            source.url = server + wxString::FromUTF8( url );
+            source.host = wxURI( server ).GetServer();
+            source.file = wxString::Format( wxS( "junction-%s-%s.zip" ), wxString::FromUTF8( kind ),
+                                            wxString::FromUTF8( ref ) );
+            sources[wxString::FromUTF8( kind )] = source;
+        }
+    }
+    catch( ... )
+    {
+        sources.clear();
+    }
+
+    return sources;
+}
+
+
+/// @return the SHA-256 of a file as lower-case hex, or an empty string.
+std::string sha256Of( const wxString& aFile )
+{
+    std::ifstream in( aFile.fn_str(), std::ios::binary );
+
+    if( !in.is_open() )
+        return std::string();
+
+    picosha2::hash256_one_by_one hasher;
+    std::vector<unsigned char>   buffer( 1 << 20 );
+
+    hasher.init();
+
+    while( in )
+    {
+        in.read( reinterpret_cast<char*>( buffer.data() ), buffer.size() );
+
+        const std::streamsize got = in.gcount();
+
+        if( got > 0 )
+            hasher.process( buffer.begin(), buffer.begin() + got );
+    }
+
+    hasher.finish();
+
+    std::vector<unsigned char> digest( picosha2::k_digest_size );
+    hasher.get_hash_bytes( digest.begin(), digest.end() );
+    return picosha2::bytes_to_hex_string( digest.begin(), digest.end() );
+}
+
+
 /**
  * One attempt at one repository archive.  What an earlier attempt (or an earlier run of the
  * program) already fetched stays in "<target>.part"; the server is asked for the rest, and
@@ -131,17 +265,45 @@ bool appendFile( const wxString& aFrom, const wxString& aTo )
  *
  * @return an empty string once "<target>" is complete, or what went wrong.
  */
-wxString downloadOnce( const ARCHIVE& aArchive, const wxString& aTarget,
+wxString downloadOnce( const ARCHIVE& aArchive, const SOURCE& aSource, const wxString& aTarget,
                        const COLLAB_STDLIBS::PROGRESS& aProgress, int aStep )
 {
-    const wxString ref = libraryRef();
-    const wxString url = wxString::Format(
-            wxS( "https://gitlab.com/kicad/libraries/%s/-/archive/%s/%s-%s.zip" ),
-            aArchive.repository, ref, aArchive.repository, ref );
+    const wxString& url = aSource.url;
+    const wxString  part = aTarget + wxS( ".part" );
+    const wxString  piece = aTarget + wxS( ".piece" );
 
-    const wxString     part = aTarget + wxS( ".part" );
-    const wxString     piece = aTarget + wxS( ".piece" );
+    // Checked against what the source says about the file, when it says anything.
+    auto finish =
+            [&]() -> wxString
+            {
+                const wxFileOffset got = fileSize( part );
+
+                if( aSource.size >= 0 && got < aSource.size )
+                {
+                    return wxString::Format( _( "The connection to %s closed before the %s "
+                                                "were complete." ),
+                                             aSource.host, wxString( aArchive.folder ) );
+                }
+
+                if( ( aSource.size >= 0 && got > aSource.size )
+                    || ( !aSource.sha256.empty() && sha256Of( part ) != aSource.sha256 ) )
+                {
+                    wxRemoveFile( part );
+                    return wxString::Format( _( "The %s arrived damaged from %s." ),
+                                             wxString( aArchive.folder ), aSource.host );
+                }
+
+                if( !wxRenameFile( part, aTarget, true ) )
+                    return wxString::Format( _( "Cannot write '%s'." ), aTarget );
+
+                return wxEmptyString;
+            };
+
     const wxFileOffset have = fileSize( part );
+
+    // Everything is here already (the program was closed just before the last step).
+    if( aSource.size >= 0 && have >= aSource.size )
+        return finish();
 
     std::ofstream out( piece.fn_str(), std::ios::binary | std::ios::trunc );
 
@@ -184,7 +346,9 @@ wxString downloadOnce( const ARCHIVE& aArchive, const wxString& aTarget,
                                                         ( have + aNow ) / 1048576.0 );
                 int percent = aStep * 33;
 
-                if( aTotal > 0 )
+                if( aSource.size > 0 )
+                    percent += (int) std::min( 16.0, 16.0 * ( have + aNow ) / aSource.size );
+                else if( aTotal > 0 )
                     percent += (int) ( 16.0 * ( have + aNow ) / ( have + aTotal ) );
 
                 if( aProgress && !aProgress( what, percent ) )
@@ -225,32 +389,41 @@ wxString downloadOnce( const ARCHIVE& aArchive, const wxString& aTarget,
         return stoppedMessage();
 
     if( stalled )
-        return wxString::Format( _( "The connection to gitlab.com stopped answering while "
+        return wxString::Format( _( "The connection to %s stopped answering while "
                                     "downloading the %s." ),
-                                 wxString( aArchive.folder ) );
+                                 aSource.host, wxString( aArchive.folder ) );
 
     if( result != 0 || ( status != 200 && status != 206 ) )
     {
-        return wxString::Format( _( "The %s could not be downloaded from gitlab.com (%s)." ),
-                                 wxString( aArchive.folder ),
+        return wxString::Format( _( "The %s could not be downloaded from %s (%s)." ),
+                                 wxString( aArchive.folder ), aSource.host,
                                  result != 0 ? wxString::FromUTF8( curl.GetErrorText( result ) )
                                              : wxString::Format( wxS( "HTTP %d" ), status ) );
     }
 
-    if( !wxRenameFile( part, aTarget, true ) )
-        return wxString::Format( _( "Cannot write '%s'." ), aTarget );
-
-    return wxEmptyString;
+    return finish();
 }
 
 
-/// Download one repository archive, trying again after a pause when the connection fails.
-wxString download( const ARCHIVE& aArchive, const wxString& aTarget,
+/**
+ * Download one repository archive, trying again after a pause when the connection fails.
+ *
+ * @param aSources where to take it from, in order of preference; each try goes through them.
+ * @param aFolder the download folder.
+ * @param aFile set to the finished archive.
+ */
+wxString download( const ARCHIVE& aArchive, const std::vector<SOURCE>& aSources,
+                   const wxString& aFolder, wxString* aFile,
                    const COLLAB_STDLIBS::PROGRESS& aProgress, int aStep )
 {
     // An archive a run before this one finished is not fetched again.
-    if( wxFileName::FileExists( aTarget ) )
-        return wxEmptyString;
+    for( const SOURCE& source : aSources )
+    {
+        *aFile = aFolder + wxFileName::GetPathSeparator() + source.file;
+
+        if( wxFileName::FileExists( *aFile ) )
+            return wxEmptyString;
+    }
 
     // A connection that fails is tried again for as long as it takes, with a pause that grows
     // to a minute: the network coming back is all it needs.  Only the user stops it.
@@ -259,14 +432,18 @@ wxString download( const ARCHIVE& aArchive, const wxString& aTarget,
 
     for( int attempt = 0; ; attempt++ )
     {
-        error = downloadOnce( aArchive, aTarget, aProgress, aStep );
+        for( const SOURCE& source : aSources )
+        {
+            *aFile = aFolder + wxFileName::GetPathSeparator() + source.file;
+            error = downloadOnce( aArchive, source, *aFile, aProgress, aStep );
 
-        if( error.IsEmpty() || error == stoppedMessage() )
-            return error;
+            if( error.IsEmpty() || error == stoppedMessage() )
+                return error;
 
-        // A disk that cannot be written will not get better by waiting.
-        if( error.StartsWith( _( "Cannot write" ) ) )
-            return error;
+            // A disk that cannot be written will not get better by waiting.
+            if( error.StartsWith( _( "Cannot write" ) ) )
+                return error;
+        }
 
         const int pause = pauses[std::min( attempt, (int) std::size( pauses ) - 1 )];
 
@@ -513,19 +690,31 @@ bool COLLAB_STDLIBS::Install( const PROGRESS& aProgress, wxString* aError )
             marker.Write( libraryRef() + wxS( "\n" ) );
     }
 
+    if( aProgress )
+        aProgress( _( "Looking for the libraries..." ), 0 );
+
+    const std::map<wxString, SOURCE> fromServer = serverSources();
+
     wxString error;
     int      step = 0;
 
     for( const ARCHIVE& archive : ARCHIVES )
     {
-        const wxString zip = downloads + sep
-                             + wxString::Format( wxS( "%s-%s.zip" ), archive.repository,
-                                                 libraryRef() );
+        // The collaboration server first (a download can continue in the middle of a file
+        // there), the KiCad library repositories when it cannot deliver.
+        std::vector<SOURCE> sources;
+
+        if( auto it = fromServer.find( wxString( archive.folder ) ); it != fromServer.end() )
+            sources.push_back( it->second );
+
+        sources.push_back( gitlabSource( archive ) );
+
+        wxString zip;
 
         // An archive that does not unpack (damaged on the way, or cut off) is fetched once more.
         for( int round = 0; round < 2; round++ )
         {
-            error = download( archive, zip, aProgress, step );
+            error = download( archive, sources, downloads, &zip, aProgress, step );
 
             if( !error.IsEmpty() )
                 break;
