@@ -121,5 +121,44 @@ for (const [demo, name, type] of [["stickhub", "StickHub.kicad_sch", "kicad_sch"
   if (!fs.existsSync(path.join(DEMOS, demo, name))) { console.log("skip " + demo + "/" + name); continue; }
   const t = Date.now(); run(demo, name, type); console.log(`${demo}/${name}: ${Date.now() - t} ms`);
 }
+
+// ---- what the serializer writes, KiCad's parsers read: no token changes between bare and quoted
+// A file KiCad wrote is the reference: reading a top-level element and writing it back must give the same
+// tokens, quoted where the file had them quoted and bare where it had them bare.  (A quoted "private" in
+// (property private "KLC_S3.3" "…") made the desktop refuse a whole schematic: "Expecting '('".)
+function tokens(t: string): string[] {
+  const out: string[] = []; const re = /\(|\)|"(?:\\.|[^"\\])*"|[^\s()"]+/g; let m: RegExpExecArray | null;
+  while ((m = re.exec(t))) { const s = m[0]; out.push(s[0] === '"' ? "S" : s === "(" || s === ")" ? s : /^-?[\d.]+(e[-+]?\d+)?$/i.test(s) ? "N" : "A:" + s); }
+  return out;
+}
+{
+  const priv = '(property private "KLC_S3.3" "The rectangle is not a symbol body but a graphical element" (at 0 -12.7 0) (hide yes))';
+  ok(serialize(parse(priv)).startsWith('(property private "KLC_S3.3" "The rectangle'), "a private property read from a file keeps its bare keyword");
+  ok(serialize(["property", "private", "KLC_S3.3", "note", ["at", 0, 0, 0]]) === '(property private "KLC_S3.3" "note" (at 0 0 0))', "a private property built by hand is written with the bare keyword");
+  ok(serialize(parse('(property "private" "x" (at 0 0 0))')) === '(property "private" "x" (at 0 0 0))', "a field that is named private stays a quoted name");
+  ok(serialize(["property", "Reference", "R1", ["at", 0, 0, 0]]) === '(property "Reference" "R1" (at 0 0 0))', "an ordinary field is quoted as before");
+  // a library symbol with private fields, through the whole fold: an edit elsewhere must not requote it
+  const sym = '(symbol "Device:Crystal_GND24" (pin_names (offset 1.016) (hide yes)) (exclude_from_sim no) (in_bom yes) (on_board yes) (property "Reference" "Y" (at 3.175 5.08 0) (effects (font (size 1.27 1.27)) (justify left))) (property "Value" "Crystal_GND24" (at 3.175 3.175 0) (effects (font (size 1.27 1.27)) (justify left))) (property private "KLC_S3.3" "The rectangle is not a symbol body but a graphical element" (at 0 -12.7 0) (show_name yes) (do_not_autoplace no) (hide yes) (effects (font (size 1.27 1.27)))) (symbol "Crystal_GND24_0_1" (rectangle (start -1.143 2.54) (end 1.143 -2.54) (stroke (width 0.3048) (type default)) (fill (type none)))) (embedded_fonts no))';
+  ok(JSON.stringify(tokens(serialize(parse(sym)))) === JSON.stringify(tokens(sym)), "a library symbol with a private field is written back token for token");
+  for (const [demo, name] of [["pic_programmer", "pic_programmer.kicad_sch"], ["pic_programmer", "pic_sockets.kicad_sch"], ["video", "video.kicad_sch"], ["stickhub", "StickHub.kicad_sch"], ["pic_programmer", "pic_programmer.kicad_pcb"], ["complex_hierarchy", "complex_hierarchy.kicad_sch"], ["ecc83", "ecc83-pp.kicad_sch"], ["ecc83", "ecc83-pp.kicad_pcb"]]) {
+    const f = path.join(DEMOS, demo, name); if (!fs.existsSync(f)) continue;
+    const text = fs.readFileSync(f, "utf8"); const root = parse(text); let bad = 0, first = "";
+    for (const el of root.slice(1)) {
+      if (!Array.isArray(el)) continue;
+      const a = tokens(serialize(el)); let i = 0;
+      // the element's own tokens in the file: found by walking the file's token stream in step
+      const src = tokens(text.slice(text.indexOf("(" + str(el[0]))));   // only used for the first mismatch report
+      void src;
+      const back = tokens(serialize(parse(serialize(el))));
+      for (; i < a.length; i++) if (a[i] !== back[i]) break;
+      if (i < a.length) { bad++; if (!first) first = str(el[0]) + " token " + i; }
+    }
+    // whole file: every token of the file against every token written, in order
+    const whole = tokens(text), written = tokens("(" + [str(root[0])].concat(root.slice(1).map((el: any) => Array.isArray(el) ? serialize(el) : serialize(el))).join(" ") + ")");
+    let at = -1; for (let i = 0; i < whole.length; i++) if (whole[i] !== written[i]) { at = i; break; }
+    ok(bad === 0, demo + "/" + name + ": written elements read back the same" + (first ? " (" + first + ")" : ""));
+    ok(at < 0, demo + "/" + name + ": written with the file's own bare and quoted tokens" + (at >= 0 ? " (token " + at + ": file " + whole.slice(Math.max(0, at - 4), at + 2).join(" ") + " / written " + written.slice(Math.max(0, at - 4), at + 2).join(" ") + ")" : ""));
+  }
+}
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

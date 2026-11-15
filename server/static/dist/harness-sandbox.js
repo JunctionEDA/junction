@@ -1788,7 +1788,123 @@ class Board(_Doc):
                 pass
             self.project.schematic(sheet).assign_pins(me["ref"], change) if sheet else self.project.schematic().assign_pins(me["ref"], change)
             self.sync()
+            self._geom = None; out["bypass"] = self.place_bypass(me["ref"])
             self.project.note(f"board: {me['ref']}: {len(change)} pins reassigned so their nets leave towards their parts ({out['before_mm']} to {out['after_mm']} mm)")
+        return out
+
+    def place_bypass(self, ref: str | None = None, caps: list | None = None, reach: float = 7.0, apply: bool = True, skip=()) -> dict:
+        """Put each bypass capacitor of a chip beside the supply pin it serves, at a spot that leaves the chip's signal
+        pins a clear way to the parts they go to: a capacitor standing in front of I/O pins sends every one of those
+        nets to another layer.  \`board.autoplace\` and \`board.swap_pins\` call it themselves; call it by hand after moving
+        a chip.  ref=None does every chip that has supply pins with capacitors; \`caps\` names the capacitors (default:
+        the two-pad C parts between one of the chip's supply nets and ground that have no nearer chip on that net).
+
+        Every supply pin gets one capacitor first (the smallest box, so the small-value part), the rest join the pin of
+        their net that has fewest.  A spot costs its distance from capacitor pad to pin plus 4 mm for each signal pin
+        whose way out (2 mm straight out of the chip, then on to its nearest partner pad) it stands on, so chip corners
+        win over the front of a pin row.  Capacitors in \`skip\`, and those whose supply net already has tracks, stay.  Returns {ref: {cap: {"pin", "at", "rotation", "mm", "blocks"}}}."""
+        import math
+        parts = self.geometry()["parts"]; ol = self.geometry().get("outline"); out: dict = {}
+        gnd = lambda n: (n or "").lstrip("/").upper().startswith(("GND", "AGND", "DGND", "PGND", "VSS"))
+        two = {p["ref"]: p for p in parts if p["ref"][:1] == "C" and len(p["pads"]) == 2}
+        chips = [p for p in parts if len(p["pads"]) >= 4 and p["ref"][:1] in ("U", "I", "Q")]
+        if ref is not None:
+            chips = [p for p in chips if p["ref"].lower() == ref.lower()]
+            if not chips and not any(p["ref"].lower() == ref.lower() for p in parts):
+                raise HarnessError(f"There is no footprint {ref} on the board.")
+        boxes = {r: b for r, b in self.courtyards().items()}
+
+        def supply_of(c):
+            a, b = (c["pads"][0][3] or ""), (c["pads"][1][3] or "")
+            return a if gnd(b) and a and not gnd(a) else b if gnd(a) and b and not gnd(b) else None
+
+        def hits(box, a, b):         # does segment a-b pass through the box?
+            x0, y0, x1, y1 = box; t0, t1 = 0.0, 1.0; dx, dy = b[0] - a[0], b[1] - a[1]
+            for d, lo, hi, o in ((dx, x0, x1, a[0]), (dy, y0, y1, a[1])):
+                if abs(d) < 1e-9:
+                    if o < lo or o > hi:
+                        return False
+                else:
+                    u, v = (lo - o) / d, (hi - o) / d
+                    t0, t1 = max(t0, min(u, v)), min(t1, max(u, v))
+                    if t0 > t1:
+                        return False
+            return True
+
+        for me in chips:
+            cx, cy = me["x"], me["y"]; nets_c = {supply_of(c) for c in two.values()} - {None}
+            pins = [q for q in me["pads"] if q[3] in nets_c]
+            if not pins:
+                continue
+            mine = []
+            for r, c in two.items():
+                n = supply_of(c)
+                if caps is not None:
+                    if r.lower() in {str(x).lower() for x in caps} and n in {q[3] for q in pins}:
+                        mine.append(r)
+                    continue
+                if n not in {q[3] for q in pins}:
+                    continue
+                near = min((math.hypot(c["x"] - q[1], c["y"] - q[2]), o["ref"]) for o in parts if len(o["pads"]) >= 4 and o["ref"][:1] in ("U", "I", "Q") for q in o["pads"] if q[3] == n)
+                if near[1] == me["ref"]:
+                    mine.append(r)
+            routed = {n: bool((self._call("get_items", net=n, kinds=["segment"]) or {}).get("items")) for n in {supply_of(two[r]) for r in mine}}
+            mine = [r for r in mine if r.lower() not in {str(x).lower() for x in skip} and not routed[supply_of(two[r])]]
+            if not mine:
+                continue
+            ways = []                # the way each signal pin takes out of the chip and on to its partner
+            for q in me["pads"]:
+                n = q[3] or ""
+                if not n or gnd(n) or n in nets_c or n.startswith("unconnected-"):
+                    continue
+                dx, dy = q[1] - cx, q[2] - cy
+                if abs(dx) < 0.3 and abs(dy) < 0.3:
+                    continue
+                o = (q[1] + math.copysign(2, dx), q[2]) if abs(dx) >= abs(dy) else (q[1], q[2] + math.copysign(2, dy))
+                t = [(u[1], u[2]) for p in parts if p is not me for u in p["pads"] if u[3] == n]
+                way = [(q[1], q[2]), o]
+                if t:
+                    way.append(min(t, key=lambda u: math.hypot(u[0] - o[0], u[1] - o[1])))
+                ways.append(way)
+            size = lambda r: (boxes[r][2] - boxes[r][0]) * (boxes[r][3] - boxes[r][1])
+            mine.sort(key=lambda r: (size(r), r)); load = {q[0]: 0 for q in pins}; jobs = []
+            for r in mine:           # one capacitor to every pin first, then the least-served pin of the net
+                n = supply_of(two[r]); own = [q for q in pins if q[3] == n]
+                q = min(own, key=lambda q: (load[q[0]], math.hypot(two[r]["x"] - q[1], two[r]["y"] - q[2])))
+                load[q[0]] += 1; jobs.append((r, q))
+            taken = [b for r, b in boxes.items() if r not in mine]; res: dict = {}
+            for r, q in jobs:
+                c = two[r]; b = boxes[r]; w, h = b[2] - b[0], b[3] - b[1]; rot0 = c.get("rotation") or 0
+                hot = next(u for u in c["pads"] if u[3] == q[3]); ox, oy = hot[1] - c["x"], hot[2] - c["y"]; best = None
+                for turn in (0, 90, 180, 270):
+                    a = math.radians(turn); px, py = ox * math.cos(a) + oy * math.sin(a), -ox * math.sin(a) + oy * math.cos(a)
+                    hw, hh = (w / 2, h / 2) if turn % 180 == 0 else (h / 2, w / 2)
+                    k = int(reach / 0.25)
+                    for i in range(-k, k + 1):
+                        for j in range(-k, k + 1):
+                            x, y = round((q[1] + i * 0.25) * 4) / 4, round((q[2] + j * 0.25) * 4) / 4
+                            d = math.hypot(x + px - q[1], y + py - q[2])
+                            if d > reach or (best and d >= best[0]):
+                                continue
+                            box = (x - hw, y - hh, x + hw, y + hh)
+                            if ol and (box[0] < ol[0] + 0.5 or box[1] < ol[1] + 0.5 or box[2] > ol[2] - 0.5 or box[3] > ol[3] - 0.5):
+                                continue
+                            if any(min(box[2], t[2]) - max(box[0], t[0]) > 1e-6 and min(box[3], t[3]) - max(box[1], t[1]) > 1e-6 for t in taken):
+                                continue
+                            wide = (box[0] - 0.15, box[1] - 0.15, box[2] + 0.15, box[3] + 0.15)
+                            n_b = sum(1 for wy in ways if any(hits(wide, wy[m], wy[m + 1]) for m in range(len(wy) - 1)))
+                            cost = d + 4 * n_b
+                            if best is None or cost < best[0]:
+                                best = (cost, x, y, (rot0 + turn) % 360, box, d, n_b)
+                if best is None:
+                    res[r] = {"pin": q[0], "left": "no free spot within reach"}; taken.append(tuple(b[:4])); continue
+                taken.append(best[4]); res[r] = {"pin": q[0], "at": (best[1], best[2]), "rotation": best[3], "mm": round(best[5], 2), "blocks": best[6]}
+                if apply and (abs(best[1] - c["x"]) > 1e-3 or abs(best[2] - c["y"]) > 1e-3 or best[3] != rot0 % 360):
+                    self.place(r, (best[1], best[2]), rotation=best[3])
+            out[me["ref"]] = res
+        if apply and out:
+            self.flush(); self._geom = None
+            self.project.note("board: bypass capacitors placed " + ", ".join(f"{k} {len(v)}" for k, v in out.items()))
         return out
 
     def nets(self, filter: str | None = None) -> dict:
@@ -1976,7 +2092,7 @@ class Board(_Doc):
 
     def autoplace(self, groups: dict | None = None, near: dict | None = None, edges: dict | None = None, fixed: dict | None = None,
                   outline=None, spacing: float | None = None, only: list | None = None, fit: bool = False, max_fill: float | None = None,
-                  rotations: dict | None = None) -> dict:
+                  rotations: dict | None = None, bypass: bool = True) -> dict:
         """Place footprints with the placement engine: blocks packed around their anchors, blocks arranged inside the outline.
 
         groups: {block: [refs]} (first ref is the anchor) in addition to those declared with group(); near: {ref: ref}
@@ -2022,6 +2138,9 @@ class Board(_Doc):
         d = next((x["auto_place"] for x in res.get("details") or [] if "auto_place" in x), {})
         out = {"placed": len(d.get("placements", [])), "score": d.get("score"), "outline": d.get("outline"), "unknown_refs": d.get("unknown_refs") or []}
         self.project.note(f"board: placed {out['placed']} footprints, score {out['score']}")
+        if bypass:
+            self._geom = None
+            out["bypass"] = self.place_bypass(skip=tuple(fixed or {}))
         self.project.publish()
         return out
 
@@ -6924,9 +7043,9 @@ def symbol(name: str, pins: list, reference: str = "U", footprint: str = "", dat
 def library(symbols: list) -> str:
     """A .kicad_sym file holding the given symbol texts."""
     return '(kicad_symbol_lib\\n\\t(version 20241209)\\n\\t(generator "kicad_harness")\\n\\t(generator_version "9.0")\\n' + "".join(symbols) + ")\\n"
-`;var p=require("node:fs"),L=globalThis,H=p.constants;process.binding=e=>{if(e==="constants")return{fs:H};throw new Error("not available")};for(let e of["WebSocket","fetch","XMLHttpRequest","EventSource","navigator"])try{delete L[e]}catch{}var G=new(require("node:string_decoder")).StringDecoder("utf8"),T=new Int32Array(new SharedArrayBuffer(4)),i="";function N(){let e=Buffer.alloc(65536);for(;;){let s=i.indexOf(`
+`;var p=require("node:fs"),H=globalThis,L=p.constants;process.binding=e=>{if(e==="constants")return{fs:L};throw new Error("not available")};for(let e of["WebSocket","fetch","XMLHttpRequest","EventSource","navigator"])try{delete H[e]}catch{}var G=new(require("node:string_decoder")).StringDecoder("utf8"),T=new Int32Array(new SharedArrayBuffer(4)),i="";function N(){let e=Buffer.alloc(65536);for(;;){let s=i.indexOf(`
 `);if(s>=0){let t=i.slice(0,s);return i=i.slice(s+1),t}let n=0;try{n=p.readSync(0,e,0,e.length,null)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(T,0,0,4);continue}if(t&&t.code==="EOF")n=0;else throw t}n||process.exit(0),i+=G.write(e.subarray(0,n))}}function d(e){let s=Buffer.from(JSON.stringify(e)+`
-`,"utf8"),n=0;for(;n<s.length;)try{n+=p.writeSync(1,s,n,s.length-n)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(T,0,0,4);continue}throw t}}var M=[["kicad_harness/__init__.py",c],["kicad_harness/project.py",h],["kicad_harness/transport.py",m],["kicad_harness/sheet.py",u],["kicad_harness/rules.py",g],["kicad_harness/physics.py",b],["kicad_harness/stackups.py",_],["kicad_harness/parts/__init__.py",y],["kicad_harness/parts/datasheet.py",w],["kicad_harness/parts/footprint.py",x],["kicad_harness/parts/search.py",k],["kicad_harness/parts/symbol.py",v]],U=`
+`,"utf8"),n=0;for(;n<s.length;)try{n+=p.writeSync(1,s,n,s.length-n)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(T,0,0,4);continue}throw t}}var U=[["kicad_harness/__init__.py",c],["kicad_harness/project.py",h],["kicad_harness/transport.py",m],["kicad_harness/sheet.py",u],["kicad_harness/rules.py",g],["kicad_harness/physics.py",b],["kicad_harness/stackups.py",_],["kicad_harness/parts/__init__.py",y],["kicad_harness/parts/datasheet.py",w],["kicad_harness/parts/footprint.py",x],["kicad_harness/parts/search.py",k],["kicad_harness/parts/symbol.py",v]],M=`
 import json, sys, traceback
 sys.path.insert(0, "/kh")
 import kicad_harness as kh
@@ -6957,6 +7076,6 @@ def __kc_run(code):
     if project is not None and project.log:
         out["notes"] = project.log[-60:]
     return json.dumps(out)
-`;async function V(){let e=JSON.parse(N()),s=String(process.argv[2]||""),n=[],t=0,f=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:S}=require(s+"pyodide.js"),o=await S({indexURL:s,jsglobals:{},stdout:f,stderr:f});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),N())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of M)o.FS.writeFile("/kh/"+r,l);o.runPython(U);let E=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(E(String(e.code||""))))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
+`;async function V(){let e=JSON.parse(N()),s=String(process.argv[2]||""),n=[],t=0,f=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:S}=require(s+"pyodide.js"),o=await S({indexURL:s,jsglobals:{},stdout:f,stderr:f});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),N())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of U)o.FS.writeFile("/kh/"+r,l);o.runPython(M);let E=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(E(String(e.code||""))))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
 `).filter(Boolean).slice(-1)[0]||"The script failed."}}a.done=!0,a.output=n.join(`
 `),d(a),process.exit(0)}V().catch(e=>{try{d({done:!0,ok:!1,error:"The Python runtime could not be started: "+String(e&&e.message||e),output:""})}finally{process.exit(1)}});

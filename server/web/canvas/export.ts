@@ -277,7 +277,7 @@ export function atomText(v: unknown, quoted: boolean): string {
   }
   const s = String(v);
   if (quoted || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)   // KiCad always quotes uuids
-      || !/^[A-Za-z_][\w.:*-]*$/.test(s))
+      || !(/^[A-Za-z_][\w.:*-]*$/.test(s) || /^0x[0-9a-fA-F_]+$/.test(s)))   // a plot layer mask (layerselection 0x00000000_…) is a bare token too
     return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';
   return s;
 }
@@ -295,6 +295,13 @@ function stringSlot(node: SNode, j: number): boolean {
   const head = node[0]; if (typeof head !== "string" || j === 0 || typeof node[j] !== "string") return false;
   if (head === "pin") return j === 1 && !node.some((c) => isList(c) && c[0] === "name");   // an instance / sheet pin, not a library pin's electrical type
   if (head === "symbol") return j === 1;
+  // A library symbol's private field is (property private "Name" "Value" …): the keyword stays a bare token
+  // (KiCad's parser reads a quoted "private" as the field's name and then fails on the third string) and the
+  // two strings after it are the quoted ones.  The reader's mask says which this is; a node built by hand has
+  // no mask, and there "private" followed by two strings is the keyword.
+  if (head === "property" && node[1] === "private" && typeof node[2] === "string" && typeof node[3] === "string" && (quotedMask(node) & 2) === 0) return j === 2 || j === 3;
+  // A key the file had bare beside a quoted value, (property ki_fp_filters "R_*") in a footprint, stays bare.
+  if (head === "property" && j === 1 && (quotedMask(node) & 6) === 4) return false;
   if (head === "property") return j <= 2 && typeof node[2] === "string";                   // not a pad's (property pad_prop_bga)
   const n = Object.prototype.hasOwnProperty.call(STRING_SLOTS, head) ? STRING_SLOTS[head] : 0;
   return n < 0 ? j === -n : j <= n;

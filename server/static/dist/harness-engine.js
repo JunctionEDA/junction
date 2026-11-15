@@ -64550,7 +64550,7 @@ function atomText(v, quoted) {
     return String(+v.toFixed(6));
   }
   const s = String(v);
-  if (quoted || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) || !/^[A-Za-z_][\w.:*-]*$/.test(s))
+  if (quoted || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) || !(/^[A-Za-z_][\w.:*-]*$/.test(s) || /^0x[0-9a-fA-F_]+$/.test(s)))
     return '"' + s.replace(/\\/g, "\\\\").replace(/"/g, '\\"').replace(/\n/g, "\\n") + '"';
   return s;
 }
@@ -64591,6 +64591,8 @@ function stringSlot(node, j) {
   if (typeof head !== "string" || j === 0 || typeof node[j] !== "string") return false;
   if (head === "pin") return j === 1 && !node.some((c) => isList(c) && c[0] === "name");
   if (head === "symbol") return j === 1;
+  if (head === "property" && node[1] === "private" && typeof node[2] === "string" && typeof node[3] === "string" && (quotedMask(node) & 2) === 0) return j === 2 || j === 3;
+  if (head === "property" && j === 1 && (quotedMask(node) & 6) === 4) return false;
   if (head === "property") return j <= 2 && typeof node[2] === "string";
   const n2 = Object.prototype.hasOwnProperty.call(STRING_SLOTS, head) ? STRING_SLOTS[head] : 0;
   return n2 < 0 ? j === -n2 : j <= n2;

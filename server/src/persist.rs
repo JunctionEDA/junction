@@ -901,7 +901,83 @@ pub async fn latest_snapshot(pool: &PgPool, doc_id: Uuid) -> DbResult<Option<(i6
     .bind(doc_id)
     .fetch_optional(pool)
     .await?;
-    Ok(row.map(|r| (r.get("seq"), r.get("content"))))
+    Ok(row.map(|r| (r.get("seq"), repair_private_properties(r.get("content")))))
+}
+
+/// A library symbol's private field is `(property private "Name" "Value" …)`, the keyword a bare token.
+/// The web writer used to quote it (fixed 2026-11-15), and KiCad refuses the whole schematic at
+/// `(property "private" "Name" "Value"`: a field has one value, so a third string is a syntax error
+/// ("Expecting '('").  Stored files that carry the quoted form are put right as they are read: nothing but
+/// those two quote marks changes, and only where two more strings follow, which no real field can have.
+pub fn repair_private_properties(content: Vec<u8>) -> Vec<u8> {
+    const NEEDLE: &[u8] = b"(property \"private\"";
+    if !(content.starts_with(b"(kicad_sch") || content.starts_with(b"(kicad_symbol_lib"))
+        || !content.windows(NEEDLE.len()).any(|w| w == NEEDLE)
+    {
+        return content;
+    }
+    // the end of the quoted string that starts at `i`, or None
+    fn string_end(c: &[u8], mut i: usize) -> Option<usize> {
+        if c.get(i) != Some(&b'"') {
+            return None;
+        }
+        i += 1;
+        while i < c.len() {
+            match c[i] {
+                b'\\' => i += 2,
+                b'"' => return Some(i + 1),
+                _ => i += 1,
+            }
+        }
+        None
+    }
+    fn skip_ws(c: &[u8], mut i: usize) -> usize {
+        while i < c.len() && c[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        i
+    }
+    let mut out = Vec::with_capacity(content.len());
+    let mut i = 0;
+    while i < content.len() {
+        if content[i..].starts_with(NEEDLE) {
+            let after = i + NEEDLE.len();
+            let two_strings = string_end(&content, skip_ws(&content, after))
+                .and_then(|e| string_end(&content, skip_ws(&content, e)))
+                .is_some();
+            if two_strings && content.get(after).map_or(false, |b| b.is_ascii_whitespace()) {
+                out.extend_from_slice(b"(property private");
+                i = after;
+                continue;
+            }
+        }
+        out.push(content[i]);
+        i += 1;
+    }
+    out
+}
+
+#[cfg(test)]
+mod repair_tests {
+    use super::repair_private_properties as fix;
+
+    #[test]
+    fn private_keyword_is_made_bare() {
+        let bad = b"(kicad_sch\n\t(lib_symbols\n\t\t(symbol \"Device:Crystal_GND24\"\n\t\t\t(property \"private\" \"KLC_S3.3\" \"The \\\"rectangle\\\" (note)\"\n\t\t\t\t(at 0 -12.7 0)\n\t\t\t)\n\t\t)\n\t)\n)\n".to_vec();
+        let good = String::from_utf8(fix(bad.clone())).unwrap();
+        assert!(good.contains("(property private \"KLC_S3.3\" \"The \\\"rectangle\\\" (note)\"\n"));
+        assert_eq!(good.len(), bad.len() - 2);
+    }
+
+    #[test]
+    fn a_field_named_private_and_other_files_are_left_alone() {
+        let field = b"(kicad_sch (symbol (property \"private\" \"yes\" (at 0 0 0))))".to_vec();
+        assert_eq!(fix(field.clone()), field);
+        let board = b"(kicad_pcb (footprint \"x\" (property \"private\" \"a\" \"b\")))".to_vec();
+        assert_eq!(fix(board.clone()), board);
+        let fixed = b"(kicad_sch (property private \"a\" \"b\"))".to_vec();
+        assert_eq!(fix(fixed.clone()), fixed);
+    }
 }
 
 pub async fn latest_snapshot_seq(pool: &PgPool, doc_id: Uuid) -> DbResult<i64> {
