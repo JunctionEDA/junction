@@ -48,7 +48,7 @@ const CSS = `
 .pd-form .span { grid-column: 1 / -1; }
 .pd-check { display: flex; gap: 6px; align-items: center; color: var(--ink); margin: 2px 0; }
 .pd-check input { width: auto; margin: 0; }
-.pd-check.disabled { color: var(--ink-3, var(--ink-2)); }
+.pd-check.disabled, .pd-check.dim, .pd-check:has(input:disabled) { color: var(--ink-3, var(--ink-2)); }
 .pd-note { color: var(--ink-2); font-size: 12px; margin: 4px 0 8px; }
 .pd-info { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-2); padding: 6px 10px; margin: 0 0 10px; color: var(--ink); }
 .pd-grid { border: 1px solid var(--line); border-radius: var(--r-2); overflow: auto; background: var(--panel); }

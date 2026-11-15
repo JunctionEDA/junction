@@ -20,6 +20,7 @@ import { openTextAndGraphics } from "./text-graphics";
 import { openUnusedPads } from "./unused-pads";
 import { openCleanupGraphics } from "./cleanup-graphics";
 import { openEditTeardrops } from "./teardrops";
+import { openGlobalTracksAndVias } from "./global-tracks";
 import { repairBoard } from "./repair";
 import { openReannotate } from "./reannotate";
 import { openUpdatePcb, projectNetlist, updatePcbFromSchematicEditor } from "./update-pcb";
@@ -60,6 +61,7 @@ export function installPcbDialogs(): void {
   action("updateFootprints", "Update Footprints from Library...", "", (ctx) => { openExchangeFootprints(ctx, "updateFootprints"); });
   action("changeFootprint", "Change Footprint...", "", (ctx) => { openExchangeFootprints(ctx, "changeFootprint"); });
   action("changeFootprints", "Change Footprints...", "", (ctx) => { openExchangeFootprints(ctx, "changeFootprints"); });
+  action("editTracksAndVias", "Edit Track & Via Properties...", "", openGlobalTracksAndVias);   // GLOBAL_EDIT_TOOL::EditTracksAndVias
   action("editTextAndGraphics", "Edit Text & Graphics Properties...", "", openTextAndGraphics);   // GLOBAL_EDIT_TOOL::EditTextAndGraphics
   action("globalDeletions", "Global Deletions...", "", openGlobalDeletions);   // GLOBAL_EDIT_TOOL::GlobalDeletions
   action("editFootprintFields", "Bulk Edit Footprint Fields...", "", openFootprintFields);
