@@ -86127,6 +86127,13 @@ var Router = class _Router {
         const t = cellsIn(polys);
         for (let i = 0; i < t.length; i++) if (t[i]) q[i] = 1;
         marked = true;
+        const band2 = this.opts.antennaBand === void 0 ? 1.2 : Math.max(0, +this.opts.antennaBand);
+        if (band2 > 0) {
+          let b = [Infinity, Infinity, -Infinity, -Infinity];
+          for (const pts of polys) for (const pt4 of pts) b = [Math.min(b[0], pt4[0] - band2), Math.min(b[1], pt4[1] - band2), Math.max(b[2], pt4[0] + band2), Math.max(b[3], pt4[1] + band2)];
+          const cb = this.cellBox(b);
+          if (cb) for (let iy = cb[1]; iy <= cb[3]; iy++) q.fill(1, iy * W11 + cb[0], iy * W11 + cb[2] + 1);
+        }
       }
       if (!marked) {
         let b = [Infinity, Infinity, -Infinity, -Infinity];
@@ -107913,6 +107920,7 @@ var LIMITS = {
 };
 var PHYSICS_RULES = [
   { id: "antenna.keepout", what: "An antenna sits at a board edge with no copper under or around it on any layer" },
+  { id: "antenna.ground", what: "The ground beside an antenna's clear area is whole: no other net's tracks, vias or parts within a band of it" },
   { id: "antenna.fence", what: "The ground edge around an antenna's clear area is stitched with vias no more than a twentieth of a wavelength apart" },
   { id: "rf.feed", what: "An RF feed is short, one width, 50 ohm, on an outer layer with no via, bends gently, runs over unbroken ground and has ground vias down both sides" },
   { id: "stackup.reference", what: "Fast and RF signals have a ground plane on the layer next to them" },
@@ -108400,6 +108408,7 @@ function reviewPhysics(doc, P, k, settings, add) {
     return grow5(ko ? ko.box : antennaRegion(S2, a, LIMITS.antennaClear), 0.3);
   });
   {
+    const crowded = [];
     const dirty = [], inland = [], open2 = [], bare_ = [], thin = [], noGround = [];
     for (const a of antennas) {
       const own = new Set(a.pads.map((p) => p.net).filter(Boolean));
@@ -108435,6 +108444,22 @@ function reviewPhysics(doc, P, k, settings, add) {
       const ko = S2.keepouts.find((q) => q.copper && hit4(q.box, a.box));
       if (gz && !ko) open2.push(a.ref);
       const region = ko ? ko.box : antennaRegion(S2, a, LIMITS.antennaClear);
+      {
+        const band = grow5(region, 1.2), bshape = rectShape(band), inner = rectShape(grow5(region, 0.05));
+        const cut = /* @__PURE__ */ new Set();
+        const quiet = (n2) => !n2 || own.has(n2) || rfNets.includes(n2) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(n2);
+        for (const c of S2.conds) {
+          if (c.kind === "zone" || quiet(c.net) || !hit4(c.bbox, band) || P.shapeGap(c.shape, bshape) > 0) continue;
+          if (c.kind === "pad") {
+            const f2 = fps.find((q) => q.id === c.item.id);
+            if (f2 && f2.id !== a.id) cut.add(`${f2.ref} (${bare(c.net)})`);
+            continue;
+          }
+          if (P.shapeGap(c.shape, inner) <= 0) continue;
+          cut.add(`${c.kind === "via" ? "a via" : "a track"} of ${bare(c.net)}`);
+        }
+        if (cut.size) crowded.push(`${a.ref}: ${Array.from(cut).slice(0, 6).join("; ")}`);
+      }
       const ring = ringPoints(S2, region, 1, 0.5, 0.4).filter(([x, y]) => S2.gndLayersAt(x, y) >= 2);
       if (ring.length >= 4) {
         const gaps = ring.filter(([x, y]) => S2.nearestStitch(x, y) > reach);
@@ -108442,6 +108467,7 @@ function reviewPhysics(doc, P, k, settings, add) {
         else if (gaps.length > ring.length * 0.2) thin.push(`${a.ref}: ${Math.round(gaps.length * 0.5)} mm of ${Math.round(ring.length * 0.5)} mm of ground edge has no via within ${r22(reach)} mm, first near ${at(gaps[0][0], gaps[0][1])}`);
       }
     }
+    if (crowded.length) add("antenna.ground", "error", "Other nets stand or run in the ground right beside an antenna's clear area. That ground is the antenna's counterpoise: keep a band of 1.2 mm round the clear area whole, with only the feed and ground vias in it. Move the parts away (board.autoplace() and board.seat() keep them out) and route again (the router keeps other nets out of the band).", crowded);
     if (dirty.length) add("antenna.keepout", "error", "There is copper in an antenna's clear area. An antenna radiates into the space around it: copper under or beside it, on any layer, detunes it and swallows the signal. Clear every layer (board.antenna(ref) adds the keep-out and refills).", dirty);
     if (inland.length) add("antenna.keepout", "warning", `An antenna belongs at a board edge, preferably a corner, pointing away from the rest of the board (within ${LIMITS.antennaEdge} mm of the edge).`, inland);
     if (open2.length) add("antenna.keepout", "warning", "No keep-out area covers these antennas, so the next zone fill pours copper under them. board.antenna(ref) adds one on every layer.", open2);

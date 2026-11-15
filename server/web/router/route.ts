@@ -77,6 +77,8 @@ export interface RouteOptions {
   fewerVias?: boolean;
   /** the most vias any one connection (pad to pad) may use; a connection that cannot be made within it is left open and reported */
   maxViasPerConnection?: number;
+  /** Width in mm of the ground band kept free of other nets round an antenna's clear area (default 1.2; 0 turns it off). */
+  antennaBand?: number;
   /** false keeps every via at its net class's size.  By default a connection that cannot be made with it may use
    *  the smallest via Board Setup's constraints permit. */
   smallVias?: boolean;           // after routing, lay each route that changes layer again without (or with fewer) vias where the finished board leaves room; default true
@@ -299,6 +301,10 @@ export class Router {
         if (z.kind !== "zone" || !K.kid(z.node, "keepout")) continue;
         const polys: Pt[][] = K.kids(z.node, "polygon").map((poly: any) => K.ptsOf(poly) as Pt[]).filter((pts: Pt[]) => pts.length >= 3);
         if (!polys.some(inside)) continue; const t = cellsIn(polys); for (let i = 0; i < t.length; i++) if (t[i]) q[i] = 1; marked = true;
+        // the ground beside the clear area is part of the antenna: a band of it stays whole, so no other net runs along the edge
+        const band = this.opts.antennaBand === undefined ? 1.2 : Math.max(0, +this.opts.antennaBand);
+        if (band > 0) { let b: Box = [Infinity, Infinity, -Infinity, -Infinity]; for (const pts of polys) for (const pt of pts) b = [Math.min(b[0], pt[0] - band), Math.min(b[1], pt[1] - band), Math.max(b[2], pt[0] + band), Math.max(b[3], pt[1] + band)];
+          const cb = this.cellBox(b); if (cb) for (let iy = cb[1]; iy <= cb[3]; iy++) q.fill(1, iy * W + cb[0], iy * W + cb[2] + 1); }
       }
       if (!marked) { let b: Box = [Infinity, Infinity, -Infinity, -Infinity]; for (const p of pads) b = [Math.min(b[0], p.x - 2.5), Math.min(b[1], p.y - 2.5), Math.max(b[2], p.x + 2.5), Math.max(b[3], p.y + 2.5)];
         const cb = this.cellBox(b); if (cb) for (let iy = cb[1]; iy <= cb[3]; iy++) q.fill(1, iy * W + cb[0], iy * W + cb[2] + 1); }

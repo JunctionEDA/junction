@@ -1782,6 +1782,10 @@ class Board(_Doc):
             if not chips and not any(p["ref"].lower() == ref.lower() for p in parts):
                 raise HarnessError(f"There is no footprint {ref} on the board.")
         boxes = {r: b for r, b in self.courtyards().items()}
+        from . import seat      # an antenna's clear area and the band of whole ground beside it take no capacitor
+        for a in parts:
+            if seat._Survey.antenna(None, a) and a["ref"] in boxes:
+                boxes["~~" + a["ref"]] = seat._band(seat._Survey(self), boxes[a["ref"]])
 
         def supply_of(c):
             a, b = (c["pads"][0][3] or ""), (c["pads"][1][3] or "")

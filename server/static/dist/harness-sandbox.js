@@ -1885,6 +1885,10 @@ class Board(_Doc):
             if not chips and not any(p["ref"].lower() == ref.lower() for p in parts):
                 raise HarnessError(f"There is no footprint {ref} on the board.")
         boxes = {r: b for r, b in self.courtyards().items()}
+        from . import seat      # an antenna's clear area and the band of whole ground beside it take no capacitor
+        for a in parts:
+            if seat._Survey.antenna(None, a) and a["ref"] in boxes:
+                boxes["~~" + a["ref"]] = seat._band(seat._Survey(self), boxes[a["ref"]])
 
         def supply_of(c):
             a, b = (c["pads"][0][3] or ""), (c["pads"][1][3] or "")
@@ -5841,6 +5845,11 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         pass
     if route:
         left = (out.get("routed") or {}).get("left") or {}
+        if left:      # the later steps (ground vias, stitching, pours) close ground connections the router left: count what is open now
+            try:
+                left = self.unrouted()
+            except HarnessError:
+                pass
         if left:
             refuse("routing.open", f"{sum(left.values())} connections are not routed ({', '.join(f'{n} {c}' for n, c in list(left.items())[:8])}). An open net is a crossing: move or turn the part it starts at, or give swap= more nets, then route again.")
         if (out.get("drc") or {}).get("errors"):
@@ -6028,6 +6037,17 @@ class _Survey:
         return first, later
 
 
+BAND = 1.2      # mm of whole ground kept beside an antenna's clear area
+
+
+def _band(S: _Survey, b) -> tuple:
+    """An antenna's clear area (2 mm round it, out to a board edge within 3 mm) and the ground band beside it."""
+    box = [b[0] - 2, b[1] - 2, b[2] + 2, b[3] + 2]; ol = S.outline
+    if ol:
+        box = [ol[0] if box[0] - ol[0] < 3 else box[0], ol[1] if box[1] - ol[1] < 3 else box[1], ol[2] if ol[2] - box[2] < 3 else box[2], ol[3] if ol[3] - box[3] < 3 else box[3]]
+    return (box[0] - BAND, box[1] - BAND, box[2] + BAND, box[3] + BAND)
+
+
 def _ways(S: _Survey, anchor, skip_nets) -> list:
     """The way each signal pin of a part takes out of it and on to its partner, as line pieces, and the spot in front
     of each supply pin of a chip."""
@@ -6081,6 +6101,7 @@ def _seat(self, refs=None, reach: float = 3.5, apply: bool = True, skip=(), give
     def movable(p) -> bool:
         return p["ref"].lower() not in held and (want is None or p["ref"].lower() in want) and not any(q[3] and not S.rail(q[3]) and has_tracks(q[3]) for q in p["pads"])
 
+    radio = set(_radio(self))
     first, later = S.jobs()
     pending = {j["ref"] for j in first + later if movable(S.by_ref[j["ref"]])}      # still to be seated: they do not hold their old spots
     pending |= {str(r) for r in giveway}      # parts that are placed after this pass (the bypass capacitors) do not hold their spots either
@@ -6091,6 +6112,7 @@ def _seat(self, refs=None, reach: float = 3.5, apply: bool = True, skip=(), give
             if ol:
                 box = [ol[0] if box[0] - ol[0] < 3 else box[0], ol[1] if box[1] - ol[1] < 3 else box[1], ol[2] if ol[2] - box[2] < 3 else box[2], ol[3] if ol[3] - box[3] < 3 else box[3]]
             taken["~" + a["ref"]] = tuple(box)
+            taken["~~" + a["ref"]] = _band(S, b)      # and a band of whole ground beside it, which only the matching network may stand in
     pos = {p["ref"]: {q[0]: (q[1], q[2]) for q in p["pads"]} for p in S.parts}      # pad positions as seated so far
 
     def put(p, x, y, rot, box):
@@ -6108,7 +6130,7 @@ def _seat(self, refs=None, reach: float = 3.5, apply: bool = True, skip=(), give
         b = S.boxes[p["ref"]]; w, h = b[2] - b[0], b[3] - b[1]; rot0 = p.get("rotation") or 0
         hot, far = p["pads"][hot_i], p["pads"][1 - hot_i]
         bx, by = (b[0] + b[2]) / 2 - p["x"], (b[1] + b[3]) / 2 - p["y"]      # the courtyard's middle from the part's origin
-        others = [t for r, t in taken.items() if r != p["ref"]]; best = None
+        others = [t for r, t in taken.items() if r != p["ref"] and not (r.startswith("~~") and p["ref"] in radio)]; best = None
         for anchor, at, row, outd, name, ways, far_at in pins:
             for turn in (0, 90, 180, 270):
                 px, py = _turn(hot[1] - p["x"], hot[2] - p["y"], turn); fx, fy = _turn(far[1] - p["x"], far[2] - p["y"], turn)
@@ -6265,13 +6287,14 @@ def _settle(self, skip=(), reach: float = 6.0) -> dict:
     that found no room within \`reach\` mm: the board is too small or too full there."""
     self.flush(); self._geom = None
     S = _Survey(self); held = {str(r).lower() for r in skip}; out: dict = {}
-    taken = {r: tuple(b) for r, b in S.boxes.items()}
+    taken = {r: tuple(b) for r, b in S.boxes.items()}; radio = set(_radio(self))
     for a in S.parts:
         if S.antenna(a) and a["ref"] in S.boxes:
             b = S.boxes[a["ref"]]; taken["~" + a["ref"]] = (b[0] - 2, b[1] - 2, b[2] + 2, b[3] + 2)
+            taken["~~" + a["ref"]] = _band(S, b)
     small = [p for p in S.parts if len(p["pads"]) == 2 and p["ref"].lower() not in held and not S.antenna(p)]
     for p in sorted(small, key=lambda p: p["ref"], reverse=True):
-        b = taken[p["ref"]]; others = [t for r, t in taken.items() if r != p["ref"]]
+        b = taken[p["ref"]]; others = [t for r, t in taken.items() if r != p["ref"] and not (r.startswith("~~") and p["ref"] in radio)]
         if _free(S, b, others):
             continue
         w, h = b[2] - b[0], b[3] - b[1]; cx, cy = (b[0] + b[2]) / 2, (b[1] + b[3]) / 2; best = None

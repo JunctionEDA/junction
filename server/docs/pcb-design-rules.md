@@ -100,6 +100,11 @@ layers or a coplanar feed. **checked** (`rf.feed` compares each RF track's width
 - Chip and trace antennas: no copper on any layer under or beside the antenna, sized to its datasheet (Johanson:
   ground more than 2 mm from the short edges and 4 mm from the long edge). `board.antenna(ref)` adds the keep-out.
   **checked**.
+- The ground right beside the clear area is the antenna's counterpoise, so it stays whole: a band of 1.2 mm round
+  the clear area holds only the feed, the matching network and ground vias. No decoupling capacitor, supply track
+  or signal via stands or runs there (owner, 2026-11-15: capacitors and a via hugging the keep-out edge are
+  "cooked"). **planned** (`seat`, `place_bypass`, `settle` keep parts out; the router keeps other nets out,
+  `antennaBand`), **checked** (`antenna.ground`, an error, so `design()` refuses the board).
 - Patch antennas (GPS, GNSS) are the opposite: unbroken ground under and around them. **checked**.
 - The ground edge facing the antenna, and the pours beside the feed, are stitched with vias no further apart than
   a twentieth of a wavelength in the board: about 2.9 mm at 2.45 GHz, 1.2 mm at 5.8 GHz, 4.5 mm at 1.575 GHz
@@ -131,6 +136,10 @@ front of that pin, turned so its far end points where its other net goes. `board
 - A crystal sits beside the oscillator pins, turned so its pads face the pins in the same order, so both nets
   reach it on the top layer without a via; load capacitors on the far side, grounded at once. **planned**,
   **checked** (`crystal.near`, `crystal.vias`).
+- A four-pad crystal has its two signal pads on a diagonal, so whichever way it is turned one ground pad lies
+  between the two tracks. Turn it so both tracks run straight from the pins without a jog and the other ground
+  pad faces open pour; the boxed-in ground pad takes one ground via beside it (a ground via is not a fault, a via
+  on XTAL_I or XTAL_O is). **planned**, **checked** (`crystal.vias`).
 - A matching network runs in a straight line from the RF pin to the antenna feed, series parts in line, shunts
   beside the line with their ground ends away from it; the whole RF net no longer than 12 mm. Other nets do not
   cross the antenna's clear area. **planned**, **checked** (`rf.match`, `rf.feed`).

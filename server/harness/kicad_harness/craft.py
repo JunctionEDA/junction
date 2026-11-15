@@ -178,6 +178,11 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         pass
     if route:
         left = (out.get("routed") or {}).get("left") or {}
+        if left:      # the later steps (ground vias, stitching, pours) close ground connections the router left: count what is open now
+            try:
+                left = self.unrouted()
+            except HarnessError:
+                pass
         if left:
             refuse("routing.open", f"{sum(left.values())} connections are not routed ({', '.join(f'{n} {c}' for n, c in list(left.items())[:8])}). An open net is a crossing: move or turn the part it starts at, or give swap= more nets, then route again.")
         if (out.get("drc") or {}).get("errors"):

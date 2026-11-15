@@ -83,6 +83,18 @@ class Seat(Boards):
         self.assertNotIn("rf.match", " ".join(b.seating()["findings"]))
         self.assertEqual(b.clashes(), [])
 
+    def test_nothing_but_the_matching_network_stands_in_the_ground_beside_an_antenna(self):
+        ant = part("AE1", (6, 3), [("1", -1.2, 0, 1, 1.4, "FEED"), ("2", 1.2, 0, 1, 1.4, "")], value="2450AT18A100E", lib="RF_Antenna:Chip")
+        cap = part("C1", (9.6, 6.0), [("1", -0.5, 0, 0.5, 0.6, "+3V3"), ("2", 0.5, 0, 0.5, 0.6, "GND")], value="100n")
+        b = self.open(edge(BOX), mcu((20, 14)), ant, cap)
+        from kicad_harness import seat as seating
+        geo = b.geometry(); S = seating._Survey(b); band = seating._band(S, b.courtyards()["AE1"])
+        self.assertTrue(band[0] < 9.6 < band[2] and band[1] < 6.0 < band[3])      # the capacitor starts in the band
+        moved = b.settle()
+        self.assertIn("C1", moved)
+        x, y = moved["C1"]
+        self.assertFalse(band[0] < x < band[2] and band[1] < y < band[3])
+
     def test_a_part_off_the_board_is_a_fault(self):
         b = self.open(edge(BOX), usb(), R("R1", (60, 5), "CC1", "GND"))
         self.assertIn("placement.outside", " ".join(b.seating()["findings"]))
