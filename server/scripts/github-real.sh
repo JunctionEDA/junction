@@ -4,6 +4,7 @@
 # this checkout. Everything lives in a temporary folder and is stopped at the end.
 #
 #   REAL_REPO=owner/throwaway server/scripts/github-real.sh
+#   REAL_REPO=owner/throwaway REAL_TEST=github-multi-real.mjs server/scripts/github-real.sh
 #
 # Needs: cargo, node, Postgres binaries (initdb, pg_ctl) on PATH, and a GitHub token for
 # an account that can push to REAL_REPO, in GH_TOKEN or from `gh auth token`.
@@ -46,4 +47,4 @@ DATABASE_URL="$DB" JWT_SECRET=realtest PUBLIC_URL=http://127.0.0.1:8096 PORT=809
 for _ in $(seq 1 60); do curl -fsS http://127.0.0.1:8096/healthz >/dev/null 2>&1 && break; sleep 0.5; done
 
 E2E_BASE=http://127.0.0.1:8096 E2E_PG_URL="$DB" E2E_JWT_SECRET=realtest REAL_REPO="$REAL_REPO" REAL_GH_ID="$GH_ID" \
-  node scripts/github-real.mjs
+  node "scripts/${REAL_TEST:-github-real.mjs}"
