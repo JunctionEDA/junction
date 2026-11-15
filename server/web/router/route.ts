@@ -1194,7 +1194,9 @@ export class Router {
     if (this.opts.fence !== false && !this.stopped) this.fence();
     if (this.opts.explain !== false) this.explain();
     this.ms = Date.now() - t0; this.passes = pass;
-    if (typeof process !== "undefined" && process.env && process.env.KC_ROUTER_WORK) console.error('router work', work.steps - w0, 'steps in', this.ms, 'ms');
+    // `process` exists only under node (the router's tests); the browser build has no node types
+    const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+    if (env && env.KC_ROUTER_WORK) console.error('router work', work.steps - w0, 'steps in', this.ms, 'ms');
     return this.result();
   }
 
