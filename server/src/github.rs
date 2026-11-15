@@ -1783,6 +1783,30 @@ pub async fn project_status(
     if let Some((from, to)) = &v.branch_moved {
         out["branchMoved"] = json!({ "from": from, "to": to });
     }
+    // Other online projects linked to this very folder: allowed, but worth knowing —
+    // each one's push is the other's pull.
+    let rows = sqlx::query(
+        "SELECT g.project_id, p.name FROM project_github g JOIN projects p ON p.id = g.project_id
+         WHERE lower(g.repo_owner) = lower($1) AND lower(g.repo_name) = lower($2) AND g.branch = $3 AND g.subdir = $4
+           AND g.project_id <> $5 AND p.deleted_at IS NULL ORDER BY g.created_at",
+    )
+    .bind(&v.link.repo.owner)
+    .bind(&v.link.repo.name)
+    .bind(&v.link.branch)
+    .bind(&v.link.subdir)
+    .bind(id)
+    .fetch_all(&state.pool)
+    .await?;
+    let mut also = Vec::new();
+    for r in rows {
+        let pid: Uuid = r.get("project_id");
+        if persist::effective_role(&state.pool, user.id, pid).await?.is_some() {
+            also.push(json!({ "projectId": pid, "name": r.get::<String, _>("name") }));
+        }
+    }
+    if !also.is_empty() {
+        out["alsoLinked"] = json!(also);
+    }
     let removed = sqlx::query(
         "SELECT r.id, r.path, r.removed_at, octet_length(r.content) AS size, u.login
          FROM project_github_removed r LEFT JOIN users u ON u.id = r.removed_by

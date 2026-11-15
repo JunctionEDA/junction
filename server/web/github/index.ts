@@ -68,6 +68,8 @@ interface Status {
   /** The folder was found elsewhere and the link followed it. */
   moved?: { from: string; to: string };
   branchMoved?: { from: string; to: string };
+  /** Other online projects linked to the same folder of the same branch. */
+  alsoLinked?: { projectId: string; name: string }[];
   renamedRepo?: { from: string; to: string };
   /** Files a pull removed, kept so they can be put back. */
   removed?: Removed[];
@@ -456,6 +458,10 @@ function render(): void {
   const s = status.summary, files = status.files;
   const canWrite = p.role === "editor";
   if (status.renamedRepo) html += `<div class="callout ok" id="renamedRepo">The repository was renamed on GitHub from <b>${esc(status.renamedRepo.from)}</b> to <b>${esc(status.renamedRepo.to)}</b>. The link follows it.</div>`;
+  if (status.alsoLinked?.length) {
+    const names = status.alsoLinked.map((o) => `<a href="/p/${esc(o.projectId)}/github">${esc(o.name)}</a>`).join(", ");
+    html += `<div class="callout warn" id="also-linked">This folder is also linked to ${status.alsoLinked.length > 1 ? "other online projects" : "another online project"}: ${names}. Both can sync: what one pushes, the other pulls, and a file changed in both is a conflict to settle, never overwritten.</div>`;
+  }
   if (status.branchMoved) html += `<div class="callout ok" id="branch-moved">The branch <span class="mono">${esc(status.branchMoved.from)}</span> is no longer on GitHub. The project is on <span class="mono">${esc(status.branchMoved.to)}</span>, and the link follows it there.</div>`;
   if (status.moved) html += `<div class="callout ok" id="moved">The project's folder moved on GitHub from <span class="mono">${esc(status.moved.from || "/")}</span> to <span class="mono">${esc(status.moved.to || "/")}</span>. The link follows it, and nothing was duplicated.</div>`;
 

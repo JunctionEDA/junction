@@ -273,6 +273,7 @@ try {
   const pb = r.j.projects[0].projectId;
   check('…unless a second copy is asked for', r.status === 200 && pb && pb !== pa, JSON.stringify(r.j));
   let docsB = await docsOf(alice, pb);
+  eq('each of two projects on one folder is told about the other', [(await status(alice, pa)).alsoLinked?.map((o) => o.projectId), (await status(alice, pb)).alsoLinked?.map((o) => o.projectId), (await status(alice, kb)).alsoLinked], [[pb], [pa], undefined]);
   await saveOnline(docs['a.kicad_pcb'], board([fpItem('R', 31, 120)]));
   await saveOnline(docsB['a.kicad_sch'], sch(32, '\t(text "from b"\n\t\t(at 10 10 0)\n\t\t(uuid "' + uuid(33) + '")\n\t)\n'));
   r = await push(alice, pa, { message: 'A moves R' });

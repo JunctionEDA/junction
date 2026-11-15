@@ -567,7 +567,10 @@ try {
   const zipText = Buffer.from(await zip.arrayBuffer()).toString('latin1');
   check('the project download holds the project in its folder and the shared library beside it, as in the repository',
     zip.status === 200 && zipText.includes('keybit/keybit.kicad_pcb') && zipText.includes('lib/lcsc.kicad_sym') && zipText.includes('keybit/collab-manifest.json'), String(zip.status));
-  check('…with no entry that climbs out of where it is unpacked', !zipText.includes('../'));
+  // entry names from the zip's central directory (compressed bytes can hold any three characters by chance)
+  const zipBuf = Buffer.from(zipText, 'latin1'), zipNames = [];
+  for (let i = zipBuf.indexOf('PK\x01\x02', 0, 'latin1'); i >= 0; i = zipBuf.indexOf('PK\x01\x02', i + 46, 'latin1')) zipNames.push(zipBuf.toString('utf8', i + 46, i + 46 + zipBuf.readUInt16LE(i + 28)));
+  check('…with no entry that climbs out of where it is unpacked', zipNames.length > 5 && !zipNames.some((n) => n.startsWith('/') || n.split('/').includes('..')), JSON.stringify(zipNames));
   const flat = await fetch(`${BASE}/api/projects/${panel}/archive`, { headers: { Authorization: `Bearer ${alice}` } });
   const flatText = Buffer.from(await flat.arrayBuffer()).toString('latin1');
   check('a project that shares nothing still downloads as its plain folder', flat.status === 200 && flatText.includes('p1.kicad_pro') && !flatText.includes('p1/p1.kicad_pro'));
