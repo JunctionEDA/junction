@@ -515,7 +515,7 @@ async fn save_link(
 /// The repository each of these projects is linked to, for the project list.
 pub async fn linked_repos(pool: &sqlx::PgPool, ids: &[Uuid]) -> AppResult<HashMap<Uuid, Value>> {
     let rows = sqlx::query(
-        "SELECT project_id, repo_owner, repo_name, branch FROM project_github WHERE project_id = ANY($1)",
+        "SELECT project_id, repo_owner, repo_name, branch, subdir FROM project_github WHERE project_id = ANY($1)",
     )
     .bind(ids)
     .fetch_all(pool)
@@ -524,7 +524,7 @@ pub async fn linked_repos(pool: &sqlx::PgPool, ids: &[Uuid]) -> AppResult<HashMa
         .into_iter()
         .map(|r| {
             let (owner, name): (String, String) = (r.get("repo_owner"), r.get("repo_name"));
-            (r.get("project_id"), json!({ "repo": format!("{owner}/{name}"), "branch": r.get::<String, _>("branch") }))
+            (r.get("project_id"), json!({ "repo": format!("{owner}/{name}"), "branch": r.get::<String, _>("branch"), "path": r.get::<String, _>("subdir") }))
         })
         .collect())
 }
@@ -1293,6 +1293,15 @@ pub async fn scan_repo(
 
     let (remote, found) = remote::scan(&gh, &repo, &branch).await?;
     let online = linked_here(&state, &user, &repo, &branch).await?;
+    // which of them the caller owns (and so may unlink)
+    let ids: Vec<Uuid> = online.values().map(|(pid, _)| *pid).collect();
+    let owned: HashSet<Uuid> = sqlx::query_scalar("SELECT id FROM projects WHERE id = ANY($1) AND owner_id = $2")
+        .bind(&ids)
+        .bind(user.id)
+        .fetch_all(&state.pool)
+        .await?
+        .into_iter()
+        .collect();
     let projects: Vec<Value> = found
         .iter()
         .map(|f| {
@@ -1310,7 +1319,7 @@ pub async fn scan_repo(
                 p["shared"] = f.shared.iter().map(|(path, at, found)| json!({ "path": path, "repoPath": at, "found": found })).collect();
             }
             if let Some((pid, name)) = online.get(&f.path) {
-                p["online"] = json!({ "projectId": pid, "name": name });
+                p["online"] = json!({ "projectId": pid, "name": name, "isOwner": owned.contains(pid) });
             }
             p
         })
@@ -1624,6 +1633,15 @@ pub async fn project_status(
         "link": Value::Null,
     });
     let Some(mut link) = load_link(&state, id).await? else {
+        // Where it was linked until it was unlinked: linking there again carries on.
+        if let Some(r) = sqlx::query("SELECT repo_owner, repo_name, branch, subdir FROM project_github_last WHERE project_id = $1")
+            .bind(id)
+            .fetch_optional(&state.pool)
+            .await?
+        {
+            let (owner, name): (String, String) = (r.get("repo_owner"), r.get("repo_name"));
+            out["lastLink"] = json!({ "repo": format!("{owner}/{name}"), "branch": r.get::<String, _>("branch"), "path": r.get::<String, _>("subdir") });
+        }
         return Ok(Json(out).into_response());
     };
     out["link"] = link_json(&state, &link);

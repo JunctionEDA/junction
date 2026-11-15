@@ -76,6 +76,10 @@
   .seg button { min-height: calc(var(--h-lg) - 2px); }
   .commit { display: flex; gap: 10px; align-items: baseline; padding: 6px 14px; border-bottom: 1px solid var(--line); font-size: var(--fs-base); }
   .commit:last-child { border-bottom: 0; }
+  .commit.proj { align-items: center; padding: 8px 14px; flex-wrap: wrap; }
+  .commit.proj .msg { white-space: normal; display: grid; gap: 2px; }
+  .commit.proj .where { font-size: var(--fs-sm); }
+  #folders .btn.on { border-color: var(--accent); }
   .commit .msg { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* A project to pick in a repository: a tick box, its name and folder, and what it shares. */
   .list .it.pick { align-items: flex-start; cursor: pointer; }

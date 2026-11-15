@@ -109,6 +109,9 @@ try {
   await page.waitForSelector('table.files');
   const pid = page.url().match(/\/p\/([0-9a-f-]{36})/)[1];
   check('import opens the project\'s sync page, all in sync', (await page.textContent('.chip.synced b')) === '4' && await page.isDisabled('#push') && await page.isDisabled('#pull'));
+  check('the page says in a sentence that there is nothing to do, and why each button is off', /Everything is in sync/.test(await page.textContent('#next'))
+    && /Nothing/.test(await page.getAttribute('#push', 'title')) && /Nothing/.test(await page.getAttribute('#pull', 'title')));
+  check('the project says it is linked, and to what', /Linked to\s+ui-dana\/preamp/.test(await page.textContent('section.box .in')) && await page.locator('#linked').count() === 1);
   await shot(page, '03-in-sync');
 
   // ---- changes on both sides
@@ -209,9 +212,37 @@ try {
 
   // ---- linking a project that is not linked yet; unlink
   await page.click('#unlink');
+  check('unlinking asks first and says nothing is deleted', /Nothing is deleted/.test(await page.textContent('[data-k="confirm"]')));
+  await page.click('[data-k="confirm-cancel"]');
+  check('…and Cancel leaves the link alone', await page.locator('#unlink').count() === 1);
+  await page.click('#unlink');
   await page.click('[data-k="confirm-ok"]');   // the themed question, not the browser's confirm()
   await page.waitForSelector('#doLink');
   check('unlink returns to the link form', await page.isDisabled('#doLink'));
+  check('…says what happened, and offers the same place again in one click', /Unlinked/.test(await page.textContent('.callout.ok')) && /ui-dana\/preamp/.test(await page.textContent('#lastLink')));
+  await shot(page, '09b-unlinked');
+  await page.click('#relink');
+  await page.waitForSelector('table.files');
+  check('Link again puts it back, in sync', (await page.textContent('.chip.synced b')) !== '0' && await page.locator('#unlink').count() === 1);
+  // the list of projects on /github shows each one's link and unlinks from there too
+  await page.goto(`${BASE}/github`);
+  await page.waitForSelector(`#mine [data-unlink="${pid}"]`);
+  check('the project list shows where each project is linked', /Linked to\s+ui-dana\/preamp/.test(await page.textContent(`#mine [data-project="${pid}"]`)));
+  await page.click('[data-repo="ui-dana/preamp"]');
+  await page.waitForSelector('[data-unlink-scan]');
+  check('a repository folder that is online already says so, with Open sync and Unlink', await page.locator('[data-open]').count() === 1 && await page.locator('[data-unlink-scan]').count() === 1);
+  await shot(page, '09c-list-linked');
+  await page.click('[data-unlink-scan]');
+  await page.click('[data-k="confirm-ok"]');
+  await page.waitForSelector(`#mine [data-project="${pid}"] a.btn:has-text("Link to a repository")`);
+  check('unlinking from the list frees the folder and the project offers to be linked', await page.locator('[data-unlink-scan]').count() === 0 && await page.locator('[data-pick]').count() === 2);
+  await page.goto(`${BASE}/p/${pid}/github`);
+  await page.waitForSelector('#doLink');
+  await page.click('[data-repo="ui-dana/preamp"]');
+  await page.waitForSelector('[data-folder]');
+  await page.click('[data-folder="0"]');
+  check('picking a repository lists its KiCad project folders to click instead of typing', (await page.inputValue('#lPath')) === 'hardware');
+  await page.fill('#lPath', '');
   await page.click('#mode [data-v="new"]');
   check('a new repository is named after the project', (await page.inputValue('#newName')) === 'preamp');
   await page.fill('#newName', 'preamp-rev-b');

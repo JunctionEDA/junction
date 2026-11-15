@@ -34,7 +34,7 @@ interface ScanProject {
   /** Libraries its tables name outside its folder. */
   shared?: { path: string; repoPath?: string | null; found: boolean }[];
   /** The online project already linked to this folder. */
-  online?: { projectId: string; name: string };
+  online?: { projectId: string; name: string; isOwner?: boolean };
 }
 interface Scan { repo: string; branch: string; branches: string[]; projects: ScanProject[]; truncated: boolean; notes?: Note[] }
 interface Imported { path: string; projectId?: string; name?: string; files?: number; shared?: number; existing?: boolean; error?: string; notes?: Note[] }
@@ -70,6 +70,8 @@ interface Status {
   branchMoved?: { from: string; to: string };
   /** Other online projects linked to the same folder of the same branch. */
   alsoLinked?: { projectId: string; name: string }[];
+  /** Where the project was linked until it was unlinked. */
+  lastLink?: Where;
   renamedRepo?: { from: string; to: string };
   /** Files a pull removed, kept so they can be put back. */
   removed?: Removed[];
@@ -85,7 +87,8 @@ interface PushResult {
 interface PullConflict { item: string; kept: "github" | "online" }
 interface PullUpdate { path: string; action: string; from?: string; fromGithub: number; fromOnline: number; conflicts: PullConflict[] }
 interface PullResult { updated: PullUpdate[]; skipped: { path: string; reason: string }[]; checkpoint?: string | null }
-interface ListedProject { projectId: string; name: string; ownerLogin: string; updatedAt: string }
+interface Where { repo: string; branch: string; path: string }
+interface ListedProject { projectId: string; name: string; ownerLogin: string; updatedAt: string; github?: Where | null }
 type Resolution = "merge" | "github" | "online" | "";
 
 /** A failed request: the server's message, its status and its machine code. */
@@ -162,6 +165,25 @@ function flashHtml(): string {
   if (!flash) return "";
   const f = flash; flash = null;
   return `<div class="callout ${f.kind}" role="status">${f.html}</div>`;
+}
+
+/** "owner/repo · branch · /folder", the way a link is written everywhere on the page. */
+const whereHtml = (w: Where): string =>
+  `<b>${esc(w.repo)}</b> <span class="pill">${esc(w.branch)}</span> <span class="pill">/${esc(w.path)}</span>`;
+
+/**
+ * Ask, then unlink a project from its repository.  The question says what unlinking does and does not do, so nobody
+ * has to guess whether it deletes anything.  Resolves true when the project was unlinked.
+ */
+async function unlinkProject(id: string, name: string, w: Where | null): Promise<boolean> {
+  const from = w ? ` from ${w.repo}` : "";
+  const yes = await askConfirm("Unlink from GitHub",
+    `Unlink "${name}"${from}?\n\nNothing is deleted, online or on GitHub. Pushing and pulling stop until the project is linked again; `
+    + "linking it to the same folder later carries on where it left off.", { ok: "Unlink" });
+  if (!yes) return false;
+  await api(`/api/projects/${id}/github`, { method: "DELETE" });
+  flash = { kind: "ok", html: `Unlinked <b>${esc(name)}</b>${w ? ` from <b>${esc(w.repo)}</b>` : ""}. Nothing was deleted.` };
+  return true;
 }
 
 // ---------------------------------------------------------------- shared pieces
@@ -251,6 +273,7 @@ async function renderImport(): Promise<void> {
   try { gh = await api<Connection>("/api/github"); }
   catch (e) { return renderSignedOut(e); }
   need("#who").textContent = gh.login;
+  me = gh.login;
 
   app.innerHTML = `<div><h1>GitHub</h1>
       <p class="muted">Keep an online project and a repository folder in step: push what changed online, pull what changed on GitHub, and merge item by item when both did.</p></div>
@@ -265,12 +288,29 @@ async function renderImport(): Promise<void> {
     repoPicker(need("#picker"), (full) => scan(full, null));
   }
 
+  loadMine();
+}
+
+let me = "";   // the signed-in person's login: only a project's owner links and unlinks it
+
+/** The caller's online projects, each with where it is linked and the way to link or unlink it. */
+function loadMine(): void {
   api<{ projects: ListedProject[] }>("/api/projects").then((j) => {
     need("#mine").innerHTML = j.projects.length
-      ? j.projects.map((p) => `<a class="commit" href="/p/${p.projectId}/github" style="color:inherit">
-          <span class="msg"><b>${esc(p.name)}</b> <span class="muted">· ${esc(p.ownerLogin)}</span></span>
-          <span class="muted">${esc(ago(p.updatedAt))}</span><span class="pill">GitHub sync ›</span></a>`).join("")
+      ? j.projects.map((p) => {
+          const owner = p.ownerLogin === me;
+          return `<div class="commit proj" data-project="${esc(p.projectId)}">
+          <span class="msg"><span><a href="/p/${esc(p.projectId)}/github"><b>${esc(p.name)}</b></a> <span class="muted">· ${esc(p.ownerLogin)}</span></span>
+            <span class="where">${p.github ? `Linked to ${whereHtml(p.github)}` : `<span class="muted">Not linked to a repository</span>`}</span></span>
+          ${p.github
+            ? `<a class="btn small" href="/p/${esc(p.projectId)}/github">Sync</a>${owner ? `<button type="button" class="btn small danger" data-unlink="${esc(p.projectId)}">Unlink</button>` : ""}`
+            : owner ? `<a class="btn small" href="/p/${esc(p.projectId)}/github">Link to a repository</a>` : ""}</div>`;
+        }).join("")
       : `<div class="in muted">No projects yet. Bring one in from a repository above, or start a session from the desktop app.</div>`;
+    $$<HTMLButtonElement>("#mine [data-unlink]").forEach((b) => (b.onclick = () => busy(b, async () => {
+      const p = j.projects.find((x) => x.projectId === b.dataset.unlink);
+      if (p && await unlinkProject(p.projectId, p.name, p.github || null)) await renderImport();
+    })));
   }).catch((e) => { need("#mine").innerHTML = `<div class="in muted">${esc(message(e))}</div>`; });
 }
 
@@ -306,7 +346,9 @@ async function scan(full: string, branch: string | null): Promise<void> {
         ${p.online ? `<span class="tick"></span>` : `<input type="checkbox" data-pick="${i}"${fresh.length === 1 ? " checked" : ""}>`}
         <span class="what"><span class="line"><span class="nm">${esc(p.name)}</span><span class="muted mono">${esc(p.path || "/")}</span></span>${about(p)}</span>
         <span class="sp"></span><span class="muted">${plural(p.files, "file")}</span>
-        ${p.online ? `<a class="btn small" href="/p/${esc(p.online.projectId)}/github" data-open="${i}">Online · open</a>` : ""}</label>`).join("")
+        ${p.online ? `<span class="pill synced" title="This folder is already an online project">online</span>
+          <a class="btn small" href="/p/${esc(p.online.projectId)}/github" data-open="${i}">Open sync</a>
+          ${p.online.isOwner ? `<button type="button" class="btn small danger" data-unlink-scan="${i}">Unlink</button>` : ""}` : ""}</label>`).join("")
       : `<div class="empty">No KiCad files on this branch.</div>`}</div>
     ${fresh.length ? `<div class="row actions" style="margin-top:10px">
       ${fresh.length > 1 ? `<label class="muted" style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="pickAll"> Select all</label>` : ""}
@@ -323,6 +365,18 @@ async function scan(full: string, branch: string | null): Promise<void> {
     if (go) { go.disabled = !n; go.textContent = n > 1 ? `Bring ${n} projects online` : "Bring online"; }
     if (all) { all.checked = n === boxes.length; all.indeterminate = n > 0 && n < boxes.length; }
   };
+  $$<HTMLButtonElement>("[data-unlink-scan]", el).forEach((b) => (b.onclick = (ev) => {
+    ev.preventDefault();
+    const p = s.projects[Number(b.dataset.unlinkScan)];
+    if (!p.online) return;
+    const o = p.online;
+    void busy(b, async () => {
+      if (!await unlinkProject(o.projectId, o.name, { repo: s.repo, branch: s.branch, path: p.path })) return;
+      const slot = $("#flash"); if (slot) slot.innerHTML = flashHtml();
+      loadMine();
+      await scan(full, s.branch);
+    });
+  }));
   boxes.forEach((b) => (b.onchange = sync));
   if (all) all.onchange = () => { boxes.forEach((b) => (b.checked = all.checked)); sync(); };
   sync();
@@ -404,6 +458,21 @@ async function loadStatus(): Promise<void> {
   });
 }
 
+/** One sentence saying where things stand and what to press next. */
+function nextStep(s: Summary, canPush: boolean, branch: string): string {
+  const files = (n: number): string => plural(n, "file");
+  if (s.conflict) {
+    return `<b>${files(s.conflict)} changed both online and on GitHub.</b> Choose what to keep for each in the list below, then press Pull`
+      + (s.push ? "; after that, Push sends your online changes." : ".");
+  }
+  if (s.pull && s.push) return `<b>GitHub has ${files(s.pull)} to bring online, and ${files(s.push)} changed online.</b> Pull first, then Push.`;
+  if (s.pull) return `<b>GitHub has changes in ${files(s.pull)} that are not online yet.</b> Press Pull to bring them in.`;
+  if (s.push) return canPush
+    ? `<b>${files(s.push)} changed online since the last sync.</b> Press Push to commit ${s.push === 1 ? "it" : "them"} to <b>${esc(branch)}</b>.`
+    : `<b>${files(s.push)} changed online</b>, but your GitHub account cannot write to this repository.`;
+  return `Everything is in sync with <b>${esc(branch)}</b>. Nothing to push or pull.`;
+}
+
 const STATE_LABEL: Record<FileState, string> = { push: "push", pull: "pull", conflict: "both changed", synced: "in sync" };
 
 function render(): void {
@@ -420,23 +489,37 @@ function render(): void {
   if (lastResult) { html += lastResult; }
 
   if (!link) {
-    html += `<div><h1>${esc(p.name)}</h1><p class="muted">This project is not linked to a repository yet.</p></div>`;
+    const last = status.lastLink;
+    html += `<div><h1>${esc(p.name)}</h1><p class="muted">This project is not linked to a repository${last ? "" : " yet"}. Link it to a folder of a GitHub repository to push its files there and pull changes made with git.</p></div>`;
     html += connectBox(gh);
     if (!p.isOwner) html += `<div class="callout">Only the project's owner can link it to a repository.</div>`;
-    else if (gh.connected) html += linkForm(p, gh);
+    else if (gh.connected) {
+      if (last) html += `<section class="box" id="lastLink"><h2>Link it again</h2><div class="in"><div class="row">
+          <div class="grow">It was linked to ${whereHtml(last)}<div class="muted">Linking it there again carries on where it left off: what you changed since is ready to push.</div></div>
+          <button class="btn primary" id="relink">Link again</button></div></div></section>`;
+      html += linkForm(p, gh, !!last);
+    }
     app.innerHTML = html;
     bindConnectBox(loadStatus);
-    if (p.isOwner && gh.connected) bindLinkForm();
+    if (p.isOwner && gh.connected) {
+      bindLinkForm();
+      const again = $<HTMLButtonElement>("#relink");
+      if (again && last) again.onclick = () => busy(again, async () => {
+        await api(`/api/projects/${projectId}/github`, { method: "PUT", body: { repo: last.repo, branch: last.branch, path: last.path } });
+        flash = { kind: "ok", html: `Linked to <b>${esc(last.repo)}</b> again.` };
+        await loadStatus();
+      });
+    }
     return;
   }
 
-  html += `<section class="box"><h2>${esc(p.name)}<span class="sp"></span>
-      ${p.isOwner ? `<button class="btn small danger" id="unlink">Unlink</button>` : ""}</h2><div class="in">
+  html += `<section class="box"><h2>${esc(p.name)}<span class="sp"></span><span class="pill synced" id="linked">linked</span></h2><div class="in">
       <div class="row"><div class="grow">
-        <a href="${esc(link.url)}" target="_blank" rel="noreferrer"><b>${esc(link.repo)}</b></a>
-        <span class="pill">${esc(link.branch)}</span>${link.path ? ` <span class="pill">/${esc(link.path)}</span>` : ""}
+        <span class="muted">Linked to</span> <a href="${esc(link.url)}" target="_blank" rel="noreferrer" title="Open this folder on GitHub"><b>${esc(link.repo)}</b></a>
+        <span class="pill" title="Branch">${esc(link.branch)}</span> <span class="pill" title="Folder in the repository">/${esc(link.path)}</span>
         <div class="muted">${link.syncedAt ? `Last synced ${esc(ago(link.syncedAt))}` : "Not synced yet"}${link.linkedBy ? ` · linked by ${esc(link.linkedBy)}` : ""}</div>
-      </div><button class="btn small" id="refresh">Refresh</button></div></div></section>`;
+      </div><button class="btn small" id="refresh" title="Look at GitHub again">Refresh</button>
+      ${p.isOwner ? `<button class="btn small danger" id="unlink" title="Stop syncing with this repository. Nothing is deleted.">Unlink</button>` : ""}</div></div></section>`;
 
   if (!gh.connected) {
     html += connectBox(gh);
@@ -498,10 +581,10 @@ function render(): void {
   if (canWrite) {
     const nothing = !s.push && !s.pull && !s.conflict;
     html += `<section class="box"><h2>Sync</h2><div class="in">
-      ${nothing ? `<p class="muted">Everything is in sync with <b>${esc(link.branch)}</b>.</p>` : ""}
+      <p id="next" class="${nothing ? "muted" : ""}" style="margin-bottom:10px">${nextStep(s, r.canPush, link.branch)}</p>
       <div class="row actions">
-        <button class="btn primary" id="pull" ${s.pull || s.conflict ? "" : "disabled"}>Pull from GitHub${s.pull + s.conflict ? ` (${s.pull + s.conflict})` : ""}</button>
-        <button class="btn primary" id="push" ${s.push && r.canPush ? "" : "disabled"}>Push to GitHub${s.push ? ` (${s.push})` : ""}</button>
+        <button class="btn primary" id="pull" ${s.pull || s.conflict ? "" : `disabled title="Nothing on GitHub to bring online"`}>Pull from GitHub${s.pull + s.conflict ? ` (${s.pull + s.conflict})` : ""}</button>
+        <button class="btn primary" id="push" ${s.push && r.canPush ? "" : `disabled title="${!r.canPush ? "Your GitHub account cannot write to this repository" : s.conflict ? "Settle the files changed on both sides first (Pull)" : "Nothing online that GitHub does not have"}"`}>Push to GitHub${s.push ? ` (${s.push})` : ""}</button>
       </div>
       <div class="row" style="margin-top:12px">
         <label class="f grow">Commit message <input type="text" id="msg" placeholder="Update ${esc(p.name)} from Junction" maxlength="200"></label>
@@ -604,11 +687,10 @@ function bindMissing(): void {
 function bindCommon(): void {
   const rf = $<HTMLButtonElement>("#refresh"); if (rf) rf.onclick = () => busy(rf, async () => { lastResult = null; await loadStatus(); });
   const un = $<HTMLButtonElement>("#unlink");
-  if (un) un.onclick = () => {
-    void askConfirm("Unlink Repository", "Unlink this project from its repository? Nothing is deleted on either side.", { ok: "Unlink" }).then((yes) => {
-      if (yes) busy(un, async () => { await api(`/api/projects/${projectId}/github`, { method: "DELETE" }); lastResult = null; await loadStatus(); });
-    });
-  };
+  if (un) un.onclick = () => busy(un, async () => {
+    if (!st || !st.link || !projectId) return;
+    if (await unlinkProject(projectId, st.project.name, st.link)) { lastResult = null; await loadStatus(); }
+  });
 }
 
 /** What a push did: files written and removed, where, and what was held back and why. */
@@ -666,10 +748,10 @@ async function doPull(force: boolean): Promise<void> {
 }
 
 // ---------------------------------------------------------------- link form
-function linkForm(p: ProjectInfo, gh: Connection): string {
+function linkForm(p: ProjectInfo, gh: Connection, again = false): string {
   // The app is not allowed to create repositories: a new one is made on GitHub and then chosen.
   const viaApp = gh.via === "app";
-  return `<section class="box"><h2>Link to a repository</h2><div class="in">
+  return `<section class="box"><h2>${again ? "Or link it somewhere else" : "Link to a repository"}</h2><div class="in">
     ${viaApp
       ? `<p class="muted" style="margin-bottom:10px">For a new repository, <a href="https://github.com/new" target="_blank" rel="noreferrer">create it on GitHub</a>, then <a href="${installUrl()}">add it to the chosen repositories</a>.</p>`
       : `<div class="seg" id="mode" style="margin-bottom:12px"><button type="button" data-v="existing" class="on">Existing repository</button><button type="button" data-v="new">New repository</button></div>`}
@@ -681,7 +763,8 @@ function linkForm(p: ProjectInfo, gh: Connection): string {
       <label class="f grow">Branch <input type="text" id="lBranch" placeholder="the repository's default branch" autocapitalize="off" spellcheck="false"></label>
       <label class="f grow">Folder in the repository <input type="text" id="lPath" placeholder="/ (the repository root)" autocapitalize="off" spellcheck="false"></label>
     </div>
-    <p class="muted" style="margin-top:10px">Linking writes nothing to GitHub. After linking you see what differs and choose to push or pull.</p>
+    <div id="folders" class="muted" style="margin-top:8px"></div>
+    <p class="muted" style="margin-top:10px">Linking writes nothing to GitHub and changes nothing online. After linking you see what differs and choose to push or pull. You can unlink at any time.</p>
     <div class="row actions" style="margin-top:4px"><button class="btn primary" id="doLink" disabled>Link</button></div>
   </div></section>`;
 }
@@ -702,6 +785,7 @@ function bindLinkForm(): void {
     picked = full;
     if (repo && repo.defaultBranch) branch.placeholder = repo.defaultBranch + " (default)";
     sync();
+    void suggestFolders(full);
   });
   btn.onclick = () => busy(btn, async () => {
     const body: { branch: string; path: string; repo?: string | null; create?: { name: string; private: boolean } } =
@@ -711,6 +795,24 @@ function bindLinkForm(): void {
     await api(`/api/projects/${projectId}/github`, { method: "PUT", body });
     await loadStatus();
   });
+}
+
+/** The KiCad project folders of the picked repository, to click instead of typing the folder. */
+async function suggestFolders(full: string): Promise<void> {
+  const el = $("#folders"), path = $<HTMLInputElement>("#lPath"), branch = $<HTMLInputElement>("#lBranch");
+  if (!el || !path || !branch) return;
+  el.innerHTML = `<span class="spinner"></span> Looking for KiCad projects in ${esc(full)}…`;
+  let s: Scan;
+  try { s = await api<Scan>(`/api/github/scan?repo=${encodeURIComponent(full)}${branch.value.trim() ? "&branch=" + encodeURIComponent(branch.value.trim()) : ""}`); }
+  catch { el.innerHTML = ""; return; }
+  if (!$("#folders")) return;
+  if (!s.projects.length) { el.innerHTML = `No KiCad project in <b>${esc(s.repo)}</b> (${esc(s.branch)}) yet: the first push puts this one in the folder you name.`; return; }
+  el.innerHTML = `KiCad projects in <b>${esc(s.repo)}</b>, click one to use its folder: ` + s.projects.map((f, i) =>
+    `<button type="button" class="btn small" data-folder="${i}" title="${f.online ? `Already linked to the online project ${esc(f.online.name)}` : `${plural(f.files, "file")}`}">${esc(f.path || "/")}${f.online ? " · linked" : ""}</button>`).join(" ");
+  $$<HTMLButtonElement>("[data-folder]", el).forEach((b) => (b.onclick = () => {
+    path.value = s.projects[Number(b.dataset.folder)].path;
+    $$("[data-folder]", el).forEach((x) => x.classList.toggle("on", x === b));
+  }));
 }
 
 // ---------------------------------------------------------------- go
