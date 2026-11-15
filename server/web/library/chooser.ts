@@ -10,6 +10,8 @@ import { clearPreview, renderFootprintPreview, renderSymbolPreview } from "./pre
 import { fetchItem, libraryIndex, officialLibraries, onSourcesChanged, placedItems, projectLibraries, recentItems, registeredSources, rememberRecent } from "./sources";
 import type { FetchedItem, LibItem, LibKind, LibraryEntry, LibrarySource, SourceContext } from "./sources";
 import { filterLabels, footprintPasses, type FpChooserFilters } from "./fpchoice";
+import { popupMenu } from "../dialogs/dom";
+import { kicadIcon } from "../components/kicon-dom";
 import "../components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 
 export interface ChooserOptions {
@@ -69,7 +71,10 @@ const CSS = `
 .klib-main { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(320px, 1.15fr) 5px minmax(240px, 1fr); padding: 8px 10px 0; }
 .klib-left { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .klib-split { cursor: col-resize; }
-.klib-filter { display: flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-2); padding: 0 6px; margin-bottom: 6px; }
+.klib-filterrow { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.klib-filter { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-2); padding: 0 6px; }
+.klib-gear { flex: none; display: flex; align-items: center; justify-content: center; width: 24px; height: 24px; padding: 0; border: 1px solid transparent; border-radius: var(--r-2); background: transparent; color: var(--ink-2); cursor: default; }
+.klib-gear:hover { background: var(--panel); border-color: var(--line); }
 .klib-filter:focus-within { border-color: var(--blue); }
 .klib-filter svg { flex: none; color: var(--ink-2); }
 .klib-filter input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 12px var(--font); padding: 5px 0; }
@@ -139,6 +144,11 @@ function loadFpFilterPrefs(): { pins: boolean; filters: boolean } {
 function saveFpFilterPrefs(v: { pins: boolean; filters: boolean }): void { try { localStorage.setItem(FP_FILTER_KEY, JSON.stringify(v)); } catch { /* no storage */ } }
 
 /** Open the chooser; resolves with the chosen item (its s-expression fetched) or null on Cancel. */
+type SortMode = "best" | "alpha";
+const SORT_KEY = "kui.libtree.sort";
+function loadSortMode(): SortMode { try { return localStorage.getItem(SORT_KEY) === "alpha" ? "alpha" : "best"; } catch (e) { return "best"; } }
+function saveSortMode(m: SortMode): void { try { localStorage.setItem(SORT_KEY, m); } catch (e) { /* no storage */ } }
+
 export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOptions = {}): Promise<Chosen | null> {
   if (openDialog) openDialog.close();
   ensureCss();
@@ -154,8 +164,8 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
       <div class="kd-title"><span class="klib-title"></span><span class="kd-x" title="Close (Esc)">×</span></div>
       <div class="klib-main">
         <div class="klib-left">
-          <div class="klib-filter"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/></svg>
-            <input type="text" placeholder="Filter" spellcheck="false" autocomplete="off" aria-label="Filter"><span class="klib-clear" title="Clear filter">×</span></div>
+          <div class="klib-filterrow"><div class="klib-filter"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/></svg>
+            <input type="text" placeholder="Filter" spellcheck="false" autocomplete="off" aria-label="Filter"><span class="klib-clear" title="Clear filter">×</span></div><button type="button" class="klib-gear" aria-label="Sort and expand options" data-icon="config"></button></div>
           ${labels.filters || labels.pins ? `<div class="klib-filters">${labels.filters ? `<label><input type="checkbox" class="klib-by-filters"${fpOn.filters ? " checked" : ""}> ${esc(labels.filters)}</label>` : ""}${labels.pins ? `<label><input type="checkbox" class="klib-by-pins"${fpOn.pins ? " checked" : ""}> ${esc(labels.pins)}</label>` : ""}</div>` : ""}
           <div class="klib-head"><span>Item</span><span>Description</span></div>
           <div class="klib-tree" tabindex="0"><div class="klib-rows"></div></div>
@@ -185,6 +195,30 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
     if (unitsBox) unitsBox.checked = CHOOSER_DEFAULTS.allUnits;
     if (opts.viewOnly) { okBtn.disabled = true; okBtn.title = "This document is read-only"; }
     if (opts.filter) { input.value = opts.filter; filterBox.classList.add("has-text"); }
+
+    // LIB_TREE's sort button (config): Sort by Best Match / Sort Alphabetically, then Expand All / Collapse All
+    let sortMode = loadSortMode();
+    const gear = $<HTMLButtonElement>(".klib-gear"); gear.append(kicadIcon("config", 16));
+    gear.addEventListener("click", () => {
+      const r = gear.getBoundingClientRect();
+      popupMenu(r.left, r.bottom + 2, [
+        { label: "Sort by Best Match", check: true, checked: sortMode === "best", run: () => { sortMode = "best"; saveSortMode(sortMode); refresh(true); } },
+        { label: "Sort Alphabetically", check: true, checked: sortMode === "alpha", run: () => { sortMode = "alpha"; saveSortMode(sortMode); refresh(true); } },
+        { sep: true },
+        { label: "Expand All", run: () => expandAll(true) },
+        { label: "Collapse All", run: () => expandAll(false) },
+      ]);
+    });
+    /** LIB_TREE::ExpandAll / CollapseAll: every library (a search keeps its "closed by hand" marks) */
+    function expandAll(open: boolean): void {
+      const searching = !!query || filtering();
+      for (const g of groups) {
+        if (searching) { if (open) expanded.delete("-" + g.key); else expanded.add("-" + g.key); }
+        else if (open) { expanded.add(g.key); void loadGroup(g); } else expanded.delete(g.key);
+      }
+      if (!open) for (const k of Array.from(expanded)) if (k.includes("/")) expanded.delete(k);   // the multi-unit items too
+      refresh();
+    }
 
     // ---- the model
     const groups: Group[] = [];
@@ -226,14 +260,16 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
         const all = visibleItems(g);
         // a registered source filters on its side: its results are taken as they come
         const scored = all.map((it) => ({ it, score: g.type === "source" ? 1 : searchScore({ name: it.name, description: it.description, keywords: it.keywords, library: it.library }, query) })).filter((x) => x.score > 0);
-        if (query) scored.sort((a, b) => b.score - a.score || a.it.name.localeCompare(b.it.name));
+        // SORT_MODE: BEST_MATCH ranks a search's results by score; ALPHABETIC keeps names in order
+        if (sortMode === "alpha") scored.sort((a, b) => a.it.name.localeCompare(b.it.name, undefined, { numeric: true }));
+        else if (query) scored.sort((a, b) => b.score - a.score || a.it.name.localeCompare(b.it.name));
         const best = scored.length ? scored[0].score : 0;
         if (g.type === "lib") { if ((query || power || filtering()) && !scored.length) continue; }
         else if (g.type === "source") { if (!scored.length && !g.loading && !g.error && !query) continue; }
         else if (!scored.length) continue;
         ranked.push({ g, items: scored, best });
       }
-      if (query) {
+      if (query && sortMode === "best") {
         // best match first, the pinned groups staying on top like KiCad's "-- Recently Used --"
         const rank = (r: { g: Group; best: number }) => (r.g.type === "recent" ? 3e9 : r.g.type === "placed" ? 2e9 : r.best);
         ranked.sort((a, b) => rank(b) - rank(a));
@@ -517,6 +553,7 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
     // The dialog is modal: it sees every key first, so the editor's hotkeys stay asleep behind it.
     function onKey(ev: KeyboardEvent): void {
       if (closed) return;
+      if (document.querySelector(".kd-pop")) return;   // the sort menu is up: its keys (Esc closes it) are its own
       const inDialog = dlg.contains(ev.target as Node), inText = ev.target === input;
       const page = Math.max(1, Math.floor((tree.clientHeight || 300) / ROW_H) - 1);
       const row = selectedRow();
