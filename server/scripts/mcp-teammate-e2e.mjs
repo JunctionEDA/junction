@@ -256,12 +256,29 @@ await open(sch.id);
   srv.close();
 }
 
+// ------------------------------------------------------------------ fabrication files
+
+{
+  const fab = await call('export_fab', { project: NAME, preset: 'jlcpcb' });
+  check('export_fab: a package with Gerbers, drill, BOM and placement, and a link', !fab.isError && /\/api\/exports\/[0-9a-f-]{36}$/.test(fab.data.download) && fab.data.contains.some((n) => /F_Cu|\.GTL|\.gtl/i.test(n)) && fab.data.contains.some((n) => /drl|DRL/.test(n)) && fab.data.contains.some((n) => /bom/i.test(n)) && fab.data.board.copper_layers >= 2 && fab.data.board.parts >= 30, fab.text.slice(0, 900));
+  check('export_fab says whether the board is ready to order', fab.data && (fab.data.ready === true || /Not ready to order/.test(fab.data.ready)), fab.text.slice(0, 300));
+  const dl = await fetch(fab.data.download.replace(/^https?:\/\/[^/]+/, BASE), { headers: { authorization: `Bearer ${bobJwt}` } });
+  const bytes = Buffer.from(await dl.arrayBuffer());
+  check('a member of the project downloads the zip from the link', dl.ok && bytes.slice(0, 2).toString() === 'PK' && /attachment; filename=".*jlcpcb\.zip"/.test(dl.headers.get('content-disposition') || '') && bytes.length > 5000, `${dl.status} ${bytes.length} bytes`);
+  if (SHOTS) fs.writeFileSync(path.join(SHOTS, 'teammate-e2e-jlcpcb.zip'), bytes);
+  const eve = await user(9523, 'tm-eve', 'Eve');
+  const no = await fetch(fab.data.download.replace(/^https?:\/\/[^/]+/, BASE), { headers: { authorization: `Bearer ${mintJwt(eve, 'tm-eve')}` } });
+  check('someone outside the project cannot', no.status === 404 || no.status === 403, String(no.status));
+  const kicad = await call('export_fab', { project: NAME, preset: 'kicad', bom: false, placement: false });
+  check('export_fab preset kicad without BOM and placement', !kicad.isError && !kicad.data.contains.some((n) => /bom|pos|cpl/i.test(n)), kicad.text.slice(0, 400));
+}
+
 // ------------------------------------------------------------------ a connection that may only read
 
 {
   const tools = (await (await fetch(`${BASE}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${adaJwt}` }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })).json()).result.tools;
   const by = Object.fromEntries(tools.map((t) => [t.name, t]));
-  check('the new tools are in the catalog as read-only tools', ['highlight', 'get_selection', 'trace_net', 'compare_versions', 'get_bom', 'view_datasheet'].every((n) => by[n] && by[n].annotations.readOnlyHint === true), Object.keys(by).join(' '));
+  check('the new tools are in the catalog as read-only tools', ['highlight', 'get_selection', 'trace_net', 'compare_versions', 'get_bom', 'view_datasheet', 'export_fab'].every((n) => by[n] && by[n].annotations.readOnlyHint === true), Object.keys(by).join(' '));
 }
 
 desk.ws.close(); await browser.close(); await db.end();

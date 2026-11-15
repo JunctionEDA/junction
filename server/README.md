@@ -453,6 +453,7 @@ How it is built:
 | `trace_net` | one net end to end: pads, length per layer, vias, islands, open connections |
 | `compare_versions` | what changed since a checkpoint, as a list and a picture with each change boxed (or the two versions side by side) |
 | `get_bom` | the bill of materials priced at the vendors' breaks for a number of boards, with stock shortfalls and parts not yet chosen |
+| `export_fab` | the fabrication package (Gerbers, drill, BOM, placement) for JLCPCB, PCBWay or KiCad defaults as a zip behind a download link (`/api/exports/{id}`, table `project_exports`), with the DRC result |
 | `view_datasheet` | pages of a PDF datasheet as pictures (pinout, typical application, graphs); the server image needs `poppler-utils` (`pdftoppm`, or `KC_PDFTOPPM`) |
 | `find_parts`, `get_library_part`, `find_datasheets` | KiCad libraries, vendor parts, datasheet links |
 | `read_datasheet` | the pages of a PDF datasheet that answer a question (fetched and indexed once on the server) |

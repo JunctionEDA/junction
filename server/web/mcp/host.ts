@@ -30,6 +30,7 @@ import * as library from "../ai/library";
 import { buildProposal, staleReason, writeRules } from "../ai/proposals";
 import { diffDocs } from "../review/diff";
 import { getBom } from "./bom";
+import { buildPackage, packageZip } from "../fab/index";
 import { renderPicture, type Emphasis } from "./picture";
 import { findPerson, highlight, people, resolveTargets, settle, traceNet } from "./teammate";
 import { DocSession, editProjectFile, readTextDocument, type Conn, type DocEntry, type UndoRecord } from "./session";
@@ -558,6 +559,35 @@ async function bomTool(req: Request): Promise<Reply> {
   return withDocument(req, entry.path, async (sess, doc) => ({ result: Object.assign({ document: sess.entry.path }, await getBom(K(), doc, others, a, (path) => api(path)) as object) }));
 }
 
+/**
+ * export_fab: the fabrication package of the board (Gerbers, drill files, BOM and placement, as the fabricator
+ * named by the preset takes them), built by the editor's own writers, stored with the project and handed back as
+ * a link the person downloads.  The rules check is run first and its result reported with the files: a package
+ * of a board with open connections or errors is still made, and says so.
+ */
+async function exportFab(req: Request): Promise<Reply> {
+  const p = needProject(req); const a = req.args || {};
+  return withDocument(req, "board", async (sess, doc) => {
+    const preset = ["jlcpcb", "pcbway", "kicad"].includes(a.preset) ? a.preset : "jlcpcb";
+    const checks: any = await design.runChecks({}); const P = W.PcbTools;
+    let open = 0; try { for (const n of P.netlist(doc).nets.values()) open += n.unconnected || 0; } catch { /* reported by the checks */ }
+    const pkg = await buildPackage({ doc, setup: sess.file, projectName: p.name } as any, { preset, includeBom: a.bom !== false, includePlacement: a.placement !== false });
+    const zipped = await packageZip(pkg);
+    let stored: any;
+    try {
+      const r = await W.fetch(`/api/projects/${p.projectId}/exports?name=${encodeURIComponent(zipped.name)}`, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: zipped.data });
+      if (!r.ok) throw new Error(String(r.status)); stored = await r.json();
+    } catch { throw new ToolError("The package was built but could not be stored on the server. Try again."); }
+    const sm = pkg.summary;
+    return { result: { document: sess.entry.path, preset: pkg.preset.id, download: `${a.__site || conn.base}${stored.path}`, file: stored.name, size_kb: Math.round(stored.bytes / 102.4) / 10, kept_days: stored.keptDays,
+      contains: pkg.files.map((f) => (f.note ? `${f.name} (${f.note})` : f.name)),
+      board: { width_mm: r3(sm.width), height_mm: r3(sm.height), copper_layers: sm.copperLayers, holes: sm.holes, slots: sm.slots || undefined, parts: sm.parts, placed: sm.placed, bom_lines: sm.bomLines },
+      ready: checks.errors === 0 && open === 0 ? true : `Not ready to order: the design rule check has ${checks.errors} error${checks.errors === 1 ? "" : "s"} and ${open} connection${open === 1 ? " is" : "s are"} still open. The files describe the board as it is now.`,
+      warnings: pkg.warnings.length ? pkg.warnings : undefined,
+      note: "Give the person the download link: it opens for members of the project signed in to the site. Zone fills are plotted as stored; run a fill_zones edit first when the board changed since the last fill." } };
+  });
+}
+
 /** Who is in the project's documents right now: one document when named, else every sheet and the board. */
 async function getSelection(req: Request): Promise<Reply> {
   const p = needProject(req); const a = req.args || {};
@@ -682,6 +712,7 @@ const TOOLS: Record<string, (req: Request) => Promise<Reply>> = {
   get_selection: getSelection,
   compare_versions: compareVersions,
   get_bom: bomTool,
+  export_fab: exportFab,
   trace_net: (req) => withDocument(req, req.args.document, async (sess, doc) => {
     const res: any = traceNet(doc, sess.entry.path, req.args.net);
     if (req.args.highlight === true) res.highlight = await highlight(sess, doc, { nets: [req.args.net], note: req.args.note, seconds: req.args.seconds });

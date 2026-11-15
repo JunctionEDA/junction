@@ -174,6 +174,23 @@
     }
   },
   {
+    "name": "export_fab",
+    "title": "Make fabrication files",
+    "write": false,
+    "description": "The board's fabrication package as one zip the person downloads: Gerbers for every layer the fabricator needs, drill files, the BOM and the placement file, named and formatted for the chosen fabricator (the same writers as the editor's Fabrication Outputs). The answer gives the download link, what the package contains, the board's size, layers and hole count, and whether the board is ready to order: the design rule check is run first, and open connections or errors are reported with the files. Use it when the person asks for Gerbers, manufacturing files or to order the board.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name." },
+        "preset": { "type": "string", "enum": ["jlcpcb", "pcbway", "kicad"], "description": "Whose order page the files are for (default jlcpcb); kicad is KiCad's own defaults, for any other fabricator." },
+        "bom": { "type": "boolean", "description": "false leaves the BOM out." },
+        "placement": { "type": "boolean", "description": "false leaves the placement (pick and place) file out." }
+      },
+      "required": ["project"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "read_document",
     "title": "Read source",
     "write": false,

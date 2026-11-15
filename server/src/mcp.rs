@@ -194,7 +194,7 @@ fn build_catalog() -> Vec<Tool> {
     // The order a model reads them in: find the project, read, look, change, then the rest.
     let order = [
         "list_projects", "get_project", "get_design_overview", "get_design_guide", "list_components", "get_component", "list_nets",
-        "get_items", "run_checks", "review_design", "check_layout", "get_board_info", "render_view", "highlight", "get_selection", "trace_net", "compare_versions", "get_bom", "find_datasheets", "read_datasheet", "view_datasheet", "find_parts", "get_library_part", "run_python", "get_run", "apply_changes",
+        "get_items", "run_checks", "review_design", "check_layout", "get_board_info", "render_view", "highlight", "get_selection", "trace_net", "compare_versions", "get_bom", "export_fab", "find_datasheets", "read_datasheet", "view_datasheet", "find_parts", "get_library_part", "run_python", "get_run", "apply_changes",
         "undo_changes", "redo_changes", "list_changes", "read_document", "list_comments", "add_comment", "resolve_comment", "list_checkpoints",
         "create_checkpoint", "create_project", "get_geometry",
     ];
@@ -781,6 +781,9 @@ async fn call_tool(state: &AppState, caller: &Caller, site: &str, tool: &Tool, n
         if let Some(id) = taken {
             return Err(format!("This person already has a project named \"{wanted}\" (id {id}). Work on that one, or choose another name."));
         }
+        args["__site"] = json!(site);
+    }
+    if name == "export_fab" {
         args["__site"] = json!(site);
     }
 

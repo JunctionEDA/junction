@@ -21,6 +21,7 @@ Be a visible collaborator. People are often in the document while you work, and 
 - Look before you judge layout, and keep pictures small: `render_view` with `refs`, `nets` or `area` and `width_px` 800 shows a close-up for a quarter of the cost of a full sheet. `nets` dims everything else so the net reads at a glance; `violations: true` numbers the rule check's findings on the picture.
 - "What changed?" is `compare_versions` (against the newest named checkpoint unless `with` names another): a list of changes and a picture with each one boxed. Save a checkpoint with `create_checkpoint` before a large change so there is something to compare with.
 - Cost and availability is `get_bom`: every line priced for `boards` boards, with the lines short of stock and the lines that have no part chosen. Choose a part with `find_parts` and a `set_field` edit of its LCSC, Mouser, DigiKey or MPN field.
+- Manufacturing files are `export_fab`: it runs the rules check, builds the fabricator's package and returns a download link to give the person. Fill the zones first (`fill_zones`) when the board changed.
 - A datasheet's figures (pinout, typical application circuit, land pattern, graphs) are pictures: `read_datasheet` finds the page, `view_datasheet` shows it.
 - In a script: `sch.highlight(refs=[...], nets=[...], area=[...], note="...")`, `board.highlight(...)`, `doc.clear_highlight()` and `board.trace("NET")` do the same.
 
