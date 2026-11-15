@@ -24,6 +24,8 @@ export interface Body {
   /** the footprint's own 3D models (models.ts) and where it stands; a model that has loaded is drawn instead of the stand-in */
   models: ModelRef[];
   x: number; y: number; rot: number;
+  /** (attr dnp) and (attr exclude_from_pos_files): the Appearance rows "Models marked DNP" / "Models not in POS File" */
+  dnp?: boolean; notInPos?: boolean;
 }
 
 const num = (v: unknown, d = 0): number => (typeof v === "number" && isFinite(v) ? v : d);
@@ -83,12 +85,12 @@ function layerExtent(item: KItem, layer: string): Extent {
 }
 
 /** The placeholder body of one footprint, or null when it has nothing to stand on (no courtyard / fab outline). */
-export function footprintBody(item: KItem): Body | null {
+export function footprintBody(item: KItem, withDnp = false): Body | null {
   if (item.kind !== "footprint") return null;
   const attrs = footprintAttrs(item.node);
   // board-only footprints (logos, mounting holes, test points drawn in copper) have no part; DNP parts
   // are hidden by default in KiCad's viewer ("Models marked DNP")
-  if (attrs.has("board_only") || attrs.has("dnp")) return null;
+  if (attrs.has("board_only") || (attrs.has("dnp") && !withDnp)) return null;
   // a footprint with fewer than two pads carries no component: mounting holes, test points, fiducials, logos
   if (padCount(item) < 2) return null;
   // footprints that are board features by their library name
@@ -100,7 +102,7 @@ export function footprintBody(item: KItem): Body | null {
   if (ext.pts.length < 2) { ext = layerExtent(item, back ? "B.Fab" : "F.Fab"); inset = 0; }
   if (ext.pts.length < 2) return null;
   const ref = item.ref || "";
-  const stand = { models: footprintModels(item.node), x: num(item.x), y: num(item.y), rot: num(item.rot) };
+  const stand = { models: footprintModels(item.node), x: num(item.x), y: num(item.y), rot: num(item.rot), dnp: attrs.has("dnp"), notInPos: attrs.has("exclude_from_pos_files") };
   const solids = modelSolids(item, cls === "smd" || (cls === "virtual" && !hasDrill(item)), back);
   if (ext.circle) {
     const r = Math.max(0.15, ext.circle.r - inset); const n = 32; const pts: Pt[] = [];
@@ -150,8 +152,9 @@ function padCount(item: KItem): number { let n = 0; for (const c of item.node) i
 
 function hasDrill(item: KItem): boolean { return item.geom.some((g) => !!g.hole); }
 
-export function boardBodies(doc: KDoc): Body[] {
+/** The parts of a board; `withDnp` keeps the DNP ones too (flagged), for the viewer's "Models marked DNP" row. */
+export function boardBodies(doc: KDoc, withDnp = false): Body[] {
   const out: Body[] = [];
-  for (const it of doc.items.values()) { const b = footprintBody(it); if (b) out.push(b); }
+  for (const it of doc.items.values()) { const b = footprintBody(it, withDnp); if (b) out.push(b); }
   return out;
 }

@@ -10,7 +10,7 @@
 import * as THREE from "three";
 import { Body, BodyClass, boardBodies } from "./bodies";
 import { ModelRef, ModelStore, placeMesh } from "./models";
-import { BOARD_BODY, RGBA, SURFACE_FINISH } from "./colors";
+import { EXTRA_LAYERS, LAYER_COLORS, RGBA } from "./colors";
 import { BoardShape, Hole, Pt, assignHoles, boardHoles, boardShape, polyArea } from "./outline";
 import { FaceComposer, FaceLayers, Side, TextureExtent, textureExtent } from "./textures";
 
@@ -19,12 +19,24 @@ export interface Visibility {
   board: boolean; barrels: boolean; copperTop: boolean; copperBottom: boolean; paste: boolean;
   silkTop: boolean; silkBottom: boolean; maskTop: boolean; maskBottom: boolean;
   tht: boolean; smd: boolean; virtual: boolean;
+  /** LAYER_3D_MODELS_NOT_IN_POS ("Models not in POS File") and LAYER_3D_MODELS_MARKED_DNP ("Models marked DNP") */
+  notInPos: boolean; dnp: boolean;
+  /** EDA_3D_ACTIONS::toggleShowMissingModels: the stand-in solids of parts whose model is missing */
+  missing: boolean;
+  /** LAYER_3D_BOUNDING_BOXES ("Model Bounding Boxes") */
+  bbox: boolean;
+  /** the extra board layers shown (colors.ts EXTRA_LAYERS keys: Adhesive, User.Drawings … User.45) */
+  extra: string[];
 }
 
 export const DEFAULT_VISIBILITY: Visibility = {
   board: true, barrels: true, copperTop: true, copperBottom: true, paste: true,
   silkTop: true, silkBottom: true, maskTop: true, maskBottom: true,
   tht: true, smd: true, virtual: true,
+  // render.show_footprints_not_in_posfile true, render.show_footprints_dnp false, render.opengl_show_model_bbox false;
+  // render.show_missing_models is false in KiCad, whose placeholder is a bare box: the web's stand-ins are on
+  notInPos: true, dnp: false, missing: true, bbox: false,
+  extra: EXTRA_LAYERS.filter((l) => l.on).map((l) => l.key),
 };
 
 export interface BoardStats { outlines: number; cutouts: number; holes: number; holesPainted: number; bodies: number; models: number; missingModels: string[]; replacedModels: string[]; fallbackOutline: boolean; texture: [number, number]; thickness: number }
@@ -213,6 +225,17 @@ function shapeSignature(shape: BoardShape, holes: Hole[], thickness: number): st
   return parts.join(",");
 }
 
+/** The axis-aligned box of the vertices `m` gained from float offset `from` on, as 12 line segments into `out` (Model Bounding Boxes). */
+function boxOf(out: MeshData, m: MeshData, from: number): void {
+  if (m.pos.length <= from) return;
+  let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity, z1 = -Infinity;
+  for (let i = from; i < m.pos.length; i += 3) { const x = m.pos[i], y = m.pos[i + 1], z = m.pos[i + 2];
+    if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; if (z < z0) z0 = z; if (z > z1) z1 = z; }
+  const c = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+  for (let i = 0; i < 4; i++) { const [ax, ay] = c[i], [bx, by] = c[(i + 1) % 4];
+    out.pos.push(ax, ay, z0, bx, by, z0, ax, ay, z1, bx, by, z1, ax, ay, z0, ax, ay, z1); }
+}
+
 export class BoardScene {
   readonly group = new THREE.Group();
   readonly stats: BoardStats;
@@ -227,6 +250,7 @@ export class BoardScene {
   private edge: THREE.Mesh | null = null;
   private barrels: THREE.Mesh | null = null;
   private bodies: Record<BodyClass, THREE.Mesh | null> = { tht: null, smd: null, virtual: null };
+  private bboxMesh: THREE.LineSegments | null = null;
   private faceKey: Record<Side, string> = { F: "", B: "" };
   private signature = "";
   private released = false;
@@ -268,12 +292,12 @@ export class BoardScene {
       const faces = triangulate(contour, holeLoops);   // the costly step on a board with thousands of holes: once for both faces
       cap(top, contour, holeLoops, 0, true, undefined, uvOf, faces);
       cap(bottom, contour, holeLoops, -thickness, false, undefined, uvOf, faces);
-      wall(edge, contour, 0, -thickness, BOARD_BODY, false);
-      for (const c of cuts) wall(edge, c, 0, -thickness, BOARD_BODY, true);
+      wall(edge, contour, 0, -thickness, LAYER_COLORS.board, false);
+      for (const c of cuts) wall(edge, c, 0, -thickness, LAYER_COLORS.board, true);
       for (const h of drills) {
         const loop = h.pts.map(toModel); const centre = toModel([h.x, h.y]);
-        if (h.plated) wall(barrels, loop, 0, -thickness, SURFACE_FINISH, true, centre);
-        else wall(edge, loop, 0, -thickness, BOARD_BODY, true, centre);
+        if (h.plated) wall(barrels, loop, 0, -thickness, LAYER_COLORS.copper, true, centre);
+        else wall(edge, loop, 0, -thickness, LAYER_COLORS.board, true, centre);
       }
     });
 
@@ -294,7 +318,7 @@ export class BoardScene {
     if (edgeGeo) { this.edge = new THREE.Mesh(edgeGeo, material({ vertexColors: true })); this.edge.name = "board-edge"; this.group.add(this.edge); }
     if (barrelGeo) { this.barrels = new THREE.Mesh(barrelGeo, material({ vertexColors: true, shininess: 60, specular: new THREE.Color(0x554422) })); this.barrels.name = "barrels"; this.group.add(this.barrels); }
 
-    this.bodyList = boardBodies(doc); this.toModel = toModel; this.thickness = thickness; this.models = models || null; this.vis = vis;
+    this.bodyList = boardBodies(doc, true); this.toModel = toModel; this.thickness = thickness; this.models = models || null; this.vis = vis;
     this.stats = { outlines: shape.outlines.length, cutouts, holes: drilled, holesPainted: rest.length, bodies: this.bodyList.length, models: 0, missingModels: [], replacedModels: [],
       fallbackOutline: shape.fallback, texture: [e.width, e.height], thickness };
     this.reusedGeometry = !!reuse;
@@ -319,16 +343,28 @@ export class BoardScene {
     const data: Record<BodyClass, MeshData> = { tht: new MeshData(), smd: new MeshData(), virtual: new MeshData() };
     const lift = 0.04;   // parts sit on the pads, a copper-and-mask thickness above the laminate
     let real = 0; const missing: string[] = []; const replaced: string[] = [];
+    const v = this.vis, bbox = new MeshData();
     for (const body of this.bodyList) {
-      if (this.addModels(data[body.cls], body, lift)) {
+      if ((body.dnp && !v.dnp) || (body.notInPos && !v.notInPos)) continue;
+      const m = data[body.cls], at = m.pos.length;
+      if (this.addModels(m, body, lift)) {
         real++;
         // drawn with a model other than the one its footprint (or, when it names none, its own name) asks for
-        if (this.models && body.models.some((r) => { const m = this.models!.get(r.url); return !!m && m !== "missing" && this.models!.replacement(r.url) !== undefined; })) replaced.push(body.ref);
+        if (this.models && body.models.some((r) => { const mm = this.models!.get(r.url); return !!mm && mm !== "missing" && this.models!.replacement(r.url) !== undefined; })) replaced.push(body.ref);
+        if (v.bbox) boxOf(bbox, m, at);
         continue;
       }
       // no model named, or none of those named can be had (still on their way does not count as missing)
-      if (!body.models.length || (this.models && body.models.every((r) => this.models!.get(r.url) === "missing"))) missing.push(body.ref);
-      this.addBody(data[body.cls], body, this.toModel, this.thickness, lift);
+      const isMissing = !body.models.length || (!!this.models && body.models.every((r) => this.models!.get(r.url) === "missing"));
+      if (isMissing) { missing.push(body.ref); if (!v.missing) continue; }
+      this.addBody(m, body, this.toModel, this.thickness, lift);
+      if (v.bbox) boxOf(bbox, m, at);
+    }
+    if (this.bboxMesh) { this.group.remove(this.bboxMesh); this.bboxMesh.geometry.dispose(); (this.bboxMesh.material as THREE.Material).dispose(); this.bboxMesh = null; }
+    if (bbox.pos.length) {
+      const g = new THREE.BufferGeometry(); g.setAttribute("position", new THREE.Float32BufferAttribute(bbox.pos, 3));
+      // EDA_3D_VIEWER_SETTINGS opengl_selection_color's neighbour: KiCad draws the boxes in a light yellow-green
+      this.bboxMesh = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x00ff00 })); this.bboxMesh.name = "bbox"; this.group.add(this.bboxMesh);
     }
     for (const cls of ["tht", "smd", "virtual"] as BodyClass[]) {
       if (data[cls].empty) continue;
@@ -383,18 +419,21 @@ export class BoardScene {
   }
 
   private faceLayers(side: Side, v: Visibility): FaceLayers {
-    return side === "F" ? { body: v.board, copper: v.copperTop, mask: v.maskTop, silk: v.silkTop, paste: v.paste }
-      : { body: v.board, copper: v.copperBottom, mask: v.maskBottom, silk: v.silkBottom, paste: v.paste };
+    return side === "F" ? { body: v.board, copper: v.copperTop, mask: v.maskTop, silk: v.silkTop, paste: v.paste, extra: v.extra }
+      : { body: v.board, copper: v.copperBottom, mask: v.maskBottom, silk: v.silkBottom, paste: v.paste, extra: v.extra };
   }
 
   /** Show / hide per the Appearance panel; the face images are recomposed only when their layers changed. */
   applyVisibility(v: Visibility, recompose = true): void {
-    this.vis = v;
+    const parts = (x: Visibility): string => `${x.notInPos}${x.dnp}${x.missing}${x.bbox}`;
+    const rebuild = recompose && parts(v) !== parts(this.vis);
+    this.vis = { ...v };
+    if (rebuild) this.buildBodies();
     for (const side of ["F", "B"] as Side[]) {
       const mesh = this.faces[side], canvas = this.faceCanvas[side], tex = this.texture[side]; if (!mesh || !canvas || !tex) continue;
-      const layers = this.faceLayers(side, v); const key = JSON.stringify(layers);
+      const layers = this.faceLayers(side, v); const key = JSON.stringify(layers) + JSON.stringify(LAYER_COLORS);
       if (recompose && key !== this.faceKey[side]) { this.composer.compose(side, layers, this.painted, canvas); tex.needsUpdate = true; this.faceKey[side] = key; }
-      mesh.visible = layers.body || layers.copper || layers.mask || layers.silk || layers.paste;
+      mesh.visible = layers.body || layers.copper || layers.mask || layers.silk || layers.paste || !!(layers.extra && layers.extra.length);
     }
     if (this.edge) this.edge.visible = v.board;
     if (this.barrels) this.barrels.visible = v.barrels;

@@ -10,6 +10,7 @@ import * as THREE from "three";
 import { GLTFExporter } from "three/examples/jsm/exporters/GLTFExporter.js";
 import { BACKGROUND_BOTTOM, BACKGROUND_TOP, RGBA, css } from "./colors";
 import { BoardScene, BoardStats, DEFAULT_VISIBILITY, Visibility } from "./scene";
+import { GRID_ALPHA, gridLines, type Grid3D } from "./grid";
 
 export type ViewName = "top" | "bottom" | "front" | "back" | "left" | "right";
 export type Axis = "x" | "y" | "z";
@@ -56,6 +57,9 @@ export class Viewer {
   private persp = new THREE.PerspectiveCamera(FOV, 1, 0.1, 5000);
   private orthoCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 5000);
   private board: BoardScene | null = null;
+  /** View > 3D Grid (render.grid_type, NONE by default) and its line mesh */
+  grid: Grid3D = 0;
+  private gridMesh: THREE.LineSegments | null = null;
   private lights: THREE.Object3D[] = [];
   /** the camera's position; it always looks down −Z */
   private cam = new THREE.Vector3(0, 0, 300);
@@ -113,6 +117,7 @@ export class Viewer {
     next.group.position.set(0, 0, next.size.t / 2);
     this.pivot.add(next.group);
     if (fit || this.fitted) { this.cam.set(0, 0, this.fitDistance()); this.fitted = true; }
+    this.buildGrid();
     this.requestRender();
     // the parts' real models: those already here were drawn just now, the rest are fetched and drawn as they arrive
     if (this.models) this.models.want(next.modelRefs());
@@ -182,6 +187,19 @@ export class Viewer {
     Object.assign(this.visibility, patch);
     if (this.board) this.board.applyVisibility(this.visibility);
     this.requestRender();
+  }
+
+  /** EDA_3D_ACTIONS::noGrid … show1mmGrid. */
+  setGrid(g: Grid3D): void { this.grid = g; this.buildGrid(); this.requestRender(); }
+
+  private buildGrid(): void {
+    if (this.gridMesh) { this.pivot.remove(this.gridMesh); this.gridMesh.geometry.dispose(); (this.gridMesh.material as THREE.Material).dispose(); this.gridMesh = null; }
+    if (!this.grid) return;
+    const s = this.boardSize(), g = gridLines(s.w, s.h, this.grid, 0);
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.Float32BufferAttribute(g.pos, 3)); geom.setAttribute("color", new THREE.Float32BufferAttribute(g.col, 3));
+    this.gridMesh = new THREE.LineSegments(geom, new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: GRID_ALPHA, depthWrite: false }));
+    this.gridMesh.name = "grid3d"; this.pivot.add(this.gridMesh);
   }
 
   setBackground(top: RGBA, bottom: RGBA): void { this.background = { top, bottom }; this.applyBackground(); }
@@ -279,6 +297,20 @@ export class Viewer {
     this.pivot.quaternion.setFromEuler(new THREE.Euler(rad(x), rad(y), rad(z), "XYZ"));
     this.cam.set(0, 0, this.fitDistance() / Math.max(0.05, zoom)); this.fitted = zoom === 1;
     this.requestRender();
+  }
+
+  /** The camera of a saved viewport (VIEWPORT_3D: the view matrix): the board's rotation, the camera position, the projection. */
+  getCamera(): { q: number[]; cam: number[]; ortho: boolean } {
+    const q = this.anim.raf ? this.anim.q1 : this.pivot.quaternion, c = this.anim.raf ? this.anim.c1 : this.cam;
+    return { q: [q.x, q.y, q.z, q.w], cam: [c.x, c.y, c.z], ortho: this.ortho };
+  }
+
+  /** Back to a saved viewport. */
+  setCamera(v: { q: number[]; cam: number[]; ortho?: boolean }): void {
+    if (!v || v.q.length !== 4 || v.cam.length !== 3) return;
+    if (typeof v.ortho === "boolean") this.ortho = v.ortho;
+    this.fitted = false;
+    this.animateTo(this.tmpQ2.set(v.q[0], v.q[1], v.q[2], v.q[3]).normalize(), this.tmpV.set(v.cam[0], v.cam[1], v.cam[2]));
   }
 
   /** Ease the board's rotation and the camera to a new pose over animationMs (at once when animation is off). */

@@ -2,12 +2,14 @@
 // draggable, resizable panel over the board editor.  Menus follow 3d-viewer/3d_viewer/3d_menubar.cpp,
 // the top toolbar toolbars_3d.cpp, the labels / tooltips / hotkeys / icons tools/eda_3d_actions.cpp, and
 // the right-hand panel the rows of dialogs/appearance_controls_3D.cpp that the web viewer can draw.
-import { BACKGROUND_BOTTOM, BACKGROUND_TOP, BOARD_BODY, RGBA, SILKSCREEN, SOLDER_MASK, SOLDER_PASTE, SURFACE_FINISH, css, fromHex, hex } from "./colors";
+import { BACKGROUND_BOTTOM, BACKGROUND_TOP, DEFAULT_LAYER_COLORS, EXTRA_LAYERS, LAYER_COLORS, RGBA, cloneLayerColors, css, setLayerColors } from "./colors";
+import { GRID3D_CHOICES, type Grid3D } from "./grid";
 import ICONS from "./icons.json";
 import { BoardStats, DEFAULT_VISIBILITY, Visibility } from "./scene";
 import { Viewer } from "./viewer";
 import { keyName, menuKey } from "../keys";
 import { fitMenu, type MenuAnchor } from "../menufit";
+import "../components/kselect";   // <k-select>, the themed drop-down (Presets, Viewports)
 
 export interface OpenOptions {
   /** the board document to show (window.KiCadCanvas doc); null when no board is open */
@@ -19,6 +21,24 @@ export interface OpenOptions {
   toast?(text: string, ms?: number): void;
   /** select the part with this reference in the board editor and bring it into view */
   selectRef?(ref: string): void;
+  /** DIALOG_COLOR_PICKER (the editor's themed picker): r, g, b, a in 0..1; `done` on OK only */
+  pickColor?(current: { r: number; g: number; b: number; a: number }, allowOpacity: boolean, done: (c: { r: number; g: number; b: number; a: number }) => void, def: { r: number; g: number; b: number; a: number }): void;
+  /** wxTextEntryDialog (themed); `ok` with the text on OK */
+  textEntry?(title: string, caption: string, value: string, ok: (text: string) => void): void;
+  /** EDA_LIST_DIALOG (themed): pick one of `items` */
+  listPick?(title: string, header: string, label: string, items: string[], ok: (item: string) => void): void;
+  /** IsOK(): a Yes / No question */
+  confirm?(message: string, yes: () => void): void;
+  /** ACTIONS::openPreferences, on the 3D Viewer pages */
+  openPreferences?(): void;
+  /** the board editor's actions this window's Help menu shares (listHotKeys, about) */
+  runAction?(id: string): void;
+  /** external links of the Help menu (tables.ts LINKS) */
+  links?: Record<string, string>;
+  /** Follow PCB Editor: is a board layer visible in the board editor */
+  layerVisible?(layer: string): boolean;
+  /** Follow PCB Plot Settings: the layers the plot dialog plots */
+  plotLayers?(): Promise<string[] | null>;
 }
 
 interface IconDef { vb?: string; light?: string; dark?: string }
@@ -71,8 +91,12 @@ const CSS = `
 .v3d-row:hover{background:var(--paper)}
 .v3d-row .sw{width:14px;height:14px;border:1px solid var(--line-2);border-radius:var(--r-1);box-sizing:border-box}
 .v3d-row input[type=checkbox]{margin:0;width:14px;height:14px}
-.v3d-row input[type=color]{width:18px;height:16px;padding:0;border:1px solid var(--line-2);border-radius:var(--r-1);background:none;grid-column:1 / span 2;justify-self:start}
 .v3d-side hr{border:0;border-top:1px solid var(--line);margin:6px 0}
+.v3d-row .sw{cursor:pointer}
+.v3d-opt{display:flex;align-items:center;gap:6px;padding:2px 10px;font-size:11px}
+.v3d-opt input{margin:0;width:14px;height:14px}
+.v3d-label{margin:8px 10px 2px;font-size:11px;color:var(--ink-2)}
+.v3d-side k-select.v3d-choice{display:block;margin:0 10px;width:calc(100% - 20px)}
 .v3d-status{display:flex;gap:16px;padding:3px 10px;border-top:1px solid var(--line);background:var(--bench);color:var(--ink-2);font:11px var(--mono);flex:none;white-space:nowrap;overflow:hidden}
 .v3d-status .grow{flex:1;overflow:hidden;text-overflow:ellipsis}
 .v3d-status a.v3d-ref{color:inherit;text-decoration:underline dotted;cursor:pointer}
@@ -128,6 +152,28 @@ function modelStatus(st: BoardStats, pick?: (ref: string) => void): Node[] {
   return out;
 }
 
+/** EDA_3D_VIEWER_SETTINGS as the web keeps it (localStorage "kui.v3d"): the appearance, the layer presets and viewports. */
+interface Preset3D { name: string; vis: Partial<Visibility>; colors: Record<string, RGBA> }
+interface Viewport3D { name: string; q: number[]; cam: number[]; ortho: boolean }
+export interface Settings3D { vis?: Partial<Visibility>; colors?: Record<string, RGBA>; bg?: [RGBA, RGBA]; grid?: Grid3D; presets?: Preset3D[]; viewports?: Viewport3D[]; preset?: string; useStackup?: boolean; useEditorCopper?: boolean }
+const SETTINGS_KEY = "kui.v3d";
+export function loadSettings3D(): Settings3D { try { const v = JSON.parse(localStorage.getItem(SETTINGS_KEY) || "null"); return v && typeof v === "object" ? v as Settings3D : {}; } catch { return {}; } }
+function saveSettings3D(s: Settings3D): void { try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* no storage */ } }
+/** PRESET_SWITCH_KEY / VIEWPORT_SWITCH_KEY: Ctrl+Tab cycles the layer presets, Alt+Tab the viewports */
+const FOLLOW_PCB = "Follow PCB Editor", FOLLOW_PLOT = "Follow PCB Plot Settings";
+
+/**
+ * BOARD_ADAPTER::GetVisibleLayers for a FOLLOW_PCB / FOLLOW_PLOT_SETTINGS preset: the 3D layers that follow from the
+ * board layers shown (`on`), the models left as they are.
+ */
+export function visibilityFromLayers(on: (layer: string) => boolean, cur: Visibility): Visibility {
+  const v: Visibility = { ...cur };
+  v.copperTop = on("F.Cu"); v.copperBottom = on("B.Cu"); v.silkTop = on("F.SilkS"); v.silkBottom = on("B.SilkS");
+  v.maskTop = on("F.Mask"); v.maskBottom = on("B.Mask"); v.paste = on("F.Paste") || on("B.Paste");
+  v.extra = EXTRA_LAYERS.filter((x) => x.layers.some(on)).map((x) => x.key);
+  return v;
+}
+
 export class ViewerWindow {
   readonly root: HTMLDivElement;
   readonly viewer: Viewer | null = null;
@@ -143,6 +189,11 @@ export class ViewerWindow {
   private onDocPointer = (ev: Event) => { if (this.menu.length && !this.menu.some((m) => m.contains(ev.target as Node)) && !(this.menuButton && this.menuButton.contains(ev.target as Node))) this.closeMenu(); };
   private onWinResize = () => this.clamp();
   closed = false;
+  private settings: Settings3D = loadSettings3D();
+  /** the layer preset shown in the Presets choice ("" when the appearance was changed since) */
+  private presetName = "";
+  private presetSel: HTMLElement | null = null;
+  private viewportSel: HTMLElement | null = null;
   /** the last build's statistics and time (tests) */
   lastBuildMs = 0;
   builds = 0;
@@ -170,6 +221,7 @@ export class ViewerWindow {
       this.viewer = new Viewer(this.stage);
       this.viewer.useModels(true);
       this.viewer.onModels = (st) => this.statusEl.replaceChildren(...modelStatus(st, this.opts.selectRef));
+      this.restoreSettings();
     }
     catch (e) { console.warn("3D viewer: WebGL is not available", e); const m = el("div", "v3d-msg", "The 3D viewer needs WebGL, which this browser could not start."); this.stage.appendChild(m); }
     this.defineActions();
@@ -192,6 +244,15 @@ export class ViewerWindow {
     status.append(this.statusEl, this.zoomEl); root.appendChild(status);
     const grip = el("div", "v3d-grip"); root.appendChild(grip); this.bindResize(grip);
 
+    // EDA_3D_CONTROLLER's context menu: a right click that did not drag (a right drag pans)
+    let rdown: { x: number; y: number } | null = null;
+    this.stage.addEventListener("pointerdown", (ev) => { if (ev.button === 2) rdown = { x: ev.clientX, y: ev.clientY }; }, true);
+    this.stage.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      const moved = rdown ? Math.hypot(ev.clientX - rdown.x, ev.clientY - rdown.y) > 4 : false; rdown = null;
+      if (moved || !this.viewer) return;
+      this.closeMenu(); this.showMenu(this.contextItems(), { at: { x: ev.clientX, y: ev.clientY } }, 0);
+    });
     root.addEventListener("keydown", (ev) => this.onKey(ev));
     // keep the keyboard on the viewer while the pointer works in it (the board editor's keys must not fire)
     root.addEventListener("pointerdown", (ev) => { const t = ev.target as HTMLElement; if (!t.closest("input,select,k-select,textarea")) setTimeout(() => { if (!this.closed && !root.contains(document.activeElement)) root.focus({ preventScroll: true }); }, 0); }, true);
@@ -210,7 +271,7 @@ export class ViewerWindow {
   private defineActions(): void {
     const v = this.viewer;
     const add = (a: Action) => { this.actions.set(a.id, a); };
-    const vis = (key: keyof Visibility) => () => { if (v) { v.setVisibility({ [key]: !v.visibility[key] }); this.syncToggles(); } };
+    const vis = (key: keyof Visibility) => () => { if (v) { v.setVisibility({ [key]: !v.visibility[key] }); this.appearanceChanged(); } };
     add({ id: "reloadBoard", label: "Reload board", tip: "Reload board and refresh 3D view", icon: "import3d", run: () => this.reload(false) });
     add({ id: "copyToClipboard", label: "Copy 3D image to clipboard", tip: "Copy the current 3D image to the clipboard", icon: "copy", key: "Ctrl+C", run: () => { void this.copyImage(); } });
     add({ id: "exportImage", label: "Export Image...", tip: "Export the Current View as an image file", icon: "export_file", run: () => { void this.exportImage(); } });
@@ -241,7 +302,24 @@ export class ViewerWindow {
     add({ id: "showTHT", label: "Show Through Hole 3D Models", tip: "Show 3D models for 'Through hole' type footprints", icon: "show_tht", key: "T", run: vis("tht"), checked: () => !!v && v.visibility.tht });
     add({ id: "showSMD", label: "Show SMD 3D Models", tip: "Show 3D models for 'Surface mount' type footprints", icon: "show_smt", key: "S", run: vis("smd"), checked: () => !!v && v.visibility.smd });
     add({ id: "showVirtual", label: "Show Unspecified 3D Models", tip: "Show 3D models for 'unspecified' type footprints", icon: "show_other", key: "V", run: vis("virtual"), checked: () => !!v && v.visibility.virtual });
-    add({ id: "resetDefaults", label: "Reset to Default Settings", run: () => this.resetDefaults() });
+    add({ id: "resetDefaults", label: "Reset to Default Settings", icon: "tools", run: () => this.resetDefaults() });
+    // View > 3D Grid (EDA_3D_ACTIONS::noGrid … show1mmGrid, check items)
+    const gridLabel: Record<number, [string, string]> = { 0: ["noGrid", "No 3D Grid"], 10: ["show10mmGrid", "3D Grid 10mm"], 5: ["show5mmGrid", "3D Grid 5mm"], 2.5: ["show2_5mmGrid", "3D Grid 2.5mm"], 1: ["show1mmGrid", "3D Grid 1mm"] };
+    for (const g of GRID3D_CHOICES) add({ id: gridLabel[g][0], label: gridLabel[g][1], run: () => { if (v) { v.setGrid(g); this.save(); } }, checked: () => !!v && v.grid === g });
+    add({ id: "toggleShowMissingModels", label: "Show parts without 3D model", tip: "Display a placeholder for footprints with missing 3D models", run: vis("missing"), checked: () => !!v && v.visibility.missing });
+    add({ id: "showNotInPosFile", label: "Show 3D Models not in POS File", tip: "Show 3D models even if not found in .pos file", icon: "show_not_in_posfile", key: "P", run: vis("notInPos"), checked: () => !!v && v.visibility.notInPos });
+    add({ id: "showDNP", label: "Show 3D Models marked DNP", tip: "Show 3D models even if marked 'Do Not Place'", icon: "show_dnp", key: "D", run: vis("dnp"), checked: () => !!v && v.visibility.dnp });
+    add({ id: "showBBoxes", label: "Show Model Bounding Boxes", tip: "Show 3D model bounding boxes in realtime renderer", icon: "ortho", run: vis("bbox"), checked: () => !!v && v.visibility.bbox });
+    add({ id: "openPreferences", label: "Preferences...", tip: "Show preferences for all open tools", icon: "preference", key: "Ctrl+,", run: () => { if (this.opts.openPreferences) this.opts.openPreferences(); }, disabled: this.opts.openPreferences ? undefined : "Preferences are set from the board editor" });
+    // AddStandardHelpMenu
+    const link = (id: string) => () => { const u = this.opts.links && this.opts.links[id]; if (u) window.open(u, "_blank", "noopener"); };
+    add({ id: "help", label: "Help", tip: "Open product documentation in a web browser", icon: "help_online", run: link("help") });
+    add({ id: "gettingStarted", label: "Getting Started with KiCad", tip: "Open \"Getting Started in KiCad\" guide for beginners", icon: "help", run: link("gettingStarted") });
+    add({ id: "listHotKeys", label: "List Hotkeys...", tip: "Displays current hotkeys table and corresponding commands", icon: "hotkeys", key: "Ctrl+F1", run: () => { if (this.opts.runAction) this.opts.runAction("listHotKeys"); } });
+    add({ id: "getInvolved", label: "Get Involved", tip: "Open \"Contribute to KiCad\" in a web browser", icon: "info", run: link("getInvolved") });
+    add({ id: "donate", label: "Donate", tip: "Open \"Donate to KiCad\" in a web browser", run: link("donate") });
+    add({ id: "reportBug", label: "Report Bug", tip: "Report a problem with KiCad", icon: "bug", run: link("reportBug") });
+    add({ id: "about", label: "About KiCad", icon: "about", run: () => { if (this.opts.runAction) this.opts.runAction("about"); } });
     add({ id: "close", label: "Close", icon: "exit", run: () => this.close() });
   }
 
@@ -254,13 +332,26 @@ export class ViewerWindow {
       ["File", [a("exportImage"), "-", a("close")]],
       ["Edit", [a("copyToClipboard")]],
       ["View", [a("zoomInCenter"), a("zoomOutCenter"), a("zoomFitScreen"), a("zoomRedraw"), "-",
+        { label: "3D Grid", icon: "grid", sub: [a("noGrid"), a("show10mmGrid"), a("show5mmGrid"), a("show2_5mmGrid"), a("show1mmGrid")] }, "-",
         a("viewTop"), a("viewBottom"), a("viewRight"), a("viewLeft"), a("viewFront"), a("viewBack"), "-",
         { label: "Rotate Board", icon: "rotate_cw", sub: [a("rotateXCW"), a("rotateXCCW"), "-", a("rotateYCW"), a("rotateYCCW"), "-", a("rotateZCW"), a("rotateZCCW")] },
         a("flipView"),
         { label: "Move Board", icon: "move", sub: [a("moveLeft"), a("moveRight"), a("moveUp"), a("moveDown")] }, "-",
         a("showLayersManager")]],
-      ["Preferences", [a("toggleRaytacing"), a("resetDefaults")]],
+      ["Preferences", [a("toggleRaytacing"), a("toggleShowMissingModels"), a("openPreferences"), a("resetDefaults"), "-",
+        { label: "Set Language", sub: [{ id: "languageEnglish", label: "English", run: () => {}, checked: () => true }] }]],
+      ["Help", [a("help"), a("gettingStarted"), a("listHotKeys"), a("getInvolved"), a("donate"), a("reportBug"), "-", a("about")]],
     ];
+  }
+
+  /** EDA_3D_CONTROLLER's canvas context menu (eda_3d_controller.cpp:64-81). */
+  private contextItems(): MenuItem[] {
+    const a = (id: string): Action => this.actions.get(id) as Action;
+    return [a("zoomInCenter"), a("zoomOutCenter"), "-",
+      a("viewTop"), a("viewBottom"), a("viewRight"), a("viewLeft"), a("viewFront"), a("viewBack"), "-",
+      { label: "Rotate Board", icon: "rotate_cw", sub: [a("rotateXCW"), a("rotateXCCW"), "-", a("rotateYCW"), a("rotateYCCW"), "-", a("rotateZCW"), a("rotateZCCW")] },
+      a("flipView"),
+      { label: "Move Board", icon: "move", sub: [a("moveLeft"), a("moveRight"), a("moveUp"), a("moveDown")] }];
   }
 
   private buildToolbar(): HTMLElement {
@@ -284,7 +375,7 @@ export class ViewerWindow {
   private syncToggles(): void {
     for (const [id, b] of this.toolButtons) { const a = this.actions.get(id); if (a && a.checked) b.classList.toggle("on", a.checked()); }
     const v = this.viewer; if (!v) return;
-    this.side.querySelectorAll<HTMLInputElement>("input[data-vis]").forEach((i) => { i.checked = v.visibility[i.dataset.vis as keyof Visibility]; });
+    this.side.querySelectorAll<HTMLInputElement>("input[data-vis]").forEach((i) => { const k = i.dataset.vis || ""; i.checked = k.startsWith("x:") ? v.visibility.extra.includes(k.slice(2)) : !!v.visibility[k as keyof Visibility]; });
   }
 
   // ---------------------------------------------------------------- appearance panel
@@ -292,46 +383,217 @@ export class ViewerWindow {
   private buildAppearance(): void {
     const side = this.side; side.replaceChildren(); const v = this.viewer;
     side.appendChild(el("h4", undefined, "Appearance"));
-    // appearance_controls_3D.cpp s_layerSettings: label, tooltip; the swatch is the layer's default colour
-    const rows: ([string, keyof Visibility, RGBA | null, string] | null)[] = [
-      ["Board Body", "board", BOARD_BODY, "Show board body"],
-      ["Plated Barrels", "barrels", SURFACE_FINISH, "Show barrels of plated through-holes and vias"],
-      ["F.Cu", "copperTop", SURFACE_FINISH, "Show front copper / surface finish color"],
-      ["B.Cu", "copperBottom", SURFACE_FINISH, "Show back copper / surface finish color"],
-      ["Solder Paste", "paste", SOLDER_PASTE, "Show solder paste"],
-      ["F.Silkscreen", "silkTop", SILKSCREEN, "Show front silkscreen"],
-      ["B.Silkscreen", "silkBottom", SILKSCREEN, "Show back silkscreen"],
-      ["F.Mask", "maskTop", SOLDER_MASK, "Show front solder mask"],
-      ["B.Mask", "maskBottom", SOLDER_MASK, "Show back solder mask"],
-      null,
-      ["Through-hole Models", "tht", null, "Show 3D models for 'Through hole' type footprints"],
-      ["SMD Models", "smd", null, "Show 3D models for 'Surface mount' type footprints"],
-      ["Virtual Models", "virtual", null, "Show 3D models for 'unspecified' type footprints"],
-    ];
-    for (const r of rows) {
-      if (!r) { side.appendChild(el("hr")); continue; }
-      const [label, key, color, tip] = r;
-      const row = el("label", "v3d-row"); row.title = tip;
-      const sw = el("span", color ? "sw" : undefined); if (color) sw.style.background = css(color, 1);
-      const cb = el("input"); cb.type = "checkbox"; cb.dataset.vis = key; cb.checked = v ? v.visibility[key] : DEFAULT_VISIBILITY[key];
-      cb.addEventListener("change", () => { if (v) { v.setVisibility({ [key]: cb.checked }); this.syncToggles(); } });
-      row.append(sw, cb, el("span", undefined, label)); side.appendChild(row);
-    }
-    side.appendChild(el("hr"));
-    const bg = (label: string, tip: string, which: "top" | "bottom") => {
-      const row = el("label", "v3d-row"); row.title = tip;
-      const inp = el("input"); inp.type = "color"; inp.dataset.bg = which; inp.value = hex(v ? v.background[which] : (which === "top" ? BACKGROUND_TOP : BACKGROUND_BOTTOM));
-      inp.addEventListener("input", () => { if (!v) return; const c = fromHex(inp.value); if (which === "top") v.setBackground(c, v.background.bottom); else v.setBackground(v.background.top, c); });
-      row.append(inp, el("span", undefined, label)); side.appendChild(row);
+    const layers = el("div", "v3d-layers"); side.appendChild(layers);
+    // APPEARANCE_CONTROLS_3D::OnLayerContextMenu: Show / Hide All Copper Layers, Show / Hide All Inner Layers (the
+    // web viewer draws the outer copper only, so the inner-layer pair stays disabled as for a two-layer board)
+    layers.addEventListener("contextmenu", (ev) => {
+      ev.preventDefault();
+      const copper = (on: boolean) => () => { if (v) { v.setVisibility({ copperTop: on, copperBottom: on }); this.appearanceChanged(); } };
+      this.closeMenu();
+      this.showMenu([{ id: "showAllCopper", label: "Show All Copper Layers", run: copper(true) }, { id: "hideAllCopper", label: "Hide All Copper Layers", run: copper(false) }, "-",
+        { id: "showAllInner", label: "Show All Inner Layers", run: () => {}, disabled: "The board has no inner copper layers in the 3D view" },
+        { id: "hideAllInner", label: "Hide All Inner Layers", run: () => {}, disabled: "The board has no inner copper layers in the 3D view" }], { at: { x: ev.clientX, y: ev.clientY } }, 0);
+    });
+    const enabled = this.enabledLayers();
+    // a swatch (left double click or middle click opens the colour picker), the eye checkbox, the label
+    const swatchFor = (key: string, opacity: boolean): HTMLElement => {
+      const sw = el("span", "sw"); sw.dataset.color = key; sw.title = "Left double click or middle click to change color";
+      const paint = () => { const c = LAYER_COLORS[key]; sw.style.background = c[3] >= 1 ? css(c, 1) : `linear-gradient(${css(c)},${css(c)}),repeating-conic-gradient(#c0c0c0 0 25%,#fff 0 50%) 0 0/6px 6px`; };
+      const open = (ev: Event) => {
+        ev.preventDefault(); ev.stopPropagation();
+        if (!this.opts.pickColor) return;
+        const c = LAYER_COLORS[key], d = DEFAULT_LAYER_COLORS[key];
+        this.opts.pickColor({ r: c[0], g: c[1], b: c[2], a: c[3] }, opacity, (n) => { setLayerColors({ [key]: [n.r, n.g, n.b, n.a] }); paint(); this.appearanceChanged(true); }, { r: d[0], g: d[1], b: d[2], a: d[3] });
+      };
+      sw.addEventListener("dblclick", open); sw.addEventListener("auxclick", (ev) => { if ((ev as MouseEvent).button === 1) open(ev); });
+      sw.addEventListener("click", (ev) => ev.preventDefault());
+      paint(); return sw;
     };
-    bg("Background Start", "Background gradient start color", "top");
-    bg("Background End", "Background gradient end color", "bottom");
+    const row = (host: HTMLElement, label: string, tip: string, sw: HTMLElement | null, checked: boolean, set: (on: boolean) => void, data?: string): void => {
+      const r = el("label", "v3d-row"); r.title = tip;
+      const cb = el("input"); cb.type = "checkbox"; cb.checked = checked; if (data) cb.dataset.vis = data;
+      cb.addEventListener("change", () => { set(cb.checked); this.appearanceChanged(); });
+      r.append(sw || el("span"), cb, el("span", undefined, label)); host.appendChild(r);
+    };
+    const visRow = (label: string, key: keyof Visibility, color: string | null, tip: string, opacity = false) =>
+      row(layers, label, tip, color ? swatchFor(color, opacity) : null, v ? !!v.visibility[key] : !!DEFAULT_VISIBILITY[key], (on) => { if (v) v.setVisibility({ [key]: on }); }, key);
+    const extraRow = (key: string) => {
+      const x = EXTRA_LAYERS.find((e) => e.key === key); if (!x) return;
+      const cur = v ? v.visibility.extra : DEFAULT_VISIBILITY.extra;
+      row(layers, x.label, x.tip, swatchFor(key, false), cur.includes(key), (on) => { if (!v) return; const list = v.visibility.extra.filter((k) => k !== key); if (on) list.push(key); v.setVisibility({ extra: list }); }, "x:" + key);
+    };
+    // appearance_controls_3D.cpp s_layerSettings, in its order; the user layers only when the board enables them
+    visRow("Board Body", "board", "board", "Show board body", true);
+    visRow("Plated Barrels", "barrels", "copper", "Show barrels of plated through-holes and vias");
+    visRow("F.Cu", "copperTop", "copper", "Show front copper / surface finish color");
+    visRow("B.Cu", "copperBottom", "copper", "Show back copper / surface finish color");
+    extraRow("adhesive");
+    visRow("Solder Paste", "paste", "paste", "Show solder paste");
+    visRow("F.Silkscreen", "silkTop", "silkTop", "Show front silkscreen");
+    visRow("B.Silkscreen", "silkBottom", "silkBottom", "Show back silkscreen");
+    visRow("F.Mask", "maskTop", "maskTop", "Show front solder mask", true);
+    visRow("B.Mask", "maskBottom", "maskBottom", "Show back solder mask", true);
+    for (const x of EXTRA_LAYERS) if (x.key !== "adhesive" && (!x.key.startsWith("User.") || !enabled || enabled.has(x.key))) extraRow(x.key);
+    layers.appendChild(el("hr"));
+    visRow("Through-hole Models", "tht", null, "Show 3D models for 'Through hole' type footprints");
+    visRow("SMD Models", "smd", null, "Show 3D models for 'Surface mount' type footprints");
+    visRow("Virtual Models", "virtual", null, "Show 3D models for 'unspecified' type footprints");
+    visRow("Models not in POS File", "notInPos", null, "Show 3D models even if not found in .pos file");
+    visRow("Models marked DNP", "dnp", null, "Show 3D models even if marked 'Do Not Place'");
+    visRow("Model Bounding Boxes", "bbox", null, "Show 3D model bounding boxes in realtime renderer");
+    layers.appendChild(el("hr"));
+    const bg = (label: string, tip: string, which: 0 | 1) => {
+      const r = el("label", "v3d-row"); r.title = tip;
+      const sw = el("span", "sw"); sw.dataset.bg = which ? "bottom" : "top"; sw.title = "Left double click or middle click to change color";
+      const cur = (): RGBA => (v ? (which ? v.background.bottom : v.background.top) : (which ? BACKGROUND_BOTTOM : BACKGROUND_TOP));
+      const paint = () => { sw.style.background = css(cur(), 1); };
+      const open = (ev: Event) => {
+        ev.preventDefault(); ev.stopPropagation(); if (!v || !this.opts.pickColor) return;
+        const c = cur(), d = which ? BACKGROUND_BOTTOM : BACKGROUND_TOP;
+        this.opts.pickColor({ r: c[0], g: c[1], b: c[2], a: 1 }, false, (n) => { const x: RGBA = [n.r, n.g, n.b, 1]; if (which) v.setBackground(v.background.top, x); else v.setBackground(x, v.background.bottom); paint(); this.save(); }, { r: d[0], g: d[1], b: d[2], a: 1 });
+      };
+      sw.addEventListener("dblclick", open); sw.addEventListener("auxclick", (ev) => { if ((ev as MouseEvent).button === 1) open(ev); });
+      paint(); r.append(sw, el("span"), el("span", undefined, label)); layers.appendChild(r);
+    };
+    bg("Background Start", "Background gradient start color", 0);
+    bg("Background End", "Background gradient end color", 1);
+    // the display options under the list (m_cbUseBoardStackupColors, m_cbUseBoardEditorCopperColors)
+    const opt = (label: string, tip: string, key: "useStackup" | "useEditorCopper") => {
+      const r = el("label", "v3d-opt"); r.title = tip; const cb = el("input"); cb.type = "checkbox"; cb.dataset.opt = key; cb.checked = !!this.settings[key];
+      cb.addEventListener("change", () => { this.settings[key] = cb.checked; this.save(); this.reload(false); });
+      r.append(cb, el("span", undefined, label)); side.appendChild(r);
+    };
+    opt("Use board stackup colors", "Use the colors of the board's physical stackup (Board Setup)", "useStackup");
+    opt("Use PCB editor copper colors", "Use the board editor layer colors for copper layers (realtime renderer only)", "useEditorCopper");
+    // Presets and Viewports (appearance_controls_3D_base.cpp m_cbLayerPresets / m_cbViewports)
+    const choice = (label: string, id: string, fill: (sel: HTMLElement) => void, pick: (value: string, sel: HTMLElement) => void, tip: string): HTMLElement => {
+      side.appendChild(el("div", "v3d-label", label));
+      const sel = document.createElement("k-select"); sel.id = id; sel.title = tip; sel.className = "v3d-choice";
+      fill(sel); sel.addEventListener("change", () => pick((sel as unknown as HTMLSelectElement).value, sel));
+      side.appendChild(sel); return sel;
+    };
+    this.presetSel = choice("Presets (Ctrl+Tab):", "v3d-presets", (sel) => this.fillPresets(sel), (value) => this.onPreset(value),
+      "Save and restore color and visibility combinations.");
+    this.viewportSel = choice("Viewports (Alt+Tab):", "v3d-viewports", (sel) => this.fillViewports(sel), (value) => this.onViewport(value),
+      "Save and restore camera position and zoom.");
+  }
+
+  /** The board's enabled layers by name (for the User.N rows), null before a board is shown. */
+  private enabledLayers(): Set<string> | null {
+    const d = this.opts.getDoc(); if (!d || !d.layers) return null;
+    const out = new Set<string>(); for (const k of d.layers.keys()) out.add(k); return out;
+  }
+
+  private option(sel: HTMLElement, value: string, label: string): void { const o = document.createElement("option"); o.value = value; o.textContent = label; sel.appendChild(o); }
+
+  private fillPresets(sel: HTMLElement): void {
+    sel.replaceChildren();
+    this.option(sel, "", "---");
+    this.option(sel, FOLLOW_PCB, FOLLOW_PCB); this.option(sel, FOLLOW_PLOT, FOLLOW_PLOT);
+    for (const p of this.settings.presets || []) this.option(sel, "p:" + p.name, p.name);
+    this.option(sel, "-", "---"); this.option(sel, "save", "Save preset..."); this.option(sel, "delete", "Delete preset...");
+    (sel as unknown as HTMLSelectElement).value = this.presetName === FOLLOW_PCB || this.presetName === FOLLOW_PLOT ? this.presetName : this.presetName ? "p:" + this.presetName : "";
+  }
+
+  private fillViewports(sel: HTMLElement): void {
+    sel.replaceChildren();
+    this.option(sel, "", "---");
+    for (const p of this.settings.viewports || []) this.option(sel, "v:" + p.name, p.name);
+    this.option(sel, "-", "---"); this.option(sel, "save", "Save viewport..."); this.option(sel, "delete", "Delete viewport...");
+    (sel as unknown as HTMLSelectElement).value = "";
+  }
+
+  /** APPEARANCE_CONTROLS_3D::onLayerPresetChanged. */
+  private onPreset(value: string): void {
+    const v = this.viewer; if (!v) return;
+    const refill = () => { if (this.presetSel) this.fillPresets(this.presetSel); };
+    if (value === FOLLOW_PCB) { const on = this.opts.layerVisible; if (on) { v.setVisibility(visibilityFromLayers(on, v.visibility)); } this.presetName = FOLLOW_PCB; this.afterPreset(); return; }
+    if (value === FOLLOW_PLOT) {
+      const get = this.opts.plotLayers;
+      if (get) void get().then((list) => { if (!list || !this.viewer) return; const set = new Set(list); this.viewer.setVisibility(visibilityFromLayers((l) => set.has(l), this.viewer.visibility)); this.presetName = FOLLOW_PLOT; this.afterPreset(); });
+      return;
+    }
+    if (value.startsWith("p:")) {
+      const p = (this.settings.presets || []).find((x) => x.name === value.slice(2)); if (!p) return;
+      v.setVisibility({ ...p.vis }); setLayerColors(p.colors); this.presetName = p.name; this.afterPreset(true); return;
+    }
+    if (value === "save") {
+      // wxTextEntryDialog( "Layer preset name:", "Save Layer Preset" ); an existing name asks "Overwrite existing preset?"
+      const ask = this.opts.textEntry; if (!ask) { refill(); return; }
+      ask("Save Layer Preset", "Layer preset name:", "", (text) => {
+        const name = text.trim(); if (!name || !this.viewer) { refill(); return; }
+        const list = this.settings.presets = this.settings.presets || [];
+        const put = () => { const at = list.findIndex((x) => x.name === name); const p: Preset3D = { name, vis: { ...this.viewer!.visibility }, colors: cloneLayerColors(LAYER_COLORS) };
+          if (at >= 0) list[at] = p; else list.push(p); this.presetName = name; this.save(); refill(); };
+        if (list.some((x) => x.name === name) && this.opts.confirm) this.opts.confirm("Overwrite existing preset?", put); else put();
+      });
+      refill(); return;
+    }
+    if (value === "delete") {
+      const list = this.settings.presets || [];
+      if (list.length && this.opts.listPick) this.opts.listPick("Delete Preset", "Presets", "Select preset:", list.map((x) => x.name), (name) => {
+        this.settings.presets = list.filter((x) => x.name !== name); if (this.presetName === name) this.presetName = ""; this.save(); refill(); });
+      refill(); return;
+    }
+    refill();
+  }
+
+  private afterPreset(colors = false): void { this.save(); if (colors) this.reload(false); const keep = this.presetName; this.buildAppearance(); this.presetName = keep; if (this.presetSel) this.fillPresets(this.presetSel); this.syncToggles(); }
+
+  /** APPEARANCE_CONTROLS_3D::onViewportChanged. */
+  private onViewport(value: string): void {
+    const v = this.viewer; if (!v) return;
+    const refill = () => { if (this.viewportSel) this.fillViewports(this.viewportSel); };
+    if (value.startsWith("v:")) { const p = (this.settings.viewports || []).find((x) => x.name === value.slice(2)); if (p) { v.setCamera(p); this.syncToggles(); } return; }
+    if (value === "save") {
+      const ask = this.opts.textEntry; if (!ask) { refill(); return; }
+      ask("Save Viewport", "Viewport name:", "", (text) => {
+        const name = text.trim(); if (!name || !this.viewer) { refill(); return; }
+        const list = this.settings.viewports = this.settings.viewports || [];
+        const c = this.viewer.getCamera(), p: Viewport3D = { name, q: c.q, cam: c.cam, ortho: c.ortho };
+        const at = list.findIndex((x) => x.name === name); if (at >= 0) list[at] = p; else list.push(p);
+        this.save(); refill(); if (this.viewportSel) (this.viewportSel as unknown as HTMLSelectElement).value = "v:" + name;
+      });
+      refill(); return;
+    }
+    if (value === "delete") {
+      const list = this.settings.viewports || [];
+      if (list.length && this.opts.listPick) this.opts.listPick("Delete Viewport", "Viewports", "Select viewport:", list.map((x) => x.name), (name) => { this.settings.viewports = list.filter((x) => x.name !== name); this.save(); refill(); });
+      refill(); return;
+    }
+    refill();
+  }
+
+  /** A row or swatch changed: the preset no longer describes what is shown; colours redraw the board. */
+  private appearanceChanged(colors = false): void {
+    this.presetName = ""; if (this.presetSel) this.fillPresets(this.presetSel);
+    this.syncToggles(); this.save();
+    if (colors) this.reload(false);
+  }
+
+  /** The appearance into "kui.v3d". */
+  private save(): void {
+    const v = this.viewer; if (!v) return;
+    this.settings.vis = { ...v.visibility }; this.settings.bg = [v.background.top, v.background.bottom]; this.settings.grid = v.grid;
+    this.settings.colors = cloneLayerColors(LAYER_COLORS); this.settings.preset = this.presetName;
+    saveSettings3D(this.settings);
+  }
+
+  private restoreSettings(): void {
+    const v = this.viewer, s = this.settings; if (!v) return;
+    if (s.colors) setLayerColors(s.colors);
+    if (s.vis) v.setVisibility({ ...DEFAULT_VISIBILITY, ...s.vis, extra: Array.isArray(s.vis.extra) ? s.vis.extra.slice() : DEFAULT_VISIBILITY.extra.slice() });
+    if (s.bg && s.bg.length === 2) v.setBackground(s.bg[0], s.bg[1]);
+    if (s.grid && GRID3D_CHOICES.includes(s.grid)) v.setGrid(s.grid);
+    this.presetName = s.preset || "";
   }
 
   private resetDefaults(): void {
     const v = this.viewer; if (!v) return;
-    v.setVisibility(Object.assign({}, DEFAULT_VISIBILITY)); v.setBackground(BACKGROUND_TOP, BACKGROUND_BOTTOM); v.setOrtho(false);
-    this.buildAppearance(); this.syncToggles(); v.view("top");
+    setLayerColors(cloneLayerColors(DEFAULT_LAYER_COLORS));
+    v.setVisibility({ ...DEFAULT_VISIBILITY, extra: DEFAULT_VISIBILITY.extra.slice() }); v.setBackground(BACKGROUND_TOP, BACKGROUND_BOTTOM); v.setOrtho(false); v.setGrid(0);
+    this.presetName = ""; this.settings.useStackup = false; this.settings.useEditorCopper = false; this.save();
+    this.buildAppearance(); this.syncToggles(); v.view("top"); this.reload(false);
   }
 
   // ---------------------------------------------------------------- menus

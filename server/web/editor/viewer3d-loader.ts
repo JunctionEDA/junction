@@ -6,13 +6,29 @@ import { E } from "./state";
 import { toast } from "./util";
 import { toolCtx } from "./tools";
 import { centerOn } from "./comments";
+import { colorPicker } from "./pcbdialogs/color-picker";
+import { listDialog, messageBox, textEntryBox } from "./pcbdialogs/ui";
+import { loadBoardHeader } from "./pcbdialogs/board-setup";
+import { BS } from "./pcbdialogs/canvas";
+import { HANDLERS } from "./actions";
+import { LINKS } from "../tables";
 
+type Rgba = { r: number; g: number; b: number; a: number };
 interface Viewer3DOpenOptions {
   getDoc(): KDoc | null;
   getName?(): string;
   subscribe?(onChange: () => void): () => void;
   toast?(text: string, ms?: number): void;
   selectRef?(ref: string): void;
+  pickColor?(current: Rgba, allowOpacity: boolean, done: (c: Rgba) => void, def: Rgba): void;
+  textEntry?(title: string, caption: string, value: string, ok: (text: string) => void): void;
+  listPick?(title: string, header: string, label: string, items: string[], ok: (item: string) => void): void;
+  confirm?(message: string, yes: () => void): void;
+  openPreferences?(): void;
+  runAction?(id: string): void;
+  links?: Record<string, string>;
+  layerVisible?(layer: string): boolean;
+  plotLayers?(): Promise<string[] | null>;
 }
 interface Viewer3DGlobal { open(opts: Viewer3DOpenOptions): unknown; close(): void; isOpen(): boolean }
 
@@ -73,6 +89,17 @@ export function show3DViewer(): void {
   loadViewer().then((viewer) => {
     viewer.open({
       getDoc: boardDoc, getName: boardName, toast, selectRef,
+      pickColor: (cur, opacity, done, def) => colorPicker(cur, opacity, done, def),
+      textEntry: (title, caption, value, ok) => { textEntryBox(title, caption, value, false, ok); },
+      listPick: (title, header, label, items, ok) => { listDialog(title, [header], items.map((i) => [i]), (row) => ok(row[0]), { listLabel: label }); },
+      // IsOK(): "Confirmation" with Yes / No
+      confirm: (message, yes) => { messageBox("Confirmation", message, [{ label: "No" }, { label: "Yes", fn: yes }], 0); },
+      openPreferences: () => { const h = HANDLERS.openPreferences; if (h) h(null); },
+      runAction: (id) => { const h = HANDLERS[id]; if (h) h(null); },
+      links: LINKS,
+      layerVisible: (layer) => !(E.hiddenLayers as Set<string>).has(layer),
+      // the plot dialog's layer selection (PCB_PLOT_PARAMS m_layerSelection) as the board stores it
+      plotLayers: async () => { const h = await loadBoardHeader(); return h ? BS().readPlotParams(h.setup, h.version).layerSelection : null; },
       // An applied change — local or a collaborator's — bumps document.version (doc.ts bumpDoc); the board
       // editor's own footprint drag commits without it but records an undo step, and a remote op counts
       // in connection.edits: any of them moving means the board may have changed.

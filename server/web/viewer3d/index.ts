@@ -18,7 +18,9 @@ import { boardBodies, bodyStyle, footprintAttrs } from "./bodies";
 import { localPads, partSolids } from "./parts";
 import { arcPoints, assignHoles, boardHoles, boardShape, chainLoops, circlePoints, nestLoops, ovalPoints, polyArea } from "./outline";
 import { stencilGeom, textureExtent } from "./textures";
-import { OpenOptions, ViewerWindow } from "./ui";
+import { OpenOptions, ViewerWindow, visibilityFromLayers } from "./ui";
+import { gridLines } from "./grid";
+import { DEFAULT_VISIBILITY } from "./scene";
 import { Viewer } from "./viewer";
 import { flattenOcct, footprintModels, modelStore, placeMesh } from "./models";
 
@@ -38,7 +40,7 @@ export const api = {
   models: modelStore,
   get current(): ViewerWindow | null { return current && !current.closed ? current : null; },
   /** the pure geometry behind the scene, for the node tests (static/tests/viewer3d.test.js) */
-  geometry: { boardShape, boardHoles, assignHoles, chainLoops, nestLoops, arcPoints, circlePoints, ovalPoints, polyArea, boardBodies, bodyStyle, footprintAttrs, stencilGeom, textureExtent, partSolids, localPads, footprintModels, placeMesh, flattenOcct },
+  geometry: { boardShape, boardHoles, assignHoles, chainLoops, nestLoops, arcPoints, circlePoints, ovalPoints, polyArea, boardBodies, bodyStyle, footprintAttrs, stencilGeom, textureExtent, partSolids, localPads, footprintModels, placeMesh, flattenOcct, gridLines, visibilityFromLayers, DEFAULT_VISIBILITY },
 };
 
 export type Viewer3DApi = typeof api;

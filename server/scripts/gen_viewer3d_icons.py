@@ -23,6 +23,9 @@ NAMES = [
     "export_file", "exit", "grid", "rotate_cw", "move",
     "axis3d_top", "axis3d_bottom", "axis3d_right", "axis3d_left", "axis3d_front", "axis3d_back",
     "show_tht", "show_smt", "show_other", "three_d",
+    "show_not_in_posfile", "show_dnp", "tools", "preference",
+    # AddStandardHelpMenu
+    "help_online", "help", "hotkeys", "info", "bug", "about",
 ]
 
 

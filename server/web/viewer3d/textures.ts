@@ -2,13 +2,13 @@
 // own 2D geometry, one technical layer at a time, drawn by the editor's canvas painter
 // (KiCadCanvas.render, server/web/canvas/render.ts) as a white stencil and tinted with KiCad's 3D
 // colours: board body, copper (surface finish), solder mask with its openings, silkscreen, solder paste.  The stack order is the 3D viewer's: body, copper, mask, silk, paste.
-import { BOARD_BODY, HOLE_SHADE, RGBA, SILKSCREEN, SOLDER_MASK, SOLDER_PASTE, SURFACE_FINISH, css } from "./colors";
+import { EXTRA_LAYERS, HOLE_SHADE, LAYER_COLORS, RGBA, css, extraSide } from "./colors";
 import type { Hole } from "./outline";
 
 export type Side = "F" | "B";
 
 /** What is drawn on a face (the Appearance panel's rows). */
-export interface FaceLayers { body: boolean; copper: boolean; mask: boolean; silk: boolean; paste: boolean }
+export interface FaceLayers { body: boolean; copper: boolean; mask: boolean; silk: boolean; paste: boolean; /** the extra layers shown (EXTRA_LAYERS keys), drawn over the paste */ extra?: string[] }
 
 /** The part of the board a face texture covers and its resolution. */
 export interface TextureExtent { x0: number; y0: number; w: number; h: number; pxPerMm: number; width: number; height: number }
@@ -64,7 +64,7 @@ export class FaceComposer {
 
   constructor(doc: KDoc, extent: TextureExtent) {
     this.extent = extent;
-    this.stencils = layerStencils(doc, ["F.Cu", "B.Cu", "F.Mask", "B.Mask", "F.SilkS", "B.SilkS", "F.Paste", "B.Paste"]);
+    this.stencils = layerStencils(doc, ["F.Cu", "B.Cu", "F.Mask", "B.Mask", "F.SilkS", "B.SilkS", "F.Paste", "B.Paste", ...EXTRA_LAYERS.flatMap((l) => l.layers)]);
     this.a = document.createElement("canvas"); this.b = document.createElement("canvas");
   }
 
@@ -100,21 +100,27 @@ export class FaceComposer {
     this.scratch(true);
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalCompositeOperation = "source-over"; ctx.globalAlpha = 1;
     ctx.clearRect(0, 0, W, H);
-    if (show.body) { ctx.fillStyle = css(BOARD_BODY, 1); ctx.fillRect(0, 0, W, H); }
-    if (show.copper && this.stencil(this.a, L.cu)) { this.tint(this.a, SURFACE_FINISH); ctx.drawImage(this.a, 0, 0); }
+    if (show.body) { ctx.fillStyle = css(LAYER_COLORS.board, 1); ctx.fillRect(0, 0, W, H); }
+    if (show.copper && this.stencil(this.a, L.cu)) { this.tint(this.a, LAYER_COLORS.copper); ctx.drawImage(this.a, 0, 0); }
     const openings = show.mask ? this.stencil(this.b, L.mask) : false;
     if (show.mask) {
       const actx = this.a.getContext("2d");
       if (actx) {
         actx.globalCompositeOperation = "source-over"; actx.clearRect(0, 0, W, H);
-        actx.fillStyle = css(SOLDER_MASK, 1); actx.fillRect(0, 0, W, H);
+        const mask = side === "F" ? LAYER_COLORS.maskTop : LAYER_COLORS.maskBottom;
+        actx.fillStyle = css(mask, 1); actx.fillRect(0, 0, W, H);
         if (openings) { actx.globalCompositeOperation = "destination-out"; actx.drawImage(this.b, 0, 0); actx.globalCompositeOperation = "source-over"; }
-        ctx.globalAlpha = SOLDER_MASK[3]; ctx.drawImage(this.a, 0, 0); ctx.globalAlpha = 1;
+        ctx.globalAlpha = side === "F" ? LAYER_COLORS.maskTop[3] : LAYER_COLORS.maskBottom[3]; ctx.drawImage(this.a, 0, 0); ctx.globalAlpha = 1;
       }
     }
     // silkscreen is not clipped at the mask openings: KiCad's default (render.subtract_mask_from_silk = false)
-    if (show.silk && this.stencil(this.a, L.silk)) { this.tint(this.a, SILKSCREEN); ctx.drawImage(this.a, 0, 0); }
-    if (show.paste && this.stencil(this.a, L.paste)) { this.tint(this.a, SOLDER_PASTE); ctx.drawImage(this.a, 0, 0); }
+    if (show.silk && this.stencil(this.a, L.silk)) { this.tint(this.a, side === "F" ? LAYER_COLORS.silkTop : LAYER_COLORS.silkBottom); ctx.drawImage(this.a, 0, 0); }
+    if (show.paste && this.stencil(this.a, L.paste)) { this.tint(this.a, LAYER_COLORS.paste); ctx.drawImage(this.a, 0, 0); }
+    // the technical and user layers the Appearance panel turned on, each on its own face
+    for (const x of EXTRA_LAYERS) {
+      if (!show.extra || !show.extra.includes(x.key)) continue;
+      for (const layer of x.layers) if (extraSide(layer) === side && this.stencil(this.a, layer)) { const c = LAYER_COLORS[x.key] || x.color; this.tint(this.a, c); ctx.globalAlpha = c[3]; ctx.drawImage(this.a, 0, 0); ctx.globalAlpha = 1; }
+    }
     if (painted.length) {
       ctx.setTransform(e.pxPerMm, 0, 0, e.pxPerMm, -e.x0 * e.pxPerMm, -e.y0 * e.pxPerMm);
       ctx.fillStyle = css(HOLE_SHADE, 1); ctx.beginPath();

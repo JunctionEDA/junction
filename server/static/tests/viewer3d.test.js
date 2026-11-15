@@ -249,5 +249,28 @@ test("a tessellated STEP file becomes one mesh with each face's colour", () => {
   assert.strictEqual(G.flattenOcct({ success: false }), null); assert.strictEqual(G.flattenOcct({ success: true, meshes: [] }), null);
 });
 
+test("generate3dGrid: lines every pitch over max(board, 100 mm) x 1.2, every fifth in the marker colour", () => {
+  assert.strictEqual(G.gridLines(40, 30, 0).pos.length, 0, "NONE draws nothing");
+  const g = G.gridLines(40, 30, 10);
+  // horizontal: x lines at 0, ±10 … ±60 (120 mm wide), y lines likewise; vertical: x at 0..±70 (the loop's last step), z lines -50..100
+  const segs = g.pos.length / 6; assert.ok(segs > 40, "a full grid: " + segs);
+  for (let i = 0; i < g.pos.length; i += 3) { assert.ok(Math.abs(g.pos[i]) <= 70.001 && Math.abs(g.pos[i + 1]) <= 60.001, "inside the grid's extent"); }
+  // the two lines through the centre (ii = 0) are marker lines, the next ones (ii = 1) ordinary
+  near(g.col[0], 144 / 255); near(g.col[12], 72 / 255, 1e-9, "ii = 1: an ordinary line");
+});
+test("Follow PCB Editor / Plot Settings: the 3D layers follow the board layers shown, the models stay", () => {
+  const cur = Object.assign({}, G.DEFAULT_VISIBILITY, { tht: false });
+  const on = new Set(["F.Cu", "B.SilkS", "F.Fab", "User.3", "F.Paste"]);
+  const v = G.visibilityFromLayers((l) => on.has(l), cur);
+  assert.strictEqual(v.copperTop, true); assert.strictEqual(v.copperBottom, false); assert.strictEqual(v.silkTop, false); assert.strictEqual(v.silkBottom, true);
+  assert.strictEqual(v.paste, true); assert.strictEqual(v.tht, false, "models untouched");
+  assert.deepStrictEqual(v.extra.sort(), ["F.Fab", "User.3"]);
+});
+test("Models marked DNP: the DNP parts come back flagged only when asked for", () => {
+  const doc = K.parseDoc(HEAD + "\n" + OUTLINE + "\n" + FP("U9", "10 10", "smd dnp", SMD_PADS) + ")", "kicad_pcb");
+  assert.strictEqual(G.boardBodies(doc).length, 0);
+  const all = G.boardBodies(doc, true); assert.strictEqual(all.length, 1); assert.strictEqual(all[0].dnp, true);
+});
+
 console.log(`viewer3d: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);
