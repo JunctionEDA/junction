@@ -596,8 +596,12 @@ void uploadFamily( const wxString& aFamily, const std::vector<fontconfig::FONTCO
                 first = s.refused.insert( aFamily.Lower() ).second;
             }
 
-            if( first )
+            // Only the font's own licence is a lasting answer; a view-only role can change.
+            if( first && ( error.message.Lower().Contains( wxS( "licence" ) )
+                           || error.message.Lower().Contains( wxS( "license" ) ) ) )
+            {
                 rememberRefused( aProject.id, aFamily );
+            }
 
             if( first && wxTheApp )
             {
