@@ -385,7 +385,7 @@ async function schematicSpice(req: Request, p: Project, withCommands: boolean, n
     if (!SM.hasNgspiceData()) SM.setNgspiceData(NGSPICE);   // the ngspice models' parameters (instance l=/w=, .model overrides)
     const { symbols, texts } = SP.readHierarchy({ sheets, netMap: nl.netMap || new Map(), symbolPins: hp.symbolPins, isPower, textVars } as any);
     // the project's SPICE model files: parsed for the exporter, and handed to ngspice where the netlist includes them
-    const models = p.docs.filter((d) => d.docType === "spice_model" || /\.(lib|sub|cir|mod|spice|ibs)$/i.test(d.path));
+    const models = p.docs.filter((d) => d.docType === "spice_model" || /\.(lib|sub|cir|mod|model|sp|spice|ibs)$/i.test(d.path));
     const norm = (x: string) => x.replace(/\\/g, "/").replace(/^\$\{KIPRJMOD\}\//, "").replace(/^\.\//, "");
     const loaded = new Map<string, string | null>(); let bytes = 0;
     const load = async (d: DocEntry) => { if (!loaded.has(d.path)) { let t: string | null = null; try { t = await readTextDocument(conn, d.docId); } catch { t = null; } if (t !== null && (bytes += t.length) > 8e6) t = null; loaded.set(d.path, t); } return loaded.get(d.path)!; };
