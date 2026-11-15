@@ -221,11 +221,11 @@ jobs:
             on && /^## / { exit }
             on { print }' CHANGELOG.md > notes.md
           test -s notes.md || { echo "CHANGELOG.md has no section for $VERSION"; exit 1; }
-          ls -la dl
+          find dl -type f -exec ls -la {} +
           flags=""
           [ "$DRAFT" = true ] && flags="--draft"
           gh release create "$TAG" --target "$GITHUB_SHA" --title "Junction $VERSION" \
             --notes-file notes.md $flags \
-            dl/Junction-$VERSION-macos.dmg \
-            dl/Junction-$VERSION-windows-x64.exe \
-            dl/Junction-$VERSION-linux-x64.tar.gz
+            "$(find dl -name "Junction-$VERSION-macos.dmg" | head -1)" \
+            "$(find dl -name "Junction-$VERSION-windows-x64.exe" | head -1)" \
+            "$(find dl -name "Junction-$VERSION-linux-x64.tar.gz" | head -1)"
