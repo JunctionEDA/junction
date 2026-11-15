@@ -103,7 +103,9 @@ async fn create(State(state): State<AppState>, AuthUser(user): AuthUser, Path(do
     if pending >= MAX_PENDING {
         return Err(AppError::BadRequest(format!("{pending} proposals are already waiting on this document: wait for them to be decided, or withdraw some")));
     }
-    let id: Uuid = sqlx::query_scalar("INSERT INTO design_proposals (project_id, doc_id, created_by, app, title, rationale, body) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id")
+    let id: Uuid = sqlx::query_scalar(
+        "INSERT INTO design_proposals (project_id, doc_id, created_by, app, title, rationale, body, base_seq)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE((SELECT MAX(seq) FROM ops WHERE doc_id = $2), 0)) RETURNING id")
         .bind(doc.project_id).bind(doc_id).bind(user.id).bind(clip(&req.app, 80)).bind(&title).bind(clip(&req.rationale, 2000)).bind(&req.body)
         .fetch_one(&state.pool).await?;
     sqlx::query("DELETE FROM design_proposals WHERE created_at < now() - make_interval(days => $1)").bind(KEEP_DAYS).execute(&state.pool).await?;
@@ -131,6 +133,14 @@ async fn fetch(State(state): State<AppState>, AuthUser(user): AuthUser, Path(id)
     access(&state, user.id, row.get("doc_id"), false).await?;
     let mut proposal = one(&state, id).await?;
     proposal["body"] = row.get::<Value, _>("body");
+    // Has someone edited an item this would change since it was proposed?  The web editor compares the items
+    // themselves; the desktop app asks here.
+    let touched: bool = sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM design_proposals p JOIN ops o ON o.doc_id = p.doc_id AND o.seq > p.base_seq,
+                        jsonb_array_elements(CASE WHEN jsonb_typeof(o.changes) = 'array' THEN o.changes ELSE '[]'::jsonb END) c
+                        WHERE p.id = $1 AND (p.body->'basis') ? (c->>'id'))")
+        .bind(id).fetch_one(&state.pool).await?;
+    proposal["stale"] = if touched { json!("An item this would change has been edited since it was proposed.") } else { Value::Null };
     Ok(Json(proposal))
 }
 

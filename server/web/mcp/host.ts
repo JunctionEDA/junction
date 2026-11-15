@@ -248,10 +248,32 @@ async function applyChanges(req: Request, live = false, stage?: (sess: DocSessio
 
 // ---------------------------------------------------------------- proposals: changes a person accepts
 
+/**
+ * Where a planned change lands, for an editor that cannot draw it itself (the desktop app draws these over the
+ * canvas): one box per touched item in mm with its kind, and new tracks and wires as line segments.
+ */
+function previewOf(sess: DocSession, doc: any, changes: any[]): { boxes: (number | string)[][]; segs: number[][] } {
+  const k = K(); const boxes: (number | string)[][] = [], segs: number[][] = []; const r = (v: number) => Math.round(v * 1e4) / 1e4;
+  const scratch = Object.assign({}, doc, { items: new Map() });
+  for (const c of changes) if (c.kind !== "REMOVED") { try { k.applyChange(scratch, c, sess.IU); } catch { /* not drawn */ } }
+  for (const c of changes) {
+    const now = doc.items.get(c.id), next: any = scratch.items.get(c.id);
+    const b = c.kind === "REMOVED" ? now && now.bbox : (next && next.bbox) || (now && now.bbox);
+    if (b && boxes.length < 200) boxes.push([r(b[0]), r(b[1]), r(b[2]), r(b[3]), c.kind === "REMOVED" ? "remove" : c.kind === "ADDED" ? "add" : "modify"]);
+    if (c.kind !== "ADDED" || !next || segs.length >= 600) continue;
+    try {
+      if (next.kind === "wire" || next.kind === "bus") { const pts = k.ptsOf(next.node); for (let i = 1; i < pts.length; i++) segs.push([r(pts[i - 1][0]), r(pts[i - 1][1]), r(pts[i][0]), r(pts[i][1]), 0.15]); }
+      else if (next.kind === "segment") { const a = k.kid(next.node, "start"), e = k.kid(next.node, "end"), w = k.kid(next.node, "width"); if (a && e) segs.push([r(k.num(a[1])), r(k.num(a[2])), r(k.num(e[1])), r(k.num(e[2])), w ? r(k.num(w[1])) : 0.2]); }
+    } catch { /* a box is enough */ }
+  }
+  return { boxes, segs };
+}
+
 /** Store a planned change for the people in the document to accept or reject (src/proposals.rs), and point at it. */
 async function park(req: Request, sess: DocSession, doc: any, prop: any): Promise<any> {
   if (!prop.changes.length && !prop.rules) throw new ToolError("These edits change nothing, so there is nothing to propose.");
-  const body = { lines: prop.lines.map((l: any) => ({ kind: l.kind, text: l.text })), changes: prop.changes, basis: prop.basis, rules: prop.rules || null, connectivity: prop.connectivity || null };
+  const body = { lines: prop.lines.map((l: any) => ({ kind: l.kind, text: l.text })), changes: prop.changes, basis: prop.basis, rules: prop.rules || null, connectivity: prop.connectivity || null,
+    preview: previewOf(sess, doc, prop.changes) };
   const stored = await api(`/api/docs/${sess.entry.docId}/proposals`, { method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ title: prop.title, rationale: prop.rationale || "", app: req.agent || "", body }) });
   // the assistant's cursor goes to what the proposal touches, so people look there
