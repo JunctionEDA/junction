@@ -142,7 +142,16 @@ fn footprint_for_name(package: &str, kind: Kind) -> Option<(&'static str, String
     }
 
     // Small-signal and power packages with one land pattern.
-    const FIXED: [(&str, &str, &str); 29] = [
+    const FIXED: [(&str, &str, &str); 37] = [
+        // metal cans, under their own names and JEDEC's
+        ("TO-18-3", "Package_TO_SOT_THT", "TO-18-3"),
+        ("TO-206AA", "Package_TO_SOT_THT", "TO-18-3"),
+        ("TO-18-4", "Package_TO_SOT_THT", "TO-18-4"),
+        ("TO-39-3", "Package_TO_SOT_THT", "TO-39-3"),
+        ("TO-205AD", "Package_TO_SOT_THT", "TO-39-3"),
+        ("TO-5-3", "Package_TO_SOT_THT", "TO-5-3"),
+        ("TO-205AA", "Package_TO_SOT_THT", "TO-5-3"),
+        ("TO-46-3", "Package_TO_SOT_THT", "TO-46-3"),
         ("SOT-753", "Package_TO_SOT_SMD", "SOT-23-5"),
         ("SC-74A", "Package_TO_SOT_SMD", "SOT-23-5"),
         ("SOT-457", "Package_TO_SOT_SMD", "SOT-23-6"),
@@ -174,6 +183,22 @@ fn footprint_for_name(package: &str, kind: Kind) -> Option<(&'static str, String
         ("SOD-523", "Diode_SMD", "D_SOD-523"),
     ];
     let head = squashed.split('(').next().unwrap_or("");
+    let head = head.strip_suffix("METALCAN").unwrap_or(head);
+    // metal cans by lead count: KiCad has TO-18, TO-39, TO-5 and TO-46 with these leads
+    if let Some(rest) = head.strip_prefix("TO-") {
+        if let Some((can, leads)) = rest.split_once('-') {
+            let known: &[&str] = match can {
+                "18" => &["2", "3", "4"],
+                "39" => &["2", "3", "4", "6", "8", "10"],
+                "5" => &["2", "3", "4", "6", "8", "10"],
+                "46" => &["2", "3", "4"],
+                _ => &[],
+            };
+            if known.contains(&leads) {
+                return Some(("Package_TO_SOT_THT", format!("TO-{can}-{leads}")));
+            }
+        }
+    }
     // the longest name first, so "SOT-23-5" is not taken for "SOT-23"
     let mut fixed: Vec<&(&str, &str, &str)> = FIXED.iter().collect();
     fixed.sort_by_key(|f| std::cmp::Reverse(f.0.len()));
@@ -342,7 +367,11 @@ mod tests {
         assert_eq!(fp("TO-236-3, SC-59, SOT-23-3", Kind::Other).as_deref(), Some("Package_TO_SOT_SMD:SOT-23"));
         assert_eq!(fp("SC-74A, SOT-753", Kind::Other).as_deref(), Some("Package_TO_SOT_SMD:SOT-23-5"));
         assert_eq!(fp("SC-74, SOT-457", Kind::Other).as_deref(), Some("Package_TO_SOT_SMD:SOT-23-6"));
-        assert_eq!(fp("TO-206AA, TO-18-3 Metal Can", Kind::Other), None);
+        assert_eq!(fp("TO-206AA, TO-18-3 Metal Can", Kind::Other).as_deref(), Some("Package_TO_SOT_THT:TO-18-3"));
+        assert_eq!(fp("TO-205AD, TO-39-3 Metal Can", Kind::Other).as_deref(), Some("Package_TO_SOT_THT:TO-39-3"));
+        assert_eq!(fp("TO-99-8 Metal Can", Kind::Other), None);
+        assert_eq!(fp("TO-5-8 Metal Can", Kind::Other).as_deref(), Some("Package_TO_SOT_THT:TO-5-8"));
+        assert_eq!(fp("TO-18", Kind::Other), None, "a can with an unknown number of leads");
         assert!(is_packaging("MouseReel") && is_packaging("Tray") && !is_packaging("SOT-23-5"));
         assert_eq!(fp("TO-220-3", Kind::Other).as_deref(), Some("Package_TO_SOT_THT:TO-220-3_Vertical"));
         assert_eq!(fp("8-DIP (0.300\", 7.62mm)", Kind::Other).as_deref(), Some("Package_DIP:DIP-8_W7.62mm"));
