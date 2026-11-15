@@ -52,7 +52,7 @@ import { applySelection, expandGroups, groupChanges, groupMembers, groupMembersC
 import { itemAt } from "./guess";
 import { hitTestItem } from "./hit";
 import { LENGTH_UNCONSTRAINED, TUNE_IU, setTargetLength, setTargetSkew, tuneCopy } from "./meander";
-import { SELECTION_TYPES, filterIds, idsOnLayer, inspectClearance } from "./msgpanel";
+import { idsOnLayer, inspectClearance } from "./msgpanel";
 import { connectedCopperIds, netHighlightIds, netInspector, netItemIds, netlist, ratsnest, selectionNets } from "./netlist";
 import { netOf } from "./nets";
 import { zoneLayers } from "./nodes";
@@ -159,10 +159,6 @@ act("selectSameSheet", "Select Footprints on Same Sheet", "", (ctx: PcbCtx) => {
   if (!sheets.size) { ctx.toast("The selection carries no sheet"); return true; } const out = new Set<string>();
   for (const it of ctx.doc.items.values()) if (it.kind === "footprint") { const sf = K.kid(it.node, "sheetfile") || K.kid(it.node, "sheetname"); if (sf && sheets.has(K.str(sf[1]))) out.add(it.id); }
   applySelection(ctx, out); ctx.toast(`${plural(out.size, "footprint")} on ${Array.from(sheets).join(", ")}`); return true;
-});
-act("filterSelection", "Filter Selected Items…", "", (ctx: PcbCtx) => {
-  const ids = needSel(ctx); if (!ids) return true;
-  return openForm({ title: "Filter Selected Items", fields: Object.keys(SELECTION_TYPES).map((t) => ({ k: t, label: t[0].toUpperCase() + t.slice(1), type: "check", value: true })), apply: (v: Record<string, boolean>) => { const kept = filterIds(ctx.doc, ids, v); applySelection(ctx, kept); ctx.toast(`${plural(kept.length, "item")} kept`); } });
 });
 act("unselectAll", "Unselect All", "", (ctx: PcbCtx) => { applySelection(ctx, []); return true; });
 // placement
