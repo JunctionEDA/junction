@@ -716,7 +716,12 @@ export function reviewPhysics(doc: any, P: any, k: any, settings: any, add: Add)
     const usb = Array.from(pairBase.values()).filter((e) => e.p && e.n && /USB|(^|[\/_(])D[+\-PM]\)?$/i.test(e.p!) && pairInterface(e.p!) === "usb2");
     const holed: string[] = [], uneven: string[] = [];
     for (const e of usb) {
-      const vp = viasOf.get(e.p!) || [], vn = viasOf.get(e.n!) || [];
+      // A USB-C receptacle carries each data line on two pins, interleaved (D- D+ D- D+): joining both twins is not
+      // possible on one layer when the chip wants the pair the other way round.  The short hop on the back that joins
+      // one twin to its line, right at the connector, is a stub beside the path and not a layer change of the pair.
+      const hop = (net: string) => { const tw = (padsOf.get(net) || []).filter((q) => /^(J|P|CN|USB|X)\d/i.test(q.fp.ref)); return tw.length >= 2 ? tw : []; };
+      const onPath = (net: string) => { const tw = hop(net); const all = viasOf.get(net) || []; const near = all.filter((v: any) => tw.some((q) => Math.hypot(q.x - v.shape.x, q.y - v.shape.y) <= 3)); return near.length === 2 && near.length === all.length ? [] : all; };
+      const vp = onPath(e.p!), vn = onPath(e.n!);
       if (vp.length + vn.length) holed.push(`${bare(e.p!)} ${vp.length} via${vp.length === 1 ? "" : "s"}, ${bare(e.n!)} ${vn.length}`);
       if (vp.length !== vn.length) uneven.push(`${bare(e.p!)} and ${bare(e.n!)} change layer a different number of times (${vp.length} and ${vn.length})`);
       else for (const a of vp) { const d = Math.min(...vn.map((b) => Math.hypot(b.shape.x - a.shape.x, b.shape.y - a.shape.y))); if (d > 1.5) uneven.push(`the ${bare(e.p!)} via at ${at(a.shape.x, a.shape.y)} has no ${bare(e.n!)} via beside it (${r2(d)} mm)`); }

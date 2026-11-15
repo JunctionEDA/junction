@@ -1265,14 +1265,15 @@ class Schematic(_Doc):
         if rest:
             groups["Other"] = rest
         notes = dict(notes or {})
-        # a crystal is a block of its own (with its load capacitors and series resistor), joined to its chip by the net
-        # names: drawn inside the chip's block its two wires loop round everything else there
+        # a crystal is a small block of its own (with its load capacitors and series resistor) inside its chip's frame,
+        # under the decoupling capacitors, joined to the chip by the net names: wired to the chip its two wires loop
+        # round everything else there
+        split: dict = {}
         if named:
             pins_of: dict = {}
             for net, pins in nets.items():
                 for pin in pins:
                     pins_of.setdefault(str(pin).partition(".")[0], []).append(net)
-            split: dict = {}
             for g, rs in groups.items():
                 keep = list(rs)
                 for y in list(rs):
@@ -1288,15 +1289,6 @@ class Schematic(_Doc):
                     val = str(parts[y].get("value") or "") if isinstance(parts.get(y), dict) else ""
                     split.setdefault(g, []).append((f"{val} crystal" if val else "Crystal", mine))
                 groups[g] = keep
-            if split:
-                out_groups: dict = {}
-                for g, rs in groups.items():
-                    out_groups[g] = rs
-                    for name, mine in split.get(g, []):
-                        while name in out_groups or name in groups:
-                            name += " " + mine[0]
-                        out_groups[name] = mine
-                groups = out_groups
         for r, spec in parts.items():   # a note given with a part belongs to its block
             if isinstance(spec, dict) and spec.get("note"):
                 g = next((n for n, rs in groups.items() if r in rs), None)
@@ -1310,6 +1302,11 @@ class Schematic(_Doc):
         intent = self._intent(parts, nets)
         drawer = Blocks(self, parts, nets, groups, intent, _GROUND, arrange_pins=swap_pins)
         drawer.force |= set(labels or [])
+        drawer.subs = split
+        for subs in split.values():
+            for name, mine in subs:
+                for r in mine:
+                    drawer.gof[r] = name
         drawer.global_labels = bool(global_labels)      # a name at a wire end becomes a global label: a box centred on the wire, with a point
         for (ref, num), name in intent.items():      # a net wired inside its block has no label: remember it by one of its pins
             self.project.net_pins.setdefault(name, f"{ref}.{num}")

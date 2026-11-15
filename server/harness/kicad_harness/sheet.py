@@ -190,6 +190,7 @@ class Blocks:
             self.netpins.setdefault(net, []).append((ref, num))
         self.done: set = set()
         self.force: set = set()     # nets that carry a label in their block after all
+        self.subs: dict = {}        # {group: [(name, refs)]}: small blocks drawn inside a group's frame and joined to it by labels (a crystal)
         self.done_nets: set = set()  # nets whose IC pin has been drawn
         self.problems: list = []
         self._offs: dict = {}
@@ -940,14 +941,18 @@ class Blocks:
                 n = 3 if near and prev[1] == 1 else 1
                 if railed and power[0]["x"] < p["x"] < power[-1]["x"]:
                     n = 3       # a pin of another supply under a shared rail: its symbol stands above that rail's
+                n0 = n
                 if natural(net) and side == "top":
                     for tries in range(8):
                         E = (p["x"], p["y"] + v * (n * G + (STUB if n == 1 else 0)))
                         me, wire = self.sym_rect(net, E), _rect(p["x"] - 0.2, E[1], p["x"] + 0.2, p["y"])
                         if not any(_hit(_rect(me[0] - 0.4, me[1] - 0.3, me[2] + 0.4, me[3] + 0.3), b) for b in stood) \
-                                and not any(_hit(wire, b) for b in stood if b[3] - b[1] > 1.0):     # a wire may cross a rail, not a name
+                                and not any(_hit(wire, _rect(b[0] + 0.8, b[1], b[2] - 0.8, b[3])) for b in stood if b[3] - b[1] > 1.0 and b[2] - b[0] > 1.6):     # a wire may cross a rail and pass the end of a name, not go through one
                             break
                         n += 2
+                    else:
+                        n = n0      # no height clears everything: one step above the neighbour, not a wire to the top of the sheet
+                        E = (p["x"], p["y"] + v * (n * G + (STUB if n == 1 else 0)))
                     stood.append(self.sym_rect(net, E))
 
                 E = (p["x"], p["y"] + v * (n * G + (STUB if n == 1 else 0)))
@@ -1159,6 +1164,16 @@ class Blocks:
                 for i in range(0, len(rs), size):
                     self.bank(rs[i:i + size], sup, gnd)
                     beside([])
+            for name, mine in self.subs.get(g, []):      # a crystal with its capacitors: a row of its own under the decoupling capacitors, joined to the chip by labels
+                if cx > cx0:
+                    cx, cy, row = cx0, cy + row + 4 * G, 0.0
+                for r in mine:
+                    if r not in self.done and not self.small(r):
+                        beside(self.big(name, r))
+                for r in mine:
+                    if r not in self.done:
+                        beside(self.chain(name, r))
+                placed += mine
             for r in refs:      # a matching network: series part in line, shunts hanging down
                 if r in self.done or not self.small(r):
                     continue

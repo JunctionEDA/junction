@@ -111,5 +111,34 @@ class Seat(Boards):
         self.assertIn("placement.outside", str(e.exception))
 
 
+    def twin_usb(self, chip_pads):
+        row = [("B7", -0.75, "USB_DN"), ("A6", -0.25, "USB_DP"), ("A7", 0.25, "USB_DN"), ("B6", 0.75, "USB_DP")]
+        j = part("J1", (20, 26), [(n, x, 0, 0.3, 1.45, net) for n, x, net in row] + [("S1", -4.3, 3, 1, 2, "GND"), ("S2", 4.3, 3, 1, 2, "GND")], value="USB-C", lib="Connector_USB:USB_C")
+        u = part("U1", (20, 14), chip_pads, value="MCU", lib="Package_DFN_QFN:QFN")
+        return self.open(edge(BOX), j, u)
+
+    def test_usb_c_twins_are_joined_at_the_pads_without_a_via_when_the_order_allows(self):
+        b = self.twin_usb([("1", -0.25, 1.5, 0.25, 0.8, "USB_DN"), ("2", 0.25, 1.5, 0.25, 0.8, "USB_DP"), ("3", 0, -1.5, 0.25, 0.8, "GND")])
+        got = b.bridge_twins()
+        self.assertEqual(got["J1"]["exits"], "outer"); self.assertEqual(got["J1"]["vias"], 0)
+        for n in ("USB_DP", "USB_DN"):
+            t = b.trace(n)
+            self.assertEqual(t["vias"], 0); self.assertLess(t["routed_length_mm"], 4.5)      # a U at the pads, not a loop round the connector
+        self.assertEqual(b.bridge_twins(), {})      # asked again: nothing more
+
+    def test_usb_c_twins_take_one_hop_on_the_back_when_the_chip_wants_the_pair_the_other_way(self):
+        b = self.twin_usb([("1", -0.25, 1.5, 0.25, 0.8, "USB_DP"), ("2", 0.25, 1.5, 0.25, 0.8, "USB_DN"), ("3", 0, -1.5, 0.25, 0.8, "GND")])
+        got = b.bridge_twins()
+        self.assertEqual(got["J1"]["exits"], "inner"); self.assertEqual(got["J1"]["vias"], 2)
+        dn, dp = b.trace("USB_DN"), b.trace("USB_DP")
+        self.assertEqual(dn["vias"], 0)
+        self.assertEqual(dp["vias"], 2)
+        self.assertLess(dp["by_layer"]["B.Cu"]["length_mm"], 4.5)
+        r = b.route(nets=["USB_DP", "USB_DN"])
+        self.assertFalse({"USB_DP", "USB_DN"} & set(r["left"]))
+        self.assertEqual(b.trace("USB_DP")["vias"], 2)      # the pair itself, connector to chip, stays on the top
+        self.assertNotIn("usb.vias", " ".join(b.brief()["findings"]))
+
+
 if __name__ == "__main__":
     unittest.main()

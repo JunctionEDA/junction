@@ -119,6 +119,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                 step(f"zone {layer}", lambda layer=layer: self.zone("GND", layer=layer, connect="solid" if layer.startswith("In") else "thermal"))
     step("prepare", self.prepare)
     if route:
+        step("twins", self.bridge_twins)      # a USB-C connector's D+ and D- twins, joined at the pads before anything is routed
         r = dict(plan.get("route") or {})
         r["order"] = list(dict.fromkeys(list(order or []) + list(r.get("order") or [])))
         r["widths"] = {**(r.get("widths") or {}), **(widths or {})}

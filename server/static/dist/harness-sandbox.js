@@ -35,6 +35,8 @@ from .stackups import BUILDS, FABS, FINISHES, MATERIALS, materials
 _stackups.install(Board)
 from . import seat as _seat
 _seat.install(Board)
+from . import twins as _twins
+_twins.install(Board)
 from . import craft as _craft
 _craft.install(Board)
 
@@ -1366,14 +1368,15 @@ class Schematic(_Doc):
         if rest:
             groups["Other"] = rest
         notes = dict(notes or {})
-        # a crystal is a block of its own (with its load capacitors and series resistor), joined to its chip by the net
-        # names: drawn inside the chip's block its two wires loop round everything else there
+        # a crystal is a small block of its own (with its load capacitors and series resistor) inside its chip's frame,
+        # under the decoupling capacitors, joined to the chip by the net names: wired to the chip its two wires loop
+        # round everything else there
+        split: dict = {}
         if named:
             pins_of: dict = {}
             for net, pins in nets.items():
                 for pin in pins:
                     pins_of.setdefault(str(pin).partition(".")[0], []).append(net)
-            split: dict = {}
             for g, rs in groups.items():
                 keep = list(rs)
                 for y in list(rs):
@@ -1389,15 +1392,6 @@ class Schematic(_Doc):
                     val = str(parts[y].get("value") or "") if isinstance(parts.get(y), dict) else ""
                     split.setdefault(g, []).append((f"{val} crystal" if val else "Crystal", mine))
                 groups[g] = keep
-            if split:
-                out_groups: dict = {}
-                for g, rs in groups.items():
-                    out_groups[g] = rs
-                    for name, mine in split.get(g, []):
-                        while name in out_groups or name in groups:
-                            name += " " + mine[0]
-                        out_groups[name] = mine
-                groups = out_groups
         for r, spec in parts.items():   # a note given with a part belongs to its block
             if isinstance(spec, dict) and spec.get("note"):
                 g = next((n for n, rs in groups.items() if r in rs), None)
@@ -1411,6 +1405,11 @@ class Schematic(_Doc):
         intent = self._intent(parts, nets)
         drawer = Blocks(self, parts, nets, groups, intent, _GROUND, arrange_pins=swap_pins)
         drawer.force |= set(labels or [])
+        drawer.subs = split
+        for subs in split.values():
+            for name, mine in subs:
+                for r in mine:
+                    drawer.gof[r] = name
         drawer.global_labels = bool(global_labels)      # a name at a wire end becomes a global label: a box centred on the wire, with a point
         for (ref, num), name in intent.items():      # a net wired inside its block has no label: remember it by one of its pins
             self.project.net_pins.setdefault(name, f"{ref}.{num}")
@@ -2932,6 +2931,7 @@ class Blocks:
             self.netpins.setdefault(net, []).append((ref, num))
         self.done: set = set()
         self.force: set = set()     # nets that carry a label in their block after all
+        self.subs: dict = {}        # {group: [(name, refs)]}: small blocks drawn inside a group's frame and joined to it by labels (a crystal)
         self.done_nets: set = set()  # nets whose IC pin has been drawn
         self.problems: list = []
         self._offs: dict = {}
@@ -3682,14 +3682,18 @@ class Blocks:
                 n = 3 if near and prev[1] == 1 else 1
                 if railed and power[0]["x"] < p["x"] < power[-1]["x"]:
                     n = 3       # a pin of another supply under a shared rail: its symbol stands above that rail's
+                n0 = n
                 if natural(net) and side == "top":
                     for tries in range(8):
                         E = (p["x"], p["y"] + v * (n * G + (STUB if n == 1 else 0)))
                         me, wire = self.sym_rect(net, E), _rect(p["x"] - 0.2, E[1], p["x"] + 0.2, p["y"])
                         if not any(_hit(_rect(me[0] - 0.4, me[1] - 0.3, me[2] + 0.4, me[3] + 0.3), b) for b in stood) \\
-                                and not any(_hit(wire, b) for b in stood if b[3] - b[1] > 1.0):     # a wire may cross a rail, not a name
+                                and not any(_hit(wire, _rect(b[0] + 0.8, b[1], b[2] - 0.8, b[3])) for b in stood if b[3] - b[1] > 1.0 and b[2] - b[0] > 1.6):     # a wire may cross a rail and pass the end of a name, not go through one
                             break
                         n += 2
+                    else:
+                        n = n0      # no height clears everything: one step above the neighbour, not a wire to the top of the sheet
+                        E = (p["x"], p["y"] + v * (n * G + (STUB if n == 1 else 0)))
                     stood.append(self.sym_rect(net, E))
 
                 E = (p["x"], p["y"] + v * (n * G + (STUB if n == 1 else 0)))
@@ -3901,6 +3905,16 @@ class Blocks:
                 for i in range(0, len(rs), size):
                     self.bank(rs[i:i + size], sup, gnd)
                     beside([])
+            for name, mine in self.subs.get(g, []):      # a crystal with its capacitors: a row of its own under the decoupling capacitors, joined to the chip by labels
+                if cx > cx0:
+                    cx, cy, row = cx0, cy + row + 4 * G, 0.0
+                for r in mine:
+                    if r not in self.done and not self.small(r):
+                        beside(self.big(name, r))
+                for r in mine:
+                    if r not in self.done:
+                        beside(self.chain(name, r))
+                placed += mine
             for r in refs:      # a matching network: series part in line, shunts hanging down
                 if r in self.done or not self.small(r):
                     continue
@@ -5768,6 +5782,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                 step(f"zone {layer}", lambda layer=layer: self.zone("GND", layer=layer, connect="solid" if layer.startswith("In") else "thermal"))
     step("prepare", self.prepare)
     if route:
+        step("twins", self.bridge_twins)      # a USB-C connector's D+ and D- twins, joined at the pads before anything is routed
         r = dict(plan.get("route") or {})
         r["order"] = list(dict.fromkeys(list(order or []) + list(r.get("order") or [])))
         r["widths"] = {**(r.get("widths") or {}), **(widths or {})}
@@ -6404,7 +6419,141 @@ def install(Board) -> None:
     Board._serving = _serving
     Board._radio = _radio
     Board.settle = _settle
-`;var x=`"""Parts made without a model: symbols and footprints from datasheets and package dimensions.
+`;var x=`"""A connector's twin pins.
+
+A USB-C receptacle carries each data line on two pads, interleaved in one row (D- D+ D- D+), so the plug works both
+ways up.  Left to the router, the second twin of a line is reached by whatever way is still free, which is a loop round
+the connector.  \`bridge_twins()\` lays those joints the way a person does, before anything else is routed:
+
+- when the chip wants the pair in the order of the two outer pads, one line is joined by a short U on the board side of
+  the pads and the other by a short U under the connector: no via at all;
+- when the chip wants the pair the other way round (the order of the two inner pads) no layout on one layer exists.
+  The two inner pads then start the pair, side by side; one line's outer pad joins it by a U under the connector, the
+  other's by a hop of a couple of millimetres on the back, with a via under the connector and one beside the pair.
+  The pair itself, from the connector to the chip, never changes layer.
+"""
+from __future__ import annotations
+
+import math
+import re
+
+from .seat import _Survey, _gnd
+
+_CONN = re.compile(r"^(J|P|CN|USB|X)\\d", re.I)
+
+
+def _bridge_twins(self, refs=None, width: float = 0.2, clearance: float = 0.2, apply: bool = True) -> dict:
+    """Join the twin pads of a connector's differential pair (USB-C D+ and D-) with the shortest tracks there are, and
+    start the pair from the pads that face the chip in the right order.  design() calls it before routing.
+
+    Returns {ref: {"nets": [low, high], "exits": "outer" | "inner", "vias": 0 | 2}}; a connector whose twins already
+    have tracks is left alone."""
+    self.flush(); self._geom = None
+    S = _Survey(self); out: dict = {}
+    want = {str(r).lower() for r in ([refs] if isinstance(refs, str) else refs)} if refs else None
+    sizes: dict = {}
+
+    def pad_size(part):
+        if part["ref"] not in sizes:
+            sx = next((it.get("sexpr", "") for it in self._call("get_items", kinds=["footprint"]).get("items", []) if it.get("id") == part.get("id") or f'"{part["ref"]}"' in it.get("sexpr", "")[:4000]), "")
+            sizes[part["ref"]] = {m.group(1): (float(m.group(2)), float(m.group(3))) for m in re.finditer(r'\\(pad "([^"]+)" smd[^\\n]*?\\(size ([\\d.]+) ([\\d.]+)\\)', sx.replace("\\n", " ").replace("(pad ", "\\n(pad "))}
+        return sizes[part["ref"]]
+
+    for part in S.parts:
+        if not _CONN.match(part["ref"]) or (want is not None and part["ref"].lower() not in want):
+            continue
+        by: dict = {}
+        for q in part["pads"]:
+            if q[3] and not _gnd(q[3]) and not S.rail(q[3]) and not q[3].startswith("unconnected-"):
+                by.setdefault(q[3], []).append(q)
+        twins = {n: v for n, v in by.items() if len(v) == 2}
+        names = sorted(twins)
+        for i in range(len(names)):
+            for j in range(i + 1, len(names)):
+                four = twins[names[i]] + twins[names[j]]
+                xs = [q[1] for q in four]; ys = [q[2] for q in four]
+                if max(ys) - min(ys) < 0.05:
+                    r = (1.0, 0.0)
+                elif max(xs) - min(xs) < 0.05:
+                    r = (0.0, 1.0)
+                else:
+                    continue
+                four.sort(key=lambda q: q[1] * r[0] + q[2] * r[1])
+                span = math.hypot(four[3][1] - four[0][1], four[3][2] - four[0][2])
+                if span > 3.0 or not (four[0][3] == four[2][3] and four[1][3] == four[3][3]):
+                    continue      # not interleaved: an ordinary joint, the router's
+                a, b = four[0][3], four[1][3]
+                if any((self._call("get_items", net=n, kinds=["segment"]) or {}).get("items") for n in (a, b)):
+                    continue
+                p = [(q[1], q[2]) for q in four]; mid = ((p[0][0] + p[3][0]) / 2, (p[0][1] + p[3][1]) / 2)
+                far = {n: [(u[1], u[2]) for o, u in S.net.get(n, []) if o is not part] for n in (a, b)}
+                both = far[a] + far[b]
+                if not both:
+                    continue
+                tx = sum(u[0] for u in both) / len(both) - mid[0]; ty = sum(u[1] for u in both) / len(both) - mid[1]
+                n_ = (-r[1], r[0])
+                if tx * n_[0] + ty * n_[1] < 0:
+                    n_ = (r[1], -r[0])      # the board side of the row: towards the chip
+                along = lambda n: (min(far[n], key=lambda u: math.hypot(u[0] - mid[0], u[1] - mid[1]))[0] - mid[0]) * r[0] + (min(far[n], key=lambda u: math.hypot(u[0] - mid[0], u[1] - mid[1]))[1] - mid[1]) * r[1] if far[n] else 0.0
+                # where each line arrives at the chip: by its pad, and for a pad on the chip's side by the way it leaves
+                inner = bool(far[a] and far[b]) and self._twin_order(S, a, b, r, mid) < 0 if hasattr(self, "_twin_order") else along(b) < along(a)
+                sz = pad_size(part).get(four[0][0], (0.3, 1.45)); L = max(sz) / 2; pitch = span / 3
+                w = min(width, min(sz)); h = L + clearance + w / 2; k = min(0.25, pitch / 2)
+                at = lambda q, dr, dn: (round(q[0] + r[0] * dr + n_[0] * dn, 4), round(q[1] + r[1] * dr + n_[1] * dn, 4))
+
+                def u_turn(net, qa, qb, s):
+                    self.track(net, [qa, at(qa, 0, s * (h - k)), at(qa, k, s * h), at(qb, -k, s * h), at(qb, 0, s * (h - k)), qb], width=w)
+
+                vias = 0
+                if not apply:
+                    out[part["ref"]] = {"nets": [a, b], "exits": "inner" if inner else "outer", "vias": 2 if inner else 0}
+                    continue
+                if not inner:      # a leaves from its U on the board side, b from its outer pad; b's twin is joined under the connector
+                    u_turn(a, p[0], p[2], 1); u_turn(b, p[1], p[3], -1)
+                else:              # the inner pads p[1] (b) and p[2] (a) start the pair
+                    via = getattr(self, "_via_size", None) or (0.5, 0.2); vr = via[0] / 2
+                    d = L + clearance + vr + 0.4
+                    u_turn(a, p[0], p[2], -1)
+                    self.track(a, [p[2], at(p[2], 0, d)], width=w)
+                    self.track(b, [p[1], at(p[1], 0, d)], width=w)
+                    v2 = at(p[1], -(vr + 0.15), d); self.track(b, [at(p[1], 0, d - (vr + 0.15)), v2], width=w)
+                    v1 = at(p[3], 0.15, -(L + clearance + 0.1 + vr)); self.track(b, [p[3], at(p[3], 0, -(L + 0.05)), v1], width=w)
+                    self.via(b, v1, size=via[0], drill=via[1]); self.via(b, v2, size=via[0], drill=via[1])
+                    dr = (v2[0] - v1[0]) * r[0] + (v2[1] - v1[1]) * r[1]; dn = (v2[0] - v1[0]) * n_[0] + (v2[1] - v1[1]) * n_[1]
+                    if abs(dn) >= abs(dr):
+                        m = (v1[0] + n_[0] * math.copysign(abs(dn) - abs(dr), dn), v1[1] + n_[1] * math.copysign(abs(dn) - abs(dr), dn))
+                    else:
+                        m = (v1[0] + r[0] * math.copysign(abs(dr) - abs(dn), dr), v1[1] + r[1] * math.copysign(abs(dr) - abs(dn), dr))
+                    self.track(b, [v1, m, v2], layer="B.Cu", width=w)
+                    vias = 2
+                self.flush()
+                out[part["ref"]] = {"nets": [a, b], "exits": "inner" if inner else "outer", "vias": vias}
+    if out and apply:
+        self.project.note("board: connector twin pins joined: " + "; ".join(f"{r} {v['nets'][0]} and {v['nets'][1]} ({'no vias' if not v['vias'] else 'one hop on the back'})" for r, v in out.items()))
+    return out
+
+
+def _twin_order(self, S, a: str, b: str, r, mid) -> float:
+    """> 0 when net a arrives at its chip on the low side of net b (seen along the connector's row), < 0 when the
+    other way round.  A pin on the chip's side row is counted where its track leaves it, outwards."""
+    def where(n):
+        best = None
+        for o, u in S.net.get(n, []):
+            if _CONN.match(o["ref"]):
+                continue
+            _, outd = S.out_of(o, u)
+            x, y = u[1] + 1.0 * outd[0], u[2] + 1.0 * outd[1]
+            d = math.hypot(u[1] - mid[0], u[2] - mid[1])
+            if best is None or d < best[0]:
+                best = (d, (x - mid[0]) * r[0] + (y - mid[1]) * r[1])
+        return best[1] if best else 0.0
+    return where(b) - where(a)
+
+
+def install(Board) -> None:
+    Board.bridge_twins = _bridge_twins
+    Board._twin_order = _twin_order
+`;var k=`"""Parts made without a model: symbols and footprints from datasheets and package dimensions.
 
     from kicad_harness import parts
     part = parts.from_datasheet("W25Q64JV.pdf", name="W25Q64JV", package="SOIC-8")
@@ -6866,7 +7015,7 @@ def _same_family(header: str, want: dict) -> bool:
 def _title_matches(title: str, pk: dict) -> bool:
     got = ds.packages(title + " ")
     return any(g["family"] == pk["family"] and g["pins"] == pk["pins"] for g in got)
-`;var k=`"""Reading a datasheet without a model: page text, the pin table and the package drawing's numbers.
+`;var v=`"""Reading a datasheet without a model: page text, the pin table and the package drawing's numbers.
 
 Datasheets are laid out for people, so this is a set of careful heuristics, and it says how sure
 it is.  What it cannot read is reported as missing, and only that small remainder needs a
@@ -7146,7 +7295,7 @@ def dim_tables(pages: list) -> list:
                     out.append(t)
             i = max(j, i + 1)
     return out
-`;var v=`"""Footprints computed from package dimensions, after IPC-7351B.
+`;var N=`"""Footprints computed from package dimensions, after IPC-7351B.
 
 Every generator takes the package's own dimensions (the numbers a datasheet's mechanical drawing
 gives) and returns a \`Footprint\`: pads, courtyard, fabrication outline, silkscreen and the text of
@@ -7560,7 +7709,7 @@ def header(name: str, pins: int, rows: int = 1, pitch: float = 2.54, lead: float
         for r in range(rows):
             fp.pad(n, x0 + r * pitch, y0 + i * pitch, pad, pad, "rect", drill=hole); n += 1
     return fp.finish(rows * pitch, per * pitch, 0.5)
-`;var N=`"""Finding parts: LCSC, Mouser and DigiKey listings, and Texas Instruments and Analog Devices datasheets.
+`;var S=`"""Finding parts: LCSC, Mouser and DigiKey listings, and Texas Instruments and Analog Devices datasheets.
 
     from kicad_harness import parts
     rows = parts.find("3.3V LDO SOT-23-5 500mA")            # every vendor that is set up, merged
@@ -7845,7 +7994,7 @@ def lookup(mpn: str, project=None) -> dict:
         elif not out["datasheet"] and own.get("datasheet_candidates"):
             out["datasheet_candidates"] = own["datasheet_candidates"]
     return out
-`;var S=`"""Schematic symbols drawn from a pin list.
+`;var T=`"""Schematic symbols drawn from a pin list.
 
 A symbol is a rectangle with the pins sorted onto its sides the way KiCad's library convention
 (KLC) asks: supplies on top, grounds at the bottom, inputs on the left, outputs on the right,
@@ -8035,9 +8184,9 @@ def symbol(name: str, pins: list, reference: str = "U", footprint: str = "", dat
 def library(symbols: list) -> str:
     """A .kicad_sym file holding the given symbol texts."""
     return '(kicad_symbol_lib\\n\\t(version 20241209)\\n\\t(generator "kicad_harness")\\n\\t(generator_version "9.0")\\n' + "".join(symbols) + ")\\n"
-`;var f=require("node:fs"),M=globalThis,V=f.constants;process.binding=e=>{if(e==="constants")return{fs:V};throw new Error("not available")};for(let e of["WebSocket","fetch","XMLHttpRequest","EventSource","navigator"])try{delete M[e]}catch{}var K=new(require("node:string_decoder")).StringDecoder("utf8"),E=new Int32Array(new SharedArrayBuffer(4)),i="";function T(){let e=Buffer.alloc(65536);for(;;){let s=i.indexOf(`
-`);if(s>=0){let t=i.slice(0,s);return i=i.slice(s+1),t}let n=0;try{n=f.readSync(0,e,0,e.length,null)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(E,0,0,4);continue}if(t&&t.code==="EOF")n=0;else throw t}n||process.exit(0),i+=K.write(e.subarray(0,n))}}function d(e){let s=Buffer.from(JSON.stringify(e)+`
-`,"utf8"),n=0;for(;n<s.length;)try{n+=f.writeSync(1,s,n,s.length-n)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(E,0,0,4);continue}throw t}}var W=[["kicad_harness/__init__.py",h],["kicad_harness/project.py",c],["kicad_harness/transport.py",u],["kicad_harness/sheet.py",m],["kicad_harness/rules.py",g],["kicad_harness/physics.py",b],["kicad_harness/stackups.py",y],["kicad_harness/craft.py",_],["kicad_harness/seat.py",w],["kicad_harness/parts/__init__.py",x],["kicad_harness/parts/datasheet.py",k],["kicad_harness/parts/footprint.py",v],["kicad_harness/parts/search.py",N],["kicad_harness/parts/symbol.py",S]],X=`
+`;var f=require("node:fs"),K=globalThis,W=f.constants;process.binding=e=>{if(e==="constants")return{fs:W};throw new Error("not available")};for(let e of["WebSocket","fetch","XMLHttpRequest","EventSource","navigator"])try{delete K[e]}catch{}var X=new(require("node:string_decoder")).StringDecoder("utf8"),q=new Int32Array(new SharedArrayBuffer(4)),i="";function E(){let e=Buffer.alloc(65536);for(;;){let s=i.indexOf(`
+`);if(s>=0){let t=i.slice(0,s);return i=i.slice(s+1),t}let n=0;try{n=f.readSync(0,e,0,e.length,null)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(q,0,0,4);continue}if(t&&t.code==="EOF")n=0;else throw t}n||process.exit(0),i+=X.write(e.subarray(0,n))}}function d(e){let s=Buffer.from(JSON.stringify(e)+`
+`,"utf8"),n=0;for(;n<s.length;)try{n+=f.writeSync(1,s,n,s.length-n)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(q,0,0,4);continue}throw t}}var Q=[["kicad_harness/__init__.py",h],["kicad_harness/project.py",c],["kicad_harness/transport.py",u],["kicad_harness/sheet.py",m],["kicad_harness/rules.py",g],["kicad_harness/physics.py",b],["kicad_harness/stackups.py",y],["kicad_harness/craft.py",_],["kicad_harness/seat.py",w],["kicad_harness/twins.py",x],["kicad_harness/parts/__init__.py",k],["kicad_harness/parts/datasheet.py",v],["kicad_harness/parts/footprint.py",N],["kicad_harness/parts/search.py",S],["kicad_harness/parts/symbol.py",T]],Y=`
 import json, sys, traceback
 sys.path.insert(0, "/kh")
 import kicad_harness as kh
@@ -8073,6 +8222,6 @@ def __kc_run(code, dry=False):
     if project is not None and project.log:
         out["notes"] = project.log[-60:]
     return json.dumps(out)
-`;async function Q(){let e=JSON.parse(T()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:q}=require(s+"pyodide.js"),o=await q({indexURL:s,jsglobals:{},stdout:p,stderr:p});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),T())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of W)o.FS.writeFile("/kh/"+r,l);o.runPython(X);let A=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(A(String(e.code||""),e.dry===!0)))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
+`;async function J(){let e=JSON.parse(E()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:A}=require(s+"pyodide.js"),o=await A({indexURL:s,jsglobals:{},stdout:p,stderr:p});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),E())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of Q)o.FS.writeFile("/kh/"+r,l);o.runPython(Y);let D=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(D(String(e.code||""),e.dry===!0)))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
 `).filter(Boolean).slice(-1)[0]||"The script failed."}}a.done=!0,a.output=n.join(`
-`),d(a),process.exit(0)}Q().catch(e=>{try{d({done:!0,ok:!1,error:"The Python runtime could not be started: "+String(e&&e.message||e),output:""})}finally{process.exit(1)}});
+`),d(a),process.exit(0)}J().catch(e=>{try{d({done:!0,ok:!1,error:"The Python runtime could not be started: "+String(e&&e.message||e),output:""})}finally{process.exit(1)}});

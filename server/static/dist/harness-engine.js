@@ -109091,7 +109091,17 @@ function reviewPhysics(doc, P, k, settings, add) {
     const usb = Array.from(pairBase.values()).filter((e) => e.p && e.n && /USB|(^|[\/_(])D[+\-PM]\)?$/i.test(e.p) && pairInterface(e.p) === "usb2");
     const holed = [], uneven = [];
     for (const e of usb) {
-      const vp = viasOf.get(e.p) || [], vn = viasOf.get(e.n) || [];
+      const hop = (net) => {
+        const tw = (padsOf.get(net) || []).filter((q) => /^(J|P|CN|USB|X)\d/i.test(q.fp.ref));
+        return tw.length >= 2 ? tw : [];
+      };
+      const onPath = (net) => {
+        const tw = hop(net);
+        const all2 = viasOf.get(net) || [];
+        const near = all2.filter((v) => tw.some((q) => Math.hypot(q.x - v.shape.x, q.y - v.shape.y) <= 3));
+        return near.length === 2 && near.length === all2.length ? [] : all2;
+      };
+      const vp = onPath(e.p), vn = onPath(e.n);
       if (vp.length + vn.length) holed.push(`${bare(e.p)} ${vp.length} via${vp.length === 1 ? "" : "s"}, ${bare(e.n)} ${vn.length}`);
       if (vp.length !== vn.length) uneven.push(`${bare(e.p)} and ${bare(e.n)} change layer a different number of times (${vp.length} and ${vn.length})`);
       else for (const a of vp) {

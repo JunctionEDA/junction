@@ -34,6 +34,8 @@ from .stackups import BUILDS, FABS, FINISHES, MATERIALS, materials
 _stackups.install(Board)
 from . import seat as _seat
 _seat.install(Board)
+from . import twins as _twins
+_twins.install(Board)
 from . import craft as _craft
 _craft.install(Board)
 

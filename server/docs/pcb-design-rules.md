@@ -134,6 +134,14 @@ front of that pin, turned so its far end points where its other net goes. `board
 - A matching network runs in a straight line from the RF pin to the antenna feed, series parts in line, shunts
   beside the line with their ground ends away from it; the whole RF net no longer than 12 mm. Other nets do not
   cross the antenna's clear area. **planned**, **checked** (`rf.match`, `rf.feed`).
+- A USB-C receptacle's twin data pins (D- D+ D- D+ in one row) are joined at the pads before anything is routed
+  (`board.bridge_twins()`, run by `design()`): a short U on each side of the row when the chip wants the pair in the
+  order of the outer pads, and otherwise the inner pads start the pair, one twin is joined by a U under the
+  connector and the other by a hop of a few millimetres on the back. The pair itself runs coupled and straight from
+  the connector to the chip with no via; never a loop round the connector. **planned**, **checked** (`usb.vias`
+  allows only that hop; `pairs.coupled`).
+- In the schematic a crystal is drawn inside its chip's frame, under the decoupling capacitors, joined by labels;
+  supply symbols on neighbouring pins stand one step apart in height, never on a long wire.
 - No part outside the board outline, none on top of another. **checked** (`placement.outside`,
   `placement.clash`).
 - A layout that fails any of these, has open connections, DRC errors or review errors is refused by `design()`
