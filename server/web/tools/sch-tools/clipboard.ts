@@ -64,14 +64,51 @@ export function setReference(node: SNode, ref: string) {
   for (const inst of kids(node, "instances")) for (const pr of kids(inst, "project")) for (const pa of kids(pr, "path")) { const r = kid(pa, "reference"); if (r) r[1] = ref; }
 }
 // Pasted / repeated symbols keep a reference that is still free on the sheet; anything else becomes "R?"
-// (or, with automatic annotation on, the next free number for its prefix).
+// (or, with automatic annotation on, the next free number for its prefix).  References are compared by prefix and
+// number, as SCH_REFERENCE_LIST does: "#PWR1" is taken when "#PWR01" is on the sheet.
 export function assignPastedRef(doc: KDoc, node: SNode, used: Set<string>) {
   const p = refField(node); if (!p) return;
-  const ref = str(p[2]);
-  if (!/\?$/.test(ref) && !used.has(ref)) { used.add(ref); return; }
+  const ref = str(p[2]), taken = refNumbers(used);
+  const free = (r: string): boolean => { const n = refNumber(r); return n < 0 ? !used.has(r) : !(taken.get(refPrefix(r)) || new Set()).has(n); };
+  if (!/\?$/.test(ref) && free(ref)) { takeRef(used, ref); return; }
   let next = unannotated(ref);
-  if (S.annotateAuto) { const prefix = refPrefix(ref); let n = 1; while (used.has(prefix + n)) n++; next = prefix + n; used.add(next); }
+  if (S.annotateAuto) { const prefix = refPrefix(ref); let n = 1; while (!free(prefix + n)) n++; next = prefix + n; takeRef(used, next); }
   setReference(node, next);
+}
+// prefix -> the numbers in use, kept beside each reference set so that repeated checks stay cheap
+const numbersOf = new WeakMap<Set<string>, Map<string, Set<number>>>();
+function refNumbers(used: Set<string>): Map<string, Set<number>> {
+  let m = numbersOf.get(used);
+  if (!m) { m = new Map(); for (const r of used) addNumber(m, r); numbersOf.set(used, m); }
+  return m;
+}
+function addNumber(m: Map<string, Set<number>>, r: string): void {
+  const n = refNumber(r); if (n < 0 || /\?$/.test(r)) return;
+  const k = refPrefix(r); let s = m.get(k); if (!s) { s = new Set(); m.set(k, s); } s.add(n);
+}
+function takeRef(used: Set<string>, r: string): void { used.add(r); addNumber(refNumbers(used), r); }
+/**
+ * SCH_EDIT_FRAME::ImportSheet without Keep annotations: AnnotateSymbols( ANNOTATE_SELECTION, sort by X position,
+ * aResetAnnotation = true ).  The new symbols lose their references and take the first free numbers in order of
+ * position (prefix, then x, then y); the units of one old multi-unit package stay together.
+ */
+function resetAnnotation(nodes: SNode[], used: Set<string>): void {
+  const syms = nodes.filter((n) => n[0] === "symbol" && refField(n)).map((n) => {
+    const at = kid(n, "at"), u = kid(n, "unit"), ref = str(refField(n)![2]);
+    return { n, ref, prefix: refPrefix(ref), x: at ? +at[1] : 0, y: at ? +at[2] : 0, unit: u ? +u[1] : 1, lib: str((kid(n, "lib_id") || [])[1]) };
+  });
+  syms.sort((a, b) => (a.prefix < b.prefix ? -1 : a.prefix > b.prefix ? 1 : 0) || a.x - b.x || a.y - b.y);
+  const taken = refNumbers(used), pkg = new Map<string, { n: number; units: Set<number> }>();
+  for (const s of syms) {
+    let set = taken.get(s.prefix); if (!set) { set = new Set(); taken.set(s.prefix, set); }
+    const key = /\?$/.test(s.ref) || refNumber(s.ref) < 0 ? null : s.prefix + "\u0000" + s.ref + "\u0000" + s.lib;
+    const held = key ? pkg.get(key) : undefined;
+    let n: number;
+    if (held && !held.units.has(s.unit)) { n = held.n; held.units.add(s.unit); }
+    else { n = 1; while (set.has(n)) n++; if (key) pkg.set(key, { n, units: new Set([s.unit]) }); }
+    set.add(n); used.add(s.prefix + n);
+    setReference(s.n, s.prefix + n);
+  }
 }
 // Junctions the new items need: every connection point of every new item (items must be in the doc).
 export function junctionsForNew(doc: KDoc, items: KItem[]) {
@@ -98,8 +135,9 @@ export function pasteChanges(doc: KDoc, parsed: Clip, at: Pt, opts?: PasteOpts |
   // reference already in use, whatever the automatic-annotation setting); default: assignPastedRef's own rule
   // SCH_EDITOR_CONTROL::Paste: UNIQUE_ANNOTATIONS when annotation is automatic (the default), else REMOVE_ANNOTATIONS
   const mode = (opts && (opts.pasteMode || (opts.keepAnnotations ? "keep" : null))) || (S.annotateAuto ? "unique" : "remove");
+  if (mode === "reset") resetAnnotation(fresh, used);
   for (const n of fresh) {
-    if (n[0] !== "symbol" || mode === "keep") continue;
+    if (n[0] !== "symbol" || mode === "keep" || mode === "reset") continue;
     if (mode === "remove") { const p = refField(n); if (p) setReference(n, unannotated(str(p[2]))); continue; }
     if (mode === "unique") { const auto = S.annotateAuto; S.annotateAuto = true; try { assignPastedRef(doc, n, used); } finally { S.annotateAuto = auto; } continue; }
     assignPastedRef(doc, n, used);

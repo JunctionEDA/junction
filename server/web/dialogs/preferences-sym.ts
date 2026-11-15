@@ -40,8 +40,18 @@ export function symEditingPage(pg: HTMLElement, p: Prefs): void {
   // m_spinRepeatLabel: -10 .. 10
   const inc = h("input", { type: "number", id: "kd-pref-sym-labeldelta", min: "-10", max: "10", step: "1", value: String(e.labelDelta), style: "width:90px" }) as HTMLInputElement;
   inc.addEventListener("change", () => { const x = Math.round(+inc.value); if (isFinite(x)) { e.labelDelta = Math.max(-10, Math.min(10, x)); inc.value = String(e.labelDelta); } });
-  ri.append(grid(...row("Pitch of repeated pins:", len("kd-pref-sym-pinpitch", e.pinPitch, (x) => { e.pinPitch = x; }, 0.0001)), h("label", null, "Label increment:"), inc, h("span")));
+  // onKillFocusPinPitch / TransferDataFromWindow: the pitch is forced to a multiple of MIN_GRID (25 mils)
+  e.pinPitch = roundPinPitch(e.pinPitch);
+  const pitch = lenField(e.pinPitch, { units: su, onChange: (x: number) => { if (!isFinite(x)) return; e.pinPitch = roundPinPitch(x); pitch.set(e.pinPitch); } });
+  pitch.input.id = "kd-pref-sym-pinpitch"; pitch.input.style.width = "90px";
+  ri.append(grid(...row("Pitch of repeated pins:", pitch.input as HTMLInputElement), h("label", null, "Label increment:"), inc, h("span")));
   KD().staticBox(R, "General Editing").append(checkbox("Keep pins attached when dragging edges", e.dragPinsWithEdges, (on) => { e.dragPinsWithEdges = on; }, { id: "kd-pref-sym-dragpins" }));
+}
+
+/** PANEL_SYM_EDITING_OPTIONS' MIN_GRID rounding of the repeat pin pitch: KiROUND( mils / 25 ) * 25, in mm. */
+export function roundPinPitch(mm: number): number {
+  const mils = Math.round(mm / 0.0254);
+  return Math.round(mils / 25) * 25 * 0.0254;
 }
 
 /** PANEL_SYM_COLOR_SETTINGS: the schematic editor's theme, or one of the Symbol Editor's own. */

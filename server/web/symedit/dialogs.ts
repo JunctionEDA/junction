@@ -7,6 +7,7 @@ import * as M from "./model";
 import { KD, h, checkbox, select, textInput, form, promptText, confirmBox, download, popupMenu, type GridColumn, type GridApi, type NotebookApi } from "../dialogs/dom";
 import { messageBox, fieldsGrid, openFieldDialog, openTextDialog, swatch } from "../dialogs/sch-items";
 import * as L from "../dialogs/sch-items-logic";
+import { globalFieldTemplates } from "../dialogs/field-templates";
 import { E, appState, api } from "../dialogs/editor";
 import { saveTextDocument } from "../editor/projectfile";
 import { UNITS, unitName } from "../units";   // a dialog's unit label (EDA_UNIT_UTILS::GetLabel: "mm", "in", "mils")
@@ -384,6 +385,8 @@ export function symbolProperties(se: SymbolEditor, opts: { pinMaps?: boolean } =
     const flipped = libToSch(p as unknown as M.Node); fieldSrc.set(flipped, p as unknown as M.Node);
     return L.rowFromField(flipped, [0, 0], M.MANDATORY_FIELDS.includes(K().str(p[1])));
   });
+  // "Add in any global template field names not yet defined" (m_addedTemplateFields: left out again while empty)
+  L.addTemplateRows(rows, globalFieldTemplates(), [0, 0]);
   let fgrid: { rows(): L.FieldRow[]; setRows(r: L.FieldRow[]): void } | null = null;
   const curRows = (): L.FieldRow[] => (fgrid ? fgrid.rows() : rows);
   const name = textInput(M.unescapeLibId(M.symName(sym)), undefined, { id: "sp-name" });
@@ -495,7 +498,7 @@ export function symbolProperties(se: SymbolEditor, opts: { pinMaps?: boolean } =
       if (newName !== oldName && !t.origin && lib && lib.doc && lib.doc.lib.symbols.has(newName)) { void messageBox(`Symbol name '${M.unescapeLibId(newName)}' already in use in library '${lib.nick}'.`); return false; }
       const nu = Math.max(1, Math.min(64, Math.round(Number(unitsIn.value) || 1)));
       void bodyGrid;
-      const finalRows = curRows();
+      const finalRows = L.withoutUnusedTemplates(curRows());
       const dup = L.duplicateFieldName(finalRows); if (dup) { void messageBox(dup); return false; }
       if (derived && !inherit.value) { void messageBox("Derived symbol must have a parent selected"); return false; }
       if (!derived) {
@@ -1129,11 +1132,13 @@ export function pinTable(se: SymbolEditor): void {
           if (v === M.PIN_MIXED) return;
           if (key && ["numSize", "nameSize", "length", "x", "y"].includes(key) && typeof v === "string") { const n = parseLen(v); val = n === null ? 0 : +M.fmt(n); }
           if (key === "orient" || key === "unit" || key === "body") val = Number(v);
-          if (M.isPinGroup(r)) {
-            if (key === null && typeof sel === "number" && sel < 0) { for (const p of r.pins) { const i = rows.indexOf(p); if (i >= 0) rows.splice(i, 1); } sum(); return; }
+          // grouped by name every row is a set of pins (m_rows[ aRow ]), a single pin too: its Number takes a list
+          const g: M.PinGroupRow | null = M.isPinGroup(r) ? r : groupMode === "name" && key === "number" ? { ...(r as M.PinRow), count: 1, pins: [r as M.PinRow] } as unknown as M.PinGroupRow : null;
+          if (g) {
+            if (key === null && typeof sel === "number" && sel < 0) { for (const p of g.pins) { const i = rows.indexOf(p); if (i >= 0) rows.splice(i, 1); } sum(); return; }
             if (key) {
-              M.setPinGroupValue(r, key, val, (like, number) => { const p = { ...like, number, node: null }; rows.push(p); return p; }, (p) => { const i = rows.indexOf(p); if (i >= 0) rows.splice(i, 1); });
-              const fresh = M.pinGroupRow(r.pins), i = shown.indexOf(r); if (i >= 0) { shown[i] = fresh; grid!.refresh(); }
+              M.setPinGroupValue(g, key, val, (like, number) => { const p = M.groupNewPin(like, number); rows.push(p); return p; }, (p) => { const i = rows.indexOf(p); if (i >= 0) rows.splice(i, 1); }, groupMode === "name");
+              const fresh = M.pinGroupRow(g.pins), i = shown.indexOf(r); if (i >= 0) { shown[i] = fresh; grid!.refresh(); }
             }
             sum(); return;
           }

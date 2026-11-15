@@ -13,6 +13,7 @@ import { filterLabels, footprintPasses, type FpChooserFilters } from "./fpchoice
 import "../components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 import { popupMenu, type PopItem } from "../dialogs/dom";
 import { bitmapButton } from "../dialogs/kicon";
+import { loadPinnedLibs, savePinnedLibs } from "./pinned";
 
 export interface ChooserOptions {
   /** The power tool's chooser: only power symbols. */
@@ -141,10 +142,8 @@ const recentByKind = new Map<string, string[]>();
 function store(): Storage | null { try { return window.localStorage; } catch { return null; } }
 function loadSort(kind: LibKind): SortMode { try { return store()?.getItem("kui.libtree.sort." + kind) === "alpha" ? "alpha" : "best"; } catch { return "best"; } }
 function saveSort(kind: LibKind, m: SortMode): void { try { store()?.setItem("kui.libtree.sort." + kind, m); } catch { /* private window */ } }
-function loadPinned(kind: LibKind): Set<string> {
-  try { const v = JSON.parse(store()?.getItem("kui.libtree.pinned." + kind) || "[]"); return new Set(Array.isArray(v) ? v.filter((x) => typeof x === "string") : []); } catch { return new Set(); }
-}
-function savePinned(kind: LibKind, s: Set<string>): void { try { store()?.setItem("kui.libtree.pinned." + kind, JSON.stringify([...s])); } catch { /* private window */ } }
+function loadPinned(kind: LibKind): Set<string> { return loadPinnedLibs(kind === "footprint" ? "footprint" : "symbol"); }
+function savePinned(kind: LibKind, s: Set<string>): void { savePinnedLibs(kind === "footprint" ? "footprint" : "symbol", s); }
 function rememberSearch(kind: LibKind, q: string): void { recentByKind.set(kind, pushRecentSearch(recentByKind.get(kind) || [], q)); }
 function recentSearches(kind: LibKind): string[] { return recentByKind.get(kind) || []; }
 
@@ -413,10 +412,11 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
     // PANEL_SYMBOL_CHOOSER::populateBodyStyleChoice
     function fillBodyStyles(got: FetchedItem | null): void {
       if (!bodySelect) return;
-      let n = 1; try { n = got && got.symbol ? Math.max(1, symbolInfo(got.symbol).bodyStyles) : 1; } catch { n = 1; }
+      let names: string[] = []; try { names = got && got.symbol ? bodyStyleNames(got.symbol) : []; } catch { names = []; }
+      const n = Math.max(1, names.length);
       bodySelect.innerHTML = "";
       if (n > 1) {
-        bodyStyleNames(n).forEach((name, i) => { const o = document.createElement("option"); o.value = String(i + 1); o.textContent = name; bodySelect.append(o); });
+        names.forEach((name, i) => { const o = document.createElement("option"); o.value = String(i + 1); o.textContent = name; bodySelect.append(o); });
         if (selectedBodyStyle > n) selectedBodyStyle = 1;
         bodySelect.value = String(selectedBodyStyle);
       }

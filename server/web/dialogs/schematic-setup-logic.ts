@@ -85,6 +85,17 @@ function topLevel(text: string, head: string): number {
   }
   return -1;
 }
+/** The root file's (embedded_files …) form as text ("" when it has none). */
+export function embeddedFilesText(text: string): string {
+  const at = topLevel(text, "(embedded_files"); if (at < 0) return "";
+  let depth = 0, inStr = false;
+  for (let i = at; i < text.length; i++) {
+    const c = text[i];
+    if (inStr) { if (c === "\\") i++; else if (c === '"') inStr = false; continue; }
+    if (c === '"') inStr = true; else if (c === "(") depth++; else if (c === ")" && --depth === 0) return text.slice(at, i + 1);
+  }
+  return text.slice(at);
+}
 export function embeddedOf(text: string): { files: string[]; fonts: boolean } {
   // the sheet's own (embedded_files …) sits directly in (kicad_sch …); a library symbol may carry one of its own
   const files: string[] = [], at = topLevel(text, "(embedded_files");

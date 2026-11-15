@@ -8,6 +8,8 @@
 // arrays: the reader records which atoms were quoted, and KiCad's parsers want strings
 // where the format says string.
 
+import { bodyStyleNames as libBodyStyleNames } from "../dialogs/sym-props-logic";
+
 const K = (): KiCadCanvasApi => (globalThis as unknown as { KiCadCanvas: KiCadCanvasApi }).KiCadCanvas;
 
 const isList = (v: unknown): v is SNode => Array.isArray(v);
@@ -373,5 +375,8 @@ export function pushRecentSearch(list: string[], entry: string): string[] {
   const out = list.filter((x) => x !== e); out.unshift(e);
   return out.slice(0, RECENT_SEARCHES_MAX);
 }
-/** LIB_SYMBOL::GetBodyStyleDescription: De Morgan symbols are Standard / Alternate. */
-export function bodyStyleNames(n: number): string[] { return n === 2 ? ["Standard", "Alternate"] : Array.from({ length: n }, (_, i) => `Body style ${i + 1}`); }
+/**
+ * LIB_SYMBOL::GetBodyStyleDescription for each body style: Standard / Alternate for a De Morgan symbol, else the
+ * symbol's own (body_styles …) names (dialogs/sym-props-logic.ts bodyStyleNames).  One entry: a single body style.
+ */
+export function bodyStyleNames(symbol: string | SNode): string[] { return libBodyStyleNames(symbolNodeOf(symbol)); }

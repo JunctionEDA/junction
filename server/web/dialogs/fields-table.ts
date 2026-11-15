@@ -10,12 +10,20 @@ import { messageBox } from "./sch-items";
 import { datasheetButton, docFiles, footprintButton } from "./browse-cells";
 import { commonChooserFilters, type FpChooserFilters } from "../library/fpchoice";
 import { fieldNamesAreDuplicates } from "./sch-items-logic";
+import { resolvedFieldTemplates } from "./field-templates";
 import { ATTR_FIELDS, BOM_FMT_PRESETS, BOM_PRESETS, ITEM_NO, QTY, bomExport, bomRows, fieldNames, str, symbolRows, withAllFields, type BomField, type BomFilterScope, type BomFmt, type BomPreset, type BomRow, type SymRow } from "./logic";
 import { loadProject, obj, projectDocs, projectName, readDoc, saveProject, sub, submitDocOp, type Json, type JsonObj } from "./project";
 import { variantDocView, variantEditNode } from "./variant-edits";
 import * as VM from "../canvas/variant-model";
 import { currentSheetPath, setCurrentVariant, variantNamesForUI } from "../editor/variant";
 import { addVariant, type VariantPrompts, fieldsTableCopyVariant, fieldsTableDeleteVariant, fieldsTableEditVariantDescription, fieldsTableRenameVariant } from "../editor/variant-ops";
+/** DIALOG_SYMBOL_FIELDS_TABLE::SetupColumnProperties: the symbols' fields, then "any templateFieldNames which aren't
+ *  already present" (hidden, not grouped: withAllFields adds new names that way). */
+function tableFieldNames(rows: SymRow[]): string[] {
+  const names = fieldNames(rows);
+  for (const t of resolvedFieldTemplates()) if (!names.includes(t.name)) names.push(t.name);
+  return names;
+}
 
 /** The variant dialogs stacked over the table (KiCad opens them as children of the table). */
 const stackedPrompts: VariantPrompts = {
@@ -99,7 +107,7 @@ export function openFieldsTable(exportTab = false): void {
     }
     // edits made before a rescope / reload stay on screen
     for (const r of out) for (const m of r.members) { const e = edits.get(editKey(m)); if (!e) continue; Object.assign(r.values, e.values); for (const [f, v] of Object.entries(e.flags)) (r as unknown as Record<string, boolean>)[f] = v; if (e.values.Reference !== undefined) r.ref = e.values.Reference; }
-    rows = out; preset = withAllFields(preset, fieldNames(rows));
+    rows = out; preset = withAllFields(preset, tableFieldNames(rows));
   };
   const markUnsaved = () => { dirtySettings = true; if (presetName !== UNSAVED) { presetName = UNSAVED; fillPresetSel(); } };
   const fillPresetSel = () => { if (!presetSel) return; const names = [...BOM_PRESETS.map((p) => p.name), ...userPresets.map((p) => p.name)]; presetSel.replaceChildren(...[...names, ...(presetName === UNSAVED ? [UNSAVED] : []), "---", SAVE, DELETE].map((n) => h("option", { value: n, disabled: n === "---" }, n === BOM_PRESETS[0].name ? "Default Editing" : n))); presetSel.value = presetName; };
@@ -232,7 +240,7 @@ export function openFieldsTable(exportTab = false): void {
           userPresets = userPresets.filter((p) => p.name !== n); userPresets.push(Object.assign(clone(preset), { name: n })); presetName = n; dirtySettings = true; fillPresetSel(); }); return; }
         if (v === DELETE) { fillPresetSel(); if (!userPresets.length) { toast("No user presets to delete"); return; } void promptText("Delete BOM Preset", "Preset to delete:", userPresets[userPresets.length - 1].name).then((n) => { if (!n) return; userPresets = userPresets.filter((p) => p.name !== n); if (presetName === n) presetName = UNSAVED; dirtySettings = true; fillPresetSel(); }); return; }
         const p = BOM_PRESETS.find((x) => x.name === v) || userPresets.find((x) => x.name === v); if (!p) return;
-        preset = withAllFields(clone(p), fieldNames(rows)); presetName = v; dirtySettings = true; fillPresetSel(); refreshFields(); syncEditBar(); refreshGrid(); refreshPreview(); }, { id: "kd-sft-preset" });
+        preset = withAllFields(clone(p), tableFieldNames(rows)); presetName = v; dirtySettings = true; fillPresetSel(); refreshFields(); syncEditBar(); refreshGrid(); refreshPreview(); }, { id: "kd-sft-preset" });
       left.append(h("div", { class: "kd-row", style: "margin-top:10px" }, h("label", { style: "white-space:nowrap;color:var(--ink-2)" }, "View presets:"), presetSel)); fillPresetSel();
       // Schematic variants: the list (GetVariantNamesForUI), choosing one shows (and stages edits for) its values
       // and makes it the schematic's current variant (onVariantSelectionChange); add / rename / copy / describe / delete
@@ -325,8 +333,8 @@ export function openFieldsTable(exportTab = false): void {
     userPresets = (Array.isArray(s.bom_presets) ? s.bom_presets : []).map(presetFromJson).filter((p): p is BomPreset => !!p && !!p.name);
     userFmts = (Array.isArray(s.bom_fmt_presets) ? s.bom_fmt_presets : []).map(fmtFromJson).filter((p): p is BomFmt => !!p && !!p.name);
     const cur = presetFromJson(s.bom_settings);
-    if (cur && cur.name && (BOM_PRESETS.some((p) => p.name === cur.name) || userPresets.some((p) => p.name === cur.name))) { const p = BOM_PRESETS.find((x) => x.name === cur.name) || userPresets.find((x) => x.name === cur.name)!; preset = withAllFields(clone(p), fieldNames(rows)); presetName = cur.name; }
-    else if (cur && !cur.name) { preset = withAllFields(cur, fieldNames(rows)); presetName = UNSAVED; }
+    if (cur && cur.name && (BOM_PRESETS.some((p) => p.name === cur.name) || userPresets.some((p) => p.name === cur.name))) { const p = BOM_PRESETS.find((x) => x.name === cur.name) || userPresets.find((x) => x.name === cur.name)!; preset = withAllFields(clone(p), tableFieldNames(rows)); presetName = cur.name; }
+    else if (cur && !cur.name) { preset = withAllFields(cur, tableFieldNames(rows)); presetName = UNSAVED; }
     const cf = fmtFromJson(s.bom_fmt_settings); if (cf) { fmt = cf; fmtName = BOM_FMT_PRESETS.some((p) => p.name === cf.name && JSON.stringify(fmtJson(p)) === JSON.stringify(fmtJson(cf))) || userFmts.some((p) => p.name === cf.name) ? cf.name : UNSAVED; }
     if (typeof s.bom_export_filename === "string" && s.bom_export_filename) outFile = s.bom_export_filename;
     const out = document.querySelector<HTMLInputElement>("#kd-sft-out"); if (out) out.value = outFile;

@@ -33,6 +33,9 @@ export function isSelectLike(el: Element | null | undefined): boolean { return !
 
 const SHADOW_CSS = `
 :host { contain: layout style; }
+.kic { display: block; flex: none; }
+.kic .lt { display: var(--kic-lt, inline); }
+.kic .dk { display: var(--kic-dk, none); }
 .b { display: flex; align-items: center; gap: 4px; width: 100%; height: 100%; min-width: 0; outline: 0; cursor: default; }
 .t { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: minmax(0, max-content); text-align: left; }
 .t > * { grid-area: 1 / 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -54,14 +57,11 @@ const CARET = '<svg class="c" viewBox="0 0 8 8" aria-hidden="true"><path d="M1 2
 
 type OptionList = HTMLOptionElement[] & { item(i: number): HTMLOptionElement | null; namedItem(name: string): HTMLOptionElement | null };
 
-/** The option's KiCad icon: the variant of the current theme only (the shadow tree does not see the page's theme rules). */
+/** The option's KiCad icon, both theme variants kept like kicon() everywhere else: the shadow tree does not see the
+ *  page's theme rules, so its CSS switches them through the inherited --kic-lt / --kic-dk the page's theme sets. */
 function optionIcon(o: HTMLOptionElement): SVGSVGElement | null {
   const name = o.getAttribute("data-icon"); if (!name) return null;
-  const el = kicon(name, 16), root = document.documentElement, theme = root.getAttribute("data-theme");
-  const dark = theme === "dark" || (theme !== "light" && typeof matchMedia === "function" && matchMedia("(prefers-color-scheme: dark)").matches);
-  const drop = (): void => { const g = el.querySelector(dark ? ".lt" : ".dk"); if (g) g.remove(); const k = el.querySelector(dark ? ".dk" : ".lt") as SVGElement | null; if (k) k.style.display = "inline"; };
-  drop(); if (!el.querySelector("g")) { const mo = new MutationObserver(() => { if (el.querySelector("g")) { mo.disconnect(); drop(); } }); mo.observe(el, { childList: true }); }
-  return el;
+  return kicon(name, 16);
 }
 /** Fill a row (or the closed control's label) with the option's icon and text. */
 function fillRow(r: HTMLElement, o: HTMLOptionElement | null): void {

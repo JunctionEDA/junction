@@ -107,7 +107,20 @@ export interface FieldRow {
   size: number; orient: 0 | 90; x: number; y: number; font: string; color: Color; autoplace: boolean; mandatory: boolean;
   /** The node the row came from (null for a new row). */
   src: SNode | null;
+  /** a field name template's row the symbol does not have yet (DIALOG_*_PROPERTIES "Add in any template fieldnames") */
+  template?: boolean;
 }
+/**
+ * The field name templates the symbol does not define yet, as new rows shown per the template's visibility.  `rows`
+ * gains them in place; `withoutUnusedTemplates` leaves out the ones still empty when the dialog closes, so a dialog
+ * opened and closed adds nothing to the design (m_addedTemplateFields of the library dialog).
+ */
+export function addTemplateRows(rows: FieldRow[], templates: { name: string; visible: boolean }[], origin: [number, number]): FieldRow[] {
+  const defined = new Set(rows.map((r) => r.name));
+  for (const t of templates) if (!defined.has(t.name)) { const r = newRow(t.name, origin); r.show = t.visible; r.template = true; rows.push(r); defined.add(t.name); }
+  return rows;
+}
+export function withoutUnusedTemplates(rows: FieldRow[]): FieldRow[] { return rows.filter((r) => !(r.template && !r.src && !r.value)); }
 export const META_FIELD = /^ki_/;
 export function fieldName(p: SNode): string { return str(p[1]) === "private" && p.length > 3 && !isList(p[2]) ? str(p[2]) : str(p[1]); }
 export function fieldValue(p: SNode): string { return str(p[1]) === "private" && p.length > 3 && !isList(p[2]) ? str(p[3]) : str(p[2]); }
@@ -589,11 +602,13 @@ export function fieldNamesAreDuplicates(a: string, b: string): boolean {
 /** DIALOG_TEXT_PROPERTIES' hyperlink combo (dialog_text_properties.cpp): one "Page <n> (<sheet>)" entry per sheet page,
  *  a "---" separator, then the file://, http:// and https:// stems. */
 export function hyperlinkChoices(pages: [string, string][]): string[] {
-  return [...pages.map(([p, n]) => `Page ${p} (${n})`), "---", "file://", "http://", "https://"];
+  return [...pages.map(([p, n]) => `Page ${p} (${n})`), "---", "file://...", "http://...", "https://..."];
 }
-/** onHyperlinkCombo: a page entry becomes "#<page>"; the separator restores the previous text; anything else stays. */
+/** onHyperlinkCombo: an entry's client data — "#<page>" for a page, the scheme for "file://..." and the like; the
+ *  separator restores the previous text; anything else stays. */
 export function hyperlinkPick(choice: string, pages: [string, string][], prev: string): string {
   const i = pages.findIndex(([p, n]) => choice === `Page ${p} (${n})`);
   if (i >= 0) return "#" + pages[i][0];
+  if (choice === "file://..." || choice === "http://..." || choice === "https://...") return choice.slice(0, -3);
   return choice === "---" ? prev : choice;
 }

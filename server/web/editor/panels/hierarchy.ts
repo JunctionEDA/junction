@@ -230,7 +230,10 @@ export function hierarchyDispatch(a: PanelAction): boolean {
  *  (the hyperlink destinations DIALOG_TEXT_PROPERTIES offers as "#<page>"). */
 export function pageNumbersAndNames(): [string, string][] {
   const out: [string, string][] = [];
-  const walk = (n: HierNode | null): void => { if (!n) return; if (n.page && !out.some((x) => x[0] === n.page)) out.push([n.page, n.name]); for (const c of n.children) walk(c); };
-  walk(panelStore.get().hierarchy.root);
+  // SCH_SHEET_PATH::size() == 1 is "<root sheet>", every other sheet its name
+  const walk = (n: HierNode | null, root: boolean): void => { if (!n) return; if (n.page && !out.some((x) => x[0] === n.page)) out.push([n.page, root ? "<root sheet>" : n.name]); for (const c of n.children) walk(c, false); };
+  // built here rather than read from the pane's store, which is empty until the hierarchy pane has been shown
+  let tree: HierNode | null = null; try { tree = build(); } catch { tree = null; }
+  walk(tree || panelStore.get().hierarchy.root, true);
   return out;
 }

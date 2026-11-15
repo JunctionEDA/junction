@@ -11,7 +11,8 @@
 import { KD, checkbox, h, select, textInput, promptText, confirmBox } from "./dom";
 import { messageBox } from "./sch-items";
 import { kicon, bitmapButton } from "./kicon";
-import { PARITY, UNIT_NOTATIONS, embeddedOf, type AnnotationSettings, type ChainRow, type ChainState } from "./schematic-setup-logic";
+import { zstdDecompress } from "./zstd";
+import { PARITY, UNIT_NOTATIONS, embeddedFilesText, embeddedOf, type AnnotationSettings, type ChainRow, type ChainState } from "./schematic-setup-logic";
 export * from "./schematic-setup-logic";
 
 // ---------------------------------------------------------------- Annotation
@@ -105,17 +106,44 @@ export function netChainsPage(pg: HTMLElement, st: ChainState, netClasses: () =>
   ]);
 }
 // ---------------------------------------------------------------- Embedded Files
+// PANEL_EMBEDDED_FILES over the root schematic's (embedded_files …): the list, and Export... writes the files out (the
+// selected one, else all of them) as EMBEDDED_FILES::DecompressAndDecode gives them.  Adding, removing and the
+// Embed fonts flag change the file's header, which no collaborative change carries yet, so they stay disabled.
 export function embeddedFilesPage(pg: HTMLElement, load: () => Promise<string>): void {
   const rows: { name: string; ref: string }[] = [];
   const host = h("div");
+  let sel = -1, text = "";
   const g = KD().grid<{ name: string; ref: string }>(host, [{ key: "name", label: "Filename", type: "ro" }, { key: "ref", label: "Embedded Reference", type: "ro" }], rows, { readOnly: true, height: 300 });
+  host.addEventListener("click", (ev) => { const tr = (ev.target as HTMLElement).closest("tr"); if (tr && tr.parentElement && tr.parentElement.tagName === "TBODY") sel = Array.from(tr.parentElement.children).indexOf(tr); });
   const fonts = checkbox("Embed fonts", false, () => undefined, { id: "kd-ss-embedfonts", disabled: true });
   const add = bitmapButton("small_plus", "Add embedded file", null), del = bitmapButton("small_trash", "Remove embedded file", null);
   add.disabled = del.disabled = true;
-  const exp = h("button", { type: "button", class: "btn", disabled: true }, "Export...");
+  const exp = h("button", { type: "button", class: "btn", id: "kd-ss-embedexport", disabled: true }, "Export...") as HTMLButtonElement;
+  exp.addEventListener("click", () => {
+    const names = sel >= 0 && sel < rows.length ? [rows[sel].name] : rows.map((r) => r.name);
+    const bad = names.filter((n) => { const b = embeddedFileBytes(text, n); if (b) downloadBytes(n, b); return !b; });
+    if (bad.length) void messageBox(`Could not read the embedded file '${bad[0]}'.`);
+  });
   pg.append(host, h("div", { class: "kd-row", style: "margin-top:4px" }, add, del, h("span", { style: "flex:1" }), fonts, exp),
     h("p", { class: "kd-note", style: "margin:6px 0 0" }, "Files are embedded in the root schematic file; adding and removing them is done in the desktop application."));
-  void load().then((t) => { const e = embeddedOf(t); rows.push(...e.files.map((n) => ({ name: n, ref: "kicad-embed://" + n }))); g.refresh(); const cb = pg.querySelector<HTMLInputElement>("#kd-ss-embedfonts"); if (cb) cb.checked = e.fonts; }).catch(() => undefined);
+  void load().then((t) => {
+    text = t; const e = embeddedOf(t); rows.push(...e.files.map((n) => ({ name: n, ref: "kicad-embed://" + n }))); g.refresh();
+    exp.disabled = !rows.length;
+    const cb = pg.querySelector<HTMLInputElement>("#kd-ss-embedfonts"); if (cb) cb.checked = e.fonts;
+  }).catch(() => undefined);
+}
+/** EMBEDDED_FILES::DecompressAndDecode of the root file's embedded file `name`: base64, then the zstd frame. */
+function embeddedFileBytes(text: string, name: string): Uint8Array | null {
+  const src = embeddedFilesText(text); if (!src) return null;
+  const ef = KiCadCanvas.parse(src) as SNode | null; if (!ef) return null;
+  const f = (KiCadCanvas.kids(ef, "file") as SNode[]).find((x) => String((KiCadCanvas.kid(x, "name") || [])[1] ?? "") === name); if (!f) return null;
+  const d = KiCadCanvas.kid(f, "data"); if (!d) return null;
+  const b64 = d.slice(1).map((x) => String(x)).join("").replace(/[|\s]/g, "");
+  try { const bin = atob(b64); const raw = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) raw[i] = bin.charCodeAt(i); return zstdDecompress(raw); } catch { return null; }
+}
+function downloadBytes(name: string, bytes: Uint8Array): void {
+  const a = h("a", { href: URL.createObjectURL(new Blob([bytes as BlobPart], { type: "application/octet-stream" })), download: name }) as HTMLAnchorElement;
+  document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
 }
 
 // ---------------------------------------------------------------- Import Settings

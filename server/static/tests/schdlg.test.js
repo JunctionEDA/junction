@@ -155,6 +155,45 @@ test("back-annotation: unmatched footprints and symbols, nothing selected, re-li
   const rl = BA.backAnnotate([sym({ ref: "R9" })], [fp], Object.assign({}, ALL, { relink: true, references: false }));
   assert.deepEqual(rl.relinks, [{ fpRef: "R9", path: "/a" }]);
 });
+// a quad gate: units 1..4 each with pins (in, out); unit 2's nets on the board are unit 1's and the other way round
+const quadUnits = () => { const unitPins = new Map([[1, ["1", "2"]], [2, ["3", "4"]]]), pinTypes = new Map([["1", "input"], ["2", "output"], ["3", "input"], ["4", "output"]]);
+  return [{ key: "/u1", unit: 1, unitPins, pinTypes }, { key: "/u2", unit: 2, unitPins, pinTypes }]; };
+test("back-annotation: a gate swap on the board is a unit swap with 'Prefer symbol unit swaps', labels otherwise", () => {
+  const s = sym({ ref: "U1", keys: ["/u1", "/u2"], key: "/u1", pins: new Map([["1", "/A"], ["2", "/B"], ["3", "/C"], ["4", "/D"]]), units: quadUnits() });
+  const fp = { ref: "U1", path: "/u1", fpid: "P:SO8", value: "1k", dnp: false, excludeFromBom: false, excludeFromPos: false, fields: new Map(), pads: new Map([["1", "/C"], ["2", "/D"], ["3", "/A"], ["4", "/B"]]) };
+  const o = Object.assign({}, ALL, { footprints: false, values: false, references: false, attributes: false, otherFields: false });
+  const r = BA.backAnnotate([s], [fp], Object.assign({}, o, { unitSwaps: true }));
+  assert.deepStrictEqual(r.lines.map((l) => l.text), ["Swap U1 unit A with unit B."]);
+  assert.deepStrictEqual(r.unitEdits, [{ key: "/u1", unit: 2 }, { key: "/u2", unit: 1 }]); assert.equal(r.labels.length, 0);
+  const off = BA.backAnnotate([s], [fp], Object.assign({}, o, { unitSwaps: false }));
+  assert.equal(off.unitEdits.length, 0); assert.equal(off.labels.length, 4);
+});
+test("back-annotation: two pads trading nets are a pin swap, only reported without unconstrained pin swaps", () => {
+  const s = sym({ ref: "U1", keys: ["/u1"], key: "/u1", pins: new Map([["1", "/A"], ["2", "/B"]]), units: [{ key: "/u1", unit: 1, unitPins: new Map([[1, ["1", "2"]]]), pinTypes: new Map([["1", "input"], ["2", "input"]]) }] });
+  const fp = { ref: "U1", path: "/u1", fpid: "P:X", value: "1k", dnp: false, excludeFromBom: false, excludeFromPos: false, fields: new Map(), pads: new Map([["1", "/B"], ["2", "/A"]]) };
+  const o = Object.assign({}, ALL, { footprints: false, values: false, references: false, attributes: false, otherFields: false, pinSwaps: true });
+  const no = BA.backAnnotate([s], [fp], o);
+  assert.ok(no.lines[0].text.startsWith("Would swap U1 pins 1 and 2 to match PCB, but unconstrained pin swaps are disabled"), no.lines[0].text);
+  assert.equal(no.pinSwaps.length, 0); assert.equal(no.labels.length, 2);   // the labels change as without the option
+  const yes = BA.backAnnotate([s], [fp], Object.assign({}, o, { allowPinSwaps: true }));
+  assert.deepStrictEqual(yes.lines.map((l) => l.text), ["Swap U1 pins 1 and 2 to match PCB."]);
+  assert.deepStrictEqual(yes.pinSwaps, [{ key: "/u1", a: "1", b: "2" }]); assert.equal(yes.labels.length, 0);
+  const lib = K.parse('(symbol "X:G" (symbol "G_1_1" (pin input line (at 0 0 0) (length 2.54) (name "A") (number "1")) (pin input line (at 0 5 180) (length 5.08) (name "B") (number "2"))))');
+  assert.deepStrictEqual([...BA.libUnitPins(lib).unitPins.get(1)], ["2", "1"]);   // by x, then y downwards
+  assert.ok(BA.swapLibPins(lib, 1, "1", "2"));
+  assert.ok(/\(at 0 5 180\) \(length 5.08\) \(name "A"\)/.test(K.serialize(lib).replace(/\s+/g, " ")), K.serialize(lib));
+});
+
+// ---- Import Sheet / paste: references compared by number (SCH_REFERENCE_LIST), Import Sheet's reset annotation
+const CB = load(["tools", "sch-tools", "clipboard.ts"]);
+test("assignPastedRef: #PWR1 is taken by #PWR01; the next free number counts the zero-padded ones", () => {
+  const used = new Set(["#PWR01", "#PWR02", "R1"]);
+  const n = K.parse('(symbol (lib_id "power:GND") (at 0 0 0) (property "Reference" "#PWR1" (at 0 0 0)))');
+  const S = CB.S || null; void S;
+  CB.assignPastedRef(null, n, used);
+  const ref = K.str(L.kids(n, "property")[0][2]);
+  assert.ok(ref === "#PWR?" || ref === "#PWR3", ref);
+});
 
 // ---------------------------------------------------------------- Schematic Setup pages
 const SP = load(["dialogs", "schematic-setup-logic.ts"]);
@@ -221,10 +260,11 @@ test("pushFindHistory: newest first, repeats move up, empty skipped, capped at 1
 });
 test("hyperlink combo: page entries map to #<page>, the separator restores the text", () => {
   const pages = [["1", "Root"], ["2", "sub"]];
-  assert.deepStrictEqual(L.hyperlinkChoices(pages), ["Page 1 (Root)", "Page 2 (sub)", "---", "file://", "http://", "https://"]);
+  assert.deepStrictEqual(L.hyperlinkChoices(pages), ["Page 1 (Root)", "Page 2 (sub)", "---", "file://...", "http://...", "https://..."]);
   assert.strictEqual(L.hyperlinkPick("Page 2 (sub)", pages, ""), "#2");
   assert.strictEqual(L.hyperlinkPick("---", pages, "https://x"), "https://x");
-  assert.strictEqual(L.hyperlinkPick("file://", pages, ""), "file://");
+  assert.strictEqual(L.hyperlinkPick("file://...", pages, ""), "file://");
+  assert.strictEqual(L.hyperlinkPick("https://...", pages, ""), "https://");
 });
 const KDT = load(["components", "kdate.ts"]);
 test("date picker: ISO parse / format, Monday-first month grid, month steps clamp the day", () => {
@@ -251,9 +291,11 @@ test("pushRecentSearch: newest first, no duplicates, empty ignored, at most 10",
   for (let i = 0; i < 15; i++) l = LC.pushRecentSearch(l, "q" + i);
   assert.strictEqual(l.length, 10); assert.strictEqual(l[0], "q14");
 });
-test("bodyStyleNames: De Morgan is Standard / Alternate", () => {
-  assert.deepStrictEqual(LC.bodyStyleNames(2), ["Standard", "Alternate"]);
-  assert.deepStrictEqual(LC.bodyStyleNames(3), ["Body style 1", "Body style 2", "Body style 3"]);
+test("bodyStyleNames: De Morgan is Standard / Alternate, custom names are the symbol's own", () => {
+  assert.deepStrictEqual(LC.bodyStyleNames('(symbol "X:G" (symbol "G_1_1") (symbol "G_1_2"))'), ["Standard", "Alternate"]);
+  assert.deepStrictEqual(LC.bodyStyleNames('(symbol "X:G" (body_styles "A" "B" "C") (symbol "G_1_1") (symbol "G_1_2") (symbol "G_1_3"))'), ["A", "B", "C"]);
+  assert.deepStrictEqual(LC.bodyStyleNames('(symbol "X:G" (body_styles "Big" "Small") (symbol "G_1_1") (symbol "G_1_2"))'), ["Big", "Small"]);
+  assert.deepStrictEqual(LC.bodyStyleNames('(symbol "X:G" (symbol "G_1_1"))'), ["Standard"]);
 });
 test("symbolInstance: the chosen body style goes into (body_style N)", () => {
   const lib = K.parse('(symbol "X:G" (property "Reference" "U" (at 0 0 0)) (symbol "G_1_1" (pin input line (at 0 0 0) (length 2) (name "A") (number "1"))) (symbol "G_1_2" (pin input line (at 0 0 0) (length 2) (name "A") (number "1"))))');

@@ -13,6 +13,7 @@
 //   Save As          the footprint under another name / library, as a new document
 //   New Library      a <name>.pretty row in the project's fp-lib-table
 //   Insert into PCB  the board tab (BroadcastChannel "kc-fpedit") carries it on the cursor, as KiCad's placement
+import { loadPinnedLibs, setLibPinned } from "../library/pinned";
 import { setStatusBar, state, store } from "./appstore";
 import { keyName } from "../keys";
 import { E } from "./state";
@@ -110,13 +111,9 @@ async function loadOfficialLib(lib: string): Promise<void> {
   } catch { official.fps.delete(lib); }
   publishLibs();
 }
-/** Pinned footprint libraries (LIB_TREE_MODEL_ADAPTER "pinned_footprint_libs"), kept for this viewer. */
-export function pinnedFpLibs(): Set<string> { try { return new Set(JSON.parse(localStorage.getItem("kui.fpedit.pinned") || "[]") as string[]); } catch { return new Set(); } }
-function setPinnedFpLib(name: string, on: boolean): void {
-  const p = pinnedFpLibs(); if (on) p.add(name); else p.delete(name);
-  try { localStorage.setItem("kui.fpedit.pinned", JSON.stringify([...p])); } catch { /* no storage */ }
-  publishLibs();
-}
+/** Pinned footprint libraries (LIB_TREE_MODEL_ADAPTER "pinned_footprint_libs"), shared with the footprint chooser (library/pinned.ts). */
+export function pinnedFpLibs(): Set<string> { return loadPinnedLibs("footprint"); }
+function setPinnedFpLib(name: string, on: boolean): void { setLibPinned("footprint", name, on); publishLibs(); }
 /** The library tree's selection (LIB_TREE::GetSelectedLibId): a library, or one of its footprints. */
 let treeSel: { lib: string; docId?: string } | null = null;
 /** FOOTPRINT_EDIT_FRAME::GetTargetFPID: the tree's selection, else the open footprint. */

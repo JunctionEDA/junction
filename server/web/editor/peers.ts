@@ -88,7 +88,29 @@ export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | nu
   // what the server's doc list carries.
   const doc = (state.docs || []).find((d) => d.docId === state.docId);
   if (doc && doc.path) st.sheetFile = doc.path;
-  E.ws.send(JSON.stringify({ type: "presence", docId: state.docId, state: st }));
+  E.ws.send(JSON.stringify({ type: "presence", docId: state.docId, state: fitPresence(st) }));
+}
+
+/** The server refuses a presence state over 8 KB (ws.rs MAX_PRESENCE_BYTES) with bad_message, which reads as a broken
+ *  session; keep under it with room to spare.  A large selection (an imported sheet riding the cursor) is cut down: the
+ *  parallel selection / boxes / at lists are shortened together, so a peer still sees the first items move with it. */
+const PRESENCE_LIMIT = 7600;
+export function fitPresence(st: PresenceState): PresenceState {
+  let s = JSON.stringify(st);
+  if (s.length <= PRESENCE_LIMIT) return st;
+  const out: PresenceState = { ...st };
+  let n = out.selection ? out.selection.length : 0;
+  while (n > 0 && s.length > PRESENCE_LIMIT) {
+    n = Math.floor(n * Math.min(0.9, PRESENCE_LIMIT / s.length));
+    out.selection = st.selection!.slice(0, n);
+    if (st.boxes) out.boxes = st.boxes.slice(0, n);
+    if (st.at) out.at = st.at.slice(0, n);
+    if (!n) { delete out.selection; delete out.boxes; delete out.at; }
+    s = JSON.stringify(out);
+  }
+  if (s.length > PRESENCE_LIMIT && out.dragLines) { delete out.dragLines; delete out.dragAdded; s = JSON.stringify(out); }
+  if (s.length > PRESENCE_LIMIT && out.ghost) { delete out.ghost; s = JSON.stringify(out); }
+  return out;
 }
 
 /** Where an item is placed by (mm): its (at) / transform for symbols, footprints, vias and texts, else its first point. */

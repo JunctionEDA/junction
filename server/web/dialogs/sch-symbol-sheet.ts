@@ -14,6 +14,7 @@ import { KD, checkbox, confirmBox, h, popupMenu, promptText, select, textInput, 
 import * as P from "./sym-props-logic";
 import { commitWithOtherUnits } from "./sync-units";
 import * as L from "./sch-items-logic";
+import { resolvedFieldTemplates } from "./field-templates";
 import { fieldsGrid, messageBox, swatch, type Swatch } from "./sch-items";
 import { openChangeSymbols } from "./change-symbols";
 import { openSimModel } from "./sim-model";
@@ -129,7 +130,8 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
       const tabs = [
         { label: "General", build(pg: HTMLElement) {
           const fh = h("div"); const fb = KD().staticBox(fh, "Fields"); pg.append(fh);
-          grid = fieldsGrid(fb, L.fieldRows(staged, origin, MANDATORY_SYMBOL).sort((a, c) => { const i = MANDATORY_SYMBOL.indexOf(a.name), j = MANDATORY_SYMBOL.indexOf(c.name); return (i < 0 ? 99 : i) - (j < 0 ? 99 : j); }),
+          // TransferDataToWindow: the symbol's fields, then "any template fieldnames not yet defined" (project and global)
+          grid = fieldsGrid(fb, L.addTemplateRows(L.fieldRows(staged, origin, MANDATORY_SYMBOL).sort((a, c) => { const i = MANDATORY_SYMBOL.indexOf(a.name), j = MANDATORY_SYMBOL.indexOf(c.name); return (i < 0 ? 99 : i) - (j < 0 ? 99 : j); }), resolvedFieldTemplates(), origin),
             { readOnly: ro, doc, newName: nextName, height: 200, shown: [0, 1, 2, 3, 4, 5, 6, 7], browse: { footprint: () => chooserFilters(lib), footprintReadOnly: isPower, files: () => [docFiles(doc), lib] } });
           const row = h("div", { style: "display:flex;gap:10px;margin-top:2px;align-items:stretch" });
           // General: Unit / Body style / Composed reference / Angle / Mirror, then Show pin numbers / Show pin names and Local power
@@ -206,7 +208,7 @@ export function openSymbolProperties(ctx: Ctx, item: KItem, opts: SymPropsOpts =
     },
     ok() {
       if (ro || !grid) return;
-      const rows = grid.rows(); const dup = L.duplicateFieldName(rows); if (dup) { void messageBox(dup); return false; }
+      const rows = L.withoutUnusedTemplates(grid.rows()); const dup = L.duplicateFieldName(rows); if (dup) { void messageBox(dup); return false; }
       const bad = L.validateFieldRows("symbol", rows); if (bad) { void messageBox(bad.message, bad.title); return false; }
       const ref = rows.find((r) => r.name === "Reference");
       const n = L.clone(staged);

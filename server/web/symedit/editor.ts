@@ -41,6 +41,9 @@ import { SYM_FILTER_ROWS, defaultSymFilter, symAllChecked, symPasses, symSetFilt
 import { openPreferences } from "../dialogs/preferences";
 import { GRID_PAGE, clonePrefs, defaultGrid, gridDefs, prefs, rememberCursor, rememberGrid, savePrefs } from "../dialogs/prefs";
 import { gridPitchFor, type GridClass } from "../dialogs/logic";
+import { loadPinnedLibs, setLibPinned } from "../library/pinned";
+import { RECT_HANDLES, dragRectHandle, rectBox, rectHandles } from "./rect-edit";
+import { EDIT_BORDER_PX, EDIT_POINT_PX, editPointColors } from "../tools/edit-point-style";
 import { ARC_MODE_ACTIONS, ARC_START_DIR_END, ARC_START_END_CENTER, ARC_START_END_MID, ARC_TANGENT, arcFromStartEndCenterDrag, arcFromStartEndMidDrag, arcFromStartTangentEnd, fromNm, toNm, type ArcSol } from "../tools/arc-geom";
 
 export type ToolId = "select" | "pin" | "text" | "textbox" | "rectangle" | "circle" | "ellipse" | "ellipse_arc" | "arc" | "bezier" | "polyline" | "polygon" | "anchor" | "delete" | "zoom";
@@ -119,7 +122,7 @@ export class SymbolEditor {
   private preview: M.Node | null = null;
   private kcache: { key: string; doc: KDoc } | null = null;
   private mouse = { x: 0, y: 0, in: false };           // doc mm (Y down)
-  private drag: { mode: "pan" | "band" | "move" | "zoom"; sx: number; sy: number; x0: number; y0: number; px?: number; py?: number; moved?: boolean; ids?: string[] } | null = null;
+  private drag: { mode: "pan" | "band" | "move" | "zoom" | "pedit"; sx: number; sy: number; x0: number; y0: number; px?: number; py?: number; moved?: boolean; ids?: string[]; handle?: number } | null = null;
   private carry: { ids: string[]; sx: number; sy: number; label: string; amend: boolean; base: string } | null = null;
   /** SYMBOL_EDITOR_DRAWING_TOOLS::TwoClickPlace: a new pin or text follows the cursor (IS_NEW | IS_MOVING) until the second click. */
   private floating: { kind: "pin"; pin: M.PinInfo } | { kind: "text"; node: M.Node; body: number; unit?: number } | null = null;
@@ -551,6 +554,7 @@ export class SymbolEditor {
       ctx.save(); ctx.lineWidth = dpr / s; ctx.strokeStyle = x1 >= x0 ? "#4F9CFF" : "#4FCF6F"; ctx.setLineDash(x1 >= x0 ? [] : [4 / s, 3 / s]);
       ctx.fillStyle = x1 >= x0 ? "rgba(79,156,255,.12)" : "rgba(79,207,111,.12)"; ctx.fillRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)); ctx.strokeRect(Math.min(x0, x1), Math.min(y0, y1), Math.abs(x1 - x0), Math.abs(y1 - y0)); ctx.restore();
     }
+    this.paintEditPoints(ctx, dpr / s);
     // the cursor on the snapped grid point (KIGFX::CURSOR): small crosshairs, full-window, or full-window at 45 degrees
     if (this.mouse.in) {
       const [fx, fy] = this.snapFile(this.mouse.x, this.mouse.y); const cx = fx, cy = -fy;
@@ -908,13 +912,9 @@ export class SymbolEditor {
     else return;
     ev.preventDefault(); ev.stopPropagation();
   }
-  /** Pinned libraries (LIB_TREE_MODEL_ADAPTER pinned_symbol_libs), kept for this viewer. */
-  pinnedLibs(): Set<string> { try { return new Set(JSON.parse(localStorage.getItem("kui.symedit.pinned") || "[]") as string[]); } catch { return new Set(); } }
-  private setPinned(nick: string, on: boolean): void {
-    const p = this.pinnedLibs(); if (on) p.add(nick); else p.delete(nick);
-    try { localStorage.setItem("kui.symedit.pinned", JSON.stringify([...p])); } catch { /* no storage */ }
-    this.renderTree();
-  }
+  /** Pinned libraries (LIB_TREE_MODEL_ADAPTER pinned_symbol_libs), shared with the symbol chooser (library/pinned.ts). */
+  pinnedLibs(): Set<string> { return loadPinnedLibs("symbol"); }
+  private setPinned(nick: string, on: boolean): void { setLibPinned("symbol", nick, on); this.renderTree(); }
   /** The library tree's menu (symedit/ctxmenu.ts symTreeMenu): rows whose condition is false are hidden. */
   private treeMenu(lib: Lib, name: string | null): MenuEntry[] {
     const proj = lib.kind === "project" && !!lib.doc && lib.doc.canEdit && !E.viewOnly;
@@ -1284,7 +1284,7 @@ export class SymbolEditor {
     if (this.showHiddenPins !== d.showHiddenPins || this.showHiddenFields !== d.showHiddenFields || this.showETypes !== d.showETypes || this.showAltIcons !== d.showAltIcons) this.kcache = null;
     this.showHiddenPins = d.showHiddenPins; this.showHiddenFields = d.showHiddenFields; this.showETypes = d.showETypes; this.showAltIcons = d.showAltIcons;
     const was = { length: M.DEFAULTS.pinLength, nameSize: M.DEFAULTS.pinNameSize, numSize: M.DEFAULTS.pinNumSize };
-    Object.assign(M.DEFAULTS, { lineWidth: e.lineWidth, textSize: e.textSize, pinLength: e.pinLength, pinNumSize: e.pinNumSize, pinNameSize: e.pinNameSize, pinStep: e.pinPitch, labelDelta: e.labelDelta });
+    Object.assign(M.DEFAULTS, { lineWidth: e.lineWidth, textSize: e.textSize, pinLength: e.pinLength, pinNumSize: e.pinNumSize, pinNameSize: e.pinNameSize, pinStep: Math.round(Math.round(e.pinPitch / 0.0254) / 25) * 25 * 0.0254, labelDelta: e.labelDelta });
     // the next new pin starts from the new defaults unless a pin dialog already set its own
     if (this.lastPin.length === was.length) this.lastPin.length = e.pinLength;
     if (this.lastPin.nameSize === was.nameSize) this.lastPin.nameSize = e.pinNameSize;
@@ -1610,6 +1610,8 @@ export class SymbolEditor {
     if (this.floating) { void this.placeFloating(fx, fy); return; }
     switch (this.tool) {
       case "select": {
+        const ph = this.editHandleAt(x, y);
+        if (ph && !this.readOnly()) { this.drag = { mode: "pedit", sx: ev.clientX, sy: ev.clientY, x0: x, y0: y, ids: [ph.id], handle: ph.h }; (ev.target as Element).setPointerCapture(ev.pointerId); return; }
         const hit = this.hitAt(x, y);
         if (hit) {
           if (ev.shiftKey) t.sel.add(hit); else if (ev.ctrlKey || ev.metaKey) { if (t.sel.has(hit)) t.sel.delete(hit); else t.sel.add(hit); } else if (!t.sel.has(hit)) t.sel = new Set([hit]);
@@ -1629,7 +1631,8 @@ export class SymbolEditor {
     const [x, y] = this.toDoc(ev.clientX, ev.clientY); this.mouse.x = x; this.mouse.y = y; this.mouse.in = true;
     const d = this.drag;
     if (d && d.mode === "pan") { const v = this.view(); v.px = d.x0 + ev.clientX - d.sx; v.py = d.y0 + ev.clientY - d.sy; this.paint(); return; }
-    if (d && d.mode === "move" && !this.readOnly()) {
+    if (d && d.mode === "pedit") { this.rectEditPreview(d.ids![0], d.handle!, d.x0, d.y0, x, y); }
+    else if (d && d.mode === "move" && !this.readOnly()) {
       if (!d.moved && Math.hypot(ev.clientX - d.sx, ev.clientY - d.sy) < 4) return;
       d.moved = true; this.movePreview(d.ids || [], d.x0, d.y0, x, y);
     } else if (this.carry) this.carryPreview();
@@ -1644,6 +1647,12 @@ export class SymbolEditor {
       const [fx0, fy0] = this.snapFile(d.x0, d.y0), [fx1, fy1] = this.snapFile(x, y); const ids = d.ids || [];
       this.preview = null; this.kcache = null;
       this.edit("Move", (s) => { const ns = ids.map((id) => nodeOf(s, id)).filter((n): n is M.Node => !!n); for (const n of ns) M.moveNode(n, fx1 - fx0, fy1 - fy0); return ns; });
+      this.paint(); return;
+    }
+    if (d.mode === "pedit") {
+      this.preview = null; this.kcache = null;
+      const [fx0, fy0] = this.snapFile(d.x0, d.y0), [fx1, fy1] = this.snapFile(x, y), id = d.ids![0], h = d.handle!;
+      if (fx1 !== fx0 || fy1 !== fy0) this.edit("Move Point", (sym) => { const n = nodeOf(sym, id); if (!n) return false; dragRectHandle(sym, n, this.unitOfId(id), h, fx1 - fx0, fy1 - fy0, prefs().symEditing.dragPinsWithEdges); return [n]; });
       this.paint(); return;
     }
     if (d.mode === "zoom") { this.zoomToArea(d.x0, d.y0, x, y); return; }
@@ -1663,6 +1672,40 @@ export class SymbolEditor {
     if (this.tool !== "select") return;
     const [x, y] = this.toDoc(ev.clientX, ev.clientY); const hit = this.hitAt(x, y); const t = this.tab; if (!t) return;
     if (hit) { t.sel = new Set([hit]); this.selChanged(); this.editSelected(); } else void D.symbolProperties(this);
+  }
+  /** The one selected rectangle that shows edit points (SCH_POINT_EDITOR on a single selected shape). */
+  private editRect(): { id: string; node: M.Node } | null {
+    const t = this.tab; if (!t || t.sel.size !== 1 || this.tool !== "select" || this.carry || this.floating) return null;
+    const id = [...t.sel][0]; if (!id.startsWith("g:")) return null;
+    const sym = this.preview || this.symbol(); const n = sym ? nodeOf(sym, id) : null;
+    return n && n[0] === "rectangle" ? { id, node: n } : null;
+  }
+  private unitOfId(id: string): number { const a = id.indexOf(":"), b = id.lastIndexOf(":"); return M.subUnitBody(id.slice(a + 1, b))[0]; }
+  /** The edit point under (x, y) (doc mm): EDIT_POINTS::FindPoint with half a point and 2 px of slack. */
+  private editHandleAt(x: number, y: number): { id: string; h: number } | null {
+    const r = this.editRect(); const b = r && rectBox(r.node); if (!r || !b) return null;
+    const tol = (EDIT_POINT_PX / 2 + 2) / this.view().s;
+    const hs = rectHandles(b); let best = -1, bd = Infinity;
+    for (let i = 0; i < RECT_HANDLES; i++) { const d = Math.max(Math.abs(hs[i][0] - x), Math.abs(-hs[i][1] - y)); if (d <= tol && d < bd) { bd = d; best = i; } }
+    return best >= 0 ? { id: r.id, h: best } : null;
+  }
+  private rectEditPreview(id: string, h: number, x0: number, y0: number, x: number, y: number): void {
+    const sym = this.symbol(); if (!sym || this.readOnly()) return;
+    const [ax, ay] = this.snapFile(x0, y0), [bx, by] = this.snapFile(x, y);
+    const s = M.node(M.text(sym)), n = nodeOf(s, id); if (!n) return;
+    dragRectHandle(s, n, this.unitOfId(id), h, bx - ax, by - ay, prefs().symEditing.dragPinsWithEdges);
+    this.preview = s; this.kcache = null;
+  }
+  /** EDIT_POINTS::ViewDraw for the selected rectangle: square corners and centre, round edge handles. */
+  private paintEditPoints(ctx: CanvasRenderingContext2D, px: number): void {
+    const r = this.editRect(); const b = r && rectBox(r.node); if (!b) return;
+    const { fill, border } = editPointColors(K().SCH.aux || "#000000", K().SCH.bg || "#F5F4EF"), size = EDIT_POINT_PX * px / 2;
+    ctx.save(); ctx.fillStyle = fill; ctx.strokeStyle = border; ctx.lineWidth = EDIT_BORDER_PX * px;
+    rectHandles(b).forEach(([hx, hy], i) => {
+      ctx.beginPath(); if (i >= 5) ctx.arc(hx, -hy, size, 0, 2 * Math.PI); else ctx.rect(hx - size, -hy - size, 2 * size, 2 * size);
+      ctx.fill(); ctx.stroke();
+    });
+    ctx.restore();
   }
   private movePreview(ids: string[], x0: number, y0: number, x: number, y: number): void {
     const sym = this.symbol(); if (!sym) return;

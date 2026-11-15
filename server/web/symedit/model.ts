@@ -866,9 +866,10 @@ export function groupPinRows(pins: PinRow[], mode: "none" | "name" | "selection"
  * the comma-separated list, adding pins (copies of the last, through `addPin`) or removing the surplus (`removePin`);
  * any other column is set on every pin.
  */
-export function setPinGroupValue(g: PinGroupRow, key: string, value: unknown, addPin: (like: PinRow, number: string) => PinRow, removePin: (p: PinRow) => void): void {
+export function setPinGroupValue(g: PinGroupRow, key: string, value: unknown, addPin: (like: PinRow, number: string) => PinRow, removePin: (p: PinRow) => void, byName = true): void {
   if (value === PIN_MIXED) return;
-  if (key === "number") {
+  // only m_pinTable->IsDisplayGrouped() (Group by name) renumbers from the list; a Group Selected Pins row sets the text
+  if (key === "number" && byName) {
     const nums = String(value).split(",").map((t) => t.trim()).filter((t) => t !== "");
     const keep = g.pins.slice(0, nums.length);
     keep.forEach((p, i) => { p.number = nums[i]; });
@@ -891,6 +892,16 @@ export function pinNumberSummary(rows: PinRow[]): { numbers: string; count: numb
     parts.push(j > i ? `${uniq[i]}-${uniq[j]}` : uniq[i]); i = j + 1;
   }
   return { numbers: parts.join(", "), count: nums.length, duplicates: dups.join(", ") };
+}
+/**
+ * PIN_TABLE_DATA_MODEL::SetValue's new pin for a grouped Number list: a fresh SCH_PIN (the editor's default length and
+ * text sizes, shown, body style 0) with the last pin's name, orientation, type, shape and unit, placed one repeat
+ * step (m_Repeat.pin_step) from it: up for a Left / Right pin (pos.y -= step), else to the right (pos.x += step).
+ */
+export function groupNewPin(last: PinRow, number: string, step = DEFAULTS.pinStep): PinRow {
+  const lr = last.orient === 0 || last.orient === 180;
+  return { count: 1, number, name: last.name, type: last.type, shape: last.shape, orient: last.orient, numSize: +fmt(DEFAULTS.pinNumSize), nameSize: +fmt(DEFAULTS.pinNameSize),
+    length: +fmt(DEFAULTS.pinLength), x: +fmt(lr ? last.x : last.x + step), y: +fmt(lr ? last.y - step : last.y), visible: true, unit: last.unit, body: 0, node: null };
 }
 /**
  * Write a pin table back: every pin of the symbol replaced by the rows, in one whole-symbol change.  A row that came

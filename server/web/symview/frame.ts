@@ -12,7 +12,7 @@ import { ensureStyle, icon, meta, showMenu, closeMenus, type MenuEntry } from ".
 import { menuKey } from "../keys";
 import { projectDocs } from "../dialogs/project";
 import { fetchItem, libraryIndex, officialLibraries, projectLibraries, type LibItem, type LibraryEntry, type SourceContext } from "../library/sources";
-import { symbolInfo, unitName } from "../library/core";
+import { bodyStyleNames, symbolInfo, unitName } from "../library/core";
 import "../components/kselect";
 import { stepSymbol, symbolSearchText, tokensMatch } from "./logic";
 
@@ -157,7 +157,7 @@ async function selectSym(name: string): Promise<void> {
   if (seq !== S.loadSeq || !S.root || !got.symbol) return;
   const node = K().parse(got.symbol) as SNode;
   const info = symbolInfo(node);
-  S.node = node; S.units = Math.max(1, info.units); S.bodies = Math.max(1, info.bodyStyles); S.unit = 1; S.body = 1; S.docCache = null;
+  S.node = node; S.units = Math.max(1, info.units); S.bodies = bodyStyleNames(node).length; S.unit = 1; S.body = 1; S.docCache = null;
   keep({ lib: S.lib, sym: S.sym });
   renderMsg(); renderToolbar(); zoomFit();
 }
@@ -205,9 +205,9 @@ function renderToolbar(): void {
   btn("previousSymbol", () => step(-1), i > 0); btn("nextSymbol", () => step(1), i >= 0 && i < names.length - 1); sep();
   btn("zoomRedraw", () => { S.docCache = null; paint(); }); btn("zoomInCenter", () => zoomBy(1.3), hasSym()); btn("zoomOutCenter", () => zoomBy(1 / 1.3), hasSym()); btn("zoomFitScreen", zoomFit, hasSym()); sep();
   btn("showElectricalTypes", toggleTypes, true, S.etypes); btn("showPinNumbers", togglePinNums, true, S.pinNums); sep();
-  // the body style choice: "Standard" / "Alternate" for a De Morgan symbol (SYMBOL_VIEWER_FRAME::updatePreviewSymbol)
+  // the body style choice: "Standard" / "Alternate" for a De Morgan symbol, else its own names (GetBodyStyleDescription)
   const body = h("k-select", { id: "sv-body", style: "width:150px" }) as HTMLElement & { value: string; disabled: boolean };
-  if (S.bodies > 1) { const bodyNames = S.bodies === 2 ? ["Standard", "Alternate"] : Array.from({ length: S.bodies }, (_, n) => `Body style ${n + 1}`); bodyNames.forEach((n, j) => body.append(h("option", { value: String(j + 1) }, n))); }
+  if (S.bodies > 1 && S.node) { const bodyNames = bodyStyleNames(S.node); bodyNames.forEach((n, j) => body.append(h("option", { value: String(j + 1) }, n))); }
   body.value = String(S.body); body.toggleAttribute("disabled", S.bodies < 2);
   body.addEventListener("change", () => { S.body = +body.value || 1; S.docCache = null; paint(); });
   tb.append(body); sep();

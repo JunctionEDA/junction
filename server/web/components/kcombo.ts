@@ -41,7 +41,10 @@ export function comboBox(input: HTMLInputElement, options: string[] | (() => str
   input.autocomplete = "off"; input.setAttribute("role", "combobox"); input.setAttribute("aria-expanded", "false");
   const wrap = (): void => {
     if (!input.parentNode || input.parentNode === el) return;
+    // moving a focused entry drops the keyboard focus (a dialog that focused it before the wrap would lose it)
+    const had = document.activeElement === input, s0 = input.selectionStart, s1 = input.selectionEnd;
     input.replaceWith(el); input.style.flex = "1"; input.style.minWidth = "0"; el.append(input, btn);
+    if (had) { input.focus(); try { if (s0 !== null && s1 !== null) input.setSelectionRange(s0, s1); } catch { /* no selection on this input type */ } }
   };
   if (input.parentNode) wrap(); else setTimeout(wrap, 0);
   // a fixed empty list has no button to press; a list read on opening may have grown by then

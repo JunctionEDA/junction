@@ -4,7 +4,11 @@
 //            Compare Symbol with Library settings (Schematic Setup), or "No relevant differences detected."
 //   Visual   SYMBOL_DIFF_WIDGET: both drawn over each other with the Schematic … Library slider and the A / B toggle
 // Its Apply button is "Update Symbol from Library..." (DIALOG_CHANGE_SYMBOLS on that symbol).
-import { E, toast, toolCtx } from "./editor";
+import { E, api, toast, toolCtx } from "./editor";
+import { projectDocs } from "./project";
+import { officialLibraries, projectLibraries } from "../library/sources";
+import { parseLibTable } from "../symedit/model";
+import { manageSymbolLibrariesFromSchematic } from "../symedit/dialogs";
 import { KD, h, type DlgApi } from "./dom";
 import { bitmapButton } from "./kicon";
 import { keyName } from "../keys";
@@ -25,11 +29,25 @@ function selectedSymbol(): KItem | null {
   return null;
 }
 
+/** SYMBOL_LIBRARY_ADAPTER::HasLibrary( name, false / true ): a row of the project's sym-lib-table (enabled or not), a
+ *  project library, or an official one; "ok" when the official list cannot be read. */
+async function libraryState(libName: string): Promise<"ok" | "missing" | "disabled"> {
+  if (!libName) return "missing";
+  const docs = projectDocs(), table = docs.find((d) => d.path === "sym-lib-table");
+  if (table) {
+    try { const t = await api(`/api/docs/${table.docId}/content`); const row = parseLibTable(typeof t === "string" ? t : String(t)).find((r) => r.nickname === libName); if (row) return row.enabled ? "ok" : "disabled"; } catch { /* no table text */ }
+  }
+  if (projectLibraries("symbol", docs).some((l) => l.name === libName)) return "ok";
+  const official = await officialLibraries("symbol").then((t) => t.libraries, () => null);
+  return !official || official.some((l) => l.name === libName) ? "ok" : "missing";
+}
+
 export function openDiffSymbol(): void {
   if (!E.kdoc || E.kdoc.type !== "sch") return;
   const item = selectedSymbol();
   // RequestSelection( { SCH_SYMBOL_T } ) came back empty
-  if (!item) { toast("Select a symbol to diff against its library equivalent."); return; }
+  // m_frame->ShowInfoBarError: the editor's infobar (toast), shown for ShowMessageFor's 8 s
+  if (!item) { toast("Select a symbol to diff against its library equivalent.", 8000); return; }
   void build(E.kdoc, item);
 }
 
@@ -47,9 +65,13 @@ async function build(doc: KDoc, item: KItem): Promise<void> {
   const libSym = libId ? await libSymbol(libId) : null;
   const schSym = doc.lib.get(libId) || null;
 
-  const lines: { text: string; cls?: string }[] = [];
+  const lines: { text: string; cls?: string; manage?: boolean }[] = [];
   let diffs: string[] = [];
-  if (!libSym) lines.push({ text: `The library no longer contains the item ${symbolName}.` });
+  const state = await libraryState(libName);
+  // libs->HasLibrary( libName, false ) / HasLibrary( libName, true ), each with the Manage Symbol Libraries link
+  if (state === "missing") lines.push({ text: "The library is not included in the current configuration.", manage: true });
+  else if (state === "disabled") lines.push({ text: "The library is not enabled in the current configuration.", manage: true });
+  else if (!libSym) lines.push({ text: `The library no longer contains the item ${symbolName}.` });
   else if (!schSym) lines.push({ text: `The schematic has no copy of ${libId}.` });
   else {
     diffs = compareSymbols(schSym, libSym, parity, node);
@@ -81,7 +103,12 @@ async function build(doc: KDoc, item: KItem): Promise<void> {
           const box = h("div", { id: "kd-diffsym-summary", class: "kd-diffsym-report", style: "height:360px;overflow:auto;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-2);background:var(--panel);user-select:text;font-size:12px" });
           box.append(h("div", { style: "font-weight:600" }, "Schematic vs library diff for:"),
             h("ul", { style: "margin:4px 0 10px;padding-left:20px" }, h("li", null, `Symbol ${ref}`), h("li", null, `Library: ${libName}`), h("li", null, `Library item: ${symbolName}`)));
-          for (const l of lines) box.append(h("div", { class: l.cls ? "ln " + l.cls : "ln", style: "margin:2px 0" }, l.text));
+          for (const l of lines) {
+            const ln = h("div", { class: l.cls ? "ln " + l.cls : "ln", style: "margin:2px 0" }, l.text);
+            // <a href='$CONFIG'>: the Manage Symbol Libraries dialog (ACTIONS::showSymbolLibTable)
+            if (l.manage) { const a = h("a", { href: "#", id: "kd-diffsym-manage", style: "margin-left:12px" }, "Manage Symbol Libraries"); a.addEventListener("click", (ev) => { ev.preventDefault(); void officialLibraries("symbol").then((t) => t.libraries, () => []).then((libs) => manageSymbolLibrariesFromSchematic(libs)); }); ln.append(a); }
+            box.append(ln);
+          }
           pg.append(box);
         } },
         ...(docs ? [{ label: "Visual", build(pg: HTMLElement) {

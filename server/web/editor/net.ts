@@ -100,7 +100,8 @@ export async function connect() {
       if (msg.clientId) E.myClientId = msg.clientId;
       sock.send(JSON.stringify({ type: "join_doc", docId: state.docId }));
     }
-    if (msg.type === "error" && (msg.code === "bad_message" || msg.code === "unsupported_protocol")) { setConn("err", `server refused the session (${msg.code}) — reload`); }
+    // a presence state the server found too large is dropped on its own; the session itself is fine
+    if (msg.type === "error" && (msg.code === "bad_message" || msg.code === "unsupported_protocol") && msg.message !== "presence state too large") { setConn("err", `server refused the session (${msg.code}) — reload`); }
     if (msg.type === "error" && msg.code === "auth_failed") {
       sock.onclose = null; sock.close(); if (E.ws === sock) E.ws = null;
       setConn("err", "sign-in expired — reload to reconnect");

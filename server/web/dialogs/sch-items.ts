@@ -21,7 +21,7 @@ import { refImageDialog } from "../editor/pcbdialogs/refimage";
 import { E, toast, toolCtx } from "./editor";
 import { KD, popupMenu, checkbox, confirmBox, h, select, textInput } from "./dom";
 import { comboBox } from "../components/kcombo";
-import { pageNumbersAndNames } from "../editor/panels/hierarchy";
+import { loadSheets, pageNumbersAndNames } from "../editor/panels/hierarchy";
 import { colorPicker, type RGBA } from "../editor/pcbdialogs/color-picker";
 import { facesUsed, fontPicker, type FontPickerEl } from "./font-picker";
 import * as L from "./sch-items-logic";
@@ -411,20 +411,23 @@ export function openTextDialog(ctx: Ctx, item: KItem, opts: ItemOpts): void {
       } else {
         // m_hyperlinkCb "Link:" + the editable m_hyperlinkCombo: the sheet pages as "#<page>", then file:// http:// https://
         const href = textInput(fx.href, undefined, { id: "kd-txt-link", style: "width:100%", disabled: ro }) as HTMLInputElement; els.link = href;
-        const pages = pageNumbersAndNames();
+        // Schematic().Hierarchy(): read when the list opens; the sheets not yet read are fetched meanwhile
+        let pages = pageNumbersAndNames();
+        void loadSheets().then(() => { pages = pageNumbersAndNames(); }, () => undefined);
         let lastLink = "", prev = fx.href;
         const hyper = checkbox("Link:", !!fx.href, (on) => {
-          // onHyperlinkChecked: ticking an empty link starts it with https://; unticking keeps the text to restore later
-          if (on && !href.value) { href.value = lastLink || "https://"; href.focus(); href.setSelectionRange(href.value.length, href.value.length); }
+          // onHyperlinkChecked: ticking an empty link puts back m_lastLink (empty until a link was unticked); unticking
+          // keeps the text to restore later
+          if (on && !href.value) { href.value = lastLink; href.focus(); href.setSelectionRange(href.value.length, href.value.length); }
           else if (!on && href.value) { lastLink = href.value; href.value = ""; }
           prev = href.value;
         }, { id: "kd-txt-hyper", disabled: ro });
         const cb = hyper.querySelector("input") as HTMLInputElement;
-        comboBox(href, L.hyperlinkChoices(pages));
+        comboBox(href, () => L.hyperlinkChoices(pages));
         href.addEventListener("input", () => {
           const v = L.hyperlinkPick(href.value, pages, prev);
           if (v !== href.value) { href.value = v; href.setSelectionRange(v.length, v.length); }
-          prev = href.value; cb.checked = !!href.value;   // onHyperlinkText
+          prev = href.value; if (href.value) cb.checked = true;   // onHyperlinkText / onHyperlinkCombo
         });
         g.append(hyper, href, h("span"));
       }

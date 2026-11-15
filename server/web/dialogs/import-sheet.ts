@@ -4,7 +4,8 @@
 //   Place as sheet   draw a sheet whose name is the file's and whose file is the chosen schematic (drawSheetFromFile;
 //                    the sheet dialog then links the existing file)
 //   Place as group   the imported items become one new group named after the file (UniqueGroupName)
-//   Keep annotations the symbols keep their references; otherwise they are annotated or cleared as on a paste
+//   Keep annotations the symbols keep their references; otherwise they are annotated afresh (AnnotateSymbols with
+//                    aResetAnnotation, numbers compared as numbers, in order of position)
 // The items ride the cursor like a paste and one click places them ("Import Schematic Sheet Content").
 import { E, appState, setTool, toast, toolCtx } from "./editor";
 import { KD, checkbox, h } from "./dom";
@@ -83,6 +84,6 @@ async function run(entry: { docId: string; path: string } | null, local: { name:
   } else return;
   const base = sheetBaseName(local ? local.name : entry!.path);
   if (E.tool !== "select") setTool("select");
-  const ok = m._.pasteText(toolCtx(), text, { label: "Import Schematic Sheet Content", ...(opts.keepAnnotations ? { pasteMode: "keep" } : {}), ...(opts.asGroup ? { group: base } : {}) });
+  const ok = m._.pasteText(toolCtx(), text, { label: "Import Schematic Sheet Content", pasteMode: opts.keepAnnotations ? "keep" : "reset", ...(opts.asGroup ? { group: base } : {}) });
   if (!ok) await messageBox("The schematic has no items to import.");
 }
