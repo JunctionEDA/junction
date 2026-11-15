@@ -205,6 +205,24 @@ jobs:
           path: dl
           run-id: ${{ inputs.macos_run || github.run_id }}
           github-token: ${{ github.token }}
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: launch-*
+          path: launch
+      - name: Keep the launch screenshots on the launch-screenshots branch
+        # One commit, replaced by every release run, so the screenshots can be
+        # looked at with git before a draft is published.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(tr -d '[:space:]' < packaging/VERSION)
+          cd launch
+          git init -q -b launch-screenshots
+          git add -A
+          git -c user.name="Nathan" -c user.email="70660308+notaroomba@users.noreply.github.com" \
+            commit -q -m "Launch screenshots of Junction $VERSION (release run $GITHUB_RUN_ID)"
+          git push -q -f "https://x-access-token:$GH_TOKEN@github.com/$GITHUB_REPOSITORY" HEAD:refs/heads/launch-screenshots
+          cd .. && rm -rf launch
       - name: Create the tag and the release
         env:
           GH_TOKEN: ${{ github.token }}
