@@ -207,7 +207,8 @@ check('it does not come back in other projects', await (async () => { await s.go
 
 // ================================================================ from the public home page
 const m = await context({ colorScheme: 'light' });
-await m.goto(BASE + '/'); await m.waitForSelector('[data-keep]');
+// alone: without the scripted teammates, who would otherwise route these connections themselves
+await m.goto(BASE + '/?hero=alone'); await m.waitForSelector('[data-keep]');
 await m.waitForFunction(() => /Unrouted 4/.test(document.querySelector('[data-unrouted]').textContent));
 const keepHref = await m.getAttribute('[data-keep]', 'href');
 check('signed out, Keep going in a real project goes through sign-in and back to the hand-off', keepHref === '/auth/github/login?next=' + encodeURIComponent('/?start=mini'), keepHref);

@@ -1,11 +1,13 @@
-// The hero: a cut-down board editor the visitor can use.  It is the demo board with four
+// The hero: a cut-down board editor the visitor can use.  It is the demo board with some
 // connections left open, painted by the editor's renderer, with just enough tools to finish
-// it: move a footprint or a text, route a track, drop a via, switch layer, undo.  Two scripted
-// collaborators keep their pointers on the board, as teammates would in a real project, and
-// when the visitor has changed something one of them comes over and puts it back by hand.
+// it: move a footprint or a text, route a track, drop a via, switch layer, undo.  Three scripted
+// collaborators work on the board as teammates would in a real project: they route what is
+// open, redo a track, try a part somewhere else, drag selection boxes and pin comments, each
+// with a pointer that moves like a hand on a mouse and never does the same thing twice.  When
+// the visitor has changed something one of them comes over and puts it back by hand.
 
 import {
-  BOARD, Box, HIDDEN, K, PEERS, boardText, Pt, Rat, View, clamp, clash, copperAt, dist, drawCursor, ease, fit, lerp, loadPcbOpen, meta, ratsnest, span, toMm, toPx, trackAt,
+  BOARD, Box, HIDDEN, K, PEERS, boardText, Pt, Rat, View, clamp, clash, copperAt, dist, drawCursor, fit, lerp, loadPcbOpen, meta, ratsnest, toMm, toPx, trackAt,
 } from "./demo";
 import { keysInText } from "../keys";
 import { SANS, Stage, makeStage, reducedMotion } from "./stage";
@@ -18,36 +20,59 @@ const GRID = 0.25, VIA = { size: 0.6, drill: 0.3 };
 const CLEARANCE = 0.2;
 const LAYER_COLOR: Record<Layer, string> = { "F.Cu": "#C83434", "B.Cu": "#4D7FC4" };
 const HOME: Box = [BOARD.x - 3, BOARD.y - 3, BOARD.x + BOARD.w + 3, BOARD.y + BOARD.h + 3];
-/** Routes the board starts without, in the order the teammates lay them while the visitor
- *  watches: the output, the LED, its ground, and the back-layer jumper. */
+/** Connections the board always starts without: the output, the LED, its ground, and the
+ *  back-layer jumper. */
 const OPEN = [26, 27, 28, 20];
+/** Connections that stand on their own (pad to pad, or pad to a via into the pour), so one can
+ *  be taken out and laid again without leaving another track hanging.  A few more of these are
+ *  open at the start, different ones each visit, and the teammates redo one now and then. */
+const LOOSE = [0, 1, 2, 3, 6, 10, 11, 12, 13, 14, 15, 17, 18, 21, 22, 23, 24, 25];
+const REDO = [...LOOSE, 26, 27, 28];
 const PARTS = new Set(meta.parts.map((p) => p.id));
 const snap = (v: number, o: number): number => o + Math.round((v - o) / GRID) * GRID;
 
-/** What a scripted teammate does on their own, round and round: go to a part (`ref`) or a
- *  point on the board ([x, y] from its corner, millimetres), click, and stay `dwell` seconds.
- *  `hold` keeps the part selected while they stay, as someone looking it over would. */
-interface Stop { ref?: string; at?: Pt; dwell: number; hold?: boolean }
-const ROUNDS: Stop[][] = [
-  [{ ref: "R1", dwell: 3.4, hold: true }, { at: [14.75, 9], dwell: 1.1 }, { ref: "C1", dwell: 2.2, hold: true }, { at: [9.5, 13.25], dwell: 0.9 }, { ref: "R2", dwell: 2.6, hold: true }, { at: [6, 20], dwell: 1.8 }, { ref: "J1", dwell: 1.4 }],
-  [{ ref: "R4", dwell: 3.8, hold: true }, { at: [33.75, 15.25], dwell: 1 }, { ref: "C3", dwell: 2.4, hold: true }, { at: [39, 21], dwell: 2 }, { ref: "R3", dwell: 2.8, hold: true }, { at: [29.5, 13.25], dwell: 1.2 }],
+/** What a scripted teammate can be busy with.  The first four change the board and are seen
+ *  through to the end; the rest can be dropped when the visitor's change needs taking back. */
+type Task = "undo" | "route" | "redo" | "nudge" | "look" | "sweep" | "note" | "rest";
+const HARD = new Set<Task>(["undo", "route", "redo", "nudge"]);
+/** How each of them handles a mouse: Mara is quick and overshoots, Jun is slower and exact. */
+const HANDS = [{ tempo: 0.86, miss: 1.3 }, { tempo: 1.2, miss: 0.55 }, { tempo: 1, miss: 1 }];
+/** Review comments they leave on parts, as in a real project. */
+const NOTES: [string, string][] = [
+  ["R5", "330R puts about 9 mA through the LED"], ["C2", "Could C2 move closer to pin 8?"], ["J1", "5k1 on both CC pins, checked"],
+  ["R4", "47k with 10u blinks at about 1.4 Hz"], ["D1", "Is D1 the right way round?"], ["U1", "Pin 5 has its 10n"], ["C3", "Timing cap, keep it near pin 6"],
+  ["R3", "10k is fine here"], ["C1", "Bulk cap could be 0805"],
 ];
-/** Where one of them is on their round: moving from `from` to `to`, then staying until `until`. */
-interface Walk { i: number; from: Pt; to: Pt; t0: number; dur: number; until: number }
 /** A change the visitor made, kept so that it can be taken back: by them, or by a teammate. */
 type Edit = { kind: "move"; id: string; from: Pt } | { kind: "add"; ids: string[] } | { kind: "del"; item: any };
-/** One stretch of a teammate's pointer while they undo something. */
-interface Step { dur: number; to: Pt; straight?: boolean; start?: () => void; tick?: (at: Pt) => void; end?: () => void }
-interface Job { who: number; steps: Step[]; i: number; t0: number; from: Pt; at: Pt; move: { id: string; from: Pt } | null }
-const CLICK = 0.11;                                 // the pause on a point before the click lands
+/** One stretch of a teammate's pointer: to `to` in `dur` seconds, along a curve when `c` gives
+ *  its two control points.  `skew` bends the speed (fast away, slow in), `wob` is how far the
+ *  hand strays sideways on a drag. */
+interface Step { dur: number; to: Pt; c?: [Pt, Pt]; skew?: number; wob?: number; ph?: number; start?: () => void; tick?: (at: Pt) => void; end?: () => void }
+/** A track being pulled out by a teammate: from `a` towards `b`, so far up to `at`. */
+interface Pull { a: Pt; b: Pt; at: Pt; layer: Layer; w: number }
+interface Actor {
+  who: number; at: Pt; from: Pt; steps: Step[]; i: number; t0: number; task: Task; last: Task;
+  marks: string[]; held: string | null; pull: Pull | null; box: [Pt, Pt] | null; boxed: string[];
+  move: { id: string; from: Pt } | null; route: number | null;
+}
+interface Note { who: number; at: Pt; text: string; n: number; born: number; dies: number }
 const IDLE = 2200, GAP = 900;                       // ms the visitor is left alone before, and between, undos
 const minJerk = (u: number): number => u <= 0 ? 0 : u >= 1 ? 1 : u * u * u * (10 - 15 * u + 6 * u * u);
+const rnd = (a: number, b: number): number => a + Math.random() * (b - a);
+const chance = (p: number): boolean => Math.random() < p;
+/** Roughly -1 to 1, bunched around 0. */
+const gauss = (): number => (Math.random() + Math.random() + Math.random() - 1.5) / 1.5;
+const any1 = <T,>(list: T[]): T => list[Math.floor(Math.random() * list.length)];
 
 export function startMini(root: HTMLElement): void {
   const canvas = root.querySelector("canvas")!;
   const q = <T extends HTMLElement>(sel: string) => root.querySelector<T>(sel);
   const xy = q("[data-xy]"), zoomOut = q("[data-z]"), counts = q("[data-counts]"), unrouted = q("[data-unrouted]"), toolName = q("[data-toolname]");
   const still = reducedMotion();
+  /** `/?hero=alone` leaves the visitor the board to themselves, with the same four connections
+   *  open every time: scripts/onboarding-ui.mjs routes one of them and carries the board over. */
+  const alone = /[?&]hero=alone\b/.test(location.search);
 
   let doc = loadPcbOpen();
   let tool: Tool = "select", layer: Layer = "F.Cu", box: Box = HOME.slice() as Box;
@@ -57,17 +82,24 @@ export function startMini(root: HTMLElement): void {
   let pan: { at: Pt; box: Box } | null = null;
   let route: { net: number; from: Pt; layer: Layer; made: string[] } | null = null;
   const edits: Edit[] = [];
-  let job: Job | null = null; const walks: (Walk | null)[] = [null, null];
-  let mark: { id: string; who: number } | null = null, redo: { a: Pt; b: Pt; at: Pt; layer: Layer; w: number } | null = null;
-  let lastAct = 0, nextJob = 0, stillTimer = 0, blocked: number | null = null;
+  const actors: Actor[] = []; const gone = new Set<number>();
+  let note: Note | null = null;
+  let lastAct = 0, nextUndo = 0, nextRedo = 0, nextNote = 0, stillTimer = 0, blocked: number | null = null;
   let base: HTMLCanvasElement | null = null, t0 = 0, serial = 0;
 
   /** The tracks and vias taken off the board at the start, for the teammates to lay again. */
   const spare = new Map<string, any>();
+  /** Takes a connection's tracks and via off the board and keeps them for laying again. */
+  function lift(i: number): void {
+    const r = meta.routes[i];
+    for (const id of [...r.ids, ...(r.via ? [r.via] : [])]) { const it = doc.items.get(id); if (it) { spare.set(id, it); doc.items.delete(id); } }
+    gone.add(i);
+  }
   function open(): void {
-    spare.clear();
+    spare.clear(); gone.clear();
     if (still) return;                                   // without motion the board is simply complete
-    for (const i of OPEN) { const r = meta.routes[i]; for (const id of [...r.ids, ...(r.via ? [r.via] : [])]) { const it = doc.items.get(id); if (it) { spare.set(id, it); doc.items.delete(id); } } }
+    const more = alone ? [] : LOOSE.slice().sort(() => Math.random() - 0.5).slice(0, 5);
+    for (const i of [...OPEN, ...more]) lift(i);
   }
   open();
 
@@ -126,130 +158,311 @@ export function startMini(root: HTMLElement): void {
     if (edits.length) stillTimer = window.setTimeout(stillUndo, GAP + 300);
   }
 
-  // ------------------------------------------------------------------ teammates undoing
+  // ------------------------------------------------------------------ teammates
 
-  /** Where a teammate's pointer is on their own loop, in board millimetres. */
   const refId = (ref: string): string | undefined => meta.parts.find((p) => p.ref === ref)?.id;
-  /** Where a stop is now: the part where it stands at this moment, on the grid like everything else. */
-  function stopAt(st: Stop): Pt {
-    const it = st.ref ? doc.items.get(refId(st.ref) || "") : null;
-    if (it) { const p = posOf(it); return [snap(p[0], BOARD.x), snap(p[1], BOARD.y)]; }
-    const a = st.at || [0, 0]; return [BOARD.x + a[0], BOARD.y + a[1]];
+  const inset = (m: number): Pt => [rnd(BOARD.x + m, BOARD.x + BOARD.w - m), rnd(BOARD.y + m, BOARD.y + BOARD.h - m)];
+  /** The point of the line a-b nearest the pointer, on the grid along it; a little past `b` is
+   *  allowed, since a hand runs over the corner before it comes back to click. */
+  function along(a: Pt, b: Pt, c: Pt): Pt {
+    const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy); if (len < 1e-6) return a;
+    const t = clamp(((c[0] - a[0]) * dx + (c[1] - a[1]) * dy) / (len * len), 0, 1 + 0.6 / len), s = Math.round((t * len) / GRID) * GRID;
+    return [a[0] + (dx / len) * s, a[1] + (dy / len) * s];
   }
-  /** The pointer of a teammate going about their round: KiCad-like, as in the story below.
-   *  A quick deliberate move (minimum jerk, slightly bowed) to the next thing, a beat, the
-   *  click, then stillness while they look at it. */
-  function walkAt(who: number, now: number): { at: Pt; held: string | null } {
-    const round = ROUNDS[who]; let w = walks[who];
-    if (!w) { const p = stopAt(round[0]); w = walks[who] = { i: 0, from: p, to: p, t0: now, dur: 0, until: now + (still ? 1e12 : 1200 + who * 900) }; }
-    if (!(job && job.who === who) && now >= w.until) {
-      const i = (w.i + 1) % round.length, to = stopAt(round[i]), dur = travel(w.to, to) * 1000;
-      w = walks[who] = { i, from: w.to, to, t0: now, dur, until: now + dur + (CLICK + round[i].dwell) * 1000 };
+  /** Where a step's pointer is at `u` (0 to 1) of its time. */
+  function spot(from: Pt, st: Step, u: number): Pt {
+    const k = minJerk(st.skew ? Math.pow(u, st.skew) : u), j = 1 - k;
+    let x = lerp(from[0], st.to[0], k), y = lerp(from[1], st.to[1], k);
+    if (st.c) {
+      const [p, q] = st.c;
+      x = j * j * j * from[0] + 3 * j * j * k * p[0] + 3 * j * k * k * q[0] + k * k * k * st.to[0];
+      y = j * j * j * from[1] + 3 * j * j * k * p[1] + 3 * j * k * k * q[1] + k * k * k * st.to[1];
     }
-    const u = w.dur ? (now - w.t0) / w.dur : 1, k = minJerk(u), dx = w.to[0] - w.from[0], dy = w.to[1] - w.from[1], d = Math.hypot(dx, dy) || 1;
-    const bow = Math.sin(Math.PI * k) * Math.min(1.6, d * 0.07) * (who ? -1 : 1);
-    const st = round[w.i], clicked = now >= w.t0 + w.dur + CLICK * 1000;
-    return { at: [w.from[0] + dx * k - (dy / d) * bow, w.from[1] + dy * k + (dx / d) * bow], held: st.hold && st.ref && clicked ? refId(st.ref) || null : null };
+    if (st.wob) {
+      const dx = st.to[0] - from[0], dy = st.to[1] - from[1], d = Math.hypot(dx, dy) || 1, s = st.wob * Math.sin((st.ph || 0) + u * 9) * Math.sin(Math.PI * u);
+      x -= (dy / d) * s; y += (dx / d) * s;
+    }
+    return [x, y];
   }
-  /** After undoing something a teammate picks their round up again from where they stand. */
-  function resume(who: number, from: Pt, now: number): void {
-    const w = walks[who]; if (!w) return;
-    const to = stopAt(ROUNDS[who][w.i]), dur = travel(from, to) * 1000;
-    walks[who] = { i: w.i, from, to, t0: now, dur, until: now + dur + (CLICK + ROUNDS[who][w.i].dwell) * 1000 };
+  /**
+   * Writes a teammate's pointer the way a hand moves a mouse.  A reach takes longer the further
+   * it goes (Fitts's law) and never the same time twice; it follows a bent path, leaves fast and
+   * comes in slowly, often lands a little past or short of the target and is then corrected, and
+   * on a long way it may stop once to look.  While waiting the hand shifts now and then.
+   */
+  function plan(who: number, from: Pt) {
+    const h = HANDS[who], steps: Step[] = []; let at = from;
+    const curve = (to: Pt, dur: number, bend: number): void => {
+      const dx = to[0] - at[0], dy = to[1] - at[1], d = Math.hypot(dx, dy) || 1, nx = -dy / d, ny = dx / d;
+      const b1 = gauss() * d * 0.17 * bend, b2 = (chance(0.8) ? b1 : -b1) * rnd(0.3, 1.1), k1 = rnd(0.18, 0.42), k2 = rnd(0.58, 0.86);
+      steps.push({ dur, to, skew: rnd(0.7, 0.98), c: [[at[0] + dx * k1 + nx * b1, at[1] + dy * k1 + ny * b1], [at[0] + dx * k2 + nx * b2, at[1] + dy * k2 + ny * b2]] });
+      at = to;
+    };
+    const reach = (to: Pt): void => {
+      const d = dist(at, to); if (d < 0.02) return;
+      const dx = (to[0] - at[0]) / d, dy = (to[1] - at[1]) / d;
+      const T = (0.17 + 0.15 * Math.log2(1 + d / 1.5)) * rnd(0.82, 1.3) * h.tempo;
+      if (d > 14 && chance(0.2)) {                         // a stop on the way, to find the thing
+        const k = rnd(0.35, 0.68), off = gauss() * d * 0.07;
+        curve([at[0] + dx * d * k - dy * off, at[1] + dy * d * k + dx * off], T * (0.35 + k * 0.65), 1);
+        steps.push({ dur: rnd(0.16, 0.55), to: at });
+        reach(to); return;
+      }
+      if (d > 5 && chance(0.5 * h.miss)) {                 // past it or short of it, then corrected
+        const over = (chance(0.75) ? 1 : -1) * Math.min(1.6, d * rnd(0.03, 0.075)), side = gauss() * Math.min(0.9, d * 0.035);
+        curve([to[0] + dx * over - dy * side, to[1] + dy * over + dx * side], T, 1);
+        steps.push({ dur: rnd(0.04, 0.13), to: at });
+        curve(to, rnd(0.13, 0.24) * h.tempo, 0.4);
+      } else curve(to, T, 1);
+    };
+    const p = {
+      steps,
+      get at(): Pt { return at; },
+      /** Stay exactly here, then do `fn`. */
+      wait(sec: number, fn?: () => void) { steps.push({ dur: sec, to: at, end: fn }); return p; },
+      /** Stay around here: still for a while, a small shift, still again. */
+      rest(sec: number) {
+        let left = sec;
+        while (left > 0) {
+          const s = Math.min(left, rnd(0.45, 1.5)); steps.push({ dur: s, to: at }); left -= s;
+          if (left > 0.25 && chance(0.55)) { const t = rnd(0.12, 0.3); curve([at[0] + gauss() * 0.5, at[1] + gauss() * 0.5], t, 0.3); left -= t; }
+        }
+        return p;
+      },
+      /** Reach for a point. */
+      go(to: Pt) { reach(to); return p; },
+      /** The beat on a point before the button goes down, then `fn`. */
+      click(fn: () => void) { steps.push({ dur: rnd(0.07, 0.17), to: at, end: fn }); return p; },
+      /** Drag to a point with the button held: nearly straight, at `speed` mm a second, with
+       *  a pause on the way now and then. */
+      pull(to: Pt, speed: number, tick: (at: Pt) => void, lo = 0.3, hi = 3) {
+        const d = dist(at, to), sec = clamp(d / speed, lo, hi) * h.tempo, wob = (): number => Math.min(0.32, d * 0.05) * rnd(0.3, 1);
+        if (d > 4 && chance(0.2)) {
+          const k = rnd(0.3, 0.7), mid: Pt = [lerp(at[0], to[0], k), lerp(at[1], to[1], k)];
+          steps.push({ dur: sec * k + 0.08, to: mid, wob: wob(), ph: rnd(0, 6), skew: rnd(0.8, 1), tick });
+          steps.push({ dur: rnd(0.15, 0.5), to: mid, tick });
+          steps.push({ dur: sec * (1 - k) + 0.08, to, wob: wob(), ph: rnd(0, 6), skew: rnd(0.8, 1), tick });
+        } else steps.push({ dur: sec, to, wob: wob(), ph: rnd(0, 6), skew: rnd(0.8, 1), tick });
+        at = to;
+        return p;
+      },
+    };
+    return p;
   }
-  const travel = (a: Pt, b: Pt): number => clamp(0.35 + dist(a, b) / 28, 0.45, 1.1);
-  /** One of the two, picked at random, sets off to take back the visitor's latest change the
-   *  way a person would: over to it, press, and slowly back to where it was. */
-  function startJob(now: number): void {
-    const e = edits.pop()!, who = Math.random() < 0.5 ? 0 : 1, steps: Step[] = [];
-    let at = walkAt(who, now).at;
-    const from = at, go = (to: Pt): void => { steps.push({ dur: travel(at, to), to }); at = to; };
-    let move: Job["move"] = null;
+  type Plan = ReturnType<typeof plan>;
+
+  /** Puts the three of them on the board, each waiting a different moment before starting. */
+  function cast(now: number): void {
+    actors.length = 0; note = null; nextRedo = now + 6000; nextNote = now + 5000;
+    if (alone) return;
+    const at: Pt[] = [[BOARD.x + 11, BOARD.y + 12], [BOARD.x + 36, BOARD.y + 13], [BOARD.x + 21, BOARD.y + 22]];
+    PEERS.forEach((_, who) => {
+      const p: Pt = still ? at[who] : [at[who][0] + gauss() * 3, at[who][1] + gauss() * 2];
+      actors.push({ who, at: p, from: p, steps: [{ dur: 0.5 + who * 0.8 + rnd(0, 0.5), to: p }], i: 0, t0: now, task: "rest", last: "rest", marks: [], held: null, pull: null, box: null, boxed: [], move: null, route: null });
+    });
+  }
+  /** Lets go of whatever a teammate holds or shows. */
+  function drop(a: Actor, now: number): void {
+    if (a.task === "note" && note && note.who === a.who) note.dies = Math.min(note.dies, now + 300);
+    if (a.task === "undo") nextUndo = now + GAP;
+    a.last = a.task; a.task = "rest"; a.steps = []; a.i = 0; a.t0 = now; a.from = a.at;
+    a.marks = []; a.held = null; a.pull = null; a.box = null; a.boxed = []; a.move = null; a.route = null;
+  }
+  /** Moves a teammate along to `now`, running what their steps do, and has them pick the next
+   *  thing when one is finished. */
+  function run(a: Actor, now: number): void {
+    for (;;) {
+      const st = a.steps[a.i];
+      if (!st) { drop(a, now); think(a, now); if (!a.steps.length) return; continue; }
+      const u = st.dur > 0 ? (now - a.t0) / (st.dur * 1000) : 1;
+      if (st.start) { st.start(); st.start = undefined; }
+      a.at = spot(a.from, st, clamp(u));
+      if (st.tick) st.tick(a.at);
+      if (u < 1) return;
+      a.at = st.to; if (st.end) st.end();
+      if (a.steps[a.i] !== st) return;                      // what it did ended the task
+      a.from = st.to; a.t0 += st.dur * 1000; a.i++;
+    }
+  }
+  /** Carries an item with the pointer, on the grid measured from `home`. */
+  function carry(it: any, c: Pt, home: Pt): void {
+    const x = snap(c[0], home[0]), y = snap(c[1], home[1]), q = posOf(it);
+    if (q[0] !== x || q[1] !== y) { K.moveItem(doc, it, x, y, 1e6); dirty = true; }
+  }
+
+  /** Takes back the visitor's latest change the way a person would: over to it, press, and
+   *  slowly back to where it was. */
+  function planUndo(a: Actor, p: Plan, e: Edit): boolean {
     if (e.kind === "move") {
-      const it = doc.items.get(e.id); if (!it) return;
-      const p = posOf(it), home = e.from; if (dist(p, home) < 1e-6) return;
-      move = { id: e.id, from: home };
-      go(p);
-      steps.push({ dur: CLICK, to: p, end: () => { mark = { id: e.id, who }; } });
-      steps.push({
-        dur: clamp(dist(p, home) / 4.5, 1.2, 3.2), to: home, straight: true,
-        tick: (c) => { const x = snap(c[0], home[0]), y = snap(c[1], home[1]), q = posOf(it); if (q[0] !== x || q[1] !== y) { K.moveItem(doc, it, x, y, 1e6); dirty = true; } },
-        end: () => { K.moveItem(doc, it, home[0], home[1], 1e6); redraw(); },
-      });
-      steps.push({ dur: 0.3, to: home, end: () => { mark = null; } });
+      const it = doc.items.get(e.id); if (!it) return false;
+      const at = posOf(it), home = e.from; if (dist(at, home) < 1e-6) return false;
+      a.move = { id: e.id, from: home };
+      p.go(at).click(() => { a.marks = [e.id]; });
+      p.pull(home, rnd(4, 6), (c) => carry(it, c, home), 1, 3.2);
+      p.wait(0.05, () => { K.moveItem(doc, it, home[0], home[1], 1e6); redraw(); });
+      p.wait(0.3, () => { a.marks = []; a.move = null; });
     } else if (e.kind === "add") {
       // Last placed first, one piece at a time, as repeated undo would.
       for (const id of e.ids.slice().reverse()) {
         const it = doc.items.get(id), g = it && (it.geom as any[])[0]; if (!g) continue;
-        const c: Pt = it!.kind === "via" ? [g.x, g.y] : [(g.x1 + g.x2) / 2, (g.y1 + g.y2) / 2];
-        go(c);
-        steps.push({ dur: CLICK + 0.28, to: c, start: () => { mark = { id, who }; }, end: () => { doc.items.delete(id); mark = null; redraw(); } });
+        const c: Pt = it!.kind === "via" ? [g.x, g.y] : [lerp(g.x1, g.x2, rnd(0.3, 0.7)), lerp(g.y1, g.y2, rnd(0.3, 0.7))];
+        p.go(c).click(() => { a.marks = [id]; });
+        p.wait(rnd(0.2, 0.4), () => { doc.items.delete(id); a.marks = []; redraw(); });
       }
     } else {
       // Something the visitor deleted is laid again.
       const it = e.item, g = (it.geom as any[])[0];
-      if (it.kind === "via" || !g) { const c: Pt = g ? [g.x, g.y] : at; go(c); steps.push({ dur: CLICK + 0.1, to: c, end: () => { doc.items.set(it.id, it); redraw(); } }); }
+      if (it.kind === "via" || !g) { if (g) p.go([g.x, g.y]); p.click(() => { doc.items.set(it.id, it); redraw(); }); }
       else {
-        const a: Pt = [g.x1, g.y1], b: Pt = [g.x2, g.y2];
-        go(a);
-        steps.push({ dur: CLICK, to: a, end: () => { redo = { a, b, at: a, layer: g.layer, w: g.w }; } });
-        steps.push({ dur: clamp(dist(a, b) / 7, 0.5, 1.6), to: b, straight: true, tick: (c) => { if (redo) redo.at = c; } });
-        steps.push({ dur: CLICK, to: b, end: () => { redo = null; doc.items.set(it.id, it); redraw(); } });
+        const s: Pt = [g.x1, g.y1], t: Pt = [g.x2, g.y2];
+        p.go(s).click(() => { a.pull = { a: s, b: t, at: s, layer: g.layer, w: g.w }; });
+        p.pull(t, rnd(5.5, 8.5), (c) => { if (a.pull) a.pull.at = along(s, t, c); }, 0.45, 1.6);
+        p.click(() => { a.pull = null; doc.items.set(it.id, it); redraw(); });
       }
     }
-    if (!steps.length) return;
-    steps.push({ dur: 0.25, to: at });
-    job = { who, steps, i: 0, t0: now, from, at: from, move };
+    p.rest(rnd(0.2, 0.5));
+    return p.steps.length > 1;
   }
-  /** A teammate routes one of the open connections, as the router does it: click on the pad,
-   *  pull the track out along the grid, click at each corner, and drop the via where it ends. */
-  function startRoute(now: number, r: (typeof meta.routes)[number]): void {
-    const who = r.who === 0 ? 0 : 1, steps: Step[] = [], pts = r.pts as Pt[];
-    const from = walkAt(who, now).at, on = r.layer as Layer;
-    const pull = (i: number): void => { const it = spare.get(r.ids[i]); redo = it ? { a: pts[i], b: pts[i + 1], at: pts[i], layer: on, w: (it.geom as any[])[0].w } : null; };
-    steps.push({ dur: travel(from, pts[0]), to: pts[0] });
-    steps.push({ dur: CLICK, to: pts[0], end: () => pull(0) });
+  /** Routes an open connection as the router does it: click on the pad, pull the track out,
+   *  click at each corner, and the via drops where it ends. */
+  function planRoute(a: Actor, p: Plan, ri: number): boolean {
+    const r = meta.routes[ri], pts = r.pts as Pt[], on = r.layer as Layer;
+    const out = (i: number): Pull | null => { const it = spare.get(r.ids[i]); return it ? { a: pts[i], b: pts[i + 1], at: pts[i], layer: on, w: (it.geom as any[])[0].w } : null; };
+    a.route = ri;
+    p.go(pts[0]).click(() => { a.pull = out(0); });
     for (let i = 1; i < pts.length; i++) {
-      const a = pts[i - 1], b = pts[i], id = r.ids[i - 1], last = i === pts.length - 1;
-      steps.push({ dur: clamp(dist(a, b) / 6, 0.45, 1.4), to: b, straight: true, tick: (c) => { if (redo) redo.at = [snap(c[0], a[0]), snap(c[1], a[1])]; } });
-      steps.push({ dur: CLICK + (last ? 0 : 0.06), to: b, end: () => {
-        const it = spare.get(id); if (it) doc.items.set(id, it);
-        if (last) { redo = null; const v = r.via ? spare.get(r.via) : null; if (v) doc.items.set(v.id, v); } else pull(i);
+      const s = pts[i - 1], t = pts[i], id = r.ids[i - 1], last = i === pts.length - 1, d = dist(s, t) || 1;
+      const tick = (c: Pt): void => { if (a.pull) a.pull.at = along(s, t, c); };
+      if (d > 1.5 && chance(0.3 * HANDS[a.who].miss)) {     // runs over the corner and comes back
+        const o = rnd(0.25, 0.6);
+        p.pull([t[0] + ((t[0] - s[0]) / d) * o, t[1] + ((t[1] - s[1]) / d) * o], rnd(5, 9), tick, 0.3, 1.5).wait(rnd(0.04, 0.1));
+        p.pull(t, 4, tick, 0.12, 0.2);
+      } else p.pull(t, rnd(5, 9), tick, 0.3, 1.5);
+      p.click(() => {
+        const it = spare.get(id); if (it) { doc.items.set(id, it); spare.delete(id); }
+        if (last) { a.pull = null; const v = r.via ? spare.get(r.via) : null; if (v) { doc.items.set(v.id, v); spare.delete(v.id); } gone.delete(ri); } else a.pull = out(i);
         redraw();
-      } });
+      });
+      if (!last && chance(0.3)) p.wait(rnd(0.15, 0.5));       // looks where it goes next
     }
-    steps.push({ dur: 0.35, to: pts[pts.length - 1] });
-    job = { who, steps, i: 0, t0: now, from, at: from, move: null };
+    p.rest(rnd(0.3, 0.9));
+    return true;
   }
-  /** The next connection still missing from the board, if the teammates have one left to lay. */
-  function missing(): (typeof meta.routes)[number] | null {
-    for (const i of OPEN) { const r = meta.routes[i]; if (r.ids.some((id) => spare.has(id) && !doc.items.has(id))) return r; }
-    return null;
+  /** Selects a finished connection, deletes it, thinks, and routes it again. */
+  function planRedo(a: Actor, p: Plan, ri: number): boolean {
+    const r = meta.routes[ri], pts = r.pts as Pt[], ids = [...r.ids, ...(r.via ? [r.via] : [])];
+    let k = 0; for (let i = 1; i < pts.length - 1; i++) if (dist(pts[i], pts[i + 1]) > dist(pts[k], pts[k + 1])) k = i;
+    const u = rnd(0.3, 0.7);
+    a.route = ri;
+    p.go([lerp(pts[k][0], pts[k + 1][0], u), lerp(pts[k][1], pts[k + 1][1], u)]).click(() => { a.marks = ids; });
+    p.wait(rnd(0.4, 1), () => { a.marks = []; lift(ri); redraw(); });
+    p.rest(rnd(0.5, 1.5));
+    return planRoute(a, p, ri);
   }
-  /** Moves the job along to `now`, running whatever its steps do on the way. */
-  function runJob(now: number): void {
-    while (job) {
-      const j: Job = job, st = j.steps[j.i], u = (now - j.t0) / (st.dur * 1000);
-      if (u >= 0 && st.start) { st.start(); st.start = undefined; }
-      const k = minJerk(u), dx = st.to[0] - j.from[0], dy = st.to[1] - j.from[1], d = Math.hypot(dx, dy);
-      const bow = st.straight || d < 0.5 ? 0 : Math.sin(Math.PI * k) * Math.min(1.6, d * 0.07) * (j.who ? -1 : 1);
-      j.at = [j.from[0] + dx * k - (dy / (d || 1)) * bow, j.from[1] + dy * k + (dx / (d || 1)) * bow];
-      if (st.tick) st.tick(j.at);
-      if (u < 1) return;
-      if (st.end) st.end();
-      j.from = st.to; j.t0 += st.dur * 1000; j.i++;
-      if (j.i >= j.steps.length) { endJob(now); return; }
+  /** Tries a part or a label a little to one side, looks, and puts it back. */
+  function planNudge(a: Actor, p: Plan, id: string): boolean {
+    const it = doc.items.get(id); if (!it) return false;
+    const home = posOf(it), ang = rnd(0, Math.PI * 2), far = rnd(0.75, 2);
+    const to: Pt = [snap(home[0] + Math.cos(ang) * far, home[0]), snap(home[1] + Math.sin(ang) * far, home[1])];
+    a.move = { id, from: home };
+    p.go(home).click(() => { a.held = id; });
+    p.pull(to, rnd(2.5, 4), (c) => carry(it, c, home), 0.5, 1.4);
+    p.rest(rnd(0.5, 1.4));
+    if (chance(0.55)) p.pull(home, rnd(3, 5), (c) => carry(it, c, home), 0.4, 1.2);
+    p.wait(0.06, () => { K.moveItem(doc, it, home[0], home[1], 1e6); redraw(); });
+    p.wait(rnd(0.2, 0.5), () => { a.held = null; a.move = null; });
+    return true;
+  }
+  /** Goes to a part and looks it over, selected or just under the pointer. */
+  function planLook(a: Actor, p: Plan, id: string): boolean {
+    const it = doc.items.get(id); if (!it) return false;
+    const at = posOf(it);
+    p.go([at[0] + gauss() * 0.5, at[1] + gauss() * 0.4]);
+    if (chance(0.65)) p.click(() => { a.held = id; });
+    p.rest(rnd(1.1, 3.2));
+    return true;
+  }
+  /** Drags a selection box over a part and its neighbours, then lets the selection go. */
+  function planSweep(a: Actor, p: Plan, id: string): boolean {
+    const me = doc.items.get(id); if (!me || !me.bbox) return false;
+    const near = meta.parts.map((q) => doc.items.get(q.id)).filter((it) => it && it.bbox && it.id !== id && dist(posOf(it), posOf(me)) < 8.5) as any[];
+    const b = me.bbox.slice() as Box, m = rnd(0.6, 1.5);
+    for (const it of near.slice(0, chance(0.5) ? 1 : 2)) { b[0] = Math.min(b[0], it.bbox[0]); b[1] = Math.min(b[1], it.bbox[1]); b[2] = Math.max(b[2], it.bbox[2]); b[3] = Math.max(b[3], it.bbox[3]); }
+    const left = chance(0.6), top = chance(0.7);
+    const c0: Pt = [left ? b[0] - m : b[2] + m, top ? b[1] - m : b[3] + m], c1: Pt = [left ? b[2] + m : b[0] - m, top ? b[3] + m : b[1] - m];
+    const inside = (c: Pt): string[] => {
+      const x0 = Math.min(c0[0], c[0]), x1 = Math.max(c0[0], c[0]), y0 = Math.min(c0[1], c[1]), y1 = Math.max(c0[1], c[1]);
+      return meta.parts.filter((q) => { const it = doc.items.get(q.id), bb = it && it.bbox; return bb && bb[0] >= x0 && bb[2] <= x1 && bb[1] >= y0 && bb[3] <= y1; }).map((q) => q.id);
+    };
+    p.go(c0).click(() => { a.box = [c0, c0]; });
+    p.pull(c1, rnd(9, 14), (c) => { if (a.box) { a.box = [c0, c]; a.boxed = inside(c); } }, 0.45, 1.3);
+    p.click(() => { a.box = null; });
+    p.rest(rnd(0.8, 2.2));
+    p.go([c1[0] + rnd(1, 3) * (left ? 1 : -1), c1[1] + gauss() * 2]).click(() => { a.boxed = []; });
+    return true;
+  }
+  /** Pins a comment on a part and types it. */
+  function planNote(a: Actor, p: Plan, ref: string, text: string): boolean {
+    const it = doc.items.get(refId(ref) || ""); if (!it) return false;
+    const c = posOf(it), at: Pt = [c[0] + gauss() * 0.3, c[1] + gauss() * 0.3];
+    const n: Note = { who: a.who, at, text, n: 0, born: 0, dies: Infinity };
+    p.go(at).click(() => { n.born = performance.now(); note = n; });
+    p.wait(rnd(0.4, 0.9));                                    // hands go to the keyboard
+    for (let i = 0; i < text.length; i++) p.wait((/[ ,?]/.test(text[i]) ? rnd(0.09, 0.22) : rnd(0.035, 0.1)) * (chance(0.06) ? 4 : 1), () => { n.n = i + 1; });
+    p.wait(rnd(2, 3.2), () => { n.dies = performance.now() + 350; });
+    return true;
+  }
+
+  /** What a teammate turns to next: open connections first, otherwise whatever a person
+   *  reviewing a board might do, picked by weighted chance and rarely the same thing twice. */
+  function think(a: Actor, now: number): void {
+    const others = actors.filter((o) => o !== a), doing = (t: Task): boolean => others.some((o) => o.task === t);
+    const quiet = !edits.length && !drag && !route && !pan && now - lastAct > 1200 && others.filter((o) => HARD.has(o.task)).length < 2;
+    const open = [...gone].filter((i) => !others.some((o) => o.route === i));
+    const whole = REDO.filter((i) => !gone.has(i) && meta.routes[i].ids.every((id) => doc.items.has(id)));
+    const taken = new Set<string>(); for (const o of others) { if (o.held) taken.add(o.held); if (o.move) taken.add(o.move.id); for (const id of o.boxed) taken.add(id); }
+    const parts = meta.parts.filter((q) => !taken.has(q.id)), small = parts.filter((q) => /^[RCD]/.test(q.ref));
+    const labels = [...doc.items.values()].filter((it) => it.kind === "gr_text").map((it) => it.id);
+    const opts: [Task, number][] = [["look", 2], ["rest", 0.7]];
+    if (quiet && open.length) opts.push(["route", 9]);
+    if (quiet && !open.length && gone.size < 2 && whole.length && !doing("redo") && now > nextRedo) opts.push(["redo", 3]);
+    if (quiet && !doing("nudge") && small.length) opts.push(["nudge", 0.8]);
+    if (!doing("sweep") && parts.length) opts.push(["sweep", 0.9]);
+    if (!note && now > nextNote) opts.push(["note", 1.1]);
+    let sum = 0; for (const o of opts) { if (o[0] === a.last && o[0] !== "route") o[1] *= 0.2; sum += o[1]; }
+    let pick = Math.random() * sum, task: Task = "look";
+    for (const o of opts) { pick -= o[1]; if (pick <= 0) { task = o[0]; break; } }
+
+    const p = plan(a.who, a.at); let ok = false;
+    if (a.last !== "route" || chance(0.5)) p.rest(rnd(0.15, 0.8));
+    if (task === "route") ok = planRoute(a, p, any1(open));
+    else if (task === "redo") { ok = planRedo(a, p, any1(whole)); nextRedo = now + rnd(5000, 11000); }
+    else if (task === "nudge") ok = planNudge(a, p, chance(0.25) && labels.length ? any1(labels) : any1(small).id);
+    else if (task === "sweep") ok = planSweep(a, p, any1(parts).id);
+    else if (task === "note") { const free = NOTES.filter(([ref]) => !taken.has(refId(ref) || "")); const n = any1(free.length ? free : NOTES); ok = planNote(a, p, n[0], n[1]); nextNote = now + rnd(9000, 16000); }
+    else if (task === "look" && parts.length) ok = planLook(a, p, any1(parts).id);
+    if (!ok) { task = "rest"; p.go(inset(4)).rest(rnd(1, 3)); }
+    a.task = task; a.steps = p.steps; a.i = 0; a.t0 = now; a.from = a.at;
+  }
+  /** One of those not in the middle of board work comes over to take back the visitor's change. */
+  function sendUndo(now: number): void {
+    const free = actors.filter((a) => !HARD.has(a.task)); if (!free.length) return;
+    const a = any1(free);
+    while (edits.length) {
+      const e = edits.pop()!; drop(a, now);
+      const p = plan(a.who, a.at);
+      if (planUndo(a, p, e)) { a.task = "undo"; a.steps = p.steps; return; }
     }
+    drop(a, now); sync();
   }
-  function endJob(now: number): void {
-    if (!job) return;
-    resume(job.who, job.at, now); job = null; mark = null; redo = null; nextJob = now + GAP;
-  }
-  /** The visitor took hold of what a teammate was carrying back: the teammate lets go. */
+  /** The visitor took hold of what a teammate was carrying: the teammate lets go, and the
+   *  item still has to get home some time. */
   function yieldTo(id: string): void {
-    if (!job || !job.move || job.move.id !== id) return;
-    edits.push({ kind: "move", id, from: job.move.from }); endJob(performance.now());
+    const a = actors.find((o) => o.move && o.move.id === id); if (!a || !a.move) return;
+    if (!edits.some((e) => e.kind === "move" && e.id === id)) edits.push({ kind: "move", id, from: a.move.from });
+    drop(a, performance.now());
   }
+  cast(performance.now());
 
   // "Keep going in a real project": the board as it stands is left for the app (web/onboarding/state.ts
   // reads it under this key), which makes a project of it with its schematic and opens it.  Signed
@@ -260,7 +473,7 @@ export function startMini(root: HTMLElement): void {
     keep.href = document.documentElement.dataset.me ? next : "/auth/github/login?next=" + encodeURIComponent(next);
     keep.addEventListener("click", () => {
       endRoute();
-      try { localStorage.setItem("kc.onboard.mini", JSON.stringify({ board: boardText(doc), at: Date.now() })); } catch { /* without it the project starts from the same board, four connections open */ }
+      try { localStorage.setItem("kc.onboard.mini", JSON.stringify({ board: boardText(doc), at: Date.now() })); } catch { /* without it the project starts from the same board, some connections open */ }
     });
   }
 
@@ -323,8 +536,8 @@ export function startMini(root: HTMLElement): void {
   }
   function endRoute(): void { if (route) { remember(route.made); route = null; change(); } }
   function reset(): void {
-    doc = loadPcbOpen(); open(); edits.length = 0; job = null; walks[0] = walks[1] = null; mark = null; redo = null; clearTimeout(stillTimer); route = null; drag = null; selected = null; box = HOME.slice() as Box; tool = "select"; layer = "F.Cu";
-    dirty = true; touched = false; nextJob = performance.now() + 1800; sync(); stage.invalidate();
+    doc = loadPcbOpen(); open(); edits.length = 0; cast(performance.now()); clearTimeout(stillTimer); route = null; drag = null; selected = null; box = HOME.slice() as Box; tool = "select"; layer = "F.Cu";
+    dirty = true; touched = false; nextUndo = performance.now() + 1800; sync(); stage.invalidate();
   }
   function zoom(k: number, about?: Pt): void {
     const cx = about ? about[0] : (box[0] + box[2]) / 2, cy = about ? about[1] : (box[1] + box[3]) / 2;
@@ -360,7 +573,7 @@ export function startMini(root: HTMLElement): void {
   }
 
   const stage: Stage = makeStage(canvas, (s, now) => {
-    if (!t0) { t0 = now; nextJob = now + 1800; }
+    if (!t0) { t0 = now; nextUndo = now + 1800; }
     const { ctx, w: W, h: H, dpr } = s;
     view = fit(W, H, dpr, box);
     if (!base) base = document.createElement("canvas");
@@ -394,34 +607,53 @@ export function startMini(root: HTMLElement): void {
       if (t.onCopper) { ctx.beginPath(); ctx.arc(c[0], c[1], 6, 0, 6.3); ctx.stroke(); }
     }
 
-    // The scripted collaborators: a pointer each, and an outline on what they hold.
+    // The scripted collaborators: a pointer each, and what each of them holds, pulls or selects.
     if (!still) {
-      if (!job && edits.length && !drag && !route && !pan && now - lastAct > IDLE && now > nextJob) startJob(now);
-      else if (!job && !edits.length && !drag && !route && !pan && now - lastAct > IDLE && now > nextJob) { const r = missing(); if (r) startRoute(now, r); }
-      runJob(now);
+      if (edits.length && !drag && !route && !pan && now - lastAct > IDLE && now > nextUndo && !actors.some((a) => a.task === "undo")) sendUndo(now);
+      for (const a of actors) run(a, now);
     }
-    if (mark) {
-      const it = doc.items.get(mark.id), g = it && (it.geom as any[])[0];
-      ctx.strokeStyle = PEERS[mark.who].color; ctx.lineCap = "round";
-      if (it && it.kind === "segment" && g) { const a = px([g.x1, g.y1]), b = px([g.x2, g.y2]); ctx.globalAlpha = 0.75; ctx.lineWidth = g.w * view.ppm + 4; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); ctx.globalAlpha = 1; }
-      else if (it && it.bbox) { const p0 = px([it.bbox[0], it.bbox[1]]), p1 = px([it.bbox[2], it.bbox[3]]); ctx.lineWidth = 1.5; ctx.strokeRect(p0[0] - 3, p0[1] - 3, p1[0] - p0[0] + 6, p1[1] - p0[1] + 6); }
-    }
-    if (redo) {
-      const a = px(redo.a), b = px(redo.at);
-      ctx.strokeStyle = LAYER_COLOR[redo.layer] || LAYER_COLOR["F.Cu"]; ctx.globalAlpha = 0.85; ctx.lineWidth = Math.max(1.5, redo.w * view.ppm); ctx.lineCap = "round";
-      ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); ctx.globalAlpha = 1;
-    }
-    ROUNDS.forEach((_, who) => {
-      const peer = PEERS[who], w = walkAt(who, now), busy = !!job && job.who === who;
-      const at: Pt = busy ? job!.at : w.at;
-      const it = !busy && w.held ? doc.items.get(w.held) : null;
-      if (it && it.bbox) {
-        const p0 = toPx(view!, it.bbox[0], it.bbox[1]), p1 = toPx(view!, it.bbox[2], it.bbox[3]);
-        ctx.strokeStyle = peer.color; ctx.lineWidth = 1.5; ctx.strokeRect(p0[0] - 3, p0[1] - 3, p1[0] - p0[0] + 6, p1[1] - p0[1] + 6);
+    const frame = (id: string, color: string): void => {
+      const it = doc.items.get(id), g = it && (it.geom as any[])[0]; if (!it) return;
+      ctx.strokeStyle = color; ctx.lineCap = "round";
+      if ((it.kind === "segment" || it.kind === "via") && g) {
+        const s = it.kind === "via" ? px([g.x, g.y]) : px([g.x1, g.y1]), t = it.kind === "via" ? s : px([g.x2, g.y2]);
+        ctx.globalAlpha = 0.75; ctx.lineWidth = (it.kind === "via" ? g.r * 2 : g.w) * view!.ppm + 4; ctx.beginPath(); ctx.moveTo(s[0], s[1]); ctx.lineTo(t[0], t[1] + 0.01); ctx.stroke(); ctx.globalAlpha = 1;
+      } else if (it.bbox) { const p0 = px([it.bbox[0], it.bbox[1]]), p1 = px([it.bbox[2], it.bbox[3]]); ctx.lineWidth = 1.5; ctx.strokeRect(p0[0] - 3, p0[1] - 3, p1[0] - p0[0] + 6, p1[1] - p0[1] + 6); }
+    };
+    for (const a of actors) {
+      const color = PEERS[a.who].color;
+      for (const id of a.marks) frame(id, color);
+      for (const id of a.boxed) frame(id, color);
+      if (a.held) frame(a.held, color);
+      if (a.pull) {
+        const s = px(a.pull.a), t = px(a.pull.at);
+        ctx.strokeStyle = LAYER_COLOR[a.pull.layer] || LAYER_COLOR["F.Cu"]; ctx.globalAlpha = 0.85; ctx.lineWidth = Math.max(1.5, a.pull.w * view.ppm); ctx.lineCap = "round";
+        ctx.beginPath(); ctx.moveTo(s[0], s[1]); ctx.lineTo(t[0], t[1]); ctx.stroke(); ctx.globalAlpha = 1;
       }
-      const c = toPx(view!, at[0], at[1]);
-      drawCursor(ctx, c[0], c[1], peer.name, peer.color, SANS);
-    });
+      if (a.box) {
+        const s = px(a.box[0]), t = px(a.box[1]);
+        ctx.fillStyle = color; ctx.globalAlpha = 0.12; ctx.fillRect(s[0], s[1], t[0] - s[0], t[1] - s[1]);
+        ctx.globalAlpha = 1; ctx.strokeStyle = color; ctx.lineWidth = 1; ctx.strokeRect(Math.round(s[0]) + 0.5, Math.round(s[1]) + 0.5, Math.round(t[0] - s[0]), Math.round(t[1] - s[1]));
+      }
+    }
+    if (note && now >= note.dies) note = null;
+    if (note) {
+      // A comment pinned to a part, typed as its author writes it.
+      const peer = PEERS[note.who], c = px(note.at), typing = note.n < note.text.length;
+      const text = note.text.slice(0, note.n) + (typing && Math.floor(now / 400) % 2 ? "|" : "");
+      ctx.save(); ctx.globalAlpha = clamp(Math.min((now - note.born) / 160, (note.dies - now) / 350));
+      ctx.font = `12px ${SANS}`; ctx.textBaseline = "middle"; ctx.textAlign = "left";
+      const w = Math.max(30, ctx.measureText(note.text.slice(0, note.n) + "|").width) + 42, hgt = 28;
+      const x = Math.round(c[0] + 12 + w > W - 6 ? c[0] - 12 - w : c[0] + 12), y = Math.round(Math.max(6, c[1] - hgt - 8));
+      ctx.beginPath(); ctx.arc(c[0], c[1], 5, 0, 6.3); ctx.fillStyle = peer.color; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.4; ctx.stroke(); ctx.fill();
+      ctx.beginPath(); if (ctx.roundRect) ctx.roundRect(x + 0.5, y + 0.5, w, hgt, 8); else ctx.rect(x + 0.5, y + 0.5, w, hgt);
+      ctx.fillStyle = "#111113"; ctx.fill(); ctx.strokeStyle = "#FFFFFF3D"; ctx.lineWidth = 1; ctx.stroke();
+      ctx.beginPath(); ctx.arc(x + 15, y + hgt / 2 + 0.5, 8, 0, 6.3); ctx.fillStyle = peer.color; ctx.fill();
+      ctx.fillStyle = "#fff"; ctx.font = `600 10px ${SANS}`; ctx.textAlign = "center"; ctx.fillText(peer.name[0], x + 15, y + hgt / 2 + 1);
+      ctx.fillStyle = "#FAFAFA"; ctx.font = `12px ${SANS}`; ctx.textAlign = "left"; ctx.fillText(text, x + 30, y + hgt / 2 + 1);
+      ctx.restore();
+    }
+    for (const a of actors) { const c = px(a.at); drawCursor(ctx, c[0], c[1], PEERS[a.who].name, PEERS[a.who].color, SANS); }
     return !still;
   });
 
