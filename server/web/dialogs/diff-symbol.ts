@@ -8,7 +8,7 @@ import { E, api, toast, toolCtx } from "./editor";
 import { projectDocs } from "./project";
 import { officialLibraries, projectLibraries } from "../library/sources";
 import { parseLibTable } from "../symedit/model";
-import { manageSymbolLibrariesFromSchematic } from "../symedit/dialogs";
+import { manageLibraries } from "./lib-tables";
 import { KD, h, type DlgApi } from "./dom";
 import { bitmapButton } from "./kicon";
 import { keyName } from "../keys";
@@ -106,7 +106,7 @@ async function build(doc: KDoc, item: KItem): Promise<void> {
           for (const l of lines) {
             const ln = h("div", { class: l.cls ? "ln " + l.cls : "ln", style: "margin:2px 0" }, l.text);
             // <a href='$CONFIG'>: the Manage Symbol Libraries dialog (ACTIONS::showSymbolLibTable)
-            if (l.manage) { const a = h("a", { href: "#", id: "kd-diffsym-manage", style: "margin-left:12px" }, "Manage Symbol Libraries"); a.addEventListener("click", (ev) => { ev.preventDefault(); void officialLibraries("symbol").then((t) => t.libraries, () => []).then((libs) => manageSymbolLibrariesFromSchematic(libs)); }); ln.append(a); }
+            if (l.manage) { const a = h("a", { href: "#", id: "kd-diffsym-manage", style: "margin-left:12px" }, "Manage Symbol Libraries"); a.addEventListener("click", (ev) => { ev.preventDefault(); void manageLibraries("symbol", { readOnly: !!E.viewOnly }); }); ln.append(a); }
             box.append(ln);
           }
           pg.append(box);
