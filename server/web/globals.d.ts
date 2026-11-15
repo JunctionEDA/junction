@@ -91,7 +91,7 @@ interface KiCadCanvasApi {
   computeBBox(doc: KDoc): void;
   fieldBoxes(item: KItem, hidden?: Set<string> | null): { name: string; pts: [number, number][] }[];
   /** the item under (x, y) mm with what was hit on it (web/canvas/hit.ts) */
-  hitTestDetail(doc: KDoc, x: number, y: number, slopMm?: number, opts?: { hidden?: Set<string> | null; side?: string | null } | null): { id: string; onGeom?: boolean; [k: string]: unknown } | null;
+  hitTestDetail(doc: KDoc, x: number, y: number, slopMm?: number, opts?: { hidden?: Set<string> | null; side?: string | null; accept?: ((it: KItem) => boolean) | null } | null): { id: string; onGeom?: boolean; [k: string]: unknown } | null;
   itemVisible(item: KItem, hidden?: Set<string> | null): boolean;
   itemTouchesRect(item: KItem, x0: number, y0: number, x1: number, y1: number, hidden?: Set<string> | null): boolean;
   renderSvg(doc: KDoc, opts?: Record<string, unknown> | null): string;

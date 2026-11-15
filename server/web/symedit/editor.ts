@@ -30,6 +30,7 @@ import { openSymbolFind, findNext as findNextMatch } from "./find";
 import type { Units } from "../store";
 import { saveToSchematic } from "./schematic";
 import { mergeSymbolText } from "./merge";
+import { SYM_FILTER_ROWS, defaultSymFilter, symAllChecked, symPasses, symSetFilter, type SymFilterKey, type SymSelFilter } from "./selfilter";
 import { openPreferences } from "../dialogs/preferences";
 import { GRID_PAGE, clonePrefs, defaultGrid, gridDefs, prefs, rememberGrid, savePrefs } from "../dialogs/prefs";
 import { gridPitchFor, type GridClass } from "../dialogs/logic";
@@ -97,6 +98,8 @@ export class SymbolEditor {
   lastTextAngle = 0;
   clip: string | null = null;
   filter = "";
+  /** the Selection Filter pane under Properties (SCH_SELECTION_FILTER_OPTIONS of the symbol editor) */
+  selFilter: SymSelFilter = defaultSymFilter();
   treeSel: { lib: string; name?: string; unit?: number } | null = null;
   private el: Record<string, HTMLElement> = {};
   private cv: HTMLCanvasElement | null = null;
@@ -560,13 +563,17 @@ export class SymbolEditor {
     cwrap.append(cv, empty);
     centre.append(tabs, cwrap);
     const props = h("div", { class: "se-props", id: "se-props" });
+    // defaultPropertiesPaneInfo over defaultSchSelectionFilterPaneInfo: the filter docks under Properties
+    const sfilter = h("div", { class: "se-sfilter", id: "se-selfilter" });
+    const side = h("div", { class: "se-side" }, props, sfilter);
     const tbRight = h("div", { class: "se-tbv se-tbr", id: "se-tbRight" });
-    main.append(tbLeft, tree, centre, props, tbRight);
+    main.append(tbLeft, tree, centre, side, tbRight);
     const msg = h("div", { class: "se-msg", id: "se-msg" });
     const status = h("div", { class: "se-status", id: "se-status" });
     root.append(mb, tbTop, info, main, msg, status);
     this.root = root;
-    this.el = { mb, tbTop, info, tbLeft, tree, list, tabs, cwrap, props, tbRight, msg, status, empty, filter };
+    this.el = { mb, tbTop, info, tbLeft, tree, list, tabs, cwrap, props, side, sfilter, tbRight, msg, status, empty, filter };
+    this.renderSelFilter();
     this.hookCanvas(cwrap, cv);
     new ResizeObserver(() => this.paint()).observe(cwrap);
   }
@@ -708,7 +715,7 @@ export class SymbolEditor {
     fill(this.el.tbTop, tb && tb.top, ["newSymbol", "saveAll", "save", "|", "undo", "redo", "|", "zoomRedraw", "zoomInCenter", "zoomOutCenter", "zoomFitScreen", "|", "rotateCCW", "rotateCW", "mirrorV", "mirrorH", "|", "symbolProperties", "pinTable", "|", "showDatasheet", "checkSymbol"]);
     fill(this.el.tbLeft, tb && tb.left, ["toggleGrid", "|", "showElectricalTypes", "showHiddenPins", "showHiddenFields", "|", "showLibraryTree", "showProperties"]);
     fill(this.el.tbRight, tb && tb.right, ["selectionTool", "|", "placeSymbolPin", "placeSymbolText", "drawRectangle", "drawCircle", "drawArc", "drawBezier", "drawSymbolLines", "drawSymbolPolygon", "placeSymbolAnchor", "deleteTool"]);
-    this.el.tree.classList.toggle("hide", !this.showTree); this.el.props.classList.toggle("hide", !this.showProps);
+    this.el.tree.classList.toggle("hide", !this.showTree); this.el.side.classList.toggle("hide", !this.showProps);
     this.renderProps();
   }
   private control(name: string): HTMLElement | null {
@@ -869,6 +876,31 @@ export class SymbolEditor {
 
   // properties panel / message panel ------------------------------------------
   /** SCH_PROPERTIES_PANEL: the selection's PROPERTY_MANAGER rows, editable; nothing selected = the symbol itself. */
+  /** PANEL_SCH_SELECTION_FILTER as the symbol editor lays it out; a right click on a kind offers "Only <kind>". */
+  renderSelFilter(): void {
+    const box = this.el.sfilter; if (!box) return;
+    box.replaceChildren();
+    const grid = h("div", { class: "se-sfgrid" });
+    for (const [key, label] of SYM_FILTER_ROWS) {
+      const cb = h("input", { type: "checkbox", "data-f": key }) as HTMLInputElement;
+      cb.checked = key === "all" ? symAllChecked(this.selFilter) : this.selFilter[key];
+      cb.addEventListener("change", () => this.setSelFilter(key, cb.checked));
+      const row = h("label", { class: "se-sfcb", title: key === "lockedItems" ? "Allow selection of locked items" : undefined }, cb, " " + label);
+      if (key !== "all" && key !== "lockedItems") row.addEventListener("contextmenu", (ev) => { ev.preventDefault(); showMenu(ev.clientX, ev.clientY, [{ label: `Only ${label.toLowerCase()}`, run: () => this.setSelFilter(`only:${key}` as `only:${SymFilterKey}`, true) }]); });
+      grid.append(row);
+    }
+    box.append(h("div", { class: "se-sfcap" }, "Selection Filter"), grid);
+  }
+  setSelFilter(key: SymFilterKey | "all" | `only:${SymFilterKey}`, on: boolean): void {
+    this.selFilter = symSetFilter(this.selFilter, key, on); this.renderSelFilter();
+  }
+  /** SCH_SELECTION_TOOL::itemPassesFilter for a symbol editor item id ("p:…" pin, "f:…" field, "g:…" graphic or text). */
+  passesFilter(id: string): boolean {
+    if (id.startsWith("p:")) return symPasses(this.selFilter, "pin");
+    if (id.startsWith("f:")) return symPasses(this.selFilter, "property");
+    const sym = this.symbol(); const n = sym ? nodeOf(sym, id) : null;
+    return symPasses(this.selFilter, n ? String(n[0]) : "");
+  }
   renderProps(): void {
     const p = this.el.props; if (!p || !this.showProps) return;
     const keep = p.querySelector<HTMLElement>(".se-pgrid"); const scroll = keep ? keep.scrollTop : 0;
@@ -1118,7 +1150,7 @@ export class SymbolEditor {
     this.drag = null; this.draw = null; this.floating = null; this.preview = null; this.kcache = null; this.paint();
   }
   selChanged(): void { this.renderMsg(); this.renderMenus(); this.paint(); }
-  selectAll(): void { const t = this.tab; const doc = this.kdoc(); if (!t || !doc) return; t.sel = new Set([...doc.items.values()].filter((i) => i.movable).map((i) => i.id)); this.selChanged(); }
+  selectAll(): void { const t = this.tab; const doc = this.kdoc(); if (!t || !doc) return; t.sel = new Set([...doc.items.values()].filter((i) => i.movable && this.passesFilter(i.id)).map((i) => i.id)); this.selChanged(); }
   /** EE_GRID_HELPER::GetItemGrid for one item, with the grid overrides. */
   private gridFor(n: M.Node): number { const o = prefs().grids.sym.overrides; return o.enabled ? gridPitchFor(SYM_GRID_CLASS[String(n[0])] || null, o, this.gridMm) : this.gridMm; }
   /** SYMBOL_EDITOR_MOVE_TOOL::AlignElements. */
@@ -1367,7 +1399,7 @@ export class SymbolEditor {
   }
   private hitAt(x: number, y: number): string | null {
     const doc = this.kdoc(); if (!doc) return null; const v = this.view();
-    const r = K().hitTestDetail(doc, x, y, 4 / v.s); return r ? r.id : null;
+    const r = K().hitTestDetail(doc, x, y, 4 / v.s, { accept: (it: { id: string }) => this.passesFilter(it.id) }); return r ? r.id : null;
   }
   private onDown(ev: PointerEvent): void {
     closeMenus(); this.el.cwrap.focus({ preventScroll: true });
@@ -1425,7 +1457,7 @@ export class SymbolEditor {
       const x0 = Math.min(d.x0, x), x1 = Math.max(d.x0, x), y0 = Math.min(d.y0, y), y1 = Math.max(d.y0, y);
       if (x1 - x0 > 0.01 || y1 - y0 > 0.01) {
         const inside = x >= d.x0;
-        for (const it of doc.items.values()) { if (!it.movable || !it.bbox) continue; const b = it.bbox; const hit = inside ? b[0] >= x0 && b[2] <= x1 && b[1] >= y0 && b[3] <= y1 : K().itemTouchesRect(it, x0, y0, x1, y1); if (hit) t.sel.add(it.id); }
+        for (const it of doc.items.values()) { if (!it.movable || !it.bbox || !this.passesFilter(it.id)) continue; const b = it.bbox; const hit = inside ? b[0] >= x0 && b[2] <= x1 && b[1] >= y0 && b[3] <= y1 : K().itemTouchesRect(it, x0, y0, x1, y1); if (hit) t.sel.add(it.id); }
       }
       this.selChanged();
     }

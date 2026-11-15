@@ -41,7 +41,13 @@ export const CSS = `
 .se-info .se-x{margin-left:auto;cursor:pointer;color:var(--ink-2)}
 .se-main{flex:1;display:flex;min-height:0;min-width:0}
 .se-tree{width:240px;flex:none;display:flex;flex-direction:column;background:var(--panel);border-right:1px solid var(--line);min-height:0}
-.se-tree.hide,.se-props.hide{display:none}
+.se-tree.hide,.se-props.hide,.se-side.hide{display:none}
+.se-side{width:280px;flex:none;display:flex;flex-direction:column;min-height:0;background:var(--panel);border-left:1px solid var(--line)}
+.se-sfilter{flex:none;border-top:1px solid var(--line);background:var(--paper)}
+.se-sfcap{padding:3px 6px;font-weight:600;background:var(--bench);border-bottom:1px solid var(--line)}
+.se-sfgrid{display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;padding:6px 8px}
+.se-sfcb{display:flex;align-items:center;gap:6px;white-space:nowrap}
+.se-sfcb input{margin:0;accent-color:var(--blue)}
 .se-tree input{margin:6px;height:24px;padding:2px 6px;background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:var(--r-1,3px);font:inherit}
 .se-list{flex:1;overflow:auto;padding-bottom:6px}
 .se-row{display:flex;align-items:center;gap:4px;padding:1px 6px;white-space:nowrap;cursor:default;user-select:none}
@@ -65,7 +71,7 @@ export const CSS = `
 .se-canvas{position:relative;flex:1;min-height:0;overflow:hidden;outline:none}
 .se-canvas canvas{position:absolute;inset:0;width:100%;height:100%}
 .se-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--ink-3);pointer-events:none;text-align:center;padding:20px}
-.se-props{width:280px;flex:none;background:var(--panel);border-left:1px solid var(--line);overflow:auto;padding:8px}
+.se-props{flex:1 1 auto;min-height:0;background:var(--panel);overflow:auto;padding:8px}
 .se-props h4{margin:0 0 6px;font-size:var(--fs-sm,12px)}
 .se-props{display:flex;flex-direction:column;padding:0}
 .se-pcap{flex:none;padding:5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

@@ -151,13 +151,15 @@ export function itemVisible(it: Pick<Item, "geom">, hidden?: Set<string> | null)
  * only geometry on visible layers counts (opts.hidden = Set of layer keys), a hit on the item's own
  * geometry beats a hit inside its empty bounding box, the preferred side (opts.side "F" | "B", the
  * active layer's side) beats the other, and the smaller visible extent wins ties.
+ * `opts.accept` leaves out the items a selection filter rejects.
  * Returns {id, onGeom, layer, box} or null; hitTest() is the id-only form.
  */
-export function hitTestDetail(doc: Doc, x: number, y: number, slopMm?: number, opts?: { hidden?: Set<string> | null; side?: string | null } | null): HitDetail | null {
-  slopMm = slopMm || 0; opts = opts || {}; const hidden = opts.hidden || null, side = opts.side || null;
+export function hitTestDetail(doc: Doc, x: number, y: number, slopMm?: number, opts?: { hidden?: Set<string> | null; side?: string | null; accept?: ((it: Item) => boolean) | null } | null): HitDetail | null {
+  slopMm = slopMm || 0; opts = opts || {}; const hidden = opts.hidden || null, side = opts.side || null, accept = opts.accept || null;
   let best: HitDetail | null = null;
   for (const it of doc.items.values()) {
     if (!it.movable || !it.bbox) continue;
+    if (accept && !accept(it)) continue;   // the selection filter (itemPassesFilter) drops a candidate before ranking
     const b = it.bbox;
     if (x < b[0] - slopMm || x > b[2] + slopMm || y < b[1] - slopMm || y > b[3] + slopMm) continue;
     let onGeom = false, exact = false, hitLayer: string | null = null, vis: Box | null = null, hull: Box | null = null, hitClass = 2;   // 0 = pad / copper, 1 = other geometry, 2 = box only

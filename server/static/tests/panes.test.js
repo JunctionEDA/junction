@@ -10,6 +10,7 @@ function load(file) {
 }
 const S = load("editor/panels/search-model.ts");
 const PT = load("components/panes/prop-text.ts");
+const SF = load("symedit/selfilter.ts");
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + (e.stack || e).toString().split("\n").slice(0, 4).join("\n       ")); } }
 console.log("docked panes under node");
@@ -58,6 +59,22 @@ test("Properties colour cells keep the alpha (PGPROPERTY_COLOR4D)", () => {
   assert.deepStrictEqual(PT.parseColorText("rgba(10, 20, 30, 0.25)"), [10, 20, 30, 0.25]);
   assert.deepStrictEqual(PT.parseColorText("#00ff00"), [0, 255, 0, 1]);
   assert.strictEqual(PT.parseColorText("red"), null);
+});
+
+test("Symbol Editor selection filter: KiCad's rows and itemPassesFilter classes", () => {
+  assert.deepStrictEqual(SF.SYM_FILTER_ROWS.map((r) => r[1]), ["All items", "Locked items", "Pins", "Text", "Graphics", "Other items"]);
+  assert.strictEqual(SF.symFilterClass("pin"), "pins");
+  assert.strictEqual(SF.symFilterClass("property"), "text");
+  assert.strictEqual(SF.symFilterClass("text_box"), "text");
+  assert.strictEqual(SF.symFilterClass("bezier"), "graphics");
+  assert.strictEqual(SF.symFilterClass("something"), "otherItems");
+});
+test("Symbol Editor selection filter: Only <kind>, All items", () => {
+  let f = SF.symSetFilter(SF.defaultSymFilter(), "only:graphics", true);
+  assert.deepStrictEqual(f, { lockedItems: true, pins: false, text: false, graphics: true, otherItems: false });
+  assert.ok(!SF.symAllChecked(f) && SF.symPasses(f, "arc") && !SF.symPasses(f, "pin"));
+  f = SF.symSetFilter(f, "all", true); assert.ok(SF.symAllChecked(f));
+  f = SF.symSetFilter(f, "text", false); assert.ok(!SF.symPasses(f, "property") && !SF.symAllChecked(f));
 });
 
 console.log(`${passed} passed, ${failed} failed`);
