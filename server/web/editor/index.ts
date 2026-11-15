@@ -29,7 +29,7 @@ import { renderObjects, snapMm, syncItemsFromDoc, updateGridStatus, applyChanges
 import { $ } from "./dom";
 import { IS_MAC } from "../keys";
 import { cancelLongPress, candidatesAt, moveLongPress, openClarifyMenu, openContextMenu, startLongPress } from "./contextmenu";
-import { DRAG_THRESHOLD_PX, cancelInteraction, clearAllSelection, markerUnder, rotateFieldMove, startFieldMove, copperUnderBeatsFootprint, installGestures, pinForClick, registerPointerUp, selectionChanged, selectionIds, startMove, applyPickMode, selectedAnywhere } from "./gestures";
+import { DRAG_THRESHOLD_PX, cancelInteraction, clearAllSelection, markerUnder, rotateFieldMove, startFieldMove, copperUnderBeatsFootprint, installGestures, pinForClick, registerPointerUp, selectionChanged, selectionIds, startMove, applyPickMode, selectedAnywhere, mergeBoardSelection, splitBoardSelection } from "./gestures";
 import { loadMe, navigate, route } from "./home";
 import { sendOp } from "./net";
 import { applyTheme, syncSchModes } from "./panes";
@@ -216,14 +216,38 @@ stage.addEventListener("pointerdown", (ev) => {
   if (ev.button !== 0 || E.tool !== "select" || !E.kdoc || E.selection.size < 2 || E.viewOnly) return;
   { const ms = modifiersState(ev, modOpts()); if (hasModifier(ms) || ms.highlight) return; }   // a modifier edits the selection (or highlights)
   if (isSch() && CollabTools.sch && CollabTools.sch.state.drag) return;   // a Move / paste is following the cursor: this click drops it (sch-tools)
-  const mm = worldMm(ev); const hit = hitAny(mm);
+  const mm = worldMm(ev); let hit = hitAny(mm);
+  // PCB_SELECTION_TOOL: DRAG_SELECTED moves the selection when SelectionContains( DragOrigin ), any selected item under
+  // the cursor (a selected track beneath a footprint's box or beneath an unselected item included)
+  if (!isSch() && (!hit || !E.selection.has(hit.id))) {
+    let id: string | undefined; try { id = candidatesAt(mm).find((c) => E.selection.has(c)); } catch (e) { id = undefined; }
+    const it = id ? E.kdoc.items.get(id) : null; if (id && it) hit = { id, kind: it.kind, item: it };
+  }
   if (!hit || !E.selection.has(hit.id)) return;
   ev.stopImmediatePropagation(); ev.preventDefault();
   // a selection of tracks (or one via) is dragged by the router (PCB_SELECTION_TOOL: routable -> drag45Degree), not moved
   const pm = CollabTools.pcb as unknown as { routableDown?: (e: PointerEvent, p: number[], c: unknown, ids: string[]) => boolean } | undefined;
   if (!isSch() && pm && pm.routableDown) { try { if (pm.routableDown(ev, mm, toolCtx(), [...E.selection])) { stage.setPointerCapture(ev.pointerId); return; } } catch (e) { console.warn(e); } }
+  // the board with tracks, vias, graphics ... in the selection (footprints too, or not): the press only arms; a drag
+  // moves the whole selection (the module's move), a click runs selectPoint, which replaces the selection
+  if (!isSch() && [...E.selection].some((id) => { const it = E.kdoc.items.get(id); return !!it && it.kind !== "footprint"; })) {
+    boardPress = { mm, client: [ev.clientX, ev.clientY], pointerId: ev.pointerId };
+    stage.setPointerCapture(ev.pointerId); return;
+  }
   startGroupDrag(hit, mm, ev);
 }, true);
+let boardPress: { mm: [number, number]; client: [number, number]; pointerId: number } | null = null;
+window.addEventListener("pointermove", (ev) => {
+  const bp = boardPress; if (!bp || ev.pointerId !== bp.pointerId || Math.hypot(ev.clientX - bp.client[0], ev.clientY - bp.client[1]) <= DRAG_THRESHOLD_PX) return;
+  boardPress = null;   // IsDrag: the module moves everything selected from the press point; this move event reaches it next
+  const pm = CollabTools.pcb as unknown as { beginMove?: (c: unknown, at: number[], sticky: boolean) => boolean } | undefined;
+  if (pm && pm.beginMove) { try { pm.beginMove(toolCtx(), bp.mm, false); } catch (e) { console.warn(e); } }
+}, true);
+window.addEventListener("pointerup", (ev) => {
+  const bp = boardPress; if (!bp || ev.pointerId !== bp.pointerId) return;
+  boardPress = null; clickSelectAt(bp.mm);   // IsClick: selectPoint( ..., false, false, false ) -> ClearSelection, then the pick
+}, true);
+window.addEventListener("pointercancel", () => { boardPress = null; }, true);
 
 stage.addEventListener("pointerdown", (ev) => {
   if ((ev.target as Element).closest("#cmtPanel") || (ev.target as Element).closest("#signinOverlay")) return;
@@ -456,7 +480,9 @@ function modifierClick(mm: [number, number], mc: ModClick): void {
   if (mode === "add" && mod && mod.selectPadAt) { let r: unknown = false; try { r = mod.selectPadAt(fake, [x, y], ctx); } catch (e) { console.warn(e); } if (r) { selectionChanged(); return; } }
   // a track / via / graphic under the cursor beats a footprint whose only claim is its bounding box
   if (mod && mod.onSelectDown && (!best || (E.lastFpHit && (!E.lastFpHit.onGeom || copperUnderBeatsFootprint([x, y]))))) {
+    splitBoardSelection();   // the module toggles / adds its own kinds in its own set, then the two join again
     let r: unknown = false; try { r = mod.onSelectDown(fake, [x, y], ctx); } catch (e) { console.warn(e); }
+    mergeBoardSelection();
     if (r) { selectionChanged(); return; }
   }
   if (best) applyPickMode(best.id, mode);

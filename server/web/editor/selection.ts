@@ -223,6 +223,8 @@ export function finishBoxSel(ev: { clientX: number; clientY: number }) {
   for (const it of picked) { const had = E.selection.has(it.id); E.selection.add(it.id); if (schM && schM.putSelEnd && (!had || !partEnds.has(it.id))) schM.putSelEnd(it.id, partEnds.has(it.id) ? partEnds.get(it.id)! : null); }
   // FilterCollectorForHierarchy: a boxed member of a group or generator (a tuning pattern's meanders) brings its
   // top-level parent, which this selection holds as the parent's id with all its members
+  // PCB_SELECTION_TOOL's one m_selection: the board module's own picks a kept selection held join the boxed items
+  if (!isSch() && pcbSel && pcbSel.size && E.selection.size) { for (const id of pcbSel) if (E.kdoc.items.has(id)) E.selection.add(id); pcbSel.clear(); }
   if (!isSch()) E.selection = groupExpand(E.selection);
   const prim = picked.find((it) => it.kind === "symbol" || it.kind === "footprint");
   E.selected = prim ? (E.items.find((f: ItemSummary) => f.id === prim.id) || E.selected) : (b.add ? E.selected : null);

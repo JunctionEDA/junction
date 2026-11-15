@@ -205,15 +205,34 @@ export function applyPickMode(id: string, mode: "add" | "toggle" | "remove", end
   if (p && (p as { padSel?: string | null }).padSel && mode !== "add") (p as { padSel?: string | null }).padSel = null;
   if (E.selected) E.selection.add(E.selected.id);
   const fp = (E.items as { id: string }[]).find((f) => f.id === id);
-  const set: Set<string> = !sch && !fp && p ? p.sel : E.selection;
+  const set: Set<string> = !sch && !fp && p && !E.selection.has(id) ? p.sel : E.selection;
   const on = mode === "add" ? true : mode === "remove" ? false : !set.has(id);
   if (on) set.add(id); else set.delete(id);
+  if (!sch) mergeBoardSelection();
   const m = sch ? (CollabTools.sch as unknown as { putSelEnd?: (id: string, end: 0 | 1 | null) => void } | undefined) : null;
   if (m && m.putSelEnd) m.putSelEnd(id, on ? end : null);
   if (on && fp) E.selected = fp as typeof E.selected;
   else if (E.selected && !E.selection.has(E.selected.id)) E.selected = null;
   if (!E.selected) for (const sid of E.selection) { const f = (E.items as { id: string }[]).find((q) => q.id === sid); if (f) { E.selected = f as typeof E.selected; break; } }
   selectionChanged();
+}
+/**
+ * PCB_SELECTION_TOOL keeps one m_selection: once the board module's own picks (tracks, vias, graphics ...) and the
+ * editor's set (footprints) both hold items, they join in the editor's set, as a box selection puts them, so a drag
+ * from any of them moves them all (DRAG_SELECTED: SelectionContains( DragOrigin )), Delete removes them all and a
+ * plain click on one of them selects it alone (selectPoint -> ClearSelection).
+ */
+export function mergeBoardSelection(): void {
+  if (isSch()) return; const p = pcbState(); if (!p || !p.sel || !p.sel.size) return;
+  if (E.selected) E.selection.add(E.selected.id);
+  if (!E.selection.size) return;
+  const d = doc(); for (const id of p.sel) if (!d || d.items.has(id)) E.selection.add(id);
+  p.sel.clear();
+}
+/** mergeBoardSelection's inverse, for the module's own pick (onSelectDown) to see the items it owns as its own. */
+export function splitBoardSelection(): void {
+  if (isSch()) return; const p = pcbState(), d = doc(); if (!p || !p.sel || !d) return;
+  for (const id of [...E.selection]) { const it = d.items.get(id); if (it && it.kind !== "footprint") { p.sel.add(id); E.selection.delete(id); } }
 }
 /** Everything selected, the editor's set and the tool module's own picks together (ids, pads as "fp#n"). */
 export function selectedAnywhere(): Set<string> {
