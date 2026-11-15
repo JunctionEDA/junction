@@ -19,6 +19,7 @@ import { chooseFootprint, noFileBrowsing, openDatasheet } from "../../dialogs/br
 import { chooserFilters, datasheetLink, type FpChooserFilters } from "../../library/fpchoice";
 import { toast } from "../util";
 import { colorText, parseColorText } from "../../components/panes/prop-text";
+import { PIN_MAP_VERSION, readOverride, readPinMaps } from "../../dialogs/sym-props-logic";
 
 type Raw = string | number | boolean | null;
 interface PropDef {
@@ -184,9 +185,32 @@ function symbolProps(it: KItem, doc: KDoc): PropDef[] {
   }
   out.push(...fieldDefs);
   out.push({ group: "Fields", name: "Library Link", type: "text", get: (x) => h.str((h.kid(x.node, "lib_id") || [])[1]) });
+  out.push(...pinMapProps(it, doc));
   out.push(flag("Attributes", "Exclude From Simulation", "exclude_from_sim", false, false), flag("Attributes", "Exclude From Bill of Materials", "in_bom", true, true),
     flag("Attributes", "Exclude From Board", "on_board", true, true), flag("Attributes", "Exclude From Position Files", "in_pos_files", true, true), flag("Attributes", "Do not Populate", "dnp", false, false));
   return out;
+}
+/**
+ * SCH_SYMBOL's "Pin Map Mode" / "Pin Map Name" (the symbol's pin_map_override), shown for a symbol whose library
+ * symbol carries pin maps in a file new enough to hold them; they are changed through the Pin Map page that the
+ * category's "Edit Pin Map..." button opens.
+ */
+const PIN_MAP_MODES: [string, string][] = [["library_default", "Library Default"], ["named_map", "Named Map"], ["identity", "Identity"], ["delegate", "Delegate"]];
+function ownLibOf(doc: KDoc, n: SNode): SNode | null {
+  const h = H(), name = h.str((h.kid(n, "lib_name") || [])[1]) || h.str((h.kid(n, "lib_id") || [])[1]);
+  const lib = (doc as KDoc & { lib?: Map<string, SNode> }).lib;
+  return lib ? lib.get(name) || lib.get(h.str((h.kid(n, "lib_id") || [])[1])) || null : null;
+}
+export function hasPinMaps(doc: KDoc, it: KItem): boolean {
+  if (it.kind !== "symbol" || (Number((doc as KDoc & { version?: number }).version) || 0) < PIN_MAP_VERSION) return false;
+  const lib = ownLibOf(doc, it.node); return !!lib && readPinMaps(lib).maps.length > 0;
+}
+function pinMapProps(it: KItem, doc: KDoc): PropDef[] {
+  if (!hasPinMaps(doc, it)) return [];
+  return [
+    { group: "Pin Map", name: "Pin Map Mode", type: "enum", choices: PIN_MAP_MODES, get: (x) => { const o = readOverride(x.node); return o ? o.mode : "library_default"; } },
+    { group: "Pin Map", name: "Pin Map Name", type: "text", get: (x) => { const o = readOverride(x.node); return o ? o.map : ""; } },
+  ];
 }
 function schLineProps(it: KItem): PropDef[] {
   const pt = (name: string, end: boolean, i: 0 | 1): PropDef => ({ group: BASIC, name, type: "coord",
@@ -877,6 +901,8 @@ export function propGrid(): PropGrid {
       if (ro) break;
       if (g.name === CUSTOM_GROUP) g.add = "Add Custom Property";
       else if (g.name === "Fields" && items.some((it) => fieldKinds.includes(it.kind))) g.add = "Add Field";
+      // SCH_PROPERTIES_PANEL: the Pin Map category's "Edit Pin Map..." button, for one pin-mapped symbol
+      else if (g.name === "Pin Map" && items.length === 1) g.add = "Edit Pin Map...";
     }
   }
   const kinds = new Set(items.map(friendly));
@@ -970,6 +996,12 @@ function selectionFilters(doc: KDoc, items: KItem[]): FpChooserFilters | null {
   return chooserFilters(K().resolveLib(doc, first), false);
 }
 /** PG_FPID_EDITOR / PG_URL_EDITOR::OnEvent( wxEVT_BUTTON ). */
+/** "Edit Pin Map...": SCH_EDIT_FRAME's Symbol Properties dialog for the one selected symbol, at its Pin Map page. */
+export function editPinMap(): void {
+  const doc = kdoc(), items = selectedItems(); if (!doc || items.length !== 1 || !hasPinMaps(doc, items[0])) return;
+  const KD = (window as unknown as { KDialogs?: { schItemDialog?(c: unknown, it: KItem, o: { pinMapPage: boolean }): boolean } }).KDialogs;
+  if (KD && KD.schItemDialog) KD.schItemDialog(tctx(), items[0], { pinMapPage: true });
+}
 export function browseProp(id: string): void {
   const doc = kdoc(); if (!doc || E.viewOnly) return;
   const { items, defs } = resolve(); if (!items.length) return;

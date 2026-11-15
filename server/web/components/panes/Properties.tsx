@@ -8,7 +8,7 @@
 // shows "<...>".
 import { Select } from "../Select";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { PropGrid, PropRow } from "../../panels-api";
+import type { PropGrid, PropGroupButton, PropRow } from "../../panels-api";
 import { useApp } from "../../store";
 import { cx } from "../../util";
 import { rowValueText } from "./prop-text";
@@ -130,7 +130,7 @@ function Editor({ row, onDone }: { row: PropRow; onDone: () => void }) {
         onClick={(ev) => { ev.preventDefault(); ev.stopPropagation(); const p = panels(); if (!p) return; if (draft !== null && !commit(draft)) return; settled.current = false; p.browseProp(row.id); }}>
         <KIcon name={browseIcon} size={16} /></button> : null}
       <input type="text" className={cx(CELL, browseIcon && "pr-[20px]", row.readOnly && "text-ink-3", err && "shadow-[inset_0_0_0_1px_var(--color-err)]")} data-prop={row.id} spellCheck={false} autoComplete="off"
-        readOnly={row.readOnly} value={shown} placeholder={row.mixed ? MIXED : ""} title={err || (row.type === "longtext" ? row.value : undefined)}
+        readOnly={row.readOnly} value={shown} placeholder={row.mixed ? MIXED : ""} title={err || (!row.mixed && row.value ? row.value : undefined) /* wxPG_TOOLTIPS: the full value of a truncated cell */}
         onFocus={(ev) => { if (!row.readOnly) ev.target.select(); }}
         onChange={(ev) => { setDraft(ev.target.value); setErr(null); }}
         onBlur={() => { if (settled.current) { settled.current = false; return; } if (draft !== null && !commit(draft)) { setDraft(null); setErr(null); } }}
@@ -281,14 +281,16 @@ export function PropertiesPane() {
   };
   const removeKey = (id: string) => { const p = panels(); if (p && p.removePropKey(id)) setTick((t) => t + 1); };
   /** PCB_PROPERTIES_PANEL::buildContextMenu: on a category, its Add entry; on a field or custom property, Remove then Add. */
-  const menuFor = (g: { name: string; add?: "Add Field" | "Add Custom Property" }, r: PropRow | null): MenuItem[] => {
+  const groupButton = (what: PropGroupButton) => { if (what === "Edit Pin Map...") { const p = panels(); if (p) p.editPinMap(); } else addKey(what); };
+  const menuFor = (g: { name: string; add?: PropGroupButton }, r: PropRow | null): MenuItem[] => {
     const out: MenuItem[] = [];
-    if (!g.add) return out;
+    const add = g.add;
+    if (!add || add === "Edit Pin Map...") return out;
     if (r) {
       if (g.name === "Fields" && r.keyEditable) out.push({ label: "Remove Field", run: () => removeKey(r.id) });
       else if (g.name === "Custom Properties") out.push({ label: "Remove Custom Property", run: () => removeKey(r.id) });
     }
-    out.push({ label: g.add, run: () => addKey(g.add!) });
+    out.push({ label: add, run: () => addKey(add) });
     return out;
   };
   const toggle = (g: string) => { const n = Object.assign({}, collapsed, { [g]: !collapsed[g] }); setCollapsed(n); try { localStorage.setItem("kui.props.collapsed", JSON.stringify(n)); } catch (e) { /* no storage */ } };
@@ -302,10 +304,10 @@ export function PropertiesPane() {
             <div className="flex items-center h-[20px] px-1 bg-bench border-b border-line font-semibold cursor-default select-none" onClick={() => toggle(g.name)}
               onContextMenu={(ev) => { const items = menuFor(g, null); if (items.length) menu.open(ev, items); else ev.preventDefault(); }}>
               <span className="inline-block w-3.5 text-ink-2 text-xs">{collapsed[g.name] ? "▸" : "▾"}</span><span className="flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{g.name}</span>
-              {/* addCategoryButton: the small "+" at the category row's right edge */}
+              {/* addCategoryButton: the small_plus (or SCH_PROPERTIES_PANEL's small_edit) bitmap at the category row's right edge */}
               {g.add ? <button type="button" className="tbtn flex-none flex items-center justify-center w-[16px] h-[16px] p-0 bg-transparent border border-transparent text-ink-2" title={g.add} data-prop-add={g.name}
-                onClick={(ev) => { ev.stopPropagation(); addKey(g.add!); }}>
-                <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1v8M1 5h8" stroke="currentColor" strokeWidth="1.6" /></svg></button> : null}
+                data-icon={g.add === "Edit Pin Map..." ? "small_edit" : "small_plus"} onClick={(ev) => { ev.stopPropagation(); groupButton(g.add!); }}>
+                <KIcon name={g.add === "Edit Pin Map..." ? "small_edit" : "small_plus"} size={14} /></button> : null}
             </div>
             {collapsed[g.name] ? null : g.rows.map((r) => (
               <div key={r.id} className="kprop d-grid h-[21px] border-b border-line-soft" style={{ gridTemplateColumns: `minmax(0,${(split * 100).toFixed(2)}%) minmax(0,1fr)` }} data-prop-row={r.id}>

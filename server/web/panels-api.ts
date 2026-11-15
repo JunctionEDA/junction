@@ -54,8 +54,9 @@ export interface PropRow {
   /** an editable combo's list in the current units (a track's Width: Board Setup's predefined track widths) */
   suggest?: string[];
 }
-/** add: the category's "+" button and context-menu entry ("Add Field", "Add Custom Property") */
-export interface PropGroup { name: string; rows: PropRow[]; add?: "Add Field" | "Add Custom Property" }
+/** add: the category's "+" button and context-menu entry; "Edit Pin Map..." is SCH_PROPERTIES_PANEL's small_edit button */
+export interface PropGroup { name: string; rows: PropRow[]; add?: PropGroupButton }
+export type PropGroupButton = "Add Field" | "Add Custom Property" | "Edit Pin Map...";
 export interface PropGrid {
   /** the caption line: "Footprint R1", "3 items selected", "No objects selected" */
   title: string; count: number; groups: PropGroup[]; readOnly: boolean; note?: string;
@@ -141,6 +142,8 @@ export interface PanelsApi {
   renamePropKey(id: string, name: string, pending: boolean): boolean;
   /** Add a blank field / custom property to the selection; the new row's id. */
   addPropKey(kind: "field" | "custom"): string | null;
+  /** SCH_PROPERTIES_PANEL's "Edit Pin Map..." category button: the symbol's Properties dialog at its Pin Map page */
+  editPinMap(): void;
   /** Remove a footprint field or a custom property from the selection. */
   removePropKey(id: string): boolean;
   /** The browse button of a row with `browse` (PG_FPID_EDITOR / PG_URL_EDITOR::OnEvent): the footprint chooser, whose

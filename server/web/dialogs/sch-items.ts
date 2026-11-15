@@ -33,7 +33,7 @@ import { isURL, resolveUriVars, type FpChooserFilters } from "../library/fpchoic
 import type { GridCellButton } from "./dom";
 
 type Ctx = ToolCtx & { doc: KDoc };
-interface ItemOpts { onCreate?(node: SNode, more?: SNode[]): boolean | void; cancel?(): void; title?: string; label?: string; generic?: boolean; isNew?: boolean; symbolEditor?: SymEditorTextOpts }
+interface ItemOpts { onCreate?(node: SNode, more?: SNode[]): boolean | void; cancel?(): void; title?: string; label?: string; generic?: boolean; isNew?: boolean; symbolEditor?: SymEditorTextOpts; pinMapPage?: boolean }
 /** DIALOG_TEXT_PROPERTIES in the Symbol Editor (m_isSymbolEditor): no hyperlink, syntax help or simulation exclusion; Private
  *  to symbol editor and Common to all units / body styles instead, and the result goes back to the editor. */
 export interface SymEditorTextOpts {
@@ -716,7 +716,7 @@ export function schItemDialog(ctx: ToolCtx, item: KItem, opts: ItemOpts = {}): b
   if (k === "image") { imageDialog(c, item); return true; }
   if (k === "no_connect") return true;              // SCH_NO_CONNECT_T: nothing happens
   if (k === "sheet") { openSheetProperties(c, item, opts); return true; }
-  if (k === "symbol") { openSymbolProperties(c, item); return true; }
+  if (k === "symbol") { openSymbolProperties(c, item, { pinMapPage: !!opts.pinMapPage }); return true; }
   if (k === "table") { schTableDialog(ctx, item); return true; }   // SCH_EDIT_TOOL::Properties, SCH_TABLE_T: DIALOG_TABLE_PROPERTIES
   return false;
 }

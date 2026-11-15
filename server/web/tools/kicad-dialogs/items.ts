@@ -17,6 +17,8 @@ export interface ItemOpts {
   title?: string; width?: number; label?: string; generic?: boolean; onCreate?(node: SNode, more?: SNode[]): boolean | void;
   /** the sch-items dialogs (schItemDialog) call it when the dialog is dismissed; the generic sheet does not */
   cancel?(): void;
+  /** a symbol's Properties dialog opens at its Pin Map page (SCH_PROPERTIES_PANEL "Edit Pin Map...") */
+  pinMapPage?: boolean;
 }
 
 export const TITLES: Record<string, string> = { symbol: "Symbol Properties", footprint: "Footprint Properties", wire: "Wire & Bus Line Properties", bus: "Wire & Bus Line Properties", polyline: "Line Properties",

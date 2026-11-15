@@ -11,7 +11,7 @@ import { appearanceDispatch, appearanceDocOpened, applyAppearance, itemObjectHid
 import { panelStore } from "./core";
 import { hierarchyDispatch, loadSheets, publishHierarchy } from "./hierarchy";
 import { netNavDispatch, netNavSignature, publishNetNav } from "./netnav";
-import { addPropKey, browseProp, propGrid, removePropKey, renamePropKey, selectionSignature, setProp } from "./propgrid";
+import { addPropKey, browseProp, editPinMap, propGrid, removePropKey, renamePropKey, selectionSignature, setProp } from "./propgrid";
 import { search, searchDispatch, searchTabs } from "./search";
 import { colorPicker, type RGBA } from "../pcbdialogs/color-picker";
 import { parseColor, rgba } from "../../canvas/colors";
@@ -34,7 +34,7 @@ export function pickColor(color: string | null, def: string | null, opacity: boo
   }, d);
 }
 
-const api: PanelsApi = { pickColor, getState: panelStore.get, subscribe: panelStore.subscribe, dispatch, propGrid, setProp, renamePropKey, addPropKey, removePropKey, browseProp, searchTabs, search, netInspector: () => netInspectorModel(), netInspectorCmd, netInspectorFilter };
+const api: PanelsApi = { pickColor, getState: panelStore.get, subscribe: panelStore.subscribe, dispatch, propGrid, setProp, renamePropKey, addPropKey, removePropKey, browseProp, editPinMap, searchTabs, search, netInspector: () => netInspectorModel(), netInspectorCmd, netInspectorFilter };
 window.CollabPanels = api;
 
 /** The select tool's gate for the tool modules' own picks (the app's picks go through filterAllows directly). */
