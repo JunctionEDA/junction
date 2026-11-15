@@ -11,6 +11,21 @@ import { expandTextVars, sheetTextVars, varResolver } from "./sheet";
 import type { Box, Doc, GeomSink, Item, Pt, SheetContext, TextEffects, Tf } from "./types";
 /** SCH_SYMBOL::ResolveTextVar: the Sim.* fields a symbol may lack, which resolve to "" rather than staying ${…}. */
 const SIM_VARS = new Set(["SIM.DEVICE", "SIM.TYPE", "SIM.PINS", "SIM.PARAMS", "SIM.LIBRARY", "SIM.NAME"]);
+/** The host's operating-point variables (SCH_SYMBOL / SCH_LABEL_BASE::ResolveTextVar's ${OP…} from
+ *  SCHEMATIC::GetOperatingPoint): the shown text of a token, or null when it is not one. */
+export type OpTextVar = (kind: "symbol" | "label", item: Item, token: string) => string | null;
+export const opVars: { resolve: OpTextVar | null } = { resolve: null };
+/** ${OP…} tokens of a label's text or field resolved through the host; everything else stays as written. */
+function labelOpText(item: Item, text: string): string {
+  const fn = opVars.resolve; if (!fn || text.indexOf("${OP") < 0) return text;
+  return text.replace(/\$\{(OP[^}]*)\}/g, (m, tok: string) => { const r = fn("label", item, tok); return r === null ? m : r; });
+}
+/** The text of an item that holds an ${OP…} token (a symbol's fields, a label and its fields). */
+export function hasOpTextVar(item: Item): boolean {
+  const n = item.node; if (!n) return false;
+  if ((item.kind === "label" || item.kind === "global_label" || item.kind === "hierarchical_label" || item.kind === "directive_label" || item.kind === "netclass_flag") && str(n[1]).indexOf("${OP") >= 0) return true;
+  return kids(n, "property").some((p) => str(p[2]).indexOf("${OP") >= 0);
+}
 
 /** What buildPinGeom needs of the symbol around a pin. */
 /** `literalTilde`: the file is at version 20250318 or later, where a pin named "~" is literally "~" (older files meant no name). */
@@ -100,7 +115,7 @@ const INTERSHEET_FIELD = /^intersheet ?refs$/i;
 export function fieldColor(ef: Pick<TextEffects, "color">, layerColor: string): string { return ef.color || layerColor; }
 export function labelFields(item: Item, n: SNode, color: string, layer: string, z: number, doc?: Doc | null, labelLen = 0): void {
   for (const p of kids(n, "property")) {
-    const ef = effectsOf(p); let val = str(p[2]);
+    const ef = effectsOf(p); let val = labelOpText(item, str(p[2]));
     // the global label's Intersheetrefs field: shown (whatever its own flag) when Formatting > Show inter-sheet
     // references is on (SCHEMATIC::RecomputeIntersheetRefs sets it visible), its ${INTERSHEET_REFS} resolved
     if (item.kind === "global_label" && INTERSHEET_FIELD.test(str(p[1])) && /\$\{INTERSHEET_REFS\}/.test(val)) {
@@ -285,7 +300,7 @@ export function shapeGeom(item: GeomSink, g: SNode, gk: string, tf: Tf, color: s
 }
 
 export function buildLabelGeom(item: Item, n: SNode, k: string, doc?: Doc | null): void {
-  const [x, y, rot] = atOf(n); const ef = effectsOf(n); const text = str(n[1]); const size = ef.size;
+  const [x, y, rot] = atOf(n); const ef = effectsOf(n); const text = labelOpText(item, str(n[1])); const size = ef.size;
   const spin = SPIN[((Math.round(rot) % 360) + 360) % 360] || "R"; const st = spinText(spin);
   const pen = textPen(ef, size), lpen = layoutPen(ef, size); const off = schFormat.textOffsetRatio * size;   // SCHEMATIC_SETTINGS::m_TextOffsetRatio
   const shapeN = kid(n, "shape"); const shape = shapeN ? str(shapeN[1]) : "";
@@ -479,6 +494,7 @@ export function buildSymbolGeom(doc: Doc, item: Item): void {
     // SCH_SYMBOL::ResolveTextVar: ${REFERENCE}, ${VALUE}, ${UNIT} and the symbol's other fields by name
     if (shown.indexOf("${") >= 0) shown = expandTextVars(shown, (tok) => {
       const up = tok.toUpperCase();
+      if (opVars.resolve && tok.startsWith("OP")) { const r = opVars.resolve("symbol", item, tok); if (r !== null) return r; }
       if (up === "UNIT") return unitCount > 1 ? unitLetter(unit) : "";
       for (const q of kids(n, "property")) if (str(q[1]).toUpperCase() === up && q !== p) return str(q[2]);
       // missing simulation fields read as empty, not unresolved (exact, upper-case token names)

@@ -30,7 +30,7 @@ import { SvgPath, renderPng, renderSvg, serialize, serializeItem, setRenderCache
 import { buildGeom, ensureFontGeom, ensureSchTheme, inSchTheme } from "./geom";
 import { faceMetrics, kicadAscDesc, outlineBoxCorners, outlineLayout, readSfnt } from "./outline-text";
 import { hatchLines } from "./geom-pcb";
-import { ORIENT, fieldColor, intersheetRefsText, resolveLib, schDisplay, schFormat, symbolTransform } from "./geom-sch";
+import { ORIENT, fieldColor, hasOpTextVar, intersheetRefsText, opVars, resolveLib, schDisplay, schFormat, symbolTransform, type OpTextVar } from "./geom-sch";
 import { bboxOf, geomBox, geomHit, geomTouchesRect, itemTouchesRect, itemVisible, hitTest, hitTestDetail, layerList, movableItems, padAt, padGeomHit, snap } from "./hit";
 import { applyChange, setAt, setPts } from "./ops";
 import { darkened, mixColor, brightenedItemColor, lockedShadowMargin, footprintBodyBox, drawLockedShadow, DRC_HIGHLIGHTED, HL_FACTOR, HC_EDGE_MIN, viaSpans, umbilicalLines, viaStitchOutline, viaStitchTicks, gridItemGeom, gridItemArea, gridTakesPrecedence, autoSparsePitch } from "./render";
@@ -78,6 +78,10 @@ export const api = {
   /** The open sheet's intersheet references (Doc.intersheetRefs); its global labels are rebuilt with them. */
   intersheetRefsText,
   setIntersheetRefs(refs: Doc["intersheetRefs"], doc?: Doc | null) { if (!doc || doc.type !== "sch") return; doc.intersheetRefs = refs || null; for (const it of doc.items.values()) if (it.kind === "global_label") { try { buildGeom(doc, it); } catch (e) { /* no geometry */ } } },
+  // ${OP} text variables: the host's resolver (sim/op-overlay.ts), and a rebuild of the items of `doc` that use one
+  // once the operating point changes (SCH_EDIT_FRAME::RefreshOperatingPointDisplay)
+  setOpTextVar(fn: OpTextVar | null) { opVars.resolve = fn; },
+  refreshOpTextVars(doc?: Doc | null) { if (!doc || doc.type !== "sch") return; for (const it of doc.items.values()) if (hasOpTextVar(it)) { try { buildGeom(doc, it); } catch (e) { /* no geometry */ } } },
   setSchDisplay(o: { pinAltIcons?: boolean }, doc?: Doc | null) { if (typeof o.pinAltIcons === "boolean") schDisplay.pinAltIcons = o.pinAltIcons; if (doc && doc.type === "sch") for (const it of doc.items.values()) if (it.kind === "symbol") { try { buildGeom(doc, it); } catch (e) { /* no geometry */ } } }, schDisplay,
   parse, parseAll, serialize, serializeItem, parseDoc, applyDocProps, paperSize, titleBlockOf, DASH_RATIOS, setViewTransform, drawSelectionHalo, selectedColor, moveItem, replaceChange, addChange, removeChange, typeNameOf, boardChangeExtras, netNameOf, groupMemberIds, wrapFragment, pinPoints, wireEndsAt, newUuid, createItem, setPts, setAt, atOf, ptsOf, kid, kids, num, str, uuidOf, cloneNode, quotedMask, resolveLib, ORIENT, addItem, applyChange, render, movableItems, hitTest, layerList, snap, computeBBox, PCB_HIDDEN_DEFAULT, SCH, PCB_COLORS, PCB_BG,
   // schematic colour themes (colors.ts): KiCad Default / KiCad Classic / Dark; the painters rebuild stale geometry,

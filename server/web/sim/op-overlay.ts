@@ -44,9 +44,9 @@ export function setOperatingPoints(vectors: { name: string; value: number }[]): 
     else if (/^@/.test(n)) continue;
     if (!points.has(key)) points.set(key, v.value);
   }
-  install(); requestRender();
+  install(); refreshTextVars(); requestRender();
 }
-export function clearOperatingPoints(): void { points.clear(); requestRender(); }
+export function clearOperatingPoints(): void { const had = points.size > 0; points.clear(); if (had) refreshTextVars(); requestRender(); }
 export function operatingPointCount(): number { return points.size; }
 
 /** SCHEMATIC::GetOperatingPoint: "" for ground, "--" before any OP, "?" for a name the run did not produce. */
@@ -153,3 +153,49 @@ function draw(ctx: CanvasRenderingContext2D): void {
 
 function install(): void { if (installed) return; installed = true; overlayHooks.push(draw); }
 
+// ---------------------------------------------------------------- ${OP} text variables
+/** SCH_SYMBOL::ResolveTextVar's "OP(:pin)?(.([0-9])?([a-zA-Z]*))?" and SCH_LABEL_BASE's "OP(.([0-9])?([a-zA-Z]*))?". */
+const OP_SYMBOL = /^OP(:[^.]*)?(.([0-9])?([a-zA-Z]*))?$/, OP_LABEL = /^OP(.([0-9])?([a-zA-Z]*))?$/;
+interface PinRow { number: string; name: string }
+/** ${OP}, ${OP:<pin>}, ${OP:power} (with an optional ".<precision><range>") on a symbol's fields, and ${OP} on a
+ *  label (its net's voltage), from SCHEMATIC::GetOperatingPoint; null for any other token. */
+export function opTextVar(kind: "symbol" | "label", item: KItem, token: string): string | null {
+  const K = (window as unknown as { KiCadCanvas?: KApi }).KiCadCanvas; if (!K) return null;
+  if (kind === "label") {
+    const m = OP_LABEL.exec(token); if (!m) return null;
+    const precision = m[2] ? Number(m[2]) : 3, range = m[3] || "~V";
+    if (!points.size) return "--";
+    const e = netsOfItems([item.id])[0];
+    return e && e.name ? operatingPoint(e.name, precision, range) : "?";
+  }
+  const m = OP_SYMBOL.exec(token); if (!m) return null;
+  const pin = (m[1] || "").toLowerCase(), precision = m[3] ? Number(m[3]) : 3;
+  let range = m[4] || "~A";
+  const p = K.kids(item.node, "property").find((q) => K.str(q[1]) === "Reference"), ref = p ? K.str(p[2]) : "";
+  const sim = simItems.get(ref), spiceRef = (sim ? sim.name : ref).toLowerCase();
+  if (!pin) return operatingPoint(spiceRef, precision, range);
+  if (pin === ":power") { if (!m[4]) range = "~W"; return operatingPoint(spiceRef + ":power", precision, range); }
+  if (!points.size) return "--";
+  if (!sim) return null;
+  const want = pin.slice(1);
+  const sch = (window as unknown as { CollabTools?: { sch?: { _: { symbolPins(doc: unknown, it: KItem): PinRow[] } } } }).CollabTools?.sch;
+  let rows: PinRow[] = [];
+  try { rows = sch && sch._ ? sch._.symbolPins(E.kdoc, item) : []; } catch { rows = []; }
+  for (const mp of sim.pins) {
+    const sp = rows.find((r) => r.number === mp.symbolPin); if (!sp) continue;
+    if (want === String(sp.name || "").toLowerCase() || want === sp.number.toLowerCase())
+      return sim.pins.length === 2 ? operatingPoint(spiceRef, precision, range) : operatingPoint(`${spiceRef}:${mp.modelPin}`, precision, range);
+  }
+  return null;
+}
+/** RefreshOperatingPointDisplay's first pass: the items whose text holds a variable are laid out again. */
+function refreshTextVars(): void {
+  const K = (window as unknown as { KiCadCanvas?: { refreshOpTextVars?(doc: unknown): void } }).KiCadCanvas;
+  if (K && K.refreshOpTextVars && E.kdoc && isSch()) { try { K.refreshOpTextVars(E.kdoc); (E as unknown as { renderFull?: boolean }).renderFull = true; } catch { /* the overlay still draws */ } }
+}
+/** The canvas asks this module for ${OP} tokens from the start: before any OP run they read "--". */
+(function hookTextVars(): void {
+  if (typeof window === "undefined") return;
+  const K = (window as unknown as { KiCadCanvas?: { setOpTextVar?(fn: typeof opTextVar | null): void } }).KiCadCanvas;
+  if (K && K.setOpTextVar) K.setOpTextVar(opTextVar);
+})();
