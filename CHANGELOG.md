@@ -4,6 +4,15 @@ Releases of Junction, which was called KiCad Collaborative up to 1.0.9. The
 version here is the product version (`packaging/VERSION`), not the KiCad
 version it is based on.
 
+## 2.1.3 (unreleased)
+
+### Desktop
+- Changes an assistant proposes through the MCP server now show in the board
+  and schematic editors: a bar names the proposal with Show (draws it over the
+  design), Details, Accept and Reject, and File, Proposed Changes brings it
+  back. An accepted proposal lands as one edit that undo takes back.
+- An assistant's highlight shows its note under its name tag.
+
 ## 2.1.2 (2026-11-15)
 
 Desktop fixes found by opening online projects end to end, and 3D models that
