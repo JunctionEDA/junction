@@ -125,7 +125,9 @@ export class SymbolEditor {
   private mouse = { x: 0, y: 0, in: false };           // doc mm (Y down)
   private drag: { mode: "pan" | "band" | "move" | "zoom" | "pedit"; sx: number; sy: number; x0: number; y0: number; px?: number; py?: number; moved?: boolean; ids?: string[]; handle?: number;
     /** a press with a modifier (SELECTION_TOOL::hasModifier): released in place it runs selectPoint with this mode on `hit` */
-    click?: { mode: "add" | "toggle" | "remove"; hit: string | null } | null;
+    click?: { mode: "add" | "toggle" | "remove"; hit: string | null; alt?: boolean } | null;
+    /** a plain press on an item: released in place, selectPoint selects it alone (ClearSelection first) */
+    hit?: string | null;
     /** the box's SelectMultiple: m_drag_additive keeps the selection, m_drag_subtractive takes the boxed items out */
     keep?: boolean; sub?: boolean } | null = null;
   /** m_disambiguateTimer: a press held still over more than one item opens Clarify Selection */
@@ -1624,14 +1626,15 @@ export class SymbolEditor {
         if (ph && !this.readOnly()) { this.drag = { mode: "pedit", sx: ev.clientX, sy: ev.clientY, x0: x, y0: y, ids: [ph.id], handle: ph.h }; (ev.target as Element).setPointerCapture(ev.pointerId); return; }
         const hit = this.hitAt(x, y);
         // Alt (Option): m_skip_heuristics, the Clarify Selection menu whenever more than one item is under the cursor
-        if (ms.skipHeuristics) { const c = this.candidatesAt(x, y); if (c.length > 1) { ev.preventDefault(); this.clarify(ev.clientX, ev.clientY, c, mode); return; } }
+        // (with Shift / Ctrl held too, on the click: the press arms below and a drag boxes)
+        if (ms.skipHeuristics && !hasModifier(ms)) { const c = this.candidatesAt(x, y); if (c.length > 1) { ev.preventDefault(); this.clarify(ev.clientX, ev.clientY, c, mode); return; } }
         this.startLongPress(ev, x, y, mode);
         if (hasModifier(ms)) {
           // the press only arms: a click runs selectPoint with the modifiers, a drag draws a box whatever it starts on
-          this.drag = { mode: "band", sx: ev.clientX, sy: ev.clientY, x0: x, y0: y, click: { mode: mode!, hit }, keep: ms.dragAdditive || ms.dragSubtractive, sub: ms.dragSubtractive };
+          this.drag = { mode: "band", sx: ev.clientX, sy: ev.clientY, x0: x, y0: y, click: { mode: mode!, hit, alt: ms.skipHeuristics }, keep: ms.dragAdditive || ms.dragSubtractive, sub: ms.dragSubtractive };
         } else if (hit) {
           if (!t.sel.has(hit)) t.sel = new Set([hit]);
-          this.drag = { mode: "move", sx: ev.clientX, sy: ev.clientY, x0: x, y0: y, ids: [...t.sel] };
+          this.drag = { mode: "move", sx: ev.clientX, sy: ev.clientY, x0: x, y0: y, ids: [...t.sel], hit };
         } else { t.sel.clear(); this.drag = { mode: "band", sx: ev.clientX, sy: ev.clientY, x0: x, y0: y, keep: false }; }
         (ev.target as Element).setPointerCapture(ev.pointerId);
         this.selChanged(); return;
@@ -1664,7 +1667,15 @@ export class SymbolEditor {
     // IsClick with a modifier: selectPoint( ..., m_additive, m_subtractive, m_exclusive_or ); nothing under the cursor
     // leaves the selection as it was
     if (d.mode === "band" && d.click && Math.hypot(ev.clientX - d.sx, ev.clientY - d.sy) < 4) {
+      // Alt as well (m_skip_heuristics): every item under the cursor in Clarify Selection, picked with the modifiers
+      if (d.click.alt) { const c = this.candidatesAt(d.x0, d.y0); if (c.length > 1) { this.clarify(d.sx, d.sy, c, d.click.mode); this.paint(); return; } }
       const t = this.tab; if (t && d.click.hit) this.pickMode(d.click.hit, d.click.mode);
+      this.paint(); return;
+    }
+    // IsClick without a modifier on an item of a multi-selection: selectPoint( ..., false, false, false ) clears the
+    // selection and selects that item alone
+    if (d.mode === "move" && !d.moved && d.hit && Math.hypot(ev.clientX - d.sx, ev.clientY - d.sy) < 4) {
+      const t = this.tab; if (t && (t.sel.size !== 1 || !t.sel.has(d.hit))) { t.sel = new Set([d.hit]); this.selChanged(); }
       this.paint(); return;
     }
     if (d.mode === "move" && d.moved) {
