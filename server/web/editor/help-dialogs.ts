@@ -16,6 +16,8 @@ import { activeModule } from "./tools";
 import { esc, toast } from "./util";
 import { isSch } from "./view";
 import { ICON_URL } from "../brand";
+import CREDITS from "../generated/kicad-credits.json";
+import { kicadIcon } from "../components/kicon-dom";
 
 interface DialogSpec { title: string; width?: number; build(body: HTMLElement): void; okLabel?: string; ok?(): boolean | void }
 const dialogs = () => (window as unknown as { KDialogs?: { open(spec: DialogSpec): void } }).KDialogs;
@@ -90,6 +92,19 @@ export function versionInfo(): string {
     `Display: ${window.innerWidth}x${window.innerHeight} @ ${window.devicePixelRatio || 1}x`, `Locale: ${navigator.language}`, spec && spec.VERSION ? `Canvas: ${spec.VERSION}` : ""].filter(Boolean).join("\n");
 }
 
+/** DIALOG_ABOUT::createNotebooks: the pages in KiCad's order, with their images (dialog_about.cpp IMAGES) */
+const ABOUT_TABS: [string, string][] = [["About", "info"], ["Version", "recent"], ["Developers", "preference"], ["Doc Writers", "editor"], ["Librarians", "library"],
+  ["Artists", "color_materials"], ["Translators", "language"], ["Packagers", "zip"], ["License", "tools"]];
+interface Credit { name: string; category: string; url?: string }
+/** createNotebookPageByCategory: each category in the order it first appears, its contributors under it. */
+export function creditsHtml(list: Credit[]): string {
+  const cats: string[] = []; for (const c of list) if (c.category && !cats.includes(c.category)) cats.push(c.category);
+  return cats.map((cat) => `<p><b><u>${esc(cat)}:</u></b></p><ul>${list.filter((c) => c.category === cat).map((c) => `<li>${c.url ? `<a href="${esc(c.url)}" target="_blank" rel="noreferrer">${esc(c.name)}</a>` : esc(c.name)}</li>`).join("")}</ul>`).join("");
+}
+function creditPages(): Record<string, string> {
+  const C = CREDITS as Record<string, Credit[]>;
+  return { Developers: creditsHtml(C.developers), "Doc Writers": creditsHtml(C.docWriters), Librarians: creditsHtml(C.librarians), Artists: creditsHtml(C.artists), Translators: creditsHtml(C.translators), Packagers: creditsHtml(C.packagers) };
+}
 export function openAbout(): void {
   const D = dialogs(); if (!D) return;
   const link = (url: string, text?: string) => `<a href="${url}" target="_blank" rel="noreferrer">${esc(text || url)}</a>`;
@@ -99,18 +114,21 @@ export function openAbout(): void {
       <p><b><u>Junction on the web</u></b></p><ul><li>Source code - ${link(SOURCE)}</li><li>Desktop application - ${link(RELEASES)}</li></ul>
       <p><b><u>KiCad on the web</u></b></p><ul><li>The official KiCad website - ${link("http://www.kicad.org")}</li><li>Developer website - ${link("https://go.kicad.org/dev")}</li><li>Official KiCad library repositories - ${link("https://go.kicad.org/libraries")}</li></ul>
       <p><b><u>KiCad users group and community</u></b></p><ul><li>KiCad forum - ${link("https://go.kicad.org/forum")}</li></ul>`,
+    ...creditPages(),
     Version: `<pre id="abVersion" style="margin:0;white-space:pre-wrap;font-family:var(--mono);user-select:text">${esc(versionInfo())}</pre>`,
     License: `<p>The complete KiCad EDA Suite is released under the</p><p><b>GNU General Public License (GPL) version 3 or any later version</b></p>
       <p>Junction is a fork of KiCad and is distributed under the same license. The source code is available from ${link(SOURCE)}.</p>`,
   };
-  D.open({ title: "About Junction", width: 640,
+  D.open({ title: "About Junction", width: 780,
     build(body) {
       body.innerHTML = `<div style="display:flex;gap:16px;align-items:center;margin-bottom:12px">${LOGO}<div><div style="font-size:20px;font-weight:700">Junction</div>
         <div style="font-family:var(--mono);color:var(--ink-2);margin-top:2px" id="abVer">Version: ${esc(PRODUCT_VERSION)}, web editor</div><div style="color:var(--ink-2);margin-top:2px">Based on KiCad 10</div></div></div>
-        <div id="abTabs" style="display:flex;gap:2px;border-bottom:1px solid var(--line)">${Object.keys(pages).map((t, i) => `<button type="button" data-tab="${t}" class="${i ? "" : "on"}" style="border:1px solid var(--line);border-bottom:0;border-radius:var(--r-3) var(--r-3) 0 0;padding:5px 12px;background:${i ? "transparent" : "var(--panel)"};color:var(--ink);font:inherit;cursor:pointer">${t}</button>`).join("")}</div>
+        <div id="abTabs" style="display:flex;flex-wrap:wrap;gap:2px;border-bottom:1px solid var(--line)">${ABOUT_TABS.map(([t], i) => `<button type="button" data-tab="${t}" class="${i ? "" : "on"}" style="display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-bottom:0;border-radius:var(--r-3) var(--r-3) 0 0;padding:4px 9px;background:${i ? "transparent" : "var(--panel)"};color:var(--ink);font:inherit;cursor:pointer">${t}</button>`).join("")}</div>
         <div id="abPage" style="height:260px;overflow:auto;border:1px solid var(--line);border-top:0;background:var(--panel);padding:10px 14px;line-height:1.5"></div>
         <div style="margin-top:10px"><button type="button" class="btn" id="abCopy">Copy Version Info</button></div>`;
       const page = body.querySelector<HTMLElement>("#abPage")!;
+      // DIALOG_ABOUT's notebook images
+      body.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => { const ic = ABOUT_TABS.find(([t]) => t === b.dataset.tab)?.[1]; if (ic) b.prepend(kicadIcon(ic, 16)); });
       const show = (t: string) => { page.innerHTML = pages[t] || ""; body.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => { const on = b.dataset.tab === t; b.classList.toggle("on", on); b.style.background = on ? "var(--panel)" : "transparent"; b.style.fontWeight = on ? "600" : "400"; }); };
       body.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.addEventListener("click", () => show(b.dataset.tab || "About")));
       body.querySelector("#abCopy")!.addEventListener("click", (ev) => {
