@@ -88,6 +88,22 @@ function pieces(s: Shape): Shape[] {
   return out;
 }
 
+/**
+ * An exact fit beside a round or a straight obstacle.  `grow` carries the grid's margin, which covers a track that
+ * bends round the obstacle between two grid points; a point that lies beyond the obstacle's flat side (past a via or
+ * a round pad along a grid line, or beside an upright or level track) by the full gap needs none: everything on that
+ * side is at least the gap away, and so is a straight run between two such points.  This is what lets a track pass a
+ * 0.5 mm via in a 0.5 mm pitch row, where the gap is met to the micron and the margin would close the lane.
+ */
+function exact(G: Grid, s: Shape, grow: number, px: number, py: number): boolean {
+  const m = G.margin; if (!(m > 0)) return false; const need = grow - m - 1e-6;
+  if (s.t === "circle") return Math.abs(px - s.x) - s.r >= need || Math.abs(py - s.y) - s.r >= need;
+  if (s.t === "seg") {
+    if (Math.abs(s.a[0] - s.b[0]) < 1e-9) return Math.abs(px - s.a[0]) - s.r >= need;
+    if (Math.abs(s.a[1] - s.b[1]) < 1e-9) return Math.abs(py - s.a[1]) - s.r >= need;
+  }
+  return false;
+}
 /** Add (sign = 1) or take away (sign = -1) a shape grown by `grow` in an occupancy map. */
 export function stamp(G: Grid, map: Uint16Array, s: Shape, grow: number, sign: number, far = grow, near?: Uint8Array): void {
   if (far > grow && near) {   // a wider gap that holds only away from pads
@@ -95,7 +111,7 @@ export function stamp(G: Grid, map: Uint16Array, s: Shape, grow: number, sign: n
       const b = bboxOf(p);
       const x0 = Math.max(0, Math.ceil((b[0] - far - G.ox) / G.g)), x1 = Math.min(G.W - 1, Math.floor((b[2] + far - G.ox) / G.g));
       const y0 = Math.max(0, Math.ceil((b[1] - far - G.oy) / G.g)), y1 = Math.min(G.H - 1, Math.floor((b[3] + far - G.oy) / G.g));
-      for (let iy = y0; iy <= y1; iy++) { const y = G.oy + iy * G.g; let row = iy * G.W + x0; for (let ix = x0; ix <= x1; ix++, row++) { const d = pointGap(p, G.ox + ix * G.g, y); if (d <= grow || (d <= far && !near[row])) map[row] += sign; } }
+      for (let iy = y0; iy <= y1; iy++) { const y = G.oy + iy * G.g; let row = iy * G.W + x0; for (let ix = x0; ix <= x1; ix++, row++) { const x = G.ox + ix * G.g; const d = pointGap(p, x, y); if ((d <= grow && !exact(G, p, grow, x, y)) || (d <= far && !near[row])) map[row] += sign; } }
     }
     return;
   }
@@ -105,7 +121,7 @@ export function stamp(G: Grid, map: Uint16Array, s: Shape, grow: number, sign: n
     const y0 = Math.max(0, Math.ceil((b[1] - grow - G.oy) / G.g)), y1 = Math.min(G.H - 1, Math.floor((b[3] + grow - G.oy) / G.g));
     for (let iy = y0; iy <= y1; iy++) {
       const y = G.oy + iy * G.g; let row = iy * G.W + x0;
-      for (let ix = x0; ix <= x1; ix++, row++) if (pointGap(p, G.ox + ix * G.g, y) <= grow) map[row] += sign;
+      for (let ix = x0; ix <= x1; ix++, row++) { const x = G.ox + ix * G.g; if (pointGap(p, x, y) <= grow && !exact(G, p, grow, x, y)) map[row] += sign; }
     }
   }
 }

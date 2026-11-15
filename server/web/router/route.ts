@@ -1228,6 +1228,31 @@ export class Router {
       }
       if (!gained) break;
     }
+    // A pin boxed in by its neighbours in a fine-pitch row (each took the lane that suited it, and the one laid last
+    // found none left): the row's routes near it come out together and are laid again in pin order, from one end of
+    // the row and then from the other.  The route next to the obstacle goes first and takes the lane against it, and
+    // each one after it nests beside the last, the way a person combs a fan-out.
+    const fineEnd = (o: Conn, at?: Pt) => { const es = [o.a, o.b].filter((x) => x.narrow && x.narrow <= 0.35); if (!es.length) return null; if (at) es.sort((p, q) => Math.hypot(p.p[0] - at[0], p.p[1] - at[1]) - Math.hypot(q.p[0] - at[0], q.p[1] - at[1])); return es[0]; };
+    for (const c of conns) {
+      if (c.nodes || c.why === "budget" || timeUp() || c.pair) continue;
+      const e = fineEnd(c); if (!e) continue;
+      const near = conns.filter((o) => { if (o === c || !o.nodes || o.pair) return false; const x = fineEnd(o, e.p); return !!x && Math.hypot(x.p[0] - e.p[0], x.p[1] - e.p[1]) <= 2.6; });
+      let sx = 0, sy = 0; for (const o of near) { const x = fineEnd(o, e.p)!; sx = Math.max(sx, Math.abs(x.p[0] - e.p[0])); sy = Math.max(sy, Math.abs(x.p[1] - e.p[1])); }
+      const ax = sx >= sy ? 0 : 1;   // the row runs along this axis; pads round the corner of the package are another row
+      const row = near.filter((o) => Math.abs(fineEnd(o, e.p)!.p[1 - ax] - e.p[1 - ax]) < 0.3);
+      if (!row.length) continue;
+      // signals in pin order; the supplies after them (a supply pin's via fits around the signal lanes, not the other way round)
+      const key = (o: Conn) => { const x = fineEnd(o, e.p); return !x || Math.abs(x.p[1 - ax] - e.p[1 - ax]) >= 0.3 ? Infinity : x.p[ax]; };
+      const late = (o: Conn) => key(o) === Infinity ? 2 : isSupply(o.net) ? 1 : 0;
+      const snap = snapOf(); const n0 = snap.filter((x) => x.nodes).length;
+      for (const dir of [1, -1]) {
+        const ripped: Conn[] = []; for (const b of row) if (b.nodes) this.rip(b, ripped);
+        const all = [c, ...ripped.filter((r) => r !== c)].sort((p, q) => late(p) - late(q) || (late(p) === 2 ? 0 : dir * (key(p) - key(q))) || p.id - q.id);
+        let good = true; for (const r of all) if (!r.nodes && !lay(r)) { good = false; if ((globalThis as any).process?.env?.KC_ROUTER_WORK) console.error('comb', c.net, dir, 'row', all.map((x) => x.net + '@' + key(x)).join(' '), 'failed at', r.net); break; }
+        if (good && conns.filter((x) => x.nodes).length > n0) { this.stat.combed = (this.stat.combed || 0) + 1; break; }
+        back(snap);
+      }
+    }
     // Last resort for what is still open: the narrowest track the board allows gets through gaps the class width
     // does not.  Narrower than the net class asks for, never narrower than the design rules permit.
     const floor = Math.max(this.s.minTrackWidth || 0, 0.1);

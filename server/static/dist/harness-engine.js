@@ -61656,7 +61656,7 @@ function hitTestDetail(doc, x, y, slopMm, opts) {
     if (!it.movable || !it.bbox) continue;
     const b = it.bbox;
     if (x < b[0] - slopMm || x > b[2] + slopMm || y < b[1] - slopMm || y > b[3] + slopMm) continue;
-    let onGeom = false, exact = false, hitLayer = null, vis = null, hull = null, hitClass = 2;
+    let onGeom = false, exact2 = false, hitLayer = null, vis = null, hull = null, hitClass = 2;
     const grow6 = (b2, gb) => {
       if (!b2) return gb.slice();
       if (gb[0] < b2[0]) b2[0] = gb[0];
@@ -61674,7 +61674,7 @@ function hitTestDetail(doc, x, y, slopMm, opts) {
       if (g2.t !== "text") hull = grow6(hull, gb);
       if (hitClass > 0 && x >= gb[0] - slopMm && x <= gb[2] + slopMm && y >= gb[1] - slopMm && y <= gb[3] + slopMm && geomHit(g2, x, y, slopMm)) {
         onGeom = true;
-        if (!exact && (slopMm <= 0 || geomHit(g2, x, y, 0))) exact = true;
+        if (!exact2 && (slopMm <= 0 || geomHit(g2, x, y, 0))) exact2 = true;
         const cls = g2.t === "pad" || g2.t !== "text" && /\.Cu$/.test(g2.layer || "") ? 0 : 1;
         if (cls < hitClass) {
           hitClass = cls;
@@ -61685,10 +61685,10 @@ function hitTestDetail(doc, x, y, slopMm, opts) {
     if (!vis) continue;
     const hb = hull || vis;
     if (x < hb[0] - slopMm || x > hb[2] + slopMm || y < hb[1] - slopMm || y > hb[3] + slopMm) continue;
-    if (!exact && hull && (it.kind === "footprint" || it.kind === "symbol" || it.kind === "sheet") && x >= hull[0] && x <= hull[2] && y >= hull[1] && y <= hull[3]) exact = true;
+    if (!exact2 && hull && (it.kind === "footprint" || it.kind === "symbol" || it.kind === "sheet") && x >= hull[0] && x <= hull[2] && y >= hull[1] && y <= hull[3]) exact2 = true;
     const area4 = Math.max(0, vis[2] - vis[0]) * Math.max(0, vis[3] - vis[1]);
     const itemSide = it.layer && /^B\./.test(it.layer) ? "B" : "F";
-    const score = (exact ? 0 : 1e13) + hitClass * 1e11 + (side && itemSide !== side ? 1e9 : 0) + area4;
+    const score = (exact2 ? 0 : 1e13) + hitClass * 1e11 + (side && itemSide !== side ? 1e9 : 0) + area4;
     if (!best || score < best.score) best = { id: it.id, onGeom, cls: hitClass, layer: hitLayer, box: vis, score };
   }
   return best;
@@ -82352,6 +82352,17 @@ function pieces(s) {
   } else out.push(s);
   return out;
 }
+function exact(G2, s, grow6, px, py) {
+  const m = G2.margin;
+  if (!(m > 0)) return false;
+  const need = grow6 - m - 1e-6;
+  if (s.t === "circle") return Math.abs(px - s.x) - s.r >= need || Math.abs(py - s.y) - s.r >= need;
+  if (s.t === "seg") {
+    if (Math.abs(s.a[0] - s.b[0]) < 1e-9) return Math.abs(px - s.a[0]) - s.r >= need;
+    if (Math.abs(s.a[1] - s.b[1]) < 1e-9) return Math.abs(py - s.a[1]) - s.r >= need;
+  }
+  return false;
+}
 function stamp(G2, map, s, grow6, sign2, far = grow6, near) {
   if (far > grow6 && near) {
     for (const p of pieces(s)) {
@@ -82362,8 +82373,9 @@ function stamp(G2, map, s, grow6, sign2, far = grow6, near) {
         const y = G2.oy + iy * G2.g;
         let row2 = iy * G2.W + x0;
         for (let ix = x0; ix <= x1; ix++, row2++) {
-          const d = pointGap(p, G2.ox + ix * G2.g, y);
-          if (d <= grow6 || d <= far && !near[row2]) map[row2] += sign2;
+          const x = G2.ox + ix * G2.g;
+          const d = pointGap(p, x, y);
+          if (d <= grow6 && !exact(G2, p, grow6, x, y) || d <= far && !near[row2]) map[row2] += sign2;
         }
       }
     }
@@ -82376,7 +82388,10 @@ function stamp(G2, map, s, grow6, sign2, far = grow6, near) {
     for (let iy = y0; iy <= y1; iy++) {
       const y = G2.oy + iy * G2.g;
       let row2 = iy * G2.W + x0;
-      for (let ix = x0; ix <= x1; ix++, row2++) if (pointGap(p, G2.ox + ix * G2.g, y) <= grow6) map[row2] += sign2;
+      for (let ix = x0; ix <= x1; ix++, row2++) {
+        const x = G2.ox + ix * G2.g;
+        if (pointGap(p, x, y) <= grow6 && !exact(G2, p, grow6, x, y)) map[row2] += sign2;
+      }
     }
   }
 }
@@ -85105,6 +85120,54 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       }
       if (!gained) break;
     }
+    const fineEnd = (o, at3) => {
+      const es = [o.a, o.b].filter((x) => x.narrow && x.narrow <= 0.35);
+      if (!es.length) return null;
+      if (at3) es.sort((p, q) => Math.hypot(p.p[0] - at3[0], p.p[1] - at3[1]) - Math.hypot(q.p[0] - at3[0], q.p[1] - at3[1]));
+      return es[0];
+    };
+    for (const c of conns) {
+      if (c.nodes || c.why === "budget" || timeUp() || c.pair) continue;
+      const e = fineEnd(c);
+      if (!e) continue;
+      const near = conns.filter((o) => {
+        if (o === c || !o.nodes || o.pair) return false;
+        const x = fineEnd(o, e.p);
+        return !!x && Math.hypot(x.p[0] - e.p[0], x.p[1] - e.p[1]) <= 2.6;
+      });
+      let sx = 0, sy = 0;
+      for (const o of near) {
+        const x = fineEnd(o, e.p);
+        sx = Math.max(sx, Math.abs(x.p[0] - e.p[0]));
+        sy = Math.max(sy, Math.abs(x.p[1] - e.p[1]));
+      }
+      const ax = sx >= sy ? 0 : 1;
+      const row2 = near.filter((o) => Math.abs(fineEnd(o, e.p).p[1 - ax] - e.p[1 - ax]) < 0.3);
+      if (!row2.length) continue;
+      const key3 = (o) => {
+        const x = fineEnd(o, e.p);
+        return !x || Math.abs(x.p[1 - ax] - e.p[1 - ax]) >= 0.3 ? Infinity : x.p[ax];
+      };
+      const late = (o) => key3(o) === Infinity ? 2 : isSupply(o.net) ? 1 : 0;
+      const snap2 = snapOf();
+      const n0 = snap2.filter((x) => x.nodes).length;
+      for (const dir of [1, -1]) {
+        const ripped = [];
+        for (const b of row2) if (b.nodes) this.rip(b, ripped);
+        const all2 = [c, ...ripped.filter((r) => r !== c)].sort((p, q) => late(p) - late(q) || (late(p) === 2 ? 0 : dir * (key3(p) - key3(q))) || p.id - q.id);
+        let good = true;
+        for (const r of all2) if (!r.nodes && !lay(r)) {
+          good = false;
+          if (globalThis.process?.env?.KC_ROUTER_WORK) console.error("comb", c.net, dir, "row", all2.map((x) => x.net + "@" + key3(x)).join(" "), "failed at", r.net);
+          break;
+        }
+        if (good && conns.filter((x) => x.nodes).length > n0) {
+          this.stat.combed = (this.stat.combed || 0) + 1;
+          break;
+        }
+        back(snap2);
+      }
+    }
     const floor = Math.max(this.s.minTrackWidth || 0, 0.1);
     for (const c of conns) {
       if (c.nodes || c.why === "budget" || timeUp() || c.pair) continue;
@@ -87448,8 +87511,8 @@ function place(K8, P, doc, settings, opts = {}) {
     const finalPads = [];
     for (const b of blocks) for (const p of b.parts) {
       const [px, py] = rotv(b.rot, p.x, p.y);
-      const exact = b.fixed && p === b.anchor && isFixed(p) ? p.spec.fixed : null;
-      const x = exact ? exact.x : r3(Math.round((b.x + px) / 0.05) * 0.05), y = exact ? exact.y : r3(Math.round((b.y + py) / 0.05) * 0.05), rot3 = norm2(p.rot + b.rot);
+      const exact2 = b.fixed && p === b.anchor && isFixed(p) ? p.spec.fixed : null;
+      const x = exact2 ? exact2.x : r3(Math.round((b.x + px) / 0.05) * 0.05), y = exact2 ? exact2.y : r3(Math.round((b.y + py) / 0.05) * 0.05), rot3 = norm2(p.rot + b.rot);
       placements3.push({ ref: p.ref, id: p.id, x, y, rot: rot3, side: p.back ? "back" : "front", group: b.name.startsWith("~") ? "" : b.name.replace(/~\d+$/, "") });
       finalBox.set(p, shift(turnBox(p.box, rot3), x, y));
       finalGeo.push(geo(p, rot3, x, y));
@@ -94257,13 +94320,13 @@ function plotLayer(m, layer, opt, log, conn) {
 }
 function maskWithMinWidth(prims, minWidth) {
   const half = minWidth / 2;
-  const exact = [];
+  const exact2 = [];
   const cleared = [];
   for (const p of prims) {
     if (p.clear) cleared.push(p);
-    else for (const poly of primPolys(p)) exact.push(poly);
+    else for (const poly of primPolys(p)) exact2.push(poly);
   }
-  const merged = union2(exact);
+  const merged = union2(exact2);
   const closed = inflate(inflate(merged, half), -half);
   const all2 = union2(closed.concat(merged));
   const out = fracture(all2).map((pts) => ({ k: "region", pts }));
