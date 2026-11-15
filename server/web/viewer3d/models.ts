@@ -50,12 +50,16 @@ function fieldOf(node: SNode, name: string): string {
  * keeps the .step, as with KiCad's own library.
  */
 function projectModel(path: string): string | null {
-  const m = /^\$[{(]KIPRJMOD[})][\/\\](.+)\.(?:step|stp|wrl)$/i.exec(path); if (!m) return null;
+  const fn = (globalThis as { KiCadProjectModel?: (stem: string) => string | null }).KiCadProjectModel;
+  // a path that is absolute on the machine it was picked on (a file dialog writes those): the project may still hold
+  // that file, when the path points into a checkout of its repository; the page matches it by the end of the path
+  const abs = /^((?:[A-Za-z]:)?[\/\\].+)\.(?:step|stp|wrl|wrz)$/i.exec(path);
+  if (abs) { try { return typeof fn === "function" ? fn(abs[1].replace(/\\/g, "/")) || null : null; } catch { return null; } }
+  const m = /^\$[{(]KIPRJMOD[})][\/\\](.+)\.(?:step|stp|wrl|wrz)$/i.exec(path); if (!m) return null;
   // a library shared with other projects sits beside the project folder (${KIPRJMOD}/../lib/…) and is kept under that
   // same path; ".." anywhere but at the front is not a path the project keeps
   const stem = m[1].replace(/\\/g, "/").replace(/^\.\//, "");
   if (stem.replace(/^(?:\.\.\/)+/, "").split("/").includes("..")) return null;
-  const fn = (globalThis as { KiCadProjectModel?: (stem: string) => string | null }).KiCadProjectModel;
   try { return typeof fn === "function" ? fn(stem) || null : null; } catch { return null; }
 }
 

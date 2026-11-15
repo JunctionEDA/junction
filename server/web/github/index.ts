@@ -67,6 +67,7 @@ interface Status {
   missing?: Missing;
   /** The folder was found elsewhere and the link followed it. */
   moved?: { from: string; to: string };
+  branchMoved?: { from: string; to: string };
   renamedRepo?: { from: string; to: string };
   /** Files a pull removed, kept so they can be put back. */
   removed?: Removed[];
@@ -455,6 +456,7 @@ function render(): void {
   const s = status.summary, files = status.files;
   const canWrite = p.role === "editor";
   if (status.renamedRepo) html += `<div class="callout ok" id="renamedRepo">The repository was renamed on GitHub from <b>${esc(status.renamedRepo.from)}</b> to <b>${esc(status.renamedRepo.to)}</b>. The link follows it.</div>`;
+  if (status.branchMoved) html += `<div class="callout ok" id="branch-moved">The branch <span class="mono">${esc(status.branchMoved.from)}</span> is no longer on GitHub. The project is on <span class="mono">${esc(status.branchMoved.to)}</span>, and the link follows it there.</div>`;
   if (status.moved) html += `<div class="callout ok" id="moved">The project's folder moved on GitHub from <span class="mono">${esc(status.moved.from || "/")}</span> to <span class="mono">${esc(status.moved.to || "/")}</span>. The link follows it, and nothing was duplicated.</div>`;
 
   // Gone from where the link points: nothing is compared, nothing is pushed or pulled until the person says what to do.

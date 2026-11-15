@@ -209,6 +209,7 @@ try {
 
   // ---- linking a project that is not linked yet; unlink
   await page.click('#unlink');
+  await page.click('[data-k="confirm-ok"]');   // the themed question, not the browser's confirm()
   await page.waitForSelector('#doLink');
   check('unlink returns to the link form', await page.isDisabled('#doLink'));
   await page.click('#mode [data-v="new"]');

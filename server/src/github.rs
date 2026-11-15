@@ -725,8 +725,36 @@ impl Entry {
 /// Every file's standing.  A file that is gone under one name and present, unchanged,
 /// under another is the same file renamed: one entry, not a delete and a new file.
 fn compare(local: &BTreeMap<String, LocalFile>, remote: &Remote, base: &HashMap<String, BaseRow>) -> Vec<Entry> {
-    // Renamed online: the document the last sync knew under one path now has another.
     let by_id: HashMap<Uuid, &String> = local.iter().map(|(p, f)| (f.doc.id, p)).collect();
+    // Renamed on both sides, to different names: the file is gone from the path the last
+    // sync knew on both, the document has a new path online, and the content of that
+    // sync sits untouched under a path on GitHub that neither side knew.  GitHub's
+    // rename is taken as read, which leaves a plain rename online to push: one file
+    // under the online name, never two copies.
+    let mut rebased: Option<HashMap<String, BaseRow>> = None;
+    let mut both: HashSet<String> = HashSet::new(); // the online names
+    for (old, b) in base {
+        if local.contains_key(old) || remote.sha(old).is_some() {
+            continue;
+        }
+        let Some(new_local) = b.doc_id.and_then(|id| by_id.get(&id)) else { continue };
+        if base.contains_key(*new_local) || remote.sha(new_local).is_some() {
+            continue;
+        }
+        let hit = remote.files.iter().find(|(q, f)| {
+            f.sha == b.sha && !local.contains_key(*q) && !base.contains_key(*q) && doc_type_for(q) == doc_type_for(old)
+                && !rebased.as_ref().is_some_and(|r| r.contains_key(*q))
+        });
+        if let Some((there, _)) = hit {
+            let r = rebased.get_or_insert_with(|| base.clone());
+            if let Some(row) = r.remove(old) {
+                r.insert(there.clone(), row);
+                both.insert((*new_local).clone());
+            }
+        }
+    }
+    let base = rebased.as_ref().unwrap_or(base);
+    // Renamed online: the document the last sync knew under one path now has another.
     let mut renamed_online: HashMap<String, String> = HashMap::new(); // new -> old
     for (old, b) in base {
         if local.contains_key(old) {
@@ -768,7 +796,9 @@ fn compare(local: &BTreeMap<String, LocalFile>, remote: &Remote, base: &HashMap<
         .filter_map(|path| {
             if let Some(old) = renamed_online.get(path) {
                 let (l, r, b) = (local[path].sha.as_str(), remote.sha(old)?, base[old].sha.as_str());
-                let (change, detail) = if r == b || l == r {
+                let (change, detail) = if both.contains(path) {
+                    (Change::Push, "renamed online and on GitHub; pushing keeps the online name")
+                } else if r == b || l == r {
                     (Change::Push, "renamed online")
                 } else {
                     (Change::Conflict, "renamed online, changed on GitHub")
@@ -884,6 +914,26 @@ struct View {
     missing: Option<Missing>,
     /// The folder was found somewhere else and the link followed it: (from, to).
     moved: Option<(String, String)>,
+    /// The branch was renamed on GitHub (or merged and deleted) and the link followed it: (from, to).
+    branch_moved: Option<(String, String)>,
+}
+
+/// Where a branch that is gone may have gone: the name GitHub forwards the old one to
+/// (a branch renamed there), then the repository's default branch.  The bool says the
+/// branch was renamed, so it holds the very same commits.
+async fn branch_successors(gh: &Gh, repo: &RepoRef, old: &str) -> Vec<(String, bool)> {
+    let mut out: Vec<(String, bool)> = Vec::new();
+    if let Ok(v) = gh.get(&format!("/repos/{}/branches/{}", repo.slug(), enc_path(old))).await {
+        if let Some(name) = v["name"].as_str().filter(|n| *n != old) {
+            out.push((name.to_string(), true));
+        }
+    }
+    if let Ok(v) = gh.get(&format!("/repos/{}", repo.slug())).await {
+        if let Some(name) = v["default_branch"].as_str().filter(|n| *n != old && !out.iter().any(|(o, _)| o == n)) {
+            out.push((name.to_string(), false));
+        }
+    }
+    out
 }
 
 /// Whether what the last sync knew of the project is gone from GitHub: no files of the
@@ -907,10 +957,36 @@ fn project_gone(remote: &Remote, base: &HashMap<String, BaseRow>) -> bool {
 /// online because a folder disappeared.
 async fn view(state: &AppState, gh: &Gh, id: Uuid, mut link: Link) -> AppResult<View> {
     let base = load_base(state, id).await?;
-    let known: Vec<String> = base.keys().filter(|p| p.starts_with("../")).cloned().collect();
+    let known: Vec<String> = base.keys().cloned().collect();
     let mut remote = remote::read(&state.pool, gh, &link.repo, &link.branch, &link.subdir, &known).await?;
     let mut missing = None;
     let mut moved = None;
+    let mut branch_moved = None;
+    // The branch is gone: renamed on GitHub (master to main), or merged and deleted.
+    // The link follows when the project is plainly there: always after a rename, and on
+    // the default branch when it holds at least half the files as they were last synced.
+    if remote.head.is_none() && base.keys().any(|p| !p.starts_with("../")) {
+        for (to, renamed) in branch_successors(gh, &link.repo, &link.branch).await {
+            let there = remote::read(&state.pool, gh, &link.repo, &to, &link.subdir, &known).await?;
+            if there.head.is_none() || project_gone(&there, &base) {
+                continue;
+            }
+            let own: Vec<_> = base.iter().filter(|(p, _)| !p.starts_with("../")).collect();
+            let same = own.iter().filter(|(p, b)| there.sha(p) == Some(b.sha.as_str())).count();
+            if !renamed && same * 2 < own.len() {
+                continue;
+            }
+            sqlx::query("UPDATE project_github SET branch = $2 WHERE project_id = $1")
+                .bind(id)
+                .bind(&to)
+                .execute(&state.pool)
+                .await?;
+            let from = std::mem::replace(&mut link.branch, to.clone());
+            branch_moved = Some((from, to));
+            remote = there;
+            break;
+        }
+    }
     if project_gone(&remote, &base) {
         let shas: HashMap<String, String> = base.iter().map(|(p, b)| (p.clone(), b.sha.clone())).collect();
         let (mut candidates, clear) = match &remote.tree {
@@ -944,8 +1020,10 @@ async fn view(state: &AppState, gh: &Gh, id: Uuid, mut link: Link) -> AppResult<
         }
     }
     let local = local_files(state, id).await?;
-    let entries = if missing.is_some() { Vec::new() } else { compare(&local, &remote, &base) };
-    let mut v = View { link, remote, local, base, entries, missing, moved };
+    let mut entries = if missing.is_some() { Vec::new() } else { compare(&local, &remote, &base) };
+    // A Git LFS file is never written over or taken for deleted.
+    entries.retain(|e| !remote.lfs.contains(&e.path));
+    let mut v = View { link, remote, local, base, entries, missing, moved, branch_moved };
     if v.missing.is_none() {
         fuzzy_renames(state, gh, &mut v).await?;
     }
@@ -1551,7 +1629,13 @@ pub async fn project_status(
         Vec::new()
     } else {
         let live: HashSet<&str> = entries.iter().flat_map(|e| [e.path.as_str(), e.base_path()]).collect();
-        base.keys().filter(|p| !live.contains(p.as_str())).cloned().collect()
+        // …except the record of a document that still exists under another name: it is
+        // what tells a file renamed on both sides from two unrelated files.
+        let docs: HashSet<Uuid> = local.values().map(|f| f.doc.id).collect();
+        base.iter()
+            .filter(|(p, b)| !live.contains(p.as_str()) && !b.doc_id.is_some_and(|d| docs.contains(&d)))
+            .map(|(p, _)| p.clone())
+            .collect()
     };
     drop_base(&state, id, &stale).await?;
 
@@ -1647,6 +1731,9 @@ pub async fn project_status(
     }
     if let Some((from, to)) = &v.moved {
         out["moved"] = json!({ "from": from, "to": to });
+    }
+    if let Some((from, to)) = &v.branch_moved {
+        out["branchMoved"] = json!({ "from": from, "to": to });
     }
     let removed = sqlx::query(
         "SELECT r.id, r.path, r.removed_at, octet_length(r.content) AS size, u.login
@@ -2092,7 +2179,8 @@ async fn push_as(state: &AppState, user: &User, id: Uuid, req: PushRequest) -> A
         }
         // Putting the project back: forget what the last sync knew, so every file is
         // simply new online.
-        sqlx::query("DELETE FROM project_github_files WHERE project_id = $1").bind(id).execute(&state.pool).await?;
+        // (What it shares with other projects outside its folder is still there and stays known.)
+        sqlx::query("DELETE FROM project_github_files WHERE project_id = $1 AND path NOT LIKE '../%'").bind(id).execute(&state.pool).await?;
         v = view(&state, &gh, id, v.link).await?;
     }
     let (link, remote, local, entries) = (&v.link, &v.remote, &v.local, &v.entries);
@@ -2127,6 +2215,12 @@ async fn push_as(state: &AppState, user: &User, id: Uuid, req: PushRequest) -> A
                     outside(&mut blocked);
                     continue;
                 };
+                if !remote.files.contains_key(&e.path) {
+                    if let Some(m) = remote.unread_module(src, &at) {
+                        blocked.push(json!({ "path": e.path, "reason": format!("{} would go inside the submodule {m}, which could not be read.", e.path) }));
+                        continue;
+                    }
+                }
                 let (_, content) = persist::latest_snapshot(&state.pool, lf.doc.id).await?.ok_or(AppError::NotFound)?;
                 per_src.entry(src).or_default().push(PushItem { doc_path: e.path.clone(), repo_path: at, content: Some((blob_sha(&content), content)) });
                 // Renamed online: the old name goes in the same commit.

@@ -66,6 +66,13 @@ pub(super) struct Remote {
     pub nested: Vec<String>,
     /// Whether the linked folder is there at all.
     pub folder_exists: bool,
+    /// Folders reached through a symbolic link: (project path of the link with a
+    /// trailing slash, source, the real folder in that source).
+    pub links: Vec<(String, usize, String)>,
+    /// Project paths that are Git LFS pointers on GitHub: left alone both ways.
+    pub lfs: BTreeSet<String>,
+    /// Where the linked repository's `.gitmodules` says its submodules are.
+    pub module_paths: Vec<String>,
 }
 
 impl Remote {
@@ -85,11 +92,33 @@ impl Remote {
         }
     }
 
+    /// The submodule of the linked repository a repository path is inside, when that
+    /// submodule was not opened: nothing may be written there as a plain file.
+    pub fn unread_module(&self, src: usize, at: &str) -> Option<&str> {
+        if src != 0 {
+            return None;
+        }
+        self.module_paths.iter().map(String::as_str).find(|m| at == *m || at.starts_with(&format!("{m}/")))
+    }
+
+    /// Where a project path lives (or would be written): see `place`.
+    fn place_inner(&self, doc_path: &str) -> Option<(usize, String)> {
+        // Below a symbolic link to a folder, a file is written in the real folder.
+        if let Some((pre, src, dir)) = self.links.iter().filter(|(pre, _, _)| doc_path.starts_with(pre.as_str())).max_by_key(|(pre, _, _)| pre.len()) {
+            let rest = &doc_path[pre.len()..];
+            return Some((*src, if dir.is_empty() { rest.to_string() } else { format!("{dir}/{rest}") }));
+        }
+        None
+    }
+
     /// Where a project path lives (or would be written): the source and the path inside it.
     /// None for a path that climbs out of the repository.
     pub fn place(&self, subdir: &str, doc_path: &str) -> Option<(usize, String)> {
         if let Some(f) = self.files.get(doc_path) {
             return Some((f.src, f.path.clone()));
+        }
+        if let Some(at) = self.place_inner(doc_path) {
+            return Some(at);
         }
         let full = repo_path(subdir, doc_path)?;
         // The deepest submodule the path is inside.
@@ -167,7 +196,7 @@ fn ext(path: &str) -> String {
 
 /// Whether a file can name other files worth following.
 fn names_files(path: &str) -> bool {
-    is_lib_table(path) || matches!(ext(path).as_str(), "kicad_sch" | "kicad_pcb" | "kicad_mod")
+    is_lib_table(path) || matches!(ext(path).as_str(), "kicad_sch" | "kicad_pcb" | "kicad_mod" | "kicad_pro")
 }
 
 // ------------------------------------------------------------------ what a file names
@@ -203,34 +232,101 @@ fn quoted_after<'a>(text: &'a str, head: &str) -> Vec<&'a str> {
     out
 }
 
-fn strip_kiprjmod(s: &str) -> Option<&str> {
-    s.strip_prefix("${KIPRJMOD}/")
-        .or_else(|| s.strip_prefix("$(KIPRJMOD)/"))
-        .or_else(|| s.strip_prefix("${KIPRJMOD}\\"))
+/// One path a file names, sorted out by where it points.
+enum Named<'a> {
+    /// Under the project folder (`${KIPRJMOD}/…`), or a plain relative path.
+    Project(String),
+    /// Absolute on the machine it was written on.
+    Absolute(String),
+    /// Under another path variable, a URL: not the project's.
+    Elsewhere(&'a str),
 }
 
-/// The files `text` (the content of `path`) names: project-relative for a library
-/// table row and a 3D model (`${KIPRJMOD}/…`), relative to the sheet's own folder for
-/// a sub-sheet.  Anything under another path variable or absolute is not the project's.
-pub(super) fn refs_of(path: &str, text: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
-    if is_lib_table(path) {
-        out.extend(quoted_after(text, "(uri").into_iter().filter_map(strip_kiprjmod).map(str::to_string));
-    } else {
-        match ext(path).as_str() {
-            "kicad_sch" => {
-                for s in quoted_after(text, "(property \"Sheetfile\"") {
-                    // A sheet file is named relative to the sheet that holds it; only a
-                    // relative name that leaves the folder needs following.
-                    if !s.starts_with('/') && !s.contains(':') && !s.starts_with('$') {
-                        out.push(s.to_string());
-                    } else if let Some(r) = strip_kiprjmod(s) {
-                        out.push(format!("//{r}")); // marked project-relative
+fn classify(raw: &str) -> Named<'_> {
+    let s = raw.trim();
+    let s = s.strip_prefix("file://").unwrap_or(s);
+    let unix = s.replace('\\', "/");
+    for head in ["${KIPRJMOD}/", "$(KIPRJMOD)/"] {
+        if let Some(rest) = unix.strip_prefix(head) {
+            return Named::Project(rest.to_string());
+        }
+    }
+    let drive = unix.as_bytes().get(1) == Some(&b':') && unix.as_bytes().first().is_some_and(u8::is_ascii_alphabetic);
+    if unix.starts_with('/') || drive {
+        return Named::Absolute(unix);
+    }
+    if unix.is_empty() || unix.contains('$') || unix.contains("://") {
+        return Named::Elsewhere(raw);
+    }
+    Named::Project(unix)
+}
+
+/// A string value of `key` anywhere in a JSON text (the project file).
+fn json_strings(text: &str, key: &str) -> Vec<String> {
+    fn walk(v: &Value, key: &str, out: &mut Vec<String>) {
+        match v {
+            Value::Object(m) => {
+                for (k, v) in m {
+                    match v.as_str() {
+                        Some(s) if k == key => out.push(s.to_string()),
+                        _ => walk(v, key, out),
                     }
                 }
             }
+            Value::Array(a) => a.iter().for_each(|v| walk(v, key, out)),
+            _ => {}
+        }
+    }
+    let mut out = Vec::new();
+    if let Ok(v) = serde_json::from_str::<Value>(text) {
+        walk(&v, key, &mut out);
+    }
+    out
+}
+
+/// The files `text` (the content of `path`) names, each tagged with how to read it:
+/// `p:` a path from the project folder that should be there, `o:` one that may not be
+/// (a model named by a bare relative path is looked up in KiCad's own folders first;
+/// the STEP file beside a VRML model a board uses), `s:` a path from the sheet's own
+/// folder, `a:` an absolute path, which may still point into the repository as it was
+/// checked out on someone's machine.  Anything under another path variable is not the
+/// project's.
+pub(super) fn refs_of(path: &str, text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    let mut add = |raw: &str, relative: &str| match classify(raw) {
+        Named::Project(p) if raw.contains("KIPRJMOD") => out.push(format!("p:{p}")),
+        Named::Project(p) => out.push(format!("{relative}:{p}")),
+        Named::Absolute(p) => out.push(format!("a:{p}")),
+        Named::Elsewhere(_) => {}
+    };
+    if is_lib_table(path) {
+        quoted_after(text, "(uri").into_iter().for_each(|s| add(s, "p"));
+    } else {
+        match ext(path).as_str() {
+            "kicad_sch" => {
+                // A sheet file is named relative to the sheet that holds it.
+                quoted_after(text, "(property \"Sheetfile\"").into_iter().for_each(|s| add(s, "s"));
+                // A simulation model library is looked up from the project folder.
+                quoted_after(text, "(property \"Sim.Library\"").into_iter().for_each(|s| add(s, "o"));
+            }
             "kicad_pcb" | "kicad_mod" => {
-                out.extend(quoted_after(text, "(model").into_iter().filter_map(strip_kiprjmod).map(str::to_string));
+                let board = ext(path) == "kicad_pcb";
+                for s in quoted_after(text, "(model") {
+                    add(s, "o");
+                    // The viewers read STEP; a board that names the VRML file of a pair
+                    // wants the STEP file beside it too.
+                    let (Named::Project(p) | Named::Absolute(p)) = classify(s) else { continue };
+                    let lower = p.to_ascii_lowercase();
+                    if board && (lower.ends_with(".wrl") || lower.ends_with(".wrz")) {
+                        let stem = &p[..p.len() - 4];
+                        for e in ["step", "stp"] {
+                            add(&format!("{stem}.{e}"), "o");
+                        }
+                    }
+                }
+            }
+            "kicad_pro" => {
+                json_strings(text, "page_layout_descr_file").iter().for_each(|s| add(s, "o"));
             }
             _ => {}
         }
@@ -240,17 +336,70 @@ pub(super) fn refs_of(path: &str, text: &str) -> Vec<String> {
     out
 }
 
-/// Turn what `refs_of` returned for the file at project path `path` into project paths.
-pub(super) fn resolve_refs(path: &str, refs: &[String]) -> Vec<String> {
-    let sheet = ext(path) == "kicad_sch";
-    refs.iter()
-        .map(|r| match r.strip_prefix("//") {
-            Some(abs) => norm_join("", abs),
-            None if sheet => norm_join(dir_of(path), r),
-            None => norm_join("", r),
-        })
-        .filter(|p| !p.is_empty())
-        .collect()
+/// A file a project file names, as a project path.
+#[derive(Debug, Clone, PartialEq)]
+pub(super) struct Target {
+    pub path: String,
+    /// Not worth a remark when it is not in the repository.
+    pub optional: bool,
+    /// `path` is absolute on someone's machine, still to be found in the repository.
+    pub absolute: bool,
+}
+
+/// Turn what `refs_of` returned for the file at project path `path` into targets.
+pub(super) fn resolve_refs(path: &str, refs: &[String]) -> Vec<Target> {
+    let mut out: Vec<Target> = Vec::new();
+    for r in refs {
+        let Some((tag, rest)) = r.split_once(':') else { continue };
+        let t = match tag {
+            "a" => Target { path: rest.to_string(), optional: true, absolute: true },
+            "s" => Target { path: norm_join(dir_of(path), rest), optional: false, absolute: false },
+            "p" | "o" => Target { path: norm_join("", rest), optional: tag == "o", absolute: false },
+            _ => continue,
+        };
+        if t.path.is_empty() {
+            continue;
+        }
+        // named both ways: the stricter reading stands
+        if let Some(have) = out.iter_mut().find(|o| o.path == t.path && o.absolute == t.absolute) {
+            have.optional &= t.optional;
+        } else {
+            out.push(t);
+        }
+    }
+    out
+}
+
+/// Where an absolute path from someone's machine is in the repository, when it reads
+/// as a path inside a checkout of it: what follows the folder named like the
+/// repository, or failing that what starts at the top folder of the project's own path.
+fn absolute_in_repo(abs: &str, repo: &RepoRef, subdir: &str) -> Vec<String> {
+    let segs: Vec<&str> = abs.split('/').filter(|s| !s.is_empty()).collect();
+    let mut out = Vec::new();
+    if let Some(i) = segs.iter().rposition(|s| s.eq_ignore_ascii_case(&repo.name)) {
+        if i + 1 < segs.len() {
+            out.push(segs[i + 1..].join("/"));
+        }
+    }
+    if let Some(top) = subdir.split('/').find(|s| !s.is_empty()) {
+        if let Some(i) = segs.iter().rposition(|s| *s == top) {
+            let cand = segs[i..].join("/");
+            if i + 1 < segs.len() && !out.contains(&cand) {
+                out.push(cand);
+            }
+        }
+    }
+    out
+}
+
+/// The project path (possibly `../…`) of a repository path, seen from the project folder.
+fn project_path(subdir: &str, repo_path: &str) -> String {
+    let from: Vec<&str> = subdir.split('/').filter(|s| !s.is_empty()).collect();
+    let to: Vec<&str> = repo_path.split('/').filter(|s| !s.is_empty()).collect();
+    let common = from.iter().zip(&to).take_while(|(a, b)| a == b).count();
+    let mut out: Vec<&str> = vec![".."; from.len() - common];
+    out.extend(&to[common..]);
+    out.join("/")
 }
 
 // ------------------------------------------------------------------ .gitmodules
@@ -338,6 +487,8 @@ enum Kind {
     Tree,
     /// A gitlink: a submodule pinned at a commit.
     Commit,
+    /// A symbolic link: a blob holding the path it points at.
+    Link,
 }
 
 #[derive(Debug, Clone)]
@@ -362,7 +513,13 @@ pub(super) struct Walker<'a> {
     listings: HashMap<(String, String, bool), (Vec<TreeEntry>, bool)>,
     modules: HashMap<usize, HashMap<String, Module>>,
     mounts: HashMap<(usize, String), Option<usize>>,
+    pub links: Vec<(String, usize, String)>,
+    /// The real folders being listed right now, so a link back into one is not followed.
+    listing: Vec<(usize, String)>,
 }
+
+/// How many symbolic links one path may go through.
+const MAX_LINK_HOPS: usize = 8;
 
 type Fut<'f, T> = Pin<Box<dyn Future<Output = Result<T, GhErr>> + Send + 'f>>;
 
@@ -384,6 +541,8 @@ impl<'a> Walker<'a> {
             listings: HashMap::new(),
             modules: HashMap::new(),
             mounts: HashMap::new(),
+            links: Vec::new(),
+            listing: Vec::new(),
         }
     }
 
@@ -392,6 +551,16 @@ impl<'a> Walker<'a> {
             return;
         }
         self.notes.push(json!({ "kind": kind, "path": path, "repo": repo.map(RepoRef::slug), "message": message }));
+    }
+
+    /// Drop what was noted since there were `n` notes (a look that was only a try),
+    /// except that a submodule could not be opened: that is said once and matters still.
+    pub fn forget_notes(&mut self, n: usize) {
+        let mut i = 0;
+        self.notes.retain(|note| {
+            i += 1;
+            i <= n || note["kind"].as_str().is_some_and(|k| k.starts_with("submodule"))
+        });
     }
 
     /// The entries of a tree: its direct children, or everything below it.
@@ -409,6 +578,7 @@ impl<'a> Walker<'a> {
         let mut out = Vec::new();
         for e in v["tree"].as_array().into_iter().flatten() {
             let kind = match e["type"].as_str() {
+                Some("blob") if e["mode"].as_str() == Some("120000") => Kind::Link,
                 Some("blob") => Kind::Blob,
                 Some("tree") => Kind::Tree,
                 Some("commit") => Kind::Commit,
@@ -503,8 +673,12 @@ impl<'a> Walker<'a> {
         Ok(found)
     }
 
-    /// What is at `path` of a source, going through submodules on the way.
+    /// What is at `path` of a source, going through submodules and symbolic links on the way.
     pub fn locate<'f>(&'f mut self, src: usize, path: &'f str) -> Fut<'f, Loc> {
+        self.locate_from(src, path.to_string(), 0)
+    }
+
+    fn locate_from<'f>(&'f mut self, src: usize, path: String, hops: usize) -> Fut<'f, Loc> {
         Box::pin(async move {
             let (mut cur_src, mut cur_tree) = (src, self.sources[src].tree.clone());
             let mut inside: Vec<&str> = Vec::new(); // path within cur_src
@@ -523,6 +697,13 @@ impl<'a> Walker<'a> {
                             Loc::Missing
                         });
                     }
+                    Kind::Link => {
+                        let at = inside.join("/");
+                        let Some(target) = self.link_target(cur_src, &at, &e.sha, e.size, hops).await? else { return Ok(Loc::Missing) };
+                        let rest = segs[i + 1..].join("/");
+                        let next = if rest.is_empty() { target } else { format!("{target}/{rest}") };
+                        return self.locate_from(cur_src, next, hops + 1).await;
+                    }
                     Kind::Commit => {
                         let at = inside.join("/");
                         match self.mount(cur_src, &at, &e.sha).await? {
@@ -540,15 +721,67 @@ impl<'a> Walker<'a> {
         })
     }
 
-    /// Every file below a folder, submodules included, as (path relative to the folder, file).
+    /// Where the symbolic link at `at` of a source points, as a path of that source.
+    /// None (with a note) when it leads out of the repository or cannot be followed.
+    async fn link_target(&mut self, src: usize, at: &str, sha: &str, size: u64, hops: usize) -> Result<Option<String>, GhErr> {
+        let full = norm_join(&self.sources[src].mount, at);
+        if hops >= MAX_LINK_HOPS {
+            self.note("symlink_loop", &full, None, format!("{full} is a symbolic link that leads back to itself, so it was left out."));
+            return Ok(None);
+        }
+        if size > 4096 {
+            return Ok(None);
+        }
+        let repo = self.sources[src].repo.clone();
+        let raw = String::from_utf8_lossy(&self.gh.blob(&repo, sha).await?).trim().to_string();
+        let absolute = raw.starts_with('/') || raw.starts_with('\\') || raw.as_bytes().get(1) == Some(&b':');
+        let target = norm_join(dir_of(at), &raw);
+        if absolute || target.starts_with("..") {
+            self.note("symlink_outside", &full, None, format!(
+                "{full} is a symbolic link to {raw}, which is outside the repository, so it was left out."));
+            return Ok(None);
+        }
+        Ok(Some(target))
+    }
+
+    /// Every file below a folder, submodules and symbolic links followed, as (path
+    /// relative to the folder, file).  A file reached through a link keeps the path it
+    /// has in the project and is read and written where it really is.
     pub fn list<'f>(&'f mut self, src: usize, tree: &'f str, dir: &'f str, prefix: &'f str, out: &'f mut Vec<(String, RemoteFile)>) -> Fut<'f, ()> {
         Box::pin(async move {
+            self.listing.push((src, dir.to_string()));
             let all = self.entries(src, tree, true).await?;
             for e in all {
                 let inside = if dir.is_empty() { e.path.clone() } else { format!("{dir}/{}", e.path) };
                 match e.kind {
                     Kind::Tree => {}
                     Kind::Blob => out.push((format!("{prefix}{}", e.path), RemoteFile { sha: e.sha, size: e.size, src, path: inside })),
+                    Kind::Link => {
+                        let full = norm_join(&self.sources[src].mount, &inside);
+                        match self.locate_from(src, inside.clone(), 0).await? {
+                            Loc::File(f) => out.push((format!("{prefix}{}", e.path), f)),
+                            Loc::Dir { src: s, tree: t, path } => {
+                                // A link to a folder being listed (itself, or one it is inside) would never end.
+                                let around = self.listing.iter().any(|(ls, ld)| {
+                                    *ls == s && (path.is_empty() || *ld == path || ld.starts_with(&format!("{path}/")))
+                                });
+                                if around {
+                                    self.note("symlink_loop", &full, None, format!(
+                                        "{full} is a symbolic link to a folder it is inside, so it was left out."));
+                                    continue;
+                                }
+                                let sub_prefix = format!("{prefix}{}/", e.path);
+                                self.links.push((sub_prefix.clone(), s, path.clone()));
+                                self.list(s, &t, &path, &sub_prefix, out).await?;
+                            }
+                            Loc::Missing => {
+                                if !self.notes.iter().any(|n| n["path"] == full.as_str()) {
+                                    self.note("symlink_broken", &full, None, format!(
+                                        "{full} is a symbolic link to something that is not in the repository, so it was left out."));
+                                }
+                            }
+                        }
+                    }
                     Kind::Commit => {
                         if let Some(s) = self.mount(src, &inside, &e.sha).await? {
                             let sub_tree = self.sources[s].tree.clone();
@@ -558,6 +791,7 @@ impl<'a> Walker<'a> {
                     }
                 }
             }
+            self.listing.pop();
             Ok(())
         })
     }
@@ -584,7 +818,9 @@ fn under<'d>(dirs: &'d BTreeSet<String>, path: &str) -> Option<&'d String> {
 
 /// What a blob names, remembered by blob id.
 async fn blob_refs(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, doc_path: &str, f: &RemoteFile) -> AppResult<Vec<String>> {
-    if let Some(row) = sqlx::query("SELECT refs FROM github_blob_refs WHERE blob_sha = $1").bind(&f.sha).fetch_optional(pool).await? {
+    // keyed with the reader's version, so what an older reader remembered is not reused
+    let key = format!("{}:2", f.sha);
+    if let Some(row) = sqlx::query("SELECT refs FROM github_blob_refs WHERE blob_sha = $1").bind(&key).fetch_optional(pool).await? {
         let v: Value = row.get("refs");
         return Ok(v.as_array().into_iter().flatten().filter_map(|s| s.as_str().map(str::to_string)).collect());
     }
@@ -594,7 +830,7 @@ async fn blob_refs(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, doc_path: &str,
     let bytes = gh.blob(repo, &f.sha).await?;
     let refs = refs_of(doc_path, &String::from_utf8_lossy(&bytes));
     sqlx::query("INSERT INTO github_blob_refs (blob_sha, refs) VALUES ($1, $2) ON CONFLICT DO NOTHING")
-        .bind(&f.sha)
+        .bind(&key)
         .bind(json!(refs))
         .execute(pool)
         .await?;
@@ -632,7 +868,10 @@ pub(super) async fn read(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, branch: &
     let nested = if own_project { project_dirs(files.keys()) } else { BTreeSet::new() };
     let mut set_aside: BTreeMap<String, RemoteFile> = BTreeMap::new();
     if !nested.is_empty() {
-        let (keep, aside): (BTreeMap<_, _>, BTreeMap<_, _>) = files.into_iter().partition(|(p, _)| under(&nested, p).is_none());
+        let (keep, aside): (BTreeMap<_, _>, BTreeMap<_, _>) = files
+            .into_iter()
+            // what the project already has stays with it when a project file appears beside it later
+            .partition(|(p, _)| under(&nested, p).is_none() || (!p.ends_with(".kicad_pro") && known.contains(p)));
         files = keep;
         set_aside = aside;
     }
@@ -643,13 +882,14 @@ pub(super) async fn read(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, branch: &
     // in another folder, a model.  What they bring in may name more.
     let mut scanned: BTreeSet<String> = BTreeSet::new();
     let mut tried: BTreeSet<String> = BTreeSet::new();
+    let mut missing: Vec<(String, String)> = Vec::new();
     loop {
         let todo: Vec<String> = files.keys().filter(|p| names_files(p) && !scanned.contains(*p)).cloned().collect();
         if todo.is_empty() {
             break;
         }
         // Read what is not remembered yet a few at a time.
-        let mut named: Vec<String> = Vec::new();
+        let mut named: Vec<Target> = Vec::new();
         for group in todo.chunks(6) {
             let jobs = group.iter().map(|p| {
                 let f = &files[p];
@@ -660,9 +900,27 @@ pub(super) async fn read(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, branch: &
             }
         }
         scanned.extend(todo);
-        named.sort();
-        named.dedup();
-        for target in named {
+        // An absolute path that reads as a path inside a checkout of this repository
+        // (a model picked through a file dialog) is the file at that place.
+        let mut wanted: Vec<Target> = Vec::new();
+        for t in named {
+            if !t.absolute {
+                wanted.push(t);
+                continue;
+            }
+            for at in absolute_in_repo(&t.path, repo, subdir) {
+                let notes = w.notes.len();
+                let hit = matches!(w.locate(0, &at).await?, Loc::File(_));
+                w.forget_notes(notes);
+                if hit {
+                    wanted.push(Target { path: project_path(subdir, &at), optional: true, absolute: false });
+                    break;
+                }
+            }
+        }
+        wanted.sort_by(|a, b| a.path.cmp(&b.path).then(a.optional.cmp(&b.optional)));
+        wanted.dedup_by(|b, a| a.path == b.path);
+        for Target { path: target, optional, .. } in wanted {
             let outside = target.starts_with("../");
             if !(outside || under(&nested, &target).is_some()) || files.contains_key(&target) || !tried.insert(target.clone()) {
                 continue;
@@ -682,6 +940,9 @@ pub(super) async fn read(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, branch: &
                 continue;
             }
             let Some(at) = repo_path(subdir, &target) else {
+                if optional {
+                    continue;
+                }
                 w.note("outside_repo", &target, None, format!(
                     "{target} is outside the repository, so it can't come along. Libraries a project shares need to be in the repository."));
                 continue;
@@ -696,22 +957,48 @@ pub(super) async fn read(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, branch: &
                 Loc::Dir { src, tree, path } => {
                     let mut found = Vec::new();
                     let prefix = format!("{target}/");
+                    // Reached through a symbolic link (or a submodule): new files go to the real folder.
+                    if (src, path.as_str()) != (0, at.as_str()) && !w.links.iter().any(|(p, _, _)| *p == prefix) {
+                        w.links.push((prefix.clone(), src, path.clone()));
+                    }
                     w.list(src, &tree, &path, &prefix, &mut found).await?;
                     files.extend(found.into_iter().filter(|(rel, _)| usable(rel)));
                 }
                 Loc::Missing => {
                     // A submodule that could not be opened has said so already.
-                    if w.notes.len() == notes_before && !w.notes.iter().any(|n| {
+                    if optional {
+                        w.forget_notes(notes_before);
+                    } else if w.notes.len() == notes_before && !w.notes.iter().any(|n| {
                         n["kind"].as_str().is_some_and(|k| k.starts_with("submodule"))
                             && n["path"].as_str().is_some_and(|m| at == m || at.starts_with(&format!("{m}/")))
                     }) {
-                        w.note("missing_ref", &target, None, format!("The project names {target} ({at} in the repository), which is not there."));
+                        missing.push((target, at));
                     }
                 }
             }
             if files.len() > MAX_FILES * 4 {
                 break;
             }
+        }
+    }
+
+    // What is named but not there, said once per folder rather than once per file.
+    let mut by_dir: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+    for (target, at) in missing {
+        by_dir.entry(dir_of(&target).to_string()).or_default().push((target, at));
+    }
+    for (dir, gone) in by_dir {
+        let (target, at) = &gone[0];
+        if gone.len() == 1 {
+            w.note("missing_ref", target, None, format!("The project names {target} ({at} in the repository), which is not there."));
+        } else {
+            let at_dir = dir_of(at);
+            let mut n = json!({
+                "kind": "missing_ref", "path": dir, "count": gone.len(),
+                "message": format!("The project names {} files in {dir} ({at_dir} in the repository) that are not there, {} among them.", gone.len(), base_name(target)),
+            });
+            n["paths"] = json!(gone.iter().map(|(t, _)| t).collect::<Vec<_>>());
+            w.notes.push(n);
         }
     }
 
@@ -724,14 +1011,61 @@ pub(super) async fn read(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, branch: &
         if let Loc::File(f) = w.locate(0, &at).await? {
             files.insert(path.clone(), f);
         }
-        w.notes.truncate(notes);
+        w.forget_notes(notes);
     }
 
+    // Files kept with Git LFS are small pointers in the repository; the real content
+    // lives elsewhere.  They stay as they are on GitHub and do not come online.
+    let maybe: Vec<String> = files.iter().filter(|(_, f)| (100..=200).contains(&f.size)).map(|(p, _)| p.clone()).collect();
+    for group in maybe.chunks(6) {
+        let jobs = group.iter().map(|p| is_lfs_pointer(pool, gh, &w.sources[files[p].src].repo, &files[p]));
+        for (p, lfs) in group.iter().zip(futures_util::future::try_join_all(jobs).await?) {
+            if lfs {
+                files.remove(p);
+                remote.lfs.insert(p.clone());
+            }
+        }
+    }
+    if let Some(first) = remote.lfs.iter().next() {
+        let n = remote.lfs.len();
+        let message = if n == 1 {
+            format!("{first} is stored with Git LFS. It stays as it is on GitHub and is not brought online.")
+        } else {
+            format!("{n} files are stored with Git LFS ({} among them). They stay as they are on GitHub and are not brought online.", base_name(first))
+        };
+        w.notes.push(json!({ "kind": "lfs", "path": first, "count": n, "message": message, "paths": remote.lfs.iter().collect::<Vec<_>>() }));
+    }
+
+    remote.module_paths = w.modules_of(0).await?.into_keys().collect();
     remote.files = files;
     remote.truncated = w.truncated;
     remote.sources = w.sources;
     remote.notes = w.notes;
+    remote.links = w.links;
     Ok(remote)
+}
+
+/// Whether a small blob is a Git LFS pointer, remembered by blob id.
+async fn is_lfs_pointer(pool: &sqlx::PgPool, gh: &Gh, repo: &RepoRef, f: &RemoteFile) -> AppResult<bool> {
+    let key = format!("{}:lfs", f.sha);
+    if let Some(row) = sqlx::query("SELECT refs FROM github_blob_refs WHERE blob_sha = $1").bind(&key).fetch_optional(pool).await? {
+        let v: Value = row.get("refs");
+        return Ok(v.as_array().is_some_and(|a| !a.is_empty()));
+    }
+    let bytes = gh.blob(repo, &f.sha).await?;
+    let lfs = lfs_pointer(&bytes);
+    sqlx::query("INSERT INTO github_blob_refs (blob_sha, refs) VALUES ($1, $2) ON CONFLICT DO NOTHING")
+        .bind(&key)
+        .bind(if lfs { json!(["lfs"]) } else { json!([]) })
+        .execute(pool)
+        .await?;
+    Ok(lfs)
+}
+
+pub(super) fn lfs_pointer(bytes: &[u8]) -> bool {
+    bytes.len() <= 400
+        && bytes.starts_with(b"version https://git-lfs.github.com/spec/")
+        && std::str::from_utf8(bytes).is_ok_and(|t| t.lines().any(|l| l.starts_with("oid sha256:")))
 }
 
 // ------------------------------------------------------------------ scanning a repository
@@ -801,7 +1135,7 @@ pub(super) async fn scan(gh: &Gh, repo: &RepoRef, branch: &str) -> AppResult<(Re
                 continue;
             }
             let text = String::from_utf8_lossy(&gh.blob(&w.sources[f.src].repo, &f.sha).await?).into_owned();
-            for target in resolve_refs(table, &refs_of(table, &text)) {
+            for target in resolve_refs(table, &refs_of(table, &text)).into_iter().filter(|t| !t.absolute).map(|t| t.path) {
                 if !target.starts_with("../") {
                     continue;
                 }
@@ -826,6 +1160,9 @@ pub(super) async fn scan(gh: &Gh, repo: &RepoRef, branch: &str) -> AppResult<(Re
         notes: w.notes,
         nested: Vec::new(),
         folder_exists: true,
+        module_paths: w.modules.get(&0).map(|m| m.keys().cloned().collect()).unwrap_or_default(),
+        links: w.links,
+        lfs: BTreeSet::new(),
     };
     Ok((remote, found))
 }
@@ -928,14 +1265,42 @@ mod tests {
 
     #[test]
     fn what_files_name() {
+        let named = |path: &str, text: &str| -> Vec<String> {
+            let mut v: Vec<String> = resolve_refs(path, &refs_of(path, text)).into_iter().map(|t| format!("{}{}{}", t.path, if t.optional { "?" } else { "" }, if t.absolute { " (absolute)" } else { "" })).collect();
+            v.sort();
+            v
+        };
         let table = "(fp_lib_table\n  (version 7)\n  (lib (name \"lcsc\")(type \"KiCad\")(uri \"${KIPRJMOD}/../lib/lcsc.pretty\")(options \"\")(descr \"\"))\n  (lib (name std)(type KiCad)(uri ${KICAD9_FOOTPRINT_DIR}/R.pretty))\n  (lib (name mine)(type KiCad)(uri $(KIPRJMOD)/mine.pretty))\n)";
-        assert_eq!(resolve_refs("fp-lib-table", &refs_of("fp-lib-table", table)), vec!["../lib/lcsc.pretty", "mine.pretty"]);
-        let sch = "(kicad_sch\n\t(sheet\n\t\t(property \"Sheetname\" \"psu\")\n\t\t(property \"Sheetfile\" \"../common/psu.kicad_sch\"\n\t\t\t(at 0 0 0))\n\t)\n\t(sheet (property \"Sheetfile\" \"io.kicad_sch\"))\n)";
-        assert_eq!(resolve_refs("sub/top.kicad_sch", &refs_of("sub/top.kicad_sch", sch)), vec!["common/psu.kicad_sch", "sub/io.kicad_sch"]);
-        assert_eq!(resolve_refs("top.kicad_sch", &refs_of("top.kicad_sch", sch)), vec!["../common/psu.kicad_sch", "io.kicad_sch"]);
-        let pcb = "(kicad_pcb (footprint \"a:b\" (model \"${KIPRJMOD}/../lib/lcsc.3dshapes/X.wrl\" (offset (xyz 0 0 0))) (model \"${KICAD10_3DMODEL_DIR}/R.3dshapes/R.step\")))";
-        assert_eq!(resolve_refs("b.kicad_pcb", &refs_of("b.kicad_pcb", pcb)), vec!["../lib/lcsc.3dshapes/X.wrl"]);
-        assert!(refs_of("x.kicad_pro", "{\"uri\": \"${KIPRJMOD}/../x\"}").is_empty());
+        assert_eq!(named("fp-lib-table", table), vec!["../lib/lcsc.pretty", "mine.pretty"]);
+        // written on Windows, with no variable at all, as a file URL, and absolute
+        let odd = "(sym_lib_table (lib (name a)(type KiCad)(uri \"${KIPRJMOD}\\..\\parts\\a.kicad_sym\"))(lib (name b)(type KiCad)(uri \"../../common/b.kicad_sym\"))\n (lib (name c)(type KiCad)(uri \"file://${KIPRJMOD}/c.kicad_sym\"))(lib (name d)(type KiCad)(uri \"C:\\Users\\me\\keys\\hardware\\lib\\d.kicad_sym\"))(lib (name e)(type KiCad)(uri \"https://example.com/e.kicad_sym\")))";
+        assert_eq!(named("sym-lib-table", odd), vec!["../../common/b.kicad_sym", "../parts/a.kicad_sym", "C:/Users/me/keys/hardware/lib/d.kicad_sym? (absolute)", "c.kicad_sym"]);
+        let sch = "(kicad_sch\n\t(sheet\n\t\t(property \"Sheetname\" \"psu\")\n\t\t(property \"Sheetfile\" \"../common/psu.kicad_sch\"\n\t\t\t(at 0 0 0))\n\t)\n\t(sheet (property \"Sheetfile\" \"io.kicad_sch\"))\n\t(symbol (property \"Sim.Library\" \"../models/opamp.lib\"))\n)";
+        assert_eq!(named("sub/top.kicad_sch", sch), vec!["../models/opamp.lib?", "common/psu.kicad_sch", "sub/io.kicad_sch"]);
+        assert_eq!(named("top.kicad_sch", sch), vec!["../common/psu.kicad_sch", "../models/opamp.lib?", "io.kicad_sch"]);
+        // a board wants the STEP file beside a VRML model; a footprint in a library does not ask for it
+        let pcb = "(kicad_pcb (footprint \"a:b\" (model \"${KIPRJMOD}/../lib/lcsc.3dshapes/X.wrl\" (offset (xyz 0 0 0))) (model \"${KICAD10_3DMODEL_DIR}/R.3dshapes/R.step\") (model \"/Users/me/keys/hardware/lib/lcsc.3dshapes/Y.wrl\") (model \"Resistors_SMD.3dshapes/R_0603.wrl\")))";
+        assert_eq!(named("b.kicad_pcb", pcb), vec![
+            "../lib/lcsc.3dshapes/X.step?", "../lib/lcsc.3dshapes/X.stp?", "../lib/lcsc.3dshapes/X.wrl", "/Users/me/keys/hardware/lib/lcsc.3dshapes/Y.step? (absolute)",
+            "/Users/me/keys/hardware/lib/lcsc.3dshapes/Y.stp? (absolute)", "/Users/me/keys/hardware/lib/lcsc.3dshapes/Y.wrl? (absolute)",
+            "Resistors_SMD.3dshapes/R_0603.step?", "Resistors_SMD.3dshapes/R_0603.stp?", "Resistors_SMD.3dshapes/R_0603.wrl?"]);
+        assert_eq!(named("../lib/a.pretty/b.kicad_mod", "(footprint \"b\" (model \"${KIPRJMOD}/../lib/lcsc.3dshapes/X.wrl\"))"), vec!["../lib/lcsc.3dshapes/X.wrl"]);
+        // the drawing sheet a project file names
+        let pro = "{\"pcbnew\": {\"page_layout_descr_file\": \"../shared/frame.kicad_wks\"}, \"schematic\": {\"page_layout_descr_file\": \"\"}, \"uri\": \"${KIPRJMOD}/../x\"}";
+        assert_eq!(named("x.kicad_pro", pro), vec!["../shared/frame.kicad_wks?"]);
+    }
+
+    #[test]
+    fn absolute_paths_into_a_checkout() {
+        let repo = RepoRef::parse("me/keys").unwrap();
+        assert_eq!(absolute_in_repo("/Users/me/Documents/GitHub/keys/hardware/lib/a.wrl", &repo, "hardware/keyword"), vec!["hardware/lib/a.wrl"]);
+        // cloned under another name: the project's own top folder still places it
+        assert_eq!(absolute_in_repo("C:/work/kb/hardware/lib/a.wrl", &repo, "hardware/keyword"), vec!["hardware/lib/a.wrl"]);
+        assert!(absolute_in_repo("/usr/share/kicad/3dmodels/R.wrl", &repo, "hardware/keyword").is_empty());
+        assert_eq!(project_path("hardware/keyword", "hardware/lib/a.wrl"), "../lib/a.wrl");
+        assert_eq!(project_path("", "lib/a.wrl"), "lib/a.wrl");
+        assert_eq!(project_path("a/b", "a/b/c.wrl"), "c.wrl");
+        assert_eq!(project_path("a/b", "x/c.wrl"), "../../x/c.wrl");
     }
 
     #[test]

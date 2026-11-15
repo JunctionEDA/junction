@@ -758,8 +758,18 @@ async function importLibraryFiles(files: { path: string; text: string }[]): Prom
 // A 3D model kept in the project, for the 3D viewer and the model report (viewer3d/models.ts): the project path a
 // footprint names, without its extension, to where that document's text is read.
 (globalThis as { KiCadProjectModel?: (stem: string) => string | null }).KiCadProjectModel = (stem) => {
-  const docs = state.project ? state.project.docs : [];
-  const hit = [".step", ".stp"].map((ext) => docs.find((d) => d.docType === "model3d" && d.path.toLowerCase() === (stem + ext).toLowerCase())).find(Boolean);
+  const docs = (state.project ? state.project.docs : []).filter((d) => d.docType === "model3d" && /\.(step|stp)$/i.test(d.path));
+  const want = stem.toLowerCase();
+  let hit = docs.find((d) => d.path.toLowerCase().replace(/\.(step|stp)$/, "") === want);
+  if (!hit && (want.startsWith("/") || /^[a-z]:\//.test(want))) {
+    // an absolute path from someone's machine: the project file whose own path (from its first real folder on) ends it,
+    // at least a folder and a file name deep; the longest such match
+    let best = 0;
+    for (const d of docs) {
+      const own = d.path.toLowerCase().replace(/\.(step|stp)$/, "").replace(/^(?:\.\.\/)+/, "");
+      if (own.split("/").length >= 2 && want.endsWith("/" + own) && own.length > best) { best = own.length; hit = d; }
+    }
+  }
   return hit ? `/api/docs/${hit.docId}/content` : null;
 };
 /** The project's custom design rules (.kicad_dru) replaced by `text`: the existing rules document, or a new one beside the board. */

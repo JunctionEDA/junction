@@ -93,6 +93,8 @@ function commitFiles(repo, branch, files, message, author) {
       const sub = repos.get(content.submodule);
       map.set(path, 'commit:' + (content.commit || (sub && sub.refs.get(sub.defaultBranch)) || '0'.repeat(40)));
     }
+    // A symbolic link: { symlink: 'target' } is a blob holding the target, with mode 120000.
+    else if (typeof content === 'object' && !Buffer.isBuffer(content) && content.symlink) map.set(path, 'link:' + putBlob(content.symlink));
     else map.set(path, putBlob(content));
   }
   const sha = putCommit(putTree(map), parent ? [parent] : [], message, author);
@@ -102,6 +104,7 @@ function commitFiles(repo, branch, files, message, author) {
 
 // ---------------------------------------------------------------- http plumbing
 function send(res, status, body, headers = {}) {
+  if (status >= 409 && process.env.FAKE_DEBUG) console.error(status, JSON.stringify(body));
   const data = body === undefined ? '' : JSON.stringify(body);
   res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
   res.end(data);
@@ -186,7 +189,7 @@ const server = http.createServer(async (req, res) => {
       const head = repo && repo.refs.get(q.get('branch') || repo.defaultBranch);
       if (!head) return send(res, 200, { head: null, files: {} });
       const files = {};
-      for (const [p, s] of trees.get(commits.get(head).tree)) files[p] = s.startsWith('commit:') ? '@' + s : blobs.get(s).toString();
+      for (const [p, s] of trees.get(commits.get(head).tree)) files[p] = s.startsWith('commit:') ? '@' + s : s.startsWith('link:') ? '->' + blobs.get(s.slice(5)).toString() : blobs.get(s).toString();
       return send(res, 200, { head, parents: commits.get(head).parents, message: commits.get(head).message, files });
     }
     if (what === 'state') {
@@ -202,6 +205,17 @@ const server = http.createServer(async (req, res) => {
       for (const i of installations.values()) if (i.repos.delete(body.fullName)) i.repos.add(body.to);
       return send(res, 200, { ok: true });
     }
+    // A branch renamed on GitHub: the old name forwards to the new one, as GET /branches/<old> does there.
+    if (what === 'rename-branch') {
+      const repo = repos.get(body.fullName);
+      if (!repo || !repo.refs.has(body.branch)) return notFound(res);
+      repo.refs.set(body.to, repo.refs.get(body.branch)); repo.refs.delete(body.branch);
+      if (repo.defaultBranch === body.branch) repo.defaultBranch = body.to;
+      (repo.renamedBranches ||= new Map()).set(body.branch, body.to);
+      return send(res, 200, { ok: true });
+    }
+    if (what === 'branch') { const repo = repos.get(body.fullName); repo.refs.set(body.to, repo.refs.get(body.from || repo.defaultBranch)); return send(res, 200, { ok: true }); }
+    if (what === 'default-branch') { repos.get(body.fullName).defaultBranch = body.branch; return send(res, 200, { ok: true }); }
     if (what === 'delete-branch') { repos.get(body.fullName)?.refs.delete(body.branch); return send(res, 200, { ok: true }); }
     if (what === 'install-choice') { installChoice = body.repos; return send(res, 200, { ok: true }); }
     if (what === 'installations') return send(res, 200, [...installations.values()].map((i) => ({ ...i, repos: [...i.repos] })));
@@ -364,6 +378,13 @@ const server = http.createServer(async (req, res) => {
   if (rest === '' && req.method === 'GET') return send(res, 200, repoJson(repo, perms));
   if (rest === '/branches') return send(res, 200, [...repo.refs.keys()].map((name) => ({ name, commit: { sha: repo.refs.get(name) } })));
 
+  const bm = rest.match(/^\/branches\/(.+)$/);
+  if (bm && req.method === 'GET') {
+    const name = repo.refs.has(bm[1]) ? bm[1] : repo.renamedBranches?.get(bm[1]);
+    if (!name || !repo.refs.has(name)) return send(res, 404, { message: 'Branch not found' });
+    return send(res, 200, { name, commit: { sha: repo.refs.get(name) } });
+  }
+
   if (rest === '/commits' && req.method === 'GET') {
     const from = q.get('sha') || repo.defaultBranch;
     let sha = repo.refs.get(from) || (commits.has(from) ? from : undefined);   // a branch or, as on GitHub, a commit
@@ -418,6 +439,7 @@ const server = http.createServer(async (req, res) => {
     const tree = trees.get(mm[1]);
     if (!tree) return notFound(res);
     const blobEntry = ([p, s]) => s.startsWith('commit:') ? { path: p, mode: '160000', type: 'commit', sha: s.slice(7) }
+      : s.startsWith('link:') ? { path: p, mode: '120000', type: 'blob', sha: s.slice(5), size: blobs.get(s.slice(5)).length }
       : { path: p, mode: '100644', type: 'blob', sha: s, size: blobs.get(s).length };
     if (q.get('recursive')) return send(res, 200, { sha: mm[1], truncated: false, tree: [...tree.entries()].map(blobEntry) });
     // Like GitHub: without ?recursive only the direct children, folders as "tree" entries.
@@ -448,7 +470,13 @@ const server = http.createServer(async (req, res) => {
     for (const e of body.tree || []) {
       if (e.sha === null) map.delete(e.path);
       else if (e.type === 'commit') { if (e.mode !== '160000') return send(res, 422, { message: 'a commit entry needs mode 160000' }); map.set(e.path, 'commit:' + e.sha); }
-      else { if (!blobs.has(e.sha)) return send(res, 422, { message: 'tree.sha is not a valid blob' }); map.set(e.path, e.sha); }
+      else {
+        if (!blobs.has(e.sha)) return send(res, 422, { message: 'tree.sha is not a valid blob' });
+        // Like git: nothing can be written below a path that is a file or a symbolic link.
+        const segs = e.path.split('/');
+        for (let i = 1; i < segs.length; i++) if (map.has(segs.slice(0, i).join('/'))) return send(res, 422, { message: `tree.path ${e.path} goes through a file` });
+        map.set(e.path, e.mode === '120000' ? 'link:' + e.sha : e.sha);
+      }
     }
     return send(res, 201, { sha: putTree(map) });
   }

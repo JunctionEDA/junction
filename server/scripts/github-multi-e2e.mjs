@@ -410,11 +410,7 @@ try {
   check('a project pushed to its own branch', r.status === 200, JSON.stringify(r.j));
   await ctl('delete-branch', { fullName: 'gh-alice/keys', branch: 'rev-b' });
   st = await status(alice, panel);
-  check('a deleted branch is reported as missing, not recreated', st.missing && st.missing.reason === 'branch', JSON.stringify(st.missing));
-  r = await push(alice, panel);
-  check('…a push needs the person to say so', r.status === 409 && !(await ctl('state?repo=gh-alice/keys')).branches['rev-b']);
-  r = await push(alice, panel, { restore: true });
-  check('…and then recreates it', r.status === 200 && !!(await ctl('state?repo=gh-alice/keys')).branches['rev-b'], JSON.stringify(r.j));
+  eq('a deleted branch whose project is on the default branch: the link moves there (a branch that leaves nothing behind is in github-multi-edge-e2e)', [st.missing, st.branchMoved, st.link.branch, !(await ctl('state?repo=gh-alice/keys')).branches['rev-b']], [undefined, { from: 'rev-b', to: 'main' }, 'main', true]);
 
   // ---- the repository renamed on GitHub
   await ctl('rename-repo', { fullName: 'gh-alice/keys', to: 'gh-alice/keyboards' });
