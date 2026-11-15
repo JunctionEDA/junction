@@ -5,6 +5,7 @@
 import { openSimulator } from "../sim/frame";
 import { openEditSymbolsLibId } from "./edit-libid";
 import { openUpdateFromPcb } from "./update-from-pcb";
+import { openImportSheet } from "./import-sheet";
 import { E, isSch, requestRender, setToggle, store, toast, toolCtx } from "./editor";
 import { openAssignFootprints } from "./assign-footprints";
 import { openChangeSymbols } from "./change-symbols";
@@ -113,6 +114,8 @@ export function installDialogs(HANDLERS: Record<string, Handler>): void {
     showSimulator: needDoc(() => { void openSimulator(); }, true),
     // SCH_EDITOR_CONTROL::EditSymbolLibraryLinks (DIALOG_EDIT_SYMBOLS_LIBID)
     editSymbolLibraryLinks: needDoc(() => { void openEditSymbolsLibId(); }, true),
+    // SCH_DRAWING_TOOLS::ImportSheet: Place > Import Sheet... (dialogs/import-sheet.ts)
+    importSheet: needDoc(() => openImportSheet(), true),
     // SCH_EDITOR_CONTROL::UpdateFromPCB (DIALOG_UPDATE_FROM_PCB); the board editor's entry is its own module's
     updateSchematicFromPcb: (() => { if (E.kdoc && isSch()) openUpdateFromPcb(); else if (prevUpdateSch) prevUpdateSch(); else toast("Open the schematic to update it from the PCB"); }) as Handler,
     // ACTIONS::gridProperties ("Edit Grids..."): COMMON_TOOLS::GridProperties opens Preferences on the editor's Grids page

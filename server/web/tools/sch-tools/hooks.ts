@@ -55,6 +55,8 @@ export function onActivate(toolId: string, ctx: SchCtx, before: string[] = []) {
   S.tool = toolId;
   closePrompt(); S.pending = null; if (S.drag) endDrag(ctx, false);
   if (S.draw) S.draw = null;                      // an unfinished shape is dropped with its tool
+  // Import Sheet arms the preset for the sheet tool it starts; any other activation drops it
+  if (S.sheetPreset && S.sheetPreset.armed && toolId === "sheet") S.sheetPreset.armed = false; else S.sheetPreset = null;
   if (toolId === "arc") showSchArcMode(ctx);       // SelectToolbarAction( DrawArcForMode ): the Arc group shows the mode
   if (!toolOf(toolId)) { closePicker(); S.carry = null; ctx.requestRender(); return; }
   S.sel = null; S.hover = null; S.selEnds = null;

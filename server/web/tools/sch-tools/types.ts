@@ -133,6 +133,8 @@ export type SchState = {
   pending: { item: KItem; mm: Pt } | null; sel: string | null; hover: string | null;
   cursor: Pt | null; cursorClient: Pt | null; prompt: HTMLElement | null; picker: HTMLElement | null; dom: boolean;
   draw: SchDraw | null; highlight: Set<string> | null; sheetJob: SheetJob | null; imageWait: boolean;
+  /** Place > Import Sheet "Place as sheet" (SCH_ACTIONS::drawSheetFromFile): the next drawn sheet's name and file */
+  sheetPreset?: { name: string; file: string; armed?: boolean } | null;
   pedit?: PointEdit | null;
   netHL?: NetHighlighter | null;
   dragMode: string; lineMode: string; posture: boolean;

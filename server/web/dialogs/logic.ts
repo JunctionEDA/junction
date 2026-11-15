@@ -346,3 +346,12 @@ export function pushFindHistory(list: string[], s: string): string[] {
   if (!s) return list.slice(0, FIND_HISTORY_MAX);
   return [s, ...list.filter((x) => x !== s)].slice(0, FIND_HISTORY_MAX);
 }
+
+/** The project-relative path `path` as seen from the directory of `from` (what a sheet's Sheetfile holds). */
+export function relativeSheetPath(from: string, path: string): string {
+  const a = from.split("/").slice(0, -1), b = path.split("/");
+  let i = 0; while (i < a.length && i < b.length - 1 && a[i] === b[i]) i++;
+  return [...a.slice(i).map(() => ".."), ...b.slice(i)].join("/");
+}
+/** wxFileName::GetName: the file name without its directory and extension. */
+export const sheetBaseName = (path: string): string => (path.split("/").pop() || path).replace(/\.kicad_sch$/i, "");

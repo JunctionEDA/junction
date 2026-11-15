@@ -295,4 +295,17 @@ test("groupPinRows: by name, by selection; grouped values and renumbering", () =
   SM.setPinGroupValue(sel[0], "type", "bidirectional", null, null); assert.ok(sel[0].pins.every((p) => p.type === "bidirectional"));
   SM.setPinGroupValue(sel[0], "name", SM.PIN_MIXED, null, null); assert.strictEqual(pins[1].name, "A");
 });
+test("Import Sheet: the sheet file relative to the current sheet, the group name made unique", () => {
+  const I = load(["dialogs", "logic.ts"]);
+  {
+    assert.strictEqual(I.relativeSheetPath("top.kicad_sch", "pic_sockets.kicad_sch"), "pic_sockets.kicad_sch");
+    assert.strictEqual(I.relativeSheetPath("sub/a.kicad_sch", "b.kicad_sch"), "../b.kicad_sch");
+    assert.strictEqual(I.relativeSheetPath("sub/a.kicad_sch", "sub/c/b.kicad_sch"), "c/b.kicad_sch");
+    assert.strictEqual(I.sheetBaseName("sub/pic_sockets.kicad_sch"), "pic_sockets");
+  }
+  const C = load(["tools", "sch-tools", "clipboard.ts"]);
+  const doc = { items: new Map([["1", { kind: "group", node: ["group", "pic"] }], ["2", { kind: "group", node: ["group", "pic1"] }]]) };
+  assert.strictEqual(C.uniqueGroupName(doc, "x"), "x");
+  assert.strictEqual(C.uniqueGroupName(doc, "pic"), "pic2");
+});
 process.on("exit", () => { console.log(`schdlg: ${passed} passed, ${failed} failed`); if (failed) process.exitCode = 1; });

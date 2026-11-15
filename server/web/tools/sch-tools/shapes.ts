@@ -70,7 +70,8 @@ export function finishDraw(ctx: SchCtx) {
     d.await = true; ctx.requestRender();
     const KD = typeof root.KDialogs !== "undefined" ? root.KDialogs : null;
     if (KD && KD.schItemDialog && !ctx.viewOnly) {
-      const sn = sheetNode(pts[0], pts[1], "Untitled Sheet", "untitled" + SHEET_EXT);
+      const pre = S.sheetPreset; S.sheetPreset = null;
+      const sn = pre ? sheetNode(pts[0], pts[1], pre.name, pre.file) : sheetNode(pts[0], pts[1], "Untitled Sheet", "untitled" + SHEET_EXT);
       const inst = sheetInstance(ctx, ctx.doc, nextPage(ctx, ctx.doc)); if (inst) sn.push(inst);
       const it = { id: "", kind: "sheet", node: sn, geom: [], bbox: null };
       KD.schItemDialog(ctx, it, { cancel() { if (S.draw === d) { S.draw = null; ctx.requestRender(); } }, onCreate(staged) {

@@ -14,7 +14,15 @@ import { addNode, deep, dropKid, r4 } from "./util";
 // symbols used, then the items — no (kicad_sch …) wrapper, which its copyable-only parser rejects.
 // opts.wrap gives the document form for anything that wants a whole sheet.
 /** Paste options: the reference rule, the undo label, where the items land, and whether junctions are added. */
-export interface PasteOpts { pasteMode?: string; keepAnnotations?: boolean; noJunctions?: boolean; label?: string; at?: Pt }
+export interface PasteOpts { pasteMode?: string; keepAnnotations?: boolean; noJunctions?: boolean; label?: string; at?: Pt;
+  /** Import Sheet's "Place as group": the new items go into one new group of this name (made unique on the sheet) */
+  group?: string }
+/** UniqueGroupName: the base name, else the base name with the first free number appended. */
+export function uniqueGroupName(doc: KDoc, base: string) {
+  const taken = new Set<string>(); for (const it of doc.items.values()) if (it.kind === "group") taken.add(str(it.node[1]));
+  if (!taken.has(base)) return base;
+  for (let n = 1; ; n++) if (!taken.has(base + n)) return base + n;
+}
 /** Clipboard content: the items and the library symbols they draw from. */
 export interface Clip { nodes: SNode[]; libs: SNode[] }
 export function clipboardText(doc: KDoc, items: KItem[], opts?: { wrap?: boolean }) {
@@ -102,7 +110,13 @@ export function pasteChanges(doc: KDoc, parsed: Clip, at: Pt, opts?: PasteOpts |
   const changes: KChange[] = [], items: KItem[] = [];
   for (const n of fresh) { const { item, change } = addNode(doc, n); changes.push(change); items.push(item); }
   if (!(opts && opts.noJunctions)) changes.push(...junctionsForNew(doc, items));
-  return { changes, ids: items.map((it) => it.id), libs };
+  const ids = items.map((it) => it.id);
+  if (opts && opts.group !== undefined && items.length) {
+    const members = fresh.map((n) => str((kid(n, "uuid") || [])[1])).filter(Boolean);
+    const { item, change } = addNode(doc, ["group", uniqueGroupName(doc, opts.group), ["uuid", K.newUuid()], ["members", ...members]]);
+    changes.push(change); ids.push(item.id);
+  }
+  return { changes, ids, libs };
 }
 export function copySelection(ctx: SchCtx) {
   const items = selectedItems(ctx); if (!items.length) return false;

@@ -26,6 +26,7 @@ export const toolCtx = tools.toolCtx as unknown as (extra?: Record<string, unkno
 export const undoStack = tools.undoStack as unknown as UndoEntry[];
 export const redoStack = tools.redoStack as unknown as UndoEntry[];
 export const publishUndo = tools.publishUndo as () => void;
+export const setTool = tools.setTool as (t: string) => void;
 export const pushUndoFor = tools.pushUndoFor as unknown as (docId: string, entry: UndoEntry) => void;
 export const applyChanges = doc.applyChanges as unknown as (changes: unknown[]) => void;
 export const sendOp = net.sendOp as unknown as (changes: unknown[], transient?: boolean) => void;

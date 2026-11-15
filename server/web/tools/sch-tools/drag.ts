@@ -292,6 +292,8 @@ function dragChangeList(ctx: SchCtx, d: SchDrag, dx: number, dy: number, connect
   const touched: Pt[] = [];
   for (const e of d.items) { const n = deep(e.item.node); shiftNode(e.kind, n, dx, dy); const c = modChange(doc, e.item, n); put(d.local && d.local.has(e.item.id) ? Object.assign(c, { kind: "ADDED" }) : c); }
   for (const r of d.riders) { const n = deep(r.item.node); shiftNode(r.item.kind, n, dx, dy); put(modChange(doc, r.item, n)); }
+  // a pasted item the drag does not move (the group an import puts the new items in) is added as it is
+  if (d.local) for (const id of d.local) { if (out.has(id)) continue; const it = doc.items.get(id); if (it && !DRAG_KINDS.has(it.kind)) put(Object.assign(modChange(doc, it, deep(it.node)), { kind: "ADDED" })); }
   for (const e of d.ends || []) {
     const g = partialGeometry(e, dx, dy, connected && !d.mode && S.lineMode !== "free"), pts = g.pts;
     touched.push(...e.orig, ...pts);
