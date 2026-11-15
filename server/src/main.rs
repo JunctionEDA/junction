@@ -316,7 +316,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/adopt", get(auth::adopt))
         .route("/auth/dev", get(auth::dev_login))
         .route("/auth/logout", post(auth::logout))
-        .route("/api/projects", post(http::create_project).get(http::list_projects))
+        .route("/api/limits", get(http::limits))
+        .route("/api/projects", post(http::create_project).layer(DefaultBodyLimit::max(http::MAX_UPLOAD_BODY_BYTES)).get(http::list_projects))
         .route(
             "/api/projects/{id}",
             get(http::get_project).patch(http::update_project).delete(http::delete_project),
@@ -376,7 +377,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .route("/api/links/{token}", delete(http::revoke_link))
         .route("/api/join/{token}", post(http::claim_link))
-        .route("/api/docs/{doc_id}/snapshots", post(http::upload_snapshot))
+        .route("/api/docs/{doc_id}/snapshots", post(http::upload_snapshot).layer(DefaultBodyLimit::max(http::MAX_FILE_BODY_BYTES)))
         .route("/api/docs/{doc_id}/snapshots/{seq}", get(http::get_snapshot))
         // Version history and branches (versions.rs); the checkpoint routes are the old names
         .merge(versions::routes())

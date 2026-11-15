@@ -12,6 +12,24 @@ version it is based on.
   design), Details, Accept and Reject, and File, Proposed Changes brings it
   back. An accepted proposal lands as one edit that undo takes back.
 - An assistant's highlight shows its note under its name tag.
+- A project that came online without its footprint library folders gets them
+  written back from its boards when it is opened, the way Export Footprints to
+  Library does, so the rules check no longer warns "footprint not found in
+  library" for every part. The next sync stores them with the project.
+- 3D viewer: standard library models that are not on this computer are
+  fetched several at a time before the board's parts are loaded, instead of
+  one by one. A cached file that is not a model is fetched again.
+- Publishing a project that is larger than an online project can hold says so
+  before anything is sent.
+
+### Web
+- Upload: when a project names libraries or 3D models of its own that were
+  not among the uploaded files, the upload dialog lists them and takes the
+  missing files or the project folder to add them.
+- One file of an online project can now be 100 MB (was 30 MB) and a project
+  250 MB (was 100 MB). A file or project over the limit is refused before the
+  upload starts, with its size and the limit; saving a document that large no
+  longer fails at 50 MB.
 
 ## 2.1.2 (2026-11-15)
 

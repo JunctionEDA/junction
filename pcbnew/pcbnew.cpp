@@ -54,6 +54,8 @@
 #include <footprint.h>
 #include <board.h>
 #include <board_loader.h>
+#include <zone.h>
+#include <pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.h>
 #include <lib_id.h>
 #include <nlohmann/json.hpp>
 #include <dialogs/dialog_configure_paths.h>
@@ -298,6 +300,74 @@ static float footprintLibraryLoadProgress()
         return *progress;
 
     return 1.0f;
+}
+
+
+/**
+ * Write the footprints a board uses into project libraries that came without them.
+ *
+ * A project uploaded without its .pretty folders opens with empty libraries, and the rules
+ * check then warns about every footprint.  The board holds each footprint in full, so the
+ * library is written back from it the way Export Footprints to Library does: the first
+ * footprint of each name, turned back to the front side and to no rotation by FootprintSave().
+ *
+ * @param aLibraries maps a library nickname to its folder
+ * @return the number of footprints written
+ */
+static int rebuildFootprintLibraries( const wxString& aBoardFile, const std::map<wxString, wxString>& aLibraries )
+{
+    int written = 0;
+
+    try
+    {
+        PCB_IO_KICAD_SEXPR     io;
+        std::unique_ptr<BOARD> board = io.LoadBoard( aBoardFile, nullptr );
+
+        if( !board )
+            return 0;
+
+        std::set<wxString> done;
+
+        for( FOOTPRINT* footprint : board->Footprints() )
+        {
+            const wxString nickname = footprint->GetFPID().GetUniStringLibNickname();
+            const wxString name = footprint->GetFPID().GetUniStringLibItemName();
+            auto           library = aLibraries.find( nickname );
+
+            if( library == aLibraries.end() || name.IsEmpty() )
+                continue;
+
+            if( !done.insert( nickname + wxS( ":" ) + name ).second )
+                continue;
+
+            try
+            {
+                std::unique_ptr<FOOTPRINT> copy(
+                        static_cast<FOOTPRINT*>( footprint->Duplicate( IGNORE_PARENT_GROUP ) ) );
+
+                copy->SetReference( wxS( "REF**" ) );
+                copy->SetParentGroup( nullptr );
+
+                for( ZONE* zone : copy->Zones() )
+                    zone->Move( -copy->GetPosition() );
+
+                io.FootprintSave( library->second, copy.get() );
+                written++;
+            }
+            catch( const IO_ERROR& )
+            {
+                // one footprint that cannot be written does not stop the others
+            }
+        }
+    }
+    catch( const IO_ERROR& )
+    {
+    }
+    catch( const std::exception& )
+    {
+    }
+
+    return written;
 }
 
 
@@ -640,6 +710,9 @@ static struct IFACE : public KIFACE_BASE, public UNITS_PROVIDER
         case KIFACE_FOOTPRINTS_LOAD_PROGRESS:
             // Report how far the load started by startFootprintMatchLoad() has got
             return KifaceServiceAddress<KIFACE_FOOTPRINTS_LOAD_PROGRESS_SERVICE>( &footprintLibraryLoadProgress );
+
+        case KIFACE_REBUILD_FOOTPRINT_LIBRARIES:
+            return KifaceServiceAddress<KIFACE_REBUILD_FOOTPRINT_LIBRARIES_SERVICE>( &rebuildFootprintLibraries );
 
         case KIFACE_MERGE_DOCUMENT:
             return KifaceServiceAddress<KIFACE_MERGE_DOCUMENT_SERVICE>( &pcbnewMergeExport );

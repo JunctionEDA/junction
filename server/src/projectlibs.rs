@@ -7,9 +7,10 @@
 //! those copies: `rebuild_symbol_libraries` returns the files to add to a download.  Nothing
 //! stored is changed, and a library the project does hold is never touched.
 //!
-//! Footprint libraries are not rebuilt: a footprint on a board is a placed instance (moved
-//! texts, pad nets, a side and a rotation), not the library's copy, and the desktop makes the
-//! empty library folder itself (COLLAB_PROJECT::EnsureLibraryFolders).
+//! Footprint libraries are rebuilt by the desktop, not here: a footprint on a board is a placed
+//! instance (moved texts, pad nets, a side and a rotation), and KiCad's own code turns it back
+//! into a library footprint (COLLAB_PROJECT::EnsureLibraryFolders, then pcbnew's
+//! KIFACE_REBUILD_FOOTPRINT_LIBRARIES).  `missing_project_files` lists what an upload left out.
 
 use std::collections::{BTreeMap, HashSet};
 
@@ -67,6 +68,12 @@ fn children(text: &[u8], open: usize, end: usize) -> Vec<(usize, usize)> {
 
 /// `(name "X") … (uri "${KIPRJMOD}/path.kicad_sym")` rows of a sym-lib-table: nickname → project path.
 fn project_symbol_libs(table: &str) -> Vec<(String, String)> {
+    project_libs(table, ".kicad_sym")
+}
+
+/// The rows of a library table that point inside the project at a path ending in `suffix`:
+/// nickname → project-relative path.  Values may be quoted or bare (older tables).
+fn project_libs(table: &str, suffix: &str) -> Vec<(String, String)> {
     let b = table.as_bytes();
     let Some(root) = table.find('(') else { return Vec::new() };
     let Some(end) = list_end(b, root) else { return Vec::new() };
@@ -74,12 +81,16 @@ fn project_symbol_libs(table: &str) -> Vec<(String, String)> {
     for (s, e) in children(b, root, end) {
         let row = &table[s..e];
         if !row.starts_with("(lib") { continue; }
-        let field = |key: &str| row.find(&format!("({key} ")).and_then(|at| quoted_at(row, at)).map(|(v, _)| v);
+        let field = |key: &str| {
+            let at = row.find(&format!("({key} "))? + key.len() + 2;
+            let rest = row[at..].trim_start();
+            if rest.starts_with('"') { quoted_at(rest, 0).map(|(v, _)| v) } else { rest.split(')').next().map(|v| v.trim().to_string()) }
+        };
         let (Some(name), Some(uri)) = (field("name"), field("uri")) else { continue };
         if let Some(t) = field("type") { if !t.eq_ignore_ascii_case("kicad") { continue; } }
         let Some(rel) = uri.strip_prefix("${KIPRJMOD}/").or_else(|| uri.strip_prefix("$(KIPRJMOD)/")) else { continue };
         let rel = rel.replace('\\', "/");
-        if rel.is_empty() || !rel.to_ascii_lowercase().ends_with(".kicad_sym") || rel.split('/').any(|p| p.is_empty() || p == "." || p == "..") { continue; }
+        if rel.is_empty() || !rel.to_ascii_lowercase().ends_with(suffix) || rel.split('/').any(|p| p.is_empty() || p == "." || p == "..") { continue; }
         out.push((name, rel));
     }
     out
@@ -135,6 +146,52 @@ pub fn rebuild_symbol_libraries(entries: &[(String, Vec<u8>)]) -> Vec<(String, V
     out
 }
 
+/// What a project names as its own and did not bring along: `${KIPRJMOD}` symbol and footprint
+/// libraries of its library tables, and `${KIPRJMOD}` 3D models of its boards and footprints.
+/// Each is `{ "kind": "symbol_library" | "footprint_library" | "model", "path": … }`, at most 200.
+pub fn missing_project_files(entries: &[(String, Vec<u8>)]) -> Vec<serde_json::Value> {
+    let have: HashSet<String> = entries.iter().map(|(p, _)| p.to_lowercase()).collect();
+    let dir_of = |path: &str| path.rsplit_once('/').map(|(d, _)| format!("{d}/")).unwrap_or_default();
+    let mut seen = HashSet::new();
+    let mut out = Vec::new();
+    let mut add = |kind: &str, path: String, out: &mut Vec<serde_json::Value>| {
+        if out.len() < 200 && seen.insert(path.to_lowercase()) {
+            out.push(serde_json::json!({ "kind": kind, "path": path }));
+        }
+    };
+    for (path, content) in entries {
+        let base = path.rsplit('/').next().unwrap_or(path);
+        let Ok(text) = std::str::from_utf8(content) else { continue };
+        let dir = dir_of(path);
+        if base == "sym-lib-table" {
+            for (_, rel) in project_libs(text, ".kicad_sym") {
+                let full = format!("{dir}{rel}");
+                if !have.contains(&full.to_lowercase()) { add("symbol_library", full, &mut out); }
+            }
+        } else if base == "fp-lib-table" {
+            for (_, rel) in project_libs(text, ".pretty") {
+                let folder = format!("{dir}{rel}/").to_lowercase();
+                if !have.iter().any(|p| p.starts_with(&folder)) { add("footprint_library", format!("{dir}{rel}"), &mut out); }
+            }
+        } else if base.to_ascii_lowercase().ends_with(".kicad_pcb") {
+            // a board's ${KIPRJMOD} is its own folder; a library footprint's is not known here
+            let mut at = 0;
+            while let Some(i) = text[at..].find("(model ") {
+                at += i + 7;
+                let rest = text[at..].trim_start();
+                let name = if rest.starts_with('"') { quoted_at(rest, 0).map(|(v, _)| v) } else { rest.split(|c: char| c.is_whitespace() || c == ')').next().map(str::to_string) };
+                let Some(name) = name else { continue };
+                let Some(rel) = name.strip_prefix("${KIPRJMOD}/").or_else(|| name.strip_prefix("$(KIPRJMOD)/")) else { continue };
+                let rel = rel.replace('\\', "/");
+                if rel.is_empty() || rel.split('/').any(|p| p.is_empty() || p == "." || p == "..") { continue; }
+                let full = format!("{dir}{rel}");
+                if !have.contains(&full.to_lowercase()) { add("model", full, &mut out); }
+            }
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,5 +223,16 @@ mod tests {
         let out = rebuild_symbol_libraries(&[entry("sub/sym-lib-table", TABLE), entry("sub/a.kicad_sch", &SCH.replace("20250114", "20230121"))]);
         assert_eq!(out[0].0, "sub/mine.kicad_sym");
         assert!(String::from_utf8(out[0].1.clone()).unwrap().contains("(version 20230121)"));
+    }
+
+    #[test]
+    fn what_a_project_names_and_did_not_bring_is_listed() {
+        let fp = "(fp_lib_table\n  (lib (name mine)(type KiCad)(uri \"$(KIPRJMOD)/mine.pretty\")(options \"\")(descr \"\"))\n  (lib (name \"here\")(type \"KiCad\")(uri \"${KIPRJMOD}/here.pretty\"))\n)";
+        let pcb = "(kicad_pcb (footprint \"mine:A\" (model \"${KIPRJMOD}/3d/a.step\" (offset (xyz 0 0 0))) (model \"${KIPRJMOD}/3d/b.step\") (model \"${KICAD9_3DMODEL_DIR}/R.3dshapes/R.step\") (model \"${KIPRJMOD}/3d/a.step\")))";
+        let out = missing_project_files(&[entry("sym-lib-table", TABLE), entry("fp-lib-table", fp), entry("b.kicad_pcb", pcb),
+                                          entry("here.pretty/X.kicad_mod", "(footprint \"X\")"), entry("3d/B.step", "x")]);
+        let got: Vec<String> = out.iter().map(|m| format!("{}:{}", m["kind"].as_str().unwrap(), m["path"].as_str().unwrap())).collect();
+        assert_eq!(got, ["symbol_library:mine.kicad_sym", "footprint_library:mine.pretty", "model:3d/a.step"]);
+        assert!(missing_project_files(&[entry("a.kicad_sch", SCH)]).is_empty());
     }
 }

@@ -17,8 +17,31 @@ use crate::persist;
 use crate::AppState;
 
 pub(crate) const MAX_FILES: usize = 200;
-pub(crate) const MAX_FILE_BYTES: u64 = 30 * 1024 * 1024;
-pub(crate) const MAX_TOTAL_BYTES: u64 = 100 * 1024 * 1024;
+pub(crate) const MAX_FILE_BYTES: u64 = 100 * 1024 * 1024;
+pub(crate) const MAX_TOTAL_BYTES: u64 = 250 * 1024 * 1024;
+/// The request body the upload routes read: every file of a project plus the multipart framing.
+pub(crate) const MAX_UPLOAD_BODY_BYTES: usize = MAX_TOTAL_BYTES as usize + 8 * 1024 * 1024;
+/// One file sent on its own (a saved document's snapshot).
+pub(crate) const MAX_FILE_BODY_BYTES: usize = MAX_FILE_BYTES as usize + 1024 * 1024;
+
+fn megabytes(bytes: u64) -> String {
+    format!("{:.1} MB", bytes as f64 / 1048576.0)
+}
+
+/// "board.kicad_pcb is 120.3 MB; one file can be at most 100 MB."
+fn file_too_large(path: &str, bytes: u64) -> String {
+    format!("{path} is {}; one file of an online project can be at most {} MB.", megabytes(bytes), MAX_FILE_BYTES / 1048576)
+}
+
+fn project_too_large() -> String {
+    format!("The project's files add up to more than {} MB, the most an online project can hold. Leave out 3D models that are not needed, or split the project.", MAX_TOTAL_BYTES / 1048576)
+}
+
+/// GET /api/limits: what an upload may hold, so a client can say so before sending anything.
+pub async fn limits() -> Json<serde_json::Value> {
+    Json(json!({ "maxFiles": MAX_FILES, "maxFileBytes": MAX_FILE_BYTES, "maxTotalBytes": MAX_TOTAL_BYTES,
+                 "maxUploadBytes": MAX_UPLOAD_BODY_BYTES }))
+}
 
 /// File names KiCad projects legitimately contain: design files, project-local
 /// libraries, 3D models and library tables.
@@ -157,8 +180,11 @@ pub async fn create_project(
                     return Err(AppError::BadRequest(format!("too many files (max {MAX_FILES})")));
                 }
                 loose_bytes += bytes.len() as u64;
-                if bytes.len() as u64 > MAX_FILE_BYTES || loose_bytes > MAX_TOTAL_BYTES {
-                    return Err(AppError::BadRequest(format!("{path} is too large")));
+                if bytes.len() as u64 > MAX_FILE_BYTES {
+                    return Err(AppError::BadRequest(file_too_large(&path, bytes.len() as u64)));
+                }
+                if loose_bytes > MAX_TOTAL_BYTES {
+                    return Err(AppError::BadRequest(project_too_large()));
                 }
                 loose.push((path, bytes.to_vec()));
             }
@@ -202,10 +228,12 @@ pub async fn create_project(
                     // f.size() is attacker-declared header metadata, not a decode
                     // limit — cap the reader itself or a zip bomb OOMs the container.
                     let cap = MAX_FILE_BYTES.min(budget);
+                    let declared = f.size();
                     let mut buf = Vec::new();
                     (&mut f).take(cap + 1).read_to_end(&mut buf).map_err(|e| e.to_string())?;
                     if buf.len() as u64 > cap {
-                        return Err(format!("{name} is too large"));
+                        return Err(if cap < MAX_FILE_BYTES { project_too_large() }
+                                   else { file_too_large(&name, declared.max(buf.len() as u64)) });
                     }
                     budget -= buf.len() as u64;
                     out.push((name, buf));
@@ -280,8 +308,11 @@ pub async fn create_project(
         }
     }
 
+    // Libraries and 3D models the project names as its own and did not bring along.
+    let missing = crate::projectlibs::missing_project_files(&files);
+
     Ok(Json(json!({
-        "projectId": project.id, "name": project.name, "docs": docs, "skipped": skipped,
+        "projectId": project.id, "name": project.name, "docs": docs, "skipped": skipped, "missing": missing,
     }))
     .into_response())
 }

@@ -141,6 +141,10 @@ await step('upload', async () => {
   await a.screenshot({ path: `${out}/01-upload-ready.png` });
   await a.locator('.hp-field input').fill('Hierarchy demo');
   await a.click('.hp-modal-f .btn.primary');
+  // the files were picked without the project's sub-folders: the dialog lists what the project names and lacks
+  const lacks = await a.waitForSelector('.hp-missing', { timeout: 8000 }).then(() => true, () => false);
+  check('an upload without the project\'s own libraries says which are missing', lacks && await a.locator('.hp-missing li').count() > 0);
+  if (lacks) await a.click('.hp-modal-f .btn.primary');
   check('upload finishes with a toast', await toastText(a, /Hierarchy demo.*online/));
   await a.waitForSelector('.hp-item-name:has-text("Hierarchy demo")');
   check('the new project is first in the list', (await names(a))[0] === 'Hierarchy demo');

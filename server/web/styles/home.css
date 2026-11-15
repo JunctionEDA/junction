@@ -269,6 +269,8 @@ textarea.hp-input { resize: vertical; min-height: 72px; }
 .hp-skipped { font-size: 12px; color: var(--ink-2); margin-bottom: 8px; }
 .hp-skipped summary { cursor: pointer; }
 .hp-skipped ul { margin: 6px 0 0; padding-left: 18px; max-height: 120px; overflow: auto; font: 11px var(--mono); }
+.hp-missing { margin: 0 0 8px; padding-left: 18px; max-height: 160px; overflow: auto; font: 11px var(--mono); color: var(--ink-2); }
+.hp-missing .hp-dim { font-family: var(--sans, inherit); margin-right: 6px; }
 .hp-progress { height: 4px; background: var(--line); border-radius: var(--r-1); overflow: hidden; margin-top: 10px; }
 .hp-progress i { display: block; height: 100%; background: var(--wire); transition: width .15s; }
 .hp-dropveil { position: absolute; inset: 0; z-index: 50; background: color-mix(in srgb, var(--blue) 18%, transparent); backdrop-filter: blur(2px); display: grid; place-items: center; pointer-events: none; }

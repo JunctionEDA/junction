@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include <map>
 #include <functional>
 #include <optional>
 #include <string>
@@ -105,8 +106,11 @@ KICOMMON_API bool DownloadAndExtract( const wxString& aServer, const wxString& a
  * folders, so a library with no footprints in it does not come down with the project; the
  * table row then failed with "Footprint library ... not found" on every open.  An empty
  * library folder is a valid, empty library.  Only folders inside aProjectPath are created.
+ *
+ * @return the project libraries that hold no footprint, as library nickname to folder: the
+ *         ones a board's own footprints can be written back into.
  */
-KICOMMON_API void EnsureLibraryFolders( const wxString& aProjectPath );
+KICOMMON_API std::map<wxString, wxString> EnsureLibraryFolders( const wxString& aProjectPath );
 
 /**
  * Remember that the local project at aProjectPath is a copy of server project

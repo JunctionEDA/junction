@@ -92,7 +92,14 @@ enum KIFACE_ADDR_ID : int
     /// Function pointer type: void (*)( const wxString& aFootprint, PROJECT* aProject,
     ///                                  std::set<wxString>& aPadNumbers )
     /// Fills aPadNumbers with the numbered pads of aFootprint.
-    KIFACE_FOOTPRINT_PAD_NUMBERS
+    KIFACE_FOOTPRINT_PAD_NUMBERS,
+
+    /// Function pointer type: int (*)( const wxString& aBoardFile,
+    ///                                 const std::map<wxString, wxString>& aLibraries )
+    /// Writes the footprints of aBoardFile into the library folders of aLibraries (library
+    /// nickname to folder), one file per footprint name, the way Export Footprints to Library
+    /// does.  Returns the number of footprints written.
+    KIFACE_REBUILD_FOOTPRINT_LIBRARIES
 };
 
 #endif // KIFACE_IDS

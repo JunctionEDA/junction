@@ -25,6 +25,8 @@
 #ifndef CACHE_3D_H
 #define CACHE_3D_H
 
+#include <utility>
+#include <vector>
 #include "3d_info.h"
 #include "model_substitution_helpers.h"
 #include <core/typeinfo.h>
@@ -147,6 +149,15 @@ public:
      * @param aNumDaysOld is age threshold to delete ".3dc" cache files.
      */
     void CleanCacheDir( int aNumDaysOld );
+
+    /**
+     * Fetch, several at a time, the standard library models of @a aModels that are not on this
+     * computer, so the loads that follow find them in the cache.  Returns when all are in (or
+     * known to be unavailable); without a sign-in nothing is asked of the network.
+     *
+     * @param aModels is each model's file name as the footprint has it, and its base path.
+     */
+    void FetchMissingLibraryModels( const std::vector<std::pair<wxString, wxString>>& aModels );
 
 private:
     /**

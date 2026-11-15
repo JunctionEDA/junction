@@ -37,6 +37,7 @@
 #include <wx/weakref.h>
 #include <wx/window.h>
 
+#include <map>
 #include <thread>
 
 
@@ -142,6 +143,18 @@ std::optional<nlohmann::json> COLLAB_PROJECT::CreateAndShare( const wxString& aS
     if( zipBytes.empty() )
     {
         aError = _( "No project files found to share.  Save the project first." );
+        return std::nullopt;
+    }
+
+    // The server's upload limit (server/src/http.rs MAX_TOTAL_BYTES).  More than this is cut off
+    // while it is being sent, which reads as a lost connection, so it is said here instead.
+    const size_t maxUpload = 250u * 1024 * 1024;
+
+    if( zipBytes.size() > maxUpload )
+    {
+        aError = wxString::Format( _( "The project's files come to %.0f MB zipped, and an online project can hold "
+                                      "250 MB.\n\nLeave out 3D models that are not needed, or split the project." ),
+                                   zipBytes.size() / 1048576.0 );
         return std::nullopt;
     }
 
@@ -768,40 +781,75 @@ wxString COLLAB_PROJECT::FindLocalCopyIn( const wxString& aRegistryDir,
 }
 
 
-void COLLAB_PROJECT::EnsureLibraryFolders( const wxString& aProjectPath )
+std::map<wxString, wxString> COLLAB_PROJECT::EnsureLibraryFolders( const wxString& aProjectPath )
 {
-    wxFileName table( aProjectPath, wxS( "fp-lib-table" ) );
+    std::map<wxString, wxString> empty;
+    wxFileName                   table( aProjectPath, wxS( "fp-lib-table" ) );
 
     if( !table.FileExists() )
-        return;
+        return empty;
 
     wxLogNull         noLog;
     wxFFileInputStream in( table.GetFullPath() );
 
     if( !in.IsOk() || in.GetLength() <= 0 || in.GetLength() > 4 * 1024 * 1024 )
-        return;
+        return empty;
 
     std::string bytes( static_cast<size_t>( in.GetLength() ), '\0' );
     in.Read( bytes.data(), bytes.size() );
 
     wxString text = wxString::FromUTF8( bytes.data(), in.LastRead() );
 
-    // Older tables write the variable as $(KIPRJMOD).
-    text.Replace( wxS( "\"$(KIPRJMOD)/" ), wxS( "\"${KIPRJMOD}/" ) );
-
-    const wxString marker = wxS( "\"${KIPRJMOD}/" );
-    size_t         pos = 0;
-
-    while( ( pos = text.find( marker, pos ) ) != wxString::npos )
+    // One row per "(lib ": (name X)(type KiCad)(uri "${KIPRJMOD}/x.pretty"), with or without
+    // quotes; older tables write the variable as $(KIPRJMOD).
+    auto field = []( const wxString& aRow, const wxString& aKey ) -> wxString
     {
-        pos += marker.length();
-        const size_t end = text.find( wxS( '"' ), pos );
+        size_t at = aRow.find( wxS( "(" ) + aKey );
 
-        if( end == wxString::npos )
-            break;
+        if( at == wxString::npos )
+            return wxEmptyString;
 
-        const wxString rel = text.Mid( pos, end - pos );
-        pos = end + 1;
+        at += aKey.length() + 1;
+
+        while( at < aRow.length() && wxIsspace( aRow[at] ) )
+            at++;
+
+        if( at < aRow.length() && aRow[at] == '"' )
+        {
+            wxString value;
+
+            for( at++; at < aRow.length() && aRow[at] != '"'; at++ )
+            {
+                if( aRow[at] == '\\' && at + 1 < aRow.length() )
+                    at++;
+
+                value += aRow[at];
+            }
+
+            return value;
+        }
+
+        const size_t end = aRow.find( wxS( ')' ), at );
+        return end == wxString::npos ? wxString() : aRow.Mid( at, end - at ).Trim();
+    };
+
+    // A table written on one line still splits at each row's opening.
+    text.Replace( wxS( "(lib " ), wxS( "\n(lib " ) );
+
+    const wxArrayString rows = wxSplit( text, '\n', '\0' );
+
+    for( wxString row : rows )
+    {
+        if( !row.Trim( false ).StartsWith( wxS( "(lib " ) ) )
+            continue;
+
+        const wxString name = field( row, wxS( "name" ) );
+        wxString       rel = field( row, wxS( "uri" ) );
+
+        if( rel.StartsWith( wxS( "${KIPRJMOD}/" ) ) || rel.StartsWith( wxS( "$(KIPRJMOD)/" ) ) )
+            rel = rel.Mid( 12 );
+        else
+            continue;
 
         // Only plain folders below the project: no escapes, variables or parent steps.
         if( rel.IsEmpty() || !rel.Lower().EndsWith( wxS( ".pretty" ) ) || rel.Contains( wxS( ".." ) )
@@ -819,9 +867,20 @@ void COLLAB_PROJECT::EnsureLibraryFolders( const wxString& aProjectPath )
                 dir.AppendDir( part );
         }
 
-        if( !dir.DirExists() && !wxFileName::FileExists( dir.GetPath() ) )
+        if( wxFileName::FileExists( dir.GetPath() ) )
+            continue;
+
+        if( !dir.DirExists() )
             wxFileName::Mkdir( dir.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL );
+
+        if( !name.IsEmpty() && dir.DirExists()
+            && wxDir::FindFirst( dir.GetPath(), wxS( "*.kicad_mod" ), wxDIR_FILES ).IsEmpty() )
+        {
+            empty[name] = dir.GetPath();
+        }
     }
+
+    return empty;
 }
 
 

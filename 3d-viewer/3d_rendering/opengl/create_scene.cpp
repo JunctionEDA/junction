@@ -1993,6 +1993,28 @@ void RENDER_3D_OPENGL::load3dModels( std::stop_token aStop )
 
     S3D_CACHE* cacheMgr = m_boardAdapter.Get3dCacheManager();
 
+    // Standard library models that are not on this computer come from the server, several at
+    // a time, before the footprints are gone through one by one.
+    {
+        std::vector<std::pair<wxString, wxString>> wanted;
+
+        for( const FOOTPRINT* footprint : m_boardAdapter.GetBoard()->Footprints() )
+        {
+            const wxString basePath = m_boardAdapter.GetFootprintLibraryPath( footprint );
+
+            for( const FP_3DMODEL& fp_model : footprint->Models() )
+            {
+                if( fp_model.m_Show && !fp_model.m_Filename.empty() && !m_3dModelMap.contains( fp_model.m_Filename ) )
+                    wanted.emplace_back( fp_model.m_Filename, basePath );
+            }
+        }
+
+        if( m_activityReporter && wanted.size() > 1 )
+            m_activityReporter->Report( _( "Fetching 3D models that are not on this computer..." ) );
+
+        cacheMgr->FetchMissingLibraryModels( wanted );
+    }
+
     // Go for all footprints
     for( const FOOTPRINT* footprint : m_boardAdapter.GetBoard()->Footprints() )
     {

@@ -20,6 +20,7 @@
 #ifndef KIFACE_SERVICES_H
 #define KIFACE_SERVICES_H
 
+#include <map>
 #include <set>
 #include <string>
 #include <type_traits>
@@ -97,6 +98,10 @@ using KIFACE_TEST_FOOTPRINT_LINK_SERVICE =
 using KIFACE_FOOTPRINT_PAD_NUMBERS_SERVICE =
         KIFACE_SERVICE<KIFACE_FOOTPRINT_PAD_NUMBERS,
                        void (*)( const wxString&, PROJECT*, std::set<wxString>& )>;
+
+using KIFACE_REBUILD_FOOTPRINT_LIBRARIES_SERVICE =
+        KIFACE_SERVICE<KIFACE_REBUILD_FOOTPRINT_LIBRARIES,
+                       int (*)( const wxString&, const std::map<wxString, wxString>& )>;
 
 /**
  * Return a service address for IfaceOrAddress().

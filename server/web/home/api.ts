@@ -121,7 +121,28 @@ export function linkToken(raw: string): string | null {
 }
 
 export interface UploadFile { path: string; file: File }
-export interface UploadResult { projectId: string; name: string; docs: unknown[]; skipped?: string[] }
+/** A library or 3D model the uploaded project names as its own (${KIPRJMOD}) and did not bring along. */
+export interface MissingFile { kind: "symbol_library" | "footprint_library" | "model"; path: string }
+export interface UploadResult { projectId: string; name: string; docs: unknown[]; skipped?: string[]; missing?: MissingFile[] }
+
+/** What an upload may hold (GET /api/limits); the defaults are the server's own, for a server that predates the route. */
+export interface Limits { maxFiles: number; maxFileBytes: number; maxTotalBytes: number; maxUploadBytes: number }
+export const DEFAULT_LIMITS: Limits = { maxFiles: 200, maxFileBytes: 100 * 1048576, maxTotalBytes: 250 * 1048576, maxUploadBytes: 258 * 1048576 };
+let limitsOnce: Promise<Limits> | null = null;
+export const getLimits = (): Promise<Limits> =>
+  (limitsOnce ||= api<Partial<Limits>>("/api/limits").then((l) => ({ ...DEFAULT_LIMITS, ...(l && typeof l === "object" ? l : {}) })).catch(() => DEFAULT_LIMITS));
+
+/** Add one file to an existing project: the document, then its content as snapshot 0.  An existing path is left as it is. */
+export async function addProjectFile(projectId: string, path: string, file: Blob): Promise<boolean> {
+  const res = await api<{ docId?: string; existing?: boolean }>(`/api/projects/${projectId}/docs`, { method: "POST", json: { path } });
+  if (!res.docId) throw new ApiError(0, "The server did not make the file.");
+  if (res.existing) return false;
+  let r: Response;
+  try { r = await fetch(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", credentials: "same-origin", headers: { "content-type": "application/octet-stream" }, body: file }); }
+  catch { throw new ApiError(0, "Can't reach the server. Check your connection."); }
+  if (!r.ok) throw new ApiError(r.status, errorText(r.status, await r.text().catch(() => "")));
+  return true;
+}
 
 /** POST /api/projects with upload progress (fetch has none): a single .zip goes as `archive`, anything else as loose `file` parts. */
 export function uploadProject(name: string, files: UploadFile[], onProgress: (fraction: number) => void): { promise: Promise<UploadResult>; abort: () => void } {

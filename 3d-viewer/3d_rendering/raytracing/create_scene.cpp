@@ -2280,6 +2280,25 @@ void RENDER_3D_RAYTRACE_BASE::load3DModels( CONTAINER_3D& aDstContainer, bool aS
         return;
     }
 
+    // Standard library models that are not on this computer come from the server, several at
+    // a time, before the footprints are gone through one by one.
+    {
+        std::vector<std::pair<wxString, wxString>> wanted;
+
+        for( const FOOTPRINT* fp : m_boardAdapter.GetBoard()->Footprints() )
+        {
+            const wxString basePath = m_boardAdapter.GetFootprintLibraryPath( fp );
+
+            for( const FP_3DMODEL& model : fp->Models() )
+            {
+                if( model.m_Show && !model.m_Filename.empty() )
+                    wanted.emplace_back( model.m_Filename, basePath );
+            }
+        }
+
+        m_boardAdapter.Get3dCacheManager()->FetchMissingLibraryModels( wanted );
+    }
+
     // Go for all footprints
     for( FOOTPRINT* fp : m_boardAdapter.GetBoard()->Footprints() )
     {

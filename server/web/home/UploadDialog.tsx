@@ -1,7 +1,7 @@
 // UploadDialog.tsx — put a KiCad project online from the browser: pick or drop a project folder,
 // its files, or a .zip.  Only KiCad project files are sent; everything else is listed as left out.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { createBlank, isLocalState, isProjectFile, uploadProject, type UploadFile, type UploadResult } from "./api";
+import { addProjectFile, createBlank, DEFAULT_LIMITS, getLimits, isLocalState, isProjectFile, uploadProject, type MissingFile, type UploadFile, type UploadResult } from "./api";
 import { Ic, Modal, PHONE, useMedia } from "./ui";
 
 export type NewMode = "upload" | "blank";
@@ -36,7 +36,28 @@ export const filesFromInput = (list: FileList | null): UploadFile[] =>
 
 const stem = (p: string) => (p.split("/").pop() || p).replace(/\.[^.]+$/, "");
 const fmtSize = (n: number) => (n < 1024 ? `${n} B` : n < 1048576 ? `${(n / 1024).toFixed(0)} kB` : `${(n / 1048576).toFixed(1)} MB`);
-const MAX_TOTAL = 50 * 1024 * 1024;   // the server's request body limit (main.rs DefaultBodyLimit)
+const mb = (n: number) => `${Math.round(n / 1048576)} MB`;
+
+/** The chosen files that fill in what the project lacks: a file under a missing footprint library's folder, or the
+ *  missing symbol library / 3D model itself.  Matched from the end of the path, so the folder picked can sit at any
+ *  depth ("project/lib/x.pretty/A.kicad_mod" fills "lib/x.pretty").  Returns project path → file. */
+export function filesForMissing(missing: MissingFile[], chosen: UploadFile[]): Map<string, File> {
+  const out = new Map<string, File>();
+  for (const f of chosen) {
+    const p = f.path.replace(/\\/g, "/"), lower = p.toLowerCase();
+    for (const m of missing) {
+      const want = m.path.toLowerCase();
+      if (m.kind === "footprint_library") {
+        if (!/\.kicad_mod$/.test(lower)) continue;
+        const folder = want.split("/").pop() + "/";
+        const at = lower.lastIndexOf(folder);
+        if (at >= 0 && (at === 0 || lower[at - 1] === "/") && !lower.slice(at + folder.length).includes("/")) { out.set(m.path + "/" + p.slice(at + folder.length), f.file); break; }
+      } else if (lower === want || lower.endsWith("/" + want) || (!p.includes("/") && lower === want.split("/").pop())) { out.set(m.path, f.file); break; }
+    }
+  }
+  return out;
+}
+const KIND: Record<MissingFile["kind"], string> = { symbol_library: "symbol library", footprint_library: "footprint library", model: "3D model" };
 
 export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy }: { initial?: UploadFile[]; start?: NewMode; onClose: () => void; onDone: (r: UploadResult) => void; onBlank: (r: UploadResult) => void; onBusy?: (busy: boolean) => void }) {
   const [mode, setMode] = useState<NewMode>(initial && initial.length ? "upload" : start || "upload");
@@ -50,6 +71,15 @@ export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy 
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [over, setOver] = useState(false);
+  const [limits, setLimits] = useState(DEFAULT_LIMITS);
+  useEffect(() => { let on = true; getLimits().then((l) => { if (on) setLimits(l); }); return () => { on = false; }; }, []);
+  // The project is online but names libraries or 3D models that were not among the files.
+  const [done, setDone] = useState<UploadResult | null>(null);
+  const [left, setLeft] = useState<MissingFile[]>([]);
+  const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState(0);
+  const addFiles = useRef<HTMLInputElement>(null);
+  const addFolder = useRef<HTMLInputElement>(null);
   const abort = useRef<(() => void) | null>(null);
   const pickFiles = useRef<HTMLInputElement>(null);
   const pickFolder = useRef<HTMLInputElement>(null);
@@ -77,14 +107,16 @@ export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy 
   // A file dropped beside the dashed box would otherwise make the browser leave the page for it.
   useEffect(() => {
     const over = (ev: DragEvent) => { ev.preventDefault(); };
-    const drop = async (ev: DragEvent) => { ev.preventDefault(); if (ev.dataTransfer) take(await filesFromDrop(ev.dataTransfer)); };
+    const drop = async (ev: DragEvent) => { ev.preventDefault(); if (!ev.dataTransfer) return; const list = await filesFromDrop(ev.dataTransfer); if (done) addMissing(list); else take(list); };
     window.addEventListener("dragover", over); window.addEventListener("drop", drop);
     return () => { window.removeEventListener("dragover", over); window.removeEventListener("drop", drop); };
   });
-  const tooBig = total > MAX_TOTAL;
+  const largest = zip ? null : kept.reduce<UploadFile | null>((a, f) => (!a || f.file.size > a.file.size ? f : a), null);
   const problem = !files.length ? null
     : !kept.length ? "None of these are KiCad project files. Choose a project folder, its .kicad_pro / .kicad_sch / .kicad_pcb files, or a .zip of them."
-    : tooBig ? `That is ${fmtSize(total)}; the limit is ${fmtSize(MAX_TOTAL)}. Leave out 3D models or split the project.`
+    : !zip && kept.length > limits.maxFiles ? `That is ${kept.length} files; an online project can hold ${limits.maxFiles}.`
+    : largest && largest.file.size > limits.maxFileBytes ? `${largest.path} is ${fmtSize(largest.file.size)}; one file of an online project can be at most ${mb(limits.maxFileBytes)}.`
+    : total > (zip ? limits.maxUploadBytes : limits.maxTotalBytes) ? `That is ${fmtSize(total)}; an online project can hold ${mb(limits.maxTotalBytes)}. Leave out 3D models that are not needed, or split the project.`
     : !zip && !kept.some((f) => /\.kicad_(pro|sch|pcb)$/i.test(f.path)) ? "There is no schematic or board among these files." : null;
 
   const createEmpty = async () => {
@@ -98,8 +130,45 @@ export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy 
     setError(null); setProgress(0);
     const up = uploadProject(name, kept, setProgress);
     abort.current = up.abort;
-    up.promise.then(onDone).catch((e) => { setProgress(null); setError(e instanceof Error ? e.message : String(e)); });
+    up.promise.then((r) => { if (r.missing?.length) { setProgress(null); setLeft(r.missing); setDone(r); } else onDone(r); }).catch((e) => { setProgress(null); setError(e instanceof Error ? e.message : String(e)); });
   };
+
+  const addMissing = async (chosen: UploadFile[]) => {
+    if (!done || adding || !chosen.length) return;
+    const fill = filesForMissing(left, chosen);
+    if (!fill.size) { setError("None of those files are the ones this project is missing."); return; }
+    setAdding(true); setError(null);
+    let n = 0;
+    try {
+      for (const [path, file] of fill) {
+        if (file.size > limits.maxFileBytes) throw new Error(`${path} is ${fmtSize(file.size)}; one file of an online project can be at most ${mb(limits.maxFileBytes)}.`);
+        await addProjectFile(done.projectId, path, file); n++;
+      }
+    } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
+    const got = Array.from(fill.keys()).slice(0, n).map((p) => p.toLowerCase());
+    setLeft((l) => l.filter((m) => !got.some((p) => p === m.path.toLowerCase() || p.startsWith(m.path.toLowerCase() + "/"))));
+    setAdded((a) => a + n); setAdding(false);
+  };
+  if (done) {
+    return (
+      <Modal title={`“${done.name}” is online`} onClose={() => onDone(done)} width={520} busy={adding}
+        footer={<><button type="button" className="btn" disabled={adding} onClick={() => addFiles.current?.click()}>Add files…</button>
+          {touch ? null : <button type="button" className="btn" disabled={adding} onClick={() => addFolder.current?.click()}>Add folder…</button>}
+          <button type="button" className="btn primary" disabled={adding} onClick={() => onDone(done)}>{left.length ? "Continue without them" : "Done"}</button></>}>
+        {left.length ? (
+          <>
+            <p className="hp-note">The project names {left.length === 1 ? "a file" : `${left.length} files`} of its own that {left.length === 1 ? "was" : "were"} not among the ones you uploaded. The design is complete and opens as it is; libraries are written back from the design when the project is opened in the desktop app, but parts you had not placed yet and 3D models cannot be recovered that way.</p>
+            <ul className="hp-missing">{left.slice(0, 40).map((m) => <li key={m.path}><span className="hp-dim">{KIND[m.kind]}</span> {m.path}</li>)}{left.length > 40 ? <li>…and {left.length - 40} more</li> : null}</ul>
+            <p className="hp-note">Choose the project folder again, or the missing files, to add them now.</p>
+          </>
+        ) : <p className="hp-note">Everything the project names is online now.</p>}
+        {added ? <p className="hp-note" role="status">{added} file{added === 1 ? "" : "s"} added.</p> : null}
+        {error ? <p className="hp-note err" role="alert">{error}</p> : null}
+        <input ref={addFiles} type="file" multiple hidden onChange={(ev) => { addMissing(filesFromInput(ev.target.files)); ev.target.value = ""; }} />
+        <input ref={addFolder} type="file" hidden multiple {...({ webkitdirectory: "", directory: "" } as object)} onChange={(ev) => { addMissing(filesFromInput(ev.target.files)); ev.target.value = ""; }} />
+      </Modal>
+    );
+  }
 
   return (
     <Modal title="New online project" onClose={onClose} width={520} busy={busy || creating}

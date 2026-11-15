@@ -59,6 +59,8 @@
 #include <kiplatform/policy.h>
 #include <build_version.h>
 #include <kiway.h>
+#include <kiface_services.h>
+#include <wx/dir.h>
 #include <kiway_mail.h>
 #include <launch_ext.h>
 #include <lockfile.h>
@@ -1021,6 +1023,67 @@ void KICAD_MANAGER_FRAME::OpenJobsFile( const wxFileName& aFileName, bool aCreat
 }
 
 
+/**
+ * Fill project footprint libraries that came down empty from the boards that use them.
+ *
+ * A project uploaded without its .pretty folders has the footprints only on its boards.  A
+ * board is first scanned as text for a footprint of one of the libraries, so the board
+ * editor's code is loaded (and the board parsed) only when there is something to write; the
+ * next open then finds the library filled and does nothing.
+ */
+static void rebuildProjectFootprintLibraries( KIWAY& aKiway, const wxString& aProjectPath,
+                                              const std::map<wxString, wxString>& aLibraries )
+{
+    if( aLibraries.empty() )
+        return;
+
+    wxArrayString boards;
+    wxDir::GetAllFiles( aProjectPath, &boards, wxS( "*.kicad_pcb" ), wxDIR_FILES );
+
+    for( const wxString& board : boards )
+    {
+        wxFFile file( board, wxS( "rb" ) );
+
+        if( !file.IsOpened() || file.Length() <= 0 || file.Length() > 512 * 1024 * 1024 )
+            continue;
+
+        std::string text( static_cast<size_t>( file.Length() ), '\0' );
+        text.resize( file.Read( text.data(), text.size() ) );
+
+        bool used = false;
+
+        for( const auto& [nickname, folder] : aLibraries )
+        {
+            if( text.find( "(footprint \"" + nickname.ToStdString( wxConvUTF8 ) + ":" ) != std::string::npos )
+            {
+                used = true;
+                break;
+            }
+        }
+
+        if( !used )
+            continue;
+
+        KIFACE* kiface = nullptr;
+
+        try
+        {
+            kiface = aKiway.KiFACE( KIWAY::FACE_PCB );
+        }
+        catch( const IO_ERROR& )
+        {
+            return;
+        }
+
+        if( !kiface )
+            return;
+
+        if( auto rebuild = GetKifaceService<KIFACE_REBUILD_FOOTPRINT_LIBRARIES_SERVICE>( kiface ) )
+            rebuild( board, aLibraries );
+    }
+}
+
+
 bool KICAD_MANAGER_FRAME::LoadProject( const wxFileName& aProjectFileName )
 {
     // The project file should be valid by the time we get here or something has gone wrong.
@@ -1067,7 +1130,8 @@ bool KICAD_MANAGER_FRAME::LoadProject( const wxFileName& aProjectFileName )
         wxString   linkedServer;
 
         if( !COLLAB_PROJECT::ReadLocalLink( pro.GetPath(), pro.GetName(), linkedServer ).IsEmpty() )
-            COLLAB_PROJECT::EnsureLibraryFolders( pro.GetPath() );
+            rebuildProjectFootprintLibraries( Kiway(), pro.GetPath(),
+                                              COLLAB_PROJECT::EnsureLibraryFolders( pro.GetPath() ) );
     }
 
     // The load overrides the lock in place.  Releasing it here and taking it again there would

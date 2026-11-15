@@ -21,7 +21,11 @@
 
 #define GLM_FORCE_RADIANS
 
+#include <atomic>
+#include <functional>
 #include <mutex>
+#include <thread>
+#include <vector>
 #include <optional>
 #include <set>
 #include <utility>
@@ -144,6 +148,22 @@ S3D_CACHE::~S3D_CACHE()
 }
 
 
+/// True when the file starts like a STEP file ("ISO-10303-21;").
+static bool isStepFile( const wxString& aPath )
+{
+    wxLogNull noLog;
+    wxFFile   file( aPath, wxS( "rb" ) );
+    char      head[256] = {};
+
+    if( !file.IsOpened() )
+        return false;
+
+    const size_t got = file.Read( head, sizeof( head ) );
+
+    return std::string( head, got ).find( "ISO-10303-21" ) != std::string::npos;
+}
+
+
 /**
  * A model of KiCad's standard 3D library ("<Library>.3dshapes/<Name>.<ext>") that is not on this
  * computer, fetched from the collaboration server into the user cache and returned as that
@@ -195,49 +215,76 @@ static wxString fetchLibraryModel( const wxString& aModelFile )
     static wxString           s_server;
     static wxString           s_token;
 
-    std::lock_guard<std::mutex> lock( s_mutex );
-
     wxFileName cached( PATHS::GetUserCachePath(), name + wxS( ".step" ) );
     cached.AppendDir( wxS( "3d-models" ) );
     cached.AppendDir( library + wxS( ".3dshapes" ) );
 
-    if( cached.FileExists() )
-        return cached.GetFullPath();
-
     const wxString key = library + wxS( "/" ) + name;
+    wxString       server;
+    wxString       token;
 
-    if( s_offline || s_misses.count( key ) )
-        return wxEmptyString;
-
-    if( !s_tokenRead )
+    // Only the bookkeeping is done under the lock: the download itself is not, so several
+    // models can be fetched at once (S3D_CACHE::FetchMissingLibraryModels).
     {
-        s_tokenRead = true;
-        s_server = COLLAB_SESSION::ServerUrl();
-        s_token = COLLAB_AUTH::StoredToken( s_server );
+        std::lock_guard<std::mutex> lock( s_mutex );
+
+        if( cached.FileExists() )
+        {
+            if( isStepFile( cached.GetFullPath() ) )
+                return cached.GetFullPath();
+
+            // Not a model (a download cut short, an error page): fetch it again.
+            wxLogNull noLog;
+            wxRemoveFile( cached.GetFullPath() );
+        }
+
+        if( s_offline || s_misses.count( key ) )
+            return wxEmptyString;
+
+        if( !s_tokenRead )
+        {
+            s_tokenRead = true;
+            s_server = COLLAB_SESSION::ServerUrl();
+            s_token = COLLAB_AUTH::StoredToken( s_server );
+        }
+
+        if( s_token.IsEmpty() )
+            return wxEmptyString;
+
+        // Deep copies: a wxString's buffer must not be shared between threads.
+        server = wxString( s_server.wc_str() );
+        token = wxString( s_token.wc_str() );
     }
 
-    if( s_token.IsEmpty() )
-        return wxEmptyString;
-
-    bool                       noAnswer = false;
-    std::optional<std::string> bytes =
-            COLLAB_REST::DownloadLibraryModel( s_server, s_token, library, name, &noAnswer );
-
-    if( !bytes )
+    auto miss = [&]( bool aOffline )
     {
-        if( noAnswer )
+        std::lock_guard<std::mutex> lock( s_mutex );
+
+        if( aOffline )
             s_offline = true;
         else
             s_misses.insert( key );
 
-        return wxEmptyString;
-    }
+        return wxString();
+    };
+
+    bool                       noAnswer = false;
+    std::optional<std::string> bytes = COLLAB_REST::DownloadLibraryModel( server, token, library, name, &noAnswer );
+
+    if( !bytes )
+        return miss( noAnswer );
+
+    // An answer that is not a STEP file (a proxy's page, a compressed body) is never kept.
+    if( bytes->substr( 0, 256 ).find( "ISO-10303-21" ) == std::string::npos )
+        return miss( false );
 
     wxLogNull noLog;
 
-    // Written beside its final name and moved into place, so a half-written file is never read.
+    // Written beside its final name and moved into place, so a half-written file is never
+    // read; the name is this thread's own, so two fetches of one model cannot collide.
     wxFileName partial( cached );
-    partial.SetFullName( cached.GetFullName() + wxS( ".part" ) );
+    partial.SetFullName( cached.GetFullName()
+                         + wxString::Format( wxS( ".%zx.part" ), std::hash<std::thread::id>()( std::this_thread::get_id() ) ) );
 
     if( !wxFileName::Mkdir( cached.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL ) )
         return wxEmptyString;
@@ -246,19 +293,52 @@ static wxString fetchLibraryModel( const wxString& aModelFile )
         wxFFile out( partial.GetFullPath(), wxS( "wb" ) );
 
         if( !out.IsOpened() || out.Write( bytes->data(), bytes->size() ) != bytes->size() || !out.Close() )
-        {
-            s_misses.insert( key );
-            return wxEmptyString;
-        }
+            return miss( false );
     }
 
     if( !wxRenameFile( partial.GetFullPath(), cached.GetFullPath(), true ) )
     {
-        s_misses.insert( key );
-        return wxEmptyString;
+        wxRemoveFile( partial.GetFullPath() );
+        return miss( false );
     }
 
     return cached.GetFullPath();
+}
+
+
+void S3D_CACHE::FetchMissingLibraryModels( const std::vector<std::pair<wxString, wxString>>& aModels )
+{
+    std::vector<wxString> wanted;
+    std::set<wxString>    seen;
+
+    for( const auto& [file, basePath] : aModels )
+    {
+        if( file.empty() || !seen.insert( file ).second )
+            continue;
+
+        if( m_FNResolver->ResolvePath( file, basePath, {} ).empty() )
+            wanted.push_back( file );
+    }
+
+    // One model is fetched when it is loaded; the workers are for a board full of them.
+    if( wanted.size() < 2 )
+        return;
+
+    std::atomic<size_t> next( 0 );
+
+    auto work = [&]()
+    {
+        for( size_t i = next++; i < wanted.size(); i = next++ )
+            fetchLibraryModel( wanted[i] );
+    };
+
+    std::vector<std::thread> workers;
+
+    for( size_t i = 0; i < std::min<size_t>( 8, wanted.size() ); i++ )
+        workers.emplace_back( work );
+
+    for( std::thread& worker : workers )
+        worker.join();
 }
 
 
