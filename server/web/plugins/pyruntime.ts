@@ -300,7 +300,7 @@ export function pythonRuntime(): void {
       "kicad_web.boot(" + JSON.stringify(kicad.plugin.identifier) + ", _kc_files, _kc_bridge, " + JSON.stringify(kicad.plugin.name) + ")",
     ].join("\n")));
     py.globals.delete("_kc_files");
-    for (const a of info.actions) kicad.actions.register("py" + a.index, () => runAction(a.index), { name: a.name, description: a.description, icon: a.icon, button: !!a.button, wizard: !!a.wizard });
+    for (const a of info.actions) kicad.actions.register("py" + a.index, () => runAction(a.index), { name: a.name, description: a.description, icon: a.icon, button: typeof a.button === "boolean" ? a.button : undefined, wizard: !!a.wizard });
     // a footprint wizard is also offered to the footprint editor's wizard dialog, which talks to it directly
     for (const a of info.actions) if (a.wizard) kicad.wizards.register("py" + a.index, (req: any) => wizardOp(a.index, req), { name: String(a.name).replace(/^Footprint Wizard: /, ""), description: a.description });
     kicad.ui.status("").catch(() => undefined);

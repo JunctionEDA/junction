@@ -6921,13 +6921,17 @@ class ActionPlugin:
     """A command a plugin adds to the board editor.  Subclasses set name / category / description in
     defaults() and do their work in Run(), as on the desktop."""
 
+    # ActionPlugin's own default, kept on the class so that a plugin which sets show_toolbar_button itself (False
+    # as well as True) can be told from one that leaves it alone (kicad_web._show_button)
+    show_toolbar_button = False
+
     def __init__(self):
         self.name = "Undefined Action plugin"
         self.category = "Undefined"
         self.description = ""
         self.icon_file_name = ""
         self.dark_icon_file_name = ""
-        self.show_toolbar_button = False
+        self.__dict__.pop("show_toolbar_button", None)   # as KiCad's __init__, a value set before it does not count
         self.__plugin_path = ""
         self.defaults()
 

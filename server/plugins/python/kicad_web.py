@@ -1168,7 +1168,8 @@ class _IpcAction:
         self.name = str(action.get("name") or manifest.get("name") or "Action")
         self.description = str(action.get("description") or manifest.get("description") or "")
         self.category = "IPC"
-        self.show_toolbar_button = bool(action.get("show-button"))
+        if "show-button" in action:   # left out, the action keeps the web default (kicad_web._show_button)
+            self.show_toolbar_button = bool(action.get("show-button"))
         self.icon_file_name = ""
         for key in ("icons-light", "icons-dark"):
             for icon in action.get(key) or []:
@@ -1225,11 +1226,25 @@ def _icon(plugin):
     return ""
 
 
+def _show_button(plugin):
+    """show_toolbar_button as the plugin says it: True or False when the plugin (or a class of its own) sets it, None
+    when it leaves ActionPlugin's default alone.  KiCad's GetPluginActionButtonVisible honours an explicit False; the
+    editor shows the button of an action that says nothing (plugins/host.ts buttonVisible)."""
+    if "show_toolbar_button" in getattr(plugin, "__dict__", {}):
+        return bool(plugin.show_toolbar_button)
+    for cls in type(plugin).__mro__:
+        if cls is object or cls is getattr(pcbnew, "ActionPlugin", None):
+            continue
+        if "show_toolbar_button" in cls.__dict__:
+            return bool(cls.__dict__["show_toolbar_button"])
+    return None
+
+
 def describe():
     out = []
     for i, p in enumerate(_actions):
         out.append({"index": i, "name": str(getattr(p, "name", "") or f"Action {i + 1}")[:120], "description": str(getattr(p, "description", "") or "")[:400],
-                    "category": str(getattr(p, "category", "") or "")[:80], "button": bool(getattr(p, "show_toolbar_button", False)), "icon": _icon(p),
+                    "category": str(getattr(p, "category", "") or "")[:80], "button": _show_button(p), "icon": _icon(p),
                     "wizard": hasattr(p, "wizard")})
     return {"actions": out, "error": _load_error, "missing": {"pcbnew": sorted(pcbnew._missing), "wx": sorted(wx._missing)}}
 

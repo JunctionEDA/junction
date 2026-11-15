@@ -61,6 +61,11 @@ export interface PluginState {
   window: PluginWindowState | null;
   /** Preferences > PCB Editor > Action Plugins (PCBNEW_SETTINGS m_Plugins.actions): the person's order of actions and whether each shows its button. */
   actionOrder: [string, boolean][];
+  /**
+   * The saved order was written before ACTION_ORDER_V2: every row was saved with the default of that time, which hid
+   * the button of every action that did not ask for one, so a row that says false is not the person's own "no".
+   */
+  actionOrderLegacy: boolean;
 }
 
 const ls = { get(k: string) { try { return localStorage.getItem(k); } catch { return null; } }, set(k: string, v: string) { try { localStorage.setItem(k, v); } catch { /* no storage */ } }, del(k: string) { try { localStorage.removeItem(k); } catch { /* no storage */ } } };
@@ -71,7 +76,7 @@ let S: PluginState = {
   registry: null, registryQuery: "", published: {}, admin: false, moderation: null, project: { id: null, plugins: [], canEdit: false, dismissed: "" },
   manager: { open: false, tab: "installed", selected: null },
   panel: (() => { try { const j = JSON.parse(ls.get(LS_PANEL) || "{}"); return { open: !!j.open, active: typeof j.active === "string" ? j.active : null, width: Math.min(640, Math.max(240, Number(j.width) || 320)) }; } catch { return { open: false, active: null, width: 320 }; } })(),
-  prompt: null, consent: null, editor: null, official: null, officialError: null, pyActions: {}, window: null, actionOrder: [],
+  prompt: null, consent: null, editor: null, official: null, officialError: null, pyActions: {}, window: null, actionOrder: [], actionOrderLegacy: false,
 };
 const subs = new Set<() => void>();
 function set(patch: Partial<PluginState>) { S = Object.assign({}, S, patch); for (const fn of Array.from(subs)) fn(); }
@@ -110,31 +115,43 @@ export async function refresh(): Promise<void> {
 }
 // ---- Preferences > PCB Editor > Action Plugins
 
+/**
+ * The version marker saved as the first row of the action order (it names no action).  Rows saved without it were
+ * written while an action that did not ask for a toolbar button had none by default; their false is read as "no
+ * choice" (parseActionOrder / buttonVisible), the next OK of the page saves the rows with the marker.
+ */
+export const ACTION_ORDER_V2 = "#action-order:2";
+/** The saved rows as the server returns them: [identifier, visible] pairs, and whether they predate ACTION_ORDER_V2. */
+export function parseActionOrder(actions: unknown): { actionOrder: [string, boolean][]; actionOrderLegacy: boolean } {
+  const rows = Array.isArray(actions) ? actions.filter((r: unknown) => Array.isArray(r) && r.length === 2).map((r: unknown[]) => [String(r[0]), !!r[1]] as [string, boolean]) : [];
+  const v2 = rows.some(([id]) => id === ACTION_ORDER_V2);
+  return { actionOrder: rows.filter(([id]) => id !== ACTION_ORDER_V2), actionOrderLegacy: !v2 && rows.length > 0 };
+}
 async function loadActionOrder(): Promise<void> {
-  try { const j = await api("/api/plugins/action-order"); set({ actionOrder: Array.isArray(j.actions) ? j.actions.filter((r: unknown) => Array.isArray(r) && r.length === 2).map((r: unknown[]) => [String(r[0]), !!r[1]] as [string, boolean]) : [] }); }
+  try { const j = await api("/api/plugins/action-order"); set(parseActionOrder(j.actions)); }
   catch { /* keep the order already shown */ }
 }
 /** PANEL_PCBNEW_ACTION_PLUGINS::TransferDataFromWindow: the rows in the grid's order, each with its Show Button box. */
 export async function saveActionOrder(rows: [string, boolean][]): Promise<void> {
-  set({ actionOrder: rows.slice() });
-  try { await api("/api/plugins/action-order", { method: "PUT", body: JSON.stringify({ actions: rows }) }); }
+  set({ actionOrder: rows.slice(), actionOrderLegacy: false });
+  try { await api("/api/plugins/action-order", { method: "PUT", body: JSON.stringify({ actions: [[ACTION_ORDER_V2, true] as [string, boolean]].concat(rows) }) }); }
   catch (e) { toast(`The plugin order was not saved: ${e instanceof Error ? e.message : String(e)}`, 5000); }
 }
 /**
  * EDA_DRAW_FRAME::GetOrderedPluginActions: the actions named in the settings first, in that order, then the others.
  * PCB_EDIT_FRAME::GetPluginActionButtonVisible: the setting if there is one (the person's own choice, kept), otherwise
  * the action's default.  Here an action shows its button unless it says it does not: a plugin.json action with
- * "show-button": false, or a footprint wizard (which opens from the Footprint Wizard, not the toolbar).  A Python
- * plugin's show_toolbar_button is False whenever it leaves ActionPlugin's default alone, so it is not a "no".
+ * "show-button": false, a Python ActionPlugin that sets show_toolbar_button = False itself (kicad_web._show_button
+ * leaves the base class's default out), or a footprint wizard (which opens from the Footprint Wizard, not the toolbar).
+ * A false row saved before ACTION_ORDER_V2 is the old default, not a choice, and gives way to the default.
  */
 export function orderActions<T extends { uiId: string }>(acts: T[], s: PluginState = S): T[] {
   const at = new Map(s.actionOrder.map(([id], i) => [id, i] as [string, number]));
   return acts.map((a, i) => ({ a, i })).sort((x, y) => (at.has(x.a.uiId) ? at.get(x.a.uiId)! : 1e6 + x.i) - (at.has(y.a.uiId) ? at.get(y.a.uiId)! : 1e6 + y.i)).map((x) => x.a);
 }
 export function buttonVisible(a: ActionContribution, s: PluginState = S): boolean {
-  const row = s.actionOrder.find(([id]) => id === a.uiId); if (row) return row[1];
+  const row = s.actionOrder.find(([id]) => id === a.uiId); if (row && (row[1] || !s.actionOrderLegacy)) return row[1];
   if (a.action.scopes && a.action.scopes.includes("footprint_wizard")) return false;
-  const p = s.installed.find((x) => x.identifier === a.plugin); if (p && isPython(p.manifest)) return true;
   return a.action["show-button"] !== false;
 }
 /**
@@ -361,10 +378,15 @@ const LS_PY = "kc.plugins.py.";
 const pyActive = new Set<string>(), pyStarting = new Set<string>(), pyFailed = new Set<string>();
 /** The actions a Python plugin registered the last time this copy of it ran, or null when it has not run yet. */
 function cachedPyActions(p: InstalledPlugin): PluginAction[] | null {
-  try { const j = JSON.parse(ls.get(LS_PY + p.identifier) || "null"); return j && j.key === keyOf(p) && Array.isArray(j.actions) ? j.actions : null; } catch { return null; }
+  try {
+    const j = JSON.parse(ls.get(LS_PY + p.identifier) || "null");
+    if (!j || j.key !== keyOf(p) || !Array.isArray(j.actions)) return null;
+    // remembered before show-button told an explicit False from ActionPlugin's default: every false there is the default
+    return j.v === 2 ? j.actions : (j.actions as PluginAction[]).map((a) => (a["show-button"] === false ? Object.assign({}, a, { "show-button": undefined }) : a));
+  } catch { return null; }
 }
 function rememberPyActions(p: InstalledPlugin, actions: PluginAction[]) {
-  ls.set(LS_PY + p.identifier, JSON.stringify({ key: keyOf(p), actions }));
+  ls.set(LS_PY + p.identifier, JSON.stringify({ key: keyOf(p), v: 2, actions }));
   set({ pyActions: Object.assign({}, S.pyActions, { [p.identifier]: actions }) });
 }
 function forgetPyActions(id: string) { ls.del(LS_PY + id); pyActive.delete(id); pyFailed.delete(id); const next = Object.assign({}, S.pyActions); delete next[id]; set({ pyActions: next }); }
@@ -445,7 +467,7 @@ function onMessage(run: Run, m: any) {
       // A Python plugin says what its actions are called as it registers them; that is the only description there is.
       if (run.actions && m.kind === "action" && m.meta && typeof m.meta === "object" && /^py\d{1,3}$/.test(m.name) && run.actions.length < 60 && !run.actions.some((a) => a.identifier === m.name)) {
         const icon = typeof m.meta.icon === "string" && /^data:image\/(png|jpeg|gif|svg\+xml|bmp|x-icon);base64,[A-Za-z0-9+/=]+$/.test(m.meta.icon) && m.meta.icon.length < 120000 ? m.meta.icon : undefined;
-        run.actions.push({ identifier: m.name, name: String(m.meta.name || "Action").slice(0, 120), description: String(m.meta.description || "").slice(0, 400), scopes: m.meta.wizard ? ["pcb", "footprint_wizard"] : ["pcb"], "show-button": !!m.meta.button, iconUrl: icon });
+        run.actions.push({ identifier: m.name, name: String(m.meta.name || "Action").slice(0, 120), description: String(m.meta.description || "").slice(0, 400), scopes: m.meta.wizard ? ["pcb", "footprint_wizard"] : ["pcb"], "show-button": typeof m.meta.button === "boolean" ? m.meta.button : undefined, iconUrl: icon });
       }
       break;
     }
