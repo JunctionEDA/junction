@@ -17,7 +17,8 @@ const mkUser = async (ghId, login, name) => (await db.query(
   `INSERT INTO users (github_id, login, name) VALUES ($1, $2, $3) ON CONFLICT (github_id) DO UPDATE SET login = EXCLUDED.login, name = EXCLUDED.name RETURNING id`, [ghId, login, name])).rows[0].id;
 const adaId = await mkUser(-7701, 'ada', 'Ada');
 await db.query(`DELETE FROM projects WHERE owner_id = $1 AND name = 'rp2040-pico'`, [adaId]);
-const ada = mintJwt(adaId, 'ada');
+// the MCP endpoint takes an access key (Connect an AI assistant), not the session token
+const ada = (await (await fetch('http://127.0.0.1:8099/api/mcp/keys', { method: 'POST', headers: { Authorization: `Bearer ${mintJwt(adaId, 'ada')}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'demo build', write: true }) })).json()).key;
 const p = await mcp(ada, 'create_project', { name: 'rp2040-pico' });
 const project = p.data.project_id;
 async function run(file, title) {

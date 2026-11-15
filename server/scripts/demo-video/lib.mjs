@@ -85,7 +85,7 @@ export async function record(pages, dirs) {
     const shot = async (p, i) => { const to = path.join(dirs[i], file);
       const s0 = Date.now();
       try { await p.screenshot({ path: to, type: 'jpeg', quality: 92, timeout: n === 1 ? 90000 : 25000 }); if (process.env.SHOT_LOG && Date.now() - s0 > 2000) console.log(`  slow photo: page ${i}, frame ${n}, ${Date.now() - s0} ms`); }
-      catch (e) { const prev = n > 1 && path.join(dirs[i], String(n - 1).padStart(5, '0') + '.jpg'); if (!prev || !fs.existsSync(prev)) throw e; fs.copyFileSync(prev, to); } };
+      catch (e) { const prev = n > 1 && path.join(dirs[i], String(n - 1).padStart(5, '0') + '.jpg'); if (!prev || !fs.existsSync(prev)) { if (i > 0) return; throw e; } fs.copyFileSync(prev, to); } };
     await Promise.all(pages.map(shot));
     frames.push({ t: +t.toFixed(3), file }); t += dt;
   };
@@ -94,6 +94,8 @@ export async function record(pages, dirs) {
     wait: async (ms) => { const end = Date.now() + ms; let last = Date.now(); do { await tick(0); await sleep(60); const now = Date.now(); t += (now - last) / 1000; last = now; } while (Date.now() < end); },
     until: async (promise) => { let done = false, value, error; promise.then((v) => { done = true; value = v; }, (e) => { done = true; error = e; }); let last = Date.now(); while (!done) { await tick(0); await sleep(150); const now = Date.now(); t += (now - last) / 1000; last = now; } if (error) throw error; return value; },
     mark: (name) => { marks[name] = +t.toFixed(3); },
+    // photograph another page from now on (a person who joins mid-take); its folder has no photographs from before
+    add: (page, d) => { fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }); pages.push(page); dirs.push(d); marks[`add-${path.basename(d)}`] = +t.toFixed(3); },
     // A mouse path a person could have made: eased, one photograph per step.
     glide: async (page, from, to, ms = 600) => {
       const steps = Math.max(6, Math.round((ms / 1000) * FPS));

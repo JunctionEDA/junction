@@ -37,6 +37,7 @@ import { installSubSheets } from "./subsheets";
 import { installIntersheetRefs, refreshIntersheetRefs } from "./intersheet-refs";
 import { onSheetOpened } from "./erc-hier";
 import { selectionIds } from "../editor/gestures";
+import { sendSelection } from "../editor/crossprobe";
 
 type Handler = import("../editor/types").ActionHandler;
 interface Marker { code: string; severity: string }
@@ -113,6 +114,9 @@ export function installDialogs(HANDLERS: Record<string, Handler>): void {
     openPreferences: (() => openPreferences()) as Handler,
     // SCH_EDITOR_CONTROL::Simulate: Inspect > Simulator (sim/frame.ts)
     showSimulator: needDoc(() => { void openSimulator(); }, true),
+    // SCH_EDITOR_CONTROL::CrossProbeToPcb / PCB_SELECTION_TOOL::CrossProbeToSch: the selection to the project's other editor (editor/crossprobe.ts)
+    selectOnPCB: needDoc(() => sendSelection(true), true),
+    selectOnSchematic: (() => { if (E.kdoc && !isSch()) sendSelection(true); }) as Handler,
     // SCH_EDITOR_CONTROL::EditSymbolLibraryLinks (DIALOG_EDIT_SYMBOLS_LIBID)
     editSymbolLibraryLinks: needDoc(() => { void openEditSymbolsLibId(); }, true),
     // SCH_DRAWING_TOOLS::ImportSheet: Place > Import Sheet... (dialogs/import-sheet.ts)

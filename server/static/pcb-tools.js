@@ -377,6 +377,66 @@
         if (t === "fp_text_box") toggleMirror(c);
       }
     }
+    return turnFrame(node);
+  }
+  function turnFrame(node) {
+    const neg = (v) => r6(-v) || 0;
+    const [x, y, a] = K.atOf(node);
+    setFootprintAt(node, x, y, norm180(a + 180));
+    const half = (g) => {
+      for (const key of ["start", "end", "center", "mid"]) {
+        const k = K.kid(g, key);
+        if (k) {
+          k[1] = neg(K.num(k[1]));
+          k[2] = neg(K.num(k[2]));
+        }
+      }
+      const pts = K.kid(g, "pts");
+      if (pts) for (const p of pts.slice(1)) {
+        if (!isList(p)) continue;
+        if (p[0] === "xy") {
+          p[1] = neg(K.num(p[1]));
+          p[2] = neg(K.num(p[2]));
+        } else half(p);
+      }
+    };
+    for (const c of node) {
+      if (!isList(c)) continue;
+      const t = c[0];
+      if (ANGLED(c)) {
+        const at = K.kid(c, "at");
+        at[1] = neg(K.num(at[1]));
+        at[2] = neg(K.num(at[2]));
+      }
+      if (t === "pad") {
+        setAngle(c, K.atOf(c)[2] + 180);
+        const dr = K.kid(c, "drill");
+        const off = dr && K.kid(dr, "offset");
+        if (off) {
+          off[1] = neg(K.num(off[1]));
+          off[2] = neg(K.num(off[2]));
+        }
+        const rd = K.kid(c, "rect_delta");
+        if (rd) {
+          rd[1] = neg(K.num(rd[1]));
+          rd[2] = neg(K.num(rd[2]));
+        }
+        const prims = K.kid(c, "primitives");
+        if (prims) {
+          for (const p of prims.slice(1)) if (isList(p)) half(p);
+        }
+        const ch = K.kid(c, "chamfer");
+        const opp = { top_left: "bottom_right", bottom_right: "top_left", top_right: "bottom_left", bottom_left: "top_right" };
+        if (ch) for (let i = 1; i < ch.length; i++) {
+          const v = K.str(ch[i]);
+          if (opp[v]) ch[i] = opp[v];
+        }
+      } else if (/^fp_(line|rect|circle|arc|poly|curve)$/.test(t)) half(c);
+      else if (t === "fp_text_box" || t === "zone") {
+        half(c);
+        for (const poly of K.kids(c, "polygon").concat(K.kids(c, "filled_polygon"))) half(poly);
+      }
+    }
     return node;
   }
 
@@ -38256,8 +38316,13 @@ Press <esc> to cancel all; double-click to finish`;
     if (!sel) return true;
     const ch = packChanges(ctx.doc, sel.ids);
     if (ch.length) ctx.commit(ch, "pack footprints");
-    endHover(ctx, sel);
-    ctx.requestRender();
+    if (S.route || S.move) {
+      endHover(ctx, sel);
+      ctx.requestRender();
+      return true;
+    }
+    applySelection(ctx, sel.ids);
+    beginCarryMove(ctx, { ids: sel.ids, hover: false });
     return true;
   });
   alias("packAndMoveFootprints", "pack");

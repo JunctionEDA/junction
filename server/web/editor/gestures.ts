@@ -64,7 +64,9 @@ export function selectionIds(): string[] {
 export function selectionItems(): KItem[] { const d = doc(); return d ? selectionIds().map((id) => d.items.get(id)!) : []; }
 
 /** Publish a changed selection: halo, Properties pane, Objects tab. */
-export function selectionChanged(): void { drawSelection(); renderProps(); renderObjects(); requestRender(); }
+export function selectionChanged(): void { drawSelection(); renderProps(); renderObjects(); requestRender(); for (const f of selectionHooks) f(); }
+/** Called after every published selection change (editor/crossprobe.ts sends the selection to the project's other editor). */
+export const selectionHooks: (() => void)[] = [];
 
 /** The ERC marker drawn under a point (the markers the View options show), or null. */
 export function markerUnder(mm: Mm): Marker | null {

@@ -14,6 +14,7 @@ import { projectDocs, resolveDoc } from "./design";
 import { footprintNode, kicadFootprint, kicadSymbol, vendorPart, vendorSymbol } from "./library";
 import { fieldShifts, inlineFieldShifts, snugFieldShifts, itemsWithin } from "./layout";
 import { planSilk } from "./silkscreen";
+import { planModelFit } from "./model-fit";
 
 const W = window as any;
 const SCH = (): any => (W.CollabTools && W.CollabTools.sch) || null;
@@ -354,6 +355,7 @@ async function fetchSources(edits: Edit[] | undefined): Promise<void> {
       } else if (e.op === "update_from_schematic" && doc.type === "pcb") e.__sync = await planSync(doc, e);
       else if (e.op === "fill_zones" && doc.type === "pcb") e.__fill = await planFill(doc, edits.length);
       else if (e.op === "assign_models" && doc.type === "pcb") e.__models = await partModels(doc);
+      else if (e.op === "align_models" && doc.type === "pcb") e.__fit = await planModelFit(doc, Array.isArray(e.refs) ? e.refs : null);
     } catch (err) { e.__error = err instanceof Error ? err.message : String(err); }
   }));
 }
@@ -728,6 +730,30 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
           if (!ids.length) { if (e.if_needed === true) { details.push({ assign_models: { assigned: [], without_model: left } }); break; } throw new ToolError(left.length ? `no replacement model was found: ${left.slice(0, 6).map((l) => `${l.ref} (${l.reason})`).join("; ")}` : "every part already shows its own 3D model"); }
           lines.push({ kind: "modify", text: `3D models: ${done.length} part${done.length === 1 ? "" : "s"} given the closest model of KiCad's library (${done.slice(0, 4).map((d) => d.ref).join(", ")}${done.length > 4 ? ", ..." : ""})`, ids });
           details.push({ assign_models: { assigned: done, without_model: left } });
+          break;
+        }
+        case "align_models": {
+          // a 3D model whose pins miss the pads (checked at pin 1 and the pad farthest from it) takes the turn that lands it
+          pcbOnly(e.op); const plan = e.__fit as import("./model-fit").FitPlan | undefined;
+          if (!plan) throw new ToolError("the 3D models could not be loaded here");
+          const ids: string[] = []; const turned: { ref: string; model: string; turn: number }[] = []; const left: { ref: string; model: string; off: unknown }[] = [];
+          const byId = new Map<string, typeof plan.misaligned>();
+          for (const row of plan.misaligned) { if (row.turn === null) { left.push({ ref: row.ref, model: row.model, off: row.off }); continue; } byId.set(row.id, [...(byId.get(row.id) || []), row]); }
+          if (e.fix !== false) for (const [id, rows] of byId) {
+            const it = doc.items.get(id); if (!it || touched.has(id)) continue;
+            const node = k.cloneNode(it.node);
+            const shown = k.kids(node, "model").filter((m: any) => { const h = k.kid(m, "hide"); return !h || k.str(h[1]) === "no"; });
+            for (const row of rows) {
+              const m = shown[row.index]; if (!m) continue;
+              let rot = k.kid(m, "rotate"); if (!rot) { rot = k.parse("(rotate (xyz 0 0 0))"); m.push(rot); }
+              let xyz = k.kid(rot, "xyz"); if (!xyz) { xyz = ["xyz", 0, 0, 0]; rot.push(xyz); }
+              const z = ((k.num(xyz[3]) + row.turn! + 180) % 360 + 360) % 360 - 180; xyz[3] = z;
+              turned.push({ ref: row.ref, model: row.model, turn: row.turn! });
+            }
+            touch(it, e.op); changes.push(modified(doc, it, node)); ids.push(id);
+          }
+          if (ids.length) lines.push({ kind: "modify", text: `3D models turned onto their pads: ${turned.slice(0, 5).map((t) => `${t.ref} ${t.turn}°`).join(", ")}${turned.length > 5 ? ", ..." : ""}`, ids });
+          details.push({ align_models: { checked: plan.checked, aligned: plan.aligned, turned, misaligned: e.fix === false ? plan.misaligned.map((r) => ({ ref: r.ref, model: r.model, off: r.off, turn: r.turn })) : left, not_loaded: plan.not_loaded, note: plan.note } });
           break;
         }
         case "move_region": {

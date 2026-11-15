@@ -10,6 +10,7 @@ import "./tools";
 import "./selection";
 import "./doc";
 import "./peers";
+import "./crossprobe";
 import "./pointer";
 import "./comments";
 import "./history";

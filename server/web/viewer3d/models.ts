@@ -155,6 +155,47 @@ export function placeMesh(mesh: ModelMesh, ref: ModelRef, at: Placement, each: (
   }
 }
 
+/** A footprint's pad in its own frame (the file's pad (at), millimetres, Y down), as viewer3d/parts.ts localPads gives it. */
+export interface FitPad { num: string; x: number; y: number; w: number; h: number; drill: boolean }
+export interface ModelFit { ok: boolean; checked: string[]; off: { pad: string; mm: number }[] }
+
+/**
+ * Does a model's pins land on the footprint's pads?  Pin 1 alone says little (a header's model turned half a turn
+ * about pin 1 still has a pin there), so the pad farthest from pin 1 is checked too: both need a pin of the model
+ * on them.  A pin is the model where it meets the board: below the face it sits on for a through-hole pad (the lead
+ * through the hole), the bottom 0.3 mm of the part for a surface pad.  Worked in the footprint's own frame, so the
+ * footprint's angle does not enter (KiCad turns the model with the footprint).
+ */
+export function modelFit(mesh: ModelMesh, ref: ModelRef, back: boolean, pads: FitPad[], tol = 0.2): ModelFit | null {
+  const real = pads.filter((p) => p.num !== "" && (p.w > 0 || p.h > 0));
+  const one = real.find((p) => p.num === "1") || real.slice().sort((a, b) => a.num.localeCompare(b.num, undefined, { numeric: true }))[0];
+  if (!one) return null;
+  let far: FitPad | null = null, dmax = 0.3;
+  for (const p of real) { const d = Math.hypot(p.x - one.x, p.y - one.y); if (d > dmax) { dmax = d; far = p; } }
+  if (!far) return null;     // one pad, or every pad on the same spot: nothing to line up
+  const lead: number[] = [], foot: number[] = [];
+  placeMesh(mesh, ref, { x: 0, y: 0, z: 0, rot: 0, back }, (x, y, z) => {
+    const up = back ? -z : z;     // height above the face the part sits on
+    if (up < -0.25) lead.push(x, -y); else if (up <= 0.3) foot.push(x, -y);
+  });
+  const miss = (p: FitPad): number => {
+    const pts = p.drill && lead.length ? lead : foot; let best = Infinity;
+    for (let i = 0; i < pts.length; i += 2) { const d = Math.hypot(pts[i] - p.x, pts[i + 1] - p.y); if (d < best) best = d; }
+    return Math.max(0, best - (Math.max(p.w, p.h) / 2 + tol));
+  };
+  const off = [one, far].map((p) => ({ pad: p.num, mm: Math.round(miss(p) * 100) / 100 })).filter((o) => o.mm > 0);
+  return { ok: !off.length, checked: [one.num, far.num], off };
+}
+
+/** The turn about the model's Z (90, 180 or 270 degrees, added to its rotate) that puts its pins on the pads, or null when none does. */
+export function modelTurn(mesh: ModelMesh, ref: ModelRef, back: boolean, pads: FitPad[]): number | null {
+  for (const d of [180, 90, 270]) {
+    const r: ModelRef = { ...ref, rotate: [ref.rotate[0], ref.rotate[1], ((ref.rotate[2] + d + 180) % 360 + 360) % 360 - 180] };
+    const f = modelFit(mesh, r, back, pads); if (f && f.ok) return d;
+  }
+  return null;
+}
+
 /** occt-import-js's result for one STEP file, flattened into one mesh. */
 export function flattenOcct(result: { success?: boolean; meshes?: any[] }): ModelMesh | null {
   if (!result || !result.success || !Array.isArray(result.meshes)) return null;

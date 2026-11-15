@@ -152,6 +152,9 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             if s and s.get("hidden"):
                 out["silk_hidden"] = s["hidden"]
     step("thermals", self.fix_thermals)      # a relief the last tracks left with too few spokes joins its pour solidly
+    fit = step("3d models", self.align_models)   # every model's pins on its pads (pin 1 and the farthest pad), turned when not
+    if fit and (fit.get("turned") or fit.get("misaligned")):
+        out["models_3d"] = {k: fit[k] for k in ("turned", "misaligned") if fit.get(k)}
     info = self.info()
     out["size_mm"], out["layers"], out["vias"] = info.get("size_mm"), len(info.get("copper_layers") or []), info.get("vias")
     chk = step("drc", lambda: self.check(limit=4))

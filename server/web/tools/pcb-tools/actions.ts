@@ -414,7 +414,10 @@ act("swap", "Swap", "Alt+S", (ctx: PcbCtx) => {
 act("pack", "Pack and Move Footprints", "P", (ctx: PcbCtx) => {
   if (!canEdit(ctx)) return true;
   const sel = requestSelection(ctx, { filter: (it: KItem) => it.kind === "footprint" || it.kind === "group", rerun: (c: PcbCtx) => runAction("pack", c) }); if (!sel) return true;
-  const ch = packChanges(ctx.doc, sel.ids); if (ch.length) ctx.commit(ch, "pack footprints"); endHover(ctx, sel); ctx.requestRender(); return true;
+  // EDIT_TOOL::PackAndMoveFootprints: SpreadFootprints packs them at their box's corner, then doMoveSelection carries them under the cursor
+  const ch = packChanges(ctx.doc, sel.ids); if (ch.length) ctx.commit(ch, "pack footprints");
+  if (S.route || S.move) { endHover(ctx, sel); ctx.requestRender(); return true; }
+  applySelection(ctx, sel.ids); beginCarryMove(ctx, { ids: sel.ids, hover: false }); return true;
 });
 alias("packAndMoveFootprints", "pack");
 act("createArray", "Create Array…", "", (ctx: PcbCtx) => {   // DIALOG_CREATE_ARRAY lives in web/editor/pcbdialogs/array.ts; this short form stands in without it

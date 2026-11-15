@@ -272,5 +272,31 @@ test("Models marked DNP: the DNP parts come back flagged only when asked for", (
   const all = G.boardBodies(doc, true); assert.strictEqual(all.length, 1); assert.strictEqual(all[0].dnp, true);
 });
 
+// a 1x5 pin header as KiCad's library draws it: pin 1 at the origin, the pins down the page (model -Y), each lead
+// from 3 mm under the board to 8.5 mm over it
+function headerMesh(n) {
+  const pos = [];
+  for (let i = 0; i < n; i++) for (const z of [-3, 0, 2.5, 8.5]) for (const [dx, dy] of [[-0.32, -0.32], [0.32, -0.32], [0.32, 0.32], [-0.32, 0.32]]) pos.push(dx, -2.54 * i + dy, z);
+  const f = new Float32Array(pos); return { pos: f, nrm: new Float32Array(f.length), col: new Float32Array(f.length), idx: new Uint32Array(0) };
+}
+const headerPads = (sign) => Array.from({ length: 5 }, (_, i) => ({ num: String(i + 1), x: 0, y: sign * 2.54 * i, w: 1.7, h: 1.7, drill: true }));
+const plainRef = { name: "Connector_PinHeader_2.54mm/PinHeader_1x05_P2.54mm_Vertical", offset: [0, 0, 0], scale: [1, 1, 1], rotate: [0, 0, 0], source: "kicad", url: "" };
+
+test("modelFit: a header's model lands on pin 1 and on the farthest pin, front and back (KiCad's flipped frame)", () => {
+  const front = G.modelFit(headerMesh(5), plainRef, false, headerPads(1));
+  assert.ok(front.ok); assert.deepStrictEqual(front.checked, ["1", "5"]);
+  // FOOTPRINT::Flip mirrors the pads' local Y: on the back the pads run up the page and the model follows
+  assert.ok(G.modelFit(headerMesh(5), plainRef, true, headerPads(-1)).ok);
+});
+
+test("modelFit: pin 1 alone is not enough; a model turned half a turn about pin 1 misses the far pin and modelTurn finds the turn", () => {
+  // a back footprint written in the other frame (local X mirrored, angle negated): same pads on the board, model half a turn off
+  const f = G.modelFit(headerMesh(5), plainRef, true, headerPads(1));
+  assert.ok(!f.ok); assert.deepStrictEqual(f.off.map((o) => o.pad), ["5"]); assert.ok(f.off[0].mm > 8);
+  assert.strictEqual(G.modelTurn(headerMesh(5), plainRef, true, headerPads(1)), 180);
+  const turned = Object.assign({}, plainRef, { rotate: [0, 0, 180] });
+  assert.ok(G.modelFit(headerMesh(5), turned, true, headerPads(1)).ok);
+});
+
 console.log(`viewer3d: ${passed} passed, ${failed} failed`);
 process.exit(failed ? 1 : 0);

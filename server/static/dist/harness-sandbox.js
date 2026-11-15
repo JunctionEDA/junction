@@ -2032,6 +2032,20 @@ class Board(_Doc):
             raise
         return dict(next((x["assign_models"] for x in res.get("details") or [] if "assign_models" in x), {"assigned": [], "without_model": []}))
 
+    def align_models(self, refs: list[str] | None = None, fix: bool = True) -> dict:
+        """Check that every part's 3D model sits on its pads: the model is loaded as the 3D view loads it and its pins
+        must land on pin 1 and on the pad farthest from pin 1 (pin 1 alone passes a header turned half a turn about
+        it).  A model that misses gets the quarter or half turn that lands it, written into the footprint's model
+        rotate (\`fix=False\` only reports).  Returns {"checked", "aligned", "turned": [{"ref", "model", "turn"}],
+        "misaligned": [{"ref", "model", "off": [{"pad", "mm"}]}], "not_loaded"}.  \`board.design()\` runs it at the end."""
+        self.flush()
+        e: dict = {"op": "align_models", "fix": bool(fix)}
+        if refs:
+            e["refs"] = [str(r) for r in refs]
+        self._edit(e)
+        res = self.flush() or {}
+        return dict(next((x["align_models"] for x in res.get("details") or [] if "align_models" in x), {"checked": 0, "aligned": 0, "turned": [], "misaligned": [], "not_loaded": []}))
+
     # ---- setting up
     def sync(self, placements: dict | None = None) -> dict:
         """Update the board from the schematic: missing footprints are added, pad nets and values brought into line.
@@ -5845,6 +5859,9 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             if s and s.get("hidden"):
                 out["silk_hidden"] = s["hidden"]
     step("thermals", self.fix_thermals)      # a relief the last tracks left with too few spokes joins its pour solidly
+    fit = step("3d models", self.align_models)   # every model's pins on its pads (pin 1 and the farthest pad), turned when not
+    if fit and (fit.get("turned") or fit.get("misaligned")):
+        out["models_3d"] = {k: fit[k] for k in ("turned", "misaligned") if fit.get(k)}
     info = self.info()
     out["size_mm"], out["layers"], out["vias"] = info.get("size_mm"), len(info.get("copper_layers") or []), info.get("vias")
     chk = step("drc", lambda: self.check(limit=4))
