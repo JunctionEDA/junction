@@ -4,6 +4,18 @@ Releases of Junction, which was called KiCad Collaborative up to 1.0.9. The
 version here is the product version (`packaging/VERSION`), not the KiCad
 version it is based on.
 
+## Unreleased
+
+### Desktop
+- The library download says what it is fetching, how much of the whole it
+  has and how long it still takes ("Downloading symbols: 21 of 61 MB, about
+  40 s left"), short enough to read in the editors' status bar too.
+- A 3D model fetched for the viewer is kept for good: it is saved into the
+  library folder on this computer (3dmodels/<Library>.3dshapes, beside the
+  downloaded symbols and footprints), so it is downloaded once and is there
+  for every project afterwards. Models fetched by earlier versions are moved
+  over the first time they are used.
+
 ## 2.1.3 (2026-11-15)
 
 ### Desktop

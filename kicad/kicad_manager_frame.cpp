@@ -1698,9 +1698,11 @@ void KICAD_MANAGER_FRAME::startStandardLibrariesDownload( bool aContinuing )
     s_stdlibsDownload = state;
 
     Pgm().GetNotificationsManager().CreateOrUpdate(
-            STDLIBS_NOTIFICATION, _( "Standard libraries are downloading" ),
+            STDLIBS_NOTIFICATION,
+            _( "Downloading the standard symbols, footprints and templates" ),
             _( "You can keep working. The standard symbols and footprints can be chosen as "
-               "soon as the download has finished; the status bar shows how far it is." ) );
+               "soon as the download has finished; the status bar shows what is downloading, "
+               "how much of it is here and how long it still takes." ) );
 
     std::shared_ptr<bool> alive = m_collabAlive;
 

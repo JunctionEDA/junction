@@ -111,6 +111,24 @@ std::atomic<int>  s_percent( 0 );
 /// "no", so the download continues at the next start.
 std::atomic<bool> s_suspended( false );
 
+/// For the progress text of the running Install(): the size of all the archives together when
+/// the server told it (0 when unknown), and the bytes of the archives that are complete.
+std::atomic<long long> s_allBytes( 0 );
+std::atomic<long long> s_doneBytes( 0 );
+
+
+/// "about 40 s", "about 3 min": how long a download still takes, for the progress text.
+wxString timeLeft( double aSeconds )
+{
+    if( aSeconds < 90 )
+        return wxString::Format( _( "about %d s left" ), std::max( 1, (int) ( aSeconds + 0.5 ) ) );
+
+    if( aSeconds < 5400 )
+        return wxString::Format( _( "about %d min left" ), (int) ( aSeconds / 60 + 0.5 ) );
+
+    return wxString::Format( _( "about %d h left" ), (int) ( aSeconds / 3600 + 0.5 ) );
+}
+
 
 wxString stoppedMessage()
 {
@@ -342,6 +360,9 @@ wxString downloadOnce( const ARCHIVE& aArchive, const SOURCE& aSource, const wxS
     size_t     lastNow = 0;
     wxLongLong lastMoved = wxGetLocalTimeMillis();
 
+    // For the estimate of the time left: when data started to arrive in this attempt.
+    wxLongLong firstData = 0;
+
     KICAD_CURL_EASY curl;
 
     curl.SetURL( url.ToStdString( wxConvUTF8 ) );
@@ -368,9 +389,33 @@ wxString downloadOnce( const ARCHIVE& aArchive, const SOURCE& aSource, const wxS
                     return 1;
                 }
 
-                const wxString what = wxString::Format( _( "Downloading the %s (%.0f MB)..." ),
-                                                        wxString( aArchive.folder ),
-                                                        ( have + aNow ) / 1048576.0 );
+                // What is downloading, how much of how much, and how long it still takes:
+                // "Downloading symbols: 21 of 61 MB, about 40 s left".  The sizes are those of
+                // all three archives when the server told them, of this one otherwise.
+                const double mb = 1048576.0;
+                const long long fileTotal = aSource.size > 0 ? (long long) aSource.size
+                                            : aTotal > 0     ? (long long) ( have + aTotal )
+                                                             : 0;
+                const long long all = s_allBytes > 0 ? s_allBytes.load() : fileTotal;
+                const long long got = ( s_allBytes > 0 ? s_doneBytes.load() : 0 ) + have + aNow;
+
+                wxString what = wxString::Format( _( "Downloading %s:" ), wxString( aArchive.folder ) );
+
+                if( all > 0 )
+                    what += wxString::Format( _( " %.0f of %.0f MB" ), got / mb, all / mb );
+                else
+                    what += wxString::Format( _( " %.0f MB" ), got / mb );
+
+                if( aNow > 0 && firstData == 0 )
+                    firstData = wxGetLocalTimeMillis();
+
+                const double seconds = firstData == 0 ? 0.0
+                                       : ( wxGetLocalTimeMillis() - firstData ).ToDouble() / 1000.0;
+
+                // The speed needs a moment to mean something.
+                if( all > got && seconds >= 2.0 && aNow > 0 )
+                    what += wxS( ", " ) + timeLeft( ( all - got ) / ( aNow / seconds ) );
+
                 int percent = aStep * 33;
 
                 if( aSource.size > 0 )
@@ -595,7 +640,7 @@ wxString unpack( const ARCHIVE& aArchive, const wxString& aZip, const wxString& 
                     percent += (int) ( 16.0 * file.TellI() / size );
 
                 if( aProgress
-                    && !aProgress( wxString::Format( _( "Unpacking the %s (%d libraries)..." ),
+                    && !aProgress( wxString::Format( _( "Unpacking %s (%d libraries)..." ),
                                                      wxString( aArchive.folder ), libraries ),
                                    percent ) )
                 {
@@ -810,6 +855,25 @@ static bool install( const COLLAB_STDLIBS::PROGRESS& aProgress, wxString* aError
     wxString error;
     int      step = 0;
 
+    // The size of everything, for the progress text, when the server told all of it.
+    long long allBytes = 0;
+
+    for( const ARCHIVE& archive : ARCHIVES )
+    {
+        auto it = fromServer.find( wxString( archive.folder ) );
+
+        if( it == fromServer.end() || it->second.size <= 0 )
+        {
+            allBytes = 0;
+            break;
+        }
+
+        allBytes += it->second.size;
+    }
+
+    s_allBytes = allBytes;
+    s_doneBytes = 0;
+
     for( const ARCHIVE& archive : ARCHIVES )
     {
         // The collaboration server first (a download can continue in the middle of a file
@@ -841,6 +905,9 @@ static bool install( const COLLAB_STDLIBS::PROGRESS& aProgress, wxString* aError
 
             wxRemoveFile( zip );
         }
+
+        if( error.IsEmpty() )
+            s_doneBytes += std::max<long long>( 0, fileSize( zip ) );
 
         if( !error.IsEmpty() )
         {
