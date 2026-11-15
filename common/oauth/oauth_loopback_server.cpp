@@ -248,9 +248,76 @@ void OAUTH_LOOPBACK_SERVER::SendHttpResponse( wxSocketBase* aClient, bool aSucce
     if( !aClient )
         return;
 
-    const wxString body = aSuccess
-                                  ? wxS( "<!DOCTYPE html><html><body><p>Authentication complete.</p></body></html>" )
-                                  : wxS( "<!DOCTYPE html><html><body><p>Authentication failed.</p></body></html>" );
+    // One self-contained page in the site's look (palette and mark from server/static/theme.css
+    // and icon.svg); it loads nothing from the network.  A tab opened by the system browser
+    // usually may not close itself, so the page tries and otherwise says the tab can be closed.
+    static const char* const page = R"html(<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>@TITLE@ - Junction</title>
+<style>
+:root { --bench:#f4f4f5; --paper:#fafafa; --panel:#fff; --ink:#111113; --ink-2:#52525b; --line:#e4e4e7;
+        --dot:#d4d4d8; --accent:#111113; --accent-2:#27272a; --on-accent:#fafafa; --err:#b42318;
+        --tile:#111113; --mark:#fafafa; }
+@media (prefers-color-scheme: dark) {
+:root { --bench:#111113; --paper:#18181b; --panel:#0b0b0c; --ink:#fafafa; --ink-2:#a1a1aa; --line:#27272a;
+        --dot:#3f3f46; --accent:#fafafa; --accent-2:#e4e4e7; --on-accent:#0b0b0c; --err:#f97066;
+        --tile:#fafafa; --mark:#111113; } }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body { display: grid; place-items: center; padding: 16px; color: var(--ink); background-color: var(--paper);
+       background-image: radial-gradient(var(--dot) 1px, transparent 1.3px); background-size: 20px 20px;
+       font: 15px/1.5 Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+main { width: 100%; max-width: 380px; padding: 32px 28px 28px; text-align: center; background: var(--panel);
+       border: 1px solid var(--line); border-radius: 10px; }
+svg { width: 52px; height: 52px; }
+h1 { margin: 18px 0 6px; font-size: 20px; font-weight: 600; letter-spacing: -.01em; }
+h1.bad { color: var(--err); }
+p { margin: 0; color: var(--ink-2); }
+button { margin-top: 22px; height: 36px; padding: 0 18px; border: 1px solid var(--accent-2); border-radius: 8px;
+         background: var(--accent); color: var(--on-accent); font: inherit; font-weight: 500; line-height: 1;
+         cursor: pointer; }
+button:hover { background: var(--accent-2); }
+button:focus-visible { outline: 2px solid var(--ink-2); outline-offset: 2px; }
+#hint { display: none; margin-top: 14px; font-size: 13px; }
+</style></head><body><main>
+<svg viewBox="0 0 100 100" aria-hidden="true"><rect width="100" height="100" rx="22" fill="var(--tile)"/>
+<path d="M18 60H82M42 20V80" fill="none" stroke="var(--mark)" stroke-width="7" stroke-linecap="round"/>
+<circle cx="42" cy="60" r="11" fill="var(--mark)"/></svg>
+<h1 class="@CLASS@">@TITLE@</h1>
+<p>@TEXT@</p>
+<button type="button" id="close">Close this tab</button>
+<p id="hint">Your browser keeps this tab open. You can close it yourself.</p>
+</main><script>
+(function () {
+  var hint = document.getElementById("hint");
+  function shut() { window.close(); setTimeout(function () { hint.style.display = "block"; }, 300); }
+  document.getElementById("close").onclick = shut;
+  if (@AUTOCLOSE@) setTimeout(function () { window.close(); }, 1500);
+})();
+</script></body></html>
+)html";
+
+    wxString body = wxString::FromUTF8( page );
+
+    if( aSuccess )
+    {
+        body.Replace( wxS( "@TITLE@" ), wxS( "You're signed in" ) );
+        body.Replace( wxS( "@CLASS@" ), wxS( "ok" ) );
+        body.Replace( wxS( "@TEXT@" ), wxS( "Junction is connected to your account. Go back to the app to "
+                                           "carry on." ) );
+        body.Replace( wxS( "@AUTOCLOSE@" ), wxS( "true" ) );
+    }
+    else
+    {
+        body.Replace( wxS( "@TITLE@" ), wxS( "Sign-in didn't finish" ) );
+        body.Replace( wxS( "@CLASS@" ), wxS( "bad" ) );
+        body.Replace( wxS( "@TEXT@" ), wxS( "Junction could not complete the sign-in. Go back to the app "
+                                           "and try again." ) );
+        body.Replace( wxS( "@AUTOCLOSE@" ), wxS( "false" ) );
+    }
+
     wxScopedCharBuffer bodyUtf8 = body.ToUTF8();
 
     wxString response;
