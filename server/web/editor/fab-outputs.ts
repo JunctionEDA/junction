@@ -9,7 +9,7 @@ import type { FabContext, FabPackage, KiCadFabApi, PackageFile, PackageOptions }
 import { store } from "./appstore";
 import { E } from "./state";
 import { toast } from "./util";
-import { download, fileStem } from "./menu-actions";
+import { download, fileStem } from "./download";
 import { loadBoardHeader } from "./pcbdialogs/board-setup";
 import { box, checkField, h, note, openDialog, reportPanel, selectField, type Field, type ReportLine } from "./pcbdialogs/ui";
 

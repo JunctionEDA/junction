@@ -9,7 +9,7 @@ import { state } from "./appstore";
 import { box, checkField, h, note, notebook, openDialog, reportPanel, textField, type Field, type ReportLine } from "./pcbdialogs/ui";
 import { projectNetlist } from "./pcbdialogs/update-pcb";
 import { liveDocument, loadProjectFile, projectDocs } from "./projectfile";
-import { download, fileStem } from "./menu-actions";
+import { download, fileStem } from "./download";
 import * as NK from "../sim/netlist-kicad";
 import { schVariantNames } from "../dialogs/sch-variants";
 import { zip } from "../fab/zip";

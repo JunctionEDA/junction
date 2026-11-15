@@ -24,6 +24,7 @@ import { schKey } from "./tools";
 import { esc, toast } from "./util";
 import { applyView, fitBox, isSch, mmW, mmX0, mmY0, requestRender, stage, world, zoomBy, zoomStep } from "./view";
 import { fitMargin } from "./zoomlist";
+import { currentDoc, download, fileStem } from "./download";
 
 type Sx = (string | number | Sx)[];
 interface DocEntry { docId: string; path: string; docType: string }
@@ -38,17 +39,6 @@ const W = window as unknown as { KiCadCanvas: Canvas; KDialogs?: Dialogs; Collab
 const st = state as unknown as { docs?: DocEntry[]; docId?: string | null; project?: { name?: string } | null };
 
 // ---------------------------------------------------------------- files
-function currentDoc(): DocEntry | null { return (st.docs || []).find((d) => d.docId === st.docId) || null; }
-export function fileStem(): { name: string; stem: string } {
-  const d = currentDoc(); const name = d ? d.path.split("/").pop() || d.path : (isSch() ? "sheet.kicad_sch" : "board.kicad_pcb");
-  return { name, stem: name.replace(/\.kicad_(sch|pcb)$/, "") };
-}
-export function download(data: Blob | string, name: string, type = "text/plain"): void {
-  const blob = typeof data === "string" ? new Blob([data], { type }) : data;
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = name; a.style.display = "none";
-  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
-}
-
 /** File > Save a Copy... / Save Current Sheet Copy As...: the document as the server holds it, every edit applied. */
 async function saveDocCopy(): Promise<void> {
   const d = currentDoc(); if (!d) { toast("No document open"); return; }

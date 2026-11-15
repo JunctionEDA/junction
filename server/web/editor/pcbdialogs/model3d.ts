@@ -7,7 +7,8 @@
 //   stepper            the wxSpinButton beside each Scale / Rotation / Offset field, with the mouse-wheel steps
 // The pure parts (path checks, steps, the preview board) are library/model3d.ts.
 import * as M from "../../library/model3d";
-import { loadViewer, type EmbeddedViewer3D } from "../viewer3d-loader";
+// the loader is fetched when a preview opens: a static import would pull editor/actions.ts in while doc.ts loads
+import type { EmbeddedViewer3D } from "../viewer3d-loader";
 import { box, checkField, currentUnits, form, grid, gridButtons, h, iconButton, lenField, messageBox, numField, openDialog, selectField, unitLabel, unitName, type CellValue, type DialogApi, type Field } from "./ui";
 import { colorPicker, type RGBA } from "./color-picker";
 import { bitmapButton } from "../../components/kicon-dom";
@@ -59,7 +60,7 @@ export function modelPreview(opts: { buttons?: boolean; reload?(): void; key?: s
   };
   // m_bpvBodyStyle: without the body only the copper and silkscreen layers are drawn
   const showBody = (): void => { if (viewer) viewer.setVisibility({ board: bodyShown, maskTop: bodyShown, maskBottom: bodyShown, paste: bodyShown }); };
-  loadViewer().then((g) => {
+  import("../viewer3d-loader").then((m) => m.loadViewer()).then((g) => {
     if (gone || !g.embed) return;
     status.remove();
     viewer = g.embed(host, { wheel: true }); viewer.useModels(true);
