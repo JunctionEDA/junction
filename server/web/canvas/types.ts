@@ -263,6 +263,8 @@ export interface RenderOpts {
   netColors?: Map<number, string> | null; netNames?: boolean; zoneFill?: boolean; flip?: boolean;
   ratsnest?: RatsLine[] | null; ratsnestNets?: Set<number> | null; markers?: Marker[] | null;
   layerColors?: Map<string, string> | null; objects?: ObjectsOpt | null;
+  /** Appearance > Objects colours the user changed (ratsnest, drcWarnings, drcErrors, drcExclusions, anchors, boardArea, drawingSheet, grid) */
+  objectColors?: Record<string, string> | null;
   itemColors?: Map<string, string | string[]> | null;
   /** the schematic item with a hyperlink under the cursor (SCH_ITEM::SetIsRollover): its text in LAYER_HOVERED, underlined */
   rollover?: string | null;

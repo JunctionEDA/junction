@@ -14,6 +14,8 @@ import { setActiveLayer } from "../doc";
 import { E } from "../state";
 import { toast } from "../util";
 import { fitBox, requestRender, visibleRectNm } from "../view";
+import { showPane } from "../panes";
+import { openBoardSetup } from "../pcbdialogs/board-setup";
 import { KC, isSchDoc, kdoc, listPick, loadJson, panelStore, pcbTools, projectId, saveJson, textEntry, tctx } from "./core";
 
 // ---------------------------------------------------------------- layers
@@ -91,6 +93,19 @@ const OBJECTS: ObjectDef[] = [
   { id: "drawingSheet", label: "Drawing Sheet", tip: "Show drawing sheet borders and title block" },
   { id: "grid", label: "Grid", tip: "Show the (x,y) grid dots" },
 ];
+/** s_allowedInFpEditor: the only Objects rows the Footprint Editor lists (spacers are not in the set either). */
+export const FP_EDITOR_OBJECTS = ["tracks", "vias", "pads", "zones", "filledShapes", "values", "references", "fpText", "images", "outsideGroup", "grid", "points", "viaStitching"];
+/**
+ * The colour of an Objects row in the user's colour theme (theme->GetColor( layer ), builtin_color_themes.h "KiCad
+ * Default"): rows whose layer has one get a COLOR_SWATCH; the others (Tracks, Vias, Pads, Zones ...) a spacer.
+ */
+export const OBJECT_COLORS: Record<string, string> = {
+  ratsnest: "rgba(0,248,255,0.35)", drcWarnings: "rgba(255,208,66,0.8)", drcErrors: "rgba(215,91,107,0.8)", drcExclusions: "rgba(255,255,255,0.8)",
+  anchors: "#ff26e2", points: "#ff26e2", subgrids: "#c2c200", viaStitching: "#4dccb2", lockedShadow: "rgba(255,38,226,0.5)",
+  conflicts: "rgba(255,0,5,0.5)", constraintShadow: "rgba(80,160,240,0.5)", boardArea: "rgba(100,100,100,0.35)", drawingSheet: "#c872ab", grid: "#848484",
+};
+/** The user's colour for an Objects row (kept with the layer colours, keyed "obj:<id>"), else the theme default. */
+export function objectColor(id: string): string | undefined { return user.colors["obj:" + id] || OBJECT_COLORS[id]; }
 /** An Objects row's opacity: the user's, else KiCad's default (PROJECT_LOCAL_SETTINGS: zones and images 0.6, the rest 1). */
 function objOpacity(o: ObjectDef): number { const v = user.objOpacity[o.id]; return typeof v === "number" && v >= 0 && v <= 1 ? v : o.defaultOpacity === undefined ? 1 : o.defaultOpacity; }
 const SEVERITY: Record<string, string> = { drcWarnings: "warning", drcErrors: "error", drcExclusions: "exclusion" };
@@ -164,6 +179,15 @@ function nets(): { nets: NetInfo[]; classes: string[] } {
   return netCache;
 }
 
+/** NETCLASS::GetSchematicColor: the class's "schematic_color" in the project, null when unspecified (transparent). */
+export function classSchematicColor(name: string): string | null {
+  const c = (netSettings().classes || []).find((x) => x && x.name === name) as { schematic_color?: string } | undefined;
+  const v = c && typeof c.schematic_color === "string" ? c.schematic_color.replace(/\s+/g, "") : "";
+  if (!v) return null;
+  const [r, g, b, a] = parseColor(v);
+  return a <= 0 ? null : rgba(r, g, b, a);
+}
+
 /** The net class a net belongs to (project net settings: assignments, then patterns, else Default). */
 export function netClassOf(name: string): string { const n = nets().nets.find((x) => x.name === name); return n ? n.netclass : "Default"; }
 
@@ -181,7 +205,9 @@ function layerRows(doc: KDoc): LayerInfo[] {
   const hidden = E.hiddenLayers as Set<string>;
   return boardLayerKeys(doc).map((key) => {
     const def = pcbColor(key);
-    return { key, name: layerDisplayName(doc, key), color: user.colors[key] || def, defaultColor: def, visible: !hidden.has(key), copper: isCu(key), tip: layerTip(key) };
+    // APPEARANCE_CONTROLS::rebuildLayers: the Footprint Editor names layers from its own settings' user layer names,
+    // else GetStandardLayerName — never the holder board's names
+    return { key, name: fpEditor() ? layerDisplayName(null, key) : layerDisplayName(doc, key), color: user.colors[key] || def, defaultColor: def, visible: !hidden.has(key), copper: isCu(key), tip: layerTip(key) };
   });
 }
 /** std::map order (m_layerPresets, m_viewports): wxString's ordinal comparison. */
@@ -233,19 +259,21 @@ export function publishAppearance(): void {
   if (!doc || isSchDoc()) { panelStore.set({ appearance: Object.assign({}, panelStore.get().appearance, { layers: [], nets: [], netClasses: [], objects: [] }) }); return; }
   loadProj();
   const layers = layerRows(doc);
-  const objects: ObjectRow[] = OBJECTS.map((o) => o.spacer ? { id: o.id, label: "", tip: "", spacer: true }
-    : { id: o.id, label: o.label, tip: o.tip, canHide: o.canHide !== false, visible: o.canHide === false ? undefined : objectVisible(o.id), opacity: o.opacity ? objOpacity(o) : undefined });
+  const fp = fpEditor();
+  const objects: ObjectRow[] = OBJECTS.filter((o) => !fp || FP_EDITOR_OBJECTS.includes(o.id)).map((o) => o.spacer ? { id: o.id, label: "", tip: "", spacer: true }
+    : { id: o.id, label: o.label, tip: o.tip, canHide: o.canHide !== false, visible: o.canHide === false ? undefined : objectVisible(o.id), opacity: o.opacity ? objOpacity(o) : undefined,
+      color: OBJECT_COLORS[o.id] ? objectColor(o.id) : undefined, defaultColor: OBJECT_COLORS[o.id] });
   const n = nets(); const s = pcbState();
   const hiddenNets = s ? s.hiddenNets : new Set(proj.hiddenNets);
   const netRows: NetRow[] = n.nets.map((x) => ({ name: x.name, code: x.code, color: proj.netColors[x.name] || null, visible: !hiddenNets.has(x.name), netclass: x.netclass }));
-  const classRows: NetClassRow[] = n.classes.map((name) => ({ name, color: proj.classColors[name] || null, visible: !proj.hiddenClasses.includes(name) }));
+  const classRows: NetClassRow[] = n.classes.map((name) => ({ name, color: proj.classColors[name] || null, visible: !proj.hiddenClasses.includes(name), schColor: classSchematicColor(name) }));
   const names = layers.map((l) => l.key);
   const reset = mruFor !== projFor; mruFor = projFor;
   presetMRU = syncMRU(presetMRU, allPresets(names).map((p) => p.name), reset);
   const vps = proj.viewports.slice().sort(byName);
   viewportMRU = syncMRU(viewportMRU, vps.map((v) => v.name), reset);
   const ap: AppearanceState = {
-    layers, active: E.activeLayer || "", objects, nets: netRows, netClasses: classRows,
+    fpEditor: fp, layers, active: E.activeLayer || "", objects, nets: netRows, netClasses: classRows,
     inactive: inactiveMode(), flip: !!E.renderOpts.flip, netColorMode: user.netColorMode, ratsnestMode: user.ratsnestMode,
     presets: allPresets(names).map((p) => p.name), builtinPresets: builtinPresets(names).sort(byName).map((p) => p.name), preset: currentPreset(layers),
     viewports: vps.map((v) => v.name), viewport: proj.viewport,
@@ -268,6 +296,10 @@ export function applyAppearance(): void {
   const P = pcbTools();
   if (show.has("lockedShadow") && P) { const ids = new Set<string>(); for (const it of doc.items.values()) { try { if (P.isLocked(it.node)) ids.add(it.id); } catch (e) { /* not lockable */ } } ro.lockedIds = ids; }
   else ro.lockedIds = undefined;
+  // the Objects swatches the user changed (the user's colour theme): the renderer's object layers and the grid
+  const oc: Record<string, string> = {};
+  for (const id of Object.keys(OBJECT_COLORS)) { const c = user.colors["obj:" + id]; if (c) oc[id] = c; }
+  ro.objectColors = Object.keys(oc).length ? oc : undefined;
   ro.frame = user.objHidden.includes("drawingSheet") ? false : undefined;
   ro.subgrids = user.objHidden.includes("subgrids") ? false : undefined;   // LAYER_SUBGRIDS: the board's grid items
   // LAYER_BOARD_OUTLINE_AREA: the board outline filled under everything (PCB_PAINTER::draw( PCB_BOARD_OUTLINE ))
@@ -295,6 +327,7 @@ export function applyAppearance(): void {
     for (const x of n.nets) if (proj.hiddenClasses.includes(x.netclass)) hiddenNets.add(x.name);
     s.hiddenNets = hiddenNets;
     s.ratsnestColors = user.netColorMode !== "off" && byName.size ? byName : null;
+    s.ratsnestBase = user.colors["obj:ratsnest"] || null;
     s.netColorMode = user.netColorMode;
     s.showCourtyardConflicts = !user.objHidden.includes("conflicts");   // LAYER_CONFLICTS_SHADOW   // the router preview takes net colours only in the "all" mode (ROUTER_PREVIEW_ITEM::getLayerColor)
     const sev = new Set<string>(); for (const [id, name] of Object.entries(SEVERITY)) if (user.objHidden.includes(id)) sev.add(name);
@@ -454,6 +487,11 @@ export function appearanceDispatch(a: PanelAction): boolean {
       break;
     }
     case "objOpacity": user.objOpacity[a.id] = Math.max(0, Math.min(1, a.value)); saveUser(); break;
+    // APPEARANCE_CONTROLS::OnColorSwatchChanged: the object layer's colour in the user's colour theme
+    case "objColor": if (a.color && a.color.toLowerCase() !== (OBJECT_COLORS[a.id] || "").toLowerCase()) user.colors["obj:" + a.id] = a.color; else delete user.colors["obj:" + a.id]; saveUser(); break;
+    // m_btnNetInspector: PCB_ACTIONS::showNetInspector; m_btnConfigureNetClasses: ShowBoardSetupDialog( _( "Net Classes" ) )
+    case "showNetInspector": showPane("netinsp", true); return true;
+    case "boardSetup": void openBoardSetup(tctx() as never, a.page); return true;
     case "inactive": setInactive(a.mode); break;
     case "flip": setFlip(a.on); break;
     case "netVisible": { const s = new Set(proj.hiddenNets); if (a.on) s.delete(a.name); else s.add(a.name); proj.hiddenNets = Array.from(s); saveProj(); break; }

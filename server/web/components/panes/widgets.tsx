@@ -6,6 +6,7 @@ import { createPortal } from "react-dom";
 import type { PanelAction, PanelsApi, PanelsState } from "../../panels-api";
 import { cx } from "../../util";
 import { menuScroller, menuSize, placeMenu } from "../../menufit";
+import { KIcon } from "../Icon";
 
 const EMPTY: PanelsState = {
   appearance: { layers: [], active: "", objects: [], nets: [], netClasses: [], inactive: "normal", flip: false, netColorMode: "ratsnest", ratsnestMode: "all", presets: [], builtinPresets: [], preset: null, viewports: [], viewport: null },
@@ -19,7 +20,11 @@ export function usePanels<T>(selector: (s: PanelsState) => T): T { return select
 export function pdispatch(a: PanelAction): void { const p = panels(); if (p) p.dispatch(a); }
 
 // ---------------------------------------------------------------- context menu
-export type MenuItem = { label: string; run: () => void; disabled?: boolean; /** why it is dimmed (the row's tooltip) */ title?: string } | "-";
+/**
+ * A wxMenu row: `icon` is a KiCad bitmap name (KIcon), `check` makes it a check item (wxITEM_CHECK, or wxITEM_RADIO with
+ * `radio`) drawn ticked when true, as the shared menus draw them.
+ */
+export type MenuItem = { label: string; run: () => void; disabled?: boolean; /** why it is dimmed (the row's tooltip) */ title?: string; icon?: string; check?: boolean; radio?: boolean } | "-";
 export interface MenuAt { x: number; y: number; items: MenuItem[] }
 
 /** A wxMenu popped at the pointer: closes on a pick, an outside press or Escape; kept inside the window. */
@@ -44,8 +49,12 @@ export function ContextMenu({ at, onClose }: { at: MenuAt | null; onClose: () =>
       style={{ left: (pos || at).x, top: (pos || at).y, maxHeight: pos ? pos.h : undefined, overflowY: "auto", visibility: pos ? "visible" : "hidden" }} onContextMenu={(ev) => ev.preventDefault()}>
       {at.items.map((it, i) => it === "-"
         ? <div key={i} className="my-1 border-t border-line" />
-        : <div key={i} role="menuitem" className={cx("px-3 py-[3px] whitespace-nowrap", it.disabled ? "text-ink-3" : "cursor-default hover:bg-accent hover:text-on-accent")}
-            title={it.title} onClick={() => { if (it.disabled) return; onClose(); it.run(); }}>{it.label}</div>)}
+        : <div key={i} role={it.check === undefined ? "menuitem" : it.radio ? "menuitemradio" : "menuitemcheckbox"} aria-checked={it.check === undefined ? undefined : it.check}
+            aria-disabled={it.disabled || undefined} data-icon={it.icon} className={cx("flex items-center pl-1.5 pr-3 py-[3px] whitespace-nowrap", it.disabled ? "text-ink-3" : "cursor-default hover:bg-accent hover:text-on-accent")}
+            title={it.title} onClick={() => { if (it.disabled) return; onClose(); it.run(); }}>
+            <span className={cx("w-5 h-4 mr-1.5 shrink-0 flex items-center justify-center text-base leading-none", it.disabled && it.icon && "opacity-40")} data-check={it.check === undefined ? undefined : it.check ? "on" : "off"}>
+              {it.check ? (it.radio ? "\u25CF" : "\u2713") : it.icon ? <KIcon name={it.icon} size={16} /> : null}</span>
+            <span className="flex-1">{it.label}</span></div>)}
     </div>, document.body);
 }
 /** State for one ContextMenu: `open(ev, items)` from an onContextMenu handler. */
@@ -55,11 +64,6 @@ export function useContextMenu(): { at: MenuAt | null; open: (ev: { clientX: num
 }
 
 // ---------------------------------------------------------------- colour swatch + picker
-// KiCad's colour picker opens on its "Defined Colors" palette; these are that page's rows.  They are opaque: picking one
-// sets the opacity to its own (DIALOG_COLOR_PICKER::buttColorClick takes the defined colour's alpha too).
-const PALETTE = ["#C83434", "#E08A2E", "#E2C12C", "#7FC820", "#22B84C", "#1FB8A6", "#2D9BE0", "#4D7FC4", "#7F5FD0", "#C04FC8", "#E0508C", "#8A5A2B",
-  "#FF6060", "#FFB060", "#FFF060", "#B8FF60", "#60FF90", "#60FFE8", "#60C8FF", "#8CA8FF", "#B090FF", "#F080FF", "#FF90C0", "#C8A070",
-  "#FFFFFF", "#D0D0D0", "#A0A0A0", "#707070", "#404040", "#000000"];
 /** A css colour as "#rrggbb" plus its opacity 0..100 (the colours here are "#rrggbb", "#rrggbbaa" or "rgb[a](r,g,b[,a])"). */
 export function splitColor(c: string | null): { hex: string; alpha: number } {
   const h = c ? /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(c) : null;
@@ -68,61 +72,17 @@ export function splitColor(c: string | null): { hex: string; alpha: number } {
   if (m) return { hex: "#" + [m[1], m[2], m[3]].map((v) => Math.max(0, Math.min(255, Math.round(+v))).toString(16).padStart(2, "0")).join(""), alpha: m[4] === undefined ? 100 : Math.round(Math.max(0, Math.min(1, +m[4])) * 100) };
   return { hex: "#808080", alpha: 100 };
 }
-/** "#rrggbb" at full opacity, else "rgba(r,g,b,a)" (the canvas library's rgba() form). */
-export function joinColor(hex: string, alpha: number): string {
-  if (alpha >= 100) return hex;
-  const v = parseInt(hex.slice(1), 16);
-  return `rgba(${v >> 16},${(v >> 8) & 255},${v & 255},${+(Math.max(0, alpha) / 100).toFixed(3)})`;
-}
 
 /**
- * opacity: DIALOG_COLOR_PICKER's Opacity slider (aAllowOpacityControl) — on for every COLOR_SWATCH of the
- * Appearance panel (layers, nets, net classes); a translucent layer colour lets the layers under it show through.
+ * COLOR_SWATCH::GetNewSwatchColor: the swatch opens DIALOG_COLOR_PICKER (editor/pcbdialogs/color-picker.ts, published
+ * by the editor as CollabPanels.pickColor) with the current colour, the swatch's default (Reset to Default, or Clear
+ * Color when it has none) and the Opacity slider (aAllowOpacityControl, on for every Appearance swatch).  `set` gets
+ * the new colour, or null when the colour was cleared or reset to the default.
  */
-export interface ColorAt { x: number; y: number; title: string; color: string | null; canClear: boolean; clearLabel: string; set: (c: string | null) => void; opacity?: boolean }
-export function ColorPicker({ at, onClose }: { at: ColorAt | null; onClose: () => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [val, setVal] = useState("#808080");
-  const [alpha, setAlpha] = useState(100);
-  // UNSPECIFIED (no colour yet) opens fully opaque, as DIALOG_COLOR_PICKER does
-  useEffect(() => { if (at) { const c = splitColor(at.color); setVal(c.hex); setAlpha(at.opacity === false || !at.color ? 100 : c.alpha); } }, [at]);
-  useEffect(() => {
-    if (!at) return;
-    const down = (ev: PointerEvent) => { if (ref.current && !ref.current.contains(ev.target as Node)) onClose(); };
-    const key = (ev: KeyboardEvent) => { if (ev.key === "Escape") { ev.stopPropagation(); onClose(); } };
-    document.addEventListener("pointerdown", down, true); document.addEventListener("keydown", key, true);
-    return () => { document.removeEventListener("pointerdown", down, true); document.removeEventListener("keydown", key, true); };
-  }, [at, onClose]);
-  if (!at) return null;
-  const W = 232, left = Math.max(4, Math.min(at.x, window.innerWidth - W - 8)), top = Math.max(4, Math.min(at.y, window.innerHeight - 290));
-  const withOpacity = at.opacity !== false, a = withOpacity ? alpha : 100;
-  const pick = (c: string | null, alphaPct = a) => { at.set(c === null ? null : joinColor(c, alphaPct)); onClose(); };
-  const valid = /^#[0-9a-f]{6}$/i.test(val);
-  return createPortal(
-    <div ref={ref} className="kcolor fixed z-[400] p-2 bg-panel border border-line rounded-md shadow-panel text-sm text-ink" style={{ left, top, width: W }}>
-      <div className="font-semibold mb-1.5">{at.title}</div>
-      <div className="flex flex-wrap gap-[3px] mb-2">
-        {PALETTE.map((c) => <button type="button" key={c} title={c} data-color={c} className="w-4 h-4 p-0 rounded-xs border border-black/40 cursor-pointer" style={{ background: c }} onClick={() => pick(c, 100)} />)}
-      </div>
-      <div className="flex items-center gap-1.5 mb-2">
-        <input type="color" value={val.toLowerCase()} onChange={(ev) => setVal(ev.target.value)} className="w-8 h-6 p-0 border border-line bg-transparent" />
-        <input type="text" value={val} spellCheck={false} onChange={(ev) => setVal(ev.target.value)} onKeyDown={(ev) => { if (ev.key === "Enter" && valid) pick(val); }}
-          className="flex-1 min-w-0 px-1 py-0.5 bg-panel border border-line rounded-xs text-ink font-mono text-xs" />
-        <Swatch color={valid ? joinColor(val, a) : null} title="New color" />
-      </div>
-      {withOpacity ? (
-        <div className="flex items-center gap-1.5 mb-2" title="Opacity of the color: lower it to see the layers underneath">
-          <span className="flex-none">Opacity:</span>
-          <input type="range" min={0} max={100} step={1} value={alpha} data-color-opacity onChange={(ev) => setAlpha(+ev.target.value)} className="flex-1 min-w-0 h-3 m-0 accent-blue" />
-          <span className="flex-none w-9 text-right font-mono text-xs text-ink-2">{alpha}%</span>
-        </div>
-      ) : null}
-      <div className="flex gap-1.5 justify-end">
-        {at.canClear ? <button type="button" className="mr-auto px-2 py-0.5 border border-line rounded-xs bg-bench text-ink" data-color-clear onClick={() => pick(null)}>{at.clearLabel}</button> : null}
-        <button type="button" className="px-2 py-0.5 border border-line rounded-xs bg-bench text-ink" onClick={onClose}>Cancel</button>
-        <button type="button" className="px-2 py-0.5 border border-line rounded-xs bg-bench text-ink" data-color-ok disabled={!valid} onClick={() => pick(val)}>OK</button>
-      </div>
-    </div>, document.body);
+export interface ColorAt { title?: string; color: string | null; def: string | null; set: (c: string | null) => void; opacity?: boolean }
+export function pickColor(c: ColorAt): void {
+  const p = panels(); if (!p) return;
+  p.pickColor(c.color, c.def, c.opacity !== false, (v) => c.set(v));
 }
 
 const CHECKER = "linear-gradient(45deg,#888 25%,transparent 25%,transparent 75%,#888 75%),linear-gradient(45deg,#888 25%,#ccc 25%,#ccc 75%,#888 75%)";

@@ -13,6 +13,8 @@ import { hierarchyDispatch, loadSheets, publishHierarchy } from "./hierarchy";
 import { netNavDispatch, netNavSignature, publishNetNav } from "./netnav";
 import { addPropKey, browseProp, propGrid, removePropKey, renamePropKey, selectionSignature, setProp } from "./propgrid";
 import { search, searchDispatch, searchTabs } from "./search";
+import { colorPicker, type RGBA } from "../pcbdialogs/color-picker";
+import { parseColor, rgba } from "../../canvas/colors";
 import { netInspectorCmd, netInspectorModel, setFilter as netInspectorFilter } from "./netinsp";
 
 function dispatch(a: PanelAction): void {
@@ -20,7 +22,19 @@ function dispatch(a: PanelAction): void {
   catch (e) { console.warn("panel action failed", a, e); }
 }
 
-const api: PanelsApi = { getState: panelStore.get, subscribe: panelStore.subscribe, dispatch, propGrid, setProp, renamePropKey, addPropKey, removePropKey, browseProp, searchTabs, search, netInspector: () => netInspectorModel(), netInspectorCmd, netInspectorFilter };
+const toRGBA = (c: string | null): RGBA | null => { if (!c) return null; const [r, g, b, a] = parseColor(c); return { r: r / 255, g: g / 255, b: b / 255, a }; };
+const toCss = (c: RGBA): string => rgba(Math.round(c.r * 255), Math.round(c.g * 255), Math.round(c.b * 255), Math.round(c.a * 1000) / 1000);
+/** COLOR_SWATCH::GetNewSwatchColor: the swatch's colour through DIALOG_COLOR_PICKER; transparent black is UNSPECIFIED. */
+export function pickColor(color: string | null, def: string | null, opacity: boolean, done: (c: string | null) => void): void {
+  const d = toRGBA(def);
+  colorPicker(toRGBA(color), opacity, (c) => {
+    if (!d && c.a === 0 && !c.r && !c.g && !c.b) { done(null); return; }
+    const css = toCss(c);
+    done(def && css.toLowerCase() === toCss(d!).toLowerCase() ? null : css);
+  }, d);
+}
+
+const api: PanelsApi = { pickColor, getState: panelStore.get, subscribe: panelStore.subscribe, dispatch, propGrid, setProp, renamePropKey, addPropKey, removePropKey, browseProp, searchTabs, search, netInspector: () => netInspectorModel(), netInspectorCmd, netInspectorFilter };
 window.CollabPanels = api;
 
 /** The select tool's gate for the tool modules' own picks (the app's picks go through filterAllows directly). */

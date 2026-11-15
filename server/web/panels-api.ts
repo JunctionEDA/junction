@@ -10,16 +10,20 @@ export type { NetInspCmd, NetInspModel, NetInspColumn, NetInspRow } from "./edit
 export interface LayerInfo { key: string; name: string; color: string; defaultColor: string; visible: boolean; copper: boolean; tip: string }
 
 /** One row of the Objects tab (APPEARANCE_SETTING); a spacer row has only `spacer`. */
-export interface ObjectRow { id: string; label: string; tip: string; spacer?: boolean; visible?: boolean; opacity?: number; canHide?: boolean }
+export interface ObjectRow { id: string; label: string; tip: string; spacer?: boolean; visible?: boolean; opacity?: number; canHide?: boolean;
+  /** the row's colour in the user's theme and the theme default: rows with one show a COLOR_SWATCH */
+  color?: string; defaultColor?: string }
 
 export interface NetRow { name: string; code: number; color: string | null; visible: boolean; netclass: string }
-export interface NetClassRow { name: string; color: string | null; visible: boolean }
+export interface NetClassRow { name: string; color: string | null; visible: boolean; /** NETCLASS::GetSchematicColor (null: unspecified) */ schColor?: string | null }
 
 export type InactiveMode = "normal" | "dim" | "hide";
 export type NetColorMode = "all" | "ratsnest" | "off";
 export type RatsnestMode = "all" | "visible" | "none";
 
 export interface AppearanceState {
+  /** the Footprint Editor's panel (m_isFpEditor): no Nets tab, only s_allowedInFpEditor objects */
+  fpEditor?: boolean;
   layers: LayerInfo[]; active: string;
   objects: ObjectRow[];
   nets: NetRow[]; netClasses: NetClassRow[];
@@ -87,6 +91,9 @@ export type PanelAction =
   | { t: "layerMenu"; cmd: LayerMenuCmd }
   | { t: "objVisible"; id: string; on: boolean }
   | { t: "objOpacity"; id: string; value: number }
+  | { t: "objColor"; id: string; color: string | null }
+  | { t: "showNetInspector" }
+  | { t: "boardSetup"; page: string }
   | { t: "inactive"; mode: InactiveMode }
   | { t: "flip"; on: boolean }
   | { t: "netVisible"; name: string; on: boolean }
@@ -126,6 +133,9 @@ export interface PanelsApi {
   /** The browse button of a row with `browse` (PG_FPID_EDITOR / PG_URL_EDITOR::OnEvent): the footprint chooser, whose
    *  choice is committed like setProp, or the datasheet opened. */
   browseProp(id: string): void;
+  /** DIALOG_COLOR_PICKER over the pane (COLOR_SWATCH::GetNewSwatchColor): `done` gets the css colour picked, or null
+   *  when it was cleared (no default) or set back to the default; nothing on Cancel. */
+  pickColor(color: string | null, def: string | null, opacity: boolean, done: (c: string | null) => void): void;
   searchTabs(): SearchTab[];
   search(tab: string, query: string): SearchResult;
   /** The board's Net Inspector pane: its columns and rows (editor/panels/netinsp.ts). */

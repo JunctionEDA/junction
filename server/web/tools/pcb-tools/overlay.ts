@@ -165,7 +165,7 @@ export function traceClearance(c: { moveTo(x: number, y: number): void; lineTo(x
 export const ROUTER_TOOLS = new Set(["route", "routediff", "tunesingle", "tunediff", "tuneskew", "drag"]);
 /** PCB_CONTROL's grid origin marker colour: the grid colour Brightened( 0.25 ), Darkened on a light background. */
 export function gridOriginColor() {
-  const gc = appGlobal(() => (editorState() as unknown as { renderOpts: { gridColor?: string } }).renderOpts.gridColor, null) || "#848484";   // LAYER_GRID
+  const gc = appGlobal(() => { const ro = (editorState() as unknown as { renderOpts: { gridColor?: string; objectColors?: Record<string, string> | null } }).renderOpts; return ro.gridColor || (ro.objectColors && ro.objectColors.grid); }, null) || "#848484";   // LAYER_GRID
   return adjustColor(gc, 0.25, alphaOf(gc), brightness(K.PCB_BG) >= 0.5);
 }
 /** A css colour's channels 0..255 and alpha 0..1. */
@@ -315,7 +315,7 @@ export function drawOverlay(c: CanvasRenderingContext2D, view: KView, ctx: PcbCt
     if (S.drag) for (const d of S.drag.subs) if (d.netKey) hlNets.add(d.netKey);
     const dimStatic = moving.size > 0 || hlNets.size > 0;
     const lightBg = brightness(K.PCB_BG) >= 0.5;
-    const baseOf = (net: string) => (S.ratsnestColors && S.ratsnestColors.get(net)) || RATSNEST;
+    const baseOf = (net: string) => (S.ratsnestColors && S.ratsnestColors.get(net)) || S.ratsnestBase || RATSNEST;
     const byColor = new Map<string, RatsnestLine[]>();
     for (const l of lines) {
       if (S.hiddenNets.has(l.net)) continue; if (sel && !l.ids.some((id: string) => sel.has(id))) continue; if (moving.size && l.ids.some((id: string) => moving.has(id))) continue;

@@ -157,7 +157,7 @@ export type PcbState = {
   shoveDoc?: BoardDoc | null;
   move?: SelectMove | null; pending?: PendingDrag | null; sworld?: { doc: BoardDoc; ver: number; key: string; w: ShoveWorld } | null;
   joints?: Joints; strokeW?: number | null; pick?: { done: (res: Pt | KItem | null) => void; prompt: string } | null; popup?: { text: string; at: Pt; until: number } | null;
-  drawRaw?: Pt; drawCtrl?: boolean; cursorBefore?: string; ratsnestColors?: Map<string, string> | null; netColorMode?: string; trackClearance?: number; padClearance?: boolean; showCourtyardConflicts?: boolean;
+  drawRaw?: Pt; drawCtrl?: boolean; cursorBefore?: string; ratsnestColors?: Map<string, string> | null; /** LAYER_RATSNEST in the user's theme (Appearance > Objects) */ ratsnestBase?: string | null; netColorMode?: string; trackClearance?: number; padClearance?: boolean; showCourtyardConflicts?: boolean;
   /** PCBNEW_SETTINGS m_RotationAngle (Preferences > Editing Options > Step for rotate commands, degrees; 90) */ rotationAngle?: number;
   /** FOOTPRINT_EDITOR_SETTINGS m_RotationAngle: the Footprint Editor's own rotate step (90) */ fpRotationAngle?: number;
   /** PCBNEW_SETTINGS m_ShowCourtyardCollisions (Editing Options): run the interactive courtyard check while moving */ showCourtyardCollisions?: boolean;

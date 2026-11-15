@@ -310,7 +310,13 @@ export const ZS: number[] = [];
 
 export function bucket(map: Map<number, Geom[]>, z: number): Geom[] { let arr = map.get(z); if (!arr) { arr = []; map.set(z, arr); } return arr; }
 
+/**
+ * The board's object colours from the user's colour theme (Appearance > Objects swatches): ratsnest, drcWarnings,
+ * drcErrors, drcExclusions, anchors, boardArea, drawingSheet, grid.  Set for each render; missing keys keep the defaults.
+ */
+let OC: Record<string, string | undefined> = {};
 export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | null): void {
+  OC = (opts && opts.objectColors) || {};
   ensureSchTheme(doc);   // geometry built under another schematic colour theme is rebuilt first
   ensureFontGeom(doc);   // and text set in a face that has arrived since is laid out with its metrics
   opts = opts || {}; const hidden = opts.hidden || new Set();
@@ -421,7 +427,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     const i0 = Math.floor((vx0 - gx) / pitch), i1 = Math.ceil((vx1 - gx) / pitch), j0 = Math.floor((vy0 - gy) / pitch), j1 = Math.ceil((vy1 - gy) / pitch);
     const px1 = gridMinorPx(opts, dpr) / s;   // GAL::gridMinorLineWidth
     const isMajor = (n: number): boolean => tick > 0 && n % tick === 0;
-    const gridColor = opts.gridColor || (isPcb ? PCB_GRID : SCH.grid);
+    const gridColor = opts.gridColor || (isPcb ? OC.grid || PCB_GRID : SCH.grid);
     if ((Math.ceil((fx1 - gx) / pitch) - Math.floor((fx0 - gx) / pitch)) * (Math.ceil((fy1 - gy) / pitch) - Math.floor((fy0 - gy) / pitch)) < 400000) {   // the whole view's count, region or not
       if (style === "dots") {
         ctx.fillStyle = gridColor; ctx.beginPath();
@@ -472,7 +478,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   }
   // LAYER_BOARD_OUTLINE_AREA (Board Area Shadow, off by default): the board outline filled, under the board items
   if (isPcb && opts.boardArea && opts.boardArea.length) {
-    ctx.save(); ctx.globalAlpha = 1; ctx.fillStyle = BOARD_AREA_COLOR; ctx.beginPath();
+    ctx.save(); ctx.globalAlpha = 1; ctx.fillStyle = OC.boardArea || BOARD_AREA_COLOR; ctx.beginPath();
     for (const loop of opts.boardArea) { if (loop.length < 3) continue; ctx.moveTo(loop[0][0], loop[0][1]); for (let i = 1; i < loop.length; i++) ctx.lineTo(loop[i][0], loop[i][1]); ctx.closePath(); }
     ctx.fill("evenodd"); ctx.restore();
   }
@@ -754,7 +760,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
   // the Footprint Editor's footprint sits at the origin: its anchor is the LAYER_ANCHOR cross there
   if ((doc as { fpEditor?: boolean }).fpEditor && !(obj && obj.hide && obj.hide.has("anchors"))) {
     const a = 5 * Math.max(1, dpr) / s;
-    ctx.save(); ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineCap = "butt"; ctx.strokeStyle = ANCHOR_COLOR; ctx.lineWidth = Math.max(1, dpr) / s; ctx.beginPath();
+    ctx.save(); ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineCap = "butt"; ctx.strokeStyle = OC.anchors || ANCHOR_COLOR; ctx.lineWidth = Math.max(1, dpr) / s; ctx.beginPath();
     ctx.moveTo(-a, 0); ctx.lineTo(a, 0); ctx.moveTo(0, -a); ctx.lineTo(0, a); ctx.stroke(); ctx.restore();
   }
   // highlight: the brightened items get a translucent halo of the highlight colour (the schematic's LAYER_SELECTION_SHADOWS pass for brightened items)
@@ -838,7 +844,7 @@ export function drawObjectOverlays(ctx: Ctx2D, doc: Doc, obj: ObjectsOpt, opts: 
   if (show.has("viaStitching")) drawViaStitching(ctx, doc, opts, s, dpr, vr);
   if (show.has("anchors")) {
     const a = 5 * Math.max(1, dpr) / s;
-    ctx.save(); ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineCap = "butt"; ctx.strokeStyle = ANCHOR_COLOR; ctx.lineWidth = Math.max(1, dpr) / s; ctx.beginPath();
+    ctx.save(); ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineCap = "butt"; ctx.strokeStyle = OC.anchors || ANCHOR_COLOR; ctx.lineWidth = Math.max(1, dpr) / s; ctx.beginPath();
     for (const it of doc.items.values()) {
       if (it.kind !== "footprint" || it.x === undefined) continue;
       if (hide.has(it.layer && /^B\./.test(it.layer) ? "fpBack" : "fpFront")) continue;
@@ -877,7 +883,7 @@ export function umbilicalLines(doc: Doc, selected: Iterable<string>): [Pt, Pt][]
 /** The umbilical lines in LAYER_ANCHOR at m_outlineWidth (1 IU: the thinnest line, one device pixel). */
 function drawUmbilicals(ctx: Ctx2D, doc: Doc, selected: Set<string>, s: number, dpr: number): void {
   const lines = umbilicalLines(doc, selected); if (!lines.length) return;
-  ctx.save(); ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineCap = "butt"; ctx.strokeStyle = ANCHOR_COLOR; ctx.lineWidth = Math.max(1, dpr) / s; ctx.beginPath();
+  ctx.save(); ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineCap = "butt"; ctx.strokeStyle = OC.anchors || ANCHOR_COLOR; ctx.lineWidth = Math.max(1, dpr) / s; ctx.beginPath();
   for (const [a, b] of lines) { ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
   ctx.stroke(); ctx.restore();
 }
@@ -1133,7 +1139,7 @@ export function drawRatsnest(ctx: Ctx2D, lines: RatsLine[], nets: Set<number> | 
     if (nets && !nets.has(l.net)) continue;
     const a = l.a, b = l.b; if (!a || !b) continue;
     if (Math.max(a[0], b[0]) < vr[0] - c || Math.min(a[0], b[0]) > vr[2] + c || Math.max(a[1], b[1]) < vr[1] - c || Math.min(a[1], b[1]) > vr[3] + c) continue;
-    const color = (netColors && netColors.get(l.net)) || RATSNEST_COLOR;
+    const color = (netColors && netColors.get(l.net)) || OC.ratsnest || RATSNEST_COLOR;
     if (color !== cur) { flush(); ctx.strokeStyle = color; ctx.beginPath(); cur = color; }
     if (a[0] === b[0] && a[1] === b[1]) { ctx.moveTo(a[0] - c, a[1] - c); ctx.lineTo(a[0] + c, a[1] + c); ctx.moveTo(a[0] - c, a[1] + c); ctx.lineTo(a[0] + c, a[1] - c); }
     else { ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); }
@@ -1149,7 +1155,8 @@ export function markerPolygon(m: { x: number; y: number }, scale: number): numbe
  * pass first, its polygon stroked in the selection colour at the shadow width (mm).
  */
 export function drawMarkers(ctx: Ctx2D, markers: (Marker | null)[], docType: string, scale: number, bg: string, selShadowW = 0): void {
-  const colors = MARKER_COLORS[docType === "sch" ? "sch" : "pcb"];
+  const colors = docType === "sch" ? MARKER_COLORS.sch
+    : { error: OC.drcErrors || MARKER_COLORS.pcb.error, warning: OC.drcWarnings || MARKER_COLORS.pcb.warning, exclusion: OC.drcExclusions || MARKER_COLORS.pcb.exclusion } as Record<string, string>;
   const [br, bgc, bb] = parseColor(bg); const shadow = rgba(br, bgc, bb, 0.5);   // LAYER_MARKER_SHADOWS = background @ 0.5
   ctx.save(); ctx.globalAlpha = 1; ctx.setLineDash([]); ctx.lineJoin = "round";
   for (const m of markers) {
@@ -1700,7 +1707,7 @@ export const OUTLINE_OVERBAR = 1.23;
  */
 export function drawDrawingSheet(ctx: Ctx2D, doc: Doc, s: number, minW: number, pageLimits = true): void {
   const isPcb = doc.type === "pcb";
-  const ink = isPcb ? PCB_SHEET : SCH.frame;
+  const ink = isPcb ? OC.drawingSheet || PCB_SHEET : SCH.frame;
   const items = documentDrawingSheet(doc);
   ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineCap = "butt"; ctx.lineJoin = "miter";
   let width = -1;

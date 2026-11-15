@@ -10,8 +10,9 @@ import type { LayerInfo, LayerMenuCmd, NetClassRow, NetCmd, NetRow } from "../..
 import { dispatch, useApp, type ItemSummary } from "../../store";
 import { cx } from "../../util";
 import { KIcon } from "../Icon";
-import { Collapsible, ColorPicker, ContextMenu, Swatch, pdispatch, useContextMenu, usePanels, type ColorAt, type MenuItem } from "./widgets";
+import { Collapsible, ContextMenu, Swatch, pdispatch, pickColor, useContextMenu, usePanels, type MenuItem } from "./widgets";
 import { IS_MAC, keyName } from "../../keys";
+import { menuMeta } from "../../menuspec";
 import { unescapeString } from "../../dialogs/sch-items-logic";
 
 // A list row (`.layer`): flex, centred, 8px gap, 3px/4px padding, 2px radius; callers add the hover fill.
@@ -91,15 +92,23 @@ function Eye({ on, onChange, title, k }: { on: boolean; onChange: (on: boolean) 
 const ROW2 = "flex items-center gap-1.5 h-[20px] px-1 whitespace-nowrap";
 const RADIO = "flex items-center gap-1 mr-2.5";
 
-const LAYER_MENU: ([LayerMenuCmd, string] | "-")[] = [
-  ["showAllCu", "Show All Copper Layers"], ["hideAllCu", "Hide All Copper Layers"], "-",
-  ["hideAllButActive", "Hide All Layers But Active"], "-",
-  ["showAllNonCu", "Show All Non Copper Layers"], ["hideAllNonCu", "Hide All Non Copper Layers"], "-",
-  ["showAll", "Show All Layers"], ["hideAll", "Hide All Layers"], "-",
-  ["frontAssembly", "Show Only Front Assembly Layers"], ["front", "Show Only Front Layers"], ["inner", "Show Only Inner Layers"], ["back", "Show Only Back Layers"], ["backAssembly", "Show Only Back Assembly Layers"],
+// APPEARANCE_CONTROLS::rebuildLayerContextMenu: each entry with its KiCad bitmap
+const LAYER_MENU: ([LayerMenuCmd, string, string] | "-")[] = [
+  ["showAllCu", "Show All Copper Layers", "show_all_copper_layers"], ["hideAllCu", "Hide All Copper Layers", "show_no_copper_layers"], "-",
+  ["hideAllButActive", "Hide All Layers But Active", "select_w_layer"], "-",
+  ["showAllNonCu", "Show All Non Copper Layers", "show_no_copper_layers"], ["hideAllNonCu", "Hide All Non Copper Layers", "show_all_copper_layers"], "-",
+  ["showAll", "Show All Layers", "show_all_layers"], ["hideAll", "Hide All Layers", "show_no_layers"], "-",
+  ["frontAssembly", "Show Only Front Assembly Layers", "show_front_assembly_layers"], ["front", "Show Only Front Layers", "show_all_front_layers"],
+  ["inner", "Show Only Inner Layers", "show_all_copper_layers"], ["back", "Show Only Back Layers", "show_all_back_layers"], ["backAssembly", "Show Only Back Assembly Layers", "show_back_assembly_layers"],
 ];
+/** "Inactive layers (%s):" — the label carries the action's hotkey when it has one (KeyNameFromKeyCode). */
+function hotkeyLabel(text: string, action: string): string {
+  const meta = menuMeta("pcb", action), k = meta && meta.key;
+  return k ? `${text} (${keyName(k)}):` : `${text}:`;
+}
+const SWATCH_TIP = "Double click or middle click for color change, right click for menu";
 
-function LayersTab({ pickColor }: { pickColor: (c: ColorAt) => void }) {
+function LayersTab() {
   const layers = usePanels((s) => s.appearance.layers);
   const active = usePanels((s) => s.appearance.active);
   const inactive = usePanels((s) => s.appearance.inactive);
@@ -107,9 +116,8 @@ function LayersTab({ pickColor }: { pickColor: (c: ColorAt) => void }) {
   const notice = useApp((s) => s.document.notice);
   const menu = useContextMenu();
   const hasInner = layers.some((l) => l.copper && l.key !== "F.Cu" && l.key !== "B.Cu");
-  const items: MenuItem[] = LAYER_MENU.filter((m) => m === "-" || m[0] !== "inner" || hasInner).map((m) => m === "-" ? "-" : { label: m[1], run: () => pdispatch({ t: "layerMenu", cmd: m[0] }) });
-  const swatch = (l: LayerInfo, ev: { clientX: number; clientY: number }) => pickColor({ x: ev.clientX, y: ev.clientY, title: `${l.name} color`, color: l.color, canClear: l.color.toLowerCase() !== l.defaultColor.toLowerCase(), clearLabel: "Reset to Default",
-    set: (c) => pdispatch({ t: "layerColor", key: l.key, color: c }) });
+  const items: MenuItem[] = LAYER_MENU.filter((m) => m === "-" || m[0] !== "inner" || hasInner).map((m) => m === "-" ? "-" : { label: m[1], icon: m[2], run: () => pdispatch({ t: "layerMenu", cmd: m[0] }) });
+  const swatch = (l: LayerInfo) => pickColor({ title: `${l.name} color`, color: l.color, def: l.defaultColor, set: (c) => pdispatch({ t: "layerColor", key: l.key, color: c }) });
   return (
     <>
       <div id="layers" className="flex-auto min-h-0 overflow-auto bg-paper py-0.5" onContextMenu={(ev) => menu.open(ev, items)}>
@@ -117,14 +125,14 @@ function LayersTab({ pickColor }: { pickColor: (c: ColorAt) => void }) {
           <div key={l.key} className={cx("layer", ROW2, "cursor-default hover:bg-panel cur:bg-sel", l.key === active && "cur")} data-layer={l.key} title={l.tip}
             onClick={() => pdispatch({ t: "layerActive", key: l.key })}>
             <span className="arrow inline-block w-2.5 flex-none text-blue text-xs leading-none">{l.key === active ? "▶" : ""}</span>
-            <Swatch color={l.color} title="Left double click or middle click for color change, right click for menu" onPick={(ev) => swatch(l, ev)} />
-            <Eye on={l.visible} k={l.key} title="Click to make layer visible / hidden" onChange={(on) => pdispatch({ t: "layerVisible", key: l.key, on })} />
+            <Swatch color={l.color} title={SWATCH_TIP} onPick={() => swatch(l)} />
+            <Eye on={l.visible} k={l.key} title="Show or hide this layer" onChange={(on) => pdispatch({ t: "layerVisible", key: l.key, on })} />
             <span className="lname">{l.name}</span>
           </div>
         ))}
       </div>
       <Collapsible title="Layer Display Options" id="layerOpts">
-        <div className="mb-1">Inactive layers:</div>
+        <div className="mb-1" data-label="inactive">{hotkeyLabel("Inactive layers", "highContrastModeCycle")}</div>
         <div className="flex mb-1.5">
           {([["normal", "Normal", "Inactive layers will be shown in full color"], ["dim", "Dim", "Inactive layers will be dimmed"], ["hide", "Hide", "Inactive layers will be hidden"]] as const).map(([m, label, tip]) => (
             <label className={RADIO} key={m} title={tip}><input type="radio" className="m-0 accent-blue" name="kInactive" data-inactive={m} checked={inactive === m} onChange={() => pdispatch({ t: "inactive", mode: m })} />{label}</label>
@@ -142,12 +150,16 @@ function ObjectsTab() {
   return (
     <div id="objects" className="flex-auto min-h-0 overflow-auto bg-paper py-0.5">
       {objects.map((o, i) => o.spacer ? <div key={"sp" + i} className="h-2.5" /> : (
-        <div key={o.id} className={cx(ROW2, "hover:bg-panel")} data-object={o.id} title={o.tip}>
-          {o.canHide ? <Eye on={!!o.visible} k={o.id} onChange={(on) => pdispatch({ t: "objVisible", id: o.id, on })} /> : <span className="w-4 flex-none" />}
-          <span className="flex-auto min-w-0 overflow-hidden text-ellipsis">{o.label}</span>
+        <div key={o.id} className={cx(ROW2, "hover:bg-panel")} data-object={o.id}>
+          {/* rebuildObjects: a COLOR_SWATCH where the theme has a colour for the layer, else a spacer of its width */}
+          {o.color ? <span data-object-swatch={o.id} className="flex"><Swatch color={o.color} small title={SWATCH_TIP}
+            onPick={() => pickColor({ title: `${o.label} color`, color: o.color!, def: o.defaultColor || null, set: (c) => pdispatch({ t: "objColor", id: o.id, color: c }) })} /></span>
+            : <span className="w-3 flex-none" />}
+          {o.canHide ? <Eye on={!!o.visible} k={o.id} title={`Show or hide ${o.label.toLowerCase()}`} onChange={(on) => pdispatch({ t: "objVisible", id: o.id, on })} /> : <span className="w-4 flex-none" />}
+          <span className="flex-auto min-w-0 overflow-hidden text-ellipsis" title={o.tip}>{o.label}</span>
           {o.opacity !== undefined ? (
             <input type="range" min={0} max={100} step={1} value={Math.round(o.opacity * 100)} data-opacity={o.id} title={`Set opacity of ${o.label.toLowerCase()}`}
-              className="flex-none w-[84px] h-3 m-0 accent-blue" onChange={(ev) => pdispatch({ t: "objOpacity", id: o.id, value: +ev.target.value / 100 })} />
+              className="kslider flex-none w-[84px]" onChange={(ev) => pdispatch({ t: "objOpacity", id: o.id, value: +ev.target.value / 100 })} />
           ) : null}
         </div>
       ))}
@@ -155,25 +167,37 @@ function ObjectsTab() {
   );
 }
 
-function netMenu(n: NetRow, pick: (ev: { clientX: number; clientY: number }) => void, ev: { clientX: number; clientY: number }): MenuItem[] {
+function netMenu(n: NetRow, pick: () => void): MenuItem[] {
   const cmd = (c: NetCmd) => () => pdispatch({ t: "netCmd", cmd: c, name: n.name });
   const shown = unescapeString(n.name);   // NET_GRID_TABLE::Rebuild: UnescapeString( net->GetNetname() )
   return [
-    { label: "Set Net Color", run: () => pick(ev) }, { label: "Clear Net Color", run: () => pdispatch({ t: "netColor", name: n.name, color: null }), disabled: !n.color }, "-",
+    { label: "Set Net Color", run: pick }, { label: "Clear Net Color", run: () => pdispatch({ t: "netColor", name: n.name, color: null }), disabled: !n.color }, "-",
     { label: `Highlight ${shown}`, run: cmd("highlight") }, { label: `Select Tracks and Vias in ${shown}`, run: cmd("select") }, { label: `Unselect Tracks and Vias in ${shown}`, run: cmd("unselect") }, "-",
     { label: "Show All Nets", run: cmd("showAll") }, { label: "Hide All Other Nets", run: cmd("hideOthers") },
   ];
 }
-function classMenu(c: NetClassRow, pick: (ev: { clientX: number; clientY: number }) => void, ev: { clientX: number; clientY: number }): MenuItem[] {
+/** buildNetClassMenu: the Default class has no colour of its own, so no colour entries (isDefaultClass). */
+function classMenu(c: NetClassRow, pick: () => void): MenuItem[] {
   const cmd = (k: NetCmd) => () => pdispatch({ t: "classCmd", cmd: k, name: c.name });
+  const colors: MenuItem[] = c.name === "Default" ? [] : [
+    { label: "Set Netclass Color", run: pick },
+    // ID_USE_SCHEMATIC_NET_COLOR: the class's schematic colour as its board colour; disabled while it has none
+    { label: "Use Color from Schematic", run: () => pdispatch({ t: "classColor", name: c.name, color: c.schColor || null }), disabled: !c.schColor },
+    { label: "Clear Netclass Color", run: () => pdispatch({ t: "classColor", name: c.name, color: null }), disabled: !c.color }, "-"];
   return [
-    { label: "Set Netclass Color", run: () => pick(ev) }, { label: "Clear Netclass Color", run: () => pdispatch({ t: "classColor", name: c.name, color: null }), disabled: !c.color }, "-",
+    ...colors,
     { label: `Highlight Nets in ${c.name}`, run: cmd("highlight") }, { label: `Select Tracks and Vias in ${c.name}`, run: cmd("select") }, { label: `Unselect Tracks and Vias in ${c.name}`, run: cmd("unselect") }, "-",
     { label: "Show All Netclasses", run: cmd("showAll") }, { label: "Hide All Other Netclasses", run: cmd("hideOthers") },
   ];
 }
 
-function NetsTab({ pickColor }: { pickColor: (c: ColorAt) => void }) {
+/** A BITMAP_BUTTON in a heading row (padding 2, 16 px bitmap). */
+function HeadButton({ icon, title, k, onClick }: { icon: string; title: string; k: string; onClick: () => void }) {
+  return <button type="button" className="tbtn flex-none flex items-center justify-center w-5 h-5 p-0 bg-transparent border border-transparent rounded-xs hover:bg-panel hover:border-line" title={title} data-head-btn={k}
+    onClick={onClick}><KIcon name={icon} size={16} /></button>;
+}
+
+function NetsTab() {
   const nets = usePanels((s) => s.appearance.nets);
   const classes = usePanels((s) => s.appearance.netClasses);
   const colorMode = usePanels((s) => s.appearance.netColorMode);
@@ -182,41 +206,44 @@ function NetsTab({ pickColor }: { pickColor: (c: ColorAt) => void }) {
   const menu = useContextMenu();
   const ql = q.trim().toLowerCase();
   const list = ql ? nets.filter((n) => unescapeString(n.name).toLowerCase().includes(ql)) : nets;
-  const netColor = (n: NetRow) => (ev: { clientX: number; clientY: number }) => pickColor({ x: ev.clientX, y: ev.clientY, title: `${unescapeString(n.name)} color`, color: n.color, canClear: !!n.color, clearLabel: "Clear Net Color", set: (c) => pdispatch({ t: "netColor", name: n.name, color: c }) });
-  const classColor = (c: NetClassRow) => (ev: { clientX: number; clientY: number }) => pickColor({ x: ev.clientX, y: ev.clientY, title: `${c.name} color`, color: c.color, canClear: !!c.color, clearLabel: "Clear Netclass Color", set: (v) => pdispatch({ t: "classColor", name: c.name, color: v }) });
+  const netColor = (n: NetRow) => () => pickColor({ title: `${unescapeString(n.name)} color`, color: n.color, def: null, set: (c) => pdispatch({ t: "netColor", name: n.name, color: c }) });
+  const classColor = (c: NetClassRow) => () => pickColor({ title: `${c.name} color`, color: c.color, def: null, set: (v) => pdispatch({ t: "classColor", name: c.name, color: v }) });
   return (
     <>
       <div id="nets" className="flex flex-col flex-auto min-h-0 bg-paper">
-        <div className="flex-none px-1.5 pt-1 font-semibold">Nets</div>
+        <div className="flex flex-none items-center px-1.5 pt-1"><span className="flex-auto font-semibold">Nets</span>
+          <HeadButton icon="list_nets" title="Show the Net Inspector" k="netInspector" onClick={() => pdispatch({ t: "showNetInspector" })} /></div>
         <div className="flex-none px-1.5 py-1"><input id="netFilter" type="search" placeholder="Filter nets" value={q} onChange={(ev) => setQ(ev.target.value)} className="w-full bg-panel border border-line rounded-xs py-0.5 px-1.5 text-ink text-sm" /></div>
         <div className="knets flex-[3_1_0] min-h-[60px] overflow-auto border-y border-line">
           {list.length ? list.slice(0, 600).map((n) => (
-            <div key={n.name} className={cx(ROW2, "hover:bg-panel")} data-net={n.name} onContextMenu={(ev) => menu.open(ev, netMenu(n, netColor(n), ev))}>
-              <Swatch color={n.color} title="Left double click or middle click for color change, right click for menu" onPick={netColor(n)} />
-              <Eye on={n.visible} k={n.name} title="Show or hide ratsnest for this net" onChange={(on) => pdispatch({ t: "netVisible", name: n.name, on })} />
+            <div key={n.name} className={cx(ROW2, "hover:bg-panel")} data-net={n.name} onContextMenu={(ev) => menu.open(ev, netMenu(n, netColor(n)))}>
+              <Swatch color={n.color} title="Double click (or middle click) to change color; right click for more actions" onPick={netColor(n)} />
+              <Eye on={n.visible} k={n.name} title={(n.visible ? "Click to hide ratsnest for " : "Click to show ratsnest for ") + unescapeString(n.name)} onChange={(on) => pdispatch({ t: "netVisible", name: n.name, on })} />
               <span className="overflow-hidden text-ellipsis">{unescapeString(n.name)}</span>
             </div>
           )) : <p className="note px-2">{nets.length ? "No nets match the filter." : "This board has no nets yet."}</p>}
         </div>
-        <div className="flex-none px-1.5 pt-1.5 pb-0.5 font-semibold">Net Classes</div>
+        <div className="flex flex-none items-center px-1.5 pt-1.5 pb-0.5"><span className="flex-auto font-semibold">Net Classes</span>
+          <HeadButton icon="options_generic" title="Configure net classes" k="netClasses" onClick={() => pdispatch({ t: "boardSetup", page: "netclasses" })} /></div>
         <div className="kclasses flex-[1_1_0] min-h-[44px] overflow-auto">
           {classes.map((c) => (
-            <div key={c.name} className={cx(ROW2, "hover:bg-panel")} data-netclass={c.name} onContextMenu={(ev) => menu.open(ev, classMenu(c, classColor(c), ev))}>
-              <Swatch color={c.color} title="Left double click or middle click for color change, right click for menu" onPick={classColor(c)} />
-              <Eye on={c.visible} k={c.name} title="Show or hide ratsnest for nets in this class" onChange={(on) => pdispatch({ t: "classVisible", name: c.name, on })} />
+            <div key={c.name} className={cx(ROW2, "hover:bg-panel")} data-netclass={c.name} onContextMenu={(ev) => menu.open(ev, classMenu(c, classColor(c)))}>
+              {/* the Default class can't have an override colour: its swatch is hidden but keeps its space */}
+              {c.name === "Default" ? <span className="w-[18px] flex-none" /> : <Swatch color={c.color} title="Left double click or middle click for color change, right click for menu" onPick={classColor(c)} />}
+              <Eye on={c.visible} k={c.name} title={`Show or hide ratsnest for nets in ${c.name}`} onChange={(on) => pdispatch({ t: "classVisible", name: c.name, on })} />
               <span className="overflow-hidden text-ellipsis">{c.name}</span>
             </div>
           ))}
         </div>
       </div>
       <Collapsible title="Net Display Options" id="netOpts">
-        <div className="mb-1" title="Choose when to show net and netclass colors">Net colors:</div>
+        <div className="mb-1" title="Choose when to show net and netclass colors" data-label="netcolors">{hotkeyLabel("Net colors", "netColorModeCycle")}</div>
         <div className="flex mb-1.5">
           {([["all", "All", "Net and netclass colors are shown on all copper items"], ["ratsnest", "Ratsnest", "Net and netclass colors are shown on the ratsnest only"], ["off", "None", "Net and netclass colors are not shown"]] as const).map(([m, label, tip]) => (
             <label className={RADIO} key={m} title={tip}><input type="radio" className="m-0 accent-blue" name="kNetColor" data-netcolor={m} checked={colorMode === m} onChange={() => pdispatch({ t: "netColorMode", mode: m })} />{label}</label>
           ))}
         </div>
-        <div className="mb-1" title="Choose which ratsnest lines to display">Ratsnest display:</div>
+        <div className="mb-1" title="Choose which ratsnest lines to display" data-label="ratsnest">{hotkeyLabel("Ratsnest display", "ratsnestModeCycle")}</div>
         <div className="flex">
           {([["all", "All", "Show ratsnest lines to items on all layers"], ["visible", "Visible layers", "Show ratsnest lines to items on visible layers"], ["none", "None", "Hide all ratsnest lines"]] as const).map(([m, label, tip]) => (
             <label className={RADIO} key={m} title={tip}><input type="radio" className="m-0 accent-blue" name="kRats" data-rats={m} checked={ratsMode === m} onChange={() => pdispatch({ t: "ratsnestMode", mode: m })} />{label}</label>
@@ -267,20 +294,21 @@ const TABS = "ktabs flex flex-none border-b border-line bg-bench";
 const TAB = "flex-1 bg-transparent border-0 border-b-2 border-b-transparent py-1 px-0 text-sm text-ink-2 on:text-ink on:border-b-blue on:bg-paper";
 
 function BoardAppearance() {
-  const [tab, setTab] = useState<"layers" | "objects" | "nets">("layers");
-  const [color, setColor] = useState<ColorAt | null>(null);
+  const [tab0, setTab] = useState<"layers" | "objects" | "nets">("layers");
+  // the Footprint Editor's panel has no Nets page (m_notebook->RemovePage( 2 ))
+  const fpEditor = usePanels((s) => !!s.appearance.fpEditor);
+  const tab = fpEditor && tab0 === "nets" ? "layers" : tab0;
   return (
     <div className="kbody flex flex-col min-h-0 flex-auto bg-paper text-sm">
       <div className={TABS}>
-        {(["layers", "objects", "nets"] as const).map((t) => (
+        {(fpEditor ? ["layers", "objects"] as const : ["layers", "objects", "nets"] as const).map((t) => (
           <button type="button" key={t} className={cx(TAB, tab === t && "on")} data-atab={t} onClick={() => setTab(t)}>{t === "layers" ? "Layers" : t === "objects" ? "Objects" : "Nets"}</button>
         ))}
       </div>
-      <div className={cx("flex flex-col flex-auto min-h-0", tab !== "layers" && "hidden")}><LayersTab pickColor={setColor} /></div>
+      <div className={cx("flex flex-col flex-auto min-h-0", tab !== "layers" && "hidden")}><LayersTab /></div>
       {tab === "objects" ? <ObjectsTab /> : null}
-      {tab === "nets" ? <NetsTab pickColor={setColor} /> : null}
+      {tab === "nets" ? <NetsTab /> : null}
       <PresetsAndViewports />
-      <ColorPicker at={color} onClose={() => setColor(null)} />
     </div>
   );
 }
