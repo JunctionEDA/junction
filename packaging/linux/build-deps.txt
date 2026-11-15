@@ -1,0 +1,11 @@
+# Ubuntu 24.04 packages the desktop build needs (linux-build.yml and upstream-sync.yml).
+build-essential cmake ninja-build ccache pkg-config
+libwxgtk3.2-dev libwxgtk-webview3.2-dev libglew-dev libglm-dev libcairo2-dev libpixman-1-dev
+libboost-all-dev libgit2-dev libngspice0-dev ngspice-dev
+libocct-modeling-algorithms-dev libocct-modeling-data-dev
+libocct-data-exchange-dev libocct-visualization-dev
+libocct-foundation-dev libocct-ocaf-dev
+protobuf-compiler libprotobuf-dev libzstd-dev unixodbc-dev
+libgtk-3-dev libsecret-1-dev libnng-dev libspnav-dev libpoppler-glib-dev python3
+libssl-dev zlib1g-dev gettext
+glslang-tools spirv-tools libvulkan-dev libsqlite3-dev
