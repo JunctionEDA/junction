@@ -1304,7 +1304,7 @@ mod landing_tests {
         // Colours come from the app, never from a palette of its own.
         assert!(html.contains("{{THEME}}") && !html.contains("--bench: #"));
         // Every screenshot it shows is one the server can serve.
-        for name in ["editor"] {
+        for name in ["board", "schematic"] {
             assert!(html.contains(&format!("/static/landing/{name}.webp")), "{name}");
         }
         assert!(html.contains("/auth/github/login?next=/"), "sign-in hands off to the projects home");
