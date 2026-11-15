@@ -12,6 +12,8 @@ import { cx } from "../../util";
 import { menuMeta } from "../../menuspec";
 import { fpTreeMenu } from "../../editor/fptree";
 import { ContextMenu, Twist, type MenuAt, type MenuItem } from "./widgets";
+import { libTreeFilter, loadSortMode, type LibTreeFilter } from "../libtree-filter";
+import { filterItems, libraryScore, sortLibraries, type SortMode } from "../../library/libtree";
 
 const NONE: FpLibRow[] = [];
 type Sel = { lib: string; docId?: string } | null;
@@ -20,13 +22,34 @@ export function LibrariesPane() {
   const current = useApp((s) => s.document.docId);
   const modified = useApp((s) => !!(s.fpTitle && s.fpTitle.modified));
   const [filter, setFilter] = useState("");
+  const [sort, setSort] = useState<SortMode>(() => loadSortMode("fpedit"));
   const [flipped, setFlipped] = useState<Set<string>>(() => new Set());
+  // Expand All / Collapse All set every library explicitly; a twist click flips one library afterwards
+  const [forced, setForced] = useState<boolean | null>(null);
   const [sel, setSelState] = useState<Sel>(null);
   const q = filter.trim().toLowerCase();
-  const shown = useMemo(() => libs.map((l) => ({ ...l, footprints: q ? l.footprints.filter((f) => (l.name + ":" + f.name + " " + (f.descr || "")).toLowerCase().includes(q)) : l.footprints }))
-    .filter((l) => !q || l.footprints.length || l.name.toLowerCase().includes(q)), [libs, q]);
+  // LIB_TREE_NODE_ITEM::UpdateScore and LIB_TREE_NODE::Compare (library/libtree.ts): every term matches, best match first
+  const shown = useMemo(() => {
+    const items = (l: FpLibRow) => l.footprints.map((f) => ({ ...f, name: f.name, desc: f.descr || "", lib: l.name }));
+    const rows = libs.map((l) => ({ ...l, footprints: filterItems(items(l), q, sort) as unknown as FpLibRow["footprints"], ...libraryScore(items(l), q), rank: 0 }))
+      .filter((l) => !q || l.footprints.length || l.name.toLowerCase().includes(q));
+    return sortLibraries(rows, q, sort);
+  }, [libs, q, sort]);
   // a library is open when it holds the open footprint or the filter matched inside it; a click on its twist flips that
-  const isOpen = (name: string, hasCurrent: boolean) => ((hasCurrent || !!q) ? !flipped.has(name) : flipped.has(name));
+  const isOpen = (name: string, hasCurrent: boolean) => { const base = forced !== null ? forced : (hasCurrent || !!q); return base ? !flipped.has(name) : flipped.has(name); };
+  // the filter row (common/widgets/lib_tree.cpp): search box, config button with the sort and expand menu
+  const filterHost = useRef<HTMLDivElement | null>(null);
+  const filterApi = useRef<LibTreeFilter | null>(null);
+  const keyRef = useRef<(ev: KeyboardEvent) => void>(() => undefined);
+  useEffect(() => {
+    const host = filterHost.current; if (!host || filterApi.current) return;
+    const f = libTreeFilter({ key: "fpedit", id: "fpLibFilter", onText: (t) => { setFilter(t); setFlipped(new Set()); setForced(null); }, onSort: (m) => setSort(m),
+      // ExpandAll opens the libraries whose footprints are here (KiCad's read the global ones as they open)
+      expandAll: () => { setFlipped(new Set(libsRef.current.filter((l) => !l.loaded && l.readOnly).map((l) => l.name))); setForced(true); },
+      collapseAll: () => { setFlipped(new Set()); setForced(false); }, onKey: (ev) => keyRef.current(ev) });
+    filterApi.current = f; host.replaceChildren(f.el);
+  }, []);
+  const libsRef = useRef(libs); libsRef.current = libs;
   const cmd = (detail: Record<string, string | undefined>) => window.dispatchEvent(new CustomEvent("kc-fpedit-lib", { detail }));
   const toggle = (name: string) => {
     const n = new Set(flipped); if (n.has(name)) n.delete(name); else n.add(name); setFlipped(n);
@@ -64,7 +87,7 @@ export function LibrariesPane() {
   const visible: { lib: FpLibRow; docId?: string }[] = [];
   for (const l of shown) { const o = isOpen(l.name, l.footprints.some((f) => f.docId === current)); visible.push({ lib: l }); if (o) for (const f of l.footprints) visible.push({ lib: l, docId: f.docId }); }
   // LIB_TREE::onTreeCharHook / onTreeActivate
-  const onKey = (ev: React.KeyboardEvent) => {
+  const onKey = (ev: React.KeyboardEvent | KeyboardEvent, fromFilter = false) => {
     if (!visible.length) return;
     const i = sel ? visible.findIndex((r) => r.lib.name === sel.lib && r.docId === sel.docId) : -1;
     const row = i >= 0 ? visible[i] : null;
@@ -72,20 +95,18 @@ export function LibrariesPane() {
     const libOpen = row ? isOpen(row.lib.name, row.lib.footprints.some((f) => f.docId === current)) : false;
     if (ev.key === "ArrowDown") go(i + 1);
     else if (ev.key === "ArrowUp") go(i < 0 ? 0 : i - 1);
-    else if ((ev.key === "ArrowRight" || ev.key === "+") && row && !row.docId && !libOpen) toggle(row.lib.name);
-    else if ((ev.key === "ArrowLeft" || ev.key === "-") && row && !row.docId && libOpen) toggle(row.lib.name);
-    else if (ev.key === "ArrowLeft" && row && row.docId) setSel({ lib: row.lib.name });
+    // WXK_ADD / WXK_SUBTRACT (the numpad keys) also work in the filter box; Left / Right only in the tree
+    else if ((ev.code === "NumpadAdd" || (!fromFilter && (ev.key === "ArrowRight" || ev.key === "+"))) && row && !row.docId) { if (!libOpen) toggle(row.lib.name); }
+    else if ((ev.code === "NumpadSubtract" || (!fromFilter && (ev.key === "ArrowLeft" || ev.key === "-"))) && row && !row.docId) { if (libOpen) toggle(row.lib.name); }
+    else if (!fromFilter && ev.key === "ArrowLeft" && row && row.docId) setSel({ lib: row.lib.name });
     else if (ev.key === "Enter" && row) { if (row.docId) open(row.docId); else toggle(row.lib.name); }
     else return;
     ev.preventDefault();
   };
+  keyRef.current = (ev: KeyboardEvent) => onKey(ev, true);
   return (
     <div className="kbody flex flex-col min-h-0 flex-auto bg-paper text-sm">
-      <div className="flex-none p-0.5">
-        <input id="fpLibFilter" type="search" placeholder="Filter" value={filter} spellCheck={false} onChange={(ev) => { setFilter(ev.target.value); setFlipped(new Set()); }}
-          onKeyDown={(ev) => { if (ev.key === "ArrowDown" || ev.key === "ArrowUp" || ev.key === "Enter") onKey(ev); }}
-          className="w-full min-w-0 bg-panel border border-line rounded-xs py-0.5 px-1.5 text-ink text-sm" />
-      </div>
+      <div className="flex-none" ref={filterHost} />
       <div className="ktree overflow-auto min-h-0 flex-auto py-1 outline-none" id="fpLibTree" tabIndex={0} onKeyDown={onKey}>
         {shown.length ? null : <div className="px-2 py-1 text-ink-3">{libs.length ? "No matches" : "The project has no footprint libraries. File > New Library... adds one."}</div>}
         {shown.map((l) => {

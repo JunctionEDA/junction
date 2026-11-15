@@ -27,6 +27,9 @@ import { datasheetLink } from "../library/fpchoice";
 import { kicadIcon, setKicadIcon } from "../components/kicon-dom";
 import { renderSymbolPreview } from "../library/preview";
 import { symCanvasMenu, symTreeMenu, type SymMenuCtx } from "./ctxmenu";
+import { libTreeFilter } from "../components/libtree-filter";
+import * as LT from "../library/libtree";
+import { filterItems, sortLibraries, type SortMode } from "../library/libtree";
 import { ZOOM_LIST, LINKS, LOCAL_LABELS } from "../tables";
 import { openSymbolFind, findNext as findNextMatch } from "./find";
 import type { Units } from "../store";
@@ -104,6 +107,10 @@ export class SymbolEditor {
   filter = "";
   /** the Selection Filter pane under Properties (SCH_SELECTION_FILTER_OPTIONS of the symbol editor) */
   selFilter: SymSelFilter = defaultSymFilter();
+  /** LIB_TREE_MODEL_ADAPTER::GetSortMode (the filter row's config menu) */
+  sortMode: SortMode = "best";
+  /** the tree's rows in display order, for the keyboard (LIB_TREE::onQueryCharHook / onTreeCharHook) */
+  private treeRows: { lib: string; name?: string; unit?: number }[] = [];
   treeSel: { lib: string; name?: string; unit?: number } | null = null;
   private el: Record<string, HTMLElement> = {};
   private cv: HTMLCanvasElement | null = null;
@@ -555,10 +562,14 @@ export class SymbolEditor {
     const main = h("div", { class: "se-main" });
     const tbLeft = h("div", { class: "se-tbv se-tbl", id: "se-tbLeft" });
     const tree = h("div", { class: "se-tree", id: "se-tree" });
-    const filter = h("input", { type: "search", placeholder: "Filter", id: "se-filter", "aria-label": "Filter" }) as HTMLInputElement;
-    filter.addEventListener("input", () => { this.filter = filter.value; this.renderTree(); });
+    // LIB_TREE's filter row: search box, then the config button (Sort by Best Match / Alphabetically, Expand / Collapse All)
+    const ftr = libTreeFilter({ key: "symedit", id: "se-filter", onText: (t) => { this.filter = t; this.renderTree(); }, onSort: (m) => { this.sortMode = m; this.renderTree(); },
+      expandAll: () => this.expandAll(true), collapseAll: () => this.expandAll(false), onKey: (ev) => this.onTreeKey(ev, true) });
+    this.sortMode = ftr.sort();
+    const filter = ftr.input;
     const list = h("div", { class: "se-list", id: "se-list", tabindex: 0 });
-    tree.append(filter, list);
+    list.addEventListener("keydown", (ev) => this.onTreeKey(ev as KeyboardEvent, false));
+    tree.append(ftr.el, list);
     const centre = h("div", { class: "se-centre" });
     const tabs = h("div", { class: "se-tabs", id: "se-tabs" });
     const cwrap = h("div", { class: "se-canvas", id: "se-canvas", tabindex: 0 });
@@ -806,12 +817,17 @@ export class SymbolEditor {
     const q = this.filter.trim().toLowerCase(); const t = this.tab;
     const frag = document.createDocumentFragment();
     const pinned = this.pinnedLibs();
-    const libs = [...this.libs.values()].sort((a, b) => (pinned.has(a.nick) !== pinned.has(b.nick) ? (pinned.has(a.nick) ? -1 : 1) : a.kind === b.kind ? a.nick.localeCompare(b.nick) : a.kind === "project" ? -1 : 1));
+    // LIB_TREE_NODE::Compare: pinned first, then (best match) the library with the better hit; project libraries rank above KiCad's
+    const items = (lib: Lib): Row[] => (lib.kind === "project" || lib.rows ? this.rowsOf(lib) : lib.rows || []);
+    const treeItems = (lib: Lib) => items(lib).map((r) => ({ ...r, lib: lib.nick }));
+    const libs = sortLibraries([...this.libs.values()].map((l) => ({ l, name: l.nick, pinned: pinned.has(l.nick), rank: l.kind === "project" ? 1 : 0, ...LT.libraryScore(treeItems(l), q) })), q, this.sortMode).map((x) => x.l);
     const onCanvas = t && !t.origin ? { lib: t.lib, name: t.name } : null;
+    const order: { lib: string; name?: string; unit?: number }[] = [];
     for (const lib of libs) {
-      const rows = lib.kind === "project" || lib.rows ? this.rowsOf(lib) : lib.rows || [];
-      const hits = q ? rows.filter((r) => r.name.toLowerCase().includes(q) || r.desc.toLowerCase().includes(q)) : rows;
+      const rows = items(lib);
+      const hits = q ? filterItems(treeItems(lib), q, this.sortMode) as (Row & { lib: string })[] : filterItems(treeItems(lib), "", this.sortMode) as (Row & { lib: string })[];
       if (q && !hits.length && !lib.nick.toLowerCase().includes(q)) continue;
+      order.push({ lib: lib.nick });
       const open = lib.open || (!!q && hits.length > 0);
       const modified = !!lib.doc && lib.doc.loaded && lib.doc.isModified;
       const isSel = this.treeSel && this.treeSel.lib === lib.nick && !this.treeSel.name;
@@ -842,7 +858,7 @@ export class SymbolEditor {
         sr.addEventListener("pointerenter", () => this.hoverPreview(sr, lib, r.name));
         sr.addEventListener("pointerleave", () => this.hidePreview());
         sr.addEventListener("contextmenu", (ev) => { ev.preventDefault(); this.treeSel = { lib: lib.nick, name: r.name }; this.renderTree(); showMenu(ev.clientX, ev.clientY, this.treeMenu(lib, r.name)); });
-        frag.append(sr);
+        frag.append(sr); order.push({ lib: lib.nick, name: r.name });
         if (uopen) for (let u = 1; u <= r.units; u++) {
           const usel = this.treeSel && this.treeSel.lib === lib.nick && this.treeSel.name === r.name && this.treeSel.unit === u;
           const label = (r.unitNames && r.unitNames[u - 1]) || `Unit ${M.unitLetter(u)}`;
@@ -850,13 +866,52 @@ export class SymbolEditor {
           ur.addEventListener("click", () => { this.treeSel = { lib: lib.nick, name: r.name, unit: u }; this.renderTree(); });
           // LIB_TREE activation of a unit: the symbol opens on that unit
           ur.addEventListener("dblclick", () => void (async () => { if (cur || (await this.loadSymbol(lib.nick, r.name))) this.setUnit(u); })());
-          frag.append(ur);
+          frag.append(ur); order.push({ lib: lib.nick, name: r.name, unit: u });
         }
       }
       if (lib.kind === "project" && lib.doc && lib.doc.loaded && !rows.length && !q) frag.append(h("div", { class: "se-row", style: "padding-left:18px;color:var(--ink-3)" }, "(empty)"));
     }
     if (this.officialFailed && !q) frag.append(h("div", { class: "se-row", style: "color:var(--ink-3);white-space:normal" }, this.officialFailed));
     list.innerHTML = ""; list.append(frag);
+    this.treeRows = order;
+    const cur = list.querySelector(".se-row.cur") as HTMLElement | null; if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+  }
+  /** Expand All / Collapse All (the filter row's config menu): KiCad's libraries are listed when they open. */
+  private expandAll(open: boolean): void {
+    for (const lib of this.libs.values()) { lib.open = open; if (open && lib.kind === "official" && !lib.rows) void this.loadOfficial(lib); }
+    if (!open) this.symOpen.clear();
+    this.renderTree();
+  }
+  /**
+   * LIB_TREE::onQueryCharHook (the filter box) and onTreeCharHook (the list): Up / Down walk the rows, Enter opens a
+   * symbol (a unit opens on that unit) or toggles a library, numpad + / - (and Right / Left in the list) expand or
+   * collapse the selected library or multi-unit symbol.
+   */
+  private onTreeKey(ev: KeyboardEvent, fromFilter: boolean): void {
+    if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
+    const rows = this.treeRows; if (!rows.length) return;
+    const s = this.treeSel;
+    const i = s ? rows.findIndex((r) => r.lib === s.lib && r.name === s.name && r.unit === s.unit) : -1;
+    const row = i >= 0 ? rows[i] : null;
+    const lib = row ? this.libs.get(row.lib) || null : null;
+    const setOpen = (on: boolean): void => {
+      if (!row || !lib) return;
+      if (!row.name) { if (lib.open !== on) { lib.open = on; if (on && lib.kind === "official") void this.loadOfficial(lib); } }
+      else if (row.unit === undefined) { const key = row.lib + ":" + row.name; if (on) this.symOpen.add(key); else this.symOpen.delete(key); }
+      this.renderTree();
+    };
+    const add = ev.code === "NumpadAdd" || (!fromFilter && (ev.key === "+" || ev.key === "ArrowRight"));
+    const sub = ev.code === "NumpadSubtract" || (!fromFilter && (ev.key === "-" || ev.key === "ArrowLeft"));
+    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") { const j = Math.max(0, Math.min(rows.length - 1, ev.key === "ArrowDown" ? i + 1 : i < 0 ? 0 : i - 1)); this.treeSel = { ...rows[j] }; this.renderTree(); this.renderMenus(); }
+    else if (ev.key === "Enter" && row) {
+      if (!row.name) setOpen(!(lib && lib.open));
+      else if (row.unit !== undefined) { const u = row.unit; const t = this.tab; void (async () => { if ((t && !t.origin && t.lib === row.lib && t.name === row.name) || (await this.loadSymbol(row.lib, row.name!))) this.setUnit(u); })(); }
+      else void this.loadSymbol(row.lib, row.name);
+    }
+    else if (add) setOpen(true);
+    else if (sub) setOpen(false);
+    else return;
+    ev.preventDefault(); ev.stopPropagation();
   }
   /** Pinned libraries (LIB_TREE_MODEL_ADAPTER pinned_symbol_libs), kept for this viewer. */
   pinnedLibs(): Set<string> { try { return new Set(JSON.parse(localStorage.getItem("kui.symedit.pinned") || "[]") as string[]); } catch { return new Set(); } }
@@ -1721,6 +1776,8 @@ export class SymbolEditor {
     }
     if (t && t.closest && t.closest(".kd-overlay, .kd-pop")) return;
     if ((window as unknown as { KDialogs?: { isOpen?: () => boolean } }).KDialogs?.isOpen?.()) return;
+    // the focused tree keeps its keys (onTreeCharHook: bare Left / Right do not reach the canvas's cursor actions)
+    if (t && t.closest && t.closest("#se-list") && !ev.ctrlKey && !ev.metaKey && !ev.altKey && /^(ArrowUp|ArrowDown|ArrowLeft|ArrowRight|Enter|\+|-)$/.test(ev.key)) { this.onTreeKey(ev, false); return; }
     const combo = comboOf(ev); if (!combo) return;
     ev.stopImmediatePropagation();
     if (document.querySelector(".se-menu")) { if (combo === "Esc") { ev.preventDefault(); closeMenus(); } return; }
