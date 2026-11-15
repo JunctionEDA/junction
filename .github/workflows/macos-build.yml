@@ -6,6 +6,11 @@ name: macos-build
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      ref:
+        description: "Commit to build instead of the one the workflow runs on (the upstream sync builds its merge)"
+        type: string
+        default: ""
 
 jobs:
   build:
@@ -20,6 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 1
 
       - name: Install dependencies

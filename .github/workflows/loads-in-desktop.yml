@@ -5,6 +5,10 @@ name: Loads in desktop
 # the desktop's own reader: kicad-cli from the latest published Junction build.
 # A writer bug that makes a file the desktop cannot read fails here, before a
 # release, instead of on somebody's computer.
+#
+# The upstream sync calls it the other way round: the server stays the same and
+# the reader is the desktop just built from the upstream KiCad merge, so a
+# reader that upstream changed is caught before the merge reaches master.
 
 on:
   push:
@@ -14,12 +18,23 @@ on:
       - 'demos/**'
       - '.github/workflows/loads-in-desktop.yml'
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Commit to take the server from"
+        type: string
+        default: ""
+      linux_run:
+        description: "Workflow run id whose Linux build is the reader (default: the latest published release)"
+        type: string
+        default: ""
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  group: loads-in-desktop
+  group: loads-in-desktop-${{ inputs.ref || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -39,17 +54,29 @@ jobs:
           --health-timeout 5s --health-retries 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
 
       - uses: actions/setup-node@v4
         with:
           node-version: 22
 
-      - name: The desktop reader (latest published Junction build)
+      - name: The desktop reader (a build from another run)
+        if: ${{ inputs.linux_run }}
+        uses: actions/download-artifact@v4
+        with:
+          name: junction-linux
+          path: ~/dl
+          run-id: ${{ inputs.linux_run }}
+          github-token: ${{ github.token }}
+
+      - name: The desktop reader (latest published Junction build, unless one was given)
         env:
           GH_TOKEN: ${{ github.token }}
+          GIVEN: ${{ inputs.linux_run }}
         run: |
           mkdir -p "$HOME/dl" "$HOME/Apps"
-          gh release download --repo "$GITHUB_REPOSITORY" --pattern 'Junction-*-linux-x64.tar.gz' --dir "$HOME/dl"
+          [ -n "$GIVEN" ] || gh release download --repo "$GITHUB_REPOSITORY" --pattern 'Junction-*-linux-x64.tar.gz' --dir "$HOME/dl"
           tar -C "$HOME/Apps" -xzf "$HOME"/dl/Junction-*-linux-x64.tar.gz
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends $(cat "$HOME/Apps/usr/share/junction/ubuntu-packages.txt") unzip
