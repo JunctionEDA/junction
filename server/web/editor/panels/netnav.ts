@@ -74,6 +74,7 @@ export function netNavSignature(): string { return (HL.name || "-") + (HL.busMem
 
 export function netNavDispatch(a: PanelAction): boolean {
   if (a.t === "netNavRefresh") { publishNetNav(); return true; }
+  if (a.t === "netNavFind") { findNetByName(a.net); return true; }
   if (a.t === "netNavFilter") {
     if (a.text !== undefined) filterState.text = a.text;
     if (a.wildcard !== undefined) filterState.wildcard = a.wildcard;
@@ -98,11 +99,16 @@ export function findNetInNavigator(ids: string[]): boolean {
   if (c && inst) for (const id of ids) { const n = c.index.get(inst.index + "|" + id) || ""; if (n && !/^unconnected-/.test(n)) { name = n; break; } }
   if (!name) name = HL.name || "";
   if (!name) return false;
+  findNetByName(name);
+  return true;
+}
+/** SCH_EDIT_FRAME::FindNetInInspector( aNetName ): show the navigator, clear the highlight, filter on the name. */
+function findNetByName(name: string): void {
+  if (!name) return;
   const hk = E.hooks as { showPane?: (name: string, show?: unknown) => void };
   if (!shown() && hk.showPane) hk.showPane("netnav", true);
   filterState.text = unescape(name); saveJson("kc.netnav.filter", filterState);
   userSel = null;
   clearHighlight();
   publishNetNav();
-  return true;
 }

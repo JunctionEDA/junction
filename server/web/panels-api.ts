@@ -119,7 +119,8 @@ export type PanelAction =
   | { t: "searchActivate"; row: SearchRow; zoom: SelectionZoom }
   | { t: "netNavSelect"; ids: string[]; key?: string }
   | { t: "netNavFilter"; text?: string; wildcard?: boolean }
-  | { t: "netNavRefresh" };
+  | { t: "netNavRefresh" }
+  | { t: "netNavFind"; net: string };
 
 export interface PanelsApi {
   getState(): PanelsState;

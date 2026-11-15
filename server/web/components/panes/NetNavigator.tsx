@@ -6,7 +6,14 @@
 import { useEffect, useState } from "react";
 import type { NetNavNode } from "../../panels-api";
 import { cx } from "../../util";
-import { ContextMenu, Twist, pdispatch, usePanels, type MenuAt } from "./widgets";
+import { KIcon } from "../Icon";
+import { ContextMenu, Twist, pdispatch, usePanels, type MenuAt, type MenuItem } from "./widgets";
+
+/** The net a tree node belongs to: a net node ("net:NAME"), or the net above a sheet / item node; "" for the "Nets" root. */
+export function navNetOf(key: string): string {
+  if (key.startsWith("net:")) return key.slice(4);
+  const m = /^(?:sheet|item):(.*?)\|/.exec(key); return m ? m[1] : "";
+}
 
 export function NetNavigatorPane() {
   const nav = usePanels((s) => s.netNav);
@@ -28,13 +35,34 @@ export function NetNavigatorPane() {
   }, [nav.selected, nav.version]);   // eslint-disable-line react-hooks/exhaustive-deps
   const toggle = (k: string) => { const n = new Set(flipped); if (n.has(k)) n.delete(k); else n.add(k); setFlipped(n); };
   const isOpen = (n: NetNavNode) => (n.collapsed ? flipped.has(n.key) : !flipped.has(n.key));
+  /** ExpandAll / CollapseAll (then the root expanded again): every node's fold state from its default. */
+  const foldAll = (open: boolean) => {
+    const next = new Set<string>();
+    const walk = (n: NetNavNode, depth: number) => { if ((n.children || []).length) { const want = open || depth === 0; if (!!n.collapsed === want) next.add(n.key); } for (const c of n.children || []) walk(c, depth + 1); };
+    if (root) walk(root, 0); setFlipped(next);
+  };
+  /** SCH_EDIT_FRAME::showNetNavigatorMenu: on a row or the empty space; Find in Net Inspector needs a net. */
+  const navMenu = (ev: React.MouseEvent, key: string | null) => {
+    ev.preventDefault(); ev.stopPropagation();
+    const net = key ? navNetOf(key) : root && root.key.startsWith("net:") ? navNetOf(root.key) : "";
+    const items: MenuItem[] = [
+      { label: "Expand All", run: () => foldAll(true) }, { label: "Collapse All", run: () => foldAll(false) },
+      { label: "Find in Net Inspector", disabled: !net, run: () => pdispatch({ t: "netNavFind", net }) },
+    ];
+    setMenu({ x: ev.clientX, y: ev.clientY, items });
+  };
+  /** onNetNavigatorKey: Esc clears the filter and refreshes. */
+  const escClears = (ev: React.KeyboardEvent) => {
+    if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); pdispatch({ t: "netNavFilter", text: "" }); return; }
+    if (ev.currentTarget.tagName === "INPUT") ev.stopPropagation();
+  };
   const row = (n: NetNavNode, depth: number): JSX.Element => {
     const kids = n.children || [], open = isOpen(n);
     return (
       <div key={n.key}>
         <div className={cx("node flex items-center h-[20px] pr-1.5 cursor-default whitespace-nowrap hover:bg-panel cur:bg-sel", n.bold && "font-semibold", nav.selected === n.key && "cur")} style={{ paddingLeft: 4 + depth * 14 }} data-nav={n.key}
           onClick={() => { if (depth > 0) pdispatch({ t: "netNavSelect", ids: n.ids || [], key: n.key }); }}
-          onDoubleClick={() => { if (kids.length) toggle(n.key); }}>
+          onDoubleClick={() => { if (kids.length) toggle(n.key); }} onContextMenu={(ev) => navMenu(ev, n.key)}>
           <Twist open={open} leaf={!kids.length} onToggle={() => toggle(n.key)} />
           <span>{n.label}</span>
         </div>
@@ -47,16 +75,17 @@ export function NetNavigatorPane() {
     <div className="kbody flex flex-col min-h-0 flex-auto bg-paper text-sm">
       <div className="flex-none flex items-center gap-0.5 p-0.5">
         <input id="netNavFilter" type="search" placeholder="Filter nets" value={nav.filter || ""} disabled={nav.filterEnabled === false} spellCheck={false}
-          onChange={(ev) => pdispatch({ t: "netNavFilter", text: ev.target.value })}
+          onChange={(ev) => pdispatch({ t: "netNavFilter", text: ev.target.value })} onKeyDown={escClears}
           className="flex-1 min-w-0 bg-panel border border-line rounded-xs py-0.5 px-1.5 text-ink text-sm disabled:opacity-50" />
+        {/* m_netNavigatorMenuButton: BITMAPS::config, AppendRadioItem Wildcard Search / Regex Search */}
         <button type="button" id="netNavGear" title="Search mode" className="flex-none w-[22px] h-[22px] grid place-items-center text-ink-2 hover:bg-panel rounded-xs"
           onClick={(ev) => { const r = (ev.currentTarget as HTMLElement).getBoundingClientRect(); setMenu({ x: r.left, y: r.bottom, items: [
-            { label: (wildcard ? "● " : "○ ") + "Wildcard Search", run: () => pdispatch({ t: "netNavFilter", wildcard: true }) },
-            { label: (!wildcard ? "● " : "○ ") + "Regex Search", run: () => pdispatch({ t: "netNavFilter", wildcard: false }) }] }); }}>
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" /></svg>
+            { label: "Wildcard Search", radio: true, check: wildcard, run: () => pdispatch({ t: "netNavFilter", wildcard: true }) },
+            { label: "Regex Search", radio: true, check: !wildcard, run: () => pdispatch({ t: "netNavFilter", wildcard: false }) }] }); }}>
+          <KIcon name="config" size={16} />
         </button>
       </div>
-      <div className="ktree overflow-auto min-h-0 flex-auto py-1" id="netnav">
+      <div className="ktree overflow-auto min-h-0 flex-auto py-1 outline-none" id="netnav" tabIndex={-1} onKeyDown={escClears} onContextMenu={(ev) => navMenu(ev, null)}>
         {root ? row(root, 0) : null}
       </div>
       <ContextMenu at={menu} onClose={() => setMenu(null)} />
