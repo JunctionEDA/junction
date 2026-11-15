@@ -18,6 +18,7 @@ import { unescapeString } from "../../dialogs/sch-items-logic";
 import { chooseFootprint, noFileBrowsing, openDatasheet } from "../../dialogs/browse-cells";
 import { chooserFilters, datasheetLink, type FpChooserFilters } from "../../library/fpchoice";
 import { toast } from "../util";
+import { colorText, parseColorText } from "../../components/panes/prop-text";
 
 type Raw = string | number | boolean | null;
 interface PropDef {
@@ -101,8 +102,9 @@ function strokeProps(group: string, styleName: string, withColor: boolean): Prop
     { group, name: "Line Width", type: "length", get: (it) => H().strokeWidth(it.node), set: (n, v) => { H().setStrokeWidth(n, Math.max(0, v as number)); } },
   ];
   if (withColor) out.push({ group, name: "Color", type: "color",
-    get: (it) => { const s = strokeOf(it.node), c = s && H().kid(s, "color"); if (!c || (!H().num(c[4]) && !H().num(c[1]) && !H().num(c[2]) && !H().num(c[3]))) return ""; return "#" + [1, 2, 3].map((i) => Math.round(H().num(c[i])).toString(16).padStart(2, "0")).join(""); },
-    set: (n, v) => { let s = strokeOf(n); if (!s) s = H().setKid(n, "stroke", [["width", 0], ["type", "default"]], ["fill", "uuid", "tstamp"]); const m = /^#([0-9a-f]{6})$/i.exec(String(v || "")); const x = m ? parseInt(m[1], 16) : 0; H().setKid(s, "color", m ? [x >> 16, (x >> 8) & 255, x & 255, 1] : [0, 0, 0, 0]); } });
+    // PGPROPERTY_COLOR4D: the colour with its alpha ("#rrggbb" when opaque, else "rgba(r,g,b,a)"); "" is UNSPECIFIED
+    get: (it) => { const s = strokeOf(it.node), c = s && H().kid(s, "color"); if (!c || (!H().num(c[4]) && !H().num(c[1]) && !H().num(c[2]) && !H().num(c[3]))) return ""; return colorText([1, 2, 3].map((i) => H().num(c[i])), c.length > 4 ? H().num(c[4]) : 1); },
+    set: (n, v) => { let s = strokeOf(n); if (!s) s = H().setKid(n, "stroke", [["width", 0], ["type", "default"]], ["fill", "uuid", "tstamp"]); const c = parseColorText(String(v || "")); H().setKid(s, "color", c || [0, 0, 0, 0]); } });
   return out;
 }
 function fontOf(n: SNode, create: boolean): SNode | null {
@@ -898,7 +900,7 @@ function parse(def: PropDef, text: string): { v: Raw } | string {
     case "int": { const v = H().evalExpr(t, ""); if (Number.isNaN(v)) return "Not a valid number"; return { v: Math.round(v) }; }
     case "bool": return { v: t === "1" || t === "true" };
     case "enum": if (def.choices && !def.choices.some((c) => c[0] === t)) return "Not one of the choices"; return { v: t };
-    case "color": if (t && !/^#[0-9a-f]{6}$/i.test(t)) return "Not a colour"; return { v: t };
+    case "color": if (t && !parseColorText(t)) return "Not a colour"; return { v: t };
     default: return { v: t };
   }
 }

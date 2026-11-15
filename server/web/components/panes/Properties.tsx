@@ -13,7 +13,7 @@ import { useApp } from "../../store";
 import { cx } from "../../util";
 import { rowValueText } from "./prop-text";
 import { KIcon } from "../Icon";
-import { ContextMenu, panels, useContextMenu, usePanels, type MenuItem } from "./widgets";
+import { ContextMenu, Swatch, panels, pickColor, useContextMenu, usePanels, type MenuItem } from "./widgets";
 
 const MIXED = "<...>";
 const CELL = "w-full h-full min-w-0 m-0 px-1 py-0 border-0 outline-none bg-transparent text-ink text-sm font-sans focus:bg-canvas focus:shadow-[inset_0_0_0_1px_var(--color-blue)]";
@@ -79,6 +79,25 @@ function Editor({ row, onDone }: { row: PropRow; onDone: () => void }) {
         else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); releaseKeyboard(ev.currentTarget); }
         else ev.stopPropagation();
       }} /></span>;
+  }
+  if (row.type === "color") {
+    // PG_COLOR_EDITOR: a SWATCH_LARGE COLOR_SWATCH filling the cell (the checkerboard when unspecified); a click
+    // opens DIALOG_COLOR_PICKER with the opacity slider and the property's default (unspecified: Clear Color)
+    const open = (el: HTMLElement) => { if (row.readOnly) return; pickColor({ color: row.mixed ? null : row.value || null, def: null, set: (c) => { if (commit(c || "")) el.focus(); } }); };
+    return (
+      <button type="button" className={cx(CELL, "flex items-center px-1 cursor-default")} data-prop={row.id} data-prop-color={row.mixed ? "mixed" : row.value || "none"} disabled={row.readOnly}
+        title={row.mixed ? MIXED : row.value || "Unspecified"} onClick={(ev) => open(ev.currentTarget)}
+        onKeyDown={(ev) => {
+          if (copyRow(ev, row)) return;
+          const nav = navOf(ev);
+          if (nav && ev.key !== "Enter") { ev.preventDefault(); ev.stopPropagation(); moveFrom(ev.currentTarget, nav); }
+          else if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); open(ev.currentTarget); }
+          else if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); releaseKeyboard(ev.currentTarget); }
+          else ev.stopPropagation();
+        }}>
+        {row.mixed ? <span className="text-ink-3">{MIXED}</span> : <span className="flex w-full h-[13px] [&>.sw]:w-full [&>.sw]:h-full"><Swatch color={row.value || null} /></span>}
+      </button>
+    );
   }
   if (row.type === "enum" && row.choices) {
     return (

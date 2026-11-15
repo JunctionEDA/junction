@@ -9,6 +9,7 @@ function load(file) {
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
 const S = load("editor/panels/search-model.ts");
+const PT = load("components/panes/prop-text.ts");
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + (e.stack || e).toString().split("\n").slice(0, 4).join("\n       ")); } }
 console.log("docked panes under node");
@@ -48,6 +49,15 @@ test("sortRows sorts by a column either way, stable, first column when none", ()
 });
 test("rowsAsText: tab-separated cells, a newline after each row", () => {
   assert.strictEqual(S.rowsAsText([{ cells: ["R1", "10k", "F.Cu"] }, { cells: ["R2", "", "B.Cu"] }]), "R1\t10k\tF.Cu\nR2\t\tB.Cu\n");
+});
+
+test("Properties colour cells keep the alpha (PGPROPERTY_COLOR4D)", () => {
+  assert.strictEqual(PT.colorText([255, 0, 0], 1), "#ff0000");
+  assert.strictEqual(PT.colorText([255, 0, 0], 0.5), "rgba(255,0,0,0.5)");
+  assert.deepStrictEqual(PT.parseColorText("#FF000080"), [255, 0, 0, 0.502]);
+  assert.deepStrictEqual(PT.parseColorText("rgba(10, 20, 30, 0.25)"), [10, 20, 30, 0.25]);
+  assert.deepStrictEqual(PT.parseColorText("#00ff00"), [0, 255, 0, 1]);
+  assert.strictEqual(PT.parseColorText("red"), null);
 });
 
 console.log(`${passed} passed, ${failed} failed`);
