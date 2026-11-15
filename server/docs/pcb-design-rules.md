@@ -311,8 +311,9 @@ fabricator does not offer on that kind of board.
 ## Workshop practice (Phil's Lab)
 
 Source: the board walk-throughs and PCB routing videos of Phil's Lab (Philip Salmony, youtube.com/@PhilsLab), read
-as transcripts in 2026-11 and distilled here in our own words. Twenty-one videos were read; the channel has about
-forty more board walk-throughs that were not, because the same rules repeat in each. Read:
+as transcripts in 2026-11 and distilled here in our own words. Twenty videos were read in full (first table). The
+other forty board walk-throughs, design reviews and layout topics (second table) were skimmed: only the sentences
+of their layout chapters that state a rule were read, to find what the first twenty had not already said.
 
 | # | Video | Link |
 |---|---|---|
@@ -337,6 +338,31 @@ forty more board walk-throughs that were not, because the same rules repeat in e
 | 166 | KiCad 9 Hardware Design Tutorial, part 2 (PCB) | youtu.be/igQWdVGZGpI |
 | 128 | KiCad 7 STM32 Bluetooth Hardware Design, part 2 (PCB) | youtu.be/PlXd3lLZ4vc |
 
+Skimmed for rules not already covered:
+
+| # | Video | # | Video |
+|---|---|---|---|
+| 174 | USB 3.1 to Gigabit Ethernet Adapter Hardware Design | 143 | Gigabit Ethernet Hardware Design |
+| 115 | Interfacing FPGAs with DDR Memory | 107 | M.2 System-on-Module Hardware Design |
+| 104 | USB-C Power Delivery Hardware Design | 101 | USB Headphone Amplifier Design Walkthrough |
+| 90 | ESP32 + PCB Antenna Hardware Design Tutorial | 86 | USB Hub Design Walkthrough |
+| 85 | FPGA PCB Design Review | 81 | Design Review (Buck + STM32 + Peripherals) |
+| 78 | Mini 6-Layer Mixed-Signal Hardware Design Walkthrough | 76 | RF + MCU PCB Design Review |
+| 70 | Design Review, Schematic and PCB | 66 | ESC Hardware Design |
+| 65 | KiCad 6 STM32 PCB Design Full Tutorial | 63 | Design Review (Spartan 7 FPGA) |
+| 57 | Audio Processor Prototype Hardware Design | 45 | Mixed-Signal Hardware Design Overview |
+| 41 | STM32 PCB Design, Complete Walkthrough | 36 | KiCad Breakout Board Design (STM32 + Sensor) |
+| 35 | How To Design a Breakout Board | 28 | Raspberry Pi RP2040 Hardware Design |
+| 1 | Flight Control System Design: Hardware and PCB Design with KiCad | 125 | Class D Audio Amplifier Hardware Design |
+| 110 | High-Speed PCB Delay Matching Explained | 139 | PCB Chip Antenna Hardware Design |
+| 106 | Boost Converter PCB Design | 170 | PCB Design Rules 101 |
+| 171 | PCB Controlled Impedance | 56 | PCB Stack-Up and Build-Up |
+| 93 | Thermal PCB Design Tips | 161 | PCB Power Distribution Networks (PDN) Basics and Measurements |
+| 132 | I2C Hardware and PCB Design | 69 | PCB and Schematic Tip: Net Ties |
+| 40 | PCB Design for Manufacturing Tips (DFM) | 158 | PCB Design for Manufacturing (DFM) Q&A with Sierra Circuits |
+| 133 | PCB Silkscreen and Solder Mask 101 | 121 | Series Termination Basics |
+| 119 | Parallel Termination Basics | 155 | Series Termination Resistor Selection |
+
 Most of what the videos teach was already in the harness from the references above (unbroken ground and never a
 split, return vias, pairs, crystals, converter loops, ESD first at the connector, fences at a twentieth of a
 wavelength, thermal pad vias, stitching, fiducials, silkscreen). What they added:
@@ -354,6 +380,10 @@ wavelength, thermal pad vias, stitching, fiducials, silkscreen). What they added
   next pin.
 - `power.return`: a supply via has a ground via within 2.5 mm (a note, not a warning).
 - `planes.signals`: no signal on an inner ground plane layer.
+- `bus.transitions` (from the skim, #110): the lines of one bus use the same layers and the same number of vias, so
+  that only track length has to be matched; a via's delay is hard to know. Match by delay, not by length, when a
+  bus runs on both outer and inner layers (`kh.calc.interface(...)` gives the skew).
+- `vias.aspect` (#40): board thickness over drill is at most ten.
 
 **Applied** by `board.design()` (`harness/kicad_harness/craft.py`), which runs the whole order of work in one call:
 plan, stackup, placement, ground on both outer layers and on both inner layers of a four-layer board (signal,
@@ -361,13 +391,25 @@ ground, ground, signal), antenna keep-outs, routing with the plan's order, a sec
 `finish()`, `cleanup()`, `silkscreen()`, the DRC and a one-line-per-finding review (`board.brief()`).
 
 **Manual** (printed in the review's checklist): place and route in order of criticality with supplies and the pour
-last; read the Gerbers layer by layer; compare hand-made footprints with the datasheet.
+last; read the Gerbers layer by layer; compare hand-made footprints with the datasheet; a series termination
+resistor at the driver (the track's impedance less the driver's output impedance, #121 and #155) and a parallel one
+at the end of the line after the last load (#119); a current-sense resistor measured four-wire from the inside of
+its pads (#104); a ground pin beside every signal pin of a header that carries fast signals (#63); I2C lines not
+routed as a pair, and a bus with several devices run through them in a chain rather than a star (#132).
+
+**Also from the skim, already the harness's way or the fabricator's rule:** set the stackup and the design rules
+before anything is routed (#170: `board.stackup()` first); every signal layer of a six-layer or larger board next
+to a ground plane (#56, `stackup.reference`); thermal vias no larger than a 0.3 mm drill, spread over the pad and
+landing on a plane (#93, `thermal.pad`); the linear regulator's loss checked (#93, `regulator.heat`); the RF
+matching parts in line with the feed, no stubs (#90, #139, `rf.feed`); pours with 45 degree corners and no
+overlapping pieces of one net (#85); silkscreen 0.3 mm or more from the board edge and off holes (#133).
 
 **Where the owner's rules differ, the owner's rules hold:**
 
 | Subject | Phil's Lab | This project |
 |---|---|---|
-| Default via | 0.7 mm pad, 0.3 mm drill | 0.4 mm pad, 0.25 mm drill |
+| Default via | 0.7 mm pad, 0.3 mm drill, an annular ring of 0.15 mm or more (#70, #40) | 0.4 mm pad, 0.25 mm drill: a 0.075 mm ring, which the fabricator's multilayer process makes but is its limit |
+| A ground via beside a pad | kept a little away from the pad so solder is not drawn off (#76, #57) | vias are tented and sit close; no via in a small part's pad (`dfm.via_in_pad`) |
 | Fan-out of a fine-pitch part | spread out, room between vias | tight and orderly, grouped (and `vias.slot` asks only for the plane sliver between them) |
 | Decoupling on the back under the chip | common | all parts on the top side unless two sides cannot be avoided |
 | Silkscreen text | 1 mm or more | 0.5 mm references allowed on dense boards |

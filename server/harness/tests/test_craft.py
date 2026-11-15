@@ -70,6 +70,26 @@ class Craft(Boards):
         self.assertIn("In1.Cu: 20 mm", got)
         self.assertNotIn("In2.Cu", got)
 
+    def test_bus_lines_with_unequal_vias(self):
+        def board(extra):
+            items = [part("U1", (5, 10), [(str(i + 1), 0, i * 2, 0.6, 0.6, f"QSPI_SD{i}") for i in range(4)]), part("U2", (30, 10), [(str(i + 1), 0, i * 2, 0.6, 0.6, f"QSPI_SD{i}") for i in range(4)])]
+            for i in range(4):
+                y = 10 + i * 2
+                if i == 2 and extra:
+                    items += [track(f"QSPI_SD{i}", [(5, y), (12, y)]), via(f"QSPI_SD{i}", (12, y)), track(f"QSPI_SD{i}", [(12, y), (22, y)], layer="B.Cu"), via(f"QSPI_SD{i}", (22, y)), track(f"QSPI_SD{i}", [(22, y), (30, y)])]
+                else:
+                    items.append(track(f"QSPI_SD{i}", [(5, y), (30, y)]))
+            return self.open(*GROUND, *items)
+        self.assertIn("QSPI_SD2 2", self.finding(board(True).review(), "bus.transitions"))
+        self.assertNotIn("bus.transitions", self.failed(board(False).review()))
+
+    def test_via_too_deep_for_its_drill(self):
+        thin = '(via (at 20 15) (size 0.3) (drill 0.1) (layers "F.Cu" "B.Cu") (net "SIG") (uuid "v-thin"))'
+        b = self.open(*GROUND, part("J1", (5, 15), [("1", 0, 0, 0.6, 0.6, "SIG")]), track("SIG", [(5, 15), (20, 15)]), thin, via("SIG", (10, 15)))
+        got = self.finding(b.review(), "vias.aspect")
+        self.assertIn("1 via with a 0.1 mm drill", got)
+        self.assertNotIn("0.3 mm drill", got)
+
     def test_short_finding(self):
         row = "warning vias.slot: These vias stand close. Leave 0.55 mm between them. [8 vias from (1, 2) to (3, 4): a 5 mm slot; b; c]"
         self.assertEqual(craft._short(row, items=2), "warning vias.slot: These vias stand close. [8 vias from (1, 2) to (3, 4): a 5 mm slot; b; and 1 more]")

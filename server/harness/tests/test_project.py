@@ -44,6 +44,7 @@ class Blinker(unittest.TestCase):
         d1 = sch.attach("U1.OUT", "Device:LED", footprint="LED_SMD:LED_0603_1608Metric", part_pin="2")
         sch.attach(f"{d1}.1", "Device:R", value="330", footprint="Resistor_SMD:R_0402_1005Metric", to="GND")
         sch.no_connect("U1.CONT")
+        sch.power_flags()      # +5V and GND come from off the sheet: the ERC wants a PWR_FLAG on a supply nothing drives
         self.assertEqual(sorted(sch.refs()), ["C1", "D1", "R1", "R2", "R3", "U1"])
         self.assertEqual(sch.unconnected(), [])
         self.assertEqual(sch.check()["errors"], 0)

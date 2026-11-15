@@ -105300,8 +105300,10 @@ var CRAFT_LIMITS = {
   // a bypass capacitor serves a supply pin this close
   pinVia: 1.2,
   // a supply via this close to the pin feeds the pin first
-  pairVia: 2.5
+  pairVia: 2.5,
   // a supply via has a ground via within this
+  aspect: 10
+  // board thickness over drill: deeper holes plate badly and cost more
 };
 var CRAFT_RULES = [
   { id: "tracks.minimum", what: "Signal tracks are wider than the fabricator's minimum wherever there is room: 0.2 to 0.3 mm, necked down only at fine-pitch pads" },
@@ -105310,12 +105312,17 @@ var CRAFT_RULES = [
   { id: "bypass.order", what: "A supply reaches the chip's pin through its bypass capacitor: via, capacitor, pin" },
   { id: "pads.entry", what: "A track leaves a fine-pitch pad through the pad's end, in line with it" },
   { id: "power.return", what: "A supply via has a ground via beside it, so the loop through the planes is small" },
-  { id: "planes.signals", what: "No signal is routed on a ground plane layer" }
+  { id: "planes.signals", what: "No signal is routed on a ground plane layer" },
+  { id: "bus.transitions", what: "The lines of one bus use the same layers and the same number of vias, so only their track lengths need matching" },
+  { id: "vias.aspect", what: "A via's drill is at least a tenth of the board's thickness" }
 ];
 var CRAFT_MANUAL = [
   "Parts were placed in order of how critical they are (decoupling, crystal, converter, RF, connectors, then the rest), and routed in the same order with supplies and the ground pour last.",
   "The Gerbers were read layer by layer before ordering: slivers, voids in the planes, thermal reliefs, silkscreen over pads.",
-  "Every footprint that is not from a checked library was compared with the datasheet's land pattern."
+  "Every footprint that is not from a checked library was compared with the datasheet's land pattern.",
+  "A series termination resistor sits at the driver (its value is the track's impedance less the driver's output impedance); a parallel one sits at the end of the line, after the last load, on a stub of a few millimetres.",
+  "A current-sense resistor is measured four-wire: the two sense tracks leave from the inside of its pads as a pair, apart from the tracks that carry the current.",
+  "A header that carries fast signals has a ground pin beside every signal pin; I2C lines are not routed as a pair, and a bus with several devices runs through them in a chain, not as a star of stubs."
 ];
 var CRAFT_SOURCE = "Layout practice: Phil's Lab (Philip Salmony), board walk-through and PCB routing videos, listed by title in server/docs/pcb-design-rules.md.";
 var GROUND3 = /^(?:[ADP]?GND\w*|GNDREF|VSS\w*|EARTH|0V)$/i;
@@ -105543,6 +105550,40 @@ function reviewCraft(doc, P, k, settings, add) {
       if (d > CRAFT_LIMITS.pairVia) lone.push(`${bare2(v.net)} at ${at2(v.shape.x, v.shape.y)}${isFinite(d) ? `: nearest ground via ${r24(d)} mm` : ""}`);
     }
     if (lone.length) add("power.return", "note", `A supply via works as a pair with a ground via: the current goes down one and comes back up the other, and the area between them is inductance in the supply. Put a ground via within ${CRAFT_LIMITS.pairVia} mm of each (board.via("GND", at); board.finish() stitches the pours but does not aim at supply vias).`, few2(lone));
+  }
+  {
+    const BUS = /(DQ|DATA|ADDR|SDIO\w*|SD_?D(AT)?|QSPI\w*|RGMII\w*|[RT]XD|LCD\w*|DCMI\w*|CAM\w*|FMC\w*|^BA|^A|^D)_?$/i;
+    const groups = /* @__PURE__ */ new Map();
+    for (const n2 of nets) {
+      const m = /^(.*?)(\d+)$/.exec(bare2(n2));
+      if (!m || !BUS.test(m[1]) || isGnd2(n2) || kindOf(n2) === "supply") continue;
+      const e = groups.get(m[1]) || [];
+      groups.set(m[1], e);
+      e.push(n2);
+    }
+    const count = /* @__PURE__ */ new Map();
+    for (const v of vias) if (v.net) count.set(v.net, (count.get(v.net) || 0) + 1);
+    const routed = new Set(tracks.map((t) => t.net));
+    const items = [];
+    for (const [stem, g2] of groups) {
+      const r = g2.filter((n2) => routed.has(n2));
+      if (r.length < 4) continue;
+      const c = r.map((n2) => count.get(n2) || 0);
+      const lo = Math.min(...c), hi = Math.max(...c);
+      if (lo === hi) continue;
+      const odd = r.filter((n2) => (count.get(n2) || 0) !== lo).sort();
+      items.push(`${stem}: most lines have ${lo} via${lo === 1 ? "" : "s"}; ${few2(odd.map((n2) => `${bare2(n2)} ${count.get(n2)}`), 6).join(", ")}`);
+    }
+    if (items.length) add("bus.transitions", "warning", "The lines of one bus should take the same route through the board: the same layers and the same number of vias. A via's delay is hard to know, so lines that differ in vias cannot be matched by track length alone, and each via is one more step for the edge to reflect from. Route the whole group on one layer where it fits (board.route(max_vias=0, nets=[...]) for the group after board.unroute), or give every line the same layer change.", items);
+  }
+  {
+    const thick = Number(doc.thickness) || 0;
+    const deep = /* @__PURE__ */ new Map();
+    if (thick > 0) for (const v of vias) {
+      const d = Number(v.drill) || 0;
+      if (d > 0 && thick / d > CRAFT_LIMITS.aspect + 1e-6) deep.set(d, (deep.get(d) || 0) + 1);
+    }
+    if (deep.size) add("vias.aspect", "warning", `These vias are drilled through a ${r24(thick)} mm board with a hole less than a tenth of that: the plating thins out in the middle of so deep a hole and the fabricator charges for the small drill. Use a drill of ${r24(Math.ceil(thick / CRAFT_LIMITS.aspect * 20) / 20)} mm or more (board.rules(via_drill=...)), or a thinner board.`, Array.from(deep.entries()).map(([d, n2]) => `${n2} via${n2 > 1 ? "s" : ""} with a ${d} mm drill`));
   }
   {
     const items = [];
