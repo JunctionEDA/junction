@@ -25,6 +25,9 @@ EXTRA_ICONS = {"import", "export_file", "fabrication", "language", "add_zone", "
                "special_tools", "align_items", "convert", "unit_mm", "checked_ok", "right", "text_align_left", "icon_kicad", "hotkeys", "about",
                # the Footprint Wizard frame's toolbar (editor/fpwizard.ts)
                "module_wizard", "reload", "refresh", "zoom_in", "zoom_out", "zoom_fit_in_page", "export_footprint_names",
+               # Assign Footprints' toolbar (cvpcb/toolbars_cvpcb.cpp, dialogs/assign-footprints.ts)
+               "module_filtered_list", "module_pin_filtered_list", "module_library_list", "delete_association", "show_footprint",
+               "auto_associate", "left", "save", "undo", "redo", "library_table",
                # the Net Inspector pane's configure button (pcbnew/widgets/net_inspector_panel.cpp)
                "config",
                # Clarify Selection rows: the item icons of BOARD_ITEM::GetMenuImage with no action of their own

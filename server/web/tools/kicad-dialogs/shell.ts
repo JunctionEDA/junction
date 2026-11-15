@@ -54,6 +54,7 @@ if (typeof document !== "undefined") document.addEventListener("keydown", (ev) =
   if (!cur || ev.key !== "Escape" || ev.defaultPrevented) return;
   const t = ev.target as Element | null;
   if (t && t.closest && t.closest(".kd-overlay, .kd-font-pop, #ctxMenu, [role='menu'], [data-popup-open]")) return;   // the overlay's own handler, a prompt on top, or an open menu
+  if (document.querySelector(".kd-pop")) return;   // a menu popped up by the dialog is open: Escape closes the menu (its own handler), not the dialog
   ev.preventDefault(); ev.stopPropagation(); cur.finish(false);
 }, true);
 // ---------------------------------------------------------------- DIALOG_SHIM's window geometry

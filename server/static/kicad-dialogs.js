@@ -1252,6 +1252,7 @@
     if (!cur || ev.key !== "Escape" || ev.defaultPrevented) return;
     const t = ev.target;
     if (t && t.closest && t.closest(".kd-overlay, .kd-font-pop, #ctxMenu, [role='menu'], [data-popup-open]")) return;
+    if (document.querySelector(".kd-pop")) return;
     ev.preventDefault();
     ev.stopPropagation();
     cur.finish(false);

@@ -78,6 +78,8 @@ const CSS = `
 .klib-head { display: grid; grid-template-columns: var(--klib-col, 46%) 1fr; border: 1px solid var(--line); border-bottom: 0; background: var(--panel-2); font-weight: 600; color: var(--ink-2); }
 .klib-head span { padding: 3px 8px; border-right: 1px solid var(--line); white-space: nowrap; overflow: hidden; }
 .klib-head span:last-child { border-right: 0; }
+.klib-head span:first-child { position: relative; }
+.klib-colgrip { position: absolute; top: 0; bottom: 0; right: -3px; width: 7px; cursor: col-resize; z-index: 1; }
 .klib-tree { flex: 1; min-height: 80px; overflow: auto; border: 1px solid var(--line); background: var(--panel); outline: 0; position: relative; }
 .klib-rows { position: relative; }
 .klib-row { position: absolute; left: 0; right: 0; height: ${ROW_H}px; line-height: ${ROW_H}px; display: grid; grid-template-columns: var(--klib-col, 46%) 1fr; cursor: default; white-space: nowrap; user-select: none; }
@@ -279,12 +281,19 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
       status.textContent = tableError ? tableError : pending > 0 ? `Loading libraries… ${pending} to go` : searching ? "Searching vendor catalogues…" : "";
     }
     let refreshTimer = 0;
-    let preselect = opts.preselect && opts.preselect.includes(":") ? opts.preselect : "";
+    let preselect = opts.preselect && opts.preselect.includes(":") ? opts.preselect : "", tablesIn = false;
     /** SetPreselect: once the library holding the item is in, open it and select the item */
     function applyPreselect(): void {
       if (!preselect || query) return;
       const lib = preselect.slice(0, preselect.indexOf(":"));
-      const g = groups.find((x) => x.type === "lib" && x.label === lib); if (!g) return;
+      let g = groups.find((x) => x.type === "lib" && x.label === lib);
+      if (!g) {
+        // A footprint a vendor part brought (LCSC:<package>): its nickname is in no library table, but the server
+        // resolves the id, so the tree gets that one library with the footprint in it and opens on it.
+        if (isSym || !tablesIn) return;
+        g = { key: "lib:" + lib, label: lib, description: "Footprints of vendor parts", type: "lib", items: [{ id: preselect, name: preselect.slice(lib.length + 1), library: lib, source: "official" }], loading: false, error: "" };
+        groups.push(g);
+      }
       if (!g.items) {
         // a library that failed to load is not asked for again here (loadGroup's own retries, when the server asked
         // for one, still run, and the item is selected if one of them brings the library in); once none is left the
@@ -339,7 +348,7 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
       }
       const it = row.item;
       renderDetails(it, row.unit, null);
-      clearPreview(mainCanvas, kind);
+      clearPreview(mainCanvas, kind); blankFp();
       mainMsg.innerHTML = `<span class="klib-spin"></span>${esc(it.source ? `Fetching ${it.name} from ${row.group.label.replace(/\s*\(.*$/, "")}…` : "Loading…")}`;
       fetchItem(kind, it, ctx).then((got) => {
         if (closed || token !== previewToken) return;
@@ -350,10 +359,12 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
         } catch (e) { clearPreview(mainCanvas, kind); mainMsg.textContent = "Cannot draw this " + kind + ": " + ((e as Error).message || e); }
       }, (e: Error) => { if (closed || token !== previewToken) return; clearPreview(mainCanvas, kind); mainMsg.textContent = e.message || String(e); });
     }
-    function blank(): void {
-      clearPreview(mainCanvas, kind); mainMsg.textContent = "";
+    /** The default-footprint pane belongs to the symbol shown above it: it empties as soon as another row is picked,
+     *  so a symbol that is still loading (or cannot be fetched) never sits over the previous symbol's footprint. */
+    function blankFp(): void {
       if (fpCanvas && fpMsg && fpSelect) { clearPreview(fpCanvas, "footprint"); fpMsg.textContent = ""; fpSelect.innerHTML = "<option>No default footprint</option>"; }
     }
+    function blank(): void { clearPreview(mainCanvas, kind); mainMsg.textContent = ""; blankFp(); }
     function renderDetails(it: LibItem, unit: number | undefined, got: FetchedItem | null): void {
       const rowsHtml: string[] = [];
       const add = (k: string, v: string, html?: boolean) => { if (v) rowsHtml.push(`<tr><td>${esc(k)}</td><td>${html ? v : esc(v)}</td></tr>`); };
@@ -420,12 +431,12 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
       if (closed) return;
       const taken = new Set(project.map((g) => g.label));
       const official = t.libraries.filter((l) => !taken.has(l.name)).map((l): Group => ({ key: "lib:" + l.name, label: l.name, description: l.description, type: "lib", entry: l, items: null, loading: false, error: "" }));
-      groups.push(...official);
+      groups.push(...official); tablesIn = true;
       refresh();
       // the power tool wants its library first; everything else follows in table order
       const order = power ? official.filter((g) => g.label === "power").concat(official.filter((g) => g.label !== "power")) : official;
       preload(project.concat(order));
-    }, (e: Error) => { if (closed) return; tableError = "KiCad libraries unavailable: " + (e.message || e); preload(project); refresh(); });
+    }, (e: Error) => { if (closed) return; tableError = "KiCad libraries unavailable: " + (e.message || e); tablesIn = true; preload(project); refresh(); });
 
     let sourceTimer = 0, sourceToken = 0;
     function searchSources(): void {
@@ -549,6 +560,21 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
       mainEl.style.gridTemplateColumns = `${left}px 5px minmax(240px, 1fr)`;
     });
     split.addEventListener("pointerup", () => { splitting = false; });
+    // The Item column (LIB_TREE's wxDataViewCtrl column): dragged at its right edge, double-clicked to fit the longest
+    // name in view, and kept per kind (m_colWidths).  Footprint names are long, so their column starts wider.
+    const leftEl = $<HTMLElement>(".klib-left"), headItem = $<HTMLElement>(".klib-head span"), colKey = "kui.chooser.col." + kind;
+    const setCol = (px: number, keep = true): void => {
+      const w = Math.round(Math.max(120, Math.min((leftEl.clientWidth || 600) - 80, px)));
+      leftEl.style.setProperty("--klib-col", w + "px"); if (keep) { try { localStorage.setItem(colKey, String(w)); } catch { /* private mode */ } }
+    };
+    let savedCol = 0; try { savedCol = Number(localStorage.getItem(colKey)) || 0; } catch { savedCol = 0; }
+    if (savedCol > 0) setCol(savedCol, false); else if (!isSym) leftEl.style.setProperty("--klib-col", "60%");
+    const grip = document.createElement("i"); grip.className = "klib-colgrip"; grip.title = "Drag to resize the column; double-click to fit"; headItem.appendChild(grip);
+    let colDrag = false;
+    grip.addEventListener("pointerdown", (ev) => { colDrag = true; grip.setPointerCapture(ev.pointerId); ev.preventDefault(); ev.stopPropagation(); });
+    grip.addEventListener("pointermove", (ev) => { if (colDrag) setCol(ev.clientX - leftEl.getBoundingClientRect().left); });
+    grip.addEventListener("pointerup", () => { colDrag = false; });
+    grip.addEventListener("dblclick", () => { let w = 0; for (const el of Array.from(rowsEl.querySelectorAll<HTMLElement>(".klib-item"))) w = Math.max(w, el.scrollWidth); if (w) setCol(w + 12); });
     let redraw = 0;
     const ro = new ResizeObserver(() => { queueDraw(); window.clearTimeout(redraw); redraw = window.setTimeout(() => { if (!closed) showSelection(); }, 120); });
     ro.observe(tree); ro.observe(mainCanvas);

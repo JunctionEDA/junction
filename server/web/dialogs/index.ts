@@ -20,6 +20,7 @@ import { installGroups } from "./groups";
 import * as logic from "./logic";
 import { commitPageSettings, openPageSettings } from "./page-settings";
 import { openPreferences } from "./preferences";
+import { openConfigurePaths, openLibTable } from "./lib-tables";
 import { GRID_PAGE, applyPcbToolPrefs, applyPrefs, defaultGrid, editorId, fastGrid, gridLabel, prefs, rememberGrid, toggleGridOverrides } from "./prefs";
 import { obj, onProjectChanged, projectJson, readDoc, saveProject, submitDocOp } from "./project";
 import { openSchematicSetup, schRenderSettings } from "./schematic-setup";
@@ -106,6 +107,10 @@ export function installDialogs(HANDLERS: Record<string, Handler>): void {
     updateSymbols: needDoc(() => openChangeSymbols("update"), true), updateSymbol: needDoc(() => openChangeSymbols("update"), true),
     toggleGridOverrides: (() => { const on = toggleGridOverrides(); toast(on ? "Grid overrides on" : "Grid overrides off"); }) as Handler,
     openPreferences: (() => openPreferences()) as Handler,
+    // Preferences > Configure Paths… / Manage Symbol Libraries… / Manage Footprint Libraries… (dialogs/lib-tables.ts)
+    configurePaths: (() => openConfigurePaths()) as Handler,
+    showSymbolLibTable: (() => { void openLibTable("symbol"); }) as Handler,
+    showFootprintLibTable: (() => { void openLibTable("footprint"); }) as Handler,
     // ACTIONS::gridProperties ("Edit Grids..."): COMMON_TOOLS::GridProperties opens Preferences on the editor's Grids page
     gridProperties: (() => openPreferences(GRID_PAGE[editorId()])) as Handler,
     gridFast1: (() => { fastGrid(1); }) as Handler, gridFast2: (() => { fastGrid(2); }) as Handler, gridFastCycle: (() => { fastGrid("cycle"); }) as Handler,

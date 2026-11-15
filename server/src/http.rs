@@ -34,6 +34,8 @@ pub(crate) fn allowed_file(name: &str) -> bool {
             | "kicad_dru" | "kicad_wks" | "step" | "stp" | "wrl" | "wrz"
             // SPICE / IBIS simulation model libraries (DIALOG_SIM_MODEL's "Browse Models" filter)
             | "lib" | "sub" | "cir" | "mod" | "spice" | "ibs"
+            // footprint association files (CvPcb's Automatically Assign Footprints)
+            | "equ"
     )
 }
 
