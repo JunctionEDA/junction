@@ -88,13 +88,26 @@ jobs:
           root=$(dirname "$here")
           export LD_LIBRARY_PATH="$root/lib/kicad-collab:$root/lib/x86_64-linux-gnu:$root/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
           export KICAD_STOCK_DATA_HOME="${KICAD_STOCK_DATA_HOME:-$root/share/kicad}"
-          tool=kicad
+          tool=Junction
           case "$1" in
             eeschema|pcbnew|gerbview|pl_editor|pcb_calculator|bitmap2component|kicad-cli) tool=$1; shift ;;
           esac
           exec "$here/$tool" "$@"
           EOF
           chmod +x pkgroot/usr/bin/junction
+          # The project manager itself runs under the name Junction (the launcher above is
+          # "junction"), so process lists and system dialogs do not say kicad.  PGM_BASE maps
+          # the name back for settings, so existing settings keep working.
+          mv pkgroot/usr/bin/kicad pkgroot/usr/bin/Junction
+          # Desktop entry and icon under the product's name.
+          d=pkgroot/usr/share/applications/org.kicad.kicad.desktop
+          if [ -f "$d" ]; then
+            sed -i -e 's/^Name=.*/Name=Junction/' -e 's/^Exec=kicad/Exec=junction/' -e 's/^Icon=.*/Icon=junction/' "$d"
+            sed -i '/^Name\[/d' "$d"
+          fi
+          find pkgroot/usr/share/icons -name 'kicad.*' 2>/dev/null | while read -r icon; do
+            cp "$icon" "$(dirname "$icon")/junction.${icon##*.}"
+          done
           # The Ubuntu packages that provide every library the binaries load,
           # so a user can install them in one apt command.
           mkdir -p pkgroot/usr/share/junction

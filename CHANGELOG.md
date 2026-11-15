@@ -11,8 +11,11 @@ version it is based on.
   libraries are found, Junction offers to download the standard KiCad
   libraries (about 60 MB) and uses them at once, without a restart.
   Preferences, Download Standard Libraries does the same later.
-- macOS: the program inside the app is named Junction, so Activity Monitor,
-  Force Quit and system messages say Junction instead of kicad.
+- The project manager program itself is named Junction on every system
+  (Junction inside the Mac app, junction.exe on Windows, Junction on Linux
+  with a Junction desktop entry and icon), so Activity Monitor, Task Manager
+  and system messages say Junction instead of kicad. Settings stay where
+  they were.
 - Changes an assistant proposes through the MCP server now show in the board
   and schematic editors: a bar names the proposal with Show (draws it over the
   design), Details, Accept and Reject, and File, Proposed Changes brings it

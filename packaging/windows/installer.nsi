@@ -26,7 +26,7 @@ SetCompressor /SOLID lzma
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
-!define MUI_FINISHPAGE_RUN "$INSTDIR\bin\kicad.exe"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\bin\junction.exe"
 !insertmacro MUI_PAGE_FINISH
 !insertmacro MUI_UNPAGE_CONFIRM
 !insertmacro MUI_UNPAGE_INSTFILES
@@ -36,19 +36,22 @@ Section "Junction"
   SetOutPath "$INSTDIR"
   File /r "${STAGEDIR}\*.*"
 
+  ; Upgrading from a build whose project manager was kicad.exe.
+  Delete "$INSTDIR\bin\kicad.exe"
+
   WriteRegStr HKLM "Software\KiCad Collaborative" "InstallDir" "$INSTDIR"
   WriteUninstaller "$INSTDIR\uninstall.exe"
 
   ; Register the kicad-collab:// URL scheme (the web "Open in Junction" button) to launch the project manager with the link.
   WriteRegStr HKCR "kicad-collab" "" "URL:Junction Protocol"
   WriteRegStr HKCR "kicad-collab" "URL Protocol" ""
-  WriteRegStr HKCR "kicad-collab\DefaultIcon" "" "$INSTDIR\bin\kicad.exe,0"
-  WriteRegStr HKCR "kicad-collab\shell\open\command" "" '"$INSTDIR\bin\kicad.exe" "%1"'
+  WriteRegStr HKCR "kicad-collab\DefaultIcon" "" "$INSTDIR\bin\junction.exe,0"
+  WriteRegStr HKCR "kicad-collab\shell\open\command" "" '"$INSTDIR\bin\junction.exe" "%1"'
 
   ; Upgrading from the old name: drop its Start Menu folder.
   RMDir /r "$SMPROGRAMS\KiCad Collaborative"
   CreateDirectory "$SMPROGRAMS\Junction"
-  CreateShortcut "$SMPROGRAMS\Junction\Junction.lnk" "$INSTDIR\bin\kicad.exe"
+  CreateShortcut "$SMPROGRAMS\Junction\Junction.lnk" "$INSTDIR\bin\junction.exe"
   CreateShortcut "$SMPROGRAMS\Junction\Uninstall.lnk" "$INSTDIR\uninstall.exe"
 
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\KiCadCollaborative" \
@@ -58,7 +61,7 @@ Section "Junction"
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\KiCadCollaborative" \
       "UninstallString" '"$INSTDIR\uninstall.exe"'
   WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\KiCadCollaborative" \
-      "DisplayIcon" "$INSTDIR\bin\kicad.exe"
+      "DisplayIcon" "$INSTDIR\bin\junction.exe"
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\KiCadCollaborative" \
       "NoModify" 1
   WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\KiCadCollaborative" \

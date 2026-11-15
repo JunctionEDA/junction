@@ -79,6 +79,10 @@ def main():
         sys.exit(f"no app bundle at {src_app} — build the 'kicad' target first")
 
     out_dir = os.path.realpath(args.out_dir)
+    if (out_dir + os.sep).startswith(build_dir + os.sep):
+        # Every library under the build folder is relocated into the bundle; a bundle staged
+        # inside it would have its own Frameworks relocated again and end up with dangling names.
+        sys.exit(f"the output folder must not be inside the build folder ({build_dir})")
     staging = os.path.join(out_dir, "staging")
     app = os.path.join(staging, f"{APP_NAME}.app")
     shutil.rmtree(staging, ignore_errors=True)

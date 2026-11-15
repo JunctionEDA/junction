@@ -107,7 +107,7 @@ jobs:
           $installer = Get-ChildItem -Recurse dl -Filter "Junction-*-windows-x64.exe" | Select-Object -First 1
           Start-Process $installer.FullName -ArgumentList "/S" -Wait
           $bin = "C:\Program Files\Junction\bin"
-          if (-not (Test-Path "$bin\kicad.exe")) { throw "installer did not put kicad.exe in $bin" }
+          if (-not (Test-Path "$bin\junction.exe")) { throw "installer did not put junction.exe in $bin" }
           New-Item -ItemType Directory -Force shots | Out-Null
           Add-Type -AssemblyName System.Windows.Forms, System.Drawing
           function Shot($path) {
@@ -120,7 +120,8 @@ jobs:
           }
           $fail = $false
           foreach ($tool in "kicad", "pcbnew", "eeschema") {
-            $p = Start-Process "$bin\$tool.exe" -PassThru
+            $exe = if ($tool -eq "kicad") { "junction" } else { $tool }   # the project manager is junction.exe
+            $p = Start-Process "$bin\$exe.exe" -PassThru
             Start-Sleep -Seconds 45
             Shot "shots\$tool.png"
             Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object ProcessName, MainWindowTitle | Out-File "shots\$tool-windows.txt"

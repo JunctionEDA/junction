@@ -80,6 +80,8 @@ function desktopLoads(file) {
   try { out = execFileSync(CLI[0], [...CLI.slice(1), ...args], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 300000 }); }
   catch (e) { code = e.status ?? 1; out = String(e.stdout || '') + String(e.stderr || '') + (e.signal ? ` (signal ${e.signal})` : ''); }
   const wrote = fs.readdirSync(tmp).length > 0; fs.rmSync(tmp, { recursive: true, force: true });
+  // A sheet that belongs to a hierarchy is refused by name and read when its root is loaded.
+  if (ext === '.kicad_sch' && /is a hierarchical subsheet/i.test(out)) return '';
   const bad = /Failed to load|Error loading|Expecting|Unable to (load|open|read)|could not be (loaded|read|opened)|IO_ERROR|Parse error|invalid/i.exec(out);
   return code === 0 && wrote && !bad ? '' : `exit ${code}${wrote ? '' : ', nothing written'}: ${out.trim().split('\n').slice(-6).join(' | ')}`;
 }

@@ -252,16 +252,18 @@ endif()
 if( APPLE )
     # The bundle in the build tree is called KiCad.app and has no schema files: run from there
     # it shows as "KiCad" in the Dock and the Plugin and Content Manager reports a missing
-    # schema.  "ninja junction-dev" makes <build>/dev/staging/Junction.app, the same bundle
-    # under its real name and identifier with everything it looks up, without building a DMG.
+    # schema.  "ninja junction-dev" makes <build>-dev/staging/Junction.app (beside the build
+    # folder: the packager relocates every library under the build folder, so its output must
+    # not be inside it), the same bundle under its real name and identifier with everything it
+    # looks up, without building a DMG.
     find_package( Python3 COMPONENTS Interpreter )
 
     if( Python3_Interpreter_FOUND )
         add_custom_target( junction-dev
                 COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/packaging/macos/package_macos.py
-                        ${CMAKE_BINARY_DIR} ${CMAKE_BINARY_DIR}/dev --app-only
+                        ${CMAKE_BINARY_DIR} ${CMAKE_BINARY_DIR}-dev --app-only
                 DEPENDS kicad
-                COMMENT "Making ${CMAKE_BINARY_DIR}/dev/staging/Junction.app"
+                COMMENT "Making ${CMAKE_BINARY_DIR}-dev/staging/Junction.app"
                 VERBATIM )
     endif()
 

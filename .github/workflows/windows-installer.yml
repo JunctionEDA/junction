@@ -103,7 +103,11 @@ jobs:
           key: ccache-windows-${{ github.sha }}
 
       - name: Install to staging
-        run: cmake --install build
+        # The project manager ships as junction.exe, so Task Manager and Windows dialogs say
+        # Junction.  PGM_BASE maps the name back for settings, so existing settings keep working.
+        run: |
+          cmake --install build
+          mv stage/bin/kicad.exe stage/bin/junction.exe
 
       - name: Bundle runtime DLLs
         # Copy every MinGW DLL the shipped binaries import, so the installer
