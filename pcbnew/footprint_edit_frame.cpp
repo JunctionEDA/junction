@@ -1035,12 +1035,22 @@ void FOOTPRINT_EDIT_FRAME::activateFootprintTab( FOOTPRINT_EDITOR_TAB_CONTEXT* a
 }
 
 
+void FOOTPRINT_EDIT_FRAME::recombineEditedPad()
+{
+    PAD_TOOL* padTool = m_toolManager ? m_toolManager->GetTool<PAD_TOOL>() : nullptr;
+
+    if( padTool && padTool->InPadEditMode() )
+        m_toolManager->RunAction( PCB_ACTIONS::recombinePad );
+}
+
+
 void FOOTPRINT_EDIT_FRAME::installFootprintTabBoard( FOOTPRINT_EDITOR_TAB_CONTEXT* aCtx, BOARD* aBoard )
 {
     // Install the successor board and tool environment before the caller frees the outgoing context
     // so no tool Reset() or repaint ever sees a freed or null m_pcb. Never calls the base SetBoard,
     // which would delete m_pcb and reset tools while the model still aliases it.
 
+    recombineEditedPad();
     detachActiveFootprintTab();
 
     // Drop selection and unwind a mid-draw tool while the outgoing board is still valid (#24975).
@@ -2084,7 +2094,8 @@ void FOOTPRINT_EDIT_FRAME::SyncLibraryTree( [[maybe_unused]] bool aProgress )
     FOOTPRINT_LIBRARY_ADAPTER*     footprints = PROJECT_PCB::FootprintLibAdapter( &Prj() );
     FP_TREE_SYNCHRONIZING_ADAPTER* adapter = static_cast<FP_TREE_SYNCHRONIZING_ADAPTER*>( m_adapter.get() );
     LIB_ID                         target = GetTargetFPID();
-    bool                           targetSelected = ( target == GetLibTree()->GetSelectedLibId() );
+    bool                           targetSelected = !target.GetLibNickname().empty()
+                                                    && target == GetLibTree()->GetSelectedLibId();
     std::vector<LIB_ID>            expanded = GetLibTree()->GetExpandedLibraries();
 
     // Unselect before syncing to avoid null reference in the adapter
@@ -2100,6 +2111,10 @@ void FOOTPRINT_EDIT_FRAME::SyncLibraryTree( [[maybe_unused]] bool aProgress )
     // Sync() collapsed the tree, so re-expand the libraries that were open before it.
     for( const LIB_ID& libId : expanded )
         GetLibTree()->ExpandLibId( libId );
+
+    // A filter selects its best match, which tree actions would take for the user's choice
+    if( !targetSelected )
+        GetLibTree()->Unselect();
 
     if( target.IsValid() )
     {
@@ -2274,6 +2289,7 @@ void FOOTPRINT_EDIT_FRAME::setupUIConditions()
 
     // clang-format off
     mgr->SetConditions( ACTIONS::saveAs,                 ENABLE( footprintTargettedCond ) );
+    mgr->SetConditions( ACTIONS::exportForOlderVersion, ENABLE( footprintTargettedCond ) );
     mgr->SetConditions( ACTIONS::revert,                 ENABLE( cond.ContentModified() ) );
     mgr->SetConditions( ACTIONS::save,                   ENABLE( SELECTION_CONDITIONS::ShowAlways ) );
     mgr->SetConditions( PCB_ACTIONS::editLibFpInFpEditor,ENABLE( footprintFromBoardCond ) );

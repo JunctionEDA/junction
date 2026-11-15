@@ -223,6 +223,7 @@ DIALOG_SHIM::~DIALOG_SHIM()
                     {
                         delete PROPERTY_HOLDER::SafeCast( child->GetClientData() );
                         child->SetClientData( nullptr );
+                        clearOptOuts( child->GetChildren() );
                     }
                 };
 
@@ -510,6 +511,7 @@ bool DIALOG_SHIM::Show( bool show )
         ret = wxDialog::Show( show );
 
         wxRect      savedDialogRect;
+        wxSize      savedClientSize;
         std::string key = m_hash_key.empty() ? getDialogKeyFromTitle( GetTitle() ) : m_hash_key;
 
         if( COMMON_SETTINGS* settings = Pgm().GetCommonSettings() )
@@ -525,6 +527,7 @@ bool DIALOG_SHIM::Show( bool show )
                     const nlohmann::json& g = geoIt->second;
                     savedDialogRect.SetPosition( wxPoint( g.value( "x", 0 ), g.value( "y", 0 ) ) );
                     savedDialogRect.SetSize( wxSize( g.value( "w", 500 ), g.value( "h", 300 ) ) );
+                    savedClientSize = wxSize( g.value( "cw", 0 ), g.value( "ch", 0 ) );
                 }
             }
         }
@@ -541,9 +544,22 @@ bool DIALOG_SHIM::Show( bool show )
             }
             else
             {
-                SetSize( savedDialogRect.GetPosition().x, savedDialogRect.GetPosition().y,
-                         std::max( wxDialog::GetSize().x, restoredSize.x ),
-                         std::max( wxDialog::GetSize().y, restoredSize.y ), 0 );
+                // GTK may not know the decorations of a process's first window yet, so a frame size
+                // restored there lands as the client size and the dialog grows on every open
+                if( savedClientSize.x > 0 && savedClientSize.y > 0 )
+                {
+                    Move( savedDialogRect.GetPosition() );
+
+                    wxSize restoredClient = FromDIP( savedClientSize );
+                    SetClientSize( std::max( wxDialog::GetClientSize().x, restoredClient.x ),
+                                   std::max( wxDialog::GetClientSize().y, restoredClient.y ) );
+                }
+                else
+                {
+                    SetSize( savedDialogRect.GetPosition().x, savedDialogRect.GetPosition().y,
+                             std::max( wxDialog::GetSize().x, restoredSize.x ),
+                             std::max( wxDialog::GetSize().y, restoredSize.y ), 0 );
+                }
 
                 // Reset minimum size so the user can resize the dialog smaller than
                 // the saved size. We must clear the current minimum and invalidate
@@ -605,9 +621,15 @@ bool DIALOG_SHIM::Show( bool show )
         // left that list floating over a hidden dialog, to be torn down with it.
         KIUI::DismissComboPopups( this, false );
 
+        // Controls settle on the focus loss that hiding sends, but the restorable position needs a mapped window
+        std::optional<wxPoint> position;
+
+        if( IsShown() )
+            position = KIPLATFORM::UI::GetRestorablePosition( this );
+
         ret = wxDialog::Show( show );
 
-        SaveControlState();
+        SaveControlState( position );
         focusParentCanvas();
     }
 
@@ -719,7 +741,7 @@ std::string DIALOG_SHIM::generateKey( const wxWindow* aWin ) const
 }
 
 
-void DIALOG_SHIM::SaveControlState()
+void DIALOG_SHIM::SaveControlState( const std::optional<wxPoint>& aPosition )
 {
     COMMON_SETTINGS* settings = Pgm().GetCommonSettings();
 
@@ -729,14 +751,21 @@ void DIALOG_SHIM::SaveControlState()
     std::string dialogKey = m_hash_key.empty() ? getDialogKeyFromTitle( GetTitle() ) : m_hash_key;
     std::map<std::string, nlohmann::json>& dlgMap = settings->CsInternals().m_dialogControlValues[ dialogKey ];
 
-    wxPoint pos = GetPosition();
-    wxSize  dipSize = ToDIP( GetSize() );
-    nlohmann::json geom;
-    geom[ "x" ] = pos.x;
-    geom[ "y" ] = pos.y;
-    geom[ "w" ] = dipSize.x;
-    geom[ "h" ] = dipSize.y;
-    dlgMap[ "__geometry" ] = geom;
+    // A hidden GTK dialog reports its frame origin, which static gravity would restore off by the decorations
+    if( aPosition || IsShown() )
+    {
+        wxPoint pos = aPosition ? *aPosition : KIPLATFORM::UI::GetRestorablePosition( this );
+        wxSize  dipSize = ToDIP( GetSize() );
+        wxSize  dipClientSize = ToDIP( GetClientSize() );
+        nlohmann::json geom;
+        geom[ "x" ] = pos.x;
+        geom[ "y" ] = pos.y;
+        geom[ "w" ] = dipSize.x;
+        geom[ "h" ] = dipSize.y;
+        geom[ "cw" ] = dipClientSize.x;
+        geom[ "ch" ] = dipClientSize.y;
+        dlgMap[ "__geometry" ] = geom;
+    }
 
     std::function<void( wxWindow* )> saveFn =
             [&]( wxWindow* win )
@@ -789,6 +818,14 @@ void DIALOG_SHIM::SaveControlState()
                     {
                         dlgMap[ key ] = od_combo->GetSelection();
                     }
+                    else if( wxSpinCtrl* spin = dynamic_cast<wxSpinCtrl*>( win ) )
+                    {
+                        dlgMap[ key ] = spin->GetValue();
+                    }
+                    else if( wxSpinCtrlDouble* spinDouble = dynamic_cast<wxSpinCtrlDouble*>( win ) )
+                    {
+                        dlgMap[ key ] = spinDouble->GetValue();
+                    }
                     else if( wxTextEntry* textEntry = dynamic_cast<wxTextEntry*>( win ) )
                     {
                         dlgMap[ key ] = textEntry->GetValue();
@@ -801,10 +838,6 @@ void DIALOG_SHIM::SaveControlState()
                     {
                         dlgMap[ key ] = check->GetValue();
                     }
-                    else if( wxSpinCtrl* spin = dynamic_cast<wxSpinCtrl*>( win ) )
-                    {
-                        dlgMap[ key ] = spin->GetValue();
-                    }
                     else if( wxRadioButton* radio = dynamic_cast<wxRadioButton*>( win ) )
                     {
                         dlgMap[ key ] = radio->GetValue();
@@ -815,7 +848,9 @@ void DIALOG_SHIM::SaveControlState()
                     }
                     else if( wxSplitterWindow* splitter = dynamic_cast<wxSplitterWindow*>( win ) )
                     {
-                        dlgMap[ key ] = splitter->GetSashPosition();
+                        // An unsplit sash is meaningless, so keep the one saved while split
+                        if( splitter->IsSplit() )
+                            dlgMap[ key ] = splitter->GetSashPosition();
                     }
                     else if( wxScrolledWindow* scrolled = dynamic_cast<wxScrolledWindow*>( win ) )
                     {
@@ -946,6 +981,16 @@ void DIALOG_SHIM::LoadControlState()
                                     od_combo->SetSelection( index );
                             }
                         }
+                        else if( wxSpinCtrl* spin = dynamic_cast<wxSpinCtrl*>( win ) )
+                        {
+                            if( j.is_number_integer() )
+                                spin->SetValue( j.get<int>() );
+                        }
+                        else if( wxSpinCtrlDouble* spinDouble = dynamic_cast<wxSpinCtrlDouble*>( win ) )
+                        {
+                            if( j.is_number() )
+                                spinDouble->SetValue( j.get<double>() );
+                        }
                         else if( wxTextEntry* textEntry = dynamic_cast<wxTextEntry*>( win ) )
                         {
                             if( j.is_string() )
@@ -965,11 +1010,6 @@ void DIALOG_SHIM::LoadControlState()
                         {
                             if( j.is_boolean() )
                                 check->SetValue( j.get<bool>() );
-                        }
-                        else if( wxSpinCtrl* spin = dynamic_cast<wxSpinCtrl*>( win ) )
-                        {
-                            if( j.is_number_integer() )
-                                spin->SetValue( j.get<int>() );
                         }
                         else if( wxRadioButton* radio = dynamic_cast<wxRadioButton*>( win ) )
                         {

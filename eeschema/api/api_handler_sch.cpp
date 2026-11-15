@@ -1732,13 +1732,11 @@ applySchematicPlotSettings( const schematic::jobs::SchematicPlotSettings& aSetti
     if( aSettings.page_size() != schematic::jobs::SchematicJobPageSize::SJPS_UNKNOWN )
         aJob.m_pageSizeSelect = FromProtoEnum<JOB_PAGE_SIZE>( aSettings.page_size() );
 
-    switch( aSettings.sheet_mode() )
-    {
-    case schematic::jobs::SJSM_ALL_SHEETS:   aJob.m_plotAll = true;  break;
-    case schematic::jobs::SJSM_SINGLE_SHEET: aJob.m_plotAll = false; break;
-    case schematic::jobs::SJSM_UNKNOWN:
-    default:                                 aJob.m_plotAll = false; break;
-    }
+    // An unspecified sheet mode keeps the value from aSettings.plot_all()
+    if( aSettings.sheet_mode() == schematic::jobs::SJSM_ALL_SHEETS )
+        aJob.m_plotAll = true;
+    else if( aSettings.sheet_mode() == schematic::jobs::SJSM_SINGLE_SHEET )
+        aJob.m_plotAll = false;
 
     if( aDocument.has_sheet_path() )
         aJob.m_sheetPath = UnpackSheetPath( aDocument.sheet_path() ).AsString();
@@ -2876,7 +2874,7 @@ HANDLER_RESULT<Empty> API_HANDLER_SCH::handleAddVariant( const HANDLER_CONTEXT<A
         undoCmd->SetDescription( _( "Add Variant" ) );
         frame()->PushCommandToUndoList( undoCmd );
 
-        frame()->UpdateVariantSelectionCtrl( frame()->Schematic().GetVariantNamesForUI() );
+        frame()->SyncVariantUI();
     }
 
     return Empty();
@@ -2939,7 +2937,7 @@ HANDLER_RESULT<Empty> API_HANDLER_SCH::handleDeleteVariant( const HANDLER_CONTEX
         if( frame()->Schematic().GetCurrentVariant().CmpNoCase( name ) == 0 )
             frame()->SetCurrentVariant( wxEmptyString );
 
-        frame()->UpdateVariantSelectionCtrl( frame()->Schematic().GetVariantNamesForUI() );
+        frame()->SyncVariantUI();
         frame()->GetCanvas()->Refresh();
     }
 
@@ -3019,15 +3017,11 @@ HANDLER_RESULT<Empty> API_HANDLER_SCH::handleRenameVariant( const HANDLER_CONTEX
         undoCmd->SetDescription( _( "Rename Variant" ) );
         frame()->PushCommandToUndoList( undoCmd );
 
-        // This will zero out the selection if it happened to point to the old name
-        frame()->UpdateVariantSelectionCtrl( frame()->Schematic().GetVariantNamesForUI() );
+        frame()->SyncVariantUI();
 
+        // Repaint ${VARIANT} text under the new name
         if( isCurrent )
-        {
-            // This will reset the variant-selection-ctrl's selection, but only if the
-            // names have already been updated to include the new name
             frame()->SetCurrentVariant( newName );
-        }
     }
 
     return Empty();
@@ -3107,7 +3101,7 @@ HANDLER_RESULT<Empty> API_HANDLER_SCH::handleCopyVariant( const HANDLER_CONTEXT<
         undoCmd->SetDescription( _( "Copy Variant" ) );
         frame()->PushCommandToUndoList( undoCmd );
 
-        frame()->UpdateVariantSelectionCtrl( frame()->Schematic().GetVariantNamesForUI() );
+        frame()->SyncVariantUI();
     }
 
     return Empty();
@@ -3227,7 +3221,19 @@ HANDLER_RESULT<PlaceFromLibraryResponse> API_HANDLER_SCH::handlePlaceSymbolFromL
     }
 
     SYMBOL_LIBRARY_ADAPTER* adapter = PROJECT_SCH::SymbolLibAdapter( &project() );
-    LIB_SYMBOL* libSymbol = adapter->LoadSymbol( libId );
+    LIB_SYMBOL* libSymbol = nullptr;
+
+    try
+    {
+        libSymbol = adapter->LoadSymbol( libId );
+    }
+    catch( const IO_ERROR& ioe )
+    {
+        ApiResponseStatus e;
+        e.set_status( ApiStatusCode::AS_BAD_REQUEST );
+        e.set_error_message( fmt::format( "error loading symbol '{}' from library", libId.Format().wx_str() ) );
+        return tl::unexpected( e );
+    }
 
     if( !libSymbol )
     {

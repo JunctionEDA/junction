@@ -161,7 +161,6 @@ std::vector<FILE_CHECKLIST_ENTRY> BuildGitChangeEntries( KIGIT_COMMON& aCommon, 
         FILE_CHECKLIST_ENTRY entry;
         entry.section = _( "Changes" );
         entry.path = relativePath;
-        entry.label = wxFileName( relativePath ).GetFullName();
         entry.status = word;
         entry.statusColour = colour;
         entry.icon = icon;
@@ -1072,9 +1071,9 @@ void loadModalGitDiff( const std::shared_ptr<MODAL_GIT_DIFF_REQUEST>& aRequest, 
 
                 wxString beforeLabel = aCommitHash.IsEmpty()
                                                ? _( "BASE (HEAD)" )
-                                               : wxString::Format( _( "BASE (parent of %s)" ), aCommitHash );
+                                               : wxString::Format( _( "PARENT (of %s)" ), aCommitHash );
                 wxString afterLabel = aCommitHash.IsEmpty() ? _( "WORKING (changes)" )
-                                                            : wxString::Format( _( "WORKING (%s)" ), aCommitHash );
+                                                            : wxString::Format( _( "COMMIT (%s)" ), aCommitHash );
 
                 // The owning kiface loads and displays documents on the UI thread. Keep the
                 // scratch files alive until the modal comparison has closed.

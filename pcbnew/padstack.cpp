@@ -145,7 +145,7 @@ bool PADSTACK::operator==( const PADSTACK& aOther ) const
         if( *m_customName != *aOther.m_customName )
             return false;
     }
-    else if( (bool) m_customName != (bool) m_customName )
+    else if( (bool) m_customName != (bool) aOther.m_customName )
     {
         return false;
     }
@@ -1218,6 +1218,11 @@ PADSTACK::COPPER_LAYER_PROPS& PADSTACK::CopperLayer( PCB_LAYER_ID aLayer )
             key = INNER_LAYERS;
     }
 
+    // A write for an undefined non-copper layer must land where the readers look. Copper layers
+    // keep their own entry, which per-layer padstacks rely on.
+    if( m_mode == MODE::CUSTOM && IsNonCopperLayer( aLayer ) )
+        return const_cast<COPPER_LAYER_PROPS&>( std::as_const( *this ).CopperLayer( aLayer ) );
+
     // A layer without an entry reads through to another one, so a new entry starts from what was read
     const bool readsThrough = m_copperProps.contains( ALL_LAYERS )
                               || ( m_mode == MODE::CUSTOM && !m_copperProps.empty() );
@@ -1783,8 +1788,12 @@ bool PADSTACK::COPPER_LAYER_PROPS::operator==( const COPPER_LAYER_PROPS& aOther 
 
     if( custom_shapes.size() != aOther.custom_shapes.size() ) return false;
 
-    // Deep compare of shapes?
-    // For now, just check pointers or size
+    for( size_t ii = 0; ii < custom_shapes.size(); ++ii )
+    {
+        if( !( *custom_shapes[ii] == *aOther.custom_shapes[ii] ) )
+            return false;
+    }
+
     return true;
 }
 

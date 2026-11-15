@@ -320,6 +320,9 @@ private:
 
     void updatePcmButtonBadge();
 
+    /// Reread the project and local settings files after a history restore rewrote them.
+    void reloadProjectSettings();
+
 private:
     COLLAB_AUTH           m_collabAuth;
     bool                  m_collabPublishing = false;   ///< an upload is running in the background

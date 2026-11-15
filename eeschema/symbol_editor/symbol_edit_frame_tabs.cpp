@@ -193,6 +193,10 @@ void SYMBOL_EDIT_FRAME::activateSymbolTab( SYMBOL_EDITOR_TAB_CONTEXT* aContext )
         GetLibTree()->SelectLibId( m_symbol->GetLibId() );
     }
 
+    // A restored or switched-to tab otherwise keeps watching whichever library loaded last
+    LIB_ID watched = m_symbol && !IsSymbolFromSchematic() ? m_symbol->GetLibId() : LIB_ID();
+    setSymWatcher( watched.IsValid() ? &watched : nullptr );
+
     m_toolManager->SetEnvironment( GetScreen(), GetCanvas()->GetView(), GetCanvas()->GetViewControls(),
                                    GetSettings(), this );
 
@@ -502,6 +506,15 @@ bool SYMBOL_EDIT_FRAME::promptAndCloseSymbolTab( int aIdx )
             break;
 
         case wxID_NO:
+            // Edits reach the library buffer as they are made, so discarding them must restore it too
+            if( !ctx->IsTransient() && m_libMgr->IsSymbolModified( ctx->GetName(), ctx->GetLibrary() ) )
+            {
+                m_libMgr->RevertSymbol( LIB_ID( ctx->GetLibrary(), ctx->GetName() ) );
+
+                if( IsLibraryTreeShown() )
+                    m_treePane->GetLibTree()->RefreshLibTree();
+            }
+
             break;
 
         default:

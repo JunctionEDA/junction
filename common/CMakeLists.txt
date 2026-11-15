@@ -188,6 +188,7 @@ set( KICOMMON_SRCS
     jobs/jobset.cpp
     jobs/job_fp_export_svg.cpp
     jobs/job_fp_upgrade.cpp
+    jobs/job_fp_downgrade.cpp
     jobs/job_gerber_diff.cpp
     jobs/job_gerber_export_png.cpp
     jobs/job_gerber_info.cpp
@@ -206,6 +207,7 @@ set( KICOMMON_SRCS
     jobs/job_sch_erc.cpp
     jobs/job_sym_export_svg.cpp
     jobs/job_sym_upgrade.cpp
+    jobs/job_sym_downgrade.cpp
     jobs/job_pcb_upgrade.cpp
     jobs/job_pcb_downgrade.cpp
     jobs/job_sch_upgrade.cpp
@@ -324,6 +326,7 @@ set( KICOMMON_SRCS
     dpi_scaling.cpp
     dpi_scaling_common.cpp
     dsnlexer.cpp
+    eda_cursor_broadcaster.cpp
     eda_doc.cpp
     eda_pattern_match.cpp
     eda_units.cpp
@@ -662,6 +665,10 @@ set( COMMON_DLG_SRCS
     dialogs/dialog_text_entry_base.cpp
     dialogs/dialog_collab_comments.cpp
     dialogs/collab_comment_card.cpp
+    dialogs/dialog_downgrade_report.cpp
+    dialogs/dialog_downgrade_report_base.cpp
+    dialogs/dialog_export_older_version.cpp
+    dialogs/dialog_export_older_version_base.cpp
     dialogs/dialog_page_settings.cpp
     dialogs/dialog_print_generic.cpp
     dialogs/dialog_print_generic_base.cpp
@@ -1002,6 +1009,7 @@ set( COMMON_SRCS
     diff_merge/diff_renderer_gal.cpp
     diff_merge/diff_renderer_plotter.cpp
     diff_merge/diff_job_output.cpp
+    diff_merge/lib_element_diff.cpp
 
     origin_viewitem.cpp
 

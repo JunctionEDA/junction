@@ -939,28 +939,9 @@ std::optional<KIGIT_AHEAD_BEHIND> KIGIT_COMMON::compareRefs( const git_reference
 
 bool KIGIT_COMMON::HasLocalCommits() const
 {
-    if( !m_repo || IsHeadDetached() )
-        return false;
+    std::optional<KIGIT_UPSTREAM_STATUS> status = UpstreamStatus();
 
-    git_reference* head = nullptr;
-
-    if( git_repository_head( &head, m_repo ) != GIT_OK )
-        return false;
-
-    KIGIT::GitReferencePtr headPtr( head );
-    git_reference*         upstream = nullptr;
-    int                    result = git_branch_upstream( &upstream, head );
-
-    if( result != GIT_OK )
-    {
-        // Treat a branch without an upstream as unpublished.
-        return result == GIT_ENOTFOUND;
-    }
-
-    KIGIT::GitReferencePtr            upstreamPtr( upstream );
-    std::optional<KIGIT_AHEAD_BEHIND> counts = compareRefs( head, upstream );
-
-    return counts && counts->ahead > 0;
+    return status && status->HasLocalCommits();
 }
 
 
@@ -987,26 +968,33 @@ bool KIGIT_COMMON::IsPullRebaseConfigured() const
 }
 
 
-bool KIGIT_COMMON::HasUpstreamCommits() const
+std::optional<KIGIT_UPSTREAM_STATUS> KIGIT_COMMON::UpstreamStatus() const
 {
-    if( !m_repo )
-        return false;
+    if( !m_repo || IsHeadDetached() )
+        return std::nullopt;
 
     git_reference* head = nullptr;
 
     if( git_repository_head( &head, m_repo ) != GIT_OK )
-        return false;
+        return std::nullopt;
 
     KIGIT::GitReferencePtr headPtr( head );
     git_reference*         upstream = nullptr;
+    int                    result = git_branch_upstream( &upstream, head );
 
-    if( git_branch_upstream( &upstream, head ) != GIT_OK )
-        return false;
+    if( result == GIT_ENOTFOUND )
+        return KIGIT_UPSTREAM_STATUS();
+
+    if( result != GIT_OK )
+        return std::nullopt;
 
     KIGIT::GitReferencePtr            upstreamPtr( upstream );
     std::optional<KIGIT_AHEAD_BEHIND> counts = compareRefs( head, upstream );
 
-    return counts && counts->behind > 0;
+    if( !counts )
+        return std::nullopt;
+
+    return KIGIT_UPSTREAM_STATUS{ true, *counts };
 }
 
 
@@ -2891,7 +2879,14 @@ wxString BranchNameError( const wxString& aName )
 
     int valid = 0;
 
-    if( git_branch_name_is_valid( &valid, aName.utf8_string().c_str() ) != GIT_OK || !valid )
+#if LIBGIT2_VER_MAJOR > 1 || ( LIBGIT2_VER_MAJOR == 1 && LIBGIT2_VER_MINOR >= 5 )
+    valid = git_branch_name_is_valid( &valid, aName.utf8_string().c_str() ) == GIT_OK && valid;
+#else
+    std::string refName = "refs/heads/" + aName.utf8_string();
+    valid = aName != wxS( "HEAD" ) && git_reference_is_valid_name( refName.c_str() );
+#endif
+
+    if( !valid )
         return wxString::Format( _( "'%s' is not a valid branch name." ), aName );
 
     return wxEmptyString;

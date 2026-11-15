@@ -736,6 +736,15 @@ void LIBRARY_MANAGER::RestartAsyncLoads()
 }
 
 
+void LIBRARY_MANAGER::LeakCachesAtExit()
+{
+    std::scoped_lock lock( m_adaptersMutex );
+
+    for( const std::unique_ptr<LIBRARY_MANAGER_ADAPTER>& adapter : m_adapters | std::views::values )
+        adapter->LeakCachesAtExit();
+}
+
+
 void LIBRARY_MANAGER::RegisterAdapter( LIBRARY_TABLE_TYPE aType,
                                        std::unique_ptr<LIBRARY_MANAGER_ADAPTER>&& aAdapter )
 {
@@ -1181,6 +1190,8 @@ void LIBRARY_MANAGER_ADAPTER::resetProjectCache( bool aCancelPlugins )
 {
     abortLoad( aCancelPlugins );
 
+    stopRefreshThreads( m_libraries, m_librariesMutex );
+
     // Declared before the lock so plugins die after it is released; their worker threads may need it
     std::vector<std::unique_ptr<IO_BASE>> retired;
     std::unique_lock                      lock( m_librariesMutex );
@@ -1215,6 +1226,31 @@ void LIBRARY_MANAGER_ADAPTER::RestartAsyncLoad()
 }
 
 
+void LIBRARY_MANAGER_ADAPTER::LeakCachesAtExit()
+{
+    // Else a load still running could publish a plugin after the marking below
+    abortLoad( true );
+
+    {
+        std::shared_lock lock( m_librariesMutex );
+
+        for( LIB_DATA& lib : m_libraries | std::views::values )
+        {
+            if( lib.plugin )
+                lib.plugin->LeakCacheAtExit();
+        }
+    }
+
+    std::shared_lock lock( globalLibsMutex() );
+
+    for( LIB_DATA& lib : globalLibs() | std::views::values )
+    {
+        if( lib.global_owner == this && lib.plugin )
+            lib.plugin->LeakCacheAtExit();
+    }
+}
+
+
 void LIBRARY_MANAGER_ADAPTER::GlobalTablesChanged( std::initializer_list<LIBRARY_TABLE_TYPE> aChangedTables )
 {
     bool me = aChangedTables.size() == 0;
@@ -1233,6 +1269,8 @@ void LIBRARY_MANAGER_ADAPTER::GlobalTablesChanged( std::initializer_list<LIBRARY
 
     abortLoad();
 
+    stopRefreshThreads( globalLibs(), globalLibsMutex() );
+
     // Plugins die after unlocking; their worker threads may need the mutex
     std::map<wxString, LIB_DATA> retired;
 
@@ -1247,6 +1285,12 @@ void LIBRARY_MANAGER_ADAPTER::evictOwnedGlobalEntries()
 {
     abortLoad( true );
 
+    stopRefreshThreads( globalLibs(), globalLibsMutex(),
+                        [this]( const wxString&, const LIB_DATA& aLib )
+                        {
+                            return aLib.global_owner == this;
+                        } );
+
     // Declared before the lock so plugins die after it is released
     std::vector<std::map<wxString, LIB_DATA>::node_type> retired;
     std::unique_lock                                     lock( globalLibsMutex() );
@@ -1260,6 +1304,45 @@ void LIBRARY_MANAGER_ADAPTER::evictOwnedGlobalEntries()
         else
             ++it;
     }
+}
+
+
+void LIBRARY_MANAGER_ADAPTER::retireAllLibraries()
+{
+    abortLoad( true );
+
+    stopRefreshThreads( m_libraries, m_librariesMutex );
+
+    stopRefreshThreads( globalLibs(), globalLibsMutex(),
+                        [this]( const wxString&, const LIB_DATA& aLib )
+                        {
+                            return aLib.global_owner == this;
+                        } );
+
+    resetProjectCache( true );
+    evictOwnedGlobalEntries();
+}
+
+
+void LIBRARY_MANAGER_ADAPTER::stopRefreshThreads(
+        std::map<wxString, LIB_DATA>& aLibs, std::shared_mutex& aMutex,
+        const std::function<bool( const wxString& aNickname, const LIB_DATA& aLib )>& aRetiring )
+{
+    std::vector<IO_BASE*> plugins;
+
+    {
+        std::shared_lock lock( aMutex );
+
+        for( const auto& [nickname, lib] : aLibs )
+        {
+            if( lib.plugin && ( !aRetiring || aRetiring( nickname, lib ) ) )
+                plugins.push_back( lib.plugin.get() );
+        }
+    }
+
+    // Unlocked as a refresh thread may wait on aMutex; the pointers stay valid since only this thread retires plugins
+    for( IO_BASE* plugin : plugins )
+        plugin->StopBackgroundRefresh();
 }
 
 
@@ -1306,13 +1389,25 @@ void LIBRARY_MANAGER_ADAPTER::ProjectTablesReloaded(
     // same-named global library from HasLibrary() / fetchIfLoaded() / etc.
     // GetRow() is safe to call here: loadTables() reset m_rowCache before
     // building the new table, and async loads were aborted in phase 1.
+    auto pruned =
+            [this]( const wxString& aNickname )
+            {
+                return !m_manager.GetRow( Type(), aNickname, LIBRARY_TABLE_SCOPE::PROJECT ).has_value();
+            };
+
+    stopRefreshThreads( m_libraries, m_librariesMutex,
+                        [&]( const wxString& aNickname, const LIB_DATA& )
+                        {
+                            return pruned( aNickname );
+                        } );
+
     // Declared before the lock so any plugin loaded since the reset dies after it is released
     std::vector<std::map<wxString, LIB_DATA>::node_type> retired;
     std::unique_lock                                     lock( m_librariesMutex );
 
     for( auto it = m_libraries.begin(); it != m_libraries.end(); )
     {
-        if( !m_manager.GetRow( Type(), it->first, LIBRARY_TABLE_SCOPE::PROJECT ).has_value() )
+        if( pruned( it->first ) )
             retired.push_back( m_libraries.extract( it++ ) );
         else
             ++it;

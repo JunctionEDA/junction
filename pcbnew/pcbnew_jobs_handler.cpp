@@ -80,6 +80,7 @@
 #include <jobs/job_import_utils.h>
 #include <jobs/job_pcb_upgrade.h>
 #include <jobs/job_pcb_downgrade.h>
+#include <jobs/job_fp_downgrade.h>
 #include <downgrade/board_downgrade.h>
 #include <downgrade_scan.h>
 #include <downgrade_copy.h>
@@ -423,6 +424,11 @@ PCBNEW_JOBS_HANDLER::PCBNEW_JOBS_HANDLER( KIWAY* aKiway ) :
                   return dlg.ShowModal() == wxID_OK;
               } );
     Register( "fpupgrade", std::bind( &PCBNEW_JOBS_HANDLER::JobExportFpUpgrade, this, std::placeholders::_1 ),
+              []( JOB* job, wxWindow* aParent ) -> bool
+              {
+                  return true;
+              } );
+    Register( "fpdowngrade", std::bind( &PCBNEW_JOBS_HANDLER::JobFpDowngrade, this, std::placeholders::_1 ),
               []( JOB* job, wxWindow* aParent ) -> bool
               {
                   return true;
@@ -1444,8 +1450,8 @@ int PCBNEW_JOBS_HANDLER::JobExportRender( JOB* aJob )
         image = image.Mirror( false );
 
         image.SetOption( wxIMAGE_OPTION_QUALITY, 90 );
-        image.SaveFile( outPath,
-                        aRenderJob->m_format == JOB_PCB_RENDER::FORMAT::PNG ? wxBITMAP_TYPE_PNG : wxBITMAP_TYPE_JPEG );
+        image.SaveFile( outPath, aRenderJob->m_format == JOB_PCB_RENDER::FORMAT::PNG ? wxBITMAP_TYPE_PNG
+                                                                                     : wxBITMAP_TYPE_JPEG );
     }
 
     if( success )
@@ -1462,7 +1468,7 @@ int PCBNEW_JOBS_HANDLER::JobExportRender( JOB* aJob )
 
 
 bool PCBNEW_JOBS_HANDLER::preparePlotLayers( JOB_EXPORT_PCB_PLOT* aJob, BOARD* aBoard,
-                                            TOOL_MANAGER* aToolManager, LSEQ& aLayersToPlot )
+                                             TOOL_MANAGER* aToolManager, LSEQ& aLayersToPlot )
 {
     if( aJob->m_checkZonesBeforePlot )
     {
@@ -1506,13 +1512,14 @@ wxString PCBNEW_JOBS_HANDLER::resolvePlotOutputPath( JOB_EXPORT_PCB_PLOT* aJob, 
 
 // PDF single-document output need not use overrides; PNG never uses them.
 static int plotJob( JOB_EXPORT_PCB_PLOT* aJob, PCB_PLOTTER& aPlotter, const LSEQ& aLayersToPlot,
-                    const wxString& aOutPath, bool aSingleOutput, bool aUseOverrides )
+                    const wxString& aOutPath, bool aSingleOutput, bool aUseVarOverrides,
+                    bool aForceAllLayersToOnePage = false )
 {
     std::optional<wxString> layerName;
     std::optional<wxString> sheetName;
     std::optional<wxString> sheetPath;
 
-    if( aUseOverrides )
+    if( aUseVarOverrides )
     {
         if( aJob->GetVarOverrides().contains( wxT( "LAYER" ) ) )
             layerName = aJob->GetVarOverrides().at( wxT( "LAYER" ) );
@@ -1524,10 +1531,11 @@ static int plotJob( JOB_EXPORT_PCB_PLOT* aJob, PCB_PLOTTER& aPlotter, const LSEQ
             sheetPath = aJob->GetVarOverrides().at( wxT( "SHEETPATH" ) );
     }
 
+    bool                  useGerberFileExtensions = false;
     std::vector<wxString> outputPaths;
 
-    if( !aPlotter.Plot( aOutPath, aLayersToPlot, aJob->m_plotOnAllLayersSequence, false,
-                        aSingleOutput, layerName, sheetName, sheetPath, &outputPaths ) )
+    if( !aPlotter.Plot( aOutPath, aLayersToPlot, aJob->m_plotOnAllLayersSequence, useGerberFileExtensions,
+                        aSingleOutput, aForceAllLayersToOnePage, layerName, sheetName, sheetPath, &outputPaths ) )
     {
         return CLI::EXIT_CODES::ERR_UNKNOWN;
     }
@@ -1556,6 +1564,7 @@ int PCBNEW_JOBS_HANDLER::JobExportSvg( JOB* aJob )
         brd->SetCurrentVariant( aSvgJob->m_variant );
 
     const bool isSingle = aSvgJob->m_genMode == JOB_EXPORT_PCB_SVG::GEN_MODE::SINGLE;
+    const bool useVarOverrides = isSingle;
 
     wxString outPath = resolvePlotOutputPath( aSvgJob, brd, PLOT_FORMAT::SVG, isSingle );
 
@@ -1575,7 +1584,7 @@ int PCBNEW_JOBS_HANDLER::JobExportSvg( JOB* aJob )
 
     PCB_PLOTTER plotter( brd, m_reporter, plotOpts );
 
-    return plotJob( aSvgJob, plotter, layersToPlot, outPath, isSingle, isSingle );
+    return plotJob( aSvgJob, plotter, layersToPlot, outPath, isSingle, useVarOverrides );
 }
 
 
@@ -1602,6 +1611,7 @@ int PCBNEW_JOBS_HANDLER::JobExportDxf( JOB* aJob )
         return CLI::EXIT_CODES::ERR_ARGS;
 
     const bool isSingle = aDxfJob->m_genMode == JOB_EXPORT_PCB_DXF::GEN_MODE::SINGLE;
+    const bool useVarOverrides = isSingle;
 
     wxString outPath = resolvePlotOutputPath( aDxfJob, brd, PLOT_FORMAT::DXF, isSingle );
 
@@ -1616,13 +1626,12 @@ int PCBNEW_JOBS_HANDLER::JobExportDxf( JOB* aJob )
 
     PCB_PLOTTER plotter( brd, m_reporter, plotOpts );
 
-    return plotJob( aDxfJob, plotter, layersToPlot, outPath, isSingle, isSingle );
+    return plotJob( aDxfJob, plotter, layersToPlot, outPath, isSingle, useVarOverrides );
 }
 
 
 int PCBNEW_JOBS_HANDLER::JobExportPdf( JOB* aJob )
 {
-    bool                plotAllLayersOneFile = false;
     JOB_EXPORT_PCB_PDF* pdfJob = dynamic_cast<JOB_EXPORT_PCB_PDF*>( aJob );
 
     if( pdfJob == nullptr )
@@ -1643,10 +1652,18 @@ int PCBNEW_JOBS_HANDLER::JobExportPdf( JOB* aJob )
     if( !preparePlotLayers( pdfJob, brd, toolManager, layersToPlot ) )
         return CLI::EXIT_CODES::ERR_ARGS;
 
-    if( pdfJob->m_pdfGenMode == JOB_EXPORT_PCB_PDF::GEN_MODE::ALL_LAYERS_ONE_FILE )
-        plotAllLayersOneFile = true;
+    bool outputIsSingle = pdfJob->m_pdfSingle;
+    bool useVarOverrides = outputIsSingle;
+    bool forceAllLayersToOnePage = false;
 
-    const bool outputIsSingle = plotAllLayersOneFile || pdfJob->m_pdfSingle;
+    // This mode is deprecated, but for now it exports all layers to a single page (instead of
+    // all layers to a single file, with one page per layer).
+    if( pdfJob->m_pdfGenMode == JOB_EXPORT_PCB_PDF::GEN_MODE::ALL_LAYERS_ONE_FILE )
+    {
+        outputIsSingle = true;
+        useVarOverrides = true;
+        forceAllLayersToOnePage = true;
+    }
 
     wxString outPath = resolvePlotOutputPath( pdfJob, brd, PLOT_FORMAT::PDF, outputIsSingle );
 
@@ -1661,7 +1678,8 @@ int PCBNEW_JOBS_HANDLER::JobExportPdf( JOB* aJob )
         return CLI::EXIT_CODES::ERR_INVALID_OUTPUT_CONFLICT;
     }
 
-    return plotJob( pdfJob, pcbPlotter, layersToPlot, outPath, outputIsSingle, plotAllLayersOneFile );
+    return plotJob( pdfJob, pcbPlotter, layersToPlot, outPath, outputIsSingle, useVarOverrides,
+                    forceAllLayersToOnePage );
 }
 
 
@@ -1688,6 +1706,7 @@ int PCBNEW_JOBS_HANDLER::JobExportPng( JOB* aJob )
         return CLI::EXIT_CODES::ERR_ARGS;
 
     bool isSingle = pngJob->m_genMode == JOB_EXPORT_PCB_PNG::GEN_MODE::SINGLE;
+    bool useVarOverrides = isSingle;
 
     wxString outPath = resolvePlotOutputPath( pngJob, brd, PLOT_FORMAT::PNG, isSingle );
 
@@ -1702,7 +1721,7 @@ int PCBNEW_JOBS_HANDLER::JobExportPng( JOB* aJob )
         return CLI::EXIT_CODES::ERR_INVALID_OUTPUT_CONFLICT;
     }
 
-    return plotJob( pngJob, pcbPlotter, layersToPlot, outPath, isSingle, false );
+    return plotJob( pngJob, pcbPlotter, layersToPlot, outPath, isSingle, useVarOverrides );
 }
 
 
@@ -1729,6 +1748,7 @@ int PCBNEW_JOBS_HANDLER::JobExportPs( JOB* aJob )
         return CLI::EXIT_CODES::ERR_ARGS;
 
     bool isSingle = psJob->m_genMode == JOB_EXPORT_PCB_PS::GEN_MODE::SINGLE;
+    bool useVarOverrides = isSingle;
 
     wxString outPath = resolvePlotOutputPath( psJob, brd, PLOT_FORMAT::POST, isSingle );
 
@@ -1743,7 +1763,7 @@ int PCBNEW_JOBS_HANDLER::JobExportPs( JOB* aJob )
 
     PCB_PLOTTER pcbPlotter( brd, m_reporter, plotOpts );
 
-    return plotJob( psJob, pcbPlotter, layersToPlot, outPath, isSingle, isSingle );
+    return plotJob( psJob, pcbPlotter, layersToPlot, outPath, isSingle, useVarOverrides );
 }
 
 
@@ -3699,6 +3719,93 @@ int PCBNEW_JOBS_HANDLER::JobDowngrade( JOB* aJob )
 }
 
 
+int PCBNEW_JOBS_HANDLER::JobFpDowngrade( JOB* aJob )
+{
+    JOB_FP_DOWNGRADE* job = dynamic_cast<JOB_FP_DOWNGRADE*>( aJob );
+
+    wxCHECK( job, CLI::EXIT_CODES::ERR_UNKNOWN );
+
+    const DOWNGRADE_TARGET* target =
+            job->m_target.IsEmpty() ? &GetDowngradeTargets().front() : FindDowngradeTarget( job->m_target );
+
+    if( !target )
+    {
+        m_reporter->Report( wxString::Format( _( "Unknown target version '%s'. Valid targets: %s\n" ), job->m_target,
+                                              DowngradeTargetNames() ),
+                            RPT_SEVERITY_ERROR );
+        return CLI::EXIT_CODES::ERR_ARGS;
+    }
+
+    if( !wxDirExists( job->m_libraryPath ) )
+    {
+        m_reporter->Report( wxString::Format( _( "The library folder '%s' does not exist.\n" ), job->m_libraryPath ),
+                            RPT_SEVERITY_ERROR );
+        return CLI::EXIT_CODES::ERR_ARGS;
+    }
+
+    COMPATIBILITY_REPORT report;
+    classifyFootprintLibraries( job->m_libraryPath, *target, report, job->m_dropInsteadOfApproximate );
+    job->m_report = report;
+    report.Print( m_reporter );
+
+    if( job->m_dryRun )
+        return CLI::EXIT_CODES::SUCCESS;
+
+    if( report.IsBlocked() )
+    {
+        m_reporter->Report( _( "Cannot export: the library uses features the target cannot represent.\n" ),
+                            RPT_SEVERITY_ERROR );
+        return CLI::EXIT_CODES::ERR_UNKNOWN;
+    }
+
+    if( report.IsLossy() && !job->m_force )
+    {
+        m_reporter->Report( _( "Export would lose data. Re-run with --force to export anyway.\n" ),
+                            RPT_SEVERITY_ERROR );
+        return CLI::EXIT_CODES::ERR_UNKNOWN;
+    }
+
+    wxString                     error;
+    DOWNGRADE_OUTPUT_DIRECTORIES outputDirectories;
+
+    // The copy is validated, made and then converted, so a failure never reaches the original
+    if( !CopyDowngradeLibraryDirectory( job->m_libraryPath, job->m_outputLibraryPath, outputDirectories, error ) )
+    {
+        m_reporter->Report( error + wxT( "\n" ), RPT_SEVERITY_ERROR );
+        return CLI::EXIT_CODES::ERR_ARGS;
+    }
+
+    try
+    {
+        wxString recoveryError;
+        wxString badLib = downgradeFootprintLibraries( job->m_outputLibraryPath, *target,
+                                                       job->m_dropInsteadOfApproximate, nullptr, &recoveryError );
+
+        if( !badLib.IsEmpty() )
+        {
+            m_reporter->Report( footprintRefusedMessage( badLib, *target ), RPT_SEVERITY_ERROR );
+
+            if( !recoveryError.IsEmpty() )
+                m_reporter->Report( recoveryError, RPT_SEVERITY_ERROR );
+
+            return CLI::EXIT_CODES::ERR_UNKNOWN;
+        }
+    }
+    catch( const IO_ERROR& ioe )
+    {
+        m_reporter->Report(
+                wxString::Format( _( "Error exporting '%s'.\n%s" ), job->m_libraryPath, ioe.What().GetData() ),
+                RPT_SEVERITY_ERROR );
+        return CLI::EXIT_CODES::ERR_UNKNOWN;
+    }
+
+    outputDirectories.Commit();
+    m_reporter->Report( _( "Downgraded footprint library\n" ), RPT_SEVERITY_INFO );
+
+    return CLI::EXIT_CODES::SUCCESS;
+}
+
+
 // Most job handlers need to align the running job with the board before resolving any
 // output paths with variables in them like ${REVISION}.
 wxString PCBNEW_JOBS_HANDLER::resolveJobOutputPath( JOB* aJob, BOARD* aBoard, const wxString* aDrawingSheet )
@@ -4059,7 +4166,8 @@ int PCBNEW_JOBS_HANDLER::JobImport( JOB* aJob )
             else if( fileType == PCB_IO_MGR::EAGLE )
             {
                 // PCB_IO_EAGLE uses these to center the BOARD
-                VECTOR2I pageSize = board->GetPageSettings().GetSizeIU( pcbIUScale.IU_PER_MILS );
+                PAGE_INFO defaultPaper;
+                VECTOR2I  pageSize = defaultPaper.GetSizeIU( pcbIUScale.IU_PER_MILS );
                 importPropertyStorage["page_width"] = std::to_string( pageSize.x );
                 importPropertyStorage["page_height"] = std::to_string( pageSize.y );
                 importProperties = &importPropertyStorage;
@@ -4348,7 +4456,7 @@ int PCBNEW_JOBS_HANDLER::RunMerge( KICAD_DIFF::DOC_KIND aKind, const wxString& a
                                                aReporter ? aReporter : m_reporter );
 
     if( aKind == KICAD_DIFF::DOC_KIND::FP_LIB || aKind == KICAD_DIFF::DOC_KIND::FOOTPRINT )
-        return runFpLibMerge( aAncestor, aOurs, aTheirs, aOutput, aSingleFile );
+        return runFpLibMerge( aAncestor, aOurs, aTheirs, aOutput, aInteractive, aSingleFile );
 
     return runPcbMerge( aAncestor, aOurs, aTheirs, aOutput, aInteractive );
 }
@@ -4400,13 +4508,8 @@ int PCBNEW_JOBS_HANDLER::runPcbMerge( const wxString& aAncestor, const wxString&
 
     if( aInteractive && !KICAD_DIFF::BuildConflictList( plan ).empty() )
     {
-        if( !Pgm().IsGUI() )
-        {
-            m_reporter->Report( _( "--interactive requires a GUI KiCad process; the console "
-                                   "kicad-cli cannot open dialogs.\n" ),
-                                RPT_SEVERITY_ERROR );
+        if( !DIALOG_KICAD_MERGE_3WAY::CanOpen( *m_reporter ) )
             return CLI::EXIT_CODES::ERR_ARGS;
-        }
 
         // Geometry context so the conflict viewer can render the actual
         // boards behind the conflict bbox highlight.
@@ -4700,23 +4803,6 @@ static int loadFootprintLibrarySide( const wxString& aPath,
 }
 
 
-// Flatten a footprint-library name map into a single DOCUMENT_GEOMETRY tinted
-// with the supplied per-side theme colour.
-static KICAD_DIFF::DOCUMENT_GEOMETRY
-footprintLibraryGeometry( const KICAD_DIFF::FP_LIB_DIFFER::FOOTPRINT_MAP& aMap, const KIGFX::COLOR4D& aColor )
-{
-    KICAD_DIFF::DOCUMENT_GEOMETRY geometry;
-
-    for( const auto& [name, footprint] : aMap )
-    {
-        if( footprint )
-            KICAD_DIFF::AppendGeometry( geometry, KICAD_DIFF::ExtractFootprintGeometry( *footprint, aColor ) );
-    }
-
-    return geometry;
-}
-
-
 int PCBNEW_JOBS_HANDLER::JobFpDiff( JOB* aJob )
 {
     JOB_FP_DIFF* diffJob = dynamic_cast<JOB_FP_DIFF*>( aJob );
@@ -4758,9 +4844,9 @@ int PCBNEW_JOBS_HANDLER::JobFpDiff( JOB* aJob )
             KICAD_DIFF::MakeEmitOptions( *diffJob, diffJob->m_inputA, diffJob->m_inputB );
     emitOpts.docKind            = KICAD_DIFF::DOC_KIND::FP_LIB;
     emitOpts.referenceGeometry  = [&]( const KIGFX::COLOR4D& aColor )
-                                  { return footprintLibraryGeometry( mapA, aColor ); };
+                                  { return KICAD_DIFF::ExtractFootprintGeometry( mapA, aColor ); };
     emitOpts.comparisonGeometry = [&]( const KIGFX::COLOR4D& aColor )
-                                  { return footprintLibraryGeometry( mapB, aColor ); };
+                                  { return KICAD_DIFF::ExtractFootprintGeometry( mapB, aColor ); };
 
     return KICAD_DIFF::EmitDiffResult( result, emitOpts, diffExitCode, *m_reporter );
 }
@@ -4887,26 +4973,13 @@ int PCBNEW_JOBS_HANDLER::OpenDiffDialog( KICAD_DIFF::DOC_KIND aKind, const wxStr
 
     SETTINGS_MANAGER& mgr = Pgm().GetSettingsManager();
 
-    KICAD_DIFF::DOCUMENT_DIFF     result;
-    KICAD_DIFF::DOCUMENT_GEOMETRY refGeometry;
-    KICAD_DIFF::DOCUMENT_GEOMETRY compGeometry;
+    const wxString labelA = aLabelA.IsEmpty() ? aFileA : aLabelA;
+    const wxString labelB = aLabelB.IsEmpty() ? aFileB : aLabelB;
 
-    auto loadFootprintFile = [&]( const wxString& aPath ) -> std::unique_ptr<FOOTPRINT>
-    {
-        if( aPath.IsEmpty() )
-            return nullptr;
-
-        wxFileName fn( aPath );
-        fn.MakeAbsolute();
-
-        // A single .kicad_mod's internal (footprint ...) name need not match its
-        // filename, so load the file's sole footprint via ImportFootprint rather
-        // than FootprintLoad (which treats the directory as a .pretty library and
-        // keys by basename), matching runFpLibMerge's single-file path.
-        PCB_IO_KICAD_SEXPR io;
-        wxString           name;
-        return io.ImportFootprint( fn.GetFullPath(), name );
-    };
+    std::vector<std::unique_ptr<FOOTPRINT>>  ownersA;
+    std::vector<std::unique_ptr<FOOTPRINT>>  ownersB;
+    KICAD_DIFF::FP_LIB_DIFFER::FOOTPRINT_MAP mapA;
+    KICAD_DIFF::FP_LIB_DIFFER::FOOTPRINT_MAP mapB;
 
     switch( aKind )
     {
@@ -4919,19 +4992,14 @@ int PCBNEW_JOBS_HANDLER::OpenDiffDialog( KICAD_DIFF::DOC_KIND aKind, const wxStr
 
         BOARD* boardA = sides.boardA;
         BOARD* boardB = sides.boardB;
-        result = std::move( sides.diff );
 
         // Background geometry, so the dialog's canvas shows the board outline and footprints
         // beneath the change rectangles.
         const KICAD_DIFF::DIFF_COLOR_THEME theme;
-        refGeometry = KICAD_DIFF::ExtractBoardGeometry( *boardA, theme.reference );
-        compGeometry = KICAD_DIFF::ExtractBoardGeometry( *boardB, theme.comparison );
-
-        const wxString labelA = aLabelA.IsEmpty() ? aFileA : aLabelA;
-        const wxString labelB = aLabelB.IsEmpty() ? aFileB : aLabelB;
 
         DIALOG_KICAD_DIFF dlg(
-                parent, labelA, labelB, result, std::move( refGeometry ), std::move( compGeometry ),
+                parent, labelA, labelB, sides.diff, KICAD_DIFF::ExtractBoardGeometry( *boardA, theme.reference ),
+                KICAD_DIFF::ExtractBoardGeometry( *boardB, theme.comparison ),
                 [boardA, boardB, color = theme.reference]( WIDGET_DIFF_CANVAS& aCanvas, const KIID_PATH& )
                 {
                     KICAD_DIFF::ConfigurePcbDiffCanvasContext( aCanvas, boardA, boardB, color );
@@ -4942,11 +5010,6 @@ int PCBNEW_JOBS_HANDLER::OpenDiffDialog( KICAD_DIFF::DOC_KIND aKind, const wxStr
     }
     case KICAD_DIFF::DOC_KIND::FP_LIB:
     {
-        std::vector<std::unique_ptr<FOOTPRINT>>  ownersA;
-        std::vector<std::unique_ptr<FOOTPRINT>>  ownersB;
-        KICAD_DIFF::FP_LIB_DIFFER::FOOTPRINT_MAP mapA;
-        KICAD_DIFF::FP_LIB_DIFFER::FOOTPRINT_MAP mapB;
-
         if( int rc = loadFootprintLibrarySide( aFileA, ownersA, mapA, true, *m_reporter );
             rc != CLI::EXIT_CODES::SUCCESS )
         {
@@ -4959,63 +5022,47 @@ int PCBNEW_JOBS_HANDLER::OpenDiffDialog( KICAD_DIFF::DOC_KIND aKind, const wxStr
             return rc;
         }
 
-        KICAD_DIFF::FP_LIB_DIFFER differ( mapA, mapB, aFileB );
-        result = differ.Diff();
-
-        const KICAD_DIFF::DIFF_COLOR_THEME theme;
-        refGeometry = footprintLibraryGeometry( mapA, theme.reference );
-        compGeometry = footprintLibraryGeometry( mapB, theme.comparison );
         break;
     }
     case KICAD_DIFF::DOC_KIND::FOOTPRINT:
     {
-        std::unique_ptr<FOOTPRINT> footprintA;
-        std::unique_ptr<FOOTPRINT> footprintB;
+        const wxString nameA = wxFileName( aFileA ).GetName();
+        const wxString nameB = wxFileName( aFileB ).GetName();
+        const wxString itemName = !nameB.IsEmpty() ? nameB : nameA;
 
-        try
+        auto loadSide = [&]( const wxString& aPath, std::vector<std::unique_ptr<FOOTPRINT>>& aOwners,
+                             KICAD_DIFF::FP_LIB_DIFFER::FOOTPRINT_MAP& aMap ) -> bool
         {
-            footprintA = loadFootprintFile( aFileA );
-        }
-        catch( const IO_ERROR& ioe )
-        {
-            m_reporter->Report( wxString::Format( _( "Failed to load %s: %s\n" ), aFileA, ioe.What() ),
-                                RPT_SEVERITY_ERROR );
+            if( aPath.IsEmpty() )
+                return true;
+
+            wxFileName fn( aPath );
+            fn.MakeAbsolute();
+
+            try
+            {
+                // The footprint name inside a .kicad_mod need not match its filename
+                PCB_IO_KICAD_SEXPR io;
+                wxString           name;
+
+                if( std::unique_ptr<FOOTPRINT> footprint = io.ImportFootprint( fn.GetFullPath(), name ) )
+                {
+                    aMap[itemName] = footprint.get();
+                    aOwners.push_back( std::move( footprint ) );
+                }
+
+                return true;
+            }
+            catch( const IO_ERROR& ioe )
+            {
+                m_reporter->Report( wxString::Format( _( "Failed to load %s: %s\n" ), aPath, ioe.What() ),
+                                    RPT_SEVERITY_ERROR );
+                return false;
+            }
+        };
+
+        if( !loadSide( aFileA, ownersA, mapA ) || !loadSide( aFileB, ownersB, mapB ) )
             return CLI::EXIT_CODES::ERR_INVALID_INPUT_FILE;
-        }
-
-        try
-        {
-            footprintB = loadFootprintFile( aFileB );
-        }
-        catch( const IO_ERROR& ioe )
-        {
-            m_reporter->Report( wxString::Format( _( "Failed to load %s: %s\n" ), aFileB, ioe.What() ),
-                                RPT_SEVERITY_ERROR );
-            return CLI::EXIT_CODES::ERR_INVALID_INPUT_FILE;
-        }
-
-        KICAD_DIFF::FP_LIB_DIFFER::FOOTPRINT_MAP mapA;
-        KICAD_DIFF::FP_LIB_DIFFER::FOOTPRINT_MAP mapB;
-        const wxString                           nameA = wxFileName( aFileA ).GetName();
-        const wxString                           nameB = wxFileName( aFileB ).GetName();
-        const wxString                           itemName = !nameB.IsEmpty() ? nameB : nameA;
-
-        if( footprintA )
-            mapA[itemName] = footprintA.get();
-
-        if( footprintB )
-            mapB[itemName] = footprintB.get();
-
-        KICAD_DIFF::FP_LIB_DIFFER differ( mapA, mapB, aFileB );
-        result = differ.Diff();
-
-        const KICAD_DIFF::DIFF_COLOR_THEME theme;
-
-        if( footprintA )
-            refGeometry = KICAD_DIFF::ExtractFootprintGeometry( *footprintA, theme.reference );
-
-        if( footprintB )
-            compGeometry = KICAD_DIFF::ExtractFootprintGeometry( *footprintB, theme.comparison );
 
         break;
     }
@@ -5024,10 +5071,21 @@ int PCBNEW_JOBS_HANDLER::OpenDiffDialog( KICAD_DIFF::DOC_KIND aKind, const wxStr
         return CLI::EXIT_CODES::ERR_ARGS;
     }
 
-    const wxString labelA = aLabelA.IsEmpty() ? aFileA : aLabelA;
-    const wxString labelB = aLabelB.IsEmpty() ? aFileB : aLabelB;
+    KICAD_DIFF::FP_LIB_DIFFER differ( mapA, mapB, aFileB );
+    KICAD_DIFF::DOCUMENT_DIFF result = differ.Diff();
 
-    DIALOG_KICAD_DIFF dlg( parent, labelA, labelB, result, std::move( refGeometry ), std::move( compGeometry ) );
+    const KICAD_DIFF::DIFF_COLOR_THEME theme;
+
+    DIALOG_KICAD_DIFF dlg( parent, labelA, labelB, result,
+                           KICAD_DIFF::ExtractFootprintGeometry( mapA, theme.reference ),
+                           KICAD_DIFF::ExtractFootprintGeometry( mapB, theme.comparison ) );
+
+    dlg.DrawChosenLibraryItem(
+            [&]( WIDGET_DIFF_CANVAS& aCanvas, const wxString& aName )
+            {
+                KICAD_DIFF::ShowFootprintPair( aCanvas, mapA, mapB, aName );
+            } );
+
     dlg.ShowModal();
 
     return CLI::EXIT_CODES::SUCCESS;
@@ -5043,7 +5101,7 @@ int PCBNEW_JOBS_HANDLER::OpenDiffDialog( KICAD_DIFF::DOC_KIND aKind, const wxStr
 
 int PCBNEW_JOBS_HANDLER::runFpLibMerge( const wxString& aAncestor, const wxString& aOurs,
                                         const wxString& aTheirs, const wxString& aOutput,
-                                        bool aSingleFile )
+                                        bool aInteractive, bool aSingleFile )
 {
     if( aOutput.IsEmpty() )
     {
@@ -5133,6 +5191,52 @@ int PCBNEW_JOBS_HANDLER::runFpLibMerge( const wxString& aAncestor, const wxStrin
 
     KICAD_DIFF::KICAD_MERGE_ENGINE engine;
     KICAD_DIFF::MERGE_PLAN         plan = engine.Plan( ourDocDiff, theirDocDiff );
+
+    // Footprint edits are never combined, so one edited on both sides stays a conflict
+    KICAD_DIFF::SettleLibraryMerges(
+            plan,
+            []( const KIID_PATH& )
+            {
+                return false;
+            },
+            KICAD_DIFF::EditedNamesIn( ourDocDiff, theirDocDiff ) );
+
+    if( aInteractive && !KICAD_DIFF::BuildConflictList( plan ).empty() )
+    {
+        if( !DIALOG_KICAD_MERGE_3WAY::CanOpen( *m_reporter ) )
+            return CLI::EXIT_CODES::ERR_ARGS;
+
+        std::set<wxString> names;
+
+        for( const KICAD_DIFF::FP_LIB_DIFFER::FOOTPRINT_MAP* side : { &ancestor.map, &ours.map, &theirs.map } )
+        {
+            for( const auto& [name, footprint] : *side )
+                names.insert( name );
+        }
+
+        // Each side is drawn over the common version so its own edits stand out
+        auto ctx = DIALOG_KICAD_MERGE_3WAY::LibraryContext(
+                names,
+                [&]( WIDGET_DIFF_CANVAS& aCanvas, DIALOG_KICAD_MERGE_3WAY::SIDE aSide, const wxString& aName )
+                {
+                    const KICAD_DIFF::FP_LIB_DIFFER::FOOTPRINT_MAP* side = &ours.map;
+
+                    if( aSide == DIALOG_KICAD_MERGE_3WAY::SIDE::THEIRS )
+                        side = &theirs.map;
+                    else if( aSide == DIALOG_KICAD_MERGE_3WAY::SIDE::ANCESTOR )
+                        side = &ancestor.map;
+
+                    KICAD_DIFF::ShowFootprintPair( aCanvas, ancestor.map, *side, aName );
+                } );
+
+        DIALOG_KICAD_MERGE_3WAY dlg( wxTheApp->GetTopWindow(), plan, std::move( ctx ) );
+
+        // Cancelling leaves the conflicts unresolved and the files untouched
+        if( dlg.ShowModal() != wxID_APPLY )
+            return CLI::EXIT_CODES::ERR_CANCELLED;
+
+        plan = dlg.GetResolvedPlan();
+    }
 
     const KICAD_DIFF::MERGE_PLAN planSnapshot = plan;
 

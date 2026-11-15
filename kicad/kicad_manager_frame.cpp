@@ -660,7 +660,7 @@ void KICAD_MANAGER_FRAME::setupUIConditions()
     activeProjectCond.Enable( activeProject );
 
     manager->SetConditions( ACTIONS::saveAs,                       activeProjectCond );
-    manager->SetConditions( KICAD_MANAGER_ACTIONS::exportForOlderVersion, activeProjectCond );
+    manager->SetConditions( ACTIONS::exportForOlderVersion, activeProjectCond );
     manager->SetConditions( KICAD_MANAGER_ACTIONS::closeProject,   activeProjectCond );
     manager->SetConditions( KICAD_MANAGER_ACTIONS::archiveProject, activeProjectCond );
     manager->SetConditions( KICAD_MANAGER_ACTIONS::newJobsetFile,  activeProjectCond );
@@ -1258,7 +1258,8 @@ bool KICAD_MANAGER_FRAME::LoadProject( const wxFileName& aProjectFileName )
         if( dlg.ShowModal() == wxID_YES )
         {
             // The dialog above is the confirmation, skip RestoreCommit's own prompt.
-            Kiway().LocalHistory().RestoreCommit( Prj().GetProjectPath(), head, this, false );
+            if( Kiway().LocalHistory().RestoreCommit( Prj().GetProjectPath(), head, this, false ) )
+                reloadProjectSettings();
         }
         else
         {
@@ -1925,12 +1926,7 @@ void KICAD_MANAGER_FRAME::ProjectChanged()
 
     // Register project file saver. Ensures project file participates in
     // autosave history commits without affecting dirty state.
-    Kiway().LocalHistory().RegisterSaver( &Prj(),
-            [this]( const wxString& aProjectPath, std::vector<HISTORY_FILE_DATA>& aFileData )
-            {
-                Prj().SaveToHistory( aProjectPath, aFileData );
-            },
-            Prj().GetHistoryLifetimeToken() );
+    Kiway().LocalHistory().RegisterProjectSaver( &Prj() );
 }
 
 
@@ -2131,6 +2127,14 @@ void KICAD_MANAGER_FRAME::ToggleLocalHistory()
 }
 
 
+void KICAD_MANAGER_FRAME::reloadProjectSettings()
+{
+    // Editors take the project settings from memory, which still hold what the restore replaced
+    Prj().GetProjectFile().LoadFromFile( Prj().GetProjectPath() );
+    Prj().GetLocalSettings().LoadFromFile( Prj().GetProjectPath() );
+}
+
+
 void KICAD_MANAGER_FRAME::RestoreCommitFromHistory( const wxString& aHash )
 {
     if( !Kiway().PlayersClose( true ) )
@@ -2139,6 +2143,7 @@ void KICAD_MANAGER_FRAME::RestoreCommitFromHistory( const wxString& aHash )
     if( Kiway().LocalHistory().RestoreCommit( Prj().GetProjectPath(), aHash, this ) )
     {
         m_restoredFromHistory = true;  // Mark editors dirty when they reopen
+        reloadProjectSettings();
     }
 
     m_projectTreePane->ReCreateTreePrj();

@@ -33,6 +33,7 @@
 #include <base_units.h>
 #include <bitmap_base.h>
 #include <common.h> // ExpandTextVars
+#include <core/leak_at_exit.h>
 #include <wildcards_and_files_ext.h>
 #include <build_version.h>
 #include <sch_selection.h>
@@ -86,7 +87,10 @@ SCH_IO_KICAD_SEXPR::SCH_IO_KICAD_SEXPR() : SCH_IO( wxS( "Eeschema s-expression" 
 
 SCH_IO_KICAD_SEXPR::~SCH_IO_KICAD_SEXPR()
 {
-    delete m_cache;
+    if( m_leakCacheAtExit )
+        LSAN_IGNORE( m_cache );
+    else
+        delete m_cache;
 }
 
 
@@ -376,7 +380,7 @@ void SCH_IO_KICAD_SEXPR::loadFile( const wxString& aFileName, SCH_SHEET* aSheet 
 
         for( const auto& [name, terms] : parser.GetNetChainTerminalRefs() )
         {
-            termRefs[name] = { { terms.first.ref, terms.first.pin }, { terms.second.ref, terms.second.pin } };
+            termRefs[name] = { { terms.first.refDes, terms.first.pinNum }, { terms.second.refDes, terms.second.pinNum } };
         }
 
         m_schematic->ConnectionGraph()->SetNetChainTerminalRefOverrides( termRefs );
@@ -402,7 +406,7 @@ void SCH_IO_KICAD_SEXPR::LoadContent( LINE_READER& aReader, SCH_SHEET* aSheet, i
 
         for( const auto& [name, terms] : parser.GetNetChainTerminalRefs() )
         {
-            termRefs[name] = { { terms.first.ref, terms.first.pin }, { terms.second.ref, terms.second.pin } };
+            termRefs[name] = { { terms.first.refDes, terms.first.pinNum }, { terms.second.refDes, terms.second.pinNum } };
         }
 
         m_schematic->ConnectionGraph()->SetNetChainTerminalRefOverrides( termRefs );
@@ -411,27 +415,24 @@ void SCH_IO_KICAD_SEXPR::LoadContent( LINE_READER& aReader, SCH_SHEET* aSheet, i
 }
 
 
-void SCH_IO_KICAD_SEXPR::SaveSchematicFile( const wxString& aFileName, SCH_SHEET* aSheet,
-                                            SCHEMATIC*             aSchematic,
+void SCH_IO_KICAD_SEXPR::SaveSchematicFile( const wxString& aFileName, SCH_SHEET* aSheet, SCHEMATIC* aSchematic,
                                             const std::map<std::string, UTF8>* aProperties )
 {
     wxCHECK_RET( aSheet != nullptr, "NULL SCH_SHEET object." );
     wxCHECK_RET( !aFileName.IsEmpty(), "No schematic file name defined." );
+    wxCHECK_RET( aSheet->GetScreen(), "Sheet has no screen." );
 
-    if( aSheet->GetScreen() )
+    wxString sanityResult = aSheet->GetScreen()->GroupsSanityCheck();
+
+    if( sanityResult != wxEmptyString && m_queryUserCallback )
     {
-        wxString sanityResult = aSheet->GetScreen()->GroupsSanityCheck();
-
-        if( sanityResult != wxEmptyString && m_queryUserCallback )
+        if( !m_queryUserCallback( _( "Internal Group Data Error" ), wxICON_ERROR,
+                                  wxString::Format( _( "Error validating group structure: %s\n\n"
+                                                       "Please report this bug." ),
+                                                    sanityResult ),
+                                  _( "Save Anyway" ) ) )
         {
-            if( !m_queryUserCallback( _( "Internal Group Data Error" ), wxICON_ERROR,
-                                      wxString::Format( _( "Please report this bug.  Error validating group "
-                                                           "structure: %s\n\nSave anyway?" ),
-                                                        sanityResult ),
-                                      _( "Save Anyway" ) ) )
-            {
-                return;
-            }
+            return;
         }
     }
 
@@ -445,8 +446,7 @@ void SCH_IO_KICAD_SEXPR::SaveSchematicFile( const wxString& aFileName, SCH_SHEET
     FormatSchematicToFormatter( &formatter, aSheet, aSchematic, aProperties );
     formatter.Finish();
 
-    if( aSheet->GetScreen() )
-        aSheet->GetScreen()->SetFileExists( true );
+    aSheet->GetScreen()->SetFileExists( true );
 }
 
 
@@ -791,14 +791,14 @@ void SCH_IO_KICAD_SEXPR::formatSheetContents( SCH_SHEET* aSheet, const SCH_SHEET
 
             const SCH_NETCHAIN& sig = *sigPtr;
 
-            if( sig.GetTerminalRef( 0 ).IsEmpty() || sig.GetTerminalRef( 1 ).IsEmpty() )
+            if( sig.GetTerminalRefDes( 0 ).IsEmpty() || sig.GetTerminalRefDes( 1 ).IsEmpty() )
                 continue;
 
             m_out->Print( "(net_chain %s", m_out->Quotew( sig.GetName() ).c_str() );
 
-            m_out->Print( " (from %s %s)", m_out->Quotew( sig.GetTerminalRef( 0 ) ).c_str(),
+            m_out->Print( " (from %s %s)", m_out->Quotew( sig.GetTerminalRefDes( 0 ) ).c_str(),
                           m_out->Quotew( sig.GetTerminalPinNum( 0 ) ).c_str() );
-            m_out->Print( " (to %s %s)", m_out->Quotew( sig.GetTerminalRef( 1 ) ).c_str(),
+            m_out->Print( " (to %s %s)", m_out->Quotew( sig.GetTerminalRefDes( 1 ) ).c_str(),
                           m_out->Quotew( sig.GetTerminalPinNum( 1 ) ).c_str() );
 
             if( !sig.GetNetClass().IsEmpty() )

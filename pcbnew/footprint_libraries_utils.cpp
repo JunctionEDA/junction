@@ -35,7 +35,6 @@
 #include <tool/tool_manager.h>
 #include <tools/pcb_actions.h>
 #include <tools/board_editor_control.h>
-#include <tools/pad_tool.h>
 #include <footprint.h>
 #include <zone.h>
 #include <pcb_group.h>
@@ -671,8 +670,7 @@ bool FOOTPRINT_EDIT_FRAME::DeleteFootprintFromLibrary( const LIB_ID& aFPID, bool
 }
 
 
-void PCB_EDIT_FRAME::ExportFootprintsToLibrary( bool aStoreInNewLib, const wxString& aLibName,
-                                                wxString* aLibPath )
+void PCB_EDIT_FRAME::ExportFootprintsToLibrary( bool aStoreInNewLib )
 {
     if( GetBoard()->GetFirstFootprint() == nullptr )
     {
@@ -704,23 +702,7 @@ void PCB_EDIT_FRAME::ExportFootprintsToLibrary( bool aStoreInNewLib, const wxStr
             return;
     }
 
-    if( !aLibName.IsEmpty() )
-        nickname = aLibName; // non-interactive callers
-
     prj.SetRString( PROJECT::PCB_LIB_NICKNAME, nickname );
-
-    if( aLibPath )
-    {
-        if( std::optional<wxString> optUri =
-                    Pgm().GetLibraryManager().GetFullURI( LIBRARY_TABLE_TYPE::FOOTPRINT, nickname ) )
-        {
-            *aLibPath = *optUri;
-        }
-        else
-        {
-            *aLibPath = nickname;
-        }
-    }
 
     for( FOOTPRINT* footprint : GetBoard()->Footprints() )
     {
@@ -768,10 +750,7 @@ bool FOOTPRINT_EDIT_FRAME::SaveFootprint( FOOTPRINT* aFootprint )
     if( !aFootprint )      // Happen if no footprint loaded
         return false;
 
-    PAD_TOOL* padTool = m_toolManager->GetTool<PAD_TOOL>();
-
-    if( padTool->InPadEditMode() )
-        m_toolManager->RunAction( PCB_ACTIONS::recombinePad );
+    recombineEditedPad();
 
     wxString libraryName = aFootprint->GetFPID().GetLibNickname();
     wxString footprintName = aFootprint->GetFPID().GetLibItemName();

@@ -20,9 +20,12 @@
 
 #include <kiplatform/ui.h>
 
+#include <algorithm>
+
 #include <wx/choice.h>
 #include <wx/dataview.h>
 #include <wx/dialog.h>
+#include <wx/display.h>
 #include <wx/nonownedwnd.h>
 #include <wx/popupwin.h>
 #include <wx/settings.h>
@@ -257,6 +260,38 @@ void KIPLATFORM::UI::StabilizeWindowPosition( wxWindow* aWindow )
 
     if( widget && GTK_IS_WINDOW( widget ) )
         gtk_window_set_gravity( GTK_WINDOW( widget ), GDK_GRAVITY_STATIC );
+}
+
+
+wxPoint KIPLATFORM::UI::GetRestorablePosition( wxWindow* aWindow )
+{
+    GtkWidget* widget = static_cast<GtkWidget*>( aWindow->GetHandle() );
+
+    if( aWindow->IsShown() && widget && GTK_IS_WINDOW( widget )
+        && gtk_window_get_gravity( GTK_WINDOW( widget ) ) == GDK_GRAVITY_STATIC )
+    {
+        if( GdkWindow* gdkWindow = gtk_widget_get_window( widget ) )
+        {
+            wxPoint      origin;
+            GdkRectangle frame;
+            gdk_window_get_origin( gdkWindow, &origin.x, &origin.y );
+            gdk_window_get_frame_extents( gdkWindow, &frame );
+
+            // Heal a position that crept up before static gravity, so the title bar comes back on screen
+            int displayIdx = wxDisplay::GetFromWindow( aWindow );
+
+            if( displayIdx != wxNOT_FOUND )
+            {
+                wxRect workArea = wxDisplay( (unsigned int) displayIdx ).GetClientArea();
+                origin.x += std::max( 0, workArea.x - frame.x );
+                origin.y += std::max( 0, workArea.y - frame.y );
+            }
+
+            return origin;
+        }
+    }
+
+    return aWindow->GetPosition();
 }
 
 
@@ -500,6 +535,78 @@ bool KIPLATFORM::UI::SupportsKeyState()
 }
 
 
+static gboolean onChoicePopupEvent( GtkWidget* aPopup, GdkEvent* aEvent, gpointer )
+{
+    if( aEvent->type == GDK_KEY_PRESS
+        && ( aEvent->key.keyval == GDK_KEY_Return || aEvent->key.keyval == GDK_KEY_KP_Enter )
+        && ( aEvent->key.state & GDK_SHIFT_MASK ) )
+    {
+        GtkWidget* selected = gtk_menu_shell_get_selected_item( GTK_MENU_SHELL( aPopup ) );
+
+        if( selected )
+        {
+            gtk_menu_shell_activate_item( GTK_MENU_SHELL( aPopup ), selected, TRUE );
+            return TRUE;
+        }
+    }
+
+    return FALSE;
+}
+
+
+static void onChoicePopupHidden( GtkWidget* aPopup, gpointer )
+{
+    g_signal_handlers_disconnect_by_func( aPopup, reinterpret_cast<gpointer>( onChoicePopupEvent ), nullptr );
+    g_signal_handlers_disconnect_by_func( aPopup, reinterpret_cast<gpointer>( onChoicePopupHidden ), nullptr );
+}
+
+
+bool KIPLATFORM::UI::PrepareChoicePopup( wxWindow* aControl )
+{
+    GtkWidget* popup = gtk_grab_get_current();
+
+    if( !GTK_IS_MENU( popup ) || gtk_menu_get_attach_widget( GTK_MENU( popup ) ) != aControl->GetHandle() )
+        return false;
+
+    g_signal_handlers_disconnect_by_func( popup, reinterpret_cast<gpointer>( onChoicePopupEvent ), nullptr );
+    g_signal_handlers_disconnect_by_func( popup, reinterpret_cast<gpointer>( onChoicePopupHidden ), nullptr );
+    g_signal_connect( popup, "event", G_CALLBACK( onChoicePopupEvent ), nullptr );
+    g_signal_connect( popup, "hide", G_CALLBACK( onChoicePopupHidden ), nullptr );
+    return true;
+}
+
+
+wxKeyEvent KIPLATFORM::UI::GetNativePopupDismissalEvent()
+{
+    wxKeyEvent key;
+    GdkEvent*  event = gtk_get_current_event();
+
+    if( event )
+    {
+        guint keyval = 0;
+
+        if( gdk_event_get_keyval( event, &keyval ) )
+        {
+            switch( keyval )
+            {
+            case GDK_KEY_Return: key.m_keyCode = WXK_RETURN; break;
+            case GDK_KEY_KP_Enter: key.m_keyCode = WXK_NUMPAD_ENTER; break;
+            case GDK_KEY_Escape: key.m_keyCode = WXK_ESCAPE; break;
+            }
+
+            key.SetShiftDown( event->key.state & GDK_SHIFT_MASK );
+            key.SetControlDown( event->key.state & GDK_CONTROL_MASK );
+            key.SetAltDown( event->key.state & GDK_MOD1_MASK );
+            key.SetMetaDown( event->key.state & GDK_META_MASK );
+        }
+
+        gdk_event_free( event );
+    }
+
+    return key;
+}
+
+
 #if defined( GDK_WINDOWING_WAYLAND ) && defined( KICAD_WAYLAND )
 
 static bool wayland_warp_pointer( GtkWidget* aWidget, GdkDisplay* aDisplay, GdkWindow* aWindow,
@@ -643,6 +750,15 @@ void KIPLATFORM::UI::AllowNetworkFileSystems( wxDialog* aDialog )
 
     if( widget && GTK_IS_FILE_CHOOSER( widget ) )
         gtk_file_chooser_set_local_only( GTK_FILE_CHOOSER( widget ), FALSE );
+}
+
+
+int KIPLATFORM::UI::GetColumnWidth( const wxDataViewColumn* aColumn )
+{
+    int requested = gtk_tree_view_column_get_fixed_width( GTK_TREE_VIEW_COLUMN( aColumn->GetGtkHandle() ) );
+
+    // A column never given a width has no request to report
+    return requested > 0 ? requested : aColumn->GetWidth();
 }
 
 

@@ -67,6 +67,7 @@ public:
     int JobExportDrill( JOB* aJob );
     int JobExportPos( JOB* aJob );
     int JobExportFpUpgrade( JOB* aJob );
+    int JobFpDowngrade( JOB* aJob );
     int JobExportFpSvg( JOB* aJob );
     int JobExportDrc( JOB* aJob );
     int JobExportIpc2581( JOB* aJob );
@@ -101,7 +102,7 @@ private:
     int runPcbMerge( const wxString& aAncestor, const wxString& aOurs, const wxString& aTheirs,
                      const wxString& aOutput, bool aInteractive );
     int runFpLibMerge( const wxString& aAncestor, const wxString& aOurs, const wxString& aTheirs,
-                       const wxString& aOutput, bool aSingleFile );
+                       const wxString& aOutput, bool aInteractive, bool aSingleFile );
 
 public:
 

@@ -1299,7 +1299,7 @@ void PCB_IO_IPC2581::addShape( wxXmlNode* aContentNode, const PAD& aPad, PCB_LAY
 
 void PCB_IO_IPC2581::addShape( wxXmlNode* aContentNode, const PCB_SHAPE& aShape, bool aInline )
 {
-    size_t hash = hash_fp_item( &aShape, HASH_POS | RELATIVE_TO_PARENT_COORDS );
+    size_t hash = hash_fp_item( &aShape, HASH_POS );
     auto iter = m_user_shape_dict.find( hash );
     wxString name;
 
@@ -1422,31 +1422,37 @@ void PCB_IO_IPC2581::addShape( wxXmlNode* aContentNode, const PCB_SHAPE& aShape,
         int width = std::abs( aShape.GetRectangleWidth() );
         int height = std::abs( aShape.GetRectangleHeight() );
         int stroke_width = aShape.GetStroke().GetWidth();
-        int corner_radius = aShape.GetCornerRadius();
-
-        wxXmlNode* rect_node = appendNode( special_node, "RectRound" );
-        addLineDesc( rect_node, aShape.GetStroke().GetWidth(), aShape.GetStroke().GetLineStyle(), true );
-
-        // RectRound rounds only the corners whose flag is set. KiCad rounds all four when the
-        // rectangle carries a corner radius, so drive the flags off the radius rather than the
-        // fill mode. A filled rect is grown by the stroke width the same as before.
-        wxString cornerFlag = corner_radius > 0 ? "true" : "false";
-        addAttribute( rect_node, "upperRight", cornerFlag );
-        addAttribute( rect_node, "upperLeft", cornerFlag );
-        addAttribute( rect_node, "lowerRight", cornerFlag );
-        addAttribute( rect_node, "lowerLeft", cornerFlag );
+        int radius = aShape.GetCornerRadius();
 
         if( aShape.GetFillMode() != FILL_T::NO_FILL )
         {
+            // IPC2581 does not allow strokes on filled elements, so fold the stroke into the
+            // body; the round stroke joins also round the corners by half the stroke width.
             width += stroke_width;
             height += stroke_width;
+            radius += stroke_width / 2;
         }
+
+        // A rectangle with square corners must be a RectCenter: RectRound requires at least
+        // one rounded corner (IPC-2581C 3.5.9.14).
+        wxXmlNode* rect_node = appendNode( special_node, radius > 0 ? "RectRound" : "RectCenter" );
+
+        if( aShape.GetFillMode() == FILL_T::NO_FILL )
+            addLineDesc( rect_node, stroke_width, aShape.GetStroke().GetLineStyle(), true );
 
         addFillDesc( rect_node, aShape.GetFillMode() );
 
         addAttribute( rect_node, "width", floatVal( m_scale * width ) );
         addAttribute( rect_node, "height", floatVal( m_scale * height ) );
-        addAttribute( rect_node, "radius", floatVal( m_scale * corner_radius ) );
+
+        if( radius > 0 )
+        {
+            addAttribute( rect_node, "radius", floatVal( m_scale * radius ) );
+            addAttribute( rect_node, "upperRight", "true" );
+            addAttribute( rect_node, "upperLeft", "true" );
+            addAttribute( rect_node, "lowerRight", "true" );
+            addAttribute( rect_node, "lowerLeft", "true" );
+        }
 
         break;
     }
@@ -1909,7 +1915,7 @@ wxXmlNode* PCB_IO_IPC2581::generateBOMSection( wxXmlNode* aEcadNode )
         addAttribute( stepRefNode,  "name", genString( fn.GetName(), "BOARD" ) );
     }
 
-    for( const auto& entry : bom_entries )
+    for( const std::unique_ptr<BOM_ENTRY>& entry : bom_entries )
     {
         wxXmlNode* bomEntryNode = appendNode( bomNode, "BomItem" );
         addAttribute( bomEntryNode,  "OEMDesignNumberRef", entry->m_OEMDesignRef );
@@ -2471,7 +2477,7 @@ void PCB_IO_IPC2581::generateAuxilliaryLayers( wxXmlNode* aCadLayerNode )
                 new_layers.emplace_back( auxLayerType::TENTING, layer, UNDEFINED_LAYER );
         }
 
-        for( auto& tuple : new_layers )
+        for( std::tuple<auxLayerType, PCB_LAYER_ID, PCB_LAYER_ID>& tuple : new_layers )
             m_auxilliary_Layers[tuple].push_back( via );
     }
 
@@ -3474,7 +3480,7 @@ wxXmlNode* PCB_IO_IPC2581::addPackage( wxXmlNode* aContentNode, FOOTPRINT* aFp )
     std::map<PCB_LAYER_ID, wxXmlNode*> layer_nodes;
     std::map<PCB_LAYER_ID, BOX2I> layer_bbox;
 
-    for( auto layer : { F_Fab, B_Fab } )
+    for( PCB_LAYER_ID layer : { F_Fab, B_Fab } )
     {
         if( elements.find( layer ) != elements.end() )
         {
@@ -3568,7 +3574,7 @@ wxXmlNode* PCB_IO_IPC2581::addPackage( wxXmlNode* aContentNode, FOOTPRINT* aFp )
         }
     }
 
-    for( auto&[layer, bbox] : layer_bbox )
+    for( auto& [layer, bbox] : layer_bbox )
     {
         if( bbox.GetWidth() > 0 )
         {
@@ -3988,8 +3994,7 @@ void PCB_IO_IPC2581::generateLayerSetDrill( wxXmlNode* aLayerNode )
 
                 if( it == m_padstack_dict.end() )
                 {
-                    Report( _( "Via uses unsupported padstack; omitted from drill data." ),
-                            RPT_SEVERITY_WARNING );
+                    Report( _( "Via uses unsupported padstack; omitted from drill data." ), RPT_SEVERITY_WARNING );
                     continue;
                 }
 

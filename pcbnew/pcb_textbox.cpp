@@ -97,6 +97,7 @@ void PCB_TEXTBOX::Serialize( kiapi::board::types::BoardTextBox& boardText ) cons
     text.mutable_margin_bottom()->set_value_nm( GetMarginBottom() );
 
     boardText.set_knockout( IsKnockout() );
+    kiapi::common::PackStroke( *boardText.mutable_border_stroke(), GetStroke() );
 
     if( FOOTPRINT* parent = GetParentFootprint() )
         boardText.mutable_parent()->set_value( parent->m_Uuid.AsStdString() );
@@ -153,6 +154,13 @@ bool PCB_TEXTBOX::Deserialize( const kiapi::board::types::BoardTextBox& boardTex
 
     SetBorderEnabled( text.border_enabled() );
     SetIsKnockout( boardText.knockout() );
+
+    if( boardText.has_border_stroke() )
+    {
+        STROKE_PARAMS stroke;
+        kiapi::common::UnpackStroke( stroke, boardText.border_stroke() );
+        SetStroke( stroke );
+    }
 
     kiapi::common::UnpackCustomProperties( boardText.custom_properties(), *this );
 
@@ -1030,7 +1038,8 @@ bool PCB_TEXTBOX::operator==( const BOARD_ITEM& aBoardItem ) const
 
 bool PCB_TEXTBOX::operator==( const PCB_TEXTBOX& aOther ) const
 {
-    return m_borderEnabled == aOther.m_borderEnabled && EDA_TEXT::operator==( aOther );
+    return m_borderEnabled == aOther.m_borderEnabled && EDA_TEXT::operator==( aOther )
+           && PCB_SHAPE::operator==( static_cast<const PCB_SHAPE&>( aOther ) );
 }
 
 
@@ -1108,7 +1117,8 @@ static struct PCB_TEXTBOX_DESC
 
         propMgr.AddProperty( new PROPERTY<PCB_TEXTBOX, bool, BOARD_ITEM>( _HKI( "Knockout" ),
                     &BOARD_ITEM::SetIsKnockout, &BOARD_ITEM::IsKnockout ),
-                    _HKI( "Text Properties" ) ).SetIsCopyable();
+                    _HKI( "Text Properties" ) )
+                .SetIsCopyable();
 
         const wxString borderProps = _( "Border Properties" );
 
@@ -1117,30 +1127,37 @@ static struct PCB_TEXTBOX_DESC
 
         propMgr.AddProperty( new PROPERTY<PCB_TEXTBOX, bool>( _HKI( "Border" ),
                     &PCB_TEXTBOX::SetBorderEnabled, &PCB_TEXTBOX::IsBorderEnabled ),
-                    borderProps ).SetIsCopyable();
+                    borderProps )
+                .SetIsCopyable();
 
         propMgr.AddProperty( new PROPERTY_ENUM<PCB_TEXTBOX, LINE_STYLE>( _HKI( "Border Style" ),
                     lineStyleSetter, lineStyleGetter ),
-                    borderProps ).SetIsCopyable();
+                    borderProps )
+            .SetIsCopyable();
 
         propMgr.AddProperty( new PROPERTY<PCB_TEXTBOX, int>( _HKI( "Border Width" ),
                     &PCB_TEXTBOX::SetBorderWidth, &PCB_TEXTBOX::GetBorderWidth, PROPERTY_DISPLAY::PT_SIZE ),
-                    borderProps ).SetIsCopyable();
+                    borderProps )
+                .SetIsCopyable();
 
         const wxString marginProps = _( "Margins" );
 
         propMgr.AddProperty( new PROPERTY<PCB_TEXTBOX, int>( _HKI( "Margin Left" ),
                     &PCB_TEXTBOX::SetMarginLeft, &PCB_TEXTBOX::GetMarginLeft, PROPERTY_DISPLAY::PT_SIZE ),
-                    marginProps ).SetIsCopyable();
+                    marginProps )
+                .SetIsCopyable();
         propMgr.AddProperty( new PROPERTY<PCB_TEXTBOX, int>( _HKI( "Margin Top" ),
                     &PCB_TEXTBOX::SetMarginTop, &PCB_TEXTBOX::GetMarginTop, PROPERTY_DISPLAY::PT_SIZE ),
-                    marginProps ).SetIsCopyable();
+                    marginProps )
+                .SetIsCopyable();
         propMgr.AddProperty( new PROPERTY<PCB_TEXTBOX, int>( _HKI( "Margin Right" ),
                     &PCB_TEXTBOX::SetMarginRight, &PCB_TEXTBOX::GetMarginRight, PROPERTY_DISPLAY::PT_SIZE ),
-                    marginProps ).SetIsCopyable();
+                    marginProps )
+                .SetIsCopyable();
         propMgr.AddProperty( new PROPERTY<PCB_TEXTBOX, int>( _HKI( "Margin Bottom" ),
                     &PCB_TEXTBOX::SetMarginBottom, &PCB_TEXTBOX::GetMarginBottom, PROPERTY_DISPLAY::PT_SIZE ),
-                    marginProps ).SetIsCopyable();
+                    marginProps )
+                .SetIsCopyable();
 
         propMgr.Mask( TYPE_HASH( PCB_TEXTBOX ), TYPE_HASH( EDA_TEXT ), _HKI( "Hyperlink" ) );
     }

@@ -606,11 +606,19 @@ void SYMBOL_EDIT_FRAME::setupUIConditions()
                 return IsSymbolEditable() && m_symbol && m_symbol->CanUpdateFieldsFromParent();
             };
 
-    auto symbolModifiedCondition =
+    auto revertableCondition =
             [this]( const SELECTION& sel )
             {
-                return m_libMgr && m_libMgr->IsSymbolModified( GetTargetLibId().GetLibItemName(),
-                                                               GetTargetLibId().GetLibNickname() );
+                if( !m_libMgr )
+                    return false;
+
+                const LIB_ID target = GetTargetLibId();
+
+                // A library row reverts the whole library
+                if( target.GetLibItemName().empty() )
+                    return m_libMgr->IsLibraryModified( target.GetLibNickname() );
+
+                return m_libMgr->IsSymbolModified( target.GetLibItemName(), target.GetLibNickname() );
             };
 
     auto libSelectedCondition =
@@ -648,6 +656,7 @@ void SYMBOL_EDIT_FRAME::setupUIConditions()
     mgr->SetConditions( ACTIONS::saveAll,                       ENABLE( SELECTION_CONDITIONS::ShowAlways ) );
     mgr->SetConditions( ACTIONS::save,                          ENABLE( SELECTION_CONDITIONS::ShowAlways ) );
     mgr->SetConditions( SCH_ACTIONS::saveLibraryAs,             ENABLE( libSelectedCondition ) );
+    mgr->SetConditions( ACTIONS::exportForOlderVersion,         ENABLE( libSelectedCondition ) );
     mgr->SetConditions( SCH_ACTIONS::saveSymbolAs,              ENABLE( saveSymbolAsCondition ) );
     mgr->SetConditions( SCH_ACTIONS::saveSymbolCopyAs,          ENABLE( saveSymbolAsCondition ) );
     mgr->SetConditions( SCH_ACTIONS::newSymbol,                 ENABLE( SELECTION_CONDITIONS::ShowAlways ) );
@@ -656,7 +665,7 @@ void SYMBOL_EDIT_FRAME::setupUIConditions()
 
     mgr->SetConditions( ACTIONS::undo,                ENABLE( haveSymbolCond && cond.UndoAvailable() ) );
     mgr->SetConditions( ACTIONS::redo,                ENABLE( haveSymbolCond && cond.RedoAvailable() ) );
-    mgr->SetConditions( ACTIONS::revert,              ENABLE( symbolModifiedCondition ) );
+    mgr->SetConditions( ACTIONS::revert,              ENABLE( revertableCondition ) );
 
     mgr->SetConditions( ACTIONS::toggleGrid,          CHECK( cond.GridVisible() ) );
     mgr->SetConditions( ACTIONS::toggleGridOverrides, CHECK( cond.GridOverrides() ) );
@@ -1623,6 +1632,10 @@ void SYMBOL_EDIT_FRAME::SyncLibraries( bool aShowProgress, bool aPreloadCancelle
         for( const LIB_ID& libId : expanded )
             GetLibTree()->ExpandLibId( libId );
 
+        // A filter selects its best match, which tree actions would take for the user's choice
+        if( selected.GetLibNickname().empty() )
+            GetLibTree()->Unselect();
+
         // Try to select the parent library, in case the symbol is not found
         if( !found && selected.IsValid() )
         {
@@ -2264,6 +2277,13 @@ bool SYMBOL_EDIT_FRAME::IsContentModified() const
     }
 
     return false;
+}
+
+
+bool SYMBOL_EDIT_FRAME::hasUnsavedLibraryEdits( const wxString& aLibNickname ) const
+{
+    // Edits in any tab of the library live in its buffer, which a reload replaces
+    return SCH_BASE_FRAME::hasUnsavedLibraryEdits( aLibNickname ) || m_libMgr->IsLibraryModified( aLibNickname );
 }
 
 
