@@ -27,7 +27,7 @@ const M = (() => {
 const { SP, SL, L, W, BL } = M;
 SL.setNgspiceData(M.NGSPICE);
 const helpers = { symbolPins: sch._.symbolPins, isPower: (d, it) => sch._.isPowerSymbol(d, String((K.kid(it.node, "lib_id") || [])[1])) };
-const repo = (...p) => { const a = path.join(__dirname, "..", "..", "..", ...p); return fs.existsSync(a) ? a : path.join("/home/claude/kicad-collaborative", ...p); };
+const repo = (...p) => path.join(__dirname, "..", "..", "..", ...p);
 const DEMOS = repo("demos", "simulation"), QA = repo("qa", "data", "eeschema", "spice_netlists");
 const ALL = SP.OPTION_SAVE_ALL_VOLTAGES | SP.OPTION_SAVE_ALL_CURRENTS | SP.OPTION_SIM_COMMAND;
 
