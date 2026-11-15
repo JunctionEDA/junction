@@ -1590,7 +1590,11 @@ void KICAD_MANAGER_FRAME::DownloadStandardLibraries( bool aOffer )
                 state->stop = true;
             }
 
-            wxMilliSleep( 80 );
+            // Update() repaints but does not run the event loop on every platform: let the
+            // dialog (and only the dialog) have its events, so the application stays responsive
+            // and Cancel is seen.
+            wxSafeYield( &progress, true );
+            wxMilliSleep( 20 );
         }
     }
 
