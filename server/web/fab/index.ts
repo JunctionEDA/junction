@@ -30,6 +30,7 @@ import { gerberJobFile } from "./gbrjob";
 import { boardPage } from "./pageplot";
 import { type FillProgress, type FillRules, type ZoneFillResult, ZoneFiller, filledZoneNode, polyArea, storedFill } from "./zonefill";
 
+import { statAreas } from "./stats";
 import { meshVrml, vrmlModels, writeVrml, type VrmlOptions } from "./vrml";
 import { type OdbResult, legalEntityName, writeOdb } from "./odb";
 import { cmpFile, d356, footprintReport, legacyBom } from "./reports";
@@ -252,7 +253,7 @@ export const reports = {
   d356: (ctx: FabContext, skipUnconnected: boolean): string => { const m = modelOf(ctx); return d356(m, { job: projectNameOf(ctx), auxOrigin: m.settings.auxOrigin, skipUnconnected }); },
 };
 
-export const api = { odb, ipc2581, ipc2581Sections, reports, outlineText, vrmlModels: (ctx: FabContext) => vrmlModels(modelOf(ctx)), writeVrml: (ctx: FabContext, o: VrmlOptions, meshOf: Parameters<typeof writeVrml>[2]) => writeVrml(modelOf(ctx), o, meshOf), meshVrml, plotBoard, pluginPlot, drillJob, drillReport, markerParts, pnpGerber, pnpFileName, DEFAULT_VARIANT, variantNames: (variants: Node | null | undefined): string[] => boardVariantNames(variants || null, refCompare), writeSvg, writePdf, writePs, writeDxf, dxfTextString, writePng, paintPage, gerberJobFile, boardPage, plotFileName, outputPath, fillZones, filledZoneNode, storedFill, polyArea, PRESETS, presetById, plottableLayers, layerDisplayName, layerAttrs, protelExtension, model: modelOf, plotGerbers, drillFiles: drill, positions, bom: billOfMaterials, placementCsv, placementAscii, bomCsv,
+export const api = { statAreas: (ctx: FabContext, o: Parameters<typeof statAreas>[1]) => statAreas(modelOf(ctx), o), odb, ipc2581, ipc2581Sections, reports, outlineText, vrmlModels: (ctx: FabContext) => vrmlModels(modelOf(ctx)), writeVrml: (ctx: FabContext, o: VrmlOptions, meshOf: Parameters<typeof writeVrml>[2]) => writeVrml(modelOf(ctx), o, meshOf), meshVrml, plotBoard, pluginPlot, drillJob, drillReport, markerParts, pnpGerber, pnpFileName, DEFAULT_VARIANT, variantNames: (variants: Node | null | undefined): string[] => boardVariantNames(variants || null, refCompare), writeSvg, writePdf, writePs, writeDxf, dxfTextString, writePng, paintPage, gerberJobFile, boardPage, plotFileName, outputPath, fillZones, filledZoneNode, storedFill, polyArea, PRESETS, presetById, plottableLayers, layerDisplayName, layerAttrs, protelExtension, model: modelOf, plotGerbers, drillFiles: drill, positions, bom: billOfMaterials, placementCsv, placementAscii, bomCsv,
   jlcPlacement, buildPackage, packageZip, zip, tar, gzip, crc32, writeGerber, primPolys };
 export type KiCadFabApi = typeof api & { open?: () => void };
 // the canvas stores a text's outlines with it when it writes the item (canvas/export.ts ensureRenderCaches)

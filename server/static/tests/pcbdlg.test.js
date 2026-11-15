@@ -370,3 +370,41 @@ test("Outset Items: rectangles, circles, lines, arcs and pads", () => {
   r = O.outsetItems(fp, [pid("3")], P({ outset: 0.25, deleteSourceItems: true }));
   assert.equal(nodes(r).filter((x) => x[0] === "gr_arc").length, 4); assert.ok(!r.changes.some((c) => c.kind === "REMOVED"), "a pad is never deleted");
 });
+
+test("Board Statistics: counts, minimums, drill lines and the fab areas", () => {
+  const S = T.boardStats;
+  const d = K.parseDoc(`(kicad_pcb (version 20241229) (generator "pcbnew") (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (25 "Edge.Cuts" user))
+    (net 0 "") (net 1 "A") (net 2 "B")
+    (footprint "X:T" (layer "F.Cu") (uuid "f1") (at 5 5) (attr through_hole)
+      (pad "1" thru_hole circle (at 0 0) (size 1.6 1.6) (drill 0.8) (layers "*.Cu" "*.Mask") (net 1 "A") (uuid "p1"))
+      (pad "2" thru_hole oval (at 3 0) (size 1.6 2.4) (drill oval 0.8 1.6) (layers "*.Cu" "*.Mask") (property pad_prop_castellated) (net 2 "B") (uuid "p2")))
+    (footprint "X:S" (layer "B.Cu") (uuid "f2") (at 15 5) (attr smd) (pad "1" smd rect (at 0 0) (size 1 1) (layers "B.Cu") (uuid "p3")))
+    (footprint "X:L" (layer "F.Cu") (uuid "f3") (at 15 15))
+    (segment (start 0 10) (end 10 10) (width 0.25) (layer "F.Cu") (net 1) (uuid "s1"))
+    (segment (start 0 10.75) (end 10 10.75) (width 0.2) (layer "F.Cu") (net 2) (uuid "s2"))
+    (segment (start 0 10.4) (end 10 10.4) (width 0.2) (layer "B.Cu") (net 2) (uuid "s3"))
+    (via (at 12 10) (size 0.6) (drill 0.3) (layers "F.Cu" "B.Cu") (net 1) (uuid "v1"))
+    (via (at 14 10) (size 0.6) (drill 0.3) (layers "F.Cu" "B.Cu") (net 2) (uuid "v2"))
+    (gr_rect (start 0 0) (end 20 20) (stroke (width 0.1) (type default)) (fill no) (layer "Edge.Cuts") (uuid "e")))`, "kicad_pcb");
+  let s = S.boardStatsData(d, { excludeNoPads: false });
+  assert.deepEqual(s.footprints, [{ title: "THT:", front: 1, back: 0 }, { title: "SMD:", front: 0, back: 1 }, { title: "Unspecified:", front: 1, back: 0 }]);
+  assert.deepEqual(s.pads.map((p) => p.count), [2, 1, 0, 0, 0]); assert.equal(s.padTotal, 3); assert.equal(s.padProps[0].count, 1);
+  assert.deepEqual(s.vias.map((v) => v.count), [2, 0, 0, 0]);
+  assert.equal(s.minTrackWidth, 0.2);
+  // s1 / s2 on F.Cu: 0.75 apart, less 0.125 and 0.1 of copper; the vias are 2 mm apart less 0.6
+  assert.ok(Math.abs(s.minClearance - 0.525) < 1e-9, String(s.minClearance));
+  assert.equal(s.minDrill, 0.3);
+  assert.deepEqual(s.drills.map((x) => [x.count, x.shape, x.x, x.y, x.plated, x.pad, x.start, x.stop]), [[2, "Round", 0.3, 0.3, true, false, "F.Cu", "B.Cu"], [1, "Round", 0.8, 0.8, true, true, "F.Cu", "B.Cu"], [1, "Slot", 0.8, 1.6, true, true, "F.Cu", "B.Cu"]]);
+  assert.deepEqual([s.hasOutline, s.width, s.height], [true, 20, 20]);
+  s = S.boardStatsData(d, { excludeNoPads: true });
+  assert.equal(s.footprints[2].front, 0);
+  // the areas: board 400 mm², less the holes when asked
+  const FAB = loadTs("fab/index.ts");
+  const ctx = { doc: d, projectName: "demo", date: new Date(2026, 0, 1) };
+  const a = FAB.api.statAreas(ctx, { subtractHolesFromBoard: false, subtractHolesFromCopper: false, courtyards: T.courtyards });
+  assert.ok(Math.abs(a.boardArea - 400) < 1e-6 && a.hasOutline);
+  const b = FAB.api.statAreas(ctx, { subtractHolesFromBoard: true, subtractHolesFromCopper: true, courtyards: T.courtyards });
+  const holes = 2 * Math.PI * 0.15 * 0.15 + Math.PI * 0.4 * 0.4 + (0.8 * 0.8 + Math.PI * 0.4 * 0.4);
+  assert.ok(Math.abs(400 - b.boardArea - holes) < 0.01, `${400 - b.boardArea} vs ${holes}`);
+  assert.ok(a.frontCopper > 5 && b.frontCopper < a.frontCopper, `${a.frontCopper} ${b.frontCopper}`);
+});

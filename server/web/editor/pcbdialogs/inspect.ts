@@ -7,7 +7,8 @@ import { DRC_ITEMS, drcItemTitle } from "../../canvas/drc-items";
 import { NL } from "./canvas";
 import { projectNetlist } from "./update-pcb";
 import { runZoneFill } from "./zonefill";
-import { box, checkField, download, fmtLenU, grid, h, messageBox, notebook, openDialog, textEntryBox, textField, type CellValue } from "./ui";
+import { fabContext, loadFab } from "../fab-outputs";
+import { box, checkField, currentUnits, download, fmtLenU, grid, h, messageBox, notebook, openDialog, textEntryBox, textField, type CellValue } from "./ui";
 import { openPopupMenu, type PopupEntry } from "../contextmenu";
 import { adoptProjectFile, canWriteProject, saveProjectFile } from "../projectfile";
 import { editProject, type Plain, type ProjectEdit } from "../../canvas/project-file";
@@ -29,6 +30,7 @@ interface PcbToolsApi {
   netInspector(doc: KDoc): NetRow[];
   netItemIds(doc: KDoc, key: string): Set<string>;
   boardStatistics(doc: KDoc): Stats;
+  boardLayerName(doc: KDoc, layer: string): string;
   inspectClearance(doc: KDoc, a: string, b: string, settings: unknown): { gap: number | null; required: number; sameNet: boolean; nets: string[] } | null;
   netclassOf(s: Settings, net: string): { clearance?: number };
   footprintDiffLines(boardFp: SNode, libFp: SNode): string[];
@@ -347,52 +349,116 @@ export function openDrc(ctx: ToolCtx): void {
 export function clearDrcMarkers(ctx: ToolCtx): void { last.markers = []; last.ran = false; PT().state.markers = []; ctx.requestRender(); }
 
 // ---------------------------------------------------------------- Board Statistics
+interface DrillLine { count: number; shape: "Round" | "Slot"; x: number; y: number; plated: boolean; pad: boolean; start: string; stop: string }
+interface StatsData {
+  footprints: { title: string; front: number; back: number }[]; pads: { title: string; count: number }[]; padTotal: number; padProps: { title: string; count: number }[];
+  vias: { title: string; count: number }[]; viaTotal: number; minTrackWidth: number | null; minClearance: number | null; minDrill: number | null;
+  drills: DrillLine[]; hasOutline: boolean; width: number; height: number;
+}
+interface StatAreas { hasOutline: boolean; boardArea: number; frontCopper: number; backCopper: number; frontCourtyard: number; backCourtyard: number }
+/** DIALOG_BOARD_STATISTICS' s_savedDialogState */
+const statsState = { excludeNoPins: false, subtractHoles: false, subtractHolesFromCopper: false };
+/** MessageTextFromValue( …, EDA_DATA_TYPE::AREA ) */
+function areaText(mm2: number): string {
+  const u = currentUnits();
+  if (u === "in") return `${(mm2 / 645.16).toFixed(4)} in²`;
+  if (u === "mil") return `${(mm2 / 0.00064516).toFixed(0)} mils²`;
+  return `${mm2.toFixed(4)} mm²`;
+}
+
+/** Inspect > Board Statistics (DIALOG_BOARD_STATISTICS over board_statistics_report.cpp). */
 export function openBoardStatistics(ctx: ToolCtx): void {
   const doc = board(); if (!doc) { ctx.toast("Board Statistics needs a board"); return; }
-  const s = PT().boardStatistics(doc), set = settings();
-  // drill table: pads and vias by hole size
-  const drills = new Map<string, { count: number; shape: string; x: number; y: number; plated: string; kind: string }>();
-  const addDrill = (x: number, y: number, plated: boolean, kind: string): void => {
-    const key = `${x}|${y}|${plated}|${kind}`; const d = drills.get(key);
-    if (d) d.count++; else drills.set(key, { count: 1, shape: x === y ? "Round" : "Slot", x, y, plated: plated ? "PTH" : "NPTH", kind });
+  const P = window as unknown as { PcbTools: { boardStats: { boardStatsData(d: KDoc, o: { excludeNoPads: boolean }): StatsData }; courtyards(fp: KItem): Record<string, [number, number][][]> } };
+  const excl = checkField(statsState.excludeNoPins, "Exclude footprints with no pads", { key: "excludeNoPads", onChange: () => refresh() });
+  const subHoles = checkField(statsState.subtractHoles, "Subtract holes from board area", { key: "subtractHoles", onChange: () => refresh() });
+  const subCopper = checkField(statsState.subtractHolesFromCopper, "Subtract holes from copper areas", { key: "subtractHolesFromCopper", onChange: () => refresh() });
+  const comp = h("table", { class: "pd-stat", "data-k": "components" }), pads = h("table", { class: "pd-stat", "data-k": "pads" });
+  const boardT = h("table", { class: "pd-stat", "data-k": "board" }), viasT = h("table", { class: "pd-stat", "data-k": "vias" });
+  const drillHost = h("div");
+  let data: StatsData = P.PcbTools.boardStats.boardStatsData(doc, { excludeNoPads: statsState.excludeNoPins });
+  let areas: StatAreas | null = null, areaSeq = 0, projectName = "";
+  const row = (t: HTMLElement, cells: (string | number)[], cls?: string): void => { t.append(h("tr", cls ? { class: cls } : null, ...cells.map((c, i) => h("td", i ? { class: "n" } : null, String(c))))); };
+  const unknownOr = (v: number | null): string => (v === null ? "unknown" : fmtLenU(v));
+  const pct = (v: number): string => `${v.toFixed(2)} %`;
+  const boardRows = (): [string, string][] => {
+    const A = areas, pending = "…";
+    return [
+      ["Dimensions:", data.hasOutline ? `${fmtLenU(data.width)} x ${fmtLenU(data.height)}` : "unknown"],
+      ["Area:", !data.hasOutline ? "unknown" : A ? areaText(A.boardArea) : pending],
+      ["Front copper area:", A ? areaText(A.frontCopper) : pending], ["Back copper area:", A ? areaText(A.backCopper) : pending],
+      ["Min track clearance:", unknownOr(data.minClearance)], ["Min track width:", unknownOr(data.minTrackWidth)], ["Min drill diameter:", unknownOr(data.minDrill)],
+      ["Board stackup thickness:", fmtLenU(Number(doc.thickness) || 1.6)],
+      ["Front footprint area:", A ? areaText(A.frontCourtyard) : pending], ["Front footprint density:", !data.hasOutline ? "unknown" : A && A.boardArea > 0 ? pct(A.frontCourtyard * 100 / A.boardArea) : pending],
+      ["Back footprint area:", A ? areaText(A.backCourtyard) : pending], ["Back footprint density:", !data.hasOutline ? "unknown" : A && A.boardArea > 0 ? pct(A.backCourtyard * 100 / A.boardArea) : pending],
+    ];
   };
-  let minTrack = Infinity, minDrill = Infinity;
-  for (const it of doc.items.values()) {
-    if (it.kind === "footprint") for (const p of KiCadCanvas.kids(it.node, "pad") as SNode[]) {
-      const d = KiCadCanvas.kid(p, "drill") as SNode | null; if (!d) continue;
-      const nums = d.slice(1).filter((v): v is number => typeof v === "number"); if (!nums.length) continue;
-      addDrill(nums[0], nums.length > 1 && d.includes("oval") ? nums[1] : nums[0], String(p[2]) !== "np_thru_hole", "Pad"); minDrill = Math.min(minDrill, nums[0]);
-    } else if (it.kind === "via") { const d = Number(((KiCadCanvas.kid(it.node, "drill") as SNode | null) || [])[1]) || 0; if (d) { addDrill(d, d, true, "Via"); minDrill = Math.min(minDrill, d); } }
-    else if (it.kind === "segment" || it.kind === "arc") { const w = Number(((KiCadCanvas.kid(it.node, "width") as SNode | null) || [])[1]) || 0; if (w) minTrack = Math.min(minTrack, w); }
-  }
-  const tbl = (title: string, rows: [string, string | number][]): HTMLElement => {
-    const t = h("table", { class: "pd-stat" }); t.append(h("tr", null, h("th", { colspan: "2" }, title)));
-    for (const [k, v] of rows) t.append(h("tr", null, h("td", null, k), h("td", { class: "n" }, String(v))));
-    return t;
+  const draw = (): void => {
+    comp.replaceChildren(h("tr", null, h("th", null, "Components"), h("th", null, "Front Side"), h("th", null, "Back Side"), h("th", null, "Total")));
+    let f = 0, b = 0;
+    for (const e of data.footprints) { row(comp, [e.title, e.front, e.back, e.front + e.back]); f += e.front; b += e.back; }
+    row(comp, ["Total:", f, b, f + b], "total");
+    pads.replaceChildren(h("tr", null, h("th", { colspan: "2" }, "Pads")));
+    for (const e of data.pads) row(pads, [e.title, e.count]);
+    row(pads, ["Total:", data.padTotal], "total");
+    for (const e of data.padProps) row(pads, [e.title, e.count]);
+    boardT.replaceChildren(h("tr", null, h("th", { colspan: "2" }, "Board")));
+    for (const [k, v] of boardRows()) row(boardT, [k, v]);
+    viasT.replaceChildren(h("tr", null, h("th", { colspan: "2" }, "Vias")));
+    for (const e of data.vias) row(viasT, [e.title, e.count]);
+    row(viasT, ["Total:", data.viaTotal], "total");
+    const rows: Record<string, CellValue>[] = data.drills.map((d) => ({ count: d.count, shape: d.shape, x: d.x, y: d.y, plated: d.plated ? "PTH" : "NPTH", kind: d.pad ? "Pad" : "Via",
+      start: d.start ? PT().boardLayerName(doc, d.start) : "", stop: d.stop ? PT().boardLayerName(doc, d.stop) : "" }));
+    drillHost.replaceChildren(grid([{ label: "Count", key: "count" }, { label: "Shape", key: "shape" }, { label: "X Size", key: "x", type: "len" }, { label: "Y Size", key: "y", type: "len" }, { label: "Plated", key: "plated" },
+      { label: "Via/Pad", key: "kind" }, { label: "Start Layer", key: "start" }, { label: "Stop Layer", key: "stop" }], rows, { ro: true, height: "320px" }).el);
   };
-  const comp = h("table", { class: "pd-stat" });
-  comp.append(h("tr", null, h("th", null, "Components"), h("th", null, "Front Side"), h("th", null, "Back Side"), h("th", null, "Total")));
-  const sideCount = (pred: (toks: string[]) => boolean): [number, number] => { let f = 0, b = 0; for (const it of doc.items.values()) { if (it.kind !== "footprint") continue; const a = KiCadCanvas.kid(it.node, "attr") as SNode | null; if (!pred(a ? a.slice(1).map(String) : [])) continue; if (it.layer === "B.Cu") b++; else f++; } return [f, b]; };
-  for (const [label, pred] of [["THT:", (t: string[]) => t.includes("through_hole")], ["SMD:", (t: string[]) => t.includes("smd")], ["Unspecified:", (t: string[]) => !t.includes("smd") && !t.includes("through_hole")]] as [string, (t: string[]) => boolean][]) {
-    const [f, b] = sideCount(pred); comp.append(h("tr", null, h("td", null, label), h("td", { class: "n" }, String(f)), h("td", { class: "n" }, String(b)), h("td", { class: "n" }, String(f + b))));
+  // the areas come from the plotters' geometry (web/fab), fetched with the fab bundle
+  const loadAreas = async (): Promise<void> => {
+    const seq = ++areaSeq; areas = null; draw();
+    try {
+      const F = await loadFab(); const fctx = await fabContext(); if (!fctx || seq !== areaSeq) return;
+      projectName = fctx.projectName || "";
+      const a = F.statAreas(fctx, { subtractHolesFromBoard: statsState.subtractHoles, subtractHolesFromCopper: statsState.subtractHolesFromCopper, courtyards: (fp: KItem) => P.PcbTools.courtyards(fp) });
+      if (seq === areaSeq) { areas = a; draw(); }
+    } catch (e) { console.warn("board statistics: areas", e); }
+  };
+  function refresh(): void {
+    Object.assign(statsState, { excludeNoPins: excl.get(), subtractHoles: subHoles.get(), subtractHolesFromCopper: subCopper.get() });
+    data = P.PcbTools.boardStats.boardStatsData(doc!, { excludeNoPads: statsState.excludeNoPins });
+    void loadAreas();
   }
-  comp.append(h("tr", { class: "total" }, h("td", null, "Total:"), h("td", { class: "n" }, String(s.footprints.front)), h("td", { class: "n" }, String(s.footprints.back)), h("td", { class: "n" }, String(s.footprints.total))));
-  const drillRows: Record<string, CellValue>[] = Array.from(drills.values()).sort((a, b) => a.x - b.x || a.y - b.y).map((d) => ({ count: d.count, shape: d.shape, x: d.x, y: d.y, plated: d.plated, kind: d.kind, start: "F.Cu", stop: "B.Cu" }));
-  const reportText = (): string => [
-    "PCB statistics report", `Date: ${new Date().toISOString().replace("T", " ").slice(0, 19)}`, "", "Board", `- Width: ${fmtLenU(s.width)}`, `- Height: ${fmtLenU(s.height)}`, `- Area: ${s.area.toFixed(4)} mm²`, "",
-    "Pads", `- Through hole: ${s.pads.tht}`, `- SMD: ${s.pads.smd}`, `- Connector: ${s.pads.connect}`, `- NPTH: ${s.pads.npth}`, "", "Vias", `- Through vias: ${s.vias.through}`, `- Blind/buried: ${s.vias.blind}`, `- Micro vias: ${s.vias.micro}`, "",
-    "Components", `- Front: ${s.footprints.front}`, `- Back: ${s.footprints.back}`, `- Total: ${s.footprints.total}`, "", "Drill holes", ...drillRows.map((d) => `- ${d.count} × ${d.shape} ${d.x} x ${d.y} mm ${d.plated} ${d.kind}`), ""].join("\n");
-  openDialog({ title: "Board Statistics", width: 720, noOk: true, extra: [{ label: "Generate Report File...", fn: () => download("board-statistics.txt", reportText()) }],
+  /** FormatBoardStatisticsReport */
+  const reportText = (): string => {
+    const L: string[] = ["PCB statistics report\n=====================", `- Date: ${new Date().toLocaleString()}`, `- Project: ${projectName}`, `- Board name: ${projectName ? projectName + ".kicad_pcb" : ""}`, "", "Board\n-----"];
+    const A = areas;
+    if (data.hasOutline) L.push(`- Width: ${fmtLenU(data.width)}`, `- Height: ${fmtLenU(data.height)}`, `- Area: ${A ? areaText(A.boardArea) : "unknown"}`);
+    else L.push("- Dimensions: unknown", "- Area: unknown");
+    L.push(`- Front copper area: ${A ? areaText(A.frontCopper) : "unknown"}`, `- Back copper area: ${A ? areaText(A.backCopper) : "unknown"}`, `- Min track clearance: ${unknownOr(data.minClearance)}`,
+      `- Min track width: ${unknownOr(data.minTrackWidth)}`, `- Min drill diameter: ${unknownOr(data.minDrill)}`, `- Board stackup thickness: ${fmtLenU(Number(doc.thickness) || 1.6)}`, "",
+      `- Front footprint area: ${A ? areaText(A.frontCourtyard) : "unknown"}`, `- Back footprint area: ${A ? areaText(A.backCourtyard) : "unknown"}`,
+      `- Front component density: ${data.hasOutline && A && A.boardArea > 0 ? pct(A.frontCourtyard * 100 / A.boardArea) : "unknown"}`,
+      `- Back component density: ${data.hasOutline && A && A.boardArea > 0 ? pct(A.backCourtyard * 100 / A.boardArea) : "unknown"}`, "Pads\n----");
+    for (const e of [...data.pads, ...data.padProps]) L.push(`- ${e.title} ${e.count}`);
+    L.push("", "Vias\n----"); for (const e of data.vias) L.push(`- ${e.title} ${e.count}`);
+    const table = (rows: string[][]): string[] => {
+      const w = rows[0].map((_, c) => Math.max(...rows.map((r) => r[c].length)));
+      const line = (r: string[]): string => "|" + r.map((v, c) => " " + v.padEnd(w[c]) + " |").join("");
+      return [line(rows[0]), "|" + w.map((n) => "-".repeat(n + 2) + "|").join(""), ...rows.slice(1).map(line)];
+    };
+    let f = 0, b = 0; const cr = [["", "Front Side", "Back Side", "Total"]];
+    for (const e of data.footprints) { cr.push([e.title, String(e.front), String(e.back), String(e.front + e.back)]); f += e.front; b += e.back; }
+    cr.push(["Total:", String(f), String(b), String(f + b)]);
+    L.push("", "Components\n----------\n", ...table(cr), "", "Drill holes\n-----------\n",
+      ...table([["Count", "Shape", "X Size", "Y Size", "Plated", "Via/Pad", "Start Layer", "Stop Layer"], ...data.drills.map((d) => [String(d.count), d.shape, fmtLenU(d.x), fmtLenU(d.y), d.plated ? "PTH" : "NPTH", d.pad ? "Pad" : "Via", d.start ? PT().boardLayerName(doc, d.start) : "", d.stop ? PT().boardLayerName(doc, d.stop) : ""])]));
+    return L.join("\n") + "\n";
+  };
+  openDialog({ title: "Board Statistics", width: 760, noOk: true, extra: [{ label: "Generate Report File...", fn: () => download("board-statistics.txt", reportText()) }],
     build(body) {
-      const general = h("div", { class: "pd-cols2" },
-        h("div", null, comp, tbl("Pads", [["Through hole:", s.pads.tht], ["SMD:", s.pads.smd], ["Connector:", s.pads.connect], ["NPTH:", s.pads.npth], ["Total:", s.pads.total]])),
-        h("div", null,
-          tbl("Board", [["Dimensions:", s.width && s.height ? `${fmtLenU(s.width)} x ${fmtLenU(s.height)}` : "unknown"], ["Area:", s.area ? `${s.area.toFixed(4)} mm²` : "unknown"],
-            ["Min track clearance:", fmtLenU(Math.min(...Object.values(set.netclasses).map((n) => n.clearance ?? set.clearance), set.clearance))], ["Min track width:", isFinite(minTrack) ? fmtLenU(minTrack) : "N/A"], ["Min drill diameter:", isFinite(minDrill) ? fmtLenU(minDrill) : "N/A"]]),
-          tbl("Vias", [["Through vias:", s.vias.through], ["Blind/buried vias:", s.vias.blind], ["Micro vias:", s.vias.micro], ["Total:", s.vias.total]])));
-      const book = notebook([{ label: "General", build: (el) => el.append(general) },
-        { label: "Drill Holes", build: (el) => el.append(grid([{ label: "Count", key: "count" }, { label: "Shape", key: "shape" }, { label: "X Size", key: "x", type: "len" }, { label: "Y Size", key: "y", type: "len" }, { label: "Plated", key: "plated" }, { label: "Via/Pad", key: "kind" }, { label: "Start Layer", key: "start" }, { label: "Stop Layer", key: "stop" }], drillRows, { ro: true, height: "320px" }).el) }]);
-      body.append(book.el);
+      const general = h("div", null,
+        h("div", { class: "pd-cols2" }, h("div", null, comp, pads), h("div", null, boardT, viasT)),
+        h("div", { style: "display:flex;flex-direction:column;gap:4px;margin-top:8px" }, subHoles.el, subCopper.el, excl.el));
+      body.append(notebook([{ label: "General", build: (el) => el.append(general) }, { label: "Drill Holes", build: (el) => el.append(drillHost) }]).el);
+      void loadAreas();
     } });
 }
 
