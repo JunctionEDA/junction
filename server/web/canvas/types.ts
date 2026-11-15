@@ -238,7 +238,7 @@ export interface RatsLine { net: number; name?: string; a: number[] | null; b: n
 export interface ObjectsOpt { hide?: Set<string>; show?: Set<string>; opacity?: Record<string, number> }
 /** render()'s options (see its comment for each). */
 export interface RenderOpts {
-  hidden?: Set<string>; grid?: number; gridStyle?: string; gridMinSpacing?: number; gridOrigin?: number[] | null; gridColor?: string;
+  hidden?: Set<string>; grid?: number; gridStyle?: string; gridMinSpacing?: number; gridLineWidth?: number; gridShowMajor?: boolean; gridOrigin?: number[] | null; gridColor?: string;
   gridAxes?: boolean; gridAxesColor?: string; frame?: boolean;
   /** board: the grid items (PCB_GRID_ITEM, Appearance ▸ Grids, LAYER_SUBGRIDS); false hides them; their colour */
   subgrids?: boolean; gridItemColor?: string;

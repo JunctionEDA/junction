@@ -1,7 +1,7 @@
 // dialogs/prefs.ts — the web editor's preferences (Preferences… dialog): stored in localStorage under "kui.prefs",
 // applied live.  Defaults are KiCad's (common/settings/app_settings.cpp, eeschema/eeschema_settings.cpp).
 import { E, GRID_CHOICES, gridListKey, isSch, requestRender, setToggle, setToggles, store, toolCtx, updateGridStatus } from "./editor";
-import { syncSchModes } from "../editor/panes";
+import { syncCrosshairRadio, syncSchModes } from "../editor/panes";
 import { publishUserOrigin } from "../editor/userorigin";
 import { hotkeyCyclePopup } from "../editor/hotkey-popup";
 import { effectiveTheme, subscribeTheme } from "../theme";
@@ -21,6 +21,8 @@ export type SchThemeId = "default" | "classic" | "dark";
  * unnamed), last = grid.last_size (the grid the editor opens on), fast1 / fast2 = Alt+1 / Alt+2, axes = axes_enabled.
  */
 export interface GridPrefs { sizes: number[]; names?: string[]; last?: number; fast1: number; fast2: number; overrides: GridOverrides; axes?: boolean }
+import { clampGal, galDefaults, type GalPrefs } from "./gal-options";
+export { GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clampGal, type GalPrefs } from "./gal-options";
 export interface Prefs {
   /**
    * COMMON_SETTINGS m_Input (common/settings/common_settings.cpp:245-318), Preferences > Common > Mouse and Touchpad:
@@ -59,6 +61,8 @@ export interface Prefs {
   /** Footprint Editor > Editing Options (FOOTPRINT_EDITOR_SETTINGS): m_RotationAngle (degrees), apart from the board's */
   fpEditing: { rotationAngle: number };
   grids: Record<EditorId, GridPrefs>;
+  /** the Display Options pages' Grid Display and Cursor boxes, per frame (the View menu's cursor modes write them too) */
+  gal: Record<EditorId, GalPrefs>;
 }
 const MIL = 0.0254;
 const IS_WIN = typeof navigator !== "undefined" && /Win/.test(navigator.platform || navigator.userAgent || "");
@@ -87,6 +91,7 @@ export const DEFAULT_PREFS: Prefs = {
     sym: schGrids(),
     fp: pcbGrids(),
   },
+  gal: { sch: galDefaults(), pcb: galDefaults(), sym: galDefaults(), fp: galDefaults() },
 };
 const KEY = "kui.prefs";
 function merge<T>(def: T, got: unknown): T {
@@ -125,7 +130,11 @@ function migrate(raw: unknown): unknown {
   return raw;
 }
 /** names[] runs beside sizes[] (settings saved before grids had names have none) */
-function normalize(p: Prefs): Prefs { for (const g of Object.values(p.grids)) { const n = g.names || []; g.names = g.sizes.map((_, i) => (typeof n[i] === "string" ? n[i] : "")); } return p; }
+function normalize(p: Prefs): Prefs {
+  for (const g of Object.values(p.grids)) { const n = g.names || []; g.names = g.sizes.map((_, i) => (typeof n[i] === "string" ? n[i] : "")); }
+  for (const k of Object.keys(p.gal) as EditorId[]) p.gal[k] = clampGal(p.gal[k]);
+  return p;
+}
 export function prefs(): Prefs {
   if (cache) return cache;
   let raw: unknown = null; try { raw = JSON.parse(localStorage.getItem(KEY) || "null"); } catch (e) { raw = null; }
@@ -220,6 +229,11 @@ export function applyPrefs(full = true): void {
     GRID_CHOICES[gridListKey()] = choices;
     store.slice("viewport", { gridChoices: choices.map((c) => ({ ...c })) });
     E.renderOpts.gridAxes = !!g.axes;
+    // PANEL_GAL_OPTIONS: GAL_DISPLAY_OPTIONS' grid look and the cursor
+    const ga = p.gal[ed];
+    // (the board's style and spacing are PCB Editor > Display Options' own: pcbDisplay)
+    if (ed === "sch" || ed === "fp") Object.assign(E.renderOpts, { gridStyle: ga.style, gridMinSpacing: ga.minSpacing, gridLineWidth: ga.lineWidth, gridShowMajor: ga.showMajor });
+    if (full) { E.crosshairMode = ga.crosshair; E.alwaysShowCursor = ga.alwaysShow; syncCrosshairRadio(); }
     if (!full) { /* grids and colours only */ }
     else if (isSch()) {
       E.renderOpts.showHiddenPins = p.schDisplay.showHiddenPins; E.renderOpts.showHiddenFields = p.schDisplay.showHiddenFields; E.renderOpts.pageLimits = p.schDisplay.showPageLimits;
@@ -240,6 +254,14 @@ export function applyPrefs(full = true): void {
   }
   setToggle("toggleGridOverrides", p.grids[ed].overrides.enabled);
   updateGridStatus(); requestRender();
+}
+/**
+ * The View menu's crosshair modes and Always Show Crosshairs write the frame's cursor settings at once
+ * (COMMON_TOOLS::CursorSmallCrosshairs ... galOpts.WriteConfig), without re-applying everything else.
+ */
+export function rememberCursor(c: Partial<Pick<GalPrefs, "crosshair" | "alwaysShow">>, ed: EditorId = editorId()): void {
+  const p = prefs(); Object.assign(p.gal[ed], c);
+  try { localStorage.setItem(KEY, JSON.stringify(p)); } catch (e) { /* no storage */ }
 }
 export function toggleGridOverrides(): boolean {
   const p = clonePrefs(), ed = editorId(); p.grids[ed].overrides.enabled = !p.grids[ed].overrides.enabled; savePrefs(p); return p.grids[ed].overrides.enabled;

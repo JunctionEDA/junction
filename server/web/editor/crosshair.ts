@@ -49,6 +49,13 @@ export function placeCrosshair(mm: number[] | null, forced?: number[] | null): n
 /** Redraw at the last cursor position (after a pan / zoom or a mode change), if the cursor is on the canvas. */
 export function refreshCrosshair(): void { if (at && E.lastCursorMm && !forcedAt) at = cursorPoint(E.lastCursorMm); requestCursor(); }
 
+/**
+ * GAL::IsCursorEnabled: the cursor shows while a tool draws (VIEW_CONTROLS::ShowCursor) or always with Always Show
+ * Crosshairs (GAL_DISPLAY_OPTIONS::m_forceDisplayCursor, Preferences > Display Options > Cursor); the selection tool
+ * never turns it on.
+ */
+export function cursorShown(): boolean { return E.alwaysShowCursor !== false || (E.tool !== "select" && E.tool !== "selection"); }
+
 let cursorReq = 0;
 /** Redraw the cursor layer on the next frame (several moves in one frame draw once). */
 function requestCursor(): void { if (!cursorReq) cursorReq = requestAnimationFrame(() => { cursorReq = 0; drawCursorLayer(); }); }
@@ -75,7 +82,7 @@ export function drawCursorLayer(): void {
   if (layer.width !== canvas.width || layer.height !== canvas.height) { layer.width = canvas.width; layer.height = canvas.height; }
   else ctx.clearRect(0, 0, layer.width, layer.height);
   layer.style.display = E.kdoc ? "block" : "none";
-  if (at && E.kdoc) drawCrosshair(ctx);
+  if (at && E.kdoc && cursorShown()) drawCrosshair(ctx);
 }
 
 /** The cursor stroked on `ctx` (a device-pixel canvas over the stage). */

@@ -6,6 +6,7 @@ import type { ThemeMode } from "../theme";
 import { $ } from "./dom";
 import { filters } from "./selection";
 import { E } from "./state";
+import { rememberCursor } from "../dialogs/prefs";
 import { renderModuleTools } from "./tools";
 import { UNITS, setRadio } from "./util";
 import { isSch, requestRender } from "./view";
@@ -130,4 +131,12 @@ export function setUnitsAction(u: string, id: string) {
   setRadio("Units", id); store.slice("viewport", { units: E.units, lastImperial: E.lastImperial || "mil" });
 }
 
-export function setCrosshair(mode: "small" | "full" | "45", id: string) { E.crosshairMode = mode; setRadio("Crosshair modes", id); store.slice("viewport", { crosshair: mode }); refreshCrosshair(); }
+export function setCrosshair(mode: "small" | "full" | "45", id: string) { E.crosshairMode = mode; setRadio("Crosshair modes", id); store.slice("viewport", { crosshair: mode }); refreshCrosshair(); rememberCursor({ crosshair: mode }); }
+/** The View menu's crosshair radio and Always Show Crosshairs check for the frame's cursor settings (dialogs/prefs.ts applyPrefs). */
+export function syncCrosshairRadio(): void {
+  setRadio("Crosshair modes", E.crosshairMode === "full" ? "cursorFullCrosshairs" : E.crosshairMode === "45" ? "cursor45Crosshairs" : "cursorSmallCrosshairs");
+  setToggles({ toggleCursor: E.alwaysShowCursor !== false });
+  store.slice("viewport", { crosshair: E.crosshairMode }); refreshCrosshair();
+}
+/** ACTIONS::toggleCursor (COMMON_TOOLS::ToggleCursor): Always Show Crosshairs, written to the frame's settings. */
+export function toggleAlwaysShowCursor(): void { E.alwaysShowCursor = E.alwaysShowCursor === false; rememberCursor({ alwaysShow: E.alwaysShowCursor }); syncCrosshairRadio(); }

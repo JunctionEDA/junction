@@ -134,7 +134,9 @@ export function tracePad(ctx: PathSink, g: PadGeom): void {
  *   gridAxes       (both)      — GAL's grid axes (window.grid.axes_enabled, off by default): the X and Y axes
  *                                through the document origin in the theme's grid_axes colour, grid shown or not;
  *   gridStyle      (both)      — "dots" (default), "lines" or "crosses" (KiCad's grid.style 0 / 1 / 2); gridMinSpacing
- *                                is the minimum spacing of drawn grid marks in px (default 10);
+ *                                is the minimum spacing of drawn grid marks in px (default 10); gridLineWidth the
+ *                                mark thickness in device px (grid.line_width, 1); gridShowMajor false draws every
+ *                                mark minor (grid.show_major);
  *   showHiddenText (board)     — draw the hidden fp_text / properties (kept in item.hiddenGeom, tagged
  *                                hiddenText, outside the hit boxes) at HIDDEN_TEXT_ALPHA; KiCad has no
  *                                painter rule for this (this version dropped LAYER_HIDDEN_TEXT).
@@ -417,22 +419,23 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
     while (pitch <= minSpacing && guard++ < 12) pitch *= GRID_TICK;
     const go = opts.gridOrigin || [0, 0], gx = go[0], gy = go[1];   // BOARD_DESIGN_SETTINGS::m_GridOrigin: the grid is laid out from it
     const i0 = Math.floor((vx0 - gx) / pitch), i1 = Math.ceil((vx1 - gx) / pitch), j0 = Math.floor((vy0 - gy) / pitch), j1 = Math.ceil((vy1 - gy) / pitch);
-    const px1 = Math.max(1, dpr) / s;   // one device pixel (grid.line_width 1.0)
+    const px1 = Math.max(1, dpr) * gridLineWidth(opts) / s;   // grid.line_width device pixels (1.0 by default)
+    const isMajor = (n: number): boolean => opts.gridShowMajor !== false && n % GRID_TICK === 0;
     const gridColor = opts.gridColor || (isPcb ? PCB_GRID : SCH.grid);
     if ((Math.ceil((fx1 - gx) / pitch) - Math.floor((fx0 - gx) / pitch)) * (Math.ceil((fy1 - gy) / pitch) - Math.floor((fy0 - gy) / pitch)) < 400000) {   // the whole view's count, region or not
       if (style === "dots") {
         ctx.fillStyle = gridColor; ctx.beginPath();
         for (let i = i0; i <= i1; i++) {
-          const wdt = i % GRID_TICK === 0 ? 2 * px1 : px1, x = (i * pitch + gx) - wdt / 2;
-          for (let j = j0; j <= j1; j++) { const hgt = j % GRID_TICK === 0 ? 2 * px1 : px1; ctx.rect(x, (j * pitch + gy) - hgt / 2, wdt, hgt); }
+          const wdt = isMajor(i) ? 2 * px1 : px1, x = (i * pitch + gx) - wdt / 2;
+          for (let j = j0; j <= j1; j++) { const hgt = isMajor(j) ? 2 * px1 : px1; ctx.rect(x, (j * pitch + gy) - hgt / 2, wdt, hgt); }
         }
         ctx.fill();
       } else if (style === "lines") {
         ctx.strokeStyle = gridColor; ctx.lineCap = "butt";
         for (const major of [false, true]) {
           ctx.lineWidth = major ? 2 * px1 : px1; ctx.beginPath();
-          for (let i = i0; i <= i1; i++) if ((i % GRID_TICK === 0) === major) { ctx.moveTo((i * pitch + gx), vy0); ctx.lineTo((i * pitch + gx), vy1); }
-          for (let j = j0; j <= j1; j++) if ((j % GRID_TICK === 0) === major) { ctx.moveTo(vx0, (j * pitch + gy)); ctx.lineTo(vx1, (j * pitch + gy)); }
+          for (let i = i0; i <= i1; i++) if ((isMajor(i)) === major) { ctx.moveTo((i * pitch + gx), vy0); ctx.lineTo((i * pitch + gx), vy1); }
+          for (let j = j0; j <= j1; j++) if ((isMajor(j)) === major) { ctx.moveTo(vx0, (j * pitch + gy)); ctx.lineTo(vx1, (j * pitch + gy)); }
           ctx.stroke();
         }
       } else {
@@ -440,7 +443,7 @@ export function render(doc: Doc, ctx: Ctx2D, view: View, opts?: RenderOpts | nul
         for (const major of [false, true]) {
           const wdt = major ? 2 * px1 : px1, len = 2 * wdt; ctx.lineWidth = wdt; ctx.beginPath();
           for (let i = i0; i <= i1; i++) for (let j = j0; j <= j1; j++) {
-            if ((i % GRID_TICK === 0 && j % GRID_TICK === 0) !== major) continue;
+            if ((isMajor(i) && isMajor(j)) !== major) continue;
             const x = (i * pitch + gx), y = (j * pitch + gy); ctx.moveTo(x - len, y); ctx.lineTo(x + len, y); ctx.moveTo(x, y - len); ctx.lineTo(x, y + len);
           }
           ctx.stroke();
@@ -903,6 +906,8 @@ export const SUBGRID_COLOR = "#C2C200", GRID_DIM_ALPHA = 0.4, GRID_EDGE_DARKEN =
  * grid's style (thinned out as the main grid is: gridLattice), and outlines its coverage one pixel wide in its colour
  * Darkened( 0.75 ).  A selected grid is Brightened( 0.5 ).
  */
+/** GAL_DISPLAY_OPTIONS::m_gridLineWidth (Preferences > Display Options > Grid thickness, 0.5..10 px) */
+function gridLineWidth(opts: RenderOpts): number { const w = +(opts.gridLineWidth ?? 1); return w > 0 && w <= 10 ? w : 1; }
 function drawGridItems(ctx: Ctx2D, doc: Doc, opts: RenderOpts, s: number, dpr: number, sCss: number, vr: number[], bg: string): void {
   const list = gridItemList(doc);
   if (!list.length) return;
@@ -911,11 +916,11 @@ function drawGridItems(ctx: Ctx2D, doc: Doc, opts: RenderOpts, s: number, dpr: n
   const order = [...list.filter((g) => !isSel(g)), ...list.filter(isSel)];   // precedence order: the first drawn wins, selected ones last
   const style = opts.gridStyle === "lines" || opts.gridStyle === "crosses" ? opts.gridStyle : "dots";
   const threshold = (opts.gridMinSpacing! > 0 ? opts.gridMinSpacing! : GRID_MIN_SPACING) * (style === "crosses" ? 2 : 1) / sCss;
-  const px1 = Math.max(1, dpr) / s, base = opts.gridItemColor || SUBGRID_COLOR;
+  const px1 = Math.max(1, dpr) * gridLineWidth(opts) / s, base = opts.gridItemColor || SUBGRID_COLOR;
   ctx.save(); ctx.setLineDash([]); ctx.lineCap = "butt";
   for (const g of order) {
     const hi = isSel(g), color = hi ? brightened(base, GRID_SELECTED_BRIGHTEN) : base;
-    const tick = g.tick > 0 ? g.tick : GRID_TICK, major = (i: number) => tick > 0 && i % tick === 0;
+    const tick = g.tick > 0 ? g.tick : GRID_TICK, major = (i: number) => opts.gridShowMajor !== false && tick > 0 && i % tick === 0;
     // the lattice (gridLattice): both cartesian axes thin by one factor; polar radius and angle each on their own
     let dx: number, dy: number;
     if (g.kind === "polar") { dx = autoSparsePitch(g.pitch[0], tick, threshold); dy = g.extent[0] > 0 ? autoSparsePitch(g.pitch[1], tick, threshold / g.extent[0]) : g.pitch[1]; }

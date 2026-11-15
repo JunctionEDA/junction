@@ -14,7 +14,7 @@ import { gridIndex, gridList, navigateDocs, openDoc, rootSchematic, setActiveLay
 import { HANDLERS, toggleRenderOpt } from "./actions";
 import { setToggle, state, store } from "./appstore";
 import { openAbout, openHotkeyList } from "./help-dialogs";
-import { setCrosshair, setUnitsAction } from "./panes";
+import { setCrosshair, setUnitsAction, toggleAlwaysShowCursor } from "./panes";
 import { cycleInactiveMode, layerAlphaStep, toggleInactiveMode } from "./panels/appearance";
 import { openSelectionProperties } from "./pointer";
 import { E } from "./state";
@@ -142,6 +142,7 @@ export const MENU_HANDLERS: Record<string, ActionHandler> = {
   millimetersUnits: () => setUnits("mm"), inchesUnits: () => setUnits("in"), milsUnits: () => setUnits("mil"), toggleUnits,
   resetLocalCoords,
   // the menu entry is a checkbox: a second click goes back to the small crosshairs
+  toggleCursor: () => toggleAlwaysShowCursor(),
   cursorFullCrosshairs: () => (E.crosshairMode === "full" ? setCrosshair("small", "cursorSmallCrosshairs") : setCrosshair("full", "cursorFullCrosshairs")),
   // eeschema's Show Hidden Fields and pcbnew's Show Hidden Text are separate settings
   toggleHiddenFields: () => toggleRenderOpt("showHiddenFields", "toggleHiddenFields"),

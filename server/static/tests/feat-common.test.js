@@ -11,6 +11,7 @@ let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + String(e && e.stack || e).split("\n").slice(0, 4).join("\n       ")); } }
 
 const L = load(["dialogs", "logic.ts"]), W = load(["editor", "drawingsheet-model.ts"]);
+const G = load(["dialogs", "gal-options.ts"]), M = load(["dialogs", "maintenance.ts"]);
 
 test("Page Settings: the custom size is 1000 mils at least, under 120000 mils (eeschema) / 48000 mils (pcbnew)", () => {
   assert.strictEqual(L.pageSizeError("Width", 25.4, true, "mm"), null);
@@ -32,6 +33,20 @@ test("drawing sheet file: read from the editor's key of the project file, resolv
   assert.strictEqual(W.resolveWorksheet("/home/me/proj/board.kicad_wks", ws).docId, "b", "an absolute path ending in a project file");
   assert.strictEqual(W.resolveWorksheet("", ws), null); assert.strictEqual(W.resolveWorksheet("other.kicad_wks", ws), null);
   assert.deepStrictEqual(W.wksKey(true), ["schematic", "page_layout_descr_file"]); assert.deepStrictEqual(W.wksKey(false), ["pcbnew", "page_layout_descr_file"]);
+});
+
+test("Display Options: PANEL_GAL_OPTIONS' defaults and ranges (app_settings.cpp, panel_gal_options.cpp)", () => {
+  assert.deepStrictEqual(G.galDefaults(), { style: "dots", lineWidth: 1, minSpacing: 10, showMajor: true, crosshair: "small", alwaysShow: true });
+  assert.strictEqual(G.GRID_THICKNESS_CHOICES.length, 20); assert.strictEqual(G.GRID_THICKNESS_CHOICES[0], 0.5); assert.strictEqual(G.GRID_THICKNESS_CHOICES[19], 10);
+  const c = G.clampGal({ style: "bogus", lineWidth: 2.3, minSpacing: 900, showMajor: false, crosshair: "45", alwaysShow: false });
+  assert.deepStrictEqual(c, { style: "dots", lineWidth: 2.5, minSpacing: 200, showMajor: false, crosshair: "45", alwaysShow: false });
+  assert.strictEqual(G.clampGal({ style: "lines", lineWidth: NaN, minSpacing: 1 }).lineWidth, 1);
+  assert.strictEqual(G.clampGal({ style: "lines", lineWidth: NaN, minSpacing: 1 }).minSpacing, 5);
+});
+test("Maintenance: dialog state and program settings are told apart; designs and hints are kept", () => {
+  const keys = ["kd.geom.plot", "kd.state.find", "pd.state.track", "kui.prefs", "kui.v3d", "kc.drc.options", "kicad.fab.preset", "kicad-collab:lib-recent:sym", "kui.boardDocs", "kc.onboard.mini", "admin.range", "other"];
+  assert.deepStrictEqual(M.dialogStateKeys(keys), ["kd.geom.plot", "kd.state.find", "pd.state.track"]);
+  assert.deepStrictEqual(M.programSettingKeys(keys), ["kd.geom.plot", "kd.state.find", "pd.state.track", "kui.prefs", "kui.v3d", "kc.drc.options", "kicad.fab.preset", "kicad-collab:lib-recent:sym"]);
 });
 
 console.log(`feat-common: ${passed} passed, ${failed} failed`);

@@ -10,7 +10,9 @@ import type { UserHotkeys } from "../menuspec";
 import { KD, checkbox, h, select, textInput } from "./dom";
 import { lenField, messageBox } from "../editor/pcbdialogs/ui";
 import { loadUnits, messageText, unitName } from "../units";
-import { COLOR_THEMES, DEFAULT_PREFS, clonePrefs, editorId, gridLabel, savePrefs, scaleOf, type EditorId, type Prefs, type SchThemeId } from "./prefs";
+import { COLOR_THEMES, DEFAULT_PREFS, GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clonePrefs, editorId, gridLabel, savePrefs, scaleOf, type EditorId, type GalPrefs, type Prefs, type SchThemeId } from "./prefs";
+import { clearDialogState, resetProgramSettings } from "./maintenance";
+import { askConfirm } from "../components/msgbox";
 import type { Units } from "../store";
 import { getThemeMode, setThemeMode, type ThemeMode } from "../theme";
 import { getInactiveMode, setInactiveMode } from "../editor/panels/appearance";
@@ -75,10 +77,11 @@ export function resetPage(key: string, st: Staged): void {
     case "Common/Common": st.uiMode = "system"; st.p.common = d.common; break;
     case "Common/Mouse and Touchpad": st.p.mouse = d.mouse; break;
     case "Symbol Editor/Grids": st.p.grids.sym = d.grids.sym; break;
-    case "Schematic Editor/Display Options": st.p.schDisplay = d.schDisplay; break;
+    case "Schematic Editor/Display Options": st.p.schDisplay = d.schDisplay; st.p.gal.sch = d.gal.sch; break;
     case "Schematic Editor/Grids": st.p.grids.sch = d.grids.sch; break;
     case "Schematic Editor/Editing Options": st.p.schEditing = d.schEditing; break;
     case "Schematic Editor/Colors": st.p.schColors = d.schColors; break;
+    case "Footprint Editor/Display Options": st.p.gal.fp = d.gal.fp; break;
     case "Footprint Editor/Grids": st.p.grids.fp = d.grids.fp; break;
     case "Footprint Editor/Editing Options": st.p.fpEditing = d.fpEditing; break;
     case "PCB Editor/Display Options": st.p.pcbDisplay = d.pcbDisplay; break;
@@ -160,6 +163,28 @@ export function openPreferences(page?: string, staged?: Staged): void {
     ov("text", "Text:"); ov("graphics", "Graphics:");
     ob.append(og); KD().staticBox(R, "Grid Display").append(checkbox("Show grid axes", !!g.axes, (on) => { g.axes = on; }, { id: `${pre}-gridaxes` })); fill();
   };
+  // PANEL_GAL_OPTIONS, the left column of the Schematic and Footprint Editor Display Options pages: the grid's look and
+  // the cursor of that frame (the PCB and Symbol Editor pages are built on their own branches of this dialog)
+  const galPanel = (host: HTMLElement, ed: EditorId): void => {
+    const g = p.gal[ed], pre = `kd-pref-${ed}-gal`;
+    const radios = (name: string, rows: [string, string][], value: string, set: (v: string) => void): HTMLElement => h("div", { style: "display:flex;flex-direction:column;gap:4px" },
+      ...rows.map(([v, l]) => { const r = h("input", { type: "radio", name: `${pre}-${name}`, id: `${pre}-${name}-${v}` }) as HTMLInputElement; r.checked = v === value;
+        r.addEventListener("change", () => { if (r.checked) set(v); }); return h("label", { class: "kd-row", style: "gap:6px" }, r, l); }));
+    const R = GRID_MIN_SPACING_RANGE;
+    const spacing = h("input", { type: "number", min: String(R.min), max: String(R.max), step: String(R.step), value: String(g.minSpacing), id: `${pre}-spacing`, style: "width:80px" }) as HTMLInputElement;
+    spacing.addEventListener("change", () => { const v = Math.round(+spacing.value); if (spacing.value.trim() !== "" && isFinite(v)) g.minSpacing = Math.max(R.min, Math.min(R.max, v)); spacing.value = String(g.minSpacing); });
+    KD().staticBox(host, "Grid Display").append(h("div", { style: "display:grid;grid-template-columns:max-content max-content max-content;gap:6px 10px;align-items:center" },
+      h("label", { style: "align-self:start" }, "Style:"), radios("style", [["dots", "Dots"], ["lines", "Lines"], ["crosses", "Small crosses"]], g.style, (v) => { g.style = v as GalPrefs["style"]; }), h("span"),
+      h("label", null, "Grid thickness:"), select(GRID_THICKNESS_CHOICES.map((w) => [String(w), w.toFixed(1)] as [string, string]), String(g.lineWidth), (v) => { g.lineWidth = +v; }, { id: `${pre}-thickness`, style: "width:80px" }), h("span", { class: "ro" }, "pixels"),
+      h("label", null, "Minimum grid spacing:"), spacing, h("span", { class: "ro" }, "pixels")),
+      h("div", { style: "margin-top:6px" }, checkbox("Show major grid", g.showMajor, (on) => { g.showMajor = on; }, { id: `${pre}-major` })));
+    KD().staticBox(host, "Cursor").append(radios("cursor", [["small", "Small crosshairs"], ["full", "Full window crosshairs"], ["45", "45 degree crosshairs"]], g.crosshair, (v) => { g.crosshair = v as GalPrefs["crosshair"]; }),
+      h("div", { style: "margin-top:6px" }, checkbox("Always show crosshairs", g.alwaysShow, (on) => { g.alwaysShow = on; }, { id: `${pre}-always` })));
+  };
+  /** A Display Options page's two columns: PANEL_GAL_OPTIONS on the left, the frame's own options on the right. */
+  const displayCols = (pg: HTMLElement, ed: EditorId): HTMLElement => {
+    const L = h("div"), R = h("div"); pg.append(h("div", { style: "display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px" }, L, R)); galPanel(L, ed); return R;
+  };
   KD().open({ title: "Preferences", width: 900, cls: "kd-wide kd-flush",
     // PAGED_DIALOG::onResetButton: only the page on show goes back to its defaults, and nothing is saved before OK
     extra: [{ label: "Reset to Defaults", fn: () => {
@@ -190,6 +215,18 @@ export function openPreferences(page?: string, staged?: Staged): void {
           { label: "Hotkeys", build(pg) { hk = hotkeysPanel(pg, staged && staged.hotkeys); } },
           // not a KiCad panel: Junction's WakaTime heartbeats (the desktop app has the same page)
           { label: "WakaTime", build(pg) { waka = wakatimePage(pg, (host, title) => KD().staticBox(host, title)); } },
+          // PANEL_MAINTENANCE: the settings KiCad keeps in its files are this browser's storage here
+          { label: "Maintenance", build(pg) {
+            const row = (label: string, id: string, fn: () => void): HTMLElement => { const b = h("button", { type: "button", class: "btn", id }, label) as HTMLButtonElement; b.addEventListener("click", fn); return h("div", { style: "margin:0 0 8px" }, b); };
+            const box = KD().staticBox(pg, "Settings");
+            box.append(
+              row("Reset All Dialogs to Defaults", "kd-pref-resetdialogs", () => { clearDialogState(); toast("All dialogs reset to defaults."); }),
+              row("Reset All Program Settings to Defaults", "kd-pref-resetall", () => {
+                void askConfirm("Reset All Program Settings", "Reset every preference, dialog setting, panel layout and hotkey this browser keeps to its default?  Your designs and projects are not changed.  The page reloads afterwards.", { ok: "Reset", danger: true })
+                  .then((yes) => { if (!yes) return; KD().close(); resetProgramSettings(); location.reload(); });
+              }),
+              h("p", { class: "kd-note", style: "margin:4px 0 0" }, "These settings are kept in this browser only; other browsers and computers keep their own."));
+          } },
         ] },
         // PANEL_SYM_EDIT_GRIDS: the Symbol Editor's own window settings
         { label: "Symbol Editor", pages: [
@@ -197,7 +234,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
         ] },
         { label: "Schematic Editor", pages: [
           { label: "Display Options", build(pg) {
-            const ap = KD().staticBox(pg, "Appearance");
+            const ap = KD().staticBox(displayCols(pg, "sch"), "Appearance");
             ap.append(checkbox("Show hidden pins", p.schDisplay.showHiddenPins, (on) => { p.schDisplay.showHiddenPins = on; }, { id: "kd-pref-hiddenpins" }), checkbox("Show hidden fields", p.schDisplay.showHiddenFields, (on) => { p.schDisplay.showHiddenFields = on; }, { id: "kd-pref-hiddenfields" }));
           } },
           { label: "Grids", build: gridsPage("sch") },
@@ -236,6 +273,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
         ] },
         // PANEL_FP_GRIDS: the Footprint Editor's own window settings
         { label: "Footprint Editor", pages: [
+          { label: "Display Options", build(pg) { displayCols(pg, "fp"); } },
           { label: "Grids", build: gridsPage("fp") },
           { label: "Editing Options", build(pg) {
             // PANEL_EDIT_OPTIONS( isFootprintEditor ): FOOTPRINT_EDITOR_SETTINGS' own rotation step, m_sizerBoardEdit

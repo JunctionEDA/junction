@@ -16,6 +16,8 @@ export interface EditorState {
   kdoc: (KDoc & { schSettings?: { junctionDiameter: number }; paper?: string; portrait?: boolean; titleBlock?: Record<string, string>; sheetCount?: number; pageNumber?: string }) | null;
   viewOnly: boolean; DOC_TYPE: string; units: string; tool: string; zoom: number; viewTouched: boolean; gridPitch: number; proSettings: string | null; druText: string | null;
   selection: Set<string>; selected: { id: string } | null; drag: { fp?: { id: string } } | null; fdrag: unknown; renderOpts: Record<string, unknown>; pcbOrigin?: { origin: "page" | "aux" | "grid"; invertX: boolean; invertY: boolean };
+  /** the canvas cursor (Preferences > Display Options > Cursor, View > Crosshair) */
+  crosshairMode?: "small" | "full" | "45"; alwaysShowCursor?: boolean;
   zoomStep?: number; middleDragPan?: boolean; rightDragPan?: boolean; wheel?: unknown; zoomController?: unknown; middleDrag?: string; rightDrag?: string; leftDrag?: string; motionPanMod?: string; autoPan?: boolean; autoPanSpeed?: number; gridFor?: () => number; gridDefault?: () => number; gridPicked?: (mm: number) => void; lastImperial?: string; dialogs?: unknown;
   /** PCBNEW_SETTINGS m_ESCClearsNetHighlight and m_CtrlClickHighlight (Preferences > PCB Editor > Editing Options) */ escClearsHighlight?: boolean; ctrlClickHighlight?: boolean;
 }
