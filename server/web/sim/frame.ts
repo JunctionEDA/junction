@@ -22,6 +22,7 @@ import { canWriteProject, projectDocs, saveTextDocument } from "../editor/projec
 import { state } from "../editor/appstore";
 import { open as openSpice, type SpiceSession } from "../plugins/spice";
 import { SimPlot, TRACE_COLORS, type PlotTrace } from "./plot";
+import { clearOperatingPoints, setOperatingPoints } from "./op-overlay";
 import { COMPAT_MODES, openFormatValue, openSimCommand, openUserDefinedSignals, type PlotSetup } from "./dialogs";
 import {
   DEFAULT_OPTIONS, OPT_SAVE_EVENTS, OPT_SAVE_I, OPT_SAVE_P, OPT_SAVE_V, acPart, commandToSimType, commandsFromOptions, eSeries, findVector,
@@ -308,6 +309,11 @@ export async function runSimulation(): Promise<void> {
         const p = await sp.exec(["print all"]);
         t.opText = p.out.trim() ? p.out : "No operating point results.";
         log(p.out);
+        // SCHEMATIC::SetOperatingPoint for every vector, shown on the schematic (RefreshOperatingPointDisplay)
+        sp.remove("/out.raw");
+        await sp.exec(["set filetype=ascii", "write /out.raw"]);
+        const opRaw = sp.read("/out.raw"), opPlots = opRaw ? parseRaw(new TextDecoder().decode(opRaw)) : [];
+        setOperatingPoints(opPlots[opPlots.length - 1] || null);
         t.data = null; continue;
       }
       sp.remove("/out.raw");
@@ -322,6 +328,7 @@ export async function runSimulation(): Promise<void> {
       } else merged = plot;
     }
     t.data = merged; S.simulated = true;
+    if (tabType(t) !== "OP") clearOperatingPoints();   // SIMULATOR_FRAME::onSimFinished: only an .op run leaves values on the schematic
     await updateMeasurements(t, sp);
     (t as Tab & { multi?: PlotTrace[] }).multi = multi ? multiTraces : undefined;
     if (!t.data && tabType(t) !== "OP") log("Error: the simulation produced no results.\n");
@@ -442,7 +449,7 @@ function renderTabs(): void {
     const x = h("span", { class: "x", title: "Close" }, "×");
     x.addEventListener("click", (ev) => { ev.stopPropagation(); closeTab(i); });
     const tab = h("div", { class: "se-tab" + (i === S.cur ? " cur" : ""), "data-i": String(i), title: t.command }, `Analysis ${i + 1} - ${typeToName(tabType(t), true)}`, x);
-    tab.addEventListener("click", () => { S.cur = i; renderAll(); });
+    tab.addEventListener("click", () => { S.cur = i; if (tabType(t) !== "OP") clearOperatingPoints(); renderAll(); });
     tab.addEventListener("dblclick", () => { S.cur = i; void editAnalysisTab(); });
     els.tabs.append(tab);
   });
