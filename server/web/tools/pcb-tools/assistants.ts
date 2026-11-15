@@ -8,7 +8,7 @@ import { closeTextPrompt } from "./dom";
 import { askText } from "./draw-tools";
 import { sizeUnits } from "./edit-commands";
 import { applySelection } from "./groups";
-import { textNode } from "./nodes";
+import { barcodeAllowed, barcodeNode, BARCODE_NEEDS_VERSION_MSG, textNode } from "./nodes";
 import { line } from "./overlay";
 import { editHandleUp } from "./point-editor";
 import { routeUnhighlight } from "./route-fix";
@@ -82,6 +82,20 @@ export function placeTextAt(ctx: PcbCtx, at: Pt) {
     const c = addedChange(ctx.doc, n); ctx.commit([c], "Draw Text", moved ? undefined : { tentative: true }); applySelection(ctx, [c.id]);
     if (!moved) beginCarryMove(ctx, { placing: [c.id], origin: at });
     ctx.requestRender();
+  });
+}
+/**
+ * DRAWING_TOOL::DrawBarcode: the click makes a PCB_BARCODE on the active layer at the cursor and opens Barcode
+ * Properties on it; OK adds it ("Draw Barcode") and selects it, Cancel drops it.  The tool stays armed.
+ */
+export function placeBarcodeAt(ctx: PcbCtx, at: Pt) {
+  if (ctx.viewOnly || S.move || !ctx.doc) return;
+  if (!barcodeAllowed(ctx.doc)) { ctx.toast(BARCODE_NEEDS_VERSION_MSG); return; }
+  const dlg = newItemDialogs.barcode; if (!dlg) { ctx.toast("Barcode Properties: dialogs are unavailable here"); return; }
+  applySelection(ctx, []);
+  dlg(ctx, barcodeNode(at[0], at[1], S.gfxLayer), (n: SNode | null) => {
+    if (!n) return;
+    const c = addedChange(ctx.doc, n); ctx.commit([c], "Draw Barcode"); applySelection(ctx, [c.id]); ctx.requestRender();
   });
 }
 export function cancelOps() { if (S.drag && lastCtx && lastCtx.doc) { const D = S.drag; S.drag = null; routeUnhighlight(lastCtx, D.subs[0]); } if (S.route) { K.pcbSizes.state.endRoute(); const rt = S.route; S.route = null; if (lastCtx && lastCtx.doc) routeUnhighlight(lastCtx, rt); } S.violations = null; S.routeQueue = null; S.draw = null; S.drag = null; S.image = null; S.pending = null; if (S.move && lastCtx) finishSelectMove(lastCtx, false); S.move = null; if (S.pedit && lastCtx) editHandleUp(lastCtx, false); closeTextPrompt(); if (S.tune) S.tune.pattern = null; }

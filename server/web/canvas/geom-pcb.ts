@@ -7,6 +7,7 @@ import { buildImageGeom, buildTableGeom } from "./tables-images";
 import { parseMarkup, textWidth, unescapeText } from "./text";
 import { linebreakText } from "./stroke-font";
 import { code128, code39 } from "./barcode";
+import { barcode2D } from "./barcode2d";
 import type { Doc, Geom, GeomSink, Item, Pt, PadGeom, PolyGeom, TextEffects, TextExtra, TextGeom, Tf } from "./types";
 
 /** A (render_cache …) node with the text state trackedRenderCache noted on it (non-enumerable). */
@@ -286,8 +287,8 @@ export const POINT_COLOR = "#FF26E2";   // LAYER_POINTS (builtin_color_themes.h)
 /**
  * PCB_BARCODE: the symbol scaled to (size w h) and centred on (at x y), its text under it (1 mm gap, text_height),
  * the knockout box inflated by its margins (at least 10 % of the smaller side), all turned by the angle about the
- * position.  Code 39 / Code 128 bars are encoded as Zint encodes them (barcode.ts); the 2D symbologies draw their
- * finder patterns only.
+ * position.  Code 39 / Code 128 bars are encoded as Zint encodes them (barcode.ts), QR / Micro QR / Data Matrix
+ * modules as barcode2d.ts encodes them.
  */
 export function barcodeGeom(item: Item, n: SNode, tf: Tf, frot: number): void {
   const at = kid(n, "at"); if (!at) return;
@@ -303,20 +304,19 @@ export function barcodeGeom(item: Item, n: SNode, tf: Tf, frot: number): void {
     const bc = type === "code39" ? code39(text) : code128(text);
     if (bc) for (const [a, b] of bc.bars) rects.push([-W / 2 + W * a / bc.modules, -H / 2, -W / 2 + W * b / bc.modules, H / 2]);
   } else {
-    // QR / Micro QR: the 7-module finder squares in the corners; Data Matrix: its solid L and dotted clock edges
-    if (type === "datamatrix") {
-      const m = Math.min(W, H) / 14;
-      rects.push([-W / 2, -H / 2, -W / 2 + m, H / 2], [-W / 2, H / 2 - m, W / 2, H / 2]);
-      for (let x = -W / 2; x < W / 2 - m / 2; x += 2 * m) rects.push([x, -H / 2, x + m, -H / 2 + m]);
-      for (let y = H / 2 - m; y > -H / 2 + m / 2; y -= 2 * m) rects.push([W / 2 - m, y - m, W / 2, y]);
-    } else {
-      const k = type === "microqr" ? 11 : 21, mw = W / k, mh = H / k;
-      const finder = (x0: number, y0: number) => {
-        rects.push([x0, y0, x0 + 7 * mw, y0 + mh], [x0, y0 + 6 * mh, x0 + 7 * mw, y0 + 7 * mh], [x0, y0 + mh, x0 + mw, y0 + 6 * mh], [x0 + 6 * mw, y0 + mh, x0 + 7 * mw, y0 + 6 * mh]);
-        rects.push([x0 + 2 * mw, y0 + 2 * mh, x0 + 5 * mw, y0 + 5 * mh]);
-      };
-      finder(-W / 2, -H / 2);
-      if (type !== "microqr") { finder(W / 2 - 7 * mw, -H / 2); finder(-W / 2, H / 2 - 7 * mh); }
+    // QR / Micro QR / Data Matrix: the module matrix, each row's dark runs as one rectangle
+    const ecc = Math.max(0, "LMQH".indexOf(str((kid(n, "ecc_level") || [])[1] || "L")));
+    const m = barcode2D(type, text, ecc);
+    if (m && m.rows) {
+      const nr = m.rows.length, nc = m.rows[0].length;
+      m.rows.forEach((row, y) => {
+        for (let x = 0; x < nc;) {
+          if (!row[x]) { x++; continue; }
+          let e = x; while (e < nc && row[e]) e++;
+          rects.push([-W / 2 + W * x / nc, -H / 2 + H * y / nr, -W / 2 + W * e / nc, -H / 2 + H * (y + 1) / nr]);
+          x = e;
+        }
+      });
     }
   }
   let y1 = H / 2;

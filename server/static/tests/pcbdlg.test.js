@@ -205,3 +205,42 @@ test("Shape Modification: fillet, chamfer, extend, simplify and polygon booleans
   r = M.booleanPolygons(d, ["r1", "r2"], "intersectPolygons");
   assert.equal(K.kids(K.kid(nodes(r)[0], "pts"), "xy").length, 4);
 });
+
+// ---- PCB_BARCODE: the 2D symbologies against matrices Zint (thirdparty/zint) produced for the same input
+const esbuild = require("esbuild");
+const crypto = require("node:crypto");
+const loadTs = (file) => { const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" }); const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports; };
+const BC = loadTs("canvas/barcode2d.ts");
+// [kind, text, ecc (0 L .. 3 H), rows, sha1 of the rows joined as 0/1]
+const ZINT = [
+  ["qr", "HELLO", 0, 21, "aad4c593e8a43f86"],
+  ["qr", "https://kicad.org/download/linux/", 3, 33, "83c088ea4dd90fc8"],
+  ["qr", "PART-0001-ABCDEFGHIJKLMNOP-0123456789 PART-0001-ABCDEFGHIJKLMNOP-0123456789 PART-0001-ABCDEFGHIJKLMNOP", 1, 37, "22aefc1d7630e1f6"],
+  ["qr", "KiCad ".repeat(40), 1, 61, "a1c0f76304a9b82e"],   // version 11: version information blocks
+  ["qr", "Ünïcödé ✓", 0, 21, "14564b4432edb757"],          // ECI 26 + UTF-8 bytes
+  ["mqr", "12345", 0, 11, "6b995ec0217fc2bf"],
+  ["mqr", "AB-12", 1, 13, "a522a42245028571"],
+  ["mqr", "kicad", 2, 17, "941406af31f3c614"],
+  ["dm", "12345", 0, 10, "1ddcecb7d09905c7"],
+  ["dm", "R1 10k 0603", 0, 14, "4b81097b653594b8"],
+  ["dm", "0123456789ABCD", 0, 8, "ee04ec6aaef79d43"],          // 8x32: two data regions
+];
+test("barcode2d: QR, Micro QR and Data Matrix modules match Zint", () => {
+  for (const [k, text, ecc, rows, sha] of ZINT) {
+    const r = k === "qr" ? BC.qrCode(text, ecc) : k === "mqr" ? BC.microQrCode(text, ecc) : BC.dataMatrix(text);
+    assert.ok(r.rows, k + " " + text + ": " + r.error);
+    assert.equal(r.rows.length, rows, k + " " + text);
+    const h = crypto.createHash("sha1").update(r.rows.map((row) => row.map((b) => (b ? "1" : "0")).join("")).join("")).digest("hex").slice(0, 16);
+    assert.equal(h, sha, k + " " + JSON.stringify(text));
+  }
+  assert.match(BC.microQrCode("x".repeat(40), 0).error, /too long/);
+  assert.match(BC.microQrCode("12", 3).error, /level H not available/);
+});
+test("barcode item: the QR modules are drawn, scaled to (size)", () => {
+  const d = K.parseDoc(`(kicad_pcb (version 20250914) (generator "pcbnew") (layers (0 "F.Cu" signal) (5 "F.SilkS" user))
+    (barcode (at 10 10 0) (layer "F.SilkS") (size 21 21) (text "HELLO") (text_height 1) (type qr) (ecc_level L) (hide yes) (knockout no) (uuid "b1")))`, "kicad_pcb");
+  const it = [...d.items.values()].find((i) => i.kind === "barcode");
+  assert.ok(it.geom.length > 50);
+  const xs = it.geom.flatMap((g) => g.pts.map((p) => p[0]));
+  assert.equal(Math.min(...xs), -0.5); assert.equal(Math.max(...xs), 20.5);   // 21 modules of 1 mm about x = 10
+});

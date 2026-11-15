@@ -98,6 +98,9 @@ const CSS = `
 .pd-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 6px; }
 .pd-row k-select, .pd-row input[type=text] { width: auto; }
 .pd-cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+.pd-radiobox { border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px 6px; margin: 0; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pd-radiobox > legend { padding: 0 4px; color: var(--ink); }
+.pd-radiobox.disabled > legend, .pd-check.disabled { color: var(--ink-3); }
 .pd-cols3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 20px; }
 .pd-list { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); overflow: auto; }
 .pd-list .it { padding: 3px 8px; cursor: pointer; display: flex; gap: 6px; align-items: baseline; }
@@ -411,6 +414,20 @@ export function checkField(v: boolean, label: string, opts?: { ro?: boolean; key
 
 /** wxStaticBoxSizer: a titled group. */
 export function box(title: string, ...children: Child[]): HTMLElement { return h("div", { class: "pd-box" }, h("div", { class: "hd" }, title), ...children); }
+/** wxRadioBox: a titled group of radio buttons, one per row; enable(i, on) greys one choice (wxRadioBox::Enable( n, on )). */
+let radioSeq = 0;
+export function radioBox(title: string, choices: string[], v: number, opts?: { ro?: boolean; key?: string; onChange?(v: number): void }): Field<number> & { enable(on: boolean): void; enableItem(i: number, on: boolean): void } {
+  const name = "pd-radio-" + (++radioSeq);
+  const inputs = choices.map((c, i) => h("input", { type: "radio", name, checked: i === v, disabled: !!(opts && opts.ro), "data-k": opts && opts.key ? opts.key + "-" + i : undefined }) as HTMLInputElement);
+  const labels = choices.map((c, i) => h("label", { class: "pd-check" }, inputs[i], c));
+  const el = h("fieldset", { class: "pd-radiobox", "data-k": opts && opts.key }, h("legend", null, title), ...labels);
+  const get = (): number => Math.max(0, inputs.findIndex((x) => x.checked));
+  if (opts && opts.onChange) { const cb = opts.onChange; inputs.forEach((x) => x.addEventListener("change", () => cb(get()))); }
+  let enabled = true; const itemOn = choices.map(() => true);
+  const sync = () => inputs.forEach((x, i) => { x.disabled = !!(opts && opts.ro) || !enabled || !itemOn[i]; labels[i].classList.toggle("disabled", x.disabled); });
+  return { el, input: inputs[0], get, set(x) { inputs.forEach((r, i) => { r.checked = i === x; }); },
+    enable(on) { enabled = on; el.classList.toggle("disabled", !on); sync(); }, enableItem(i, on) { itemOn[i] = on; sync(); } };
+}
 /** A label / control / unit grid; rows are [label, control, unit?] or a single element spanning the row. */
 export function form(rows: ([string, Child, Child?, string?] | Child)[], wide?: boolean): HTMLElement {
   const f = h("div", { class: "pd-form" + (wide ? " wide" : "") });

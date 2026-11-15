@@ -26,7 +26,7 @@ export const ANGLE_SNAP_MSG: Record<string, string> = { free: "", "90": "Constra
 /** EDIT_TOOL::doMoveSelection displayConstraintsMessage: the constraint field while a move runs (it stays afterwards). */
 export const MOVE_SNAP_MSG: Record<string, string> = { free: "", "90": "Angle snap lines: 90\u00b0", "45": "Angle snap lines: 45\u00b0" };
 /** The DRAWING_TOOL actions: activating one runs DRAWING_TOOL::Reset( RUN ), which calls UpdateStatusBar. */
-export const DRAWING_TOOL_IDS = new Set(["via", "gline", "grect", "gcircle", "gtext", "garc", "gpoly", "gcurve", "gtextbox", "table", "image", "zone", "thievingzone", "rulearea", "dimaligned", "dimortho", "dimcenter", "dimradial", "leader", "anchor"]);
+export const DRAWING_TOOL_IDS = new Set(["via", "gline", "grect", "gcircle", "gtext", "barcode", "garc", "gpoly", "gcurve", "gtextbox", "table", "image", "zone", "thievingzone", "rulearea", "dimaligned", "dimortho", "dimcenter", "dimradial", "leader", "anchor"]);
 /** EDA_DRAW_FRAME::DisplayConstraintsMsg: status field 7 (the app keeps the last text written, as wxStatusBar does). */
 export function displayConstraintsMsg(msg: string) {
   try { if (typeof root.dispatchEvent === "function" && typeof CustomEvent === "function") root.dispatchEvent(new CustomEvent("kc:constraint-msg", { detail: { msg: msg || "" } })); } catch (e) { /* no DOM */ }

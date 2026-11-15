@@ -1,7 +1,6 @@
 // barcode.ts — the bar patterns of PCB_BARCODE's 1D symbologies (Code 39 and Code 128), with the module tables of
 // the Zint library KiCad links (thirdparty/zint/backend/code.c C39Table, code128.c C128Table), so a (barcode …) item
-// draws the same bars pcbnew does.  The 2D symbologies (QR, Micro QR, Data Matrix) are not encoded here: their
-// geometry draws the finder patterns only (geom-pcb.ts).
+// draws the same bars pcbnew does.  The 2D symbologies (QR, Micro QR, Data Matrix) are in barcode2d.ts.
 
 /** Code 39: 9 elements per character (bar, space, …; 1 narrow, 2 wide) and the inter-character gap; [43] is the start / stop "*". */
 const C39 = "1112212111 2112111121 1122111121 2122111111 1112211121 2112211111 1122211111 1112112121 2112112111 1122112111 2111121121 1121121121 2121121111 1111221121 2111221111 1121221111 1111122121 2111122111 1121122111 1111222111 2111111221 1121111221 2121111211 1111211221 2111211211 1121211211 1111112221 2111112211 1121112211 1111212211 2211111121 1221111121 2221111111 1211211121 2211211111 1221211111 1211112121 2211112111 1221112111 1212121111 1212111211 1211121211 1112121211 1211212111".split(" ");

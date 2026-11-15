@@ -32,7 +32,7 @@ import { highlightNetAt, setDragImpl, swapLayerChanges, footprintByRef, footprin
 import { hoverPoint, liveSelected, netNameOf, nextWidth, sizesOf } from "./app-state";
 import { ArcGeom, arcBackup, arcDrawMode, arcFromStartEndCenterDrag, arcFromStartEndMidDrag, arcFromStartTangentEnd, arcMove, arcTangentSeedAt, arcTangentSeedNear, finishArc, setArcDrawMode, showArcMode } from "./arcs";
 import { arrayChanges, arrayOrigin, arraySize, arrayStacked, arrayTransform } from "./array";
-import { cancelOps, dimensionLabel, newItemDialogs, placeTextAt, setNewItemDialogsImpl } from "./assistants";
+import { cancelOps, dimensionLabel, newItemDialogs, placeBarcodeAt, placeTextAt, setNewItemDialogsImpl } from "./assistants";
 import { branchChanges, branchDoc, branchOpFresh, updateHead } from "./branch";
 import { addedChange, boardNets, deleteChanges, removedChange, replacedChange, typeNameOf, wrapBoard } from "./changes";
 import { annotate, clearNets, clipboardText, cursorPoint, duplicateChanges, freshUuids, layersBlock, parseClipboard, pasteChanges, referencePoint, rewriteNets } from "./clipboard";
@@ -216,6 +216,7 @@ export const pcb = {
     else if (t === "anchor") { if (!ctx.viewOnly) { const ch = moveAnchorChanges(ctx.doc, [hv.x, hv.y]); if (ch.length) ctx.commit(ch, "Move Footprint Anchor"); } ctx.setTool("select"); }
     else if (t === "drag") { if (S.drag) { dragMove(ctx, mm); if (S.drag.moved) finishDrag(ctx, true, !!(ev.ctrlKey || ev.metaKey)); } else ctx.setTool("select"); }   // a click after motion fixes the drag
     else if (t === "gtext") placeTextAt(ctx, [hv.x, hv.y]);
+    else if (t === "barcode") placeBarcodeAt(ctx, [hv.x, hv.y]);
     else if (t === "image") { if (S.image) placeImage(ctx, hv); else openImagePicker(); }
     else if (t === "pickpoint" || t === "pickitem") pickClick(ctx, t, hv, mm);
     else if (t === "delete") deleteAt(ctx, mm);   // an empty click is ours too: the tool stays armed

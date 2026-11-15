@@ -26,6 +26,17 @@ export function polyNode(pts: Pt[], layer: string): SNode { return ["gr_poly", [
 export function textNode(text: string, x: number, y: number, layer: string): SNode {
   return ["gr_text", text, ["at", r6(x), r6(y), 0], ["layer", layer], ["uuid", K.newUuid()], effectsNode(layer, ["left", "bottom"])];
 }
+/** PCB_BARCODE as DRAWING_TOOL::DrawBarcode makes it: the constructor's 40 mm QR code (level L) on the active layer, the
+ *  layer class's text height; PCB_IO_KICAD_SEXPR::format( PCB_BARCODE ) writes (barcode (at) (layer) (size) (text)
+ *  (text_height) (type) (ecc_level) (hide) (knockout) (uuid)). */
+export function barcodeNode(x: number, y: number, layer: string): SNode {
+  const { size } = textStyle(layer);
+  return ["barcode", ["at", r6(x), r6(y), 0], ["layer", layer], ["size", 40, 40], ["text", ""], ["text_height", size], ["type", "qr"], ["ecc_level", "L"], ["hide", "no"], ["knockout", "no"], ["uuid", K.newUuid()]];
+}
+/** SEXPR_BOARD_FILE_VERSION 20250914 added PCB_BARCODE: an older board cannot store one (the web never bumps the format). */
+export const BARCODE_FILE_VERSION = 20250914;
+export const barcodeAllowed = (doc: BoardDoc | null | undefined) => !doc || !(Number((doc as { version?: unknown }).version) > 0) || Number((doc as { version?: unknown }).version) >= BARCODE_FILE_VERSION;
+export const BARCODE_NEEDS_VERSION_MSG = "Barcodes need a board in the KiCad 10 file format (version 20250914 or later); this board is saved in an older format, which cannot store them.";
 /** EDA_TEXT::Format for a new item on a layer: the class's size and thickness, a justification, mirrored on the back. */
 export function effectsNode(layer: string, just?: string[]): SNode {
   const { size, thick } = textStyle(layer); const eff: SNode = ["effects", ["font", ["size", size, size], ["thickness", thick]]];

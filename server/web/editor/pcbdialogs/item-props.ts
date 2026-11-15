@@ -12,6 +12,7 @@ import { comboBox } from "../../components/kcombo";
 import { E } from "../state";
 import { kicadActionAvailable, runKicadAction } from "../hotkeys";
 import { dimensionDialog } from "./dimension";
+import { barcodeDialog } from "./barcode";
 import { textBoxDialog } from "./textbox";
 import { tableDialog } from "./table";
 import { boardXref } from "./xref";
@@ -1041,6 +1042,7 @@ export function pcbItemDialog(ctx: ToolCtx, item: KItem): boolean {
     case "footprint": return footprintDialog(ctx, item);
     case "dimension": return dimensionDialog(ctx, item);
     case "target": return targetDialog(ctx, item);
+    case "barcode": return barcodeDialog(ctx, item.node, item);
     default: return false;
   }
 }
