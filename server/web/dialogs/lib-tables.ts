@@ -542,26 +542,3 @@ export async function manageLibraries(kind: T.LibTableKind, frame?: { readOnly?:
       if (frame && frame.onSaved) frame.onSaved(rows);
     } });
 }
-
-/** The path variables the server resolves, as Configure Paths shows them. */
-export const PATH_VARS: { name: string; value: string }[] = [
-  { name: "KICAD10_3DMODEL_DIR", value: "(the KiCad 3D models this server provides)" },
-  { name: "KICAD10_FOOTPRINT_DIR", value: "(the KiCad footprint libraries this server provides)" },
-  { name: "KICAD10_SYMBOL_DIR", value: "(the KiCad symbol libraries this server provides)" },
-  { name: "KICAD_COLLAB_3DMODELS", value: "(3D models of vendor parts, fetched on use)" },
-  { name: "KIPRJMOD", value: "(the project folder)" },
-];
-
-/** ACTIONS::configurePaths: the Environment Variables grid.  Every path here is set by the server, which KiCad shows
- *  as a variable "defined externally to the running process": listed, not editable. */
-export function openConfigurePaths(): void {
-  KD().open({
-    title: "Configure Paths", width: 760, geomKey: "configure-paths", buttons: [{ label: "Close", close: true, primary: true, isDefault: true }],
-    build(body) {
-      const box = KD().staticBox(body, "Environment Variables");
-      KD().grid(box, [{ key: "name", label: "Name", type: "ro", width: 230 }, { key: "value", label: "Path", type: "ro", width: 470 }], PATH_VARS.slice(), { readOnly: true, height: 190 });
-      body.append(h("p", { class: "kd-note", id: "kd-paths-note", style: "margin:8px 2px 0" },
-        "These paths are defined by the Junction server, outside the editor, and cannot be changed here. Library tables and 3D model references written with them resolve the same way in the desktop app, where the variables point at the local KiCad install."));
-    },
-  });
-}

@@ -82,7 +82,6 @@ export const CSS = `
 .se-prow .k{position:relative;outline:none;padding:0 4px 0 18px;line-height:20px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border-right:1px solid var(--line-soft,var(--line))}
 .se-prow.ro .k{color:var(--ink-3)}
 .se-prow .k:focus{background:var(--sel)}
-.se-hoverprev{position:fixed;z-index:60;background:var(--canvas);border:1px solid var(--line);box-shadow:var(--shadow-panel,0 6px 18px rgba(0,0,0,.25));pointer-events:none}
 .se-psplit{position:absolute;right:0;top:0;bottom:0;width:5px;cursor:col-resize;z-index:1}
 .se-plabel{position:absolute;inset:0;width:100%;height:100%;border:0;margin:0;padding:0 4px 0 18px;font:inherit;color:var(--ink);background:var(--canvas);box-shadow:inset 0 0 0 1px var(--blue);outline:none;z-index:2}
 .se-pgroup .nm{flex:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}

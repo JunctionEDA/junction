@@ -25,7 +25,6 @@ import { navTarget, propNavOf, type PropNav } from "../components/panes/prop-nav
 import { FP_BROWSE_TIP, chooseFootprint, noFileBrowsing, openDatasheet, urlIcon, urlTip } from "../dialogs/browse-cells";
 import { datasheetLink } from "../library/fpchoice";
 import { kicadIcon, setKicadIcon } from "../components/kicon-dom";
-import { renderSymbolPreview } from "../library/preview";
 import { symCanvasMenu, symTreeMenu, type SymMenuCtx } from "./ctxmenu";
 import { libTreeFilter } from "../components/libtree-filter";
 import { bindTreePreview } from "../components/libtree-preview";
@@ -572,7 +571,7 @@ export class SymbolEditor {
     const list = h("div", { class: "se-list", id: "se-list", tabindex: 0 });
     list.addEventListener("keydown", (ev) => this.onTreeKey(ev as KeyboardEvent, false));
     // LIB_TREE's hover preview: a symbol row other than the one on the canvas (SYMBOL_TREE_SYNCHRONIZING_ADAPTER::HasPreview)
-    bindTreePreview(list, {
+    this.treePreview = bindTreePreview(list, {
       rowAt: (t) => { const row = t.closest(".se-row[data-sym]") as HTMLElement | null; const key = row && row.dataset.sym; const c = this.tab && !this.tab.origin ? this.tab.lib + ":" + this.tab.name : ""; return row && key && key !== c ? { row, key } : null; },
       draw: (canvas, key) => this.drawTreePreview(canvas, key),
     });
@@ -595,8 +594,6 @@ export class SymbolEditor {
     root.append(mb, tbTop, info, main, msg, status);
     this.root = root;
     this.el = { mb, tbTop, info, tbLeft, tree, list, tabs, cwrap, props, side, sfilter, tbRight, msg, status, empty, filter };
-    list.addEventListener("scroll", () => this.hidePreview(), { passive: true });
-    list.addEventListener("pointerdown", () => this.hidePreview());
     this.renderSelFilter();
     this.hookCanvas(cwrap, cv);
     new ResizeObserver(() => this.paint()).observe(cwrap);
@@ -783,41 +780,9 @@ export class SymbolEditor {
   /** SYMBOL_TREE_SYNCHRONIZING_ADAPTER: pinned libraries first ("☆ "), " *" and bold on modified libraries and
    *  symbols, derived symbols in italics, the on-canvas symbol (or its collapsed library) outlined, every
    *  multi-unit symbol with its units as children; a click selects, a double-click or the twist expands. */
-  // LIB_TREE's hover preview (common/widgets/lib_tree.cpp onHoverTimer / showPreview): after a pause over a symbol
-  // row, a 240 x 200 preview beside the tree; leaving the row, a click or a scroll takes it away
-  private previewTimer = 0;
-  private previewPop: HTMLElement | null = null;
-  private previewSeq = 0;
-  hidePreview(): void {
-    window.clearTimeout(this.previewTimer); this.previewTimer = 0; this.previewSeq++;
-    if (this.previewPop) { this.previewPop.remove(); this.previewPop = null; }
-  }
-  private hoverPreview(row: HTMLElement, lib: Lib, name: string): void {
-    this.hidePreview();
-    const seq = this.previewSeq;
-    this.previewTimer = window.setTimeout(() => void (async () => {
-      let sym: M.Node | null = null;
-      try {
-        if (lib.doc) { await lib.doc.whenLoaded(); sym = lib.doc.lib.symbols.get(name) || null; }
-        else if (lib.kind === "official") {
-          sym = lib.syms.get(name) || null;
-          if (!sym) {
-            const r = await fetch(`/api/libs/symbols/${encodeURIComponent(lib.nick)}/${encodeURIComponent(name)}`, { credentials: "same-origin" });
-            if (r.ok) { const j = await r.json() as { symbol: string; parents?: string[] }; for (const p of j.parents || []) { try { const n = M.node(p); lib.syms.set(M.symName(n), n); } catch (e) { /* skip */ } } sym = M.node(j.symbol); lib.syms.set(name, sym); }
-          }
-        }
-      } catch (e) { sym = null; }
-      if (!sym || seq !== this.previewSeq || !row.isConnected) return;
-      const flat = M.flatten(this.libMap(lib), sym);
-      const box = row.getBoundingClientRect(), list = this.el.list ? this.el.list.getBoundingClientRect() : box;
-      const W = 240, H = 200, M8 = 8;
-      const left = Math.min(window.innerWidth - W - M8, list.right + 4), top = Math.max(M8, Math.min(window.innerHeight - H - M8, box.top));
-      const cv = h("canvas", { style: `width:${W - 2}px;height:${H - 2}px;display:block` }) as HTMLCanvasElement;
-      const pop = h("div", { class: "se-hoverprev", "data-preview": lib.nick + ":" + name, style: `left:${left}px;top:${top}px;width:${W}px;height:${H}px` }, cv);
-      document.body.append(pop); this.previewPop = pop;
-      try { renderSymbolPreview(cv, lib.nick + ":" + name, M.text(flat), 1); } catch (e) { pop.remove(); this.previewPop = null; }
-    })(), 500);
-  }
+  /** LIB_TREE's hover preview (components/libtree-preview.ts) */
+  private treePreview: { hide(): void } | null = null;
+  hidePreview(): void { if (this.treePreview) this.treePreview.hide(); }
   renderTree(): void {
     this.hidePreview();
     const list = this.el.list; if (!list) return;
@@ -862,8 +827,6 @@ export class SymbolEditor {
         stw.addEventListener("click", (ev) => { ev.stopPropagation(); utoggle(); });
         sr.addEventListener("click", () => { this.treeSel = { lib: lib.nick, name: r.name }; this.renderTree(); });
         sr.addEventListener("dblclick", () => { this.hidePreview(); void this.loadSymbol(lib.nick, r.name); });
-        sr.addEventListener("pointerenter", () => this.hoverPreview(sr, lib, r.name));
-        sr.addEventListener("pointerleave", () => this.hidePreview());
         sr.addEventListener("contextmenu", (ev) => { ev.preventDefault(); this.treeSel = { lib: lib.nick, name: r.name }; this.renderTree(); showMenu(ev.clientX, ev.clientY, this.treeMenu(lib, r.name)); });
         frag.append(sr); order.push({ lib: lib.nick, name: r.name });
         if (uopen) for (let u = 1; u <= r.units; u++) {

@@ -22,8 +22,9 @@ export const PREDEFINED_ENV_VARS = ["KIPRJMOD", "KICAD10_SYMBOL_DIR", "KICAD10_3
 /** The rows of the Environment Variables grid: the variables KiCad sets itself (Pgm().GetLocalEnvVariables), sorted. */
 export function envVarRows(): { name: string; path: string }[] {
   const vals = serverEnvValues({});
-  const names = ["KICAD10_3DMODEL_DIR", "KICAD10_3RD_PARTY", "KICAD10_FOOTPRINT_DIR", "KICAD10_SYMBOL_DIR", "KICAD10_TEMPLATE_DIR", "KICAD_USER_TEMPLATE_DIR"];
-  const other: Record<string, string> = { KICAD10_3RD_PARTY: "(Plugin and Content Manager packages of this server)", KICAD10_TEMPLATE_DIR: "(the project templates of this server)", KICAD_USER_TEMPLATE_DIR: "" };
+  // KICAD_COLLAB_3DMODELS: the server's variable for vendor parts' 3D models, defined outside the program like the rest
+  const names = ["KICAD10_3DMODEL_DIR", "KICAD10_3RD_PARTY", "KICAD10_FOOTPRINT_DIR", "KICAD10_SYMBOL_DIR", "KICAD10_TEMPLATE_DIR", "KICAD_COLLAB_3DMODELS", "KICAD_USER_TEMPLATE_DIR"];
+  const other: Record<string, string> = { KICAD10_3RD_PARTY: "(Plugin and Content Manager packages of this server)", KICAD10_TEMPLATE_DIR: "(the project templates of this server)", KICAD_COLLAB_3DMODELS: "(3D models of vendor parts, fetched on use)", KICAD_USER_TEMPLATE_DIR: "" };
   return names.map((name) => ({ name, path: vals[name] !== undefined ? vals[name] : other[name] || "" }));
 }
 
