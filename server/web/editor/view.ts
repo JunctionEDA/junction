@@ -3,6 +3,7 @@ import { updateMsgPanel } from "./msgpanel";
 import { state, store } from "./appstore";
 import { drawCursorLayer, refreshCrosshair } from "./crosshair";
 import { drawComments } from "./comments";
+import { refreshPreview } from "../ai/proposals";
 import { loadBase } from "./doc";
 import { $, NS } from "./dom";
 import { drawHover } from "./gestures";
@@ -183,7 +184,7 @@ export function applyView() {
   // Everything on the overlay is sized in screen pixels, so a zoom or fit
   // must redraw peers too (they otherwise keep the previous scale until the
   // next presence message).
-  drawComments(); drawSelection(); drawPeers(E.peerState); refreshCrosshair();
+  drawComments(); drawSelection(); drawPeers(E.peerState); refreshCrosshair(); refreshPreview();
   requestRepaint();
 }
 

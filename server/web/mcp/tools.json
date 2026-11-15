@@ -191,6 +191,41 @@
     }
   },
   {
+    "name": "propose_fixes",
+    "title": "Offer fixes for rule violations",
+    "write": true,
+    "description": "Runs the ERC (a sheet) or DRC (the board) and offers a fix for every violation that has a mechanical cure, each kind as one proposal the people in the document see drawn over the design and Accept or Reject: open connections routed, dangling tracks and vias removed, silkscreen moved off pads, unconnected pins flagged no-connect, PWR_FLAG on undriven supply nets, stray labels and flags removed. Nothing changes until a person accepts. Violations that need a design decision (clearance, shorts, pin conflicts) come back in left_for_you with a hint; solve those yourself and offer them with apply_changes propose: true.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name." },
+        "document": { "type": "string", "description": "A schematic sheet's path, or \"board\"." },
+        "codes": { "type": "array", "items": { "type": "string" }, "description": "Only these violation codes (as run_checks names them)." }
+      },
+      "required": ["project", "document"],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "list_proposals",
+    "title": "Proposals and their outcome",
+    "write": false,
+    "description": "The changes you proposed with apply_changes propose: true, and what the people decided: pending, accepted (applied by the person), rejected (with their reason), stale (the design changed under it) or withdrawn. Pass proposal with wait_s to wait for one decision; pass withdraw to take a pending proposal back.",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "Project id or exact name." },
+        "document": { "type": "string", "description": "Only this document's proposals." },
+        "status": { "type": "string", "enum": ["pending", "accepted", "rejected", "stale", "withdrawn"], "description": "Only proposals in this state." },
+        "proposal": { "type": "string", "description": "One proposal by id." },
+        "wait_s": { "type": "number", "description": "With proposal: wait up to this many seconds (50 at most) for a person to decide." },
+        "withdraw": { "type": "string", "description": "Id of a pending proposal to take back." }
+      },
+      "required": ["project"],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "read_document",
     "title": "Read source",
     "write": false,

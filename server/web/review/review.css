@@ -143,3 +143,35 @@ button.cmt-anchor:hover { border-color: var(--blue); }
 .cmt-card .text { white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .cmt-card .foot { display: flex; justify-content: space-between; margin-top: 4px; color: var(--ink-3); font: var(--fs-xs) var(--mono); }
 .cmt-doc { margin: 10px 0 4px; color: var(--ink-2); font: 600 var(--fs-xs) var(--mono); }
+
+/* Changes an assistant proposes over MCP (web/editor/proposals.ts): a list over the top right of the canvas. */
+#propPanel { position: absolute; z-index: 4; top: 46px; right: 8px; display: none; flex-direction: column; overflow: hidden; width: 330px; max-width: calc(100% - 16px); max-height: min(75%, 560px);
+  background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-3, 6px); box-shadow: var(--shadow-2, 0 4px 16px rgba(0, 0, 0, .25)); color: var(--ink); font-size: var(--fs-sm, 12px); }
+#propPanel.open { display: flex; }
+.prop-head { display: flex; align-items: center; gap: 6px; padding: 6px 10px 6px 6px; background: var(--paper); border-bottom: 1px solid var(--line); cursor: default; }
+.prop-fold { flex: none; width: 18px; height: 18px; padding: 0; border: 0; border-radius: var(--r-1); background: transparent; color: var(--ink-2); cursor: pointer; }
+.prop-fold:hover { background: var(--line); color: var(--ink); }
+.prop-heading { font-weight: 600; }
+.prop-list { flex: 1 1 auto; min-height: 0; overflow: auto; }
+.prop-card { padding: 8px 10px 10px; border-bottom: 1px solid var(--line); border-left: 2px solid transparent; }
+.prop-card:last-child { border-bottom: 0; }
+.prop-card.shown { border-left-color: var(--wire); background: var(--sel-soft); }
+.prop-card .meta { display: flex; align-items: baseline; gap: 6px; color: var(--ink-3); font: var(--fs-xs) var(--mono); }
+.prop-card .meta b { color: var(--ink-2); font-weight: 500; }
+.prop-title { margin-top: 2px; font-weight: 600; overflow-wrap: anywhere; }
+.prop-why { margin-top: 2px; color: var(--ink-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.prop-lines { margin: 6px 0 0; padding: 0; list-style: none; font: var(--fs-xs) var(--mono); color: var(--ink-2); }
+.prop-lines li { position: relative; padding: 1px 0 1px 14px; overflow-wrap: anywhere; }
+.prop-lines li::before { content: ""; position: absolute; left: 2px; top: 6px; width: 7px; height: 7px; border-radius: var(--r-1); background: var(--ink-3); }
+.prop-lines li.add::before { background: var(--wire); }
+.prop-lines li.modify::before { background: var(--warn); }
+.prop-lines li.remove::before { background: var(--err); }
+.prop-lines li.more { color: var(--ink-3); }
+.prop-lines li.more::before { display: none; }
+.prop-warn { margin-top: 6px; padding: 4px 6px; border: 1px solid var(--warn); border-radius: var(--r-2); color: var(--ink); overflow-wrap: anywhere; }
+.prop-note { margin-top: 6px; color: var(--ink-3); }
+.prop-card .row { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+.prop-card .row .grow { flex: 1; }
+.prop-card .row .hint { color: var(--ink-3); font-size: var(--fs-xs); }
+.prop-card .row input { flex: 1; min-width: 0; height: 24px; padding: 0 6px; background: var(--paper); border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink); font: inherit; }
+.prop-card .row input:focus { outline: none; border-color: var(--blue); }

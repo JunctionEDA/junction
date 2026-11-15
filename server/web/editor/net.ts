@@ -7,6 +7,7 @@ import { drawSelection, renderProps } from "./selection";
 import { E } from "./state";
 import { setTool } from "./tools";
 import { api, toast } from "./util";
+import { noteProposalMsg } from "./proposals";
 import { historyActive, holdViewOnly, noteEdit, onVersionsNotice } from "./versions";
 import type { ItemSummary, PendingOp, ServerError } from "./types";
 import { dragG, drawPeers, peersG, scheduleRenderRefresh } from "./view";
@@ -131,6 +132,7 @@ export async function connect() {
       if (was !== msg.role) toast(msg.role === "editor" ? "You can now edit this project" : msg.role === "commenter" ? "You can now comment on this project, but not change it" : "You now have view-only access to this project", 4500);
     }
     if (msg.type === "comment") noteCommentMsg(msg);
+    if (msg.type === "proposal") noteProposalMsg(msg);       // an assistant proposed a change, or somebody decided one (proposals.ts)
     if (msg.type === "versions") onVersionsNotice(msg);       // somebody saved, restored, branched or merged
     // a document of the project was saved explicitly (the Footprint Editor's Save): fpedit.ts clears its '*', library caches drop the file
     if (msg.type === "saved") window.dispatchEvent(new CustomEvent("kc-doc-saved", { detail: msg }));

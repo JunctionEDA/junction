@@ -454,6 +454,9 @@ How it is built:
 | `compare_versions` | what changed since a checkpoint, as a list and a picture with each change boxed (or the two versions side by side) |
 | `get_bom` | the bill of materials priced at the vendors' breaks for a number of boards, with stock shortfalls and parts not yet chosen |
 | `export_fab` | the fabrication package (Gerbers, drill, BOM, placement) for JLCPCB, PCBWay or KiCad defaults as a zip behind a download link (`/api/exports/{id}`, table `project_exports`), with the DRC result |
+| `apply_changes` with `propose: true` | the change is not applied: it is stored (`/api/docs/{id}/proposals`, table `design_proposals`) and everyone in the document sees it drawn over the design in a Proposed changes panel with Accept and Reject; accepting applies it as that person's edit, one undo step |
+| `list_proposals` | the proposals and their outcome (pending, accepted, rejected with the reason, stale, withdrawn); waits for one decision with `wait_s`, takes one back with `withdraw` |
+| `propose_fixes` | runs the ERC or DRC and offers each kind of mechanically fixable violation as one proposal; the rest come back with a hint |
 | `view_datasheet` | pages of a PDF datasheet as pictures (pinout, typical application, graphs); the server image needs `poppler-utils` (`pdftoppm`, or `KC_PDFTOPPM`) |
 | `find_parts`, `get_library_part`, `find_datasheets` | KiCad libraries, vendor parts, datasheet links |
 | `read_datasheet` | the pages of a PDF datasheet that answer a question (fetched and indexed once on the server) |

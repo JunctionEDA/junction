@@ -1,6 +1,7 @@
 // editor — GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/editor/index.ts — edit these modules, not the bundle).
 import { KICAD_LAYERS, SCH_LAYERS, setStatusBar, setToggle, state, store } from "./appstore";
 import { centerOn, closeThread, drawComments, loadComments, renderThreads } from "./comments";
+import { loadProposals } from "./proposals";
 import { $ } from "./dom";
 import { pruneSelection, resetInteraction } from "./gestures";
 import { loadHistory } from "./history";
@@ -440,6 +441,7 @@ export async function openDoc(doc: DocEntry) {
   const docId = doc.docId;
   setupGridControls();
   loadComments();
+  void loadProposals();
   // The document itself, drawn here and kept current by the op stream; the
   // desktop-pushed render is only a fallback when the file can't be read.
   let ok = false;

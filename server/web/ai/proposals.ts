@@ -954,7 +954,7 @@ let noScroll = false;
  * drawn from a scratch copy as a ghost over the sheet, and every touched item gets a box —
  * green for new, amber for changed, red for removed.
  */
-export function showPreview(p: Proposal): void {
+export function showPreview(p: Proposal, quiet = false): void {
   clearPreview();
   const ed = ED(); const doc = ed?.kdoc; const g = layer(); const k = K(); if (!doc || !g || openEntry()?.docId !== p.docId) return;
   previewOf = p.id; previewed = p; lastZoom = ed.zoom;
@@ -992,7 +992,7 @@ export function showPreview(p: Proposal): void {
     g.appendChild(r);
   }
   // bring it into view when it is off screen
-  if (boxes.length && !noScroll) {
+  if (boxes.length && !noScroll && !quiet) {
     let bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
     for (const { b } of boxes) { bx0 = Math.min(bx0, b[0]); by0 = Math.min(by0, b[1]); bx1 = Math.max(bx1, b[2]); by1 = Math.max(by1, b[3]); }
     const stage = document.getElementById("stage"), world = document.getElementById("world");

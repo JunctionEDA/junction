@@ -28,6 +28,7 @@ import { checkLayout } from "../ai/layout";
 import { reviewDesign } from "../ai/review";
 import * as library from "../ai/library";
 import { buildProposal, staleReason, writeRules } from "../ai/proposals";
+import { planFixes } from "./fixes";
 import { diffDocs } from "../review/diff";
 import { getBom } from "./bom";
 import { buildPackage, packageZip } from "../fab/index";
@@ -206,6 +207,10 @@ async function applyChanges(req: Request, live = false, stage?: (sess: DocSessio
     needWrite(req, p);
     if (ed.viewOnly) throw new ToolError(`You have view-only access to ${p.name}.`);
     const stale = staleReason(prop); if (stale) throw new ToolError(stale);
+    if (args.propose === true) {
+      if (stage) throw new ToolError("A script's edits are applied as it runs; propose changes with apply_changes and propose: true.");
+      return { result: Object.assign(await park(req, sess, _doc, prop), summary) };
+    }
 
     let rules: unknown; const pro = p.docs.find((d) => d.docType === "kicad_pro");
     if (prop.rules) {
@@ -234,6 +239,89 @@ async function applyChanges(req: Request, live = false, stage?: (sess: DocSessio
     }
     return { result: Object.assign({ applied: true, changes: prop.changes.length, board_rules: rules ? "written to the project file" : undefined }, summary),
       record: { docId: sess.entry.docId, title: prop.title, edits: summary.edits, undo: Object.assign({}, undo, rules ? { rules } : {}) } };
+  });
+}
+
+// ---------------------------------------------------------------- proposals: changes a person accepts
+
+/** Store a planned change for the people in the document to accept or reject (src/proposals.rs), and point at it. */
+async function park(req: Request, sess: DocSession, doc: any, prop: any): Promise<any> {
+  if (!prop.changes.length && !prop.rules) throw new ToolError("These edits change nothing, so there is nothing to propose.");
+  const body = { lines: prop.lines.map((l: any) => ({ kind: l.kind, text: l.text })), changes: prop.changes, basis: prop.basis, rules: prop.rules || null, connectivity: prop.connectivity || null };
+  const stored = await api(`/api/docs/${sess.entry.docId}/proposals`, { method: "POST", headers: { "content-type": "application/json" },
+    body: JSON.stringify({ title: prop.title, rationale: prop.rationale || "", app: req.agent || "", body }) });
+  // the assistant's cursor goes to what the proposal touches, so people look there
+  let seen: unknown;
+  try {
+    const ids = prop.changes.filter((c: any) => c.kind !== "ADDED" && doc.items.has(c.id)).map((c: any) => c.id).slice(0, 40);
+    let box: number[] | null = null;
+    const scratch = Object.assign({}, doc, { items: new Map() });
+    for (const c of prop.changes) if (c.kind === "ADDED") { try { K().applyChange(scratch, c, sess.IU); } catch { /* drawn by the editor */ } }
+    for (const it of scratch.items.values() as Iterable<any>) if (it.bbox) box = box ? [Math.min(box[0], it.bbox[0]), Math.min(box[1], it.bbox[1]), Math.max(box[2], it.bbox[2]), Math.max(box[3], it.bbox[3])] : it.bbox.slice();
+    if (ids.length || box) { const h: any = await highlight(sess, doc, { ids: ids.length ? ids : undefined, area: !ids.length && box ? box : undefined, note: `Proposed: ${prop.title}`, seconds: 60 }); seen = h.seen_by; }
+  } catch { /* the proposal stands without the pointer */ }
+  return { applied: false, proposed: true, proposal: stored.id, status: "pending", seen_by: seen,
+    note: "Nothing was changed. The people in this document see the change drawn over the design and choose Accept or Reject. Read the outcome with list_proposals (wait_s waits for it); do not apply the same edits yourself meanwhile." };
+}
+
+const proposalRow = (r: any) => ({ proposal: r.id, document: r.docPath, title: r.title, status: r.status, edits: (r.lines || []).length, proposed: r.createdAt,
+  decided_by: r.decidedBy ? r.decidedBy.name || r.decidedBy.login : undefined, decided: r.decidedAt || undefined, reason: r.reason || undefined });
+
+async function listProposals(req: Request): Promise<Reply> {
+  const p = needProject(req), a = req.args || {};
+  if (a.withdraw) {
+    needWrite(req, p);
+    const r = await api(`/api/proposals/${encodeURIComponent(String(a.withdraw))}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: "withdrawn", reason: String(a.reason || "") }) });
+    return { result: proposalRow(r) };
+  }
+  if (a.proposal) {
+    const until = Date.now() + Math.max(0, Math.min(50, Number(a.wait_s) || 0)) * 1000;
+    for (;;) {
+      const r = await api(`/api/proposals/${encodeURIComponent(String(a.proposal))}`);
+      if (r.projectId !== p.projectId) throw new ToolError("That proposal is not in this project.");
+      if (r.status !== "pending" || Date.now() >= until) {
+        const row: any = proposalRow(r);
+        if (r.status === "pending") row.note = "Still waiting for a person to decide. Carry on with other work or ask them; do not apply it yourself.";
+        if (r.status === "accepted") row.note = "Applied by the person as their own edit; the design now contains it.";
+        if (r.status === "stale") row.note = "The design changed under it. Read the design again and propose a new version if it is still wanted.";
+        return { result: row };
+      }
+      await new Promise((ok) => setTimeout(ok, 1500));
+    }
+  }
+  const docs = a.document ? [findDocument(p, a.document)] : p.docs.filter((d) => d.docType === "kicad_sch" || d.docType === "kicad_pcb");
+  const out: any[] = [];
+  for (const d of docs) {
+    const j = await api(`/api/docs/${d.docId}/proposals${a.status ? `?status=${encodeURIComponent(String(a.status))}` : ""}`);
+    for (const r of j.proposals || []) out.push(proposalRow(r));
+  }
+  out.sort((x, y) => String(y.proposed).localeCompare(String(x.proposed)));
+  return { result: { proposals: out.slice(0, 30), note: out.length ? undefined : "No proposals." } };
+}
+
+async function proposeFixes(req: Request): Promise<Reply> {
+  const p = needProject(req), a = req.args || {}; needWrite(req, p);
+  return withDocument(req, a.document, async (sess, doc, ed) => {
+    if (ed.viewOnly) throw new ToolError(`You have view-only access to ${p.name}.`);
+    let markers: any[];
+    if (doc.type === "sch") markers = await design.projectErc(doc, sess.entry.path);
+    else { const P = W.PcbTools; if (!P || !P.drc) throw new ToolError("The DRC is not available."); markers = P.drc(doc, P.designSettings(ed.proSettings || null), {}); }
+    const rows = markers.filter((m) => m.severity === "error" || m.severity === "warning");
+    const { plans, left } = planFixes(doc, rows, Array.isArray(a.codes) ? a.codes.map(String) : undefined);
+    const waiting = (await api(`/api/docs/${sess.entry.docId}/proposals?status=pending`)).proposals || [];
+    const proposed: any[] = [], failed: any[] = [];
+    for (const plan of plans) {
+      if (waiting.some((w: any) => w.title === plan.title)) { failed.push({ fix: plan.title, why: "The same fix is already waiting for a decision." }); continue; }
+      try {
+        const prop = await buildProposal({ title: plan.title, rationale: plan.rationale, edits: plan.edits });
+        const stored = await park(req, sess, doc, prop);
+        proposed.push({ proposal: stored.proposal, title: plan.title, fixes: plan.fixes, codes: plan.codes, edits: prop.lines.length });
+      } catch (e) { failed.push({ fix: plan.title, why: plain(e instanceof Error ? e.message : String(e)) }); }
+    }
+    return { result: { document: sess.entry.path, check: doc.type === "sch" ? "ERC" : "DRC", violations: rows.length, proposed, could_not_plan: failed.length ? failed : undefined,
+      left_for_you: left.length ? left.slice(0, 20) : undefined,
+      note: proposed.length ? "Nothing was changed. Each fix waits as its own proposal for a person to Accept or Reject in the editor; list_proposals gives the outcome. Run the check again after they decide."
+        : rows.length ? "None of these violations has a mechanical fix. Work through left_for_you: each needs a design decision; propose your change with apply_changes propose: true." : "The check is clean: nothing to fix." } };
   });
 }
 
@@ -713,6 +801,8 @@ const TOOLS: Record<string, (req: Request) => Promise<Reply>> = {
   compare_versions: compareVersions,
   get_bom: bomTool,
   export_fab: exportFab,
+  list_proposals: listProposals,
+  propose_fixes: proposeFixes,
   trace_net: (req) => withDocument(req, req.args.document, async (sess, doc) => {
     const res: any = traceNet(doc, sess.entry.path, req.args.net);
     if (req.args.highlight === true) res.highlight = await highlight(sess, doc, { nets: [req.args.net], note: req.args.note, seconds: req.args.seconds });

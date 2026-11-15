@@ -273,12 +273,103 @@ await open(sch.id);
   check('export_fab preset kicad without BOM and placement', !kicad.isError && !kicad.data.contains.some((n) => /bom|pos|cpl/i.test(n)), kicad.text.slice(0, 400));
 }
 
+// ------------------------------------------------------------------ proposals a person accepts or rejects
+
+{
+  await db.query(`DELETE FROM design_proposals WHERE project_id = $1`, [projectId]);
+  page.on('console', (m) => { if (process.env.DEBUG) console.log('  console:', m.text().slice(0, 300)); });
+  await open(sch.id);
+  const before = await call('get_component', { project: NAME, document: sch.path, ref: 'R5' }); if (process.env.DEBUG) console.log(before.text.slice(0, 400));
+  const prop = await call('apply_changes', { project: NAME, document: sch.path, propose: true, title: 'Stronger pull-up on R5', rationale: 'A 4.7k pull-up gives faster edges on this bus.',
+    edits: [{ op: 'set_field', ref: 'R5', field: 'Value', value: '4k7' }] });
+  check('apply_changes propose: true changes nothing and returns a pending proposal', !prop.isError && prop.data.applied === false && prop.data.proposed === true && /^[0-9a-f-]{36}$/.test(prop.data.proposal), prop.text.slice(0, 400));
+  const same = await call('get_component', { project: NAME, document: sch.path, ref: 'R5' });
+  check('the design is untouched while the proposal waits', same.text === before.text);
+  check('the person sees the proposal listed with its author, title and edits', await until(() => page.evaluate(() => { const c = document.querySelector('#propPanel.open .prop-card'); return !!c && /Ada's assistant/.test(c.querySelector('.meta')?.textContent || '') && /Stronger pull-up on R5/.test(c.textContent || '') && c.querySelectorAll('.prop-lines li').length === 1; })), await page.evaluate(() => document.querySelector('#propPanel')?.outerHTML.slice(0, 600)));
+  check('and it is drawn over the sheet without being applied', await until(() => page.evaluate(() => document.querySelectorAll('#aiG rect').length >= 1 && document.querySelectorAll('#aiG svg').length === 1)));
+  await sleep(400); await shot('14-proposal-preview.png');
+  const waiting = call('list_proposals', { project: NAME, proposal: prop.data.proposal, wait_s: 20 });
+  await sleep(600);
+  await page.click('#propPanel .prop-card [data-act="accept"]');
+  const outcome = await waiting;
+  check('list_proposals wait_s returns as soon as the person accepts', !outcome.isError && outcome.data.status === 'accepted' && outcome.data.decided_by === 'Bob', outcome.text);
+  const after = await until(async () => /4k7/.test((await call('get_component', { project: NAME, document: sch.path, ref: 'R5' })).text));
+  check('accepting applies the change as the person\'s edit', after, await page.evaluate(() => document.body.innerText.split('\n').filter((l) => /proposal|edited|Open |applied|deleted|decision/i.test(l)).join(' | ')));
+  check('the card and the preview go away', await until(() => page.evaluate(() => !document.querySelector('#propPanel.open') && document.querySelectorAll('#aiG *').length === 0)));
+  await page.keyboard.press('Control+z');
+  check('it is one undo step for the person who accepted', await until(async () => !/4k7/.test((await call('get_component', { project: NAME, document: sch.path, ref: 'R5' })).text)));
+  await shot('15-proposal-accepted.png');
+
+  const two = await call('apply_changes', { project: NAME, document: sch.path, propose: true, title: 'Remove R8', edits: [{ op: 'remove', ref: 'R8' }] });
+  check('a second proposal', !two.isError && two.data.proposed === true, two.text.slice(0, 300));
+  await page.waitForSelector('#propPanel.open .prop-card [data-act="reject"]');
+  await page.click('#propPanel .prop-card [data-act="reject"]');
+  await page.fill('#propPanel .prop-card [data-act="why"]', 'R8 is needed for boot');
+  await shot('16-proposal-reject.png');
+  await page.click('#propPanel .prop-card [data-act="reject-send"]');
+  const rej = await call('list_proposals', { project: NAME, proposal: two.data.proposal, wait_s: 10 });
+  check('a rejection reaches the assistant with the reason', rej.data.status === 'rejected' && rej.data.reason === 'R8 is needed for boot' && rej.data.decided_by === 'Bob', rej.text);
+  check('and nothing was removed', !(await call('get_component', { project: NAME, document: sch.path, ref: 'R8' })).isError);
+
+  const three = await call('apply_changes', { project: NAME, document: sch.path, propose: true, title: 'R5 to 2k2', edits: [{ op: 'set_field', ref: 'R5', field: 'Value', value: '2k2' }] });
+  const gone = await call('list_proposals', { project: NAME, withdraw: three.data.proposal });
+  check('a pending proposal can be withdrawn, and leaves the person\'s screen', gone.data.status === 'withdrawn' && await until(() => page.evaluate(() => !document.querySelector('#propPanel.open'))), gone.text);
+  const again = await call('list_proposals', { project: NAME, withdraw: three.data.proposal });
+  check('a decided proposal cannot be decided again', again.isError && /already withdrawn/.test(again.text), again.text);
+  const all = await call('list_proposals', { project: NAME, document: sch.path });
+  check('list_proposals lists them newest first with their outcome', all.data.proposals.length >= 3 && all.data.proposals[0].status === 'withdrawn' && all.data.proposals.some((r) => r.status === 'accepted') && all.text.length < 3000, all.text.slice(0, 400));
+  const eve = await user(9523, 'tm-eve', 'Eve');
+  const peek = await fetch(`${BASE}/api/proposals/${prop.data.proposal}`, { headers: { authorization: `Bearer ${mintJwt(eve, 'tm-eve')}` } });
+  check('someone outside the project cannot read a proposal', peek.status === 404 || peek.status === 403, String(peek.status));
+}
+
+// ------------------------------------------------------------------ rule violations fixed through proposals
+
+{
+  const codes = async (document) => { const r = await call('run_checks', { project: NAME, document }); const m = {}; for (const v of r.data.violations) m[v.code] = (m[v.code] || 0) + 1; return m; };
+  // a label on nothing, on the sheet the person has open
+  await call('apply_changes', { project: NAME, document: sch.path, title: 'A stray label', edits: [{ op: 'add_label', kind: 'label', text: 'STRAY', x: 250.19, y: 180.34 }] });
+  const had = await codes(sch.path);
+  const fix = await call('propose_fixes', { project: NAME, document: sch.path, codes: ['label_dangling'] });
+  if (process.env.DEBUG) console.log(fix.text.slice(0, 1500));
+  check('propose_fixes offers the stray label\'s removal as one proposal and changes nothing', !fix.isError && had.label_dangling === 1 && fix.data.proposed.length === 1 && /Remove 1 label or flag that connects/.test(fix.data.proposed[0].title) && (await codes(sch.path)).label_dangling === 1, fix.text.slice(0, 600));
+  const twice = await call('propose_fixes', { project: NAME, document: sch.path, codes: ['label_dangling'] });
+  check('the same fix is not offered twice while it waits', twice.data.proposed.length === 0 && /already waiting/.test(JSON.stringify(twice.data.could_not_plan)), twice.text.slice(0, 400));
+  await page.waitForSelector('#propPanel.open .prop-card [data-act="accept"]');
+  await sleep(500); await shot('17-fix-proposal.png');
+  await page.click('#propPanel .prop-card [data-act="accept"]');
+  check('accepting the fix clears the violation', await until(async () => !(await codes(sch.path)).label_dangling, 10000));
+  const whole = await call('propose_fixes', { project: NAME, document: sch.path });
+  check('violations without a mechanical fix come back with a hint, in a small answer', !whole.isError && whole.text.length < 6000 && (whole.data.violations === 0 || !!whole.data.left_for_you || whole.data.proposed.length > 0), whole.text.slice(0, 600));
+  for (const pr of whole.data.proposed || []) await call('list_proposals', { project: NAME, withdraw: pr.proposal });
+
+  // the board: one track taken out leaves an open connection, which the fix routes again
+  await open(pcb.id);
+  const net = await call('trace_net', { project: NAME, document: 'board', net: 'RUN' });
+  const items = await call('get_items', { project: NAME, document: 'board', kind: 'segment', net: 'RUN' });
+  const seg = items.data && (items.data.items || [])[0];
+  if (!seg) console.log('  (no RUN track to remove: ' + items.text.slice(0, 200) + ')');
+  else {
+    await call('apply_changes', { project: NAME, document: 'board', title: 'Take a track out', edits: [{ op: 'remove', id: seg.id }] });
+    const open1 = (await codes('board')).unconnected_items || 0;
+    const bfix = await call('propose_fixes', { project: NAME, document: 'board', codes: ['unconnected_items'] });
+    if (process.env.DEBUG) console.log(bfix.text.slice(0, 1200));
+    check('propose_fixes offers to route the open connection', !bfix.isError && open1 >= 1 && bfix.data.proposed.length === 1 && /^Route \d+ open connection/.test(bfix.data.proposed[0].title), bfix.text.slice(0, 600));
+    await page.waitForSelector('#propPanel.open .prop-card [data-act="accept"]');
+    await sleep(600); await shot('18-fix-route-proposal.png');
+    await page.click('#propPanel .prop-card [data-act="accept"]');
+    check('accepted, the board has no open connection left from it', await until(async () => ((await codes('board')).unconnected_items || 0) < open1, 15000));
+    await shot('19-fix-route-accepted.png');
+    void net;
+  }
+}
+
 // ------------------------------------------------------------------ a connection that may only read
 
 {
   const tools = (await (await fetch(`${BASE}/mcp`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${adaJwt}` }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) })).json()).result.tools;
   const by = Object.fromEntries(tools.map((t) => [t.name, t]));
-  check('the new tools are in the catalog as read-only tools', ['highlight', 'get_selection', 'trace_net', 'compare_versions', 'get_bom', 'view_datasheet', 'export_fab'].every((n) => by[n] && by[n].annotations.readOnlyHint === true), Object.keys(by).join(' '));
+  check('the new tools are in the catalog as read-only tools', ['highlight', 'get_selection', 'trace_net', 'compare_versions', 'get_bom', 'view_datasheet', 'export_fab', 'list_proposals'].every((n) => by[n] && by[n].annotations.readOnlyHint === true), Object.keys(by).join(' '));
 }
 
 desk.ws.close(); await browser.close(); await db.end();

@@ -27,6 +27,7 @@ mod relay;
 mod templates;
 mod timetrack;
 mod exports;
+mod proposals;
 mod versions;
 mod ws;
 
@@ -379,6 +380,7 @@ async fn main() -> anyhow::Result<()> {
         // Version history and branches (versions.rs); the checkpoint routes are the old names
         .merge(versions::routes())
         .merge(exports::routes())
+        .merge(proposals::routes())
         // GitHub repository sync (github.rs)
         .route("/auth/github/connect", get(auth::github_connect))
         .route("/auth/github/install", get(github_app::install))
