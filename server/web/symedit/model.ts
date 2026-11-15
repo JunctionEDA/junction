@@ -831,6 +831,53 @@ export function pinsFromCsv(src: string, sym: Node, parseLen: (s: string) => num
   return { rows, errors };
 }
 /** The summary line of the pin table: a range summary of the numbers, the count and the duplicates. */
+/** INDETERMINATE_STATE: a grouped row's column whose pins disagree. */
+export const PIN_MIXED = "-- mixed values --";
+/** A grouped Pin Table row (PIN_TABLE_DATA_MODEL m_rows entry of several pins): its cells are the pins' common values. */
+export type PinGroupRow = PinRow & { pins: PinRow[] };
+export type PinTableRow = PinRow | PinGroupRow;
+export const isPinGroup = (r: PinTableRow): r is PinGroupRow => Array.isArray((r as PinGroupRow).pins);
+const PIN_ROW_KEYS = ["name", "type", "shape", "orient", "numSize", "nameSize", "length", "x", "y", "visible", "unit", "body"] as const;
+/** PIN_TABLE_DATA_MODEL::GetValue over a row's pins: the numbers joined by ", ", any other column one value or PIN_MIXED. */
+export function pinGroupRow(pins: PinRow[]): PinTableRow {
+  if (pins.length === 1) return pins[0];
+  const sorted = pins.slice().sort((a, b) => numCompare(a.number, b.number));
+  const r = { count: sorted.length, number: sorted.map((p) => p.number).join(", "), pins: sorted, node: null } as unknown as PinGroupRow;
+  const rec = r as unknown as Record<string, unknown>;
+  for (const k of PIN_ROW_KEYS) { const v0 = sorted[0][k]; rec[k] = sorted.every((p) => p[k] === v0) ? v0 : PIN_MIXED; }
+  return r;
+}
+/**
+ * PIN_TABLE_DATA_MODEL::RebuildRows: one row per pin, or the pins grouped by name (groups in first-seen order), or the
+ * `selected` pins in one row on top and every other pin alone.
+ */
+export function groupPinRows(pins: PinRow[], mode: "none" | "name" | "selection", selected?: Set<PinRow>): PinTableRow[] {
+  if (mode === "none") return pins.slice();
+  if (mode === "selection") {
+    const sel = pins.filter((p) => selected && selected.has(p));
+    return [...(sel.length ? [pinGroupRow(sel)] : []), ...pins.filter((p) => !selected || !selected.has(p))];
+  }
+  const by = new Map<string, PinRow[]>();
+  for (const p of pins) { const g = by.get(p.name); if (g) g.push(p); else by.set(p.name, [p]); }
+  return [...by.values()].map(pinGroupRow);
+}
+/**
+ * PIN_TABLE_DATA_MODEL::SetValue on a grouped row: PIN_MIXED changes nothing; the Number column renumbers the pins from
+ * the comma-separated list, adding pins (copies of the last, through `addPin`) or removing the surplus (`removePin`);
+ * any other column is set on every pin.
+ */
+export function setPinGroupValue(g: PinGroupRow, key: string, value: unknown, addPin: (like: PinRow, number: string) => PinRow, removePin: (p: PinRow) => void): void {
+  if (value === PIN_MIXED) return;
+  if (key === "number") {
+    const nums = String(value).split(",").map((t) => t.trim()).filter((t) => t !== "");
+    const keep = g.pins.slice(0, nums.length);
+    keep.forEach((p, i) => { p.number = nums[i]; });
+    for (const p of g.pins.slice(nums.length)) removePin(p);
+    for (let i = keep.length; i < nums.length; i++) keep.push(addPin(keep[keep.length - 1] || g.pins[0], nums[i]));
+    g.pins = keep; return;
+  }
+  for (const p of g.pins) (p as unknown as Record<string, unknown>)[key] = value;
+}
 export function pinNumberSummary(rows: PinRow[]): { numbers: string; count: number; duplicates: string } {
   const nums = rows.map((r) => r.number).filter((n) => n !== "");
   const counts = new Map<string, number>(); for (const n of nums) counts.set(n, (counts.get(n) || 0) + 1);

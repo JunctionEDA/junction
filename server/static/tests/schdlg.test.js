@@ -276,4 +276,23 @@ test("bomRows: the filter matches the Reference, the shown columns, or every col
   assert.deepStrictEqual(refs(Object.assign({}, preset, { filter_string: "0805", filter_scope: "all" })), ["R2"]);
   assert.deepStrictEqual(refs(Object.assign({}, preset, { filter_string: "u1" })), ["U1"]);
 });
+
+// ---- Pin Table grouping (PIN_TABLE_DATA_MODEL::RebuildRows / GetValue / SetValue)
+const SM = load(["symedit", "model.ts"]);
+test("groupPinRows: by name, by selection; grouped values and renumbering", () => {
+  const pin = (number, name, type) => ({ count: 1, number, name, type, shape: "line", orient: 0, numSize: 1.27, nameSize: 1.27, length: 2.54, x: 0, y: 0, visible: true, unit: 1, body: 1, node: null });
+  const pins = [pin("1", "GND", "power_in"), pin("10", "A", "input"), pin("2", "GND", "power_in"), pin("3", "B", "output")];
+  const byName = SM.groupPinRows(pins, "name");
+  assert.strictEqual(byName.length, 3);
+  assert.strictEqual(byName[0].count, 2); assert.strictEqual(byName[0].number, "1, 2"); assert.strictEqual(byName[0].type, "power_in");
+  const sel = SM.groupPinRows(pins, "selection", new Set([pins[1], pins[3]]));
+  assert.strictEqual(sel.length, 3); assert.strictEqual(sel[0].number, "3, 10"); assert.strictEqual(sel[0].type, SM.PIN_MIXED); assert.strictEqual(sel[0].name, SM.PIN_MIXED);
+  const all = pins.slice(), g = byName[0];
+  SM.setPinGroupValue(g, "number", "5, 6, 7", (like, n) => { const p = Object.assign({}, like, { number: n }); all.push(p); return p; }, (p) => all.splice(all.indexOf(p), 1));
+  assert.deepStrictEqual(g.pins.map((p) => p.number), ["5", "6", "7"]); assert.strictEqual(all.length, 5);
+  SM.setPinGroupValue(g, "number", "5", () => null, (p) => all.splice(all.indexOf(p), 1));
+  assert.strictEqual(all.length, 3);
+  SM.setPinGroupValue(sel[0], "type", "bidirectional", null, null); assert.ok(sel[0].pins.every((p) => p.type === "bidirectional"));
+  SM.setPinGroupValue(sel[0], "name", SM.PIN_MIXED, null, null); assert.strictEqual(pins[1].name, "A");
+});
 process.on("exit", () => { console.log(`schdlg: ${passed} passed, ${failed} failed`); if (failed) process.exitCode = 1; });

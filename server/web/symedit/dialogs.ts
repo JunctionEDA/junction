@@ -4,7 +4,7 @@
 // shape properties and the import / export commands.
 import { bitmapButton } from "../dialogs/kicon";
 import * as M from "./model";
-import { KD, h, checkbox, select, textInput, form, promptText, confirmBox, download, type GridColumn, type GridApi, type NotebookApi } from "../dialogs/dom";
+import { KD, h, checkbox, select, textInput, form, promptText, confirmBox, download, popupMenu, type GridColumn, type GridApi, type NotebookApi } from "../dialogs/dom";
 import { messageBox, fieldsGrid, openFieldDialog, openTextDialog, swatch } from "../dialogs/sch-items";
 import * as L from "../dialogs/sch-items-logic";
 import { E, appState, api } from "../dialogs/editor";
@@ -13,7 +13,7 @@ import { UNITS, unitName } from "../units";   // a dialog's unit label (EDA_UNIT
 import { hotkeyRows } from "../menuspec";
 import { keyName } from "../keys";
 import type { SymbolEditor, Lib } from "./editor";
-import { nodeOf } from "./editor";
+import { idOfNode, nodeOf } from "./editor";
 import { icon } from "./ui";
 import { pinMapPage, pinMapState, harvestPinMaps } from "./pinmap";
 import * as FF from "./fpfilters";
@@ -1072,8 +1072,10 @@ export function pinTable(se: SymbolEditor): void {
   const summary = h("div", { id: "pt-summary", style: "display:flex;gap:16px;margin-bottom:6px;color:var(--ink-2)" });
   const sum = () => { const s = M.pinNumberSummary(rows); summary.innerHTML = "";
     summary.append(h("span", null, `Pin numbers: ${s.numbers}`), h("span", null, `Pin count: ${s.count}`), h("span", { id: "pt-dups", style: s.duplicates ? "color:var(--err)" : "" }, `Duplicate pins: ${s.duplicates || 0}`)); };
-  let grid: { refresh(): void } | null = null;
-  const len = (k: keyof M.PinRow) => ({ key: k as string, label: "", width: 76, format: (v: unknown) => toUser(Number(v)) });
+  let grid: GridApi<M.PinTableRow> | null = null;
+  const len = (k: keyof M.PinRow) => ({ key: k as string, label: "", width: 76, format: (v: unknown) => (v === M.PIN_MIXED ? M.PIN_MIXED : toUser(Number(v))) });
+  // a grouped row offers "-- mixed values --" in its choices while its pins disagree (typeNames.push_back( INDETERMINATE_STATE ))
+  const mixedOpt = (opts: [string, string][]) => (r: M.PinTableRow): [string, string][] => (M.isPinGroup(r) ? [...opts, [M.PIN_MIXED, M.PIN_MIXED]] : opts);
   // the filters (RebuildRows: a pin common to all units / body styles always shows)
   const selNodes = new Set<M.Node>(se.selNodes(sym));
   const fUnit = checkbox("Filter by unit:", false, () => rebuild(), { id: "pt-filter-unit", disabled: nUnits < 2 });
@@ -1082,38 +1084,91 @@ export function pinTable(se: SymbolEditor): void {
   const fBodySel = select(bodyOpts, "0", () => { (fBody.querySelector("input") as HTMLInputElement).checked = true; rebuild(); }, { id: "pt-body", disabled: bodyNames.length < 2 });
   const fSel = checkbox("Filter by selection", false, () => rebuild(), { id: "pt-filter-sel" });
   const on = (l: HTMLLabelElement) => (l.querySelector("input") as HTMLInputElement).checked;
-  const shown: M.PinRow[] = [];
   const visible = (r: M.PinRow): boolean => {
     const u = on(fUnit) ? Number(fUnitSel.value) : 0, b = on(fBody) ? Number(fBodySel.value) : 0;
     return (u === 0 || r.unit === 0 || r.unit === u) && (b === 0 || r.body === 0 || r.body === b) && (!on(fSel) || (!!r.node && selNodes.has(r.node)));
   };
-  const rebuild = () => { shown.length = 0; shown.push(...rows.filter(visible)); grid && grid.refresh(); sum(); };
+  // m_cbGroup "Group by name" / m_groupSelected "Group Selected Pins" (RebuildRows( groupByName, groupBySelection ))
+  let groupMode: "none" | "name" | "selection" = "none";
+  let picked = new Set<M.PinRow>();
+  const rowSel = new Set<number>(); let anchor = -1;
+  const groupCb = checkbox("Group by name", false, (v) => { groupMode = v ? "name" : "none"; rebuild(); }, { id: "pt-group" });
+  const groupBtn = h("button", { class: "btn", id: "pt-group-sel", disabled: true, onclick: () => {
+    picked = new Set([...rowSel].flatMap((i) => { const r = shown[i]; return r ? (M.isPinGroup(r) ? r.pins : [r]) : []; }));
+    (groupCb.querySelector("input") as HTMLInputElement).checked = false; groupMode = "selection"; rebuild();
+  } }, "Group Selected Pins") as HTMLButtonElement;
+  const allCols: GridColumn<M.PinTableRow>[] = [];
+  const shown: M.PinTableRow[] = [];
+  const rebuild = () => {
+    shown.length = 0; shown.push(...M.groupPinRows(rows.filter(visible), groupMode, picked));
+    rowSel.clear(); anchor = -1; groupBtn.disabled = true;
+    if (grid) grid.refresh();
+    sum();
+  };
   shown.push(...rows.filter(visible));
+  // SYMBOL_EDITOR_SETTINGS pin_table.crossprobe_on_selection (on by default)
+  const crossProbe = (): boolean => { try { return localStorage.getItem("kui.pinTable.crossprobe") !== "0"; } catch { return true; } };
   KD().open({
     title: `Pin Table`, width: 1100, cls: "kd-wide", readOnly: ro,
     build(body) {
       sum(); body.append(summary);
-      grid = KD().grid(body, [
+      allCols.push(
         { key: "count", label: "Count", type: "ro", width: 46 },
         { key: "number", label: "Number", width: 70 }, { key: "name", label: "Name", width: 120 },
-        { key: "type", label: "Electrical Type", type: "choice", options: M.PIN_TYPES.map(([a, l]) => [a, l] as [string, string]), width: 120 },
-        { key: "shape", label: "Graphic Style", type: "choice", options: M.PIN_SHAPES.map(([a, l]) => [a, l] as [string, string]), width: 120 },
-        { key: "orient", label: "Orientation", type: "choice", options: M.PIN_ORIENTATIONS.map(([a, l]) => [String(a), l] as [string, string]), width: 80 },
+        { key: "type", label: "Electrical Type", type: "choice", options: mixedOpt(M.PIN_TYPES.map(([a, l]) => [a, l] as [string, string])), width: 120 },
+        { key: "shape", label: "Graphic Style", type: "choice", options: mixedOpt(M.PIN_SHAPES.map(([a, l]) => [a, l] as [string, string])), width: 120 },
+        { key: "orient", label: "Orientation", type: "choice", options: mixedOpt(M.PIN_ORIENTATIONS.map(([a, l]) => [String(a), l] as [string, string])), width: 80 },
         { ...len("numSize"), label: "Number Text Size" }, { ...len("nameSize"), label: "Name Text Size" }, { ...len("length"), label: "Length" }, { ...len("x"), label: "X Position" }, { ...len("y"), label: "Y Position" },
         { key: "visible", label: "Visible", type: "bool", width: 50 },
-        { key: "unit", label: "Unit", type: "choice", options: unitOpts, width: 56 }, { key: "body", label: "Body Style", type: "choice", options: bodyOpts, width: 90 },
-      ], shown, {
+        { key: "unit", label: "Unit", type: "choice", options: mixedOpt(unitOpts), width: 56 }, { key: "body", label: "Body Style", type: "choice", options: mixedOpt(bodyOpts), width: 90 });
+      grid = KD().grid<M.PinTableRow>(body, allCols, shown, {
         readOnly: ro, height: 380,
         onChange(r, key, v, sel) {
+          // the cell's value as the pins hold it (lengths in mm, the choices as numbers)
+          let val: unknown = v;
+          if (v === M.PIN_MIXED) return;
+          if (key && ["numSize", "nameSize", "length", "x", "y"].includes(key) && typeof v === "string") { const n = parseLen(v); val = n === null ? 0 : +M.fmt(n); }
+          if (key === "orient" || key === "unit" || key === "body") val = Number(v);
+          if (M.isPinGroup(r)) {
+            if (key === null && typeof sel === "number" && sel < 0) { for (const p of r.pins) { const i = rows.indexOf(p); if (i >= 0) rows.splice(i, 1); } sum(); return; }
+            if (key) {
+              M.setPinGroupValue(r, key, val, (like, number) => { const p = { ...like, number, node: null }; rows.push(p); return p; }, (p) => { const i = rows.indexOf(p); if (i >= 0) rows.splice(i, 1); });
+              const fresh = M.pinGroupRow(r.pins), i = shown.indexOf(r); if (i >= 0) { shown[i] = fresh; grid!.refresh(); }
+            }
+            sum(); return;
+          }
           const row = r as unknown as Record<string, unknown>;
-          if (key && ["numSize", "nameSize", "length", "x", "y"].includes(key) && typeof v === "string") { const n = parseLen(v); row[key] = n === null ? 0 : +M.fmt(n); }
-          if (key === "orient" || key === "unit" || key === "body") row[key] = Number(v);
+          if (key) row[key] = val;
           // the grid edits the shown rows: an added row joins the pins, a deleted one leaves them
-          if (key === null && typeof sel === "number") { const pr = r as unknown as M.PinRow; const i = rows.indexOf(pr); if (sel < 0 && i >= 0) rows.splice(i, 1); else if (sel >= 0 && i < 0) rows.push(pr); }
+          if (key === null && typeof sel === "number") { const pr = r as M.PinRow; const i = rows.indexOf(pr); if (sel < 0 && i >= 0) rows.splice(i, 1); else if (sel >= 0 && i < 0) rows.push(pr); }
           sum();
+        },
+        // OnCellSelected: a single pin's row focuses that pin on the canvas (FocusOnItem) while cross-probing is on
+        onSelect(r) {
+          if (!r || M.isPinGroup(r) || !r.node || !crossProbe()) return;
+          const id = idOfNode(sym, r.node); if (!id || !se.tab) return;
+          se.tab.sel = new Set([id]); se.selChanged();
         },
         buttons: { add: () => { const last = rows[rows.length - 1]; const p = last ? M.repeatPin({ ...M.newPinInfo(last.x, last.y, se.lastPin, last.unit, last.body), name: last.name, number: last.number, orient: last.orient }) : M.newPinInfo(0, 0, se.lastPin, t.unit, t.body); return { count: 1, number: p.number, name: p.name, type: p.type, shape: p.shape, orient: p.orient, numSize: p.numSize, nameSize: p.nameSize, length: p.length, x: p.x, y: p.y, visible: p.visible, unit: p.unit, body: p.body, node: null }; }, remove: true },
       });
+      // wxGrid row selection with Shift / Ctrl: the rows Group Selected Pins gathers (getSelectedArea)
+      grid.el.addEventListener("pointerdown", (ev) => {
+        const tr = (ev.target as HTMLElement).closest("tbody tr"); if (!tr || !tr.parentElement) return;
+        const i = Array.from(tr.parentElement.children).indexOf(tr); if (i < 0) return;
+        if (ev.shiftKey && anchor >= 0) { rowSel.clear(); for (let k = Math.min(anchor, i); k <= Math.max(anchor, i); k++) rowSel.add(k); }
+        else if (ev.ctrlKey || ev.metaKey) { if (rowSel.has(i)) rowSel.delete(i); else rowSel.add(i); anchor = i; }
+        else { rowSel.clear(); rowSel.add(i); anchor = i; }
+        Array.from(tr.parentElement.children).forEach((x, k) => x.classList.toggle("sel", rowSel.has(k)));
+        groupBtn.disabled = rowSel.size < 2;
+      });
+      // m_refreshButton (OnRebuildRows) and m_bMenu (OnMenu: Highlight on Cross-probe)
+      const menuBtn = bitmapButton("config", "", () => {
+        const b = menuBtn.getBoundingClientRect(), on = crossProbe();
+        popupMenu(b.left, b.bottom, [{ label: "Highlight on Cross-probe", check: true, checked: on, run: () => { try { localStorage.setItem("kui.pinTable.crossprobe", on ? "0" : "1"); } catch { /* private window */ } } }]);
+      }, { id: "pt-menu" });
+      menuBtn.removeAttribute("title");
+      body.append(h("div", { style: "display:flex;gap:10px;align-items:center;margin-top:6px" }, groupCb, groupBtn, h("span", { style: "flex:1" }),
+        bitmapButton("small_refresh", "Refresh Grouping", () => rebuild(), { id: "pt-refresh" }), menuBtn));
       for (const l of [fUnit, fBody, fSel]) l.style.whiteSpace = "nowrap";
       fUnitSel.style.width = fBodySel.style.width = "110px";
       body.append(h("div", { style: "display:flex;gap:14px;align-items:center;margin-top:6px;flex-wrap:wrap" },
@@ -1122,7 +1177,7 @@ export function pinTable(se: SymbolEditor): void {
       const radio = (name: string, id: string, label: string, checked: boolean) => { const i = h("input", { type: "radio", name, id, style: "width:auto;margin:0" }) as HTMLInputElement; i.checked = checked; return h("label", { style: "display:flex;gap:6px;align-items:center" }, i, label); };
       const expAll = radio("pt-exp", "pt-exp-all", "Export all pins", true), expShown = radio("pt-exp", "pt-exp-shown", "Export only shown pins", false);
       const impReplace = radio("pt-imp", "pt-imp-replace", "Replace all existing pins", true), impAppend = radio("pt-imp", "pt-imp-append", "Append to existing pins", false);
-      const exp = (sep: string) => M.pinsToCsv((expShown.querySelector("input") as HTMLInputElement).checked ? shown : rows, sym, (mm) => toUser(mm), sep);
+      const exp = (sep: string) => M.pinsToCsv((expShown.querySelector("input") as HTMLInputElement).checked ? shown.flatMap((r) => (M.isPinGroup(r) ? r.pins : [r])) : rows, sym, (mm) => toUser(mm), sep);
       const boxes = h("div", { style: "display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:6px" });
       body.append(boxes);
       const eb = KD().staticBox(boxes, "Export"); const ib = KD().staticBox(boxes, "Import");
@@ -1138,7 +1193,7 @@ export function pinTable(se: SymbolEditor): void {
           if ((impReplace.querySelector("input") as HTMLInputElement).checked) rows.length = 0;
           rows.push(...got.rows); rebuild(); }) }, "From File...")));
     },
-    ok() { if (ro) return true; se.edit("Edit Pins", (s) => { M.applyPinRows(s, rows); }); return true; },
+    ok() { if (ro) return true; for (const r of rows) r.count = 1; se.edit("Edit Pins", (s) => { M.applyPinRows(s, rows); }); return true; },
   });
 }
 
