@@ -179,6 +179,32 @@ class Rules(unittest.TestCase):
         with self.assertRaises(kh.HarnessError):
             sch.assign_pins("J1", {"1": "A", "9": "B"})
 
+    def test_bypass_capacitors_sit_by_their_supply_pin_and_off_the_way_of_the_signal_pins(self):
+        sch = self.project.schematic()
+        H = "Connector_PinHeader_2.54mm:PinHeader_1x04_P2.54mm_Vertical"
+        sch.place("Timer:NE555D", ref="U1", at=(127, 76.2), footprint="Package_SO:SOIC-8_3.9x4.9mm_P1.27mm")
+        sch.place("Device:C", ref="C1", value="100nF", at=(101.6, 101.6), footprint=C)
+        sch.place("Connector_Generic:Conn_01x04", ref="J1", at=(165.1, 76.2), footprint=H)
+        sch.net("+5V", "U1.8", "C1.1", "J1.4"); sch.net("GND", "U1.1", "C1.2")
+        for n, pin, to in (("DIS", "7", "J1.1"), ("THR", "6", "J1.2"), ("CV", "5", "J1.3")):
+            sch.net(n, f"U1.{pin}", to)
+        sch.flush()
+        board = self.project.board()
+        board.sync()
+        board.outline(100, 100, 130, 125)
+        got = board.autoplace(outline=(100, 100, 130, 125), fixed={"U1": (110, 112, 0), "J1": (122, 108, 0)})
+        spot = got["bypass"]["U1"]["C1"]
+        self.assertEqual((spot["pin"], spot["blocks"]), ("8", 0))          # beside pin 8, in front of no signal pin
+        self.assertLess(spot["mm"], 2.5)
+        self.assertEqual(board.clashes(), [])
+        hot = next(p for p in board.pads("C1") if p["net"].lstrip("/") == "+5V"); pin = board.pad("U1.8")
+        self.assertLess(abs(hot["x"] - pin["x"]) + abs(hot["y"] - pin["y"]), 3.5)
+        box = board.courtyards("C1")["C1"]
+        for n in ("5", "6", "7"):          # the three signal pins leave to the right: the capacitor is not in their rows
+            q = board.pad(f"U1.{n}")
+            self.assertFalse(box[0] - 0.15 < q["x"] + 2 and box[2] + 0.15 > q["x"] and box[1] - 0.15 < q["y"] < box[3] + 0.15, n)
+        self.assertEqual(board.place_bypass("U1")["U1"]["C1"]["at"], spot["at"])       # settled: a second call keeps it
+
 
 if __name__ == "__main__":
     unittest.main()
