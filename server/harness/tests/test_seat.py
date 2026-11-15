@@ -105,13 +105,16 @@ class Seat(Boards):
             b.outline(0, 0, 30, 20)
             b.zone("GND", layer="B.Cu")
         b.flush()
-        self.assertEqual(len([i for i in b._call("get_items", kinds=["gr_rect"])["items"] if "Edge.Cuts" in i.get("sexpr", "")]), 1)
+        edge_items = lambda: [i for i in b._call("get_items", kinds=["gr_rect", "gr_line", "gr_arc"])["items"] if "Edge.Cuts" in i.get("sexpr", "")]
+        self.assertEqual(sorted(i["kind"] for i in edge_items()), ["gr_arc"] * 4 + ["gr_line"] * 4)      # corners are always rounded
         self.assertEqual(len(b._call("get_items", kinds=["zone"])["items"]), 1)
         b.outline(0, 0, 32, 20)                           # a new size replaces the old outline
         b.flush()
-        rects = [i for i in b._call("get_items", kinds=["gr_rect"])["items"] if "Edge.Cuts" in i.get("sexpr", "")]
-        self.assertEqual(len(rects), 1)
-        self.assertIn("32", rects[0]["sexpr"])
+        self.assertEqual(len(edge_items()), 8)
+        self.assertEqual(b.geometry()["outline"], [0, 0, 32, 20])
+        b.outline(0, 0, 32, 20, radius=0)                 # square on request: one rectangle
+        b.flush()
+        self.assertEqual([i["kind"] for i in edge_items()], ["gr_rect"])
 
     def test_a_refused_layout_is_not_saved(self):
         b = self.open(edge(BOX), usb(), R("R1", (60, 5), "CC1", "GND"))

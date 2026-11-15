@@ -452,7 +452,8 @@ overlapping pieces of one net (#85); silkscreen 0.3 mm or more from the board ed
 | Fan-out of a fine-pitch part | spread out, room between vias | tight and orderly, grouped (and `vias.slot` asks only for the plane sliver between them) |
 | Decoupling on the back under the chip | common | all parts on the top side unless two sides cannot be avoided |
 | Silkscreen text | 1 mm or more | 0.5 mm references allowed on dense boards |
-| Board corners | always rounded | rounded only on product boards |
+
+Board corners are always rounded, as Phil's Lab does (owner, 2026-11-15; before that only on product boards): `board.outline()` draws a 1 mm radius and `design()` rounds the outline after placement.
 
 **Left to the router** (not automatic yet): preferring three track widths of spacing wherever there is room;
 breaking parallel tracks apart right after a pad row; a ground via placed beside each supply via; never cutting a

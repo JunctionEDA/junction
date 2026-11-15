@@ -106852,10 +106852,12 @@ async function geometry(input) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const it of doc.items.values()) {
     if (it.edge && it.bbox) {
-      x0 = Math.min(x0, it.bbox[0]);
-      y0 = Math.min(y0, it.bbox[1]);
-      x1 = Math.max(x1, it.bbox[2]);
-      y1 = Math.max(y1, it.bbox[3]);
+      const sw = it.kind === "gr_line" || it.kind === "gr_arc" ? k.kid(k.kid(it.node, "stroke") || [], "width") : null;
+      const h = sw ? k.num(sw[1]) / 2 : 0;
+      x0 = Math.min(x0, it.bbox[0] + h);
+      y0 = Math.min(y0, it.bbox[1] + h);
+      x1 = Math.max(x1, it.bbox[2] - h);
+      y1 = Math.max(y1, it.bbox[3] - h);
     }
     if (it.kind !== "footprint") continue;
     let cb;

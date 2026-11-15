@@ -1959,26 +1959,52 @@ class Board(_Doc):
         self.project.note(f"board: synced from the schematic, {out['added']} added, {out['updated']} updated" + (f", problems: {'; '.join(out['problems'][:5])}" if out["problems"] else ""))
         return out
 
-    def outline(self, x0: float, y0: float, x1: float, y1: float) -> None:
-        """Draw a rectangular board outline on Edge.Cuts.  A board has one outline: rectangles already on Edge.Cuts are
-        taken off first, and calling it again with the same box changes nothing."""
-        self.flush()
-        want = (_r(min(x0, x1)), _r(min(y0, y1)), _r(max(x0, x1)), _r(max(y0, y1))); same = False
-        for it in self._call("get_items", kinds=["gr_rect"]).get("items", []):
+    def _edge(self) -> list:
+        """The lines, arcs and rectangles on Edge.Cuts: [(item, kind, [points])]."""
+        out = []
+        for it in self._call("get_items", kinds=["gr_rect", "gr_line", "gr_arc"]).get("items", []):
             sx = it.get("sexpr", "")
             if '"Edge.Cuts"' not in sx:
                 continue
-            m = re.search(r"\(start ([-\d.]+) ([-\d.]+)\) \(end ([-\d.]+) ([-\d.]+)\)", sx)
-            box = m and tuple(float(v) for v in m.groups())
-            if box and not same and all(abs(a - b) < 1e-4 for a, b in zip((min(box[0], box[2]), min(box[1], box[3]), max(box[0], box[2]), max(box[1], box[3])), want)):
-                same = True
-                continue
+            pts = [(float(a), float(b)) for a, b in re.findall(r"\((?:start|end) ([-\d.]+) ([-\d.]+)\)", sx)]
+            out.append((it, sx.lstrip("( \n\t").split(None, 1)[0], pts))
+        return out
+
+    def outline(self, x0: float, y0: float, x1: float, y1: float, radius: float = 1.0) -> None:
+        """Draw the board outline on Edge.Cuts: a rectangle with rounded corners (the owner's rule: board corners are
+        always rounded; `radius` in mm, 0 for square).  A board has one outline: what is already on the old outline's
+        edge is taken off first, and calling it again with the same box and radius changes nothing."""
+        self.flush()
+        want = (_r(min(x0, x1)), _r(min(y0, y1)), _r(max(x0, x1)), _r(max(y0, y1)))
+        r = max(0.0, min(float(radius or 0), (want[2] - want[0]) / 4, (want[3] - want[1]) / 4))
+        self._geom = None; old = (self.geometry() or {}).get("outline"); frames = [want] + ([tuple(old)] if old else [])
+        on = lambda p: any((abs(p[0] - f[0]) < 1e-3 or abs(p[0] - f[2]) < 1e-3 or abs(p[1] - f[1]) < 1e-3 or abs(p[1] - f[3]) < 1e-3)
+                           and f[0] - 1e-3 <= p[0] <= f[2] + 1e-3 and f[1] - 1e-3 <= p[1] <= f[3] + 1e-3 for f in frames)
+        mine = [(it, kind, pts) for it, kind, pts in self._edge() if kind == "gr_rect" or (pts and all(on(q) for q in pts))]
+        a, b, c, d = want; k = r * (1 - math.sqrt(0.5))
+        lines = [((a + r, b), (c - r, b)), ((c, b + r), (c, d - r)), ((c - r, d), (a + r, d)), ((a, d - r), (a, b + r))] if r else []
+        arcs = [((c - r, b), (c - k, b + k), (c, b + r)), ((c, d - r), (c - k, d - k), (c - r, d)), ((a + r, d), (a + k, d - k), (a, d - r)), ((a, b + r), (a + k, b + k), (a + r, b))] if r else []
+        key = lambda pts: tuple(sorted((round(x, 3), round(y, 3)) for x, y in pts))
+        have = sorted(key(pts) for _, _, pts in mine)
+        if have == (sorted([key(l) for l in lines] + [key((s, e)) for s, _, e in arcs]) if r else [key(((a, b), (c, d)))]):
+            return
+        for it, _, _ in mine:
             self._edit({"op": "remove", "id": it["id"]})
         self._geom = None
-        if same:
-            self.flush()
+        tail = f'(stroke (width 0.05) (type solid)) (layer "Edge.Cuts")'
+        if not r:
+            self.add_item(f'(gr_rect (start {_r(a)} {_r(b)}) (end {_r(c)} {_r(d)}) (stroke (width 0.05) (type solid)) (fill no) (layer "Edge.Cuts") (uuid "{_uuid.uuid4()}"))')
             return
-        self.add_item(f'(gr_rect (start {_r(x0)} {_r(y0)}) (end {_r(x1)} {_r(y1)}) (stroke (width 0.05) (type solid)) (fill no) (layer "Edge.Cuts") (uuid "{_uuid.uuid4()}"))')
+        for s_, e_ in lines:
+            self.add_item(f'(gr_line (start {_r(s_[0])} {_r(s_[1])}) (end {_r(e_[0])} {_r(e_[1])}) {tail} (uuid "{_uuid.uuid4()}"))')
+        for s_, m_, e_ in arcs:
+            self.add_item(f'(gr_arc (start {_r(s_[0])} {_r(s_[1])}) (mid {_r(m_[0])} {_r(m_[1])}) (end {_r(e_[0])} {_r(e_[1])}) {tail} (uuid "{_uuid.uuid4()}"))')
+
+    def round_corners(self, radius: float = 1.0) -> None:
+        """Round the corners of a rectangular outline (board corners are always rounded)."""
+        self.flush(); self._geom = None; o = (self.geometry() or {}).get("outline")
+        if o:
+            self.outline(o[0], o[1], o[2], o[3], radius=radius)
 
     def rules(self, **rules) -> None:
         """Set design rules in mm: clearance, track_width, via_diameter, via_drill, min_track_width, min_clearance, edge_clearance, hole_clearance (copper to a hole of something else), min_text_height (the smallest silkscreen text the rules check accepts, 0.8 unless set), net_class."""

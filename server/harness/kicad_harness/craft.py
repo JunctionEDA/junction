@@ -71,7 +71,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
 
     step("sync", self.sync)
     if outline:
-        self.outline(*outline)
+        self.outline(*outline, radius=0 if place else 1.0)      # square while the placement may still pull it in; rounded after
     plan = step("plan", lambda: self.plan(edge=edge)) or {"place": {"near": {}, "edges": {}}, "route": {}, "notes": []}
     out["notes"] = [n.split(". ")[0] for n in plan.get("notes", [])][:6]
     rec = dict((plan.get("stackup") or {}).get("recommended") or {})
@@ -117,6 +117,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         for layer in names:
             if layer in ("F.Cu", "B.Cu") or layer in INNER_GROUND or len(names) > 4:
                 step(f"zone {layer}", lambda layer=layer: self.zone("GND", layer=layer, connect="solid" if layer.startswith("In") else "thermal"))
+    step("corners", self.round_corners)      # board corners are always rounded
     step("prepare", self.prepare)
     if route:
         step("twins", self.bridge_twins)      # a USB-C connector's D+ and D- twins, joined at the pads before anything is routed

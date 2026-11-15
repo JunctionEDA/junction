@@ -2062,26 +2062,52 @@ class Board(_Doc):
         self.project.note(f"board: synced from the schematic, {out['added']} added, {out['updated']} updated" + (f", problems: {'; '.join(out['problems'][:5])}" if out["problems"] else ""))
         return out
 
-    def outline(self, x0: float, y0: float, x1: float, y1: float) -> None:
-        """Draw a rectangular board outline on Edge.Cuts.  A board has one outline: rectangles already on Edge.Cuts are
-        taken off first, and calling it again with the same box changes nothing."""
-        self.flush()
-        want = (_r(min(x0, x1)), _r(min(y0, y1)), _r(max(x0, x1)), _r(max(y0, y1))); same = False
-        for it in self._call("get_items", kinds=["gr_rect"]).get("items", []):
+    def _edge(self) -> list:
+        """The lines, arcs and rectangles on Edge.Cuts: [(item, kind, [points])]."""
+        out = []
+        for it in self._call("get_items", kinds=["gr_rect", "gr_line", "gr_arc"]).get("items", []):
             sx = it.get("sexpr", "")
             if '"Edge.Cuts"' not in sx:
                 continue
-            m = re.search(r"\\(start ([-\\d.]+) ([-\\d.]+)\\) \\(end ([-\\d.]+) ([-\\d.]+)\\)", sx)
-            box = m and tuple(float(v) for v in m.groups())
-            if box and not same and all(abs(a - b) < 1e-4 for a, b in zip((min(box[0], box[2]), min(box[1], box[3]), max(box[0], box[2]), max(box[1], box[3])), want)):
-                same = True
-                continue
+            pts = [(float(a), float(b)) for a, b in re.findall(r"\\((?:start|end) ([-\\d.]+) ([-\\d.]+)\\)", sx)]
+            out.append((it, sx.lstrip("( \\n\\t").split(None, 1)[0], pts))
+        return out
+
+    def outline(self, x0: float, y0: float, x1: float, y1: float, radius: float = 1.0) -> None:
+        """Draw the board outline on Edge.Cuts: a rectangle with rounded corners (the owner's rule: board corners are
+        always rounded; \`radius\` in mm, 0 for square).  A board has one outline: what is already on the old outline's
+        edge is taken off first, and calling it again with the same box and radius changes nothing."""
+        self.flush()
+        want = (_r(min(x0, x1)), _r(min(y0, y1)), _r(max(x0, x1)), _r(max(y0, y1)))
+        r = max(0.0, min(float(radius or 0), (want[2] - want[0]) / 4, (want[3] - want[1]) / 4))
+        self._geom = None; old = (self.geometry() or {}).get("outline"); frames = [want] + ([tuple(old)] if old else [])
+        on = lambda p: any((abs(p[0] - f[0]) < 1e-3 or abs(p[0] - f[2]) < 1e-3 or abs(p[1] - f[1]) < 1e-3 or abs(p[1] - f[3]) < 1e-3)
+                           and f[0] - 1e-3 <= p[0] <= f[2] + 1e-3 and f[1] - 1e-3 <= p[1] <= f[3] + 1e-3 for f in frames)
+        mine = [(it, kind, pts) for it, kind, pts in self._edge() if kind == "gr_rect" or (pts and all(on(q) for q in pts))]
+        a, b, c, d = want; k = r * (1 - math.sqrt(0.5))
+        lines = [((a + r, b), (c - r, b)), ((c, b + r), (c, d - r)), ((c - r, d), (a + r, d)), ((a, d - r), (a, b + r))] if r else []
+        arcs = [((c - r, b), (c - k, b + k), (c, b + r)), ((c, d - r), (c - k, d - k), (c - r, d)), ((a + r, d), (a + k, d - k), (a, d - r)), ((a, b + r), (a + k, b + k), (a + r, b))] if r else []
+        key = lambda pts: tuple(sorted((round(x, 3), round(y, 3)) for x, y in pts))
+        have = sorted(key(pts) for _, _, pts in mine)
+        if have == (sorted([key(l) for l in lines] + [key((s, e)) for s, _, e in arcs]) if r else [key(((a, b), (c, d)))]):
+            return
+        for it, _, _ in mine:
             self._edit({"op": "remove", "id": it["id"]})
         self._geom = None
-        if same:
-            self.flush()
+        tail = f'(stroke (width 0.05) (type solid)) (layer "Edge.Cuts")'
+        if not r:
+            self.add_item(f'(gr_rect (start {_r(a)} {_r(b)}) (end {_r(c)} {_r(d)}) (stroke (width 0.05) (type solid)) (fill no) (layer "Edge.Cuts") (uuid "{_uuid.uuid4()}"))')
             return
-        self.add_item(f'(gr_rect (start {_r(x0)} {_r(y0)}) (end {_r(x1)} {_r(y1)}) (stroke (width 0.05) (type solid)) (fill no) (layer "Edge.Cuts") (uuid "{_uuid.uuid4()}"))')
+        for s_, e_ in lines:
+            self.add_item(f'(gr_line (start {_r(s_[0])} {_r(s_[1])}) (end {_r(e_[0])} {_r(e_[1])}) {tail} (uuid "{_uuid.uuid4()}"))')
+        for s_, m_, e_ in arcs:
+            self.add_item(f'(gr_arc (start {_r(s_[0])} {_r(s_[1])}) (mid {_r(m_[0])} {_r(m_[1])}) (end {_r(e_[0])} {_r(e_[1])}) {tail} (uuid "{_uuid.uuid4()}"))')
+
+    def round_corners(self, radius: float = 1.0) -> None:
+        """Round the corners of a rectangular outline (board corners are always rounded)."""
+        self.flush(); self._geom = None; o = (self.geometry() or {}).get("outline")
+        if o:
+            self.outline(o[0], o[1], o[2], o[3], radius=radius)
 
     def rules(self, **rules) -> None:
         """Set design rules in mm: clearance, track_width, via_diameter, via_drill, min_track_width, min_clearance, edge_clearance, hole_clearance (copper to a hole of something else), min_text_height (the smallest silkscreen text the rules check accepts, 0.8 unless set), net_class."""
@@ -5738,7 +5764,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
 
     step("sync", self.sync)
     if outline:
-        self.outline(*outline)
+        self.outline(*outline, radius=0 if place else 1.0)      # square while the placement may still pull it in; rounded after
     plan = step("plan", lambda: self.plan(edge=edge)) or {"place": {"near": {}, "edges": {}}, "route": {}, "notes": []}
     out["notes"] = [n.split(". ")[0] for n in plan.get("notes", [])][:6]
     rec = dict((plan.get("stackup") or {}).get("recommended") or {})
@@ -5784,6 +5810,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         for layer in names:
             if layer in ("F.Cu", "B.Cu") or layer in INNER_GROUND or len(names) > 4:
                 step(f"zone {layer}", lambda layer=layer: self.zone("GND", layer=layer, connect="solid" if layer.startswith("In") else "thermal"))
+    step("corners", self.round_corners)      # board corners are always rounded
     step("prepare", self.prepare)
     if route:
         step("twins", self.bridge_twins)      # a USB-C connector's D+ and D- twins, joined at the pads before anything is routed
@@ -8207,9 +8234,9 @@ def symbol(name: str, pins: list, reference: str = "U", footprint: str = "", dat
 def library(symbols: list) -> str:
     """A .kicad_sym file holding the given symbol texts."""
     return '(kicad_symbol_lib\\n\\t(version 20241209)\\n\\t(generator "kicad_harness")\\n\\t(generator_version "9.0")\\n' + "".join(symbols) + ")\\n"
-`;var f=require("node:fs"),K=globalThis,W=f.constants;process.binding=e=>{if(e==="constants")return{fs:W};throw new Error("not available")};for(let e of["WebSocket","fetch","XMLHttpRequest","EventSource","navigator"])try{delete K[e]}catch{}var X=new(require("node:string_decoder")).StringDecoder("utf8"),q=new Int32Array(new SharedArrayBuffer(4)),i="";function E(){let e=Buffer.alloc(65536);for(;;){let s=i.indexOf(`
-`);if(s>=0){let t=i.slice(0,s);return i=i.slice(s+1),t}let n=0;try{n=f.readSync(0,e,0,e.length,null)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(q,0,0,4);continue}if(t&&t.code==="EOF")n=0;else throw t}n||process.exit(0),i+=X.write(e.subarray(0,n))}}function d(e){let s=Buffer.from(JSON.stringify(e)+`
-`,"utf8"),n=0;for(;n<s.length;)try{n+=f.writeSync(1,s,n,s.length-n)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(q,0,0,4);continue}throw t}}var Q=[["kicad_harness/__init__.py",h],["kicad_harness/project.py",c],["kicad_harness/transport.py",u],["kicad_harness/sheet.py",m],["kicad_harness/rules.py",g],["kicad_harness/physics.py",b],["kicad_harness/stackups.py",y],["kicad_harness/craft.py",_],["kicad_harness/seat.py",w],["kicad_harness/twins.py",x],["kicad_harness/parts/__init__.py",k],["kicad_harness/parts/datasheet.py",v],["kicad_harness/parts/footprint.py",N],["kicad_harness/parts/search.py",S],["kicad_harness/parts/symbol.py",T]],Y=`
+`;var f=require("node:fs"),K=globalThis,W=f.constants;process.binding=e=>{if(e==="constants")return{fs:W};throw new Error("not available")};for(let e of["WebSocket","fetch","XMLHttpRequest","EventSource","navigator"])try{delete K[e]}catch{}var X=new(require("node:string_decoder")).StringDecoder("utf8"),E=new Int32Array(new SharedArrayBuffer(4)),i="";function q(){let e=Buffer.alloc(65536);for(;;){let s=i.indexOf(`
+`);if(s>=0){let t=i.slice(0,s);return i=i.slice(s+1),t}let n=0;try{n=f.readSync(0,e,0,e.length,null)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(E,0,0,4);continue}if(t&&t.code==="EOF")n=0;else throw t}n||process.exit(0),i+=X.write(e.subarray(0,n))}}function d(e){let s=Buffer.from(JSON.stringify(e)+`
+`,"utf8"),n=0;for(;n<s.length;)try{n+=f.writeSync(1,s,n,s.length-n)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(E,0,0,4);continue}throw t}}var Q=[["kicad_harness/__init__.py",h],["kicad_harness/project.py",c],["kicad_harness/transport.py",u],["kicad_harness/sheet.py",m],["kicad_harness/rules.py",g],["kicad_harness/physics.py",b],["kicad_harness/stackups.py",y],["kicad_harness/craft.py",_],["kicad_harness/seat.py",w],["kicad_harness/twins.py",x],["kicad_harness/parts/__init__.py",k],["kicad_harness/parts/datasheet.py",v],["kicad_harness/parts/footprint.py",N],["kicad_harness/parts/search.py",S],["kicad_harness/parts/symbol.py",T]],Y=`
 import json, sys, traceback
 sys.path.insert(0, "/kh")
 import kicad_harness as kh
@@ -8245,6 +8272,6 @@ def __kc_run(code, dry=False):
     if project is not None and project.log:
         out["notes"] = project.log[-60:]
     return json.dumps(out)
-`;async function J(){let e=JSON.parse(E()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:A}=require(s+"pyodide.js"),o=await A({indexURL:s,jsglobals:{},stdout:p,stderr:p});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),E())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of Q)o.FS.writeFile("/kh/"+r,l);o.runPython(Y);let D=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(D(String(e.code||""),e.dry===!0)))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
+`;async function J(){let e=JSON.parse(q()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:A}=require(s+"pyodide.js"),o=await A({indexURL:s,jsglobals:{},stdout:p,stderr:p});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),q())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of Q)o.FS.writeFile("/kh/"+r,l);o.runPython(Y);let D=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(D(String(e.code||""),e.dry===!0)))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
 `).filter(Boolean).slice(-1)[0]||"The script failed."}}a.done=!0,a.output=n.join(`
 `),d(a),process.exit(0)}J().catch(e=>{try{d({done:!0,ok:!1,error:"The Python runtime could not be started: "+String(e&&e.message||e),output:""})}finally{process.exit(1)}});
