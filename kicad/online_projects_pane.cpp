@@ -45,12 +45,14 @@
 #include <wx/dirdlg.h>
 #include <wx/ffile.h>
 #include <wx/filename.h>
+#include <wx/log.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
 #include <wx/settings.h>
 #include <wx/sizer.h>
 #include <wx/statline.h>
 #include <wx/srchctrl.h>
+#include <wx/stdpaths.h>
 #include <wx/stattext.h>
 #include <wx/textctrl.h>
 #include <wx/choicdlg.h>
@@ -341,6 +343,51 @@ static wxString linkedProFile( const wxString& aDir, const wxString& aProjectId 
 
 
 /// True for an existing directory with nothing in it.
+/// True when a file can really be created in aDir (made first if missing).  The permission
+/// bits are not enough on macOS: a Documents folder the user has not allowed this app into
+/// looks writable and still refuses every write.
+static bool canWriteInto( const wxString& aDir )
+{
+    wxLogNull noLog;
+
+    if( !wxFileName::DirExists( aDir )
+        && !wxFileName::Mkdir( aDir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL ) )
+    {
+        return false;
+    }
+
+    wxFileName probe( aDir, wxString::Format( wxS( ".junction-write-test-%lu" ),
+                                              wxGetProcessId() ) );
+
+    {
+        wxFFile file( probe.GetFullPath(), wxS( "wb" ) );
+
+        if( !file.IsOpened() || !file.Write( "x", 1 ) || !file.Close() )
+        {
+            wxRemoveFile( probe.GetFullPath() );
+            return false;
+        }
+    }
+
+    wxRemoveFile( probe.GetFullPath() );
+    return true;
+}
+
+
+/// Where copies of online projects go when the default projects folder cannot be written:
+/// the application's own data folder, which needs no permission from the system.
+static wxString fallbackCloudDir()
+{
+#ifdef __WXMAC__
+    wxFileName dir( PATHS::GetOSXKicadUserDataDir(), wxEmptyString );
+#else
+    wxFileName dir( wxStandardPaths::Get().GetUserLocalDataDir(), wxEmptyString );
+#endif
+    dir.AppendDir( wxS( "Cloud Projects" ) );
+    return dir.GetPath();
+}
+
+
 static bool dirIsEmpty( const wxString& aDir )
 {
     wxDir dir( aDir );
@@ -2314,6 +2361,23 @@ void ONLINE_PROJECTS_PANE::openProject( const nlohmann::json& aProject, bool aCh
     wxString parentDir = base.GetPath();
     wxString targetDir;
     wxString existingPro;
+
+    // The default home refuses writes (typically macOS not allowing this app into Documents):
+    // keep the copy in the application's own data folder instead of failing, and say where.
+    if( !aChooseFolder && !canWriteInto( parentDir ) )
+    {
+        wxString fallback = fallbackCloudDir();
+
+        if( canWriteInto( fallback ) )
+        {
+            wxMessageBox( wxString::Format( _( "Junction is not allowed to save into\n\n%s\n\n"
+                                               "so the local copy of '%s' is kept in\n\n%s\n\n"
+                                               "Use Open In Folder... to choose another place." ),
+                                            parentDir, name, fallback ),
+                          _( "Open Online Project" ), wxOK | wxICON_INFORMATION, this );
+            parentDir = fallback;
+        }
+    }
 
     if( aChooseFolder )
     {
