@@ -720,10 +720,74 @@
     return SCROLLERS.has(el) && el.scrollHeight > el.clientHeight + 1 ? ARROW + 2 : 0;
   }
 
+  // web/components/kicon-dom.ts
+  var G = () => typeof window === "undefined" ? {} : window;
+  var NS = "http://www.w3.org/2000/svg";
+  var CSS2 = `
+.kic{flex:none;vertical-align:middle}
+.kic .dk{display:none}
+:root[data-theme="dark"] .kic .lt{display:none} :root[data-theme="dark"] .kic .dk{display:inline}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .kic .lt{display:none} :root:not([data-theme="light"]) .kic .dk{display:inline}}
+:root[data-theme="dark"]{--kic-lt:none;--kic-dk:inline}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--kic-lt:none;--kic-dk:inline}}
+.kbmp{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:24px;padding:0;border:1px solid var(--line);border-radius:var(--r-2,3px);background:var(--panel);color:var(--ink);cursor:pointer}
+.kbmp>.kic{display:block}
+.kbmp:hover:not(:disabled){border-color:var(--line-2);background:var(--paper)}
+.kbmp:disabled{opacity:.4;cursor:default}
+.kbmp.flat{border-color:transparent;background:transparent}
+.kbmp.flat:hover:not(:disabled){border-color:var(--line)}
+.kbmp.on,.kbmp[aria-pressed="true"]{background:var(--on,var(--sel-soft));border-color:var(--on-line,var(--sel))}
+.kbmp-sep{flex:none;width:1px;height:18px;margin:0 4px;background:var(--line);align-self:center}
+.kbmp-bar{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
+`;
+  var styled = false;
+  function ensureIconCss() {
+    if (styled || typeof document === "undefined") return;
+    styled = true;
+    const st = document.createElement("style");
+    st.id = "kicon-css";
+    st.textContent = CSS2;
+    document.head.appendChild(st);
+  }
+  function fill(el, ic) {
+    el.setAttribute("viewBox", ic.vb || "0 0 24 24");
+    el.innerHTML = `<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`;
+    el.dataset.icon = el.dataset.want || "";
+  }
+  function kicadIcon(name, size = 16) {
+    ensureIconCss();
+    const el = document.createElementNS(NS, "svg");
+    el.setAttribute("class", "kic kicon-dom");
+    el.setAttribute("aria-hidden", "true");
+    el.setAttribute("viewBox", "0 0 24 24");
+    el.setAttribute("width", String(size));
+    el.setAttribute("height", String(size));
+    setKicadIcon(el, name);
+    return el;
+  }
+  function setKicadIcon(el, name) {
+    if (el.dataset.want === name && el.dataset.icon === name) return;
+    el.dataset.want = name;
+    el.dataset.icon = name;
+    const g = G(), ic = g.KiCadIconFor ? g.KiCadIconFor(name) : void 0;
+    if (ic) {
+      fill(el, ic);
+      return;
+    }
+    if (g.KiCadIconsReady) void g.KiCadIconsReady.then(() => {
+      if (el.dataset.want !== name) return;
+      const i = G().KiCadIconFor?.(name);
+      if (i) fill(el, i);
+    }).catch(() => void 0);
+  }
+
   // web/components/kselect.ts
   var KSELECT_TAG = "k-select";
   var SHADOW_CSS = `
 :host { contain: layout style; }
+.kic { display: block; flex: none; }
+.kic .lt { display: var(--kic-lt, inline); }
+.kic .dk { display: var(--kic-dk, none); }
 .b { display: flex; align-items: center; gap: 4px; width: 100%; height: 100%; min-width: 0; outline: 0; cursor: default; }
 .t { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: minmax(0, max-content); text-align: left; }
 .t > * { grid-area: 1 / 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -737,8 +801,28 @@
 .r.dis { color: var(--ink-3); }
 .r.sep { height: 1px; padding: 0; margin: 3px 4px; background: var(--line); }
 .r.hd { color: var(--ink-2); font-weight: 600; }
+.ic { display: inline-flex; align-items: center; gap: 5px; }
+.ic > svg { flex: none; }
+.sz > span.ic::before { content: ""; display: inline-block; width: 16px; }
 `;
   var CARET = '<svg class="c" viewBox="0 0 8 8" aria-hidden="true"><path d="M1 2.5h6L4 6z" fill="currentColor"/></svg>';
+  function optionIcon(o) {
+    const name = o.getAttribute("data-icon");
+    if (!name) return null;
+    return kicadIcon(name, 16);
+  }
+  function fillRow(r, o) {
+    const text = o ? o.label || o.text : "", ic = o ? optionIcon(o) : null;
+    if (!ic) {
+      r.classList.remove("ic");
+      r.textContent = text;
+      return;
+    }
+    r.classList.add("ic");
+    const t = document.createElement("span");
+    t.textContent = text;
+    r.replaceChildren(ic, t);
+  }
   var popSeq = 0;
   var openOne = null;
   function defineKSelect() {
@@ -977,13 +1061,15 @@
           this.btn.tabIndex = dis ? -1 : 0;
           this.btn.setAttribute("aria-disabled", dis ? "true" : "false");
           const os = this.options, s = this.current();
-          if (this.label) this.label.textContent = s ? s.label || s.text : "";
-          const all = os.filter((o) => !this.isSep(o)).map((o) => o.label || o.text), key = all.join("");
+          if (this.label) fillRow(this.label, s);
+          const icons = os.some((o) => o.hasAttribute("data-icon"));
+          const all = os.filter((o) => !this.isSep(o)).map((o) => o.label || o.text), key = (icons ? "" : "") + all.join("");
           if (this.sizer && key !== this.sizedFor) {
             this.sizedFor = key;
             this.sizer.replaceChildren(...all.map((t) => {
               const e = document.createElement("span");
               e.textContent = t;
+              if (icons) e.className = "ic";
               return e;
             }));
           }
@@ -1001,7 +1087,7 @@
               return hd ? [hd, r] : [r];
             }
             r.className = "r" + (o === s ? " on" : "") + (this.pickable(o) ? "" : " dis");
-            r.textContent = o.label || o.text;
+            fillRow(r, o);
             r.setAttribute("aria-selected", o === s ? "true" : "false");
             return hd ? [hd, r] : [r];
           }));
@@ -1136,7 +1222,7 @@
           r.id = pop.id + "-" + i;
           r.setAttribute("role", "option");
           r.setAttribute("aria-selected", o === s ? "true" : "false");
-          r.textContent = o.label || o.text;
+          fillRow(r, o);
           if (o.title) r.title = o.title;
           if (o.parentElement && o.parentElement.tagName === "OPTGROUP") r.classList.add("ind");
           return hd ? [hd, r] : [r];

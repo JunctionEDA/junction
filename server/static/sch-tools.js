@@ -1814,10 +1814,74 @@
     return SCROLLERS.has(el2) && el2.scrollHeight > el2.clientHeight + 1 ? ARROW + 2 : 0;
   }
 
+  // web/components/kicon-dom.ts
+  var G = () => typeof window === "undefined" ? {} : window;
+  var NS = "http://www.w3.org/2000/svg";
+  var CSS2 = `
+.kic{flex:none;vertical-align:middle}
+.kic .dk{display:none}
+:root[data-theme="dark"] .kic .lt{display:none} :root[data-theme="dark"] .kic .dk{display:inline}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .kic .lt{display:none} :root:not([data-theme="light"]) .kic .dk{display:inline}}
+:root[data-theme="dark"]{--kic-lt:none;--kic-dk:inline}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--kic-lt:none;--kic-dk:inline}}
+.kbmp{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:24px;padding:0;border:1px solid var(--line);border-radius:var(--r-2,3px);background:var(--panel);color:var(--ink);cursor:pointer}
+.kbmp>.kic{display:block}
+.kbmp:hover:not(:disabled){border-color:var(--line-2);background:var(--paper)}
+.kbmp:disabled{opacity:.4;cursor:default}
+.kbmp.flat{border-color:transparent;background:transparent}
+.kbmp.flat:hover:not(:disabled){border-color:var(--line)}
+.kbmp.on,.kbmp[aria-pressed="true"]{background:var(--on,var(--sel-soft));border-color:var(--on-line,var(--sel))}
+.kbmp-sep{flex:none;width:1px;height:18px;margin:0 4px;background:var(--line);align-self:center}
+.kbmp-bar{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
+`;
+  var styled = false;
+  function ensureIconCss() {
+    if (styled || typeof document === "undefined") return;
+    styled = true;
+    const st = document.createElement("style");
+    st.id = "kicon-css";
+    st.textContent = CSS2;
+    document.head.appendChild(st);
+  }
+  function fill(el2, ic) {
+    el2.setAttribute("viewBox", ic.vb || "0 0 24 24");
+    el2.innerHTML = `<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`;
+    el2.dataset.icon = el2.dataset.want || "";
+  }
+  function kicadIcon(name, size = 16) {
+    ensureIconCss();
+    const el2 = document.createElementNS(NS, "svg");
+    el2.setAttribute("class", "kic kicon-dom");
+    el2.setAttribute("aria-hidden", "true");
+    el2.setAttribute("viewBox", "0 0 24 24");
+    el2.setAttribute("width", String(size));
+    el2.setAttribute("height", String(size));
+    setKicadIcon(el2, name);
+    return el2;
+  }
+  function setKicadIcon(el2, name) {
+    if (el2.dataset.want === name && el2.dataset.icon === name) return;
+    el2.dataset.want = name;
+    el2.dataset.icon = name;
+    const g = G(), ic = g.KiCadIconFor ? g.KiCadIconFor(name) : void 0;
+    if (ic) {
+      fill(el2, ic);
+      return;
+    }
+    if (g.KiCadIconsReady) void g.KiCadIconsReady.then(() => {
+      if (el2.dataset.want !== name) return;
+      const i = G().KiCadIconFor?.(name);
+      if (i) fill(el2, i);
+    }).catch(() => void 0);
+  }
+
   // web/components/kselect.ts
   var KSELECT_TAG = "k-select";
   var SHADOW_CSS = `
 :host { contain: layout style; }
+.kic { display: block; flex: none; }
+.kic .lt { display: var(--kic-lt, inline); }
+.kic .dk { display: var(--kic-dk, none); }
 .b { display: flex; align-items: center; gap: 4px; width: 100%; height: 100%; min-width: 0; outline: 0; cursor: default; }
 .t { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: minmax(0, max-content); text-align: left; }
 .t > * { grid-area: 1 / 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1831,8 +1895,28 @@
 .r.dis { color: var(--ink-3); }
 .r.sep { height: 1px; padding: 0; margin: 3px 4px; background: var(--line); }
 .r.hd { color: var(--ink-2); font-weight: 600; }
+.ic { display: inline-flex; align-items: center; gap: 5px; }
+.ic > svg { flex: none; }
+.sz > span.ic::before { content: ""; display: inline-block; width: 16px; }
 `;
   var CARET = '<svg class="c" viewBox="0 0 8 8" aria-hidden="true"><path d="M1 2.5h6L4 6z" fill="currentColor"/></svg>';
+  function optionIcon(o) {
+    const name = o.getAttribute("data-icon");
+    if (!name) return null;
+    return kicadIcon(name, 16);
+  }
+  function fillRow(r, o) {
+    const text = o ? o.label || o.text : "", ic = o ? optionIcon(o) : null;
+    if (!ic) {
+      r.classList.remove("ic");
+      r.textContent = text;
+      return;
+    }
+    r.classList.add("ic");
+    const t = document.createElement("span");
+    t.textContent = text;
+    r.replaceChildren(ic, t);
+  }
   var popSeq = 0;
   var openOne = null;
   function defineKSelect() {
@@ -2071,13 +2155,15 @@
           this.btn.tabIndex = dis ? -1 : 0;
           this.btn.setAttribute("aria-disabled", dis ? "true" : "false");
           const os = this.options, s = this.current();
-          if (this.label) this.label.textContent = s ? s.label || s.text : "";
-          const all = os.filter((o) => !this.isSep(o)).map((o) => o.label || o.text), key = all.join("");
+          if (this.label) fillRow(this.label, s);
+          const icons = os.some((o) => o.hasAttribute("data-icon"));
+          const all = os.filter((o) => !this.isSep(o)).map((o) => o.label || o.text), key = (icons ? "" : "") + all.join("");
           if (this.sizer && key !== this.sizedFor) {
             this.sizedFor = key;
             this.sizer.replaceChildren(...all.map((t) => {
               const e = document.createElement("span");
               e.textContent = t;
+              if (icons) e.className = "ic";
               return e;
             }));
           }
@@ -2095,7 +2181,7 @@
               return hd ? [hd, r] : [r];
             }
             r.className = "r" + (o === s ? " on" : "") + (this.pickable(o) ? "" : " dis");
-            r.textContent = o.label || o.text;
+            fillRow(r, o);
             r.setAttribute("aria-selected", o === s ? "true" : "false");
             return hd ? [hd, r] : [r];
           }));
@@ -2230,7 +2316,7 @@
           r.id = pop.id + "-" + i;
           r.setAttribute("role", "option");
           r.setAttribute("aria-selected", o === s ? "true" : "false");
-          r.textContent = o.label || o.text;
+          fillRow(r, o);
           if (o.title) r.title = o.title;
           if (o.parentElement && o.parentElement.tagName === "OPTGROUP") r.classList.add("ind");
           return hd ? [hd, r] : [r];
@@ -3182,6 +3268,12 @@
   }
 
   // web/tools/sch-tools/clipboard.ts
+  function uniqueGroupName(doc, base) {
+    const taken = /* @__PURE__ */ new Set();
+    for (const it of doc.items.values()) if (it.kind === "group") taken.add(str(it.node[1]));
+    if (!taken.has(base)) return base;
+    for (let n = 1; ; n++) if (!taken.has(base + n)) return base + n;
+  }
   function clipboardText(doc, items, opts) {
     const libs = /* @__PURE__ */ new Map();
     for (const it of items) if (it.kind === "symbol") {
@@ -3230,6 +3322,10 @@ ${body}
   }
   var refPrefix = (ref) => str(ref).replace(/\?$/, "").replace(/\d+$/, "");
   var unannotated = (ref) => refPrefix(ref) + "?";
+  var refNumber = (ref) => {
+    const m = str(ref).match(/(\d+)$/);
+    return m ? +m[1] : -1;
+  };
   function usedReferences(doc, skip) {
     const used = new Set(S.otherRefs || []);
     for (const it of doc.items.values()) if (it.kind === "symbol" && it.ref && !(skip && skip.has(it.id))) used.add(it.ref);
@@ -3249,20 +3345,78 @@ ${body}
   function assignPastedRef(doc, node, used) {
     const p = refField(node);
     if (!p) return;
-    const ref = str(p[2]);
-    if (!/\?$/.test(ref) && !used.has(ref)) {
-      used.add(ref);
+    const ref = str(p[2]), taken = refNumbers(used);
+    const free = (r) => {
+      const n = refNumber(r);
+      return n < 0 ? !used.has(r) : !(taken.get(refPrefix(r)) || /* @__PURE__ */ new Set()).has(n);
+    };
+    if (!/\?$/.test(ref) && free(ref)) {
+      takeRef(used, ref);
       return;
     }
     let next = unannotated(ref);
     if (S.annotateAuto) {
       const prefix = refPrefix(ref);
       let n = 1;
-      while (used.has(prefix + n)) n++;
+      while (!free(prefix + n)) n++;
       next = prefix + n;
-      used.add(next);
+      takeRef(used, next);
     }
     setReference(node, next);
+  }
+  var numbersOf = /* @__PURE__ */ new WeakMap();
+  function refNumbers(used) {
+    let m = numbersOf.get(used);
+    if (!m) {
+      m = /* @__PURE__ */ new Map();
+      for (const r of used) addNumber(m, r);
+      numbersOf.set(used, m);
+    }
+    return m;
+  }
+  function addNumber(m, r) {
+    const n = refNumber(r);
+    if (n < 0 || /\?$/.test(r)) return;
+    const k = refPrefix(r);
+    let s = m.get(k);
+    if (!s) {
+      s = /* @__PURE__ */ new Set();
+      m.set(k, s);
+    }
+    s.add(n);
+  }
+  function takeRef(used, r) {
+    used.add(r);
+    addNumber(refNumbers(used), r);
+  }
+  function resetAnnotation(nodes, used) {
+    const syms = nodes.filter((n) => n[0] === "symbol" && refField(n)).map((n) => {
+      const at = kid(n, "at"), u = kid(n, "unit"), ref = str(refField(n)[2]);
+      return { n, ref, prefix: refPrefix(ref), x: at ? +at[1] : 0, y: at ? +at[2] : 0, unit: u ? +u[1] : 1, lib: str((kid(n, "lib_id") || [])[1]) };
+    });
+    syms.sort((a, b) => (a.prefix < b.prefix ? -1 : a.prefix > b.prefix ? 1 : 0) || a.x - b.x || a.y - b.y);
+    const taken = refNumbers(used), pkg = /* @__PURE__ */ new Map();
+    for (const s of syms) {
+      let set = taken.get(s.prefix);
+      if (!set) {
+        set = /* @__PURE__ */ new Set();
+        taken.set(s.prefix, set);
+      }
+      const key = /\?$/.test(s.ref) || refNumber(s.ref) < 0 ? null : s.prefix + "\0" + s.ref + "\0" + s.lib;
+      const held = key ? pkg.get(key) : void 0;
+      let n;
+      if (held && !held.units.has(s.unit)) {
+        n = held.n;
+        held.units.add(s.unit);
+      } else {
+        n = 1;
+        while (set.has(n)) n++;
+        if (key) pkg.set(key, { n, units: /* @__PURE__ */ new Set([s.unit]) });
+      }
+      set.add(n);
+      used.add(s.prefix + n);
+      setReference(s.n, s.prefix + n);
+    }
   }
   function junctionsForNew(doc, items) {
     const out = [], seen = /* @__PURE__ */ new Set();
@@ -3291,8 +3445,9 @@ ${body}
     const fresh = parsed.nodes.map((n) => cloneNode({ kind: n[0], node: deep(n) }));
     const used = usedReferences(doc);
     const mode2 = opts && (opts.pasteMode || (opts.keepAnnotations ? "keep" : null)) || (S.annotateAuto ? "unique" : "remove");
+    if (mode2 === "reset") resetAnnotation(fresh, used);
     for (const n of fresh) {
-      if (n[0] !== "symbol" || mode2 === "keep") continue;
+      if (n[0] !== "symbol" || mode2 === "keep" || mode2 === "reset") continue;
       if (mode2 === "remove") {
         const p = refField(n);
         if (p) setReference(n, unannotated(str(p[2])));
@@ -3320,7 +3475,14 @@ ${body}
       items.push(item);
     }
     if (!(opts && opts.noJunctions)) changes.push(...junctionsForNew(doc, items));
-    return { changes, ids: items.map((it) => it.id), libs };
+    const ids = items.map((it) => it.id);
+    if (opts && opts.group !== void 0 && items.length) {
+      const members = fresh.map((n) => str((kid(n, "uuid") || [])[1])).filter(Boolean);
+      const { item, change } = addNode(doc, ["group", uniqueGroupName(doc, opts.group), ["uuid", K.newUuid()], ["members", ...members]]);
+      changes.push(change);
+      ids.push(item.id);
+    }
+    return { changes, ids, libs };
   }
   function copySelection(ctx) {
     const items = selectedItems(ctx);
@@ -5952,7 +6114,9 @@ Link '${target}' to this file?`)) return null;
       ctx.requestRender();
       const KD = typeof root.KDialogs !== "undefined" ? root.KDialogs : null;
       if (KD && KD.schItemDialog && !ctx.viewOnly) {
-        const sn = sheetNode(pts[0], pts[1], "Untitled Sheet", "untitled" + SHEET_EXT);
+        const pre = S.sheetPreset;
+        S.sheetPreset = null;
+        const sn = pre ? sheetNode(pts[0], pts[1], pre.name, pre.file) : sheetNode(pts[0], pts[1], "Untitled Sheet", "untitled" + SHEET_EXT);
         const inst = sheetInstance(ctx, ctx.doc, nextPage(ctx, ctx.doc));
         if (inst) sn.push(inst);
         const it = { id: "", kind: "sheet", node: sn, geom: [], bbox: null };
@@ -6328,6 +6492,29 @@ Link '${target}' to this file?`)) return null;
       } else path(dr.pts.concat([c]));
     }
     return out;
+  }
+
+  // web/tools/edit-point-style.ts
+  var EDIT_POINT_PX = 8;
+  var IS_MAC2 = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
+  var EDIT_BORDER_PX = IS_MAC2 ? 3 : 2;
+  function editPointColors(aux, bg) {
+    let d = parseRgb(aux) || [0, 0, 0];
+    const b = parseRgb(bg);
+    if (b && (d[0] - b[0]) ** 2 + (d[1] - b[1]) ** 2 + (d[2] - b[2]) ** 2 < 0.5) d = [1 - d[0], 1 - d[1], 1 - d[2]];
+    const br = d[0] * 0.299 + d[1] * 0.587 + d[2] * 0.117;
+    const shade = (f, dark2) => "rgba(" + d.map((v) => Math.round(255 * (dark2 ? v * (1 - f) : v + (1 - v) * f))).join(",") + ",0.8)";
+    const [bf, dark] = br > 0.5 ? [0.7, true] : br > 0.2 ? [0.4, false] : [0.7, false];
+    return { fill: "rgb(" + d.map((v) => Math.round(255 * v)).join(",") + ")", border: shade(bf, dark) };
+  }
+  function parseRgb(c) {
+    if (!c) return null;
+    let m = /^#([0-9a-f]{6})/i.exec(c);
+    if (m) return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16) / 255);
+    m = /^#([0-9a-f]{3})$/i.exec(c);
+    if (m) return [0, 1, 2].map((i) => parseInt(m[1][i] + m[1][i], 16) / 255);
+    m = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/.exec(c);
+    return m ? [+m[1] / 255, +m[2] / 255, +m[3] / 255] : null;
   }
 
   // web/tools/sch-tools/point-edit.ts
@@ -6870,7 +7057,6 @@ Link '${target}' to this file?`)) return null;
     const ep = editPoints(ctx.doc, it);
     return ep ? { item: it, ep } : null;
   }
-  var EDIT_POINT_PX = 8;
   function pointEditStart(ctx, mm, ev) {
     if (ctx.viewOnly || S.drag || S.wire || S.carry) return false;
     const t = pointEditTarget(ctx);
@@ -6941,33 +7127,13 @@ Link '${target}' to this file?`)) return null;
     ctx.requestRender();
     return changes;
   }
-  var IS_MAC2 = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent || "");
-  var EDIT_BORDER_PX = IS_MAC2 ? 3 : 2;
-  function editPointColors(aux, bg) {
-    let d = parseRgb(aux) || [0, 0, 0];
-    const b = parseRgb(bg);
-    if (b && (d[0] - b[0]) ** 2 + (d[1] - b[1]) ** 2 + (d[2] - b[2]) ** 2 < 0.5) d = [1 - d[0], 1 - d[1], 1 - d[2]];
-    const br = d[0] * 0.299 + d[1] * 0.587 + d[2] * 0.117;
-    const shade = (f, dark2) => "rgba(" + d.map((v) => Math.round(255 * (dark2 ? v * (1 - f) : v + (1 - v) * f))).join(",") + ",0.8)";
-    const [bf, dark] = br > 0.5 ? [0.7, true] : br > 0.2 ? [0.4, false] : [0.7, false];
-    return { fill: "rgb(" + d.map((v) => Math.round(255 * v)).join(",") + ")", border: shade(bf, dark) };
-  }
-  function parseRgb(c) {
-    if (!c) return null;
-    let m = /^#([0-9a-f]{6})/i.exec(c);
-    if (m) return [0, 2, 4].map((i) => parseInt(m[1].slice(i, i + 2), 16) / 255);
-    m = /^#([0-9a-f]{3})$/i.exec(c);
-    if (m) return [0, 1, 2].map((i) => parseInt(m[1][i] + m[1][i], 16) / 255);
-    m = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/.exec(c);
-    return m ? [+m[1] / 255, +m[2] / 255, +m[3] / 255] : null;
-  }
   function drawEditPoints(c, ctx, px) {
     const t = S.pedit ? { item: S.pedit.item, ep: editPoints(ctx.doc, S.pedit.item) } : pointEditTarget(ctx);
     if (!t || !t.ep) return;
-    const { fill, border } = editPointColors(K.SCH.aux || "#000000", K.SCH.bg || "#F5F4EF"), size = EDIT_POINT_PX * px / 2, bw = EDIT_BORDER_PX * px;
+    const { fill: fill2, border } = editPointColors(K.SCH.aux || "#000000", K.SCH.bg || "#F5F4EF"), size = EDIT_POINT_PX * px / 2, bw = EDIT_BORDER_PX * px;
     const ep = t.ep, circ = new Set(ep.circles || []);
     c.save();
-    c.fillStyle = fill;
+    c.fillStyle = fill2;
     c.strokeStyle = border;
     c.lineWidth = bw;
     const dot = (h, round) => {
@@ -7394,7 +7560,7 @@ Link '${target}' to this file?`)) return null;
         }
         c.stroke();
       } else if (d.shape === "sheet") {
-        const b = d.await ? cur : sheetCorner(p0, cur, S.ctx ? S.ctx.gridPitch : 1.27), it = ghost(doc, sheetNode(p0, b, "Untitled Sheet", "untitled.kicad_sch"));
+        const b = d.await ? cur : sheetCorner(p0, cur, S.ctx ? S.ctx.gridPitch : 1.27), it = ghost(doc, sheetNode(p0, b, S.sheetPreset ? S.sheetPreset.name : "Untitled Sheet", S.sheetPreset ? S.sheetPreset.file : "untitled.kicad_sch"));
         if (it) {
           c.restore();
           paintItems(c, view, doc, [it], {});
@@ -8036,6 +8202,8 @@ Link '${target}' to this file?`)) return null;
     S.pending = null;
     if (S.drag) endDrag(ctx, false);
     if (S.draw) S.draw = null;
+    if (S.sheetPreset && S.sheetPreset.armed && toolId === "sheet") S.sheetPreset.armed = false;
+    else S.sheetPreset = null;
     if (toolId === "arc") showSchArcMode(ctx);
     if (!toolOf(toolId)) {
       closePicker();
@@ -8517,7 +8685,7 @@ Link '${target}' to this file?`)) return null;
     const list = el("div", "max-height:240px;overflow:auto;border-top:1px solid var(--line,#ccc)");
     box.appendChild(list);
     const pick = (name) => pickSymbol(ctx, name);
-    const fill = () => {
+    const fill2 = () => {
       const q = inp.value.trim().toLowerCase();
       list.replaceChildren();
       const shown = names.filter((n) => !q || n.toLowerCase().includes(q));
@@ -8532,7 +8700,7 @@ Link '${target}' to this file?`)) return null;
       }
       list.dataset.first = shown[0] || "";
     };
-    inp.addEventListener("input", fill);
+    inp.addEventListener("input", fill2);
     inp.addEventListener("keydown", (ev) => {
       ev.stopPropagation();
       if (ev.key === "Enter" && list.dataset.first) pick(list.dataset.first);
@@ -8540,7 +8708,7 @@ Link '${target}' to this file?`)) return null;
         closePicker();
       }
     });
-    fill();
+    fill2();
     placePanel(box, client);
     ctx.stage.appendChild(box);
     S.picker = box;
@@ -9681,6 +9849,11 @@ Link '${target}' to this file?`)) return null;
       const n = deep(r.item.node);
       shiftNode(r.item.kind, n, dx, dy);
       put(modChange(doc, r.item, n));
+    }
+    if (d.local) for (const id of d.local) {
+      if (out.has(id)) continue;
+      const it = doc.items.get(id);
+      if (it && !DRAG_KINDS.has(it.kind)) put(Object.assign(modChange(doc, it, deep(it.node)), { kind: "ADDED" }));
     }
     for (const e of d.ends || []) {
       const g = partialGeometry(e, dx, dy, connected && !d.mode && S.lineMode !== "free"), pts = g.pts;

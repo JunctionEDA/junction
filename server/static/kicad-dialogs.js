@@ -156,8 +156,8 @@
   function fieldHidden(p) {
     const H = PROPS() && PROPS().helpers;
     if (H && H.isHidden) return H.isHidden(p);
-    const h = kid(p, "hide");
-    if (h) return str(h[1]) !== "no";
+    const h2 = kid(p, "hide");
+    if (h2) return str(h2[1]) !== "no";
     const e = kid(p, "effects");
     return !!(e && (has(e, "hide") || yesKid(e, "hide")));
   }
@@ -178,16 +178,28 @@
   var G = () => typeof window === "undefined" ? {} : window;
   var NS = "http://www.w3.org/2000/svg";
   var CSS2 = `
-.kicon-dom .dk { display: none; }
-:root[data-theme="dark"] .kicon-dom .lt { display: none; } :root[data-theme="dark"] .kicon-dom .dk { display: inline; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .kicon-dom .lt { display: none; } :root:not([data-theme="light"]) .kicon-dom .dk { display: inline; } }
+.kic{flex:none;vertical-align:middle}
+.kic .dk{display:none}
+:root[data-theme="dark"] .kic .lt{display:none} :root[data-theme="dark"] .kic .dk{display:inline}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .kic .lt{display:none} :root:not([data-theme="light"]) .kic .dk{display:inline}}
+:root[data-theme="dark"]{--kic-lt:none;--kic-dk:inline}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--kic-lt:none;--kic-dk:inline}}
+.kbmp{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:24px;padding:0;border:1px solid var(--line);border-radius:var(--r-2,3px);background:var(--panel);color:var(--ink);cursor:pointer}
+.kbmp>.kic{display:block}
+.kbmp:hover:not(:disabled){border-color:var(--line-2);background:var(--paper)}
+.kbmp:disabled{opacity:.4;cursor:default}
+.kbmp.flat{border-color:transparent;background:transparent}
+.kbmp.flat:hover:not(:disabled){border-color:var(--line)}
+.kbmp.on,.kbmp[aria-pressed="true"]{background:var(--on,var(--sel-soft));border-color:var(--on-line,var(--sel))}
+.kbmp-sep{flex:none;width:1px;height:18px;margin:0 4px;background:var(--line);align-self:center}
+.kbmp-bar{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
 `;
   var styled = false;
-  function ensureCss() {
+  function ensureIconCss() {
     if (styled || typeof document === "undefined") return;
     styled = true;
     const st = document.createElement("style");
-    st.id = "kicon-dom-css";
+    st.id = "kicon-css";
     st.textContent = CSS2;
     document.head.appendChild(st);
   }
@@ -197,10 +209,11 @@
     el2.dataset.icon = el2.dataset.want || "";
   }
   function kicadIcon(name, size = 16) {
-    ensureCss();
+    ensureIconCss();
     const el2 = document.createElementNS(NS, "svg");
-    el2.setAttribute("class", "kicon-dom");
+    el2.setAttribute("class", "kic kicon-dom");
     el2.setAttribute("aria-hidden", "true");
+    el2.setAttribute("viewBox", "0 0 24 24");
     el2.setAttribute("width", String(size));
     el2.setAttribute("height", String(size));
     setKicadIcon(el2, name);
@@ -209,6 +222,7 @@
   function setKicadIcon(el2, name) {
     if (el2.dataset.want === name && el2.dataset.icon === name) return;
     el2.dataset.want = name;
+    el2.dataset.icon = name;
     const g = G(), ic = g.KiCadIconFor ? g.KiCadIconFor(name) : void 0;
     if (ic) {
       fill(el2, ic);
@@ -219,6 +233,21 @@
       const i = G().KiCadIconFor?.(name);
       if (i) fill(el2, i);
     }).catch(() => void 0);
+  }
+  function bitmapButton(icon, title, onClick, opts) {
+    ensureIconCss();
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "kbmp" + (opts?.flat ? " flat" : "") + (opts?.cls ? " " + opts.cls : "");
+    b.title = title;
+    b.setAttribute("aria-label", title.split("\n")[0]);
+    b.dataset.icon = icon;
+    if (opts?.id) b.id = opts.id;
+    if (opts?.key) b.dataset.k = opts.key;
+    if (opts?.disabled) b.disabled = true;
+    b.appendChild(kicadIcon(icon, opts?.size || 16));
+    if (onClick) b.addEventListener("click", (ev) => onClick(ev));
+    return b;
   }
 
   // web/keys.ts
@@ -231,8 +260,111 @@
     return /Macintosh|Mac OS X|iPhone|iPad/.test(nav.userAgent || "");
   }
   var IS_MAC = detectMac();
+  function splitKey(key) {
+    const parts = key.split("+");
+    let k = parts.pop() ?? "";
+    if (k === "" && key.endsWith("+")) {
+      k = "+";
+      parts.pop();
+    }
+    return { ctrl: parts.includes("Ctrl") || parts.includes("Cmd"), alt: parts.includes("Alt") || parts.includes("Option"), shift: parts.includes("Shift"), rawCtrl: parts.includes("RawCtrl"), key: k };
+  }
+  function keyName(key) {
+    if (!key) return "";
+    const s = splitKey(key);
+    if (!IS_MAC) return s.rawCtrl ? key.replace("RawCtrl", "Ctrl") : key;
+    const mods = [];
+    if (s.rawCtrl) mods.push("Ctrl");
+    if (s.ctrl) mods.push("Cmd");
+    if (s.alt) mods.push("Option");
+    if (s.shift) mods.push("Shift");
+    return [...mods, s.key].join("+");
+  }
+  var MAC_MENU_KEYS = {
+    Del: "\u2326",
+    Delete: "\u2326",
+    Backspace: "\u232B",
+    Back: "\u232B",
+    Esc: "\u238B",
+    Escape: "\u238B",
+    Tab: "\u21E5",
+    Enter: "\u21A9",
+    Return: "\u21A9",
+    Up: "\u2191",
+    Down: "\u2193",
+    Left: "\u2190",
+    Right: "\u2192",
+    PgUp: "\u21DE",
+    PgDn: "\u21DF",
+    Home: "\u2196",
+    End: "\u2198"
+  };
+  function menuKey(key) {
+    if (!key) return "";
+    if (!IS_MAC) return keyName(key);
+    const s = splitKey(key);
+    return (s.rawCtrl ? "\u2303" : "") + (s.alt ? "\u2325" : "") + (s.shift ? "\u21E7" : "") + (s.ctrl ? "\u2318" : "") + (MAC_MENU_KEYS[s.key] || s.key);
+  }
 
   // web/menufit.ts
+  var MARGIN = 4;
+  function menuViewport() {
+    const de = typeof document !== "undefined" ? document.documentElement : null;
+    const w = Math.min(window.innerWidth, de && de.clientWidth || window.innerWidth);
+    const h2 = Math.min(window.innerHeight, de && de.clientHeight || window.innerHeight);
+    return { w, h: h2 };
+  }
+  function menuSize(el2) {
+    const prev = el2.style.maxHeight, scrolled = el2.scrollTop;
+    el2.style.maxHeight = "none";
+    const w = el2.offsetWidth, h2 = el2.offsetHeight;
+    el2.style.maxHeight = prev;
+    if (scrolled) el2.scrollTop = scrolled;
+    return { w, h: h2 };
+  }
+  function placeMenu(size, a) {
+    const { w: vw, h: vh } = menuViewport(), m = MARGIN, w = size.w, h2 = size.h, room = vh - 2 * m;
+    const clampX = (x) => Math.max(m, Math.min(x, vw - w - m));
+    let left, top2, maxHeight;
+    if (a.row) {
+      const p = a.parent || a.row, ov = a.overlap ?? 3;
+      left = p.right - ov;
+      if (left + w > vw - m) left = p.left - w + ov;
+      if (left < m) left = clampX(p.right - ov);
+      top2 = a.row.top - 5;
+      if (top2 + h2 > vh - m) top2 = Math.max(m, vh - m - h2);
+      maxHeight = vh - m - top2;
+    } else if (a.below) {
+      const r = a.below, gap = a.gap ?? 2;
+      left = clampX(r.left);
+      const under = vh - m - (r.bottom + gap), over = r.top - gap - m;
+      if (h2 <= under || a.noFlip || under >= over) {
+        top2 = r.bottom + gap;
+        maxHeight = Math.max(under, 40);
+      } else {
+        maxHeight = over;
+        top2 = r.top - gap - Math.min(h2, over);
+      }
+    } else {
+      const x = a.at ? a.at.x : m, y = a.at ? a.at.y : m;
+      left = x + w <= vw - m ? x : x - w >= m ? x - w : clampX(x);
+      if (y + h2 <= vh - m) top2 = y;
+      else if (y - h2 >= m) top2 = y - h2;
+      else top2 = Math.max(m, vh - m - h2);
+      maxHeight = vh - m - top2;
+    }
+    return { left: Math.round(left), top: Math.round(top2), maxHeight: Math.max(Math.floor(Math.min(maxHeight, room)), 24) };
+  }
+  function fitMenu(el2, a) {
+    const p = placeMenu(menuSize(el2), a);
+    el2.style.position = "fixed";
+    el2.style.left = p.left + "px";
+    el2.style.top = p.top + "px";
+    el2.style.maxHeight = p.maxHeight + "px";
+    el2.style.overflowY = "auto";
+    menuScroller(el2);
+    return p;
+  }
   var ARROW = 16;
   var SPEED = 0.5;
   var SCROLLERS = /* @__PURE__ */ new WeakMap();
@@ -323,6 +455,9 @@
   var KSELECT_TAG = "k-select";
   var SHADOW_CSS = `
 :host { contain: layout style; }
+.kic { display: block; flex: none; }
+.kic .lt { display: var(--kic-lt, inline); }
+.kic .dk { display: var(--kic-dk, none); }
 .b { display: flex; align-items: center; gap: 4px; width: 100%; height: 100%; min-width: 0; outline: 0; cursor: default; }
 .t { flex: 1 1 auto; min-width: 0; display: grid; grid-template-columns: minmax(0, max-content); text-align: left; }
 .t > * { grid-area: 1 / 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -336,8 +471,28 @@
 .r.dis { color: var(--ink-3); }
 .r.sep { height: 1px; padding: 0; margin: 3px 4px; background: var(--line); }
 .r.hd { color: var(--ink-2); font-weight: 600; }
+.ic { display: inline-flex; align-items: center; gap: 5px; }
+.ic > svg { flex: none; }
+.sz > span.ic::before { content: ""; display: inline-block; width: 16px; }
 `;
   var CARET = '<svg class="c" viewBox="0 0 8 8" aria-hidden="true"><path d="M1 2.5h6L4 6z" fill="currentColor"/></svg>';
+  function optionIcon(o) {
+    const name = o.getAttribute("data-icon");
+    if (!name) return null;
+    return kicadIcon(name, 16);
+  }
+  function fillRow(r, o) {
+    const text = o ? o.label || o.text : "", ic = o ? optionIcon(o) : null;
+    if (!ic) {
+      r.classList.remove("ic");
+      r.textContent = text;
+      return;
+    }
+    r.classList.add("ic");
+    const t = document.createElement("span");
+    t.textContent = text;
+    r.replaceChildren(ic, t);
+  }
   var popSeq = 0;
   var openOne = null;
   function defineKSelect() {
@@ -576,13 +731,15 @@
           this.btn.tabIndex = dis ? -1 : 0;
           this.btn.setAttribute("aria-disabled", dis ? "true" : "false");
           const os = this.options, s = this.current();
-          if (this.label) this.label.textContent = s ? s.label || s.text : "";
-          const all = os.filter((o) => !this.isSep(o)).map((o) => o.label || o.text), key = all.join("");
+          if (this.label) fillRow(this.label, s);
+          const icons = os.some((o) => o.hasAttribute("data-icon"));
+          const all = os.filter((o) => !this.isSep(o)).map((o) => o.label || o.text), key = (icons ? "" : "") + all.join("");
           if (this.sizer && key !== this.sizedFor) {
             this.sizedFor = key;
             this.sizer.replaceChildren(...all.map((t) => {
               const e = document.createElement("span");
               e.textContent = t;
+              if (icons) e.className = "ic";
               return e;
             }));
           }
@@ -600,7 +757,7 @@
               return hd ? [hd, r] : [r];
             }
             r.className = "r" + (o === s ? " on" : "") + (this.pickable(o) ? "" : " dis");
-            r.textContent = o.label || o.text;
+            fillRow(r, o);
             r.setAttribute("aria-selected", o === s ? "true" : "false");
             return hd ? [hd, r] : [r];
           }));
@@ -735,7 +892,7 @@
           r.id = pop.id + "-" + i;
           r.setAttribute("role", "option");
           r.setAttribute("aria-selected", o === s ? "true" : "false");
-          r.textContent = o.label || o.text;
+          fillRow(r, o);
           if (o.title) r.title = o.title;
           if (o.parentElement && o.parentElement.tagName === "OPTGROUP") r.classList.add("ind");
           return hd ? [hd, r] : [r];
@@ -751,9 +908,9 @@
         const want = pop.scrollHeight + 2;
         const below = vh - r.bottom - M - 2, above = r.top - M - 2;
         const up = want > below && above > below;
-        const room = Math.max(80, up ? above : below), h = Math.min(want, room, Math.round(vh * 0.7));
-        pop.style.maxHeight = h + "px";
-        pop.style.top = (up ? Math.max(M, r.top - 2 - h) : Math.min(r.bottom + 2, vh - M - h)) + "px";
+        const room = Math.max(80, up ? above : below), h2 = Math.min(want, room, Math.round(vh * 0.7));
+        pop.style.maxHeight = h2 + "px";
+        pop.style.top = (up ? Math.max(M, r.top - 2 - h2) : Math.min(r.bottom + 2, vh - M - h2)) + "px";
         const w = pop.offsetWidth;
         pop.style.left = Math.max(M, Math.min(r.left, vw - M - w)) + "px";
         menuScroller(pop, { combo: true });
@@ -887,6 +1044,90 @@
   }
   defineKSelect();
 
+  // web/dialogs/dom.ts
+  function h(tag, attrs, ...children) {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+      if (v === void 0 || v === null || v === false) continue;
+      if (typeof v === "function") e.addEventListener(k.replace(/^on/, ""), v);
+      else if (k === "class") e.className = String(v);
+      else if (k === "style") e.setAttribute("style", String(v));
+      else if (k === "value") e.value = String(v);
+      else if (k === "checked" || k === "disabled" || k === "selected") e[k] = !!v;
+      else e.setAttribute(k, v === true ? "" : String(v));
+    }
+    for (const c of children) if (c !== null && c !== void 0 && c !== false) e.append(c);
+    return e;
+  }
+  function popupMenu(x, y, items) {
+    for (const old of Array.from(document.querySelectorAll(".kd-pop"))) old.remove();
+    const build = (list, px, py, depth) => {
+      const m = h("div", { class: "kd-pop", role: "menu", "data-depth": depth, style: `position:fixed;left:${px}px;top:${py}px;z-index:${80 + depth};min-width:160px;background:var(--panel);border:1px solid var(--line);border-radius:4px;box-shadow:0 6px 18px rgba(0,0,0,.25);padding:3px 0;font-size:12px;color:var(--ink)` });
+      for (const it of list) {
+        if (it.sep) {
+          m.append(h("div", { style: "height:1px;background:var(--line);margin:3px 0" }));
+          continue;
+        }
+        const row = h(
+          "div",
+          { class: "kd-pop-row", role: "menuitem", "aria-disabled": it.disabled ? "true" : void 0, style: `display:flex;gap:6px;align-items:center;padding:3px 12px 3px 6px;cursor:default;white-space:nowrap;${it.disabled ? "opacity:.45;" : ""}` },
+          h("span", { style: "width:16px;display:inline-flex;justify-content:center" }, it.check ? it.checked ? "\u2713" : "" : it.icon ? kicadIcon(it.icon, 16) : ""),
+          h("span", { style: "flex:1" }, it.label || ""),
+          it.key ? h("span", { class: "kd-pop-key", style: "margin-left:24px;opacity:.7" }, menuKey(it.key)) : null,
+          it.sub ? h("span", null, "\u25B8") : null
+        );
+        if (it.title) row.title = it.title;
+        row.addEventListener("pointerenter", () => {
+          row.style.background = "var(--accent)";
+          row.style.color = "var(--on-accent)";
+          for (const o of Array.from(document.querySelectorAll(".kd-pop"))) if (Number(o.dataset.depth) > depth) o.remove();
+          if (it.sub && !it.disabled) {
+            const r = row.getBoundingClientRect(), sub = build(it.sub, r.right - 2, r.top - 3, depth + 1);
+            document.body.append(sub);
+            fitMenu(sub, { row: r, parent: m.getBoundingClientRect(), overlap: 2 });
+          }
+        });
+        row.addEventListener("pointerleave", () => {
+          row.style.background = "";
+          row.style.color = "";
+        });
+        row.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          if (it.disabled || it.sub) return;
+          closeAll();
+          if (it.run) it.run();
+        });
+        m.append(row);
+      }
+      return m;
+    };
+    const closeAll = () => {
+      for (const o of Array.from(document.querySelectorAll(".kd-pop"))) o.remove();
+      document.removeEventListener("pointerdown", away, true);
+      document.removeEventListener("keydown", esc2, true);
+    };
+    const away = (ev) => {
+      const t = ev.target;
+      if (t && t.closest && t.closest(".kd-pop")) return;
+      closeAll();
+    };
+    const esc2 = (ev) => {
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        ev.stopPropagation();
+        closeAll();
+      }
+    };
+    const root2 = build(items, x, y, 0);
+    document.body.append(root2);
+    fitMenu(root2, { at: { x, y } });
+    setTimeout(() => {
+      document.addEventListener("pointerdown", away, true);
+      document.addEventListener("keydown", esc2, true);
+    }, 0);
+    return root2;
+  }
+
   // web/tools/kicad-dialogs/widgets.ts
   var WIDGET_CSS = `
 .kd-overlay.kd-modeless { background: transparent; pointer-events: none; align-items: flex-start; justify-content: flex-end; padding: 96px 60px 0 0; }
@@ -898,7 +1139,7 @@
 .kd-nb-tab { padding: 5px 14px; border: 1px solid transparent; border-bottom: none; border-radius: 4px 4px 0 0; cursor: pointer; color: var(--ink-2); margin-bottom: -1px; user-select: none; }
 .kd-nb-tab.on { background: var(--bench); border-color: var(--line); color: var(--ink); font-weight: 600; }
 .kd-nb-page { padding: 10px 4px 2px; min-height: 0; }
-.kd-tb { display: grid; grid-template-columns: 190px 1fr; min-height: 420px; }
+.kd-tb { display: grid; grid-template-columns: minmax(190px, max-content) 1fr; min-height: 420px; }
 .kd-tb-tree { border-right: 1px solid var(--line); background: var(--panel); padding: 6px 0; overflow: auto; user-select: none; }
 .kd-tb-node { padding: 3px 10px; cursor: default; white-space: nowrap; color: var(--ink); }
 .kd-tb-node.child { padding-left: 26px; cursor: pointer; }
@@ -913,6 +1154,10 @@
 .kd-grid tr.sel td { background: color-mix(in srgb, var(--blue) 18%, transparent); }
 .kd-grid td.ro { padding: 2px 6px; color: var(--ink-2); }
 .kd-grid td.c { text-align: center; }
+.kd-nowrap .kd-grid td.ro { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 420px; }
+.kd-grid td.kd-icon-cell { width: 24px; }
+.kd-grid .kd-cell-ic { border: 0; background: transparent; padding: 1px; display: inline-flex; cursor: pointer; border-radius: var(--r-1); vertical-align: middle; }
+.kd-grid .kd-cell-ic:hover { background: var(--sel-soft); }
 .kd-body .kd-grid td input[type=text], .kd-body .kd-grid td input[type=number], .kd-body .kd-grid td k-select { border: none; background: transparent; border-radius: 0; padding: 2px 6px; font-family: inherit; }
 .kd-body .kd-grid td input[type=text]:focus, .kd-body .kd-grid td k-select:focus-within { outline: 2px solid var(--blue); outline-offset: -2px; background: var(--panel); }
 .kd-grid td input[type=checkbox] { margin: 0; }
@@ -922,8 +1167,10 @@
 .kd-grid td.kd-btn-cell:focus-within .kd-cell-btn, .kd-grid tr:hover td.kd-btn-cell .kd-cell-btn { visibility: visible; }
 .kd-grid .kd-cell-btn:hover { background: var(--sel-soft); }
 .kd-grid .kd-cell-btn:active { background: var(--on); }
-.kd-grid-btns { display: flex; gap: 4px; margin-top: 4px; }
+.kd-grid-btns { display: flex; gap: 4px; margin-top: 4px; align-items: center; }
 .kd-grid-btns .btn { padding: 1px 7px; min-width: 26px; font-size: 13px; line-height: 18px; }
+.kd-grid-btns .kd-gap { width: 16px; flex: none; }
+.kd-grid-btns .kd-fill { flex: 1; }
 .kd-sb { border: 1px solid var(--line); border-radius: 3px; padding: 14px 10px 8px; margin: 12px 0 8px; position: relative; }
 .kd-sb > .kd-sb-t { position: absolute; top: -9px; left: 8px; background: var(--bench); padding: 0 4px; color: var(--ink-2); font-size: 12px; }
 .kd-row { display: flex; gap: 8px; align-items: center; }
@@ -931,7 +1178,7 @@
 .kd-chk input { width: auto; margin: 0; }
 `;
   var cssDone = false;
-  function ensureCss2() {
+  function ensureCss() {
     if (cssDone || typeof document === "undefined") return;
     cssDone = true;
     const st = document.createElement("style");
@@ -940,7 +1187,7 @@
     document.head.appendChild(st);
   }
   function notebook(host, tabs, opts) {
-    ensureCss2();
+    ensureCss();
     const nb = el("div", "kd-nb"), bar = el("div", "kd-nb-tabs"), pages = [];
     let cur = -1;
     const select = (i) => {
@@ -970,7 +1217,7 @@
     return { el: nb, select, index: () => cur, pages };
   }
   function treebook(host, sections, opts) {
-    ensureCss2();
+    ensureCss();
     const tb = el("div", "kd-tb"), tree = el("div", "kd-tb-tree"), pane = el("div", "kd-tb-page"), built = /* @__PURE__ */ new Map(), nodes = /* @__PURE__ */ new Map();
     let cur = null;
     const pages = /* @__PURE__ */ new Map();
@@ -1013,27 +1260,76 @@
     return { el: tb, select, current: () => cur };
   }
   function grid(host, columns, rows, optsIn) {
-    ensureCss2();
+    ensureCss();
     const opts = optsIn || {};
     const wrap = el("div", "kd-grid-wrap"), table = el("table", "kd-grid");
     if (opts.height) wrap.style.maxHeight = wrap.style.height = typeof opts.height === "number" ? opts.height + "px" : opts.height;
     let sel = -1;
-    const api = { el: wrap, rows, columns, refresh, selected: () => sel, select };
+    let multi = /* @__PURE__ */ new Set();
+    const api = { el: wrap, rows, columns, refresh, selected: () => sel, select, selectedRows: () => (sel >= 0 && !multi.has(sel) ? [...multi, sel] : [...multi]).filter((i) => i < rows.length).sort((a, b) => a - b), selectRows };
+    const paint = () => {
+      [...table.querySelectorAll("tbody tr")].forEach((tr, j) => tr.classList.toggle("sel", j === sel || multi.has(j)));
+    };
     function select(i) {
       sel = i;
-      [...table.querySelectorAll("tbody tr")].forEach((tr, j) => tr.classList.toggle("sel", j === i));
+      multi = /* @__PURE__ */ new Set();
+      paint();
       if (opts.onSelect) opts.onSelect(rows[i] || null, i);
+    }
+    function selectRows(list) {
+      multi = new Set(list.filter((i) => i >= 0 && i < rows.length));
+      sel = list.length ? list[list.length - 1] : -1;
+      paint();
+      if (opts.onSelect) opts.onSelect(rows[sel] || null, sel);
+    }
+    function clickRow(i, ev) {
+      if (opts.multiSelect && (ev.ctrlKey || ev.metaKey)) {
+        if (sel >= 0) multi.add(sel);
+        if (multi.has(i) && multi.size > 1) multi.delete(i);
+        else multi.add(i);
+        sel = i;
+        paint();
+        if (opts.onSelect) opts.onSelect(rows[i] || null, i);
+        return;
+      }
+      if (opts.multiSelect && ev.shiftKey && sel >= 0) {
+        const a = Math.min(sel, i), b = Math.max(sel, i);
+        multi = /* @__PURE__ */ new Set();
+        for (let k = a; k <= b; k++) multi.add(k);
+        sel = i;
+        paint();
+        if (opts.onSelect) opts.onSelect(rows[i] || null, i);
+        return;
+      }
+      if (sel !== i || multi.size) select(i);
     }
     function refresh() {
       const cols = api.columns;
-      table.innerHTML = `<thead><tr>${cols.map((c) => `<th${c.width ? ` style="width:${c.width}px${c.button ? `;min-width:${c.width}px` : ""}"` : ""}>${esc(c.label)}</th>`).join("")}</tr></thead>`;
+      table.innerHTML = `<thead${opts.noHeader ? ' style="display:none"' : ""}><tr>${cols.map((c) => `<th${c.width ? ` style="width:${c.width}px${c.button ? `;min-width:${c.width}px` : ""}"` : ""}>${esc(c.label)}</th>`).join("")}</tr></thead>`;
       const tb = el("tbody");
       rows.forEach((r, i) => {
         const tr = el("tr");
-        if (i === sel) tr.classList.add("sel");
+        if (i === sel || multi.has(i)) tr.classList.add("sel");
         for (const c of cols) {
           const td = el("td"), ro = opts.readOnly || c.type === "ro" || c.ro && c.ro(r), v = r[c.key];
-          if (c.type === "bool") {
+          if (c.type === "icon") {
+            td.className = "c kd-icon-cell";
+            const spec = c.icon ? c.icon(r) : null;
+            if (spec) {
+              const b = el("button", "kd-cell-ic");
+              b.type = "button";
+              b.title = spec.title;
+              b.dataset.icon = spec.icon;
+              b.dataset.col = c.key;
+              b.appendChild(kicadIcon(spec.icon, 16));
+              b.tabIndex = -1;
+              b.addEventListener("click", (ev) => {
+                ev.stopPropagation();
+                if (spec.run) spec.run();
+              });
+              td.appendChild(b);
+            }
+          } else if (c.type === "bool") {
             td.className = "c";
             const cb = el("input");
             cb.type = "checkbox";
@@ -1080,11 +1376,16 @@
           }
           tr.appendChild(td);
         }
-        tr.addEventListener("pointerdown", () => {
-          if (sel !== i) select(i);
+        tr.addEventListener("pointerdown", (ev) => {
+          if (ev.button === 2 && (i === sel || multi.has(i))) return;
+          clickRow(i, ev);
         });
         tr.addEventListener("focusin", () => {
-          if (sel !== i) select(i);
+          if (sel !== i && !multi.has(i)) select(i);
+        });
+        if (opts.onContextMenu) tr.addEventListener("contextmenu", (ev) => {
+          ev.preventDefault();
+          opts.onContextMenu(ev, i);
         });
         tb.appendChild(tr);
       });
@@ -1097,57 +1398,72 @@
     wrap.appendChild(table);
     host.appendChild(wrap);
     refresh();
+    installGridTricks(table, api, opts, () => sel, (i) => {
+      sel = i;
+    });
     const B = opts.buttons;
     if (B && !opts.readOnly) {
       const bar = el("div", "kd-grid-btns");
-      const mk = (txt, title, fn) => {
-        const b = el("button", "btn", txt);
-        b.title = title;
-        b.type = "button";
-        b.addEventListener("click", fn);
+      const mk = (icon, title, fn, role) => {
+        const b = bitmapButton(icon, title, fn, { key: "grid-" + icon.replace(/^small_/, "") });
+        b.dataset.btn = role;
         bar.appendChild(b);
         return b;
       };
-      if (B.add) mk("+", B.addTitle || "Add", () => {
+      if (B.add) mk("small_plus", B.addTitle || "Add", () => {
         const r = B.add();
         if (r) {
           rows.push(r);
           sel = rows.length - 1;
+          multi = /* @__PURE__ */ new Set();
           refresh();
           const f = table.querySelector("tbody tr:last-child input[type=text]");
           if (f) f.focus();
           if (opts.onChange) opts.onChange(r, null, null, sel);
         }
-      });
+      }, "add");
+      if (B.add) (B.afterAdd || []).forEach((x) => bar.appendChild(x));
       if (B.move) {
-        mk("\u2191", "Move up", () => {
+        mk("small_up", "Move up", () => {
           if (sel > 0) {
             [rows[sel - 1], rows[sel]] = [rows[sel], rows[sel - 1]];
             sel--;
+            multi = /* @__PURE__ */ new Set();
             refresh();
             if (opts.onChange) opts.onChange(rows[sel], null, null, sel);
           }
-        });
-        mk("\u2193", "Move down", () => {
+        }, "up");
+        mk("small_down", "Move down", () => {
           if (sel >= 0 && sel < rows.length - 1) {
             [rows[sel + 1], rows[sel]] = [rows[sel], rows[sel + 1]];
             sel++;
+            multi = /* @__PURE__ */ new Set();
             refresh();
             if (opts.onChange) opts.onChange(rows[sel], null, null, sel);
           }
-        });
+        }, "down");
       }
-      if (B.remove) mk("\u{1F5D1}", B.removeTitle || "Delete", () => {
-        if (sel < 0 || !rows[sel]) return;
-        if (B.canRemove && !B.canRemove(rows[sel])) return;
-        const gone = rows.splice(sel, 1)[0];
-        sel = Math.min(sel, rows.length - 1);
-        refresh();
-        if (opts.onChange) opts.onChange(gone, null, null, -1);
-      });
+      if (B.remove) {
+        if (B.gapBeforeRemove) bar.appendChild(el("span", "kd-gap"));
+        mk("small_trash", B.removeTitle || "Delete", () => {
+          removeRows(api.selectedRows());
+        }, "remove");
+      }
       host.appendChild(bar);
       api.bar = bar;
     }
+    function removeRows(list) {
+      const go = list.filter((i) => rows[i] && !(B && B.canRemove && !B.canRemove(rows[i]))).sort((a, b) => b - a);
+      if (!go.length) return;
+      const first = go[go.length - 1];
+      let gone;
+      for (const i of go) gone = rows.splice(i, 1)[0];
+      multi = /* @__PURE__ */ new Set();
+      sel = Math.min(first, rows.length - 1);
+      refresh();
+      if (opts.onChange && gone) opts.onChange(gone, null, null, -1);
+    }
+    api.removeRows = removeRows;
     return api;
   }
   function cellButton(td, inp, spec) {
@@ -1192,17 +1508,162 @@
     td.appendChild(b);
   }
   function staticBox(host, title) {
-    ensureCss2();
+    ensureCss();
     const b = el("div", "kd-sb");
     b.appendChild(el("span", "kd-sb-t", esc(title)));
     host.appendChild(b);
     return b;
+  }
+  function cellText(v, type) {
+    return type === "bool" ? v ? "1" : "0" : str(v);
+  }
+  function parseClip(text) {
+    const lines = text.replace(/\r\n?/g, "\n").split("\n");
+    if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+    return lines.map((l) => l.split("	"));
+  }
+  function installGridTricks(table, api, opts, getSel, setSel) {
+    let all = false;
+    const cols = () => api.columns;
+    const editable = (r, c) => !opts.readOnly && c.type !== "ro" && !(c.ro && c.ro(r));
+    const block = (at) => {
+      if (all && api.rows.length) return { r0: 0, r1: api.rows.length - 1, c0: 0, c1: cols().length - 1 };
+      return at ? { r0: at.r, r1: at.r, c0: at.c, c1: at.c } : null;
+    };
+    const textOf = (b) => {
+      const out = [];
+      for (let r = b.r0; r <= b.r1; r++) {
+        const row = api.rows[r];
+        const cells = [];
+        for (let c = b.c0; c <= b.c1; c++) {
+          const col = cols()[c];
+          cells.push(cellText(row[col.key], col.type));
+        }
+        out.push(cells.join("	"));
+      }
+      return out.join("\n");
+    };
+    const set = (r, c, v) => {
+      const row = api.rows[r], col = cols()[c];
+      if (!row || !col || !editable(row, col)) return false;
+      const rec = row;
+      if (col.type === "bool") rec[col.key] = v === "1" || /^true$/i.test(v);
+      else if (col.type === "choice") {
+        const o = typeof col.options === "function" ? col.options(row) : col.options || [];
+        const vals = o.map((x) => Array.isArray(x) ? x[0] : x);
+        if (!vals.includes(v)) return false;
+        rec[col.key] = v;
+      } else rec[col.key] = v;
+      if (opts.onChange) opts.onChange(row, col.key, rec[col.key], r);
+      return true;
+    };
+    const clear = (b) => {
+      for (let r = b.r0; r <= b.r1; r++) for (let c = b.c0; c <= b.c1; c++) {
+        const col = cols()[c];
+        if (col.type === "choice") continue;
+        set(r, c, col.type === "bool" ? "0" : "");
+      }
+      api.refresh();
+      markAll();
+    };
+    const copy = (b) => {
+      const t = textOf(b);
+      if (navigator.clipboard) void navigator.clipboard.writeText(t).catch(() => void 0);
+    };
+    const paste = (at) => {
+      if (!navigator.clipboard || !navigator.clipboard.readText) return;
+      void navigator.clipboard.readText().then((t) => {
+        const data = parseClip(t), b = block(at);
+        if (!b) return;
+        const r0 = b.r0, c0 = b.c0;
+        if (data.length === 1 && data[0].length === 1 && (b.r1 > b.r0 || b.c1 > b.c0)) {
+          for (let r = b.r0; r <= b.r1; r++) for (let c = b.c0; c <= b.c1; c++) set(r, c, data[0][0]);
+        } else data.forEach((cells, dr) => cells.forEach((v, dc) => {
+          if (r0 + dr < api.rows.length && c0 + dc < cols().length) set(r0 + dr, c0 + dc, v);
+        }));
+        api.refresh();
+        markAll();
+      }).catch(() => void 0);
+    };
+    const markAll = () => {
+      if (all) for (const tr of Array.from(table.querySelectorAll("tbody tr"))) tr.classList.add("sel");
+    };
+    const selectAll = () => {
+      all = true;
+      markAll();
+    };
+    const cellAt = (t) => {
+      const td = t?.closest ? t.closest("td") : null;
+      if (!td || !table.contains(td)) return null;
+      const tr = td.parentElement;
+      const r = Array.from(tr.parentElement.children).indexOf(tr), c = Array.from(tr.children).indexOf(td);
+      return r >= 0 && c >= 0 ? { r, c } : null;
+    };
+    table.addEventListener("pointerdown", (ev) => {
+      if (ev.button === 0 && all) {
+        all = false;
+        const s = getSel();
+        for (const [j, tr] of Array.from(table.querySelectorAll("tbody tr")).entries()) tr.classList.toggle("sel", j === s);
+      }
+    });
+    table.addEventListener("contextmenu", (ev) => {
+      if (opts.onContextMenu || ev.defaultPrevented) return;
+      const at = cellAt(ev.target);
+      if (!at) return;
+      ev.preventDefault();
+      if (!all && getSel() !== at.r) {
+        setSel(at.r);
+        api.select(at.r);
+      }
+      const b = block(at), row = api.rows[at.r], col = cols()[at.c];
+      const canEdit = !opts.readOnly && !!row && !!col && (all || editable(row, col));
+      const own = opts.cellMenu && row && col ? opts.cellMenu(row, col) : [];
+      popupMenu(ev.clientX, ev.clientY, [
+        ...own,
+        ...own.length ? [{ sep: true }] : [],
+        { label: "Cut", key: "Ctrl+X", disabled: !canEdit, run: () => {
+          copy(b);
+          clear(b);
+        } },
+        { label: "Copy", key: "Ctrl+C", run: () => copy(b) },
+        { label: "Paste", key: "Ctrl+V", disabled: !canEdit || !(navigator.clipboard && navigator.clipboard.readText), run: () => paste(at) },
+        { label: "Delete", key: "Del", disabled: !canEdit, run: () => clear(b) },
+        { sep: true },
+        { label: "Select All", key: "Ctrl+A", run: selectAll }
+      ]);
+    });
+    table.addEventListener("keydown", (ev) => {
+      const t = ev.target, inText = t.tagName === "INPUT" && t.type === "text";
+      const mod = ev.ctrlKey || ev.metaKey, k = ev.key.toLowerCase();
+      if (inText && !all) return;
+      const at = cellAt(t) || (getSel() >= 0 ? { r: getSel(), c: 0 } : null);
+      if (!at) return;
+      const b = block(at);
+      if (mod && k === "a") {
+        ev.preventDefault();
+        selectAll();
+      } else if (mod && k === "c") {
+        ev.preventDefault();
+        copy(b);
+      } else if (mod && k === "x" && !opts.readOnly) {
+        ev.preventDefault();
+        copy(b);
+        clear(b);
+      } else if (mod && k === "v" && !opts.readOnly) {
+        ev.preventDefault();
+        paste(at);
+      } else if ((ev.key === "Delete" || ev.key === "Backspace") && all && !opts.readOnly) {
+        ev.preventDefault();
+        clear(b);
+      }
+    });
   }
 
   // web/tools/kicad-dialogs/shell.ts
   var stack = [];
   var top = () => stack.length ? stack[stack.length - 1] : null;
   var isOpen = () => stack.length > 0;
+  var isModalOpen = () => stack.some((d) => !d.spec.modeless);
   function el(tag, cls, html) {
     const e = document.createElement(tag);
     if (cls) e.className = cls;
@@ -1297,8 +1758,8 @@
   }
   function clampGeometry(g, vw, vh) {
     const width = g.width ? Math.min(g.width, vw) : void 0, height = g.height ? Math.min(g.height, vh) : void 0;
-    const w = width || 240, h = height || 120;
-    return { left: Math.max(0, Math.min(g.left, vw - Math.min(w, vw))), top: Math.max(0, Math.min(g.top, vh - Math.min(h, vh))), width, height };
+    const w = width || 240, h2 = height || 120;
+    return { left: Math.max(0, Math.min(g.left, vw - Math.min(w, vw))), top: Math.max(0, Math.min(g.top, vh - Math.min(h2, vh))), width, height };
   }
   function restoredGeometry(saved, natural, resizable) {
     const out = { left: saved.left, top: saved.top };
@@ -1511,7 +1972,7 @@
     });
     const entry = { ov, dlg, body, spec, finish };
     stack.push(entry);
-    ensureCss2();
+    ensureCss();
     const api = { body, close: () => closeEntry(entry), dlg, foot, finish, refocus(key) {
       const c = key !== void 0 && body.querySelector(`[data-k="${key}"]`);
       if (c) {
@@ -1714,12 +2175,13 @@
     openNew,
     openField,
     isOpen,
+    isModalOpen,
     TITLES,
     notebook,
     treebook,
     grid,
     staticBox,
-    ensureCss: ensureCss2,
+    ensureCss,
     _: { fieldNode, fieldEffects, setFieldEffects, fieldAt, setFieldAt, fieldHidden, setFieldHidden, fieldUnlocked, setFieldUnlocked, fieldLayer, setFieldLayer, fieldText, setFieldText }
   };
   root.KDialogs = kdialogs;
