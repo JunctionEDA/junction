@@ -17,7 +17,7 @@ interface ShapeApi {
 }
 interface OutsetParams { outset: number; roundCorners: boolean; useSourceLayers: boolean; useSourceWidths: boolean; layer: string; lineWidth: number; gridRounding: number | null; deleteSourceItems: boolean }
 interface OutsetApi { outsetItems(doc: KDoc, ids: string[], p: OutsetParams): Result; outsetDefaults(fpEditor: boolean, lineWidth: (layer: string) => number): OutsetParams }
-const PT = (): { shapeModify: ShapeApi; outset: OutsetApi; layerStyle(layer: string): { line: number }; boardLayerName(doc: KDoc, l: string): string; applySelection?(ctx: ToolCtx, ids: string[]): void } =>
+const PT = (): { shapeModify: ShapeApi; outset: OutsetApi; layerStyle(layer: string): { line: number }; boardLayerName(doc: KDoc, l: string): string; applySelection?(ctx: ToolCtx, ids: string[]): void; unlockedIds?(ctx: ToolCtx, ids: string[], quiet: boolean): string[] } =>
   (window as unknown as { PcbTools: ReturnType<typeof PT> }).PcbTools;
 // s_filletRadius (1 mm), the chamfer setback (1 mm) and s_toleranceValue (3 mm)
 const remembered: Record<string, number> = { filletLines: 1, chamferLines: 1, simplifyPolygons: 3 };
@@ -68,9 +68,13 @@ const optionList = (presets: number[], used: number[]): number[] => Array.from(n
 /** CONVERT_TOOL::OutsetItems: pads and graphic shapes of the selection, outset into new shapes. */
 export function outsetItems(ctx: ToolCtx): void {
   const doc = board(ctx); if (!doc) return;
-  const ids = selectionIds().filter((id) => { const it = doc.items.get(id); return !!it && (it.kind === "pad" || /^gr_(line|rect|circle|arc|poly|curve)$/.test(it.kind)); });
+  let ids = selectionIds().filter((id) => { const it = doc.items.get(id); return !!it && (it.kind === "pad" || /^gr_(line|rect|circle|arc|poly|curve)$/.test(it.kind)); });
   if (!ids.length) return;
-  const P = PT(), key = doc.fpEditor ? "fp" : "pcb";
+  const P = PT();
+  // FilterCollectorForLockedItems + ReportFilteredLockedItems: a locked item stops the action (a footprint holder's
+  // items are never locked, BOARD_ITEM::IsLocked)
+  if (!doc.fpEditor && P.unlockedIds) { ids = P.unlockedIds(ctx, ids, false); if (!ids.length) return; }
+  const key = doc.fpEditor ? "fp" : "pcb";
   const prm = outsetParams[key] || (outsetParams[key] = P.outset.outsetDefaults(!!doc.fpEditor, (l) => P.layerStyle(l).line));
   const units = currentUnits();
   const combo = (f: { input: HTMLElement }, presets: number[], used: number[]): void => { comboBox(f.input as HTMLInputElement, () => optionList(presets, used).map((v) => fmtLen(v, units))); };
@@ -102,7 +106,8 @@ export function outsetItems(ctx: ToolCtx): void {
         gridRounding: roundToGrid.get() ? grid.get() : null, deleteSourceItems: del.get() });
       gridPersist = grid.get();
       const remember = (list: number[], v: number): void => { if (!list.some((x) => Math.abs(x - v) < 1e-9)) list.push(v); };
-      remember(recent.outset, prm.outset); remember(recent.width, prm.lineWidth); remember(recent.grid, gridPersist);
+      remember(recent.outset, prm.outset); remember(recent.width, prm.lineWidth);
+      if (prm.gridRounding !== null) remember(recent.grid, prm.gridRounding);   // only a grid that was used
       apply(ctx, P.outset.outsetItems(doc, ids, prm));
       return true;
     } });

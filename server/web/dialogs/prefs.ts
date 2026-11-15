@@ -62,7 +62,11 @@ export interface Prefs {
     /** pcb_display.track_clearance_mode: 0 do not show, 1 while routing, 2 with via while routing (default), 3 while routing and editing, 4 always */
     trackClearance: number;
     /** pcb_display.pad_clearance: Show pad clearance (on by default) */
-    padClearance?: boolean };
+    padClearance?: boolean;
+    /** pcb_display.pad_use_via_color_for_normal_th_padstacks (off), force_show_fields_when_fp_selected (on), live_3d_refresh (off) */
+    viaColorForTHPads?: boolean; forceShowFieldsWhenFPSelected?: boolean; live3DRefresh?: boolean;
+    /** APP_SETTINGS_BASE cross_probing: on_selection, center_on_items, zoom_to_fit, auto_highlight (all on), flash_selection (off) */
+    crossProbing?: { onSelection: boolean; centerOnItems: boolean; zoomToFit: boolean; autoHighlight: boolean; flashSelection: boolean } };
   /** SYMBOL_EDITOR_SETTINGS show_hidden_lib_pins / show_hidden_lib_fields / show_pin_electrical_type / show_pin_alt_icons
    *  (Preferences > Symbol Editor > Display Options, the same switches as the frame's View toggles) */
   symDisplay: { showHiddenPins: boolean; showHiddenFields: boolean; showETypes: boolean; showAltIcons: boolean };
@@ -112,7 +116,9 @@ export const DEFAULT_PREFS: Prefs = {
     arcEditMode: "center", autoPlaceSheetPins: true, unconstrainedPinSwaps: false, sheetBorder: "", sheetBackground: "", newPowerSymbols: "default", pinSelectsSymbol: true,
     autoplaceFields: true, autoplaceJustify: true, autoplaceAlign: true, footprintPreview: true, neverShowRescue: false },
   schColors: { theme: "default", followDark: false, user: [] },
-  pcbDisplay: { showPadNumbers: true, showNetNames: true, showPageLimits: true, netNamesMode: 3, trackClearance: 2, padClearance: true },
+  pcbDisplay: { showPadNumbers: true, showNetNames: true, showPageLimits: true, netNamesMode: 3, trackClearance: 2, padClearance: true,
+    viaColorForTHPads: false, forceShowFieldsWhenFPSelected: true, live3DRefresh: false,
+    crossProbing: { onSelection: true, centerOnItems: true, zoomToFit: true, autoHighlight: true, flashSelection: false } },
   common: { hcDimming: 0.8 },
   symDisplay: { showHiddenPins: true, showHiddenFields: true, showETypes: true, showAltIcons: true },
   symEditing: { lineWidth: 0, textSize: 50 * 0.0254, pinLength: 100 * 0.0254, pinNumSize: 50 * 0.0254, pinNameSize: 50 * 0.0254, pinPitch: 100 * 0.0254, labelDelta: 1, dragPinsWithEdges: true },

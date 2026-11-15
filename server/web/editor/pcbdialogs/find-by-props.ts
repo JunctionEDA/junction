@@ -45,6 +45,24 @@ export function expressionFromRows(rows: { name: string; type: string; value: st
   }
   return { expr: conds.join(" && "), skipped };
 }
+/** normalizeQueryFieldAliases: A.<Field_Name> of a footprint field (Value, Datasheet, Description and the selection's
+ *  own fields) becomes A.getField('<Field Name>') outside quoted strings, the longest names first */
+export function normalizeQueryFieldAliases(expr: string, fieldNames: Iterable<string>): string {
+  const names = new Set(["Value", "Datasheet", "Description", ...fieldNames]);
+  const aliases = [...names].map((f) => ({ from: "A." + f.replace(/ /g, "_"), to: `A.getField('${f.replace(/'/g, "\\'")}')` })).sort((a, b) => b.from.length - a.from.length);
+  const ident = (c: string | undefined): boolean => !!c && /[\p{L}\p{N}_]/u.test(c);
+  let out = "", inString = false;
+  for (let i = 0; i < expr.length;) {
+    const ch = expr[i];
+    if (ch === "'" && (i === 0 || expr[i - 1] !== "\\")) { inString = !inString; out += ch; i++; continue; }
+    if (!inString) {
+      const a = aliases.find((x) => expr.startsWith(x.from, i) && !ident(expr[i - 1]) && !ident(expr[i + x.from.length]));
+      if (a) { out += a.to; i += a.from.length; continue; }
+    }
+    out += ch; i++;
+  }
+  return out;
+}
 /** queryUsesUnsupportedPairwiseSyntax */
 export const usesB = (expr: string): boolean => /(^|[^\w.])B\./.test(expr);
 /** The expression as a one-rule custom rules text, for the rules engine to compile and match. */
@@ -63,7 +81,7 @@ export function openFindByProperties(ctx: ToolCtx): void {
   if (!E.kdoc || E.kdoc.type !== "pcb") return;
   if (open) { const d = Array.from(document.querySelectorAll<HTMLElement>(".kd-dialog")).find((x) => x.querySelector("[data-k=findByProps]")); if (d) { d.style.display = ""; return; } }
   open = true;
-  let rows: (Row & { type: string })[] = [], types = new Set<string>(), sig = "";
+  let rows: (Row & { type: string })[] = [], types = new Set<string>(), sig = "", fieldNames: string[] = [];
   const status = h("div", { class: "pd-lbl", "data-k": "selStatus" }, "No items selected");
   const g = grid([{ label: "Property", key: "name", type: "ro" }, { label: "Value", key: "value", type: "ro" }, { label: "Match", key: "mode", type: "select", options: MODES, width: "110px" }], [], { height: "260px", key: "propGrid",
     onChange: () => { for (const r of g.rows()) { const row = rows.find((x) => x.id === r.id); if (row) { row.mode = r.mode as Mode; if (row.mode === "ignored") savedModes.delete(row.name); else savedModes.set(row.name, row.mode); } } } });
@@ -72,27 +90,35 @@ export function openFindByProperties(ctx: ToolCtx): void {
   const rebuild = (): void => {
     sig = selectionSignature();
     const items = selectedItems(); types = new Set(items.map((it) => it.kind));
-    if (!items.length) { rows = []; status.textContent = "No items selected"; (createBtn as HTMLButtonElement).disabled = true; g.setRows([]); return; }
+    if (!items.length) { rows = []; fieldNames = []; status.textContent = "No items selected"; (createBtn as HTMLButtonElement).disabled = true; g.setRows([]); return; }
     const pg = propGrid();
     status.textContent = items.length === 1 ? pg.title : `${items.length} objects selected`;
     rows = [];
+    // getQueryableFootprintFieldNames: the footprint fields that are not a property of their own
+    fieldNames = pg.groups.filter((grp) => grp.name === "Fields").flatMap((grp) => grp.rows.map((r) => r.name)).filter((n) => n !== "Reference" && n !== "Footprint");
     for (const grp of pg.groups) for (const r of grp.rows) if (!rows.some((x) => x.name === r.name)) rows.push({ id: r.id, name: r.name, type: r.type, value: r.mixed ? "" : String(r.value), mixed: !!r.mixed, mode: savedModes.get(r.name) || "ignored" });
     rows.sort((a, b) => a.name.localeCompare(b.name));
     (createBtn as HTMLButtonElement).disabled = false;
     g.setRows(rows.map((r): Record<string, CellValue> => ({ id: r.id, name: r.name, value: r.mixed ? "<...>" : r.value, mode: r.mode })));
   };
-  const recent = selectField<string>("", [["", ""], ...loadRecent().map((q): [string, string] => [q, q])], { key: "recent", onChange: (v) => { if (v) query.value = v; } });
+  /** loadRecentQueries: the Recently Used choice, rebuilt after each saved query */
+  const recentHost = h("div", { "data-k": "recentHost" });
+  const loadRecentQueries = (selected = ""): void => {
+    const f = selectField<string>(selected, [["", ""], ...loadRecent().map((q): [string, string] => [q, q])], { key: "recent", onChange: (v) => { if (v) query.value = v; } });
+    recentHost.replaceChildren(f.el);
+  };
   const query = h("textarea", { class: "pd-mono", "data-k": "query", rows: "6", spellcheck: "false", style: "width:100%;font-family:var(--mono, monospace)" }) as HTMLTextAreaElement;
   const qStatus = h("div", { class: "pd-lbl", "data-k": "queryStatus" });
   const checkBtn = h("button", { type: "button", class: "btn", "data-k": "checkSyntax" }, "Check Syntax");
   const deselect = checkField(true, "Deselect non-matching items", { key: "deselect" });
   const zoom = checkField(false, "Zoom to fit selected items", { key: "zoomFit" });
   let page = 0;
-  const syntaxErrors = (expr: string): string[] => PT().parseDru(ruleOf(expr)).errors.map((e) => e.replace(/^rule 'find_by_properties': /, ""));
+  const normalized = (expr: string): string => normalizeQueryFieldAliases(expr, fieldNames);
+  const syntaxErrors = (expr: string): string[] => PT().parseDru(ruleOf(normalized(expr))).errors.map((e) => e.replace(/^rule 'find_by_properties': /, ""));
   checkBtn.addEventListener("click", () => {   // onCheckSyntaxClick
     const expr = query.value.trim();
     if (!expr) { qStatus.textContent = "Expression is empty"; return; }
-    if (usesB(expr)) { qStatus.textContent = "B. expressions are not supported."; return; }
+    if (usesB(normalized(expr))) { qStatus.textContent = "B. expressions are not supported."; return; }
     const errs = syntaxErrors(expr);
     qStatus.textContent = errs.length ? "Syntax error: " + errs.join("\n") : "Syntax OK";
   });
@@ -126,17 +152,19 @@ export function openFindByProperties(ctx: ToolCtx): void {
       apply(ids, status);
     } else {   // selectMatchingFromQuery
       const expr = query.value.trim(); if (!expr) return;
-      if (usesB(expr)) { qStatus.textContent = "B. expressions are not supported."; messageBox("Expression Error", "B. expressions are not supported."); return; }
+      if (usesB(normalized(expr))) { qStatus.textContent = "B. expressions are not supported."; messageBox("Expression Error", "B. expressions are not supported."); return; }
       const errs = syntaxErrors(expr);
       if (errs.length) { qStatus.textContent = "Syntax error in expression"; messageBox("Expression Error", errs.join("\n")); return; }
-      const list = [expr, ...loadRecent().filter((q) => q !== expr)].slice(0, 10); saveRecent(list);
-      const P = PT(); const ids = P.ruleMatchingItems(doc, P.designSettings((E as { proSettings?: unknown }).proSettings || null), ruleOf(expr), "find_by_properties") || [];
+      // saveRecentQuery: to the front, no duplicate, ten at most; then loadRecentQueries and SetSelection( 0 )
+      const list = [expr, ...loadRecent().filter((q) => q !== expr)].slice(0, 10); saveRecent(list); loadRecentQueries(expr);
+      const P = PT(); const ids = P.ruleMatchingItems(doc, P.designSettings((E as { proSettings?: unknown }).proSettings || null), ruleOf(normalized(expr)), "find_by_properties") || [];
       apply(ids, qStatus);
     }
   };
+  loadRecentQueries();
   const book = notebook([
     { label: "From Selection", build: (el) => { el.append(status, g.el); } },
-    { label: "Query", build: (el) => { el.append(h("div", { class: "pd-lbl" }, "Recently Used"), recent.el, h("div", { class: "pd-lbl", style: "margin-top:6px" }, "Expression"), query, h("div", { class: "pd-row", style: "margin-top:6px;gap:6px" }, checkBtn, createBtn), qStatus); } },
+    { label: "Query", build: (el) => { el.append(h("div", { class: "pd-lbl" }, "Recently Used"), recentHost, h("div", { class: "pd-lbl", style: "margin-top:6px" }, "Expression"), query, h("div", { class: "pd-row", style: "margin-top:6px;gap:6px" }, checkBtn, createBtn), qStatus); } },
   ], { onShow: (i) => { page = i; if (i === 0) rebuild(); } });
   // the selection moving under the open dialog (OnSelectionChanged)
   const timer = window.setInterval(() => { if (!document.body.contains(book.el)) { window.clearInterval(timer); open = false; return; } if (page === 0 && selectionSignature() !== sig) rebuild(); }, 400);

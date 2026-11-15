@@ -328,6 +328,11 @@ export function openPreferences(page?: string, staged?: Staged): void {
             const d = p.pcbDisplay;
             const [, R] = displayCols(pg, "pcb");
             const row = (label: string, ...ctl: Node[]) => h("div", { class: "kd-row", style: "margin-bottom:6px;gap:6px" }, h("label", { style: "color:var(--ink-2)" }, label), ...ctl);
+            // panel_display_options_base: Pads, Clearance Outlines, then the PCB Editor page's Annotations, Selection &
+            // Highlighting and Cross-probing (with Refresh 3D view automatically under it)
+            const xp = d.crossProbing || (d.crossProbing = { onSelection: true, centerOnItems: true, zoomToFit: true, autoHighlight: true, flashSelection: false });
+            const pd = KD().staticBox(R, "Pads");
+            pd.append(checkbox("Use via color for normal through hole padstacks", !!d.viaColorForTHPads, (on) => { d.viaColorForTHPads = on; }, { id: "kd-pref-viacolorthpads" }));
             const cl = KD().staticBox(R, "Clearance Outlines");
             cl.append(row("Tracks:", select([["0", "Do not show clearances"], ["1", "Show when routing"], ["2", "Show when routing w/ via clearance at end"], ["3", "Show when routing and editing"], ["4", "Show always"]], String(d.trackClearance), (v) => { d.trackClearance = +v; }, { id: "kd-pref-trackclearance", style: "width:320px" })),
               checkbox("Show pad clearance", d.padClearance !== false, (on) => { d.padClearance = on; }, { id: "kd-pref-padclearance" }));
@@ -335,8 +340,15 @@ export function openPreferences(page?: string, staged?: Staged): void {
             // m_ShowNetNamesOption: the choice index is pcb_display.net_names_mode
             ap.append(row("Net names:", select([["0", "Do not show"], ["1", "Show on pads"], ["2", "Show on tracks"], ["3", "Show on pads & tracks"]], String(d.netNamesMode), (v) => { d.netNamesMode = +v; d.showNetNames = +v !== 0; }, { id: "kd-pref-netnamesmode", style: "width:220px" })),
               checkbox("Show pad numbers", d.showPadNumbers, (on) => { d.showPadNumbers = on; }, { id: "kd-pref-padnumbers" }));
-            const hc = KD().staticBox(R, "Layer Display");
-            hc.append(checkbox("High-contrast display mode", contrast !== "normal", (on) => { contrast = on ? (contrast === "normal" ? "dim" : contrast) : "normal"; }, { id: "kd-pref-contrast" }));
+            const sh = KD().staticBox(R, "Selection & Highlighting");
+            sh.append(checkbox("Show all fields when parent footprint is selected", d.forceShowFieldsWhenFPSelected !== false, (on) => { d.forceShowFieldsWhenFPSelected = on; }, { id: "kd-pref-forceshowfields" }));
+            const cp = KD().staticBox(R, "Cross-probing");
+            cp.append(checkbox("Select/highlight objects corresponding to schematic selection", xp.onSelection, (on) => { xp.onSelection = on; }, { id: "kd-pref-xp-onselection" }),
+              checkbox("Center view on cross-probed items", xp.centerOnItems, (on) => { xp.centerOnItems = on; }, { id: "kd-pref-xp-center" }),
+              checkbox("Zoom to fit cross-probed items", xp.zoomToFit, (on) => { xp.zoomToFit = on; }, { id: "kd-pref-xp-zoom" }),
+              checkbox("Highlight cross-probed nets", xp.autoHighlight, (on) => { xp.autoHighlight = on; }, { id: "kd-pref-xp-highlight" }),
+              checkbox("Flash cross-probed selection", xp.flashSelection, (on) => { xp.flashSelection = on; }, { id: "kd-pref-xp-flash" }),
+              checkbox("Refresh 3D view automatically", !!d.live3DRefresh, (on) => { d.live3DRefresh = on; }, { id: "kd-pref-live3drefresh" }));
           } },
           { label: "Grids", build: gridsPage("pcb") },
           { label: "Origins & Axes", build(pg) {
