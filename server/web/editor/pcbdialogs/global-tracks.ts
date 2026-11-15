@@ -63,6 +63,9 @@ export function openGlobalEditTracks(ctx: ToolCtx): void {
   const diaOpt = checkField(false, "Filter vias by diameter:", { key: "filterByViaSize" });
   const dia = lenField(0, { key: "viaSizeFilter", onChange: () => diaOpt.set(true) });
   const selOnly = checkField(false, "Selected items only", { key: "selectedItemsFilter" });
+  // OnTrackWidthText / OnViaSizeText: typing (wxEVT_TEXT) ticks the filter, not only leaving the field
+  width.input.addEventListener("input", () => widthOpt.set(true));
+  dia.input.addEventListener("input", () => diaOpt.set(true));
   for (const f of [net, nc, layer]) nodup(f as Field<unknown>);
 
   // ---- Action

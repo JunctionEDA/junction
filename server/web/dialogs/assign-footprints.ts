@@ -205,6 +205,8 @@ export function openAssignFootprints(): void {
   // InvokePcbLibTableEditor: the project's fp-lib-table; saving it reloads the libraries (KiwayMailIn MAIL_RELOAD_LIB)
   act.showFootprintLibTable = () => { void manageLibraries("footprint", { readOnly: !!E.viewOnly, onSaved: () => { if (current) void loadLibraries(); } }); };
   act.openPreferences = () => openPreferences();
+  // Preferences > Configure Paths... (DIALOG_CONFIGURE_PATHS through the frame's common tools)
+  act.configurePaths = () => { void import("./configure-paths").then((m) => m.configurePaths(() => { /* nothing to reload here */ })); };
   act.close = () => { void doClose(false); };
   const setFilter = (bit: number) => { flags ^= bit; cfg.filter_footprint = flags; saveSettings(cfg); renderToolbar(); onSelectComponent(); };
   act.FilterFPbyFPFilters = () => setFilter(L.FILTER_FP_FILTERS);

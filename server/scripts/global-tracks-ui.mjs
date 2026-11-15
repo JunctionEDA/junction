@@ -1,7 +1,9 @@
 // Edit > Edit Track & Via Properties (KiCad's DIALOG_GLOBAL_EDIT_TRACKS_AND_VIAS) and Global Deletions' greyed
-// filters in the web board editor, on KiCad's pic_programmer demo.
+// filters in the web board editor (web/editor/pcbdialogs/global-tracks.ts, global-delete.ts), on KiCad's pic_programmer
+// demo: scope, every filter, both actions, Apply / Apply and Close, undo.  `pg` and `playwright` come from the script's
+// node_modules or NODE_PATH; E2E_STATIC=<server/static> serves the web bundles from that folder.
 //
-//   E2E_PG_URL=… E2E_JWT_SECRET=… [SHOTS=/some/dir] node global-tracks-ui.mjs
+//   E2E_PG_URL=… E2E_JWT_SECRET=… [E2E_STATIC=…] [SHOTS=/some/dir] node global-tracks-ui.mjs
 //
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -9,11 +11,12 @@ import path from 'node:path';
 import { execSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import pg from 'pg';
 
-const { chromium } = createRequire(import.meta.url)('playwright');
+const require = createRequire(import.meta.url);
+const { chromium } = require('playwright');
+const pg = require('pg');
 const BASE = (process.env.E2E_BASE || 'http://127.0.0.1:8099').replace(/\/$/, '');
-const SECRET = process.env.E2E_JWT_SECRET, PG_URL = process.env.E2E_PG_URL, SHOTS = process.env.SHOTS || '';
+const SECRET = process.env.E2E_JWT_SECRET, PG_URL = process.env.E2E_PG_URL, SHOTS = process.env.SHOTS || '', STATIC = process.env.E2E_STATIC || '';
 if (!SECRET || !PG_URL) { console.error('E2E_JWT_SECRET and E2E_PG_URL are required.'); process.exit(2); }
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 
@@ -47,6 +50,7 @@ const page = await ctx.newPage(); page.setDefaultTimeout(15000);
 const errors = [];
 page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
 page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push('console: ' + m.text()); });
+if (STATIC) await serveStatic(page, STATIC);
 await page.goto(`${BASE}/auth/dev?jwt=${jwt}&next=${encodeURIComponent(`/p/${created.projectId}/edit?doc=${pcb.docId}`)}`);
 await page.waitForFunction(() => { const E = window.CollabEditor; return E && E.kdoc && E.kdoc.items.size > 1 && E.ws && E.ws.readyState === 1 && window.PcbTools; }, null, { timeout: 60000 });
 await page.waitForTimeout(1500);
@@ -67,6 +71,13 @@ const dlg = '.kd-dialog:has([data-k="setToSpecifiedValues"])';
 const val = (k) => page.evaluate((k) => { const e = document.querySelector(`[data-k="${k}"]`); return e.type === 'checkbox' || e.type === 'radio' ? e.checked : e.value; }, k);
 const options = (k) => page.evaluate((k) => [...document.querySelector(`[data-k="${k}"]`).querySelectorAll('option')].map((o) => o.textContent), k);
 const pick = (k, label) => page.evaluate(([k, label]) => { const e = document.querySelector(`[data-k="${k}"]`); const i = [...e.querySelectorAll('option')].findIndex((o) => o.textContent === label); e.selectedIndex = i; e.dispatchEvent(new Event('change', { bubbles: true })); return i; }, [k, label]);
+// every filter off, the specified-values action, the given scope (the dialog keeps its controls between openings)
+const fresh = async (scope = { tracks: true, vias: true }) => {
+  for (const k of ['netFilterOpt', 'netclassFilterOpt', 'layerFilterOpt', 'filterByTrackWidth', 'filterByViaSize', 'selectedItemsFilter']) if (await val(k)) await page.click(`[data-k="${k}"]`);
+  if (!(await val('setToSpecifiedValues'))) await page.click('[data-k="setToSpecifiedValues"]');
+  for (const k of ['tracks', 'vias']) if ((await val(k)) !== scope[k]) await page.click(`[data-k="${k}"]`);
+  if (scope.vias && !(await val('vias'))) await page.click('[data-k="vias"]');
+};
 const applyClose = async () => { await page.evaluate(() => { const b = [...document.querySelectorAll('button')].find((x) => x.textContent.trim() === 'Apply and Close'); b.click(); }); await page.waitForSelector('[data-k="setToSpecifiedValues"]', { state: 'detached' }); await page.waitForTimeout(300); };
 
 try {
@@ -82,15 +93,15 @@ try {
   const allSame = await page.evaluate(() => ['throughVias', 'microVias', 'blindVias', 'buriedVias'].map((k) => document.querySelector(`[data-k="${k}"]`).checked));
   check('clicking Vias sets the four via types together', allSame.every((x) => x === allSame[0]), JSON.stringify(allSame));
   if (!allSame[0]) await page.click('[data-k="vias"]');
-  const tw = await options('trackWidthCtrl'), vs = await options('viaSizesCtrl');
+  const tw = await options('trackWidth'), vs = await options('viaSizes');
   check('track width choice lists the pre-defined widths and ends with "-- leave unchanged --"', tw.length > 1 && tw.at(-1) === '-- leave unchanged --' && tw.slice(0, -1).every((t) => /^Track: /.test(t)), JSON.stringify(tw));
   check('via size choice lists the pre-defined sizes and ends with "-- leave unchanged --"', vs.at(-1) === '-- leave unchanged --' && vs.slice(0, -1).every((t) => /^Via: /.test(t)), JSON.stringify(vs));
-  check('every action value starts at "-- leave unchanged --"', await page.evaluate(() => ['layerCtrl', 'trackWidthCtrl', 'viaSizesCtrl', 'annularRingsCtrl', 'protectionFeatures'].every((k) => { const e = document.querySelector(`[data-k="${k}"]`); return e.options[e.selectedIndex].textContent === '-- leave unchanged --'; })));
-  check('annular rings choice is KiCad\'s', JSON.stringify((await options('annularRingsCtrl')).slice(0, 4)) === JSON.stringify(['All copper layers', 'Start, end, and connected layers', 'Connected layers only', 'Start and end layers only']));
+  check('every action value starts at "-- leave unchanged --"', await page.evaluate(() => ['layerCtrl', 'trackWidth', 'viaSizes', 'annularRings', 'protectionFeatures'].every((k) => { const e = document.querySelector(`[data-k="${k}"]`); return e.options[e.selectedIndex].textContent === '-- leave unchanged --'; })));
+  check('annular rings choice is KiCad\'s', JSON.stringify((await options('annularRings')).slice(0, 4)) === JSON.stringify(['All copper layers', 'Start, end, and connected layers', 'Connected layers only', 'Start and end layers only']));
   await page.click('[data-k="setToDesignRuleValues"]');
-  check('net class action disables the specified values', await page.evaluate(() => ['layerCtrl', 'trackWidthCtrl', 'viaSizesCtrl', 'annularRingsCtrl'].every((k) => document.querySelector(`[data-k="${k}"]`).hasAttribute('disabled'))));
+  check('net class action disables the specified values', await page.evaluate(() => ['layerCtrl', 'trackWidth', 'viaSizes', 'annularRings'].every((k) => document.querySelector(`[data-k="${k}"]`).hasAttribute('disabled'))));
   await page.click('[data-k="setToSpecifiedValues"]');
-  check('specified action enables them again', await page.evaluate(() => ['layerCtrl', 'trackWidthCtrl', 'viaSizesCtrl', 'annularRingsCtrl'].every((k) => !document.querySelector(`[data-k="${k}"]`).hasAttribute('disabled'))));
+  check('specified action enables them again', await page.evaluate(() => ['layerCtrl', 'trackWidth', 'viaSizes', 'annularRings'].every((k) => !document.querySelector(`[data-k="${k}"]`).hasAttribute('disabled'))));
   await shot('06-edit-track-via-properties');
   // nothing chosen: nothing changes
   await applyClose();
@@ -103,7 +114,7 @@ try {
   const target = tw.find((t) => t !== '-- leave unchanged --' && !t.startsWith(`Track: ${Number(fromW).toFixed(3)} mm`) && !t.startsWith(`Track: ${Number(fromW)} mm`));
   await page.fill('[data-k="trackWidthFilter"]', String(fromW));
   check('typing a width checks "Filter tracks by width"', await val('filterByTrackWidth'));
-  await pick('trackWidthCtrl', target);
+  await pick('trackWidth', target);
   await applyClose();
   const after = await stats();
   const tgtMm = String(Number(/Track: ([\d.]+) mm/.exec(target)[1]));
@@ -114,7 +125,7 @@ try {
   // vias only: annular rings
   await open();
   await page.click('[data-k="tracks"]');
-  await pick('annularRingsCtrl', 'Start, end, and connected layers');
+  await pick('annularRings', 'Start, end, and connected layers');
   await applyClose();
   const a2 = await stats(); const nVias = Object.values(before.v).reduce((a, b) => a + b, 0);
   check('annular rings set on every via, tracks untouched', a2.rings === nVias && JSON.stringify(a2.w) === JSON.stringify(before.w), JSON.stringify(a2));
@@ -133,6 +144,79 @@ try {
   await page.keyboard.press('Control+z'); await page.waitForTimeout(400);
   check('undo restores the board', JSON.stringify(await stats()) === JSON.stringify(before));
 
+  // the via diameter filter ticks itself on typing too (OnViaSizeText), the protection features follow KiCad
+  await open();
+  await page.fill('[data-k="viaSizeFilter"]', '0.8');
+  check('typing a via diameter checks "Filter vias by diameter"', await val('filterByViaSize'));
+  await page.click('[data-k="filterByViaSize"]');
+  const prot = await options('protectionFeatures');
+  check('via protection features list IPC-4761 types and end with "-- leave unchanged --"', prot.length > 3 && prot.at(-1) === '-- leave unchanged --', JSON.stringify(prot));
+  await page.click('[data-k="setToDesignRuleValues"]');
+  check('the protection features choice stays enabled under the net class action, as KiCad leaves it', await page.evaluate(() => !document.querySelector('[data-k="protectionFeatures"]').hasAttribute('disabled')));
+  await page.click('[data-k="setToSpecifiedValues"]');
+  if (await val('filterByTrackWidth')) await page.click('[data-k="filterByTrackWidth"]');
+
+  // Apply keeps the dialog: vias only, annular rings (and a pre-defined via size when the board has one)
+  await fresh({ tracks: false, vias: true });
+  const vsTarget = vs.find((t) => t !== '-- leave unchanged --');
+  if (vsTarget) await pick('viaSizes', vsTarget);
+  await pick('annularRings', 'Connected layers only');
+  await page.evaluate(() => { const b = [...document.querySelectorAll('.kd-dialog button')].find((x) => x.textContent.trim() === 'Apply'); b.click(); });
+  await page.waitForTimeout(500);
+  const a4 = await stats();
+  const m = vsTarget ? /Via: ([\d.]+)[^/]*\/\s*([\d.]+)/.exec(vsTarget) : null;
+  check('Apply keeps the dialog open', await page.evaluate(() => !!document.querySelector('[data-k="setToSpecifiedValues"]')));
+  check('Apply writes every via (annular rings' + (vsTarget ? ', ' + vsTarget : '') + '), tracks untouched',
+    a4.rings === nVias && JSON.stringify(a4.w) === JSON.stringify(before.w) && (!m || (Object.keys(a4.v).length === 1 && Object.keys(a4.v)[0] === `${Number(m[1])}/${Number(m[2])}`)), JSON.stringify({ v: a4.v, rings: a4.rings, vsTarget }));
+  await page.evaluate(() => { const b = [...document.querySelectorAll('.kd-dialog button')].find((x) => x.textContent.trim() === 'Close'); b.click(); });
+  await page.waitForTimeout(300);
+  await page.keyboard.press('Control+z'); await page.waitForTimeout(400);
+  check('undo restores the vias', JSON.stringify(await stats()) === JSON.stringify(before));
+
+  // a layer filter and the Layer action: B.Cu tracks move to F.Cu, the rest stay
+  const bName = await page.evaluate(() => window.PcbTools.boardLayerName(window.CollabEditor.kdoc, 'B.Cu'));
+  const fName = await page.evaluate(() => window.PcbTools.boardLayerName(window.CollabEditor.kdoc, 'F.Cu'));
+  await open(); await fresh({ tracks: true, vias: false });
+  await pick('layerFilter', bName);
+  check('picking a layer checks "Filter items by layer"', await val('layerFilterOpt'));
+  await pick('layerCtrl', fName);
+  await applyClose();
+  const a5 = await stats();
+  check('the B.Cu tracks moved to F.Cu, nothing else changed', !a5.layers['B.Cu'] && a5.layers['F.Cu'] === (before.layers['F.Cu'] || 0) + (before.layers['B.Cu'] || 0) && JSON.stringify(a5.v) === JSON.stringify(before.v), JSON.stringify(a5.layers));
+  await page.keyboard.press('Control+z'); await page.waitForTimeout(400);
+  check('undo moves them back', JSON.stringify(await stats()) === JSON.stringify(before));
+
+  // a net filter: only that net's tracks take the width
+  const netOf = () => page.evaluate(() => { const E = window.CollabEditor, kid = (n, k) => n.find((c) => Array.isArray(c) && c[0] === k); const by = {};
+    for (const it of E.kdoc.items.values()) if (it.kind === 'segment' || it.kind === 'arc') { const nn = kid(it.node, 'net'); const net = nn ? String(nn[1]) : ''; const nm = /^\d+$/.test(net) ? (E.kdoc.nets && E.kdoc.nets.get(Number(net))) || net : net; (by[nm] = by[nm] || []).push(String(kid(it.node, 'width')[1])); }
+    return by; });
+  const byNet0 = await netOf();
+  const netName = Object.entries(byNet0).filter(([n]) => n && n !== '0').sort((a, b) => b[1].length - a[1].length)[0][0];
+  await open(); await fresh({ tracks: true, vias: false });
+  await pick('netFilter', netName);
+  check('picking a net checks "Filter items by net"', await val('netFilterOpt'));
+  const tgt2 = tw.find((t) => t !== '-- leave unchanged --' && byNet0[netName].some((w) => !t.startsWith(`Track: ${Number(w).toFixed(3)} mm`)));
+  await pick('trackWidth', tgt2);
+  await applyClose();
+  const byNet1 = await netOf(); const w2 = String(Number(/Track: ([\d.]+) mm/.exec(tgt2)[1]));
+  check(`every ${netName} track is ${w2} mm, other nets kept theirs`, byNet1[netName].every((w) => w === w2) && Object.keys(byNet0).filter((n) => n !== netName).every((n) => JSON.stringify(byNet0[n]) === JSON.stringify(byNet1[n])), JSON.stringify(byNet1[netName].slice(0, 5)));
+  await page.keyboard.press('Control+z'); await page.waitForTimeout(400);
+  check('the net filter is remembered for the session (g_netFilter)', await (async () => { await open(); const v = await page.evaluate(() => { const e = document.querySelector('[data-k="netFilter"]'); return e.options[e.selectedIndex].textContent; }); await page.keyboard.press('Escape'); await page.waitForTimeout(300); return v === netName; })());
+
+  // Selected items only: one selected track changes
+  const one = await page.evaluate(() => { const E = window.CollabEditor; const it = [...E.kdoc.items.values()].find((i) => i.kind === 'segment'); E.api.toolCtx().setSelection([it.id]); return it.id; });
+  await open(); await fresh({ tracks: true, vias: false });
+  await page.click('[data-k="selectedItemsFilter"]');
+  const w3 = Number(await page.evaluate((id) => window.CollabEditor.kdoc.items.get(id).node.find((c) => Array.isArray(c) && c[0] === 'width')[1], one));
+  const tgt3 = tw.find((t) => t !== '-- leave unchanged --' && !t.startsWith('Track: ' + w3.toFixed(3)) && !t.startsWith(`Track: ${w3} mm`));
+  await pick('trackWidth', tgt3);
+  await applyClose();
+  const changed = await page.evaluate((id) => String(window.CollabEditor.kdoc.items.get(id).node.find((c) => Array.isArray(c) && c[0] === 'width')[1]), one);
+  const a6 = await stats(); const diff = Object.keys({ ...a6.w, ...before.w }).reduce((n, k) => n + Math.abs((a6.w[k] || 0) - (before.w[k] || 0)), 0);
+  check('"Selected items only" changes just the selected track', diff === 2 && changed === String(Number(/Track: ([\d.]+) mm/.exec(tgt3)[1])), JSON.stringify({ diff, changed }));
+  await page.keyboard.press('Control+z'); await page.waitForTimeout(400);
+  check('the board is back to where it started', JSON.stringify(await stats()) === JSON.stringify(before));
+
   // Global Deletions: the filters grey out with their item kind
   await page.evaluate(() => window.CollabApp.dispatch({ type: 'action', id: 'module:globalDeletions' }));
   await page.waitForSelector('[data-k="lockedTracks"]');
@@ -149,3 +233,17 @@ try {
 await browser.close(); await db.end();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
+
+/** Serve /static/** and the app page from a local static folder (the server inlines dist/boot.js into the page). */
+async function serveStatic(page, root) {
+  const types = { '.css': 'text/css', '.json': 'application/json', '.map': 'application/json', '.svg': 'image/svg+xml', '.wasm': 'application/wasm', '.png': 'image/png', '.woff2': 'font/woff2' };
+  await page.route('**/static/**', (route) => {
+    const f = path.join(root, new URL(route.request().url()).pathname.replace(/^\/static/, ''));
+    if (!f.startsWith(root) || !fs.existsSync(f) || !fs.statSync(f).isFile()) return route.continue();
+    route.fulfill({ body: fs.readFileSync(f), contentType: types[path.extname(f)] || 'application/javascript; charset=utf-8' });
+  });
+  let html = fs.readFileSync(path.join(root, 'app.html'), 'utf8');
+  const boot = path.join(root, 'dist', 'boot.js');
+  if (html.includes('/*BOOT*/') && fs.existsSync(boot)) html = html.replace('/*BOOT*/', 'window.__kcAssetV="e2e";' + fs.readFileSync(boot, 'utf8').trimEnd());
+  await page.route((u) => /^\/p\//.test(new URL(u).pathname), (r) => (r.request().resourceType() === 'document' ? r.fulfill({ body: html, contentType: 'text/html; charset=utf-8' }) : r.continue()));
+}
