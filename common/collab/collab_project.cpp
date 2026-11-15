@@ -776,12 +776,44 @@ bool COLLAB_PROJECT::DownloadAndExtract( const wxString& aServer, const wxString
         return false;
     }
 
+    // A folder the system will not let us write to (a read-only location, or on macOS a
+    // Documents / Desktop / Downloads folder the user has not allowed this app into) must
+    // stop the download with one clear message.  Skipping the files that fail left a
+    // half-empty folder and a string of "can't open file" errors from the project load.
+    auto cannotWrite =
+            [&]( const wxString& aPath )
+            {
+                aError = wxString::Format( _( "The project could not be saved to\n\n%s\n\n"
+                                              "Junction is not allowed to write there." ),
+                                           aPath );
+#ifdef __WXMAC__
+                aError += wxS( "\n\n" );
+                aError += _( "If macOS asked whether Junction may access this folder, choose "
+                             "Allow, or turn it on in System Settings > Privacy & Security > "
+                             "Files and Folders > Junction, then open the project again." );
+#else
+                aError += wxS( "\n\n" );
+                aError += _( "Check the folder's permissions, or use Open In Folder... to keep "
+                             "the copy somewhere else." );
+#endif
+                // Leave no empty folder behind (a folder holding anything is kept as it is).
+                if( wxFileName::DirExists( aTargetDir ) )
+                    wxFileName::Rmdir( aTargetDir );
+
+                return false;
+            };
+
+    // The failures below are reported through aError, not as a pile of log errors.
+    wxLogNull noLog;
+
     if( !wxFileName::DirExists( aTargetDir )
         && !wxFileName::Mkdir( aTargetDir, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL ) )
     {
-        aError = _( "Unable to create the project directory." );
-        return false;
+        return cannotWrite( aTargetDir );
     }
+
+    if( !wxFileName::IsDirWritable( aTargetDir ) )
+        return cannotWrite( aTargetDir );
 
     wxMemoryInputStream memStream( archive->data(), archive->size() );
     wxZipInputStream    zipStream( memStream );
@@ -805,7 +837,9 @@ bool COLLAB_PROJECT::DownloadAndExtract( const wxString& aServer, const wxString
 
         if( !target.DirExists()
             && !wxFileName::Mkdir( target.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL ) )
-            continue;
+        {
+            return cannotWrite( target.GetPath() );
+        }
 
         // A join writes archive entries verbatim, so it is the one design-file write that cannot
         // honour the format version the local file was kept at.  Say so rather than letting a
@@ -816,9 +850,12 @@ bool COLLAB_PROJECT::DownloadAndExtract( const wxString& aServer, const wxString
             wxFFileOutputStream out( target.GetFullPath() );
 
             if( !out.IsOk() )
-                continue;
+                return cannotWrite( target.GetFullPath() );
 
             zipStream.Read( out );
+
+            if( !out.IsOk() || !out.Close() )
+                return cannotWrite( target.GetFullPath() );
         }
 
         if( previousVersion > 0 )

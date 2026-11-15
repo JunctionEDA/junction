@@ -4,6 +4,26 @@ Releases of Junction, which was called KiCad Collaborative up to 1.0.9. The
 version here is the product version (`packaging/VERSION`), not the KiCad
 version it is based on.
 
+## 2.1.1 (2026-11-15)
+
+A small desktop fix on top of 2.1.0.
+
+### Desktop
+- Opening an online project into a folder Junction may not write to (for
+  example Documents on macOS before you allow it) now stops with one message
+  that names the folder and says how to allow it. Before, the download left an
+  empty folder and a list of "can't open file" errors.
+
+### Downloads
+
+| Platform | File | Notes |
+|---|---|---|
+| macOS (Apple Silicon, macOS 15+) | `Junction-2.1.1-macos.dmg` | Ad-hoc signed: first launch is right-click, Open. Replace the old app in Applications. |
+| Windows x64 | `Junction-2.1.1-windows-x64.exe` | Installer; upgrades earlier versions in place. |
+| Linux x64 (Ubuntu 24.04 LTS) | `Junction-2.1.1-linux-x64.tar.gz` | Extract anywhere, install the packages listed in `usr/share/junction/ubuntu-packages.txt` (`sudo apt install $(cat usr/share/junction/ubuntu-packages.txt)`), run `usr/bin/junction`. |
+
+Symbol and footprint libraries are not bundled; point the library tables at an existing KiCad 10 install.
+
 ## 2.1.0 (2026-11-14)
 
 A desktop update with new features since 2.0.0. It reads and writes the same
