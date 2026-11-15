@@ -5,6 +5,7 @@
 // small_library, config…), the toggle kind the text formatting bars use (text_bold, text_italic, text_align_*…) and
 // their separators.  Every plain-DOM dialog draws its bitmaps through here, never from text glyphs.
 import type { IconSpec } from "../spec";
+import { uniqueIconIds } from "./icon-ids";
 
 interface IconGlobals { KiCadIconFor?: (name: string) => IconSpec | undefined; KiCadIconsReady?: Promise<void> }
 const G = (): IconGlobals => (typeof window === "undefined" ? {} : window as unknown as IconGlobals);
@@ -33,16 +34,16 @@ export function ensureIconCss(): void {
 }
 function fill(el: SVGSVGElement, ic: IconSpec): void {
   el.setAttribute("viewBox", ic.vb || "0 0 24 24");
-  el.innerHTML = `<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`;
+  el.innerHTML = uniqueIconIds(`<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`);
   el.dataset.icon = el.dataset.want || "";
 }
 
-/** KiCad's icon `name` as an inline SVG, `size` px square (16 for the dialog bitmap buttons, as KiCad's small_* are). */
-export function kicadIcon(name: string, size = 16): SVGSVGElement {
+/** KiCad's icon `name` as an inline SVG, `size` px square (or `size` x `height` for a picture that is not square). */
+export function kicadIcon(name: string, size = 16, height = size): SVGSVGElement {
   ensureIconCss();
   const el = document.createElementNS(NS, "svg") as SVGSVGElement;
   el.setAttribute("class", "kic kicon-dom"); el.setAttribute("aria-hidden", "true"); el.setAttribute("viewBox", "0 0 24 24");
-  el.setAttribute("width", String(size)); el.setAttribute("height", String(size));
+  el.setAttribute("width", String(size)); el.setAttribute("height", String(height));
   setKicadIcon(el, name);
   return el;
 }

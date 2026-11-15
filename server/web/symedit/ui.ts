@@ -4,6 +4,7 @@ import { h } from "../dialogs/dom";
 import { menuMeta } from "../menuspec";
 import { menuKey } from "../keys";
 import { fitMenu, type MenuAnchor } from "../menufit";
+import { uniqueIconIds } from "../components/icon-ids";
 
 interface IconSpec { vb?: string; light?: string; dark?: string }
 interface UiGlobals { KiCadIconFor?: (name: string) => IconSpec | undefined; KiCadIconsReady?: Promise<void>; KiCadUiToolbars?: Record<string, Record<string, unknown[]>> }
@@ -126,7 +127,7 @@ const waiting = new Set<{ el: SVGSVGElement; name: string }>();
 let hooked = false;
 function fill(el: SVGSVGElement, ic: IconSpec): void {
   el.setAttribute("viewBox", ic.vb || "0 0 24 24");
-  el.innerHTML = `<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`;
+  el.innerHTML = uniqueIconIds(`<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`);
 }
 /** KiCad's icon `name` as an inline SVG element (filled in when the icon pack arrives). */
 export function icon(name: string | null | undefined): SVGSVGElement {

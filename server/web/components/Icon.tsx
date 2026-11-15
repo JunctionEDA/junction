@@ -2,6 +2,8 @@
 // the `dark:` variant on the .lt / .dk groups) and the stroke glyphs of the collab tools.
 import { SPEC } from "../spec";
 import { loadIconPack, packIcon, useIconPack } from "../iconpack";
+import { useMemo } from "react";
+import { uniqueIconIds } from "./icon-ids";
 
 loadIconPack();
 
@@ -12,6 +14,8 @@ export function KIcon({ name, size }: { name: string | null | undefined; size?: 
   // the icons of the menu entries the toolbars do not use come from the lazily fetched pack (iconpack.ts)
   const ready = useIconPack();
   const ic = name ? SPEC.icons[name] || packIcon(name) : undefined;
+  // this copy's own gradient / marker ids (icon-ids.ts)
+  const markup = useMemo(() => (ic ? { lt: uniqueIconIds(ic.light || ic.dark || ""), dk: uniqueIconIds(ic.dark || ic.light || "") } : null), [ic]);
   if (!ic && name && !ready) return <svg className={size ? "kicon block" : ICON} viewBox="0 0 24 24" aria-hidden="true" width={size} height={size} />;
   if (!ic) {
     return (
@@ -22,8 +26,8 @@ export function KIcon({ name, size }: { name: string | null | undefined; size?: 
   }
   return (
     <svg className={size ? "kicon block" : ICON} viewBox={ic.vb || "0 0 24 24"} aria-hidden="true" width={size} height={size}>
-      <g className="lt dark:hidden" dangerouslySetInnerHTML={{ __html: ic.light || ic.dark || "" }} />
-      <g className="dk hidden dark:inline" dangerouslySetInnerHTML={{ __html: ic.dark || ic.light || "" }} />
+      <g className="lt dark:hidden" dangerouslySetInnerHTML={{ __html: markup ? markup.lt : "" }} />
+      <g className="dk hidden dark:inline" dangerouslySetInnerHTML={{ __html: markup ? markup.dk : "" }} />
     </svg>
   );
 }

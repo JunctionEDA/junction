@@ -150,12 +150,37 @@ def clean_svg(path, prefix):
     for e in list(root):
         if e.tag.split("}")[-1] in ("metadata", "namedview", "title", "desc"):
             root.remove(e)
+    # ids that something points at (a gradient's xlink:href, fill:url(#...), marker-end:url(#...)) are kept, renamed
+    # to this icon and theme, because the light and dark drawings of every icon share one page; the others go
+    ref_re = re.compile(r"url\(\s*#([^)\s]+)\s*\)")
+    refs = set()
+    for e in root.iter():
+        for a, v in e.attrib.items():
+            refs.update(ref_re.findall(v))
+            if a.split("}")[-1] == "href" and v.startswith("#"):
+                refs.add(v[1:])
+        if e.tag.split("}")[-1] == "style" and e.text:
+            refs.update(ref_re.findall(e.text))
+    ids = {}
+    for e in root.iter():
+        i = e.get("id")
+        if i is not None and i in refs:
+            ids[i] = f"{prefix}-r{len(ids)}"
+    swap = lambda v: ref_re.sub(lambda m: f"url(#{ids[m.group(1)]})" if m.group(1) in ids else m.group(0), v)
     for e in root.iter():
         for a in list(e.attrib):
             if a.startswith("{") and "w3.org/2000/svg" not in a and "xlink" not in a:
                 del e.attrib[a]
+            elif a == "id" and e.attrib[a] in ids:
+                e.attrib[a] = ids[e.attrib[a]]
             elif a in ("id", "data-name", "version", "sodipodi:docname"):
                 del e.attrib[a]
+            elif a.split("}")[-1] == "href" and e.attrib[a].startswith("#"):
+                e.attrib[a] = "#" + ids.get(e.attrib[a][1:], e.attrib[a][1:])
+            else:
+                e.attrib[a] = swap(e.attrib[a])
+        if e.tag.split("}")[-1] == "style" and e.text:
+            e.text = swap(e.text)
     inner = "".join(ET.tostring(c, encoding="unicode") for c in root)
     inner = re.sub(r'\s+xmlns(:\w+)?="[^"]*"', "", inner)
     inner = re.sub(r"\s+", " ", inner).strip()
