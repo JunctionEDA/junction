@@ -740,8 +740,8 @@ bool COLLAB_STDLIBS::IsDownloadableLibraryError( const wxString& aMessage )
 
 bool COLLAB_STDLIBS::Interrupted()
 {
-    return Needed()
-           && wxFileName::FileExists( downloadFolder() + wxFileName::GetPathSeparator()
+    // Also with libraries in place: a "download again" that was cut short continues too.
+    return wxFileName::FileExists( downloadFolder() + wxFileName::GetPathSeparator()
                                       + wxS( "in-progress" ) );
 }
 

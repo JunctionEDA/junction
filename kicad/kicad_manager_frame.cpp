@@ -411,8 +411,8 @@ KICAD_MANAGER_FRAME::KICAD_MANAGER_FRAME( wxWindow* parent, const wxString& titl
 
     // On a computer with no KiCad there are no symbols or footprints to place: offer them once
     // the window is up.
-    if( COLLAB_STDLIBS::Needed()
-        && ( COLLAB_STDLIBS::Interrupted() || !COLLAB_STDLIBS::Declined() )
+    if( ( COLLAB_STDLIBS::Interrupted()
+          || ( COLLAB_STDLIBS::Needed() && !COLLAB_STDLIBS::Declined() ) )
         && !wxGetEnv( wxS( "JUNCTION_NO_LIBRARY_OFFER" ), nullptr ) )
     {
         CallAfter(
@@ -1616,7 +1616,7 @@ void KICAD_MANAGER_FRAME::DownloadStandardLibraries( bool aOffer )
 
     // A download that was cut short by closing the program (or by the computer or the network
     // going away) is simply continued; the user already said yes to it.
-    const bool continuing = needed && COLLAB_STDLIBS::Interrupted();
+    const bool continuing = COLLAB_STDLIBS::Interrupted();
 
     if( continuing )
     {
