@@ -2,7 +2,7 @@
 // (DIALOG_PIN_PROPERTIES), Symbol Properties (DIALOG_LIB_SYMBOL_PROPERTIES), New Symbol (DIALOG_LIB_NEW_SYMBOL),
 // Save As, New Library, Rename, Pin Table (DIALOG_LIB_EDIT_PIN_TABLE), the Symbol Checker report, the field / text /
 // shape properties and the import / export commands.
-import { bitmapButton } from "../dialogs/kicon";
+import { bitmapButton } from "../components/kicon-dom";
 import * as M from "./model";
 import { KD, h, checkbox, select, textInput, form, promptText, confirmBox, download, popupMenu, type GridColumn, type GridApi, type NotebookApi } from "../dialogs/dom";
 import { messageBox, fieldsGrid, openFieldDialog, openTextDialog, swatch } from "../dialogs/sch-items";

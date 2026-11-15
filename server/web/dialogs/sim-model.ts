@@ -3,7 +3,7 @@
 // It works on a copy of the parent dialog's staged field rows (never the document) and hands back the complete,
 // merged row list (DIALOG_SYMBOL_PROPERTIES::OnEditSpiceModel), so the parent's OK still commits one change and
 // collaboration / undo see an ordinary field edit.  window.KiCadSimModel.open(rows, ctx, done).
-import { bitmapButton } from "./kicon";
+import { bitmapButton } from "../components/kicon-dom";
 import { trapTab } from "../tools/kicad-dialogs/shell";
 import * as S from "./sim-model-logic";
 import { KD, h, popupMenu } from "./dom";

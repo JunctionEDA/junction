@@ -539,15 +539,15 @@ function actionPluginsPage(pg: HTMLElement, rows: PluginRow[], plug: { actionPlu
     up.disabled = sel <= 0; down.disabled = sel < 0 || sel >= rows.length - 1;
   };
   const move = (d: number): void => { const j = sel + d; if (sel < 0 || j < 0 || j >= rows.length) return; const t = rows[sel]!; rows[sel] = rows[j]!; rows[j] = t; sel = j; fill(); };
-  const btn = (icon: string, title: string, id: string, fn: () => void) => h("button", { class: "btn kd-bmp", type: "button", title, "aria-label": title, id, onclick: fn }, icon) as HTMLButtonElement;
-  const up = btn("↑", "Move Up", "kd-pref-plugin-up", () => move(-1)), down = btn("↓", "Move Down", "kd-pref-plugin-down", () => move(1));
+  // PANEL_PCBNEW_ACTION_PLUGINS: m_moveUpButton / m_moveDownButton draw BITMAPS::small_up / small_down
+  const up = bitmapButton("small_up", "Move Up", () => move(-1), { id: "kd-pref-plugin-up" }), down = bitmapButton("small_down", "Move Down", () => move(1), { id: "kd-pref-plugin-down" });
   const th = (t: string, w?: number) => h("th", w ? { style: `width:${w}px` } : null, t);
   const table = h("table", { class: "kd-grid", style: "width:100%" }, h("thead", null, h("tr", null, th("Action"), th("Show Button", 100), th("Plugin"), th("Description"))), tb);
   pg.append(h("div", { class: "kd-grid-wrap", style: "height:380px;overflow:auto" }, table),
     rows.length ? "" : h("p", { class: "kd-note", style: "margin:8px 0 0" }, "No plugin adds an action to the PCB Editor.  Install plugins from the Plugin and Content Manager."),
     h("div", { class: "kd-grid-btns", style: "margin-top:5px" }, up, down, h("span", { style: "width:15px" }),
-      btn("🗀", "Open Plugin Directory", "kd-pref-plugin-dir", () => { if (plug && plug.openManager) plug.openManager(); }),
-      btn("⟳", "Reload Plugins", "kd-pref-plugin-reload", () => { if (plug && plug.refresh) void plug.refresh().then(() => { const was = new Map(rows.map((r) => [r.id, r.visible] as [string, boolean])); const fresh = plug.actionPluginRows("pcb").map((r) => Object.assign(r, was.has(r.id) ? { visible: was.get(r.id) } : {})); rows.splice(0, rows.length, ...fresh); sel = rows.length ? 0 : -1; fill(); }); })));
+      bitmapButton("small_folder", "Open Plugin Directory", () => { if (plug && plug.openManager) plug.openManager(); }, { id: "kd-pref-plugin-dir" }),
+      bitmapButton("small_refresh", "Reload Plugins", () => { if (plug && plug.refresh) void plug.refresh().then(() => { const was = new Map(rows.map((r) => [r.id, r.visible] as [string, boolean])); const fresh = plug.actionPluginRows("pcb").map((r) => Object.assign(r, was.has(r.id) ? { visible: was.get(r.id) } : {})); rows.splice(0, rows.length, ...fresh); sel = rows.length ? 0 : -1; fill(); }); }, { id: "kd-pref-plugin-reload" })));
   fill();
 }
 

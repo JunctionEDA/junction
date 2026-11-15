@@ -12,7 +12,7 @@ import type { FetchedItem, LibItem, LibKind, LibraryEntry, LibrarySource, Source
 import { filterLabels, footprintPasses, type FpChooserFilters } from "./fpchoice";
 import "../components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 import { popupMenu, type PopItem } from "../dialogs/dom";
-import { bitmapButton } from "../dialogs/kicon";
+import { bitmapButton } from "../components/kicon-dom";
 import { loadPinnedLibs, savePinnedLibs } from "./pinned";
 
 export interface ChooserOptions {

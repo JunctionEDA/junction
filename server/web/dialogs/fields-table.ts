@@ -3,7 +3,7 @@
 // "Edit" (the grouped, filterable grid; a cell edit applies to every symbol of its row) and "Export" (the BOM:
 // delimiters, format presets, preview, Export downloads the file).  The field list on the left sets each column's
 // BOM name, whether it is included and whether rows group by it; view presets are KiCad's built-ins plus the project's.
-import { bitmapButton } from "./kicon";
+import { bitmapButton } from "../components/kicon-dom";
 import { E, appState, toast, toolCtx, cloneNode } from "./editor";
 import { KD, checkbox, download, h, popupMenu, promptFields, promptText, select, textInput, unsavedChangesBox, type GridApi, type GridColumn } from "./dom";
 import { messageBox } from "./sch-items";

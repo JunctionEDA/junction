@@ -8,7 +8,7 @@
 // Sheet Properties: the fields grid (Sheetname, Sheetfile and user fields), Border width / color, Background fill,
 // Page number:, Hierarchical path:, the Attributes box, and SCH_EDIT_FRAME::ChangeSheetFile's rules for a new file
 // name (link an existing file, or copy this sheet's contents to the new file).  Drawing a sheet opens it first.
-import { bitmapButton } from "./kicon";
+import { bitmapButton } from "../components/kicon-dom";
 import { E, api, appState, rootSchematic, toast } from "./editor";
 import { KD, checkbox, confirmBox, h, popupMenu, promptText, select, textInput, type PopItem } from "./dom";
 import * as P from "./sym-props-logic";

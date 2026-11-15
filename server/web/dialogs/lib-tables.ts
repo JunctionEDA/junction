@@ -16,7 +16,7 @@
 import { KD, h, popupMenu, type GridApi, type GridColumn, type PopItem } from "./dom";
 import * as T from "../library/libtable";
 import { formatLibTable, parseLibTable } from "../symedit/model";
-import { kicadIcon } from "../components/kicon-dom";
+import { bitmapButton, kicadIcon } from "../components/kicon-dom";
 import { trapTab } from "../tools/kicad-dialogs/shell";
 import { fitMenu } from "../menufit";
 import { saveTextDocument } from "../editor/projectfile";
@@ -316,10 +316,10 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
   };
   const readOnlyBar = (): HTMLElement => {
     const b = h("div", { class: "kd-grid-btns" });
-    for (const [icon, title] of [["small_plus", "Add empty row to table"]] as [string, string][]) b.append(h("button", { class: "btn kd-bmp", type: "button", disabled: true, title }, kicadIcon(icon, 16)));
+    for (const [icon, title] of [["small_plus", "Add empty row to table"]] as [string, string][]) b.append(bitmapButton(icon, title, null, { disabled: true }));
     b.append(addExistingButton(true));
-    for (const [icon, title] of [["small_up", "Move up"], ["small_down", "Move down"]] as [string, string][]) b.append(h("button", { class: "btn kd-bmp", type: "button", disabled: true, title }, kicadIcon(icon, 16)));
-    b.append(h("span", { class: "kd-gap" }), h("button", { class: "btn kd-bmp", type: "button", disabled: true, title: "Remove library from table" }, kicadIcon("small_trash", 16)));
+    for (const [icon, title] of [["small_up", "Move up"], ["small_down", "Move down"]] as [string, string][]) b.append(bitmapButton(icon, title, null, { disabled: true }));
+    b.append(h("span", { class: "kd-gap" }), bitmapButton("small_trash", "Remove library from table", null, { disabled: true }));
     return b;
   };
   /** SPLIT_BUTTON "Add Existing" with small_folder: the button adds a KiCad library, its arrow lists every plugin. */

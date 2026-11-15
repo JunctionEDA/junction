@@ -10,7 +10,7 @@
 // importSections.  The logic half (annotationOf, separatorChoice, chainsOf, importSections) is plain data.
 import { KD, checkbox, h, select, textInput, promptText, confirmBox } from "./dom";
 import { messageBox } from "./sch-items";
-import { kicon, bitmapButton } from "./kicon";
+import { kicadIcon, bitmapButton } from "../components/kicon-dom";
 import { zstdDecompress } from "./zstd";
 import { PARITY, UNIT_NOTATIONS, embeddedFilesText, embeddedOf, type AnnotationSettings, type ChainRow, type ChainState } from "./schematic-setup-logic";
 export * from "./schematic-setup-logic";
@@ -24,8 +24,8 @@ export function annotationPage(pg: HTMLElement, s: AnnotationSettings, ro: boole
   const units = KD().staticBox(pg, "Units");
   units.append(h("div", { class: "kd-row" }, h("label", null, "Symbol unit notation:"), select(UNIT_NOTATIONS.map((n, i) => [String(i), n[0]] as [string, string]), String(s.notation), (v) => { s.notation = +v; }, { id: "kd-ss-unitnotation", disabled: ro, style: "width:90px" })));
   const order = KD().staticBox(pg, "Order");
-  order.append(h("div", { class: "kd-row" }, kicon("annotate_down_right", 24), radio("kd-ss-sort", !s.sortY, "Sort symbols by X position", () => { s.sortY = false; }, "kd-ss-sortx")),
-    h("div", { class: "kd-row" }, kicon("annotate_right_down", 24), radio("kd-ss-sort", s.sortY, "Sort symbols by Y position", () => { s.sortY = true; }, "kd-ss-sorty")));
+  order.append(h("div", { class: "kd-row" }, kicadIcon("annotate_down_right", 24), radio("kd-ss-sort", !s.sortY, "Sort symbols by X position", () => { s.sortY = false; }, "kd-ss-sortx")),
+    h("div", { class: "kd-row" }, kicadIcon("annotate_right_down", 24), radio("kd-ss-sort", s.sortY, "Sort symbols by Y position", () => { s.sortY = true; }, "kd-ss-sorty")));
   const num = KD().staticBox(pg, "Numbering");
   const after = textInput(String(s.startNum), (v) => { const n = parseInt(v, 10); s.startNum = isFinite(n) && n >= 0 ? n : 0; }, { id: "kd-ss-startnum", disabled: ro, style: "width:70px" });
   num.append(h("div", { class: "kd-row" }, radio("kd-ss-method", s.method === 0, "Use first free number after:", () => { s.method = 0; }, "kd-ss-firstfree"), after),

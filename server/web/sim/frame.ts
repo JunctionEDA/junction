@@ -8,7 +8,7 @@
 import { KD, h, popupMenu, promptText, download, type PopItem } from "../dialogs/dom";
 import { E, api, isSch, requestRender, toast, toolCtx } from "../dialogs/editor";
 import { messageBox } from "../dialogs/sch-items";
-import { bitmapButton, bitmapToggle, kicon } from "../dialogs/kicon";
+import { bitmapButton, bitmapToggle, kicadIcon } from "../components/kicon-dom";
 import { ensureStyle, icon, meta, showMenu, closeMenus, type MenuEntry } from "../symedit/ui";
 import { menuKey } from "../keys";
 import { projectSpiceNetlist } from "../editor/export-netlist";
@@ -868,4 +868,4 @@ async function saveWorkbook(as: boolean): Promise<void> {
 }
 
 /** Test hooks (static/tests and the rigs). */
-export const simInternals = { S, workbook, applyWorkbook, addTrace, runSimulation, renderAll, curTab, kicon, COMPAT_MODES };
+export const simInternals = { S, workbook, applyWorkbook, addTrace, runSimulation, renderAll, curTab, kicon: kicadIcon, COMPAT_MODES };

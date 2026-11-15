@@ -10,7 +10,7 @@ import * as M from "../../library/model3d";
 import { loadViewer, type EmbeddedViewer3D } from "../viewer3d-loader";
 import { box, checkField, currentUnits, form, grid, gridButtons, h, iconButton, lenField, messageBox, numField, openDialog, selectField, unitLabel, unitName, type CellValue, type DialogApi, type Field } from "./ui";
 import { colorPicker, type RGBA } from "./color-picker";
-import { kicadIcon } from "../../components/kicon-dom";
+import { bitmapButton } from "../../components/kicon-dom";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 type Any = any;
@@ -67,7 +67,7 @@ export function modelPreview(opts: { buttons?: boolean; reload?(): void; key?: s
   }).catch(() => { status.textContent = "The 3D viewer could not be loaded."; });
   let el: HTMLElement = host;
   if (opts.buttons) {
-    const btn = (icon: string, tip: string, fn: () => void, k: string): HTMLButtonElement => { const b = h("button", { type: "button", class: "pd-iconbtn", title: tip, "data-k": k }); b.append(kicadIcon(icon, 16)); b.addEventListener("click", fn); return b; };
+    const btn = (icon: string, tip: string, fn: () => void, k: string): HTMLButtonElement => bitmapButton(icon, tip, fn, { key: k, cls: "pd-iconbtn" });
     const ortho = btn("ortho", "Enable/disable orthographic projection", () => { if (viewer) { viewer.setOrtho(!viewer.ortho); ortho.classList.toggle("on", viewer.ortho); } }, "prev-ortho");
     const body = btn("show_board_body", "Show or hide the board body\nIf hidden, show only copper and silkscreen layers.", () => { bodyShown = !bodyShown; body.classList.toggle("on", !bodyShown); showBody(); }, "prev-body");
     const view = (name: string, label: string): HTMLButtonElement => btn("axis3d_" + name, "View " + label, () => { if (viewer) viewer.view(name); }, "prev-" + name);

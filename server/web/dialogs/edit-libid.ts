@@ -5,7 +5,7 @@
 // same name; a choice when several do), and "Update symbol fields from new library".  OK relinks each symbol of a
 // changed row: SetLibId, the new flattened library symbol embedded, a Value that named the old symbol renamed, and,
 // with the checkbox, UpdateFields( reset other fields ).
-import { bitmapButton } from "./kicon";
+import { bitmapButton } from "../components/kicon-dom";
 import { E, pushUndoFor, toolCtx } from "./editor";
 import { KD, checkbox, h } from "./dom";
 import { messageBox } from "./sch-items";

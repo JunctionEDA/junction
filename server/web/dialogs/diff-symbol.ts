@@ -10,7 +10,7 @@ import { officialLibraries, projectLibraries } from "../library/sources";
 import { parseLibTable } from "../symedit/model";
 import { manageLibraries } from "./lib-tables";
 import { KD, h, type DlgApi } from "./dom";
-import { bitmapButton } from "./kicon";
+import { bitmapButton } from "../components/kicon-dom";
 import { keyName } from "../keys";
 import { loadProject, proDoc, obj, type JsonObj } from "./project";
 import { parityOf } from "./schematic-setup-logic";

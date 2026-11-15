@@ -12,7 +12,7 @@
 //
 // kicad-dialogs.js asks KDialogs.schItemDialog / schFieldDialog first (openItem / openNew / openField), so the
 // double-click, E and the tools' creation paths all reach these.  The document edits are in sch-items-logic.ts.
-import { bitmapButton } from "./kicon";
+import { bitmapButton } from "../components/kicon-dom";
 import { trapTab } from "../tools/kicad-dialogs/shell";
 import { schTableDialog } from "../editor/tabledialogs";
 import { keyName } from "../keys";

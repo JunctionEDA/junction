@@ -11,7 +11,7 @@
 // Several cells at once: a value the cells disagree on shows "-- mixed values --" (INDETERMINATE_STATE) and is left
 // alone unless it is edited; bold / italic only change when toggled, an alignment only when one of its buttons is
 // down.  A cell whose values do not change keeps its bytes.  Each OK is one change of the table node.
-import { bitmapButton } from "../dialogs/kicon";
+import { bitmapButton } from "../components/kicon-dom";
 import { LINE_STYLES, tableDialog } from "./pcbdialogs/table";
 import { fontField } from "../dialogs/font-picker";
 import { box, checkField, errorMessage, fmtLen, form, h, lenField, messageBox, openDialog, parseLen, selectField, unitLabel, unitName, type Field } from "./pcbdialogs/ui";

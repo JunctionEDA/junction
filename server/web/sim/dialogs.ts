@@ -3,7 +3,7 @@
 // DIALOG_USER_DEFINED_SIGNALS (expressions over the simulation's vectors, with the syntax help).
 import { KD, checkbox, form, h, select, textInput } from "../dialogs/dom";
 import { messageBox } from "../dialogs/sch-items";
-import { bitmapButton } from "../dialogs/kicon";
+import { bitmapButton } from "../components/kicon-dom";
 import {
   NEW_TAB_TYPES, OPT_FIX_INCLUDES, OPT_SAVE_EVENTS, OPT_SAVE_I, OPT_SAVE_P, OPT_SAVE_V, acCommand, commandToSimType, dcCommand, fftCommand,
   formatToString, noiseCommand, parseCommand, parseSpiceValue, pzCommand, spCommand, toSpiceString, tranCommand, typeToName,

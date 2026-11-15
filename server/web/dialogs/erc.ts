@@ -9,7 +9,7 @@
 //
 // Exclusions are kept in the project's erc_exclusions (ERC_SETTINGS::m_ErcExclusions) in the form its erc schema
 // already uses, so a re-run excludes the same violations again (SCHEMATIC::ResolveERCExclusions).
-import { bitmapButton } from "./kicon";
+import { bitmapButton } from "../components/kicon-dom";
 import { E, appState, applyView, centerOn, openDocId, requestRender, store, toast, toolCtx } from "./editor";
 import { preferInstance } from "../editor/schnets";
 import { setStatusBar } from "../editor/appstore";

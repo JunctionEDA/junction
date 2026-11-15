@@ -4,7 +4,7 @@
 import type { GridApi, GridCellButton, GridColumn, GridOpts, NotebookApi, NotebookTab, TreebookApi, TreeSection } from "../../dialogs/dom";
 import { esc, isList, str } from "./sexpr";
 import { el } from "./shell";
-import { kicadIcon, setKicadIcon } from "../../components/kicon-dom";
+import { bitmapButton, kicadIcon, setKicadIcon } from "../../components/kicon-dom";
 import { popupMenu } from "../../dialogs/dom";
 import "../../components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 
@@ -48,8 +48,6 @@ const WIDGET_CSS = `
 .kd-grid .kd-cell-btn:active { background: var(--on); }
 .kd-grid-btns { display: flex; gap: 4px; margin-top: 4px; align-items: center; }
 .kd-grid-btns .btn { padding: 1px 7px; min-width: 26px; font-size: 13px; line-height: 18px; }
-.kd-grid-btns .btn.kd-bmp { padding: 0; width: 26px; height: 24px; display: inline-flex; align-items: center; justify-content: center; }
-.kd-grid-btns .btn.kd-bmp:disabled { opacity: .45; }
 .kd-grid-btns .kd-gap { width: 16px; flex: none; }
 .kd-grid-btns .kd-fill { flex: 1; }
 .kd-sb { border: 1px solid var(--line); border-radius: 3px; padding: 14px 10px 8px; margin: 12px 0 8px; position: relative; }
@@ -150,7 +148,7 @@ export function grid<R>(host: HTMLElement, columns: GridColumn<R>[], rows: R[], 
   const B = opts.buttons;
   if (B && !opts.readOnly) {
     // STD_BITMAP_BUTTONs with KiCad's small_plus / small_up / small_down / small_trash, as every WX_GRID dialog sets them
-    const bar = el("div", "kd-grid-btns"); const mk = (icon: string, title: string, fn: () => void, role: string): HTMLElement => { const b = el("button", "btn kd-bmp") as HTMLButtonElement; b.appendChild(kicadIcon(icon, 16)); b.title = title; b.type = "button"; b.dataset.btn = role; b.dataset.k = "grid-" + icon.replace(/^small_/, ""); b.setAttribute("aria-label", title); b.addEventListener("click", fn); bar.appendChild(b); return b; };
+    const bar = el("div", "kd-grid-btns"); const mk = (icon: string, title: string, fn: () => void, role: string): HTMLElement => { const b = bitmapButton(icon, title, fn, { key: "grid-" + icon.replace(/^small_/, "") }); b.dataset.btn = role; bar.appendChild(b); return b; };
     if (B.add) mk("small_plus", B.addTitle || "Add", () => { const r = B.add!(); if (r) { rows.push(r); sel = rows.length - 1; multi = new Set(); refresh(); const f = table.querySelector<HTMLInputElement>("tbody tr:last-child input[type=text]"); if (f) f.focus(); if (opts.onChange) opts.onChange(r, null, null, sel); } }, "add");
     if (B.add) (B.afterAdd || []).forEach((x) => bar.appendChild(x));
     if (B.move) { mk("small_up", "Move up", () => { if (sel > 0) { [rows[sel - 1], rows[sel]] = [rows[sel], rows[sel - 1]]; sel--; multi = new Set(); refresh(); if (opts.onChange) opts.onChange(rows[sel], null, null, sel); } }, "up");

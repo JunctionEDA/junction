@@ -8,7 +8,7 @@ import "../../components/kselect";   // <k-select>, the themed drop-down these u
 import { fromDisplayAbsAxis, toDisplayAbsAxis } from "../userorigin";
 import { evalExpr } from "../../tools/props/numeric";
 import { popupMenu } from "../../dialogs/dom";
-import { kicadIcon } from "../../components/kicon-dom";
+import { bitmapButton, kicadIcon } from "../../components/kicon-dom";
 
 // ---------------------------------------------------------------- elements
 type Child = Node | string | null | undefined | false;
@@ -66,7 +66,7 @@ const CSS = `
 .pd-grid td.chk { text-align: center; }
 .pd-grid td.chk input { width: auto; margin: 0; }
 .pd-grid td.ico { width: 22px; text-align: center; vertical-align: middle; padding: 0 2px; }
-.pd-grid td.ico .kicon, .pd-grid td.ico svg, .pd-grid td.ico img { display: block; margin: auto; }
+.pd-grid td.ico svg, .pd-grid td.ico img { display: block; margin: auto; }
 .pd-cellwrap { display: flex; align-items: center; }
 .pd-3dwrap { display: flex; flex: 1; min-width: 0; min-height: 0; gap: 4px; }
 .pd-3dprev { position: relative; flex: 1; min-width: 0; min-height: 200px; background: var(--canvas); border: 1px solid var(--line); overflow: hidden; }
@@ -76,11 +76,10 @@ const CSS = `
 .pd-cellbtn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: none; background: transparent; color: var(--ink); cursor: pointer; border-radius: var(--r-1); }
 .pd-cellbtn:hover { background: var(--sel-soft); }
 .pd-gridbar { display: flex; gap: 4px; margin: 4px 0 0; }
-.pd-iconbtn { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); color: var(--ink); padding: 0; }
-.pd-iconbtn:hover { border-color: var(--ink-3, var(--ink-2)); }
-.pd-iconbtn:disabled { opacity: .4; cursor: default; }
-.pd-iconbtn.pd-tog { border-color: transparent; background: transparent; }
-.pd-iconbtn.pd-tog.on { background: var(--sel-soft, var(--paper)); border-color: var(--line-2); }
+/* the hand-made square buttons (a "..." picker, a colour swatch); icon buttons are components/kicon-dom's .kbmp */
+.pd-iconbtn:not(.kbmp) { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); color: var(--ink); padding: 0; }
+.pd-iconbtn:not(.kbmp):hover { border-color: var(--ink-3, var(--ink-2)); }
+.pd-iconbtn:not(.kbmp):disabled { opacity: .4; cursor: default; }
 .pd-3dbtns .pd-iconbtn.on { background: var(--on); border-color: var(--on-line); }
 .pd-togrow { display: flex; align-items: center; gap: 2px; }
 .pd-togrow .vsep { width: 1px; height: 18px; background: var(--line); margin: 0 5px; }
@@ -162,10 +161,6 @@ textarea.pd-text { width: 100%; min-height: 260px; font-family: var(--mono); fon
 .pd-layercell k-select { flex: 1; }
 .pd-report .ln.sel { background: var(--sel-soft); }
 .pd-report .ln[tabindex] { cursor: pointer; }
-.pd-kicon { display: block; flex: none; }
-.pd-kicon .dk { display: none; }
-:root[data-theme="dark"] .pd-kicon .lt { display: none; } :root[data-theme="dark"] .pd-kicon .dk { display: inline; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .pd-kicon .lt { display: none; } :root:not([data-theme="light"]) .pd-kicon .dk { display: inline; } }
 .pd-vline { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
 .pd-reann-dirs { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 8px; }
 .pd-reann-dir { display: flex; align-items: center; gap: 4px; cursor: pointer; }
@@ -553,8 +548,8 @@ export const ICONS = {
  * most one is on (onAlignButton: pressing one releases the others; pressing the pressed one releases it).
  */
 export function iconToggle(icon: keyof typeof ICONS, title: string, on: boolean, opts?: { key?: string; group?: string; ro?: boolean; onChange?(on: boolean): void }): Field<boolean> & { el: HTMLButtonElement } {
-  const b = h("button", { class: "pd-iconbtn pd-tog" + (on ? " on" : ""), type: "button", title, "aria-pressed": on ? "true" : "false", "data-k": opts && opts.key, "data-nopersist": "", "data-group": opts && opts.group, disabled: !!(opts && opts.ro) }) as HTMLButtonElement;
-  b.appendChild(kicadIcon(ICONS[icon], 16));
+  const b = bitmapButton(ICONS[icon], title, null, { key: opts && opts.key, disabled: !!(opts && opts.ro), flat: true, cls: "pd-iconbtn pd-tog" + (on ? " on" : "") });
+  b.setAttribute("aria-pressed", on ? "true" : "false"); b.dataset.nopersist = ""; if (opts && opts.group) b.dataset.group = opts.group;
   const set = (v: boolean): void => { b.classList.toggle("on", v); b.setAttribute("aria-pressed", v ? "true" : "false"); };
   b.addEventListener("click", () => {
     const now = !b.classList.contains("on");
@@ -566,41 +561,15 @@ export function iconToggle(icon: keyof typeof ICONS, title: string, on: boolean,
 /** iconToggle with a KiCad icon-pack bitmap (BITMAP_BUTTON::SetIsCheckButton over KiBitmapBundle( BITMAPS::name )). */
 export function kiconToggle(name: string, title: string, on: boolean, opts?: { key?: string; group?: string; ro?: boolean; onChange?(on: boolean): void }): Field<boolean> & { el: HTMLButtonElement } {
   const f = iconToggle("bold", title, on, opts);
-  f.el.replaceChildren(kicon(name, 16));
+  f.el.replaceChildren(kicadIcon(name, 16)); f.el.dataset.icon = name;
   return f;
 }
 export function iconButton(icon: keyof typeof ICONS, title: string, fn: () => void, disabled?: boolean): HTMLButtonElement {
-  const b = h("button", { class: "pd-iconbtn", type: "button", title, disabled: !!disabled });
-  b.appendChild(kicadIcon(ICONS[icon], 16)); b.addEventListener("click", fn); return b;
+  return bitmapButton(ICONS[icon], title, fn, { disabled: !!disabled, cls: "pd-iconbtn" });
 }
 
-// ---------------------------------------------------------------- KiCad icon-pack bitmaps (STD_BITMAP_BUTTON, wxStaticBitmap)
-interface IconSpecLite { vb?: string; light?: string; dark?: string }
-interface IconGlobals { KiCadIconFor?: (name: string) => IconSpecLite | undefined; KiCadIconsReady?: Promise<void> }
-const iconWaiting = new Set<{ el: SVGSVGElement; name: string }>();
-let iconHooked = false;
-function fillIcon(el: SVGSVGElement, ic: IconSpecLite): void {
-  el.setAttribute("viewBox", ic.vb || "0 0 24 24");
-  el.innerHTML = `<g class="lt">${ic.light || ic.dark || ""}</g><g class="dk">${ic.dark || ic.light || ""}</g>`;
-}
-/** KiCad's bitmap `name` from the web's icon pack (KiCadIconFor, published by ui.js) as an inline SVG, filled in when the pack arrives. */
-export function kicon(name: string, size = 16): SVGSVGElement {
-  const el = document.createElementNS("http://www.w3.org/2000/svg", "svg") as SVGSVGElement;
-  el.setAttribute("class", "pd-kicon"); el.setAttribute("aria-hidden", "true"); el.setAttribute("viewBox", "0 0 24 24");
-  el.setAttribute("width", String(size)); el.setAttribute("height", String(size)); el.setAttribute("data-icon", name);
-  const g = window as unknown as IconGlobals; const ic = g.KiCadIconFor ? g.KiCadIconFor(name) : undefined;
-  if (ic) fillIcon(el, ic);
-  else {
-    iconWaiting.add({ el, name });
-    if (!iconHooked && g.KiCadIconsReady) { iconHooked = true; g.KiCadIconsReady.then(() => { for (const w of iconWaiting) { const i = (window as unknown as IconGlobals).KiCadIconFor?.(w.name); if (i) fillIcon(w.el, i); } iconWaiting.clear(); }).catch(() => undefined); }
-  }
-  return el;
-}
-/** STD_BITMAP_BUTTON with KiBitmapBundle( BITMAPS::<name> ): a small square button drawing the icon-pack bitmap. */
-export function bitmapButton(name: string, title: string, fn: () => void, opts?: { key?: string; disabled?: boolean }): HTMLButtonElement {
-  const b = h("button", { class: "pd-iconbtn", type: "button", title, "data-k": opts && opts.key, "data-icon": name, disabled: !!(opts && opts.disabled) });
-  b.append(kicon(name)); b.addEventListener("click", fn); return b;
-}
+// STD_BITMAP_BUTTON with KiBitmapBundle( BITMAPS::<name> ): the one implementation, in components/kicon-dom
+export { bitmapButton };
 
 export type CellValue = string | number | boolean;
 export interface GridColumn {

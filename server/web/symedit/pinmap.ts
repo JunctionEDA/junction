@@ -2,7 +2,7 @@
 // footprint row binding each map to a footprint (associated_footprints), one row per logical pin (stacked pins
 // expanded).  A blank or identical pad resolves 1:1; a malformed bracketed pad is flagged red.  The column menu has
 // Rename Map..., Reset '<map>' to 1:1 and Copy From...; a double click on a map's header renames it.
-import { bitmapButton } from "../dialogs/kicon";
+import { bitmapButton } from "../components/kicon-dom";
 import * as M from "./model";
 import { h, promptText, confirmBox } from "../dialogs/dom";
 import { messageBox } from "../dialogs/sch-items";

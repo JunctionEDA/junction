@@ -9,7 +9,7 @@
 // options (change-symbols-logic.ts updateSymbolNode).  The sheet on screen is one commit; the other sheets are
 // edited through their own documents, each step on that sheet's undo list, as Annotate does.
 import { reportPanel, type ReportLine } from "../editor/pcbdialogs/ui";
-import { bitmapButton } from "./kicon";
+import { bitmapButton } from "../components/kicon-dom";
 import { E, appState, pushUndoFor, toolCtx } from "./editor";
 import { KD, checkbox, h, textInput, type DlgApi } from "./dom";
 import { projectDocs, readDoc, submitDocOp } from "./project";

@@ -178,8 +178,6 @@ button:disabled { cursor: default; }
 .btn.lg { min-height: var(--h-lg); padding: 6px 16px; font-size: var(--fs-md); }
 .btn:disabled, .btn[aria-disabled="true"] { opacity: .5; cursor: default; pointer-events: none; }
 .btn svg { flex: none; }
-/* KiCad's STD_BITMAP_BUTTON: a small icon-only .btn (components/kicon-dom.ts bitmapButton) */
-.btn.kd-bmp { min-width: 26px; min-height: 24px; padding: 0 3px; }
 
 /* ---- text fields: .input on input, select and textarea ---- */
 .input { width: 100%; min-width: 0; min-height: var(--h-md); padding: 4px 8px; background: var(--panel);
