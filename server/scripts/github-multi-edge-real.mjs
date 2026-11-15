@@ -221,8 +221,15 @@ try {
   eq('a second online project of the same folder, on a branch', [r.status, notSynced(st = await status(alice, pb)), st.link?.branch], [200, {}, BR]);
   r = gh('POST', `/repos/${REPO}/branches/${BR}/rename`, { new_name: `${BR}-renamed` });
   check('(the branch is renamed on GitHub)', r.status < 300, JSON.stringify(r.j));
-  st = await status(alice, pb);
-  eq('a branch renamed on GitHub: the link follows it, in sync', [st.branchMoved, st.link?.branch, st.missing, notSynced(st)], [{ from: BR, to: `${BR}-renamed` }, `${BR}-renamed`, undefined, {}]);
+  // github.com can go on serving the old name for a few seconds after a rename; the link moves at the first look after that
+  let movedTo = null;
+  for (let i = 0; i < 20; i++) {
+    st = await status(alice, pb);
+    movedTo = movedTo || st.branchMoved;
+    if (st.link?.branch === `${BR}-renamed`) break;
+    await new Promise((res) => setTimeout(res, 1500));
+  }
+  eq('a branch renamed on GitHub: the link follows it, in sync', [movedTo, st.link?.branch, st.missing, notSynced(st)], [{ from: BR, to: `${BR}-renamed` }, `${BR}-renamed`, undefined, {}]);
   await saveOnline(docsB['a.kicad_sch'], sch(11, 'on the renamed branch'));
   r = await push(alice, pb, { message: `Sync edge test ${STAMP}: on the renamed branch` });
   check('…a push goes to the new name', r.status === 200 && (ghText(`${A}/a.kicad_sch`, `${BR}-renamed`) || '').includes('on the renamed branch') && !branches().includes(BR), JSON.stringify(r.j));
