@@ -55,8 +55,11 @@ pub(crate) fn allowed_file(name: &str) -> bool {
         ext.to_ascii_lowercase().as_str(),
         "kicad_pro" | "kicad_sch" | "kicad_pcb" | "kicad_prl" | "kicad_sym" | "kicad_mod"
             | "kicad_dru" | "kicad_wks" | "step" | "stp" | "wrl" | "wrz"
-            // SPICE / IBIS simulation model libraries (DIALOG_SIM_MODEL's "Browse Models" filter)
-            | "lib" | "sub" | "cir" | "mod" | "spice" | "ibs"
+            // SPICE / IBIS simulation model libraries (DIALOG_SIM_MODEL's "Browse Models" filter, and the
+            // other names KiCad's demos include: amplifier-ac's 2n2222.model, Simulation_SPICE.sp)
+            | "lib" | "sub" | "cir" | "mod" | "model" | "sp" | "spice" | "ibs"
+            // XSPICE digital state files a model names (up-down-counter's state-3bit-count.in)
+            | "in"
             // CvPcb footprint association (equivalence) files (DIALOG_CONFIG_EQUFILES)
             | "equ"
             // the simulator's workbook (SIMULATOR_FRAME_UI::SaveWorkbook, <project>.wbk)
@@ -80,7 +83,7 @@ pub(crate) fn doc_type_for(path: &str) -> &'static str {
         "kicad_wks" => "worksheet",
         "kicad_dru" => "design_rules",
         "step" | "stp" | "wrl" | "wrz" => "model3d",
-        "lib" | "sub" | "cir" | "mod" | "spice" | "ibs" => "spice_model",
+        "lib" | "sub" | "cir" | "mod" | "model" | "sp" | "spice" | "ibs" => "spice_model",
         _ => "other",
     }
 }
@@ -2462,6 +2465,8 @@ mod tests {
         assert!(allowed_file("footprints.equ") && allowed_file("libs/Passives.EQU"));
         assert_eq!(doc_type_for("models/opamp.lib"), "spice_model");
         assert_eq!(doc_type_for("sim/test.CIR"), "spice_model");
+        assert!(allowed_file("2n2222.model") && allowed_file("Simulation_SPICE.sp") && allowed_file("state-3bit-count.in"));
+        assert_eq!(doc_type_for("2n2222.model"), "spice_model");
     }
 
     /// The extraction loop must bound the decoder, not trust the header's
