@@ -4,7 +4,7 @@ Releases of Junction, which was called KiCad Collaborative up to 1.0.9. The
 version here is the product version (`packaging/VERSION`), not the KiCad
 version it is based on.
 
-## Unreleased
+## 2.1.4 (2026-11-15)
 
 ### Desktop
 - The library download says what it is fetching, how much of the whole it
@@ -20,6 +20,20 @@ version it is based on.
   downloaded symbols and footprints), so it is downloaded once and is there
   for every project afterwards. Models fetched by earlier versions are moved
   over the first time they are used.
+- The editors' status bar gives a background job's text room for a full
+  line, so the download progress is readable there too.
+- Downloaded standard libraries are also registered when the library table
+  already lists libraries of your own (they are added beside them).
+- A "download again" that is cut short continues at the next start, like a
+  first download.
+
+### Downloads
+
+| Platform | File | Notes |
+|---|---|---|
+| macOS (Apple Silicon, macOS 15+) | `Junction-2.1.4-macos.dmg` | Ad-hoc signed: first launch is right-click, Open. Replace the old app in Applications. |
+| Windows x64 | `Junction-2.1.4-windows-x64.exe` | Installer; upgrades earlier versions in place. |
+| Linux x64 (Ubuntu 24.04 LTS) | `Junction-2.1.4-linux-x64.tar.gz` | Extract anywhere, install the packages listed in `usr/share/junction/ubuntu-packages.txt` (`sudo apt install $(cat usr/share/junction/ubuntu-packages.txt)`), run `usr/bin/junction`. |
 
 ## 2.1.3 (2026-11-15)
 
