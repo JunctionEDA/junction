@@ -19,6 +19,8 @@ import * as VM from "../../canvas/variant-model";
 import { syntaxHelpLink } from "../syntax-help";
 import { refImageDialog } from "./refimage";
 import { zoneSettingsPanel, type ZoneDefaults } from "./board-setup-pages";
+import { models3dPanel, whenGone } from "./model3d";
+import { state } from "../appstore";
 
 const isList = Array.isArray;
 const K = (): KiCadCanvasApi => KiCadCanvas;
@@ -805,7 +807,16 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
     const clearances = h("div", null, h("p", { class: "pd-note" }, "Leave values blank to use Board Setup values."),
       box("Clearances", form([["Pad clearance:", clr.el, unitLabel()], ["Solder mask expansion:", mask.el, unitLabel()], ["Solder paste clearance:", paste.el, unitLabel()]])),
       box("Pad Connections", form([["Pad connection to zones:", zone.el]], true)));
-    body.append(notebook([{ label: "General", build: (el) => el.append(general) }, { label: "Clearance Overrides & Pad Connections", build: (el) => el.append(clearances) }]).el);
+    // PANEL_FP_PROPERTIES_3D_MODEL, the same panel as the footprint editor's dialog; its preview shows the footprint as
+    // PANEL_PREVIEW_3D_MODEL's dummy copy does (flipped to the front, unrotated, at the origin)
+    const PTX = window as unknown as { PcbTools: { fpProps: { readModels(n: SNode): unknown[]; writeModels(n: SNode, models: unknown[]): void }; exchange: { editableCopy(n: SNode): { node: SNode } } } };
+    const fpEmbedded = (): string[] => (K().kids(kid(node, "embedded_files") || ["embedded_files"], "file") as SNode[]).map((f) => sval(kid(f, "name"))).filter(Boolean);
+    const models3d = models3dPanel({ ro, models: PTX.PcbTools.fpProps.readModels(node), embedded: fpEmbedded, previewKey: "boardFpPreview3d",
+      projectModels: () => (state.project ? state.project.docs : []).filter((d) => d.docType === "model3d").map((d) => d.path),
+      footprintText: () => K().serialize(PTX.PcbTools.exchange.editableCopy(node).node) });
+    body.append(notebook([{ label: "General", build: (el) => el.append(general) }, { label: "Clearance Overrides & Pad Connections", build: (el) => el.append(clearances) },
+      { label: "3D Models", build: (el) => models3d.build(el) }]).el);
+    whenGone(body, () => models3d.dispose());
     return (n) => {
       const variantFields: Record<string, string> = {};
       // field names: none empty, none twice (TransferDataFromWindow / OnGridCellChanging)
@@ -865,6 +876,7 @@ function footprintDialog(ctx: ToolCtx, item: KItem): boolean {
       const setOv = (key: string, f: Field<number>, before: string[]): void => { const v = f.get(); if (isFinite(v)) { if (!kid(n, key) || nval(kid(n, key)) !== v) put(n, key, `(${key} ${f6(v)})`, before); } else put(n, key, null); };
       setOv("solder_mask_margin", mask, AFTER); setOv("solder_paste_margin", paste, AFTER.slice(1)); setOv("clearance", clr, AFTER.slice(3));
       if (zone.get() !== (zc ? String(zc[1]) : "")) put(n, "zone_connect", zone.get() === "" ? null : `(zone_connect ${zone.get()})`, AFTER.slice(4));
+      PTX.PcbTools.fpProps.writeModels(n, models3d.models());
       return undefined;
     };
   }, undefined, "Edit Footprint Properties");

@@ -545,7 +545,9 @@ export interface GridColumn {
   /** shown for an unset length (NaN) */
   blank?: string;
 }
-export interface GridApi { el: HTMLElement; rows(): Record<string, CellValue>[]; setRows(rows: Record<string, CellValue>[]): void; selected(): number; select(i: number): void; refresh(): void; columns: GridColumn[] }
+export interface GridApi { el: HTMLElement; rows(): Record<string, CellValue>[]; setRows(rows: Record<string, CellValue>[]): void; selected(): number; select(i: number): void; refresh(): void; columns: GridColumn[];
+  /** every selected row in order: the cursor row and, with `multi`, the rows Shift- and Ctrl-click added (wxGrid::GetSelectedRows) */
+  selectedRows(): number[] }
 /** A CSS colour ("rgba(r, g, b, a)" as KiCad writes it, or #hex) drawn over the checkerboard that shows transparency. */
 export function swatch(css: string): HTMLElement { const sw = h("span", { class: "sw" }); const i = h("i"); i.style.background = css || "transparent"; sw.append(i); return sw; }
 /**
@@ -553,11 +555,22 @@ export function swatch(css: string): HTMLElement { const sw = h("span", { class:
  * the cell's selected text), Ctrl+V pastes tab- and line-separated text over the cells from the focused one on, and
  * a right-click on the header shows or hides the optional columns.
  */
-export function grid(columns: GridColumn[], rows: Record<string, CellValue>[], opts?: { ro?: boolean; height?: string; onSelect?(i: number): void; onChange?(): void; rowClass?(row: Record<string, CellValue>, i: number): string; key?: string }): GridApi {
-  let data = rows, sel = -1;
+export function grid(columns: GridColumn[], rows: Record<string, CellValue>[], opts?: { ro?: boolean; height?: string; onSelect?(i: number): void; onChange?(): void; rowClass?(row: Record<string, CellValue>, i: number): string; key?: string;
+  /** Shift-click selects the rows from the last clicked one, Ctrl- (Cmd-) click adds or removes one (wxGrid's row selection) */
+  multi?: boolean }): GridApi {
+  let data = rows, sel = -1, anchor = -1; const more = new Set<number>();
   const table = h("table"), wrap = h("div", { class: "pd-grid", style: opts && opts.height ? `max-height:${opts.height}` : null, "data-k": opts && opts.key }, table);
   const changed = (): void => { if (opts && opts.onChange) opts.onChange(); };
-  const select = (i: number): void => { sel = i; Array.from(table.querySelectorAll("tbody tr")).forEach((tr, k) => tr.classList.toggle("sel", k === i)); if (opts && opts.onSelect) opts.onSelect(i); };
+  const isSel = (k: number): boolean => k === sel || more.has(k);
+  const mark = (): void => { Array.from(table.querySelectorAll("tbody tr")).forEach((tr, k) => tr.classList.toggle("sel", isSel(k))); };
+  const select = (i: number): void => { sel = i; anchor = i; more.clear(); mark(); if (opts && opts.onSelect) opts.onSelect(i); };
+  const selectedRows = (): number[] => data.map((_r, k) => k).filter(isSel);
+  const pick = (i: number, ev: PointerEvent): void => {
+    if (!(opts && opts.multi) || (!ev.shiftKey && !ev.ctrlKey && !ev.metaKey)) { if (sel !== i || more.size) select(i); return; }
+    if (ev.shiftKey && anchor >= 0) { more.clear(); for (let k = Math.min(anchor, i); k <= Math.max(anchor, i); k++) more.add(k); sel = i; }
+    else { if (isSel(i) && selectedRows().length > 1) { more.delete(i); if (sel === i) sel = selectedRows()[0]; } else { if (sel >= 0) more.add(sel); sel = i; } anchor = i; }
+    mark(); if (opts && opts.onSelect) opts.onSelect(sel);
+  };
   const shown = (): GridColumn[] => columns.filter((c) => !c.hidden);
   const cellText = (c: GridColumn, v: CellValue | undefined): string => c.type === "len" ? (typeof v === "number" && isFinite(v) ? fmtLenU(v) : "") : c.type === "num" ? (typeof v === "number" && isFinite(v) ? trim(v.toFixed(6)) : "") : c.type === "check" ? (v ? "1" : "0") : c.type === "select" ? (((c.options || []).find((o) => String(o[0]) === String(v)) || [0, String(v === undefined ? "" : v)])[1]) : String(v === undefined ? "" : v);
   /** a pasted text into one cell (the value conversions of the cell's own editor) */
@@ -579,8 +592,8 @@ export function grid(columns: GridColumn[], rows: Record<string, CellValue>[], o
     table.append(h("thead", null, head));
     const body = h("tbody");
     data.forEach((row, i) => {
-      const tr = h("tr", { class: (i === sel ? "sel " : "") + (opts && opts.rowClass ? opts.rowClass(row, i) : "") });
-      tr.addEventListener("pointerdown", () => { if (sel !== i) select(i); });
+      const tr = h("tr", { class: (isSel(i) ? "sel " : "") + (opts && opts.rowClass ? opts.rowClass(row, i) : "") });
+      tr.addEventListener("pointerdown", (ev) => pick(i, ev));
       shown().forEach((c, ci) => {
         const ro = !!(opts && opts.ro) || c.type === "ro" || (c.readOnly ? c.readOnly(row, i) : false);
         const v = row[c.key];
@@ -642,7 +655,7 @@ export function grid(columns: GridColumn[], rows: Record<string, CellValue>[], o
     table.append(body);
   };
   refresh();
-  return { el: wrap, rows: () => data, setRows(r) { data = r; sel = -1; refresh(); }, selected: () => sel, select, refresh, columns };
+  return { el: wrap, rows: () => data, setRows(r) { data = r; sel = -1; anchor = -1; more.clear(); refresh(); }, selected: () => sel, select, refresh, columns, selectedRows };
 }
 /** EDA_LIST_DIALOG: a filter box (wildcards, "*text*", case-insensitive, on the first column), "Items:" and a
  *  read-only list; OK, Enter or a double-click picks the selected row.  `onPick` gets the row's columns. */

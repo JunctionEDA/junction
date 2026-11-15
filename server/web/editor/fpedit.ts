@@ -811,6 +811,12 @@ window.addEventListener("kc-fpedit-lib", ((ev: CustomEvent) => {
   case "loadLib": if (m.lib) void loadOfficialLib(m.lib); break;
   case "hover": if (id) void showHoverPreview(id, Number(m.x) || 0, Number(m.y) || 0); break;
   case "unhover": hideHoverPreview(); break;
+  case "loadLibs": { // LIB_TREE::ExpandAll: every library opens, so the global ones not read yet are read now, a few at a time
+    const todo = (official.list || []).map((l) => l.name).filter((n) => !official.fps.has(n));
+    const next = async (): Promise<void> => { for (let n = todo.shift(); n; n = todo.shift()) await loadOfficialLib(n); };
+    for (let i = 0; i < 6; i++) void next();
+    break;
+  }
   case "delete": if (id) { if (ro) readOnlyError(id.slice(4).split(":")[0]); else void deleteFootprint(id); } break;
   case "rename": if (id) { if (ro) readOnlyError(id.slice(4).split(":")[0]); else void renameFootprint(id); } break;
   case "new": if (m.lib && !projectFpLibs().some((l) => l.name === m.lib)) readOnlyError(m.lib); else void newFootprint(m.lib); break;

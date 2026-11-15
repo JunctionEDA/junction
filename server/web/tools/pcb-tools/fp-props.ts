@@ -71,6 +71,24 @@ function fieldRow(it: KItem): FpFieldRow {
 
 function xyz(n: SNode | null, key: string, d: number): number[] { const k = n ? K.kid(n, key) : null; const v = k ? K.kid(k, "xyz") : null; return v ? [num(v[1], d), num(v[2], d), num(v[3], d)] : [d, d, d]; }
 
+/** A footprint node's (model …) entries (FOOTPRINT::Models), in the footprint editor or on a board. */
+export function readModels(h: SNode): Fp3DModel[] {
+  return K.kids(h, "model").filter((m: SNode) => typeof m[1] === "string").map((m: SNode) => {
+    const hide = K.kid(m, "hide"); const op = K.kid(m, "opacity");
+    return { file: str(m[1]), show: !(hide ? yes(hide) : m.includes("hide")), opacity: op ? num(op[1], 1) : 1, offset: xyz(m, "offset", 0), scale: xyz(m, "scale", 1), rotate: xyz(m, "rotate", 0) };
+  });
+}
+/** PANEL_FP_PROPERTIES_3D_MODEL::TransferDataFromWindow into a footprint node (a copy): nothing is touched unless the list differs. */
+export function writeModels(h: SNode, models: Fp3DModel[]): void {
+  const before = readModels(h);
+  if (models.map(modelSig).join() === before.map(modelSig).join()) return;
+  // the models keep the place of the first one (the writer orders the header anyway)
+  const old = h.filter((c, j) => j > 1 && isList(c) && c[0] === "model" && typeof c[1] === "string") as SNode[];
+  const oldBySig = new Map<string, SNode>(); old.forEach((n, i) => oldBySig.set(modelSig(before[i]), n));
+  for (const n of old) h.splice(h.indexOf(n), 1);
+  for (const mm of models.filter((x) => x.file)) h.push(oldBySig.get(modelSig(mm)) || modelNode(mm));
+}
+
 /** DIALOG_FOOTPRINT_PROPERTIES_FP_EDITOR::TransferDataToWindow. */
 export function readFpProps(doc: BoardDoc): FpPropsModel {
   const h = header(doc) || ["footprint", ""];
@@ -84,10 +102,7 @@ export function readFpProps(doc: BoardDoc): FpPropsModel {
   const nt = one("net_tie_pad_groups");
   const jg = one("jumper_pad_groups");
   const known = ["through_hole", "smd", "board_only", "exclude_from_pos_files", "exclude_from_bom", "exclude_from_sim", "allow_missing_courtyard", "dnp", "allow_soldermask_bridges"];
-  const models: Fp3DModel[] = K.kids(h, "model").filter((m: SNode) => typeof m[1] === "string").map((m: SNode) => {
-    const hide = K.kid(m, "hide"); const op = K.kid(m, "opacity");
-    return { file: str(m[1]), show: !(hide ? yes(hide) : m.includes("hide")), opacity: op ? num(op[1], 1) : 1, offset: xyz(m, "offset", 0), scale: xyz(m, "scale", 1), rotate: xyz(m, "rotate", 0) };
-  });
+  const models = readModels(h);
   const cuCount = stack ? stackLayers.filter((l: string) => /\.Cu$/.test(l)).length : minimalCopperCount(usedLayers);
   return {
     name: str(h[1]), descr: str((one("descr") || [])[1]), tags: str((one("tags") || [])[1]), height: opt("height"),
@@ -266,13 +281,7 @@ export function fpPropsChanges(doc: BoardDoc, m: FpPropsModel): PcbChange[] {
   const jg = m.jumperGroups.map((g) => Array.from(new Set(splitPadList(g))).sort()).filter((g) => g.length > 1);
   const jgBefore = before.jumperGroups.map((g) => Array.from(new Set(splitPadList(g))).sort());
   if (JSON.stringify(jg) !== JSON.stringify(jgBefore)) setHeader(h, "jumper_pad_groups", jg.length ? jg.map((g) => "(" + g.map(qs).join(" ") + ")").join(" ") : null);
-  if (m.models.map(modelSig).join() !== before.models.map(modelSig).join()) {
-    // the models keep the place of the first one (the writer orders the header anyway)
-    const old = h.filter((c, j) => j > 1 && isList(c) && c[0] === "model" && typeof c[1] === "string") as SNode[];
-    const oldBySig = new Map<string, SNode>(); old.forEach((n, i) => oldBySig.set(modelSig(before.models[i]), n));
-    for (const n of old) h.splice(h.indexOf(n), 1);
-    for (const mm of m.models.filter((x) => x.file)) h.push(oldBySig.get(modelSig(mm)) || modelNode(mm));
-  }
+  writeModels(h, m.models);
   if (m.embedFonts !== before.embedFonts) setHeader(h, "embedded_fonts", [m.embedFonts ? "yes" : "no"]);
   if ((m.embeddedFiles || []).join("\n") !== before.embeddedFiles.join("\n")) {
     // only removal happens here: a file dropped from the list goes, and an empty list drops (embedded_files) as the writer does
@@ -312,4 +321,4 @@ export function newFieldRow(m: FpPropsModel, activeLayer: string, textStyle: (la
 /** OnDeleteField: the mandatory fields (Reference, Value, Datasheet, Description) cannot go. */
 export const isMandatoryName = (name: string) => MANDATORY.includes(name);
 
-export const fpPropsApi = { readFpProps, validateFpProps, fpPropsChanges, newFieldRow, fieldItems, parsePaste, formatPaste, customLayerSet, sortLayers, minimalCopperCount, clampTextPenSize, splitPadList, ZONE_CHOICES, COPPER_COUNTS, isMandatoryName };
+export const fpPropsApi = { readFpProps, readModels, writeModels, validateFpProps, fpPropsChanges, newFieldRow, fieldItems, parsePaste, formatPaste, customLayerSet, sortLayers, minimalCopperCount, clampTextPenSize, splitPadList, ZONE_CHOICES, COPPER_COUNTS, isMandatoryName };

@@ -46,8 +46,8 @@ export function LibrariesPane() {
   useEffect(() => {
     const host = filterHost.current; if (!host || filterApi.current) return;
     const f = libTreeFilter({ key: "fpedit", id: "fpLibFilter", onText: (t) => { setFilter(t); setFlipped(new Set()); setForced(null); }, onSort: (m) => setSort(m),
-      // ExpandAll opens the libraries whose footprints are here (KiCad's read the global ones as they open)
-      expandAll: () => { setFlipped(new Set(libsRef.current.filter((l) => !l.loaded && l.readOnly).map((l) => l.name))); setForced(true); },
+      // LIB_TREE::ExpandAll opens every library; the global ones not read yet are read as they open
+      expandAll: () => { setFlipped(new Set()); setForced(true); if (libsRef.current.some((l) => !l.loaded)) window.dispatchEvent(new CustomEvent("kc-fpedit-lib", { detail: { cmd: "loadLibs" } })); },
       collapseAll: () => { setFlipped(new Set()); setForced(false); }, onKey: (ev) => keyRef.current(ev) });
     filterApi.current = f; host.replaceChildren(f.el);
   }, []);

@@ -7,9 +7,8 @@
 //   Footprint Checker      DIALOG_FOOTPRINT_CHECKER (markers list, Run Checks, Delete All Markers)
 // The logic is pcb-tools' (fp-props.ts, fp-pads.ts, fp-check.ts); these build the controls and commit the changes.
 import { zstdDecompress } from "../../dialogs/zstd";
-import { box, checkField, currentUnits, download, errorMessage, fmtLenU, form, grid, gridButtons, h, iconButton, lenField, messageBox, note, notebook, numField, openDialog, parseLen, selectField, textField, unitLabel, unitName, type CellValue, type Field } from "./ui";
-import * as M3 from "../../library/model3d";
-import { modelLibItems, modelPreview, pick3DModel, stepper, whenGone } from "./model3d";
+import { box, checkField, download, errorMessage, fmtLenU, form, grid, gridButtons, h, iconButton, lenField, messageBox, note, notebook, numField, openDialog, parseLen, selectField, textField, unitLabel, type CellValue } from "./ui";
+import { models3dPanel, whenGone } from "./model3d";
 import { E } from "../state";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -67,50 +66,8 @@ export function footprintPropertiesDialog(ctx: ToolCtx, host: FpPropsHost = {}):
   const efRows: Record<string, CellValue>[] = m.embeddedFiles.map((n: string) => ({ name: n, ref: "kicad-embed://" + n }));
   let efGrid: ReturnType<typeof grid> | null = null;
   // 3D Models (PANEL_FP_PROPERTIES_3D_MODEL with PANEL_PREVIEW_3D_MODEL)
-  const models = m.models.map((x: Any) => ({ ...x, offset: x.offset.slice(), scale: x.scale.slice(), rotate: x.rotate.slice() }));
-  const modelRows: Record<string, CellValue>[] = models.map((x: Any, i: number) => ({ i, file: x.file, show: x.show }));
-  let modelSel = -1;
-  const mf: Record<string, Field<number>> = {};
-  for (const k of ["sx", "sy", "sz"]) mf[k] = numField(1, { ro, key: "model-" + k, digits: 4 });
-  for (const k of ["rx", "ry", "rz"]) mf[k] = numField(0, { ro, key: "model-" + k, digits: 2 });
-  for (const k of ["ox", "oy", "oz"]) mf[k] = lenField(0, { ro, key: "model-" + k });   // m_userUnits (PANEL_PREVIEW_3D_MODEL::formatOffsetValue)
-  // the slider starts at KiCad's layout default of 50 until a model is selected
-  const opacity = h("input", { type: "range", min: "0", max: "100", value: "50", disabled: ro, "data-k": "model-opacity", style: "width:100%" }) as HTMLInputElement;
   const fpEmbedded = (): string[] => (efGrid ? efGrid.rows() : efRows).map((r) => String(r.name));
-  const modelEnv = (): M3.ModelEnv => ({ projectFiles: host.projectModels ? host.projectModels() : [], embedded: fpEmbedded(), libItems: (lib) => modelLibItems(lib, () => modelGrid.refresh()) });
-  const saveModel = (): void => {
-    const x = models[modelSel]; if (!x) return;
-    x.scale = [mf.sx.get(), mf.sy.get(), mf.sz.get()]; x.rotate = [mf.rx.get(), mf.ry.get(), mf.rz.get()]; x.offset = [mf.ox.get(), mf.oy.get(), mf.oz.get()]; x.opacity = Number(opacity.value) / 100;
-  };
-  let preview: ReturnType<typeof modelPreview> | null = null;
-  const updatePreview = (): void => {   // UpdateDummyFootprint
-    if (!preview || !host.footprintText) return;
-    saveModel();
-    preview.update(M3.previewBoardText(host.footprintText(), models.filter((x: Any) => x.file).map((x: Any) => ({ file: x.file, show: x.show, opacity: x.opacity, offset: x.offset, scale: x.scale, rotate: x.rotate })), preview.thickness()));
-  };
-  const showModel = (i: number): void => {
-    saveModel(); modelSel = i; const x = models[i];
-    const vals = x ? [...x.scale, ...x.rotate, ...x.offset] : [1, 1, 1, 0, 0, 0, 0, 0, 0];
-    ["sx", "sy", "sz", "rx", "ry", "rz", "ox", "oy", "oz"].forEach((k, j) => mf[k].set(vals[j]));
-    opacity.value = String(Math.round((x ? x.opacity : 0.5) * 100));
-  };
-  const status = (r: Record<string, CellValue>): { icon: string; title: string } | null => {
-    const p = M3.modelProblem(String(r.file || ""), modelEnv());
-    return p && p.icon ? { icon: p.icon === "warning" ? "ercwarn" : "ercerr", title: p.text } : null;
-  };
-  const repick = (r: Record<string, CellValue>, _i: number, set: (v: string) => void): void => {
-    void pick3DModel({ current: String(r.file || ""), start: pathChoice.get(), projectFiles: host.projectModels ? host.projectModels() : [], embedded: fpEmbedded() }).then((p) => { if (p) { set(p); syncModels(); modelGrid.refresh(); updatePreview(); } });
-  };
-  const modelGrid = grid([{ label: "", key: "status", type: "icon", width: "22px", icon: status }, { label: "3D Model(s)", key: "file", button: { icon: "small_refresh", title: "Select 3D Model", run: repick } },
-    { label: "Show", key: "show", type: "check", width: "48px" }], modelRows, { ro, height: "150px", key: "models3d", onSelect: (i) => showModel(i), onChange: () => { syncModels(); modelGrid.refresh(); updatePreview(); } });
-  const syncModels = (): void => {   // the grid's file / show cells and row order back into the model list
-    saveModel();
-    const next = modelGrid.rows().map((r) => { const x = typeof r.i === "number" && models[r.i as number] ? models[r.i as number] : { file: "", show: true, opacity: 1, offset: [0, 0, 0], scale: [1, 1, 1], rotate: [0, 0, 0] }; return { ...x, file: String(r.file || ""), show: !!r.show }; });
-    models.splice(0, models.length, ...next); modelGrid.rows().forEach((r, i) => { r.i = i; });
-  };
-  // the configured path choice: the folder the picker opens on (updateConfiguredPathChoices)
-  const pathChoice = selectField<string>("Automatic", M3.configuredPathChoices().map((c): [string, string] => [c, c]), { ro, key: "configuredPath" });
-  pathChoice.input.title = "Choose the folder used when opening the 3D model picker";
+  const models3d = models3dPanel({ ro, models: m.models, projectModels: host.projectModels, embedded: fpEmbedded, footprintText: host.footprintText, previewKey: "fpPreview3d" });
 
   let api: Any = null;
   // Embedded Files
@@ -148,36 +105,7 @@ export function footprintPropertiesDialog(ctx: ToolCtx, host: FpPropsHost = {}):
         box("Net Ties", ntGrid.el, gridButtons(ntGrid, () => ({ g: "" }), { ro })),
         box("Jumpers", dupJ.el, jgGrid.el, gridButtons(jgGrid, () => ({ g: "" }), { ro })));
     } },
-    { label: "3D Models", build(el) {
-      const unitSpan = (k: string) => unitLabel(k === "deg" ? "" : k);
-      // the Scale / Rotation / Offset boxes, each field with its wxSpinButton and mouse-wheel steps
-      const units = (): string => currentUnits();
-      const spin = (k: string): HTMLElement => stepper(mf[k], k[0] === "s" ? M3.stepScale : k[0] === "r" ? M3.stepRotation : (v, sg, fine) => M3.stepOffset(v, sg, fine, units()), updatePreview);
-      const xyz = (label: string, a: string, b: string, c: string, unit: string) => box(label, form([["X:", spin(a), unitSpan(unit)], ["Y:", spin(b), unitSpan(unit)], ["Z:", spin(c), unitSpan(unit)]]));
-      // OnAdd3DModel: the picker, then a new row with the picked file
-      const browse = (): void => {
-        void pick3DModel({ start: pathChoice.get(), projectFiles: host.projectModels ? host.projectModels() : [], embedded: fpEmbedded() }).then((p) => {
-          if (!p) return;
-          modelGrid.rows().push({ i: -1, file: p, show: true }); modelGrid.refresh(); syncModels(); modelGrid.select(modelGrid.rows().length - 1); updatePreview();
-        });
-      };
-      const bar = gridButtons(modelGrid, () => ({ i: -1, file: "", show: true }), { ro, addTip: "Add 3D model", delTip: "Remove 3D model", onChange: () => { syncModels(); modelGrid.refresh(); updatePreview(); } });
-      // m_button3DShapeAdd, m_button3DShapeBrowse, a 20 px gap, m_button3DShapeRemove (panel_fp_properties_3d_model_base.cpp)
-      const [addB, delB] = [bar.firstElementChild as HTMLElement, bar.lastElementChild as HTMLElement];
-      const browseB = iconButton("folder", "Select 3D Model", browse, ro); browseB.setAttribute("data-k", "browse3d");
-      bar.replaceChildren(addB, browseB, h("span", { style: "width:20px" }), delB);
-      const cfg = h("button", { type: "button", class: "kbtn", "data-k": "configure3dPaths" }, "Configure Paths...");
-      cfg.addEventListener("click", () => { void import("../../dialogs/configure-paths").then((x) => x.configurePaths(() => updatePreview())); });
-      preview = modelPreview({ buttons: true, reload: updatePreview, key: "fpPreview3d" });
-      ["sx", "sy", "sz", "rx", "ry", "rz", "ox", "oy", "oz"].forEach((k) => mf[k].input.addEventListener("change", updatePreview));
-      opacity.addEventListener("input", updatePreview);
-      el.append(modelGrid.el, h("div", { class: "pd-row", style: "margin:2px 0 6px" }, bar, h("span", { style: "flex:1" }), pathChoice.el, cfg),
-        h("div", { style: "display:flex;gap:8px;min-height:340px" },
-          h("div", { style: "flex:none;width:220px;display:flex;flex-direction:column" }, xyz("Scale", "sx", "sy", "sz", ""), xyz("Rotation", "rx", "ry", "rz", "deg"), xyz("Offset", "ox", "oy", "oz", unitName()), box("Opacity", opacity)),
-          h("div", { style: "flex:1;min-width:0;display:flex;flex-direction:column" }, h("div", { class: "pd-lbl", style: "padding:4px 0" }, "Preview"), h("div", { style: "flex:1;min-height:300px;display:flex" }, preview.el))));
-      if (models.length) { modelGrid.select(0); }
-      updatePreview();
-    } },
+    { label: "3D Models", build: (el) => models3d.build(el) },
     // PANEL_EMBEDDED_FILES: Filename / Embedded Reference, delete, Embed fonts, Export...
     { label: "Embedded Files", build(el) {
       const ref = (n: string) => "kicad-embed://" + n;
@@ -194,7 +122,6 @@ export function footprintPropertiesDialog(ctx: ToolCtx, host: FpPropsHost = {}):
     } },
   ]);
   const collect = (): Any => {
-    syncModels();
     const out = { ...m };
     out.name = name.get().trim(); out.descr = descr.get(); out.tags = tags.get(); out.height = height.get();
     out.type = type.get(); out.excludeFromSim = exSim.get(); out.boardOnly = boardOnly.get(); out.dnp = dnp.get(); out.excludeFromBom = exBom.get(); out.excludeFromPos = exPos.get();
@@ -202,14 +129,14 @@ export function footprintPropertiesDialog(ctx: ToolCtx, host: FpPropsHost = {}):
     out.clearance = clr.get(); out.maskMargin = mask.get(); out.allowBridges = bridges.get(); out.noCourtyard = noCrt.get(); out.zoneConnect = zone.get();
     const p = FPP().parsePaste(pasteT.get(), parseLen); if (p) { out.pasteMargin = p.offset; out.pasteRatio = p.ratio; }
     out.netTieGroups = ntGrid.rows().map((r) => String(r.g || "")); out.dupPadsAreJumpers = dupJ.get(); out.jumperGroups = jgGrid.rows().map((r) => String(r.g || "")).filter((g) => g.trim());
-    out.models = models.filter((x: Any) => x.file);
+    out.models = models3d.models();
     out.embeddedFiles = (efGrid ? efGrid.rows() : efRows).map((r) => String(r.name)); out.embedFonts = embedFonts.get();
     out.fields = (fieldsGrid ? fieldsGrid.rows() : fieldRows).map((r: Record<string, CellValue>) => ({ ...r, w: Number(r.w), h: Number(r.h), thick: Number(r.thick), rot: Number(r.rot) || 0, x: Number(r.x) || 0, y: Number(r.y) || 0, show: !!r.show, italic: !!r.italic, unconstrained: !!r.unconstrained, name: String(r.name), value: String(r.value), layer: String(r.layer), id: String(r.id || "") }));
     return out;
   };
   const commit = (v: Any): void => { const ch = FPP().fpPropsChanges(doc, v); if (ch.length) ctx.commit(ch, "Edit Footprint Properties"); api && api.close(); };
   api = openDialog({ title: "Footprint Properties", width: 900, readOnly: ro, noEnter: true,
-    build(body) { body.append(tabs.el); whenGone(body, () => { if (preview) preview.dispose(); }); },
+    build(body) { body.append(tabs.el); whenGone(body, () => models3d.dispose()); },
     ok() {
       if (ro) return true;
       const v = collect();
@@ -235,20 +162,41 @@ export function padTableDialog(ctx: ToolCtx): boolean {
   const g = grid([{ label: "Number", key: "number", width: "70px" }, { label: "Type", key: "type", type: "select", options: PADS().PAD_TYPES }, { label: "Shape", key: "shape", type: "select", options: PADS().PAD_SHAPES },
     { label: "X Position", key: "x", type: "len" }, { label: "Y Position", key: "y", type: "len" }, { label: "Size X", key: "w", type: "len" }, { label: "Size Y", key: "h", type: "len" },
     { label: "Drill X", key: "dx", type: "len", readOnly: (r) => !PADS().drillsEditable(String(r.type)) }, { label: "Drill Y", key: "dy", type: "len", readOnly: (r) => !PADS().drillsEditable(String(r.type)) },
-    { label: "Pad->Die Length", key: "dieLen", type: "len" }, { label: "Pad->Die Delay", key: "dieDelay", type: "num" }], rows, { ro, height: "360px", onChange: () => { refresh(); g.refresh(); },
-    onSelect: (i) => brighten(i) });
-  // OnSelectCell: the row's pad is brightened on the canvas while the dialog is open
-  const ES = E as { dialogBrightened?: Set<string> | null };
-  const brighten = (i: number): void => { const r = g.rows()[i]; ES.dialogBrightened = r && r.id ? new Set([String(r.id)]) : null; ctx.requestRender(); };
+    { label: "Pad->Die Length", key: "dieLen", type: "len" }, { label: "Pad->Die Delay", key: "dieDelay", type: "num" }], rows, { ro, height: "360px", multi: true, onChange: () => { refresh(); g.refresh(); brighten(); },
+    onSelect: () => brighten() });
+  // OnSelectCell: the selected rows' pads are brightened on the canvas while the dialog is open.  OnAddRow puts the
+  // new pad in the view and OnDeleteRow takes the pad out of it: an added pad is drawn as the copy of the pad it was
+  // made from at its row's position, a deleted one is left out, until OK or Cancel.
+  const ES = E as { dialogBrightened?: Set<string> | null; dialogGhosts?: { ids: Set<string>; dx: number; dy: number; bright?: boolean }[] | null; dialogHidden?: Set<string> | null };
+  const removed = new Set<string>();
+  const brighten = (): void => {
+    const all = g.rows(), sel = new Set(g.selectedRows());
+    const ids = all.filter((r, k) => sel.has(k) && r.id).map((r) => String(r.id));
+    ES.dialogBrightened = ids.length ? new Set(ids) : null;
+    const ghosts = all.flatMap((r, k) => {
+      const src = !r.id && r.from ? doc.items.get(String(r.from)) : null; if (!src) return [];
+      const at = PADS().padRow(src); const dx = Number(r.x) - at.x, dy = Number(r.y) - at.y;
+      return isFinite(dx) && isFinite(dy) ? [{ ids: new Set([String(r.from)]), dx, dy, bright: sel.has(k) }] : [];
+    });
+    ES.dialogGhosts = ghosts.length ? ghosts : null;
+    ES.dialogHidden = removed.size ? new Set(removed) : null;
+    ctx.requestRender();
+  };
   refresh();
-  // OnAddRow: a copy of the last pad, one grid step lower; OnDeleteRow: the selected pad goes
+  // OnAddRow: a copy of the last pad, one grid step lower, selected
   const addPad = (): void => {
     const all = g.rows(); const last = all[all.length - 1];
     const row: Record<string, CellValue> = last ? { ...last, id: "", from: String(last.from || last.id || ""), y: Number(last.y) + (ctx.gridPitch || 0) } : { id: "", number: "", type: "smd", shape: "roundrect", x: 0, y: 0, w: 1, h: 1, dx: NaN, dy: NaN, dieLen: NaN, dieDelay: NaN };
     all.push(row); g.refresh(); refresh(); g.select(all.length - 1);
     const inp = g.el.querySelector("tbody tr:last-child input[data-col=number]") as HTMLInputElement | null; if (inp) { inp.focus(); inp.select(); }
   };
-  const delPad = (): void => { const all = g.rows(), i = g.selected(); if (i < 0 || i >= all.length) return; all.splice(i, 1); g.refresh(); refresh(); if (all.length) g.select(Math.min(i, all.length - 1)); else brighten(-1); };
+  // GRID_TRICKS OnDeleteRows: every selected row goes, the cursor then sits on the row after the first one deleted
+  const delPad = (): void => {
+    const all = g.rows(), picked = g.selectedRows().filter((k) => k < all.length); if (!picked.length) return;
+    for (const k of picked.slice().reverse()) { const r = all[k]; if (r.id) removed.add(String(r.id)); all.splice(k, 1); }
+    g.refresh(); refresh();
+    if (all.length) g.select(Math.min(picked[0], all.length - 1)); else brighten();
+  };
   const addB = iconButton("plus", "Add pad", addPad, ro), delB = iconButton("trash", "Delete pad", delPad, ro);
   addB.setAttribute("data-k", "padAdd"); delB.setAttribute("data-k", "padDelete");
   const fmtCell = (r: Record<string, CellValue>, k: string): string => { const v = r[k]; if (k === "type") return (PADS().PAD_TYPES.find((t: [string, string]) => t[0] === v) || [0, String(v)])[1]; if (k === "shape") return (PADS().PAD_SHAPES.find((t: [string, string]) => t[0] === v) || [0, String(v)])[1]; if (typeof v === "number") return isFinite(v) ? (k === "dieDelay" ? String(v) : fmtLenU(v)) : ""; return String(v ?? ""); };
@@ -297,7 +245,7 @@ export function padTableDialog(ctx: ToolCtx): boolean {
     build(body, dlgApi) {
       // m_buttonAdd and m_buttonDelete sit left of OK / Cancel (bSizer91: 2 px, then 25 px apart)
       const foot = dlgApi.dialog.querySelector(".kd-foot"); if (foot) foot.prepend(h("span", { class: "pd-row", style: "gap:25px;margin-left:2px" }, addB, delB));
-      whenGone(body, () => { ES.dialogBrightened = null; ctx.requestRender(); });
+      whenGone(body, () => { ES.dialogBrightened = null; ES.dialogGhosts = null; ES.dialogHidden = null; ctx.requestRender(); });
       if (g.rows().length) setTimeout(() => g.select(0), 0);   // the first row is selected on open
       body.append(form([["Pad numbers:", summary], ["Pad count:", count], ["Duplicate pads:", dups]], true), g.el,
         h("div", { class: "pd-cols2" },

@@ -137,7 +137,10 @@ export function drawCanvas() {
   const ghosts: PeerGhost[] = E.peerGhosts || [];
   const m0 = activeModule() as { hiddenIds?: () => Set<string> | null } | null;
   const own = m0 && m0.hiddenIds ? m0.hiddenIds() : null;   // the board module's items drawn elsewhere (a router drag's lines)
-  const skip = ghosts.length || own ? new Set([...ghosts.flatMap((g) => [...g.ids]), ...(own || [])]) : null;
+  // a dialog's pending edit on the canvas (DIALOG_FP_EDIT_PAD_TABLE: pads added to and removed from the view)
+  const dlgE = E as { dialogGhosts?: { ids: Set<string>; dx: number; dy: number; bright?: boolean }[] | null; dialogHidden?: Set<string> | null };
+  const dlgGhosts = !isSch() && dlgE.dialogGhosts ? dlgE.dialogGhosts : [], dlgHidden = !isSch() && dlgE.dialogHidden ? dlgE.dialogHidden : null;
+  const skip = ghosts.length || own || dlgHidden ? new Set([...ghosts.flatMap((g) => [...g.ids]), ...(own || []), ...(dlgHidden || [])]) : null;
   const force: boolean | "rest" | "zoomEnd" = E.renderFull === "rest" || E.renderFull === "zoomEnd" ? E.renderFull : E.renderFull !== false; E.renderFull = false;
   // pinned comment threads sit on their part or net: a full render means items may have moved (a local move
   // updates the item's box only when it lands, after the document version was bumped)
@@ -156,6 +159,17 @@ export function drawCanvas() {
       KiCadCanvas.render(E.kdoc, octx, Object.assign({}, view, { panX: view.panX + g.dx * sc, panY: view.panY + g.dy * sc }),
         Object.assign({}, E.renderOpts, { hidden: E.hiddenLayers, grid: 0, frame: false, background: false, ids: g.ids, markers: null, ratsnest: null, highlight: null, selected: null }));
       cctx.setTransform(1, 0, 0, 1, 0, 0); cctx.globalAlpha = 0.6; cctx.drawImage(off, 0, 0); cctx.globalAlpha = 1;
+    }
+  }
+  if (dlgGhosts.length) {
+    const off: HTMLCanvasElement = E.ghostCanvas || (E.ghostCanvas = document.createElement("canvas"));
+    if (off.width !== canvas.width || off.height !== canvas.height) { off.width = canvas.width; off.height = canvas.height; }
+    const octx = off.getContext("2d")!; const sc = view.ppm * view.zoom;
+    for (const g of dlgGhosts) {
+      octx.setTransform(1, 0, 0, 1, 0, 0); octx.clearRect(0, 0, off.width, off.height);
+      KiCadCanvas.render(E.kdoc, octx, Object.assign({}, view, { panX: view.panX + g.dx * sc, panY: view.panY + g.dy * sc }),
+        Object.assign({}, E.renderOpts, { hidden: E.hiddenLayers, grid: 0, frame: false, background: false, ids: g.ids, markers: null, ratsnest: null, highlight: null, selected: null, brightened: g.bright ? g.ids : null }));
+      cctx.setTransform(1, 0, 0, 1, 0, 0); cctx.drawImage(off, 0, 0);
     }
   }
   const m = activeModule();

@@ -450,16 +450,18 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
   };
 
   // ---------------------------------------------------------------- saving
+  const written = new Set<Page>();
   const savePage = async (p: Page): Promise<boolean> => {
     if (p.readOnly || !p.path) return true;
     const v = T.verifyRows(p.rows, sym);
     if (v.error) { select(pages.indexOf(p)); if (p.grid && v.row !== undefined) { p.rows.splice(0, p.rows.length, ...v.rows); p.grid.refresh(); p.grid.select(v.row); } await okBox("Library Nickname Error", v.error); return false; }
     p.rows.splice(0, p.rows.length, ...v.rows); if (p.grid) p.grid.refresh();
-    if (rowsKey(p.rows) === p.original && p.docId) return true;
+    // TransferDataFromWindow writes a table only when it differs from the one loaded (a missing table loads empty)
+    if (rowsKey(p.rows) === p.original) return true;
     const text = formatLibTable(p.rows, kind === "symbol" ? "sym_lib_table" : "fp_lib_table");
     const id = await writeProjectText(p.path, text);
     if (!id) { await okBox("File Save Error", `Error saving project library table:\n\n'${p.path}' could not be written.`); return false; }
-    p.docId = id; p.original = rowsKey(p.rows); markDirty(p);
+    p.docId = id; p.original = rowsKey(p.rows); markDirty(p); written.add(p);
     window.dispatchEvent(new CustomEvent("kc-doc-saved", { detail: { docId: id, savedDocId: id } }));
     return true;
   };
@@ -470,9 +472,10 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
       const v = T.verifyRows(p.rows, sym);
       if (v.error) { select(pages.indexOf(p)); p.rows.splice(0, p.rows.length, ...v.rows); if (p.grid) { p.grid.refresh(); if (v.row !== undefined) p.grid.select(v.row); } await okBox("Library Nickname Error", v.error); return false; }
     }
-    const projPage = pages[1]; const wasDirty = projPage && rowsKey(projPage.rows) !== projPage.original;
+    const projPage = pages[1]; written.clear();
     for (const p of pages) if (!(await savePage(p))) return false;
-    if (projPage && (wasDirty || !projPage.docId) && opts.onSaved) opts.onSaved(projPage.rows.slice());
+    // PreloadLibraries runs only when the project table was written
+    if (projPage && written.has(projPage) && opts.onSaved) opts.onSaved(projPage.rows.slice());
     return true;
   };
 

@@ -8,7 +8,7 @@
 // The pure parts (path checks, steps, the preview board) are library/model3d.ts.
 import * as M from "../../library/model3d";
 import { loadViewer, type EmbeddedViewer3D } from "../viewer3d-loader";
-import { grid, h, lenField, messageBox, openDialog, unitLabel, type CellValue, type DialogApi, type Field } from "./ui";
+import { box, currentUnits, form, grid, gridButtons, h, iconButton, lenField, messageBox, numField, openDialog, selectField, unitLabel, unitName, type CellValue, type DialogApi, type Field } from "./ui";
 import { kicadIcon } from "../../components/kicon-dom";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -225,4 +225,103 @@ export function pick3DModel(o: PickOpts): Promise<string | null> {
 export function offsetField(mm: number, key: string, ro: boolean, units: () => string): { field: Field<number>; el: HTMLElement } {
   const f = lenField(mm, { ro, key });
   return { field: f, el: stepper(f, (v, s, fine) => M.stepOffset(v, s, fine, units())) };
+}
+
+// ---------------------------------------------------------------- the 3D Models tab
+export interface Models3dOpts {
+  ro: boolean;
+  /** the footprint's models (FOOTPRINT::Models) */
+  models: M.PreviewModel[] | Any[];
+  /** the project's 3D model files (project-relative paths), for the picker and the status column */
+  projectModels?(): string[];
+  /** the footprint's embedded file names (PANEL_EMBEDDED_FILES), for the picker and the status column */
+  embedded(): string[];
+  /** the footprint in library form (at the origin, front side, unrotated), for the preview's dummy board */
+  footprintText?(): string;
+  previewKey: string;
+}
+/**
+ * PANEL_FP_PROPERTIES_3D_MODEL with its PANEL_PREVIEW_3D_MODEL: the model grid (status, file with its picker, Show),
+ * add / browse / remove, the configured path choice, Configure Paths..., the Scale / Rotation / Offset / Opacity of the
+ * selected model and the live preview.  Both DIALOG_FOOTPRINT_PROPERTIES (board) and the footprint editor's dialog use it.
+ */
+export function models3dPanel(o: Models3dOpts): { build(el: HTMLElement): void; models(): Any[]; dispose(): void } {
+  const ro = o.ro;
+  const host = { projectModels: o.projectModels, footprintText: o.footprintText };
+  const models = o.models.map((x: Any) => ({ ...x, offset: x.offset.slice(), scale: x.scale.slice(), rotate: x.rotate.slice() }));
+  const modelRows: Record<string, CellValue>[] = models.map((x: Any, i: number) => ({ i, file: x.file, show: x.show }));
+  let modelSel = -1;
+  const mf: Record<string, Field<number>> = {};
+  for (const k of ["sx", "sy", "sz"]) mf[k] = numField(1, { ro, key: "model-" + k, digits: 4 });
+  for (const k of ["rx", "ry", "rz"]) mf[k] = numField(0, { ro, key: "model-" + k, digits: 2 });
+  for (const k of ["ox", "oy", "oz"]) mf[k] = lenField(0, { ro, key: "model-" + k });   // m_userUnits (PANEL_PREVIEW_3D_MODEL::formatOffsetValue)
+  // the slider starts at KiCad's layout default of 50 until a model is selected
+  const opacity = h("input", { type: "range", min: "0", max: "100", value: "50", disabled: ro, "data-k": "model-opacity", style: "width:100%" }) as HTMLInputElement;
+  const fpEmbedded = o.embedded;
+  const modelEnv = (): M.ModelEnv => ({ projectFiles: host.projectModels ? host.projectModels() : [], embedded: fpEmbedded(), libItems: (lib) => modelLibItems(lib, () => modelGrid.refresh()) });
+  const saveModel = (): void => {
+    const x = models[modelSel]; if (!x) return;
+    x.scale = [mf.sx.get(), mf.sy.get(), mf.sz.get()]; x.rotate = [mf.rx.get(), mf.ry.get(), mf.rz.get()]; x.offset = [mf.ox.get(), mf.oy.get(), mf.oz.get()]; x.opacity = Number(opacity.value) / 100;
+  };
+  let preview: ReturnType<typeof modelPreview> | null = null;
+  const updatePreview = (): void => {   // UpdateDummyFootprint
+    if (!preview || !host.footprintText) return;
+    saveModel();
+    preview.update(M.previewBoardText(host.footprintText(), models.filter((x: Any) => x.file).map((x: Any) => ({ file: x.file, show: x.show, opacity: x.opacity, offset: x.offset, scale: x.scale, rotate: x.rotate })), preview.thickness()));
+  };
+  const showModel = (i: number): void => {
+    saveModel(); modelSel = i; const x = models[i];
+    const vals = x ? [...x.scale, ...x.rotate, ...x.offset] : [1, 1, 1, 0, 0, 0, 0, 0, 0];
+    ["sx", "sy", "sz", "rx", "ry", "rz", "ox", "oy", "oz"].forEach((k, j) => mf[k].set(vals[j]));
+    opacity.value = String(Math.round((x ? x.opacity : 0.5) * 100));
+  };
+  const status = (r: Record<string, CellValue>): { icon: string; title: string } | null => {
+    const p = M.modelProblem(String(r.file || ""), modelEnv());
+    return p && p.icon ? { icon: p.icon === "warning" ? "ercwarn" : "ercerr", title: p.text } : null;
+  };
+  const repick = (r: Record<string, CellValue>, _i: number, set: (v: string) => void): void => {
+    void pick3DModel({ current: String(r.file || ""), start: pathChoice.get(), projectFiles: host.projectModels ? host.projectModels() : [], embedded: fpEmbedded() }).then((p) => { if (p) { set(p); syncModels(); modelGrid.refresh(); updatePreview(); } });
+  };
+  const modelGrid = grid([{ label: "", key: "status", type: "icon", width: "22px", icon: status }, { label: "3D Model(s)", key: "file", button: { icon: "small_refresh", title: "Select 3D Model", run: repick } },
+    { label: "Show", key: "show", type: "check", width: "48px" }], modelRows, { ro, height: "150px", key: "models3d", onSelect: (i) => showModel(i), onChange: () => { syncModels(); modelGrid.refresh(); updatePreview(); } });
+  const syncModels = (): void => {   // the grid's file / show cells and row order back into the model list
+    saveModel();
+    const next = modelGrid.rows().map((r) => { const x = typeof r.i === "number" && models[r.i as number] ? models[r.i as number] : { file: "", show: true, opacity: 1, offset: [0, 0, 0], scale: [1, 1, 1], rotate: [0, 0, 0] }; return { ...x, file: String(r.file || ""), show: !!r.show }; });
+    models.splice(0, models.length, ...next); modelGrid.rows().forEach((r, i) => { r.i = i; });
+  };
+  // the configured path choice: the folder the picker opens on (updateConfiguredPathChoices)
+  const pathChoice = selectField<string>("Automatic", M.configuredPathChoices().map((c): [string, string] => [c, c]), { ro, key: "configuredPath" });
+  pathChoice.input.title = "Choose the folder used when opening the 3D model picker";
+
+  const build = (el: HTMLElement): void => {
+    const unitSpan = (k: string) => unitLabel(k === "deg" ? "" : k);
+    // the Scale / Rotation / Offset boxes, each field with its wxSpinButton and mouse-wheel steps
+    const units = (): string => currentUnits();
+    const spin = (k: string): HTMLElement => stepper(mf[k], k[0] === "s" ? M.stepScale : k[0] === "r" ? M.stepRotation : (v, sg, fine) => M.stepOffset(v, sg, fine, units()), updatePreview);
+    const xyz = (label: string, a: string, b: string, c: string, unit: string) => box(label, form([["X:", spin(a), unitSpan(unit)], ["Y:", spin(b), unitSpan(unit)], ["Z:", spin(c), unitSpan(unit)]]));
+    // OnAdd3DModel: the picker, then a new row with the picked file
+    const browse = (): void => {
+      void pick3DModel({ start: pathChoice.get(), projectFiles: host.projectModels ? host.projectModels() : [], embedded: fpEmbedded() }).then((p) => {
+        if (!p) return;
+        modelGrid.rows().push({ i: -1, file: p, show: true }); modelGrid.refresh(); syncModels(); modelGrid.select(modelGrid.rows().length - 1); updatePreview();
+      });
+    };
+    const bar = gridButtons(modelGrid, () => ({ i: -1, file: "", show: true }), { ro, addTip: "Add 3D model", delTip: "Remove 3D model", onChange: () => { syncModels(); modelGrid.refresh(); updatePreview(); } });
+    // m_button3DShapeAdd, m_button3DShapeBrowse, a 20 px gap, m_button3DShapeRemove (panel_fp_properties_3d_model_base.cpp)
+    const [addB, delB] = [bar.firstElementChild as HTMLElement, bar.lastElementChild as HTMLElement];
+    const browseB = iconButton("folder", "Select 3D Model", browse, ro); browseB.setAttribute("data-k", "browse3d");
+    bar.replaceChildren(addB, browseB, h("span", { style: "width:20px" }), delB);
+    const cfg = h("button", { type: "button", class: "kbtn", "data-k": "configure3dPaths" }, "Configure Paths...");
+    cfg.addEventListener("click", () => { void import("../../dialogs/configure-paths").then((x) => x.configurePaths(() => updatePreview())); });
+    preview = modelPreview({ buttons: true, reload: updatePreview, key: o.previewKey });
+    ["sx", "sy", "sz", "rx", "ry", "rz", "ox", "oy", "oz"].forEach((k) => mf[k].input.addEventListener("change", updatePreview));
+    opacity.addEventListener("input", updatePreview);
+    el.append(modelGrid.el, h("div", { class: "pd-row", style: "margin:2px 0 6px" }, bar, h("span", { style: "flex:1" }), pathChoice.el, cfg),
+      h("div", { style: "display:flex;gap:8px;min-height:340px" },
+        h("div", { style: "flex:none;width:220px;display:flex;flex-direction:column" }, xyz("Scale", "sx", "sy", "sz", ""), xyz("Rotation", "rx", "ry", "rz", "deg"), xyz("Offset", "ox", "oy", "oz", unitName()), box("Opacity", opacity)),
+        h("div", { style: "flex:1;min-width:0;display:flex;flex-direction:column" }, h("div", { class: "pd-lbl", style: "padding:4px 0" }, "Preview"), h("div", { style: "flex:1;min-height:300px;display:flex" }, preview.el))));
+    if (models.length) { modelGrid.select(0); }
+    updatePreview();
+  };
+  return { build, models: () => { syncModels(); return models.filter((x: Any) => x.file); }, dispose: () => { if (preview) preview.dispose(); } };
 }

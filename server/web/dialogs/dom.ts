@@ -4,7 +4,7 @@ import { trapTab } from "../tools/kicad-dialogs/shell";
 import "../components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 import { fitMenu } from "../menufit";
 import { kicadIcon } from "../components/kicon-dom";
-import { keyName } from "../keys";
+import { menuKey } from "../keys";
 
 export interface DlgButton { label: string; fn?: () => void; primary?: boolean; isDefault?: boolean; close?: boolean; id?: string }
 export interface DlgSpec {
@@ -164,7 +164,7 @@ export function popupMenu(x: number, y: number, items: PopItem[]): HTMLElement {
     for (const it of list) {
       if (it.sep) { m.append(h("div", { style: "height:1px;background:var(--line);margin:3px 0" })); continue; }
       const row = h("div", { class: "kd-pop-row", role: "menuitem", "aria-disabled": it.disabled ? "true" : undefined, style: `display:flex;gap:6px;align-items:center;padding:3px 12px 3px 6px;cursor:default;white-space:nowrap;${it.disabled ? "opacity:.45;" : ""}` },
-        h("span", { style: "width:16px;display:inline-flex;justify-content:center" }, it.check ? (it.checked ? "✓" : "") : it.icon ? kicadIcon(it.icon, 16) as unknown as Node : ""), h("span", { style: "flex:1" }, it.label || ""), it.key ? h("span", { class: "kd-pop-key", style: "margin-left:24px;opacity:.7" }, keyName(it.key)) : null, it.sub ? h("span", null, "▸") : null);
+        h("span", { style: "width:16px;display:inline-flex;justify-content:center" }, it.check ? (it.checked ? "✓" : "") : it.icon ? kicadIcon(it.icon, 16) as unknown as Node : ""), h("span", { style: "flex:1" }, it.label || ""), it.key ? h("span", { class: "kd-pop-key", style: "margin-left:24px;opacity:.7" }, menuKey(it.key)) : null, it.sub ? h("span", null, "▸") : null);
       if (it.title) row.title = it.title;
       row.addEventListener("pointerenter", () => { row.style.background = "var(--accent)"; row.style.color = "var(--on-accent)"; for (const o of Array.from(document.querySelectorAll(".kd-pop"))) if (Number((o as HTMLElement).dataset.depth) > depth) o.remove();
         if (it.sub && !it.disabled) { const r = row.getBoundingClientRect(), sub = build(it.sub, r.right - 2, r.top - 3, depth + 1); document.body.append(sub); fitMenu(sub, { row: r, parent: m.getBoundingClientRect(), overlap: 2 }); } });
