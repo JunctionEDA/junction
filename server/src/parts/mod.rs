@@ -438,13 +438,15 @@ async fn package_from_digikey(state: &AppState, keys: &Keys, info: &mut PartInfo
         if m.get(&memo).is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(86_400)) {
             return;
         }
-        m.insert(memo, std::time::Instant::now());
     }
     let found = match vendors::search("digikey", keys, &info.mpn, 5).await {
         Ok(hits) => hits.into_iter().find(|h| h.mpn.eq_ignore_ascii_case(&info.mpn) && !h.package.is_empty()),
-        Err(_) => None,
+        Err(_) => return, // DigiKey did not answer: ask again next time
     };
-    let Some(dk) = found else { return };
+    let Some(dk) = found else {
+        NO_PACKAGE.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(memo, std::time::Instant::now());
+        return;
+    };
     info.package = dk.package.clone();
     if let Some(sdp) = dk.attributes.get("Supplier Device Package") {
         info.attributes.entry("Supplier Device Package".into()).or_insert_with(|| sdp.clone());
