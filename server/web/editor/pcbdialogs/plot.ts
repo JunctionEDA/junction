@@ -17,6 +17,7 @@ import type { KiCadFabApi } from "../../fab/index";
 import type { PlotParams } from "../../canvas/plot-params";
 import type { BoardHeader } from "../../canvas/board-setup";
 import { popupMenu, type PopItem } from "../../dialogs/dom";
+import { colorSwatch, colorText, parseColor } from "../../components/colorswatch";
 import { applyChanges } from "../doc";
 import { sendOp } from "../net";
 import { E } from "../state";
@@ -188,10 +189,9 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
   const pdfMeta = checkField(p.pdfMetadata, "Generate metadata from AUTHOR & SUBJECT variables", { key: "pdfMetadata", tip: "Generate PDF document properties from AUTHOR and SUBJECT text variables" });
   const pdfSingle = checkField(p.pdfSingle, "Single document", { key: "pdfSingle" });
   let pdfBg: string | null = user.pdfBackground;
-  const bgSwatch = h("input", { type: "color", value: pdfBg || "#ffffff", "data-k": "pdfBackground", title: "Background Color" });
-  const bgClear = iconButton("trash", "Default (no background)", () => { pdfBg = null; drawSwatch(); });
-  const drawSwatch = (): void => { bgSwatch.style.opacity = pdfBg ? "1" : "0.35"; };
-  bgSwatch.addEventListener("input", () => { pdfBg = bgSwatch.value; drawSwatch(); }); drawSwatch();
+  // m_pdfBackgroundColorSwatch: a COLOR_SWATCH whose default is COLOR4D::UNSPECIFIED (no background); the picker's
+  // Clear Color puts that back
+  const bgSwatch = colorSwatch(parseColor(pdfBg), { def: null, key: "pdfBackground", title: "Background Color", onChange: (c) => { pdfBg = c ? colorText(c) : null; } });
   const bgLabel = h("span", { class: "pd-lbl" }, "Background Color");
   // PNG Options
   const pngDpi = numField(p.pngDpi, { key: "pngDpi", digits: 0 });
@@ -204,7 +204,7 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
     2: box("Postscript Options", h("div", { class: "pl-grid3" }, lbl("X scale factor:"), fineX.el, h("span"), lbl("Y scale factor:"), fineY.el, h("span"), lbl("Track width correction:"), widthAdj.el, h("span", { class: "unit" }, "mm")), a4.el),
     3: box("DXF Options", h("div", { class: "pl-cols2" }, h("div", null, dxfContours.el, row(lbl("Export units:"), dxfUnits.el)), h("div", null, dxfFont.el, dxfSingle.el))),
     5: box("SVG Options", h("div", { class: "pd-row" }, lbl("Precision:"), svgPrec.el, lbl("Output mode:"), svgMode.el, svgFit.el)),
-    4: box("PDF Options", h("div", { class: "pl-cols2" }, h("div", null, row(lbl("Output mode:"), pdfMode.el), frontPop.el, backPop.el), h("div", null, pdfMeta.el, pdfSingle.el, row(bgLabel, bgSwatch, bgClear)))),
+    4: box("PDF Options", h("div", { class: "pl-cols2" }, h("div", null, row(lbl("Output mode:"), pdfMode.el), frontPop.el, backPop.el), h("div", null, pdfMeta.el, pdfSingle.el, row(bgLabel, bgSwatch.el)))),
     6: box("PNG Options", h("div", { class: "pd-row" }, lbl("DPI:"), pngDpi.el, pngAa.el)),
   };
   const boardSetupLink = h("a", { href: "#", title: "File > Board Setup...", "data-k": "boardSetup" }, "Board setup");
@@ -244,7 +244,7 @@ function show(fab: KiCadFabApi, ctx: ToolCtx, p: PlotParams, stored: PlotParams,
     en(padNumbers, sketchPads.get());
     // OnChangeDXFPlotMode: the contour mode plots text with the stroke font
     en(dxfFont, !dxfContours.get()); if (dxfContours.get()) dxfFont.set(true);
-    const bw = pdfMode.get() === 1; bgSwatch.disabled = bw || ro; bgClear.disabled = bw || ro; bgLabel.classList.toggle("disabled", bw);
+    const bw = pdfMode.get() === 1; bgSwatch.setDisabled(bw || ro); bgLabel.classList.toggle("disabled", bw);
   }
 
   // ---------------------------------------------------------------- applyPlotSettings
