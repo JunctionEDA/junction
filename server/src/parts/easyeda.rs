@@ -537,6 +537,9 @@ fn symbol_shapes(shapes: &[Value], cx: &mut SymCtx, out: &mut String, stats: &mu
                     style: style.to_string(),
                     name: name.to_string(),
                     number: number.to_string(),
+                    x: kx,
+                    y: ky,
+                    angle,
                 });
                 out.push_str(&format!(
                     "\t\t\t(pin {} {} (at {} {} {}) (length {}) (name {} {FONT}) (number {} {FONT}))\n",
@@ -1552,7 +1555,7 @@ mod fixture_tests {
                 let Some(s) = c.symbol.as_ref() else { continue };
                 let sx = symbol_sexpr(s, &c.prefix, &c.name, "", "", "", &[]);
                 std::fs::write(format!("{out}/{stem}.{tag}.kicad_sym"), &sx).unwrap();
-                println!("{stem} {tag} tidied={} pins={}", s.tidied, s.pins);
+                println!("TIDY {stem} {} {tag} tidied={} pins={}", c.name, s.tidied, s.pins);
             }
         }
     }

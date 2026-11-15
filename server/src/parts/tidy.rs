@@ -28,6 +28,11 @@ pub struct RawPin {
     pub style: String,
     pub name: String,
     pub number: String,
+    /// Where the vendor drew it: connection point (mm, Y up) and KiCad pin angle
+    /// (0 = on the left side, 180 = right, 270 = top, 90 = bottom).
+    pub x: f64,
+    pub y: f64,
+    pub angle: i32,
 }
 
 /// What else a unit draws besides its pins.
@@ -321,6 +326,78 @@ fn family(n: &str) -> String {
     h.trim_end_matches(|c: char| c.is_ascii_digit() || c == '+' || c == '-').to_string()
 }
 
+/// How the vendor laid the pins out.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Layout {
+    /// Numbered round the body like the package (1…n down the left, on round the
+    /// bottom and up the right, or straight down both sides): nobody arranged it.
+    PackageOrder,
+    /// Not in package order, but supplies or grounds sit where a reader would not look.
+    Unconventional,
+    /// Drawn by function already: ground lowest, supplies on top (a regulator's
+    /// input on the left).  Kept as the vendor drew it.
+    ByFunction,
+}
+
+/// Classify the vendor's drawing from where its pins sit.
+pub fn layout(pins: &[RawPin], prefix: &str) -> Layout {
+    let side = |a: i32| match a {
+        0 => Side::Left,
+        180 => Side::Right,
+        270 => Side::Top,
+        _ => Side::Bottom,
+    };
+    let on = |s: Side| -> Vec<&RawPin> { pins.iter().filter(|p| side(p.angle) == s).collect() };
+    let (mut l, mut r, mut t, mut b) = (on(Side::Left), on(Side::Right), on(Side::Top), on(Side::Bottom));
+    let by = |f: fn(&RawPin) -> f64| move |a: &&RawPin, b: &&RawPin| f(a).partial_cmp(&f(b)).unwrap_or(std::cmp::Ordering::Equal);
+    l.sort_by(by(|p| -p.y)); // top to bottom
+    r.sort_by(by(|p| -p.y));
+    t.sort_by(by(|p| p.x)); // left to right
+    b.sort_by(by(|p| p.x));
+    // a pin's number as the package counts it; "A5" style rows have no single count
+    let num = |p: &RawPin| p.number.parse::<f64>().ok();
+    let rising = |seq: &[&RawPin]| -> Option<f64> {
+        let v: Vec<f64> = seq.iter().filter_map(|p| num(p)).collect();
+        if v.len() < seq.len() || v.len() < 3 {
+            return None;
+        }
+        Some(v.windows(2).filter(|w| w[1] > w[0]).count() as f64 / (v.len() - 1) as f64)
+    };
+    // counter-clockwise from the top left, the way a package is numbered …
+    let mut ccw: Vec<&RawPin> = l.clone();
+    ccw.extend(b.iter().copied());
+    ccw.extend(r.iter().rev().copied());
+    ccw.extend(t.iter().rev().copied());
+    // … or straight down the left, then straight down the right
+    let mut down: Vec<&RawPin> = l.clone();
+    down.extend(r.iter().copied());
+    down.extend(b.iter().copied());
+    if rising(&ccw).is_some_and(|f| f >= 0.9) || (t.is_empty() && rising(&down).is_some_and(|f| f >= 0.9)) {
+        return Layout::PackageOrder;
+    }
+    let names: Vec<String> = pins.iter().map(|p| up(&p.name)).collect();
+    let reg = !connector_prefix(&prefix.trim_end_matches('?').to_ascii_uppercase()) && regulator(&names);
+    let lowest = |p: &RawPin| pins.iter().filter(|q| side(q.angle) == side(p.angle)).all(|q| q.y >= p.y - 1e-6 || is_ground(&up(&q.name)));
+    let highest = |p: &RawPin| pins.iter().filter(|q| side(q.angle) == side(p.angle)).all(|q| q.y <= p.y + 1e-6 || is_supply(&up(&q.name)));
+    for p in pins {
+        let n = up(&p.name);
+        let s = side(p.angle);
+        if is_ground(&n) && !(s == Side::Bottom || (s != Side::Top && lowest(p))) {
+            return Layout::Unconventional;
+        }
+        if is_supply(&n) && !is_ground(&n) {
+            let ok = s == Side::Top || (s != Side::Bottom && highest(p)) || (reg && s == Side::Left);
+            if !ok {
+                return Layout::Unconventional;
+            }
+        }
+        if reg && matches!(reg_side(&n), Some((Side::Right, 0, _))) && s == Side::Left {
+            return Layout::Unconventional;
+        }
+    }
+    Layout::ByFunction
+}
+
 pub struct Tidied {
     /// The unit's contents: body rectangle and pins.
     pub unit: String,
@@ -344,6 +421,10 @@ pub fn arrange(pins: &[RawPin], art: &Art, prefix: &str) -> Option<Tidied> {
     let names: Vec<String> = pins.iter().map(|p| up(&p.name)).collect();
     // a numbered header or terminal block already is in its natural order
     if names.iter().all(|n| n.is_empty() || n == "~" || n.chars().all(|c| c.is_ascii_digit()) || n.starts_with("PIN")) {
+        return None;
+    }
+    // the vendor already drew it by function: keep the drawing
+    if layout(pins, prefix) == Layout::ByFunction {
         return None;
     }
     let reg = !connector && regulator(&names);
@@ -676,7 +757,10 @@ mod tests {
     use super::*;
 
     fn pin(n: &str, num: &str) -> RawPin {
-        RawPin { etype: "unspecified".into(), style: "line".into(), name: n.into(), number: num.into() }
+        // drawn the vendor's way: down the left side in the order given
+        static ROW: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+        let k = ROW.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        RawPin { etype: "unspecified".into(), style: "line".into(), name: n.into(), number: num.into(), x: -10.0, y: -(k as f64) * 2.54, angle: 0 }
     }
     fn art() -> Art {
         Art { rects: 1, dots: 1, other: 0 }
@@ -743,5 +827,24 @@ mod tests {
         assert!(arrange(&pins, &Art { rects: 0, dots: 0, other: 3 }, "Q").is_none());
         let hdr: Vec<RawPin> = (1..=6).map(|k| pin(&k.to_string(), &k.to_string())).collect();
         assert!(arrange(&hdr, &art(), "J").is_none());
+    }
+
+    fn at(n: &str, num: &str, x: f64, y: f64, angle: i32) -> RawPin {
+        RawPin { x, y, angle, ..pin(n, num) }
+    }
+
+    #[test]
+    fn a_drawing_already_made_by_function_is_kept() {
+        // XC6206 as LCSC draws it: Vin left, Vout right, GND lowest on the right
+        let ldo = vec![at("Vin", "3", -10.0, 0.0, 0), at("Vout", "2", 10.0, 2.54, 180), at("GND", "1", 10.0, -2.54, 180)];
+        assert_eq!(layout(&ldo, "U"), Layout::ByFunction);
+        assert!(arrange(&ldo, &art(), "U").is_none());
+        // the same part in package order: 1 and 2 down the left, 3 on the right
+        let pkg = vec![at("GND", "1", -10.0, 2.54, 0), at("Vout", "2", -10.0, 0.0, 0), at("Vin", "3", 10.0, 0.0, 180)];
+        assert_eq!(layout(&pkg, "U"), Layout::PackageOrder);
+        assert!(arrange(&pkg, &art(), "U").is_some());
+        // not package order, but ground on top of a side: still rearranged
+        let odd = vec![at("GND", "A1", -10.0, 2.54, 0), at("VBUS", "A4", -10.0, 0.0, 0), at("CC1", "A5", -10.0, -2.54, 0)];
+        assert_eq!(layout(&odd, "USB"), Layout::Unconventional);
     }
 }
