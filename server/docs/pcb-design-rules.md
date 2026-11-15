@@ -408,7 +408,7 @@ overlapping pieces of one net (#85); silkscreen 0.3 mm or more from the board ed
 
 | Subject | Phil's Lab | This project |
 |---|---|---|
-| Default via | 0.7 mm pad, 0.3 mm drill, an annular ring of 0.15 mm or more (#70, #40) | 0.4 mm pad, 0.25 mm drill: a 0.075 mm ring, which the fabricator's multilayer process makes but is its limit |
+| Default via | 0.7 mm pad, 0.3 mm drill, an annular ring of 0.15 mm or more (#70, #40) | 0.5 mm pad, 0.2 mm drill: small like the owner's earlier 0.4 on 0.25, but with the 0.15 mm ring (changed 2026-11-15); the fabricator's larger minimum wins where it cannot drill 0.2 |
 | A ground via beside a pad | kept a little away from the pad so solder is not drawn off (#76, #57) | vias are tented and sit close; no via in a small part's pad (`dfm.via_in_pad`) |
 | Fan-out of a fine-pitch part | spread out, room between vias | tight and orderly, grouped (and `vias.slot` asks only for the plane sliver between them) |
 | Decoupling on the back under the chip | common | all parts on the top side unless two sides cannot be avoided |

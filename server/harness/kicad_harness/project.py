@@ -2160,7 +2160,7 @@ class Board(_Doc):
         return hit or name
 
     def _house_vias(self) -> None:
-        """A board still on KiCad's stock via (0.6 mm on a 0.3 mm hole) gets the house via, 0.4 mm on a 0.25 mm hole,
+        """A board still on KiCad's stock via (0.6 mm on a 0.3 mm hole) gets the house via, 0.5 mm on a 0.2 mm hole,
         before anything is routed: the net class and the board minimums both."""
         r = self.project.transport.call("get_board_info", {}).get("design_rules") or {}
         d = ((r.get("net_classes") or {}).get("Default") or {})
