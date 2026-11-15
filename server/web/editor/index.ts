@@ -179,7 +179,9 @@ window.addEventListener("pointercancel", () => cancelLongPress(), true);
 // (Alt is the system menu's there); with Shift / Ctrl held too the pick is added / toggled / removed (m_additive ...)
 window.addEventListener("pointerdown", (ev) => {
   if (ev.button !== 0 || !ev.altKey || IS_WINDOWS || !(ev.target instanceof Element) || !stage.contains(ev.target) || ev.target.closest("#cmtPanel")) return;
-  const ms = modifiersState(ev, modOpts()); if (ms.highlight) return;
+  // with Shift / Ctrl held too (hasModifier) the press only arms, as any modifier press does: m_skip_heuristics acts in
+  // selectPoint on IsClick (the release, below), and a drag draws a box (selectMultiple)
+  const ms = modifiersState(ev, modOpts()); if (ms.highlight || hasModifier(ms)) return;
   if (openClarifyMenu(ev, clickMode(ms))) { ev.stopImmediatePropagation(); ev.preventDefault(); }
 }, true);
 
@@ -601,7 +603,9 @@ const onPointerUp = (ev: PointerEvent) => {
   if (E.fdrag) { if (!E.fdrag.sticky) commitFieldDrag(); return; }   // a Move (M) drops on the next click instead
   if (E.zoomRect) { finishZoomRect(ev); return; }
   if (E.boxSel && E.boxSel.modClick && Math.hypot(ev.clientX - E.boxSel.startClient[0], ev.clientY - E.boxSel.startClient[1]) < 4) {
-    const b = E.boxSel; E.boxSel = null; requestRepaint(); modifierClick(b.start as [number, number], b.modClick as ModClick); return;   // IsClick: selectPoint with the modifiers
+    const b = E.boxSel; E.boxSel = null; requestRepaint(); const mc = b.modClick as ModClick;
+    if (mc.ev.altKey && !IS_WINDOWS && openClarifyMenu(mc.ev, mc.mode)) return;   // Alt (m_skip_heuristics): every candidate in Clarify Selection
+    modifierClick(b.start as [number, number], mc); return;   // IsClick: selectPoint with the modifiers
   }
   if (E.boxSel) { finishBoxSel(ev); return; }
   if (E.tool === "measure" && ev.button === 0) { measureUp(ev); return; }
