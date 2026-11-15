@@ -100,6 +100,15 @@ KICOMMON_API bool DownloadAndExtract( const wxString& aServer, const wxString& a
                                       wxString& aError );
 
 /**
+ * Create the project-local footprint library folders the project's fp-lib-table names
+ * (${KIPRJMOD}/<name>.pretty) when they are missing.  An online project stores files, not
+ * folders, so a library with no footprints in it does not come down with the project; the
+ * table row then failed with "Footprint library ... not found" on every open.  An empty
+ * library folder is a valid, empty library.  Only folders inside aProjectPath are created.
+ */
+KICOMMON_API void EnsureLibraryFolders( const wxString& aProjectPath );
+
+/**
  * Remember that the local project at aProjectPath is a copy of server project
  * aProjectId, so the editors can rejoin the live session automatically the next
  * time it is opened.  Written to <project>.collab/link.json.

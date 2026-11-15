@@ -1060,6 +1060,16 @@ bool KICAD_MANAGER_FRAME::LoadProject( const wxFileName& aProjectFileName )
     // current extension. Be very careful with aProjectFileName vs. Prj().GetProjectPath()
     // from here on out.
 
+    // A copy of an online project downloaded before library folders were created with it:
+    // make the empty ones now, before the library tables load and report them missing.
+    {
+        wxFileName pro( fullPath );
+        wxString   linkedServer;
+
+        if( !COLLAB_PROJECT::ReadLocalLink( pro.GetPath(), pro.GetName(), linkedServer ).IsEmpty() )
+            COLLAB_PROJECT::EnsureLibraryFolders( pro.GetPath() );
+    }
+
     // The load overrides the lock in place.  Releasing it here and taking it again there would
     // delete and recreate the lock file, which fails on Windows while another handle is open.
     Pgm().GetSettingsManager().LoadProject( fullPath, true, lockOverrideGranted );

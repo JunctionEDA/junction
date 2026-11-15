@@ -25,6 +25,7 @@
 
 #include <wx/log.h>
 
+#include <wx/arrstr.h>
 #include <wx/dir.h>
 #include <wx/filename.h>
 #include <wx/mstream.h>
@@ -759,6 +760,59 @@ wxString COLLAB_PROJECT::FindLocalCopyIn( const wxString& aRegistryDir,
 }
 
 
+void COLLAB_PROJECT::EnsureLibraryFolders( const wxString& aProjectPath )
+{
+    wxFileName table( aProjectPath, wxS( "fp-lib-table" ) );
+
+    if( !table.FileExists() )
+        return;
+
+    wxLogNull         noLog;
+    wxFFileInputStream in( table.GetFullPath() );
+
+    if( !in.IsOk() || in.GetLength() <= 0 || in.GetLength() > 4 * 1024 * 1024 )
+        return;
+
+    std::string bytes( static_cast<size_t>( in.GetLength() ), '\0' );
+    in.Read( bytes.data(), bytes.size() );
+
+    const wxString text = wxString::FromUTF8( bytes.data(), in.LastRead() );
+    const wxString marker = wxS( "\"${KIPRJMOD}/" );
+    size_t         pos = 0;
+
+    while( ( pos = text.find( marker, pos ) ) != wxString::npos )
+    {
+        pos += marker.length();
+        const size_t end = text.find( wxS( '"' ), pos );
+
+        if( end == wxString::npos )
+            break;
+
+        const wxString rel = text.Mid( pos, end - pos );
+        pos = end + 1;
+
+        // Only plain folders below the project: no escapes, variables or parent steps.
+        if( rel.IsEmpty() || !rel.Lower().EndsWith( wxS( ".pretty" ) ) || rel.Contains( wxS( ".." ) )
+            || rel.Contains( wxS( "$" ) ) || rel.Contains( wxS( "\\" ) ) || rel.Contains( wxS( ":" ) )
+            || rel.StartsWith( wxS( "/" ) ) )
+        {
+            continue;
+        }
+
+        wxFileName dir = wxFileName::DirName( aProjectPath );
+
+        for( const wxString& part : wxSplit( rel, '/', '\0' ) )
+        {
+            if( !part.IsEmpty() )
+                dir.AppendDir( part );
+        }
+
+        if( !dir.DirExists() && !wxFileName::FileExists( dir.GetPath() ) )
+            wxFileName::Mkdir( dir.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL );
+    }
+}
+
+
 bool COLLAB_PROJECT::DownloadAndExtract( const wxString& aServer, const wxString& aToken,
                                          const wxString& aProjectId,
                                          const wxString& aProjectName,
@@ -890,6 +944,7 @@ bool COLLAB_PROJECT::DownloadAndExtract( const wxString& aServer, const wxString
 
     WriteLocalLink( linkDir, linkName, aServer, aProjectId );
     SeedSyncBases( linkDir, linkName );
+    EnsureLibraryFolders( linkDir );
 
     return true;
 }
