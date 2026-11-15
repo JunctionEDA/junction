@@ -15,13 +15,15 @@ import type { ScrollMod } from "../editor/wheel-model";
 export type EditorId = "sch" | "pcb" | "sym" | "fp";
 /** The internal-unit scale an editor formats with: the schematic and symbol editors use eeschema's, the board editors pcbnew's. */
 export const scaleOf = (ed: EditorId): IuScale => (ed === "sch" || ed === "sym" ? "sch" : "pcb");
-export type SchThemeId = "default" | "classic" | "dark";
+/** a built-in theme ("default", "classic", "dark") or a user theme's id ("user:…") */
+export type SchThemeId = string;
 /**
  * WINDOW_SETTINGS::grid: the grid list in KiCad's order (sizes in mm, square grids; names[i] is GRID::name, "" when
  * unnamed), last = grid.last_size (the grid the editor opens on), fast1 / fast2 = Alt+1 / Alt+2, axes = axes_enabled.
  */
 export interface GridPrefs { sizes: number[]; names?: string[]; last?: number; fast1: number; fast2: number; overrides: GridOverrides; axes?: boolean }
 import { clampGal, galDefaults, type GalPrefs } from "./gal-options";
+import { isDarkBackground, type UserSchTheme } from "./color-themes";
 export { GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clampGal, type GalPrefs } from "./gal-options";
 export interface Prefs {
   /**
@@ -40,7 +42,7 @@ export interface Prefs {
   schEditing: { lineMode: "free" | "90" | "45"; mouseDragIsDrag: boolean; autoAnnotate: boolean; autoStartWires: boolean; escClearsNetHighlight: boolean;
     repeatX: number; repeatY: number; repeatIncrement: number };
   /** the schematic canvas colours (Preferences > Schematic Editor > Colors): a theme, and whether a dark UI swaps in the dark sheet */
-  schColors: { theme: SchThemeId; followDark: boolean };
+  schColors: { theme: SchThemeId; followDark: boolean; /** the themes made with New Theme... (KiCad's colors/*.json) */ user: UserSchTheme[] };
   /** the inactive layer mode is not here: it is the project's ("board.high_contrast_mode", Appearance panel) */
   pcbDisplay: { showPadNumbers: boolean; showNetNames: boolean; showPageLimits: boolean;
     /** pcb_display.track_clearance_mode: 0 do not show, 1 while routing, 2 with via while routing (default), 3 while routing and editing, 4 always */
@@ -76,7 +78,7 @@ export const DEFAULT_PREFS: Prefs = {
     touchpadMode: IS_WIN ? "native" : "scroll", zoomMod: "", panHMod: "ctrl", panVMod: "shift", reverseZoom: false, reversePanH: false, horizontalPan: true },
   schDisplay: { showHiddenPins: false, showHiddenFields: false, showPageLimits: true },
   schEditing: { lineMode: "90", mouseDragIsDrag: true, autoAnnotate: true, autoStartWires: true, escClearsNetHighlight: true, repeatX: 0, repeatY: 100 * 0.0254, repeatIncrement: 1 },
-  schColors: { theme: "default", followDark: false },
+  schColors: { theme: "default", followDark: false, user: [] },
   pcbDisplay: { showPadNumbers: true, showNetNames: true, showPageLimits: true, trackClearance: 2, padClearance: true },
   common: { hcDimming: 0.8 },
   pcbOrigin: { origin: "page", invertX: false, invertY: false },
@@ -174,13 +176,35 @@ export function rememberGrid(mm: number, ed: EditorId = editorId()): void {
 export const COLOR_THEMES: [SchThemeId, string][] = [["default", "KiCad Default"], ["classic", "KiCad Classic"], ["dark", "Dark"]];
 /** The schematic theme the canvas should show: the chosen one, or the dark sheet while the UI is dark and the user asked to follow it. */
 export function schThemeFor(p: Prefs, ui: "light" | "dark" = effectiveTheme()): SchThemeId {
-  const t = COLOR_THEMES.some(([id]) => id === p.schColors.theme) ? p.schColors.theme : "default";
+  const t = schThemeList(p).some(([id]) => id === p.schColors.theme) ? p.schColors.theme : "default";
   return p.schColors.followDark && ui === "dark" ? "dark" : t;
 }
+/** Every theme the Theme list offers: the built-in ones (read-only), then the user's. */
+export function schThemeList(p: Prefs): [SchThemeId, string][] { return [...COLOR_THEMES, ...(p.schColors.user || []).map((u) => [u.id, u.name] as [string, string])]; }
 let followingUi = false;
+/** the user themes' colours as last put into the canvas' table, to see an edit of the theme on show */
+const registered = new Map<string, string>();
+/** SETTINGS_MANAGER's colour settings: the user's themes go into the canvas' theme table (print and plot list them too). */
+export function registerUserThemes(p: Prefs = prefs()): string[] {
+  if (typeof KiCadCanvas === "undefined" || !KiCadCanvas.SCH_THEMES) return [];
+  const changed: string[] = [], T = KiCadCanvas.SCH_THEMES;
+  for (const u of p.schColors.user || []) {
+    const stamp = JSON.stringify([u.name, u.colors]);
+    if (registered.get(u.id) === stamp && T[u.id]) continue;
+    T[u.id] = { name: u.name, dark: isDarkBackground(u.colors.bg || "#FFFFFF"), colors: { ...u.colors } }; registered.set(u.id, stamp); changed.push(u.id);
+  }
+  return changed;
+}
 function applyColorTheme(p: Prefs): void {
   if (typeof KiCadCanvas === "undefined" || !KiCadCanvas.setSchTheme) return;
-  if (KiCadCanvas.setSchTheme(schThemeFor(p))) requestRender();
+  const changed = registerUserThemes(p), want = schThemeFor(p);
+  // a theme on show whose colours were edited: the palette is filled again and the sheet's geometry rebuilt
+  if (changed.includes(want) && KiCadCanvas.schTheme && KiCadCanvas.schTheme() === want) {
+    KiCadCanvas.setSchTheme("default"); KiCadCanvas.setSchTheme(want);
+    if (E.kdoc && E.kdoc.type === "sch") (E.kdoc as unknown as { schTheme?: string }).schTheme = "";
+    requestRender();
+  }
+  if (KiCadCanvas.setSchTheme(want)) requestRender();
   // with "follow the app's dark mode" on, a UI theme change (menu, other tab, the system) swaps the sheet too
   if (!followingUi) { followingUi = true; subscribeTheme(() => applyColorTheme(prefs())); }
 }

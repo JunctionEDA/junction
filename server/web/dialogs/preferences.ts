@@ -7,10 +7,12 @@ import { E, toast } from "./editor";
 import { IS_MAC, keyName, modName } from "../keys";
 import { hotkeysPanel } from "./hotkeys-panel";
 import type { UserHotkeys } from "../menuspec";
-import { KD, checkbox, h, select, textInput } from "./dom";
+import { KD, checkbox, h, popupMenu, promptText, select, textInput } from "./dom";
+import { SCH_COLOR_ITEMS, hiddenByBackground, newUserTheme, sameColor, themeNameError, type UserSchTheme } from "./color-themes";
+import { colorSwatch, colorText, parseColor, type RGBA } from "../components/colorswatch";
 import { lenField, messageBox } from "../editor/pcbdialogs/ui";
 import { loadUnits, messageText, unitName } from "../units";
-import { COLOR_THEMES, DEFAULT_PREFS, GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clonePrefs, editorId, gridLabel, savePrefs, scaleOf, type EditorId, type GalPrefs, type Prefs, type SchThemeId } from "./prefs";
+import { DEFAULT_PREFS, schThemeList, GRID_MIN_SPACING_RANGE, GRID_THICKNESS_CHOICES, clonePrefs, editorId, gridLabel, savePrefs, scaleOf, type EditorId, type GalPrefs, type Prefs } from "./prefs";
 import { clearDialogState, resetProgramSettings } from "./maintenance";
 import { askConfirm } from "../components/msgbox";
 import type { Units } from "../store";
@@ -80,7 +82,7 @@ export function resetPage(key: string, st: Staged): void {
     case "Schematic Editor/Display Options": st.p.schDisplay = d.schDisplay; st.p.gal.sch = d.gal.sch; break;
     case "Schematic Editor/Grids": st.p.grids.sch = d.grids.sch; break;
     case "Schematic Editor/Editing Options": st.p.schEditing = d.schEditing; break;
-    case "Schematic Editor/Colors": st.p.schColors = d.schColors; break;
+    case "Schematic Editor/Colors": st.p.schColors = { ...d.schColors, user: st.p.schColors.user }; break;
     case "Footprint Editor/Display Options": st.p.gal.fp = d.gal.fp; break;
     case "Footprint Editor/Grids": st.p.grids.fp = d.grids.fp; break;
     case "Footprint Editor/Editing Options": st.p.fpEditing = d.fpEditing; break;
@@ -181,6 +183,52 @@ export function openPreferences(page?: string, staged?: Staged): void {
     KD().staticBox(host, "Cursor").append(radios("cursor", [["small", "Small crosshairs"], ["full", "Full window crosshairs"], ["45", "45 degree crosshairs"]], g.crosshair, (v) => { g.crosshair = v as GalPrefs["crosshair"]; }),
       h("div", { style: "margin-top:6px" }, checkbox("Always show crosshairs", g.alwaysShow, (on) => { g.alwaysShow = on; }, { id: `${pre}-always` })));
   };
+  // PANEL_EESCHEMA_COLOR_SETTINGS: the Theme list (the built-in themes read-only, then the user's, then New Theme...),
+  // a swatch per item over the theme's background, each with Copy / Paste / Revert to saved color on a right click
+  let bgConfirmed = false;
+  const colorsPage = (pg: HTMLElement): void => {
+    const sc = p.schColors, saved = JSON.parse(JSON.stringify(sc.user)) as UserSchTheme[];
+    const NEW = "__new__";
+    const userOf = (id: string): UserSchTheme | undefined => sc.user.find((u) => u.id === id);
+    const colorsOf = (id: string): Record<string, string> => { const u = userOf(id); return u ? { ...KiCadCanvas.schThemeColors("default"), ...u.colors } : KiCadCanvas.schThemeColors(id); };
+    const choices = (): [string, string][] => [...schThemeList(p).map(([id, n]) => [id, userOf(id) ? n : `${n} (read-only)`] as [string, string]), [NEW, "New Theme..."]];
+    const theme = select(choices(), sc.theme, (v) => {
+      if (v !== NEW) { sc.theme = v; paint(); return; }
+      theme.value = sc.theme;
+      void promptText("Add Color Theme", "New theme name:", "", (name) => { const err = themeNameError(name, schThemeList(p).map(([, n]) => n)); if (err) { messageBox("Add Color Theme", err); return false; } return true; }).then((name) => {
+        if (name === null) return;
+        const u = newUserTheme(name, colorsOf(sc.theme), schThemeList(p).map(([id]) => id)); sc.user.push(u); sc.theme = u.id;
+        theme.replaceChildren(...choices().map(([v2, l]) => h("option", { value: v2 }, l))); theme.value = u.id; paint();
+      });
+    }, { id: "kd-pref-theme", style: "width:260px" });
+    let copied: RGBA | null = null;
+    const grid = h("div", { id: "kd-pref-swatches", style: "display:grid;grid-template-columns:repeat(2,max-content minmax(0,1fr));gap:5px 10px;align-items:center;margin-top:12px" });
+    const paint = (): void => {
+      const C = colorsOf(sc.theme), u = userOf(sc.theme), bg = C.bg || "#FFFFFF";
+      grid.replaceChildren();
+      for (const [k, label] of SCH_COLOR_ITEMS) {
+        const sw = colorSwatch(parseColor(C[k]), { opacity: true, readOnly: !u, key: `sch-color-${k}`, title: label.replace("&&", "&"),
+          onChange: (c) => { if (!u || !c) return; u.colors[k] = colorText(c); if (k === "wire") u.colors.busEntry = u.colors[k]; if (k === "bg") paint(); } });
+        // COLOR_SWATCH::SetSwatchBackground: a translucent colour is shown over the theme's background
+        sw.el.style.boxShadow = `0 0 0 2px ${bg}`;
+        sw.el.addEventListener("contextmenu", (ev) => {
+          ev.preventDefault();
+          const was = (saved.find((x) => x.id === sc.theme)?.colors || {})[k], cur = u ? u.colors[k] : C[k];
+          popupMenu(ev.clientX, ev.clientY, [
+            { label: "Copy color", run: () => { copied = parseColor(cur); } },
+            ...(u && copied ? [{ label: "Paste color", run: () => { u.colors[k] = colorText(copied!); paint(); } }] : []),
+            ...(u && was && !sameColor(was, cur) ? [{ label: "Revert to saved color", run: () => { u.colors[k] = was; paint(); } }] : []),
+          ]);
+        });
+        grid.append(sw.el, h("span", null, label.replace("&&", "&")));
+      }
+    };
+    pg.append(h("div", { class: "kd-row", style: "gap:8px" }, h("label", { style: "color:var(--ink-2)" }, "Theme:"), theme),
+      h("div", { style: "margin-top:8px" }, checkbox("Follow the app's dark mode for the schematic sheet", sc.followDark, (on) => { sc.followDark = on; }, { id: "kd-pref-followdark", title: "While the user interface is dark, draw the schematic with the Dark theme" })),
+      grid,
+      h("p", { class: "kd-note", style: "margin-top:10px" }, "Built-in themes are read-only: choose New Theme... to make an editable copy.  Right-click a color to copy, paste or revert it.  Changes are applied when the dialog is closed with OK; plots and exports use KiCad Default unless told otherwise."));
+    paint();
+  };
   /** A Display Options page's two columns: PANEL_GAL_OPTIONS on the left, the frame's own options on the right. */
   const displayCols = (pg: HTMLElement, ed: EditorId): HTMLElement => {
     const L = h("div"), R = h("div"); pg.append(h("div", { style: "display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:20px" }, L, R)); galPanel(L, ed); return R;
@@ -260,16 +308,7 @@ export function openPreferences(page?: string, staged?: Staged): void {
               h("label", null, "Vertical pitch:"), pitch("kd-pref-repeaty", se.repeatY, (v) => { se.repeatY = v; }), h("span", { class: "ro" }, uname),
               h("label", null, "Label increment:"), inc, h("span", null)));
           } },
-          { label: "Colors", build(pg) {
-            const sw = h("div", { id: "kd-pref-swatches", style: "display:flex;gap:6px;flex-wrap:wrap;margin-top:12px" });
-            const names: [string, string][] = [["bg", "Background"], ["wire", "Wires"], ["bus", "Buses"], ["junction", "Junctions"], ["outline", "Symbol body outlines"], ["body", "Symbol body fills"], ["pin", "Pins"], ["pinName", "Pin names"], ["pinNum", "Pin numbers"], ["ref", "References"], ["value", "Values"], ["field", "Fields"], ["label", "Labels"], ["glabel", "Global labels"], ["hlabel", "Hierarchical labels"], ["sheet", "Sheet borders"], ["notes", "Schematic text && graphics"], ["frame", "Drawing sheet"]];
-            // the swatches preview the theme picked in the dialog; the canvas changes on OK
-            const paint = () => { const C = KiCadCanvas.schThemeColors(p.schColors.theme); sw.replaceChildren(...names.map(([k, n]) => h("div", { class: "kd-row", style: "width:240px;gap:6px" }, h("span", { style: `display:inline-block;width:26px;height:14px;border:1px solid var(--line);background:${C[k] || "transparent"}` }), n.replace("&&", "&")))); };
-            pg.append(h("div", { class: "kd-row" }, h("label", { style: "color:var(--ink-2)" }, "Theme:"), select(COLOR_THEMES, p.schColors.theme, (v) => { p.schColors.theme = v as SchThemeId; paint(); }, { id: "kd-pref-theme", style: "width:220px" })),
-              h("div", { style: "margin-top:8px" }, checkbox("Follow the app's dark mode for the schematic sheet", p.schColors.followDark, (on) => { p.schColors.followDark = on; }, { id: "kd-pref-followdark", title: "While the user interface is dark, draw the schematic with the Dark theme" })), sw,
-              h("p", { class: "kd-note", style: "margin-top:10px" }, "A new theme is applied when the dialog is closed with OK.  Plots and exports always use KiCad Default."));
-            paint();
-          } },
+          { label: "Colors", build(pg) { colorsPage(pg); } },
         ] },
         // PANEL_FP_GRIDS: the Footprint Editor's own window settings
         { label: "Footprint Editor", pages: [
@@ -354,6 +393,14 @@ export function openPreferences(page?: string, staged?: Staged): void {
     ok() {
       // PANEL_MOUSE_SETTINGS::TransferDataFromWindow: one modifier per vertical scroll action
       if (!scrollModsValid(p.mouse)) { toast("Only one action can be assigned to each vertical scroll setting", 4000); return false; }
+      // PANEL_EESCHEMA_COLOR_SETTINGS::validateSave: a user theme with items in the background colour asks first
+      const ut = p.schColors.user.find((u) => u.id === p.schColors.theme);
+      if (ut && !bgConfirmed && hiddenByBackground(ut.colors).length) {
+        const okBtn = body0 && body0.closest(".kd-dialog")?.querySelector<HTMLButtonElement>(".kd-foot .btn.primary");
+        void askConfirm("Warning", "Some items have the same color as the background\nand they will not be seen on the screen.  Are you\nsure you want to use these colors?", { ok: "Yes", cancel: "No" })
+          .then((yes) => { if (yes && okBtn) { bgConfirmed = true; okBtn.click(); } });
+        return false;
+      }
       lastPage = pageKey() || lastPage; if (hk) hk.apply(); if (uiMode !== getThemeMode()) setThemeMode(uiMode); savePrefs(p); if (contrast !== getInactiveMode()) setInactiveMode(contrast); if (pcbTools() && arcEdit !== pcbTools()!.arcEditMode()) pcbTools()!.setArcEditMode(arcEdit);
       // PANEL_EDIT_OPTIONS::TransferDataFromWindow: m_AngleSnapMode = checked ? DEG45 : DIRECT (only when the box changed, so a 90 degree mode stays)
       const t = pcbTools(); if (t && t.setAngleSnap && hv45 !== (snap0 !== "free")) t.setAngleSnap(null, hv45 ? "45" : "free");

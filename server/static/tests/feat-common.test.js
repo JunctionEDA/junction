@@ -11,7 +11,7 @@ let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + String(e && e.stack || e).split("\n").slice(0, 4).join("\n       ")); } }
 
 const L = load(["dialogs", "logic.ts"]), W = load(["editor", "drawingsheet-model.ts"]);
-const G = load(["dialogs", "gal-options.ts"]), M = load(["dialogs", "maintenance.ts"]);
+const G = load(["dialogs", "gal-options.ts"]), M = load(["dialogs", "maintenance.ts"]), T = load(["dialogs", "color-themes.ts"]);
 
 test("Page Settings: the custom size is 1000 mils at least, under 120000 mils (eeschema) / 48000 mils (pcbnew)", () => {
   assert.strictEqual(L.pageSizeError("Width", 25.4, true, "mm"), null);
@@ -47,6 +47,24 @@ test("Maintenance: dialog state and program settings are told apart; designs and
   const keys = ["kd.geom.plot", "kd.state.find", "pd.state.track", "kui.prefs", "kui.v3d", "kc.drc.options", "kicad.fab.preset", "kicad-collab:lib-recent:sym", "kui.boardDocs", "kc.onboard.mini", "admin.range", "other"];
   assert.deepStrictEqual(M.dialogStateKeys(keys), ["kd.geom.plot", "kd.state.find", "pd.state.track"]);
   assert.deepStrictEqual(M.programSettingKeys(keys), ["kd.geom.plot", "kd.state.find", "pd.state.track", "kui.prefs", "kui.v3d", "kc.drc.options", "kicad.fab.preset", "kicad-collab:lib-recent:sym"]);
+});
+
+test("Colors: New Theme names (FOOTPRINT_NAME_VALIDATOR, Theme already exists!) and ids", () => {
+  assert.strictEqual(T.themeNameError("Mine", ["KiCad Default"]), null);
+  assert.strictEqual(T.themeNameError("kicad default", ["KiCad Default"]), "Theme already exists!");
+  assert.match(T.themeNameError("a/b", []), /illegal character '\/'/);
+  assert.match(T.themeNameError("  ", []), /required/);
+  assert.strictEqual(T.userThemeId("My Theme", []), "user:my-theme");
+  assert.strictEqual(T.userThemeId("My Theme", ["user:my-theme"]), "user:my-theme-2");
+  const u = T.newUserTheme(" Night ", { bg: "#000000", wire: "#00FF00" }, []);
+  assert.deepStrictEqual(u, { id: "user:night", name: "Night", colors: { bg: "#000000", wire: "#00FF00" } });
+});
+test("Colors: validateSave finds items drawn in the background colour (not the body fill)", () => {
+  assert.deepStrictEqual(T.hiddenByBackground({ bg: "#F5F4EF", wire: "#f5f4ef", body: "#F5F4EF", bus: "#000084" }), ["wire"]);
+  assert.deepStrictEqual(T.hiddenByBackground({ bg: "#F5F4EF", wire: "rgba(245,244,239,0.5)" }), []);
+  assert.ok(T.sameColor("#0000ff", "rgb(0, 0, 255)"));
+  assert.ok(T.isDarkBackground("#1C1D20")); assert.ok(!T.isDarkBackground("#F5F4EF"));
+  assert.strictEqual(T.SCH_COLOR_ITEMS.length, 35); assert.ok(T.SCH_COLOR_ITEMS.some(([k, n]) => k === "bg" && n === "Background"));
 });
 
 console.log(`feat-common: ${passed} passed, ${failed} failed`);
