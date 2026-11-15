@@ -259,6 +259,48 @@
     "image"
   ]);
 
+  // web/keys.ts
+  function detectMac() {
+    if (typeof navigator === "undefined") return false;
+    const nav = navigator;
+    if (nav.platform) return /Mac|iPhone|iPad|iPod/i.test(nav.platform);
+    const uad = nav.userAgentData && nav.userAgentData.platform;
+    if (uad) return /mac|ios/i.test(uad);
+    return /Macintosh|Mac OS X|iPhone|iPad/.test(nav.userAgent || "");
+  }
+  var IS_MAC = detectMac();
+
+  // web/editor/selmodes.ts
+  function detectWindows() {
+    if (typeof navigator === "undefined") return false;
+    const nav = navigator;
+    if (nav.platform) return /^Win/i.test(nav.platform);
+    const uad = nav.userAgentData && nav.userAgentData.platform;
+    if (uad) return /windows/i.test(uad);
+    return /Windows/.test(nav.userAgent || "");
+  }
+  var IS_WINDOWS = detectWindows();
+  function ctrlDown(ev, mac = IS_MAC) {
+    return mac ? !!ev.metaKey : !!ev.ctrlKey;
+  }
+  function modifiersState(ev, o = {}) {
+    const shift = !!ev.shiftKey, ctrl = ctrlDown(ev, o.mac ?? IS_MAC), alt = !!ev.altKey;
+    const hl = !!o.ctrlHighlights;
+    return {
+      subtractive: ctrl && shift,
+      additive: !ctrl && shift,
+      exclusiveOr: hl ? false : ctrl && !shift,
+      highlight: hl ? ctrl && !shift : false,
+      // "Drag is more forgiving and allows either Ctrl+Drag or Shift+Drag to add to the selection"
+      dragAdditive: (ctrl || shift) && !alt,
+      dragSubtractive: ctrl && shift && !alt,
+      skipHeuristics: o.windows ?? IS_WINDOWS ? false : alt
+    };
+  }
+  function hasModifier(s) {
+    return s.subtractive || s.additive || s.exclusiveOr;
+  }
+
   // web/tools/sch-tools/orient.ts
   var ROT = { 0: [1, 0, 0, -1], 90: [0, -1, -1, 0], 180: [-1, 0, 0, 1], 270: [0, 1, 1, 0] };
   var MX = [1, 0, 0, -1];
@@ -1715,17 +1757,6 @@
     if (free.length !== items.length && typeof ctx.setSelection === "function") ctx.setSelection(free.map((it) => it.id));
     return free;
   }
-
-  // web/keys.ts
-  function detectMac() {
-    if (typeof navigator === "undefined") return false;
-    const nav = navigator;
-    if (nav.platform) return /Mac|iPhone|iPad|iPod/i.test(nav.platform);
-    const uad = nav.userAgentData && nav.userAgentData.platform;
-    if (uad) return /mac|ios/i.test(uad);
-    return /Macintosh|Mac OS X|iPhone|iPad/.test(nav.userAgent || "");
-  }
-  var IS_MAC = detectMac();
 
   // web/menufit.ts
   var ARROW = 16;
@@ -8784,7 +8815,8 @@ Link '${target}' to this file?`)) return null;
       ev.preventDefault();
       return;
     }
-    if (!ev.shiftKey && pointEditStart(ctx, mm, ev)) {
+    if (hasModifier(modifiersState(ev))) return;
+    if (pointEditStart(ctx, mm, ev)) {
       ev.stopImmediatePropagation();
       ev.preventDefault();
       return;
@@ -8804,7 +8836,11 @@ Link '${target}' to this file?`)) return null;
     const already = S.sel === hit.id;
     S.sel = hit.id;
     S.hover = null;
-    ctx.setSelected(null);
+    if (ctx.selection && ctx.selection.size && ctx.setSelection) {
+      const keepEnds = S.selEnds;
+      ctx.setSelection([]);
+      S.selEnds = keepEnds;
+    } else ctx.setSelected(null);
     if (!already) setSelEnd(hit.id, lineEndAt(hit, mm, selectThreshold(ctx)));
     S.pending = { item: hit, mm };
     try {

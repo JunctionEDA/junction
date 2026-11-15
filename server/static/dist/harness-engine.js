@@ -48,6 +48,68 @@ var require_pcb_tools = __commonJS({
         }
       });
       var root4 = typeof window !== "undefined" ? window : globalThis;
+      function detectMac2() {
+        if (typeof navigator === "undefined") return false;
+        const nav = navigator;
+        if (nav.platform) return /Mac|iPhone|iPad|iPod/i.test(nav.platform);
+        const uad = nav.userAgentData && nav.userAgentData.platform;
+        if (uad) return /mac|ios/i.test(uad);
+        return /Macintosh|Mac OS X|iPhone|iPad/.test(nav.userAgent || "");
+      }
+      var IS_MAC2 = detectMac2();
+      function splitKey(key3) {
+        const parts = key3.split("+");
+        let k = parts.pop() ?? "";
+        if (k === "" && key3.endsWith("+")) {
+          k = "+";
+          parts.pop();
+        }
+        return { ctrl: parts.includes("Ctrl") || parts.includes("Cmd"), alt: parts.includes("Alt") || parts.includes("Option"), shift: parts.includes("Shift"), rawCtrl: parts.includes("RawCtrl"), key: k };
+      }
+      function keyName(key3) {
+        if (!key3) return "";
+        const s = splitKey(key3);
+        if (!IS_MAC2) return s.rawCtrl ? key3.replace("RawCtrl", "Ctrl") : key3;
+        const mods = [];
+        if (s.rawCtrl) mods.push("Ctrl");
+        if (s.ctrl) mods.push("Cmd");
+        if (s.alt) mods.push("Option");
+        if (s.shift) mods.push("Shift");
+        return [...mods, s.key].join("+");
+      }
+      function keysInText(text2) {
+        if (!IS_MAC2) return text2;
+        return text2.replace(/\b((?:(?:Ctrl|Alt|Shift)\+)+)(?=\S)/g, (mods) => /Ctrl|Alt/.test(mods) ? keyName(mods + "x").slice(0, -1) : mods);
+      }
+      function detectWindows() {
+        if (typeof navigator === "undefined") return false;
+        const nav = navigator;
+        if (nav.platform) return /^Win/i.test(nav.platform);
+        const uad = nav.userAgentData && nav.userAgentData.platform;
+        if (uad) return /windows/i.test(uad);
+        return /Windows/.test(nav.userAgent || "");
+      }
+      var IS_WINDOWS = detectWindows();
+      function ctrlDown(ev, mac = IS_MAC2) {
+        return mac ? !!ev.metaKey : !!ev.ctrlKey;
+      }
+      function modifiersState(ev, o = {}) {
+        const shift2 = !!ev.shiftKey, ctrl = ctrlDown(ev, o.mac ?? IS_MAC2), alt = !!ev.altKey;
+        const hl = !!o.ctrlHighlights;
+        return {
+          subtractive: ctrl && shift2,
+          additive: !ctrl && shift2,
+          exclusiveOr: hl ? false : ctrl && !shift2,
+          highlight: hl ? ctrl && !shift2 : false,
+          // "Drag is more forgiving and allows either Ctrl+Drag or Shift+Drag to add to the selection"
+          dragAdditive: (ctrl || shift2) && !alt,
+          dragSubtractive: ctrl && shift2 && !alt,
+          skipHeuristics: o.windows ?? IS_WINDOWS ? false : alt
+        };
+      }
+      function clickMode(s) {
+        return s.subtractive ? "remove" : s.exclusiveOr ? "toggle" : s.additive ? "add" : null;
+      }
       var K8 = root4.KiCadCanvas;
       var WIDTHS = [0.2, 0.25, 0.3, 0.5, 0.8, 1];
       var HL = "#FFB43A";
@@ -27368,39 +27430,6 @@ var require_pcb_tools = __commonJS({
         return out;
       }
       var padToolApi = { nextPadNumber, masterPad, defaultPad, typeFromPad, newPadNode, placePad, moveAnchorChanges, enumerateChanges, padMemory, strNumCmp: strNumCmp2, ipcRoundingRatio, refDesPrefix, trailingInt, canHaveNumber };
-      function detectMac2() {
-        if (typeof navigator === "undefined") return false;
-        const nav = navigator;
-        if (nav.platform) return /Mac|iPhone|iPad|iPod/i.test(nav.platform);
-        const uad = nav.userAgentData && nav.userAgentData.platform;
-        if (uad) return /mac|ios/i.test(uad);
-        return /Macintosh|Mac OS X|iPhone|iPad/.test(nav.userAgent || "");
-      }
-      var IS_MAC2 = detectMac2();
-      function splitKey(key3) {
-        const parts = key3.split("+");
-        let k = parts.pop() ?? "";
-        if (k === "" && key3.endsWith("+")) {
-          k = "+";
-          parts.pop();
-        }
-        return { ctrl: parts.includes("Ctrl") || parts.includes("Cmd"), alt: parts.includes("Alt") || parts.includes("Option"), shift: parts.includes("Shift"), rawCtrl: parts.includes("RawCtrl"), key: k };
-      }
-      function keyName(key3) {
-        if (!key3) return "";
-        const s = splitKey(key3);
-        if (!IS_MAC2) return s.rawCtrl ? key3.replace("RawCtrl", "Ctrl") : key3;
-        const mods = [];
-        if (s.rawCtrl) mods.push("Ctrl");
-        if (s.ctrl) mods.push("Cmd");
-        if (s.alt) mods.push("Option");
-        if (s.shift) mods.push("Shift");
-        return [...mods, s.key].join("+");
-      }
-      function keysInText(text2) {
-        if (!IS_MAC2) return text2;
-        return text2.replace(/\b((?:(?:Ctrl|Alt|Shift)\+)+)(?=\S)/g, (mods) => /Ctrl|Alt/.test(mods) ? keyName(mods + "x").slice(0, -1) : mods);
-      }
       function layersBlock(doc) {
         const rows = [];
         for (const [name, l] of doc.layers) if (/\./.test(name) || name === "Margin") rows.push([l.id, name, l.type || "user"].concat(l.userName ? [l.userName] : []));
@@ -29833,8 +29862,15 @@ var require_pcb_tools = __commonJS({
       }
       function onStagePointerUp(ev) {
         const ctx = lastCtx;
+        const pd = S2.pending;
         S2.pending = null;
         if (!ctx) return;
+        if (pd && !pd.app && pd.item && ev && ev.type === "pointerup" && ctx.doc && S2.sel.size > 1 && Math.hypot(ev.clientX - pd.client[0], ev.clientY - pd.client[1]) <= DRAG_PX) {
+          const pick = topParentOf(ctx.doc, pd.item.id) ? Array.from(expandGroups(ctx.doc, [pd.item.id])) : [pd.item.id];
+          S2.sel = new Set(pick);
+          if (ctx.setSelection) ctx.setSelection([]);
+          ctx.requestRender();
+        }
         if (S2.pedit) {
           if (ev) {
             ev.stopImmediatePropagation();
@@ -34009,8 +34045,7 @@ var require_pcb_tools = __commonJS({
         ctx.requestRender();
       }
       function selMode(ev) {
-        const c = !!(ev && (ev.ctrlKey || ev.metaKey)), sh = !!(ev && ev.shiftKey);
-        return c && sh ? "remove" : c ? "toggle" : sh ? "add" : null;
+        return ev ? clickMode(modifiersState({ shiftKey: !!ev.shiftKey, ctrlKey: !!ev.ctrlKey, metaKey: !!ev.metaKey, altKey: !!ev.altKey })) : null;
       }
       function applySelMode(set, id, mode2) {
         if (mode2 === "add") set.add(id);
@@ -45687,9 +45722,9 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
   }
 });
 
-// node_modules/opentype.js/dist/opentype.js
+// ../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.js
 var require_opentype = __commonJS({
-  "node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
+  "../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
     (function(global, factory) {
       typeof exports2 === "object" && typeof module2 !== "undefined" ? factory(exports2) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global = global || self, factory(global.opentype = {}));
     })(exports2, (function(exports3) {
@@ -74015,6 +74050,44 @@ root.KiCadCanvas = api;
     "table",
     "image"
   ]);
+  function detectMac2() {
+    if (typeof navigator === "undefined") return false;
+    const nav = navigator;
+    if (nav.platform) return /Mac|iPhone|iPad|iPod/i.test(nav.platform);
+    const uad = nav.userAgentData && nav.userAgentData.platform;
+    if (uad) return /mac|ios/i.test(uad);
+    return /Macintosh|Mac OS X|iPhone|iPad/.test(nav.userAgent || "");
+  }
+  var IS_MAC2 = detectMac2();
+  function detectWindows() {
+    if (typeof navigator === "undefined") return false;
+    const nav = navigator;
+    if (nav.platform) return /^Win/i.test(nav.platform);
+    const uad = nav.userAgentData && nav.userAgentData.platform;
+    if (uad) return /windows/i.test(uad);
+    return /Windows/.test(nav.userAgent || "");
+  }
+  var IS_WINDOWS = detectWindows();
+  function ctrlDown(ev, mac = IS_MAC2) {
+    return mac ? !!ev.metaKey : !!ev.ctrlKey;
+  }
+  function modifiersState(ev, o = {}) {
+    const shift2 = !!ev.shiftKey, ctrl = ctrlDown(ev, o.mac ?? IS_MAC2), alt = !!ev.altKey;
+    const hl = !!o.ctrlHighlights;
+    return {
+      subtractive: ctrl && shift2,
+      additive: !ctrl && shift2,
+      exclusiveOr: hl ? false : ctrl && !shift2,
+      highlight: hl ? ctrl && !shift2 : false,
+      // "Drag is more forgiving and allows either Ctrl+Drag or Shift+Drag to add to the selection"
+      dragAdditive: (ctrl || shift2) && !alt,
+      dragSubtractive: ctrl && shift2 && !alt,
+      skipHeuristics: o.windows ?? IS_WINDOWS ? false : alt
+    };
+  }
+  function hasModifier(s) {
+    return s.subtractive || s.additive || s.exclusiveOr;
+  }
   var ROT = { 0: [1, 0, 0, -1], 90: [0, -1, -1, 0], 180: [-1, 0, 0, 1], 270: [0, 1, 1, 0] };
   var MX = [1, 0, 0, -1];
   var MY = [-1, 0, 0, 1];
@@ -75454,15 +75527,6 @@ root.KiCadCanvas = api;
     if (free.length !== items.length && typeof ctx.setSelection === "function") ctx.setSelection(free.map((it) => it.id));
     return free;
   }
-  function detectMac2() {
-    if (typeof navigator === "undefined") return false;
-    const nav = navigator;
-    if (nav.platform) return /Mac|iPhone|iPad|iPod/i.test(nav.platform);
-    const uad = nav.userAgentData && nav.userAgentData.platform;
-    if (uad) return /mac|ios/i.test(uad);
-    return /Macintosh|Mac OS X|iPhone|iPad/.test(nav.userAgent || "");
-  }
-  var IS_MAC2 = detectMac2();
   var ARROW2 = 16;
   var SPEED2 = 0.5;
   var SCROLLERS2 = /* @__PURE__ */ new WeakMap();
@@ -82465,7 +82529,8 @@ Link '${target2}' to this file?`)) return null;
       ev.preventDefault();
       return;
     }
-    if (!ev.shiftKey && pointEditStart(ctx, mm2, ev)) {
+    if (hasModifier(modifiersState(ev))) return;
+    if (pointEditStart(ctx, mm2, ev)) {
       ev.stopImmediatePropagation();
       ev.preventDefault();
       return;
@@ -82485,7 +82550,11 @@ Link '${target2}' to this file?`)) return null;
     const already = S2.sel === hit5.id;
     S2.sel = hit5.id;
     S2.hover = null;
-    ctx.setSelected(null);
+    if (ctx.selection && ctx.selection.size && ctx.setSelection) {
+      const keepEnds = S2.selEnds;
+      ctx.setSelection([]);
+      S2.selEnds = keepEnds;
+    } else ctx.setSelected(null);
     if (!already) setSelEnd(hit5.id, lineEndAt(hit5, mm2, selectThreshold(ctx)));
     S2.pending = { item: hit5, mm: mm2 };
     try {
@@ -90754,7 +90823,7 @@ function drillFiles(m, baseName3, opt, ext = "drl") {
   return out;
 }
 
-// node_modules/clipper2-ts/dist/Core.js
+// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Core.js
 var ClipType;
 (function(ClipType2) {
   ClipType2[ClipType2["NoClip"] = 0] = "NoClip";
@@ -91413,7 +91482,7 @@ var RectDUtils = {
 var InvalidRect64 = Object.freeze(Rect64Utils.createInvalid());
 var InvalidRectD = Object.freeze(RectDUtils.createInvalid());
 
-// node_modules/clipper2-ts/dist/Engine.js
+// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Engine.js
 var B02 = BigInt(0);
 var B22 = BigInt(2);
 var B42 = BigInt(4);
@@ -94278,7 +94347,7 @@ var Clipper = {
   }
 };
 
-// node_modules/clipper2-ts/dist/Offset.js
+// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Offset.js
 var JoinType;
 (function(JoinType2) {
   JoinType2[JoinType2["Miter"] = 0] = "Miter";
@@ -94894,7 +94963,7 @@ var ClipperOffset = class _ClipperOffset {
   }
 };
 
-// node_modules/clipper2-ts/dist/Clipper.js
+// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Clipper.js
 var B23 = BigInt(2);
 function intersectD(subject, clip2, fillRule, precision = 2) {
   return booleanOpD(ClipType.Intersection, subject, clip2, fillRule, precision);
@@ -101117,7 +101186,7 @@ function statAreas(m, o) {
   return { hasOutline, boardArea, frontCopper: total(front), backCopper: total(back), frontCourtyard: total(union2(fc)), backCourtyard: total(union2(bc)) };
 }
 
-// node_modules/three/src/extras/lib/earcut.js
+// ../../../kicad-collaborative/server/node_modules/three/src/extras/lib/earcut.js
 function earcut(data, holeIndices, dim = 2) {
   const hasHoles = holeIndices && holeIndices.length;
   const outerLen = hasHoles ? holeIndices[0] * dim : data.length;
@@ -101538,7 +101607,7 @@ function signedArea2(data, start, end, dim) {
   return sum;
 }
 
-// node_modules/three/src/extras/Earcut.js
+// ../../../kicad-collaborative/server/node_modules/three/src/extras/Earcut.js
 var Earcut = class {
   /**
    * Triangulates the given shape definition by returning an array of triangles.

@@ -19,6 +19,72 @@
   // web/tools/root.ts
   var root = typeof window !== "undefined" ? window : globalThis;
 
+  // web/keys.ts
+  function detectMac() {
+    if (typeof navigator === "undefined") return false;
+    const nav = navigator;
+    if (nav.platform) return /Mac|iPhone|iPad|iPod/i.test(nav.platform);
+    const uad = nav.userAgentData && nav.userAgentData.platform;
+    if (uad) return /mac|ios/i.test(uad);
+    return /Macintosh|Mac OS X|iPhone|iPad/.test(nav.userAgent || "");
+  }
+  var IS_MAC = detectMac();
+  function splitKey(key) {
+    const parts = key.split("+");
+    let k = parts.pop() ?? "";
+    if (k === "" && key.endsWith("+")) {
+      k = "+";
+      parts.pop();
+    }
+    return { ctrl: parts.includes("Ctrl") || parts.includes("Cmd"), alt: parts.includes("Alt") || parts.includes("Option"), shift: parts.includes("Shift"), rawCtrl: parts.includes("RawCtrl"), key: k };
+  }
+  function keyName(key) {
+    if (!key) return "";
+    const s = splitKey(key);
+    if (!IS_MAC) return s.rawCtrl ? key.replace("RawCtrl", "Ctrl") : key;
+    const mods = [];
+    if (s.rawCtrl) mods.push("Ctrl");
+    if (s.ctrl) mods.push("Cmd");
+    if (s.alt) mods.push("Option");
+    if (s.shift) mods.push("Shift");
+    return [...mods, s.key].join("+");
+  }
+  function keysInText(text) {
+    if (!IS_MAC) return text;
+    return text.replace(/\b((?:(?:Ctrl|Alt|Shift)\+)+)(?=\S)/g, (mods) => /Ctrl|Alt/.test(mods) ? keyName(mods + "x").slice(0, -1) : mods);
+  }
+
+  // web/editor/selmodes.ts
+  function detectWindows() {
+    if (typeof navigator === "undefined") return false;
+    const nav = navigator;
+    if (nav.platform) return /^Win/i.test(nav.platform);
+    const uad = nav.userAgentData && nav.userAgentData.platform;
+    if (uad) return /windows/i.test(uad);
+    return /Windows/.test(nav.userAgent || "");
+  }
+  var IS_WINDOWS = detectWindows();
+  function ctrlDown(ev, mac = IS_MAC) {
+    return mac ? !!ev.metaKey : !!ev.ctrlKey;
+  }
+  function modifiersState(ev, o = {}) {
+    const shift = !!ev.shiftKey, ctrl = ctrlDown(ev, o.mac ?? IS_MAC), alt = !!ev.altKey;
+    const hl = !!o.ctrlHighlights;
+    return {
+      subtractive: ctrl && shift,
+      additive: !ctrl && shift,
+      exclusiveOr: hl ? false : ctrl && !shift,
+      highlight: hl ? ctrl && !shift : false,
+      // "Drag is more forgiving and allows either Ctrl+Drag or Shift+Drag to add to the selection"
+      dragAdditive: (ctrl || shift) && !alt,
+      dragSubtractive: ctrl && shift && !alt,
+      skipHeuristics: o.windows ?? IS_WINDOWS ? false : alt
+    };
+  }
+  function clickMode(s) {
+    return s.subtractive ? "remove" : s.exclusiveOr ? "toggle" : s.additive ? "add" : null;
+  }
+
   // web/tools/pcb-tools/state.ts
   var K = root.KiCadCanvas;
   var WIDTHS = [0.2, 0.25, 0.3, 0.5, 0.8, 1];
@@ -2115,7 +2181,7 @@
     return m;
   }
 
-  // node_modules/clipper2-ts/dist/Core.js
+  // ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Core.js
   var ClipType;
   (function(ClipType2) {
     ClipType2[ClipType2["NoClip"] = 0] = "NoClip";
@@ -2774,7 +2840,7 @@
   var InvalidRect64 = Object.freeze(Rect64Utils.createInvalid());
   var InvalidRectD = Object.freeze(RectDUtils.createInvalid());
 
-  // node_modules/clipper2-ts/dist/Engine.js
+  // ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Engine.js
   var B02 = BigInt(0);
   var B22 = BigInt(2);
   var B42 = BigInt(4);
@@ -5639,7 +5705,7 @@
     }
   };
 
-  // node_modules/clipper2-ts/dist/Offset.js
+  // ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Offset.js
   var JoinType;
   (function(JoinType2) {
     JoinType2[JoinType2["Miter"] = 0] = "Miter";
@@ -6255,7 +6321,7 @@
     }
   };
 
-  // node_modules/clipper2-ts/dist/Clipper.js
+  // ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Clipper.js
   var B23 = BigInt(2);
   function intersectD(subject, clip, fillRule, precision = 2) {
     return booleanOpD(ClipType.Intersection, subject, clip, fillRule, precision);
@@ -6562,7 +6628,7 @@
     }
   }
 
-  // node_modules/opentype.js/dist/opentype.module.js
+  // ../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.module.js
   if (!String.prototype.codePointAt) {
     (function() {
       var defineProperty = (function() {
@@ -27433,41 +27499,6 @@
   }
   var padToolApi = { nextPadNumber, masterPad, defaultPad, typeFromPad, newPadNode, placePad, moveAnchorChanges, enumerateChanges, padMemory, strNumCmp, ipcRoundingRatio, refDesPrefix, trailingInt, canHaveNumber };
 
-  // web/keys.ts
-  function detectMac() {
-    if (typeof navigator === "undefined") return false;
-    const nav = navigator;
-    if (nav.platform) return /Mac|iPhone|iPad|iPod/i.test(nav.platform);
-    const uad = nav.userAgentData && nav.userAgentData.platform;
-    if (uad) return /mac|ios/i.test(uad);
-    return /Macintosh|Mac OS X|iPhone|iPad/.test(nav.userAgent || "");
-  }
-  var IS_MAC = detectMac();
-  function splitKey(key) {
-    const parts = key.split("+");
-    let k = parts.pop() ?? "";
-    if (k === "" && key.endsWith("+")) {
-      k = "+";
-      parts.pop();
-    }
-    return { ctrl: parts.includes("Ctrl") || parts.includes("Cmd"), alt: parts.includes("Alt") || parts.includes("Option"), shift: parts.includes("Shift"), rawCtrl: parts.includes("RawCtrl"), key: k };
-  }
-  function keyName(key) {
-    if (!key) return "";
-    const s = splitKey(key);
-    if (!IS_MAC) return s.rawCtrl ? key.replace("RawCtrl", "Ctrl") : key;
-    const mods = [];
-    if (s.rawCtrl) mods.push("Ctrl");
-    if (s.ctrl) mods.push("Cmd");
-    if (s.alt) mods.push("Option");
-    if (s.shift) mods.push("Shift");
-    return [...mods, s.key].join("+");
-  }
-  function keysInText(text) {
-    if (!IS_MAC) return text;
-    return text.replace(/\b((?:(?:Ctrl|Alt|Shift)\+)+)(?=\S)/g, (mods) => /Ctrl|Alt/.test(mods) ? keyName(mods + "x").slice(0, -1) : mods);
-  }
-
   // web/tools/pcb-tools/clipboard.ts
   function layersBlock(doc) {
     const rows = [];
@@ -29921,8 +29952,15 @@
   }
   function onStagePointerUp(ev) {
     const ctx = lastCtx;
+    const pd = S.pending;
     S.pending = null;
     if (!ctx) return;
+    if (pd && !pd.app && pd.item && ev && ev.type === "pointerup" && ctx.doc && S.sel.size > 1 && Math.hypot(ev.clientX - pd.client[0], ev.clientY - pd.client[1]) <= DRAG_PX) {
+      const pick = topParentOf(ctx.doc, pd.item.id) ? Array.from(expandGroups(ctx.doc, [pd.item.id])) : [pd.item.id];
+      S.sel = new Set(pick);
+      if (ctx.setSelection) ctx.setSelection([]);
+      ctx.requestRender();
+    }
     if (S.pedit) {
       if (ev) {
         ev.stopImmediatePropagation();
@@ -34131,8 +34169,7 @@
     ctx.requestRender();
   }
   function selMode(ev) {
-    const c = !!(ev && (ev.ctrlKey || ev.metaKey)), sh = !!(ev && ev.shiftKey);
-    return c && sh ? "remove" : c ? "toggle" : sh ? "add" : null;
+    return ev ? clickMode(modifiersState({ shiftKey: !!ev.shiftKey, ctrlKey: !!ev.ctrlKey, metaKey: !!ev.metaKey, altKey: !!ev.altKey })) : null;
   }
   function applySelMode(set, id, mode2) {
     if (mode2 === "add") set.add(id);
