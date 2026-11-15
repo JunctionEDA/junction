@@ -25,7 +25,7 @@ import { openCleanupGraphics } from "./cleanup-graphics";
 import { openEditTeardrops } from "./teardrops";
 import { openGlobalEditTracks } from "./global-tracks";
 import { openFilterSelection } from "./filter-selection";
-import { booleanPolygons, chamferLines, extendLines, filletLines, simplifyPolygons } from "./shape-modify";
+import { booleanPolygons, chamferLines, extendLines, filletLines, outsetItems, simplifyPolygons } from "./shape-modify";
 import { repairBoard } from "./repair";
 import { openReannotate } from "./reannotate";
 import { openUpdatePcb, projectNetlist, updatePcbFromSchematicEditor } from "./update-pcb";
@@ -65,6 +65,7 @@ export function installPcbDialogs(): void {
   action("generateBOMLegacy", "Bill of Materials (legacy)...", "", (ctx) => { void generateBomLegacy(ctx); });
   action("filterSelection", "Filter Selected Items...", "", openFilterSelection);   // PCB_SELECTION_TOOL::filterSelection
   // EDIT_TOOL's Shape Modification sub-menu
+  action("outsetItems", "Outset Items...", "", outsetItems);   // CONVERT_TOOL::OutsetItems
   action("filletLines", "Fillet Lines...", "", filletLines);
   action("chamferLines", "Chamfer Lines...", "", chamferLines);
   action("extendLines", "Extend Lines to Meet", "", extendLines);

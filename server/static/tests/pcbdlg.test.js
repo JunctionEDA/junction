@@ -311,3 +311,62 @@ test("fab reports: .cmp, legacy BOM, footprint report and IPC-D-356A", () => {
   assert.equal(dn[dn.length - 2], "999".padEnd(80));
   assert.equal(FAB.reports.d356(ctx, true).includes("R1"), false);
 });
+
+test("Outset Items: rectangles, circles, lines, arcs and pads", () => {
+  const O = T.outset;
+  const B = (body) => K.parseDoc(`(kicad_pcb (version 20241229) (layers (0 "F.Cu" signal) (25 "Edge.Cuts" user) (37 "F.SilkS" user)) ${body})`, "kicad_pcb");
+  const nodes = (r) => r.changes.filter((c) => c.kind !== "REMOVED").map(nodeOf);
+  const at = (n, k) => K.kid(n, k).slice(1).map((v) => +(+v).toFixed(4));
+  const P = (o) => Object.assign(O.outsetDefaults(false, () => 0.05), o);
+  assert.deepEqual(O.outsetDefaults(true, () => 0.05), { outset: 0.25, roundCorners: false, useSourceLayers: false, useSourceWidths: true, layer: "F.CrtYd", lineWidth: 0.05, gridRounding: 0.01, deleteSourceItems: false });
+  // a square rectangle, outset 1 without rounding, copying its layer and width
+  let d = B(`(gr_rect (start 0 0) (end 10 5) (stroke (width 0.2) (type default)) (fill no) (layer "F.SilkS") (uuid "r"))`);
+  let r = O.outsetItems(d, ["r"], P({ roundCorners: false }));
+  assert.equal(r.label, "Outset Items"); assert.equal(r.message, null);
+  let n = nodes(r)[0];
+  assert.equal(n[0], "gr_rect"); assert.deepEqual([at(n, "start"), at(n, "end")], [[-1, -1], [11, 6]]);
+  assert.equal(K.kid(n, "layer")[1], "F.SilkS"); assert.equal(+K.kid(K.kid(n, "stroke"), "width")[1], 0.2);
+  // rounded: four sides and four corner arcs of radius 1
+  r = O.outsetItems(d, ["r"], P({}));
+  assert.deepEqual(nodes(r).map((x) => x[0]).sort(), ["gr_arc", "gr_arc", "gr_arc", "gr_arc", "gr_line", "gr_line", "gr_line", "gr_line"]);
+  const a0 = nodes(r).find((x) => x[0] === "gr_arc");
+  assert.deepEqual([at(a0, "start"), at(a0, "end")], [[10, -1], [11, 0]]);
+  // grid rounding outwards; a given layer and width
+  r = O.outsetItems(d, ["r"], P({ outset: 0.33, roundCorners: false, gridRounding: 0.5, useSourceLayers: false, useSourceWidths: false, lineWidth: 0.12 }));
+  n = nodes(r)[0]; assert.deepEqual([at(n, "start"), at(n, "end")], [[-0.5, -0.5], [10.5, 5.5]]);
+  assert.equal(K.kid(n, "layer")[1], "Edge.Cuts"); assert.equal(+K.kid(K.kid(n, "stroke"), "width")[1], 0.12);
+  // a circle grows; without rounding it becomes its square
+  d = B(`(gr_circle (center 5 5) (end 7 5) (stroke (width 0.1) (type default)) (fill no) (layer "F.SilkS") (uuid "c"))`);
+  n = nodes(O.outsetItems(d, ["c"], P({ outset: 0.5 })))[0]; assert.deepEqual([n[0], at(n, "center"), at(n, "end")], ["gr_circle", [5, 5], [7.5, 5]]);
+  n = nodes(O.outsetItems(d, ["c"], P({ outset: 0.5, roundCorners: false })))[0]; assert.deepEqual([n[0], at(n, "start"), at(n, "end")], ["gr_rect", [2.5, 2.5], [7.5, 7.5]]);
+  // a line: the stadium (two lines, two half circles), or its box as a polygon; delete the source when asked
+  d = B(`(gr_line (start 0 0) (end 10 0) (stroke (width 0.1) (type default)) (layer "F.SilkS") (uuid "l"))`);
+  r = O.outsetItems(d, ["l"], P({ deleteSourceItems: true }));
+  const st = nodes(r);
+  assert.deepEqual(st.map((x) => x[0]).sort(), ["gr_arc", "gr_arc", "gr_line", "gr_line"]);
+  assert.deepEqual(st.filter((x) => x[0] === "gr_line").map((x) => [at(x, "start"), at(x, "end")]), [[[0, -1], [10, -1]], [[10, 1], [0, 1]]]);
+  assert.deepEqual(at(st.find((x) => x[0] === "gr_arc"), "mid"), [-1, 0]);
+  assert.ok(r.changes.some((c) => c.kind === "REMOVED" && c.id === "l"));
+  n = nodes(O.outsetItems(d, ["l"], P({ roundCorners: false })))[0];
+  assert.deepEqual(K.kids(K.kid(n, "pts"), "xy").map((x) => x.slice(1).map(Number)), [[-1, -1], [-1, 1], [11, 1], [11, -1]]);
+  assert.equal(O.outsetItems(d, ["l"], P({ outset: 0 })).message, "Unable to outset the selected items.");
+  // an arc: outer, inner and two end caps
+  d = B(`(gr_arc (start 10 0) (mid 7.071068 7.071068) (end 0 10) (stroke (width 0.1) (type default)) (layer "F.SilkS") (uuid "a"))`);
+  const arcs = nodes(O.outsetItems(d, ["a"], P({ outset: 1 })));
+  assert.equal(arcs.length, 4);
+  assert.deepEqual([at(arcs[0], "start"), at(arcs[0], "end")], [[11, 0], [0, 11]]);
+  assert.deepEqual([at(arcs[2], "start"), at(arcs[2], "end")], [[0, 9], [9, 0]]);
+  assert.deepEqual(O.arcThrough([10, 0], [7.071068, 7.071068], [0, 10]).angle.toFixed(3), "90.000");
+  // footprint editor pads: a rotated rectangle without rounding is a polygon; a circle a circle; a roundrect gets arcs
+  const fp = K.parseDoc(`(footprint "X" (version 20241229) (generator "pcbnew") (layer "F.Cu")
+    (pad "1" smd rect (at 0 0 90) (size 2 1) (layers "F.Cu") (uuid "p1"))
+    (pad "2" thru_hole circle (at 5 0) (size 1.6 1.6) (drill 0.8) (layers "*.Cu") (uuid "p2"))
+    (pad "3" smd roundrect (at 10 0) (size 2 1) (roundrect_rratio 0.25) (layers "F.Cu") (uuid "p3")))`, "footprint");
+  const pid = (num) => [...fp.items.values()].find((i) => i.kind === "pad" && i.node[1] === num).id;
+  r = O.outsetItems(fp, [pid("1")], O.outsetDefaults(true, () => 0.05));
+  n = nodes(r)[0]; assert.equal(n[0], "gr_poly"); assert.equal(K.kid(n, "layer")[1], "F.CrtYd");
+  assert.deepEqual(K.kids(K.kid(n, "pts"), "xy").map((x) => x.slice(1).map((v) => +(+v).toFixed(4))), [[-0.75, 1.25], [-0.75, -1.25], [0.75, -1.25], [0.75, 1.25]]);
+  n = nodes(O.outsetItems(fp, [pid("2")], P({ outset: 0.2, useSourceLayers: true })))[0]; assert.deepEqual([n[0], at(n, "end"), K.kid(n, "layer")[1]], ["gr_circle", [6, 0], "F.Cu"]);
+  r = O.outsetItems(fp, [pid("3")], P({ outset: 0.25, deleteSourceItems: true }));
+  assert.equal(nodes(r).filter((x) => x[0] === "gr_arc").length, 4); assert.ok(!r.changes.some((c) => c.kind === "REMOVED"), "a pad is never deleted");
+});
