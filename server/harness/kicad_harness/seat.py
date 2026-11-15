@@ -477,7 +477,10 @@ def _seating(self) -> dict:
         p = S.by_ref[job["ref"]]; hot = p["pads"][job["hot"]]
         d, name = min((math.hypot(hot[1] - q[1], hot[2] - q[2]), f"{o['ref']}.{q[0]}") for o, q in job["pins"])
         other = p["pads"][1 - job["hot"]][3]; conn = any(re.match(r"^(J|P|CN|USB)\d", o["ref"], re.I) for o, _ in job["pins"])
-        if d > (LIMITS["serve_pull"] if S.rail(other) and not _gnd(other) else LIMITS["serve"]):
+        # a pull-up only has to be on its net, and a capacitor to ground is a bypass capacitor whatever its net is called
+        # (the review's bypass.near measures those)
+        loose = (S.rail(other) and not _gnd(other)) or (_gnd(other) and re.match(r"^C\d", p["ref"], re.I) and not conn)
+        if d > (LIMITS["serve_pull"] if loose else LIMITS["serve"]):
             far.append(f"{p['ref']} is {round(d, 1)} mm from {name}")
         elif d > LIMITS["serve_note"]:
             near.append(f"{p['ref']} is {round(d, 1)} mm from {name}")
