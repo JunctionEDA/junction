@@ -2,7 +2,10 @@
 // come out.  Pure: reads a parsed board and the design rules, returns item nodes; nothing is written to the board
 // here (the caller commits them as ordinary edits).
 import { buildClass, DX, DY, fillPoly, Grid, Obstacle, pickGrid, pointGap, Pt, RuleClass, Shape, stamp, stampClass, viaFits } from "./grid";
-import { costOf, dirOf, Features, featuresOf, Node, probe, ProbeResult, Terminal, Win } from "./probe";
+import { costOf, dirOf, Features, featuresOf, Node, probe, ProbeResult, Terminal, Win, work } from "./probe";
+
+/** Search steps an ordinary machine takes per millisecond of routing: turns the time allowed into a work budget. */
+const STEPS_PER_MS = 12000;
 import { TRAINED, Weights } from "./weights";
 import { cornerAngle, SQUARE_MAX } from "./corners";
 import { stackupOf, traceOn, usualImpedance, widthFor, z0, zdiff } from "./impedance";
@@ -75,6 +78,7 @@ export interface RouteOptions {
   /** false keeps every via at its net class's size.  By default a connection that cannot be made with it may use
    *  the smallest via Board Setup's constraints permit. */
   smallVias?: boolean;           // after routing, lay each route that changes layer again without (or with fewer) vias where the finished board leaves room; default true
+  planarFirst?: boolean;         // lay each signal without a via first, pushing others aside; only what cannot be made on one layer changes layer; default true
   timeMs?: number;               // stop starting new connections after this long
   zones?: boolean;               // let a route end in the net's own copper zone; default true
   // ---- a plan from outside (the assistant's model, or a person): the engine still does the geometry and the rules
@@ -1105,7 +1109,12 @@ export class Router {
     const order = conns.slice().sort((a, b) => cmp(gOf.get(a.net)!.rank, gOf.get(b.net)!.rank) || gOf.get(b.net)!.priority - gOf.get(a.net)!.priority || tier(a) - tier(b) || (tier(a) === 1 ? b.len - a.len : a.len - b.len) || (a.net < b.net ? -1 : a.net > b.net ? 1 : a.id - b.id));
     let best: { score: number; snap: (Pick<Conn, "cls" | "pair" | "nodes" | "shapes" | "viaCells" | "landed" | "feat" | "stubs" | "zoneEnd">)[] } | null = null; let failedLast = new Set<number>(); let pass = 0;
     const RC = (this.opts as any).connRips || 4, RB = (this.opts as any).blockerRips || 3;
-    const timeUp = () => this.stopped || (!!this.opts.timeMs && Date.now() - t0 > this.opts.timeMs);
+    // The budget is work done (search steps), not the clock: the same board then routes the same way on a fast machine,
+    // a slow one and a busy server.  STEPS_PER_MS is what an ordinary machine does; the clock only stops a run that
+    // takes four times its allowance.
+    const w0 = work.steps; const budget = this.opts.timeMs ? this.opts.timeMs * STEPS_PER_MS : 0;
+    const timeUp = () => this.stopped || (!!budget && (work.steps - w0 > budget || Date.now() - t0 > 4 * this.opts.timeMs!));
+    const later = new Set<number>();   // connections found to need a layer change: in the next pass they go first and may take it at once
     for (; pass < passes; pass++) {
       for (const c of conns) if (c.nodes) this.rip(c);
       for (const c of conns) c.rips = 0;
@@ -1115,6 +1124,13 @@ export class Router {
       while (queue.length) {
         if (timeUp()) { for (const c of queue) { failed.add(c.id); if (!c.nodes) c.why = "budget"; } break; }
         const c = queue.shift()!; if (c.nodes) continue; c.why = undefined;
+        // One layer first: a signal is laid without a via while that can be done, taking routes in its way out and
+        // laying them again (they get the same chance).  Only what cannot be made on one layer comes back at the end
+        // of the queue and may change layer.  Laid the other way round, an early track takes the direct line and every
+        // later one that has to cross it pays two vias.
+        const flat = this.opts.planarFirst !== false && !later.has(c.id) && !isSupply(c.net) && !this.netOf(c.net).zoneCells && this.netOf(c.net).guide.allowVias && !this.netOf(c.net).guide.allowed;   // a plan that names the net's layers stands
+        if (flat) this.viaCap = 0;
+        try {
         // the two lines of a differential pair run together or not at all: never one on its own path
         if (c.pairOnly && this.opts.splitPairs !== true) { c.why = "pair: " + c.pairOnly; failed.add(c.id); done++; continue; }
         let found = this.find(c, false);
@@ -1132,7 +1148,9 @@ export class Router {
             }
           }
         }
+        if (!found && flat) { later.add(c.id); queue.push(c); continue; }
         if (found) { this.commit(c, found); failed.delete(c.id); } else failed.add(c.id);
+        } finally { this.viaCap = Infinity; }
         done++;
         yield { done: Math.min(done, conns.length), total: conns.length, routed: conns.filter((x) => x.nodes).length, pass, net: c.net };
       }
@@ -1161,6 +1179,7 @@ export class Router {
     if (this.opts.fence !== false && !this.stopped) this.fence();
     if (this.opts.explain !== false) this.explain();
     this.ms = Date.now() - t0; this.passes = pass;
+    if (typeof process !== "undefined" && process.env && process.env.KC_ROUTER_WORK) console.error('router work', work.steps - w0, 'steps in', this.ms, 'ms');
     return this.result();
   }
 

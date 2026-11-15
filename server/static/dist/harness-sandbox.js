@@ -1914,7 +1914,7 @@ class Board(_Doc):
                                 continue
                             if any(min(box[2], t[2]) - max(box[0], t[0]) > 1e-6 and min(box[3], t[3]) - max(box[1], t[1]) > 1e-6 for t in taken):
                                 continue
-                            wide = (box[0] - 0.15, box[1] - 0.15, box[2] + 0.15, box[3] + 0.15)
+                            wide = (box[0] - 0.75, box[1] - 0.75, box[2] + 0.75, box[3] + 0.75)      # room for the pin's track and a neighbour or two beside it
                             n_b = sum(1 for wy in ways if any(hits(wide, wy[m], wy[m + 1]) for m in range(len(wy) - 1)))
                             cost = d + 4 * n_b
                             if best is None or cost < best[0]:
@@ -4413,8 +4413,9 @@ def _fence(self, path, spacing: float = 1.0, net: str = "GND", offset: float = 0
 
 
 def _ground_pads(self, net: str = "GND", size: float | None = None, drill: float | None = None, width: float = 0.25, rounds: int = 12, max_pads: int | None = None) -> dict:
-    """Give every ground pad that reaches the plane only through the pour on its own layer (review rule
-    ground.pour_only) its own via beside it, joined by one short straight track.  A pad on a pour hangs on that piece
+    """Give the ground pads that reach the plane only through the pour on their own layer (review rule
+    ground.pour_only) a via beside them, joined by one short straight track; pads that share an unbroken piece of
+    pour share the via (one within 4 mm in the same piece is enough), so the board gets the vias it needs, not one a pad.  A pad on a pour hangs on that piece
     of copper; a track routed past it, or a pour not refilled, cuts it off and leaves ratsnest lines to ground.  Each
     via is tried in eight directions, those pointing away from the part's middle first (where its other pins' tracks
     do not run), at 0.8 to 2.1 mm; any the rules check finds at fault is taken out again and the next spot tried.
@@ -4444,6 +4445,10 @@ def _ground_pads(self, net: str = "GND", size: float | None = None, drill: float
         tried: dict = {}
         for spec in left:
             q = self.pad(spec)
+            # one via serves the ground pads around it through the pour: a pad close to a via laid in this round waits
+            # for the next look, which tells whether that via reaches it
+            if any(math.hypot(q["x"] - t[0][0], q["y"] - t[0][1]) <= 3.5 for t in tried.values()):
+                continue
             if spec not in order:
                 part = next((p for p in g["parts"] if p["ref"] == spec.split(".")[0]), None)
                 ox, oy = (q["x"] - part["x"], q["y"] - part["y"]) if part else (0.0, 0.0)

@@ -75519,14 +75519,14 @@ ${body}
     }
     const mine = terms.get(item), set = /* @__PURE__ */ new Set([item.id]);
     if (!mine) return { ids: set, reached };
-    const done = /* @__PURE__ */ new Set(), keys = /* @__PURE__ */ new Set(), keysDone = /* @__PURE__ */ new Set(), work = [];
+    const done = /* @__PURE__ */ new Set(), keys = /* @__PURE__ */ new Set(), keysDone = /* @__PURE__ */ new Set(), work2 = [];
     const reach = (it, t) => {
       set.add(it.id);
       for (const u of conducts(it) ? terms.get(it) : [t]) {
         if (done.has(u)) continue;
         done.add(u);
         reached.set(u, it);
-        work.push(u);
+        work2.push(u);
         if (u.key && !physical) keys.add(u.key);
       }
       if (isNetLine(it.kind)) {
@@ -75549,8 +75549,8 @@ ${body}
       reach(item, best);
     } else for (const t of mine) reach(item, t);
     for (; ; ) {
-      while (work.length) {
-        const t = work.pop();
+      while (work2.length) {
+        const t = work2.pop();
         for (const [it, ts] of terms) {
           for (const u of ts) if (!done.has(u) && joins(t, u) && same(u.p, t.p)) reach(it, u);
           if (isNetLine(it.kind) && !set.has(it.id) && joins(t, { net: it.kind }) && segs(it).some(([a, b]) => onSegMid(t.p, a, b))) reach(it, ts[0]);
@@ -82489,6 +82489,7 @@ function viaFits(G2, vmaps, gi) {
 }
 
 // web/router/probe.ts
+var work = { steps: 0 };
 var costOf = (f2, W11) => f2.length * W11.length + f2.vias * W11.via + f2.b45 * W11.bend45 + f2.b90 * W11.bend90 + f2.wrong * W11.wrongDir;
 function featuresOf(G2, nodes, pref) {
   const f2 = { length: 0, vias: 0, b45: 0, b90: 0, wrong: 0 };
@@ -82711,6 +82712,7 @@ function probe(inp) {
     }
   }
   if (best) best.steps = steps;
+  work.steps += steps;
   return best;
 }
 
@@ -82910,6 +82912,7 @@ function usualImpedance(net, paired) {
 }
 
 // web/router/route.ts
+var STEPS_PER_MS = 12e3;
 var isSupply = (net) => /^\/?(.*\/)?(A|D|P)?(GND|VSS|VEE)\w*$|^\/?(.*\/)?[+-]?\d+(V\d*|\.\d+V)\w*$|^\/?(.*\/)?(VCC|VDD|VBUS|VBAT|VIN|VSYS|VPP|VAA|VREF|VOUT|V\d+V\d*|PWR|\+BATT|-BATT)\w*$/i.test(net) && !/(_|\b)(EN|SENSE|SNS|FB|PG|OK|DET|MON|ADC)\w*$/i.test(net);
 function netKind(net, paired = /(\+|-|_P|_N)\)?$/.test(net)) {
   if (isSupply(net)) return "supply";
@@ -84905,7 +84908,10 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     let failedLast = /* @__PURE__ */ new Set();
     let pass = 0;
     const RC = this.opts.connRips || 4, RB = this.opts.blockerRips || 3;
-    const timeUp = () => this.stopped || !!this.opts.timeMs && Date.now() - t0 > this.opts.timeMs;
+    const w0 = work.steps;
+    const budget = this.opts.timeMs ? this.opts.timeMs * STEPS_PER_MS : 0;
+    const timeUp = () => this.stopped || !!budget && (work.steps - w0 > budget || Date.now() - t0 > 4 * this.opts.timeMs);
+    const later = /* @__PURE__ */ new Set();
     for (; pass < passes; pass++) {
       for (const c of conns) if (c.nodes) this.rip(c);
       for (const c of conns) c.rips = 0;
@@ -84924,46 +84930,57 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
         const c = queue2.shift();
         if (c.nodes) continue;
         c.why = void 0;
-        if (c.pairOnly && this.opts.splitPairs !== true) {
-          c.why = "pair: " + c.pairOnly;
-          failed.add(c.id);
-          done++;
-          continue;
-        }
-        let found = this.find(c, false);
-        if (!found && ripUp && c.rips < RC) {
-          const soft = this.find(c, true);
-          if (!soft) this.stat.noSoft++;
-          if (soft) {
-            const bl = this.blockers(c, soft.res);
-            this.stat[!bl.length ? "noBlockers" : bl.length > 14 ? "tooMany" : bl.every((b) => b.rips < RB) ? "ripped" : "ripLimit"]++;
-            if (bl.length && bl.length <= 14 && bl.every((b) => b.rips < RB)) {
-              const ripped = [];
-              for (const b of bl) {
-                b.rips++;
-                this.rip(b, ripped);
-              }
-              c.rips++;
-              if (this.fits(c, soft.res)) {
-                found = soft;
-                for (const r of ripped) {
-                  failed.delete(r.id);
-                  queue2.unshift(r);
+        const flat = this.opts.planarFirst !== false && !later.has(c.id) && !isSupply(c.net) && !this.netOf(c.net).zoneCells && this.netOf(c.net).guide.allowVias && !this.netOf(c.net).guide.allowed;
+        if (flat) this.viaCap = 0;
+        try {
+          if (c.pairOnly && this.opts.splitPairs !== true) {
+            c.why = "pair: " + c.pairOnly;
+            failed.add(c.id);
+            done++;
+            continue;
+          }
+          let found = this.find(c, false);
+          if (!found && ripUp && c.rips < RC) {
+            const soft = this.find(c, true);
+            if (!soft) this.stat.noSoft++;
+            if (soft) {
+              const bl = this.blockers(c, soft.res);
+              this.stat[!bl.length ? "noBlockers" : bl.length > 14 ? "tooMany" : bl.every((b) => b.rips < RB) ? "ripped" : "ripLimit"]++;
+              if (bl.length && bl.length <= 14 && bl.every((b) => b.rips < RB)) {
+                const ripped = [];
+                for (const b of bl) {
+                  b.rips++;
+                  this.rip(b, ripped);
                 }
-              } else {
-                found = this.find(c, false);
-                for (const r of ripped) {
-                  failed.delete(r.id);
-                  queue2.unshift(r);
+                c.rips++;
+                if (this.fits(c, soft.res)) {
+                  found = soft;
+                  for (const r of ripped) {
+                    failed.delete(r.id);
+                    queue2.unshift(r);
+                  }
+                } else {
+                  found = this.find(c, false);
+                  for (const r of ripped) {
+                    failed.delete(r.id);
+                    queue2.unshift(r);
+                  }
                 }
               }
             }
           }
+          if (!found && flat) {
+            later.add(c.id);
+            queue2.push(c);
+            continue;
+          }
+          if (found) {
+            this.commit(c, found);
+            failed.delete(c.id);
+          } else failed.add(c.id);
+        } finally {
+          this.viaCap = Infinity;
         }
-        if (found) {
-          this.commit(c, found);
-          failed.delete(c.id);
-        } else failed.add(c.id);
         done++;
         yield { done: Math.min(done, conns.length), total: conns.length, routed: conns.filter((x) => x.nodes).length, pass, net: c.net };
       }
@@ -85002,6 +85019,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     if (this.opts.explain !== false) this.explain();
     this.ms = Date.now() - t0;
     this.passes = pass;
+    if (typeof process !== "undefined" && process.env && process.env.KC_ROUTER_WORK) console.error("router work", work.steps - w0, "steps in", this.ms, "ms");
     return this.result();
   }
   /**
@@ -96954,11 +96972,11 @@ var ZoneFiller = class {
     prog && prog.phase(1, "Building zone fills...");
     this.conditionalFlashing();
     for (const z of this.zones) if (!zones.includes(z) && !z.ruleArea) this.fills.set(z, new Map(z.stored));
-    const work = [];
-    for (const z of zones) for (const l of z.layers) if (copperSet.has(l) || !isCopper(l)) work.push({ z, layer: l });
-    work.sort((a, b) => a.z === b.z ? 0 : higherPriority(a.z, b.z) ? -1 : 1);
+    const work2 = [];
+    for (const z of zones) for (const l of z.layers) if (copperSet.has(l) || !isCopper(l)) work2.push({ z, layer: l });
+    work2.sort((a, b) => a.z === b.z ? 0 : higherPriority(a.z, b.z) ? -1 : 1);
     let done = 0;
-    for (const w of work) {
+    for (const w of work2) {
       if (prog) {
         if (prog.cancelled()) return null;
         await prog.yield();
@@ -96970,7 +96988,7 @@ var ZoneFiller = class {
         this.fills.set(w.z, map);
       }
       map.set(w.layer, polys);
-      prog && prog.advance(++done, work.length);
+      prog && prog.advance(++done, work2.length);
     }
     if (prog) {
       if (prog.cancelled()) return null;
@@ -103157,6 +103175,8 @@ function itemsWithin(doc, box) {
 
 // web/ai/review-physics.ts
 var LIMITS = {
+  groundPourReach: 4,
+  // ... or, through an unbroken piece of ground pour on its own layer, a ground via or through-hole pad this close
   groundViaReach: 1.5,
   // a ground pad with no ground via or through-hole pad this close reaches the plane only through its own pour
   powerPath: 0.3,
@@ -104452,13 +104472,26 @@ function reviewPhysics(doc, P, k, settings, add) {
         }
         return false;
       };
+      const pours = S2.conds.filter((c) => c.kind === "zone" && isGnd(c.net) && c.shape && c.shape.pts && [...c.layers].some((l) => outer.has(l)));
+      const poured = (p) => {
+        const m = 0.45, b = p.box;
+        const probes = [[b[0] - m, p.y], [b[2] + m, p.y], [p.x, b[1] - m], [p.x, b[3] + m], [b[0] - m, b[1] - m], [b[2] + m, b[1] - m], [b[0] - m, b[3] + m], [b[2] + m, b[3] + m]];
+        for (const c of pours) {
+          if (![...c.layers].some((l) => p.layers.has(l))) continue;
+          const pts = c.shape.pts;
+          const g2 = grow5(c.bbox, 0.01);
+          if (!probes.some((q) => inBox(g2, q[0], q[1]) && inPoly2(pts, q[0], q[1]))) continue;
+          if (holes.some((h) => Math.hypot(h[0] - p.x, h[1] - p.y) <= LIMITS.groundPourReach && inBox(g2, h[0], h[1]) && inPoly2(pts, h[0], h[1]))) return true;
+        }
+        return false;
+      };
       const lone = [];
       for (const f2 of fps) for (const p of f2.pads) {
         if (!isGnd(p.net) || p.type !== "smd" || antennas.includes(f2)) continue;
         const reach2 = Math.max(LIMITS.groundViaReach, Math.max(p.box[2] - p.box[0], p.box[3] - p.box[1]) / 2 + 0.6);
-        if (!near(p.x, p.y, reach2) && !tied(p)) lone.push(`${f2.ref}.${p.number} at ${at(p.x, p.y)}`);
+        if (!near(p.x, p.y, reach2) && !tied(p) && !poured(p)) lone.push(`${f2.ref}.${p.number} at ${at(p.x, p.y)}`);
       }
-      if (lone.length) add("ground.pour_only", "warning", `These ground pads reach the ground plane only through the pour on their own layer: no ground via within ${LIMITS.groundViaReach} mm and no short ground track to one. Such a joint lasts only while that piece of pour is filled and unbroken; a track routed past it later, or a pour that was never refilled, leaves the pad on its own (the ratsnest lines to ground pads). Give each its own via to the plane: board.ground_pads().`, few(lone, 12));
+      if (lone.length) add("ground.pour_only", "warning", `These ground pads reach the ground plane only through the pour on their own layer: no ground via within ${LIMITS.groundViaReach} mm, no short ground track to one, and none within ${LIMITS.groundPourReach} mm in the piece of pour the pad sits in. Such a joint lasts only while that piece of pour is filled and unbroken; a track routed past it later, or a pour that was never refilled, leaves the pad on its own (the ratsnest lines to ground pads). Give them a via to the plane, one for each group of pads that share a piece of pour: board.ground_pads().`, few(lone, 12));
     }
     const islands = [];
     let pieces3 = 0;
@@ -105522,11 +105555,11 @@ async function reviewSchematic(doc, path2) {
       const [a, b] = p.pins.map(pinNet);
       const va = railV(a), vb = railV(b);
       if (/^C\d/i.test(p.ref)) {
-        const work = va !== null && vb !== null ? Math.abs(va - vb) : null;
+        const work2 = va !== null && vb !== null ? Math.abs(va - vb) : null;
         const rated = capVolts(p.fields);
-        if (work !== null && work > 0) {
-          if (rated === null) noRating.push(`${p.ref} ${p.value} on ${isGround(a) ? b : a} (${work} V)`);
-          else if (rated < 2 * work - 1e-9) under.push(`${p.ref} ${p.value} is rated ${rated} V on ${isGround(a) ? b : a} (${work} V): use ${Math.ceil(2 * work)} V or more`);
+        if (work2 !== null && work2 > 0) {
+          if (rated === null) noRating.push(`${p.ref} ${p.value} on ${isGround(a) ? b : a} (${work2} V)`);
+          else if (rated < 2 * work2 - 1e-9) under.push(`${p.ref} ${p.value} is rated ${rated} V on ${isGround(a) ? b : a} (${work2} V): use ${Math.ceil(2 * work2)} V or more`);
         }
       } else if (/^R\d/i.test(p.ref)) {
         const r = ohms(p.value);

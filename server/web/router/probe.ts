@@ -22,6 +22,8 @@ export interface ProbeInput {
   maxVias?: number;            // candidates with more vias than this are not considered
   extra?: (nodes: Node[]) => number;   // a plan's own cost on top of the trained one
 }
+/** Search steps taken by every probe so far: the router's measure of work done, the same on any machine (a clock is not). */
+export const work = { steps: 0 };
 export interface ProbeResult { nodes: Node[]; feat: Features; cost: number; corners: number; onTerm: boolean; steps: number }
 
 export const costOf = (f: Features, W: Weights) => f.length * W.length + f.vias * W.via + f.b45 * W.bend45 + f.b90 * W.bend90 + f.wrong * W.wrongDir;
@@ -157,5 +159,6 @@ export function probe(inp: ProbeInput): ProbeResult | null {
     if (!any) { let more = false; for (let side = 0; side < 2; side++) for (let j = k + 1; j < buckets[side].length; j++) if (buckets[side][j] && buckets[side][j].length) more = true; if (!more) break; }
   }
   if (best) (best as ProbeResult).steps = steps;
+  work.steps += steps;
   return best;
 }

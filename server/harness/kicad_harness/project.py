@@ -1817,7 +1817,7 @@ class Board(_Doc):
                                 continue
                             if any(min(box[2], t[2]) - max(box[0], t[0]) > 1e-6 and min(box[3], t[3]) - max(box[1], t[1]) > 1e-6 for t in taken):
                                 continue
-                            wide = (box[0] - 0.15, box[1] - 0.15, box[2] + 0.15, box[3] + 0.15)
+                            wide = (box[0] - 0.75, box[1] - 0.75, box[2] + 0.75, box[3] + 0.75)      # room for the pin's track and a neighbour or two beside it
                             n_b = sum(1 for wy in ways if any(hits(wide, wy[m], wy[m + 1]) for m in range(len(wy) - 1)))
                             cost = d + 4 * n_b
                             if best is None or cost < best[0]:

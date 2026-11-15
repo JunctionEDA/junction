@@ -29,6 +29,7 @@ type Pt = [number, number];
 
 /** The numbers the checks use (millimetres unless named otherwise); pcb-design-rules.md gives the source of each. */
 export const LIMITS = {
+  groundPourReach: 4,       // ... or, through an unbroken piece of ground pour on its own layer, a ground via or through-hole pad this close
   groundViaReach: 1.5,      // a ground pad with no ground via or through-hole pad this close reaches the plane only through its own pour
   powerPath: 0.3,           // a net through a power inductor or from a battery is at least this wide (about 1 A on 1 oz outer copper)
   antennaClear: 0.5,        // no copper inside the antenna's courtyard grown by this (the datasheet's keep-out is usually larger)
@@ -744,13 +745,25 @@ export function reviewPhysics(doc: any, P: any, k: any, settings: any, add: Add)
         while (open.length) { const u = open.shift()!; const du = dist.get(u)!; if (atHole(gpts[u])) return true; for (const [v, w] of gadj[u]) { const d = du + w; if (d <= maxLen && (dist.get(v) === undefined || d < dist.get(v)! - 1e-9)) { dist.set(v, d); open.push(v); } } }
         return false;
       };
+      // a pad that sits in a piece of ground pour which itself reaches the plane close by (a ground via or through-hole
+      // pad in the same piece, within groundPourReach) is joined well enough: one via serves the pads around it
+      const pours = S.conds.filter((c: any) => c.kind === "zone" && isGnd(c.net) && c.shape && c.shape.pts && [...c.layers].some((l: string) => outer.has(l)));
+      const poured = (p: Pad): boolean => {
+        const m = 0.45, b = p.box; const probes: Pt[] = [[b[0] - m, p.y], [b[2] + m, p.y], [p.x, b[1] - m], [p.x, b[3] + m], [b[0] - m, b[1] - m], [b[2] + m, b[1] - m], [b[0] - m, b[3] + m], [b[2] + m, b[3] + m]];
+        for (const c of pours) {
+          if (![...c.layers].some((l: string) => p.layers.has(l))) continue; const pts: Pt[] = c.shape.pts; const g = grow(c.bbox, 0.01);
+          if (!probes.some((q) => inBox(g, q[0], q[1]) && inPoly(pts, q[0], q[1]))) continue;
+          if (holes.some((h) => Math.hypot(h[0] - p.x, h[1] - p.y) <= LIMITS.groundPourReach && inBox(g, h[0], h[1]) && inPoly(pts, h[0], h[1]))) return true;
+        }
+        return false;
+      };
       const lone: string[] = [];
       for (const f of fps) for (const p of f.pads) {
         if (!isGnd(p.net) || p.type !== "smd" || antennas.includes(f)) continue;
         const reach = Math.max(LIMITS.groundViaReach, (Math.max(p.box[2] - p.box[0], p.box[3] - p.box[1])) / 2 + 0.6);
-        if (!near(p.x, p.y, reach) && !tied(p)) lone.push(`${f.ref}.${p.number} at ${at(p.x, p.y)}`);
+        if (!near(p.x, p.y, reach) && !tied(p) && !poured(p)) lone.push(`${f.ref}.${p.number} at ${at(p.x, p.y)}`);
       }
-      if (lone.length) add("ground.pour_only", "warning", `These ground pads reach the ground plane only through the pour on their own layer: no ground via within ${LIMITS.groundViaReach} mm and no short ground track to one. Such a joint lasts only while that piece of pour is filled and unbroken; a track routed past it later, or a pour that was never refilled, leaves the pad on its own (the ratsnest lines to ground pads). Give each its own via to the plane: board.ground_pads().`, few(lone, 12));
+      if (lone.length) add("ground.pour_only", "warning", `These ground pads reach the ground plane only through the pour on their own layer: no ground via within ${LIMITS.groundViaReach} mm, no short ground track to one, and none within ${LIMITS.groundPourReach} mm in the piece of pour the pad sits in. Such a joint lasts only while that piece of pour is filled and unbroken; a track routed past it later, or a pour that was never refilled, leaves the pad on its own (the ratsnest lines to ground pads). Give them a via to the plane, one for each group of pads that share a piece of pour: board.ground_pads().`, few(lone, 12));
     }
     // pieces of an outer ground pour with no via or through-hole pad in them: islands the plane does not reach
     const islands: string[] = []; let pieces = 0;
