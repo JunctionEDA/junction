@@ -25,6 +25,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include <wx/dir.h>
@@ -111,6 +112,10 @@ std::atomic<int>  s_percent( 0 );
 /// Set when the program closes during a download: the stop that follows is not the user's
 /// "no", so the download continues at the next start.
 std::atomic<bool> s_suspended( false );
+
+/// Where the standard libraries were looked for before a download put them in place.
+std::mutex            s_formerMutex;
+std::vector<wxString> s_formerDirs;
 
 /// For the progress text of the running Install(): the size of all the archives together when
 /// the server told it (0 when unknown), and the bytes of the archives that are complete.
@@ -697,11 +702,24 @@ bool COLLAB_STDLIBS::IsDownloadableLibraryError( const wxString& aMessage )
     // A standard library that is not on this computer is not a fault to warn about while the
     // set can be downloaded (or is on its way): the download is the answer, and it brings the
     // library.  Anything else that fails to load is still reported.
-    if( !Running() && !Needed() )
-        return false;
-
     wxString message = aMessage;
     message.Replace( wxS( "\\" ), wxS( "/" ) );
+
+    // An error that names the folder the libraries were looked for in before the download put
+    // them elsewhere is left over from then (an editor that was open keeps it): the library
+    // is here now, at its new place.
+    {
+        std::lock_guard<std::mutex> lock( s_formerMutex );
+
+        for( const wxString& dir : s_formerDirs )
+        {
+            if( message.Contains( dir + wxS( "/" ) ) )
+                return true;
+        }
+    }
+
+    if( !Running() && !Needed() )
+        return false;
 
     for( wxString dir : { PATHS::GetStockSymbolsPath(), PATHS::GetStockFootprintsPath(),
                           PATHS::GetStockDesignBlocksPath(), PATHS::GetStock3dmodelsPath(),
@@ -986,6 +1004,33 @@ void COLLAB_STDLIBS::Activate()
     };
 
     PATHS::ForgetStockLibraryProbe();
+
+    // Remember where the libraries were looked for until now (see IsDownloadableLibraryError).
+    {
+        std::lock_guard<std::mutex> lock( s_formerMutex );
+
+        for( const auto& [dir, kind] : before )
+        {
+            wxString former = dir;
+            former.Replace( wxS( "\\" ), wxS( "/" ) );
+
+            while( former.EndsWith( wxS( "/" ) ) )
+                former.RemoveLast();
+
+            wxString now = kind == wxS( "symbols" )      ? PATHS::GetStockSymbolsPath()
+                           : kind == wxS( "footprints" ) ? PATHS::GetStockFootprintsPath()
+                           : kind == wxS( "3dmodels" )   ? PATHS::GetStock3dmodelsPath()
+                           : kind == wxS( "blocks" )     ? PATHS::GetStockDesignBlocksPath()
+                                                         : PATHS::GetStockTemplatesPath();
+            now.Replace( wxS( "\\" ), wxS( "/" ) );
+
+            while( now.EndsWith( wxS( "/" ) ) )
+                now.RemoveLast();
+
+            if( !former.IsEmpty() && former != now )
+                s_formerDirs.push_back( former );
+        }
+    }
 
     const std::map<wxString, wxString> after = {
         { wxS( "symbols" ), PATHS::GetStockSymbolsPath() },
