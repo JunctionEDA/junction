@@ -434,13 +434,16 @@ export function scrollModsValid(m: Prefs["mouse"]): boolean { return m.zoomMod !
 /**
  * PANEL_EDIT_OPTIONS' Left Click Mouse Commands (m_mouseCmdsWinLin / m_mouseCmdsOSX): the note and the fixed rows, the
  * Ctrl row showing `ctrl` (the board editor's Toggle selection / Highlight net choice).  The modifier names come from
- * keys.ts, in the order each of KiCad's two panels writes them ("Ctrl+Shift", "Shift+Cmd").
+ * keys.ts, in the order each of KiCad's two panels writes them ("Ctrl+Shift", "Shift+Cmd").  With `ctrl` null, the rows of
+ * PANEL_EESCHEMA_EDITING_OPTIONS' m_leftClickCmdsBook (no Click or Ctrl row, no colons).
  */
-function leftClickCommands(ctrl: Node | string): HTMLElement[] {
+function leftClickCommands(ctrl: Node | string | null): HTMLElement[] {
   const ctrlK = modName("Ctrl"), shiftK = modName("Shift"), altK = modName("Alt");
-  const cmds: [string, Node | string][] = [["Click:", "Select item(s)"], ["Long Click:", "Clarify selection from menu"], [`${shiftK}:`, "Add item(s) to selection"],
-    [IS_MAC ? `${shiftK}+${ctrlK}:` : `${ctrlK}+${shiftK}:`, "Remove item(s) from selection"], [`${ctrlK}:`, ctrl]];
-  if (IS_MAC) cmds.push([`${altK}:`, "Clarify selection from menu"]);
+  // PANEL_EESCHEMA_EDITING_OPTIONS (ctrl null) lists Long Click, Shift and Ctrl+Shift only, without colons
+  const c = ctrl === null ? "" : ":";
+  const cmds: [string, Node | string][] = [...(ctrl === null ? [] : [["Click:", "Select item(s)"] as [string, string]]), [`Long Click${c}`, "Clarify selection from menu"], [`${shiftK}${c}`, "Add item(s) to selection"],
+    [(IS_MAC ? `${shiftK}+${ctrlK}` : `${ctrlK}+${shiftK}`) + c, "Remove item(s) from selection"], ...(ctrl === null ? [] : [[`${ctrlK}:`, ctrl] as [string, Node | string]])];
+  if (IS_MAC) cmds.push([`${altK}${c}`, "Clarify selection from menu"]);
   const note = IS_MAC ? `Left click (and drag) actions depend on 3 modifier keys:\n${altK}, ${shiftK} and ${ctrlK}` : `Left click (and drag) actions depend on 2 modifier keys:\n${shiftK} and ${ctrlK}`;
   return [h("div", { style: "font-style:italic;color:var(--ink-3);font-size:var(--fs-sm);margin-bottom:6px;white-space:pre-line" }, note),
     h("div", { style: "display:grid;grid-template-columns:max-content 1fr;gap:4px 12px;align-items:start" }, ...cmds.flatMap(([k, v]) => [h("span", null, k), typeof v === "string" ? h("span", null, v) : v]))];
