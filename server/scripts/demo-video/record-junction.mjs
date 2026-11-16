@@ -348,6 +348,8 @@ await scene('build', async (dir) => {
   const others = {};
   for (const w of ['ben', 'chloe', 'dev']) { others[w] = await open(w, docOf('kicad_pcb')); await clearPanels(others[w]); await fitTo(others[w], VIEW); await others[w].evaluate(DEMO); }
   const pages = { ada: a, ...others };
+  // the editor may still fit its view to the (nearly empty) board after loading: frame the work area again, last thing
+  await a.bringToFront(); await sleep(1500); await fitTo(a, VIEW); console.log('  zoom before recording:', await a.evaluate(() => document.body.innerText.match(/Zoom [\d.]+/)?.[0] || '?'));
   const rec = await record(a, dir);
   const m = await mapOf(a);
   await rec.hold(500);
