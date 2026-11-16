@@ -3,7 +3,7 @@
 # plugin runtime (plugins/python/kicad_spice.py) and the assistant's simulate tool (web/mcp/simulate.ts).
 #
 # The result is server/vendor/ngspice/ngspice-core.mjs.br: emscripten's ES module with the WebAssembly inside it
-# (SINGLE_FILE, UTF-8 embedded; about 7.5 MB), brotli-compressed to about 1.5 MB, and build-meta.json beside it.
+# (SINGLE_FILE, UTF-8 embedded; about 7.7 MB), brotli-compressed to about 1.5 MB, and build-meta.json beside it.
 # scripts/build-python.mjs bundles it with web/plugins/ngspice-module.ts (the Simulation class every caller uses)
 # into static/dist/pyodide/ngspice.mjs, which the server hands out as /static/pyodide/ngspice.mjs.
 #
@@ -17,8 +17,9 @@
 # The recipe:
 #   * ngspice 45.2 (the release KiCad 9 bundles), from the GitHub mirror of ngspice's git (tag ngspice-45.2);
 #   * emscripten 7.0.0 (emsdk), ASYNCIFY so ngspice's interactive loop can wait for its next command without blocking;
-#   * the patches EEcircuit-Engine (MIT) applies to build ngspice for the web (hicum2 is C++ and is left out; the
-#     prompt waits for the page between commands);
+#   * the patches EEcircuit-Engine (MIT) applies to build ngspice for the web (the prompt waits for the page between
+#     commands), but not its leaving out hicum2: HICUM L2 (C++) is built and linked with emscripten's C++ library;
+#   * OSDI is off: its models are native shared libraries (OpenVAF's .osdi files), which WebAssembly cannot load;
 #   * XSPICE on: cmpp is built for this machine, preprocesses the code models (analog, digital, spice2poly, xtradev,
 #     xtraevt, table, tlines), and their objects are linked into ngspice itself; `codemodel <lib>.cm` registers a
 #     library from that table instead of dlopen()ing a file (kc_static_cm.c, the load_opus patch);
@@ -53,12 +54,8 @@ cd ngspice
 # the build date ngspice prints (NGSPICEBUILDDATE, __DATE__) is the tag's: the same source gives the same bytes
 SOURCE_DATE_EPOCH="$(git log -1 --format=%ct)"; export SOURCE_DATE_EPOCH
 
-# hicum2 is C++ (no exceptions in this build): left out, as EEcircuit-Engine does
-sed -i '/AC_CHECK_LIB(stdc++/d; /AC_SUBST(XTRALIBS/d; /src\/spicelib\/devices\/hicum2\/Makefile/d; /tests\/hicum2\/Makefile/d' configure.ac
-sed -i '/spicelib\/devices\/hicum2\/libhicum2.la/d' src/Makefile.am
-sed -i '/^[[:space:]]*hicum2[[:space:]]*\\\?/d' src/spicelib/devices/Makefile.am
-sed -i '/get_hicum_info/d' src/spicelib/devices/dev.c
-sed -i '/^[[:space:]]*hicum2[[:space:]]*\\\?[[:space:]]*$/d' tests/Makefile.am
+# hicum2 (HICUM L2, the BJT's level=8) is C++ that catches no exceptions: it is built, as KiCad's ngspice has it, and
+# the link takes emscripten's C++ library
 sed -i 's/-Wno-unused-but-set-variable/-Wno-unused-const-variable/g' configure.ac
 sed -i 's/AC_CHECK_FUNCS(\[time getrusage\])/AC_CHECK_FUNCS([time])/g' configure.ac
 
@@ -141,7 +138,9 @@ CMPP="$WORK/cmpp/cmpp"
 mkdir -p release && cd release
 # the build folder's path (in __FILE__ of ngspice's assertions) is left out, so any WORK gives the same bytes
 PREFIX_MAP="-ffile-prefix-map=$WORK=/ngspice-wasm"
+# cppduals (hicum2's automatic differentiation) specializes std::is_compound, which libc++ refuses unless told not to
 emconfigure ../configure --host=wasm32-unknown-emscripten --build=x86_64-pc-linux-gnu CC_FOR_BUILD=gcc CPPFLAGS="$PREFIX_MAP" \
+  CXXFLAGS="-O2 -Wno-invalid-specialization" \
   --disable-debug --disable-openmp --enable-xspice --disable-osdi --without-x --with-readline=no >/dev/null
 
 # ---- the code models: cmpp's sources, compiled with emcc
@@ -191,7 +190,8 @@ emcc $CMFLAGS -c "$CMOBJ/kc_cm_helpers.c" -o "$CMOBJ/kc_cm_helpers.o"
 
 # ---- link: ngspice with the code models, as an ES module with the WebAssembly inside it
 EXTRA_OBJS="$(ls "$CMOBJ"/*.o | tr '\n' ' ')"
-LINK="-O2 -s ASYNCIFY=1 -s ASYNCIFY_ADVISE=0 -s ASYNCIFY_IGNORE_INDIRECT=0 -s ASYNCIFY_STACK_SIZE=65536 -s STACK_SIZE=2097152 -s ENVIRONMENT=web,worker -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=2147483648 -s MODULARIZE=1 -s EXPORT_ES6=1 -s SINGLE_FILE=1 -s EXPORTED_RUNTIME_METHODS=[\"FS\",\"Asyncify\",\"callMain\",\"UTF8ToString\"] --pre-js $HERE/pre.js -o spice.mjs"
+# -lstdc++ -sDEFAULT_TO_CXX: emscripten's C++ library for hicum2, which an emcc link leaves out otherwise
+LINK="-lstdc++ -sDEFAULT_TO_CXX=1 -O2 -s ASYNCIFY=1 -s ASYNCIFY_ADVISE=0 -s ASYNCIFY_IGNORE_INDIRECT=0 -s ASYNCIFY_STACK_SIZE=65536 -s STACK_SIZE=2097152 -s ENVIRONMENT=web,worker -s ALLOW_MEMORY_GROWTH=1 -s MAXIMUM_MEMORY=2147483648 -s MODULARIZE=1 -s EXPORT_ES6=1 -s SINGLE_FILE=1 -s EXPORTED_RUNTIME_METHODS=[\"FS\",\"Asyncify\",\"callMain\",\"UTF8ToString\"] --pre-js $HERE/pre.js -o spice.mjs"
 sed -i "s|\$(ngspice_LDADD) \$(LIBS)|\$(ngspice_LDADD) $EXTRA_OBJS \$(LIBS) $LINK|" src/Makefile
 grep -q "SINGLE_FILE" src/Makefile
 emmake make -j"$JOBS" >/dev/null 2> "$WORK/make-errors.log" || { tail -40 "$WORK/make-errors.log"; exit 1; }

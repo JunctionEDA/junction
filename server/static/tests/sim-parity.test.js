@@ -379,6 +379,13 @@ if (fs.existsSync(ENGINE)) {
       assert.ok(o.plot, o.r.err.join("\n"));
       for (const s of ["I(XU1:out)", "I(XU1:in+)"]) assert.ok(L.findVector(o.plot, s), `${s} not in ${o.plot.vectors.map((v) => v.name).join(" ")}`);
     });
+    test("ngspice: the devices KiCad's ngspice has, HICUM L2 (a BJT of level=8) among them", async () => {
+      if (sp.dead) sp = await M.SPICE.open(pathToFileURL(ENGINE).href);
+      sp.write("/hicum.cir", "* hicum\n.model hic npn level=8\nQ1 c b 0 hic\nVc c 0 2\nVb b 0 0.8\n.op\n.end\n");
+      const r = await sp.exec(["destroy all", "remcirc", "source /hicum.cir", "run", "print vc#branch"]);
+      assert.ok(!r.err.some((e) => /not available/i.test(e)), r.err.join("\n"));
+      const m = /vc#branch = (\S+)/.exec(r.out); assert.ok(m && Number(m[1]) < -1e-4, r.out);
+    });
     test("ngspice: demo laser_driver's TRAN runs (POLY sources, the laser diode's extra model parameters)", async () => {
       const r = await simulate(demo("laser_driver/laser_driver.kicad_sch"), "", ["set ngbehavior=ltpsa"]);
       assert.ok(r.plot && /transient/i.test(r.plot.plotname), r.r.err.join("\n"));

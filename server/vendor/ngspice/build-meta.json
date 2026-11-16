@@ -3,6 +3,6 @@
   "ngspiceCommit": "724dc77b9153dc75eaec474b1f7a44f1fcf5f362",
   "emscripten": "7.0.0",
   "codeModels": "analog digital spice2poly xtradev xtraevt table tlines",
-  "bytes": 7525678,
-  "sha256": "2dd8c9e3363cff9a173f29933b0def3b924d67593a4257017ce8e47bd7926531"
+  "bytes": 7700954,
+  "sha256": "87c90e9dc2e85dce699d3a47d023c20506ccad01aeac4cc98914f4df2ae2ac66"
 }

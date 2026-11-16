@@ -8,12 +8,12 @@ simulator frame (`web/sim/frame.ts`), the plugin runtime (`plugins/python/kicad_
 
 | file | what it is |
 | --- | --- |
-| `vendor/ngspice/ngspice-core.mjs.br` | emscripten's ES module with the WebAssembly embedded (SINGLE_FILE), brotli-compressed: about 1.46 MB (7.5 MB unpacked) |
+| `vendor/ngspice/ngspice-core.mjs.br` | emscripten's ES module with the WebAssembly embedded (SINGLE_FILE), brotli-compressed: about 1.5 MB (7.7 MB unpacked) |
 | `vendor/ngspice/build-meta.json` | the ngspice tag and commit, the emscripten version, the code model libraries, and the size and sha256 of the unpacked module |
 | `scripts/ngspice-wasm/*` | the recipe: `build.sh`, the emscripten pre-js, the static code-model registry and the progress hook |
 
 `npm run build` (`scripts/build-python.mjs`) unpacks the module and bundles it with `web/plugins/ngspice-module.ts`
-(the `Simulation` class every caller uses) into `static/dist/pyodide/ngspice.mjs`, about 8.7 MB. The server serves
+(the `Simulation` class every caller uses) into `static/dist/pyodide/ngspice.mjs`, about 8.9 MB. The server serves
 it as `/static/pyodide/ngspice.mjs` (`pcm::runtime`, compressed on the wire). That file is generated and is never
 committed. The worker loads it from there, and so do the plugin frame and `scripts/plugin-spice.mjs`.
 
@@ -32,11 +32,24 @@ The build is reproducible. ngspice's build date is the tag's commit time (`SOURC
 folder's path is mapped out of `__FILE__` (`-ffile-prefix-map`), so two runs give the sha256 recorded in
 `build-meta.json`.
 
+## How it differs from KiCad's ngspice
+
+It has the devices and code models of the ngspice KiCad 9 bundles, HICUM L2 (a BJT of `level=8`) among them, with
+these differences:
+
+* **No OSDI.** ngspice is configured with `--disable-osdi` and the init script runs `unset osdi_enabled`. OSDI
+  models (Verilog-A compiled by OpenVAF, loaded with `pre_osdi`) are native shared libraries, and WebAssembly cannot
+  load them. A netlist that needs one fails here and runs in KiCad.
+* **No d_cosim.** The verilog and vhdl libraries d_cosim loads (Icarus Verilog, GHDL) are not built.
+* **No `plot` window.** `plot` in a `.control` block does nothing, as with the desktop's libngspice.
+
 ## The patches
 
-* **The EEcircuit-Engine patches (MIT).** hicum2 is left out, because it is C++ and this build has no exceptions. The
-  interactive prompt hands control to the page before it reads each command typed at the terminal (but not the
-  lines of a script it sources).
+* **The EEcircuit-Engine patches (MIT), but with hicum2.** The interactive prompt hands control to the page before
+  it reads each command typed at the terminal (but not the lines of a script it sources). EEcircuit-Engine leaves
+  hicum2 out; here it is built, as in KiCad's ngspice: HICUM L2 is C++ that catches no exceptions, so it only needs
+  emscripten's C++ library at the link (`-lstdc++ -sDEFAULT_TO_CXX`) and cppduals' `std::is_compound` specialization
+  allowed (`-Wno-invalid-specialization`).
 * **XSPICE.** `cmpp` is built natively and preprocesses the code models: analog, digital, spice2poly, xtradev,
   xtraevt, table and tlines. Their objects are linked into ngspice. `codemodel <lib>.cm` (from spinit) registers a
   library from the static table instead of `dlopen()`ing it (`kc_static_cm.c`). verilog and vhdl (d_cosim's shared
