@@ -340,7 +340,7 @@ class DIALOG_COLLAB_COMMENTS* m_commentsDlg = nullptr;
     bool           m_overlayQueued = false; ///< a cursor-overlay rebuild is on its way
     wxLongLong     m_lastMoveSendMs = 0; ///< when the last changed state went out
     bool           m_stopPending = false; ///< the "stopped" repeat of it is still owed
-    COLLAB_CURSOR_PREDICTOR m_predictor;  ///< where to draw each peer's pointer between messages
+    COLLAB_CURSOR_REPLAY    m_predictor;  ///< where to draw each peer's pointer between messages
     std::map<wxString, unsigned long long> m_sampledSeq; ///< each peer's last update taken as a sample
 
     ///< Feed every peer's fresh presence update to the prediction.

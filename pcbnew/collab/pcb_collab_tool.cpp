@@ -69,6 +69,15 @@
 #include <wx/statusbr.h>
 #include <wx/textdlg.h>
 
+/// A presence state as it goes out: stamped with our clock, so peers replay the pointer at the
+/// pace it moved (COLLAB_CURSOR_REPLAY).  Added after the "did anything change" comparison,
+/// which the stamp would always defeat.
+static nlohmann::json stampedPresence( nlohmann::json aState )
+{
+    aState[ "ts" ] = std::round( COLLAB_CURSOR_REPLAY::ClockMs() * 10.0 ) / 10.0;
+    return aState;
+}
+
 /// Put a share link on the clipboard, telling the truth about whether it landed.
 ///
 /// wxClipboard::Open() fails while another process holds the clipboard (a clipboard
@@ -1871,7 +1880,7 @@ void PCB_COLLAB_TOOL::onTimer( wxTimerEvent& aEvent )
         followCommentAnchors();
     }
 
-    // Pointers move every frame between presence messages (COLLAB_CURSOR_PREDICTOR).
+    // Pointers move every frame between presence messages (COLLAB_CURSOR_REPLAY).
     animatePeerCursors();
 
     COLLAB_SESSION& session = COLLAB_SESSION::Get();
@@ -2029,9 +2038,8 @@ void PCB_COLLAB_TOOL::onTimer( wxTimerEvent& aEvent )
 
     // Re-send unchanged state as a keepalive: the server evicts peers after 30 s
     // of silence, which would make an idle collaborator's cursor vanish.
-    // Our round trip to the server: peers draw our pointer ahead by half of it (plus half
-    // of theirs), the age of this update when it reaches them.  Whole ms, so it changes
-    // the state (and forces a send) only when the estimate really moves.
+    // Our round trip to the server, for diagnostics.  Whole ms, so it changes the state (and
+    // forces a send) only when the estimate really moves.
     if( session.RttMs() > 0.0 )
         state[ "rtt" ] = KiROUND( session.RttMs() );
 
@@ -2041,11 +2049,11 @@ void PCB_COLLAB_TOOL::onTimer( wxTimerEvent& aEvent )
     if( !m_presenceDirty && !keepalive && state == m_lastSentState )
     {
         // The pointer stopped: say so once more a moment later, with the same place, so
-        // peers drawing it ahead of the last update bring it back to where it is at once.
+        // peers replaying it (COLLAB_CURSOR_REPLAY) know the motion ended.
         if( m_stopPending && wxGetLocalTimeMillis() - m_lastMoveSendMs >= STOP_AFTER_MS )
         {
             m_stopPending = false;
-            session.SendPresence( m_docId, state );
+            session.SendPresence( m_docId, stampedPresence( state ) );
         }
 
         return;
@@ -2058,7 +2066,7 @@ void PCB_COLLAB_TOOL::onTimer( wxTimerEvent& aEvent )
     m_lastSentState = state;
     m_lastPresenceSend = wxDateTime::Now();
 
-    session.SendPresence( m_docId, state );
+    session.SendPresence( m_docId, stampedPresence( state ) );
 }
 
 
@@ -2820,7 +2828,6 @@ void PCB_COLLAB_TOOL::samplePeerCursors()
 {
     COLLAB_SESSION&    session = COLLAB_SESSION::Get();
     const wxString     docId = m_docId;
-    const double       ownRtt = session.RttMs();
     std::set<wxString> present;
 
     if( !docId.IsEmpty() )
@@ -2846,12 +2853,12 @@ void PCB_COLLAB_TOOL::samplePeerCursors()
 
             seen = peer.stateSeq;
 
-            const double senderRtt = st.contains( "rtt" ) && st[ "rtt" ].is_number()
-                                             ? st[ "rtt" ].get<double>() : 0.0;
+            const double senderTs = st.contains( "ts" ) && st[ "ts" ].is_number()
+                                            ? st[ "ts" ].get<double>() : 0.0;
 
             m_predictor.Sample( clientId,
                                 VECTOR2I( st[ "cursor" ][ 0 ].get<int>(), st[ "cursor" ][ 1 ].get<int>() ),
-                                COLLAB_CURSOR_PREDICTOR::LeadMs( senderRtt, ownRtt ) );
+                                senderTs );
         }
     }
 
