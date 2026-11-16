@@ -1,0 +1,8 @@
+{
+  "ngspice": "ngspice-45.2",
+  "ngspiceCommit": "724dc77b9153dc75eaec474b1f7a44f1fcf5f362",
+  "emscripten": "7.0.0",
+  "codeModels": "analog digital spice2poly xtradev xtraevt table tlines",
+  "bytes": 7525678,
+  "sha256": "2dd8c9e3363cff9a173f29933b0def3b924d67593a4257017ce8e47bd7926531"
+}

@@ -22,11 +22,19 @@ for (const f of ["occt-import-js.js", "occt-import-js.wasm"]) {
   const src = path.join(server, "node_modules", "occt-import-js", "dist", f), dst = path.join(out, f);
   if (!fs.existsSync(dst) || fs.statSync(dst).size !== fs.statSync(src).size) fs.copyFileSync(src, dst);
 }
-// ngspice compiled to WebAssembly (npm eecircuit-engine, MIT): the circuit simulator behind the `ngspice` program and
-// the libngspice stand-in (plugins/python/kicad_spice.py).  About 20 MB, so it is its own file, fetched on first use.
+// ngspice 45.2 compiled to WebAssembly with XSPICE and its code models (scripts/ngspice-wasm/build.sh, which makes
+// vendor/ngspice/ngspice-core.mjs.br): the circuit simulator behind the simulator frame, the `ngspice` program and the
+// libngspice stand-in (plugins/python/kicad_spice.py), with its JavaScript face (web/plugins/ngspice-module.ts).  About
+// 9 MB, so it is its own file, fetched on first use.
 {
-  const src = path.join(server, "node_modules", "eecircuit-engine", "dist", "eecircuit-engine.mjs"), dst = path.join(out, "ngspice.mjs");
-  if (!fs.existsSync(dst) || fs.statSync(dst).size !== fs.statSync(src).size) fs.copyFileSync(src, dst);
+  const core = path.join(server, "vendor", "ngspice", "ngspice-core.mjs.br");
+  const unpack = { name: "ngspice-core", setup(b) {
+    b.onResolve({ filter: /ngspice-core\.mjs$/ }, () => ({ path: core, namespace: "ngspice-core" }));
+    b.onLoad({ filter: /.*/, namespace: "ngspice-core" }, () => ({ contents: zlib.brotliDecompressSync(fs.readFileSync(core)).toString("utf8"), loader: "js" }));
+  } };
+  const r = await esbuild.build({ entryPoints: [path.join(server, "web", "plugins", "ngspice-module.ts")], bundle: true, format: "esm", target: "es2022", minify: true, charset: "utf8", external: ["node:*"], write: false, legalComments: "none", logLevel: "warning", plugins: [unpack] });
+  const dst = path.join(out, "ngspice.mjs"), body = Buffer.from(r.outputFiles[0].contents);
+  if (!fs.existsSync(dst) || !fs.readFileSync(dst).equals(body)) fs.writeFileSync(dst, body);
 }
 const shim = path.join(server, "plugins", "python"); const files = {};
 const walk = (dir, base) => { for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { const rel = base ? base + "/" + e.name : e.name; if (e.isDirectory()) { if (e.name !== "__pycache__" && e.name !== "wheels") walk(path.join(dir, e.name), rel); } else if (e.name.endsWith(".py")) files[rel] = fs.readFileSync(path.join(dir, e.name), "utf8"); } };
