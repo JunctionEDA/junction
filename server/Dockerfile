@@ -12,6 +12,8 @@ COPY static/sch-tools.js static/pcb-tools.js ./static/
 COPY plugins/python ./plugins/python
 # the Python harness (harness/kicad_harness) is bundled into the program that runs run_python scripts
 COPY harness/kicad_harness ./harness/kicad_harness
+# the ngspice WebAssembly engine (vendor/ngspice) is built ahead of time and packed into the Python runtime's ngspice.mjs
+COPY vendor ./vendor
 RUN npm run check && npm run build
 
 FROM rust:1-slim-bookworm AS build
