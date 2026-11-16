@@ -89,11 +89,12 @@ const b = await pcb.evaluate(() => {
     out.push({ id: it.id, kind: it.kind, pts, layer, net: K.netNameOf ? (K.netNameOf(d, it) || net) : net, add, remove: P.removedChange(it) });
   }
   // the footprints as the layout left them, and the board outline: the video adds the outline, brings the
-  // footprints in with Update PCB from Schematic, and places them where these say
+  // footprints in with Update PCB from Schematic, and places them where these say (the outline: a rectangle, or the
+  // lines and arcs of one with rounded corners)
   const fps = [], outline = [];
   for (const it of d.items.values()) {
     if (it.kind === 'footprint') { const at = K.atOf(it.node); fps.push({ id: it.id, ref: it.ref, at: [at[0], at[1]], rot: at[2] || 0, bbox: it.bbox, node: it.node, remove: P.removedChange(it) }); }
-    else if (it.kind === 'gr_rect' && JSON.stringify(kid(it.node, 'layer') || []).includes('Edge.Cuts')) outline.push({ id: it.id, bbox: it.bbox, add: K.boardChangeExtras(d, it, { id: it.id, kind: 'ADDED', typeName: P.typeNameOf(it), sexpr: P.wrapBoard(it.node) }), remove: P.removedChange(it) });
+    else if (/^gr_(rect|line|arc)$/.test(it.kind) && JSON.stringify(kid(it.node, 'layer') || []).includes('Edge.Cuts')) outline.push({ id: it.id, bbox: it.bbox, add: K.boardChangeExtras(d, it, { id: it.id, kind: 'ADDED', typeName: P.typeNameOf(it), sexpr: P.wrapBoard(it.node) }), remove: P.removedChange(it) });
   }
   return { out, fps, outline };
 });

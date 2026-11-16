@@ -275,12 +275,12 @@ const DEMO = () => {
   };
 };
 await scene('place', async (dir) => {
-  const FP = I.footprints, OUTL = I.outline[0];
+  const FP = I.footprints, OUTL = { bbox: I.outline.reduce((b, o) => [Math.min(b[0], o.bbox[0]), Math.min(b[1], o.bbox[1]), Math.max(b[2], o.bbox[2]), Math.max(b[3], o.bbox[3])], [Infinity, Infinity, -Infinity, -Infinity]), adds: I.outline.map((o) => o.add) };
   const blockNames = Object.values(I.blocks).map((b) => b.name);
   const mine = Object.fromEntries(Object.entries(PEOPLE_BLOCKS).map(([w, res]) => [w, blockNames.filter((n) => res.some((r) => r.test(n)))]));
   const a = await open('ada', docOf('kicad_pcb'), MAIN);
   // start from an empty board: no footprints, no outline, no copper
-  await a.evaluate(() => { const E = window.CollabEditor, P = window.PcbTools; const out = []; for (const it of E.kdoc.items.values()) if (['footprint', 'segment', 'arc', 'via', 'zone'].includes(it.kind) || (it.kind === 'gr_rect')) out.push(P.removedChange(it)); if (out.length) E.api.commitChanges(out, 'reset'); });
+  await a.evaluate(() => { const E = window.CollabEditor, P = window.PcbTools; const out = []; for (const it of E.kdoc.items.values()) if (['footprint', 'segment', 'arc', 'via', 'zone'].includes(it.kind) || (/^gr_(rect|line|arc)$/.test(it.kind) && JSON.stringify(it.node).includes('Edge.Cuts'))) out.push(P.removedChange(it)); if (out.length) E.api.commitChanges(out, 'reset'); });
   await settled(a); await clearPanels(a);
   // cross-probing as KiCad ships it: select, centre and zoom to the probed footprints (Preferences > PCB Editor > Display Options)
   await a.evaluate(() => { const k = 'kui.prefs'; let p = {}; try { p = JSON.parse(localStorage.getItem(k) || '{}') || {}; } catch (e) { p = {}; }
@@ -318,7 +318,7 @@ await scene('place', async (dir) => {
   let at = [800, 450];
   const c0 = m.to([ob[0], ob[1]]), c1 = m.to([ob[2], ob[3]]);
   await rec.glide(a, at, c0, 500); await rec.hold(250); await rec.glide(a, c0, c1, 900); at = c1;
-  await commit(a, [OUTL.add], 'outline'); await rec.hold(500); rec.mark('outline');
+  await commit(a, OUTL.adds, 'outline'); await rec.hold(500); rec.mark('outline');
   // 2. Update PCB from Schematic
   at = await menu(rec, a, at, 'tools', '/Update PCB from Schematic/');
   const upd = a.locator('button', { hasText: /^Update PCB$/ }).first();
@@ -423,7 +423,7 @@ await scene('place', async (dir) => {
 await scene('route', async (dir) => {
   const a = await open('ada', docOf('kicad_pcb'), MAIN);
   await reset(a, 'pcb'); await clearPanels(a);
-  const outline = await a.evaluate(() => { for (const it of window.CollabEditor.kdoc.items.values()) if (it.kind === 'gr_rect') return it.bbox; return null; });
+  const outline = await a.evaluate(() => { let b = null; for (const it of window.CollabEditor.kdoc.items.values()) if (/^gr_(rect|line|arc)$/.test(it.kind) && it.bbox && JSON.stringify(it.node).includes('Edge.Cuts')) b = b ? [Math.min(b[0], it.bbox[0]), Math.min(b[1], it.bbox[1]), Math.max(b[2], it.bbox[2]), Math.max(b[3], it.bbox[3])] : it.bbox.slice(); return b; });
   await frame(a, [outline[0] - 2, outline[1] - 2, outline[2] + 2, outline[3] + 2]);
   const others = {};
   for (const w of ['ben', 'chloe', 'dev']) { others[w] = await open(w, docOf('kicad_pcb')); await clearPanels(others[w]); await home(others[w]); }
