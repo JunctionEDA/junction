@@ -141,6 +141,8 @@ async function menu(rec, page, from, name, entry, sub) {
   for (const [text, last] of [[sub, false], [entry, true]]) {
     if (!text) continue;
     const it = page.locator(`#kmenus [data-menu="${name}"] .dd`).locator(`text=${text}`).first(); await it.waitFor({ timeout: 10000 }); const ib = await it.boundingBox(); const to = [ib.x + 40, ib.y + ib.height / 2];
+    // into a submenu sideways first, then down: a diagonal crosses the other entries and the submenu closes
+    if (last && sub) { const side = [to[0], at[1]]; await rec.glide(page, at, side, 200); at = side; }
     await rec.glide(page, at, to, 350); at = to; await rec.hold(200);
     if (last) await it.click(); else await it.hover();
   }
