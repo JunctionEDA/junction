@@ -305,6 +305,7 @@
   .win, .scene, .shot, .get-grid { border-radius: 2px; box-shadow: none; border-color: var(--line-2); }
   .js .win.rv, .js .win.rv.in { transform: none; }
   .close { padding-top: clamp(40px, 6vw, 72px) !important; }
+  #get { padding-bottom: clamp(40px, 5vw, 64px); }   /* the page ends at Get it now, straight into the footer */
   .close .lead { max-width: 60ch; }
   .close .acts { margin-top: 18px; }
   @media (max-width: 640px) { .sheet-n { display: none; } .sheet-h h2 { padding: 12px 12px 10px; } }
@@ -552,15 +553,17 @@
   </div>
 </section>
 
+<!-- The closing call repeated Get it's buttons; the person asked for it to go (2026-11-16).
 <section class="close" style="padding-top:0">
   <div class="wrap">
     <p class="lead rv">Sign in to start a project in the browser, or get the desktop app and open it from there.</p>
-    <div class="acts rv" style="--i:1">
+    <div class="acts rv" style="- -i:1">
       <a class="btn primary" data-signin data-long href="/auth/github/login?next=/"><span>Sign in with GitHub</span></a>
       <a class="btn" href="#get">Get the desktop app</a>
     </div>
   </div>
 </section>
+-->
 </main>
 
 <footer class="wrap">

@@ -1,7 +1,8 @@
 // The scroll story: one design carried from schematic to placed, routed and fabricated.
 // Scrolling picks the chapter; each chapter then plays to its end on its own clock, so a
 // wire that starts being drawn always arrives.  Scrolling ahead never skips a
-// chapter: the one playing speeds up (eased, at most 3x) and the next starts when it has finished.
+// chapter: the page holds at the end of the one playing until it has finished, and while the visitor
+// pushes on it plays faster (eased, at most 3x).
 // Everything flat is the real KiCad files
 // painted by the editor's renderer; only the last chapter's solid is drawn here.
 
@@ -92,7 +93,7 @@ export function startStory(root: HTMLElement): void {
   const steps = Array.from(root.querySelectorAll<HTMLElement>("[data-step]"));
   const track = root.querySelector<HTMLElement>(".story-track")!;
   const still = reducedMotion();
-  let g = 0, chapter = -1, blend = 0, rush = 1;
+  let g = 0, chapter = -1, blend = 0, rush = 1, held = false;
   const p = [0, 0, 0, 0];
   // In the last chapter the board can be turned by dragging; it settles back when let go.
   let turn = 0, turnTo = 0, drag: { x: number; from: number } | null = null;
@@ -126,8 +127,15 @@ export function startStory(root: HTMLElement): void {
   }
 
   function readScroll(): void {
-    const r = track.getBoundingClientRect();
+    let r = track.getBoundingClientRect();
     const room = r.height - window.innerHeight;
+    // The page cannot be scrolled past a step that is still playing.  A jump from far away (a link,
+    // a restored scroll position) is let through; the chapters then play from the start as usual.
+    if (!still && room > 0 && p[3] < 1) {
+      let gate = 0; while (gate < 3 && p[gate] >= 1) gate++;
+      const over = -r.top - room * (gate + 1) / 4;
+      if (over > 0.5 && over < window.innerHeight) { window.scrollTo({ top: window.scrollY - over, behavior: "auto" }); held = true; r = track.getBoundingClientRect(); }
+    }
     g = room > 0 ? clamp(-r.top / room) * 4 : 0;
     // The 3D viewer (210 KB) is fetched once the story is halfway, a chapter before it is shown, not with the page.
     if (g > 1.6 && r.bottom > -window.innerHeight) want3d();
@@ -138,7 +146,7 @@ export function startStory(root: HTMLElement): void {
 
   function setChapter(i: number): void {
     if (i === chapter) return;
-    chapter = i;
+    chapter = i; held = false;
     steps.forEach((el, k) => { el.classList.toggle("on", k === i); el.classList.toggle("done", k < i); });
     root.dataset.chapter = String(i);
   }
@@ -154,7 +162,7 @@ export function startStory(root: HTMLElement): void {
       if (still) p[i] = i <= c ? 1 : 0;
       else if (c === i && (i === 0 || p[i - 1] >= 1)) {
         // Scrolled past a step that is still playing: it speeds up, easing in, but still plays through.
-        const to = Math.floor(g) > i ? HURRY : 1;
+        const to = held || g > i + 0.9 ? HURRY : 1;
         rush += (to - rush) * (1 - Math.exp(-dt / 450));
         if (Math.abs(to - rush) < 0.01) rush = to;
         p[i] = Math.min(1, p[i] + dt / 1000 * rush / DUR[i]);
