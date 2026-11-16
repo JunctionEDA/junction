@@ -81,8 +81,8 @@ export function openHotkeyList(): void {
     } });
 }
 
-const RELEASES = "https://github.com/notaroomba/junction/releases";
-const SOURCE = "https://github.com/notaroomba/junction";
+const RELEASES = "https://github.com/JunctionEDA/junction/releases";
+const SOURCE = "https://github.com/JunctionEDA/junction";
 const LOGO = `<img src="${ICON_URL}" width="64" height="64" alt="">`;
 
 /** The text KiCad's "Copy Version Info" puts on the clipboard, for this client. */

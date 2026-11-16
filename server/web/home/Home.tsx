@@ -15,7 +15,7 @@ import { FirstProject } from "../onboarding/FirstProject";
 import { miniBoard, startGuidedProject } from "../onboarding/state";
 import { ago, Avatar, Confirm, copyText, Ic, layerOpen, Menu, Modal, PHONE, toast, toastError, useMedia, type MenuAt, type MenuEntry } from "./ui";
 
-const RELEASES = "https://github.com/notaroomba/junction/releases";
+const RELEASES = "https://github.com/JunctionEDA/junction/releases";
 type Tab = "projects" | "explore" | "trash" | "time";
 type Scope = "all" | "owned" | "shared" | "starred";
 type Sort = "updated" | "name" | "created";

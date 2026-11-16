@@ -8,12 +8,12 @@ with any AI model as a teammate.</p>
 
 <p align="center">
   <a href="https://junctioneda.com"><b>Open in the browser</b></a> ·
-  <a href="https://github.com/notaroomba/junction/releases/latest"><b>Download for macOS, Windows, Linux</b></a> ·
+  <a href="https://github.com/JunctionEDA/junction/releases/latest"><b>Download for macOS, Windows, Linux</b></a> ·
   <a href="#design-with-an-ai"><b>Connect an AI</b></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/notaroomba/junction/releases/latest"><img src="https://img.shields.io/github/v/release/notaroomba/junction" alt="Release"></a>
+  <a href="https://github.com/JunctionEDA/junction/releases/latest"><img src="https://img.shields.io/github/v/release/JunctionEDA/junction" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="License: GPL v3"></a>
 </p>
 
@@ -29,7 +29,7 @@ with any AI model as a teammate.</p>
 | You want | Do this |
 |---|---|
 | The browser editor | Open [junctioneda.com](https://junctioneda.com) and sign in with GitHub. Nothing to install. |
-| The desktop app | Download Junction 2.1.4 for macOS, Windows or Linux from the [latest release](https://github.com/notaroomba/junction/releases/latest). |
+| The desktop app | Download Junction 2.1.4 for macOS, Windows or Linux from the [latest release](https://github.com/JunctionEDA/junction/releases/latest). |
 | An AI app that designs with you | Add `https://junctioneda.com/mcp` as an MCP server (commands [below](#design-with-an-ai)). |
 | Your own server | `cargo run` in [`server/`](server/README.md#running) with a Postgres database. |
 
