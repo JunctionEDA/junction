@@ -61,7 +61,7 @@ const beatAt = (name, from, len, captions) => fs.existsSync(path.join(OUT, name,
 // Straight into the schematic: Ada starts alone, and each time someone joins, the view closes in on their cursor.
 {
   const follows = ['ben', 'chloe', 'dev'].filter((w) => S.follow && S.follow[w] && S.follow[w].length)
-    .map((w) => ({ who: w, t0: S.follow[w][0][0], len: 3.4, s: 2.1, sx: 1, track: S.follow[w] }));
+    .map((w) => ({ who: w, t0: S.follow[w][0][0], len: 3.2, s: 1.35, sx: 1, track: S.follow[w] }));
   const toasts = follows.map((f) => ({ at: f.t0 + 0.25, text: `${NAME[f.who]} joined`, color: COL[f.who] }));
   cut('schematic', 0, S.length, { follows, toasts, captions: [''] });
 }

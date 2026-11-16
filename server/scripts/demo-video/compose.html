@@ -98,7 +98,7 @@
       // the cursor, in the window's pixels (the photographs are the window's size: f.sx scales them to the box)
       const px = (a[1] + (b[1] - a[1]) * u) * f.sx, py = (a[2] + (b[2] - a[2]) * u) * f.sx;
       sc = 1 + (f.s - 1) * e;
-      const wantX = px + (W / 2 - px) * e * 0.7, wantY = py + (H / 2 - py) * e * 0.7;
+      const wantX = px + (W / 2 - px) * e * 0.35, wantY = py + (H / 2 - py) * e * 0.35;
       tx = clamp(wantX - sc * px, W - sc * W, 0); ty = clamp(wantY - sc * py, H - sc * H, 0);
     }
     I.img.style.transformOrigin = '0 0'; I.img.style.transform = sc === 1 ? '' : `translate(${tx}px, ${ty}px) scale(${sc})`;
