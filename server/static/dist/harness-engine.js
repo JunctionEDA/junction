@@ -118912,6 +118912,7 @@ var Router = class _Router {
       let pour;
       const anchors = [].concat(...clusters);
       let planeEnd = null;
+      let dropAt;
       if (mine.length) {
         const inZone = (a) => mine.some((z2) => z2.layers.some((l) => a.layers.includes(l)) && z2.polys.filter((pts) => pointInPolyPts(pts, a.p)).length % 2 === 1);
         const covered = [], rest = [];
@@ -118935,6 +118936,25 @@ var Router = class _Router {
           if (!clusters.some((cl) => cl.some(inZone))) {
             const a = anchors.find(under);
             if (a) clusters.push([planeEnd(a) || a]);
+          }
+        }
+        {
+          const pzi = mine.filter((z2) => z2.layers.some((l) => /^In\d/.test(copper[l])));
+          if (pzi.length && !watchOnly) {
+            const pl = pzi[0].layers.find((l) => /^In\d/.test(copper[l]));
+            const others = zones.filter((z2) => z2.net !== net.key && z2.layers.includes(pl));
+            const inP = (polys, p) => polys.filter((pts) => pointInPolyPts(pts, p)).length % 2 === 1;
+            const gap = (polys, p) => {
+              let d = Infinity;
+              for (const pts of polys) for (let i = 0; i < pts.length; i++) {
+                const a0 = pts[i], b0 = pts[(i + 1) % pts.length];
+                const dx = b0[0] - a0[0], dy = b0[1] - a0[1], L2 = dx * dx + dy * dy;
+                const t = L2 ? Math.max(0, Math.min(1, ((p[0] - a0[0]) * dx + (p[1] - a0[1]) * dy) / L2)) : 0;
+                d = Math.min(d, Math.hypot(p[0] - a0[0] - t * dx, p[1] - a0[1] - t * dy));
+              }
+              return d;
+            };
+            dropAt = (a) => !a.plane && !a.layers.includes(pl) && pzi.some((z2) => inP(z2.polys, a.p) && gap(z2.polys, a.p) >= 0.6) && !others.some((z2) => inP(z2.polys, a.p) || gap(z2.polys, a.p) < 0.6) ? { p: [a.p[0], a.p[1]], layers: [pl], shape: { t: "circle", x: a.p[0], y: a.p[1], r: 0.01 }, cluster: 0, plane: true } : null;
           }
         }
         clusters.forEach((cl, i) => {
@@ -118969,7 +118989,7 @@ var Router = class _Router {
       }));
       if (watchOnly && !pour) continue;
       const cls = this.classFor(net.key);
-      const info = { key: net.key, obj: nl.table.byName.get(net.key) || { code: net.code, name: net.name }, cls, conns: [], clusters: clusters.length, zoneCells, zoneCluster, guide: this.guideFor(net.key), anchors, pour };
+      const info = { key: net.key, obj: nl.table.byName.get(net.key) || { code: net.code, name: net.name }, cls, conns: [], clusters: clusters.length, zoneCells, zoneCluster, guide: this.guideFor(net.key), anchors, pour, drop: dropAt };
       const isPair = !!pairName(net.key);
       const partOf2 = (i) => {
         for (const a of clusters[i]) {
@@ -120153,8 +120173,12 @@ var Router = class _Router {
         return out2;
       };
       let ta = cells(conn.a.cluster), tb = cells(conn.b.cluster);
+      if (conn.planeOnly !== void 0) {
+        ta = [];
+        tb = [];
+      }
       const zoneAt = (cluster) => !collect && net.zoneCells && comp[cluster] === comp[net.zoneCluster];
-      let flip = ta.length > tb.length || !!zoneAt(conn.a.cluster) && !zoneAt(conn.b.cluster);
+      let flip = conn.planeOnly === void 0 && (ta.length > tb.length || !!zoneAt(conn.a.cluster) && !zoneAt(conn.b.cluster));
       if (flip) {
         const t = ta;
         ta = tb;
@@ -120275,7 +120299,7 @@ var Router = class _Router {
         zoneSet = /* @__PURE__ */ new Set();
         term = tb.slice();
         let own = false;
-        for (const z2 of net.zoneCells) if (!maps[z2.l][z2.iy * G5.W + z2.ix]) {
+        for (const z2 of net.zoneCells) if ((conn.planeOnly === void 0 || z2.l === conn.planeOnly) && !maps[z2.l][z2.iy * G5.W + z2.ix]) {
           if (!rt[z2.l]) {
             if (!own) {
               rt = rt.slice();
@@ -120717,6 +120741,11 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       if (this.opts.zones !== false) this.stitch(timeUp);
     }
     if (this.opts.fewerVias !== false && !this.stopped) this.fewerVias(timeUp);
+    if (this.opts.planeShortcuts !== false && !this.stopped) {
+      const before = this.stat.planeShortcuts || 0;
+      this.planeShortcuts(timeUp);
+      if (ripUp && (this.stat.planeShortcuts || 0) > before && conns.some((c) => !c.nodes && !c.moot && c.why !== "budget")) this.repair(timeUp);
+    }
     this.widen();
     if (this.opts.zones !== false && !this.stopped) this.stitch(timeUp);
     if (ripUp && this.opts.zones !== false && !this.stopped && conns.some((c) => !c.nodes && !c.moot && c.stitch)) {
@@ -120901,6 +120930,108 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       if (!done) {
         Object.assign(c, old);
         this.place(c, 1);
+      }
+    }
+  }
+  /** A supply track that runs a long way between two pads of a net that has an inner plane is taken up again when
+   *  each pad can drop into the plane through a via beside it, as the owner's boards do (Ember's +3.3V: 79 mm of track
+   *  by hand where the router laid 194).  Done after every connection is routed, so it only ever frees room. */
+  planeShortcuts(timeUp) {
+    const G5 = this.G, LONG = 4;
+    const dbg = (...m) => {
+      const g2 = globalThis;
+      if (g2.KC_PS_DEBUG || g2.process?.env?.KC_PS_DEBUG) console.error("ps", ...m);
+    };
+    const save2 = (c) => ({ nodes: c.nodes, shapes: c.shapes, viaCells: c.viaCells, landed: c.landed, feat: c.feat, stubs: c.stubs, zoneEnd: c.zoneEnd, ends: c.ends, a: c.a, b: c.b, why: c.why });
+    const lenOf = (c) => c.feat ? c.feat.length : c.len;
+    for (const net of this.nets) {
+      if (!net.drop || timeUp()) continue;
+      const drop2 = net.drop;
+      const order = net.conns.filter((c) => c.nodes && !c.stitch).sort((a, b) => lenOf(b) - lenOf(a));
+      for (const c of order) {
+        if (timeUp()) break;
+        if (!c.nodes || c.moot || c.pair || c.partner || c.a.plane || c.b.plane) continue;
+        const len = lenOf(c);
+        if (len < LONG) continue;
+        const da = drop2(c.a), db = drop2(c.b);
+        if (!da || !db) {
+          dbg(c.net, this.padName(c.a.p), this.padName(c.b.p), "no drop", !!da, !!db);
+          continue;
+        }
+        const pl = da.layers[0];
+        if (!net.pour || !net.pour.mask[pl] || net.zoneCluster < 0) continue;
+        const tree = [];
+        const walk2 = (x) => {
+          tree.push(x);
+          for (const o of this.conns) if (o.nodes && o.landed === x.id && !tree.includes(o)) walk2(o);
+        };
+        walk2(c);
+        if (tree.some((x) => x.pair || x.partner)) continue;
+        const olds = tree.map(save2);
+        const before = tree.reduce((t, x) => t + lenOf(x), 0);
+        this.rip(c);
+        const made = [];
+        let ok2 = true;
+        let after = 0;
+        const downAt = (n2, f2) => n2.l === pl && f2.res.feat.vias === 1;
+        for (const [a, d] of [[olds[0].ends ? olds[0].ends[0] : olds[0].a, da], [olds[0].ends ? olds[0].ends[1] : olds[0].b, db]]) {
+          const h3 = this.adhoc(c.net, a, d);
+          h3.id = this.conns.length;
+          h3.cls = c.cls;
+          h3.a.cluster = a.cluster;
+          h3.b.cluster = net.zoneCluster;
+          h3.planeOnly = pl;
+          const f2 = this.find(h3, false);
+          const onPlane = f2 ? f2.res.nodes.reduce((t, n2, i, ns) => t + (i && n2.l === pl && ns[i - 1].l === pl ? Math.hypot(n2.ix - ns[i - 1].ix, n2.iy - ns[i - 1].iy) * G5.g : 0), 0) : 0;
+          if (!f2 || onPlane > 0.3 || f2.res.feat.vias > 1 || !downAt(f2.res.nodes[f2.res.nodes.length - 1], f2)) {
+            dbg(c.net, this.padName(a.p), "fail", !!f2, onPlane, f2 && f2.res.feat.vias);
+            ok2 = false;
+            break;
+          }
+          this.conns.push(h3);
+          net.conns.push(h3);
+          this.commit(h3, f2);
+          made.push(h3);
+          after += lenOf(h3);
+        }
+        if (ok2) for (const x of tree.slice(1).sort((p, q4) => p.len - q4.len)) {
+          if (x.nodes) {
+            after += lenOf(x);
+            continue;
+          }
+          const f2 = this.find(x, false);
+          if (!f2) {
+            dbg(c.net, this.padName(x.a.p), "branch failed");
+            ok2 = false;
+            break;
+          }
+          this.commit(x, f2);
+          after += lenOf(x);
+        }
+        dbg(c.net, this.padName(c.a.p), this.padName(c.b.p), "tree", tree.length, "ok", ok2, after.toFixed(1), before.toFixed(1));
+        if (ok2 && after < before * 0.6) {
+          const st = this.pourState(net);
+          if (!st || made.some((h3) => st.connRoot(h3) !== st.main)) {
+            dbg(c.net, "via in a cut-off piece of the plane");
+            ok2 = false;
+          }
+        }
+        if (ok2 && after < before * 0.6) {
+          c.moot = true;
+          this.stat.planeShortcuts = (this.stat.planeShortcuts || 0) + 1;
+          continue;
+        }
+        for (const x of tree) if (x.nodes) this.rip(x);
+        for (const h3 of made) if (h3.nodes) this.rip(h3);
+        for (const h3 of made) {
+          this.conns.splice(this.conns.indexOf(h3), 1);
+          net.conns.splice(net.conns.indexOf(h3), 1);
+        }
+        tree.forEach((x, k) => {
+          if (x.nodes) this.rip(x);
+          Object.assign(x, olds[k]);
+        });
+        for (const x of tree) this.place(x, 1);
       }
     }
   }
