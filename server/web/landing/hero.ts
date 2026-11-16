@@ -5,6 +5,7 @@
 // pours with their stitching vias, and the silkscreen texts.
 
 import PCB_TEXT from "./hero/stm32.kicad_pcb";
+import SCH_TEXT from "./hero/stm32.kicad_sch";
 import META from "./hero/stm32.json";
 import { K, Pt, boardTextOf, openOf } from "./demo";
 
@@ -21,3 +22,6 @@ export const BOARD = meta.board;
 export const loadPcb = (): KDoc => K.parseDoc(PCB_TEXT);
 export const loadPcbOpen = (): KDoc => openOf(PCB_TEXT);
 export const boardText = (doc: KDoc): string => boardTextOf(PCB_TEXT, doc);
+
+/** The schematic the board was made from, for the hero's schematic tab (hero-sch.ts). */
+export const schText: string = SCH_TEXT;

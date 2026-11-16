@@ -214,7 +214,7 @@ const keepHref = await m.getAttribute('[data-keep]', 'href');
 check('signed out, Keep going in a real project goes through sign-in and back to the hand-off', keepHref === '/auth/github/login?next=' + encodeURIComponent('/?start=mini'), keepHref);
 check('the home page has no template button', await m.locator('[data-template]').count() === 0);
 // route one connection in the small editor: the route tool, a pad, the corners, a pad
-const canvas = m.locator('#hero canvas'); await canvas.scrollIntoViewIfNeeded();
+const canvas = m.locator('#hero canvas:not([data-sch])'); await canvas.scrollIntoViewIfNeeded();
 await m.click('#hero [data-tool-btn="route"]');
 await m.waitForTimeout(1500);   // the page's reveal animation
 // The canvas keeps its view to itself, so the track is drawn where the board is known to be: the

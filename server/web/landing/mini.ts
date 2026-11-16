@@ -787,7 +787,7 @@ export function startMini(root: HTMLElement): void {
     }
     // The board is done: it is left to be looked at for a while, then they start over (not while the visitor is at work on it).
     if (!still && !alone && !touched && !unplaced.size && !gone.size && poured && !stitches.length && ![...TEXTS].some((id) => shelf.has(id)) && stories.every((x) => x.state === 2)) {
-      if (!doneAt) doneAt = now; else if (now - doneAt > AGAIN && !drag && !pan && !route) { reset(); own = false; }
+      if (!doneAt) doneAt = now; else if (now - doneAt > AGAIN && !drag && !pan && !route) { reset(); own = false; root.dispatchEvent(new CustomEvent("hero:again")); }
     } else doneAt = 0;
     if (note && now >= note.dies) note = null;
     if (note) {
