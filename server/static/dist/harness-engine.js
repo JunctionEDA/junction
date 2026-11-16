@@ -75858,13 +75858,13 @@ var init_tables = __esm({
       editLibSymbolWithLibEdit: "sch"
     };
     LINKS = {
-      // web only for now, and the repository is private: downloadDesktop: "https://github.com/JunctionEDA/junction/releases",
-      sourceCode: "https://github.com/JunctionEDA",
+      downloadDesktop: "https://github.com/notaroomba/junction/releases",
+      sourceCode: "https://github.com/notaroomba/junction",
       help: "https://docs.kicad.org/",
       gettingStarted: "https://docs.kicad.org/master/en/getting_started_in_kicad/getting_started_in_kicad.html",
       getInvolved: "https://go.kicad.org/contribute/",
       donate: "https://go.kicad.org/app-donate",
-      reportBug: "https://github.com/JunctionEDA"
+      reportBug: "https://github.com/notaroomba/junction/issues/new"
     };
     PANE_DEFAULT_HIDDEN = { sch: ["peers", "comments", "appearance", "search", "netnav", "history"], pcb: ["peers", "comments", "search", "history", "netinsp"] };
     ZOOM_LIST = {

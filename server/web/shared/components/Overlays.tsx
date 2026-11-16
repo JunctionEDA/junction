@@ -34,7 +34,7 @@ export function Toast() {
   return <div id="toast" role="status" aria-live="polite" className={cx("fixed left-1/2 bottom-10 transform-[translateX(-50%)] bg-ink text-paper rounded-sm py-2 px-3.5 opacity-0 transition-opacity duration-200 ease-[ease] pointer-events-none z-100 show:opacity-100", show && "show")}>{toast ? toast.text : ""}</div>;
 }
 
-// web only for now: const RELEASES = "https://github.com/JunctionEDA/junction/releases";
+const RELEASES = "https://github.com/notaroomba/junction/releases";
 const H4 = "m-0 mb-2 text-base";                                                                              // was #popover h4
 const INPUT = "w-full bg-paper border border-line rounded-sm py-1.5 px-2 text-ink font-mono text-sm";     // was #popover input
 
@@ -45,7 +45,7 @@ function PopoverBody({ p }: { p: PopoverState }) {
       return (
         <>
           <h4 className={H4}>{p.title}</h4><p className="note">{p.why}</p>
-          {/* web only for now: <p className="note"><a href="#" onClick={(ev) => { ev.preventDefault(); dispatch({ type: "popover", popover: { kind: "kicad", anchor: p.anchor } }); }}>Open this project in Junction…</a></p> */}
+          <p className="note"><a href="#" onClick={(ev) => { ev.preventDefault(); dispatch({ type: "popover", popover: { kind: "kicad", anchor: p.anchor } }); }}>Open this project in Junction…</a></p>
         </>
       );
     case "about":
@@ -55,15 +55,14 @@ function PopoverBody({ p }: { p: PopoverState }) {
         <>
           <h4 className={H4}>Share link (editor)</h4>
           <input className={INPUT} value={p.url || ""} readOnly onClick={(ev) => ev.currentTarget.select()} />
-          <p className="note">Copied to your clipboard. Anyone with it can join in the browser.</p>
+          <p className="note">Copied to your clipboard. Anyone with it can join in the browser or from Junction &gt; File &gt; Join Session from URL…</p>
         </>
       );
     case "kicad":
       return (
         <>
           <h4 className={H4}>Open in Junction</h4>
-          <p className="note">Junction runs in the browser for now. Send a share link (File &gt; Copy share link…) and everyone opens the project here.</p>
-          {/* web only for now: <p className="note">1. Install the desktop app from the <a href={RELEASES} target="_blank" rel="noreferrer">releases page</a>.<br />2. File &gt; Join Session from URL… and paste a share link (File &gt; Copy share link… here).<br />3. Edits sync both ways, live.</p> */}
+          <p className="note">1. Install the desktop app from the <a href={RELEASES} target="_blank" rel="noreferrer">releases page</a>.<br />2. File &gt; Join Session from URL… and paste a share link (File &gt; Copy share link… here).<br />3. Edits sync both ways, live.</p>
         </>
       );
   }
