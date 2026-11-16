@@ -3,6 +3,7 @@ import { state, store } from "./appstore";
 import { E } from "./state";
 import { toast } from "./util";
 import type { PeerEntry, PresenceState } from "./types";
+import { myRtt } from "./peercursors";
 import { applyView, mmH, mmW, mmX0, mmY0, stage, visibleRectNm, world } from "./view";
 export function cycleFollow() {
   const ids = Object.keys(E.peerState);
@@ -49,6 +50,9 @@ export function followAction(cid: string | null) { E.followPeer = cid && E.peerS
  *  is newest by then, so the place the pointer stopped always reaches everyone. */
 const PRESENCE_GAP_MS = 14;
 let trailing: ReturnType<typeof setTimeout> | 0 = 0;
+/** No pointer move for this long after the last update means it stopped. */
+const STOP_AFTER_MS = 40;
+let stopTimer: ReturnType<typeof setTimeout> | 0 = 0, stopping = false;
 let trailingGhost: number[][] | null | undefined;
 export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | null) {
   const now = Date.now();
@@ -68,7 +72,12 @@ export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | nu
   }
   if (trailing) { clearTimeout(trailing); trailing = 0; if (ghostSegs === undefined) ghostSegs = trailingGhost; trailingGhost = undefined; }
   E.lastPresence = now;
+  // The pointer stopped: say so once more a moment later, with the same place, so peers who were drawing it ahead
+  // of the last update (peercursors.ts) bring it back to where it really is at once.
+  if (stopTimer) clearTimeout(stopTimer);
+  stopTimer = stopping ? 0 : setTimeout(() => { stopTimer = 0; E.lastPresence = 0; stopping = true; try { sendPresence(null); } finally { stopping = false; } }, STOP_AFTER_MS);
   const st: PresenceState = { cursor: [Math.round(at[0] * E.IU), Math.round(at[1] * E.IU)] };
+  const rtt = myRtt(); if (rtt > 0) st.rtt = Math.round(rtt);
   const vp = visibleRectNm(); if (vp) st.viewport = vp;
   if (ghostSegs) st.ghost = ghostSegs;
   // What the peer has selected (desktop rebuildOverlay pairs selection[i] with boxes[i] and at[i]; boxes are

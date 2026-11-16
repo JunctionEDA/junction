@@ -20,8 +20,10 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-/// The shortest time between two forwarded updates of one client: a 120 Hz pointer.
-pub const MIN_GAP: Duration = Duration::from_millis(8);
+/// The shortest time between two forwarded updates of one client.  Editors send at most
+/// every 14 ms, so this only catches two that the network bunched together (and anyone
+/// sending faster than they should).
+pub const MIN_GAP: Duration = Duration::from_millis(4);
 
 struct LanePeer {
     tx: mpsc::Sender<String>,

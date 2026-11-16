@@ -330,6 +330,8 @@ async fn handle_socket(
             "type": "hello_ok", "proto": PROTO_VERSION, "clientId": client_id,
             "userId": user_id, "login": login, "name": peer.name, "color": peer.color,
             "guest": user.is_none(),
+            // what this server understands beyond protocol 1 as first published
+            "caps": ["ping"],
         })
         .to_string(),
     );
@@ -595,6 +597,9 @@ async fn handle_socket(
                 }
                 let Some(d) = joined.get(&doc_id) else { continue };
                 let _ = d.tx.send(DocMsg::Request { client_id: client_id.clone(), action }).await;
+            }
+            ClientMsg::ping { t } => {
+                let _ = out_tx.try_send(json!({ "type": "pong", "t": t }).to_string());
             }
             ClientMsg::resync { doc_id } => {
                 // A resync hands over the whole file: never to someone whose access went.

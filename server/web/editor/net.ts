@@ -3,7 +3,7 @@ import { state, store } from "./appstore";
 import { noteCommentMsg } from "./comments";
 import { applyChanges, applyRemoteChanges, renderObjects, setDocFromText } from "./doc";
 import { applyFollowWeb, peerName, renderPeers, startPresenceKeepalive } from "./peers";
-import { clearPeerCursors, onlyPointerMoved } from "./peercursors";
+import { clearPeerCursors, noteRtt, onlyPointerMoved } from "./peercursors";
 import type { PeerEntry } from "./types";
 import { drawSelection, renderProps } from "./selection";
 import { E } from "./state";
@@ -101,7 +101,13 @@ export async function connect() {
       // back on the next reconnect is what makes the takeover work.
       if (msg.clientId) E.myClientId = msg.clientId;
       sock.send(JSON.stringify({ type: "join_doc", docId: state.docId }));
+      // How far away the server is: peers' pointers are drawn ahead by the time they took to get here.
+      let pinger: ReturnType<typeof setInterval> | undefined;
+      const ping = () => { if (E.ws !== sock || sock.readyState !== 1) { clearInterval(pinger); return; } sock.send(JSON.stringify({ type: "ping", t: performance.now() })); };
+      // (only a server that says it answers: an older one calls an unknown message a broken session)
+      if (Array.isArray(msg.caps) && msg.caps.includes("ping")) { pinger = setInterval(ping, 2000); ping(); setTimeout(ping, 300); }
     }
+    if (msg.type === "pong" && typeof msg.t === "number") { noteRtt(performance.now() - msg.t); return; }
     // a presence state the server found too large is dropped on its own; the session itself is fine
     if (msg.type === "error" && (msg.code === "bad_message" || msg.code === "unsupported_protocol") && msg.message !== "presence state too large") { setConn("err", `server refused the session (${msg.code}) — reload`); }
     if (msg.type === "error" && msg.code === "auth_failed") {

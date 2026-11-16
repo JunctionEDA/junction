@@ -73128,207 +73128,14 @@ var init_msgpanel = __esm({
   }
 });
 
-// web/editor/peers.ts
-function cycleFollow() {
-  const ids = Object.keys(E.peerState);
-  if (!ids.length) {
-    toast("No one else is here to follow");
-    return;
-  }
-  const i = ids.indexOf(E.followPeer);
-  E.followPeer = ids[(i + 1) % ids.length] || null;
-  const p = E.peerState[E.followPeer];
-  toast(`Following ${peerName(p)} \u2014 zoom or pan to stop`);
-  applyFollowWeb(E.peerState);
-  renderPeers();
-}
-function peerName(p) {
-  return p && p.user && (p.user.name || p.user.login) || "peer";
-}
-function applyFollowWeb(peers) {
-  if (!E.followPeer) return;
-  const entry = peers[E.followPeer];
-  if (!entry) {
-    E.followPeer = null;
-    toast("Stopped following (they left)");
-    renderPeers();
-    return;
-  }
-  const vp = (entry.state || {}).viewport;
-  if (!vp || vp.length < 4 || vp[2] <= 0) return;
-  const w = world.clientWidth || stage.clientWidth;
-  const xMm = vp[0] / E.IU, yMm = vp[1] / E.IU, wMm = vp[2] / E.IU;
-  E.zoom = Math.min(40, Math.max(0.2, stage.clientWidth / w * (mmW() / wMm)));
-  E.panX = -((xMm - mmX0()) / mmW()) * w * E.zoom;
-  E.panY = -((yMm - mmY0()) / mmH()) * (w * mmH() / mmW()) * E.zoom;
-  E.suppressBreakout = true;
-  applyView();
-  E.suppressBreakout = false;
-}
-function breakFollow() {
-  if (!E.followPeer || E.suppressBreakout) return;
-  E.followPeer = null;
-  toast("Stopped following");
-  renderPeers();
-}
-function renderPeers() {
-  store.set({ peers: { list: Object.keys(E.peerState).map((cid) => {
-    const p = E.peerState[cid];
-    return { cid, name: peerName(p), color: p.user && p.user.color || "#4477ee" };
-  }), follow: E.followPeer } });
-}
-function sendPresence(mmPos, ghostSegs) {
-  const now = Date.now();
-  if (mmPos) E.lastPresenceMm = mmPos;
-  const at4 = mmPos || E.lastPresenceMm || viewCentreMm();
-  if (!at4 || !E.ws || E.ws.readyState !== 1 || !state.docId) return;
-  const clearing = Array.isArray(ghostSegs) && ghostSegs.length === 0;
-  if (now - E.lastPresence < PRESENCE_GAP_MS && !clearing) {
-    if (ghostSegs !== void 0) trailingGhost = ghostSegs;
-    if (!trailing) trailing = setTimeout(() => {
-      trailing = 0;
-      const g2 = trailingGhost;
-      trailingGhost = void 0;
-      sendPresence(null, g2);
-    }, PRESENCE_GAP_MS - (now - E.lastPresence));
-    return;
-  }
-  if (trailing) {
-    clearTimeout(trailing);
-    trailing = 0;
-    if (ghostSegs === void 0) ghostSegs = trailingGhost;
-    trailingGhost = void 0;
-  }
-  E.lastPresence = now;
-  const st = { cursor: [Math.round(at4[0] * E.IU), Math.round(at4[1] * E.IU)] };
-  const vp = visibleRectNm();
-  if (vp) st.viewport = vp;
-  if (ghostSegs) st.ghost = ghostSegs;
-  const picked = new Set(E.selection || []);
-  if (E.selected && E.selected.id) picked.add(E.selected.id);
-  const T = typeof CollabTools !== "undefined" ? CollabTools : null;
-  if (E.DOC_TYPE === "kicad_sch") {
-    const schSel = T && T.sch && T.sch.state ? T.sch.state.sel : null;
-    if (typeof schSel === "string" && schSel) picked.add(schSel);
-  } else {
-    const modSel = E.kdoc && T && T.pcb && T.pcb.state && T.pcb.state.sel;
-    if (modSel) for (const id of modSel) picked.add(id);
-  }
-  const sel = picked.size ? cachedSelection(picked) : null;
-  if (sel) {
-    st.selection = sel.selection;
-    if (sel.boxes) {
-      st.boxes = sel.boxes;
-      st.at = sel.selection.map((id) => {
-        const it = E.kdoc.items.get(id), a = it && anchorMm(it);
-        return a ? [Math.round(a[0] * E.IU), Math.round(a[1] * E.IU)] : null;
-      });
-    }
-  }
-  const doc2 = (state.docs || []).find((d) => d.docId === state.docId);
-  if (doc2 && doc2.path) st.sheetFile = doc2.path;
-  E.ws.send(JSON.stringify({ type: "presence", docId: state.docId, state: fitPresence(st) }));
-}
-function cachedSelection(picked) {
-  const moving = presenceMoving();
-  const key3 = [...picked].join("\0");
-  if (!moving && selCache && selCache.key === key3 && selCache.doc === E.kdoc && performance.now() - selCache.at < 250) return selCache.sel;
-  const sel = presenceSelection2(E.kdoc, picked, E.IU, moving);
-  selCache = moving ? null : { key: key3, doc: E.kdoc, at: performance.now(), sel };
-  return sel;
-}
-function fitPresence(st) {
-  let s2 = JSON.stringify(st);
-  if (s2.length <= PRESENCE_LIMIT) return st;
-  const out2 = { ...st };
-  let n2 = out2.selection ? out2.selection.length : 0;
-  while (n2 > 0 && s2.length > PRESENCE_LIMIT) {
-    n2 = Math.floor(n2 * Math.min(0.9, PRESENCE_LIMIT / s2.length));
-    out2.selection = st.selection.slice(0, n2);
-    if (st.boxes) out2.boxes = st.boxes.slice(0, n2);
-    if (st.at) out2.at = st.at.slice(0, n2);
-    if (!n2) {
-      delete out2.selection;
-      delete out2.boxes;
-      delete out2.at;
-    }
-    s2 = JSON.stringify(out2);
-  }
-  if (s2.length > PRESENCE_LIMIT && out2.dragLines) {
-    delete out2.dragLines;
-    delete out2.dragAdded;
-    s2 = JSON.stringify(out2);
-  }
-  if (s2.length > PRESENCE_LIMIT && out2.ghost) {
-    delete out2.ghost;
-    s2 = JSON.stringify(out2);
-  }
-  return out2;
-}
-function anchorMm(it) {
-  const n2 = it.node, K11 = KiCadCanvas;
-  if (!n2) return null;
-  if (n2[0] === "arc" || n2[0] === "gr_arc") return null;
-  if (K11.kid(n2, "at") || K11.kid(n2, "transform")) {
-    const a = K11.atOf(n2);
-    return a ? [a[0], a[1]] : null;
-  }
-  for (const key3 of ["start", "center"]) {
-    const p = K11.kid(n2, key3);
-    if (p) return [K11.num(p[1]), K11.num(p[2])];
-  }
-  const pts = K11.ptsOf(n2);
-  if (pts.length) return pts[0];
-  const poly = K11.kid(n2, "polyline");
-  if (poly) {
-    const pp = K11.ptsOf(poly);
-    if (pp.length) return pp[0];
-  }
-  return null;
-}
-function presenceMoving() {
-  if (E.drag && (E.drag.moved || E.drag.group)) return true;
-  const T = typeof CollabTools !== "undefined" ? CollabTools : null;
-  const p = T && T.pcb && T.pcb.state, sc = T && T.sch && T.sch.state;
-  return !!(p && (p.move && p.move.moved || p.drag || p.carry) || sc && sc.drag);
-}
-function startPresenceKeepalive() {
-  stopPresenceKeepalive();
-  E.presenceTimer = setInterval(() => {
-    if (!E.ws || E.ws.readyState !== 1) return;
-    if (Date.now() - E.lastPresence < 1e4) return;
-    E.lastPresence = 0;
-    sendPresence(null);
-  }, 5e3);
-}
-function viewCentreMm() {
-  const v = visibleRectNm();
-  return v ? [(v[0] + v[2] / 2) / E.IU, (v[1] + v[3] / 2) / E.IU] : null;
-}
-function stopPresenceKeepalive() {
-  if (E.presenceTimer) {
-    clearInterval(E.presenceTimer);
-    E.presenceTimer = 0;
-  }
-}
-var PRESENCE_GAP_MS, trailing, trailingGhost, selCache, PRESENCE_LIMIT, presenceSelection2, MAX_PRESENCE_ITEMS;
-var init_peers = __esm({
-  "web/editor/peers.ts"() {
-    "use strict";
-    init_appstore();
-    init_state();
-    init_util();
-    init_view();
-    PRESENCE_GAP_MS = 14;
-    trailing = 0;
-    selCache = null;
-    PRESENCE_LIMIT = 7600;
-    presenceSelection2 = (doc2, selection, IU3, moving) => KiCadCanvas.presenceSelection(doc2, selection, IU3, moving, MAX_PRESENCE_ITEMS);
-    MAX_PRESENCE_ITEMS = 60;
-  }
-});
-
 // web/editor/peercursors.ts
+function noteRtt(ms) {
+  if (!(ms > 0 && ms < 2e3)) return;
+  rttMs = !rttMs ? ms : ms < rttMs ? rttMs * 0.5 + ms * 0.5 : rttMs * 0.9 + ms * 0.1;
+}
+function myRtt() {
+  return rttMs;
+}
 function brightness(c) {
   const h3 = c.replace("#", ""), f2 = h3.length === 3 ? h3.split("").map((d) => d + d).join("") : h3.slice(0, 6);
   const n2 = parseInt(f2, 16);
@@ -73359,7 +73166,7 @@ function syncPeerCursors(specs) {
       const g2 = document.createElementNS(NS2, "g");
       g2.setAttribute("class", "peer-cursor");
       layer.appendChild(g2);
-      c = { g: g2, key: "", x: sp.at[0], y: sp.at[1], t: now, vx: 0, vy: 0, every: 16, dx: sp.at[0], dy: sp.at[1], s: 0 };
+      c = { g: g2, key: "", x: sp.at[0], y: sp.at[1], t: now, vx: 0, vy: 0, every: 16, lead: 0, dx: sp.at[0], dy: sp.at[1], s: 0 };
       cursors.set(sp.cid, c);
     } else {
       sample(c, sp.at[0], sp.at[1], now);
@@ -73368,6 +73175,7 @@ function syncPeerCursors(specs) {
       c.key = key3;
       build(c, sp);
     }
+    c.lead = Math.min(LEAD_MAX_MS, (sp.rtt > 0 ? sp.rtt : rttMs) / 2 + rttMs / 2 + FRAME_MS);
   }
   for (const [cid, c] of cursors) if (!keep.has(cid)) {
     c.g.remove();
@@ -73377,13 +73185,19 @@ function syncPeerCursors(specs) {
   wake();
 }
 function sample(c, x, y, now) {
-  if (x === c.x && y === c.y) return;
+  if (x === c.x && y === c.y) {
+    c.vx = 0;
+    c.vy = 0;
+    c.t = now;
+    return;
+  }
   const dt = now - c.t;
   if (dt > 4 && dt < 150) {
-    c.vx = (x - c.x) / dt;
-    c.vy = (y - c.y) / dt;
+    const vx = (x - c.x) / dt, vy = (y - c.y) / dt, fresh = !c.vx && !c.vy;
+    c.vx = fresh ? vx : c.vx * 0.35 + vx * 0.65;
+    c.vy = fresh ? vy : c.vy * 0.35 + vy * 0.65;
     c.every = c.every * 0.8 + Math.min(dt, 100) * 0.2;
-  } else {
+  } else if (dt >= 150) {
     c.vx = 0;
     c.vy = 0;
   }
@@ -73398,9 +73212,12 @@ function sample(c, x, y, now) {
     c.vy = 0;
   }
 }
+function horizon(c) {
+  return Math.min(CARRY_MAX_MS, c.every * 1.2);
+}
 function target(c, now) {
-  const age = now - c.t, carry = Math.min(CARRY_MAX_MS, c.every * 1.2);
-  const k = age <= carry ? age : Math.max(0, 2 * carry - age);
+  const age = now - c.t, carry = horizon(c);
+  const k = age <= carry ? c.lead + age : Math.max(0, c.lead + carry - 2 * (age - carry));
   return [c.x + c.vx * k, c.y + c.vy * k];
 }
 function place2(force) {
@@ -73419,7 +73236,7 @@ function place2(force) {
       c.dy += ey * a;
       moving = true;
     }
-    if (now - c.t < 2 * Math.min(CARRY_MAX_MS, c.every * 1.2) && (c.vx || c.vy)) moving = true;
+    if (now - c.t < 2 * horizon(c) + c.lead && (c.vx || c.vy)) moving = true;
     const tf2 = `translate(${c.dx.toFixed(4)} ${c.dy.toFixed(4)}) scale(${(1 / s2).toFixed(6)})`;
     if (force || moving || c.s !== s2) {
       c.g.setAttribute("transform", tf2);
@@ -73532,7 +73349,7 @@ function onlyPointerMoved(a, b) {
   const ka = Object.keys(a), kb = Object.keys(b);
   if (ka.length !== kb.length) return false;
   for (const k of ka) {
-    if (k === "cursor" || k === "viewport") continue;
+    if (k === "cursor" || k === "viewport" || k === "rtt") continue;
     if (!(k in b)) return false;
     const x = a[k], y = b[k];
     if (x === y) continue;
@@ -73545,7 +73362,7 @@ function toggleFollowToast(cid, name, render3) {
   toast(E.followPeer ? `Following ${name}` : "Stopped following");
   render3();
 }
-var PEER_CURSOR_PX, PEER_TAG_TEXT_PX, PEER_TAG_PAD_PX, CARRY_MAX_MS, EASE_MS, cursors, layer, raf, lastFrame, scaleOf3, onFollow;
+var PEER_CURSOR_PX, PEER_TAG_TEXT_PX, PEER_TAG_PAD_PX, CARRY_MAX_MS, LEAD_MAX_MS, FRAME_MS, rttMs, EASE_MS, cursors, layer, raf, lastFrame, scaleOf3, onFollow;
 var init_peercursors = __esm({
   "web/editor/peercursors.ts"() {
     "use strict";
@@ -73556,6 +73373,9 @@ var init_peercursors = __esm({
     PEER_TAG_TEXT_PX = 16;
     PEER_TAG_PAD_PX = 5;
     CARRY_MAX_MS = 60;
+    LEAD_MAX_MS = 90;
+    FRAME_MS = 4;
+    rttMs = 0;
     EASE_MS = 7;
     cursors = /* @__PURE__ */ new Map();
     layer = null;
@@ -73564,6 +73384,223 @@ var init_peercursors = __esm({
     scaleOf3 = () => 4;
     onFollow = () => {
     };
+  }
+});
+
+// web/editor/peers.ts
+function cycleFollow() {
+  const ids = Object.keys(E.peerState);
+  if (!ids.length) {
+    toast("No one else is here to follow");
+    return;
+  }
+  const i = ids.indexOf(E.followPeer);
+  E.followPeer = ids[(i + 1) % ids.length] || null;
+  const p = E.peerState[E.followPeer];
+  toast(`Following ${peerName(p)} \u2014 zoom or pan to stop`);
+  applyFollowWeb(E.peerState);
+  renderPeers();
+}
+function peerName(p) {
+  return p && p.user && (p.user.name || p.user.login) || "peer";
+}
+function applyFollowWeb(peers) {
+  if (!E.followPeer) return;
+  const entry = peers[E.followPeer];
+  if (!entry) {
+    E.followPeer = null;
+    toast("Stopped following (they left)");
+    renderPeers();
+    return;
+  }
+  const vp = (entry.state || {}).viewport;
+  if (!vp || vp.length < 4 || vp[2] <= 0) return;
+  const w = world.clientWidth || stage.clientWidth;
+  const xMm = vp[0] / E.IU, yMm = vp[1] / E.IU, wMm = vp[2] / E.IU;
+  E.zoom = Math.min(40, Math.max(0.2, stage.clientWidth / w * (mmW() / wMm)));
+  E.panX = -((xMm - mmX0()) / mmW()) * w * E.zoom;
+  E.panY = -((yMm - mmY0()) / mmH()) * (w * mmH() / mmW()) * E.zoom;
+  E.suppressBreakout = true;
+  applyView();
+  E.suppressBreakout = false;
+}
+function breakFollow() {
+  if (!E.followPeer || E.suppressBreakout) return;
+  E.followPeer = null;
+  toast("Stopped following");
+  renderPeers();
+}
+function renderPeers() {
+  store.set({ peers: { list: Object.keys(E.peerState).map((cid) => {
+    const p = E.peerState[cid];
+    return { cid, name: peerName(p), color: p.user && p.user.color || "#4477ee" };
+  }), follow: E.followPeer } });
+}
+function sendPresence(mmPos, ghostSegs) {
+  const now = Date.now();
+  if (mmPos) E.lastPresenceMm = mmPos;
+  const at4 = mmPos || E.lastPresenceMm || viewCentreMm();
+  if (!at4 || !E.ws || E.ws.readyState !== 1 || !state.docId) return;
+  const clearing = Array.isArray(ghostSegs) && ghostSegs.length === 0;
+  if (now - E.lastPresence < PRESENCE_GAP_MS && !clearing) {
+    if (ghostSegs !== void 0) trailingGhost = ghostSegs;
+    if (!trailing) trailing = setTimeout(() => {
+      trailing = 0;
+      const g2 = trailingGhost;
+      trailingGhost = void 0;
+      sendPresence(null, g2);
+    }, PRESENCE_GAP_MS - (now - E.lastPresence));
+    return;
+  }
+  if (trailing) {
+    clearTimeout(trailing);
+    trailing = 0;
+    if (ghostSegs === void 0) ghostSegs = trailingGhost;
+    trailingGhost = void 0;
+  }
+  E.lastPresence = now;
+  if (stopTimer) clearTimeout(stopTimer);
+  stopTimer = stopping ? 0 : setTimeout(() => {
+    stopTimer = 0;
+    E.lastPresence = 0;
+    stopping = true;
+    try {
+      sendPresence(null);
+    } finally {
+      stopping = false;
+    }
+  }, STOP_AFTER_MS);
+  const st = { cursor: [Math.round(at4[0] * E.IU), Math.round(at4[1] * E.IU)] };
+  const rtt = myRtt();
+  if (rtt > 0) st.rtt = Math.round(rtt);
+  const vp = visibleRectNm();
+  if (vp) st.viewport = vp;
+  if (ghostSegs) st.ghost = ghostSegs;
+  const picked = new Set(E.selection || []);
+  if (E.selected && E.selected.id) picked.add(E.selected.id);
+  const T = typeof CollabTools !== "undefined" ? CollabTools : null;
+  if (E.DOC_TYPE === "kicad_sch") {
+    const schSel = T && T.sch && T.sch.state ? T.sch.state.sel : null;
+    if (typeof schSel === "string" && schSel) picked.add(schSel);
+  } else {
+    const modSel = E.kdoc && T && T.pcb && T.pcb.state && T.pcb.state.sel;
+    if (modSel) for (const id of modSel) picked.add(id);
+  }
+  const sel = picked.size ? cachedSelection(picked) : null;
+  if (sel) {
+    st.selection = sel.selection;
+    if (sel.boxes) {
+      st.boxes = sel.boxes;
+      st.at = sel.selection.map((id) => {
+        const it = E.kdoc.items.get(id), a = it && anchorMm(it);
+        return a ? [Math.round(a[0] * E.IU), Math.round(a[1] * E.IU)] : null;
+      });
+    }
+  }
+  const doc2 = (state.docs || []).find((d) => d.docId === state.docId);
+  if (doc2 && doc2.path) st.sheetFile = doc2.path;
+  E.ws.send(JSON.stringify({ type: "presence", docId: state.docId, state: fitPresence(st) }));
+}
+function cachedSelection(picked) {
+  const moving = presenceMoving();
+  const key3 = [...picked].join("\0");
+  if (!moving && selCache && selCache.key === key3 && selCache.doc === E.kdoc && performance.now() - selCache.at < 250) return selCache.sel;
+  const sel = presenceSelection2(E.kdoc, picked, E.IU, moving);
+  selCache = moving ? null : { key: key3, doc: E.kdoc, at: performance.now(), sel };
+  return sel;
+}
+function fitPresence(st) {
+  let s2 = JSON.stringify(st);
+  if (s2.length <= PRESENCE_LIMIT) return st;
+  const out2 = { ...st };
+  let n2 = out2.selection ? out2.selection.length : 0;
+  while (n2 > 0 && s2.length > PRESENCE_LIMIT) {
+    n2 = Math.floor(n2 * Math.min(0.9, PRESENCE_LIMIT / s2.length));
+    out2.selection = st.selection.slice(0, n2);
+    if (st.boxes) out2.boxes = st.boxes.slice(0, n2);
+    if (st.at) out2.at = st.at.slice(0, n2);
+    if (!n2) {
+      delete out2.selection;
+      delete out2.boxes;
+      delete out2.at;
+    }
+    s2 = JSON.stringify(out2);
+  }
+  if (s2.length > PRESENCE_LIMIT && out2.dragLines) {
+    delete out2.dragLines;
+    delete out2.dragAdded;
+    s2 = JSON.stringify(out2);
+  }
+  if (s2.length > PRESENCE_LIMIT && out2.ghost) {
+    delete out2.ghost;
+    s2 = JSON.stringify(out2);
+  }
+  return out2;
+}
+function anchorMm(it) {
+  const n2 = it.node, K11 = KiCadCanvas;
+  if (!n2) return null;
+  if (n2[0] === "arc" || n2[0] === "gr_arc") return null;
+  if (K11.kid(n2, "at") || K11.kid(n2, "transform")) {
+    const a = K11.atOf(n2);
+    return a ? [a[0], a[1]] : null;
+  }
+  for (const key3 of ["start", "center"]) {
+    const p = K11.kid(n2, key3);
+    if (p) return [K11.num(p[1]), K11.num(p[2])];
+  }
+  const pts = K11.ptsOf(n2);
+  if (pts.length) return pts[0];
+  const poly = K11.kid(n2, "polyline");
+  if (poly) {
+    const pp = K11.ptsOf(poly);
+    if (pp.length) return pp[0];
+  }
+  return null;
+}
+function presenceMoving() {
+  if (E.drag && (E.drag.moved || E.drag.group)) return true;
+  const T = typeof CollabTools !== "undefined" ? CollabTools : null;
+  const p = T && T.pcb && T.pcb.state, sc = T && T.sch && T.sch.state;
+  return !!(p && (p.move && p.move.moved || p.drag || p.carry) || sc && sc.drag);
+}
+function startPresenceKeepalive() {
+  stopPresenceKeepalive();
+  E.presenceTimer = setInterval(() => {
+    if (!E.ws || E.ws.readyState !== 1) return;
+    if (Date.now() - E.lastPresence < 1e4) return;
+    E.lastPresence = 0;
+    sendPresence(null);
+  }, 5e3);
+}
+function viewCentreMm() {
+  const v = visibleRectNm();
+  return v ? [(v[0] + v[2] / 2) / E.IU, (v[1] + v[3] / 2) / E.IU] : null;
+}
+function stopPresenceKeepalive() {
+  if (E.presenceTimer) {
+    clearInterval(E.presenceTimer);
+    E.presenceTimer = 0;
+  }
+}
+var PRESENCE_GAP_MS, trailing, STOP_AFTER_MS, stopTimer, stopping, trailingGhost, selCache, PRESENCE_LIMIT, presenceSelection2, MAX_PRESENCE_ITEMS;
+var init_peers = __esm({
+  "web/editor/peers.ts"() {
+    "use strict";
+    init_appstore();
+    init_state();
+    init_util();
+    init_peercursors();
+    init_view();
+    PRESENCE_GAP_MS = 14;
+    trailing = 0;
+    STOP_AFTER_MS = 40;
+    stopTimer = 0;
+    stopping = false;
+    selCache = null;
+    PRESENCE_LIMIT = 7600;
+    presenceSelection2 = (doc2, selection, IU3, moving) => KiCadCanvas.presenceSelection(doc2, selection, IU3, moving, MAX_PRESENCE_ITEMS);
+    MAX_PRESENCE_ITEMS = 60;
   }
 });
 
@@ -74369,6 +74406,23 @@ async function connect() {
       E.retries = 0;
       if (msg.clientId) E.myClientId = msg.clientId;
       sock.send(JSON.stringify({ type: "join_doc", docId: state.docId }));
+      let pinger;
+      const ping = () => {
+        if (E.ws !== sock || sock.readyState !== 1) {
+          clearInterval(pinger);
+          return;
+        }
+        sock.send(JSON.stringify({ type: "ping", t: performance.now() }));
+      };
+      if (Array.isArray(msg.caps) && msg.caps.includes("ping")) {
+        pinger = setInterval(ping, 2e3);
+        ping();
+        setTimeout(ping, 300);
+      }
+    }
+    if (msg.type === "pong" && typeof msg.t === "number") {
+      noteRtt(performance.now() - msg.t);
+      return;
     }
     if (msg.type === "error" && (msg.code === "bad_message" || msg.code === "unsupported_protocol") && msg.message !== "presence state too large") {
       setConn("err", `server refused the session (${msg.code}) \u2014 reload`);
@@ -77385,7 +77439,7 @@ function peerCursorSpec(cid, p) {
   if (!Array.isArray(st.cursor)) return null;
   const ai = st.ai && typeof st.ai === "object" ? st.ai : null;
   const note3 = ai && typeof ai.note === "string" ? ai.note.trim().slice(0, 140) : "";
-  return { cid, name: peerName(p), color: p.user && p.user.color || "#4477ee", note: note3, following: E.followPeer === cid, at: [st.cursor[0] / E.IU, st.cursor[1] / E.IU] };
+  return { cid, name: peerName(p), color: p.user && p.user.color || "#4477ee", note: note3, following: E.followPeer === cid, at: [st.cursor[0] / E.IU, st.cursor[1] / E.IU], rtt: typeof st.rtt === "number" ? st.rtt : 0 };
 }
 function movePeerCursors(peers) {
   const specs = [];
