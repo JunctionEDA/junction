@@ -164,10 +164,9 @@ function swatch(rgba: string, mixed: boolean, ro: boolean, key: string): { el: H
       cur = c.r === 0 && c.g === 0 && c.b === 0 && c.a === 0 ? "" : [Math.round(c.r * 255), Math.round(c.g * 255), Math.round(c.b * 255), Math.round(c.a * 1000) / 1000].join(" "); paint();
     }, null);
   });
-  const clear = h("button", { type: "button", class: "btn", title: "Default", disabled: ro, style: "height:22px;padding:0 6px;margin-left:4px", "data-k": key + "-default" }, "Default");
-  clear.addEventListener("click", () => { cur = ""; paint(); });
+  // no button beside it: the default colour is set with the picker's Clear Color (DIALOG_COLOR_PICKER, default UNSPECIFIED)
   paint();
-  return { el: h("span", { style: "position:relative;display:inline-flex;align-items:center" }, sw, clear), get: () => cur };
+  return { el: h("span", { style: "position:relative;display:inline-flex;align-items:center" }, sw), get: () => cur };
 }
 
 

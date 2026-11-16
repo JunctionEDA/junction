@@ -409,9 +409,9 @@ function CompareDialog({ request }: { request: CompareRequest }) {
               ) : null}
               <label className="rv-check"><input type="checkbox" checked={showProps} onChange={(ev) => setShowProps(ev.target.checked)} />Properties</label>
               <span className="rv-spacer" />
-              <button type="button" className="btn sm" title="Zoom out" onClick={() => zoomBy(0.8)}>−</button>
-              <button type="button" className="btn sm" title="Zoom in" onClick={() => zoomBy(1.25)}>+</button>
-              <button type="button" className="btn sm" id="rvFit" title="Zoom to fit" onClick={fit}>Fit</button>
+              <button type="button" className="btn sm ghost rv-zoom" title="Zoom out" aria-label="Zoom out" onClick={() => zoomBy(0.8)}><KIcon name="zoom_out" size={16} /></button>
+              <button type="button" className="btn sm ghost rv-zoom" title="Zoom in" aria-label="Zoom in" onClick={() => zoomBy(1.25)}><KIcon name="zoom_in" size={16} /></button>
+              <button type="button" className="btn sm ghost rv-zoom" id="rvFit" title="Zoom to fit" aria-label="Zoom to fit" onClick={fit}><KIcon name="zoom_fit_in_page" size={16} /></button>
             </div>
 
             <div className={cx("rv-stage", mode)} ref={stageRef} data-mode={mode}>

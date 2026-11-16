@@ -5,6 +5,7 @@
 // interactively on the cursor.  The dialogs remember their settings for the session, as DIALOG_SHIM does.
 import { box, checkField, errorMessage, fmtLen, h, messageBox, openDialog, parseLen, selectField, unitLabel } from "../editor/pcbdialogs/ui";
 import { E } from "../editor/state";
+import { bitmapButton } from "../components/kicon-dom";
 import { store } from "../editor/appstore";
 import { toolCtx } from "../editor/tools";
 import { DXF_UNIT_CHOICES, bboxOf, fixDiscontinuities, importDxf, importSvg, importerFor, toPrims, type ImportResult, type Prim, type V } from "./model";
@@ -66,8 +67,8 @@ export function openImportGraphics(editor: Editor): void {
   const fileInput = h("input", { type: "text", "data-k": "file", style: "flex:1;min-width:300px" }) as HTMLInputElement;
   fileInput.value = file ? file.name : "";
   const picker = h("input", { type: "file", accept: ".svg,.dxf,.SVG,.DXF", style: "display:none", "data-k": "file-picker" }) as HTMLInputElement;
-  const browse = h("button", { class: "btn sm", type: "button", title: "Browse", "data-k": "browse" }, "...");
-  browse.addEventListener("click", () => picker.click());
+  // STD_BITMAP_BUTTON m_browseButton with BITMAPS::small_folder (dialog_import_graphics.cpp:130)
+  const browse = bitmapButton("small_folder", "Browse", () => picker.click(), { key: "browse" });
   picker.addEventListener("change", () => {
     const f = picker.files && picker.files[0]; if (!f) return;
     void f.text().then((text) => { file = { name: f.name, text }; fileInput.value = f.name; onFilenameChanged(); });
