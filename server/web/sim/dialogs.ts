@@ -17,6 +17,8 @@ export interface PlotSetup {
   fixed: ({ min: number; max: number } | null)[];
   grid: boolean; legend: boolean; dotted: boolean;
   margins: { left: number; top: number; right: number; bottom: number };
+  /** SIM_PLOT_TAB::IsSmithMode: an S-parameter tab drawn on a Smith chart */
+  smith?: boolean;
 }
 export interface SimCommandInput {
   /** the tab's command, or "*" for the New Simulation Tab dialog */

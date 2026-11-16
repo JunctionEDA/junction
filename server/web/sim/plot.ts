@@ -14,6 +14,8 @@ export interface PlotTrace {
   secondary?: boolean;
   /** cursors 1 and 2 are shown on this trace */
   cursor1?: boolean; cursor2?: boolean;
+  /** the complex values (reflection coefficients) a Smith chart draws: SMITH_TRACE's data */
+  gamma?: { re: ArrayLike<number>; im: ArrayLike<number> };
 }
 export interface PlotAxis { name: string; units: string }
 interface Range { min: number; max: number }
@@ -53,6 +55,8 @@ export class SimPlot {
   traces: PlotTrace[] = [];
   opts: PlotOptions = { logX: false, x: { name: "Time", units: "s" }, y: [{ name: "Voltage", units: "V" }, null, null] };
   showGrid = true; showLegend = true; dottedSecondary = true; dark = false;
+  /** SIM_VIEW::SetSmithChart: an S-parameter tab drawn on a Smith chart (SMITH_GRID, SMITH_TRACE) */
+  smith = false;
   /** the legend's top-left corner inside the plot area (mpInfoLegend's position, kept in the workbook) */
   legendAt = { x: 10, y: 10 };
   fixed: (Range | null)[] = [null, null, null];
@@ -214,6 +218,7 @@ export class SimPlot {
     const C = this.dark ? PLOT_COLORS.dark : PLOT_COLORS.light, a = this.area(), v = this.cur();
     g.fillStyle = C.bg; g.fillRect(0, 0, w, h);
     g.font = "11px sans-serif"; g.textBaseline = "middle";
+    if (this.smith) { this.renderSmith(g, C, a); return; }
     // ---- X ticks and grid
     const xt: { px: number; label: string; major: boolean }[] = [];
     if (this.opts.logX) {
@@ -293,6 +298,67 @@ export class SimPlot {
       this.traces.forEach((t, i) => {
         const yy = ly + 11 + i * 16; g.strokeStyle = t.color; g.lineWidth = 2; g.setLineDash(t.secondary && this.dottedSecondary ? [2, 2] : []);
         g.beginPath(); g.moveTo(lx + 6, yy); g.lineTo(lx + 24, yy); g.stroke(); g.setLineDash([]); g.lineWidth = 1;
+        g.fillStyle = C.fg; g.textAlign = "left"; g.fillText(t.name, lx + 28, yy);
+      });
+      this.legendBox = { x: lx, y: ly, w: lw, h: lh };
+    }
+  }
+  /** SMITH_GRID::Plot and SMITH_TRACE::Plot: the unit circle of the reflection coefficient, the constant resistance
+   *  circles and constant reactance arcs of 0.2, 0.5, 1, 2 and 5 (normalized, clipped to the unit circle), their
+   *  labels on the real axis and the rim, and each trace's Γ in the plane, then the legend. */
+  private renderSmith(g: CanvasRenderingContext2D, C: { bg: string; fg: string; axis: string }, a: { l: number; t: number; r: number; b: number; w: number; h: number }): void {
+    const radius = Math.min(a.w, a.h) / 2 - 15; if (radius <= 20) return;
+    const cx = a.l + a.w / 2, cy = a.t + a.h / 2;
+    const at = (re: number, im: number): [number, number] => [cx + re * radius, cy - im * radius];
+    g.save(); g.beginPath(); g.rect(a.l, a.t, a.w, a.h); g.clip();
+    const circle = (ccx: number, ccy: number, r: number): void => {
+      const n = Math.max(64, Math.min(4096, Math.round(Math.PI * Math.sqrt(r * radius))));
+      g.beginPath(); let pen = false;
+      for (let i = 0; i <= n; i++) {
+        const ang = (2 * Math.PI * i) / n, re = ccx + r * Math.cos(ang), im = ccy + r * Math.sin(ang);
+        if (re * re + im * im <= 1.0002) { const [x, y] = at(re, im); if (pen) g.lineTo(x, y); else { g.moveTo(x, y); pen = true; } } else pen = false;
+      }
+      g.stroke();
+    };
+    const vals = [0.2, 0.5, 1, 2, 5];
+    if (this.showGrid) {
+      g.strokeStyle = C.axis; g.lineWidth = 1; g.setLineDash([1, 2]);
+      for (const r of vals) circle(r / (1 + r), 0, 1 / (1 + r));
+      for (const x of vals) { circle(1, 1 / x, 1 / x); circle(1, -1 / x, 1 / x); }
+      g.setLineDash([]);
+    }
+    g.strokeStyle = C.fg; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(...at(-1, 0)); g.lineTo(...at(1, 0)); g.stroke();
+    g.beginPath(); g.arc(cx, cy, radius, 0, 2 * Math.PI); g.stroke();
+    // the labels: a resistance where its circle meets the real axis, a reactance where its arc meets the rim
+    g.fillStyle = C.fg; g.textAlign = "left";
+    for (const r of vals) { const [x, y] = at((r - 1) / (r + 1), 0); g.fillText(String(r), x + 2, y - 7); }
+    for (const x of vals) {
+      const d = x * x + 1, re = (x * x - 1) / d, im = (2 * x) / d;
+      for (const sgn of [1, -1]) { const [px, py] = at(re, sgn * im); g.textAlign = re >= 0 ? "left" : "right"; g.fillText((sgn > 0 ? "+j" : "-j") + x, px + (re >= 0 ? 4 : -4), py - sgn * 6); }
+    }
+    g.textAlign = "left"; g.textBaseline = "bottom"; g.fillText("Normalized Z/Z0", a.l + 4, a.b - 4); g.textBaseline = "middle";
+    for (const t of this.traces) {
+      const gm = t.gamma; if (!gm) continue;
+      g.strokeStyle = t.color; g.lineWidth = 1; g.setLineDash(t.secondary && this.dottedSecondary ? [2, 2] : []);
+      g.beginPath(); let pen = false;
+      for (let i = 0; i < gm.re.length; i++) {
+        const re = gm.re[i], im = gm.im[i];
+        if (!Number.isFinite(re) || !Number.isFinite(im)) { pen = false; continue; }
+        const [x, y] = at(re, im); if (pen) g.lineTo(x, y); else { g.moveTo(x, y); pen = true; }
+      }
+      g.stroke(); g.setLineDash([]);
+    }
+    g.restore();
+    this.legendBox = null;
+    const shown = this.traces.filter((t) => t.gamma);
+    if (this.showLegend && shown.length) {
+      const lw = Math.max(...shown.map((t) => g.measureText(t.name).width)) + 34, lh = shown.length * 16 + 6;
+      const lx = Math.min(a.l + this.legendAt.x, a.r - lw), ly = Math.min(a.t + this.legendAt.y, a.b - lh);
+      g.fillStyle = C.bg; g.strokeStyle = C.fg; g.fillRect(lx, ly, lw, lh); g.strokeRect(lx + 0.5, ly + 0.5, lw, lh);
+      shown.forEach((t, i) => {
+        const yy = ly + 11 + i * 16; g.strokeStyle = t.color; g.lineWidth = 2;
+        g.beginPath(); g.moveTo(lx + 6, yy); g.lineTo(lx + 24, yy); g.stroke(); g.lineWidth = 1;
         g.fillStyle = C.fg; g.textAlign = "left"; g.fillText(t.name, lx + 28, yy);
       });
       this.legendBox = { x: lx, y: ly, w: lw, h: lh };

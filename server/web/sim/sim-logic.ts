@@ -306,6 +306,45 @@ export function parseRaw(text: string): RawPlot[] {
   }
   return plots;
 }
+/** A raw file as `write` makes it, binary (the default filetype) or ASCII: one or more plots.  The binary form is the
+ *  one read after a run, as it is several times smaller and quicker for ngspice to write than the text. */
+export function readRaw(bytes: Uint8Array): RawPlot[] {
+  const plots: RawPlot[] = []; let at = 0;
+  const latin = new TextDecoder("latin1");
+  while (at < bytes.length) {
+    // the header runs to "Binary:\n" or "Values:\n"
+    let end = -1, binary = false;
+    for (let k = at; k + 7 < bytes.length; k++) {
+      if (bytes[k] !== 0x0a && k !== at) continue;
+      const s = k === at ? k : k + 1;
+      const w = latin.decode(bytes.subarray(s, Math.min(bytes.length, s + 8)));
+      if (w === "Binary:\n") { end = s + 8; binary = true; break; }
+      if (w.startsWith("Values:")) { end = s; break; }
+    }
+    if (end < 0) break;
+    if (!binary) { plots.push(...parseRaw(latin.decode(bytes.subarray(at)))); break; }
+    const head = latin.decode(bytes.subarray(at, end)).split(/\r?\n/);
+    let title = "", plotname = "", complex = false, nv = 0, np = 0; const names: [string, string][] = [];
+    for (let i = 0; i < head.length; i++) {
+      const m = /^([A-Za-z. ]+):\s*(.*)$/.exec(head[i]); if (!m) continue;
+      const k = m[1].trim().toLowerCase();
+      if (k === "title") title = m[2]; else if (k === "plotname") plotname = m[2]; else if (k === "flags") complex = /complex/i.test(m[2]);
+      else if (k === "no. variables") nv = Number(m[2]); else if (k === "no. points") np = Number(m[2]);
+      else if (k === "variables") { for (let v = 0; v < nv && i + 1 < head.length; v++) { const p = head[++i].trim().split(/\s+/); names.push([p[1] || "", p[2] || ""]); } }
+    }
+    if (!nv) break;
+    const per = complex ? 16 : 8, size = np * nv * per;
+    const view = new DataView(bytes.buffer, bytes.byteOffset + end, Math.min(size, bytes.length - end));
+    const vecs: RawVector[] = names.map(([name, type]) => ({ name, type, re: new Float64Array(np), im: complex ? new Float64Array(np) : null }));
+    for (let p = 0; p < np; p++) for (let v = 0; v < nv; v++) {
+      const o = (p * nv + v) * per; if (o + per > view.byteLength) break;
+      vecs[v].re[p] = view.getFloat64(o, true); if (complex) vecs[v].im![p] = view.getFloat64(o + 8, true);
+    }
+    plots.push({ title, plotname, complex, vectors: vecs });
+    at = end + size;
+  }
+  return plots;
+}
 /** A raw vector by signal or ngspice name, case-insensitively, under any of its spellings. */
 export function findVector(plot: RawPlot, signalOrVec: string): RawVector | null {
   const want = signalOrVec.toLowerCase(), alts = new Set([want, signalExpr(signalOrVec)]);
@@ -316,12 +355,15 @@ export function findVector(plot: RawPlot, signalOrVec: string): RawVector | null
   return null;
 }
 /** A complex vector as the AC page plots it: gain in dB (20·log10|x|) or phase in degrees. */
+/** MagnitudeToDb (sim_types.h): 20·log10 of the magnitude, NaN where there is no signal (a magnitude of 0 or NaN).
+ *  mathplot leaves a non-finite point out of the axis range (mpFiniteRange) and draws a gap there. */
+export function magnitudeToDb(m: number): number { return m > 0 ? 20 * Math.log10(m) : NaN; }
 export function acPart(vec: RawVector, part: "gain" | "phase" | "amplitude" | ""): Float64Array {
   const n = vec.re.length, out = new Float64Array(n);
   for (let k = 0; k < n; k++) {
     const re = vec.re[k], im = vec.im ? vec.im[k] : 0;
     if (part === "phase") out[k] = (Math.atan2(im, re) * 180) / Math.PI;
-    else if (part === "gain" || part === "amplitude") out[k] = 20 * Math.log10(Math.max(1e-300, Math.hypot(re, im)));
+    else if (part === "gain" || part === "amplitude") out[k] = magnitudeToDb(Math.hypot(re, im));
     else out[k] = vec.im ? Math.hypot(re, im) : re;
   }
   return out;
@@ -368,7 +410,7 @@ export function userSignalLet(id: number, expr: string): string {
 
 // ---------------------------------------------------------------- the workbook
 export interface WbTrace { trace_type?: number; signal: string; color?: string; view?: number; yScaleView?: number }
-export interface WbTab { analysis?: string; commands: string[]; traces?: WbTrace[]; measurements?: { expr: string; format: string }[]; dottedSecondary?: boolean; showGrid?: boolean; legend?: { x: number; y: number }; fixedY1scale?: { min: number; max: number }; fixedY2scale?: { min: number; max: number }; fixedY3scale?: { min: number; max: number }; margins?: { left: number; right: number; top: number; bottom: number } }
+export interface WbTab { analysis?: string; commands: string[]; traces?: WbTrace[]; measurements?: { expr: string; format: string }[]; dottedSecondary?: boolean; showGrid?: boolean; legend?: { x: number; y: number }; fixedY1scale?: { min: number; max: number }; fixedY2scale?: { min: number; max: number }; fixedY3scale?: { min: number; max: number }; margins?: { left: number; right: number; top: number; bottom: number }; smithMode?: boolean; smithZoom?: number; smithPanX?: number; smithPanY?: number }
 export interface Workbook { version: number; tabs: WbTab[]; user_defined_signals: string[]; custom_cursors?: number; last_sch_text_sim_command?: string }
 /** The options a tab's command lines carry (".save all", ".probe alli", ".probe allp", ".kicad esavenone", ".kicad adjustpaths"). */
 export function optionsFromCommands(cmds: string[]): { command: string; options: number } {

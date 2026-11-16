@@ -16,6 +16,7 @@ import { pxPerMm, worldMm } from "../editor/view";
 import { convertToSpiceMarkup } from "./spice-netlist";
 import { builtinLibrary } from "./builtin-libs";
 import { forWasmNgspice } from "./ngspice-wasm";
+import { toDouble } from "../dialogs/sim-model-logic";
 import { clearOperatingPoints, setOperatingPoints, setSimItems } from "./op-overlay";
 import type { SimItemInfo } from "./spice-netlist";
 import { editProject } from "../canvas/project-file";
@@ -25,13 +26,13 @@ import { nameOfPick } from "../editor/schnets";
 import { colorPicker, fromHex, toHex } from "../editor/pcbdialogs/color-picker";
 import { adoptProjectFile, canWriteProject, loadProjectFile, projectDocs, saveProjectFile, saveTextDocument } from "../editor/projectfile";
 import { state } from "../editor/appstore";
-import { open as openSpice, type SpiceSession } from "../plugins/spice";
+import { openWorker as openSpice, type WorkerSpiceSession as SpiceSession, type Progress } from "../plugins/spice";
 import { SimPlot, TRACE_COLORS, type PlotTrace } from "./plot";
 import { COMPAT_MODES, openFormatValue, openSimCommand, openUserDefinedSignals, type PlotSetup } from "./dialogs";
 import {
   DEFAULT_OPTIONS, OPT_SAVE_EVENTS, OPT_SAVE_I, OPT_SAVE_P, OPT_SAVE_V, acPart, commandToSimType, commandsFromOptions, eSeries, findVector,
   formatFromString, formatToString, formatValue, isPlottable, measCommand, measurementFor, measurementUnits, optionsFromCommands, parseCommand,
-  parseRaw, parseSpiceValue, readCircuit, signalKind, signalsFor, snapToSeries, splitSignal, toSpiceString, typeToName, unitsOf, updateUnits,
+  readRaw, parseSpiceValue, readCircuit, signalKind, signalsFor, snapToSeries, splitSignal, toSpiceString, typeToName, unitsOf, updateUnits,
   userSignalLet, userVectorName, xAxisOf, type CircuitItem, type RawPlot, type SimType, type ValueFormat, type WbTab, type Workbook,
 } from "./sim-logic";
 
@@ -50,7 +51,7 @@ interface Tuner { name: string; value: number; min: number; max: number; steps: 
 type Circuit = { items: CircuitItem[]; nets: string[]; directives: string[] };
 const S = {
   root: null as HTMLElement | null, tabs: [] as Tab[], cur: -1, userSignals: [] as string[], circuit: { items: [], nets: [], directives: [] } as Circuit,
-  netlist: "", schCommand: "", spice: null as SpiceSession | null, running: false, sidePanel: true, console: true, darkPlots: false, compat: "User configuration",
+  netlist: "", schCommand: "", spice: null as SpiceSession | null, running: false, stopping: false, sidePanel: true, console: true, darkPlots: false, compat: "User configuration",
   simItems: [] as SimItemInfo[], tuners: [] as Tuner[], wbName: "", dirty: false, filter: "", probing: null as null | "probe" | "tune", colorN: 0, simulated: false,
 };
 const NGSPICE_URL = "/static/pyodide/ngspice.mjs";   // served by src/pcm.rs runtime() (static/dist/pyodide in the build, /usr/local/share/kicad-collab/pyodide in the image)
@@ -119,6 +120,7 @@ const CSS = `
 #simframe .sim-tuner .es .kbmp{width:22px;height:20px}
 #simframe .sim-tuner k-select{width:100%;height:22px}
 #simframe .sim-tuner button.txt{width:100%;height:22px}
+#simframe .sim-status{flex:none;height:22px;padding:0 8px;border-top:1px solid var(--line);background:var(--panel);color:var(--ink-2);font:12px/21px var(--font);white-space:nowrap;overflow:hidden}
 #simframe .sim-hint{padding:6px 10px;color:var(--ink-3)}
 .sim-probe-banner{position:fixed;left:50%;top:10px;transform:translateX(-50%);z-index:60;padding:6px 12px;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:4px;box-shadow:var(--shadow);font:var(--fs-sm,12px)/1.35 var(--font)}
 .sim-unit{color:var(--ink-2);white-space:nowrap}
@@ -301,6 +303,12 @@ function traceData(t: Tab, signal: string): { xs: Float64Array; ys: Float64Array
   const ys = part ? acPart(vec, part) : type === "FFT" ? acPart(vec, "gain") : vec.im ? acPart(vec, "") : vec.re;
   return { xs, ys };
 }
+/** A signal's complex values (an S-parameter is the reflection coefficient a Smith chart plots). */
+function gammaData(t: Tab, signal: string): { re: Float64Array; im: Float64Array } | null {
+  const d = t.data; if (!d || !d.vectors.length) return null;
+  const vec = findVector(d, splitSignal(signal).base);
+  return vec && vec.im ? { re: vec.re, im: vec.im } : null;
+}
 function nextColor(t: Tab): string {
   const used = new Set(t.traces.map((x) => x.color.toUpperCase()));
   for (const c of TRACE_COLORS) if (!used.has(c.toUpperCase())) return c;
@@ -322,22 +330,40 @@ function log(s: string): void { const c = S.root && S.root.querySelector<HTMLTex
 async function session(): Promise<SpiceSession> {
   if (S.spice && S.spice.dead) { S.spice = null; S.simulated = false; }
   if (!S.spice) {
-    log("Loading ngspice...\n"); S.spice = await openSpice(NGSPICE_URL); log(`Note: using ngspice ${S.spice.version}\n`);
+    log("Loading ngspice...\n"); setStatus("Loading ngspice...");
+    S.spice = await openSpice(NGSPICE_URL, (p) => setStatus(progressText(p))); log(`Note: using ngspice ${S.spice.version}\n`); setStatus("");
     // NGSPICE::init_dll's workarounds, sent whatever the init script says
     await S.spice.exec(["set noaskquit", "set nomoremode"]);
   }
   return S.spice;
 }
-/** The .include files the netlist names, written into ngspice's file system from the project's documents. */
+/** The .include files the netlist names, written into ngspice's file system from the project's documents, and the
+ *  data files their models read (an XSPICE d_state's state_file, a filesource's file): ngspice opens those relative
+ *  to the folder it runs in, the project's folder on the desktop and the file system's root here. */
 async function stageIncludes(sp: SpiceSession, netlist: string): Promise<void> {
   const docs = projectDocs() as { docId: string; path: string }[];
+  const texts = [netlist];
+  const fetchDoc = async (p: string): Promise<string | null> => {
+    const base = p.split("/").pop() || p;
+    const doc = docs.find((d) => d.path === p || d.path.endsWith("/" + base) || d.path === base);
+    if (!doc) return null;
+    const txt = await api(`/api/docs/${doc.docId}/content`);
+    return typeof txt === "string" ? txt : JSON.stringify(txt);
+  };
   for (const m of netlist.matchAll(/^\.include\s+"([^"]+)"/gim)) {
-    const p = m[1], base = p.split("/").pop() || p;
+    const p = m[1];
     const builtin = builtinLibrary(p);
     if (builtin !== null) { sp.write(p.startsWith("/") ? p : "/" + p, forWasmNgspice(builtin)); continue; }
-    const doc = docs.find((d) => d.path === p || d.path.endsWith("/" + base) || d.path === base);
-    if (!doc) { log(`Warning: library '${p}' is not part of the project.\n`); continue; }
-    try { const txt = await api(`/api/docs/${doc.docId}/content`); sp.write(p.startsWith("/") ? p : "/" + p, forWasmNgspice(typeof txt === "string" ? txt : JSON.stringify(txt), (w) => log(w + "\n"))); } catch { log(`Warning: could not read '${p}'.\n`); }
+    try {
+      const txt = await fetchDoc(p);
+      if (txt === null) { log(`Warning: library '${p}' is not part of the project.\n`); continue; }
+      sp.write(p.startsWith("/") ? p : "/" + p, forWasmNgspice(txt)); texts.push(txt);
+    } catch { log(`Warning: could not read '${p}'.\n`); }
+  }
+  const data = new Set<string>();
+  for (const t of texts) for (const m of t.matchAll(/\b(?:\w+_)?file\s*=\s*"([^"]+)"/gi)) if (!/^(\/|[a-z]:)/i.test(m[1])) data.add(m[1]);
+  for (const p of data) {
+    try { const txt = await fetchDoc(p); if (txt !== null) sp.write("/" + p, txt); else log(`Warning: file '${p}' is not part of the project.\n`); } catch { log(`Warning: could not read '${p}'.\n`); }
   }
 }
 function circuitFor(t: Tab): string {
@@ -374,15 +400,18 @@ export async function runSimulation(reuse = false): Promise<void> {
     const sp = await session();
     const multi = S.tuners.find((x) => x.multi);
     const steps = multi ? Math.max(2, multi.steps) : 1;
-    let merged: RawPlot | null = null, listing = false; const multiTraces: PlotTrace[] = [];
-    for (let k = 0; k < steps; k++) {
+    let merged: RawPlot | null = null, listing = false, stopped = false; const multiTraces: PlotTrace[] = [];
+    for (let k = 0; k < steps && !(k > 0 && S.stopping); k++) {
       if (multi) multi.value = multi.min + ((multi.max - multi.min) * k) / (steps - 1);
       const cir = circuitFor(t);
       await stageIncludes(sp, cir);
       sp.write("/sim.cir", forWasmNgspice(cir.replace(/^(\s*\.include\s+")(?!\/)/gim, "$1/"), (w) => log(w + "\n")));
       await sp.exec(["destroy all", "remcirc"]).catch(() => undefined);
-      const lines = [...COMPAT_COMMANDS[compatIndex()], "source /sim.cir", ...S.tuners.map((x) => `alter ${x.name.toLowerCase()} = ${toSpiceString(x.value)}`), "run"];
+      const lines = [...COMPAT_COMMANDS[compatIndex()], "source /sim.cir", ...tunerCommands(), "run"];
       const r = await sp.exec(lines);
+      if (r.halted || S.stopping) log("Simulation stopped.\n");
+      // ended with its worker: nothing of this run can be read
+      if (sp.dead && (r.halted || S.stopping)) { stopped = true; break; }
       // SIMULATOR_FRAME::onSimFinished: every finished run clears the schematic's operating point; only an OP run's
       // results (OnSimRefresh) set it again
       clearOperatingPoints();
@@ -400,9 +429,9 @@ export async function runSimulation(reuse = false): Promise<void> {
         t.opText = said2.trim() ? said2 : "No results."; t.data = null; listing = true; continue;
       }
       sp.remove("/out.raw");
-      await sp.exec(["set filetype=ascii", "write /out.raw"]);
-      const raw = sp.read("/out.raw");
-      const plots = raw ? parseRaw(new TextDecoder().decode(raw)) : [];
+      await sp.exec(["set filetype=binary", "write /out.raw"]);
+      const raw = await sp.read("/out.raw");
+      const plots = raw ? readRaw(raw) : [];
       const plot = plots[plots.length - 1] || null;
       if (multi && plot) {
         const save = t.data; t.data = plot;
@@ -410,6 +439,7 @@ export async function runSimulation(reuse = false): Promise<void> {
         t.data = save; merged = plot;
       } else merged = plot;
     }
+    if (stopped) { S.simulated = false; return; }
     t.data = merged; S.simulated = true;
     await updateMeasurements(t, sp);
     (t as Tab & { multi?: PlotTrace[] }).multi = multi ? multiTraces : undefined;
@@ -418,16 +448,16 @@ export async function runSimulation(reuse = false): Promise<void> {
   } catch (e) {
     log("Error: " + (e instanceof Error ? e.message : String(e)) + "\n");
   } finally {
-    S.running = false; renderAll();
+    S.running = false; S.stopping = false; setStatus(""); renderAll();
   }
 }
 /** SIMULATOR_FRAME_UI::OnSimRefresh (ST_OP): "Simulation results:" in the console, one line per vector (the signal
  *  padded to 25 characters, the value with its unit), and each value on the schematic (SetOperatingPoint). */
 async function operatingPointResults(t: Tab, sp: SpiceSession): Promise<void> {
   sp.remove("/out.raw");
-  await sp.exec(["set filetype=ascii", "write /out.raw"]);
-  const raw = sp.read("/out.raw");
-  const plot = raw ? parseRaw(new TextDecoder().decode(raw)).pop() || null : null;
+  await sp.exec(["set filetype=binary", "write /out.raw"]);
+  const raw = await sp.read("/out.raw");
+  const plot = raw ? readRaw(raw).pop() || null : null;
   const lines: string[] = [], vectors: { name: string; value: number }[] = [];
   for (const v of plot ? plot.vectors : []) {
     if (!v.re.length) continue;
@@ -452,7 +482,18 @@ async function operatingPointResults(t: Tab, sp: SpiceSession): Promise<void> {
 }
 /** ngspice's interactive prompts ("ngspice 12 -> ") are not part of what it says. */
 function noPrompts(s: string): string { return s.replace(/^\s*ngspice \d+ -> ?$/gm, "").replace(/(?:ngspice \d+ -> )+/g, "").replace(/\n{3,}/g, "\n\n"); }
-function stopSimulation(): void { if (S.running) log("Simulation stopped.\n"); S.running = false; renderToolbar(); }
+/** SIMULATOR_FRAME's Stop (NGSPICE::Stop, bg_halt): the analysis ends where it is and what it computed is shown.
+ *  ngspice gives way to the page while it runs (plugins/spice.ts); one that does not within a moment is ended with
+ *  its worker, and the next run starts a new one. */
+function stopSimulation(): void {
+  if (!S.running || S.stopping) return;
+  S.stopping = true; setStatus("Stopping...");
+  if (S.spice) S.spice.halt();
+  renderToolbar();
+}
+/** The status line: ngspice's progress reports (libngspice's SendStat text, "tran: 45.3%"). */
+function progressText(p: Progress): string { return p.text === "--ready--" ? "" : p.text; }
+function setStatus(text: string): void { const el = S.root && S.root.querySelector<HTMLElement>(".sim-status"); if (el) el.textContent = text; }
 async function updateMeasurements(t: Tab, sp: SpiceSession): Promise<void> {
   const type = tabType(t);
   for (let i = 0; i < t.meas.length; i++) {
@@ -478,7 +519,7 @@ function layout(): void {
   const signals = h("div", { class: "sim-gridwrap", id: "sim-signals" }), cursors = h("div", { class: "sim-gridwrap", id: "sim-cursors", style: "max-height:110px" }), meas = h("div", { class: "sim-gridwrap", id: "sim-meas", style: "max-height:150px" });
   const tuners = h("div", { class: "sim-tuners", id: "sim-tuners" });
   const side = h("div", { class: "sim-side" }, h("div", { class: "sim-sec grow" }, filter, signals), h("div", { class: "sim-sec" }, cursors), h("div", { class: "sim-sec" }, meas), tuners);
-  root.append(menubar, toolbar, h("div", { class: "sim-body" }, h("div", { class: "sim-left" }, tabs, area, splitH, cons), split, side));
+  root.append(menubar, toolbar, h("div", { class: "sim-body" }, h("div", { class: "sim-left" }, tabs, area, splitH, cons), split, side), h("div", { class: "sim-status", id: "sim-status" }));
   els = { menubar, toolbar, tabs, area, console: cons, side, signals, cursors, meas, tuners, split, splitH, filter };
   dragSplit(split, (dx) => { side.style.width = Math.max(240, Math.min(window.innerWidth - 300, side.offsetWidth - dx)) + "px"; });
   dragSplit(splitH, (_dx, dy) => { cons.style.height = Math.max(40, Math.min(window.innerHeight - 200, cons.offsetHeight - dy)) + "px"; });
@@ -519,7 +560,7 @@ function menus(): [string, MenuEntry[]][] {
       A("toggleGrid", () => { const x = t(); if (x) { x.setup.grid = !x.setup.grid; S.dirty = true; renderPlot(); } }, hasPlot, () => !!t()?.setup.grid),
       A("toggleLegend", () => { const x = t(); if (x) { x.setup.legend = !x.setup.legend; S.dirty = true; renderPlot(); } }, hasPlot, () => !!t()?.setup.legend),
       A("toggleDottedSecondary", () => { const x = t(); if (x) { x.setup.dotted = !x.setup.dotted; S.dirty = true; renderPlot(); } }, hasPlot, () => !!t()?.setup.dotted),
-      { ...A("toggleSmithChart", () => undefined, () => false, () => false), run: undefined },
+      A("toggleSmithChart", () => { const x = t(); if (x && tabType(x) === "SP") { x.setup.smith = !x.setup.smith; S.dirty = true; renderPlot(); } }, () => { const x = t(); return !!x && tabType(x) === "SP"; }, () => { const x = t(); return !!x && tabType(x) === "SP" && !!x.setup.smith; }),
       A("toggleDarkModePlots", () => { S.darkPlots = !S.darkPlots; renderPlot(); }, undefined, () => S.darkPlots)]],
     ["Simulation", [A("newAnalysisTab", () => void newAnalysisTab()), A("simAnalysisProperties", () => void editAnalysisTab(), hasTab), A("runSimulation", () => void runSimulation(), () => !S.running), SEP,
       A("simProbe", () => startProbe("probe"), hasTab), A("simTune", () => startProbe("tune"), hasTab), SEP, A("editUserDefinedSignals", () => void editUserSignals()), A("showNetlist", showNetlist)]],
@@ -588,13 +629,17 @@ function renderPlot(): void {
   p.opts = { logX: x.log, x: { name: x.name, units: x.units }, y: axesFor(t).map((a, i) => (i === 0 || used.has(i as 0 | 1 | 2) ? a : null)) };
   p.showGrid = t.setup.grid; p.showLegend = t.setup.legend; p.dottedSecondary = t.setup.dotted; p.dark = S.darkPlots;
   p.fixed = t.setup.fixed.slice(); p.margins = { ...t.setup.margins };
+  p.smith = type === "SP" && !!t.setup.smith;
   const traces: PlotTrace[] = [];
   const multi = (t as Tab & { multi?: PlotTrace[] }).multi;
   if (multi && multi.length) traces.push(...multi);
   else for (const tr of t.traces) {
     const d = traceData(t, tr.signal); if (!d) continue;
     const ax = axisOf(tr.signal, type);
-    traces.push({ name: tr.signal, xs: d.xs, ys: d.ys, color: tr.color, axis: ax, secondary: ax === 1, cursor1: tr.cursor1, cursor2: tr.cursor2 });
+    const pt: PlotTrace = { name: tr.signal, xs: d.xs, ys: d.ys, color: tr.color, axis: ax, secondary: ax === 1, cursor1: tr.cursor1, cursor2: tr.cursor2 };
+    // SMITH_TRACE: the complex S-parameter itself, once per signal whatever part of it the trace plots
+    if (p.smith) { const g = gammaData(t, tr.signal); if (!g || traces.some((o) => o.gamma && splitSignal(o.name).base === splitSignal(tr.signal).base)) continue; pt.name = splitSignal(tr.signal).base; pt.gamma = g; pt.secondary = false; }
+    traces.push(pt);
   }
   if (traces.some((x2) => x2.cursor1)) p.placeCursor(0);
   if (traces.some((x2) => x2.cursor2)) p.placeCursor(1);
@@ -764,16 +809,29 @@ function tunerEl(tu: Tuner): HTMLElement {
   set(tu.value, false);
   return el;
 }
+/** SIMULATOR_FRAME_UI::applyTuners: each tuner's value through its model's TunerCommand (SPICE_GENERATOR_IDEAL's
+ *  "alter @r1=…", SPICE_GENERATOR_R_POT's "altermod @a…[position]=…", a DC source's "alter @v1=…"). */
+function tunerCommands(): string[] {
+  const out: string[] = [];
+  for (const tu of S.tuners) {
+    const si = S.simItems.find((x) => x.name.toLowerCase() === tu.name.toLowerCase());
+    const cmd = si && si.tunerCommand ? si.tunerCommand(tu.value) : "";
+    if (cmd) out.push(cmd); else log(`Could not apply tuned value(s):\n${tu.name} is not tunable\n`);
+  }
+  return out;
+}
 function addTuner(name: string, symId: string | null): void {
   if (S.tuners.some((t) => t.name.toLowerCase() === name.toLowerCase())) return;
   const it = S.circuit.items.find((i) => i.name.toLowerCase() === name.toLowerCase());
-  if (!it || !/^[rlcvi]/i.test(name)) { void messageBox(`${name} cannot be tuned.`); return; }
+  // SIM_MODEL::GetTunerParam: ideal passives, potentiometers and DC sources can be tuned
+  const si = S.simItems.find((x) => x.name.toLowerCase() === name.toLowerCase());
+  if (!it || !si || !si.tunerCommand) { void messageBox(`${name} is not tunable`); return; }
   const line = S.netlist.split(/\r?\n/).find((l) => l.trim().toLowerCase().startsWith(name.toLowerCase() + " ")) || "";
-  const tok = line.trim().split(/\s+/); let v = parseSpiceValue(tok[3] || "");
-  if (/^[vi]/i.test(name)) { const dc = /\bdc\s+(\S+)/i.exec(line); v = parseSpiceValue(dc ? dc[1] : tok[3] || ""); }
+  const tok = line.trim().split(/\s+/);
+  const v = si.tunerPot && si.tunerValue === "" ? 0.5 : toDouble(si.tunerValue);
   if (!Number.isFinite(v)) { void messageBox(`${name} has no value that can be tuned.`); return; }
-  // TUNER_SLIDER: the range is half to twice the value (a zero value gets ±1)
-  const lo = v === 0 ? -1 : v > 0 ? v / 2 : v * 2, hi = v === 0 ? 1 : v > 0 ? v * 2 : v / 2;
+  // TUNER_SLIDER: a potentiometer's wiper from 0 to 1, anything else half to twice the value (a zero value gets ±1)
+  const lo = si.tunerPot ? 0 : v === 0 ? -1 : v > 0 ? v / 2 : v * 2, hi = si.tunerPot ? 1 : v === 0 ? 1 : v > 0 ? v * 2 : v / 2;
   S.tuners.push({ name: it.name, value: v, min: lo, max: hi, steps: 5, multi: false, series: 0, orig: tok[3] || "", symId });
   renderTuners();
 }
@@ -936,6 +994,7 @@ export function workbook(): Workbook {
         if (t.setup.legend && t.plot) wt.legend = { x: t.plot.legendAt.x, y: t.plot.legendAt.y };
         t.setup.fixed.forEach((f, i) => { if (f) (wt as unknown as Record<string, unknown>)[`fixedY${i + 1}scale`] = { min: f.min, max: f.max }; });
         wt.margins = { ...t.setup.margins };
+        if (t.setup.smith && tabType(t) === "SP") { wt.smithMode = true; wt.smithZoom = 1; wt.smithPanX = 0; wt.smithPanY = 0; }
       }
       return wt;
     }),
@@ -971,6 +1030,8 @@ export function applyWorkbook(wb: Workbook): void {
     t.setup.dotted = wt.dottedSecondary !== false; t.setup.grid = wt.showGrid !== false; t.setup.legend = !!wt.legend;
     t.setup.fixed = [wt.fixedY1scale || null, wt.fixedY2scale || null, wt.fixedY3scale || null];
     if (wt.margins) t.setup.margins = { ...t.setup.margins, ...wt.margins };
+    // SIM_PLOT_TAB::SetSmithMode: only an S-parameter tab has one
+    t.setup.smith = !!wt.smithMode && tabType(t) === "SP";
   }
   if (S.tabs.length) S.tabs[0].lastSch = typeof wb.last_sch_text_sim_command === "string" ? wb.last_sch_text_sim_command : "";
   S.cur = S.tabs.length ? 0 : -1; S.dirty = false;

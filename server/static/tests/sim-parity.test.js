@@ -3,7 +3,7 @@
 //     SIM_LIB_MGR::CreateModel calls it on every symbol (also on one with Sim.Device / Sim.Type but no Sim.Params);
 //   * the netlist NETLIST_EXPORTER_SPICE writes for KiCad's own simulation demos (demos/simulation), line by line,
 //     each expectation read off the C++ (spice_generator.cpp, sim_model_source.cpp, sim_model_ideal.cpp, …);
-//   * the simulator's copy for the WebAssembly ngspice (sim/ngspice-wasm.ts: POLY sources, unknown model parameters);
+//   * the simulator's copy for the WebAssembly ngspice (sim/ngspice-wasm.ts: line ends);
 //   * KiCad's qa/tests/spice cases run through ngspice with the values test_netlist_exporter_spice.cpp expects, and
 //     hand-computed results on the demos (an RC low-pass corner, an inverting op-amp's gain).
 // Run: node server/static/tests/sim-parity.test.js
@@ -19,12 +19,12 @@ console.log("Simulator netlist parity under node");
 const esbuild = require("esbuild");
 const WEB = path.join(__dirname, "..", "..", "web");
 const M = (() => {
-  const out = esbuild.buildSync({ stdin: { contents: 'export * as SP from "./sim/spice-netlist"; export * as SL from "./dialogs/sim-model-logic"; export { NGSPICE } from "./dialogs/sim-model-ngspice"; export * as L from "./sim/sim-logic"; export * as SPICE from "./plugins/spice"; export * as BL from "./sim/builtin-libs"; export * as W from "./sim/ngspice-wasm";', resolveDir: WEB, loader: "ts" },
+  const out = esbuild.buildSync({ stdin: { contents: 'export * as SP from "./sim/spice-netlist"; export * as SL from "./dialogs/sim-model-logic"; export { NGSPICE } from "./dialogs/sim-model-ngspice"; export * as L from "./sim/sim-logic"; export * as SPICE from "./plugins/spice"; export * as BL from "./sim/builtin-libs"; export * as W from "./sim/ngspice-wasm"; export * as MG from "./sim/sim-migrate";', resolveDir: WEB, loader: "ts" },
     bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const mod = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, require);
   return mod.exports;
 })();
-const { SP, SL, L, W, BL } = M;
+const { SP, SL, L, W, BL, MG } = M;
 SL.setNgspiceData(M.NGSPICE);
 const helpers = { symbolPins: sch._.symbolPins, isPower: (d, it) => sch._.isPowerSymbol(d, String((K.kid(it.node, "lib_id") || [])[1])) };
 const repo = (...p) => path.join(__dirname, "..", "..", "..", ...p);
@@ -44,7 +44,7 @@ function exportFile(file, options = ALL) {
   const msgs = []; let items = [];
   const out = SP.spiceNetlist({ symbols, texts, options, report: (m) => msgs.push(m), items: (l) => { items = l; }, library: (p) => {
     const b = BL.builtinLibrary(p); if (b !== null) return SL.parseSpiceLibrary(b);
-    const f = path.join(dir, p.replace(/^\$\{KIPRJMOD\}\//, "")); return fs.existsSync(f) ? SL.parseSpiceLibrary(fs.readFileSync(f, "utf8")) : null; } });
+    const f = path.join(dir, p.replace(/^\$\{KIPRJMOD\}\//, "")); if (!fs.existsSync(f)) return null; const t = fs.readFileSync(f, "utf8"); return SL.isIbisPath(p) ? SL.parseIbisLibrary(t, p) : SL.parseSpiceLibrary(t); } });
   return { out, msgs, lines: out.split("\n"), items };
 }
 const fields = (o) => Object.entries(o).map(([name, value]) => ({ name, value }));
@@ -202,28 +202,85 @@ test("SPICE_VALUE::ToString: precision, auto range, and the shortest form of a v
 });
 
 // ---------------------------------------------------------------- the simulator's copy for this ngspice
-test("POLY sources become B sources with the SPICE2 coefficient order", () => {
-  assert.strictEqual(W.polyToB("EOS 3 1 POLY(1) 53 98 1.7E-3 1"), "BEOS 3 1 V=(1.7E-3)+(1)*V(53,98)");
-  assert.strictEqual(W.polyToB("EREF1 98 0 POLY(2) 99 0 50 0 0 0.5 0.5"), "BEREF1 98 0 V=(0.5)*V(99,0)+(0.5)*V(50,0)");
-  assert.strictEqual(W.polyToB("G1 1 2 POLY(2) (3,0) (4,0) 0 1 2 3 4 5"), "BG1 1 2 I=(1)*V(3,0)+(2)*V(4,0)+(3)*V(3,0)*V(3,0)+(4)*V(3,0)*V(4,0)+(5)*V(4,0)*V(4,0)");
-  assert.strictEqual(W.polyToB("fout1 0 99 poly(2) vo1 vcur1 -9.27e-3 1 -1"), "Bfout1 0 99 I=(-9.27e-3)+(1)*I(vo1)+(-1)*I(vcur1)");
-  assert.strictEqual(W.polyToB("H1 a b POLY(1) Vx 0 0 2"), "BH1 a b V=(2)*I(Vx)*I(Vx)");
-  assert.strictEqual(W.translatePoly("E1 1 0 POLY(1)\n+ 2 0 0 3\nR1 1 0 1k"), "BE1 1 0 V=(3)*V(2,0)\nR1 1 0 1k");
-  assert.strictEqual(W.translatePoly("E1 1 0 2 0 3"), "E1 1 0 2 0 3");
+test("MigrateSimModel: KiCad 6 fields become Sim.* fields (library, inferred, source function, raw SPICE; pin sequence)", () => {
+  const ctx = (prefix, pins, lib = null) => ({ prefix, pins, libraryModel: (l, n) => (lib && l === lib.path && n === lib.name ? SL.createModel("SUBCKT") : null) });
+  const get = (f, n) => (f.find((x) => x.name === n) || {}).value;
+  // a source function: SIM_MODEL_SOURCE with its parameters, the value pointing at them
+  let f = MG.migrateSimModel(fields({ Reference: "V1", Value: "x", Spice_Primitive: "V", Spice_Model: "sin(0 1 1k)", Spice_Node_Sequence: "2 1" }), ctx("V", ["1", "2"]));
+  assert.strictEqual(get(f, "Sim.Device"), "V"); assert.strictEqual(get(f, "Sim.Type"), "SIN"); assert.strictEqual(get(f, "Sim.Params"), "dc=0 ampl=1 f=1k");
+  assert.strictEqual(get(f, "Sim.Pins"), "2=1 1=2"); assert.ok(!f.some((x) => /^Spice_/.test(x.name)));
+  // "dc(1)": the value only
+  f = MG.migrateSimModel(fields({ Reference: "V2", Value: "x", Spice_Primitive: "V", Spice_Model: "dc(1)" }), ctx("V", ["1", "2"]));
+  assert.strictEqual(get(f, "Value"), "1"); assert.strictEqual(get(f, "Sim.Type"), "DC"); assert.strictEqual(get(f, "Sim.Params"), undefined); assert.strictEqual(get(f, "Sim.Pins"), "1=+ 2=-");
+  // a library model with parameters after its name
+  f = MG.migrateSimModel(fields({ Reference: "U1", Value: "OPA", Spice_Primitive: "X", Spice_Model: "pot k=0.3", Spice_Lib_File: "pot.lib" }), ctx("U", ["1", "2", "3"], { path: "pot.lib", name: "pot" }));
+  assert.strictEqual(get(f, "Sim.Library"), "pot.lib"); assert.strictEqual(get(f, "Sim.Name"), "pot"); assert.strictEqual(get(f, "Sim.Params"), "k=0.3");
+  // a model the library does not have: a raw SPICE model naming it, the symbol's pins in order
+  f = MG.migrateSimModel(fields({ Reference: "U2", Value: "X", Spice_Primitive: "X", Spice_Model: "nope", Spice_Lib_File: "x.lib" }), ctx("U", ["10", "2", "1"]));
+  assert.strictEqual(get(f, "Sim.Device"), "SPICE"); assert.strictEqual(get(f, "Sim.Params"), 'type="X" model="nope" lib="x.lib"'); assert.strictEqual(get(f, "Sim.Pins"), "1=1 2=2 10=3");
+  // an R whose value is its model: inferred, nothing written
+  f = MG.migrateSimModel(fields({ Reference: "R1", Value: "1Meg", Spice_Primitive: "R" }), ctx("R", ["1", "2"]));
+  assert.ok(!f.some((x) => /^Sim\./.test(x.name)) && get(f, "Value") === "1Meg");
+  // V7 fields: a potentiometer's +/- pins, a MUTUAL inductor, a NORMAL random source
+  assert.strictEqual(get(MG.migrateSimModel(fields({ "Sim.Device": "R", "Sim.Type": "POT", "Sim.Pins": "1=+ 2=wiper 3=-" }), ctx("RV", [])), "Sim.Pins"), "1=r1 2=wiper 3=r0");
+  f = MG.migrateSimModel(fields({ "Sim.Device": "L", "Sim.Type": "MUTUAL" }), ctx("K", [])); assert.strictEqual(get(f, "Sim.Device"), "K"); assert.strictEqual(get(f, "Sim.Type"), undefined);
+  f = MG.migrateSimModel(fields({ "Sim.Device": "V", "Sim.Type": "RANDNORMAL", "Sim.Params": "min=0 max=0 dt=1m" }), ctx("V", [])); assert.strictEqual(get(f, "Sim.Type"), "RANDGAUSSIAN"); assert.strictEqual(get(f, "Sim.Params"), "ts=1m");
+  // the parser's exclusion fields
+  assert.strictEqual(MG.legacyExcludedFromSim(fields({ "Sim.Enable": "0" })), true); assert.strictEqual(MG.legacyExcludedFromSim(fields({ Spice_Netlist_Enabled: "N" })), true);
+  assert.strictEqual(MG.legacyExcludedFromSim(fields({ Spice_Netlist_Enabled: "Y" })), false); assert.strictEqual(MG.legacyExcludedFromSim(fields({ Value: "1" })), undefined);
 });
-test("a .model parameter the device does not have is left out with ngspice's warning; models it cannot check are left alone", () => {
-  const warn = [];
-  assert.strictEqual(W.dropUnknownModelParams(".model LASER D(Is=1e-22 Rs=6 N=1.5 Cjo=50p Xti=100 Iave=160m Vpk=5)", (w) => warn.push(w)), ".model LASER D(Is=1e-22 Rs=6 N=1.5 Cjo=50p Xti=100)");
-  assert.deepStrictEqual(warn, ["Warning: Model issue: unrecognized parameter (iave) - ignored", "Warning: Model issue: unrecognized parameter (vpk) - ignored"]);
-  assert.strictEqual(W.dropUnknownModelParams(".model Q1 NPN(IS=1f BF=100 VCEO=40\n+ MFG=X VAF=50)"), ".model Q1 NPN(IS=1f BF=100 VAF=50)");
-  const keep = ".model SW1 SW(Ron=1 Roff=1Meg Vt=0.5 foo=1)\n.model pot potentiometer(r=1k)"; assert.strictEqual(W.dropUnknownModelParams(keep), keep);
+test("TunerCommand: alter for ideal passives and DC sources, altermod of a potentiometer's position, nothing for other models", () => {
+  const item = (ref) => ({ refName: ref, modelName: "", baseModelName: "", pinNumbers: ["1", "2"], pinNetNames: ["a", "b"] });
+  const r = SL.createModel("R"); r.setParamValue(0, "4.7k"); assert.strictEqual(SL.tunerCommand(r, item("R1"), 4700), "alter @R1=4700");
+  const pot = SL.createModel("R_POT"); assert.strictEqual(SL.tunerCommand(pot, item("RV1"), 0.25), "altermod @ARV1[position]=0.25");
+  const v = SL.createModel("V"); v.setParamValue(0, "5"); assert.strictEqual(SL.tunerCommand(v, item("V1"), 1e-5), "alter @V1=1e-05");
+  assert.strictEqual(SL.tunerCommand(SL.createModel("V_SIN"), item("V2"), 1), ""); assert.strictEqual(SL.tunerParam(SL.createModel("D")), null);
+});
+test("the raw file: write's binary form (several plots, real and complex) reads as its ASCII form does", () => {
+  const head = (name, complex, vars, np) => `Title: t\nDate: d\nPlotname: ${name}\nFlags: ${complex ? "complex" : "real"}\nNo. Variables: ${vars.length}\nNo. Points: ${np}\nVariables:\n` + vars.map((v, i) => `\t${i}\t${v}\tvoltage\n`).join("") + "Binary:\n";
+  const real = new Float64Array([0, 1, 1e-3, 2]), cplx = new Float64Array([10, 0, 0.5, -0.5]);
+  const enc = new TextEncoder();
+  const bytes = Buffer.concat([Buffer.from(enc.encode(head("Transient Analysis", false, ["time", "v(out)"], 2))), Buffer.from(real.buffer), Buffer.from(enc.encode(head("AC Analysis", true, ["frequency", "v(out)"], 1))), Buffer.from(cplx.buffer)]);
+  const plots = L.readRaw(new Uint8Array(bytes));
+  assert.strictEqual(plots.length, 2);
+  assert.deepStrictEqual(Array.from(plots[0].vectors[1].re), [1, 2]); assert.strictEqual(plots[0].vectors[0].re[1], 1e-3);
+  assert.ok(plots[1].complex); assert.strictEqual(plots[1].vectors[1].re[0], 0.5); assert.strictEqual(plots[1].vectors[1].im[0], -0.5);
+  const ascii = "Title: t\nPlotname: p\nFlags: real\nNo. Variables: 2\nNo. Points: 1\nVariables:\n\t0\ttime\ttime\n\t1\tv(a)\tvoltage\nValues:\n 0\t1.5e-3\n\t2\n";
+  assert.strictEqual(L.readRaw(enc.encode(ascii))[0].vectors[1].re[0], 2);
+});
+test("an AC trace of a node with no signal: MagnitudeToDb gives no point (not -6000 dB), so the axis keeps its range", () => {
+  const v = { name: "v(x)", type: "voltage", re: new Float64Array([0, 1, 0.1]), im: new Float64Array([0, 0, 0]) };
+  const db = L.acPart(v, "gain"); assert.ok(Number.isNaN(db[0])); assert.strictEqual(db[1], 0); assert.ok(Math.abs(db[2] + 20) < 1e-9);
+});
+test("multi-unit symbols: the units' Sim.Pins merged into one item (multiunit_pinmap_split.golden), and Sim.Decomposition mode=repeat's wrapper", () => {
+  const dir = path.join(QA, "multiunit_pinmap_split"); if (!fs.existsSync(dir)) return;
+  const golden = fs.readFileSync(path.join(dir, "multiunit_pinmap_split.golden"), "utf8").replace(/\n+$/, "\n").split("\n").filter((l) => !/^\.probe p\(/.test(l));
+  assert.deepStrictEqual(exportFile(path.join(dir, "multiunit_pinmap_split.kicad_sch")).lines, golden);
+  const r = exportFile(path.join(QA, "multiunit_repeat_opamp", "multiunit_repeat_opamp.kicad_sch"));
+  const sub = r.lines.filter((l) => l.startsWith(".subckt kicad_mu_"));
+  assert.strictEqual(sub.length, 1, r.out); assert.deepStrictEqual(r.msgs, []);
+  const name = sub[0].split(" ")[1], xu1 = r.lines.find((l) => l.startsWith("XU1 ")).split(" ");
+  assert.strictEqual(xu1[xu1.length - 1], name); assert.ok(/^kicad_mu_uopamp_5Fsingle_2u_[0-9a-f]{16}$/.test(name), name);
+  const x1 = r.lines.find((l) => l.startsWith("X1 ")).split(" "), x2 = r.lines.find((l) => l.startsWith("X2 ")).split(" ");
+  assert.strictEqual(x1[3], x2[3]); assert.strictEqual(x1[4], x2[4]); assert.strictEqual(x1[x1.length - 1], "uopamp_single");
+});
+test("Sim.NodesFormat: each pin's net in its pattern (XSPICE vectors and modifiers); a count that differs is an error", () => {
+  const sym = (fmt) => ({ ref: "A1", fields: fields({ Reference: "A1", Value: "x", "Sim.Device": "SPICE", "Sim.Params": 'type="A" model="adc"', "Sim.Pins": "1=1 2=2 3=3", "Sim.NodesFormat": fmt }), pins: [{ number: "1", net: "a" }, { number: "2", net: "b" }, { number: "3", net: "c" }] });
+  const run = (fmt) => { const msgs = []; const out = SP.spiceNetlist({ symbols: [sym(fmt)], texts: [], options: 0, report: (m) => msgs.push(m), library: () => null }); return { out, msgs }; };
+  assert.ok(run("[? ?] %vd(?)").out.includes("A1 [ a   b ] %vd c  adc"), run("[? ?] %vd(?)").out);
+  assert.ok(/wrong number of nodes/.test(run("[? ?]").msgs.join()));
+});
+test("the simulator's copy for this ngspice: line ends only (POLY and unknown model parameters read as on the desktop)", () => {
   assert.strictEqual(W.forWasmNgspice("a\r\nb\rc"), "a\nb\nc");
+  const poly = "E1 1 0 POLY(1)\n+ 2 0 0 3\n.model LASER D(Is=1e-22 Iave=160m)"; assert.strictEqual(W.forWasmNgspice(poly), poly);
 });
 
 // ---------------------------------------------------------------- through ngspice
 const ENGINE = path.join(__dirname, "..", "dist", "pyodide", "ngspice.mjs");
 let sp = null;
 async function simulate(file, extra, pre) {
+  // a fatal error ends ngspice (as it ends the desktop's libngspice): the next case gets a new one
+  if (sp.dead) sp = await M.SPICE.open(pathToFileURL(ENGINE).href);
   const dir = path.dirname(file); const { out, msgs } = exportFile(file);
   for (const m of out.matchAll(/^\.include "([^"]+)"/gm)) {
     const b = BL.builtinLibrary(m[1]); if (b !== null) { sp.write(m[1], W.forWasmNgspice(b)); continue; }
@@ -238,7 +295,7 @@ async function simulate(file, extra, pre) {
   return { net, msgs, r, plot: plots[plots.length - 1] || null };
 }
 function at(plot, x, sig) {
-  const xs = plot.vectors[0].re; let i = 0, best = Infinity; for (let k = 0; k < xs.length; k++) { const d = Math.abs(xs[k] - x); if (d < best) { best = d; i = k; } }
+  const xs = plot.vectors[0].re; let i = 0, best = Infinity; if (x !== null) for (let k = 0; k < xs.length; k++) { const d = Math.abs(xs[k] - x); if (d < best) { best = d; i = k; } }
   const v = L.findVector(plot, sig); assert.ok(v, `no vector ${sig}`);
   return v.im ? Math.hypot(v.re[i], v.im[i]) : v.re[i];
 }
@@ -251,6 +308,13 @@ const QA_CASES = {
   tlines: [[910e-6, { "V(/z0_in)": 1, "V(/z0_out)": 0, "V(/rlgc_in)": 1, "V(/rlgc_out)": 0 }], [970e-6, { "V(/z0_in)": 0, "V(/z0_out)": 1, "V(/rlgc_in)": 0, "V(/rlgc_out)": 1 }]],
   cmos_not: [[0, { "V(/in)": 2.5, "V(/out)": 2.64 }], [250e-6, { "V(/in)": 5, "V(/out)": 0.013 }], [500e-6, { "V(/in)": 2.5, "V(/out)": 2.64 }], [750e-6, { "V(/in)": 0, "V(/out)": 5 }], [1e-3, { "V(/in)": 2.5, "V(/out)": 2.64 }]],
   fliege_filter: [[0.8e3, { "V(/in)": 1, "V(/out)": 1 }], [1.061e3, { "V(/in)": 1, "V(/out)": 0 }], [1.2e3, { "V(/in)": 1, "V(/out)": 1 }]],
+  potentiometers: [[null, { "V(/out1)": 0.5, "V(/out2)": 0.7, "V(/out3)": 0.9 }]],
+  switches: [[0.5e-3, { "V(/inswv)": 0, "V(/outswv)": 0 }], [1.5e-3, { "V(/inswv)": 1, "V(/outswv)": 5 }], [2.5e-3, { "V(/inswv)": 0, "V(/outswv)": 0 }]],
+  legacy_pot: [[null, { "V(/out1)": 0.5, "V(/out2)": 0.7, "V(/out3)": 0.9 }]],
+  legacy_pspice: [[190, { "V(/VIN)": Math.pow(10, -186e-3 / 20), "V(VOUT)": Math.pow(10, 87e-3 / 20) }]],
+  legacy_rectifier: [[0, { "V(/signal_in)": 0, "V(/rect_out)": 0 }], [9.75e-3, { "V(/signal_in)": 1.5, "V(/rect_out)": 823e-3 }]],
+  legacy_sallen_key: [[1, { "V(/lowpass)": 1 }], [1e3, { "V(/lowpass)": Math.pow(10, -2.9 / 20) }]],
+  legacy_opamp: [[0, { "V(/in)": 0, "V(/out)": 0 }], [250e-6, { "V(/in)": 500e-3, "V(/out)": 1 }], [500e-6, { "V(/in)": 0, "V(/out)": 0 }], [750e-6, { "V(/in)": -500e-3, "V(/out)": -1 }], [1e-3, { "V(/in)": 0, "V(/out)": 0 }]],
   directives: [[9.25e-3, { "V(/in)": 1, "V(/out)": -900e-3, "I(XR1)": 1e-3 }], [9.50e-3, { "V(/in)": 0, "V(/out)": 0, "I(XR1)": 1e-3 }], [9.75e-3, { "V(/in)": -1, "V(/out)": 900e-3, "I(XR1)": 1e-3 }], [10e-3, { "V(/in)": 0, "V(/out)": 0, "I(XR1)": 1e-3 }]],
 };
 if (fs.existsSync(ENGINE)) {
@@ -271,6 +335,15 @@ if (fs.existsSync(ENGINE)) {
       const peakOut = Math.max(...out), peakIn = Math.max(...vin);
       assert.ok(Math.abs(peakIn - 1) < 1e-3, `input peak ${peakIn}`);
       assert.ok(peakOut > 0.2 && peakOut < peakIn - 0.3, `output peak ${peakOut}: 1 V less a 1N4148 drop`);
+    });
+    test("KIBIS: demo ibis's drivers and receiver become IBIS subcircuits; stuck high / low, high-Z and the rectangle drive as their ramps say", async () => {
+      const r = await simulate(demo("ibis/ibis.kicad_sch"), ".tran 1n 1u", ["set ngbehavior=ltpsa"]);
+      assert.deepStrictEqual(r.msgs, []); assert.ok(/\.SUBCKT U1\.Virtual GND PIN/.test(r.net) && /^XU6 GND PULSE_INPUT U6\.Virtual$/m.test(r.net), r.net.slice(0, 400));
+      assert.ok(r.plot && /transient/i.test(r.plot.plotname), r.r.err.join("\n"));
+      const avg = (sig) => { const v = L.findVector(r.plot, sig).re; return v.reduce((a, b) => a + b, 0) / v.length; };
+      assert.ok(avg("V(HIGH_OUTPUT)") > 4.5, `high ${avg("V(HIGH_OUTPUT)")}`); assert.ok(Math.abs(avg("V(LOW_OUTPUT)")) < 0.5, `low ${avg("V(LOW_OUTPUT)")}`);
+      assert.ok(Math.abs(avg("V(HIGHZ_OUTPUT)") - 2.5) < 0.1, `high-Z ${avg("V(HIGHZ_OUTPUT)")}`);
+      const rect = L.findVector(r.plot, "V(RECT_OUTPUT)").re; assert.ok(Math.max(...rect) > 4.5 && Math.min(...rect) < 0.5, "the rectangle swings");
     });
     test("ngspice: demo sallen_key's AC — a 2nd-order low-pass, 0 dB in the passband, corner where the RC sets it", async () => {
       const r = await simulate(demo("sallen_key/sallen_key.kicad_sch"), "", ["set ngbehavior=ltpsa"]);
