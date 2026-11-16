@@ -108,6 +108,7 @@ export interface RouteOptions {
   groupsFirst?: boolean;         // false turns the cluster-first order off
   criticalFirst?: boolean;       // false: the inside of each cluster before the critical nets (the owner chose critical first, 2026-11-16)
   splitPlaneEnds?: boolean;      // true: no route ends where two nets' pours overlap on a layer
+  planeShortcuts?: boolean;      // false: keep long supply tracks that could drop into the net's inner plane at both ends
   planeDrops?: boolean;          // true: a pad of a net with an inner plane counts as 1.5 mm from it, so it drops in rather than run to a far pad
   planes?: boolean;              // true keeps tracks off an inner ground layer its pour covers, and drops ground pins straight into it
   order?: string[];              // net names to route first, in this order; the rest follow in the heuristic order
@@ -134,7 +135,7 @@ export interface ConnReport {
 export interface Anchor { p: Pt; layers: number[]; shape: Shape | null; cluster: number; grp?: number; plane?: boolean; narrow?: number; axis?: Pt }
 export interface Conn {
   id: number; net: string; cls: RuleClass; a: Anchor; b: Anchor; len: number;
-  nodes: Node[] | null; shapes: Obstacle[]; viaCells: number[]; landed: number; rips: number; feat: Features | null; stubs: [Pt, Pt, number][]; zoneEnd: boolean; ends?: [Anchor, Anchor]; stitch?: boolean; moot?: boolean; pair?: boolean;
+  nodes: Node[] | null; shapes: Obstacle[]; viaCells: number[]; landed: number; rips: number; feat: Features | null; stubs: [Pt, Pt, number][]; zoneEnd: boolean; ends?: [Anchor, Anchor]; stitch?: boolean; planeOnly?: number; moot?: boolean; pair?: boolean;
   why?: string; pairOnly?: string;   // a differential pair's connection whose coupled run could not be laid: it is never routed alone
   partner?: Conn;                    // the other line of a pair that cannot be one coupled run (its pads change layer): routed beside it
 }
@@ -161,7 +162,7 @@ interface Pair { p: NetInfo; n: NetInfo; cp: Conn; cn: Conn; swap: boolean; laid
 interface Lead { e: Pt; s: number }   // each track first leaves its pad straight, this far, before it turns in to its partner
 interface Guide { allowed: boolean[] | null; allowVias: boolean; maxVias: number; avoid: [number, number, number, number][]; rank: number; priority: number }
 interface Found { res: ProbeResult; owner: Map<number, number>; flip: boolean; esc?: (Pt | undefined)[] }
-interface NetInfo { key: string; obj: any; cls: RuleClass; conns: Conn[]; clusters: number; zoneCells: Node[] | null; zoneCluster: number; guide: Guide; anchors?: Anchor[]; pour?: { mask: (Uint8Array | null)[]; width: number; clr: number } }
+interface NetInfo { key: string; obj: any; cls: RuleClass; conns: Conn[]; clusters: number; zoneCells: Node[] | null; zoneCluster: number; guide: Guide; anchors?: Anchor[]; drop?: (a: Anchor) => Anchor | null; pour?: { mask: (Uint8Array | null)[]; width: number; clr: number } }
 
 const r6 = (v: number) => { const x = +(+v).toFixed(6); return x === 0 ? 0 : x; };
 
@@ -413,7 +414,7 @@ export class Router {
       }
       // An unfilled zone of the net joins the pads it covers on its own layers once it is filled: those need no
       // track.  The remaining islands may reach the zone with a short track and a via instead of a long one.
-      const mine = useZones ? zones.filter((z) => z.net === net.key) : []; let zoneCluster = -1; let zoneCells: Node[] | null = null; let pour: NetInfo["pour"]; const anchors = ([] as Anchor[]).concat(...clusters); let planeEnd: ((a: Anchor) => Anchor | null) | null = null;
+      const mine = useZones ? zones.filter((z) => z.net === net.key) : []; let zoneCluster = -1; let zoneCells: Node[] | null = null; let pour: NetInfo["pour"]; const anchors = ([] as Anchor[]).concat(...clusters); let planeEnd: ((a: Anchor) => Anchor | null) | null = null; let dropAt: ((a: Anchor) => Anchor | null) | undefined;
       if (mine.length) {
         const inZone = (a: Anchor) => mine.some((z) => z.layers.some((l) => a.layers.includes(l)) && z.polys.filter((pts) => pointInPolyPts(pts, a.p)).length % 2 === 1);
         const covered: number[] = [], rest: Anchor[][] = [];
@@ -429,6 +430,10 @@ export class Router {
           planeEnd = (a: Anchor) => under(a) && !a.layers.includes(pl) ? { p: [a.p[0], a.p[1]], layers: [pl], shape: { t: "circle", x: a.p[0], y: a.p[1], r: 0.01 }, cluster: 0, plane: true } as Anchor : null;
           if (!clusters.some((cl) => cl.some(inZone))) { const a = anchors.find(under); if (a) clusters.push([planeEnd(a) || a]); }
         }
+        // the same drop for the shortcut pass after routing, whether or not planeDrops is on: any inner plane of the net
+        { const pzi = mine.filter((z) => z.layers.some((l) => /^In\d/.test(copper[l]))); if (pzi.length && !watchOnly) { const pl = pzi[0].layers.find((l) => /^In\d/.test(copper[l]))!; const others = zones.filter((z) => z.net !== net.key && z.layers.includes(pl)); const inP = (polys: Pt[][], p: Pt) => polys.filter((pts) => pointInPolyPts(pts, p)).length % 2 === 1;
+          const gap = (polys: Pt[][], p: Pt) => { let d = Infinity; for (const pts of polys) for (let i = 0; i < pts.length; i++) { const a0 = pts[i], b0 = pts[(i + 1) % pts.length]; const dx = b0[0] - a0[0], dy = b0[1] - a0[1], L = dx * dx + dy * dy; const t = L ? Math.max(0, Math.min(1, ((p[0] - a0[0]) * dx + (p[1] - a0[1]) * dy) / L)) : 0; d = Math.min(d, Math.hypot(p[0] - a0[0] - t * dx, p[1] - a0[1] - t * dy)); } return d; };
+          dropAt = (a: Anchor) => !a.plane && !a.layers.includes(pl) && pzi.some((z) => inP(z.polys, a.p) && gap(z.polys, a.p) >= 0.6) && !others.some((z) => inP(z.polys, a.p) || gap(z.polys, a.p) < 0.6) ? { p: [a.p[0], a.p[1]], layers: [pl], shape: { t: "circle", x: a.p[0], y: a.p[1], r: 0.01 }, cluster: 0, plane: true } as Anchor : null; } }
         clusters.forEach((cl, i) => { if (cl.some(inZone)) covered.push(i); else rest.push(cl); });
         if (covered.length) {
           const merged: Anchor[] = []; for (const i of covered) merged.push(...clusters[i]);
@@ -442,7 +447,7 @@ export class Router {
       clusters.forEach((cl, i) => cl.forEach((a) => { a.cluster = i; }));
       if (watchOnly && !pour) continue;
       const cls = this.classFor(net.key);
-      const info: NetInfo = { key: net.key, obj: nl.table.byName.get(net.key) || { code: net.code, name: net.name }, cls, conns: [], clusters: clusters.length, zoneCells, zoneCluster, guide: this.guideFor(net.key), anchors, pour };
+      const info: NetInfo = { key: net.key, obj: nl.table.byName.get(net.key) || { code: net.code, name: net.name }, cls, conns: [], clusters: clusters.length, zoneCells, zoneCluster, guide: this.guideFor(net.key), anchors, pour, drop: dropAt };
       // Prim's tree over the islands through their nearest anchors (the ratsnest)
       // A differential pair's net passes through its in-line parts: a connector's twin pins are bridged first, and a
       // chip joins the ESD part or series resistor beside the connector, never the connector's other pin past it.
@@ -450,7 +455,9 @@ export class Router {
       const parts = isPair ? clusters.map((_, i) => partOf(i)) : null; const isConn = (r: string) => /^(J|P|CN|USB|X)\d/i.test(r);
       const near = (i: number, j: number) => {
         let best: [number, Anchor, Anchor] | null = null; for (const a of clusters[i]) for (const b of clusters[j]) { const d = Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1]); if (!best || d < best[0]) best = [d, a, b]; }
-        if (planeEnd && zoneCluster === 0 && (i === 0 || j === 0) && best![0] > PLANE_HOP_MM) {   // straight down into the plane beats a track to a far pad
+        // straight down into the plane beats a track to a far pad; a pad of the net close by is joined by track instead,
+        // as people do (one via serves the pads that stand together)
+        if (planeEnd && zoneCluster === 0 && (i === 0 || j === 0) && best![0] > PLANE_HOP_MM) {
           for (const a of clusters[i === 0 ? j : i]) { const e = planeEnd(a); if (e) { best = i === 0 ? [PLANE_HOP_MM, e, a] : [PLANE_HOP_MM, a, e]; break; } }
         }
         return best!;
@@ -1052,9 +1059,10 @@ export class Router {
       const comp = this.components(net); const owner = new Map<number, number>();
       const cells = (cluster: number) => { const out: Node[] = []; if (collect) return out; for (const c of net.conns) if (c.nodes && c !== conn && comp[c.a.cluster] === comp[cluster]) this.cellsOf(c, out, owner); return out; };
       let ta = cells(conn.a.cluster), tb = cells(conn.b.cluster);
+      if (conn.planeOnly !== undefined) { ta = []; tb = []; }   // a way down into a plane: only the plane itself is its goal
       const zoneAt = (cluster: number) => !collect && net.zoneCells && comp[cluster] === comp[net.zoneCluster];
       // the larger tree is the target, so the route may join it anywhere along its tracks
-      let flip = ta.length > tb.length || (!!zoneAt(conn.a.cluster) && !zoneAt(conn.b.cluster)); if (flip) { const t = ta; ta = tb; tb = t; }
+      let flip = conn.planeOnly === undefined && (ta.length > tb.length || (!!zoneAt(conn.a.cluster) && !zoneAt(conn.b.cluster))); if (flip) { const t = ta; ta = tb; tb = t; }
       const A = flip ? conn.b : conn.a, B = flip ? conn.a : conn.b;
       // A plan may confine the net to some layers.  Where an end has no copper on them (a surface pad), its own layer
       // stays open so the route can leave the pad, at a price per mm that sends it to the wanted layers quickly.
@@ -1098,7 +1106,7 @@ export class Router {
       const perConn = this.opts.maxViasPerConnection; const maxVias = Math.min(gd.maxVias - used, this.viaCap, perConn === undefined || perConn === null ? Infinity : Math.max(0, +perConn));
       const src = this.access(A, maps, rt), tgt = this.access(B, maps, rt); if (!src) return null;
       let term = tb; let zoneSet: Set<number> | null = null;
-      if (zoneAt(B.cluster)) { zoneSet = new Set(); term = tb.slice(); let own = false; for (const z of net.zoneCells!) if (!maps[z.l][z.iy * G.W + z.ix]) { if (!rt[z.l]) { if (!own) { rt = rt.slice(); own = true; } rt[z.l] = true; }   // a plane layer takes no tracks, but a via may drop into the net's own pour on it
+      if (zoneAt(B.cluster)) { zoneSet = new Set(); term = tb.slice(); let own = false; for (const z of net.zoneCells!) if ((conn.planeOnly === undefined || z.l === conn.planeOnly) && !maps[z.l][z.iy * G.W + z.ix]) { if (!rt[z.l]) { if (!own) { rt = rt.slice(); own = true; } rt[z.l] = true; }   // a plane layer takes no tracks, but a via may drop into the net's own pour on it
         term.push(z); zoneSet.add(z.l * G.W * G.H + z.iy * G.W + z.ix); } }
       if (!tgt && !term.length) return null;
       const x0 = Math.min(src.ix, tgt ? tgt.ix : src.ix), x1 = Math.max(src.ix, tgt ? tgt.ix : src.ix), y0 = Math.min(src.iy, tgt ? tgt.iy : src.iy), y1 = Math.max(src.iy, tgt ? tgt.iy : src.iy);
@@ -1344,6 +1352,11 @@ export class Router {
     if (this.opts.zones !== false && !this.stopped) this.stitch(timeUp);
     if (ripUp && !this.stopped) { this.repair(timeUp); if (this.opts.zones !== false) this.stitch(timeUp); }
     if (this.opts.fewerVias !== false && !this.stopped) this.fewerVias(timeUp);
+    if (this.opts.planeShortcuts !== false && !this.stopped) {
+      const before = this.stat.planeShortcuts || 0; this.planeShortcuts(timeUp);
+      // track taken up into a plane leaves room: what is still open gets another go at it
+      if (ripUp && (this.stat.planeShortcuts || 0) > before && conns.some((c) => !c.nodes && !c.moot && c.why !== "budget")) this.repair(timeUp);
+    }
     this.widen();
     if (this.opts.zones !== false && !this.stopped) this.stitch(timeUp);   // what the last two steps moved may have cut a pour again
     if (ripUp && this.opts.zones !== false && !this.stopped && conns.some((c) => !c.nodes && !c.moot && c.stitch)) { this.repair(timeUp); this.stitch(timeUp); }   // a cut-off pad still not joined: let it push others aside
@@ -1442,6 +1455,54 @@ export class Router {
         if (found && found.res.feat.vias < n && found.res.feat.length <= len * 2.5 + 4) { this.commit(c, found); this.stat.viasSaved = (this.stat.viasSaved || 0) + n - c.viaCells.length; done = true; break; }
       }
       if (!done) { Object.assign(c, old); this.place(c, 1); }
+    }
+  }
+  /** A supply track that runs a long way between two pads of a net that has an inner plane is taken up again when
+   *  each pad can drop into the plane through a via beside it, as the owner's boards do (Ember's +3.3V: 79 mm of track
+   *  by hand where the router laid 194).  Done after every connection is routed, so it only ever frees room. */
+  planeShortcuts(timeUp: () => boolean): void {
+    const G = this.G, LONG = 4; const dbg = (...m: unknown[]) => { const g = globalThis as { KC_PS_DEBUG?: unknown; process?: { env?: Record<string, string | undefined> } }; if (g.KC_PS_DEBUG || g.process?.env?.KC_PS_DEBUG) console.error("ps", ...m); };
+    type Old = Pick<Conn, "nodes" | "shapes" | "viaCells" | "landed" | "feat" | "stubs" | "zoneEnd" | "ends" | "a" | "b" | "why">;
+    const save = (c: Conn): Old => ({ nodes: c.nodes, shapes: c.shapes, viaCells: c.viaCells, landed: c.landed, feat: c.feat, stubs: c.stubs, zoneEnd: c.zoneEnd, ends: c.ends, a: c.a, b: c.b, why: c.why });
+    const lenOf = (c: Conn) => c.feat ? c.feat.length : c.len;
+    for (const net of this.nets) {
+      if (!net.drop || timeUp()) continue; const drop = net.drop;
+      const order = net.conns.filter((c) => c.nodes && !c.stitch).sort((a, b) => lenOf(b) - lenOf(a));
+      for (const c of order) {
+        if (timeUp()) break; if (!c.nodes || c.moot || c.pair || c.partner || c.a.plane || c.b.plane) continue;
+        const len = lenOf(c); if (len < LONG) continue; const da = drop(c.a), db = drop(c.b); if (!da || !db) { dbg(c.net, this.padName(c.a.p), this.padName(c.b.p), "no drop", !!da, !!db); continue; }
+        const pl = da.layers[0]; if (!net.pour || !net.pour.mask[pl] || net.zoneCluster < 0) continue;
+        // the track and every branch that lands on it come up together; the branches are laid again afterwards
+        const tree: Conn[] = []; const walk = (x: Conn) => { tree.push(x); for (const o of this.conns) if (o.nodes && o.landed === x.id && !tree.includes(o)) walk(o); }; walk(c);
+        if (tree.some((x) => x.pair || x.partner)) continue;
+        const olds = tree.map(save); const before = tree.reduce((t, x) => t + lenOf(x), 0);
+        // a way down must really reach the plane through its one via: a track of the net on the pad's layer may hang on
+        // a top pour that never fills that far
+        this.rip(c); const made: Conn[] = []; let ok = true; let after = 0;
+        const downAt = (n: Node, f: { res: { feat: Features } }) => n.l === pl && f.res.feat.vias === 1;
+        for (const [a, d] of [[olds[0].ends ? olds[0].ends[0] : olds[0].a, da], [olds[0].ends ? olds[0].ends[1] : olds[0].b, db]] as [Anchor, Anchor][]) {
+          const h = this.adhoc(c.net, a, d); h.id = this.conns.length; h.cls = c.cls; h.a.cluster = a.cluster; h.b.cluster = net.zoneCluster; h.planeOnly = pl;   // the plane only, through one via: a pour or a track of the net on the pad's own layer may hang on a fill that never reaches it
+          const f = this.find(h, false);   // pad to plane: the plane is the net's poured island
+          // a way down that runs along the plane's own layer would cut the plane: only the via may touch it.  And it must
+          const onPlane = f ? f.res.nodes.reduce((t, n, i, ns) => t + (i && n.l === pl && ns[i - 1].l === pl ? Math.hypot(n.ix - ns[i - 1].ix, n.iy - ns[i - 1].iy) * G.g : 0), 0) : 0;
+          if (!f || onPlane > 0.3 || f.res.feat.vias > 1 || !downAt(f.res.nodes[f.res.nodes.length - 1], f)) { dbg(c.net, this.padName(a.p), "fail", !!f, onPlane, f && f.res.feat.vias); ok = false; break; }
+          this.conns.push(h); net.conns.push(h); this.commit(h, f); made.push(h); after += lenOf(h);
+        }
+        if (ok) for (const x of tree.slice(1).sort((p, q) => p.len - q.len)) {
+          if (x.nodes) { after += lenOf(x); continue; }
+          const f = this.find(x, false); if (!f) { dbg(c.net, this.padName(x.a.p), "branch failed"); ok = false; break; } this.commit(x, f); after += lenOf(x);
+        }
+        dbg(c.net, this.padName(c.a.p), this.padName(c.b.p), "tree", tree.length, "ok", ok, after.toFixed(1), before.toFixed(1));
+        if (ok && after < before * 0.6) {
+          // the vias must land in the plane's main body as it will really fill, not in a piece cut off by other copper
+          const st = this.pourState(net); if (!st || made.some((h) => st.connRoot(h) !== st.main)) { dbg(c.net, "via in a cut-off piece of the plane"); ok = false; }
+        }
+        if (ok && after < before * 0.6) { c.moot = true; this.stat.planeShortcuts = (this.stat.planeShortcuts || 0) + 1; continue; }
+        // put everything back as it was
+        for (const x of tree) if (x.nodes) this.rip(x); for (const h of made) if (h.nodes) this.rip(h);
+        for (const h of made) { this.conns.splice(this.conns.indexOf(h), 1); net.conns.splice(net.conns.indexOf(h), 1); }
+        tree.forEach((x, k) => { if (x.nodes) this.rip(x); Object.assign(x, olds[k]); }); for (const x of tree) this.place(x, 1);
+      }
     }
   }
   // ------------------------------------------------------------------ copper pours

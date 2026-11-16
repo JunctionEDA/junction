@@ -21,9 +21,7 @@ with any AI model as a teammate. Open source under GPL-3.0.</p>
      player, drag docs/media/junction-demo.mp4 into this file in GitHub's editor and let the URL it inserts replace
      the poster link below. -->
 
-
-https://github.com/user-attachments/assets/03a18f9e-1325-409d-ac0d-dcadf3a42ed4
-
+https://github.com/user-attachments/assets/4089e936-c17c-4153-b253-e5f6324e9056
 
 <p align="center"><sub>Four people build a Raspberry Pi Pico board together, from the first symbol to the filled planes. Music: Grieg, <i>In the Hall of the Mountain King</i>, Musopen (public domain).</sub></p>
 

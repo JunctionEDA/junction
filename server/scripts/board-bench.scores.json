@@ -26,7 +26,7 @@
   "parts": {
    "drc": 100,
    "pour_coverage": 100,
-   "pour_pieces": 100,
+   "pour_pieces": 97,
    "signal_vias": 100,
    "square_corners": 100,
    "track_length": 100,
@@ -36,26 +36,26 @@
    "copper_errors": 9,
    "ground_pour": {
     "B.Cu": {
-     "percent": 71.2,
-     "pieces": 1
+     "percent": 68.2,
+     "pieces": 4
     },
     "F.Cu": {
-     "percent": 43.4,
-     "pieces": 21
+     "percent": 43.7,
+     "pieces": 20
     },
     "In1.Cu": {
      "percent": 63.0,
-     "pieces": 6
+     "pieces": 7
     }
    },
-   "ground_vias": 51,
-   "power_vias": 18,
-   "signal_vias": 39,
-   "square_corners": 2,
-   "track_mm": 732.5,
-   "unrouted": 12
+   "ground_vias": 62,
+   "power_vias": 20,
+   "signal_vias": 46,
+   "square_corners": 1,
+   "track_mm": 863.4,
+   "unrouted": 9
   },
-  "score": 75.0
+  "score": 74.8
  },
  "ember": {
   "hand": {
@@ -84,8 +84,8 @@
   "parts": {
    "drc": 100,
    "pour_coverage": 100,
-   "pour_pieces": 66,
-   "signal_vias": 93,
+   "pour_pieces": 79,
+   "signal_vias": 86,
    "square_corners": 100,
    "track_length": 100,
    "unrouted": 0
@@ -94,26 +94,26 @@
    "copper_errors": 0,
    "ground_pour": {
     "B.Cu": {
-     "percent": 71.5,
+     "percent": 71.3,
      "pieces": 1
     },
     "F.Cu": {
-     "percent": 57.4,
-     "pieces": 27
+     "percent": 57.8,
+     "pieces": 22
     },
     "In1.Cu": {
-     "percent": 74.8,
+     "percent": 74.9,
      "pieces": 1
     }
    },
-   "ground_vias": 390,
-   "power_vias": 35,
-   "signal_vias": 75,
+   "ground_vias": 389,
+   "power_vias": 40,
+   "signal_vias": 81,
    "square_corners": 0,
-   "track_mm": 2409.7,
-   "unrouted": 12
+   "track_mm": 2403.8,
+   "unrouted": 9
   },
-  "score": 71.0
+  "score": 70.9
  },
  "ledify": {
   "hand": {
@@ -164,11 +164,11 @@
      "pieces": 1
     }
    },
-   "ground_vias": 122,
+   "ground_vias": 133,
    "power_vias": 43,
    "signal_vias": 37,
    "square_corners": 7,
-   "track_mm": 768.2,
+   "track_mm": 769.6,
    "unrouted": 2
   },
   "score": 93.4
