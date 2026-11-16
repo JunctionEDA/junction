@@ -866,8 +866,9 @@ mod net_tests {
             for (i, _) in src.match_indices("/static/pyodide/") {
                 let rest = &src[i + "/static/pyodide/".len()..];
                 let name: String = rest.chars().take_while(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-' | '+')).collect();
+                let name = name.trim_end_matches('.'); // a URL that ends a sentence in a comment
                 if name.is_empty() { continue } // a prefix the code appends a name to
-                assert!(runtime_kind(&name).is_some(), "{}: /static/pyodide/{name} is not served by runtime()", f.display());
+                assert!(runtime_kind(name).is_some(), "{}: /static/pyodide/{name} is not served by runtime()", f.display());
             }
         }
     }
