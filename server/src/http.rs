@@ -387,6 +387,8 @@ pub async fn list_projects(
     State(state): State<AppState>,
     AuthUser(user): AuthUser,
 ) -> AppResult<Response> {
+    // Sign-in already made the Devboard Demo; this catches an account whose copy failed then.
+    crate::demo::ensure_quietly(&state, user.id).await;
     let list = persist::list_projects_for_user(&state.pool, user.id).await?;
     let ids: Vec<Uuid> = list.iter().map(|p| p.id).collect();
     let linked = crate::github::linked_repos(&state.pool, &ids).await?;

@@ -2,6 +2,7 @@ mod access;
 mod admin;
 mod ai;
 mod datasheet;
+mod demo;
 mod kicadlib;
 mod auth;
 mod compact;

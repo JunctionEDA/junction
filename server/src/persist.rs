@@ -66,8 +66,8 @@ pub async fn upsert_user(
     avatar_url: Option<&str>,
 ) -> DbResult<User> {
     sqlx::query_as::<_, User>(
-        "INSERT INTO users (github_id, login, name, email, avatar_url)
-         VALUES ($1, $2, $3, $4, $5)
+        "INSERT INTO users (github_id, login, name, email, avatar_url, demo_seeded)
+         VALUES ($1, $2, $3, $4, $5, false)
          ON CONFLICT (github_id) DO UPDATE
            SET login = EXCLUDED.login, name = EXCLUDED.name,
                email = EXCLUDED.email, avatar_url = EXCLUDED.avatar_url
