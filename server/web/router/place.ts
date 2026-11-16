@@ -9,9 +9,10 @@
 // Who belongs to which group, the anchors and the edges come from the caller (the assistant's model, or a person);
 // without them, small parts join the larger part they share their most specific net with.
 // Pure: reads the board, returns positions; nothing is written here.
-import { isSupply, pairName, refOf } from "./route";
+import { isCritical, isSupply, pairName, refOf } from "./route";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+const CRITICAL_PULL = 4, SQUARE_GAIN = 0.05;
 type Pt = [number, number];
 export type Box = [number, number, number, number];
 export interface PlaceSpec {
@@ -22,7 +23,7 @@ export interface PlaceSpec {
 export interface PlaceOptions { footprints?: PlaceSpec[]; outline?: Box; spacing?: number; grid?: number; fit?: boolean; maxFill?: number }
 export interface Placement { ref: string; id: string; x: number; y: number; rot: number; side: "front" | "back"; group: string }
 export interface PlaceScore { ratsnest: number; overlaps: number; courtyardClashes: number; outside: number; area: number; clashes: [string, string][]; outsideRefs: string[] }
-export interface PlaceResult { placements: Placement[]; score: PlaceScore; outline: Box; outlineFromBoard: boolean; groups: { name: string; anchor: string; refs: string[]; box: Box }[]; unknown: string[] }
+export interface PlaceResult { placements: Placement[]; score: PlaceScore; outline: Box; outlineFromBoard: boolean; groups: { name: string; anchor: string; refs: string[]; box: Box }[]; unknown: string[]; turned?: string[] }
 
 interface Pad { x: number; y: number; net: string; thru: boolean }
 interface Part {
@@ -99,7 +100,9 @@ export function place(K: any, P: any, doc: any, settings: any, opts: PlaceOption
   // ---- nets: which ones pull
   const netPads = new Map<string, number>(); let total = 0; for (const p of all) for (const d of p.pads) if (d.net) { netPads.set(d.net, (netPads.get(d.net) || 0) + 1); total++; }
   const wide = Math.max(8, total * 0.12); const weight = new Map<string, number>();
-  for (const [n, c] of netPads) weight.set(n, c < 2 ? 0 : GLOBAL_NAME.test(n) || c > wide ? 0.03 : 1 / Math.sqrt(c - 1));
+  // A critical net (a USB or other pair, a crystal, an RF feed) pulls four times as hard: the blocks go down, and are
+  // turned, so that those few tracks come out short and straight on one layer; everything else fits in around them.
+  for (const [n, c] of netPads) weight.set(n, c < 2 ? 0 : GLOBAL_NAME.test(n) || c > wide ? 0.03 : (isCritical(n, undefined as any) || pairName(n) ? CRITICAL_PULL : 1) / Math.sqrt(c - 1));
   const w = (n: string) => weight.get(n) || 0;
   // Without a list, everything unlocked moves, except parts nothing connects to (mounting holes, fiducials, logos):
   // where those sit is a mechanical decision.
@@ -132,8 +135,19 @@ export function place(K: any, P: any, doc: any, settings: any, opts: PlaceOption
   const padAt = (p: Part, d: Pad): Pt => { const [x, y] = rotv(p.rot, d.x, d.y); return [p.x + x, p.y + y]; };
   const boxAt = (p: Part): Box => shift(turnBox(p.box, p.rot), p.x, p.y);
   // Parts on opposite sides only get in each other's way where one of them is drilled through the board.
-  interface Geo { p: Part; b: Box; rot: number; x: number; y: number }
-  const geo = (p: Part, rot: number, x: number, y: number): Geo => ({ p, b: shift(turnBox(p.box, rot), x, y), rot, x, y });
+  interface Geo { p: Part; b: Box; rot: number; x: number; y: number; poly?: Pt[] }
+  // a part turned off the 90° steps (a square chip at 45°) keeps its true outline for the clash test, so the parts
+  // round it may fill the corners its bounding box would waste
+  const corners = (b: Box): Pt[] => [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]];
+  const geo = (p: Part, rot: number, x: number, y: number): Geo => ({ p, b: shift(turnBox(p.box, rot), x, y), rot, x, y, poly: norm(rot) % 90 ? corners(p.box).map(([u, v]) => { const [a, c] = rotv(rot, u, v); return [a + x, c + y] as Pt; }) : undefined });
+  const apart = (A: Pt[], B: Pt[], g: number) => {   // separating axis between two convex outlines, `g` apart at least
+    for (const poly of [A, B]) for (let i = 0; i < poly.length; i++) {
+      const [x0, y0] = poly[i], [x1, y1] = poly[(i + 1) % poly.length]; const L = Math.hypot(x1 - x0, y1 - y0); if (!L) continue; const nx = -(y1 - y0) / L, ny = (x1 - x0) / L;
+      let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity; for (const [x, y] of A) { const d = x * nx + y * ny; a0 = Math.min(a0, d); a1 = Math.max(a1, d); } for (const [x, y] of B) { const d = x * nx + y * ny; b0 = Math.min(b0, d); b1 = Math.max(b1, d); }
+      if (a0 >= b1 + g - 1e-6 || b0 >= a1 + g - 1e-6) return true;
+    }
+    return false;
+  };
   const holesAt = (a: Geo) => a.p.holes.map((h) => shift(turnBox(h, a.rot), a.x, a.y));
   // A fine-pitch chip (QFN, QFP: 20 pads or more at 0.65 mm or less) keeps a ring of board round it free of other parts, so
   // its signals can fan out between its decoupling: crowd the ring and the pins boxed in by the capacitors cannot be routed.
@@ -142,13 +156,19 @@ export function place(K: any, P: any, doc: any, settings: any, opts: PlaceOption
   const ESCAPE = 1.5;
   const clash = (a: Geo, b: Geo, g0: number) => {
     const g = g0 > 0 && a.p.back === b.p.back && (fine(a.p) || fine(b.p)) ? g0 + ESCAPE : g0;
-    if (!hit(a.b, b.b, g)) return false; if (a.p.back === b.p.back) return true; if (!a.p.thru && !b.p.thru) return false;
+    if (!hit(a.b, b.b, g)) return false; if (a.p.back === b.p.back) return !(a.poly || b.poly) || !apart(a.poly || corners(a.b), b.poly || corners(b.b), g); if (!a.p.thru && !b.p.thru) return false;
     for (const h of holesAt(a)) if (hit(h, b.b, g)) return true; for (const h of holesAt(b)) if (hit(h, a.b, g)) return true;
     if (a.p.thru && b.p.thru) return false; return false;
   };
+  const turnedChips: string[] = [];
   for (const [name, parts] of groupOf) {
     const anchor = parts.find(isFixed) || parts.find((p) => p.spec && p.spec.anchor) || parts.slice().sort((a, b) => b.pads.length - a.pads.length || (b.box[2] - b.box[0]) * (b.box[3] - b.box[1]) - (a.box[2] - a.box[0]) * (a.box[3] - a.box[1]))[0];
-    anchor.x = 0; anchor.y = 0; anchor.rot = 0; anchor.placed = true; const down: Part[] = [anchor];
+    // A square chip (a QFN or QFP with pins on four sides) may stand at 45° when its block comes out smaller that way:
+    // laid out both ways, the smaller block wins, by at least SQUARE_GAIN of its area.
+    const square = !anchor.thru && anchor.pads.length >= 16 && !(anchor.spec && anchor.spec.rot !== undefined) && !isFixed(anchor) && (() => { const [x0, y0, x1, y1] = anchor.padBox; const w = x1 - x0, h = y1 - y0; return w > 0 && h > 0 && Math.abs(w - h) <= 0.1 * Math.max(w, h); })();
+    const layout = (arot: number): number => {
+    for (const p of parts) p.placed = false;
+    anchor.x = 0; anchor.y = 0; anchor.rot = arot; anchor.placed = true; const down: Part[] = [anchor];
     const pull = (p: Part) => { let s = 0; for (const a of p.pads) for (const q of down) for (const b of q.pads) if (a.net && a.net === b.net) s += w(a.net); return s; };
     const todo = parts.filter((p) => p !== anchor);
     while (todo.length) {
@@ -188,6 +208,11 @@ export function place(K: any, P: any, doc: any, settings: any, opts: PlaceOption
       if (best) { p.x = best.x; p.y = best.y; p.rot = best.rot; } else { p.x = focus[0]; p.y = focus[1]; p.rot = 0; }
       p.placed = true; down.push(p);
     }
+    let bb: Box = [Infinity, Infinity, -Infinity, -Infinity]; for (const p of parts) { const b = boxAt(p); bb = [Math.min(bb[0], b[0]), Math.min(bb[1], b[1]), Math.max(bb[2], b[2]), Math.max(bb[3], b[3])]; }
+    return (bb[2] - bb[0]) * (bb[3] - bb[1]);
+    };
+    if (square && parts.length > 1) { const flat = layout(0), turned = layout(45); if (!(turned < (1 - SQUARE_GAIN) * flat)) layout(0); else turnedChips.push(anchor.ref); }
+    else layout(0);
     let box: Box = [Infinity, Infinity, -Infinity, -Infinity], padBox: Box = [Infinity, Infinity, -Infinity, -Infinity];
     for (const p of parts) { const b = boxAt(p); box = [Math.min(box[0], b[0]), Math.min(box[1], b[1]), Math.max(box[2], b[2]), Math.max(box[3], b[3])]; const q = shift(turnBox(p.padBox, p.rot), p.x, p.y); padBox = [Math.min(padBox[0], q[0]), Math.min(padBox[1], q[1]), Math.max(padBox[2], q[2]), Math.max(padBox[3], q[3])]; }
     const edgePart = parts.find((p) => p.spec && p.spec.edge); const fixedPart = parts.find((p) => p.spec && typeof p.spec.fixed === "object" && p.spec.fixed);
@@ -369,7 +394,7 @@ export function place(K: any, P: any, doc: any, settings: any, opts: PlaceOption
     if (!good(res)) res = best;    // the coarse grid's placement is legal too: better a few tenths off the fine grid than the board size thrown away
   }
   const { placements, score, groups } = res; const O = res.O;
-  return { placements, score, outline: O.map(r3) as Box, outlineFromBoard: fromBoard, groups, unknown };
+  return { placements, score, outline: O.map(r3) as Box, outlineFromBoard: fromBoard, groups, unknown, turned: turnedChips.length ? turnedChips : undefined };
 }
 
 /** The total length of the per-net spanning trees over pad centres: what is left to route, as the crow flies. */

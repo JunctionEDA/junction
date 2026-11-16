@@ -2308,6 +2308,8 @@ class Board(_Doc):
         res = self.flush() or {}
         d = next((x["auto_place"] for x in res.get("details") or [] if "auto_place" in x), {})
         out = {"placed": len(d.get("placements", [])), "score": d.get("score"), "outline": d.get("outline"), "unknown_refs": d.get("unknown_refs") or []}
+        if d.get("turned"):      # square chips the engine stood at 45 degrees because their cluster came out smaller
+            out["turned_45"] = d["turned"]
         self.project.note(f"board: placed {out['placed']} footprints, score {out['score']}")
         # the small parts, in the order a person seats them: the matching network at the radio pin, the bypass capacitors
         # at their supply pins, then the crystal at its oscillator pins and the parts that serve one pin (a pull-down in
@@ -4676,6 +4678,184 @@ def _stitch(self, spacing: float = 2.0, net: str = "GND", margin: float = 1.5, s
     return out
 
 
+
+# ---------------------------------------------------------------- power: pours as wide tracks, via arrays into planes
+
+_GROUNDS = re.compile(r"/?(GND|AGND|DGND|PGND|VSS)", re.I)
+
+
+def _zones_of(self) -> list:
+    """Every copper pour on the board with its net, layers and outline in full: [{"id", "net", "layers", "pts"}]."""
+    out = []
+    for z in self._call("get_items", kinds=["zone"]).get("items", []):
+        sx = z.get("sexpr", "")
+        if "keepout" in sx:
+            continue
+        try:      # a listing gives only the start of each item
+            sx = (self._call("get_items", ids=[z["id"]]).get("items") or [{}])[0].get("sexpr", sx)
+        except HarnessError:
+            pass
+        head = sx.split("(polygon")[0]
+        net = re.search(r'\\(net_name "([^"]*)"\\)', head) or re.search(r'\\(net "([^"]+)"\\)', head)
+        m = re.search(r"\\(polygon\\s*\\(pts((?:\\s*\\(xy [-\\d.]+ [-\\d.]+\\))+)\\s*\\)\\s*\\)", sx)
+        if not net or not net.group(1) or not m:
+            continue
+        ls = re.search(r'\\(layers? ([^)]*)\\)', head)
+        out.append({"id": z["id"], "net": net.group(1), "layers": re.findall(r'"([^"]+\\.Cu)"', ls.group(1)) if ls else [],
+                    "pts": [(float(x), float(y)) for x, y in re.findall(r"\\(xy ([-\\d.]+) ([-\\d.]+)\\)", m.group(1))]})
+    return out
+
+
+def _in_poly(poly, at) -> bool:
+    c = False
+    for i in range(len(poly)):
+        (x0, y0), (x1, y1) = poly[i], poly[i - 1]
+        if (y0 > at[1]) != (y1 > at[1]) and at[0] < (x1 - x0) * (at[1] - y0) / (y1 - y0) + x0:
+            c = not c
+    return c
+
+
+def _edge_gap(poly, at) -> float:
+    best = 1e9
+    for i in range(len(poly)):
+        (x0, y0), (x1, y1) = poly[i], poly[i - 1]
+        dx, dy = x1 - x0, y1 - y0
+        t = 0.0 if not (dx or dy) else max(0.0, min(1.0, ((at[0] - x0) * dx + (at[1] - y0) * dy) / (dx * dx + dy * dy)))
+        best = min(best, math.hypot(at[0] - x0 - t * dx, at[1] - y0 - t * dy))
+    return best
+
+
+def _hull(pts) -> list:
+    pts = sorted(set(pts))
+    if len(pts) < 3:
+        return pts
+    cross = lambda o, a, b: (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    lo, up = [], []
+    for q in pts:
+        while len(lo) >= 2 and cross(lo[-2], lo[-1], q) <= 0:
+            lo.pop()
+        lo.append(q)
+    for q in reversed(pts):
+        while len(up) >= 2 and cross(up[-2], up[-1], q) <= 0:
+            up.pop()
+        up.append(q)
+    return lo[:-1] + up[:-1]
+
+
+def _power_pours(self, nets: list | None = None, reach: float = 4.0, pad: float = 0.45, largest: float = 80.0) -> dict:
+    """Pours as wide tracks, the way a power stage is laid out by hand: where pads of one supply or switching net stand
+    together (a converter's switch pin and its inductor, the input capacitors at VIN, the connector and its fuse) and
+    no pad of another net stands between them, one solid pour on the top layer joins them instead of a track.  Call it
+    after placement and before routing; the router then finds those pads joined.  \`nets\` names the nets (by default
+    every net the plan gives a width of 0.5 mm or more, except ground and RF); pads up to \`reach\` mm apart share a
+    pour.  A net that already has a pour on the top layer is left alone.  Returns {net: pours made}."""
+    self.flush()
+    g = self.geometry()
+    if nets is None:
+        plan = getattr(self, "_layout", None) or self.plan()
+        r = plan.get("route") or {}
+        nets = [n for n, w in (r.get("widths") or {}).items() if w >= 0.5 and (r.get("kinds") or {}).get(n) != "rf"]
+    want = {self._net(n) for n in nets if not _GROUNDS.fullmatch(n)}
+    have = {z["net"] for z in _zones_of(self) if "F.Cu" in z["layers"]}
+    pads: dict = {}
+    every = []
+    for part in g["parts"]:
+        if part.get("side") == "back":
+            continue
+        for pd in part.get("pads") or []:
+            every.append((pd[1], pd[2], pd[3]))
+            if pd[3] in want and pd[3] not in have:
+                pads.setdefault(pd[3], []).append((pd[1], pd[2]))
+    out = {}
+    for net, pts in pads.items():
+        groups: list = []
+        for q in pts:      # pads that stand together, by single linkage
+            hit = [gr for gr in groups if any(math.hypot(q[0] - a[0], q[1] - a[1]) <= reach for a in gr)]
+            for gr in hit:
+                groups.remove(gr)
+            groups.append(sum(hit, []) + [q])
+        made = 0
+        for gr in groups:
+            if len(gr) < 2:
+                continue
+            hull = _hull([(_r(x + dx), _r(y + dy)) for x, y in gr for dx in (-pad, pad) for dy in (-pad, pad)])
+            x0, y0, x1, y1 = min(h[0] for h in hull), min(h[1] for h in hull), max(h[0] for h in hull), max(h[1] for h in hull)
+            if len(hull) < 3 or (x1 - x0) * (y1 - y0) > largest:
+                continue
+            if any(n != net and (_in_poly(hull, (x, y)) or _edge_gap(hull, (x, y)) < 0.5) for x, y, n in every):
+                continue      # another net's pad stands in it: that one stays a track
+            pp = " ".join(f"(xy {x} {y})" for x, y in hull)
+            self.add_item(f'(zone (net "{net}") (layer "F.Cu") (uuid "{_uuid.uuid4()}") (hatch edge 0.5) (priority 2) (connect_pads yes (clearance 0.2)) '
+                          f'(min_thickness 0.2) (fill (thermal_gap 0.3) (thermal_bridge_width 0.4)) (polygon (pts {pp})))')
+            made += 1
+        if made:
+            out[net] = made
+    self.flush()
+    self._geom = None
+    if out:
+        self.project.note(f"board: {sum(out.values())} power pours as wide tracks ({', '.join(out)})")
+    return out
+
+
+def _power_stitch(self, pitch: float = 1.0, most: int = 24, size: float | None = None, drill: float | None = None) -> dict:
+    """A via array wherever a supply net's pour on one layer lies over its pour on another (a top-layer pour over the
+    net's inner plane): \`pitch\` mm apart, at most \`most\` in one overlap, clear of parts and of the pours' edges.  That
+    is how current gets from a pour into its plane; one via is a bottleneck.  Call it after routing.  Ground is
+    stitch()'s job.  Returns {net: vias}."""
+    self.flush()
+    g = self.geometry()
+    zs = [z for z in _zones_of(self) if not _GROUNDS.fullmatch(z["net"]) and len(z["pts"]) >= 3]
+    width = lambda z: max(p[0] for p in z["pts"]) - min(p[0] for p in z["pts"])
+    out: dict = {}
+    ids: dict = {}
+    for i, a in enumerate(zs):
+        for b in zs[i + 1:]:
+            if a["net"] != b["net"] or not (set(a["layers"]) ^ set(b["layers"])):
+                continue
+            small, big = (a, b) if width(a) <= width(b) else (b, a)
+            x0, y0 = min(p[0] for p in small["pts"]), min(p[1] for p in small["pts"])
+            x1, y1 = max(p[0] for p in small["pts"]), max(p[1] for p in small["pts"])
+            pts = []
+            nx, ny = int((x1 - x0) // pitch), int((y1 - y0) // pitch)
+            for ix in range(nx + 1):
+                for iy in range(ny + 1):
+                    at = (_r(x0 + (x1 - x0 - nx * pitch) / 2 + ix * pitch), _r(y0 + (y1 - y0 - ny * pitch) / 2 + iy * pitch))
+                    if all(_in_poly(z["pts"], at) and _edge_gap(z["pts"], at) >= 0.5 for z in (small, big)) and _free_at(g, at, 0.3):
+                        pts.append(at)
+            if len(pts) > most:      # the middle of the overlap, as a block
+                cx, cy = sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts)
+                pts = sorted(pts, key=lambda p: math.hypot(p[0] - cx, p[1] - cy))[:most]
+            for at in pts:
+                if any(abs(at[0] - q[0]) < pitch * 0.9 and abs(at[1] - q[1]) < pitch * 0.9 for q, _ in ids.values()):
+                    continue
+                self.via(a["net"], at, size=size, drill=drill)
+                res = self.flush() or {}
+                new = (res.get("added") or [None])[-1]
+                if new:
+                    ids[new] = (at, a["net"])
+    bad = set()
+    if ids:
+        r = self._call("run_checks")
+        for v in r.get("violations", []):
+            if v.get("severity") != "error" or v.get("code") in ("unconnected_items",):
+                continue
+            for vid, (at, _) in ids.items():
+                if abs(v["x"] - at[0]) < 0.6 and abs(v["y"] - at[1]) < 0.6:
+                    bad.add(vid)
+        for vid in bad:
+            self._edit({"op": "remove", "id": vid})
+        self.flush()
+    for vid, (_, net) in ids.items():
+        if vid not in bad:
+            out[net] = out.get(net, 0) + 1
+    self._geom = None
+    if out:
+        self.project.note(f"board: {sum(out.values())} vias from power pours into their planes")
+    return out
+
+
+
+
 def _fence(self, path, spacing: float = 1.0, net: str = "GND", offset: float = 0.0, size: float | None = None, drill: float | None = None) -> dict:
     """A row of vias on \`net\` along a path you choose: \`path\` is a list of points [(x, y), ...] in mm and a via goes
     every \`spacing\` mm along it.  With \`offset\` the path is a centre line (a trace, the edge of a section) and two rows
@@ -4934,6 +5114,9 @@ def install(Project, Schematic, Board) -> None:
     Board.fiducials = _board_fiducials
     Board.mark = _mark
     Board.stitch = _stitch
+    Board.power_pours = _power_pours
+    Board._zones_of = _zones_of
+    Board.power_stitch = _power_stitch
     Board.ground_pads = _ground_pads
     Board.compare_parts = _compare_parts
     Board.fence = _fence
@@ -5170,11 +5353,27 @@ def _finish(self, stitch: float | None = 2.0) -> dict:
         out["ground_pads"] = self.ground_pads()["vias"]
     except HarnessError:
         out["ground_pads"] = 0
+    try:      # a supply pad cut off from its pour (a track laid through it) drops into the net's inner plane the same way
+        planes = {z["net"] for z in self._zones_of() if any(l.startswith("In") for l in z["layers"]) and not re.fullmatch(r"/?(GND|AGND|DGND|PGND|VSS)", z["net"], re.I)}
+        open_now = self.unrouted() or {}
+        for n in sorted(planes):
+            if open_now.get(n):
+                got = self.ground_pads(net=n)["vias"]
+                if got:
+                    out.setdefault("supply_pads", {})[n] = got
+    except HarnessError:
+        pass
     if stitch:
         try:
             out["stitching"] = self.stitch(spacing=stitch)["vias"]
         except HarnessError:
             out["stitching"] = 0
+    try:      # a supply pour over the net's own plane gets its via array: the current's way down
+        pv = self.power_stitch()
+        if pv:
+            out["power_vias"] = pv
+    except HarnessError:
+        pass
     try:
         self.fill()
     except HarnessError:
@@ -5894,6 +6093,10 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                 step(f"zone {layer}", lambda layer=layer: self.zone("GND", layer=layer, connect="solid" if layer.startswith("In") else "thermal"))
     if not reroute:
         step("corners", self.round_corners)      # board corners are always rounded
+        if place and route:      # pads of one supply or switching net that stand together: a pour joins them, as a wide track would
+            pp = step("power pours", self.power_pours)
+            if pp:
+                out["power_pours"] = pp
     step("prepare", self.prepare)
     if route:
         step("twins", self.bridge_twins)      # a USB-C connector's D+ and D- twins, joined at the pads before anything is routed
@@ -6040,7 +6243,7 @@ def _reasoning(self, plan: dict, clusters: dict, got: dict) -> list:
     for a, b in plan.get("apart") or []:
         lines.append(f"{a} and {b} are kept apart: one disturbs the other.")
     r = plan.get("route") or {}
-    lines.append("ROUTING ORDER: 1. critical nets, short, on one layer, no via (" + (", ".join(ex.get("critical_first") or r.get("order") or []) or "none found") + "); 2. the connections inside each cluster; 3. power; 4. fine-pitch escapes; 5. the tracks between clusters.")
+    lines.append("ROUTING ORDER: 1. critical nets, short, on one layer, no via (" + (", ".join(ex.get("critical_first") or r.get("order") or []) or "none found") + "); 2. the connections inside each cluster; 3. power (a pin of a net with an inner plane drops straight into it); 4. fine-pitch escapes; 5. the tracks between clusters.")
     g = got.get("groups") or {}
     if g:
         lines.append(f"Inside clusters: {g.get('routed')} of {g.get('inside')} connections made, with {g.get('vias')} vias. A via here means a part of that cluster faces the wrong way or stands too far out.")
@@ -8392,9 +8595,9 @@ def symbol(name: str, pins: list, reference: str = "U", footprint: str = "", dat
 def library(symbols: list) -> str:
     """A .kicad_sym file holding the given symbol texts."""
     return '(kicad_symbol_lib\\n\\t(version 20241209)\\n\\t(generator "kicad_harness")\\n\\t(generator_version "9.0")\\n' + "".join(symbols) + ")\\n"
-`;var f=require("node:fs"),K=globalThis,W=f.constants;process.binding=e=>{if(e==="constants")return{fs:W};throw new Error("not available")};for(let e of["WebSocket","fetch","XMLHttpRequest","EventSource","navigator"])try{delete K[e]}catch{}var X=new(require("node:string_decoder")).StringDecoder("utf8"),q=new Int32Array(new SharedArrayBuffer(4)),i="";function E(){let e=Buffer.alloc(65536);for(;;){let s=i.indexOf(`
-`);if(s>=0){let t=i.slice(0,s);return i=i.slice(s+1),t}let n=0;try{n=f.readSync(0,e,0,e.length,null)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(q,0,0,4);continue}if(t&&t.code==="EOF")n=0;else throw t}n||process.exit(0),i+=X.write(e.subarray(0,n))}}function d(e){let s=Buffer.from(JSON.stringify(e)+`
-`,"utf8"),n=0;for(;n<s.length;)try{n+=f.writeSync(1,s,n,s.length-n)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(q,0,0,4);continue}throw t}}var Q=[["kicad_harness/__init__.py",h],["kicad_harness/project.py",c],["kicad_harness/transport.py",u],["kicad_harness/sheet.py",m],["kicad_harness/rules.py",g],["kicad_harness/physics.py",b],["kicad_harness/stackups.py",y],["kicad_harness/craft.py",_],["kicad_harness/seat.py",w],["kicad_harness/twins.py",x],["kicad_harness/parts/__init__.py",k],["kicad_harness/parts/datasheet.py",v],["kicad_harness/parts/footprint.py",N],["kicad_harness/parts/search.py",S],["kicad_harness/parts/symbol.py",T]],Y=`
+`;var f=require("node:fs"),K=globalThis,W=f.constants;process.binding=e=>{if(e==="constants")return{fs:W};throw new Error("not available")};for(let e of["WebSocket","fetch","XMLHttpRequest","EventSource","navigator"])try{delete K[e]}catch{}var X=new(require("node:string_decoder")).StringDecoder("utf8"),E=new Int32Array(new SharedArrayBuffer(4)),i="";function q(){let e=Buffer.alloc(65536);for(;;){let s=i.indexOf(`
+`);if(s>=0){let t=i.slice(0,s);return i=i.slice(s+1),t}let n=0;try{n=f.readSync(0,e,0,e.length,null)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(E,0,0,4);continue}if(t&&t.code==="EOF")n=0;else throw t}n||process.exit(0),i+=X.write(e.subarray(0,n))}}function d(e){let s=Buffer.from(JSON.stringify(e)+`
+`,"utf8"),n=0;for(;n<s.length;)try{n+=f.writeSync(1,s,n,s.length-n)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(E,0,0,4);continue}throw t}}var Q=[["kicad_harness/__init__.py",h],["kicad_harness/project.py",c],["kicad_harness/transport.py",u],["kicad_harness/sheet.py",m],["kicad_harness/rules.py",g],["kicad_harness/physics.py",b],["kicad_harness/stackups.py",y],["kicad_harness/craft.py",_],["kicad_harness/seat.py",w],["kicad_harness/twins.py",x],["kicad_harness/parts/__init__.py",k],["kicad_harness/parts/datasheet.py",v],["kicad_harness/parts/footprint.py",N],["kicad_harness/parts/search.py",S],["kicad_harness/parts/symbol.py",T]],Y=`
 import json, sys, traceback
 sys.path.insert(0, "/kh")
 import kicad_harness as kh
@@ -8430,6 +8633,6 @@ def __kc_run(code, dry=False):
     if project is not None and project.log:
         out["notes"] = project.log[-60:]
     return json.dumps(out)
-`;async function J(){let e=JSON.parse(E()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:A}=require(s+"pyodide.js"),o=await A({indexURL:s,jsglobals:{},stdout:p,stderr:p});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),E())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of Q)o.FS.writeFile("/kh/"+r,l);o.runPython(Y);let D=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(D(String(e.code||""),e.dry===!0)))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
+`;async function J(){let e=JSON.parse(q()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:A}=require(s+"pyodide.js"),o=await A({indexURL:s,jsglobals:{},stdout:p,stderr:p});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),q())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of Q)o.FS.writeFile("/kh/"+r,l);o.runPython(Y);let D=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(D(String(e.code||""),e.dry===!0)))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
 `).filter(Boolean).slice(-1)[0]||"The script failed."}}a.done=!0,a.output=n.join(`
 `),d(a),process.exit(0)}J().catch(e=>{try{d({done:!0,ok:!1,error:"The Python runtime could not be started: "+String(e&&e.message||e),output:""})}finally{process.exit(1)}});

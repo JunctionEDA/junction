@@ -93,7 +93,7 @@ def copper(path: str) -> dict:
             d["length"] += ln; d["segments"] += 1
             layers[layer] = layers.get(layer, 0.0) + ln
             if kind == "segment":
-                segs.append((net, layer, float(a[1]), float(a[2]), float(b[1]), float(b[2])))
+                segs.append((net, layer, float(a[1]), float(a[2]), float(b[1]), float(b[2]), float((child(s, "width") or [0, 0.2])[1])))
     sizes: dict = {}
     for v in children(root, "via"):
         net = net_of(v)
@@ -112,16 +112,17 @@ def copper(path: str) -> dict:
             d["area"] += area(pts); d["pieces"] += 1
     # square corners: two segments of one net and layer that meet end to end at 90 degrees or sharper
     ends: dict = {}
-    for i, (net, layer, x0, y0, x1, y1) in enumerate(segs):
+    for i, (net, layer, x0, y0, x1, y1, w) in enumerate(segs):
         for (x, y, ox, oy) in ((x0, y0, x1, y1), (x1, y1, x0, y0)):
-            ends.setdefault((net, layer, round(x, 3), round(y, 3)), []).append((ox - x, oy - y))
+            ends.setdefault((net, layer, round(x, 3), round(y, 3)), []).append((ox - x, oy - y, w))
     square = 0
     for dirs in ends.values():
         if len(dirs) != 2:
             continue
-        (ax, ay), (bx, by) = dirs
+        (ax, ay, wa), (bx, by, wb) = dirs
         la, lb = math.hypot(ax, ay), math.hypot(bx, by)
-        if la > 0.05 and lb > 0.05 and (ax * bx + ay * by) / (la * lb) > -0.05:      # the two legs leave at <= ~93 degrees
+        short = max(0.15, wa, wb)      # a jog shorter than the track is wide is a pad hook-up, not a corner anyone sees
+        if la > short and lb > short and (ax * bx + ay * by) / (la * lb) > -0.05:      # the two legs leave at <= ~93 degrees
             square += 1
     return {"nets": nets, "layers": layers, "via_sizes": sizes, "pour": pour, "square_corners": square}
 
@@ -187,6 +188,27 @@ def measure(folder: str, board_file: str, refill: bool = True) -> dict:
     }
 
 
+def rules_as_routed(folders: list) -> dict:
+    """A hand-routed board is the rule: where its own tracks run closer than its net class says (a 0.2 mm class on a
+    0.4 mm pitch chip routed at 0.1 mm), the copies are judged, and routed, at the clearance the person really kept.
+    Returns {} when the board keeps its own rules, else {"clearance": mm, "was_violations": n}."""
+    import kicad_harness as kh
+    p = kh.open(folders[0])
+    try:
+        got = [float(m.group(1)) for v in p.board()._call("run_checks").get("violations", []) if v.get("code") == "clearance"
+               for m in [re.search(r"actual ([\d.]+)", v.get("message", ""))] if m and float(m.group(1)) > 0.02]
+    finally:
+        p.close()
+    if not got:
+        return {}
+    clr = max(0.08, math.floor(min(got) * 100 + 1e-6) / 100)
+    for f in folders:
+        p = kh.open(f)
+        p.board().rules(clearance=clr)
+        p.save(force=True); p.close()
+    return {"clearance": clr, "was_violations": len(got)}
+
+
 def differences(hand: dict, auto: dict) -> dict:
     """Net by net, where the router did worse than the person: more vias, or much more track."""
     more_vias, longer, shorter = [], [], []
@@ -232,17 +254,17 @@ def verdict(hand: dict, auto: dict) -> dict:
 
 # ---------------------------------------------------------------- pictures
 
-def picture(svgs: list, titles: list, out_png: str) -> bool:
+def picture(svgs: list, titles: list, out_png: str, stacked: bool = False) -> bool:
     """The drawings side by side in one PNG (headless Chromium through Playwright, when it is installed)."""
     html = os.path.splitext(out_png)[0] + ".html"
     cells = "".join(f'<figure><figcaption>{t}</figcaption><img src="file://{os.path.abspath(s)}"></figure>' for s, t in zip(svgs, titles))
     with open(html, "w", encoding="utf-8") as f:
-        f.write('<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#111113;color:#eee;font:15px system-ui;display:flex;gap:12px;padding:12px}'
+        f.write('<!doctype html><meta charset="utf-8"><style>body{margin:0;background:#111113;color:#eee;font:15px system-ui;display:flex;gap:12px;padding:12px' + (";flex-direction:column" if stacked else "") + '}'
                 'figure{margin:0;flex:1;min-width:0}figcaption{padding:4px 2px 8px}img{width:100%;height:auto;display:block;background:#001023}</style>' + cells)
     js = ("let pw;try{pw=require('playwright')}catch(e){pw=require('/opt/node-tools/node_modules/playwright')}"
-          "(async()=>{const b=await pw.chromium.launch();const p=await b.newPage({viewport:{width:%d,height:900},deviceScaleFactor:2});"
+          "(async()=>{const b=await pw.chromium.launch();const p=await b.newPage({viewport:{width:%d,height:200},deviceScaleFactor:2});"
           "await p.goto('file://'+process.argv[1]);await p.waitForTimeout(500);await p.screenshot({path:process.argv[2],fullPage:true});await b.close()})()"
-          % (900 * len(svgs)))
+          % (1400 if stacked else 900 * len(svgs)))
     try:
         subprocess.run(["node", "-e", js, os.path.abspath(html), os.path.abspath(out_png)], check=True, timeout=180, capture_output=True)
         return True
@@ -289,10 +311,14 @@ def bench(name: str, pcb: str, work: str, out: str, time_s: float | None, design
     for d in (hand_dir, auto_dir):
         shutil.rmtree(d, ignore_errors=True)
     hand_pcb = copy_project(pcb, hand_dir); auto_pcb = copy_project(pcb, auto_dir)
+    relaxed = rules_as_routed([hand_dir, auto_dir])
     hand = measure(hand_dir, hand_pcb)
     t0 = time.time()
     p = kh.open(auto_dir)
     b = p.board()
+    if not time_s:      # a benchmark may take its time: three seconds of budget per connection, a quarter of an hour at most
+        b.unroute(keep=())
+        time_s = min(900, 30 + 3 * (b.info().get("unrouted_connections") or 0))
     res = b.design(reroute=True, time_s=time_s, explain=True, **design)
     p.save(force=True); p.close()
     secs = round(time.time() - t0, 1)
@@ -300,7 +326,7 @@ def bench(name: str, pcb: str, work: str, out: str, time_s: float | None, design
     v = verdict(hand, auto)
     result = {"board": name, "score": v["score"], "worst": v["worst"], "parts": v["parts"], "seconds": secs,
               "hand": {k: x for k, x in hand.items() if k != "nets"}, "routed": {k: x for k, x in auto.items() if k != "nets"},
-              "differences": differences(hand, auto),
+              "differences": differences(hand, auto), "rules_as_routed": relaxed,
               "design": {k: res.get(k) for k in ("routed", "added", "skipped", "refused", "notes") if res.get(k)}}
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, f"{name}.json"), "w", encoding="utf-8") as f:
@@ -311,8 +337,10 @@ def bench(name: str, pcb: str, work: str, out: str, time_s: float | None, design
     try:
         svgs = [os.path.join(out, f"{name}-hand.svg"), os.path.join(out, f"{name}-routed.svg")]
         draw(hand_dir, svgs[0]); draw(auto_dir, svgs[1])
+        m = re.search(r'viewBox="[-\d.]+ [-\d.]+ ([\d.]+) ([\d.]+)"', open(svgs[0], encoding="utf-8").read(4000))
+        wide = bool(m) and float(m.group(1)) > 1.4 * float(m.group(2))      # a wide board: one above the other
         cap = lambda t, m: f"{name}: {t} &middot; {m['signal_vias']} signal vias, {m['power_vias']} power, {m['ground_vias']} ground, {m['track_mm']} mm, {m['unrouted']} open, {m['copper_errors']} copper errors"      # noqa: E731
-        if picture(svgs, [cap("by hand", hand), cap(f"router (score {v['score']})", auto)], os.path.join(out, f"{name}.png")):
+        if picture(svgs, [cap("by hand", hand), cap(f"router (score {v['score']})", auto)], os.path.join(out, f"{name}.png"), stacked=wide):
             result["picture"] = os.path.join(out, f"{name}.png")
     except Exception as e:      # noqa: BLE001
         print(f"  (no picture: {str(e)[:200]})", file=sys.stderr)
@@ -330,6 +358,8 @@ def table(r: dict) -> str:
     lines = [f"{r['board']}: score {r['score']} (worst: {r['worst']}), routed in {r['seconds']} s", f"  {'':20}{'by hand':>14}  {'router':>14}"]
     lines += [f"  {n:20}{str(x):>14}  {str(y):>14}" for n, x, y in rows]
     lines.append("  parts: " + ", ".join(f"{k} {v}" for k, v in r["parts"].items()))
+    if r.get("rules_as_routed"):
+        lines.append(f"  judged at the clearance the hand routing keeps: {r['rules_as_routed']['clearance']} mm (its own net class is broken {r['rules_as_routed']['was_violations']} times)")
     for k, title in (("more_vias", "more vias than by hand"), ("longer", "longer than by hand")):
         if r["differences"][k]:
             lines.append(f"  {title}: " + "; ".join(r["differences"][k][:6]))

@@ -2205,6 +2205,8 @@ class Board(_Doc):
         res = self.flush() or {}
         d = next((x["auto_place"] for x in res.get("details") or [] if "auto_place" in x), {})
         out = {"placed": len(d.get("placements", [])), "score": d.get("score"), "outline": d.get("outline"), "unknown_refs": d.get("unknown_refs") or []}
+        if d.get("turned"):      # square chips the engine stood at 45 degrees because their cluster came out smaller
+            out["turned_45"] = d["turned"]
         self.project.note(f"board: placed {out['placed']} footprints, score {out['score']}")
         # the small parts, in the order a person seats them: the matching network at the radio pin, the bypass capacitors
         # at their supply pins, then the crystal at its oscillator pins and the parts that serve one pin (a pull-down in

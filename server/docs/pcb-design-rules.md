@@ -136,8 +136,16 @@ it serves (90th percentile 4.2 to 5.0 mm), and in 70 to 85 percent of cases its 
    outward, all within about one part length of the package.
 2. The connections inside a cluster are planned and routed first: short, on the parts' layer, no via. A connection
    inside a cluster that needs a via or a detour means the cluster is built wrong.
-3. Only then are the clusters placed on the board, turned so the nets that leave face where they go.
+3. Only then are the clusters placed on the board, with the critical nets in mind: each cluster put down and turned
+   so its USB pair, RF feed or crystal line comes out short, straight and on one layer, and the nets that leave face
+   where they go. A square chip may stand at 45 degrees when its cluster comes out smaller that way.
 4. Then the tracks between clusters: critical nets (USB pair, RF feed, crystal) first, then power, then the rest.
+   (Owner, 2026-11-16, after the benchmark: critical nets first, then the inside of each cluster; Ledify 93.4
+   that way against 71 the other way round, where the later tracks cut the supply pours.)
+5. Power as on Ember: pads of one supply or switching net that stand together are joined by a top-layer pour, not a
+   track, and a block of vias about 1 mm apart (Ember's PPHV: 192 vias at 0.9 mm, +3.3V: 0.47 mm) takes the pour
+   down into the net's inner plane. A pin of a net with an inner plane drops straight into it. The ground plane
+   stays whole (the router's `planes: true` keeps tracks off it; off by default, it cost Ledify 20 points). Ground is stitched about every 1.5 to 2 mm.
 
 Where it lives: `board.autoplace` builds the clusters (`near=`, `seat`, `place_bypass`); the router
 (`web/router/route.ts`) finds the clusters (`opts.groups`, or from the board: a small part belongs to the nearest
@@ -146,7 +154,10 @@ fine-pitch escapes, the rest; its result carries `groups: {clusters, inside, ins
 `board.design()` hands the plan's clusters to it and reports `routed.inside_groups`. A one-layer route may be 1.6
 times the straight line plus 5 mm before a layer change is taken instead, a via costs 12 mm of track, plain signals
 are widened to 0.2 mm where the clearances allow, and ground is stitched on a 2 mm grid: all four are what the
-owner's boards do. `scripts/board-bench.py` scores the router against those boards after every change.
+owner's boards do. The placer (`web/router/place.ts`) pulls four times harder along critical nets and tries a
+square chip at 45 degrees (kept when its block is 5 percent smaller). The harness makes the power pours
+(`board.power_pours()`, before routing in `design()`) and the via blocks (`board.power_stitch()`, in `finish()`).
+`scripts/board-bench.py` scores the router against those boards after every change.
 
 ## Parts that serve a pin
 
