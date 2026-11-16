@@ -103,6 +103,25 @@ async function fitTo(page, box, rec) {
   }
   await sleep(300);
 }
+// The camera: the editor's own view (zoom and pan, as View > Zoom to Fit sets them) moved to show exactly the world
+// box [x0, y0, x1, y1], in one step, or with rec over `frames` photographs: a slow, even glide (zoom by ratio, centre
+// in a straight line), never a jump.
+async function camTo(page, box, rec, frames = 40, margin = 0.94) {
+  const v = await page.evaluate(() => {
+    const E = window.CollabEditor, st = document.getElementById('stage').getBoundingClientRect();
+    const a = E.api.worldMm({ clientX: st.left, clientY: st.top }), b = E.api.worldMm({ clientX: st.left + 1000, clientY: st.top + 1000 });
+    return { zoom: E.zoom, panX: E.panX, panY: E.panY, a, s: 1000 / (b[0] - a[0]), w: st.width, h: st.height };
+  });
+  // world at the stage's top-left is a + (-pan)/s for the current zoom: mmX0 = a0 + panX / s
+  const mm0 = [v.a[0] + v.panX / v.s, v.a[1] + v.panY / v.s];
+  const c0 = [v.a[0] + v.w / 2 / v.s, v.a[1] + v.h / 2 / v.s], c1 = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
+  const s1 = Math.min(v.w / (box[2] - box[0]), v.h / (box[3] - box[1])) * margin;
+  const at = (k) => { const s = v.s * Math.pow(s1 / v.s, k), c = [c0[0] + (c1[0] - c0[0]) * k, c0[1] + (c1[1] - c0[1]) * k];
+    return { zoom: v.zoom * (s / v.s), panX: v.w / 2 - (c[0] - mm0[0]) * s, panY: v.h / 2 - (c[1] - mm0[1]) * s }; };
+  const set = (q) => page.evaluate((q2) => { const E = window.CollabEditor; E.zoom = q2.zoom; E.panX = q2.panX; E.panY = q2.panY; E.api.applyView(); E.api.requestRender && E.api.requestRender(); }, q);
+  if (!rec) { await set(at(1)); await sleep(400); return; }
+  for (let i = 1; i <= frames; i++) { const k = i / frames, e = k * k * (3 - 2 * k); await set(at(e)); await rec.tick(); }
+}
 const commit = (page, changes, label) => page.evaluate(([c, l]) => window.CollabEditor.api.commitChanges(c, l), [changes, label]);
 const settled = (page) => page.waitForFunction(() => window.CollabEditor.pendingOps.size === 0, null, { timeout: 60000 });
 async function reset(page, kind, filter = () => true) {
@@ -197,7 +216,7 @@ await scene('schematic', async (dir) => {
   const A = actor(a, plan[0].steps(ma), [800, 450]);
   const actors = [A]; const pending = []; const joins = {}, follow = {};
   const rec = await record(a, dir);
-  await rec.hold(700);
+  await a.mouse.move(800, 450); await rec.hold(300);
   for (;;) {
     for (const p of plan.slice(1)) if (!p.started && A.done >= p.at) {
       p.started = true;
@@ -209,6 +228,8 @@ await scene('schematic', async (dir) => {
       if (r) { pending.splice(i, 1); rec.mark(`join-${r.p.who}`); joins[r.p.who] = A.done; const Z = actor(r.pg, r.p.steps(r.m), [1150, 100]); Z.who = r.p.who; Z.map = r.m; Z.joined = rec.now(); follow[r.p.who] = []; actors.push(Z); }
     }
     let any = false; for (const X of actors) if (await advance(X)) any = true;
+    // a person who is done takes their hand off the drawing (Ada's pointer leaves the sheet: no cursor sitting idle)
+    if (!A.cur && !A.steps.length && !A.away) { A.away = true; await a.evaluate(() => { const p = document.getElementById('__demo_ptr'); if (p) p.style.display = 'none'; }); await a.mouse.move(2, 885); }
     // where a newcomer's cursor is on Ada's screen for their first seconds: the video zooms in and follows it
     for (const X of actors) if (X.who && rec.now() - X.joined < 5) { const q = ma.to(X.map.from(X.pos)); follow[X.who].push([rec.now(), Math.round(q[0]), Math.round(q[1])]); }
     await rec.tick();
@@ -344,14 +365,13 @@ await scene('build', async (dir) => {
   await a.evaluate(() => { const E = window.CollabEditor, P = window.PcbTools; const out = []; for (const it of E.kdoc.items.values()) if (['footprint', 'segment', 'arc', 'via', 'zone'].includes(it.kind) || (/^gr_(rect|line|arc)$/.test(it.kind) && JSON.stringify(it.node).includes('Edge.Cuts'))) out.push(P.removedChange(it)); if (out.length) E.api.commitChanges(out, 'reset'); });
   await settled(a); await clearPanels(a);
   // an empty board's Home zooms onto its one text: zoom out by the wheel twice over before framing
-  await home(a); await fitTo(a, VIEW); await fitTo(a, VIEW); await a.evaluate(DEMO);
+  await camTo(a, VIEW); await a.evaluate(DEMO);
   const others = {};
-  for (const w of ['ben', 'chloe', 'dev']) { others[w] = await open(w, docOf('kicad_pcb')); await clearPanels(others[w]); await fitTo(others[w], VIEW); await others[w].evaluate(DEMO); }
+  for (const w of ['ben', 'chloe', 'dev']) { others[w] = await open(w, docOf('kicad_pcb')); await clearPanels(others[w]); await camTo(others[w], VIEW); await others[w].evaluate(DEMO); }
   const pages = { ada: a, ...others };
   // the editor may still fit its view to the (nearly empty) board after loading: frame the work area again, last thing
-  await a.bringToFront(); await sleep(1500); await fitTo(a, VIEW); console.log('  zoom before recording:', await a.evaluate(() => document.body.innerText.match(/Zoom [\d.]+/)?.[0] || '?'));
+  await a.bringToFront(); await sleep(1500); await camTo(a, VIEW);
   const rec = await record(a, dir);
-  await fitTo(a, VIEW, rec);
   const m = await mapOf(a);
   await rec.hold(500);
   // 1. the outline: Edge.Cuts, corner to corner
@@ -373,8 +393,8 @@ await scene('build', async (dir) => {
   const row = await a.evaluate(() => { let b = null; for (const it of window.CollabEditor.kdoc.items.values()) if (it.kind === 'footprint') b = b ? [Math.min(b[0], it.bbox[0]), Math.min(b[1], it.bbox[1]), Math.max(b[2], it.bbox[2]), Math.max(b[3], it.bbox[3])] : it.bbox.slice(); return b; });
   const WIDE = row ? [Math.min(VIEW[0], row[0] - 2), Math.min(VIEW[1], row[1] - 2), Math.max(VIEW[2], row[2] + 2), Math.max(VIEW[3], row[3] + 2)] : VIEW.slice();
   console.log('  row', row && row.map((v) => v.toFixed(1)).join(','), 'wide', WIDE.map((v) => v.toFixed(1)).join(','));
-  await fitTo(a, WIDE, rec);
-  for (const w of Object.keys(others)) await fitTo(others[w], WIDE);
+  await camTo(a, WIDE, rec);
+  for (const w of Object.keys(others)) await camTo(others[w], WIDE);
 
 
   const maps = {}; for (const w of Object.keys(pages)) maps[w] = await mapOf(pages[w]);
@@ -387,6 +407,8 @@ await scene('build', async (dir) => {
     const pg = pages[w], mp = maps[w];
     const from = await pg.evaluate((r) => window.__demo.at([r]), part.ref); if (!from) return;
     yield* glideTo(w, mp.to(from), 8);
+    // picked up the way a person does: a click selects it (everyone sees it selected), then it is carried
+    const p0 = mp.to(from); await pg.mouse.click(p0[0], p0[1]); yield; yield;
     const to = [part.at[0] + d[0], part.at[1] + d[1]], frames = 12; let last = from;
     for (let f = 1; f <= frames; f++) {
       const k = ease(f / frames); const now = [from[0] + (to[0] - from[0]) * k, from[1] + (to[1] - from[1]) * k];
@@ -394,6 +416,7 @@ await scene('build', async (dir) => {
       await pg.evaluate(([r, dx, dy]) => window.__demo.move([r], dx, dy), [part.ref, now[0] - last[0], now[1] - last[1]]); last = now; yield;
     }
     await pg.evaluate(([ref, node, dx, dy]) => window.__demo.snap(ref, node, dx, dy), [part.ref, part.node, d[0], d[1]]); yield;
+    await pg.keyboard.press('Escape'); yield;
   }
   // routing: the person's cursor draws each run, and the run is committed as it ends
   async function* route(w, tracks) {
@@ -407,7 +430,11 @@ await scene('build', async (dir) => {
     const pg = pages[w], mp = maps[w], d = off[name]; if (!d[0] && !d[1]) return;
     const refs = FP.filter((f) => f.block === name).map((f) => f.ref), ids = inside[name] || [];
     const b = padBox(name), c = [(b[0] + b[2]) / 2 + d[0], (b[1] + b[3]) / 2 + d[1]];
-    yield* glideTo(w, mp.to(c), 10); yield; yield;
+    // a box round the cluster selects it, parts and tracks
+    const k0 = mp.to([b[0] + d[0] - 1.5, b[1] + d[1] - 1.5]), k1 = mp.to([b[2] + d[0] + 1.5, b[3] + d[1] + 1.5]);
+    yield* glideTo(w, k0, 10); await pg.mouse.down(); yield;
+    yield* glideTo(w, k1, 14); await pg.mouse.up(); yield; yield; yield;
+    yield* glideTo(w, mp.to(c), 8); yield; yield;
     const frames = 24; let last = [0, 0];
     for (let f = 1; f <= frames; f++) {
       const k = ease(f / frames), now = [-d[0] * k, -d[1] * k];
@@ -416,7 +443,7 @@ await scene('build', async (dir) => {
     }
     // land exactly where the layout has them
     for (const f of FP.filter((x) => x.block === name)) await pg.evaluate(([ref, node]) => window.__demo.snap(ref, node, 0, 0), [f.ref, f.node]);
-    yield; yield; yield;
+    yield; await pg.keyboard.press('Escape'); yield; yield;
   }
   // a. everyone takes their parts out of the rows and lays out their blocks beside the board (Dev: the edge headers
   //    straight onto the board)
@@ -439,11 +466,11 @@ await scene('build', async (dir) => {
   for (const w of Object.keys(pages)) await settled(pages[w]);
   await rec.hold(500); rec.mark('clustered');
   // closer in for the routing: the board and the blocks round it
-  await fitTo(a, VIEW, rec); for (const w of Object.keys(others)) await fitTo(others[w], VIEW); await remap();
+  await camTo(a, VIEW, rec); for (const w of Object.keys(others)) await camTo(others[w], VIEW); await remap();
   rec.mark('inner');
   await runAll(WORK.map((W, i) => routeInside(W, [0, 4, 2, 6][i])));
   for (const w of Object.keys(pages)) await settled(pages[w]);
-  await rec.hold(600); await fitTo(a, VIEW, rec); await remap(); rec.mark('onboard');
+  await rec.hold(600); await camTo(a, VIEW, rec); await remap(); rec.mark('onboard');
   await runAll(WORK.map((W, i) => moveAll(W, [0, 10, 5, 15][i])));
   for (const w of Object.keys(pages)) await settled(pages[w]);
   await rec.hold(700); rec.mark('blocks');
@@ -456,7 +483,7 @@ await scene('build', async (dir) => {
   for (const n of nets) { const c = cOf(n); quad[c[1] < my ? (c[0] < mx ? 'ada' : 'ben') : (c[0] < mx ? 'chloe' : 'dev')].push(n); }
   // zoomed on the board for the routing, by the wheel (everyone)
   const BOARDV = [ob[0] - 2, ob[1] - 2, ob[2] + 2, ob[3] + 2];
-  await fitTo(a, BOARDV, rec); for (const w of Object.keys(others)) await fitTo(others[w], BOARDV);
+  await camTo(a, BOARDV, rec); for (const w of Object.keys(others)) await camTo(others[w], BOARDV);
   for (const w of Object.keys(pages)) maps[w] = await mapOf(pages[w]);
   const actors = Object.keys(pages).map((w) => actor(pages[w], trackSteps(maps[w], tracks.filter((t) => quad[w].includes(t.net))), w === 'ada' ? [800, 450] : [600, 400]));
   rec.mark('route');
