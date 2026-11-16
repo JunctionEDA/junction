@@ -16,6 +16,8 @@ import { pxPerMm, worldMm } from "../editor/view";
 import { convertToSpiceMarkup } from "./spice-netlist";
 import { builtinLibrary } from "./builtin-libs";
 import { forWasmNgspice } from "./ngspice-wasm";
+import ngspiceBuild from "../../vendor/ngspice/build-meta.json";
+import { NGSPICE_MODULE_REVISION } from "../plugins/ngspice-revision";
 import { toDouble } from "../dialogs/sim-model-logic";
 import { clearOperatingPoints, setOperatingPoints, setSimItems } from "./op-overlay";
 import type { SimItemInfo } from "./spice-netlist";
@@ -59,7 +61,10 @@ const S = {
   netlist: "", schCommand: "", spice: null as SpiceSession | null, running: false, stopping: false, sidePanel: true, console: true, darkPlots: false, compat: "User configuration",
   simItems: [] as SimItemInfo[], tuners: [] as Tuner[], wbName: "", dirty: false, filter: "", probing: null as null | "probe" | "tune", colorN: 0, simulated: false,
 };
-const NGSPICE_URL = "/static/pyodide/ngspice.mjs";   // served by src/pcm.rs runtime() (static/dist/pyodide in the build, /usr/local/share/kicad-collab/pyodide in the image)
+// served by src/pcm.rs runtime() (static/dist/pyodide in the build, /usr/local/share/kicad-collab/pyodide in the image),
+// which lets browsers keep it a day: the query names the engine's build and the module's revision, so a deploy that
+// changes either is not answered from yesterday's cache
+const NGSPICE_URL = `/static/pyodide/ngspice.mjs?v=${ngspiceBuild.sha256.slice(0, 12)}-${NGSPICE_MODULE_REVISION}`;
 const SIM_OPTS = OPT_SAVE_V | OPT_SAVE_I | OPT_SAVE_P | OPT_SAVE_EVENTS;
 const curTab = (): Tab | null => S.tabs[S.cur] || null;
 const tabType = (t: Tab | null): SimType => (t ? commandToSimType(t.command) : "TRAN");

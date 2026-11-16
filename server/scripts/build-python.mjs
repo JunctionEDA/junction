@@ -28,6 +28,12 @@ for (const f of ["occt-import-js.js", "occt-import-js.wasm"]) {
 // 9 MB, so it is its own file, fetched on first use.
 {
   const core = path.join(server, "vendor", "ngspice", "ngspice-core.mjs.br");
+  // the simulator's URL for the module names this revision (web/plugins/ngspice-revision.ts): a stale one would let
+  // browsers keep yesterday's module
+  const moduleSrc = path.join(server, "web", "plugins", "ngspice-module.ts");
+  const revision = crypto.createHash("sha256").update(fs.readFileSync(moduleSrc)).digest("hex").slice(0, 12);
+  const recorded = (/NGSPICE_MODULE_REVISION = "([0-9a-f]+)"/.exec(fs.readFileSync(path.join(server, "web", "plugins", "ngspice-revision.ts"), "utf8")) || [])[1];
+  if (recorded !== revision) throw new Error(`web/plugins/ngspice-revision.ts says ${recorded}; web/plugins/ngspice-module.ts is now ${revision}: write that there`);
   const unpack = { name: "ngspice-core", setup(b) {
     b.onResolve({ filter: /ngspice-core\.mjs$/ }, () => ({ path: core, namespace: "ngspice-core" }));
     b.onLoad({ filter: /.*/, namespace: "ngspice-core" }, () => ({ contents: zlib.brotliDecompressSync(fs.readFileSync(core)).toString("utf8"), loader: "js" }));
