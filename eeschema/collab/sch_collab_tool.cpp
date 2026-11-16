@@ -109,6 +109,10 @@ static bool copyLinkToClipboard( const wxString& aUrl )
 // trims further when it has to; this only keeps the payload from being built huge in the first place.
 static constexpr size_t MAX_PRESENCE_BOXES = 150;
 
+/// The collab tick, ms: one display frame, so the cursor goes out as often as it is drawn.
+/// Everything else on the tick still runs every 100 ms.
+static constexpr int PRESENCE_TICK_MS = 16;
+
 /// Cap on in-flight ghost segments per presence update (same 8 KB budget).
 static constexpr size_t MAX_GHOST_SEGS = 100;
 
@@ -747,7 +751,7 @@ void SCH_COLLAB_TOOL::beginSession( const nlohmann::json& aProject, const wxStri
     }
 
     m_lastSheetFile = currentSheetFile();
-    m_timer.Start( 100 );
+    m_timer.Start( PRESENCE_TICK_MS );
     OnSessionStateChanged();
 }
 
@@ -1012,8 +1016,18 @@ void SCH_COLLAB_TOOL::restoreStatusText()
 
 void SCH_COLLAB_TOOL::onTimer( wxTimerEvent& aEvent )
 {
-    updateCommentCard();
-    followCommentAnchors();
+    // The cursor goes out on every display frame (the 16 ms tick); everything else here
+    // keeps the old 100 ms pace.
+    const wxLongLong now = wxGetLocalTimeMillis();
+    const bool       slow = now - m_lastSlowTick >= 100;
+
+    if( slow )
+    {
+        m_lastSlowTick = now;
+        updateCommentCard();
+        followCommentAnchors();
+    }
+
     COLLAB_SESSION& session = COLLAB_SESSION::Get();
 
     if( !sessionActive() || !m_frame )
@@ -1021,6 +1035,9 @@ void SCH_COLLAB_TOOL::onTimer( wxTimerEvent& aEvent )
 
     if( !session.IsLive() )
     {
+        if( !slow )
+            return;
+
         // An ordinary drop is CONNECTING and comes back on its own.  DISCONNECTED here
         // means the session is over for good -- the sign-in expired or was revoked, or
         // the other editor in this process left -- so let go of it.  Holding on left the
@@ -1049,10 +1066,13 @@ void SCH_COLLAB_TOOL::onTimer( wxTimerEvent& aEvent )
         return;
     }
 
-    if( m_sync && m_sync->PendingOps() != m_lastPendingShown )
-        OnSessionStateChanged();
-    else
-        restoreStatusText();
+    if( slow )
+    {
+        if( m_sync && m_sync->PendingOps() != m_lastPendingShown )
+            OnSessionStateChanged();
+        else
+            restoreStatusText();
+    }
 
     wxString sheetFile = currentSheetFile();
 
@@ -1355,8 +1375,23 @@ void SCH_COLLAB_TOOL::OnPresenceChanged()
             OnSessionStateChanged();
         }
     }
-    applyFollow();
-    rebuildOverlay();
+
+    // A burst of presence messages (several people, sixty updates a second each) is drawn
+    // once: the rebuild runs after the messages already waiting have been read.
+    if( m_overlayQueued )
+        return;
+
+    m_overlayQueued = true;
+    CallAfter(
+            [this, alive = m_alive]()
+            {
+                if( !*alive )
+                    return;
+
+                m_overlayQueued = false;
+                applyFollow();
+                rebuildOverlay();
+            } );
 }
 
 

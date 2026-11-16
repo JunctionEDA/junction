@@ -205,6 +205,8 @@ private:
 private:
     COLLAB_AUTH        m_auth;
     wxTimer            m_timer;
+    wxLongLong         m_lastSlowTick = 0;      ///< last tick that did the 100 ms work
+    bool               m_overlayQueued = false; ///< a cursor-overlay rebuild is on its way
     COLLAB_CURSOR_ITEM m_cursorItem;
 
     std::unique_ptr<SCH_COLLAB_SYNC> m_sync;      ///< live while a session is active

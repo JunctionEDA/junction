@@ -44,6 +44,12 @@ export function renderPeers() {
 export function followAction(cid: string | null) { E.followPeer = cid && E.peerState[cid] ? cid : null; applyFollowWeb(E.peerState); renderPeers(); }
 
 /** The last cursor position we told anyone about, so the keepalive can re-send it. */
+/** The shortest time between two presence messages, ms: every display frame at 60 Hz (the server forwards each one
+ *  at once, presence_lane.rs).  A call that comes sooner is not dropped: it is sent when the gap is up, with whatever
+ *  is newest by then, so the place the pointer stopped always reaches everyone. */
+const PRESENCE_GAP_MS = 14;
+let trailing: ReturnType<typeof setTimeout> | 0 = 0;
+let trailingGhost: number[][] | null | undefined;
 export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | null) {
   const now = Date.now();
   if (mmPos) E.lastPresenceMm = mmPos;
@@ -54,7 +60,13 @@ export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | nu
   // Ghost updates are rate-limited like the cursor; an *empty* ghost is the "I stopped drawing"
   // signal and must go out at once so peers do not keep painting a stale in-flight wire.
   const clearing = Array.isArray(ghostSegs) && ghostSegs.length === 0;
-  if (now - E.lastPresence < 80 && !clearing) return;
+  if (now - E.lastPresence < PRESENCE_GAP_MS && !clearing) {
+    // the newest ghost wins; "no ghost given" keeps the one already waiting
+    if (ghostSegs !== undefined) trailingGhost = ghostSegs;
+    if (!trailing) trailing = setTimeout(() => { trailing = 0; const g = trailingGhost; trailingGhost = undefined; sendPresence(null, g); }, PRESENCE_GAP_MS - (now - E.lastPresence));
+    return;
+  }
+  if (trailing) { clearTimeout(trailing); trailing = 0; if (ghostSegs === undefined) ghostSegs = trailingGhost; trailingGhost = undefined; }
   E.lastPresence = now;
   const st: PresenceState = { cursor: [Math.round(at[0] * E.IU), Math.round(at[1] * E.IU)] };
   const vp = visibleRectNm(); if (vp) st.viewport = vp;
@@ -72,7 +84,7 @@ export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | nu
     const modSel = E.kdoc && T && T.pcb && T.pcb.state && T.pcb.state.sel;
     if (modSel) for (const id of modSel) picked.add(id);
   }
-  const sel = picked.size ? presenceSelection(E.kdoc, picked, E.IU, presenceMoving()) : null;
+  const sel = picked.size ? cachedSelection(picked) : null;
   if (sel) {
     st.selection = sel.selection;
     if (sel.boxes) {
@@ -89,6 +101,19 @@ export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | nu
   const doc = (state.docs || []).find((d) => d.docId === state.docId);
   if (doc && doc.path) st.sheetFile = doc.path;
   E.ws.send(JSON.stringify({ type: "presence", docId: state.docId, state: fitPresence(st) }));
+}
+
+/** The selection part of the last message: at rest it only changes with the selection (or the document), and the
+ *  pointer goes out sixty times a second, so it is not worked out again each time.  While something moves, it is,
+ *  and at rest it is refreshed a few times a second anyway (an edit can change a selected item's box). */
+let selCache: { key: string; doc: unknown; at: number; sel: ReturnType<typeof presenceSelection> } | null = null;
+function cachedSelection(picked: Set<string>) {
+  const moving = presenceMoving();
+  const key = [...picked].join("\u0000");
+  if (!moving && selCache && selCache.key === key && selCache.doc === E.kdoc && performance.now() - selCache.at < 250) return selCache.sel;
+  const sel = presenceSelection(E.kdoc, picked, E.IU, moving);
+  selCache = moving ? null : { key, doc: E.kdoc, at: performance.now(), sel };
+  return sel;
 }
 
 /** The server refuses a presence state over 8 KB (ws.rs MAX_PRESENCE_BYTES) with bad_message, which reads as a broken

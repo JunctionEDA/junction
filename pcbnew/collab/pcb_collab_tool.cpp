@@ -100,6 +100,10 @@ static bool copyLinkToClipboard( const wxString& aUrl )
 // trims further when it has to; this only keeps the payload from being built huge in the first place.
 static constexpr size_t MAX_PRESENCE_BOXES = 150;
 
+/// The collab tick, ms: one display frame, so the cursor goes out as often as it is drawn.
+/// Everything else on the tick still runs every 100 ms.
+static constexpr int PRESENCE_TICK_MS = 16;
+
 /// Cap on in-flight ghost segments per presence update (same 8 KB budget).
 static constexpr size_t MAX_GHOST_SEGS = 100;
 
@@ -216,9 +220,9 @@ PCB_COLLAB_TOOL::~PCB_COLLAB_TOOL()
 
 bool PCB_COLLAB_TOOL::Init()
 {
-    // The 100 ms tick is a cheap no-op until a session (started here or in
-    // eeschema) goes live.
-    m_timer.Start( 100 );
+    // The tick is a cheap no-op until a session (started here or in eeschema) goes
+    // live.  It runs every display frame so the cursor goes out at that rate.
+    m_timer.Start( PRESENCE_TICK_MS );
 
     return true;
 }
@@ -1852,12 +1856,25 @@ void PCB_COLLAB_TOOL::restoreStatusText()
 
 void PCB_COLLAB_TOOL::onTimer( wxTimerEvent& aEvent )
 {
-    updateCommentCard();
-    followCommentAnchors();
+    // The cursor goes out on every display frame (the 16 ms tick); everything else here
+    // keeps the old 100 ms pace.
+    const wxLongLong now = wxGetLocalTimeMillis();
+    const bool       slow = now - m_lastSlowTick >= 100;
+
+    if( slow )
+    {
+        m_lastSlowTick = now;
+        updateCommentCard();
+        followCommentAnchors();
+    }
+
     COLLAB_SESSION& session = COLLAB_SESSION::Get();
 
     if( session.GetState() == COLLAB_SESSION::STATE::DISCONNECTED )
     {
+        if( !slow )
+            return;
+
         // The session is over (not merely out of touch: a lost connection is CONNECTING
         // and comes back on its own, and the board stays joined through it so that edits
         // made meanwhile queue up).
@@ -1886,15 +1903,21 @@ void PCB_COLLAB_TOOL::onTimer( wxTimerEvent& aEvent )
     }
 
     // The count of edits waiting to be sent is part of the status text.
-    if( m_sync && m_sync->PendingOps() != m_lastPendingShown )
-        OnSessionStateChanged();
-    else
-        restoreStatusText();
+    if( slow )
+    {
+        if( m_sync && m_sync->PendingOps() != m_lastPendingShown )
+            OnSessionStateChanged();
+        else
+            restoreStatusText();
+    }
 
     wxString file = boardFile();
 
     if( !m_docId.IsEmpty() && m_docPath != file )
         leaveDoc();
+
+    if( m_docId.IsEmpty() && !slow )
+        return;
 
     if( m_docId.IsEmpty() )
     {
@@ -2122,8 +2145,23 @@ void PCB_COLLAB_TOOL::OnPresenceChanged()
             OnSessionStateChanged();
         }
     }
-    applyFollow();
-    rebuildOverlay();
+
+    // A burst of presence messages (several people, sixty updates a second each) is drawn
+    // once: the rebuild runs after the messages already waiting have been read.
+    if( m_overlayQueued )
+        return;
+
+    m_overlayQueued = true;
+    CallAfter(
+            [this, alive = m_alive]()
+            {
+                if( !*alive )
+                    return;
+
+                m_overlayQueued = false;
+                applyFollow();
+                rebuildOverlay();
+            } );
 }
 
 

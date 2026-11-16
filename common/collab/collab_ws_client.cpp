@@ -35,6 +35,11 @@
 using namespace std::chrono_literals;
 
 static constexpr int    POLL_MS = 50;
+
+/// How long an idle connection waits for incoming data before it looks at the outbox again.
+/// Nothing wakes the wait when the editor queues a frame, so this is the most a cursor update
+/// sits in the outbox: short, or the cursor reaches peers up to a whole poll late.
+static constexpr int    IDLE_WAIT_MS = 4;
 static constexpr long   CONNECT_TIMEOUT_SECS = 10;
 static constexpr int    BACKOFF_START_MS = 1000;
 static constexpr int    BACKOFF_MAX_MS = 30000;
@@ -371,7 +376,7 @@ void COLLAB_WS_CLIENT::runConnection()
             {
                 curl_socket_t sock = CURL_SOCKET_BAD;
                 curl_easy_getinfo( curl, CURLINFO_ACTIVESOCKET, &sock );
-                waitOnSocket( sock, POLL_MS, WAIT_FOR::READ );
+                waitOnSocket( sock, IDLE_WAIT_MS, WAIT_FOR::READ );
             }
         }
     }
@@ -810,7 +815,7 @@ void COLLAB_WS_CLIENT::runOwnFraming()
             }
 
             if( outboxEmpty )
-                waitOnSocket( socketOf(), POLL_MS, WAIT_FOR::READ );
+                waitOnSocket( socketOf(), IDLE_WAIT_MS, WAIT_FOR::READ );
         }
     }
 

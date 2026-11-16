@@ -336,6 +336,8 @@ class DIALOG_COLLAB_COMMENTS* m_commentsDlg = nullptr;
     wxString       m_docPath;    ///< project-relative board path the doc was joined for
     nlohmann::json m_lastSentState;
     wxDateTime     m_lastPresenceSend;  ///< for the idle keepalive
+    wxLongLong     m_lastSlowTick = 0;  ///< last tick that did the 100 ms work
+    bool           m_overlayQueued = false; ///< a cursor-overlay rebuild is on its way
     wxDateTime     m_lastRejectNotice;  ///< throttles the rejected-edit infobar
     bool           m_presenceDirty;
     bool           m_ownsSession; ///< this tool connected the session, rather than eeschema

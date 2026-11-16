@@ -10,9 +10,15 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 
 use crate::persist::{self, Document};
+use crate::presence_lane::PresenceLane;
 use crate::relay::Relay;
 
-const PRESENCE_FLUSH: Duration = Duration::from_millis(50);
+/// The actor's tick: held fast-lane updates go out on it (presence_lane.rs), and so do
+/// leaves and the batch for other replicas.
+const PRESENCE_FLUSH: Duration = Duration::from_millis(16);
+/// How often this replica tells the others where its people are.  Notifications go through
+/// Postgres, so they are batched more coarsely than the local fast lane.
+const RELAY_PRESENCE_EVERY: Duration = Duration::from_millis(40);
 const PRESENCE_STALE: Duration = Duration::from_secs(30);
 const REAP_AFTER: Duration = Duration::from_secs(60);
 const SNAPSHOT_LAG_OPS: i64 = 500;
@@ -79,6 +85,9 @@ pub enum DocMsg {
     Presence {
         client_id: String,
         state: Value,
+        /// Whether the socket already handed it to the presence lane, which delivers it to
+        /// everyone on this replica; the actor then only keeps it (and tells other replicas).
+        laned: bool,
     },
     /// A comment changed via REST; relay to every connected client.
     Comment {
@@ -147,13 +156,13 @@ struct ClientState {
     can_snapshot: bool,
 }
 
-pub fn spawn(pool: PgPool, doc: Document, relay: Arc<Relay>) -> mpsc::Sender<DocMsg> {
+pub fn spawn(pool: PgPool, doc: Document, relay: Arc<Relay>, lane: Arc<PresenceLane>) -> mpsc::Sender<DocMsg> {
     let (tx, rx) = mpsc::channel(1024);
-    tokio::spawn(run(pool, doc, relay, rx));
+    tokio::spawn(run(pool, doc, relay, lane, rx));
     tx
 }
 
-async fn run(pool: PgPool, doc: Document, relay: Arc<Relay>, mut rx: mpsc::Receiver<DocMsg>) {
+async fn run(pool: PgPool, doc: Document, relay: Arc<Relay>, lane: Arc<PresenceLane>, mut rx: mpsc::Receiver<DocMsg>) {
     let doc_id = doc.id;
     let mut head_seq = match persist::head_seq(&pool, doc_id).await {
         Ok(s) => s,
@@ -173,6 +182,9 @@ async fn run(pool: PgPool, doc: Document, relay: Arc<Relay>, mut rx: mpsc::Recei
     relay.publish(json!({ "t": "who", "d": doc_id }));
     // clientId -> Some(state) = changed, None = left. Flushed every 50ms.
     let mut presence_dirty: HashMap<String, Option<Value>> = HashMap::new();
+    // States the lane already delivered here, still to be told to the other replicas.
+    let mut relay_dirty: HashMap<String, Value> = HashMap::new();
+    let mut last_relay_presence = Instant::now();
     let mut empty_since = Some(Instant::now());
     let mut last_snapshot_request = Instant::now() - SNAPSHOT_REQUEST_COOLDOWN;
     let folding = Arc::new(FoldState::default());
@@ -193,8 +205,9 @@ async fn run(pool: PgPool, doc: Document, relay: Arc<Relay>, mut rx: mpsc::Recei
                         // state, so it is all-or-nothing: on failure the client
                         // is not registered and its join simply times out.
                         if handle_join(&pool, &doc, head_seq, &mut clients, &remote, &peer, &role,
-                                       since_seq, can_snapshot, tx).await
+                                       since_seq, can_snapshot, tx.clone()).await
                         {
+                            lane.join(&peer.client_id, tx, json!(peer).to_string());
                             // Announce to everyone else and share existing presence with the joiner.
                             let joined = json!({ "type": "peer_joined", "docId": doc_id, "peer": peer }).to_string();
                             broadcast_except(&mut clients, &mut presence_dirty, doc_id, &peer.client_id, &joined);
@@ -219,6 +232,7 @@ async fn run(pool: PgPool, doc: Document, relay: Arc<Relay>, mut rx: mpsc::Recei
                         let owns = clients.get(&client_id)
                                           .is_some_and(|c| c.tx.same_channel(&tx));
 
+                        lane.leave(&client_id, &tx);
                         if owns {
                             clients.remove(&client_id);
                             presence_dirty.insert(client_id.clone(), None);
@@ -313,11 +327,15 @@ async fn run(pool: PgPool, doc: Document, relay: Arc<Relay>, mut rx: mpsc::Recei
                             }
                         }
                     }
-                    DocMsg::Presence { client_id, state } => {
+                    DocMsg::Presence { client_id, state, laned } => {
                         touch(&mut clients, &client_id);
                         if let Some(c) = clients.get_mut(&client_id) {
                             c.presence = Some(state.clone());
-                            presence_dirty.insert(client_id, Some(state));
+                            if laned {
+                                relay_dirty.insert(client_id, state);
+                            } else {
+                                presence_dirty.insert(client_id, Some(state));
+                            }
                         }
                     }
                     DocMsg::Comment { payload } => {
@@ -509,6 +527,7 @@ async fn run(pool: PgPool, doc: Document, relay: Arc<Relay>, mut rx: mpsc::Recei
                             // instead of silently receiving baseless ops.
                             if !send_snapshot_catchup(&pool, &doc, head_seq, &tx).await
                             {
+                                lane.remove(&client_id);
                                 clients.remove(&client_id);
                                 presence_dirty.insert(client_id.clone(), None);
                                 let msg = json!({ "type": "peer_left", "docId": doc_id,
@@ -520,6 +539,17 @@ async fn run(pool: PgPool, doc: Document, relay: Arc<Relay>, mut rx: mpsc::Recei
                 }
             }
             _ = flush.tick() => {
+                lane.flush(doc_id);
+                if !relay_dirty.is_empty() && last_relay_presence.elapsed() >= RELAY_PRESENCE_EVERY {
+                    last_relay_presence = Instant::now();
+                    let peers: serde_json::Map<String, Value> = relay_dirty.drain()
+                        .filter(|(id, _)| !presence_dirty.contains_key(id))
+                        .filter_map(|(id, s)| clients.get(&id).map(|c| (id, json!({ "user": c.peer, "state": s }))))
+                        .collect();
+                    if !peers.is_empty() && relay.others_alive() {
+                        relay.publish(json!({ "t": "presence", "d": doc_id, "peers": peers }));
+                    }
+                }
                 // Notifications are not durable; the op table is.  While other replicas
                 // exist, look at it now and then so a lost one costs seconds, not a resync.
                 if !clients.is_empty() && relay.others_alive() && last_remote_poll.elapsed() >= REMOTE_POLL {
@@ -540,6 +570,7 @@ async fn run(pool: PgPool, doc: Document, relay: Arc<Relay>, mut rx: mpsc::Recei
                 for (id, c) in clients.iter_mut() {
                     if c.presence.is_some() && now.duration_since(c.last_seen) > PRESENCE_STALE {
                         c.presence = None;
+                        relay_dirty.remove(id);
                         presence_dirty.insert(id.clone(), None);
                     }
                 }

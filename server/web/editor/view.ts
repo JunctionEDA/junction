@@ -17,6 +17,7 @@ import { drawAppOverlays } from "./overlays";
 import { toast } from "./util";
 import { ZOOM_LIST, fitMargin, nextZoomPreset } from "./zoomlist";
 import type { PeerEntry, PeerGhost } from "./types";
+import { initPeerCursors, syncPeerCursors, toggleFollowToast, type PeerCursorSpec } from "./peercursors";
 // ================================================================ EDITOR
 export const stage = $("#stage"), world = $("#world"), base = $("#base"), overlay = $("#overlay");
 
@@ -334,19 +335,27 @@ function peerBoxesOf(ids: Iterable<string>) {
   return out;
 }
 
-// A peer's pointer and name tag, in screen pixels (the desktop's COLLAB_CURSOR_ITEM uses the same sizes).
-const PEER_CURSOR_PX = 24, PEER_TAG_TEXT_PX = 16, PEER_TAG_PAD_PX = 5;
-/** Brightness 0..1 of a #rgb / #rrggbb colour, as COLOR4D::GetBrightness (its weighted W3C formula). */
-function brightness(c: string): number {
-  const h = c.replace("#", ""), f = h.length === 3 ? h.split("").map((d) => d + d).join("") : h.slice(0, 6);
-  const n = parseInt(f, 16); if (!Number.isFinite(n)) return 0;
-  return (((n >> 16) & 255) * 0.299 + ((n >> 8) & 255) * 0.587 + (n & 255) * 0.117) / 255;
+/** A peer's pointer as the pointer layer draws it, or null when the peer has not said where it is. */
+function peerCursorSpec(cid: string, p: PeerEntry): PeerCursorSpec | null {
+  const st = p.state || {};
+  if (!Array.isArray(st.cursor)) return null;
+  const ai = st.ai && typeof st.ai === "object" ? st.ai : null;
+  const note = ai && typeof ai.note === "string" ? ai.note.trim().slice(0, 140) : "";
+  return { cid, name: peerName(p), color: (p.user && p.user.color) || "#4477ee", note, following: E.followPeer === cid, at: [st.cursor[0] / E.IU, st.cursor[1] / E.IU] };
+}
+
+/** Only pointers moved: move them, and leave the rest of the peer overlay (and the canvas) alone. */
+export function movePeerCursors(peers: Record<string, PeerEntry>) {
+  const specs: PeerCursorSpec[] = [];
+  for (const [cid, p] of Object.entries(peers)) { const spec = peerCursorSpec(cid, p); if (spec) specs.push(spec); }
+  syncPeerCursors(specs);
 }
 
 export function drawPeers(peers: Record<string, PeerEntry>) {
   peersG.replaceChildren();
   const s = pxPerMm(), mm = (nm: number) => nm / E.IU;
-  const ghosts: PeerGhost[] = [];
+  const ghosts: PeerGhost[] = [], cursorSpecs: PeerCursorSpec[] = [];
+  initPeerCursors(peersG, pxPerMm, (cid, name) => toggleFollowToast(cid, name, () => { renderPeers(); drawPeers(E.peerState); }));
   for (const [cid, p] of Object.entries(peers)) {
     const st = p.state || {}, color = (p.user && p.user.color) || "#4477ee", name = peerName(p);
     // Items the peer is dragging: `at[i]` is where they hold selection[i]; a displacement from our copy's own
@@ -407,50 +416,9 @@ export function drawPeers(peers: Record<string, PeerEntry>) {
       rect.setAttribute("fill", "none"); rect.setAttribute("stroke", color); rect.setAttribute("stroke-opacity", "0.9"); rect.setAttribute("stroke-width", 1.5 / s);
       peersG.appendChild(rect);
     }
-    if (Array.isArray(st.cursor)) {
-      // COLLAB_CURSOR_ITEM's pointer and name tag: a triangle in the peer colour with its tip on the
-      // cursor, and below-right of it a chip filled with that colour, the name in black or white on it.
-      const x = mm(st.cursor[0]), y = mm(st.cursor[1]), t = PEER_CURSOR_PX / s, th = PEER_TAG_TEXT_PX / s, pad = PEER_TAG_PAD_PX / s;
-      const tri = document.createElementNS(NS, "path");
-      tri.setAttribute("d", `M ${x} ${y} L ${x + 0.38 * t} ${y + t} L ${x + t} ${y + 0.38 * t} Z`);
-      tri.setAttribute("fill", color); tri.setAttribute("stroke", "white"); tri.setAttribute("stroke-opacity", "0.9"); tri.setAttribute("stroke-width", 1.5 / s);
-      tri.setAttribute("stroke-linejoin", "round");
-      peersG.appendChild(tri);
-      const tag = document.createElementNS(NS, "g");
-      tag.style.pointerEvents = "auto"; tag.style.cursor = "pointer";
-      const cx = x + 0.8 * t, cy = y + 1.2 * t;
-      const chip = document.createElementNS(NS, "rect");
-      chip.setAttribute("x", cx); chip.setAttribute("y", cy); chip.setAttribute("height", th + 2 * pad); chip.setAttribute("rx", 2 / s);
-      chip.setAttribute("fill", color);
-      const label = document.createElementNS(NS, "text");
-      label.setAttribute("x", cx + pad); label.setAttribute("y", cy + pad + th / 2); label.setAttribute("dominant-baseline", "central");
-      label.setAttribute("font-size", th); label.setAttribute("font-weight", "600"); label.setAttribute("font-family", "system-ui, sans-serif");
-      label.setAttribute("fill", brightness(color) > 0.5 ? "#000" : "#fff");
-      label.textContent = E.followPeer === cid ? name + " (following)" : name;
-      tag.appendChild(chip); tag.appendChild(label); peersG.appendChild(tag);
-      let tw = 0; try { tw = label.getComputedTextLength(); } catch { /* not laid out */ }
-      if (!(tw > 0)) tw = label.textContent.length * 0.6 * th;
-      chip.setAttribute("width", tw + 2 * pad);
-      // what the assistant says about what it is pointing at: a second chip under its name, wrapped to a few lines
-      const said = ai && typeof ai.note === "string" ? ai.note.trim().slice(0, 140) : "";
-      if (said) {
-        const lines: string[] = []; let cur = "";
-        for (const w of said.split(/\s+/)) { if (cur && (cur + " " + w).length > 38) { lines.push(cur); cur = w; } else cur = cur ? cur + " " + w : w; }
-        if (cur) lines.push(cur);
-        const lh = th * 1.3, ny = cy + th + 2 * pad + 3 / s, nh = lines.length * lh + 2 * pad;
-        const box = document.createElementNS(NS, "rect"), txt = document.createElementNS(NS, "text");
-        box.setAttribute("x", cx); box.setAttribute("y", ny); box.setAttribute("height", nh); box.setAttribute("rx", 2 / s);
-        box.setAttribute("fill", "#16161a"); box.setAttribute("fill-opacity", "0.94"); box.setAttribute("stroke", color); box.setAttribute("stroke-width", 1 / s);
-        txt.setAttribute("font-size", th); txt.setAttribute("font-family", "system-ui, sans-serif"); txt.setAttribute("fill", "#f2f2f4");
-        lines.forEach((ln, i) => { const ts = document.createElementNS(NS, "tspan"); ts.setAttribute("x", cx + pad); ts.setAttribute("y", ny + pad + lh * i + lh / 2); ts.setAttribute("dominant-baseline", "central"); ts.textContent = ln; txt.appendChild(ts); });
-        const note = document.createElementNS(NS, "g"); note.setAttribute("class", "ai-note"); note.appendChild(box); note.appendChild(txt); peersG.appendChild(note);
-        let nw = 0; try { nw = txt.getBBox().width; } catch { /* not laid out */ }
-        if (!(nw > 0)) nw = Math.max(...lines.map((l) => l.length)) * 0.55 * th;
-        box.setAttribute("width", nw + 2 * pad);
-      }
-      tag.addEventListener("click", (ev) => { ev.stopPropagation(); E.followPeer = E.followPeer === cid ? null : cid; toast(E.followPeer ? `Following ${name}` : "Stopped following"); renderPeers(); });
-    }
+    const spec = peerCursorSpec(cid, p); if (spec) cursorSpecs.push(spec);
   }
+  syncPeerCursors(cursorSpecs);
   const had = (E.peerGhosts || []).length; E.peerGhosts = ghosts;
   if (had || ghosts.length) requestRender();
 }
