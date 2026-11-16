@@ -362,6 +362,8 @@ await scene('build', async (dir) => {
     { who: 'maya', side: 1, blocks: [named(/RP2040/)] },
     { who: 'dev', side: 1, blocks: [named(/Reset/)], edge: [named(/GPIO/)] },
   ];
+  // the edge headers sit on the board from the start: their tracks wait for the routing, so nothing is on the board before it
+  for (const W of WORK) for (const n of W.edge || []) { between.push(...(inside[n] || [])); delete inside[n]; }
   const GAP = 5, off = {};
   for (const side of [-1, 1]) {
     let y = ob[1];
@@ -471,7 +473,7 @@ await scene('build', async (dir) => {
   // b. each routes inside their own blocks
   async function* routeInside(W, wait) {
     for (let i = 0; i < wait; i++) yield;
-    for (const n of [...(W.edge || []), ...W.blocks]) yield* route(W.who, (inside[n] || []).map((id) => shifted(trackById.get(id), off[n][0], off[n][1])));
+    for (const n of W.blocks) yield* route(W.who, (inside[n] || []).map((id) => shifted(trackById.get(id), off[n][0], off[n][1])));
   }
   // c. and carries the finished blocks onto the board
   async function* moveAll(W, wait) { for (let i = 0; i < wait; i++) yield; for (const n of W.blocks) yield* moveOn(W.who, n); }
