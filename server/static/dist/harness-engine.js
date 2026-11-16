@@ -56347,9 +56347,9 @@ var init_kselect = __esm({
   }
 });
 
-// ../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.js
+// node_modules/opentype.js/dist/opentype.js
 var require_opentype = __commonJS({
-  "../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
+  "node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
     (function(global, factory) {
       typeof exports2 === "object" && typeof module2 !== "undefined" ? factory(exports2) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global = global || self, factory(global.opentype = {}));
     })(exports2, (function(exports3) {
@@ -100959,6 +100959,17 @@ function parseDoc(text3, docType) {
     } else if (k === "embedded_files") {
       doc2.embeddedFiles = node;
       continue;
+    } else if (k === "symbol_instances" && type === "sch") {
+      const m = /* @__PURE__ */ new Map();
+      for (const p of kids(node, "path")) {
+        const f2 = (key3) => {
+          const c = kid(p, key3);
+          return c ? str(c[1]) : "";
+        };
+        m.set(str(p[1]), { reference: f2("reference"), unit: num((kid(p, "unit") || [])[1], 1), value: f2("value"), footprint: f2("footprint") });
+      }
+      doc2.legacySymbolInstances = m;
+      continue;
     } else if (k === "lib_symbols" || k === "generator" || k === "generator_version" || k === "general" || k === "setup" || k === "symbol_instances" || k === "embedded_fonts" || k === "embedded_files" || k === "uuid") continue;
     else if (type === "pcb" && PCB_KINDS.has(k) && doc2.items.has(uuidOf(node))) (doc2.dupItems || (doc2.dupItems = [])).push({ id: uuidOf(node), node });
     else addItem(doc2, node);
@@ -103138,9 +103149,14 @@ function distSeg(p, a, b) {
   t = Math.max(0, Math.min(1, t));
   return Math.hypot(p[0] - (a[0] + t * dx), p[1] - (a[1] + t * dy));
 }
-function instanceRef(node, path2, project3) {
+function instanceRef(node, path2, project3, legacy) {
   const unitN = kid(node, "unit");
   let ref = propVal(node, "Reference"), unit2 = unitN ? num(unitN[1], 1) : 1, found = false;
+  const old = legacy && legacy.get("/" + [...path2.split("/").filter(Boolean).slice(1), str((kid(node, "uuid") || [])[1])].join("/"));
+  if (old) {
+    if (old.reference) ref = old.reference;
+    unit2 = old.unit;
+  }
   const inst = kid(node, "instances");
   if (inst) {
     const projects = kids(inst, "project");
@@ -103368,8 +103384,9 @@ function buildNetlist(root5, loadSheet, h3, project3) {
           }
         }
       } else if (k === "symbol") {
-        const power = h3.isPower(doc2, it), value = propVal(n2, "Value"), localPower = power && (h3.isLocalPower ? h3.isLocalPower(doc2, it) : libIsLocalPower(doc2, n2));
-        const { ref, unit: unit2 } = instanceRef(n2, "/" + inst.uuidPath.join("/"), project3);
+        const legacyValue = root5.doc.legacySymbolInstances && root5.doc.legacySymbolInstances.get("/" + [...inst.uuidPath.slice(1), it.id].join("/"));
+        const power = h3.isPower(doc2, it), value = legacyValue && legacyValue.value ? legacyValue.value : propVal(n2, "Value"), localPower = power && (h3.isLocalPower ? h3.isLocalPower(doc2, it) : libIsLocalPower(doc2, n2));
+        const { ref, unit: unit2 } = instanceRef(n2, "/" + inst.uuidPath.join("/"), project3, root5.doc.legacySymbolInstances);
         const inNetlist = !ref.startsWith("#") && !power, onBoard = yes3(n2, "on_board", true);
         const pins2 = h3.symbolPins(doc2, it);
         const units = unitCount(doc2, n2), unitRef = units > 1 ? ref + unitLetter2(unit2) : ref;
@@ -122452,7 +122469,7 @@ function drillFiles(m, baseName3, opt, ext = "drl") {
   return out2;
 }
 
-// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Core.js
+// node_modules/clipper2-ts/dist/Core.js
 var ClipType;
 (function(ClipType2) {
   ClipType2[ClipType2["NoClip"] = 0] = "NoClip";
@@ -123111,7 +123128,7 @@ var RectDUtils = {
 var InvalidRect64 = Object.freeze(Rect64Utils.createInvalid());
 var InvalidRectD = Object.freeze(RectDUtils.createInvalid());
 
-// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Engine.js
+// node_modules/clipper2-ts/dist/Engine.js
 var B02 = BigInt(0);
 var B22 = BigInt(2);
 var B42 = BigInt(4);
@@ -125976,7 +125993,7 @@ var Clipper = {
   }
 };
 
-// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Offset.js
+// node_modules/clipper2-ts/dist/Offset.js
 var JoinType;
 (function(JoinType2) {
   JoinType2[JoinType2["Miter"] = 0] = "Miter";
@@ -126592,7 +126609,7 @@ var ClipperOffset = class _ClipperOffset {
   }
 };
 
-// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Clipper.js
+// node_modules/clipper2-ts/dist/Clipper.js
 var B23 = BigInt(2);
 function intersectD(subject, clip2, fillRule, precision = 2) {
   return booleanOpD(ClipType.Intersection, subject, clip2, fillRule, precision);
@@ -132821,7 +132838,7 @@ function statAreas(m, o) {
   return { hasOutline, boardArea, frontCopper: total(front), backCopper: total(back), frontCourtyard: total(union2(fc)), backCourtyard: total(union2(bc2)) };
 }
 
-// ../../../kicad-collaborative/server/node_modules/three/src/extras/lib/earcut.js
+// node_modules/three/src/extras/lib/earcut.js
 function earcut(data, holeIndices, dim = 2) {
   const hasHoles = holeIndices && holeIndices.length;
   const outerLen = hasHoles ? holeIndices[0] * dim : data.length;
@@ -133242,7 +133259,7 @@ function signedArea2(data, start, end, dim) {
   return sum;
 }
 
-// ../../../kicad-collaborative/server/node_modules/three/src/extras/Earcut.js
+// node_modules/three/src/extras/Earcut.js
 var Earcut = class {
   /**
    * Triangulates the given shape definition by returning an array of triangles.
