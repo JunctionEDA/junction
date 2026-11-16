@@ -54,6 +54,8 @@ export interface SimItemInfo {
   tunerValue: string; tunerCommand: ((value: number) => string) | null;
   /** a potentiometer: TUNER_SLIDER tunes its wiper from 0 to 1 */
   tunerPot: boolean;
+  /** the model's Sim.Device and Sim.Type field values (SIM_MODEL::GetDeviceInfo / GetTypeInfo().fieldValue) */
+  device: string; typeField: string;
 }
 /** A hierarchical label as a .subckt port: its text and LABEL_FLAG_SHAPE. */
 export interface SpicePort { name: string; shape: string }
@@ -322,7 +324,8 @@ export function spiceNetlist(inp: SpiceNetlistInput): string {
   const itemLineOf = (it: Item): string => (it.multi ? muItemLine(it, it.multi) : S.itemLine(it.model, spiceItem(it)));
   if (inp.items) inp.items(items.map((it) => ({ ref: it.ref, name: it.multi ? muName(it) : S.itemName(it.model, spiceItem(it)), enabled: it.model.enabled, currents: it.multi ? muCurrents(it, it.multi) : S.currentNames(it.model, spiceItem(it)),
     pins: it.multi ? it.multi.pins.map((p) => ({ symbolPin: p.symbolPin, modelPin: p.node })) : it.model.pins.map((p) => ({ symbolPin: p.symbolPinNumber, modelPin: p.name })),
-    tunerValue: S.tunerParam(it.model)?.value || "", tunerCommand: S.tunerParam(it.model) ? (v: number) => S.tunerCommand(it.model, spiceItem(it), v) : null, tunerPot: it.model.cls === "r_pot" })));
+    tunerValue: S.tunerParam(it.model)?.value || "", tunerCommand: S.tunerParam(it.model) ? (v: number) => S.tunerCommand(it.model, spiceItem(it), v) : null, tunerPot: it.model.cls === "r_pot",
+    device: S.deviceInfo(it.model.deviceType).fieldValue, typeField: S.typeInfo(it.model.type).fieldValue })));
   const directives = readDirectives(inp.texts);
   let out = ".title KiCad schematic\n";
   if (inp.subckt) {

@@ -909,20 +909,30 @@ function tunerEl(tu: Tuner): HTMLElement {
 /** SIMULATOR_FRAME_UI::applyTuners: each tuner's value through its model's TunerCommand (SPICE_GENERATOR_IDEAL's
  *  "alter @r1=…", SPICE_GENERATOR_R_POT's "altermod @a…[position]=…", a DC source's "alter @v1=…"). */
 function tunerCommands(): string[] {
-  const out: string[] = [];
+  const out: string[] = [], report: string[] = [];
+  const items = (E.kdoc as unknown as { items: Map<string, unknown> }).items;
   for (const tu of S.tuners) {
+    if (tu.symId && !items.has(tu.symId)) { report.push(`${tu.name} not found`); continue; }
     const si = S.simItems.find((x) => x.name.toLowerCase() === tu.name.toLowerCase());
     const cmd = si && si.tunerCommand ? si.tunerCommand(tu.value) : "";
-    if (cmd) out.push(cmd); else log(`Could not apply tuned value(s):\n${tu.name} is not tunable\n`);
+    if (cmd) out.push(cmd); else report.push(`${tu.name} is not tunable`);
   }
+  // one message for every tuner, after them all (WX_STRING_REPORTER, DisplayErrorMessage)
+  if (report.length) void messageBox("Could not apply tuned value(s):\n" + report.join("\n"));
   return out;
 }
 function addTuner(name: string, symId: string | null): void {
   if (S.tuners.some((t) => t.name.toLowerCase() === name.toLowerCase())) return;
-  const it = S.circuit.items.find((i) => i.name.toLowerCase() === name.toLowerCase());
-  // SIM_MODEL::GetTunerParam: ideal passives, potentiometers and DC sources can be tuned
-  const si = S.simItems.find((x) => x.name.toLowerCase() === name.toLowerCase());
-  if (!it || !si || !si.tunerCommand) { void messageBox(`${name} is not tunable`); return; }
+  // SIMULATOR_FRAME_UI::AddTuner: the exporter's item of the reference (GetExporter()->FindItem), nothing without one
+  const si = S.simItems.find((x) => x.ref === name) || S.simItems.find((x) => x.name.toLowerCase() === name.toLowerCase());
+  const it = si ? S.circuit.items.find((i) => i.name.toLowerCase() === si.name.toLowerCase()) : null;
+  if (!si || !it) return;
+  // TUNER_SLIDER: SIM_MODEL::GetTunerParam, so ideal passives, potentiometers and sources can be tuned
+  if (!si.tunerCommand) {
+    void messageBox(`${name} has simulation model of type '${si.device} ${si.typeField}'.\n\nOnly passive R, L, C models and voltage and current sources may be tuned.`);
+    return;
+  }
+  if (S.tuners.some((t) => t.name.toLowerCase() === it.name.toLowerCase())) return;
   const line = S.netlist.split(/\r?\n/).find((l) => l.trim().toLowerCase().startsWith(name.toLowerCase() + " ")) || "";
   const tok = line.trim().split(/\s+/);
   const v = si.tunerPot && si.tunerValue === "" ? 0.5 : toDouble(si.tunerValue);
