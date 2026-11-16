@@ -117831,9 +117831,9 @@ function stampClass(G5, c, o, sign2, fixed2) {
   stampObstacle(G5, c, o, sign2, c.full, c.vfull);
   if (fixed2) stampObstacle(G5, c, o, sign2, c.fixed, c.vfixed);
 }
-function buildClass(G5, key3, width, clr, viaD, viaDrill, kind, open3 = true) {
+function buildClass(G5, key3, width, clr, viaD, viaDrill, kind, open3 = true, feed = false) {
   const n2 = G5.W * G5.H;
-  const c = { key: key3, width, clr, viaD, viaDrill, kind, open: open3, full: [], fixed: [], vfull: [], vfixed: [] };
+  const c = { key: key3, width, clr, viaD, viaDrill, kind, open: open3, feed, full: [], fixed: [], vfull: [], vfixed: [] };
   for (let l = 0; l < G5.layers.length; l++) {
     const m = new Uint16Array(n2);
     if (G5.outside) {
@@ -117845,6 +117845,9 @@ function buildClass(G5, key3, width, clr, viaD, viaDrill, kind, open3 = true) {
     }
     if (!open3 && G5.quiet) {
       for (let i = 0; i < n2; i++) if (G5.quiet[i]) m[i]++;
+    }
+    if (!feed && G5.clear) {
+      for (let i = 0; i < n2; i++) if (G5.clear[i]) m[i]++;
     }
     c.fixed.push(m);
     c.vfixed.push(m.slice());
@@ -118344,6 +118347,7 @@ var Router = class _Router {
     this.dropped = [];
     this.stat = { noSoft: 0, noBlockers: 0, tooMany: 0, ripped: 0, ripLimit: 0 };
     this.xtalNets = /* @__PURE__ */ new Set();
+    this.feedNets = /* @__PURE__ */ new Set();
     this.planeLayers = [];
     this.fanned = 0;
     this.relax = false;
@@ -118371,6 +118375,7 @@ var Router = class _Router {
     this.fenceShapes = [];
     this.ruleHit = /* @__PURE__ */ new Map();
     this.reports = /* @__PURE__ */ new Map();
+    this.refPads = null;
     this.ms = 0;
     this.passes = 0;
     this.W = Object.assign({}, TRAINED, { via: TRAINED.via * VIA_PRICE }, opts2.weights || {});
@@ -118664,6 +118669,11 @@ var Router = class _Router {
           const c = K11.kid(ko, k);
           return !!c && K11.str(c[1]) === "not_allowed";
         };
+        if (no("copperpour")) {
+          const t2 = cellsIn(polys);
+          const m = G5.noPour || (G5.noPour = new Uint8Array(W12 * H));
+          for (let i = 0; i < t2.length; i++) if (t2[i]) m[i] = 1;
+        }
         if (!no("tracks") && !no("vias")) continue;
         const t = cellsIn(polys);
         const tt = band(polys, t, maxTrack / 2), tv = band(polys, t, maxVia / 2);
@@ -118730,7 +118740,11 @@ var Router = class _Router {
         const polys = K11.kids(z2.node, "polygon").map((poly) => K11.ptsOf(poly)).filter((pts) => pts.length >= 3);
         if (!polys.some(inside2)) continue;
         const t = cellsIn(polys);
-        for (let i = 0; i < t.length; i++) if (t[i]) q4[i] = 1;
+        const cl = G5.clear || (G5.clear = new Uint8Array(W12 * H));
+        for (let i = 0; i < t.length; i++) if (t[i]) {
+          q4[i] = 1;
+          cl[i] = 1;
+        }
         marked = true;
         const band2 = this.opts.antennaBand === void 0 ? 1.2 : Math.max(0, +this.opts.antennaBand);
         if (band2 > 0) {
@@ -118748,7 +118762,10 @@ var Router = class _Router {
       }
       for (const p of pads2) {
         const n2 = nl.table.key(p.net) || "";
-        if (n2) this.xtalNets.add(n2);
+        if (n2) {
+          this.xtalNets.add(n2);
+          this.feedNets.add(n2);
+        }
       }
     }
     for (const it of doc2.items.values()) if (it.kind === "footprint") {
@@ -118938,7 +118955,7 @@ var Router = class _Router {
             for (const l of z2.layers) {
               const m = pour.mask[l] || (pour.mask[l] = new Uint8Array(W12 * H));
               const sh = this.opts.splitPlaneEnds ? shared()[l] : null;
-              for (let i = 0; i < t.length; i++) if (t[i]) {
+              for (let i = 0; i < t.length; i++) if (t[i] && !(G5.noPour && G5.noPour[i])) {
                 m[i] = 1;
                 if (!sh || sh[i] !== 2) zoneCells.push({ ix: i % W12, iy: i / W12 | 0, l });
               }
@@ -119031,10 +119048,11 @@ var Router = class _Router {
     }
     const kind = this.relax ? void 0 : this.kindFor(netKey);
     const open3 = !G5.quiet || this.xtalNets.has(netKey) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(netKey);
-    const key3 = `${width}/${clr}/${viaD}/${viaDrill}` + (kind ? "/" + kind : "") + (open3 ? "" : "/q");
+    const feed = this.feedNets.has(netKey);
+    const key3 = `${width}/${clr}/${viaD}/${viaDrill}` + (kind ? "/" + kind : "") + (open3 ? "" : "/q") + (feed ? "/f" : "");
     let c = G5.classes.get(key3);
     if (!c) {
-      c = buildClass(G5, key3, width, clr, viaD, viaDrill, kind, open3);
+      c = buildClass(G5, key3, width, clr, viaD, viaDrill, kind, open3, feed);
       if (this.conns.length) {
         for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G5, c, sh, 1, false);
       }
@@ -119406,11 +119424,21 @@ var Router = class _Router {
             };
             const cps = side(e.p, cp2, end), cns = side(e.n, cn, nEnd);
             const far = [cp2[other].p[0] - cn[nOther].p[0], cp2[other].p[1] - cn[nOther].p[1]];
+            const hand = (a, b) => {
+              const e2 = this.outward(a) || this.outward(b);
+              const v = [a.p[0] - b.p[0], a.p[1] - b.p[1]];
+              return e2 ? Math.sign(e2[0] * v[1] - e2[1] * v[0]) : 0;
+            };
+            const farHand = hand(cp2[other], cn[nOther]);
+            const side2 = (a, b) => {
+              const h3 = hand(a, b);
+              return !!h3 && !!farHand && h3 * farHand > 0;
+            };
             let pick = null;
             for (const a of cps) for (const b of cns) {
               const dd = d(a, b);
               if (dd < 1e-3 || dd > NEAR) continue;
-              const sc = dd + ((a.p[0] - b.p[0]) * far[0] + (a.p[1] - b.p[1]) * far[1] < 0 ? 5 : 0) + 0.05 * (d(a, cp2[other]) + d(b, cn[nOther]));
+              const sc = dd + (side2(a, b) ? 5 : 0) + 0.05 * (d(a, cp2[other]) + d(b, cn[nOther]));
               if (!pick || sc < pick[0] - 1e-9) pick = [sc, a, b];
             }
             if (pick && (pick[1] !== cp2[end] || pick[2] !== cn[nEnd])) {
@@ -119618,7 +119646,17 @@ var Router = class _Router {
     const out2 = (a, ld) => [r62(a.p[0] + ld.e[0] * ld.s), r62(a.p[1] + ld.e[1] * ld.s)];
     const tp = [Pa.p, out2(Pa, lead[0]), ...op, out2(Pb, lead[1]), Pb.p], tn = [Na.p, out2(Na, lead[0]), ...on2, out2(Nb, lead[1]), Nb.p];
     const sp = segs(tp), sn = segs(tn);
-    if (sp.some((a) => sn.some((b) => P.shapeGap(a, b) < clr - 1e-4))) return "the fan-out to the pads brings the two tracks too close";
+    if (sp.some((a) => sn.some((b) => P.shapeGap(a, b) < clr - 1e-4))) {
+      if (this.opts.debugPairs) {
+        const bad = [];
+        sp.forEach((a, i) => sn.forEach((b, j) => {
+          const g2 = P.shapeGap(a, b);
+          if (g2 < clr - 1e-4) bad.push(`${i}/${sp.length}-${j}/${sn.length}:${g2.toFixed(3)}`);
+        }));
+        console.log("   clash", bad.join(" "), JSON.stringify(tp.slice(-4)), JSON.stringify(tn.slice(-4)));
+      }
+      return "the fan-out to the pads brings the two tracks too close";
+    }
     this.cur = Object.assign({}, cp2);
     this.curSoft = false;
     if (!sp.every((sh) => this.clearOf(sh, l, pr.p.key, cp2.cls.clr)) || !sn.every((sh) => this.clearOf(sh, l, pr.n.key, cn.cls.clr))) return "a piece of the pair would not keep its clearance";
@@ -119634,7 +119672,7 @@ var Router = class _Router {
     const key3 = `pair/${w}/${gap}/${clr}` + (cp2.cls.open === false ? "/q" : "");
     let wide = G5.classes.get(key3);
     if (!wide) {
-      wide = buildClass(G5, key3, 2 * w + gap, clr, cp2.cls.viaD, cp2.cls.viaDrill, cp2.cls.kind, cp2.cls.open !== false);
+      wide = buildClass(G5, key3, 2 * w + gap, clr, cp2.cls.viaD, cp2.cls.viaDrill, cp2.cls.kind, cp2.cls.open !== false, !!cp2.cls.feed);
       for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G5, wide, sh, 1, false);
     }
     const half = (a) => {
@@ -121357,6 +121395,29 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     for (const [ref, g2] of this.groupOf) (members[g2] || (members[g2] = [])).push(ref);
     for (const g2 of Object.keys(members)) if (members[g2].length < 2) delete members[g2];
     return { clusters: Object.keys(members).length, inside: inside2, insideRouted, insideVias, critical, members };
+  }
+  /** The way a pad faces out of its part: along its own axis, away from the middle of the part's pads. */
+  outward(a) {
+    if (!a.axis) return null;
+    if (!this.refPads) {
+      const sum = /* @__PURE__ */ new Map();
+      for (const [k, v] of this.padNames) {
+        const r = v.replace(/\.[^.]*$/, "");
+        const [x, y] = k.split(",").map(Number);
+        const t = sum.get(r) || [0, 0, 0];
+        t[0] += x;
+        t[1] += y;
+        t[2]++;
+        sum.set(r, t);
+      }
+      this.refPads = new Map([...sum].map(([r, t]) => [r, [t[0] / t[2], t[1] / t[2]]]));
+    }
+    const ref = (this.padNames.get(a.p[0].toFixed(3) + "," + a.p[1].toFixed(3)) || "").replace(/\.[^.]*$/, "");
+    const c = this.refPads.get(ref);
+    if (!c) return null;
+    const s2 = (a.p[0] - c[0]) * a.axis[0] + (a.p[1] - c[1]) * a.axis[1];
+    if (Math.abs(s2) < 0.05) return null;
+    return s2 > 0 ? a.axis : [-a.axis[0], -a.axis[1]];
   }
   padName(p) {
     return this.padNames.get(p[0].toFixed(3) + "," + p[1].toFixed(3)) || `(${r62(p[0])}, ${r62(p[1])})`;
@@ -138659,12 +138720,13 @@ function physicsPlan(doc2, P, k, settings3, plan) {
   if (plan.what === "antenna") {
     const ants = plan.ref ? [find(plan.ref)].filter(Boolean) : S2.fps.filter(isAntenna);
     if (!ants.length) return { error: plan.ref ? `There is no part ${plan.ref} on the board.` : "The board has no antenna (a part with reference AE or ANT, or an antenna footprint)." };
-    const pitch = Math.max(0.8, plan.pitch || 2), out2 = [];
+    const pitch = Math.max(0.8, plan.pitch || 1), out2 = [];
     const radio = radioGHz(S2.fps, S2.padsOf.keys());
     for (const a of ants) {
       const patch = plan.kind ? plan.kind === "patch" : isPatch(a);
-      const box3 = patch ? a.box : antennaRegion(S2, a, plan.clearance >= 0 ? plan.clearance : LIMITS.antennaKeepout);
-      const have = S2.keepouts.some((q4) => q4.copper && hit4(q4.box, a.box));
+      const ko = S2.keepouts.find((q4) => q4.copper && hit4(q4.box, a.box));
+      const have = !!ko;
+      const box3 = patch ? a.box : ko && !(plan.clearance >= 0) ? ko.box : antennaRegion(S2, a, plan.clearance >= 0 ? plan.clearance : LIMITS.antennaKeepout);
       const pts = [];
       let skipped = 0;
       for (const [x, y] of ringPoints(S2, box3, r + 0.4, pitch, r + 0.3)) {
@@ -138974,7 +139036,9 @@ var CIRCUIT_RULES = [
   { id: "regulator.heat", what: "A linear regulator's package can lose the heat of its voltage drop at the load current" },
   { id: "led.current", what: "Every LED has a series resistor that sets a sane current" },
   { id: "nets.typos", what: "No two net names are a slip apart, and no named net ends at a single pin" },
-  { id: "passives.sizes", what: "Small resistors and capacitors use one package size where they can" }
+  { id: "passives.sizes", what: "Small resistors and capacitors use one package size where they can" },
+  { id: "bypass.damping", what: "A rail with many ceramic capacitors has one lossy (electrolytic, tantalum or polymer) capacitor to damp their resonance" },
+  { id: "converter.grounds", what: "A converter's analog and digital ground pins meet at one ground, at the chip" }
 ];
 var CIRCUIT_MANUAL = [
   "Each IC's support circuit was compared with the typical application in its datasheet: capacitor values and count, pull-ups, strapping pins.",
@@ -139291,6 +139355,30 @@ function reviewCircuit(c) {
       const minor = rows3.slice(1).filter(([, l]) => l.length <= Math.max(3, total2 * 0.15));
       if (minor.length) add2("passives.sizes", "note", `Most small resistors and capacitors here are ${rows3[0][0]}. One size keeps assembly cheap and the board easy to rework; move these to ${rows3[0][0]} unless their voltage, power or value needs the other size.`, minor.map(([s2, l]) => `${s2}: ${l.slice(0, 6).join(", ")}${l.length > 6 ? ` and ${l.length - 6} more` : ""}`));
     }
+  }
+  {
+    const LOSSY = /electrolytic|elko|tantal|polymer|poscap|oscon|e-?cap|CP_|CPol|_Elec|aluminum|alu\b/i;
+    const rows3 = [];
+    for (const net of supplyNets) {
+      if (isGround2(net)) continue;
+      const caps = capsToGround(net);
+      if (caps.length < 4) continue;
+      const lossy = caps.some((x) => LOSSY.test(x.part.lib + " " + x.part.value + " " + footprintOf(x.part)) || (farads(x.part.value) || 0) >= 47e-6);
+      if (!lossy) rows3.push(`${net}: ${caps.length} ceramic capacitors (${caps.slice(0, 6).map((x) => x.part.ref).join(", ")}${caps.length > 6 ? ", ..." : ""}) and no lossy one`);
+    }
+    if (rows3.length) add2("bypass.damping", "note", "Many ceramic bypass capacitors on one rail form high-Q resonances with the wiring between them (typically 5 to 20 MHz) that can ring or make the circuit oscillate (The Art of Electronics, 12.9.1A). One electrolytic, tantalum or polymer capacitor of about 10 uF on the rail damps them with its ESR.", rows3.slice(0, 12));
+  }
+  {
+    const rows3 = [];
+    for (const p of live2) {
+      const a = pinNamed(p, /^(AGND|GNDA|AVSS|VSSA|AGND\d*)$/i).map(pinNet).filter(Boolean), d = pinNamed(p, /^(DGND|GNDD|DVSS|VSSD|DGND\d*)$/i).map(pinNet).filter(Boolean);
+      if (!a.length || !d.length) continue;
+      const an = new Set(a), dn = new Set(d);
+      if ([...an].some((n2) => dn.has(n2))) continue;
+      const joined = [...an].some((n2) => across(n2, (q4) => !!q4 && q4.pins.length === 2).some((x) => dn.has(x.far)));
+      if (!joined) rows3.push(`${p.ref} (${p.value}): ${[...an].join(", ")} and ${[...dn].join(", ")}`);
+    }
+    if (rows3.length) add2("converter.grounds", "warning", "These parts have analog and digital ground pins on nets that never meet. Tie both to one ground plane right at the part (The Art of Electronics, chapter 13): the separate pins are there to keep digital return current off the analog side inside the chip, not to split the board's ground.", rows3);
   }
 }
 

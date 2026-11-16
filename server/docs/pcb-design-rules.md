@@ -499,6 +499,21 @@ breaking parallel tracks apart right after a pad row; a ground via placed beside
 back-side jump under a pair or a clock when a DC net could be crossed instead; teardrops; pour clearance of three
 dielectric heights beside impedance-controlled tracks.
 
+## The Art of Electronics (Horowitz and Hill, 3rd edition)
+
+Read 2026-11-16 from the owner's copy: section 8.16 (interference, shielding and grounding), 12.9 (on-board
+interconnections), and the grounding, bypassing and converter passages it points to. Most of its board advice was
+already here (a ground plane, a small ceramic at every supply pin, short loops, high-impedance nodes kept short and
+over ground, differential signalling between boards). New from it:
+
+| Rule | Where |
+|---|---|
+| Several ceramic bypass capacitors and the supply wiring between them ring at 5 to 20 MHz; one electrolytic, tantalum or polymer capacitor (about 10 uF) on the rail damps that with its ESR (12.9.1A, note 54) | `bypass.damping` (schematic review, note) |
+| A converter's AGND and DGND pins keep digital return current out of the analog side inside the chip; both go to one ground at the chip (chapter 13) | `converter.grounds` (schematic review, warning) |
+| Return currents of a high-current stage must not flow through the ground a low-level input refers to; tie low-level stages to the supply at the regulator's sense point (8.16.2A, figure 8.124) | manual: `power.return` notes it on the board |
+| A low-level stage may take its supply through a small RC (10 ohm, 10 uF) from the main rail (figure 8.125) | manual |
+| Fast clocks between boards go through a buffer or differential receiver on each board; edges of a nanosecond or less run as terminated microstrip or stripline (12.9.2) | manual, and `pairs`/impedance in the router |
+
 ## What is not automatic yet
 
 - Blind, buried and micro vias (HDI) and back-drilling.

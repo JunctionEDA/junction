@@ -84,8 +84,8 @@
   "parts": {
    "drc": 100,
    "pour_coverage": 100,
-   "pour_pieces": 50,
-   "signal_vias": 100,
+   "pour_pieces": 66,
+   "signal_vias": 93,
    "square_corners": 100,
    "track_length": 100,
    "unrouted": 0
@@ -94,26 +94,26 @@
    "copper_errors": 0,
    "ground_pour": {
     "B.Cu": {
-     "percent": 70.3,
+     "percent": 71.5,
      "pieces": 1
     },
     "F.Cu": {
-     "percent": 55.6,
-     "pieces": 35
+     "percent": 57.4,
+     "pieces": 27
     },
     "In1.Cu": {
-     "percent": 73.4,
-     "pieces": 2
+     "percent": 74.8,
+     "pieces": 1
     }
    },
-   "ground_vias": 338,
-   "power_vias": 34,
-   "signal_vias": 66,
+   "ground_vias": 390,
+   "power_vias": 35,
+   "signal_vias": 75,
    "square_corners": 0,
-   "track_mm": 2788.5,
-   "unrouted": 11
+   "track_mm": 2409.7,
+   "unrouted": 12
   },
-  "score": 70.8
+  "score": 71.0
  },
  "ledify": {
   "hand": {
