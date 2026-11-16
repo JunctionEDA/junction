@@ -339,6 +339,11 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.SYNC_PUSH_TOKEN || github.token }}
 
+      # For rebuilding the web editor when master changed it while the desktop was built.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Move master to the merge
         id: promote
         env:
@@ -371,9 +376,28 @@ jobs:
               restart "master changed desktop code: $(echo "$moved" | grep -vE "$safe" | head -5 | tr '\n' ' ')"
             fi
             if echo "$moved" | grep -q '^server/' && ! git diff --quiet "$BASE" HEAD -- server; then
-              restart "master and the sync both changed the web editor; its bundles need building again"
+              # Both sides changed the web editor.  The sync only touched it to regenerate
+              # tables from the C++ tree, so take master's web editor as it is and regenerate
+              # them here; nothing the desktop builds tested depends on server/.  (Restarting
+              # the whole 3.5 h run instead never finished: master's web code moves daily.)
+              git merge -q --no-commit "$tip" || true
+              git checkout -q "$tip" -- server
+              if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+                git merge --abort
+                restart "the new master does not merge cleanly: outside server/"
+              fi
+              git commit -q --no-edit
+              if sh tools/upstream-sync/regen_web.sh web-regen.log; then
+                if ! git diff --quiet -- server; then
+                  git add -A server
+                  git commit -q -m "Web editor: tables regenerated from the merged KiCad sources"
+                fi
+              else
+                echo "::warning::The regenerated tables do not pass the web checks on the new master; the web editor keeps master's tables."
+              fi
+            else
+              git merge -q --no-edit "$tip" || restart "the new master does not merge cleanly"
             fi
-            git merge -q --no-edit "$tip" || restart "the new master does not merge cleanly"
           fi
           git log -1 --format='%h %an <%ae> | %cn <%ce> | %s'
           git push origin HEAD:refs/heads/master || restart "master moved again during the push"
