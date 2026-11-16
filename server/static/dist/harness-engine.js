@@ -107849,6 +107849,7 @@ root.KiCadCanvas = api;
     const w = S2.wire;
     S2.wire = null;
     if (!w) return;
+    S2.wireEndedAt = Date.now();
     const list = simplifyWireList(w.segs);
     const unfold = S2.unfold;
     S2.unfold = null;
@@ -115131,7 +115132,8 @@ Link '${target3}' to this file?`)) return null;
         ev.preventDefault();
         return;
       }
-      if (toolOf(curTool()) || Date.now() - (S2.dragEndedAt || 0) < 600) {
+      const now = Date.now();
+      if (toolOf(curTool()) || now - (S2.dragEndedAt || 0) < 600 || now - (S2.wireEndedAt || 0) < 600) {
         ev.stopImmediatePropagation();
         ev.preventDefault();
       }
