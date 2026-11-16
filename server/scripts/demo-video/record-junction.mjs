@@ -183,7 +183,7 @@ const content = (() => { const b = Object.values(I.blocks).map((x) => x.box); re
 // ---------------------------------------------------------------- the schematic, one person and then four
 await scene('schematic', async (dir) => {
   const a = await open('ada', docOf('kicad_sch'), MAIN);
-  await reset(a, 'sch'); await clearPanels(a); await frame(a, content);
+  await reset(a, 'sch'); await clearPanels(a); await home(a);
   const ma = await mapOf(a);
   const RP = blockNamed(/RP2040/), rpSteps = (map) => schSteps(map, [RP]);
   const third = (steps, k) => { const n = Math.ceil(steps.length / 3); return steps.slice(k * n, (k + 1) * n); };
@@ -224,7 +224,7 @@ await scene('schematic', async (dir) => {
 await scene('ai', async (dir) => {
   const a = await open('ada', docOf('kicad_sch'), MAIN);
   await reset(a, 'sch', (i) => i.blockName === AI_BLOCK);
-  await clearPanels(a); await frame(a, content);
+  await clearPanels(a); await home(a);
   // the AI app's access key (Connect an AI assistant), warmed up in a scratch project so that it is not in this
   // document before Ada asks (the server starts its worker on the first call)
   await db.query(`UPDATE mcp_tokens SET expires_at = now() WHERE grant_id IN (SELECT id FROM mcp_grants WHERE user_id = $1 AND client_id LIKE 'kcm\\_key\\_%')`, [people.ada.id]);
@@ -489,7 +489,7 @@ await scene('history', async (dir) => {
 // ---------------------------------------------------------------- Parts from vendors
 await scene('parts', async (dir) => {
   const a = await open('ada', docOf('kicad_sch'), MAIN);
-  await clearPanels(a); await frame(a, content);
+  await clearPanels(a); await home(a);
   const before = await a.evaluate(() => [...window.CollabEditor.kdoc.items.keys()]);
   // where the part goes: the empty paper between the flash and RP2040 blocks
   const ma = await mapOf(a); const spot = ma.to([157, 160]);
