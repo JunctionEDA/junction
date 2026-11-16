@@ -6,8 +6,10 @@
 //              Every item goes in through that person's own editor, with their mouse on it.
 //   ai         Ada asks her AI app for the crystal circuit: it points at the gap (highlight) and proposes the
 //              circuit (apply_changes with propose), which Ada accepts.
-//   route      All four route the board, a corner each; then the planes are filled.
-//   history, parts, plugins, fab, viewer3d   short looks at the rest of the product.
+//   build      Ada draws the outline and runs Update PCB; everyone builds their blocks as clusters beside the
+//              board, routes inside each cluster, moves the clusters on, and all four route between them.
+//   parts      a part found at LCSC and placed in the schematic.
+//   history, plugins, fab, viewer3d   short looks at the rest of the product.
 //   simulate   the AI's simulate tool on the reset circuit (the plot it returns).
 //
 //   node record-junction.mjs [scene ...]
@@ -17,13 +19,14 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 import { BASE, PG_URL, mintJwt, mcp, share, record, sleep, POINTER } from './lib.mjs';
+import { splitTracks, padsOf } from './clusters.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OUT = process.env.OUT || path.join(here, 'out');
 const STATE = path.join(OUT, 'state.json');
-const all = ['schematic', 'ai', 'place', 'route', 'history', 'parts', 'plugins', 'websim', 'fab', 'viewer3d'];
+const all = ['schematic', 'ai', 'build', 'history', 'parts', 'plugins', 'fab', 'viewer3d'];
 const want = process.argv.slice(2).length ? process.argv.slice(2) : all;
 const state = fs.existsSync(STATE) ? JSON.parse(fs.readFileSync(STATE, 'utf8')) : {};
 const save = () => fs.writeFileSync(STATE, JSON.stringify(state, null, 1));
@@ -69,7 +72,7 @@ async function home(page) { await page.mouse.move(page.viewportSize().width / 2,
 async function mapOf(page) {
   const [m0, m1] = await page.evaluate(() => { const E = window.CollabEditor; return [E.api.worldMm({ clientX: 0, clientY: 0 }), E.api.worldMm({ clientX: 1000, clientY: 1000 })]; });
   const sx = 1000 / (m1[0] - m0[0]), sy = 1000 / (m1[1] - m0[1]);
-  return { to: (p) => [(p[0] - m0[0]) * sx, (p[1] - m0[1]) * sy] };
+  return { to: (p) => [(p[0] - m0[0]) * sx, (p[1] - m0[1]) * sy], from: (q) => [m0[0] + q[0] / sx, m0[1] + q[1] / sy] };
 }
 // zoom so that the world box [x0, y0, x1, y1] fills the view: Home, then wheel notches at its centre while it fits
 async function frame(page, box) {
@@ -188,31 +191,33 @@ await scene('schematic', async (dir) => {
   const plan = [
     { who: 'ada', at: 0, steps: (m) => [...schSteps(m, [blockNamed(/USB/), blockNamed(/buck/)]), ...third(rpSteps(m), 1)] },
     { who: 'ben', at: 22, steps: (m) => [...schSteps(m, [blockNamed(/QSPI/), blockNamed(/Reset/)]), ...third(rpSteps(m), 2)] },
-    { who: 'chloe', at: 52, steps: (m) => third(rpSteps(m), 0) },
-    { who: 'dev', at: 70, steps: (m) => schSteps(m, [blockNamed(/GPIO/)]) },
+    { who: 'chloe', at: 62, steps: (m) => third(rpSteps(m), 0) },
+    { who: 'dev', at: 100, steps: (m) => schSteps(m, [blockNamed(/GPIO/)]) },
   ];
   const A = actor(a, plan[0].steps(ma), [800, 450]);
-  const actors = [A]; const pending = []; const joins = {};
+  const actors = [A]; const pending = []; const joins = {}, follow = {};
   const rec = await record(a, dir);
   await rec.hold(700);
   for (;;) {
     for (const p of plan.slice(1)) if (!p.started && A.done >= p.at) {
       p.started = true;
-      pending.push((async () => { const pg = await open(p.who, docOf('kicad_sch'), p.who === 'ben' ? MAIN : SIDE); await clearPanels(pg); if (p.who === 'ben') await frame(pg, content); else await home(pg); const m = await mapOf(pg); return { p, pg, m }; })());
+      pending.push((async () => { const pg = await open(p.who, docOf('kicad_sch'), SIDE); await clearPanels(pg); await home(pg); const m = await mapOf(pg); return { p, pg, m }; })());
     }
     // a person who has finished opening joins: their window is ready, their cursor comes in from the side
     for (let i = pending.length - 1; i >= 0; i--) {
       const r = await Promise.race([pending[i], sleep(0).then(() => null)]);
-      if (r) { pending.splice(i, 1); rec.mark(`join-${r.p.who}`); if (r.p.who === 'ben') rec.add(r.pg, path.join(dir, 'ben')); joins[r.p.who] = A.done; const Z = actor(r.pg, r.p.steps(r.m), [1150, 100]); Z.who = r.p.who; actors.push(Z); }
+      if (r) { pending.splice(i, 1); rec.mark(`join-${r.p.who}`); joins[r.p.who] = A.done; const Z = actor(r.pg, r.p.steps(r.m), [1150, 100]); Z.who = r.p.who; Z.map = r.m; Z.joined = rec.now(); follow[r.p.who] = []; actors.push(Z); }
     }
     let any = false; for (const X of actors) if (await advance(X)) any = true;
+    // where a newcomer's cursor is on Ada's screen for their first seconds: the video zooms in and follows it
+    for (const X of actors) if (X.who && rec.now() - X.joined < 5) { const q = ma.to(X.map.from(X.pos)); follow[X.who].push([rec.now(), Math.round(q[0]), Math.round(q[1])]); }
     await rec.tick();
     if (!any && !pending.length && plan.every((p) => p.started || p.at === 0)) break;
   }
   for (const X of actors) await settled(X.page);
   await rec.hold(900);
   const r = await rec.stop();
-  return { ...r, items: Object.fromEntries(actors.map((X) => [X.who || 'ada', X.done])), joins };
+  return { ...r, items: Object.fromEntries(actors.map((X) => [X.who || 'ada', X.done])), joins, follow };
 });
 
 // ---------------------------------------------------------------- Ada's AI: points at the gap, proposes the crystal, she accepts
@@ -254,18 +259,14 @@ await scene('ai', async (dir) => {
   return { ...r, highlight: h.text.slice(0, 200), proposal: p.text.slice(0, 300), items: items.length };
 });
 
-// ---------------------------------------------------------------- the board takes shape: outline, Update PCB from Schematic, blocks
-// Ada draws the Edge.Cuts outline and brings the footprints in with Update PCB from Schematic (they land in a row
-// under the board).  Selecting a block's symbols in her schematic window selects its footprints on the board
-// (cross-probing).  Each person then gathers their blocks beside the board, arranged as the layout has them,
-// and moves each block onto the board.
-const PEOPLE_BLOCKS = { ada: [/^USB/, /buck/], ben: [/QSPI/, /crystal/], chloe: [/RP2040/], dev: [/Reset/, /GPIO/] };
+// the board scene's helpers, in each person's page
 const DEMO = () => {
   const E = window.CollabEditor, P = window.PcbTools, K = window.KiCadCanvas;
   const fp = (ref) => { for (const it of E.kdoc.items.values()) if (it.kind === 'footprint' && it.ref === ref) return it; return null; };
   window.__demo = {
     at: (refs) => { const p = refs.map(fp).filter(Boolean).map((it) => K.atOf(it.node)); return p.length ? [p.reduce((s, q) => s + q[0], 0) / p.length, p.reduce((s, q) => s + q[1], 0) / p.length] : null; },
     move: (refs, dx, dy) => { const ids = refs.map(fp).filter(Boolean).map((it) => it.id); const c = P.moveChanges(E.kdoc, ids, dx, dy); if (c.length) E.api.commitChanges(c, 'move'); },
+    moveGroup: (refs, more, dx, dy) => { const ids = refs.map(fp).filter(Boolean).map((it) => it.id).concat(more.filter((id) => E.kdoc.items.has(id))); const c = P.moveChanges(E.kdoc, ids, dx, dy); if (c.length) E.api.commitChanges(c, 'move'); },
     snap: (ref, node, dx, dy) => {
       const it = fp(ref); if (!it) return false;
       const n = JSON.parse(JSON.stringify(node)); const u = n.find((c) => Array.isArray(c) && c[0] === 'uuid'); if (u) u[1] = it.id;
@@ -274,44 +275,79 @@ const DEMO = () => {
     count: () => { let n = 0; for (const it of E.kdoc.items.values()) if (it.kind === 'footprint') n++; return n; },
   };
 };
-await scene('place', async (dir) => {
+// ---- a person's routing steps for a set of tracks: net by net, each run of joined segments drawn in one stroke
+function trackSteps(map, tracks) {
+  const steps = [];
+  for (const n of [...new Set(tracks.map((t) => t.net))]) {
+    let rest = tracks.filter((t) => t.net === n); let at = rest.reduce((m, t) => (t.pts[0][1] < m[1] ? t.pts[0] : m), rest[0].pts[0]);
+    let chain = []; let chainEnd = null;
+    const flush = () => { if (chain.length) { const pts = [chain[0].pts[0], ...chain.flatMap((c) => c.pts.slice(1))]; steps.push({ path: pts.map(map.to), commit: chain.map((c) => c.add), label: 'route', max: 6, speed: 80, alongMax: 8, alongPx: 40 }); chain = []; } };
+    while (rest.length) {
+      rest.sort((p, q) => Math.min(...p.pts.map((x) => dist(x, at))) - Math.min(...q.pts.map((x) => dist(x, at))));
+      let t = rest.shift();
+      if (t.kind !== 'via' && dist(t.pts[t.pts.length - 1], at) < dist(t.pts[0], at)) t = { ...t, pts: t.pts.slice().reverse() };
+      const joins = chainEnd && dist(t.pts[0], chainEnd) < 0.01 && t.kind !== 'via' && chain.length < 12;
+      if (!joins) flush();
+      if (t.kind === 'via') { steps.push({ path: [map.to(t.pts[0])], commit: [t.add], label: 'via', max: 5, speed: 80 }); at = t.pts[0]; chainEnd = null; continue; }
+      chain.push(t); chainEnd = t.pts[t.pts.length - 1]; at = chainEnd;
+    }
+    flush();
+  }
+  return steps;
+}
+// a track moved by (dx, dy): its points and the change that adds it there
+const shiftNum = (v, d) => String(+(Number(v) + d).toFixed(6));
+function shifted(t, dx, dy) {
+  if (!dx && !dy) return t;
+  const sexpr = t.add.sexpr.replace(/\((start|end|mid|at) (-?[\d.]+) (-?[\d.]+)/g, (_, k, x, y) => `(${k} ${shiftNum(x, dx)} ${shiftNum(y, dy)}`);
+  return { ...t, pts: t.pts.map((p) => [p[0] + dx, p[1] + dy]), add: { ...t.add, sexpr } };
+}
+
+// ---------------------------------------------------------------- the board, block by block
+// Ada draws the outline and brings the footprints in with Update PCB from Schematic.  Then everyone builds their
+// blocks the way a layout person does: each block as a tight cluster beside the board, its parts round the chip's
+// pins as the layout has them, routed inside the cluster first; then the finished cluster, tracks and all, goes
+// onto the board.  Dev puts the edge headers on first, since everything else sits between them.  Last, all four
+// route between the blocks, and the planes are filled.
+await scene('build', async (dir) => {
   const FP = I.footprints, OUTL = { bbox: I.outline.reduce((b, o) => [Math.min(b[0], o.bbox[0]), Math.min(b[1], o.bbox[1]), Math.max(b[2], o.bbox[2]), Math.max(b[3], o.bbox[3])], [Infinity, Infinity, -Infinity, -Infinity]), adds: I.outline.map((o) => o.add) };
+  const ob = OUTL.bbox;
+  const { inside, between } = splitTracks(I);
+  const trackById = new Map(I.board.map((t) => [t.id, t]));
   const blockNames = Object.values(I.blocks).map((b) => b.name);
-  const mine = Object.fromEntries(Object.entries(PEOPLE_BLOCKS).map(([w, res]) => [w, blockNames.filter((n) => res.some((r) => r.test(n)))]));
+  const named = (re) => blockNames.find((n) => re.test(n));
+  // each block's copper extent (its pads), from which the cluster's spot beside the board is worked out
+  const padBox = (name) => { const ps = FP.filter((f) => f.block === name).flatMap(padsOf); return [Math.min(...ps.map((p) => p.x - p.r)), Math.min(...ps.map((p) => p.y - p.r)), Math.max(...ps.map((p) => p.x + p.r)), Math.max(...ps.map((p) => p.y + p.r))]; };
+  // who builds which block, and where its cluster is built (left or right of the board, stacked)
+  const WORK = [
+    { who: 'ada', side: -1, blocks: [named(/^USB/), named(/buck/)] },
+    { who: 'ben', side: -1, blocks: [named(/QSPI/), named(/crystal/)] },
+    { who: 'chloe', side: 1, blocks: [named(/RP2040/)] },
+    { who: 'dev', side: 1, blocks: [named(/Reset/)], edge: [named(/GPIO/)] },
+  ];
+  const GAP = 5, off = {};
+  for (const side of [-1, 1]) {
+    let y = ob[1];
+    for (const w of WORK.filter((x) => x.side === side)) for (const n of w.blocks) {
+      const b = padBox(n), W = b[2] - b[0], H = b[3] - b[1];
+      const x0 = side < 0 ? ob[0] - GAP - W : ob[2] + GAP;
+      off[n] = [+(x0 - b[0]).toFixed(3), +(y - b[1]).toFixed(3)]; y += H + 4;
+    }
+  }
+  for (const w of WORK) for (const n of w.edge || []) off[n] = [0, 0];
+  const allBoxes = Object.entries(off).map(([n, d]) => { const b = padBox(n); return [b[0] + d[0], b[1] + d[1], b[2] + d[0], b[3] + d[1]]; });
+  const VIEW = [Math.min(ob[0], ...allBoxes.map((b) => b[0])) - 3, Math.min(ob[1], ...allBoxes.map((b) => b[1])) - 4, Math.max(ob[2], ...allBoxes.map((b) => b[2])) + 3, Math.max(ob[3], ...allBoxes.map((b) => b[3])) + 6];
+  console.log('  clusters', JSON.stringify(off), 'view', VIEW.map((v) => v.toFixed(1)).join(','));
+
   const a = await open('ada', docOf('kicad_pcb'), MAIN);
   // start from an empty board: no footprints, no outline, no copper
   await a.evaluate(() => { const E = window.CollabEditor, P = window.PcbTools; const out = []; for (const it of E.kdoc.items.values()) if (['footprint', 'segment', 'arc', 'via', 'zone'].includes(it.kind) || (/^gr_(rect|line|arc)$/.test(it.kind) && JSON.stringify(it.node).includes('Edge.Cuts'))) out.push(P.removedChange(it)); if (out.length) E.api.commitChanges(out, 'reset'); });
   await settled(a); await clearPanels(a);
-  // cross-probing as KiCad ships it: select, centre and zoom to the probed footprints (Preferences > PCB Editor > Display Options)
-  await a.evaluate(() => { const k = 'kui.prefs'; let p = {}; try { p = JSON.parse(localStorage.getItem(k) || '{}') || {}; } catch (e) { p = {}; }
-    p.pcbDisplay = { ...(p.pcbDisplay || {}), crossProbing: { onSelection: true, centerOnItems: true, zoomToFit: true, autoHighlight: true, flashSelection: false } }; localStorage.setItem(k, JSON.stringify(p)); });
-  await a.reload(); await a.waitForFunction(() => window.CollabEditor && window.CollabEditor.ws && window.CollabEditor.ws.readyState === 1, null, { timeout: 90000 });
-  await a.evaluate(() => { window.KiCadCanvas.renderPng = () => new Promise(() => {}); }); await sleep(1200); await clearPanels(a);
-  const ob = OUTL.bbox, VIEW = [ob[0] - 52, ob[1] - 8, ob[2] + 92, ob[3] + 42];
-  await fitTo(a, VIEW);
-  await a.evaluate(DEMO);
-  // Ada's schematic, in a second window of her browser: the cross-probe partner
-  const sctx = a.context(); const sp = await sctx.newPage(); await sp.setViewportSize(MAIN);
-  await sp.goto(a.url().replace(/doc=[^&]+/, `doc=${docOf('kicad_sch')}`));
-  await sp.waitForFunction(() => window.CollabEditor && window.CollabEditor.ws && window.CollabEditor.ws.readyState === 1, null, { timeout: 90000 });
-  await sp.evaluate(() => { window.KiCadCanvas.renderPng = () => new Promise(() => {}); }); await sleep(800); await clearPanels(sp); await home(sp);
-  // everyone else: a board window and, beside it in the same browser, their schematic (the cross-probe partner);
-  // their board keeps its view when a probe comes in (Preferences > Display Options: select only)
-  const others = {}, osch = {};
-  for (const w of ['ben', 'chloe', 'dev']) {
-    others[w] = await open(w, docOf('kicad_pcb'));
-    await others[w].evaluate(() => { const k = 'kui.prefs'; let p = {}; try { p = JSON.parse(localStorage.getItem(k) || '{}') || {}; } catch (e) { p = {}; }
-      p.pcbDisplay = { ...(p.pcbDisplay || {}), crossProbing: { onSelection: true, centerOnItems: false, zoomToFit: false, autoHighlight: true, flashSelection: false } }; localStorage.setItem(k, JSON.stringify(p)); });
-    await others[w].reload(); await others[w].waitForFunction(() => window.CollabEditor && window.CollabEditor.ws && window.CollabEditor.ws.readyState === 1, null, { timeout: 90000 });
-    await others[w].evaluate(() => { window.KiCadCanvas.renderPng = () => new Promise(() => {}); }); await sleep(600);
-    await clearPanels(others[w]); await fitTo(others[w], VIEW); await others[w].evaluate(DEMO);
-    const q = await others[w].context().newPage(); await q.setViewportSize(MAIN);
-    await q.goto(others[w].url().replace(/doc=[^&]+/, `doc=${docOf('kicad_sch')}`));
-    await q.waitForFunction(() => window.CollabEditor && window.CollabEditor.ws && window.CollabEditor.ws.readyState === 1, null, { timeout: 90000 });
-    await q.evaluate(() => { window.KiCadCanvas.renderPng = () => new Promise(() => {}); }); await sleep(500); await clearPanels(q); await home(q);
-    osch[w] = q; await others[w].bringToFront();
-  }
-  const rec = await record([a, sp], [dir, path.join(dir, 'sch')]);
+  await fitTo(a, VIEW); await a.evaluate(DEMO);
+  const others = {};
+  for (const w of ['ben', 'chloe', 'dev']) { others[w] = await open(w, docOf('kicad_pcb')); await clearPanels(others[w]); await fitTo(others[w], VIEW); await others[w].evaluate(DEMO); }
+  const pages = { ada: a, ...others };
+  const rec = await record(a, dir);
   const m = await mapOf(a);
   await rec.hold(500);
   // 1. the outline: Edge.Cuts, corner to corner
@@ -329,133 +365,99 @@ await scene('place', async (dir) => {
   const close = a.locator('button', { hasText: /^Close$/ }).first(); if (await close.count()) { at = await clickOn(rec, a, at, close, 350); }
   await a.keyboard.press('Escape'); await rec.hold(300); await a.keyboard.press('Escape');
   await settled(a); await rec.hold(600); rec.mark('updated');
-  await fitTo(a, VIEW);
+  // the footprints landed in rows under the board: the view takes them in while the parts are taken to their blocks
+  const row = await a.evaluate(() => { let b = null; for (const it of window.CollabEditor.kdoc.items.values()) if (it.kind === 'footprint') b = b ? [Math.min(b[0], it.bbox[0]), Math.min(b[1], it.bbox[1]), Math.max(b[2], it.bbox[2]), Math.max(b[3], it.bbox[3])] : it.bbox.slice(); return b; });
+  const WIDE = row ? [Math.min(VIEW[0], row[0] - 2), Math.min(VIEW[1], row[1] - 2), Math.max(VIEW[2], row[2] + 2), Math.max(VIEW[3], row[3] + 2)] : VIEW.slice();
+  console.log('  row', row && row.map((v) => v.toFixed(1)).join(','), 'wide', WIDE.map((v) => v.toFixed(1)).join(','));
+  await fitTo(a, WIDE, rec);
+  for (const w of Object.keys(others)) await fitTo(others[w], WIDE);
 
-  // 3. each person takes their blocks: a box round them in the schematic selects their footprints on the board
-  //    (cross-probing), Pack and Move (P) gathers them under the cursor, a click puts the group down beside the board
-  const bx = (ob[0] + ob[2]) / 2, by = (ob[1] + ob[3]) / 2;
-  const blockOf = (name) => Object.values(I.blocks).find((b) => b.name === name);
-  const pages = { ada: a, ...others }, schs = { ada: sp, ...osch };
-  const pos = { ada: at, ben: [1300, 200], chloe: [300, 700], dev: [1300, 750] }, spos = { ada: [800, 450], ben: [800, 450], chloe: [800, 450], dev: [800, 450] };
-  const smaps = {}; for (const w of Object.keys(schs)) smaps[w] = await mapOf(schs[w]);
-  const ease = (k) => k * k * (3 - 2 * k);
-  const centroid = (refs) => { const f = FP.filter((x) => refs.includes(x.ref)); return [f.reduce((s, x) => s + x.at[0], 0) / f.length, f.reduce((s, x) => s + x.at[1], 0) / f.length]; };
-  // where a person's pack goes: beside the board on the side its parts end up, at their height
-  const parking = (refs) => { const c = centroid(refs); const side = c[0] < bx ? -1 : 1; return [side < 0 ? ob[0] - 16 : ob[2] + 16 + (c[0] > bx + 6 ? 18 : 0), Math.max(ob[1] + 6, Math.min(ob[3] - 6, by + (c[1] - by) * 1.05))]; };
-  // a person's selection on the board (ids), read from their page
-  const selected = (page) => page.evaluate(() => { const E = window.CollabEditor; const out = []; for (const id of E.selection || []) { const it = E.kdoc.items.get(id); if (it && it.kind === 'footprint') out.push(it.ref); } return out; });
-  const PARK = { ada: [[ob[0] - 48, ob[1] - 4]], ben: [[ob[0] - 48, ob[1] + 22], [ob[0] - 48, ob[1] + 36]], chloe: [[ob[2] + 8, ob[1] - 4]], dev: [[ob[2] + 8, ob[1] + 14], [ob[2] + 40, ob[1] + 14]] };
-  async function* glideOn(page, w, to, frames, posOf = pos) { const from = posOf[w]; for (let f = 1; f <= frames; f++) { const k = ease(f / frames); const p = [from[0] + (to[0] - from[0]) * k, from[1] + (to[1] - from[1]) * k]; await page.mouse.move(p[0], p[1]); posOf[w] = p; yield; } }
-  async function* takeBlocks(w, groups, wait) {
-    for (let i = 0; i < wait; i++) yield;
-    const pg = pages[w], sch = schs[w], sm = smaps[w];
-    for (const [gi, names] of groups.entries()) {
-      const boxes = names.map(blockOf).filter(Boolean).map((b) => b.box); if (!boxes.length) continue;
-      const box = [Math.min(...boxes.map((b) => b[0])) - 2, Math.min(...boxes.map((b) => b[1])) - 2, Math.max(...boxes.map((b) => b[2])) + 2, Math.max(...boxes.map((b) => b[3])) + 2];
-      const refs = FP.filter((x) => names.includes(x.block)).map((x) => x.ref); if (!refs.length) continue;
-      // the schematic: a box round the blocks
-      const s0 = sm.to([box[0], box[1]]), s1 = sm.to([box[2], box[3]]);
-      yield* glideOn(sch, w, s0, w === 'ada' ? 12 : 8, spos);
-      await sch.mouse.down(); yield;
-      yield* glideOn(sch, w, s1, w === 'ada' ? 20 : 12, spos);
-      await sch.mouse.up(); if (w === 'ada') rec.mark('probe');
-      // the board takes the probe
-      for (let i = 0; i < 60; i++) { const got = await selected(pg); if (refs.every((r) => got.includes(r))) break; yield; }
-      if (w === 'ada') {
-        for (let i = 0; i < 45; i++) yield;          // the board has zoomed to them: let it be seen
-        rec.mark('probed');
-        await fitTo(pg, VIEW, rec);                    // and back out, by the wheel
-      }
-      await pg.bringToFront();
-      // Pack and Move: the parts gather under the cursor and follow it until the click
-      const mp = await mapOf(pg); const live = await pg.evaluate((r) => window.__demo.at(r), refs);
-      yield* glideOn(pg, w, mp.to(live), 10);
-      await pg.keyboard.press('p'); yield; yield;
-      // the carry puts the pack's first part where the click is: each person has their own spot beside the board
-      const park = PARK[w][Math.min(gi, PARK[w].length - 1)];
-      yield* glideOn(pg, w, mp.to(park), 22);
-      await pg.mouse.down(); await pg.mouse.up(); yield;
-      await pg.keyboard.press('Escape'); yield;
-    }
-  }
-  const jobs = [
-    takeBlocks('ada', [mine.ada], 0),
-    takeBlocks('ben', mine.ben.map((n) => [n]), 30),
-    takeBlocks('chloe', [mine.chloe], 55),
-    takeBlocks('dev', mine.dev.map((n) => [n]), 75),
-  ];
-  const runAll = async (list) => { const live = list.slice(); while (live.length) { for (let i = live.length - 1; i >= 0; i--) { const r = await live[i].next(); if (r.done) live.splice(i, 1); } await rec.tick(); } };
-  rec.mark('gather'); await runAll(jobs);
-  for (const w of Object.keys(pages)) await settled(pages[w]);
-  await rec.hold(700); rec.mark('grouped');
 
-  // 4. each person puts their parts on the board, one by one: picked up, carried, turned and dropped where it goes
   const maps = {}; for (const w of Object.keys(pages)) maps[w] = await mapOf(pages[w]);
-  async function* placeParts(w, wait) {
-    for (let i = 0; i < wait; i++) yield;
+  const pos = { ada: at, ben: [1300, 200], chloe: [300, 700], dev: [1300, 750] };
+  const ease = (k) => k * k * (3 - 2 * k);
+  async function* glideTo(w, to, frames) { const pg = pages[w], from = pos[w]; for (let f = 1; f <= frames; f++) { const k = ease(f / frames); const p = [from[0] + (to[0] - from[0]) * k, from[1] + (to[1] - from[1]) * k]; await pg.mouse.move(p[0], p[1]); pos[w] = p; yield; } }
+  const bigFirst = (refs) => refs.sort((p, q) => (q.node && /Connector|RP2040|QFN|SOT|SOIC|Crystal/.test(JSON.stringify(q.node[1])) ? 1 : 0) - (p.node && /Connector|RP2040|QFN|SOT|SOIC|Crystal/.test(JSON.stringify(p.node[1])) ? 1 : 0));
+  // a part picked up from the row, carried and put down at its spot in the cluster (the layout's spot + the cluster's offset)
+  async function* placePart(w, part, d) {
     const pg = pages[w], mp = maps[w];
-    const refs = FP.filter((x) => mine[w].includes(x.block)).sort((p, q) => (q.node && /Connector|RP2040|QFN/.test(JSON.stringify(q.node[1])) ? 1 : 0) - (p.node && /Connector|RP2040|QFN/.test(JSON.stringify(p.node[1])) ? 1 : 0));
-    for (const part of refs) {
-      const from = await pg.evaluate((r) => window.__demo.at([r]), part.ref); if (!from) continue;
-      yield* glideOn(pg, w, mp.to(from), 8);
-      const frames = 12; let last = from;
-      for (let f = 1; f <= frames; f++) {
-        const k = ease(f / frames); const now = [from[0] + (part.at[0] - from[0]) * k, from[1] + (part.at[1] - from[1]) * k];
-        const sc = mp.to(now); await pg.mouse.move(sc[0], sc[1]); pos[w] = sc;
-        await pg.evaluate(([r, dx, dy]) => window.__demo.move([r], dx, dy), [part.ref, now[0] - last[0], now[1] - last[1]]); last = now; yield;
-      }
-      await pg.evaluate(([ref, node]) => window.__demo.snap(ref, node, 0, 0), [part.ref, part.node]); yield;
+    const from = await pg.evaluate((r) => window.__demo.at([r]), part.ref); if (!from) return;
+    yield* glideTo(w, mp.to(from), 8);
+    const to = [part.at[0] + d[0], part.at[1] + d[1]], frames = 12; let last = from;
+    for (let f = 1; f <= frames; f++) {
+      const k = ease(f / frames); const now = [from[0] + (to[0] - from[0]) * k, from[1] + (to[1] - from[1]) * k];
+      const sc = mp.to(now); await pg.mouse.move(sc[0], sc[1]); pos[w] = sc;
+      await pg.evaluate(([r, dx, dy]) => window.__demo.move([r], dx, dy), [part.ref, now[0] - last[0], now[1] - last[1]]); last = now; yield;
     }
+    await pg.evaluate(([ref, node, dx, dy]) => window.__demo.snap(ref, node, dx, dy), [part.ref, part.node, d[0], d[1]]); yield;
   }
-  rec.mark('place');
-  await runAll([placeParts('ada', 0), placeParts('ben', 6), placeParts('chloe', 3), placeParts('dev', 9)]);
+  // routing: the person's cursor draws each run, and the run is committed as it ends
+  async function* route(w, tracks) {
+    if (!tracks.length) return;
+    const A = actor(pages[w], trackSteps(maps[w], tracks), pos[w]);
+    while (await advance(A)) yield;
+    pos[w] = A.pos;
+  }
+  // a finished cluster, parts and tracks together, carried onto the board
+  async function* moveOn(w, name) {
+    const pg = pages[w], mp = maps[w], d = off[name]; if (!d[0] && !d[1]) return;
+    const refs = FP.filter((f) => f.block === name).map((f) => f.ref), ids = inside[name] || [];
+    const b = padBox(name), c = [(b[0] + b[2]) / 2 + d[0], (b[1] + b[3]) / 2 + d[1]];
+    yield* glideTo(w, mp.to(c), 10);
+    await pg.mouse.down(); yield; yield;
+    const frames = 24; let last = [0, 0];
+    for (let f = 1; f <= frames; f++) {
+      const k = ease(f / frames), now = [-d[0] * k, -d[1] * k];
+      const sc = mp.to([c[0] + now[0], c[1] + now[1]]); await pg.mouse.move(sc[0], sc[1]); pos[w] = sc;
+      await pg.evaluate(([r, i, dx, dy]) => window.__demo.moveGroup(r, i, dx, dy), [refs, ids, now[0] - last[0], now[1] - last[1]]); last = now; yield;
+    }
+    await pg.mouse.up();
+    // land exactly where the layout has them
+    for (const f of FP.filter((x) => x.block === name)) await pg.evaluate(([ref, node]) => window.__demo.snap(ref, node, 0, 0), [f.ref, f.node]);
+    yield; yield; yield;
+  }
+  // a. everyone takes their parts out of the rows and lays out their blocks beside the board (Dev: the edge headers
+  //    straight onto the board)
+  async function* placeAll(W, wait) {
+    for (let i = 0; i < wait; i++) yield;
+    for (const n of W.edge || []) for (const part of bigFirst(FP.filter((f) => f.block === n))) yield* placePart(W.who, part, [0, 0]);
+    for (const n of W.blocks) for (const part of bigFirst(FP.filter((f) => f.block === n))) yield* placePart(W.who, part, off[n]);
+  }
+  // b. each routes inside their own blocks
+  async function* routeInside(W, wait) {
+    for (let i = 0; i < wait; i++) yield;
+    for (const n of [...(W.edge || []), ...W.blocks]) yield* route(W.who, (inside[n] || []).map((id) => shifted(trackById.get(id), off[n][0], off[n][1])));
+  }
+  // c. and carries the finished blocks onto the board
+  async function* moveAll(W, wait) { for (let i = 0; i < wait; i++) yield; for (const n of W.blocks) yield* moveOn(W.who, n); }
+  const runAll = async (list) => { const live = list.slice(); while (live.length) { for (let i = live.length - 1; i >= 0; i--) { const r = await live[i].next(); if (r.done) live.splice(i, 1); } await rec.tick(); } };
+  const remap = async () => { for (const w of Object.keys(pages)) maps[w] = await mapOf(pages[w]); };
+  rec.mark('build');
+  await runAll(WORK.map((W, i) => placeAll(W, [0, 6, 3, 9][i])));
   for (const w of Object.keys(pages)) await settled(pages[w]);
-  await rec.hold(900); rec.mark('placed');
-
-  // 5. the other way: Ada clicks the USB-C connector on the board and her schematic shows it
-  const j1 = FP.find((x) => x.ref === 'J1'); const j1at = (await mapOf(a)).to(j1.at);
-  await rec.glide(a, pos.ada, j1at, 600); await a.mouse.click(j1at[0], j1at[1]); rec.mark('j1');
-  await rec.wait(900); await rec.hold(2200); rec.mark('j1-shown');
-  return await rec.stop();
-});
-
-// ---------------------------------------------------------------- four people route the board
-await scene('route', async (dir) => {
-  const a = await open('ada', docOf('kicad_pcb'), MAIN);
-  await reset(a, 'pcb'); await clearPanels(a);
-  const outline = await a.evaluate(() => { let b = null; for (const it of window.CollabEditor.kdoc.items.values()) if (/^gr_(rect|line|arc)$/.test(it.kind) && it.bbox && JSON.stringify(it.node).includes('Edge.Cuts')) b = b ? [Math.min(b[0], it.bbox[0]), Math.min(b[1], it.bbox[1]), Math.max(b[2], it.bbox[2]), Math.max(b[3], it.bbox[3])] : it.bbox.slice(); return b; });
-  await frame(a, [outline[0] - 2, outline[1] - 2, outline[2] + 2, outline[3] + 2]);
-  const others = {};
-  for (const w of ['ben', 'chloe', 'dev']) { others[w] = await open(w, docOf('kicad_pcb')); await clearPanels(others[w]); await home(others[w]); }
-  const tracks = I.board.filter((i) => i.kind !== 'zone');
+  await rec.hold(500); rec.mark('clustered');
+  // closer in for the routing: the board and the blocks round it
+  await fitTo(a, VIEW, rec); for (const w of Object.keys(others)) await fitTo(others[w], VIEW); await remap();
+  rec.mark('inner');
+  await runAll(WORK.map((W, i) => routeInside(W, [0, 4, 2, 6][i])));
+  for (const w of Object.keys(pages)) await settled(pages[w]);
+  await rec.hold(600); rec.mark('onboard');
+  await runAll(WORK.map((W, i) => moveAll(W, [0, 10, 5, 15][i])));
+  for (const w of Object.keys(pages)) await settled(pages[w]);
+  await rec.hold(700); rec.mark('blocks');
+  // 3. all four route between the blocks, each taking the nets of one quarter of the board
+  const tracks = between.map((id) => trackById.get(id));
   const nets = [...new Set(tracks.map((t) => t.net))];
-  const cOf = (n) => { const t = tracks.filter((x) => x.net === n); return [t.reduce((s, x) => s + x.pts[0][0], 0) / t.length, t.reduce((s, x) => s + x.pts[0][1], 0) / t.length]; };
-  const mx = (outline[0] + outline[2]) / 2, my = (outline[1] + outline[3]) / 2;
+  const cOf = (n) => { const t = tracks.filter((x) => x.net === n); return [t.reduce((s2, x) => s2 + x.pts[0][0], 0) / t.length, t.reduce((s2, x) => s2 + x.pts[0][1], 0) / t.length]; };
+  const mx = (ob[0] + ob[2]) / 2, my = (ob[1] + ob[3]) / 2;
   const quad = { ada: [], ben: [], chloe: [], dev: [] };
   for (const n of nets) { const c = cOf(n); quad[c[1] < my ? (c[0] < mx ? 'ada' : 'ben') : (c[0] < mx ? 'chloe' : 'dev')].push(n); }
-  const plan = (map, list) => {
-    const steps = [];
-    for (const n of list) {
-      let rest = tracks.filter((t) => t.net === n); let at = rest.reduce((m, t) => (t.pts[0][1] < m[1] ? t.pts[0] : m), rest[0].pts[0]);
-      let chain = []; let chainEnd = null;
-      const flush = () => { if (chain.length) { const pts = [chain[0].pts[0], ...chain.flatMap((c) => c.pts.slice(1))]; steps.push({ path: pts.map(map.to), commit: chain.map((c) => c.add), label: 'route', max: 6, speed: 80, alongMax: 8, alongPx: 40 }); chain = []; } };
-      while (rest.length) {
-        rest.sort((p, q) => Math.min(...p.pts.map((x) => dist(x, at))) - Math.min(...q.pts.map((x) => dist(x, at))));
-        let t = rest.shift();
-        if (t.kind !== 'via' && dist(t.pts[t.pts.length - 1], at) < dist(t.pts[0], at)) t = { ...t, pts: t.pts.slice().reverse() };
-        const joins = chainEnd && dist(t.pts[0], chainEnd) < 0.01 && t.kind !== 'via' && chain.length < 12;
-        if (!joins) flush();
-        if (t.kind === 'via') { steps.push({ path: [map.to(t.pts[0])], commit: [t.add], label: 'via', max: 5, speed: 80 }); at = t.pts[0]; chainEnd = null; continue; }
-        chain.push(t); chainEnd = t.pts[t.pts.length - 1]; at = chainEnd;
-      }
-      flush();
-    }
-    return steps;
-  };
-  const actors = [actor(a, plan(await mapOf(a), quad.ada), [800, 450])];
-  for (const w of ['ben', 'chloe', 'dev']) actors.push(actor(others[w], plan(await mapOf(others[w]), quad[w]), [600, 400]));
-  const rec = await record(a, dir);
-  await rec.hold(600);
+  // zoomed on the board for the routing, by the wheel (everyone)
+  const BOARDV = [ob[0] - 2, ob[1] - 2, ob[2] + 2, ob[3] + 2];
+  await fitTo(a, BOARDV, rec); for (const w of Object.keys(others)) await fitTo(others[w], BOARDV);
+  for (const w of Object.keys(pages)) maps[w] = await mapOf(pages[w]);
+  const actors = Object.keys(pages).map((w) => actor(pages[w], trackSteps(maps[w], tracks.filter((t) => quad[w].includes(t.net))), w === 'ada' ? [800, 450] : [600, 400]));
+  rec.mark('route');
   await together(rec, actors);
   for (const X of actors) await settled(X.page);
   rec.mark('routed'); await rec.hold(500);
@@ -465,7 +467,7 @@ await scene('route', async (dir) => {
   await rec.wait(3500); rec.mark('filled'); await rec.hold(800);
   const r = await rec.stop();
   const left = await a.evaluate(() => window.PcbTools.ratsnest(window.CollabEditor.kdoc).length);
-  return { ...r, nets: nets.length, tracks: tracks.filter((t) => t.kind !== 'via').length, vias: tracks.filter((t) => t.kind === 'via').length, unrouted: left, byPerson: Object.fromEntries(Object.entries(quad).map(([k, v]) => [k, v.length])) };
+  return { ...r, inside: Object.fromEntries(Object.entries(inside).map(([k, v]) => [k, v.length])), between: between.length, unrouted: left, byPerson: Object.fromEntries(Object.entries(quad).map(([k, v]) => [k, v.length])) };
 });
 
 // ---------------------------------------------------------------- History: everyone's edits, scrubbable
@@ -486,18 +488,34 @@ await scene('history', async (dir) => {
 // ---------------------------------------------------------------- Parts from vendors
 await scene('parts', async (dir) => {
   const a = await open('ada', docOf('kicad_sch'), MAIN);
-  await home(a);
+  await clearPanels(a); await frame(a, content);
+  const before = await a.evaluate(() => [...window.CollabEditor.kdoc.items.keys()]);
+  // where the part goes: the empty paper under the RP2040 block
+  const ma = await mapOf(a); const spot = ma.to([230, 242]);
   const rec = await record(a, dir);
   await rec.hold(300);
-  const at = await menu(rec, a, [800, 450], 'tools', '/Add Part from Vendor/');
+  let at = await menu(rec, a, [800, 450], 'tools', '/Add Part from Vendor/');
   await rec.hold(600);
   for (const ch of 'TLV62569') { await a.keyboard.type(ch); await rec.hold(90); }
   await a.keyboard.press('Enter'); rec.mark('search');
-  await rec.wait(6000);
+  await rec.until(a.locator('text=/^TLV62569DBVR$/').first().waitFor({ timeout: 30000 })); await rec.hold(500);
   const row = a.locator('text=/^TLV62569DBVR$/').first();
-  if (await row.count()) { const bb = await row.boundingBox(); await rec.glide(a, at, [bb.x + 40, bb.y + bb.height / 2], 500); await row.click(); await rec.wait(3000); }
-  await rec.hold(800);
-  return await rec.stop();
+  at = await clickOn(rec, a, at, row, 500); rec.mark('picked');
+  await rec.wait(2500); await rec.hold(900);
+  // Place Symbol: the part comes in on the cursor, a click puts it down
+  const place = a.locator('button', { hasText: /^Place Symbol$/ }).first();
+  at = await clickOn(rec, a, at, place, 600); rec.mark('place');
+  await rec.wait(1500);
+  await rec.glide(a, at, spot, 1100); await rec.hold(300);
+  await a.mouse.click(spot[0], spot[1]); rec.mark('placed');
+  await rec.hold(400); await a.keyboard.press('Escape'); await rec.hold(300);
+  await settled(a);
+  await rec.glide(a, spot, [spot[0] + 120, spot[1] + 90], 700); await rec.hold(1800);
+  const r = await rec.stop();
+  // take it out again: the Pico's schematic stays as it was
+  const added = await a.evaluate((b) => { const E = window.CollabEditor, T = window.CollabTools.sch._, had = new Set(b), out = []; for (const it of E.kdoc.items.values()) if (!had.has(it.id)) out.push({ id: it.id, kind: 'REMOVED', typeName: T.typeNameFor(it), properties: [] }); if (out.length) E.api.commitChanges(out, 'reset'); return out.length; }, before);
+  await settled(a);
+  return { ...r, added };
 });
 
 // ---------------------------------------------------------------- Plugins: one catalog
@@ -515,29 +533,6 @@ await scene('plugins', async (dir) => {
   at = await clickOn(rec, a, at, a.locator('text=/^Catalog$/').first(), 450);
   await rec.wait(3500);
   await rec.glide(a, at, [at[0] + 200, at[1] + 220], 900); await rec.hold(900);
-  return await rec.stop();
-});
-
-// ---------------------------------------------------------------- the web simulator, on the RUN pin's power-on sheet (sim/build.mjs)
-await scene('websim', async (dir) => {
-  const simProject = JSON.parse(fs.readFileSync(path.join(OUT, 'sim.json'), 'utf8')).project;
-  const simDocs = (await (await fetch(`${BASE}/api/projects/${simProject}`, { headers: { Authorization: `Bearer ${ada}` } })).json()).docs;
-  const a = await open('ada', simDocs.find((d) => d.docType === 'kicad_sch').docId, MAIN, simProject);
-  await home(a);
-  const rec = await record(a, dir);
-  await rec.hold(500);
-  let at = await menu(rec, a, [800, 450], 'inspect', '/Simulator/');
-  await rec.wait(2500);
-  const run = a.locator('#simframe button[title^="Run Simulation"]').first();
-  at = await clickOn(rec, a, at, (await run.count()) ? run : a.locator('#simframe button').nth(4), 500);
-  await rec.until(a.waitForFunction(() => /Data Rows/.test(document.querySelector('#sim-console')?.value || ''), null, { timeout: 120000 }));
-  await rec.hold(300); rec.mark('ran');
-  for (const sig of ['V(3V3)', 'V(/RUN)']) {
-    const box = a.locator('#simframe tr', { hasText: sig }).first().locator('input[type=checkbox]').first();
-    at = await clickOn(rec, a, at, box, 450); await rec.wait(900);
-  }
-  rec.mark('plotted');
-  await rec.glide(a, at, [700, 420], 900); await rec.hold(1500);
   return await rec.stop();
 });
 

@@ -85,6 +85,24 @@
     }
     return T.length;
   };
+  // A camera move inside a window: when someone joins, the view closes in on their cursor (follows: a track of
+  // [footage time, x, y] in the window's own pixels), keeps it in frame while it moves, and pulls back out.
+  const ease = (k) => k * k * (3 - 2 * k);
+  function camera(I, ft) {
+    const W = I.w.w, H = I.w.h; let sc = 1, tx = 0, ty = 0;
+    for (const f of I.w.follows) {
+      const k = ft - f.t0; if (k < 0 || k > f.len) continue;
+      const e = ease(clamp(Math.min(k / (f.in || 0.5), (f.len - k) / (f.out || 0.7)), 0, 1));
+      const tr = f.track; let j = 0; while (j < tr.length - 1 && tr[j + 1][0] <= ft) j++;
+      const a = tr[j], b = tr[Math.min(j + 1, tr.length - 1)], u = b[0] > a[0] ? clamp((ft - a[0]) / (b[0] - a[0]), 0, 1) : 0;
+      // the cursor, in the window's pixels (the photographs are the window's size: f.sx scales them to the box)
+      const px = (a[1] + (b[1] - a[1]) * u) * f.sx, py = (a[2] + (b[2] - a[2]) * u) * f.sx;
+      sc = 1 + (f.s - 1) * e;
+      const wantX = px + (W / 2 - px) * e * 0.7, wantY = py + (H / 2 - py) * e * 0.7;
+      tx = clamp(wantX - sc * px, W - sc * W, 0); ty = clamp(wantY - sc * py, H - sc * H, 0);
+    }
+    I.img.style.transformOrigin = '0 0'; I.img.style.transform = sc === 1 ? '' : `translate(${tx}px, ${ty}px) scale(${sc})`;
+  }
   window.seek = async (t) => {
     const waits = []; let caption = '', capA = 0, speed = '', spA = 0;
     for (const L of layers) {
@@ -95,6 +113,7 @@
         const ft = s.from + local * s.speed;      // footage time
         for (const I of L.imgs) { if (I.w.from) { const k = clamp(local / (I.w.tween || 0.6), 0, 1), e = k * k * (3 - 2 * k), g = (n) => I.w.from[n] + (I.w[n] - I.w.from[n]) * e;
             I.box.style.left = g('x') + 'px'; I.box.style.top = g('y') + 'px'; I.box.style.width = g('w') + 'px'; I.box.style.height = g('h') + 'px'; }
+          if (I.w.follows) camera(I, ft);
           const src = I.w.dir + '/' + frameAt(I.w.frames, ft); if (src !== I.src) { I.src = src; I.img.src = src; waits.push(I.img.decode().catch(() => {})); } }
         for (const c of s.captions || []) if (local >= c.at && local < c.until) {
           const fin = s.cutIn && c.at === 0 ? 1 : (local - c.at) / 0.25, fout = s.cutOut && c.until >= s.length ? 1 : (c.until - local) / 0.25;

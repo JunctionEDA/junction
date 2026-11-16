@@ -94,6 +94,7 @@ export async function record(pages, dirs) {
     wait: async (ms) => { const end = Date.now() + ms; let last = Date.now(); do { await tick(0); await sleep(60); const now = Date.now(); t += (now - last) / 1000; last = now; } while (Date.now() < end); },
     until: async (promise) => { let done = false, value, error; promise.then((v) => { done = true; value = v; }, (e) => { done = true; error = e; }); let last = Date.now(); while (!done) { await tick(0); await sleep(150); const now = Date.now(); t += (now - last) / 1000; last = now; } if (error) throw error; return value; },
     mark: (name) => { marks[name] = +t.toFixed(3); },
+    now: () => +t.toFixed(3),
     // photograph another page from now on (a person who joins mid-take); its folder has no photographs from before
     add: (page, d) => { fs.rmSync(d, { recursive: true, force: true }); fs.mkdirSync(d, { recursive: true }); pages.push(page); dirs.push(d); marks[`add-${path.basename(d)}`] = +t.toFixed(3); },
     // A mouse path a person could have made: eased, one photograph per step.
