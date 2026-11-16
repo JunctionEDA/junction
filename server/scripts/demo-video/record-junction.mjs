@@ -343,7 +343,8 @@ await scene('build', async (dir) => {
   // start from an empty board: no footprints, no outline, no copper
   await a.evaluate(() => { const E = window.CollabEditor, P = window.PcbTools; const out = []; for (const it of E.kdoc.items.values()) if (['footprint', 'segment', 'arc', 'via', 'zone'].includes(it.kind) || (/^gr_(rect|line|arc)$/.test(it.kind) && JSON.stringify(it.node).includes('Edge.Cuts'))) out.push(P.removedChange(it)); if (out.length) E.api.commitChanges(out, 'reset'); });
   await settled(a); await clearPanels(a);
-  await fitTo(a, VIEW); await a.evaluate(DEMO);
+  // an empty board's Home zooms onto its one text: zoom out by the wheel twice over before framing
+  await home(a); await fitTo(a, VIEW); await fitTo(a, VIEW); await a.evaluate(DEMO);
   const others = {};
   for (const w of ['ben', 'chloe', 'dev']) { others[w] = await open(w, docOf('kicad_pcb')); await clearPanels(others[w]); await fitTo(others[w], VIEW); await others[w].evaluate(DEMO); }
   const pages = { ada: a, ...others };
@@ -364,7 +365,7 @@ await scene('build', async (dir) => {
   await rec.hold(700);
   const close = a.locator('button', { hasText: /^Close$/ }).first(); if (await close.count()) { at = await clickOn(rec, a, at, close, 350); }
   await a.keyboard.press('Escape'); await rec.hold(300); await a.keyboard.press('Escape');
-  await settled(a); await rec.hold(600); rec.mark('updated');
+  await settled(a); await rec.glide(a, at, [800, 470], 500); at = [800, 470]; await rec.hold(300); rec.mark('updated');
   // the footprints landed in rows under the board: the view takes them in while the parts are taken to their blocks
   const row = await a.evaluate(() => { let b = null; for (const it of window.CollabEditor.kdoc.items.values()) if (it.kind === 'footprint') b = b ? [Math.min(b[0], it.bbox[0]), Math.min(b[1], it.bbox[1]), Math.max(b[2], it.bbox[2]), Math.max(b[3], it.bbox[3])] : it.bbox.slice(); return b; });
   const WIDE = row ? [Math.min(VIEW[0], row[0] - 2), Math.min(VIEW[1], row[1] - 2), Math.max(VIEW[2], row[2] + 2), Math.max(VIEW[3], row[3] + 2)] : VIEW.slice();
@@ -490,8 +491,8 @@ await scene('parts', async (dir) => {
   const a = await open('ada', docOf('kicad_sch'), MAIN);
   await clearPanels(a); await frame(a, content);
   const before = await a.evaluate(() => [...window.CollabEditor.kdoc.items.keys()]);
-  // where the part goes: the empty paper under the RP2040 block
-  const ma = await mapOf(a); const spot = ma.to([230, 242]);
+  // where the part goes: the empty paper between the flash and RP2040 blocks
+  const ma = await mapOf(a); const spot = ma.to([157, 160]);
   const rec = await record(a, dir);
   await rec.hold(300);
   let at = await menu(rec, a, [800, 450], 'tools', '/Add Part from Vendor/');
@@ -507,7 +508,10 @@ await scene('parts', async (dir) => {
   at = await clickOn(rec, a, at, place, 600); rec.mark('place');
   await rec.wait(1500);
   await rec.glide(a, at, spot, 1100); await rec.hold(300);
-  await a.mouse.click(spot[0], spot[1]); rec.mark('placed');
+  await a.mouse.click(spot[0], spot[1]); await rec.hold(300);
+  const newCount = () => a.evaluate((b) => { const had = new Set(b); let n = 0; for (const id of window.CollabEditor.kdoc.items.keys()) if (!had.has(id)) n++; return n; }, before);
+  if (!(await newCount())) { await a.mouse.move(spot[0] + 2, spot[1] + 2); await rec.hold(200); await a.mouse.down(); await a.mouse.up(); await rec.hold(300); }
+  rec.mark('placed'); console.log('  placed items:', await newCount());
   await rec.hold(400); await a.keyboard.press('Escape'); await rec.hold(300);
   await settled(a);
   await rec.glide(a, spot, [spot[0] + 120, spot[1] + 90], 700); await rec.hold(1800);
