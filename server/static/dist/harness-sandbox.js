@@ -2320,7 +2320,7 @@ class Board(_Doc):
         if seat:      # the radio's matching network first: it has exactly one place, in line from the radio pin to the feed
             self._geom = None
             radio = tuple(r for r in self._radio() if r not in hold)
-            out["seated"] = self.seat(refs=list(radio), skip=hold + caps, giveway=tuple(self._serving())) if radio else {}
+            out["seated"] = self.seat(refs=list(radio), skip=hold + caps, giveway=tuple(r for r in self._serving() if r.lower() not in {h.lower() for h in hold})) if radio else {}      # a part the floor plan fixed gives way to nothing
         if bypass:    # then the bypass capacitors, each at its supply pin, before a crystal or a pull-up takes the spot
             self._geom = None
             out["bypass"] = self.place_bypass(skip=hold + tuple(self._hangers()) + radio)
