@@ -192,6 +192,25 @@ def clean_svg(path, prefix):
     return vb, scope_classes(inner, prefix)
 
 
+_CONSTRAINT_SOURCES = None
+
+
+def constraint_sources():
+    """BITMAPS::constraint_<x> -> the file name (no .svg) bitmap_dir_constraints makes it from, read from the
+    BMAPS_CONSTRAINTS and BMAPS_CONSTRAINTS_GEOM lists of resources/bitmaps_png/CMakeLists.txt."""
+    global _CONSTRAINT_SOURCES
+    if _CONSTRAINT_SOURCES is None:
+        _CONSTRAINT_SOURCES = {}
+        with open(os.path.join(ROOT, "resources", "bitmaps_png", "CMakeLists.txt"), encoding="utf-8") as f:
+            text = f.read()
+        for m in re.finditer(r"set\(\s*BMAPS_CONSTRAINTS(?:_GEOM)?\s+(.*?)\)", text, re.S):
+            for line in m.group(1).splitlines():
+                bmn = line.split("#", 1)[0].strip()
+                if bmn:
+                    _CONSTRAINT_SOURCES["constraint_" + bmn.replace("-", "_")] = bmn
+    return _CONSTRAINT_SOURCES
+
+
 def collect_icons(names):
     icons = {}
     for n in sorted(names):
@@ -201,11 +220,11 @@ def collect_icons(names):
             if not os.path.exists(p) and n.startswith("constraint_"):
                 # bitmap_dir_constraints (resources/bitmaps_png/CMakeLists.txt): sources/<theme>/constraints/<name>.svg,
                 # hyphens in the file name becoming underscores in BITMAPS::constraint_<name>
-                d = os.path.join(ROOT, "resources", "bitmaps_png", "sources", theme, "constraints")
-                for f in (os.listdir(d) if os.path.isdir(d) else []):
-                    if f.endswith(".svg") and "constraint_" + f[:-4].replace("-", "_") == n:
-                        p = os.path.join(d, f)
-                        break
+                # The bmn named in BMAPS_CONSTRAINTS / BMAPS_CONSTRAINTS_GEOM picks the file: the directory holds pairs
+                # that normalise to the same name (copper-to-edge-clearance / copper_to_edge_clearance) and differ.
+                bmn = constraint_sources().get(n)
+                if bmn:
+                    p = os.path.join(ROOT, "resources", "bitmaps_png", "sources", theme, "constraints", bmn + ".svg")
             if os.path.exists(p):
                 vb, inner = clean_svg(p, f"k-{n}-{theme[0]}")
                 entry["vb"] = vb
