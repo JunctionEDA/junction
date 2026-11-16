@@ -209,21 +209,14 @@ check('the shared library shows up for the other project member', /Motor Board/.
 await shot(B, '12-shared-library-other-client');
 await B.keyboard.press('Escape');
 
-// ---------------------------------------------------------------- API keys, Mouser and DigiKey
-await openDialog(A); await A.click('.kp-tab[data-tab="keys"]'); await A.waitForSelector('.kp-card[data-vendor="mouser"]');
-check('LCSC needs no key; Mouser and DigiKey ask for one', /No key needed/.test(await A.locator('.kp-card[data-vendor="lcsc"]').innerText()) && /No key/.test(await A.locator('.kp-card[data-vendor="mouser"]').innerText()));
-await A.fill('.kp-card[data-vendor="mouser"] input', 'wrong-key'); await A.click('.kp-card[data-vendor="mouser"] .kp-btn.primary');
-await A.waitForFunction(() => /did not accept/.test(document.querySelector('.kp-card[data-vendor="mouser"]').innerText));
-check('a wrong key is refused with the reason', true);
-await A.fill('.kp-card[data-vendor="mouser"] input', 'test-mouser-key'); await A.click('.kp-card[data-vendor="mouser"] .kp-btn.primary');
-await A.waitForFunction(() => /Your key/.test(document.querySelector('.kp-card[data-vendor="mouser"]').innerText));
-await A.fill('.kp-card[data-vendor="digikey"] input[data-field="client_id"]', 'test-digikey-id'); await A.fill('.kp-card[data-vendor="digikey"] input[data-field="client_secret"]', 'test-digikey-secret');
-await A.click('.kp-card[data-vendor="digikey"] .kp-btn.primary');
-await A.waitForFunction(() => /Your key/.test(document.querySelector('.kp-card[data-vendor="digikey"]').innerText));
-await A.fill('.kp-card[data-vendor="farnell"] input[data-field="api_key"]', 'test-farnell-key'); await A.click('.kp-card[data-vendor="farnell"] .kp-btn.primary');
-await A.waitForFunction(() => /Your key/.test(document.querySelector('.kp-card[data-vendor="farnell"]').innerText));
-check('the right keys are saved', true);
-await shot(A, '13-api-keys');
+// ---------------------------------------------------------------- vendor keys: no tab in the dialog; the API still takes them
+await openDialog(A);
+check('the dialog has no API Keys tab', await A.locator('.kp-tab[data-tab="keys"]').count() === 0);
+const putKey = (vendor, body) => A.evaluate(async ([vendor, body]) => { const r = await fetch(`/api/parts/keys/${vendor}`, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return r.status; }, [vendor, body]);
+check('a wrong key is refused', await putKey('mouser', { api_key: 'wrong-key' }) >= 400);
+const saved = [await putKey('mouser', { api_key: 'test-mouser-key' }), await putKey('digikey', { client_id: 'test-digikey-id', client_secret: 'test-digikey-secret' }), await putKey('farnell', { api_key: 'test-farnell-key' })];
+check('the right keys are saved', saved.every((c) => c === 200), saved.join());
+await A.keyboard.press('Escape'); await openDialog(A);
 await A.click('.kp-tab[data-tab="search"]'); await search(A, 'STM32F103C8T6');
 const vendorsSeen = await A.evaluate(() => [...new Set([...document.querySelectorAll('#kp-results tr.kp-row')].map((r) => r.dataset.vendor))].sort().join());
 check('a search now covers all four vendors', vendorsSeen === 'digikey,farnell,lcsc,mouser', vendorsSeen);

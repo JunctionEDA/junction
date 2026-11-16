@@ -224,10 +224,11 @@ fields they carry, with stock and the price break for the number of boards,
 finds and assigns a vendor part to lines that have none, and downloads the BOM
 in JLCPCB's assembly format or in full.
 
-LCSC needs no key. Mouser, DigiKey and Farnell need API keys, either for the
+LCSC needs no key. Mouser, DigiKey and Farnell need API keys set for the
 whole deployment (`MOUSER_API_KEY`, `DIGIKEY_CLIENT_ID`, `DIGIKEY_CLIENT_SECRET`,
-`FARNELL_API_KEY` with `FARNELL_STORE`, default `uk.farnell.com`) or
-per person in the dialog's API Keys tab (stored encrypted in `vendor_keys`).
+`FARNELL_API_KEY` with `FARNELL_STORE`, default `uk.farnell.com`). The dialog has no
+keys page; a person's own key can still be stored through `PUT /api/parts/keys/{vendor}`
+(encrypted in `vendor_keys`).
 None of them publishes drawings, so their parts use the LCSC drawing for the same
 manufacturer part number when there is one.
 

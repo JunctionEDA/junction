@@ -93,7 +93,6 @@ const CSS = `
 .kp-lib:hover{background:var(--sel-soft)}
 .kp-lib.on{background:var(--sel)}
 .kp-lib small{display:block;color:var(--ink-2);font-size:11px}
-.kp-keys{padding:14px 16px;overflow:auto;flex:1;display:grid;gap:12px;align-content:start;grid-template-columns:repeat(auto-fit,minmax(300px,1fr))}
 .kp-card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-3);padding:12px}
 .kp-card h4{margin:0 0 4px;font-size:14px;display:flex;gap:8px;align-items:center}
 .kp-card p{margin:0 0 8px;color:var(--ink-2);font-size:12px}
@@ -130,7 +129,7 @@ function ask(o: { title: string; text?: string; input?: string | null; placehold
 }
 const tell = (title: string, text?: string) => ask({ title, text, cancel: false });
 
-type Tab = "search" | "libraries" | "keys" | "bom";
+type Tab = "search" | "libraries" | "bom";
 
 /** "R1, R2, R3 +4" */
 const refList = (refs: string[]) => (refs.length > 4 ? `${refs.slice(0, 3).join(", ")} +${refs.length - 3}` : refs.join(", "));
@@ -169,7 +168,7 @@ class PartsDialog {
     const tab = (id: Tab, label: string) => (this.tabs[id] = h("button", { class: "kp-tab", type: "button", "data-tab": id, onclick: () => this.setTab(id) }, label));
     this.bodyEl = h("div", { class: "kp-body" });
     const box = h("div", { class: "kp", role: "dialog", "aria-label": "Vendor Parts", tabindex: "-1", style: "outline:none" },
-      h("div", { class: "kp-head" }, h("span", { class: "kp-title" }, "Vendor Parts"), tab("search", "Search"), tab("libraries", "My Libraries"), this.ctx && this.ctx.doc ? tab("bom", "BOM") : null, tab("keys", "API Keys"),
+      h("div", { class: "kp-head" }, h("span", { class: "kp-title" }, "Vendor Parts"), tab("search", "Search"), tab("libraries", "My Libraries"), this.ctx && this.ctx.doc ? tab("bom", "BOM") : null,
         h("button", { class: "kp-x", type: "button", title: "Close (Esc)", "aria-label": "Close", onclick: () => this.close() }, closeMark())),
       this.bodyEl);
     // keep the editor's hotkeys and tools out of the dialog
@@ -220,7 +219,6 @@ class PartsDialog {
   // ------------------------------------------------------------ render
   private render() {
     for (const [id, b] of Object.entries(this.tabs)) b.classList.toggle("on", id === this.tab);
-    if (this.tab === "keys") { this.bodyEl.replaceChildren(this.renderKeys()); return; }
     const main = this.tab === "search" ? this.renderSearch() : this.tab === "bom" ? this.renderBom() : this.renderLibrary();
     const kids: Node[] = [];
     if (this.tab === "libraries") kids.push(this.renderLibList());
@@ -255,13 +253,10 @@ class PartsDialog {
       onkeydown: (ev: KeyboardEvent) => { if (ev.key === "Enter") void this.search(); else if (ev.key === "ArrowDown" || ev.key === "ArrowUp") { ev.preventDefault(); this.step(ev.key === "ArrowDown" ? 1 : -1); } } });
     const sel = h("k-select", { id: "kp-vendor", title: "Where to search", onchange: (ev: Event) => { this.vendor = (ev.target as HTMLSelectElement).value; if (this.q.trim().length >= 2) void this.search(); } },
       h("option", { value: "all" }, "All vendors"),
-      ...this.vendors.map((v) => h("option", { value: v.id, disabled: !v.configured }, v.configured ? v.name : `${v.name} — needs a key`)));
+      ...this.vendors.map((v) => h("option", { value: v.id, disabled: !v.configured }, v.configured ? v.name : `${v.name} — not available`)));
     sel.value = this.vendor;
     const bar = h("div", { class: "kp-bar" }, input, sel, h("button", { class: "kp-btn primary", type: "button", id: "kp-go", onclick: () => void this.search() }, "Search"));
     const notes: Node[] = this.searchErrors.map((e) => h("div", { class: "kp-note err" }, e.message));
-    const missing = this.vendors.filter((v) => !v.configured);
-    if (missing.length && this.results && !this.searchErrors.length && this.vendor === "all")
-      notes.push(h("div", { class: "kp-note" }, `Searched ${this.vendors.filter((v) => v.configured).map((v) => v.name).join(", ")}. `, h("a", { href: "#", onclick: (ev: Event) => { ev.preventDefault(); this.setTab("keys"); } }, `Add a key to search ${missing.map((v) => v.name).join(" and ")} too.`)));
     let list: HTMLElement;
     if (this.searching) list = h("div", { class: "kp-empty" }, h("span", { class: "kp-spin" }), "Searching…");
     else if (!this.results) list = h("div", { class: "kp-empty" }, h("b", null, "Find a part by number, value or description."), h("p", null, "LCSC parts come with a symbol, a footprint and a 3D model. Mouser and DigiKey parts use the drawings of the matching LCSC listing."));
@@ -536,30 +531,6 @@ class PartsDialog {
       ? this.partsTable(lib.items.map((i) => ({ key: i.vendor + "\n" + i.vendor_id, vendor: i.vendor, vendor_name: i.vendor_name, vendor_id: i.vendor_id, mpn: i.mpn, manufacturer: i.manufacturer, description: i.description, package: i.package, stock: i.stock, prices: i.prices || [], assembly: i.assembly, item: i })), lib)
       : h("div", { class: "kp-empty" }, h("b", null, "This library is empty."), h("p", null, "Find a part under Search and choose “Add to library…”."));
     return h("div", { class: "kp-main" }, bar, this.libNote ? h("div", { class: "kp-note", id: "kp-libnote" }, this.libNote) : null, h("div", { class: "kp-list", id: "kp-items" }, body));
-  }
-
-  // ------------------------------------------------------------ keys
-  private renderKeys(): HTMLElement {
-    return h("div", { class: "kp-keys" }, this.vendors.map((v) => {
-      const status = h("span", { class: "kp-badge " + (v.configured ? "basic" : "warn") }, !v.fields.length ? "No key needed" : v.key_source === "yours" ? "Your key" : v.key_source === "server" ? "Server key" : "No key");
-      const card = h("div", { class: "kp-card", "data-vendor": v.id }, h("h4", null, v.name, status), h("p", null, v.note));
-      if (!v.fields.length) return card;
-      const inputs: Record<string, HTMLInputElement> = {};
-      const msg = h("p", { style: "margin:8px 0 0" });
-      for (const f of v.fields) { inputs[f.id] = h("input", { type: f.id.includes("secret") || f.id.includes("key") ? "password" : "text", placeholder: v.key_source === "yours" ? "•••••••• (saved)" : "", autocomplete: "off", "data-field": f.id }); card.append(h("label", null, f.label), inputs[f.id]); }
-      const save = h("button", { class: "kp-btn primary", type: "button", onclick: async () => {
-        save.disabled = true; msg.textContent = "Checking the key with " + v.name + "…"; msg.style.color = "";
-        try {
-          const r = await api.putKey(v.id, Object.fromEntries(Object.entries(inputs).map(([k, el]) => [k, el.value.trim()])));
-          this.vendors = await api.vendors(); this.render();
-          if (!r.verified) void tell("Key saved", `${v.name} could not be reached to check it.`);
-        } catch (e) { msg.textContent = errText(e); msg.style.color = "var(--err)"; save.disabled = false; }
-      } }, "Save");
-      card.append(h("div", { style: "display:flex;gap:6px;margin-top:10px;align-items:center" }, save,
-        v.key_source === "yours" ? h("button", { class: "kp-btn", type: "button", onclick: async () => { try { await api.deleteKey(v.id); this.vendors = await api.vendors(); } catch (e) { void tell("The key could not be removed", errText(e)); } this.render(); } }, "Remove") : null,
-        h("a", { href: v.signup, target: "_blank", rel: "noreferrer", style: "margin-left:auto;font-size:12px" }, "Get a key")), msg);
-      return card;
-    }));
   }
 }
 
