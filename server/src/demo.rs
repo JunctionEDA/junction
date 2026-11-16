@@ -39,6 +39,19 @@ fn files() -> Result<Vec<(String, Vec<u8>)>, String> {
     Ok(out)
 }
 
+/// `fonts/<face>/<file>`: a font the design's text names by `face`, kept as the project's font rather than as a
+/// project file (the web editor, its plots and the desktop fetch a face that is not installed from there).
+fn font_entry(path: &str) -> Option<(&str, &str)> {
+    let rest = path.strip_prefix("fonts/")?;
+    let (face, file) = rest.split_once('/')?;
+    (!face.is_empty() && !file.is_empty() && !file.contains('/')).then_some((face, file))
+}
+
+fn hex_sha256(data: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect()
+}
+
 /// Give `user_id` its Devboard Demo if it is still owed one.  Returns the new project's id, or None when the
 /// account already had it (or never was owed it).  All or nothing: on any error nothing is kept and the
 /// account stays owed, so the next sign-in or project list tries again.
@@ -71,6 +84,26 @@ pub async fn ensure(state: &AppState, user_id: i64) -> anyhow::Result<Option<Uui
             .fetch_one(&mut *tx)
             .await?;
     for (path, content) in &files {
+        if let Some((face, file_name)) = font_entry(path) {
+            let font = crate::fonts::inspect(content, 0).map_err(|e| anyhow::anyhow!("demo font {path}: {e:?}"))?;
+            sqlx::query(
+                "INSERT INTO project_font_files (project_id, family_key, family, bold, italic, file_name, fs_type, license, sha256, bytes, data, uploaded_by)
+                 VALUES ($1, $2, $3, false, false, $4, $5, $6, $7, $8, $9, $10)",
+            )
+            .bind(project)
+            .bind(face.to_lowercase())
+            .bind(face)
+            .bind(file_name)
+            .bind(font.fs_type.unwrap_or(0) as i32)
+            .bind(&font.license)
+            .bind(hex_sha256(&font.data))
+            .bind(font.data.len() as i64)
+            .bind(&font.data)
+            .bind(user_id)
+            .execute(&mut *tx)
+            .await?;
+            continue;
+        }
         let doc: Uuid = sqlx::query_scalar(
             "INSERT INTO documents (project_id, path, doc_type) VALUES ($1, $2, $3) RETURNING id",
         )
@@ -129,7 +162,16 @@ mod tests {
         assert!(!pcb.contains("(sheetfile \"Cyberboard"));
         assert!(!text("Devboard_Demo.kicad_sch").contains("(project \"Cyberboard\""));
         assert!(text("Devboard_Demo.kicad_pro").contains("\"filename\": \"Devboard_Demo.kicad_pro\""));
-        for (n, _) in &files {
+        // the two faces the text uses travel with the project, and their licences let them
+        let pcb_sch = pcb.clone() + &text("Devboard_Demo.kicad_sch");
+        let fonts: Vec<_> = files.iter().filter_map(|(n, d)| font_entry(n).map(|(face, _)| (face, d))).collect();
+        assert_eq!(fonts.len(), 2);
+        for (face, data) in fonts {
+            assert!(pcb_sch.contains(&format!("(face \"{face}\")")), "{face} is not used");
+            let f = crate::fonts::inspect(data, 0).expect("a font");
+            assert!(crate::fonts::may_embed(f.fs_type), "{face} may not be embedded: fsType {:?}", f.fs_type);
+        }
+        for (n, _) in files.iter().filter(|(n, _)| font_entry(n).is_none()) {
             assert_ne!(doc_type_for(n), "other", "{n} would not be stored as a project file");
         }
     }

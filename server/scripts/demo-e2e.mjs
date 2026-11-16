@@ -52,7 +52,10 @@ const api = async (session, p) => { const r = await fetch(`${BASE}${p}`, { heade
 const demos = async (s) => ((await api(s, '/api/projects')).j?.projects || []).filter((p) => p.name === 'Devboard Demo');
 
 const stamp = Date.now().toString(36);
-const seed = seedFiles();
+const all = seedFiles();
+// fonts/<face>/<file> become the project's fonts, everything else a project file
+const seed = new Map([...all].filter(([p]) => !p.startsWith('fonts/')));
+const faces = [...all.keys()].filter((p) => p.startsWith('fonts/')).map((p) => p.split('/')[1]);
 const t0 = Date.now();
 const alice = await signIn(`demo-alice-${stamp}`);
 const signInMs = Date.now() - t0;
@@ -80,6 +83,14 @@ check('board, schematic, libraries and models are typed', types['Devboard_Demo.k
   && types['lib/lcsc.kicad_sym'] === 'symbol_lib' && types['fp-lib-table'] === 'lib_table'
   && Object.entries(types).some(([p, t]) => p.endsWith('.step') && t === 'model3d')
   && Object.entries(types).some(([p, t]) => p.endsWith('.kicad_mod') && t === 'footprint'), JSON.stringify(types).slice(0, 300));
+
+const fonts = await api(alice, `/api/projects/${demo.projectId}/fonts`);
+check('the fonts the text uses come with it', fonts.status === 200 && faces.length === 2 && faces.every((f) => JSON.stringify(fonts.j).includes(f)), JSON.stringify(fonts.j).slice(0, 300));
+for (const face of faces) {
+  const r = await fetch(`${BASE}/api/projects/${demo.projectId}/fonts/file?family=${encodeURIComponent(face)}&exact=1`, { headers: { Cookie: `kc_session=${alice}` } });
+  const got = Buffer.from(await r.arrayBuffer());
+  check(`the ${face} font file is served`, r.status === 200 && got.equals(all.get([...all.keys()].find((p) => p.startsWith(`fonts/${face}/`)))), `${r.status} ${got.length}`);
+}
 
 const again = await signIn(`demo-alice-${stamp}`);
 check('signing in again adds no second copy', !!again && (await demos(again)).length === 1);

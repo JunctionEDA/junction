@@ -60,6 +60,14 @@ def main() -> None:
                 with open(os.path.join(hw, path), "rb") as f:
                     files.append((path, f.read()))
 
+    # The two fonts the schematic and board text use (face "Blender Pro Bold" and "Cynatar"), from the repo's
+    # docs/fonts.  They are not project documents: demo.rs stores them as the project's fonts (project_font_files),
+    # where the web editor, plots and the desktop fetch a face that is not installed.
+    for name, face in (("BlenderProBold.ttf", "Blender Pro Bold"), ("Cynatar.otf", "Cynatar")):
+        assert f'(face "{face}")' in sch + pcb
+        with open(os.path.join(sys.argv[1], "docs", "fonts", name), "rb") as f:
+            files.append((f"fonts/{face}/{name}", f.read()))
+
     # Every model a footprint names must be in the project.
     names = {p for p, _ in files}
     for path, data in files:
