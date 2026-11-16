@@ -72,12 +72,13 @@ export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | nu
   }
   if (trailing) { clearTimeout(trailing); trailing = 0; if (ghostSegs === undefined) ghostSegs = trailingGhost; trailingGhost = undefined; }
   E.lastPresence = now;
-  // The pointer stopped: say so once more a moment later, with the same place, so peers who were drawing it ahead
-  // of the last update (peercursors.ts) bring it back to where it really is at once.
+  // The pointer stopped: say so once more a moment later, with the same place, so peers replaying it (peercursors.ts)
+  // know the motion ended and finish it at once.
   if (stopTimer) clearTimeout(stopTimer);
   stopTimer = stopping ? 0 : setTimeout(() => { stopTimer = 0; E.lastPresence = 0; stopping = true; try { sendPresence(null); } finally { stopping = false; } }, STOP_AFTER_MS);
   const st: PresenceState = { cursor: [Math.round(at[0] * E.IU), Math.round(at[1] * E.IU)] };
   const rtt = myRtt(); if (rtt > 0) st.rtt = Math.round(rtt);
+  st.ts = Math.round(performance.now() * 10) / 10;
   const vp = visibleRectNm(); if (vp) st.viewport = vp;
   if (ghostSegs) st.ghost = ghostSegs;
   // What the peer has selected (desktop rebuildOverlay pairs selection[i] with boxes[i] and at[i]; boxes are

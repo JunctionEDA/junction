@@ -52,7 +52,8 @@ async function open(token) {
   if (process.env.PLAYOUT === '0') await page.addInitScript(() => { try { localStorage.setItem('junction.cursorPlayout', '0'); } catch {} });
   page.on('pageerror', (e) => console.log('pageerror: ' + e.message));
   await page.goto(`${BASE}/p/${projectId}/edit`);
-  await page.waitForFunction(() => window.CollabEditor && window.CollabEditor.kdoc && window.CollabEditor.joinedDocId, null, { timeout: 30000 });
+  await page.waitForFunction(() => window.CollabEditor && window.CollabEditor.kdoc && window.CollabEditor.joinedDocId, null, { timeout: 30000 })
+    .catch(async (e) => { console.log('editor did not open:', await page.evaluate(() => ({ title: document.title, E: !!window.CollabEditor, kdoc: !!(window.CollabEditor && window.CollabEditor.kdoc), joined: window.CollabEditor && window.CollabEditor.joinedDocId, ws: window.CollabEditor && window.CollabEditor.ws && window.CollabEditor.ws.readyState }))); throw e; });
   if (BOARD) {
     await page.evaluate(() => { const E = window.CollabEditor; E.api.openDoc(E.api.state.docs.find((d) => d.docType === 'kicad_pcb')); });
     await page.waitForFunction(() => document.body.dataset.editor === 'pcb' && window.CollabEditor.kdoc && window.CollabEditor.joinedDocId, null, { timeout: 30000 });

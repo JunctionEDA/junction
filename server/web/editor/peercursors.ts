@@ -5,50 +5,53 @@
 // person's pointer is one persistent element that is moved by a transform on every display frame, and is rebuilt only
 // when its name, colour or note change.
 //
-// It is also drawn where the person's hand most likely is NOW, not where it was when the update left them: every
-// update is at least one trip through the server old (each editor pings the server and sends its round trip along
-// with its pointer, so the age is half the sender's round trip plus half ours), and the next one is still a message
-// interval away.  The pointer is carried on along its velocity by that much.  When the sender stops it sends its
-// place once more, which zeroes the velocity, so a prediction past the stopping point is taken back within about one
-// trip; and with no news for longer than the prediction covers, it eases back to the last place it was seen.
+// How it moves (the way Figma and perfect-cursors do it): the sender sends its pointer every frame or so, stamped
+// with its own clock (`ts`, peers.ts).  The receiver keeps the points it has not drawn yet and walks through them at
+// the speed they were made (each step takes as long as it took the sender), a little behind the newest one.  The
+// pointer is always somewhere on the line between two places the person really was: never guessed ahead, never past
+// where they stopped.  The "little behind" (`delay`) adapts: it grows when the walk catches up with the newest point
+// while the person is still moving (the network held a message), and shrinks back slowly while messages come evenly.
+// When a backlog builds (a burst after a stall) the walk speeds up to catch up; when the sender says it stopped (the
+// same place again), the walk just finishes.  Nothing is drawn ahead of what has arrived.
 import { NS } from "./dom";
 import { E } from "./state";
 import { toast } from "./util";
 
 // A peer's pointer and name tag, in screen pixels (the desktop's COLLAB_CURSOR_ITEM uses the same sizes).
 const PEER_CURSOR_PX = 24, PEER_TAG_TEXT_PX = 16, PEER_TAG_PAD_PX = 5;
-/** The longest a pointer is carried on past its last sample, ms. */
-const CARRY_MAX_MS = 60;
-/** The most a pointer is drawn ahead to make up for the network, ms (a far-away server is not guessed across). */
-const LEAD_MAX_MS = 90;
-/** From a message's arrival to the screen, ms: part of a display frame (more measured as running ahead). */
-const FRAME_MS = 4;
+/** How far behind the newest point the walk aims to be, ms: its starting value and bounds. */
+const DELAY_START_MS = 24, DELAY_MIN_MS = 16, DELAY_MAX_MS = 40;
+/** How much one stall (the walk ran out of points mid-motion) adds to the delay, and how fast it comes back, ms/s. */
+const DELAY_STALL_STEP_MS = 3, DELAY_DECAY_MS_PER_S = 8;
+/** The longest a single step may take, ms (a longer gap is a pause, not slow motion), and the step for a sender that
+ *  does not stamp its points. */
+const STEP_MAX_MS = 60, STEP_DEFAULT_MS = 15;
+/** The fastest the walk goes to catch up with a backlog (times real speed), and the slowest it goes when it is about
+ *  to run out while the person is still moving. */
+const RATE_MAX = 4, RATE_MIN = 0.8;
 
 let rttMs = 0;
 /** Our round trip to the server, from a ping (net.ts); a running estimate that leans to the fast samples, since a
- *  slow one is usually a hiccup and not the distance. */
+ *  slow one is usually a hiccup and not the distance.  Sent along with presence (peers.ts) for diagnostics. */
 export function noteRtt(ms: number) {
   if (!(ms > 0 && ms < 2000)) return;
   rttMs = !rttMs ? ms : ms < rttMs ? rttMs * 0.5 + ms * 0.5 : rttMs * 0.9 + ms * 0.1;
 }
 export function myRtt() { return rttMs; }
-/** How quickly the drawn pointer closes on where it should be (time constant, ms): about half a frame. */
-const EASE_MS_PREDICTING = 7;
-/** Prediction (drawing a pointer ahead of its last update, see above) is off: in use it read as jitter, every late or
- *  early update showing as a lurch.  Without it a pointer glides to each update as it arrives, over about one display
- *  frame (EASE_MS).  It stays here to come back: localStorage "junction.cursorPrediction" = "1" turns it on (reload). */
-const PREDICT = (() => { try { return localStorage.getItem("junction.cursorPrediction") === "1"; } catch { return false; } })();
-const EASE_MS = PREDICT ? EASE_MS_PREDICTING : 14;
 
+interface Step { x: number; y: number; d: number }
 interface Cursor {
   g: SVGGElement;
   key: string;
-  /** last sample (mm), when it came (performance.now()), the velocity it implies (mm/ms) */
-  x: number; y: number; t: number; vx: number; vy: number;
-  /** the usual time between samples, ms */
-  every: number;
-  /** how old a sample is when it gets here, ms (half the sender's round trip plus half ours, plus a frame) */
-  lead: number;
+  /** the newest point received (mm), its sender stamp, when it came (performance.now()) */
+  x: number; y: number; ts: number; t: number;
+  /** where the walk is: the point it left (mm), the points still ahead with how long each step takes, ms into the
+   *  first step */
+  fx: number; fy: number; q: Step[]; p: number;
+  /** the sender said it stopped (its last point repeated): finish the walk at full speed */
+  done: boolean;
+  /** how far behind the newest point the walk aims to be, ms; when the walk last ran out of points mid-motion */
+  delay: number; dry: number;
   /** what is drawn (mm) */
   dx: number; dy: number;
   /** the scale the element was last transformed with */
@@ -84,7 +87,7 @@ export function clearPeerCursors() {
 }
 
 export interface PeerCursorSpec { cid: string; name: string; color: string; note: string; following: boolean; at: number[];
-  /** the sender's round trip to the server, ms (0 when it does not say) */ rtt: number }
+  /** the sender's clock when it sent this point, ms (0 when it does not say) */ ts: number }
 
 /** The pointers there should be now (mm), from the presence map. */
 export function syncPeerCursors(specs: PeerCursorSpec[]) {
@@ -98,61 +101,73 @@ export function syncPeerCursors(specs: PeerCursorSpec[]) {
       const g = document.createElementNS(NS, "g") as SVGGElement;
       g.setAttribute("class", "peer-cursor");
       layer.appendChild(g);
-      c = { g, key: "", x: sp.at[0], y: sp.at[1], t: now, vx: 0, vy: 0, every: 16, lead: 0, dx: sp.at[0], dy: sp.at[1], s: 0 };
+      const [x, y] = sp.at;
+      c = { g, key: "", x, y, ts: sp.ts, t: now, fx: x, fy: y, q: [], p: 0, done: true, delay: DELAY_START_MS, dry: 0, dx: x, dy: y, s: 0 };
       cursors.set(sp.cid, c);
     } else {
-      sample(c, sp.at[0], sp.at[1], now);
+      sample(c, sp.at[0], sp.at[1], sp.ts, now);
     }
     if (c.key !== key) { c.key = key; build(c, sp); }
-    // the sender's half of the trip is only known from a sender that pings; otherwise assume it is as far as we are
-    c.lead = Math.min(LEAD_MAX_MS, (sp.rtt > 0 ? sp.rtt : rttMs) / 2 + rttMs / 2 + FRAME_MS);
   }
   for (const [cid, c] of cursors) if (!keep.has(cid)) { c.g.remove(); cursors.delete(cid); }
   place(true);
   wake();
 }
 
-/** One cursor's new sample, straight from a presence message (mm). */
-function sample(c: Cursor, x: number, y: number, now: number) {
-  // The same place again is the sender saying it stopped (peers.ts): no more carrying on.
-  if (x === c.x && y === c.y) { c.vx = 0; c.vy = 0; c.t = now; return; }
-  const dt = now - c.t;
-  // a sample after a long gap is a fresh start, not a speed; otherwise a little smoothing, because the prediction
-  // multiplies any jitter in the velocity by the lead
-  if (dt > 4 && dt < 150) {
-    const vx = (x - c.x) / dt, vy = (y - c.y) / dt, fresh = !c.vx && !c.vy;
-    c.vx = fresh ? vx : c.vx * 0.35 + vx * 0.65; c.vy = fresh ? vy : c.vy * 0.35 + vy * 0.65;
-    c.every = c.every * 0.8 + Math.min(dt, 100) * 0.2;
-  } else if (dt >= 150) { c.vx = 0; c.vy = 0; }
+/** One cursor's new point, straight from a presence message (mm). */
+function sample(c: Cursor, x: number, y: number, ts: number, now: number) {
+  // the full peer map comes again with other people's updates: the same stamp is not a new point
+  if (ts && ts === c.ts) return;
+  if (ts && c.ts && ts < c.ts) return; // overtaken (a held state flushed late)
+  const gap = ts && c.ts ? ts - c.ts : now - c.t;
+  c.ts = ts; c.t = now;
+  // The same place again is the sender saying it stopped: finish the walk, no new step.
+  if (x === c.x && y === c.y) { c.done = true; return; }
+  c.x = x; c.y = y;
   // A jump (a peer who zoomed out and back, or was off the page) is shown at once.
-  const jump = Math.hypot(x - c.dx, y - c.dy) * scaleOf() > 400;
-  c.x = x; c.y = y; c.t = now;
-  if (jump) { c.dx = x; c.dy = y; c.vx = 0; c.vy = 0; }
+  if (Math.hypot(x - c.dx, y - c.dy) * scaleOf() > 400) { c.q = []; c.p = 0; c.fx = c.dx = x; c.fy = c.dy = y; c.done = true; return; }
+  // Moving again after a rest: start the walk from where the pointer is drawn, after the delay, so the next point
+  // (one send interval away) is likely here before the walk reaches this one.
+  // The walk ran dry a moment ago although the person had not stopped: the network held this point.  Sit further
+  // back from now on, by part of how long it was held.
+  if (!c.done && !c.q.length && c.dry && now - c.dry < 200) c.delay = Math.min(DELAY_MAX_MS, c.delay + Math.min(DELAY_STALL_STEP_MS, (now - c.dry) / 2));
+  c.dry = 0;
+  const resting = c.done || !c.q.length;
+  const d = resting ? c.delay : Math.max(1, Math.min(STEP_MAX_MS, gap > 0 ? gap : STEP_DEFAULT_MS));
+  c.done = false;
+  c.q.push({ x, y, d });
+  if (c.q.length > 120) { const k = c.q.length - 120; const last = c.q[k - 1]; c.fx = last.x; c.fy = last.y; c.q.splice(0, k); c.p = 0; }
 }
 
-/** Where a cursor should be drawn at `now`: ahead of its last sample by the sample's age when it arrived (`lead`)
- *  plus the time since, until about the next sample is due; past that, eased back to the last sample, so a pointer
- *  whose stop message got lost still ends exactly where it was last seen. */
-function horizon(c: Cursor) { return Math.min(CARRY_MAX_MS, c.every * 1.2); }
-function target(c: Cursor, now: number): [number, number] {
-  if (!PREDICT) return [c.x, c.y];
-  const age = now - c.t, carry = horizon(c);
-  const k = age <= carry ? c.lead + age : Math.max(0, c.lead + carry - 2 * (age - carry));
-  return [c.x + c.vx * k, c.y + c.vy * k];
-}
-
+/** Advance every walk by one display frame and draw it.  Returns whether anything is still moving. */
 function place(force: boolean) {
-  const now = performance.now(), dt = lastFrame ? Math.min(50, now - lastFrame) : 16; lastFrame = now;
-  const s = scaleOf(), a = 1 - Math.exp(-dt / EASE_MS);
+  const now = performance.now(), dt = lastFrame ? Math.min(50, now - lastFrame) : 0; lastFrame = now;
+  const s = scaleOf();
   let moving = false;
   for (const c of cursors.values()) {
-    const [tx, ty] = target(c, now);
-    const ex = tx - c.dx, ey = ty - c.dy;
-    if (Math.abs(ex) * s < 0.05 && Math.abs(ey) * s < 0.05) { c.dx = tx; c.dy = ty; }
-    else { c.dx += ex * a; c.dy += ey * a; moving = true; }
-    if (now - c.t < 2 * horizon(c) + c.lead && (c.vx || c.vy)) moving = true;
+    if (c.q.length) {
+      // how much walk is still ahead, against how far behind it should be
+      let ahead = -c.p; for (const st of c.q) ahead += st.d;
+      const rate = c.done ? Math.max(1, Math.min(RATE_MAX, 1 + (ahead - c.delay) / 40))
+        : Math.max(RATE_MIN, Math.min(RATE_MAX, 1 + (ahead - c.delay) / 40));
+      let adv = dt * rate;
+      while (adv > 0 && c.q.length) {
+        const st = c.q[0], left = st.d - c.p;
+        if (adv >= left) { adv -= left; c.fx = st.x; c.fy = st.y; c.q.shift(); c.p = 0; }
+        else { c.p += adv; adv = 0; }
+      }
+      // ran out while the person may still be moving: either they stopped (their stop message follows) or the
+      // network is holding the next point (sample() tells which, and makes the delay longer)
+      if (!c.q.length && !c.done) c.dry = now;
+    }
+    if (c.delay > DELAY_MIN_MS && dt > 0) c.delay = Math.max(DELAY_MIN_MS, c.delay - DELAY_DECAY_MS_PER_S * dt / 1000);
+    if (c.q.length) {
+      const st = c.q[0], k = st.d > 0 ? c.p / st.d : 1;
+      c.dx = c.fx + (st.x - c.fx) * k; c.dy = c.fy + (st.y - c.fy) * k;
+      moving = true;
+    } else { c.dx = c.fx; c.dy = c.fy; }
     const tf = `translate(${c.dx.toFixed(4)} ${c.dy.toFixed(4)}) scale(${(1 / s).toFixed(6)})`;
-    if (force || moving || c.s !== s) { c.g.setAttribute("transform", tf); c.s = s; }
+    if (force || moving || c.s !== s || c.g.getAttribute("transform") !== tf) { c.g.setAttribute("transform", tf); c.s = s; }
   }
   return moving;
 }
@@ -164,6 +179,7 @@ function wake() {
     if (place(false)) raf = requestAnimationFrame(frame);
     else lastFrame = 0;
   };
+  lastFrame = performance.now();
   raf = requestAnimationFrame(frame);
 }
 
@@ -218,7 +234,7 @@ export function onlyPointerMoved(a: Record<string, unknown> | null | undefined, 
   const ka = Object.keys(a), kb = Object.keys(b);
   if (ka.length !== kb.length) return false;
   for (const k of ka) {
-    if (k === "cursor" || k === "viewport" || k === "rtt") continue;
+    if (k === "cursor" || k === "viewport" || k === "rtt" || k === "ts") continue;
     if (!(k in b)) return false;
     const x = a[k], y = b[k];
     if (x === y) continue;
@@ -232,3 +248,6 @@ export function toggleFollowToast(cid: string, name: string, render: () => void)
   toast(E.followPeer ? `Following ${name}` : "Stopped following");
   render();
 }
+
+// for scripts/cursor-lag.mjs (DEBUG=1): each walk's state
+(globalThis as Record<string, unknown>).__peerCursorState = () => [...cursors.values()].map((c) => ({ x: c.x, y: c.y, dx: c.dx, dy: c.dy, q: c.q.length, done: c.done, delay: Math.round(c.delay), ts: c.ts }));

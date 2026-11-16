@@ -21,9 +21,9 @@ var __commonJS = (cb, mod) => function __require() {
     throw mod = 0, e;
   }
 };
-var __export = (target3, all2) => {
+var __export = (target2, all2) => {
   for (var name in all2)
-    __defProp(target3, name, { get: all2[name], enumerable: true });
+    __defProp(target2, name, { get: all2[name], enumerable: true });
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
@@ -33,12 +33,12 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
-var __toESM = (mod, isNodeMode, target3) => (target3 = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+var __toESM = (mod, isNodeMode, target2) => (target2 = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
   // If the importer is in node compatibility mode or this is not an ESM
   // file that has been converted to a CommonJS file using a Babel-
   // compatible transform (i.e. "__esModule" has not been set), then set
   // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target3, "default", { value: mod, enumerable: true }) : target3,
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target2, "default", { value: mod, enumerable: true }) : target2,
   mod
 ));
 
@@ -7597,7 +7597,7 @@ function drawZonePreview(ctx, g2, obstacles, base2, W12, H, minW, netColors, alp
   if (colorXf && color2) color2 = colorXf(color2);
   const off = scratchCanvas(W12, H);
   const octx = off ? off.getContext("2d") : null;
-  const target3 = octx || ctx;
+  const target2 = octx || ctx;
   if (octx) {
     octx.setTransform(1, 0, 0, 1, 0, 0);
     octx.clearRect(0, 0, W12, H);
@@ -7607,43 +7607,43 @@ function drawZonePreview(ctx, g2, obstacles, base2, W12, H, minW, netColors, alp
     ctx.save();
     ctx.globalAlpha = alpha;
   }
-  target3.setLineDash([]);
-  target3.lineJoin = "round";
-  target3.lineCap = "round";
-  target3.fillStyle = color2;
-  target3.beginPath();
-  tracePath(target3, g2);
-  target3.fill();
-  target3.globalCompositeOperation = "destination-out";
-  target3.fillStyle = "#000";
-  target3.strokeStyle = "#000";
+  target2.setLineDash([]);
+  target2.lineJoin = "round";
+  target2.lineCap = "round";
+  target2.fillStyle = color2;
+  target2.beginPath();
+  tracePath(target2, g2);
+  target2.fill();
+  target2.globalCompositeOperation = "destination-out";
+  target2.fillStyle = "#000";
+  target2.strokeStyle = "#000";
   for (const o of obstacles) {
     if (o.net === net && !o.npth) continue;
     const onLayer = o.layer === layer4 || o.via && o.viaType === "through" || o.npth;
     if (!onLayer) continue;
     if (o.track) {
-      target3.lineWidth = (o.w || 0) + 2 * c;
-      target3.beginPath();
-      tracePath(target3, o);
-      target3.stroke();
+      target2.lineWidth = (o.w || 0) + 2 * c;
+      target2.beginPath();
+      tracePath(target2, o);
+      target2.stroke();
       continue;
     }
     if (o.via && o.t === "circle") {
-      target3.beginPath();
-      target3.arc(o.x, o.y, o.r + c, 0, Math.PI * 2);
-      target3.fill();
+      target2.beginPath();
+      target2.arc(o.x, o.y, o.r + c, 0, Math.PI * 2);
+      target2.fill();
       continue;
     }
     if (o.t === "poly" && o.pts.length < 2) continue;
-    target3.beginPath();
-    tracePath(target3, o);
-    target3.fill();
+    target2.beginPath();
+    tracePath(target2, o);
+    target2.fill();
     if (c > 0) {
-      target3.lineWidth = 2 * c;
-      target3.stroke();
+      target2.lineWidth = 2 * c;
+      target2.stroke();
     }
   }
-  target3.globalCompositeOperation = "source-over";
+  target2.globalCompositeOperation = "source-over";
   if (octx) {
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -10329,10 +10329,10 @@ var require_pcb_tools = __commonJS({
         let gap = extents[extents.length - 1][0] - extents[0][1];
         for (let i = 1; i < extents.length - 1; i++) gap -= extents[i][1] - extents[i][0];
         const per = gap / (extents.length - 1);
-        let target3 = extents[0][1];
+        let target2 = extents[0][1];
         for (let i = 1; i < extents.length - 1; i++) {
-          d[i] = target3 - extents[i][0] + i * per;
-          target3 += extents[i][1] - extents[i][0];
+          d[i] = target2 - extents[i][0] + i * per;
+          target2 += extents[i][1] - extents[i][0];
         }
         return d;
       }
@@ -34151,20 +34151,20 @@ var require_pcb_tools = __commonJS({
         const reported = /* @__PURE__ */ new Set();
         for (const silkLayer of SILK2) {
           const refs = byLayer.get(silkLayer) || [];
-          for (const target3 of TARGETS[silkLayer]) {
-            const tests = byLayer.get(target3) || [];
+          for (const target2 of TARGETS[silkLayer]) {
+            const tests = byLayer.get(target2) || [];
             if (!tests.length) continue;
             const near3 = elementGrid(tests);
             for (const ref of refs) for (const test of near3(ref.bbox, largest)) {
               if (ref === test) continue;
-              if (target3 === silkLayer && ref.uuid > test.uuid) continue;
+              if (target2 === silkLayer && ref.uuid > test.uuid) continue;
               if (!touch(ref.bbox, test.bbox, largest)) continue;
               if (!touchesOutline(test)) continue;
               let code = "silk_overlap";
-              const c = silkConstraint(rules, doc2, s2, ref, test, target3);
+              const c = silkConstraint(rules, doc2, s2, ref, test, target2);
               let min = c ? c.min : -1;
               const name = c ? c.name : "";
-              if (/\.Mask$/.test(target3)) {
+              if (/\.Mask$/.test(target2)) {
                 if (checkIndividualMaskItems) min = Math.max(min, 0);
                 code = "silk_over_copper";
               }
@@ -34172,8 +34172,8 @@ var require_pcb_tools = __commonJS({
               const isShape = (e) => /^(fp|gr)_(line|rect|circle|arc|poly|curve|ellipse|ellipse_arc)$/.test(e.kind);
               if (isShape(ref) && isShape(test) && ref.fp === test.fp) continue;
               let [a, b] = [ref, test];
-              if (target3 === silkLayer && a.uuid > b.uuid) [a, b] = [b, a];
-              const key3 = code + "|" + a.uuid + "|" + b.uuid + "|" + target3;
+              if (target2 === silkLayer && a.uuid > b.uuid) [a, b] = [b, a];
+              const key3 = code + "|" + a.uuid + "|" + b.uuid + "|" + target2;
               if (reported.has(key3)) continue;
               const gap = elementGap(a, b);
               if (!collides(gap, min)) continue;
@@ -40547,17 +40547,17 @@ var require_pcb_tools = __commonJS({
           rt.dpFit = false;
           return;
         }
-        const target3 = rt.placingVia ? null : dpTarget(ctx, rt, hv && hv.snap);
+        const target2 = rt.placingVia ? null : dpTarget(ctx, rt, hv && hv.snap);
         let centre2, reached = true, tail = null;
-        if (target3) {
-          const tg = dpGateway(target3, gw.mid, h3);
+        if (target2) {
+          const tg = dpGateway(target2, gw.mid, h3);
           if (tg && tg.sideP === -gw.sideP) {
             const back = rp(vadd(tg.mid, vmul(tg.d, h3 + 1e-3)));
             const c = dpCentre(mode2 === RM_MARK ? null : O, gw, back, R2, rt, mode2);
             if (c.reached && samePt(c.pts[c.pts.length - 1], back)) {
               centre2 = simplifyPts(c.pts.concat([tg.mid.slice()]));
               tail = tg;
-              rt.dpTargetPair = target3;
+              rt.dpTargetPair = target2;
             }
           }
         }
@@ -40812,15 +40812,15 @@ var require_pcb_tools = __commonJS({
         ctx.requestRender();
         return true;
       }
-      function dpToggleVia(ctx, type, target3) {
+      function dpToggleVia(ctx, type, target2) {
         const rt = S2.route;
         if (!rt) return false;
-        if (rt.placingVia && !target3) {
+        if (rt.placingVia && !target2) {
           rt.placingVia = null;
           S2.layer = rt.layer;
           sizesOf(ctx).setActiveLayer(rt.layer);
         } else {
-          const plan = viaPlan(ctx, Object.assign({}, rt, { ratAnchor: null }), type, target3);
+          const plan = viaPlan(ctx, Object.assign({}, rt, { ratAnchor: null }), type, target2);
           if (typeof plan === "string") {
             ctx.toast(plan);
             return true;
@@ -41616,16 +41616,16 @@ var require_pcb_tools = __commonJS({
         const nc = R2.netclassOf ? R2.netclassOf(netNameOf3(ctx, net)) : null;
         return { diameter: nc && nc.uvia_diameter > 0 ? nc.uvia_diameter : 0.3, drill: nc && nc.uvia_drill > 0 ? nc.uvia_drill : 0.1 };
       }
-      function viaPlan(ctx, rt, type, target3) {
+      function viaPlan(ctx, rt, type, target2) {
         const R2 = sizesOf(ctx);
         const cur2 = rt.layer;
         const [pTop, pBot] = R2.layerPair || ["F.Cu", "B.Cu"];
         const doc2 = routeDoc(ctx, rt);
         const stack2 = K11.pcbSizes.copperStack(copperOf(doc2));
         const F2 = stack2[0], B = stack2[stack2.length - 1];
-        if (type !== "through" && target3 && (target3 === B && cur2 === F2 || target3 === F2 && cur2 === B)) type = "through";
+        if (type !== "through" && target2 && (target2 === B && cur2 === F2 || target2 === F2 && cur2 === B)) type = "through";
         const paired = (x, p0, p1) => x === p0 ? p1 : x === p1 ? p0 : p0;
-        let a = cur2, b = target3 || null, next;
+        let a = cur2, b = target2 || null, next;
         if (b) next = b;
         else if (type === "through") {
           const rl2 = rt.ratAnchor;
@@ -41657,15 +41657,15 @@ var require_pcb_tools = __commonJS({
         const span = type === "through" ? [F2, B] : [a, b].sort((x, y) => stack2.indexOf(x) - stack2.indexOf(y));
         return { type, toLayer: next, span, diameter: size2.diameter, drill: size2.drill };
       }
-      function toggleViaPlacement(ctx, type, target3) {
+      function toggleViaPlacement(ctx, type, target2) {
         const rt = S2.route;
-        if (rt && rt.dp) return dpToggleVia(ctx, type, target3);
+        if (rt && rt.dp) return dpToggleVia(ctx, type, target2);
         if (!rt) {
           if (S2.modTool === "routediff") return true;
           startWithVia(ctx);
           return true;
         }
-        if (rt.placingVia && !target3) {
+        if (rt.placingVia && !target2) {
           rt.placingVia = null;
           S2.layer = rt.layer;
           sizesOf(ctx).setActiveLayer(rt.layer);
@@ -41674,7 +41674,7 @@ var require_pcb_tools = __commonJS({
           ctx.requestRender();
           return true;
         }
-        const plan = viaPlan(ctx, rt, type, target3);
+        const plan = viaPlan(ctx, rt, type, target2);
         if (typeof plan === "string") {
           ctx.toast(plan);
           return true;
@@ -42126,7 +42126,7 @@ var require_pcb_tools = __commonJS({
         const path2 = line3.map((q4) => q4.slice());
         let index = aIndex;
         const segs0 = line3.length - 1;
-        const target3 = snapToNeighbourSegments(path2, aP, aIndex, thresh);
+        const target2 = snapToNeighbourSegments(path2, aP, aIndex, thresh);
         if (index === 0) {
           path2.splice(0, 0, path2[0].slice());
           index++;
@@ -42161,7 +42161,7 @@ var require_pcb_tools = __commonJS({
         if (aIndex === segs0 - 1) gB = [guide(dragged[1], d45Right(dragDir)), guide(dragged[1], d45Left(dragDir))];
         else if (wide(dirNext)) gB = [guide(sNext[1], d45Left(dragDir)), guide(sNext[1], d45Right(dragDir))];
         else gB = [guide(dragged[1], dirNext), guide(dragged[1], dirNext)];
-        const cur2 = guide(target3, dragDir);
+        const cur2 = guide(target2, dragDir);
         let best = null, bestLen = Infinity;
         for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
           const ip1 = lineX(cur2[0], cur2[1], gA[i][0], gA[i][1]), ip2 = lineX(cur2[0], cur2[1], gB[j][0], gB[j][1]);
@@ -46446,9 +46446,9 @@ var require_pcb_tools = __commonJS({
           if (it.kind !== "segment" && it.kind !== "arc") return false;
           const l = K11.kid(n2, "layer");
           const i = copper.indexOf(K11.str(l[1]));
-          const target3 = toLayer || copper[Math.max(0, Math.min(copper.length - 1, i + step))];
-          if (!target3 || target3 === K11.str(l[1])) return false;
-          l[1] = target3;
+          const target2 = toLayer || copper[Math.max(0, Math.min(copper.length - 1, i + step))];
+          if (!target2 || target2 === K11.str(l[1])) return false;
+          l[1] = target2;
         });
       }
       function breakTrackChanges(doc2, p, seg2) {
@@ -50559,17 +50559,17 @@ Please remove the objects that use these layers first.`, page: 1 };
       var after = (key3) => PAD_ORDER2.slice(0, Math.max(0, PAD_ORDER2.indexOf(key3)));
       var isAperture2 = (n2) => str92(n2[2]) === "smd" && !layersOf2(n2).some((l) => /\.Cu$/.test(l));
       var sizeSig = (n2) => K11.serialize(["s", K11.kid(n2, "size") || [], K11.kid(n2, "rect_delta") || [], K11.kid(n2, "drill") || [], K11.kid(n2, "roundrect_rratio") || [], K11.kid(n2, "chamfer_ratio") || [], K11.kid(n2, "primitives") || []]);
-      function importPadSettings(target3, master) {
+      function importPadSettings(target2, master) {
         const n2 = clone5(master);
         const keep = ["net", "pinfunction", "pintype", "die_length", "die_delay", "uuid", "tstamp"];
         for (const k of keep) {
-          const t = K11.kid(target3, k), m = K11.kid(n2, k);
+          const t = K11.kid(target2, k), m = K11.kid(n2, k);
           if (t && m) n2[n2.indexOf(m)] = clone5(t);
           else if (m) n2.splice(n2.indexOf(m), 1);
           else if (t) setKid22(n2, k, clone5(t).slice(1), k === "uuid" || k === "tstamp" ? n2.filter(isList10).map((c) => str92(c[0])) : after(k));
         }
-        n2[1] = canHaveNumber(n2) ? target3[1] : "";
-        const [x, y] = atOf22(target3);
+        n2[1] = canHaveNumber(n2) ? target2[1] : "";
+        const [x, y] = atOf22(target2);
         const ma = K11.kid(n2, "at");
         ma[1] = x;
         ma[2] = y;
@@ -73166,16 +73166,16 @@ function syncPeerCursors(specs) {
       const g2 = document.createElementNS(NS2, "g");
       g2.setAttribute("class", "peer-cursor");
       layer.appendChild(g2);
-      c = { g: g2, key: "", x: sp.at[0], y: sp.at[1], t: now, vx: 0, vy: 0, every: 16, lead: 0, dx: sp.at[0], dy: sp.at[1], s: 0 };
+      const [x, y] = sp.at;
+      c = { g: g2, key: "", x, y, ts: sp.ts, t: now, fx: x, fy: y, q: [], p: 0, done: true, delay: DELAY_START_MS, dry: 0, dx: x, dy: y, s: 0 };
       cursors.set(sp.cid, c);
     } else {
-      sample(c, sp.at[0], sp.at[1], now);
+      sample(c, sp.at[0], sp.at[1], sp.ts, now);
     }
     if (c.key !== key3) {
       c.key = key3;
       build(c, sp);
     }
-    c.lead = Math.min(LEAD_MAX_MS, (sp.rtt > 0 ? sp.rtt : rttMs) / 2 + rttMs / 2 + FRAME_MS);
   }
   for (const [cid, c] of cursors) if (!keep.has(cid)) {
     c.g.remove();
@@ -73184,62 +73184,79 @@ function syncPeerCursors(specs) {
   place2(true);
   wake();
 }
-function sample(c, x, y, now) {
+function sample(c, x, y, ts, now) {
+  if (ts && ts === c.ts) return;
+  if (ts && c.ts && ts < c.ts) return;
+  const gap = ts && c.ts ? ts - c.ts : now - c.t;
+  c.ts = ts;
+  c.t = now;
   if (x === c.x && y === c.y) {
-    c.vx = 0;
-    c.vy = 0;
-    c.t = now;
+    c.done = true;
     return;
   }
-  const dt = now - c.t;
-  if (dt > 4 && dt < 150) {
-    const vx = (x - c.x) / dt, vy = (y - c.y) / dt, fresh = !c.vx && !c.vy;
-    c.vx = fresh ? vx : c.vx * 0.35 + vx * 0.65;
-    c.vy = fresh ? vy : c.vy * 0.35 + vy * 0.65;
-    c.every = c.every * 0.8 + Math.min(dt, 100) * 0.2;
-  } else if (dt >= 150) {
-    c.vx = 0;
-    c.vy = 0;
-  }
-  const jump = Math.hypot(x - c.dx, y - c.dy) * scaleOf3() > 400;
   c.x = x;
   c.y = y;
-  c.t = now;
-  if (jump) {
-    c.dx = x;
-    c.dy = y;
-    c.vx = 0;
-    c.vy = 0;
+  if (Math.hypot(x - c.dx, y - c.dy) * scaleOf3() > 400) {
+    c.q = [];
+    c.p = 0;
+    c.fx = c.dx = x;
+    c.fy = c.dy = y;
+    c.done = true;
+    return;
+  }
+  if (!c.done && !c.q.length && c.dry && now - c.dry < 200) c.delay = Math.min(DELAY_MAX_MS, c.delay + Math.min(DELAY_STALL_STEP_MS, (now - c.dry) / 2));
+  c.dry = 0;
+  const resting = c.done || !c.q.length;
+  const d = resting ? c.delay : Math.max(1, Math.min(STEP_MAX_MS, gap > 0 ? gap : STEP_DEFAULT_MS));
+  c.done = false;
+  c.q.push({ x, y, d });
+  if (c.q.length > 120) {
+    const k = c.q.length - 120;
+    const last3 = c.q[k - 1];
+    c.fx = last3.x;
+    c.fy = last3.y;
+    c.q.splice(0, k);
+    c.p = 0;
   }
 }
-function horizon(c) {
-  return Math.min(CARRY_MAX_MS, c.every * 1.2);
-}
-function target(c, now) {
-  if (!PREDICT) return [c.x, c.y];
-  const age = now - c.t, carry = horizon(c);
-  const k = age <= carry ? c.lead + age : Math.max(0, c.lead + carry - 2 * (age - carry));
-  return [c.x + c.vx * k, c.y + c.vy * k];
-}
 function place2(force) {
-  const now = performance.now(), dt = lastFrame ? Math.min(50, now - lastFrame) : 16;
+  const now = performance.now(), dt = lastFrame ? Math.min(50, now - lastFrame) : 0;
   lastFrame = now;
-  const s2 = scaleOf3(), a = 1 - Math.exp(-dt / EASE_MS);
+  const s2 = scaleOf3();
   let moving = false;
   for (const c of cursors.values()) {
-    const [tx, ty] = target(c, now);
-    const ex = tx - c.dx, ey = ty - c.dy;
-    if (Math.abs(ex) * s2 < 0.05 && Math.abs(ey) * s2 < 0.05) {
-      c.dx = tx;
-      c.dy = ty;
-    } else {
-      c.dx += ex * a;
-      c.dy += ey * a;
-      moving = true;
+    if (c.q.length) {
+      let ahead = -c.p;
+      for (const st of c.q) ahead += st.d;
+      const rate = c.done ? Math.max(1, Math.min(RATE_MAX, 1 + (ahead - c.delay) / 40)) : Math.max(RATE_MIN, Math.min(RATE_MAX, 1 + (ahead - c.delay) / 40));
+      let adv = dt * rate;
+      while (adv > 0 && c.q.length) {
+        const st = c.q[0], left = st.d - c.p;
+        if (adv >= left) {
+          adv -= left;
+          c.fx = st.x;
+          c.fy = st.y;
+          c.q.shift();
+          c.p = 0;
+        } else {
+          c.p += adv;
+          adv = 0;
+        }
+      }
+      if (!c.q.length && !c.done) c.dry = now;
     }
-    if (now - c.t < 2 * horizon(c) + c.lead && (c.vx || c.vy)) moving = true;
+    if (c.delay > DELAY_MIN_MS && dt > 0) c.delay = Math.max(DELAY_MIN_MS, c.delay - DELAY_DECAY_MS_PER_S * dt / 1e3);
+    if (c.q.length) {
+      const st = c.q[0], k = st.d > 0 ? c.p / st.d : 1;
+      c.dx = c.fx + (st.x - c.fx) * k;
+      c.dy = c.fy + (st.y - c.fy) * k;
+      moving = true;
+    } else {
+      c.dx = c.fx;
+      c.dy = c.fy;
+    }
     const tf2 = `translate(${c.dx.toFixed(4)} ${c.dy.toFixed(4)}) scale(${(1 / s2).toFixed(6)})`;
-    if (force || moving || c.s !== s2) {
+    if (force || moving || c.s !== s2 || c.g.getAttribute("transform") !== tf2) {
       c.g.setAttribute("transform", tf2);
       c.s = s2;
     }
@@ -73253,6 +73270,7 @@ function wake() {
     if (place2(false)) raf = requestAnimationFrame(frame);
     else lastFrame = 0;
   };
+  lastFrame = performance.now();
   raf = requestAnimationFrame(frame);
 }
 function build(c, sp) {
@@ -73350,7 +73368,7 @@ function onlyPointerMoved(a, b) {
   const ka = Object.keys(a), kb = Object.keys(b);
   if (ka.length !== kb.length) return false;
   for (const k of ka) {
-    if (k === "cursor" || k === "viewport" || k === "rtt") continue;
+    if (k === "cursor" || k === "viewport" || k === "rtt" || k === "ts") continue;
     if (!(k in b)) return false;
     const x = a[k], y = b[k];
     if (x === y) continue;
@@ -73363,7 +73381,7 @@ function toggleFollowToast(cid, name, render3) {
   toast(E.followPeer ? `Following ${name}` : "Stopped following");
   render3();
 }
-var PEER_CURSOR_PX, PEER_TAG_TEXT_PX, PEER_TAG_PAD_PX, CARRY_MAX_MS, LEAD_MAX_MS, FRAME_MS, rttMs, EASE_MS_PREDICTING, PREDICT, EASE_MS, cursors, layer, raf, lastFrame, scaleOf3, onFollow;
+var PEER_CURSOR_PX, PEER_TAG_TEXT_PX, PEER_TAG_PAD_PX, DELAY_START_MS, DELAY_MIN_MS, DELAY_MAX_MS, DELAY_STALL_STEP_MS, DELAY_DECAY_MS_PER_S, STEP_MAX_MS, STEP_DEFAULT_MS, RATE_MAX, RATE_MIN, rttMs, cursors, layer, raf, lastFrame, scaleOf3, onFollow;
 var init_peercursors = __esm({
   "web/editor/peercursors.ts"() {
     "use strict";
@@ -73373,19 +73391,16 @@ var init_peercursors = __esm({
     PEER_CURSOR_PX = 24;
     PEER_TAG_TEXT_PX = 16;
     PEER_TAG_PAD_PX = 5;
-    CARRY_MAX_MS = 60;
-    LEAD_MAX_MS = 90;
-    FRAME_MS = 4;
+    DELAY_START_MS = 24;
+    DELAY_MIN_MS = 16;
+    DELAY_MAX_MS = 40;
+    DELAY_STALL_STEP_MS = 3;
+    DELAY_DECAY_MS_PER_S = 8;
+    STEP_MAX_MS = 60;
+    STEP_DEFAULT_MS = 15;
+    RATE_MAX = 4;
+    RATE_MIN = 0.8;
     rttMs = 0;
-    EASE_MS_PREDICTING = 7;
-    PREDICT = (() => {
-      try {
-        return localStorage.getItem("junction.cursorPrediction") === "1";
-      } catch {
-        return false;
-      }
-    })();
-    EASE_MS = PREDICT ? EASE_MS_PREDICTING : 14;
     cursors = /* @__PURE__ */ new Map();
     layer = null;
     raf = 0;
@@ -73393,6 +73408,7 @@ var init_peercursors = __esm({
     scaleOf3 = () => 4;
     onFollow = () => {
     };
+    globalThis.__peerCursorState = () => [...cursors.values()].map((c) => ({ x: c.x, y: c.y, dx: c.dx, dy: c.dy, q: c.q.length, done: c.done, delay: Math.round(c.delay), ts: c.ts }));
   }
 });
 
@@ -73482,6 +73498,7 @@ function sendPresence(mmPos, ghostSegs) {
   const st = { cursor: [Math.round(at4[0] * E.IU), Math.round(at4[1] * E.IU)] };
   const rtt = myRtt();
   if (rtt > 0) st.rtt = Math.round(rtt);
+  st.ts = Math.round(performance.now() * 10) / 10;
   const vp = visibleRectNm();
   if (vp) st.viewport = vp;
   if (ghostSegs) st.ghost = ghostSegs;
@@ -76421,8 +76438,8 @@ function settledFrame(paint) {
     plateHeld = false;
   }
 }
-function showPlate(target3, L, k, ox, oy) {
-  const cv = target3.canvas, parent = cv.parentNode;
+function showPlate(target2, L, k, ox, oy) {
+  const cv = target2.canvas, parent = cv.parentNode;
   if (!paintConfig.plate || !parent || typeof cv.getBoundingClientRect !== "function") return false;
   const pl = L.el || L.cv;
   if (!pl.style) return false;
@@ -76443,44 +76460,44 @@ function showPlate(target3, L, k, ox, oy) {
   if (st.width !== wc) st.width = wc;
   if (st.height !== hc) st.height = hc;
   st.transform = `translate(${ox / dpr}px, ${oy / dpr}px) scale(${k})`;
-  target3.save();
-  target3.setTransform(1, 0, 0, 1, 0, 0);
-  target3.clearRect(0, 0, cv.width, cv.height);
-  target3.restore();
+  target2.save();
+  target2.setTransform(1, 0, 0, 1, 0, 0);
+  target2.clearRect(0, 0, cv.width, cv.height);
+  target2.restore();
   return true;
 }
-function blitLevel(target3, L, view) {
+function blitLevel(target2, L, view) {
   const { k, ox, oy } = placement(L, view);
   L.used = performance.now();
   stats.down++;
   stats.maxDownK = Math.max(stats.maxDownK, k);
   stats.last = "down";
-  if (!plateHeld && showPlate(target3, L, k, ox, oy)) {
+  if (!plateHeld && showPlate(target2, L, k, ox, oy)) {
     stats.plates++;
     return;
   }
   hidePlate();
-  copyLevel(target3, L, k, ox, oy);
+  copyLevel(target2, L, k, ox, oy);
 }
-function copyLevel(target3, L, k, ox, oy) {
-  target3.save();
-  target3.setTransform(1, 0, 0, 1, 0, 0);
-  target3.globalAlpha = 1;
-  target3.globalCompositeOperation = "copy";
-  target3.imageSmoothingEnabled = true;
-  target3.imageSmoothingQuality = "low";
-  target3.drawImage(levelImage(L), ox, oy, L.w * k, L.h * k);
-  target3.restore();
+function copyLevel(target2, L, k, ox, oy) {
+  target2.save();
+  target2.setTransform(1, 0, 0, 1, 0, 0);
+  target2.globalAlpha = 1;
+  target2.globalCompositeOperation = "copy";
+  target2.imageSmoothingEnabled = true;
+  target2.imageSmoothingQuality = "low";
+  target2.drawImage(levelImage(L), ox, oy, L.w * k, L.h * k);
+  target2.restore();
 }
-function paintDocument(doc2, target3, view, opts2, forceIn, zoom, onRest) {
-  const W12 = target3.canvas.width, H = target3.canvas.height;
+function paintDocument(doc2, target2, view, opts2, forceIn, zoom, onRest) {
+  const W12 = target2.canvas.width, H = target2.canvas.height;
   stats.view = view;
   const now = performance.now(), sincePaint = now - lastPaint;
   lastPaint = now;
   const l = ensureLayer(W12, H);
   if (!l) {
     hidePlate();
-    KiCadCanvas.render(doc2, target3, view, opts2);
+    KiCadCanvas.render(doc2, target2, view, opts2);
     wasScaling = !!zoom;
     return;
   }
@@ -76502,16 +76519,16 @@ function paintDocument(doc2, target3, view, opts2, forceIn, zoom, onRest) {
       const ox = view.panX * dpr - lv.panX * dpr * k, oy = view.panY * dpr - lv.panY * dpr * k;
       const bg = backgroundOf(doc2, opts2);
       hidePlate();
-      target3.save();
-      target3.setTransform(1, 0, 0, 1, 0, 0);
-      target3.globalAlpha = 1;
+      target2.save();
+      target2.setTransform(1, 0, 0, 1, 0, 0);
+      target2.globalAlpha = 1;
       if (bg) {
-        target3.fillStyle = bg;
-        target3.fillRect(0, 0, W12, H);
-      } else target3.clearRect(0, 0, W12, H);
-      target3.imageSmoothingEnabled = true;
-      target3.drawImage(l.cv, ox, oy, W12 * k, H * k);
-      target3.restore();
+        target2.fillStyle = bg;
+        target2.fillRect(0, 0, W12, H);
+      } else target2.clearRect(0, 0, W12, H);
+      target2.imageSmoothingEnabled = true;
+      target2.drawImage(l.cv, ox, oy, W12 * k, H * k);
+      target2.restore();
       stats.scaled++;
       stats.last = "scaled";
       wasScaling = true;
@@ -76526,7 +76543,7 @@ function paintDocument(doc2, target3, view, opts2, forceIn, zoom, onRest) {
         renderLevel(L, doc2, opts2);
         queue = queue.filter((x) => x !== L);
       }
-      blitLevel(target3, L, view);
+      blitLevel(target2, L, view);
       if (zoom) prefetchAhead(L, view, zoom, W12, H);
       wasScaling = true;
       if (zoom) {
@@ -76568,21 +76585,21 @@ function paintDocument(doc2, target3, view, opts2, forceIn, zoom, onRest) {
       stats.last = "strip";
       stand = true;
     } else {
-      fullAndBlit(l, doc2, view, opts2, target3, now);
+      fullAndBlit(l, doc2, view, opts2, target2, now);
       return finishFull(doc2, view, opts2, zoom, W12, H);
     }
   } else {
-    fullAndBlit(l, doc2, view, opts2, target3, now);
+    fullAndBlit(l, doc2, view, opts2, target2, now);
     return finishFull(doc2, view, opts2, zoom, W12, H);
   }
   wasScaling = !!zoom;
   hidePlate();
-  target3.save();
-  target3.setTransform(1, 0, 0, 1, 0, 0);
-  target3.globalAlpha = 1;
-  target3.globalCompositeOperation = "copy";
-  target3.drawImage(l.cv, 0, 0);
-  target3.restore();
+  target2.save();
+  target2.setTransform(1, 0, 0, 1, 0, 0);
+  target2.globalAlpha = 1;
+  target2.globalCompositeOperation = "copy";
+  target2.drawImage(l.cv, 0, 0);
+  target2.restore();
   if (stand) scheduleRest(() => {
     invalidateLayerOnly();
     onRest();
@@ -76591,15 +76608,15 @@ function paintDocument(doc2, target3, view, opts2, forceIn, zoom, onRest) {
 function invalidateLayerOnly() {
   if (layer2) layer2.view = null;
 }
-function fullAndBlit(l, doc2, view, opts2, target3, t0) {
+function fullAndBlit(l, doc2, view, opts2, target2, t0) {
   full2(l, doc2, view, opts2);
   hidePlate();
-  target3.save();
-  target3.setTransform(1, 0, 0, 1, 0, 0);
-  target3.globalAlpha = 1;
-  target3.globalCompositeOperation = "copy";
-  target3.drawImage(l.cv, 0, 0);
-  target3.restore();
+  target2.save();
+  target2.setTransform(1, 0, 0, 1, 0, 0);
+  target2.globalAlpha = 1;
+  target2.globalCompositeOperation = "copy";
+  target2.drawImage(l.cv, 0, 0);
+  target2.restore();
   l.ms = performance.now() - t0;
   stats.lastFullMs = l.ms;
   stats.last = "full";
@@ -77448,7 +77465,7 @@ function peerCursorSpec(cid, p) {
   if (!Array.isArray(st.cursor)) return null;
   const ai = st.ai && typeof st.ai === "object" ? st.ai : null;
   const note3 = ai && typeof ai.note === "string" ? ai.note.trim().slice(0, 140) : "";
-  return { cid, name: peerName(p), color: p.user && p.user.color || "#4477ee", note: note3, following: E.followPeer === cid, at: [st.cursor[0] / E.IU, st.cursor[1] / E.IU], rtt: typeof st.rtt === "number" ? st.rtt : 0 };
+  return { cid, name: peerName(p), color: p.user && p.user.color || "#4477ee", note: note3, following: E.followPeer === cid, at: [st.cursor[0] / E.IU, st.cursor[1] / E.IU], ts: typeof st.ts === "number" ? st.ts : 0 };
 }
 function movePeerCursors(peers) {
   const specs = [];
@@ -79743,11 +79760,11 @@ function infoBar() {
 }
 function focusError(ctrl, row3, col) {
   if (!ctrl) return;
-  let target3 = ctrl;
+  let target2 = ctrl;
   if (ctrl.classList.contains("pd-grid") && row3 !== void 0) {
     const tr = ctrl.querySelectorAll("tbody tr")[row3];
     const td = tr ? tr.children[col || 0] : void 0;
-    target3 = td ? td.querySelector("input,textarea,k-select") || td : ctrl;
+    target2 = td ? td.querySelector("input,textarea,k-select") || td : ctrl;
     if (td) {
       td.classList.add("err");
       setTimeout(() => td.classList.remove("err"), 3e3);
@@ -79755,9 +79772,9 @@ function focusError(ctrl, row3, col) {
     }
   }
   setTimeout(() => {
-    if (!target3) return;
-    target3.focus();
-    if (target3 instanceof HTMLInputElement || target3 instanceof HTMLTextAreaElement) target3.select();
+    if (!target2) return;
+    target2.focus();
+    if (target2 instanceof HTMLInputElement || target2 instanceof HTMLTextAreaElement) target2.select();
   }, 0);
 }
 function staticBitmap(bitmap, w, hgt = w, style) {
@@ -82533,13 +82550,13 @@ async function openLibTables(opts2) {
         await okBox("Error", `Library '${r.uri}' not found.`);
         continue;
       }
-      const target3 = sym ? path2.replace(/\.[^./]*$/, "") + ".kicad_sym" : path2.replace(/\.[^./]*$/, "") + ".pretty";
-      if (projectPaths().some((x) => x === target3 || x.startsWith(target3 + "/"))) {
-        const c = await choiceBox("Migrate Library", sym ? `File '${target3}' already exists. Do you want overwrite this file?` : `Folder '${target3}' already exists. Do you want overwrite any existing footprints?`, ["Cancel", "No", "Yes"], { def: 2, esc: 0 });
+      const target2 = sym ? path2.replace(/\.[^./]*$/, "") + ".kicad_sym" : path2.replace(/\.[^./]*$/, "") + ".pretty";
+      if (projectPaths().some((x) => x === target2 || x.startsWith(target2 + "/"))) {
+        const c = await choiceBox("Migrate Library", sym ? `File '${target2}' already exists. Do you want overwrite this file?` : `Folder '${target2}' already exists. Do you want overwrite any existing footprints?`, ["Cancel", "No", "Yes"], { def: 2, esc: 0 });
         if (c.index === 0) return;
         if (c.index === 1) continue;
       }
-      await okBox("Error", (sym ? `Failed to save symbol library file '${target3}'.` : `Failed to save footprint library file '${target3}'.`) + `
+      await okBox("Error", (sym ? `Failed to save symbol library file '${target2}'.` : `Failed to save footprint library file '${target2}'.`) + `
 
 The web editor cannot read ${r.type} libraries; migrate this one in KiCad.`);
     }
@@ -84772,16 +84789,16 @@ function changesTo(text3) {
   return changesBetween(E.kdoc, text3);
 }
 function changesBetween(doc2, text3) {
-  const target3 = KiCadCanvas.parseDoc(text3, "footprint");
+  const target2 = KiCadCanvas.parseDoc(text3, "footprint");
   const out2 = [];
   const wrap = (n2) => PT4().wrapBoard(n2);
-  for (const [id, it] of target3.items) {
+  for (const [id, it] of target2.items) {
     const cur2 = doc2.items.get(id);
     if (!cur2) out2.push({ id, kind: "ADDED", typeName: PT4().typeNameOf(it), sexpr: wrap(it.node) });
     else if (KiCadCanvas.serialize(cur2.node) !== KiCadCanvas.serialize(it.node)) out2.push({ id, kind: "MODIFIED", typeName: PT4().typeNameOf(it), sexpr: wrap(it.node) });
   }
-  for (const [id, it] of doc2.items) if (!target3.items.has(id)) out2.push({ id, kind: "REMOVED", typeName: PT4().typeNameOf(it), properties: [] });
-  const h3 = FD().footprintHeaderSexpr(target3);
+  for (const [id, it] of doc2.items) if (!target2.items.has(id)) out2.push({ id, kind: "REMOVED", typeName: PT4().typeNameOf(it), properties: [] });
+  const h3 = FD().footprintHeaderSexpr(target2);
   if (h3 !== FD().footprintHeaderSexpr(doc2)) out2.push({ id: "footprint", kind: "MODIFIED", typeName: "FOOTPRINT", sexpr: h3 });
   return out2;
 }
@@ -86650,8 +86667,8 @@ function navigateDocs(dir) {
   }
 }
 function switchEditor() {
-  const target3 = isSch() ? state.docs.find((d) => d.docType === "kicad_pcb") : rootSchematic();
-  if (target3) openDoc(target3);
+  const target2 = isSch() ? state.docs.find((d) => d.docType === "kicad_pcb") : rootSchematic();
+  if (target2) openDoc(target2);
   else toast(isSch() ? "This project has no board yet" : "This project has no schematic yet");
 }
 var docNav, GRID_CHOICES, sheetNames, sheetPages, ROOT_SHEET_NAME, hierarchyLearned, layerRow, remote;
@@ -89118,22 +89135,22 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
   };
   const teardropsPage = (el4) => {
     const params = arr3(ds.teardrop_parameters).map(obj4);
-    const find = (target3) => params.find((p) => p.td_target_name === target3) || {};
+    const find = (target2) => params.find((p) => p.td_target_name === target2) || {};
     const sets = [];
-    const one2 = (title, target3, span, sizeTip, d, bitmap) => {
-      const p = find(target3), ro = roPro;
-      const pct = (k, def, key3) => numField(+(numOr3(p[k], def) * 100).toFixed(2), { ro, key: target3 + "-" + key3 });
-      const bestL = pct("td_length_ratio", 0.5, "bestLength"), maxL = lenField(numOr3(p.td_maxlen, 1), { ro, key: target3 + "-maxLength" });
-      const bestW = pct("td_height_ratio", 1, "bestWidth"), maxW = lenField(numOr3(p.td_maxheight, 2), { ro, key: target3 + "-maxWidth" });
-      const zone = checkField(boolOr2(p.td_on_pad_in_zone, false) === false, "Prefer zone connection", { ro, key: target3 + "-preferZone", tip: "Do not create teardrops on tracks connected to pads that are also connected to a copper zone." });
+    const one2 = (title, target2, span, sizeTip, d, bitmap) => {
+      const p = find(target2), ro = roPro;
+      const pct = (k, def, key3) => numField(+(numOr3(p[k], def) * 100).toFixed(2), { ro, key: target2 + "-" + key3 });
+      const bestL = pct("td_length_ratio", 0.5, "bestLength"), maxL = lenField(numOr3(p.td_maxlen, 1), { ro, key: target2 + "-maxLength" });
+      const bestW = pct("td_height_ratio", 1, "bestWidth"), maxW = lenField(numOr3(p.td_maxheight, 2), { ro, key: target2 + "-maxWidth" });
+      const zone = checkField(boolOr2(p.td_on_pad_in_zone, false) === false, "Prefer zone connection", { ro, key: target2 + "-preferZone", tip: "Do not create teardrops on tracks connected to pads that are also connected to a copper zone." });
       const limit = pct("td_width_to_size_filter_ratio", 0.9, "widthLimit");
       limit.input.title = sizeTip;
-      const two = checkField(boolOr2(p.td_allow_use_two_tracks, true), span, { ro, key: target3 + "-twoTracks", tip: "Allows a teardrop to extend over the first 2 connected track segments if the first track segment is too short to accommodate the best length." });
-      const curved = checkField(p.td_curve_segcount === true || numOr3(p.td_curve_segcount, 0) > 0, "Curved edges", { ro, key: target3 + "-curved" });
+      const two = checkField(boolOr2(p.td_allow_use_two_tracks, true), span, { ro, key: target2 + "-twoTracks", tip: "Allows a teardrop to extend over the first 2 connected track segments if the first track segment is too short to accommodate the best length." });
+      const curved = checkField(p.td_curve_segcount === true || numOr3(p.td_curve_segcount, 0) > 0, "Curved edges", { ro, key: target2 + "-curved" });
       const ratio = unitLabel(`%( ${d} )`);
-      sets.push({ target: target3, ratios: [[bestL, "best_length_ratio"], [bestW, "best_width_ratio"], [limit, "width_to_size_filter_ratio"]], get: () => ({
+      sets.push({ target: target2, ratios: [[bestL, "best_length_ratio"], [bestW, "best_width_ratio"], [limit, "width_to_size_filter_ratio"]], get: () => ({
         ...p,
-        td_target_name: target3,
+        td_target_name: target2,
         td_maxlen: maxL.get(),
         td_maxheight: maxW.get(),
         td_length_ratio: +(bestL.get() / 100).toFixed(6),
@@ -95951,9 +95968,9 @@ function sheetPage(s2, count2, o, pageIndex, variant = "") {
       if (ref && !ref.startsWith("#")) bookmarks.push({ group: "Symbols", title: ref });
     } else if (it.kind === "sheet") {
       const m = KiCadCanvas.movableItems(doc2).find((x) => x.id === it.id);
-      const target3 = m && m.page ? pageIndex.get(m.page) : void 0;
-      if (o.links && target3) links.push({ box: box4(b), url: `#${target3}` });
-      else if (o.popups) links.push({ box: box4(b), menu: [...target3 ? [["Go to page " + m.page, `#${target3}`]] : [], ...props.map(([n2, v]) => [`${n2} = ${v}`, ""])] });
+      const target2 = m && m.page ? pageIndex.get(m.page) : void 0;
+      if (o.links && target2) links.push({ box: box4(b), url: `#${target2}` });
+      else if (o.popups) links.push({ box: box4(b), menu: [...target2 ? [["Go to page " + m.page, `#${target2}`]] : [], ...props.map(([n2, v]) => [`${n2} = ${v}`, ""])] });
     }
   }
   const bg = o.background && o.color ? KiCadCanvas.schThemeColors(o.theme).bg : null;
@@ -97860,7 +97877,7 @@ var init_model_fit = __esm({
 });
 
 // web/ai/proposals.ts
-function target2(doc2, e) {
+function target(doc2, e) {
   if (typeof e.id === "string" && e.id) {
     const it = doc2.items.get(e.id);
     if (!it) throw new ToolError(`no item with id ${e.id} on the open document`);
@@ -98409,7 +98426,7 @@ function build2(input) {
         case "set_field": {
           const field2 = text2(e.field, "field");
           if (typeof e.value !== "string") throw new ToolError("value must be a string");
-          const items = all(target2(doc2, e)).filter((it) => it.kind === "symbol" || it.kind === "footprint");
+          const items = all(target(doc2, e)).filter((it) => it.kind === "symbol" || it.kind === "footprint");
           if (!items.length) throw new ToolError("fields belong to symbols and footprints");
           const before = fieldsOf(items[0].node)[field2];
           if (before === e.value) throw new ToolError(`${nameOf2(items[0])} ${field2} is already "${e.value}"`);
@@ -98421,7 +98438,7 @@ function build2(input) {
           break;
         }
         case "move": {
-          const it = one(target2(doc2, e), e);
+          const it = one(target(doc2, e), e);
           touch(it, e.op);
           const x = num12(e.x, "x"), y = num12(e.y, "y");
           const rot3 = e.rotation === void 0 ? void 0 : num12(e.rotation, "rotation");
@@ -98434,7 +98451,7 @@ function build2(input) {
           break;
         }
         case "remove": {
-          const items = all(target2(doc2, e));
+          const items = all(target(doc2, e));
           for (const it of items) {
             touch(it, e.op);
             changes.push(removed(doc2, it));
@@ -99061,7 +99078,7 @@ function build2(input) {
         }
         case "pad_connection": {
           pcbOnly(e.op);
-          const it = one(target2(doc2, e), e);
+          const it = one(target(doc2, e), e);
           if (it.kind !== "footprint") throw new ToolError("pad_connection applies to a footprint's pads");
           const code = { inherit: null, none: 0, thermal: 1, solid: 2 }[String(e.connect)];
           if (code === void 0) throw new ToolError("connect is solid, thermal, none or inherit");
@@ -102775,10 +102792,10 @@ function stackupFixedThickness(layers) {
   }
   return +t.toFixed(6);
 }
-function adjustDielectrics(layers, target3) {
+function adjustDielectrics(layers, target2) {
   const free = layers.filter((l) => (l.type === "core" || l.type === "prepreg") && !l.locked);
   if (!free.length) return "All dielectric  thickness layers are locked";
-  const left = target3 - stackupFixedThickness(layers), PREPREG = 0.1;
+  const left = target2 - stackupFixedThickness(layers), PREPREG = 0.1;
   const cores = free.filter((l) => l.type === "core"), pre = free.filter((l) => l.type !== "core");
   let core = cores.length ? (left - PREPREG * pre.length) / cores.length : 0;
   if (!cores.length || core < PREPREG) {
@@ -104084,10 +104101,10 @@ function planUpdate(doc2, netlist, o = {}) {
         touched = true;
         return st;
       };
-      const attr = (key3, label, target3, current) => {
-        if (current === target3) return;
-        say("action", target3 ? `Add ${ref} '${label}' attribute to variant ${v.name}.` : `Remove ${ref} '${label}' attribute from variant ${v.name}.`);
-        add2().flags[key3] = target3;
+      const attr = (key3, label, target2, current) => {
+        if (current === target2) return;
+        say("action", target2 ? `Add ${ref} '${label}' attribute to variant ${v.name}.` : `Remove ${ref} '${label}' attribute from variant ${v.name}.`);
+        add2().flags[key3] = target2;
         changed = true;
       };
       const now = flagsNow();
@@ -109369,18 +109386,18 @@ root.KiCadCanvas = api;
     if (boxes.length < 2) return [];
     const edge = (b) => which === "top" ? b[1] : which === "bottom" ? b[3] : which === "left" ? b[0] : which === "right" ? b[2] : which === "centerX" ? (b[0] + b[2]) / 2 : (b[1] + b[3]) / 2;
     const locked = items.filter((it) => isLockedNode(it.node)).map((it) => it.bbox || rectOf(it)).filter(Boolean);
-    let target3;
+    let target2;
     if (locked.length) {
       const c = cursorOf(ctx), hit5 = c && locked.find((b) => c[0] >= b[0] && c[0] <= b[2] && c[1] >= b[1] && c[1] <= b[3]);
       const vals = locked.map(edge);
-      target3 = hit5 ? edge(hit5) : which === "bottom" || which === "right" ? Math.max(...vals) : Math.min(...vals);
-    } else target3 = which === "top" ? Math.min(...boxes.map((b) => b[1])) : which === "bottom" ? Math.max(...boxes.map((b) => b[3])) : which === "left" ? Math.min(...boxes.map((b) => b[0])) : which === "right" ? Math.max(...boxes.map((b) => b[2])) : which === "centerX" ? boxes.reduce((t, b) => t + (b[0] + b[2]) / 2, 0) / boxes.length : boxes.reduce((t, b) => t + (b[1] + b[3]) / 2, 0) / boxes.length;
+      target2 = hit5 ? edge(hit5) : which === "bottom" || which === "right" ? Math.max(...vals) : Math.min(...vals);
+    } else target2 = which === "top" ? Math.min(...boxes.map((b) => b[1])) : which === "bottom" ? Math.max(...boxes.map((b) => b[3])) : which === "left" ? Math.min(...boxes.map((b) => b[0])) : which === "right" ? Math.max(...boxes.map((b) => b[2])) : which === "centerX" ? boxes.reduce((t, b) => t + (b[0] + b[2]) / 2, 0) / boxes.length : boxes.reduce((t, b) => t + (b[1] + b[3]) / 2, 0) / boxes.length;
     const out2 = [], touched = [], keep = /* @__PURE__ */ new Set();
     for (const it of items) {
       const b = it.bbox || rectOf(it);
       if (!b || !DRAG_KINDS.has(it.kind) || isLockedNode(it.node)) continue;
       const cur2 = edge(b);
-      const d = ctx.snap ? r45(K11.snap(target3 - cur2, ctx.gridPitch || 1.27)) : r45(target3 - cur2);
+      const d = ctx.snap ? r45(K11.snap(target2 - cur2, ctx.gridPitch || 1.27)) : r45(target2 - cur2);
       if (!d) continue;
       const n2 = deep(it.node);
       shiftNode(it.kind, n2, which === "left" || which === "right" || which === "centerX" ? d : 0, which === "top" || which === "bottom" || which === "centerY" ? d : 0);
@@ -111700,14 +111717,14 @@ ${body}
   async function ensureSheetDoc(ctx, file) {
     file = normSheetFile(file);
     if (!file) throw new Error("no sheet file name");
-    const cur2 = currentDoc2(ctx), dir = cur2 ? dirName(cur2.path) : "", target3 = joinPath2(dir, file);
-    const found = schDocs2(ctx).find((d) => d.path === target3 || d.path === file) || schDocs2(ctx).find((d) => baseName3(d.path) === baseName3(file));
+    const cur2 = currentDoc2(ctx), dir = cur2 ? dirName(cur2.path) : "", target2 = joinPath2(dir, file);
+    const found = schDocs2(ctx).find((d) => d.path === target2 || d.path === file) || schDocs2(ctx).find((d) => baseName3(d.path) === baseName3(file));
     if (found) return { file: relPath(dir, found.path), docId: found.docId, created: false };
     if (typeof ctx.api !== "function" || !ctx.project || !ctx.project.projectId) throw new Error("this session cannot create sheet files");
-    const res = await ctx.api(`/api/projects/${ctx.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path: target3, docType: "kicad_sch" }) });
+    const res = await ctx.api(`/api/projects/${ctx.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path: target2, docType: "kicad_sch" }) });
     if (!res || !res.docId) throw new Error("no document id returned");
     if (!res.existing) await ctx.api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: emptySheetDoc() });
-    const entry = { docId: res.docId, path: res.path || target3, docType: "kicad_sch" };
+    const entry = { docId: res.docId, path: res.path || target2, docType: "kicad_sch" };
     if (Array.isArray(ctx.docs) && !ctx.docs.some((d) => d && d.docId === entry.docId)) ctx.docs.push(entry);
     return { file, docId: entry.docId, created: !res.existing };
   }
@@ -111788,11 +111805,11 @@ ${body}
     job.promise = (async () => {
       try {
         file = normSheetFile(file);
-        const cur2 = currentDoc2(ctx), dir = cur2 ? dirName(cur2.path) : "", target3 = joinPath2(dir, file);
-        const exists = schDocs2(ctx).find((x) => x.path === target3 || x.path === file);
+        const cur2 = currentDoc2(ctx), dir = cur2 ? dirName(cur2.path) : "", target2 = joinPath2(dir, file);
+        const exists = schDocs2(ctx).find((x) => x.path === target2 || x.path === file);
         if (exists && root5.KDialogs && root5.KDialogs.confirm && !await root5.KDialogs.confirm("Confirmation", `'${baseName3(file)}' already exists.
 
-Link '${target3}' to this file?`)) return null;
+Link '${target2}' to this file?`)) return null;
         const ref = await ensureSheetDoc(ctx, file);
         if (S2.sheetJob !== job || ctx.doc !== doc2) return null;
         const fp = kids7(node, "property").find((q4) => /^Sheet ?file$/i.test(str9(q4[1])));
@@ -113243,7 +113260,7 @@ Link '${target3}' to this file?`)) return null;
       if (idx === 4) setImageOriginOffset(item.id, [p[0] - g2.pos[0], p[1] - g2.pos[1]]);
       else if (idx === 5) {
         const cv = [p[0] - origin[0], p[1] - origin[1]];
-        const target3 = Math.atan2(-cv[1], cv[0]) * 180 / Math.PI - 90, d = target3 - g2.rot;
+        const target2 = Math.atan2(-cv[1], cv[0]) * 180 / Math.PI - 90, d = target2 - g2.rot;
         const np = rotDeg([g2.pos[0] - origin[0], g2.pos[1] - origin[1]], d), at4 = kid8(n2, "at");
         at4[1] = r45(origin[0] + np[0]);
         at4[2] = r45(origin[1] + np[1]);
@@ -118249,8 +118266,8 @@ function z0(tr, w) {
 function zdiff(tr, w, s2) {
   return tr.kind === "stripline" ? 2 * z0(tr, w) * (1 - 0.347 * Math.exp(-2.9 * s2 / tr.b)) : 2 * z0(tr, w) * (1 - 0.48 * Math.exp(-0.96 * s2 / tr.h));
 }
-function widthFor(tr, target3, s2) {
-  const f2 = (w) => (s2 === void 0 ? z0(tr, w) : zdiff(tr, w, s2)) - target3;
+function widthFor(tr, target2, s2) {
+  const f2 = (w) => (s2 === void 0 ? z0(tr, w) : zdiff(tr, w, s2)) - target2;
   let lo = 0.05, hi = 6;
   if (f2(lo) < 0 || f2(hi) > 0) return null;
   for (let i = 0; i < 60; i++) {
@@ -119299,40 +119316,40 @@ var Router = class _Router {
         single.push(...e);
         continue;
       }
-      const target3 = planned2(e[0].key) || planned2(e[1].key) || usualImpedance(e[0].key, true);
-      if (!target3) continue;
+      const target2 = planned2(e[0].key) || planned2(e[1].key) || usualImpedance(e[0].key, true);
+      if (!target2) continue;
       const clr = Math.max(P.netClearance(s2, e[0].key), P.netClearance(s2, e[1].key), s2.minClearance || 0);
       const cw = this.classFor(e[0].key).width;
       let pick = null, first = null;
       for (const g2 of [Math.max(clr, this.opts.pairGap || 0), clr * 1.5, clr * 2, clr * 3]) {
-        const w = widthFor(tr, target3, g2);
+        const w = widthFor(tr, target2, g2);
         if (w !== null && first === null) first = w;
         if (w !== null && w >= minW && w <= Math.max(0.6, cw * 3)) {
           pick = { w: r26(w), g: r26(g2) };
           break;
         }
       }
-      const rep = { nets: e.map((n2) => n2.key), target: target3, differential: true, layer: tr.layer, model, width: pick ? pick.w : first !== null ? r26(first) : null, gap: pick ? pick.g : r26(clr), applied: !!pick };
+      const rep = { nets: e.map((n2) => n2.key), target: target2, differential: true, layer: tr.layer, model, width: pick ? pick.w : first !== null ? r26(first) : null, gap: pick ? pick.g : r26(clr), applied: !!pick };
       if (pick) {
         for (const n2 of e) {
           this.zWidth.set(n2.key, pick.w);
           this.zGap.set(n2.key, pick.g);
         }
         rep.achieved = Math.round(zdiff(tr, pick.w, pick.g));
-      } else rep.note = first !== null ? `${target3} \u03A9 needs ${r26(first)} mm tracks on this stackup, more than the board can carry: routed at the class width (${Math.round(zdiff(tr, cw, clr))} \u03A9). A thinner dielectric under the layer (a 4-layer build) brings the width down.` : `no track width gives ${target3} \u03A9 on this stackup`;
+      } else rep.note = first !== null ? `${target2} \u03A9 needs ${r26(first)} mm tracks on this stackup, more than the board can carry: routed at the class width (${Math.round(zdiff(tr, cw, clr))} \u03A9). A thinner dielectric under the layer (a 4-layer build) brings the width down.` : `no track width gives ${target2} \u03A9 on this stackup`;
       this.zReports.push(rep);
     }
     for (const net of single) {
-      const target3 = planned2(net.key) || usualImpedance(net.key, false);
-      if (!target3) continue;
+      const target2 = planned2(net.key) || usualImpedance(net.key, false);
+      if (!target2) continue;
       const cw = this.classFor(net.key).width;
-      const w = widthFor(tr, target3);
+      const w = widthFor(tr, target2);
       const ok2 = w !== null && w >= minW && w <= Math.max(1.2, cw * 5);
-      const rep = { nets: [net.key], target: target3, differential: false, layer: tr.layer, model, width: w !== null ? r26(w) : null, applied: ok2 };
+      const rep = { nets: [net.key], target: target2, differential: false, layer: tr.layer, model, width: w !== null ? r26(w) : null, applied: ok2 };
       if (ok2) {
         this.zWidth.set(net.key, r26(w));
         rep.achieved = Math.round(z0(tr, r26(w)));
-      } else rep.note = w !== null && w < minW ? `${target3} \u03A9 needs a ${r26(w)} mm track on this stackup, under the board's minimum track width (${r26(minW)} mm): routed at the class width (${Math.round(z0(tr, cw))} \u03A9).` : w !== null ? `${target3} \u03A9 needs a ${r26(w)} mm track on this stackup, more than the board can carry: routed at the class width (${Math.round(z0(tr, cw))} \u03A9). A thinner dielectric under the layer (a 4-layer build), or a coplanar feed with ground beside it, brings the width down.` : `no track width gives ${target3} \u03A9 on this stackup`;
+      } else rep.note = w !== null && w < minW ? `${target2} \u03A9 needs a ${r26(w)} mm track on this stackup, under the board's minimum track width (${r26(minW)} mm): routed at the class width (${Math.round(z0(tr, cw))} \u03A9).` : w !== null ? `${target2} \u03A9 needs a ${r26(w)} mm track on this stackup, more than the board can carry: routed at the class width (${Math.round(z0(tr, cw))} \u03A9). A thinner dielectric under the layer (a 4-layer build), or a coplanar feed with ground beside it, brings the width down.` : `no track width gives ${target2} \u03A9 on this stackup`;
       this.zReports.push(rep);
     }
   }
@@ -119991,15 +120008,15 @@ var Router = class _Router {
     }
     for (const g2 of groups) {
       const before = g2.members.map(lenM);
-      const target3 = g2.length && g2.length > 0 ? g2.length : Math.max(...before);
-      const rep = { group: g2.name, target: +target3.toFixed(3), tolerance: g2.tol, members: [] };
+      const target2 = g2.length && g2.length > 0 ? g2.length : Math.max(...before);
+      const rep = { group: g2.name, target: +target2.toFixed(3), tolerance: g2.tol, members: [] };
       this.matchReports.push(rep);
       g2.members.forEach((mb, i) => {
-        const need = target3 - before[i];
+        const need = target2 - before[i];
         let left = need;
         if (need > g2.tol) left = mb.pr ? this.extendPair(mb.pr, need, g2.tol / 2) : this.extend(mb.conns.slice().sort((a, b) => _Router.lenOf(b) - _Router.lenOf(a))[0], need, g2.tol / 2);
         const now = lenM(mb);
-        const ok2 = Math.abs(target3 - now) <= g2.tol + 1e-6;
+        const ok2 = Math.abs(target2 - now) <= g2.tol + 1e-6;
         rep.members.push({ nets: mb.nets, before: +before[i].toFixed(3), length: +now.toFixed(3), matched: ok2, note: ok2 ? void 0 : need < 0 ? "longer than the length asked for" : `no room for ${left.toFixed(2)} mm more of serpentine beside its track` });
       });
     }
@@ -130362,7 +130379,7 @@ ${content}endstream`);
       const n2 = alloc();
       annots.push(n2);
       if (ln.menu && ln.menu.length) {
-        const js = "ShM([\n" + ln.menu.map(([label, target3]) => target3 ? `["${jsStr(label)}", "${jsStr(target3)}"],
+        const js = "ShM([\n" + ln.menu.map(([label, target2]) => target2 ? `["${jsStr(label)}", "${jsStr(target2)}"],
 ` : `["${jsStr(label)}"],
 `).join("") + "]);";
         set2(n2, `<<

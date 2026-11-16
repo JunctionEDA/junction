@@ -6,8 +6,10 @@ export interface PresenceState {
   cursor?: number[];
   /** [x, y, w, h] of what the peer is looking at */
   viewport?: number[];
-  /** the sender's round trip to the server, ms: receivers predict its pointer ahead by half of it plus half their own */
+  /** the sender's round trip to the server, ms: for diagnostics */
   rtt?: number;
+  /** the sender's clock (performance.now(), ms) when it sent this: receivers replay the pointer at the pace it moved */
+  ts?: number;
   /** in-flight wire segments: x1, y1, x2, y2, width */
   ghost?: number[][];
   selection?: string[];
