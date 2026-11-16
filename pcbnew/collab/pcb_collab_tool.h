@@ -338,6 +338,16 @@ class DIALOG_COLLAB_COMMENTS* m_commentsDlg = nullptr;
     wxDateTime     m_lastPresenceSend;  ///< for the idle keepalive
     wxLongLong     m_lastSlowTick = 0;  ///< last tick that did the 100 ms work
     bool           m_overlayQueued = false; ///< a cursor-overlay rebuild is on its way
+    wxLongLong     m_lastMoveSendMs = 0; ///< when the last changed state went out
+    bool           m_stopPending = false; ///< the "stopped" repeat of it is still owed
+    COLLAB_CURSOR_PREDICTOR m_predictor;  ///< where to draw each peer's pointer between messages
+    std::map<wxString, unsigned long long> m_sampledSeq; ///< each peer's last update taken as a sample
+
+    ///< Feed every peer's fresh presence update to the prediction.
+    void samplePeerCursors();
+
+    ///< Move the drawn pointers one frame along the prediction (from the tick).
+    void animatePeerCursors();
     wxDateTime     m_lastRejectNotice;  ///< throttles the rejected-edit infobar
     bool           m_presenceDirty;
     bool           m_ownsSession; ///< this tool connected the session, rather than eeschema

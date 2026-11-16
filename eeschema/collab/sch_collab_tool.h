@@ -207,6 +207,16 @@ private:
     wxTimer            m_timer;
     wxLongLong         m_lastSlowTick = 0;      ///< last tick that did the 100 ms work
     bool               m_overlayQueued = false; ///< a cursor-overlay rebuild is on its way
+    wxLongLong     m_lastMoveSendMs = 0; ///< when the last changed state went out
+    bool           m_stopPending = false; ///< the "stopped" repeat of it is still owed
+    COLLAB_CURSOR_PREDICTOR m_predictor;  ///< where to draw each peer's pointer between messages
+    std::map<wxString, unsigned long long> m_sampledSeq; ///< each peer's last update taken as a sample
+
+    ///< Feed every peer's fresh presence update to the prediction.
+    void samplePeerCursors();
+
+    ///< Move the drawn pointers one frame along the prediction (from the tick).
+    void animatePeerCursors();
     COLLAB_CURSOR_ITEM m_cursorItem;
 
     std::unique_ptr<SCH_COLLAB_SYNC> m_sync;      ///< live while a session is active

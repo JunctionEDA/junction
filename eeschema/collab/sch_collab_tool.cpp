@@ -113,6 +113,9 @@ static constexpr size_t MAX_PRESENCE_BOXES = 150;
 /// Everything else on the tick still runs every 100 ms.
 static constexpr int PRESENCE_TICK_MS = 16;
 
+/// No change in what we send for this long after the last update means the pointer stopped.
+static constexpr int STOP_AFTER_MS = 40;
+
 /// Cap on in-flight ghost segments per presence update (same 8 KB budget).
 static constexpr size_t MAX_GHOST_SEGS = 100;
 
@@ -1028,6 +1031,9 @@ void SCH_COLLAB_TOOL::onTimer( wxTimerEvent& aEvent )
         followCommentAnchors();
     }
 
+    // Pointers move every frame between presence messages (COLLAB_CURSOR_PREDICTOR).
+    animatePeerCursors();
+
     COLLAB_SESSION& session = COLLAB_SESSION::Get();
 
     if( !sessionActive() || !m_frame )
@@ -1214,11 +1220,30 @@ void SCH_COLLAB_TOOL::onTimer( wxTimerEvent& aEvent )
 
     // Re-send unchanged state as a keepalive: the server evicts peers after 30 s
     // of silence, which would make an idle collaborator's cursor vanish.
+    // Our round trip to the server: peers draw our pointer ahead by half of it (plus half
+    // of theirs), the age of this update when it reaches them.  Whole ms, so it changes
+    // the state (and forces a send) only when the estimate really moves.
+    if( session.RttMs() > 0.0 )
+        state[ "rtt" ] = KiROUND( session.RttMs() );
+
     bool keepalive = m_lastPresenceSend.IsValid()
                      && wxDateTime::Now() - m_lastPresenceSend >= wxTimeSpan::Seconds( 10 );
 
     if( !m_presenceDirty && !keepalive && docId == m_lastSentDocId && state == m_lastSentState )
+    {
+        // The pointer stopped: say so once more a moment later, with the same place, so
+        // peers drawing it ahead of the last update bring it back to where it is at once.
+        if( m_stopPending && wxGetLocalTimeMillis() - m_lastMoveSendMs >= STOP_AFTER_MS )
+        {
+            m_stopPending = false;
+            session.SendPresence( docId, state );
+        }
+
         return;
+    }
+
+    m_stopPending = true;
+    m_lastMoveSendMs = wxGetLocalTimeMillis();
 
     m_presenceDirty = false;
     m_lastSentDocId = docId;
@@ -1375,6 +1400,9 @@ void SCH_COLLAB_TOOL::OnPresenceChanged()
             OnSessionStateChanged();
         }
     }
+
+    // Every message is a sample for the pointer prediction, taken now (the drawing waits).
+    samplePeerCursors();
 
     // A burst of presence messages (several people, sixty updates a second each) is drawn
     // once: the rebuild runs after the messages already waiting have been read.
@@ -2339,6 +2367,10 @@ void SCH_COLLAB_TOOL::rebuildOverlay()
                 draw.cursor = VECTOR2I( peer.state[ "cursor" ][ 0 ].get<int>(),
                                         peer.state[ "cursor" ][ 1 ].get<int>() );
                 draw.hasCursor = true;
+                draw.clientId = clientId;
+
+                // where their hand most likely is now (the prediction), not where it was
+                m_predictor.Where( clientId, draw.cursor );
             }
 
             SCH_SCREEN*         screen = m_frame->GetScreen();
@@ -2861,4 +2893,73 @@ void SCH_COLLAB_TOOL::updateCommentCard()
         else if( pressed )
             hideCommentCard();   // clicking away closes it
     }
+}
+
+
+void SCH_COLLAB_TOOL::samplePeerCursors()
+{
+    COLLAB_SESSION&    session = COLLAB_SESSION::Get();
+    const wxString     docId = currentDocId();
+    const double       ownRtt = session.RttMs();
+    std::set<wxString> present;
+
+    if( !docId.IsEmpty() )
+    {
+        for( const auto& [clientId, peer] : session.Peers( docId ) )
+        {
+            const nlohmann::json& st = peer.state;
+
+            if( !st.is_object() || !st.contains( "cursor" ) || !st[ "cursor" ].is_array()
+                || st[ "cursor" ].size() < 2 || !st[ "cursor" ][ 0 ].is_number()
+                || !st[ "cursor" ][ 1 ].is_number() )
+            {
+                continue;
+            }
+
+            present.insert( clientId );
+            unsigned long long& seen = m_sampledSeq[ clientId ];
+
+            // Only an update that came since the last look is a sample: this runs on every
+            // peer's message, and an old state seen again would read as "they stopped".
+            if( seen == peer.stateSeq )
+                continue;
+
+            seen = peer.stateSeq;
+
+            const double senderRtt = st.contains( "rtt" ) && st[ "rtt" ].is_number()
+                                             ? st[ "rtt" ].get<double>() : 0.0;
+
+            m_predictor.Sample( clientId,
+                                VECTOR2I( st[ "cursor" ][ 0 ].get<int>(), st[ "cursor" ][ 1 ].get<int>() ),
+                                COLLAB_CURSOR_PREDICTOR::LeadMs( senderRtt, ownRtt ) );
+        }
+    }
+
+    m_predictor.Retain( present );
+
+    for( auto it = m_sampledSeq.begin(); it != m_sampledSeq.end(); )
+        it = present.count( it->first ) ? std::next( it ) : m_sampledSeq.erase( it );
+}
+
+
+void SCH_COLLAB_TOOL::animatePeerCursors()
+{
+    if( !m_predictor.Advance() )
+        return;
+
+    KIGFX::VIEW* view = getView();
+
+    if( !view )
+        return;
+
+    m_cursorItem.MoveCursors(
+            [this]( const wxString& aId, VECTOR2I& aPos )
+            {
+                return m_predictor.Where( aId, aPos );
+            } );
+
+    view->Update( &m_cursorItem );
+
+    if( m_frame && m_frame->GetCanvas() )
+        m_frame->GetCanvas()->Refresh();
 }
