@@ -489,13 +489,14 @@ serves, but sign-in returns 503.
 
 ## Deploying
 
-The hosted site (kicad.notaroomba.dev) is the Railway service `kicad-collab` in the
-project `kicad-collaborative`.  Its source is this repository, branch `master`, root
+The hosted site (junctioneda.com; the earlier address kicad.notaroomba.dev still
+answers and sends page views on) is the Railway service `junction` in the
+project `junction`.  Its source is this repository, branch `master`, root
 directory `/server`, so every push to master builds `server/Dockerfile` and deploys.
 A one-off upload of a local tree still works:
 
 ```bash
-railway up --service kicad-collab
+railway up --service junction
 ```
 
 **Replicas.** Run as many as you like behind the load balancer; they need the same

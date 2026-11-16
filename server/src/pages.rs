@@ -139,6 +139,53 @@ pub async fn cache_versioned_assets(req: axum::extract::Request, next: axum::mid
     res
 }
 
+/// Page views that arrive on one of our other hosts (`PUBLIC_URL` or an `ALLOWED_ORIGINS`
+/// entry) go to the same path on `SITE_URL`, so a domain the site moved away from keeps its
+/// links working.  Only a browser opening a page is sent on: the API, the socket, sign-in,
+/// the MCP endpoint and static files answer on every host, which keeps desktop apps and AI
+/// clients that still have the old address working.
+pub async fn redirect_to_site(
+    axum::extract::State(state): axum::extract::State<crate::AppState>,
+    req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> Response {
+    if let Some(to) = site_redirect(&state.cfg, &req) {
+        return axum::response::Redirect::temporary(&to).into_response();
+    }
+    next.run(req).await
+}
+
+fn site_redirect(cfg: &crate::Config, req: &axum::extract::Request) -> Option<String> {
+    if req.method() != axum::http::Method::GET {
+        return None;
+    }
+    let host = req.headers().get(header::HOST)?.to_str().ok()?;
+    let here = format!("https://{host}");
+    let site = cfg.site_url.trim_end_matches('/');
+    if here == site || !site.starts_with("https://") {
+        return None;
+    }
+    let ours = here == cfg.public_url.trim_end_matches('/') || cfg.allowed_origins.iter().any(|o| *o == here);
+    if !ours {
+        return None;
+    }
+    let h = |name: &str| req.headers().get(name).and_then(|v| v.to_str().ok()).unwrap_or("");
+    let page_view = match h("sec-fetch-mode") {
+        "" => h("accept").starts_with("text/html") && h("upgrade").is_empty(),
+        mode => mode == "navigate" && matches!(h("sec-fetch-dest"), "" | "document"),
+    };
+    if !page_view {
+        return None;
+    }
+    let path = req.uri().path();
+    const STAY: [&str; 9] =
+        ["/api/", "/auth/", "/oauth/", "/mcp", "/ws", "/.well-known/", "/static/", "/admin/github-app", "/healthz"];
+    if STAY.iter().any(|p| path.starts_with(p)) {
+        return None;
+    }
+    Some(format!("{site}{}", req.uri().path_and_query().map(|pq| pq.as_str()).unwrap_or("/")))
+}
+
 pub async fn canvas_js() -> Response {
     (
         [(header::CONTENT_TYPE, "application/javascript; charset=utf-8"),
@@ -1322,5 +1369,63 @@ mod landing_tests {
         assert!(include_str!("../web/landing/ai/esp32.kicad_pcb").starts_with("(kicad_pcb"));
         assert!(include_str!("../web/landing/ai/timeline.json").contains("\"stats\""));
         assert!(html.contains(&format!("href=\"/brand/{}/icon.svg\"", super::ICON_V)) && super::MARK.starts_with("<svg"));
+    }
+}
+
+#[cfg(test)]
+mod site_redirect_tests {
+    use super::site_redirect;
+
+    fn cfg() -> crate::Config {
+        crate::Config {
+            public_url: "https://old.example".into(),
+            site_url: "https://new.example".into(),
+            jwt_secret: "x".into(),
+            github_client_id: None,
+            github_client_secret: None,
+            github_api_url: String::new(),
+            github_web_url: String::new(),
+            kicad_cli: None,
+            render_cache_dir: String::new(),
+            allowed_origins: vec!["https://other.example".into()],
+            dev_login: false,
+        }
+    }
+
+    fn req(method: &str, host: &str, uri: &str, headers: &[(&str, &str)]) -> axum::extract::Request {
+        let mut b = axum::http::Request::builder().method(method).uri(uri).header("host", host);
+        for (k, v) in headers {
+            b = b.header(*k, *v);
+        }
+        b.body(axum::body::Body::empty()).unwrap()
+    }
+
+    const NAV: [(&str, &str); 2] = [("sec-fetch-mode", "navigate"), ("sec-fetch-dest", "document")];
+
+    #[test]
+    fn page_views_on_our_other_hosts_move_to_the_site() {
+        let c = cfg();
+        let to = |host: &str, uri: &str| site_redirect(&c, &req("GET", host, uri, &NAV));
+        assert_eq!(to("old.example", "/p/abc/edit?doc=1").as_deref(), Some("https://new.example/p/abc/edit?doc=1"));
+        assert_eq!(to("other.example", "/").as_deref(), Some("https://new.example/"));
+        assert_eq!(to("new.example", "/gallery"), None);
+        assert_eq!(to("stranger.example", "/gallery"), None);
+        // A browser without Sec-Fetch headers, and a curl-style client.
+        assert!(site_redirect(&c, &req("GET", "old.example", "/j/tok", &[("accept", "text/html,*/*")])).is_some());
+        assert!(site_redirect(&c, &req("GET", "old.example", "/j/tok", &[("accept", "*/*")])).is_none());
+    }
+
+    #[test]
+    fn apps_and_sign_in_keep_answering_on_the_old_host() {
+        let c = cfg();
+        for uri in ["/api/me", "/auth/github/login?next=/", "/auth/desktop/authorize", "/oauth/authorize", "/mcp", "/ws",
+            "/.well-known/oauth-authorization-server", "/static/theme.css", "/admin/github-app/created", "/healthz"]
+        {
+            assert_eq!(site_redirect(&c, &req("GET", "old.example", uri, &NAV)), None, "{uri}");
+        }
+        assert_eq!(site_redirect(&c, &req("POST", "old.example", "/gallery", &NAV)), None);
+        assert_eq!(site_redirect(&c, &req("GET", "old.example", "/gallery", &[("sec-fetch-mode", "cors")])), None);
+        // An iframe or a websocket upgrade is not a page view.
+        assert_eq!(site_redirect(&c, &req("GET", "old.example", "/p/a/live", &[("sec-fetch-mode", "navigate"), ("sec-fetch-dest", "iframe")])), None);
     }
 }

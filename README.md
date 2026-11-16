@@ -20,9 +20,9 @@ https://github.com/user-attachments/assets/048096a4-82aa-4844-ad54-ccb67b8257e7
 
 | You want | Do this |
 |---|---|
-| The browser editor | Open [kicad.notaroomba.dev](https://kicad.notaroomba.dev) and sign in with GitHub. Nothing to install. |
+| The browser editor | Open [junctioneda.com](https://junctioneda.com) and sign in with GitHub. Nothing to install. |
 | The desktop app | Download Junction 2.1.4 for macOS, Windows or Linux from the [latest release](https://github.com/notaroomba/junction/releases/latest). |
-| An AI app that designs with you | Add `https://kicad.notaroomba.dev/mcp` as an MCP server (commands [below](#design-with-an-ai)). |
+| An AI app that designs with you | Add `https://junctioneda.com/mcp` as an MCP server (commands [below](#design-with-an-ai)). |
 | Your own server | `cargo run` in [`server/`](server/README.md#running) with a Postgres database. |
 
 Projects are ordinary KiCad files. Everyone in a project should be on 2.0: it is built on a much newer KiCad than
@@ -70,11 +70,11 @@ Junction's server is an MCP endpoint. The model is your AI app's: Junction never
 
 ```sh
 # Claude Code
-claude mcp add --transport http junction https://kicad.notaroomba.dev/mcp
+claude mcp add --transport http junction https://junctioneda.com/mcp
 ```
 
 ```json
-{ "mcpServers": { "junction": { "url": "https://kicad.notaroomba.dev/mcp" } } }
+{ "mcpServers": { "junction": { "url": "https://junctioneda.com/mcp" } } }
 ```
 
 claude.ai, ChatGPT, VS Code, Gemini CLI and Codex are on the site's **Connect an AI assistant** page and in

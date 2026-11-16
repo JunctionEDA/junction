@@ -470,6 +470,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/mcp/grants/{id}", delete(oauth::delete_grant))
         .merge(mcp_routes())
         .layer(axum::middleware::from_fn(pages::cache_versioned_assets))
+        .layer(axum::middleware::from_fn_with_state(state.clone(), pages::redirect_to_site))
         .layer(DefaultBodyLimit::max(50 * 1024 * 1024))
         .layer(tower_http::trace::TraceLayer::new_for_http())
         // SVG previews are ~10x smaller compressed; pages benefit too.
