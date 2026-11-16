@@ -31,6 +31,9 @@ export interface SpiceSymbol {
    *  Sim.Pins and Sim.Decomposition, the unit read first ahead of the others (collectMergedSimPins,
    *  collectUnitPinMaps, getDecomposition) */
   units?: { unit: number; pins: string | null; decomposition: string }[];
+  /** every pin number of the library symbol, in all its units and body styles (SCH_SYMBOL::GetGraphicalPins(
+   *  ALL_UNITS, ALL_BODY_STYLES), which SIM_MODEL::MigrateSimModel builds a legacy symbol's pin map from) */
+  libPins?: string[];
 }
 export interface SpiceLibraryRef { path: string; lib: S.SpiceLibrary }
 export interface SpiceNetlistInput {
@@ -209,7 +212,7 @@ export function spiceNetlist(inp: SpiceNetlistInput): string {
   for (const sym of inp.symbols) {
     const pinNumbers = sym.pins.map((p) => p.number);
     // SCH_SCREEN::MigrateSimModels: the simulation fields of older files, as KiCad migrates them on load
-    let rows = migrateSimModel(dropLegacyEnable(sym.fields), { prefix: sym.ref.replace(/[^A-Za-z].*$/, ""), pins: pinNumbers, libraryModel: (lib, name) => {
+    let rows = migrateSimModel(dropLegacyEnable(sym.fields), { prefix: sym.ref.replace(/[^A-Za-z].*$/, ""), pins: sym.libPins || pinNumbers, libraryModel: (lib, name) => {
       const l = inp.library(lib); if (!l) return null;
       const lm = l.models.find((m) => m.name === name) || l.models.find((m) => m.name.toLowerCase() === name.toLowerCase());
       return lm ? lm.model : null;
@@ -507,15 +510,27 @@ export function readHierarchy(h: HierarchyInput): { symbols: SpiceSymbol[]; text
         units.push(unitFields(it.node, sh, path));
         for (const s2 of sheets) {
           const p2 = "/" + s2.uuidPath.join("/");
-          for (const u of s2.doc.items.values()) if (u.kind === "symbol" && !(u === it && s2 === sh) && refOf(u.node, p2).toLowerCase() === ref.toLowerCase()) units.push(unitFields(u.node, s2, p2));
+          for (const u of s2.doc.items.values()) if (u.kind === "symbol" && !(u === it && s2 === sh) && refOf(u.node, p2) === ref) units.push(unitFields(u.node, s2, p2));
         }
       }
       const old = legacyOf(it.node, path);
       const fields: S.FieldLike[] = kidsOf(node, "property").map((p) => ({ name: sv(p[1]), value: sv(p[1]) === "Reference" ? ref : sv(p[1]) === "Value" && old && old.value ? old.value : resolveText(node, ref, sh, sv(p[2]), 0) }));
-      symbols.push(units ? { ref, fields, pins, units } : { ref, fields, pins });
+      const libPins = libPinsOf(sh.doc, it.node);
+      symbols.push(units ? { ref, fields, pins, units, libPins } : { ref, fields, pins, libPins });
     }
   }
   return { symbols, texts, ports };
+}
+/** SCH_SYMBOL::GetGraphicalPins( ALL_UNITS, ALL_BODY_STYLES ): the pin numbers of every unit and body style of a
+ *  placed symbol's library symbol, in the library's order (a pin drawn in both body styles is there twice). */
+function libPinsOf(doc: KDoc, node: N): string[] | undefined {
+  const name = sv((kidOf(node, "lib_name") || [])[1]) || sv((kidOf(node, "lib_id") || [])[1]);
+  const lib = doc.lib.get(name) || doc.lib.get(sv((kidOf(node, "lib_id") || [])[1]));
+  if (!lib) return undefined;
+  const out: string[] = [];
+  for (const p of kidsOf(lib as N, "pin")) out.push(sv((kidOf(p, "number") || [])[1]));
+  for (const sub of kidsOf(lib as N, "symbol")) for (const p of kidsOf(sub, "pin")) out.push(sv((kidOf(p, "number") || [])[1]));
+  return out;
 }
 /** LIB_SYMBOL::GetUnitCount of a placed symbol's library symbol (its "<name>_<unit>_<style>" children). */
 function unitCountOf(doc: KDoc, node: N): number {
