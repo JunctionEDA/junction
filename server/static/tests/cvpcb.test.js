@@ -5,12 +5,12 @@
 // Run: node server/static/tests/cvpcb.test.js
 "use strict";
 const path = require("path"), assert = require("assert");
+const { webPath } = require("./web-path");
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-const WEB = path.join(__dirname, "..", "..", "web");
-const load = (rel) => { const b = esbuild.buildSync({ entryPoints: [path.join(WEB, ...rel)], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" }); const m = { exports: {} }; new Function("module", "exports", "require", b.outputFiles[0].text)(m, m.exports, require); return m.exports; };
+const load = (rel) => { const b = esbuild.buildSync({ entryPoints: [webPath(...rel)], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" }); const m = { exports: {} }; new Function("module", "exports", "require", b.outputFiles[0].text)(m, m.exports, require); return m.exports; };
 const L = load(["dialogs", "cvpcb", "logic.ts"]);
-const UI = require(path.join(WEB, "generated", "kicad-ui-spec.json"));
-const MENU = require(path.join(WEB, "generated", "kicad-menu-spec.json"));
+const UI = require(webPath("generated", "kicad-ui-spec.json"));
+const MENU = require(webPath("generated", "kicad-menu-spec.json"));
 
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + String(e && e.stack || e).split("\n").slice(0, 4).join("\n       ")); } }

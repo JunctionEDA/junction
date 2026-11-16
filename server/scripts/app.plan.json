@@ -1,5 +1,5 @@
 {
-  "header": "editor \u2014 GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/editor/index.ts \u2014 edit these modules, not the bundle).",
+  "header": "editor \u2014 GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/domains/pcb/editor/index.ts \u2014 edit these modules, not the bundle).",
   "nocheck": true,
   "state": "E",
   "stateModule": "state",

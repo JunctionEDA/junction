@@ -1,13 +1,14 @@
-// library.test.js — the library module's document logic (server/web/library/core.ts, bundled on
+// library.test.js — the library module's document logic (server/web/domains/pcb/library/core.ts, bundled on
 // the fly) under node: flattening, the embedded copy, a new symbol instance, a library
 // footprint on the board and the chooser's search.  Run:
 //   node server/static/tests/library.test.js
 "use strict";
 const path = require("path"), assert = require("assert");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 const K = globalThis.KiCadCanvas;
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-const built = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "library", "core.ts")], bundle: true, format: "cjs", target: "es2020", write: false });
+const built = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "library", "core.ts")], bundle: true, format: "cjs", target: "es2020", write: false });
 const mod = { exports: {} }; new Function("exports", "module", built.outputFiles[0].text)(mod.exports, mod); const L = mod.exports;
 const { kid, kids, str } = K;
 let n = 0; const ok = (name, fn) => { fn(); n++; };

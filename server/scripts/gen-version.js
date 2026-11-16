@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Writes web/canvas/version.ts — the KiCad version the web editor reports as its own, so the title
+// Writes web/domains/pcb/canvas/version.ts — the KiCad version the web editor reports as its own, so the title
 // block's ${KICAD_VERSION} cell reads what the desktop built from this tree reads.
 //
 // KiCad resolves ${KICAD_VERSION} to `productName + " " + GetBaseVersion()`
@@ -12,12 +12,12 @@
 //   3. cmake/KiCadVersion.cmake's KICAD_SEMANTIC_VERSION — cmake's own fallback when git is absent.
 const fs = require("fs"), path = require("path"), { execFileSync } = require("child_process");
 
-// The output is always beside this script's own package (server/web/canvas), so it resolves in the
+// The output is always beside this script's own package (server/web/domains/pcb/canvas), so it resolves in the
 // Docker web stage too, where only package.json, web/ and scripts/ are copied and there is no repo
 // above them.  The version SOURCES are looked for in the repo above, which simply is not there.
 const server = path.resolve(__dirname, "..");
 const repo = path.resolve(server, "..");
-const out = path.join(server, "web", "canvas", "version.ts");
+const out = path.join(server, "web", "domains", "pcb", "canvas", "version.ts");
 
 function fromHeader() {
   try {
@@ -58,9 +58,9 @@ if (old !== body) fs.writeFileSync(out, body);
 process.stdout.write("KICAD_BASE_VERSION = " + JSON.stringify(version) + "\n");
 
 // The product version the web chrome shows next to the name: packaging/VERSION, the same file
-// the installers are stamped from.  Committed (web/generated/product-version.ts) because the
+// the installers are stamped from.  Committed (web/domains/pcb/generated/product-version.ts) because the
 // Docker web stage has no repo above it; there the committed value is kept, like above.
-const productOut = path.join(server, "web", "generated", "product-version.ts");
+const productOut = path.join(server, "web", "domains", "pcb", "generated", "product-version.ts");
 let product = "";
 try { product = fs.readFileSync(path.join(repo, "packaging", "VERSION"), "utf8").trim(); } catch { /* no repo here */ }
 if (product) {

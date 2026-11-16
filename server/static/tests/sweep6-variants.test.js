@@ -10,6 +10,7 @@
 // Run: node server/static/tests/sweep6-variants.test.js
 "use strict";
 const path = require("path"), assert = require("assert");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 require(path.join(__dirname, "..", "pcb-tools.js"));
 require(path.join(__dirname, "..", "sch-tools.js"));
@@ -20,7 +21,7 @@ console.log("design variants under node");
 
 const esbuild = require("esbuild");
 function load(rel) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", ...rel.split("/"))], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(...rel.split("/"))], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const mod = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, require);
   return mod.exports;
 }

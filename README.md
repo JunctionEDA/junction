@@ -3,17 +3,17 @@
 <h1 align="center">Junction</h1>
 
 <p align="center"><b>Real-time collaborative KiCad.</b><br>
-Schematic and PCB editors where everyone works on the same design at once, in the browser,<br>
-with any AI model as a teammate.</p>
+Schematic and PCB editors where everyone works on the same design at once, on the desktop or in the browser,<br>
+with any AI model as a teammate. Open source under GPL-3.0.</p>
 
 <p align="center">
   <a href="https://junctioneda.com"><b>Open in the browser</b></a> ·
-  <!-- web only for now: <a href="https://github.com/JunctionEDA/junction/releases/latest"><b>Download for macOS, Windows, Linux</b></a> · -->
+  <a href="https://github.com/notaroomba/junction/releases/latest"><b>Download for macOS, Windows, Linux</b></a> ·
   <a href="#design-with-an-ai"><b>Connect an AI</b></a>
 </p>
 
 <p align="center">
-  <!-- web only for now: <a href="https://github.com/JunctionEDA/junction/releases/latest"><img src="https://img.shields.io/github/v/release/JunctionEDA/junction" alt="Release"></a> -->
+  <a href="https://github.com/notaroomba/junction/releases/latest"><img src="https://img.shields.io/github/v/release/notaroomba/junction" alt="Release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="License: GPL v3"></a>
 </p>
 
@@ -32,16 +32,16 @@ https://github.com/user-attachments/assets/03a18f9e-1325-409d-ac0d-dcadf3a42ed4
 | You want | Do this |
 |---|---|
 | The browser editor | Open [junctioneda.com](https://junctioneda.com) and sign in with GitHub. Nothing to install. |
+| The desktop app | Download Junction for [macOS](https://junctioneda.com/download/macos), [Windows](https://junctioneda.com/download/windows) or [Linux](https://junctioneda.com/download/linux) (newest release; all files on the [releases page](https://github.com/notaroomba/junction/releases/latest)). |
 | An AI app that designs with you | Add `https://junctioneda.com/mcp` as an MCP server (commands [below](#design-with-an-ai)). |
 | Your own server | `cargo run` in [`server/`](server/README.md#running) with a Postgres database. |
 
-Projects are ordinary KiCad files, and projects from any KiCad version from 6 to 10 open as they are.
-<!-- web only for now: Everyone in a project should be on 2.0: it is built on a much newer KiCad than
-1.0.9 and can write things an older client cannot read. -->
+Projects are ordinary KiCad files, and projects from any KiCad version from 6 to 10 open as they are. Everyone in a project should be on 2.0: it is built on a much newer KiCad than
+1.0.9 and can write things an older client cannot read.
 
 ## Quick start
 
-1. Open [junctioneda.com](https://junctioneda.com) and sign in with GitHub.
+1. In the desktop app choose **File → Online Projects…**, or open the site, and sign in with GitHub.
 2. Upload a KiCad project, or start a blank one.
 3. **Share…** it with a GitHub username or an email address, or copy an edit, comment-only or view-only link.
 4. Open the same schematic or board on both sides. Cursors and edits are live from there.
@@ -50,7 +50,7 @@ Projects are ordinary KiCad files, and projects from any KiCad version from 6 to
 
 <table>
 <tr>
-<td width="50%"><img src="docs/media/collab-schematic.jpg" alt="Four people's cursors in one Raspberry Pi Pico schematic, each with a name tag" width="100%"><br><b>Live, together.</b> Everyone in the same schematic or board, each with their own view. Cursors, selections, drags in progress and edits arrive as they happen.</td>
+<td width="50%"><img src="docs/media/collab-schematic.jpg" alt="Four people's cursors in one Raspberry Pi Pico schematic, each with a name tag" width="100%"><br><b>Live, together.</b> Everyone in the same schematic or board, each with their own view. Cursors, selections, drags in progress and edits arrive as they happen, between the desktop app and the browser alike.</td>
 <td width="50%"><img src="docs/media/board-blocks.jpg" alt="Each circuit block laid out and routed as a tight cluster beside the board before it goes on" width="100%"><br><b>The whole board flow.</b> Update PCB from Schematic, placement, interactive routing, zones, DRC and the autorouter, following KiCad's own tools and dialogs.</td>
 </tr>
 <tr>
@@ -70,7 +70,7 @@ And the rest of what a team needs:
 - **Sharing and roles.** Editors, commenters and viewers, by GitHub username, email or link. View links open without
   an account.
 - **Review.** Comment threads pinned to parts and nets that follow them when they move.
-<!-- web only for now: - **Offline.** The desktop app keeps working without a connection and merges when it returns. -->
+- **Offline.** The desktop app keeps working without a connection and merges when it returns.
 - **Parts.** Search LCSC, Mouser and DigiKey and place the symbol and footprint straight into the schematic.
 - **Plugins.** One catalog for built-in, KiCad and community plugins, sandboxed and permissioned.
 
@@ -130,7 +130,7 @@ Every shot is the real application against a local Junction server, staged by sc
 
 ## Docs
 
-[Collaboration guide](COLLABORATION.md) · [Server, protocol and self-hosting](server/README.md) ·
+[Roadmap](docs/ROADMAP.md) · [Architecture](docs/ARCHITECTURE.md) · [Collaboration guide](COLLABORATION.md) · [Server, protocol and self-hosting](server/README.md) ·
 [MCP server](server/README.md#mcp-server-any-ai-model-or-service) ·
 [Python harness](server/README.md#the-python-harness) · [Autorouter](server/README.md#board-autorouter) ·
 [Changelog](CHANGELOG.md)

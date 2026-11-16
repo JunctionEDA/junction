@@ -1,4 +1,4 @@
-// The web 3D viewer's models (web/viewer3d/models.ts, src/kicadlib.rs): a part's own model from KiCad's 3D library,
+// The web 3D viewer's models (web/domains/pcb/viewer3d/models.ts, src/kicadlib.rs): a part's own model from KiCad's 3D library,
 // the closest library model when its own is not there, one found for a footprint that names none, and the plain
 // stand-in shape when nothing comes close.  Needs the server to reach KiCad's libraries (or a mirror).
 //

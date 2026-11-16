@@ -1,13 +1,14 @@
-// sym-props.test.js — DIALOG_SYMBOL_PROPERTIES' own logic (web/dialogs/sym-props-logic.ts): the passthrough token,
+// sym-props.test.js — DIALOG_SYMBOL_PROPERTIES' own logic (web/domains/pcb/dialogs/sym-props-logic.ts): the passthrough token,
 // local power, body style names, the composed reference suffix, SCH_SYMBOL::SyncOtherUnits / CollectOtherUnits and
 // the pin-to-pad maps of PANEL_SYMBOL_PIN_MAP.  Run: node server/static/tests/sym-props.test.js
 "use strict";
 const path = require("path"), assert = require("assert");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 const K = globalThis.KiCadCanvas;
 const esbuild = require("esbuild");
 function load(file) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
 const P = load("dialogs/sym-props-logic.ts");

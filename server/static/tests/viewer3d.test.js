@@ -1,4 +1,4 @@
-// node server/static/tests/viewer3d.test.js — the 3D viewer's board geometry (server/web/viewer3d: outline.ts,
+// node server/static/tests/viewer3d.test.js — the 3D viewer's board geometry (server/web/domains/pcb/viewer3d: outline.ts,
 // bodies.ts, textures.ts), reached through the bundle's KiCadViewer3D.geometry.  No WebGL and no DOM needed:
 // `npm run build` must have produced static/dist/viewer3d.js and static/kicad-canvas.js first.
 "use strict";

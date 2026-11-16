@@ -2817,7 +2817,7 @@ pub async fn pull(
 // ------------------------------------------------------------------ page
 
 /// The GitHub page: `/github` (bring a repository online) and `/p/{id}/github`
-/// (one project's sync).  One self-contained document; web/github/index.ts draws it.
+/// (one project's sync).  One self-contained document; web/platform/github/index.ts draws it.
 pub async fn page() -> Response {
     // The script is asked for with its own content hash, so a browser (or a proxy that
     // adds its own max-age) never runs an older copy against this server.

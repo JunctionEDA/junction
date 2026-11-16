@@ -1,12 +1,13 @@
-// embedded-file.test.js — adding a file on the Embedded Files page (web/library/embedded-file.ts): the type AddFile
+// embedded-file.test.js — adding a file on the Embedded Files page (web/domains/pcb/library/embedded-file.ts): the type AddFile
 // picks, the MMH3 checksum KiCad writes, the zstd frame KiCad's reader takes (content size known), the (file …) form,
 // and the board serializer writing its (data |…|) lines bare, as EMBEDDED_FILES::WriteEmbeddedFiles does.
 // Run: node server/static/tests/embedded-file.test.js
 "use strict";
 const path = require("path"), assert = require("assert/strict"), zlib = require("zlib");
+const { webPath } = require("./web-path");
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
 function load(file) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
 const F = load("library/embedded-file.ts"), Z = load("dialogs/zstd.ts"), C = load("dialogs/zstd-compress.ts"), B = load("canvas/board-setup.ts"), S = load("canvas/sexpr.ts"), X = load("canvas/export.ts");

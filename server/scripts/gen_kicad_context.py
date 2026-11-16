@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Generate server/web/generated/kicad-context-spec.json: the TOOL_ACTION metadata and icons the
+"""Generate server/web/domains/pcb/generated/kicad-context-spec.json: the TOOL_ACTION metadata and icons the
 right-click context menus need beyond what the toolbar spec (kicad-ui-spec.json) already carries.
 
-The menus themselves are transcribed in server/web/editor/ctxmenus.ts from the tools' Init()
+The menus themselves are transcribed in server/web/domains/pcb/editor/ctxmenus.ts from the tools' Init()
 functions; every entry there names its action the way the C++ does ("SCH_ACTIONS::rotateCCW",
 "ACT_PlaceThroughVia") and every submenu its BITMAPS icon (icon: "zoom_selection").  This script
 scans that file for those names and emits, for each, the friendly name, tooltip, icon and default
@@ -19,9 +19,9 @@ import json, os, re, sys
 sys.path.insert(0, os.path.dirname(__file__))
 import gen_kicad_ui as ui  # noqa: E402
 
-TABLES = os.path.join(ui.ROOT, "server", "web", "editor", "ctxmenus.ts")
-OUT = os.path.join(ui.ROOT, "server", "web", "generated", "kicad-context-spec.json")
-MAIN = os.path.join(ui.ROOT, "server", "web", "generated", "kicad-ui-spec.json")
+TABLES = os.path.join(ui.ROOT, "server", "web", "domains", "pcb", "editor", "ctxmenus.ts")
+OUT = os.path.join(ui.ROOT, "server", "web", "domains", "pcb", "generated", "kicad-context-spec.json")
+MAIN = os.path.join(ui.ROOT, "server", "web", "domains", "pcb", "generated", "kicad-ui-spec.json")
 
 
 def router_actions():
@@ -64,7 +64,7 @@ def main():
     with open(MAIN, encoding="utf-8") as f:
         have = set(json.load(f)["icons"].keys())
     icons = ui.collect_icons(names - have)
-    spec = {"generated": "server/scripts/gen_kicad_context.py from the TOOL_ACTIONs named in server/web/editor/ctxmenus.ts and resources/bitmaps_png — do not edit by hand",
+    spec = {"generated": "server/scripts/gen_kicad_context.py from the TOOL_ACTIONs named in server/web/domains/pcb/editor/ctxmenus.ts and resources/bitmaps_png — do not edit by hand",
             "actions": used, "icons": icons}
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump(spec, f, separators=(",", ":"), ensure_ascii=False)

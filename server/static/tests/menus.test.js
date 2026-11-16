@@ -1,14 +1,14 @@
-// menus.test.js — the menu tables (server/web/tables.ts) against KiCad's action table and the tool modules:
+// menus.test.js — the menu tables (server/web/domains/pcb/tables.ts) against KiCad's action table and the tool modules:
 // every entry names a real KiCad action (or one of ours), every module command has its place in a menu, and no
 // module hotkey shadows a different KiCad default without KiCad's meaning being given precedence.  Run:
 //   node server/static/tests/menus.test.js
 "use strict";
 const fs = require("fs"), path = require("path"), assert = require("assert");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 require(path.join(__dirname, "..", "sch-tools.js"));
 require(path.join(__dirname, "..", "pcb-tools.js"));
-const WEB = path.join(__dirname, "..", "..", "web");
-const SPEC = JSON.parse(fs.readFileSync(path.join(WEB, "generated", "kicad-menu-spec.json"), "utf8")).actions;
+const SPEC = JSON.parse(fs.readFileSync(webPath("generated", "kicad-menu-spec.json"), "utf8")).actions;
 const CLASS = { sch: "SCH_ACTIONS", pcb: "PCB_ACTIONS" };
 
 let passed = 0, failed = 0;
@@ -37,7 +37,7 @@ function flatten(entries, trail, out) {
 
 (async () => {
   // node ≥ 22.18 loads the TypeScript table directly (it only imports a type)
-  const T = await import(path.join(WEB, "tables.ts"));
+  const T = await import(webPath("tables.ts"));
   console.log("menus under node");
 
   test("the menu bars carry KiCad's titles, in KiCad's order, with their mnemonics", () => {

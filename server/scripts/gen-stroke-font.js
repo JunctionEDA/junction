@@ -1,4 +1,4 @@
-// node scripts/gen-stroke-font.js — regenerates web/canvas/newstroke-data.ts from KiCad's own stroke font
+// node scripts/gen-stroke-font.js — regenerates web/domains/pcb/canvas/newstroke-data.ts from KiCad's own stroke font
 // (common/newstroke_font.cpp, the Hershey-coded glyph table STROKE_FONT::loadNewStrokeFont reads).
 // Only the ranges the web canvas draws are carried: U+0020..U+052F (Latin, Greek, Cyrillic) and
 // U+2000..U+23FF (punctuation, letterlike, arrows, math, technical); other code points draw as '?',
@@ -18,5 +18,5 @@ for (const [a, b] of RANGES) {
   out += `  [0x${a.toString(16)}, 0x${b.toString(16)}, ${JSON.stringify(glyphs)}],\n`;
 }
 out += "];\n";
-fs.writeFileSync(path.join(__dirname, "..", "web", "canvas", "newstroke-data.ts"), out);
+fs.writeFileSync(path.join(__dirname, "..", "web", "domains", "pcb", "canvas", "newstroke-data.ts"), out);
 console.log("newstroke-data.ts:", out.length, "bytes");

@@ -1,4 +1,4 @@
-// pad-model.test.js — Pad Properties' pure half (web/canvas/pad-model.ts) under node: reading a pad into the
+// pad-model.test.js — Pad Properties' pure half (web/domains/pcb/canvas/pad-model.ts) under node: reading a pad into the
 // dialog's model, writing back only what changed in PCB_IO_KICAD_SEXPR::format( PAD )'s order, the layer
 // wildcards, flipped footprints and CheckPad's messages.
 // Run: node server/static/tests/pad-model.test.js

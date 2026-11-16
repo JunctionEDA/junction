@@ -1,4 +1,4 @@
-// Assign Footprints (KiCad's CvPcb, web/dialogs/assign-footprints.ts and web/dialogs/cvpcb/*) in the web editor:
+// Assign Footprints (KiCad's CvPcb, web/domains/pcb/dialogs/assign-footprints.ts and web/domains/pcb/dialogs/cvpcb/*) in the web editor:
 // the frame and its menu bar, the top toolbar from KiCad's own config with the "Footprint Filters:" tools, the three
 // panes and their keyboard, the status lines, assigning / deleting / undo / redo / cut / paste, next / previous
 // unassigned, the context menu, the footprint viewer, Apply / Cancel / OK, Automatically Assign Footprints from the

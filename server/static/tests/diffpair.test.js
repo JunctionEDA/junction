@@ -2,15 +2,16 @@
 // BOARD::MatchDpSuffix, FindDpPrimitivePair and its failure messages, the coupled lines at the pair's gap, walk around,
 // Highlight collisions, the via pair, Backspace, landing on the target pair as one "Route Track" commit, the pair's
 // sizes (BOARD_DESIGN_SETTINGS / pcb-sizes.ts routeDiffPair), DIFF_PAIR_MENU and the Differential Pair Dimensions
-// dialog's logic (web/editor/routersettings.ts), and the router menu's diffPairCond (web/editor/ctxmenus.ts).
+// dialog's logic (web/domains/pcb/editor/routersettings.ts), and the router menu's diffPairCond (web/domains/pcb/editor/ctxmenus.ts).
 // Run: node server/static/tests/diffpair.test.js
 "use strict";
 const path = require("path"), assert = require("assert/strict");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 require(path.join(__dirname, "..", "pcb-tools.js"));
 const K = globalThis.KiCadCanvas, P = globalThis.PcbTools, pcb = globalThis.CollabTools.pcb;
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-const load = (rel) => { const b = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", ...rel)], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" }); const m = { exports: {} }; new Function("module", "exports", "require", b.outputFiles[0].text)(m, m.exports, require); return m.exports; };
+const load = (rel) => { const b = esbuild.buildSync({ entryPoints: [webPath(...rel)], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" }); const m = { exports: {} }; new Function("module", "exports", "require", b.outputFiles[0].text)(m, m.exports, require); return m.exports; };
 const CM = load(["editor", "ctxmenus.ts"]);
 const IU = 1e6;
 

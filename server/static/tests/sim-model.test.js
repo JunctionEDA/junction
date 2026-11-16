@@ -1,11 +1,12 @@
-// sim-model.test.js — DIALOG_SIM_MODEL's model side (web/dialogs/sim-model-logic.ts): SIM_VALUE notation, StrNumCmp,
+// sim-model.test.js — DIALOG_SIM_MODEL's model side (web/domains/pcb/dialogs/sim-model-logic.ts): SIM_VALUE notation, StrNumCmp,
 // InferSimModel, the Sim.Params / Sim.Pins serializer, WriteFields' erase / append-hidden rules, the SPICE library
 // reader and the Code page preview.  Run: node server/static/tests/sim-model.test.js
 "use strict";
 const path = require("path"), assert = require("assert");
+const { webPath } = require("./web-path");
 const esbuild = require("esbuild");
 function load(file) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
 const L = load("dialogs/sim-model-logic.ts");

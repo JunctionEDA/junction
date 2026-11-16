@@ -1,12 +1,13 @@
-// Node test for the measure tool's RULER_ITEM port (web/editor/ruler.ts) and the selection-area winding
-// (web/editor/overlays.ts): readout strings, tick spacing per zoom, Shift's 45° end, the tick / label layout.
+// Node test for the measure tool's RULER_ITEM port (web/domains/pcb/editor/ruler.ts) and the selection-area winding
+// (web/domains/pcb/editor/overlays.ts): readout strings, tick spacing per zoom, Shift's 45° end, the tick / label layout.
 // Run: node server/static/tests/ruler.test.js
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const { webPath } = require("./web-path");
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-const load = (rel) => { const b = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", ...rel)], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" }); const m = { exports: {} }; new Function("module", "exports", "require", b.outputFiles[0].text)(m, m.exports, require); return m.exports; };
+const load = (rel) => { const b = esbuild.buildSync({ entryPoints: [webPath(...rel)], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" }); const m = { exports: {} }; new Function("module", "exports", "require", b.outputFiles[0].text)(m, m.exports, require); return m.exports; };
 const R = load(["editor", "ruler.ts"]);
 
 const MM = 1e6;

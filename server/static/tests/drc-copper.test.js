@@ -4,6 +4,7 @@
 // Run: node server/static/tests/drc-copper.test.js
 "use strict";
 const path = require("path"), fs = require("fs"), assert = require("assert/strict");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 require(path.join(__dirname, "..", "pcb-tools.js"));
 const K = globalThis.KiCadCanvas, P = globalThis.PcbTools;
@@ -69,10 +70,10 @@ test("annular width slow path: trapezoid, custom and offset pads measured to the
     "the custom pad's disc anchor (1.2 mm, 1 mm hole) is the narrowest part of its merged outline");
 });
 
-// fracture (web/fab/poly.ts) against the straightforward version it replaced: the same outlines, vertex for vertex
+// fracture (web/domains/pcb/fab/poly.ts) against the straightforward version it replaced: the same outlines, vertex for vertex
 const esbuild = require("esbuild");
 function loadTs(file) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const mod = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, require); return mod.exports;
 }
 function fractureRef(paths) {

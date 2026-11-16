@@ -1,8 +1,8 @@
 # ngspice for the web
 
 `build.sh` compiles ngspice 45.2 (the release KiCad 9 ships) to WebAssembly with XSPICE and its code models. The
-simulator frame (`web/sim/frame.ts`), the plugin runtime (`plugins/python/kicad_spice.py`) and the assistant's
-`simulate` tool (`web/mcp/simulate.ts`) all run this build.
+simulator frame (`web/domains/pcb/sim/frame.ts`), the plugin runtime (`plugins/python/kicad_spice.py`) and the assistant's
+`simulate` tool (`web/domains/pcb/mcp/simulate.ts`) all run this build.
 
 ## What is committed
 
@@ -12,7 +12,7 @@ simulator frame (`web/sim/frame.ts`), the plugin runtime (`plugins/python/kicad_
 | `vendor/ngspice/build-meta.json` | the ngspice tag and commit, the emscripten version, the code model libraries, and the size and sha256 of the unpacked module |
 | `scripts/ngspice-wasm/*` | the recipe: `build.sh`, the emscripten pre-js, the static code-model registry and the progress hook |
 
-`npm run build` (`scripts/build-python.mjs`) unpacks the module and bundles it with `web/plugins/ngspice-module.ts`
+`npm run build` (`scripts/build-python.mjs`) unpacks the module and bundles it with `web/domains/pcb/plugins/ngspice-module.ts`
 (the `Simulation` class every caller uses) into `static/dist/pyodide/ngspice.mjs`, about 8.9 MB. The server serves
 it as `/static/pyodide/ngspice.mjs` (`pcm::runtime`, compressed on the wire). That file is generated and is never
 committed. The worker loads it from there, and so do the plugin frame and `scripts/plugin-spice.mjs`.

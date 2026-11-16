@@ -1,5 +1,5 @@
 // The upload dialog's limits and its "the project names files that were not uploaded" step
-// (web/home/UploadDialog.tsx, src/projectlibs.rs missing_project_files, GET /api/limits).
+// (web/platform/home/UploadDialog.tsx, src/projectlibs.rs missing_project_files, GET /api/limits).
 //
 //   E2E_PG_URL=… E2E_JWT_SECRET=… [SHOTS=/some/dir] node upload-missing-ui.mjs
 //

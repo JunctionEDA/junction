@@ -426,7 +426,7 @@ test("selected: a halo for every id in the set; polylines with a fill", () => {
   ctx = stubCtx(800, 600); K.render(K.parseDoc(poly("(type background)", "p6")), ctx, view, {}); assert(ctx.calls.fill >= 1);
 });
 
-// ---------------------------------------------------------------- the drawing sheet (web/canvas/sheet.ts)
+// ---------------------------------------------------------------- the drawing sheet (web/domains/pcb/canvas/sheet.ts)
 // Every number below is KiCad's own: the (kicad_wks …) description in
 // common/drawing_sheet/drawing_sheet_default_description.cpp:117-151 resolved through
 // DS_DATA_ITEM::GetStartPos / IsInsidePage (ds_data_item.cpp:263-358) for an A4 landscape page.
@@ -1123,7 +1123,7 @@ test("a rule area is keyed by the uuid inside its polyline, not a synthetic id",
   assert.strictEqual(doc.items.size, 0);
 });
 
-// ---------------------------------------------------------------- KiCad's stroke font (web/canvas/stroke-font.ts)
+// ---------------------------------------------------------------- KiCad's stroke font (web/domains/pcb/canvas/stroke-font.ts)
 test("stroke font: Newstroke glyphs decode to KiCad's advances and strokes", () => {
   near(K.strokeGlyph(32).adv, 16 / 21, 1e-12, "space");                 // "JZ"
   const A = K.strokeGlyph(65); near(A.adv, 18 / 21, 1e-12, "A");        // "I[MUWU RK[RFY["

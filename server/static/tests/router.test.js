@@ -1,15 +1,16 @@
 // router.test.js — the interactive router's modes and settings (pcb-tools.js, after KiCad's PNS router):
 // ROUTING_SETTINGS, the corner modes of DIRECTION_45::BuildInitialTrace, the route as one transaction, Highlight
 // collisions / Shove / Walk around while routing and dragging, the via commands and their hotkeys, and the
-// Interactive Router Settings dialog's form (web/editor/routersettings.ts).
+// Interactive Router Settings dialog's form (web/domains/pcb/editor/routersettings.ts).
 // Run: node server/static/tests/router.test.js
 "use strict";
 const path = require("path"), assert = require("assert/strict");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 require(path.join(__dirname, "..", "pcb-tools.js"));
 const K = globalThis.KiCadCanvas, P = globalThis.PcbTools, pcb = globalThis.CollabTools.pcb;
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-const built = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "editor", "routersettings.ts")], bundle: true, format: "cjs", write: false, logLevel: "silent" });
+const built = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "editor", "routersettings.ts")], bundle: true, format: "cjs", write: false, logLevel: "silent" });
 const RS = { exports: {} }; new Function("module", "exports", built.outputFiles[0].text)(RS, RS.exports);
 const IU = 1e6;
 

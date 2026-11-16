@@ -16,7 +16,7 @@ pub(crate) const MARK: &str = include_str!("../static/icon.svg");
 /// The icon's versioned folder.  Pages link the icon under `/brand/<ICON_V>/`, served as immutable,
 /// so a changed icon gets a new address and no browser or CDN cache can keep showing the old one
 /// (Cloudflare kept serving the KiCad "Ki" mark at `/favicon.svg` after the rename).  Bump it
-/// whenever `static/icon.svg` changes, together with `ICON_V` in `web/brand.ts`.
+/// whenever `static/icon.svg` changes, together with `ICON_V` in `web/shared/brand.ts`.
 pub(crate) const ICON_V: &str = "j2";
 
 /// The whole theme: tokens, then the shared components (static/theme.css).  Every page uses it,
@@ -92,7 +92,7 @@ fn asset_version() -> &'static str {
     })
 }
 
-/// `frame-src 'none'` is the outer wall of the plugin sandbox (web/plugins/sandbox.ts).  Plugins
+/// `frame-src 'none'` is the outer wall of the plugin sandbox (web/domains/pcb/plugins/sandbox.ts).  Plugins
 /// run in `srcdoc` frames, which this does not affect; what it forbids is such a frame
 /// navigating itself to a real address — the one way left for sandboxed code to carry what
 /// it has read off the page, in a URL.  The app embeds no other frames.
@@ -222,24 +222,24 @@ pub async fn ui_js_map() -> Response {
     ([(header::CONTENT_TYPE, "application/json; charset=utf-8"), (header::CACHE_CONTROL, "no-cache")], include_str!("../static/dist/ui.js.map")).into_response()
 }
 
-// Vendor parts and saved part libraries (server/web/parts, `npm run build:parts`).
+// Vendor parts and saved part libraries (server/web/domains/pcb/parts, `npm run build:parts`).
 pub async fn parts_js() -> Response { js_response(include_str!("../static/dist/parts.js")) }
 pub async fn parts_js_map() -> Response {
     ([(header::CONTENT_TYPE, "application/json; charset=utf-8"), (header::CACHE_CONTROL, "no-cache")], include_str!("../static/dist/parts.js.map")).into_response()
 }
 
 pub async fn editor_js() -> Response { js_response(include_str!("../static/dist/editor.js")) }
-// The board autorouter (server/web/router, built by `npm run build:router`).
+// The board autorouter (server/web/domains/pcb/router, built by `npm run build:router`).
 pub async fn autoroute_js() -> Response { js_response(include_str!("../static/dist/autoroute.js")) }
 pub async fn autoroute_js_map() -> Response {
     ([(header::CONTENT_TYPE, "application/json; charset=utf-8"), (header::CACHE_CONTROL, "no-cache")], include_str!("../static/dist/autoroute.js.map")).into_response()
 }
-// The 3D viewer (server/web/viewer3d, three.js bundled): fetched by the editor on first use of
+// The 3D viewer (server/web/domains/pcb/viewer3d, three.js bundled): fetched by the editor on first use of
 // View → 3D Viewer, with the same ?v= as the editor bundle (asset_version covers it).
 pub async fn viewer3d_js() -> Response { js_response(include_str!("../static/dist/viewer3d.js")) }
-// Fabrication outputs (server/web/fab: Gerber, drill, placement and BOM writers): fetched by the editor on
+// Fabrication outputs (server/web/domains/pcb/fab: Gerber, drill, placement and BOM writers): fetched by the editor on
 // first use of File → Fabrication Outputs and by plugins that plot, with the same ?v= as the editor bundle.
-// The ngspice model parameter tables (web/dialogs/sim-model-ngspice.ts): fetched by the Simulation Model
+// The ngspice model parameter tables (web/domains/pcb/dialogs/sim-model-ngspice.ts): fetched by the Simulation Model
 // Editor the first time it opens, with the same ?v= as the editor bundle.
 pub async fn sim_ngspice_js() -> Response { js_response(include_str!("../static/dist/sim-ngspice.js")) }
 pub async fn fab_js() -> Response { js_response(include_str!("../static/dist/fab.js")) }
@@ -269,7 +269,7 @@ pub async fn landing_page(State(state): State<AppState>, jar: CookieJar) -> Resp
     landing(auth::user_from_jar(&state, &jar).await.is_some(), &state.cfg.site_url)
 }
 
-/// The public home page (static/landing.html, drawn by web/landing).  It takes its colours
+/// The public home page (static/landing.html, drawn by web/platform/landing).  It takes its colours
 /// from the app, like the GitHub page.
 fn landing(signed_in: bool, site: &str) -> Response {
     static PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
@@ -377,9 +377,9 @@ pub async fn landing_image(Path(name): Path<String>) -> Response {
         // The AI chapter's recorded run (scripts/landing-ai/record.mjs), fetched when it comes near.
         "ai-esp32.kicad_sch" | "ai-esp32.kicad_pcb" | "ai-timeline.json" => {
             let text: &'static str = match name.as_str() {
-                "ai-esp32.kicad_sch" => include_str!("../web/landing/ai/esp32.kicad_sch"),
-                "ai-esp32.kicad_pcb" => include_str!("../web/landing/ai/esp32.kicad_pcb"),
-                _ => include_str!("../web/landing/ai/timeline.json"),
+                "ai-esp32.kicad_sch" => include_str!("../web/platform/landing/ai/esp32.kicad_sch"),
+                "ai-esp32.kicad_pcb" => include_str!("../web/platform/landing/ai/esp32.kicad_pcb"),
+                _ => include_str!("../web/platform/landing/ai/timeline.json"),
             };
             let kind = if name.ends_with(".json") { "application/json" } else { "text/plain; charset=utf-8" };
             return ([(header::CONTENT_TYPE, kind), (header::CACHE_CONTROL, "no-cache")], text).into_response();
@@ -484,10 +484,10 @@ pub async fn join_page(
     <dl class="kv"><dt>Shared by</dt><dd><b>{owner}</b></dd><dt>This link makes you a</dt><dd><b id="linkrole" data-role="{role}">{role_word}</b><br><span class="muted">{role_note}</span></dd></dl>
     <div class="choices">
       <a class="choice web" id="openweb" href="{web_href}"><b>Open in the web editor</b><span class="muted">{web_note}</span></a>
-      <!-- web only for now: <a class="choice desktop" href="kicad-collab://join/{token}"><b>Open in Junction</b><span class="muted">The desktop app, signed in; a working copy is kept in sync.</span></a> -->
+      <a class="choice desktop" href="kicad-collab://join/{token}"><b>Open in Junction</b><span class="muted">The desktop app, signed in; a working copy is kept in sync.</span></a>
     </div>
     {signin}
-    <!-- web only for now: <p class="muted">Desktop app didn't open? Paste this link into Junction &rarr; <b>File &rarr; Join Session from URL…</b></p> -->
+    <p class="muted">Desktop app didn't open? Paste this link into Junction &rarr; <b>File &rarr; Join Session from URL…</b></p>
     <div class="linkbox">
       <input id="lnk" readonly value="{url}">
       <button type="button" class="btn" onclick="navigator.clipboard.writeText(document.getElementById('lnk').value);this.textContent='Copied';">Copy</button>
@@ -691,7 +691,7 @@ document.getElementById("cloneBtn").onclick = async () => {{
   {preview}
   <ul>{doc_rows}</ul>
   {clone}
-  <p class="muted">To edit, sign in with GitHub and ask the owner to share it with you.</p>
+  <p class="muted">To edit, join from KiCad: <b>File &rarr; Online Projects…</b></p>
 </div></body></html>"#,
         name = esc(&project.name),
         owner = esc(&owner_login),
@@ -1363,13 +1363,13 @@ mod landing_tests {
             assert!(html.contains(hook), "{hook}");
         }
         // The demo design it draws is real KiCad files, bundled into the page script.
-        assert!(include_str!("../web/landing/demo/blinker.kicad_sch").starts_with("(kicad_sch"));
-        assert!(include_str!("../web/landing/demo/blinker.kicad_pcb").starts_with("(kicad_pcb"));
+        assert!(include_str!("../web/platform/landing/demo/blinker.kicad_sch").starts_with("(kicad_sch"));
+        assert!(include_str!("../web/platform/landing/demo/blinker.kicad_pcb").starts_with("(kicad_pcb"));
         // The AI chapter plays back a real recorded run: both documents and the order they were made in.
         assert!(html.contains("id=\"ai\"") && html.contains("data-prompt") && html.matches("data-call").count() == 2);
-        assert!(include_str!("../web/landing/ai/esp32.kicad_sch").starts_with("(kicad_sch"));
-        assert!(include_str!("../web/landing/ai/esp32.kicad_pcb").starts_with("(kicad_pcb"));
-        assert!(include_str!("../web/landing/ai/timeline.json").contains("\"stats\""));
+        assert!(include_str!("../web/platform/landing/ai/esp32.kicad_sch").starts_with("(kicad_sch"));
+        assert!(include_str!("../web/platform/landing/ai/esp32.kicad_pcb").starts_with("(kicad_pcb"));
+        assert!(include_str!("../web/platform/landing/ai/timeline.json").contains("\"stats\""));
         assert!(html.contains(&format!("href=\"/brand/{}/icon.svg\"", super::ICON_V)) && super::MARK.starts_with("<svg"));
     }
 }

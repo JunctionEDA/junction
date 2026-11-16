@@ -1,4 +1,4 @@
-//! Reading a document as it stands, for the design tools (web/ai: design.ts, proposals.ts,
+//! Reading a document as it stands, for the design tools (web/domains/pcb/ai: design.ts, proposals.ts,
 //! library.ts), which run in the browser for plugins and in the headless editor behind the MCP
 //! endpoint (src/mcp.rs).
 //!

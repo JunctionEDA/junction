@@ -1,4 +1,4 @@
-// Browser test of how an open document catches up with edits (web/editor/doc.ts openDoc, net.ts): the edits since the
+// Browser test of how an open document catches up with edits (web/domains/pcb/editor/doc.ts openDoc, net.ts): the edits since the
 // stored snapshot are on the first picture, an edit made before the live session is joined survives, a guest and a
 // resync end up with the same document, and nothing is parsed twice.  Needs a local server with KC_DEV_LOGIN=1.
 //

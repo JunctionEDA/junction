@@ -1,10 +1,10 @@
 //! The MCP endpoint: `POST /mcp` (Streamable HTTP), where an AI assistant (any model or service that speaks MCP) works on a person's online
 //! projects.
 //!
-//! A tool call here does what the design assistant in the web editor does (web/ai), with the
-//! same tool definitions and the same code: the assistant's tool list (web/ai/tools.json) is
+//! A tool call here does what the design assistant in the web editor does (web/domains/pcb/ai), with the
+//! same tool definitions and the same code: the assistant's tool list (web/domains/pcb/ai/tools.json) is
 //! the base of the catalog, and the calls are run by the same modules in a headless editor
-//! (mcp_host.rs, web/mcp/host.ts) that has the document open over the collaboration socket.
+//! (mcp_host.rs, web/domains/pcb/mcp/host.ts) that has the document open over the collaboration socket.
 //! An edit therefore travels the ordinary op pipeline and appears live for everybody in the
 //! document.  The one difference from the assistant is deliberate: in the editor a person
 //! accepts a proposal card, here the person approves the tool call in their own AI client, so
@@ -33,9 +33,9 @@ use crate::mcp_host::HostPool;
 use crate::oauth::{self, Caller};
 use crate::{persist, AppState};
 
-const ASSISTANT_TOOLS: &str = include_str!("../web/ai/tools.json");
-const MCP_TOOLS: &str = include_str!("../web/mcp/tools.json");
-const GUIDE: &str = include_str!("../web/mcp/guide.md");
+const ASSISTANT_TOOLS: &str = include_str!("../web/domains/pcb/ai/tools.json");
+const MCP_TOOLS: &str = include_str!("../web/domains/pcb/mcp/tools.json");
+const GUIDE: &str = include_str!("../web/domains/pcb/mcp/guide.md");
 
 const PROTOCOL_VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const DEFAULT_PROTOCOL: &str = "2025-06-18";
@@ -97,9 +97,9 @@ fn annotations(title: &str, write: bool, destructive: bool) -> Value {
 }
 
 fn build_catalog() -> Vec<Tool> {
-    let assistant: Vec<Value> = serde_json::from_str(ASSISTANT_TOOLS).expect("web/ai/tools.json is valid JSON");
+    let assistant: Vec<Value> = serde_json::from_str(ASSISTANT_TOOLS).expect("web/domains/pcb/ai/tools.json is valid JSON");
     let find = |name: &str| -> &Value {
-        assistant.iter().find(|t| t["name"] == name).unwrap_or_else(|| panic!("web/ai/tools.json has no tool {name}"))
+        assistant.iter().find(|t| t["name"] == name).unwrap_or_else(|| panic!("web/domains/pcb/ai/tools.json has no tool {name}"))
     };
     let mut out = Vec::new();
 
@@ -176,7 +176,7 @@ fn build_catalog() -> Vec<Tool> {
         });
     }
 
-    let extra: Vec<Value> = serde_json::from_str(MCP_TOOLS).expect("web/mcp/tools.json is valid JSON");
+    let extra: Vec<Value> = serde_json::from_str(MCP_TOOLS).expect("web/domains/pcb/mcp/tools.json is valid JSON");
     for t in extra {
         let name = t["name"].as_str().expect("tool name").to_string();
         let title = t["title"].as_str().unwrap_or(&name).to_string();
@@ -992,7 +992,7 @@ async fn store_change(state: &AppState, caller: &Caller, p: &ProjectCtx, record:
 }
 
 /// SVG to PNG, the longest side `longest` pixels.  The picture carries its text as paths
-/// (web/mcp/picture.ts), so no fonts are needed.
+/// (web/domains/pcb/mcp/picture.ts), so no fonts are needed.
 pub(crate) fn rasterize(svg: &str, longest: u32) -> Result<(Vec<u8>, u32, u32), String> {
     use resvg::{tiny_skia, usvg};
     let tree = usvg::Tree::from_str(svg, &usvg::Options::default()).map_err(|e| format!("The picture could not be drawn ({e})."))?;

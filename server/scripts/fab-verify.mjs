@@ -1,4 +1,4 @@
-// Holds the web editor's fabrication outputs (server/web/fab) against KiCad's own for the same board:
+// Holds the web editor's fabrication outputs (server/web/domains/pcb/fab) against KiCad's own for the same board:
 // every plottable layer is written by both, drawn by gerbv on the same window and compared pixel by pixel;
 // the Excellon drill files and the placement file are compared as text.
 //

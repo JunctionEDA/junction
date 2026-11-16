@@ -15,7 +15,7 @@ answered here, in this interpreter, from the editor itself:
               window is the Save Version dialog.
   ffmpeg      -version · PNG or JPEG frames (-i frame%04d.png) to .gif, .mp4, a palette (.png) or one picture
               The browser decodes and composes the frames; the GIF writer and the MP4 writer are the editor's
-              (web/plugins/media.ts), the H.264 stream is the browser's own video encoder.
+              (web/domains/pcb/plugins/media.ts), the H.264 stream is the browser's own video encoder.
 
 Everything else a real kicad-cli or git can do is refused with its own error text and a non-zero exit code, as the
 program itself would for a command it does not know.
@@ -930,7 +930,7 @@ _FF_FILTERS = {"color", "overlay", "scale", "palettegen", "paletteuse", "fps", "
 
 
 def _media():
-    """The encoders (web/plugins/media.ts) in the page this interpreter runs in; None where there is no browser."""
+    """The encoders (web/domains/pcb/plugins/media.ts) in the page this interpreter runs in; None where there is no browser."""
     try:
         import js
     except ImportError:

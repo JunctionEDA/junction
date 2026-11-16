@@ -1,6 +1,6 @@
 """The physics of a layout as calls: what the copper must do for the board to work.
 
-`board.review()` (rules.py) also runs the layout physics checks of the design engine (web/ai/review-physics.ts):
+`board.review()` (rules.py) also runs the layout physics checks of the design engine (web/domains/pcb/ai/review-physics.ts):
 antennas, RF feeds, return paths, differential pairs and memory buses, crystals, switching converters, thermal pads,
 amplifier inputs, isolation and spacing for the voltage.  The calls here put in the copper those checks ask for:
 

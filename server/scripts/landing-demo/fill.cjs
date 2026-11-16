@@ -8,7 +8,7 @@
 const fs = require("fs"), os = require("os"), path = require("path"), crypto = require("crypto"), { execFileSync } = require("child_process");
 require(path.join(__dirname, "..", "..", "static", "kicad-canvas.js"));
 const K = globalThis.KiCadCanvas;
-const IMAGE = "kicad/kicad:10.0", OUT = path.join(__dirname, "..", "..", "web", "landing", "demo");
+const IMAGE = "kicad/kicad:10.0", OUT = path.join(__dirname, "..", "..", "web", "platform", "landing", "demo");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "blinker-")); fs.chmodSync(dir, 0o777);
 const gen = (env) => execFileSync("node", [path.join(__dirname, "gen.cjs")], { env: Object.assign({}, process.env, env), stdio: "inherit" });
 const kicad = (...args) => {

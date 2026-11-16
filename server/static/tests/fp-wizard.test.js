@@ -1,13 +1,14 @@
-// fp-wizard.test.js — the footprint editor's Footprint Wizard (web/editor/fpwizard*.ts): the "footprint_wizard"
+// fp-wizard.test.js — the footprint editor's Footprint Wizard (web/domains/pcb/editor/fpwizard*.ts): the "footprint_wizard"
 // manifest scope, what a wizard's answer is checked into, the footprint it exports (at the origin, with a new
 // footprint's header) and the Python runtime's side (kicad_wizard.web_op) on a legacy FootprintWizardBase wizard.
 // Run: node server/static/tests/fp-wizard.test.js
 "use strict";
 const path = require("path"), assert = require("assert"), fs = require("fs"), os = require("os");
+const { webPath } = require("./web-path");
 const { spawnSync } = require("child_process");
 const esbuild = require("esbuild");
 function load(file) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
 const M = load("editor/fpwizard-model.ts");

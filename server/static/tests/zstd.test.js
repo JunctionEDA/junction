@@ -1,12 +1,13 @@
-// zstd.test.js — the Zstandard frame decoder (web/dialogs/zstd.ts) the Simulation Model dialog uses for the
+// zstd.test.js — the Zstandard frame decoder (web/domains/pcb/dialogs/zstd.ts) the Simulation Model dialog uses for the
 // embedded files KiCad writes (base64 of a zstd frame), checked against node's zstd where node has one, a fixed
 // frame, and a real embedded file from KiCad's QA boards.
 // Run: node server/static/tests/zstd.test.js
 "use strict";
 const path = require("path"), fs = require("fs"), assert = require("assert/strict"), zlib = require("zlib");
+const { webPath } = require("./web-path");
 const esbuild = require("esbuild");
 function load(file) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
 const Z = load("dialogs/zstd.ts"), F = load("dialogs/sim-files.ts");

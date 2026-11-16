@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Junction</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<script>/* the stored UI theme before the first paint (web/theme.ts owns it; keep the two in step) */try{var t=localStorage.getItem("kui.theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
-<!-- who is signed in, the project and its first document are asked for at once, beside the script downloads (web/editor/boot.ts) -->
+<script>/* the stored UI theme before the first paint (web/shared/theme.ts owns it; keep the two in step) */try{var t=localStorage.getItem("kui.theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<!-- who is signed in, the project and its first document are asked for at once, beside the script downloads (web/domains/pcb/editor/boot.ts) -->
 <script>/*BOOT*/</script>
 <link rel="stylesheet" href="/static/theme.css">
 <link rel="stylesheet" href="/static/dist/ui.css">
@@ -36,7 +36,7 @@
   #dockL { grid-column: 1; grid-row: 1 / 3; } #tbLeft { grid-column: 2; grid-row: 1; } #stage { grid-column: 3; grid-row: 1; } #tbRight { grid-column: 4; grid-row: 1; } #dockR { grid-column: 5; grid-row: 1 / 3; }
   #dockB { grid-column: 2 / 5; grid-row: 2; } #dockPlugins { grid-row: 1 / 3; }
   /* narrow windows: the side docks (and the plugin dock) float over the stage as drawers
-     instead of squeezing the canvas to nothing (web/components/Dock.tsx toggles the side drawers) */
+     instead of squeezing the canvas to nothing (web/shared/components/Dock.tsx toggles the side drawers) */
   @media (max-width: 900px) {
     #dockPlugins { position: absolute; top: 0; bottom: 0; right: 0; z-index: 30; max-width: calc(100% - 40px); box-shadow: var(--shadow); }
   }
@@ -48,7 +48,7 @@
   #world { transform-origin: 0 0; position: absolute; left: 0; top: 0; pointer-events: none; }
   #world svg#base { display: block; width: 100%; height: auto; }
   #overlay { position: absolute; inset: 0; pointer-events: none; overflow: visible; }   /* cursors, selection boxes and comments off the sheet are not clipped */
-  /* the canvas cursor is the tool's KICURSOR (web/editor/cursors.ts); panning keeps it, as KiCad does */
+  /* the canvas cursor is the tool's KICURSOR (web/domains/pcb/editor/cursors.ts); panning keeps it, as KiCad does */
   .kinfobar { position: fixed; z-index: 100; box-sizing: border-box; display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 4px 6px 4px 30px; background: color-mix(in srgb, var(--blue) 14%, var(--paper)); border-bottom: 1px solid color-mix(in srgb, var(--blue) 45%, var(--line)); color: var(--ink); font-size: 12px; white-space: pre-line; pointer-events: none; transform: translateY(-100%); opacity: 0; visibility: hidden; transition: transform .16s ease-out, opacity .16s ease-out, visibility 0s linear .16s; }
   .kinfobar-ic { position: absolute; left: 7px; top: 50%; margin-top: -8px; width: 16px; height: 16px; }   /* WX_INFOBAR's wxICON_INFORMATION */
   .kinfobar.show { transform: none; opacity: 1; visibility: visible; pointer-events: auto; transition: transform .16s ease-out, opacity .16s ease-out; }
@@ -71,11 +71,11 @@
 <div id="app">
   <div id="ui-menubar"></div>
 
-  <!-- ===== Home: the projects window (React, server/web/home) ===== -->
+  <!-- ===== Home: the projects window (React, server/web/platform/home) ===== -->
   <section id="home" class="view"><div id="ui-home"></div></section>
 
   <!-- ===== Editor: KiCad's frame.  Toolbars, docks, menus, status bar and overlays are React
-       components in server/web (bundled into /static/dist/ui.js); only the stage is the editor bundle's (web/editor). ===== -->
+       components in server/web (bundled into /static/dist/ui.js); only the stage is the editor bundle's (web/domains/pcb/editor). ===== -->
   <section id="editor" class="view">
     <div id="ui-tbTop"></div>
     <div id="ui-tbAux"></div>

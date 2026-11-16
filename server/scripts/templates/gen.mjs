@@ -228,17 +228,17 @@ function project(stem, t) {
   };
 }
 
-/** The home page's 555 blinker (server/web/landing/demo, written by scripts/landing-demo) is the first template as it
+/** The home page's 555 blinker (server/web/platform/landing/demo, written by scripts/landing-demo) is the first template as it
  *  stands; the guided first project starts from the same board with four connections left open, as the home page's
  *  mini editor shows it. */
-const DEMO = path.join(HERE, "..", "..", "web", "landing", "demo");
+const DEMO = path.join(HERE, "..", "..", "web", "platform", "landing", "demo");
 const BLINKER = {
   title: "555 LED blinker",
   summary: "The board from the home page: a USB-C powered 555 timer that blinks an LED about once a second.",
   detail: "A classic first circuit with everything a real board has: a connector, a timer chip, the resistors and capacitors that set its rate, a ground pour and mounting holes. The guided first project uses this board.",
   level: "Beginner", tags: ["Timer", "USB-C"], size: [42, 27, 2], power: ["+5V"],
 };
-const OPEN_ROUTES = [20, 26, 27, 28];   // web/landing/mini.ts OPEN
+const OPEN_ROUTES = [20, 26, 27, 28];   // web/platform/landing/mini.ts OPEN
 function buildBlinker() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "kc-template-")), stem = "blinker";
   for (const ext of ["kicad_sch", "kicad_pcb"]) fs.copyFileSync(path.join(DEMO, `blinker.${ext}`), path.join(dir, `${stem}.${ext}`));
@@ -256,9 +256,9 @@ function buildBlinker() {
   return { t: BLINKER, dir, stem, guided, open, parts: 12, nets: 9 };
 }
 
-/** The home page's hero board (server/web/landing/hero, designed by scripts/landing-hero) is a template as it stands,
+/** The home page's hero board (server/web/platform/landing/hero, designed by scripts/landing-hero) is a template as it stands,
  *  so that the board a visitor works on in the home page's small editor fits the project it is handed to. */
-const HERO_DIR = path.join(HERE, "..", "..", "web", "landing", "hero");
+const HERO_DIR = path.join(HERE, "..", "..", "web", "platform", "landing", "hero");
 const HERO = {
   title: "STM32 USB-C dev board",
   summary: "The board from the top of the home page: an STM32F042 with USB-C, a 3.3 V regulator, reset and boot buttons and breadboard pin rows.",

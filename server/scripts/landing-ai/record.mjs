@@ -4,7 +4,7 @@
 // the board) through the real MCP endpoint of a local server, exactly as the AI did, and keeps
 // what came out for the home page's AI chapter: the finished schematic and board, and the order
 // in which every item was added (the documents' op logs).  Server and library mirror as in
-// ../demo-video/README.md.  Writes server/web/landing/ai/{esp32.kicad_sch,esp32.kicad_pcb,order.json}.
+// ../demo-video/README.md.  Writes server/web/platform/landing/ai/{esp32.kicad_sch,esp32.kicad_pcb,order.json}.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,7 +13,7 @@ import { createRequire } from 'node:module';
 import { BASE, PG_URL, mintJwt, mcp } from '../demo-video/lib.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const OUT = path.join(here, '..', '..', 'web', 'landing', 'ai');
+const OUT = path.join(here, '..', '..', 'web', 'platform', 'landing', 'ai');
 fs.mkdirSync(OUT, { recursive: true });
 const db = new pg.Client({ connectionString: PG_URL, ssl: false });
 await db.connect();

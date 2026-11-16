@@ -3,6 +3,7 @@ mod admin;
 mod ai;
 mod datasheet;
 mod demo;
+mod downloads;
 mod kicadlib;
 mod auth;
 mod compact;
@@ -287,6 +288,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/styleguide", get(pages::styleguide_page))
         .route("/static/dist/styleguide.js", get(pages::styleguide_js))
         .route("/welcome", get(pages::landing_page))
+        .route("/download", get(downloads::releases))
+        .route("/download/{os}", get(downloads::download))
         .route("/favicon.svg", get(pages::favicon))
         .route("/brand/{v}/{name}", get(pages::brand_file))
         .route("/favicon.ico", get(pages::favicon_ico))

@@ -6,7 +6,7 @@
 // no arcs) the script asks the router which routes it would consider between the same two pads on the same board,
 // and then moves the weights until the route the designer actually drew costs no more than the alternatives.  The
 // track length weight is fixed at 1 per mm, so the others read as "millimetres of detour this is worth".  --write
-// puts the result into web/router/weights.ts, with the list of boards it came from.
+// puts the result into web/domains/pcb/router/weights.ts, with the list of boards it came from.
 import fs from "node:fs"; import path from "node:path"; import { createRequire } from "node:module"; import { fileURLToPath } from "node:url";
 const require = createRequire(import.meta.url); const here = path.dirname(fileURLToPath(import.meta.url)); const S = path.join(here, "..", "static");
 require(path.join(S, "kicad-canvas.js")); require(path.join(S, "pcb-tools.js")); require(path.join(S, "dist", "autoroute.js"));
@@ -114,7 +114,7 @@ const r2 = (v) => +v.toFixed(2);
 const W = { length: 1, via: r2(w[0]), bend45: r2(w[1]), bend90: r2(w[2]), wrongDir: r2(w[3]), viaLevel: Math.max(1, Math.min(4, Math.round(w[0] / Math.max(w[2], 1)))), extraLevels: D.extraLevels, mitre: r2(Math.min(3, Math.max(0.3, mitre))) };
 console.log("weights", JSON.stringify(W));
 if (write) {
-  const file = path.join(here, "..", "web", "router", "weights.ts"); let text = fs.readFileSync(file, "utf8");
+  const file = path.join(here, "..", "web", "domains", "pcb", "router", "weights.ts"); let text = fs.readFileSync(file, "utf8");
   const block = `// <trained>\nexport const TRAINED: Weights = ${JSON.stringify(W)};\nexport const PROVENANCE: Provenance = ${JSON.stringify({ boards, fitted: new Date().toISOString().slice(0, 10), agreement: r2(agree) }, null, 2)};\n// </trained>`;
   text = text.replace(/\/\/ <trained>[\s\S]*\/\/ <\/trained>/, block); fs.writeFileSync(file, text); console.log("wrote", file);
 }

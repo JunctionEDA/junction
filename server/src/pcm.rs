@@ -1,7 +1,7 @@
 //! KiCad's official plugins for the web editor.
 //!
 //! The desktop installs plugins from KiCad's Plugin and Content Manager repository.  The web
-//! editor runs the same Python packages inside the plugin sandbox (web/plugins/pyruntime.ts:
+//! editor runs the same Python packages inside the plugin sandbox (web/domains/pcb/plugins/pyruntime.ts:
 //! CPython compiled to WebAssembly, with `pcbnew` and `wx` provided over the collaborative
 //! board), so this module does the two things a browser cannot: read the repository's package
 //! list, and download and unpack one package.  What it hands back goes through the same
@@ -818,7 +818,7 @@ pub(crate) fn runtime_dir() -> Option<&'static std::path::PathBuf> {
 /// The content type of a runtime file `GET /static/pyodide/{file}` serves, or None for a file it does not serve.
 fn runtime_kind(file: &str) -> Option<&'static str> {
     Some(match file {
-        // occt-import-js: the STEP reader behind the 3D viewer's real part models (web/viewer3d/models.ts)
+        // occt-import-js: the STEP reader behind the 3D viewer's real part models (web/domains/pcb/viewer3d/models.ts)
         "pyodide.js" | "pyodide.asm.mjs" | "ngspice.mjs" | "occt-import-js.js" => "application/javascript; charset=utf-8",
         "pyodide.asm.wasm" | "occt-import-js.wasm" => "application/wasm",
         "python_stdlib.zip" => "application/zip",

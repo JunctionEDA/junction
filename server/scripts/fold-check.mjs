@@ -1,5 +1,5 @@
 // Test of the server folding a document's edits into a new stored file when no desktop editor is there to save
-// it (src/compact.rs, web/mcp/compact.ts).  A project is edited from the browser only; then an archive download,
+// it (src/compact.rs, web/domains/pcb/mcp/compact.ts).  A project is edited from the browser only; then an archive download,
 // a new branch and everyone leaving must each leave a stored file that is the design as edited: the same document
 // the editing browser shows, the stored file's own text wherever nothing was edited, the format version untouched,
 // and the live session carrying on.  Needs a local server with KC_DEV_LOGIN=1.

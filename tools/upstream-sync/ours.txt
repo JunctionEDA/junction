@@ -7,3 +7,27 @@
 README.md
 CONTRIBUTING.md
 code-of-conduct.md
+AGENTS.md
+# KiCad leftovers Junction removed: nothing builds, tests or ships them (kept deleted)
+INSTALL.txt
+install-deps.sh
+setup-env.sh
+copyright.h
+uncrustify.cfg
+.githooks
+tools/git
+tools/checkcoding.py
+tools/check_coding.sh
+tools/check_wxlogdebug.sh
+tools/build-fedora-ci.sh
+tools/test-fedora-ci.sh
+tools/create_mock.py
+tools/lib_convert.py
+tools/tests
+tools/Info.plist
+qa/arm64
+qa/fedora-rawhide
+utils/webview_test
+doxygen/doxygen.Dockerfile
+doxygen/doxygen.Dockerfile.dockerignore
+doxygen/eagle-plugin-notes.txt

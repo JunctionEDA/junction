@@ -1,4 +1,4 @@
-// Browser test of the projects home (server/web/home): two real browsers, an owner and a
+// Browser test of the projects home (server/web/platform/home): two real browsers, an owner and a
 // collaborator, go through listing, upload, rename, sharing, joining by link, Trash, stars,
 // blank projects, ownership transfer, selecting several, and the phone layout.
 // Needs a local server with KC_DEV_LOGIN=1 on a throwaway database, Playwright, and `zip`.
@@ -89,7 +89,7 @@ async function open(token, opts = { viewport: { width: 1280, height: 800 } }, ne
 // List changes run as view transitions, which apply a frame or two after the click.
 const settle = (p) => p.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(r, 30)))));
 /** Poll until `fn` is true (the UI answers first and tells the server right after). */
-// The home's drop-downs are <k-select> (web/components/kselect.ts): set the value and say so, as a pick does.
+// The home's drop-downs are <k-select> (web/shared/components/kselect.ts): set the value and say so, as a pick does.
 const pick = (loc, value) => loc.evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event('change', { bubbles: true })); }, value);
 const until = async (fn, ms = 4000) => { const t = Date.now(); for (;;) { if (await fn()) return true; if (Date.now() - t > ms) return false; await new Promise((r) => setTimeout(r, 100)); } };
 const names = async (p) => { await settle(p); return p.locator('.hp-item:not(.skel) .hp-item-name').allTextContents(); };
@@ -525,7 +525,7 @@ await step('share dialog: answers out of order, files dropped on it', async () =
 
 await step('a project built in the browser gets a picture', async () => {
   // Nothing but ops on top of a blank first file: the stored file stays empty, so the picture can only
-  // come from the editor that has the real document (web/editor/thumbpush.ts).
+  // come from the editor that has the real document (web/domains/pcb/editor/thumbpush.ts).
   const made = (await api(ids.ta, '/api/projects/blank', { method: 'POST', json: { name: 'Browser built' } })).body;
   const sch = made.docs.find((d) => d.docType === 'kicad_sch');
   const ws = new WebSocket(BASE.replace(/^http/, 'ws') + '/ws');
@@ -619,7 +619,7 @@ await step('phone', async () => {
   await m.locator('.hp-x').tap();
   await m.locator('.hp-tabbar a >> nth=1').tap(); await m.waitForSelector('.hp-item:not(.skel)'); check('phone: Explore tab', await m.locator('.hp-head h1').textContent() === 'Explore');
   await m.locator('.hp-topbar .hp-account').tap(); await m.locator('.hp-menu button', { hasText: 'Log out' }).tap();
-  // Signed out, "/" is the public home page (web/landing), not this app.
+  // Signed out, "/" is the public home page (web/platform/landing), not this app.
   await m.waitForFunction(() => !document.querySelector('.hp-account') && document.readyState === 'complete' && /Junction/.test(document.title));
   check('sign out returns to the public home page', (await m.evaluate(() => fetch('/api/me').then((r) => r.status))) === 401);
   await m.screenshot({ path: `${out}/15-phone-signed-out.png` });

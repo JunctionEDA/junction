@@ -221,8 +221,8 @@ mod tests {
     fn the_stm32_template_is_the_home_page_hero_board() {
         // the board a visitor works on in the home page's small editor is handed to a project made from this template
         let t = find("stm32-usbc-devboard").unwrap();
-        assert_eq!(t.sch, include_str!("../web/landing/hero/stm32.kicad_sch"), "run node scripts/templates/gen.mjs stm32-usbc-devboard after the hero board changes");
-        assert_eq!(t.pcb, include_str!("../web/landing/hero/stm32.kicad_pcb"), "run node scripts/templates/gen.mjs stm32-usbc-devboard after the hero board changes");
+        assert_eq!(t.sch, include_str!("../web/platform/landing/hero/stm32.kicad_sch"), "run node scripts/templates/gen.mjs stm32-usbc-devboard after the hero board changes");
+        assert_eq!(t.pcb, include_str!("../web/platform/landing/hero/stm32.kicad_pcb"), "run node scripts/templates/gen.mjs stm32-usbc-devboard after the hero board changes");
         assert!(t.pcb.len() < MAX_HANDED_BOARD / 2);
     }
 
@@ -231,8 +231,8 @@ mod tests {
         // The small editor on the home page hands its board over to a project made from this template, so the
         // schematic that project gets must be the one that board was made for.
         let t = find("blinker").unwrap();
-        assert_eq!(t.sch, include_str!("../web/landing/demo/blinker.kicad_sch"), "run node scripts/templates/gen.mjs after the demo changes");
-        assert_eq!(t.pcb, include_str!("../web/landing/demo/blinker.kicad_pcb"), "run node scripts/templates/gen.mjs after the demo changes");
+        assert_eq!(t.sch, include_str!("../web/platform/landing/demo/blinker.kicad_sch"), "run node scripts/templates/gen.mjs after the demo changes");
+        assert_eq!(t.pcb, include_str!("../web/platform/landing/demo/blinker.kicad_pcb"), "run node scripts/templates/gen.mjs after the demo changes");
         let g = t.guided.unwrap();
         assert!(is_board(g) && g.contains("(filled_polygon") && g.len() < t.pcb.len(), "the guided board is the same board with connections taken out, pour still filled");
     }

@@ -6,7 +6,7 @@ COPY package.json package-lock.json tsconfig.json ./
 RUN npm ci --no-audit --no-fund
 COPY web ./web
 COPY scripts ./scripts
-# the headless editor (web/mcp) bundles the editor's schematic and board tool modules
+# the headless editor (web/domains/pcb/mcp) bundles the editor's schematic and board tool modules
 COPY static/sch-tools.js static/pcb-tools.js ./static/
 # the Python runtime for KiCad's own plugins packs its pcbnew and wx modules (plugins/python) beside the interpreter
 COPY plugins/python ./plugins/python

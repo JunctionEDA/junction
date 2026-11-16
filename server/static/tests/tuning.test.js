@@ -2,15 +2,16 @@
 // pns_meander_placer.cpp, pns_meander_placer_base.cpp and pcbnew/generators/pcb_tuning_pattern.cpp): the meander
 // geometry and the length trimming, the click / move / click flow committing "Tune" with its
 // (generated (type tuning_pattern) …), KiCad's refusals, the 1-4 steps, Escape, and the Tuning Pattern Properties
-// dialog's logic (web/editor/routersettings.ts) and the drawing tool menu's tuning entries (web/editor/ctxmenus.ts).
+// dialog's logic (web/domains/pcb/editor/routersettings.ts) and the drawing tool menu's tuning entries (web/domains/pcb/editor/ctxmenus.ts).
 // Run: node server/static/tests/tuning.test.js
 "use strict";
 const path = require("path"), assert = require("assert/strict");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 require(path.join(__dirname, "..", "pcb-tools.js"));
 const K = globalThis.KiCadCanvas, P = globalThis.PcbTools, pcb = globalThis.CollabTools.pcb;
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-const load = (rel) => { const b = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", ...rel)], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" }); const m = { exports: {} }; new Function("module", "exports", "require", b.outputFiles[0].text)(m, m.exports, require); return m.exports; };
+const load = (rel) => { const b = esbuild.buildSync({ entryPoints: [webPath(...rel)], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" }); const m = { exports: {} }; new Function("module", "exports", "require", b.outputFiles[0].text)(m, m.exports, require); return m.exports; };
 const CM = load(["editor", "ctxmenus.ts"]);
 const IU = 1e6;
 

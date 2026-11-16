@@ -4,7 +4,7 @@
 // anything, so each request starts this program, which replays the session so far (the files written and the
 // commands given) in a fresh ngspice and answers with the result of the last step.  ngspice itself is the same
 // WebAssembly build the browser loads (static/dist/pyodide/ngspice.mjs, scripts/ngspice-wasm/build.sh) behind the same
-// session code (web/plugins/spice.ts).
+// session code (web/domains/pcb/plugins/spice.ts).
 //
 //   stdin:  {"ops": [["write", path, base64] | ["remove", path] | ["exec", [commands]] | ["read", path] | ["list", dir]]}
 //   stdout: {"version": "45.2", "result": <what the last op gave>}

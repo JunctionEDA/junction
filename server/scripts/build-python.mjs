@@ -24,21 +24,21 @@ for (const f of ["occt-import-js.js", "occt-import-js.wasm"]) {
 }
 // ngspice 45.2 compiled to WebAssembly with XSPICE and its code models (scripts/ngspice-wasm/build.sh, which makes
 // vendor/ngspice/ngspice-core.mjs.br): the circuit simulator behind the simulator frame, the `ngspice` program and the
-// libngspice stand-in (plugins/python/kicad_spice.py), with its JavaScript face (web/plugins/ngspice-module.ts).  About
+// libngspice stand-in (plugins/python/kicad_spice.py), with its JavaScript face (web/domains/pcb/plugins/ngspice-module.ts).  About
 // 9 MB, so it is its own file, fetched on first use.
 {
   const core = path.join(server, "vendor", "ngspice", "ngspice-core.mjs.br");
-  // the simulator's URL for the module names this revision (web/plugins/ngspice-revision.ts): a stale one would let
+  // the simulator's URL for the module names this revision (web/domains/pcb/plugins/ngspice-revision.ts): a stale one would let
   // browsers keep yesterday's module
-  const moduleSrc = path.join(server, "web", "plugins", "ngspice-module.ts");
+  const moduleSrc = path.join(server, "web", "domains", "pcb", "plugins", "ngspice-module.ts");
   const revision = crypto.createHash("sha256").update(fs.readFileSync(moduleSrc)).digest("hex").slice(0, 12);
-  const recorded = (/NGSPICE_MODULE_REVISION = "([0-9a-f]+)"/.exec(fs.readFileSync(path.join(server, "web", "plugins", "ngspice-revision.ts"), "utf8")) || [])[1];
-  if (recorded !== revision) throw new Error(`web/plugins/ngspice-revision.ts says ${recorded}; web/plugins/ngspice-module.ts is now ${revision}: write that there`);
+  const recorded = (/NGSPICE_MODULE_REVISION = "([0-9a-f]+)"/.exec(fs.readFileSync(path.join(server, "web", "domains", "pcb", "plugins", "ngspice-revision.ts"), "utf8")) || [])[1];
+  if (recorded !== revision) throw new Error(`web/domains/pcb/plugins/ngspice-revision.ts says ${recorded}; web/domains/pcb/plugins/ngspice-module.ts is now ${revision}: write that there`);
   const unpack = { name: "ngspice-core", setup(b) {
     b.onResolve({ filter: /ngspice-core\.mjs$/ }, () => ({ path: core, namespace: "ngspice-core" }));
     b.onLoad({ filter: /.*/, namespace: "ngspice-core" }, () => ({ contents: zlib.brotliDecompressSync(fs.readFileSync(core)).toString("utf8"), loader: "js" }));
   } };
-  const r = await esbuild.build({ entryPoints: [path.join(server, "web", "plugins", "ngspice-module.ts")], bundle: true, format: "esm", target: "es2022", minify: true, charset: "utf8", external: ["node:*"], write: false, legalComments: "none", logLevel: "warning", plugins: [unpack] });
+  const r = await esbuild.build({ entryPoints: [path.join(server, "web", "domains", "pcb", "plugins", "ngspice-module.ts")], bundle: true, format: "esm", target: "es2022", minify: true, charset: "utf8", external: ["node:*"], write: false, legalComments: "none", logLevel: "warning", plugins: [unpack] });
   const dst = path.join(out, "ngspice.mjs"), body = Buffer.from(r.outputFiles[0].contents);
   if (!fs.existsSync(dst) || !fs.readFileSync(dst).equals(body)) fs.writeFileSync(dst, body);
 }
@@ -46,7 +46,7 @@ const shim = path.join(server, "plugins", "python"); const files = {};
 const walk = (dir, base) => { for (const e of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) { const rel = base ? base + "/" + e.name : e.name; if (e.isDirectory()) { if (e.name !== "__pycache__" && e.name !== "wheels") walk(path.join(dir, e.name), rel); } else if (e.name.endsWith(".py")) files[rel] = fs.readFileSync(path.join(dir, e.name), "utf8"); } };
 walk(shim, "");
 // Browser-side helpers the shims load into the plugin's frame: the animation encoders (ffmpeg's stand-in) and the WebGL end of the OpenGL shim.
-for (const [name, entry] of [["kicad_media.js", "web/plugins/media.ts"], ["kicad_gl.js", "web/plugins/glfixed.ts"], ["kicad_spice.js", "web/plugins/spice.ts"]]) {
+for (const [name, entry] of [["kicad_media.js", "web/domains/pcb/plugins/media.ts"], ["kicad_gl.js", "web/domains/pcb/plugins/glfixed.ts"], ["kicad_spice.js", "web/domains/pcb/plugins/spice.ts"]]) {
   const r = esbuild.buildSync({ entryPoints: [path.join(server, entry)], bundle: true, format: "iife", target: "es2020", minify: true, write: false, legalComments: "none" });
   files[name] = Buffer.from(r.outputFiles[0].contents).toString("utf8");
 }

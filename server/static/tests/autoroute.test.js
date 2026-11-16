@@ -1,4 +1,4 @@
-// Node test for the board autorouter (web/router → static/dist/autoroute.js): it connects what the ratsnest shows,
+// Node test for the board autorouter (web/domains/pcb/router → static/dist/autoroute.js): it connects what the ratsnest shows,
 // keeps the design rules and net classes, stays off other nets, keep-outs and the board edge, changes layer through
 // vias only where allowed, never alters what is already on the board, and hands its result to the editor as
 // ordinary ADDED changes in one undoable commit.

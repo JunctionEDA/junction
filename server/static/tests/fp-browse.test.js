@@ -1,14 +1,15 @@
-// fp-browse.test.js — the fields grids' footprint / datasheet browse buttons (web/library/fpchoice.ts): the symbol
+// fp-browse.test.js — the fields grids' footprint / datasheet browse buttons (web/domains/pcb/library/fpchoice.ts): the symbol
 // netlist the footprint chooser gets (BuildFootprintChooserSymbolNetlist: pins of every unit, body style 1, stacked
 // numbers expanded; ki_fp_filters), the grouped-row rule, FOOTPRINT_CHOOSER_FRAME::filterFootprint and the
 // check box labels, GetAssociatedDocument's link test (kicad-embed://, ${VAR}) and IsURL.  Run: node server/static/tests/fp-browse.test.js
 "use strict";
 const path = require("path"), assert = require("assert");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 const K = globalThis.KiCadCanvas;
 const esbuild = require("esbuild");
 function load(file) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
 const F = load("library/fpchoice.ts");

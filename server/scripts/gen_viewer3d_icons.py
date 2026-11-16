@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate server/web/viewer3d/icons.json: the icons of KiCad's 3D viewer toolbar, menus and
+"""Generate server/web/domains/pcb/viewer3d/icons.json: the icons of KiCad's 3D viewer toolbar, menus and
 appearance panel (3d-viewer/3d_viewer/toolbars_3d.cpp, 3d_menubar.cpp, tools/eda_3d_actions.cpp),
 taken from resources/bitmaps_png/sources/{light,dark} exactly as gen_kicad_ui.py does for the editors.
 
@@ -12,7 +12,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gen_kicad_ui import collect_icons  # noqa: E402
 
-OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web", "viewer3d", "icons.json")
+OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "web", "domains", "pcb", "viewer3d", "icons.json")
 
 NAMES = [
     # EDA_3D_ACTIONS / ACTIONS used by the top toolbar, in toolbar order

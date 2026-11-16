@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate server/web/generated/kicad-ui-spec.json from KiCad's own sources.
+"""Generate server/web/domains/pcb/generated/kicad-ui-spec.json from KiCad's own sources.
 
 The web editor mirrors the desktop's toolbars, so the toolbar layout, the action
 labels / tooltips / hotkeys and the icons all come straight from the C++ tree:
@@ -14,7 +14,7 @@ Run from the repository root:  python3 server/scripts/gen_kicad_ui.py
 import json, os, re, sys, xml.etree.ElementTree as ET
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
-OUT = os.path.join(ROOT, "server", "web", "generated", "kicad-ui-spec.json")
+OUT = os.path.join(ROOT, "server", "web", "domains", "pcb", "generated", "kicad-ui-spec.json")
 
 ACTION_SOURCES = ["common/tool/actions.cpp", "eeschema/tools/sch_actions.cpp", "pcbnew/tools/pcb_actions.cpp", "cvpcb/tools/cvpcb_actions.cpp"]
 TOOLBAR_SOURCES = {"sch": "eeschema/toolbars_sch_editor.cpp", "pcb": "pcbnew/toolbars_pcb_editor.cpp", "symedit": "eeschema/symbol_editor/toolbars_symbol_editor.cpp", "fpedit": "pcbnew/toolbars_footprint_editor.cpp",
@@ -274,7 +274,7 @@ def main():
                   "CVPCB_ACTIONS::deleteAssoc", "CVPCB_ACTIONS::showEquFileTable", "CVPCB_ACTIONS::saveAssociationsToFile"):
         if extra in actions:
             used[extra] = actions[extra]
-    # The web chrome (server/web/spec.ts) imports this JSON as a typed module (KicadUiSpec);
+    # The web chrome (server/web/domains/pcb/spec.ts) imports this JSON as a typed module (KicadUiSpec);
     # "generated" documents the provenance since JSON cannot carry a comment.
     spec = {"generated": "server/scripts/gen_kicad_ui.py from KiCad's toolbar configs, TOOL_ACTIONs and resources/bitmaps_png — do not edit by hand",
             "actions": used, "toolbars": toolbars, "icons": icons}

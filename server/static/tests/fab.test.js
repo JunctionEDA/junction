@@ -1,4 +1,4 @@
-// node server/static/tests/fab.test.js — the fabrication output writers (server/web/fab: Gerber, Excellon drill,
+// node server/static/tests/fab.test.js — the fabrication output writers (server/web/domains/pcb/fab: Gerber, Excellon drill,
 // placement, BOM, the manufacturer presets and the zip writer), reached through the bundle's KiCadFab.
 // `npm run build` must have produced static/dist/fab.js and static/kicad-canvas.js first.  How the same
 // output compares with kicad-cli on real boards is scripts/fab-verify.mjs.

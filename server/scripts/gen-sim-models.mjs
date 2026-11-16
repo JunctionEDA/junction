@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // gen-sim-models.mjs — generates the Simulation Model Editor's tables from KiCad's own C++:
-//   web/dialogs/sim-model-data.ts     DEVICE_T / TYPE (sim_model.h), DeviceInfo / TypeInfo / SpiceInfo (sim_model.cpp),
+//   web/domains/pcb/dialogs/sim-model-data.ts     DEVICE_T / TYPE (sim_model.h), DeviceInfo / TypeInfo / SpiceInfo (sim_model.cpp),
 //                                     the pins and PARAM::INFO lists of the hand-written models (sim_model_ideal,
 //                                     _behavioral, _r_pot, _l_mutual, _tline, _switch, _source, _raw_spice)
-//   web/dialogs/sim-model-ngspice.ts  NGSPICE_MODEL_INFO_MAP (sim_model_ngspice_data_*.cpp), loaded on demand
+//   web/domains/pcb/dialogs/sim-model-ngspice.ts  NGSPICE_MODEL_INFO_MAP (sim_model_ngspice_data_*.cpp), loaded on demand
 // Run: node server/scripts/gen-sim-models.mjs [<kicad source root>]   (defaults to this repository's root)
 import fs from "node:fs";
 import path from "node:path";
@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = process.argv[2] || path.resolve(here, "..", "..");
 const SIM = path.join(root, "eeschema", "sim");
-const OUT = path.resolve(here, "..", "web", "dialogs");
+const OUT = path.resolve(here, "..", "web", "domains", "pcb", "dialogs");
 const read = (f) => fs.readFileSync(path.join(SIM, f), "utf8");
 
 // ------------------------------------------------------------------ enums (DEFINE_ENUM_CLASS_WITH_ITERATOR)

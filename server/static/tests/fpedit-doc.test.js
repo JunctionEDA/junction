@@ -1,4 +1,4 @@
-// fpedit-doc.test.js — the Footprint Editor's document (web/canvas/footprint-doc.ts) under node: a .kicad_mod's
+// fpedit-doc.test.js — the Footprint Editor's document (web/domains/pcb/canvas/footprint-doc.ts) under node: a .kicad_mod's
 // children as items, byte-exact write-back of an unedited file, KiCad's Prettify, edits written in format(FOOTPRINT)
 // order, the header op, and every .kicad_mod in the repository round-tripping.
 // Run: node server/static/tests/fpedit-doc.test.js

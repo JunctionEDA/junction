@@ -1,13 +1,14 @@
 // symedit-symdir.test.js — a KiCad 10 directory symbol library (X.kicad_symdir, one file per symbol) as one buffer
-// (web/symedit/symdir.ts) over an in-memory copy of the op protocol with several documents: the files' symbols merge,
+// (web/domains/pcb/symedit/symdir.ts) over an in-memory copy of the op protocol with several documents: the files' symbols merge,
 // an edit goes to the symbol's own file, a new symbol gets a new file named EscapeString( name, CTX_FILENAME ), Save
 // writes the modified files, Revert puts them back.
 // Run: node server/static/tests/symedit-symdir.test.js
 "use strict";
 const path = require("path"), fs = require("fs"), assert = require("assert");
+const { webPath } = require("./web-path");
 const esbuild = require("esbuild");
 function load(file) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
 const DEVICE = fs.readFileSync(path.join(__dirname, "..", "..", "..", "qa", "data", "libraries", "test_project", "Device.kicad_sym"), "utf8");

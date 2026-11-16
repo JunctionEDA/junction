@@ -1,12 +1,13 @@
-// libtree.test.js — the editor trees' filter and order (web/library/libtree.ts): LIB_TREE_NODE_ITEM::UpdateScore,
+// libtree.test.js — the editor trees' filter and order (web/domains/pcb/library/libtree.ts): LIB_TREE_NODE_ITEM::UpdateScore,
 // LIB_TREE_NODE::Compare with Sort by Best Match / Sort Alphabetically, and the recent searches.
 // Run: node server/static/tests/libtree.test.js
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const { webPath } = require("./web-path");
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-const built = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "library", "libtree.ts")], bundle: true, format: "cjs", target: "es2020", write: false });
+const built = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "library", "libtree.ts")], bundle: true, format: "cjs", target: "es2020", write: false });
 const mod = { exports: {} }; new Function("exports", "module", "require", built.outputFiles[0].text)(mod.exports, mod, require); const L = mod.exports;
 
 const items = [

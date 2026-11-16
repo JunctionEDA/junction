@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# ngspice compiled to WebAssembly with XSPICE and its code models, for the web simulator (web/sim/frame.ts), the
-# plugin runtime (plugins/python/kicad_spice.py) and the assistant's simulate tool (web/mcp/simulate.ts).
+# ngspice compiled to WebAssembly with XSPICE and its code models, for the web simulator (web/domains/pcb/sim/frame.ts), the
+# plugin runtime (plugins/python/kicad_spice.py) and the assistant's simulate tool (web/domains/pcb/mcp/simulate.ts).
 #
 # The result is server/vendor/ngspice/ngspice-core.mjs.br: emscripten's ES module with the WebAssembly inside it
 # (SINGLE_FILE, UTF-8 embedded; about 7.7 MB), brotli-compressed to about 1.5 MB, and build-meta.json beside it.
-# scripts/build-python.mjs bundles it with web/plugins/ngspice-module.ts (the Simulation class every caller uses)
+# scripts/build-python.mjs bundles it with web/domains/pcb/plugins/ngspice-module.ts (the Simulation class every caller uses)
 # into static/dist/pyodide/ngspice.mjs, which the server hands out as /static/pyodide/ngspice.mjs.
 #
 # What it takes:  bash, git, gcc, make, autoconf, automake, libtool, bison, flex, python3, xz, and network access to

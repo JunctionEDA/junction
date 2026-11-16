@@ -1,4 +1,4 @@
-// node server/static/tests/themes.test.js — the schematic colour themes (web/canvas/colors.ts): KiCad's built-in
+// node server/static/tests/themes.test.js — the schematic colour themes (web/domains/pcb/canvas/colors.ts): KiCad's built-in
 // palettes, the lazy geometry rebuild after a switch, and exports that stay in KiCad Default.
 "use strict";
 const assert = require("assert");

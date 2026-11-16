@@ -1,11 +1,12 @@
 // node server/static/tests/plot.test.js — File > Plot for the board and the schematic: the board's
-// (pcbplotparams …) section (canvas/plot-params.ts), the page model and its writers (web/fab: svg, pdf, ps,
+// (pcbplotparams …) section (canvas/plot-params.ts), the page model and its writers (web/domains/pcb/fab: svg, pdf, ps,
 // dxf), the page-based board plot (pageplot.ts: scale, mirror, drill marks, drawing sheet), the Gerber X2
 // aperture / object attributes and the job file, and the plot recorder that turns the screen painter into
 // plot items (canvas/plot-rec.ts).  `npm run build` must have produced the bundles first.
 "use strict";
 const assert = require("assert");
 const path = require("path");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 require(path.join(__dirname, "..", "dist", "fab.js"));
 const K = globalThis.KiCadCanvas, F = globalThis.KiCadFab, P = K.plot.params;
@@ -297,7 +298,7 @@ test("Design variants: the variant's DNP, exclusions and field values reach the 
 
 test("Schematic design variants: names in GetVariantNamesForUI order, a symbol as the variant shows it on its sheet", () => {
   const esbuild = require("esbuild");
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "dialogs", "sch-variants.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "dialogs", "sch-variants.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const mod = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, require); const V = mod.exports;
   const SYM = `(symbol (lib_id "Device:R") (at 10 10 0) (unit 1) (in_bom yes) (on_board yes) (dnp no) (uuid "s1")
     (property "Reference" "R1" (at 0 0 0)) (property "Value" "10k" (at 0 0 0))

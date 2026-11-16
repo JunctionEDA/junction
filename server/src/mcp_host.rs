@@ -1,9 +1,9 @@
 //! The headless editors behind the MCP endpoint.
 //!
 //! Reading a design as components and nets, checking it and changing it is done by the web
-//! editor's own modules (web/ai, the schematic and board tools, the autorouter): TypeScript
+//! editor's own modules (web/domains/pcb/ai, the schematic and board tools, the autorouter): TypeScript
 //! that works on a parsed document.  This server never parses a KiCad file, so for MCP it
-//! runs those modules in Node (web/mcp/host.ts, built into static/dist/mcp-host.js and
+//! runs those modules in Node (web/domains/pcb/mcp/host.ts, built into static/dist/mcp-host.js and
 //! embedded here): one process per person using the endpoint, started on their first tool
 //! call and gone after a quarter of an hour of silence.  A process holds the documents the
 //! person's calls touched, joined over the collaboration socket like any editor, and takes
@@ -25,7 +25,7 @@ use tokio::process::{Child, ChildStdin, Command};
 use tokio::sync::oneshot;
 
 const HOST_JS: &str = include_str!("../static/dist/mcp-host.js");
-/// The process a run_python script runs in (web/harness/sandbox.ts); the host starts it from beside itself.
+/// The process a run_python script runs in (web/domains/pcb/harness/sandbox.ts); the host starts it from beside itself.
 const SANDBOX_JS: &str = include_str!("../static/dist/harness-sandbox.js");
 
 #[derive(Debug)]

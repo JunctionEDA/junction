@@ -9,13 +9,13 @@ labels) and a placement. Everything else comes from KiCad 10 itself, through `ki
 `kicad/kicad:10.0` image:
 
 1. the netlist of the schematic, which gives the board its nets;
-2. the editor's own autorouter routes the board (`web/router`);
+2. the editor's own autorouter routes the board (`web/domains/pcb/router`);
 3. KiCad fills the pour and saves the board, then saves the schematic;
 4. KiCad runs ERC, and DRC with schematic parity, at every severity. A template is written only when all of
    them report nothing;
 5. `kicad-cli pcb render` and `sch export svg` make `board.png` and `schematic.png`.
 
-The 555 blinker is not described here: it is the home page's demo (`web/landing/demo`, written by
+The 555 blinker is not described here: it is the home page's demo (`web/platform/landing/demo`, written by
 `scripts/landing-demo`), copied as it stands so that the board a visitor routes in the home page's small
 editor fits the project it is handed to. `blinker.guided.kicad_pcb` is that board with four connections taken
 out, for the guided first project. A unit test fails when the copy and the demo differ: run the generator again.

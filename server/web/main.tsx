@@ -4,27 +4,27 @@
 // wrappers so the rendered elements are the page grid's own children, exactly as the static
 // markup used to be.
 import { createRoot } from "react-dom/client";
-import { Guide } from "./onboarding/Guide";
+import { Guide } from "./platform/onboarding/Guide";
 import type { ReactNode } from "react";
-// chrome styling: web/styles/tailwind.css (built by @tailwindcss/cli into static/dist/ui.css)
-import { MenuBar } from "./components/MenuBar";
-import { AuxToolbar, LeftOptionsToolbar, RightDrawToolbar, TopToolbar } from "./components/Toolbar";
-import { DockBottom, DockLeft, DockRight } from "./components/Dock";
-import { StatusBar } from "./components/StatusBar";
-import { MsgPanel } from "./components/MsgPanel";
-import { Popover, SignInOverlay, Toast } from "./components/Overlays";
-import { Home } from "./home/Home";
-import { Toasts } from "./home/ui";
-import { PluginDialogs, PluginDock } from "./plugins/PluginUi";
-import { ContextMenu } from "./components/ContextMenu";
-import { HistoryBar, VersionDialogs } from "./components/VersionHistory";
-import { CompareWindow } from "./review/Compare";
-import { installReview } from "./review/store";
-import { installToolbarTooltips } from "./tooltip";
-import { SPEC } from "./spec";
-import { loadIconPack, packIcon } from "./iconpack";
+// chrome styling: web/shared/styles/tailwind.css (built by @tailwindcss/cli into static/dist/ui.css)
+import { MenuBar } from "./shared/components/MenuBar";
+import { AuxToolbar, LeftOptionsToolbar, RightDrawToolbar, TopToolbar } from "./shared/components/Toolbar";
+import { DockBottom, DockLeft, DockRight } from "./shared/components/Dock";
+import { StatusBar } from "./shared/components/StatusBar";
+import { MsgPanel } from "./shared/components/MsgPanel";
+import { Popover, SignInOverlay, Toast } from "./shared/components/Overlays";
+import { Home } from "./platform/home/Home";
+import { Toasts } from "./platform/home/ui";
+import { PluginDialogs, PluginDock } from "./domains/pcb/plugins/PluginUi";
+import { ContextMenu } from "./shared/components/ContextMenu";
+import { HistoryBar, VersionDialogs } from "./shared/components/VersionHistory";
+import { CompareWindow } from "./platform/review/Compare";
+import { installReview } from "./platform/review/store";
+import { installToolbarTooltips } from "./shared/tooltip";
+import { SPEC } from "./domains/pcb/spec";
+import { loadIconPack, packIcon } from "./domains/pcb/iconpack";
 
-// The Symbol Editor (web/symedit, in editor.js) draws its toolbars from the same spec and icons: published here so
+// The Symbol Editor (web/domains/pcb/symedit, in editor.js) draws its toolbars from the same spec and icons: published here so
 // the 670 KB spec is not bundled twice.
 Object.assign(window, {
   KiCadUiToolbars: SPEC.toolbars,

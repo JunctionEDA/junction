@@ -196,18 +196,18 @@ of a net as one row) and drawn in KiCad's diff colours as an overlay, side by
 side, or with a swipe divider. Selecting a change shows its properties before
 and after; "Comment on Change…" starts a thread on that item. A live side
 follows edits made while the window is open. Other code opens it with
-`window.CollabReview.openCompare({ a, b })` (web/review/sources.ts lists the
+`window.CollabReview.openCompare({ a, b })` (web/platform/review/sources.ts lists the
 version references).
 
-The code is in `web/review/` (the diff engine has its own tests, `npm run
-test:review`) and `web/editor/comments.ts`; `scripts/review-ui.mjs` drives
+The code is in `web/platform/review/` (the diff engine has its own tests, `npm run
+test:review`) and `web/domains/pcb/editor/comments.ts`; `scripts/review-ui.mjs` drives
 both features with two people in two browsers.
 
 ## Vendor parts and part libraries
 
 Parts can be found at LCSC / JLCPCB, Mouser, DigiKey and Farnell / Newark /
 element14 and placed straight
-into a schematic or a board (`src/parts/`, dialog in `web/parts/`, in the
+into a schematic or a board (`src/parts/`, dialog in `web/domains/pcb/parts/`, in the
 editor under Tools → Add Part from Vendor… and Part Libraries…).
 
 A saved library stores **references only**: vendor, vendor part number,
@@ -326,7 +326,7 @@ will do (Claude, ChatGPT, Gemini, Copilot, Cursor, a local model behind an agent
 on whatever plan or key the person already has instead of on API tokens the server pays for. The
 menu bar's **AI** button opens the page that connects one.
 
-The design tools (`web/ai/`: `design.ts`, `proposals.ts`, `library.ts`, with `tools.json` as their
+The design tools (`web/domains/pcb/ai/`: `design.ts`, `proposals.ts`, `library.ts`, with `tools.json` as their
 catalog) read components, nets, ERC/DRC and board statistics from the live document and turn
 structured edits into ordinary collaboration ops. They run in the browser for plugins and in the
 headless editor behind the MCP endpoint.
@@ -340,11 +340,11 @@ back. It is a thin layer: every call becomes edits for the same tool modules, so
 implementation of placement, connectivity, checks, the placement engine and the autorouter. Its own
 README has the API. It reaches a design three ways, with the same calls:
 
-- **Local files**: `kh.open(folder)` runs the engine with Node (`web/harness/cli.ts` and
+- **Local files**: `kh.open(folder)` runs the engine with Node (`web/domains/pcb/harness/cli.ts` and
   `workspace.ts`, bundled to `static/dist/harness-engine.js`) on KiCad files, no server involved.
 - **An online project from outside**: `kh.connect(url, token, project)` goes through `/mcp`.
 - **`run_python`**, an MCP tool: the assistant sends a script, the server runs it and returns only what
-  the script printed. The script runs in a process of its own (`web/harness/sandbox.ts`): Pyodide
+  the script printed. The script runs in a process of its own (`web/domains/pcb/harness/sandbox.ts`): Pyodide
   under Node's permission model with no file, network, child process or environment access and
   JavaScript code generation disabled; its only way out is a blocking call to the headless editor,
   which runs it as the tool of that name. A script that fails is rolled back as a whole; a script
@@ -352,7 +352,7 @@ README has the API. It reaches a design three ways, with the same calls:
 
 **Live mode.** Edits made through `run_python` (and `apply_changes` with `live`) are sent a few
 items at a time, each step its own op with the peer's cursor and selection on what it just drew
-(`DocSession.commit` in `web/mcp/session.ts`), so people in the document watch the design being
+(`DocSession.commit` in `web/domains/pcb/mcp/session.ts`), so people in the document watch the design being
 drawn. A change takes about two seconds however large it is; `live: false` applies it at once.
 
 **Parts.** `parts.from_datasheet` reads a datasheet's pin table and package dimension table and
@@ -424,10 +424,10 @@ How it is built:
   consent page naming the app; **Let it make changes** can be unticked for a read-only connection. Tokens are
   opaque, stored only as SHA-256 hashes, access tokens last an hour. `/connect` lists a person's connected apps
   and disconnects them. Cookies are never accepted on `/mcp`.
-- **Tools** (`src/mcp.rs`, `web/mcp/`): the design tools are the shared ones (`web/ai/tools.json`,
+- **Tools** (`src/mcp.rs`, `web/domains/pcb/mcp/`): the design tools are the shared ones (`web/domains/pcb/ai/tools.json`,
   `design.ts`, `proposals.ts`, `library.ts`), not a second implementation. They are written against the web
   editor's document model, so the server runs them in a **headless editor**: a Node process per signed-in
-  person (`web/mcp/host.ts`, bundled to `static/dist/mcp-host.js` and embedded in the binary) that joins the
+  person (`web/domains/pcb/mcp/host.ts`, bundled to `static/dist/mcp-host.js` and embedded in the binary) that joins the
   document over the ordinary collaboration WebSocket as a peer named "Name (App)", keeps it in step with
   everyone's edits, and sends its own as ordinary ops. Nothing about a change made this way is special to the
   desktop app or the web editor.
@@ -439,9 +439,9 @@ How it is built:
   `ai` note, so every client that draws a person's presence draws the assistant's: the browser outlines each
   item and shows the note, the desktop editors show the cursor, name, outline and net lines. The mark is taken
   off after its time (and an edit's mark after a minute). The host also keeps the presence the server sends
-  it, which is what `get_selection` and `render_view view_of` read (`web/mcp/teammate.ts`).
+  it, which is what `get_selection` and `render_view view_of` read (`web/domains/pcb/mcp/teammate.ts`).
 - **Pictures**: `render_view` draws the sheet or board from the editor's own geometry as SVG with stroke-font
-  text (`web/mcp/picture.ts`) and the server rasterises it (resvg), so the model can look at what it changed.
+  text (`web/domains/pcb/mcp/picture.ts`) and the server rasterises it (resvg), so the model can look at what it changed.
 
 | Tool | |
 |---|---|
@@ -606,7 +606,7 @@ would bounce (no outline, zones without a fill, BOM lines without a part number)
 layers and options be changed before the download. The same four menu entries (Gerbers, Drill
 Files, Component Placement, Bill of Materials) open it on their kind of file.
 
-The writers are `server/web/fab` (`prims.ts` plot primitives, `model.ts` pads, vias, tracks and
+The writers are `server/web/domains/pcb/fab` (`prims.ts` plot primitives, `model.ts` pads, vias, tracks and
 zones read from the board, `plot.ts` pcbnew's layer plotting order and rules, `gerber.ts`,
 `drill.ts`, `parts.ts` placement and BOM, `presets.ts`, `zip.ts`), built into
 `static/dist/fab.js` and loaded on first use. They are also `window.KiCadFab` for plugins and
@@ -640,7 +640,7 @@ the fonts a board names must be installed for kicad-cli (`fonts-ubuntu`, `fonts-
 
 ## Board autorouter
 
-`web/router/` (bundled to `static/dist/autoroute.js`) is the web editor's **Route ▸ Autoroute…**. It only runs when
+`web/domains/pcb/router/` (bundled to `static/dist/autoroute.js`) is the web editor's **Route ▸ Autoroute…**. It only runs when
 someone asks for it, never moves or removes what is on the board, and commits its tracks and vias as ordinary
 edits: one undo step, sent to everyone in the session.
 
@@ -653,7 +653,7 @@ edits: one undo step, sent to everyone in the session.
 - **Heuristics**: grid aligned to the pads, shortest connections first, rip-up and retry, whole-board retries with
   the failed connections first, joining a net's own track mid-way, plated holes as free layer changes, short
   via drops into the net's copper zone.
-- **Weights**: `web/router/weights.ts` holds the cost weights and the list of boards they were fitted on.
+- **Weights**: `web/domains/pcb/router/weights.ts` holds the cost weights and the list of boards they were fitted on.
   `node scripts/router-train.mjs boards.json --write` refits them from hand-routed boards;
   `node scripts/router-bench.mjs board.kicad_pcb…` strips boards and routes them again as a benchmark.
 - Tests: `node static/tests/autoroute.test.js`; two browsers in one board: `node scripts/autoroute-ui.mjs`.
@@ -685,7 +685,7 @@ Once every connection has been tried, a few passes work on the finished board (a
   apart, each led straight off its pad and turned in to its partner. A pair stays on one layer and nothing tees
   into it. When the geometry does not allow it (a part right in front of the pads, pads on different layers) the
   two nets are routed singly and `result.pairs[]` says why.
-- **Impedance** (`impedance`, `netOpts[net].impedance`): `web/router/impedance.ts` reads the board's physical
+- **Impedance** (`impedance`, `netOpts[net].impedance`): `web/domains/pcb/router/impedance.ts` reads the board's physical
   stackup (or assumes the usual build for the layer count) and computes the track width, and for pairs the gap,
   that present the target: 90 Ω for USB pairs, 100 Ω for HDMI, Ethernet, LVDS and MIPI pairs, 50 Ω for nets named
   as antenna or RF feeds, or whatever a plan asks for. Microstrip (Hammerstad, Wheeler) on outer layers, IPC-2141
@@ -725,7 +725,7 @@ Once every connection has been tried, a few passes work on the finished board (a
 - **Keepouts**: KiCad rule areas on the board are honoured (tracks, vias, and the band a track's half width reaches
   into); `keepouts` adds areas for one run and `netOpts[net].avoid` keeps one net out of an area.
 - From Python: `board.route(kinds=..., separate=..., fence=...)` and `board.keepout(box, ...)`; over MCP the
-  `autoroute` edit takes `separate`, `fence` and `net_options.<net>.kind`. The design guide (`web/mcp/guide.md`,
+  `autoroute` edit takes `separate`, `fence` and `net_options.<net>.kind`. The design guide (`web/domains/pcb/mcp/guide.md`,
   "Keeping signals apart") tells the model how to place by domain and when to use each.
 
 ### Planning and judging from outside
