@@ -49,8 +49,8 @@ function footage(name, { from, to, show, captions, split, cutIn, cutOut, chat, t
 }
 
 const S = state.schematic, AI = state.ai, R = state.route, H = state.history;
-const COL = { ben: '#2a9d63', chloe: '#9a63d1', dev: '#1f9fb8', ada: '#d9822b' };
-const NAME = { ben: 'Ben', chloe: 'Chloé', dev: 'Dev' };
+const COL = { ben: '#2a9d63', maya: '#9a63d1', dev: '#1f9fb8', ada: '#d9822b' };
+const NAME = { ben: 'Ben', maya: 'Maya', dev: 'Dev' };
 const BOARD_ZOOM = { s: 1.0, x: 0.5, y: 0.5 };
 const beat = (name, opts) => fs.existsSync(path.join(OUT, name, 'frames.json')) && footage(name, opts);
 
@@ -61,7 +61,7 @@ const cut = (name, from, len, opts = {}) => { const t = take(name); from = Math.
 const beatAt = (name, from, len, captions) => fs.existsSync(path.join(OUT, name, 'frames.json')) && cut(name, from, len, { captions });
 // Straight into the schematic: Ada starts alone, and each time someone joins, the view closes in on their cursor.
 {
-  const follows = ['ben', 'chloe', 'dev'].filter((w) => S.follow && S.follow[w] && S.follow[w].length)
+  const follows = ['ben', 'maya', 'dev'].filter((w) => S.follow && S.follow[w] && S.follow[w].length)
     .map((w) => { const tr = S.follow[w].filter((q) => q[0] <= S.follow[w][0][0] + 3); const mx = tr.reduce((s2, q) => s2 + q[1], 0) / tr.length, my = tr.reduce((s2, q) => s2 + q[2], 0) / tr.length;
       // a slow push-in towards where the newcomer works: one fixed point, no following
       return { who: w, t0: S.follow[w][0][0], len: 4.2, in: 1.6, out: 1.6, s: 1.2, sx: 1, track: [[0, mx, my]] }; });
@@ -90,13 +90,13 @@ const beatAt = (name, from, len, captions) => fs.existsSync(path.join(OUT, name,
 }
 beatAt('history', 0, state.history.length, ['History']);
 if (state.parts) { const P = state.parts, from = Math.max(0, (P.marks.search || 0) - 1.5); beatAt('parts', from, P.length - from, ['LCSC, Mouser and DigiKey parts']); }
-beatAt('plugins', 0.5, Math.min(10, state.plugins.length - 0.5), ['Plugins']);
+beatAt('plugins', 0.5, state.plugins.length - 0.5, ['Plugins']);
 if (state.websim) beatAt('websim', Math.max(0, state.websim.marks.ran - 4), state.websim.length - Math.max(0, state.websim.marks.ran - 4), ['SPICE simulation']);
 if (state.drc) beatAt('drc', 0, state.drc.length, ['Design rules check']);
-beat('github', { show: 7, captions: ['GitHub sync'] });
+beat('github', { show: 12, captions: ['GitHub sync'] });
 beatAt('fab', 0, state.fab.length, ['Fabrication outputs']);
 beatAt('viewer3d', state.viewer3d.marks.loaded - 0.2, state.viewer3d.length - state.viewer3d.marks.loaded + 0.2, ['3D viewer']);
-add({ kind: 'end', length: 4.5, bg: '', title: 'Junction', sub: '', links: ['junctioneda.com'] });
+add({ kind: 'end', length: 4.5, bg: '', title: 'Junction', sub: 'Real-time collaborative KiCAD', links: ['junctioneda.com'] });
 
 // On the beat: every cut lands on a beat of the music (a strong one when one is near), by stretching or squeezing
 // the scene before it a little; a join's zoom starts on a beat too.
@@ -108,8 +108,9 @@ const BARS = (sc) => {
   const cap = (sc.captions[0] || {}).text || '';
   if (sc.kind === 'end') return 0;
   if (sc.name === 'schematic') return 8;
-  if (sc.name === 'build') return /Update PCB|Edge/.test(sc.captions.map((c) => c.text).join()) ? 2 : /^Routing$/.test(cap) ? 3 : /Blocks onto/.test(cap) || /Zone/.test(cap) ? 1 : 2;
-  if (sc.name === 'ai' || sc.name === 'parts' || sc.name === 'github') return 3;
+  if (sc.name === 'build') return /Update PCB|Edge/.test(sc.captions.map((c) => c.text).join()) ? 2 : /^Routing$/.test(cap) ? 3 : /Placement/.test(cap) ? 4 : /Inside|inside/.test(cap) ? 3 : /Blocks onto/.test(cap) ? 2 : 1;
+  if (sc.name === 'github') return 5;
+  if (sc.name === 'ai' || sc.name === 'parts' || sc.name === 'plugins') return 3;
   if (sc.name === 'history' || sc.name === 'fab') return 1;
   return 2;
 };
@@ -198,11 +199,11 @@ const mp4 = path.join(OUT, `${tag}.mp4`);
 if (stills) {
   for (const s of scenes) for (const k of [0.3, 0.75]) { await page.evaluate((t) => window.seek(t), s.start + s.length * k); await page.screenshot({ path: path.join(OUT, `still-${String(scenes.indexOf(s)).padStart(2, '0')}-${k}.jpg`), type: 'jpeg', quality: 80 }); }
 } else {
-  const ff = spawn('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-', '-c:v', 'libx264', '-preset', process.argv.includes('--final') ? 'slow' : 'veryfast', '-crf', '24', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4], { stdio: ['pipe', 'inherit', 'inherit'] });
+  const ff = spawn('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-', '-c:v', 'libx264', '-preset', process.argv.includes('--final') ? 'slow' : 'veryfast', '-crf', process.argv.includes('--final') ? '16' : '24', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4], { stdio: ['pipe', 'inherit', 'inherit'] });
   const total = Math.round(timeline.length * FPS);
   for (let i = 0; i < total; i++) {
     await page.evaluate((t) => window.seek(t), i / FPS);
-    const buf = await page.screenshot({ type: 'jpeg', quality: 95 });
+    const buf = await page.screenshot({ type: 'jpeg', quality: process.argv.includes('--final') ? 100 : 95 });
     if (!ff.stdin.write(buf)) await new Promise((r) => ff.stdin.once('drain', r));
     if (i % 300 === 0) console.log(`  frame ${i} of ${total}`);
   }
@@ -212,7 +213,7 @@ if (stills) {
     const silent = mp4.replace(/\.mp4$/, '.video.mp4'); fs.renameSync(mp4, silent);
     const L = timeline.length, fade = 2.5;
     execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', silent, '-ss', String(music.offset), '-i', music.file, '-map', '0:v', '-map', '1:a', '-c:v', 'copy',
-      '-af', `afade=t=in:st=0:d=0.4,afade=t=out:st=${(L - fade).toFixed(2)}:d=${fade},volume=0.9`, '-c:a', 'aac', '-b:a', '192k', '-t', String(L), '-movflags', '+faststart', mp4]);
+      '-af', `afade=t=in:st=0:d=0.4,afade=t=out:st=${(L - fade).toFixed(2)}:d=${fade},volume=0.9`, '-c:a', 'aac', '-b:a', '256k', '-t', String(L), '-movflags', '+faststart', mp4]);
     fs.rmSync(silent);
   }
   console.log(mp4, (fs.statSync(mp4).size / 1e6).toFixed(1), 'MB');
