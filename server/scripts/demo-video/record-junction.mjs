@@ -344,11 +344,12 @@ await scene('place', async (dir) => {
   const parking = (refs) => { const c = centroid(refs); const side = c[0] < bx ? -1 : 1; return [side < 0 ? ob[0] - 16 : ob[2] + 16 + (c[0] > bx + 6 ? 18 : 0), Math.max(ob[1] + 6, Math.min(ob[3] - 6, by + (c[1] - by) * 1.05))]; };
   // a person's selection on the board (ids), read from their page
   const selected = (page) => page.evaluate(() => { const E = window.CollabEditor; const out = []; for (const id of E.selection || []) { const it = E.kdoc.items.get(id); if (it && it.kind === 'footprint') out.push(it.ref); } return out; });
+  const PARK = { ada: [[ob[0] - 48, ob[1] - 4]], ben: [[ob[0] - 48, ob[1] + 22], [ob[0] - 48, ob[1] + 36]], chloe: [[ob[2] + 8, ob[1] - 4]], dev: [[ob[2] + 8, ob[1] + 14], [ob[2] + 40, ob[1] + 14]] };
   async function* glideOn(page, w, to, frames, posOf = pos) { const from = posOf[w]; for (let f = 1; f <= frames; f++) { const k = ease(f / frames); const p = [from[0] + (to[0] - from[0]) * k, from[1] + (to[1] - from[1]) * k]; await page.mouse.move(p[0], p[1]); posOf[w] = p; yield; } }
   async function* takeBlocks(w, groups, wait) {
     for (let i = 0; i < wait; i++) yield;
     const pg = pages[w], sch = schs[w], sm = smaps[w];
-    for (const names of groups) {
+    for (const [gi, names] of groups.entries()) {
       const boxes = names.map(blockOf).filter(Boolean).map((b) => b.box); if (!boxes.length) continue;
       const box = [Math.min(...boxes.map((b) => b[0])) - 2, Math.min(...boxes.map((b) => b[1])) - 2, Math.max(...boxes.map((b) => b[2])) + 2, Math.max(...boxes.map((b) => b[3])) + 2];
       const refs = FP.filter((x) => names.includes(x.block)).map((x) => x.ref); if (!refs.length) continue;
@@ -370,10 +371,9 @@ await scene('place', async (dir) => {
       const mp = await mapOf(pg); const live = await pg.evaluate((r) => window.__demo.at(r), refs);
       yield* glideOn(pg, w, mp.to(live), 10);
       await pg.keyboard.press('p'); yield; yield;
-      // the pack sits at the corner of where the parts were; carry it so that its middle lands on the parking spot
-      const packed = await pg.evaluate((r) => window.__demo.at(r), refs) || live; const park = parking(refs);
-      const cur = pos[w], aim = mp.to([park[0] - packed[0], park[1] - packed[1]]), zero = mp.to([0, 0]);
-      yield* glideOn(pg, w, [cur[0] + aim[0] - zero[0], cur[1] + aim[1] - zero[1]], 22);
+      // the carry puts the pack's first part where the click is: each person has their own spot beside the board
+      const park = PARK[w][Math.min(gi, PARK[w].length - 1)];
+      yield* glideOn(pg, w, mp.to(park), 22);
       await pg.mouse.down(); await pg.mouse.up(); yield;
       await pg.keyboard.press('Escape'); yield;
     }
@@ -396,7 +396,7 @@ await scene('place', async (dir) => {
     const pg = pages[w], mp = maps[w];
     const refs = FP.filter((x) => mine[w].includes(x.block)).sort((p, q) => (q.node && /Connector|RP2040|QFN/.test(JSON.stringify(q.node[1])) ? 1 : 0) - (p.node && /Connector|RP2040|QFN/.test(JSON.stringify(p.node[1])) ? 1 : 0));
     for (const part of refs) {
-      const from = await pg.evaluate((r) => window.__demo.at([r]), [part.ref]); if (!from) continue;
+      const from = await pg.evaluate((r) => window.__demo.at([r]), part.ref); if (!from) continue;
       yield* glideOn(pg, w, mp.to(from), 8);
       const frames = 12; let last = from;
       for (let f = 1; f <= frames; f++) {

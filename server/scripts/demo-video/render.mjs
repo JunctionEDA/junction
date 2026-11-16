@@ -94,19 +94,19 @@ cut('route', 0, R.marks.routed, { cutOut: true, zoom: BOARD, captions: ['Routing
 cut('route', R.marks.routed, Math.min(3, R.length - R.marks.routed), { zoom: BOARD, cutIn: true, captions: ['Zone fill'] });
 // the rest: short cuts
 {
-  const from = AI.marks.ask - 0.4, len = Math.min(AI.length, AI.marks.accept + 1.4) - from, at = (m) => AI.marks[m] - from;
+  const from = Math.max(0, AI.marks.ask - 1.2), len = Math.min(AI.length, AI.marks.accept + 3) - from, at = (m) => AI.marks[m] - from;
   cut('ai', from, len, { chat: { x: 1010, y: 560, head: 'AI CHAT', at: 0, until: at('card') - 0.2,
     lines: [{ who: 'Ada', text: 'Can you add the 12 MHz crystal circuit from the RP2040 design guide?', at: at('ask'), typing: 1.4 },
             { who: 'Claude', ai: true, text: 'Here is where it goes. I\'ll propose it for you to check.', at: at('highlight') + 0.3, typing: 0.9 }] },
     captions: ['AI assistant over MCP'] });
 }
-beatAt('history', Math.max(0, (state.history.length || 4) / 2 - 1.5), 3, ['History']);
-beatAt('parts', Math.max(0, (state.parts.marks.search || 0) - 1), 3.5, ['LCSC, Mouser and DigiKey parts']);
-beatAt('plugins', Math.max(0, (state.plugins.length || 4) / 2 - 1.5), 3, ['Plugins']);
-if (state.websim) beatAt('websim', Math.max(0, state.websim.marks.ran - 0.8), 4, ['SPICE simulation']);
-beat('github', { show: 4.5, captions: ['GitHub sync'] });
-beatAt('fab', Math.max(0, (state.fab.length || 3) / 2 - 1.5), 3, ['Fabrication outputs']);
-beatAt('viewer3d', state.viewer3d.marks.loaded - 0.2, 4.5, ['3D viewer']);
+beatAt('history', 0, state.history.length, ['History']);
+beatAt('parts', Math.max(0, (state.parts.marks.search || 0) - 1.5), 8, ['LCSC, Mouser and DigiKey parts']);
+beatAt('plugins', 0.5, 8, ['Plugins']);
+if (state.websim) beatAt('websim', Math.max(0, state.websim.marks.ran - 4), state.websim.length - Math.max(0, state.websim.marks.ran - 4), ['SPICE simulation']);
+beat('github', { show: 7, captions: ['GitHub sync'] });
+beatAt('fab', 0, state.fab.length, ['Fabrication outputs']);
+beatAt('viewer3d', state.viewer3d.marks.loaded - 0.2, state.viewer3d.length - state.viewer3d.marks.loaded + 0.2, ['3D viewer']);
 add({ kind: 'end', length: 3.4, bg: '', title: 'Junction', sub: '', links: ['kicad.notaroomba.dev'] });
 const timeline = { length: +at.toFixed(3), fps: FPS, icon: pathToFileURL(path.join(here, '..', '..', 'static', 'icon.svg')).href, scenes };
 fs.writeFileSync(path.join(OUT, 'timeline.json'), JSON.stringify({ ...timeline, scenes: scenes.map((s) => ({ ...s, windows: s.windows && s.windows.map((w) => ({ ...w, frames: w.frames.length })) })) }, null, 1));
@@ -127,7 +127,7 @@ const mp4 = path.join(OUT, SOLO ? 'junction-demo-solo.mp4' : 'junction-demo.mp4'
 if (stills) {
   for (const s of scenes) for (const k of [0.3, 0.75]) { await page.evaluate((t) => window.seek(t), s.start + s.length * k); await page.screenshot({ path: path.join(OUT, `still-${String(scenes.indexOf(s)).padStart(2, '0')}-${k}.jpg`), type: 'jpeg', quality: 80 }); }
 } else {
-  const ff = spawn('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-', '-c:v', 'libx264', '-preset', 'slow', '-crf', '24', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4], { stdio: ['pipe', 'inherit', 'inherit'] });
+  const ff = spawn('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-', '-c:v', 'libx264', '-preset', process.argv.includes('--final') ? 'slow' : 'veryfast', '-crf', '24', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4], { stdio: ['pipe', 'inherit', 'inherit'] });
   const total = Math.round(timeline.length * FPS);
   for (let i = 0; i < total; i++) {
     await page.evaluate((t) => window.seek(t), i / FPS);
