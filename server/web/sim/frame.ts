@@ -387,6 +387,7 @@ export async function runSimulation(reuse = false): Promise<void> {
     void messageBox("You must run a TRAN simulation first; its results will be used for the fast Fourier transform."); return;
   }
   S.running = true; renderToolbar();
+  let merged: RawPlot | null = null, listing = false, stopped = false; const multiTraces: PlotTrace[] = [];
   try {
     // StartSimulation: the netlist of the schematic as it is now (a tuner's rerun keeps the loaded circuit)
     if (!reuse || !S.netlist) await loadCircuit();
@@ -398,18 +399,24 @@ export async function runSimulation(reuse = false): Promise<void> {
       }
     }
     const sp = await session();
+    // Stop pressed while ngspice was starting, or before a run's commands were sent: that run is not started
+    let saidStopped = false;
+    const sayStopped = (): void => { if (!saidStopped) log("Simulation stopped.\n"); saidStopped = true; };
+    const stoppedHere = (k: number): boolean => { if (!S.stopping) return false; sayStopped(); stopped = k === 0; return true; };
     const multi = S.tuners.find((x) => x.multi);
     const steps = multi ? Math.max(2, multi.steps) : 1;
-    let merged: RawPlot | null = null, listing = false, stopped = false; const multiTraces: PlotTrace[] = [];
-    for (let k = 0; k < steps && !(k > 0 && S.stopping); k++) {
+    for (let k = 0; k < steps; k++) {
+      if (stoppedHere(k)) break;
       if (multi) multi.value = multi.min + ((multi.max - multi.min) * k) / (steps - 1);
       const cir = circuitFor(t);
       await stageIncludes(sp, cir);
       sp.write("/sim.cir", forWasmNgspice(cir.replace(/^(\s*\.include\s+")(?!\/)/gim, "$1/"), (w) => log(w + "\n")));
+      if (stoppedHere(k)) break;
       await sp.exec(["destroy all", "remcirc"]).catch(() => undefined);
+      if (stoppedHere(k)) break;
       const lines = [...COMPAT_COMMANDS[compatIndex()], "source /sim.cir", ...tunerCommands(), "run"];
       const r = await sp.exec(lines);
-      if (r.halted || S.stopping) log("Simulation stopped.\n");
+      if (r.halted || S.stopping) sayStopped();
       // ended with its worker: nothing of this run can be read
       if (sp.dead && (r.halted || S.stopping)) { stopped = true; break; }
       // SIMULATOR_FRAME::onSimFinished: every finished run clears the schematic's operating point; only an OP run's
@@ -486,7 +493,8 @@ function noPrompts(s: string): string { return s.replace(/^\s*ngspice \d+ -> ?$/
  *  ngspice gives way to the page while it runs (plugins/spice.ts); one that does not within a moment is ended with
  *  its worker, and the next run starts a new one. */
 function stopSimulation(): void {
-  if (!S.running || S.stopping) return;
+  if (!S.running) return;
+  // pressed again: the halt is sent again (a run that has not given way is still ended with its worker)
   S.stopping = true; setStatus("Stopping...");
   if (S.spice) S.spice.halt();
   renderToolbar();

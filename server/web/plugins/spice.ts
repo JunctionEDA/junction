@@ -96,27 +96,31 @@ export const open = (url: string): Promise<SpiceSession> => sessionCode().open(u
  *  (sharedspice.c's DELTATIME, with its text: "tran: 45.3%"); every 100 ms the run gives way so a halt can come in. */
 function workerMain(code: typeof sessionCode): void {
   const post = (m: unknown, t?: Transferable[]): void => (self as unknown as { postMessage(m: unknown, t?: Transferable[]): void }).postMessage(m, t || []);
-  let session: SpiceSession | null = null, halt = false, lastPost = 0, lastYield = Date.now();
+  // a halt names the last command list sent before it (`upTo`): that one and any earlier one still to run are halted,
+  // so a Stop that comes in while an earlier list is running, or before its list is reached, is not lost
+  let session: SpiceSession | null = null, haltUpTo = 0, current = 0, lastPost = 0, lastYield = Date.now();
+  const halted = (): boolean => current > 0 && current <= haltUpTo;
   const say = (analysis: string, permille: number): string =>
     permille < 0 || permille >= 1000 ? "--ready--" : permille === 0 ? analysis : analysis === "shooting" ? `${analysis}: ${permille}` : `${analysis}: ${(permille / 10).toFixed(1)}%`;
   const progress = async (analysis: string, permille: number): Promise<boolean> => {
     const now = Date.now();
     if (now - lastPost > 150 || permille === 0 || permille >= 1000) { lastPost = now; post({ kind: "progress", analysis, permille, text: say(analysis, permille) }); }
     if (now - lastYield > 100) { lastYield = now; await new Promise((go) => setTimeout(go, 0)); lastYield = Date.now(); }
-    return halt;
+    return halted();
   };
   let queue: Promise<unknown> = Promise.resolve();
   self.onmessage = (ev: MessageEvent) => {
-    const m = ev.data as { kind: string; id?: number; url?: string; commands?: string[]; path?: string; data?: Uint8Array | string };
-    if (m.kind === "halt") { halt = true; return; }
+    const m = ev.data as { kind: string; id?: number; upTo?: number; url?: string; commands?: string[]; path?: string; data?: Uint8Array | string };
+    if (m.kind === "halt") { haltUpTo = Math.max(haltUpTo, m.upTo || 0); return; }
     queue = queue.then(async () => {
       try {
         if (m.kind === "open") { session = await code().open(m.url || "", progress); post({ kind: "reply", id: m.id, version: session.version }); return; }
         if (!session) throw new Error("ngspice is not started");
         if (m.kind === "exec") {
-          halt = false; lastYield = Date.now();
-          const r = await session.exec(m.commands || []);
-          post({ kind: "reply", id: m.id, result: { ...r, halted: halt }, dead: session.dead }); halt = false;
+          current = m.id || 0; lastYield = Date.now();
+          const r = await session.exec(halted() ? [] : m.commands || []);
+          const was = halted(); current = 0;
+          post({ kind: "reply", id: m.id, result: { ...r, halted: was }, dead: session.dead });
         } else if (m.kind === "write") session.write(m.path || "", m.data || "");
         else if (m.kind === "remove") session.remove(m.path || "");
         else if (m.kind === "read") { const d = session.read(m.path || ""); const c = d ? new Uint8Array(d) : null; post({ kind: "reply", id: m.id, data: c }, c ? [c.buffer] : []); }
@@ -134,7 +138,9 @@ export async function openWorker(url: string, onProgress?: (p: Progress) => void
   const blob = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
   const worker = new Worker(blob, { type: "module", name: "ngspice" });
   URL.revokeObjectURL(blob);
-  let seq = 0, dead = false, killTimer = 0;
+  let seq = 0, dead = false, killTimer = 0, haltUpTo = 0;
+  /** the command lists sent and not answered yet */
+  const execs = new Set<number>();
   const waiting = new Map<number, { ok: (v: any) => void; fail: (e: Error) => void }>();
   const end = (why: string, halted: boolean): void => {
     if (dead) return;
@@ -161,20 +167,28 @@ export async function openWorker(url: string, onProgress?: (p: Progress) => void
   return {
     version, get dead() { return dead; },
     async exec(commands) {
-      const r = await ask({ kind: "exec", commands });
-      clearTimeout(killTimer);
-      if (r.dead) dead = true;
-      return r.result as SpiceResult;
+      if (dead) return { out: "", err: ["ngspice has stopped; start it again."] };
+      const id = seq + 1; execs.add(id);
+      try {
+        const r = await ask({ kind: "exec", commands });
+        if (r.dead) dead = true;
+        return r.result as SpiceResult;
+      } finally {
+        execs.delete(id);
+        // the halted lists have all given way: the worker is not ended
+        if (![...execs].some((x) => x <= haltUpTo)) { clearTimeout(killTimer); killTimer = 0; }
+      }
     },
     write(path, data) { tell({ kind: "write", path, data }); },
     remove(path) { tell({ kind: "remove", path }); },
     async read(path) { if (dead) return null; const r = await ask({ kind: "read", path }); return (r.data as Uint8Array) || null; },
     async list(dir) { if (dead) return []; const r = await ask({ kind: "list", path: dir }); return (r.names as string[]) || []; },
     halt(graceMs = 1500) {
-      if (dead || !waiting.size) return;
-      worker.postMessage({ kind: "halt" });
-      clearTimeout(killTimer);
-      killTimer = window.setTimeout(() => end("Simulation stopped.", true), graceMs);
+      if (dead) return;
+      haltUpTo = seq;
+      worker.postMessage({ kind: "halt", upTo: haltUpTo });
+      // the worker is ended only when a command list it is running or still has to run does not give way in time
+      if (execs.size && !killTimer) killTimer = window.setTimeout(() => end("Simulation stopped.", true), graceMs);
     },
     close() { end("ngspice was closed.", false); },
   };
