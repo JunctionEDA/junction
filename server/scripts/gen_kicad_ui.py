@@ -198,6 +198,14 @@ def collect_icons(names):
         entry = {}
         for theme in ("light", "dark"):
             p = os.path.join(ROOT, "resources", "bitmaps_png", "sources", theme, n + ".svg")
+            if not os.path.exists(p) and n.startswith("constraint_"):
+                # bitmap_dir_constraints (resources/bitmaps_png/CMakeLists.txt): sources/<theme>/constraints/<name>.svg,
+                # hyphens in the file name becoming underscores in BITMAPS::constraint_<name>
+                d = os.path.join(ROOT, "resources", "bitmaps_png", "sources", theme, "constraints")
+                for f in (os.listdir(d) if os.path.isdir(d) else []):
+                    if f.endswith(".svg") and "constraint_" + f[:-4].replace("-", "_") == n:
+                        p = os.path.join(d, f)
+                        break
             if os.path.exists(p):
                 vb, inner = clean_svg(p, f"k-{n}-{theme[0]}")
                 entry["vb"] = vb

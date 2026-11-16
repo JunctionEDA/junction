@@ -299,7 +299,8 @@ k-select.input { min-height: var(--h-md); height: auto; }
 .kd-title { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--paper);
             border-bottom: 1px solid var(--line); border-radius: var(--r-3) var(--r-3) 0 0; font-weight: 600;
             cursor: move; user-select: none; }
-.kd-title .kd-x { margin-left: auto; padding: 0 4px; color: var(--ink-2); font-size: 15px; line-height: 1; cursor: pointer; }
+.kd-title .kd-x { margin-left: auto; display: inline-flex; align-items: center; padding: 3px 4px; color: var(--ink-2); line-height: 1; cursor: pointer; }
+.kclose, .kmax { display: block; flex: none; pointer-events: none; }
 .kd-title .kd-x:hover { color: var(--ink); }
 .kd-body { padding: 10px 14px; overflow: auto; flex: 1 1 auto; min-height: 0; }
 /* wxRESIZE_BORDER's size grip: the dotted corner at the bottom right */

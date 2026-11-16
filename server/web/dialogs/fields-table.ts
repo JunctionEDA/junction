@@ -131,8 +131,8 @@ export function openFieldsTable(exportTab = false): void {
   const refreshGrid = () => {
     if (!gridHost) return;
     const cols: GridColumn<GRow>[] = preset.fields_ordered.filter((f) => f.show).map((f) => {
-      const sorted = (preset.sort_field || "Reference") === f.name ? (preset.sort_asc === false ? " ▾" : " ▴") : "";
-      const base = { key: f.name, label: f.label + sorted };
+      const sort: "asc" | "desc" | undefined = (preset.sort_field || "Reference") === f.name ? (preset.sort_asc === false ? "desc" : "asc") : undefined;
+      const base = { key: f.name, label: f.label, sort };
       if (ATTR_FIELDS[f.name]) return Object.assign(base, { type: "bool" as const, width: 90, ro: (r: GRow) => !r._g.rows.every((x) => x.editable) });
       if (f.name === QTY || f.name === ITEM_NO) return Object.assign(base, { type: "ro" as const, width: 46 });
       // DIALOG_SYMBOL_FIELDS_TABLE: the Footprint column's GRID_CELL_FPID_EDITOR (filters only when every symbol of the

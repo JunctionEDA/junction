@@ -2,7 +2,7 @@
 // (DIALOG_PIN_PROPERTIES), Symbol Properties (DIALOG_LIB_SYMBOL_PROPERTIES), New Symbol (DIALOG_LIB_NEW_SYMBOL),
 // Save As, New Library, Rename, Pin Table (DIALOG_LIB_EDIT_PIN_TABLE), the Symbol Checker report, the field / text /
 // shape properties and the import / export commands.
-import { bitmapButton } from "../components/kicon-dom";
+import { bitmapButton, setExpander, treeExpander } from "../components/kicon-dom";
 import * as M from "./model";
 import { KD, h, checkbox, select, textInput, form, promptText, confirmBox, download, popupMenu, type GridColumn, type GridApi, type NotebookApi } from "../dialogs/dom";
 import { messageBox, fieldsGrid, openFieldDialog, openTextDialog, swatch } from "../dialogs/sch-items";
@@ -107,9 +107,9 @@ export function pinDialog(se: SymbolEditor, p: M.PinInfo, existing: M.Node | nul
           // WX_COLLAPSIBLE_PANE "Alternate Pin Function Definitions": collapsed when the pin has none and it was not left open
           let open = alts.length > 0 || altPaneOpen;
           const pane = h("div", { id: "pin-alt-pane", style: "margin:6px 10px 0" });
-          const tw = h("span", { class: "tw", style: "display:inline-block;width:14px" });
+          const tw = treeExpander(true);
           const head = h("div", { id: "pin-alt-toggle", style: "cursor:pointer;user-select:none;display:flex;align-items:center;gap:2px;margin:8px 10px 0" }, tw, "Alternate Pin Function Definitions");
-          const sync = () => { tw.textContent = open ? "▾" : "▸"; pane.style.display = open ? "" : "none"; };
+          const sync = () => { setExpander(tw, open); pane.style.display = open ? "" : "none"; };
           head.addEventListener("click", () => { open = !open; altPaneOpen = open; sync(); if (open) altGrid && altGrid.refresh(); });
           body.append(head, pane); sync();
           altGrid = KD().grid(pane, [

@@ -41,6 +41,8 @@ const isBack = (layer: string): boolean => layer.startsWith("B.");   // IsBackLa
 
 /** lineTypeNames: the combo's order is LINE_STYLE's (SOLID = 0 …); DEFAULT shows as the first entry. */
 export const LINE_STYLES: [string, string][] = [["solid", "Solid"], ["dash", "Dashed"], ["dot", "Dotted"], ["dash_dot", "Dash-Dot"], ["dash_dot_dot", "Dash-Dot-Dot"]];
+/** lineTypeNames' bitmaps (stroke_params.cpp): the line style wxBitmapComboBoxes draw them before each name */
+export const LINE_STYLE_ICONS: Record<string, string> = { solid: "stroke_solid", dash: "stroke_dash", dot: "stroke_dot", dash_dot: "stroke_dashdot", dash_dot_dot: "stroke_dashdotdot" };
 
 export interface TableValues {
   cells: string[][]; layer: string; locked: boolean; external: boolean; header: boolean; borderWidth: number; borderStyle: string;
@@ -161,9 +163,9 @@ export function tableDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode | n
       const layer = selectField<string>(v0.layer, layerOptions(doc, v0.layer), { ro, key: "layer" });
       const locked = checkField(v0.locked, "Locked", { ro, key: "locked" });
       const bw = lenField(v0.borderWidth >= 0 ? v0.borderWidth : NaN, { ro: ro || !(v0.external || v0.header), key: "borderWidth", allowEmpty: true });
-      const bstyle = selectField<string>(v0.borderStyle, LINE_STYLES, { ro: ro || !(v0.external || v0.header), key: "borderStyle" });
+      const bstyle = selectField<string>(v0.borderStyle, LINE_STYLES, { ro: ro || !(v0.external || v0.header), key: "borderStyle", icons: LINE_STYLE_ICONS });
       const sw = lenField(v0.sepWidth >= 0 ? v0.sepWidth : NaN, { ro: ro || !(v0.rows || v0.cols), key: "sepWidth", allowEmpty: true });
-      const sstyle = selectField<string>(v0.sepStyle, LINE_STYLES, { ro: ro || !(v0.rows || v0.cols), key: "sepStyle" });
+      const sstyle = selectField<string>(v0.sepStyle, LINE_STYLES, { ro: ro || !(v0.rows || v0.cols), key: "sepStyle", icons: LINE_STYLE_ICONS });
       // onBorderChecked / onHeaderChecked: a stroke turned on with no width takes the layer class's line thickness
       const sync = (): void => {
         const b = !!f.external.get() || !!f.header.get(), s = !!f.rows.get() || !!f.cols.get();

@@ -5,6 +5,7 @@
 import { h } from "../dom";
 import { trapTab } from "../../tools/kicad-dialogs/shell";
 import { actionByName } from "../../menuspec";
+import { closeMark } from "../../components/kicon-dom";
 
 /** A footprint library of the frame's list: an official one or one of the project (fp-lib-table row or *.pretty folder). */
 export interface CvLib { name: string; pinned: boolean; source: "official" | "project"; descr: string; uri: string; docs?: { docId: string; path: string }[] }
@@ -57,7 +58,7 @@ function hook3D(): void {
   document.addEventListener("pointerdown", (ev) => { const w = ev.target instanceof Element ? ev.target.closest<HTMLElement>(".v3d-win") : null; if (w) raiseWindow(w); }, true);
 }
 export function cvWindow(o: { id: string; title: string; geomKey: string; width: number; height: number; cls?: string; onCloseBox(): void; offset?: number }): CvWindow {
-  const x = h("span", { class: "cv-x", title: "Close" }, "×");
+  const x = h("span", { class: "cv-x", title: "Close" }, closeMark());
   const titleText = h("span", null, o.title);
   const title = h("div", { class: "cv-title" }, titleText, x);
   const body = h("div", { style: "flex:1;display:flex;flex-direction:column;min-height:0" });

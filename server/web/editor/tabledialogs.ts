@@ -12,7 +12,7 @@
 // alone unless it is edited; bold / italic only change when toggled, an alignment only when one of its buttons is
 // down.  A cell whose values do not change keeps its bytes.  Each OK is one change of the table node.
 import { bitmapButton } from "../components/kicon-dom";
-import { LINE_STYLES, tableDialog } from "./pcbdialogs/table";
+import { LINE_STYLES, LINE_STYLE_ICONS, tableDialog } from "./pcbdialogs/table";
 import { fontField } from "../dialogs/font-picker";
 import { box, checkField, errorMessage, fmtLen, form, h, lenField, messageBox, openDialog, parseLen, selectField, unitLabel, unitName, type Field } from "./pcbdialogs/ui";
 import { syntaxHelp } from "./syntax-help";
@@ -164,7 +164,7 @@ function swatch(rgba: string, mixed: boolean, ro: boolean, key: string): { el: H
       cur = c.r === 0 && c.g === 0 && c.b === 0 && c.a === 0 ? "" : [Math.round(c.r * 255), Math.round(c.g * 255), Math.round(c.b * 255), Math.round(c.a * 1000) / 1000].join(" "); paint();
     }, null);
   });
-  const clear = h("button", { type: "button", class: "btn", title: "Default", disabled: ro, style: "height:22px;padding:0 6px;margin-left:4px", "data-k": key + "-default" }, "×");
+  const clear = h("button", { type: "button", class: "btn", title: "Default", disabled: ro, style: "height:22px;padding:0 6px;margin-left:4px", "data-k": key + "-default" }, "Default");
   clear.addEventListener("click", () => { cur = ""; paint(); });
   paint();
   return { el: h("span", { style: "position:relative;display:inline-flex;align-items:center" }, sw, clear), get: () => cur };
@@ -325,8 +325,8 @@ export function schTableDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode 
       }
       if (first) { const fc = first; setTimeout(() => fc.focus(), 0); }
       const ext = yes(kid(border, "external")), hdr = yes(kid(border, "header")), rws = yes(kid(seps, "rows")), cls = yes(kid(seps, "cols"));
-      const bw = lenField(bs.width, { ro, key: "borderWidth" }), bstyle = selectField<string>(bs.style, LINE_STYLES, { ro, key: "borderStyle" });
-      const sw = lenField(ss.width, { ro, key: "sepWidth" }), sstyle = selectField<string>(ss.style, LINE_STYLES, { ro, key: "sepStyle" });
+      const bw = lenField(bs.width, { ro, key: "borderWidth" }), bstyle = selectField<string>(bs.style, LINE_STYLES, { ro, key: "borderStyle", icons: LINE_STYLE_ICONS });
+      const sw = lenField(ss.width, { ro, key: "sepWidth" }), sstyle = selectField<string>(ss.style, LINE_STYLES, { ro, key: "sepStyle", icons: LINE_STYLE_ICONS });
       bcol = swatch(bs.color, false, ro, "borderColor"); scol = swatch(ss.color, false, ro, "sepColor");
       const sync = (): void => {
         const b = !!f.external.get() || !!f.header.get(), s = !!f.rows.get() || !!f.cols.get();

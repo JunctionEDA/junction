@@ -3,7 +3,7 @@
 // It works on a copy of the parent dialog's staged field rows (never the document) and hands back the complete,
 // merged row list (DIALOG_SYMBOL_PROPERTIES::OnEditSpiceModel), so the parent's OK still commits one change and
 // collaboration / undo see an ordinary field edit.  window.KiCadSimModel.open(rows, ctx, done).
-import { bitmapButton } from "../components/kicon-dom";
+import { bitmapButton, setExpander, treeExpander, closeMark } from "../components/kicon-dom";
 import { trapTab } from "../tools/kicad-dialogs/shell";
 import * as S from "./sim-model-logic";
 import { KD, h, popupMenu } from "./dom";
@@ -52,7 +52,7 @@ const TYPE_LABEL: Record<string, string> = { BOOL: "Bool", INT: "Int", FLOAT: "F
 /** A modal on top of the open dialog (the parent Symbol Properties stays open underneath, as a wxDialog child). */
 function stacked(title: string, width: number): { ov: HTMLElement; dlg: HTMLElement; body: HTMLElement; foot: HTMLElement; close(): void } {
   const body = h("div", { class: "kd-body", style: "max-height:calc(100vh - 140px);overflow:auto" }), foot = h("div", { class: "kd-foot" });
-  const x = h("span", { class: "kd-x", title: "Close (Esc)" }, "×");
+  const x = h("span", { class: "kd-x", title: "Close (Esc)" }, closeMark());
   const tt = h("div", { class: "kd-title" }, h("span", null, title), x);
   const dlg = h("div", { class: "kd-dialog", style: `width:${width}px;max-width:calc(100vw - 32px);min-width:0`, tabindex: -1 }, tt, body, foot);
   const ov = h("div", { class: "kd-overlay kd-prompt", style: "z-index:60" }, dlg);
@@ -107,7 +107,7 @@ function build<R extends S.FieldLike>(rows0: R[], ctx: SimModelCtx<R>, done: (ro
   // ---- the infobar (WX_INFOBAR with a close button)
   const infoText = h("span", { id: "kd-sim-info-text", style: "flex:1;white-space:pre-wrap" });
   const info = h("div", { id: "kd-sim-info", style: "display:none;align-items:flex-start;gap:8px;padding:6px 10px;margin:-4px -4px 8px;background:color-mix(in srgb, var(--warn) 18%, var(--panel));border:1px solid color-mix(in srgb, var(--warn) 45%, var(--line));border-radius:var(--r-1);font-size:12px;color:var(--ink)" },
-    infoText, h("span", { class: "kd-x", style: "cursor:pointer", title: "Close", onclick: () => { info.style.display = "none"; } }, "×"));
+    infoText, h("span", { class: "kd-x", style: "cursor:pointer", title: "Close", onclick: () => { info.style.display = "none"; } }, closeMark()));
   const showInfo = (msg: string) => { if (!msg) { info.style.display = "none"; return; } infoText.textContent = msg; info.style.display = "flex"; };
   d.body.append(info);
 
@@ -208,9 +208,9 @@ function build<R extends S.FieldLike>(rows0: R[], ctx: SimModelCtx<R>, done: (ro
     for (const i of principal) tb.append(paramRow(m, i, ""));
     for (const [cat, label] of CATEGORIES) {
       const list = groups.get(cat); if (!list) continue;
-      const tw = h("span", { style: "display:inline-block;width:12px" }, collapsed.has(cat) ? "▸" : "▾");
+      const tw = treeExpander(!collapsed.has(cat));
       const hr = h("tr", { class: "kd-sim-cat", "data-cat": cat, style: "cursor:pointer;background:var(--bench);font-weight:600" }, h("td", { colspan: 5 }, tw, label));
-      hr.addEventListener("click", () => { if (collapsed.has(cat)) collapsed.delete(cat); else collapsed.add(cat); tw.textContent = collapsed.has(cat) ? "▸" : "▾"; for (const r of Array.from(tb.querySelectorAll<HTMLElement>(`tr[data-in="${cat}"]`))) r.style.display = collapsed.has(cat) ? "none" : ""; });
+      hr.addEventListener("click", () => { if (collapsed.has(cat)) collapsed.delete(cat); else collapsed.add(cat); setExpander(tw, !collapsed.has(cat)); for (const r of Array.from(tb.querySelectorAll<HTMLElement>(`tr[data-in="${cat}"]`))) r.style.display = collapsed.has(cat) ? "none" : ""; });
       tb.append(hr);
       for (const i of list) { const r = paramRow(m, i, cat); if (collapsed.has(cat)) r.style.display = "none"; tb.append(r); }
     }

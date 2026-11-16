@@ -147,7 +147,7 @@ export function openFootprintFields(ctx: ToolCtx): void {
   const drawData = (): void => {
     const shown = preset.fields_ordered.filter((f) => f.show);
     const g = viewRows();
-    const cols: GridColumn[] = shown.map((f) => ({ key: f.name, label: f.label + (preset.sort_field === f.name ? (preset.sort_asc ? " ▴" : " ▾") : ""),
+    const cols: GridColumn[] = shown.map((f) => ({ key: f.name, label: f.label, sort: preset.sort_field === f.name ? (preset.sort_asc ? "asc" : "desc") : undefined,
       type: ATTR[f.name] ? "check" : f.name === "Footprint" || f.name === QTY || f.name === ITEM_NO ? "ro" : "text",
       readOnly: (row: Record<string, CellValue>) => f.name === "Reference" && ((row.__n as number) > 1) }));
     const rows: Record<string, CellValue>[] = g.map((b) => {

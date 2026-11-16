@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { dispatch, useApp, type PopoverState } from "../store";
 import { toast } from "../home/ui";
 import { cx } from "../util";
+import { CloseMark, KIcon } from "./Icon";
 
 export function Toast() {
   const toast = useApp((s) => s.toast);
@@ -25,9 +26,9 @@ export function Toast() {
     const t = setTimeout(() => setShow(false), toast.ms || 2200);
     return () => { clearTimeout(t); if (ro) ro.disconnect(); };
   }, [toast]);
-  const close = <button type="button" className="kinfobar-x" aria-label="Close" onClick={() => setShow(false)}><svg viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M2 2l6 6M8 2L2 8" stroke="currentColor" strokeWidth="1.4" /></svg></button>;
+  const close = <button type="button" className="kinfobar-x" aria-label="Close" onClick={() => setShow(false)}><CloseMark /></button>;
   const link = toast && toast.link ? <a href="#" className="kinfobar-link" onClick={(ev) => { ev.preventDefault(); setShow(false); toast.link!.run(); }}>{toast.link.text}</a> : null;
-  if (box) return <div id="toast" role="status" aria-live="polite" className={cx("kinfobar", show && "show")} style={box}>{toast ? toast.text : ""}{link}{close}</div>;
+  if (box) return <div id="toast" role="status" aria-live="polite" className={cx("kinfobar", show && "show")} style={box}><span className="kinfobar-ic" aria-hidden="true"><KIcon name="info" size={16} /></span>{toast ? toast.text : ""}{link}{close}</div>;
   // transform-[…] rather than -translate-x-1/2: Tailwind's translate-* utilities emit the separate `translate`
   // property, and app.html's centring for #toast (if ever re-added) uses `transform` — keep the one property.
   return <div id="toast" role="status" aria-live="polite" className={cx("fixed left-1/2 bottom-10 transform-[translateX(-50%)] bg-ink text-paper rounded-sm py-2 px-3.5 opacity-0 transition-opacity duration-200 ease-[ease] pointer-events-none z-100 show:opacity-100", show && "show")}>{toast ? toast.text : ""}</div>;

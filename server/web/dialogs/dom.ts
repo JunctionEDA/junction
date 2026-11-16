@@ -3,7 +3,7 @@
 import { trapTab } from "../tools/kicad-dialogs/shell";
 import "../components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 import { fitMenu } from "../menufit";
-import { kicadIcon } from "../components/kicon-dom";
+import { kicadIcon, menuArrow, menuCheck } from "../components/kicon-dom";
 import { menuKey } from "../keys";
 
 export interface DlgButton { label: string; fn?: () => void; primary?: boolean; isDefault?: boolean; close?: boolean; id?: string }
@@ -37,6 +37,8 @@ export interface TreebookApi { el: HTMLElement; select(label: string): void; cur
 export interface GridCellButton { icon(value: string): string; title(value: string): string; run(value: string, set: (v: string) => void, input?: HTMLInputElement): void }
 export interface GridIconCell { icon: string; title: string; run?(): void }
 export interface GridColumn<R> { key: string; label: string; type?: "text" | "bool" | "choice" | "ro" | "icon";
+  /** the header's sort arrow (wxGrid::SetSortingColumn) */
+  sort?: "asc" | "desc";
   /** an "icon" column's cell: a GRID_BITMAP_BUTTON_RENDERER bitmap that runs on a click, or nothing */
   icon?(row: R): GridIconCell | null; options?: (string | [string, string])[] | ((row: R) => (string | [string, string])[]); width?: number; list?: string; ro?(row: R): boolean; format?(v: unknown, row: R): string; title?(row: R): string;
   /** a text cell of this row gets a browse button (GRID_CELL_FPID_EDITOR, GRID_CELL_URL_EDITOR) */
@@ -186,7 +188,7 @@ export function popupMenu(x: number, y: number, items: PopItem[]): HTMLElement {
     for (const it of list) {
       if (it.sep) { m.append(h("div", { style: "height:1px;background:var(--line);margin:3px 0" })); continue; }
       const row = h("div", { class: "kd-pop-row", role: "menuitem", "aria-disabled": it.disabled ? "true" : undefined, style: `display:flex;gap:6px;align-items:center;padding:3px 12px 3px 6px;cursor:default;white-space:nowrap;${it.disabled ? "opacity:.45;" : ""}` },
-        h("span", { style: `${it.icon && it.iconW ? "" : "width:16px;"}display:inline-flex;flex:none;justify-content:center` }, it.check ? (it.checked ? "✓" : "") : it.icon ? kicadIcon(it.icon, it.iconW || 16, it.iconH || it.iconW || 16) as unknown as Node : ""), h("span", { style: "flex:1" }, it.label || ""), it.key ? h("span", { class: "kd-pop-key", style: "margin-left:24px;opacity:.7" }, menuKey(it.key)) : null, it.sub ? h("span", null, "▸") : null);
+        h("span", { style: `${it.icon && it.iconW ? "" : "width:16px;"}display:inline-flex;flex:none;justify-content:center` }, it.check ? menuCheck(!!it.checked) : it.icon ? kicadIcon(it.icon, it.iconW || 16, it.iconH || it.iconW || 16) as unknown as Node : ""), h("span", { style: "flex:1" }, it.label || ""), it.key ? h("span", { class: "kd-pop-key", style: "margin-left:24px;opacity:.7" }, menuKey(it.key)) : null, it.sub ? menuArrow() : null);
       if (it.title) row.title = it.title;
       row.addEventListener("pointerenter", () => { row.style.background = "var(--accent)"; row.style.color = "var(--on-accent)"; for (const o of Array.from(document.querySelectorAll(".kd-pop"))) if (Number((o as HTMLElement).dataset.depth) > depth) o.remove();
         if (it.sub && !it.disabled) { const r = row.getBoundingClientRect(), sub = build(it.sub, r.right - 2, r.top - 3, depth + 1); document.body.append(sub); fitMenu(sub, { row: r, parent: m.getBoundingClientRect(), overlap: 2 }); } });

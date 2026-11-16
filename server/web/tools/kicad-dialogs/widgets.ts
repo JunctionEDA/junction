@@ -4,7 +4,7 @@
 import type { GridApi, GridCellButton, GridColumn, GridOpts, NotebookApi, NotebookTab, TreebookApi, TreeSection } from "../../dialogs/dom";
 import { esc, isList, str } from "./sexpr";
 import { el } from "./shell";
-import { bitmapButton, kicadIcon, setKicadIcon } from "../../components/kicon-dom";
+import { bitmapButton, ensureIconCss, kicadIcon, setKicadIcon } from "../../components/kicon-dom";
 import { popupMenu } from "../../dialogs/dom";
 import "../../components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 
@@ -106,7 +106,7 @@ export function treebook(host: HTMLElement, sections: TreeSection[], opts?: { se
  * -> { el, rows, refresh(), selected(), select(i) }
  */
 export function grid<R>(host: HTMLElement, columns: GridColumn<R>[], rows: R[], optsIn?: GridOpts<R>): GridApi<R> {
-  ensureCss(); const opts = optsIn || {};
+  ensureCss(); ensureIconCss(); const opts = optsIn || {};
   const wrap = el("div", "kd-grid-wrap"), table = el("table", "kd-grid"); if (opts.height) wrap.style.maxHeight = wrap.style.height = typeof opts.height === "number" ? opts.height + "px" : opts.height;
   // the grid cursor's row, plus the rows a Shift- or Ctrl-click added (wxGrid::GetSelectedRows, wxGridSelectRows)
   let sel = -1; let multi = new Set<number>();
@@ -123,7 +123,7 @@ export function grid<R>(host: HTMLElement, columns: GridColumn<R>[], rows: R[], 
   function refresh(): void {
     const cols = api.columns;
     // a column with a browse button keeps its width (the grid scrolls sideways instead of squeezing the text under it)
-    table.innerHTML = `<thead${opts.noHeader ? ' style="display:none"' : ""}><tr>${cols.map((c) => `<th${c.width ? ` style="width:${c.width}px${c.button ? `;min-width:${c.width}px` : ""}"` : ""}>${esc(c.label)}</th>`).join("")}</tr></thead>`;
+    table.innerHTML = `<thead${opts.noHeader ? ' style="display:none"' : ""}><tr>${cols.map((c) => `<th${c.width ? ` style="width:${c.width}px${c.button ? `;min-width:${c.width}px` : ""}"` : ""}>${esc(c.label)}${c.sort ? `<span class="ksort${c.sort === "desc" ? " desc" : ""}" data-sort-ind="${c.sort}" aria-hidden="true"></span>` : ""}</th>`).join("")}</tr></thead>`;
     const tb = el("tbody");
     rows.forEach((r, i) => {
       const tr = el("tr"); if (i === sel || multi.has(i)) tr.classList.add("sel");

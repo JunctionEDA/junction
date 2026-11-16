@@ -12,7 +12,7 @@ import type { FetchedItem, LibItem, LibKind, LibraryEntry, LibrarySource, Source
 import { filterLabels, footprintPasses, type FpChooserFilters } from "./fpchoice";
 import "../components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 import { popupMenu, type PopItem } from "../dialogs/dom";
-import { bitmapButton } from "../components/kicon-dom";
+import { bitmapButton, ensureIconCss, CLOSE_MARK_SVG } from "../components/kicon-dom";
 import { loadPinnedLibs, savePinnedLibs } from "./pinned";
 
 export interface ChooserOptions {
@@ -174,13 +174,13 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
 
   return new Promise<Chosen | null>((resolve) => {
     const ov = document.createElement("div"); ov.className = "kd-overlay klib-overlay";
-    const dlg = document.createElement("div"); dlg.className = "kd-dialog klib-dialog"; dlg.setAttribute("role", "dialog"); dlg.dataset.kind = kind;
+    ensureIconCss(); const dlg = document.createElement("div"); dlg.className = "kd-dialog klib-dialog"; dlg.setAttribute("role", "dialog"); dlg.dataset.kind = kind;
     dlg.innerHTML = `
-      <div class="kd-title"><span class="klib-title"></span><span class="kd-x" title="Close (Esc)">×</span></div>
+      <div class="kd-title"><span class="klib-title"></span><span class="kd-x" title="Close (Esc)">${CLOSE_MARK_SVG}</span></div>
       <div class="klib-main">
         <div class="klib-left">
           <div class="klib-search"><div class="klib-filter"><svg class="klib-recent" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><title>Recent searches</title><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/></svg>
-            <input type="text" placeholder="Filter" spellcheck="false" autocomplete="off" aria-label="Filter"><span class="klib-clear" title="Clear filter">×</span></div><span class="klib-vsep"></span></div>
+            <input type="text" placeholder="Filter" spellcheck="false" autocomplete="off" aria-label="Filter"><span class="klib-clear" title="Clear filter">${CLOSE_MARK_SVG}</span></div><span class="klib-vsep"></span></div>
           ${labels.filters || labels.pins ? `<div class="klib-filters">${labels.filters ? `<label><input type="checkbox" class="klib-by-filters"${fpOn.filters ? " checked" : ""}> ${esc(labels.filters)}</label>` : ""}${labels.pins ? `<label><input type="checkbox" class="klib-by-pins"${fpOn.pins ? " checked" : ""}> ${esc(labels.pins)}</label>` : ""}</div>` : ""}
           <div class="klib-head"><span>Item</span><span>Description</span></div>
           <div class="klib-tree" tabindex="0"><div class="klib-rows"></div></div>
@@ -318,7 +318,7 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
       let html = "";
       for (let i = first; i < last; i++) {
         const r = rows[i], note = !r.item && r.depth === 1;
-        const tw = r.expandable ? (r.expanded ? "▼" : "▶") : "";
+        const tw = r.expandable ? `<span class="ktw${r.expanded ? "" : " shut"}" data-twist="" aria-hidden="true"></span>` : "";
         html += `<div class="klib-row${r.depth === 0 ? " lib" : ""}${note ? " note" : ""}${r.key === selKey ? " sel" : ""}" style="top:${i * ROW_H}px" data-i="${i}" title="${esc(r.item ? (r.item.library ? r.item.library + ":" : "") + r.item.name : r.label)}">`
           + `<span class="klib-item" style="padding-left:${4 + r.depth * 16}px"><span class="klib-tw">${tw}</span>${(r.depth === 0 || r.key.endsWith("/@loading")) && r.group.loading ? '<span class="klib-spin"></span>' : ""}${esc(r.label)}</span><span class="klib-desc">${esc(r.description)}</span></div>`;
       }
@@ -562,12 +562,12 @@ export function openChooser(kind: LibKind, ctx: SourceContext, opts: ChooserOpti
     rowsEl.addEventListener("mousedown", (ev) => {
       const el = (ev.target as HTMLElement).closest<HTMLElement>(".klib-row"); if (!el) return;
       const row = rows[+el.dataset.i!]; if (!row) return;
-      if ((ev.target as HTMLElement).classList.contains("klib-tw")) { select(row.key); toggle(row); ev.preventDefault(); return; }
+      if ((ev.target as HTMLElement).closest(".klib-tw")) { select(row.key); toggle(row); ev.preventDefault(); return; }
       select(row.key);
     });
     rowsEl.addEventListener("dblclick", (ev) => {
       const el = (ev.target as HTMLElement).closest<HTMLElement>(".klib-row"); if (!el) return;
-      const row = rows[+el.dataset.i!]; if (!row || (ev.target as HTMLElement).classList.contains("klib-tw")) return;
+      const row = rows[+el.dataset.i!]; if (!row || (ev.target as HTMLElement).closest(".klib-tw")) return;
       if (row.item) accept(); else toggle(row);
     });
     // LIB_TREE::onItemContextMenu: Pin Library / Unpin Library on a library node

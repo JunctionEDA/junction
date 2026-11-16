@@ -8,7 +8,7 @@
 import { KD, h, popupMenu, promptText, download, confirmBox, unsavedChangesBox, type PopItem } from "../dialogs/dom";
 import { E, api, isSch, requestRender, toast, toolCtx } from "../dialogs/editor";
 import { messageBox } from "../dialogs/sch-items";
-import { bitmapButton, bitmapToggle, kicadIcon } from "../components/kicon-dom";
+import { bitmapButton, bitmapToggle, kicadIcon, closeMark } from "../components/kicon-dom";
 import { ensureStyle, icon, meta, showMenu, closeMenus, type MenuEntry } from "../symedit/ui";
 import { menuKey } from "../keys";
 import { projectSpiceNetlist } from "../editor/export-netlist";
@@ -559,7 +559,7 @@ function renderAll(): void {
 function renderTabs(): void {
   els.tabs.innerHTML = "";
   S.tabs.forEach((t, i) => {
-    const x = h("span", { class: "x", title: "Close" }, "×");
+    const x = h("span", { class: "x", title: "Close" }, closeMark());
     x.addEventListener("click", (ev) => { ev.stopPropagation(); closeTab(i); });
     const tab = h("div", { class: "se-tab" + (i === S.cur ? " cur" : ""), "data-i": String(i), title: t.command }, `Analysis ${i + 1} - ${typeToName(tabType(t), true)}`, x);
     tab.addEventListener("click", () => { S.cur = i; renderAll(); });

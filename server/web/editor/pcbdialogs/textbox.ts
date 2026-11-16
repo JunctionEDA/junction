@@ -11,6 +11,7 @@ import { faceOfFont, fontField, setFaceOfFont } from "../../dialogs/font-picker"
 import { boardXref } from "./xref";
 import { syntaxHelpLink } from "../syntax-help";
 import { checkField, errorMessage, fmtLenU, form, h, kiconToggle, lenField, numField, openDialog, selectField, unitLabel, type Field } from "./ui";
+import { LINE_STYLE_ICONS } from "./table";
 
 const isList = Array.isArray;
 const K = (): KiCadCanvasApi => KiCadCanvas;
@@ -189,7 +190,7 @@ export function textBoxDialog(ctx: ToolCtx, item: KItem, create?: (node: SNode |
       const onTextSize = (): void => { if (auto.get()) thick.set(Math.round(tw.get() * NM / 8) / NM); };
       tw.input.addEventListener("input", onTextSize); tw.input.addEventListener("change", onTextSize);
       const bw = reg("borderWidth", lenField(v0.borderWidth, { ro: ro || !v0.border, key: "borderWidth", allowEmpty: true }));
-      const bs = reg("borderStyle", selectField<string>(v0.borderStyle, BORDER_STYLES, { ro: ro || !v0.border, key: "borderStyle" }));
+      const bs = reg("borderStyle", selectField<string>(v0.borderStyle, BORDER_STYLES, { ro: ro || !v0.border, key: "borderStyle", icons: LINE_STYLE_ICONS }));
       const border = reg("border", checkField(v0.border, "Border", { ro, key: "border",
         onChange: (on) => {   // onBorderChecked: a border with no width takes the layer class's line thickness
           if (on && !(bw.get() > 0)) { const PTx = window as unknown as { PcbTools?: { gfxWidth?(l: string): number } }; const lw = PTx.PcbTools && PTx.PcbTools.gfxWidth ? PTx.PcbTools.gfxWidth(layer.get()) : 0.1; bw.set(lw); }

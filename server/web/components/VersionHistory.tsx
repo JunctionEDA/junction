@@ -6,6 +6,7 @@ import type { FormEvent, ReactNode } from "react";
 import { dispatch, useApp } from "../store";
 import type { BranchInfo, HistoryAt, HistoryView, VersionDialog, VersionsCmd } from "../store";
 import { ago, cx } from "../util";
+import { CloseMark } from "../components/Icon";
 
 const run = (cmd: VersionsCmd): void => dispatch({ type: "versions", ...cmd });
 const close = (): void => run({ cmd: "dialog", dialog: null });
@@ -147,7 +148,7 @@ function Modal({ title, children, foot, onSubmit, width }: { title: string; chil
   return (
     <div className="kd-overlay" data-version-dialog onPointerDown={(ev) => { if (ev.target === ev.currentTarget) close(); }}>
       <form className="kd-dialog" ref={box} role="dialog" aria-modal="true" aria-label={title} style={{ width: width || 440 }} onSubmit={submit}>
-        <div className="kd-title">{title}<span className="kd-x" role="button" aria-label="Close" onClick={close}>×</span></div>
+        <div className="kd-title">{title}<span className="kd-x" role="button" aria-label="Close" onClick={close}><CloseMark /></span></div>
         <div className="kd-body flex flex-col gap-2.5 text-sm">{children}</div>
         <div className="kd-foot">{foot}</div>
       </form>

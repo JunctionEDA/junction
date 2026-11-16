@@ -10,6 +10,7 @@ import { box, checkField, form, h, coordField, lenField, notebook, openDialog, s
 import type { DlgShape, DlgType, PadModel, padModel as PadModelApi } from "../../canvas/pad-model";
 import { popupMenu } from "../../dialogs/dom";
 import { fitMenu } from "../../menufit";
+import { comboArrow } from "../../components/kicon-dom";
 
 const PM = (): typeof PadModelApi => (KiCadCanvas as unknown as { padModel: typeof PadModelApi }).padModel;
 const K = (): KiCadCanvasApi => KiCadCanvas;
@@ -117,7 +118,7 @@ export function padPropertiesDialog(ctx: ToolCtx, fpItem: KItem, index: number):
       const sx = lenField(m.w, { ro, key: "sizeX" }), sy = lenField(m.h, { ro, key: "sizeY" });
       // m_cb_padrotation: an editable combo box with the 0 / 90 / -90 / 180 presets
       const angle = h("input", { type: "text", value: f6(m.angle), disabled: ro, "data-k": "angle", style: "width:100px" });
-      const angles = h("button", { type: "button", class: "btn pp-combo", disabled: ro, "data-k": "anglePresets", title: "Preset angles" }, "▾");
+      const angles = h("button", { type: "button", class: "btn pp-combo", disabled: ro, "data-k": "anglePresets", title: "Preset angles" }, comboArrow());
       angles.addEventListener("click", () => {
         const r = angle.getBoundingClientRect();
         const menu = popupMenu(r.left, r.bottom, ["0", "90", "-90", "180"].map((a) => ({ label: a, run: () => { angle.value = a; angle.dispatchEvent(new Event("change", { bubbles: true })); } })));

@@ -8,6 +8,7 @@
 // The element behaves like the <select> it replaces: `value`, `disabled`, and a "change" event.
 
 import { h } from "./dom";
+import { comboArrow } from "../components/kicon-dom";
 
 export const KICAD_FONT = "KiCad Font";
 
@@ -105,7 +106,7 @@ export function fontPicker(doc: { items: Map<unknown, { node: unknown }> } | nul
   const labelOf = (v: string): string => { const x = extra.find((e) => e[0] === v); return x ? x[1] : v === kicadValue || v === KICAD_FONT ? KICAD_FONT : v; };
   const text = h("span", { class: "kd-font-name" }, labelOf(current));
   const el = h("div", { class: "kd-font", id: o.id, style: o.style, role: "combobox", tabindex: disabled ? -1 : 0, "aria-haspopup": "listbox", "aria-expanded": "false", "aria-disabled": disabled ? "true" : undefined, "data-k": o.key },
-    text, h("span", { class: "kd-font-chev", "aria-hidden": "true" }, "▾")) as FontPickerEl;
+    text, h("span", { class: "kd-font-chev", "aria-hidden": "true" }, comboArrow())) as FontPickerEl;
   Object.defineProperty(el, "value", { get: () => current, set: (v: string) => { current = String(v); text.textContent = labelOf(current); } });
   Object.defineProperty(el, "disabled", { get: () => disabled, set: (d: boolean) => { disabled = !!d; el.tabIndex = disabled ? -1 : 0; if (disabled) el.setAttribute("aria-disabled", "true"); else el.removeAttribute("aria-disabled"); if (disabled) close(); } });
 

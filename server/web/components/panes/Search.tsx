@@ -10,7 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { SearchOpts, SearchResult, SearchRow, SelectionZoom } from "../../panels-api";
 import { useApp } from "../../store";
 import { cx } from "../../util";
-import { KIcon } from "../Icon";
+import { KIcon, SortArrow } from "../Icon";
 import { rowsAsText } from "../../editor/panels/search-model";
 import { ContextMenu, panels, pdispatch, useContextMenu, usePanels, type MenuItem } from "./widgets";
 
@@ -152,7 +152,7 @@ export function SearchPane() {
               <th key={c} data-search-col={i} aria-sort={sort.col === i ? (sort.asc ? "ascending" : "descending") : undefined}
                 className="sticky top-0 z-[1] relative px-2 py-0.5 font-semibold whitespace-nowrap overflow-hidden text-ellipsis bg-bench border-b border-r border-line cursor-default select-none hover:bg-panel"
                 style={{ textAlign: align(i) }} onClick={() => clickHeader(i)}>
-                {c}{sort.col === i ? <span className="ml-1 text-ink-2 text-2xs" data-sort-ind>{sort.asc ? "▲" : "▼"}</span> : null}
+                {c}{sort.col === i ? <SortArrow asc={sort.asc} /> : null}
                 <span className="absolute right-0 top-0 bottom-0 w-[5px] cursor-col-resize" data-col-split={i} onPointerDown={(ev) => dragCol(ev, i)} onClick={(ev) => ev.stopPropagation()} />
               </th>)) : null}</tr>
           </thead>
