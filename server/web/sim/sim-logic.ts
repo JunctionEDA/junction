@@ -183,7 +183,7 @@ export function parseCommand(cmd: string): ParsedCommand {
 
 // ---------------------------------------------------------------- the circuit (from the netlist text)
 /** A SPICE element of the netlist: its name as written ("R1", "XU1") and the nodes it connects. */
-export interface CircuitItem { name: string; nodes: string[]; currents?: string[] }
+export interface CircuitItem { name: string; nodes: string[]; currents?: string[]; /** an S-parameter port (a voltage source's portnum and z0) */ portnum?: string; z0?: string }
 const NODE_COUNT: Record<string, number> = { R: 2, C: 2, L: 2, V: 2, I: 2, D: 2, B: 2, F: 2, H: 2, E: 4, G: 4, Q: 3, J: 3, Z: 3, M: 4, S: 4, W: 2, T: 4, O: 4, U: 3, K: 0, A: 0, N: 0, P: 0, Y: 0 };
 /** The elements and nets of a netlist: lines joined over "+", .subckt bodies and dot-cards skipped. */
 export function readCircuit(netlist: string): { items: CircuitItem[]; nets: string[]; directives: string[] } {
@@ -202,7 +202,13 @@ export function readCircuit(netlist: string): { items: CircuitItem[]; nets: stri
     let nodes: string[];
     if (kind === "X") { const rest = tok.slice(1).filter((x) => !x.includes("=")); nodes = rest.slice(0, -1); }
     else nodes = tok.slice(1, 1 + (NODE_COUNT[kind] ?? 2));
-    items.push({ name, nodes });
+    const item: CircuitItem = { name, nodes };
+    // SPICE_GENERATOR_SOURCE::ItemLine writes an S-parameter port as "portnum <n> [z0 <ohms>]"
+    if (kind === "V") {
+      const pi = tok.findIndex((x) => x.toLowerCase() === "portnum");
+      if (pi > 0 && tok[pi + 1]) { item.portnum = tok[pi + 1]; const zi = tok.findIndex((x) => x.toLowerCase() === "z0"); if (zi > pi && tok[zi + 1]) item.z0 = tok[zi + 1]; }
+    }
+    items.push(item);
     for (const n of nodes) nets.add(n);
   }
   return { items, nets: [...nets].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)), directives };
@@ -220,17 +226,40 @@ export function currentNames(it: CircuitItem): string[] {
 }
 export const OPT_SAVE_V = 0x0040, OPT_SAVE_I = 0x0080, OPT_SAVE_P = 0x0100, OPT_SAVE_EVENTS = 0x0800, OPT_FIX_INCLUDES = 0x0010;
 /** SIMULATOR_FRAME_UI::rebuildSignalsList: the signals the grid offers for an analysis. */
-export function signalsFor(type: SimType, circuit: { items: CircuitItem[]; nets: string[]; directives: string[] }, options: number, userSignals: string[] = []): string[] {
+export function signalsFor(type: SimType, circuit: { items: CircuitItem[]; nets: string[]; directives: string[] }, options: number, userSignals: string[] = [], smith = false): string[] {
   const t = type === "Custom" ? "TRAN" : type, out: string[] = [], seen = new Set<string>();
-  const add = (s: string): void => { if (seen.has(s.toUpperCase())) return; seen.add(s.toUpperCase()); if (t === "AC") out.push(s + " (gain)", s + " (phase)"); else if (t === "SP") out.push(s + " (amplitude)", s + " (phase)"); else out.push(s); };
+  // a Smith chart's rows carry no suffix: the trace is the complex reflection coefficient
+  const add = (s: string): void => { if (seen.has(s.toUpperCase())) return; seen.add(s.toUpperCase()); if (t === "AC") out.push(s + " (gain)", s + " (phase)"); else if (t === "SP" && !smith) out.push(s + " (amplitude)", s + " (phase)"); else out.push(s); };
   if (options & OPT_SAVE_V && (t === "TRAN" || t === "DC" || t === "AC" || t === "FFT"))
     for (const n of circuit.nets) { if (/^gnd$/i.test(n) || n === "0" || n.startsWith("unconnected-_")) continue; add(`V(${n})`); }
   if (options & OPT_SAVE_I && (t === "TRAN" || t === "DC" || t === "AC")) for (const it of circuit.items) for (const c of currentNames(it)) add(c);
   if (options & OPT_SAVE_P && (t === "TRAN" || t === "DC")) for (const it of circuit.items) if (it.nodes.length >= 2) add(`P(${it.name})`);
   if (t === "NOISE") { add("inoise_spectrum"); add("onoise_spectrum"); }
+  if (t === "SP") {
+    // the voltage sources with a port number; a Smith chart has only the reflection parameters (S_i_i): the
+    // transmission ones are not impedances
+    const ports = circuit.items.filter((it) => /^V/.test(it.name) && it.portnum).map((it) => it.portnum!);
+    for (const p1 of ports) for (const p2 of ports) { if (smith && p1 !== p2) continue; add(`S_${p1}_${p2}`); }
+  }
   for (const d of circuit.directives) { const m = /^\.(save|probe)\s+(.*)$/i.exec(d); if (m) for (const p of m[2].trim().split(/[ \t]+/)) if (p && !/^(all|alli|allp)$/i.test(p)) add(p.toUpperCase()); }
   for (const u of userSignals) if (u.trim()) add(u);
   return out;
+}
+
+/** SMITH_MATH::ParseSParamPorts: S-parameter vectors are named S_<responsePort>_<drivePort>. */
+export function parseSParamPorts(name: string): { response: number; drive: number } | null {
+  const m = /^S_(-?\d+)_(-?\d+)$/.exec(name); return m ? { response: Number(m[1]), drive: Number(m[2]) } : null;
+}
+/** SIMULATOR_FRAME_UI::getSmithPortImpedance: the z0 of the port an S-parameter is normalized to (its response port),
+ *  0 when it has none.  A port without a z0 of its own has ngspice's 50 Ω (the model's default). */
+export function smithPortImpedance(circuit: { items: CircuitItem[] }, vector: string): number {
+  const ports = parseSParamPorts(vector); if (!ports) return 0;
+  for (const it of circuit.items) {
+    if (!it.portnum || parseInt(it.portnum, 10) !== ports.response || !/^-?\d+$/.test(it.portnum)) continue;
+    const z0 = it.z0 === undefined ? 50 : parseSpiceValue(it.z0);
+    if (z0 > 0) return z0;
+  }
+  return 0;
 }
 
 // ---------------------------------------------------------------- vectors and signals
@@ -410,7 +439,7 @@ export function userSignalLet(id: number, expr: string): string {
 
 // ---------------------------------------------------------------- the workbook
 export interface WbTrace { trace_type?: number; signal: string; color?: string; view?: number; yScaleView?: number }
-export interface WbTab { analysis?: string; commands: string[]; traces?: WbTrace[]; measurements?: { expr: string; format: string }[]; dottedSecondary?: boolean; showGrid?: boolean; legend?: { x: number; y: number }; fixedY1scale?: { min: number; max: number }; fixedY2scale?: { min: number; max: number }; fixedY3scale?: { min: number; max: number }; margins?: { left: number; right: number; top: number; bottom: number }; smithMode?: boolean; smithZoom?: number; smithPanX?: number; smithPanY?: number }
+export interface WbTab { analysis?: string; commands: string[]; traces?: WbTrace[]; measurements?: { expr: string; format: string }[]; dottedSecondary?: boolean; showGrid?: boolean; legend?: { x: number; y: number }; fixedY1scale?: { min: number; max: number }; fixedY2scale?: { min: number; max: number }; fixedY3scale?: { min: number; max: number }; margins?: { left: number; right: number; top: number; bottom: number }; smithMode?: boolean; smithZoom?: number; smithPanX?: number; smithPanY?: number; smithStashedTraces?: { vector: string; name?: string; base_type?: number }[]; smithStashedCursors?: { id: number; vector: string; base_type?: number; sub_type?: number; frequency?: number }[] }
 export interface Workbook { version: number; tabs: WbTab[]; user_defined_signals: string[]; custom_cursors?: number; last_sch_text_sim_command?: string }
 /** The options a tab's command lines carry (".save all", ".probe alli", ".probe allp", ".kicad esavenone", ".kicad adjustpaths"). */
 export function optionsFromCommands(cmds: string[]): { command: string; options: number } {

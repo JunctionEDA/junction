@@ -57,6 +57,11 @@ export class SimPlot {
   showGrid = true; showLegend = true; dottedSecondary = true; dark = false;
   /** SIM_VIEW::SetSmithChart: an S-parameter tab drawn on a Smith chart (SMITH_GRID, SMITH_TRACE) */
   smith = false;
+  /** SIM_VIEW's Smith zoom (1 fits the window, up to 50) and pan (the reflection coefficient at the window's centre) */
+  smithZoom = 1; smithPan = { x: 0, y: 0 };
+  /** SMITH_GRID::SetReferenceImpedance / SetMixedReferences: the ports' one reference impedance (0 when they differ or
+   *  one is unknown), and whether they differ */
+  smithZ0 = 0; smithMixed = false;
   /** the legend's top-left corner inside the plot area (mpInfoLegend's position, kept in the workbook) */
   legendAt = { x: 10, y: 10 };
   fixed: (Range | null)[] = [null, null, null];
@@ -67,7 +72,7 @@ export class SimPlot {
   onContextMenu: ((x: number, y: number) => void) | null = null;
   private view: View | null = null;
   private undo: View[] = []; private redo: View[] = [];
-  private drag: { kind: "box" | "pan" | "cursor" | "legend"; x0: number; y0: number; x1: number; y1: number; view?: View; cursor?: 0 | 1; moved: boolean; lx?: number; ly?: number } | null = null;
+  private drag: { kind: "box" | "pan" | "cursor" | "legend" | "smithpan" | "smithmenu"; x0: number; y0: number; x1: number; y1: number; view?: View; cursor?: 0 | 1; moved: boolean; lx?: number; ly?: number; x1Prev?: number; y1Prev?: number } | null = null;
 
   constructor() {
     this.el = document.createElement("div"); this.el.className = "sim-plot";
@@ -77,6 +82,7 @@ export class SimPlot {
     this.canvas.addEventListener("pointermove", (e) => this.move(e));
     this.canvas.addEventListener("pointerup", (e) => this.up(e));
     this.canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    this.canvas.addEventListener("dblclick", (e) => this.dclick(e));
     if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => this.render()).observe(this.el);
   }
 
@@ -152,6 +158,8 @@ export class SimPlot {
   gestures: () => { vNone: WheelAction; vCtrl: WheelAction; vShift: WheelAction; vAlt: WheelAction; h: WheelAction } = () => ({ vNone: "zoom", vCtrl: "panLR", vShift: "panUD", vAlt: "none", h: "panLR" });
   private wheel(e: WheelEvent): void {
     e.preventDefault(); const p = this.local(e);
+    // SIM_VIEW::onSmithMouseWheel: a vertical wheel zooms the chart about the mouse, a horizontal one does nothing
+    if (this.smith) { if (Math.abs(e.deltaY) >= Math.abs(e.deltaX) && e.deltaY) this.smithZoomAt(p[0], p[1], e.deltaY < 0 ? 1.2 : 1 / 1.2); return; }
     const g = this.gestures(), horiz = Math.abs(e.deltaX) > Math.abs(e.deltaY);
     const d = horiz ? e.deltaX : e.deltaY; if (!d) return;
     const act: WheelAction = horiz ? g.h : e.ctrlKey || e.metaKey ? g.vCtrl : e.shiftKey ? g.vShift : e.altKey ? g.vAlt : g.vNone;
@@ -171,9 +179,25 @@ export class SimPlot {
     return null;
   }
   private legendBox: { x: number; y: number; w: number; h: number } | null = null;
+  /** SIM_VIEW::onSmithDClick: a double click on the chart (not the legend) fits it to the window again */
+  private dclick(e: MouseEvent): void {
+    if (!this.smith) return;
+    const [x, y] = this.local(e), lb = this.legendBox;
+    if (lb && this.showLegend && x >= lb.x && x <= lb.x + lb.w && y >= lb.y && y <= lb.y + lb.h) return;
+    this.resetSmith();
+  }
   private down(e: PointerEvent): void {
     const [x, y] = this.local(e); this.canvas.focus();
     this.canvas.setPointerCapture(e.pointerId);
+    const lb0 = this.legendBox, onLegend = !!lb0 && this.showLegend && x >= lb0.x && x <= lb0.x + lb0.w && y >= lb0.y && y <= lb0.y + lb0.h;
+    if (this.smith) {
+      // SIM_VIEW::onSmithLeftDown / onSmithRightUp: the left button pans the chart (or drags the legend), the right one
+      // opens the menu, the middle one does nothing
+      if (e.button === 2) this.drag = { kind: "smithmenu", x0: x, y0: y, x1: x, y1: y, moved: false };
+      else if (e.button === 0 && onLegend) this.drag = { kind: "legend", x0: x, y0: y, x1: x, y1: y, lx: this.legendAt.x, ly: this.legendAt.y, moved: false };
+      else if (e.button === 0) this.drag = { kind: "smithpan", x0: x, y0: y, x1: x, y1: y, moved: false };
+      return;
+    }
     if (e.button === 2 || e.button === 1) { this.drag = { kind: "pan", x0: x, y0: y, x1: x, y1: y, view: this.clone(this.cur()), moved: false }; return; }
     if (e.button !== 0) return;
     const c = this.cursorNear(x);
@@ -185,7 +209,9 @@ export class SimPlot {
   private move(e: PointerEvent): void {
     const [x, y] = this.local(e), d = this.drag;
     if (!d) { this.canvas.style.cursor = this.cursorNear(x) !== null ? "ew-resize" : ""; return; }
+    if (d.x1Prev === undefined) { d.x1Prev = d.x0; d.y1Prev = d.y0; }
     d.x1 = x; d.y1 = y; if (Math.abs(x - d.x0) + Math.abs(y - d.y0) > 3) d.moved = true;
+    if (d.kind === "smithpan") { this.smithPanBy(x - d.x1Prev!, y - d.y1Prev!); d.x1Prev = x; d.y1Prev = y; return; }
     if (d.kind === "pan" && d.moved) { this.view = this.pan(x - d.x0, y - d.y0, d.view!); }
     else if (d.kind === "cursor") { this.cursorX[d.cursor!] = this.dataX(x); if (this.onChange) this.onChange(); }
     else if (d.kind === "legend") { this.legendAt = { x: Math.max(0, d.lx! + x - d.x0), y: Math.max(0, d.ly! + y - d.y0) }; }
@@ -194,6 +220,8 @@ export class SimPlot {
   private up(e: PointerEvent): void {
     const d = this.drag; this.drag = null; if (!d) return;
     try { this.canvas.releasePointerCapture(e.pointerId); } catch { /* released */ }
+    if (d.kind === "smithmenu") { if (this.onContextMenu) this.onContextMenu(e.clientX, e.clientY); return; }
+    if (d.kind === "smithpan") { if (d.moved && this.onChange) this.onChange(); return; }
     if (d.kind === "pan") {
       if (!d.moved) { this.view = d.view!; if (e.button === 2 && this.onContextMenu) this.onContextMenu(e.clientX, e.clientY); return; }
       const fin = this.clone(this.cur()); this.view = d.view!; this.push(fin); return;
@@ -218,7 +246,7 @@ export class SimPlot {
     const C = this.dark ? PLOT_COLORS.dark : PLOT_COLORS.light, a = this.area(), v = this.cur();
     g.fillStyle = C.bg; g.fillRect(0, 0, w, h);
     g.font = "11px sans-serif"; g.textBaseline = "middle";
-    if (this.smith) { this.renderSmith(g, C, a); return; }
+    if (this.smith) { this.renderSmith(g, C); return; }
     // ---- X ticks and grid
     const xt: { px: number; label: string; major: boolean }[] = [];
     if (this.opts.logX) {
@@ -303,55 +331,144 @@ export class SimPlot {
       this.legendBox = { x: lx, y: ly, w: lw, h: lh };
     }
   }
+  /** SMITH_GRID::GetChartView with the view's zoom and pan (SMITH_VIEW): the unit circle's centre and radius on screen. */
+  private smithView(): { cx: number; cy: number; radius: number; zoom: number; pan: { x: number; y: number }; a: { l: number; t: number; r: number; b: number; w: number; h: number } } | null {
+    const a = this.area(), radius = Math.floor(Math.min(a.w, a.h) / 2) - 15; if (radius <= 20) return null;
+    return { cx: a.l + Math.floor(a.w / 2), cy: a.t + Math.floor(a.h / 2), radius: radius * this.smithZoom, zoom: this.smithZoom, pan: this.smithPan, a };
+  }
+  /** SMITH_VIEW::ToGamma: the reflection coefficient under a screen point. */
+  private smithGamma(px: number, py: number): { x: number; y: number } | null {
+    const v = this.smithView(); if (!v) return null;
+    return { x: v.pan.x + (px - v.cx) / v.radius, y: v.pan.y - (py - v.cy) / v.radius };
+  }
+  /** SIM_VIEW::ResetSmithView: fit to the window. */
+  resetSmith(): void { this.smithZoom = 1; this.smithPan = { x: 0, y: 0 }; this.render(); if (this.onChange) this.onChange(); }
+  /** SIM_VIEW::SmithZoomAt: zoom by a factor (1 to 50) keeping the point under the mouse fixed (SMITH_MATH::ZoomAboutPoint). */
+  smithZoomAt(px: number, py: number, factor: number): void {
+    const v = this.smithView(); if (!v) return;
+    const zoom = Math.min(50, Math.max(1, this.smithZoom * factor));
+    if (zoom <= 1) { this.resetSmith(); return; }
+    const g = this.smithGamma(px, py)!, r = (v.radius / v.zoom) * zoom;
+    this.smithPan = { x: g.x - (px - v.cx) / r, y: g.y + (py - v.cy) / r }; this.smithZoom = zoom;
+    this.render(); if (this.onChange) this.onChange();
+  }
+  /** SIM_VIEW::SmithPanBy: move the chart with the mouse. */
+  private smithPanBy(dx: number, dy: number): void {
+    const v = this.smithView(); if (!v) return;
+    this.smithPan = { x: this.smithPan.x - dx / v.radius, y: this.smithPan.y + dy / v.radius }; this.render();
+  }
+  /** the "Center on Cursor" of a Smith chart: the point moves to the window's middle. */
+  smithCenterOn(px: number, py: number): void { const g = this.smithGamma(px, py); if (!g) return; this.smithPan = g; this.render(); if (this.onChange) this.onChange(); }
   /** SMITH_GRID::Plot and SMITH_TRACE::Plot: the unit circle of the reflection coefficient, the constant resistance
-   *  circles and constant reactance arcs of 0.2, 0.5, 1, 2 and 5 (normalized, clipped to the unit circle), their
-   *  labels on the real axis and the rim, and each trace's Γ in the plane, then the legend. */
-  private renderSmith(g: CanvasRenderingContext2D, C: { bg: string; fg: string; axis: string }, a: { l: number; t: number; r: number; b: number; w: number; h: number }): void {
-    const radius = Math.min(a.w, a.h) / 2 - 15; if (radius <= 20) return;
-    const cx = a.l + a.w / 2, cy = a.t + a.h / 2;
-    const at = (re: number, im: number): [number, number] => [cx + re * radius, cy - im * radius];
-    g.save(); g.beginPath(); g.rect(a.l, a.t, a.w, a.h); g.clip();
+   *  circles and constant reactance arcs (0.2, 0.5, 1, 2 and 5, with finer values as the view zooms in, clipped to the
+   *  unit circle), their labels (in ohms when the ports share one reference impedance), the reference note, each
+   *  trace's Γ in the plane, then the legend. */
+  private renderSmith(g: CanvasRenderingContext2D, C: { bg: string; fg: string; axis: string }): void {
+    const view = this.smithView(); if (!view) return;
+    const { l: mL, t: mT, w: plotW, h: plotH } = view.a;
+    const toScreen = (re: number, im: number): [number, number] => {
+      const LIMIT = 1e7; let x = (re - view.pan.x) * view.radius, y = (im - view.pan.y) * view.radius;
+      x = Number.isFinite(x) ? Math.min(LIMIT, Math.max(-LIMIT, x)) : 0; y = Number.isFinite(y) ? Math.min(LIMIT, Math.max(-LIMIT, y)) : 0;
+      return [view.cx + Math.round(x), view.cy - Math.round(y)];
+    };
+    const toGamma = (px: number, py: number): { x: number; y: number } => ({ x: view.pan.x + (px - view.cx) / view.radius, y: view.pan.y - (py - view.cy) / view.radius });
+    const inPlot = (p: [number, number]): boolean => p[0] >= mL && p[0] < mL + plotW && p[1] >= mT && p[1] < mT + plotH;
+    g.save(); g.beginPath(); g.rect(mL, mT, plotW, plotH); g.clip();
+    const segmentsFor = (r: number): number => Math.min(4096, Math.max(64, Math.round(Math.PI * Math.sqrt(r * view.radius))));
     const circle = (ccx: number, ccy: number, r: number): void => {
-      const n = Math.max(64, Math.min(4096, Math.round(Math.PI * Math.sqrt(r * radius))));
-      g.beginPath(); let pen = false;
+      const n = segmentsFor(r); let run: [number, number][] = [];
+      const flush = (): void => { if (run.length > 1) { g.beginPath(); g.moveTo(...run[0]); for (const q of run.slice(1)) g.lineTo(...q); g.stroke(); } run = []; };
       for (let i = 0; i <= n; i++) {
         const ang = (2 * Math.PI * i) / n, re = ccx + r * Math.cos(ang), im = ccy + r * Math.sin(ang);
-        if (re * re + im * im <= 1.0002) { const [x, y] = at(re, im); if (pen) g.lineTo(x, y); else { g.moveTo(x, y); pen = true; } } else pen = false;
+        if (re * re + im * im <= 1.0002) run.push(toScreen(re, im)); else flush();
       }
-      g.stroke();
+      flush();
     };
-    const vals = [0.2, 0.5, 1, 2, 5];
+    const fmt = (v: number): string => String(Number(v.toPrecision(6)));
+    // ohm labels for a single reference impedance, normalized labels without one
+    const labelScale = this.smithZ0 > 0 ? this.smithZ0 : 1;
+    const gridVals = [0.2, 0.5, 1, 2, 5];
+    const FINEST_SCALE = 2 / (1 + 20);
+    const lowGamma = toGamma(mL, mT + plotH), highGamma = toGamma(mL + plotW, mT);
+    const poleDistance = (re: number): number => Math.hypot(Math.max(lowGamma.x - re, re - highGamma.x, 0), Math.max(lowGamma.y, -highGamma.y, 0));
+    const zoomedIn = plotW / 2 / view.radius < 1;
+    const converged = zoomedIn && Math.min(poleDistance(1), poleDistance(-1)) < FINEST_SCALE;
+    if (view.zoom >= 2 && !converged) gridVals.push(0.1, 0.3, 0.4, 0.7, 1.5, 3, 10);
+    if (view.zoom >= 5 && !converged) gridVals.push(0.05, 0.15, 0.6, 0.8, 1.2, 1.7, 2.5, 4, 7, 20);
     if (this.showGrid) {
       g.strokeStyle = C.axis; g.lineWidth = 1; g.setLineDash([1, 2]);
-      for (const r of vals) circle(r / (1 + r), 0, 1 / (1 + r));
-      for (const x of vals) { circle(1, 1 / x, 1 / x); circle(1, -1 / x, 1 / x); }
+      for (const r of gridVals) circle(r / (1 + r), 0, 1 / (1 + r));
+      for (const x of gridVals) { circle(1, 1 / x, 1 / x); circle(1, -1 / x, 1 / x); }
       g.setLineDash([]);
     }
-    g.strokeStyle = C.fg; g.lineWidth = 1;
-    g.beginPath(); g.moveTo(...at(-1, 0)); g.lineTo(...at(1, 0)); g.stroke();
-    g.beginPath(); g.arc(cx, cy, radius, 0, 2 * Math.PI); g.stroke();
-    // the labels: a resistance where its circle meets the real axis, a reactance where its arc meets the rim
-    g.fillStyle = C.fg; g.textAlign = "left";
-    for (const r of vals) { const [x, y] = at((r - 1) / (r + 1), 0); g.fillText(String(r), x + 2, y - 7); }
-    for (const x of vals) {
+    g.strokeStyle = C.axis; g.lineWidth = 1;
+    g.beginPath(); g.moveTo(...toScreen(-1, 0)); g.lineTo(...toScreen(1, 0)); g.stroke();
+    { const [ox, oy] = toScreen(0, 0); g.beginPath(); g.arc(ox, oy, Math.round(view.radius), 0, 2 * Math.PI); g.stroke(); }
+    // each gridline's label at its axis or rim anchor, or where the line meets the plot's edge when the anchor is out of view
+    const LABEL_LIMIT = 1.0002;
+    const anchorPos = (re: number, im: number): [number, number] | null => { if (re * re + im * im > LABEL_LIMIT) return null; const p = toScreen(re, im); return inPlot(p) ? p : null; };
+    const edgePos = (ccx: number, ccy: number, r: number): [number, number] | null => {
+      let best = Infinity, out: [number, number] | null = null; const n = segmentsFor(r);
+      for (let i = 0; i <= n; i++) {
+        const ang = (2 * Math.PI * i) / n, re = ccx + r * Math.cos(ang), im = ccy + r * Math.sin(ang);
+        if (re * re + im * im > LABEL_LIMIT) continue;
+        const p = toScreen(re, im); if (!inPlot(p)) continue;
+        const margin = Math.min(p[0] - mL, mL + plotW - p[0], p[1] - mT, mT + plotH - p[1]);
+        if (margin < best) { best = margin; out = p; }
+      }
+      return out;
+    };
+    g.fillStyle = C.axis; g.textAlign = "left"; g.textBaseline = "top";
+    const TEXT_H = 12;
+    const extent = (s: string): [number, number] => [Math.ceil(g.measureText(s).width), TEXT_H];
+    const placed: { x: number; y: number; w: number; h: number }[] = [];
+    const drawLabel = (label: string, x: number, y: number, ext: [number, number]): void => {
+      const px = Math.min(Math.max(x, mL + 1), mL + plotW - ext[0] - 1), py = Math.min(Math.max(y, mT + 1), mT + plotH - ext[1] - 1);
+      const box = { x: px - 2, y: py - 1, w: ext[0] + 4, h: ext[1] + 2 };
+      if (placed.some((o) => o.x < box.x + box.w && box.x < o.x + o.w && o.y < box.y + box.h && box.y < o.y + o.h)) return;
+      placed.push(box); g.fillText(label, px, py);
+    };
+    const drawEdgeLabel = (label: string, at: [number, number]): void => { const ext = extent(label); drawLabel(label, at[0] - Math.trunc(ext[0] / 2), at[1] + 3, ext); };
+    // reactance labels go just outside the rim
+    const drawRimLabel = (label: string, at: [number, number], re: number, im: number): void => {
+      const ext = extent(label);
+      const x = at[0] + Math.round(re * 6) - Math.round((ext[0] * (1 - re)) / 2), y = at[1] - Math.round(im * 6) - Math.round((ext[1] * (1 + im)) / 2);
+      drawLabel(label, x, y, ext);
+    };
+    let at: [number, number] | null;
+    // the short (r = 0)
+    if ((at = anchorPos(-1, 0))) drawRimLabel("0", at, -1, 0); else if ((at = edgePos(0, 0, 1))) drawEdgeLabel("0", at);
+    for (const r of gridVals) if ((at = anchorPos((r - 1) / (r + 1), 0) || edgePos(r / (1 + r), 0, 1 / (1 + r)))) drawEdgeLabel(fmt(r * labelScale), at);
+    for (const x of gridVals) {
       const d = x * x + 1, re = (x * x - 1) / d, im = (2 * x) / d;
-      for (const sgn of [1, -1]) { const [px, py] = at(re, sgn * im); g.textAlign = re >= 0 ? "left" : "right"; g.fillText((sgn > 0 ? "+j" : "-j") + x, px + (re >= 0 ? 4 : -4), py - sgn * 6); }
+      const pos = "j" + fmt(x * labelScale), neg = "-j" + fmt(x * labelScale);
+      if ((at = anchorPos(re, im))) drawRimLabel(pos, at, re, im); else if ((at = edgePos(1, 1 / x, 1 / x))) drawEdgeLabel(pos, at);
+      if ((at = anchorPos(re, -im))) drawRimLabel(neg, at, re, -im); else if ((at = edgePos(1, -1 / x, 1 / x))) drawEdgeLabel(neg, at);
     }
-    g.textAlign = "left"; g.textBaseline = "bottom"; g.fillText("Normalized Z/Z0", a.l + 4, a.b - 4); g.textBaseline = "middle";
+    // the ohm labels mean nothing unless the reference impedance is named
+    const note = this.smithZ0 > 0 ? `Z0 = ${fmt(this.smithZ0)} Ω` : this.smithMixed ? "Normalized Z/Z0 (ports differ)" : "Normalized Z/Z0";
+    g.fillText(note, mL + 4, mT + plotH - TEXT_H - 4);
     for (const t of this.traces) {
       const gm = t.gamma; if (!gm) continue;
-      g.strokeStyle = t.color; g.lineWidth = 1; g.setLineDash(t.secondary && this.dottedSecondary ? [2, 2] : []);
-      g.beginPath(); let pen = false;
+      g.strokeStyle = t.color; g.fillStyle = t.color; g.lineWidth = 1; g.setLineDash(t.secondary && this.dottedSecondary ? [2, 2] : []);
+      let pts: [number, number][] = [];
+      // a non-finite sample breaks the locus rather than drawing a bogus segment
+      const flush = (): void => {
+        if (pts.length > 1) { g.beginPath(); g.moveTo(...pts[0]); for (const q of pts.slice(1)) g.lineTo(...q); g.stroke(); }
+        else if (pts.length === 1) { g.beginPath(); g.arc(pts[0][0], pts[0][1], 2, 0, 2 * Math.PI); g.fill(); }
+        pts = [];
+      };
       for (let i = 0; i < gm.re.length; i++) {
         const re = gm.re[i], im = gm.im[i];
-        if (!Number.isFinite(re) || !Number.isFinite(im)) { pen = false; continue; }
-        const [x, y] = at(re, im); if (pen) g.lineTo(x, y); else { g.moveTo(x, y); pen = true; }
+        if (!Number.isFinite(re) || !Number.isFinite(im)) { flush(); continue; }
+        pts.push(toScreen(re, im));
       }
-      g.stroke(); g.setLineDash([]);
+      flush(); g.setLineDash([]);
     }
     g.restore();
+    g.textBaseline = "middle";
     this.legendBox = null;
-    const shown = this.traces.filter((t) => t.gamma);
+    const a = view.a, shown = this.traces.filter((t) => t.gamma);
     if (this.showLegend && shown.length) {
       const lw = Math.max(...shown.map((t) => g.measureText(t.name).width)) + 34, lh = shown.length * 16 + 6;
       const lx = Math.min(a.l + this.legendAt.x, a.r - lw), ly = Math.min(a.t + this.legendAt.y, a.b - lh);

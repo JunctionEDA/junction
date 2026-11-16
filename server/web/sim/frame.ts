@@ -33,7 +33,7 @@ import {
   DEFAULT_OPTIONS, OPT_SAVE_EVENTS, OPT_SAVE_I, OPT_SAVE_P, OPT_SAVE_V, acPart, commandToSimType, commandsFromOptions, eSeries, findVector,
   formatFromString, formatToString, formatValue, isPlottable, measCommand, measurementFor, measurementUnits, optionsFromCommands, parseCommand,
   readRaw, parseSpiceValue, readCircuit, signalKind, signalsFor, snapToSeries, splitSignal, toSpiceString, typeToName, unitsOf, updateUnits,
-  userSignalLet, userVectorName, xAxisOf, type CircuitItem, type RawPlot, type SimType, type ValueFormat, type WbTab, type Workbook,
+  userSignalLet, userVectorName, xAxisOf, parseSParamPorts, smithPortImpedance, type CircuitItem, type RawPlot, type SimType, type ValueFormat, type WbTab, type Workbook,
 } from "./sim-logic";
 
 // ---------------------------------------------------------------- state
@@ -45,6 +45,11 @@ interface Tab {
   setup: PlotSetup; cursorFmt: [ValueFormat, ValueFormat];
   /** SIM_TAB::m_lastSchTextSimCommand: the schematic's directive this tab last took (the first tab follows it) */
   lastSch: string;
+  /** SIM_VIEW's Smith zoom and pan, and what the Smith toggle set aside (SIM_PLOT_TAB::SmithStashedTraces /
+   *  SmithStashedCursors: the transmission traces and every cursor, for the way back) */
+  smithZoom: number; smithPan: { x: number; y: number };
+  stashTraces: { vector: string; name: string; base_type: number }[];
+  stashCursors: { id: number; vector: string; base_type: number; sub_type: number; frequency: number }[];
 }
 interface Tuner { name: string; value: number; min: number; max: number; steps: number; multi: boolean; series: 0 | 24 | 48 | 96 | 192; orig: string; symId: string | null; el?: HTMLElement }
 
@@ -222,7 +227,7 @@ const resistors = (): string[] => S.circuit.items.filter((i) => /^r/i.test(i.nam
 // ---------------------------------------------------------------- tabs
 function defaultSetup(): PlotSetup { return { axes: [null, null, null], fixed: [null, null, null], grid: true, legend: false, dotted: true, margins: { left: 70, top: 30, right: 70, bottom: 45 } }; }
 function newTab(command: string, options: number): Tab {
-  const t: Tab = { command, options, traces: [], meas: [], plot: null, data: null, opText: "", lastSch: "", setup: defaultSetup(), cursorFmt: [{ precision: 3, range: "~s" }, { precision: 3, range: "~V" }] };
+  const t: Tab = { command, options, traces: [], meas: [], plot: null, data: null, opText: "", lastSch: "", setup: defaultSetup(), smithZoom: 1, smithPan: { x: 0, y: 0 }, stashTraces: [], stashCursors: [], cursorFmt: [{ precision: 3, range: "~s" }, { precision: 3, range: "~V" }] };
   S.tabs.push(t); S.cur = S.tabs.length - 1; S.dirty = true;
   return t;
 }
@@ -258,7 +263,8 @@ function syncSetup(t: Tab): void {
 }
 
 // ---------------------------------------------------------------- signals
-function allSignalsFor(type: SimType, options: number): string[] { return signalsFor(type, S.circuit, options, S.userSignals); }
+function allSignalsFor(type: SimType, options: number, smith = false): string[] { return signalsFor(type, S.circuit, options, S.userSignals, smith); }
+const isSmith = (t: Tab | null): boolean => !!t && tabType(t) === "SP" && !!t.setup.smith;
 function axisOf(signal: string, type: SimType): 0 | 1 | 2 {
   const { part } = splitSignal(signal);
   if (part === "phase") return 1;
@@ -324,6 +330,66 @@ export function addTrace(signal: string): void {
   renderAll();
 }
 function removeTrace(signal: string): void { const t = curTab(); if (!t) return; t.traces = t.traces.filter((x) => x.signal !== signal); S.dirty = true; renderAll(); }
+
+/** SIMULATOR_FRAME_UI::ToggleSmithChart: the shown signals rebuilt in the other coordinate system.  Entering, the
+ *  transmission parameters (S_i_j, not impedances) and every cursor are set aside on the tab; leaving, they come back,
+ *  each cursor on the trace and part (amplitude or phase) it came from, at its frequency. */
+function toggleSmithChart(t: Tab): void {
+  if (tabType(t) !== "SP") return;
+  const smith = !t.setup.smith;
+  const isReflection = (name: string): boolean => { const p = parseSParamPorts(name); return p ? p.response === p.drive : true; };
+  const partBits = (part: string): number => (part === "phase" ? 0x04 : part === "amplitude" ? 0x20 : 0x40);
+  const shown: { vector: string; name: string; base_type: number; color: string }[] = [];
+  const saved: { id: number; vector: string; base_type: number; sub_type: number; x: number }[] = [];
+  const p = t.plot;
+  for (const tr of t.traces) {
+    const { base, part } = splitSignal(tr.signal), base_type = traceType(t, tr.signal) & ~(0x04 | 0x08 | 0x20 | 0x40);
+    if (!shown.some((x) => x.vector === base)) shown.push({ vector: base, name: base, base_type, color: tr.color });
+    for (const id of [1, 2] as const) {
+      if (!(id === 1 ? tr.cursor1 : tr.cursor2)) continue;
+      const x = p ? p.cursorX[id - 1] : null;
+      saved.push({ id, vector: base, base_type, sub_type: partBits(part), x: x === null ? NaN : x });
+    }
+  }
+  if (smith) {
+    // set aside what the Smith chart cannot show, so leaving it restores that
+    t.stashTraces = shown.filter((x) => !isReflection(x.vector)).map((x) => ({ vector: x.vector, name: x.name, base_type: x.base_type }));
+    t.stashCursors = saved.map((x) => ({ id: x.id, vector: x.vector, base_type: x.base_type, sub_type: x.sub_type, frequency: x.x }));
+  } else {
+    for (const st of t.stashTraces) if (!shown.some((x) => x.vector === st.vector)) shown.push({ ...st, color: "" });
+  }
+  const colors = new Map(t.traces.map((tr) => [splitSignal(tr.signal).base, tr.color] as [string, string]));
+  t.traces = []; t.setup.smith = smith;
+  const cursorAt: [number, number] = [NaN, NaN];
+  const add = (signal: string, vector: string): void => { if (!t.traces.some((x) => x.signal === signal)) t.traces.push({ signal, color: colors.get(vector) || nextColor(t), cursor1: false, cursor2: false }); };
+  for (const sv of shown) {
+    if (smith) { if (isReflection(sv.vector)) add(sv.vector, sv.vector); }
+    else { add(sv.vector + " (amplitude)", sv.vector); add(sv.vector + " (phase)", sv.vector); }
+  }
+  const setCursor = (signal: string, id: 1 | 2, freq: number): boolean => {
+    const tr = t.traces.find((x) => x.signal === signal); if (!tr) return false;
+    for (const o of t.traces) { if (id === 1) o.cursor1 = o === tr; else o.cursor2 = o === tr; }
+    cursorAt[id - 1] = freq; return true;
+  };
+  if (smith) {
+    // amplitude and phase cursors with the same id collapse onto one: the first is kept, the stash has both
+    const done = new Set<number>();
+    for (const c of saved) { if (done.has(c.id) || (c.id !== 1 && c.id !== 2)) continue; if (setCursor(c.vector, c.id as 1 | 2, c.x)) done.add(c.id); }
+  } else {
+    const restored = new Set<number>();
+    const restore = (id: number, vector: string, sub: number, freq: number): boolean => (id === 1 || id === 2) && setCursor(vector + (sub === 0x04 ? " (phase)" : " (amplitude)"), id, freq);
+    // live Smith cursors go back to the part they came from, at their frequency now
+    for (const c of saved) {
+      const st = t.stashCursors.find((x) => x.id === c.id && x.vector === c.vector);
+      if (restore(c.id, c.vector, st ? st.sub_type : 0x20, c.x)) restored.add(c.id);
+    }
+    // cursors whose trace could not be on the Smith chart come back from the stash alone
+    for (const st of t.stashCursors) { if (isReflection(st.vector) || restored.has(st.id)) continue; restore(st.id, st.vector, st.sub_type, st.frequency); }
+    t.stashTraces = []; t.stashCursors = [];
+  }
+  if (p) for (const i of [0, 1] as const) p.cursorX[i] = Number.isFinite(cursorAt[i]) ? cursorAt[i] : null;
+  S.dirty = true; renderAll();
+}
 
 // ---------------------------------------------------------------- running ngspice
 function log(s: string): void { const c = S.root && S.root.querySelector<HTMLTextAreaElement>(".sim-console"); if (c) { c.value += s; c.scrollTop = c.scrollHeight; } }
@@ -568,7 +634,7 @@ function menus(): [string, MenuEntry[]][] {
       A("toggleGrid", () => { const x = t(); if (x) { x.setup.grid = !x.setup.grid; S.dirty = true; renderPlot(); } }, hasPlot, () => !!t()?.setup.grid),
       A("toggleLegend", () => { const x = t(); if (x) { x.setup.legend = !x.setup.legend; S.dirty = true; renderPlot(); } }, hasPlot, () => !!t()?.setup.legend),
       A("toggleDottedSecondary", () => { const x = t(); if (x) { x.setup.dotted = !x.setup.dotted; S.dirty = true; renderPlot(); } }, hasPlot, () => !!t()?.setup.dotted),
-      A("toggleSmithChart", () => { const x = t(); if (x && tabType(x) === "SP") { x.setup.smith = !x.setup.smith; S.dirty = true; renderPlot(); } }, () => { const x = t(); return !!x && tabType(x) === "SP"; }, () => { const x = t(); return !!x && tabType(x) === "SP" && !!x.setup.smith; }),
+      A("toggleSmithChart", () => { const x = t(); if (x) toggleSmithChart(x); }, () => { const x = t(); return !!x && tabType(x) === "SP"; }, () => { const x = t(); return !!x && tabType(x) === "SP" && !!x.setup.smith; }),
       A("toggleDarkModePlots", () => { S.darkPlots = !S.darkPlots; renderPlot(); }, undefined, () => S.darkPlots)]],
     ["Simulation", [A("newAnalysisTab", () => void newAnalysisTab()), A("simAnalysisProperties", () => void editAnalysisTab(), hasTab), A("runSimulation", () => void runSimulation(), () => !S.running), SEP,
       A("simProbe", () => startProbe("probe"), hasTab), A("simTune", () => startProbe("tune"), hasTab), SEP, A("editUserDefinedSignals", () => void editUserSignals()), A("showNetlist", showNetlist)]],
@@ -628,7 +694,11 @@ function renderPlot(): void {
   if (!isPlottable(type) && type !== "Custom" && type !== "FFT") { area.append(h("div", { class: "sim-op", id: "sim-op" }, t.opText || "Run the simulation to see the results.")); return; }
   if (!t.plot) {
     const p = new SimPlot(); t.plot = p; p.gestures = () => prefs().sim;
-    p.onChange = () => { renderCursors(); };
+    p.onChange = () => {
+      // the Smith chart's zoom and pan are the tab's (saved in the workbook)
+      if (p.smith && (p.smithZoom !== t.smithZoom || p.smithPan.x !== t.smithPan.x || p.smithPan.y !== t.smithPan.y)) { t.smithZoom = p.smithZoom; t.smithPan = { ...p.smithPan }; S.dirty = true; }
+      renderCursors();
+    };
     p.onContextMenu = (x, y) => plotMenu(t, x, y);
   }
   const p = t.plot, x = xAxisFor(t);
@@ -637,7 +707,17 @@ function renderPlot(): void {
   p.opts = { logX: x.log, x: { name: x.name, units: x.units }, y: axesFor(t).map((a, i) => (i === 0 || used.has(i as 0 | 1 | 2) ? a : null)) };
   p.showGrid = t.setup.grid; p.showLegend = t.setup.legend; p.dottedSecondary = t.setup.dotted; p.dark = S.darkPlots;
   p.fixed = t.setup.fixed.slice(); p.margins = { ...t.setup.margins };
-  p.smith = type === "SP" && !!t.setup.smith;
+  p.smith = isSmith(t);
+  if (p.smith) {
+    p.smithZoom = t.smithZoom; p.smithPan = { ...t.smithPan };
+    // SIM_VIEW::UpdateSmithReferenceImpedance: one z0 for every port shown, or none (mixed, or one unknown)
+    let z0 = 0, mixed = false, unresolved = false;
+    for (const tr of t.traces) {
+      const tz = smithPortImpedance(S.circuit, splitSignal(tr.signal).base);
+      if (tz <= 0) unresolved = true; else if (z0 === 0) z0 = tz; else if (tz !== z0) mixed = true;
+    }
+    p.smithZ0 = mixed || unresolved ? 0 : z0; p.smithMixed = mixed;
+  }
   const traces: PlotTrace[] = [];
   const multi = (t as Tab & { multi?: PlotTrace[] }).multi;
   if (multi && multi.length) traces.push(...multi);
@@ -646,7 +726,7 @@ function renderPlot(): void {
     const ax = axisOf(tr.signal, type);
     const pt: PlotTrace = { name: tr.signal, xs: d.xs, ys: d.ys, color: tr.color, axis: ax, secondary: ax === 1, cursor1: tr.cursor1, cursor2: tr.cursor2 };
     // SMITH_TRACE: the complex S-parameter itself, once per signal whatever part of it the trace plots
-    if (p.smith) { const g = gammaData(t, tr.signal); if (!g || traces.some((o) => o.gamma && splitSignal(o.name).base === splitSignal(tr.signal).base)) continue; pt.name = splitSignal(tr.signal).base; pt.gamma = g; pt.secondary = false; }
+    if (p.smith) { const g = gammaData(t, tr.signal); if (!g || splitSignal(tr.signal).part) continue; pt.gamma = g; pt.secondary = false; }
     traces.push(pt);
   }
   if (traces.some((x2) => x2.cursor1)) p.placeCursor(0);
@@ -661,6 +741,15 @@ function plotMenu(t: Tab, x: number, y: number): void {
   const p = t.plot; if (!p) return;
   const r = p.canvas.getBoundingClientRect(), lx = x - r.left, ly = y - r.top;
   const it = (id: string, run: () => void, en = true): PopItem => ({ label: meta(id).label, run, disabled: !en });
+  // SIM_VIEW::onSmithRightUp / onSmithMenuCommand: no zoom history on a Smith chart; the zooms are about where the menu opened
+  if (p.smith) {
+    popupMenu(x, y, [
+      it("zoomUndo", () => undefined, false), it("zoomRedo", () => undefined, false), { sep: true },
+      { label: "Zoom In", run: () => p.smithZoomAt(lx, ly, 1.5) }, { label: "Zoom Out", run: () => p.smithZoomAt(lx, ly, 1 / 1.5) },
+      { label: "Center on Cursor", run: () => p.smithCenterOn(lx, ly) }, { label: "Fit on Screen", run: () => p.resetSmith() },
+    ]);
+    return;
+  }
   popupMenu(x, y, [
     it("zoomUndo", () => p.undoZoom(), p.canUndo()), it("zoomRedo", () => p.redoZoom(), p.canRedo()), { sep: true },
     { label: "Zoom In", run: () => p.zoom(1.5, "both", [lx, ly]) }, { label: "Zoom Out", run: () => p.zoom(1 / 1.5, "both", [lx, ly]) },
@@ -679,7 +768,7 @@ function renderSignals(): void {
   const { table: tbl, body } = table(["Signal", "Plot", "Y Scale", "Color", "Cursor 1", "Cursor 2"]); tbl.id = "sim-signals-grid";
   if (!t) { host.append(tbl); return; }
   const type = tabType(t), q = S.filter.trim().toLowerCase();
-  const list = !isPlottable(type) && type !== "Custom" && type !== "FFT" ? [] : allSignalsFor(type, t.options);
+  const list = !isPlottable(type) && type !== "Custom" && type !== "FFT" ? [] : allSignalsFor(type, t.options, isSmith(t));
   for (const tr of t.traces) if (!list.includes(tr.signal)) list.push(tr.signal);
   const axes = axesFor(t);
   for (const sig of list) {
@@ -948,8 +1037,9 @@ function mmAt(ev: PointerEvent): number[] | null { try { return worldMm(ev); } c
 function addProbe(signal: string): void {
   const t = curTab(); if (!t) return;
   const type = tabType(t);
-  const name = type === "AC" ? signal + " (gain)" : type === "SP" ? signal + " (amplitude)" : signal;
-  addTrace(name); if (type === "AC" || type === "SP") addTrace(signal + " (phase)");
+  const smith = isSmith(t);
+  const name = type === "AC" ? signal + " (gain)" : type === "SP" && !smith ? signal + " (amplitude)" : signal;
+  addTrace(name); if (type === "AC" || (type === "SP" && !smith)) addTrace(signal + " (phase)");
   toast(`Added ${signal}`);
 }
 
@@ -1002,7 +1092,13 @@ export function workbook(): Workbook {
         if (t.setup.legend && t.plot) wt.legend = { x: t.plot.legendAt.x, y: t.plot.legendAt.y };
         t.setup.fixed.forEach((f, i) => { if (f) (wt as unknown as Record<string, unknown>)[`fixedY${i + 1}scale`] = { min: f.min, max: f.max }; });
         wt.margins = { ...t.setup.margins };
-        if (t.setup.smith && tabType(t) === "SP") { wt.smithMode = true; wt.smithZoom = 1; wt.smithPanX = 0; wt.smithPanY = 0; }
+        wt.smithMode = isSmith(t);
+        if (isSmith(t)) {
+          wt.smithZoom = t.smithZoom; wt.smithPanX = t.smithPan.x; wt.smithPanY = t.smithPan.y;
+          // what the Smith toggle set aside, so a workbook written in Smith mode keeps it across a reload
+          if (t.stashTraces.length) wt.smithStashedTraces = t.stashTraces.map((x) => ({ ...x }));
+          if (t.stashCursors.length) wt.smithStashedCursors = t.stashCursors.map((x) => { const { frequency, ...rest } = x; return Number.isFinite(frequency) ? { ...rest, frequency } : rest; });
+        }
       }
       return wt;
     }),
@@ -1015,6 +1111,7 @@ function traceType(t: Tab, signal: string): number {
   const { base, part } = splitSignal(signal); const k = userKind(base) || signalKind(base, tabType(t));
   let v = k === "I" ? 0x02 : k === "P" ? 0x10 : 0x01;
   if (part === "phase") v |= 0x04; else if (part === "gain") v |= 0x08; else if (part === "amplitude") v |= 0x20;
+  else if (isSmith(t)) v |= 0x40;
   const type = tabType(t);
   v |= type === "AC" || type === "SP" || type === "NOISE" || type === "FFT" ? 0x400 : type === "DC" ? 0x800 : 0x100;
   return v;
@@ -1040,6 +1137,19 @@ export function applyWorkbook(wb: Workbook): void {
     if (wt.margins) t.setup.margins = { ...t.setup.margins, ...wt.margins };
     // SIM_PLOT_TAB::SetSmithMode: only an S-parameter tab has one
     t.setup.smith = !!wt.smithMode && tabType(t) === "SP";
+    if (t.setup.smith) {
+      const num = (v: unknown, d: number): number => (typeof v === "number" && Number.isFinite(v) ? v : d);
+      t.smithZoom = Math.min(50, Math.max(1, num(wt.smithZoom, 1))); t.smithPan = { x: num(wt.smithPanX, 0), y: num(wt.smithPanY, 0) };
+      for (const st of Array.isArray(wt.smithStashedTraces) ? wt.smithStashedTraces : []) {
+        if (!st || !st.vector) continue;
+        t.stashTraces.push({ vector: st.vector, name: st.name || st.vector, base_type: num(st.base_type, 0) });
+      }
+      for (const st of Array.isArray(wt.smithStashedCursors) ? wt.smithStashedCursors : []) {
+        const id = num(st && st.id, 0);
+        if (!st || !st.vector || (id < 1 && id !== -1)) continue;
+        t.stashCursors.push({ id, vector: st.vector, base_type: num(st.base_type, 0), sub_type: num(st.sub_type, 0), frequency: num(st.frequency, NaN) });
+      }
+    }
   }
   if (S.tabs.length) S.tabs[0].lastSch = typeof wb.last_sch_text_sim_command === "string" ? wb.last_sch_text_sim_command : "";
   S.cur = S.tabs.length ? 0 : -1; S.dirty = false;
