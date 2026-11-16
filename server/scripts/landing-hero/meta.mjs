@@ -26,7 +26,17 @@ for (const it of doc.items.values()) if (it.kind === 'gr_rect' && it.bbox && /Ed
   const s = K.kid(it.node, 'start'), e = K.kid(it.node, 'end');
   board = { x: Math.min(+s[1], +e[1]), y: Math.min(+s[2], +e[2]), w: Math.abs(e[1] - s[1]), h: Math.abs(e[2] - s[2]), r: 0 };
 }
-if (!board) throw new Error('no rectangular outline');
+if (!board) {
+  // Rounded corners: the outline is four lines and four arcs. Its box is the board, an arc's reach the radius.
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, r = 0;
+  for (const it of doc.items.values()) if ((it.kind === 'gr_line' || it.kind === 'gr_arc') && /Edge\.Cuts/.test(K.serialize(it.node))) {
+    const s = K.kid(it.node, 'start'), e = K.kid(it.node, 'end');
+    for (const p of [s, e]) { x0 = Math.min(x0, +p[1]); y0 = Math.min(y0, +p[2]); x1 = Math.max(x1, +p[1]); y1 = Math.max(y1, +p[2]); }
+    if (it.kind === 'gr_arc') r = Math.max(r, Math.abs(e[1] - s[1]));
+  }
+  if (x1 > x0) board = { x: r3(x0), y: r3(y0), w: r3(x1 - x0), h: r3(y1 - y0), r: r3(r) };
+}
+if (!board) throw new Error('no outline');
 
 // ---- pads, tracks, vias
 const pads = [], segs = [], vias = [], parts = [], zones = [], texts = [];

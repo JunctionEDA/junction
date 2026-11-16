@@ -5,8 +5,9 @@ X0, Y0, W, H = 100, 100, 43, 19
 YS = 0.5      # the layout is drawn on an 18 mm tall floor that sits in the middle, which keeps the pin rows' silkscreen off the edges
 OVER = 1.2    # how far the USB-C shell hangs over the board edge
 FLOOR = {
-    # USB-C and its protection
-    "J1": (3.66, 9.0, 270), "U2": (10.56, 9.0, 180), "R1": (9.8, 4.9, 90), "R2": (9.8, 13.1, 270),
+    # USB-C and its protection: each CC resistor right in front of its CC pin, ground end outward, so VBUS leaves the
+    # connector straight past it
+    "J1": (3.66, 9.0, 270), "U2": (10.56, 9.0, 180), "R1": (8.95, 6.85, 90), "R2": (8.95, 11.15, 270),
     # 3.3 V regulator above the USB pair
     "C1": (11.35, 5.2, 270), "U3": (13.9, 5.6, 0), "C2": (16.5, 5.2, 270),
     # STM32: USB pins (17, 18) face the connector; its supply capacitors sit in a row at pins 15 and 16, the analog one at pin 5

@@ -211,7 +211,8 @@ export function startMini(root: HTMLElement): void {
       } else if (st.kind === "width") {
         for (const r of meta.routes) if (r.net === st.net) for (const sid of r.ids) {
           const thick = spare.get(sid); if (!thick || (thick.geom as any[])[0].w <= st.thin!) continue;
-          real.set(sid, thick); spare.set(sid, variant(thick, (node) => { K.kid(node, "width")[1] = st.thin; }));
+          const thin = variant(thick, (node) => { K.kid(node, "width")[1] = st.thin; });
+          real.set(sid, thick); spare.set(sid, thin); orig.set(sid, thin);
         }
       }
     }
@@ -237,7 +238,7 @@ export function startMini(root: HTMLElement): void {
       const it = doc.items.get(id), h = home(id); if (it && !unplaced.has(id)) K.moveItem(doc, it, h[0], h[1], 1e6);
       for (const [i, pid] of [...crowded]) if (pid === id) crowded.delete(i);
     } else if (st.kind === "width") {
-      for (const r of meta.routes) if (r.net === st.net) for (const sid of r.ids) { const it = real.get(sid); if (!it) continue; if (doc.items.has(sid)) doc.items.set(sid, it); else if (spare.has(sid)) spare.set(sid, it); real.delete(sid); }
+      for (const r of meta.routes) if (r.net === st.net) for (const sid of r.ids) { const it = real.get(sid); if (!it) continue; if (doc.items.has(sid)) doc.items.set(sid, it); else if (spare.has(sid)) spare.set(sid, it); orig.set(sid, it); real.delete(sid); }
     }
     pending.delete(id);
   }
@@ -648,8 +649,8 @@ export function startMini(root: HTMLElement): void {
     const texts = meta.texts.filter((t) => shelf.has(t.id) && !kept.has(t.text)).map((t) => t.id);
     const routed = !gone.size && !unplaced.size;
     // A story can be told once what it is about is on the board: the part placed, half the net's tracks laid, the board all but done.
-    const told = (st: Story): boolean => st.kind === "width" ? meta.routes.filter((r) => r.net === st.net).length > 1 && meta.routes.filter((r, i) => r.net === st.net && !gone.has(i)).length >= 3 && !!pinOf(st)
-      : st.kind === "label" ? routed && poured && !stitches.length && !texts.length : !unplaced.has(refId(st.ref)) && !taken.has(refId(st.ref));
+    const told = (st: Story): boolean => st.kind === "width" ? meta.routes.filter((r) => r.net === st.net).length > 1 && meta.routes.filter((r, i) => r.net === st.net && !gone.has(i)).length >= 3 && meta.routes.every((r, i) => r.net !== st.net || !inCluster(i)) && !!pinOf(st)
+      : st.kind === "label" ? routed && poured && !stitches.length && !texts.length : !unplaced.has(refId(st.ref)) && !taken.has(refId(st.ref)) && !busy.has(UNIT.get(refId(st.ref))!);
     const tell = !note ? stories.filter((x) => x.state === 0 && told(x)) : [];
     const fix = stories.filter((x) => x.state === 1 && x.by !== a.who && !others.some((o) => o.story === x));
     const opts: [Task, number][] = [["rest", 0.25]];
