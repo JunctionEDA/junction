@@ -118870,9 +118870,10 @@ var Router = class _Router {
       if (mine.length) {
         const inZone = (a) => mine.some((z2) => z2.layers.some((l) => a.layers.includes(l)) && z2.polys.filter((pts) => pointInPolyPts(pts, a.p)).length % 2 === 1);
         const covered = [], rest = [];
-        const pz = mine.filter((z2) => z2.layers.some((l) => !routable[l]));
+        const inner = (l) => this.opts.planeDrops === true ? /^In\d/.test(copper[l]) : !routable[l];
+        const pz = mine.filter((z2) => z2.layers.some(inner));
         if (pz.length && !watchOnly) {
-          const pl = pz[0].layers.find((l) => !routable[l]);
+          const pl = pz[0].layers.find(inner);
           const edgeGap = (polys, p) => {
             let d = Infinity;
             for (const pts of polys) for (let i = 0; i < pts.length; i++) {
@@ -119547,6 +119548,16 @@ var Router = class _Router {
   /** The two tracks of a pair from its centre line: each a constant distance to one side, mitred at the turns, and
    *  fanned to its own pads at the ends — checked exactly against each other and against everything around.
    *  Returns the two polylines, or why they cannot be. */
+  /** The width of each piece of one line of a pair: the coupled run at `w`, the two short fan-out pieces at its ends
+   *  necked down where the chip's pins stand closer than two tracks and a gap (a USB pair into a 0.4 mm QFN). */
+  pairWidth(pr, t, k, w, clr) {
+    if (k !== 0 && k !== t.length - 2) return w;
+    const { cp: cp2, cn } = pr;
+    const at4 = k === 0 ? [cp2.a, pr.swap ? cn.b : cn.a] : [cp2.b, pr.swap ? cn.a : cn.b];
+    const pitch = Math.hypot(at4[0].p[0] - at4[1].p[0], at4[0].p[1] - at4[1].p[1]);
+    const floor = Math.max(this.s.minTrackWidth || 0, 0.1);
+    return Math.max(floor, Math.min(w, Math.floor((pitch - clr) * 1e3 - 1e-6) / 1e3));
+  }
   pairTracks(pr, c, l, w, d, clr, sgn, lead) {
     const P = this.P, { cp: cp2, cn } = pr;
     const Pa = cp2.a, Pb = cp2.b, Na = pr.swap ? cn.b : cn.a, Nb = pr.swap ? cn.a : cn.b;
@@ -119571,7 +119582,7 @@ var Router = class _Router {
     };
     const segs = (t) => {
       const o = [];
-      for (let i = 0; i + 1 < t.length; i++) if (Math.hypot(t[i + 1][0] - t[i][0], t[i + 1][1] - t[i][1]) > 1e-4) o.push({ t: "seg", a: t[i], b: t[i + 1], r: w / 2 });
+      for (let i = 0; i + 1 < t.length; i++) if (Math.hypot(t[i + 1][0] - t[i][0], t[i + 1][1] - t[i][1]) > 1e-4) o.push({ t: "seg", a: t[i], b: t[i + 1], r: this.pairWidth(pr, t, i, w, clr) / 2 });
       return o;
     };
     const op = off(sgn), on2 = off(-sgn);
@@ -119716,7 +119727,7 @@ var Router = class _Router {
     if (!laid) return close || why2;
     const put4 = (c, t) => {
       c.shapes = [];
-      for (let i = 0; i + 1 < t.length; i++) if (Math.hypot(t[i + 1][0] - t[i][0], t[i + 1][1] - t[i][1]) > 1e-4) c.shapes.push({ net: c.net, layers: [laid.l], shape: { t: "seg", a: t[i], b: t[i + 1], r: w / 2 }, clr: c.cls.clr });
+      for (let i = 0; i + 1 < t.length; i++) if (Math.hypot(t[i + 1][0] - t[i][0], t[i + 1][1] - t[i][1]) > 1e-4) c.shapes.push({ net: c.net, layers: [laid.l], shape: { t: "seg", a: t[i], b: t[i + 1], r: this.pairWidth(pr, t, i, w, clr) / 2 }, clr: c.cls.clr });
       c.nodes = laid.nodes;
       c.viaCells = [];
       c.stubs = [];
@@ -119865,7 +119876,7 @@ var Router = class _Router {
             continue;
           }
           const set2 = (cc, t) => {
-            for (let k = 0; k + 1 < t.length; k++) if (Math.hypot(t[k + 1][0] - t[k][0], t[k + 1][1] - t[k][1]) > 1e-4) cc.shapes.push({ net: cc.net, layers: [Ld.l], shape: { t: "seg", a: t[k], b: t[k + 1], r: w / 2 }, clr: cc.cls.clr });
+            for (let k = 0; k + 1 < t.length; k++) if (Math.hypot(t[k + 1][0] - t[k][0], t[k + 1][1] - t[k][1]) > 1e-4) cc.shapes.push({ net: cc.net, layers: [Ld.l], shape: { t: "seg", a: t[k], b: t[k + 1], r: this.pairWidth(pr, t, k, w, Ld.clr) / 2 }, clr: cc.cls.clr });
             this.place(cc, 1);
           };
           set2(cp2, r.tp);
