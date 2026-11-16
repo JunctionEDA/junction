@@ -48,6 +48,8 @@ async function open(token) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 800 } });
   const p0 = await ctx.newPage(); await p0.goto(`${BASE}/auth/dev?jwt=${token}&next=${encodeURIComponent('/api/me')}`); await p0.close();
   const page = await ctx.newPage();
+  // PLAYOUT=0: draw each update as it arrives (the replay switch, peercursors.ts), to compare
+  if (process.env.PLAYOUT === '0') await page.addInitScript(() => { try { localStorage.setItem('junction.cursorPlayout', '0'); } catch {} });
   page.on('pageerror', (e) => console.log('pageerror: ' + e.message));
   await page.goto(`${BASE}/p/${projectId}/edit`);
   await page.waitForFunction(() => window.CollabEditor && window.CollabEditor.kdoc && window.CollabEditor.joinedDocId, null, { timeout: 30000 });
@@ -59,6 +61,8 @@ async function open(token) {
   return page;
 }
 const A = await open(tokA), B = await open(tokB);
+// JITTER_FLAG=<file>: a test proxy (an uneven network) reads this file to start misbehaving once both editors are open
+if (process.env.JITTER_FLAG) fs.writeFileSync(process.env.JITTER_FLAG, '1');
 const docId = await A.evaluate(() => window.CollabEditor.joinedDocId);
 
 // where the drawing area is, and a circle inside it
@@ -114,9 +118,11 @@ for (;;) {
 }
 // then stop dead: how long until the drawn pointer is where the real one stopped
 const stopAt = await A.evaluate(() => performance.timeOrigin + performance.now());
+if (process.env.DEBUG) console.log('  replay state while moving', JSON.stringify(await B.evaluate(() => window.__peerCursorState && window.__peerCursorState())));
 await A.waitForTimeout(1200);
 if (opTimer) clearInterval(opTimer);
 const moves = await A.evaluate(() => window.__moves), seen = await B.evaluate(() => window.__seen);
+if (process.env.DEBUG) console.log('  replay state', JSON.stringify(await B.evaluate(() => window.__peerCursorState && window.__peerCursorState())));
 
 // angle of the real pointer over time (unwrapped), then for each frame the drawn pointer's angle against it
 const ang = (x, y) => Math.atan2(y - CY, x - CX);
@@ -128,7 +134,7 @@ const realAt = (t) => {   // [angle, x, y] of the real pointer at time t
   const f = (t - real[lo][0]) / (real[hi][0] - real[lo][0] || 1);
   return [1, 2, 3].map((k) => real[lo][k] + (real[hi][k] - real[lo][k]) * f);
 };
-const ages = [], errs = []; let updates = 0, last = null; const first = real[0][0] + 500, end = real[real.length - 1][0];
+const ages = [], errs = [], speeds = []; let updates = 0, last = null, prevA = null; const first = real[0][0] + 500, end = real[real.length - 1][0];
 let frames = 0;
 for (const [t, sx, sy] of seen) {
   if (t < first || t > end) continue;
@@ -139,6 +145,8 @@ for (const [t, sx, sy] of seen) {
   const [ra, rx, ry] = realAt(t);
   let d = ra - ang(x, y); d -= Math.round(d / (2 * Math.PI)) * 2 * Math.PI;   // how far behind, in radians
   ages.push(d / OMEGA * 1000); errs.push(Math.hypot(rx - x, ry - y));
+  // how even the drawn motion is: its speed from one frame to the next, as a share of the real speed
+  const da = ang(x, y); if (prevA) { let s = da - prevA[1]; s -= Math.round(s / (2 * Math.PI)) * 2 * Math.PI; if (t > prevA[0]) speeds.push(s / ((t - prevA[0]) / 1000) / OMEGA); } prevA = [t, da];
 }
 const stats = (v) => { const s = [...v].sort((a, b) => a - b), q = (p) => s[Math.min(s.length - 1, Math.floor(p * s.length))]; return { mean: v.reduce((a, b) => a + b, 0) / v.length, p50: q(0.5), p95: q(0.95), max: s[s.length - 1] }; };
 const fmt = (s, u) => `mean ${s.mean.toFixed(1)}${u}, median ${s.p50.toFixed(1)}${u}, p95 ${s.p95.toFixed(1)}${u}, worst ${s.max.toFixed(1)}${u}`;
@@ -151,10 +159,13 @@ console.log(`  sender got                 ${(moves.length / ((stopAt - real[0][0
 console.log(`  drawn pointer moved        ${(updates / secs).toFixed(1)} times a second (${(frames / secs).toFixed(0)} frames a second)`);
 console.log(`  age of what is drawn       ${fmt(stats(ages), ' ms')}`);
 console.log(`  distance from the real one ${fmt(stats(errs), ' px')}`);
+{ const m = speeds.reduce((p, c) => p + c, 0) / speeds.length, sd = Math.sqrt(speeds.reduce((p, c) => p + (c - m) ** 2, 0) / speeds.length);
+  console.log(`  unevenness of the motion     ${(sd * 100).toFixed(0)}% (frame-to-frame speed, spread around the real speed; 0% is perfectly smooth)`); }
 console.log(`  settled after the stop in  ${settle === null ? 'never (still off after 1.2 s)' : Math.max(0, settle).toFixed(0) + ' ms'}`);
 if (process.env.JSON_OUT) fs.writeFileSync(process.env.JSON_OUT, JSON.stringify({ age: stats(ages), err: stats(errs), updates: updates / secs, settle }));
 
 if (ws) ws.close();
+if (process.env.JITTER_FLAG) fs.rmSync(process.env.JITTER_FLAG, { force: true });
 await browser.close();
 await db.query('DELETE FROM projects WHERE id = $1', [projectId]).catch(() => {});
 await db.end();
