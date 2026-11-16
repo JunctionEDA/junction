@@ -582,6 +582,20 @@ export function itemName(m: SimModel, item: SpiceItem): string {
   const t = m.cls === "rawspice" ? m.getParam(0).value : spiceInfo(m.type).itemType;
   return item.refName !== "" && item.refName.startsWith(t) ? item.refName : t + item.refName;
 }
+/** SIM_MODEL::GetTunerParam: the parameter a tuner changes (an ideal R / C / L's value, a potentiometer's wiper
+ *  position, a DC source's value), or null when the model has none. */
+export function tunerParam(m: SimModel): Param | null {
+  if (m.fallback || !m.enabled) return null;
+  if (m.cls === "ideal") return m.params.length ? m.getParamOverride(0) : null;
+  if (m.cls === "r_pot") return m.findParam("pos");
+  if (m.cls === "source" && (m.type === "V" || m.type === "I")) return m.params.length ? m.getParamOverride(0) : null;
+  return null;
+}
+/** SPICE_GENERATOR::TunerCommand and its overrides: the command that sets a tuned value ("" when there is none). */
+export function tunerCommand(m: SimModel, item: SpiceItem, value: number): string {
+  if (!tunerParam(m)) return "";
+  return m.cls === "r_pot" ? `altermod @${itemName(m, item)}[position]=${fmtG(value)}` : `alter @${itemName(m, item)}=${fmtG(value)}`;
+}
 /** SPICE_GENERATOR::CurrentNames and its overrides: what ngspice names the item's currents.
  *  SPICE_GENERATOR_NGSPICE: a BJT's I(<item>:c|b|e), a JFET / MESFET / MOSFET's I(<item>:d|g|s), R C L D one I(<item>),
  *  any other built-in device none; SPICE_GENERATOR_SUBCKT (and the multi-unit one): I(<item>) for two pins, else
@@ -608,8 +622,10 @@ function itemPins(m: SimModel, item: SpiceItem): string {
   let out = "", nc = 0; const nums = item.pinNumbers || [], nets = item.pinNetNames || [];
   // SPICE_GENERATOR_RAW_SPICE::ItemPins: a raw model that knows none of its pins takes the symbol's pins in order
   if (!m.fallback && m.cls === "rawspice" && !m.pins.length) { for (const n of nets) out += ` ${n}`; return out; }
-  for (let i = 0; i < m.pins.length; i++) {
-    const k = nums.indexOf(m.pins[i].symbolPinNumber);
+  // SPICE_GENERATOR_SWITCH::GetPins: the switched nodes first, then the controlling ones (S n+ n- nc+ nc-)
+  const pins = !m.fallback && m.cls === "switch" && m.pins.length >= 4 ? (m.type === "SW_V" ? [m.pins[2], m.pins[3], m.pins[0], m.pins[1]] : [m.pins[2], m.pins[3]]) : m.pins;
+  for (let i = 0; i < pins.length; i++) {
+    const k = nums.indexOf(pins[i].symbolPinNumber);
     out += k < 0 ? ` NC-${item.refName}-${nc++}` : ` ${nets[k]}`;
   }
   return out;
@@ -692,14 +708,14 @@ export function preview(m: SimModel, item: SpiceItem): string {
 
 // ---------------------------------------------------------------- SPICE library (.lib / .sub / .cir / .mod)
 export interface LibModel { name: string; model: SimModel; code: string }
-export interface SpiceLibrary { models: LibModel[]; errors: string[]; ibis?: IbisFile }
+export interface SpiceLibrary { models: LibModel[]; errors: string[]; ibis?: IbisFile; /** an IBIS library's text (KIBIS reads it again for the netlist) */ text?: string }
 /** SIM_LIBRARY::Create: a path ending in "ibs" is an IBIS library (SIM_LIBRARY_IBIS), anything else SPICE. */
 export const isIbisPath = (p: string): boolean => p.endsWith("ibs");
 /** SIM_LIBRARY_IBIS::ReadFile: one KIBIS_DEVICE model per [Component], with the component's pins (InitModel). */
 export function parseIbisLibrary(text: string, path: string): SpiceLibrary {
   const k = parseIbis(text);
   if (!k.valid) return { models: [], errors: [`Invalid IBIS file '${path}'`], ibis: k };
-  const lib: SpiceLibrary = { models: [], errors: [], ibis: k };
+  const lib: SpiceLibrary = { models: [], errors: [], ibis: k, text };
   for (const c of k.components) {
     const m = createModel("KIBIS_DEVICE");
     if (m.ibis) { m.ibis.componentName = c.name; m.ibis.ibisPins = c.pins.map((p) => [p.number, p.signal]); }
