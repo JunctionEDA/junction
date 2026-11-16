@@ -266,7 +266,7 @@ function JoinDialog({ me, onClose }: { me: User | null; onClose: () => void }) {
           onChange={(ev) => { setText(ev.target.value); setError(null); }}
           onPaste={(ev) => { const t = ev.clipboardData.getData("text"); if (API.linkToken(t) && me) { ev.preventDefault(); setText(t.trim()); join(t); } }}
           onKeyDown={(ev) => { if (ev.key === "Enter") join(); }} /></label>
-      {error ? <p className="hp-note err" role="alert">{error}</p> : <p className="hp-note">Paste the link someone sent you. The project is added to your list and opens right away. The same link works in the desktop app under File &gt; Join Session from URL…</p>}
+      {error ? <p className="hp-note err" role="alert">{error}</p> : <p className="hp-note">Paste the link someone sent you. The project is added to your list and opens right away.</p>}
     </Modal>
   );
 }
@@ -698,16 +698,16 @@ function Welcome({ onJoin }: { onJoin: () => void }) {
   return (
     <div className="hp-welcome">
       <h1>KiCad, together</h1>
-      <p className="hp-lead">Keep KiCad projects online and edit them with other people in real time: shared cursors, live edits, comments and history, in the desktop app and here in the browser.</p>
+      <p className="hp-lead">Keep KiCad projects online and edit them with other people in real time: shared cursors, live edits, comments and history, right here in the browser.</p>
       <div className="hp-empty-acts">
         <a className="btn primary" href={API.loginUrl(location.pathname.startsWith("/trash") ? location.pathname : "/")}><Ic name="people" />Sign in with GitHub</a>
         <button type="button" className="btn" onClick={onJoin}><Ic name="link" />Join with link</button>
         <button type="button" className="btn" onClick={() => go("/gallery")}><Ic name="explore" />Browse public projects</button>
       </div>
       <ol className="hp-steps">
-        <li><b>Put a project online.</b> Upload it here after signing in, or use File &gt; Publish Project Online in the <a href={RELEASES} target="_blank" rel="noreferrer">desktop app</a>.</li>
+        <li><b>Put a project online.</b> Upload it here after signing in.</li>
         <li><b>Share it.</b> Invite people by GitHub username or email, or send a link.</li>
-        <li><b>Work together.</b> Everyone edits the same schematic and board, from Junction or the browser.</li>
+        <li><b>Work together.</b> Everyone edits the same schematic and board in the browser.</li>
       </ol>
     </div>
   );
@@ -836,7 +836,7 @@ export function Home() {
               {me ? <a aria-label="Connect AI" className="hp-side-btn" id="homeConnect" href="/connect"><Ic name="link" size={18} /><span>Connect AI</span></a> : null}
             </div>
             <div className="hp-side-foot">
-              {me ? null : <a aria-label="Get the desktop app" className="hp-side-btn" href={RELEASES} target="_blank" rel="noreferrer"><Ic name="desktop" size={18} /><span>Get the desktop app</span></a>}
+              {/* web only for now: {me ? null : <a aria-label="Get the desktop app" className="hp-side-btn" href={RELEASES} target="_blank" rel="noreferrer"><Ic name="desktop" size={18} /><span>Get the desktop app</span></a>} */}
               {accountBtn}
             </div>
           </aside>
@@ -877,7 +877,7 @@ export function Home() {
         ] as MenuEntry[] : []),
         { id: "waka", label: "WakaTime settings", icon: "clock", run: () => { go("/time"); setTimeout(() => document.getElementById("wakatime")?.scrollIntoView({ block: "start" }), 300); } },
         { id: "gh", label: "GitHub profile", icon: "open", run: () => { window.open(`https://github.com/${me.login}`, "_blank", "noopener"); } },
-        { id: "app", label: "Get the desktop app", icon: "desktop", run: () => { window.open(RELEASES, "_blank", "noopener"); } },
+        // web only for now: { id: "app", label: "Get the desktop app", icon: "desktop", run: () => { window.open(RELEASES, "_blank", "noopener"); } },
         ...(me.admin ? ["-" as const, { id: "admin", label: "Admin dashboard", icon: "chart", run: () => { location.href = "/admin"; } }] : []),
         "-",
         { id: "out", label: "Log out", icon: "signout", run: () => { signOut(); } },
