@@ -91,7 +91,7 @@ async function fitTo(page, box, rec) {
   const pause = async (ms) => { if (rec) { await sleep(ms / 2); await rec.tick(); await rec.tick(); } else await sleep(ms); };
   const vp = page.viewportSize(), H = vp.height - 140;
   const span = async () => { const m = await mapOf(page); const a = m.to([box[0], box[1]]), b = m.to([box[2], box[3]]); return { a, b, w: b[0] - a[0], h: b[1] - a[1] }; };
-  for (let i = 0; i < 30; i++) { const s = await span(); if (s.w <= vp.width * 0.98 && s.h <= H) break; await page.mouse.move(vp.width / 2, vp.height / 2); await page.mouse.wheel(0, 120); await pause(250); }
+  for (let i = 0; i < 60; i++) { const s = await span(); if (s.w <= vp.width * 0.98 && s.h <= H) break; await page.mouse.move(vp.width / 2, vp.height / 2); await page.mouse.wheel(0, 120); await pause(250); }
   for (let i = 0; i < 30; i++) { const s = await span(); if (s.w * 1.25 > vp.width * 0.98 || s.h * 1.25 > H) break; await page.mouse.move(vp.width / 2, vp.height / 2); await page.mouse.wheel(0, -120); await pause(250); }
   for (let i = 0; i < 8; i++) {
     const s = await span(); const cx = (s.a[0] + s.b[0]) / 2, cy = (s.a[1] + s.b[1]) / 2, tx = vp.width / 2, ty = 70 + H / 2;
@@ -351,6 +351,7 @@ await scene('build', async (dir) => {
   // the editor may still fit its view to the (nearly empty) board after loading: frame the work area again, last thing
   await a.bringToFront(); await sleep(1500); await fitTo(a, VIEW); console.log('  zoom before recording:', await a.evaluate(() => document.body.innerText.match(/Zoom [\d.]+/)?.[0] || '?'));
   const rec = await record(a, dir);
+  await fitTo(a, VIEW, rec);
   const m = await mapOf(a);
   await rec.hold(500);
   // 1. the outline: Edge.Cuts, corner to corner
@@ -406,15 +407,13 @@ await scene('build', async (dir) => {
     const pg = pages[w], mp = maps[w], d = off[name]; if (!d[0] && !d[1]) return;
     const refs = FP.filter((f) => f.block === name).map((f) => f.ref), ids = inside[name] || [];
     const b = padBox(name), c = [(b[0] + b[2]) / 2 + d[0], (b[1] + b[3]) / 2 + d[1]];
-    yield* glideTo(w, mp.to(c), 10);
-    await pg.mouse.down(); yield; yield;
+    yield* glideTo(w, mp.to(c), 10); yield; yield;
     const frames = 24; let last = [0, 0];
     for (let f = 1; f <= frames; f++) {
       const k = ease(f / frames), now = [-d[0] * k, -d[1] * k];
       const sc = mp.to([c[0] + now[0], c[1] + now[1]]); await pg.mouse.move(sc[0], sc[1]); pos[w] = sc;
       await pg.evaluate(([r, i, dx, dy]) => window.__demo.moveGroup(r, i, dx, dy), [refs, ids, now[0] - last[0], now[1] - last[1]]); last = now; yield;
     }
-    await pg.mouse.up();
     // land exactly where the layout has them
     for (const f of FP.filter((x) => x.block === name)) await pg.evaluate(([ref, node]) => window.__demo.snap(ref, node, 0, 0), [f.ref, f.node]);
     yield; yield; yield;
@@ -444,7 +443,7 @@ await scene('build', async (dir) => {
   rec.mark('inner');
   await runAll(WORK.map((W, i) => routeInside(W, [0, 4, 2, 6][i])));
   for (const w of Object.keys(pages)) await settled(pages[w]);
-  await rec.hold(600); rec.mark('onboard');
+  await rec.hold(600); await fitTo(a, VIEW, rec); await remap(); rec.mark('onboard');
   await runAll(WORK.map((W, i) => moveAll(W, [0, 10, 5, 15][i])));
   for (const w of Object.keys(pages)) await settled(pages[w]);
   await rec.hold(700); rec.mark('blocks');
