@@ -73216,6 +73216,7 @@ function horizon(c) {
   return Math.min(CARRY_MAX_MS, c.every * 1.2);
 }
 function target(c, now) {
+  if (!PREDICT) return [c.x, c.y];
   const age = now - c.t, carry = horizon(c);
   const k = age <= carry ? c.lead + age : Math.max(0, c.lead + carry - 2 * (age - carry));
   return [c.x + c.vx * k, c.y + c.vy * k];
@@ -73362,7 +73363,7 @@ function toggleFollowToast(cid, name, render3) {
   toast(E.followPeer ? `Following ${name}` : "Stopped following");
   render3();
 }
-var PEER_CURSOR_PX, PEER_TAG_TEXT_PX, PEER_TAG_PAD_PX, CARRY_MAX_MS, LEAD_MAX_MS, FRAME_MS, rttMs, EASE_MS, cursors, layer, raf, lastFrame, scaleOf3, onFollow;
+var PEER_CURSOR_PX, PEER_TAG_TEXT_PX, PEER_TAG_PAD_PX, CARRY_MAX_MS, LEAD_MAX_MS, FRAME_MS, rttMs, EASE_MS_PREDICTING, PREDICT, EASE_MS, cursors, layer, raf, lastFrame, scaleOf3, onFollow;
 var init_peercursors = __esm({
   "web/editor/peercursors.ts"() {
     "use strict";
@@ -73376,7 +73377,15 @@ var init_peercursors = __esm({
     LEAD_MAX_MS = 90;
     FRAME_MS = 4;
     rttMs = 0;
-    EASE_MS = 7;
+    EASE_MS_PREDICTING = 7;
+    PREDICT = (() => {
+      try {
+        return localStorage.getItem("junction.cursorPrediction") === "1";
+      } catch {
+        return false;
+      }
+    })();
+    EASE_MS = PREDICT ? EASE_MS_PREDICTING : 14;
     cursors = /* @__PURE__ */ new Map();
     layer = null;
     raf = 0;
