@@ -139,8 +139,10 @@ project.
 
 ---
 
-## Upstream KiCad
+## Based on KiCad
 
-Junction is built on [KiCad](https://kicad.org/). For building KiCad, its policies and its source documentation,
-see the [developer documentation](https://dev-docs.kicad.org), the
-[wiki](https://gitlab.com/kicad/code/kicad/-/wikis/home) and the [forum](https://forum.kicad.info/).
+Junction is built on [KiCad](https://kicad.org/) and stays current with it: every week
+[upstream-sync](tools/upstream-sync/README.md) merges KiCad's latest changes, builds and tests them on Linux,
+Windows and macOS, and only then moves `master`. For building the desktop code and its style, see KiCad's
+[developer documentation](https://dev-docs.kicad.org). Problems with Junction belong in this repository's
+issues, not KiCad's tracker.

@@ -1,0 +1,9 @@
+# Paths where Junction's version always wins over upstream KiCad's in the weekly merge.
+# Upstream changes to them are dropped; a path deleted here stays deleted.
+# One git pathspec per line.
+.github
+.gitlab
+.gitlab-ci.yml
+README.md
+CONTRIBUTING.md
+code-of-conduct.md
