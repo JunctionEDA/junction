@@ -6,6 +6,7 @@
 "use strict";
 const assert = require("assert");
 const path = require("path");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 require(path.join(__dirname, "..", "sch-tools.js"));
 const K = globalThis.KiCadCanvas, sch = globalThis.CollabTools.sch, _ = sch._;
@@ -109,7 +110,7 @@ test("bus colour from the label's own name, wherever it sits; bus-named sheet pi
 
 test("Formatting values out of range fall back to the default (PARAM / PARAM_SCALED::Load), not the limit", () => {
   const esbuild = require("esbuild");
-  const out = esbuild.buildSync({ stdin: { contents: 'export { schParamInRange } from "./logic";', resolveDir: path.join(__dirname, "..", "..", "web", "dialogs"), loader: "ts" }, bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ stdin: { contents: 'export { schParamInRange } from "./logic";', resolveDir: webPath("domains", "pcb", "dialogs"), loader: "ts" }, bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require);
   const f = m.exports.schParamInRange;
   assert.strictEqual(f(2, 6, 5, 1000), 6, "default_line_thickness 2 mil: the 6 mil default");

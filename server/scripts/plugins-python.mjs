@@ -343,7 +343,7 @@ _kj.dumps(_ko)
     }
     // fabrication: a stand-in for the editor's writers, enough for a plugin to carry on with what it does with the files
     const stem = path.basename(boardPath).replace(/\.kicad_pcb$/, "");
-    // Gerbers, drill files, placements and the BOM are the editor's own writers too (static/dist/fab.js, as web/plugins/api.ts
+    // Gerbers, drill files, placements and the BOM are the editor's own writers too (static/dist/fab.js, as web/domains/pcb/plugins/api.ts
     // calls them), so a drive can open what a fabrication plugin packs and find the board in it
     if (/^fab\.(gerbers|drill|positions|bom|layers|odb)$/.test(method) && process.env.KC_FAB_STANDIN !== "1") {
       if (!globalThis.KiCadFab || !globalThis.KiCadFab.plotGerbers) { require(path.join(server, "static", "kicad-canvas.js")); require(path.join(server, "static", "dist", "fab.js")); }
@@ -410,7 +410,7 @@ _kj.dumps(_ko)
       return JSON.stringify({ text: r.text, models: r.models, stats: r.stats });
     }
     // The design rule check and the project's netlist are the editor's own as well (static/pcb-tools.js, canvas/pcb-netlist
-    // over the schematics beside the board), as web/plugins/api.ts and editor/pcbdialogs/inspect.ts call them, so a
+    // over the schematics beside the board), as web/domains/pcb/plugins/api.ts and editor/pcbdialogs/inspect.ts call them, so a
     // drive sees the violations a plugin's `kicad-cli pcb drc` sees in the editor.  KC_DRC_STANDIN=1 answers "nothing found".
     if ((method === "fab.drc" || method === "fab.netlist") && process.env.KC_DRC_STANDIN !== "1") {
       if (!globalThis.PcbTools || !globalThis.PcbTools.drc) { require(path.join(server, "static", "kicad-canvas.js")); require(path.join(server, "static", "pcb-tools.js")); }

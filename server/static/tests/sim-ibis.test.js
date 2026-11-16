@@ -1,12 +1,13 @@
-// sim-ibis.test.js — IBIS in the Simulation Model Editor (web/dialogs/sim-ibis.ts and the SIM_LIBRARY_IBIS /
-// SIM_MODEL_IBIS side of web/dialogs/sim-model-logic.ts): the reader, the pins and their models, Differential, the
+// sim-ibis.test.js — IBIS in the Simulation Model Editor (web/domains/pcb/dialogs/sim-ibis.ts and the SIM_LIBRARY_IBIS /
+// SIM_MODEL_IBIS side of web/domains/pcb/dialogs/sim-model-logic.ts): the reader, the pins and their models, Differential, the
 // KIBIS waveform types and the Sim.Ibis.Pin / Sim.Ibis.Model / Sim.Ibis.Diff fields.
 // Run: node server/static/tests/sim-ibis.test.js
 "use strict";
 const path = require("path"), assert = require("assert"), fs = require("fs");
+const { webPath } = require("./web-path");
 const esbuild = require("esbuild");
 function load(file) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
 const L = load("dialogs/sim-model-logic.ts");

@@ -8,7 +8,7 @@
 //! server's own readers of "the file" (archive download, GitHub sync) would see the
 //! last upload instead of the design.
 //!
-//! The fold itself is `web/mcp/compact.ts`, run in the tool host: it splices the edits
+//! The fold itself is `web/domains/pcb/mcp/compact.ts`, run in the tool host: it splices the edits
 //! into the stored file's own bytes, applies them with the editor's applier, reads the
 //! result back and refuses anything that is not exactly the live document.  Here is
 //! only the bookkeeping: which ops, and storing the result at the seq of the last one.

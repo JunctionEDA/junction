@@ -4,9 +4,10 @@
 // Run: node server/static/tests/sweep8-dlg.test.js
 "use strict";
 const path = require("path"), assert = require("assert");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-const load = (rel) => { const b = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", ...rel)], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" }); const m = { exports: {} }; new Function("module", "exports", "require", b.outputFiles[0].text)(m, m.exports, require); return m.exports; };
+const load = (rel) => { const b = esbuild.buildSync({ entryPoints: [webPath(...rel)], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" }); const m = { exports: {} }; new Function("module", "exports", "require", b.outputFiles[0].text)(m, m.exports, require); return m.exports; };
 const K = globalThis.KiCadCanvas;
 const S = load(["tools", "kicad-dialogs", "shell.ts"]), L = load(["dialogs", "sch-items-logic.ts"]);
 const M = load(["editor", "pcbdialogs", "track-via-model.ts"]);

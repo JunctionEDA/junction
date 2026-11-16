@@ -1,4 +1,4 @@
-// global-text-graphics.test.js — DIALOG_GLOBAL_EDIT_TEXT_AND_GRAPHICS (web/tools/pcb-tools/global-text-graphics.ts):
+// global-text-graphics.test.js — DIALOG_GLOBAL_EDIT_TEXT_AND_GRAPHICS (web/domains/pcb/tools/pcb-tools/global-text-graphics.ts):
 // scope, filters, the specified values and the layer defaults (StyleFromSettings).
 // Run: node server/static/tests/global-text-graphics.test.js
 "use strict";

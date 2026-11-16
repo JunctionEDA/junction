@@ -60,9 +60,9 @@ KEYWORDS = ["common/pcb.keywords", "eeschema/schematic.keywords", "common/drc_ru
             "common/pcb_plot_params.keywords", "common/stroke_params.keywords", "common/embedded_files.keywords",
             "common/template_fieldnames.keywords", "common/netlist.keywords"]
 VERSIONS = [("pcbnew/pcb_io/kicad_sexpr/pcb_io_kicad_sexpr.h", "board"), ("eeschema/sch_file_versions.h", "schematic and symbol library")]
-GENERATED = ["server/web/generated/kicad-ui-spec.json", "server/web/generated/kicad-menu-spec.json",
-             "server/web/generated/kicad-menu-icons.json", "server/web/generated/kicad-context-spec.json",
-             "server/web/generated/rules-help.ts", "server/web/viewer3d/icons.json"]
+GENERATED = ["server/web/domains/pcb/generated/kicad-ui-spec.json", "server/web/domains/pcb/generated/kicad-menu-spec.json",
+             "server/web/domains/pcb/generated/kicad-menu-icons.json", "server/web/domains/pcb/generated/kicad-context-spec.json",
+             "server/web/domains/pcb/generated/rules-help.ts", "server/web/domains/pcb/viewer3d/icons.json"]
 
 
 def git(*args, check=True):
@@ -169,7 +169,7 @@ def check_items(old, new, path, kind):
 
 def action_changes():
     """Compare the regenerated action table with the one in HEAD."""
-    path = "server/web/generated/kicad-menu-spec.json"
+    path = "server/web/domains/pcb/generated/kicad-menu-spec.json"
     try:
         before = json.loads(show("HEAD", path) or "{}").get("actions", {})
         with open(path, encoding="utf-8") as fh:

@@ -1,4 +1,4 @@
-// model3d.test.js — the 3D Models tab's logic (web/library/model3d.ts): FILENAME_RESOLVER::ValidateFileName, where a
+// model3d.test.js — the 3D Models tab's logic (web/domains/pcb/library/model3d.ts): FILENAME_RESOLVER::ValidateFileName, where a
 // model path points, PANEL_FP_PROPERTIES_3D_MODEL's status problems, the configured path choices, the picker's
 // filters, PANEL_PREVIEW_3D_MODEL's spin steps and the FPHOLDER preview board.
 // Run: node server/static/tests/model3d.test.js
@@ -6,8 +6,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const { webPath } = require("./web-path");
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-const built = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "library", "model3d.ts")], bundle: true, format: "cjs", target: "es2020", write: false });
+const built = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "library", "model3d.ts")], bundle: true, format: "cjs", target: "es2020", write: false });
 const mod = { exports: {} }; new Function("exports", "module", "require", built.outputFiles[0].text)(mod.exports, mod, require); const M = mod.exports;
 
 test("ValidateFileName follows FILENAME_RESOLVER's rules", () => {

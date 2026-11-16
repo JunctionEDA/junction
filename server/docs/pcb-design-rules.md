@@ -6,8 +6,8 @@ tested automatically by `board.review()` (`review_design` on the board); rules m
 placement or routing by `board.plan()`; rules marked **manual** are printed in the review's manual checklist because
 they cannot be read from the copper.
 
-Code: `server/web/ai/review-physics.ts` (checks and plans), `server/harness/kicad_harness/physics.py` (calls and sums),
-`server/harness/kicad_harness/stackups.py` (stackups, materials, fabricators), `server/web/ai/review-craft.ts` and
+Code: `server/web/domains/pcb/ai/review-physics.ts` (checks and plans), `server/harness/kicad_harness/physics.py` (calls and sums),
+`server/harness/kicad_harness/stackups.py` (stackups, materials, fabricators), `server/web/domains/pcb/ai/review-craft.ts` and
 `server/harness/kicad_harness/craft.py` (workshop practice and the one-call layout). Tests: `server/harness/tests/test_physics.py`,
 `test_stackups.py`.
 
@@ -51,7 +51,7 @@ Physics is decided before placement, not found by a review at the end.
 
 ## The circuit, before the board
 
-`sch.review()` checks the support circuits from the netlist (`server/web/ai/review-circuit.ts`,
+`sch.review()` checks the support circuits from the netlist (`server/web/domains/pcb/ai/review-circuit.ts`,
 `harness/tests/test_circuit.py`), because a board laid out perfectly round a wrong circuit is still wrong:
 
 - One small bypass capacitor for each supply pin, not one per chip (`bypass.count`).
@@ -148,13 +148,13 @@ it serves (90th percentile 4.2 to 5.0 mm), and in 70 to 85 percent of cases its 
    stays whole (the router's `planes: true` keeps tracks off it; off by default, it cost Ledify 20 points). Ground is stitched about every 1.5 to 2 mm.
 
 Where it lives: `board.autoplace` builds the clusters (`near=`, `seat`, `place_bypass`); the router
-(`web/router/route.ts`) finds the clusters (`opts.groups`, or from the board: a small part belongs to the nearest
+(`web/domains/pcb/router/route.ts`) finds the clusters (`opts.groups`, or from the board: a small part belongs to the nearest
 chip it shares a net with, within 5 mm pad to pad) and orders its queue critical nets, inside each cluster, power,
 fine-pitch escapes, the rest; its result carries `groups: {clusters, inside, insideRouted, insideVias}`.
 `board.design()` hands the plan's clusters to it and reports `routed.inside_groups`. A one-layer route may be 1.6
 times the straight line plus 5 mm before a layer change is taken instead, a via costs 12 mm of track, plain signals
 are widened to 0.2 mm where the clearances allow, and ground is stitched on a 2 mm grid: all four are what the
-owner's boards do. The placer (`web/router/place.ts`) pulls four times harder along critical nets and tries a
+owner's boards do. The placer (`web/domains/pcb/router/place.ts`) pulls four times harder along critical nets and tries a
 square chip at 45 degrees (kept when its block is 5 percent smaller). The harness makes the power pours
 (`board.power_pours()`, before routing in `design()`) and the via blocks (`board.power_stitch()`, in `finish()`).
 `scripts/board-bench.py` scores the router against those boards after every change.
@@ -443,7 +443,7 @@ Most of what the videos teach was already in the harness from the references abo
 split, return vias, pairs, crystals, converter loops, ESD first at the connector, fences at a twentieth of a
 wavelength, thermal pad vias, stitching, fiducials, silkscreen). What they added:
 
-**Checked** by `board.review()` (`server/web/ai/review-craft.ts`, tests in `harness/tests/test_craft.py`):
+**Checked** by `board.review()` (`server/web/domains/pcb/ai/review-craft.ts`, tests in `harness/tests/test_craft.py`):
 
 - `tracks.minimum`: signal tracks are 0.2 to 0.3 mm, never the fabricator's minimum, and neck down only at a
   fine-pitch pad row. Reported when a net has 5 mm or more below 0.15 mm further than 2 mm from a fine-pitch pad.

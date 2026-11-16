@@ -1,5 +1,5 @@
 // exchange-footprints.test.js — BOARD::ExchangeFootprint with DIALOG_EXCHANGE_FOOTPRINTS' options and the dialog's
-// processMatchingFootprints (web/tools/pcb-tools/exchange.ts: exchangeFootprint, planExchange, wildCompare).
+// processMatchingFootprints (web/domains/pcb/tools/pcb-tools/exchange.ts: exchangeFootprint, planExchange, wildCompare).
 // Run: node server/static/tests/exchange-footprints.test.js
 "use strict";
 const test = require("node:test");

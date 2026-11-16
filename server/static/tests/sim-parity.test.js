@@ -10,6 +10,7 @@
 "use strict";
 const path = require("path"), fs = require("fs"), assert = require("assert");
 const { pathToFileURL } = require("url");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js")); require(path.join(__dirname, "..", "sch-tools.js"));
 const K = globalThis.KiCadCanvas, N = K.pcbNetlist, sch = globalThis.CollabTools.sch;
 let passed = 0, failed = 0;
@@ -17,9 +18,8 @@ const queue = [];
 const test = (name, fn) => queue.push([name, fn]);
 console.log("Simulator netlist parity under node");
 const esbuild = require("esbuild");
-const WEB = path.join(__dirname, "..", "..", "web");
 const M = (() => {
-  const out = esbuild.buildSync({ stdin: { contents: 'export * as SP from "./sim/spice-netlist"; export * as SL from "./dialogs/sim-model-logic"; export { NGSPICE } from "./dialogs/sim-model-ngspice"; export * as L from "./sim/sim-logic"; export * as SPICE from "./plugins/spice"; export * as BL from "./sim/builtin-libs"; export * as W from "./sim/ngspice-wasm"; export * as MG from "./sim/sim-migrate";', resolveDir: WEB, loader: "ts" },
+  const out = esbuild.buildSync({ stdin: { contents: 'export * as SP from "./sim/spice-netlist"; export * as SL from "./dialogs/sim-model-logic"; export { NGSPICE } from "./dialogs/sim-model-ngspice"; export * as L from "./sim/sim-logic"; export * as SPICE from "./plugins/spice"; export * as BL from "./sim/builtin-libs"; export * as W from "./sim/ngspice-wasm"; export * as MG from "./sim/sim-migrate";', resolveDir: webPath("domains", "pcb"), loader: "ts" },
     bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const mod = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, require);
   return mod.exports;

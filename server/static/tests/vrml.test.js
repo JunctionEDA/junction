@@ -1,4 +1,4 @@
-// node server/static/tests/vrml.test.js — the VRML export (server/web/fab/vrml.ts), reached through the bundle's
+// node server/static/tests/vrml.test.js — the VRML export (server/web/domains/pcb/fab/vrml.ts), reached through the bundle's
 // KiCadFab: the file is laid out as pcbnew's exporter_vrml.cpp writes it, the board body is a closed solid of the
 // right volume, every layer faces the right way, and a part's Transform puts its model where the 3D viewer's own
 // placement (viewer3d/models.ts placeMesh, a separate reading of KiCad's 3D viewer) puts it.

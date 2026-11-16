@@ -10,7 +10,7 @@ rather than to KiCad's GitLab.
 | --- | --- | --- |
 | Desktop app (KiCad plus collaboration) | `common/collab`, `eeschema/collab`, `pcbnew/collab`, and the rest of the KiCad tree | C++ |
 | Server | `server/src` | Rust |
-| Web editor | `server/web` (generated bundles in `server/static`) | TypeScript |
+| Web app | `server/web`: `shared/`, `platform/` (home, sharing, GitHub, review) and `domains/<id>/` (`domains/pcb` is the electronics editor); generated bundles in `server/static`. See `server/web/README.md` | TypeScript |
 | Upstream KiCad sync | `tools/upstream-sync`, `.github/workflows/upstream-sync.yml` | Python, shell |
 
 ## Ground rules
@@ -18,7 +18,7 @@ rather than to KiCad's GitLab.
 - **The web editor behaves like KiCad.** KiCad's own behaviour and code are the spec for every
   interaction and visual detail. Point at the KiCad source a change follows.
 - **Edit TypeScript, not generated files.** `server/static/*.js` and `server/static/dist/*` are
-  built by `npm run build` in `server/`; tables in `server/web/generated/` come from
+  built by `npm run build` in `server/`; tables in `server/web/domains/pcb/generated/` come from
   `server/scripts/gen_*.py`.
 - **Never raise a file format version a file does not need.** A file read at an older KiCad
   version is written back at that version whenever its content allows
@@ -35,6 +35,10 @@ npm run check     # type check; a failure blocks every deploy
 npm run build
 npm test
 ```
+
+The same checks, and the Rust server's and the Python harness's tests, run on every pull request
+(`.github/workflows/ci.yml`). [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) maps the repository and
+[docs/ROADMAP.md](docs/ROADMAP.md) says where it is going.
 
 For desktop changes, build with `-DKICAD_BUILD_QA_TESTS=ON` and run the collaboration and file
 format suites (`CollabSync`, `PcbCollabSync`, `CollabProjectRegistry`, `CollabFonts`,

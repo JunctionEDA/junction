@@ -8,6 +8,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const { webPath } = require("./web-path");
 const zlib = require("node:zlib");
 
 require(path.join(__dirname, "..", "kicad-canvas.js"));
@@ -2025,7 +2026,7 @@ test("dimension point editor: handles per type, and each drag as UpdateItem does
 
 test("Dimension Properties: the dialog's values round-trip, and OK re-derives the text as updateDimensionFromDialog + Update()", () => {
   const esbuild = require("esbuild");
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "editor", "pcbdialogs", "dimension.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "editor", "pcbdialogs", "dimension.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const mod = { exports: {} }; globalThis.window = globalThis.window || globalThis; new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, require);
   const D = mod.exports, doc = K.parseDoc(DIM_FIXTURE, "kicad_pcb"), node = (t) => doc.items.get("d-" + t).node;
   const v = D.dimDialogValues(node("aligned"));
@@ -2066,7 +2067,7 @@ test("Draw Text Box opens Text Box Properties on the drawn box: OK adds it selec
 
 test("Text Box Properties: values round-trip; OK writes size, pen, flags, justification, border; the angle slides the box about its start", () => {
   const esbuild = require("esbuild");
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "editor", "pcbdialogs", "textbox.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "editor", "pcbdialogs", "textbox.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const mod = { exports: {} }; globalThis.window = globalThis.window || globalThis; new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, require);
   const T = mod.exports;
   const node = K.parse('(gr_text_box "Line one\\nLine two" (start 10 10) (end 40 30) (margins 1.0025 1.0025 1.0025 1.0025) (layer "F.SilkS") (uuid "tb-1") (effects (font (size 1.5 1.2) (thickness 0.2)) (justify left top)) (border yes) (stroke (width 0.12) (type default)) (knockout no))');
@@ -2096,7 +2097,7 @@ test("Text Box Properties: values round-trip; OK writes size, pen, flags, justif
 // (after the module tests: loading a dialog bundle installs the editor state the board module then sees)
 test("Reference Image Properties: sizes from the scale, CheckValues' limits and the writer's order", () => {
   const esbuild = require("esbuild");
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "editor", "pcbdialogs", "refimage.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "editor", "pcbdialogs", "refimage.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const mod = { exports: {} }; globalThis.window = globalThis.window || globalThis; new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, require);
   const R = mod.exports;
   const node = K.parse('(image (at 50 40) (layer "F.SilkS") (data "QUJD") (uuid "11111111-2222-3333-4444-555555555555"))');
@@ -2161,7 +2162,7 @@ test("Create Array: ARRAY_OPTIONS transforms, ARRAY_TOOL's copies, and DIALOG_CR
   assert.equal(r.label, "Arrange selection"); assert.equal(r.changes.length, 1); assert.ok(r.changes[0].sexpr.includes("(start 140 50) (end 145 50)") && r.changes[0].sexpr.includes('"s-1"'), r.changes[0].sexpr);
 
   const esbuild = require("esbuild");
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "editor", "pcbdialogs", "array.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "editor", "pcbdialogs", "array.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const mod = { exports: {} }; globalThis.window = globalThis.window || globalThis; new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, require);
   const A = mod.exports, D = A.ARRAY_DEFAULTS;
   let o = A.arrayOptions(D); assert.deepEqual(o.errors, []); assert.deepEqual([o.opts.type, o.opts.nx, o.opts.ny, o.opts.dx, o.opts.dy, o.opts.stagger, o.opts.centred, o.opts.keepRefs, o.opts.arrange], ["grid", 5, 5, 2.54, 2.54, 1, true, false, false]);
@@ -2176,7 +2177,7 @@ test("Create Array: ARRAY_OPTIONS transforms, ARRAY_TOOL's copies, and DIALOG_CR
 
 test("Table Properties: cells read and write as the table reads (reversed on the back); strokes as DIALOG_TABLE_PROPERTIES writes them", () => {
   const esbuild = require("esbuild");
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "editor", "pcbdialogs", "table.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "editor", "pcbdialogs", "table.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const mod = { exports: {} }; globalThis.window = globalThis.window || globalThis; new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, require);
   const T = mod.exports;
   const node = P.tableNode([0, 0], [30, 6], "F.SilkS", 0);

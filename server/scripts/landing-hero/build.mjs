@@ -3,7 +3,7 @@
 // Designs the board the home page's hero editor shows (an STM32F042 USB-C devboard) the way
 // the AI chapter's board is made: the two harness scripts in ./design (the schematic, then
 // the board) run through the real MCP endpoint of a local server, and the finished files are
-// kept in server/web/landing/hero/.  Server and library mirror as in ../demo-video/README.md.
+// kept in server/web/platform/landing/hero/.  Server and library mirror as in ../demo-video/README.md.
 // Then `node server/scripts/landing-hero/meta.mjs` works out what the hero needs to know about
 // the board (parts, connections in routing order, the pile).
 import fs from 'node:fs';
@@ -13,7 +13,7 @@ import pg from 'pg';
 import { BASE, PG_URL, mintJwt, mcp } from '../demo-video/lib.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const OUT = path.join(here, '..', '..', 'web', 'landing', 'hero');
+const OUT = path.join(here, '..', '..', 'web', 'platform', 'landing', 'hero');
 fs.mkdirSync(OUT, { recursive: true });
 const db = new pg.Client({ connectionString: PG_URL, ssl: false });
 await db.connect();

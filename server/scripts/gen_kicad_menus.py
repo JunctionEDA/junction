@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Generate server/web/generated/kicad-menu-spec.json and kicad-menu-icons.json from KiCad's own sources.
+"""Generate server/web/domains/pcb/generated/kicad-menu-spec.json and kicad-menu-icons.json from KiCad's own sources.
 
 The menu bar, the hotkey handling and Help > List Hotkeys need more of KiCad's TOOL_ACTIONs than the
 toolbars use (gen_kicad_ui.py keeps only those): every action of the three action tables with its
 friendly name, tooltip, icon name and default hotkey(s) — the Linux / Windows one, plus the macOS one where it
 differs — keyed by its C++ name (kicad-menu-spec.json, which
-the editor bundle reads for its key handling), plus the icons of the actions the menus in server/web/tables.ts
+the editor bundle reads for its key handling), plus the icons of the actions the menus in server/web/domains/pcb/tables.ts
 list that the toolbar spec does not already carry (kicad-menu-icons.json, chrome bundle only).
 
 Run from the repository root:  python3 server/scripts/gen_kicad_menus.py
@@ -15,10 +15,10 @@ import json, os, re, sys
 sys.path.insert(0, os.path.dirname(__file__))
 import gen_kicad_ui as base  # noqa: E402
 
-OUT = os.path.join(base.ROOT, "server", "web", "generated", "kicad-menu-spec.json")
-OUT_ICONS = os.path.join(base.ROOT, "server", "web", "generated", "kicad-menu-icons.json")
-UI_SPEC = os.path.join(base.ROOT, "server", "web", "generated", "kicad-ui-spec.json")
-TABLES = os.path.join(base.ROOT, "server", "web", "tables.ts")
+OUT = os.path.join(base.ROOT, "server", "web", "domains", "pcb", "generated", "kicad-menu-spec.json")
+OUT_ICONS = os.path.join(base.ROOT, "server", "web", "domains", "pcb", "generated", "kicad-menu-icons.json")
+UI_SPEC = os.path.join(base.ROOT, "server", "web", "domains", "pcb", "generated", "kicad-ui-spec.json")
+TABLES = os.path.join(base.ROOT, "server", "web", "domains", "pcb", "tables.ts")
 # Icons the menu chrome uses that belong to no action (sub-menu titles, the About box).
 EXTRA_ICONS = {"import", "export_file", "fabrication", "language", "add_zone", "contrast_mode", "mw_add_line", "add_aligned_dimension",
                "measurement", "mode_module", "puzzle_piece", "swap", "locked", "show_ratsnest", "group", "component_select_unit",

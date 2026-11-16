@@ -1,7 +1,7 @@
 """PyOpenGL for KiCad plugins in the web editor: the OpenGL 1.x calls a plugin draws a 3D preview with, on WebGL.
 
 `OpenGL.GL`, `OpenGL.GLU` and `OpenGL.GLUT` hold the fixed-function state here (matrix stacks, lights, material,
-client arrays, glBegin/glEnd) and hand finished draw calls to the browser (web/plugins/glfixed.ts), which draws
+client arrays, glBegin/glEnd) and hand finished draw calls to the browser (web/domains/pcb/plugins/glfixed.ts), which draws
 them with one shader pair that does what the fixed pipeline did.  A context comes from wx.glcanvas.GLCanvas.
 """
 

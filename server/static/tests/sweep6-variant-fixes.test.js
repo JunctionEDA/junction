@@ -10,6 +10,7 @@
 // Run: node server/static/tests/sweep6-variant-fixes.test.js
 "use strict";
 const path = require("path"), fs = require("fs"), assert = require("assert");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 require(path.join(__dirname, "..", "sch-tools.js"));
 const K = globalThis.KiCadCanvas, N = K.pcbNetlist, sch = globalThis.CollabTools.sch;
@@ -18,7 +19,7 @@ function test(name, fn) { try { fn(); passed++; console.log("  ok   " + name); }
 console.log("design variant and SPICE fixes under node");
 const esbuild = require("esbuild");
 function load(rel) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", ...rel.split("/"))], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(...rel.split("/"))], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const mod = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(mod, mod.exports, require);
   return mod.exports;
 }

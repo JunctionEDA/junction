@@ -1,5 +1,5 @@
 // fpedit-dialogs.test.js — the logic behind the Footprint Editor's dialogs and pad commands, under node:
-// Footprint Properties (web/tools/pcb-tools/fp-props.ts), Push Pad Properties, Edit Pad as Graphic Shapes / Finish Pad
+// Footprint Properties (web/domains/pcb/tools/pcb-tools/fp-props.ts), Push Pad Properties, Edit Pad as Graphic Shapes / Finish Pad
 // Edit, the Pad Table, interactive Renumber Pads (fp-pads.ts) and the Footprint Checker (fp-check.ts).
 // Run: node server/static/tests/fpedit-dialogs.test.js
 "use strict";

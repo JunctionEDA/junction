@@ -1,0 +1,157 @@
+name: ci
+
+# Checks every pull request and every push to master, so a change is known to build and pass its tests before
+# it is merged.  Each job runs only when its part of the tree changed (a push to master runs all of them):
+#
+#   web       server/web, the bundles in server/static and their tests: type-check, build, bundles match the
+#             source, the test files (static/tests/known-failures.txt lists the ones that already fail)
+#   server    the Rust server: build, tests, clippy; rustfmt reports but does not fail yet
+#   harness   the Python harness's tests, against the engine the web build makes
+#   workflows actionlint over .github/workflows
+#   desktop   the C++ desktop app, Linux build (pull requests that touch it only; about 100 minutes cold)
+#
+# The release and upstream-sync workflows are unchanged; this one only checks.
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      web: ${{ steps.diff.outputs.web }}
+      server: ${{ steps.diff.outputs.server }}
+      harness: ${{ steps.diff.outputs.harness }}
+      workflows: ${{ steps.diff.outputs.workflows }}
+      desktop: ${{ steps.diff.outputs.desktop }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: diff
+        name: What changed
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ "$EVENT" != "pull_request" ]; then
+            for k in web server harness workflows; do echo "$k=true" >> "$GITHUB_OUTPUT"; done
+            echo "desktop=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only "$BASE_SHA" HEAD)
+          echo "$files" | sed 's/^/  /'
+          has() { if echo "$files" | grep -qE "$1"; then echo true; else echo false; fi; }
+          {
+            echo "web=$(has '^server/(web|static|scripts|package(-lock)?\.json|tsconfig\.json|vendor|plugins|harness/kicad_harness)/?|^\.github/workflows/ci\.yml$')"
+            echo "server=$(has '^server/(src|protocol|migrations|templates|tests|web|static|Cargo\.(toml|lock))/?|^\.github/workflows/ci\.yml$')"
+            echo "harness=$(has '^server/(harness|web|static)/|^\.github/workflows/ci\.yml$')"
+            echo "workflows=$(has '^\.github/workflows/')"
+            # Everything outside server/, docs and the GitHub/upstream-sync tooling is the desktop app's.
+            echo "desktop=$(echo "$files" | grep -vE '^(server/|docs/|\.github/|tools/upstream-sync/|[^/]*\.md$)' | grep -q . && echo true || echo false)"
+          } >> "$GITHUB_OUTPUT"
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.web == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: server/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - name: Type-check
+        run: npm run check
+      - name: Build
+        run: npm run build
+      - name: Bundles match the source
+        # server/static's bundles are committed so `cargo run` works without node; a change to server/web must
+        # come with its rebuilt bundles.
+        run: |
+          if ! git diff --quiet -- static web; then
+            git status --short -- static web
+            echo "::error::The committed bundles are not what 'npm run build' makes from server/web. Run it in server/ and commit the result."
+            exit 1
+          fi
+      - name: Tests
+        run: node scripts/ci-web-tests.mjs
+
+  server:
+    needs: changes
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: server
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy,rustfmt
+          rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: server
+      - name: Build
+        run: cargo build --locked --all-targets
+      - name: Tests
+        run: cargo test --locked
+      - name: Clippy
+        # Errors fail the job.  Warnings are reported; there are some on master today.
+        run: cargo clippy --locked --all-targets
+      - name: rustfmt (report only)
+        # master is not rustfmt-clean yet: this lists the files and does not fail.  Make it fail
+        # (drop continue-on-error) once `cargo fmt` has been run over the tree.
+        continue-on-error: true
+        run: cargo fmt --check -- --files-with-diff
+
+  harness:
+    needs: changes
+    if: needs.changes.outputs.harness == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Tests
+        # The engine (server/static/dist/harness-engine.js) is committed; tests that need KiCad's libraries skip.
+        working-directory: server/harness
+        run: python -m unittest discover -s tests -v
+
+  workflows:
+    needs: changes
+    if: needs.changes.outputs.workflows == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - name: actionlint
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.7 -color -shellcheck=
+
+  desktop:
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
+    uses: ./.github/workflows/linux-build.yml

@@ -1,7 +1,7 @@
 // node server/scripts/landing-demo/gen.cjs
 //
 // Writes the home page's demo design: a USB-C powered 555 LED blinker as a real KiCad schematic
-// and board (server/web/landing/demo/blinker.kicad_sch / .kicad_pcb) plus blinker.json, the
+// and board (server/web/platform/landing/demo/blinker.kicad_sch / .kicad_pcb) plus blinker.json, the
 // order the page draws things in.  The symbols and footprints in lib/ are KiCad's own library
 // files (kicad-symbols / kicad-footprints, CC-BY-SA 4.0 with the design exception), copied
 // unchanged; this script only instantiates them, wires them and routes the board.
@@ -9,7 +9,7 @@
 const fs = require("fs"), path = require("path"), crypto = require("crypto");
 require(path.join(__dirname, "..", "..", "static", "kicad-canvas.js"));
 const K = globalThis.KiCadCanvas;
-const LIB = path.join(__dirname, "lib"), OUT = path.join(__dirname, "..", "..", "web", "landing", "demo");
+const LIB = path.join(__dirname, "lib"), OUT = path.join(__dirname, "..", "..", "web", "platform", "landing", "demo");
 
 const uuid = (name) => { const h = crypto.createHash("sha1").update("blinker/" + name).digest("hex"); return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`; };
 const r3 = (v) => Math.round(v * 1000) / 1000;

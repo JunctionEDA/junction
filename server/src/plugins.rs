@@ -1,7 +1,7 @@
-//! Web editor plugins (web/plugins): the per-account store and the built-in catalog.
+//! Web editor plugins (web/domains/pcb/plugins): the per-account store and the built-in catalog.
 //!
 //! The server's part is deliberately small.  A plugin is code that runs in a sandbox in the
-//! browser of the person who installed it (web/plugins/sandbox.ts) and reaches the design
+//! browser of the person who installed it (web/domains/pcb/plugins/sandbox.ts) and reaches the design
 //! only through that person's own editor, so nothing a plugin does arrives here except as
 //! the ordinary collaboration ops the editor sends for any edit — with that person's role
 //! deciding, as always, whether they are accepted.  What is kept here is the copy: the
@@ -76,7 +76,7 @@ fn valid_permission(p: &str) -> bool {
 }
 
 /// The checks that matter for what is stored and later handed to a browser.  The browser
-/// validates the manifest in full before it asks (web/plugins/types.ts); this is the part
+/// validates the manifest in full before it asks (web/domains/pcb/plugins/types.ts); this is the part
 /// that must hold even for a request that did not come from our page.
 fn check(identifier: &str, manifest: &Value, files: &Map<String, Value>, granted: &[String]) -> AppResult<()> {
     if !valid_identifier(identifier) {

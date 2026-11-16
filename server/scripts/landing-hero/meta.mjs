@@ -1,6 +1,6 @@
 // node server/scripts/landing-hero/meta.mjs
 //
-// Reads the hero's board (server/web/landing/hero/stm32.kicad_pcb, made by build.mjs) with the
+// Reads the hero's board (server/web/platform/landing/hero/stm32.kicad_pcb, made by build.mjs) with the
 // editor's own parser and writes what the hero needs to know to build it up in front of the
 // visitor (hero/stm32.json): the parts with a place in the pile below the board, the copper as
 // connections in an order they can be routed in (each a run of track on one layer, from a pad or
@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const DIR = path.join(here, '..', '..', 'web', 'landing', 'hero');
+const DIR = path.join(here, '..', '..', 'web', 'platform', 'landing', 'hero');
 const require = createRequire(import.meta.url);
 require(path.join(here, '..', '..', 'static', 'kicad-canvas.js'));
 const K = globalThis.KiCadCanvas;

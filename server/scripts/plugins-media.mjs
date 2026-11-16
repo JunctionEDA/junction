@@ -1,4 +1,4 @@
-// plugins-media.mjs — checks the animation encoders plugins get in place of ffmpeg (web/plugins/media.ts) in a real
+// plugins-media.mjs — checks the animation encoders plugins get in place of ffmpeg (web/domains/pcb/plugins/media.ts) in a real
 // browser: frames are drawn, encoded as a GIF, a palette and an MP4, and the results are decoded again by the
 // browser's own decoders and compared with what went in.
 //   node scripts/plugins-media.mjs            (after `npm run build`; OUT=<dir> keeps the files)

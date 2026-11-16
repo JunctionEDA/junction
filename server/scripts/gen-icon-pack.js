@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 // Writes static/dist/kicad-icons.json — the KiCad icons the menus and context menus draw that the toolbars do not
-// (web/generated/kicad-menu-icons.json + the icons of web/generated/kicad-context-spec.json, minus the toolbar
-// icons web/generated/kicad-ui-spec.json already carries).  They used to be inlined in ui.js (~750 KB); ui.js now
-// fetches this file once at start-up (web/iconpack.ts), long before a menu can open.
+// (web/domains/pcb/generated/kicad-menu-icons.json + the icons of web/domains/pcb/generated/kicad-context-spec.json, minus the toolbar
+// icons web/domains/pcb/generated/kicad-ui-spec.json already carries).  They used to be inlined in ui.js (~750 KB); ui.js now
+// fetches this file once at start-up (web/domains/pcb/iconpack.ts), long before a menu can open.
 const fs = require("fs"), path = require("path");
-const gen = path.resolve(__dirname, "..", "web", "generated");
+const gen = path.resolve(__dirname, "..", "web", "domains", "pcb", "generated");
 const read = (f) => JSON.parse(fs.readFileSync(path.join(gen, f), "utf8"));
 const toolbar = read("kicad-ui-spec.json").icons || {};
 const icons = {};

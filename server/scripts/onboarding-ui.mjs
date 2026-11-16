@@ -1,4 +1,4 @@
-// Browser test of onboarding (server/web/onboarding and the
+// Browser test of onboarding (server/web/platform/onboarding and the
 // hand-off from the home page's small editor): a new person's empty projects home, the guided first project from its first step to its last with tracks routed by hand and by
 // the autorouter, and a board carried over from the public home page through sign-in.
 // Needs a local server with KC_DEV_LOGIN=1 on a throwaway database, and Playwright.

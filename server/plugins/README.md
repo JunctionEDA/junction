@@ -224,7 +224,7 @@ account like any other plugin.
 How it works:
 
 - A Python plugin is an ordinary sandboxed web plugin whose manifest says
-  `"runtime": { "type": "kicad-python" }`.  Its entry script (`web/plugins/pyruntime.ts`) starts
+  `"runtime": { "type": "kicad-python" }`.  Its entry script (`web/domains/pcb/plugins/pyruntime.ts`) starts
   CPython compiled to WebAssembly (Pyodide) inside the plugin's frame and gives it this editor's
   `pcbnew`, `wx` and `FootprintWizardBase` modules (`plugins/python/`).  It has exactly the reach
   any web plugin has: the `kicad` API, checked against the permissions the person granted.
@@ -266,7 +266,7 @@ How it works:
   a plugin opens or copies one). A model file a plugin puts in the project folder that a footprint of the board
   then names (`${KIPRJMOD}/packages3D/R_0603.step`) is offered to the project like a library file, and the 3D
   viewer reads it from there; a footprint may name the `.wrl` where the project keeps the `.step`.
-- **VRML export.** `pcbnew.ExportVRML` writes what File → Export → VRML writes (`fab.vrml`, `web/fab/vrml.ts`): the
+- **VRML export.** `pcbnew.ExportVRML` writes what File → Export → VRML writes (`fab.vrml`, `web/domains/pcb/fab/vrml.ts`): the
   placed models, then the board body, copper, paste, solder mask, plated holes and silkscreen, in pcbnew's order and
   node layout. The shapes are the editor's own plot of each layer, merged, cut to the outline and triangulated, so
   the triangles are not pcbnew's. A part's model is the mesh the 3D viewer tessellates from its STEP file, written
@@ -373,7 +373,7 @@ How it works:
   under *Addresses you allowed*, each with *Remove*; uninstalling the plugin forgets them.
   One plugin may also reach a server on the user's own computer: traces (`com.github.usetraces.traces`), a client
   for traces-serve, which the user installs and starts on `127.0.0.1:8000`.  This is the person's decision
-  (2026-11-13), limited to that plugin and that address (`LOCAL_SERVERS` in `web/plugins/host.ts`), and only for a
+  (2026-11-13), limited to that plugin and that address (`LOCAL_SERVERS` in `web/domains/pcb/plugins/host.ts`), and only for a
   copy installed from KiCad's repository.  The user is asked once (*Reach a server on this computer?*); the
   request then goes from the editor page straight to that port, never through Junction's server, so the browser's
   own local-network prompt and the server's CORS rules apply too.  *Remove* in the Plugin Manager takes it back.
@@ -440,7 +440,7 @@ rules and schematic parity over the sibling schematics, not by a placeholder.
 `KC_DRC_STANDIN=1` restores the placeholder.
 
 `pcbnew.PCB_IO_MGR.Save(pcbnew.PCB_IO_MGR.ODBPP, folder, board, properties)` writes a
-real ODB++ job (`web/fab/odb.ts`, the same writer as File > Fabrication Outputs >
+real ODB++ job (`web/domains/pcb/fab/odb.ts`, the same writer as File > Fabrication Outputs >
 ODB++ Output File…): matrix, stackup, profile, layer features, drills, components,
 packages and the netlist, in KiCad's layout, with `units` and `sigfig` read from the
 properties.  `board.GetTitleBlock().SetComment(…)` and the other title block setters

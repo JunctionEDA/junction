@@ -37,7 +37,7 @@ class Unavailable(OSError):
 # ----------------------------------------------------------------------------- one running ngspice
 
 class _Page:
-    """ngspice in the page this interpreter runs in (web/plugins/spice.ts): Python waits on it."""
+    """ngspice in the page this interpreter runs in (web/domains/pcb/plugins/spice.ts): Python waits on it."""
     def __init__(self, js):
         from pyodide.ffi import run_sync
         self._wait = run_sync

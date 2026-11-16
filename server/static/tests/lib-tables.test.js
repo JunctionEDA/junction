@@ -1,4 +1,4 @@
-// lib-tables.test.js — the Symbol / Footprint Libraries dialogs' table logic (web/library/libtable.ts): the plugin
+// lib-tables.test.js — the Symbol / Footprint Libraries dialogs' table logic (web/domains/pcb/library/libtable.ts): the plugin
 // lists of PANEL_SYM_LIB_TABLE / PANEL_FP_LIB_TABLE, the Add Existing menu, format guessing, FixIllegalChars,
 // VerifyTable, the options string, clipboard rows and the path substitutions.
 // Run: node server/static/tests/lib-tables.test.js
@@ -6,8 +6,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const { webPath } = require("./web-path");
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-const built = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "library", "libtable.ts")], bundle: true, format: "cjs", target: "es2020", write: false });
+const built = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "library", "libtable.ts")], bundle: true, format: "cjs", target: "es2020", write: false });
 const mod = { exports: {} }; new Function("exports", "module", "require", built.outputFiles[0].text)(mod.exports, mod, require); const T = mod.exports;
 
 test("Add Existing menus follow the plugin registries", () => {

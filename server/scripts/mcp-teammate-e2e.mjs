@@ -1,4 +1,4 @@
-// End-to-end test of the MCP tools that make the assistant a visible collaborator (web/mcp/teammate.ts):
+// End-to-end test of the MCP tools that make the assistant a visible collaborator (web/domains/pcb/mcp/teammate.ts):
 // highlight, get_selection, trace_net and the scoped pictures of render_view.  Two real clients are in the
 // documents while the tools run: a browser signed in as a second person (Playwright), and a bare
 // collaboration socket, so that "everyone sees it" is checked on the wire and on the canvas.

@@ -1,4 +1,4 @@
-// node server/static/tests/odb.test.js — the ODB++ writer (server/web/fab/odb.ts) on KiCad's demo boards.
+// node server/static/tests/odb.test.js — the ODB++ writer (server/web/domains/pcb/fab/odb.ts) on KiCad's demo boards.
 // Every job is read back with a small ODB++ reader written here from the format's record layouts, and checked
 // against the board model and against the Gerber and drill files the same bundle writes: record counts, symbol and
 // attribute tables, the net / subnet / feature links of eda/data, components and their toeprints, surface winding.

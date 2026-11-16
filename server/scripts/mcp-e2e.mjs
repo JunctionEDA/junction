@@ -1,4 +1,4 @@
-// End-to-end test of the MCP endpoint (src/mcp.rs, src/oauth.rs, web/mcp): everything an MCP
+// End-to-end test of the MCP endpoint (src/mcp.rs, src/oauth.rs, web/domains/pcb/mcp): everything an MCP
 // client does, against a running server, with a second collaboration client watching the
 // documents so that "the edit appears live for everyone" is checked, not assumed.
 //

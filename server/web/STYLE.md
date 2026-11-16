@@ -16,7 +16,7 @@ file, is at `/styleguide`.
 3. **Red means red.** Red is F.Cu, an error, or a destructive action. It never
    means "go".
 4. **Colour comes from tokens.** No colour literal outside `theme.css`. Canvas drawing uses
-   KiCad's own layer and schematic colours (`web/canvas/colors.ts`) and is the one exception.
+   KiCad's own layer and schematic colours (`web/domains/pcb/canvas/colors.ts`) and is the one exception.
 5. **Light and dark are the same design.** Every surface works in both. `data-theme` on `<html>`
    (stored as `kui.theme`) overrides the system setting.
 6. **Plain words.** Use KiCad's own label where KiCad has one. Sentence case, no exclamation
@@ -27,8 +27,8 @@ file, is at `/styleguide`.
 | What | Where |
 | --- | --- |
 | Tokens and shared components | `server/static/theme.css` (tokens above the `components` marker, classes below) |
-| Tailwind names for the tokens (`bg-bench`, `text-ink-2`, `rounded-sm`) | `server/web/styles/tailwind.css` |
-| Live guide | `server/static/styleguide.html`, `server/web/styleguide/index.ts`, served at `/styleguide` |
+| Tailwind names for the tokens (`bg-bench`, `text-ink-2`, `rounded-sm`) | `server/web/shared/styles/tailwind.css` |
+| Live guide | `server/static/styleguide.html`, `server/web/platform/styleguide/index.ts`, served at `/styleguide` |
 | How pages get the theme | `app.html` links `/static/theme.css`; `pages::STYLE`, the GitHub page and the guide inline it (`pages::THEME_CSS`); the home page inlines the tokens only (`github::theme_tokens()`) |
 
 A page never defines a palette of its own; a test in `src/github.rs` fails if one does.
@@ -109,7 +109,7 @@ The icon is a junction: two wires and the dot that joins them, in near-white on 
 rounded tile (`#FAFAFA` on `#111113`), with a hairline edge so the tile holds on dark pages. It is
 one file, `server/static/icon.svg`, used by `pages::MARK`, `/brand/<v>/icon.svg` (plus `/favicon.svg`), the
 PNG and ICO sizes drawn from it, the menu bar and the About dialog. Pages link it by its versioned
-address (`ICON_V` in `src/pages.rs` and `web/brand.ts`, also written in the three static HTML heads);
+address (`ICON_V` in `src/pages.rs` and `web/shared/brand.ts`, also written in the three static HTML heads);
 bump the version whenever the icon changes so no cache keeps the old one. Its colours belong to the icon only and are not
 theme tokens. Use it at 18 to 20px in title bars; never recolour or redraw it.
 

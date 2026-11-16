@@ -1,13 +1,14 @@
-// symedit-checker.test.js — the Symbol Checker (CheckLibSymbol in web/symedit/model.ts): KiCad's messages for empty or
+// symedit-checker.test.js — the Symbol Checker (CheckLibSymbol in web/domains/pcb/symedit/model.ts): KiCad's messages for empty or
 // numbered references, duplicate and stacked pins, power symbols, hidden power pins, off-grid pins and degenerate graphics.
 // Run: node server/static/tests/symedit-checker.test.js
 "use strict";
 const path = require("path"), fs = require("fs"), assert = require("assert");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 const K = globalThis.KiCadCanvas;
 const esbuild = require("esbuild");
 function load(file) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
 const M = load("symedit/model.ts");

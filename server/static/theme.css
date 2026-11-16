@@ -12,7 +12,7 @@
 
    Rules of the house:
      - No colour literal outside this file's token blocks.  Canvas drawing (KiCad's layer and
-       schematic colours) is the one exception and lives in web/canvas/colors.ts.
+       schematic colours) is the one exception and lives in web/domains/pcb/canvas/colors.ts.
      - Near-black and near-white chrome with one accent, ink: the primary button is a solid ink
        fill, links, selection and focus are neutral.  No blue on chrome.  Red means F.Cu, an
        error, or a destructive action, never "go".
@@ -202,7 +202,7 @@ input[type="range"].kslider::-webkit-slider-thumb { -webkit-appearance: none; wi
 input[type="range"].kslider::-moz-range-thumb { width: 10px; height: 12px; border-radius: 2px; background: var(--panel); border: 1px solid var(--line-2); box-sizing: border-box; }
 input[type="range"].kslider:hover::-webkit-slider-thumb, input[type="range"].kslider:focus-visible::-webkit-slider-thumb { border-color: var(--blue); }
 input[type="range"].kslider:hover::-moz-range-thumb, input[type="range"].kslider:focus-visible::-moz-range-thumb { border-color: var(--blue); }
-/* ---- drop-downs: <k-select> (web/components/kselect.ts) in place of the browser's <select> ----
+/* ---- drop-downs: <k-select> (web/shared/components/kselect.ts) in place of the browser's <select> ----
    The closed control is the element itself (a field like .input, dense by default); its list is a .ksel-pop
    on <body>, so no pane or dialog clips it.  size > 1 draws the list in place (a wxListBox). */
 k-select { display: inline-flex; align-items: center; box-sizing: border-box; min-width: 0; max-width: 100%;
@@ -247,7 +247,7 @@ k-select.input { min-height: var(--h-md); height: auto; }
 .kdate-day.on { background: var(--sel); font-weight: 600; }
 .kdate-day.hi { background: var(--accent); color: var(--on-accent); }
 
-/* ---- menus cut to the window (web/menufit.ts): they scroll, with arrow strips at the ends in place of a scroll
+/* ---- menus cut to the window (web/shared/menufit.ts): they scroll, with arrow strips at the ends in place of a scroll
         bar, as native menus do (macOS, Windows and GTK menus alike); resting the pointer on a strip scrolls the
         menu.  A combo box's list gets them only on a Mac (an NSPopUpButton's menu); elsewhere it is never
         .kmenu-cut and keeps its scroll bar, like a wxChoice's list ---- */
@@ -318,7 +318,7 @@ k-select.input { min-height: var(--h-md); height: auto; }
 .kd-body input[type=text]:focus, .kd-body input[type=number]:focus, .kd-body select:focus, .kd-body k-select:focus-within, .kd-body textarea:focus {
   outline: 0; border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue); }
 .kd-body .ro { color: var(--ink-2); font-family: var(--mono); }
-/* ---- the font choice (web/dialogs/font-picker.ts): a combo box with a search and the names in their own fonts ---- */
+/* ---- the font choice (web/domains/pcb/dialogs/font-picker.ts): a combo box with a search and the names in their own fonts ---- */
 .kd-font { display: inline-flex; align-items: center; gap: 6px; min-width: 0; padding: 4px 6px; background: var(--panel);
   border: 1px solid var(--line); border-radius: var(--r-2); color: var(--ink); font-family: var(--mono); cursor: default;
   user-select: none; box-sizing: border-box; }

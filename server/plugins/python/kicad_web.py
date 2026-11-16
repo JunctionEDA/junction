@@ -1,6 +1,6 @@
 # kicad_web.py — runs KiCad's Python plugins inside the web editor's plugin sandbox.
 #
-# The sandbox frame (web/plugins/pyruntime.ts) starts Python, puts this folder on sys.path and
+# The sandbox frame (web/domains/pcb/plugins/pyruntime.ts) starts Python, puts this folder on sys.path and
 # calls boot() with the plugin's files.  From there this module does what KiCad does on the
 # desktop: import the plugin package from the plugins folder, collect the ActionPlugins it
 # registers, and call Run() when the person picks one.  Around Run() it does what the desktop

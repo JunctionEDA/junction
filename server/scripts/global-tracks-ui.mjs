@@ -1,5 +1,5 @@
 // Edit > Edit Track & Via Properties (KiCad's DIALOG_GLOBAL_EDIT_TRACKS_AND_VIAS) and Global Deletions' greyed
-// filters in the web board editor (web/editor/pcbdialogs/global-tracks.ts, global-delete.ts), on KiCad's pic_programmer
+// filters in the web board editor (web/domains/pcb/editor/pcbdialogs/global-tracks.ts, global-delete.ts), on KiCad's pic_programmer
 // demo: scope, every filter, both actions, Apply / Apply and Close, undo.  `pg` and `playwright` come from the script's
 // node_modules or NODE_PATH; E2E_STATIC=<server/static> serves the web bundles from that folder.
 //

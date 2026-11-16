@@ -1,4 +1,4 @@
-// global-delete.test.js — DIALOG_GLOBAL_DELETION::DoGlobalDeletions (web/tools/pcb-tools/global-delete.ts): which
+// global-delete.test.js — DIALOG_GLOBAL_DELETION::DoGlobalDeletions (web/domains/pcb/tools/pcb-tools/global-delete.ts): which
 // items each check box, lock filter and the layer filter remove.
 // Run: node server/static/tests/global-delete.test.js
 "use strict";

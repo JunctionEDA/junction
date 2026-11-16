@@ -1,13 +1,14 @@
-// symedit-merge.test.js — item-level merge of library symbol edits (web/symedit/merge.ts) and two LibDoc clients (web/symedit/libdoc.ts) against an in-memory copy of the server's op
+// symedit-merge.test.js — item-level merge of library symbol edits (web/domains/pcb/symedit/merge.ts) and two LibDoc clients (web/domains/pcb/symedit/libdoc.ts) against an in-memory copy of the server's op
 // protocol (hello / join_doc / snapshot / op / ack, the doc actor's single sequence): a live edit reaches the other
 // client, both show the same '*', concurrent edits converge, Save uploads the buffer at the marker's sequence and
 // clears '*' everywhere, Revert and an undo (the old whole-symbol text) restore the file exactly.
 // Run: node server/static/tests/symedit-libdoc.test.js
 "use strict";
 const path = require("path"), fs = require("fs"), assert = require("assert");
+const { webPath } = require("./web-path");
 const esbuild = require("esbuild");
 function load(file) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
 // ---- an in-memory server: one document, a sequence, snapshots; messages delivered on flush()

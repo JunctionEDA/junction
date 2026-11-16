@@ -193,7 +193,7 @@ private:
 
 /**
  * Where to draw each peer's pointer between presence messages, the way Figma and
- * perfect-cursors do it (the web editor does the same, server/web/editor/peercursors.ts).
+ * perfect-cursors do it (the web editor does the same, server/web/domains/pcb/editor/peercursors.ts).
  *
  * The sender sends its pointer every frame or so, stamped with its own clock ("ts").  The
  * receiver keeps the points it has not drawn yet and walks through them at the pace they were

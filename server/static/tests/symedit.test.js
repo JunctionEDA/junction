@@ -1,13 +1,14 @@
-// symedit.test.js — the Symbol Editor's model (web/symedit/model.ts): the .kicad_sym writer (SCH_IO_KICAD_SEXPR_LIB_CACHE
+// symedit.test.js — the Symbol Editor's model (web/domains/pcb/symedit/model.ts): the .kicad_sym writer (SCH_IO_KICAD_SEXPR_LIB_CACHE
 // + KICAD_FORMAT::Prettify) round-trips KiCad's own libraries byte for byte, new symbols / renames / flattening, and
-// the canvas render mode (web/canvas/libsym.ts).  Run: node server/static/tests/symedit.test.js
+// the canvas render mode (web/domains/pcb/canvas/libsym.ts).  Run: node server/static/tests/symedit.test.js
 "use strict";
 const path = require("path"), fs = require("fs"), assert = require("assert");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 const K = globalThis.KiCadCanvas;
 const esbuild = require("esbuild");
 function load(file) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
 const M = load("symedit/model.ts");

@@ -1,5 +1,5 @@
 // table-model.test.js — the table structure edits (EDIT_TABLE_TOOL_BASE) and Normalize (PCB_TABLE / SCH_TABLE) of
-// web/canvas/table-model.ts under node: add / delete rows and columns, merge / unmerge, the selection conditions,
+// web/domains/pcb/canvas/table-model.ts under node: add / delete rows and columns, merge / unmerge, the selection conditions,
 // the clipboard trim, paste into cells, CSV, cell hit tests; every edit leaves the original node byte-identical
 // (that node is what undo restores).
 // Run: node server/static/tests/table-model.test.js

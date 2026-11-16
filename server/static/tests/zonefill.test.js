@@ -1,9 +1,10 @@
-// node server/static/tests/zonefill.test.js — the browser zone filler (server/web/fab/zonefill.ts, a port of
+// node server/static/tests/zonefill.test.js — the browser zone filler (server/web/domains/pcb/fab/zonefill.ts, a port of
 // pcbnew's ZONE_FILLER) through the fab bundle's KiCadFab.fillZones / filledZoneNode.  `npm run build` must have
 // produced static/kicad-canvas.js and static/dist/fab.js first.
 "use strict";
 const assert = require("assert");
 const path = require("path");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 require(path.join(__dirname, "..", "dist", "fab.js"));
 const K = globalThis.KiCadCanvas, F = globalThis.KiCadFab;
@@ -172,7 +173,7 @@ test("filledZoneNode writes (fill yes …) and the filled polygons after the out
 // ---------------------------------------------------------------- automatic refill: BOARD_COMMIT::propagateDamage
 {
   const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-  const b = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "editor", "pcbdialogs", "zone-damage.ts")], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" });
+  const b = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "editor", "pcbdialogs", "zone-damage.ts")], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" });
   const m = { exports: {} }; new Function("module", "exports", "require", b.outputFiles[0].text)(m, m.exports, require);
   const D = m.exports, cu = ["F.Cu", "In1.Cu", "In2.Cu", "B.Cu"];
   const zoneOn = (id, layer, extra = []) => ({ id, node: ["zone", ["layer", layer], ["fill", "yes"], ...extra], bbox: [0, 0, 50, 50] });

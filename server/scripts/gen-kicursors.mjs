@@ -1,6 +1,6 @@
 // gen-kicursors.mjs — KiCad's canvas cursors (common/gal/cursors.cpp, resources/bitmaps_png/cursors/*.xpm) as
 // CSS cursor values: each 32 px XPM becomes a PNG data URL with the hotspot cursors.cpp gives it (the non-Windows
-// variants: black-on-white MOVING / WARNING / PLACE).  Writes web/editor/kicursors.generated.ts.
+// variants: black-on-white MOVING / WARNING / PLACE).  Writes web/domains/pcb/editor/kicursors.generated.ts.
 //   node scripts/gen-kicursors.mjs
 import fs from "node:fs";
 import path from "node:path";
@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const SRC = path.join(here, "..", "..", "resources", "bitmaps_png", "cursors");
-const OUT = path.join(here, "..", "web", "editor", "kicursors.generated.ts");
+const OUT = path.join(here, "..", "web", "domains", "pcb", "editor", "kicursors.generated.ts");
 
 // KICURSOR -> [xpm file, hotspot] (cursors_defs, the 32 px entries)
 const DEFS = {

@@ -1,7 +1,7 @@
 // node server/scripts/landing-together/shoot.mjs [outDir]
 //
 // The two pictures of the home page's "Working together" section: the real web editor on the home
-// page's STM32 board (web/landing/hero), three people in it.  The pictures are Ada's window: Jun has a
+// page's STM32 board (web/platform/landing/hero), three people in it.  The pictures are Ada's window: Jun has a
 // part selected, Mara's pointer is on the sheet, and there is a comment thread pinned to a part.
 // Server and library mirror as in ../demo-video/README.md.  Writes together-pcb.png and
 // together-sch.png into outDir (default /tmp); they become static/landing/{board,schematic}.webp.
@@ -15,7 +15,7 @@ import { BASE, PG_URL, mintJwt, upload, share } from '../demo-video/lib.mjs';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 const here = path.dirname(fileURLToPath(import.meta.url));
-const HERO = path.join(here, '..', '..', 'web', 'landing', 'hero');
+const HERO = path.join(here, '..', '..', 'web', 'platform', 'landing', 'hero');
 const OUT = process.argv[2] || '/tmp';
 const db = new pg.Client({ connectionString: PG_URL, ssl: false });
 await db.connect();

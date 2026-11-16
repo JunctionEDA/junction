@@ -1,4 +1,4 @@
-// End-to-end test of run_python (web/mcp/host.ts, web/harness/sandbox.ts, harness/kicad_harness):
+// End-to-end test of run_python (web/domains/pcb/mcp/host.ts, web/domains/pcb/harness/sandbox.ts, harness/kicad_harness):
 // a Python script sent to the MCP endpoint builds a small design in a live project, while a
 // second collaboration client watches, so that "edits appear step by step with a cursor on
 // them" is checked and not assumed.  Also: a failing script leaves nothing behind, the sandbox

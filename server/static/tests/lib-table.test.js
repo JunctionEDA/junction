@@ -1,14 +1,15 @@
 // lib-table.test.js — Update / Change Footprint finds a library footprint through the project's fp-lib-table
-// nickname (FP_LIB_TABLE::FootprintLoad), then by its .pretty folder (web/library/sources.ts, bundled on the fly).
+// nickname (FP_LIB_TABLE::FootprintLoad), then by its .pretty folder (web/domains/pcb/library/sources.ts, bundled on the fly).
 // Run: node server/static/tests/lib-table.test.js
 "use strict";
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const { webPath } = require("./web-path");
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 globalThis.window = globalThis; globalThis.addEventListener = globalThis.addEventListener || (() => {});
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-const built = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "library", "sources.ts")], bundle: true, format: "cjs", target: "es2020", write: false });
+const built = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "library", "sources.ts")], bundle: true, format: "cjs", target: "es2020", write: false });
 const mod = { exports: {} }; new Function("exports", "module", "require", built.outputFiles[0].text)(mod.exports, mod, require); const L = mod.exports;
 
 const TABLE = `(fp_lib_table (version 7)

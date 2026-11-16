@@ -5,6 +5,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const { webPath } = require("./web-path");
 
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 require(path.join(__dirname, "..", "pcb-tools.js"));
@@ -209,7 +210,7 @@ test("Shape Modification: fillet, chamfer, extend, simplify and polygon booleans
 // ---- PCB_BARCODE: the 2D symbologies against matrices Zint (thirdparty/zint) produced for the same input
 const esbuild = require("esbuild");
 const crypto = require("node:crypto");
-const loadTs = (file) => { const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" }); const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports; };
+const loadTs = (file) => { const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" }); const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports; };
 const BC = loadTs("canvas/barcode2d.ts");
 // [kind, text, ecc (0 L .. 3 H), rows, sha1 of the rows joined as 0/1]
 const ZINT = [

@@ -5,7 +5,7 @@
 # the same names over the board the collaborative editor holds: the board arrives as the text
 # of its .kicad_pcb file, every object here is a view onto one node of that s-expression, and
 # when the plugin returns, the items it touched go back to the editor as one ordinary
-# collaborative edit (web/plugins/pyruntime.ts).  Lengths are KiCad's internal units
+# collaborative edit (web/domains/pcb/plugins/pyruntime.ts).  Lengths are KiCad's internal units
 # (nanometres) on the Python side and millimetres in the file, exactly as on the desktop.
 #
 # What cannot exist in a browser — plotting to disk, loading other boards, the 3D model
@@ -6582,7 +6582,7 @@ ID_ON_ZOOM_SELECT = 6210
 
 
 class _Host:
-    """What the runtime (web/plugins/pyruntime.ts) sets before it calls a plugin."""
+    """What the runtime (web/domains/pcb/plugins/pyruntime.ts) sets before it calls a plugin."""
     grid_mm = 0.25           # the editor's current grid
     board = None
     refresh = None           # called by Refresh(): pushes the changes so far to the editor
@@ -7643,7 +7643,7 @@ def ImportSpecctraSES(*_):
 
 
 def ExportVRML(aFullFileName, aMMtoWRMLunit=1.0, *rest):
-    """File > Export > VRML, written by the editor (web/fab/vrml.ts) in pcbnew's own layout: the placed 3D models, then
+    """File > Export > VRML, written by the editor (web/domains/pcb/fab/vrml.ts) in pcbnew's own layout: the placed 3D models, then
     the board body, copper, paste, solder mask, plated holes and silkscreen.  Takes KiCad 6 and 7's seven arguments
     (file, unit, export 3D files, relative paths, 3D folder, x and y reference) and KiCad 8's nine, which add "include
     unspecified" and "include DNP" after the unit."""
@@ -7686,7 +7686,7 @@ def WriteDRCReport(*_):
 
 
 def _save_odb(path, properties=None):
-    """PCB_IO_ODBPP::SaveBoard: the board as an ODB++ job in the folder `path`, written by the editor (web/fab/odb.ts) in
+    """PCB_IO_ODBPP::SaveBoard: the board as an ODB++ job in the folder `path`, written by the editor (web/domains/pcb/fab/odb.ts) in
     KiCad's own layout.  `properties` may name "units" ("mm" or "inch") and "sigfig" (decimal places), as on the desktop."""
     import os
     import kicad_web

@@ -130,7 +130,7 @@ Every shot is the real application against a local Junction server, staged by sc
 
 ## Docs
 
-[Collaboration guide](COLLABORATION.md) · [Server, protocol and self-hosting](server/README.md) ·
+[Roadmap](docs/ROADMAP.md) · [Architecture](docs/ARCHITECTURE.md) · [Collaboration guide](COLLABORATION.md) · [Server, protocol and self-hosting](server/README.md) ·
 [MCP server](server/README.md#mcp-server-any-ai-model-or-service) ·
 [Python harness](server/README.md#the-python-harness) · [Autorouter](server/README.md#board-autorouter) ·
 [Changelog](CHANGELOG.md)

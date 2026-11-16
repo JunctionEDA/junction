@@ -1,4 +1,4 @@
-// fpedit-tools.test.js — the Footprint Editor's tools under node (web/tools/pcb-tools/pad-tool.ts, exchange.ts):
+// fpedit-tools.test.js — the Footprint Editor's tools under node (web/domains/pcb/tools/pcb-tools/pad-tool.ts, exchange.ts):
 // FOOTPRINT::GetNextPadNumber, PAD_MASTER_PROVIDER, PlacePad (one "Place pad" step), Duplicate and Increment, the
 // anchor move, pad rotate / mirror, the editable copy of a board footprint and BOARD::ExchangeFootprint.
 // Run: node server/static/tests/fpedit-tools.test.js
@@ -6,6 +6,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("node:path");
+const { webPath } = require("./web-path");
 
 require(path.join(__dirname, "..", "kicad-canvas.js"));
 require(path.join(__dirname, "..", "pcb-tools.js"));
@@ -196,7 +197,7 @@ test("PAD_TOOL::copyPadSettings / pastePadProperties: the buffer pad's settings 
 
 test("library tree menu: FOOTPRINT_EDITOR_CONTROL::Init order and conditions, Pin Library and Hide Library Tree", () => {
   const esbuild = require("esbuild");
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "editor", "fptree.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "editor", "fptree.ts")], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); const T = m.exports;
   assert.deepEqual(T.fpTreeMenu({ libSelected: true, fpSelected: false, hasFootprint: true, allPinned: false, allUnpinned: true }),
     ["pinLibrary", "-", "newFootprint", "createFootprint", "-", "save", "saveAs", "revert", "-", "pasteFootprint", "-", "importFootprint", "exportFootprint", "-", "hideLibraryTree"]);

@@ -13,7 +13,7 @@ import math
 import pcbnew
 import wx
 
-# KiCad's default board colours (web/canvas/colors.ts holds the same table for the editor's canvas).
+# KiCad's default board colours (web/domains/pcb/canvas/colors.ts holds the same table for the editor's canvas).
 _COLORS = {"F.Cu": "#C83434", "B.Cu": "#4D7FC4", "F.SilkS": "#F2EDA1", "B.SilkS": "#E8B2A7", "F.Mask": "#D864FF", "B.Mask": "#02FFEE", "F.Paste": "#B4A09A", "B.Paste": "#00C2C2",
            "F.Adhes": "#840084", "B.Adhes": "#000084", "Edge.Cuts": "#D0D2CD", "Margin": "#FF26E2", "F.CrtYd": "#FF26E2", "B.CrtYd": "#26E9FF", "F.Fab": "#AFAFAF", "B.Fab": "#585D84",
            "Dwgs.User": "#C2C2C2", "Cmts.User": "#5994DC", "Eco1.User": "#B4DBD2", "Eco2.User": "#D8C852"}

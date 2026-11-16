@@ -1,13 +1,14 @@
-// ctxmenus.test.js — the right-click menu tables (server/web/editor/ctxmenus.ts) under node: KiCad's
+// ctxmenus.test.js — the right-click menu tables (server/web/domains/pcb/editor/ctxmenus.ts) under node: KiCad's
 // CONDITIONAL_MENU ordering and the entries each selection / tool gets, and pcb-tools' cancel().
 // Run: node server/static/tests/ctxmenus.test.js
 "use strict";
 const path = require("path"), assert = require("assert");
+const { webPath } = require("./web-path");
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "editor", "ctxmenus.ts")], bundle: true, format: "cjs", write: false, logLevel: "silent" });
+const out = esbuild.buildSync({ entryPoints: [webPath("domains", "pcb", "editor", "ctxmenus.ts")], bundle: true, format: "cjs", write: false, logLevel: "silent" });
 const mod = { exports: {} }; new Function("module", "exports", out.outputFiles[0].text)(mod, mod.exports);
 const { CondMenu, menuFor, evaluate } = mod.exports;
-const spec = require(path.join(__dirname, "..", "..", "web", "generated", "kicad-context-spec.json"));
+const spec = require(webPath("domains", "pcb", "generated", "kicad-context-spec.json"));
 let passed = 0, failed = 0;
 function test(name, fn) { try { fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + (e.stack || e).toString().split("\n").slice(0, 4).join("\n       ")); } }
 const ctx = (o) => Object.assign({ editor: "sch", kinds: [], tool: "select", busy: false, drawingLine: false, routing: false, canClose: false, canUndoPoint: false, highlight: false, belowRoot: false, hasLocked: false, hasUnlocked: false, hasItems: true, checks: {} }, o);

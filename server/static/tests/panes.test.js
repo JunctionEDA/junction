@@ -3,9 +3,10 @@
 // Run: node server/static/tests/panes.test.js
 "use strict";
 const path = require("path"), assert = require("assert");
+const { webPath } = require("./web-path");
 const esbuild = require("esbuild");
 function load(file) {
-  const out = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
+  const out = esbuild.buildSync({ entryPoints: [webPath(file)], bundle: true, format: "cjs", write: false, platform: "node", logLevel: "silent" });
   const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
 }
 const S = load("editor/panels/search-model.ts");

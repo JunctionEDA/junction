@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate server/web/generated/kicad-credits.json: the contributor lists of KiCad's About dialog
+"""Generate server/web/domains/pcb/generated/kicad-credits.json: the contributor lists of KiCad's About dialog
 (common/dialog_about/AboutDialog_main.cpp s_developers, s_docWriters, s_translators, s_librarians, s_artists and
 s_packagers) with the category each is listed under (buildKicadAboutBanner), in the source's order.
 
@@ -11,7 +11,7 @@ import re
 
 ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..")
 SRC = os.path.join(ROOT, "common", "dialog_about", "AboutDialog_main.cpp")
-OUT = os.path.join(ROOT, "server", "web", "generated", "kicad-credits.json")
+OUT = os.path.join(ROOT, "server", "web", "domains", "pcb", "generated", "kicad-credits.json")
 
 DEV_CATEGORIES = {"LEAD_DEV": "Lead Development Team", "FORMER_DEV": "Lead Development Alumni", "CONTRIB_DEV": "Additional Contributions By"}
 LIB_CATEGORIES = {"LIBRARIAN_TEAM": "Librarian Team", "MODELS_3D_CONTRIBUTION": "3D models", "SYMBOL_LIB_CONTRIBUTION": "Symbols", "FOOTPRINT_LIB_CONTRIBUTION": "Footprints"}

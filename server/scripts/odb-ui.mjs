@@ -1,6 +1,6 @@
 // Browser test of File ▸ Fabrication Outputs ▸ ODB++ Output File… in the real editor: the entry opens the Export
 // ODB++ dialog (KiCad's DIALOG_EXPORT_ODBPP: output file, unit, precision, compression), and Export downloads an
-// archive whose files are the ones web/fab/odb.ts writes for the same board in Node (static/tests/odb.test.js
+// archive whose files are the ones web/domains/pcb/fab/odb.ts writes for the same board in Node (static/tests/odb.test.js
 // checks those against the board).  Setup as fab-ui.mjs.
 //
 //   E2E_PG_URL=… E2E_JWT_SECRET=… [SHOTS=/some/dir] [BOARD=path.kicad_pcb] node odb-ui.mjs

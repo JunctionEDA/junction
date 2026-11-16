@@ -2096,7 +2096,7 @@ pub async fn doc_content(
         axum::http::HeaderName::from_static("x-snapshot-seq"),
         axum::http::HeaderValue::from_str(&seq.to_string()).unwrap(),
     );
-    // edits made since that snapshot are not in the text: the editor fetches them when this is ahead (web/editor/doc.ts)
+    // edits made since that snapshot are not in the text: the editor fetches them when this is ahead (web/domains/pcb/editor/doc.ts)
     let head = persist::head_seq(&state.pool, doc_id).await.unwrap_or(seq);
     response.headers_mut().insert(
         axum::http::HeaderName::from_static("x-head-seq"),
@@ -2112,8 +2112,8 @@ pub struct FirstDocQuery {
 }
 
 /// The text of the document a project opens on, so the page can ask for it at the same moment it
-/// asks for the project (web/editor/boot.ts) instead of after: the document a link names, else the
-/// root schematic, else the board.  The choice is the editor's own (web/editor/bootpick.ts), and the
+/// asks for the project (web/domains/pcb/editor/boot.ts) instead of after: the document a link names, else the
+/// root schematic, else the board.  The choice is the editor's own (web/domains/pcb/editor/bootpick.ts), and the
 /// editor checks `x-doc-id` against it, so a disagreement costs one request, never a wrong sheet.
 pub async fn first_doc_content(
     State(state): State<AppState>,
@@ -2139,7 +2139,7 @@ pub async fn first_doc_content(
     response.headers_mut().insert(axum::http::HeaderName::from_static("x-doc-id"), value(doc.id.to_string()));
     let head = persist::head_seq(&state.pool, doc.id).await.unwrap_or(seq);
     response.headers_mut().insert(axum::http::HeaderName::from_static("x-head-seq"), value(head.to_string()));
-    // a board needs the board tools, which the page then starts fetching at once (web/editor/boot.ts)
+    // a board needs the board tools, which the page then starts fetching at once (web/domains/pcb/editor/boot.ts)
     response.headers_mut().insert(axum::http::HeaderName::from_static("x-doc-type"), value(doc.doc_type.clone()));
     Ok(response)
 }

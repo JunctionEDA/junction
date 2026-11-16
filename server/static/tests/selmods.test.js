@@ -4,8 +4,9 @@
 // Run: node server/static/tests/selmods.test.js
 "use strict";
 const path = require("path"), assert = require("assert");
+const { webPath } = require("./web-path");
 const esbuild = require(path.join(__dirname, "..", "..", "node_modules", "esbuild"));
-const load = (rel) => { const b = esbuild.buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", ...rel)], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" }); const m = { exports: {} }; new Function("module", "exports", "require", b.outputFiles[0].text)(m, m.exports, require); return m.exports; };
+const load = (rel) => { const b = esbuild.buildSync({ entryPoints: [webPath(...rel)], bundle: true, format: "cjs", write: false, logLevel: "silent", platform: "node" }); const m = { exports: {} }; new Function("module", "exports", "require", b.outputFiles[0].text)(m, m.exports, require); return m.exports; };
 const M = load(["editor", "selmodes.ts"]);
 
 let passed = 0, failed = 0;
