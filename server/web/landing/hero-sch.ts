@@ -2,7 +2,7 @@
 // each at a time, before the window turns to the board (mini.ts).  Shown whole when the visitor
 // opens the tab themselves.
 
-import { Box, K, PEERS, Pt, clamp, drawCursor, fit, lerp, mixBox, toPx } from "./demo";
+import { Box, K, PEERS, Pt, View, clamp, drawCursor, fit, lerp, mixBox, toMm, toPx } from "./demo";
 import { SANS, Stage, makeStage, reducedMotion } from "./stage";
 import { schText } from "./hero";
 
@@ -54,6 +54,31 @@ export function startSch(canvas: HTMLCanvasElement, onEnd: () => void): SchScene
   // Where the camera and the hands were on the last frame of the drawing: the zoom out starts from there.
   let lastBox: Box | null = null, lastHands: Pt[] = [];
   const still = reducedMotion();
+
+  // The sheet is drawn into a kept image and only what is new is added to it, so a frame is a copy of that
+  // image plus the cursors (drawing the whole sheet each frame took 35 to 90 ms).  The drawing image holds the
+  // whole sheet at the drawing's scale, wider than the window when the window drifts along it; the finished
+  // image is the whole sheet fitted to the window.
+  const sheet = document.createElement("canvas"), sctx = sheet.getContext("2d")!, done = document.createElement("canvas");
+  let sheetKey = "", sheetView: View | null = null, doneKey = "";
+  const inSheet = new Set<string>();
+  function drawing(W: number, H: number, dpr: number, ids: Set<string>): View {
+    const vw = view[2] - view[0], bw = (view[3] - view[1]) * W / H, sw = bw < vw * 0.8 ? W * vw / bw : W;
+    const key = `${Math.round(sw)}x${H}@${dpr}`;
+    if (key !== sheetKey) { sheetKey = key; sheet.width = Math.round(sw * dpr); sheet.height = Math.round(H * dpr); sheetView = fit(sw, H, dpr, view); inSheet.clear(); }
+    if (!inSheet.size) { K.render(doc, sctx, sheetView, { ids, grid: 1.27, frame: false }); for (const id of ids) inSheet.add(id); }
+    else {
+      const add = new Set<string>(); for (const id of ids) if (!inSheet.has(id)) { add.add(id); inSheet.add(id); }
+      if (add.size) K.render(doc, sctx, sheetView, { ids: add, frame: false, overlay: true, background: null });
+    }
+    return sheetView!;
+  }
+  /** Copies the part of the drawing image that `v` shows onto the window. */
+  function blit(ctx: CanvasRenderingContext2D, W: number, H: number, dpr: number, v: View): void {
+    const a = toPx(sheetView!, ...toMm(v, 0, 0)), b = toPx(sheetView!, ...toMm(v, W, H));
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(sheet, a[0] * dpr, a[1] * dpr, (b[0] - a[0]) * dpr, (b[1] - a[1]) * dpr, 0, 0, Math.round(W * dpr), Math.round(H * dpr));
+  }
   const stage: Stage = makeStage(canvas, (s, _now, dt) => {
     const { ctx, w: W, h: H } = s;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -63,7 +88,12 @@ export function startSch(canvas: HTMLCanvasElement, onEnd: () => void): SchScene
       // The camera eases out to the whole sheet while the three of them let go and leave.
       const u = lastBox ? minJerk(clamp((t - total) / ZOOM)) : 1;
       const v = fit(W, H, s.dpr, lastBox && u < 1 ? mixBox(lastBox, view, u) : view);
-      K.render(doc, ctx, v, { ids: all, grid: 1.27, frame: false });
+      if (u < 1) { drawing(W, H, s.dpr, all); blit(ctx, W, H, s.dpr, v); }
+      else {
+        const key = `${W}x${H}@${s.dpr}`;
+        if (key !== doneKey) { doneKey = key; done.width = canvas.width; done.height = canvas.height; K.render(doc, done.getContext("2d")!, v, { ids: all, grid: 1.27, frame: false }); }
+        ctx.drawImage(done, 0, 0);
+      }
       if (u < 1) {
         ctx.setTransform(s.dpr, 0, 0, s.dpr, 0, 0);
         lastHands.forEach((h, k) => { if (lanes[k].length) { const p = toPx(v, h[0], h[1]); drawCursor(ctx, p[0], p[1], PEERS[k].name, PEERS[k].color, SANS, 1 - u); } });
@@ -95,7 +125,9 @@ export function startSch(canvas: HTMLCanvasElement, onEnd: () => void): SchScene
       }
       lastBox = box.slice() as Box; lastHands = hands;
       const v = fit(W, H, s.dpr, box);
-      K.render(doc, ctx, v, { ids, grid: 1.27, frame: false, selected: fresh.size ? fresh : null });
+      drawing(W, H, s.dpr, ids); blit(ctx, W, H, s.dpr, v);
+      // what was just put down shows selected for a moment, as it does in the editor
+      if (fresh.size) K.render(doc, ctx, v, { ids: fresh, frame: false, overlay: true, background: null, selected: fresh });
       ctx.setTransform(s.dpr, 0, 0, s.dpr, 0, 0);
       hands.forEach((h, k) => { if (lanes[k].length) { const p = toPx(v, h[0], h[1]); drawCursor(ctx, p[0], p[1], PEERS[k].name, PEERS[k].color, SANS); } });
     }
@@ -104,7 +136,7 @@ export function startSch(canvas: HTMLCanvasElement, onEnd: () => void): SchScene
   });
   return {
     symbols: items.filter(real).length,
-    play() { lastBox = null; if (still) { t = Infinity; ended = true; } else { t = 0; ended = false; } stage.invalidate(); },
+    play() { lastBox = null; inSheet.clear(); if (still) { t = Infinity; ended = true; } else { t = 0; ended = false; } stage.invalidate(); },
     whole() { t = Infinity; ended = true; lastBox = null; stage.invalidate(); },
   };
 }
