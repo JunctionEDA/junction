@@ -213,6 +213,9 @@ export class ViewerWindow {
   private onWinResize = () => this.clamp();
   closed = false;
   private settings: Settings3D = loadSettings3D();
+  /** "Use board stackup colors": on unless turned off, as in KiCad (EDA_3D_VIEWER_SETTINGS use_stackup_colors defaults to true),
+   *  so a board with a black mask in its Board Setup is drawn black. */
+  private get useStackup(): boolean { return this.settings.useStackup !== false; }
   /** the layer preset shown in the Presets choice ("" when the appearance was changed since) */
   private presetName = "";
   /** APPEARANCE_CONTROLS_3D m_presetMRU / m_viewportMRU: names applied most recently first (this session) */
@@ -294,7 +297,7 @@ export class ViewerWindow {
     root.focus({ preventScroll: true });
     if (opts.subscribe) this.unsubscribe = opts.subscribe(() => this.scheduleReload());
     this.reload(true);
-    if (this.settings.useStackup || this.settings.useEditorCopper) void this.refreshOverrides();
+    if (this.useStackup || this.settings.useEditorCopper) void this.refreshOverrides();
   }
 
   // ---------------------------------------------------------------- actions
@@ -494,7 +497,7 @@ export class ViewerWindow {
     bg("Background End", "Background gradient end color", 1);
     // the display options under the list (m_cbUseBoardStackupColors, m_cbUseBoardEditorCopperColors)
     const opt = (label: string, tip: string, key: "useStackup" | "useEditorCopper") => {
-      const r = el("label", "v3d-opt"); r.title = tip; const cb = el("input"); cb.type = "checkbox"; cb.dataset.opt = key; cb.checked = !!this.settings[key];
+      const r = el("label", "v3d-opt"); r.title = tip; const cb = el("input"); cb.type = "checkbox"; cb.dataset.opt = key; cb.checked = key === "useStackup" ? this.useStackup : !!this.settings[key];
       cb.addEventListener("change", () => { this.settings[key] = cb.checked; this.save(); void this.refreshOverrides(); });
       r.append(cb, el("span", undefined, label)); side.appendChild(r);
     };
@@ -519,7 +522,7 @@ export class ViewerWindow {
   /** The colours the two display options stand in (stackup, editor copper), then the board drawn again. */
   async refreshOverrides(): Promise<void> {
     const o: Partial<LayerColors> = {};
-    if (this.settings.useStackup && this.opts.stackupLayers) {
+    if (this.useStackup && this.opts.stackupLayers) {
       try { const l = await this.opts.stackupLayers(), f = this.opts.stackupFinish ? await this.opts.stackupFinish() : null; if (l) Object.assign(o, stackupOverride(l, f)); } catch { /* no stackup */ }
     }
     if (this.settings.useEditorCopper && this.opts.editorColor) {
@@ -642,7 +645,7 @@ export class ViewerWindow {
     const v = this.viewer; if (!v) return;
     setLayerColors(cloneLayerColors(DEFAULT_LAYER_COLORS));
     v.setVisibility({ ...DEFAULT_VISIBILITY, extra: DEFAULT_VISIBILITY.extra.slice() }); v.setBackground(BACKGROUND_TOP, BACKGROUND_BOTTOM); v.setOrtho(false); v.setGrid(0);
-    this.presetName = ""; this.settings.useStackup = false; this.settings.useEditorCopper = false; this.save();
+    this.presetName = ""; this.settings.useStackup = true; this.settings.useEditorCopper = false; this.save();
     this.buildAppearance(); this.syncToggles(); v.view("top"); this.reload(false);
   }
 
