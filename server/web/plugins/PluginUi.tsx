@@ -228,7 +228,7 @@ function Permissions({ perms, fresh, m }: { perms: string[]; fresh?: string[]; m
 function Contributes({ m, actions }: { m: PluginManifest; actions?: PluginAction[] }) {
   const rows: string[] = [];
   if (isPython(m)) {
-    if (!actions || !actions.length) return <p className="plg-muted">Board editor commands under Tools → External Plugins. A Python plugin names them when it first runs.</p>;
+    if (!actions || !actions.length) return <p className="plg-muted">Board editor commands under Tools &gt; External Plugins. A Python plugin names them when it first runs.</p>;
     for (const a of actions) rows.push(`Command: ${a.name}`);
     return <ul className="plg-adds">{rows.map((r) => <li key={r}>{r}</li>)}</ul>;
   }

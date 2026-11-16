@@ -32,7 +32,7 @@ export function FirstProject({ onGuided, onUpload, onJoin, releases }: {
           <button type="button" className="btn" onClick={onUpload}><Ic name="upload" />Upload a KiCad project</button>
           <button type="button" className="btn" onClick={onJoin}><Ic name="link" />Join with link</button>
         </div>
-        <p className="hp-note">Using the desktop app? Open a project there and choose File → Publish Project Online. <a href={releases} target="_blank" rel="noreferrer">Get the app</a></p>
+        <p className="hp-note">Using the desktop app? Open a project there and choose File &gt; Publish Project Online. <a href={releases} target="_blank" rel="noreferrer">Get the app</a></p>
       </section>
     </div>
   );
