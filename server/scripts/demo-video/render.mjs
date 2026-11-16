@@ -179,6 +179,8 @@ if (MUSIC && process.argv.includes('--measures')) {
   music = { file: MUSIC, offset };
   console.log(`music ${path.basename(MUSIC)} from ${offset.toFixed(2)} s, tempo ${B.tempo.toFixed(0)}; cuts on`, scenes.map((s2) => s2.start.toFixed(2)).join(' '));
 }
+// straight cuts only, on the music: no fade into or out of any scene
+for (const sc of scenes) { sc.cutIn = true; sc.cutOut = true; }
 const timeline = { length: +at.toFixed(3), fps: FPS, icon: pathToFileURL(path.join(here, '..', '..', 'static', 'icon.svg')).href, scenes };
 fs.writeFileSync(path.join(OUT, 'timeline.json'), JSON.stringify({ ...timeline, scenes: scenes.map((s) => ({ ...s, windows: s.windows && s.windows.map((w) => ({ ...w, frames: w.frames.length })) })) }, null, 1));
 console.log(`timeline ${timeline.length.toFixed(1)} s:`, scenes.map((s) => `${s.name || s.kind} ${s.length.toFixed(1)}s${s.speed ? ' ×' + s.speed.toFixed(1) : ''}`).join(', '));
