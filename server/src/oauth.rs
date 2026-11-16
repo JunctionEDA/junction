@@ -899,21 +899,21 @@ Nothing here is tied to one vendor, and the work runs on whatever plan or key yo
   <h3>Claude</h3>
   <ol><li>On the web or in the desktop app, open <b>Settings</b>, then <b>Connectors</b>, and choose <b>Add custom connector</b>.</li>
       <li>Name it Junction, paste the address above, choose <b>Connect</b>, sign in here and allow it.</li></ol>
-  <p class="muted">In Claude Code, run the line below, then <code>/mcp</code>, pick <b>kicad</b> and sign in.</p>
-  <pre>claude mcp add --transport http kicad {url}</pre>
+  <p class="muted">In Claude Code, run the line below, then <code>/mcp</code>, pick <b>junction</b> and sign in.</p>
+  <pre>claude mcp add --transport http junction {url}</pre>
   <h3>ChatGPT</h3>
   <ol><li>Open <b>Settings</b>, then <b>Apps and connectors</b>, and turn on <b>Developer mode</b> under the advanced settings.</li>
       <li>Choose <b>Create</b>, paste the address above, sign in here and allow it.</li></ol>
   <p class="muted">In Codex CLI, run the line below and sign in when it asks.</p>
-  <pre>codex mcp add kicad --url {url}</pre>
+  <pre>codex mcp add junction --url {url}</pre>
   <h3>Gemini CLI</h3>
-  <pre>gemini mcp add --transport http kicad {url}</pre>
+  <pre>gemini mcp add --transport http junction {url}</pre>
   <h3>Cursor</h3>
   <p class="muted">Add this to <code>~/.cursor/mcp.json</code>, then sign in from Cursor's MCP settings.</p>
-  <pre>{{ "mcpServers": {{ "kicad": {{ "url": "{url}" }} }} }}</pre>
+  <pre>{{ "mcpServers": {{ "junction": {{ "url": "{url}" }} }} }}</pre>
   <h3>VS Code with GitHub Copilot</h3>
   <p class="muted">Add this to <code>.vscode/mcp.json</code> in your workspace and start the server from the editor.</p>
-  <pre>{{ "servers": {{ "kicad": {{ "type": "http", "url": "{url}" }} }} }}</pre>
+  <pre>{{ "servers": {{ "junction": {{ "type": "http", "url": "{url}" }} }} }}</pre>
   <h3>Anything else</h3>
   <p class="muted">Add a remote MCP server (Streamable HTTP) with the address above. Sign-in is standard OAuth with automatic
   registration, so there is no client ID or secret to fill in. A model you run yourself works through any agent that speaks MCP.</p>

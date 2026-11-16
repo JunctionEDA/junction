@@ -108,6 +108,7 @@ const CSS = `
 #simframe .sim-split-h{flex:none;height:5px;cursor:row-resize;background:var(--panel);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 #simframe .sim-split-v{flex:none;width:5px;cursor:col-resize;background:var(--panel);border-left:1px solid var(--line);border-right:1px solid var(--line)}
 #simframe .sim-console{flex:none;height:140px;resize:none;border:0;padding:4px 8px;background:var(--bg);color:var(--ink);font:12px/1.35 var(--mono,monospace);outline:none}
+#simframe .sim-back{width:auto;gap:4px;padding:0 8px 0 4px;display:inline-flex;align-items:center;font:12px var(--ui,inherit);color:var(--ink)}
 #simframe .sim-side{flex:none;width:400px;display:flex;flex-direction:column;min-height:0;background:var(--panel)}
 #simframe .sim-sec{display:flex;flex-direction:column;min-height:0;border-bottom:1px solid var(--line)}
 #simframe .sim-sec.grow{flex:1}
@@ -661,6 +662,8 @@ function renderToolbar(): void {
     b.disabled = !enabled; b.addEventListener("click", () => run()); tb.append(b);
   };
   const sep = (): void => { tb.append(h("span", { class: "se-sep" })); };
+  const back = h("button", { class: "se-btn sim-back", id: "sim-back", title: "Back to Schematic Editor", "aria-label": "Back to Schematic Editor" }, icon("leave_sheet"), h("span", {}, "Back")) as HTMLButtonElement;
+  back.addEventListener("click", () => void closeSimulator()); tb.append(back); sep();
   btn("openWorkbook", openWorkbook); btn("saveWorkbook", () => void saveWorkbook(false)); sep();
   btn("newAnalysisTab", () => void newAnalysisTab()); btn("simAnalysisProperties", () => void editAnalysisTab(), hasTab()); sep();
   btn("runSimulation", () => void runSimulation(), !S.running); btn("stopSimulation", stopSimulation, S.running); sep();
