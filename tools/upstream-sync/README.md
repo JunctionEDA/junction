@@ -26,7 +26,7 @@ Monday at 06:00 UTC and can be started from the Actions tab.
    reported); every kind of file the server writes is opened by the new desktop.
 7. **Promote.** Only when every job passed, master is moved to the merge and the
    `upstream-sync` branch is deleted. If master moved meanwhile: changes outside the desktop
-   code are merged in; anything else starts the run again on top of the new master (three tries).
+   code are merged in; anything else starts the run again on top of the new master (five tries).
 8. **Report.** A successful sync opens an issue labelled `upstream-parity` with the web to-do
    list. A sync that could not finish opens (or comments on) one issue labelled
    `upstream-sync-failed`; master is untouched.

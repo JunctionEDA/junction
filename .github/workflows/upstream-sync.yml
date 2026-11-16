@@ -349,15 +349,15 @@ jobs:
           set -u
           restart() {
             echo "$1"
-            if [ "$ATTEMPT" -ge 3 ]; then
-              echo "::error::master kept moving under the sync for three runs in a row."
+            if [ "$ATTEMPT" -ge 5 ]; then
+              echo "::error::master kept moving under the sync for five runs in a row."
               echo "result=gave-up" >> "$GITHUB_OUTPUT"
               exit 1
             fi
             # Keep what was merged and settled; the next run adds the new master to it.
             gh workflow run upstream-sync.yml --repo "$GITHUB_REPOSITORY" --ref master -f resume=true -f attempt=$((ATTEMPT + 1))
             echo "result=restarted" >> "$GITHUB_OUTPUT"
-            echo "master moved while the merge was being built; started the sync again (run $((ATTEMPT + 1)) of 3)." >> "$GITHUB_STEP_SUMMARY"
+            echo "master moved while the merge was being built; started the sync again (run $((ATTEMPT + 1)) of 5)." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           }
           git fetch -q origin master
