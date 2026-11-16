@@ -264,6 +264,16 @@ test("multi-unit symbols: the units' Sim.Pins merged into one item (multiunit_pi
   const x1 = r.lines.find((l) => l.startsWith("X1 ")).split(" "), x2 = r.lines.find((l) => l.startsWith("X2 ")).split(" ");
   assert.strictEqual(x1[3], x2[3]); assert.strictEqual(x1[4], x2[4]); assert.strictEqual(x1[x1.length - 1], "uopamp_single");
 });
+test("a legacy multi-unit symbol: MigrateSimModel's pin map has every pin of the library symbol (GetGraphicalPins(ALL_UNITS, ALL_BODY_STYLES)), placed or not", () => {
+  // unit A of a dual op amp placed alone: pins 1 2 3 4 8 on the sheet, 5 6 7 in the unplaced unit B
+  const placed = ["1", "2", "3", "4", "8"].map((n) => ({ number: n, net: "/n" + n }));
+  const sym = { ref: "U1", fields: fields({ Reference: "U1", Value: "X", Spice_Primitive: "X", Spice_Model: "nope", Spice_Lib_File: "x.lib" }), pins: placed, libPins: ["1", "2", "3", "4", "8", "5", "6", "7"] };
+  let items = [];
+  SP.spiceNetlist({ symbols: [sym], texts: [], options: 0, report: () => undefined, items: (l) => { items = l; }, library: () => null });
+  const u1 = items.find((x) => x.ref === "U1");
+  assert.ok(u1, JSON.stringify(items));
+  assert.deepStrictEqual(u1.pins.map((p) => p.symbolPin + "=" + p.modelPin).join(" "), "1=1 2=2 3=3 4=4 5=5 6=6 7=7 8=8");
+});
 test("Sim.NodesFormat: each pin's net in its pattern (XSPICE vectors and modifiers); a count that differs is an error", () => {
   const sym = (fmt) => ({ ref: "A1", fields: fields({ Reference: "A1", Value: "x", "Sim.Device": "SPICE", "Sim.Params": 'type="A" model="adc"', "Sim.Pins": "1=1 2=2 3=3", "Sim.NodesFormat": fmt }), pins: [{ number: "1", net: "a" }, { number: "2", net: "b" }, { number: "3", net: "c" }] });
   const run = (fmt) => { const msgs = []; const out = SP.spiceNetlist({ symbols: [sym(fmt)], texts: [], options: 0, report: (m) => msgs.push(m), library: () => null }); return { out, msgs }; };
