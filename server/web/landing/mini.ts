@@ -936,7 +936,12 @@ export function startMini(root: HTMLElement): void {
     const r = canvas.getBoundingClientRect();
     return toMm(view, e.clientX - r.left, e.clientY - r.top);
   }
+  const touches = new Set<number>();
+  const untouch = (e: PointerEvent) => { touches.delete(e.pointerId); };
+  canvas.addEventListener("pointerup", untouch);
+  canvas.addEventListener("pointercancel", untouch);
   canvas.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") { touches.add(e.pointerId); if (touches.size > 1) return; }   // a second finger: a pinch, see below
     const at = where(e); if (!at || e.button !== 0) return;
     canvas.focus({ preventScroll: true }); hover = at; lastAct = performance.now();
     if (tool === "select") {
@@ -968,6 +973,7 @@ export function startMini(root: HTMLElement): void {
     }
   });
   canvas.addEventListener("pointermove", (e) => {
+    if (pinch) return;
     const at = where(e); if (!at) return;
     hover = at;
     if (xy) xy.textContent = `X ${(at[0] - BOARD.x).toFixed(2)}  Y ${(at[1] - BOARD.y).toFixed(2)}`;
@@ -999,6 +1005,31 @@ export function startMini(root: HTMLElement): void {
   canvas.addEventListener("pointercancel", release);
   canvas.addEventListener("pointerleave", () => { if (!drag && !pan) { hover = null; if (xy) xy.textContent = "X --.--  Y --.--"; stage.invalidate(); } });
   canvas.addEventListener("dblclick", () => { if (route) endRoute(); });
+  // Two fingers zoom and pan the board, as in the editor on a phone or tablet; one finger still scrolls the page.
+  let pinch: { d: number; mid: [number, number] } | null = null;
+  const fingers = (t: TouchList) => {
+    const a = t[0], b = t[1];
+    return { d: Math.max(1, Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY)), mid: [(a.clientX + b.clientX) / 2, (a.clientY + b.clientY) / 2] as [number, number] };
+  };
+  canvas.addEventListener("touchstart", (e) => {
+    if (e.touches.length < 2) return;
+    e.preventDefault();
+    // Whatever the first finger started is let go: a part it picked up goes back where it was.
+    if (drag) { const it = doc.items.get(drag.id); if (it && drag.moved) { K.moveItem(doc, it, drag.from[0], drag.from[1], 1e6); dirty = true; } drag = null; }
+    pan = null; pinch = fingers(e.touches); own = true; glide = null; lastAct = performance.now();
+  }, { passive: false });
+  canvas.addEventListener("touchmove", (e) => {
+    if (!pinch || e.touches.length < 2 || !view) return;
+    e.preventDefault();
+    const f = fingers(e.touches), at = where({ clientX: f.mid[0], clientY: f.mid[1] });
+    const dx = (f.mid[0] - pinch.mid[0]) / view.ppm, dy = (f.mid[1] - pinch.mid[1]) / view.ppm;
+    box = [box[0] - dx, box[1] - dy, box[2] - dx, box[3] - dy];
+    zoom(pinch.d / f.d, at ? [at[0] - dx, at[1] - dy] : undefined);
+    pinch = f; lastAct = performance.now();
+  }, { passive: false });
+  const unpinch = (e: TouchEvent) => { if (e.touches.length < 2) pinch = null; };
+  canvas.addEventListener("touchend", unpinch);
+  canvas.addEventListener("touchcancel", unpinch);
   canvas.addEventListener("wheel", (e) => {
     if (!e.ctrlKey && !e.metaKey) return;               // a plain wheel scrolls the page
     e.preventDefault(); const at = where(e); zoom(e.deltaY > 0 ? 1.15 : 1 / 1.15, at || undefined);
