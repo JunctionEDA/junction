@@ -2,13 +2,17 @@
 // each at a time, before the window turns to the board (mini.ts).  Shown whole when the visitor
 // opens the tab themselves.
 
-import { Box, K, PEERS, Pt, clamp, drawCursor, fit, lerp, toPx } from "./demo";
+import { Box, K, PEERS, Pt, clamp, drawCursor, fit, lerp, mixBox, toPx } from "./demo";
 import { SANS, Stage, makeStage, reducedMotion } from "./stage";
 import { schText } from "./hero";
 
 /** One thing a teammate does: the pointer travels to `at`, then `ids` are on the sheet. */
 interface Beat { t: number; at: Pt; ids: string[] }
-const HOLD = 1500;                                   // ms the finished schematic is left up before the board takes over
+const FADE = 650;                                    // ms the schematic and the board take to cross-fade
+const ZOOM = 1200;                                   // ms the camera takes to ease out from the close-up to the whole sheet
+const HOLD = ZOOM + 1500;                            // ms the finished schematic is left up before the board takes over
+const snapG = (v: number): number => Math.round(v / 1.27) * 1.27;
+const easeOut = (u: number): number => 1 - Math.pow(1 - u, 3);
 const minJerk = (u: number): number => u <= 0 ? 0 : u >= 1 ? 1 : u * u * u * (10 - 15 * u + 6 * u * u);
 const mid = (b: number[]): Pt => [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2];
 const inside = (b: number[], r: number[]): boolean => { const c = mid(b); return c[0] >= r[0] && c[0] <= r[2] && c[1] >= r[1] && c[1] <= r[3]; };
@@ -47,13 +51,25 @@ export function startSch(canvas: HTMLCanvasElement, onEnd: () => void): SchScene
   const all = new Set(items.map((it) => it.id));
 
   let t = Infinity, ended = true, focus = NaN;
+  // Where the camera and the hands were on the last frame of the drawing: the zoom out starts from there.
+  let lastBox: Box | null = null, lastHands: Pt[] = [];
   const still = reducedMotion();
   const stage: Stage = makeStage(canvas, (s, _now, dt) => {
     const { ctx, w: W, h: H } = s;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     const playing = t <= total + HOLD;
     if (playing) t += dt;
-    if (t >= total) { K.render(doc, ctx, fit(W, H, s.dpr, view), { ids: all, grid: 1.27, frame: false }); focus = NaN; }
+    if (t >= total) {
+      // The camera eases out to the whole sheet while the three of them let go and leave.
+      const u = lastBox ? minJerk(clamp((t - total) / ZOOM)) : 1;
+      const v = fit(W, H, s.dpr, lastBox && u < 1 ? mixBox(lastBox, view, u) : view);
+      K.render(doc, ctx, v, { ids: all, grid: 1.27, frame: false });
+      if (u < 1) {
+        ctx.setTransform(s.dpr, 0, 0, s.dpr, 0, 0);
+        lastHands.forEach((h, k) => { if (lanes[k].length) { const p = toPx(v, h[0], h[1]); drawCursor(ctx, p[0], p[1], PEERS[k].name, PEERS[k].color, SANS, 1 - u); } });
+      } else lastBox = null;
+      focus = NaN;
+    }
     else {
       const ids = new Set<string>(), fresh = new Set<string>();
       for (const lane of lanes) for (const b of lane) { if (b.t > t) break; for (const id of b.ids) { ids.add(id); if (t - b.t < 260) fresh.add(id); } }
@@ -61,9 +77,12 @@ export function startSch(canvas: HTMLCanvasElement, onEnd: () => void): SchScene
         if (!lane.length) return mid(view);
         let i = lane.findIndex((b) => b.t > t); if (i < 0) i = lane.length - 1;
         const a = i ? lane[i - 1] : { t: 0, at: [view[0] + (view[2] - view[0]) * (0.25 + 0.25 * k), view[3] - 6] as Pt }, b = lane[i];
-        // the hand is quick between places and slow on arriving: most of each beat is the click, not the travel
-        const u = minJerk(clamp((t - a.t) / Math.max(1, (b.t - a.t) * 0.7)));
-        return [lerp(a.at[0], b.at[0], u), lerp(a.at[1], b.at[1], u)];
+        // A real hand: a quick, direct reach (longer for farther places, as Fitts has it), then still for the
+        // rest of the beat.  Drawn where KiCad's cursor would be, snapped to the sheet's 1.27 mm grid.
+        const d = Math.hypot(b.at[0] - a.at[0], b.at[1] - a.at[1]);
+        const reach = Math.min((b.t - a.t) * 0.8, 110 + 95 * Math.log2(1 + d / 4));
+        const u = easeOut(clamp((t - a.t) / Math.max(1, reach)));
+        return [snapG(lerp(a.at[0], b.at[0], u)), snapG(lerp(a.at[1], b.at[1], u))];
       });
       // A narrow window cannot show the whole sheet at a readable size: it shows the sheet's full height and
       // drifts along it with the work.
@@ -74,6 +93,7 @@ export function startSch(canvas: HTMLCanvasElement, onEnd: () => void): SchScene
         focus = isNaN(focus) ? want : focus + (want - focus) * Math.min(1, dt / 900);
         box = [focus - bw / 2, view[1], focus + bw / 2, view[3]];
       }
+      lastBox = box.slice() as Box; lastHands = hands;
       const v = fit(W, H, s.dpr, box);
       K.render(doc, ctx, v, { ids, grid: 1.27, frame: false, selected: fresh.size ? fresh : null });
       ctx.setTransform(s.dpr, 0, 0, s.dpr, 0, 0);
@@ -84,8 +104,8 @@ export function startSch(canvas: HTMLCanvasElement, onEnd: () => void): SchScene
   });
   return {
     symbols: items.filter(real).length,
-    play() { if (still) { t = Infinity; ended = true; } else { t = 0; ended = false; } stage.invalidate(); },
-    whole() { t = Infinity; ended = true; stage.invalidate(); },
+    play() { lastBox = null; if (still) { t = Infinity; ended = true; } else { t = 0; ended = false; } stage.invalidate(); },
+    whole() { t = Infinity; ended = true; lastBox = null; stage.invalidate(); },
   };
 }
 
@@ -97,7 +117,24 @@ export function startTabs(root: HTMLElement, sch: SchScene, auto: boolean): void
   if (stat) stat.textContent = `Symbols ${sch.symbols}`;
   const cap = root.querySelector<HTMLElement>("[data-sch-cap]");
   const says = (drawing: boolean): void => { if (cap) cap.textContent = drawing ? "Mara, Jun and Ada are drawing the schematic. The board comes next." : "The schematic the board is made from."; };
-  function show(v: "sch" | "pcb"): void {
+  const body = root.querySelector<HTMLElement>(".win-body");
+  /** Switches the window to the other editor.  The view that is left fades out over the new one,
+   *  from a still copy of its last frame, so neither scene has to keep running for it. */
+  function show(v: "sch" | "pcb", fade = true): void {
+    const was = root.dataset.view;
+    if (fade && was && was !== v && body && !reducedMotion()) {
+      const old = root.querySelector<HTMLCanvasElement>(was === "sch" ? ".win-body > canvas[data-sch]" : ".win-body > canvas:not([data-sch])");
+      if (old && old.width > 1 && old.offsetWidth) {
+        const r = old.getBoundingClientRect(), b = body.getBoundingClientRect();
+        const still = document.createElement("canvas");
+        still.width = old.width; still.height = old.height; still.getContext("2d")!.drawImage(old, 0, 0);
+        still.className = "fading"; still.setAttribute("aria-hidden", "true");
+        Object.assign(still.style, { left: `${r.left - b.left}px`, top: `${r.top - b.top}px`, width: `${r.width}px`, height: `${r.height}px` });
+        body.appendChild(still);
+        requestAnimationFrame(() => requestAnimationFrame(() => { still.style.opacity = "0"; }));
+        setTimeout(() => still.remove(), FADE + 100);
+      }
+    }
     root.dataset.view = v;
     for (const b of tabs) b.setAttribute("aria-selected", String(b.dataset.tab === v));
     if (app) app.textContent = v === "sch" ? "Schematic Editor" : "PCB Editor";
@@ -106,6 +143,6 @@ export function startTabs(root: HTMLElement, sch: SchScene, auto: boolean): void
   root.addEventListener("hero:sch-done", () => show("pcb"));
   if (auto) {
     root.addEventListener("hero:again", () => { show("sch"); says(true); sch.play(); });
-    show("sch"); says(true); sch.play();
-  } else { sch.whole(); says(false); show("pcb"); }
+    show("sch", false); says(true); sch.play();
+  } else { sch.whole(); says(false); show("pcb", false); }
 }

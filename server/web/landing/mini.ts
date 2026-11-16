@@ -914,7 +914,8 @@ export function startMini(root: HTMLElement): void {
       });
       ctx.restore();
     }
-    for (const a of actors) { const c = px(a.at); drawCursor(ctx, c[0], c[1], PEERS[a.who].name, PEERS[a.who].color, SANS); }
+    // Where KiCad would draw each of them: the cursor snaps to the 0.25 mm grid, so it moves in small steps.
+    for (const a of actors) { const c = px([snap(a.at[0], BOARD.x), snap(a.at[1], BOARD.y)]); drawCursor(ctx, c[0], c[1], PEERS[a.who].name, PEERS[a.who].color, SANS); }
     return !still;
   });
 

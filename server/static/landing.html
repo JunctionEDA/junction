@@ -120,7 +120,8 @@
            font-style: normal; margin-left: -5px; box-shadow: 0 0 0 2px var(--bench); }
   .avs .you { background: var(--panel); color: var(--ink-2); padding: 0 7px; box-shadow: 0 0 0 1px var(--line), 0 0 0 2px var(--bench); }
   .win-tools { height: 36px; gap: 2px; padding: 0 6px; border-bottom: 1px solid var(--line); }
-  .win-body { display: grid; grid-template-columns: minmax(0, 1fr) 36px; }
+  .win-body { display: grid; grid-template-columns: minmax(0, 1fr) 36px; position: relative; }
+  .win-body > canvas.fading { position: absolute; pointer-events: none; opacity: 1; transition: opacity 650ms cubic-bezier(.4, 0, .2, 1); }
   .win-side { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 5px 0; background: var(--bench); border-left: 1px solid var(--line); }
   .tb { width: 28px; height: 28px; padding: 0; display: grid; place-items: center; background: none; border: 1px solid transparent; border-radius: 2px; color: var(--ink-2); }
   .tb:hover:not(:disabled) { background: color-mix(in srgb, var(--ink) 9%, transparent); }
