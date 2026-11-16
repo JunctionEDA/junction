@@ -7,7 +7,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProp
 import { dispatch, useApp, type CtxItem } from "../store";
 import { hasIcon } from "../ctxspec";
 import { cx } from "../util";
-import { KIcon } from "./Icon";
+import { KIcon, MenuArrow } from "./Icon";
 import { menuKey } from "../keys";
 import { menuScroller, menuSize, placeMenu } from "../menufit";
 
@@ -72,7 +72,7 @@ function Panel({ items, path, open, active, x, y, onHover, onRun }: PanelProps) 
               ) : null}
               <span className="flex-1">{it.label}</span>
               {it.key ? <kbd className={cx(KBD, isActive && !dim && "text-on-accent")}>{menuKey(it.key)}</kbd> : null}
-              {it.sub ? <span className="ml-4 -mr-0.5" aria-hidden="true">›</span> : null}
+              {it.sub ? <MenuArrow className="ml-4 -mr-0.5" /> : null}
             </button>
             {it.sub && startsWith(open, p) ? <Panel items={it.sub} path={p} open={open} active={active} x={0} y={0} onHover={onHover} onRun={onRun} /> : null}
           </div>

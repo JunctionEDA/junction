@@ -61,7 +61,7 @@ function WakaSettings() {
   return (
     <section className="tp-card" id="wakatime">
       <h2>WakaTime</h2>
-      <p className="tp-lead">Send your time in the browser editor to WakaTime, Hackatime or Wakapi. Junction's server sends the heartbeats with your key, so the key is never put in a page. The desktop app uses wakatime-cli and ~/.wakatime.cfg on your computer, like every WakaTime plugin. Also in the editor under Preferences → Common → WakaTime.</p>
+      <p className="tp-lead">Send your time in the browser editor to WakaTime, Hackatime or Wakapi. Junction's server sends the heartbeats with your key, so the key is never put in a page. The desktop app uses wakatime-cli and ~/.wakatime.cfg on your computer, like every WakaTime plugin. Also in the editor under Preferences &gt; Common &gt; WakaTime.</p>
       <label className="tp-check"><input type="checkbox" id="tpWakaOn" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />Send heartbeats while I work in the browser editor</label>
       <div className="tp-form">
         <label htmlFor="tpWakaServer">Server</label>

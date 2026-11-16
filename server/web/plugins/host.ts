@@ -620,7 +620,7 @@ async function handleCall(run: Run, method: string, a: any): Promise<unknown> {
   if (ns === "design") {
     if (reads[fn]) return reads[fn](a);
     if (fn === "copied" || fn === "copy") return copyBuffer[fn](a);
-    if (fn === "undo" || fn === "redo") { const out = await history[fn](); log(p.identifier, "host", fn === "undo" ? "Chose Edit → Undo" : "Chose Edit → Redo"); return out; }
+    if (fn === "undo" || fn === "redo") { const out = await history[fn](); log(p.identifier, "host", fn === "undo" ? "Chose Edit > Undo" : "Chose Edit > Redo"); return out; }
     // A plugin that writes in a loop (an edit event answered with an edit) is stopped here rather than flooding the session.
     const now = Date.now(); run.commits = run.commits.filter((t) => now - t < 10000);
     if (run.commits.length >= 30) throw new ApiError("That is too many changes in a few seconds; this one was not applied.", "rate_limited");

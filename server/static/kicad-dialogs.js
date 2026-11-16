@@ -203,6 +203,24 @@
 .kbmp.on,.kbmp[aria-pressed="true"]{background:var(--on,var(--sel-soft));border-color:var(--on-line,var(--sel))}
 .kbmp-sep{flex:none;width:1px;height:18px;margin:0 4px;background:var(--line);align-self:center}
 .kbmp-bar{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
+.ktw{display:inline-block;flex:none;width:12px;height:12px;position:relative;vertical-align:middle;cursor:pointer}
+.ktw::before{content:"";position:absolute;left:2px;top:4px;border-style:solid;border-width:5px 4px 0 4px;border-color:var(--ink-3) transparent transparent transparent}
+.ktw.shut::before{left:4px;top:2px;border-width:4px 0 4px 5px;border-color:transparent transparent transparent var(--ink-3)}
+.ktw.leaf::before{display:none}
+.kmarrow{display:inline-block;flex:none;width:8px;height:10px;position:relative;vertical-align:middle}
+.kmarrow::before{content:"";position:absolute;left:2px;top:1px;border-style:solid;border-width:4px 0 4px 4px;border-color:transparent transparent transparent currentColor;opacity:.75}
+.kmchk{display:inline-block;flex:none;width:16px;height:16px;position:relative;vertical-align:middle}
+.kmchk.on::before{content:"";position:absolute;left:6px;top:2px;width:4px;height:9px;border:solid currentColor;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.kmchk.radio.on::before{left:5px;top:5px;width:6px;height:6px;border:0;border-radius:50%;background:currentColor;transform:none}
+.ksort{display:inline-block;flex:none;width:8px;height:8px;position:relative;margin-left:4px;vertical-align:middle}
+.ksort::before{content:"";position:absolute;left:0;top:1px;border-style:solid;border-width:0 4px 5px 4px;border-color:transparent transparent var(--ink-3) transparent}
+.ksort.desc::before{border-width:5px 4px 0 4px;border-color:var(--ink-3) transparent transparent transparent}
+.kcarrow{display:inline-block;flex:none;width:10px;height:10px;position:relative;vertical-align:middle}
+.kcarrow::before{content:"";position:absolute;left:2px;top:1px;width:5px;height:5px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.kcarrow.l::before{left:3px;top:2px;transform:rotate(135deg)} .kcarrow.r::before{left:1px;top:2px;transform:rotate(-45deg)} .kcarrow.u::before{top:3px;transform:rotate(-135deg)}
+.kind-on{display:inline-block;flex:none;width:10px;height:10px;position:relative;vertical-align:middle}
+.kind-on::before{content:"";position:absolute;left:2px;top:1px;border-style:solid;border-width:4px 0 4px 6px;border-color:transparent transparent transparent rgb(64,72,255)}
+.kgrid-chk{pointer-events:none;margin:0}
 `;
   var styled = false;
   function ensureIconCss() {
@@ -259,6 +277,22 @@
     if (onClick) b.addEventListener("click", (ev) => onClick(ev));
     return b;
   }
+  function menuArrow() {
+    ensureIconCss();
+    const s = document.createElement("span");
+    s.className = "kmarrow";
+    s.setAttribute("aria-hidden", "true");
+    return s;
+  }
+  function menuCheck(on, radio = false) {
+    ensureIconCss();
+    const s = document.createElement("span");
+    s.className = "kmchk" + (radio ? " radio" : "") + (on ? " on" : "");
+    s.dataset.check = on ? "on" : "off";
+    s.setAttribute("aria-hidden", "true");
+    return s;
+  }
+  var CLOSE_MARK_SVG = '<svg class="kclose" viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M2 2l6 6M8 2L2 8" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>';
 
   // web/keys.ts
   function detectMac() {
@@ -1081,10 +1115,10 @@
         const row = h(
           "div",
           { class: "kd-pop-row", role: "menuitem", "aria-disabled": it.disabled ? "true" : void 0, style: `display:flex;gap:6px;align-items:center;padding:3px 12px 3px 6px;cursor:default;white-space:nowrap;${it.disabled ? "opacity:.45;" : ""}` },
-          h("span", { style: `${it.icon && it.iconW ? "" : "width:16px;"}display:inline-flex;flex:none;justify-content:center` }, it.check ? it.checked ? "\u2713" : "" : it.icon ? kicadIcon(it.icon, it.iconW || 16, it.iconH || it.iconW || 16) : ""),
+          h("span", { style: `${it.icon && it.iconW ? "" : "width:16px;"}display:inline-flex;flex:none;justify-content:center` }, it.check ? menuCheck(!!it.checked) : it.icon ? kicadIcon(it.icon, it.iconW || 16, it.iconH || it.iconW || 16) : ""),
           h("span", { style: "flex:1" }, it.label || ""),
           it.key ? h("span", { class: "kd-pop-key", style: "margin-left:24px;opacity:.7" }, menuKey(it.key)) : null,
-          it.sub ? h("span", null, "\u25B8") : null
+          it.sub ? menuArrow() : null
         );
         if (it.title) row.title = it.title;
         row.addEventListener("pointerenter", () => {
@@ -1275,6 +1309,7 @@
   }
   function grid(host, columns, rows, optsIn) {
     ensureCss();
+    ensureIconCss();
     const opts = optsIn || {};
     const wrap = el("div", "kd-grid-wrap"), table = el("table", "kd-grid");
     if (opts.height) wrap.style.maxHeight = wrap.style.height = typeof opts.height === "number" ? opts.height + "px" : opts.height;
@@ -1319,7 +1354,7 @@
     }
     function refresh() {
       const cols = api.columns;
-      table.innerHTML = `<thead${opts.noHeader ? ' style="display:none"' : ""}><tr>${cols.map((c) => `<th${c.width ? ` style="width:${c.width}px${c.button ? `;min-width:${c.width}px` : ""}"` : ""}>${esc(c.label)}</th>`).join("")}</tr></thead>`;
+      table.innerHTML = `<thead${opts.noHeader ? ' style="display:none"' : ""}><tr>${cols.map((c) => `<th${c.width ? ` style="width:${c.width}px${c.button ? `;min-width:${c.width}px` : ""}"` : ""}>${esc(c.label)}${c.sort ? `<span class="ksort${c.sort === "desc" ? " desc" : ""}" data-sort-ind="${c.sort}" aria-hidden="true"></span>` : ""}</th>`).join("")}</tr></thead>`;
       const tb = el("tbody");
       rows.forEach((r, i) => {
         const tr = el("tr");
@@ -1886,7 +1921,7 @@
     else for (const d of stack.slice(1)) if (d.spec.title === spec.title) closeEntry(d);
     const ov = el("div", "kd-overlay"), dlg = el("div", "kd-dialog");
     if (spec.width) dlg.style.width = spec.width + "px";
-    const tt = el("div", "kd-title", `<span>${esc(spec.title)}</span><span class="kd-x" title="Close (Esc)">\xD7</span>`);
+    const tt = el("div", "kd-title", `<span>${esc(spec.title)}</span><span class="kd-x" title="Close (Esc)">${CLOSE_MARK_SVG}</span>`);
     const body = el("div", "kd-body"), foot = el("div", "kd-foot");
     for (const b of spec.extra || []) {
       const btn = el("button", "btn", esc(b.label));

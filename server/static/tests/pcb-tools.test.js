@@ -129,19 +129,19 @@ test("rotating a footprint keeps every pad's angle relative to the footprint and
   assert.ok(K.applyChange(doc, change, IU)); assert.equal(doc.items.get("fp-1").rot, 0);
 });
 
-test("flipping a footprint swaps F./B. layers, mirrors local pad X and negates angles", () => {
+test("flipping a footprint swaps F./B. layers and is written as pcbnew writes it: angle 180 - a, local Y mirrored", () => {
   const doc = fixture(); const fp = doc.items.get("fp-1");
   const before = absPads(fp.node); const [fx] = K.atOf(fp.node);
   const node = P.flipFootprintNode(JSON.parse(JSON.stringify(fp.node)));
-  assert.equal(K.kid(node, "layer")[1], "B.Cu"); assert.equal(K.atOf(node)[2], 90);
+  assert.equal(K.kid(node, "layer")[1], "B.Cu"); assert.equal(K.atOf(node)[2], -90);   // 180 - (-90), as FOOTPRINT::Flip: the 3D model follows this angle
   const pad1 = K.kids(node, "pad")[0];
   assert.deepEqual(K.kid(pad1, "layers").slice(1), ["B.Cu", "B.Mask", "B.Paste"]);
-  assert.equal(K.atOf(pad1)[0], 0.9); assert.equal(K.atOf(pad1)[2], 90);
+  assert.equal(K.atOf(pad1)[0], -0.9); assert.equal(K.atOf(pad1)[2], -90);   // relative angle negated (PAD::Flip), turned with the footprint
   absPads(node).forEach(([x, y], i) => assert.ok(near(x, 2 * fx - before[i][0]) && near(y, before[i][1]), `pad ${i} mirrored about the origin`));
   const ref = K.kids(node, "property")[0];
   assert.equal(K.kid(ref, "layer")[1], "B.SilkS"); assert.ok(K.kid(K.kid(ref, "effects"), "justify").includes("mirror")); assert.equal(K.atOf(ref)[2], 90);
   assert.equal(K.kid(K.kids(node, "property")[1], "layer")[1], "B.Fab");
-  const l = K.kid(node, "fp_line"); assert.equal(K.kid(l, "layer")[1], "B.SilkS"); assert.equal(K.kid(l, "start")[1], 1); assert.equal(K.kid(l, "end")[1], -1);
+  const l = K.kid(node, "fp_line"); assert.equal(K.kid(l, "layer")[1], "B.SilkS"); assert.equal(K.kid(l, "start")[1], -1); assert.equal(K.kid(l, "end")[1], 1);
   assert.ok(roundTrips(node));
   // flipping back restores the original file content
   assert.deepEqual(P.flipFootprintNode(JSON.parse(JSON.stringify(node))), fp.node);

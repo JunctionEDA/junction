@@ -48,6 +48,11 @@ KICOMMON_API bool Needed();
 /// network went away) and should simply be continued.  A download the user stopped is not.
 KICOMMON_API bool Interrupted();
 
+/// @return true when a library load error is only a standard library that is not on this
+/// computer yet while the standard libraries can be downloaded or are downloading: nothing
+/// to warn about.
+KICOMMON_API bool IsDownloadableLibraryError( const wxString& aMessage );
+
 /// @return true while an Install() is running, in any window of the program.
 KICOMMON_API bool Running();
 

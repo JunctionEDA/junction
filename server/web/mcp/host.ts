@@ -33,6 +33,8 @@ import { eng, findVector, plotOf, runSpice, summarize, type SimRun, type Vector 
 import * as NK from "../sim/netlist-kicad";
 import * as SP from "../sim/spice-netlist";
 import * as SM from "../dialogs/sim-model-logic";
+import { NGSPICE } from "../dialogs/sim-model-ngspice";
+import { builtinLibrary } from "../sim/builtin-libs";
 import { diffDocs } from "../review/diff";
 import { getBom } from "./bom";
 import { buildPackage, packageZip } from "../fab/index";
@@ -380,9 +382,10 @@ async function schematicSpice(req: Request, p: Project, withCommands: boolean, n
     const sheets = insts.map((i) => { const pl = placed.get(i.uuidPath.join("/")), pd = parentDoc(i.uuidPath);
       return { index: i.index, uuidPath: i.uuidPath, doc: docOf(i.file), sheetNode: pl ? pl.sheetNode : null, parentVersion: pd ? pd.version : undefined }; }).filter((x) => x.doc);
     let textVars: Record<string, string> = {}; try { textVars = ((ed.proSettings ? JSON.parse(ed.proSettings) : {}).text_variables as Record<string, string>) || {}; } catch { textVars = {}; }
+    if (!SM.hasNgspiceData()) SM.setNgspiceData(NGSPICE);   // the ngspice models' parameters (instance l=/w=, .model overrides)
     const { symbols, texts } = SP.readHierarchy({ sheets, netMap: nl.netMap || new Map(), symbolPins: hp.symbolPins, isPower, textVars } as any);
     // the project's SPICE model files: parsed for the exporter, and handed to ngspice where the netlist includes them
-    const models = p.docs.filter((d) => d.docType === "spice_model" || /\.(lib|sub|cir|mod|spice|ibs)$/i.test(d.path));
+    const models = p.docs.filter((d) => d.docType === "spice_model" || /\.(lib|sub|cir|mod|model|sp|spice|ibs)$/i.test(d.path));
     const norm = (x: string) => x.replace(/\\/g, "/").replace(/^\$\{KIPRJMOD\}\//, "").replace(/^\.\//, "");
     const loaded = new Map<string, string | null>(); let bytes = 0;
     const load = async (d: DocEntry) => { if (!loaded.has(d.path)) { let t: string | null = null; try { t = await readTextDocument(conn, d.docId); } catch { t = null; } if (t !== null && (bytes += t.length) > 8e6) t = null; loaded.set(d.path, t); } return loaded.get(d.path)!; };
@@ -390,7 +393,7 @@ async function schematicSpice(req: Request, p: Project, withCommands: boolean, n
     const libs = new Map<string, any>();
     for (const sym of symbols) {
       const path = (sym.fields.find((f: any) => f.name === SM.F.LIBRARY) || { value: "" }).value; if (!path || libs.has(path)) continue;
-      const f = find(path); let text = f ? await load(f) : null;
+      const f = find(path); let text = builtinLibrary(path); if (text === null) text = f ? await load(f) : null;
       if (text !== null && !SM.isIbisPath(path)) text = await SM.expandSpiceIncludes(text, path, async (cands: string[]) => { for (const c of cands) { const g = find(c); if (g) { const t = await load(g); if (t !== null) return t; } } return null; }, []);
       if (text === null) notes.push(`The model library ${path} is not in the project.`);
       libs.set(path, text === null ? null : SM.isIbisPath(path) ? SM.parseIbisLibrary(text, path) : SM.parseSpiceLibrary(text));
@@ -400,6 +403,7 @@ async function schematicSpice(req: Request, p: Project, withCommands: boolean, n
     for (const d of models) await load(d);
     const given: [string, string][] = [];
     for (const [path, text] of loaded) if (text !== null) given.push([`/proj/${norm(path)}`, text]);
+    for (const m of netlist.matchAll(/^\s*\.include\s+"([^"]+)"/gim)) { const b = builtinLibrary(m[1]); if (b !== null) given.push([m[1], b]); }
     netlist = netlist.replace(/^(\s*\.(?:include|lib)\s+)"([^"]+)"/gim, (all, head, path) => { const f = find(path); return f ? `${head}"/proj/${norm(f.path)}"` : all; });
     return { netlist, files: given };
   });
@@ -536,19 +540,23 @@ async function runPython(req: Request): Promise<Reply> {
   // Planned first, drawn after: while the script runs its edits stay in the host's copy of each document (it reads,
   // measures and checks them there), and the people watching see each document drawn once, live, at its final
   // places, when the script ends or calls project.publish().  plan: false sends each batch as it is made.
-  const plan = live && a.plan !== false;
+  // dry_run: the script runs on the host's copy only.  Nothing is drawn or stored; the answer is what the script
+  // printed and how much it would change, so a design is tried, checked and corrected before anyone sees it.
+  const dry = a.dry_run === true;
+  const plan = dry || (live && a.plan !== false);
   const staged = new Map<string, { sess: DocSession; edits: string[] }>();
   const stage = (sess: DocSession) => { sess.beginStage(); if (!staged.has(sess.entry.docId)) staged.set(sess.entry.docId, { sess, edits: [] }); };
   const publish = async (): Promise<number> => {
-    let n = 0;
+    let n = 0; const alone = staged.size === 1;
     for (const [docId, st] of [...staged]) {
       staged.delete(docId);
-      const undo = await st.sess.publishStage(live);
+      const undo = await st.sess.publishStage(live, alone);
       if (undo) { n += undo.inverse.length; records.push({ docId, title, edits: st.edits.slice(0, 200), undo }); }
     }
     return n;
   };
-  const drop = () => { for (const st of staged.values()) st.sess.dropStage(); staged.clear(); };
+  const would: { document: string; items: number }[] = [];
+  const drop = () => { for (const st of staged.values()) { const n = st.sess.dropStage(); if (n) would.push({ document: st.sess.entry.path, items: n }); } staged.clear(); };
 
   const answer = async (tool: string, args: any): Promise<unknown> => {
     calls++; args = args || {};
@@ -556,7 +564,11 @@ async function runPython(req: Request): Promise<Reply> {
     if (tool === "text") return withDocument(req, args.document, (sess, doc) => ({ document: sess.entry.path, text: sourceText(sess, doc) }));
     const sub: Request = Object.assign({}, req, { args });
     if (tool === "apply") {
-      const r = await applyChanges(Object.assign(sub, { tool: "apply_changes", args: Object.assign({}, args, { title: args.title || title, dry_run: false }) }), live, plan ? stage : undefined);
+      // a document the script has planned and not yet drawn is read as planned (a board synced from the sheet built two lines above)
+      design.planned.doc = (id: string) => { const st = staged.get(id); return st ? st.sess.kdoc : null; };
+      let r: Reply;
+      try { r = await applyChanges(Object.assign(sub, { tool: "apply_changes", args: Object.assign({}, args, { title: args.title || title, dry_run: false }) }), live, plan ? stage : undefined); }
+      finally { design.planned.doc = null; }
       if (r.record) records.push(r.record as ChangeRecord);
       const res: any = r.result; const c = res && res.connectivity;
       if (res && res.staged) {
@@ -567,7 +579,7 @@ async function runPython(req: Request): Promise<Reply> {
       const added = r.record ? ((r.record as ChangeRecord).undo.inverse || []).filter((x: any) => x.kind === "REMOVED").map((x: any) => x.id).reverse() : [];
       return Object.assign({}, res, { added, connectivity: c && typeof c === "object" ? c.changed : undefined });
     }
-    if (tool === "publish") return { drawn: await publish() };
+    if (tool === "publish") return { drawn: dry ? 0 : await publish() };
     const name = HARNESS_CALLS[tool]; if (!name) throw new ToolError(`Unknown harness call ${tool}.`);
     sub.tool = name; return (await TOOLS[name](sub)).result;
   };
@@ -598,9 +610,25 @@ async function runPython(req: Request): Promise<Reply> {
     child.on("error", (e: any) => finish({ ok: false, error: `Python could not be started (${e && e.message}).`, output: "" }));
     child.on("exit", () => chain.then(() => finish({ ok: false, error: "The Python runtime stopped before the script finished" + (errText.trim() ? `: ${errText.trim().split("\n").slice(-2).join(" ")}` : "."), output: "" })));
     child.stdin.on("error", () => undefined);
-    child.stdin.write(JSON.stringify({ code: a.code }) + "\n");
+    child.stdin.write(JSON.stringify({ code: a.code, dry }) + "\n");
   });
 
+  if (done.ok && dry) {
+    drop();
+    // what could not be staged (the board's layer set-up, its rules in the project file) was applied: take it back
+    let clean = true;
+    try {
+      for (const rec of mergeRecords(title, records).reverse()) {
+        const entry = p.docs.find((d) => d.docId === rec.docId); if (!entry) continue;
+        if (rec.undo.rules) { const pro = p.docs.find((d) => d.docType === "kicad_pro"); if (pro) { const saved = await editProjectFile(conn, pro.docId, (j) => restoreRules(j, rec.undo.rules as any), "board rules"); proCache.set(pro.docId, { at: Date.now(), text: saved.text }); } }
+        if (rec.undo.inverse.length) await withDocument(req, entry.path, (sess) => sess.commit(rec.undo.inverse));
+      }
+    } catch (e) { clean = false; console.error("mcp host: dry run not taken back", e); }
+    const seconds = Math.round((Date.now() - started) / 100) / 10;
+    return { result: { ok: true, dry_run: true, output: clip(String(done.output || "").trim(), PY_OUTPUT_MAX) || undefined, result: done.result, refused: Array.isArray(done.refused) && done.refused.length ? done.refused : undefined,
+      notes: Array.isArray(done.notes) && done.notes.length ? done.notes : undefined, would_change: would,
+      design: clean ? "Dry run: nothing was changed and nobody saw it. When the output shows no errors and nothing refused, run the same script again without dry_run; it is then drawn once." : "Dry run, but the board set-up it changed could not all be taken back; read the design before going on.", calls, seconds } };
+  }
   if (done.ok) {
     try { await publish(); }
     catch (e) { drop(); Object.assign(done, { ok: false, error: `The finished drawing could not be sent: ${e instanceof Error ? plain(e.message) : String(e)}` }); }

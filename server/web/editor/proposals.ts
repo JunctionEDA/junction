@@ -9,6 +9,7 @@ import { state } from "./appstore";
 import { E } from "./state";
 import { commitChanges } from "./tools";
 import { ago, api, toast } from "./util";
+import { treeExpander } from "../components/kicon-dom";
 
 interface Who { login: string; name?: string | null }
 interface Row {
@@ -137,7 +138,7 @@ function render(): void {
   p.replaceChildren();
   if (!rows.length) { p.classList.remove("open"); return; }
   p.classList.add("open");
-  const head = el("div", "prop-head"), fold = el("button", "prop-fold", open ? "▾" : "▸"); fold.type = "button"; fold.title = open ? "Fold" : "Unfold";
+  const head = el("div", "prop-head"), fold = el("button", "prop-fold"); fold.appendChild(treeExpander(open)); fold.type = "button"; fold.title = open ? "Fold" : "Unfold";
   const toggle = () => { open = !open; if (!open) clearPreview(); render(); };
   fold.addEventListener("click", toggle);
   const title = el("span", "prop-heading", rows.length === 1 ? "1 proposed change" : `${rows.length} proposed changes`); title.addEventListener("click", toggle);

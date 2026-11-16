@@ -60,7 +60,7 @@ function SchObjects() {
             <div className={cx(ROW, "hover:bg-panel")}><span className="muted">Sheets</span><span className={CNT}>{sheets.length}</span></div>
             {sheets.map((sh) => (
               <div className={cx(ROW, "hover:bg-panel cursor-pointer pl-3.5")} key={sh.id} data-sheet={sh.file} onClick={() => dispatch({ type: "enterSheet", file: sh.file })}>
-                <span>{sh.name || sh.file}</span><span className={CNT}>↗</span>
+                <span>{sh.name || sh.file}</span><span className={CNT} title="Enter Sheet"><KIcon name="enter_sheet" size={16} /></span>
               </div>
             ))}
           </>
@@ -124,7 +124,7 @@ function LayersTab() {
         {notice ? <p className="note px-2">{notice}</p> : !layers.length ? <p className="note px-2">Nothing to show yet.</p> : layers.map((l) => (
           <div key={l.key} className={cx("layer", ROW2, "cursor-default hover:bg-panel cur:bg-sel", l.key === active && "cur")} data-layer={l.key} title={l.tip}
             onClick={() => pdispatch({ t: "layerActive", key: l.key })}>
-            <span className="arrow inline-block w-2.5 flex-none text-blue text-xs leading-none">{l.key === active ? "▶" : ""}</span>
+            <span className="arrow inline-block w-2.5 flex-none leading-none">{l.key === active ? <span className="kind-on" aria-hidden="true" /> : null}</span>
             <Swatch color={l.color} title={SWATCH_TIP} onPick={() => swatch(l)} />
             <Eye on={l.visible} k={l.key} title="Show or hide this layer" onChange={(on) => pdispatch({ t: "layerVisible", key: l.key, on })} />
             <span className="lname">{l.name}</span>

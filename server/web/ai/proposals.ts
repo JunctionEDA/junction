@@ -14,6 +14,7 @@ import { projectDocs, resolveDoc } from "./design";
 import { footprintNode, kicadFootprint, kicadSymbol, vendorPart, vendorSymbol } from "./library";
 import { fieldShifts, inlineFieldShifts, snugFieldShifts, itemsWithin } from "./layout";
 import { planSilk } from "./silkscreen";
+import { planModelFit } from "./model-fit";
 
 const W = window as any;
 const SCH = (): any => (W.CollabTools && W.CollabTools.sch) || null;
@@ -354,6 +355,7 @@ async function fetchSources(edits: Edit[] | undefined): Promise<void> {
       } else if (e.op === "update_from_schematic" && doc.type === "pcb") e.__sync = await planSync(doc, e);
       else if (e.op === "fill_zones" && doc.type === "pcb") e.__fill = await planFill(doc, edits.length);
       else if (e.op === "assign_models" && doc.type === "pcb") e.__models = await partModels(doc);
+      else if (e.op === "align_models" && doc.type === "pcb") e.__fit = await planModelFit(doc, Array.isArray(e.refs) ? e.refs : null);
     } catch (err) { e.__error = err instanceof Error ? err.message : String(err); }
   }));
 }
@@ -574,9 +576,11 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
           const order = Array.isArray(e.order) ? e.order.map((n: unknown) => boardNet(doc, text(n, "net")).name) : undefined;
           const keepouts = Array.isArray(e.keepouts) ? e.keepouts.filter((q: any) => q && Array.isArray(q.box) && q.box.length === 4).map((q: any) => ({ layers: Array.isArray(q.layers) ? q.layers : undefined, box: q.box })) : undefined;
           const num = (v: unknown) => typeof v === "number" && v >= 0 ? v : undefined;
+          // clusters: {name: [refs]}; connections inside one cluster are laid before any between clusters
+          const groups: Record<string, string[]> | undefined = e.groups && typeof e.groups === "object" && !Array.isArray(e.groups) ? Object.fromEntries(Object.entries(e.groups as Record<string, unknown>).filter(([, v]) => Array.isArray(v)).map(([n, v]) => [n, (v as unknown[]).map(String)])) : undefined;
           const separate = e.separate === false ? false : e.separate && typeof e.separate === "object" ? { quiet: num(e.separate.quiet), noisy: num(e.separate.noisy) } : undefined;
           const fence = e.fence === false ? false : e.fence && typeof e.fence === "object" ? { spacing: num(e.fence.spacing), nets: Array.isArray(e.fence.nets) ? e.fence.nets.map((n: unknown) => boardNet(doc, text(n, "net")).name) : undefined, returnVias: e.fence.return_vias === false ? false : undefined } : undefined;
-          const res = R.route(k, P, doc, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : undefined, timeMs: Math.round(1000 * Math.min(300, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : undefined, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : undefined, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : undefined });
+          const res = R.route(k, P, doc, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : undefined, timeMs: Math.round(1000 * Math.min(300, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : undefined, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : undefined, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : undefined, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : undefined });
           const failed = (res.failed || []).map((f: any) => ({ net: f.net, from: f.a.map(r4), to: f.b.map(r4) }));
           if (!res.total) throw new ToolError(`nothing to route: every connection ${nets ? "of " + nets.join(", ") : "on the board"} is already made`);
           if (!res.items.length) throw new ToolError(`the autorouter could not make any of the ${res.total} missing connection${res.total === 1 ? "" : "s"} within the design rules: ${JSON.stringify(failed.slice(0, 12))}`);
@@ -586,6 +590,10 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
           details.push({ autoroute: { connections: res.total, routed: res.routed, segments: res.segments, vias: res.vias, length_mm: r4(res.length),
             unrouted: conns.length ? conns.filter((c) => !c.routed).slice(0, 40).map((c) => ({ net: c.net, from: c.from && c.from.pad, to: c.to && c.to.pad, reason: c.reason, detail: c.detail, blocked_by_nets: c.blockedBy && c.blockedBy.nets })) : failed.slice(0, 40),
             longest_detours: conns.filter((c) => c.routed && c.detourRatio > 1.6).sort((a, b) => b.detourRatio - a.detourRatio).slice(0, 12).map((c) => ({ net: c.net, from: c.from && c.from.pad, to: c.to && c.to.pad, length_mm: r4(c.length), detour_ratio: r4(c.detourRatio), vias: c.vias, layers: c.layers })),
+            groups: res.groups && res.groups.inside ? { clusters: res.groups.clusters, inside: res.groups.inside, routed: res.groups.insideRouted, vias: res.groups.insideVias } : undefined,
+            // explain: true asks for the reasoning behind the run: which nets went first, which parts formed which cluster, and every connection that changed layer or wandered
+            explain: e.explain === true ? { critical_first: res.groups ? res.groups.critical : [], clusters: res.groups ? res.groups.members : {},
+              layer_changes: conns.filter((c) => c.routed && c.vias > 0).slice(0, 80).map((c) => ({ net: c.net, from: c.from && c.from.pad, to: c.to && c.to.pad, vias: c.vias, layers: c.layers, length_mm: r4(c.length), straight_mm: c.detourRatio ? r4(c.length / c.detourRatio) : undefined })) } : undefined,
             domains: res.domains ? { kept_apart: res.domains.kinds, quiet_mm: res.domains.quiet, noisy_mm: res.domains.noisy, relaxed: res.domains.relaxed } : undefined,
             ground_vias: Array.isArray(res.fences) && res.fences.length ? res.fences.map((f: any) => ({ net: f.net, ground: f.ground, fence: f.fence, return_vias: f.returns, spacing_mm: f.spacing, note: f.note })) : undefined,
             note: "Judge this before the person does: a net left unrouted, a power net with a long detour or many vias, or a sensitive net crossing the board is a reason to change the placement or the net order and options and propose again instead." } });
@@ -674,7 +682,7 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
             for (const m of moves) { const p = k.kids(node, "property").find((q: any) => k.str(q[1]) === m.field); const at = p && k.kid(p, "at"); if (!at) continue; at[1] = r4(k.num(at[1]) + m.dx); at[2] = r4(k.num(at[2]) + m.dy); any = true; }
             if (!any) continue; touch(it, e.op); changes.push(modified(doc, it, node)); ids.push(it.id);
           }
-          lines.push({ kind: "modify", text: `Move the fields of ${ids.length} symbol${ids.length === 1 ? "" : "s"} clear of what they were drawn over`, ids });
+          if (ids.length) lines.push({ kind: "modify", text: `Move the fields of ${ids.length} symbol${ids.length === 1 ? "" : "s"} clear of what they were drawn over`, ids });      // nothing moved is not an edit worth a line in the history
           break;
         }
         case "cleanup": {
@@ -728,6 +736,30 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
           if (!ids.length) { if (e.if_needed === true) { details.push({ assign_models: { assigned: [], without_model: left } }); break; } throw new ToolError(left.length ? `no replacement model was found: ${left.slice(0, 6).map((l) => `${l.ref} (${l.reason})`).join("; ")}` : "every part already shows its own 3D model"); }
           lines.push({ kind: "modify", text: `3D models: ${done.length} part${done.length === 1 ? "" : "s"} given the closest model of KiCad's library (${done.slice(0, 4).map((d) => d.ref).join(", ")}${done.length > 4 ? ", ..." : ""})`, ids });
           details.push({ assign_models: { assigned: done, without_model: left } });
+          break;
+        }
+        case "align_models": {
+          // a 3D model whose pins miss the pads (checked at pin 1 and the pad farthest from it) takes the turn that lands it
+          pcbOnly(e.op); const plan = e.__fit as import("./model-fit").FitPlan | undefined;
+          if (!plan) throw new ToolError("the 3D models could not be loaded here");
+          const ids: string[] = []; const turned: { ref: string; model: string; turn: number }[] = []; const left: { ref: string; model: string; off: unknown }[] = [];
+          const byId = new Map<string, typeof plan.misaligned>();
+          for (const row of plan.misaligned) { if (row.turn === null) { left.push({ ref: row.ref, model: row.model, off: row.off }); continue; } byId.set(row.id, [...(byId.get(row.id) || []), row]); }
+          if (e.fix !== false) for (const [id, rows] of byId) {
+            const it = doc.items.get(id); if (!it || touched.has(id)) continue;
+            const node = k.cloneNode(it.node);
+            const shown = k.kids(node, "model").filter((m: any) => { const h = k.kid(m, "hide"); return !h || k.str(h[1]) === "no"; });
+            for (const row of rows) {
+              const m = shown[row.index]; if (!m) continue;
+              let rot = k.kid(m, "rotate"); if (!rot) { rot = k.parse("(rotate (xyz 0 0 0))"); m.push(rot); }
+              let xyz = k.kid(rot, "xyz"); if (!xyz) { xyz = ["xyz", 0, 0, 0]; rot.push(xyz); }
+              const z = ((k.num(xyz[3]) + row.turn! + 180) % 360 + 360) % 360 - 180; xyz[3] = z;
+              turned.push({ ref: row.ref, model: row.model, turn: row.turn! });
+            }
+            touch(it, e.op); changes.push(modified(doc, it, node)); ids.push(id);
+          }
+          if (ids.length) lines.push({ kind: "modify", text: `3D models turned onto their pads: ${turned.slice(0, 5).map((t) => `${t.ref} ${t.turn}°`).join(", ")}${turned.length > 5 ? ", ..." : ""}`, ids });
+          details.push({ align_models: { checked: plan.checked, aligned: plan.aligned, turned, misaligned: e.fix === false ? plan.misaligned.map((r) => ({ ref: r.ref, model: r.model, off: r.off, turn: r.turn })) : left, not_loaded: plan.not_loaded, note: plan.note } });
           break;
         }
         case "move_region": {

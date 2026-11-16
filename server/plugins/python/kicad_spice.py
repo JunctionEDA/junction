@@ -1,7 +1,7 @@
 """ngspice for plugins: the `ngspice` program and the libngspice library, both answered by the real simulator.
 
-The simulator is ngspice itself, compiled to WebAssembly (npm eecircuit-engine, loaded on first use from the server's
-own files).  It runs as the interactive program does: it reads commands and prints.  Everything here is built on that:
+The simulator is ngspice itself with its XSPICE code models, compiled to WebAssembly (server/scripts/ngspice-wasm,
+loaded on first use from the server's own files).  It runs as the interactive program does: it reads commands and prints.  Everything here is built on that:
 
   * `engine()` is one running ngspice: `command()` gives a command and returns what ngspice printed, with the files the
     command reads (a netlist and what it includes) carried in and the files it writes (wrdata, write) carried out;

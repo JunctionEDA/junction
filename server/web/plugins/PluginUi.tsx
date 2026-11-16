@@ -1,6 +1,7 @@
 // PluginUi.tsx — the chrome plugins get: the dock their panels sit in, the toolbar buttons of
 // their actions, the dialogs the host draws on their behalf, and the manager (KiCad's Plugin and
 // Content Manager, for the web): what is installed, what it may do, a catalog, and a developer tab.
+import { CloseMark } from "../components/Icon";
 import { Select } from "../components/Select";
 import { askConfirm } from "../components/msgbox";
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
@@ -115,7 +116,7 @@ export function PluginDock() {
           {panels.map((p) => <button type="button" key={p.plugin} className={cx("plg-tab", active && p.plugin === active.plugin && "on")} data-plugin-tab={p.plugin} onClick={() => showPanel(p.plugin)}>{p.name}</button>)}
         </div>
         <button type="button" className="plg-ib" title="Manage plugins" onClick={() => openManager("installed")}>{PUZZLE}</button>
-        <button type="button" className="plg-ib x" title="Close" onClick={() => closePanels()}>×</button>
+        <button type="button" className="plg-ib x" title="Close" onClick={() => closePanels()}><CloseMark /></button>
       </div>
       {active && run && run.failed ? <div className="plg-note err">This plugin failed to start. Its log in Manage Plugins says why.</div> : null}
       {active && !run ? <div className="plg-note">This plugin is not running.</div> : null}
@@ -155,7 +156,7 @@ function WindowDialog({ w }: { w: PluginWindowState }) {
   return (
     <div className={cx("kd-overlay plg-winlay", !w.modal && "modeless")} onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") closeWindow(); }}>
       <div className="kd-dialog plg-window" role="dialog" aria-modal={w.modal} id="pluginWindow" tabIndex={-1} style={{ transform: `translate(${off.x}px, ${off.y}px)`, maxWidth: "calc(100vw - 24px)" /* theme.css caps its own dialogs at 760px; a plugin window is as wide as its content asks */ }}>
-        <div className="kd-title" onPointerDown={startDrag}><span>{w.title}</span><span className="plg-from">plugin: {w.pluginName}</span><span className="kd-x" title="Close (Esc)" onClick={() => closeWindow()}>×</span></div>
+        <div className="kd-title" onPointerDown={startDrag}><span>{w.title}</span><span className="plg-from">plugin: {w.pluginName}</span><span className="kd-x" title="Close (Esc)" onClick={() => closeWindow()}><CloseMark /></span></div>
         <div className="plg-winbody" ref={body} style={{ minWidth: w.width, height: w.height }}>{busy ? <span className="plg-muted">Starting…</span> : null}</div>
       </div>
     </div>
@@ -198,7 +199,7 @@ function PromptDialog({ pr }: { pr: PromptRequest }) {
   return (
     <div className="kd-overlay plg-overlay" onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") cancel(); if (e.key === "Enter" && (e.target as HTMLElement).tagName !== "TEXTAREA" && !needFile) ok(); }}>
       <div className="kd-dialog plg-prompt" role="dialog" aria-modal="true" id="pluginPrompt">
-        <div className="kd-title"><span>{pr.title}</span><span className="plg-from">plugin: {pr.pluginName}</span><span className="kd-x" title="Close (Esc)" onClick={cancel}>×</span></div>
+        <div className="kd-title"><span>{pr.title}</span><span className="plg-from">plugin: {pr.pluginName}</span><span className="kd-x" title="Close (Esc)" onClick={cancel}><CloseMark /></span></div>
         <div className="kd-body">
           {pr.message ? <p className="plg-msg">{pr.message}</p> : null}
           {pr.fields.length ? <div className="kv">{pr.fields.map((f) => <Field key={f.name} f={f} value={values[f.name]} set={(v) => setValues((o) => Object.assign({}, o, { [f.name]: v }))} />)}</div> : null}
@@ -227,7 +228,7 @@ function Permissions({ perms, fresh, m }: { perms: string[]; fresh?: string[]; m
 function Contributes({ m, actions }: { m: PluginManifest; actions?: PluginAction[] }) {
   const rows: string[] = [];
   if (isPython(m)) {
-    if (!actions || !actions.length) return <p className="plg-muted">Board editor commands under Tools → External Plugins. A Python plugin names them when it first runs.</p>;
+    if (!actions || !actions.length) return <p className="plg-muted">Board editor commands under Tools &gt; External Plugins. A Python plugin names them when it first runs.</p>;
     for (const a of actions) rows.push(`Command: ${a.name}`);
     return <ul className="plg-adds">{rows.map((r) => <li key={r}>{r}</li>)}</ul>;
   }
@@ -321,7 +322,7 @@ function Detail({ p }: { p: InstalledPlugin }) {
         <label className="plg-switch"><input type="checkbox" id="pluginEnabled" checked={p.enabled} onChange={(e) => { const on = e.target.checked; if (on && p.withdrawn) { void askConfirm("Withdrawn Plugin", `The administrators took ${m.name} out of the registry:\n\n${p.withdrawn}\n\nSwitch it on anyway?`, { ok: "Switch On" }).then((yes) => { if (yes) void setEnabled(p.identifier, true); }); return; } void setEnabled(p.identifier, on); }} /> Enabled</label>
       </div>
       {p.withdrawn ? <p className="plg-warn bad" id="pluginWithdrawn">The administrators took this plugin out of the community registry, and your copy was switched off. Their reason: {p.withdrawn} The copy is still yours: uninstall it, or switch it back on if you trust it.</p> : null}
-      <p className="plg-muted">{m.identifier}{m.author ? ` · by ${m.author}` : ""}{scopesOf(m) ? ` · ${scopesOf(m)}` : ""}{m.homepage && /^https:\/\//.test(m.homepage) ? <> · <a href={m.homepage} target="_blank" rel="noreferrer noopener">homepage ↗</a></> : null}</p>
+      <p className="plg-muted">{m.identifier}{m.author ? ` · by ${m.author}` : ""}{scopesOf(m) ? ` · ${scopesOf(m)}` : ""}{m.homepage && /^https:\/\//.test(m.homepage) ? <> · <a href={m.homepage} target="_blank" rel="noreferrer noopener">homepage</a></> : null}</p>
       <p>{m.description}</p>
       <h3>Permissions you granted</h3><Permissions perms={p.granted} m={p.manifest} />
       {python && p.granted.includes("network") ? <AllowedHosts p={p} /> : null}
@@ -419,7 +420,7 @@ function CatalogTab() {
           {c ? <span className={cx("plg-compat", c.status)} title={c.note || ""}>{COMPAT_LABEL[c.status] || c.status}</span> : <span className="plg-compat" title="Newer than this editor's test run">Not tested yet</span>}</div>
         <p>{m.description}</p>
         {c && c.note && c.status !== "works" ? <p className="plg-muted">{c.note}</p> : null}
-        <div className="plg-row"><span className="plg-muted perms">{e.identifier}{e.size ? ` · ${sizeOf(e.size)}` : ""}{m.homepage && /^https:\/\//.test(m.homepage) ? <> · <a href={m.homepage} target="_blank" rel="noreferrer noopener">homepage ↗</a></> : null}</span><span className="grow" />
+        <div className="plg-row"><span className="plg-muted perms">{e.identifier}{e.size ? ` · ${sizeOf(e.size)}` : ""}{m.homepage && /^https:\/\//.test(m.homepage) ? <> · <a href={m.homepage} target="_blank" rel="noreferrer noopener">homepage</a></> : null}</span><span className="grow" />
           {cur && !newer ? <span className="plg-muted">Installed</span> : <button type="button" className="btn sm primary" data-install={e.identifier} disabled={busy !== null} onClick={() => void installKicad(e)}>{busy === e.identifier ? "Downloading…" : newer ? "Update…" : "Install…"}</button>}</div>
       </div>
     </div>) }); }
@@ -563,7 +564,7 @@ function DevelopTab() {
       {err ? <p className="plg-err" id="pluginDevErr">{err}</p> : null}
       <h3>Writing a plugin</h3>
       <p>A plugin is a folder with a <code>plugin.json</code> — KiCad's own plugin manifest, with <code>"runtime": {"{"}"type": "web", "entrypoint": "main.js"{"}"}</code> — and a script that uses the <code>kicad</code> object: <code>kicad.actions.register()</code>, <code>kicad.design.components()</code>, <code>kicad.design.apply()</code>, <code>kicad.ui.prompt()</code>…</p>
-      <p>The guide and the API reference are in <a href="https://github.com/notaroomba/junction/blob/master/server/plugins/README.md" target="_blank" rel="noreferrer noopener">server/plugins/README.md ↗</a>; the catalog plugins beside it are short, complete examples.</p>
+      <p>The guide and the API reference are in <a href="https://github.com/notaroomba/junction/blob/master/server/plugins/README.md" target="_blank" rel="noreferrer noopener">server/plugins/README.md</a>; the catalog plugins beside it are short, complete examples.</p>
       <p className="plg-muted">Python and exec plugins for the desktop app (KiCad's IPC API and action plugins) are installed there, in its Plugin and Content Manager. What they change in an online project reaches the web like any other edit.</p>
     </div>
   );
@@ -581,7 +582,7 @@ export function PluginManager() {
   return (
     <div className="kd-overlay plg-overlay" onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") { if (consent) cancelInstall(); else closeManager(); } }} onPointerDown={(e) => { if (e.target === e.currentTarget) closeManager(); }}>
       <div className={cx("kd-dialog plg-manager", consent && "consenting")} role="dialog" aria-modal="true" id="pluginManager" tabIndex={-1} ref={box}>
-        <div className="kd-title"><span>Plugin Manager</span><span className="kd-x" title="Close (Esc)" onClick={() => closeManager()}>×</span></div>
+        <div className="kd-title"><span>Plugin Manager</span><span className="kd-x" title="Close (Esc)" onClick={() => closeManager()}><CloseMark /></span></div>
         {consent ? <div className="kd-body"><ConsentSheet /></div> : (
           <>
             <div className="plg-mtabs">{tabs.map(([id, label]) => <button type="button" key={id} className={cx(mgr.tab === id && "on")} data-tab={id} onClick={() => setManager({ tab: id })}>{label}</button>)}</div>
@@ -612,6 +613,6 @@ function RecommendBar() {
     <div className="plg-infobar" id="pluginRecommended" role="status">
       {PUZZLE}<span className="grow">This project recommends {n === 1 ? "a plugin" : `${n} plugins`} you do not have. Nothing is installed unless you choose to.</span>
       <button type="button" className="btn sm" id="pluginRecommendedShow" onClick={() => openManager("project")}>Show…</button>
-      <button type="button" className="plg-ib" id="pluginRecommendedDismiss" title="Dismiss" aria-label="Dismiss" onClick={() => dismissRecommended()}>×</button>
+      <button type="button" className="plg-ib" id="pluginRecommendedDismiss" title="Dismiss" aria-label="Dismiss" onClick={() => dismissRecommended()}><CloseMark /></button>
     </div>, stage);
 }

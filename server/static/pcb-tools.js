@@ -377,6 +377,66 @@
         if (t === "fp_text_box") toggleMirror(c);
       }
     }
+    return turnFrame(node);
+  }
+  function turnFrame(node) {
+    const neg = (v) => r6(-v) || 0;
+    const [x, y, a] = K.atOf(node);
+    setFootprintAt(node, x, y, norm180(a + 180));
+    const half = (g) => {
+      for (const key of ["start", "end", "center", "mid"]) {
+        const k = K.kid(g, key);
+        if (k) {
+          k[1] = neg(K.num(k[1]));
+          k[2] = neg(K.num(k[2]));
+        }
+      }
+      const pts = K.kid(g, "pts");
+      if (pts) for (const p of pts.slice(1)) {
+        if (!isList(p)) continue;
+        if (p[0] === "xy") {
+          p[1] = neg(K.num(p[1]));
+          p[2] = neg(K.num(p[2]));
+        } else half(p);
+      }
+    };
+    for (const c of node) {
+      if (!isList(c)) continue;
+      const t = c[0];
+      if (ANGLED(c)) {
+        const at = K.kid(c, "at");
+        at[1] = neg(K.num(at[1]));
+        at[2] = neg(K.num(at[2]));
+      }
+      if (t === "pad") {
+        setAngle(c, K.atOf(c)[2] + 180);
+        const dr = K.kid(c, "drill");
+        const off = dr && K.kid(dr, "offset");
+        if (off) {
+          off[1] = neg(K.num(off[1]));
+          off[2] = neg(K.num(off[2]));
+        }
+        const rd = K.kid(c, "rect_delta");
+        if (rd) {
+          rd[1] = neg(K.num(rd[1]));
+          rd[2] = neg(K.num(rd[2]));
+        }
+        const prims = K.kid(c, "primitives");
+        if (prims) {
+          for (const p of prims.slice(1)) if (isList(p)) half(p);
+        }
+        const ch = K.kid(c, "chamfer");
+        const opp = { top_left: "bottom_right", bottom_right: "top_left", top_right: "bottom_left", bottom_left: "top_right" };
+        if (ch) for (let i = 1; i < ch.length; i++) {
+          const v = K.str(ch[i]);
+          if (opp[v]) ch[i] = opp[v];
+        }
+      } else if (/^fp_(line|rect|circle|arc|poly|curve)$/.test(t)) half(c);
+      else if (t === "fp_text_box" || t === "zone") {
+        half(c);
+        for (const poly of K.kids(c, "polygon").concat(K.kids(c, "filled_polygon"))) half(poly);
+      }
+    }
     return node;
   }
 
@@ -2181,7 +2241,7 @@
     return m;
   }
 
-  // ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Core.js
+  // node_modules/clipper2-ts/dist/Core.js
   var ClipType;
   (function(ClipType2) {
     ClipType2[ClipType2["NoClip"] = 0] = "NoClip";
@@ -2840,7 +2900,7 @@
   var InvalidRect64 = Object.freeze(Rect64Utils.createInvalid());
   var InvalidRectD = Object.freeze(RectDUtils.createInvalid());
 
-  // ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Engine.js
+  // node_modules/clipper2-ts/dist/Engine.js
   var B02 = BigInt(0);
   var B22 = BigInt(2);
   var B42 = BigInt(4);
@@ -5705,7 +5765,7 @@
     }
   };
 
-  // ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Offset.js
+  // node_modules/clipper2-ts/dist/Offset.js
   var JoinType;
   (function(JoinType2) {
     JoinType2[JoinType2["Miter"] = 0] = "Miter";
@@ -6321,7 +6381,7 @@
     }
   };
 
-  // ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Clipper.js
+  // node_modules/clipper2-ts/dist/Clipper.js
   var B23 = BigInt(2);
   function intersectD(subject, clip, fillRule, precision = 2) {
     return booleanOpD(ClipType.Intersection, subject, clip, fillRule, precision);
@@ -6628,7 +6688,7 @@
     }
   }
 
-  // ../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.module.js
+  // node_modules/opentype.js/dist/opentype.module.js
   if (!String.prototype.codePointAt) {
     (function() {
       var defineProperty = (function() {
@@ -35904,6 +35964,24 @@
 .kbmp.on,.kbmp[aria-pressed="true"]{background:var(--on,var(--sel-soft));border-color:var(--on-line,var(--sel))}
 .kbmp-sep{flex:none;width:1px;height:18px;margin:0 4px;background:var(--line);align-self:center}
 .kbmp-bar{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
+.ktw{display:inline-block;flex:none;width:12px;height:12px;position:relative;vertical-align:middle;cursor:pointer}
+.ktw::before{content:"";position:absolute;left:2px;top:4px;border-style:solid;border-width:5px 4px 0 4px;border-color:var(--ink-3) transparent transparent transparent}
+.ktw.shut::before{left:4px;top:2px;border-width:4px 0 4px 5px;border-color:transparent transparent transparent var(--ink-3)}
+.ktw.leaf::before{display:none}
+.kmarrow{display:inline-block;flex:none;width:8px;height:10px;position:relative;vertical-align:middle}
+.kmarrow::before{content:"";position:absolute;left:2px;top:1px;border-style:solid;border-width:4px 0 4px 4px;border-color:transparent transparent transparent currentColor;opacity:.75}
+.kmchk{display:inline-block;flex:none;width:16px;height:16px;position:relative;vertical-align:middle}
+.kmchk.on::before{content:"";position:absolute;left:6px;top:2px;width:4px;height:9px;border:solid currentColor;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.kmchk.radio.on::before{left:5px;top:5px;width:6px;height:6px;border:0;border-radius:50%;background:currentColor;transform:none}
+.ksort{display:inline-block;flex:none;width:8px;height:8px;position:relative;margin-left:4px;vertical-align:middle}
+.ksort::before{content:"";position:absolute;left:0;top:1px;border-style:solid;border-width:0 4px 5px 4px;border-color:transparent transparent var(--ink-3) transparent}
+.ksort.desc::before{border-width:5px 4px 0 4px;border-color:var(--ink-3) transparent transparent transparent}
+.kcarrow{display:inline-block;flex:none;width:10px;height:10px;position:relative;vertical-align:middle}
+.kcarrow::before{content:"";position:absolute;left:2px;top:1px;width:5px;height:5px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.kcarrow.l::before{left:3px;top:2px;transform:rotate(135deg)} .kcarrow.r::before{left:1px;top:2px;transform:rotate(-45deg)} .kcarrow.u::before{top:3px;transform:rotate(-135deg)}
+.kind-on{display:inline-block;flex:none;width:10px;height:10px;position:relative;vertical-align:middle}
+.kind-on::before{content:"";position:absolute;left:2px;top:1px;border-style:solid;border-width:4px 0 4px 6px;border-color:transparent transparent transparent rgb(64,72,255)}
+.kgrid-chk{pointer-events:none;margin:0}
 `;
   var styled = false;
   function ensureIconCss() {
@@ -38256,8 +38334,13 @@ Press <esc> to cancel all; double-click to finish`;
     if (!sel) return true;
     const ch = packChanges(ctx.doc, sel.ids);
     if (ch.length) ctx.commit(ch, "pack footprints");
-    endHover(ctx, sel);
-    ctx.requestRender();
+    if (S.route || S.move) {
+      endHover(ctx, sel);
+      ctx.requestRender();
+      return true;
+    }
+    applySelection(ctx, sel.ids);
+    beginCarryMove(ctx, { ids: sel.ids, hover: false });
     return true;
   });
   alias("packAndMoveFootprints", "pack");

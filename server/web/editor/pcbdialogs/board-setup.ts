@@ -561,7 +561,8 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       // shown in the Schematic Setup; here hidden until the header's right-click menu shows them (ShowHideColumns)
       { label: "Wire Thickness", key: "wire_width", type: "num", tip: "Schematic wire thickness", hidden: true }, { label: "Bus Thickness", key: "bus_width", type: "num", tip: "Bus wire thickness", hidden: true },
       { label: "Color", key: "schematic_color", type: "color", tip: "Schematic wire color", hidden: true, pick: pickColor, readOnly: isDefault },
-      { label: "Line Style", key: "line_style", type: "select", tip: "Schematic wire line style", hidden: true, readOnly: isDefault, options: [[-1, "<Not defined>"], [0, "Solid"], [1, "Dashed"], [2, "Dotted"], [3, "Dash-Dot"], [4, "Dash-Dot-Dot"]] }], rows, { ro: roPro, height: "190px", key: "netclassGrid" });
+      { label: "Line Style", key: "line_style", type: "select", tip: "Schematic wire line style", hidden: true, readOnly: isDefault, options: [[-1, "<Not defined>"], [0, "Solid"], [1, "Dashed"], [2, "Dotted"], [3, "Dash-Dot"], [4, "Dash-Dot-Dot"]],
+        icons: { "-1": "stroke_none", 0: "stroke_solid", 1: "stroke_dash", 2: "stroke_dot", 3: "stroke_dashdot", 4: "stroke_dashdotdot" } }], rows, { ro: roPro, height: "190px", key: "netclassGrid" });
     const patterns: Record<string, CellValue>[] = arr(net.netclass_patterns).map(obj).map((p) => ({ pattern: String(p.pattern || ""), netclass: String(p.netclass || "") }));
     const classOpts = (): [string, string][] => g.rows().map((r) => String(r.name)).filter(Boolean).map((n): [string, string] => [n, n]);
     const matching = h("div", { class: "pd-report", style: "height:130px;min-height:0", "data-k": "matchingNets" });

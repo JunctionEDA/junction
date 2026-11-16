@@ -15,6 +15,7 @@ import { schVariantNames } from "../dialogs/sch-variants";
 import { zip } from "../fab/zip";
 import { KICAD_BASE_VERSION } from "../canvas/version";
 import * as SP from "../sim/spice-netlist";
+import { builtinLibrary } from "../sim/builtin-libs";
 import * as NF from "../sim/netlist-formats";
 import * as S from "../dialogs/sim-model-logic";
 import { projectModelFiles } from "../dialogs/sim-files";
@@ -33,9 +34,28 @@ function store(s: Saved): void { try { localStorage.setItem(KEY, JSON.stringify(
 
 interface SchInternals { _?: { symbolPins(doc: KDoc, item: KItem): { number: string }[]; isPowerSymbol(doc: KDoc, libId: string): boolean } }
 
+/** The ngspice parameter tables (static/dist/sim-ngspice.js, the bundle the Simulation Model Editor loads) in this
+ *  bundle's model logic: without them an ngspice model (a transistor, a diode, a MOSFET) has no parameters, so its
+ *  .model line and its instance parameters (l=, w=, area=) would be left out of the netlist. */
+let ngTables: Promise<void> | null = null;
+export function loadNgspiceTables(): Promise<void> {
+  if (S.hasNgspiceData()) return Promise.resolve();
+  const w = window as unknown as { KiCadSimNgspice?: Parameters<typeof S.setNgspiceData>[0] };
+  if (w.KiCadSimNgspice) { S.setNgspiceData(w.KiCadSimNgspice); return Promise.resolve(); }
+  if (!ngTables) ngTables = new Promise<void>((resolve) => {
+    const own = document.querySelector<HTMLScriptElement>('script[src*="/static/dist/editor.js"]');
+    const query = own ? (own.getAttribute("src") || "").split("?")[1] : "";
+    const sc = document.createElement("script"); sc.src = "/static/dist/sim-ngspice.js" + (query ? "?" + query : "");
+    sc.onload = () => { if (w.KiCadSimNgspice) S.setNgspiceData(w.KiCadSimNgspice); resolve(); };
+    sc.onerror = () => { ngTables = null; resolve(); };
+    document.head.appendChild(sc);
+  });
+  return ngTables;
+}
+
 /** The SPICE netlist of the project's hierarchy (or of the current sheet's subtree) with its libraries read. */
-export async function projectSpiceNetlist(options: number, report: (m: string, sev: "error" | "warning") => void, model = false): Promise<string | null> {
-  const res = await projectNetlist();
+export async function projectSpiceNetlist(options: number, report: (m: string, sev: "error" | "warning") => void, model = false, items?: (list: SP.SimItemInfo[]) => void): Promise<string | null> {
+  const [res] = await Promise.all([projectNetlist(), loadNgspiceTables()]);
   if ("error" in res) { report(res.error, "error"); return null; }
   const sch = CollabTools.sch as (SchToolModule & SchInternals) | undefined, hp = sch && sch._;
   if (!hp) { report("The schematic tools are not loaded.", "error"); return null; }
@@ -63,14 +83,14 @@ export async function projectSpiceNetlist(options: number, report: (m: string, s
   for (const sym of symbols) {
     const p = (sym.fields.find((f) => f.name === S.F.LIBRARY) || { value: "" }).value; if (!p || libs.has(p)) continue;
     const f = files.find((x) => norm(x.path) === norm(p)) || files.find((x) => norm(p).endsWith("/" + norm(x.path))) || null;
-    let text: string | null = null; try { text = f ? await f.load() : null; } catch (e) { text = null; }
+    let text: string | null = builtinLibrary(p); try { if (text === null) text = f ? await f.load() : null; } catch (e) { text = null; }
     if (text !== null && !S.isIbisPath(p)) {
       const errs: string[] = [];
       text = await S.expandSpiceIncludes(text, p, async (cands) => { for (const c of cands) { const g = files.find((x) => norm(x.path) === norm(c)); if (g) { const t = await g.load(); if (t !== null) return t; } } return null; }, errs);
     }
     libs.set(p, text === null ? null : S.isIbisPath(p) ? S.parseIbisLibrary(text, p) : S.parseSpiceLibrary(text));
   }
-  return SP.spiceNetlist({ symbols, texts, options, library: (p) => libs.get(p) || null, report, subckt: model ? { name: projectName(), ports } : undefined });
+  return SP.spiceNetlist({ symbols, texts, options, library: (p) => libs.get(p) || null, report, subckt: model ? { name: projectName(), ports } : undefined, items });
 }
 
 /** GetBuildVersion() as the netlist headers carry it */

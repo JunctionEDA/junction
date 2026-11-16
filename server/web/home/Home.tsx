@@ -266,7 +266,7 @@ function JoinDialog({ me, onClose }: { me: User | null; onClose: () => void }) {
           onChange={(ev) => { setText(ev.target.value); setError(null); }}
           onPaste={(ev) => { const t = ev.clipboardData.getData("text"); if (API.linkToken(t) && me) { ev.preventDefault(); setText(t.trim()); join(t); } }}
           onKeyDown={(ev) => { if (ev.key === "Enter") join(); }} /></label>
-      {error ? <p className="hp-note err" role="alert">{error}</p> : <p className="hp-note">Paste the link someone sent you. The project is added to your list and opens right away. The same link works in the desktop app under File → Join Session from URL…</p>}
+      {error ? <p className="hp-note err" role="alert">{error}</p> : <p className="hp-note">Paste the link someone sent you. The project is added to your list and opens right away. The same link works in the desktop app under File &gt; Join Session from URL…</p>}
     </Modal>
   );
 }
@@ -705,7 +705,7 @@ function Welcome({ onJoin }: { onJoin: () => void }) {
         <button type="button" className="btn" onClick={() => go("/gallery")}><Ic name="explore" />Browse public projects</button>
       </div>
       <ol className="hp-steps">
-        <li><b>Put a project online.</b> Upload it here after signing in, or use File → Publish Project Online in the <a href={RELEASES} target="_blank" rel="noreferrer">desktop app</a>.</li>
+        <li><b>Put a project online.</b> Upload it here after signing in, or use File &gt; Publish Project Online in the <a href={RELEASES} target="_blank" rel="noreferrer">desktop app</a>.</li>
         <li><b>Share it.</b> Invite people by GitHub username or email, or send a link.</li>
         <li><b>Work together.</b> Everyone edits the same schematic and board, from Junction or the browser.</li>
       </ol>

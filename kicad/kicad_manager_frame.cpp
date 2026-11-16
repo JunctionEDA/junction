@@ -411,8 +411,8 @@ KICAD_MANAGER_FRAME::KICAD_MANAGER_FRAME( wxWindow* parent, const wxString& titl
 
     // On a computer with no KiCad there are no symbols or footprints to place: offer them once
     // the window is up.
-    if( COLLAB_STDLIBS::Needed()
-        && ( COLLAB_STDLIBS::Interrupted() || !COLLAB_STDLIBS::Declined() )
+    if( ( COLLAB_STDLIBS::Interrupted()
+          || ( COLLAB_STDLIBS::Needed() && !COLLAB_STDLIBS::Declined() ) )
         && !wxGetEnv( wxS( "JUNCTION_NO_LIBRARY_OFFER" ), nullptr ) )
     {
         CallAfter(
@@ -1617,7 +1617,7 @@ void KICAD_MANAGER_FRAME::DownloadStandardLibraries( bool aOffer )
 
     // A download that was cut short by closing the program (or by the computer or the network
     // going away) is simply continued; the user already said yes to it.
-    const bool continuing = needed && COLLAB_STDLIBS::Interrupted();
+    const bool continuing = COLLAB_STDLIBS::Interrupted();
 
     if( continuing )
     {
@@ -1698,10 +1698,15 @@ void KICAD_MANAGER_FRAME::startStandardLibrariesDownload( bool aContinuing )
     state->job->m_reporter->Report( state->message );
     s_stdlibsDownload = state;
 
+    // Libraries that are on their way are nothing to warn about.
+    Pgm().ClearLibraryLoadMessages();
+
     Pgm().GetNotificationsManager().CreateOrUpdate(
-            STDLIBS_NOTIFICATION, _( "Standard libraries are downloading" ),
+            STDLIBS_NOTIFICATION,
+            _( "Downloading the standard symbols, footprints and templates" ),
             _( "You can keep working. The standard symbols and footprints can be chosen as "
-               "soon as the download has finished; the status bar shows how far it is." ) );
+               "soon as the download has finished; the status bar shows what is downloading, "
+               "how much of it is here and how long it still takes." ) );
 
     std::shared_ptr<bool> alive = m_collabAlive;
 
@@ -1789,6 +1794,10 @@ void KICAD_MANAGER_FRAME::standardLibrariesDownloadEnded( bool aOk, bool aStoppe
         // library lists again, so the parts show up without closing anything.
         COLLAB_STDLIBS::SetDeclined( false );
         COLLAB_STDLIBS::Activate();
+
+        // Warnings about libraries that were not here yet are over; whatever still fails to
+        // load is reported again by the reload.
+        Pgm().ClearLibraryLoadMessages();
         PreloadAllLibraries();
 
         notifications.CreateOrUpdate(

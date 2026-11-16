@@ -9,6 +9,7 @@ import { drawFootprint, drawSymbol } from "./preview";
 import { canPlace, placePart } from "./place";
 import { assignChanges, collect, fullCsv, jlcCsv, priceAt, totals, type BomLine } from "./bom";
 import "../components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
+import { closeMark, kicadIcon } from "../components/kicon-dom";
 
 type Child = Node | string | null | undefined | false;
 function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs?: Record<string, unknown> | null, ...kids: (Child | Child[])[]): HTMLElementTagNameMap[K] {
@@ -41,7 +42,7 @@ const CSS = `
 .kp-bar{display:flex;gap:6px;padding:8px 10px;align-items:center;border-bottom:1px solid var(--line);flex-wrap:wrap}
 .kp input[type=text],.kp input[type=password],.kp k-select{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-2);padding:5px 8px;color:var(--ink);font:inherit;min-width:0}
 .kp input:focus,.kp k-select:focus-within{outline:0;border-color:var(--blue);box-shadow:0 0 0 1px var(--blue)}
-.kp-btn{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-2);min-height:var(--h-md);padding:4px 12px;font-weight:500;cursor:pointer;color:var(--ink);font:inherit;white-space:nowrap;text-decoration:none;display:inline-block}
+.kp-btn{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-2);min-height:var(--h-md);padding:4px 12px;font-weight:500;cursor:pointer;color:var(--ink);font:inherit;white-space:nowrap;text-decoration:none;display:inline-flex;align-items:center;gap:6px}
 .kp-btn:hover{border-color:var(--line-2);background:var(--paper);text-decoration:none}
 .kp-btn:disabled{opacity:.45;cursor:default}
 .kp-btn.primary{background:var(--accent);border-color:var(--accent-2);color:var(--on-accent)}
@@ -169,7 +170,7 @@ class PartsDialog {
     this.bodyEl = h("div", { class: "kp-body" });
     const box = h("div", { class: "kp", role: "dialog", "aria-label": "Vendor Parts", tabindex: "-1", style: "outline:none" },
       h("div", { class: "kp-head" }, h("span", { class: "kp-title" }, "Vendor Parts"), tab("search", "Search"), tab("libraries", "My Libraries"), this.ctx && this.ctx.doc ? tab("bom", "BOM") : null, tab("keys", "API Keys"),
-        h("button", { class: "kp-x", type: "button", title: "Close (Esc)", onclick: () => this.close() }, "×")),
+        h("button", { class: "kp-x", type: "button", title: "Close (Esc)", "aria-label": "Close", onclick: () => this.close() }, closeMark())),
       this.bodyEl);
     // keep the editor's hotkeys and tools out of the dialog
     for (const t of ["keydown", "keyup", "keypress", "wheel", "pointerdown", "mousedown", "contextmenu", "paste", "copy", "cut"]) box.addEventListener(t, (ev) => { if (!(t === "keydown" && (ev as KeyboardEvent).key === "Escape")) ev.stopPropagation(); });
@@ -347,9 +348,9 @@ class PartsDialog {
       canAssign ? h("button", { class: "kp-btn primary", type: "button", id: "kp-assign", title: "Write this part's vendor number, MPN and manufacturer onto " + this.assign!.refs.join(", "), onclick: () => this.assignPart() }, `Assign to ${refList(this.assign!.refs)}`) : null,
       h("button", { class: "kp-btn" + (canAssign ? "" : " primary"), type: "button", id: "kp-place", disabled: !!why, title: why || "Put this part on the cursor", onclick: () => void this.place() }, kind),
       addSel,
-      p.datasheet ? h("a", { class: "kp-btn", href: p.datasheet, target: "_blank", rel: "noreferrer" }, "Datasheet ↗") : null,
-      p.url ? h("a", { class: "kp-btn", href: p.url, target: "_blank", rel: "noreferrer" }, `${p.vendor_name} ↗`) : null,
-      cad && cad.model ? h("a", { class: "kp-btn", href: cad.model.url, title: `3D model: ${cad.model.title}` }, "3D model ↓") : null,
+      p.datasheet ? h("a", { class: "kp-btn", href: p.datasheet, target: "_blank", rel: "noreferrer" }, kicadIcon("datasheet", 16), "Datasheet") : null,
+      p.url ? h("a", { class: "kp-btn", href: p.url, target: "_blank", rel: "noreferrer" }, kicadIcon("www", 16), p.vendor_name) : null,
+      cad && cad.model ? h("a", { class: "kp-btn", href: cad.model.url, title: `3D model: ${cad.model.title}` }, kicadIcon("import", 16), "3D model") : null,
       h("button", { class: "kp-btn", type: "button", id: "kp-refresh", title: "Fetch this part from the vendor again", onclick: () => this.sel && void this.select(this.sel.vendor, this.sel.id, this.sel.lib, true) }, "Refresh"));
     side.append(detail, actions);
     return side;
@@ -453,8 +454,8 @@ class PartsDialog {
         oninput: (ev: Event) => { const n = Math.floor(+(ev.target as HTMLInputElement).value); if (n >= 1 && n !== this.boards) { this.boards = Math.min(n, 100000); this.render(); } } })),
       h("span", { id: "kp-bom-sum", style: "flex:1;color:var(--ink-2)" }, lines.length
         ? `${t.parts} parts in ${t.lines} lines on ${what} · ${t.matched} with a vendor part${t.matched ? ` · ${money(t.cost, t.currency)} for ${this.boards === 1 ? "one board" : this.boards + " boards"}` : ""}${t.short ? ` · ${t.short} short of stock` : ""}` : ""),
-      h("button", { class: "kp-btn", type: "button", id: "kp-bom-jlc", disabled: !lines.length, title: "Comment, Designator, Footprint, LCSC Part #: the file JLCPCB's assembly order asks for", onclick: () => this.download(`${stem}-jlcpcb-bom.csv`, jlcCsv(lines)) }, "JLCPCB BOM ↓"),
-      h("button", { class: "kp-btn", type: "button", id: "kp-bom-csv", disabled: !lines.length, title: "Every line with stock and prices, for a spreadsheet", onclick: () => this.download(`${stem}-bom.csv`, fullCsv(lines, this.boards)) }, "Full BOM ↓"));
+      h("button", { class: "kp-btn", type: "button", id: "kp-bom-jlc", disabled: !lines.length, title: "Comment, Designator, Footprint, LCSC Part #: the file JLCPCB's assembly order asks for", onclick: () => this.download(`${stem}-jlcpcb-bom.csv`, jlcCsv(lines)) }, "JLCPCB BOM"),
+      h("button", { class: "kp-btn", type: "button", id: "kp-bom-csv", disabled: !lines.length, title: "Every line with stock and prices, for a spreadsheet", onclick: () => this.download(`${stem}-bom.csv`, fullCsv(lines, this.boards)) }, "Full BOM"));
     const table = h("table", { class: "kp-table", id: "kp-bom" }, h("thead", null, h("tr", null, h("th", null, "References"), h("th", { class: "kp-num" }, "Qty"), h("th", null, "Value"), h("th", null, "Part"), h("th", { class: "kp-num" }, "Stock"), h("th", { class: "kp-num" }, "Each"), h("th", { class: "kp-num" }, "Total"))));
     const body = h("tbody"); table.append(body);
     for (const l of lines) {
@@ -529,7 +530,7 @@ class PartsDialog {
       lib.mine && pid && lib.project_id !== pid ? h("button", { class: "kp-btn", type: "button", id: "kp-share", disabled: busy, title: "Everyone in this project can use the library; its editors can add to it", onclick: () => void run("share", async () => { this.lib = await api.updateLibrary(lib.id, { project_id: pid }); await this.reloadLibs(); }) }, "Share with This Project") : null,
       lib.mine && lib.project_id ? h("button", { class: "kp-btn", type: "button", id: "kp-unshare", disabled: busy, onclick: () => void run("share", async () => { this.lib = await api.updateLibrary(lib.id, { project_id: null }); await this.reloadLibs(); }) }, "Stop Sharing") : null,
       h("button", { class: "kp-btn", type: "button", id: "kp-refreshlib", disabled: busy || !lib.items.length, title: "Fetch every part in this library from its vendor again", onclick: () => void run("refresh", async () => { const r = await api.refreshLibrary(lib.id); this.lib = r.library; this.libNote = r.failed.length ? `${r.refreshed} refreshed, ${r.failed.length} could not be reached and kept their saved copy.` : `${r.refreshed} part${r.refreshed === 1 ? "" : "s"} refreshed.`; }) }, this.libBusy === "refresh" ? [h("span", { class: "kp-spin" }), "Refreshing…"] : "Refresh All"),
-      h("a", { class: "kp-btn", id: "kp-export", href: api.exportUrl(lib.id), title: "A .kicad_sym symbol library, a .pretty footprint folder and the 3D models, for desktop KiCad" }, "Export for KiCad ↓"),
+      h("a", { class: "kp-btn", id: "kp-export", href: api.exportUrl(lib.id), title: "A .kicad_sym symbol library, a .pretty footprint folder and the 3D models, for desktop KiCad" }, "Export for KiCad"),
       lib.mine ? h("button", { class: "kp-btn danger", type: "button", disabled: busy, onclick: async () => { if (await ask({ title: `Delete “${lib.name}”?`, text: "Designs that already use its parts are not affected.", ok: "Delete", danger: true }) !== null) void run("delete", async () => { await api.deleteLibrary(lib.id); this.lib = null; await this.reloadLibs(); }); } }, "Delete") : null);
     const body = lib.items.length
       ? this.partsTable(lib.items.map((i) => ({ key: i.vendor + "\n" + i.vendor_id, vendor: i.vendor, vendor_name: i.vendor_name, vendor_id: i.vendor_id, mpn: i.mpn, manufacturer: i.manufacturer, description: i.description, package: i.package, stock: i.stock, prices: i.prices || [], assembly: i.assembly, item: i })), lib)
@@ -556,7 +557,7 @@ class PartsDialog {
       } }, "Save");
       card.append(h("div", { style: "display:flex;gap:6px;margin-top:10px;align-items:center" }, save,
         v.key_source === "yours" ? h("button", { class: "kp-btn", type: "button", onclick: async () => { try { await api.deleteKey(v.id); this.vendors = await api.vendors(); } catch (e) { void tell("The key could not be removed", errText(e)); } this.render(); } }, "Remove") : null,
-        h("a", { href: v.signup, target: "_blank", rel: "noreferrer", style: "margin-left:auto;font-size:12px" }, "Get a key ↗")), msg);
+        h("a", { href: v.signup, target: "_blank", rel: "noreferrer", style: "margin-left:auto;font-size:12px" }, "Get a key")), msg);
       return card;
     }));
   }

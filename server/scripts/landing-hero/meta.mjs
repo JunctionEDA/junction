@@ -26,7 +26,17 @@ for (const it of doc.items.values()) if (it.kind === 'gr_rect' && it.bbox && /Ed
   const s = K.kid(it.node, 'start'), e = K.kid(it.node, 'end');
   board = { x: Math.min(+s[1], +e[1]), y: Math.min(+s[2], +e[2]), w: Math.abs(e[1] - s[1]), h: Math.abs(e[2] - s[2]), r: 0 };
 }
-if (!board) throw new Error('no rectangular outline');
+if (!board) {
+  // Rounded corners: the outline is four lines and four arcs. Its box is the board, an arc's reach the radius.
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity, r = 0;
+  for (const it of doc.items.values()) if ((it.kind === 'gr_line' || it.kind === 'gr_arc') && /Edge\.Cuts/.test(K.serialize(it.node))) {
+    const s = K.kid(it.node, 'start'), e = K.kid(it.node, 'end');
+    for (const p of [s, e]) { x0 = Math.min(x0, +p[1]); y0 = Math.min(y0, +p[2]); x1 = Math.max(x1, +p[1]); y1 = Math.max(y1, +p[2]); }
+    if (it.kind === 'gr_arc') r = Math.max(r, Math.abs(e[1] - s[1]));
+  }
+  if (x1 > x0) board = { x: r3(x0), y: r3(y0), w: r3(x1 - x0), h: r3(y1 - y0), r: r3(r) };
+}
+if (!board) throw new Error('no outline');
 
 // ---- pads, tracks, vias
 const pads = [], segs = [], vias = [], parts = [], zones = [], texts = [];
@@ -111,21 +121,83 @@ const needed = new Set(order.flatMap((r) => r.needs));
 order.forEach((r, i) => { r.loose = !r.needs.length && !needed.has(i); });
 const stitch = vias.filter((v) => !owner.has(v.id)).map((v) => v.id);
 
-// ---- the pile: rows under the board, tallest parts first
-const GAP = 0.8, x0 = board.x + 0.5, x1 = board.x + board.w - 0.5;
-let x = x0, y = board.y + board.h + 5.5, rowH = 0;
-for (const p of parts.slice().sort((a, b) => (b.box[3] - b.box[1]) - (a.box[3] - a.box[1]) || (b.box[2] - b.box[0]) - (a.box[2] - a.box[0]))) {
-  const w = p.box[2] - p.box[0], h = p.box[3] - p.box[1];
-  if (x + w > x1 && x > x0) { x = x0; y += rowH + GAP; rowH = 0; }
+// ---- the groups: the schematic's blocks (design/design.py), each packed into a cluster in a band under the board,
+// where the teammates sort the parts before any of them goes onto the board (the pile itself is in a strip left of the board, above the band)
+const GROUPS = [['USB-C', 'J1 R1 R2 U2'], ['3.3 V', 'U3 C1 C2 D1 R4'], ['MCU', 'U1 C3 C4 C5 C6'], ['Buttons', 'SW1 C7 SW2 R3'], ['LED', 'R5 D2'], ['Pins', 'J2 J3']];
+const GAP = 0.8, PAD = 1.2, LEFT = 38, x0 = board.x - LEFT, x1 = board.x + board.w + 2.5;      // LEFT: the strip beside the board where the pile starts
+const size = (p) => [p.box[2] - p.box[0], p.box[3] - p.box[1]];
+const tall = (a, b) => size(b)[1] - size(a)[1] || size(b)[0] - size(a)[0];
+const clusters = GROUPS.map(([name, refs], gi) => {
+  const mine = refs.split(' ').map((r) => parts.find((p) => p.ref === r)).sort(tall);
+  if (mine.some((p) => !p)) throw new Error('group ' + name + ' names a part the board does not have');
+  for (const p of mine) p.group = gi;
+  // Parts that sit together on the board stay together in the cluster, each exactly where it is beside the others
+  // (a capacitor at its supply pin, a CC resistor in front of its CC pin): the group is the placement in small.
+  // Parts of the group that are far apart on the board (the two pin rows, the two LEDs) form units of their own.
+  const near = (p, q) => Math.max(Math.max(p.box[0], q.box[0]) - Math.min(p.box[2], q.box[2]), Math.max(p.box[1], q.box[1]) - Math.min(p.box[3], q.box[3])) < 2.2;
+  const units = [];
+  for (const p of mine) {
+    const hit = units.filter((u) => u.some((q) => near(p, q)));
+    const u = [p, ...hit.flat()]; for (const h of hit) units.splice(units.indexOf(h), 1); units.push(u);
+  }
+  const ubox = (u) => [Math.min(...u.map((p) => p.box[0])), Math.min(...u.map((p) => p.box[1])), Math.max(...u.map((p) => p.box[2])), Math.max(...u.map((p) => p.box[3]))];
+  units.sort((u, v) => { const a = ubox(u), b = ubox(v); return (b[3] - b[1]) - (a[3] - a[1]); });
+  const wide = Math.max(...units.map((u) => { const b = ubox(u); return b[2] - b[0]; }));
+  let cx = 0, cy = 0, rh = 0, w = 0;
+  for (const u of units) {
+    const b = ubox(u), uw = b[2] - b[0], uh = b[3] - b[1];
+    for (const p of u) p.unit = u;
+    if (cx + uw > wide && cx > 0) { cx = 0; cy += rh + GAP; rh = 0; }
+    for (const p of u) p.slot = [cx + p.box[0] - b[0], cy + p.box[1] - b[1]];
+    cx += uw + GAP; rh = Math.max(rh, uh); w = Math.max(w, cx - GAP);
+  }
+  return { name, parts: mine, w: w + PAD * 2, h: cy + rh + PAD * 2 + 1.6 };      // 1.6 mm at the top for the group's name
+});
+if (parts.some((p) => p.group === undefined)) throw new Error('a part is in no group: ' + parts.filter((p) => p.group === undefined).map((p) => p.ref));
+let x = x0, y = board.y + board.h + 4.5, rowH = 0;
+const bands = [];
+const put = (name, cx, cy) => {
+  const c = clusters.find((q) => q.name === name);
+  for (const p of c.parts) p.stage = [r3(p.x + (cx + PAD + p.slot[0] - p.box[0])), r3(p.y + (cy + PAD + 1.6 + p.slot[1] - p.box[1]))];
+  bands[clusters.indexOf(c)] = { name, box: [r3(cx), r3(cy), r3(cx + c.w), r3(cy + c.h)] };
+  return c;
+};
+
+// ---- the pile: rows in the strip left of the board, tallest parts first, the groups mixed up as a netlist import leaves them
+const px0 = board.x - LEFT, px1 = board.x - 3.5;
+x = px0; y = board.y - 1; rowH = 0;
+for (const p of parts.slice().sort(tall)) {
+  const [w, h] = size(p);
+  if (x + w > px1 && x > px0) { x = px0; y += rowH + GAP; rowH = 0; }
   p.pile = [r3(p.x + (x - p.box[0])), r3(p.y + (y - p.box[1]))];
   x += w + GAP; rowH = Math.max(rowH, h);
 }
+// The band: the three big groups in a row under the pile, the pin rows under the board's right half with the two small
+// groups below them.
+{
+  let cx = x0; const cy = r3(y + rowH + 2);
+  for (const name of ['USB-C', 'MCU', 'Buttons']) cx += put(name, cx, cy).w + 1.5;
+  const bx = Math.max(cx, board.x + 12), by = board.y + board.h + 4.5;
+  const pins = put('Pins', bx, by);
+  put('LED', bx + put('3.3 V', bx, by + pins.h + 1.5).w + 1.5, by + pins.h + 1.5);
+}
+const bandBottom = Math.max(...bands.map((g) => g.box[3]));
 const pileBottom = r3(y + rowH);
-for (const p of parts) delete p.box;
+// the units: parts that move onto the board together, with how far their cluster is from their place on the board
+const units = [];
+for (const p of parts) {
+  let u = units.find((q) => q.src === p.unit);
+  if (!u) { u = { src: p.unit, group: p.group, off: [r3(p.stage[0] - p.x), r3(p.stage[1] - p.y)], parts: [] }; units.push(u); }
+  u.parts.push(p.id);
+}
+units.sort((a, b) => a.group - b.group);
+for (const u of units) delete u.src;
+for (const p of parts) { delete p.box; delete p.slot; delete p.unit; }
 parts.sort((a, b) => a.ref.localeCompare(b.ref, undefined, { numeric: true }));
 
 const nets = new Set(pads.map((p) => p.net).filter(Boolean));
-const meta = { board, pileBottom, parts, routes: order, zones, stitch, texts, ground: [...doc.nets.entries()].find(([, n]) => n === 'GND')[0], pads: pads.length, nets: nets.size };
+const stageBottom = r3(bandBottom);
+const meta = { board, left: LEFT, pileBottom, stageBottom, groups: bands, units, parts, routes: order, zones, stitch, texts, ground: [...doc.nets.entries()].find(([, n]) => n === 'GND')[0], pads: pads.length, nets: nets.size };
 fs.writeFileSync(path.join(DIR, 'stm32.json'), JSON.stringify(meta));
 console.log({ board, parts: parts.length, routes: order.length, loose: order.filter((r) => r.loose).length, withVia: order.filter((r) => r.via).length, stitch: stitch.length, zones: zones.length, texts: texts.map((t) => t.text), pads: pads.length, nets: nets.size, pileBottom });
 console.log(order.map((r, i) => `${i}:${r.net}/${r.layer[0]}${r.via ? 'v' : ''}${r.needs.length ? '<' + r.needs.join(',') : ''}`).join(' '));

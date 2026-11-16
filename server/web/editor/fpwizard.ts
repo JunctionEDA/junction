@@ -25,6 +25,7 @@ import { INVALID_VALUE, boolValue, buildMessage, pageValues, paramCategories, pa
 import { E } from "./state";
 import { icon } from "../symedit/ui";
 import "../components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
+import { treeExpander } from "../components/kicon-dom";
 
 /** The plugin host (web/plugins/host.ts, in the app's bundle) as it offers its footprint wizards. */
 interface WizardHost { list(): WizardContribution[]; call(plugin: string, id: string, req: unknown): Promise<unknown> }
@@ -95,7 +96,7 @@ export async function footprintWizardDialog(): Promise<string | null> {
       if (!st) return;
       for (const cat of paramCategories(st)) {
         const err = cat.params.some((q) => q.error);
-        const head = h("div", { class: "fw-pg-cat" + (err ? " err" : ""), "data-k": "category" }, h("span", { class: "fw-pg-tw" }, collapsed.has(cat.name) ? "\u25b8" : "\u25be"), cat.name);
+        const head = h("div", { class: "fw-pg-cat" + (err ? " err" : ""), "data-k": "category" }, h("span", { class: "fw-pg-tw" }, treeExpander(!collapsed.has(cat.name))), cat.name);
         head.addEventListener("click", () => { if (collapsed.has(cat.name)) collapsed.delete(cat.name); else collapsed.add(cat.name); showParams(); });
         grid.append(head);
         if (collapsed.has(cat.name)) continue;

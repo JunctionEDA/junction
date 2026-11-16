@@ -43,139 +43,30 @@ jobs:
     if: ${{ always() && (needs.linux.result == 'success' || inputs.linux_run) }}
     permissions:
       actions: read
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: junction-linux
-          run-id: ${{ inputs.linux_run || github.run_id }}
-          github-token: ${{ github.token }}
-      - name: Install only the packages the tarball lists
-        run: |
-          mkdir -p "$HOME/Apps"
-          tar -C "$HOME/Apps" -xzf Junction-*-linux-x64.tar.gz
-          echo "Packages:"; cat "$HOME/Apps/usr/share/junction/ubuntu-packages.txt"
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends $(cat "$HOME/Apps/usr/share/junction/ubuntu-packages.txt")
-          # Test harness only: a virtual display, a software GL/Vulkan driver
-          # (a desktop already has one) and screenshot tools.
-          sudo apt-get install -y --no-install-recommends xvfb x11-utils imagemagick libgl1-mesa-dri mesa-vulkan-drivers xdotool
-      - name: Launch the project manager and both editors
-        run: |
-          set -x
-          export HOME=$(mktemp -d)   # a first launch: no settings yet
-          J=/home/runner/Apps/usr/bin/junction
-          mkdir -p shots
-          Xvfb :99 -screen 0 1600x1000x24 & sleep 3
-          export DISPLAY=:99
-          fail=0
-          for tool in kicad pcbnew eeschema; do
-            if [ $tool = kicad ]; then "$J" > shots/$tool.log 2>&1 & else "$J" $tool > shots/$tool.log 2>&1 & fi
-            pid=$!
-            sleep 45
-            import -window root shots/$tool.png
-            xwininfo -root -tree | grep -E '"[^"]+"' | grep -v -E 'has no name' | head -20 > shots/$tool-windows.txt || true
-            if kill -0 $pid 2>/dev/null; then echo "$tool is running"; else echo "$tool EXITED"; cat shots/$tool.log; fail=1; fi
-            kill $pid 2>/dev/null; sleep 3; kill -9 $pid 2>/dev/null || true
-          done
-          "$J" kicad-cli version | tee shots/kicad-cli-version.txt
-          exit $fail
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: launch-linux
-          path: shots
+    uses: ./.github/workflows/launch-tests.yml
+    with:
+      platform: linux
+      run: ${{ inputs.linux_run }}
 
   test-windows:
     needs: windows
     if: ${{ always() && (needs.windows.result == 'success' || inputs.windows_run) }}
     permissions:
       actions: read
-    runs-on: windows-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: junction-windows-installer
-          path: dl
-          run-id: ${{ inputs.windows_run || github.run_id }}
-          github-token: ${{ github.token }}
-      - name: Install silently and launch the project manager and both editors
-        shell: pwsh
-        run: |
-          $installer = Get-ChildItem -Recurse dl -Filter "Junction-*-windows-x64.exe" | Select-Object -First 1
-          Start-Process $installer.FullName -ArgumentList "/S" -Wait
-          $bin = "C:\Program Files\Junction\bin"
-          if (-not (Test-Path "$bin\junction.exe")) { throw "installer did not put junction.exe in $bin" }
-          New-Item -ItemType Directory -Force shots | Out-Null
-          Add-Type -AssemblyName System.Windows.Forms, System.Drawing
-          function Shot($path) {
-            $b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
-            $bmp = New-Object System.Drawing.Bitmap $b.Width, $b.Height
-            $g = [System.Drawing.Graphics]::FromImage($bmp)
-            $g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size)
-            $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
-            $g.Dispose(); $bmp.Dispose()
-          }
-          $fail = $false
-          foreach ($tool in "kicad", "pcbnew", "eeschema") {
-            $exe = if ($tool -eq "kicad") { "junction" } else { $tool }   # the project manager is junction.exe
-            $p = Start-Process "$bin\$exe.exe" -PassThru
-            Start-Sleep -Seconds 45
-            Shot "shots\$tool.png"
-            Get-Process | Where-Object { $_.MainWindowTitle } | Select-Object ProcessName, MainWindowTitle | Out-File "shots\$tool-windows.txt"
-            if ($p.HasExited) { Write-Host "$tool EXITED with $($p.ExitCode)"; $fail = $true } else { Write-Host "$tool is running" }
-            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
-            Start-Sleep -Seconds 3
-          }
-          & "$bin\kicad-cli.exe" version | Tee-Object shots\kicad-cli-version.txt
-          if ($fail) { exit 1 }
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: launch-windows
-          path: shots
+    uses: ./.github/workflows/launch-tests.yml
+    with:
+      platform: windows
+      run: ${{ inputs.windows_run }}
 
   test-macos:
     needs: macos
     if: ${{ always() && (needs.macos.result == 'success' || inputs.macos_run) }}
     permissions:
       actions: read
-    runs-on: macos-15
-    timeout-minutes: 30
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: junction-macos
-          run-id: ${{ inputs.macos_run || github.run_id }}
-          github-token: ${{ github.token }}
-      - name: Hide Homebrew, which the app must not need
-        run: |
-          # The DMG has to run on a Mac without Homebrew: move the prefix away.
-          sudo mv /opt/homebrew /opt/homebrew-hidden
-      - name: Open the DMG and launch the app
-        run: |
-          mkdir -p shots
-          hdiutil attach Junction-*-macos.dmg -mountpoint /Volumes/Junction -nobrowse
-          ditto /Volumes/Junction/Junction.app "$HOME/Applications/Junction.app"
-          hdiutil detach /Volumes/Junction
-          app="$HOME/Applications/Junction.app"
-          "$app/Contents/MacOS/Junction" > shots/kicad.log 2>&1 &
-          pid=$!
-          sleep 60
-          screencapture -x shots/kicad.png || true
-          if kill -0 $pid 2>/dev/null; then echo "Junction is running"; else echo "Junction EXITED"; cat shots/kicad.log; exit 1; fi
-          kill $pid
-          "$app/Contents/MacOS/kicad-cli" version | tee shots/kicad-cli-version.txt
-      - name: Put Homebrew back
-        if: always()
-        run: sudo mv /opt/homebrew-hidden /opt/homebrew || true
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: launch-macos
-          path: shots
+    uses: ./.github/workflows/launch-tests.yml
+    with:
+      platform: macos
+      run: ${{ inputs.macos_run }}
 
   release:
     needs: [test-linux, test-windows, test-macos]

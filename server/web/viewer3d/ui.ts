@@ -11,6 +11,7 @@ import { IS_MAC, keyName, menuKey } from "../keys";
 import { advance, switcherFor, type SwitcherKind } from "../editor/view-switcher-model";
 import { fitMenu, type MenuAnchor } from "../menufit";
 import "../components/kselect";   // <k-select>, the themed drop-down (Presets, Viewports)
+import { closeMark, maximizeMark, menuArrow, menuCheck } from "../components/kicon-dom";
 
 /** Move a name to the front of an MRU. */
 function toFront(list: string[], name: string): void { const i = list.indexOf(name); if (i >= 0) list.splice(i, 1); list.unshift(name); }
@@ -237,8 +238,8 @@ export class ViewerWindow {
     // ---- title bar
     const title = el("div", "v3d-title"); title.appendChild(icon("three_d"));
     this.nameEl = el("span", "v3d-name"); title.appendChild(this.nameEl);
-    const maxBtn = el("button", "v3d-maxbtn", "□"); maxBtn.title = "Maximize"; maxBtn.addEventListener("click", () => this.toggleMaximize());
-    const closeBtn = el("button", "v3d-close", "✕"); closeBtn.title = "Close"; closeBtn.addEventListener("click", () => this.close());
+    const maxBtn = el("button", "v3d-maxbtn"); maxBtn.appendChild(maximizeMark()); maxBtn.title = "Maximize"; maxBtn.setAttribute("aria-label", "Maximize"); maxBtn.addEventListener("click", () => this.toggleMaximize());
+    const closeBtn = el("button", "v3d-close"); closeBtn.appendChild(closeMark()); closeBtn.title = "Close"; closeBtn.setAttribute("aria-label", "Close"); closeBtn.addEventListener("click", () => this.close());
     title.append(maxBtn, closeBtn); root.appendChild(title);
     title.addEventListener("dblclick", (ev) => { if (!(ev.target as HTMLElement).closest("button")) this.toggleMaximize(); });
     this.bindDrag(title);
@@ -660,11 +661,11 @@ export class ViewerWindow {
       const row = el("div", "v3d-mi");
       const ic = el("span"); const lab = el("span", undefined, it.label); const k = el("span", "k"); const arrow = el("span");
       if ("sub" in it) {
-        ic.appendChild(icon(it.icon)); arrow.textContent = "▸";
+        ic.appendChild(icon(it.icon)); arrow.appendChild(menuArrow());
         row.addEventListener("pointerenter", () => { this.showMenu(it.sub, { row: row.getBoundingClientRect(), parent: m.getBoundingClientRect(), overlap: 2 }, depth + 1); });
       } else {
         row.dataset.action = it.id;
-        if (it.checked) { ic.className = "chk"; ic.textContent = it.checked() ? "✓" : ""; } else ic.appendChild(icon(it.icon));
+        if (it.checked) { ic.className = "chk"; ic.appendChild(menuCheck(it.checked())); } else ic.appendChild(icon(it.icon));
         if (it.key) k.textContent = menuKey(it.key);
         if (it.disabled) { row.classList.add("dis"); row.title = it.disabled; } else if (it.tip) row.title = it.tip;
         row.addEventListener("pointerenter", () => { while (this.menu.length > depth + 1) { const s = this.menu.pop(); if (s) s.remove(); } });

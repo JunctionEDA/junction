@@ -26,7 +26,7 @@ import * as SP from "./props";
 import { navTarget, propNavOf, type PropNav } from "../components/panes/prop-nav";
 import { FP_BROWSE_TIP, chooseFootprint, noFileBrowsing, openDatasheet, urlIcon, urlTip } from "../dialogs/browse-cells";
 import { datasheetLink } from "../library/fpchoice";
-import { kicadIcon, setKicadIcon } from "../components/kicon-dom";
+import { kicadIcon, setKicadIcon, treeExpander, closeMark } from "../components/kicon-dom";
 import { symCanvasMenu, symTreeMenu, type SymMenuCtx } from "./ctxmenu";
 import { libTreeFilter } from "../components/libtree-filter";
 import { bindTreePreview } from "../components/libtree-preview";
@@ -601,7 +601,7 @@ export class SymbolEditor {
     const tabs = h("div", { class: "se-tabs", id: "se-tabs" });
     const cwrap = h("div", { class: "se-canvas", id: "se-canvas", tabindex: 0 });
     const cv = h("canvas", { id: "se-cv" }) as HTMLCanvasElement; this.cv = cv;
-    const empty = h("div", { class: "se-empty" }, "Select a symbol in the library tree, or create one with File ▸ New Symbol...");
+    const empty = h("div", { class: "se-empty" }, "Select a symbol in the library tree, or create one with File > New Symbol...");
     cwrap.append(cv, empty);
     centre.append(tabs, cwrap);
     const props = h("div", { class: "se-props", id: "se-props" });
@@ -826,7 +826,7 @@ export class SymbolEditor {
       const isSel = this.treeSel && this.treeSel.lib === lib.nick && !this.treeSel.name;
       const canvasLib = !!onCanvas && onCanvas.lib === lib.nick && !open;
       const note = lib.error ? "(failed to load) " + lib.error : lib.kind === "official" ? "(read-only)" : lib.loading ? "loading…" : "";
-      const tw = h("span", { class: "tw" }, open ? "▾" : "▸");
+      const tw = treeExpander(open); tw.classList.add("tw");
       const row = h("div", { class: "se-row lib" + (modified ? " mod" : "") + (lib.error ? " dis" : "") + (isSel ? " cur" : ""), "data-lib": lib.nick, title: lib.kind === "official" ? "KiCad library (read-only)" : lib.doc ? lib.doc.path : "" },
         tw, h("span", { class: "nm" + (canvasLib ? " canvas" : "") }, (pinned.has(lib.nick) ? "☆ " : "") + lib.nick + (modified ? " *" : "")), note ? h("span", { class: "ds" }, note) : null);
       const toggle = () => { lib.open = !open; if (lib.open && lib.kind === "official") void this.loadOfficial(lib); this.renderTree(); };
@@ -841,7 +841,7 @@ export class SymbolEditor {
         const sel = this.treeSel && this.treeSel.lib === lib.nick && this.treeSel.name === r.name && this.treeSel.unit === undefined;
         const mod = !!lib.doc && lib.doc.loaded && lib.doc.isSymbolModified(r.name);
         const key = lib.nick + ":" + r.name; const uopen = r.units > 1 && this.symOpen.has(key);
-        const stw = h("span", { class: "tw" }, r.units > 1 ? (uopen ? "▾" : "▸") : "");
+        const stw = treeExpander(uopen, r.units > 1); stw.classList.add("tw");
         const sr = h("div", { class: "se-row" + (sel ? " cur" : "") + (mod ? " mod" : "") + (r.parent ? " der" : ""), "data-sym": key, style: "padding-left:18px", title: r.desc },
           stw, h("span", { class: "nm" + (cur ? " canvas" : "") }, M.unescapeLibId(r.name) + (mod ? " *" : "")), h("span", { class: "ds" }, r.desc));
         const utoggle = () => { if (r.units < 2) return; if (this.symOpen.has(key)) this.symOpen.delete(key); else this.symOpen.add(key); this.renderTree(); };
@@ -968,7 +968,7 @@ export class SymbolEditor {
   renderTabs(): void {
     const host = this.el.tabs; if (!host) return; host.innerHTML = "";
     this.tabs.forEach((t, i) => {
-      const x = h("span", { class: "x", title: "Close", "aria-label": "Close tab" }, "×");
+      const x = h("span", { class: "x", title: "Close", "aria-label": "Close tab" }, closeMark());
       const el = h("div", { class: "se-tab" + (i === this.cur ? " cur" : ""), "data-tab": i, title: t.origin ? `${t.name} (from schematic)` : t.lib ? `${t.lib}:${t.name}` : t.name }, (this.isModified(t) ? "*" : "") + (t.origin ? t.origin.ref || t.name : M.unescapeLibId(t.name)), x);
       el.addEventListener("click", (ev) => { if (ev.target === x) { void this.closeTab(i); return; } this.cur = i; this.afterTabChange(); });
       host.append(el);
@@ -1065,7 +1065,7 @@ export class SymbolEditor {
     for (const r of rows) {
       if (r.group !== group) {
         group = r.group; const g = group; const shut = this.propsCollapsed.has(g);
-        const head = h("div", { class: "se-pgroup", "data-prop-group": g }, h("span", { class: "tw" }, shut ? "\u25b8" : "\u25be"), h("span", { class: "nm" }, g));
+        const head = h("div", { class: "se-pgroup", "data-prop-group": g }, h("span", { class: "tw" }, treeExpander(!shut)), h("span", { class: "nm" }, g));
         head.addEventListener("click", () => { if (this.propsCollapsed.has(g)) this.propsCollapsed.delete(g); else this.propsCollapsed.add(g); this.renderProps(); });
         // SCH_PROPERTIES_PANEL's "Add Field" category button (small_plus) and context menu, on the symbol's own rows
         if (g === "Fields" && canAddField) {

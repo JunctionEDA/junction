@@ -91,11 +91,12 @@ export function pinMapPage(pg: HTMLElement, st: PinMapState, ro: boolean): void 
     st.maps.forEach((m, c) => {
       const inp = h("input", { type: "text", value: footprintOf(m.name), disabled: ro, "data-fp": m.name, style: "flex:1;min-width:0;border:0;background:transparent;padding:1px 2px" }) as HTMLInputElement;
       inp.addEventListener("focus", () => (curCol = c)); inp.addEventListener("change", () => void setFootprint(c, inp.value));
-      const browse = h("button", { class: "btn sm", type: "button", disabled: ro, title: "Browse footprints", style: "padding:0 4px;min-width:0", onclick: async () => {
+      // GRID_CELL_FPID_EDITOR's button: BITMAPS::small_library (common/widgets/grid_text_button_helpers.cpp)
+      const browse = bitmapButton("small_library", "Browse footprints", async () => {
         curCol = c;
         const L = (window as unknown as { KiCadLibrary?: { openChooser(k: "footprint", o?: { title?: string }): Promise<{ fpid?: string; libId?: string } | null> } }).KiCadLibrary;
         if (!L) return; const ch = await L.openChooser("footprint", { title: "Choose Footprint" }); const id = ch && (ch.fpid || ch.libId); if (id) void setFootprint(c, id);
-      } }, "…");
+      }, { flat: true, disabled: ro, key: "fpBrowse" });
       const cell = h("td", { style: td }, h("div", { style: "display:flex;gap:2px;align-items:center" }, inp, browse)); cell.addEventListener("contextmenu", (ev) => colMenu(ev, c));
       fr.append(cell);
     });

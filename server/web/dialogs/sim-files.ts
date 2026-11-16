@@ -11,7 +11,7 @@ const str = (n: Node): string => (typeof n === "string" ? n : n == null ? "" : S
 const kid = (n: Node, k: string): Node[] | null => { if (!isList(n)) return null; for (let i = 1; i < n.length; i++) { const c = n[i]; if (isList(c) && c[0] === k) return c; } return null; };
 const kids = (n: Node, k: string): Node[][] => (isList(n) ? n.slice(1).filter((c): c is Node[] => isList(c) && c[0] === k) : []);
 
-export const SPICE_EXT = /\.(lib|sub|cir|mod|spice|ibs)$/i;
+export const SPICE_EXT = /\.(lib|sub|cir|mod|model|sp|spice|ibs)$/i;
 
 /** The project's SPICE model documents, relative to the project directory.  `docs` is the whole /info list
  *  (appState.project.docs: appState.docs keeps only the schematics and boards). */

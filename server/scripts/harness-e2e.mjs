@@ -297,6 +297,48 @@ result = {"assumed": before["assumed"], "build": st["build"], "finish": st["fini
   check('get_project lists the stored scripts', !proj.isError && (proj.data.scripts || []).some((x) => x.name === 'count'), proj.text.slice(0, 400));
 }
 
+// ------------------------------------------------------------------ plan first, draw once: dry run, rebuild, refusal
+
+{
+  const N3 = 'harness-e2e-dry';
+  const made3 = await call('create_project', { name: N3 });
+  check('a third project', !made3.isError, made3.text);
+  const CODE = `
+R, C = "Resistor_SMD:R_0402_1005Metric", "Capacitor_SMD:C_0402_1005Metric"
+parts = {"U1": {"lib": "Timer:NE555D", "footprint": "Package_SO:SOIC-8_3.9x4.9mm_P1.27mm"},
+         "R1": {"lib": "Device:R", "value": "10k", "footprint": R}, "R2": {"lib": "Device:R", "value": "47k", "footprint": R},
+         "C1": {"lib": "Device:C", "value": "10uF", "footprint": C}, "C2": {"lib": "Device:C", "value": "100nF", "footprint": C},
+         "D1": {"lib": "Device:LED", "footprint": "LED_SMD:LED_0603_1608Metric"}, "R3": {"lib": "Device:R", "value": "330", "footprint": R},
+         "J1": {"lib": "Connector_Generic:Conn_01x02", "footprint": "Connector_PinHeader_2.54mm:PinHeader_1x02_P2.54mm_Vertical"}}
+nets = {"+5V": ["U1.VCC", "U1.RST", "R1.1", "C2.1", "J1.1"], "GND": ["U1.GND", "C1.2", "C2.2", "R3.2", "J1.2"],
+        "DISCH": ["U1.DISCH", "R1.2", "R2.1"], "THRES": ["U1.THRES", "U1.TRIG", "R2.2", "C1.1"], "OUT": ["U1.OUT", "D1.2"], "LED_K": ["D1.1", "R3.1"]}
+groups = {"Power input": ["J1", "C2"], "Timer": ["U1", "R1", "R2", "C1"], "Indicator": ["D1", "R3"]}
+sch = project.schematic()
+built = sch.build(parts, nets, groups, no_connect=["U1.CONT"])
+board = project.board()
+r = board.design(outline=OUTLINE, edges={"J1": "left"}, layers=2, accept=["review", "drc"])
+result = {"parts": len(board.refs()), "left": r["routed"]["left"], "refused": r.get("refused")}
+`;
+  const parts = async (doc) => { const c = await call('list_components', { project: N3, document: doc }); return c.isError ? -1 : c.data.components.length; };
+  const changes = async () => { const c = await call('list_changes', { project: N3 }); return c.isError ? -1 : (c.data.changes || []).length; };
+  const before = await changes();
+  const dry = await call('run_python', { project: N3, dry_run: true, code: CODE.replace('OUTLINE', '(100, 50, 130, 75)') });
+  check('a dry run runs the whole script and says what it would change', !dry.isError && dry.data.ok === true && dry.data.dry_run === true && Array.isArray(dry.data.would_change) && dry.data.would_change.length === 2 && dry.data.result && dry.data.result.parts === 8, dry.text.slice(0, 5000));
+  check('and publishes nothing: no parts, no change in the history', (await parts('schematic')) === 0 && (await parts('board')) === 0 && (await changes()) === before, `${await parts('schematic')} ${await parts('board')} ${await changes()} vs ${before}`);
+  const tight = await call('run_python', { project: N3, code: CODE.replace('OUTLINE', '(100, 50, 104, 53)').replace(', accept=["review", "drc"]', '') });
+  check('a layout that fails the gate is refused with its reasons', tight.data && tight.data.ok === false && /refused/i.test(tight.text), tight.text.slice(0, 900));
+  check('and leaves nothing behind', (await parts('schematic')) === 0 && (await parts('board')) === 0 && (await changes()) === before, `${await parts('schematic')} ${await parts('board')} ${await changes()}`);
+  const real = await call('run_python', { project: N3, script: 'design', title: 'Design the blinker', code: CODE.replace('OUTLINE', '(100, 50, 130, 75)') });
+  check('the real run draws it once', !real.isError && real.data.ok === true && (await parts('schematic')) === 8 && (await parts('board')) === 8 && (real.data.change_ids || []).length <= 2, real.text.slice(0, 900));
+  const mid = await changes();
+  const again = await call('run_python', { project: N3, script: 'design' });
+  const items = ((again.data && again.data.changed) || []).reduce((n, c) => n + c.items, 0), first = ((real.data && real.data.changed) || []).reduce((n, c) => n + c.items, 0);
+  const drc = await call('run_checks', { project: N3, document: 'board' });
+  // laid out again from its parts: the old copper is taken up first, so the board is either the new clean layout or (refused) the one it was
+  check('the same script again needs no wipe: the board is whole afterwards', (again.data.ok === true ? items <= first + 20 : /refused/.test(again.text) && (await changes()) === mid) && (await parts('board')) === 8 && (await parts('schematic')) === 8 && !drc.isError && (drc.data.errors || 0) === 0,
+    `${items} items the second time, ${first} the first; ${(await changes()) - mid} new changes; DRC ${drc.data && drc.data.errors}; ${again.text.slice(0, 300)}`);
+}
+
 schWatch.ws.close(); pcbWatch.ws.close();
 await db.end();
 console.log(`\n${pass} passed, ${fail} failed`);

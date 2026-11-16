@@ -20,6 +20,7 @@ import type { Plain } from "../canvas/project-file";
 import { api, esc, toast } from "./util";
 import { isSch, requestRender } from "./view";
 import { installRouterDialogs } from "./routersettings";
+import { ensureIconCss } from "../components/kicon-dom";
 
 const PS = () => KiCadCanvas.pcbSizes;
 const R = (): PcbSizes => KiCadCanvas.pcbSizes.state;
@@ -303,13 +304,14 @@ export function openLayerPair(): void {
   let presets: LayerPairPreset[] = st.layerPairPresets.map((p) => ({ ...p })); let picked = -1;
   const before = JSON.stringify(presets);
   const color = (n: string) => (byName.get(n) || { color: "#888" }).color, label = (n: string) => (byName.get(n) || { label: n }).label;
+  ensureIconCss();
   openDialog({ title: "Select Copper Layer Pair", width: 720,
     build(body) {
       const wrap = document.createElement("div"); wrap.className = "lp-wrap";
       const column = (title: string, side: "top" | "bottom") => {
         const col = document.createElement("div"); col.innerHTML = `<div>${title}</div><div class="lp-list" data-side="${side}"></div>`;
         const list = col.querySelector(".lp-list") as HTMLElement;
-        const draw = () => { const cur = side === "top" ? top : bottom; list.innerHTML = layers.map((l) => `<div class="lp-row${l.name === cur ? " on" : ""}" data-layer="${esc(l.name)}"><span><i class="lp-sw" style="background:${l.color}"></i></span><span class="lp-mark">${l.name === cur ? "✓" : ""}</span><span>${esc(l.label)}</span></div>`).join(""); };
+        const draw = () => { const cur = side === "top" ? top : bottom; list.innerHTML = layers.map((l) => `<div class="lp-row${l.name === cur ? " on" : ""}" data-layer="${esc(l.name)}"><span><i class="lp-sw" style="background:${l.color}"></i></span><span class="lp-mark"><input type="checkbox" class="kgrid-chk" tabindex="-1" aria-readonly="true"${l.name === cur ? " checked" : ""}></span><span>${esc(l.label)}</span></div>`).join(""); };
         list.addEventListener("click", (ev) => { const row = (ev.target as Element).closest<HTMLElement>(".lp-row"); if (!row || !row.dataset.layer) return; if (side === "top") top = row.dataset.layer; else bottom = row.dataset.layer; picked = -1; redraw(); });
         return { col, draw };
       };

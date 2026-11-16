@@ -18,6 +18,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
+#include <collab/collab_stdlibs.h>
 #include <chrono>
 #include <common.h>
 #include <env_vars.h>
@@ -1826,6 +1827,10 @@ std::vector<KI_ERROR> LIBRARY_MANAGER_ADAPTER::GetLibraryLoadErrors() const
     {
         if( status.load_status == LOAD_STATUS::LOAD_ERROR && status.error )
         {
+            // A standard library that the download brings is not reported.
+            if( COLLAB_STDLIBS::IsDownloadableLibraryError( status.error->message ) )
+                continue;
+
             wxString title = status.error->message.BeforeFirst( '\n' );
             title.StartsWith( wxS( "IO_ERROR: " ), &title );
             errors.emplace_back(

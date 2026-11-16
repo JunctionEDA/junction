@@ -88,12 +88,24 @@ const b = await pcb.evaluate(() => {
     const n = kid(it.node, 'net'); const net = n ? String(n[n.length - 1]) : null;
     out.push({ id: it.id, kind: it.kind, pts, layer, net: K.netNameOf ? (K.netNameOf(d, it) || net) : net, add, remove: P.removedChange(it) });
   }
-  return out;
+  // the footprints as the layout left them, and the board outline: the video adds the outline, brings the
+  // footprints in with Update PCB from Schematic, and places them where these say (the outline: a rectangle, or the
+  // lines and arcs of one with rounded corners)
+  const fps = [], outline = [];
+  for (const it of d.items.values()) {
+    if (it.kind === 'footprint') { const at = K.atOf(it.node); fps.push({ id: it.id, ref: it.ref, at: [at[0], at[1]], rot: at[2] || 0, bbox: it.bbox, node: it.node, remove: P.removedChange(it) }); }
+    else if (/^gr_(rect|line|arc)$/.test(it.kind) && JSON.stringify(kid(it.node, 'layer') || []).includes('Edge.Cuts')) outline.push({ id: it.id, bbox: it.bbox, add: K.boardChangeExtras(d, it, { id: it.id, kind: 'ADDED', typeName: P.typeNameOf(it), sexpr: P.wrapBoard(it.node) }), remove: P.removedChange(it) });
+  }
+  return { out, fps, outline };
 });
-const by = {}; for (const i of b) by[i.kind] = (by[i.kind] || 0) + 1;
-console.log('board', JSON.stringify(by), 'nets', new Set(b.map((i) => i.net)).size);
-await removeAll(pcb, b.map((i) => i.remove));
+const { fps, outline } = b; const bItems = b.out;
+const blockOfRef = Object.fromEntries(s.items.filter((i) => i.kind === 'symbol' && i.ref).map((i) => [i.ref, i.blockName]));
+for (const f of fps) f.block = blockOfRef[f.ref] || 'outside';
+console.log('footprints', fps.length, 'outline', outline.length);
+const by = {}; for (const i of bItems) by[i.kind] = (by[i.kind] || 0) + 1;
+console.log('board', JSON.stringify(by), 'nets', new Set(bItems.map((i) => i.net)).size);
+await removeAll(pcb, [...bItems.map((i) => i.remove), ...fps.map((f) => f.remove), ...outline.map((o) => o.remove)]);
 console.log('board cleared:', await pcb.evaluate(() => { const c = {}; for (const it of window.CollabEditor.kdoc.items.values()) c[it.kind] = (c[it.kind] || 0) + 1; return JSON.stringify(c); }));
 
-fs.writeFileSync(path.join(OUT, 'pico-items.json'), JSON.stringify({ project, blocks, schematic: s.items, board: b }));
+fs.writeFileSync(path.join(OUT, 'pico-items.json'), JSON.stringify({ project, blocks, schematic: s.items, board: bItems, footprints: fps, outline }));
 await browser.close(); await db.end();

@@ -15,6 +15,7 @@ import { emptyPreviewDoc, footprintPreviewDoc } from "../../library/preview";
 import { show3DViewerOn } from "../../editor/viewer3d-loader";
 import * as L from "./logic";
 import { cvMeta, cvWindow, loadSettings, raiseWindow, saveSettings, type CvLib } from "./widgets";
+import { closeMark } from "../../components/kicon-dom";
 
 export interface FpViewerHost {
   /** GetSelectedFootprint, else the selected symbol's FPID. */
@@ -155,7 +156,7 @@ export function openFpViewer(host: FpViewerHost): FpViewer {
   };
 
   // ------------------------------------------------------------ InitDisplay: the selected footprint
-  const showError = (text: string) => { info.replaceChildren(h("span", null, text), h("span", { class: "se-x", title: "Dismiss", onclick: () => info.classList.remove("show") }, "×")); info.classList.add("show"); };
+  const showError = (text: string) => { info.replaceChildren(h("span", null, text), h("span", { class: "se-x", title: "Dismiss", onclick: () => info.classList.remove("show") }, closeMark())); info.classList.add("show"); };
   const update = () => {
     const fpid = host.selectedFootprint();
     if (fpid === shown) return;

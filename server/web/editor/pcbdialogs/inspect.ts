@@ -8,7 +8,7 @@ import { NL } from "./canvas";
 import { projectNetlist } from "./update-pcb";
 import { runZoneFill } from "./zonefill";
 import { fabContext, loadFab } from "../fab-outputs";
-import { box, checkField, currentUnits, download, fmtLenU, grid, h, messageBox, notebook, openDialog, textEntryBox, textField, type CellValue } from "./ui";
+import { bitmapButton, box, checkField, currentUnits, download, fmtLenU, grid, h, messageBox, notebook, openDialog, textEntryBox, textField, type CellValue } from "./ui";
 import { openPopupMenu, type PopupEntry } from "../contextmenu";
 import { adoptProjectFile, canWriteProject, saveProjectFile } from "../projectfile";
 import { editProject, type Plain, type ProjectEdit } from "../../canvas/project-file";
@@ -330,7 +330,7 @@ export function openDrc(ctx: ToolCtx): void {
       const save = h("button", { type: "button" }, "Save...");
       save.addEventListener("click", () => download("DRC.rpt", report()));
       // the gear button (m_bMenu): the three persisted options
-      const gear = h("button", { type: "button", class: "btn", title: "Options", "data-k": "drc-options", style: "padding:2px 6px" }, "⚙");
+      const gear = bitmapButton("config", "Options", null, { key: "drc-options" });
       gear.addEventListener("click", () => { const r = gear.getBoundingClientRect(); openPopupMenu(r.left, r.bottom, [
         { label: "Report All Errors for Each Track", tip: "If unchecked, only the first error will be reported for each track", check: true, checked: opts.reportAllTrackErrors, run: () => { opts.reportAllTrackErrors = !opts.reportAllTrackErrors; saveOpts(); } },
         { sep: true },

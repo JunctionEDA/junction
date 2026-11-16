@@ -18,7 +18,7 @@ export function CollaboratorsPane() {
       {peers.length ? peers.map((p) => (
         <div className={PEER} key={p.cid}>
           <span className={DOT} style={{ background: p.color }} /><span className={WHO}>{p.name}</span>
-          <button type="button" className="btn sm" data-follow={p.cid} onClick={() => dispatch({ type: "follow", cid: follow === p.cid ? null : p.cid })}>{follow === p.cid ? "Following ✔" : "Follow"}</button>
+          <button type="button" className="btn sm" data-follow={p.cid} aria-pressed={follow === p.cid} onClick={() => dispatch({ type: "follow", cid: follow === p.cid ? null : p.cid })}>{follow === p.cid ? "Following" : "Follow"}</button>
         </div>
       )) : <p className="note">No one else is here right now. Share the link to invite collaborators.</p>}
     </div>

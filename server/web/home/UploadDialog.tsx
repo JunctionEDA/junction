@@ -184,7 +184,7 @@ export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy 
           <label className="hp-field"><span>Project name</span>
             <input className="hp-input" autoFocus value={blankName} maxLength={120} placeholder="My board" disabled={creating} onChange={(ev) => setBlankName(ev.target.value)}
               onKeyDown={(ev) => { if (ev.key === "Enter") createEmpty(); }} /></label>
-          <p className="hp-note">Starts an empty schematic and board, the same files KiCad makes for File → New Project, and opens it in the editor. You can share it straight away.</p>
+          <p className="hp-note">Starts an empty schematic and board, the same files KiCad makes for File &gt; New Project, and opens it in the editor. You can share it straight away.</p>
         </>
       ) : (<>
       <div className={"hp-drop" + (over ? " over" : "") + (files.length ? " has" : "")}
@@ -220,7 +220,7 @@ export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy 
               <ul>{skipped.slice(0, 40).map((f) => <li key={f.path}>{f.path}</li>)}{skipped.length > 40 ? <li>…and {skipped.length - 40} more</li> : null}</ul></details>
           ) : null}
         </>
-      ) : <p className="hp-note">Your files are copied to the server; nothing on your {touch ? "device" : "computer"} changes. You can also publish straight from the desktop app with File → Publish Project Online, or <a href="/github">import a repository from GitHub</a>.</p>}
+      ) : <p className="hp-note">Your files are copied to the server; nothing on your {touch ? "device" : "computer"} changes. You can also publish straight from the desktop app with File &gt; Publish Project Online, or <a href="/github">import a repository from GitHub</a>.</p>}
       </>)}
       {mode === "upload" && problem ? <p className="hp-note err" role="alert">{problem}</p> : null}
       {error ? <p className="hp-note err" role="alert">{error}</p> : null}

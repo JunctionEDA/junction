@@ -1,0 +1,417 @@
+name: upstream-sync
+
+# Keeps Junction current with upstream KiCad without anybody doing it by hand.
+#
+#   merge    fetch upstream KiCad master, merge it into master on the branch
+#            "upstream-sync", settle conflicts (tools/upstream-sync/resolve_conflicts.py),
+#            regenerate the web editor's tables from the merged sources, and
+#            write the web parity to-do list.
+#   build    Linux, Windows and macOS builds of the merge, each installed on a
+#            clean machine and launched; the fork's tests (collaboration, file
+#            format round trips); every file the server writes opened by the
+#            new desktop.
+#   promote  master moves to the merge only when all of that passed.
+#   report   the to-do list for the web editor becomes an issue; a sync that
+#            could not finish opens an issue saying what is in the way.
+#
+# master is never pushed unless every job is green.  Nothing new upstream costs
+# one short job.  See tools/upstream-sync/README.md.
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      resume:
+        description: "Use the upstream-sync branch as it is (a merge fixed by hand) instead of merging again"
+        type: boolean
+        default: false
+      attempt:
+        description: "Set by the workflow when it starts itself again because master moved"
+        default: "1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+env:
+  UPSTREAM_URL: https://gitlab.com/kicad/code/kicad.git
+  UPSTREAM_MIRROR_URL: https://github.com/KiCad/kicad-source-mirror.git
+  SYNC_BRANCH: upstream-sync
+  # Commits are the owner's, like every other commit on master.
+  GIT_AUTHOR_NAME: Nathan
+  GIT_AUTHOR_EMAIL: 70660308+notaroomba@users.noreply.github.com
+  GIT_COMMITTER_NAME: Nathan
+  GIT_COMMITTER_EMAIL: 70660308+notaroomba@users.noreply.github.com
+
+jobs:
+  merge:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    outputs:
+      changed: ${{ steps.merge.outputs.changed }}
+      sha: ${{ steps.push.outputs.sha }}
+      base: ${{ steps.merge.outputs.base }}
+      old: ${{ steps.merge.outputs.old }}
+      new: ${{ steps.merge.outputs.new }}
+      count: ${{ steps.merge.outputs.count }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+          # Optional: a token that may change workflow files, for the rare
+          # upstream commit that touches .github/workflows.
+          token: ${{ secrets.SYNC_PUSH_TOKEN || github.token }}
+
+      - name: Fetch upstream KiCad
+        run: |
+          git fetch --no-tags "$UPSTREAM_URL" "+master:refs/remotes/upstream/master" ||
+            git fetch --no-tags "$UPSTREAM_MIRROR_URL" "+master:refs/remotes/upstream/master"
+
+      - name: Merge
+        id: merge
+        env:
+          RESUME: ${{ inputs.resume }}
+          SYNC_AI_BASE_URL: ${{ vars.SYNC_AI_BASE_URL }}
+          SYNC_AI_MODEL: ${{ vars.SYNC_AI_MODEL }}
+          SYNC_AI_API_KEY: ${{ secrets.SYNC_AI_API_KEY }}
+        run: |
+          set -eu
+          base=$(git rev-parse HEAD)
+          old=$(git merge-base HEAD upstream/master)
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "old=$old" >> "$GITHUB_OUTPUT"
+          echo '{"left": [], "conflicts": []}' > conflicts.json
+
+          if [ "$RESUME" = true ]; then
+            git fetch origin "+refs/heads/$SYNC_BRANCH:refs/remotes/origin/$SYNC_BRANCH"
+            git checkout -q -B "$SYNC_BRANCH" "origin/$SYNC_BRANCH"
+            # master may have moved since the merge was made: bring it in.  The web editor's
+            # files are taken from master as they are; its tables are regenerated below.
+            if ! git merge-base --is-ancestor "$base" HEAD; then
+              git merge --no-commit "$base" || true
+              git checkout -q "$base" -- server
+              if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+                echo "::error::The upstream-sync branch no longer merges with master: $(git diff --name-only --diff-filter=U | tr '\n' ' ')"
+                exit 1
+              fi
+              git commit -q -m "Merge master into the upstream sync"
+            fi
+            new=$(git merge-base HEAD upstream/master)
+          else
+            new=$(git rev-parse upstream/master)
+            if [ "$old" != "$new" ]; then
+              git checkout -q -B "$SYNC_BRANCH"
+              conflicts=0
+              git merge --no-ff --no-commit upstream/master || conflicts=1
+              # This repository's own workflows always win over the mirror's.
+              git checkout -q HEAD -- .github
+              git diff --cached --name-only --diff-filter=A HEAD -- .github | xargs -r git rm -qf --
+              if [ $conflicts = 1 ] && ! python3 tools/upstream-sync/resolve_conflicts.py --report conflicts.json; then
+                echo "::error::The merge has conflicts that could not be settled automatically."
+                echo "new=$new" >> "$GITHUB_OUTPUT"
+                echo "changed=true" >> "$GITHUB_OUTPUT"
+                echo "conflict=true" >> "$GITHUB_OUTPUT"
+                exit 1
+              fi
+              settled=$(python3 -c "import json; print(''.join('\n  ' + c['file'] + ': ' + c['result'] for c in json.load(open('conflicts.json'))['conflicts']))")
+              git commit -q -m "Merge upstream KiCad master through $(git rev-parse --short=10 upstream/master)" \
+                ${settled:+-m "Conflicts settled automatically:$settled"}
+            fi
+          fi
+
+          if [ "$old" = "$new" ]; then
+            echo "Nothing new upstream since $(git rev-parse --short=10 "$old")." | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # A merge fixed by hand must not carry the mirror's workflow changes either.
+          if ! git diff --quiet "$base" HEAD -- .github; then
+            git rm -rqf --ignore-unmatch .github && git checkout -q "$base" -- .github
+            git commit -q -m "Keep this repository's own workflows"
+          fi
+          echo "new=$new" >> "$GITHUB_OUTPUT"
+          echo "count=$(git rev-list --count --no-merges "$old..$new")" >> "$GITHUB_OUTPUT"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Every file format version is known to the version keeper
+        if: steps.merge.outputs.changed == 'true'
+        run: python3 tools/upstream-sync/check_format_versions.py
+
+      - uses: actions/setup-node@v4
+        if: steps.merge.outputs.changed == 'true'
+        with:
+          node-version: 22
+
+      - name: Regenerate the web editor's tables and write the parity list
+        if: steps.merge.outputs.changed == 'true'
+        env:
+          OLD: ${{ steps.merge.outputs.old }}
+          NEW: ${{ steps.merge.outputs.new }}
+        run: |
+          set -u
+          kept=""
+          sh tools/upstream-sync/regen_web.sh web-regen.log || kept="see web-regen.log in the run's sync-report artifact"
+          python3 tools/upstream-sync/parity_report.py --old "$OLD" --new "$NEW" --out parity.md --web-kept "$kept"
+          if ! git diff --quiet -- server; then
+            git add -A server
+            git commit -q -m "Web editor: tables regenerated from the merged KiCad sources"
+          fi
+
+      - name: Push the merge to the upstream-sync branch
+        id: push
+        if: steps.merge.outputs.changed == 'true'
+        run: |
+          git log -3 --format='%h %an <%ae> | %cn <%ce> | %s'
+          git push -f origin "HEAD:refs/heads/$SYNC_BRANCH"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          {
+            echo "Merged ${{ steps.merge.outputs.count }} upstream commits as $(git rev-parse --short=10 HEAD); building and testing it now."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sync-report
+          path: |
+            parity.md
+            conflicts.json
+            web-regen.log
+          if-no-files-found: ignore
+
+  linux:
+    needs: merge
+    if: needs.merge.outputs.changed == 'true'
+    uses: ./.github/workflows/linux-build.yml
+    with:
+      ref: ${{ needs.merge.outputs.sha }}
+
+  windows:
+    needs: merge
+    if: needs.merge.outputs.changed == 'true'
+    uses: ./.github/workflows/windows-installer.yml
+    with:
+      ref: ${{ needs.merge.outputs.sha }}
+
+  macos:
+    needs: merge
+    if: needs.merge.outputs.changed == 'true'
+    uses: ./.github/workflows/macos-build.yml
+    with:
+      ref: ${{ needs.merge.outputs.sha }}
+
+  launch-linux:
+    needs: linux
+    permissions:
+      actions: read
+    uses: ./.github/workflows/launch-tests.yml
+    with:
+      platform: linux
+
+  launch-windows:
+    needs: windows
+    permissions:
+      actions: read
+    uses: ./.github/workflows/launch-tests.yml
+    with:
+      platform: windows
+
+  launch-macos:
+    needs: macos
+    permissions:
+      actions: read
+    uses: ./.github/workflows/launch-tests.yml
+    with:
+      platform: macos
+
+  # Every kind of file the server writes, opened by the desktop just built.
+  loads:
+    needs: [merge, linux]
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/loads-in-desktop.yml
+    with:
+      ref: ${{ needs.merge.outputs.sha }}
+      linux_run: ${{ github.run_id }}
+
+  # The fork's own tests: collaboration sync and the file format round trips
+  # must pass.  KiCad's whole test programs run too and are reported, but do
+  # not hold the merge back: some of them fail upstream from time to time.
+  qa:
+    needs: merge
+    if: needs.merge.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.merge.outputs.sha }}
+          fetch-depth: 1
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          grep -v '^#' packaging/linux/build-deps.txt | xargs sudo apt-get install -y --no-install-recommends libcurl4-openssl-dev
+
+      - name: ccache (restore)
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.cache/ccache
+          key: ccache-linuxqa-${{ needs.merge.outputs.sha }}
+          restore-keys: ccache-linuxqa-
+
+      - name: Configure
+        run: >-
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DKICAD_BUILD_I18N=OFF
+          -DKICAD_BUILD_QA_TESTS=ON
+          -DKICAD_UPDATE_CHECK=OFF
+          -DKICAD_USE_PCH=ON
+          -DKICAD_INSTALL_DEMOS=OFF
+
+      - name: Build the test programs
+        run: cmake --build build --target qa_common qa_eeschema qa_pcbnew
+
+      - name: ccache (save)
+        uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: ~/.cache/ccache
+          key: ccache-linuxqa-${{ needs.merge.outputs.sha }}
+
+      - name: Collaboration and file format tests
+        env:
+          KICAD_RUN_FROM_BUILD_DIR: "1"
+        run: |
+          set -e
+          run() { ( cd "build/qa/tests/$1" && "./qa_$1" --run_test="$2" ); }
+          run common CollabProjectRegistry
+          run common CollabFonts
+          run eeschema CollabSync
+          run eeschema SchematicFormatRoundTrip
+          run pcbnew PcbCollabSync
+          run pcbnew BoardFormatRoundTrip
+
+      - name: KiCad's whole test programs (reported, not required)
+        continue-on-error: true
+        timeout-minutes: 120
+        env:
+          KICAD_RUN_FROM_BUILD_DIR: "1"
+        run: |
+          for t in common eeschema pcbnew; do
+            ( cd "build/qa/tests/$t" && "./qa_$t" --log_level=error --report_level=short > "$GITHUB_WORKSPACE/qa_$t.log" 2>&1 ) && r=passed || r="FAILED"
+            {
+              echo "### qa_$t: $r"
+              echo '```'
+              grep -E "error: in \"|Test (suite|module) .* (passed|failed)|failures? (is|are) detected" "qa_$t.log" | head -40
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: qa-logs
+          path: qa_*.log
+          if-no-files-found: ignore
+
+  promote:
+    needs: [merge, linux, windows, macos, launch-linux, launch-windows, launch-macos, loads, qa]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+      actions: write
+    outputs:
+      result: ${{ steps.promote.outputs.result }}
+      master: ${{ steps.promote.outputs.master }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.merge.outputs.sha }}
+          fetch-depth: 0
+          token: ${{ secrets.SYNC_PUSH_TOKEN || github.token }}
+
+      - name: Move master to the merge
+        id: promote
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ needs.merge.outputs.base }}
+          ATTEMPT: ${{ inputs.attempt || '1' }}
+        run: |
+          set -u
+          restart() {
+            echo "$1"
+            if [ "$ATTEMPT" -ge 3 ]; then
+              echo "::error::master kept moving under the sync for three runs in a row."
+              echo "result=gave-up" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
+            # Keep what was merged and settled; the next run adds the new master to it.
+            gh workflow run upstream-sync.yml --repo "$GITHUB_REPOSITORY" --ref master -f resume=true -f attempt=$((ATTEMPT + 1))
+            echo "result=restarted" >> "$GITHUB_OUTPUT"
+            echo "master moved while the merge was being built; started the sync again (run $((ATTEMPT + 1)) of 3)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          }
+          git fetch -q origin master
+          tip=$(git rev-parse FETCH_HEAD)
+          if [ "$tip" != "$BASE" ]; then
+            # master moved while the builds ran.  Changes that cannot alter the desktop
+            # that was just tested are merged in; anything else is built again.
+            moved=$(git diff --name-only "$BASE" "$tip")
+            safe='^(\.github/|docs/|tools/upstream-sync/|server/|[^/]*\.md$)'
+            if echo "$moved" | grep -qvE "$safe"; then
+              restart "master changed desktop code: $(echo "$moved" | grep -vE "$safe" | head -5 | tr '\n' ' ')"
+            fi
+            if echo "$moved" | grep -q '^server/' && ! git diff --quiet "$BASE" HEAD -- server; then
+              restart "master and the sync both changed the web editor; its bundles need building again"
+            fi
+            git merge -q --no-edit "$tip" || restart "the new master does not merge cleanly"
+          fi
+          git log -1 --format='%h %an <%ae> | %cn <%ce> | %s'
+          git push origin HEAD:refs/heads/master || restart "master moved again during the push"
+          echo "master=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "result=pushed" >> "$GITHUB_OUTPUT"
+          git push origin --delete "$SYNC_BRANCH" || true
+          echo "master is now at $(git rev-parse --short=10 HEAD), with upstream KiCad through $(git rev-parse --short=10 ${{ needs.merge.outputs.new }})." >> "$GITHUB_STEP_SUMMARY"
+
+  report:
+    needs: [merge, linux, windows, macos, launch-linux, launch-windows, launch-macos, loads, qa, promote]
+    if: ${{ always() && (needs.merge.outputs.changed == 'true' || needs.merge.result == 'failure') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 1
+          sparse-checkout: tools/upstream-sync
+      - uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: sync-report
+          path: report
+      - name: Open the issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESULTS: ${{ toJSON(needs) }}
+          PROMOTED: ${{ needs.promote.outputs.result }}
+          MASTER: ${{ needs.promote.outputs.master }}
+          OLD: ${{ needs.merge.outputs.old }}
+          NEW: ${{ needs.merge.outputs.new }}
+          COUNT: ${{ needs.merge.outputs.count }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: python3 tools/upstream-sync/report.py

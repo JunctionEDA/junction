@@ -286,14 +286,15 @@ wxString COLLAB_AUTH::StoredToken( const wxString& aServerUrl )
             return tokens->access_token;
     }
 
-    // The default server moved from its Railway host to kicad.notaroomba.dev —
-    // same backend, same tokens.  A sign-in stored under the old host is adopted
-    // under the new one so an update does not look like a sign-out.
+    // The default server moved from its Railway host to kicad.notaroomba.dev and then
+    // to junctioneda.com — same backend, same tokens.  A sign-in stored under an old
+    // host is adopted under the new one so an update does not look like a sign-out.
     static const wxString legacyHosts[] = {
+        wxS( "https://kicad.notaroomba.dev" ),
         wxS( "https://kicad-collab-production.up.railway.app" ),
     };
 
-    if( accountIdFor( aServerUrl ) == wxS( "kicad.notaroomba.dev" ) )
+    if( accountIdFor( aServerUrl ) == wxS( "junctioneda.com" ) )
     {
         for( const wxString& legacy : legacyHosts )
         {

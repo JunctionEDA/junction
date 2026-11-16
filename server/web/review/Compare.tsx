@@ -7,6 +7,7 @@
 // change.  The versions on offer are the document as it is now, the project's checkpoints (and the
 // version history once the server has one), the commits of the linked GitHub repository, and a file.
 import { Select } from "../components/Select";
+import { KIcon, CloseMark } from "../components/Icon";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as RPointerEvent, type ReactNode, type RefObject } from "react";
 import { dispatch, useApp } from "../store";
 import { ago, cx } from "../util";
@@ -331,7 +332,7 @@ function CompareDialog({ request }: { request: CompareRequest }) {
   return (
     <div className="kd-overlay rv-overlay" data-compare onMouseDown={(ev) => { if (ev.target === ev.currentTarget) closeCompare(); }}>
       <div className="kd-dialog rv-dialog" role="dialog" aria-label={`Compare ${kind} Versions`}>
-        <div className="kd-title"><span>Compare {kind} Versions</span><span className="kd-x" role="button" aria-label="Close" onClick={() => closeCompare()}>×</span></div>
+        <div className="kd-title"><span>Compare {kind} Versions</span><span className="kd-x" role="button" aria-label="Close" onClick={() => closeCompare()}><CloseMark /></span></div>
 
         <div className="rv-head">
           {docs.length > 1 ? (
@@ -343,7 +344,7 @@ function CompareDialog({ request }: { request: CompareRequest }) {
             <button type="button" className="btn sm" id="rvOlder" disabled={histIndex < 0 || histIndex >= history.length - 1} title="The version before this one" onClick={() => step(1)}>Older</button>
             <button type="button" className="btn sm" id="rvNewer" disabled={histIndex <= 0} title="The version after this one" onClick={() => step(-1)}>Newer</button>
           </label>
-          <button type="button" className="btn sm ghost rv-swap" id="rvSwap" title="Swap the two sides" disabled={!refA || !refB} onClick={() => { const a = refA; setRefA(refB); setRefB(a); }}>⇄</button>
+          <button type="button" className="btn sm ghost rv-swap" id="rvSwap" title="Swap the two sides" disabled={!refA || !refB} aria-label="Swap the two sides" onClick={() => { const a = refA; setRefA(refB); setRefB(a); }}><KIcon name="swap" size={16} /></button>
           <label className="rv-field grow"><span>Comparison:</span>{picker("b", refB)}</label>
           <input ref={fileInput} type="file" hidden accept=".kicad_sch,.kicad_pcb" onChange={(ev) => { void onFile(ev.target.files); ev.target.value = ""; }} />
         </div>
@@ -408,9 +409,9 @@ function CompareDialog({ request }: { request: CompareRequest }) {
               ) : null}
               <label className="rv-check"><input type="checkbox" checked={showProps} onChange={(ev) => setShowProps(ev.target.checked)} />Properties</label>
               <span className="rv-spacer" />
-              <button type="button" className="btn sm" title="Zoom out" onClick={() => zoomBy(0.8)}>−</button>
-              <button type="button" className="btn sm" title="Zoom in" onClick={() => zoomBy(1.25)}>+</button>
-              <button type="button" className="btn sm" id="rvFit" title="Zoom to fit" onClick={fit}>Fit</button>
+              <button type="button" className="btn sm ghost rv-zoom" title="Zoom out" aria-label="Zoom out" onClick={() => zoomBy(0.8)}><KIcon name="zoom_out" size={16} /></button>
+              <button type="button" className="btn sm ghost rv-zoom" title="Zoom in" aria-label="Zoom in" onClick={() => zoomBy(1.25)}><KIcon name="zoom_in" size={16} /></button>
+              <button type="button" className="btn sm ghost rv-zoom" id="rvFit" title="Zoom to fit" aria-label="Zoom to fit" onClick={fit}><KIcon name="zoom_fit_in_page" size={16} /></button>
             </div>
 
             <div className={cx("rv-stage", mode)} ref={stageRef} data-mode={mode}>
@@ -427,7 +428,7 @@ function CompareDialog({ request }: { request: CompareRequest }) {
               {!loading && !error && !entry ? <div className="rv-cover"><div className="callout">This project has no schematic or board to compare.</div></div> : null}
               {!loading && !error && sides && sameSides ? (
                 <div className="rv-hint">{noHistory
-                  ? "Nothing to compare with yet. Save a checkpoint (File ▸ Save), link a GitHub repository, or choose a file as the reference."
+                  ? "Nothing to compare with yet. Save a checkpoint (File > Save), link a GitHub repository, or choose a file as the reference."
                   : "Both sides are the same version. Pick another one as the reference."}</div>
               ) : null}
             </div>

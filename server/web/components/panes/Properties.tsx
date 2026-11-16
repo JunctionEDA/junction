@@ -13,7 +13,7 @@ import { useApp } from "../../store";
 import { cx } from "../../util";
 import { rowValueText } from "./prop-text";
 import { navTarget, propNavOf, type PropNav } from "./prop-nav";
-import { KIcon } from "../Icon";
+import { KIcon, TreeExpander } from "../Icon";
 import { comboBox, type KCombo } from "../kcombo";
 import { ContextMenu, Swatch, panels, pickColor, useContextMenu, usePanels, type MenuItem } from "./widgets";
 
@@ -291,7 +291,7 @@ export function PropertiesPane() {
           <div key={g.name} data-prop-group={g.name}>
             <div className="flex items-center h-[20px] px-1 bg-bench border-b border-line font-semibold cursor-default select-none" onClick={() => toggle(g.name)}
               onContextMenu={(ev) => { const items = menuFor(g, null); if (items.length) menu.open(ev, items); else ev.preventDefault(); }}>
-              <span className="inline-block w-3.5 text-ink-2 text-xs">{collapsed[g.name] ? "▸" : "▾"}</span><span className="flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{g.name}</span>
+              <TreeExpander open={!collapsed[g.name]} /><span className="flex-auto min-w-0 overflow-hidden text-ellipsis whitespace-nowrap">{g.name}</span>
               {/* addCategoryButton: the small_plus (or SCH_PROPERTIES_PANEL's small_edit) bitmap at the category row's right edge */}
               {g.add ? <button type="button" className="tbtn flex-none flex items-center justify-center w-[16px] h-[16px] p-0 bg-transparent border border-transparent text-ink-2" title={g.add} data-prop-add={g.name}
                 data-icon={g.add === "Edit Pin Map..." ? "small_edit" : "small_plus"} onClick={(ev) => { ev.stopPropagation(); groupButton(g.add!); }}>

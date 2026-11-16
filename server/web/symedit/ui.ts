@@ -5,6 +5,7 @@ import { menuMeta } from "../menuspec";
 import { menuKey } from "../keys";
 import { fitMenu, type MenuAnchor } from "../menufit";
 import { uniqueIconIds } from "../components/icon-ids";
+import { menuArrow, menuCheck } from "../components/kicon-dom";
 
 interface IconSpec { vb?: string; light?: string; dark?: string }
 interface UiGlobals { KiCadIconFor?: (name: string) => IconSpec | undefined; KiCadIconsReady?: Promise<void>; KiCadUiToolbars?: Record<string, Record<string, unknown[]>> }
@@ -132,7 +133,8 @@ function fill(el: SVGSVGElement, ic: IconSpec): void {
 /** KiCad's icon `name` as an inline SVG element (filled in when the icon pack arrives). */
 export function icon(name: string | null | undefined): SVGSVGElement {
   const el = document.createElementNS(NS, "svg") as SVGSVGElement; el.setAttribute("class", "se-ic"); el.setAttribute("aria-hidden", "true"); el.setAttribute("viewBox", "0 0 24 24");
-  if (!name) return el;
+  if (!name) { el.dataset.blank = ""; return el; }
+  el.dataset.want = name;
   const g = UI(); const ic = g.KiCadIconFor ? g.KiCadIconFor(name) : undefined;
   if (ic) fill(el, ic);
   else {
@@ -160,7 +162,7 @@ export function showMenu(x: number, y: number, items: MenuEntry[], depth = 0, an
     if (it.sep) { m.append(h("div", { class: "se-ms" })); continue; }
     const on = it.enabled ? it.enabled() : !!it.run || !!it.sub;
     const row = h("div", { class: "se-mi" + (on ? "" : " dim"), role: "menuitem", "data-id": it.id || undefined },
-      h("span", { class: "ck" }, it.check ? (it.check() ? "✓" : "") : ""), it.icon !== undefined ? icon(it.icon) : h("span", { style: "width:16px" }), h("span", null, it.label || ""), h("span", { class: "k" }, it.sub ? "▸" : menuKey(it.key)));
+      h("span", { class: "ck" }, it.check ? menuCheck(it.check()) : ""), it.icon !== undefined ? icon(it.icon) : h("span", { style: "width:16px" }), h("span", null, it.label || ""), h("span", { class: "k" }, it.sub ? menuArrow() : menuKey(it.key)));
     if (it.tip) row.title = it.tip;
     if (!on && it.id && !it.run) row.title = "Runs in the KiCad desktop app";
     row.addEventListener("pointerenter", () => { if (it.sub) { const r = row.getBoundingClientRect(); showMenu(r.right - 2, r.top - 3, it.sub, depth + 1, { row: r, parent: m.getBoundingClientRect(), overlap: 2 }); } else { for (const o of openMenu.splice(depth + 1)) o.remove(); } });

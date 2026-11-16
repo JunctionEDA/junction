@@ -14,6 +14,16 @@ import { stackupOf, traceOn, usualImpedance, widthFor, z0, zdiff } from "./imped
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /** A supply net by its name: ground, a rail voltage, or one of the usual rail names. */
+/** A signal laid without a via may be this much longer than the straight line between its pads (times, plus mm) before a layer change is tried instead. */
+const FLAT_DETOUR = 1.6, FLAT_SLACK_MM = 5;
+/** How far (mm, pad to pad on a shared net) a small part may stand from a chip and still count as part of its cluster. */
+const GROUP_REACH = 5;
+/** A via costs this many times what the reference boards' routing says it does (4.66 mm of track): people asked for
+ *  fewer vias than those boards use, but at four times a signal ran 80 mm round the board to save two. */
+const VIA_PRICE = 2.5;
+/** Nets a person routes before anything else: RF feeds, crystal lines and USB data. */
+export const isCritical = (net: string, kind: NetKind): boolean => kind === "rf" || usualImpedance(net, true) === 90
+  || /(^|[\/_\-.(])(XTAL|XIN|XOUT|XI|XO|XC\d?|XL\d?|OSC(_?32K?)?_?(IN|OUT|I|O)|OSCI|OSCO|XTAL_?[PN]|X(32K?)_?[PN])\d*([_\-.)]|$)/i.test(net);
 export const isSupply = (net: string): boolean => /^\/?(.*\/)?(A|D|P)?(GND|VSS|VEE)\w*$|^\/?(.*\/)?[+-]?\d+(V\d*|\.\d+V)\w*$|^\/?(.*\/)?(VCC|VDD|VBUS|VBAT|VIN|VSYS|VPP|VAA|VREF|VOUT|V\d+V\d*|PWR|\+BATT|-BATT)\w*$/i.test(net) && !/(_|\b)(EN|SENSE|SNS|FB|PG|OK|DET|MON|ADC)\w*$/i.test(net);
 /** What a net carries, as far as its neighbours are concerned. */
 export type NetKind = "analog" | "rf" | "switching" | "fast" | "digital" | "supply";
@@ -64,6 +74,7 @@ export interface RouteOptions {
   passes?: number;               // whole-board attempts with a different order; default 3
   pitch?: number;                // force the grid pitch, mm
   weights?: Partial<Weights>;
+  signalWidth?: number;          // the width plain signals are widened to after routing wherever the clearances allow (default 0.2 mm; 0 keeps the class width)
   powerWidth?: number;           // track width for supply nets (GND, +3V3, VBUS …) that have no class of their own; 0 keeps the class width.  Default: twice the class width, 0.3 to 0.5 mm
   impedance?: boolean;           // size tracks for the impedance their nets call for (a plan's impedance, else by name: USB 90 Ω, HDMI/Ethernet 100 Ω, antenna feeds 50 Ω); default true
   splitPairs?: boolean;          // route a differential pair's two lines separately when no coupled run fits (default false: they stay unrouted and the report says why)
@@ -77,6 +88,8 @@ export interface RouteOptions {
   fewerVias?: boolean;
   /** the most vias any one connection (pad to pad) may use; a connection that cannot be made within it is left open and reported */
   maxViasPerConnection?: number;
+  /** Width in mm of the ground band kept free of other nets round an antenna's clear area (default 1.2; 0 turns it off). */
+  antennaBand?: number;
   /** false keeps every via at its net class's size.  By default a connection that cannot be made with it may use
    *  the smallest via Board Setup's constraints permit. */
   smallVias?: boolean;           // after routing, lay each route that changes layer again without (or with fewer) vias where the finished board leaves room; default true
@@ -85,6 +98,8 @@ export interface RouteOptions {
   timeMs?: number;               // stop starting new connections after this long
   zones?: boolean;               // let a route end in the net's own copper zone; default true
   // ---- a plan from outside (the assistant's model, or a person): the engine still does the geometry and the rules
+  groups?: Record<string, string[]>;   // clusters by name: the parts of each (a chip and what serves it); connections inside one cluster are laid before any between clusters.  Parts not named are grouped from the board
+  groupsFirst?: boolean;         // false turns the cluster-first order off
   order?: string[];              // net names to route first, in this order; the rest follow in the heuristic order
   netOpts?: Record<string, NetPlan>;
   keepouts?: { layers?: string[]; box: Box }[];   // areas no new track or via may enter, for this run only
@@ -119,6 +134,7 @@ export interface RouteResult {
   segments: number; vias: number; length: number; ms: number; passes: number; zoneEnds: number; zoneCovered: number; pairs?: PairReport[]; impedance?: ImpedanceReport[]; matched?: MatchReport[];
   grid: { pitch: number; w: number; h: number; layers: string[] }; nets: number;
   connections: ConnReport[]; domains?: DomainReport; fences?: FenceReport[];
+  groups?: { clusters: number; inside: number; insideRouted: number; insideVias: number; critical: string[]; members: Record<string, string[]> };   // connections that lie inside one cluster, and how they came out
 }
 export interface Progress { done: number; total: number; routed: number; pass: number; net: string }
 
@@ -146,7 +162,7 @@ export class Router {
   constructor(public K: any, public P: any, public doc: any, settings: any, public opts: RouteOptions = {}) {
     // the weights were fitted to how people route; a via is then charged four times over, because a board with few layer
     // changes is what is asked for: a track goes round on its own layer for up to ~19 mm before it changes layer
-    this.W = Object.assign({}, TRAINED, { via: TRAINED.via * 4 }, opts.weights || {}); this.allowVias = opts.allowVias !== false;
+    this.W = Object.assign({}, TRAINED, { via: TRAINED.via * VIA_PRICE }, opts.weights || {}); this.allowVias = opts.allowVias !== false;
     this.s = settings && settings.netclasses ? settings : P.designSettings(settings);
     this.build();
   }
@@ -286,7 +302,49 @@ export class Router {
       for (let iy = cb[1]; iy <= cb[3]; iy++) q.fill(1, iy * W + cb[0], iy * W + cb[2] + 1);
       for (const n of nets) if (n) this.xtalNets.add(n);
     }
+    // An antenna's clear area takes nothing but the antenna's own feed: the keep-out round it lets tracks in so that
+    // the feed can reach the pad, and every other net would otherwise take the short cut through it.
+    for (const it of doc.items.values()) {
+      if (it.kind !== "footprint") continue; const ref = refOf(K, it.node) || ""; const what = String(it.lib || "") + " " + String(it.value || "");
+      if (!(/^(AE|ANT)\d/i.test(ref) || /antenna/i.test(what)) || /u\.?fl|sma|ipex|mmcx|coax/i.test(what)) continue;
+      const pads: any[] = P.padsOf(it); if (!pads.length) continue;
+      const cx = pads.reduce((a, p) => a + p.x, 0) / pads.length, cy = pads.reduce((a, p) => a + p.y, 0) / pads.length;
+      const inside = (pts: Pt[]) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) if ((pts[i][1] > cy) !== (pts[j][1] > cy) && cx < ((pts[j][0] - pts[i][0]) * (cy - pts[i][1])) / (pts[j][1] - pts[i][1]) + pts[i][0]) c = !c; return c; };
+      const q = G.quiet || (G.quiet = new Uint8Array(W * H)); let marked = false;
+      for (const z of doc.items.values()) {
+        if (z.kind !== "zone" || !K.kid(z.node, "keepout")) continue;
+        const polys: Pt[][] = K.kids(z.node, "polygon").map((poly: any) => K.ptsOf(poly) as Pt[]).filter((pts: Pt[]) => pts.length >= 3);
+        if (!polys.some(inside)) continue; const t = cellsIn(polys); for (let i = 0; i < t.length; i++) if (t[i]) q[i] = 1; marked = true;
+        // the ground beside the clear area is part of the antenna: a band of it stays whole, so no other net runs along the edge
+        const band = this.opts.antennaBand === undefined ? 1.2 : Math.max(0, +this.opts.antennaBand);
+        if (band > 0) { let b: Box = [Infinity, Infinity, -Infinity, -Infinity]; for (const pts of polys) for (const pt of pts) b = [Math.min(b[0], pt[0] - band), Math.min(b[1], pt[1] - band), Math.max(b[2], pt[0] + band), Math.max(b[3], pt[1] + band)];
+          const cb = this.cellBox(b); if (cb) for (let iy = cb[1]; iy <= cb[3]; iy++) q.fill(1, iy * W + cb[0], iy * W + cb[2] + 1); }
+      }
+      if (!marked) { let b: Box = [Infinity, Infinity, -Infinity, -Infinity]; for (const p of pads) b = [Math.min(b[0], p.x - 2.5), Math.min(b[1], p.y - 2.5), Math.max(b[2], p.x + 2.5), Math.max(b[3], p.y + 2.5)];
+        const cb = this.cellBox(b); if (cb) for (let iy = cb[1]; iy <= cb[3]; iy++) q.fill(1, iy * W + cb[0], iy * W + cb[2] + 1); }
+      for (const p of pads) { const n = nl.table.key(p.net) || ""; if (n) this.xtalNets.add(n); }
+    }
     for (const it of doc.items.values()) if (it.kind === "footprint") { const ref = refOf(K, it.node); for (const p of P.padsOf(it)) this.padNames.set(p.x.toFixed(3) + "," + p.y.toFixed(3), (ref || "?") + "." + p.number); }
+    // Groups: a chip and the small parts that serve it (its capacitors, pull-ups, crystal, inductor) are one cluster,
+    // and a person routes inside each cluster before anything runs between clusters.  A plan names them
+    // (opts.groups); what it leaves out is found from the board: a small part belongs to the nearest chip it shares a
+    // net with, within GROUP_REACH mm of a pad of that net, and a small part that hangs on a grouped one joins it.
+    {
+      type FP = { ref: string; pads: any[]; nets: Map<string, any[]> };
+      const fps: FP[] = [];
+      for (const it of doc.items.values()) if (it.kind === "footprint") {
+        const ref = refOf(K, it.node); const pads = P.padsOf(it); if (!ref || !pads.length) continue; const nets = new Map<string, any[]>();
+        for (const p of pads) { const n = nl.table.key(p.net) || ""; if (n) { const l = nets.get(n); if (l) l.push(p); else nets.set(n, [p]); } }
+        fps.push({ ref, pads, nets });
+      }
+      for (const [name, refs] of Object.entries(this.opts.groups || {})) for (const r of refs || []) this.groupOf.set(r, name);
+      const chips = fps.filter((f) => f.pads.length >= 5); const small = fps.filter((f) => f.pads.length < 5 && !this.groupOf.has(f.ref));
+      for (const c of chips) if (!this.groupOf.has(c.ref)) this.groupOf.set(c.ref, c.ref);
+      const reach = (f: FP, o: FP, lim: number): number => { let best = Infinity; for (const [n, ps] of f.nets) { const qs = o.nets.get(n); if (!qs) continue; const w = /^\/?(.*\/)?(A|D|P)?(GND|VSS)\w*$/i.test(n) ? 1e3 : 0;   // a shared ground says nothing about whose part it is
+        for (const p of ps) for (const q of qs) { const d = Math.hypot(p.x - q.x, p.y - q.y) + w; if (d < best) best = d; } } return best <= lim ? best : Infinity; };
+      for (const f of small) { let best = Infinity, owner = ""; for (const c of chips) { const d = reach(f, c, GROUP_REACH); if (d < best) { best = d; owner = this.groupOf.get(c.ref)!; } } if (owner) this.groupOf.set(f.ref, owner); }
+      for (let round = 0; round < 2; round++) for (const f of small) { if (this.groupOf.has(f.ref)) continue; let best = Infinity, owner = ""; for (const o of small) { const g = this.groupOf.get(o.ref); if (!g || o === f) continue; const d = reach(f, o, GROUP_REACH * 0.7); if (d < best) { best = d; owner = g; } } if (owner) this.groupOf.set(f.ref, owner); }
+    }
     this.pref = hv.map(([h, v]) => h + v > 20 ? (h - v) / (h + v) : 0);
     // An empty board has no habit yet: give it the usual one, alternate layers running across and along.
     if (hv.every(([h, v]) => h + v <= 20) && routable.filter(Boolean).length > 1) { let k = 0; this.pref = routable.map((r) => r ? (k++ % 2 ? -0.5 : 0.5) : 0); }
@@ -401,12 +459,26 @@ export class Router {
   }
   sepGaps = { quiet: 0, noisy: 0 };
   /** Supply nets carry the board's current: where the net has no class or plan of its own, they run wider. */
+  /** The width a plain signal is drawn at where there is room: people route at 0.2 mm and neck down only at a
+   *  fine-pitch pin, whatever minimum the net class allows.  0 for a net whose width is set by a plan, an impedance or a pair. */
+  signalWidth(c: Conn): number {
+    const o = this.opts.signalWidth; const want = o === undefined ? 0.2 : +o; if (!(want > 0) || c.pair || isSupply(c.net)) return 0;
+    const plan = (this.opts.netOpts || {})[c.net]; if ((plan && +plan.width! > 0) || this.zWidth.get(c.net)) return 0;
+    return want;
+  }
   powerWidth(netKey: string): number {
     const { P, s } = this; const o = this.opts.powerWidth; if (o === 0 || !isSupply(netKey)) return 0;
     if (((this.opts.netOpts || {})[netKey] || {}).width) return 0; const nc = P.netclassOf(s, netKey); if (s.netclasses.Default && nc !== s.netclasses.Default) return 0; const w = nc.track_width !== undefined ? nc.track_width : s.trackWidth;
     return o && o > 0 ? o : Math.min(0.5, Math.max(0.3, w * 2));
   }
   padNames = new Map<string, string>();
+  /** The cluster each part belongs to (a chip's reference, or a plan's group name). */
+  groupOf = new Map<string, string>();
+  /** The cluster a connection lies inside (both its pads belong to parts of one cluster), or "". */
+  groupFor(c: Conn): string {
+    const ref = (p: Pt) => (this.padNames.get(p[0].toFixed(3) + "," + p[1].toFixed(3)) || "").replace(/\.[^.]*$/, "");
+    const a = this.groupOf.get(ref(c.a.p)), b = this.groupOf.get(ref(c.b.p)); return a && a === b ? a : "";
+  }
   private cellBox(b: Box): [number, number, number, number] | null {
     const G = this.G; if (!b || b.length < 4) return null;
     const x0 = Math.max(0, Math.ceil((Math.min(b[0], b[2]) - G.ox) / G.g)), x1 = Math.min(G.W - 1, Math.floor((Math.max(b[0], b[2]) - G.ox) / G.g));
@@ -1121,8 +1193,18 @@ export class Router {
     // The order a person routes in: differential pairs first (layPairs, before this queue, so they take the clean
     // direct path), then the short connections inside each block and the escapes from fine-pitch chips, then power,
     // then the remaining signals.
-    const tier = (c: Conn) => c.len < 3 ? 0 : Math.min(c.a.narrow || Infinity, c.b.narrow || Infinity) <= 0.35 ? 1 : isSupply(c.net) ? 2 : 3;
-    const order = conns.slice().sort((a, b) => cmp(gOf.get(a.net)!.rank, gOf.get(b.net)!.rank) || gOf.get(b.net)!.priority - gOf.get(a.net)!.priority || tier(a) - tier(b) || (tier(a) === 1 ? b.len - a.len : a.len - b.len) || (a.net < b.net ? -1 : a.net > b.net ? 1 : a.id - b.id));
+    // The critical nets go in before all of that, the way a person starts a board: after the coupled pairs come the
+    // other USB data stubs, the RF feed and the crystal (short, on one layer, no via), then power.  Only then does
+    // the bulk of the signals fill in round them.  Laid the other way round, the USB line and the antenna feed get
+    // what is left: a detour and two vias.
+    const critical = (c: Conn) => isCritical(c.net, this.kindOf(c.net));
+    // Then every cluster is wired inside itself (a chip to its own capacitors, crystal, pull-ups, inductor: short,
+    // on the parts' layer), cluster by cluster, before any track runs from one cluster to another: the way a person
+    // plans a group's routing first and only then joins the groups up.
+    const inGroup = new Map<number, string>(); for (const c of conns) { const g = this.opts.groupsFirst === false ? "" : this.groupFor(c); if (g && c.len <= GROUP_REACH * 2) inGroup.set(c.id, g); }
+    const first = new Set<number>(); for (const c of conns) if (critical(c) || gOf.get(c.net)!.rank < Infinity) first.add(c.id);
+    const tier = (c: Conn) => critical(c) ? -3 : inGroup.has(c.id) ? -2 : isSupply(c.net) && !this.netOf(c.net).zoneCells ? -1 : c.len < 3 ? 0 : Math.min(c.a.narrow || Infinity, c.b.narrow || Infinity) <= 0.35 ? 1 : isSupply(c.net) ? 2 : 3;
+    const order = conns.slice().sort((a, b) => cmp(gOf.get(a.net)!.rank, gOf.get(b.net)!.rank) || gOf.get(b.net)!.priority - gOf.get(a.net)!.priority || tier(a) - tier(b) || (tier(a) === -2 ? (inGroup.get(a.id)! < inGroup.get(b.id)! ? -1 : inGroup.get(a.id)! > inGroup.get(b.id)! ? 1 : 0) : 0) || (tier(a) === 1 ? b.len - a.len : a.len - b.len) || (a.net < b.net ? -1 : a.net > b.net ? 1 : a.id - b.id));
     let best: { score: number; snap: (Pick<Conn, "cls" | "pair" | "nodes" | "shapes" | "viaCells" | "landed" | "feat" | "stubs" | "zoneEnd">)[] } | null = null; let failedLast = new Set<number>(); let pass = 0;
     const RC = (this.opts as any).connRips || 4, RB = (this.opts as any).blockerRips || 3;
     // The budget is work done (search steps), not the clock: the same board then routes the same way on a fast machine,
@@ -1135,7 +1217,8 @@ export class Router {
       for (const c of conns) if (c.nodes) this.rip(c);
       for (const c of conns) c.rips = 0;
       this.layPairs();
-      const queue = pass === 0 ? order.slice() : order.filter((c) => failedLast.has(c.id)).concat(order.filter((c) => !failedLast.has(c.id)));
+      // later passes take what failed last time first, but never ahead of the critical nets: those go first in every pass
+      const queue = pass === 0 ? order.slice() : order.filter((c) => first.has(c.id)).concat(order.filter((c) => !first.has(c.id) && failedLast.has(c.id)), order.filter((c) => !first.has(c.id) && !failedLast.has(c.id)));
       const failed = new Set<number>(); let done = 0;
       while (queue.length) {
         if (timeUp()) { for (const c of queue) { failed.add(c.id); if (!c.nodes) c.why = "budget"; } break; }
@@ -1155,8 +1238,8 @@ export class Router {
           if (!soft) this.stat.noSoft++;
           if (soft) {
             const bl = this.blockers(c, soft.res);
-            this.stat[!bl.length ? "noBlockers" : bl.length > 14 ? "tooMany" : bl.every((b) => b.rips < RB) ? "ripped" : "ripLimit"]++;
-            if (bl.length && bl.length <= 14 && bl.every((b) => b.rips < RB)) {
+            this.stat[!bl.length ? "noBlockers" : bl.length > 14 ? "tooMany" : bl.every((b) => b.rips < RB && !first.has(b.id)) ? "ripped" : "ripLimit"]++;
+            if (bl.length && bl.length <= 14 && bl.every((b) => b.rips < RB && !first.has(b.id))) {   // a critical net keeps the path it was given: nothing laid later takes it up
               const ripped: Conn[] = []; for (const b of bl) { b.rips++; this.rip(b, ripped); }
               c.rips++;
               if (this.fits(c, soft.res)) { found = soft; for (const r of ripped) { failed.delete(r.id); queue.unshift(r); } }
@@ -1164,6 +1247,12 @@ export class Router {
             }
           }
         }
+        // one layer at any price is not what a person does: a flat route that wanders far round the board (a loop
+        // round the edge boxes in everything inside it and cuts the pour) gives way to one that changes layer
+        if (found && flat && found.res.feat.length > FLAT_DETOUR * c.len + FLAT_SLACK_MM) found = null;
+        // a critical net does not wait for the end of the queue: what it cannot have on one layer it takes now, with
+        // a layer change, while the board is still empty round it
+        if (!found && flat && (first.has(c.id))) { this.viaCap = Infinity; found = this.find(c, false); }
         if (!found && flat) { later.add(c.id); queue.push(c); continue; }
         if (found) { this.commit(c, found); failed.delete(c.id); } else failed.add(c.id);
         } finally { this.viaCap = Infinity; }
@@ -1381,7 +1470,7 @@ export class Router {
    *  piece wherever the exact clearances leave the room — wide along the run, necked down at tight pads. */
   widen(): void {
     for (const c of this.conns) {
-      if (!c.nodes) continue; const want = this.powerWidth(c.net); if (!(want > c.cls.width + 1e-6)) continue;
+      if (!c.nodes) continue; const want = this.powerWidth(c.net) || this.signalWidth(c); if (!(want > c.cls.width + 1e-6)) continue;
       this.place(c, -1); this.cur = c; this.curSoft = false;
       for (const o of c.shapes) {
         const sh = o.shape as any; if (sh.t !== "seg") continue; const r0 = sh.r;
@@ -1487,6 +1576,14 @@ export class Router {
       rep.detail = bl.length ? "routes laid earlier in this run are in the way" : "too tight for a track of this width between the routes laid earlier";
     }
   }
+  private groupReport(): RouteResult["groups"] {
+    let inside = 0, insideRouted = 0, insideVias = 0;
+    for (const c of this.conns) { if (c.moot && !c.nodes) continue; if (!this.groupFor(c) || c.len > GROUP_REACH * 2) continue; inside++; if (c.nodes) { insideRouted++; insideVias += c.viaCells.length; } }
+    const critical = Array.from(new Set(this.conns.filter((c) => isCritical(c.net, this.kindOf(c.net)) || this.netOf(c.net).guide.rank < Infinity).map((c) => c.net)));
+    const members: Record<string, string[]> = {}; for (const [ref, g] of this.groupOf) (members[g] || (members[g] = [])).push(ref);
+    for (const g of Object.keys(members)) if (members[g].length < 2) delete members[g];
+    return { clusters: Object.keys(members).length, inside, insideRouted, insideVias, critical, members };
+  }
   private padName(p: Pt): string { return this.padNames.get(p[0].toFixed(3) + "," + p[1].toFixed(3)) || `(${r6(p[0])}, ${r6(p[1])})`; }
   private domainReport(): DomainReport | undefined {
     if (!this.domains) return undefined; const kinds: Record<string, NetKind> = {};
@@ -1514,7 +1611,7 @@ export class Router {
     for (const v of this.fenceVias) { items.push({ kind: "via", node: P.viaNode(doc, v.p[0], v.p[1], v.cls.viaD, v.cls.viaDrill, v.obj, span), net: v.obj, netName: v.net, conn: -1 }); vias++; }
     const total = this.conns.filter((c) => c.nodes || !c.moot).length;
     return { items, total, routed: total - failed.length, failed, segments, vias, length, ms, passes, zoneEnds, zoneCovered: this.zoneCovered,
-      grid: { pitch: G.g, w: G.W, h: G.H, layers: G.layers.filter((_, i) => G.routable[i]) }, nets: this.nets.length, connections, pairs: Array.from(this.pairReports.values()), impedance: this.zReports, matched: this.matchReports, domains: this.domainReport(), fences: this.fenceReports };
+      grid: { pitch: G.g, w: G.W, h: G.H, layers: G.layers.filter((_, i) => G.routable[i]) }, nets: this.nets.length, connections, pairs: Array.from(this.pairReports.values()), impedance: this.zReports, matched: this.matchReports, domains: this.domainReport(), fences: this.fenceReports, groups: this.groupReport() };
   }
 }
 

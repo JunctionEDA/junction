@@ -43,6 +43,9 @@ export function findDoc(name: string): { docId: string; path: string; docType: s
 const cache = new Map<string, { at: number; doc: any }>();
 /** Forget the parsed copies of the project's other documents (the harness changes them between two reads). */
 export function forgetDocs(): void { cache.clear(); }
+/** A copy of another document that is newer than the server's: the MCP host gives the documents a running script has
+ *  planned and not yet drawn, so a board synced in the same script as its schematic reads that schematic. */
+export const planned: { doc: ((docId: string) => any) | null } = { doc: null };
 
 /**
  * The document a tool should read.  The open one is the live in-memory document; any other is
@@ -57,6 +60,8 @@ export async function resolveDoc(name?: string): Promise<DocRef> {
   }
   const entry = findDoc(name);
   if (!entry) throw new ToolError(`There is no document "${name}" in this project. The documents are: ${projectDocs().map((d) => d.path).join(", ") || "(none)"}.`);
+  const mine = planned.doc ? planned.doc(entry.docId) : null;
+  if (mine) return { doc: mine, path: entry.path, docId: entry.docId, open: false };
   const hit = cache.get(entry.docId);
   if (hit && Date.now() - hit.at < 8000) return { doc: hit.doc, path: entry.path, docId: entry.docId, open: false };
   const r = await fetch(`/api/docs/${entry.docId}/content?v=${Date.now()}`);
@@ -243,7 +248,10 @@ export async function geometry(input: { doc?: string; silk?: boolean }): Promise
   const P = PCB(); if (!P) throw new ToolError("The board tools are not loaded."); const NT = P.netTable(doc);
   const parts: any[] = []; let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
   for (const it of doc.items.values() as Iterable<any>) {
-    if (it.edge && it.bbox) { x0 = Math.min(x0, it.bbox[0]); y0 = Math.min(y0, it.bbox[1]); x1 = Math.max(x1, it.bbox[2]); y1 = Math.max(y1, it.bbox[3]); }
+    if (it.edge && it.bbox) {      // the outline is the middle of the stroke: a line's or an arc's box includes its width
+      const sw = it.kind === "gr_line" || it.kind === "gr_arc" ? k.kid(k.kid(it.node, "stroke") || [], "width") : null; const h = sw ? k.num(sw[1]) / 2 : 0;
+      x0 = Math.min(x0, it.bbox[0] + h); y0 = Math.min(y0, it.bbox[1] + h); x1 = Math.max(x1, it.bbox[2] - h); y1 = Math.max(y1, it.bbox[3] - h);
+    }
     if (it.kind !== "footprint") continue;
     // the courtyard's box, as placed: what has to stay clear of the next part
     let cb: number[] | undefined; try { const cy = P.courtyards({ node: it.node }); let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; for (const k of Object.keys(cy)) for (const loop of cy[k]) for (const q of loop) { a = Math.min(a, q[0]); b = Math.min(b, q[1]); c = Math.max(c, q[0]); d = Math.max(d, q[1]); } if (a <= c) cb = [r3(a), r3(b), r3(c), r3(d)]; } catch { /* no courtyard maths */ }

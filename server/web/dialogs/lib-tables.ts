@@ -16,7 +16,7 @@
 import { KD, h, popupMenu, type GridApi, type GridColumn, type PopItem } from "./dom";
 import * as T from "../library/libtable";
 import { formatLibTable, parseLibTable } from "../symedit/model";
-import { bitmapButton, kicadIcon } from "../components/kicon-dom";
+import { bitmapButton, kicadIcon, comboArrow, closeMark } from "../components/kicon-dom";
 import { trapTab } from "../tools/kicad-dialogs/shell";
 import { fitMenu } from "../menufit";
 import { saveTextDocument } from "../editor/projectfile";
@@ -263,7 +263,7 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
     const p: Page = { title, rows, readOnly, closable, path, docId, original: rowsKey(rows), grid: null, el, tab, dirty: false };
     if (closable) {
       // wxAUI_NB_CLOSE_ON_ALL_TABS: the tab's close box, drawn like the dialog's own
-      const x = h("button", { class: "kd-nb-x", type: "button", title: "Close", "aria-label": "Close", style: "border:0;background:transparent;margin-left:6px;padding:0 2px;cursor:pointer;color:var(--ink-2);font-size:14px;line-height:1" }, "×");
+      const x = h("button", { class: "kd-nb-x", type: "button", title: "Close", "aria-label": "Close", style: "border:0;background:transparent;margin-left:6px;padding:0 2px;cursor:pointer;color:var(--ink-2);line-height:1;display:inline-flex;align-items:center" }, closeMark());
       x.addEventListener("click", (ev) => { ev.stopPropagation(); void closePage(p); });
       tab.append(x);
     }
@@ -325,7 +325,7 @@ export async function openLibTables(opts: LibTablesOpts): Promise<void> {
   /** SPLIT_BUTTON "Add Existing" with small_folder: the button adds a KiCad library, its arrow lists every plugin. */
   const addExistingButton = (disabled = false): HTMLElement => {
     const main = h("button", { class: "btn", type: "button", "data-btn": "add-existing", title: "Add Existing", disabled, style: "display:inline-flex;align-items:center;gap:4px;padding:1px 6px;height:24px;border-top-right-radius:0;border-bottom-right-radius:0" }, kicadIcon("small_folder", 16), "Add Existing");
-    const arrow = h("button", { class: "btn", type: "button", "data-btn": "add-existing-menu", title: "Add Existing", disabled, style: "padding:0 4px;height:24px;margin-left:-1px;border-top-left-radius:0;border-bottom-left-radius:0" }, "▾");
+    const arrow = h("button", { class: "btn", type: "button", "data-btn": "add-existing-menu", title: "Add Existing", disabled, style: "padding:0 4px;height:24px;margin-left:-1px;border-top-left-radius:0;border-bottom-left-radius:0" }, comboArrow());
     main.addEventListener("click", () => { void browseLibraries(T.addExistingMenu(kind)[0]); });
     arrow.addEventListener("click", () => {
       const r = arrow.getBoundingClientRect();

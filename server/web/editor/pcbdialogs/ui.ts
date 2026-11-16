@@ -8,7 +8,7 @@ import "../../components/kselect";   // <k-select>, the themed drop-down these u
 import { fromDisplayAbsAxis, toDisplayAbsAxis } from "../userorigin";
 import { evalExpr } from "../../tools/props/numeric";
 import { popupMenu } from "../../dialogs/dom";
-import { bitmapButton, kicadIcon } from "../../components/kicon-dom";
+import { bitmapButton, kicadIcon, sortArrow, closeMark } from "../../components/kicon-dom";
 
 // ---------------------------------------------------------------- elements
 type Child = Node | string | null | undefined | false;
@@ -417,9 +417,9 @@ export function textField(v: string, opts?: { ro?: boolean; key?: string; placeh
   const input = h("input", { type: "text", value: v, disabled: !!(opts && opts.ro), "data-k": opts && opts.key, placeholder: opts && opts.placeholder });
   return { el: input, input, get: () => input.value, set(x) { input.value = x; } };
 }
-export function selectField<T extends string | number>(v: T, options: [T, string][], opts?: { ro?: boolean; key?: string; onChange?(v: T): void }): Field<T> {
+export function selectField<T extends string | number>(v: T, options: [T, string][], opts?: { ro?: boolean; key?: string; onChange?(v: T): void; icons?: Record<string, string> }): Field<T> {
   const input = h("k-select", { disabled: !!(opts && opts.ro), "data-k": opts && opts.key });
-  options.forEach(([val, label]) => { const o = h("option", { value: String(val) }, label); if (String(val) === String(v)) o.selected = true; input.append(o); });
+  options.forEach(([val, label]) => { const o = h("option", { value: String(val), "data-icon": opts && opts.icons ? opts.icons[String(val)] : undefined }, label); if (String(val) === String(v)) o.selected = true; input.append(o); });
   if (!options.some(([val]) => String(val) === String(v)) && options.length) input.selectedIndex = 0;
   const get = (): T => (options[input.selectedIndex] || options[0])[0];
   if (opts && opts.onChange) { const cb = opts.onChange; input.addEventListener("change", () => cb(get())); }
@@ -517,7 +517,7 @@ export function treeBook(groups: TreeGroup[], start?: string, opts?: { canLeave?
 /** WX_INFOBAR at the top of a dialog: ShowMessage (stays) and ShowMessageFor (goes after `ms`). */
 export function infoBar(): { el: HTMLElement; show(message: string, ms?: number): void; hide(): void } {
   const msg = h("span", { class: "msg", "data-k": "infobar-msg" });
-  const x = h("button", { class: "x", type: "button", title: "Hide this message." }, "\u00d7");
+  const x = h("button", { class: "x", type: "button", title: "Hide this message." }, closeMark());
   const el = h("div", { class: "pd-infobar", hidden: true, "data-k": "infobar" }, h("span", { class: "pd-warnicon" }), msg, x);
   (el.firstChild as HTMLElement).innerHTML = warningIcon().el.innerHTML;
   let timer = 0;
@@ -582,6 +582,8 @@ export { bitmapButton };
 export type CellValue = string | number | boolean;
 export interface GridColumn {
   label: string; key: string; width?: string;
+  /** the header's sort arrow (wxGrid::SetSortingColumn) */
+  sort?: "asc" | "desc";
   /** text (default), a length in the editor's units, a number, a checkbox, a choice or read-only text */
   type?: "text" | "len" | "num" | "check" | "select" | "ro" | "color" | "icon";
   /** an "icon" cell (GRID_CELL_STATUS_ICON_RENDERER): the icon-pack bitmap and its tooltip, or nothing */
@@ -589,6 +591,8 @@ export interface GridColumn {
   /** a text cell's button (GRID_CELL_RUN_FUNCTION_EDITOR): `set` writes the cell and reports the change */
   button?: { icon: string; title: string; run(row: Record<string, CellValue>, index: number, set: (v: string) => void): void };
   options?: [string | number, string][];
+  /** a "select" column's bitmaps by option value (GRID_CELL_ICON_TEXT_POPUP: the Line Style column's stroke_* icons) */
+  icons?: Record<string, string>;
   /** the column header's tooltip (PANEL_SETUP_NETCLASSES::onmouseMove) */
   tip?: string;
   /** hidden until shown from the header's right-click menu (WX_GRID::ShowHideColumns) */
@@ -638,7 +642,7 @@ export function grid(columns: GridColumn[], rows: Record<string, CellValue>[], o
   };
   const refresh = (): void => {
     table.replaceChildren();
-    const head = h("tr"); for (const c of shown()) head.append(h("th", { style: c.width ? `width:${c.width}` : null, title: c.tip }, c.label));
+    const head = h("tr"); for (const c of shown()) head.append(h("th", { style: c.width ? `width:${c.width}` : null, title: c.tip }, c.label, c.sort ? sortArrow(c.sort === "asc") : null));
     head.addEventListener("contextmenu", (ev) => {
       if (!columns.some((c) => c.hidden !== undefined)) return;
       ev.preventDefault();
@@ -663,12 +667,13 @@ export function grid(columns: GridColumn[], rows: Record<string, CellValue>[], o
           b.addEventListener("click", () => { if (c.pick) c.pick(String(row[c.key] || ""), (css) => { row[c.key] = css; b.replaceChildren(swatch(css)); b.title = css; changed(); }); });
           tr.append(h("td", null, b));
         } else if (c.type === "select" && !ro) {
-          const s = h("k-select"); for (const [val, label] of c.options || []) { const o = h("option", { value: String(val) }, label); if (String(val) === String(v)) o.selected = true; s.append(o); }
+          const s = h("k-select"); for (const [val, label] of c.options || []) { const o = h("option", { value: String(val), "data-icon": c.icons ? c.icons[String(val)] : undefined }, label); if (String(val) === String(v)) o.selected = true; s.append(o); }
           s.addEventListener("change", () => { const o = (c.options || [])[s.selectedIndex]; if (o) { row[c.key] = o[0]; changed(); } });
           tr.append(h("td", null, s));
         } else if (ro) {
           const text = c.type === "len" ? (typeof v === "number" && isFinite(v) ? fmtLenU(v) : c.blank || "") : cellText(c, v);
-          tr.append(h("td", { class: "ro", title: text }, text));
+          const bmp = c.type === "select" && c.icons ? c.icons[String(v)] : undefined;
+          tr.append(h("td", { class: "ro", title: text }, bmp ? h("span", { style: "display:inline-flex;align-items:center;gap:4px" }, kicadIcon(bmp, 40, 10), text) : text));
         } else {
           const text = cellText(c, v);
           const inp = h("input", { type: "text", value: text, placeholder: c.blank, "data-col": c.key });

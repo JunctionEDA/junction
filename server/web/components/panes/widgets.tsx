@@ -6,7 +6,7 @@ import { createPortal } from "react-dom";
 import type { PanelAction, PanelsApi, PanelsState } from "../../panels-api";
 import { cx } from "../../util";
 import { menuScroller, menuSize, placeMenu } from "../../menufit";
-import { KIcon } from "../Icon";
+import { KIcon, MenuCheck, TreeExpander } from "../Icon";
 
 const EMPTY: PanelsState = {
   appearance: { layers: [], active: "", objects: [], nets: [], netClasses: [], inactive: "normal", flip: false, netColorMode: "ratsnest", ratsnestMode: "all", presets: [], builtinPresets: [], preset: null, viewports: [], viewport: null },
@@ -53,7 +53,7 @@ export function ContextMenu({ at, onClose }: { at: MenuAt | null; onClose: () =>
             aria-disabled={it.disabled || undefined} data-icon={it.icon} className={cx("flex items-center pl-1.5 pr-3 py-[3px] whitespace-nowrap", it.disabled ? "text-ink-3" : "cursor-default hover:bg-accent hover:text-on-accent")}
             title={it.title} onClick={() => { if (it.disabled) return; onClose(); it.run(); }}>
             <span className={cx("w-5 h-4 mr-1.5 shrink-0 flex items-center justify-center text-base leading-none", it.disabled && it.icon && "opacity-40")} data-check={it.check === undefined ? undefined : it.check ? "on" : "off"}>
-              {it.check ? (it.radio ? "\u25CF" : "\u2713") : it.icon ? <KIcon name={it.icon} size={16} /> : null}</span>
+              {it.check !== undefined ? <MenuCheck on={!!it.check} radio={it.radio} /> : it.icon ? <KIcon name={it.icon} size={16} /> : null}</span>
             <span className="flex-1">{it.label}</span></div>)}
     </div>, document.body);
 }
@@ -106,7 +106,7 @@ export function Collapsible({ title, id, children }: { title: string; id: string
   return (
     <div className="kcollapse flex-none border-t border-line bg-bench" data-collapse={id}>
       <button type="button" className="flex items-center gap-1 w-full px-1.5 py-1 border-0 bg-transparent text-ink text-sm text-left cursor-pointer" onClick={toggle} aria-expanded={open}>
-        <span className="inline-block w-3 text-ink-2 text-xs">{open ? "▾" : "▸"}</span>{title}
+        <TreeExpander open={open} />{title}
       </button>
       {open ? <div className="px-2 pb-2 pt-0.5">{children}</div> : null}
     </div>
@@ -116,5 +116,5 @@ export function Collapsible({ title, id, children }: { title: string; id: string
 /** The +/- of a tree row (wxTreeCtrl's twist button); an empty slot keeps leaf labels aligned. */
 export function Twist({ open, onToggle, leaf }: { open: boolean; onToggle: () => void; leaf?: boolean }) {
   if (leaf) return <span className="inline-block w-3.5 flex-none" />;
-  return <span className="twist inline-block w-3.5 flex-none text-center text-ink-2 text-xs cursor-pointer" data-twist onClick={(ev) => { ev.stopPropagation(); onToggle(); }}>{open ? "▾" : "▸"}</span>;
+  return <TreeExpander className="twist" open={open} onToggle={onToggle} />;
 }

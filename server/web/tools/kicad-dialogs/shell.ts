@@ -4,6 +4,7 @@
 import type { DlgApi, DlgSpec } from "../../dialogs/dom";
 import { esc } from "./sexpr";
 import { ensureCss } from "./widgets";
+import { CLOSE_MARK_SVG } from "../../components/kicon-dom";
 
 interface OpenDialog { ov: HTMLElement; dlg: HTMLElement; body: HTMLElement; spec: DlgSpec; finish(apply: boolean): void }
 
@@ -161,7 +162,7 @@ export function open(spec: DlgSpec): DlgApi {
   if (!spec.child || !stack.length) close();
   else for (const d of stack.slice(1)) if (d.spec.title === spec.title) closeEntry(d);   // one window of a kind: a second "Syntax help" replaces the first
   const ov = el("div", "kd-overlay"), dlg = el("div", "kd-dialog"); if (spec.width) dlg.style.width = spec.width + "px";
-  const tt = el("div", "kd-title", `<span>${esc(spec.title)}</span><span class="kd-x" title="Close (Esc)">×</span>`);
+  const tt = el("div", "kd-title", `<span>${esc(spec.title)}</span><span class="kd-x" title="Close (Esc)">${CLOSE_MARK_SVG}</span>`);
   const body = el("div", "kd-body"), foot = el("div", "kd-foot");
   for (const b of spec.extra || []) { const btn = el("button", "btn", esc(b.label)); if (b.id) btn.id = b.id; btn.addEventListener("click", () => b.fn()); foot.appendChild(btn); }
   foot.appendChild(el("span", "spacer"));

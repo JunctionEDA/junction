@@ -426,7 +426,7 @@ export function drawPeers(peers: Record<string, PeerEntry>) {
       label.setAttribute("x", cx + pad); label.setAttribute("y", cy + pad + th / 2); label.setAttribute("dominant-baseline", "central");
       label.setAttribute("font-size", th); label.setAttribute("font-weight", "600"); label.setAttribute("font-family", "system-ui, sans-serif");
       label.setAttribute("fill", brightness(color) > 0.5 ? "#000" : "#fff");
-      label.textContent = E.followPeer === cid ? name + " ✔" : name;
+      label.textContent = E.followPeer === cid ? name + " (following)" : name;
       tag.appendChild(chip); tag.appendChild(label); peersG.appendChild(tag);
       let tw = 0; try { tw = label.getComputedTextLength(); } catch { /* not laid out */ }
       if (!(tw > 0)) tw = label.textContent.length * 0.6 * th;

@@ -87,7 +87,7 @@ test("the circuit, signals list and vector names", () => {
   assert.deepEqual(c.items.map((i) => i.name), ["V1", "R1", "C1", "Q1"]);
   assert.deepEqual(c.nets, ["/b", "/c", "/in", "/out", "0"]);
   const s = SL.signalsFor("TRAN", c, SL.DEFAULT_OPTIONS);
-  assert.ok(s.includes("V(/out)") && !s.includes("V(0)") && s.includes("I(R1)") && s.includes("Ic(Q1)") && s.includes("P(R1)") && s.includes("V(/X)"));
+  assert.ok(s.includes("V(/out)") && !s.includes("V(0)") && s.includes("I(R1)") && s.includes("I(Q1:c)") && !s.includes("Ic(Q1)") && s.includes("P(R1)") && s.includes("V(/X)"));
   assert.ok(SL.signalsFor("AC", c, SL.DEFAULT_OPTIONS).includes("V(/out) (gain)"));
   assert.deepEqual(SL.vectorToSignal("r1#branch"), { signal: "I(r1)", kind: "I" });
   assert.deepEqual(SL.vectorToSignal("r1:power"), { signal: "P(r1)", kind: "P" });

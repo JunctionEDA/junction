@@ -5,6 +5,7 @@
 import { E } from "../state";
 import { boardSelection } from "./exchange";
 import { checkField, errorMessage, fmtLen, h, openDialog, parseLen, unitName, type Field } from "./ui";
+import { gridCheck } from "../../components/kicon-dom";
 
 type Tri = boolean | null;
 interface Style { line: number; w: number; h: number; thick: number; italic: boolean; upright: boolean }
@@ -111,14 +112,14 @@ export function openTextAndGraphics(ctx: ToolCtx): void {
         grid.classList.toggle("dim", on);
       });
       // Action: layer defaults (the Board Setup values, read-only)
-      const cell = (t: string, head = false): HTMLElement => h(head ? "th" : "td", { style: "padding:2px 8px;border:1px solid var(--line);text-align:" + (head ? "center" : "right") }, t);
+      const cell = (t: string | Node, head = false): HTMLElement => h(head ? "th" : "td", { style: "padding:2px 8px;border:1px solid var(--line);text-align:" + (head ? "center" : "right") }, t);
       const ROWS: [string, string, boolean][] = [["Silk Layers", "F.SilkS", true], ["Copper Layers", "F.Cu", true], ["Edge Cuts", "Edge.Cuts", false], ["Courtyards", "F.CrtYd", false], ["Fab Layers", "F.Fab", true], ["Other Layers", "User.1", true]];
       const tbl = h("table", { style: "border-collapse:collapse;font-size:12px;margin:4px 0 0 22px" },
         h("tr", null, cell("", true), cell("Line Thickness", true), cell("Text Width", true), cell("Text Height", true), cell("Text Thickness", true), cell("Italic", true), cell("Keep Upright", true)));
       for (const [name, layer, text] of ROWS) {
         const s = PT().layerStyle(layer); const L = (v: number): string => `${fmtLen(v)} ${unitName()}`;
         tbl.append(h("tr", null, h("td", { style: "padding:2px 8px;border:1px solid var(--line)" }, name), cell(L(s.line)), cell(text ? L(s.w) : ""), cell(text ? L(s.h) : ""), cell(text ? L(s.thick) : ""),
-          cell(text ? (s.italic ? "✓" : "") : ""), cell(text ? (s.upright ? "✓" : "") : "")));
+          cell(text ? gridCheck(s.italic) : ""), cell(text ? gridCheck(s.upright) : "")));
       }
       grid = tbl;
       const defLabel = h("span", null, "Set to layer default values:");

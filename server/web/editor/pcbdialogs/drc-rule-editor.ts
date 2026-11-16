@@ -18,6 +18,7 @@ import { keysInText } from "../../keys";
 import { bitmapButton, checkField, ensureCss, fmtLen, h, messageBox, parseLen, selectField, textField, unitName, type Field } from "./ui";
 
 import { RULE_TYPES, formatRuleName, loadRules, ruleEdited, ruleText, rulesText, savedText, typeById, type Cond, type CondKind, type Rule, type RuleType } from "./drc-rule-model";
+import { treeExpander } from "../../components/kicon-dom";
 
 // ---------------------------------------------------------------- the dialog
 const CSS = `
@@ -66,7 +67,7 @@ export async function openDrcRuleEditor(ctx: ToolCtx): Promise<void> {
     const q = filter.value.trim().toLowerCase();
     const nodes: HTMLElement[] = [];
     const node = (label: string, depth: number, cls: string, isSel: boolean, onClick: () => void, key?: string, kids?: boolean): void => {
-      const tw = h("span", { class: "tw" }, kids ? (key && collapsed.has(key) ? "\u25B8" : "\u25BE") : "");
+      const tw = treeExpander(!(key && collapsed.has(key)), !!kids); tw.classList.add("tw");
       if (kids && key) tw.addEventListener("click", (ev) => { ev.stopPropagation(); if (collapsed.has(key)) collapsed.delete(key); else collapsed.add(key); buildTree(); });
       const n = h("div", { class: `n ${cls}${isSel ? " sel" : ""}`, style: `padding-left:${6 + depth * 14}px`, "data-label": label }, tw, label);
       n.addEventListener("click", onClick);

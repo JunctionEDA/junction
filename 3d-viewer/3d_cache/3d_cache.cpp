@@ -168,8 +168,8 @@ static bool isStepFile( const wxString& aPath )
 
 /**
  * A model of KiCad's standard 3D library ("<Library>.3dshapes/<Name>.<ext>") that is not on this
- * computer, fetched from the collaboration server into the user cache and returned as that
- * file's path; empty when there is nothing to show.
+ * computer, fetched from the collaboration server into the library folder on this computer
+ * and returned as that file's path; empty when there is nothing to show.
  *
  * Junction ships without the 3D library, so a board drawn where the library was installed
  * would otherwise show bare pads.  Nothing is asked of the network when nobody is signed in,
@@ -218,9 +218,18 @@ static wxString fetchLibraryModel( const wxString& aModelFile )
     static wxString           s_server;
     static wxString           s_token;
 
-    wxFileName cached( PATHS::GetUserCachePath(), name + wxS( ".step" ) );
-    cached.AppendDir( wxS( "3d-models" ) );
+    // A fetched model becomes part of the library on this computer: it is kept in the 3D
+    // model folder beside the downloaded symbols and footprints ("3dmodels/<Library>.3dshapes"),
+    // which nothing clears, so each model is downloaded once and is there for every project
+    // from then on.  (Models fetched by an earlier version sit in the cache folder; they are
+    // moved over the first time they are asked for.)
+    wxFileName cached( PATHS::GetManagedLibrariesPath(), name + wxS( ".step" ) );
+    cached.AppendDir( wxS( "3dmodels" ) );
     cached.AppendDir( library + wxS( ".3dshapes" ) );
+
+    wxFileName before( PATHS::GetUserCachePath(), name + wxS( ".step" ) );
+    before.AppendDir( wxS( "3d-models" ) );
+    before.AppendDir( library + wxS( ".3dshapes" ) );
 
     const wxString key = library + wxS( "/" ) + name;
     wxString       server;
@@ -230,6 +239,14 @@ static wxString fetchLibraryModel( const wxString& aModelFile )
     // models can be fetched at once (S3D_CACHE::FetchMissingLibraryModels).
     {
         std::lock_guard<std::mutex> lock( s_mutex );
+
+        if( !cached.FileExists() && before.FileExists() )
+        {
+            wxLogNull noLog;
+
+            if( wxFileName::Mkdir( cached.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL ) )
+                wxRenameFile( before.GetFullPath(), cached.GetFullPath(), false );
+        }
 
         if( cached.FileExists() )
         {

@@ -58,6 +58,7 @@ export const LIMITS = {
 
 export const PHYSICS_RULES: { id: string; what: string }[] = [
   { id: "antenna.keepout", what: "An antenna sits at a board edge with no copper under or around it on any layer" },
+  { id: "antenna.ground", what: "The ground beside an antenna's clear area is whole: no other net's tracks, vias or parts within a band of it" },
   { id: "antenna.fence", what: "The ground edge around an antenna's clear area is stitched with vias no more than a twentieth of a wavelength apart" },
   { id: "rf.feed", what: "An RF feed is short, one width, 50 ohm, on an outer layer with no via, bends gently, runs over unbroken ground and has ground vias down both sides" },
   { id: "stackup.reference", what: "Fast and RF signals have a ground plane on the layer next to them" },
@@ -335,7 +336,7 @@ export function reviewPhysics(doc: any, P: any, k: any, settings: any, add: Add)
   // ---- antennas: clear of copper, at an edge, their ground edge stitched
   const antRegions: Box[] = antennas.filter((a) => !isPatch(a)).map((a) => { const ko = S.keepouts.find((q) => q.copper && hit(q.box, a.box)); return grow(ko ? ko.box : antennaRegion(S, a, LIMITS.antennaClear), 0.3); });
   {
-    const dirty: string[] = [], inland: string[] = [], open: string[] = [], bare_: string[] = [], thin: string[] = [], noGround: string[] = [];
+    const crowded: string[] = []; const dirty: string[] = [], inland: string[] = [], open: string[] = [], bare_: string[] = [], thin: string[] = [], noGround: string[] = [];
     for (const a of antennas) {
       const own = new Set(a.pads.map((p) => p.net).filter(Boolean)); const core = grow(a.box, LIMITS.antennaClear), shape = rectShape(core); const what = new Set<string>();
       if (isPatch(a)) {      // a patch antenna is the opposite case: it works against the ground under it
@@ -356,9 +357,21 @@ export function reviewPhysics(doc: any, P: any, k: any, settings: any, add: Add)
       if (gz && !ko) open.push(a.ref);
       // the ground edge that faces the antenna
       const region = ko ? ko.box : antennaRegion(S, a, LIMITS.antennaClear);
+      {   // the ground beside the clear area carries the antenna's return current: nothing but the feed and ground stands or runs in a band of it
+        const band = grow(region, 1.2), bshape = rectShape(band), inner = rectShape(grow(region, 0.05)); const cut = new Set<string>();
+        const quiet = (n: string) => !n || own.has(n) || rfNets.includes(n) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(n);
+        for (const c of S.conds) {
+          if (c.kind === "zone" || quiet(c.net) || !hit(c.bbox, band) || P.shapeGap(c.shape, bshape) > 0) continue;
+          if (c.kind === "pad") { const f = fps.find((q) => q.id === c.item.id); if (f && f.id !== a.id) cut.add(`${f.ref} (${bare(c.net)})`); continue; }
+          if (P.shapeGap(c.shape, inner) <= 0) continue;      // inside the clear area: antenna.keepout's finding
+          cut.add(`${c.kind === "via" ? "a via" : "a track"} of ${bare(c.net)}`);
+        }
+        if (cut.size) crowded.push(`${a.ref}: ${Array.from(cut).slice(0, 6).join("; ")}`);
+      }
       const ring = ringPoints(S, region, 1.0, 0.5, 0.4).filter(([x, y]) => S.gndLayersAt(x, y) >= 2);
       if (ring.length >= 4) { const gaps = ring.filter(([x, y]) => S.nearestStitch(x, y) > reach); if (gaps.length === ring.length) bare_.push(a.ref); else if (gaps.length > ring.length * 0.2) thin.push(`${a.ref}: ${Math.round(gaps.length * 0.5)} mm of ${Math.round(ring.length * 0.5)} mm of ground edge has no via within ${r2(reach)} mm, first near ${at(gaps[0][0], gaps[0][1])}`); }
     }
+    if (crowded.length) add("antenna.ground", "error", "Other nets stand or run in the ground right beside an antenna's clear area. That ground is the antenna's counterpoise: keep a band of 1.2 mm round the clear area whole, with only the feed and ground vias in it. Move the parts away (board.autoplace() and board.seat() keep them out) and route again (the router keeps other nets out of the band).", crowded);
     if (dirty.length) add("antenna.keepout", "error", "There is copper in an antenna's clear area. An antenna radiates into the space around it: copper under or beside it, on any layer, detunes it and swallows the signal. Clear every layer (board.antenna(ref) adds the keep-out and refills).", dirty);
     if (inland.length) add("antenna.keepout", "warning", `An antenna belongs at a board edge, preferably a corner, pointing away from the rest of the board (within ${LIMITS.antennaEdge} mm of the edge).`, inland);
     if (open.length) add("antenna.keepout", "warning", "No keep-out area covers these antennas, so the next zone fill pours copper under them. board.antenna(ref) adds one on every layer.", open);
@@ -716,7 +729,12 @@ export function reviewPhysics(doc: any, P: any, k: any, settings: any, add: Add)
     const usb = Array.from(pairBase.values()).filter((e) => e.p && e.n && /USB|(^|[\/_(])D[+\-PM]\)?$/i.test(e.p!) && pairInterface(e.p!) === "usb2");
     const holed: string[] = [], uneven: string[] = [];
     for (const e of usb) {
-      const vp = viasOf.get(e.p!) || [], vn = viasOf.get(e.n!) || [];
+      // A USB-C receptacle carries each data line on two pins, interleaved (D- D+ D- D+): joining both twins is not
+      // possible on one layer when the chip wants the pair the other way round.  The short hop on the back that joins
+      // one twin to its line, right at the connector, is a stub beside the path and not a layer change of the pair.
+      const hop = (net: string) => { const tw = (padsOf.get(net) || []).filter((q) => /^(J|P|CN|USB|X)\d/i.test(q.fp.ref)); return tw.length >= 2 ? tw : []; };
+      const onPath = (net: string) => { const tw = hop(net); const all = viasOf.get(net) || []; const near = all.filter((v: any) => tw.some((q) => Math.hypot(q.x - v.shape.x, q.y - v.shape.y) <= 3)); return near.length === 2 && near.length === all.length ? [] : all; };
+      const vp = onPath(e.p!), vn = onPath(e.n!);
       if (vp.length + vn.length) holed.push(`${bare(e.p!)} ${vp.length} via${vp.length === 1 ? "" : "s"}, ${bare(e.n!)} ${vn.length}`);
       if (vp.length !== vn.length) uneven.push(`${bare(e.p!)} and ${bare(e.n!)} change layer a different number of times (${vp.length} and ${vn.length})`);
       else for (const a of vp) { const d = Math.min(...vn.map((b) => Math.hypot(b.shape.x - a.shape.x, b.shape.y - a.shape.y))); if (d > 1.5) uneven.push(`the ${bare(e.p!)} via at ${at(a.shape.x, a.shape.y)} has no ${bare(e.n!)} via beside it (${r2(d)} mm)`); }

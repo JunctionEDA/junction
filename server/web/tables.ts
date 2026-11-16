@@ -274,7 +274,7 @@ export const KICAD_KEY_WINS: Record<Editor, Record<string, string>> = {
   },
 };
 /** Handled ids that only one editor implements: the other editor's entry and hotkey stay desktop-only. */
-export const EDITOR_ONLY: Record<string, Editor> = { showSymbolLibTable: "sch", showFootprintLibTable: "pcb", move: "sch", drag: "sch", exportNetlist: "sch", saveCurrSheetCopyAs: "sch", drawSheetOnClipboard: "sch", saveCopy: "pcb",
+export const EDITOR_ONLY: Record<string, Editor> = { selectOnPCB: "sch", selectOnSchematic: "pcb", showSymbolLibTable: "sch", showFootprintLibTable: "pcb", move: "sch", drag: "sch", exportNetlist: "sch", saveCurrSheetCopyAs: "sch", drawSheetOnClipboard: "sch", saveCopy: "pcb",
   navigatePrevious: "sch", navigateNext: "sch", navigateBack: "sch", navigateForward: "sch", navigateUp: "sch", leaveSheet: "sch", toggleHiddenPins: "sch", toggleHiddenFields: "sch", toggleERCErrors: "sch", toggleERCWarnings: "sch", toggleERCExclusions: "sch", prevMarker: "sch", nextMarker: "sch",
   layerNext: "pcb", layerPrev: "pcb", layerTop: "pcb", layerBottom: "pcb", highContrastModeCycle: "pcb", highContrastMode: "pcb", showPcbNew: "sch", showEeschema: "pcb",
   showSymbolEditor: "sch", editPageNumber: "sch", autoplaceAllSheetPins: "sch", findNetInInspector: "sch", showBusSyntaxHelp: "sch", assignNetclass: "sch", editWithLibEdit: "sch", editLibSymbolWithLibEdit: "sch" };

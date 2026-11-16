@@ -5,6 +5,11 @@ name: linux-build
 on:
   workflow_dispatch:
   workflow_call:
+    inputs:
+      ref:
+        description: "Commit to build instead of the one the workflow runs on (the upstream sync builds its merge)"
+        type: string
+        default: ""
 
 jobs:
   build:
@@ -15,22 +20,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.ref }}
           fetch-depth: 1
 
       - name: Install dependencies
+        # The list is a file so the upstream sync's test build installs the same packages.
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake ninja-build ccache pkg-config \
-            libwxgtk3.2-dev libwxgtk-webview3.2-dev libglew-dev libglm-dev libcairo2-dev libpixman-1-dev \
-            libboost-all-dev libgit2-dev libngspice0-dev ngspice-dev \
-            libocct-modeling-algorithms-dev libocct-modeling-data-dev \
-            libocct-data-exchange-dev libocct-visualization-dev \
-            libocct-foundation-dev libocct-ocaf-dev \
-            protobuf-compiler libprotobuf-dev libzstd-dev unixodbc-dev \
-            libgtk-3-dev libsecret-1-dev libnng-dev libspnav-dev libpoppler-glib-dev python3 \
-            libssl-dev zlib1g-dev gettext \
-            glslang-tools spirv-tools libvulkan-dev libsqlite3-dev
+          grep -v '^#' packaging/linux/build-deps.txt | xargs sudo apt-get install -y --no-install-recommends
 
       - name: Build WebSocket-capable curl
         # Ubuntu's curl predates enabled-by-default WebSockets, and the

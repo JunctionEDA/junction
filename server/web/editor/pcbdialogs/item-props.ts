@@ -14,7 +14,7 @@ import { kicadActionAvailable, runKicadAction } from "../hotkeys";
 import { dimensionDialog } from "./dimension";
 import { barcodeDialog } from "./barcode";
 import { textBoxDialog } from "./textbox";
-import { tableDialog } from "./table";
+import { LINE_STYLE_ICONS, tableDialog } from "./table";
 import { boardXref } from "./xref";
 import * as VM from "../../canvas/variant-model";
 import { syntaxHelpLink } from "../syntax-help";
@@ -758,7 +758,7 @@ function shapeDialog(ctx: ToolCtx, item: KItem): boolean {
     const stroke = kid(node, "stroke"), legacyW = kid(node, "width");
     const width = lenField(stroke ? nval(kid(stroke, "width")) : nval(legacyW), { ro, key: "lineWidth" });
     const style0 = ((t: string) => (LINE_STYLES.some(([k]) => k === t) ? t : "solid"))(sval(stroke ? kid(stroke, "type") : null));
-    const style = selectField<string>(style0, LINE_STYLES, { ro: ro || !stroke, key: "lineStyle" });
+    const style = selectField<string>(style0, LINE_STYLES, { ro: ro || !stroke, key: "lineStyle", icons: LINE_STYLE_ICONS });
     const closed = kind === "gr_rect" || kind === "gr_circle" || kind === "gr_poly";
     const fk = kid(node, "fill"), fv = sval(fk);
     const fill0 = fv === "solid" || fv === "yes" ? "solid" : fv === "hatch" || fv === "reverse_hatch" || fv === "cross_hatch" ? fv : "none";

@@ -8,7 +8,7 @@ import type { NetInspColumn, NetInspModel, NetInspRow } from "../../panels-api";
 import { useApp } from "../../store";
 import { cx } from "../../util";
 import { popupMenu, type PopItem } from "../../dialogs/dom";
-import { KIcon } from "../Icon";
+import { KIcon, SortArrow, TreeExpander } from "../Icon";
 import { moveColumn, orderColumns } from "./columns";
 import { panels, usePanels } from "./widgets";
 
@@ -190,7 +190,7 @@ export function NetInspectorPane() {
                   drag && drag.col === c.id && "opacity-60", drag && drag.over === c.id && drag.col !== c.id && "shadow-[inset_2px_0_0_var(--accent)]")}
                 onPointerDown={(ev) => headerDown(ev, c.id)}
                 onClick={() => { if (dragged.current) { dragged.current = false; return; } cmd({ t: "sort", col: c.id }); }} onContextMenu={(ev) => headerMenu(ev, c.id)}>
-                {c.label}{sortCol === c.id ? <span className="ml-1 text-ink-3">{s.sort_order_asc ? "▴" : "▾"}</span> : null}
+                {c.label}{sortCol === c.id ? <SortArrow asc={!!s.sort_order_asc} /> : null}
                 <span className="absolute top-0 right-0 bottom-0 w-1 cursor-col-resize" onPointerDown={(ev) => resize(ev, c.id)} onClick={(ev) => ev.stopPropagation()} />
               </th>))}
             </tr>
@@ -202,7 +202,7 @@ export function NetInspectorPane() {
                 {cols.map((c) => { const i = model.columns.indexOf(c); return (
                   <td key={c.id} className={cx("px-2 py-px whitespace-nowrap border-r border-line-soft overflow-hidden text-ellipsis", c.center ? "text-center" : "text-left", r.zero[i] && "text-ink-3", r.group && c.id === 0 && "font-semibold")}
                     style={c.id === 0 ? { paddingLeft: 4 + r.level * 16 } : undefined}>
-                    {c.id === 0 && r.group ? <button type="button" className="inline-block w-3.5 mr-1 p-0 border-0 bg-transparent text-ink-2" data-expand={r.key} onClick={(ev) => { ev.stopPropagation(); cmd({ t: "expand", key: r.key }); }}>{r.expanded ? "▾" : "▸"}</button> : null}
+                    {c.id === 0 && r.group ? <button type="button" className="inline-block w-3.5 mr-1 p-0 border-0 bg-transparent text-ink-2" data-expand={r.key} onClick={(ev) => { ev.stopPropagation(); cmd({ t: "expand", key: r.key }); }} aria-label={r.expanded ? "Collapse" : "Expand"}><TreeExpander open={!!r.expanded} /></button> : null}
                     {r.cells[i]}
                   </td>); })}
               </tr>

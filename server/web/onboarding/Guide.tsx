@@ -135,14 +135,14 @@ function Panel({ guide }: { guide: GuideState }) {
           {editor === "pcb" ? <button type="button" className="btn primary sm" onClick={() => run("module:runDRC")}>Run the checker</button>
             : <button type="button" className="btn primary sm" onClick={() => show(pcb?.docId)} disabled={!pcb}>Open the board</button>}
         </div>
-        <p className="kg-hint">It is in the menus as Inspect → Design Rules Checker.</p>
+        <p className="kg-hint">It is in the menus as Inspect &gt; Design Rules Checker.</p>
       </>
     ),
     share: (
       <>
         <p>A project is shared by GitHub name, email or link. Everyone you invite works on these same files, and you see each other's cursors as you go.</p>
         <div className="kg-acts"><button type="button" className="btn primary sm" onClick={() => run("share")}>Open Share</button></div>
-        <p className="kg-hint">You do not have to invite anyone now. It is in the menus as File → Share.</p>
+        <p className="kg-hint">You do not have to invite anyone now. It is in the menus as File &gt; Share.</p>
       </>
     ),
   };

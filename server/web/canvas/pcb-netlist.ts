@@ -128,9 +128,12 @@ function distSeg(p: Pt, a: Pt, b: Pt): number {
 }
 
 /** A symbol's reference and unit on one sheet instance: its (instances …) entry for that path, else the field. */
-function instanceRef(node: SNode, path: string, project: string | undefined): { ref: string; unit: number } {
+function instanceRef(node: SNode, path: string, project: string | undefined, legacy?: Map<string, { reference: string; unit: number }>): { ref: string; unit: number } {
   const unitN = kid(node, "unit") as SNode | null;
   let ref = propVal(node, "Reference"), unit = unitN ? num(unitN[1], 1) : 1, found = false;
+  // a file older than 20221002: the root's (symbol_instances …), by the path below the root
+  const old = legacy && legacy.get("/" + [...path.split("/").filter(Boolean).slice(1), str((kid(node, "uuid") || [])[1])].join("/"));
+  if (old) { if (old.reference) ref = old.reference; unit = old.unit; }
   const inst = kid(node, "instances") as SNode | null;
   if (inst) {
     const projects = kids(inst, "project") as SNode[];
@@ -307,8 +310,9 @@ export function buildNetlist(root: SheetFile, loadSheet: (file: string, parent: 
           }
         }
       } else if (k === "symbol") {
-        const power = h.isPower(doc, it), value = propVal(n, "Value"), localPower = power && (h.isLocalPower ? h.isLocalPower(doc, it) : libIsLocalPower(doc, n));
-        const { ref, unit } = instanceRef(n, "/" + inst.uuidPath.join("/"), project);
+        const legacyValue = root.doc.legacySymbolInstances && root.doc.legacySymbolInstances.get("/" + [...inst.uuidPath.slice(1), it.id].join("/"));
+        const power = h.isPower(doc, it), value = legacyValue && legacyValue.value ? legacyValue.value : propVal(n, "Value"), localPower = power && (h.isLocalPower ? h.isLocalPower(doc, it) : libIsLocalPower(doc, n));
+        const { ref, unit } = instanceRef(n, "/" + inst.uuidPath.join("/"), project, root.doc.legacySymbolInstances);
         const inNetlist = !ref.startsWith("#") && !power, onBoard = yes(n, "on_board", true);
         const pins = h.symbolPins(doc, it);
         const units = unitCount(doc, n), unitRef = units > 1 ? ref + unitLetter(unit) : ref;

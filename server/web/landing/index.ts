@@ -3,6 +3,8 @@
 
 import { startLettering } from "./lettering";
 import { startMini } from "./mini";
+import { startSch, startTabs } from "./hero-sch";
+import { reducedMotion } from "./stage";
 import { startStory } from "./story";
 import { startAi } from "./ai";
 
@@ -70,7 +72,12 @@ function start(): void {
   theme(); nav(); lean(); reveals();
   const hero = document.getElementById("hero"), story = document.getElementById("make");
   startLettering();
-  if (hero) startMini(hero);
+  if (hero) {
+    startMini(hero);
+    const sheet = hero.querySelector<HTMLCanvasElement>("canvas[data-sch]");
+    // `/?hero=alone` is the board on its own (scripts/onboarding-ui.mjs); without motion the board is simply complete
+    if (sheet) startTabs(hero, startSch(sheet, () => hero.dispatchEvent(new CustomEvent("hero:sch-done"))), !reducedMotion() && !/[?&]hero=alone\b/.test(location.search));
+  }
   if (story) startStory(story);
   const ai = document.getElementById("ai");
   if (ai) startAi(ai);

@@ -16,6 +16,7 @@ import { E } from "./state";
 import { setTool } from "./tools";
 import { ago, api, toast } from "./util";
 import { applyView, cmtG, cmtPanel, mmH, mmW, mmX0, mmY0, pxPerMm, requestRender, stage, world, worldMm } from "./view";
+import { closeMark } from "../components/kicon-dom";
 
 export interface Anchor { kind: "item" | "net"; id: string; label: string; item?: string | null }
 export interface CommentRow {
@@ -222,7 +223,7 @@ function head(a: Anchor | null | undefined, found: boolean, stateText: string, o
   const h = el("div", "cmt-head");
   h.appendChild(chip(a, found, onChip));
   if (stateText) h.appendChild(el("span", "cmt-state", stateText));
-  const x = el("button", "cmt-x", "×"); x.type = "button"; x.title = "Close"; x.id = "closeBtn"; x.addEventListener("click", closeThread);
+  const x = el("button", "cmt-x"); x.appendChild(closeMark()); x.type = "button"; x.title = "Close"; x.id = "closeBtn"; x.addEventListener("click", closeThread);
   h.appendChild(x);
   return h;
 }

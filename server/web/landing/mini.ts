@@ -27,10 +27,11 @@ const LAYER_COLOR: Record<Layer, string> = { "F.Cu": "#C83434", "B.Cu": "#4D7FC4
 /** The back silkscreen (the pin names under the headers) would read mirrored through the board. */
 const HID = new Set([...HIDDEN, "B.SilkS"]);
 const HOME: Box = [BOARD.x - 4.5, BOARD.y - 3, BOARD.x + BOARD.w + 3, BOARD.y + BOARD.h + 3];
-/** Where a part waits before it is placed: the pile is laid out in rows under the board. */
+/** Where a part lies at the start: the pile is in rows left of the board, the groups mixed up. */
 const pileAt = (p: { pile: Pt }): Pt => p.pile;
-/** The view while the board is being built: the board and, under it, the pile its parts start in. */
-const BUILD: Box = [HOME[0], HOME[1], HOME[2], meta.pileBottom + 2.5];
+/** The view while the board is being built: the board, the pile its parts start in beside it, and under both the
+ *  band where the parts are sorted into their groups. */
+const BUILD: Box = [BOARD.x - meta.left - 2, HOME[1], Math.max(HOME[2], ...meta.groups.map((g) => g.box[2] + 2)), Math.max(meta.pileBottom, meta.stageBottom) + 2.5];
 /** For each connection, the earlier ones it starts or ends on (a via, a track it tees into):
  *  those have to be on the board before it can be routed. */
 const NEEDS: number[][] = meta.routes.map((r) => r.needs);
@@ -46,8 +47,8 @@ const snap = (v: number, o: number): number => o + Math.round((v - o) / GRID) * 
 
 /** What a scripted teammate can be busy with.  All up to "fix" change the board and are seen
  *  through to the end; the rest can be dropped when the visitor's change needs taking back. */
-type Task = "undo" | "place" | "route" | "label" | "pour" | "stitch" | "fix" | "note" | "rest";
-const HARD = new Set<Task>(["undo", "place", "route", "label", "pour", "stitch", "fix"]);
+type Task = "undo" | "sort" | "place" | "wire" | "route" | "label" | "pour" | "stitch" | "fix" | "note" | "rest";
+const HARD = new Set<Task>(["undo", "sort", "place", "wire", "route", "label", "pour", "stitch", "fix"]);
 /** How each of them handles a mouse: Mara is quick and overshoots, Jun is slower and exact. */
 const HANDS = [{ tempo: 0.86, miss: 1.3 }, { tempo: 1.2, miss: 0.55 }, { tempo: 1, miss: 1 }];
 /**
@@ -80,6 +81,8 @@ interface Actor {
   who: number; at: Pt; from: Pt; steps: Step[]; i: number; t0: number; task: Task; last: Task;
   marks: string[]; held: string | null; pull: Pull | null; poly: Pt[] | null;
   move: { id: string; from: Pt } | null; route: number | null; story: Story | null;
+  /** the cluster this one is moving onto the board */
+  unit: number | null;
 }
 /** A comment pinned on the board: typed by `who`, kept until its story is resolved (`ok`). */
 interface Note { who: number; at: Pt; text: string; n: number; born: number; dies: number; ok: boolean }
@@ -119,12 +122,18 @@ export function startMini(root: HTMLElement): void {
   /** Takes a connection's tracks and via off the board and keeps them for laying again. */
   function lift(i: number): void {
     const r = meta.routes[i];
-    for (const id of [...r.ids, ...(r.via ? [r.via] : [])]) { const it = doc.items.get(id); if (it) { spare.set(id, it); doc.items.delete(id); } }
+    for (const id of [...r.ids, ...(r.via ? [r.via] : [])]) { const it = doc.items.get(id); if (it) { spare.set(id, it); orig.set(id, it); doc.items.delete(id); } }
     gone.add(i);
   }
   /** Parts still in the pile, and the labels, the ground pours and their stitching vias not
    *  yet made: the teammates start from the bare outline and design the board while the
    *  visitor watches. */
+  /** Parts still in the pile: each is sorted into its group's cluster before any part is placed. */
+  const unsorted = new Set<string>();
+  /** Clusters not on the board yet, and every track and via as it is on the finished board (a cluster's own
+   *  tracks are laid beside the board first, shifted by the cluster's offset). */
+  const staged = new Set<number>(), orig = new Map<string, any>();
+  const UNIT = new Map<string, number>(); meta.units.forEach((u, k) => { for (const id of u.parts) UNIT.set(id, k); });
   const unplaced = new Set<string>(), shelf = new Map<string, any>(), stitches: string[] = [];
   let poured = true, fitTo: Box = HOME, own = false, glide: { from: Box; t0: number } | null = null;
   /** The review stories of this run, and for each part or track that starts out not right yet
@@ -142,6 +151,37 @@ export function startMini(root: HTMLElement): void {
   })();
   /** Connections that pass where a part waits beside its place: they wait until it has moved. */
   const crowded = new Map<number, string>();
+  /** For each connection, the cluster it lies wholly inside (its pads are all that cluster's, and so is what it
+   *  starts on), or -1: those are wired in the cluster before it goes onto the board. */
+  const INNER: number[] = [];
+  /** Each cluster's extent on the finished board: a connection that leaves it is not the cluster's own. */
+  const UBOX: Box[] = (() => {
+    const full = loadPcb();
+    return meta.units.map((u) => { const b: Box = [Infinity, Infinity, -Infinity, -Infinity]; for (const id of u.parts) { const q = full.items.get(id)?.bbox; if (q) { b[0] = Math.min(b[0], q[0] - 1); b[1] = Math.min(b[1], q[1] - 1); b[2] = Math.max(b[2], q[2] + 1); b[3] = Math.max(b[3], q[3] + 1); } } return b; });
+  })();
+  meta.routes.forEach((r, i) => {
+    const us = new Set(reaches[i].map((id) => UNIT.get(id)!)), ns = new Set(r.needs.map((k) => INNER[k]));
+    for (const k of r.needs) if (k >= i) throw new Error("routes out of order");
+    const all = new Set([...us, ...ns]);
+    const u = all.size === 1 && !all.has(-1) && (us.size || ns.size) ? [...all][0] : -1;
+    INNER[i] = u >= 0 && r.pts.every((q) => q[0] >= UBOX[u][0] && q[0] <= UBOX[u][2] && q[1] >= UBOX[u][1] && q[1] <= UBOX[u][3]) ? u : -1;
+  });
+  /** How far a connection is drawn from where it ends up: its cluster's offset while that waits beside the board. */
+  const offOf = (i: number): Pt => INNER[i] >= 0 && staged.has(INNER[i]) ? meta.units[INNER[i]].off : [0, 0];
+  /** A track or via moved by an offset, as an item of its own under the same id. */
+  function shifted(it: any, off: Pt): any {
+    if (!off[0] && !off[1]) return it;
+    return variant(it, (node) => { for (const key of ["start", "end", "at"]) { const k = K.kid(node, key); if (k) { k[1] = f3(+k[1] + off[0]); k[2] = f3(+k[2] + off[1]); } } });
+  }
+  /** Puts a cluster, its parts and the tracks laid in it, `off` away from its place on the board. */
+  function setUnit(u: number, off: Pt): void {
+    for (const id of meta.units[u].parts) { const it = doc.items.get(id), h = spotOf(id); if (it) K.moveItem(doc, it, f3(h[0] + off[0]), f3(h[1] + off[1]), 1e6); }
+    meta.routes.forEach((r, i) => {
+      if (INNER[i] !== u) return;
+      for (const id of [...r.ids, ...(r.via ? [r.via] : [])]) { const base = orig.get(id); if (!base) continue; const had = doc.items.has(id); if (had) doc.items.set(id, shifted(base, off)); else if (spare.has(id)) spare.set(id, shifted(base, off)); }
+    });
+    dirty = true;
+  }
   /** A copy of an item's node with one thing changed, as an item of its own under the same id. */
   function variant(it: any, change: (node: any[]) => void): any {
     const node = K.parse(K.serialize(it.node)); change(node);
@@ -149,7 +189,7 @@ export function startMini(root: HTMLElement): void {
     return v;
   }
   function open(): void {
-    spare.clear(); gone.clear(); unplaced.clear(); shelf.clear(); stitches.length = 0; real.clear(); pending.clear(); crowded.clear(); stories = [];
+    spare.clear(); gone.clear(); unplaced.clear(); unsorted.clear(); staged.clear(); orig.clear(); shelf.clear(); stitches.length = 0; real.clear(); pending.clear(); crowded.clear(); stories = [];
     poured = true; fitTo = HOME; own = false; glide = null; doneAt = 0;
     if (still) return;                                   // without motion the board is simply complete
     if (alone) { for (const i of OPEN) lift(i); return; }
@@ -171,11 +211,13 @@ export function startMini(root: HTMLElement): void {
       } else if (st.kind === "width") {
         for (const r of meta.routes) if (r.net === st.net) for (const sid of r.ids) {
           const thick = spare.get(sid); if (!thick || (thick.geom as any[])[0].w <= st.thin!) continue;
-          real.set(sid, thick); spare.set(sid, variant(thick, (node) => { K.kid(node, "width")[1] = st.thin; }));
+          const thin = variant(thick, (node) => { K.kid(node, "width")[1] = st.thin; });
+          real.set(sid, thick); spare.set(sid, thin); orig.set(sid, thin);
         }
       }
     }
-    for (const q of meta.parts) { const it = doc.items.get(q.id); if (it) { const at = pileAt(q); K.moveItem(doc, it, at[0], at[1], 1e6); unplaced.add(q.id); } }
+    for (const q of meta.parts) { const it = doc.items.get(q.id); if (it) { const at = pileAt(q); K.moveItem(doc, it, at[0], at[1], 1e6); unplaced.add(q.id); unsorted.add(q.id); } }
+    meta.units.forEach((_, k) => staged.add(k));
     for (const id of [...TEXTS, ...meta.zones, ...meta.stitch]) { const it = doc.items.get(id); if (it) { shelf.set(id, it); doc.items.delete(id); } }
     stitches.push(...meta.stitch);
     poured = false; fitTo = BUILD;
@@ -196,7 +238,7 @@ export function startMini(root: HTMLElement): void {
       const it = doc.items.get(id), h = home(id); if (it && !unplaced.has(id)) K.moveItem(doc, it, h[0], h[1], 1e6);
       for (const [i, pid] of [...crowded]) if (pid === id) crowded.delete(i);
     } else if (st.kind === "width") {
-      for (const r of meta.routes) if (r.net === st.net) for (const sid of r.ids) { const it = real.get(sid); if (!it) continue; if (doc.items.has(sid)) doc.items.set(sid, it); else if (spare.has(sid)) spare.set(sid, it); real.delete(sid); }
+      for (const r of meta.routes) if (r.net === st.net) for (const sid of r.ids) { const it = real.get(sid); if (!it) continue; if (doc.items.has(sid)) doc.items.set(sid, it); else if (spare.has(sid)) spare.set(sid, it); orig.set(sid, it); real.delete(sid); }
     }
     pending.delete(id);
   }
@@ -354,10 +396,10 @@ export function startMini(root: HTMLElement): void {
     actors.length = 0; note = null;
     if (alone) return;
     const py = BOARD.y + BOARD.h + 8;
-    const at: Pt[] = unplaced.size ? [[BOARD.x + 9, py], [BOARD.x + 31, py + 3], [BOARD.x + 20, py - 2]] : [[BOARD.x + 9, BOARD.y + 4], [BOARD.x + 34, BOARD.y + 6], [BOARD.x + 17, BOARD.y + 14]];
+    const at: Pt[] = unplaced.size ? [[BOARD.x - 28, py], [BOARD.x - 8, py + 3], [BOARD.x - 18, py - 2]] : [[BOARD.x + 9, BOARD.y + 4], [BOARD.x + 34, BOARD.y + 6], [BOARD.x + 17, BOARD.y + 14]];
     PEERS.forEach((_, who) => {
       const p: Pt = still ? at[who] : [at[who][0] + gauss() * 3, at[who][1] + gauss() * 2];
-      actors.push({ who, at: p, from: p, steps: [{ dur: 0.5 + who * 0.8 + rnd(0, 0.5), to: p }], i: 0, t0: now, task: "rest", last: "rest", marks: [], held: null, pull: null, poly: null, move: null, route: null, story: null });
+      actors.push({ who, at: p, from: p, steps: [{ dur: 0.5 + who * 0.8 + rnd(0, 0.5), to: p }], i: 0, t0: now, task: "rest", last: "rest", marks: [], held: null, pull: null, poly: null, move: null, route: null, story: null, unit: null });
     });
   }
   /** Lets go of whatever a teammate holds or shows. */
@@ -365,7 +407,7 @@ export function startMini(root: HTMLElement): void {
     if (a.task === "note" && a.story && a.story.state === 0 && note && !note.ok) note = null;   // interrupted while typing: it is written again later
     if (a.task === "undo") nextUndo = now + GAP;
     a.last = a.task; a.task = "rest"; a.steps = []; a.i = 0; a.t0 = now; a.from = a.at;
-    a.marks = []; a.held = null; a.pull = null; a.poly = null; a.move = null; a.route = null; a.story = null;
+    a.marks = []; a.held = null; a.pull = null; a.poly = null; a.move = null; a.route = null; a.story = null; a.unit = null;
   }
   /** Moves a teammate along to `now`, running what their steps do, and has them pick the next
    *  thing when one is finished. */
@@ -425,7 +467,8 @@ export function startMini(root: HTMLElement): void {
   /** Routes an open connection as the router does it: click on the pad, pull the track out,
    *  click at each corner, and the via drops where it ends. */
   function planRoute(a: Actor, p: Plan, ri: number): boolean {
-    const r = meta.routes[ri], pts = r.pts as Pt[], on = r.layer as Layer;
+    const r = meta.routes[ri], off = offOf(ri), pts = (r.pts as Pt[]).map((q): Pt => [f3(q[0] + off[0]), f3(q[1] + off[1])]), on = r.layer as Layer;
+    if (off[0] || off[1]) for (const id of [...r.ids, ...(r.via ? [r.via] : [])]) { const base = orig.get(id); if (base && spare.has(id)) spare.set(id, shifted(base, off)); }
     const out = (i: number): Pull | null => { const it = spare.get(r.ids[i]); return it ? { a: pts[i], b: pts[i + 1], at: pts[i], layer: on, w: (it.geom as any[])[0].w } : null; };
     a.route = ri;
     p.go(pts[0]).click(() => { a.pull = out(0); });
@@ -459,6 +502,34 @@ export function startMini(root: HTMLElement): void {
     } else p.pull(to, rnd(26, 36), tick, 0.6, 1.7);
     p.click(() => { K.moveItem(doc, it, to[0], to[1], 1e6); unplaced.delete(id); a.held = null; a.move = null; redraw(); });
     p.rest(rnd(0.1, 0.5));
+    return true;
+  }
+  /** Moves a finished cluster onto the board in one piece: its parts and the tracks between them. */
+  function planUnit(a: Actor, p: Plan, u: number): boolean {
+    const unit = meta.units[u], size = (id: string): number => { const b = doc.items.get(id)?.bbox; return b ? (b[2] - b[0]) * (b[3] - b[1]) : 0; };
+    const lead = unit.parts.reduce((b, id) => (size(id) > size(b) ? id : b), unit.parts[0]), it = doc.items.get(lead); if (!it) return false;
+    const to = spotOf(lead);
+    const tick = (c: Pt): void => { const off: Pt = [snap(c[0], to[0]) - to[0], snap(c[1], to[1]) - to[1]], q = posOf(it); if (Math.abs(q[0] - to[0] - off[0]) > 1e-6 || Math.abs(q[1] - to[1] - off[1]) > 1e-6) setUnit(u, off); };
+    a.unit = u;
+    p.go(posOf(it)).click(() => { a.held = lead; a.marks = unit.parts.filter((id) => id !== lead); });
+    p.pull(to, rnd(20, 28), tick, 0.8, 2.2);
+    p.click(() => {
+      staged.delete(u); setUnit(u, [0, 0]);
+      for (const id of unit.parts) unplaced.delete(id);
+      a.held = null; a.marks = []; a.unit = null; redraw();
+    });
+    p.rest(rnd(0.2, 0.6));
+    return true;
+  }
+  /** Takes a part out of the pile to its group's cluster under the board. */
+  function planSort(a: Actor, p: Plan, id: string): boolean {
+    const it = doc.items.get(id), q = meta.parts.find((x) => x.id === id); if (!it || !q) return false;
+    const h = spotOf(id), off = meta.units[UNIT.get(id)!].off, to: Pt = [f3(h[0] + off[0]), f3(h[1] + off[1])], tick = (c: Pt): void => carry(it, c, to);
+    a.move = { id, from: to };
+    p.go(posOf(it)).click(() => { a.held = id; });
+    p.pull(to, rnd(52, 70), tick, 0.5, 1.4);                  // sorting is quick work: nothing has to land exactly
+    p.click(() => { K.moveItem(doc, it, to[0], to[1], 1e6); unsorted.delete(id); a.held = null; a.move = null; redraw(); });
+    p.rest(rnd(0.05, 0.3));
     return true;
   }
   /** Adds one of the silkscreen texts: it appears on the pointer and is set down where it goes. */
@@ -555,20 +626,38 @@ export function startMini(root: HTMLElement): void {
     const others = actors.filter((o) => o !== a), doing = (t: Task): boolean => others.some((o) => o.task === t);
     const quiet = !edits.length && !drag && !route && !pan && now - lastAct > 1200;
     const settled = (id: string): boolean => !unplaced.has(id) && !pending.has(id);
-    const open = [...gone].filter((i) => !others.some((o) => o.route === i) && NEEDS[i].every((k) => !gone.has(k)) && reaches[i].every(settled) && !crowded.has(i));
     const taken = new Set<string>(); for (const o of others) { if (o.held) taken.add(o.held); if (o.move) taken.add(o.move.id); }
-    const pile = meta.parts.filter((q) => unplaced.has(q.id) && !taken.has(q.id) && !(drag && drag.id === q.id)).slice(0, 4);
+    const busy = new Set<number>(); for (const o of others) { if (o.unit !== null) busy.add(o.unit); }
+    const inCluster = (i: number): boolean => INNER[i] >= 0 && staged.has(INNER[i]);
+    // A connection inside a cluster is laid while the cluster waits beside the board, once its parts are sorted there;
+    // any other needs its parts on the board, and what it starts on laid on the board too.
+    const can = (i: number): boolean => inCluster(i)
+      ? !busy.has(INNER[i]) && reaches[i].every((id) => !unsorted.has(id) && !pending.has(id) && !taken.has(id))
+      : reaches[i].every(settled) && NEEDS[i].every((k) => !inCluster(k));
+    const open = [...gone].filter((i) => !others.some((o) => o.route === i) && NEEDS[i].every((k) => !gone.has(k)) && can(i) && !crowded.has(i));
+    const inner = open.filter(inCluster), outer = open.filter((i) => !inCluster(i));
+    // what is still to be wired inside clusters, by anyone: nothing goes onto the board before that is done
+    const wiring = inner.length > 0 || others.some((o) => o.task === "wire" || (o.route !== null && inCluster(o.route)));
+    const free = (q: { id: string }): boolean => !taken.has(q.id) && !(drag && drag.id === q.id);
+    // Sorting comes first, a group at a time; nothing is placed until the pile is empty, and then the groups go onto the
+    // board one after another.
+    const first = <T extends { group: number }>(list: T[]): T[] => { const g = Math.min(...list.map((q) => q.group)); return list.filter((q) => q.group === g); };
+    const heap = first(meta.parts.filter((q) => unsorted.has(q.id))).filter(free);
+    const ready = unsorted.size || others.some((o) => o.task === "sort") || wiring ? [] : [...staged].filter((u) => !busy.has(u) && meta.units[u].parts.every((id) => !taken.has(id) && !(drag && drag.id === id)));
+    const pile = ready.filter((u) => meta.units[u].group === Math.min(...ready.map((v) => meta.units[v].group)));
     const kept = new Set(stories.filter((x) => x.kind === "label" && x.state < 2).flatMap((x) => x.texts!));
     const texts = meta.texts.filter((t) => shelf.has(t.id) && !kept.has(t.text)).map((t) => t.id);
     const routed = !gone.size && !unplaced.size;
     // A story can be told once what it is about is on the board: the part placed, half the net's tracks laid, the board all but done.
-    const told = (st: Story): boolean => st.kind === "width" ? meta.routes.filter((r) => r.net === st.net).length > 1 && meta.routes.filter((r, i) => r.net === st.net && !gone.has(i)).length >= 3 && !!pinOf(st)
-      : st.kind === "label" ? routed && poured && !stitches.length && !texts.length : !unplaced.has(refId(st.ref)) && !taken.has(refId(st.ref));
+    const told = (st: Story): boolean => st.kind === "width" ? meta.routes.filter((r) => r.net === st.net).length > 1 && meta.routes.filter((r, i) => r.net === st.net && !gone.has(i)).length >= 3 && meta.routes.every((r, i) => r.net !== st.net || !inCluster(i)) && !!pinOf(st)
+      : st.kind === "label" ? routed && poured && !stitches.length && !texts.length : !unplaced.has(refId(st.ref)) && !taken.has(refId(st.ref)) && !busy.has(UNIT.get(refId(st.ref))!);
     const tell = !note ? stories.filter((x) => x.state === 0 && told(x)) : [];
     const fix = stories.filter((x) => x.state === 1 && x.by !== a.who && !others.some((o) => o.story === x));
     const opts: [Task, number][] = [["rest", 0.25]];
+    if (quiet && heap.length) opts.push(["sort", 10]);
     if (quiet && pile.length) opts.push(["place", 10]);
-    if (quiet && open.length) opts.push(["route", 9]);
+    if (quiet && inner.length && !unsorted.size) opts.push(["wire", 12]);
+    if (quiet && outer.length) opts.push(["route", 9]);
     if (quiet && routed && !poured && !doing("pour")) opts.push(["pour", 40]);
     if (quiet && poured && stitches.length) opts.push(["stitch", 8]);
     if (quiet && routed && texts.length && !doing("label")) opts.push(["label", 4]);
@@ -580,11 +669,13 @@ export function startMini(root: HTMLElement): void {
 
     const p = plan(a.who, a.at); let ok = false;
     if (!HARD.has(a.last) || chance(0.5)) p.rest(rnd(0.15, 0.8));
-    if (task === "place") ok = planPlace(a, p, any1(pile).id);
+    if (task === "sort") ok = planSort(a, p, any1(heap).id);
+    else if (task === "place") ok = planUnit(a, p, any1(pile));
     else if (task === "label") ok = planLabel(a, p, any1(texts));
     else if (task === "pour") ok = planPour(a, p);
     else if (task === "stitch") ok = planStitch(a, p);
-    else if (task === "route") ok = planRoute(a, p, open.reduce((b, i) => (dist(meta.routes[i].pts[0], a.at) * rnd(0.6, 1.4) < dist(meta.routes[b].pts[0], a.at) ? i : b), any1(open)));
+    else if (task === "wire") ok = planRoute(a, p, inner.reduce((b, i) => (dist(meta.routes[i].pts[0], a.at) * rnd(0.6, 1.4) < dist(meta.routes[b].pts[0], a.at) ? i : b), any1(inner)));
+    else if (task === "route") ok = planRoute(a, p, outer.reduce((b, i) => (dist(meta.routes[i].pts[0], a.at) * rnd(0.6, 1.4) < dist(meta.routes[b].pts[0], a.at) ? i : b), any1(outer)));
     else if (task === "note") ok = planNote(a, p, tell[0]);
     else if (task === "fix") ok = planFix(a, p, fix[0]);
     // Nothing to do just now: the hand waits near where the work is, on nothing in particular.
@@ -787,7 +878,7 @@ export function startMini(root: HTMLElement): void {
     }
     // The board is done: it is left to be looked at for a while, then they start over (not while the visitor is at work on it).
     if (!still && !alone && !touched && !unplaced.size && !gone.size && poured && !stitches.length && ![...TEXTS].some((id) => shelf.has(id)) && stories.every((x) => x.state === 2)) {
-      if (!doneAt) doneAt = now; else if (now - doneAt > AGAIN && !drag && !pan && !route) { reset(); own = false; }
+      if (!doneAt) doneAt = now; else if (now - doneAt > AGAIN && !drag && !pan && !route) { reset(); own = false; root.dispatchEvent(new CustomEvent("hero:again")); }
     } else doneAt = 0;
     if (note && now >= note.dies) note = null;
     if (note) {
@@ -810,6 +901,17 @@ export function startMini(root: HTMLElement): void {
         ctx.beginPath(); ctx.moveTo(tx + 1, cy); ctx.lineTo(tx + 5, cy + 4); ctx.lineTo(tx + 12, cy - 4); ctx.stroke(); tx += 20;
       }
       ctx.fillStyle = "#FAFAFA"; ctx.font = `12px ${SANS}`; ctx.textAlign = "left"; ctx.fillText(text, tx, y + hgt / 2 + 1);
+      ctx.restore();
+    }
+    // The groups: a frame and a name for each cluster while it holds parts that are not on the board yet.
+    if (unplaced.size) {
+      ctx.save(); ctx.font = `11px ${SANS}`; ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+      meta.groups.forEach((g, gi) => {
+        if (!meta.parts.some((q) => q.group === gi && unplaced.has(q.id) && !unsorted.has(q.id))) return;
+        const p0 = px([g.box[0], g.box[1]]), p1 = px([g.box[2], g.box[3]]);
+        ctx.strokeStyle = "#7C8AA5"; ctx.strokeRect(Math.round(p0[0]) + 0.5, Math.round(p0[1]) + 0.5, Math.round(p1[0] - p0[0]), Math.round(p1[1] - p0[1]));
+        ctx.fillStyle = "#AEB9CF"; ctx.fillText(g.name, p0[0] + 6, p0[1] + 5);
+      });
       ctx.restore();
     }
     for (const a of actors) { const c = px(a.at); drawCursor(ctx, c[0], c[1], PEERS[a.who].name, PEERS[a.who].color, SANS); }

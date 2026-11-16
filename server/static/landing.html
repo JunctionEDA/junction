@@ -8,6 +8,15 @@
 <meta property="og:title" content="Junction">
 <meta property="og:description" content="KiCad with everyone on the same board. Shared cursors, live edits, comments and history, in the desktop app and in the browser.">
 <meta property="og:type" content="website">
+<meta property="og:site_name" content="Junction">
+<meta property="og:url" content="{{SITE}}/">
+<meta property="og:image" content="{{SITE}}/icon-512.png">
+<meta property="og:image:type" content="image/png">
+<meta property="og:image:width" content="512">
+<meta property="og:image:height" content="512">
+<meta property="og:image:alt" content="The Junction icon">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:image" content="{{SITE}}/icon-512.png">
 <meta name="theme-color" content="#001023">
 <link rel="icon" type="image/svg+xml" href="/brand/j2/icon.svg"><link rel="icon" type="image/png" sizes="192x192" href="/brand/j2/icon-192.png"><link rel="alternate icon" href="/brand/j2/favicon.ico" sizes="any"><link rel="apple-touch-icon" href="/brand/j2/icon-180.png">
 <script>document.documentElement.classList.add("js"); try { var t = localStorage.getItem("kui.theme"); if (t === "dark" || t === "light") document.documentElement.dataset.theme = t; } catch (e) {}</script>
@@ -95,6 +104,17 @@
   .win-bar b { font-weight: 500; color: var(--ink); }
   .win-bar .app { color: var(--ink-3); }
   .win-bar .sp, .win-status .sp, .win-tools .sp { flex: 1; }
+  .win-bar .tabs { display: flex; align-self: stretch; margin-left: -12px; }
+  .win-bar .tabs button { all: unset; box-sizing: border-box; display: flex; align-items: center; padding: 0 14px; font: 12px var(--mono); color: var(--ink-3); border-right: 1px solid var(--line); cursor: pointer; }
+  .win-bar .tabs button { white-space: nowrap; }
+  @media (max-width: 560px) { .win-bar .tabs .long { display: none; } }
+  .win-bar .tabs button:hover { color: var(--ink); }
+  .win-bar .tabs button[aria-selected="true"] { color: var(--ink); font-weight: 500; background: var(--paper); box-shadow: inset 0 -2px 0 var(--ink); }
+  .win-bar .tabs button:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+  #hero[data-view="pcb"] .sch-only, #hero[data-view="pcb"] canvas[data-sch] { display: none; }
+  #hero[data-view="sch"] .win-tools > :not(.sch-only), #hero[data-view="sch"] .win-status > :not(.sch-only), #hero[data-view="sch"] .win-side, #hero[data-view="sch"] .win-body > canvas:not([data-sch]) { display: none; }
+  #hero[data-view="sch"] .win-body { grid-template-columns: minmax(0, 1fr); }
+  .win-tools .cap-s { padding: 0 6px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .avs { display: flex; }
   .avs i { min-width: 22px; height: 22px; border-radius: 11px; background: var(--c); color: #fff; font: 600 10.5px/22px var(--font); text-align: center;
            font-style: normal; margin-left: -5px; box-shadow: 0 0 0 2px var(--bench); }
@@ -371,14 +391,19 @@
       </div>
     </div>
 
-    <div class="win rv" style="--i:4" id="hero" data-tool="select" data-layer="F.Cu">
+    <div class="win rv" style="--i:4" id="hero" data-tool="select" data-layer="F.Cu" data-view="pcb">
       <div class="win-bar">
-        <b>stm32-usbc.kicad_pcb</b><span class="app">PCB Editor</span>
+        <div class="tabs" role="tablist" aria-label="Open documents">
+          <button type="button" role="tab" data-tab="sch" aria-selected="false"><span class="long">stm32-usbc.</span>kicad_sch</button>
+          <button type="button" role="tab" data-tab="pcb" aria-selected="true"><span class="long">stm32-usbc.</span>kicad_pcb</button>
+        </div>
+        <span class="app" data-app>PCB Editor</span>
         <span class="sp"></span>
         <span class="live">live</span>
         <span class="avs" aria-label="Mara, Jun and Ada are in this file with you"><i style="--c:#A45BD6">M</i><i style="--c:#149C94">J</i><i style="--c:#D9822B">A</i><i class="you">You</i></span>
       </div>
       <div class="win-tools" role="toolbar" aria-label="Board editor">
+        <span class="sch-only cap-s" data-sch-cap>Mara, Jun and Ada are drawing the schematic. The board comes next.</span>
         <button type="button" class="tb" data-act="undo" title="Undo (Ctrl+Z)" aria-label="Undo" disabled><img class="il" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:%23545454;}%3C/style%3E%3C/defs%3E%3Cpath class='cls-1' d='m 10.692917,22 c -0.063,0 -0.125152,-9.16e-4 -0.18948,-0.0018 A 10.229771,9.8921921 0 0 1 3.2675531,18.943853 0.95053869,0.91917126 0 1 1 4.6338973,17.665656 8.4243054,8.1463063 0 0 0 16.741705,6.3362253 8.3960728,8.1190054 0 0 0 4.8465893,6.1295444 0.95071867,0.91934529 0 0 1 3.5283731,4.8045328 10.059049,9.7271043 0 0 1 10.872829,2.0037133 10.32669,9.9859126 0 0 1 20.998101,12.179816 10.325269,9.9845385 0 0 1 10.692917,22 Z' style='stroke-width:1;stroke-miterlimit:4;stroke-dasharray:none' /%3E%3Cpath class='cls-1' d='M 8.6954,9.4573 A 0.993,0.993 0 0 1 8.3911,9.4102 L 2.6976,7.5895 A 1.0049,1.0049 0 0 1 2,6.6319 v -5.63 a 1.0019,1.0019 0 1 1 2.0038,0 v 4.896 L 9,7.4953 a 1.0051,1.0051 0 0 1 -0.3046,1.962 z' style='stroke-width:1;stroke-miterlimit:4;stroke-dasharray:none' /%3E%3C/svg%3E"><img class="id" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:%23DED3DD;}%3C/style%3E%3C/defs%3E%3Cpath class='cls-1' d='m 10.692917,22 c -0.063,0 -0.125152,-9.16e-4 -0.18948,-0.0018 A 10.229771,9.8921921 0 0 1 3.2675531,18.943853 0.95053869,0.91917126 0 1 1 4.6338973,17.665656 8.4243054,8.1463063 0 0 0 16.741705,6.3362253 8.3960728,8.1190054 0 0 0 4.8465893,6.1295444 0.95071867,0.91934529 0 0 1 3.5283731,4.8045328 10.059049,9.7271043 0 0 1 10.872829,2.0037133 10.32669,9.9859126 0 0 1 20.998101,12.179816 10.325269,9.9845385 0 0 1 10.692917,22 Z' style='stroke-width:1;stroke-miterlimit:4;stroke-dasharray:none' /%3E%3Cpath class='cls-1' d='M 8.6954,9.4573 A 0.993,0.993 0 0 1 8.3911,9.4102 L 2.6976,7.5895 A 1.0049,1.0049 0 0 1 2,6.6319 v -5.63 a 1.0019,1.0019 0 1 1 2.0038,0 v 4.896 L 9,7.4953 a 1.0051,1.0051 0 0 1 -0.3046,1.962 z' style='stroke-width:1;stroke-miterlimit:4;stroke-dasharray:none' /%3E%3C/svg%3E"></button>
         <i class="sep"></i>
         <button type="button" class="tb" data-act="zoom-in" title="Zoom in (+)" aria-label="Zoom in"><img class="il" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:%23545454;}.cls-2{fill:none;stroke:%23545454;stroke-linecap:round;stroke-linejoin:round;stroke-width:2px;}%3C/style%3E%3C/defs%3E%3Cpath class='cls-1' d='M 9.9976493,18.999997 A 8.998129,8.9999987 0 1 1 16.362105,3.6373763 v 0 A 8.9954858,8.9973549 0 0 1 9.9976493,18.999997 Z m 0,-16.2787305 A 7.2800339,7.2815466 0 1 0 15.148695,4.8510385 7.2612755,7.2627843 0 0 0 9.9976493,2.7216076 Z' style='fill:%23545454;fill-opacity:1;stroke-width:1;stroke-miterlimit:4;stroke-dasharray:none' /%3E%3Cpath class='cls-1' d='M 21.941949,23.012172 A 1.071826,1.071826 0 0 1 21.181811,22.69715 l -6.176896,-6.176896 a 1.0927916,1.0927916 0 0 1 1.520275,-1.520382 l 6.177004,6.176896 a 1.075159,1.075159 0 0 1 -0.760245,1.835404 z' style='stroke-width:1' /%3E%3Cline class='cls-2' x1='6.5' y1='10.018' x2='13.494992' y2='10.018' /%3E%3Cline class='cls-2' x1='10' y1='6.5200853' x2='10' y2='13.515091' /%3E%3C/svg%3E"><img class="id" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:%23DED3DD;}.cls-2{fill:none;stroke:%23DED3DD;stroke-linecap:round;stroke-linejoin:round;stroke-width:2px;}%3C/style%3E%3C/defs%3E%3Cpath class='cls-1' d='M 9.9976493,18.999997 A 8.998129,8.9999987 0 1 1 16.362105,3.6373763 v 0 A 8.9954858,8.9973549 0 0 1 9.9976493,18.999997 Z m 0,-16.2787305 A 7.2800339,7.2815466 0 1 0 15.148695,4.8510385 7.2612755,7.2627843 0 0 0 9.9976493,2.7216076 Z' style='fill:%23DED3DD;fill-opacity:1;stroke-width:1;stroke-miterlimit:4;stroke-dasharray:none' /%3E%3Cpath class='cls-1' d='M 21.941949,23.012172 A 1.071826,1.071826 0 0 1 21.181811,22.69715 l -6.176896,-6.176896 a 1.0927916,1.0927916 0 0 1 1.520275,-1.520382 l 6.177004,6.176896 a 1.075159,1.075159 0 0 1 -0.760245,1.835404 z' style='stroke-width:1' /%3E%3Cline class='cls-2' x1='6.5' y1='10.018' x2='13.494992' y2='10.018' /%3E%3Cline class='cls-2' x1='10' y1='6.5200853' x2='10' y2='13.515091' /%3E%3C/svg%3E"></button>
@@ -394,13 +419,14 @@
       </div>
       <div class="win-body">
         <canvas tabindex="0" aria-label="A small board editor. The board is an STM32 USB-C development board. Three scripted teammates design it from the bare outline: they place the parts from a pile, route every connection, pour and stitch the ground planes and add the labels. On the way one of them leaves a review comment, another makes the change and the comment is resolved. Drag a footprint to move it, or pick the route tool and click two pads to join them; a teammate then puts your change back."></canvas>
+        <canvas data-sch aria-label="The schematic of the same STM32 USB-C board, drawn block by block by three scripted teammates: USB-C input, 3.3 V regulator, the microcontroller, the buttons, the LED and the edge pins. When it is complete the window turns to the board."></canvas>
         <div class="win-side" role="toolbar" aria-label="Tools" aria-orientation="vertical">
           <button type="button" class="tb" data-tool-btn="select" aria-pressed="true" title="Select and move (Esc)" aria-label="Select and move"><img class="il" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:%23545454;}%3C/style%3E%3C/defs%3E%3Cpath class='cls-1' d='m 7,4 4.18e-4,13.636621 3.013224,-2.910219 c 0.40646,0.927255 1.002473,2.296662 1.523834,3.492113 a 1.5317443,1.5317443 0 0 0 2.031021,0.78694 v 0 a 1.5537557,1.5537557 0 0 0 0.792899,-2.03839 C 13.840175,15.77142 13.243405,14.399854 12.836027,13.469757 L 17,13.184675 Z' style='stroke-width:1' /%3E%3C/svg%3E"><img class="id" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:%23DED3DD;}%3C/style%3E%3C/defs%3E%3Cpath class='cls-1' d='m 7,4 4.18e-4,13.636621 3.013224,-2.910219 c 0.40646,0.927255 1.002473,2.296662 1.523834,3.492113 a 1.5317443,1.5317443 0 0 0 2.031021,0.78694 v 0 a 1.5537557,1.5537557 0 0 0 0.792899,-2.03839 C 13.840175,15.77142 13.243405,14.399854 12.836027,13.469757 L 17,13.184675 Z' style='stroke-width:1;fill:%23DED3DD;fill-opacity:1' /%3E%3C/svg%3E"></button>
           <button type="button" class="tb" data-tool-btn="route" aria-pressed="false" title="Route tracks (X)" aria-label="Route tracks"><img class="il" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:none;stroke:%23545454;stroke-linecap:round;stroke-linejoin:round;stroke-width:2px;}%3C/style%3E%3C/defs%3E%3Cpath style='fill:none;stroke:%231a81c4;stroke-width:2px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1' transform='translate(-1,-1)' d='M 23,3 18.5,13 H 7.5 L 3,23' class='cls-1' /%3E%3C/svg%3E"><img class="id" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:none;stroke:%23DED3DD;stroke-linecap:round;stroke-linejoin:round;stroke-width:2px;}%3C/style%3E%3C/defs%3E%3Cpath style='fill:none;stroke:%2342B8EB;stroke-width:2px;stroke-linecap:round;stroke-linejoin:round;stroke-opacity:1' transform='translate(-1,-1)' d='M 23,3 18.5,13 H 7.5 L 3,23' class='cls-1' /%3E%3C/svg%3E"></button>
           <button type="button" class="tb" data-tool-btn="via" aria-pressed="false" title="Add via (V)" aria-label="Add via"><img class="il" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:%23f29100;}.cls-2{fill:%23b9b9b9;}%3C/style%3E%3C/defs%3E%3Ccircle class='cls-1' cx='12' cy='12' r='7' /%3E%3Ccircle class='cls-2' cx='12' cy='12' style='fill:%23ffffff;fill-opacity:1;stroke-width:1' r='3' /%3E%3C/svg%3E"><img class="id" alt="" width="22" height="22" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' data-name='Слой 1' viewBox='0 0 24 24' version='1.1'%3E%3Cdefs%3E%3Cstyle%3E.cls-1{fill:%23f29100;}.cls-2{fill:%238f8f8f;}%3C/style%3E%3C/defs%3E%3Ccircle class='cls-1' cx='12' cy='12' r='7' /%3E%3Ccircle class='cls-2' cx='12' cy='12' style='fill:%23e0e0e0;fill-opacity:1;stroke-width:1' r='3' /%3E%3C/svg%3E"></button>
         </div>
       </div>
-      <div class="win-status"><span class="hide-s" data-counts>Pads 100</span><span data-unrouted>Unrouted 73</span><span class="sp"></span><span class="hide-s" data-z>Z 1.00</span><span data-xy>X --.--  Y --.--</span><span class="hide-s">grid 0.25</span><span class="hide-s">mm</span><span class="hide-m" data-toolname>Select item(s)</span></div>
+      <div class="win-status"><span class="sch-only" data-sch-counts>Symbols 22</span><span class="sch-only">Nets 27</span><span class="sch-only sp"></span><span class="sch-only hide-s">grid 1.27</span><span class="sch-only">mm</span><span class="hide-s" data-counts>Pads 100</span><span data-unrouted>Unrouted 73</span><span class="sp"></span><span class="hide-s" data-z>Z 1.00</span><span data-xy>X --.--  Y --.--</span><span class="hide-s">grid 0.25</span><span class="hide-s">mm</span><span class="hide-m" data-toolname>Select item(s)</span></div>
     </div>
     <div class="keep">
       <p class="cap">Try it: this is the web editor's renderer on a real .kicad_pcb, an STM32 USB-C board. Mara, Jun and Ada are designing it from the bare outline: placing the parts, routing them, pouring the ground planes. When one of them leaves a review comment, another makes the change. Drag a part or a label, route a track (X), change layer and drop a via (V), and one of them comes over to put it back. Here they are scripted; in a project they are your teammates.</p>
@@ -518,7 +544,7 @@
           <li>Edit. People in the desktop app see you, and you see them.</li>
         </ol>
         <div class="acts"><a class="btn primary" data-signin data-long href="/auth/github/login?next=/"><span>Sign in with GitHub</span></a><a class="btn" href="/gallery">Browse public projects</a></div>
-        <p class="os">kicad.notaroomba.dev</p>
+        <p class="os">junctioneda.com</p>
       </div>
     </div>
 

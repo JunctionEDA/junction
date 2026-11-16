@@ -25,6 +25,7 @@
 #include <iterator>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include <wx/dir.h>
@@ -59,12 +60,13 @@ struct ARCHIVE
     const char* table;          ///< the library table at the top of the repository
 };
 
-// The project templates and drawing sheets come first and the symbols last: the symbols folder
-// is what marks the set as installed.
+// In the order they are downloaded: the footprints and symbols, which a design cannot do
+// without, before the project templates and drawing sheets.  (Putting them in place has its
+// own order, with the symbols folder last: it is what marks the set as installed.)
 const ARCHIVE ARCHIVES[] = {
-    { "kicad-templates", "templates", "", "" },
     { "kicad-footprints", "footprints", ".pretty", "fp-lib-table" },
     { "kicad-symbols", "symbols", ".kicad_symdir", "sym-lib-table" },
+    { "kicad-templates", "templates", "", "" },
 };
 
 
@@ -110,6 +112,28 @@ std::atomic<int>  s_percent( 0 );
 /// Set when the program closes during a download: the stop that follows is not the user's
 /// "no", so the download continues at the next start.
 std::atomic<bool> s_suspended( false );
+
+/// Where the standard libraries were looked for before a download put them in place.
+std::mutex            s_formerMutex;
+std::vector<wxString> s_formerDirs;
+
+/// For the progress text of the running Install(): the size of all the archives together when
+/// the server told it (0 when unknown), and the bytes of the archives that are complete.
+std::atomic<long long> s_allBytes( 0 );
+std::atomic<long long> s_doneBytes( 0 );
+
+
+/// "about 40 s", "about 3 min": how long a download still takes, for the progress text.
+wxString timeLeft( double aSeconds )
+{
+    if( aSeconds < 90 )
+        return wxString::Format( _( "about %d s left" ), std::max( 1, (int) ( aSeconds + 0.5 ) ) );
+
+    if( aSeconds < 5400 )
+        return wxString::Format( _( "about %d min left" ), (int) ( aSeconds / 60 + 0.5 ) );
+
+    return wxString::Format( _( "about %d h left" ), (int) ( aSeconds / 3600 + 0.5 ) );
+}
 
 
 wxString stoppedMessage()
@@ -342,6 +366,9 @@ wxString downloadOnce( const ARCHIVE& aArchive, const SOURCE& aSource, const wxS
     size_t     lastNow = 0;
     wxLongLong lastMoved = wxGetLocalTimeMillis();
 
+    // For the estimate of the time left: when data started to arrive in this attempt.
+    wxLongLong firstData = 0;
+
     KICAD_CURL_EASY curl;
 
     curl.SetURL( url.ToStdString( wxConvUTF8 ) );
@@ -368,9 +395,33 @@ wxString downloadOnce( const ARCHIVE& aArchive, const SOURCE& aSource, const wxS
                     return 1;
                 }
 
-                const wxString what = wxString::Format( _( "Downloading the %s (%.0f MB)..." ),
-                                                        wxString( aArchive.folder ),
-                                                        ( have + aNow ) / 1048576.0 );
+                // What is downloading, how much of how much, and how long it still takes:
+                // "Downloading symbols: 21 of 61 MB, about 40 s left".  The sizes are those of
+                // all three archives when the server told them, of this one otherwise.
+                const double mb = 1048576.0;
+                const long long fileTotal = aSource.size > 0 ? (long long) aSource.size
+                                            : aTotal > 0     ? (long long) ( have + aTotal )
+                                                             : 0;
+                const long long all = s_allBytes > 0 ? s_allBytes.load() : fileTotal;
+                const long long got = ( s_allBytes > 0 ? s_doneBytes.load() : 0 ) + have + aNow;
+
+                wxString what = wxString::Format( _( "Downloading %s:" ), wxString( aArchive.folder ) );
+
+                if( all > 0 )
+                    what += wxString::Format( _( " %.0f of %.0f MB" ), got / mb, all / mb );
+                else
+                    what += wxString::Format( _( " %.0f MB" ), got / mb );
+
+                if( aNow > 0 && firstData == 0 )
+                    firstData = wxGetLocalTimeMillis();
+
+                const double seconds = firstData == 0 ? 0.0
+                                       : ( wxGetLocalTimeMillis() - firstData ).ToDouble() / 1000.0;
+
+                // The speed needs a moment to mean something.
+                if( all > got && seconds >= 2.0 && aNow > 0 )
+                    what += wxS( ", " ) + timeLeft( ( all - got ) / ( aNow / seconds ) );
+
                 int percent = aStep * 33;
 
                 if( aSource.size > 0 )
@@ -595,7 +646,7 @@ wxString unpack( const ARCHIVE& aArchive, const wxString& aZip, const wxString& 
                     percent += (int) ( 16.0 * file.TellI() / size );
 
                 if( aProgress
-                    && !aProgress( wxString::Format( _( "Unpacking the %s (%d libraries)..." ),
+                    && !aProgress( wxString::Format( _( "Unpacking %s (%d libraries)..." ),
                                                      wxString( aArchive.folder ), libraries ),
                                    percent ) )
                 {
@@ -646,10 +697,51 @@ bool COLLAB_STDLIBS::Needed()
 }
 
 
+bool COLLAB_STDLIBS::IsDownloadableLibraryError( const wxString& aMessage )
+{
+    // A standard library that is not on this computer is not a fault to warn about while the
+    // set can be downloaded (or is on its way): the download is the answer, and it brings the
+    // library.  Anything else that fails to load is still reported.
+    wxString message = aMessage;
+    message.Replace( wxS( "\\" ), wxS( "/" ) );
+
+    // An error that names the folder the libraries were looked for in before the download put
+    // them elsewhere is left over from then (an editor that was open keeps it): the library
+    // is here now, at its new place.
+    {
+        std::lock_guard<std::mutex> lock( s_formerMutex );
+
+        for( const wxString& dir : s_formerDirs )
+        {
+            if( message.Contains( dir + wxS( "/" ) ) )
+                return true;
+        }
+    }
+
+    if( !Running() && !Needed() )
+        return false;
+
+    for( wxString dir : { PATHS::GetStockSymbolsPath(), PATHS::GetStockFootprintsPath(),
+                          PATHS::GetStockDesignBlocksPath(), PATHS::GetStock3dmodelsPath(),
+                          PATHS::GetManagedLibrariesPath() } )
+    {
+        dir.Replace( wxS( "\\" ), wxS( "/" ) );
+
+        while( dir.EndsWith( wxS( "/" ) ) )
+            dir.RemoveLast();
+
+        if( !dir.IsEmpty() && message.Contains( dir + wxS( "/" ) ) )
+            return true;
+    }
+
+    return false;
+}
+
+
 bool COLLAB_STDLIBS::Interrupted()
 {
-    return Needed()
-           && wxFileName::FileExists( downloadFolder() + wxFileName::GetPathSeparator()
+    // Also with libraries in place: a "download again" that was cut short continues too.
+    return wxFileName::FileExists( downloadFolder() + wxFileName::GetPathSeparator()
                                       + wxS( "in-progress" ) );
 }
 
@@ -810,6 +902,25 @@ static bool install( const COLLAB_STDLIBS::PROGRESS& aProgress, wxString* aError
     wxString error;
     int      step = 0;
 
+    // The size of everything, for the progress text, when the server told all of it.
+    long long allBytes = 0;
+
+    for( const ARCHIVE& archive : ARCHIVES )
+    {
+        auto it = fromServer.find( wxString( archive.folder ) );
+
+        if( it == fromServer.end() || it->second.size <= 0 )
+        {
+            allBytes = 0;
+            break;
+        }
+
+        allBytes += it->second.size;
+    }
+
+    s_allBytes = allBytes;
+    s_doneBytes = 0;
+
     for( const ARCHIVE& archive : ARCHIVES )
     {
         // The collaboration server first (a download can continue in the middle of a file
@@ -841,6 +952,9 @@ static bool install( const COLLAB_STDLIBS::PROGRESS& aProgress, wxString* aError
 
             wxRemoveFile( zip );
         }
+
+        if( error.IsEmpty() )
+            s_doneBytes += std::max<long long>( 0, fileSize( zip ) );
 
         if( !error.IsEmpty() )
         {
@@ -891,6 +1005,33 @@ void COLLAB_STDLIBS::Activate()
 
     PATHS::ForgetStockLibraryProbe();
 
+    // Remember where the libraries were looked for until now (see IsDownloadableLibraryError).
+    {
+        std::lock_guard<std::mutex> lock( s_formerMutex );
+
+        for( const auto& [dir, kind] : before )
+        {
+            wxString former = dir;
+            former.Replace( wxS( "\\" ), wxS( "/" ) );
+
+            while( former.EndsWith( wxS( "/" ) ) )
+                former.RemoveLast();
+
+            wxString now = kind == wxS( "symbols" )      ? PATHS::GetStockSymbolsPath()
+                           : kind == wxS( "footprints" ) ? PATHS::GetStockFootprintsPath()
+                           : kind == wxS( "3dmodels" )   ? PATHS::GetStock3dmodelsPath()
+                           : kind == wxS( "blocks" )     ? PATHS::GetStockDesignBlocksPath()
+                                                         : PATHS::GetStockTemplatesPath();
+            now.Replace( wxS( "\\" ), wxS( "/" ) );
+
+            while( now.EndsWith( wxS( "/" ) ) )
+                now.RemoveLast();
+
+            if( !former.IsEmpty() && former != now )
+                s_formerDirs.push_back( former );
+        }
+    }
+
     const std::map<wxString, wxString> after = {
         { wxS( "symbols" ), PATHS::GetStockSymbolsPath() },
         { wxS( "footprints" ), PATHS::GetStockFootprintsPath() },
@@ -917,8 +1058,9 @@ void COLLAB_STDLIBS::Activate()
         Pgm().SetLocalEnvVariables();
     }
 
-    // A global table written while there were no libraries is an empty list.  Give it the
-    // standard set now; a table that already lists anything is the user's and stays.
+    // A global table written while there were no libraries is an empty list: give it the
+    // standard set now.  A table that already lists libraries of the user's own keeps them and
+    // gets the standard set added when it is not in it yet.
     LIBRARY_MANAGER& manager = Pgm().GetLibraryManager();
 
     for( LIBRARY_TABLE_TYPE type : { LIBRARY_TABLE_TYPE::SYMBOL, LIBRARY_TABLE_TYPE::FOOTPRINT } )
@@ -929,7 +1071,28 @@ void COLLAB_STDLIBS::Activate()
         std::optional<LIBRARY_TABLE*> table = manager.Table( type, LIBRARY_TABLE_SCOPE::GLOBAL );
 
         if( !table || !*table || ( *table )->Rows().empty() )
+        {
             LIBRARY_MANAGER::CreateGlobalTable( type, true );
+            continue;
+        }
+
+        bool listed = false;
+
+        for( const LIBRARY_TABLE_ROW& row : ( *table )->Rows() )
+        {
+            if( row.Type() == LIBRARY_TABLE_ROW::TABLE_TYPE_NAME )
+                listed = true;
+        }
+
+        if( listed )
+            continue;
+
+        LIBRARY_TABLE_ROW& chained = ( *table )->InsertRow();
+        chained.SetType( LIBRARY_TABLE_ROW::TABLE_TYPE_NAME );
+        chained.SetNickname( wxT( "KiCad" ) );
+        chained.SetDescription( _( "KiCad Default Libraries" ) );
+        chained.SetURI( LIBRARY_MANAGER::StockTableReferenceURI( type ) );
+        ( *table )->Save();
     }
 
     manager.LoadGlobalTables();

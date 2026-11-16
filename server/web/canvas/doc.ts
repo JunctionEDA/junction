@@ -92,6 +92,11 @@ export function parseDoc(text: string, docType?: string): Doc {
     else if (k === "net") { if (type === "pcb") doc.nets.set(num(node[1], -1), str(node[2])); continue; }   // (net 3 "GND"): the board's net table
     else if (type === "pcb" && k === "setup") { const o = setupOrigins(node); doc.auxOrigin = o.aux; doc.gridOrigin = o.grid; doc.stackup = kid(node, "stackup") || null; doc.setupNode = node; continue; }   // the physical stackup is kept for impedance work   // the drill / place and grid origins
     else if (k === "embedded_files") { doc.embeddedFiles = node; continue; }   // read by the Simulation Model dialog (kicad-embed://)
+    else if (k === "symbol_instances" && type === "sch") {
+      const m = new Map<string, { reference: string; unit: number; value: string; footprint: string }>();
+      for (const p of kids(node, "path")) { const f = (key: string): string => { const c = kid(p, key); return c ? str(c[1]) : ""; }; m.set(str(p[1]), { reference: f("reference"), unit: num((kid(p, "unit") || [])[1], 1), value: f("value"), footprint: f("footprint") }); }
+      doc.legacySymbolInstances = m; continue;
+    }   // a KiCad 6 schematic's symbol_instances: each symbol's reference, unit, value and footprint by its path
     else if (k === "lib_symbols" || k === "generator" || k === "generator_version" || k === "general" || k === "setup" || k === "symbol_instances" || k === "embedded_fonts" || k === "embedded_files" || k === "uuid") continue;
     else if (type === "pcb" && PCB_KINDS.has(k) && doc.items.has(uuidOf(node))) (doc.dupItems || (doc.dupItems = [])).push({ id: uuidOf(node), node });   // a second item with an id: kept for Repair Board
     else addItem(doc, node);

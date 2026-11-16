@@ -44,7 +44,8 @@ Physics is decided before placement, not found by a review at the end.
 4. `board.autoplace(near=plan["place"]["near"], edges=plan["place"]["edges"])`.
 5. Ground zones on every layer that carries them.
 6. `board.prepare()`: antenna keep-outs and their ground vias, before the router can put copper there.
-7. `board.route(**plan["route"])`.
+7. `board.route(**plan["route"])`: critical nets, then inside each cluster, then power, then between clusters
+   (see "Cluster first").
 8. `board.finish()`: RF fences, thermal vias, the antenna's ground edge, stitching, refill.
 9. `board.review()` until clean.
 
@@ -100,6 +101,11 @@ layers or a coplanar feed. **checked** (`rf.feed` compares each RF track's width
 - Chip and trace antennas: no copper on any layer under or beside the antenna, sized to its datasheet (Johanson:
   ground more than 2 mm from the short edges and 4 mm from the long edge). `board.antenna(ref)` adds the keep-out.
   **checked**.
+- The ground right beside the clear area is the antenna's counterpoise, so it stays whole: a band of 1.2 mm round
+  the clear area holds only the feed, the matching network and ground vias. No decoupling capacitor, supply track
+  or signal via stands or runs there (owner, 2026-11-15: capacitors and a via hugging the keep-out edge are
+  "cooked"). **planned** (`seat`, `place_bypass`, `settle` keep parts out; the router keeps other nets out,
+  `antennaBand`), **checked** (`antenna.ground`, an error, so `design()` refuses the board).
 - Patch antennas (GPS, GNSS) are the opposite: unbroken ground under and around them. **checked**.
 - The ground edge facing the antenna, and the pours beside the feed, are stitched with vias no further apart than
   a twentieth of a wavelength in the board: about 2.9 mm at 2.45 GHz, 1.2 mm at 5.8 GHz, 4.5 mm at 1.575 GHz
@@ -116,6 +122,65 @@ layers or a coplanar feed. **checked** (`rf.feed` compares each RF track's width
   20 GHz PTFE. **planned** (`kh.materials.choose`), **checked** (`stackup.material`).
 - LNA and PA stages: input and output on opposite sides, ground vias at every ground pad, supply decoupled per
   stage with the smallest capacitor nearest the pin, DC feed through a choke.
+
+## Cluster first
+
+Said by the owner 2026-11-15 ("I grouped together some of the components and planned out how I would route INSIDE
+THOSE GROUPS FIRST", "this is critical"), with their Frost board and a USB-C PD controller as the examples, and
+measured on Ledify, Cyberboard, Ember and Frost: the pad of a small part sits a median 2.0 to 2.1 mm from the pin
+it serves (90th percentile 4.2 to 5.0 mm), and in 70 to 85 percent of cases its other end points away from the chip.
+
+1. A cluster is one chip and everything that serves it: bypass capacitors, pull-ups, series resistors, the crystal
+   and its load capacitors, a converter's inductor and capacitors, a connector's ESD part and CC resistors. The
+   parts ring the chip, each at the pin it serves, the pad on that net facing the pin, the ground or far end
+   outward, all within about one part length of the package.
+2. The connections inside a cluster are planned and routed first: short, on the parts' layer, no via. A connection
+   inside a cluster that needs a via or a detour means the cluster is built wrong.
+3. Only then are the clusters placed on the board, turned so the nets that leave face where they go.
+4. Then the tracks between clusters: critical nets (USB pair, RF feed, crystal) first, then power, then the rest.
+
+Where it lives: `board.autoplace` builds the clusters (`near=`, `seat`, `place_bypass`); the router
+(`web/router/route.ts`) finds the clusters (`opts.groups`, or from the board: a small part belongs to the nearest
+chip it shares a net with, within 5 mm pad to pad) and orders its queue critical nets, inside each cluster, power,
+fine-pitch escapes, the rest; its result carries `groups: {clusters, inside, insideRouted, insideVias}`.
+`board.design()` hands the plan's clusters to it and reports `routed.inside_groups`. A one-layer route may be 1.6
+times the straight line plus 5 mm before a layer change is taken instead, a via costs 12 mm of track, plain signals
+are widened to 0.2 mm where the clearances allow, and ground is stitched on a 2 mm grid: all four are what the
+owner's boards do. `scripts/board-bench.py` scores the router against those boards after every change.
+
+## Parts that serve a pin
+
+Said by the owner 2026-11-15 after a board where the CC resistors, the crystal and the matching network were
+placed by typed coordinates. One rule covers them all: a small part whose job is one pin of a larger part sits in
+front of that pin, turned so its far end points where its other net goes. `board.seat()` (run by `autoplace` and
+`design`) places them; `board.seating()` checks them; `design()` refuses a board that fails.
+
+- USB-C configuration resistors (5.1 k on CC1 and CC2) sit directly in front of their CC pins, ground ends
+  towards the outer edges of the connector. **planned**, **checked** (`usb.cc`).
+- Pull-ups, pull-downs, series resistors, LED resistors, regulator input and output capacitors and ESD parts sit
+  within 3 mm of the pin they serve. **planned**, **checked** (`serve.near`).
+- A crystal sits beside the oscillator pins, turned so its pads face the pins in the same order, so both nets
+  reach it on the top layer without a via; load capacitors on the far side, grounded at once. **planned**,
+  **checked** (`crystal.near`, `crystal.vias`).
+- A four-pad crystal has its two signal pads on a diagonal, so whichever way it is turned one ground pad lies
+  between the two tracks. Turn it so both tracks run straight from the pins without a jog and the other ground
+  pad faces open pour; the boxed-in ground pad takes one ground via beside it (a ground via is not a fault, a via
+  on XTAL_I or XTAL_O is). **planned**, **checked** (`crystal.vias`).
+- A matching network runs in a straight line from the RF pin to the antenna feed, series parts in line, shunts
+  beside the line with their ground ends away from it; the whole RF net no longer than 12 mm. Other nets do not
+  cross the antenna's clear area. **planned**, **checked** (`rf.match`, `rf.feed`).
+- A USB-C receptacle's twin data pins (D- D+ D- D+ in one row) are joined at the pads before anything is routed
+  (`board.bridge_twins()`, run by `design()`): a short U on each side of the row when the chip wants the pair in the
+  order of the outer pads, and otherwise the inner pads start the pair, one twin is joined by a U under the
+  connector and the other by a hop of a few millimetres on the back. The pair itself runs coupled and straight from
+  the connector to the chip with no via; never a loop round the connector. **planned**, **checked** (`usb.vias`
+  allows only that hop; `pairs.coupled`).
+- In the schematic a crystal is drawn inside its chip's frame, under the decoupling capacitors, joined by labels;
+  supply symbols on neighbouring pins stand one step apart in height, never on a long wire.
+- No part outside the board outline, none on top of another. **checked** (`placement.outside`,
+  `placement.clash`).
+- A layout that fails any of these, has open connections, DRC errors or review errors is refused by `design()`
+  and is not published or saved. Try layouts with a dry run, never on the live project.
 
 ## High-speed digital and interfaces
 
@@ -375,6 +440,8 @@ wavelength, thermal pad vias, stitching, fiducials, silkscreen). What they added
   clocks, fast lines and switch nodes over any run above 5 mm. An unstitched guard track does not help.
 - `vias.slot`: neighbouring vias leave room for plane copper between their clearance holes (two clearances plus
   0.15 mm). Four or more in a merged row longer than 4 mm are reported as a slot in the ground.
+- `cluster.inside`: a net that lives inside one cluster (a chip pin and the small parts on it, within 6 mm) has no
+  via and no wandering track; if it does, the cluster is built wrong (the owner's cluster-first rule, see above).
 - `bypass.order`: the supply reaches the pin through the capacitor (via, capacitor, pin), on a short pad-wide track.
 - `pads.entry`: a track leaves a fine-pitch pad through its end, in line with the pad, not sideways towards the
   next pin.
@@ -413,7 +480,8 @@ overlapping pieces of one net (#85); silkscreen 0.3 mm or more from the board ed
 | Fan-out of a fine-pitch part | spread out, room between vias | tight and orderly, grouped (and `vias.slot` asks only for the plane sliver between them) |
 | Decoupling on the back under the chip | common | all parts on the top side unless two sides cannot be avoided |
 | Silkscreen text | 1 mm or more | 0.5 mm references allowed on dense boards |
-| Board corners | always rounded | rounded only on product boards |
+
+Board corners are always rounded, as Phil's Lab does (owner, 2026-11-15; before that only on product boards): `board.outline()` draws a 1 mm radius and `design()` rounds the outline after placement.
 
 **Left to the router** (not automatic yet): preferring three track widths of spacing wherever there is room;
 breaking parallel tracks apart right after a pad row; a ground via placed beside each supply via; never cutting a

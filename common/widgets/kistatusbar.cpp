@@ -597,7 +597,23 @@ void KISTATUSBAR::updateAuxFieldWidths()
     bool jobActive = m_backgroundProgressBar && m_backgroundProgressBar->IsShown();
 
     if( std::optional<int> idx = fieldIndex( FIELD::BGJOB_LABEL ) )
-        m_fieldWidths[m_normalFieldsCount + *idx] = jobActive ? -1 : 0;
+    {
+        // Beside several fields (the editors) an equal share of the stretch leaves room for
+        // only a few words, so a job's text is cut short.  Give it room for a full line of
+        // progress there, up to two fifths of the bar.
+        int width = -1;
+
+        if( jobActive && m_normalFieldsCount > 1 && GetClientSize().x > 0 )
+        {
+            const int wanted = KIUI::GetTextSize(
+                    wxT( "Downloading footprints: 58 of 58 MB, about 3 min left" ), this ).x
+                               + 2 * padding;
+
+            width = std::min( wanted, GetClientSize().x * 2 / 5 );
+        }
+
+        m_fieldWidths[m_normalFieldsCount + *idx] = jobActive ? width : 0;
+    }
 
     if( std::optional<int> idx = fieldIndex( FIELD::BGJOB_GAUGE ) )
         m_fieldWidths[m_normalFieldsCount + *idx] = jobActive ? 75 : 0;

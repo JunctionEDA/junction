@@ -23,6 +23,9 @@ fixed["J2"] = (X0 + 1.57, Y0 + 1.42, 0)
 fixed["J3"] = (X0 + 1.57 + 25.4, Y0 + 1.42 + 48.26, 180)
 placed = board.autoplace(fixed=fixed, outline=(X0, Y0, X0 + W, Y0 + H))
 print("placed", placed["score"], "clashes", board.clashes())
+# the headers go underneath, pins down, the way a Pico sits on a breadboard or a carrier board
+for ref in ("J2", "J3", "J4"):
+    board.flip(ref)
 if len(board.info().get("copper_layers", [])) < 4:
     board.layers(4, planes=["In1.Cu", "In2.Cu"])
 board.zone("GND", layer="In1.Cu", connect="solid")
@@ -47,3 +50,6 @@ print("board", board.info())
 # silkscreen: references beside their parts, header pin names, board name and version
 board.rules(min_text_height=0.6)
 print("silk", board.silkscreen(rev="V1"))
+
+# every 3D model on its pads (pin 1 and the farthest pad)
+print("models", board.align_models())

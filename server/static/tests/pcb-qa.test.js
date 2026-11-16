@@ -130,11 +130,13 @@ test("a selection box that takes what it touches goes by shape: a diagonal track
 
 test("flip and rotate write a footprint's zero orientation the way pcbnew does: no angle at all", () => {
   const doc = load(); const fp = doc.items.get("fp-1");
-  const flipped = P.flipFootprintNode(K.cloneNode(fp.node));
+  const turned = P.flipFootprintNode(K.cloneNode(fp.node));
+  assert.deepEqual(K.kid(turned, "at"), ["at", 100, 50, 180], "FOOTPRINT::Flip (left / right) writes 180 - a");
+  const flipped = P.flipFootprintNode(P.rotateFootprintNode(K.cloneNode(fp.node), 180));
   assert.deepEqual(K.kid(flipped, "at"), ["at", 100, 50], "not (at 100 50 0)");
   assert.equal(K.str(K.kid(flipped, "layer")[1]), "B.Cu");
   const pads = K.kids(flipped, "pad");
-  assert.deepEqual(K.kid(pads[0], "at").slice(1), [1.5, 0, -90], "pad 1 mirrored in X, its angle negated");
+  assert.deepEqual(K.kid(pads[0], "at").slice(1), [-1.5, 0, -90], "pad 1 mirrored in Y (local), its relative angle negated, as PAD::Flip");
   assert.deepEqual(K.kid(pads[0], "layers").slice(1), ["B.Cu"]);
   assert.equal(K.str(K.kid(K.kids(flipped, "fp_line")[0], "layer")[1]), "B.SilkS");
   const back = P.rotateFootprintNode(P.rotateFootprintNode(K.cloneNode(fp.node), 90), -90);

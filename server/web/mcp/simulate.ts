@@ -1,8 +1,8 @@
 // simulate.ts — the `simulate` tool: the schematic (or a netlist the model writes) run through ngspice, the result
 // as a few numbers per signal and one plot.  The netlist is KiCad's own SPICE export (sim/spice-netlist.ts, the
 // exporter the editor's File > Export > Netlist uses); the simulator is the real ngspice compiled to WebAssembly
-// (npm eecircuit-engine, the build the plugin runtime ships as ngspice.mjs), run in a worker thread so a long or
-// diverging analysis can be stopped.
+// with XSPICE (scripts/ngspice-wasm/build.sh, the build the plugin runtime ships as ngspice.mjs), run in a worker
+// thread so a long or diverging analysis can be stopped.
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { ToolError } from "../ai/design";
 

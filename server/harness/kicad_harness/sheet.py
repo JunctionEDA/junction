@@ -190,6 +190,7 @@ class Blocks:
             self.netpins.setdefault(net, []).append((ref, num))
         self.done: set = set()
         self.force: set = set()     # nets that carry a label in their block after all
+        self.subs: dict = {}        # {group: [(name, refs)]}: small blocks drawn inside a group's frame and joined to it by labels (a crystal)
         self.done_nets: set = set()  # nets whose IC pin has been drawn
         self.problems: list = []
         self._offs: dict = {}
@@ -940,14 +941,18 @@ class Blocks:
                 n = 3 if near and prev[1] == 1 else 1
                 if railed and power[0]["x"] < p["x"] < power[-1]["x"]:
                     n = 3       # a pin of another supply under a shared rail: its symbol stands above that rail's
+                n0 = n
                 if natural(net) and side == "top":
                     for tries in range(8):
                         E = (p["x"], p["y"] + v * (n * G + (STUB if n == 1 else 0)))
                         me, wire = self.sym_rect(net, E), _rect(p["x"] - 0.2, E[1], p["x"] + 0.2, p["y"])
                         if not any(_hit(_rect(me[0] - 0.4, me[1] - 0.3, me[2] + 0.4, me[3] + 0.3), b) for b in stood) \
-                                and not any(_hit(wire, b) for b in stood if b[3] - b[1] > 1.0):     # a wire may cross a rail, not a name
+                                and not any(_hit(wire, _rect(b[0] + 0.8, b[1], b[2] - 0.8, b[3])) for b in stood if b[3] - b[1] > 1.0 and b[2] - b[0] > 1.6):     # a wire may cross a rail and pass the end of a name, not go through one
                             break
                         n += 2
+                    else:
+                        n = n0      # no height clears everything: one step above the neighbour, not a wire to the top of the sheet
+                        E = (p["x"], p["y"] + v * (n * G + (STUB if n == 1 else 0)))
                     stood.append(self.sym_rect(net, E))
 
                 E = (p["x"], p["y"] + v * (n * G + (STUB if n == 1 else 0)))
@@ -1026,6 +1031,65 @@ class Blocks:
         self.emit(ops)
         return [ref]
 
+    def pi(self, g, ref) -> list | None:
+        """A matching network or filter drawn the way a textbook draws it: the series part lying in line on one wire
+        from the net that comes in (its label at the left) to the part the chain ends on (an antenna, at the right), and
+        every shunt part hanging straight down from its node to its ground or supply symbol.  `ref` is the series part:
+        a two pin part between two signal nets of which at least one carries a shunt.  Returns the parts drawn in
+        line, or None when `ref` is not the middle of such a network (the caller draws it as a plain chain)."""
+        nums = list(self.offs(ref))
+        nets = [self.intent.get((ref, n)) for n in nums]
+        if len(nums) != 2 or not all(n and self.kind(n) == "sig" for n in nets) or nets[0] == nets[1]:
+            return None
+        def shunts(net):
+            return [r for r in self.smalls_on(net, g, skip=(ref,)) if self.kind(self.other(r, net)[2]) in ("gnd", "sup")]
+        def series_on(net):
+            return [r for r in self.smalls_on(net, g, skip=(ref,)) if self.kind(self.other(r, net)[2]) == "sig"]
+        if not (shunts(nets[0]) or shunts(nets[1])) or series_on(nets[0]) or series_on(nets[1]):
+            return None      # longer ladders stay with the chain drawer
+        if self.on_ic(nets[0], g) or self.on_ic(nets[1], g):
+            return None      # it hangs on a chip drawn in this block: the chip's own wires carry it
+        # the end with the terminal (the antenna) is the right-hand end; else the end whose net stays inside the block
+        a, b = nets
+        if self.terminals(a, g) and not self.terminals(b, g):
+            a, b = b, a
+        elif not self.terminals(b, g) and self.need_label(b, g) and not self.need_label(a, g):
+            a, b = b, a
+        x, y = SCRATCH
+        ops: list = []
+        step = 4 * G
+        def hang(net, x0):
+            """The shunts of one node, side by side under the wire; returns the x where the wire may go on."""
+            for i, r in enumerate(shunts(net)):
+                nx = x0 + i * step
+                pin, _, far_net = self.other(r, net)
+                ops.append(("wire", [(nx, y), (nx, y + G)]))
+                far = self.put(ops, r, (nx, y + G), pin, (0, -1))
+                ops.append(("sym", far_net, far))
+                ops.append(("dot", (nx, y)))
+            return x0 + max(0, len(shunts(net)) - 1) * step
+        ops += self.lab(a, (x, y), -1, gap=0)[0]
+        xa = hang(a, x + 2 * G) if shunts(a) else x
+        pin_a = nums[nets.index(a)] if nets[0] != nets[1] else nums[0]
+        xs = xa + 2 * G
+        far = self.put(ops, ref, (xs, y), pin_a, (-1, 0))
+        ops.append(("wire", [(x, y), (xs, y)]))
+        xb = hang(b, far[0] + 2 * G) if shunts(b) else far[0]
+        end = (xb + 2 * G, y)
+        ops.append(("wire", [far, end]))
+        term = self.terminals(b, g)
+        if term:
+            t, num = term[0]
+            o = self.offs(t, 0)[num]
+            ops.append(("part", t, (end[0] + 2 * G - o[0], y - o[1]), 0))
+            ops.append(("wire", [end, (end[0] + 2 * G, y)]))
+        elif self.need_label(b, g):
+            ops += self.lab(b, end, 1)[0]
+        else:
+            return None
+        self.emit(ops)
+        return [ref]
+
     # ---- the clusters of one block, side by side
     def settle(self, inline, at) -> list | None:
         """Fields into place, then the cluster as drawn is measured and moved so its top left corner is at `at`."""
@@ -1100,6 +1164,22 @@ class Blocks:
                 for i in range(0, len(rs), size):
                     self.bank(rs[i:i + size], sup, gnd)
                     beside([])
+            for name, mine in self.subs.get(g, []):      # a crystal with its capacitors: a row of its own under the decoupling capacitors, joined to the chip by labels
+                if cx > cx0:
+                    cx, cy, row = cx0, cy + row + 4 * G, 0.0
+                for r in mine:
+                    if r not in self.done and not self.small(r):
+                        beside(self.big(name, r))
+                for r in mine:
+                    if r not in self.done:
+                        beside(self.chain(name, r))
+                placed += mine
+            for r in refs:      # a matching network: series part in line, shunts hanging down
+                if r in self.done or not self.small(r):
+                    continue
+                drawn = self.pi(g, r)
+                if drawn:
+                    beside(drawn)
             for labelled in (True, False):      # chains that start from a net's label first, then what is left
                 for r in refs:
                     if r in self.done:

@@ -22,7 +22,7 @@ import { fitMenu, menuScroller, menuSize, placeMenu } from "../menufit";
 import { cx } from "../util";
 import { usePluginMenus } from "../plugins/PluginUi";
 import { PRODUCT_VERSION } from "../generated/product-version";
-import { KIcon } from "./Icon";
+import { ComboArrow, KIcon, MenuArrow, MenuCheck } from "./Icon";
 import { ICON_URL } from "../brand";
 
 // ---------------------------------------------------------------- the menu tree
@@ -153,7 +153,7 @@ function AppMenu({ inEditor }: { inEditor: boolean }) {
         onKeyDown={(ev) => { if (!open && (ev.key === "Enter" || ev.key === " " || ev.key === "ArrowDown")) { ev.preventDefault(); setOpen(true); setSel(items[0] ?? -1); } }}>
         <img className="logo w-4.5 h-4.5 block" src={ICON_URL} alt="" />
         <span className="max-[1100px]:hidden">Junction</span> <span className="ver max-[1100px]:hidden text-xs font-mono font-normal leading-[normal] text-ink-3">{PRODUCT_VERSION}</span>
-        <span className="text-2xs text-ink-3" aria-hidden="true">▾</span>
+        <ComboArrow className="text-ink-3" />
       </button>
       {open && r ? (
         <div id="appMenu" role="menu" ref={panel} className={PANEL} style={{ left: r.left, top: r.bottom + 2 }}>
@@ -217,7 +217,7 @@ function Panel({ nodes, depth, anchor, parentPanel, sel, open, c, onHover, onEnt
             <div key={"sub" + n.title} data-idx={i} data-sub={n.title} role="menuitem" aria-haspopup="true" aria-expanded={openIdx === i}
               className={cx(ROW, "sub", active ? "bg-accent text-on-accent" : "bg-transparent")} onMouseMove={() => onHover(depth, i)} onClick={() => onOpenSub(depth, i)}>
               <span className="w-5 h-4 mr-1.5 shrink-0 flex items-center justify-center">{icon ? <KIcon name={icon} size={16} /> : null}</span>
-              <span className="flex-1">{n.title}</span><span className="ml-6 text-2xs opacity-70">▶</span>
+              <span className="flex-1">{n.title}</span><MenuArrow className="ml-6" />
               {openIdx === i ? <Panel nodes={n.nodes} depth={depth + 1} anchor={rectOf(i)} parentPanel={ownRect} sel={sel} open={open} c={c} onHover={onHover} onEnterPanel={onEnterPanel} onRun={onRun} onOpenSub={onOpenSub} /> : null}
             </div>
           );
@@ -229,7 +229,7 @@ function Panel({ nodes, depth, anchor, parentPanel, sel, open, c, onHover, onEnt
         const title = id === "undo" && c.undo.undo ? `${c.undo.undo} step${c.undo.undo === 1 ? "" : "s"}` : id === "redo" && c.undo.redo ? `${c.undo.redo} step${c.undo.redo === 1 ? "" : "s"}` : why || off || undefined;
         const body: ReactNode = (
           <>
-            <span className="w-5 h-4 mr-1.5 shrink-0 flex items-center justify-center text-base leading-none" data-check={checkable ? (on ? "on" : "off") : undefined}>{on ? "✓" : icon ? <KIcon name={icon} size={16} /> : null}</span>
+            <span className="w-5 h-4 mr-1.5 shrink-0 flex items-center justify-center text-base leading-none" data-check={checkable ? (on ? "on" : "off") : undefined}>{checkable ? <MenuCheck on={on} /> : icon ? <KIcon name={icon} size={16} /> : null}</span>
             <span className="flex-1">{label}</span>{k ? <kbd className={cx(KBD, active && !off && "text-on-accent")}>{menuKey(k)}</kbd> : null}
           </>
         );

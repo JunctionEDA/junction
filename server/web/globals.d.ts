@@ -41,6 +41,9 @@ interface KDoc {
   version?: number;
   /** board-level items read after another one with the same uuid (canvas/doc.ts parseDoc), in file order */
   dupItems?: { id: string; node: SNode }[];
+  /** a root schematic older than 20221002: its (symbol_instances …), each symbol's reference, unit and value by its
+   *  path from the root (no root uuid), which SCH_SHEET_LIST::UpdateSymbolInstanceData applies on load */
+  legacySymbolInstances?: Map<string, { reference: string; unit: number; value: string; footprint: string }>;
 }
 
 /** A collaboration op change (the item-level LWW protocol shared with the desktop). */

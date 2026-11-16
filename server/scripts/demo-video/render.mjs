@@ -2,7 +2,9 @@
 // how fast, which caption), has compose.html draw every frame in a browser, and encodes with ffmpeg.
 // Numbers in the captions are read from what the recorded runs returned (out/state.json), not typed in.
 //
-//   node render.mjs [--stills]          → out/junction-demo.mp4 and out/junction-demo-poster.jpg (--stills: two frames a scene)
+//   node render.mjs [--stills] [--music piece.wav [--from-start]] [--out name]   → out/<name>.mp4 (default junction-demo) and its poster
+//   --music: the soundtrack; every cut lands on one of its beats (beats.py), and by default the piece is started so its
+//   closing chord comes with the end card (--from-start: from its beginning)
 //
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,44 +28,105 @@ const ONE = { x: 160, y: 50, w: 1600, h: 900 };
 const scenes = []; let at = 0;
 const add = (s) => { s.start = +at.toFixed(3); at += s.length; scenes.push(s); return s; };
 // a stretch [from, to] of a take, shown for `show` seconds (so its speed is what it has to be)
-function footage(name, { from, to, show, captions, split, cutIn, cutOut }) {
+// several windows of one take, each with its own place on screen (and where it slides from): wins [{ dir, x, y, w, h, from, label, toasts }]
+function multi(name, { from, to, show, captions, cutIn, cutOut, wins }) {
+  const windows = wins.map((w) => { const t = take(w.dir ? `${name}/${w.dir}` : name); return { ...w, dir: t.dir, frames: t.frames }; });
+  const speed = (to - from) / show;
+  return add({ kind: 'footage', name, from, speed: +speed.toFixed(3), length: show, windows, cutIn: !!cutIn, cutOut: !!cutOut,
+    captions: captions.map((c, i) => ({ text: c, at: (show * i) / captions.length, until: (show * (i + 1)) / captions.length })) });
+}
+function footage(name, { from, to, show, captions, split, cutIn, cutOut, chat, toasts, zoom, follows }) {
   const takes = split ? split.map((s) => take(`${name}/${s.dir}`)) : [take(name)];
   from = from ?? 0; to = to ?? takes[0].length;
   const windows = split
     ? takes.map((t, i) => ({ x: 10 + i * 956, y: 110, w: 944, h: 800, dir: t.dir, frames: t.frames, label: split[i].label, chat: split[i].chat }))
-    : [{ ...ONE, dir: takes[0].dir, frames: takes[0].frames }];
+    : [{ ...ONE, dir: takes[0].dir, frames: takes[0].frames, chat, toasts, zoom: zoom && zoom.s !== 1 ? zoom : null, follows }];
   const speed = (to - from) / show;
   // cutIn / cutOut: this stretch continues the one before / after it (same take, another speed), so no fade there
   return add({ kind: 'footage', name, from, speed: +speed.toFixed(3), length: show, windows, cutIn: !!cutIn, cutOut: !!cutOut,
     captions: captions.map((c, i) => ({ text: c, at: (show * i) / captions.length, until: (show * (i + 1)) / captions.length })) });
 }
 
-const sch = state.schematic, ai = state.ai, rt = state.route, fin = state.finish;
-const [aiItems] = num(ai.output, /added (\d+) items/);
-const split = (chat) => [{ dir: 'ada', label: 'Ada' }, { dir: 'ben', label: 'Ben', chat }];
+const S = state.schematic, AI = state.ai, R = state.route, H = state.history;
+const COL = { ben: '#2a9d63', chloe: '#9a63d1', dev: '#1f9fb8', ada: '#d9822b' };
+const NAME = { ben: 'Ben', chloe: 'Chloé', dev: 'Dev' };
+const BOARD_ZOOM = { s: 1.0, x: 0.5, y: 0.5 };
+const beat = (name, opts) => fs.existsSync(path.join(OUT, name, 'frames.json')) && footage(name, opts);
 
-add({ kind: 'title', length: 3.2, title: 'Junction', sub: 'Design hardware together, live.' });
-// Ada and Ben draw the Pico schematic, each in their own browser
-footage('schematic', { from: 0, to: sch.length, show: 20, split: split(), captions: [
-  'Ada and Ben draw a Raspberry Pi Pico board in one schematic, each in their own browser',
-  'Each sees the other\'s cursor, and every part and wire the moment it goes in',
-  `${sch.ada + sch.ben} items between them, ${sch.ada} by Ada and ${sch.ben} by Ben` ] });
-// stuck on the crystal: Ben asks an AI app connected to the project
-const ask = ai.marks.ask, call = ai.marks.call, done = ai.marks.done;
-footage('ai', { from: 0, to: call, show: call * 0.9, cutOut: true, split: split({ x: 30, y: 470, head: 'BEN\'S AI APP · CONNECTED TO JUNCTION', at: ask * 0.9 - 0.2, until: 99,
-  lines: [{ who: 'Ben', text: 'We\'re stuck on the crystal. Can you add the 12 MHz circuit from the RP2040 design guide?', at: ask * 0.9, typing: 2.2 }] }), captions: [
-  'They get stuck on the 12 MHz crystal and leave a gap', 'Ben asks the AI app he has connected to the project'] });
-footage('ai', { from: call, to: done + 1.5, show: Math.min(12, (done + 1.5 - call)), cutIn: true, split: split({ x: 30, y: 470, head: 'BEN\'S AI APP · CONNECTED TO JUNCTION', at: -1, until: 99,
-  lines: [{ who: 'Ben', text: 'We\'re stuck on the crystal. Can you add the 12 MHz circuit from the RP2040 design guide?', at: -1 },
-          { who: 'Claude', ai: true, text: 'Adding it through Junction\'s run_python tool, one item at a time.', at: 0.2, typing: 1.2 }] }), captions: [
-  'The AI works in the same file, with its own cursor: "Ben (Claude)"', `${aiItems} items added; both editors see each one land`] });
-// routing, animated
-footage('route', { from: 0, to: rt.length, show: Math.min(20, rt.length), split: split(), captions: [
-  'Then they route the board together, track by track',
-  `${rt.tracks} track segments and ${rt.vias} vias, each by the person whose half of the board it is in`] });
-footage('finish', { from: fin.marks.fill - 0.3, to: fin.marks.open3d, show: 3.5, cutOut: true, captions: [fin.unconnected ? `Ground planes in and filled; ${fin.unconnected} connections left` : 'Ground planes in and filled: every connection made'] });
-footage('finish', { from: fin.marks.loaded - 0.6, show: Math.min(7, fin.length - fin.marks.loaded + 0.6), cutIn: true, captions: ['The finished board in the 3D viewer'] });
-add({ kind: 'title', length: 4, title: 'Junction', sub: 'Design hardware together, live.', code: 'github.com/notaroomba/junction' });
+const frameOf = (name, t) => { const m = take(name); const f = m.frames.filter((x) => x.t <= t).pop() || m.frames[m.frames.length - 1]; return `${m.dir}/${f.file}`; };
+// Everything plays at the speed it was recorded (1×): the people working together are shown whole, the other
+// features are short cuts from the middle of their takes.
+const cut = (name, from, len, opts = {}) => { const t = take(name); from = Math.max(0, Math.min(from, t.length - 0.2)); len = Math.min(len, t.length - from); return footage(name, { from, to: from + len, show: len, ...opts }); };
+const beatAt = (name, from, len, captions) => fs.existsSync(path.join(OUT, name, 'frames.json')) && cut(name, from, len, { captions });
+// Straight into the schematic: Ada starts alone, and each time someone joins, the view closes in on their cursor.
+{
+  const follows = ['ben', 'chloe', 'dev'].filter((w) => S.follow && S.follow[w] && S.follow[w].length)
+    .map((w) => ({ who: w, t0: S.follow[w][0][0], len: 3.4, s: 2.1, sx: 1, track: S.follow[w] }));
+  const toasts = follows.map((f) => ({ at: f.t0 + 0.25, text: `${NAME[f.who]} joined`, color: COL[f.who] }));
+  cut('schematic', 0, S.length, { follows, toasts, captions: [''] });
+}
+// the board: outline and Update PCB; each block built as a cluster and routed inside, then put on the board;
+// all four route between the blocks; the planes fill
+{
+  const B = state.build, M = B.marks;
+  cut('build', 0, M.updated, { cutOut: true, captions: ['Edge.Cuts', 'Update PCB from Schematic'] });
+  const fast = (from, to, max) => { const len = to - from; return Math.min(len, max); };
+  footage('build', { from: M.updated, to: M.clustered, show: fast(M.updated, M.clustered, 22), cutIn: true, cutOut: true, captions: ['Placement, block by block'] });
+  footage('build', { from: M.clustered, to: M.onboard, show: fast(M.clustered, M.onboard, 20), cutIn: true, cutOut: true, captions: ['Routing inside each block'] });
+  footage('build', { from: M.onboard, to: M.route, show: fast(M.onboard, M.route, 8), cutIn: true, cutOut: true, captions: ['Blocks onto the board'] });
+  footage('build', { from: M.route, to: M.routed, show: fast(M.route, M.routed, 24), cutIn: true, cutOut: true, zoom: BOARD_ZOOM, captions: ['Routing'] });
+  cut('build', M.routed, Math.min(3.5, B.length - M.routed), { cutIn: true, zoom: BOARD_ZOOM, captions: ['Zone fill'] });
+}
+// the rest: cuts of their own
+{
+  const from = Math.max(0, AI.marks.ask - 1.2), len = Math.min(AI.length, AI.marks.accept + 3) - from, at = (m) => AI.marks[m] - from;
+  cut('ai', from, len, { chat: { x: 1010, y: 560, head: 'AI CHAT', at: 0, until: at('card') - 0.2,
+    lines: [{ who: 'Ada', text: 'Can you add the 12 MHz crystal circuit from the RP2040 design guide?', at: at('ask'), typing: 1.4 },
+            { who: 'Claude', ai: true, text: 'Here is where it goes. I\'ll propose it for you to check.', at: at('highlight') + 0.3, typing: 0.9 }] },
+    captions: ['AI assistant over MCP'] });
+}
+beatAt('history', 0, state.history.length, ['History']);
+if (state.parts) { const P = state.parts, from = Math.max(0, (P.marks.search || 0) - 1.5); beatAt('parts', from, P.length - from, ['LCSC, Mouser and DigiKey parts']); }
+beatAt('plugins', 0.5, Math.min(10, state.plugins.length - 0.5), ['Plugins']);
+beat('github', { show: 7, captions: ['GitHub sync'] });
+beatAt('fab', 0, state.fab.length, ['Fabrication outputs']);
+beatAt('viewer3d', state.viewer3d.marks.loaded - 0.2, state.viewer3d.length - state.viewer3d.marks.loaded + 0.2, ['3D viewer']);
+add({ kind: 'end', length: 4.5, bg: '', title: 'Junction', sub: '', links: ['junctioneda.com'] });
+
+// On the beat: every cut lands on a beat of the music (a strong one when one is near), by stretching or squeezing
+// the scene before it a little; a join's zoom starts on a beat too.
+const MUSIC = (() => { const i = process.argv.indexOf('--music'); return i > 0 ? process.argv[i + 1] : null; })();
+let music = null;
+if (MUSIC) {
+  const bj = MUSIC.replace(/\.[^.]+$/, '.beats.json');
+  if (!fs.existsSync(bj)) execFileSync('python3', [path.join(here, 'beats.py'), MUSIC, bj], { stdio: 'inherit' });
+  const B = JSON.parse(fs.readFileSync(bj, 'utf8'));
+  // where in the piece the video starts: the closing chord falls as the end card comes up, if the piece is long enough
+  const endAt = scenes[scenes.length - 1].start;
+  const offset = process.argv.includes('--from-start') ? 0 : Math.max(0, B.last_hit - endAt);
+  const beats = B.beats.map((t) => t - offset).filter((t) => t > 0.5), strong = new Set(B.strong.map((t) => +(t - offset).toFixed(3)));
+  const near = (t, win) => { let best = null; for (const b of beats) { const d = Math.abs(b - t), w = strong.has(+b.toFixed(3)) ? d * 0.6 : d; if (d <= win && (!best || w < best.w)) best = { b, w }; } return best ? best.b : t; };
+  let t = 0;
+  for (const sc of scenes) {
+    const want = t + sc.length; const isLast = sc === scenes[scenes.length - 1];
+    const land = isLast ? want : near(want, Math.min(0.6, sc.length * 0.12));
+    const len = Math.max(0.5, land - t);
+    if (sc.kind === 'footage') {
+      sc.speed = +((sc.speed * sc.length) / len).toFixed(4);
+      for (const c of sc.captions) { c.at *= len / sc.length; c.until *= len / sc.length; }
+      for (const w of sc.windows) {
+        for (const ts of w.toasts || []) ts.at *= len / sc.length;
+        if (w.chat) { const k = len / sc.length; w.chat.at *= k; w.chat.until *= k; for (const l of w.chat.lines) l.at *= k; }
+        // a zoom starts on a beat
+        for (const f of w.follows || []) { const v = t + (f.t0 - sc.from) / sc.speed, vb = near(v, 0.3); f.t0 = sc.from + (vb - t) * sc.speed; }
+      }
+    }
+    sc.length = +len.toFixed(3); sc.start = +t.toFixed(3); t += len;
+  }
+  at = t;
+  music = { file: MUSIC, offset };
+  console.log(`music ${path.basename(MUSIC)} from ${offset.toFixed(2)} s, tempo ${B.tempo.toFixed(0)}; cuts on`, scenes.map((s2) => s2.start.toFixed(2)).join(' '));
+}
 const timeline = { length: +at.toFixed(3), fps: FPS, icon: pathToFileURL(path.join(here, '..', '..', 'static', 'icon.svg')).href, scenes };
 fs.writeFileSync(path.join(OUT, 'timeline.json'), JSON.stringify({ ...timeline, scenes: scenes.map((s) => ({ ...s, windows: s.windows && s.windows.map((w) => ({ ...w, frames: w.frames.length })) })) }, null, 1));
 console.log(`timeline ${timeline.length.toFixed(1)} s:`, scenes.map((s) => `${s.name || s.kind} ${s.length.toFixed(1)}s${s.speed ? ' ×' + s.speed.toFixed(1) : ''}`).join(', '));
@@ -74,16 +137,17 @@ await page.goto(pathToFileURL(path.join(here, 'compose.html')).href);
 await page.evaluate((t) => window.load(t), timeline);
 const stills = process.argv.includes('--stills');
 // the README's poster: a frame of the AI scene (both people and the AI's cursor), with a play button on it
-const posterAt = scenes.filter((s) => s.name === 'ai')[1]; await page.evaluate((t) => window.seek(t), posterAt.start + posterAt.length * 0.55);
+const posterAt = scenes.filter((s) => s.name === 'schematic').pop(); await page.evaluate((t) => window.seek(t), posterAt.start + posterAt.length * 0.8);
 await page.evaluate(() => { const d = document.createElement('div'); d.id = 'play'; d.style.cssText = 'position:absolute;left:50%;top:50%;width:150px;height:150px;margin:-75px 0 0 -75px;border-radius:50%;background:rgba(10,10,12,.78);box-shadow:0 0 0 2px rgba(255,255,255,.85)';
   d.innerHTML = '<div style="position:absolute;left:60px;top:45px;border-left:46px solid #fff;border-top:30px solid transparent;border-bottom:30px solid transparent"></div>'; document.getElementById('stage').appendChild(d); });
-await page.screenshot({ path: path.join(OUT, 'junction-demo-poster.jpg'), type: 'jpeg', quality: 86 });
+await page.screenshot({ path: path.join(OUT, `${(() => { const i = process.argv.indexOf('--out'); return i > 0 ? process.argv[i + 1] : 'junction-demo'; })()}-poster.jpg`), type: 'jpeg', quality: 86 });
 await page.evaluate(() => document.getElementById('play').remove());
-const mp4 = path.join(OUT, 'junction-demo.mp4');
+const tag = (() => { const i = process.argv.indexOf('--out'); return i > 0 ? process.argv[i + 1] : 'junction-demo'; })();
+const mp4 = path.join(OUT, `${tag}.mp4`);
 if (stills) {
   for (const s of scenes) for (const k of [0.3, 0.75]) { await page.evaluate((t) => window.seek(t), s.start + s.length * k); await page.screenshot({ path: path.join(OUT, `still-${String(scenes.indexOf(s)).padStart(2, '0')}-${k}.jpg`), type: 'jpeg', quality: 80 }); }
 } else {
-  const ff = spawn('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-', '-c:v', 'libx264', '-preset', 'slow', '-crf', '24', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4], { stdio: ['pipe', 'inherit', 'inherit'] });
+  const ff = spawn('ffmpeg', ['-loglevel', 'error', '-y', '-f', 'image2pipe', '-framerate', String(FPS), '-c:v', 'mjpeg', '-i', '-', '-c:v', 'libx264', '-preset', process.argv.includes('--final') ? 'slow' : 'veryfast', '-crf', '24', '-pix_fmt', 'yuv420p', '-movflags', '+faststart', mp4], { stdio: ['pipe', 'inherit', 'inherit'] });
   const total = Math.round(timeline.length * FPS);
   for (let i = 0; i < total; i++) {
     await page.evaluate((t) => window.seek(t), i / FPS);
@@ -92,6 +156,14 @@ if (stills) {
     if (i % 300 === 0) console.log(`  frame ${i} of ${total}`);
   }
   ff.stdin.end(); await new Promise((r) => ff.on('close', r));
+  if (music) {
+    // the soundtrack: from the chosen point of the piece, faded in briefly and out under the end card
+    const silent = mp4.replace(/\.mp4$/, '.video.mp4'); fs.renameSync(mp4, silent);
+    const L = timeline.length, fade = 2.5;
+    execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', silent, '-ss', String(music.offset), '-i', music.file, '-map', '0:v', '-map', '1:a', '-c:v', 'copy',
+      '-af', `afade=t=in:st=0:d=0.4,afade=t=out:st=${(L - fade).toFixed(2)}:d=${fade},volume=0.9`, '-c:a', 'aac', '-b:a', '192k', '-t', String(L), '-movflags', '+faststart', mp4]);
+    fs.rmSync(silent);
+  }
   console.log(mp4, (fs.statSync(mp4).size / 1e6).toFixed(1), 'MB');
 }
 await browser.close();
