@@ -418,7 +418,7 @@ BOOST_AUTO_TEST_CASE( MergeKeepsBothSidesRejectsADroppedEdit )
     // Footprint filters are neither a registered property nor an element
     auto setFilters = []( LIB_SYMBOL& aSymbol )
     {
-        aSymbol.SetFPFilters( wxArrayString( 1, wxS( "QA_Filter_*" ) ) );
+        aSymbol.SetFPFilters( wxArrayString( std::vector<wxString>{ wxS( "QA_Filter_*" ) } ) );
     };
 
     editSymbol( oursOwners, 0, movePin );
