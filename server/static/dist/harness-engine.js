@@ -45322,6 +45322,24 @@ var require_pcb_tools = __commonJS({
 .kbmp.on,.kbmp[aria-pressed="true"]{background:var(--on,var(--sel-soft));border-color:var(--on-line,var(--sel))}
 .kbmp-sep{flex:none;width:1px;height:18px;margin:0 4px;background:var(--line);align-self:center}
 .kbmp-bar{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
+.ktw{display:inline-block;flex:none;width:12px;height:12px;position:relative;vertical-align:middle;cursor:pointer}
+.ktw::before{content:"";position:absolute;left:2px;top:4px;border-style:solid;border-width:5px 4px 0 4px;border-color:var(--ink-3) transparent transparent transparent}
+.ktw.shut::before{left:4px;top:2px;border-width:4px 0 4px 5px;border-color:transparent transparent transparent var(--ink-3)}
+.ktw.leaf::before{display:none}
+.kmarrow{display:inline-block;flex:none;width:8px;height:10px;position:relative;vertical-align:middle}
+.kmarrow::before{content:"";position:absolute;left:2px;top:1px;border-style:solid;border-width:4px 0 4px 4px;border-color:transparent transparent transparent currentColor;opacity:.75}
+.kmchk{display:inline-block;flex:none;width:16px;height:16px;position:relative;vertical-align:middle}
+.kmchk.on::before{content:"";position:absolute;left:6px;top:2px;width:4px;height:9px;border:solid currentColor;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.kmchk.radio.on::before{left:5px;top:5px;width:6px;height:6px;border:0;border-radius:50%;background:currentColor;transform:none}
+.ksort{display:inline-block;flex:none;width:8px;height:8px;position:relative;margin-left:4px;vertical-align:middle}
+.ksort::before{content:"";position:absolute;left:0;top:1px;border-style:solid;border-width:0 4px 5px 4px;border-color:transparent transparent var(--ink-3) transparent}
+.ksort.desc::before{border-width:5px 4px 0 4px;border-color:var(--ink-3) transparent transparent transparent}
+.kcarrow{display:inline-block;flex:none;width:10px;height:10px;position:relative;vertical-align:middle}
+.kcarrow::before{content:"";position:absolute;left:2px;top:1px;width:5px;height:5px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.kcarrow.l::before{left:3px;top:2px;transform:rotate(135deg)} .kcarrow.r::before{left:1px;top:2px;transform:rotate(-45deg)} .kcarrow.u::before{top:3px;transform:rotate(-135deg)}
+.kind-on{display:inline-block;flex:none;width:10px;height:10px;position:relative;vertical-align:middle}
+.kind-on::before{content:"";position:absolute;left:2px;top:1px;border-style:solid;border-width:4px 0 4px 6px;border-color:transparent transparent transparent rgb(64,72,255)}
+.kgrid-chk{pointer-events:none;margin:0}
 `;
       var styled3 = false;
       function ensureIconCss2() {
@@ -55633,7 +55651,55 @@ function bitmapButton(icon2, title, onClick, opts2) {
   if (onClick) b.addEventListener("click", (ev) => onClick(ev));
   return b;
 }
-var G3, NS, CSS2, styled;
+function treeExpander(open3, kids7 = true) {
+  ensureIconCss();
+  const s2 = document.createElement("span");
+  s2.setAttribute("aria-hidden", "true");
+  s2.dataset.twist = "";
+  setExpander(s2, open3, kids7);
+  return s2;
+}
+function setExpander(s2, open3, kids7 = true) {
+  s2.className = "ktw" + (kids7 ? open3 ? "" : " shut" : " leaf");
+  if (kids7) s2.dataset.open = String(open3);
+  else delete s2.dataset.open;
+}
+function menuArrow() {
+  ensureIconCss();
+  const s2 = document.createElement("span");
+  s2.className = "kmarrow";
+  s2.setAttribute("aria-hidden", "true");
+  return s2;
+}
+function menuCheck(on2, radio = false) {
+  ensureIconCss();
+  const s2 = document.createElement("span");
+  s2.className = "kmchk" + (radio ? " radio" : "") + (on2 ? " on" : "");
+  s2.dataset.check = on2 ? "on" : "off";
+  s2.setAttribute("aria-hidden", "true");
+  return s2;
+}
+function sortArrow(asc) {
+  ensureIconCss();
+  const s2 = document.createElement("span");
+  s2.className = "ksort" + (asc ? "" : " desc");
+  s2.dataset.sortInd = asc ? "asc" : "desc";
+  s2.setAttribute("aria-hidden", "true");
+  return s2;
+}
+function comboArrow() {
+  ensureIconCss();
+  const s2 = document.createElement("span");
+  s2.className = "kcarrow";
+  s2.setAttribute("aria-hidden", "true");
+  return s2;
+}
+function closeMark() {
+  const t = document.createElement("template");
+  t.innerHTML = CLOSE_MARK_SVG;
+  return t.content.firstChild;
+}
+var G3, NS, CSS2, styled, CLOSE_MARK_SVG;
 var init_kicon_dom = __esm({
   "web/components/kicon-dom.ts"() {
     "use strict";
@@ -55656,8 +55722,27 @@ var init_kicon_dom = __esm({
 .kbmp.on,.kbmp[aria-pressed="true"]{background:var(--on,var(--sel-soft));border-color:var(--on-line,var(--sel))}
 .kbmp-sep{flex:none;width:1px;height:18px;margin:0 4px;background:var(--line);align-self:center}
 .kbmp-bar{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
+.ktw{display:inline-block;flex:none;width:12px;height:12px;position:relative;vertical-align:middle;cursor:pointer}
+.ktw::before{content:"";position:absolute;left:2px;top:4px;border-style:solid;border-width:5px 4px 0 4px;border-color:var(--ink-3) transparent transparent transparent}
+.ktw.shut::before{left:4px;top:2px;border-width:4px 0 4px 5px;border-color:transparent transparent transparent var(--ink-3)}
+.ktw.leaf::before{display:none}
+.kmarrow{display:inline-block;flex:none;width:8px;height:10px;position:relative;vertical-align:middle}
+.kmarrow::before{content:"";position:absolute;left:2px;top:1px;border-style:solid;border-width:4px 0 4px 4px;border-color:transparent transparent transparent currentColor;opacity:.75}
+.kmchk{display:inline-block;flex:none;width:16px;height:16px;position:relative;vertical-align:middle}
+.kmchk.on::before{content:"";position:absolute;left:6px;top:2px;width:4px;height:9px;border:solid currentColor;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.kmchk.radio.on::before{left:5px;top:5px;width:6px;height:6px;border:0;border-radius:50%;background:currentColor;transform:none}
+.ksort{display:inline-block;flex:none;width:8px;height:8px;position:relative;margin-left:4px;vertical-align:middle}
+.ksort::before{content:"";position:absolute;left:0;top:1px;border-style:solid;border-width:0 4px 5px 4px;border-color:transparent transparent var(--ink-3) transparent}
+.ksort.desc::before{border-width:5px 4px 0 4px;border-color:var(--ink-3) transparent transparent transparent}
+.kcarrow{display:inline-block;flex:none;width:10px;height:10px;position:relative;vertical-align:middle}
+.kcarrow::before{content:"";position:absolute;left:2px;top:1px;width:5px;height:5px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.kcarrow.l::before{left:3px;top:2px;transform:rotate(135deg)} .kcarrow.r::before{left:1px;top:2px;transform:rotate(-45deg)} .kcarrow.u::before{top:3px;transform:rotate(-135deg)}
+.kind-on{display:inline-block;flex:none;width:10px;height:10px;position:relative;vertical-align:middle}
+.kind-on::before{content:"";position:absolute;left:2px;top:1px;border-style:solid;border-width:4px 0 4px 6px;border-color:transparent transparent transparent rgb(64,72,255)}
+.kgrid-chk{pointer-events:none;margin:0}
 `;
     styled = false;
+    CLOSE_MARK_SVG = '<svg class="kclose" viewBox="0 0 10 10" width="10" height="10" aria-hidden="true"><path d="M2 2l6 6M8 2L2 8" stroke="currentColor" stroke-width="1.4" fill="none"/></svg>';
   }
 });
 
@@ -56262,9 +56347,9 @@ var init_kselect = __esm({
   }
 });
 
-// node_modules/opentype.js/dist/opentype.js
+// ../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.js
 var require_opentype = __commonJS({
-  "node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
+  "../../../kicad-collaborative/server/node_modules/opentype.js/dist/opentype.js"(exports2, module2) {
     (function(global, factory) {
       typeof exports2 === "object" && typeof module2 !== "undefined" ? factory(exports2) : typeof define === "function" && define.amd ? define(["exports"], factory) : (global = global || self, factory(global.opentype = {}));
     })(exports2, (function(exports3) {
@@ -73606,7 +73691,8 @@ function render2() {
     return;
   }
   p.classList.add("open");
-  const head3 = el("div", "prop-head"), fold = el("button", "prop-fold", open2 ? "\u25BE" : "\u25B8");
+  const head3 = el("div", "prop-head"), fold = el("button", "prop-fold");
+  fold.appendChild(treeExpander(open2));
   fold.type = "button";
   fold.title = open2 ? "Fold" : "Unfold";
   const toggle = () => {
@@ -73634,6 +73720,7 @@ var init_proposals = __esm({
     init_state();
     init_tools();
     init_util();
+    init_kicon_dom();
     rows = [];
     open2 = true;
     rejecting = null;
@@ -77139,7 +77226,7 @@ function drawPeers(peers) {
       label.setAttribute("font-weight", "600");
       label.setAttribute("font-family", "system-ui, sans-serif");
       label.setAttribute("fill", brightness(color2) > 0.5 ? "#000" : "#fff");
-      label.textContent = E.followPeer === cid ? name + " \u2714" : name;
+      label.textContent = E.followPeer === cid ? name + " (following)" : name;
       tag.appendChild(chip2);
       tag.appendChild(label);
       peersG.appendChild(tag);
@@ -77991,7 +78078,8 @@ function head(a, found, stateText, onChip) {
   const h3 = el2("div", "cmt-head");
   h3.appendChild(chip(a, found, onChip));
   if (stateText) h3.appendChild(el2("span", "cmt-state", stateText));
-  const x = el2("button", "cmt-x", "\xD7");
+  const x = el2("button", "cmt-x");
+  x.appendChild(closeMark());
   x.type = "button";
   x.title = "Close";
   x.id = "closeBtn";
@@ -78197,6 +78285,7 @@ var init_comments = __esm({
     init_tools();
     init_util();
     init_view();
+    init_kicon_dom();
     comments = () => E.comments;
     kdoc = () => E.kdoc;
     IU2 = () => E.IU;
@@ -78510,6 +78599,7 @@ var init_shell = __esm({
     "use strict";
     init_sexpr2();
     init_widgets();
+    init_kicon_dom();
     stack = [];
     top = () => stack.length ? stack[stack.length - 1] : null;
     FOCUSABLE = "input, k-select, textarea, button, select, a[href], [tabindex]";
@@ -78733,10 +78823,10 @@ function popupMenu(x, y, items) {
       const row3 = h(
         "div",
         { class: "kd-pop-row", role: "menuitem", "aria-disabled": it.disabled ? "true" : void 0, style: `display:flex;gap:6px;align-items:center;padding:3px 12px 3px 6px;cursor:default;white-space:nowrap;${it.disabled ? "opacity:.45;" : ""}` },
-        h("span", { style: `${it.icon && it.iconW ? "" : "width:16px;"}display:inline-flex;flex:none;justify-content:center` }, it.check ? it.checked ? "\u2713" : "" : it.icon ? kicadIcon(it.icon, it.iconW || 16, it.iconH || it.iconW || 16) : ""),
+        h("span", { style: `${it.icon && it.iconW ? "" : "width:16px;"}display:inline-flex;flex:none;justify-content:center` }, it.check ? menuCheck(!!it.checked) : it.icon ? kicadIcon(it.icon, it.iconW || 16, it.iconH || it.iconW || 16) : ""),
         h("span", { style: "flex:1" }, it.label || ""),
         it.key ? h("span", { class: "kd-pop-key", style: "margin-left:24px;opacity:.7" }, menuKey(it.key)) : null,
-        it.sub ? h("span", null, "\u25B8") : null
+        it.sub ? menuArrow() : null
       );
       if (it.title) row3.title = it.title;
       row3.addEventListener("pointerenter", () => {
@@ -79253,7 +79343,7 @@ function textField(v, opts2) {
 function selectField(v, options, opts2) {
   const input = h2("k-select", { disabled: !!(opts2 && opts2.ro), "data-k": opts2 && opts2.key });
   options.forEach(([val, label]) => {
-    const o = h2("option", { value: String(val) }, label);
+    const o = h2("option", { value: String(val), "data-icon": opts2 && opts2.icons ? opts2.icons[String(val)] : void 0 }, label);
     if (String(val) === String(v)) o.selected = true;
     input.append(o);
   });
@@ -79371,7 +79461,7 @@ function treeBook(groups, start, opts2) {
 }
 function infoBar() {
   const msg = h2("span", { class: "msg", "data-k": "infobar-msg" });
-  const x = h2("button", { class: "x", type: "button", title: "Hide this message." }, "\xD7");
+  const x = h2("button", { class: "x", type: "button", title: "Hide this message." }, closeMark());
   const el4 = h2("div", { class: "pd-infobar", hidden: true, "data-k": "infobar" }, h2("span", { class: "pd-warnicon" }), msg, x);
   el4.firstChild.innerHTML = warningIcon().el.innerHTML;
   let timer3 = 0;
@@ -79481,7 +79571,7 @@ function grid(columns, rows3, opts2) {
   const refresh = () => {
     table.replaceChildren();
     const head3 = h2("tr");
-    for (const c of shown2()) head3.append(h2("th", { style: c.width ? `width:${c.width}` : null, title: c.tip }, c.label));
+    for (const c of shown2()) head3.append(h2("th", { style: c.width ? `width:${c.width}` : null, title: c.tip }, c.label, c.sort ? sortArrow(c.sort === "asc") : null));
     head3.addEventListener("contextmenu", (ev) => {
       if (!columns.some((c) => c.hidden !== void 0)) return;
       ev.preventDefault();
@@ -79522,7 +79612,7 @@ function grid(columns, rows3, opts2) {
         } else if (c.type === "select" && !ro) {
           const s2 = h2("k-select");
           for (const [val, label] of c.options || []) {
-            const o = h2("option", { value: String(val) }, label);
+            const o = h2("option", { value: String(val), "data-icon": c.icons ? c.icons[String(val)] : void 0 }, label);
             if (String(val) === String(v)) o.selected = true;
             s2.append(o);
           }
@@ -79536,7 +79626,8 @@ function grid(columns, rows3, opts2) {
           tr.append(h2("td", null, s2));
         } else if (ro) {
           const text3 = c.type === "len" ? typeof v === "number" && isFinite(v) ? fmtLenU(v) : c.blank || "" : cellText2(c, v);
-          tr.append(h2("td", { class: "ro", title: text3 }, text3));
+          const bmp = c.type === "select" && c.icons ? c.icons[String(v)] : void 0;
+          tr.append(h2("td", { class: "ro", title: text3 }, bmp ? h2("span", { style: "display:inline-flex;align-items:center;gap:4px" }, kicadIcon(bmp, 40, 10), text3) : text3));
         } else {
           const text3 = cellText2(c, v);
           const inp = h2("input", { type: "text", value: text3, placeholder: c.blank, "data-col": c.key });
@@ -81996,7 +82087,7 @@ async function openLibTables(opts2) {
     const tab = h("div", { class: "kd-nb-tab", "data-tab": title }, h("span", { class: "kd-nb-label" }, title));
     const p = { title, rows: rows3, readOnly, closable, path: path2, docId: docId3, original: rowsKey(rows3), grid: null, el: el4, tab, dirty: false };
     if (closable) {
-      const x = h("button", { class: "kd-nb-x", type: "button", title: "Close", "aria-label": "Close", style: "border:0;background:transparent;margin-left:6px;padding:0 2px;cursor:pointer;color:var(--ink-2);font-size:14px;line-height:1" }, "\xD7");
+      const x = h("button", { class: "kd-nb-x", type: "button", title: "Close", "aria-label": "Close", style: "border:0;background:transparent;margin-left:6px;padding:0 2px;cursor:pointer;color:var(--ink-2);line-height:1;display:inline-flex;align-items:center" }, closeMark());
       x.addEventListener("click", (ev) => {
         ev.stopPropagation();
         void closePage(p);
@@ -82100,7 +82191,7 @@ async function openLibTables(opts2) {
   };
   const addExistingButton = (disabled = false) => {
     const main = h("button", { class: "btn", type: "button", "data-btn": "add-existing", title: "Add Existing", disabled, style: "display:inline-flex;align-items:center;gap:4px;padding:1px 6px;height:24px;border-top-right-radius:0;border-bottom-right-radius:0" }, kicadIcon("small_folder", 16), "Add Existing");
-    const arrow2 = h("button", { class: "btn", type: "button", "data-btn": "add-existing-menu", title: "Add Existing", disabled, style: "padding:0 4px;height:24px;margin-left:-1px;border-top-left-radius:0;border-bottom-left-radius:0" }, "\u25BE");
+    const arrow2 = h("button", { class: "btn", type: "button", "data-btn": "add-existing-menu", title: "Add Existing", disabled, style: "padding:0 4px;height:24px;margin-left:-1px;border-top-left-radius:0;border-bottom-left-radius:0" }, comboArrow());
     main.addEventListener("click", () => {
       void browseLibraries(addExistingMenu(kind)[0]);
     });
@@ -83708,7 +83799,11 @@ function icon(name) {
   el4.setAttribute("class", "se-ic");
   el4.setAttribute("aria-hidden", "true");
   el4.setAttribute("viewBox", "0 0 24 24");
-  if (!name) return el4;
+  if (!name) {
+    el4.dataset.blank = "";
+    return el4;
+  }
+  el4.dataset.want = name;
   const g2 = UI();
   const ic = g2.KiCadIconFor ? g2.KiCadIconFor(name) : void 0;
   if (ic) fill2(el4, ic);
@@ -83736,6 +83831,7 @@ var init_ui2 = __esm({
     init_keys();
     init_menufit();
     init_icon_ids();
+    init_kicon_dom();
     UI = () => window;
     NS3 = "http://www.w3.org/2000/svg";
     waiting = /* @__PURE__ */ new Set();
@@ -83845,7 +83941,7 @@ The footprint could not be drawn: ${e.message || e}`;
       if (!st) return;
       for (const cat of paramCategories(st)) {
         const err = cat.params.some((q4) => q4.error);
-        const head3 = h2("div", { class: "fw-pg-cat" + (err ? " err" : ""), "data-k": "category" }, h2("span", { class: "fw-pg-tw" }, collapsed.has(cat.name) ? "\u25B8" : "\u25BE"), cat.name);
+        const head3 = h2("div", { class: "fw-pg-cat" + (err ? " err" : ""), "data-k": "category" }, h2("span", { class: "fw-pg-tw" }, treeExpander(!collapsed.has(cat.name))), cat.name);
         head3.addEventListener("click", () => {
           if (collapsed.has(cat.name)) collapsed.delete(cat.name);
           else collapsed.add(cat.name);
@@ -84059,6 +84155,7 @@ var init_fpwizard = __esm({
     init_state();
     init_ui2();
     init_kselect();
+    init_kicon_dom();
     host = () => window.KiCadPluginWizards || null;
     footprintWizards = () => {
       const h3 = host();
@@ -85502,6 +85599,7 @@ var init_font_picker = __esm({
   "web/dialogs/font-picker.ts"() {
     "use strict";
     init_dom2();
+    init_kicon_dom();
     projectId = null;
     projectReq = null;
   }
@@ -88853,7 +88951,16 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
       { label: "Wire Thickness", key: "wire_width", type: "num", tip: "Schematic wire thickness", hidden: true },
       { label: "Bus Thickness", key: "bus_width", type: "num", tip: "Bus wire thickness", hidden: true },
       { label: "Color", key: "schematic_color", type: "color", tip: "Schematic wire color", hidden: true, pick: pickColor, readOnly: isDefault },
-      { label: "Line Style", key: "line_style", type: "select", tip: "Schematic wire line style", hidden: true, readOnly: isDefault, options: [[-1, "<Not defined>"], [0, "Solid"], [1, "Dashed"], [2, "Dotted"], [3, "Dash-Dot"], [4, "Dash-Dot-Dot"]] }
+      {
+        label: "Line Style",
+        key: "line_style",
+        type: "select",
+        tip: "Schematic wire line style",
+        hidden: true,
+        readOnly: isDefault,
+        options: [[-1, "<Not defined>"], [0, "Solid"], [1, "Dashed"], [2, "Dotted"], [3, "Dash-Dot"], [4, "Dash-Dot-Dot"]],
+        icons: { "-1": "stroke_none", 0: "stroke_solid", 1: "stroke_dash", 2: "stroke_dot", 3: "stroke_dashdot", 4: "stroke_dashdotdot" }
+      }
     ], rows3, { ro: roPro, height: "190px", key: "netclassGrid" });
     const patterns = arr3(net.netclass_patterns).map(obj4).map((p) => ({ pattern: String(p.pattern || ""), netclass: String(p.netclass || "") }));
     const classOpts = () => g2.rows().map((r) => String(r.name)).filter(Boolean).map((n2) => [n2, n2]);
@@ -89394,6 +89501,7 @@ var init_pcbrouting = __esm({
     init_util();
     init_view();
     init_routersettings();
+    init_kicon_dom();
     SVG = (inner, vb = 16) => `<svg viewBox="0 0 ${vb} ${vb}" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${inner}</svg>`;
     ICON_PLUS = SVG('<path d="M8 2v12M14 8H2"/>');
     ICON_SORT = SVG('<path d="M12 10V2M14.5 7.5L12 10 9.5 7.5" /><path d="M4 2H1M5 6H1M7 10H1M10 14H1" stroke-width="1.4"/>');
@@ -92749,7 +92857,7 @@ function openDrc(ctx) {
       } });
       const save2 = h2("button", { type: "button" }, "Save...");
       save2.addEventListener("click", () => download2("DRC.rpt", report3()));
-      const gear = h2("button", { type: "button", class: "btn", title: "Options", "data-k": "drc-options", style: "padding:2px 6px" }, "\u2699");
+      const gear = bitmapButton("config", "Options", null, { key: "drc-options" });
       gear.addEventListener("click", () => {
         const r = gear.getBoundingClientRect();
         openPopupMenu(r.left, r.bottom, [
@@ -93333,7 +93441,7 @@ function show3(fab, ctx, p, stored2, version3, user, maskAlert, opts2, variants,
   const alert = h2(
     "div",
     { class: "pl-alert", "data-k": "maskAlert" },
-    h2("span", { class: "pl-warn" }, "\u26A0"),
+    h2("span", { class: "pl-warn" }, kicadIcon("dialog_warning", 32)),
     h2("div", null, h2("div", null, "Global solder mask minimum width and/or margin are not set to 0. "), h2("div", null, "Most board manufacturers expect 0 and use their own constraints for solder mask minimum width.")),
     boardSetupLink
   );
@@ -93660,6 +93768,7 @@ var init_plot = __esm({
     init_gendrill();
     init_plot_out();
     init_ui();
+    init_kicon_dom();
     layerRows2 = () => store.get().document.layers || [];
     FORMATS = [[1, "Gerber"], [2, "Postscript"], [5, "SVG"], [3, "DXF"], [4, "PDF"], [6, "PNG"]];
     SHEET_COLOR = "#C872AB";
@@ -94623,7 +94732,8 @@ async function openDrcRuleEditor(ctx) {
     const q4 = filter.value.trim().toLowerCase();
     const nodes = [];
     const node = (label, depth, cls, isSel, onClick, key3, kids7) => {
-      const tw = h2("span", { class: "tw" }, kids7 ? key3 && collapsed.has(key3) ? "\u25B8" : "\u25BE" : "");
+      const tw = treeExpander(!(key3 && collapsed.has(key3)), !!kids7);
+      tw.classList.add("tw");
       if (kids7 && key3) tw.addEventListener("click", (ev) => {
         ev.stopPropagation();
         if (collapsed.has(key3)) collapsed.delete(key3);
@@ -95188,6 +95298,7 @@ var init_drc_rule_editor = __esm({
     init_keys();
     init_ui();
     init_drc_rule_model();
+    init_kicon_dom();
     CSS9 = `
 .dre { display: flex; gap: 8px; height: 640px; }
 .dre-left { width: 290px; flex: 0 0 auto; display: flex; flex-direction: column; gap: 6px; }
@@ -107839,6 +107950,24 @@ root.KiCadCanvas = api;
 .kbmp.on,.kbmp[aria-pressed="true"]{background:var(--on,var(--sel-soft));border-color:var(--on-line,var(--sel))}
 .kbmp-sep{flex:none;width:1px;height:18px;margin:0 4px;background:var(--line);align-self:center}
 .kbmp-bar{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
+.ktw{display:inline-block;flex:none;width:12px;height:12px;position:relative;vertical-align:middle;cursor:pointer}
+.ktw::before{content:"";position:absolute;left:2px;top:4px;border-style:solid;border-width:5px 4px 0 4px;border-color:var(--ink-3) transparent transparent transparent}
+.ktw.shut::before{left:4px;top:2px;border-width:4px 0 4px 5px;border-color:transparent transparent transparent var(--ink-3)}
+.ktw.leaf::before{display:none}
+.kmarrow{display:inline-block;flex:none;width:8px;height:10px;position:relative;vertical-align:middle}
+.kmarrow::before{content:"";position:absolute;left:2px;top:1px;border-style:solid;border-width:4px 0 4px 4px;border-color:transparent transparent transparent currentColor;opacity:.75}
+.kmchk{display:inline-block;flex:none;width:16px;height:16px;position:relative;vertical-align:middle}
+.kmchk.on::before{content:"";position:absolute;left:6px;top:2px;width:4px;height:9px;border:solid currentColor;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.kmchk.radio.on::before{left:5px;top:5px;width:6px;height:6px;border:0;border-radius:50%;background:currentColor;transform:none}
+.ksort{display:inline-block;flex:none;width:8px;height:8px;position:relative;margin-left:4px;vertical-align:middle}
+.ksort::before{content:"";position:absolute;left:0;top:1px;border-style:solid;border-width:0 4px 5px 4px;border-color:transparent transparent var(--ink-3) transparent}
+.ksort.desc::before{border-width:5px 4px 0 4px;border-color:var(--ink-3) transparent transparent transparent}
+.kcarrow{display:inline-block;flex:none;width:10px;height:10px;position:relative;vertical-align:middle}
+.kcarrow::before{content:"";position:absolute;left:2px;top:1px;width:5px;height:5px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.kcarrow.l::before{left:3px;top:2px;transform:rotate(135deg)} .kcarrow.r::before{left:1px;top:2px;transform:rotate(-45deg)} .kcarrow.u::before{top:3px;transform:rotate(-135deg)}
+.kind-on{display:inline-block;flex:none;width:10px;height:10px;position:relative;vertical-align:middle}
+.kind-on::before{content:"";position:absolute;left:2px;top:1px;border-style:solid;border-width:4px 0 4px 6px;border-color:transparent transparent transparent rgb(64,72,255)}
+.kgrid-chk{pointer-events:none;margin:0}
 `;
   var styled3 = false;
   function ensureIconCss2() {
@@ -122323,7 +122452,7 @@ function drillFiles(m, baseName3, opt, ext = "drl") {
   return out2;
 }
 
-// node_modules/clipper2-ts/dist/Core.js
+// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Core.js
 var ClipType;
 (function(ClipType2) {
   ClipType2[ClipType2["NoClip"] = 0] = "NoClip";
@@ -122982,7 +123111,7 @@ var RectDUtils = {
 var InvalidRect64 = Object.freeze(Rect64Utils.createInvalid());
 var InvalidRectD = Object.freeze(RectDUtils.createInvalid());
 
-// node_modules/clipper2-ts/dist/Engine.js
+// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Engine.js
 var B02 = BigInt(0);
 var B22 = BigInt(2);
 var B42 = BigInt(4);
@@ -125847,7 +125976,7 @@ var Clipper = {
   }
 };
 
-// node_modules/clipper2-ts/dist/Offset.js
+// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Offset.js
 var JoinType;
 (function(JoinType2) {
   JoinType2[JoinType2["Miter"] = 0] = "Miter";
@@ -126463,7 +126592,7 @@ var ClipperOffset = class _ClipperOffset {
   }
 };
 
-// node_modules/clipper2-ts/dist/Clipper.js
+// ../../../kicad-collaborative/server/node_modules/clipper2-ts/dist/Clipper.js
 var B23 = BigInt(2);
 function intersectD(subject, clip2, fillRule, precision = 2) {
   return booleanOpD(ClipType.Intersection, subject, clip2, fillRule, precision);
@@ -132692,7 +132821,7 @@ function statAreas(m, o) {
   return { hasOutline, boardArea, frontCopper: total(front), backCopper: total(back), frontCourtyard: total(union2(fc)), backCourtyard: total(union2(bc2)) };
 }
 
-// node_modules/three/src/extras/lib/earcut.js
+// ../../../kicad-collaborative/server/node_modules/three/src/extras/lib/earcut.js
 function earcut(data, holeIndices, dim = 2) {
   const hasHoles = holeIndices && holeIndices.length;
   const outerLen = hasHoles ? holeIndices[0] * dim : data.length;
@@ -133113,7 +133242,7 @@ function signedArea2(data, start, end, dim) {
   return sum;
 }
 
-// node_modules/three/src/extras/Earcut.js
+// ../../../kicad-collaborative/server/node_modules/three/src/extras/Earcut.js
 var Earcut = class {
   /**
    * Triangulates the given shape definition by returning an array of triangles.

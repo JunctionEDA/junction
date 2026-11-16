@@ -1874,6 +1874,24 @@
 .kbmp.on,.kbmp[aria-pressed="true"]{background:var(--on,var(--sel-soft));border-color:var(--on-line,var(--sel))}
 .kbmp-sep{flex:none;width:1px;height:18px;margin:0 4px;background:var(--line);align-self:center}
 .kbmp-bar{display:flex;align-items:center;gap:2px;flex-wrap:wrap}
+.ktw{display:inline-block;flex:none;width:12px;height:12px;position:relative;vertical-align:middle;cursor:pointer}
+.ktw::before{content:"";position:absolute;left:2px;top:4px;border-style:solid;border-width:5px 4px 0 4px;border-color:var(--ink-3) transparent transparent transparent}
+.ktw.shut::before{left:4px;top:2px;border-width:4px 0 4px 5px;border-color:transparent transparent transparent var(--ink-3)}
+.ktw.leaf::before{display:none}
+.kmarrow{display:inline-block;flex:none;width:8px;height:10px;position:relative;vertical-align:middle}
+.kmarrow::before{content:"";position:absolute;left:2px;top:1px;border-style:solid;border-width:4px 0 4px 4px;border-color:transparent transparent transparent currentColor;opacity:.75}
+.kmchk{display:inline-block;flex:none;width:16px;height:16px;position:relative;vertical-align:middle}
+.kmchk.on::before{content:"";position:absolute;left:6px;top:2px;width:4px;height:9px;border:solid currentColor;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.kmchk.radio.on::before{left:5px;top:5px;width:6px;height:6px;border:0;border-radius:50%;background:currentColor;transform:none}
+.ksort{display:inline-block;flex:none;width:8px;height:8px;position:relative;margin-left:4px;vertical-align:middle}
+.ksort::before{content:"";position:absolute;left:0;top:1px;border-style:solid;border-width:0 4px 5px 4px;border-color:transparent transparent var(--ink-3) transparent}
+.ksort.desc::before{border-width:5px 4px 0 4px;border-color:var(--ink-3) transparent transparent transparent}
+.kcarrow{display:inline-block;flex:none;width:10px;height:10px;position:relative;vertical-align:middle}
+.kcarrow::before{content:"";position:absolute;left:2px;top:1px;width:5px;height:5px;border:solid currentColor;border-width:0 1.5px 1.5px 0;transform:rotate(45deg)}
+.kcarrow.l::before{left:3px;top:2px;transform:rotate(135deg)} .kcarrow.r::before{left:1px;top:2px;transform:rotate(-45deg)} .kcarrow.u::before{top:3px;transform:rotate(-135deg)}
+.kind-on{display:inline-block;flex:none;width:10px;height:10px;position:relative;vertical-align:middle}
+.kind-on::before{content:"";position:absolute;left:2px;top:1px;border-style:solid;border-width:4px 0 4px 6px;border-color:transparent transparent transparent rgb(64,72,255)}
+.kgrid-chk{pointer-events:none;margin:0}
 `;
   var styled = false;
   function ensureIconCss() {
