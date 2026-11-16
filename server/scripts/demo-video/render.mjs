@@ -4,7 +4,8 @@
 //
 //   node render.mjs [--stills] [--music piece.wav [--from-start]] [--out name]   → out/<name>.mp4 (default junction-demo) and its poster
 //   --music: the soundtrack; every cut lands on one of its beats (beats.py), and by default the piece is started so its
-//   closing chord comes with the end card (--from-start: from its beginning)
+//   closing chord comes with the end card (--from-start: from its beginning); --measures: each feature fills whole bars,
+//   sped up to fit, and every cut falls on a bar line
 //
 import fs from 'node:fs';
 import path from 'node:path';
@@ -97,7 +98,53 @@ add({ kind: 'end', length: 4.5, bg: '', title: 'Junction', sub: '', links: ['jun
 // the scene before it a little; a join's zoom starts on a beat too.
 const MUSIC = (() => { const i = process.argv.indexOf('--music'); return i > 0 ? process.argv[i + 1] : null; })();
 let music = null;
-if (MUSIC) {
+// --measures: every feature gets whole bars of the music (4 beats each), its footage sped up to fill them, and every
+// cut falls on a bar line; the run of bars is the piece's last ones, so the closing chord comes with the end card.
+const BARS = (sc) => {
+  const cap = (sc.captions[0] || {}).text || '';
+  if (sc.kind === 'end') return 0;
+  if (sc.name === 'schematic') return 8;
+  if (sc.name === 'build') return /Update PCB|Edge/.test(sc.captions.map((c) => c.text).join()) ? 2 : /^Routing$/.test(cap) ? 3 : /Blocks onto/.test(cap) || /Zone/.test(cap) ? 1 : 2;
+  if (sc.name === 'ai' || sc.name === 'parts') return 3;
+  if (sc.name === 'history' || sc.name === 'fab') return 1;
+  return 2;
+};
+if (MUSIC && process.argv.includes('--measures')) {
+  const bj = MUSIC.replace(/\.[^.]+$/, '.beats.json');
+  if (!fs.existsSync(bj)) execFileSync('python3', [path.join(here, 'beats.py'), MUSIC, bj], { stdio: 'inherit' });
+  const B = JSON.parse(fs.readFileSync(bj, 'utf8'));
+  // the bar lines: every fourth beat, on the phase where the accents fall
+  const strong = new Set(B.strong.map((t) => t.toFixed(3)));
+  let phase = 0, bestN = -1;
+  for (let ph = 0; ph < 4; ph++) { const n = B.beats.filter((t, i) => i % 4 === ph && strong.has(t.toFixed(3))).length; if (n > bestN) { bestN = n; phase = ph; } }
+  let bars = B.beats.filter((_, i) => i % 4 === phase);
+  // the last bar line at or before the closing chord ends the footage
+  const end = B.last_hit; bars = bars.filter((t) => t <= end + 0.15);
+  if (Math.abs(bars[bars.length - 1] - end) > 0.15) bars.push(end);
+  const feats = scenes.filter((sc) => sc.kind !== 'end'); const need = feats.reduce((n, sc) => n + BARS(sc), 0);
+  if (bars.length - 1 < need) throw new Error(`the piece has ${bars.length - 1} bars before its last chord, the video needs ${need}`);
+  const lines = bars.slice(bars.length - 1 - need); const offset = lines[0];
+  let k = 0, t = 0;
+  for (const sc of scenes) {
+    let len;
+    if (sc.kind === 'end') len = sc.length;
+    else { const n = BARS(sc); len = lines[k + n] - lines[k]; k += n; }
+    if (sc.kind === 'footage') {
+      const ratio = len / sc.length;
+      sc.speed = +((sc.speed * sc.length) / len).toFixed(4);
+      for (const c of sc.captions) { c.at *= ratio; c.until *= ratio; }
+      for (const w of sc.windows) {
+        for (const ts of w.toasts || []) ts.at *= ratio;
+        if (w.chat) { w.chat.at *= ratio; w.chat.until *= ratio; for (const l of w.chat.lines) { l.at *= ratio; if (l.typing) l.typing *= ratio; } }
+        // a join's push-in lasts as long in the video whatever the speed
+        for (const f of w.follows || []) f.len *= sc.speed;
+      }
+    }
+    sc.length = +len.toFixed(3); sc.start = +t.toFixed(3); t += len;
+  }
+  at = t; music = { file: MUSIC, offset };
+  console.log(`music ${path.basename(MUSIC)} from ${offset.toFixed(2)} s, ${need} bars, phase ${phase}; cuts on`, scenes.map((s2) => s2.start.toFixed(2)).join(' '));
+} else if (MUSIC) {
   const bj = MUSIC.replace(/\.[^.]+$/, '.beats.json');
   if (!fs.existsSync(bj)) execFileSync('python3', [path.join(here, 'beats.py'), MUSIC, bj], { stdio: 'inherit' });
   const B = JSON.parse(fs.readFileSync(bj, 'utf8'));
