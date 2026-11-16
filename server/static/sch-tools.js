@@ -1470,6 +1470,7 @@
     const w = S.wire;
     S.wire = null;
     if (!w) return;
+    S.wireEndedAt = Date.now();
     const list = simplifyWireList(w.segs);
     const unfold = S.unfold;
     S.unfold = null;
@@ -8816,7 +8817,8 @@ Link '${target}' to this file?`)) return null;
         ev.preventDefault();
         return;
       }
-      if (toolOf(curTool()) || Date.now() - (S.dragEndedAt || 0) < 600) {
+      const now = Date.now();
+      if (toolOf(curTool()) || now - (S.dragEndedAt || 0) < 600 || now - (S.wireEndedAt || 0) < 600) {
         ev.stopImmediatePropagation();
         ev.preventDefault();
       }

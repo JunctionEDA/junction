@@ -5,6 +5,8 @@
 // plus the order in which every item appeared (ai/timeline.json).  Here the scroll position
 // decides how far the run has got: how much of the prompt is typed, which schematic items exist,
 // where each footprint is on its way from the pile to its place, and which tracks are laid.
+// The run itself plays at one speed: scrolling ahead only lets it carry on, it never hurries or
+// skips it, and it waits where the scroll stops.
 // Nothing is invented: every item drawn is one the AI made, in the order it made them.
 
 import { Box, HIDDEN, K, Pt, Rat, View, clamp, ease, fit, lerp, mixBox, ratsnest, span } from "./demo";
@@ -25,6 +27,8 @@ const T = {
   call1: 0.49, place: [0.5, 0.66], route: [0.68, 0.9], fill: 0.915, done: 0.94,
 } as const;
 const TRACKS = new Set(["segment", "via", "arc"]);
+const RUN = 30;                                     // seconds the whole run takes to play
+const BACK = 3;                                     // how much faster it winds back when scrolled up
 
 export function startAi(root: HTMLElement): void {
   const canvas = root.querySelector<HTMLCanvasElement>("canvas")!;
@@ -36,7 +40,7 @@ export function startAi(root: HTMLElement): void {
   const done = root.querySelector<HTMLElement>("[data-done]");
   const chat = root.querySelector<HTMLElement>(".chat-body");
   const still = reducedMotion();
-  let u = 0, asked = false, ready = false, failed = false;
+  let u = 0, want = 0, asked = false, ready = false, failed = false;
 
   let sch: KDoc | null = null, pcb: KDoc | null = null, tl: Timeline | null = null;
   // Schematic: items in the order they appeared.  Board: footprints, tracks, the rest, each in order.
@@ -135,15 +139,20 @@ export function startAi(root: HTMLElement): void {
     const r = track.getBoundingClientRect();
     if (r.top < window.innerHeight * 2 && r.bottom > -window.innerHeight) load();
     const room = r.height - window.innerHeight;
-    u = room > 0 ? clamp(-r.top / room) : 0;
-    chatTo(u);
+    want = room > 0 ? clamp(-r.top / room) : 0;
+    // Back above the section: the next visit starts from the beginning.
+    if (still || r.top > window.innerHeight) { u = want; chatTo(u); }
     stage.invalidate();
   }
 
   // ------------------------------------------------------------------ drawing
 
-  const stage: Stage = makeStage(canvas, (s) => {
+  const stage: Stage = makeStage(canvas, (s, _now, dt) => {
     const { ctx, w: W, h: H } = s;
+    if (ready && u !== want) {
+      u = want > u ? Math.min(want, u + dt / 1000 / RUN) : Math.max(want, u - dt / 1000 * BACK / RUN);
+      chatTo(u);
+    }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     if (!ready) {
       ctx.fillStyle = "#F5F4EF"; ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -154,7 +163,7 @@ export function startAi(root: HTMLElement): void {
     }
     if (u < T.call1) drawSch(ctx, W, H, s.dpr);
     else drawPcb(ctx, W, H, s.dpr);
-    return false;
+    return u !== want;
   });
 
   function drawSch(ctx: CanvasRenderingContext2D, W: number, H: number, dpr: number): void {

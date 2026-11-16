@@ -110,5 +110,23 @@ class Circuit(unittest.TestCase):
         self.assertTrue(self.said(rv, "regulator.heat").startswith("note"), self.said(rv, "regulator.heat"))
 
 
+    def test_art_of_electronics_rules(self):
+        """Many ceramics and no lossy capacitor on a rail; a converter's AGND and DGND left on nets that never meet."""
+        sch = self.project.schematic()
+        self.parts(sch, "Device:C", [("C1", "100nF"), ("C2", "100nF"), ("C3", "100nF"), ("C4", "1uF")], 50.8, 50.8)
+        try:
+            sch.place("Audio:PCM5102", ref="U1", at=(101.6, 101.6))
+            sch.flush()
+        except kh.HarnessError as e:
+            self.skipTest(f"no converter symbol in this library set: {e}")
+        sch.net("+3V3", "C1.1", "C2.1", "C3.1", "C4.1")
+        sch.net("GND", "C1.2", "C2.2", "C3.2", "C4.2", "U1.DGND")
+        sch.net("AGND", "U1.AGND")
+        sch.flush()
+        rv = sch.review()
+        self.assertIn("+3V3: 4 ceramic capacitors", self.said(rv, "bypass.damping"))
+        self.assertIn("U1", self.said(rv, "converter.grounds"))
+
+
 if __name__ == "__main__":
     unittest.main()

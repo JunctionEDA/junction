@@ -15,6 +15,7 @@ export interface Obstacle { net: string; layers: number[]; shape: Shape; clr: nu
 export interface RuleClass {
   key: string; width: number; clr: number; viaD: number; viaDrill: number; kind?: string;
   open?: boolean;                        // may run under a crystal (the crystal's own nets); false keeps it out of G.quiet
+  feed?: boolean;                        // an antenna's own net: may enter G.clear
   full: Uint16Array[];                   // everything, including what this run has routed
   fixed: Uint16Array[];                  // only what was on the board before the run (rip-up looks through this one)
   vfull: Uint16Array[]; vfixed: Uint16Array[];   // the same two for a via centred on the cell (a wider disc)
@@ -28,6 +29,8 @@ export interface Grid {
   outside: Uint8Array | null;            // cells outside the board outline
   keep: (Uint8Array | null)[];           // rule areas that keep tracks out, per layer
   quiet?: Uint8Array;                    // under a crystal: only the crystal's own nets may run there, on any layer
+  clear?: Uint8Array;                    // an antenna's clear area: only its feed may run there (not even ground)
+  noPour?: Uint8Array;                   // rule areas where no copper may be poured: a pour does not reach here
   edgeClr: number; margin: number;
   holeClr?: number;                      // copper of another net keeps this far from a drilled hole (KiCad's hole clearance)
   obstacles: Map<string, Obstacle[]>;    // board copper by net ("" = no net, holes, edges)
@@ -185,13 +188,14 @@ export function stampClass(G: Grid, c: RuleClass, o: Obstacle, sign: number, fix
 }
 
 /** Build the occupancy maps of a rule class from the board's obstacles. */
-export function buildClass(G: Grid, key: string, width: number, clr: number, viaD: number, viaDrill: number, kind?: string, open = true): RuleClass {
-  const n = G.W * G.H; const c: RuleClass = { key, width, clr, viaD, viaDrill, kind, open, full: [], fixed: [], vfull: [], vfixed: [] };
+export function buildClass(G: Grid, key: string, width: number, clr: number, viaD: number, viaDrill: number, kind?: string, open = true, feed = false): RuleClass {
+  const n = G.W * G.H; const c: RuleClass = { key, width, clr, viaD, viaDrill, kind, open, feed, full: [], fixed: [], vfull: [], vfixed: [] };
   for (let l = 0; l < G.layers.length; l++) {
     const m = new Uint16Array(n);
     if (G.outside) for (let i = 0; i < n; i++) if (G.outside[i]) m[i] = 1;
     const k = G.keep[l]; if (k) for (let i = 0; i < n; i++) if (k[i]) m[i]++;
     if (!open && G.quiet) for (let i = 0; i < n; i++) if (G.quiet[i]) m[i]++;
+    if (!feed && G.clear) for (let i = 0; i < n; i++) if (G.clear[i]) m[i]++;
     c.fixed.push(m); c.vfixed.push(m.slice());
   }
   for (const list of G.obstacles.values()) for (const o of list) stampObstacle(G, c, o, 1, c.fixed, c.vfixed);

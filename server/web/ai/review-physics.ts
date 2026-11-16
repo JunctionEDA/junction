@@ -825,11 +825,13 @@ export function physicsPlan(doc: any, P: any, k: any, settings: any, plan: any):
   if (plan.what === "antenna") {
     const ants = plan.ref ? [find(plan.ref)].filter(Boolean) as Fp[] : S.fps.filter(isAntenna);
     if (!ants.length) return { error: plan.ref ? `There is no part ${plan.ref} on the board.` : "The board has no antenna (a part with reference AE or ANT, or an antenna footprint)." };
-    const pitch = Math.max(0.8, plan.pitch || 2), out: any[] = [];
+    const pitch = Math.max(0.8, plan.pitch || 1), out: any[] = [];   // a close wall: the owner's boards stitch an antenna's edge about every millimetre
     const radio = radioGHz(S.fps, S.padsOf.keys());
     for (const a of ants) {
       const patch = plan.kind ? plan.kind === "patch" : isPatch(a);
-      const box = patch ? a.box : antennaRegion(S, a, plan.clearance >= 0 ? plan.clearance : LIMITS.antennaKeepout); const have = S.keepouts.some((q) => q.copper && hit(q.box, a.box));
+      const ko = S.keepouts.find((q) => q.copper && hit(q.box, a.box)); const have = !!ko;
+      // the clear area the board already has (drawn by hand, often larger than the datasheet minimum) is the one to stitch round
+      const box = patch ? a.box : ko && !(plan.clearance >= 0) ? ko.box : antennaRegion(S, a, plan.clearance >= 0 ? plan.clearance : LIMITS.antennaKeepout);
       const pts: Pt[] = []; let skipped = 0;
       for (const [x, y] of ringPoints(S, box, r + 0.4, pitch, r + 0.3)) {
         if (S.nearestStitch(x, y) < pitch * 0.6 || !free(x, y, pitch * 0.6)) continue;

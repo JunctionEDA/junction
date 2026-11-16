@@ -516,6 +516,8 @@ pub async fn github_callback(
     )
     .await?;
     persist::fill_pending_grants(&state.pool, user.id, &user.login, &verified_emails).await?;
+    // A new account starts with its own copy of the Devboard Demo (once; a no-op for everyone else).
+    crate::demo::ensure_quietly(&state, user.id).await;
 
     finish_login(&state, jar, user, pending).await
 }

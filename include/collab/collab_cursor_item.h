@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <deque>
 #include <functional>
 #include <map>
 #include <set>
@@ -191,69 +192,80 @@ private:
 
 
 /**
- * Where to draw each peer's pointer: where their hand most likely is now, not where it was
- * when the update left them (the web editor does the same, server/web/editor/peercursors.ts).
+ * Where to draw each peer's pointer between presence messages, the way Figma and
+ * perfect-cursors do it (the web editor does the same, server/web/editor/peercursors.ts).
  *
- * An update is already one trip through the server old when it arrives (half the sender's
- * round trip plus half ours, both measured with pings and the sender's sent along with its
- * pointer), and the next one is still a message interval away.  The pointer is carried on
- * along its velocity by that much.  A sender that stops sends its place once more, which
- * zeroes the velocity, so a guess past the stopping point is taken back within about one
- * trip; with no news for longer than the guess covers, it eases back to the last place seen.
- * Between those, the drawn position closes on the target quickly but not in one jump, so a
- * correction never shows as a hop.
+ * The sender sends its pointer every frame or so, stamped with its own clock ("ts").  The
+ * receiver keeps the points it has not drawn yet and walks through them at the pace they were
+ * made (each step takes as long as it took the sender), a little behind the newest one.  The
+ * pointer is always on the line between two places the person really was: never guessed
+ * ahead, never past where they stopped.  The "little behind" adapts: it grows when the walk
+ * runs out of points while the person is still moving (the network held a message) and
+ * shrinks back slowly while messages come evenly.  A backlog (a burst after a stall) is walked
+ * faster to catch up; when the sender says it stopped (the same place again), the walk just
+ * finishes.
  */
-class COLLAB_CURSOR_PREDICTOR
+class COLLAB_CURSOR_REPLAY
 {
 public:
-    /// A fresh presence update for @p aId with its pointer at @p aPos.  @p aLeadMs is how
-    /// old the update was on arrival.
-    void Sample( const wxString& aId, const VECTOR2I& aPos, double aLeadMs )
+    /// A fresh presence update for @p aId with its pointer at @p aPos, sent at the sender's
+    /// clock @p aSenderTs (ms; 0 when the sender does not stamp its updates).
+    void Sample( const wxString& aId, const VECTOR2I& aPos, double aSenderTs )
     {
-        const double now = NowMs();
-        auto         it = m_tracks.find( aId );
+        const double   now = ClockMs();
+        const VECTOR2D pos( aPos );
+        auto           it = m_tracks.find( aId );
 
         if( it == m_tracks.end() )
         {
             TRACK track;
-            track.pos = VECTOR2D( aPos );
-            track.drawn = track.pos;
+            track.pos = track.from = track.drawn = pos;
+            track.ts = aSenderTs;
             track.t = now;
-            track.lead = std::min( aLeadMs, LEAD_MAX_MS );
             m_tracks.emplace( aId, track );
             return;
         }
 
         TRACK& tr = it->second;
-        tr.lead = std::min( aLeadMs, LEAD_MAX_MS );
-        const VECTOR2D pos( aPos );
 
-        // The same place again is the sender saying it stopped.
+        if( aSenderTs > 0.0 && tr.ts > 0.0 && aSenderTs < tr.ts )
+            return;     // overtaken by a newer one
+
+        const double gap = aSenderTs > 0.0 && tr.ts > 0.0 ? aSenderTs - tr.ts : now - tr.t;
+        tr.ts = aSenderTs;
+        tr.t = now;
+
+        // The same place again is the sender saying it stopped: finish the walk.
         if( pos == tr.pos )
         {
-            tr.vel = VECTOR2D( 0, 0 );
-            tr.t = now;
+            tr.done = true;
             return;
         }
 
-        const double dt = now - tr.t;
-
-        // A sample after a long gap is a fresh start, not a speed; otherwise a little
-        // smoothing, because the lead multiplies any jitter in the velocity.
-        if( dt > 4.0 && dt < 150.0 )
-        {
-            const VECTOR2D v = ( pos - tr.pos ) / dt;
-            const bool     fresh = tr.vel.x == 0.0 && tr.vel.y == 0.0;
-            tr.vel = fresh ? v : tr.vel * 0.35 + v * 0.65;
-            tr.every = tr.every * 0.8 + std::min( dt, 100.0 ) * 0.2;
-        }
-        else if( dt >= 150.0 )
-        {
-            tr.vel = VECTOR2D( 0, 0 );
-        }
-
         tr.pos = pos;
-        tr.t = now;
+
+        // The walk ran dry a moment ago although the person had not stopped: the network
+        // held this point.  Sit further back from now on.
+        if( !tr.done && tr.steps.empty() && tr.dry > 0.0 && now - tr.dry < 200.0 )
+            tr.delay = std::min( DELAY_MAX_MS, tr.delay + std::min( DELAY_STALL_STEP_MS, ( now - tr.dry ) / 2.0 ) );
+
+        tr.dry = 0.0;
+
+        // Moving again after a rest: the first step takes the delay, so the next point is
+        // likely here before the walk reaches this one.
+        const bool   resting = tr.done || tr.steps.empty();
+        const double d = resting ? tr.delay
+                                 : std::clamp( gap > 0.0 ? gap : STEP_DEFAULT_MS, 1.0, STEP_MAX_MS );
+
+        tr.done = false;
+        tr.steps.push_back( { pos, d } );
+
+        while( tr.steps.size() > 120 )
+        {
+            tr.from = tr.steps.front().pos;
+            tr.steps.pop_front();
+            tr.p = 0.0;
+        }
     }
 
     /// Forget everyone not in @p aIds.
@@ -267,33 +279,64 @@ public:
     /// calling it every frame while it does).
     bool Advance()
     {
-        const double now = NowMs();
-        const double dt = m_lastFrame > 0.0 ? std::min( 50.0, now - m_lastFrame ) : 16.0;
-        const double a = 1.0 - std::exp( -dt / EASE_MS );
+        const double now = ClockMs();
+        const double dt = m_lastFrame > 0.0 ? std::min( 50.0, now - m_lastFrame ) : 0.0;
         bool         moving = false;
 
         m_lastFrame = now;
 
         for( auto& [id, tr] : m_tracks )
         {
-            const VECTOR2D target = targetOf( tr, now );
-            const VECTOR2D err = target - tr.drawn;
-
-            // Internal units: well under a pixel at any zoom anyone works at.
-            if( std::abs( err.x ) < 100 && std::abs( err.y ) < 100 )
+            if( !tr.steps.empty() )
             {
-                tr.drawn = target;
+                // how much walk is still ahead, against how far behind it should be
+                double ahead = -tr.p;
+
+                for( const STEP& st : tr.steps )
+                    ahead += st.d;
+
+                const double want = 1.0 + ( ahead - tr.delay ) / 40.0;
+                const double rate = std::clamp( want, tr.done ? 1.0 : RATE_MIN, RATE_MAX );
+                double       adv = dt * rate;
+
+                while( adv > 0.0 && !tr.steps.empty() )
+                {
+                    const STEP&  st = tr.steps.front();
+                    const double left = st.d - tr.p;
+
+                    if( adv >= left )
+                    {
+                        adv -= left;
+                        tr.from = st.pos;
+                        tr.steps.pop_front();
+                        tr.p = 0.0;
+                    }
+                    else
+                    {
+                        tr.p += adv;
+                        adv = 0.0;
+                    }
+                }
+
+                // ran out while the person may still be moving: either they stopped (their
+                // stop message follows) or the network is holding the next point
+                if( tr.steps.empty() && !tr.done )
+                    tr.dry = now;
+            }
+
+            if( dt > 0.0 )
+                tr.delay = std::max( DELAY_MIN_MS, tr.delay - DELAY_DECAY_MS_PER_S * dt / 1000.0 );
+
+            if( !tr.steps.empty() )
+            {
+                const STEP&  st = tr.steps.front();
+                const double k = st.d > 0.0 ? tr.p / st.d : 1.0;
+                tr.drawn = tr.from + ( st.pos - tr.from ) * k;
+                moving = true;
             }
             else
             {
-                tr.drawn += err * a;
-                moving = true;
-            }
-
-            if( ( tr.vel.x != 0.0 || tr.vel.y != 0.0 )
-                && now - tr.t < 2.0 * horizon( tr ) + tr.lead )
-            {
-                moving = true;
+                tr.drawn = tr.from;
             }
         }
 
@@ -315,58 +358,38 @@ public:
         return true;
     }
 
-    /// How old an update is on arrival, given the sender's round trip (0 when it does not
-    /// say: assume it is as far as we are) and ours.
-    static double LeadMs( double aSenderRtt, double aOwnRtt )
-    {
-        return std::min( LEAD_MAX_MS, ( aSenderRtt > 0.0 ? aSenderRtt : aOwnRtt ) / 2.0
-                                              + aOwnRtt / 2.0 + FRAME_MS );
-    }
-
-private:
-    struct TRACK
-    {
-        VECTOR2D pos;           ///< last sample, IU
-        VECTOR2D vel;           ///< IU per ms
-        VECTOR2D drawn;         ///< what is drawn, IU
-        double   t = 0.0;       ///< when the last sample came, ms
-        double   every = 16.0;  ///< usual time between samples, ms
-        double   lead = 0.0;    ///< how old a sample is on arrival, ms
-    };
-
-    static constexpr double CARRY_MAX_MS = 60.0;  ///< the longest a pointer is carried on
-    static constexpr double LEAD_MAX_MS = 90.0;   ///< a far-away server is not guessed across
-    static constexpr double FRAME_MS = 4.0;       ///< arrival to screen
-    /// Prediction is off: in use it read as jitter, every late or early update showing as a
-    /// lurch.  Without it a pointer glides to each update as it arrives, over about one frame.
-    /// Set to true to bring it back (the web editor's switch is in peercursors.ts).
-    static constexpr bool   PREDICT = false;
-    static constexpr double EASE_MS = PREDICT ? 7.0 : 14.0; ///< how fast the drawn pointer closes in
-
-    static double NowMs()
+    /// The clock a sender stamps its presence with ("ts"), ms.
+    static double ClockMs()
     {
         using namespace std::chrono;
         return duration<double, std::milli>( steady_clock::now().time_since_epoch() ).count();
     }
 
-    static double horizon( const TRACK& aTrack )
+private:
+    struct STEP
     {
-        return std::min( CARRY_MAX_MS, aTrack.every * 1.2 );
-    }
+        VECTOR2D pos;           ///< where this step ends, IU
+        double   d = 0.0;       ///< how long it takes, ms
+    };
 
-    /// Ahead of the last sample by its age on arrival plus the time since, until about the
-    /// next sample is due; past that, eased back to the last sample, so a pointer whose stop
-    /// message got lost still ends exactly where it was last seen.
-    static VECTOR2D targetOf( const TRACK& aTrack, double aNow )
+    struct TRACK
     {
-        if( !PREDICT )
-            return aTrack.pos;
+        VECTOR2D         pos;           ///< newest point received, IU
+        VECTOR2D         from;          ///< the point the walk left, IU
+        VECTOR2D         drawn;         ///< what is drawn, IU
+        std::deque<STEP> steps;         ///< the points still ahead
+        double           p = 0.0;       ///< ms into the first step
+        double           ts = 0.0;      ///< sender stamp of the newest point
+        double           t = 0.0;       ///< when it came, ms
+        double           delay = DELAY_START_MS;  ///< how far behind the newest point, ms
+        double           dry = 0.0;     ///< when the walk last ran out mid-motion, ms
+        bool             done = true;   ///< the sender said it stopped
+    };
 
-        const double age = aNow - aTrack.t, carry = horizon( aTrack );
-        const double k = age <= carry ? aTrack.lead + age
-                                      : std::max( 0.0, aTrack.lead + carry - 2.0 * ( age - carry ) );
-        return aTrack.pos + aTrack.vel * k;
-    }
+    static constexpr double DELAY_START_MS = 24.0, DELAY_MIN_MS = 16.0, DELAY_MAX_MS = 40.0;
+    static constexpr double DELAY_STALL_STEP_MS = 3.0, DELAY_DECAY_MS_PER_S = 8.0;
+    static constexpr double STEP_MAX_MS = 60.0, STEP_DEFAULT_MS = 15.0;
+    static constexpr double RATE_MAX = 4.0, RATE_MIN = 0.8;
 
     std::map<wxString, TRACK> m_tracks;
     double                    m_lastFrame = 0.0;

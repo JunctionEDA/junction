@@ -99,8 +99,8 @@ function appEntries(me: AppState["me"], project: AppState["project"], inEditor: 
     out.push("-",
       { id: "tab-peers", label: "Collaborators", icon: "" },
       { id: "clone", label: "Clone to My Account", icon: "duplicate", why: noCopy || (r.guest || !me ? "Sign in to make your own copy" : null) },
-      { id: "archive", label: "Download Project (.zip)", icon: "library_archive", why: noCopy || (!me ? "Sign in to download the project" : null) },
-      { id: "openInKicad", label: "Open in Junction...", icon: "icon_kicad" });
+      { id: "archive", label: "Download Project (.zip)", icon: "library_archive", why: noCopy || (!me ? "Sign in to download the project" : null) });
+      // web only for now: { id: "openInKicad", label: "Open in Junction...", icon: "icon_kicad" }
   }
   out.push("-",
     { id: "symbolLibrary", label: "Symbol Library Browser", icon: "library_browser" },

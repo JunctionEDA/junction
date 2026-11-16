@@ -2,6 +2,7 @@ mod access;
 mod admin;
 mod ai;
 mod datasheet;
+mod demo;
 mod kicadlib;
 mod auth;
 mod compact;
@@ -324,6 +325,7 @@ async fn main() -> anyhow::Result<()> {
             get(http::get_project).patch(http::update_project).delete(http::delete_project),
         )
         .route("/api/projects/blank", post(http::create_blank_project))
+        .route("/api/projects/demo", post(demo::open))
         .route("/api/templates", get(templates::list))
         .route("/api/templates/{id}/{name}", get(templates::picture))
         .route("/api/projects/from-template", post(templates::create))

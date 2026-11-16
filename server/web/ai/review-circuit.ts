@@ -32,6 +32,8 @@ export const CIRCUIT_RULES: { id: string; what: string }[] = [
   { id: "led.current", what: "Every LED has a series resistor that sets a sane current" },
   { id: "nets.typos", what: "No two net names are a slip apart, and no named net ends at a single pin" },
   { id: "passives.sizes", what: "Small resistors and capacitors use one package size where they can" },
+  { id: "bypass.damping", what: "A rail with many ceramic capacitors has one lossy (electrolytic, tantalum or polymer) capacitor to damp their resonance" },
+  { id: "converter.grounds", what: "A converter's analog and digital ground pins meet at one ground, at the chip" },
 ];
 export const CIRCUIT_MANUAL = [
   "Each IC's support circuit was compared with the typical application in its datasheet: capacitor values and count, pull-ups, strapping pins.",
@@ -247,4 +249,31 @@ export function reviewCircuit(c: CircuitContext): void {
     if (sizes.size > 1) { const total = Array.from(sizes.values()).reduce((a, l) => a + l.length, 0); const rows = Array.from(sizes.entries()).sort((a, b) => b[1].length - a[1].length); const minor = rows.slice(1).filter(([, l]) => l.length <= Math.max(3, total * 0.15));
       if (minor.length) add("passives.sizes", "note", `Most small resistors and capacitors here are ${rows[0][0]}. One size keeps assembly cheap and the board easy to rework; move these to ${rows[0][0]} unless their voltage, power or value needs the other size.`, minor.map(([s, l]) => `${s}: ${l.slice(0, 6).join(", ")}${l.length > 6 ? ` and ${l.length - 6} more` : ""}`)); }
   }
+
+  // ---- The Art of Electronics (3rd ed.), section 12.9.1A and its note 54: several ceramic bypass capacitors joined by the
+  // inductance of the supply wiring ring at 5 to 20 MHz, and can make a circuit oscillate; the ESR of one electrolytic
+  // (or tantalum, polymer) capacitor on the rail damps it
+  {
+    const LOSSY = /electrolytic|elko|tantal|polymer|poscap|oscon|e-?cap|CP_|CPol|_Elec|aluminum|alu\b/i; const rows: string[] = [];
+    for (const net of supplyNets) {
+      if (isGround(net)) continue; const caps = capsToGround(net); if (caps.length < 4) continue;
+      const lossy = caps.some((x) => LOSSY.test(x.part.lib + " " + x.part.value + " " + footprintOf(x.part)) || (farads(x.part.value) || 0) >= 47e-6);
+      if (!lossy) rows.push(`${net}: ${caps.length} ceramic capacitors (${caps.slice(0, 6).map((x) => x.part.ref).join(", ")}${caps.length > 6 ? ", ..." : ""}) and no lossy one`);
+    }
+    if (rows.length) add("bypass.damping", "note", "Many ceramic bypass capacitors on one rail form high-Q resonances with the wiring between them (typically 5 to 20 MHz) that can ring or make the circuit oscillate (The Art of Electronics, 12.9.1A). One electrolytic, tantalum or polymer capacitor of about 10 uF on the rail damps them with its ESR.", rows.slice(0, 12));
+  }
+
+  // ---- The Art of Electronics, chapter 13: a converter's separate analog and digital ground pins keep digital return current out of
+  // the analog front end, but the two must meet at one ground, at the chip; left on two nets they never meet, or meet far away
+  {
+    const rows: string[] = [];
+    for (const p of live) {
+      const a = pinNamed(p, /^(AGND|GNDA|AVSS|VSSA|AGND\d*)$/i).map(pinNet).filter(Boolean), d = pinNamed(p, /^(DGND|GNDD|DVSS|VSSD|DGND\d*)$/i).map(pinNet).filter(Boolean);
+      if (!a.length || !d.length) continue; const an = new Set(a), dn = new Set(d); if ([...an].some((n) => dn.has(n))) continue;
+      const joined = [...an].some((n) => across(n, (q) => !!q && q.pins.length === 2).some((x) => dn.has(x.far)));      // a net tie, 0R or bead between them
+      if (!joined) rows.push(`${p.ref} (${p.value}): ${[...an].join(", ")} and ${[...dn].join(", ")}`);
+    }
+    if (rows.length) add("converter.grounds", "warning", "These parts have analog and digital ground pins on nets that never meet. Tie both to one ground plane right at the part (The Art of Electronics, chapter 13): the separate pins are there to keep digital return current off the analog side inside the chip, not to split the board's ground.", rows);
+  }
+
 }

@@ -55,7 +55,7 @@ export function openHotkeyList(): void {
     build(body) {
       body.innerHTML = `<input id="hkFilter" type="text" placeholder="Type filter text" autocomplete="off" spellcheck="false" style="margin-bottom:8px">
         <div id="hkList" style="height:min(60vh,520px);overflow:auto;border:1px solid var(--line);border-radius:var(--r-2);background:var(--panel)"></div>
-        <p class="kd-note" style="margin:8px 0 0">Default hotkeys of KiCad. Greyed commands run in the desktop app.</p>`;
+        <p class="kd-note" style="margin:8px 0 0">Default hotkeys of KiCad. Greyed commands are not in the web editor yet.</p>`;
       const list = body.querySelector<HTMLElement>("#hkList")!, filter = body.querySelector<HTMLInputElement>("#hkFilter")!;
       const avail = new Map<string, boolean>();
       const isAvail = (r: HotkeyRow) => { if (r.section === "Junction" || !inEditor) return true; let v = avail.get(r.id); if (v === undefined) { v = kicadActionAvailable(r.id); avail.set(r.id, v); } return v; };
@@ -81,8 +81,8 @@ export function openHotkeyList(): void {
     } });
 }
 
-const RELEASES = "https://github.com/JunctionEDA/junction/releases";
-const SOURCE = "https://github.com/JunctionEDA/junction";
+// web only for now, and the repository is private: the organisation, not the repository
+const SOURCE = "https://github.com/JunctionEDA";
 const LOGO = `<img src="${ICON_URL}" width="64" height="64" alt="">`;
 
 /** The text KiCad's "Copy Version Info" puts on the clipboard, for this client. */
@@ -110,14 +110,14 @@ export function openAbout(): void {
   const link = (url: string, text?: string) => `<a href="${url}" target="_blank" rel="noreferrer">${esc(text || url)}</a>`;
   const pages: Record<string, string> = {
     About: `<p><b><u>Description</u></b></p><p>The KiCad EDA Suite is a set of open source applications for the creation of electronic schematics and printed circuit boards.</p>
-      <p>Junction adds real-time collaboration: several people edit the same schematic and board at once, in the desktop application or in this web editor, with live cursors, comments and version history.</p>
-      <p><b><u>Junction on the web</u></b></p><ul><li>Source code - ${link(SOURCE)}</li><li>Desktop application - ${link(RELEASES)}</li></ul>
+      <p>Junction adds real-time collaboration: several people edit the same schematic and board at once in this web editor, with live cursors, comments and version history.</p>
+      <p><b><u>Junction on the web</u></b></p><ul><li>Junction on GitHub - ${link(SOURCE)}</li></ul>
       <p><b><u>KiCad on the web</u></b></p><ul><li>The official KiCad website - ${link("http://www.kicad.org")}</li><li>Developer website - ${link("https://go.kicad.org/dev")}</li><li>Official KiCad library repositories - ${link("https://go.kicad.org/libraries")}</li></ul>
       <p><b><u>KiCad users group and community</u></b></p><ul><li>KiCad forum - ${link("https://go.kicad.org/forum")}</li></ul>`,
     ...creditPages(),
     Version: `<pre id="abVersion" style="margin:0;white-space:pre-wrap;font-family:var(--mono);user-select:text">${esc(versionInfo())}</pre>`,
     License: `<p>The complete KiCad EDA Suite is released under the</p><p><b>GNU General Public License (GPL) version 3 or any later version</b></p>
-      <p>Junction is a fork of KiCad and is distributed under the same license. The source code is available from ${link(SOURCE)}.</p>`,
+      <p>Junction is a fork of KiCad and is distributed under the same license.</p>`,
   };
   D.open({ title: "About Junction", width: 780,
     build(body) {

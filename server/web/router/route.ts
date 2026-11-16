@@ -300,6 +300,7 @@ export class Router {
       const ko = K.kid(n, "keepout"); const layers = zoneLayers(n);
       if (ko) {
         const no = (k: string) => { const c = K.kid(ko, k); return !!c && K.str(c[1]) === "not_allowed"; };
+        if (no("copperpour")) { const t = cellsIn(polys); const m = G.noPour || (G.noPour = new Uint8Array(W * H)); for (let i = 0; i < t.length; i++) if (t[i]) m[i] = 1; }
         if (!no("tracks") && !no("vias")) continue; const t = cellsIn(polys);
         // a track or via whose centre sits on the area's edge still reaches into it by its half width (the DRC's
         // DRC_TEST_PROVIDER_DISALLOW): the band within the widest half width of the edge is kept out too
@@ -339,7 +340,7 @@ export class Router {
       for (const z of doc.items.values()) {
         if (z.kind !== "zone" || !K.kid(z.node, "keepout")) continue;
         const polys: Pt[][] = K.kids(z.node, "polygon").map((poly: any) => K.ptsOf(poly) as Pt[]).filter((pts: Pt[]) => pts.length >= 3);
-        if (!polys.some(inside)) continue; const t = cellsIn(polys); for (let i = 0; i < t.length; i++) if (t[i]) q[i] = 1; marked = true;
+        if (!polys.some(inside)) continue; const t = cellsIn(polys); const cl = G.clear || (G.clear = new Uint8Array(W * H)); for (let i = 0; i < t.length; i++) if (t[i]) { q[i] = 1; cl[i] = 1; } marked = true;
         // the ground beside the clear area is part of the antenna: a band of it stays whole, so no other net runs along the edge
         const band = this.opts.antennaBand === undefined ? 1.2 : Math.max(0, +this.opts.antennaBand);
         if (band > 0) { let b: Box = [Infinity, Infinity, -Infinity, -Infinity]; for (const pts of polys) for (const pt of pts) b = [Math.min(b[0], pt[0] - band), Math.min(b[1], pt[1] - band), Math.max(b[2], pt[0] + band), Math.max(b[3], pt[1] + band)];
@@ -347,7 +348,7 @@ export class Router {
       }
       if (!marked) { let b: Box = [Infinity, Infinity, -Infinity, -Infinity]; for (const p of pads) b = [Math.min(b[0], p.x - 2.5), Math.min(b[1], p.y - 2.5), Math.max(b[2], p.x + 2.5), Math.max(b[3], p.y + 2.5)];
         const cb = this.cellBox(b); if (cb) for (let iy = cb[1]; iy <= cb[3]; iy++) q.fill(1, iy * W + cb[0], iy * W + cb[2] + 1); }
-      for (const p of pads) { const n = nl.table.key(p.net) || ""; if (n) this.xtalNets.add(n); }
+      for (const p of pads) { const n = nl.table.key(p.net) || ""; if (n) { this.xtalNets.add(n); this.feedNets.add(n); } }
     }
     for (const it of doc.items.values()) if (it.kind === "footprint") { const ref = refOf(K, it.node); for (const p of P.padsOf(it)) this.padNames.set(p.x.toFixed(3) + "," + p.y.toFixed(3), (ref || "?") + "." + p.number); }
     // Groups: a chip and the small parts that serve it (its capacitors, pull-ups, crystal, inductor) are one cluster,
@@ -434,7 +435,7 @@ export class Router {
           this.zoneCovered += covered.length - 1; clusters.length = 0; clusters.push(merged, ...rest); zoneCluster = 0;
           zoneCells = [];
           pour = { mask: copper.map(() => null), width: Math.max(...mine.map((z) => z.minW)), clr: Math.max(P.netClearance(s, net.key), s.minClearance || 0, ...mine.map((z) => z.clr)) };
-          for (const z of mine) { const t = cellsIn(z.polys); for (const l of z.layers) { const m = pour.mask[l] || (pour.mask[l] = new Uint8Array(W * H)); const sh = this.opts.splitPlaneEnds ? shared()[l] : null; for (let i = 0; i < t.length; i++) if (t[i]) { m[i] = 1; if (!sh || sh[i] !== 2) zoneCells.push({ ix: i % W, iy: (i / W) | 0, l }); } } }   // where pours of two nets overlap, the fill may be the other's: no end there
+          for (const z of mine) { const t = cellsIn(z.polys); for (const l of z.layers) { const m = pour.mask[l] || (pour.mask[l] = new Uint8Array(W * H)); const sh = this.opts.splitPlaneEnds ? shared()[l] : null; for (let i = 0; i < t.length; i++) if (t[i] && !(G.noPour && G.noPour[i])) { m[i] = 1; if (!sh || sh[i] !== 2) zoneCells.push({ ix: i % W, iy: (i / W) | 0, l }); } } }   // where pours of two nets overlap, the fill may be the other's: no end there
         }
       }
       if (clusters.length < 2 && !pour) continue;
@@ -470,7 +471,7 @@ export class Router {
     }
   }
 
-  private xtalNets = new Set<string>();
+  private xtalNets = new Set<string>(); private feedNets = new Set<string>();
   private planeLayers: string[] = []; private fanned = 0;
   /** The rule class a net routes with (its netclass's track width, clearance and via), built on first use. */
   classFor(netKey: string, cap = Infinity, want = 0, smallVia = false): RuleClass {
@@ -487,8 +488,9 @@ export class Router {
     if (smallVia && s.minViaDiameter > 0 && s.minThroughDrill > 0 && s.minViaDiameter < viaD0 - 1e-6) { const d = Math.max(s.minViaDiameter, s.minThroughDrill + 2 * (s.minViaAnnular || 0.05)); if (d < viaD0 - 1e-6) { viaD = d; viaDrill = Math.min(viaDrill, s.minThroughDrill); } }
     const kind = this.relax ? undefined : this.kindFor(netKey);
     const open = !G.quiet || this.xtalNets.has(netKey) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(netKey);
-    const key = `${width}/${clr}/${viaD}/${viaDrill}` + (kind ? "/" + kind : "") + (open ? "" : "/q"); let c = G.classes.get(key);
-    if (!c) { c = buildClass(G, key, width, clr, viaD, viaDrill, kind, open); if (this.conns.length) for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G, c, sh, 1, false); }
+    const feed = this.feedNets.has(netKey);   // an antenna's clear area takes its feed and nothing else, not even ground (no pour reaches there to join it)
+    const key = `${width}/${clr}/${viaD}/${viaDrill}` + (kind ? "/" + kind : "") + (open ? "" : "/q") + (feed ? "/f" : ""); let c = G.classes.get(key);
+    if (!c) { c = buildClass(G, key, width, clr, viaD, viaDrill, kind, open, feed); if (this.conns.length) for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G, c, sh, 1, false); }
     return c;
   }
   relax = false; relaxed = new Set<string>(); pairNets = new Set<string>(); private kindMemo = new Map<string, NetKind>(); private domains: boolean | null = null;
@@ -688,8 +690,13 @@ export class Router {
               return (net.anchors || []).filter((a) => seen.has(a.cluster) && a.axis);
             };
             const cps = side(e.p, cp, end), cns = side(e.n, cn, nEnd); const far: Pt = [cp[other].p[0] - cn[nOther].p[0], cp[other].p[1] - cn[nOther].p[1]];
+            // the same way round means P on the same side of the run at both ends.  The run leaves each end the way
+            // its pads face (out of the part), so a pair that has to come back on itself (a chip whose pins face away
+            // from the connector) still compares right; ends turned at odd angles (a QFN at 45°) too.
+            const hand = (a: Anchor, b: Anchor): number => { const e = this.outward(a) || this.outward(b); const v: Pt = [a.p[0] - b.p[0], a.p[1] - b.p[1]]; return e ? Math.sign(e[0] * v[1] - e[1] * v[0]) : 0; };
+            const farHand = hand(cp[other], cn[nOther]); const side2 = (a: Anchor, b: Anchor) => { const h = hand(a, b); return !!h && !!farHand && h * farHand > 0; };
             let pick: [number, Anchor, Anchor] | null = null;
-            for (const a of cps) for (const b of cns) { const dd = d(a, b); if (dd < 1e-3 || dd > NEAR) continue; const sc = dd + ((a.p[0] - b.p[0]) * far[0] + (a.p[1] - b.p[1]) * far[1] < 0 ? 5 : 0) + 0.05 * (d(a, cp[other]) + d(b, cn[nOther])); if (!pick || sc < pick[0] - 1e-9) pick = [sc, a, b]; }
+            for (const a of cps) for (const b of cns) { const dd = d(a, b); if (dd < 1e-3 || dd > NEAR) continue; const sc = dd + (side2(a, b) ? 5 : 0) + 0.05 * (d(a, cp[other]) + d(b, cn[nOther])); if (!pick || sc < pick[0] - 1e-9) pick = [sc, a, b]; }
             if (pick && (pick[1] !== cp[end] || pick[2] !== cn[nEnd])) { cp[end] = pick[1]; cn[nEnd] = pick[2]; cp.len = d(cp.a, cp.b); cn.len = d(cn.a, cn.b); cp.cls = this.classFor(cp.net, Math.min(this.roomAt(cp.a, cp.net), this.roomAt(cp.b, cp.net))); cn.cls = this.classFor(cn.net, Math.min(this.roomAt(cn.a, cn.net), this.roomAt(cn.b, cn.net))); }
           }
         }
@@ -792,7 +799,7 @@ export class Router {
     const op = off(sgn), on = off(-sgn); if (!op || !on) return "a turn is too tight for the pair";
     const out = (a: Anchor, ld: Lead): Pt => [r6(a.p[0] + ld.e[0] * ld.s), r6(a.p[1] + ld.e[1] * ld.s)];
     const tp = [Pa.p, out(Pa, lead[0]), ...op, out(Pb, lead[1]), Pb.p], tn = [Na.p, out(Na, lead[0]), ...on, out(Nb, lead[1]), Nb.p]; const sp = segs(tp), sn = segs(tn);
-    if (sp.some((a) => sn.some((b) => P.shapeGap(a, b) < clr - 1e-4))) return "the fan-out to the pads brings the two tracks too close";
+    if (sp.some((a) => sn.some((b) => P.shapeGap(a, b) < clr - 1e-4))) { if ((this.opts as any).debugPairs) { const bad: string[] = []; sp.forEach((a, i) => sn.forEach((b, j) => { const g = P.shapeGap(a, b); if (g < clr - 1e-4) bad.push(`${i}/${sp.length}-${j}/${sn.length}:${g.toFixed(3)}`); })); console.log("   clash", bad.join(" "), JSON.stringify(tp.slice(-4)), JSON.stringify(tn.slice(-4))); } return "the fan-out to the pads brings the two tracks too close"; }
     this.cur = Object.assign({}, cp); this.curSoft = false;
     if (!sp.every((sh) => this.clearOf(sh, l, pr.p.key, cp.cls.clr)) || !sn.every((sh) => this.clearOf(sh, l, pr.n.key, cn.cls.clr))) return "a piece of the pair would not keep its clearance";
     return { tp, tn };
@@ -803,7 +810,7 @@ export class Router {
     const layers = G.layers.map((_, l) => l).filter((l) => G.routable[l] && [Pa, Pb, Na, Nb].every((a) => a.layers.includes(l)));
     if (!layers.length) return this.layPairVias(pr);
     const key = `pair/${w}/${gap}/${clr}` + (cp.cls.open === false ? "/q" : ""); let wide = G.classes.get(key);
-    if (!wide) { wide = buildClass(G, key, 2 * w + gap, clr, cp.cls.viaD, cp.cls.viaDrill, cp.cls.kind, cp.cls.open !== false); for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G, wide, sh, 1, false); }
+    if (!wide) { wide = buildClass(G, key, 2 * w + gap, clr, cp.cls.viaD, cp.cls.viaDrill, cp.cls.kind, cp.cls.open !== false, !!cp.cls.feed); for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G, wide, sh, 1, false); }
     const half = (a: Anchor) => { const sh = a.shape as any; return sh ? (sh.t === "circle" ? sh.r : Math.max(sh.w || 0, sh.h || 0) / 2 || sh.r || 0) : 0; };
     // Each end gathers the pair a little way off its pads, square to the line between them, on either side of it.
     const gather = (a: Anchor, b: Anchor, toward: Anchor): { g: Anchor; e: Pt; q: Pt; s: number }[] => {
@@ -1647,6 +1654,15 @@ export class Router {
     const members: Record<string, string[]> = {}; for (const [ref, g] of this.groupOf) (members[g] || (members[g] = [])).push(ref);
     for (const g of Object.keys(members)) if (members[g].length < 2) delete members[g];
     return { clusters: Object.keys(members).length, inside, insideRouted, insideVias, critical, members };
+  }
+  private refPads: Map<string, Pt> | null = null;
+  /** The way a pad faces out of its part: along its own axis, away from the middle of the part's pads. */
+  private outward(a: Anchor): Pt | null {
+    if (!a.axis) return null;
+    if (!this.refPads) { const sum = new Map<string, number[]>(); for (const [k, v] of this.padNames) { const r = v.replace(/\.[^.]*$/, ""); const [x, y] = k.split(",").map(Number); const t = sum.get(r) || [0, 0, 0]; t[0] += x; t[1] += y; t[2]++; sum.set(r, t); } this.refPads = new Map([...sum].map(([r, t]) => [r, [t[0] / t[2], t[1] / t[2]] as Pt])); }
+    const ref = (this.padNames.get(a.p[0].toFixed(3) + "," + a.p[1].toFixed(3)) || "").replace(/\.[^.]*$/, ""); const c = this.refPads.get(ref); if (!c) return null;
+    const s = (a.p[0] - c[0]) * a.axis[0] + (a.p[1] - c[1]) * a.axis[1]; if (Math.abs(s) < 0.05) return null;
+    return s > 0 ? a.axis : [-a.axis[0], -a.axis[1]];
   }
   private padName(p: Pt): string { return this.padNames.get(p[0].toFixed(3) + "," + p[1].toFixed(3)) || `(${r6(p[0])}, ${r6(p[1])})`; }
   private domainReport(): DomainReport | undefined {

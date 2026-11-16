@@ -304,9 +304,10 @@ export const LOCAL_LABELS: Record<string, string> = {
 export const LOCAL_KEYS: Record<string, string> = { close: "Ctrl+W", zoomin: "+", zoomout: "−", fit: "Home", undo: "Ctrl+Z", redo: "Ctrl+Shift+Z", selectAll: "Ctrl+A" };
 /** External links among the menu entries (rendered as anchors). */
 export const LINKS: Record<string, string> = {
-  downloadDesktop: "https://github.com/JunctionEDA/junction/releases", sourceCode: "https://github.com/JunctionEDA/junction",
+  // web only for now, and the repository is private: downloadDesktop: "https://github.com/JunctionEDA/junction/releases",
+  sourceCode: "https://github.com/JunctionEDA",
   help: "https://docs.kicad.org/", gettingStarted: "https://docs.kicad.org/master/en/getting_started_in_kicad/getting_started_in_kicad.html",
-  getInvolved: "https://go.kicad.org/contribute/", donate: "https://go.kicad.org/app-donate", reportBug: "https://github.com/JunctionEDA/junction/issues/new",
+  getInvolved: "https://go.kicad.org/contribute/", donate: "https://go.kicad.org/app-donate", reportBug: "https://github.com/JunctionEDA",
 };
 
 /** Docked pane ids and the KiCad "show …" action that toggles each. */

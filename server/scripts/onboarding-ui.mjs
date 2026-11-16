@@ -211,7 +211,7 @@ const m = await context({ colorScheme: 'light' });
 await m.goto(BASE + '/?hero=alone'); await m.waitForSelector('[data-keep]');
 await m.waitForFunction(() => /Unrouted 4/.test(document.querySelector('[data-unrouted]').textContent));
 const keepHref = await m.getAttribute('[data-keep]', 'href');
-check('signed out, Keep going in a real project goes through sign-in and back to the hand-off', keepHref === '/auth/github/login?next=' + encodeURIComponent('/?start=mini'), keepHref);
+check('signed out, Keep going in a real project goes through sign-in and back to the Devboard Demo', keepHref === '/auth/github/login?next=' + encodeURIComponent('/?start=demo'), keepHref);
 check('the home page has no template button', await m.locator('[data-template]').count() === 0);
 // route one connection in the small editor: the route tool, a pad, the corners, a pad
 const canvas = m.locator('#hero canvas:not([data-sch])'); await canvas.scrollIntoViewIfNeeded();
@@ -231,32 +231,28 @@ await m.keyboard.press('Escape');
 const unr = await m.textContent('[data-unrouted]');
 check('a connection routed in the small editor', /Unrouted 3/.test(unr), unr);
 await m.locator('[data-keep]').scrollIntoViewIfNeeded(); await m.waitForTimeout(400); await shot(m, '14-home-page-keep-going');
-// the click leaves the board for the app; sign-in itself is GitHub's, so the test signs in the way the rig does
-await m.evaluate(() => { document.querySelector('[data-keep]').addEventListener('click', (e) => e.preventDefault()); });
-await m.click('[data-keep]');
-const left = await m.evaluate(() => JSON.parse(localStorage.getItem('kc.onboard.mini') || 'null'));
-check('Keep going leaves the board as a .kicad_pcb for the app', !!left && left.board.startsWith('(kicad_pcb') && /filled_polygon/.test(left.board) && !/mini-\d/.test(left.board), left ? `${left.board.length} bytes` : 'nothing');
-await signIn(m, odile, '/?start=mini');
-await inEditor(m); await m.waitForSelector('.kg');
-const mg = await guide(m);
-check('after sign-in the board opens as a real project with the guide', mg.from === 'mini' && await m.evaluate(() => window.CollabApp.getState().project.name) === 'My first board' && /board you were routing on the home page/.test(await m.textContent('.kg')));
-check('the hand-off is used once', await m.evaluate(() => localStorage.getItem('kc.onboard.mini')) === null && !/start=/.test(await m.evaluate(() => location.search)));
-if (await m.evaluate(() => window.CollabApp.getState().document.editor) !== 'pcb') { await m.evaluate(() => { const s = window.CollabApp.getState(); window.CollabApp.dispatch({ type: 'openDoc', docId: s.document.docs.find((d) => d.docType === 'kicad_pcb').docId }); }); await inEditor(m, 'pcb'); }
-await m.waitForTimeout(900);
-const mb = await board(m);
-check('it is the board as it was left: three connections open, the routed one made', mb.open === 3 && mb.violations.length === 0, JSON.stringify(mb));
+// sign-in itself is GitHub's, so the test signs in the way the rig does and lands where the button leads
+await signIn(m, odile, '/?start=demo');
+await inEditor(m);
+const demoName = await m.evaluate(() => window.CollabApp.getState().project.name);
+check('after sign-in Keep going opens the Devboard Demo in the editor', demoName === 'Devboard Demo' && !/start=/.test(await m.evaluate(() => location.search)), demoName);
 const mid = await m.evaluate(() => window.CollabApp.getState().project.projectId);
-const mdocs = ((await api(odile.token, `/api/projects/${mid}`)).docs || []).map((d) => d.docType).sort().join();
-check('the project has its schematic and project file too', mdocs === 'kicad_pcb,kicad_pro,kicad_sch', mdocs);
-await shot(m, '16-handed-over-board');
+const mproj = await api(odile.token, `/api/projects/${mid}`);
+const mdocs = (mproj.docs || []).map((d) => d.path);
+const mlisted = ((await api(odile.token, '/api/projects')).projects || []).find((p) => p.projectId === mid) || {};
+check('it is the whole Cyberboard project, private', mdocs.length === 64 && mdocs.includes('Devboard_Demo.kicad_pcb') && mdocs.includes('Devboard_Demo.kicad_sch') && mdocs.some((p) => p.endsWith('.step')) && mlisted.public === false, `${mdocs.length} docs, public ${mlisted.public}`);
+await shot(m, '16-devboard-demo');
 
 // signed in already: the buttons go straight there
 const w = await context({ colorScheme: 'light' });
 await signIn(w, pax, '/welcome'); await w.waitForSelector('[data-keep]');
-check('signed in, the home page buttons skip sign-in', await w.getAttribute('[data-keep]', 'href') === '/?start=mini');
+check('signed in, the home page buttons skip sign-in', await w.getAttribute('[data-keep]', 'href') === '/?start=demo');
 await w.locator('[data-keep]').scrollIntoViewIfNeeded(); await w.click('[data-keep]');
-await inEditor(w); await w.waitForSelector('.kg');
-check('…and Keep going opens the project', (await guide(w))?.from === 'mini');
+await inEditor(w);
+const firstDemo = await w.evaluate(() => window.CollabApp.getState().project);
+check('…and Keep going opens the Devboard Demo', firstDemo.name === 'Devboard Demo', firstDemo.name);
+await w.goto(BASE + '/?start=demo'); await inEditor(w);
+check('…the same copy every time, not a new one', await w.evaluate(() => window.CollabApp.getState().project.projectId) === firstDemo.projectId);
 await w.goto(BASE + '/?new=template&t=usb-c-3v3-regulator'); await w.waitForSelector('.hp-item'); await w.waitForTimeout(500);
 check('an old /?new=template link opens no dialog', await w.locator('.hp-modal').count() === 0);
 

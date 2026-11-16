@@ -341,7 +341,7 @@ function peerCursorSpec(cid: string, p: PeerEntry): PeerCursorSpec | null {
   if (!Array.isArray(st.cursor)) return null;
   const ai = st.ai && typeof st.ai === "object" ? st.ai : null;
   const note = ai && typeof ai.note === "string" ? ai.note.trim().slice(0, 140) : "";
-  return { cid, name: peerName(p), color: (p.user && p.user.color) || "#4477ee", note, following: E.followPeer === cid, at: [st.cursor[0] / E.IU, st.cursor[1] / E.IU], rtt: typeof st.rtt === "number" ? st.rtt : 0 };
+  return { cid, name: peerName(p), color: (p.user && p.user.color) || "#4477ee", note, following: E.followPeer === cid, at: [st.cursor[0] / E.IU, st.cursor[1] / E.IU], ts: typeof st.ts === "number" ? st.ts : 0 };
 }
 
 /** Only pointers moved: move them, and leave the rest of the peer overlay (and the canvas) alone. */

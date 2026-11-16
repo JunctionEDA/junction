@@ -5187,7 +5187,7 @@ def _board_review(self, level: str | None = None, rule: str | None = None, limit
 
 # ---------------------------------------------------------------- copper the checks ask for
 
-def _antenna(self, ref: str | None = None, clearance: float | None = None, pitch: float = 2.0, kind: str | None = None,
+def _antenna(self, ref: str | None = None, clearance: float | None = None, pitch: float = 1.0, kind: str | None = None,
              size: float | None = None, drill: float | None = None) -> dict:
     """Give an antenna what it needs from the board: a keep-out over its clear area on every copper layer (no pour, no
     track, no via under or beside it) and a row of ground vias, \`pitch\` mm apart, along the edge of the ground that
