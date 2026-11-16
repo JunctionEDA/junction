@@ -32,7 +32,7 @@ Datasheets: `find_datasheets` lists each part with its Datasheet link and part n
 
 ## A board in one call
 
-The cheapest way to lay out a board, in tokens and in time: one `run_python` script, one harness call. The harness holds the layout rules (the owner's, the references' and the workshop practice in `server/docs/pcb-design-rules.md`), applies them in the right order and checks the result, so you do not need the long topics (`board`, `routing`, `layout`) unless a finding sends you there.
+The cheapest way to lay out a board: one `run_python` script, one harness call. The harness holds the layout rules (`server/docs/pcb-design-rules.md`), applies them in order and checks the result, so the long topics (`board`, `routing`, `layout`) are only for when a finding sends you there.
 
 ```python
 board = project.board()
@@ -51,7 +51,7 @@ print(r)
 
 **A bad layout is refused.** `design()` ends with a gate: clashing or off-board parts, a pin-serving part away from its pin (`serve.near`, `usb.cc`), a crystal far away or with a via (`crystal.near`, `crystal.vias`), a wandering match or feed (`rf.match`, `rf.feed`), copper in an antenna's ground band (`antenna.ground`), open connections, DRC and review errors. A refused script publishes nothing and lists the reasons; fix the cause (usually the floor plan or a rotation) and dry-run again. `accept=["routing.open"]` lets a named reason through when the person has agreed; say so in your reply.
 
-Read the result, which is short on purpose: `routed.left` (open connections by net; empty is done), `drc.errors`, `review.findings` (one line each) and `skipped` (a step that could not run, and why). Fix only what is named, with the one call that fixes it, and look again with `board.brief()` or `board.brief(rule="vias.slot")`; `board.review(rule=...)` gives one finding's full text. Do not print whole results of the single steps.
+Read the result, which is short on purpose: `routed.left` (open connections by net; empty is done), `drc.errors`, `review.findings` (one line each) and `skipped` (a step that could not run, and why). Fix only what is named, with the one call that fixes it, and look again with `board.brief()` or `board.brief(rule="vias.slot")`; `board.review(rule=...)` gives one finding's full text.
 
 What to do about the usual findings: an open connection or a signal via is a crossing, so move or turn the part, or give `swap=` more nets, before routing again (`board.unroute(net)`, `board.route(nets=[...])`); `bypass.near` and `bypass.order` are placement (`board.place_bypass("U1")`); `pour.islands` and `ground.pour_only` want `board.ground_pads()` or `board.stitch()`; `tracks.minimum` and `power.width` want `widths=`; `return.path`, `planes.signals` and `vias.slot` mean the ground under a fast net is cut, so move the track or the vias that cut it.
 
