@@ -20,7 +20,10 @@ with any AI model as a teammate.</p>
 <!-- The demo video. GitHub plays a video inline only from a github.com/user-attachments URL: to get the inline
      player, drag docs/media/junction-demo.mp4 into this file in GitHub's editor and let the URL it inserts replace
      the poster link below. -->
-<p align="center"><a href="docs/media/junction-demo.mp4"><img src="docs/media/junction-demo-poster.jpg" alt="Junction demo video: four people build a Raspberry Pi Pico board together, from schematic to routed board" width="100%"></a></p>
+
+
+https://github.com/user-attachments/assets/03a18f9e-1325-409d-ac0d-dcadf3a42ed4
+
 
 <p align="center"><sub>Four people build a Raspberry Pi Pico board together, from the first symbol to the filled planes. Music: Grieg, <i>In the Hall of the Mountain King</i>, Musopen (public domain).</sub></p>
 
