@@ -35,6 +35,7 @@ export const CRAFT_LIMITS = {
   slotSliver: 0.15,    // plane copper narrower than this between two clearance holes does not survive
   slotCount: 4,        // this many vias in a merged row
   slotLength: 4,       // ... over this length make a slot worth reporting
+  clusterSpan: 6,      // a net whose pads all lie within this is inside one cluster
   capReach: 4,         // a bypass capacitor serves a supply pin this close
   pinVia: 1.2,         // a supply via this close to the pin feeds the pin first
   pairVia: 2.5,        // a supply via has a ground via within this
@@ -45,6 +46,7 @@ export const CRAFT_RULES: { id: string; what: string }[] = [
   { id: "tracks.minimum", what: "Signal tracks are wider than the fabricator's minimum wherever there is room: 0.2 to 0.3 mm, necked down only at fine-pitch pads" },
   { id: "crosstalk.victims", what: "Reset, crystal, reference and analog lines keep three track widths from clocks, fast lines and switch nodes" },
   { id: "vias.slot", what: "Vias are spaced so that plane copper passes between their clearance holes: a merged row is a slot in the ground" },
+  { id: "cluster.inside", what: "The connections inside a cluster (a chip and the small parts that serve it) are short, on one layer and have no via: a cluster is routed inside itself first" },
   { id: "bypass.order", what: "A supply reaches the chip's pin through its bypass capacitor: via, capacitor, pin" },
   { id: "pads.entry", what: "A track leaves a fine-pitch pad through the pad's end, in line with it" },
   { id: "power.return", what: "A supply via has a ground via beside it, so the loop through the planes is small" },
@@ -147,6 +149,22 @@ export function reviewCraft(doc: any, P: any, k: any, settings: any, add: Add): 
       if (best >= CRAFT_LIMITS.slotLength) items.push(`${g.length} vias from ${at(a.shape.x, a.shape.y)} to ${at(b.shape.x, b.shape.y)}: a ${r2(best)} mm slot`);
     }
     if (items.length) add("vias.slot", "warning", `These vias stand so close that their clearance holes in the ground plane join into one slot, and every signal that crosses it loses its return path. Leave ${r2(2 * clr + CRAFT_LIMITS.slotSliver)} mm of copper-to-copper room between neighbouring vias, or stagger the row in two lines, so plane copper passes between them; then fill and look at the plane layer.`, few(items));
+  }
+
+  // ---- cluster.inside: a net that lives wholly inside one cluster (a chip pin and the small parts on it, all surface
+  // pads within a few millimetres) is wired there, on the parts' layer: no via, no wandering
+  {
+    const byNet = new Map<string, Pad[]>(); for (const p of pads) if (p.net && !isGnd(p.net)) { const l = byNet.get(p.net); if (l) l.push(p); else byNet.set(p.net, [p]); }
+    const items: string[] = [];
+    for (const [net, ps] of byNet) {
+      if (ps.length < 2 || ps.length > 4 || ps.some((p) => p.type !== "smd") || !ps.some((p) => p.fp.pads.length >= 5) || !ps.some((p) => p.fp.pads.length < 5)) continue;
+      let span = 0; for (const p of ps) for (const q of ps) span = Math.max(span, Math.hypot(p.x - q.x, p.y - q.y)); if (span > CRAFT_LIMITS.clusterSpan) continue;
+      const nv = vias.filter((v) => v.net === net).length; let len = 0; for (const t of tracks) if (t.net === net && t.shape && t.shape.t === "seg") len += Math.hypot(t.shape.b[0] - t.shape.a[0], t.shape.b[1] - t.shape.a[1]);
+      const chip = ps.find((p) => p.fp.pads.length >= 5)!;
+      if (nv) items.push(`${bare(net)} at ${chip.fp.ref}: ${nv} via${nv === 1 ? "" : "s"} on a net whose pads lie within ${r2(span)} mm`);
+      else if (len > 2.5 * span + 3) items.push(`${bare(net)} at ${chip.fp.ref}: ${r2(len)} mm of track for pads ${r2(span)} mm apart`);
+    }
+    if (items.length) add("cluster.inside", "warning", "A cluster is one chip and the parts that serve it, and it is routed inside itself first: every connection between two of its parts is short, on the parts' own layer and has no via. These are not, which means the cluster is built wrong rather than routed wrong: turn or move the small part so its pad faces the pin it serves with its other end pointing outward (board.seat(ref), board.place_bypass(chip)), then lay the net again (board.unroute(net), board.route(nets=[net])).", few(items));
   }
 
   // ---- bypass.order: the supply reaches the pin through the capacitor

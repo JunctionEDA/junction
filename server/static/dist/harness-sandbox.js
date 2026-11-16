@@ -2412,13 +2412,21 @@ class Board(_Doc):
     def route(self, nets: list | None = None, order: list | None = None, widths: dict | None = None, layers: list | None = None,
               net_options: dict | None = None, keepouts: list | None = None, allow_vias: bool = True, time_s: float | None = None,
               fill: bool = True, max_vias: int | None = None, kinds: dict | None = None, separate=None, fence=None,
-              ground_vias: bool = True, fanout_lanes=None, via_cost: float | None = None) -> dict:
+              ground_vias: bool = True, fanout_lanes=None, via_cost: float | None = None, groups=None, explain: bool = False) -> dict:
         """Autoroute the missing connections (every unrouted net by default) and report what was done.
 
         order: the few nets to lay first (USB pair, crystal); widths: {net: mm} for supply nets; net_options and
         keepouts are passed to the engine as they are.  Route a whole board in one call.
         max_vias: the most vias one pad-to-pad connection may use (2 keeps every track to one trip to the other side).
-        via_cost: how many millimetres of extra track a via is worth (19 by default: the engine goes round on the pad's
+        groups: {name: [refs]}, the clusters (a chip with the parts that serve it).  The engine lays the critical nets
+        first, then wires every cluster inside itself, then power, then the tracks between clusters.  Parts not named
+        are grouped from the board (a small part belongs to the nearest chip it shares a net with); False turns the
+        cluster-first order off.  The result's \`groups\` says how many connections lay inside a cluster.
+        explain=True adds \`explain\` to the result: the nets laid first, the clusters with their parts, every connection
+        that changed layer (with its length against the straight line) and the longest detours, for checking the
+        engine's thinking.
+        time_s: the engine's budget; left out it grows with the board (30 s plus 1.5 s per open connection, 300 at most).
+        via_cost: how many millimetres of extra track a via is worth (12 by default: the engine goes round on the pad's
         own layer before it changes layer); lower it only for a board that cannot route otherwise.
 
         Signal domains.  The engine tells analog nets (ADC, VREF, crystal, sense, feedback), RF nets (ANT, RF),
@@ -2476,8 +2484,19 @@ class Board(_Doc):
             e["keepouts"] = keepouts
         if not allow_vias:
             e["allow_vias"] = False
+        if not time_s and not nets:      # a dense board needs longer than a breakout: the budget follows the work there is
+            try:
+                time_s = min(300, 30 + 1.5 * (self.info().get("unrouted_connections") or 0))
+            except HarnessError:
+                time_s = None
         if time_s:
             e["time_s"] = time_s
+        if explain:
+            e["explain"] = True
+        if groups is False:
+            e["groups"] = False
+        elif groups:
+            e["groups"] = {str(n): list(refs) for n, refs in groups.items()}
         if max_vias is not None:
             e["max_vias"] = max_vias
         if separate is not None:
@@ -2546,7 +2565,9 @@ class Board(_Doc):
         out = {"routed": d.get("routed"), "connections": d.get("connections"), "segments": d.get("segments"), "vias": d.get("vias"), "length_mm": d.get("length_mm"), "unrouted": un[:25]}
         if len(un) > 25:
             out["more_unrouted"] = len(un) - 25
-        for k in ("domains", "ground_vias"):
+        if d.get("explain"):
+            out["explain"] = dict(d["explain"], longest_detours=d.get("longest_detours") or [])
+        for k in ("domains", "ground_vias", "groups"):
             if d.get(k):
                 out[k] = d[k]
         return out
@@ -4573,7 +4594,7 @@ def _score(self) -> dict:
     return {"score": score, "parts": sub, "gates": gates, "worst": [t for _, t in sorted(worst)]}
 
 
-def _stitch(self, spacing: float = 10.0, net: str = "GND", margin: float = 1.5, size: float | None = None, drill: float | None = None) -> dict:
+def _stitch(self, spacing: float = 2.0, net: str = "GND", margin: float = 1.5, size: float | None = None, drill: float | None = None) -> dict:
     """Tie the ground planes together with a grid of vias, about every \`spacing\` mm, wherever one fits: clear of
     parts, and taken back out wherever the rules check says it is too close to other copper.  Call it after routing,
     with ground poured on at least two layers."""
@@ -4583,6 +4604,37 @@ def _stitch(self, spacing: float = 10.0, net: str = "GND", margin: float = 1.5, 
     if not o:
         raise HarnessError("The board has no outline yet.")
     name = self._net(net)
+    # ground vias stay out of other nets' pours (a supply fill, a switch node) and out of keep-outs: a via there
+    # joins nothing and only punches holes in that copper
+    shut = []
+    for z in self._call("get_items", kinds=["zone"]).get("items", []):
+        sx = z.get("sexpr", "")
+        if "keepout" not in sx and re.search(r'\\(net(_name)? "?' + re.escape(name) + r'"?\\)', sx):
+            continue
+        head = sx.split("(polygon")[0]
+        if "keepout" not in sx and not re.search(r'"(F|B|F&B|\\*)\\.Cu"', head):
+            continue      # another net's plane on an inner layer: a ground via passes through it as it should
+        try:      # the outline in full (a listing gives only the start of each item)
+            sx = (self._call("get_items", ids=[z["id"]]).get("items") or [{}])[0].get("sexpr", sx)
+        except HarnessError:
+            pass
+        m = re.search(r"\\(polygon\\s*\\(pts((?:\\s*\\(xy [-\\d.]+ [-\\d.]+\\))+)\\s*\\)\\s*\\)", sx)
+        if m:
+            shut.append([(float(x), float(y)) for x, y in re.findall(r"\\(xy ([-\\d.]+) ([-\\d.]+)\\)", m.group(1))])
+        elif z.get("bbox"):      # an outline too long to read here: its box stands in for it
+            x0, y0, x1, y1 = z["bbox"][:4]
+            shut.append([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
+
+    def closed(at) -> bool:
+        for poly in shut:
+            c = False
+            for i in range(len(poly)):
+                (x0, y0), (x1, y1) = poly[i], poly[i - 1]
+                if (y0 > at[1]) != (y1 > at[1]) and at[0] < (x1 - x0) * (at[1] - y0) / (y1 - y0) + x0:
+                    c = not c
+            if c:
+                return True
+        return False
     pts = []
     nx = max(1, int((o[2] - o[0] - 2 * margin) // spacing))
     ny = max(1, int((o[3] - o[1] - 2 * margin) // spacing))
@@ -4590,10 +4642,12 @@ def _stitch(self, spacing: float = 10.0, net: str = "GND", margin: float = 1.5, 
         for j in range(ny + 1):
             c = (o[0] + margin + i * (o[2] - o[0] - 2 * margin) / nx, o[1] + margin + j * (o[3] - o[1] - 2 * margin) / ny)
             reach = int(spacing / 2)      # the nearest clear spot around the grid point, within half a pitch
+            if spacing < 4:      # a fine grid stays a grid: a point that is taken is left out, not moved
+                reach = 0
             near = sorted(((dx, dy) for dx in range(-reach, reach + 1) for dy in range(-reach, reach + 1)), key=lambda q: q[0] * q[0] + q[1] * q[1])
             for dx, dy in near:
                 at = (_r(c[0] + dx), _r(c[1] + dy))
-                if o[0] + margin <= at[0] <= o[2] - margin and o[1] + margin <= at[1] <= o[3] - margin and _free_at(g, at, 0.6) and all(abs(at[0] - q[0]) + abs(at[1] - q[1]) > spacing / 2 for q in pts):
+                if o[0] + margin <= at[0] <= o[2] - margin and o[1] + margin <= at[1] <= o[3] - margin and _free_at(g, at, 0.6) and not closed(at) and all(abs(at[0] - q[0]) + abs(at[1] - q[1]) > spacing / 2 for q in pts):
                     pts.append(at)
                     break
     ids = {}
@@ -5070,7 +5124,7 @@ def _prepare(self) -> dict:
     return out
 
 
-def _finish(self, stitch: float | None = 10.0) -> dict:
+def _finish(self, stitch: float | None = 2.0) -> dict:
     """After routing: what the copper still owes the physics.  Antenna edges get the vias the routing left room for,
     every routed RF net gets its fence, exposed pads get their via arrays, ground is poured on both outer layers where
     it is not yet (two-layer boards too: what the tracks leave free becomes ground), the ground pours are stitched (every
@@ -5746,9 +5800,18 @@ def _brief(self, level: str | None = "warning", limit: int = 12, rule: str | Non
 def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, edge: str = "top", edges: dict | None = None, near: dict | None = None,
             groups: dict | None = None, fixed: dict | None = None, rotations: dict | None = None, swap: dict | None = None, fit: bool | None = None,
             order: list | None = None, widths: dict | None = None, kinds: dict | None = None, time_s: float | None = None, max_vias: int = 2,
-            stitch: float | None = 10.0, name: str | bool | None = None, rev: str | None = None, silk: bool = True, place: bool = True, route: bool = True,
-            accept: list | None = None) -> dict:
+            stitch: float | None = 2.0, name: str | bool | None = None, rev: str | None = None, silk: bool = True, place: bool = True, route: bool = True,
+            accept: list | None = None, reroute: bool = False, explain: bool = False) -> dict:
     """Lay the whole board out in one call and say how it came out.
+
+    explain=True adds "reasoning": a list of plain lines saying where every part stands and why (its cluster, the
+    pin it serves, how far from it), which parts belong to no cluster, the order the nets were routed in and why,
+    and every connection that changed layer, wandered or stayed open, with the cause.  Use it when the person wants
+    to check the thinking behind a layout; read it for the line that is wrong and fix that step.
+
+    reroute=True lays only the copper again on a board somebody placed: every track and via comes up, and the parts,
+    the outline, the zones, the rules, the stackup and the silkscreen stay exactly as they are (no sync from the
+    schematic either).  It is how scripts/board-bench.py scores the router against a hand-routed board.
 
     outline: (x0, y0, x1, y1), the largest the board may be (fit=True, the default when an outline is given, pulls it in
     round the parts); leave it out to keep the outline the board has.  edges: {ref: "left"|"right"|"top"|"bottom"} for
@@ -5776,7 +5839,11 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             out["skipped"][what] = str(e).split("\\n")[0][:200]
             return None
 
-    step("sync", self.sync)
+    if reroute:
+        place, silk, outline = False, False, None
+        step("take up", lambda: self.unroute(keep=()))
+    else:
+        step("sync", self.sync)
     if outline:
         self.outline(*outline, radius=0 if place else 1.0)      # square while the placement may still pull it in; rounded after
     plan = step("plan", lambda: self.plan(edge=edge)) or {"place": {"near": {}, "edges": {}}, "route": {}, "notes": []}
@@ -5785,9 +5852,10 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     if layers:
         rec["layers"] = layers
     want = int(rec.get("layers") or len(self.info().get("copper_layers") or []) or 2)
-    if want > len(self.info().get("copper_layers") or []):
+    if want > len(self.info().get("copper_layers") or []) and not reroute:
         step("layers", lambda: self.layers(want, planes=list(INNER_GROUND) if want >= 4 else None))
-    step("stackup", lambda: self.stackup(fab=fab, **rec))
+    if not reroute:
+        step("stackup", lambda: self.stackup(fab=fab, **rec))
     if place:
         # a board laid out before is laid out again from its parts: its old copper comes up first, so a second run of
         # the script needs no board.clear() (what comes out the same is left alone when the plan is drawn)
@@ -5824,7 +5892,8 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         for layer in names:
             if layer in ("F.Cu", "B.Cu") or layer in INNER_GROUND or len(names) > 4:
                 step(f"zone {layer}", lambda layer=layer: self.zone("GND", layer=layer, connect="solid" if layer.startswith("In") else "thermal"))
-    step("corners", self.round_corners)      # board corners are always rounded
+    if not reroute:
+        step("corners", self.round_corners)      # board corners are always rounded
     step("prepare", self.prepare)
     if route:
         step("twins", self.bridge_twins)      # a USB-C connector's D+ and D- twins, joined at the pads before anything is routed
@@ -5832,9 +5901,29 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         r["order"] = list(dict.fromkeys(list(order or []) + list(r.get("order") or [])))
         r["widths"] = {**(r.get("widths") or {}), **(widths or {})}
         r["kinds"] = {**(r.get("kinds") or {}), **(kinds or {})}
-        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias))
+        # the clusters: each chip with the parts the plan ties to it (and the caller's own groups); the router wires
+        # every cluster inside itself before it runs a track between two of them
+        clusters: dict = {}
+        near = {**(plan.get("place") or {}).get("near", {}), **(near or {})}
+        def owner(ref, seen=()):
+            o = near.get(ref)
+            return ref if not o or o in seen else owner(o, (*seen, ref))
+        for ref in near:
+            clusters.setdefault(owner(ref), [owner(ref)]).append(ref)
+        for gname, refs in (groups or {}).items():
+            clusters[str(gname)] = list(refs)
+        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain))
         if got:
             out["routed"] = {k: got.get(k) for k in ("routed", "connections", "vias", "length_mm")}
+            if got.get("groups"):
+                out["routed"]["inside_groups"] = got["groups"]
+            if explain:
+                try:
+                    out["reasoning"] = _reasoning(self, plan, clusters, got)
+                except HarnessError as e:
+                    out["skipped"]["reasoning"] = str(e)[:120]
+            if got.get("unrouted"):
+                out["routed"]["why_open"] = [u[:160] for u in got["unrouted"][:8]]
             left = got.get("left") or {}
             if left:      # one more pass at only what is open, as a person goes back over the last few
                 more = step("route again", lambda: self.route(nets=list(left), widths=r["widths"], kinds=r["kinds"], time_s=(time_s or 60) / 2, max_vias=max_vias))
@@ -5859,7 +5948,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             if s and s.get("hidden"):
                 out["silk_hidden"] = s["hidden"]
     step("thermals", self.fix_thermals)      # a relief the last tracks left with too few spokes joins its pour solidly
-    fit = step("3d models", self.align_models)   # every model's pins on its pads (pin 1 and the farthest pad), turned when not
+    fit = None if reroute else step("3d models", self.align_models)   # every model's pins on its pads (pin 1 and the farthest pad), turned when not
     if fit and (fit.get("turned") or fit.get("misaligned")):
         out["models_3d"] = {k: fit[k] for k in ("turned", "misaligned") if fit.get(k)}
     info = self.info()
@@ -5913,6 +6002,58 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         del out["skipped"]
     self.project.note(f"board: design() {out.get('routed', {}).get('routed', 0)} connections routed, {out.get('vias')} vias, DRC {out.get('drc', {}).get('errors', '?')} errors, review {out.get('review', {}).get('errors', '?')} errors")
     return out
+
+
+def _reasoning(self, plan: dict, clusters: dict, got: dict) -> list:
+    """The layout's thinking as plain lines: each cluster with where its parts stand and why, the parts in no
+    cluster, then the routing order and every connection that did not come out short and flat."""
+    import math
+    parts = {p["ref"]: p for p in self.parts()}
+    why = plan.get("why") or {}
+    ex = got.get("explain") or {}
+    found = ex.get("clusters") or {}
+    lines = ["PLACEMENT, cluster by cluster (a cluster is one chip and the parts that serve it; each part belongs at the pin it serves, about 2 mm away, far end outward):"]
+    seen = set()
+    names = dict(clusters)
+    for g, refs in found.items():      # the engine's own clusters, for parts the plan did not tie to a chip
+        names.setdefault(g, [])
+        names[g] = list(dict.fromkeys(list(names[g]) + [g] + list(refs)))
+    for head, refs in names.items():
+        c = parts.get(head)
+        at = f"at ({c['x']}, {c['y']}) turned {c['rotation']}" if c else ""
+        lines.append(f"Cluster {head} {at}: {len(refs) - (1 if head in refs else 0)} parts round it.")
+        seen.add(head)
+        for r in refs:
+            p = parts.get(r)
+            if r == head or not p or r in seen:
+                continue
+            seen.add(r)
+            d = round(math.hypot(p["x"] - c["x"], p["y"] - c["y"]), 1) if c else None
+            note = why.get(r) or "shares a net with it and stands closest to it (no rule of the plan placed it)"
+            far = "  <-- FAR: more than 6 mm from its chip, check this one" if d is not None and d > 6 else ""
+            lines.append(f"  {r} ({p.get('value', '')}) at ({p['x']}, {p['y']}) turned {p['rotation']}, {d} mm from {head}'s centre: {note}.{far}")
+    loose = [r for r in parts if r not in seen]
+    if loose:
+        lines.append("In no cluster (placed by the floor plan, an edge, or left where they were): " + ", ".join(f"{r} at ({parts[r]['x']}, {parts[r]['y']})" for r in loose[:40]) + ".")
+    for ref, side in ((plan.get("place") or {}).get("edges") or {}).items():
+        lines.append(f"{ref} goes on the {side} edge: {why.get(ref) or 'it must reach the outside (a connector or an antenna)'}.")
+    for a, b in plan.get("apart") or []:
+        lines.append(f"{a} and {b} are kept apart: one disturbs the other.")
+    r = plan.get("route") or {}
+    lines.append("ROUTING ORDER: 1. critical nets, short, on one layer, no via (" + (", ".join(ex.get("critical_first") or r.get("order") or []) or "none found") + "); 2. the connections inside each cluster; 3. power; 4. fine-pitch escapes; 5. the tracks between clusters.")
+    g = got.get("groups") or {}
+    if g:
+        lines.append(f"Inside clusters: {g.get('routed')} of {g.get('inside')} connections made, with {g.get('vias')} vias. A via here means a part of that cluster faces the wrong way or stands too far out.")
+    if r.get("widths"):
+        lines.append("Widths: " + ", ".join(f"{n} {w} mm" for n, w in r["widths"].items()) + " (supplies wide, RF at its impedance); plain signals 0.2 mm where they fit.")
+    for c in ex.get("layer_changes") or []:
+        ratio = f", {c['length_mm']} mm for {c['straight_mm']} mm straight" if c.get("straight_mm") else ""
+        lines.append(f"Layer change: {c['net']} {c.get('from')} to {c.get('to')} took {c['vias']} via{'s' if c['vias'] != 1 else ''} over {'/'.join(c.get('layers') or [])}{ratio}: no way on one layer within 1.6 times the straight line, so something crosses it between those pads.")
+    for c in ex.get("longest_detours") or []:
+        lines.append(f"Detour: {c['net']} {c.get('from')} to {c.get('to')} is {c['length_mm']} mm, {c['detour_ratio']} times the straight line: the direct way was taken by earlier tracks or parts.")
+    for u in got.get("unrouted") or []:
+        lines.append(f"Open: {u}")
+    return lines
 
 
 def _has_ground(self) -> bool:
@@ -8251,9 +8392,9 @@ def symbol(name: str, pins: list, reference: str = "U", footprint: str = "", dat
 def library(symbols: list) -> str:
     """A .kicad_sym file holding the given symbol texts."""
     return '(kicad_symbol_lib\\n\\t(version 20241209)\\n\\t(generator "kicad_harness")\\n\\t(generator_version "9.0")\\n' + "".join(symbols) + ")\\n"
-`;var f=require("node:fs"),K=globalThis,W=f.constants;process.binding=e=>{if(e==="constants")return{fs:W};throw new Error("not available")};for(let e of["WebSocket","fetch","XMLHttpRequest","EventSource","navigator"])try{delete K[e]}catch{}var X=new(require("node:string_decoder")).StringDecoder("utf8"),E=new Int32Array(new SharedArrayBuffer(4)),i="";function q(){let e=Buffer.alloc(65536);for(;;){let s=i.indexOf(`
-`);if(s>=0){let t=i.slice(0,s);return i=i.slice(s+1),t}let n=0;try{n=f.readSync(0,e,0,e.length,null)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(E,0,0,4);continue}if(t&&t.code==="EOF")n=0;else throw t}n||process.exit(0),i+=X.write(e.subarray(0,n))}}function d(e){let s=Buffer.from(JSON.stringify(e)+`
-`,"utf8"),n=0;for(;n<s.length;)try{n+=f.writeSync(1,s,n,s.length-n)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(E,0,0,4);continue}throw t}}var Q=[["kicad_harness/__init__.py",h],["kicad_harness/project.py",c],["kicad_harness/transport.py",u],["kicad_harness/sheet.py",m],["kicad_harness/rules.py",g],["kicad_harness/physics.py",b],["kicad_harness/stackups.py",y],["kicad_harness/craft.py",_],["kicad_harness/seat.py",w],["kicad_harness/twins.py",x],["kicad_harness/parts/__init__.py",k],["kicad_harness/parts/datasheet.py",v],["kicad_harness/parts/footprint.py",N],["kicad_harness/parts/search.py",S],["kicad_harness/parts/symbol.py",T]],Y=`
+`;var f=require("node:fs"),K=globalThis,W=f.constants;process.binding=e=>{if(e==="constants")return{fs:W};throw new Error("not available")};for(let e of["WebSocket","fetch","XMLHttpRequest","EventSource","navigator"])try{delete K[e]}catch{}var X=new(require("node:string_decoder")).StringDecoder("utf8"),q=new Int32Array(new SharedArrayBuffer(4)),i="";function E(){let e=Buffer.alloc(65536);for(;;){let s=i.indexOf(`
+`);if(s>=0){let t=i.slice(0,s);return i=i.slice(s+1),t}let n=0;try{n=f.readSync(0,e,0,e.length,null)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(q,0,0,4);continue}if(t&&t.code==="EOF")n=0;else throw t}n||process.exit(0),i+=X.write(e.subarray(0,n))}}function d(e){let s=Buffer.from(JSON.stringify(e)+`
+`,"utf8"),n=0;for(;n<s.length;)try{n+=f.writeSync(1,s,n,s.length-n)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(q,0,0,4);continue}throw t}}var Q=[["kicad_harness/__init__.py",h],["kicad_harness/project.py",c],["kicad_harness/transport.py",u],["kicad_harness/sheet.py",m],["kicad_harness/rules.py",g],["kicad_harness/physics.py",b],["kicad_harness/stackups.py",y],["kicad_harness/craft.py",_],["kicad_harness/seat.py",w],["kicad_harness/twins.py",x],["kicad_harness/parts/__init__.py",k],["kicad_harness/parts/datasheet.py",v],["kicad_harness/parts/footprint.py",N],["kicad_harness/parts/search.py",S],["kicad_harness/parts/symbol.py",T]],Y=`
 import json, sys, traceback
 sys.path.insert(0, "/kh")
 import kicad_harness as kh
@@ -8289,6 +8430,6 @@ def __kc_run(code, dry=False):
     if project is not None and project.log:
         out["notes"] = project.log[-60:]
     return json.dumps(out)
-`;async function J(){let e=JSON.parse(q()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:A}=require(s+"pyodide.js"),o=await A({indexURL:s,jsglobals:{},stdout:p,stderr:p});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),q())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of Q)o.FS.writeFile("/kh/"+r,l);o.runPython(Y);let D=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(D(String(e.code||""),e.dry===!0)))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
+`;async function J(){let e=JSON.parse(E()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:A}=require(s+"pyodide.js"),o=await A({indexURL:s,jsglobals:{},stdout:p,stderr:p});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),E())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of Q)o.FS.writeFile("/kh/"+r,l);o.runPython(Y);let D=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(D(String(e.code||""),e.dry===!0)))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
 `).filter(Boolean).slice(-1)[0]||"The script failed."}}a.done=!0,a.output=n.join(`
 `),d(a),process.exit(0)}J().catch(e=>{try{d({done:!0,ok:!1,error:"The Python runtime could not be started: "+String(e&&e.message||e),output:""})}finally{process.exit(1)}});

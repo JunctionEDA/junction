@@ -592,7 +592,7 @@ def _score(self) -> dict:
     return {"score": score, "parts": sub, "gates": gates, "worst": [t for _, t in sorted(worst)]}
 
 
-def _stitch(self, spacing: float = 10.0, net: str = "GND", margin: float = 1.5, size: float | None = None, drill: float | None = None) -> dict:
+def _stitch(self, spacing: float = 2.0, net: str = "GND", margin: float = 1.5, size: float | None = None, drill: float | None = None) -> dict:
     """Tie the ground planes together with a grid of vias, about every `spacing` mm, wherever one fits: clear of
     parts, and taken back out wherever the rules check says it is too close to other copper.  Call it after routing,
     with ground poured on at least two layers."""
@@ -602,6 +602,37 @@ def _stitch(self, spacing: float = 10.0, net: str = "GND", margin: float = 1.5, 
     if not o:
         raise HarnessError("The board has no outline yet.")
     name = self._net(net)
+    # ground vias stay out of other nets' pours (a supply fill, a switch node) and out of keep-outs: a via there
+    # joins nothing and only punches holes in that copper
+    shut = []
+    for z in self._call("get_items", kinds=["zone"]).get("items", []):
+        sx = z.get("sexpr", "")
+        if "keepout" not in sx and re.search(r'\(net(_name)? "?' + re.escape(name) + r'"?\)', sx):
+            continue
+        head = sx.split("(polygon")[0]
+        if "keepout" not in sx and not re.search(r'"(F|B|F&B|\*)\.Cu"', head):
+            continue      # another net's plane on an inner layer: a ground via passes through it as it should
+        try:      # the outline in full (a listing gives only the start of each item)
+            sx = (self._call("get_items", ids=[z["id"]]).get("items") or [{}])[0].get("sexpr", sx)
+        except HarnessError:
+            pass
+        m = re.search(r"\(polygon\s*\(pts((?:\s*\(xy [-\d.]+ [-\d.]+\))+)\s*\)\s*\)", sx)
+        if m:
+            shut.append([(float(x), float(y)) for x, y in re.findall(r"\(xy ([-\d.]+) ([-\d.]+)\)", m.group(1))])
+        elif z.get("bbox"):      # an outline too long to read here: its box stands in for it
+            x0, y0, x1, y1 = z["bbox"][:4]
+            shut.append([(x0, y0), (x1, y0), (x1, y1), (x0, y1)])
+
+    def closed(at) -> bool:
+        for poly in shut:
+            c = False
+            for i in range(len(poly)):
+                (x0, y0), (x1, y1) = poly[i], poly[i - 1]
+                if (y0 > at[1]) != (y1 > at[1]) and at[0] < (x1 - x0) * (at[1] - y0) / (y1 - y0) + x0:
+                    c = not c
+            if c:
+                return True
+        return False
     pts = []
     nx = max(1, int((o[2] - o[0] - 2 * margin) // spacing))
     ny = max(1, int((o[3] - o[1] - 2 * margin) // spacing))
@@ -609,10 +640,12 @@ def _stitch(self, spacing: float = 10.0, net: str = "GND", margin: float = 1.5, 
         for j in range(ny + 1):
             c = (o[0] + margin + i * (o[2] - o[0] - 2 * margin) / nx, o[1] + margin + j * (o[3] - o[1] - 2 * margin) / ny)
             reach = int(spacing / 2)      # the nearest clear spot around the grid point, within half a pitch
+            if spacing < 4:      # a fine grid stays a grid: a point that is taken is left out, not moved
+                reach = 0
             near = sorted(((dx, dy) for dx in range(-reach, reach + 1) for dy in range(-reach, reach + 1)), key=lambda q: q[0] * q[0] + q[1] * q[1])
             for dx, dy in near:
                 at = (_r(c[0] + dx), _r(c[1] + dy))
-                if o[0] + margin <= at[0] <= o[2] - margin and o[1] + margin <= at[1] <= o[3] - margin and _free_at(g, at, 0.6) and all(abs(at[0] - q[0]) + abs(at[1] - q[1]) > spacing / 2 for q in pts):
+                if o[0] + margin <= at[0] <= o[2] - margin and o[1] + margin <= at[1] <= o[3] - margin and _free_at(g, at, 0.6) and not closed(at) and all(abs(at[0] - q[0]) + abs(at[1] - q[1]) > spacing / 2 for q in pts):
                     pts.append(at)
                     break
     ids = {}

@@ -2309,13 +2309,21 @@ class Board(_Doc):
     def route(self, nets: list | None = None, order: list | None = None, widths: dict | None = None, layers: list | None = None,
               net_options: dict | None = None, keepouts: list | None = None, allow_vias: bool = True, time_s: float | None = None,
               fill: bool = True, max_vias: int | None = None, kinds: dict | None = None, separate=None, fence=None,
-              ground_vias: bool = True, fanout_lanes=None, via_cost: float | None = None) -> dict:
+              ground_vias: bool = True, fanout_lanes=None, via_cost: float | None = None, groups=None, explain: bool = False) -> dict:
         """Autoroute the missing connections (every unrouted net by default) and report what was done.
 
         order: the few nets to lay first (USB pair, crystal); widths: {net: mm} for supply nets; net_options and
         keepouts are passed to the engine as they are.  Route a whole board in one call.
         max_vias: the most vias one pad-to-pad connection may use (2 keeps every track to one trip to the other side).
-        via_cost: how many millimetres of extra track a via is worth (19 by default: the engine goes round on the pad's
+        groups: {name: [refs]}, the clusters (a chip with the parts that serve it).  The engine lays the critical nets
+        first, then wires every cluster inside itself, then power, then the tracks between clusters.  Parts not named
+        are grouped from the board (a small part belongs to the nearest chip it shares a net with); False turns the
+        cluster-first order off.  The result's `groups` says how many connections lay inside a cluster.
+        explain=True adds `explain` to the result: the nets laid first, the clusters with their parts, every connection
+        that changed layer (with its length against the straight line) and the longest detours, for checking the
+        engine's thinking.
+        time_s: the engine's budget; left out it grows with the board (30 s plus 1.5 s per open connection, 300 at most).
+        via_cost: how many millimetres of extra track a via is worth (12 by default: the engine goes round on the pad's
         own layer before it changes layer); lower it only for a board that cannot route otherwise.
 
         Signal domains.  The engine tells analog nets (ADC, VREF, crystal, sense, feedback), RF nets (ANT, RF),
@@ -2373,8 +2381,19 @@ class Board(_Doc):
             e["keepouts"] = keepouts
         if not allow_vias:
             e["allow_vias"] = False
+        if not time_s and not nets:      # a dense board needs longer than a breakout: the budget follows the work there is
+            try:
+                time_s = min(300, 30 + 1.5 * (self.info().get("unrouted_connections") or 0))
+            except HarnessError:
+                time_s = None
         if time_s:
             e["time_s"] = time_s
+        if explain:
+            e["explain"] = True
+        if groups is False:
+            e["groups"] = False
+        elif groups:
+            e["groups"] = {str(n): list(refs) for n, refs in groups.items()}
         if max_vias is not None:
             e["max_vias"] = max_vias
         if separate is not None:
@@ -2443,7 +2462,9 @@ class Board(_Doc):
         out = {"routed": d.get("routed"), "connections": d.get("connections"), "segments": d.get("segments"), "vias": d.get("vias"), "length_mm": d.get("length_mm"), "unrouted": un[:25]}
         if len(un) > 25:
             out["more_unrouted"] = len(un) - 25
-        for k in ("domains", "ground_vias"):
+        if d.get("explain"):
+            out["explain"] = dict(d["explain"], longest_detours=d.get("longest_detours") or [])
+        for k in ("domains", "ground_vias", "groups"):
             if d.get(k):
                 out[k] = d[k]
         return out

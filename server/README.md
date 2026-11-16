@@ -734,7 +734,10 @@ plan — a model, or a person. Everything here is pure (nothing is written to th
 
 - `PcbAutoRouter.route(K, P, doc, settings, opts)` also takes `order` (net names routed first, in that order),
   `netOpts[net] = { layers, width, allowVias, maxVias, avoid: [[x0,y0,x1,y1]…], priority }` and
-  `keepouts: [{ layers?, box }]` for the run. Its result lists every connection in `connections`: pads at both ends,
+  `keepouts: [{ layers?, box }]` for the run, and `groups: { name: [refs] }`, the clusters (a chip and the parts that
+  serve it): critical nets (USB data, RF feeds, crystal lines) are laid first, then the connections inside each
+  cluster, then power, then what runs between clusters. Parts no group names are clustered from the board;
+  `groupsFirst: false` turns the order off, `signalWidth` (0.2 mm) is what plain signals are widened to afterwards. Its result lists every connection in `connections`: pads at both ends,
   length, vias, bends, layers, detour ratio, and for a failure the `reason` (`blocked` by nets routed earlier,
   `no-room` past what is on the board, dropped by a `rule` in the exact check, or out of `budget`) with `blockedBy`.
 - `PcbAutoRouter.evaluate(K, P, doc, settings, { drc })` gives the numbers a layout is judged by: ratsnest length,

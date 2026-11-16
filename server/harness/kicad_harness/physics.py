@@ -182,7 +182,7 @@ def _prepare(self) -> dict:
     return out
 
 
-def _finish(self, stitch: float | None = 10.0) -> dict:
+def _finish(self, stitch: float | None = 2.0) -> dict:
     """After routing: what the copper still owes the physics.  Antenna edges get the vias the routing left room for,
     every routed RF net gets its fence, exposed pads get their via arrays, ground is poured on both outer layers where
     it is not yet (two-layer boards too: what the tracks leave free becomes ground), the ground pours are stitched (every

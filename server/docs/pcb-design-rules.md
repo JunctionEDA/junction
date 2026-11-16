@@ -44,7 +44,8 @@ Physics is decided before placement, not found by a review at the end.
 4. `board.autoplace(near=plan["place"]["near"], edges=plan["place"]["edges"])`.
 5. Ground zones on every layer that carries them.
 6. `board.prepare()`: antenna keep-outs and their ground vias, before the router can put copper there.
-7. `board.route(**plan["route"])`.
+7. `board.route(**plan["route"])`: critical nets, then inside each cluster, then power, then between clusters
+   (see "Cluster first").
 8. `board.finish()`: RF fences, thermal vias, the antenna's ground edge, stitching, refill.
 9. `board.review()` until clean.
 
@@ -121,6 +122,31 @@ layers or a coplanar feed. **checked** (`rf.feed` compares each RF track's width
   20 GHz PTFE. **planned** (`kh.materials.choose`), **checked** (`stackup.material`).
 - LNA and PA stages: input and output on opposite sides, ground vias at every ground pad, supply decoupled per
   stage with the smallest capacitor nearest the pin, DC feed through a choke.
+
+## Cluster first
+
+Said by the owner 2026-11-15 ("I grouped together some of the components and planned out how I would route INSIDE
+THOSE GROUPS FIRST", "this is critical"), with their Frost board and a USB-C PD controller as the examples, and
+measured on Ledify, Cyberboard, Ember and Frost: the pad of a small part sits a median 2.0 to 2.1 mm from the pin
+it serves (90th percentile 4.2 to 5.0 mm), and in 70 to 85 percent of cases its other end points away from the chip.
+
+1. A cluster is one chip and everything that serves it: bypass capacitors, pull-ups, series resistors, the crystal
+   and its load capacitors, a converter's inductor and capacitors, a connector's ESD part and CC resistors. The
+   parts ring the chip, each at the pin it serves, the pad on that net facing the pin, the ground or far end
+   outward, all within about one part length of the package.
+2. The connections inside a cluster are planned and routed first: short, on the parts' layer, no via. A connection
+   inside a cluster that needs a via or a detour means the cluster is built wrong.
+3. Only then are the clusters placed on the board, turned so the nets that leave face where they go.
+4. Then the tracks between clusters: critical nets (USB pair, RF feed, crystal) first, then power, then the rest.
+
+Where it lives: `board.autoplace` builds the clusters (`near=`, `seat`, `place_bypass`); the router
+(`web/router/route.ts`) finds the clusters (`opts.groups`, or from the board: a small part belongs to the nearest
+chip it shares a net with, within 5 mm pad to pad) and orders its queue critical nets, inside each cluster, power,
+fine-pitch escapes, the rest; its result carries `groups: {clusters, inside, insideRouted, insideVias}`.
+`board.design()` hands the plan's clusters to it and reports `routed.inside_groups`. A one-layer route may be 1.6
+times the straight line plus 5 mm before a layer change is taken instead, a via costs 12 mm of track, plain signals
+are widened to 0.2 mm where the clearances allow, and ground is stitched on a 2 mm grid: all four are what the
+owner's boards do. `scripts/board-bench.py` scores the router against those boards after every change.
 
 ## Parts that serve a pin
 
@@ -414,6 +440,8 @@ wavelength, thermal pad vias, stitching, fiducials, silkscreen). What they added
   clocks, fast lines and switch nodes over any run above 5 mm. An unstitched guard track does not help.
 - `vias.slot`: neighbouring vias leave room for plane copper between their clearance holes (two clearances plus
   0.15 mm). Four or more in a merged row longer than 4 mm are reported as a slot in the ground.
+- `cluster.inside`: a net that lives inside one cluster (a chip pin and the small parts on it, within 6 mm) has no
+  via and no wandering track; if it does, the cluster is built wrong (the owner's cluster-first rule, see above).
 - `bypass.order`: the supply reaches the pin through the capacitor (via, capacitor, pin), on a short pad-wide track.
 - `pads.entry`: a track leaves a fine-pitch pad through its end, in line with the pad, not sideways towards the
   next pin.
