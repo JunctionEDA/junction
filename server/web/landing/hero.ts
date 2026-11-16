@@ -12,9 +12,10 @@ import { K, Pt, boardTextOf, openOf } from "./demo";
 /** One run of track on one layer, from a pad or from copper laid before it (`needs`), ending in
  *  `via` when it changes layer there.  `loose` ones neither need nor carry another. */
 export interface Route { net: string; layer: string; ids: string[]; pts: Pt[]; w: number; via: string | null; needs: number[]; loose: boolean }
-export interface Part { ref: string; value: string; id: string; x: number; y: number; rot: number; pile: Pt }
+/** `pile` is where the part lies at the start; `stage` is its spot in its group's cluster, where it is sorted to before it goes on the board. */
+export interface Part { ref: string; value: string; id: string; x: number; y: number; rot: number; pile: Pt; group: number; stage: Pt }
 export const meta = META as unknown as {
-  board: { x: number; y: number; w: number; h: number; r: number }; pileBottom: number;
+  board: { x: number; y: number; w: number; h: number; r: number }; pileBottom: number; stageBottom: number; left: number; groups: { name: string; box: [number, number, number, number] }[];
   parts: Part[]; routes: Route[]; zones: string[]; stitch: string[]; texts: { id: string; text: string }[];
   ground: number; pads: number; nets: number;
 };
