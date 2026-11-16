@@ -13,7 +13,7 @@
 import {
   Box, HIDDEN, K, PEERS, Pt, Rat, View, clamp, clash, copperAt, dist, drawCursor, fit, lerp, mixBox, ratsnest, toMm, toPx, trackAt,
 } from "./demo";
-import { BOARD, boardText, loadPcb, loadPcbOpen, meta } from "./hero";
+import { BOARD, loadPcb, loadPcbOpen, meta } from "./hero";
 import { keysInText } from "../keys";
 import { SANS, Stage, makeStage, reducedMotion } from "./stage";
 
@@ -706,17 +706,14 @@ export function startMini(root: HTMLElement): void {
   }
   cast(performance.now());
 
-  // "Keep going in a real project": the board as it stands is left for the app (web/onboarding/state.ts
-  // reads it under this key), which makes a project of it with its schematic and opens it.  Signed
-  // out, sign-in comes first and returns to the same place.
+  // "Keep going in a real project": opens the visitor's own Devboard Demo (server/src/demo.rs, the copy of
+  // Cyberboard every account starts with) in the editor.  Signed out, sign-in comes first and returns to the
+  // same place (Home.tsx reads ?start=demo).
   const keep = document.querySelector<HTMLAnchorElement>("[data-keep]");   // under the window, beside the caption
   if (keep) {
-    const next = "/?start=mini";
+    const next = "/?start=demo";
     keep.href = document.documentElement.dataset.me ? next : "/auth/github/login?next=" + encodeURIComponent(next);
-    keep.addEventListener("click", () => {
-      endRoute(); settle();
-      try { localStorage.setItem("kc.onboard.mini", JSON.stringify({ board: boardText(doc), template: "stm32-usbc-devboard", at: Date.now() })); } catch { /* without it the project starts from the same board, some connections open */ }
-    });
+    keep.addEventListener("click", () => { endRoute(); settle(); });
   }
 
   /** KiCad's two-leg track: straight along the longer axis, then 45 degrees into the target. */

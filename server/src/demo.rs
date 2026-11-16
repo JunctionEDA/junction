@@ -77,13 +77,25 @@ pub async fn ensure(state: &AppState, user_id: i64) -> anyhow::Result<Option<Uui
     if claimed == 0 {
         return Ok(None);
     }
+    let project = copy_into(&mut tx, user_id, &files).await?;
+    tx.commit().await?;
+    tracing::info!(user_id, %project, files = files.len(), "gave a new account its Devboard Demo");
+    Ok(Some(project))
+}
+
+/// Make a copy of the seed owned by `user_id` inside `tx`; returns the new project's id.
+async fn copy_into(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    user_id: i64,
+    files: &[(String, Vec<u8>)],
+) -> anyhow::Result<Uuid> {
     let project: Uuid =
         sqlx::query_scalar("INSERT INTO projects (owner_id, name, public) VALUES ($1, $2, false) RETURNING id")
             .bind(user_id)
             .bind(NAME)
-            .fetch_one(&mut *tx)
+            .fetch_one(&mut **tx)
             .await?;
-    for (path, content) in &files {
+    for (path, content) in files {
         if let Some((face, file_name)) = font_entry(path) {
             let font = crate::fonts::inspect(content, 0).map_err(|e| anyhow::anyhow!("demo font {path}: {e:?}"))?;
             sqlx::query(
@@ -100,7 +112,7 @@ pub async fn ensure(state: &AppState, user_id: i64) -> anyhow::Result<Option<Uui
             .bind(font.data.len() as i64)
             .bind(&font.data)
             .bind(user_id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
             continue;
         }
@@ -110,18 +122,48 @@ pub async fn ensure(state: &AppState, user_id: i64) -> anyhow::Result<Option<Uui
         .bind(project)
         .bind(path)
         .bind(doc_type_for(path))
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut **tx)
         .await?;
         sqlx::query("INSERT INTO snapshots (doc_id, seq, content, uploader_id) VALUES ($1, 0, $2, $3)")
             .bind(doc)
             .bind(content.as_slice())
             .bind(user_id)
-            .execute(&mut *tx)
+            .execute(&mut **tx)
             .await?;
     }
+    Ok(project)
+}
+
+/// The caller's Devboard Demo: their newest project of that name, made for them first when they have none
+/// (an account from before the demo, or one that deleted its copy).  The home page's "Keep going in a real
+/// project" opens it.
+async fn find_or_make(state: &AppState, user_id: i64) -> anyhow::Result<Uuid> {
+    ensure(state, user_id).await?;
+    let find = "SELECT id FROM projects WHERE owner_id = $1 AND name = $2 AND deleted_at IS NULL AND parent_id IS NULL
+                ORDER BY created_at DESC LIMIT 1";
+    if let Some(id) = sqlx::query_scalar::<_, Uuid>(find).bind(user_id).bind(NAME).fetch_optional(&state.pool).await? {
+        return Ok(id);
+    }
+    let files = tokio::task::spawn_blocking(files).await?.map_err(|e| anyhow::anyhow!("demo seed: {e}"))?;
+    let mut tx = state.pool.begin().await?;
+    // the account's row is the lock: two clicks at once make one copy
+    sqlx::query("SELECT id FROM users WHERE id = $1 FOR UPDATE").bind(user_id).execute(&mut *tx).await?;
+    if let Some(id) = sqlx::query_scalar::<_, Uuid>(find).bind(user_id).bind(NAME).fetch_optional(&mut *tx).await? {
+        return Ok(id);
+    }
+    let project = copy_into(&mut tx, user_id, &files).await?;
     tx.commit().await?;
-    tracing::info!(user_id, %project, files = files.len(), "gave a new account its Devboard Demo");
-    Ok(Some(project))
+    tracing::info!(user_id, %project, "made a Devboard Demo on request");
+    Ok(project)
+}
+
+/// POST /api/projects/demo: `{ projectId }` of the caller's Devboard Demo (see `find_or_make`).
+pub async fn open(
+    axum::extract::State(state): axum::extract::State<AppState>,
+    crate::auth::AuthUser(user): crate::auth::AuthUser,
+) -> crate::error::AppResult<axum::Json<serde_json::Value>> {
+    let id = find_or_make(&state, user.id).await?;
+    Ok(axum::Json(serde_json::json!({ "projectId": id, "name": NAME })))
 }
 
 /// `ensure`, with a failure logged instead of returned: a missing demo must never stop a sign-in or a list.

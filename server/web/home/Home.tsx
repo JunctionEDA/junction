@@ -755,7 +755,15 @@ export function Home() {
     catch (e) { toast(`Couldn't start the first project: ${e instanceof Error ? e.message : String(e)}`, { kind: "err" }); }
     finally { guiding.current = false; }
   };
-  // Links that start something: /?start=mini (the home page's small editor), /?start=guided,
+  // The account's Devboard Demo (made for it at sign-up, or now when it has none), opened in the editor.
+  const openDemo = async () => {
+    if (guiding.current) return;
+    guiding.current = true;
+    try { const r = await API.api<{ projectId: string }>("/api/projects/demo", { method: "POST" }); cache.mine = null; go(editUrl(r.projectId)); }
+    catch (e) { toast(`Couldn't open the Devboard Demo: ${e instanceof Error ? e.message : String(e)}`, { kind: "err" }); }
+    finally { guiding.current = false; }
+  };
+  // Links that start something: /?start=demo (the home page's "Keep going in a real project"), /?start=mini (the home page's small editor), /?start=guided,
   // Read once, then taken out of the address so Back does not start it again.
   const linked = useRef(false);
   useEffect(() => {
@@ -766,6 +774,7 @@ export function Home() {
     q.delete("start");
     history.replaceState(history.state, "", location.pathname + (q.toString() ? "?" + q : "") + location.hash);
     if (start === "mini" || start === "guided") startGuided(start === "mini" && miniBoard() ? "mini" : "home");
+    else if (start === "demo") openDemo();
   }, [view, me]);   // eslint-disable-line
   const signOut = async () => { try { await API.api("/auth/logout", { method: "POST" }); } catch { /* the reload decides */ } cache.mine = null; location.href = "/"; };
   acts.current = { newProject: () => startUpload(), signOut };
