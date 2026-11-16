@@ -16,6 +16,8 @@ export interface Route { net: string; layer: string; ids: string[]; pts: Pt[]; w
 export interface Part { ref: string; value: string; id: string; x: number; y: number; rot: number; pile: Pt; group: number; stage: Pt }
 export const meta = META as unknown as {
   board: { x: number; y: number; w: number; h: number; r: number }; pileBottom: number; stageBottom: number; left: number; groups: { name: string; box: [number, number, number, number] }[];
+  /** Parts that sit together on the board: sorted into a cluster `off` away from their places, wired there, then moved on together. */
+  units: { group: number; off: Pt; parts: string[] }[];
   parts: Part[]; routes: Route[]; zones: string[]; stitch: string[]; texts: { id: string; text: string }[];
   ground: number; pads: number; nets: number;
 };

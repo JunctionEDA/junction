@@ -121,10 +121,26 @@ const clusters = GROUPS.map(([name, refs], gi) => {
   const mine = refs.split(' ').map((r) => parts.find((p) => p.ref === r)).sort(tall);
   if (mine.some((p) => !p)) throw new Error('group ' + name + ' names a part the board does not have');
   for (const p of mine) p.group = gi;
-  // rows no wider than the widest part or a square of the same area, whichever is more
-  const wide = Math.max(...mine.map((p) => size(p)[0]), Math.sqrt(mine.reduce((n, p) => n + (size(p)[0] + GAP) * (size(p)[1] + GAP), 0)) * 1.4);
+  // Parts that sit together on the board stay together in the cluster, each exactly where it is beside the others
+  // (a capacitor at its supply pin, a CC resistor in front of its CC pin): the group is the placement in small.
+  // Parts of the group that are far apart on the board (the two pin rows, the two LEDs) form units of their own.
+  const near = (p, q) => Math.max(Math.max(p.box[0], q.box[0]) - Math.min(p.box[2], q.box[2]), Math.max(p.box[1], q.box[1]) - Math.min(p.box[3], q.box[3])) < 2.2;
+  const units = [];
+  for (const p of mine) {
+    const hit = units.filter((u) => u.some((q) => near(p, q)));
+    const u = [p, ...hit.flat()]; for (const h of hit) units.splice(units.indexOf(h), 1); units.push(u);
+  }
+  const ubox = (u) => [Math.min(...u.map((p) => p.box[0])), Math.min(...u.map((p) => p.box[1])), Math.max(...u.map((p) => p.box[2])), Math.max(...u.map((p) => p.box[3]))];
+  units.sort((u, v) => { const a = ubox(u), b = ubox(v); return (b[3] - b[1]) - (a[3] - a[1]); });
+  const wide = Math.max(...units.map((u) => { const b = ubox(u); return b[2] - b[0]; }));
   let cx = 0, cy = 0, rh = 0, w = 0;
-  for (const p of mine) { const [pw, ph] = size(p); if (cx + pw > wide && cx > 0) { cx = 0; cy += rh + GAP; rh = 0; } p.slot = [cx, cy]; cx += pw + GAP; rh = Math.max(rh, ph); w = Math.max(w, cx - GAP); }
+  for (const u of units) {
+    const b = ubox(u), uw = b[2] - b[0], uh = b[3] - b[1];
+    for (const p of u) p.unit = u;
+    if (cx + uw > wide && cx > 0) { cx = 0; cy += rh + GAP; rh = 0; }
+    for (const p of u) p.slot = [cx + p.box[0] - b[0], cy + p.box[1] - b[1]];
+    cx += uw + GAP; rh = Math.max(rh, uh); w = Math.max(w, cx - GAP);
+  }
   return { name, parts: mine, w: w + PAD * 2, h: cy + rh + PAD * 2 + 1.6 };      // 1.6 mm at the top for the group's name
 });
 if (parts.some((p) => p.group === undefined)) throw new Error('a part is in no group: ' + parts.filter((p) => p.group === undefined).map((p) => p.ref));
@@ -157,12 +173,21 @@ for (const p of parts.slice().sort(tall)) {
 }
 const bandBottom = Math.max(...bands.map((g) => g.box[3]));
 const pileBottom = r3(y + rowH);
-for (const p of parts) { delete p.box; delete p.slot; }
+// the units: parts that move onto the board together, with how far their cluster is from their place on the board
+const units = [];
+for (const p of parts) {
+  let u = units.find((q) => q.src === p.unit);
+  if (!u) { u = { src: p.unit, group: p.group, off: [r3(p.stage[0] - p.x), r3(p.stage[1] - p.y)], parts: [] }; units.push(u); }
+  u.parts.push(p.id);
+}
+units.sort((a, b) => a.group - b.group);
+for (const u of units) delete u.src;
+for (const p of parts) { delete p.box; delete p.slot; delete p.unit; }
 parts.sort((a, b) => a.ref.localeCompare(b.ref, undefined, { numeric: true }));
 
 const nets = new Set(pads.map((p) => p.net).filter(Boolean));
 const stageBottom = r3(bandBottom);
-const meta = { board, left: LEFT, pileBottom, stageBottom, groups: bands, parts, routes: order, zones, stitch, texts, ground: [...doc.nets.entries()].find(([, n]) => n === 'GND')[0], pads: pads.length, nets: nets.size };
+const meta = { board, left: LEFT, pileBottom, stageBottom, groups: bands, units, parts, routes: order, zones, stitch, texts, ground: [...doc.nets.entries()].find(([, n]) => n === 'GND')[0], pads: pads.length, nets: nets.size };
 fs.writeFileSync(path.join(DIR, 'stm32.json'), JSON.stringify(meta));
 console.log({ board, parts: parts.length, routes: order.length, loose: order.filter((r) => r.loose).length, withVia: order.filter((r) => r.via).length, stitch: stitch.length, zones: zones.length, texts: texts.map((t) => t.text), pads: pads.length, nets: nets.size, pileBottom });
 console.log(order.map((r, i) => `${i}:${r.net}/${r.layer[0]}${r.via ? 'v' : ''}${r.needs.length ? '<' + r.needs.join(',') : ''}`).join(' '));
