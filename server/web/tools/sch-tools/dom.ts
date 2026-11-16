@@ -112,9 +112,11 @@ export function installDom(ctx: SchCtx) {
     if (!schActive()) return;
     const ctx = S.ctx;
     // a double click always finishes a move, even breaks (pointerdown carries no click count, the dblclick does);
-    // the double click that ended one opens no properties dialog either
+    // the double click that ended one opens no properties dialog either, nor does the one that finished a wire
+    // auto-started by the selection tool (it is back on select by the time the dblclick arrives)
     if (S.drag && ctx) { endDrag(ctx, true); ev.stopImmediatePropagation(); ev.preventDefault(); return; }
-    if (toolOf(curTool()) || Date.now() - (S.dragEndedAt || 0) < 600) { ev.stopImmediatePropagation(); ev.preventDefault(); }
+    const now = Date.now();
+    if (toolOf(curTool()) || now - (S.dragEndedAt || 0) < 600 || now - (S.wireEndedAt || 0) < 600) { ev.stopImmediatePropagation(); ev.preventDefault(); }
   }, true);
   document.addEventListener("keydown", onKeyCapture, true);
 }

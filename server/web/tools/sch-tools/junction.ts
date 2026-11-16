@@ -181,6 +181,7 @@ export function txnTrimWire(t: EditTxn, doc: KDoc, a: Pt, b: Pt, only: Set<strin
  */
 export function finishWire(ctx: SchCtx) {
   const w = S.wire; S.wire = null; if (!w) return;
+  S.wireEndedAt = Date.now();                                      // the double click that ended it opens no dialog (dom.ts)
   const list = simplifyWireList(w.segs);
   const unfold = S.unfold; S.unfold = null;
   const doc = ctx.doc, held = unfold ? dropUnfold(doc, unfold) : null;
