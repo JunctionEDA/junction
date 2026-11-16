@@ -260,18 +260,18 @@ pub async fn home(State(state): State<AppState>, jar: CookieJar) -> Response {
     if auth::user_from_jar(&state, &jar).await.is_some() {
         app_page().await
     } else {
-        landing(false)
+        landing(false, &state.cfg.site_url)
     }
 }
 
 /// `/welcome`: the public home page whether or not you are signed in.
 pub async fn landing_page(State(state): State<AppState>, jar: CookieJar) -> Response {
-    landing(auth::user_from_jar(&state, &jar).await.is_some())
+    landing(auth::user_from_jar(&state, &jar).await.is_some(), &state.cfg.site_url)
 }
 
 /// The public home page (static/landing.html, drawn by web/landing).  It takes its colours
 /// from the app, like the GitHub page.
-fn landing(signed_in: bool) -> Response {
+fn landing(signed_in: bool, site: &str) -> Response {
     static PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     let page = PAGE.get_or_init(|| {
         let mut h: u64 = 0xcbf29ce484222325;
@@ -282,6 +282,8 @@ fn landing(signed_in: bool) -> Response {
         include_str!("../static/landing.html")
             .replace("{{THEME}}", crate::github::theme_tokens())
             .replace("{{MARK}}", MARK)
+            // Link previews (Slack, Discord, iMessage) only take an absolute picture address.
+            .replace("{{SITE}}", site.trim_end_matches('/'))
             .replace("/static/dist/landing.js\"", &format!("/static/dist/landing.js?v={h:x}\""))
     });
     // Signed in: the page swaps its sign-in buttons for a way back to the projects.
@@ -1398,6 +1400,17 @@ mod site_redirect_tests {
             b = b.header(*k, *v);
         }
         b.body(axum::body::Body::empty()).unwrap()
+    }
+
+    #[test]
+    fn the_home_page_names_a_picture_for_link_previews() {
+        let html = include_str!("../static/landing.html");
+        assert!(html.contains(r#"<meta property="og:image" content="{{SITE}}/icon-512.png">"#));
+        assert!(html.contains(r#"<meta name="twitter:card" content="summary">"#));
+        // The picture is a real PNG with a solid background, as chat apps do not draw SVG.
+        let (png, w, h) = crate::mcp::rasterize(super::MARK, 512).unwrap();
+        assert_eq!((w, h), (512, 512));
+        assert_eq!(&png[1..4], b"PNG");
     }
 
     const NAV: [(&str, &str); 2] = [("sec-fetch-mode", "navigate"), ("sec-fetch-dest", "document")];
