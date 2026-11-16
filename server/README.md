@@ -398,13 +398,13 @@ them as pictures, run the checks, find parts, and make changes that everyone in 
 
 Connecting (the same steps are on the site's **Connect an AI assistant** page, `/connect`, with the address filled in):
 
-- **Claude Code**: `claude mcp add --transport http kicad https://<site>/mcp`, then `/mcp` inside Claude Code,
-  pick `kicad` and sign in.
-- **claude.ai and the desktop app**: Settings, Connectors, Add custom connector, paste `https://<site>/mcp`.
+- **Claude Code**: `claude mcp add --transport http junction https://<site>/mcp`, then `/mcp` inside Claude Code,
+  pick `junction` and sign in.
+- **claude.ai and the desktop app**: Settings, Connectors, Add custom connector, name it Junction, paste `https://<site>/mcp`.
 - **ChatGPT**: Settings, Apps and connectors, Developer mode on, Create, paste the address.
-- **Cursor** (`~/.cursor/mcp.json`): `{"mcpServers":{"kicad":{"url":"https://<site>/mcp"}}}`.
-- **VS Code with Copilot** (`.vscode/mcp.json`): `{"servers":{"kicad":{"type":"http","url":"https://<site>/mcp"}}}`.
-- **Gemini CLI**: `gemini mcp add --transport http kicad https://<site>/mcp`. **Codex CLI**: `codex mcp add kicad --url https://<site>/mcp`.
+- **Cursor** (`~/.cursor/mcp.json`): `{"mcpServers":{"junction":{"url":"https://<site>/mcp"}}}`.
+- **VS Code with Copilot** (`.vscode/mcp.json`): `{"servers":{"junction":{"type":"http","url":"https://<site>/mcp"}}}`.
+- **Gemini CLI**: `gemini mcp add --transport http junction https://<site>/mcp`. **Codex CLI**: `codex mcp add junction --url https://<site>/mcp`.
 - Anything else that speaks MCP over Streamable HTTP with OAuth works the same way; nothing in the server is
   specific to one vendor.
 - **Access keys**, for a service that cannot open a sign-in page (a model API's remote MCP tool, an automation,

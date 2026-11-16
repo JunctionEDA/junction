@@ -108,6 +108,7 @@ export interface RouteOptions {
   groupsFirst?: boolean;         // false turns the cluster-first order off
   criticalFirst?: boolean;       // false: the inside of each cluster before the critical nets (the owner chose critical first, 2026-11-16)
   splitPlaneEnds?: boolean;      // true: no route ends where two nets' pours overlap on a layer
+  planeDrops?: boolean;          // true: a pad of a net with an inner plane counts as 1.5 mm from it, so it drops in rather than run to a far pad
   planes?: boolean;              // true keeps tracks off an inner ground layer its pour covers, and drops ground pins straight into it
   order?: string[];              // net names to route first, in this order; the rest follow in the heuristic order
   netOpts?: Record<string, NetPlan>;
@@ -416,9 +417,9 @@ export class Router {
         const inZone = (a: Anchor) => mine.some((z) => z.layers.some((l) => a.layers.includes(l)) && z.polys.filter((pts) => pointInPolyPts(pts, a.p)).length % 2 === 1);
         const covered: number[] = [], rest: Anchor[][] = [];
         // a plane on a layer no pad of the net is on: the plane itself is the island the pads drop into
-        const pz = mine.filter((z) => z.layers.some((l) => !routable[l]));
+        const inner = (l: number) => this.opts.planeDrops === true ? /^In\d/.test(copper[l]) : !routable[l]; const pz = mine.filter((z) => z.layers.some(inner));   // drops into a supply plane: opt-in, they cost Ledify 21 points on its split +3V3/VBUS plane (Ember +1.4)
         if (pz.length && !watchOnly) {
-          const pl = pz[0].layers.find((l) => !routable[l])!;
+          const pl = pz[0].layers.find(inner)!;
           // only where the plane is really there: inside its outline, 0.6 mm in from the edge, and not where another
           // net's pour shares the layer (a split plane: the fill there may be the other net's)
           const edgeGap = (polys: Pt[][], p: Pt) => { let d = Infinity; for (const pts of polys) for (let i = 0; i < pts.length; i++) { const a0 = pts[i], b0 = pts[(i + 1) % pts.length]; const dx = b0[0] - a0[0], dy = b0[1] - a0[1], L = dx * dx + dy * dy; const t = L ? Math.max(0, Math.min(1, ((p[0] - a0[0]) * dx + (p[1] - a0[1]) * dy) / L)) : 0; d = Math.min(d, Math.hypot(p[0] - a0[0] - t * dx, p[1] - a0[1] - t * dy)); } return d; };
@@ -767,6 +768,14 @@ export class Router {
   /** The two tracks of a pair from its centre line: each a constant distance to one side, mitred at the turns, and
    *  fanned to its own pads at the ends — checked exactly against each other and against everything around.
    *  Returns the two polylines, or why they cannot be. */
+  /** The width of each piece of one line of a pair: the coupled run at `w`, the two short fan-out pieces at its ends
+   *  necked down where the chip's pins stand closer than two tracks and a gap (a USB pair into a 0.4 mm QFN). */
+  private pairWidth(pr: Pair, t: Pt[], k: number, w: number, clr: number): number {
+    if (k !== 0 && k !== t.length - 2) return w;
+    const { cp, cn } = pr; const at = k === 0 ? [cp.a, pr.swap ? cn.b : cn.a] : [cp.b, pr.swap ? cn.a : cn.b];
+    const pitch = Math.hypot(at[0].p[0] - at[1].p[0], at[0].p[1] - at[1].p[1]); const floor = Math.max(this.s.minTrackWidth || 0, 0.1);
+    return Math.max(floor, Math.min(w, Math.floor((pitch - clr) * 1000 - 1e-6) / 1000));
+  }
   private pairTracks(pr: Pair, c: Pt[], l: number, w: number, d: number, clr: number, sgn: number, lead: Lead[]): { tp: Pt[]; tn: Pt[] } | string {
     const P = this.P, { cp, cn } = pr; const Pa = cp.a, Pb = cp.b, Na = pr.swap ? cn.b : cn.a, Nb = pr.swap ? cn.a : cn.b;
     const dir = (i: number): Pt => { const x = c[i + 1][0] - c[i][0], y = c[i + 1][1] - c[i][1], h = Math.hypot(x, y); return [x / h, y / h]; };
@@ -779,7 +788,7 @@ export class Router {
       for (let i = 0; i + 1 < out.length; i++) { const u = dir(i); if ((out[i + 1][0] - out[i][0]) * u[0] + (out[i + 1][1] - out[i][1]) * u[1] < 0.02) return null; }   // a piece too short to carry the turn
       return out;
     };
-    const segs = (t: Pt[]) => { const o: Shape[] = []; for (let i = 0; i + 1 < t.length; i++) if (Math.hypot(t[i + 1][0] - t[i][0], t[i + 1][1] - t[i][1]) > 1e-4) o.push({ t: "seg", a: t[i], b: t[i + 1], r: w / 2 } as Shape); return o; };
+    const segs = (t: Pt[]) => { const o: Shape[] = []; for (let i = 0; i + 1 < t.length; i++) if (Math.hypot(t[i + 1][0] - t[i][0], t[i + 1][1] - t[i][1]) > 1e-4) o.push({ t: "seg", a: t[i], b: t[i + 1], r: this.pairWidth(pr, t, i, w, clr) / 2 } as Shape); return o; };
     const op = off(sgn), on = off(-sgn); if (!op || !on) return "a turn is too tight for the pair";
     const out = (a: Anchor, ld: Lead): Pt => [r6(a.p[0] + ld.e[0] * ld.s), r6(a.p[1] + ld.e[1] * ld.s)];
     const tp = [Pa.p, out(Pa, lead[0]), ...op, out(Pb, lead[1]), Pb.p], tn = [Na.p, out(Na, lead[0]), ...on, out(Nb, lead[1]), Nb.p]; const sp = segs(tp), sn = segs(tn);
@@ -855,7 +864,7 @@ export class Router {
     } finally { this.lift(pr.n, -1, wide); this.lift(pr.p, -1, wide); }
     if (!laid) return close || why;
     const put = (c: Conn, t: Pt[]) => {
-      c.shapes = []; for (let i = 0; i + 1 < t.length; i++) if (Math.hypot(t[i + 1][0] - t[i][0], t[i + 1][1] - t[i][1]) > 1e-4) c.shapes.push({ net: c.net, layers: [laid!.l], shape: { t: "seg", a: t[i], b: t[i + 1], r: w / 2 } as Shape, clr: c.cls.clr });
+      c.shapes = []; for (let i = 0; i + 1 < t.length; i++) if (Math.hypot(t[i + 1][0] - t[i][0], t[i + 1][1] - t[i][1]) > 1e-4) c.shapes.push({ net: c.net, layers: [laid!.l], shape: { t: "seg", a: t[i], b: t[i + 1], r: this.pairWidth(pr, t, i, w, clr) / 2 } as Shape, clr: c.cls.clr });
       c.nodes = laid!.nodes; c.viaCells = []; c.stubs = []; c.feat = laid!.feat; c.landed = -1; c.zoneEnd = false; c.pair = true; c.rips = 99; c.why = undefined; this.place(c, 1);
       let len = 0; for (let i = 0; i + 1 < t.length; i++) len += Math.hypot(t[i + 1][0] - t[i][0], t[i + 1][1] - t[i][1]); return len;
     };
@@ -934,7 +943,7 @@ export class Router {
           this.place(cp, -1); this.place(cn, -1); const kp = cp.shapes, kn = cn.shapes; cp.shapes = []; cn.shapes = [];
           const r = this.pairTracks(pr, c2, Ld.l, w, d, Ld.clr, Ld.sgn, Ld.lead);
           if (typeof r === "string") { cp.shapes = kp; cn.shapes = kn; this.place(cp, 1); this.place(cn, 1); continue; }
-          const set = (cc: Conn, t: Pt[]) => { for (let k = 0; k + 1 < t.length; k++) if (Math.hypot(t[k + 1][0] - t[k][0], t[k + 1][1] - t[k][1]) > 1e-4) cc.shapes.push({ net: cc.net, layers: [Ld.l], shape: { t: "seg", a: t[k], b: t[k + 1], r: w / 2 } as Shape, clr: cc.cls.clr }); this.place(cc, 1); };
+          const set = (cc: Conn, t: Pt[]) => { for (let k = 0; k + 1 < t.length; k++) if (Math.hypot(t[k + 1][0] - t[k][0], t[k + 1][1] - t[k][1]) > 1e-4) cc.shapes.push({ net: cc.net, layers: [Ld.l], shape: { t: "seg", a: t[k], b: t[k + 1], r: this.pairWidth(pr, t, k, w, Ld.clr) / 2 } as Shape, clr: cc.cls.clr }); this.place(cc, 1); };
           set(cp, r.tp); set(cn, r.tn); Ld.c = c2; left -= total() - before; done = true; break;
         }
         if (done) break;

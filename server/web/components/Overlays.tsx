@@ -34,7 +34,7 @@ export function Toast() {
   return <div id="toast" role="status" aria-live="polite" className={cx("fixed left-1/2 bottom-10 transform-[translateX(-50%)] bg-ink text-paper rounded-sm py-2 px-3.5 opacity-0 transition-opacity duration-200 ease-[ease] pointer-events-none z-100 show:opacity-100", show && "show")}>{toast ? toast.text : ""}</div>;
 }
 
-const RELEASES = "https://github.com/notaroomba/junction/releases";
+const RELEASES = "https://github.com/JunctionEDA/junction/releases";
 const H4 = "m-0 mb-2 text-base";                                                                              // was #popover h4
 const INPUT = "w-full bg-paper border border-line rounded-sm py-1.5 px-2 text-ink font-mono text-sm";     // was #popover input
 

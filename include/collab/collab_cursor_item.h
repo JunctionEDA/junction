@@ -337,7 +337,11 @@ private:
     static constexpr double CARRY_MAX_MS = 60.0;  ///< the longest a pointer is carried on
     static constexpr double LEAD_MAX_MS = 90.0;   ///< a far-away server is not guessed across
     static constexpr double FRAME_MS = 4.0;       ///< arrival to screen
-    static constexpr double EASE_MS = 7.0;        ///< how fast the drawn pointer closes in
+    /// Prediction is off: in use it read as jitter, every late or early update showing as a
+    /// lurch.  Without it a pointer glides to each update as it arrives, over about one frame.
+    /// Set to true to bring it back (the web editor's switch is in peercursors.ts).
+    static constexpr bool   PREDICT = false;
+    static constexpr double EASE_MS = PREDICT ? 7.0 : 14.0; ///< how fast the drawn pointer closes in
 
     static double NowMs()
     {
@@ -355,6 +359,9 @@ private:
     /// message got lost still ends exactly where it was last seen.
     static VECTOR2D targetOf( const TRACK& aTrack, double aNow )
     {
+        if( !PREDICT )
+            return aTrack.pos;
+
         const double age = aNow - aTrack.t, carry = horizon( aTrack );
         const double k = age <= carry ? aTrack.lead + age
                                       : std::max( 0.0, aTrack.lead + carry - 2.0 * ( age - carry ) );

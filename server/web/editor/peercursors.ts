@@ -33,7 +33,12 @@ export function noteRtt(ms: number) {
 }
 export function myRtt() { return rttMs; }
 /** How quickly the drawn pointer closes on where it should be (time constant, ms): about half a frame. */
-const EASE_MS = 7;
+const EASE_MS_PREDICTING = 7;
+/** Prediction (drawing a pointer ahead of its last update, see above) is off: in use it read as jitter, every late or
+ *  early update showing as a lurch.  Without it a pointer glides to each update as it arrives, over about one display
+ *  frame (EASE_MS).  It stays here to come back: localStorage "junction.cursorPrediction" = "1" turns it on (reload). */
+const PREDICT = (() => { try { return localStorage.getItem("junction.cursorPrediction") === "1"; } catch { return false; } })();
+const EASE_MS = PREDICT ? EASE_MS_PREDICTING : 14;
 
 interface Cursor {
   g: SVGGElement;
@@ -130,6 +135,7 @@ function sample(c: Cursor, x: number, y: number, now: number) {
  *  whose stop message got lost still ends exactly where it was last seen. */
 function horizon(c: Cursor) { return Math.min(CARRY_MAX_MS, c.every * 1.2); }
 function target(c: Cursor, now: number): [number, number] {
+  if (!PREDICT) return [c.x, c.y];
   const age = now - c.t, carry = horizon(c);
   const k = age <= carry ? c.lead + age : Math.max(0, c.lead + carry - 2 * (age - carry));
   return [c.x + c.vx * k, c.y + c.vy * k];
