@@ -184,7 +184,9 @@ fs.writeFileSync(path.join(OUT, 'timeline.json'), JSON.stringify({ ...timeline, 
 console.log(`timeline ${timeline.length.toFixed(1)} s:`, scenes.map((s) => `${s.name || s.kind} ${s.length.toFixed(1)}s${s.speed ? ' ×' + s.speed.toFixed(1) : ''}`).join(', '));
 
 const browser = await chromium.launch({ args: ['--allow-file-access-from-files'] });
-const page = await (await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1, colorScheme: 'dark' })).newPage();
+// --final draws the stage at twice its size: a 3840 x 2160 master (the footage is photographed at 2x too)
+const SCALE = process.argv.includes('--final') ? 2 : 1;
+const page = await (await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: SCALE, colorScheme: 'dark' })).newPage();
 await page.goto(pathToFileURL(path.join(here, 'compose.html')).href);
 await page.evaluate((t) => window.load(t), timeline);
 const stills = process.argv.includes('--stills');
@@ -215,6 +217,12 @@ if (stills) {
     execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', silent, '-ss', String(music.offset), '-i', music.file, '-map', '0:v', '-map', '1:a', '-c:v', 'copy',
       '-af', `afade=t=in:st=0:d=0.4,afade=t=out:st=${(L - fade).toFixed(2)}:d=${fade},volume=0.9`, '-c:a', 'aac', '-b:a', '256k', '-t', String(L), '-movflags', '+faststart', mp4]);
     fs.rmSync(silent);
+  }
+  if (SCALE > 1) {
+    // the web copy: 1920 x 1080, small enough for the repository (GitHub refuses files over 100 MB)
+    const web = mp4.replace(/\.mp4$/, '-1080p.mp4');
+    execFileSync('ffmpeg', ['-loglevel', 'error', '-y', '-i', mp4, '-vf', 'scale=1920:1080:flags=lanczos', '-c:v', 'libx264', '-preset', 'slow', '-crf', '17', '-pix_fmt', 'yuv420p', '-c:a', 'copy', '-movflags', '+faststart', web]);
+    console.log(web, (fs.statSync(web).size / 1e6).toFixed(1), 'MB');
   }
   console.log(mp4, (fs.statSync(mp4).size / 1e6).toFixed(1), 'MB');
 }

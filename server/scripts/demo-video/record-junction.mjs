@@ -55,7 +55,8 @@ const browsers = {};
 const MAIN = { width: 1600, height: 900 }, SIDE = { width: 1200, height: 800 };
 async function open(login, docId, viewport = SIDE, proj = project) {
   browsers[login] = browsers[login] || await launch();
-  const ctx = await browsers[login].newContext({ viewport, deviceScaleFactor: 1, colorScheme: 'dark' });
+  // the filmed window (Ada's) is photographed at twice its pixels (DSF=1 for a quick draft); the others are never filmed
+  const ctx = await browsers[login].newContext({ viewport, deviceScaleFactor: login === 'ada' ? Number(process.env.DSF || 2) : 1, colorScheme: 'dark' });
   await ctx.addInitScript(POINTER);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('  page error:', String(e).slice(0, 200)));
