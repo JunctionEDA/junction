@@ -89,6 +89,8 @@ const beatAt = (name, from, len, captions) => fs.existsSync(path.join(OUT, name,
 beatAt('history', 0, state.history.length, ['History']);
 if (state.parts) { const P = state.parts, from = Math.max(0, (P.marks.search || 0) - 1.5); beatAt('parts', from, P.length - from, ['LCSC, Mouser and DigiKey parts']); }
 beatAt('plugins', 0.5, Math.min(10, state.plugins.length - 0.5), ['Plugins']);
+if (state.websim) beatAt('websim', Math.max(0, state.websim.marks.ran - 4), state.websim.length - Math.max(0, state.websim.marks.ran - 4), ['SPICE simulation']);
+if (state.drc) beatAt('drc', 0, state.drc.length, ['Design rules check']);
 beat('github', { show: 7, captions: ['GitHub sync'] });
 beatAt('fab', 0, state.fab.length, ['Fabrication outputs']);
 beatAt('viewer3d', state.viewer3d.marks.loaded - 0.2, state.viewer3d.length - state.viewer3d.marks.loaded + 0.2, ['3D viewer']);
@@ -105,7 +107,7 @@ const BARS = (sc) => {
   if (sc.kind === 'end') return 0;
   if (sc.name === 'schematic') return 8;
   if (sc.name === 'build') return /Update PCB|Edge/.test(sc.captions.map((c) => c.text).join()) ? 2 : /^Routing$/.test(cap) ? 3 : /Blocks onto/.test(cap) || /Zone/.test(cap) ? 1 : 2;
-  if (sc.name === 'ai' || sc.name === 'parts') return 3;
+  if (sc.name === 'ai' || sc.name === 'parts' || sc.name === 'github') return 3;
   if (sc.name === 'history' || sc.name === 'fab') return 1;
   return 2;
 };

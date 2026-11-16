@@ -26,7 +26,7 @@ const { chromium } = require('playwright');
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OUT = process.env.OUT || path.join(here, 'out');
 const STATE = path.join(OUT, 'state.json');
-const all = ['schematic', 'ai', 'build', 'history', 'parts', 'plugins', 'fab', 'viewer3d'];
+const all = ['schematic', 'ai', 'build', 'history', 'parts', 'plugins', 'websim', 'drc', 'fab', 'viewer3d'];
 const want = process.argv.slice(2).length ? process.argv.slice(2) : all;
 const state = fs.existsSync(STATE) ? JSON.parse(fs.readFileSync(STATE, 'utf8')) : {};
 const save = () => fs.writeFileSync(STATE, JSON.stringify(state, null, 1));
@@ -539,6 +539,44 @@ await scene('plugins', async (dir) => {
   at = await clickOn(rec, a, at, a.locator('text=/^Catalog$/').first(), 450);
   await rec.wait(3500);
   await rec.glide(a, at, [at[0] + 200, at[1] + 220], 900); await rec.hold(900);
+  return await rec.stop();
+});
+
+// ---------------------------------------------------------------- the web simulator, on the RUN pin's power-on sheet (sim/build.mjs)
+await scene('websim', async (dir) => {
+  const simProject = JSON.parse(fs.readFileSync(path.join(OUT, 'sim.json'), 'utf8')).project;
+  const simDocs = (await (await fetch(`${BASE}/api/projects/${simProject}`, { headers: { Authorization: `Bearer ${ada}` } })).json()).docs;
+  const a = await open('ada', simDocs.find((d) => d.docType === 'kicad_sch').docId, MAIN, simProject);
+  await home(a);
+  const rec = await record(a, dir);
+  await rec.hold(500);
+  let at = await menu(rec, a, [800, 450], 'inspect', '/Simulator/');
+  await rec.wait(2500);
+  const run = a.locator('#simframe button[title^="Run Simulation"]').first();
+  at = await clickOn(rec, a, at, (await run.count()) ? run : a.locator('#simframe button').nth(4), 500);
+  await rec.until(a.waitForFunction(() => /Data Rows/.test(document.querySelector('#sim-console')?.value || ''), null, { timeout: 120000 }));
+  await rec.hold(300); rec.mark('ran');
+  for (const sig of ['V(3V3)', 'V(/RUN)']) {
+    const box = a.locator('#simframe tr', { hasText: sig }).first().locator('input[type=checkbox]').first();
+    at = await clickOn(rec, a, at, box, 450); await rec.wait(900);
+  }
+  rec.mark('plotted');
+  await rec.glide(a, at, [700, 420], 900); await rec.hold(1500);
+  return await rec.stop();
+});
+
+// ---------------------------------------------------------------- Design rules check on the finished board
+await scene('drc', async (dir) => {
+  const a = await open('ada', docOf('kicad_pcb'), MAIN);
+  await clearPanels(a); await home(a);
+  const rec = await record(a, dir);
+  await rec.hold(300);
+  let at = await menu(rec, a, [800, 450], 'inspect', '/Design Rules Checker/');
+  await rec.wait(1200);
+  const run = a.locator('button', { hasText: /^Run DRC$/ }).first();
+  at = await clickOn(rec, a, at, run, 500); rec.mark('run');
+  await rec.wait(6000); rec.mark('done');
+  await rec.glide(a, at, [at[0] - 200, at[1] - 160], 800); await rec.hold(1500);
   return await rec.stop();
 });
 
