@@ -21,6 +21,7 @@ mod pages;
 mod pcm;
 mod parts;
 mod persist;
+mod presence_lane;
 mod projectlibs;
 mod plugins;
 mod registry;
@@ -482,7 +483,12 @@ async fn main() -> anyhow::Result<()> {
         .ok()
         .filter(|a| !a.trim().is_empty())
         .unwrap_or_else(|| "0.0.0.0".to_string());
-    let listener = tokio::net::TcpListener::bind((bind_addr.trim(), port)).await?;
+    // TCP_NODELAY on every connection: a cursor update is one small frame, and Nagle would
+    // hold it until the previous one is acknowledged (a round trip later).
+    use axum::serve::ListenerExt;
+    let listener = tokio::net::TcpListener::bind((bind_addr.trim(), port)).await?.tap_io(|tcp| {
+        let _ = tcp.set_nodelay(true);
+    });
     tracing::info!("kicad-collab-server listening on {}:{port}", bind_addr.trim());
     axum::serve(listener, app).await?;
     Ok(())

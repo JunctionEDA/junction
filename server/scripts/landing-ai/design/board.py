@@ -38,7 +38,7 @@ board.rules(clearance=0.15, track_width=0.15, via_diameter=0.4, via_drill=0.25, 
 plan = board.plan(edge="bottom")
 RFW = plan["route"]["widths"].get("RF_LNA", 0.35)
 board.track("RF_LNA", ["U1.1", "C16.1", "L1.1"], width=RFW)
-board.track(next(n for n in board.nets() if n.endswith("RF_ANT")), ["L1.2", "C17.1", "AE1.1"], width=RFW)
+board.track(next(n for n, v in board.nets().items() if "AE1.1" in v["pads"]), ["L1.2", "C17.1", "AE1.1"], width=RFW)
 board.track("GPIO8", ["U1.14", (114.2, 82.75), (115.09, 81.86), "R9.2"])
 # USB pair, laid first as one coupled run (0.5 mm pitch): connector B6/B7 straight down through the ESD part's pads,
 # down the lane between J4 and the charger, then round SW2 into U1's west pins. A6/A7 tie in: D+ under the connector, D- beside it.
@@ -71,7 +71,17 @@ R = plan["route"]
 order = [n for n in ["GPIO9_BOOT"] + R["order"] + ["I2C_SDA", "I2C_SCL", "IMU_INT1", "VBUS", "VSYS", "+BATT"] if n in have]
 order = [n for n in dict.fromkeys(order) if n not in ("USB_D+", "USB_D-")]
 widths = {**R["widths"], "VBUS": 0.4, "VSYS": 0.4, "+BATT": 0.4, "+3V3": 0.3, "VDD_SPI": 0.3}
-r = board.route(order=order, widths=widths, kinds=R["kinds"], time_s=120, max_vias=2)
+# cluster first: each chip with the parts the plan seats at its pins is wired inside itself before anything runs
+# between clusters; pads of one supply that stand together share a pour instead of a track
+near = plan["place"].get("near", {})
+def owner(ref, seen=()):
+    o = near.get(ref)
+    return ref if not o or o in seen else owner(o, (*seen, ref))
+clusters = {}
+for ref in near:
+    clusters.setdefault(owner(ref), [owner(ref)]).append(ref)
+print("power pours", board.power_pours())
+r = board.route(order=order, widths=widths, kinds=R["kinds"], time_s=180, max_vias=2, groups=clusters or None)
 print("routed", {k: r.get(k) for k in ("routed", "connections", "vias", "length_mm", "left")})
 left = board.unrouted()
 if left:

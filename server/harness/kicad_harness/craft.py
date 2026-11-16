@@ -133,6 +133,10 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                 step(f"zone {layer}", lambda layer=layer: self.zone("GND", layer=layer, connect="solid" if layer.startswith("In") else "thermal"))
     if not reroute:
         step("corners", self.round_corners)      # board corners are always rounded
+        if place and route:      # pads of one supply or switching net that stand together: a pour joins them, as a wide track would
+            pp = step("power pours", self.power_pours)
+            if pp:
+                out["power_pours"] = pp
     step("prepare", self.prepare)
     if route:
         step("twins", self.bridge_twins)      # a USB-C connector's D+ and D- twins, joined at the pads before anything is routed
@@ -279,7 +283,7 @@ def _reasoning(self, plan: dict, clusters: dict, got: dict) -> list:
     for a, b in plan.get("apart") or []:
         lines.append(f"{a} and {b} are kept apart: one disturbs the other.")
     r = plan.get("route") or {}
-    lines.append("ROUTING ORDER: 1. critical nets, short, on one layer, no via (" + (", ".join(ex.get("critical_first") or r.get("order") or []) or "none found") + "); 2. the connections inside each cluster; 3. power; 4. fine-pitch escapes; 5. the tracks between clusters.")
+    lines.append("ROUTING ORDER: 1. critical nets, short, on one layer, no via (" + (", ".join(ex.get("critical_first") or r.get("order") or []) or "none found") + "); 2. the connections inside each cluster; 3. power (a pin of a net with an inner plane drops straight into it); 4. fine-pitch escapes; 5. the tracks between clusters.")
     g = got.get("groups") or {}
     if g:
         lines.append(f"Inside clusters: {g.get('routed')} of {g.get('inside')} connections made, with {g.get('vias')} vias. A via here means a part of that cluster faces the wrong way or stands too far out.")

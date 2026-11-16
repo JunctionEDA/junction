@@ -3,7 +3,7 @@
 ## Our Pledge
 
 In the interest of fostering an open and welcoming environment, we as
-contributors and maintainers of KiCad pledge to make participation in our
+contributors and maintainers of Junction pledge to make participation in our
 project and our community a harassment-free experience for everyone.
 
 ## Our Standards
@@ -52,12 +52,8 @@ a project may be further defined and clarified by project maintainers.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported by contacting the project team individually at 
-
-Wayne Stambaugh <stambaughw@gmail.com>
-Seth Hillbrand <seth@kipro-pcb.com>
-Jon Evans <jon@craftyjon.com>
-Jeff Young <jeff@rokeby.ie>
+reported to the maintainer through this repository's GitHub issues, or privately
+through the contact on the maintainer's GitHub profile.
 
 All complaints will be reviewed and investigated and will result in a response that
 is deemed necessary and appropriate to the circumstances. The project team is

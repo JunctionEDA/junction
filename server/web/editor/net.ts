@@ -2,7 +2,9 @@
 import { state, store } from "./appstore";
 import { noteCommentMsg } from "./comments";
 import { applyChanges, applyRemoteChanges, renderObjects, setDocFromText } from "./doc";
-import { applyFollowWeb, renderPeers, startPresenceKeepalive } from "./peers";
+import { applyFollowWeb, peerName, renderPeers, startPresenceKeepalive } from "./peers";
+import { clearPeerCursors, noteRtt, onlyPointerMoved } from "./peercursors";
+import type { PeerEntry } from "./types";
 import { drawSelection, renderProps } from "./selection";
 import { E } from "./state";
 import { setTool } from "./tools";
@@ -10,7 +12,7 @@ import { api, toast } from "./util";
 import { noteProposalMsg } from "./proposals";
 import { historyActive, holdViewOnly, noteEdit, onVersionsNotice } from "./versions";
 import type { ItemSummary, PendingOp, ServerError } from "./types";
-import { dragG, drawPeers, peersG, scheduleRenderRefresh } from "./view";
+import { dragG, drawPeers, movePeerCursors, peersG, scheduleRenderRefresh } from "./view";
 import { updateTitle } from "./title";
 // ---- websocket / presence / ops ----
 export function setConn(cls: string, text?: string) { store.slice("connection", { status: cls === "live" ? "live" : cls === "err" ? "error" : "offline", text: text || (cls === "live" ? "live" : "offline") }); }
@@ -84,7 +86,7 @@ export async function connect() {
     console.warn(`collab socket closed: code=${ev.code} clean=${ev.wasClean} reason=${JSON.stringify(ev.reason || "")}`);
     if (E.ws !== sock || gen !== E.connectGen) return;   // superseded: not ours to reconnect
     E.ws = null; E.joinedDocId = null;
-    peersG.replaceChildren(); E.peerState = {}; renderPeers();
+    peersG.replaceChildren(); clearPeerCursors(); E.peerState = {}; renderPeers();
     const delay = Math.min(15000, 1000 * Math.pow(2, E.retries++));
     setConn("err", `reconnecting in ${Math.round(delay / 1000)}s`);
     setTimeout(() => { if (state.view === "editor" && gen === E.connectGen) connect().catch(() => {}); }, delay);
@@ -99,7 +101,13 @@ export async function connect() {
       // back on the next reconnect is what makes the takeover work.
       if (msg.clientId) E.myClientId = msg.clientId;
       sock.send(JSON.stringify({ type: "join_doc", docId: state.docId }));
+      // How far away the server is: peers' pointers are drawn ahead by the time they took to get here.
+      let pinger: ReturnType<typeof setInterval> | undefined;
+      const ping = () => { if (E.ws !== sock || sock.readyState !== 1) { clearInterval(pinger); return; } sock.send(JSON.stringify({ type: "ping", t: performance.now() })); };
+      // (only a server that says it answers: an older one calls an unknown message a broken session)
+      if (Array.isArray(msg.caps) && msg.caps.includes("ping")) { pinger = setInterval(ping, 2000); ping(); setTimeout(ping, 300); }
     }
+    if (msg.type === "pong" && typeof msg.t === "number") { noteRtt(performance.now() - msg.t); return; }
     // a presence state the server found too large is dropped on its own; the session itself is fine
     if (msg.type === "error" && (msg.code === "bad_message" || msg.code === "unsupported_protocol") && msg.message !== "presence state too large") { setConn("err", `server refused the session (${msg.code}) — reload`); }
     if (msg.type === "error" && msg.code === "auth_failed") {
@@ -114,8 +122,22 @@ export async function connect() {
       if (typeof msg.role === "string") setRole(msg.role);
       setConn("live", liveLabel()); renderPeers(); startPresenceKeepalive();
     }
-    if (msg.type === "presence") { for (const [cid, e] of Object.entries(msg.peers || {})) { if (cid === E.myClientId || cid.endsWith(":" + E.myClientId)) continue; if (e === null) delete E.peerState[cid]; else E.peerState[cid] = e; }
-      drawPeers(E.peerState); applyFollowWeb(E.peerState); renderPeers(); }
+    if (msg.type === "presence") {
+      // Most of these are a pointer that moved: that moves the pointer layer and nothing else.  The rest of the peer
+      // overlay (selections, ghosts) and the people list are redrawn only when what they show changed.
+      let full = false, roster = false;
+      for (const [cid, e] of Object.entries(msg.peers || {}) as [string, PeerEntry | null][]) {
+        if (cid === E.myClientId || cid.endsWith(":" + E.myClientId)) continue;
+        const old = E.peerState[cid];
+        if (e === null) { if (old) { delete E.peerState[cid]; full = roster = true; } continue; }
+        if (!old || peerName(old) !== peerName(e) || (old.user && old.user.color) !== (e.user && e.user.color)) roster = full = true;
+        else if (!onlyPointerMoved(old.state as Record<string, unknown> | null, e.state as Record<string, unknown> | null)) full = true;
+        E.peerState[cid] = e;
+      }
+      if (full) drawPeers(E.peerState); else movePeerCursors(E.peerState);
+      if (E.followPeer) applyFollowWeb(E.peerState);
+      if (roster) renderPeers();
+    }
     if (msg.type === "peer_left" && msg.clientId) { delete E.peerState[msg.clientId]; drawPeers(E.peerState); applyFollowWeb(E.peerState); renderPeers(); }
     // Our own ops are acked, never broadcast back to us, so the ack is how their seq enters our
     // count — without it the next remote op would read as a gap and trigger a needless resync.

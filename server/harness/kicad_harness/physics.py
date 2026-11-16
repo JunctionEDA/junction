@@ -228,11 +228,27 @@ def _finish(self, stitch: float | None = 2.0) -> dict:
         out["ground_pads"] = self.ground_pads()["vias"]
     except HarnessError:
         out["ground_pads"] = 0
+    try:      # a supply pad cut off from its pour (a track laid through it) drops into the net's inner plane the same way
+        planes = {z["net"] for z in self._zones_of() if any(l.startswith("In") for l in z["layers"]) and not re.fullmatch(r"/?(GND|AGND|DGND|PGND|VSS)", z["net"], re.I)}
+        open_now = self.unrouted() or {}
+        for n in sorted(planes):
+            if open_now.get(n):
+                got = self.ground_pads(net=n)["vias"]
+                if got:
+                    out.setdefault("supply_pads", {})[n] = got
+    except HarnessError:
+        pass
     if stitch:
         try:
             out["stitching"] = self.stitch(spacing=stitch)["vias"]
         except HarnessError:
             out["stitching"] = 0
+    try:      # a supply pour over the net's own plane gets its via array: the current's way down
+        pv = self.power_stitch()
+        if pv:
+            out["power_vias"] = pv
+    except HarnessError:
+        pass
     try:
         self.fill()
     except HarnessError:

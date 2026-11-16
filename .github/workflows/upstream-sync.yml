@@ -109,9 +109,9 @@ jobs:
               git checkout -q -B "$SYNC_BRANCH"
               conflicts=0
               git merge --no-ff --no-commit upstream/master || conflicts=1
-              # This repository's own workflows always win over the mirror's.
-              git checkout -q HEAD -- .github
-              git diff --cached --name-only --diff-filter=A HEAD -- .github | xargs -r git rm -qf --
+              # Paths listed in tools/upstream-sync/ours.txt (the workflows, README, contributing
+              # docs, KiCad's GitLab CI) always keep Junction's version, or stay deleted.
+              sh tools/upstream-sync/keep_ours.sh
               if [ $conflicts = 1 ] && ! python3 tools/upstream-sync/resolve_conflicts.py --report conflicts.json; then
                 echo "::error::The merge has conflicts that could not be settled automatically."
                 echo "new=$new" >> "$GITHUB_OUTPUT"
@@ -130,11 +130,9 @@ jobs:
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # A merge fixed by hand must not carry the mirror's workflow changes either.
-          if ! git diff --quiet "$base" HEAD -- .github; then
-            git rm -rqf --ignore-unmatch .github && git checkout -q "$base" -- .github
-            git commit -q -m "Keep this repository's own workflows"
-          fi
+          # A merge fixed by hand must not carry upstream's changes to those paths either.
+          sh tools/upstream-sync/keep_ours.sh "$base"
+          git diff --cached --quiet || git commit -q -m "Keep Junction's own workflows and project documents"
           echo "new=$new" >> "$GITHUB_OUTPUT"
           echo "count=$(git rev-list --count --no-merges "$old..$new")" >> "$GITHUB_OUTPUT"
           echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -351,15 +349,15 @@ jobs:
           set -u
           restart() {
             echo "$1"
-            if [ "$ATTEMPT" -ge 3 ]; then
-              echo "::error::master kept moving under the sync for three runs in a row."
+            if [ "$ATTEMPT" -ge 5 ]; then
+              echo "::error::master kept moving under the sync for five runs in a row."
               echo "result=gave-up" >> "$GITHUB_OUTPUT"
               exit 1
             fi
             # Keep what was merged and settled; the next run adds the new master to it.
             gh workflow run upstream-sync.yml --repo "$GITHUB_REPOSITORY" --ref master -f resume=true -f attempt=$((ATTEMPT + 1))
             echo "result=restarted" >> "$GITHUB_OUTPUT"
-            echo "master moved while the merge was being built; started the sync again (run $((ATTEMPT + 1)) of 3)." >> "$GITHUB_STEP_SUMMARY"
+            echo "master moved while the merge was being built; started the sync again (run $((ATTEMPT + 1)) of 5)." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           }
           git fetch -q origin master

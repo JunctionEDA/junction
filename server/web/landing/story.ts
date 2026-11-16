@@ -100,7 +100,7 @@ export function startStory(root: HTMLElement): void {
   let symAt: Pt[] = [], cam: Pt | null = null, ratKey = "", rats: Rat[] = [];
   let resting: HTMLCanvasElement | null = null, rest = "";
 
-  // The last chapter is the editor's own 3D viewer (server/web/viewer3d), fetched when the story comes near.
+  // The last chapter is the editor's own 3D viewer (server/web/viewer3d), fetched a chapter ahead of it.
   // Until it is there, or where there is no WebGL, the board is drawn as a flat solid instead.
   const host3d = root.querySelector<HTMLElement>("[data-3d]");
   let viewer: V3D | null = null, asked = false, pose3d = "";
@@ -124,9 +124,10 @@ export function startStory(root: HTMLElement): void {
 
   function readScroll(): void {
     const r = track.getBoundingClientRect();
-    if (r.top < window.innerHeight * 1.5 && r.bottom > -window.innerHeight) want3d();
     const room = r.height - window.innerHeight;
     g = room > 0 ? clamp(-r.top / room) * 4 : 0;
+    // The 3D viewer (210 KB) is fetched once the story is halfway, a chapter before it is shown, not with the page.
+    if (g > 1.6 && r.bottom > -window.innerHeight) want3d();
     // Back above the story: the next visit starts from an empty sheet.
     if (r.top > window.innerHeight * 0.9 && p[0] > 0) { p.fill(0); cam = null; }
     stage.invalidate();

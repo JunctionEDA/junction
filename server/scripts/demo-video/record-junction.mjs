@@ -2,7 +2,7 @@
 // prepare.mjs.  One window is filmed, Ada's; everyone else works in their own browser and shows in hers as a
 // cursor with a name tag, the way a collaborator does.
 //
-//   schematic  Ada starts the Pico schematic alone; Ben joins, then Chloé, then Dev, each taking a part of it.
+//   schematic  Ada starts the Pico schematic alone; Ben joins, then Maya, then Dev, each taking a part of it.
 //              Every item goes in through that person's own editor, with their mouse on it.
 //   ai         Ada asks her AI app for the crystal circuit: it points at the gap (highlight) and proposes the
 //              circuit (apply_changes with propose), which Ada accepts.
@@ -26,7 +26,7 @@ const { chromium } = require('playwright');
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OUT = process.env.OUT || path.join(here, 'out');
 const STATE = path.join(OUT, 'state.json');
-const all = ['schematic', 'ai', 'build', 'history', 'parts', 'plugins', 'fab', 'viewer3d'];
+const all = ['schematic', 'ai', 'build', 'history', 'parts', 'plugins', 'websim', 'drc', 'fab', 'viewer3d'];
 const want = process.argv.slice(2).length ? process.argv.slice(2) : all;
 const state = fs.existsSync(STATE) ? JSON.parse(fs.readFileSync(STATE, 'utf8')) : {};
 const save = () => fs.writeFileSync(STATE, JSON.stringify(state, null, 1));
@@ -39,13 +39,13 @@ await db.connect();
 const mkUser = async (ghId, login, name) => (await db.query(
   `INSERT INTO users (github_id, login, name) VALUES ($1, $2, $3) ON CONFLICT (github_id) DO UPDATE SET login = EXCLUDED.login, name = EXCLUDED.name RETURNING id`, [ghId, login, name])).rows[0].id;
 const people = {};
-for (const [g, login, name] of [[-7701, 'ada', 'Ada'], [-7702, 'ben', 'Ben'], [-7703, 'chloe', 'Chloé'], [-7704, 'dev', 'Dev']]) {
+for (const [g, login, name] of [[-7701, 'ada', 'Ada'], [-7702, 'ben', 'Ben'], [-7703, 'maya', 'Maya'], [-7704, 'dev', 'Dev']]) {
   const id = await mkUser(g, login, name); people[login] = { id, name, jwt: mintJwt(id, login) };
 }
 const ada = people.ada.jwt;
 const docs = (await (await fetch(`${BASE}/api/projects/${project}`, { headers: { Authorization: `Bearer ${ada}` } })).json()).docs;
 const docOf = (type) => docs.find((d) => d.docType === type).docId;
-for (const p of ['ben', 'chloe', 'dev']) await share(ada, project, people[p].jwt);
+for (const p of ['ben', 'maya', 'dev']) await share(ada, project, people[p].jwt);
 
 // One browser for each person, as on separate computers.  WebGL by software (for the 3D viewer), but not
 // --ignore-gpu-blocklist: with it the 2D canvases are composited through the software GPU too, and a page
@@ -55,7 +55,8 @@ const browsers = {};
 const MAIN = { width: 1600, height: 900 }, SIDE = { width: 1200, height: 800 };
 async function open(login, docId, viewport = SIDE, proj = project) {
   browsers[login] = browsers[login] || await launch();
-  const ctx = await browsers[login].newContext({ viewport, deviceScaleFactor: 1, colorScheme: 'dark' });
+  // the filmed window (Ada's) is photographed at twice its pixels (DSF=1 for a quick draft); the others are never filmed
+  const ctx = await browsers[login].newContext({ viewport, deviceScaleFactor: login === 'ada' ? Number(process.env.DSF || 2) : 1, colorScheme: 'dark' });
   await ctx.addInitScript(POINTER);
   const page = await ctx.newPage();
   page.on('pageerror', (e) => console.log('  page error:', String(e).slice(0, 200)));
@@ -91,7 +92,7 @@ async function fitTo(page, box, rec) {
   const pause = async (ms) => { if (rec) { await sleep(ms / 2); await rec.tick(); await rec.tick(); } else await sleep(ms); };
   const vp = page.viewportSize(), H = vp.height - 140;
   const span = async () => { const m = await mapOf(page); const a = m.to([box[0], box[1]]), b = m.to([box[2], box[3]]); return { a, b, w: b[0] - a[0], h: b[1] - a[1] }; };
-  for (let i = 0; i < 30; i++) { const s = await span(); if (s.w <= vp.width * 0.98 && s.h <= H) break; await page.mouse.move(vp.width / 2, vp.height / 2); await page.mouse.wheel(0, 120); await pause(250); }
+  for (let i = 0; i < 60; i++) { const s = await span(); if (s.w <= vp.width * 0.98 && s.h <= H) break; await page.mouse.move(vp.width / 2, vp.height / 2); await page.mouse.wheel(0, 120); await pause(250); }
   for (let i = 0; i < 30; i++) { const s = await span(); if (s.w * 1.25 > vp.width * 0.98 || s.h * 1.25 > H) break; await page.mouse.move(vp.width / 2, vp.height / 2); await page.mouse.wheel(0, -120); await pause(250); }
   for (let i = 0; i < 8; i++) {
     const s = await span(); const cx = (s.a[0] + s.b[0]) / 2, cy = (s.a[1] + s.b[1]) / 2, tx = vp.width / 2, ty = 70 + H / 2;
@@ -102,6 +103,25 @@ async function fitTo(page, box, rec) {
     await page.mouse.move(sx0, sy0); await page.mouse.down({ button: 'middle' }); await page.mouse.move(sx0 + dx / 2, sy0 + dy / 2, { steps: 4 }); await page.mouse.move(sx0 + dx, sy0 + dy, { steps: 4 }); await page.mouse.up({ button: 'middle' }); await pause(300);
   }
   await sleep(300);
+}
+// The camera: the editor's own view (zoom and pan, as View > Zoom to Fit sets them) moved to show exactly the world
+// box [x0, y0, x1, y1], in one step, or with rec over `frames` photographs: a slow, even glide (zoom by ratio, centre
+// in a straight line), never a jump.
+async function camTo(page, box, rec, frames = 40, margin = 0.94) {
+  const v = await page.evaluate(() => {
+    const E = window.CollabEditor, st = document.getElementById('stage').getBoundingClientRect();
+    const a = E.api.worldMm({ clientX: st.left, clientY: st.top }), b = E.api.worldMm({ clientX: st.left + 1000, clientY: st.top + 1000 });
+    return { zoom: E.zoom, panX: E.panX, panY: E.panY, a, s: 1000 / (b[0] - a[0]), w: st.width, h: st.height };
+  });
+  // world at the stage's top-left is a + (-pan)/s for the current zoom: mmX0 = a0 + panX / s
+  const mm0 = [v.a[0] + v.panX / v.s, v.a[1] + v.panY / v.s];
+  const c0 = [v.a[0] + v.w / 2 / v.s, v.a[1] + v.h / 2 / v.s], c1 = [(box[0] + box[2]) / 2, (box[1] + box[3]) / 2];
+  const s1 = Math.min(v.w / (box[2] - box[0]), v.h / (box[3] - box[1])) * margin;
+  const at = (k) => { const s = v.s * Math.pow(s1 / v.s, k), c = [c0[0] + (c1[0] - c0[0]) * k, c0[1] + (c1[1] - c0[1]) * k];
+    return { zoom: v.zoom * (s / v.s), panX: v.w / 2 - (c[0] - mm0[0]) * s, panY: v.h / 2 - (c[1] - mm0[1]) * s }; };
+  const set = (q) => page.evaluate((q2) => { const E = window.CollabEditor; E.zoom = q2.zoom; E.panX = q2.panX; E.panY = q2.panY; E.api.applyView(); E.api.requestRender && E.api.requestRender(); }, q);
+  if (!rec) { await set(at(1)); await sleep(400); return; }
+  for (let i = 1; i <= frames; i++) { const k = i / frames, e = k * k * (3 - 2 * k); await set(at(e)); await rec.tick(); }
 }
 const commit = (page, changes, label) => page.evaluate(([c, l]) => window.CollabEditor.api.commitChanges(c, l), [changes, label]);
 const settled = (page) => page.waitForFunction(() => window.CollabEditor.pendingOps.size === 0, null, { timeout: 60000 });
@@ -121,6 +141,8 @@ async function menu(rec, page, from, name, entry, sub) {
   for (const [text, last] of [[sub, false], [entry, true]]) {
     if (!text) continue;
     const it = page.locator(`#kmenus [data-menu="${name}"] .dd`).locator(`text=${text}`).first(); await it.waitFor({ timeout: 10000 }); const ib = await it.boundingBox(); const to = [ib.x + 40, ib.y + ib.height / 2];
+    // into a submenu sideways first, then down: a diagonal crosses the other entries and the submenu closes
+    if (last && sub) { const side = [to[0], at[1]]; await rec.glide(page, at, side, 200); at = side; }
     await rec.glide(page, at, to, 350); at = to; await rec.hold(200);
     if (last) await it.click(); else await it.hover();
   }
@@ -151,7 +173,19 @@ async function advance(A) {
   return true;
 }
 // Everybody works until all are done; the recorder photographs every frame.
-async function together(rec, actors, onFrame) { for (;;) { let any = false; for (const A of actors) if (await advance(A)) any = true; await rec.tick(); if (onFrame) await onFrame(); if (!any) break; } }
+// Whoever runs out of work helps whoever has the most left: the second half of their remaining steps moves over,
+// redrawn in the helper's own view (screen -> world -> screen).
+function help(actors) {
+  for (const X of actors) {
+    if (X.cur || X.steps.length || !X.map) continue;
+    const Y = actors.filter((q) => q !== X && q.map && q.steps.length > 8).sort((p, q) => q.steps.length - p.steps.length)[0];
+    if (!Y) continue;
+    const take = Y.steps.splice(Math.ceil(Y.steps.length / 2));
+    X.steps.push(...take.map((st) => ({ ...st, path: st.path.map((pt) => X.map.to(Y.map.from(pt))) })));
+    X.helped = (X.helped || 0) + take.length;
+  }
+}
+async function together(rec, actors, onFrame) { for (;;) { help(actors); let any = false; for (const A of actors) if (await advance(A)) any = true; await rec.tick(); if (onFrame) await onFrame(); if (!any) break; } }
 
 // ---- turning the exported items into a person's steps
 const ORDER = { rectangle: 0, text: 1, symbol: 2, wire: 3, label: 4, global_label: 4, hierarchical_label: 4, junction: 5, no_connect: 6 };
@@ -183,7 +217,7 @@ const content = (() => { const b = Object.values(I.blocks).map((x) => x.box); re
 // ---------------------------------------------------------------- the schematic, one person and then four
 await scene('schematic', async (dir) => {
   const a = await open('ada', docOf('kicad_sch'), MAIN);
-  await reset(a, 'sch'); await clearPanels(a); await frame(a, content);
+  await reset(a, 'sch'); await clearPanels(a); await home(a);
   const ma = await mapOf(a);
   const RP = blockNamed(/RP2040/), rpSteps = (map) => schSteps(map, [RP]);
   const third = (steps, k) => { const n = Math.ceil(steps.length / 3); return steps.slice(k * n, (k + 1) * n); };
@@ -191,13 +225,13 @@ await scene('schematic', async (dir) => {
   const plan = [
     { who: 'ada', at: 0, steps: (m) => [...schSteps(m, [blockNamed(/USB/), blockNamed(/buck/)]), ...third(rpSteps(m), 1)] },
     { who: 'ben', at: 22, steps: (m) => [...schSteps(m, [blockNamed(/QSPI/), blockNamed(/Reset/)]), ...third(rpSteps(m), 2)] },
-    { who: 'chloe', at: 62, steps: (m) => third(rpSteps(m), 0) },
+    { who: 'maya', at: 62, steps: (m) => third(rpSteps(m), 0) },
     { who: 'dev', at: 100, steps: (m) => schSteps(m, [blockNamed(/GPIO/)]) },
   ];
-  const A = actor(a, plan[0].steps(ma), [800, 450]);
+  const A = actor(a, plan[0].steps(ma), [800, 450]); A.map = ma;
   const actors = [A]; const pending = []; const joins = {}, follow = {};
   const rec = await record(a, dir);
-  await rec.hold(700);
+  await a.mouse.move(800, 450); await rec.hold(300);
   for (;;) {
     for (const p of plan.slice(1)) if (!p.started && A.done >= p.at) {
       p.started = true;
@@ -208,7 +242,10 @@ await scene('schematic', async (dir) => {
       const r = await Promise.race([pending[i], sleep(0).then(() => null)]);
       if (r) { pending.splice(i, 1); rec.mark(`join-${r.p.who}`); joins[r.p.who] = A.done; const Z = actor(r.pg, r.p.steps(r.m), [1150, 100]); Z.who = r.p.who; Z.map = r.m; Z.joined = rec.now(); follow[r.p.who] = []; actors.push(Z); }
     }
+    if (!pending.length && plan.every((p) => p.started || p.at === 0)) help(actors);
     let any = false; for (const X of actors) if (await advance(X)) any = true;
+    // a person who is done takes their hand off the drawing (Ada's pointer leaves the sheet: no cursor sitting idle)
+    if (!A.cur && !A.steps.length && !A.away) { A.away = true; await a.evaluate(() => { const p = document.getElementById('__demo_ptr'); if (p) p.style.display = 'none'; }); await a.mouse.move(2, 885); }
     // where a newcomer's cursor is on Ada's screen for their first seconds: the video zooms in and follows it
     for (const X of actors) if (X.who && rec.now() - X.joined < 5) { const q = ma.to(X.map.from(X.pos)); follow[X.who].push([rec.now(), Math.round(q[0]), Math.round(q[1])]); }
     await rec.tick();
@@ -217,14 +254,14 @@ await scene('schematic', async (dir) => {
   for (const X of actors) await settled(X.page);
   await rec.hold(900);
   const r = await rec.stop();
-  return { ...r, items: Object.fromEntries(actors.map((X) => [X.who || 'ada', X.done])), joins, follow };
+  return { ...r, items: Object.fromEntries(actors.map((X) => [X.who || 'ada', X.done])), helped: Object.fromEntries(actors.map((X) => [X.who || 'ada', X.helped || 0])), joins, follow };
 });
 
 // ---------------------------------------------------------------- Ada's AI: points at the gap, proposes the crystal, she accepts
 await scene('ai', async (dir) => {
   const a = await open('ada', docOf('kicad_sch'), MAIN);
   await reset(a, 'sch', (i) => i.blockName === AI_BLOCK);
-  await clearPanels(a); await frame(a, content);
+  await clearPanels(a); await home(a);
   // the AI app's access key (Connect an AI assistant), warmed up in a scratch project so that it is not in this
   // document before Ada asks (the server starts its worker on the first call)
   await db.query(`UPDATE mcp_tokens SET expires_at = now() WHERE grant_id IN (SELECT id FROM mcp_grants WHERE user_id = $1 AND client_id LIKE 'kcm\\_key\\_%')`, [people.ada.id]);
@@ -322,7 +359,7 @@ await scene('build', async (dir) => {
   const WORK = [
     { who: 'ada', side: -1, blocks: [named(/^USB/), named(/buck/)] },
     { who: 'ben', side: -1, blocks: [named(/QSPI/), named(/crystal/)] },
-    { who: 'chloe', side: 1, blocks: [named(/RP2040/)] },
+    { who: 'maya', side: 1, blocks: [named(/RP2040/)] },
     { who: 'dev', side: 1, blocks: [named(/Reset/)], edge: [named(/GPIO/)] },
   ];
   const GAP = 5, off = {};
@@ -343,10 +380,13 @@ await scene('build', async (dir) => {
   // start from an empty board: no footprints, no outline, no copper
   await a.evaluate(() => { const E = window.CollabEditor, P = window.PcbTools; const out = []; for (const it of E.kdoc.items.values()) if (['footprint', 'segment', 'arc', 'via', 'zone'].includes(it.kind) || (/^gr_(rect|line|arc)$/.test(it.kind) && JSON.stringify(it.node).includes('Edge.Cuts'))) out.push(P.removedChange(it)); if (out.length) E.api.commitChanges(out, 'reset'); });
   await settled(a); await clearPanels(a);
-  await fitTo(a, VIEW); await a.evaluate(DEMO);
+  // an empty board's Home zooms onto its one text: zoom out by the wheel twice over before framing
+  await camTo(a, VIEW); await a.evaluate(DEMO);
   const others = {};
-  for (const w of ['ben', 'chloe', 'dev']) { others[w] = await open(w, docOf('kicad_pcb')); await clearPanels(others[w]); await fitTo(others[w], VIEW); await others[w].evaluate(DEMO); }
+  for (const w of ['ben', 'maya', 'dev']) { others[w] = await open(w, docOf('kicad_pcb')); await clearPanels(others[w]); await others[w].mouse.move(2, 885); await camTo(others[w], VIEW); await others[w].evaluate(DEMO); }
   const pages = { ada: a, ...others };
+  // the editor may still fit its view to the (nearly empty) board after loading: frame the work area again, last thing
+  await a.bringToFront(); await sleep(1500); await camTo(a, VIEW);
   const rec = await record(a, dir);
   const m = await mapOf(a);
   await rec.hold(500);
@@ -364,17 +404,17 @@ await scene('build', async (dir) => {
   await rec.hold(700);
   const close = a.locator('button', { hasText: /^Close$/ }).first(); if (await close.count()) { at = await clickOn(rec, a, at, close, 350); }
   await a.keyboard.press('Escape'); await rec.hold(300); await a.keyboard.press('Escape');
-  await settled(a); await rec.hold(600); rec.mark('updated');
+  await settled(a); await rec.glide(a, at, [800, 470], 500); at = [800, 470]; await rec.hold(300); rec.mark('updated');
   // the footprints landed in rows under the board: the view takes them in while the parts are taken to their blocks
   const row = await a.evaluate(() => { let b = null; for (const it of window.CollabEditor.kdoc.items.values()) if (it.kind === 'footprint') b = b ? [Math.min(b[0], it.bbox[0]), Math.min(b[1], it.bbox[1]), Math.max(b[2], it.bbox[2]), Math.max(b[3], it.bbox[3])] : it.bbox.slice(); return b; });
   const WIDE = row ? [Math.min(VIEW[0], row[0] - 2), Math.min(VIEW[1], row[1] - 2), Math.max(VIEW[2], row[2] + 2), Math.max(VIEW[3], row[3] + 2)] : VIEW.slice();
   console.log('  row', row && row.map((v) => v.toFixed(1)).join(','), 'wide', WIDE.map((v) => v.toFixed(1)).join(','));
-  await fitTo(a, WIDE, rec);
-  for (const w of Object.keys(others)) await fitTo(others[w], WIDE);
+  await camTo(a, WIDE, rec);
+  for (const w of Object.keys(others)) await camTo(others[w], WIDE);
 
 
   const maps = {}; for (const w of Object.keys(pages)) maps[w] = await mapOf(pages[w]);
-  const pos = { ada: at, ben: [1300, 200], chloe: [300, 700], dev: [1300, 750] };
+  const pos = { ada: at, ben: [1300, 200], maya: [300, 700], dev: [1300, 750] };
   const ease = (k) => k * k * (3 - 2 * k);
   async function* glideTo(w, to, frames) { const pg = pages[w], from = pos[w]; for (let f = 1; f <= frames; f++) { const k = ease(f / frames); const p = [from[0] + (to[0] - from[0]) * k, from[1] + (to[1] - from[1]) * k]; await pg.mouse.move(p[0], p[1]); pos[w] = p; yield; } }
   const bigFirst = (refs) => refs.sort((p, q) => (q.node && /Connector|RP2040|QFN|SOT|SOIC|Crystal/.test(JSON.stringify(q.node[1])) ? 1 : 0) - (p.node && /Connector|RP2040|QFN|SOT|SOIC|Crystal/.test(JSON.stringify(p.node[1])) ? 1 : 0));
@@ -383,6 +423,8 @@ await scene('build', async (dir) => {
     const pg = pages[w], mp = maps[w];
     const from = await pg.evaluate((r) => window.__demo.at([r]), part.ref); if (!from) return;
     yield* glideTo(w, mp.to(from), 8);
+    // picked up the way a person does: a click selects it (everyone sees it selected), then it is carried
+    const p0 = mp.to(from); await pg.mouse.click(p0[0], p0[1]); yield; yield;
     const to = [part.at[0] + d[0], part.at[1] + d[1]], frames = 12; let last = from;
     for (let f = 1; f <= frames; f++) {
       const k = ease(f / frames); const now = [from[0] + (to[0] - from[0]) * k, from[1] + (to[1] - from[1]) * k];
@@ -390,6 +432,7 @@ await scene('build', async (dir) => {
       await pg.evaluate(([r, dx, dy]) => window.__demo.move([r], dx, dy), [part.ref, now[0] - last[0], now[1] - last[1]]); last = now; yield;
     }
     await pg.evaluate(([ref, node, dx, dy]) => window.__demo.snap(ref, node, dx, dy), [part.ref, part.node, d[0], d[1]]); yield;
+    await pg.keyboard.press('Escape'); yield;
   }
   // routing: the person's cursor draws each run, and the run is committed as it ends
   async function* route(w, tracks) {
@@ -403,18 +446,20 @@ await scene('build', async (dir) => {
     const pg = pages[w], mp = maps[w], d = off[name]; if (!d[0] && !d[1]) return;
     const refs = FP.filter((f) => f.block === name).map((f) => f.ref), ids = inside[name] || [];
     const b = padBox(name), c = [(b[0] + b[2]) / 2 + d[0], (b[1] + b[3]) / 2 + d[1]];
-    yield* glideTo(w, mp.to(c), 10);
-    await pg.mouse.down(); yield; yield;
+    // a box round the cluster selects it, parts and tracks
+    const k0 = mp.to([b[0] + d[0] - 1.5, b[1] + d[1] - 1.5]), k1 = mp.to([b[2] + d[0] + 1.5, b[3] + d[1] + 1.5]);
+    yield* glideTo(w, k0, 10); await pg.mouse.down(); yield;
+    yield* glideTo(w, k1, 14); await pg.mouse.up(); yield; yield; yield;
+    yield* glideTo(w, mp.to(c), 8); yield; yield;
     const frames = 24; let last = [0, 0];
     for (let f = 1; f <= frames; f++) {
       const k = ease(f / frames), now = [-d[0] * k, -d[1] * k];
       const sc = mp.to([c[0] + now[0], c[1] + now[1]]); await pg.mouse.move(sc[0], sc[1]); pos[w] = sc;
       await pg.evaluate(([r, i, dx, dy]) => window.__demo.moveGroup(r, i, dx, dy), [refs, ids, now[0] - last[0], now[1] - last[1]]); last = now; yield;
     }
-    await pg.mouse.up();
     // land exactly where the layout has them
     for (const f of FP.filter((x) => x.block === name)) await pg.evaluate(([ref, node]) => window.__demo.snap(ref, node, 0, 0), [f.ref, f.node]);
-    yield; yield; yield;
+    yield; await pg.keyboard.press('Escape'); yield; yield;
   }
   // a. everyone takes their parts out of the rows and lays out their blocks beside the board (Dev: the edge headers
   //    straight onto the board)
@@ -437,11 +482,11 @@ await scene('build', async (dir) => {
   for (const w of Object.keys(pages)) await settled(pages[w]);
   await rec.hold(500); rec.mark('clustered');
   // closer in for the routing: the board and the blocks round it
-  await fitTo(a, VIEW, rec); for (const w of Object.keys(others)) await fitTo(others[w], VIEW); await remap();
+  await camTo(a, VIEW, rec); for (const w of Object.keys(others)) await camTo(others[w], VIEW); await remap();
   rec.mark('inner');
   await runAll(WORK.map((W, i) => routeInside(W, [0, 4, 2, 6][i])));
   for (const w of Object.keys(pages)) await settled(pages[w]);
-  await rec.hold(600); rec.mark('onboard');
+  await rec.hold(600); await camTo(a, VIEW, rec); await remap(); rec.mark('onboard');
   await runAll(WORK.map((W, i) => moveAll(W, [0, 10, 5, 15][i])));
   for (const w of Object.keys(pages)) await settled(pages[w]);
   await rec.hold(700); rec.mark('blocks');
@@ -450,13 +495,13 @@ await scene('build', async (dir) => {
   const nets = [...new Set(tracks.map((t) => t.net))];
   const cOf = (n) => { const t = tracks.filter((x) => x.net === n); return [t.reduce((s2, x) => s2 + x.pts[0][0], 0) / t.length, t.reduce((s2, x) => s2 + x.pts[0][1], 0) / t.length]; };
   const mx = (ob[0] + ob[2]) / 2, my = (ob[1] + ob[3]) / 2;
-  const quad = { ada: [], ben: [], chloe: [], dev: [] };
-  for (const n of nets) { const c = cOf(n); quad[c[1] < my ? (c[0] < mx ? 'ada' : 'ben') : (c[0] < mx ? 'chloe' : 'dev')].push(n); }
+  const quad = { ada: [], ben: [], maya: [], dev: [] };
+  for (const n of nets) { const c = cOf(n); quad[c[1] < my ? (c[0] < mx ? 'ada' : 'ben') : (c[0] < mx ? 'maya' : 'dev')].push(n); }
   // zoomed on the board for the routing, by the wheel (everyone)
   const BOARDV = [ob[0] - 2, ob[1] - 2, ob[2] + 2, ob[3] + 2];
-  await fitTo(a, BOARDV, rec); for (const w of Object.keys(others)) await fitTo(others[w], BOARDV);
+  await camTo(a, BOARDV, rec); for (const w of Object.keys(others)) await camTo(others[w], BOARDV);
   for (const w of Object.keys(pages)) maps[w] = await mapOf(pages[w]);
-  const actors = Object.keys(pages).map((w) => actor(pages[w], trackSteps(maps[w], tracks.filter((t) => quad[w].includes(t.net))), w === 'ada' ? [800, 450] : [600, 400]));
+  const actors = Object.keys(pages).map((w) => { const X = actor(pages[w], trackSteps(maps[w], tracks.filter((t) => quad[w].includes(t.net))), w === 'ada' ? [800, 450] : [600, 400]); X.map = maps[w]; return X; });
   rec.mark('route');
   await together(rec, actors);
   for (const X of actors) await settled(X.page);
@@ -488,10 +533,10 @@ await scene('history', async (dir) => {
 // ---------------------------------------------------------------- Parts from vendors
 await scene('parts', async (dir) => {
   const a = await open('ada', docOf('kicad_sch'), MAIN);
-  await clearPanels(a); await frame(a, content);
+  await clearPanels(a); await home(a);
   const before = await a.evaluate(() => [...window.CollabEditor.kdoc.items.keys()]);
-  // where the part goes: the empty paper under the RP2040 block
-  const ma = await mapOf(a); const spot = ma.to([230, 242]);
+  // where the part goes: the empty paper between the flash and RP2040 blocks
+  const ma = await mapOf(a); const spot = ma.to([157, 160]);
   const rec = await record(a, dir);
   await rec.hold(300);
   let at = await menu(rec, a, [800, 450], 'tools', '/Add Part from Vendor/');
@@ -507,7 +552,10 @@ await scene('parts', async (dir) => {
   at = await clickOn(rec, a, at, place, 600); rec.mark('place');
   await rec.wait(1500);
   await rec.glide(a, at, spot, 1100); await rec.hold(300);
-  await a.mouse.click(spot[0], spot[1]); rec.mark('placed');
+  await a.mouse.click(spot[0], spot[1]); await rec.hold(300);
+  const newCount = () => a.evaluate((b) => { const had = new Set(b); let n = 0; for (const id of window.CollabEditor.kdoc.items.keys()) if (!had.has(id)) n++; return n; }, before);
+  if (!(await newCount())) { await a.mouse.move(spot[0] + 2, spot[1] + 2); await rec.hold(200); await a.mouse.down(); await a.mouse.up(); await rec.hold(300); }
+  rec.mark('placed'); console.log('  placed items:', await newCount());
   await rec.hold(400); await a.keyboard.press('Escape'); await rec.hold(300);
   await settled(a);
   await rec.glide(a, spot, [spot[0] + 120, spot[1] + 90], 700); await rec.hold(1800);
@@ -532,7 +580,48 @@ await scene('plugins', async (dir) => {
   await rec.wait(1500);
   at = await clickOn(rec, a, at, a.locator('text=/^Catalog$/').first(), 450);
   await rec.wait(3500);
-  await rec.glide(a, at, [at[0] + 200, at[1] + 220], 900); await rec.hold(900);
+  // down the catalog, slowly, a notch at a time
+  const over = [at[0] + 200, at[1] + 220]; await rec.glide(a, at, over, 700); rec.mark('scroll');
+  for (let i = 0; i < 24; i++) { await a.mouse.wheel(0, 40); await rec.tick(); await rec.tick(); await rec.tick(); }
+  await rec.hold(900);
+  return await rec.stop();
+});
+
+// ---------------------------------------------------------------- the web simulator, on the RUN pin's power-on sheet (sim/build.mjs)
+await scene('websim', async (dir) => {
+  const simProject = JSON.parse(fs.readFileSync(path.join(OUT, 'sim.json'), 'utf8')).project;
+  const simDocs = (await (await fetch(`${BASE}/api/projects/${simProject}`, { headers: { Authorization: `Bearer ${ada}` } })).json()).docs;
+  const a = await open('ada', simDocs.find((d) => d.docType === 'kicad_sch').docId, MAIN, simProject);
+  await home(a);
+  const rec = await record(a, dir);
+  await rec.hold(500);
+  let at = await menu(rec, a, [800, 450], 'inspect', '/Simulator/');
+  await rec.wait(2500);
+  const run = a.locator('#simframe button[title^="Run Simulation"]').first();
+  at = await clickOn(rec, a, at, (await run.count()) ? run : a.locator('#simframe button').nth(4), 500);
+  await rec.until(a.waitForFunction(() => /Data Rows/.test(document.querySelector('#sim-console')?.value || ''), null, { timeout: 120000 }));
+  await rec.hold(300); rec.mark('ran');
+  for (const sig of ['V(3V3)', 'V(/RUN)']) {
+    const box = a.locator('#simframe tr', { hasText: sig }).first().locator('input[type=checkbox]').first();
+    at = await clickOn(rec, a, at, box, 450); await rec.wait(900);
+  }
+  rec.mark('plotted');
+  await rec.glide(a, at, [700, 420], 900); await rec.hold(1500);
+  return await rec.stop();
+});
+
+// ---------------------------------------------------------------- Design rules check on the finished board
+await scene('drc', async (dir) => {
+  const a = await open('ada', docOf('kicad_pcb'), MAIN);
+  await clearPanels(a); await home(a);
+  const rec = await record(a, dir);
+  await rec.hold(300);
+  let at = await menu(rec, a, [800, 450], 'inspect', '/Design Rules Checker/');
+  await rec.wait(1200);
+  const run = a.locator('button', { hasText: /^Run DRC$/ }).first();
+  at = await clickOn(rec, a, at, run, 500); rec.mark('run');
+  await rec.wait(6000); rec.mark('done');
+  await rec.glide(a, at, [at[0] - 200, at[1] - 160], 800); await rec.hold(1500);
   return await rec.stop();
 });
 

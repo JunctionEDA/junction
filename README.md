@@ -1,20 +1,28 @@
-<p align="center"><img src="server/static/icon.svg" alt="" width="84"></p>
+<p align="center"><img src="server/static/icon.svg" alt="" width="96"></p>
 
-# Junction
+<h1 align="center">Junction</h1>
 
-Design hardware together, live. Junction is a fork of KiCad's schematic and PCB editors that adds live
-multiplayer editing, a full editor in the browser, and a server any AI model can design through.
+<p align="center"><b>Real-time collaborative KiCad.</b><br>
+Schematic and PCB editors where everyone works on the same design at once, on the desktop or in the browser,<br>
+with any AI model as a teammate.</p>
 
-[![Release](https://img.shields.io/github/v/release/notaroomba/junction)](https://github.com/notaroomba/junction/releases/latest)
-[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue)](LICENSE)
+<p align="center">
+  <a href="https://junctioneda.com"><b>Open in the browser</b></a> ·
+  <a href="https://github.com/notaroomba/junction/releases/latest"><b>Download for macOS, Windows, Linux</b></a> ·
+  <a href="#design-with-an-ai"><b>Connect an AI</b></a>
+</p>
 
-<!-- The demo video. GitHub plays a video inline only from a github.com/user-attachments URL: to update it, drag
-     docs/media/junction-demo.mp4 into this file in GitHub's editor and let the URL it inserts replace the line below. -->
+<p align="center">
+  <a href="https://github.com/notaroomba/junction/releases/latest"><img src="https://img.shields.io/github/v/release/notaroomba/junction" alt="Release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-GPLv3-blue" alt="License: GPL v3"></a>
+</p>
 
+<!-- The demo video. GitHub plays a video inline only from a github.com/user-attachments URL: to get the inline
+     player, drag docs/media/junction-demo.mp4 into this file in GitHub's editor and let the URL it inserts replace
+     the poster link below. -->
+<p align="center"><a href="docs/media/junction-demo.mp4"><img src="docs/media/junction-demo-poster.jpg" alt="Junction demo video: four people build a Raspberry Pi Pico board together, from schematic to routed board" width="100%"></a></p>
 
-https://github.com/user-attachments/assets/048096a4-82aa-4844-ad54-ccb67b8257e7
-
-
+<p align="center"><sub>Four people build a Raspberry Pi Pico board together, from the first symbol to the filled planes. Music: Grieg, <i>In the Hall of the Mountain King</i>, Musopen (public domain).</sub></p>
 
 ## Install
 
@@ -39,18 +47,20 @@ Projects are ordinary KiCad files. Everyone in a project should be on 2.0: it is
 
 <table>
 <tr>
-<td width="50%"><img src="docs/media/together.jpg" alt="Ada and Ben in one Raspberry Pi Pico schematic from two browsers, each showing the other person's cursor and name tag" width="100%"><br><b>Live editing.</b> Two people in one schematic or board, on the desktop or in the browser, each with their own view. Cursors, selections, drags in progress and edits arrive as they happen.</td>
-<td width="50%"><img src="docs/media/ai-board.jpg" alt="The routed four-layer Raspberry Pi Pico board from the video in the browser editor, laid out by harness scripts through MCP" width="100%"><br><b>Design with any AI.</b> An MCP server lets Claude, ChatGPT, Gemini, Cursor or a local model read and edit your projects. Its edits appear in everyone's editor, with a cursor on them.</td>
+<td width="50%"><img src="docs/media/collab-schematic.jpg" alt="Four people's cursors in one Raspberry Pi Pico schematic, each with a name tag" width="100%"><br><b>Live, together.</b> Everyone in the same schematic or board, each with their own view. Cursors, selections, drags in progress and edits arrive as they happen, between the desktop app and the browser alike.</td>
+<td width="50%"><img src="docs/media/board-blocks.jpg" alt="Each circuit block laid out and routed as a tight cluster beside the board before it goes on" width="100%"><br><b>The whole board flow.</b> Update PCB from Schematic, placement, interactive routing, zones, DRC and the autorouter, following KiCad's own tools and dialogs.</td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/media/autoroute.jpg" alt="The Autoroute dialog over a board being routed" width="100%"><br><b>Autorouter.</b> Route → Autoroute lays tracks by the board's own rules, with differential pairs, length matching and ground via fences. One undo takes the whole run back.</td>
-<td width="50%"><img src="docs/media/viewer3d.jpg" alt="The 3D viewer showing the Pico board with real part models" width="100%"><br><b>The whole of KiCad in a tab.</b> Schematic and board editors that follow KiCad's tools and dialogs, symbol and footprint editors, DRC and ERC, the 3D viewer with real part models, SPICE simulation.</td>
+<td width="50%"><img src="docs/media/ai-proposal.jpg" alt="An AI assistant proposing the crystal circuit on the schematic, with Accept and Reject" width="100%"><br><b>Any AI as a teammate.</b> An MCP server lets Claude, ChatGPT, Gemini, Cursor or a local model read and edit your projects. It points at what it means and proposes changes you accept or reject.</td>
+<td width="50%"><img src="docs/media/github-sync.jpg" alt="An online project pushed to a GitHub repository" width="100%"><br><b>GitHub sync.</b> Connect a project to a repository: push, pull and an item-level merge, through a GitHub App installed per repository.</td>
+</tr>
+<tr>
+<td width="50%"><img src="docs/media/sim.jpg" alt="The SPICE simulator plotting the RUN pin rising at power-on" width="100%"><br><b>SPICE in the tab.</b> The simulator runs in the browser, on the schematic you are drawing.</td>
+<td width="50%"><img src="docs/media/viewer3d.jpg" alt="The 3D viewer showing the Pico board with real part models" width="100%"><br><b>3D and fabrication.</b> The 3D viewer with real part models, and Gerbers, drill, placement and BOM with presets for JLCPCB and PCBWay.</td>
 </tr>
 </table>
 
-<img src="docs/media/two-editors.jpg" alt="Ada's and Ben's editors on the same Pico schematic, each at its own zoom, each showing the other person's cursor" width="100%">
-
-Ada and Ben in the same schematic, each at their own zoom. Ada's window shows Ben's cursor, and Ben's shows Ada's.
+And the rest of what a team needs:
 
 - **Version history.** Every edit of the last 30 days can be scrubbed through; named versions and branches are kept
   for good, and two versions can be compared side by side.
@@ -58,11 +68,8 @@ Ada and Ben in the same schematic, each at their own zoom. Ada's window shows Be
   an account.
 - **Review.** Comment threads pinned to parts and nets that follow them when they move.
 - **Offline.** The desktop app keeps working without a connection and merges when it returns.
-- **Fabrication outputs.** Gerbers, drill, placement and BOM from the browser, with presets for JLCPCB and PCBWay,
-  checked against KiCad's own plot output.
-- **Parts.** Search LCSC, Mouser and DigiKey and place the symbol and footprint.
+- **Parts.** Search LCSC, Mouser and DigiKey and place the symbol and footprint straight into the schematic.
 - **Plugins.** One catalog for built-in, KiCad and community plugins, sandboxed and permissioned.
-- **GitHub sync.** Connect an online project to a repository: push, pull and an item-level merge.
 
 ## Design with an AI
 
@@ -106,21 +113,17 @@ Junction 2.1.4 is the current release (the name changed from KiCad Collaborative
 
 ## How the demo video was made
 
-The video is a web page played frame by frame, in the manner of
-[copper-kicad-mcp](https://github.com/claynicholson/copper-kicad-mcp)'s release video. The sources are in
-[server/scripts/demo-video](server/scripts/demo-video). Every shot is the real application, against a local Junction
-server, but it is staged, and this is how:
+Every shot is the real application against a local Junction server, staged by scripts in
+[server/scripts/demo-video](server/scripts/demo-video):
 
-- The Pico board was designed first, by the [harness scripts](server/scripts/demo-video/pico). `prepare.mjs` then
+- The Pico board was designed first by the [harness scripts](server/scripts/demo-video/pico); `prepare.mjs` then
   took every part, wire and track out of it and kept them.
-- `record-pico.mjs` opens Ada's and Ben's editors in two browsers and puts the design back one item at a time, each
-  through that person's own editor, with their mouse moving to it. What the other window shows (the cursor, the item
-  arriving) is Junction's live sync doing its normal work.
-- The AI's part is a real `run_python` call through an access key named "Claude", with the crystal's items written
-  into the script beforehand. Its cursor and its edits arriving one by one are how Junction shows any AI's live run.
-  The chat panel is drawn by the video, not by an AI app.
-- The long stretches are sped up and the video says by how much. The mouse pointer is drawn by the page, because a
-  headless browser has none. The numbers in the captions are read from what the recording returned.
+- `record-junction.mjs` opens four browsers, one per person, and puts the design back one item at a time, each
+  through that person's own editor with their mouse on it. Ada's window is the one filmed: the other cursors and
+  their edits arriving are Junction's live sync doing its normal work.
+- The AI's part is a real MCP call (highlight, then a proposal Ada accepts). The chat bubble is drawn by the video.
+- `render.mjs` lays the footage on the music's bars, so each feature fills whole bars and some stretches play faster
+  than they were recorded. The mouse pointer is drawn by the page, because a headless browser has none.
 
 ## Docs
 
@@ -136,59 +139,10 @@ project.
 
 ---
 
-## Upstream KiCad
+## Based on KiCad
 
-For specific documentation about [building KiCad](https://dev-docs.kicad.org/en/build/), policies
-and guidelines, and source code documentation see the
-[Developer Documentation](https://dev-docs.kicad.org) website.
-
-You may also take a look into the [Wiki](https://gitlab.com/kicad/code/kicad/-/wikis/home),
-the [contribution guide](https://dev-docs.kicad.org/en/contribute/).
-
-For general information about KiCad and information about contributing to the documentation and
-libraries, see our [Website](https://kicad.org/) and our [Forum](https://forum.kicad.info/).
-
-## Build state
-
-KiCad uses a host of CI resources.
-
-GitLab CI pipeline status can be viewed for Linux and Windows builds of the latest commits.
-
-## Release status
-[![latest released version(s)](https://repology.org/badge/latest-versions/kicad.svg)](https://repology.org/project/kicad/versions)
-[![Release status](https://repology.org/badge/tiny-repos/kicad.svg)](https://repology.org/metapackage/kicad/versions)
-
-## Files
-* [AUTHORS.txt](AUTHORS.txt) - The authors, contributors, document writers and translators list
-* [CMakeLists.txt](CMakeLists.txt) - Main CMAKE build tool script
-* [copyright.h](copyright.h) - A very short copy of the GNU General Public License to be included in new source files
-* [Doxyfile](Doxyfile) - Doxygen config file for KiCad
-* [INSTALL.txt](INSTALL.txt) - The release (binary) installation instructions
-* [uncrustify.cfg](uncrustify.cfg) - Uncrustify config file for uncrustify sources formatting tool
-* [_clang-format](_clang-format) - clang config file for clang-format sources formatting tool
-
-## Subdirectories
-
-* [3d-viewer](3d-viewer)         - Sourcecode of the 3D viewer
-* [cmake](cmake)      - Modules for the CMAKE build tool
-* [common](common)            - Sourcecode of the common library
-* [cvpcb](cvpcb)             - Sourcecode of the CvPCB tool
-* [demos](demos)             - Some demo examples
-* [doxygen](doxygen)     - Configuration for generating pretty doxygen manual of the codebase
-* [eeschema](eeschema)          - Sourcecode of the schematic editor
-* [gerbview](gerbview)          - Sourcecode of the gerber viewer
-* [include](include)           - Interfaces to the common library
-* [kicad](kicad)             - Sourcecode of the project manager
-* [libs](libs)           - Sourcecode of KiCad utilities (geometry and others)
-* [pagelayout_editor](pagelayout_editor) - Sourcecode of the pagelayout editor
-* [patches](patches)           - Collection of patches for external dependencies
-* [pcbnew](pcbnew)           - Sourcecode of the printed circuit board editor
-* [plugins](plugins)           - Sourcecode for the 3D viewer plugins
-* [qa](qa)                - Unit testing framework for KiCad
-* [resources](resources)         - Packaging resources such as bitmaps and operating system specific files
-    - [bitmaps_png](resources/bitmaps_png)       - Menu and program icons
-    - [project_template](resources/project_template)          - Project template
-* [thirdparty](thirdparty)           - Sourcecode of external libraries used in KiCad but not written by the KiCad team
-* [tools](tools)             - Helpers for developing, testing and building
-* [translation](translation) - Translation data files (managed through [Weblate](https://hosted.weblate.org/projects/kicad/master-source/) for most languages)
-* [utils](utils)             - Small utils for KiCad, e.g. IDF, STEP, and OGL tools and converters
+Junction is built on [KiCad](https://kicad.org/) and stays current with it: every week
+[upstream-sync](tools/upstream-sync/README.md) merges KiCad's latest changes, builds and tests them on Linux,
+Windows and macOS, and only then moves `master`. For building the desktop code and its style, see KiCad's
+[developer documentation](https://dev-docs.kicad.org). Problems with Junction belong in this repository's
+issues, not KiCad's tracker.

@@ -21,9 +21,9 @@ var __commonJS = (cb, mod) => function __require() {
     throw mod = 0, e;
   }
 };
-var __export = (target2, all2) => {
+var __export = (target3, all2) => {
   for (var name in all2)
-    __defProp(target2, name, { get: all2[name], enumerable: true });
+    __defProp(target3, name, { get: all2[name], enumerable: true });
 };
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
@@ -33,12 +33,12 @@ var __copyProps = (to, from, except, desc) => {
   }
   return to;
 };
-var __toESM = (mod, isNodeMode, target2) => (target2 = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
+var __toESM = (mod, isNodeMode, target3) => (target3 = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
   // If the importer is in node compatibility mode or this is not an ESM
   // file that has been converted to a CommonJS file using a Babel-
   // compatible transform (i.e. "__esModule" has not been set), then set
   // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target2, "default", { value: mod, enumerable: true }) : target2,
+  isNodeMode || !mod || !mod.__esModule ? __defProp(target3, "default", { value: mod, enumerable: true }) : target3,
   mod
 ));
 
@@ -93,15 +93,15 @@ function withSchTheme(id, fn) {
     setSchTheme(was);
   }
 }
-function pcbColor(layer3) {
-  if (PCB_COLORS[layer3]) return PCB_COLORS[layer3];
-  const u = /^User\.(\d+)$/.exec(layer3);
+function pcbColor(layer4) {
+  if (PCB_COLORS[layer4]) return PCB_COLORS[layer4];
+  const u = /^User\.(\d+)$/.exec(layer4);
   if (u) return +u[1] === 9 ? "#E8B2A7" : USER_COLORS[(+u[1] - 1) % 4];
-  if (/\.Cu$/.test(layer3)) return "#7FC87F";
+  if (/\.Cu$/.test(layer4)) return "#7FC87F";
   return "#C2C2C2";
 }
-function pcbZ(layer3) {
-  const z2 = PCB_ZMAP.get(layer3);
+function pcbZ(layer4) {
+  const z2 = PCB_ZMAP.get(layer4);
   return z2 === void 0 ? 5 : z2;
 }
 function padLayers(doc2, names2) {
@@ -1693,7 +1693,7 @@ function tableCellShownText(doc2, table, index, isPcb, depth) {
   const lc = pcb ? layerOf(table, "Dwgs.User") : "";
   const ll = pcb && doc2 ? doc2.layers : null;
   const lu = ll && typeof ll.get === "function" ? ll.get(lc) : null;
-  const layer3 = lu && lu.userName ? lu.userName : lc;
+  const layer4 = lu && lu.userName ? lu.userName : lc;
   let base2 = null;
   const fallback = (token2) => {
     if (!base2) {
@@ -1709,7 +1709,7 @@ function tableCellShownText(doc2, table, index, isPcb, depth) {
     if (token2 === "ROW") return String(pcb ? row3 + 1 : row3);
     if (token2 === "COL") return String(pcb ? col + 1 : col);
     if (token2 === "ADDR") return cellAddr(row3, col, pcb);
-    if (pcb && token2 === "LAYER") return layer3;
+    if (pcb && token2 === "LAYER") return layer4;
     if (!pcb && token2.startsWith("CELL(") && token2.endsWith(")")) {
       const args = token2.slice(5, -1).trim();
       let tr = -1, tc = -1;
@@ -1748,13 +1748,13 @@ function buildTableGeom(doc2, item, n2) {
   const cellsN = kid(n2, "cells");
   const cellNodes = cellsN ? kids(cellsN, "table_cell") : [];
   const rows3 = Math.ceil(cellNodes.length / cols);
-  const layer3 = isPcb ? layerOf(n2, "Dwgs.User") : "Notes";
-  const z2 = isPcb ? pcbZ(layer3) : SCH_Z.notes, zBg = isPcb ? pcbZ(layer3) - 0.5 : SCH_Z.notesBg;
+  const layer4 = isPcb ? layerOf(n2, "Dwgs.User") : "Notes";
+  const z2 = isPcb ? pcbZ(layer4) : SCH_Z.notes, zBg = isPcb ? pcbZ(layer4) - 0.5 : SCH_Z.notesBg;
   const borderN = kid(n2, "border"), sepN = kid(n2, "separators");
   const external = boolOf(borderN, "external", true), header = boolOf(borderN, "header", true);
   const rowsOn = boolOf(sepN, "rows", true), colsOn = boolOf(sepN, "cols", true);
   const bs = strokeOf(borderN, isPcb ? 0 : SCH_PEN), ss = strokeOf(sepN, isPcb ? 0 : SCH_PEN);
-  const lineColor = (st) => isPcb ? pcbColor(layer3) : st.color || SCH.notes;
+  const lineColor = (st) => isPcb ? pcbColor(layer4) : st.color || SCH.notes;
   const lineWidth = (st) => isPcb ? Math.max(st.w, 0) : st.w > 0 ? st.w : SCH_PEN;
   const cells = cellNodes.map((c) => {
     const b = boxOf(c);
@@ -1766,7 +1766,7 @@ function buildTableGeom(doc2, item, n2) {
   const first = cells.find((c) => c);
   item.movable = true;
   item.rot = 0;
-  if (isPcb) item.layer = layer3;
+  if (isPcb) item.layer = layer4;
   if (!first) {
     const [x, y] = atOf(n2);
     item.x = x;
@@ -1790,7 +1790,7 @@ function buildTableGeom(doc2, item, n2) {
     if (!isPcb) {
       const f2 = fillOf(cn);
       const fill3 = f2.type === "color" ? f2.color : f2.type === "background" ? SCH.body : f2.type === "solid" || f2.type === "outline" ? SCH.notes : null;
-      if (fill3) G(item, { t: "rect", x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0, wd: 0, color: fill3, fill: fill3, layer: layer3, z: zBg, noStroke: true });
+      if (fill3) G(item, { t: "rect", x: b.x0, y: b.y0, w: b.x1 - b.x0, h: b.y1 - b.y0, wd: 0, color: fill3, fill: fill3, layer: layer4, z: zBg, noStroke: true });
     }
     let text3 = str(cn[1]);
     if (ef.hide || !text3) continue;
@@ -1813,7 +1813,7 @@ function buildTableGeom(doc2, item, n2) {
       const anchor2 = j.v === "top" ? j.h === "left" ? cr[0] : j.h === "right" ? cr[1] : mid2(cr[0], cr[1]) : j.v === "bottom" ? j.h === "left" ? cr[3] : j.h === "right" ? cr[2] : mid2(cr[3], cr[2]) : j.h === "left" ? mid2(cr[0], cr[3]) : j.h === "right" ? mid2(cr[1], cr[2]) : mid2(mid2(cr[0], cr[2]), mid2(cr[1], cr[3]));
       const ox = j.h === "left" ? lm : j.h === "right" ? -rm : 0, oy = j.v === "top" ? tm : j.v === "bottom" ? -bm : 0;
       const [dx, dy] = rotPt(ox, oy, b.rot);
-      pcbTextGeom(item, cn, anchor2[0] + dx, anchor2[1] + dy, text3, b.rot, layer3, { defH: "center", defV: "middle" });
+      pcbTextGeom(item, cn, anchor2[0] + dx, anchor2[1] + dy, text3, b.rot, layer4, { defH: "center", defV: "middle" });
     } else {
       const vert = (Math.round(b.rot) % 180 + 180) % 180 === 90;
       let tx, ty;
@@ -1824,11 +1824,11 @@ function buildTableGeom(doc2, item, n2) {
         tx = j.h === "left" ? b.x0 + lm : j.h === "right" ? b.x1 - rm : (b.x0 + b.x1) / 2;
         ty = j.v === "top" ? b.y0 + tm : j.v === "bottom" ? b.y1 - bm : (b.y0 + b.y1) / 2;
       }
-      textLines(item, tx, ty, text3, ef.size, ef.color || SCH.notes, b.rot, [j.h, j.v], layer3, { z: z2, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX });
+      textLines(item, tx, ty, text3, ef.size, ef.color || SCH.notes, b.rot, [j.h, j.v], layer4, { z: z2, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX });
     }
   }
   const cellAt2 = (r, c) => cells[r * cols + c] || null;
-  const line = (p, q4, st) => G(item, { t: "line", x1: p[0], y1: p[1], x2: q4[0], y2: q4[1], w: lineWidth(st), color: lineColor(st), layer: layer3, z: z2, cap: "butt", dash: st.dash || void 0, dashType: st.type || void 0 });
+  const line = (p, q4, st) => G(item, { t: "line", x1: p[0], y1: p[1], x2: q4[0], y2: q4[1], w: lineWidth(st), color: lineColor(st), layer: layer4, z: z2, cap: "butt", dash: st.dash || void 0, dashType: st.type || void 0 });
   for (let col = 0; col < cols - 1; col++) for (let row3 = 0; row3 < rows3; row3++) {
     const st = row3 === 0 && header ? bs : colsOn ? ss : null;
     if (!st) continue;
@@ -1991,13 +1991,13 @@ function buildImageGeom(doc2, item, n2) {
   const e = imageEntry(item.id, d.b64, d.hash);
   const pxMm = 25.4 / (e.ppi || 300);
   const w = e.w * pxMm * scale || 10, h3 = e.h * pxMm * scale || 10;
-  const layer3 = isPcb ? layerOf(n2, "Dwgs.User") : "Images";
+  const layer4 = isPcb ? layerOf(n2, "Dwgs.User") : "Images";
   const rN = kid(n2, "rotate"), rot3 = rN ? num(rN[1], 0) : 0;
   const oN = kid(n2, "opacity");
   let opacity = oN ? num(oN[1], 1) : 1;
   if (!isFinite(opacity)) opacity = 1;
   opacity = Math.min(1, Math.max(0, opacity));
-  G(item, { t: "image", x: x - w / 2, y: y - h3 / 2, w, h: h3, entry: e, pxMm, scale, rot: rot3, opacity, color: isPcb ? pcbColor(layer3) : SCH.notes, layer: layer3, z: isPcb ? Z_BITMAP : SCH_Z.bitmap });
+  G(item, { t: "image", x: x - w / 2, y: y - h3 / 2, w, h: h3, entry: e, pxMm, scale, rot: rot3, opacity, color: isPcb ? pcbColor(layer4) : SCH.notes, layer: layer4, z: isPcb ? Z_BITMAP : SCH_Z.bitmap });
   if (rot3) {
     const c = Math.cos(rot3 * Math.PI / 180), sn = Math.sin(rot3 * Math.PI / 180);
     for (const [px, py] of [[-w / 2, -h3 / 2], [w / 2, -h3 / 2], [w / 2, h3 / 2], [-w / 2, h3 / 2]]) bboxAdd(item, x + px * c + py * sn, y - px * sn + py * c);
@@ -2009,7 +2009,7 @@ function buildImageGeom(doc2, item, n2) {
   item.w = w;
   item.h = h3;
   item.scale = scale;
-  if (isPcb) item.layer = layer3;
+  if (isPcb) item.layer = layer4;
 }
 var CELL_DEPTH, IMAGE_CACHE, IMAGE_CACHE_MAX, DATA_CACHE;
 var init_tables_images = __esm({
@@ -2081,16 +2081,16 @@ function endingShape(e, p, dir, lineW) {
   }
   return [];
 }
-function emitEnding(item, e, p, dir, lineW, color2, layer3, z2) {
+function emitEnding(item, e, p, dir, lineW, color2, layer4, z2) {
   if (!e || !dir) return;
   const pts = endingShape(e, p, dir, lineW);
   if (!pts.length) return;
   if (e.style === "arrow_open") {
-    G(item, { t: "poly", pts, close: false, w: e.strokeW > 0 ? e.strokeW : lineW, color: color2, layer: layer3, z: z2, cap: "round" });
+    G(item, { t: "poly", pts, close: false, w: e.strokeW > 0 ? e.strokeW : lineW, color: color2, layer: layer4, z: z2, cap: "round" });
     return;
   }
-  if (e.strokeW > 0) G(item, { t: "poly", pts, close: true, w: e.strokeW, color: color2, fill: color2, layer: layer3, z: z2 });
-  else G(item, { t: "poly", pts, close: true, w: 0, color: color2, fill: color2, layer: layer3, z: z2, noStroke: true });
+  if (e.strokeW > 0) G(item, { t: "poly", pts, close: true, w: e.strokeW, color: color2, fill: color2, layer: layer4, z: z2 });
+  else G(item, { t: "poly", pts, close: true, w: 0, color: color2, fill: color2, layer: layer4, z: z2, noStroke: true });
 }
 function shortenSegment(a, b, start, end, lineW) {
   const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy);
@@ -2273,7 +2273,7 @@ function intersheetRefsText(refs, label) {
 function fieldColor(ef, layerColor) {
   return ef.color || layerColor;
 }
-function labelFields(item, n2, color2, layer3, z2, doc2, labelLen = 0) {
+function labelFields(item, n2, color2, layer4, z2, doc2, labelLen = 0) {
   for (const p of kids(n2, "property")) {
     const ef = effectsOf(p);
     let val = labelOpText(item, str(p[2]));
@@ -2304,13 +2304,13 @@ function labelFields(item, n2, color2, layer3, z2, doc2, labelLen = 0) {
           just = ["right"];
         }
       }
-      textLines(item, px2, py2, val, ef.size, ef.color || SCH.glabel, pr2, just, layer3, { z: z2, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, field: str(p[1]), olKind: "field" });
+      textLines(item, px2, py2, val, ef.size, ef.color || SCH.glabel, pr2, just, layer4, { z: z2, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, field: str(p[1]), olKind: "field" });
       continue;
     }
     if (!val || /^\$\{.*\}$/.test(val)) continue;
     const [px, py, pr] = atOf(p);
     const sink = ef.hide ? { geom: [], bbox: null } : item;
-    textLines(sink, px, py, val, ef.size, fieldColor(ef, ef.hide ? SCH.hidden : color2), pr, ef.just, layer3, { z: z2, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, field: str(p[1]), olKind: "field" });
+    textLines(sink, px, py, val, ef.size, fieldColor(ef, ef.hide ? SCH.hidden : color2), pr, ef.just, layer4, { z: z2, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, field: str(p[1]), olKind: "field" });
     if (ef.hide && sink.geom.length) {
       for (const g2 of sink.geom) {
         g2.hiddenText = true;
@@ -2424,7 +2424,7 @@ function roundRectPts(x0, y0, x1, y1, r) {
   corner(l + r, t + r, Math.PI);
   return out2;
 }
-function hatchGeom(item, outline, type, w, color2, layer3, z2) {
+function hatchGeom(item, outline, type, w, color2, layer4, z2) {
   const slopes = type === "cross_hatch" ? [1, -1] : type === "hatch" ? [-1] : type === "reverse_hatch" ? [1] : null;
   if (!slopes || outline.length < 3) return;
   const lw = w / 2;
@@ -2440,31 +2440,31 @@ function hatchGeom(item, outline, type, w, color2, layer3, z2) {
   const major = Math.max(x1 - x0, y1 - y0);
   if (major / spacing > 100) spacing = major / 100;
   for (const sl of slopes) for (const [ax, ay, bx, by] of hatchLines(outline, sl, spacing, -1))
-    G(item, { t: "line", x1: ax, y1: ay, x2: bx, y2: by, w: lw, color: color2, layer: layer3, z: z2, cap: "round", noShadow: true });
+    G(item, { t: "line", x1: ax, y1: ay, x2: bx, y2: by, w: lw, color: color2, layer: layer4, z: z2, cap: "round", noShadow: true });
 }
-function shapeGeom(item, g2, gk, tf2, color2, layer3, z2, zBg, w, bodyFill, invertY) {
+function shapeGeom(item, g2, gk, tf2, color2, layer4, z2, zBg, w, bodyFill, invertY) {
   const f2 = fillOf(g2);
   const sc = strokeColorOf(g2) || color2;
   const fill3 = f2.type === "background" ? SCH.body : f2.type === "outline" ? sc : f2.type === "color" ? f2.color : f2.type === "solid" ? sc : null;
   const fz = f2.type === "outline" || f2.type === "solid" ? z2 : zBg;
   const closed = f2.type !== "none";
   const ds = dashOf(g2);
-  const hatch = (outline) => hatchGeom(item, outline, f2.type, w, f2.color || sc, layer3, zBg);
+  const hatch = (outline) => hatchGeom(item, outline, f2.type, w, f2.color || sc, layer4, zBg);
   if (gk === "rectangle") {
     const s0 = kid(g2, "start"), e0 = kid(g2, "end");
     if (!s0 || !e0) return;
     const x0 = num(s0[1]), y0 = num(s0[2]), x1 = num(e0[1]), y1 = num(e0[2]);
     const rN = kid(g2, "radius"), rad2 = rN ? num(rN[1]) : 0;
     const pts = rad2 > 0 ? roundRectPts(x0, y0, x1, y1, rad2).map(([x, y]) => tf2(x, y)) : [tf2(x0, y0), tf2(x1, y0), tf2(x1, y1), tf2(x0, y1)];
-    if (fill3) G(item, { t: "poly", pts, close: true, w: 0, color: fill3, fill: fill3, layer: layer3, z: fz, noStroke: true });
+    if (fill3) G(item, { t: "poly", pts, close: true, w: 0, color: fill3, fill: fill3, layer: layer4, z: fz, noStroke: true });
     hatch(pts);
-    G(item, Object.assign({ t: "poly", pts, close: true, w, color: sc, layer: layer3, z: z2 }, ds));
+    G(item, Object.assign({ t: "poly", pts, close: true, w, color: sc, layer: layer4, z: z2 }, ds));
   } else if (gk === "polyline" || gk === "bezier") {
     const ctrl = ptsOf(g2).map(([x, y]) => tf2(x, y));
     let p = ctrl;
     if (p.length < 2) return;
     if (gk === "bezier") p = bezierPts(p);
-    if (fill3 && p.length > 2) G(item, { t: "poly", pts: p, close: true, w: 0, color: fill3, fill: fill3, layer: layer3, z: fz, noStroke: true });
+    if (fill3 && p.length > 2) G(item, { t: "poly", pts: p, close: true, w: 0, color: fill3, fill: fill3, layer: layer4, z: fz, noStroke: true });
     if (gk === "polyline" && p.length > 2) hatch(p);
     if (hasEndings(g2)) {
       const e = readEndings(g2);
@@ -2477,44 +2477,44 @@ function shapeGeom(item, g2, gk, tf2, color2, layer3, z2, zBg, w, bodyFill, inve
         body = shortenPoly(p, e.start, e.end, w);
         tan = polyTangents(p);
       }
-      if (body) G(item, Object.assign({ t: "poly", pts: body, close: false, w, color: sc, layer: layer3, z: z2 }, ds));
-      emitEnding(item, e.start, p[0], tan[0], w, sc, layer3, z2);
-      emitEnding(item, e.end, p[p.length - 1], tan[1], w, sc, layer3, z2);
+      if (body) G(item, Object.assign({ t: "poly", pts: body, close: false, w, color: sc, layer: layer4, z: z2 }, ds));
+      emitEnding(item, e.start, p[0], tan[0], w, sc, layer4, z2);
+      emitEnding(item, e.end, p[p.length - 1], tan[1], w, sc, layer4, z2);
       return;
     }
-    G(item, Object.assign({ t: "poly", pts: p, close: false, w, color: sc, layer: layer3, z: z2 }, ds));
+    G(item, Object.assign({ t: "poly", pts: p, close: false, w, color: sc, layer: layer4, z: z2 }, ds));
   } else if (gk === "circle") {
     const c = kid(g2, "center"), r = kid(g2, "radius");
     if (!c) return;
     const [cx, cy] = tf2(num(c[1]), num(c[2]));
     const rad2 = r ? num(r[1]) : 1;
-    if (fill3) G(item, { t: "circle", x: cx, y: cy, r: rad2, w: 0, color: fill3, fill: fill3, layer: layer3, z: fz, noStroke: true });
+    if (fill3) G(item, { t: "circle", x: cx, y: cy, r: rad2, w: 0, color: fill3, fill: fill3, layer: layer4, z: fz, noStroke: true });
     if (f2.type.endsWith("hatch")) {
       const ring = [];
       for (let i = 0; i < 64; i++) ring.push([cx + rad2 * Math.cos(i * Math.PI / 32), cy + rad2 * Math.sin(i * Math.PI / 32)]);
       hatch(ring);
     }
-    G(item, Object.assign({ t: "circle", x: cx, y: cy, r: rad2, w, color: sc, layer: layer3, z: z2 }, ds));
+    G(item, Object.assign({ t: "circle", x: cx, y: cy, r: rad2, w, color: sc, layer: layer4, z: z2 }, ds));
   } else if (gk === "ellipse" || gk === "ellipse_arc") {
     const e = ellipsePts(g2, invertY);
     if (!e) return;
     const p = e.pts.map(([x, y]) => tf2(x, y));
-    if (fill3 && p.length > 2) G(item, { t: "poly", pts: p, close: true, w: 0, color: fill3, fill: fill3, layer: layer3, z: fz, noStroke: true });
+    if (fill3 && p.length > 2) G(item, { t: "poly", pts: p, close: true, w: 0, color: fill3, fill: fill3, layer: layer4, z: fz, noStroke: true });
     if (gk === "ellipse") hatch(p);
-    G(item, Object.assign({ t: "poly", pts: p, close: e.closed, w, color: sc, layer: layer3, z: z2 }, ds));
+    G(item, Object.assign({ t: "poly", pts: p, close: e.closed, w, color: sc, layer: layer4, z: z2 }, ds));
   } else if (gk === "arc") {
     const s0 = kid(g2, "start"), m0 = kid(g2, "mid"), e0 = kid(g2, "end");
     if (!s0 || !m0 || !e0) return;
     const a = arcFrom3(tf2(num(s0[1]), num(s0[2])), tf2(num(m0[1]), num(m0[2])), tf2(num(e0[1]), num(e0[2])));
     if (a && hasEndings(g2)) {
       const e = readEndings(g2), body = shortenArc(a, e.start, e.end, w), tan = arcTangents(a), [ps, pe] = arcEnds(a);
-      if (body) G(item, Object.assign({ t: "arc", w, color: sc, layer: layer3, z: z2, fill: closed ? fill3 : null }, body, ds));
-      emitEnding(item, e.start, ps, tan[0], w, sc, layer3, z2);
-      emitEnding(item, e.end, pe, tan[1], w, sc, layer3, z2);
-    } else if (a) G(item, Object.assign({ t: "arc", w, color: sc, layer: layer3, z: z2, fill: closed ? fill3 : null }, a, ds));
+      if (body) G(item, Object.assign({ t: "arc", w, color: sc, layer: layer4, z: z2, fill: closed ? fill3 : null }, body, ds));
+      emitEnding(item, e.start, ps, tan[0], w, sc, layer4, z2);
+      emitEnding(item, e.end, pe, tan[1], w, sc, layer4, z2);
+    } else if (a) G(item, Object.assign({ t: "arc", w, color: sc, layer: layer4, z: z2, fill: closed ? fill3 : null }, a, ds));
     else {
       const p0 = tf2(num(s0[1]), num(s0[2])), p1 = tf2(num(e0[1]), num(e0[2]));
-      G(item, Object.assign({ t: "line", x1: p0[0], y1: p0[1], x2: p1[0], y2: p1[1], w, color: sc, layer: layer3, z: z2 }, ds));
+      G(item, Object.assign({ t: "line", x1: p0[0], y1: p0[1], x2: p1[0], y2: p1[1], w, color: sc, layer: layer4, z: z2 }, ds));
     }
   }
 }
@@ -2844,12 +2844,12 @@ function buildSymbolGeom(doc2, item) {
 function simMarker(item, b, sw, alpha) {
   const [r, g2, bl] = parseColor(SCH.excluded);
   const col = (a) => `rgba(${r},${g2},${bl},${a})`;
-  const c = alpha < 1 ? col(alpha) : SCH.excluded, layer3 = "Symbols", z2 = SCH_Z.marker;
-  G(item, { t: "poly", pts: [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]], close: true, w: sw, color: c, layer: layer3, z: z2, simMarker: true });
+  const c = alpha < 1 ? col(alpha) : SCH.excluded, layer4 = "Symbols", z2 = SCH_Z.marker;
+  G(item, { t: "poly", pts: [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]], close: true, w: sw, color: c, layer: layer4, z: z2, simMarker: true });
   const off = 2 * sw;
   const cx = b[2] + off + sw, cy = b[3] - off;
-  G(item, { t: "circle", x: cx, y: cy, r: off, w: sw, color: c, fill: col(0.1), layer: layer3, z: z2, simMarker: true });
-  G(item, { t: "poly", pts: bezierPts([[cx - off, cy], [cx, cy + off], [cx, cy - off], [cx + off, cy]], 12), close: false, w: sw, color: c, layer: layer3, z: z2, simMarker: true });
+  G(item, { t: "circle", x: cx, y: cy, r: off, w: sw, color: c, fill: col(0.1), layer: layer4, z: z2, simMarker: true });
+  G(item, { t: "poly", pts: bezierPts([[cx - off, cy], [cx, cy + off], [cx, cy - off], [cx + off, cy]], 12), close: false, w: sw, color: c, layer: layer4, z: z2, simMarker: true });
 }
 function localPowerIcon(item, tg, text3, pen, color2, field2) {
   const w = textWidth(parseMarkup(text3).text, tg.sizeX || tg.size, pen), hgt = tg.size + pen, rotated = (Math.round(tg.rot) % 180 + 180) % 180 === 90;
@@ -2872,16 +2872,16 @@ function localPowerIcon(item, tg, text3, pen, color2, field2) {
   const P = (x, y) => rotated ? [pos[0] + y, pos[1] - x] : [pos[0] + x, pos[1] + y];
   const bottom = [xm, 0], left = [0, -2 * size2 / 3], right = [xr, -2 * size2 / 3];
   const bA = [xm, -size2 / 4], l1 = [0, -size2 / 2.5], l2 = [0, -size2 * 1.15], r1 = [xr, -size2 / 2.5], r26 = [xr, -size2 * 1.15];
-  const lw = size2 / 10, layer3 = "Reference & value", z2 = SCH_Z.value;
+  const lw = size2 / 10, layer4 = "Reference & value", z2 = SCH_Z.value;
   for (const c of [[bottom, bA, l1, left], [left, l2, r26, right], [right, r1, bA, bottom]])
-    G(item, { t: "poly", pts: bezierPts(c.map((p) => P(p[0], p[1])), 12), close: false, w: lw, color: color2, layer: layer3, z: z2, field: field2, cap: "round" });
+    G(item, { t: "poly", pts: bezierPts(c.map((p) => P(p[0], p[1])), 12), close: false, w: lw, color: color2, layer: layer4, z: z2, field: field2, cap: "round" });
   const cc = P((left[0] + right[0]) / 2, (left[1] + right[1]) / 2);
-  G(item, { t: "circle", x: cc[0], y: cc[1], r: size2 / 15, w: lw, color: color2, fill: color2, layer: layer3, z: z2, field: field2 });
+  G(item, { t: "circle", x: cc[0], y: cc[1], r: size2 / 15, w: lw, color: color2, fill: color2, layer: layer4, z: z2, field: field2 });
 }
 function altPinModesIcon(item, x, y, size2, rotate, color2) {
-  const w = size2 / 10, lyo = size2 / 4, ah = size2 / 8, layer3 = "Pin names", z2 = SCH_Z.pinName;
+  const w = size2 / 10, lyo = size2 / 4, ah = size2 / 8, layer4 = "Pin names", z2 = SCH_Z.pinName;
   const P = (px, py) => rotate ? [x + py, y - px] : [x + px, y + py];
-  const seg2 = (a, b) => G(item, { t: "line", x1: a[0], y1: a[1], x2: b[0], y2: b[1], w, color: color2, layer: layer3, z: z2, cap: "round" });
+  const seg2 = (a, b) => G(item, { t: "line", x1: a[0], y1: a[1], x2: b[0], y2: b[1], w, color: color2, layer: layer4, z: z2, cap: "round" });
   const tr = [size2 / 2, -lyo], br = [size2 / 2, lyo];
   seg2(P(tr[0], tr[1]), P(tr[0] - size2, tr[1]));
   seg2(P(tr[0], tr[1]), P(tr[0] - ah * 1.2, tr[1] - ah));
@@ -2894,7 +2894,7 @@ function altPinModesIcon(item, x, y, size2, rotate, color2) {
     const t = Math.PI - Math.PI / 2 * i / 8;
     arc.push(P(lyo * Math.cos(t), lyo * Math.sin(t)));
   }
-  G(item, { t: "poly", pts: arc, close: false, w, color: color2, layer: layer3, z: z2 });
+  G(item, { t: "poly", pts: arc, close: false, w, color: color2, layer: layer4, z: z2 });
 }
 function buildPinGeom(item, g2, tf2, sym) {
   const type = str(g2[1]), shape3 = str(g2[2]);
@@ -2923,14 +2923,14 @@ function buildPinGeomInner(item, g2, tf2, sym, type, shape3, px, py, pr, len) {
   const vertical = orient === "U" || orient === "D";
   const color2 = sym.col(SCH.pin);
   const w = SCH_PEN;
-  const z2 = SCH_Z.pin, layer3 = "Pins";
+  const z2 = SCH_Z.pin, layer4 = "Pins";
   const nameN = kid(g2, "name"), numN = kid(g2, "number");
   const nameEf = nameN ? effectsOf(nameN) : { size: 1.27, hide: false }, numEf = numN ? effectsOf(numN) : { size: 1.27, hide: false };
   const ps = schFormat.pinSymbolSize;
   const radius = ps > 0 ? ps : numEf.size / 2, diam = radius * 2, clock = ps > 0 ? ps : (nameEf.size || numEf.size) / 2;
   const p0 = rootPt;
-  const line = (a, b) => G(item, { t: "line", x1: a[0], y1: a[1], x2: b[0], y2: b[1], w, color: color2, layer: layer3, z: z2, cap: "round" });
-  const tri = (a, b, c) => G(item, { t: "poly", pts: [a, b, c], close: false, w, color: color2, layer: layer3, z: z2 });
+  const line = (a, b) => G(item, { t: "line", x1: a[0], y1: a[1], x2: b[0], y2: b[1], w, color: color2, layer: layer4, z: z2, cap: "round" });
+  const tri = (a, b, c) => G(item, { t: "poly", pts: [a, b, c], close: false, w, color: color2, layer: layer4, z: z2 });
   const P = (dx, dy) => [p0[0] + dx, p0[1] + dy];
   if (len > 0 || shape3 !== "line") {
     if (type === "no_connect") {
@@ -2939,11 +2939,11 @@ function buildPinGeomInner(item, g2, tf2, sym, type, shape3, px, py, pr, len) {
       line([pos[0] - r, pos[1] - r], [pos[0] + r, pos[1] + r]);
       line([pos[0] + r, pos[1] - r], [pos[0] - r, pos[1] + r]);
     } else if (shape3 === "inverted") {
-      G(item, { t: "circle", x: p0[0] + ox * radius, y: p0[1] + oy * radius, r: radius, w, color: color2, layer: layer3, z: z2 });
+      G(item, { t: "circle", x: p0[0] + ox * radius, y: p0[1] + oy * radius, r: radius, w, color: color2, layer: layer4, z: z2 });
       line(P(ox * diam, oy * diam), pos);
     } else if (shape3 === "inverted_clock") {
       tri(P(oy * clock, -ox * clock), P(-ox * clock, -oy * clock), P(-oy * clock, ox * clock));
-      G(item, { t: "circle", x: p0[0] + ox * radius, y: p0[1] + oy * radius, r: radius, w, color: color2, layer: layer3, z: z2 });
+      G(item, { t: "circle", x: p0[0] + ox * radius, y: p0[1] + oy * radius, r: radius, w, color: color2, layer: layer4, z: z2 });
       line(P(ox * diam, oy * diam), pos);
     } else if (shape3 === "clock_low" || shape3 === "edge_clock_high") {
       tri(P(oy * clock, -ox * clock), P(-ox * clock, -oy * clock), P(-oy * clock, ox * clock));
@@ -3944,7 +3944,7 @@ function dataMatrix(text3) {
     const ecc = rsEncode(GF_DM, blk, rsBlock, 1);
     for (let n2 = b, p = 0; n2 < blocks * rsBlock; n2 += blocks, p++) full3[bytes + n2 + (skew ? b < 8 ? 2 : -8 : 0)] = ecc[p];
   }
-  const NR = H - 2 * (H / FH), NC = W12 - 2 * (W12 / FW), place2 = dmPlacement(NR, NC);
+  const NR = H - 2 * (H / FH), NC = W12 - 2 * (W12 / FW), place3 = dmPlacement(NR, NC);
   const rows3 = [];
   for (let y = 0; y < H; y++) rows3.push(new Array(W12).fill(false));
   for (let y = 0; y < H; y += FH) {
@@ -3957,7 +3957,7 @@ function dataMatrix(text3) {
   }
   const rh = FH - 2, rw = FW - 2;
   for (let r = 0; r < NR; r++) for (let c = 0; c < NC; c++) {
-    const v = place2[r * NC + c];
+    const v = place3[r * NC + c];
     let dark;
     if (v === 1) dark = true;
     else if (v < 10) dark = false;
@@ -4191,11 +4191,11 @@ function trackedRenderCache(n2, x, y, sig) {
   }
   return rc;
 }
-function pcbTextGeom(item, n2, x, y, text3, rot3, layer3, extra) {
+function pcbTextGeom(item, n2, x, y, text3, rot3, layer4, extra) {
   const ef = effectsOf(n2);
   if (!text3) return null;
-  const color2 = pcbColor(layer3);
-  const z2 = pcbZ(layer3) + Z_TEXT;
+  const color2 = pcbColor(layer4);
+  const z2 = pcbZ(layer4) + Z_TEXT;
   const boldStroke = ef.bold && !ef.face && ef.thick > 0;
   const attrW = boldStroke && boardVersion > 0 && boardVersion < 20260826 ? ef.thick / 1.6 : ef.thick;
   const thick = ef.thick > 0 ? boldStroke ? attrW * 1.6 : ef.thick : ef.bold ? ef.sizeX / 5 : ef.sizeX / 8;
@@ -4206,10 +4206,10 @@ function pcbTextGeom(item, n2, x, y, text3, rot3, layer3, extra) {
     const stale = kid(n2, "render_cache");
     if (stale) n2.splice(n2.indexOf(stale), 1);
   }
-  const rc = ef.face ? trackedRenderCache(n2, x, y, JSON.stringify([text3, rot3 || 0, ef.size, ef.sizeX, ef.just, ef.bold, ef.italic, ef.face, layer3])) : null;
+  const rc = ef.face ? trackedRenderCache(n2, x, y, JSON.stringify([text3, rot3 || 0, ef.size, ef.sizeX, ef.just, ef.bold, ef.italic, ef.face, layer4])) : null;
   if (ef.hide) {
     const shadow = { geom: [], bbox: null };
-    textLines(shadow, x, y, text3, ef.size, color2, rot3, ef.just, layer3, ex);
+    textLines(shadow, x, y, text3, ef.size, color2, rot3, ef.just, layer4, ex);
     for (const g2 of shadow.geom) g2.hiddenText = true;
     if (shadow.geom.length) (item.hiddenGeom = item.hiddenGeom || []).push(...shadow.geom);
     return null;
@@ -4219,7 +4219,7 @@ function pcbTextGeom(item, n2, x, y, text3, rot3, layer3, extra) {
     ex.block = { x, y, rot: rot3 || 0, text: text3, upright: !!ex.upright };
     Object.defineProperty(ex.block, "node", { value: n2, enumerable: false });
   }
-  const first = textLines(item, x, y, text3, ef.size, color2, rot3, ef.just, layer3, ex);
+  const first = textLines(item, x, y, text3, ef.size, color2, rot3, ef.just, layer4, ex);
   if (first && ef.face) first.outlineFirst = true;
   return first;
 }
@@ -4229,19 +4229,19 @@ function buildPcbGeom(doc2, item) {
   if (k === "segment") {
     const s2 = kid(n2, "start"), e = kid(n2, "end");
     if (!s2 || !e) return;
-    const layer3 = layerOf(n2, "F.Cu");
+    const layer4 = layerOf(n2, "F.Cu");
     const net = netCode(doc2, n2);
     item.net = net;
-    G(item, { t: "line", x1: num(s2[1]), y1: num(s2[2]), x2: num(e[1]), y2: num(e[2]), w: widthOf(n2, 0.25), color: pcbColor(layer3), layer: layer3, z: pcbZ(layer3), cap: "round", track: true, net });
+    G(item, { t: "line", x1: num(s2[1]), y1: num(s2[2]), x2: num(e[1]), y2: num(e[2]), w: widthOf(n2, 0.25), color: pcbColor(layer4), layer: layer4, z: pcbZ(layer4), cap: "round", track: true, net });
   } else if (k === "arc") {
     const s2 = kid(n2, "start"), m = kid(n2, "mid"), e = kid(n2, "end");
     if (!s2 || !m || !e) return;
-    const layer3 = layerOf(n2, "F.Cu");
+    const layer4 = layerOf(n2, "F.Cu");
     const net = netCode(doc2, n2);
     item.net = net;
     const a = arcFrom3([num(s2[1]), num(s2[2])], [num(m[1]), num(m[2])], [num(e[1]), num(e[2])]);
-    if (a) G(item, Object.assign({ t: "arc", w: widthOf(n2, 0.25), color: pcbColor(layer3), layer: layer3, z: pcbZ(layer3), cap: "round", track: true, net }, a));
-    else G(item, { t: "line", x1: num(s2[1]), y1: num(s2[2]), x2: num(e[1]), y2: num(e[2]), w: widthOf(n2, 0.25), color: pcbColor(layer3), layer: layer3, z: pcbZ(layer3), cap: "round", track: true, net });
+    if (a) G(item, Object.assign({ t: "arc", w: widthOf(n2, 0.25), color: pcbColor(layer4), layer: layer4, z: pcbZ(layer4), cap: "round", track: true, net }, a));
+    else G(item, { t: "line", x1: num(s2[1]), y1: num(s2[2]), x2: num(e[1]), y2: num(e[2]), w: widthOf(n2, 0.25), color: pcbColor(layer4), layer: layer4, z: pcbZ(layer4), cap: "round", track: true, net });
   } else if (k === "via") {
     buildViaGeom(doc2, item, n2);
   } else if (k === "zone") {
@@ -4262,9 +4262,9 @@ function buildPcbGeom(doc2, item) {
     buildDimensionGeom(item, n2);
   } else if (k === "target") {
     const [x, y] = atOf(n2);
-    const layer3 = layerOf(n2, "Edge.Cuts");
-    const color2 = pcbColor(layer3);
-    const z2 = pcbZ(layer3);
+    const layer4 = layerOf(n2, "Edge.Cuts");
+    const color2 = pcbColor(layer4);
+    const z2 = pcbZ(layer4);
     const sizeN = kid(n2, "size");
     const size2 = sizeN ? num(sizeN[1]) : 5;
     const w = widthOf(n2, 0.15);
@@ -4273,9 +4273,9 @@ function buildPcbGeom(doc2, item) {
     const arm = xShape ? 2 * size2 / 3 : size2 / 2, r = xShape ? size2 / 2 : size2 / 3;
     for (const [a, b] of [[[-arm, 0], [arm, 0]], [[0, -arm], [0, arm]]]) {
       const p = R2(a[0], a[1]), q4 = R2(b[0], b[1]);
-      G(item, { t: "line", x1: x + p[0], y1: y + p[1], x2: x + q4[0], y2: y + q4[1], w, color: color2, layer: layer3, z: z2 });
+      G(item, { t: "line", x1: x + p[0], y1: y + p[1], x2: x + q4[0], y2: y + q4[1], w, color: color2, layer: layer4, z: z2 });
     }
-    G(item, { t: "circle", x, y, r, w, color: color2, layer: layer3, z: z2 });
+    G(item, { t: "circle", x, y, r, w, color: color2, layer: layer4, z: z2 });
   } else if (k === "footprint") {
     buildFootprintGeom(doc2, item);
   } else if (k === "pad" && doc2 && doc2.fpEditor) {
@@ -4293,8 +4293,8 @@ function buildPcbGeom(doc2, item) {
     buildImageGeom(doc2, item, n2);
   }
 }
-function padNameColor(layer3) {
-  const m = /^#([0-9a-f]{6})$/i.exec(pcbColor(layer3));
+function padNameColor(layer4) {
+  const m = /^#([0-9a-f]{6})$/i.exec(pcbColor(layer4));
   if (!m) return PAD_TEXT;
   const v = parseInt(m[1], 16);
   const br = (0.299 * (v >> 16) + 0.587 * (v >> 8 & 255) + 0.114 * (v & 255)) / 255;
@@ -4316,7 +4316,7 @@ function buildViaGeom(doc2, item, n2) {
   }
   const net = netCode(doc2, n2);
   item.net = net;
-  for (const layer3 of layers) G(item, { t: "circle", x, y, r: size2 / 2, w: 0, color: pcbColor(layer3), fill: pcbColor(layer3), layer: layer3, z: pcbZ(layer3) + Z_VIA, via: true, net, viaSize: size2, viaType: vtype, viaLayers: pair, viaLabel: layer3 === layers[0] || void 0 });
+  for (const layer4 of layers) G(item, { t: "circle", x, y, r: size2 / 2, w: 0, color: pcbColor(layer4), fill: pcbColor(layer4), layer: layer4, z: pcbZ(layer4) + Z_VIA, via: true, net, viaSize: size2, viaType: vtype, viaLayers: pair, viaLabel: layer4 === layers[0] || void 0 });
   const zh = pcbZ("holes");
   const wallR = Math.min(drill2 / 2 + HOLE_WALL2, size2 / 2);
   const wall = wallR > drill2 / 2 ? { wallR, wallColor: HOLE_WALL } : null;
@@ -4346,24 +4346,24 @@ function buildZoneGeom(doc2, item, n2) {
   for (const poly of kids(n2, "polygon")) {
     const p = polyPtsOf(poly);
     if (p.length < 2) continue;
-    for (const layer3 of layersZ) {
-      const color2 = pcbColor(layer3);
-      const z2 = pcbZ(layer3) + (keepout ? Z_TEXT : 0.5);
-      G(item, keepout ? { t: "poly", pts: p, close: true, w: 0, color: color2, layer: layer3, z: z2 } : { t: "poly", pts: p, close: true, w: 0, color: color2, layer: layer3, z: z2, zoneOutline: true, net, zoneClearance: clearance, zoneUnfilled: unfilled, ...td });
+    for (const layer4 of layersZ) {
+      const color2 = pcbColor(layer4);
+      const z2 = pcbZ(layer4) + (keepout ? Z_TEXT : 0.5);
+      G(item, keepout ? { t: "poly", pts: p, close: true, w: 0, color: color2, layer: layer4, z: z2 } : { t: "poly", pts: p, close: true, w: 0, color: color2, layer: layer4, z: z2, zoneOutline: true, net, zoneClearance: clearance, zoneUnfilled: unfilled, ...td });
       if (hatchStyle !== "none" && pitch > 0) {
-        const info = doc2.layers.get(layer3);
+        const info = doc2.layers.get(layer4);
         const slope = info && info.id & 1 ? 1 : -1;
         const segs = hatchLines(p, slope, hatchStyle === "full" ? pitch * 2 : pitch, hatchStyle === "full" ? -1 : pitch);
-        for (const s2 of segs) G(item, { t: "line", x1: s2[0], y1: s2[1], x2: s2[2], y2: s2[3], w: 0, color: color2, layer: layer3, z: z2, zoneHatch: true });
+        for (const s2 of segs) G(item, { t: "line", x1: s2[0], y1: s2[1], x2: s2[2], y2: s2[3], w: 0, color: color2, layer: layer4, z: z2, zoneHatch: true });
       }
     }
   }
   if (keepout) return;
   for (const fp of kids(n2, "filled_polygon")) {
-    const layer3 = layerOf(fp, layersZ[0]);
+    const layer4 = layerOf(fp, layersZ[0]);
     const p = polyPtsOf(fp);
     if (p.length < 3) continue;
-    G(item, { t: "poly", pts: p, close: true, w: 0, color: pcbColor(layer3), fill: pcbColor(layer3), layer: layer3, z: pcbZ(layer3) + Z_ZONE, noStroke: true, zoneFill: true, net, ...td });
+    G(item, { t: "poly", pts: p, close: true, w: 0, color: pcbColor(layer4), fill: pcbColor(layer4), layer: layer4, z: pcbZ(layer4) + Z_ZONE, noStroke: true, zoneFill: true, net, ...td });
   }
 }
 function hatchLines(pts, slope, spacing, lineLen) {
@@ -4413,9 +4413,9 @@ function pointGeom(item, n2, tf2) {
   const at4 = kid(n2, "at");
   if (!at4) return;
   const [x, y] = tf2(num(at4[1]), num(at4[2]));
-  const sz = kid(n2, "size"), size2 = (sz ? num(sz[1]) : 1) / 2, layer3 = layerOf(n2, "F.SilkS"), z2 = pcbZ(layer3) + 0.9, w = 0.01;
-  for (const [dx, dy] of [[1, 1], [1, -1]]) G(item, { t: "line", x1: x - size2 * dx, y1: y - size2 * dy, x2: x + size2 * dx, y2: y + size2 * dy, w, color: POINT_COLOR, layer: layer3, z: z2, cap: "butt", point: true });
-  G(item, { t: "circle", x, y, r: size2 / 2, w, color: pcbColor(layer3), layer: layer3, z: z2, point: true });
+  const sz = kid(n2, "size"), size2 = (sz ? num(sz[1]) : 1) / 2, layer4 = layerOf(n2, "F.SilkS"), z2 = pcbZ(layer4) + 0.9, w = 0.01;
+  for (const [dx, dy] of [[1, 1], [1, -1]]) G(item, { t: "line", x1: x - size2 * dx, y1: y - size2 * dy, x2: x + size2 * dx, y2: y + size2 * dy, w, color: POINT_COLOR, layer: layer4, z: z2, cap: "butt", point: true });
+  G(item, { t: "circle", x, y, r: size2 / 2, w, color: pcbColor(layer4), layer: layer4, z: z2, point: true });
 }
 function barcodeGeom(item, n2, tf2, frot) {
   const at4 = kid(n2, "at");
@@ -4424,10 +4424,10 @@ function barcodeGeom(item, n2, tf2, frot) {
   const rot3 = num(at4[3]) + (frot || 0);
   const sz = kid(n2, "size"), W12 = sz ? num(sz[1]) : 5, H = sz ? num(sz[2], W12) : 5;
   if (!(W12 > 0) || !(H > 0)) return;
-  const layer3 = layerOf(n2, "F.SilkS"), color2 = pcbColor(layer3), z2 = pcbZ(layer3);
+  const layer4 = layerOf(n2, "F.SilkS"), color2 = pcbColor(layer4), z2 = pcbZ(layer4);
   const text3 = str((kid(n2, "text") || [])[1] || ""), th = num((kid(n2, "text_height") || [])[1], 1.5);
   const type = str((kid(n2, "type") || [])[1] || "code39"), showText = !yesNo(n2, "hide"), knockout = yesNo(n2, "knockout");
-  const back = /^B\./.test(layer3), mx = back ? -1 : 1;
+  const back = /^B\./.test(layer4), mx = back ? -1 : 1;
   const R2 = rotator(rot3);
   const P = (x, y) => {
     const [dx, dy] = R2(mx * x, y);
@@ -4462,18 +4462,18 @@ function barcodeGeom(item, n2, tf2, frot) {
   if (knockout) {
     const minSide = Math.min(W12, H), m = Math.max(Math.ceil(minSide * 0.1 / 0.1 - 1e-9) * 0.1, 0);
     const mg = kid(n2, "margins"), ml = Math.max(mg ? num(mg[1]) : 0, m), mt = Math.max(mg ? num(mg[2]) : 0, m);
-    G(item, { t: "poly", pts: [P(-W12 / 2 - ml, -H / 2 - mt), P(W12 / 2 + ml, -H / 2 - mt), P(W12 / 2 + ml, y1 + mt), P(-W12 / 2 - ml, y1 + mt)], close: true, w: 0, color: color2, fill: color2, layer: layer3, z: z2, noStroke: true });
+    G(item, { t: "poly", pts: [P(-W12 / 2 - ml, -H / 2 - mt), P(W12 / 2 + ml, -H / 2 - mt), P(W12 / 2 + ml, y1 + mt), P(-W12 / 2 - ml, y1 + mt)], close: true, w: 0, color: color2, fill: color2, layer: layer4, z: z2, noStroke: true });
   }
   const ink = knockout ? PCB_BG : color2;
-  for (const [x0, y0, x2, y2] of rects) G(item, { t: "poly", pts: [P(x0, y0), P(x2, y0), P(x2, y2), P(x0, y2)], close: true, w: 0, color: ink, fill: ink, layer: layer3, z: z2 + 0.01, noStroke: true });
+  for (const [x0, y0, x2, y2] of rects) G(item, { t: "poly", pts: [P(x0, y0), P(x2, y0), P(x2, y2), P(x0, y2)], close: true, w: 0, color: ink, fill: ink, layer: layer4, z: z2 + 0.01, noStroke: true });
   if (showText && text3) {
     const [tx, ty] = P(0, textY);
-    textLines(item, tx, ty, text3, th, ink, rot3, ["center", "top"], layer3, { pcb: true, z: z2 + 0.01, w: th * 0.15, mirror: back || void 0 });
+    textLines(item, tx, ty, text3, th, ink, rot3, ["center", "top"], layer4, { pcb: true, z: z2 + 0.01, w: th * 0.15, mirror: back || void 0 });
   }
 }
-function graphicGeom(item, g2, shape3, tf2, layer3, z2) {
+function graphicGeom(item, g2, shape3, tf2, layer4, z2) {
   const first = item.geom ? item.geom.length : 0;
-  graphicShapeGeom(item, g2, shape3, tf2, layer3, z2);
+  graphicShapeGeom(item, g2, shape3, tf2, layer4, z2);
   const ls = kid(g2, "layers");
   const mask = ls && ls.slice(1).map(str).find((l) => /\.Mask$/.test(l));
   if (!mask || !item.geom) return;
@@ -4483,11 +4483,11 @@ function graphicGeom(item, g2, shape3, tf2, layer3, z2) {
     if (mm4) item.geom[i].maskMargin = num(mm4[1]);
   }
 }
-function graphicShapeGeom(item, g2, shape3, tf2, layer3, z2) {
+function graphicShapeGeom(item, g2, shape3, tf2, layer4, z2) {
   const w = widthOf(g2, 0);
-  const color2 = pcbColor(layer3);
-  z2 = z2 === void 0 ? pcbZ(layer3) : z2;
-  if (layer3 === "Edge.Cuts") item.edge = true;
+  const color2 = pcbColor(layer4);
+  z2 = z2 === void 0 ? pcbZ(layer4) : z2;
+  if (layer4 === "Edge.Cuts") item.edge = true;
   const f2 = fillOf(g2);
   const fillColor = f2.type === "solid" ? color2 : null;
   const ds = dashOf(g2);
@@ -4495,40 +4495,40 @@ function graphicShapeGeom(item, g2, shape3, tf2, layer3, z2) {
     const s2 = kid(g2, "start"), e = kid(g2, "end");
     if (!s2 || !e) return;
     const a = tf2(num(s2[1]), num(s2[2])), b = tf2(num(e[1]), num(e[2]));
-    G(item, Object.assign({ t: "line", x1: a[0], y1: a[1], x2: b[0], y2: b[1], w, color: color2, layer: layer3, z: z2, cap: "round" }, ds));
+    G(item, Object.assign({ t: "line", x1: a[0], y1: a[1], x2: b[0], y2: b[1], w, color: color2, layer: layer4, z: z2, cap: "round" }, ds));
   } else if (shape3 === "rect") {
     const s2 = kid(g2, "start"), e = kid(g2, "end");
     if (!s2 || !e) return;
     const x0 = num(s2[1]), y0 = num(s2[2]), x1 = num(e[1]), y1 = num(e[2]);
-    G(item, Object.assign({ t: "poly", pts: [tf2(x0, y0), tf2(x1, y0), tf2(x1, y1), tf2(x0, y1)], close: true, w, color: color2, fill: fillColor, layer: layer3, z: z2, noStroke: !!fillColor && w <= 0 }, ds));
+    G(item, Object.assign({ t: "poly", pts: [tf2(x0, y0), tf2(x1, y0), tf2(x1, y1), tf2(x0, y1)], close: true, w, color: color2, fill: fillColor, layer: layer4, z: z2, noStroke: !!fillColor && w <= 0 }, ds));
   } else if (shape3 === "circle") {
     const c = kid(g2, "center"), e = kid(g2, "end");
     if (!c) return;
     const [cx, cy] = tf2(num(c[1]), num(c[2]));
     const r = e ? Math.hypot(num(e[1]) - num(c[1]), num(e[2]) - num(c[2])) : num((kid(g2, "radius") || [])[1], 1);
-    G(item, Object.assign({ t: "circle", x: cx, y: cy, r, w, color: color2, fill: fillColor, layer: layer3, z: z2, noStroke: !!fillColor && w <= 0 }, ds));
+    G(item, Object.assign({ t: "circle", x: cx, y: cy, r, w, color: color2, fill: fillColor, layer: layer4, z: z2, noStroke: !!fillColor && w <= 0 }, ds));
   } else if (shape3 === "arc") {
     const s2 = kid(g2, "start"), m = kid(g2, "mid"), e = kid(g2, "end");
     if (!s2 || !m || !e) return;
     const a = arcFrom3(tf2(num(s2[1]), num(s2[2])), tf2(num(m[1]), num(m[2])), tf2(num(e[1]), num(e[2])));
-    if (a) G(item, Object.assign({ t: "arc", w, color: color2, layer: layer3, z: z2, cap: "round" }, a, ds));
+    if (a) G(item, Object.assign({ t: "arc", w, color: color2, layer: layer4, z: z2, cap: "round" }, a, ds));
     else {
       const p0 = tf2(num(s2[1]), num(s2[2])), p1 = tf2(num(e[1]), num(e[2]));
-      G(item, Object.assign({ t: "line", x1: p0[0], y1: p0[1], x2: p1[0], y2: p1[1], w, color: color2, layer: layer3, z: z2, cap: "round" }, ds));
+      G(item, Object.assign({ t: "line", x1: p0[0], y1: p0[1], x2: p1[0], y2: p1[1], w, color: color2, layer: layer4, z: z2, cap: "round" }, ds));
     }
   } else if (shape3 === "ellipse" || shape3 === "ellipse_arc") {
     const e = ellipsePts(g2, false);
     if (!e) return;
     const p = e.pts.map(([x, y]) => tf2(x, y));
-    G(item, Object.assign({ t: "poly", pts: p, close: e.closed, w, color: color2, fill: e.closed ? fillColor : null, layer: layer3, z: z2, noStroke: !!fillColor && w <= 0 }, ds));
+    G(item, Object.assign({ t: "poly", pts: p, close: e.closed, w, color: color2, fill: e.closed ? fillColor : null, layer: layer4, z: z2, noStroke: !!fillColor && w <= 0 }, ds));
   } else if (shape3 === "poly" || shape3 === "curve") {
     let p = polyPtsOf(g2).map(([x, y]) => tf2(x, y));
     if (p.length < 2) return;
     if (shape3 === "curve") p = bezierPts(p);
-    G(item, Object.assign({ t: "poly", pts: p, close: shape3 === "poly", w, color: color2, fill: fillColor, layer: layer3, z: z2, noStroke: !!fillColor && w <= 0 }, ds));
+    G(item, Object.assign({ t: "poly", pts: p, close: shape3 === "poly", w, color: color2, fill: fillColor, layer: layer4, z: z2, noStroke: !!fillColor && w <= 0 }, ds));
   }
 }
-function buildTextBoxGeom(item, n2, tf2, layer3, rotBase) {
+function buildTextBoxGeom(item, n2, tf2, layer4, rotBase) {
   const ef = effectsOf(n2);
   if (ef.hide) return;
   const angN = kid(n2, "angle");
@@ -4546,9 +4546,9 @@ function buildTextBoxGeom(item, n2, tf2, layer3, rotBase) {
     });
   }
   const w = widthOf(n2, 0);
-  const color2 = pcbColor(layer3);
-  const z2 = pcbZ(layer3);
-  if (yesNo(n2, "border") || w > 0) G(item, Object.assign({ t: "poly", pts, close: true, w, color: color2, layer: layer3, z: z2 }, dashOf(n2)));
+  const color2 = pcbColor(layer4);
+  const z2 = pcbZ(layer4);
+  if (yesNo(n2, "border") || w > 0) G(item, Object.assign({ t: "poly", pts, close: true, w, color: color2, layer: layer4, z: z2 }, dashOf(n2)));
   const mg = kid(n2, "margins");
   const dm2 = w / 2 + ef.size * 0.75;
   const lm = mg ? num(mg[1]) : dm2, tm = mg ? num(mg[2], lm) : dm2, rm = mg ? num(mg[3], lm) : dm2, bm = mg ? num(mg[4], tm) : dm2;
@@ -4560,7 +4560,7 @@ function buildTextBoxGeom(item, n2, tf2, layer3, rotBase) {
   const ox = j.h === "left" ? lm : j.h === "right" ? -rm : 0, oy = j.v === "top" ? tm : j.v === "bottom" ? -bm : 0;
   const col = el4 - lm - rm;
   const pen = ef.thick > 0 ? ef.thick : ef.bold ? ef.size / 5 : ef.size / 8;
-  pcbTextGeom(item, n2, anchor2[0] + ex[0] / el4 * ox + ey[0] / yl * oy, anchor2[1] + ex[1] / el4 * ox + ey[1] / yl * oy, linebreakText(unescapeText(str(n2[1])), col, ef.sizeX, pen, ef.italic), ang, layer3);
+  pcbTextGeom(item, n2, anchor2[0] + ex[0] / el4 * ox + ey[0] / yl * oy, anchor2[1] + ex[1] / el4 * ox + ey[1] / yl * oy, linebreakText(unescapeText(str(n2[1])), col, ef.sizeX, pen, ef.italic), ang, layer4);
 }
 function buildDimensionGeom(item, n2) {
   const from = item.geom.length;
@@ -4570,9 +4570,9 @@ function buildDimensionGeom(item, n2) {
 function buildDimensionShapes(item, n2) {
   const typeN = kid(n2, "type");
   const type = typeN ? str(typeN[1]) : "aligned";
-  const layer3 = layerOf(n2, "Dwgs.User");
-  const color2 = pcbColor(layer3);
-  const z2 = pcbZ(layer3);
+  const layer4 = layerOf(n2, "Dwgs.User");
+  const color2 = pcbColor(layer4);
+  const z2 = pcbZ(layer4);
   const pts = polyPtsOf(n2);
   if (pts.length < 2) return;
   const style = kid(n2, "style") || [];
@@ -4585,7 +4585,7 @@ function buildDimensionShapes(item, n2) {
   const [tx, ty, tr] = gt ? atOf(gt) : [0, 0, 0];
   const text3 = gt ? str(gt[1]) : "";
   const tw = textWidth(parseMarkup(text3).text, ef.size, ef.thick), th = ef.size;
-  const line = (a, b) => G(item, { t: "line", x1: a[0], y1: a[1], x2: b[0], y2: b[1], w: thick, color: color2, layer: layer3, z: z2, cap: "round" });
+  const line = (a, b) => G(item, { t: "line", x1: a[0], y1: a[1], x2: b[0], y2: b[1], w: thick, color: color2, layer: layer4, z: z2, cap: "round" });
   const arrow2 = (p, ang, tail) => {
     if (tail) {
       const [dx, dy] = rotPt(tail, 0, -ang);
@@ -4677,8 +4677,8 @@ function buildDimensionShapes(item, n2) {
         const [rx, ry] = R2(px, py);
         return [tx + rx, ty + ry];
       });
-      G(item, { t: "poly", pts: box3, close: true, w: thick, color: color2, layer: layer3, z: z2 });
-    } else if (text3 && frame === "2") G(item, { t: "circle", x: tx, y: ty, r: tw / 2 + ef.size / 2 - ef.thick / 2, w: thick, color: color2, layer: layer3, z: z2 });
+      G(item, { t: "poly", pts: box3, close: true, w: thick, color: color2, layer: layer4, z: z2 });
+    } else if (text3 && frame === "2") G(item, { t: "circle", x: tx, y: ty, r: tw / 2 + ef.size / 2 - ef.thick / 2, w: thick, color: color2, layer: layer4, z: z2 });
   } else if (type === "radial") {
     line([s2[0], s2[1] - arrowLen], [s2[0], s2[1] + arrowLen]);
     line([s2[0] - arrowLen, s2[1]], [s2[0] + arrowLen, s2[1]]);
@@ -4695,7 +4695,7 @@ function buildDimensionShapes(item, n2) {
     const [rx, ry] = rotPt(a[0], a[1], -90);
     line([s2[0] - rx, s2[1] - ry], [s2[0] + rx, s2[1] + ry]);
   }
-  if (gt) pcbTextGeom(item, gt, tx, ty, text3, tr, layer3);
+  if (gt) pcbTextGeom(item, gt, tx, ty, text3, tr, layer4);
 }
 function buildFootprintGeom(doc2, item) {
   const n2 = item.node;
@@ -4726,12 +4726,12 @@ function buildFootprintGeom(doc2, item) {
     if (!isList(kid(p, "at"))) return;
     const at4 = kid(p, "at");
     const [px, py, pr] = atOf(p);
-    const layer3 = layerOf(p, side === "B.Cu" ? "B.SilkS" : "F.SilkS");
+    const layer4 = layerOf(p, side === "B.Cu" ? "B.SilkS" : "F.SilkS");
     const [x, y] = tf2(px, py);
     const unlocked = has(at4, "unlocked") || yesNo(p, "unlocked");
     const field2 = p[0] === "property" ? str(p[1]) : p[0] === "fp_text" ? str(p[1]) === "reference" ? "Reference" : str(p[1]) === "value" ? "Value" : null : null;
     const dxfText = { bold: !!effectsOf(p).bold };
-    const first = pcbTextGeom(item, p, x, y, expand(text3), pr, layer3, field2 ? { upright: !unlocked, field: field2, dxfText } : { upright: !unlocked, dxfText });
+    const first = pcbTextGeom(item, p, x, y, expand(text3), pr, layer4, field2 ? { upright: !unlocked, field: field2, dxfText } : { upright: !unlocked, dxfText });
     if (first) first.textPos = [x, y];
   };
   for (const p of kids(n2, "property")) textAt(p, str(p[2]));
@@ -4772,26 +4772,26 @@ function buildFootprintGeom(doc2, item) {
   }
   if (!item.bbox) bboxAdd(item, fx, fy, 1);
 }
-function fpEditorVars(doc2, text3, layer3) {
+function fpEditorVars(doc2, text3, layer4) {
   if (text3.indexOf("${") < 0) return text3;
   const fields = {};
   for (const it of doc2.items.values()) if (it.kind === "property") fields[(it.node[0] === "fp_text" ? it.node[1] === "reference" ? "Reference" : "Value" : str(it.node[1])).toUpperCase()] = str(it.node[2]);
   const name = doc2.fpState ? str(doc2.fpState.fp[1]) : "";
-  return text3.replace(/\$\{([A-Za-z_0-9]+)\}/g, (m, v) => v === "LAYER" ? layer3 : v === "FOOTPRINT_NAME" ? name : fields[v] !== void 0 ? fields[v] : m);
+  return text3.replace(/\$\{([A-Za-z_0-9]+)\}/g, (m, v) => v === "LAYER" ? layer4 : v === "FOOTPRINT_NAME" ? name : fields[v] !== void 0 ? fields[v] : m);
 }
 function buildFieldGeom(doc2, item) {
   const p = item.node;
   if (!isList(kid(p, "at"))) return;
   const at4 = kid(p, "at");
   const [px, py, pr] = atOf(p);
-  const layer3 = layerOf(p, "F.SilkS");
+  const layer4 = layerOf(p, "F.SilkS");
   const unlocked = has(at4, "unlocked") || yesNo(p, "unlocked");
   const field2 = p[0] === "property" ? str(p[1]) : str(p[1]) === "reference" ? "Reference" : "Value";
   item.x = px;
   item.y = py;
   item.rot = pr;
-  item.layer = layer3;
-  pcbTextGeom(item, p, px, py, fpEditorVars(doc2, str(p[2]), layer3), pr, layer3, { upright: !unlocked, field: field2, dxfText: { bold: !!effectsOf(p).bold } });
+  item.layer = layer4;
+  pcbTextGeom(item, p, px, py, fpEditorVars(doc2, str(p[2]), layer4), pr, layer4, { upright: !unlocked, field: field2, dxfText: { bold: !!effectsOf(p).bold } });
 }
 function padPolygon(pad2, shape3, w, h3) {
   const hw = w / 2, hh = h3 / 2;
@@ -4845,9 +4845,9 @@ function buildPadGeom(item, pad2, tf2, side, doc2, padIndex) {
   }
   const npth = type === "np_thru_hole";
   const shapes2 = [];
-  const pushShape = (layer3, z2, color2, fill3) => {
+  const pushShape = (layer4, z2, color2, fill3) => {
     const from = item.geom.length;
-    pushPadShape(layer3, z2, color2, fill3);
+    pushPadShape(layer4, z2, color2, fill3);
     for (let i = from; i < item.geom.length; i++) {
       const pg = item.geom[i];
       pg.pad = true;
@@ -4858,7 +4858,7 @@ function buildPadGeom(item, pad2, tf2, side, doc2, padIndex) {
       pg.netName = netname;
     }
   };
-  const pushPadShape = (layer3, z2, color2, fill3) => {
+  const pushPadShape = (layer4, z2, color2, fill3) => {
     if (shape3 === "custom") {
       const prims = kid(pad2, "primitives");
       const anchor2 = str((kid(pad2, "options") && kid(kid(pad2, "options"), "anchor") || [])[1]);
@@ -4870,7 +4870,7 @@ function buildPadGeom(item, pad2, tf2, side, doc2, padIndex) {
         };
         for (const pr of prims.slice(1)) if (isList(pr)) {
           const before = item.geom.length;
-          graphicGeom(item, pr, pr[0].replace("gr_", ""), ptf, layer3, z2);
+          graphicGeom(item, pr, pr[0].replace("gr_", ""), ptf, layer4, z2);
           for (let i = before; i < item.geom.length; i++) {
             const gg = item.geom[i];
             gg.color = color2;
@@ -4882,24 +4882,24 @@ function buildPadGeom(item, pad2, tf2, side, doc2, padIndex) {
           }
         }
       }
-      shapes2.push(G(item, { t: "pad", x: cx, y: cy, w, h: h3, rot: prot, shape: anchor2 === "circle" ? "circle" : "rect", rr: 0, color: color2, fill: fill3, layer: layer3, z: z2 }));
+      shapes2.push(G(item, { t: "pad", x: cx, y: cy, w, h: h3, rot: prot, shape: anchor2 === "circle" ? "circle" : "rect", rr: 0, color: color2, fill: fill3, layer: layer4, z: z2 }));
     } else if (shape3 === "trapezoid" || shape3 === "rect" && kid(pad2, "rect_delta") || (shape3 === "custom" ? false : kid(pad2, "chamfer") && shape3 !== "circle" && shape3 !== "oval")) {
       const Rp = rotator(prot);
       const pts = padPolygon(pad2, shape3 === "trapezoid" || kid(pad2, "rect_delta") ? "trapezoid" : "chamfer", w, h3).map(([lx, ly]) => {
         const [x, y] = Rp(lx, ly);
         return [cx + x, cy + y];
       });
-      shapes2.push(G(item, { t: "poly", pts, close: true, w: 0, color: color2, fill: fill3, layer: layer3, z: z2, noStroke: true }));
+      shapes2.push(G(item, { t: "poly", pts, close: true, w: 0, color: color2, fill: fill3, layer: layer4, z: z2, noStroke: true }));
     } else {
-      shapes2.push(G(item, { t: "pad", x: cx, y: cy, w, h: h3, rot: prot, shape: shape3 === "roundrect" ? "rect" : shape3, rr: rr * Math.min(w, h3), color: color2, fill: fill3, layer: layer3, z: z2 }));
+      shapes2.push(G(item, { t: "pad", x: cx, y: cy, w, h: h3, rot: prot, shape: shape3 === "roundrect" ? "rect" : shape3, rr: rr * Math.min(w, h3), color: color2, fill: fill3, layer: layer4, z: z2 }));
     }
   };
-  for (const layer3 of layers) {
-    const isCu2 = /\.Cu$/.test(layer3);
-    const color2 = pcbColor(layer3);
+  for (const layer4 of layers) {
+    const isCu2 = /\.Cu$/.test(layer4);
+    const color2 = pcbColor(layer4);
     if (npth && isCu2 && !(w > dw + 1e-3 || h3 > dh + 1e-3)) continue;
-    if (!isCu2 && !/\.(Mask|Paste|Adhes)$/.test(layer3)) continue;
-    pushShape(layer3, pcbZ(layer3) + (isCu2 ? Z_PAD : 0.5), color2, color2);
+    if (!isCu2 && !/\.(Mask|Paste|Adhes)$/.test(layer4)) continue;
+    pushShape(layer4, pcbZ(layer4) + (isCu2 ? Z_PAD : 0.5), color2, color2);
   }
   bboxAdd(item, cx, cy, Math.hypot(w, h3) / 2);
   if (dr && dw > 0) {
@@ -5383,7 +5383,7 @@ function inSchTheme(doc2, id, fn) {
     return fn(copy);
   });
 }
-function textGeom(item, x, y, text3, size2, color2, rot3, just, layer3, extra) {
+function textGeom(item, x, y, text3, size2, color2, rot3, just, layer4, extra) {
   extra = extra || {};
   const j = justOf(just || [], extra.defH, extra.defV);
   let r = rot3 || 0;
@@ -5403,16 +5403,16 @@ function textGeom(item, x, y, text3, size2, color2, rot3, just, layer3, extra) {
   }
   text3 = unescapeText(str(text3));
   const m = parseMarkup(text3);
-  const g2 = { t: "text", x, y, text: m.text, bars: m.bars, size: size2 || 1.27, w: 0, color: color2, rot: r, h: j.h, v: j.v, layer: layer3 };
+  const g2 = { t: "text", x, y, text: m.text, bars: m.bars, size: size2 || 1.27, w: 0, color: color2, rot: r, h: j.h, v: j.v, layer: layer4 };
   if (m.text !== text3) g2.raw = text3;
   for (const k in extra) if (k !== "defH" && k !== "defV" && k !== "pcb" && k !== "upright" && k !== "olKind" && k !== "olLift" && k !== "olKeepH") g2[k] = extra[k];
   return G(item, g2);
 }
-function textLines(item, x, y, text3, size2, color2, rot3, just, layer3, extra) {
+function textLines(item, x, y, text3, size2, color2, rot3, just, layer4, extra) {
   const lines = splitLines(str(text3));
   const all2 = extra && extra.face && extra.olKind === "field" && !extra.olKeepH && lines.length > 1 ? lines.map((ln) => parseMarkup(unescapeText(ln)).text) : void 0;
   const block = (i, e) => !e || !e.face ? e : Object.assign({}, e, { olBlock: { x, y, line: i, lines: lines.length, first: unescapeText(lines[0] || ""), kind: e.olKind, lift: e.olLift, all: all2 } });
-  if (lines.length === 1) return textGeom(item, x, y, lines[0], size2, color2, rot3, just, layer3, block(0, extra));
+  if (lines.length === 1) return textGeom(item, x, y, lines[0], size2, color2, rot3, just, layer4, block(0, extra));
   if (extra && extra.dxfText) extra = Object.assign({}, extra, { dxfText: void 0 });
   const j = justOf(just || [], extra && extra.defH, extra && extra.defV);
   const il = size2 * INTERLINE;
@@ -5421,11 +5421,11 @@ function textLines(item, x, y, text3, size2, color2, rot3, just, layer3, extra) 
   const out2 = [];
   lines.forEach((ln, i) => {
     const [dx, dy] = R2(0, off0 + i * il);
-    out2.push(textGeom(item, x + dx, y + dy, ln, size2, color2, rot3, just, layer3, block(i, extra)));
+    out2.push(textGeom(item, x + dx, y + dy, ln, size2, color2, rot3, just, layer4, block(i, extra)));
   });
   return out2[0];
 }
-function transformedText(item, Ti, x, y, text3, size2, color2, angle, just, layer3, extra) {
+function transformedText(item, Ti, x, y, text3, size2, color2, angle, just, layer4, extra) {
   const a = (Math.round(angle) % 360 + 360) % 360;
   const vertical = a === 90 || a === 270;
   const j = justOf(just || [], extra && extra.defH, extra && extra.defV);
@@ -5440,7 +5440,7 @@ function transformedText(item, Ti, x, y, text3, size2, color2, angle, just, laye
   let h3 = j.h, v = j.v;
   if (outVertical ? rv[1] > 0 : rv[0] < 0) h3 = flipH(h3);
   if (outVertical ? dv[0] < 0 : dv[1] < 0) v = flipV(v);
-  return textLines(item, x, y, text3, size2, color2, outVertical ? 90 : 0, [h3, v], layer3, extra);
+  return textLines(item, x, y, text3, size2, color2, outVertical ? 90 : 0, [h3, v], layer4, extra);
 }
 var init_geom = __esm({
   "web/canvas/geom.ts"() {
@@ -5708,7 +5708,7 @@ function layerList(doc2) {
   for (const it of doc2.items.values()) for (const g2 of it.geom) counts.set(g2.layer, (counts.get(g2.layer) || 0) + 1);
   if (doc2.type === "sch") return SCH_LAYERS.map(([name, key3]) => ({ key: name, name, color: SCH[key3], count: counts.get(name) || 0 })).filter((l) => l.count);
   const out2 = [];
-  for (const [layer3, count2] of counts) if (layer3 !== "holes") out2.push({ key: layer3, name: layer3, color: pcbColor(layer3), count: count2, z: pcbZ(layer3) });
+  for (const [layer4, count2] of counts) if (layer4 !== "holes") out2.push({ key: layer4, name: layer4, color: pcbColor(layer4), count: count2, z: pcbZ(layer4) });
   out2.sort((a, b) => b.z - a.z);
   return out2;
 }
@@ -6438,12 +6438,12 @@ function render(doc2, ctx, view, opts2) {
   const actSide = act ? act.indexOf("F.") === 0 ? "F." : act.indexOf("B.") === 0 ? "B." : null : null, actCu = !!act && /\.Cu$/.test(act);
   const zHoles0 = isPcb ? pcbZ("holes") : 0;
   TOP_CACHE.clear();
-  const topOf = (layer3) => {
+  const topOf = (layer4) => {
     if (!act) return 0;
-    let v = TOP_CACHE.get(layer3);
+    let v = TOP_CACHE.get(layer4);
     if (v === void 0) {
-      v = layer3 === "holes" ? TOP_Z : layer3 === act ? actCu ? TOP_Z : 2 * TOP_Z : actSide && layer3 && layer3.indexOf(actSide) === 0 ? TOP_Z : 0;
-      TOP_CACHE.set(layer3, v);
+      v = layer4 === "holes" ? TOP_Z : layer4 === act ? actCu ? TOP_Z : 2 * TOP_Z : actSide && layer4 && layer4.indexOf(actSide) === 0 ? TOP_Z : 0;
+      TOP_CACHE.set(layer4, v);
     }
     return v;
   };
@@ -7591,13 +7591,13 @@ function drawViaName(ctx, g2, doc2, s2, sCss, base2, flip, dark) {
 }
 function drawZonePreview(ctx, g2, obstacles, base2, W12, H, minW, netColors, alphaMul, colorXf) {
   if (!g2.pts || g2.pts.length < 3) return;
-  const layer3 = g2.layer, net = g2.net, c = g2.zoneClearance || 0;
+  const layer4 = g2.layer, net = g2.net, c = g2.zoneClearance || 0;
   const alpha = ZONE_OPACITY * (alphaMul === void 0 ? 1 : alphaMul);
   let color2 = netColors && net > 0 && netColors.get(net) || g2.color;
   if (colorXf && color2) color2 = colorXf(color2);
   const off = scratchCanvas(W12, H);
   const octx = off ? off.getContext("2d") : null;
-  const target2 = octx || ctx;
+  const target3 = octx || ctx;
   if (octx) {
     octx.setTransform(1, 0, 0, 1, 0, 0);
     octx.clearRect(0, 0, W12, H);
@@ -7607,43 +7607,43 @@ function drawZonePreview(ctx, g2, obstacles, base2, W12, H, minW, netColors, alp
     ctx.save();
     ctx.globalAlpha = alpha;
   }
-  target2.setLineDash([]);
-  target2.lineJoin = "round";
-  target2.lineCap = "round";
-  target2.fillStyle = color2;
-  target2.beginPath();
-  tracePath(target2, g2);
-  target2.fill();
-  target2.globalCompositeOperation = "destination-out";
-  target2.fillStyle = "#000";
-  target2.strokeStyle = "#000";
+  target3.setLineDash([]);
+  target3.lineJoin = "round";
+  target3.lineCap = "round";
+  target3.fillStyle = color2;
+  target3.beginPath();
+  tracePath(target3, g2);
+  target3.fill();
+  target3.globalCompositeOperation = "destination-out";
+  target3.fillStyle = "#000";
+  target3.strokeStyle = "#000";
   for (const o of obstacles) {
     if (o.net === net && !o.npth) continue;
-    const onLayer = o.layer === layer3 || o.via && o.viaType === "through" || o.npth;
+    const onLayer = o.layer === layer4 || o.via && o.viaType === "through" || o.npth;
     if (!onLayer) continue;
     if (o.track) {
-      target2.lineWidth = (o.w || 0) + 2 * c;
-      target2.beginPath();
-      tracePath(target2, o);
-      target2.stroke();
+      target3.lineWidth = (o.w || 0) + 2 * c;
+      target3.beginPath();
+      tracePath(target3, o);
+      target3.stroke();
       continue;
     }
     if (o.via && o.t === "circle") {
-      target2.beginPath();
-      target2.arc(o.x, o.y, o.r + c, 0, Math.PI * 2);
-      target2.fill();
+      target3.beginPath();
+      target3.arc(o.x, o.y, o.r + c, 0, Math.PI * 2);
+      target3.fill();
       continue;
     }
     if (o.t === "poly" && o.pts.length < 2) continue;
-    target2.beginPath();
-    tracePath(target2, o);
-    target2.fill();
+    target3.beginPath();
+    tracePath(target3, o);
+    target3.fill();
     if (c > 0) {
-      target2.lineWidth = 2 * c;
-      target2.stroke();
+      target3.lineWidth = 2 * c;
+      target3.stroke();
     }
   }
-  target2.globalCompositeOperation = "source-over";
+  target3.globalCompositeOperation = "source-over";
   if (octx) {
     ctx.save();
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -9722,7 +9722,7 @@ var require_pcb_tools = __commonJS({
         const w = K11.kid(node, "width");
         return w ? K11.num(w[1], def) : def;
       };
-      var color2 = (layer3) => K11.PCB_COLORS && K11.PCB_COLORS[layer3] || (/\.Cu$/.test(layer3) ? "#7FC87F" : "#C2C2C2");
+      var color2 = (layer4) => K11.PCB_COLORS && K11.PCB_COLORS[layer4] || (/\.Cu$/.test(layer4) ? "#7FC87F" : "#C2C2C2");
       var fmt4 = (v) => String(+v.toFixed(3));
       var layerClass = (l) => /^[FB]\.SilkS$/.test(l) ? "silk" : /\.Cu$/.test(l) ? "copper" : l === "Edge.Cuts" ? "edges" : /^[FB]\.CrtYd$/.test(l) ? "courtyard" : /^[FB]\.Fab$/.test(l) ? "fab" : "others";
       var LINE_W = { silk: 0.1, copper: 0.2, edges: 0.05, courtyard: 0.05, fab: 0.1, others: 0.1 };
@@ -9766,8 +9766,8 @@ var require_pcb_tools = __commonJS({
           if (typeof sz === "number" && sz > 0) TEXT_STYLE[cls] = [sz, typeof th === "number" && th > 0 ? th : TEXT_STYLE[cls][1]];
         }
       }
-      function layerStyle(layer3) {
-        const cls = layerClass(layer3);
+      function layerStyle(layer4) {
+        const cls = layerClass(layer4);
         const stem2 = { silk: "silk", copper: "copper", edges: "board_outline", courtyard: "courtyard", fab: "fab", others: "other" }[cls];
         const d = rawDefaults;
         const [size2, thick] = TEXT_STYLE[cls];
@@ -9781,8 +9781,8 @@ var require_pcb_tools = __commonJS({
           upright: typeof d[stem2 + "_text_upright"] === "boolean" ? d[stem2 + "_text_upright"] : true
         };
       }
-      var textStyle = (layer3) => {
-        const [size2, thick] = TEXT_STYLE[layerClass(layer3)];
+      var textStyle = (layer4) => {
+        const [size2, thick] = TEXT_STYLE[layerClass(layer4)];
         return { size: size2, thick };
       };
       var isBack2 = (l) => /^B\./.test(l);
@@ -10329,10 +10329,10 @@ var require_pcb_tools = __commonJS({
         let gap = extents[extents.length - 1][0] - extents[0][1];
         for (let i = 1; i < extents.length - 1; i++) gap -= extents[i][1] - extents[i][0];
         const per = gap / (extents.length - 1);
-        let target2 = extents[0][1];
+        let target3 = extents[0][1];
         for (let i = 1; i < extents.length - 1; i++) {
-          d[i] = target2 - extents[i][0] + i * per;
-          target2 += extents[i][1] - extents[i][0];
+          d[i] = target3 - extents[i][0] + i * per;
+          target3 += extents[i][1] - extents[i][0];
         }
         return d;
       }
@@ -10939,53 +10939,53 @@ var require_pcb_tools = __commonJS({
       }
       var hasNet = (n2) => !!(n2 && (n2.name || n2.code > 0));
       var sameNet2 = (a, b) => hasNet(a) && hasNet(b) && (a.name && b.name ? a.name === b.name : a.code === b.code);
-      function segmentNode(doc2, a, b, width, layer3, net) {
-        return ["segment", ["start", r65(a[0]), r65(a[1])], ["end", r65(b[0]), r65(b[1])], ["width", r65(width)], ["layer", layer3], netNode(doc2, net)];
+      function segmentNode(doc2, a, b, width, layer4, net) {
+        return ["segment", ["start", r65(a[0]), r65(a[1])], ["end", r65(b[0]), r65(b[1])], ["width", r65(width)], ["layer", layer4], netNode(doc2, net)];
       }
       function viaNode(doc2, x, y, size2, drill22, net, layers) {
         return ["via", ["at", r65(x), r65(y)], ["size", r65(size2)], ["drill", r65(drill22)], ["layers"].concat(layers || ["F.Cu", "B.Cu"]), netNode(doc2, net)];
       }
-      var gfxWidth = (layer3) => LINE_W[layerClass(layer3)];
+      var gfxWidth = (layer4) => LINE_W[layerClass(layer4)];
       var strokeNode = (w) => ["stroke", ["width", r65(w)], ["type", "default"]];
-      function lineNode(a, b, layer3) {
-        return ["gr_line", ["start", r65(a[0]), r65(a[1])], ["end", r65(b[0]), r65(b[1])], strokeNode(gfxWidth(layer3)), ["layer", layer3]];
+      function lineNode(a, b, layer4) {
+        return ["gr_line", ["start", r65(a[0]), r65(a[1])], ["end", r65(b[0]), r65(b[1])], strokeNode(gfxWidth(layer4)), ["layer", layer4]];
       }
-      function rectNode(a, b, layer3) {
-        return ["gr_rect", ["start", r65(a[0]), r65(a[1])], ["end", r65(b[0]), r65(b[1])], strokeNode(gfxWidth(layer3)), ["fill", "no"], ["layer", layer3]];
+      function rectNode(a, b, layer4) {
+        return ["gr_rect", ["start", r65(a[0]), r65(a[1])], ["end", r65(b[0]), r65(b[1])], strokeNode(gfxWidth(layer4)), ["fill", "no"], ["layer", layer4]];
       }
-      function circleNode(c, e, layer3) {
-        return ["gr_circle", ["center", r65(c[0]), r65(c[1])], ["end", r65(e[0]), r65(e[1])], strokeNode(gfxWidth(layer3)), ["fill", "no"], ["layer", layer3]];
+      function circleNode(c, e, layer4) {
+        return ["gr_circle", ["center", r65(c[0]), r65(c[1])], ["end", r65(e[0]), r65(e[1])], strokeNode(gfxWidth(layer4)), ["fill", "no"], ["layer", layer4]];
       }
-      function arcNode(a, m, b, layer3) {
+      function arcNode(a, m, b, layer4) {
         if ((m[0] - a[0]) * (b[1] - m[1]) - (m[1] - a[1]) * (b[0] - m[0]) < 0) [a, b] = [b, a];
-        return ["gr_arc", ["start", r65(a[0]), r65(a[1])], ["mid", r65(m[0]), r65(m[1])], ["end", r65(b[0]), r65(b[1])], strokeNode(gfxWidth(layer3)), ["layer", layer3]];
+        return ["gr_arc", ["start", r65(a[0]), r65(a[1])], ["mid", r65(m[0]), r65(m[1])], ["end", r65(b[0]), r65(b[1])], strokeNode(gfxWidth(layer4)), ["layer", layer4]];
       }
-      function polyNode(pts, layer3) {
-        return ["gr_poly", ["pts", ...pts.map((p) => ["xy", r65(p[0]), r65(p[1])])], strokeNode(gfxWidth(layer3)), ["fill", "no"], ["layer", layer3]];
+      function polyNode(pts, layer4) {
+        return ["gr_poly", ["pts", ...pts.map((p) => ["xy", r65(p[0]), r65(p[1])])], strokeNode(gfxWidth(layer4)), ["fill", "no"], ["layer", layer4]];
       }
-      function textNode(text3, x, y, layer3) {
-        return ["gr_text", text3, ["at", r65(x), r65(y), 0], ["layer", layer3], ["uuid", K11.newUuid()], effectsNode(layer3, ["left", "bottom"])];
+      function textNode(text3, x, y, layer4) {
+        return ["gr_text", text3, ["at", r65(x), r65(y), 0], ["layer", layer4], ["uuid", K11.newUuid()], effectsNode(layer4, ["left", "bottom"])];
       }
-      function barcodeNode(x, y, layer3) {
-        const { size: size2 } = textStyle(layer3);
-        return ["barcode", ["at", r65(x), r65(y), 0], ["layer", layer3], ["size", 40, 40], ["text", ""], ["text_height", size2], ["type", "qr"], ["ecc_level", "L"], ["hide", "no"], ["knockout", "no"], ["uuid", K11.newUuid()]];
+      function barcodeNode(x, y, layer4) {
+        const { size: size2 } = textStyle(layer4);
+        return ["barcode", ["at", r65(x), r65(y), 0], ["layer", layer4], ["size", 40, 40], ["text", ""], ["text_height", size2], ["type", "qr"], ["ecc_level", "L"], ["hide", "no"], ["knockout", "no"], ["uuid", K11.newUuid()]];
       }
       var BARCODE_FILE_VERSION = 20250914;
       var barcodeAllowed = (doc2) => !doc2 || !(Number(doc2.version) > 0) || Number(doc2.version) >= BARCODE_FILE_VERSION;
       var BARCODE_NEEDS_VERSION_MSG = "Barcodes need a board in the KiCad 10 file format (version 20250914 or later); this board is saved in an older format, which cannot store them.";
-      function effectsNode(layer3, just) {
-        const { size: size2, thick } = textStyle(layer3);
+      function effectsNode(layer4, just) {
+        const { size: size2, thick } = textStyle(layer4);
         const eff = ["effects", ["font", ["size", size2, size2], ["thickness", thick]]];
         const j = (just || []).slice();
-        if (isBack2(layer3)) j.push("mirror");
+        if (isBack2(layer4)) j.push("mirror");
         if (j.length) eff.push(["justify", ...j]);
         return eff;
       }
-      function curveNode(pts, layer3) {
-        return ["gr_curve", ["pts", ...pts.map(xy)], strokeNode(gfxWidth(layer3)), ["layer", layer3]];
+      function curveNode(pts, layer4) {
+        return ["gr_curve", ["pts", ...pts.map(xy)], strokeNode(gfxWidth(layer4)), ["layer", layer4]];
       }
       var TEXTBOX_MARGIN = 1.0025;
-      function textBoxNode(text3, a, b, layer3) {
+      function textBoxNode(text3, a, b, layer4) {
         const [x0, y0, x1, y1] = corners(a, b);
         return [
           "gr_text_box",
@@ -10993,16 +10993,16 @@ var require_pcb_tools = __commonJS({
           ["start", r65(x0), r65(y0)],
           ["end", r65(x1), r65(y1)],
           ["margins", TEXTBOX_MARGIN, TEXTBOX_MARGIN, TEXTBOX_MARGIN, TEXTBOX_MARGIN],
-          ["layer", layer3],
+          ["layer", layer4],
           ["uuid", K11.newUuid()],
-          effectsNode(layer3, ["left", "top"]),
+          effectsNode(layer4, ["left", "top"]),
           ["border", "yes"],
-          strokeNode(gfxWidth(layer3)),
+          strokeNode(gfxWidth(layer4)),
           ["knockout", "no"]
         ];
       }
-      function tableGrid(origin, cursor, layer3, grid2) {
-        const { size: size2 } = textStyle(layer3);
+      function tableGrid(origin, cursor, layer4, grid2) {
+        const { size: size2 } = textStyle(layer4);
         const fs2 = Math.round(size2 * 1e6), g2 = Math.round((grid2 || 0) * 1e6);
         const rx = Math.round((cursor[0] - origin[0]) * 1e6), ry = Math.round((cursor[1] - origin[1]) * 1e6);
         const cols = Math.max(1, Math.trunc(rx / (fs2 * 15))), rows3 = Math.max(1, Math.trunc(ry / (fs2 * 3)));
@@ -11013,12 +11013,12 @@ var require_pcb_tools = __commonJS({
         }
         return { x: origin[0], y: origin[1], cw: r65(cw / 1e6), ch: r65(ch / 1e6), rows: rows3, cols };
       }
-      function tableNode(origin, cursor, layer3, grid2) {
-        const L = tableGrid(origin, cursor, layer3, grid2);
-        const w = gfxWidth(layer3);
+      function tableNode(origin, cursor, layer4, grid2) {
+        const L = tableGrid(origin, cursor, layer4, grid2);
+        const w = gfxWidth(layer4);
         const cells = ["cells"];
         const just = ["justify", "left"];
-        if (isBack2(layer3)) just.push("mirror");
+        if (isBack2(layer4)) just.push("mirror");
         for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) {
           const x = r65(L.x + c * L.cw), y = r65(L.y + r * L.ch);
           cells.push([
@@ -11028,7 +11028,7 @@ var require_pcb_tools = __commonJS({
             ["end", r65(x + L.cw), r65(y + L.ch)],
             ["margins", TEXTBOX_MARGIN, TEXTBOX_MARGIN, TEXTBOX_MARGIN, TEXTBOX_MARGIN],
             ["span", 1, 1],
-            ["layer", layer3],
+            ["layer", layer4],
             ["uuid", K11.newUuid()],
             ["effects", ["font", ["size", 1.27, 1.27]], just.slice()],
             ["knockout", "no"]
@@ -11037,7 +11037,7 @@ var require_pcb_tools = __commonJS({
         return [
           "table",
           ["uuid", K11.newUuid()],
-          ["layer", layer3],
+          ["layer", layer4],
           ["column_count", L.cols],
           ["border", ["external", "yes"], ["header", "yes"], strokeNode(w)],
           ["separators", ["rows", "yes"], ["cols", "yes"], strokeNode(w)],
@@ -11046,10 +11046,10 @@ var require_pcb_tools = __commonJS({
           cells
         ];
       }
-      function imageNode(x, y, base643, layer3) {
+      function imageNode(x, y, base643, layer4) {
         const data = ["data"];
         for (let i = 0; i < base643.length; i += 76) data.push(base643.slice(i, i + 76));
-        return ["image", ["at", r65(x), r65(y)], ["layer", layer3], data];
+        return ["image", ["at", r65(x), r65(y)], ["layer", layer4], data];
       }
       var zoneFillNode = () => ["fill", ["thermal_gap", 0.5], ["thermal_bridge_width", 0.5], ["island_removal_mode", 0]];
       var zoneLayers = (node) => {
@@ -11130,8 +11130,8 @@ var require_pcb_tools = __commonJS({
         }
         return node;
       }
-      function thievingZoneNode(doc2, pts, layer3) {
-        const node = setZoneFillMode(zoneNode(doc2, pts, layer3, null), "thieving");
+      function thievingZoneNode(doc2, pts, layer4) {
+        const node = setZoneFillMode(zoneNode(doc2, pts, layer4, null), "thieving");
         let cp2 = K11.kid(node, "connect_pads");
         if (!cp2) {
           cp2 = ["connect_pads", ["clearance", 0.5]];
@@ -11144,11 +11144,11 @@ var require_pcb_tools = __commonJS({
       var THIEVING_FILE_VERSION = 20260513;
       var thievingAllowed = (doc2) => !doc2 || !(Number(doc2.version) > 0) || Number(doc2.version) >= THIEVING_FILE_VERSION;
       var THIEVING_NEEDS_VERSION_MSG = "Copper thieving needs a board in the KiCad 11 file format (version 20260513 or later); this board is saved in an older format, which cannot store it.";
-      function zoneNode(doc2, pts, layer3, net) {
+      function zoneNode(doc2, pts, layer4, net) {
         const node = ["zone"];
         const nn = netNode(doc2, net);
         if (nn[1]) node.push(nn);
-        node.push(["layer", layer3], ["uuid", K11.newUuid()], ["hatch", "edge", 0.5]);
+        node.push(["layer", layer4], ["uuid", K11.newUuid()], ["hatch", "edge", 0.5]);
         const prio = zonePriority(doc2);
         if (prio > 0) node.push(["priority", prio]);
         node.push(["connect_pads", ["clearance", 0.5]], ["min_thickness", 0.25], zoneFillNode(), ["polygon", ["pts", ...pts.map(xy)]]);
@@ -11476,9 +11476,9 @@ var require_pcb_tools = __commonJS({
           primitives: K22(n2, "primitives") || (inherit ? inherit.primitives : null)
         };
       }
-      function padShapeOn2(pad2, layer3, copper) {
+      function padShapeOn2(pad2, layer4, copper) {
         if (!pad2.stack.size) return pad2.base;
-        const cu = isCopper2(layer3) ? layer3 : isBack22(layer3) ? "B.Cu" : "F.Cu";
+        const cu = isCopper2(layer4) ? layer4 : isBack22(layer4) ? "B.Cu" : "F.Cu";
         if (cu === "F.Cu") return pad2.base;
         if (pad2.stackMode === "front_inner_back") {
           if (cu === "B.Cu") return pad2.stack.get("B.Cu") || pad2.base;
@@ -11635,10 +11635,10 @@ var require_pcb_tools = __commonJS({
         const ls = K22(n2, "layers");
         const l1 = K22(n2, "layer");
         const names2 = ls ? ls.slice(1).map(str9) : [l1 ? str9(l1[1]) : "F.Cu"];
-        const layer3 = names2.find(isCopper2) || names2[0];
+        const layer4 = names2.find(isCopper2) || names2[0];
         const maskLayer = names2.find((x) => /\.Mask$/.test(x)) || null;
         const wN = K22(n2, "width");
-        const t = { layer: layer3, w: wN ? num13(wN[1], 0.25) : 0.25, x1: num13(s2[1]), y1: num13(s2[2]), x2: num13(e[1]), y2: num13(e[2]), arc: null, maskLayer, maskMargin: optNum3(n2, "solder_mask_margin"), net: nets ? netName2(n2, nets) : void 0 };
+        const t = { layer: layer4, w: wN ? num13(wN[1], 0.25) : 0.25, x1: num13(s2[1]), y1: num13(s2[2]), x2: num13(e[1]), y2: num13(e[2]), arc: null, maskLayer, maskMargin: optNum3(n2, "solder_mask_margin"), net: nets ? netName2(n2, nets) : void 0 };
         if (kind === "arc") {
           const m = K22(n2, "mid");
           const a = m ? arcFrom32([t.x1, t.y1], [num13(m[1]), num13(m[2])], [t.x2, t.y2]) : null;
@@ -29063,9 +29063,9 @@ var require_pcb_tools = __commonJS({
         }
         return polys.map(clockwise2);
       }
-      function padPrims2(pad2, layer3, m, out2, adj = 0) {
-        const shape3 = padShapeOn2(pad2, layer3, m.copper);
-        const onMask = /\.Mask$/.test(layer3), onPaste = /\.Paste$/.test(layer3);
+      function padPrims2(pad2, layer4, m, out2, adj = 0) {
+        const shape3 = padShapeOn2(pad2, layer4, m.copper);
+        const onMask = /\.Mask$/.test(layer4), onPaste = /\.Paste$/.test(layer4);
         let mx = 0, my = 0;
         if (onMask) mx = my = maskMargin2(pad2, m, shape3);
         if (onPaste) [mx, my] = pasteMargin2(pad2, m, shape3);
@@ -29410,8 +29410,8 @@ var require_pcb_tools = __commonJS({
         }
         const m = /^gr_(line|rect|circle|arc|poly|curve)$/.exec(it.kind);
         if (m) {
-          const layer3 = layerOf2(n2);
-          return /\.Cu$/.test(layer3) ? `${SHAPE_NAMES[m[1]]} ${netnameMsg(netOf3(n2))} on ${L(layer3)}` : `${SHAPE_NAMES[m[1]]} on ${L(layer3)}`;
+          const layer4 = layerOf2(n2);
+          return /\.Cu$/.test(layer4) ? `${SHAPE_NAMES[m[1]]} ${netnameMsg(netOf3(n2))} on ${L(layer4)}` : `${SHAPE_NAMES[m[1]]} on ${L(layer4)}`;
         }
         return "";
       }
@@ -29573,12 +29573,12 @@ var require_pcb_tools = __commonJS({
             }
           }
           if (it && (it.kind === "segment" || it.kind === "arc")) {
-            const n2 = it.node, net = netOf3(n2).name || "", w = widthOf3(n2, 0.25), layer3 = layerOf2(n2);
+            const n2 = it.node, net = netOf3(n2).name || "", w = widthOf3(n2, 0.25), layer4 = layerOf2(n2);
             add22("Type", it.kind === "arc" ? "Track (arc)" : "Track");
             add22("Net", unescapeName(net));
             add22("Resolved Netclass", NN(net));
             if (isLocked3(n2)) add22("Status", "Locked");
-            add22("Layer", boardLayerName(doc2, layer3));
+            add22("Layer", boardLayerName(doc2, layer4));
             add22("Width", V(w));
             const a = pt4(n2, "start"), b = pt4(n2, "end");
             let len3 = a && b ? Math.hypot(b[0] - a[0], b[1] - a[1]) : 0;
@@ -29716,9 +29716,9 @@ var require_pcb_tools = __commonJS({
               add22("Length", V(Math.hypot(b[0] - a[0], b[1] - a[1])));
               add22("Angle", (Math.atan2(a[1] - b[1], b[0] - a[0]) * 180 / Math.PI).toFixed(1) + "\xB0");
             }
-            const layer3 = layerOf2(n2);
-            add22("Layer", boardLayerName(doc2, layer3));
-            if (/\.Cu$/.test(layer3) && hasNet(netOf3(n2))) add22("Net", unescapeName(netOf3(n2).name));
+            const layer4 = layerOf2(n2);
+            add22("Layer", boardLayerName(doc2, layer4));
+            if (/\.Cu$/.test(layer4) && hasNet(netOf3(n2))) add22("Net", unescapeName(netOf3(n2).name));
             return out2;
           }
         }
@@ -29793,11 +29793,11 @@ var require_pcb_tools = __commonJS({
         }
         return [x0, y0, x1, y1];
       }
-      function idsOnLayer(doc2, layer3) {
+      function idsOnLayer(doc2, layer4) {
         const out2 = /* @__PURE__ */ new Set();
         for (const it of doc2.items.values()) {
           if (it.kind === "group") continue;
-          if (it.kind === "footprint" && it.layer === layer3 || it.geom.some((g2) => g2.layer === layer3)) out2.add(it.id);
+          if (it.kind === "footprint" && it.layer === layer4 || it.geom.some((g2) => g2.layer === layer4)) out2.add(it.id);
         }
         return out2;
       }
@@ -29835,16 +29835,16 @@ var require_pcb_tools = __commonJS({
         if (A.kind === "via") return { kind: "via", node: ["via", ["at", 0, 0], ["size", A.size || 0.6], ["drill", A.drill || 0.3], ["layers", "F.Cu", "B.Cu"], net], layer: A.layer };
         return { kind: A.kind || "segment", node: [A.kind || "segment", ["start", 0, 0], ["end", 0, 0], ["width", A.width || 0.25], ["layer", A.layer || "F.Cu"], net], layer: A.layer };
       }
-      function obstacleRuleItem(ob, layer3) {
-        if (ob.rule) return Object.assign({}, ob.rule, { layer: layer3 });
-        if (ob.kind === "edge") return { kind: "gr_line", node: ["gr_line", ["layer", "Edge.Cuts"]], layer: layer3 };
+      function obstacleRuleItem(ob, layer4) {
+        if (ob.rule) return Object.assign({}, ob.rule, { layer: layer4 });
+        if (ob.kind === "edge") return { kind: "gr_line", node: ["gr_line", ["layer", "Edge.Cuts"]], layer: layer4 };
         const kind = ob.kind === "track" || ob.kind === "line" ? "segment" : ob.kind;
-        return { kind, node: [kind, ["layer", layer3 || "F.Cu"], ["net", ob.net || ""]], layer: layer3 };
+        return { kind, node: [kind, ["layer", layer4 || "F.Cu"], ["net", ob.net || ""]], layer: layer4 };
       }
       var cache5 = /* @__PURE__ */ new Map();
       var cacheVer = null;
       var cacheDru = null;
-      function customRouteClearance(doc2, s2, A, ob, layer3) {
+      function customRouteClearance(doc2, s2, A, ob, layer4) {
         const rules = routerRules();
         if (!rules || !doc2) return null;
         if (cacheVer !== S2.docVer || cacheDru !== S2.dru) {
@@ -29852,9 +29852,9 @@ var require_pcb_tools = __commonJS({
           cacheVer = S2.docVer;
           cacheDru = S2.dru;
         }
-        const key3 = (A.kind || "segment") + "|" + A.net + "|" + (layer3 || "") + "|" + (A.width || "") + "|" + ob.kind + "|" + (ob.id || "") + "|" + ob.net;
+        const key3 = (A.kind || "segment") + "|" + A.net + "|" + (layer4 || "") + "|" + (A.width || "") + "|" + ob.kind + "|" + (ob.id || "") + "|" + ob.net;
         if (cache5.has(key3)) return cache5.get(key3);
-        const a = routedRuleItem(Object.assign({}, A, { layer: layer3 })), b = obstacleRuleItem(ob, layer3);
+        const a = routedRuleItem(Object.assign({}, A, { layer: layer4 })), b = obstacleRuleItem(ob, layer4);
         const q4 = (type) => {
           const h3 = evalRuleConstraint(rules, type, doc2, s2, a, b) || evalRuleConstraint(rules, type, doc2, s2, b, a);
           return h3 ? h3.severity === "ignore" ? 0 : h3.min : null;
@@ -29876,9 +29876,9 @@ var require_pcb_tools = __commonJS({
         cache5.set(key3, rv);
         return rv;
       }
-      function rulePairClearance(doc2, s2, netA, netB, layer3, kindB) {
+      function rulePairClearance(doc2, s2, netA, netB, layer4, kindB) {
         const base2 = Math.max(netClearance(s2, netA), netClearance(s2, netB), s2.minClearance || 0);
-        const c = customRouteClearance(doc2, s2, { net: netA, layer: layer3 }, { kind: kindB === "via" ? "via" : "segment", net: netB }, layer3);
+        const c = customRouteClearance(doc2, s2, { net: netA, layer: layer4 }, { kind: kindB === "via" ? "via" : "segment", net: netB }, layer4);
         return c == null ? base2 : c;
       }
       var pinnedOpt = (h3) => {
@@ -29888,11 +29888,11 @@ var require_pcb_tools = __commonJS({
         if (h3.max != null) v = Math.min(v, h3.max);
         return v;
       };
-      function ruleSizes(doc2, s2, net, layer3, coupled) {
+      function ruleSizes(doc2, s2, net, layer4, coupled) {
         const d = S2.dru;
         const out2 = { width: null, viaDiameter: null, viaDrill: null, dpGap: null, dpWidth: null, widthRule: null, gapRule: null };
         if (!d || !d.rules.length || !doc2) return out2;
-        const tr = routedRuleItem({ net, layer: layer3 }), via = routedRuleItem({ kind: "via", net, layer: layer3 }), co = coupled ? routedRuleItem({ net: coupled, layer: layer3 }) : null;
+        const tr = routedRuleItem({ net, layer: layer4 }), via = routedRuleItem({ kind: "via", net, layer: layer4 }), co = coupled ? routedRuleItem({ net: coupled, layer: layer4 }) : null;
         const w = evalRuleConstraint(d.rules, "track_width", doc2, s2, tr, null);
         if (w) out2.width = pinnedOpt(w);
         const vd = evalRuleConstraint(d.rules, "via_diameter", doc2, s2, via, null);
@@ -29969,8 +29969,8 @@ var require_pcb_tools = __commonJS({
         }
         return W12;
       }
-      function routeClearance(s2, netKey2, ob, layer3, doc2, A) {
-        const custom = doc2 ? customRouteClearance(doc2, s2, Object.assign({ net: netKey2, layer: layer3 || null }, A || {}), { kind: ob.kind, net: ob.net, id: ob.id, rule: ob.src ? srcRuleItem(ob.src) : null }, layer3 || null) : null;
+      function routeClearance(s2, netKey2, ob, layer4, doc2, A) {
+        const custom = doc2 ? customRouteClearance(doc2, s2, Object.assign({ net: netKey2, layer: layer4 || null }, A || {}), { kind: ob.kind, net: ob.net, id: ob.id, rule: ob.src ? srcRuleItem(ob.src) : null }, layer4 || null) : null;
         if (custom != null) return custom;
         const minC = s2.minClearance || 0;
         const mine = Math.max(netClearance(s2, netKey2), minC);
@@ -29990,23 +29990,23 @@ var require_pcb_tools = __commonJS({
         const n2 = p && p.net;
         return !!t && K11.str(t[1]) === "free" && !!n2 && /^(.*\/)?unconnected-\(/.test(n2.name || "");
       }
-      function routeObstacles(doc2, s2, netKey2, layer3, own, skip2) {
+      function routeObstacles(doc2, s2, netKey2, layer4, own, skip2) {
         const W12 = routerWorld(doc2);
         const out2 = [];
         const take = (o, net) => {
           const ob = { id: o.id, kind: o.kind, net: net || "", shape: o.shape, bbox: o.bbox, src: o };
-          ob.clr = routeClearance(s2, netKey2, ob, layer3, doc2);
+          ob.clr = routeClearance(s2, netKey2, ob, layer4, doc2);
           out2.push(ob);
         };
         for (const c of W12.conds) {
-          if (!c.layers.has(layer3) || skip2 && skip2.has(c.id) && c.kind !== "pad") continue;
+          if (!c.layers.has(layer4) || skip2 && skip2.has(c.id) && c.kind !== "pad") continue;
           if (netKey2 && c.net === netKey2) continue;
           if (c.kind === "pad" && (!c.net ? !netKey2 : isFreePad(c.pad))) continue;
           if (own && own.has(c.id) && c.kind !== "pad") continue;
           take(c, c.net);
         }
         for (const h3 of W12.holes) take(h3, "");
-        for (const k of W12.keepouts) if (k.layers.has(layer3)) take(k, "");
+        for (const k of W12.keepouts) if (k.layers.has(layer4)) take(k, "");
         for (const e of W12.edges) take(e, "");
         return indexObstacles(out2);
       }
@@ -30385,8 +30385,8 @@ var require_pcb_tools = __commonJS({
         const els = roundCorners(pts);
         return !clear || clear(elemsPts(els)) ? els : plain();
       }
-      function arcTrackNode(doc2, a, m, b, width, layer3, net) {
-        return ["arc", ["start", r65(a[0]), r65(a[1])], ["mid", r65(m[0]), r65(m[1])], ["end", r65(b[0]), r65(b[1])], ["width", r65(width)], ["layer", layer3], netNode(doc2, net)];
+      function arcTrackNode(doc2, a, m, b, width, layer4, net) {
+        return ["arc", ["start", r65(a[0]), r65(a[1])], ["mid", r65(m[0]), r65(m[1])], ["end", r65(b[0]), r65(b[1])], ["width", r65(width)], ["layer", layer4], netNode(doc2, net)];
       }
       S2.tuneSettings = { single: meanderDefaults(), diffpair: meanderDefaults(), skew: meanderDefaults() };
       var TUNE_TOOLS = /* @__PURE__ */ new Set(["tunesingle", "tunediff", "tuneskew"]);
@@ -33113,7 +33113,7 @@ var require_pcb_tools = __commonJS({
         const l = K11.kid(z2, "layers") || K11.kid(z2, "layer");
         return l ? l.slice(1).map((x) => K11.str(x)) : [];
       };
-      var onLayer = (ls, layer3) => !layer3 || ls.some((l) => l === layer3 || l === "*.Cu" && /\.Cu$/.test(layer3) || l === "F&B.Cu" && /^[FB]\.Cu$/.test(layer3) || l.startsWith("*.") && layer3.endsWith(l.slice(1)));
+      var onLayer = (ls, layer4) => !layer4 || ls.some((l) => l === layer4 || l === "*.Cu" && /\.Cu$/.test(layer4) || l === "F&B.Cu" && /^[FB]\.Cu$/.test(layer4) || l.startsWith("*.") && layer4.endsWith(l.slice(1)));
       function areasMatching(doc2, arg, A, B) {
         if (arg === "A" || arg === "B") {
           const it = arg === "A" ? A : B;
@@ -33304,8 +33304,8 @@ var require_pcb_tools = __commonJS({
             for (const z2 of areasMatching(doc2, as, c.A, c.B)) {
               if (z2.node === it.node) continue;
               const zl = zoneLayersOf(z2.node);
-              const layer3 = it.layer || (it.kind === "footprint" ? null : layerOf2(it.node, ""));
-              if (layer3 && !onLayer(zl, layer3) && it.kind !== "via" && it.kind !== "pad") continue;
+              const layer4 = it.layer || (it.kind === "footprint" ? null : layerOf2(it.node, ""));
+              if (layer4 && !onLayer(zl, layer4) && it.kind !== "via" && it.kind !== "pad") continue;
               if (it.kind === "footprint" && fn !== "enclosedByArea") {
                 const cy = courtyardLoops2(it.item || { id: "", kind: "footprint", node: it.node });
                 const sides = [zl.some((l) => /^F\.|^\*\.|F&B/.test(l)) ? "F.CrtYd" : "", zl.some((l) => /^B\.|^\*\.|F&B/.test(l)) ? "B.CrtYd" : ""].filter(Boolean);
@@ -33647,11 +33647,11 @@ var require_pcb_tools = __commonJS({
         }
         return { rules, errors };
       }
-      var layerOk = (rule2, layer3) => {
-        if (!rule2.layer || !layer3) return true;
-        if (rule2.layer === "outer") return /^(F|B)\.Cu$/.test(layer3);
-        if (rule2.layer === "inner") return /^In\d+\.Cu$/.test(layer3);
-        return wildMatch(rule2.layer, layer3);
+      var layerOk = (rule2, layer4) => {
+        if (!rule2.layer || !layer4) return true;
+        if (rule2.layer === "outer") return /^(F|B)\.Cu$/.test(layer4);
+        if (rule2.layer === "inner") return /^In\d+\.Cu$/.test(layer4);
+        return wildMatch(rule2.layer, layer4);
       };
       function ruleMatches(rule2, doc2, s2, A, B) {
         if (rule2.error) return false;
@@ -33876,13 +33876,13 @@ var require_pcb_tools = __commonJS({
         }
         return [];
       }
-      function geomShapes(geoms, layer3, grow6 = 0) {
+      function geomShapes(geoms, layer4, grow6 = 0) {
         const out2 = [], knock = [];
         const log = new PlotLog2();
         for (const g2 of geoms) {
           if (g2.hiddenText || g2.point || g2.zoneOutline || g2.zoneHatch || g2.pad || g2.hole || g2.padText) continue;
-          if (g2.layer === layer3) geomPrims2(g2, out2, knock, log, 0);
-          else if (g2.maskLayer === layer3) geomPrims2(g2, out2, knock, log, grow6 || (typeof g2.maskMargin === "number" ? g2.maskMargin : 0));
+          if (g2.layer === layer4) geomPrims2(g2, out2, knock, log, 0);
+          else if (g2.maskLayer === layer4) geomPrims2(g2, out2, knock, log, grow6 || (typeof g2.maskMargin === "number" ? g2.maskMargin : 0));
         }
         const shapes2 = [];
         for (const p of knock.concat(out2)) for (const s2 of primShapes(p)) shapes2.push(s2);
@@ -34105,14 +34105,14 @@ var require_pcb_tools = __commonJS({
       function elementsOn(doc2, s2, layers, ms, pool) {
         return pool ? pool.filter((e) => layers.has(e.layer)) : boardElements(doc2, s2, layers, ms);
       }
-      var ruleItem = (e, layer3) => ({ kind: e.kind, node: e.node, parent: e.fp, item: e.fp ? null : void 0, layer: layer3, shape: e.shapes[0] || null, id: e.id });
-      function silkConstraint(rules, doc2, s2, a, b, layer3) {
+      var ruleItem = (e, layer4) => ({ kind: e.kind, node: e.node, parent: e.fp, item: e.fp ? null : void 0, layer: layer4, shape: e.shapes[0] || null, id: e.id });
+      function silkConstraint(rules, doc2, s2, a, b, layer4) {
         if (rules.length && a) {
-          const A = ruleItem(a, layer3 || a.layer), B = b ? ruleItem(b, layer3 || b.layer) : null;
+          const A = ruleItem(a, layer4 || a.layer), B = b ? ruleItem(b, layer4 || b.layer) : null;
           const h3 = evalRuleConstraint(rules, "silk_clearance", doc2, s2, A, B) || (B ? evalRuleConstraint(rules, "silk_clearance", doc2, s2, B, A) : null);
           if (h3) return { min: h3.severity === "ignore" ? -1 : h3.min != null ? h3.min : 0, name: h3.name };
         }
-        if (layer3 === null || SILK2.includes(layer3)) return { min: typeof s2.minSilkClearance === "number" ? s2.minSilkClearance : 0, name: "board setup constraints silk" };
+        if (layer4 === null || SILK2.includes(layer4)) return { min: typeof s2.minSilkClearance === "number" ? s2.minSilkClearance : 0, name: "board setup constraints silk" };
         return null;
       }
       var detail = (name, min, actual) => min > 0 ? ` (${name} clearance ${mm4(min)}; actual ${mm4(Math.max(0, actual))})` : "";
@@ -34151,20 +34151,20 @@ var require_pcb_tools = __commonJS({
         const reported = /* @__PURE__ */ new Set();
         for (const silkLayer of SILK2) {
           const refs = byLayer.get(silkLayer) || [];
-          for (const target2 of TARGETS[silkLayer]) {
-            const tests = byLayer.get(target2) || [];
+          for (const target3 of TARGETS[silkLayer]) {
+            const tests = byLayer.get(target3) || [];
             if (!tests.length) continue;
             const near3 = elementGrid(tests);
             for (const ref of refs) for (const test of near3(ref.bbox, largest)) {
               if (ref === test) continue;
-              if (target2 === silkLayer && ref.uuid > test.uuid) continue;
+              if (target3 === silkLayer && ref.uuid > test.uuid) continue;
               if (!touch(ref.bbox, test.bbox, largest)) continue;
               if (!touchesOutline(test)) continue;
               let code = "silk_overlap";
-              const c = silkConstraint(rules, doc2, s2, ref, test, target2);
+              const c = silkConstraint(rules, doc2, s2, ref, test, target3);
               let min = c ? c.min : -1;
               const name = c ? c.name : "";
-              if (/\.Mask$/.test(target2)) {
+              if (/\.Mask$/.test(target3)) {
                 if (checkIndividualMaskItems) min = Math.max(min, 0);
                 code = "silk_over_copper";
               }
@@ -34172,8 +34172,8 @@ var require_pcb_tools = __commonJS({
               const isShape = (e) => /^(fp|gr)_(line|rect|circle|arc|poly|curve|ellipse|ellipse_arc)$/.test(e.kind);
               if (isShape(ref) && isShape(test) && ref.fp === test.fp) continue;
               let [a, b] = [ref, test];
-              if (target2 === silkLayer && a.uuid > b.uuid) [a, b] = [b, a];
-              const key3 = code + "|" + a.uuid + "|" + b.uuid + "|" + target2;
+              if (target3 === silkLayer && a.uuid > b.uuid) [a, b] = [b, a];
+              const key3 = code + "|" + a.uuid + "|" + b.uuid + "|" + target3;
               if (reported.has(key3)) continue;
               const gap = elementGap(a, b);
               if (!collides(gap, min)) continue;
@@ -34320,7 +34320,7 @@ var require_pcb_tools = __commonJS({
         const els = elementsOn(doc2, s2, /* @__PURE__ */ new Set(["F.Mask", "B.Mask", "F.Cu", "B.Cu"]), ms, pool).filter((e) => e.kind !== "zone");
         const zones = conductors(doc2).filter((c) => c.kind === "zone");
         const mtc = typeof s2.maskToCopperClearance === "number" ? s2.maskToCopperClearance : 0;
-        const ignored = (e, layer3) => rules.length > 0 && (evalRuleConstraint(rules, "bridged_mask", doc2, s2, ruleItem(e, layer3), null) || { severity: null }).severity === "ignore";
+        const ignored = (e, layer4) => rules.length > 0 && (evalRuleConstraint(rules, "bridged_mask", doc2, s2, ruleItem(e, layer4), null) || { severity: null }).severity === "ignore";
         const checked = /* @__PURE__ */ new Set();
         const bridges = [];
         const apertures = /* @__PURE__ */ new Map();
@@ -34492,16 +34492,16 @@ var require_pcb_tools = __commonJS({
         for (const fp of m.footprints) for (const p of fp.pads) pads.set(p.node, p);
         return { m, pads, nets: /* @__PURE__ */ new Map() };
       }
-      function netCopper(layer3, conds, cc, outside = false) {
-        const key3 = (outside === "low" ? "low:" : outside ? "out:" : "") + layer3;
+      function netCopper(layer4, conds, cc, outside = false) {
+        const key3 = (outside === "low" ? "low:" : outside ? "out:" : "") + layer4;
         let got = cc.nets.get(key3);
         if (got) return got;
         const byNet = /* @__PURE__ */ new Map();
-        for (const c of conds) if (c.layers.has(layer3)) {
+        for (const c of conds) if (c.layers.has(layer4)) {
           const k = c.net || "";
           let l = byNet.get(k);
           if (!l) byNet.set(k, l = []);
-          let polys = conductorPolys(c, layer3, cc, outside);
+          let polys = conductorPolys(c, layer4, cc, outside);
           if (outside === "low") polys = splitCollinearOutlines(polys);
           for (const p of polys) l.push(p);
         }
@@ -34510,13 +34510,13 @@ var require_pcb_tools = __commonJS({
         cc.nets.set(key3, got);
         return got;
       }
-      function conductorPolys(c, layer3, cc, outside = false) {
+      function conductorPolys(c, layer4, cc, outside = false) {
         const loc = outside === "low" ? "inside" : "outside", err = outside === "low" ? ARC_LOW_DEF : ARC_HIGH_DEF;
         if (c.kind === "pad") {
           const fp = cc.pads.get(c.pad.node);
           if (fp) {
             const out2 = [];
-            padPrims2(fp, layer3, cc.m, out2);
+            padPrims2(fp, layer4, cc.m, out2);
             return out2.flatMap((p) => outside && p.k === "circle" && p.d > 0 ? [circleApprox(p.x, p.y, p.d / 2, err, loc)] : primPolys2(p));
           }
         }
@@ -34603,10 +34603,10 @@ var require_pcb_tools = __commonJS({
         return a * 0.5;
       }
       var CONDUCTOR_KINDS = /* @__PURE__ */ new Set(["segment", "arc", "via", "zone"]);
-      function layerCopperOutlines(doc2, layer3, conds, cc) {
+      function layerCopperOutlines(doc2, layer4, conds, cc) {
         const polys = [];
-        for (const merged of netCopper(layer3, conds, cc, "low").values()) for (const p of merged) polys.push(p);
-        for (const it of doc2.items.values()) if (!CONDUCTOR_KINDS.has(it.kind)) for (const s2 of geomShapes(it.geom, layer3)) for (const p of splitCollinearOutlines(approxShapePolys(s2, ARC_LOW_DEF, "inside"))) polys.push(p);
+        for (const merged of netCopper(layer4, conds, cc, "low").values()) for (const p of merged) polys.push(p);
+        for (const it of doc2.items.values()) if (!CONDUCTOR_KINDS.has(it.kind)) for (const s2 of geomShapes(it.geom, layer4)) for (const p of splitCollinearOutlines(approxShapePolys(s2, ARC_LOW_DEF, "inside"))) polys.push(p);
         return union22(polys).filter((p) => clipperArea(p) > 0).map((p) => p.map((q4) => [Math.round(q4[0] * 1e6), Math.round(q4[1] * 1e6)]));
       }
       function approxCollinear(s1, s2, th) {
@@ -34750,19 +34750,19 @@ var require_pcb_tools = __commonJS({
       function sliverMarkers(doc2, conds, cc) {
         const out2 = [];
         const ctx = cc || copperCtx(doc2);
-        for (const layer3 of doc2.copper) {
-          const name = layerName3(doc2, layer3);
-          for (const poly of layerCopperOutlines(doc2, layer3, conds, ctx)) for (const p of sliverPoints(poly)) {
+        for (const layer4 of doc2.copper) {
+          const name = layerName3(doc2, layer4);
+          for (const poly of layerCopperOutlines(doc2, layer4, conds, ctx)) for (const p of sliverPoints(poly)) {
             const m = marker("copper_sliver", "warning", p[0] / 1e6, p[1] / 1e6, `Copper sliver (${name})`, []);
-            m.layer = layer3;
+            m.layer = layer4;
             out2.push(m);
           }
         }
         return out2;
       }
-      function layerName3(doc2, layer3) {
-        const l = doc2.layers && doc2.layers.get(layer3);
-        return l && l.userName ? l.userName : layer3;
+      function layerName3(doc2, layer4) {
+        const l = doc2.layers && doc2.layers.get(layer4);
+        return l && l.userName ? l.userName : layer4;
       }
       var IU3 = 1e6;
       var MAX_ERROR_IU = 5e3;
@@ -34973,8 +34973,8 @@ var require_pcb_tools = __commonJS({
         for (const c of conds) {
           if (c.kind === "segment" || c.kind === "arc") {
             const [a, b] = c.anchors;
-            const layer3 = layerOf2(c.item.node);
-            const A = { kind: c.kind, node: c.item.node, item: c.item, layer: layer3, shape: c.shape };
+            const layer4 = layerOf2(c.item.node);
+            const A = { kind: c.kind, node: c.item.node, item: c.item, layer: layer4, shape: c.shape };
             const r = resolve2(rules, "track_width", doc2, s2, A, null, s2.minTrackWidth || 0);
             const f2 = fails(r, c.width);
             if (r && f2) out2.push(marker("track_width", sev(r), (a[0] + b[0]) / 2, (a[1] + b[1]) / 2, `Track width (${r.name} ${f2.kind} width ${mm4(f2.v)}; actual ${mm4(c.width)})`, [c.id]));
@@ -35473,11 +35473,11 @@ var require_pcb_tools = __commonJS({
         const widths = connectionWidths(s2, rules).filter((w) => w - eps > 0);
         if (!widths.length) return out2;
         const ctx = cc || copperCtx(doc2);
-        const ruleItem2 = (c, layer3) => c.kind === "pad" ? { kind: c.kind, node: c.pad.node, parent: c.item, layer: layer3, shape: c.shape } : { kind: c.kind, node: c.item.node, item: c.item, layer: layer3, shape: c.shape };
-        for (const layer3 of doc2.copper) {
-          const onLayer3 = conductors2.filter((c) => c.layers.has(layer3));
+        const ruleItem2 = (c, layer4) => c.kind === "pad" ? { kind: c.kind, node: c.pad.node, parent: c.item, layer: layer4, shape: c.shape } : { kind: c.kind, node: c.item.node, item: c.item, layer: layer4, shape: c.shape };
+        for (const layer4 of doc2.copper) {
+          const onLayer3 = conductors2.filter((c) => c.layers.has(layer4));
           const ordered = [...onLayer3.filter((c) => c.kind !== "zone"), ...onLayer3.filter((c) => c.kind === "zone")];
-          for (const merged of netCopper(layer3, conductors2, ctx, true).values()) {
+          for (const merged of netCopper(layer4, conductors2, ctx, true).values()) {
             const polys = fracture2(merged).map((p) => p.map((q4) => [Math.round(q4[0] * 1e6), Math.round(q4[1] * 1e6)]));
             for (const minW of widths) {
               const test = new PolygonTest(Math.round((minW - eps) * 1e6));
@@ -35488,17 +35488,17 @@ var require_pcb_tools = __commonJS({
                 const at4 = { t: "circle", x: loc[0], y: loc[1], r: 0 };
                 const hit5 = ordered.filter((c) => shapeGap(c.shape, at4) <= minW);
                 if (!hit5.length) continue;
-                const r = resolve2(rules, "connection_width", doc2, s2, ruleItem2(hit5[0], layer3), hit5[1] ? ruleItem2(hit5[1], layer3) : null, Number(s2.minConn) || 0);
+                const r = resolve2(rules, "connection_width", doc2, s2, ruleItem2(hit5[0], layer4), hit5[1] ? ruleItem2(hit5[1], layer4) : null, Number(s2.minConn) || 0);
                 if (!r || r.min == null || Math.abs(r.min - minW) > 1e-9) continue;
                 const m = marker(
                   "connection_width",
                   r.severity === "warning" || r.severity === "error" ? r.severity : "warning",
                   loc[0],
                   loc[1],
-                  `Copper connection too narrow (${r.name} minimum connection width ${mm4(r.min)}; actual ${mm4(dist)}) (${layerName3(doc2, layer3)})`,
+                  `Copper connection too narrow (${r.name} minimum connection width ${mm4(r.min)}; actual ${mm4(dist)}) (${layerName3(doc2, layer4)})`,
                   Array.from(new Set(hit5.map((c) => c.id)))
                 );
-                m.layer = layer3;
+                m.layer = layer4;
                 m.rule = r.name;
                 out2.push(m);
               }
@@ -35690,10 +35690,10 @@ var require_pcb_tools = __commonJS({
       }
       function boardTexts(doc2) {
         const out2 = [];
-        const take = (n2, id, tf2, fp, layer3) => {
+        const take = (n2, id, tf2, fp, layer4) => {
           const k = kindOf2(n2);
           const at4 = pt4(n2, k.endsWith("text_box") ? "start" : "at") || (k.endsWith("text_box") ? K11.ptsOf(n2)[0] : null) || [0, 0];
-          out2.push({ id, node: n2, kind: k, layer: layer3 || layerOf2(n2, "F.SilkS"), pos: tf2(at4[0], at4[1]), fp });
+          out2.push({ id, node: n2, kind: k, layer: layer4 || layerOf2(n2, "F.SilkS"), pos: tf2(at4[0], at4[1]), fp });
         };
         for (const it of doc2.items.values()) {
           const n2 = it.node;
@@ -35755,8 +35755,8 @@ var require_pcb_tools = __commonJS({
         const chains = { "F.CrtYd": [], "B.CrtYd": [] };
         for (const g2 of fp.node) {
           if (!isList10(g2) || !/^fp_(line|rect|circle|arc|poly)$/.test(g2[0])) continue;
-          const layer3 = layerOf2(g2, "");
-          if (!chains[layer3]) continue;
+          const layer4 = layerOf2(g2, "");
+          if (!chains[layer4]) continue;
           const kind = g2[0].slice(3);
           const P4 = (key3) => {
             const p = pt4(g2, key3);
@@ -35764,12 +35764,12 @@ var require_pcb_tools = __commonJS({
           };
           if (kind === "line") {
             const a = P4("start"), b = P4("end");
-            if (a && b) chains[layer3].push([a, b]);
+            if (a && b) chains[layer4].push([a, b]);
           } else if (kind === "rect") {
             const s0 = pt4(g2, "start"), e = pt4(g2, "end");
             if (s0 && e) {
               const pts = [tf2(s0[0], s0[1]), tf2(e[0], s0[1]), tf2(e[0], e[1]), tf2(s0[0], e[1])];
-              chains[layer3].push(pts.concat([pts[0]]));
+              chains[layer4].push(pts.concat([pts[0]]));
             }
           } else if (kind === "circle") {
             const c = P4("center"), e = P4("end");
@@ -35777,37 +35777,37 @@ var require_pcb_tools = __commonJS({
               const r = Math.hypot(e[0] - c[0], e[1] - c[1]);
               const pts = [];
               for (let i = 0; i < 32; i++) pts.push([c[0] + r * Math.cos(i * Math.PI / 16), c[1] + r * Math.sin(i * Math.PI / 16)]);
-              chains[layer3].push(pts.concat([pts[0]]));
+              chains[layer4].push(pts.concat([pts[0]]));
             }
           } else if (kind === "arc") {
             const a = P4("start"), m = P4("mid"), b = P4("end");
             if (a && m && b) {
               const arc = K11.arcFrom3(a, m, b);
-              chains[layer3].push(arc ? arcPoints3(arc, a, b) : [a, b]);
+              chains[layer4].push(arc ? arcPoints3(arc, a, b) : [a, b]);
             }
           } else if (kind === "poly") {
             const pts = K11.ptsOf(g2).map(([x, y]) => tf2(x, y));
-            if (pts.length > 2) chains[layer3].push(pts.concat([pts[0]]));
+            if (pts.length > 2) chains[layer4].push(pts.concat([pts[0]]));
           }
         }
         const res = {};
-        for (const layer3 of Object.keys(chains)) {
-          if (!chains[layer3].length) {
-            res[layer3] = { loops: [], open: null };
+        for (const layer4 of Object.keys(chains)) {
+          if (!chains[layer4].length) {
+            res[layer4] = { loops: [], open: null };
             continue;
           }
-          const { loops, dangling } = chainLoops2(chains[layer3], 0.02);
+          const { loops, dangling } = chainLoops2(chains[layer4], 0.02);
           let open3 = null;
           if (dangling) {
             const ends = [];
-            for (const c of chains[layer3]) {
+            for (const c of chains[layer4]) {
               const a = c[0], b = c[c.length - 1];
               if (Math.hypot(a[0] - b[0], a[1] - b[1]) > 0.02) ends.push(a, b);
             }
             const free = ends.filter((e) => ends.filter((o) => Math.hypot(o[0] - e[0], o[1] - e[1]) <= 0.02).length < 2);
-            open3 = free[0] || ends[0] || chains[layer3][0][0];
+            open3 = free[0] || ends[0] || chains[layer4][0][0];
           }
-          res[layer3] = { loops, open: open3 };
+          res[layer4] = { loops, open: open3 };
         }
         return res;
       }
@@ -35920,7 +35920,7 @@ var require_pcb_tools = __commonJS({
           if (it.kind === "segment" || it.kind === "arc") {
             const a = pt4(n2, "start"), b = pt4(n2, "end");
             if (!a || !b) continue;
-            const layer3 = layerOf2(n2);
+            const layer4 = layerOf2(n2);
             const w = K11.num((K11.kid(n2, "width") || [0, 0.25])[1], 0.25);
             let pts = [a, b];
             if (it.kind === "arc") {
@@ -35930,7 +35930,7 @@ var require_pcb_tools = __commonJS({
             }
             const shape3 = { t: "path", pts, r: w / 2 };
             kos.forEach((k, i) => {
-              if (k.tracks && k.layers.has(layer3) && hits2(shape3, i)) {
+              if (k.tracks && k.layers.has(layer4) && hits2(shape3, i)) {
                 const p = firstInside(shape3, pts, k.pts);
                 out2.push(marker("items_not_allowed", sev3, p[0], p[1], `Items not allowed (${keepoutRuleName(k)})`, [it.id]));
               }
@@ -36092,7 +36092,7 @@ var require_pcb_tools = __commonJS({
         const a = K11.kid(z2, "attr");
         return !!a && !!K11.kid(a, "teardrop");
       };
-      var padOnLayer = (p, layer3) => p.layers.some((l) => l === layer3 || l === "*.Cu" || l === "F&B.Cu" && (layer3 === "F.Cu" || layer3 === "B.Cu"));
+      var padOnLayer = (p, layer4) => p.layers.some((l) => l === layer4 || l === "*.Cu" || l === "F&B.Cu" && (layer4 === "F.Cu" || layer4 === "B.Cu"));
       function starvedThermalMarkers(doc2, s2, rules, conds) {
         const out2 = [];
         const sev3 = defaultSeverity3("starved_thermal");
@@ -36118,7 +36118,7 @@ var require_pcb_tools = __commonJS({
           if (!zf) continue;
           const zNet = (all2.find((c) => c.id === z2.id) || { net: "" }).net;
           if (!zNet) continue;
-          for (const [layer3, outlines] of zf) {
+          for (const [layer4, outlines] of zf) {
             const obox = outlines.map(boxOf2);
             const zb = [Math.min(...obox.map((b) => b[0])), Math.min(...obox.map((b) => b[1])), Math.max(...obox.map((b) => b[2])), Math.max(...obox.map((b) => b[3]))];
             const single = /* @__PURE__ */ new Map();
@@ -36128,7 +36128,7 @@ var require_pcb_tools = __commonJS({
               const poly = { t: "poly", pts: outlines[jj] };
               const ids = /* @__PURE__ */ new Set();
               for (const c of all2) {
-                if (c.kind === "zone" || c.net !== zNet || !c.layers.has(layer3)) continue;
+                if (c.kind === "zone" || c.net !== zNet || !c.layers.has(layer4)) continue;
                 const b = c.bbox;
                 const ob = obox[jj];
                 if (b[0] > ob[2] || b[2] < ob[0] || b[1] > ob[3] || b[3] < ob[1]) continue;
@@ -36142,11 +36142,11 @@ var require_pcb_tools = __commonJS({
             for (const fp of fps) for (const p of padsByFp.get(fp)) {
               const net = netOfPad(p);
               if (!net || net !== zNet) continue;
-              if (!padOnLayer(p, layer3)) continue;
+              if (!padOnLayer(p, layer4)) continue;
               const pb = shapeBBox(padShape(p));
               if (pb[0] > zb[2] || pb[2] < zb[0] || pb[1] > zb[3] || pb[3] < zb[1]) continue;
               if (padZoneConnection(p, fp, z2.node) !== "thermal") continue;
-              const A = { kind: "pad", node: p.node, parent: fp, layer: layer3 }, B = { kind: "zone", node: z2.node, item: z2, layer: layer3 };
+              const A = { kind: "pad", node: p.node, parent: fp, layer: layer4 }, B = { kind: "zone", node: z2.node, item: z2, layer: layer4 };
               const hit5 = rules.length ? evalRuleConstraint(rules, "min_resolved_spokes", doc2, s2, A, B) : null;
               if (hit5 && hit5.severity === "ignore") continue;
               const minCount = hit5 && hit5.min != null ? hit5.min : defMin;
@@ -36173,7 +36173,7 @@ var require_pcb_tools = __commonJS({
               if (spokes < minCount) {
                 const inFill = (q4) => outlines.some((fo) => pointInPoly4(fo, q4[0], q4[1]));
                 for (const c of all2) {
-                  if (c.kind !== "segment" && c.kind !== "arc" || c.net !== zNet || !c.layers.has(layer3)) continue;
+                  if (c.kind !== "segment" && c.kind !== "arc" || c.net !== zNet || !c.layers.has(layer4)) continue;
                   const [a0, a1] = c.anchors;
                   if (pointInPoly4(outline, a0[0], a0[1])) {
                     if (inFill(a1)) spokes++;
@@ -36188,9 +36188,9 @@ var require_pcb_tools = __commonJS({
               }
               if (spokes >= minCount) continue;
               const pos = ignored && ignoredPos ? ignoredPos : [p.x, p.y];
-              const detail2 = ignored ? `(layer ${layer3}; ${ignored} spokes connected to isolated island)` : `(layer ${layer3}; ${name} min spoke count ${minCount}; actual ${spokes})`;
+              const detail2 = ignored ? `(layer ${layer4}; ${ignored} spokes connected to isolated island)` : `(layer ${layer4}; ${name} min spoke count ${minCount}; actual ${spokes})`;
               const m = marker("starved_thermal", sev3, pos[0], pos[1], `Thermal relief connection to zone incomplete ${detail2}`, [z2.id, fp.id]);
-              m.layer = layer3;
+              m.layer = layer4;
               out2.push(m);
             }
           }
@@ -36210,10 +36210,10 @@ var require_pcb_tools = __commonJS({
         all2.forEach((c, i) => {
           if (c.kind !== "zone" || !c.net || zoneFillMode(c.item.node) === "thieving" || isTeardrop(c.item.node)) return;
           if (padded.has(roots[i] + "\0" + c.net)) return;
-          const layer3 = [...c.layers][0];
+          const layer4 = [...c.layers][0];
           const poly = c.shape;
           const m = marker("isolated_copper", sev3, poly.pts[0][0], poly.pts[0][1], "Isolated copper fill", [c.id]);
-          m.layer = layer3;
+          m.layer = layer4;
           out2.push(m);
         });
         return out2;
@@ -36350,8 +36350,8 @@ var require_pcb_tools = __commonJS({
       var mm4 = (v) => v.toFixed(4) + " mm";
       function edgeShapes(doc2) {
         const shapes2 = [], chains = [];
-        const take = (kind, node, tf2, layer3) => {
-          if (layer3 !== "Edge.Cuts") return;
+        const take = (kind, node, tf2, layer4) => {
+          if (layer4 !== "Edge.Cuts") return;
           const w = K11.kid(node, "stroke") ? K11.num((K11.kid(K11.kid(node, "stroke"), "width") || [0, 0])[1]) : widthOf3(node, 0);
           const P4 = (key3) => {
             const p = pt4(node, key3);
@@ -36491,8 +36491,8 @@ var require_pcb_tools = __commonJS({
         const out2 = { "F.CrtYd": [], "B.CrtYd": [] };
         for (const g2 of n2) {
           if (!isList10(g2) || !/^fp_(line|rect|circle|arc|poly)$/.test(g2[0])) continue;
-          const layer3 = layerOf2(g2, "");
-          if (!out2[layer3]) continue;
+          const layer4 = layerOf2(g2, "");
+          if (!out2[layer4]) continue;
           const kind = g2[0].slice(3);
           const P4 = (key3) => {
             const p = pt4(g2, key3);
@@ -36500,12 +36500,12 @@ var require_pcb_tools = __commonJS({
           };
           if (kind === "line") {
             const a = P4("start"), b = P4("end");
-            if (a && b) out2[layer3].push([a, b]);
+            if (a && b) out2[layer4].push([a, b]);
           } else if (kind === "rect") {
             const s2 = pt4(g2, "start"), e = pt4(g2, "end");
             if (s2 && e) {
               const pts = [tf2(s2[0], s2[1]), tf2(e[0], s2[1]), tf2(e[0], e[1]), tf2(s2[0], e[1])];
-              out2[layer3].push(pts.concat([pts[0]]));
+              out2[layer4].push(pts.concat([pts[0]]));
             }
           } else if (kind === "circle") {
             const c = P4("center"), e = P4("end");
@@ -36513,21 +36513,21 @@ var require_pcb_tools = __commonJS({
               const r = Math.hypot(e[0] - c[0], e[1] - c[1]);
               const pts = [];
               for (let i = 0; i < 32; i++) pts.push([c[0] + r * Math.cos(i * Math.PI / 16), c[1] + r * Math.sin(i * Math.PI / 16)]);
-              out2[layer3].push(pts.concat([pts[0]]));
+              out2[layer4].push(pts.concat([pts[0]]));
             }
           } else if (kind === "arc") {
             const a = P4("start"), m = P4("mid"), b = P4("end");
             if (a && m && b) {
               const arc = K11.arcFrom3(a, m, b);
-              out2[layer3].push(arc ? arcPoints3(arc, a, b) : [a, b]);
+              out2[layer4].push(arc ? arcPoints3(arc, a, b) : [a, b]);
             }
           } else if (kind === "poly") {
             const pts = K11.ptsOf(g2).map(([x, y]) => tf2(x, y));
-            if (pts.length > 2) out2[layer3].push(pts.concat([pts[0]]));
+            if (pts.length > 2) out2[layer4].push(pts.concat([pts[0]]));
           }
         }
         const res = {};
-        for (const layer3 of Object.keys(out2)) res[layer3] = out2[layer3].length ? chainLoops2(out2[layer3]).loops : [];
+        for (const layer4 of Object.keys(out2)) res[layer4] = out2[layer4].length ? chainLoops2(out2[layer4]).loops : [];
         return res;
       }
       function segCross(p1, p2, p3, p4) {
@@ -36551,7 +36551,7 @@ var require_pcb_tools = __commonJS({
         const clrRules = rules.filter((r) => r.constraints.some((k) => k.type === "clearance" && k.min != null));
         const ruleMax = Math.max(0, ...clrRules.map((r) => r.constraints.find((k) => k.type === "clearance").min || 0));
         const maxClr = Math.max(s2.clearance, s2.minClearance || 0, ...Object.values(s2.netclasses).map((n2) => n2.clearance || 0), s2.edgeClearance, ruleMax);
-        const ruleItem2 = (c, layer3) => c.kind === "pad" ? { kind: c.kind, node: c.pad.node, parent: c.item, layer: layer3, shape: c.shape } : { kind: c.kind, node: c.item.node, item: c.item, layer: layer3, shape: c.shape };
+        const ruleItem2 = (c, layer4) => c.kind === "pad" ? { kind: c.kind, node: c.pad.node, parent: c.item, layer: layer4, shape: c.shape } : { kind: c.kind, node: c.item.node, item: c.item, layer: layer4, shape: c.shape };
         const order = conds.slice().sort((a, b) => a.bbox[0] - b.bbox[0]);
         for (let i = 0; i < order.length; i++) {
           const a = order[i];
@@ -36562,8 +36562,8 @@ var require_pcb_tools = __commonJS({
             if (!shareLayer(a.layers, b.layers)) continue;
             let need = Math.max(clr(a), clr(b), s2.minClearance || 0), by = "";
             if (clrRules.length && boxesTouch(a.bbox, b.bbox, maxClr)) {
-              const layer3 = [...a.layers].find((l) => b.layers.has(l)) || "";
-              const hit5 = ruleClearance(clrRules, doc2, s2, ruleItem2(a, layer3), ruleItem2(b, layer3));
+              const layer4 = [...a.layers].find((l) => b.layers.has(l)) || "";
+              const hit5 = ruleClearance(clrRules, doc2, s2, ruleItem2(a, layer4), ruleItem2(b, layer4));
               if (hit5) {
                 need = hit5.min > 0 ? Math.max(hit5.min, s2.minClearance || 0) : 0;
                 by = hit5.name;
@@ -36594,8 +36594,8 @@ var require_pcb_tools = __commonJS({
           for (const c of conds) {
             let need = s2.edgeClearance, name = "board setup constraints edge";
             if (edgeRules) {
-              const layer3 = c.layers.values().next().value || "";
-              const h3 = evalRuleConstraint(rules, "edge_clearance", doc2, s2, ruleItem2(c, layer3), edgeItem) || evalRuleConstraint(rules, "edge_clearance", doc2, s2, edgeItem, ruleItem2(c, layer3));
+              const layer4 = c.layers.values().next().value || "";
+              const h3 = evalRuleConstraint(rules, "edge_clearance", doc2, s2, ruleItem2(c, layer4), edgeItem) || evalRuleConstraint(rules, "edge_clearance", doc2, s2, edgeItem, ruleItem2(c, layer4));
               if (h3) {
                 need = h3.severity === "ignore" ? 0 : h3.min || 0;
                 name = h3.name;
@@ -36618,16 +36618,16 @@ var require_pcb_tools = __commonJS({
           out2.push(marker("shorting_items", "error", p[0], p[1], `Items shorting two nets (${Array.from(cl.nets).join(", ")})`, Array.from(new Set(cl.items.map((c) => c.id)))));
         }
         const condGrid = boxGrid(conds, (c) => c.bbox), zoneGrid = boxGrid(nl.conductors.filter((c) => c.kind === "zone"), (c) => c.bbox);
-        const touches = (p, layer3, self2) => {
+        const touches = (p, layer4, self2) => {
           const pb = [p[0], p[1], p[0], p[1]];
-          return condGrid.query(pb, EPS).some((c) => c !== self2 && c.layers.has(layer3) && shapeGap(c.shape, { t: "circle", x: p[0], y: p[1], r: 0 }) <= EPS) || zoneGrid.query(pb, EPS).some((c) => c.layers.has(layer3) && pointInPoly4(c.shape.pts, p[0], p[1]));
+          return condGrid.query(pb, EPS).some((c) => c !== self2 && c.layers.has(layer4) && shapeGap(c.shape, { t: "circle", x: p[0], y: p[1], r: 0 }) <= EPS) || zoneGrid.query(pb, EPS).some((c) => c.layers.has(layer4) && pointInPoly4(c.shape.pts, p[0], p[1]));
         };
         for (const c of conds) {
           if (c.kind === "segment" || c.kind === "arc") {
             const [a, b] = c.anchors;
-            const layer3 = c.layers.values().next().value;
+            const layer4 = c.layers.values().next().value;
             if (c.length < EPS) continue;
-            const loose = [a, b].find((p) => !touches(p, layer3, c));
+            const loose = [a, b].find((p) => !touches(p, layer4, c));
             if (loose) out2.push(marker("track_dangling", "warning", loose[0], loose[1], "Track has unconnected end", [c.id]));
           } else if (c.kind === "via") {
             const [a] = c.anchors;
@@ -36648,12 +36648,12 @@ var require_pcb_tools = __commonJS({
         const cy = fps.map((fp) => courtyards(fp));
         for (let i = 0; i < fps.length; i++) for (let j = i + 1; j < fps.length; j++) {
           if (!fps[i].bbox || !fps[j].bbox || !boxesTouch(fps[i].bbox, fps[j].bbox, 0)) continue;
-          for (const layer3 of ["F.CrtYd", "B.CrtYd"]) {
+          for (const layer4 of ["F.CrtYd", "B.CrtYd"]) {
             let hit5 = false;
-            for (const P4 of cy[i][layer3]) for (const Q of cy[j][layer3]) if (polysOverlap(P4, Q)) hit5 = true;
+            for (const P4 of cy[i][layer4]) for (const Q of cy[j][layer4]) if (polysOverlap(P4, Q)) hit5 = true;
             if (hit5) {
               const [x, y] = boxCenter(fps[i].bbox, fps[j].bbox);
-              out2.push(marker("courtyards_overlap", "error", x, y, `Courtyards overlap (${fps[i].ref || "footprint"} and ${fps[j].ref || "footprint"} on ${layer3})`, [fps[i].id, fps[j].id]));
+              out2.push(marker("courtyards_overlap", "error", x, y, `Courtyards overlap (${fps[i].ref || "footprint"} and ${fps[j].ref || "footprint"} on ${layer4})`, [fps[i].id, fps[j].id]));
             }
           }
         }
@@ -37271,7 +37271,7 @@ var require_pcb_tools = __commonJS({
         }
         return out2;
       }
-      var pairClr = (s2, a, b, layer3, kindB) => S2.dru && S2.dru.rules.length ? rulePairClearance(S2.shoveDoc || null, s2, a, b, layer3 || null, kindB) : Math.max(netClearance(s2, a), netClearance(s2, b), s2.minClearance || 0);
+      var pairClr = (s2, a, b, layer4, kindB) => S2.dru && S2.dru.rules.length ? rulePairClearance(S2.shoveDoc || null, s2, a, b, layer4 || null, kindB) : Math.max(netClearance(s2, a), netClearance(s2, b), s2.minClearance || 0);
       var sameNetKey = (a, b) => !!a && a === b;
       function insideConvex(P4, p) {
         let sign2 = 0;
@@ -37405,8 +37405,8 @@ var require_pcb_tools = __commonJS({
         else S2.sworld = { doc: doc2, ver: S2.docVer, key: key3, w };
         return w;
       }
-      function solidClr(s2, net, o, layer3) {
-        return routeClearance(s2, net, { kind: o.ckind === "hole" ? "hole" : o.ckind === "keepout" ? "keepout" : o.ckind === "edge" ? "edge" : o.ckind, net: o.net, id: o.id, src: o.src }, layer3, S2.shoveDoc || null);
+      function solidClr(s2, net, o, layer4) {
+        return routeClearance(s2, net, { kind: o.ckind === "hole" ? "hole" : o.ckind === "keepout" ? "keepout" : o.ckind === "edge" ? "edge" : o.ckind, net: o.net, id: o.id, src: o.src }, layer4, S2.shoveDoc || null);
       }
       function shoveNear(SW, st, box3, grow6, fn) {
         const C = SW.CELL, seen = /* @__PURE__ */ new Set();
@@ -37479,7 +37479,7 @@ var require_pcb_tools = __commonJS({
         if (L.via) {
           const v = L.via;
           const probe2 = { t: "circle", x: v.at[0], y: v.at[1] };
-          for (const layer3 of v.layers) shoveNear(SW, st, [v.at[0], v.at[1], v.at[0], v.at[1]], v.r + grow6, (o) => consider(o, probe2, segs.length * 1e4, v.r, layer3));
+          for (const layer4 of v.layers) shoveNear(SW, st, [v.at[0], v.at[1], v.at[0], v.at[1]], v.r + grow6, (o) => consider(o, probe2, segs.length * 1e4, v.r, layer4));
         }
         if (found.solid) return Object.assign({ kind: "solid" }, found.solid);
         if (found.via) return Object.assign({ kind: "via" }, found.via);
@@ -37714,15 +37714,15 @@ var require_pcb_tools = __commonJS({
         }
         return { hidden: hidden2, lines, vias };
       }
-      function solidObs(ctx, rt, layer3) {
-        layer3 = layer3 || rt.layer;
+      function solidObs(ctx, rt, layer4) {
+        layer4 = layer4 || rt.layer;
         const doc2 = routeDoc(ctx, rt);
         const s2 = settingsOf2(ctx);
-        const key3 = S2.docVer + "|" + layer3 + "|" + rt.width + "|" + rt.stages.length + "|" + rt.netKey + "|" + S2.rs.shove_vias;
+        const key3 = S2.docVer + "|" + layer4 + "|" + rt.width + "|" + rt.stages.length + "|" + rt.netKey + "|" + S2.rs.shove_vias;
         if (rt.sobs && rt.sobs.key === key3 && rt.sobs.doc === doc2) return rt.sobs;
         const SW = shoveWorld(doc2, s2, S2.rs.shove_vias);
         const skip2 = /* @__PURE__ */ new Set([...SW.tracks.keys(), ...SW.vias.keys()]);
-        rt.sobs = routeObstacles(doc2, s2, rt.netKey, layer3, rt.netKey ? null : routeOwn(rt), skip2);
+        rt.sobs = routeObstacles(doc2, s2, rt.netKey, layer4, rt.netKey ? null : routeOwn(rt), skip2);
         rt.sobs.key = key3;
         rt.sobs.doc = doc2;
         return rt.sobs;
@@ -37815,11 +37815,11 @@ var require_pcb_tools = __commonJS({
         }
         return out2;
       }
-      function padOrViaAt(doc2, layer3, netKey2, p) {
+      function padOrViaAt(doc2, layer4, netKey2, p) {
         const J = jointIndex(doc2);
         const k = ptKey(p);
-        if ((J.vias.get(k) || []).some((v) => v.layers.has(layer3) && v.net === netKey2)) return { via: true };
-        const x = (J.pads.get(k) || []).find((x2) => x2.layers.has(layer3) && samePt([x2.pad.x, x2.pad.y], p) && J.NT.key(x2.pad.net) === netKey2);
+        if ((J.vias.get(k) || []).some((v) => v.layers.has(layer4) && v.net === netKey2)) return { via: true };
+        const x = (J.pads.get(k) || []).find((x2) => x2.layers.has(layer4) && samePt([x2.pad.x, x2.pad.y], p) && J.NT.key(x2.pad.net) === netKey2);
         return x ? { pad: x.pad } : null;
       }
       function smartPadsSingle(line3, pad2, width, atEnd, endVertex, clear) {
@@ -37861,10 +37861,10 @@ var require_pcb_tools = __commonJS({
         }
         return best;
       }
-      function runSmartPads(doc2, pts, width, layer3, netKey2, clear) {
+      function runSmartPads(doc2, pts, width, layer4, netKey2, clear) {
         if (!netKey2 || pts.length < 3) return null;
         let line3 = pts.map((q4) => q4.slice()), changed = false, vtx = -1;
-        const sp = padOrViaAt(doc2, layer3, netKey2, line3[0]);
+        const sp = padOrViaAt(doc2, layer4, netKey2, line3[0]);
         if (sp && sp.pad) {
           const r = smartPadsSingle(line3, sp.pad, width, false, 3, clear);
           if (r) {
@@ -37873,7 +37873,7 @@ var require_pcb_tools = __commonJS({
             changed = true;
           }
         }
-        const ep = padOrViaAt(doc2, layer3, netKey2, line3[line3.length - 1]);
+        const ep = padOrViaAt(doc2, layer4, netKey2, line3[line3.length - 1]);
         if (ep && ep.pad) {
           const r = smartPadsSingle(line3, ep.pad, width, true, vtx < 0 ? line3.length - 1 : line3.length - 1 - vtx, clear);
           if (r) {
@@ -38008,14 +38008,14 @@ var require_pcb_tools = __commonJS({
         if (!st) return null;
         return { ops: shoveOps(doc2, st), preview: shovePreview(doc2, st) };
       }
-      function dragSolidObs(ctx, d, layer3) {
-        const key3 = "s|" + layer3 + "|" + S2.rs.shove_vias;
+      function dragSolidObs(ctx, d, layer4) {
+        const key3 = "s|" + layer4 + "|" + S2.rs.shove_vias;
         let O = d.obs.get(key3);
         if (O) return O;
         const s2 = settingsOf2(ctx);
         const SW = shoveWorld(ctx.doc, s2, S2.rs.shove_vias);
         const skip2 = /* @__PURE__ */ new Set([...SW.tracks.keys(), ...SW.vias.keys(), ...d.excl || []]);
-        O = routeObstacles(ctx.doc, s2, d.netKey, layer3, d.netKey ? null : d.ids, skip2);
+        O = routeObstacles(ctx.doc, s2, d.netKey, layer4, d.netKey ? null : d.ids, skip2);
         d.obs.set(key3, O);
         return O;
       }
@@ -38193,17 +38193,17 @@ var require_pcb_tools = __commonJS({
         if (show6) show6("Object Snapping", ["Active Layer", "All Layers"], v ? 1 : 0);
         return true;
       }
-      function itemOnLayer(it, layer3) {
-        if (!layer3) return true;
-        if (it.kind === "footprint") return it.layer === layer3;
+      function itemOnLayer(it, layer4) {
+        if (!layer4) return true;
+        if (it.kind === "footprint") return it.layer === layer4;
         if (it.kind === "via") {
           const ls = K11.kid(it.node, "layers");
           const names2 = ls ? ls.slice(1).map((v) => K11.str(v)) : [];
           const through = !K11.kid(it.node, "blind") && !K11.kid(it.node, "micro") && !(it.node[1] === "blind" || it.node[1] === "micro");
-          return /\.Cu$/.test(layer3) && (through || names2.includes(layer3) || names2.includes("*.Cu"));
+          return /\.Cu$/.test(layer4) && (through || names2.includes(layer4) || names2.includes("*.Cu"));
         }
-        if (it.layer === layer3) return true;
-        return it.geom.some((g2) => g2.layer === layer3 || g2.layer === "*.Cu" && /\.Cu$/.test(layer3));
+        if (it.layer === layer4) return true;
+        return it.geom.some((g2) => g2.layer === layer4 || g2.layer === "*.Cu" && /\.Cu$/.test(layer4));
       }
       function beginSelectDrag(ctx, it, mm5) {
         if (isLocked3(it.node) && !overrideLocks()) {
@@ -38329,9 +38329,9 @@ var require_pcb_tools = __commonJS({
           const kind = FP_SHAPES[String(c[0])];
           if (!kind) continue;
           const l = K11.kid(c, "layer");
-          const layer3 = l ? K11.str(l[1]) : "";
-          if (only && layer3 !== only) continue;
-          for (const p of itemAnchors({ id: "", kind, node: c, layer: layer3, geom: [] }, false, null, gridPitch)) {
+          const layer4 = l ? K11.str(l[1]) : "";
+          if (only && layer4 !== only) continue;
+          for (const p of itemAnchors({ id: "", kind, node: c, layer: layer4, geom: [] }, false, null, gridPitch)) {
             const [x, y] = R2(p[0], p[1]);
             const q4 = [fx + x, fy + y];
             if (p.t) q4.t = p.t;
@@ -38414,11 +38414,11 @@ var require_pcb_tools = __commonJS({
         return best;
       }
       var dirOfElem = (e) => e.t === "seg" ? dir8(e.a, e.b) : -1;
-      function jointAt(doc2, layer3, p, netKey2) {
+      function jointAt(doc2, layer4, p, netKey2) {
         const J = jointIndex(doc2);
         const k = ptKey(p);
-        const links = (J.ends.get(layer3 + "|" + k) || []).filter((o) => J.NT.key(netOf3(o.node)) === netKey2);
-        const solid = (J.vias.get(k) || []).some((v) => v.layers.has(layer3) && v.net === netKey2) || (J.pads.get(k) || []).some((x) => x.layers.has(layer3) && samePt([x.pad.x, x.pad.y], p) && J.NT.key(x.pad.net) === netKey2);
+        const links = (J.ends.get(layer4 + "|" + k) || []).filter((o) => J.NT.key(netOf3(o.node)) === netKey2);
+        const solid = (J.vias.get(k) || []).some((v) => v.layers.has(layer4) && v.net === netKey2) || (J.pads.get(k) || []).some((x) => x.layers.has(layer4) && samePt([x.pad.x, x.pad.y], p) && J.NT.key(x.pad.net) === netKey2);
         return { links, solid, count: links.length + (solid ? 1 : 0) };
       }
       function assembleLoopLine(doc2, it) {
@@ -38659,7 +38659,7 @@ var require_pcb_tools = __commonJS({
         if (!net) return null;
         const end = rt.target;
         const probe2 = (p) => ({ t: "circle", x: p[0], y: p[1], r: 0 });
-        const touches = (cl, p, layer3) => cl.items.some((c) => c.kind !== "zone" && c.layers.has(layer3) && boxesTouch(c.bbox, [p[0], p[1], p[0], p[1]], EPS) && shapeGap(c.shape, probe2(p)) <= EPS);
+        const touches = (cl, p, layer4) => cl.items.some((c) => c.kind !== "zone" && c.layers.has(layer4) && boxesTouch(c.bbox, [p[0], p[1], p[0], p[1]], EPS) && shapeGap(c.shape, probe2(p)) <= EPS);
         let best = null, bd = Infinity, bcl = null;
         for (const cl of net.clusters) {
           if (touches(cl, rt.last, rt.layer) || touches(cl, end, rt.layer) || rt.start && touches(cl, rt.start, rt.startLayer)) continue;
@@ -38708,11 +38708,11 @@ var require_pcb_tools = __commonJS({
         }
         return out2.length === 1 && out2[0].t === "seg" && Math.hypot(out2[0].b[0] - out2[0].a[0], out2[0].b[1] - out2[0].a[1]) < MICRO_SEG ? [] : out2;
       }
-      function trackOps(doc2, els, width, layer3, net) {
+      function trackOps(doc2, els, width, layer4, net) {
         const ops = [];
         for (const e of foldMicro(els)) {
           if (peq(e.a, e.b)) continue;
-          const node = e.t === "arc" ? arcTrackNode(doc2, e.a, e.m, e.b, width, layer3, net) : segmentNode(doc2, e.a, e.b, width, layer3, net);
+          const node = e.t === "arc" ? arcTrackNode(doc2, e.a, e.m, e.b, width, layer4, net) : segmentNode(doc2, e.a, e.b, width, layer4, net);
           node.push(["uuid", K11.newUuid()]);
           ops.push({ add: node });
         }
@@ -39346,14 +39346,14 @@ var require_pcb_tools = __commonJS({
         });
         for (const c of routerWorld(doc2).conds) {
           if (c.kind !== "pad" || !moved.has(c.id) || isFreePad(c.pad)) continue;
-          for (const layer3 of c.layers) {
-            const O = routeObstacles(doc2, s2, c.net, layer3, null);
+          for (const layer4 of c.layers) {
+            const O = routeObstacles(doc2, s2, c.net, layer4, null);
             obstaclesNear(O, c.bbox, 0, (ob) => {
               if (!moved.has(ob.id) && !gone.has(ob.id) && ob.kind !== "keepout" && shapeGap(c.shape, ob.shape) < ob.clr - ROUTE_EPS) hit5(ob, [c.pad.x, c.pad.y]);
               return false;
             });
             for (const { l, pts } of lines) {
-              if (l.layer !== layer3 || pts.length < 2 || (c.net ? c.net === l.netKey : !l.netKey)) continue;
+              if (l.layer !== layer4 || pts.length < 2 || (c.net ? c.net === l.netKey : !l.netKey)) continue;
               const clr = Math.max(netClearance(s2, l.netKey), netClearance(s2, c.net), s2.minClearance || 0);
               for (const sg of segsOf(pts)) {
                 const shape3 = Object.assign({ r: l.width / 2 }, sg);
@@ -39450,12 +39450,12 @@ var require_pcb_tools = __commonJS({
           finishDrag(ctx, true, !!(ev && (ev.ctrlKey || ev.metaKey)));
         } else if (S2.move && !S2.move.sticky) finishSelectMove(ctx, true);
       }
-      function previewColor(layer3, netKey2) {
-        if (netKey2 && S2.netColorMode === "all" && S2.ratsnestColors && /\.Cu$/.test(layer3)) {
+      function previewColor(layer4, netKey2) {
+        if (netKey2 && S2.netColorMode === "all" && S2.ratsnestColors && /\.Cu$/.test(layer4)) {
           const c = S2.ratsnestColors.get(netKey2);
           if (c) return c;
         }
-        return color2(layer3);
+        return color2(layer4);
       }
       function ratlineColor(netKey2) {
         const base2 = netKey2 && S2.netColorMode && S2.netColorMode !== "off" && S2.ratsnestColors && S2.ratsnestColors.get(netKey2) || RATSNEST;
@@ -39684,25 +39684,25 @@ var require_pcb_tools = __commonJS({
             const A = a.bbox, B = b.bbox;
             if (A[2] < B[0] || B[2] < A[0] || A[3] < B[1] || B[3] < A[1]) continue;
             const cb = cyOf(b);
-            for (const layer3 of ["F.CrtYd", "B.CrtYd"]) for (const P4 of ca[layer3]) for (const Q of cb[layer3]) if (polysOverlap(P4, Q)) {
-              mark(a, ca[layer3]);
-              mark(b, cb[layer3]);
+            for (const layer4 of ["F.CrtYd", "B.CrtYd"]) for (const P4 of ca[layer4]) for (const Q of cb[layer4]) if (polysOverlap(P4, Q)) {
+              mark(a, ca[layer4]);
+              mark(b, cb[layer4]);
             }
           }
         }
         return out2;
       }
       var NPTH_COLOR = "#1AC4D2";
-      function clearanceOutlines(doc2, s2, layer3, opt) {
+      function clearanceOutlines(doc2, s2, layer4, opt) {
         const oh = opt.objHide || null;
         const out2 = [];
-        if (!/\.Cu$/.test(layer3) || opt.hidden && opt.hidden.has(layer3)) return out2;
+        if (!/\.Cu$/.test(layer4) || opt.hidden && opt.hidden.has(layer4)) return out2;
         const clrOf = (net) => netClearance(s2, opt.netName(net));
         for (const it of doc2.items.values()) {
           const n2 = it.node;
           if (opt.tracks && (it.kind === "segment" || it.kind === "arc")) {
             if (oh && oh.has("tracks")) continue;
-            if (K11.str((K11.kid(n2, "layer") || [])[1]) !== layer3) continue;
+            if (K11.str((K11.kid(n2, "layer") || [])[1]) !== layer4) continue;
             const w = K11.kid(n2, "width"), half = (w ? K11.num(w[1]) : 0.25) / 2, clr = clrOf(netOf3(n2));
             if (clr <= 0) continue;
             const a = pt4(n2, "start"), b = pt4(n2, "end");
@@ -39711,7 +39711,7 @@ var require_pcb_tools = __commonJS({
             out2.push({ id: it.id, shape: arc ? { t: "arcband", x: arc.x, y: arc.y, r: arc.r, a0: arc.a0, a1: arc.a1, anticlockwise: !!arc.anticlockwise, w: half + clr } : { t: "capsule", a, b, r: half + clr } });
           } else if (opt.tracks && it.kind === "via") {
             if (oh && oh.has("vias")) continue;
-            if (!viaOnLayer(n2, layer3, doc2)) continue;
+            if (!viaOnLayer(n2, layer4, doc2)) continue;
             const clr = clrOf(netOf3(n2));
             if (clr <= 0) continue;
             const at4 = K11.atOf(n2), sz = K11.kid(n2, "size"), r = (sz ? K11.num(sz[1]) : 0.8) / 2;
@@ -39720,7 +39720,7 @@ var require_pcb_tools = __commonJS({
             if (oh && (oh.has("pads") || oh.has(/^B\./.test(K11.str((K11.kid(n2, "layer") || [])[1])) ? "fpBack" : "fpFront"))) continue;
             const fpClr = K11.kid(n2, "clearance");
             for (const p of padsOf(it)) {
-              if (!padOnLayer2(p, layer3)) continue;
+              if (!padOnLayer2(p, layer4)) continue;
               const own = K11.kid(p.node, "clearance"), clr = own ? K11.num(own[1]) : fpClr ? K11.num(fpClr[1]) : clrOf(p.net);
               if (!(clr > 0)) continue;
               const npth = p.type === "np_thru_hole";
@@ -39744,22 +39744,22 @@ var require_pcb_tools = __commonJS({
         }
         return out2;
       }
-      function viaOnLayer(n2, layer3, doc2) {
+      function viaOnLayer(n2, layer4, doc2) {
         const ls = K11.kid(n2, "layers");
         if (!ls) return true;
         const copper = doc2.copper || [];
         const pair = [K11.str(ls[1]), K11.str(ls[2])];
-        if (!n2.includes("blind") && !n2.includes("micro") && !n2.includes("buried")) return copper.length ? copper.includes(layer3) : true;
-        const i0 = copper.indexOf(pair[0]), i1 = copper.indexOf(pair[1]), i = copper.indexOf(layer3);
-        return i0 >= 0 && i1 >= 0 && i >= 0 ? i >= Math.min(i0, i1) && i <= Math.max(i0, i1) : pair.includes(layer3);
+        if (!n2.includes("blind") && !n2.includes("micro") && !n2.includes("buried")) return copper.length ? copper.includes(layer4) : true;
+        const i0 = copper.indexOf(pair[0]), i1 = copper.indexOf(pair[1]), i = copper.indexOf(layer4);
+        return i0 >= 0 && i1 >= 0 && i >= 0 ? i >= Math.min(i0, i1) && i <= Math.max(i0, i1) : pair.includes(layer4);
       }
       function drawClearanceOutlines(c, ctx, cpx) {
-        const doc2 = ctx.doc, s2 = settingsOf2(ctx), layer3 = S2.layer;
+        const doc2 = ctx.doc, s2 = settingsOf2(ctx), layer4 = S2.layer;
         const hidden2 = appGlobal(() => editorState().hiddenLayers, null);
         const hl = appGlobal(() => editorState().highlightIds || null, null);
         const sel = new Set(selectionIds2(ctx));
         const objHide = appGlobal(() => editorState().renderOpts?.objects?.hide || null, null);
-        const list = clearanceOutlines(doc2, s2, layer3, { tracks: S2.trackClearance === CLEARANCE_MODE.ALWAYS, pads: S2.padClearance !== false, netName: (net) => netNameOf3(ctx, net), hidden: hidden2, objHide });
+        const list = clearanceOutlines(doc2, s2, layer4, { tracks: S2.trackClearance === CLEARANCE_MODE.ALWAYS, pads: S2.padClearance !== false, netName: (net) => netNameOf3(ctx, net), hidden: hidden2, objHide });
         if (!list.length) return;
         const KC2 = K11;
         c.save();
@@ -39768,7 +39768,7 @@ var require_pcb_tools = __commonJS({
         c.lineWidth = cpx;
         c.lineCap = "round";
         c.lineJoin = "round";
-        const base2 = color2(layer3);
+        const base2 = color2(layer4);
         const entered = enteredGroupIds(doc2);
         const ro = entered ? appGlobal(() => editorState().renderOpts || null, null) : null;
         const outsideOp = !entered ? 1 : ro && typeof ro.outsideGroupOpacity === "number" ? ro.outsideGroupOpacity : ro && ro.objects && ro.objects.opacity && typeof ro.objects.opacity.outsideGroup === "number" ? ro.objects.opacity.outsideGroup : 0.2;
@@ -40027,11 +40027,11 @@ var require_pcb_tools = __commonJS({
         c.stroke();
       }
       function drawDimPreview(c, d, px) {
-        const type = DIM_TYPE[d.shape], layer3 = S2.gfxLayer, s2 = d.start;
-        const dd = { start: s2, end: d.end || d.cur, height: d.height || 0, orientation: d.orientation, arrowInward: !!d.arrowInward, thickness: drawWidth(layer3) };
+        const type = DIM_TYPE[d.shape], layer4 = S2.gfxLayer, s2 = d.start;
+        const dd = { start: s2, end: d.end || d.cur, height: d.height || 0, orientation: d.orientation, arrowInward: !!d.arrowInward, thickness: drawWidth(layer4) };
         if (type === "center" && !d.end) dd.end = vadd(s2, snap45(vsub(d.cur, s2)));
         if (samePt(dd.start, dd.end)) return;
-        const item = { id: "", kind: "dimension", node: dimensionNode(type, dd, layer3) };
+        const item = { id: "", kind: "dimension", node: dimensionNode(type, dd, layer4) };
         try {
           K11.buildGeom({ type: "pcb", items: /* @__PURE__ */ new Map(), layers: /* @__PURE__ */ new Map(), copper: [] }, item);
         } catch (e) {
@@ -40177,19 +40177,19 @@ var require_pcb_tools = __commonJS({
         if (isTuneTool(S2.modTool)) drawTune(c, ctx, px);
         if (S2.draw) {
           const d = S2.draw;
-          const layer3 = d.layer || (d.shape === "zone" || d.shape === "thievingzone" ? S2.layer : d.shape === "rulearea" ? RULE_AREA_LAYERS[0] : S2.gfxLayer);
+          const layer4 = d.layer || (d.shape === "zone" || d.shape === "thievingzone" ? S2.layer : d.shape === "rulearea" ? RULE_AREA_LAYERS[0] : S2.gfxLayer);
           c.globalAlpha = 0.85;
-          c.strokeStyle = color2(layer3);
-          c.lineWidth = Math.max(drawWidth(layer3), 1.5 * px);
+          c.strokeStyle = color2(layer4);
+          c.lineWidth = Math.max(drawWidth(layer4), 1.5 * px);
           const box3 = () => [Math.min(d.start[0], d.cur[0]), Math.min(d.start[1], d.cur[1]), Math.abs(d.cur[0] - d.start[0]), Math.abs(d.cur[1] - d.start[1])];
           if (d.shape === "gline") line2(c, d.start, d.cur);
           else if (d.shape === "grect" || d.shape === "gtextbox") c.strokeRect(...box3());
           else if (d.shape === "table") {
-            const L = tableGrid(d.start, d.cur, layer3, ctx.gridPitch || 0), w = L.cols * L.cw, h3 = L.rows * L.ch;
+            const L = tableGrid(d.start, d.cur, layer4, ctx.gridPitch || 0), w = L.cols * L.cw, h3 = L.rows * L.ch;
             c.strokeRect(L.x, L.y, w, h3);
             for (let i = 1; i < L.cols; i++) line2(c, [L.x + L.cw * i, L.y], [L.x + L.cw * i, L.y + h3]);
             for (let i = 1; i < L.rows; i++) line2(c, [L.x, L.y + L.ch * i], [L.x + w, L.y + L.ch * i]);
-          } else if (d.shape === "garc") drawArcPreview(c, d, px, color2(layer3));
+          } else if (d.shape === "garc") drawArcPreview(c, d, px, color2(layer4));
           else if (d.shape === "gcurve") {
             const pts = d.pts.concat([d.cur]);
             polyline22(c, K11.bezierPts(pts), false);
@@ -40203,7 +40203,7 @@ var require_pcb_tools = __commonJS({
               const loop = d.loop && d.loop.length > 1 ? d.loop : [d.cur, d.pts[0]];
               const fill22 = d.pts.concat(leader, loop);
               if (fill22.length > 2) {
-                const [r, g2, b] = rgbaOf2(color2(layer3));
+                const [r, g2, b] = rgbaOf2(color2(layer4));
                 c.globalAlpha = 1;
                 c.fillStyle = `rgba(${r}, ${g2}, ${b}, 0.2)`;
                 c.beginPath();
@@ -40229,7 +40229,7 @@ var require_pcb_tools = __commonJS({
             const h3 = 3 * px;
             for (const p of d.pts) c.fillRect(p[0] - h3, p[1] - h3, 2 * h3, 2 * h3);
           }
-          drawTwoPointAssistant(c, d, px, color2(layer3));
+          drawTwoPointAssistant(c, d, px, color2(layer4));
         }
         if (S2.image && S2.hover && S2.modTool === "image") {
           const img = S2.image;
@@ -40371,7 +40371,7 @@ var require_pcb_tools = __commonJS({
         const self2 = { code: net.code > 0 ? net.code : (netTable(doc2).byName.get(name) || {}).code || 0, name };
         return m.rv > 0 ? { P: self2, N: other } : { P: other, N: self2 };
       }
-      function dpPrimitives(doc2, netKey2, layer3) {
+      function dpPrimitives(doc2, netKey2, layer4) {
         const J = jointIndex(doc2);
         const copper = copperOf(doc2);
         const out2 = [];
@@ -40379,28 +40379,28 @@ var require_pcb_tools = __commonJS({
           if (it.kind === "footprint") {
             for (const p of padsOf(it)) {
               const ls = padCopperLayers(p, copper);
-              if (J.NT.key(p.net) === netKey2 && ls.has(layer3)) out2.push({ kind: "pad", p: [p.x, p.y], dir: null, id: it.id, layers: Array.from(ls).sort().join(","), pad: p });
+              if (J.NT.key(p.net) === netKey2 && ls.has(layer4)) out2.push({ kind: "pad", p: [p.x, p.y], dir: null, id: it.id, layers: Array.from(ls).sort().join(","), pad: p });
             }
           } else if (it.kind === "via") {
             const a = pt4(it.node, "at");
             const ls = viaLayers(it.node, copper);
-            if (a && ls.has(layer3) && J.NT.key(netOf3(it.node)) === netKey2) out2.push({ kind: "via", p: a, dir: null, id: it.id, layers: Array.from(ls).sort().join(",") });
-          } else if (it.kind === "segment" && layerOf2(it.node) === layer3 && J.NT.key(netOf3(it.node)) === netKey2) {
+            if (a && ls.has(layer4) && J.NT.key(netOf3(it.node)) === netKey2) out2.push({ kind: "via", p: a, dir: null, id: it.id, layers: Array.from(ls).sort().join(",") });
+          } else if (it.kind === "segment" && layerOf2(it.node) === layer4 && J.NT.key(netOf3(it.node)) === netKey2) {
             const [a, b] = trackEnds(it);
             if (!a || !b || samePt(a, b)) continue;
             for (const [q4, o] of [[a, b], [b, a]]) {
               const k = ptKey(q4);
-              if ((J.vias.get(k) || []).some((v) => v.layers.has(layer3)) || (J.pads.get(k) || []).some((x) => x.layers.has(layer3) && samePt([x.pad.x, x.pad.y], q4))) continue;
-              const links = (J.ends.get(layer3 + "|" + k) || []).filter((x) => J.NT.key(netOf3(x.node)) === netKey2);
+              if ((J.vias.get(k) || []).some((v) => v.layers.has(layer4)) || (J.pads.get(k) || []).some((x) => x.layers.has(layer4) && samePt([x.pad.x, x.pad.y], q4))) continue;
+              const links = (J.ends.get(layer4 + "|" + k) || []).filter((x) => J.NT.key(netOf3(x.node)) === netKey2);
               if (links.length !== 1) continue;
-              out2.push({ kind: "track", p: q4.slice(), dir: vunit(vsub(q4, o)), id: it.id, layers: layer3, width: widthOf3(it.node, 0.25) });
+              out2.push({ kind: "track", p: q4.slice(), dir: vunit(vsub(q4, o)), id: it.id, layers: layer4, width: widthOf3(it.node, 0.25) });
             }
           }
         }
         return out2;
       }
-      function dpClickedPrimitive(doc2, snap2, p, netKey2, layer3) {
-        const prims = dpPrimitives(doc2, netKey2, layer3);
+      function dpClickedPrimitive(doc2, snap2, p, netKey2, layer4) {
+        const prims = dpPrimitives(doc2, netKey2, layer4);
         if (snap2 && (snap2.kind === "pad" || snap2.kind === "via")) return prims.find((q4) => q4.kind === snap2.kind && samePt(q4.p, [snap2.x, snap2.y])) || null;
         let best = null, bd = Infinity;
         for (const q4 of prims) {
@@ -40413,16 +40413,16 @@ var require_pcb_tools = __commonJS({
         }
         return best;
       }
-      function findDpPrimitivePair(doc2, snap2, p, layer3, net) {
+      function findDpPrimitivePair(doc2, snap2, p, layer4, net) {
         const nets = dpNetPair(doc2, net);
         if (!nets) return { error: DP_MSG_NETS };
         const NT = netTable(doc2);
         const refKey2 = NT.key(net), keyP = NT.key(nets.P), keyN = NT.key(nets.N);
-        const ref = dpClickedPrimitive(doc2, snap2, p, refKey2, layer3);
+        const ref = dpClickedPrimitive(doc2, snap2, p, refKey2, layer4);
         if (!ref) return { error: DP_MSG_START };
         const coupledKey = refKey2 === keyP ? keyN : keyP;
         let best = null, bd = Infinity;
-        for (const q4 of dpPrimitives(doc2, coupledKey, layer3)) {
+        for (const q4 of dpPrimitives(doc2, coupledKey, layer4)) {
           if (q4.kind !== ref.kind || q4.kind !== "track" && q4.layers !== ref.layers) continue;
           const d = Math.hypot(q4.p[0] - ref.p[0], q4.p[1] - ref.p[1]);
           if (d < bd) {
@@ -40547,17 +40547,17 @@ var require_pcb_tools = __commonJS({
           rt.dpFit = false;
           return;
         }
-        const target2 = rt.placingVia ? null : dpTarget(ctx, rt, hv && hv.snap);
+        const target3 = rt.placingVia ? null : dpTarget(ctx, rt, hv && hv.snap);
         let centre2, reached = true, tail = null;
-        if (target2) {
-          const tg = dpGateway(target2, gw.mid, h3);
+        if (target3) {
+          const tg = dpGateway(target3, gw.mid, h3);
           if (tg && tg.sideP === -gw.sideP) {
             const back = rp(vadd(tg.mid, vmul(tg.d, h3 + 1e-3)));
             const c = dpCentre(mode2 === RM_MARK ? null : O, gw, back, R2, rt, mode2);
             if (c.reached && samePt(c.pts[c.pts.length - 1], back)) {
               centre2 = simplifyPts(c.pts.concat([tg.mid.slice()]));
               tail = tg;
-              rt.dpTargetPair = target2;
+              rt.dpTargetPair = target3;
             }
           }
         }
@@ -40617,11 +40617,11 @@ var require_pcb_tools = __commonJS({
       function dpStart(ctx, hv, mm5) {
         const p = [hv.x, hv.y];
         const doc2 = ctx.doc;
-        const layer3 = S2.layer;
+        const layer4 = S2.layer;
         const snap2 = hv.snap && hv.snap.kind !== "anchor" ? hv.snap : null;
         let net = snap2 ? snap2.net : null, s2 = snap2;
         if (!snap2) {
-          const on2 = trackUnder(doc2, mm5 ? mm5[0] : hv.x, mm5 ? mm5[1] : hv.y, layer3);
+          const on2 = trackUnder(doc2, mm5 ? mm5[0] : hv.x, mm5 ? mm5[1] : hv.y, layer4);
           if (on2) {
             net = netOf3(on2.item.node);
             s2 = { kind: "track", x: on2.point[0], y: on2.point[1], net, id: on2.item.id };
@@ -40631,7 +40631,7 @@ var require_pcb_tools = __commonJS({
           ctx.toast(DP_MSG_NOWHERE);
           return;
         }
-        if (!/\.Cu$/.test(layer3)) {
+        if (!/\.Cu$/.test(layer4)) {
           ctx.toast("Tracks on Copper layers only.");
           return;
         }
@@ -40645,7 +40645,7 @@ var require_pcb_tools = __commonJS({
           ctx.toast(DP_MSG_GAP);
           return;
         }
-        const fp = findDpPrimitivePair(doc2, s2.kind === "track" ? null : s2, [s2.x, s2.y], layer3, net);
+        const fp = findDpPrimitivePair(doc2, s2.kind === "track" ? null : s2, [s2.x, s2.y], layer4, net);
         if (fp.error) {
           ctx.toast(fp.error);
           return;
@@ -40654,7 +40654,7 @@ var require_pcb_tools = __commonJS({
         S2.route = {
           dp: true,
           start: p.slice(),
-          startLayer: layer3,
+          startLayer: layer4,
           startKind: s2.kind,
           last: p.slice(),
           target: p.slice(),
@@ -40666,7 +40666,7 @@ var require_pcb_tools = __commonJS({
           netKey: NT.key(nets.P),
           netN: nets.N,
           netKeyN: NT.key(nets.N),
-          layer: layer3,
+          layer: layer4,
           width: sizes2.width,
           dpSizes: sizes2,
           dpStart: fp.pair,
@@ -40689,7 +40689,7 @@ var require_pcb_tools = __commonJS({
         const rt = S2.route;
         trailAdd(rt.tracer, p);
         const R2 = sizesOf(ctx);
-        if (R2.activeLayer !== layer3) R2.setActiveLayer(layer3);
+        if (R2.activeLayer !== layer4) R2.setActiveLayer(layer4);
         routeHighlight(ctx, rt);
         dpUpdateHead(ctx, hv);
         refreshChip(ctx);
@@ -40812,15 +40812,15 @@ var require_pcb_tools = __commonJS({
         ctx.requestRender();
         return true;
       }
-      function dpToggleVia(ctx, type, target2) {
+      function dpToggleVia(ctx, type, target3) {
         const rt = S2.route;
         if (!rt) return false;
-        if (rt.placingVia && !target2) {
+        if (rt.placingVia && !target3) {
           rt.placingVia = null;
           S2.layer = rt.layer;
           sizesOf(ctx).setActiveLayer(rt.layer);
         } else {
-          const plan = viaPlan(ctx, Object.assign({}, rt, { ratAnchor: null }), type, target2);
+          const plan = viaPlan(ctx, Object.assign({}, rt, { ratAnchor: null }), type, target3);
           if (typeof plan === "string") {
             ctx.toast(plan);
             return true;
@@ -40834,19 +40834,19 @@ var require_pcb_tools = __commonJS({
         ctx.requestRender();
         return true;
       }
-      function dpSetLayer(ctx, layer3) {
+      function dpSetLayer(ctx, layer4) {
         const rt = S2.route;
-        if (layer3 === rt.layer) {
+        if (layer4 === rt.layer) {
           if (rt.placingVia) dpToggleVia(ctx);
           return;
         }
         const st = rt.dpStart;
         const doc2 = routeDoc(ctx, rt);
-        const reaches = (q4) => q4.kind === "pad" || q4.kind === "via" ? dpPrimitives(doc2, q4 === st.P ? rt.netKey : rt.netKeyN, layer3).some((x) => x.kind === q4.kind && samePt(x.p, q4.p)) : false;
+        const reaches = (q4) => q4.kind === "pad" || q4.kind === "via" ? dpPrimitives(doc2, q4 === st.P ? rt.netKey : rt.netKeyN, layer4).some((x) => x.kind === q4.kind && samePt(x.p, q4.p)) : false;
         if (!rt.placingVia && (!rt.stages.length && reaches(st.P) && reaches(st.N) || rt.stages.length && !rt.chained)) {
-          rt.layer = layer3;
-          S2.layer = layer3;
-          sizesOf(ctx).setActiveLayer(layer3);
+          rt.layer = layer4;
+          S2.layer = layer4;
+          sizesOf(ctx).setActiveLayer(layer4);
           rt.dpObs = null;
           rt.tracer = newTracer(rt.width, -1);
           trailAdd(rt.tracer, rt.last);
@@ -40856,7 +40856,7 @@ var require_pcb_tools = __commonJS({
           return;
         }
         rt.placingVia = null;
-        dpToggleVia(ctx, "through", layer3);
+        dpToggleVia(ctx, "through", layer4);
       }
       function drawDpRoute(c, ctx, px) {
         const rt = S2.route;
@@ -40976,12 +40976,12 @@ var require_pcb_tools = __commonJS({
         }
         return s2;
       }
-      function routeObs(ctx, rt, layer3) {
-        layer3 = layer3 || rt.layer;
+      function routeObs(ctx, rt, layer4) {
+        layer4 = layer4 || rt.layer;
         const doc2 = routeDoc(ctx, rt);
-        const key3 = S2.docVer + "|" + layer3 + "|" + rt.width + "|" + rt.stages.length + "|" + rt.netKey;
+        const key3 = S2.docVer + "|" + layer4 + "|" + rt.width + "|" + rt.stages.length + "|" + rt.netKey;
         if (!rt.obs || rt.obs.key !== key3 || rt.obs.doc !== doc2) {
-          rt.obs = routeObstacles(doc2, settingsOf2(ctx), rt.netKey, layer3, rt.netKey ? null : routeOwn(rt));
+          rt.obs = routeObstacles(doc2, settingsOf2(ctx), rt.netKey, layer4, rt.netKey ? null : routeOwn(rt));
           rt.obs.key = key3;
           rt.obs.doc = doc2;
         }
@@ -41160,11 +41160,11 @@ var require_pcb_tools = __commonJS({
         out2.splice(at4 > 0 ? at4 : out2.length, 0, node);
         return out2;
       }
-      function padAt2(doc2, x, y, layer3) {
+      function padAt2(doc2, x, y, layer4) {
         let best = null;
         for (const it of doc2.items.values()) {
           if (it.kind !== "footprint" || !it.bbox || x < it.bbox[0] || x > it.bbox[2] || y < it.bbox[1] || y > it.bbox[3]) continue;
-          for (const p of padsOf(it)) if ((!layer3 || padOnLayer2(p, layer3)) && padCovers(p, x, y) && (!best || p.w * p.h < best.pad.w * best.pad.h)) best = { item: it, index: p.index, pad: p };
+          for (const p of padsOf(it)) if ((!layer4 || padOnLayer2(p, layer4)) && padCovers(p, x, y) && (!best || p.w * p.h < best.pad.w * best.pad.h)) best = { item: it, index: p.index, pad: p };
         }
         return best;
       }
@@ -41209,12 +41209,12 @@ var require_pcb_tools = __commonJS({
       function convertChanges(doc2, ids, to, extra) {
         const items = ids.map((id) => doc2.items.get(id)).filter(Boolean);
         const out2 = [];
-        const layer3 = items.length ? layerOf2(items[0].node, "F.SilkS") : "F.SilkS";
+        const layer4 = items.length ? layerOf2(items[0].node, "F.SilkS") : "F.SilkS";
         if (to === "lines") {
           for (const it of items) {
             const loop = closedShapeLoop(it);
             if (!loop || it.kind === "gr_circle") continue;
-            loop.forEach((p, i) => out2.push(addedChange(doc2, lineNode(p, loop[(i + 1) % loop.length], layerOf2(it.node, layer3)))));
+            loop.forEach((p, i) => out2.push(addedChange(doc2, lineNode(p, loop[(i + 1) % loop.length], layerOf2(it.node, layer4)))));
             out2.push(removedChange(it));
           }
           return out2;
@@ -41222,7 +41222,7 @@ var require_pcb_tools = __commonJS({
         if (to === "tracks") {
           for (const it of items) {
             const n2 = it.node;
-            const l = layerOf2(n2, layer3);
+            const l = layerOf2(n2, layer4);
             if (!/\.Cu$/.test(l) || it.kind !== "gr_line" && it.kind !== "gr_arc") continue;
             const w = K11.kid(n2, "stroke") ? K11.num((K11.kid(K11.kid(n2, "stroke"), "width") || [0, 0.2])[1], 0.2) : 0.2;
             const a = pt4(n2, "start");
@@ -41236,13 +41236,13 @@ var require_pcb_tools = __commonJS({
         const loops = selectionLoops(items);
         if (!loops.length) return [];
         if (to === "poly") {
-          for (const loop of loops) out2.push(addedChange(doc2, polyNode(loop, layer3)));
+          for (const loop of loops) out2.push(addedChange(doc2, polyNode(loop, layer4)));
         } else if (to === "zone") {
-          const l = /\.Cu$/.test(layer3) ? layer3 : extra && extra.layer || "F.Cu";
+          const l = /\.Cu$/.test(layer4) ? layer4 : extra && extra.layer || "F.Cu";
           const net = extra && extra.net || { code: 0, name: "" };
           for (const loop of loops) out2.push(addedChange(doc2, zoneNode(doc2, loop, l, net), net));
         } else if (to === "keepout") {
-          for (const loop of loops) out2.push(addedChange(doc2, ruleAreaNode(loop, /\.Cu$/.test(layer3) ? [layer3] : RULE_AREA_LAYERS)));
+          for (const loop of loops) out2.push(addedChange(doc2, ruleAreaNode(loop, /\.Cu$/.test(layer4) ? [layer4] : RULE_AREA_LAYERS)));
         } else return [];
         if (!(extra && extra.keep)) {
           for (const it of items) if (/^gr_(line|arc|rect|poly|circle|curve)$/.test(it.kind)) out2.push(removedChange(it));
@@ -41438,9 +41438,9 @@ var require_pcb_tools = __commonJS({
         ctx.requestRender();
         return true;
       }
-      function trackUnder(doc2, x, y, layer3) {
-        const it = hitTestItem(doc2, x, y, HIT_MM, (c) => c.kind === "segment" && layerOf2(c.node) === layer3);
-        if (!it || it.kind !== "segment" || layerOf2(it.node) !== layer3) return null;
+      function trackUnder(doc2, x, y, layer4) {
+        const it = hitTestItem(doc2, x, y, HIT_MM, (c) => c.kind === "segment" && layerOf2(c.node) === layer4);
+        if (!it || it.kind !== "segment" || layerOf2(it.node) !== layer4) return null;
         const a = pt4(it.node, "start"), b = pt4(it.node, "end");
         if (!a || !b) return null;
         const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
@@ -41464,22 +41464,22 @@ var require_pcb_tools = __commonJS({
       function showViolations(obs, at4) {
         S2.violations = obs.length ? { obs, at: at4.slice() } : null;
       }
-      function startRefusal(ctx, p, mm5, net, width, layer3, own, snapped) {
+      function startRefusal(ctx, p, mm5, net, width, layer4, own, snapped) {
         const doc2 = ctx.doc;
         const q4 = mm5 || p;
-        const pad2 = padAt2(doc2, q4[0], q4[1], layer3) || padAt2(doc2, q4[0], q4[1], null);
+        const pad2 = padAt2(doc2, q4[0], q4[1], layer4) || padAt2(doc2, q4[0], q4[1], null);
         if (pad2 && pad2.pad.type === "np_thru_hole") return "Cannot start routing from a non-plated hole.";
         const W12 = routerWorld(doc2);
-        if (W12.keepouts.some((k) => k.layers.has(layer3) && pointInPoly4(k.shape.pts, p[0], p[1]))) return "Rule area disallows tracks.";
+        if (W12.keepouts.some((k) => k.layers.has(layer4) && pointInPoly4(k.shape.pts, p[0], p[1]))) return "Rule area disallows tracks.";
         if (!snapped && !pad2) {
           const t = hitTestItem(doc2, q4[0], q4[1], HIT_MM);
           if (t && (t.kind === "gr_text" || t.kind === "gr_text_box") && /\.Cu$/.test(layerOf2(t.node, ""))) return "Cannot start routing from a text item.";
         }
-        if (!/\.Cu$/.test(layer3)) return "Tracks on Copper layers only.";
+        if (!/\.Cu$/.test(layer4)) return "Tracks on Copper layers only.";
         if (S2.rs.mode === RM_MARK) return null;
         const s2 = settingsOf2(ctx);
         const key3 = netTable(doc2).key(net);
-        const O = routeObstacles(doc2, s2, key3, layer3, key3 ? null : own);
+        const O = routeObstacles(doc2, s2, key3, layer4, key3 ? null : own);
         let hits2 = pathHits(O, [p], width / 2);
         if (hits2.length && s2.minTrackWidth > 0) hits2 = pathHits(O, [p], s2.minTrackWidth / 2);
         if (hits2.length) {
@@ -41616,16 +41616,16 @@ var require_pcb_tools = __commonJS({
         const nc = R2.netclassOf ? R2.netclassOf(netNameOf3(ctx, net)) : null;
         return { diameter: nc && nc.uvia_diameter > 0 ? nc.uvia_diameter : 0.3, drill: nc && nc.uvia_drill > 0 ? nc.uvia_drill : 0.1 };
       }
-      function viaPlan(ctx, rt, type, target2) {
+      function viaPlan(ctx, rt, type, target3) {
         const R2 = sizesOf(ctx);
         const cur2 = rt.layer;
         const [pTop, pBot] = R2.layerPair || ["F.Cu", "B.Cu"];
         const doc2 = routeDoc(ctx, rt);
         const stack2 = K11.pcbSizes.copperStack(copperOf(doc2));
         const F2 = stack2[0], B = stack2[stack2.length - 1];
-        if (type !== "through" && target2 && (target2 === B && cur2 === F2 || target2 === F2 && cur2 === B)) type = "through";
+        if (type !== "through" && target3 && (target3 === B && cur2 === F2 || target3 === F2 && cur2 === B)) type = "through";
         const paired = (x, p0, p1) => x === p0 ? p1 : x === p1 ? p0 : p0;
-        let a = cur2, b = target2 || null, next;
+        let a = cur2, b = target3 || null, next;
         if (b) next = b;
         else if (type === "through") {
           const rl2 = rt.ratAnchor;
@@ -41657,15 +41657,15 @@ var require_pcb_tools = __commonJS({
         const span = type === "through" ? [F2, B] : [a, b].sort((x, y) => stack2.indexOf(x) - stack2.indexOf(y));
         return { type, toLayer: next, span, diameter: size2.diameter, drill: size2.drill };
       }
-      function toggleViaPlacement(ctx, type, target2) {
+      function toggleViaPlacement(ctx, type, target3) {
         const rt = S2.route;
-        if (rt && rt.dp) return dpToggleVia(ctx, type, target2);
+        if (rt && rt.dp) return dpToggleVia(ctx, type, target3);
         if (!rt) {
           if (S2.modTool === "routediff") return true;
           startWithVia(ctx);
           return true;
         }
-        if (rt.placingVia && !target2) {
+        if (rt.placingVia && !target3) {
           rt.placingVia = null;
           S2.layer = rt.layer;
           sizesOf(ctx).setActiveLayer(rt.layer);
@@ -41674,7 +41674,7 @@ var require_pcb_tools = __commonJS({
           ctx.requestRender();
           return true;
         }
-        const plan = viaPlan(ctx, rt, type, target2);
+        const plan = viaPlan(ctx, rt, type, target3);
         if (typeof plan === "string") {
           ctx.toast(plan);
           return true;
@@ -41698,11 +41698,11 @@ var require_pcb_tools = __commonJS({
         const cu = K11.pcbSizes.copperStack(copperOf(doc2));
         const disallow = new Set(type === "through" ? [] : [rt.layer]);
         const at4 = rt.target || rt.last;
-        layerPickerImpl({ layers: cu, current: rt.layer, disallow, at: at4, client: S2.client }, (layer3) => {
-          if (!layer3 || !S2.route || S2.route !== rt) return;
-          if (type !== "through" && layer3 === rt.layer) return;
+        layerPickerImpl({ layers: cu, current: rt.layer, disallow, at: at4, client: S2.client }, (layer4) => {
+          if (!layer4 || !S2.route || S2.route !== rt) return;
+          if (type !== "through" && layer4 === rt.layer) return;
           if (rt.placingVia) rt.placingVia = null;
-          toggleViaPlacement(lastCtx || ctx, type, layer3);
+          toggleViaPlacement(lastCtx || ctx, type, layer4);
         });
         return true;
       }
@@ -41711,23 +41711,23 @@ var require_pcb_tools = __commonJS({
         const via = sizesOf(ctx).routeVia(netNameOf3(ctx, net));
         ctx.commit([addedChange(ctx.doc, viaNode(ctx.doc, hv.x, hv.y, via.diameter, via.drill, net, viaSpan2(ctx.doc)), net)], "via");
       }
-      function setLayer(ctx, layer3) {
+      function setLayer(ctx, layer4) {
         const rt = S2.route;
         if (rt && rt.dp) {
-          dpSetLayer(ctx, layer3);
+          dpSetLayer(ctx, layer4);
           return;
         }
         if (rt) {
-          if (layer3 === rt.layer) {
+          if (layer4 === rt.layer) {
             if (rt.placingVia) toggleViaPlacement(ctx);
             return;
           }
-          const spans2 = !rt.stages.length && (!rt.startKind || (rt.startKind === "pad" || rt.startKind === "via") && startSpans(ctx, rt, layer3));
+          const spans2 = !rt.stages.length && (!rt.startKind || (rt.startKind === "pad" || rt.startKind === "via") && startSpans(ctx, rt, layer4));
           const afterVia = rt.stages.length && !rt.chained;
           if (!rt.placingVia && (spans2 || afterVia)) {
-            rt.layer = layer3;
-            S2.layer = layer3;
-            sizesOf(ctx).setActiveLayer(layer3);
+            rt.layer = layer4;
+            S2.layer = layer4;
+            sizesOf(ctx).setActiveLayer(layer4);
             rt.obs = null;
             rt.tracer = newTracer(rt.width, -1);
             trailAdd(rt.tracer, rt.last);
@@ -41739,16 +41739,16 @@ var require_pcb_tools = __commonJS({
             return;
           }
           rt.placingVia = null;
-          toggleViaPlacement(ctx, "through", layer3);
+          toggleViaPlacement(ctx, "through", layer4);
           return;
         }
-        S2.layer = layer3;
-        S2.gfxLayer = layer3;
-        sizesOf(ctx).setActiveLayer(layer3);
+        S2.layer = layer4;
+        S2.gfxLayer = layer4;
+        sizesOf(ctx).setActiveLayer(layer4);
         refreshChip(ctx);
         ctx.requestRender();
       }
-      function startSpans(ctx, rt, layer3) {
+      function startSpans(ctx, rt, layer4) {
         const doc2 = ctx.doc;
         const p = rt.start;
         const cu = copperOf(doc2);
@@ -41757,9 +41757,9 @@ var require_pcb_tools = __commonJS({
           if (b && (p[0] < b[0] - 0.01 || p[0] > b[2] + 0.01 || p[1] < b[1] - 0.01 || p[1] > b[3] + 0.01)) continue;
           if (it.kind === "via") {
             const a = pt4(it.node, "at");
-            if (a && samePt(a, p) && viaLayers(it.node, cu).has(layer3)) return true;
+            if (a && samePt(a, p) && viaLayers(it.node, cu).has(layer4)) return true;
           } else if (it.kind === "footprint") {
-            for (const pd of padsOf(it)) if (samePt([pd.x, pd.y], p) && padCopperLayers(pd, cu).has(layer3)) return true;
+            for (const pd of padsOf(it)) if (samePt([pd.x, pd.y], p) && padCopperLayers(pd, cu).has(layer4)) return true;
           }
         }
         return false;
@@ -41801,9 +41801,9 @@ var require_pcb_tools = __commonJS({
           ctx.toast("No ratsnest end to continue from.");
           return true;
         }
-        const currentEnd = rt.target.slice(), layer3 = rt.layer;
+        const currentEnd = rt.target.slice(), layer4 = rt.layer;
         endRoute(ctx, false);
-        const next = a.layers.includes(layer3) || a.layers.includes("*.Cu") || !a.layers.length ? layer3 : a.layers[0];
+        const next = a.layers.includes(layer4) || a.layers.includes("*.Cu") || !a.layers.length ? layer4 : a.layers[0];
         if (next !== S2.layer) setLayer(ctx, next);
         const hv = hoverPoint(ctx, a.p.slice(), true);
         routeClick(ctx, { x: a.p[0], y: a.p[1], snap: hv.snap }, a.p.slice());
@@ -42126,7 +42126,7 @@ var require_pcb_tools = __commonJS({
         const path2 = line3.map((q4) => q4.slice());
         let index = aIndex;
         const segs0 = line3.length - 1;
-        const target2 = snapToNeighbourSegments(path2, aP, aIndex, thresh);
+        const target3 = snapToNeighbourSegments(path2, aP, aIndex, thresh);
         if (index === 0) {
           path2.splice(0, 0, path2[0].slice());
           index++;
@@ -42161,7 +42161,7 @@ var require_pcb_tools = __commonJS({
         if (aIndex === segs0 - 1) gB = [guide(dragged[1], d45Right(dragDir)), guide(dragged[1], d45Left(dragDir))];
         else if (wide(dirNext)) gB = [guide(sNext[1], d45Left(dragDir)), guide(sNext[1], d45Right(dragDir))];
         else gB = [guide(dragged[1], dirNext), guide(dragged[1], dirNext)];
-        const cur2 = guide(target2, dragDir);
+        const cur2 = guide(target3, dragDir);
         let best = null, bestLen = Infinity;
         for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) {
           const ip1 = lineX(cur2[0], cur2[1], gA[i][0], gA[i][1]), ip2 = lineX(cur2[0], cur2[1], gB[j][0], gB[j][1]);
@@ -42277,7 +42277,7 @@ var require_pcb_tools = __commonJS({
         }
         return out2;
       }
-      function arcStubLine(arc, at4, layer3, netKey2) {
+      function arcStubLine(arc, at4, layer4, netKey2) {
         const a = pt4(arc.node, "start"), m = pt4(arc.node, "mid"), b = pt4(arc.node, "end");
         if (!a || !m || !b) return null;
         const e = samePt(a, at4) ? a : b;
@@ -42288,7 +42288,7 @@ var require_pcb_tools = __commonJS({
           if ((m[0] - e[0]) * t[0] + (m[1] - e[1]) * t[1] > 0) t = [-t[0], -t[1]];
           diag = isDiagDir(dir8(e, [e[0] + t[0], e[1] + t[1]]));
         }
-        return { ids: [], pts: [at4.slice(), at4.slice()], index: 0, vertex: 0, width: widthOf3(arc.node, 0.25), layer: layer3, net: netOf3(arc.node), netKey: netKey2, arc, arcDiag: diag, tmpl: arc };
+        return { ids: [], pts: [at4.slice(), at4.slice()], index: 0, vertex: 0, width: widthOf3(arc.node, 0.25), layer: layer4, net: netOf3(arc.node), netKey: netKey2, arc, arcDiag: diag, tmpl: arc };
       }
       function snapGrab(ctx, it, mm5) {
         if (it.kind === "via") return pt4(it.node, "at").slice();
@@ -42343,11 +42343,11 @@ var require_pcb_tools = __commonJS({
         const pts = d.mode === "segment" ? dragSegment45(l.pts, l.index, p, thresh(l)) : d.free ? dragCornerFree(l.pts, l.vertex, p) : dragCorner45(l.pts, l.vertex, p, thresh(l));
         return { lines: [{ l, pts }] };
       }
-      function dragObstacles(ctx, d, layer3) {
-        let O = d.obs.get(layer3);
+      function dragObstacles(ctx, d, layer4) {
+        let O = d.obs.get(layer4);
         if (O) return O;
-        O = routeObstacles(ctx.doc, settingsOf2(ctx), d.netKey, layer3, d.netKey ? null : d.ids, d.excl);
-        d.obs.set(layer3, O);
+        O = routeObstacles(ctx.doc, settingsOf2(ctx), d.netKey, layer4, d.netKey ? null : d.ids, d.excl);
+        d.obs.set(layer4, O);
         return O;
       }
       function solutionHits(ctx, d, sol) {
@@ -42428,12 +42428,12 @@ var require_pcb_tools = __commonJS({
         });
         return out2;
       }
-      var padOnLayer2 = (p, layer3) => p.layers.some((l) => l === layer3 || l === "*.Cu" || l === "F&B.Cu");
+      var padOnLayer2 = (p, layer4) => p.layers.some((l) => l === layer4 || l === "*.Cu" || l === "F&B.Cu");
       function padCovers(p, x, y) {
         const [lx, ly] = rotator2(-p.rot)(x - p.x, y - p.y);
         return Math.abs(lx) <= p.w / 2 && Math.abs(ly) <= p.h / 2;
       }
-      function snapTarget(doc2, x, y, tol, layer3, net, strict) {
+      function snapTarget(doc2, x, y, tol, layer4, net, strict) {
         let best = null, bd = Infinity;
         const take = (px, py, n2, kind, inside3, extra) => {
           const d = Math.hypot(px - x, py - y);
@@ -42442,7 +42442,7 @@ var require_pcb_tools = __commonJS({
           if (strict && !sameNet2(n2, net) && !(kind === "pad" && inside3)) return;
           if (d < bd) {
             bd = d;
-            best = Object.assign({ x: px, y: py, net: n2, kind, onLayer: layer3 }, extra);
+            best = Object.assign({ x: px, y: py, net: n2, kind, onLayer: layer4 }, extra);
           }
         };
         const mids = [];
@@ -42451,12 +42451,12 @@ var require_pcb_tools = __commonJS({
           if (b && (x < b[0] - tol || x > b[2] + tol || y < b[1] - tol || y > b[3] + tol)) continue;
           if (it.kind === "footprint") {
             padsOf(it).forEach((p, i) => {
-              if (padOnLayer2(p, layer3)) take(p.x, p.y, p.net, "pad", padCovers(p, x, y), { fp: it.id, padIndex: p.index !== void 0 ? p.index : i });
+              if (padOnLayer2(p, layer4)) take(p.x, p.y, p.net, "pad", padCovers(p, x, y), { fp: it.id, padIndex: p.index !== void 0 ? p.index : i });
             });
           } else if (it.kind === "via") {
             const a = pt4(it.node, "at");
             if (a) take(a[0], a[1], netOf3(it.node), "via", false, { id: it.id });
-          } else if ((it.kind === "segment" || it.kind === "arc") && layerOf2(it.node) === layer3) {
+          } else if ((it.kind === "segment" || it.kind === "arc") && layerOf2(it.node) === layer4) {
             const a = pt4(it.node, "start"), b2 = pt4(it.node, "end");
             if (!a || !b2) continue;
             take(a[0], a[1], netOf3(it.node), "track", false, { id: it.id });
@@ -42475,12 +42475,12 @@ var require_pcb_tools = __commonJS({
         }
         return best;
       }
-      function netUnder(doc2, x, y, layer3) {
+      function netUnder(doc2, x, y, layer4) {
         for (const it2 of doc2.items.values()) if (it2.kind === "footprint" && it2.bbox && x >= it2.bbox[0] && x <= it2.bbox[2] && y >= it2.bbox[1] && y <= it2.bbox[3]) {
-          for (const p of padsOf(it2)) if ((!layer3 || padOnLayer2(p, layer3)) && padCovers(p, x, y)) return p.net;
+          for (const p of padsOf(it2)) if ((!layer4 || padOnLayer2(p, layer4)) && padCovers(p, x, y)) return p.net;
         }
         const it = hitTestItem(doc2, x, y, HIT_MM);
-        if (it && (it.kind === "via" || (it.kind === "segment" || it.kind === "arc") && (!layer3 || layerOf2(it.node) === layer3))) return netOf3(it.node);
+        if (it && (it.kind === "via" || (it.kind === "segment" || it.kind === "arc") && (!layer4 || layerOf2(it.node) === layer4))) return netOf3(it.node);
         return { code: 0, name: "" };
       }
       function netTable(doc2) {
@@ -42864,7 +42864,7 @@ var require_pcb_tools = __commonJS({
           hv = Object.assign({}, hv, { x: c[0], y: c[1] });
         }
         if (t === "garc" && S2.draw && S2.draw.shape === "garc") arcMove(S2.draw, [hv.x, hv.y], !!(ev && (ev.ctrlKey || ev.metaKey)));
-        const p = [hv.x, hv.y], layer3 = S2.gfxLayer;
+        const p = [hv.x, hv.y], layer4 = S2.gfxLayer;
         if (!S2.draw && t === "thievingzone" && !thievingAllowed(ctx.doc)) {
           ctx.toast(THIEVING_NEEDS_VERSION_MSG);
           return;
@@ -42938,7 +42938,7 @@ var require_pcb_tools = __commonJS({
           }
           d.pts.push(p);
           if (d.pts.length === 4) {
-            ctx.commit([addedChange(ctx.doc, withStroke(curveNode(d.pts, layer3)))], "curve");
+            ctx.commit([addedChange(ctx.doc, withStroke(curveNode(d.pts, layer4)))], "curve");
             S2.draw = null;
           }
           ctx.requestRender();
@@ -42949,7 +42949,7 @@ var require_pcb_tools = __commonJS({
           ctx.requestRender();
           if (t === "gtextbox" && samePt(p, d.start)) return;
           if (t === "gtextbox") {
-            const node3 = withStroke(textBoxNode("", d.start, p, layer3));
+            const node3 = withStroke(textBoxNode("", d.start, p, layer4));
             const dlg2 = newItemDialogs.gr_text_box;
             if (!dlg2) {
               askText(ctx, "Text box", "", (text3) => {
@@ -42971,7 +42971,7 @@ var require_pcb_tools = __commonJS({
             });
             return;
           }
-          const node2 = tableNode(d.start, p, layer3, ctx.gridPitch || 0);
+          const node2 = tableNode(d.start, p, layer4, ctx.gridPitch || 0);
           const dlg = newItemDialogs.table;
           const add3 = (n2) => {
             const c = addedChange(ctx.doc, n2);
@@ -42997,16 +42997,16 @@ var require_pcb_tools = __commonJS({
           ctx.requestRender();
           return;
         }
-        const node = withStroke(t === "gline" ? lineNode(d.start, p, layer3) : t === "grect" ? rectNode(d.start, p, layer3) : circleNode(d.start, p, layer3));
+        const node = withStroke(t === "gline" ? lineNode(d.start, p, layer4) : t === "grect" ? rectNode(d.start, p, layer4) : circleNode(d.start, p, layer4));
         const add22 = addedChange(ctx.doc, node);
         ctx.commit([add22], t === "gline" ? "line" : t === "grect" ? "rectangle" : "circle");
         S2.draw = t === "gline" ? { shape: t, start: p, cur: p.slice(), pts: [p], chain: (d.chain || []).concat([{ id: add22.id, start: d.start, end: p }]) } : null;
         ctx.requestRender();
       }
       function zoneTemplate(ctx, keepout, thieving = false) {
-        const doc2 = ctx.doc, layer3 = sizesOf(ctx).activeLayer || S2.layer;
-        if (keepout) return ruleAreaNode([], [layer3]);
-        if (thieving) return thievingZoneNode(doc2, [], layer3);
+        const doc2 = ctx.doc, layer4 = sizesOf(ctx).activeLayer || S2.layer;
+        if (keepout) return ruleAreaNode([], [layer4]);
+        if (thieving) return thievingZoneNode(doc2, [], layer4);
         let net = { code: 0, name: "" };
         if (S2.highlightNet) {
           const t = netTable(doc2);
@@ -43017,8 +43017,8 @@ var require_pcb_tools = __commonJS({
           const first = Array.from(selectionIds2(ctx))[0], it = first && doc2.items.get(first);
           if (it && it.kind !== "footprint" && K11.kid(it.node, "net")) net = netOf3(it.node);
         }
-        const node = zoneNode(doc2, [], layer3, net);
-        if (!/\.Cu$/.test(layer3)) {
+        const node = zoneNode(doc2, [], layer4, net);
+        if (!/\.Cu$/.test(layer4)) {
           const pr = K11.kid(node, "priority");
           if (pr) node.splice(node.indexOf(pr), 1);
         }
@@ -43083,11 +43083,11 @@ var require_pcb_tools = __commonJS({
           ctx.commit([addedChange(ctx.doc, ruleAreaNode(d.pts, RULE_AREA_LAYERS))], "rule area");
           return;
         }
-        const layer3 = S2.layer, nets = boardNets(ctx.doc), under = netUnder(ctx.doc, d.pts[0][0], d.pts[0][1], layer3);
+        const layer4 = S2.layer, nets = boardNets(ctx.doc), under = netUnder(ctx.doc, d.pts[0][0], d.pts[0][1], layer4);
         askText(ctx, "Zone net", under.name, (name) => {
           if (name === null) return;
           const net = name ? nets.find((n2) => n2.name === name) || { code: -1, name } : { code: 0, name: "" };
-          ctx.commit([addedChange(ctx.doc, zoneNode(ctx.doc, d.pts, layer3, net), net)], "zone");
+          ctx.commit([addedChange(ctx.doc, zoneNode(ctx.doc, d.pts, layer4, net), net)], "zone");
         }, nets.map((n2) => n2.name));
       }
       function dimClick(ctx, p, t) {
@@ -43281,8 +43281,8 @@ var require_pcb_tools = __commonJS({
         else if (d.shape === "dimortho") d.orientation = Math.abs(d.cur[0] - d.start[0]) < Math.abs(d.cur[1] - d.start[1]) ? "v" : "h";
       }
       var WIDTH_STEP = 0.1;
-      function drawWidth(layer3) {
-        return S2.strokeW != null ? S2.strokeW : gfxWidth(layer3);
+      function drawWidth(layer4) {
+        return S2.strokeW != null ? S2.strokeW : gfxWidth(layer4);
       }
       function stepDrawWidth(ctx, dir) {
         const d = S2.draw;
@@ -43470,10 +43470,10 @@ var require_pcb_tools = __commonJS({
         for (const g2 of e.geoms) a += geomArea(g2);
         return a;
       }
-      function entryOnLayer(e, layer3) {
-        if (!layer3) return false;
-        const cu = /\.Cu$/.test(layer3);
-        const hits2 = (l) => l === layer3 || cu && (l === "*.Cu" || l === "F&B.Cu");
+      function entryOnLayer(e, layer4) {
+        if (!layer4) return false;
+        const cu = /\.Cu$/.test(layer4);
+        const hits2 = (l) => l === layer4 || cu && (l === "*.Cu" || l === "F&B.Cu");
         if (!e.pad && !e.field) {
           const l = K11.kid(e.item.node, "layer");
           if (l && hits2(K11.str(l[1]))) return true;
@@ -44457,11 +44457,11 @@ var require_pcb_tools = __commonJS({
         return null;
       }
       function findTangentSeed(ctx, pos) {
-        const tol = kiRound(5 / Math.max(1e-9, ctx.pxPerMm || 1) * NM), layer3 = S2.gfxLayer;
+        const tol = kiRound(5 / Math.max(1e-9, ctx.pxPerMm || 1) * NM), layer4 = S2.gfxLayer;
         for (const it of ctx.doc.items.values()) {
           if (!/^gr_(line|arc|curve|poly)$/.test(it.kind)) continue;
           const l = K11.kid(it.node, "layer");
-          if (!l || K11.str(l[1]) !== layer3) continue;
+          if (!l || K11.str(l[1]) !== layer4) continue;
           if (it.bbox && (pos[0] / NM < it.bbox[0] - tol / NM || pos[0] / NM > it.bbox[2] + tol / NM || pos[1] / NM < it.bbox[1] - tol / NM || pos[1] / NM > it.bbox[3] + tol / NM)) continue;
           const sh = seedShapeOf(it);
           if (!sh) continue;
@@ -44688,9 +44688,9 @@ var require_pcb_tools = __commonJS({
       function snap90(v) {
         return Math.abs(v[0]) > Math.abs(v[1]) ? [v[0], 0] : [0, v[1]];
       }
-      function dimGeometry(type, d, layer3) {
+      function dimGeometry(type, d, layer4) {
         const s2 = d.start, e = d.end;
-        const { size: size2, thick } = textStyle(layer3);
+        const { size: size2, thick } = textStyle(layer4);
         const lines = [], arrows = [];
         let text3 = "", tpos = s2.slice(), tang = 0;
         if (type === "aligned" || type === "orthogonal") {
@@ -44750,9 +44750,9 @@ var require_pcb_tools = __commonJS({
         }
         return { lines, arrows, text: text3, tpos, tang, size: size2, thick };
       }
-      function dimensionNode(type, d, layer3) {
+      function dimensionNode(type, d, layer4) {
         const uuid = K11.newUuid(), D = DIM_DEFAULTS, measuring = type !== "center" && type !== "leader";
-        const node = ["dimension", ["type", type], ["layer", layer3], ["uuid", uuid], ["pts", xy(d.start), xy(d.end)]];
+        const node = ["dimension", ["type", type], ["layer", layer4], ["uuid", uuid], ["pts", xy(d.start), xy(d.end)]];
         if (type === "aligned" || type === "orthogonal") node.push(["height", r65(d.height || 0)]);
         if (type === "radial") node.push(["leader_length", r65(ARROW_LEN * 3)]);
         if (type === "orthogonal") node.push(["orientation", d.orientation === "v" ? 1 : 0]);
@@ -44761,7 +44761,7 @@ var require_pcb_tools = __commonJS({
           if (measuring && D.suppressZeroes) format.push(["suppress_zeroes", "yes"]);
           node.push(format);
         }
-        const style = ["style", ["thickness", r65(d.thickness != null ? d.thickness : gfxWidth(layer3))], ["arrow_length", r65(D.arrowLength)], ["text_position_mode", measuring ? D.textPosition : 0]];
+        const style = ["style", ["thickness", r65(d.thickness != null ? d.thickness : gfxWidth(layer4))], ["arrow_length", r65(D.arrowLength)], ["text_position_mode", measuring ? D.textPosition : 0]];
         if (type === "aligned" || type === "orthogonal") style.push(["arrow_direction", d.arrowInward ? "inward" : "outward"], ["extension_height", EXT_HEIGHT]);
         if (type === "leader") style.push(["text_frame", 0]);
         style.push(["extension_offset", r65(D.extOffset)]);
@@ -44769,7 +44769,7 @@ var require_pcb_tools = __commonJS({
         node.push(style);
         if (type === "center") return node;
         const tp = d.textPos || (type === "leader" ? vadd(d.end, [d.end[0] < d.start[0] ? -10 * D.arrowLength : 10 * D.arrowLength, 0]) : d.start);
-        node.push(["gr_text", "", ["at", r65(tp[0]), r65(tp[1]), 0], ["layer", layer3], ["uuid", uuid], effectsNode(layer3)]);
+        node.push(["gr_text", "", ["at", r65(tp[0]), r65(tp[1]), 0], ["layer", layer4], ["uuid", uuid], effectsNode(layer4)]);
         const m = dimRead(node);
         if (type === "radial" && !d.textPos) {
           const k = dimKnee(m);
@@ -46219,10 +46219,10 @@ var require_pcb_tools = __commonJS({
         return R2;
       }
       var netNameOf3 = (ctx, net) => net && net.name || net && net.code > 0 && ctx.doc && ctx.doc.nets && ctx.doc.nets.get(net.code) || "";
-      function connectedWidth(doc2, p, layer3, towards) {
+      function connectedWidth(doc2, p, layer4, towards) {
         let best = null, bd = Infinity;
         for (const it of doc2.items.values()) {
-          if (it.kind !== "segment" && it.kind !== "arc" || layerOf2(it.node) !== layer3) continue;
+          if (it.kind !== "segment" && it.kind !== "arc" || layerOf2(it.node) !== layer4) continue;
           const a = pt4(it.node, "start"), b = pt4(it.node, "end");
           if (!a || !b) continue;
           const w = widthOf3(it.node, 0);
@@ -46446,9 +46446,9 @@ var require_pcb_tools = __commonJS({
           if (it.kind !== "segment" && it.kind !== "arc") return false;
           const l = K11.kid(n2, "layer");
           const i = copper.indexOf(K11.str(l[1]));
-          const target2 = toLayer || copper[Math.max(0, Math.min(copper.length - 1, i + step))];
-          if (!target2 || target2 === K11.str(l[1])) return false;
-          l[1] = target2;
+          const target3 = toLayer || copper[Math.max(0, Math.min(copper.length - 1, i + step))];
+          if (!target3 || target3 === K11.str(l[1])) return false;
+          l[1] = target3;
         });
       }
       function breakTrackChanges(doc2, p, seg2) {
@@ -46482,7 +46482,7 @@ var require_pcb_tools = __commonJS({
         const nodeOf = (c) => replace.get(c.id) || c.item.node;
         const layerOfC = (c) => c.layers.values().next().value;
         const near3 = (p, q4) => Math.abs(p[0] - q4[0]) < EPS && Math.abs(p[1] - q4[1]) < EPS;
-        const touchesPt = (p, layer3, self2) => conds.filter(alive).some((c) => c !== self2 && c.layers.has(layer3) && boxesTouch(c.bbox, [p[0], p[1], p[0], p[1]], EPS) && shapeGap(c.shape, { t: "circle", x: p[0], y: p[1], r: 0 }) <= EPS);
+        const touchesPt = (p, layer4, self2) => conds.filter(alive).some((c) => c !== self2 && c.layers.has(layer4) && boxesTouch(c.bbox, [p[0], p[1], p[0], p[1]], EPS) && shapeGap(c.shape, { t: "circle", x: p[0], y: p[1], r: 0 }) <= EPS);
         for (const c of tracks()) if (c.kind === "segment" && c.length < EPS && !keep(c)) {
           remove.add(c.id);
           report3("null_segment", "Remove zero-length track", [c.id]);
@@ -46506,8 +46506,8 @@ var require_pcb_tools = __commonJS({
         if (opts2.inPads) {
           for (const c of tracks()) if (c.kind === "segment" && !keep(c)) {
             const [a, b] = c.anchors;
-            const layer3 = layerOfC(c);
-            const inside3 = (p) => conds.find((o) => o.kind === "pad" && o.layers.has(layer3) && boxesTouch(o.bbox, [p[0], p[1], p[0], p[1]], 0) && coreDist(o.shape, { t: "circle", x: p[0], y: p[1], r: 0 }) <= shapeOffset(o.shape) + 1e-9);
+            const layer4 = layerOfC(c);
+            const inside3 = (p) => conds.find((o) => o.kind === "pad" && o.layers.has(layer4) && boxesTouch(o.bbox, [p[0], p[1], p[0], p[1]], 0) && coreDist(o.shape, { t: "circle", x: p[0], y: p[1], r: 0 }) <= shapeOffset(o.shape) + 1e-9);
             const pa = inside3(a), pb = inside3(b);
             if (pa && pb && pa === pb) {
               remove.add(c.id);
@@ -46566,8 +46566,8 @@ var require_pcb_tools = __commonJS({
             again2 = false;
             if (opts2.dangling) for (const c of tracks()) {
               if (keep(c)) continue;
-              const layer3 = layerOfC(c);
-              if (c.anchors.some((p) => !touchesPt(p, layer3, c))) {
+              const layer4 = layerOfC(c);
+              if (c.anchors.some((p) => !touchesPt(p, layer4, c))) {
                 remove.add(c.id);
                 report3("dangling_track", "Remove track not connected at both ends", [c.id]);
                 again2 = true;
@@ -47283,10 +47283,10 @@ Press <esc> to cancel all; double-click to finish`;
         return true;
       });
       act("selectAllOnLayer", "Select All on Active Layer", "", (ctx) => {
-        const layer3 = ctx.activeLayer || S2.layer;
-        const ids = idsOnLayer(ctx.doc, layer3);
+        const layer4 = ctx.activeLayer || S2.layer;
+        const ids = idsOnLayer(ctx.doc, layer4);
         applySelection(ctx, ids);
-        ctx.toast(`${plural3(ids.size, "item")} on ${layer3}`);
+        ctx.toast(`${plural3(ids.size, "item")} on ${layer4}`);
         return true;
       });
       act("selectSameSheet", "Select Footprints on Same Sheet", "", (ctx) => {
@@ -48353,12 +48353,12 @@ Press <esc> to cancel all; double-click to finish`;
           if (!ids) return true;
           if (to === "zone") {
             const items = ids.map((i) => ctx.doc.items.get(i));
-            const layer3 = /\.Cu$/.test(layerOf2(items[0].node, "")) ? layerOf2(items[0].node) : S2.layer;
+            const layer4 = /\.Cu$/.test(layerOf2(items[0].node, "")) ? layerOf2(items[0].node) : S2.layer;
             const nets = boardNets(ctx.doc);
             askText(ctx, "Zone net", "", (name) => {
               if (name === null) return;
               const net = name ? nets.find((n2) => n2.name === name) || { code: -1, name } : { code: 0, name: "" };
-              commitSel(ctx, convertChanges(ctx.doc, ids, "zone", { layer: layer3, net }), "zone from shapes");
+              commitSel(ctx, convertChanges(ctx.doc, ids, "zone", { layer: layer4, net }), "zone from shapes");
             }, nets.map((n2) => n2.name));
             return true;
           }
@@ -48969,7 +48969,7 @@ Press <esc> to cancel all; double-click to finish`;
           if (isList10(c) && c[0] === "net") n2.splice(i, 1);
         }
       }
-      function scaleOf4(n2) {
+      function scaleOf5(n2) {
         const t = K11.kid(n2, "transform");
         const s2 = t && K11.kid(t, "scale");
         return s2 ? [K11.num(s2[1], 1) || 1, K11.num(s2[2], 1) || 1] : [1, 1];
@@ -49377,7 +49377,7 @@ Press <esc> to cancel all; double-click to finish`;
         setFootprintAt(n2, px, py, no);
         if (orient - no) rotateFootprintNode(n2, orient - no);
         if (!opt.resetTransform) {
-          const [sx, sy] = scaleOf4(existing), [nx, ny] = scaleOf4(n2);
+          const [sx, sy] = scaleOf5(existing), [nx, ny] = scaleOf5(n2);
           if (sx !== nx || sy !== ny) applyScale(n2, sx, sy);
         }
         setLocked2(n2, !!(K11.kid(existing, "locked") || existing.includes("locked")) && str62((K11.kid(existing, "locked") || ["", "yes"])[1]) !== "no");
@@ -49762,9 +49762,9 @@ Press <esc> to cancel all; double-click to finish`;
           f2.splice(s2 ? f2.indexOf(s2) + 1 : f2.length, 0, ["thickness", r65(t)]);
         }
       }
-      function setLayer2(n2, layer3) {
+      function setLayer2(n2, layer4) {
         const l = K11.kid(n2, "layer");
-        if (l) l[1] = layer3;
+        if (l) l[1] = layer4;
       }
       function setBarcodeTextHeight(n2, h3) {
         const t = K11.kid(n2, "text_height");
@@ -50511,13 +50511,13 @@ Please remove the objects that use these layers first.`, page: 1 };
       }
       function newFieldRow(m, activeLayer, textStyle2) {
         const tech = /^[FB]\.(SilkS|Mask|Adhes|Paste|CrtYd|Fab)$/.test(activeLayer);
-        const layer3 = tech ? activeLayer : m.fields.length ? m.fields[m.fields.length - 1].layer : "F.Fab";
-        const s2 = textStyle2(layer3);
+        const layer4 = tech ? activeLayer : m.fields.length ? m.fields[m.fields.length - 1].layer : "F.Fab";
+        const s2 = textStyle2(layer4);
         let i = m.fields.length;
         let name = `Field${i}`;
         const used = new Set(m.fields.map((f2) => f2.name));
         while (used.has(name)) name = `Field${++i}`;
-        return { id: "", name, value: "", show: true, w: s2.w, h: s2.h, thick: s2.thick, italic: s2.italic, layer: layer3, rot: 0, unconstrained: false, x: 0, y: 0 };
+        return { id: "", name, value: "", show: true, w: s2.w, h: s2.h, thick: s2.thick, italic: s2.italic, layer: layer4, rot: 0, unconstrained: false, x: 0, y: 0 };
       }
       var isMandatoryName = (name) => MANDATORY22.includes(name);
       var fpPropsApi = { readFpProps, readModels: readModels2, writeModels: writeModels2, validateFpProps, fpPropsChanges, newFieldRow, fieldItems, parsePaste, formatPaste, customLayerSet, sortLayers, minimalCopperCount, clampTextPenSize, splitPadList, ZONE_CHOICES, COPPER_COUNTS, isMandatoryName };
@@ -50559,17 +50559,17 @@ Please remove the objects that use these layers first.`, page: 1 };
       var after = (key3) => PAD_ORDER2.slice(0, Math.max(0, PAD_ORDER2.indexOf(key3)));
       var isAperture2 = (n2) => str92(n2[2]) === "smd" && !layersOf2(n2).some((l) => /\.Cu$/.test(l));
       var sizeSig = (n2) => K11.serialize(["s", K11.kid(n2, "size") || [], K11.kid(n2, "rect_delta") || [], K11.kid(n2, "drill") || [], K11.kid(n2, "roundrect_rratio") || [], K11.kid(n2, "chamfer_ratio") || [], K11.kid(n2, "primitives") || []]);
-      function importPadSettings(target2, master) {
+      function importPadSettings(target3, master) {
         const n2 = clone5(master);
         const keep = ["net", "pinfunction", "pintype", "die_length", "die_delay", "uuid", "tstamp"];
         for (const k of keep) {
-          const t = K11.kid(target2, k), m = K11.kid(n2, k);
+          const t = K11.kid(target3, k), m = K11.kid(n2, k);
           if (t && m) n2[n2.indexOf(m)] = clone5(t);
           else if (m) n2.splice(n2.indexOf(m), 1);
           else if (t) setKid22(n2, k, clone5(t).slice(1), k === "uuid" || k === "tstamp" ? n2.filter(isList10).map((c) => str92(c[0])) : after(k));
         }
-        n2[1] = canHaveNumber(n2) ? target2[1] : "";
-        const [x, y] = atOf22(target2);
+        n2[1] = canHaveNumber(n2) ? target3[1] : "";
+        const [x, y] = atOf22(target3);
         const ma = K11.kid(n2, "at");
         ma[1] = x;
         ma[2] = y;
@@ -50640,7 +50640,7 @@ Please remove the objects that use these layers first.`, page: 1 };
         const [ox, oy] = rotator2(a)(num62(o[1]), num62(o[2]));
         return [x + ox, y + oy];
       }
-      function primitiveToShape(g2, pad2, layer3) {
+      function primitiveToShape(g2, pad2, layer4) {
         const n2 = clone5(g2);
         const k = str92(n2[0]);
         const w = K11.kid(n2, "width");
@@ -50654,7 +50654,7 @@ Please remove the objects that use these layers first.`, page: 1 };
         translateNode(n2, px, py);
         n2.push(["stroke", ["width", r65(width)], ["type", "solid"]]);
         if (k !== "gr_line" && k !== "gr_arc" && k !== "gr_curve") n2.push(["fill", fill22 && str92(fill22[1]) !== "no" && str92(fill22[1]) !== "none" ? "yes" : "no"]);
-        n2.push(K11.parse(`(layer ${qs3(layer3)})`), ["uuid", K11.newUuid()]);
+        n2.push(K11.parse(`(layer ${qs3(layer4)})`), ["uuid", K11.newUuid()]);
         return n2;
       }
       function explodePadChanges(doc2, padId) {
@@ -50664,8 +50664,8 @@ Please remove the objects that use these layers first.`, page: 1 };
         const out2 = [];
         if (str92(pad2[3]) === "custom") {
           const prims = K11.kid(pad2, "primitives");
-          const layer3 = principalLayer(pad2);
-          for (const g2 of prims ? prims.slice(1) : []) if (isList10(g2) && /^gr_/.test(str92(g2[0])) && g2[0] !== "gr_bbox") out2.push(addedChange(doc2, primitiveToShape(g2, pad2, layer3)));
+          const layer4 = principalLayer(pad2);
+          for (const g2 of prims ? prims.slice(1) : []) if (isList10(g2) && /^gr_/.test(str92(g2[0])) && g2[0] !== "gr_bbox") out2.push(addedChange(doc2, primitiveToShape(g2, pad2, layer4)));
           const opts2 = K11.kid(pad2, "options");
           const anchor2 = opts2 ? K11.kid(opts2, "anchor") : null;
           pad2[3] = anchor2 ? str92(anchor2[1]) : "circle";
@@ -50758,8 +50758,8 @@ Please remove the objects that use these layers first.`, page: 1 };
         const it = doc2.items.get(padId);
         if (!it || it.kind !== "pad") return { changes: [], merged: [] };
         const pad2 = clone5(it.node);
-        const layer3 = principalLayer(pad2);
-        const shapes2 = Array.from(doc2.items.values()).filter((s2) => /^gr_(line|rect|circle|arc|poly|curve)$/.test(s2.kind) && str92((K11.kid(s2.node, "layer") || [])[1]) === layer3);
+        const layer4 = principalLayer(pad2);
+        const shapes2 = Array.from(doc2.items.values()).filter((s2) => /^gr_(line|rect|circle|arc|poly|curve)$/.test(s2.kind) && str92((K11.kid(s2.node, "layer") || [])[1]) === layer4);
         const merged = [];
         const used = /* @__PURE__ */ new Set();
         let grew = true;
@@ -52359,8 +52359,8 @@ Press <esc> to cancel all; double-click to finish`;
           if (p.a.net === p.b.net) continue;
           let ca = 0, cb = 0;
           for (const c of conds) {
-            const layer3 = [...c.layers].find((l) => p.shared.has(l));
-            if (!layer3) continue;
+            const layer4 = [...c.layers].find((l) => p.shared.has(l));
+            if (!layer4) continue;
             const at4 = c.anchors[0];
             if (!at4 || !inZone(at4, p.a) || !inZone(at4, p.b)) continue;
             if (c.net === p.a.net) ca++;
@@ -52582,20 +52582,20 @@ Press <esc> to cancel all; double-click to finish`;
         if (str13(a[2]) !== str13(b[2])) out2.push(`${D} pad type differs.`);
         if (kidText2(a, "property") !== kidText2(b, "property")) out2.push(`${D} fabrication property differs.`);
         if (!near22(pa[2], pb[2])) out2.push(`${D} orientation differs.`);
-        const layer3 = first(a);
-        if (str13(a[3]) !== str13(b[3])) out2.push(`${D} pad shape type differs on layer ${layer3}.`);
-        if (!sameNums(nums(K11.kid(a, "size")), nums(K11.kid(b, "size")))) out2.push(`${D} size differs on layer ${layer3}.`);
-        if (kidText2(a, "rect_delta") !== kidText2(b, "rect_delta")) out2.push(`${D} trapezoid delta differs on layer ${layer3}.`);
-        if (kidText2(a, "roundrect_rratio") !== kidText2(b, "roundrect_rratio")) out2.push(`${D} rounded corners differ on layer ${layer3}.`);
-        if (kidText2(a, "chamfer_ratio") !== kidText2(b, "chamfer_ratio")) out2.push(`${D} chamfered corner sizes differ on layer ${layer3}.`);
-        if (kidText2(a, "chamfer") !== kidText2(b, "chamfer")) out2.push(`${D} chamfered corners differ on layer ${layer3}.`);
+        const layer4 = first(a);
+        if (str13(a[3]) !== str13(b[3])) out2.push(`${D} pad shape type differs on layer ${layer4}.`);
+        if (!sameNums(nums(K11.kid(a, "size")), nums(K11.kid(b, "size")))) out2.push(`${D} size differs on layer ${layer4}.`);
+        if (kidText2(a, "rect_delta") !== kidText2(b, "rect_delta")) out2.push(`${D} trapezoid delta differs on layer ${layer4}.`);
+        if (kidText2(a, "roundrect_rratio") !== kidText2(b, "roundrect_rratio")) out2.push(`${D} rounded corners differ on layer ${layer4}.`);
+        if (kidText2(a, "chamfer_ratio") !== kidText2(b, "chamfer_ratio")) out2.push(`${D} chamfered corner sizes differ on layer ${layer4}.`);
+        if (kidText2(a, "chamfer") !== kidText2(b, "chamfer")) out2.push(`${D} chamfered corners differ on layer ${layer4}.`);
         const da = K11.kid(a, "drill"), db = K11.kid(b, "drill");
         const off = (d) => d ? kidText2(d, "offset") : "";
-        if (off(da) !== off(db)) out2.push(`${D} shape offset from hole differs on layer ${layer3}.`);
+        if (off(da) !== off(db)) out2.push(`${D} shape offset from hole differs on layer ${layer4}.`);
         const oval = (d) => !!d && d.includes("oval");
         if (oval(da) !== oval(db)) out2.push(`${D} drill shape differs.`);
         if (!sameNums(nums(da), nums(db))) out2.push(`${D} drill size differs.`);
-        if (kidText2(a, "primitives") !== kidText2(b, "primitives")) out2.push(`${D} shape primitives differ on layer ${layer3}.`);
+        if (kidText2(a, "primitives") !== kidText2(b, "primitives")) out2.push(`${D} shape primitives differ on layer ${layer4}.`);
         if (out2.length) return out2;
         for (const [k, msg] of PAD_OVERRIDES) if (K11.kid(a, k) && kidText2(a, k) !== kidText2(b, k)) out2.push(msg.replace("%s", D));
         return out2;
@@ -52933,25 +52933,25 @@ Press <esc> to cancel all; double-click to finish`;
           if (!it) continue;
           const n2 = it.node;
           const srcLayer = String((K11.kid(n2, "layer") || [])[1] || p.layer);
-          let layer3 = p.useSourceLayers ? srcLayer : p.layer;
+          let layer4 = p.useSourceLayers ? srcLayer : p.layer;
           let width = p.lineWidth;
           if (p.useSourceWidths && it.kind !== "pad") {
             const st = K11.kid(n2, "stroke"), w = st ? K11.kid(st, "width") : K11.kid(n2, "width");
             if (w && isFinite(K11.num(w[1]))) width = K11.num(w[1]);
           }
-          const tail = () => [strokeNode(width), ["fill", "no"], ["layer", layer3]];
+          const tail = () => [strokeNode(width), ["fill", "no"], ["layer", layer4]];
           const addPolyChain = (pts) => emit(["gr_poly", ["pts", ...pts.map((q4) => ["xy", r65(q4[0]), r65(q4[1])])], ...tail()]);
           const addSegs = (segs) => {
             if (!segs.some((s2) => s2.kind === "arc")) {
               addPolyChain(segs.map((s2) => s2.a));
               return;
             }
-            for (const s2 of segs) if (s2.kind === "line" && len2(sub22(s2.b, s2.a)) > EPS4) emit(["gr_line", ["start", r65(s2.a[0]), r65(s2.a[1])], ["end", r65(s2.b[0]), r65(s2.b[1])], strokeNode(width), ["layer", layer3]]);
+            for (const s2 of segs) if (s2.kind === "line" && len2(sub22(s2.b, s2.a)) > EPS4) emit(["gr_line", ["start", r65(s2.a[0]), r65(s2.a[1])], ["end", r65(s2.b[0]), r65(s2.b[1])], strokeNode(width), ["layer", layer4]]);
             for (const s2 of segs) {
               if (s2.kind !== "arc") continue;
               const e = arcEnd(s2), m = arcMid(s2);
               if (len2(sub22(s2.start, s2.c)) < EPS4 || len2(sub22(e, s2.start)) < EPS4) continue;
-              emit(["gr_arc", ["start", r65(s2.start[0]), r65(s2.start[1])], ["mid", r65(m[0]), r65(m[1])], ["end", r65(e[0]), r65(e[1])], strokeNode(width), ["layer", layer3]]);
+              emit(["gr_arc", ["start", r65(s2.start[0]), r65(s2.start[1])], ["mid", r65(m[0]), r65(m[1])], ["end", r65(e[0]), r65(e[1])], strokeNode(width), ["layer", layer4]]);
             }
           };
           const addRect = (r) => {
@@ -52968,7 +52968,7 @@ Press <esc> to cancel all; double-click to finish`;
             else addSegs(ch.segs.map((s2) => s2.kind === "line" ? { kind: "line", a: turn(s2.a), b: turn(s2.b) } : { kind: "arc", c: turn(s2.c), start: turn(s2.start), angle: s2.angle }));
           };
           if (it.kind === "pad") {
-            if (p.useSourceLayers) layer3 = "F.Cu";
+            if (p.useSourceLayers) layer4 = "F.Cu";
             const shape3 = String(n2[3] || ""), at4 = K11.kid(n2, "at"), size2 = K11.kid(n2, "size");
             const pos = at4 ? [K11.num(at4[1]), K11.num(at4[2])] : [0, 0], rot32 = at4 && at4.length > 3 ? K11.num(at4[3]) || 0 : 0;
             const sz = size2 ? [K11.num(size2[1]), K11.num(size2[2])] : [0, 0];
@@ -53626,7 +53626,7 @@ Press <esc> to cancel all; double-click to finish`;
               y = fy - lx * Math.sin(r) + ly * Math.cos(r);
             }
           }
-          const layer3 = K11.kid(n2, "layer"), isFront2 = !layer3 || K11.str(layer3[1]) === "F.Cu";
+          const layer4 = K11.kid(n2, "layer"), isFront2 = !layer4 || K11.str(layer4[1]) === "F.Cu";
           const info = { id: fp.id, ref, fpid: K11.str(n2[1]), x: nm3(x), y: nm3(y), rx: roundToGrid2(nm3(x), grid2), ry: roundToGrid2(nm3(y), grid2), front: isFront2, action: 0, prefix: "" };
           let firstnum = -1;
           if (!ref) info.action = 1;
@@ -53675,7 +53675,7 @@ Press <esc> to cancel all; double-click to finish`;
           if (f2.action === 3) prefixInfo(f2.prefix).unavailable.add(refDesNumber(f2.ref));
         }
         const changes = [], bad = [];
-        const build2 = (side, startText, prefix, remove) => {
+        const build3 = (side, startText, prefix, remove) => {
           const start = Math.max(0, parseInt(startText, 10) || 0);
           const have = prefix.length > 0, add22 = have && !remove;
           remove = remove && have;
@@ -53709,8 +53709,8 @@ ${i + 1} ${f2.ref || "unannotated footprint"} at ${coord(f2.x, f2.y)} (rounded t
             changes.push(c);
           }
         };
-        if (front.length) build2(front, o.frontStart, o.frontPrefix, o.removeFrontPrefix);
-        if (back.length) build2(back, o.backStart, o.backPrefix, o.removeBackPrefix);
+        if (front.length) build3(front, o.frontStart, o.frontPrefix, o.removeFrontPrefix);
+        if (back.length) build3(back, o.backStart, o.backPrefix, o.removeBackPrefix);
         changes.sort((a, b) => strNumCmp22(a.from, b.from));
         let plan = "Reference Designator Prefixes in Use\n-------------------------------------------------------------\n";
         plan += prefixes.map((p, i) => p.prefix + ((i + 1) % 16 === 0 ? "\n" : " ")).join("");
@@ -53776,7 +53776,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
       var DRCET = { unconnected_items: "UNCONNECTED_ITEMS", shorting_items: "SHORTING_ITEMS", items_not_allowed: "ALLOWED_ITEMS", text_on_edge_cuts: "TEXT_ON_EDGECUTS", clearance: "CLEARANCE", creepage: "CREEPAGE", tracks_crossing: "TRACKS_CROSSING", copper_edge_clearance: "EDGE_CLEARANCE", copper_outside_board: "COPPER_OUTSIDE_BOARD", isolated_copper: "ISOLATED_COPPER", starved_thermal: "STARVED_THERMAL", via_dangling: "DANGLING_VIA", track_dangling: "DANGLING_TRACK", hole_clearance: "HOLE_CLEARANCE", hole_to_hole: "DRILLED_HOLES_TOO_CLOSE", holes_co_located: "DRILLED_HOLES_COLOCATED", connection_width: "CONNECTION_WIDTH", track_width: "TRACK_WIDTH", track_angle: "TRACK_ANGLE", track_segment_length: "TRACK_SEGMENT_LENGTH", annular_width: "ANNULAR_WIDTH", drill_out_of_range: "DRILL_OUT_OF_RANGE", via_diameter: "VIA_DIAMETER", padstack: "PADSTACK", padstack_invalid: "PADSTACK_INVALID", microvia_drill_out_of_range: "MICROVIA_DRILL_OUT_OF_RANGE", malformed_microvia_stack_span: "MALFORMED_MICROVIA_STACK_SPAN", microvia_stack_not_filled: "MICROVIA_STACK_NOT_FILLED", microvia_stack_depth: "MICROVIA_STACK_DEPTH", hole_aspect_ratio: "HOLE_ASPECT_RATIO", microvia_crosses_core: "MICROVIA_CROSSES_CORE", courtyards_overlap: "OVERLAPPING_FOOTPRINTS", missing_courtyard: "MISSING_COURTYARD", malformed_courtyard: "MALFORMED_COURTYARD", pth_inside_courtyard: "PTH_IN_COURTYARD", npth_inside_courtyard: "NPTH_IN_COURTYARD", item_on_disabled_layer: "DISABLED_LAYER_ITEM", invalid_outline: "INVALID_OUTLINE", duplicate_footprints: "DUPLICATE_FOOTPRINT", missing_footprint: "MISSING_FOOTPRINT", extra_footprint: "EXTRA_FOOTPRINT", net_conflict: "NET_CONFLICT", footprint_symbol_mismatch: "SCHEMATIC_PARITY", footprint_filters_mismatch: "FOOTPRINT_FILTERS", footprint_symbol_field_mismatch: "SCHEMATIC_FIELDS_PARITY", lib_footprint_issues: "LIB_FOOTPRINT_ISSUES", lib_footprint_mismatch: "LIB_FOOTPRINT_MISMATCH", unresolved_variable: "UNRESOLVED_VARIABLE", assertion_failure: "ASSERTION_FAILURE", generic_warning: "GENERIC_WARNING", generic_error: "GENERIC_ERROR", copper_sliver: "COPPER_SLIVER", solder_mask_bridge: "SOLDERMASK_BRIDGE", silk_over_copper: "SILK_MASK_CLEARANCE", silk_edge_clearance: "SILK_EDGE_CLEARANCE", silk_overlap: "SILK_CLEARANCE", text_height: "TEXT_HEIGHT", text_thickness: "TEXT_THICKNESS", length_out_of_range: "LENGTH_OUT_OF_RANGE", net_chain_stub_length: "NET_CHAIN_STUB_TOO_LONG", net_chain_return_path: "NET_CHAIN_RETURN_PATH_BREAK", net_chain_tuning_profiles: "NET_CHAIN_TUNING_PROFILES", skew_out_of_range: "SKEW_OUT_OF_RANGE", too_many_vias: "VIA_COUNT_OUT_OF_RANGE", diff_pair_gap_out_of_range: "DIFF_PAIR_GAP_OUT_OF_RANGE", diff_pair_uncoupled_length_too_long: "DIFF_PAIR_UNCOUPLED_LENGTH_TOO_LONG", footprint: "FOOTPRINT", footprint_type_mismatch: "FOOTPRINT_TYPE_MISMATCH", through_hole_pad_without_hole: "PAD_TH_WITH_NO_HOLE", footprint_scaled_with_pads: "FOOTPRINT_SCALED_WITH_PADS", mirrored_text_on_front_layer: "MIRRORED_TEXT_ON_FRONT_LAYER", nonmirrored_text_on_back_layer: "NONMIRRORED_TEXT_ON_BACK_LAYER", missing_tuning_profile: "MISSING_TUNING_PROFILE", tuning_profile_track_geometries: "TUNING_PROFILE_IMPLICIT_RULES", track_on_post_machined_layer: "TRACK_ON_POST_MACHINED_LAYER", track_not_centered_on_via: "TRACK_NOT_CENTERED_ON_VIA" };
       var LAYER_STORED = /* @__PURE__ */ new Set(["copper_sliver", "generic_warning", "generic_error", "unconnected_items", "starved_thermal"]);
       var LEGACY_LAYER_FIELD = /* @__PURE__ */ new Set(["copper_sliver", "generic_warning", "generic_error"]);
-      var boardLayerEnum = (layer3) => "BL_" + layer3.replace(/\./g, "_");
+      var boardLayerEnum = (layer4) => "BL_" + layer4.replace(/\./g, "_");
       function kiidOf(doc2, id) {
         const it = doc2 && doc2.items.get(id);
         const u = it && (K11.kid(it.node, "uuid") || K11.kid(it.node, "tstamp"));
@@ -53809,12 +53809,12 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         const p = data.split("|");
         if (p.length < 5 || !DRCET[p[0]]) return null;
         const code = p[0], x = parseInt(p[1], 10) || 0, y = parseInt(p[2], 10) || 0;
-        let ids = [p[3], p[4]], layer3 = "F.Cu";
+        let ids = [p[3], p[4]], layer4 = "F.Cu";
         if (LEGACY_LAYER_FIELD.has(code)) {
           ids = [p[3]];
-          layer3 = p[4] || "F.Cu";
+          layer4 = p[4] || "F.Cu";
         } else if (code === "unconnected_items" && p.length > 6) ids = [p[5], p[6]];
-        return exclusionOf(null, { code, x: x / 1e6, y: y / 1e6, ids: ids.filter(Boolean), layer: layer3 }, comment);
+        return exclusionOf(null, { code, x: x / 1e6, y: y / 1e6, ids: ids.filter(Boolean), layer: layer4 }, comment);
       }
       function readExclusion(entry) {
         if (entry && typeof entry === "object" && !Array.isArray(entry)) return entry.marker ? entry : null;
@@ -54578,17 +54578,17 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         runAction: runAction2,
         // runAction(id, ctx): run with error reporting
         // the toolbar's layer selector: a copper layer is the routing layer, any other the one the graphic tools draw on
-        setLayer(ctx, layer3) {
+        setLayer(ctx, layer4) {
           bind(ctx);
-          if (!layer3) return;
+          if (!layer4) return;
           const R2 = sizesOf(ctx);
-          if (/\.Cu$/.test(layer3)) {
-            if (layer3 !== (S2.route ? S2.route.layer : S2.layer) || R2.activeLayer !== layer3) setLayer(ctx, layer3);
+          if (/\.Cu$/.test(layer4)) {
+            if (layer4 !== (S2.route ? S2.route.layer : S2.layer) || R2.activeLayer !== layer4) setLayer(ctx, layer4);
             return;
           }
-          if (R2.activeLayer === layer3 && S2.gfxLayer === layer3) return;
-          S2.gfxLayer = layer3;
-          R2.setActiveLayer(layer3);
+          if (R2.activeLayer === layer4 && S2.gfxLayer === layer4) return;
+          S2.gfxLayer = layer4;
+          R2.setActiveLayer(layer4);
           refreshChip(ctx);
           ctx.requestRender();
         },
@@ -69861,7 +69861,7 @@ function footprintNode2(fpid, sexpr, ref, value, fields, nets) {
   const out2 = ["footprint", fpid];
   const uuid = () => ["uuid", k.newUuid()];
   let placed = false;
-  const place2 = () => {
+  const place3 = () => {
     if (!placed) {
       out2.push(uuid(), ["at", 0, 0]);
       placed = true;
@@ -69875,10 +69875,10 @@ function footprintNode2(fpid, sexpr, ref, value, fields, nets) {
     const node = k.cloneNode(c);
     if (key3 === "layer") {
       out2.push(node);
-      place2();
+      place3();
       continue;
     }
-    place2();
+    place3();
     if (key3 === "property") {
       const name = k.str(node[1]);
       seen.add(name);
@@ -69895,7 +69895,7 @@ function footprintNode2(fpid, sexpr, ref, value, fields, nets) {
     }
     out2.push(node);
   }
-  place2();
+  place3();
   for (const [name, v] of Object.entries(fields)) {
     if (seen.has(name) || !v || name === "Reference" || name === "Value" || name === "Footprint") continue;
     out2.push(["property", name, v, ["at", 0, 0, 0], ["layer", "F.Fab"], ["hide", "yes"], uuid(), ["effects", ["font", ["size", 1, 1], ["thickness", 0.15]]]]);
@@ -70085,8 +70085,8 @@ function measure(doc2, fp, child2) {
     return null;
   }
   const lay = k.kid(child2, "layer");
-  const layer3 = lay ? k.str(lay[1]) : "F.SilkS";
-  return shapesBox(P.geomShapes(item.geom, layer3));
+  const layer4 = lay ? k.str(lay[1]) : "F.SilkS";
+  return shapesBox(P.geomShapes(item.geom, layer4));
 }
 function styled2(child2, lx, ly, ang, size2, text3) {
   const k = K4();
@@ -70585,7 +70585,7 @@ var init_silkscreen = __esm({
     W2 = window;
     PCB2 = () => W2.PcbTools || null;
     r42 = (v) => Math.round(v * 1e4) / 1e4;
-    sideOf = (layer3) => layer3.startsWith("B.") ? "B" : "F";
+    sideOf = (layer4) => layer4.startsWith("B.") ? "B" : "F";
     hit2 = (a, b, gap) => a[0] < b[2] + gap && a[2] > b[0] - gap && a[1] < b[3] + gap && a[3] > b[1] - gap;
     grow2 = (b, by) => [b[0] - by, b[1] - by, b[2] + by, b[3] + by];
     hiddenText = (node) => {
@@ -71938,7 +71938,7 @@ function globalizeLabels(doc2, h3, opts2 = {}) {
     const touching = wires.map((w, i) => ({ w, i })).filter(({ w }) => on2(P, w));
     const endsHere = touching.filter(({ w }) => key2(w.a[0], w.a[1]) === pk || key2(w.b[0], w.b[1]) === pk);
     if (touching.length > 1 || junctions.has(pk) || touching.length === 1 && !endsHere.length) continue;
-    let place2 = P, turn = rot3, here = (pinAt.get(pk) || []).map((p) => p.type).filter(Boolean);
+    let place3 = P, turn = rot3, here = (pinAt.get(pk) || []).map((p) => p.type).filter(Boolean);
     if (touching.length === 1) {
       const { w, i } = touching[0];
       if (pinAt.has(pk)) continue;
@@ -71952,12 +71952,12 @@ function globalizeLabels(doc2, h3, opts2 = {}) {
         const tw = Math.ceil((k.textWidth(text3, 1.27, 0) + 0.6) / 1.27) * 1.27;
         const big = (pinAt.get(key2(Q[0], Q[1])) || []).some((p) => (pinCount.get(p.ref) || 0) > 2);
         const cut = Math.min(tw + (big ? 1.27 : 0), len);
-        place2 = [r43(P[0] - d * cut), P[1]];
+        place3 = [r43(P[0] - d * cut), P[1]];
         turn = d > 0 ? 0 : 180;
         changes.push(h3.removed(doc2, w.it));
         ids.push(w.it.id);
         if (len - cut > 1e-3) {
-          const c2 = h3.added(doc2, s2._.lineNode("wire", Q, place2));
+          const c2 = h3.added(doc2, s2._.lineNode("wire", Q, place3));
           changes.push(c2);
           ids.push(c2.id);
         }
@@ -71968,7 +71968,7 @@ function globalizeLabels(doc2, h3, opts2 = {}) {
       const j = rest.indexOf(t);
       if (j >= 0) rest.splice(j, 1);
     }
-    const node = s2._.labelNode("global_label", text3, place2, turn);
+    const node = s2._.labelNode("global_label", text3, place3, turn);
     const sh = node.find((c2) => Array.isArray(c2) && c2[0] === "shape");
     if (sh) sh[1] = shapeFor(here, rest);
     changes.push(h3.removed(doc2, l));
@@ -73128,6 +73128,265 @@ var init_msgpanel = __esm({
   }
 });
 
+// web/editor/peercursors.ts
+function noteRtt(ms) {
+  if (!(ms > 0 && ms < 2e3)) return;
+  rttMs = !rttMs ? ms : ms < rttMs ? rttMs * 0.5 + ms * 0.5 : rttMs * 0.9 + ms * 0.1;
+}
+function myRtt() {
+  return rttMs;
+}
+function brightness(c) {
+  const h3 = c.replace("#", ""), f2 = h3.length === 3 ? h3.split("").map((d) => d + d).join("") : h3.slice(0, 6);
+  const n2 = parseInt(f2, 16);
+  if (!Number.isFinite(n2)) return 0;
+  return ((n2 >> 16 & 255) * 0.299 + (n2 >> 8 & 255) * 0.587 + (n2 & 255) * 0.117) / 255;
+}
+function initPeerCursors(peersG2, pxPerMm2, follow) {
+  scaleOf3 = pxPerMm2;
+  onFollow = follow;
+  if (layer && layer.isConnected) return;
+  layer = document.createElementNS(NS2, "g");
+  layer.id = "peerCursorG";
+  layer.style.pointerEvents = "none";
+  peersG2.after(layer);
+}
+function clearPeerCursors() {
+  for (const c of cursors.values()) c.g.remove();
+  cursors.clear();
+}
+function syncPeerCursors(specs) {
+  if (!layer) return;
+  const now = performance.now(), keep = /* @__PURE__ */ new Set();
+  for (const sp of specs) {
+    keep.add(sp.cid);
+    const key3 = `${sp.name}\0${sp.color}\0${sp.note}\0${sp.following ? 1 : 0}`;
+    let c = cursors.get(sp.cid);
+    if (!c) {
+      const g2 = document.createElementNS(NS2, "g");
+      g2.setAttribute("class", "peer-cursor");
+      layer.appendChild(g2);
+      c = { g: g2, key: "", x: sp.at[0], y: sp.at[1], t: now, vx: 0, vy: 0, every: 16, lead: 0, dx: sp.at[0], dy: sp.at[1], s: 0 };
+      cursors.set(sp.cid, c);
+    } else {
+      sample(c, sp.at[0], sp.at[1], now);
+    }
+    if (c.key !== key3) {
+      c.key = key3;
+      build(c, sp);
+    }
+    c.lead = Math.min(LEAD_MAX_MS, (sp.rtt > 0 ? sp.rtt : rttMs) / 2 + rttMs / 2 + FRAME_MS);
+  }
+  for (const [cid, c] of cursors) if (!keep.has(cid)) {
+    c.g.remove();
+    cursors.delete(cid);
+  }
+  place2(true);
+  wake();
+}
+function sample(c, x, y, now) {
+  if (x === c.x && y === c.y) {
+    c.vx = 0;
+    c.vy = 0;
+    c.t = now;
+    return;
+  }
+  const dt = now - c.t;
+  if (dt > 4 && dt < 150) {
+    const vx = (x - c.x) / dt, vy = (y - c.y) / dt, fresh = !c.vx && !c.vy;
+    c.vx = fresh ? vx : c.vx * 0.35 + vx * 0.65;
+    c.vy = fresh ? vy : c.vy * 0.35 + vy * 0.65;
+    c.every = c.every * 0.8 + Math.min(dt, 100) * 0.2;
+  } else if (dt >= 150) {
+    c.vx = 0;
+    c.vy = 0;
+  }
+  const jump = Math.hypot(x - c.dx, y - c.dy) * scaleOf3() > 400;
+  c.x = x;
+  c.y = y;
+  c.t = now;
+  if (jump) {
+    c.dx = x;
+    c.dy = y;
+    c.vx = 0;
+    c.vy = 0;
+  }
+}
+function horizon(c) {
+  return Math.min(CARRY_MAX_MS, c.every * 1.2);
+}
+function target(c, now) {
+  const age = now - c.t, carry = horizon(c);
+  const k = age <= carry ? c.lead + age : Math.max(0, c.lead + carry - 2 * (age - carry));
+  return [c.x + c.vx * k, c.y + c.vy * k];
+}
+function place2(force) {
+  const now = performance.now(), dt = lastFrame ? Math.min(50, now - lastFrame) : 16;
+  lastFrame = now;
+  const s2 = scaleOf3(), a = 1 - Math.exp(-dt / EASE_MS);
+  let moving = false;
+  for (const c of cursors.values()) {
+    const [tx, ty] = target(c, now);
+    const ex = tx - c.dx, ey = ty - c.dy;
+    if (Math.abs(ex) * s2 < 0.05 && Math.abs(ey) * s2 < 0.05) {
+      c.dx = tx;
+      c.dy = ty;
+    } else {
+      c.dx += ex * a;
+      c.dy += ey * a;
+      moving = true;
+    }
+    if (now - c.t < 2 * horizon(c) + c.lead && (c.vx || c.vy)) moving = true;
+    const tf2 = `translate(${c.dx.toFixed(4)} ${c.dy.toFixed(4)}) scale(${(1 / s2).toFixed(6)})`;
+    if (force || moving || c.s !== s2) {
+      c.g.setAttribute("transform", tf2);
+      c.s = s2;
+    }
+  }
+  return moving;
+}
+function wake() {
+  if (raf) return;
+  const frame = () => {
+    raf = 0;
+    if (place2(false)) raf = requestAnimationFrame(frame);
+    else lastFrame = 0;
+  };
+  raf = requestAnimationFrame(frame);
+}
+function build(c, sp) {
+  const g2 = c.g;
+  g2.replaceChildren();
+  const t = PEER_CURSOR_PX, th = PEER_TAG_TEXT_PX, pad2 = PEER_TAG_PAD_PX, color2 = sp.color;
+  const tri = document.createElementNS(NS2, "path");
+  tri.setAttribute("d", `M 0 0 L ${0.38 * t} ${t} L ${t} ${0.38 * t} Z`);
+  tri.setAttribute("fill", color2);
+  tri.setAttribute("stroke", "white");
+  tri.setAttribute("stroke-opacity", "0.9");
+  tri.setAttribute("stroke-width", "1.5");
+  tri.setAttribute("stroke-linejoin", "round");
+  g2.appendChild(tri);
+  const tag = document.createElementNS(NS2, "g");
+  tag.style.pointerEvents = "auto";
+  tag.style.cursor = "pointer";
+  const cx = 0.8 * t, cy = 1.2 * t;
+  const chip2 = document.createElementNS(NS2, "rect");
+  chip2.setAttribute("x", String(cx));
+  chip2.setAttribute("y", String(cy));
+  chip2.setAttribute("height", String(th + 2 * pad2));
+  chip2.setAttribute("rx", "2");
+  chip2.setAttribute("fill", color2);
+  const label = document.createElementNS(NS2, "text");
+  label.setAttribute("x", String(cx + pad2));
+  label.setAttribute("y", String(cy + pad2 + th / 2));
+  label.setAttribute("dominant-baseline", "central");
+  label.setAttribute("font-size", String(th));
+  label.setAttribute("font-weight", "600");
+  label.setAttribute("font-family", "system-ui, sans-serif");
+  label.setAttribute("fill", brightness(color2) > 0.5 ? "#000" : "#fff");
+  label.textContent = sp.following ? sp.name + " (following)" : sp.name;
+  tag.appendChild(chip2);
+  tag.appendChild(label);
+  g2.appendChild(tag);
+  let tw = 0;
+  try {
+    tw = label.getComputedTextLength();
+  } catch {
+  }
+  if (!(tw > 0)) tw = label.textContent.length * 0.6 * th;
+  chip2.setAttribute("width", String(tw + 2 * pad2));
+  if (sp.note) {
+    const lines = [];
+    let cur2 = "";
+    for (const w of sp.note.split(/\s+/)) {
+      if (cur2 && (cur2 + " " + w).length > 38) {
+        lines.push(cur2);
+        cur2 = w;
+      } else cur2 = cur2 ? cur2 + " " + w : w;
+    }
+    if (cur2) lines.push(cur2);
+    const lh = th * 1.3, ny = cy + th + 2 * pad2 + 3, nh = lines.length * lh + 2 * pad2;
+    const box3 = document.createElementNS(NS2, "rect"), txt = document.createElementNS(NS2, "text");
+    box3.setAttribute("x", String(cx));
+    box3.setAttribute("y", String(ny));
+    box3.setAttribute("height", String(nh));
+    box3.setAttribute("rx", "2");
+    box3.setAttribute("fill", "#16161a");
+    box3.setAttribute("fill-opacity", "0.94");
+    box3.setAttribute("stroke", color2);
+    box3.setAttribute("stroke-width", "1");
+    txt.setAttribute("font-size", String(th));
+    txt.setAttribute("font-family", "system-ui, sans-serif");
+    txt.setAttribute("fill", "#f2f2f4");
+    lines.forEach((ln, i) => {
+      const ts = document.createElementNS(NS2, "tspan");
+      ts.setAttribute("x", String(cx + pad2));
+      ts.setAttribute("y", String(ny + pad2 + lh * i + lh / 2));
+      ts.setAttribute("dominant-baseline", "central");
+      ts.textContent = ln;
+      txt.appendChild(ts);
+    });
+    const note3 = document.createElementNS(NS2, "g");
+    note3.setAttribute("class", "ai-note");
+    note3.appendChild(box3);
+    note3.appendChild(txt);
+    g2.appendChild(note3);
+    let nw = 0;
+    try {
+      nw = txt.getBBox().width;
+    } catch {
+    }
+    if (!(nw > 0)) nw = Math.max(...lines.map((l) => l.length)) * 0.55 * th;
+    box3.setAttribute("width", String(nw + 2 * pad2));
+  }
+  tag.addEventListener("click", (ev) => {
+    ev.stopPropagation();
+    onFollow(sp.cid, sp.name);
+  });
+}
+function onlyPointerMoved(a, b) {
+  if (!a || !b) return false;
+  const ka = Object.keys(a), kb = Object.keys(b);
+  if (ka.length !== kb.length) return false;
+  for (const k of ka) {
+    if (k === "cursor" || k === "viewport" || k === "rtt") continue;
+    if (!(k in b)) return false;
+    const x = a[k], y = b[k];
+    if (x === y) continue;
+    if (typeof x !== "object" || typeof y !== "object" || JSON.stringify(x) !== JSON.stringify(y)) return false;
+  }
+  return true;
+}
+function toggleFollowToast(cid, name, render3) {
+  E.followPeer = E.followPeer === cid ? null : cid;
+  toast(E.followPeer ? `Following ${name}` : "Stopped following");
+  render3();
+}
+var PEER_CURSOR_PX, PEER_TAG_TEXT_PX, PEER_TAG_PAD_PX, CARRY_MAX_MS, LEAD_MAX_MS, FRAME_MS, rttMs, EASE_MS, cursors, layer, raf, lastFrame, scaleOf3, onFollow;
+var init_peercursors = __esm({
+  "web/editor/peercursors.ts"() {
+    "use strict";
+    init_dom();
+    init_state();
+    init_util();
+    PEER_CURSOR_PX = 24;
+    PEER_TAG_TEXT_PX = 16;
+    PEER_TAG_PAD_PX = 5;
+    CARRY_MAX_MS = 60;
+    LEAD_MAX_MS = 90;
+    FRAME_MS = 4;
+    rttMs = 0;
+    EASE_MS = 7;
+    cursors = /* @__PURE__ */ new Map();
+    layer = null;
+    raf = 0;
+    lastFrame = 0;
+    scaleOf3 = () => 4;
+    onFollow = () => {
+    };
+  }
+});
+
 // web/editor/peers.ts
 function cycleFollow() {
   const ids = Object.keys(E.peerState);
@@ -73183,9 +73442,37 @@ function sendPresence(mmPos, ghostSegs) {
   const at4 = mmPos || E.lastPresenceMm || viewCentreMm();
   if (!at4 || !E.ws || E.ws.readyState !== 1 || !state.docId) return;
   const clearing = Array.isArray(ghostSegs) && ghostSegs.length === 0;
-  if (now - E.lastPresence < 80 && !clearing) return;
+  if (now - E.lastPresence < PRESENCE_GAP_MS && !clearing) {
+    if (ghostSegs !== void 0) trailingGhost = ghostSegs;
+    if (!trailing) trailing = setTimeout(() => {
+      trailing = 0;
+      const g2 = trailingGhost;
+      trailingGhost = void 0;
+      sendPresence(null, g2);
+    }, PRESENCE_GAP_MS - (now - E.lastPresence));
+    return;
+  }
+  if (trailing) {
+    clearTimeout(trailing);
+    trailing = 0;
+    if (ghostSegs === void 0) ghostSegs = trailingGhost;
+    trailingGhost = void 0;
+  }
   E.lastPresence = now;
+  if (stopTimer) clearTimeout(stopTimer);
+  stopTimer = stopping ? 0 : setTimeout(() => {
+    stopTimer = 0;
+    E.lastPresence = 0;
+    stopping = true;
+    try {
+      sendPresence(null);
+    } finally {
+      stopping = false;
+    }
+  }, STOP_AFTER_MS);
   const st = { cursor: [Math.round(at4[0] * E.IU), Math.round(at4[1] * E.IU)] };
+  const rtt = myRtt();
+  if (rtt > 0) st.rtt = Math.round(rtt);
   const vp = visibleRectNm();
   if (vp) st.viewport = vp;
   if (ghostSegs) st.ghost = ghostSegs;
@@ -73199,7 +73486,7 @@ function sendPresence(mmPos, ghostSegs) {
     const modSel = E.kdoc && T && T.pcb && T.pcb.state && T.pcb.state.sel;
     if (modSel) for (const id of modSel) picked.add(id);
   }
-  const sel = picked.size ? presenceSelection2(E.kdoc, picked, E.IU, presenceMoving()) : null;
+  const sel = picked.size ? cachedSelection(picked) : null;
   if (sel) {
     st.selection = sel.selection;
     if (sel.boxes) {
@@ -73213,6 +73500,14 @@ function sendPresence(mmPos, ghostSegs) {
   const doc2 = (state.docs || []).find((d) => d.docId === state.docId);
   if (doc2 && doc2.path) st.sheetFile = doc2.path;
   E.ws.send(JSON.stringify({ type: "presence", docId: state.docId, state: fitPresence(st) }));
+}
+function cachedSelection(picked) {
+  const moving = presenceMoving();
+  const key3 = [...picked].join("\0");
+  if (!moving && selCache && selCache.key === key3 && selCache.doc === E.kdoc && performance.now() - selCache.at < 250) return selCache.sel;
+  const sel = presenceSelection2(E.kdoc, picked, E.IU, moving);
+  selCache = moving ? null : { key: key3, doc: E.kdoc, at: performance.now(), sel };
+  return sel;
 }
 function fitPresence(st) {
   let s2 = JSON.stringify(st);
@@ -73288,14 +73583,21 @@ function stopPresenceKeepalive() {
     E.presenceTimer = 0;
   }
 }
-var PRESENCE_LIMIT, presenceSelection2, MAX_PRESENCE_ITEMS;
+var PRESENCE_GAP_MS, trailing, STOP_AFTER_MS, stopTimer, stopping, trailingGhost, selCache, PRESENCE_LIMIT, presenceSelection2, MAX_PRESENCE_ITEMS;
 var init_peers = __esm({
   "web/editor/peers.ts"() {
     "use strict";
     init_appstore();
     init_state();
     init_util();
+    init_peercursors();
     init_view();
+    PRESENCE_GAP_MS = 14;
+    trailing = 0;
+    STOP_AFTER_MS = 40;
+    stopTimer = 0;
+    stopping = false;
+    selCache = null;
     PRESENCE_LIMIT = 7600;
     presenceSelection2 = (doc2, selection, IU3, moving) => KiCadCanvas.presenceSelection(doc2, selection, IU3, moving, MAX_PRESENCE_ITEMS);
     MAX_PRESENCE_ITEMS = 60;
@@ -74084,6 +74386,7 @@ async function connect() {
     E.ws = null;
     E.joinedDocId = null;
     peersG.replaceChildren();
+    clearPeerCursors();
     E.peerState = {};
     renderPeers();
     const delay = Math.min(15e3, 1e3 * Math.pow(2, E.retries++));
@@ -74103,6 +74406,23 @@ async function connect() {
       E.retries = 0;
       if (msg.clientId) E.myClientId = msg.clientId;
       sock.send(JSON.stringify({ type: "join_doc", docId: state.docId }));
+      let pinger;
+      const ping = () => {
+        if (E.ws !== sock || sock.readyState !== 1) {
+          clearInterval(pinger);
+          return;
+        }
+        sock.send(JSON.stringify({ type: "ping", t: performance.now() }));
+      };
+      if (Array.isArray(msg.caps) && msg.caps.includes("ping")) {
+        pinger = setInterval(ping, 2e3);
+        ping();
+        setTimeout(ping, 300);
+      }
+    }
+    if (msg.type === "pong" && typeof msg.t === "number") {
+      noteRtt(performance.now() - msg.t);
+      return;
     }
     if (msg.type === "error" && (msg.code === "bad_message" || msg.code === "unsupported_protocol") && msg.message !== "presence state too large") {
       setConn("err", `server refused the session (${msg.code}) \u2014 reload`);
@@ -74122,14 +74442,25 @@ async function connect() {
       startPresenceKeepalive();
     }
     if (msg.type === "presence") {
+      let full3 = false, roster = false;
       for (const [cid, e] of Object.entries(msg.peers || {})) {
         if (cid === E.myClientId || cid.endsWith(":" + E.myClientId)) continue;
-        if (e === null) delete E.peerState[cid];
-        else E.peerState[cid] = e;
+        const old = E.peerState[cid];
+        if (e === null) {
+          if (old) {
+            delete E.peerState[cid];
+            full3 = roster = true;
+          }
+          continue;
+        }
+        if (!old || peerName(old) !== peerName(e) || (old.user && old.user.color) !== (e.user && e.user.color)) roster = full3 = true;
+        else if (!onlyPointerMoved(old.state, e.state)) full3 = true;
+        E.peerState[cid] = e;
       }
-      drawPeers(E.peerState);
-      applyFollowWeb(E.peerState);
-      renderPeers();
+      if (full3) drawPeers(E.peerState);
+      else movePeerCursors(E.peerState);
+      if (E.followPeer) applyFollowWeb(E.peerState);
+      if (roster) renderPeers();
     }
     if (msg.type === "peer_left" && msg.clientId) {
       delete E.peerState[msg.clientId];
@@ -74353,6 +74684,7 @@ var init_net = __esm({
     init_comments();
     init_doc();
     init_peers();
+    init_peercursors();
     init_selection();
     init_state();
     init_tools();
@@ -74654,7 +74986,7 @@ var init_color_themes = __esm({
       ["opCurrent", "Operating point currents", "LAYER_OP_CURRENTS"]
     ];
     byName = (a, b) => a < b ? -1 : a > b ? 1 : 0;
-    SCH_COLOR_ITEMS = SCH_LAYER_ITEMS.slice().sort((a, b) => byName(a[1], b[1])).map(([k, name, layer3]) => [k, layer3 === "LAYER_SCHEMATIC_GRID_AXES" ? `${name} (symbol editor only)` : name]);
+    SCH_COLOR_ITEMS = SCH_LAYER_ITEMS.slice().sort((a, b) => byName(a[1], b[1])).map(([k, name, layer4]) => [k, layer4 === "LAYER_SCHEMATIC_GRID_AXES" ? `${name} (symbol editor only)` : name]);
     EXTRA_DEFAULT = {
       sheetRefs: "#B4DBD2",
       shapeFill: "#B4DBD2",
@@ -75791,18 +76123,18 @@ var init_selection = __esm({
 
 // web/editor/paint.ts
 function ensureLayer(w, h3) {
-  if (!layer) {
+  if (!layer2) {
     const cv = document.createElement("canvas");
     const ctx = cv.getContext("2d");
     if (!ctx) return null;
-    layer = { cv, ctx, view: null, opts: null, doc: null, geoms: [], ms: 0 };
+    layer2 = { cv, ctx, view: null, opts: null, doc: null, geoms: [], ms: 0 };
   }
-  if (layer.cv.width !== w || layer.cv.height !== h3) {
-    layer.cv.width = w;
-    layer.cv.height = h3;
-    layer.view = null;
+  if (layer2.cv.width !== w || layer2.cv.height !== h3) {
+    layer2.cv.width = w;
+    layer2.cv.height = h3;
+    layer2.view = null;
   }
-  return layer;
+  return layer2;
 }
 function sameSet(a, b) {
   if (a.size !== b.size) return false;
@@ -75874,10 +76206,10 @@ function dropLevels() {
 }
 function releaseLayers() {
   dropLevels();
-  if (layer) {
-    layer.cv.width = 0;
-    layer.cv.height = 0;
-    layer = null;
+  if (layer2) {
+    layer2.cv.width = 0;
+    layer2.cv.height = 0;
+    layer2 = null;
   }
 }
 function levelsValid(doc2, opts2) {
@@ -75888,11 +76220,11 @@ function keyLevels(doc2, opts2) {
   levelKey = { doc: doc2, opts: snapshot(opts2), geoms: geomsOf(doc2, []) };
 }
 function placement(L, view) {
-  const k = scaleOf3(view) / L.s;
+  const k = scaleOf4(view) / L.s;
   return { k, ox: txOf(view) - k * L.tx, oy: tyOf(view) - k * L.ty };
 }
 function covers(L, view, W12, H) {
-  const s2 = scaleOf3(view);
+  const s2 = scaleOf4(view);
   if (L.dpr !== (view.dpr || 1) || L.s < s2 * (1 - 1e-9) || L.s > s2 * LEVEL_SPAN * 1.02) return false;
   const { k, ox, oy } = placement(L, view), e = 0.01;
   return ox <= e && oy <= e && ox + k * L.w >= W12 - e && oy + k * L.h >= H - e;
@@ -75903,7 +76235,7 @@ function findLevel(view, W12, H, complete) {
   return best;
 }
 function newLevel(view, S2, x0, y0, x1, y1, low) {
-  const dpr = view.dpr || 1, s2 = scaleOf3(view), r = S2 / s2, M = LEVEL_MARGIN;
+  const dpr = view.dpr || 1, s2 = scaleOf4(view), r = S2 / s2, M = LEVEL_MARGIN;
   const w = Math.ceil((x1 - x0) * r) + 2 * M, h3 = Math.ceil((y1 - y0) * r) + 2 * M;
   if (w <= 0 || h3 <= 0 || w > 16e3 || h3 > 16e3) return null;
   const tx = M + (txOf(view) - x0) * r, ty = M + (tyOf(view) - y0) * r;
@@ -75919,7 +76251,7 @@ function newLevel(view, S2, x0, y0, x1, y1, low) {
   if (!ctx) return null;
   const L = { cv, ctx, el: null, s: S2, tx, ty, w, h: h3, dpr, view: lv, rows: 0, slice: null, used: performance.now(), low };
   levels.push(L);
-  const budget = LEVEL_BUDGET * Math.max(1, layer ? layer.cv.width * layer.cv.height : w * h3);
+  const budget = LEVEL_BUDGET * Math.max(1, layer2 ? layer2.cv.width * layer2.cv.height : w * h3);
   let total2 = 0;
   for (const x of levels) total2 += x.w * x.h;
   const byAge = levels.filter((x) => x !== L).sort((a, b) => a.used - b.used);
@@ -75978,13 +76310,13 @@ function freeLevel(L) {
   }
 }
 function levelFor(view, hint, W12, H) {
-  const dpr = view.dpr || 1, s2 = scaleOf3(view), sT = view.ppm * hint.to * dpr;
+  const dpr = view.dpr || 1, s2 = scaleOf4(view), sT = view.ppm * hint.to * dpr;
   if (sT > s2) return newLevel(view, s2 * Math.min(LEVEL_SPAN, Math.max(REST_SPAN, sT / s2)), 0, 0, W12, H, s2);
   const r = Math.min(LEVEL_SPAN, Math.max(REST_SPAN, s2 / sT)), ax = hint.cx * dpr, ay = hint.cy * dpr;
   return newLevel(view, s2, ax - ax * r, ay - ay * r, ax + (W12 - ax) * r, ay + (H - ay) * r, s2 / r);
 }
 function prefetchAhead(L, view, hint, W12, H) {
-  const dpr = view.dpr || 1, s2 = scaleOf3(view), sT = view.ppm * hint.to * dpr;
+  const dpr = view.dpr || 1, s2 = scaleOf4(view), sT = view.ppm * hint.to * dpr;
   if (Math.abs(sT / s2 - 1) < 1e-3) return;
   const ax = hint.cx * dpr, ay = hint.cy * dpr;
   const S2 = sT > s2 ? L.s * LEVEL_SPAN : L.low, r = sT > s2 ? s2 / L.s : s2 / (S2 / LEVEL_SPAN);
@@ -75997,7 +76329,7 @@ function prefetchAhead(L, view, hint, W12, H) {
   }
 }
 function prefetchRest(view, W12, H) {
-  const s2 = scaleOf3(view), dpr = view.dpr || 1;
+  const s2 = scaleOf4(view), dpr = view.dpr || 1;
   const want2 = [
     [s2 * REST_SPAN, 0, 0, W12, H, s2],
     // in, from any anchor
@@ -76013,11 +76345,11 @@ function prefetchRest(view, W12, H) {
   if (queue.length) scheduleIdle();
 }
 function coversShrunk(L, view, W12, H) {
-  const k = scaleOf3(view) / L.s, ox = txOf(view) - k * L.tx, oy = tyOf(view) - k * L.ty;
+  const k = scaleOf4(view) / L.s, ox = txOf(view) - k * L.tx, oy = tyOf(view) - k * L.ty;
   return ox <= 0.01 && oy <= 0.01 && ox + k * L.w >= W12 - 0.01 && oy + k * L.h >= H - 0.01;
 }
 function coversGrown(L, view, r, W12, H) {
-  const k = scaleOf3(view) / L.s, ox = txOf(view) - k * L.tx, oy = tyOf(view) - k * L.ty;
+  const k = scaleOf4(view) / L.s, ox = txOf(view) - k * L.tx, oy = tyOf(view) - k * L.ty;
   return ox <= W12 * (1 - r) + 0.01 && oy <= H * (1 - r) + 0.01 && ox + k * L.w >= W12 * r - 0.01 && oy + k * L.h >= H * r - 0.01;
 }
 function scheduleIdle() {
@@ -76044,7 +76376,7 @@ function sliceRows(w, ms, log) {
     if (n2 === log.rows) n2 = n2 > MIN ? Math.max(MIN, Math.round(n2 * 0.75)) : Math.round(n2 * 1.5);
     return n2;
   }
-  const per = (pxMs > 0 ? pxMs : layer && layer.cv.width ? costOf2() / (layer.cv.width * layer.cv.height) : 0) * w;
+  const per = (pxMs > 0 ? pxMs : layer2 && layer2.cv.width ? costOf2() / (layer2.cv.width * layer2.cv.height) : 0) * w;
   return per > 0 ? Math.max(MIN, Math.floor(ms / per)) : 64;
 }
 function notePxMs(ms, px) {
@@ -76080,8 +76412,8 @@ function settledFrame(paint) {
     plateHeld = false;
   }
 }
-function showPlate(target2, L, k, ox, oy) {
-  const cv = target2.canvas, parent = cv.parentNode;
+function showPlate(target3, L, k, ox, oy) {
+  const cv = target3.canvas, parent = cv.parentNode;
   if (!paintConfig.plate || !parent || typeof cv.getBoundingClientRect !== "function") return false;
   const pl = L.el || L.cv;
   if (!pl.style) return false;
@@ -76102,44 +76434,44 @@ function showPlate(target2, L, k, ox, oy) {
   if (st.width !== wc) st.width = wc;
   if (st.height !== hc) st.height = hc;
   st.transform = `translate(${ox / dpr}px, ${oy / dpr}px) scale(${k})`;
-  target2.save();
-  target2.setTransform(1, 0, 0, 1, 0, 0);
-  target2.clearRect(0, 0, cv.width, cv.height);
-  target2.restore();
+  target3.save();
+  target3.setTransform(1, 0, 0, 1, 0, 0);
+  target3.clearRect(0, 0, cv.width, cv.height);
+  target3.restore();
   return true;
 }
-function blitLevel(target2, L, view) {
+function blitLevel(target3, L, view) {
   const { k, ox, oy } = placement(L, view);
   L.used = performance.now();
   stats.down++;
   stats.maxDownK = Math.max(stats.maxDownK, k);
   stats.last = "down";
-  if (!plateHeld && showPlate(target2, L, k, ox, oy)) {
+  if (!plateHeld && showPlate(target3, L, k, ox, oy)) {
     stats.plates++;
     return;
   }
   hidePlate();
-  copyLevel(target2, L, k, ox, oy);
+  copyLevel(target3, L, k, ox, oy);
 }
-function copyLevel(target2, L, k, ox, oy) {
-  target2.save();
-  target2.setTransform(1, 0, 0, 1, 0, 0);
-  target2.globalAlpha = 1;
-  target2.globalCompositeOperation = "copy";
-  target2.imageSmoothingEnabled = true;
-  target2.imageSmoothingQuality = "low";
-  target2.drawImage(levelImage(L), ox, oy, L.w * k, L.h * k);
-  target2.restore();
+function copyLevel(target3, L, k, ox, oy) {
+  target3.save();
+  target3.setTransform(1, 0, 0, 1, 0, 0);
+  target3.globalAlpha = 1;
+  target3.globalCompositeOperation = "copy";
+  target3.imageSmoothingEnabled = true;
+  target3.imageSmoothingQuality = "low";
+  target3.drawImage(levelImage(L), ox, oy, L.w * k, L.h * k);
+  target3.restore();
 }
-function paintDocument(doc2, target2, view, opts2, forceIn, zoom, onRest) {
-  const W12 = target2.canvas.width, H = target2.canvas.height;
+function paintDocument(doc2, target3, view, opts2, forceIn, zoom, onRest) {
+  const W12 = target3.canvas.width, H = target3.canvas.height;
   stats.view = view;
   const now = performance.now(), sincePaint = now - lastPaint;
   lastPaint = now;
   const l = ensureLayer(W12, H);
   if (!l) {
     hidePlate();
-    KiCadCanvas.render(doc2, target2, view, opts2);
+    KiCadCanvas.render(doc2, target3, view, opts2);
     wasScaling = !!zoom;
     return;
   }
@@ -76161,16 +76493,16 @@ function paintDocument(doc2, target2, view, opts2, forceIn, zoom, onRest) {
       const ox = view.panX * dpr - lv.panX * dpr * k, oy = view.panY * dpr - lv.panY * dpr * k;
       const bg = backgroundOf(doc2, opts2);
       hidePlate();
-      target2.save();
-      target2.setTransform(1, 0, 0, 1, 0, 0);
-      target2.globalAlpha = 1;
+      target3.save();
+      target3.setTransform(1, 0, 0, 1, 0, 0);
+      target3.globalAlpha = 1;
       if (bg) {
-        target2.fillStyle = bg;
-        target2.fillRect(0, 0, W12, H);
-      } else target2.clearRect(0, 0, W12, H);
-      target2.imageSmoothingEnabled = true;
-      target2.drawImage(l.cv, ox, oy, W12 * k, H * k);
-      target2.restore();
+        target3.fillStyle = bg;
+        target3.fillRect(0, 0, W12, H);
+      } else target3.clearRect(0, 0, W12, H);
+      target3.imageSmoothingEnabled = true;
+      target3.drawImage(l.cv, ox, oy, W12 * k, H * k);
+      target3.restore();
       stats.scaled++;
       stats.last = "scaled";
       wasScaling = true;
@@ -76185,7 +76517,7 @@ function paintDocument(doc2, target2, view, opts2, forceIn, zoom, onRest) {
         renderLevel(L, doc2, opts2);
         queue = queue.filter((x) => x !== L);
       }
-      blitLevel(target2, L, view);
+      blitLevel(target3, L, view);
       if (zoom) prefetchAhead(L, view, zoom, W12, H);
       wasScaling = true;
       if (zoom) {
@@ -76227,38 +76559,38 @@ function paintDocument(doc2, target2, view, opts2, forceIn, zoom, onRest) {
       stats.last = "strip";
       stand = true;
     } else {
-      fullAndBlit(l, doc2, view, opts2, target2, now);
+      fullAndBlit(l, doc2, view, opts2, target3, now);
       return finishFull(doc2, view, opts2, zoom, W12, H);
     }
   } else {
-    fullAndBlit(l, doc2, view, opts2, target2, now);
+    fullAndBlit(l, doc2, view, opts2, target3, now);
     return finishFull(doc2, view, opts2, zoom, W12, H);
   }
   wasScaling = !!zoom;
   hidePlate();
-  target2.save();
-  target2.setTransform(1, 0, 0, 1, 0, 0);
-  target2.globalAlpha = 1;
-  target2.globalCompositeOperation = "copy";
-  target2.drawImage(l.cv, 0, 0);
-  target2.restore();
+  target3.save();
+  target3.setTransform(1, 0, 0, 1, 0, 0);
+  target3.globalAlpha = 1;
+  target3.globalCompositeOperation = "copy";
+  target3.drawImage(l.cv, 0, 0);
+  target3.restore();
   if (stand) scheduleRest(() => {
     invalidateLayerOnly();
     onRest();
   }, 160);
 }
 function invalidateLayerOnly() {
-  if (layer) layer.view = null;
+  if (layer2) layer2.view = null;
 }
-function fullAndBlit(l, doc2, view, opts2, target2, t0) {
+function fullAndBlit(l, doc2, view, opts2, target3, t0) {
   full2(l, doc2, view, opts2);
   hidePlate();
-  target2.save();
-  target2.setTransform(1, 0, 0, 1, 0, 0);
-  target2.globalAlpha = 1;
-  target2.globalCompositeOperation = "copy";
-  target2.drawImage(l.cv, 0, 0);
-  target2.restore();
+  target3.save();
+  target3.setTransform(1, 0, 0, 1, 0, 0);
+  target3.globalAlpha = 1;
+  target3.globalCompositeOperation = "copy";
+  target3.drawImage(l.cv, 0, 0);
+  target3.restore();
   l.ms = performance.now() - t0;
   stats.lastFullMs = l.ms;
   stats.last = "full";
@@ -76273,7 +76605,7 @@ function finishFull(doc2, view, opts2, zoom, W12, H) {
   const v = Object.assign({}, view);
   prefetchTimer = window.setTimeout(() => {
     prefetchTimer = 0;
-    if (!layer || !layer.view || layer.doc !== doc2 || !sameScale(layer.view, v) || layer.view.panX !== v.panX || layer.view.panY !== v.panY) return;
+    if (!layer2 || !layer2.view || layer2.doc !== doc2 || !sameScale(layer2.view, v) || layer2.view.panX !== v.panX || layer2.view.panY !== v.panY) return;
     if (levelKey && !levelsValid(doc2, opts2)) dropLevels();
     keyLevels(doc2, opts2);
     prefetchRest(v, W12, H);
@@ -76286,11 +76618,11 @@ function scheduleRest(fn, ms) {
     fn();
   }, ms);
 }
-var layer, restTimer, SCALED_MIN_MS, SLOW_MS, wasScaling, REST_DELAY_MS, restPending, stats, paintConfig, sameScale, whole, scaleOf3, txOf, tyOf, LEVEL_SPAN, REST_SPAN, LEVEL_BUDGET, LEVEL_MARGIN, levels, levelKey, queue, idleHandle, prefetchTimer, flushCtx, jsMs, frameMs, costOf2, lastPaint, lastWasFull, levelImage, SLICE_MIN_MS, SLICE_MAX_MS, pxMs, sliceBudget, plate, plateHeld;
+var layer2, restTimer, SCALED_MIN_MS, SLOW_MS, wasScaling, REST_DELAY_MS, restPending, stats, paintConfig, sameScale, whole, scaleOf4, txOf, tyOf, LEVEL_SPAN, REST_SPAN, LEVEL_BUDGET, LEVEL_MARGIN, levels, levelKey, queue, idleHandle, prefetchTimer, flushCtx, jsMs, frameMs, costOf2, lastPaint, lastWasFull, levelImage, SLICE_MIN_MS, SLICE_MAX_MS, pxMs, sliceBudget, plate, plateHeld;
 var init_paint = __esm({
   "web/editor/paint.ts"() {
     "use strict";
-    layer = null;
+    layer2 = null;
     restTimer = 0;
     SCALED_MIN_MS = 33;
     SLOW_MS = 12;
@@ -76301,9 +76633,9 @@ var init_paint = __esm({
     paintConfig = { plate: true, bitmap: true };
     sameScale = (a, b) => a.ppm === b.ppm && a.zoom === b.zoom && a.x0 === b.x0 && a.y0 === b.y0 && (a.dpr || 1) === (b.dpr || 1);
     whole = (v) => Math.abs(v - Math.round(v)) < 1e-6;
-    scaleOf3 = (v) => v.ppm * v.zoom * (v.dpr || 1);
-    txOf = (v) => v.panX * (v.dpr || 1) - v.x0 * scaleOf3(v);
-    tyOf = (v) => v.panY * (v.dpr || 1) - v.y0 * scaleOf3(v);
+    scaleOf4 = (v) => v.ppm * v.zoom * (v.dpr || 1);
+    txOf = (v) => v.panX * (v.dpr || 1) - v.x0 * scaleOf4(v);
+    tyOf = (v) => v.panY * (v.dpr || 1) - v.y0 * scaleOf4(v);
     LEVEL_SPAN = 1.4;
     REST_SPAN = 1.25;
     LEVEL_BUDGET = 8;
@@ -77102,16 +77434,29 @@ function peerBoxesOf(ids) {
   }
   return out2;
 }
-function brightness(c) {
-  const h3 = c.replace("#", ""), f2 = h3.length === 3 ? h3.split("").map((d) => d + d).join("") : h3.slice(0, 6);
-  const n2 = parseInt(f2, 16);
-  if (!Number.isFinite(n2)) return 0;
-  return ((n2 >> 16 & 255) * 0.299 + (n2 >> 8 & 255) * 0.587 + (n2 & 255) * 0.117) / 255;
+function peerCursorSpec(cid, p) {
+  const st = p.state || {};
+  if (!Array.isArray(st.cursor)) return null;
+  const ai = st.ai && typeof st.ai === "object" ? st.ai : null;
+  const note3 = ai && typeof ai.note === "string" ? ai.note.trim().slice(0, 140) : "";
+  return { cid, name: peerName(p), color: p.user && p.user.color || "#4477ee", note: note3, following: E.followPeer === cid, at: [st.cursor[0] / E.IU, st.cursor[1] / E.IU], rtt: typeof st.rtt === "number" ? st.rtt : 0 };
+}
+function movePeerCursors(peers) {
+  const specs = [];
+  for (const [cid, p] of Object.entries(peers)) {
+    const spec = peerCursorSpec(cid, p);
+    if (spec) specs.push(spec);
+  }
+  syncPeerCursors(specs);
 }
 function drawPeers(peers) {
   peersG.replaceChildren();
   const s2 = pxPerMm(), mm4 = (nm3) => nm3 / E.IU;
-  const ghosts = [];
+  const ghosts = [], cursorSpecs = [];
+  initPeerCursors(peersG, pxPerMm, (cid, name) => toggleFollowToast(cid, name, () => {
+    renderPeers();
+    drawPeers(E.peerState);
+  }));
   for (const [cid, p] of Object.entries(peers)) {
     const st = p.state || {}, color2 = p.user && p.user.color || "#4477ee", name = peerName(p);
     if (E.kdoc && Array.isArray(st.at) && Array.isArray(st.selection)) {
@@ -77198,98 +77543,10 @@ function drawPeers(peers) {
       rect.setAttribute("stroke-width", 1.5 / s2);
       peersG.appendChild(rect);
     }
-    if (Array.isArray(st.cursor)) {
-      const x = mm4(st.cursor[0]), y = mm4(st.cursor[1]), t = PEER_CURSOR_PX / s2, th = PEER_TAG_TEXT_PX / s2, pad2 = PEER_TAG_PAD_PX / s2;
-      const tri = document.createElementNS(NS2, "path");
-      tri.setAttribute("d", `M ${x} ${y} L ${x + 0.38 * t} ${y + t} L ${x + t} ${y + 0.38 * t} Z`);
-      tri.setAttribute("fill", color2);
-      tri.setAttribute("stroke", "white");
-      tri.setAttribute("stroke-opacity", "0.9");
-      tri.setAttribute("stroke-width", 1.5 / s2);
-      tri.setAttribute("stroke-linejoin", "round");
-      peersG.appendChild(tri);
-      const tag = document.createElementNS(NS2, "g");
-      tag.style.pointerEvents = "auto";
-      tag.style.cursor = "pointer";
-      const cx = x + 0.8 * t, cy = y + 1.2 * t;
-      const chip2 = document.createElementNS(NS2, "rect");
-      chip2.setAttribute("x", cx);
-      chip2.setAttribute("y", cy);
-      chip2.setAttribute("height", th + 2 * pad2);
-      chip2.setAttribute("rx", 2 / s2);
-      chip2.setAttribute("fill", color2);
-      const label = document.createElementNS(NS2, "text");
-      label.setAttribute("x", cx + pad2);
-      label.setAttribute("y", cy + pad2 + th / 2);
-      label.setAttribute("dominant-baseline", "central");
-      label.setAttribute("font-size", th);
-      label.setAttribute("font-weight", "600");
-      label.setAttribute("font-family", "system-ui, sans-serif");
-      label.setAttribute("fill", brightness(color2) > 0.5 ? "#000" : "#fff");
-      label.textContent = E.followPeer === cid ? name + " (following)" : name;
-      tag.appendChild(chip2);
-      tag.appendChild(label);
-      peersG.appendChild(tag);
-      let tw = 0;
-      try {
-        tw = label.getComputedTextLength();
-      } catch {
-      }
-      if (!(tw > 0)) tw = label.textContent.length * 0.6 * th;
-      chip2.setAttribute("width", tw + 2 * pad2);
-      const said = ai && typeof ai.note === "string" ? ai.note.trim().slice(0, 140) : "";
-      if (said) {
-        const lines = [];
-        let cur2 = "";
-        for (const w of said.split(/\s+/)) {
-          if (cur2 && (cur2 + " " + w).length > 38) {
-            lines.push(cur2);
-            cur2 = w;
-          } else cur2 = cur2 ? cur2 + " " + w : w;
-        }
-        if (cur2) lines.push(cur2);
-        const lh = th * 1.3, ny = cy + th + 2 * pad2 + 3 / s2, nh = lines.length * lh + 2 * pad2;
-        const box3 = document.createElementNS(NS2, "rect"), txt = document.createElementNS(NS2, "text");
-        box3.setAttribute("x", cx);
-        box3.setAttribute("y", ny);
-        box3.setAttribute("height", nh);
-        box3.setAttribute("rx", 2 / s2);
-        box3.setAttribute("fill", "#16161a");
-        box3.setAttribute("fill-opacity", "0.94");
-        box3.setAttribute("stroke", color2);
-        box3.setAttribute("stroke-width", 1 / s2);
-        txt.setAttribute("font-size", th);
-        txt.setAttribute("font-family", "system-ui, sans-serif");
-        txt.setAttribute("fill", "#f2f2f4");
-        lines.forEach((ln, i) => {
-          const ts = document.createElementNS(NS2, "tspan");
-          ts.setAttribute("x", cx + pad2);
-          ts.setAttribute("y", ny + pad2 + lh * i + lh / 2);
-          ts.setAttribute("dominant-baseline", "central");
-          ts.textContent = ln;
-          txt.appendChild(ts);
-        });
-        const note3 = document.createElementNS(NS2, "g");
-        note3.setAttribute("class", "ai-note");
-        note3.appendChild(box3);
-        note3.appendChild(txt);
-        peersG.appendChild(note3);
-        let nw = 0;
-        try {
-          nw = txt.getBBox().width;
-        } catch {
-        }
-        if (!(nw > 0)) nw = Math.max(...lines.map((l) => l.length)) * 0.55 * th;
-        box3.setAttribute("width", nw + 2 * pad2);
-      }
-      tag.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        E.followPeer = E.followPeer === cid ? null : cid;
-        toast(E.followPeer ? `Following ${name}` : "Stopped following");
-        renderPeers();
-      });
-    }
+    const spec = peerCursorSpec(cid, p);
+    if (spec) cursorSpecs.push(spec);
   }
+  syncPeerCursors(cursorSpecs);
   const had = (E.peerGhosts || []).length;
   E.peerGhosts = ghosts;
   if (had || ghosts.length) requestRender();
@@ -77306,7 +77563,7 @@ function scheduleRenderRefresh() {
     await loadBase(false);
   }, 8e3);
 }
-var stage, world, base, overlay, peersG, selG, dragG, cmtG, cmtPanel, mmW, mmH, mmX0, mmY0, isSch, canvas2, cctx, PEER_CURSOR_PX, PEER_TAG_TEXT_PX, PEER_TAG_PAD_PX;
+var stage, world, base, overlay, peersG, selG, dragG, cmtG, cmtPanel, mmW, mmH, mmX0, mmY0, isSch, canvas2, cctx;
 var init_view = __esm({
   "web/editor/view.ts"() {
     "use strict";
@@ -77325,8 +77582,8 @@ var init_view = __esm({
     init_variant();
     init_tools();
     init_overlays();
-    init_util();
     init_zoomlist();
+    init_peercursors();
     stage = $("#stage");
     world = $("#world");
     base = $("#base");
@@ -77347,9 +77604,6 @@ var init_view = __esm({
     E.paintConfig = paintConfig;
     E.requestRepaint = requestRepaint;
     E.drawCanvasSettled = drawCanvasSettled;
-    PEER_CURSOR_PX = 24;
-    PEER_TAG_TEXT_PX = 16;
-    PEER_TAG_PAD_PX = 5;
   }
 });
 
@@ -78813,7 +79067,7 @@ function confirmBox(title, message, okLabel = "OK") {
 }
 function popupMenu(x, y, items) {
   for (const old of Array.from(document.querySelectorAll(".kd-pop"))) old.remove();
-  const build2 = (list, px, py, depth) => {
+  const build3 = (list, px, py, depth) => {
     const m = h("div", { class: "kd-pop", role: "menu", "data-depth": depth, style: `position:fixed;left:${px}px;top:${py}px;z-index:${80 + depth};min-width:160px;background:var(--panel);border:1px solid var(--line);border-radius:4px;box-shadow:0 6px 18px rgba(0,0,0,.25);padding:3px 0;font-size:12px;color:var(--ink)` });
     for (const it of list) {
       if (it.sep) {
@@ -78834,7 +79088,7 @@ function popupMenu(x, y, items) {
         row3.style.color = "var(--on-accent)";
         for (const o of Array.from(document.querySelectorAll(".kd-pop"))) if (Number(o.dataset.depth) > depth) o.remove();
         if (it.sub && !it.disabled) {
-          const r = row3.getBoundingClientRect(), sub2 = build2(it.sub, r.right - 2, r.top - 3, depth + 1);
+          const r = row3.getBoundingClientRect(), sub2 = build3(it.sub, r.right - 2, r.top - 3, depth + 1);
           document.body.append(sub2);
           fitMenu(sub2, { row: r, parent: m.getBoundingClientRect(), overlap: 2 });
         }
@@ -78870,7 +79124,7 @@ function popupMenu(x, y, items) {
       closeAll();
     }
   };
-  const root5 = build2(items, x, y, 0);
+  const root5 = build3(items, x, y, 0);
   document.body.append(root5);
   fitMenu(root5, { at: { x, y } });
   setTimeout(() => {
@@ -79110,7 +79364,7 @@ function messageBox(title, message, buttons = [{ label: "OK" }], escape2) {
   else dlg.focus();
   return ov;
 }
-function subDialog(title, width, build2, ok2, opts2) {
+function subDialog(title, width, build3, ok2, opts2) {
   if (typeof document === "undefined") return null;
   ensureCss2();
   const ov = h2("div", { class: "kd-overlay", style: "z-index:10040", "data-k": opts2 && opts2.key || "subdialog" });
@@ -79131,7 +79385,7 @@ function subDialog(title, width, build2, ok2, opts2) {
       ov.remove();
     }
   });
-  build2(body);
+  build3(body);
   document.body.append(ov);
   dlg.focus();
   return ov;
@@ -79480,11 +79734,11 @@ function infoBar() {
 }
 function focusError(ctrl, row3, col) {
   if (!ctrl) return;
-  let target2 = ctrl;
+  let target3 = ctrl;
   if (ctrl.classList.contains("pd-grid") && row3 !== void 0) {
     const tr = ctrl.querySelectorAll("tbody tr")[row3];
     const td = tr ? tr.children[col || 0] : void 0;
-    target2 = td ? td.querySelector("input,textarea,k-select") || td : ctrl;
+    target3 = td ? td.querySelector("input,textarea,k-select") || td : ctrl;
     if (td) {
       td.classList.add("err");
       setTimeout(() => td.classList.remove("err"), 3e3);
@@ -79492,9 +79746,9 @@ function focusError(ctrl, row3, col) {
     }
   }
   setTimeout(() => {
-    if (!target2) return;
-    target2.focus();
-    if (target2 instanceof HTMLInputElement || target2 instanceof HTMLTextAreaElement) target2.select();
+    if (!target3) return;
+    target3.focus();
+    if (target3 instanceof HTMLInputElement || target3 instanceof HTMLTextAreaElement) target3.select();
   }, 0);
 }
 function staticBitmap(bitmap, w, hgt = w, style) {
@@ -80526,7 +80780,7 @@ function colorPicker(current, allowOpacity, done, def = null) {
     const label = h2("div", { style: "position:absolute;left:16px;font-size:11px;color:var(--ink-2);white-space:nowrap;transform:translateY(-50%)" });
     track.append(thumb, label);
     let cur2 = init;
-    const place2 = () => {
+    const place3 = () => {
       const f2 = 1 - cur2 / max;
       thumb.style.top = `calc(${f2 * 100}% - 5px)`;
       label.style.top = `${f2 * 100}%`;
@@ -80538,7 +80792,7 @@ function colorPicker(current, allowOpacity, done, def = null) {
       const v = Math.round((1 - f2) * max);
       if (v !== cur2) {
         cur2 = v;
-        place2();
+        place3();
         onChange(v);
       }
     };
@@ -80557,11 +80811,11 @@ function colorPicker(current, allowOpacity, done, def = null) {
       const v = Math.min(max, Math.max(0, cur2 + d));
       if (v !== cur2) {
         cur2 = v;
-        place2();
+        place3();
         onChange(v);
       }
     });
-    place2();
+    place3();
     const el4 = h2(
       "div",
       { style: "display:flex;flex-direction:column;align-items:flex-start;height:100%" },
@@ -80571,7 +80825,7 @@ function colorPicker(current, allowOpacity, done, def = null) {
     );
     return { el: el4, set(v) {
       cur2 = v;
-      place2();
+      place3();
     } };
   };
   const value = vslider("value", 255, b255(val), (v) => {
@@ -81671,8 +81925,8 @@ function placedFetch(kind, id, doc2) {
   }
   if (!best) throw new Error(`The board has no footprint ${id}`);
   const node = K7().cloneNode(best.node);
-  const layer3 = K7().kid(node, "layer");
-  if (Pcb && layer3 && String(layer3[1]) === "B.Cu") Pcb.flipFootprintNode(node);
+  const layer4 = K7().kid(node, "layer");
+  if (Pcb && layer4 && String(layer4[1]) === "B.Cu") Pcb.flipFootprintNode(node);
   const rot3 = K7().atOf(node)[2];
   if (Pcb && rot3) Pcb.rotateFootprintNode(node, -rot3);
   return { fpid: id, footprint: K7().serialize(node) };
@@ -82270,13 +82524,13 @@ async function openLibTables(opts2) {
         await okBox("Error", `Library '${r.uri}' not found.`);
         continue;
       }
-      const target2 = sym ? path2.replace(/\.[^./]*$/, "") + ".kicad_sym" : path2.replace(/\.[^./]*$/, "") + ".pretty";
-      if (projectPaths().some((x) => x === target2 || x.startsWith(target2 + "/"))) {
-        const c = await choiceBox("Migrate Library", sym ? `File '${target2}' already exists. Do you want overwrite this file?` : `Folder '${target2}' already exists. Do you want overwrite any existing footprints?`, ["Cancel", "No", "Yes"], { def: 2, esc: 0 });
+      const target3 = sym ? path2.replace(/\.[^./]*$/, "") + ".kicad_sym" : path2.replace(/\.[^./]*$/, "") + ".pretty";
+      if (projectPaths().some((x) => x === target3 || x.startsWith(target3 + "/"))) {
+        const c = await choiceBox("Migrate Library", sym ? `File '${target3}' already exists. Do you want overwrite this file?` : `Folder '${target3}' already exists. Do you want overwrite any existing footprints?`, ["Cancel", "No", "Yes"], { def: 2, esc: 0 });
         if (c.index === 0) return;
         if (c.index === 1) continue;
       }
-      await okBox("Error", (sym ? `Failed to save symbol library file '${target2}'.` : `Failed to save footprint library file '${target2}'.`) + `
+      await okBox("Error", (sym ? `Failed to save symbol library file '${target3}'.` : `Failed to save footprint library file '${target3}'.`) + `
 
 The web editor cannot read ${r.type} libraries; migrate this one in KiCad.`);
     }
@@ -82801,26 +83055,26 @@ function pick3DModel(o) {
       }
     };
     const cur2 = o.current ? modelTarget(o.current) : null;
-    let place2 = "lib", folder = "", file = "";
+    let place3 = "lib", folder = "", file = "";
     if (cur2 && cur2.kind === "kicad") {
-      place2 = "lib";
+      place3 = "lib";
       folder = cur2.lib;
       file = cur2.name + "." + cur2.ext;
     } else if (cur2 && cur2.kind === "project" && projectModelFile(cur2.path, o.projectFiles)) {
-      place2 = "project";
+      place3 = "project";
       const p = projectModelFile(cur2.path, o.projectFiles);
       folder = p.split("/").slice(0, -1).join("/");
       file = p.split("/").pop() || "";
     } else if (cur2 && cur2.kind === "embedded") {
-      place2 = "embedded";
+      place3 = "embedded";
       file = cur2.name;
     } else {
       const start = o.start && o.start !== "Automatic" ? o.start : store3.get(LAST_DIR);
       if (/KIPRJMOD/.test(start)) {
-        place2 = "project";
+        place3 = "project";
         folder = start.replace(/^\$\{KIPRJMOD\}\/?/, "");
       } else if (/3DMODEL_DIR/.test(start)) {
-        place2 = "lib";
+        place3 = "lib";
         folder = start.replace(/^\$\{[^}]+\}\/?/, "").replace(/\.3dshapes$/, "");
       }
     }
@@ -82831,7 +83085,7 @@ function pick3DModel(o) {
     if (o.embedded.length) places.push(["embedded", "Embedded files"]);
     for (const [v, l] of places) {
       const op = h2("option", { value: v }, l);
-      if (v === place2) op.selected = true;
+      if (v === place3) op.selected = true;
       lookIn.append(op);
     }
     const folderFilter = h2("input", { type: "text", placeholder: "Filter", "data-k": "folderFilter" });
@@ -82865,10 +83119,10 @@ function pick3DModel(o) {
     let libs = [];
     const wild = (s2, pat) => !pat || s2.toLowerCase().includes(pat.toLowerCase());
     const listFolders = () => {
-      folderBox.style.display = place2 === "embedded" ? "none" : "flex";
+      folderBox.style.display = place3 === "embedded" ? "none" : "flex";
       let names2 = [];
-      if (place2 === "lib") names2 = libs.map((l) => ({ id: l, name: l + ".3dshapes" }));
-      else if (place2 === "project") {
+      if (place3 === "lib") names2 = libs.map((l) => ({ id: l, name: l + ".3dshapes" }));
+      else if (place3 === "project") {
         const dirs = /* @__PURE__ */ new Set([""]);
         for (const p of o.projectFiles) dirs.add(p.split("/").slice(0, -1).join("/"));
         names2 = [...dirs].sort().map((d) => ({ id: d, name: d || "(project folder)" }));
@@ -82879,7 +83133,7 @@ function pick3DModel(o) {
       if (at4 >= 0) {
         folders.select(at4);
         scrollSel(folders.el);
-      } else if (place2 !== "embedded") {
+      } else if (place3 !== "embedded") {
         folder = "";
       }
       listFiles();
@@ -82887,11 +83141,11 @@ function pick3DModel(o) {
     const listFiles = () => {
       const exts = filters2[filterIx].exts;
       let names2 = [];
-      if (place2 === "embedded") names2 = o.embedded.slice();
-      else if (place2 === "project") names2 = o.projectFiles.filter((p) => p.split("/").slice(0, -1).join("/") === folder).map((p) => p.split("/").pop() || "");
+      if (place3 === "embedded") names2 = o.embedded.slice();
+      else if (place3 === "project") names2 = o.projectFiles.filter((p) => p.split("/").slice(0, -1).join("/") === folder).map((p) => p.split("/").pop() || "");
       else if (folder) {
         const items = modelLibItems(folder, () => {
-          if (place2 === "lib") listFiles();
+          if (place3 === "lib") listFiles();
         });
         if (items === void 0) {
           files.setRows([{ name: "Loading..." }]);
@@ -82913,8 +83167,8 @@ function pick3DModel(o) {
     };
     const pathOf2 = (name) => {
       if (!name) return null;
-      if (place2 === "embedded") return o.embedded.includes(name) ? EMBED_PREFIX + name : null;
-      if (place2 === "project") return "${KIPRJMOD}/" + (folder ? folder + "/" : "") + name;
+      if (place3 === "embedded") return o.embedded.includes(name) ? EMBED_PREFIX + name : null;
+      if (place3 === "project") return "${KIPRJMOD}/" + (folder ? folder + "/" : "") + name;
       return folder ? "${" + MODEL_DIR_VAR + "}/" + folder + ".3dshapes/" + name : null;
     };
     const showPreview2 = () => {
@@ -82923,7 +83177,7 @@ function pick3DModel(o) {
       prev.update(previewBoardText(null, [{ file: p, show: true, opacity: 1, offset: [0, 0, 0], scale: [1, 1, 1], rotate: [0, 0, 0] }], 1.6, [-15, -15, 15, 15]));
     };
     lookIn.addEventListener("change", () => {
-      place2 = places[lookIn.selectedIndex][0];
+      place3 = places[lookIn.selectedIndex][0];
       folder = "";
       file = "";
       nameIn.value = "";
@@ -82947,7 +83201,7 @@ File not found.
 Check the file name and try again.` : "Select a file.", [{ label: "OK" }]);
         return false;
       }
-      store3.set(LAST_DIR, place2 === "project" ? "${KIPRJMOD}/" + folder : place2 === "lib" && folder ? "${" + MODEL_DIR_VAR + "}/" + folder + ".3dshapes" : "");
+      store3.set(LAST_DIR, place3 === "project" ? "${KIPRJMOD}/" + folder : place3 === "lib" && folder ? "${" + MODEL_DIR_VAR + "}/" + folder + ".3dshapes" : "");
       finish(p);
       return true;
     };
@@ -82982,12 +83236,12 @@ Check the file name and try again.` : "Select a file.", [{ label: "OK" }]);
         });
         whenGone(body, () => finish(null));
         listFolders();
-        if (place2 === "lib") void modelLibraries().then((l) => {
+        if (place3 === "lib") void modelLibraries().then((l) => {
           libs = l;
-          if (place2 === "lib") listFolders();
+          if (place3 === "lib") listFolders();
         });
         if (file) showPreview2();
-        setTimeout(() => (place2 === "embedded" ? fileFilter : folderFilter).focus(), 0);
+        setTimeout(() => (place3 === "embedded" ? fileFilter : folderFilter).focus(), 0);
       },
       ok() {
         return accept2();
@@ -83079,7 +83333,7 @@ function models3dPanel(o) {
   };
   const pathChoice = selectField("Automatic", configuredPathChoices().map((c) => [c, c]), { ro, key: "configuredPath" });
   pathChoice.input.title = "Choose the folder used when opening the 3D model picker";
-  const build2 = (el4) => {
+  const build3 = (el4) => {
     const unitSpan = (k) => unitLabel(k === "deg" ? "" : k);
     const units = () => currentUnits();
     const spin = (k) => stepper(mf[k], k[0] === "s" ? stepScale : k[0] === "r" ? stepRotation : (v, sg, fine) => stepOffset(v, sg, fine, units()), updatePreview);
@@ -83198,7 +83452,7 @@ function models3dPanel(o) {
     updatePreview();
   };
   return {
-    build: build2,
+    build: build3,
     models: () => {
       syncModels();
       return models.filter((x) => x.file);
@@ -83696,7 +83950,7 @@ var init_fpwizard_model = __esm({
 var kicad_menu_spec_default;
 var init_kicad_menu_spec = __esm({
   "web/generated/kicad-menu-spec.json"() {
-    kicad_menu_spec_default = { generated: "server/scripts/gen_kicad_menus.py from KiCad's TOOL_ACTIONs and resources/bitmaps_png \u2014 do not edit by hand", actions: { "ACTIONS::doNew": { id: "doNew", label: "New...", tip: "Create a new document in the editor", icon: "new_generic", key: "Ctrl+N", name: "common.Control.new" }, "ACTIONS::newLibrary": { id: "newLibrary", label: "New Library...", tip: "Create a new library folder", icon: "new_library", key: null, name: "common.Control.newLibrary" }, "ACTIONS::addLibrary": { id: "addLibrary", label: "Add Library...", tip: "Add an existing library folder", icon: "add_library", key: null, name: "common.Control.addLibrary" }, "ACTIONS::open": { id: "open", label: "Open...", tip: "Open existing document", icon: "directory_open", key: "Ctrl+O", name: "common.Control.open" }, "ACTIONS::openWithTextEditor": { id: "openWithTextEditor", label: "Edit in a Text Editor...", tip: "Open a library file with a text editor", icon: "editor", key: null, name: "common.Control.openWithTextEditor" }, "ACTIONS::openDirectory": { id: "openDirectory", label: "Open in file explorer...", tip: "Open a library file with system file explorer", icon: "directory_browser", key: null, name: "common.Control.openDirectory" }, "ACTIONS::save": { id: "save", label: "Save", tip: "Save changes", icon: "save", key: "Ctrl+S", name: "common.Control.save" }, "ACTIONS::saveAs": { id: "saveAs", label: "Save As...", tip: "Save current document to another location", icon: "save_as", key: "Ctrl+Shift+S", name: "common.Control.saveAs" }, "ACTIONS::saveCopy": { id: "saveCopy", label: "Save a Copy...", tip: "Save a copy of the current document to another location", icon: "save_as", key: null, name: "common.Control.saveCopy" }, "ACTIONS::saveAll": { id: "saveAll", label: "Save All", tip: "Save all changes", icon: "save_all", key: null, name: "common.Control.saveAll" }, "ACTIONS::revert": { id: "revert", label: "Revert", tip: "Throw away changes", icon: "restore_from_file", key: null, name: "common.Control.revert" }, "ACTIONS::pageSettings": { id: "pageSettings", label: "Page Settings...", tip: "Settings for paper size and title block info", icon: "sheetset", key: null, name: "common.Control.pageSettings" }, "ACTIONS::exportForOlderVersion": { id: "exportForOlderVersion", label: "Export for Older KiCad Version...", tip: "Export a copy that an older KiCad can open", icon: null, key: null, name: "common.Control.exportForOlderVersion" }, "ACTIONS::print": { id: "print", label: "Print...", tip: null, icon: "print_button", key: "Ctrl+P", name: "common.Control.print" }, "ACTIONS::plot": { id: "plot", label: "Plot...", tip: null, icon: "plot", key: null, name: "common.Control.plot" }, "ACTIONS::quit": { id: "quit", label: "Quit", tip: "Close the current editor", icon: "exit", key: null, name: "common.Control.quit" }, "ACTIONS::group": { id: "group", label: "Group Items", tip: "Group the selected items so that they are treated as a single item", icon: "group", key: null, name: "common.Interactive.group" }, "ACTIONS::ungroup": { id: "ungroup", label: "Ungroup Items", tip: "Ungroup any selected groups", icon: "group_ungroup", key: null, name: "common.Interactive.ungroup" }, "ACTIONS::addToGroup": { id: "addToGroup", label: "Add Items", tip: "Add items to group", icon: "group_remove", key: null, name: "common.Interactive.addToGroup" }, "ACTIONS::removeFromGroup": { id: "removeFromGroup", label: "Remove Items", tip: "Remove items from group", icon: "group_remove", key: null, name: "common.Interactive.removeFromGroup" }, "ACTIONS::groupEnter": { id: "groupEnter", label: "Enter Group", tip: "Enter the group to edit items", icon: "group_enter", key: null, name: "common.Interactive.groupEnter" }, "ACTIONS::groupLeave": { id: "groupLeave", label: "Leave Group", tip: "Leave the current group", icon: "group_leave", key: null, name: "common.Interactive.groupLeave" }, "ACTIONS::cancelInteractive": { id: "cancelInteractive", label: "Cancel", tip: "Cancel current tool", icon: "cancel", key: null, name: "common.Interactive.cancel" }, "ACTIONS::finishInteractive": { id: "finishInteractive", label: "Finish", tip: "Finish current tool", icon: "checked_ok", key: "End", name: "common.Interactive.finish" }, "ACTIONS::showContextMenu": { id: "showContextMenu", label: "Show Context Menu", tip: "Perform the right-mouse-button action", icon: null, key: null, name: "common.Control.showContextMenu" }, "ACTIONS::undo": { id: "undo", label: "Undo", tip: null, icon: "undo", key: "Ctrl+Z", name: "common.Interactive.undo" }, "ACTIONS::redo": { id: "redo", label: "Redo", tip: null, icon: "redo", key: "Ctrl+Y", name: "common.Interactive.redo", mac: "Ctrl+Shift+Z" }, "ACTIONS::cut": { id: "cut", label: "Cut", tip: "Cut selected item(s) to clipboard", icon: "cut", key: "Ctrl+X", name: "common.Interactive.cut" }, "ACTIONS::copy": { id: "copy", label: "Copy", tip: "Copy selected item(s) to clipboard", icon: "copy", key: "Ctrl+C", name: "common.Interactive.copy" }, "ACTIONS::copyAsText": { id: "copyAsText", label: "Copy as Text", tip: "Copy selected item(s) to clipboard as text", icon: "copy", key: "Ctrl+Shift+C", name: "common.Interactive.copyAsText" }, "ACTIONS::paste": { id: "paste", label: "Paste", tip: "Paste item(s) from clipboard", icon: "paste", key: "Ctrl+V", name: "common.Interactive.paste" }, "ACTIONS::selectSetRect": { id: "selectSetRect", label: "Rectangle", tip: "Set selection mode to use rectangle", icon: "cursor", key: null, name: "common.Interactive.selectSetRect" }, "ACTIONS::selectSetLasso": { id: "selectSetLasso", label: "Lasso", tip: "Set selection mode to use polygon lasso", icon: "lasso", key: null, name: "common.Interactive.selectSetLasso" }, "ACTIONS::selectAll": { id: "selectAll", label: "Select All", tip: "Select all items on screen", icon: null, key: "Ctrl+A", name: "common.Interactive.selectAll" }, "ACTIONS::unselectAll": { id: "unselectAll", label: "Unselect All", tip: "Unselect all items on screen", icon: null, key: "Ctrl+Shift+A", name: "common.Interactive.unselectAll" }, "ACTIONS::pasteSpecial": { id: "pasteSpecial", label: "Paste Special...", tip: "Paste item(s) from clipboard with options", icon: "paste_special", key: "Ctrl+Shift+V", name: "common.Interactive.pasteSpecial" }, "ACTIONS::duplicate": { id: "duplicate", label: "Duplicate", tip: "Duplicates the selected item(s)", icon: "duplicate", key: "Ctrl+D", name: "common.Interactive.duplicate" }, "ACTIONS::doDelete": { id: "doDelete", label: "Delete", tip: "Delete selected item(s)", icon: "trash", key: "Del", name: "common.Interactive.delete", alt: "Backspace" }, "ACTIONS::deleteTool": { id: "deleteTool", label: "Interactive Delete Tool", tip: "Delete clicked items", icon: "delete_cursor", key: null, name: "common.Interactive.deleteTool" }, "ACTIONS::leftJustify": { id: "leftJustify", label: "Left Justify", tip: "Left-justify fields and text items", icon: "text_align_left", key: null, name: "common.Control.leftJustify" }, "ACTIONS::centerJustify": { id: "centerJustify", label: "Center Justify", tip: "Center-justify fields and text items", icon: "text_align_center", key: null, name: "common.Control.centerJustify" }, "ACTIONS::rightJustify": { id: "rightJustify", label: "Right Justify", tip: "Right-justify fields and text items", icon: "text_align_right", key: null, name: "common.Control.rightJustify" }, "ACTIONS::expandAll": { id: "expandAll", label: "Expand All", tip: null, icon: "up", key: null, name: "common.Control.expandAll" }, "ACTIONS::collapseAll": { id: "collapseAll", label: "Collapse All", tip: null, icon: "down", key: null, name: "common.Control.collapseAll" }, "ACTIONS::increment": { id: "increment", label: "Increment", tip: "Increment the selected item(s)", icon: null, key: null, name: "eeschema.Interactive.increment" }, "ACTIONS::incrementPrimary": { id: "incrementPrimary", label: "Increment Primary", tip: "Increment the primary field of the selected item(s)", icon: null, key: null, name: "eeschema.Interactive.incrementPrimary" }, "ACTIONS::decrementPrimary": { id: "decrementPrimary", label: "Decrement Primary", tip: "Decrement the primary field of the selected item(s)", icon: null, key: null, name: "eeschema.Interactive.decrementPrimary" }, "ACTIONS::incrementSecondary": { id: "incrementSecondary", label: "Increment Secondary", tip: "Increment the secondary field of the selected item(s)", icon: null, key: null, name: "eeschema.Interactive.incrementSecondary" }, "ACTIONS::decrementSecondary": { id: "decrementSecondary", label: "Decrement Secondary", tip: "Decrement the secondary field of the selected item(s)", icon: null, key: null, name: "eeschema.Interactive.decrementSecondary" }, "ACTIONS::selectColumns": { id: "selectColumns", label: "Select Column(s)", tip: "Select complete column(s) containing the current selected cell(s)", icon: "table_select_column", key: null, name: "common.InteractiveSelection.SelectColumns" }, "ACTIONS::selectRows": { id: "selectRows", label: "Select Row(s)", tip: "Select complete row(s) containing the current selected cell(s)", icon: "table_select_row", key: null, name: "common.InteractiveSelection.Rows" }, "ACTIONS::selectTable": { id: "selectTable", label: "Select Table", tip: "Select parent table of selected cell(s)", icon: "table_select", key: null, name: "common.InteractiveSelection.SelectTable" }, "ACTIONS::addRowAbove": { id: "addRowAbove", label: "Add Row Above", tip: "Insert a new table row above the selected cell(s)", icon: "table_add_row_above", key: null, name: "common.TableEditor.addRowAbove" }, "ACTIONS::addRowBelow": { id: "addRowBelow", label: "Add Row Below", tip: "Insert a new table row below the selected cell(s)", icon: "table_add_row_below", key: null, name: "common.TableEditor.addRowBelow" }, "ACTIONS::addColBefore": { id: "addColBefore", label: "Add Column Before", tip: "Insert a new table column before the selected cell(s)", icon: "table_add_column_before", key: null, name: "common.TableEditor.addColBefore" }, "ACTIONS::addColAfter": { id: "addColAfter", label: "Add Column After", tip: "Insert a new table column after the selected cell(s)", icon: "table_add_column_after", key: null, name: "common.TableEditor.addColAfter" }, "ACTIONS::deleteRows": { id: "deleteRows", label: "Delete Row(s)", tip: "Delete rows containing the currently selected cell(s)", icon: "table_delete_row", key: null, name: "common.TableEditor.deleteRows" }, "ACTIONS::deleteColumns": { id: "deleteColumns", label: "Delete Column(s)", tip: "Delete columns containing the currently selected cell(s)", icon: "table_delete_column", key: null, name: "common.TableEditor.deleteColumns" }, "ACTIONS::mergeCells": { id: "mergeCells", label: "Merge Cells", tip: "Turn selected table cells into a single cell", icon: "table", key: null, name: "common.TableEditor.mergeCells" }, "ACTIONS::unmergeCells": { id: "unmergeCells", label: "Unmerge Cells", tip: "Turn merged table cells back into separate cells.", icon: "table", key: null, name: "common.TableEditor.unmergeCell" }, "ACTIONS::editTable": { id: "editTable", label: "Edit Table...", tip: null, icon: "table_edit", key: "Ctrl+E", name: "pcbnew.TableEditor.editTable" }, "ACTIONS::exportTableCSV": { id: "exportTableCSV", label: "Export Table to CSV", tip: "Export table contents to CSV file with resolved text variables", icon: "export_file", key: null, name: "common.TableEditor.exportTableCSV" }, "ACTIONS::pointEditorArcKeepCenter": { id: "pointEditorArcKeepCenter", label: "Keep Arc Center, Adjust Radius", tip: "Switch arc editing mode to keep center, adjust radius and endpoints", icon: null, key: null, name: "pcbnew.PointEditor.arcKeepCenter" }, "ACTIONS::pointEditorArcKeepEndpoint": { id: "pointEditorArcKeepEndpoint", label: "Keep Arc Endpoints or Direction of Starting Point", tip: "Switch arc editing mode to keep endpoints, or to keep direction of the other point", icon: null, key: null, name: "pcbnew.PointEditor.arcKeepEndpoint" }, "ACTIONS::pointEditorArcKeepRadius": { id: "pointEditorArcKeepRadius", label: "Keep Arc Radius and Center, adjust angle", tip: "Switch arc editing mode to maintaining radius when endpoint are moved", icon: null, key: null, name: "pcbnew.PointEditor.arcKeepRadius" }, "ACTIONS::arcPosture": { id: "arcPosture", label: "Switch Arc Posture", tip: "Switch arc posture between clockwise and counter-clockwise", icon: null, key: "/", name: "common.InteractiveDrawing.arcPosture" }, "ACTIONS::cycleArcDrawMode": { id: "cycleArcDrawMode", label: "Cycle Arc Drawing Mode", tip: "Switch to the next method of drawing arcs", icon: null, key: "Alt+/", name: "common.InteractiveDrawing.cycleArcDrawMode" }, "ACTIONS::deleteLastPoint": { id: "deleteLastPoint", label: "Delete Last Point", tip: "Delete the last point added to the current item", icon: "undo", key: "Backspace", name: "common.InteractiveDrawing.deleteLastPoint" }, "ACTIONS::cycleArcEditMode": { id: "cycleArcEditMode", label: "Cycle Arc Editing Mode", tip: "Switch to a different method of editing arcs", icon: null, key: "Ctrl+Space", name: "common.Interactive.cycleArcEditMode" }, "ACTIONS::showSearch": { id: "showSearch", label: "Search", tip: "Show/hide the search panel", icon: "find", key: "Ctrl+G", name: "common.Interactive.search" }, "ACTIONS::find": { id: "find", label: "Find", tip: null, icon: "find", key: "Ctrl+F", name: "common.Interactive.find" }, "ACTIONS::findAndReplace": { id: "findAndReplace", label: "Find and Replace", tip: null, icon: "find_replace", key: "Ctrl+Alt+F", name: "common.Interactive.findAndReplace" }, "ACTIONS::findNext": { id: "findNext", label: "Find Next", tip: null, icon: "find", key: "F3", name: "common.Interactive.findNext" }, "ACTIONS::findPrevious": { id: "findPrevious", label: "Find Previous", tip: null, icon: "find", key: "Shift+F3", name: "common.Interactive.findPrevious" }, "ACTIONS::findNextMarker": { id: "findNextMarker", label: "Find Next Marker", tip: null, icon: "find", key: "Ctrl+Shift+F3", name: "common.Interactive.findNextMarker" }, "ACTIONS::replaceAndFindNext": { id: "replaceAndFindNext", label: "Replace and Find Next", tip: null, icon: "find_replace", key: null, name: "common.Interactive.replaceAndFindNext" }, "ACTIONS::replaceAll": { id: "replaceAll", label: "Replace All", tip: null, icon: "find_replace", key: null, name: "common.Interactive.replaceAll" }, "ACTIONS::prevMarker": { id: "prevMarker", label: "Previous Marker", tip: null, icon: "marker_previous", key: null, name: "common.Checker.prevMarker" }, "ACTIONS::nextMarker": { id: "nextMarker", label: "Next Marker", tip: null, icon: "marker_next", key: null, name: "common.Checker.nextMarker" }, "ACTIONS::excludeMarker": { id: "excludeMarker", label: "Exclude Marker", tip: "Mark current violation in Checker window as an exclusion", icon: "marker_exclude", key: null, name: "common.Checker.excludeMarker" }, "ACTIONS::zoomRedraw": { id: "zoomRedraw", label: "Refresh", tip: null, icon: "refresh", key: "F5", name: "common.Control.zoomRedraw", mac: "Ctrl+R" }, "ACTIONS::zoomFitScreen": { id: "zoomFitScreen", label: "Zoom to Fit", tip: "Zoom to worksheet area if exists or edited object", icon: "zoom_fit_in_page", key: "Home", name: "common.Control.zoomFitScreen", mac: "Ctrl+0" }, "ACTIONS::zoomFitObjects": { id: "zoomFitObjects", label: "Zoom to All Objects", tip: "Zoom to all objects on screen", icon: "zoom_fit_to_objects", key: "Ctrl+Home", name: "common.Control.zoomFitObjects" }, "ACTIONS::zoomFitSelection": { id: "zoomFitSelection", label: "Zoom to Selected Objects", tip: "Zoom to items currently selected", icon: "zoom_fit_to_objects", key: null, name: "common.Control.zoomFitSelection" }, "ACTIONS::zoomIn": { id: "zoomIn", label: "Zoom In at Cursor", tip: null, icon: "zoom_in", key: "F1", name: "common.Control.zoomIn", mac: "Ctrl++" }, "ACTIONS::zoomOut": { id: "zoomOut", label: "Zoom Out at Cursor", tip: null, icon: "zoom_out", key: "F2", name: "common.Control.zoomOut", mac: "Ctrl+-" }, "ACTIONS::zoomInCenter": { id: "zoomInCenter", label: "Zoom In", tip: null, icon: "zoom_in", key: null, name: "common.Control.zoomInCenter" }, "ACTIONS::zoomOutCenter": { id: "zoomOutCenter", label: "Zoom Out", tip: null, icon: "zoom_out", key: null, name: "common.Control.zoomOutCenter" }, "ACTIONS::zoomInHorizontally": { id: "zoomInHorizontally", label: "Zoom In Horizontally", tip: "Zoom in horizontally the plot area", icon: "zoom_in_horizontally", key: null, name: "common.Control.zoomInHorizontally" }, "ACTIONS::zoomOutHorizontally": { id: "zoomOutHorizontally", label: "Zoom Out Horizontally", tip: "Zoom out horizontally the plot area", icon: "zoom_out_horizontally", key: null, name: "common.Control.zoomOutHorizontally" }, "ACTIONS::zoomInVertically": { id: "zoomInVertically", label: "Zoom In Vertically", tip: "Zoom in vertically the plot area", icon: "zoom_in_vertically", key: null, name: "common.Control.zoomInVertically" }, "ACTIONS::zoomOutVertically": { id: "zoomOutVertically", label: "Zoom Out Vertically", tip: "Zoom out vertically the plot area", icon: "zoom_out_vertically", key: null, name: "common.Control.zoomOutVertically" }, "ACTIONS::zoomCenter": { id: "zoomCenter", label: "Center on Cursor", tip: null, icon: "zoom_center_on_screen", key: "F4", name: "common.Control.zoomCenter" }, "ACTIONS::zoomTool": { id: "zoomTool", label: "Zoom to Selection Area", tip: "Zoom to an area selection created by a mouse drag", icon: "zoom_area", key: "Ctrl+F5", name: "common.Control.zoomTool" }, "ACTIONS::zoomUndo": { id: "zoomUndo", label: "Undo Last Zoom", tip: "Return zoom to level prior to last zoom action", icon: "undo", key: null, name: "common.Control.undoZoom" }, "ACTIONS::zoomRedo": { id: "zoomRedo", label: "Redo Last Zoom", tip: "Return zoom to level prior to last zoom undo", icon: "redo", key: null, name: "common.Control.redoZoom" }, "ACTIONS::centerSelection": { id: "centerSelection", label: "Pan to Center Selected Objects", tip: null, icon: null, key: null, name: "common.Control.centerSelection" }, "ACTIONS::cursorUp": { id: "cursorUp", label: "Cursor Up", tip: null, icon: null, key: "Up", name: "common.Control.cursorUp" }, "ACTIONS::cursorDown": { id: "cursorDown", label: "Cursor Down", tip: null, icon: null, key: "Down", name: "common.Control.cursorDown" }, "ACTIONS::cursorLeft": { id: "cursorLeft", label: "Cursor Left", tip: null, icon: null, key: "Left", name: "common.Control.cursorLeft" }, "ACTIONS::cursorRight": { id: "cursorRight", label: "Cursor Right", tip: null, icon: null, key: "Right", name: "common.Control.cursorRight" }, "ACTIONS::cursorUpFast": { id: "cursorUpFast", label: "Cursor Up Fast", tip: null, icon: null, key: "Ctrl+Up", name: "common.Control.cursorUpFast" }, "ACTIONS::cursorDownFast": { id: "cursorDownFast", label: "Cursor Down Fast", tip: null, icon: null, key: "Ctrl+Down", name: "common.Control.cursorDownFast" }, "ACTIONS::cursorLeftFast": { id: "cursorLeftFast", label: "Cursor Left Fast", tip: null, icon: null, key: "Ctrl+Left", name: "common.Control.cursorLeftFast" }, "ACTIONS::cursorRightFast": { id: "cursorRightFast", label: "Cursor Right Fast", tip: null, icon: null, key: "Ctrl+Right", name: "common.Control.cursorRightFast" }, "ACTIONS::cursorClick": { id: "cursorClick", label: "Click", tip: "Performs left mouse button click", icon: null, key: "Enter", name: "common.Control.cursorClick" }, "ACTIONS::cursorDblClick": { id: "cursorDblClick", label: "Double-click", tip: "Performs left mouse button double-click", icon: null, key: "End", name: "common.Control.cursorDblClick" }, "ACTIONS::pinLibrary": { id: "pinLibrary", label: "Pin Library", tip: "Keep the library at the top of the list", icon: null, key: null, name: "common.Control.pinLibrary" }, "ACTIONS::unpinLibrary": { id: "unpinLibrary", label: "Unpin Library", tip: "No longer keep the library at the top of the list", icon: null, key: null, name: "common.Control.unpinLibrary" }, "ACTIONS::showLibraryTree": { id: "showLibraryTree", label: "Library Tree", tip: null, icon: "search_tree", key: null, name: "common.Control.showLibraryTree" }, "ACTIONS::hideLibraryTree": { id: "hideLibraryTree", label: "Hide Library Tree", tip: null, icon: "search_tree", key: null, name: "common.Control.hideLibraryTree" }, "ACTIONS::libraryTreeSearch": { id: "libraryTreeSearch", label: "Focus Library Tree Search Field", tip: null, icon: null, key: "Ctrl+L", name: "common.Control.libraryTreeSearch" }, "ACTIONS::panUp": { id: "panUp", label: "Pan Up", tip: null, icon: null, key: "Shift+Up", name: "common.Control.panUp" }, "ACTIONS::panDown": { id: "panDown", label: "Pan Down", tip: null, icon: null, key: "Shift+Down", name: "common.Control.panDown" }, "ACTIONS::panLeft": { id: "panLeft", label: "Pan Left", tip: null, icon: null, key: "Shift+Left", name: "common.Control.panLeft" }, "ACTIONS::panRight": { id: "panRight", label: "Pan Right", tip: null, icon: null, key: "Shift+Right", name: "common.Control.panRight" }, "ACTIONS::gridFast1": { id: "gridFast1", label: "Switch to Fast Grid 1", tip: null, icon: null, key: "Alt+1", name: "common.Control.gridFast1" }, "ACTIONS::gridFast2": { id: "gridFast2", label: "Switch to Fast Grid 2", tip: null, icon: null, key: "Alt+2", name: "common.Control.gridFast2" }, "ACTIONS::gridFastCycle": { id: "gridFastCycle", label: "Cycle Fast Grid", tip: null, icon: null, key: "Alt+4", name: "common.Control.gridFastCycle" }, "ACTIONS::gridNext": { id: "gridNext", label: "Switch to Next Grid", tip: null, icon: null, key: "N", name: "common.Control.gridNext" }, "ACTIONS::gridPrev": { id: "gridPrev", label: "Switch to Previous Grid", tip: null, icon: null, key: "Shift+N", name: "common.Control.gridPrev" }, "ACTIONS::gridSetOrigin": { id: "gridSetOrigin", label: "Grid Origin", tip: "Place the grid origin point", icon: "grid_select_axis", key: null, name: "common.Control.gridSetOrigin" }, "ACTIONS::gridResetOrigin": { id: "gridResetOrigin", label: "Reset Grid Origin", tip: null, icon: null, key: null, name: "common.Control.gridResetOrigin" }, "ACTIONS::toggleGrid": { id: "toggleGrid", label: "Show Grid", tip: "Display background grid in the edit window", icon: "grid", key: null, name: "common.Control.toggleGrid" }, "ACTIONS::toggleGridOverrides": { id: "toggleGridOverrides", label: "Grid Overrides", tip: "Enables item-specific grids that override the current grid", icon: "grid_override", key: "Ctrl+Shift+G", name: "common.Control.toggleGridOverrides" }, "ACTIONS::gridProperties": { id: "gridProperties", label: "Edit Grids...", tip: "Edit grid definitions", icon: "grid_select", key: null, name: "common.Control.editGrids" }, "ACTIONS::gridOrigin": { id: "gridOrigin", label: "Grid Origin...", tip: "Set the grid origin point", icon: "grid_select_axis", key: null, name: "common.Control.editGridOrigin" }, "ACTIONS::inchesUnits": { id: "inchesUnits", label: "Inches", tip: null, icon: "unit_inch", key: null, name: "common.Control.imperialUnits" }, "ACTIONS::milsUnits": { id: "milsUnits", label: "Mils", tip: null, icon: "unit_mil", key: null, name: "common.Control.mils" }, "ACTIONS::millimetersUnits": { id: "millimetersUnits", label: "Millimeters", tip: null, icon: "unit_mm", key: null, name: "common.Control.metricUnits" }, "ACTIONS::selectLibTreeColumns": { id: "selectLibTreeColumns", label: "Select Columns...", tip: null, icon: null, key: null, name: "common.Control.selectColumns" }, "ACTIONS::toggleUnits": { id: "toggleUnits", label: "Switch units", tip: "Switch between imperial and metric units", icon: "unit_mm", key: "Ctrl+U", name: "common.Control.toggleUnits" }, "ACTIONS::togglePolarCoords": { id: "togglePolarCoords", label: "Polar Coordinates", tip: "Switch between polar and cartesian coordinate systems", icon: "polar_coord", key: null, name: "common.Control.togglePolarCoords" }, "ACTIONS::resetLocalCoords": { id: "resetLocalCoords", label: "Reset Local Coordinates", tip: null, icon: null, key: "Space", name: "common.Control.resetLocalCoords" }, "ACTIONS::toggleCursor": { id: "toggleCursor", label: "Always Show Crosshairs", tip: "Display crosshairs even when not drawing objects", icon: "cursor", key: null, name: "common.Control.toggleCursor" }, "ACTIONS::cursorSmallCrosshairs": { id: "cursorSmallCrosshairs", label: "Small crosshairs", tip: "Use small crosshairs aligned at 0 and 90 degrees", icon: "cursor_shape", key: null, name: "common.Control.cursorSmallCrosshairs" }, "ACTIONS::cursorFullCrosshairs": { id: "cursorFullCrosshairs", label: "Full-Window Crosshairs", tip: "Display full-window crosshairs aligned at 0 and 90 degrees", icon: "cursor_fullscreen", key: null, name: "common.Control.cursorFullCrosshairs" }, "ACTIONS::cursor45Crosshairs": { id: "cursor45Crosshairs", label: "45 Degree Crosshairs", tip: "Display full-window crosshairs aligned at 45 and 135 degrees", icon: "cursor_fullscreen45", key: null, name: "common.Control.cursor45Crosshairs" }, "ACTIONS::highContrastMode": { id: "highContrastMode", label: "Inactive Layer View Mode", tip: "Toggle inactive layers between normal and dimmed", icon: "contrast_mode", key: null, name: "common.Control.highContrastMode" }, "ACTIONS::highContrastModeCycle": { id: "highContrastModeCycle", label: "Inactive Layer View Mode (3-state)", tip: "Cycle inactive layers between normal, dimmed, and hidden", icon: "contrast_mode", key: "H", name: "common.Control.highContrastModeCycle" }, "ACTIONS::toggleBoundingBoxes": { id: "toggleBoundingBoxes", label: "Draw Bounding Boxes", tip: null, icon: "gerbview_show_negative_objects", key: null, name: "common.Control.toggleBoundingBoxes" }, "ACTIONS::selectionTool": { id: "selectionTool", label: "Select item(s)", tip: null, icon: "cursor", key: null, name: "common.InteractiveSelection.selectionTool" }, "ACTIONS::measureTool": { id: "measureTool", label: "Measure Tool", tip: "Interactively measure distance between points", icon: "measurement", key: "Ctrl+Shift+M", name: "common.Interactive.measureTool" }, "ACTIONS::showProjectManager": { id: "showProjectManager", label: "Switch to Project Manager", tip: "Show project window", icon: "icon_kicad_24", key: null, name: "common.Control.showProjectManager" }, "ACTIONS::show3DViewer": { id: "show3DViewer", label: "3D Viewer", tip: "Show 3D viewer window", icon: "three_d", key: "Alt+3", name: "common.Control.show3DViewer" }, "ACTIONS::showSymbolBrowser": { id: "showSymbolBrowser", label: "Symbol Library Browser", tip: null, icon: "library_browser", key: null, name: "common.Control.showSymbolBrowser" }, "ACTIONS::showSymbolEditor": { id: "showSymbolEditor", label: "Symbol Editor", tip: "Create, delete and edit schematic symbols", icon: "libedit", key: null, name: "common.Control.showSymbolEditor" }, "ACTIONS::showFootprintBrowser": { id: "showFootprintBrowser", label: "Footprint Library Browser", tip: null, icon: "library_browser", key: null, name: "common.Control.showFootprintBrowser" }, "ACTIONS::showFootprintEditor": { id: "showFootprintEditor", label: "Footprint Editor", tip: "Create, delete and edit board footprints", icon: "module_editor", key: null, name: "common.Control.showFootprintEditor" }, "ACTIONS::showCalculatorTools": { id: "showCalculatorTools", label: "Calculator Tools", tip: "Run component calculations, track width calculations, etc.", icon: "icon_pcbcalculator_24", key: null, name: "common.Control.showCalculatorTools" }, "ACTIONS::showProperties": { id: "showProperties", label: "Properties", tip: "Show/hide the properties manager", icon: "tools", key: null, name: "common.Control.showProperties" }, "ACTIONS::showGitCommitPane": { id: "showGitCommitPane", label: "Version Control", tip: "Show/hide the version control panel", icon: "git_good_check", key: null, name: "common.Control.showGitCommitPane" }, "ACTIONS::showDatasheet": { id: "showDatasheet", label: "Show Datasheet", tip: "Open the datasheet in a browser", icon: "datasheet", key: "D", name: "common.Control.showDatasheet" }, "ACTIONS::updatePcbFromSchematic": { id: "updatePcbFromSchematic", label: "Update PCB from Schematic...", tip: "Update PCB with changes made to schematic", icon: "update_pcb_from_sch", key: "F8", name: "common.Control.updatePcbFromSchematic" }, "ACTIONS::updateSchematicFromPcb": { id: "updateSchematicFromPcb", label: "Update Schematic from PCB...", tip: "Update schematic with changes made to PCB", icon: "update_sch_from_pcb", key: null, name: "common.Control.updateSchematicFromPCB" }, "ACTIONS::openPreferences": { id: "openPreferences", label: "Preferences...", tip: "Show preferences for all open tools", icon: "preference", key: "Ctrl+,", name: "common.SuiteControl.openPreferences" }, "ACTIONS::configurePaths": { id: "configurePaths", label: "Configure Paths...", tip: "Edit path configuration environment variables", icon: "path", key: null, name: "common.SuiteControl.configurePaths" }, "ACTIONS::showSymbolLibTable": { id: "showSymbolLibTable", label: "Manage Symbol Libraries...", tip: "Edit the global and project symbol library lists", icon: "library_table", key: null, name: "common.SuiteControl.showSymbolLibTable" }, "ACTIONS::showFootprintLibTable": { id: "showFootprintLibTable", label: "Manage Footprint Libraries...", tip: "Edit the global and project footprint library lists", icon: "library_table", key: null, name: "common.SuiteControl.showFootprintLibTable" }, "ACTIONS::showDesignBlockLibTable": { id: "showDesignBlockLibTable", label: "Manage Design Block Libraries...", tip: "Edit the global and project design block library lists", icon: "library_table", key: null, name: "common.SuiteControl.showDesignBLockLibTable" }, "ACTIONS::gettingStarted": { id: "gettingStarted", label: "Getting Started with KiCad", tip: 'Open "Getting Started in KiCad" guide for beginners', icon: "help", key: null, name: "common.SuiteControl.gettingStarted" }, "ACTIONS::help": { id: "help", label: "Help", tip: "Open product documentation in a web browser", icon: "help_online", key: null, name: "common.SuiteControl.help" }, "ACTIONS::about": { id: "about", label: "About KiCad", tip: null, icon: "about", key: null, name: "common.SuiteControl.about" }, "ACTIONS::listHotKeys": { id: "listHotKeys", label: "List Hotkeys...", tip: "Displays current hotkeys table and corresponding commands", icon: "hotkeys", key: "Ctrl+F1", name: "common.SuiteControl.listHotKeys" }, "ACTIONS::getInvolved": { id: "getInvolved", label: "Get Involved", tip: 'Open "Contribute to KiCad" in a web browser', icon: "info", key: null, name: "common.SuiteControl.getInvolved" }, "ACTIONS::donate": { id: "donate", label: "Donate", tip: 'Open "Donate to KiCad" in a web browser', icon: null, key: null, name: "common.SuiteControl.donate" }, "ACTIONS::reportBug": { id: "reportBug", label: "Report Bug", tip: "Report a problem with KiCad", icon: "bug", key: null, name: "common.SuiteControl.reportBug" }, "ACTIONS::pluginsReload": { id: "pluginsReload", label: "Refresh Plugins", tip: "Reload all python plugins and refresh plugin menus", icon: "reload", key: null, name: "common.API.pluginsReload" }, "ACTIONS::pluginsShowFolder": { id: "pluginsShowFolder", label: "Open Plugin Directory", tip: "Opens the directory in the default system file manager", icon: "directory_open", key: null, name: "common.API.pluginsShowFolder" }, "ACTIONS::embeddedFiles": { id: "embeddedFiles", label: "Embedded Files", tip: "Manage embedded files", icon: null, key: null, name: "common.Embed.embededFile" }, "ACTIONS::removeFile": { id: "removeFile", label: "Remove File", tip: "Remove an embedded file", icon: null, key: null, name: "common.Embed.removeFile" }, "ACTIONS::extractFile": { id: "extractFile", label: "Extract File", tip: "Extract an embedded file", icon: null, key: null, name: "common.Embed.extractFile" }, "SCH_ACTIONS::runERC": { id: "runERC", label: "Electrical Rules Checker", tip: "Show the electrical rules checker window", icon: "erc", key: null, name: "eeschema.InspectionTool.runERC" }, "SCH_ACTIONS::checkSymbol": { id: "checkSymbol", label: "Symbol Checker", tip: "Show the symbol checker window", icon: "erc", key: null, name: "eeschema.InspectionTool.checkSymbol" }, "SCH_ACTIONS::diffSymbol": { id: "diffSymbol", label: "Compare Symbol with Library", tip: "Show differences between schematic symbol and its library equivalent", icon: "library", key: null, name: "eeschema.InspectionTool.diffSymbol" }, "SCH_ACTIONS::compareSchematicWithFile": { id: "compareSchematicWithFile", label: "Compare Schematic with File...", tip: "Diff the current schematic against another .kicad_sch file", icon: "library", key: null, name: "eeschema.InspectionTool.CompareSchematicWithFile" }, "SCH_ACTIONS::compareSchematicWithHistory": { id: "compareSchematicWithHistory", label: "Compare Schematic with Local History...", tip: "Diff the current schematic against the most recent local-history snapshot", icon: "library", key: null, name: "eeschema.InspectionTool.CompareSchematicWithHistory" }, "SCH_ACTIONS::showBusSyntaxHelp": { id: "showBusSyntaxHelp", label: "Show Bus Syntax Help", tip: null, icon: "bus_definition_tool", key: null, name: "eeschema.InspectionTool.showBusSyntaxHelp" }, "SCH_ACTIONS::showSimulator": { id: "showSimulator", label: "Simulator", tip: "Show simulation window for running SPICE or IBIS simulations.", icon: "simulator", key: null, name: "eeschema.EditorControl.showSimulator" }, "SCH_ACTIONS::pointEditorAddCorner": { id: "pointEditorAddCorner", label: "Create Corner", tip: null, icon: "add_corner", key: null, name: "eeschema.PointEditor.addCorner" }, "SCH_ACTIONS::pointEditorRemoveCorner": { id: "pointEditorRemoveCorner", label: "Remove Corner", tip: null, icon: "delete_cursor", key: null, name: "eeschema.PointEditor.removeCorner" }, "SCH_ACTIONS::selectNode": { id: "selectNode", label: "Select Node", tip: "Select a connection item under the cursor", icon: null, key: "Alt+3", name: "eeschema.InteractiveSelection.SelectNode" }, "SCH_ACTIONS::selectConnection": { id: "selectConnection", label: "Select/Expand Connection", tip: "Selects a connection or expands an existing selection to pins, symbols, or entire connections", icon: "net_highlight_schematic", key: "Ctrl+4", name: "eeschema.InteractiveSelection.SelectConnection" }, "SCH_ACTIONS::showDesignBlockPanel": { id: "showDesignBlockPanel", label: "Design Blocks", tip: "Show/hide design blocks library", icon: "search_tree", key: null, name: "eeschema.SchDesignBlockControl.showDesignBlockPanel" }, "SCH_ACTIONS::showRemoteSymbolPanel": { id: "showRemoteSymbolPanel", label: "Remote Symbols", tip: "Show/hide the remote symbol panel", icon: "library_browser", key: null, name: "eeschema.RemoteSymbols.showPanel" }, "SCH_ACTIONS::saveSheetAsDesignBlock": { id: "saveSheetAsDesignBlock", label: "Save Current Sheet as Design Block...", tip: "Create a new design block from the current sheet", icon: "new_component", key: null, name: "eeschema.SchDesignBlockControl.saveSheetAsDesignBlock" }, "SCH_ACTIONS::saveSelectionAsDesignBlock": { id: "saveSelectionAsDesignBlock", label: "Save Selection as Design Block...", tip: "Create a new design block from the current selection", icon: "new_component", key: null, name: "eeschema.SchDesignBlockControl.saveSelectionAsDesignBlock" }, "SCH_ACTIONS::updateDesignBlockFromSheet": { id: "updateDesignBlockFromSheet", label: "Update Design Block from Current Sheet", tip: "Set design block schematic to current sheet", icon: "save", key: null, name: "eeschema.SchDesignBlockControl.updateDesignBlockFromSheet" }, "SCH_ACTIONS::updateDesignBlockFromSelection": { id: "updateDesignBlockFromSelection", label: "Update Design Block from Selection", tip: "Set design block schematic to current selection", icon: "save", key: null, name: "eeschema.SchDesignBlockControl.updateDesignBlockFromSelection" }, "SCH_ACTIONS::deleteDesignBlock": { id: "deleteDesignBlock", label: "Delete Design Block", tip: "Remove the selected design block from its library", icon: "trash", key: null, name: "eeschema.SchDesignBlockControl.deleteDesignBlock" }, "SCH_ACTIONS::editDesignBlockProperties": { id: "editDesignBlockProperties", label: "Properties...", tip: "Edit properties of design block", icon: "edit", key: null, name: "eeschema.SchDesignBlockControl.editDesignBlockProperties" }, "SCH_ACTIONS::saveLibraryAs": { id: "saveLibraryAs", label: "Save Library As...", tip: "Save the current library to a new file", icon: null, key: "Ctrl+Shift+S", name: "eeschema.SymbolLibraryControl.saveLibraryAs" }, "SCH_ACTIONS::saveLibraryAsPacked": { id: "saveLibraryAsPacked", label: "Save Library As Packed...", tip: "Save the current unpacked library to a new packed library file", icon: null, key: null, name: "eeschema.SymbolLibraryControl.saveLibraryAsPacked" }, "SCH_ACTIONS::saveLibraryAsUnpacked": { id: "saveLibraryAsUnpacked", label: "Save Library As Unpacked...", tip: "Save the current packed library to a new unpacked library folder", icon: null, key: null, name: "eeschema.SymbolLibraryControl.saveLibraryAsUnpacked" }, "SCH_ACTIONS::compareLibraryWithFile": { id: "compareLibraryWithFile", label: "Compare Library with File...", tip: "Diff the current symbol library against another .kicad_sym file", icon: "library", key: null, name: "eeschema.SymbolLibraryControl.CompareLibraryWithFile" }, "SCH_ACTIONS::newSymbol": { id: "newSymbol", label: "New Symbol...", tip: "Create a new symbol in an existing library", icon: "new_component", key: "Ctrl+N", name: "eeschema.SymbolLibraryControl.newSymbol" }, "SCH_ACTIONS::deriveFromExistingSymbol": { id: "deriveFromExistingSymbol", label: "Derive from Existing Symbol...", tip: "Create a new symbol, derived from an existing symbol", icon: "new_component", key: null, name: "eeschema.SymbolLibraryControl.deriveFromExistingSymbol" }, "SCH_ACTIONS::editSymbol": { id: "editSymbol", label: "Edit Symbol", tip: "Show selected symbol on editor canvas", icon: "edit", key: null, name: "eeschema.SymbolLibraryControl.editSymbol" }, "SCH_ACTIONS::duplicateSymbol": { id: "duplicateSymbol", label: "Duplicate Symbol", tip: null, icon: "duplicate", key: null, name: "eeschema.SymbolLibraryControl.duplicateSymbol" }, "SCH_ACTIONS::renameSymbol": { id: "renameSymbol", label: "Rename Symbol...", tip: null, icon: "edit", key: null, name: "eeschema.SymbolLibraryControl.renameFootprint" }, "SCH_ACTIONS::saveSymbolAs": { id: "saveSymbolAs", label: "Save As...", tip: "Save the current symbol to a different library or name", icon: "save_as", key: null, name: "eeschema.SymbolLibraryControl.saveSymbolAs" }, "SCH_ACTIONS::saveSymbolCopyAs": { id: "saveSymbolCopyAs", label: "Save Copy As...", tip: "Save a copy of the current symbol to a different library or name", icon: "save_as", key: null, name: "eeschema.SymbolLibraryControl.saveSymbolCopyAs" }, "SCH_ACTIONS::deleteSymbol": { id: "deleteSymbol", label: "Delete Symbol", tip: "Remove the selected symbol from its library", icon: "trash", key: null, name: "eeschema.SymbolLibraryControl.deleteSymbol" }, "SCH_ACTIONS::cutSymbol": { id: "cutSymbol", label: "Cut", tip: null, icon: "cut", key: null, name: "eeschema.SymbolLibraryControl.cutSymbol" }, "SCH_ACTIONS::copySymbol": { id: "copySymbol", label: "Copy", tip: null, icon: "copy", key: null, name: "eeschema.SymbolLibraryControl.copySymbol" }, "SCH_ACTIONS::pasteSymbol": { id: "pasteSymbol", label: "Paste Symbol", tip: null, icon: "paste", key: null, name: "eeschema.SymbolLibraryControl.pasteSymbol" }, "SCH_ACTIONS::importSymbol": { id: "importSymbol", label: "Import Symbol...", tip: "Import a symbol to the current library", icon: "import_part", key: null, name: "eeschema.SymbolLibraryControl.importSymbol" }, "SCH_ACTIONS::exportSymbol": { id: "exportSymbol", label: "Export...", tip: "Export a symbol to a new library file", icon: "export_part", key: null, name: "eeschema.SymbolLibraryControl.exportSymbol" }, "SCH_ACTIONS::updateSymbolFields": { id: "updateSymbolFields", label: "Update Symbol Fields...", tip: "Update symbol to match changes made in parent symbol", icon: "refresh", key: null, name: "eeschema.SymbolLibraryControl.updateSymbolFields" }, "SCH_ACTIONS::flattenSymbol": { id: "flattenSymbol", label: "Flatten Symbol", tip: "Remove inheritance from symbol", icon: null, key: null, name: "eeschema.SymbolLibraryControl.flattenSymbol" }, "SCH_ACTIONS::nextSymbolTab": { id: "nextSymbolTab", label: "Next Symbol Tab", tip: "Switch to the next open symbol tab", icon: null, key: null, name: "eeschema.SymbolLibraryControl.nextSymbolTab" }, "SCH_ACTIONS::prevSymbolTab": { id: "prevSymbolTab", label: "Previous Symbol Tab", tip: "Switch to the previous open symbol tab", icon: null, key: null, name: "eeschema.SymbolLibraryControl.prevSymbolTab" }, "SCH_ACTIONS::closeSymbolTab": { id: "closeSymbolTab", label: "Close Symbol Tab", tip: "Close the active symbol tab", icon: null, key: null, name: "eeschema.SymbolLibraryControl.closeSymbolTab" }, "SCH_ACTIONS::showLibFieldsTable": { id: "showLibFieldsTable", label: "Bulk Edit Symbol Fields...", tip: "Edit a table of fields from all symbols in the library", icon: "table", key: null, name: "eeschema.SymbolLibraryControl.showLibraryFieldsTable" }, "SCH_ACTIONS::showRelatedLibFieldsTable": { id: "showRelatedLibFieldsTable", label: "Bulk Edit Related Symbol Fields...", tip: "Edit a table of fields from all symbols related to the selected symbol", icon: "table", key: null, name: "eeschema.SymbolLibraryControl.showRelatedLibraryFieldsTable" }, "SCH_ACTIONS::addSymbolToSchematic": { id: "addSymbolToSchematic", label: "Add Symbol to Schematic", tip: "Add the current symbol to the schematic", icon: "add_symbol_to_schematic", key: null, name: "eeschema.SymbolLibraryControl.addSymbolToSchematic" }, "SCH_ACTIONS::showElectricalTypes": { id: "showElectricalTypes", label: "Show Pin Electrical Types", tip: "Annotate pins with their electrical types", icon: "pin_show_etype", key: null, name: "eeschema.SymbolLibraryControl.showElectricalTypes" }, "SCH_ACTIONS::showPinNumbers": { id: "showPinNumbers", label: "Show Pin Numbers", tip: "Annotate pins with their numbers", icon: "pin", key: null, name: "eeschema.SymbolLibraryControl.showPinNumbers" }, "SCH_ACTIONS::exportSymbolView": { id: "exportSymbolView", label: "Export View as PNG...", tip: "Create PNG file from the current view", icon: "export_png", key: null, name: "eeschema.SymbolLibraryControl.exportSymbolView" }, "SCH_ACTIONS::exportSymbolAsSVG": { id: "exportSymbolAsSVG", label: "Export Symbol as SVG...", tip: "Create SVG file from the current symbol", icon: "export_svg", key: null, name: "eeschema.SymbolLibraryControl.exportSymbolAsSVG" }, "SCH_ACTIONS::toggleSyncedPinsMode": { id: "toggleSyncedPinsMode", label: "Synchronized Pins Mode", tip: "Synchronized Pins Mode\\nWhen enabled propagates all changes (except pin numbers) to other units.\\nEnabled by default for multiunit parts with interchangeable units.", icon: "pin2pin", key: null, name: "eeschema.SymbolLibraryControl.toggleSyncedPinsMode" }, "SCH_ACTIONS::showHiddenPins": { id: "showHiddenPins", label: "Show Hidden Pins", tip: null, icon: "hidden_pin", key: null, name: "eeschema.SymbolLibraryControl.showHiddenPins" }, "SCH_ACTIONS::showHiddenFields": { id: "showHiddenFields", label: "Show Hidden Fields", tip: null, icon: "text_sketch", key: null, name: "eeschema.SymbolLibraryControl.showHiddenFields" }, "SCH_ACTIONS::previousSymbol": { id: "previousSymbol", label: "Display previous symbol", tip: null, icon: "lib_previous", key: null, name: "eeschema.SymbolLibraryControl.previousSymbol" }, "SCH_ACTIONS::nextSymbol": { id: "nextSymbol", label: "Display next symbol", tip: null, icon: "lib_next", key: null, name: "eeschema.SymbolLibraryControl.nextSymbol" }, "SCH_ACTIONS::placeSymbolPin": { id: "placeSymbolPin", label: "Draw Pins", tip: null, icon: "pin", key: "P", name: "eeschema.SymbolDrawing.placeSymbolPin" }, "SCH_ACTIONS::placeSymbolText": { id: "placeSymbolText", label: "Draw Text", tip: null, icon: "text", key: null, name: "eeschema.SymbolDrawing.placeSymbolText" }, "SCH_ACTIONS::drawSymbolTextBox": { id: "drawSymbolTextBox", label: "Draw Text Boxes", tip: null, icon: "add_textbox", key: null, name: "eeschema.SymbolDrawing.drawSymbolTextBox" }, "SCH_ACTIONS::drawSymbolLines": { id: "drawSymbolLines", label: "Draw Lines", tip: "Draw connected graphic lines", icon: "add_graphical_segments", key: null, name: "eeschema.SymbolDrawing.drawSymbolLines" }, "SCH_ACTIONS::drawSymbolPolygon": { id: "drawSymbolPolygon", label: "Draw Polygons", tip: null, icon: "add_graphical_polygon", key: null, name: "eeschema.SymbolDrawing.drawSymbolPolygon" }, "SCH_ACTIONS::placeSymbolAnchor": { id: "placeSymbolAnchor", label: "Move Symbol Anchor", tip: null, icon: "anchor", key: null, name: "eeschema.SymbolDrawing.placeSymbolAnchor" }, "SCH_ACTIONS::pushPinLength": { id: "pushPinLength", label: "Push Pin Length", tip: "Copy pin length to other pins in symbol", icon: "pin_size_to", key: null, name: "eeschema.PinEditing.pushPinLength" }, "SCH_ACTIONS::pushPinNameSize": { id: "pushPinNameSize", label: "Push Pin Name Size", tip: "Copy pin name size to other pins in symbol", icon: "pin_size_to", key: null, name: "eeschema.PinEditing.pushPinNameSize" }, "SCH_ACTIONS::pushPinNumSize": { id: "pushPinNumSize", label: "Push Pin Number Size", tip: "Copy pin number size to other pins in symbol", icon: "pin_size_to", key: null, name: "eeschema.PinEditing.pushPinNumSize" }, "SCH_ACTIONS::placeSymbol": { id: "placeSymbol", label: "Place Symbols", tip: null, icon: "add_component", key: "A", name: "eeschema.InteractiveDrawing.placeSymbol" }, "SCH_ACTIONS::placeNextSymbolUnit": { id: "placeNextSymbolUnit", label: "Place Next Symbol Unit", tip: "Place the next unit of the current symbol that is missing from the schematic", icon: null, key: null, name: "eeschema.InteractiveDrawing.placeNextSymbolUnit" }, "SCH_ACTIONS::placePower": { id: "placePower", label: "Place Power Symbols", tip: null, icon: "add_power", key: "P", name: "eeschema.InteractiveDrawing.placePowerSymbol" }, "SCH_ACTIONS::placeDesignBlock": { id: "placeDesignBlock", label: "Place Design Block", tip: "Add selected design block to current sheet", icon: "add_component", key: "Shift+B", name: "eeschema.InteractiveDrawing.placeDesignBlock" }, "SCH_ACTIONS::placeLinkedDesignBlock": { id: "placeLinkedDesignBlock", label: "Place Linked Design Block", tip: "Place design block linked to selected group", icon: "add_component", key: null, name: "eeschema.InteractiveDrawing.placeLinkedDesignBlock" }, "SCH_ACTIONS::saveToLinkedDesignBlock": { id: "saveToLinkedDesignBlock", label: "Save to Linked Design Block", tip: "Save selected group to linked design block", icon: "add_component", key: null, name: "eeschema.InteractiveDrawing.saveToLinkedDesignBlock" }, "SCH_ACTIONS::placeNoConnect": { id: "placeNoConnect", label: "Place/Remove No Connect Flags", tip: null, icon: "noconn", key: "Q", name: "eeschema.InteractiveDrawing.placeNoConnect" }, "SCH_ACTIONS::placeJunction": { id: "placeJunction", label: "Place Junctions", tip: null, icon: "add_junction", key: "J", name: "eeschema.InteractiveDrawing.placeJunction" }, "SCH_ACTIONS::placeBusWireEntry": { id: "placeBusWireEntry", label: "Place Wire to Bus Entries", tip: null, icon: "add_line2bus", key: "Z", name: "eeschema.InteractiveDrawing.placeBusWireEntry" }, "SCH_ACTIONS::placeLabel": { id: "placeLabel", label: "Place Net Labels", tip: null, icon: "add_label", key: "L", name: "eeschema.InteractiveDrawing.placeLabel" }, "SCH_ACTIONS::placeClassLabel": { id: "placeClassLabel", label: "Place Directive Labels", tip: null, icon: "add_class_flag", key: null, name: "eeschema.InteractiveDrawing.placeClassLabel" }, "SCH_ACTIONS::placeHierLabel": { id: "placeHierLabel", label: "Place Hierarchical Labels", tip: null, icon: "add_hierarchical_label", key: "H", name: "eeschema.InteractiveDrawing.placeHierarchicalLabel" }, "SCH_ACTIONS::drawSheet": { id: "drawSheet", label: "Draw Hierarchical Sheets", tip: null, icon: "add_hierarchical_subsheet", key: "S", name: "eeschema.InteractiveDrawing.drawSheet" }, "SCH_ACTIONS::drawSheetFromFile": { id: "drawSheetFromFile", label: "Draw Sheet from File", tip: "Copy sheet into project and draw on current sheet", icon: "add_hierarchical_subsheet", key: null, name: "eeschema.InteractiveDrawing.drawSheetFromFile" }, "SCH_ACTIONS::drawSheetFromDesignBlock": { id: "drawSheetFromDesignBlock", label: "Draw Sheet from Design Block", tip: "Copy design block into project as a sheet on current sheet", icon: "add_hierarchical_subsheet", key: null, name: "eeschema.InteractiveDrawing.drawSheetFromDesignBlock" }, "SCH_ACTIONS::placeSheetPin": { id: "placeSheetPin", label: "Place Pins from Sheet", tip: "Add sheet pins from existing hierarchical labels found on that sheet", icon: "add_hierar_pin", key: null, name: "eeschema.InteractiveDrawing.placeSheetPin" }, "SCH_ACTIONS::autoplaceAllSheetPins": { id: "autoplaceAllSheetPins", label: "Autoplace All Sheet Pins", tip: "Imports and auto places all sheet pins", icon: null, key: null, name: "eeschema.InteractiveDrawing.autoplaceAllSheetPins" }, "SCH_ACTIONS::syncSheetPins": { id: "syncSheetPins", label: "Sync Selected Sheet Pins...", tip: "Synchronize selected sheet pins and hierarchical labels", icon: "import_hierarchical_label", key: null, name: "eeschema.InteractiveDrawing.syncSheetPins" }, "SCH_ACTIONS::syncAllSheetsPins": { id: "syncAllSheetsPins", label: "Sync All Sheet Pins...", tip: "Synchronize all sheet pins and hierarchical labels", icon: "import_hierarchical_label", key: null, name: "eeschema.InteractiveDrawing.syncAllSheetsPins" }, "SCH_ACTIONS::importSheet": { id: "importSheet", label: "Import Sheet...", tip: "Import sheet into project", icon: "add_hierarchical_subsheet", key: null, name: "eeschema.InteractiveDrawing.importSheet" }, "SCH_ACTIONS::placeGlobalLabel": { id: "placeGlobalLabel", label: "Place Global Labels", tip: null, icon: "add_glabel", key: "Ctrl+L", name: "eeschema.InteractiveDrawing.placeGlobalLabel" }, "SCH_ACTIONS::placeSchematicText": { id: "placeSchematicText", label: "Draw Text", tip: null, icon: "text", key: "T", name: "eeschema.InteractiveDrawing.placeSchematicText" }, "SCH_ACTIONS::drawTextBox": { id: "drawTextBox", label: "Draw Text Boxes", tip: null, icon: "add_textbox", key: null, name: "eeschema.InteractiveDrawing.drawTextBox" }, "SCH_ACTIONS::drawTable": { id: "drawTable", label: "Draw Tables", tip: null, icon: "table", key: null, name: "eeschema.InteractiveDrawing.drawTable" }, "SCH_ACTIONS::drawRectangle": { id: "drawRectangle", label: "Draw Rectangles", tip: null, icon: "add_rectangle", key: null, name: "eeschema.InteractiveDrawing.drawRectangle" }, "SCH_ACTIONS::drawCircle": { id: "drawCircle", label: "Draw Circles", tip: null, icon: "add_circle", key: null, name: "eeschema.InteractiveDrawing.drawCircle" }, "SCH_ACTIONS::drawEllipse": { id: "drawEllipse", label: "Draw Ellipses", tip: null, icon: "add_ellipse", key: null, name: "eeschema.InteractiveDrawing.drawEllipse" }, "SCH_ACTIONS::drawEllipseArc": { id: "drawEllipseArc", label: "Draw Elliptical Arcs", tip: null, icon: "add_ellipse_arc", key: null, name: "eeschema.InteractiveDrawing.drawEllipseArc" }, "SCH_ACTIONS::drawArc": { id: "drawArc", label: "Draw Arcs", tip: null, icon: "add_arc", key: null, name: "eeschema.InteractiveDrawing.drawArc" }, "SCH_ACTIONS::drawArcCenter": { id: "drawArcCenter", label: "Draw Arc: Center, Start, End", tip: "Draw arcs by clicking the center, the start point, then the end point", icon: "add_arc_center", key: null, name: "eeschema.InteractiveDrawing.drawArcCenter" }, "SCH_ACTIONS::drawArcStartEndMid": { id: "drawArcStartEndMid", label: "Draw Arc: Start, End, Midpoint", tip: "Draw arcs by clicking the start point, the end point, then a point on the arc", icon: "add_arc_start_end_mid", key: null, name: "eeschema.InteractiveDrawing.drawArcStartEndMid" }, "SCH_ACTIONS::drawArcStartEndCenter": { id: "drawArcStartEndCenter", label: "Draw Arc: Start, End, Center", tip: "Draw arcs by clicking the start point, the end point, then the center", icon: "add_arc_start_end_center", key: null, name: "eeschema.InteractiveDrawing.drawArcStartEndCenter" }, "SCH_ACTIONS::drawArcTangent": { id: "drawArcTangent", label: "Draw Arc: Tangent", tip: "Draw arcs tangent to the previous arc or to the line or arc ending at the start point", icon: "add_arc_tangent", key: null, name: "eeschema.InteractiveDrawing.drawArcTangent" }, "SCH_ACTIONS::drawArcStartDirEnd": { id: "drawArcStartDirEnd", label: "Draw Arc: Start, Direction, End", tip: "Draw arcs by clicking the start point, a point giving the start direction, then the end point", icon: "add_arc_start_dir_end", key: null, name: "eeschema.InteractiveDrawing.drawArcStartDirEnd" }, "SCH_ACTIONS::drawBezier": { id: "drawBezier", label: "Draw Bezier Curve", tip: null, icon: "add_bezier", key: null, name: "eeschema.InteractiveDrawing.drawBezier" }, "SCH_ACTIONS::drawPolygon": { id: "drawPolygon", label: "Draw Polygons", tip: null, icon: "add_graphical_polygon", key: null, name: "eeschema.InteractiveDrawing.drawPolygon" }, "SCH_ACTIONS::placeImage": { id: "placeImage", label: "Place Images", tip: null, icon: "image", key: null, name: "eeschema.InteractiveDrawing.placeImage" }, "SCH_ACTIONS::convertImageToOutlines": { id: "convertImageToOutlines", label: "Convert to Outlines...", tip: "Trace the image into schematic graphics", icon: "image", key: null, name: "eeschema.InteractiveDrawing.convertImageToOutlines" }, "SCH_ACTIONS::drawRuleArea": { id: "drawRuleArea", label: "Draw Rule Areas", tip: null, icon: "add_keepout_area", key: null, name: "eeschema.InteractiveDrawing.drawRuleArea" }, "SCH_ACTIONS::closeOutline": { id: "closeOutline", label: "Close Outline", tip: "Close the in-progress outline", icon: "checked_ok", key: null, name: "eeschema.InteractiveDrawing.closeOutline" }, "SCH_ACTIONS::repeatDrawItem": { id: "repeatDrawItem", label: "Repeat Last Item", tip: "Duplicates the last drawn item", icon: null, key: "Ins", name: "eeschema.InteractiveEdit.repeatDrawItem", mac: "F1" }, "SCH_ACTIONS::rotateCW": { id: "rotateCW", label: "Rotate Clockwise", tip: null, icon: "rotate_cw", key: "Shift+R", name: "eeschema.InteractiveEdit.rotateCW" }, "SCH_ACTIONS::rotateCCW": { id: "rotateCCW", label: "Rotate Counterclockwise", tip: null, icon: "rotate_ccw", key: "R", name: "eeschema.InteractiveEdit.rotateCCW" }, "SCH_ACTIONS::mirrorV": { id: "mirrorV", label: "Mirror Vertically", tip: "Flips selected item(s) from top to bottom", icon: "mirror_v", key: "Y", name: "eeschema.InteractiveEdit.mirrorV" }, "SCH_ACTIONS::mirrorH": { id: "mirrorH", label: "Mirror Horizontally", tip: "Flips selected item(s) from left to right", icon: "mirror_h", key: "X", name: "eeschema.InteractiveEdit.mirrorH" }, "SCH_ACTIONS::swap": { id: "swap", label: "Swap", tip: "Swap positions of selected items", icon: "swap", key: "Alt+S", name: "eeschema.InteractiveEdit.swap" }, "SCH_ACTIONS::swapPins": { id: "swapPins", label: "Swap Pins", tip: "Swap the selected symbol pins' positions", icon: "swap", key: null, name: "eeschema.InteractiveEdit.swapPins" }, "SCH_ACTIONS::swapPinLabels": { id: "swapPinLabels", label: "Swap Pin Labels", tip: "Swap the labels attached to selected pins", icon: "swap", key: null, name: "eeschema.InteractiveEdit.swapPinLabels" }, "SCH_ACTIONS::swapUnitLabels": { id: "swapUnitLabels", label: "Swap Unit Labels", tip: "Swap labels between selected units", icon: "swap", key: null, name: "eeschema.InteractiveEdit.swapUnitLabels" }, "SCH_ACTIONS::toggleLock": { id: "toggleLock", label: "Toggle Lock", tip: "Lock or unlock selected items", icon: "lock_unlock", key: null, name: "eeschema.InteractiveEdit.toggleLock" }, "SCH_ACTIONS::lock": { id: "lock", label: "Lock", tip: "Prevent items from being moved and/or resized on the canvas", icon: "locked", key: null, name: "eeschema.InteractiveEdit.lock" }, "SCH_ACTIONS::unlock": { id: "unlock", label: "Unlock", tip: "Allow items to be moved and/or resized on the canvas", icon: "unlocked", key: null, name: "eeschema.InteractiveEdit.unlock" }, "SCH_ACTIONS::properties": { id: "properties", label: "Properties...", tip: null, icon: "edit", key: "E", name: "eeschema.InteractiveEdit.properties" }, "SCH_ACTIONS::editReference": { id: "editReference", label: "Edit Reference Designator...", tip: null, icon: "edit_comp_ref", key: "U", name: "eeschema.InteractiveEdit.editReference" }, "SCH_ACTIONS::editValue": { id: "editValue", label: "Edit Value...", tip: null, icon: "edit_comp_value", key: "V", name: "eeschema.InteractiveEdit.editValue" }, "SCH_ACTIONS::editFootprint": { id: "editFootprint", label: "Edit Footprint...", tip: null, icon: "edit_comp_footprint", key: "F", name: "eeschema.InteractiveEdit.editFootprint" }, "SCH_ACTIONS::autoplaceFields": { id: "autoplaceFields", label: "Autoplace Fields", tip: "Runs the automatic placement algorithm on the symbol's (or sheet's) fields", icon: "autoplace_fields", key: "O", name: "eeschema.InteractiveEdit.autoplaceFields" }, "SCH_ACTIONS::changeSymbols": { id: "changeSymbols", label: "Change Symbols...", tip: "Assign different symbols from the library", icon: "exchange", key: null, name: "eeschema.InteractiveEdit.changeSymbols" }, "SCH_ACTIONS::updateSymbols": { id: "updateSymbols", label: "Update Symbols from Library...", tip: "Update symbols to include any changes from the library", icon: "refresh", key: null, name: "eeschema.InteractiveEdit.updateSymbols" }, "SCH_ACTIONS::changeSymbol": { id: "changeSymbol", label: "Change Symbol...", tip: "Assign a different symbol from the library", icon: "exchange", key: null, name: "eeschema.InteractiveEdit.changeSymbol" }, "SCH_ACTIONS::updateSymbol": { id: "updateSymbol", label: "Update Symbol...", tip: "Update symbol to include any changes from the library", icon: "refresh", key: null, name: "eeschema.InteractiveEdit.updateSymbol" }, "SCH_ACTIONS::setVariantSymbol": { id: "setVariantSymbol", label: "Set Variant Symbol...", tip: "Assign an alternate library symbol for this design variant", icon: "exchange", key: null, name: "eeschema.InteractiveEdit.setVariantSymbol" }, "SCH_ACTIONS::clearVariantSymbol": { id: "clearVariantSymbol", label: "Clear Variant Symbol", tip: "Remove the variant symbol override and revert to the base symbol", icon: "cancel", key: null, name: "eeschema.InteractiveEdit.clearVariantSymbol" }, "SCH_ACTIONS::assignNetclass": { id: "assignNetclass", label: "Assign Netclass...", tip: "Assign a netclass to nets matching a pattern", icon: "netlist", key: null, name: "eeschema.InteractiveEdit.assignNetclass" }, "SCH_ACTIONS::findNetInInspector": { id: "findNetInInspector", label: "Find in Net Navigator", tip: "Locate the selected net in the net navigator", icon: null, key: null, name: "eeschema.InteractiveEdit.findNetInInspector" }, "SCH_ACTIONS::cycleBodyStyle": { id: "cycleBodyStyle", label: "Cycle Body Style", tip: "Switch between De Morgan (or other) representations", icon: "morgan2", key: null, name: "eeschema.InteractiveEdit.toggleDeMorgan" }, "SCH_ACTIONS::toLabel": { id: "toLabel", label: "Change to Label", tip: "Change existing item to a label", icon: "add_line_label", key: null, name: "eeschema.InteractiveEdit.toLabel" }, "SCH_ACTIONS::toDLabel": { id: "toDLabel", label: "Change to Directive Label", tip: "Change existing item to a directive label", icon: "add_class_flag", key: null, name: "eeschema.InteractiveEdit.toCLabel" }, "SCH_ACTIONS::toHLabel": { id: "toHLabel", label: "Change to Hierarchical Label", tip: "Change existing item to a hierarchical label", icon: "add_hierarchical_label", key: null, name: "eeschema.InteractiveEdit.toHLabel" }, "SCH_ACTIONS::toGLabel": { id: "toGLabel", label: "Change to Global Label", tip: "Change existing item to a global label", icon: "add_glabel", key: null, name: "eeschema.InteractiveEdit.toGLabel" }, "SCH_ACTIONS::toText": { id: "toText", label: "Change to Text", tip: "Change existing item to a text comment", icon: "text", key: null, name: "eeschema.InteractiveEdit.toText" }, "SCH_ACTIONS::toTextBox": { id: "toTextBox", label: "Change to Text Box", tip: "Change existing item to a text box", icon: "add_textbox", key: null, name: "eeschema.InteractiveEdit.toTextBox" }, "SCH_ACTIONS::cleanupSheetPins": { id: "cleanupSheetPins", label: "Cleanup Sheet Pins", tip: "Delete unreferenced sheet pins", icon: null, key: null, name: "eeschema.InteractiveEdit.cleanupSheetPins" }, "SCH_ACTIONS::editTextAndGraphics": { id: "editTextAndGraphics", label: "Edit Text & Graphics Properties...", tip: "Edit text and graphics properties globally across schematic", icon: "text", key: null, name: "eeschema.InteractiveEdit.editTextAndGraphics" }, "SCH_ACTIONS::symbolProperties": { id: "symbolProperties", label: "Symbol Properties...", tip: null, icon: "part_properties", key: null, name: "eeschema.InteractiveEdit.symbolProperties" }, "SCH_ACTIONS::editSymbolPinMaps": { id: "editSymbolPinMaps", label: "Symbol Pin Maps...", tip: "Edit the symbol's pin-to-pad maps and associated footprints", icon: "pin_table", key: null, name: "eeschema.InteractiveEdit.editSymbolPinMaps" }, "SCH_ACTIONS::pinTable": { id: "pinTable", label: "Pin Table...", tip: "Displays pin table for bulk editing of pins", icon: "pin_table", key: null, name: "eeschema.InteractiveEdit.pinTable" }, "SCH_ACTIONS::convertStackedPins": { id: "convertStackedPins", label: "Convert Stacked Pins", tip: "Convert multiple pins at the same location to a single pin with stacked notation", icon: "pin", key: null, name: "eeschema.InteractiveEdit.convertStackedPins" }, "SCH_ACTIONS::explodeStackedPin": { id: "explodeStackedPin", label: "Explode Stacked Pin", tip: "Convert a pin with stacked notation to multiple individual pins", icon: "pin", key: null, name: "eeschema.InteractiveEdit.explodeStackedPin" }, "SCH_ACTIONS::breakWire": { id: "breakWire", label: "Break", tip: "Divide into connected segments", icon: "break_line", key: null, name: "eeschema.InteractiveEdit.breakWire" }, "SCH_ACTIONS::slice": { id: "slice", label: "Slice", tip: "Divide into unconnected segments", icon: "slice_line", key: null, name: "eeschema.InteractiveEdit.slice" }, "SCH_ACTIONS::highlightNet": { id: "highlightNet", label: "Highlight Net", tip: "Highlight net under cursor", icon: "net_highlight_schematic", key: "`", name: "eeschema.EditorControl.highlightNet" }, "SCH_ACTIONS::clearHighlight": { id: "clearHighlight", label: "Clear Net Highlighting", tip: "Clear any existing net highlighting", icon: null, key: "~", name: "eeschema.EditorControl.clearHighlight" }, "SCH_ACTIONS::highlightNetTool": { id: "highlightNetTool", label: "Highlight Nets", tip: "Highlight wires and pins of a net", icon: "net_highlight_schematic", key: null, name: "eeschema.EditorControl.highlightNetTool" }, "SCH_ACTIONS::highlightNetChain": { id: "highlightNetChain", label: "Highlight Net Chain", tip: "Highlight the net chain under the cursor", icon: "net_highlight_schematic", key: null, name: "eeschema.EditorControl.highlightNetChain" }, "SCH_ACTIONS::removeFromNetChain": { id: "removeFromNetChain", label: "Remove from Net Chain", tip: "Remove the selected net from its net chain by disabling propagation on the bridging component(s)", icon: null, key: null, name: "eeschema.EditorControl.removeFromNetChain" }, "SCH_ACTIONS::replaceTerminalPin": { id: "replaceTerminalPin", label: "Replace Terminal Pin", tip: null, icon: null, key: null, name: "eeschema.EditorControl.replaceTerminalPin" }, "SCH_ACTIONS::nameNetChain": { id: "nameNetChain", label: "Name Net Chain", tip: "Assign a name to the net chain", icon: null, key: null, name: "eeschema.EditorControl.nameNetChain" }, "SCH_ACTIONS::createNetChainBetweenPins": { id: "createNetChainBetweenPins", label: "Create Net Chain Between Pins", tip: "Create a new net chain connecting the two selected pins", icon: null, key: null, name: "eeschema.EditorControl.createNetChainBetweenPins" }, "SCH_ACTIONS::createNetChain": { id: "createNetChain", label: "Create Net Chain...", tip: "Detect net chain paths through passives and create a named net chain", icon: null, key: null, name: "eeschema.EditorControl.createNetChain" }, "SCH_ACTIONS::showNetNavigator": { id: "showNetNavigator", label: "Net Navigator", tip: "Show/hide the net navigator", icon: null, key: null, name: "eeschema.EditorControl.showNetNavigator" }, "SCH_ACTIONS::editWithLibEdit": { id: "editWithLibEdit", label: "Edit with Symbol Editor", tip: "Open the selected symbol in the Symbol Editor", icon: "libedit", key: "Ctrl+E", name: "eeschema.EditorControl.editWithSymbolEditor" }, "SCH_ACTIONS::setExcludeFromBOM": { id: "setExcludeFromBOM", label: "Exclude from Bill of Materials", tip: "Set the exclude from bill of materials attribute", icon: null, key: null, name: "eeschema.EditorControl.setExcludeFromBOM" }, "SCH_ACTIONS::setExcludeFromSim": { id: "setExcludeFromSim", label: "Exclude from Simulation", tip: "Set the exclude from simulation attribute", icon: null, key: null, name: "eeschema.EditorControl.setExcludeFromSimulation" }, "SCH_ACTIONS::setExcludeFromBoard": { id: "setExcludeFromBoard", label: "Exclude from Board", tip: "Set the exclude from board attribute", icon: null, key: null, name: "eeschema.EditorControl.setExcludeFromBoard" }, "SCH_ACTIONS::setExcludeFromPosFiles": { id: "setExcludeFromPosFiles", label: "Exclude from Position Files", tip: "Set the exclude from position files attribute", icon: null, key: null, name: "eeschema.EditorControl.setExcludeFromPosFiles" }, "SCH_ACTIONS::setDNP": { id: "setDNP", label: "Do not Populate", tip: "Set the do not populate attribute", icon: null, key: null, name: "eeschema.EditorControl.setDNP" }, "SCH_ACTIONS::editLibSymbolWithLibEdit": { id: "editLibSymbolWithLibEdit", label: "Edit Library Symbol...", tip: "Open the library symbol in the Symbol Editor", icon: "libedit", key: "Ctrl+Shift+E", name: "eeschema.EditorControl.editLibSymbolWithSymbolEditor" }, "SCH_ACTIONS::editSymbolFields": { id: "editSymbolFields", label: "Bulk Edit Symbol Fields...", tip: "Edit a table of fields from all symbols in the schematic", icon: "spreadsheet", key: null, name: "eeschema.EditorControl.editSymbolFields" }, "SCH_ACTIONS::editSymbolLibraryLinks": { id: "editSymbolLibraryLinks", label: "Bulk Edit Symbol Library Links...", tip: "Edit a table of links between schematic and library symbols", icon: "link", key: null, name: "eeschema.EditorControl.editSymbolLibraryLinks" }, "SCH_ACTIONS::assignFootprints": { id: "assignFootprints", label: "Assign Footprints...", tip: "Run footprint assignment tool", icon: "icon_cvpcb_24", key: null, name: "eeschema.EditorControl.assignFootprints" }, "SCH_ACTIONS::importFPAssignments": { id: "importFPAssignments", label: "Import Footprint Assignments...", tip: "Import symbol footprint assignments from .cmp file created by board editor", icon: "import_footprint_names", key: null, name: "eeschema.EditorControl.importFPAssignments" }, "SCH_ACTIONS::annotate": { id: "annotate", label: "Annotate Schematic...", tip: "Fill in schematic symbol reference designators", icon: "annotate", key: null, name: "eeschema.EditorControl.annotate" }, "SCH_ACTIONS::incrementAnnotations": { id: "incrementAnnotations", label: "Increment Annotations From...", tip: "Increment a subset of reference designators starting at a particular symbol", icon: "annotate_increment", key: null, name: "eeschema.EditorControl.incrementAnnotations" }, "SCH_ACTIONS::schematicSetup": { id: "schematicSetup", label: "Schematic Setup...", tip: "Edit schematic setup including annotation styles and electrical rules", icon: "options_schematic", key: null, name: "eeschema.EditorControl.schematicSetup" }, "SCH_ACTIONS::editPageNumber": { id: "editPageNumber", label: "Edit Sheet Page Number...", tip: "Edit the page number of the current or selected sheet", icon: null, key: null, name: "eeschema.EditorControl.editPageNumber" }, "SCH_ACTIONS::rescueSymbols": { id: "rescueSymbols", label: "Rescue Symbols...", tip: "Find old symbols in project and rename/rescue them", icon: "rescue", key: null, name: "eeschema.EditorControl.rescueSymbols" }, "SCH_ACTIONS::remapSymbols": { id: "remapSymbols", label: "Remap Legacy Library Symbols...", tip: "Remap library symbol references in legacy schematics to the symbol library table", icon: "rescue", key: null, name: "eeschema.EditorControl.remapSymbols" }, "SCH_ACTIONS::nextNetItem": { id: "nextNetItem", label: "Next Net Item", tip: "Select next item on the current net", icon: null, key: "Tab", name: "eeschema.EditorControl.nextNetItem" }, "SCH_ACTIONS::previousNetItem": { id: "previousNetItem", label: "Previous Net Item", tip: "Select previous item on the current net", icon: null, key: "Shift+Tab", name: "eeschema.EditorControl.previousNetItem" }, "SCH_ACTIONS::drawSheetOnClipboard": { id: "drawSheetOnClipboard", label: "Export Drawing to Clipboard", tip: "Export drawing of current sheet to clipboard", icon: "copy", key: null, name: "eeschema.EditorControl.drawSheetOnClipboard" }, "SCH_ACTIONS::importGraphics": { id: "importGraphics", label: "Import Graphics...", tip: "Import 2D drawing file", icon: "import_vector", key: "Ctrl+Shift+F", name: "eeschema.EditorControl.importGraphics" }, "SCH_ACTIONS::importNonKicadSchematic": { id: "importNonKicadSchematic", label: "Import Non-KiCad Schematic...", tip: "Replace current schematic sheet with one imported from another application", icon: "import_document", key: null, name: "eeschema.EditorControl.importNonKicadSchematic" }, "SCH_ACTIONS::showPcbNew": { id: "showPcbNew", label: "Switch to PCB Editor", tip: "Open PCB in board editor", icon: "icon_pcbnew_24", key: null, name: "eeschema.EditorControl.showPcbNew" }, "SCH_ACTIONS::exportNetlist": { id: "exportNetlist", label: "Export Netlist...", tip: "Export file containing netlist in one of several formats", icon: "netlist", key: null, name: "eeschema.EditorControl.exportNetlist" }, "SCH_ACTIONS::generateBOM": { id: "generateBOM", label: "Generate Bill of Materials...", tip: "Generate a bill of materials for the current schematic", icon: "post_bom", key: null, name: "eeschema.EditorControl.generateBOM" }, "SCH_ACTIONS::generateBOMLegacy": { id: "generateBOMLegacy", label: "Generate Legacy Bill of Materials...", tip: "Generate a bill of materials for the current schematic (Legacy Generator)", icon: "file_bom", key: null, name: "eeschema.EditorControl.generateBOMLegacy" }, "SCH_ACTIONS::generateBOMExternal": { id: "generateBOMExternal", label: "Generate Bill of Materials (External)...", tip: "Generate a bill of materials for the current schematic using external generator", icon: null, key: null, name: "eeschema.EditorControl.generateBOMExternal" }, "SCH_ACTIONS::exportSymbolsToLibrary": { id: "exportSymbolsToLibrary", label: "Export Symbols...", tip: "Add symbols from schematic to a new or an existing symbol library\\n(does not remove other symbols from this library)", icon: "library_archive", key: null, name: "eeschema.EditorControl.exportSymbolsToLibrary" }, "SCH_ACTIONS::selectOnPCB": { id: "selectOnPCB", label: "Select on PCB", tip: "Select corresponding items in PCB editor", icon: "select_same_sheet", key: null, name: "eeschema.EditorControl.selectOnPCB" }, "SCH_ACTIONS::toggleHiddenPins": { id: "toggleHiddenPins", label: "Show Hidden Pins", tip: null, icon: "hidden_pin", key: null, name: "eeschema.EditorControl.showHiddenPins" }, "SCH_ACTIONS::toggleHiddenFields": { id: "toggleHiddenFields", label: "Show Hidden Fields", tip: null, icon: null, key: null, name: "eeschema.EditorControl.showHiddenFields" }, "SCH_ACTIONS::toggleDirectiveLabels": { id: "toggleDirectiveLabels", label: "Show Directive Labels", tip: null, icon: null, key: null, name: "eeschema.EditorControl.showDirectiveLabels" }, "SCH_ACTIONS::toggleERCWarnings": { id: "toggleERCWarnings", label: "Show ERC Warnings", tip: "Show markers for electrical rules checker warnings", icon: null, key: null, name: "eeschema.EditorControl.showERCWarnings" }, "SCH_ACTIONS::toggleERCErrors": { id: "toggleERCErrors", label: "Show ERC Errors", tip: "Show markers for electrical rules checker errors", icon: null, key: null, name: "eeschema.EditorControl.showERCErrors" }, "SCH_ACTIONS::toggleERCExclusions": { id: "toggleERCExclusions", label: "Show ERC Exclusions", tip: "Show markers for excluded electrical rules checker violations", icon: null, key: null, name: "eeschema.EditorControl.showERCExclusions" }, "SCH_ACTIONS::markSimExclusions": { id: "markSimExclusions", label: "Mark items excluded from simulation", tip: "Draw 'X's over items which have been excluded from simulation", icon: null, key: null, name: "eeschema.EditorControl.markSimExclusions" }, "SCH_ACTIONS::toggleOPVoltages": { id: "toggleOPVoltages", label: "Show OP Voltages", tip: "Show operating point voltage data from simulation", icon: null, key: null, name: "eeschema.EditorControl.showOperatingPointVoltages" }, "SCH_ACTIONS::toggleOPCurrents": { id: "toggleOPCurrents", label: "Show OP Currents", tip: "Show operating point current data from simulation", icon: null, key: null, name: "eeschema.EditorControl.showOperatingPointCurrents" }, "SCH_ACTIONS::togglePinAltIcons": { id: "togglePinAltIcons", label: "Show Pin Alternate Icons", tip: "Show indicator icons for pins with alternate modes", icon: null, key: null, name: "eeschema.EditorControl.togglePinAltIcons" }, "SCH_ACTIONS::lineModeFree": { id: "lineModeFree", label: "Line Mode for Wires and Buses", tip: "Draw and drag at any angle", icon: "lines_any", key: null, name: "eeschema.EditorControl.lineModeFree" }, "SCH_ACTIONS::lineMode90": { id: "lineMode90", label: "Line Mode for Wires and Buses", tip: "Constrain drawing and dragging to horizontal or vertical motions", icon: "lines90", key: null, name: "eeschema.EditorControl.lineModeOrthonal" }, "SCH_ACTIONS::lineMode45": { id: "lineMode45", label: "Line Mode for Wires and Buses", tip: "Constrain drawing and dragging to horizontal, vertical, or 45-degree angle motions", icon: "hv45mode", key: null, name: "eeschema.EditorControl.lineMode45" }, "SCH_ACTIONS::lineModeNext": { id: "lineModeNext", label: "Line Mode for Wires and Buses", tip: "Switch to next angle snapping mode", icon: null, key: "Shift+Space", name: "eeschema.EditorControl.lineModeNext" }, "SCH_ACTIONS::toggleAnnotateAuto": { id: "toggleAnnotateAuto", label: "Annotate Automatically", tip: "Toggle automatic annotation of new symbols", icon: "annotate", key: null, name: "eeschema.EditorControl.annotateAutomatically" }, "SCH_ACTIONS::previousUnit": { id: "previousUnit", label: "Previous Symbol Unit", tip: "Open the previous unit of the symbol", icon: null, key: null, name: "eeschema.EditorControl.previousUnit" }, "SCH_ACTIONS::nextUnit": { id: "nextUnit", label: "Next Symbol Unit", tip: "Open the next unit of the symbol", icon: null, key: null, name: "eeschema.EditorControl.nextUnit" }, "SCH_ACTIONS::changeSheet": { id: "changeSheet", label: "Change Sheet", tip: "Change to provided sheet's contents in the schematic editor", icon: "enter_sheet", key: null, name: "eeschema.NavigateTool.changeSheet" }, "SCH_ACTIONS::enterSheet": { id: "enterSheet", label: "Enter Sheet", tip: "Display the selected sheet's contents in the schematic editor", icon: "enter_sheet", key: null, name: "eeschema.NavigateTool.enterSheet" }, "SCH_ACTIONS::leaveSheet": { id: "leaveSheet", label: "Leave Sheet", tip: "Display the parent sheet in the schematic editor", icon: "leave_sheet", key: "Alt+Backspace", name: "eeschema.NavigateTool.leaveSheet" }, "SCH_ACTIONS::navigateUp": { id: "navigateUp", label: "Navigate Up", tip: "Navigate up one sheet in the hierarchy", icon: "up", key: "Alt+Up", name: "eeschema.NavigateTool.up" }, "SCH_ACTIONS::navigateBack": { id: "navigateBack", label: "Navigate Back", tip: "Move backward in sheet navigation history", icon: "left", key: "Alt+Left", name: "eeschema.NavigateTool.back" }, "SCH_ACTIONS::navigateForward": { id: "navigateForward", label: "Navigate Forward", tip: "Move forward in sheet navigation history", icon: "right", key: "Alt+Right", name: "eeschema.NavigateTool.forward" }, "SCH_ACTIONS::navigatePrevious": { id: "navigatePrevious", label: "Previous Sheet", tip: "Move to previous sheet by number", icon: "left", key: "PgUp", name: "eeschema.NavigateTool.previous" }, "SCH_ACTIONS::navigateNext": { id: "navigateNext", label: "Next Sheet", tip: "Move to next sheet by number", icon: "right", key: "PgDn", name: "eeschema.NavigateTool.next" }, "SCH_ACTIONS::showHierarchy": { id: "showHierarchy", label: "Hierarchy Navigator", tip: "Show/hide the schematic sheet hierarchy navigator", icon: "hierarchy_nav", key: "Ctrl+H", name: "eeschema.EditorTool.showHierarchy", mac: "Alt+H" }, "SCH_ACTIONS::drawWire": { id: "drawWire", label: "Draw Wires", tip: null, icon: "add_line", key: "W", name: "eeschema.InteractiveDrawingLineWireBus.drawWires" }, "SCH_ACTIONS::drawBus": { id: "drawBus", label: "Draw Buses", tip: null, icon: "add_bus", key: "B", name: "eeschema.InteractiveDrawingLineWireBus.drawBuses" }, "SCH_ACTIONS::unfoldBus": { id: "unfoldBus", label: "Unfold from Bus", tip: "Break a wire out of a bus", icon: "INVALID_BITMAP", key: "C", name: "eeschema.InteractiveDrawingLineWireBus.unfoldBus" }, "SCH_ACTIONS::drawLines": { id: "drawLines", label: "Draw Lines", tip: null, icon: "add_graphical_segments", key: "I", name: "eeschema.InteractiveDrawingLineWireBus.drawLines" }, "SCH_ACTIONS::undoLastSegment": { id: "undoLastSegment", label: "Undo Last Segment", tip: "Walks the current line back one segment.", icon: "undo", key: "Backspace", name: "eeschema.InteractiveDrawingLineWireBus.undoLastSegment" }, "SCH_ACTIONS::switchSegmentPosture": { id: "switchSegmentPosture", label: "Switch Segment Posture", tip: "Switches posture of the current segment.", icon: "change_entry_orient", key: "/", name: "eeschema.InteractiveDrawingLineWireBus.switchPosture" }, "SCH_ACTIONS::move": { id: "move", label: "Move", tip: null, icon: "move", key: "M", name: "eeschema.InteractiveMove.move" }, "SCH_ACTIONS::drag": { id: "drag", label: "Drag", tip: "Move items while keeping their connections", icon: "drag", key: "G", name: "eeschema.InteractiveMove.drag" }, "SCH_ACTIONS::alignToGrid": { id: "alignToGrid", label: "Align Items to Grid", tip: null, icon: "align_elements_to_grid", key: null, name: "eeschema.AlignToGrid" }, "SCH_ACTIONS::alignTop": { id: "alignTop", label: "Align to Top", tip: "Aligns selected items to the top edge of the item under the cursor", icon: "align_items_top", key: null, name: "eeschema.Align.alignTop" }, "SCH_ACTIONS::alignBottom": { id: "alignBottom", label: "Align to Bottom", tip: "Aligns selected items to the bottom edge of the item under the cursor", icon: "align_items_bottom", key: null, name: "eeschema.Align.alignBottom" }, "SCH_ACTIONS::alignLeft": { id: "alignLeft", label: "Align to Left", tip: "Aligns selected items to the left edge of the item under the cursor", icon: "align_items_left", key: null, name: "eeschema.Align.alignLeft" }, "SCH_ACTIONS::alignRight": { id: "alignRight", label: "Align to Right", tip: "Aligns selected items to the right edge of the item under the cursor", icon: "align_items_right", key: null, name: "eeschema.Align.alignRight" }, "SCH_ACTIONS::alignCenterX": { id: "alignCenterX", label: "Align to Horizontal Center", tip: "Aligns selected items to the horizontal center of the item under the cursor", icon: "align_items_middle", key: null, name: "eeschema.Align.alignCenterX" }, "SCH_ACTIONS::alignCenterY": { id: "alignCenterY", label: "Align to Vertical Center", tip: "Aligns selected items to the vertical center of the item under the cursor", icon: "align_items_center", key: null, name: "eeschema.Align.alignCenterY" }, "SCH_ACTIONS::saveCurrSheetCopyAs": { id: "saveCurrSheetCopyAs", label: "Save Current Sheet Copy As...", tip: "Save a copy of the current sheet to another location or name", icon: "save_as", key: null, name: "eeschema.EditorControl.saveCurrSheetCopyAs" }, "SCH_ACTIONS::newAnalysisTab": { id: "newAnalysisTab", label: "New Analysis Tab...", tip: "Create a new tab containing a simulation analysis", icon: "sim_add_plot", key: "Ctrl+N", name: "eeschema.Simulation.newAnalysisTab" }, "SCH_ACTIONS::openWorkbook": { id: "openWorkbook", label: "Open Workbook...", tip: "Open a saved set of analysis tabs and settings", icon: "directory_open", key: "Ctrl+O", name: "eeschema.Simulation.openWorkbook" }, "SCH_ACTIONS::saveWorkbook": { id: "saveWorkbook", label: "Save Workbook", tip: "Save the current set of analysis tabs and settings", icon: "save", key: "Ctrl+S", name: "eeschema.Simulation.saveWorkbook" }, "SCH_ACTIONS::saveWorkbookAs": { id: "saveWorkbookAs", label: "Save Workbook As...", tip: "Save the current set of analysis tabs and settings to another location", icon: "sim_add_signal", key: "Ctrl+Shift+S", name: "eeschema.Simulation.saveWorkbookAs" }, "SCH_ACTIONS::exportPlotAsPNG": { id: "exportPlotAsPNG", label: "Export Current Plot as PNG...", tip: null, icon: "export_png", key: null, name: "eeschema.Simulator.exportPNG" }, "SCH_ACTIONS::exportPlotAsCSV": { id: "exportPlotAsCSV", label: "Export Current Plot as CSV...", tip: null, icon: "export_file", key: null, name: "eeschema.Simulator.exportCSV" }, "SCH_ACTIONS::exportPlotToClipboard": { id: "exportPlotToClipboard", label: "Export Current Plot to Clipboard", tip: null, icon: "export_png", key: null, name: "eeschema.Simulator.exportToClipboard" }, "SCH_ACTIONS::exportPlotToSchematic": { id: "exportPlotToSchematic", label: "Export Current Plot to Schematic", tip: null, icon: "export_png", key: null, name: "eeschema.Simulator.exportPlotToSchematic" }, "SCH_ACTIONS::toggleSimSidePanel": { id: "toggleSimSidePanel", label: "Show Simulation Side Panel", tip: null, icon: null, key: null, name: "eeschema.Simulator.toggleSimSidePanel" }, "SCH_ACTIONS::toggleSimConsole": { id: "toggleSimConsole", label: "Show Simulation Console Panel", tip: null, icon: null, key: null, name: "eeschema.Simulator.toggleSimConsole" }, "SCH_ACTIONS::toggleLegend": { id: "toggleLegend", label: "Show Legend", tip: null, icon: "text", key: null, name: "eeschema.Simulator.toggleLegend" }, "SCH_ACTIONS::toggleDottedSecondary": { id: "toggleDottedSecondary", label: "Dotted Current/Phase", tip: "Draw secondary signal trace (current or phase) with a dotted line", icon: null, key: null, name: "eeschema.Simulator.toggleDottedSecondary" }, "SCH_ACTIONS::toggleSmithChart": { id: "toggleSmithChart", label: "Smith Chart", tip: "Show S-parameter results on a Smith chart", icon: null, key: null, name: "eeschema.Simulator.toggleSmithChart" }, "SCH_ACTIONS::toggleDarkModePlots": { id: "toggleDarkModePlots", label: "Dark Mode Plots", tip: "Draw plots with a black background", icon: null, key: null, name: "eeschema.Simulator.toggleDarkModePlots" }, "SCH_ACTIONS::toggleTrackCursor": { id: "toggleTrackCursor", label: "Track Cursor", tip: "Show a crosshair that follows the mouse and reads out every signal's value", icon: null, key: null, name: "eeschema.Simulator.toggleTrackCursor" }, "SCH_ACTIONS::simAnalysisProperties": { id: "simAnalysisProperties", label: "Edit Analysis Tab...", tip: "Edit the current analysis tab's SPICE command and plot setup", icon: "sim_command", key: null, name: "eeschema.Simulation.simAnalysisProperties" }, "SCH_ACTIONS::runSimulation": { id: "runSimulation", label: "Run Simulation", tip: null, icon: "sim_run", key: "R", name: "eeschema.Simulation.runSimulation" }, "SCH_ACTIONS::stopSimulation": { id: "stopSimulation", label: "Stop Simulation", tip: null, icon: "sim_stop", key: null, name: "eeschema.Simulation.stopSimulation" }, "SCH_ACTIONS::simProbe": { id: "simProbe", label: "Probe Schematic...", tip: "Add a simulator probe", icon: "sim_probe", key: "Shift+P", name: "eeschema.Simulation.probe" }, "SCH_ACTIONS::simTune": { id: "simTune", label: "Add Tuned Value...", tip: "Select a value to be tuned", icon: "sim_tune", key: "Shift+T", name: "eeschema.Simulation.tune" }, "SCH_ACTIONS::editUserDefinedSignals": { id: "editUserDefinedSignals", label: "User-defined Signals...", tip: "Add, edit or delete user-defined simulation signals", icon: "sim_add_signal", key: null, name: "eeschema.Simulation.editUserDefinedSignals" }, "SCH_ACTIONS::showNetlist": { id: "showNetlist", label: "Show SPICE Netlist", tip: null, icon: "netlist", key: null, name: "eeschema.Simulation.showNetlist" }, "SCH_ACTIONS::addVariant": { id: "addVariant", label: "Add Design Variant...", tip: "Add new design variant to the schematic.", icon: null, key: null, name: "eeschema.EditorControl.addVariant" }, "SCH_ACTIONS::removeVariant": { id: "removeVariant", label: "Remove Design Variant...", tip: "Remove an existing design variant from the schematic.", icon: null, key: null, name: "eeschema.EditorControl.removeVariant" }, "SCH_ACTIONS::editVariantDescription": { id: "editVariantDescription", label: "Edit Variant Description...", tip: "Edit the description of an existing design variant.", icon: null, key: null, name: "eeschema.EditorControl.editVariantDescription" }, "SCH_ACTIONS::renameVariant": { id: "renameVariant", label: "Rename Design Variant...", tip: "Rename an existing design variant.", icon: null, key: null, name: "eeschema.EditorControl.renameVariant" }, "SCH_ACTIONS::copyVariant": { id: "copyVariant", label: "Copy Design Variant...", tip: "Create a copy of an existing design variant.", icon: null, key: null, name: "eeschema.EditorControl.copyVariant" }, "SCH_ACTIONS::collabStartSession": { id: "collabStartSession", label: "Start Collaboration Session...", tip: "Upload this project to the collaboration server and copy a share link", icon: "library_archive", key: null, name: "eeschema.Collab.startSession" }, "SCH_ACTIONS::collabJoinSession": { id: "collabJoinSession", label: "Join Shared Project...", tip: "Join a shared project from a share link", icon: "library_archive", key: null, name: "eeschema.Collab.joinSession" }, "SCH_ACTIONS::collabLeaveSession": { id: "collabLeaveSession", label: "Leave Session", tip: "Disconnect this computer from the live session; the shared project stays on the server for everyone else", icon: null, key: null, name: "eeschema.Collab.leaveSession" }, "SCH_ACTIONS::collabHistory": { id: "collabHistory", label: "History", tip: "Show the shared project's version history panel", icon: null, key: null, name: "eeschema.Collab.history" }, "SCH_ACTIONS::collabCopyLink": { id: "collabCopyLink", label: "Copy Share Link", tip: "Copy an invite link for the current collaboration session", icon: null, key: null, name: "eeschema.Collab.copyLink" }, "SCH_ACTIONS::collabVendorParts": { id: "collabVendorParts", label: "Vendor Parts...", tip: "Search LCSC, Mouser and DigiKey for parts and manage saved part libraries (opens in the browser; in a session, placed parts arrive here)", icon: null, key: null, name: "eeschema.Collab.vendorParts" }, "SCH_ACTIONS::collabCompare": { id: "collabCompare", label: "Compare Versions...", tip: "See what changed between the shared sheet as it is now and a version, a checkpoint or a GitHub commit (opens in the browser)", icon: null, key: null, name: "eeschema.Collab.compare" }, "SCH_ACTIONS::collabGithub": { id: "collabGithub", label: "GitHub Sync...", tip: "Push the shared project to a GitHub repository, or pull and merge changes from it (opens in the browser)", icon: null, key: null, name: "eeschema.Collab.github" }, "SCH_ACTIONS::collabComments": { id: "collabComments", label: "Comments...", tip: "Browse, answer and resolve the shared project's comment threads", icon: null, key: null, name: "eeschema.Collab.comments" }, "SCH_ACTIONS::collabProposals": { id: "collabProposals", label: "Proposed Changes", tip: "Show the changes an assistant proposed on this sheet, to preview, accept or reject", icon: null, key: null, name: "eeschema.Collab.proposals" }, "SCH_ACTIONS::collabFollow": { id: "collabFollow", label: "Follow Next Peer", tip: "Follow a collaborator's view, switching sheets with them; pan or zoom to stop", icon: null, key: null, name: "eeschema.Collab.follow" }, "PCB_ACTIONS::convertToPoly": { id: "convertToPoly", label: "Create Polygon from Selection...", tip: "Creates a graphic polygon from the selection", icon: "add_graphical_polygon", key: null, name: "pcbnew.Convert.convertToPoly" }, "PCB_ACTIONS::convertToZone": { id: "convertToZone", label: "Create Zone from Selection...", tip: "Creates a copper zone from the selection", icon: "add_zone", key: null, name: "pcbnew.Convert.convertToZone" }, "PCB_ACTIONS::addConstraintParallel": { id: "addConstraintParallel", label: "Parallel", tip: "Constrain the two selected segments to be parallel", icon: "constraint_parallel", key: null, name: "pcbnew.ConstraintEditor.addParallel" }, "PCB_ACTIONS::addConstraintPerpendicular": { id: "addConstraintPerpendicular", label: "Perpendicular", tip: "Constrain the two selected segments to be perpendicular", icon: "constraint_perpendicular", key: null, name: "pcbnew.ConstraintEditor.addPerpendicular" }, "PCB_ACTIONS::addConstraintEqualLength": { id: "addConstraintEqualLength", label: "Equal Length", tip: "Constrain the two selected segments to be of equal length", icon: "constraint_equal_length", key: null, name: "pcbnew.ConstraintEditor.addEqualLength" }, "PCB_ACTIONS::addConstraintCollinear": { id: "addConstraintCollinear", label: "Collinear", tip: "Constrain the two selected segments to be collinear", icon: "constraint_collinear", key: null, name: "pcbnew.ConstraintEditor.addCollinear" }, "PCB_ACTIONS::addConstraintAngular": { id: "addConstraintAngular", label: "Angular Dimension", tip: "Constrain the angle between the two selected segments", icon: "constraint_angular_dimension", key: null, name: "pcbnew.ConstraintEditor.addAngular" }, "PCB_ACTIONS::addConstraintTangent": { id: "addConstraintTangent", label: "Tangent", tip: "Constrain the selected line and curve, or two curves, to touch tangentially", icon: "constraint_tangent", key: null, name: "pcbnew.ConstraintEditor.addTangent" }, "PCB_ACTIONS::addConstraintHorizontal": { id: "addConstraintHorizontal", label: "Horizontal", tip: "Constrain the selected segment to be horizontal", icon: "constraint_horizontal", key: null, name: "pcbnew.ConstraintEditor.addHorizontal" }, "PCB_ACTIONS::addConstraintVertical": { id: "addConstraintVertical", label: "Vertical", tip: "Constrain the selected segment to be vertical", icon: "constraint_vertical", key: null, name: "pcbnew.ConstraintEditor.addVertical" }, "PCB_ACTIONS::addConstraintFixedLength": { id: "addConstraintFixedLength", label: "Fixed Length", tip: "Lock the selected segment to its current length", icon: "constraint_fixed_length", key: null, name: "pcbnew.ConstraintEditor.addFixedLength" }, "PCB_ACTIONS::addConstraintConcentric": { id: "addConstraintConcentric", label: "Concentric", tip: "Constrain the two selected circles, arcs or ellipses to share a center", icon: "constraint_concentric", key: null, name: "pcbnew.ConstraintEditor.addConcentric" }, "PCB_ACTIONS::addConstraintEqualRadius": { id: "addConstraintEqualRadius", label: "Equal Radius", tip: "Constrain the two selected circles or arcs to be of equal radius", icon: "constraint_equal_radius", key: null, name: "pcbnew.ConstraintEditor.addEqualRadius" }, "PCB_ACTIONS::addConstraintFixedRadius": { id: "addConstraintFixedRadius", label: "Fixed Radius", tip: "Lock the selected circle or arc to its current radius", icon: "constraint_fixed_radius", key: null, name: "pcbnew.ConstraintEditor.addFixedRadius" }, "PCB_ACTIONS::addConstraintArcAngle": { id: "addConstraintArcAngle", label: "Arc Angle", tip: "Drive the selected arc's swept angle", icon: "constraint_arc_angle", key: null, name: "pcbnew.ConstraintEditor.addArcAngle" }, "PCB_ACTIONS::addConstraintFixedPosition": { id: "addConstraintFixedPosition", label: "Fix in Place...", tip: "Click a point to pin it where it is, grounding the shapes constrained to it", icon: "constraint_fixed_position", key: null, name: "pcbnew.ConstraintEditor.addFixedPosition" }, "PCB_ACTIONS::addConstraintCoincident": { id: "addConstraintCoincident", label: "Coincident...", tip: "Click two shape endpoints to make them coincide", icon: "constraint_coincident", key: null, name: "pcbnew.ConstraintEditor.addCoincident" }, "PCB_ACTIONS::addConstraintPointOnLine": { id: "addConstraintPointOnLine", label: "Point on Line...", tip: "Click an endpoint, then a segment or circle, to put the point on it", icon: "constraint_point_on_line", key: null, name: "pcbnew.ConstraintEditor.addPointOnLine" }, "PCB_ACTIONS::addConstraintMidpoint": { id: "addConstraintMidpoint", label: "Midpoint...", tip: "Click an endpoint, then a segment, to put the point at its midpoint", icon: "constraint_midpoint", key: null, name: "pcbnew.ConstraintEditor.addMidpoint" }, "PCB_ACTIONS::addConstraintSymmetric": { id: "addConstraintSymmetric", label: "Symmetric...", tip: "Click two endpoints, then a segment axis, to mirror them across it", icon: "constraint_symmetric", key: null, name: "pcbnew.ConstraintEditor.addSymmetric" }, "PCB_ACTIONS::showConstraints": { id: "showConstraints", label: "Always Show Geometric Constraints", tip: "Always show the geometric-constraint diagnostics overlay", icon: "measurement", key: null, name: "pcbnew.ConstraintEditor.showConstraints" }, "PCB_ACTIONS::hideConstraints": { id: "hideConstraints", label: "Show Geometric Constraints on Hover Only", tip: "Reveal a shape's geometric constraints only while hovering it", icon: "measurement", key: null, name: "pcbnew.ConstraintEditor.hideConstraints" }, "PCB_ACTIONS::manageConstraints": { id: "manageConstraints", label: "Geometric Constraints...", tip: "List, locate and delete the board's geometric constraints", icon: "measurement", key: null, name: "pcbnew.ConstraintEditor.manageConstraints" }, "PCB_ACTIONS::removeConstraints": { id: "removeConstraints", label: "Remove Geometric Constraints", tip: "Remove geometric constraints referencing the selected items", icon: "measurement", key: null, name: "pcbnew.ConstraintEditor.removeConstraints" }, "PCB_ACTIONS::showConstraintsPanel": { id: "showConstraintsPanel", label: "Geometric Constraints", tip: "Show/hide the geometric constraints panel", icon: "measurement", key: null, name: "pcbnew.EditorControl.showConstraintsPanel" }, "PCB_ACTIONS::toggleAutoConstraints": { id: "toggleAutoConstraints", label: "Automatic Constraints", tip: "Automatically add geometric constraints while drawing", icon: "constraint_auto", key: null, name: "pcbnew.ConstraintEditor.toggleAutoConstraints" }, "PCB_ACTIONS::convertToKeepout": { id: "convertToKeepout", label: "Create Rule Area from Selection...", tip: "Creates a rule area from the selection", icon: "add_keepout_area", key: null, name: "pcbnew.Convert.convertToKeepout" }, "PCB_ACTIONS::convertToLines": { id: "convertToLines", label: "Create Lines from Selection...", tip: "Creates graphic lines from the selection", icon: "add_line", key: null, name: "pcbnew.Convert.convertToLines" }, "PCB_ACTIONS::convertToArc": { id: "convertToArc", label: "Create Arc from Selection", tip: "Creates an arc from the selected line segment", icon: "add_arc", key: null, name: "pcbnew.Convert.convertToArc" }, "PCB_ACTIONS::convertToTracks": { id: "convertToTracks", label: "Create Tracks from Selection", tip: "Creates tracks from the selected graphic lines", icon: "add_tracks", key: null, name: "pcbnew.Convert.convertToTracks" }, "PCB_ACTIONS::outsetItems": { id: "outsetItems", label: "Create Outsets from Selection...", tip: "Create outset lines from the selected item", icon: "outset_from_selection", key: null, name: "pcbnew.Convert.outsetItems" }, "PCB_ACTIONS::drawLine": { id: "drawLine", label: "Draw Lines", tip: null, icon: "add_graphical_segments", key: "Ctrl+Shift+L", name: "pcbnew.InteractiveDrawing.line" }, "PCB_ACTIONS::drawPolygon": { id: "drawPolygon", label: "Draw Polygons", tip: null, icon: "add_graphical_polygon", key: "Ctrl+Shift+P", name: "pcbnew.InteractiveDrawing.graphicPolygon" }, "PCB_ACTIONS::drawViaStitchArea": { id: "drawViaStitchArea", label: "Draw Via Stitch area", tip: "Draw a via stitch area", icon: "add_via_stitch", key: "Ctrl+Shift+N", name: "pcbnew.InteractiveDrawing.drawViaStitchArea" }, "PCB_ACTIONS::drawRectangle": { id: "drawRectangle", label: "Draw Rectangles", tip: null, icon: "add_rectangle", key: null, name: "pcbnew.InteractiveDrawing.rectangle" }, "PCB_ACTIONS::drawCircle": { id: "drawCircle", label: "Draw Circles", tip: null, icon: "add_circle", key: "Ctrl+Shift+C", name: "pcbnew.InteractiveDrawing.circle" }, "PCB_ACTIONS::drawEllipse": { id: "drawEllipse", label: "Draw Ellipse", tip: "Draw an ellipse", icon: "add_ellipse", key: null, name: "pcbnew.InteractiveDrawing.ellipse" }, "PCB_ACTIONS::drawEllipseArc": { id: "drawEllipseArc", label: "Draw Elliptical Arcs", tip: "Draw an elliptical arc", icon: "add_ellipse_arc", key: null, name: "pcbnew.InteractiveDrawing.ellipseArc" }, "PCB_ACTIONS::drawArc": { id: "drawArc", label: "Draw Arcs", tip: null, icon: "add_arc", key: "Ctrl+Shift+A", name: "pcbnew.InteractiveDrawing.arc" }, "PCB_ACTIONS::drawArcCenter": { id: "drawArcCenter", label: "Draw Arc: Center, Start, End", tip: "Draw arcs by clicking the center, the start point, then the end point", icon: "add_arc_center", key: null, name: "pcbnew.InteractiveDrawing.arcCenter" }, "PCB_ACTIONS::drawArcStartEndMid": { id: "drawArcStartEndMid", label: "Draw Arc: Start, End, Midpoint", tip: "Draw arcs by clicking the start point, the end point, then a point on the arc", icon: "add_arc_start_end_mid", key: null, name: "pcbnew.InteractiveDrawing.arcStartEndMid" }, "PCB_ACTIONS::drawArcStartEndCenter": { id: "drawArcStartEndCenter", label: "Draw Arc: Start, End, Center", tip: "Draw arcs by clicking the start point, the end point, then the center", icon: "add_arc_start_end_center", key: null, name: "pcbnew.InteractiveDrawing.arcStartEndCenter" }, "PCB_ACTIONS::drawArcTangent": { id: "drawArcTangent", label: "Draw Arc: Tangent", tip: "Draw arcs tangent to the previous arc or to the line or arc ending at the start point", icon: "add_arc_tangent", key: null, name: "pcbnew.InteractiveDrawing.arcTangent" }, "PCB_ACTIONS::drawArcStartDirEnd": { id: "drawArcStartDirEnd", label: "Draw Arc: Start, Direction, End", tip: "Draw arcs by clicking the start point, a point giving the start direction, then the end point", icon: "add_arc_start_dir_end", key: null, name: "pcbnew.InteractiveDrawing.arcStartDirEnd" }, "PCB_ACTIONS::drawBezier": { id: "drawBezier", label: "Draw Bezier Curve", tip: null, icon: "add_bezier", key: "Ctrl+Shift+B", name: "pcbnew.InteractiveDrawing.bezier" }, "PCB_ACTIONS::placeBarcode": { id: "placeBarcode", label: "Add Barcode", tip: "Add a barcode", icon: "add_barcode", key: null, name: "pcbnew.InteractiveDrawing.barcode" }, "PCB_ACTIONS::placeCharacteristics": { id: "placeCharacteristics", label: "Add Board Characteristics", tip: "Add a board characteristics table on a graphic layer", icon: null, key: null, name: "pcbnew.InteractiveDrawing.placeCharacteristics" }, "PCB_ACTIONS::placeStackup": { id: "placeStackup", label: "Add Stackup Table", tip: "Add a board stackup table that follows the stackup", icon: null, key: null, name: "pcbnew.InteractiveDrawing.placeStackup" }, "PCB_ACTIONS::placeDrillChart": { id: "placeDrillChart", label: "Add Drill Chart", tip: "Add a drill chart that tracks the board's holes", icon: null, key: null, name: "pcbnew.InteractiveDrawing.placeDrillChart" }, "PCB_ACTIONS::placeDrillMap": { id: "placeDrillMap", label: "Add Drill Map", tip: "Draw drill symbols at the holes on a documentation layer", icon: null, key: null, name: "pcbnew.InteractiveDrawing.placeDrillMap" }, "PCB_ACTIONS::showDrillGroups": { id: "showDrillGroups", label: "Drill Groups...", tip: "Inspect drill groups and assign symbols", icon: null, key: null, name: "pcbnew.InteractiveDrawing.showDrillGroups" }, "PCB_ACTIONS::placePoint": { id: "placePoint", label: "Place Point", tip: "Add reference/snap points", icon: "add_point", key: null, name: "pcbnew.InteractiveDrawing.placePoint" }, "PCB_ACTIONS::placeReferenceImage": { id: "placeReferenceImage", label: "Place Reference Images", tip: "Add bitmap images to be used as reference (images will not be included in any output)", icon: "image", key: null, name: "pcbnew.InteractiveDrawing.placeReferenceImage" }, "PCB_ACTIONS::convertImageToOutlines": { id: "convertImageToOutlines", label: "Convert to Outlines...", tip: "Trace the image into board graphics", icon: "image", key: null, name: "pcbnew.InteractiveDrawing.convertImageToOutlines" }, "PCB_ACTIONS::placeText": { id: "placeText", label: "Draw Text", tip: null, icon: "text", key: "Ctrl+Shift+T", name: "pcbnew.InteractiveDrawing.text" }, "PCB_ACTIONS::drawTextBox": { id: "drawTextBox", label: "Draw Text Boxes", tip: null, icon: "add_textbox", key: null, name: "pcbnew.InteractiveDrawing.textbox" }, "PCB_ACTIONS::drawTable": { id: "drawTable", label: "Draw Tables", tip: null, icon: "table", key: null, name: "pcbnew.InteractiveDrawing.drawTable" }, "PCB_ACTIONS::spacingIncrease": { id: "spacingIncrease", label: "Increase Spacing", tip: "Increase tuning pattern spacing by one step.", icon: "router_len_tuner_dist_incr", key: "1", name: "pcbnew.lengthTuner.SpacingIncrease" }, "PCB_ACTIONS::spacingDecrease": { id: "spacingDecrease", label: "Decrease Spacing", tip: "Decrease tuning pattern spacing by one step.", icon: "router_len_tuner_dist_decr", key: "2", name: "pcbnew.lengthTuner.SpacingDecrease" }, "PCB_ACTIONS::amplIncrease": { id: "amplIncrease", label: "Increase Amplitude", tip: "Increase tuning pattern amplitude by one step.", icon: "router_len_tuner_amplitude_incr", key: "3", name: "pcbnew.lengthTuner.AmplIncrease" }, "PCB_ACTIONS::amplDecrease": { id: "amplDecrease", label: "Decrease Amplitude", tip: "Decrease tuning pattern amplitude by one step.", icon: "router_len_tuner_amplitude_decr", key: "4", name: "pcbnew.lengthTuner.AmplDecrease" }, "PCB_ACTIONS::drawAlignedDimension": { id: "drawAlignedDimension", label: "Draw Aligned Dimensions", tip: null, icon: "add_aligned_dimension", key: null, name: "pcbnew.InteractiveDrawing.alignedDimension" }, "PCB_ACTIONS::drawCenterDimension": { id: "drawCenterDimension", label: "Draw Center Dimensions", tip: null, icon: "add_center_dimension", key: null, name: "pcbnew.InteractiveDrawing.centerDimension" }, "PCB_ACTIONS::drawRadialDimension": { id: "drawRadialDimension", label: "Draw Radial Dimensions", tip: null, icon: "add_radial_dimension", key: null, name: "pcbnew.InteractiveDrawing.radialDimension" }, "PCB_ACTIONS::drawOrthogonalDimension": { id: "drawOrthogonalDimension", label: "Draw Orthogonal Dimensions", tip: null, icon: "add_orthogonal_dimension", key: "Ctrl+Shift+H", name: "pcbnew.InteractiveDrawing.orthogonalDimension" }, "PCB_ACTIONS::drawLeader": { id: "drawLeader", label: "Draw Leaders", tip: null, icon: "add_leader", key: null, name: "pcbnew.InteractiveDrawing.leader" }, "PCB_ACTIONS::drawZone": { id: "drawZone", label: "Draw Filled Zones", tip: null, icon: "add_zone", key: "Ctrl+Shift+Z", name: "pcbnew.InteractiveDrawing.zone", mac: "Alt+Z" }, "PCB_ACTIONS::drawCopperThievingZone": { id: "drawCopperThievingZone", label: "Draw Copper Thieving Zone", tip: "Add a non-electrical thieving zone for plating-balance copper", icon: "add_zone", key: null, name: "pcbnew.InteractiveDrawing.copperThievingZone" }, "PCB_ACTIONS::drawVia": { id: "drawVia", label: "Place Vias", tip: "Place free-standing vias", icon: "add_via", key: "Ctrl+Shift+X", name: "pcbnew.InteractiveDrawing.via" }, "PCB_ACTIONS::placeViaStack": { id: "placeViaStack", label: "Place Microvia Stack", tip: "Place a stacked or staggered microvia stack", icon: "add_via_stack", key: null, name: "pcbnew.InteractiveDrawing.viaStack" }, "PCB_ACTIONS::makeViaStack": { id: "makeViaStack", label: "Create Stack from Selection", tip: "Wrap the selected microvias and traces into a microvia stack", icon: "add_via_stack", key: null, name: "pcbnew.Generator.makeViaStack" }, "PCB_ACTIONS::drawRuleArea": { id: "drawRuleArea", label: "Draw Rule Areas", tip: null, icon: "add_keepout_area", key: "Ctrl+Shift+K", name: "pcbnew.InteractiveDrawing.ruleArea" }, "PCB_ACTIONS::drawZoneCutout": { id: "drawZoneCutout", label: "Add a Zone Cutout", tip: "Add a cutout to an existing zone or rule area", icon: "add_zone_cutout", key: "Shift+C", name: "pcbnew.InteractiveDrawing.zoneCutout" }, "PCB_ACTIONS::drawSimilarZone": { id: "drawSimilarZone", label: "Add a Similar Zone", tip: "Add a zone with the same settings as an existing zone", icon: "add_zone", key: "Ctrl+Shift+.", name: "pcbnew.InteractiveDrawing.similarZone" }, "PCB_ACTIONS::placeImportedGraphics": { id: "placeImportedGraphics", label: "Import Graphics...", tip: "Import 2D drawing file", icon: "import_vector", key: "Ctrl+Shift+F", name: "pcbnew.InteractiveDrawing.placeImportedGraphics" }, "PCB_ACTIONS::setAnchor": { id: "setAnchor", label: "Place the Footprint Anchor", tip: "Set the anchor point of the footprint", icon: "anchor", key: "Ctrl+Shift+N", name: "pcbnew.InteractiveDrawing.setAnchor" }, "PCB_ACTIONS::incWidth": { id: "incWidth", label: "Increase Line Width", tip: null, icon: null, key: "Ctrl++", name: "pcbnew.InteractiveDrawing.incWidth" }, "PCB_ACTIONS::decWidth": { id: "decWidth", label: "Decrease Line Width", tip: null, icon: null, key: "Ctrl+-", name: "pcbnew.InteractiveDrawing.decWidth" }, "PCB_ACTIONS::changeDimensionArrows": { id: "changeDimensionArrows", label: "Switch Dimension Arrows", tip: "Switch between inward and outward dimension arrows", icon: null, key: null, name: "pcbnew.InteractiveDrawing.changeDimensionArrows" }, "PCB_ACTIONS::magneticSnapActiveLayer": { id: "magneticSnapActiveLayer", label: "Snap to Objects on the Active Layer Only", tip: "Enables snapping to objects on the active layer only", icon: null, key: null, name: "common.Control.magneticSnapActiveLayer" }, "PCB_ACTIONS::magneticSnapAllLayers": { id: "magneticSnapAllLayers", label: "Snap to Objects on All Layers", tip: "Enables snapping to objects on all visible layers", icon: null, key: null, name: "common.Control.magneticSnapAllLayers" }, "PCB_ACTIONS::magneticSnapToggle": { id: "magneticSnapToggle", label: "Toggle Snapping Between Active and All Layers", tip: "Toggles between snapping on all visible layers and only the active area", icon: null, key: "Shift+S", name: "common.Control.magneticSnapToggle" }, "PCB_ACTIONS::closeOutline": { id: "closeOutline", label: "Close Outline", tip: "Close the in progress outline", icon: "checked_ok", key: null, name: "pcbnew.InteractiveDrawing.closeOutline" }, "PCB_ACTIONS::runDRC": { id: "runDRC", label: "Design Rules Checker", tip: "Show the design rules checker window", icon: "erc", key: null, name: "pcbnew.DRCTool.runDRC" }, "PCB_ACTIONS::placeDesignBlock": { id: "placeDesignBlock", label: "Place Design Block", tip: "Add selected design block to current board", icon: "add_component", key: "Shift+B", name: "pcbnew.InteractiveDrawing.placeDesignBlock" }, "PCB_ACTIONS::placeLinkedDesignBlock": { id: "placeLinkedDesignBlock", label: "Place Linked Design Block", tip: "Place design block linked to selected group", icon: "add_component", key: null, name: "pcbnew.InteractiveDrawing.placeLinkedDesignBlock" }, "PCB_ACTIONS::applyDesignBlockLayout": { id: "applyDesignBlockLayout", label: "Apply Design Block Layout", tip: "Apply linked design block layout to selected group", icon: "add_component", key: null, name: "pcbnew.InteractiveDrawing.applyDesignBlockLayout" }, "PCB_ACTIONS::saveToLinkedDesignBlock": { id: "saveToLinkedDesignBlock", label: "Save to Linked Design Block", tip: "Save selected group to linked design block", icon: "add_component", key: null, name: "pcbnew.InteractiveDrawing.saveToLinkedDesignBlock" }, "PCB_ACTIONS::showDesignBlockPanel": { id: "showDesignBlockPanel", label: "Design Blocks", tip: "Show/hide design blocks library", icon: "search_tree", key: null, name: "pcbnew.PcbDesignBlockControl.showDesignBlockPanel" }, "PCB_ACTIONS::saveBoardAsDesignBlock": { id: "saveBoardAsDesignBlock", label: "Save Board as Design Block...", tip: "Create a new design block from the current board", icon: "new_component", key: null, name: "pcbnew.PcbDesignBlockControl.saveBoardAsDesignBlock" }, "PCB_ACTIONS::saveSelectionAsDesignBlock": { id: "saveSelectionAsDesignBlock", label: "Save Selection as Design Block...", tip: "Create a new design block from the current selection", icon: "new_component", key: null, name: "pcbnew.PcbDesignBlockControl.saveSelectionAsDesignBlock" }, "PCB_ACTIONS::updateDesignBlockFromBoard": { id: "updateDesignBlockFromBoard", label: "Update Design Block from Board", tip: "Set design block layout to current board", icon: "save", key: null, name: "pcbnew.PcbDesignBlockControl.updateDesignBlockFromBoard" }, "PCB_ACTIONS::updateDesignBlockFromSelection": { id: "updateDesignBlockFromSelection", label: "Update Design Block from Selection", tip: "Set design block layout to current selection", icon: "save", key: null, name: "pcbnew.PcbDesignBlockControl.updateDesignBlockFromSelection" }, "PCB_ACTIONS::deleteDesignBlock": { id: "deleteDesignBlock", label: "Delete Design Block", tip: "Remove the selected design block from its library", icon: "trash", key: null, name: "pcbnew.PcbDesignBlockControl.deleteDesignBlock" }, "PCB_ACTIONS::editDesignBlockProperties": { id: "editDesignBlockProperties", label: "Properties...", tip: "Edit properties of design block", icon: "edit", key: null, name: "pcbnew.PcbDesignBlockControl.editDesignBlockProperties" }, "PCB_ACTIONS::editFpInFpEditor": { id: "editFpInFpEditor", label: "Open in Footprint Editor", tip: null, icon: "module_editor", key: "Ctrl+E", name: "pcbnew.EditorControl.EditFpInFpEditor" }, "PCB_ACTIONS::editLibFpInFpEditor": { id: "editLibFpInFpEditor", label: "Edit Library Footprint...", tip: null, icon: "module_editor", key: "Ctrl+Shift+E", name: "pcbnew.EditorControl.EditLibFpInFpEditor" }, "PCB_ACTIONS::toggleExcludeFromBOM": { id: "toggleExcludeFromBOM", label: "Exclude from Bill of Materials", tip: "Toggle the exclude from bill of materials attribute", icon: null, key: null, name: "pcbnew.InteractiveEdit.toggleExcludeFromBOM" }, "PCB_ACTIONS::toggleExcludeFromSim": { id: "toggleExcludeFromSim", label: "Exclude from Simulation", tip: "Toggle the exclude from simulation attribute", icon: null, key: null, name: "pcbnew.InteractiveEdit.toggleExcludeFromSim" }, "PCB_ACTIONS::toggleExcludeFromPosFiles": { id: "toggleExcludeFromPosFiles", label: "Exclude from Position Files", tip: "Toggle the exclude from position files attribute", icon: null, key: null, name: "pcbnew.InteractiveEdit.toggleExcludeFromPosFiles" }, "PCB_ACTIONS::findByProperties": { id: "findByProperties", label: "Find by Properties...", tip: "Find board items matching property criteria or expressions", icon: "find", key: null, name: "pcbnew.EditorControl.findByProperties" }, "PCB_ACTIONS::getAndPlace": { id: "getAndPlace", label: "Get and Move Footprint", tip: "Selects a footprint by reference designator and places it under the cursor for moving", icon: "move", key: "T", name: "pcbnew.InteractiveEdit.FindMove" }, "PCB_ACTIONS::move": { id: "move", label: "Move", tip: null, icon: "move", key: "M", name: "pcbnew.InteractiveMove.move" }, "PCB_ACTIONS::moveIndividually": { id: "moveIndividually", label: "Move Individually", tip: "Moves the selected items one-by-one", icon: "move", key: "Ctrl+M", name: "pcbnew.InteractiveMove.moveIndividually" }, "PCB_ACTIONS::moveWithReference": { id: "moveWithReference", label: "Move with Reference...", tip: "Moves the selected item(s) with a specified starting point", icon: "move", key: null, name: "pcbnew.InteractiveMove.moveWithReference" }, "PCB_ACTIONS::copyWithReference": { id: "copyWithReference", label: "Copy with Reference...", tip: "Copy selected item(s) to clipboard with a specified starting point", icon: "copy", key: null, name: "pcbnew.InteractiveMove.copyWithReference" }, "PCB_ACTIONS::duplicateIncrement": { id: "duplicateIncrement", label: "Duplicate and Increment", tip: "Duplicates the selected item(s), incrementing pad numbers", icon: "duplicate", key: "Ctrl+Shift+D", name: "pcbnew.InteractiveEdit.duplicateIncrementPads" }, "PCB_ACTIONS::moveExact": { id: "moveExact", label: "Move Exactly...", tip: "Moves the selected item(s) by an exact amount", icon: "move_exactly", key: "Shift+M", name: "pcbnew.InteractiveEdit.moveExact" }, "PCB_ACTIONS::pointEditorMoveCorner": { id: "pointEditorMoveCorner", label: "Move Corner To...", tip: "Move the active corner to an exact location", icon: "move_exactly", key: null, name: "pcbnew.InteractiveEdit.moveCorner" }, "PCB_ACTIONS::pointEditorMoveMidpoint": { id: "pointEditorMoveMidpoint", label: "Move Midpoint To...", tip: "Move the active midpoint to an exact location", icon: "move_exactly", key: null, name: "pcbnew.InteractiveEdit.moveMidpoint" }, "PCB_ACTIONS::rotateCw": { id: "rotateCw", label: "Rotate Clockwise", tip: null, icon: "rotate_cw", key: "Shift+R", name: "pcbnew.InteractiveEdit.rotateCw" }, "PCB_ACTIONS::rotateCcw": { id: "rotateCcw", label: "Rotate Counterclockwise", tip: null, icon: "rotate_ccw", key: "R", name: "pcbnew.InteractiveEdit.rotateCcw" }, "PCB_ACTIONS::flip": { id: "flip", label: "Change Side / Flip", tip: "Flips selected item(s) to opposite side of board", icon: "swap_layer", key: "F", name: "pcbnew.InteractiveEdit.flip" }, "PCB_ACTIONS::mirrorH": { id: "mirrorH", label: "Mirror Horizontally", tip: "Mirrors selected item(s) across the Y axis", icon: "mirror_h", key: null, name: "pcbnew.InteractiveEdit.mirrorHoriontally" }, "PCB_ACTIONS::mirrorV": { id: "mirrorV", label: "Mirror Vertically", tip: "Mirrors selected item(s) across the X axis", icon: "mirror_v", key: null, name: "pcbnew.InteractiveEdit.mirrorVertically" }, "PCB_ACTIONS::mirrorInteractive": { id: "mirrorInteractive", label: "Mirror Interactive", tip: "Mirrors selected item(s) interactively", icon: null, key: null, name: "pcbnew.InteractiveEdit.mirrorInteractive" }, "PCB_ACTIONS::swap": { id: "swap", label: "Swap", tip: "Swap positions of selected items", icon: "swap", key: "Alt+S", name: "pcbnew.InteractiveEdit.swap" }, "PCB_ACTIONS::swapPadNets": { id: "swapPadNets", label: "Swap Pad Nets", tip: "Swap nets between two selected pads and their connected copper", icon: "swap", key: null, name: "pcbnew.InteractiveEdit.swapPadNets" }, "PCB_ACTIONS::swapGateNets": { id: "swapGateNets", label: "Swap Gate Nets", tip: "Swap nets between gates of a footprint and their connected copper", icon: "swap", key: null, name: "pcbnew.InteractiveEdit.swapGateNets" }, "PCB_ACTIONS::packAndMoveFootprints": { id: "packAndMoveFootprints", label: "Pack and Move Footprints", tip: "Sorts selected footprints by reference, packs based on size and initiates movement", icon: "pack_footprints", key: "P", name: "pcbnew.InteractiveEdit.packAndMoveFootprints" }, "PCB_ACTIONS::skip": { id: "skip", label: "Skip", tip: "Skip to next item", icon: "right", key: "Tab", name: "pcbnew.InteractiveEdit.skip" }, "PCB_ACTIONS::changeTrackWidth": { id: "changeTrackWidth", label: "Change Track Width", tip: "Updates selected track & via sizes", icon: null, key: null, name: "pcbnew.InteractiveEdit.changeTrackWidth" }, "PCB_ACTIONS::changeTrackLayerNext": { id: "changeTrackLayerNext", label: "Switch Track to Next Layer", tip: "Switch track to next enabled copper layer", icon: null, key: "Ctrl++", name: "pcbnew.Control.changeTrackLayerNext" }, "PCB_ACTIONS::changeTrackLayerPrev": { id: "changeTrackLayerPrev", label: "Switch Track to Previous Layer", tip: "Switch track to previous enabled copper layer", icon: null, key: "Ctrl+-", name: "pcbnew.Control.changeTrackLayerPrev" }, "PCB_ACTIONS::filletTracks": { id: "filletTracks", label: "Fillet Tracks", tip: "Adds arcs tangent to the selected straight track segments", icon: null, key: null, name: "pcbnew.InteractiveEdit.filletTracks" }, "PCB_ACTIONS::filletLines": { id: "filletLines", label: "Fillet Lines...", tip: "Adds arcs tangent to the selected lines", icon: "fillet", key: null, name: "pcbnew.InteractiveEdit.filletLines" }, "PCB_ACTIONS::chamferLines": { id: "chamferLines", label: "Chamfer Lines...", tip: "Cut away corners between selected lines", icon: "chamfer", key: null, name: "pcbnew.InteractiveEdit.chamferLines" }, "PCB_ACTIONS::dogboneCorners": { id: "dogboneCorners", label: "Dogbone Corners...", tip: "Add dogbone corners to selected lines", icon: null, key: null, name: "pcbnew.InteractiveEdit.dogboneCorners" }, "PCB_ACTIONS::simplifyPolygons": { id: "simplifyPolygons", label: "Simplify Polygons", tip: "Simplify polygon outlines, removing superfluous points", icon: null, key: null, name: "pcbnew.InteractiveEdit.simplifyPolygons" }, "PCB_ACTIONS::editVertices": { id: "editVertices", label: "Edit Corners...", tip: "Edit polygon corners using a table", icon: "edit", key: null, name: "pcbnew.InteractiveEdit.editVertices" }, "PCB_ACTIONS::healShapes": { id: "healShapes", label: "Heal Shapes", tip: "Connect shapes, possibly extending or cutting them, or adding extra geometry", icon: "heal_shapes", key: null, name: "pcbnew.InteractiveEdit.healShapes" }, "PCB_ACTIONS::extendLines": { id: "extendLines", label: "Extend Lines to Meet", tip: "Extend lines to meet each other", icon: null, key: null, name: "pcbnew.InteractiveEdit.extendLines" }, "PCB_ACTIONS::extendGraphic": { id: "extendGraphic", label: "Extend Line or Arc", tip: "Hover a graphical line or arc to extend it until it meets another", icon: null, key: null, name: "pcbnew.GraphicEdit.extend" }, "PCB_ACTIONS::trimGraphic": { id: "trimGraphic", label: "Trim Shape", tip: "Hover the part of a graphical shape to remove between the nearest crossings", icon: null, key: null, name: "pcbnew.GraphicEdit.trim" }, "PCB_ACTIONS::mergePolygons": { id: "mergePolygons", label: "Merge Polygons", tip: "Merge selected polygons into a single polygon", icon: "merge_polygons", key: null, name: "pcbnew.InteractiveEdit.mergePolygons" }, "PCB_ACTIONS::subtractPolygons": { id: "subtractPolygons", label: "Subtract Polygons", tip: "Subtract selected polygons from the last one selected", icon: "subtract_polygons", key: null, name: "pcbnew.InteractiveEdit.subtractPolygons" }, "PCB_ACTIONS::intersectPolygons": { id: "intersectPolygons", label: "Intersect Polygons", tip: "Create the intersection of the selected polygons", icon: "intersect_polygons", key: null, name: "pcbnew.InteractiveEdit.intersectPolygons" }, "PCB_ACTIONS::deleteFull": { id: "deleteFull", label: "Delete Full Track", tip: "Deletes selected item(s) and copper connections", icon: "delete_cursor", key: "Shift+Del", name: "pcbnew.InteractiveEdit.deleteFull" }, "PCB_ACTIONS::properties": { id: "properties", label: "Properties...", tip: null, icon: "edit", key: "E", name: "pcbnew.InteractiveEdit.properties" }, "PCB_ACTIONS::matchProperties": { id: "matchProperties", label: "Match Properties", tip: "Copy selected properties from a source item to compatible target items", icon: null, key: null, name: "pcbnew.MatchProperties.match" }, "PCB_ACTIONS::matchPropertiesSettings": { id: "matchPropertiesSettings", label: "Match Properties Settings...", tip: "Choose the properties copied by Match Properties", icon: null, key: "Ctrl+,", name: "pcbnew.MatchProperties.settings" }, "PCB_ACTIONS::createArray": { id: "createArray", label: "Create Array...", tip: null, icon: "array", key: "Ctrl+T", name: "pcbnew.Array.createArray" }, "PCB_ACTIONS::newFootprint": { id: "newFootprint", label: "New Footprint", tip: "Create a new, empty footprint", icon: "new_footprint", key: "Ctrl+N", name: "pcbnew.ModuleEditor.newFootprint" }, "PCB_ACTIONS::createFootprint": { id: "createFootprint", label: "Create Footprint...", tip: "Create a new footprint using the Footprint Wizard", icon: "module_wizard", key: null, name: "pcbnew.ModuleEditor.createFootprint" }, "PCB_ACTIONS::editFootprint": { id: "editFootprint", label: "Edit Footprint", tip: "Show selected footprint on editor canvas", icon: "edit", key: null, name: "pcbnew.ModuleEditor.editFootprint" }, "PCB_ACTIONS::duplicateFootprint": { id: "duplicateFootprint", label: "Duplicate Footprint", tip: null, icon: "duplicate", key: null, name: "pcbnew.ModuleEditor.duplicateFootprint" }, "PCB_ACTIONS::renameFootprint": { id: "renameFootprint", label: "Rename Footprint...", tip: null, icon: "edit", key: null, name: "pcbnew.ModuleEditor.renameFootprint" }, "PCB_ACTIONS::deleteFootprint": { id: "deleteFootprint", label: "Delete Footprint from Library", tip: null, icon: "trash", key: null, name: "pcbnew.ModuleEditor.deleteFootprint" }, "PCB_ACTIONS::cutFootprint": { id: "cutFootprint", label: "Cut Footprint", tip: null, icon: "cut", key: null, name: "pcbnew.ModuleEditor.cutFootprint" }, "PCB_ACTIONS::copyFootprint": { id: "copyFootprint", label: "Copy Footprint", tip: null, icon: "copy", key: null, name: "pcbnew.ModuleEditor.copyFootprint" }, "PCB_ACTIONS::pasteFootprint": { id: "pasteFootprint", label: "Paste Footprint", tip: null, icon: "paste", key: null, name: "pcbnew.ModuleEditor.pasteFootprint" }, "PCB_ACTIONS::importFootprint": { id: "importFootprint", label: "Import Footprint...", tip: "Import footprint from file", icon: "import_module", key: null, name: "pcbnew.ModuleEditor.importFootprint" }, "PCB_ACTIONS::exportFootprint": { id: "exportFootprint", label: "Export Current Footprint...", tip: "Export edited footprint to file", icon: "export_module", key: null, name: "pcbnew.ModuleEditor.exportFootprint" }, "PCB_ACTIONS::exportFootprintAsSVG": { id: "exportFootprintAsSVG", label: "Export Current Footprint as SVG...", tip: "Export the current footprint to an SVG file", icon: "export_svg", key: null, name: "pcbnew.ModuleEditor.exportFootprintAsSVG" }, "PCB_ACTIONS::compareFpLibraryWithFile": { id: "compareFpLibraryWithFile", label: "Compare Library with File...", tip: "Diff the current footprint library against another .pretty directory", icon: "library", key: null, name: "pcbnew.ModuleEditor.CompareFpLibraryWithFile" }, "PCB_ACTIONS::showLibFootprintFieldsTable": { id: "showLibFootprintFieldsTable", label: "Bulk Edit Footprint Fields...", tip: "Edit a table of fields from all footprints in the library", icon: "table", key: null, name: "pcbnew.ModuleEditor.showLibraryFootprintFieldsTable" }, "PCB_ACTIONS::footprintProperties": { id: "footprintProperties", label: "Footprint Properties...", tip: null, icon: "module_options", key: null, name: "pcbnew.ModuleEditor.footprintProperties" }, "PCB_ACTIONS::padTable": { id: "padTable", label: "Pad Table...", tip: "Displays pad table for bulk editing of pads", icon: "pad_table", key: null, name: "pcbnew.ModuleEditor.padTable" }, "PCB_ACTIONS::checkFootprint": { id: "checkFootprint", label: "Footprint Checker", tip: "Show the footprint checker window", icon: "erc", key: null, name: "pcbnew.ModuleEditor.checkFootprint" }, "PCB_ACTIONS::showFootprintUsers": { id: "showFootprintUsers", label: "Footprint Users", tip: "Show the symbols that use this footprint", icon: "module_filtered_list", key: null, name: "pcbnew.ModuleEditor.showFootprintUsers" }, "PCB_ACTIONS::loadFpFromBoard": { id: "loadFpFromBoard", label: "Load footprint from current PCB", tip: "Load footprint from current board", icon: "load_module_board", key: null, name: "pcbnew.ModuleEditor.loadFootprintFromBoard" }, "PCB_ACTIONS::saveFpToBoard": { id: "saveFpToBoard", label: "Insert footprint into PCB", tip: "Insert footprint into current board", icon: "insert_module_board", key: null, name: "pcbnew.ModuleEditor.saveFootprintToBoard" }, "PCB_ACTIONS::previousFootprint": { id: "previousFootprint", label: "Display previous footprint", tip: null, icon: "lib_previous", key: null, name: "pcbnew.Control.previousFootprint" }, "PCB_ACTIONS::nextFootprint": { id: "nextFootprint", label: "Display next footprint", tip: null, icon: "lib_next", key: null, name: "pcbnew.Control.nextFootprint" }, "PCB_ACTIONS::updateFootprint": { id: "updateFootprint", label: "Update Footprint...", tip: "Update footprint to include any changes from the library", icon: "refresh", key: null, name: "pcbnew.GlobalEdit.updateFootprint" }, "PCB_ACTIONS::updateFootprints": { id: "updateFootprints", label: "Update Footprints from Library...", tip: "Update footprints to include any changes from the library", icon: "refresh", key: null, name: "pcbnew.GlobalEdit.updateFootprints" }, "PCB_ACTIONS::migrate3DModels": { id: "migrate3DModels", label: "Migrate 3D Models...", tip: "Replace obsolete WRL 3D model references with current STEP models", icon: "refresh", key: null, name: "pcbnew.GlobalEdit.migrate3DModels" }, "PCB_ACTIONS::removeUnusedPads": { id: "removeUnusedPads", label: "Remove Unused Pads...", tip: "Remove or restore the unconnected inner layers on through hole pads and vias", icon: "pads_remove", key: null, name: "pcbnew.GlobalEdit.removeUnusedPads" }, "PCB_ACTIONS::changeFootprint": { id: "changeFootprint", label: "Change Footprint...", tip: "Assign a different footprint from the library", icon: "exchange", key: null, name: "pcbnew.GlobalEdit.changeFootprint" }, "PCB_ACTIONS::changeFootprints": { id: "changeFootprints", label: "Change Footprints...", tip: "Assign different footprints from the library", icon: "exchange", key: null, name: "pcbnew.GlobalEdit.changeFootprints" }, "PCB_ACTIONS::swapLayers": { id: "swapLayers", label: "Swap Layers...", tip: "Move tracks or drawings from one layer to another", icon: "swap_layer", key: null, name: "pcbnew.GlobalEdit.swapLayers" }, "PCB_ACTIONS::editTracksAndVias": { id: "editTracksAndVias", label: "Edit Track & Via Properties...", tip: "Edit track and via properties globally across board", icon: "width_track_via", key: null, name: "pcbnew.GlobalEdit.editTracksAndVias" }, "PCB_ACTIONS::editTextAndGraphics": { id: "editTextAndGraphics", label: "Edit Text & Graphics Properties...", tip: "Edit Text and graphics properties globally across board", icon: "text", key: null, name: "pcbnew.GlobalEdit.editTextAndGraphics" }, "PCB_ACTIONS::editTeardrops": { id: "editTeardrops", label: "Edit Teardrops...", tip: "Add, remove or edit teardrops globally across board", icon: "via", key: null, name: "pcbnew.GlobalEdit.editTeardrops" }, "PCB_ACTIONS::globalDeletions": { id: "globalDeletions", label: "Global Deletions...", tip: "Delete tracks, footprints and graphic items from board", icon: "general_deletions", key: null, name: "pcbnew.GlobalEdit.globalDeletions" }, "PCB_ACTIONS::cleanupTracksAndVias": { id: "cleanupTracksAndVias", label: "Cleanup Tracks & Vias...", tip: "Cleanup redundant items, shorting items, etc.", icon: "cleanup_tracks_and_vias", key: null, name: "pcbnew.GlobalEdit.cleanupTracksAndVias" }, "PCB_ACTIONS::cleanupGraphics": { id: "cleanupGraphics", label: "Cleanup Graphics...", tip: "Cleanup redundant items, etc.", icon: "cleanup_graphics", key: null, name: "pcbnew.GlobalEdit.cleanupGraphics" }, "PCB_ACTIONS::microwaveCreateGap": { id: "microwaveCreateGap", label: "Draw Microwave Gaps", tip: "Create gap of specified length for microwave applications", icon: "mw_add_gap", key: null, name: "pcbnew.MicrowaveTool.createGap" }, "PCB_ACTIONS::microwaveCreateStub": { id: "microwaveCreateStub", label: "Draw Microwave Stubs", tip: "Create stub of specified length for microwave applications", icon: "mw_add_stub", key: null, name: "pcbnew.MicrowaveTool.createStub" }, "PCB_ACTIONS::microwaveCreateStubArc": { id: "microwaveCreateStubArc", label: "Draw Microwave Arc Stubs", tip: "Create stub (arc) of specified size for microwave applications", icon: "mw_add_stub_arc", key: null, name: "pcbnew.MicrowaveTool.createStubArc" }, "PCB_ACTIONS::microwaveCreateFunctionShape": { id: "microwaveCreateFunctionShape", label: "Draw Microwave Polygonal Shapes", tip: "Create a microwave polygonal shape from a list of vertices", icon: "mw_add_shape", key: null, name: "pcbnew.MicrowaveTool.createFunctionShape" }, "PCB_ACTIONS::microwaveCreateLine": { id: "microwaveCreateLine", label: "Draw Microwave Lines", tip: "Create line of specified length for microwave applications", icon: "mw_add_line", key: null, name: "pcbnew.MicrowaveTool.createLine" }, "PCB_ACTIONS::copyPadSettings": { id: "copyPadSettings", label: "Copy Pad Properties to Default", tip: "Copy current pad's properties", icon: "copy_pad_settings", key: null, name: "pcbnew.PadTool.CopyPadSettings" }, "PCB_ACTIONS::applyPadSettings": { id: "applyPadSettings", label: "Paste Default Pad Properties to Selected", tip: "Replace the current pad's properties with those copied earlier", icon: "apply_pad_settings", key: null, name: "pcbnew.PadTool.ApplyPadSettings" }, "PCB_ACTIONS::pushPadSettings": { id: "pushPadSettings", label: "Push Pad Properties to Other Pads...", tip: "Copy the current pad's properties to other pads", icon: "push_pad_settings", key: null, name: "pcbnew.PadTool.PushPadSettings" }, "PCB_ACTIONS::enumeratePads": { id: "enumeratePads", label: "Renumber Pads...", tip: "Renumber pads by clicking on them in the desired order", icon: "pad_enumerate", key: null, name: "pcbnew.PadTool.enumeratePads" }, "PCB_ACTIONS::placePad": { id: "placePad", label: "Add Pad", tip: "Add a pad of the most recently-placed type, or a copy of the selected pad", icon: "pad", key: null, name: "pcbnew.PadTool.placePad" }, "PCB_ACTIONS::placeThtPad": { id: "placeThtPad", label: "Add a THT Pad", tip: "Add a through-hole pad", icon: "pad_tht", key: null, name: "pcbnew.PadTool.placeThtPad" }, "PCB_ACTIONS::placeSmdPad": { id: "placeSmdPad", label: "Add an SMD Pad", tip: "Add a surface-mount pad", icon: "pad_smd", key: null, name: "pcbnew.PadTool.placeSmdPad" }, "PCB_ACTIONS::placeNpthPad": { id: "placeNpthPad", label: "Add an NPTH Pad", tip: "Add a non-plated through-hole pad", icon: "pad_npth", key: null, name: "pcbnew.PadTool.placeNpthPad" }, "PCB_ACTIONS::placePasteAperturePad": { id: "placePasteAperturePad", label: "Add a Paste Aperture Pad", tip: "Add a paste aperture pad", icon: "pad_paste_aperture", key: null, name: "pcbnew.PadTool.placePasteAperturePad" }, "PCB_ACTIONS::explodePad": { id: "explodePad", label: "Edit Pad as Graphic Shapes", tip: "Ungroups a custom-shaped pad for editing as individual graphic shapes", icon: "custom_pad_to_primitives", key: "Ctrl+E", name: "pcbnew.PadTool.explodePad" }, "PCB_ACTIONS::recombinePad": { id: "recombinePad", label: "Finish Pad Edit", tip: "Regroups all touching graphic shapes into the edited pad", icon: "custom_pad_to_primitives", key: "Ctrl+E", name: "pcbnew.PadTool.recombinePad" }, "PCB_ACTIONS::appendBoard": { id: "appendBoard", label: "Append Board...", tip: "Open another board and append its contents to this board", icon: "add_board", key: null, name: "pcbnew.EditorControl.appendBoard" }, "PCB_ACTIONS::rescueAutosave": { id: "rescueAutosave", label: "Rescue", tip: "Clear board and get last rescue file automatically saved by PCB editor", icon: "rescue", key: null, name: "pcbnew.EditorControl.rescueAutosave" }, "PCB_ACTIONS::openNonKicadBoard": { id: "openNonKicadBoard", label: "Import Non-KiCad Board File...", tip: "Import board file from other applications", icon: "import_brd_file", key: null, name: "pcbnew.EditorControl.openNonKicadBoard" }, "PCB_ACTIONS::exportFootprints": { id: "exportFootprints", label: "Export Footprints...", tip: "Add footprints from board to a new or an existing footprint library\\n(does not remove other footprints from this library)", icon: "library_archive", key: null, name: "pcbnew.EditorControl.exportFootprints" }, "PCB_ACTIONS::boardSetup": { id: "boardSetup", label: "Board Setup...", tip: "Edit board setup including layers, design rules and various defaults", icon: "options_board", key: null, name: "pcbnew.EditorControl.boardSetup" }, "PCB_ACTIONS::importNetlist": { id: "importNetlist", label: "Import Netlist...", tip: "Read netlist and update board connectivity", icon: "netlist", key: null, name: "pcbnew.EditorControl.importNetlist" }, "PCB_ACTIONS::importSpecctraSession": { id: "importSpecctraSession", label: "Import Specctra Session...", tip: "Import routed Specctra session (*.ses) file", icon: "import", key: null, name: "pcbnew.EditorControl.importSpecctraSession" }, "PCB_ACTIONS::exportSpecctraDSN": { id: "exportSpecctraDSN", label: "Export Specctra DSN...", tip: "Export Specctra DSN routing info", icon: "export_dsn", key: null, name: "pcbnew.EditorControl.exportSpecctraDSN" }, "PCB_ACTIONS::editFootprintFields": { id: "editFootprintFields", label: "Bulk Edit Footprint Fields...", tip: "Edit a table of fields from all footprints in the board", icon: "spreadsheet", key: null, name: "pcbnew.EditorControl.editFootprintFields" }, "PCB_ACTIONS::generateGerbers": { id: "generateGerbers", label: "Gerbers (.gbr)...", tip: "Generate Gerbers for fabrication", icon: "post_gerber", key: null, name: "pcbnew.EditorControl.generateGerbers" }, "PCB_ACTIONS::generateDrillFiles": { id: "generateDrillFiles", label: "Drill Files (.drl)...", tip: "Generate Excellon drill file(s)", icon: "post_drill", key: null, name: "pcbnew.EditorControl.generateDrillFiles" }, "PCB_ACTIONS::generatePosFile": { id: "generatePosFile", label: "Component Placement (.pos, .gbr)...", tip: "Generate component placement file(s) for pick and place", icon: "post_compo", key: null, name: "pcbnew.EditorControl.generatePosFile" }, "PCB_ACTIONS::generateReportFile": { id: "generateReportFile", label: "Footprint Report (.rpt)...", tip: "Create report of all footprints from current board", icon: "post_rpt", key: null, name: "pcbnew.EditorControl.generateReportFile" }, "PCB_ACTIONS::generateIPC2581File": { id: "generateIPC2581File", label: "IPC-2581 File (.xml)...", tip: "Generate an IPC-2581 file", icon: "post_xml", key: null, name: "pcbnew.EditorControl.generateIPC2581File" }, "PCB_ACTIONS::generateODBPPFile": { id: "generateODBPPFile", label: "ODB++ Output File...", tip: "Generate ODB++ output files", icon: "post_odb", key: null, name: "pcbnew.EditorControl.generateODBPPFile" }, "PCB_ACTIONS::generateD356File": { id: "generateD356File", label: "IPC-D-356 Netlist File...", tip: "Generate IPC-D-356 netlist file", icon: "post_d356", key: null, name: "pcbnew.EditorControl.generateD356File" }, "PCB_ACTIONS::generateBOM": { id: "generateBOM", label: "Bill of Materials...", tip: "Create bill of materials from board", icon: "post_bom", key: null, name: "pcbnew.EditorControl.generateBOM" }, "PCB_ACTIONS::generateBOMLegacy": { id: "generateBOMLegacy", label: "Generate Legacy Bill of Materials...", tip: "Generate a bill of materials for the current board using the legacy exporter", icon: "file_bom", key: null, name: "pcbnew.EditorControl.generateBOMLegacy" }, "PCB_ACTIONS::exportGenCAD": { id: "exportGenCAD", label: "Export GenCAD...", tip: "Export GenCAD board representation", icon: "post_gencad", key: null, name: "pcbnew.EditorControl.exportGenCAD" }, "PCB_ACTIONS::exportVRML": { id: "exportVRML", label: "Export VRML...", tip: "Export VRML 3D board representation", icon: "export3d", key: null, name: "pcbnew.EditorControl.exportVRML" }, "PCB_ACTIONS::exportIDF": { id: "exportIDF", label: "Export IDFv3...", tip: "Export IDF 3D board representation", icon: "export_idf", key: null, name: "pcbnew.EditorControl.exportIDF" }, "PCB_ACTIONS::exportSTEP": { id: "exportSTEP", label: "Export STEP/GLB/BREP/XAO/PLY/STL...", tip: "Export STEP, GLB, BREP, XAO, PLY or STL 3D board representation", icon: "export_step", key: null, name: "pcbnew.EditorControl.exportSTEP" }, "PCB_ACTIONS::exportCmpFile": { id: "exportCmpFile", label: "Export Footprint Association (.cmp) File...", tip: "Export footprint association file (*.cmp) for schematic back annotation", icon: "export_cmp", key: null, name: "pcbnew.EditorControl.exportFootprintAssociations" }, "PCB_ACTIONS::exportHyperlynx": { id: "exportHyperlynx", label: "Hyperlynx...", tip: null, icon: "export_step", key: null, name: "pcbnew.EditorControl.exportHyperlynx" }, "PCB_ACTIONS::collect3DModels": { id: "collect3DModels", label: "Collect And Embed 3D Models", tip: "Collect footprint 3D models and embed them into the board", icon: "import3d", key: null, name: "pcbnew.EditorControl.collect3DModels" }, "PCB_ACTIONS::trackWidthInc": { id: "trackWidthInc", label: "Switch Track Width to Next", tip: "Change track width to next pre-defined size", icon: null, key: "W", name: "pcbnew.EditorControl.trackWidthInc" }, "PCB_ACTIONS::trackWidthDec": { id: "trackWidthDec", label: "Switch Track Width to Previous", tip: "Change track width to previous pre-defined size", icon: null, key: "Shift+W", name: "pcbnew.EditorControl.trackWidthDec" }, "PCB_ACTIONS::viaSizeInc": { id: "viaSizeInc", label: "Increase Via Size", tip: "Change via size to next pre-defined size", icon: null, key: "'", name: "pcbnew.EditorControl.viaSizeInc" }, "PCB_ACTIONS::viaSizeDec": { id: "viaSizeDec", label: "Decrease Via Size", tip: "Change via size to previous pre-defined size", icon: null, key: "\\", name: "pcbnew.EditorControl.viaSizeDec" }, "PCB_ACTIONS::autoTrackWidth": { id: "autoTrackWidth", label: "Automatically select track width", tip: "When routing from an existing track use its width instead of the current width setting", icon: "auto_track_width", key: null, name: "pcbnew.EditorControl.autoTrackWidth" }, "PCB_ACTIONS::assignNetClass": { id: "assignNetClass", label: "Assign Netclass...", tip: "Assign a netclass to nets matching a pattern", icon: "netlist", key: null, name: "pcbnew.EditorControl.assignNetclass" }, "PCB_ACTIONS::zoneMerge": { id: "zoneMerge", label: "Merge Zones", tip: null, icon: null, key: null, name: "pcbnew.EditorControl.zoneMerge" }, "PCB_ACTIONS::zoneDuplicate": { id: "zoneDuplicate", label: "Duplicate Zone onto Layer...", tip: null, icon: "zone_duplicate", key: null, name: "pcbnew.EditorControl.zoneDuplicate" }, "PCB_ACTIONS::zonePriorityMoveToTop": { id: "zonePriorityMoveToTop", label: "Move to Top", tip: null, icon: "small_up", key: null, name: "pcbnew.EditorControl.zonePriorityMoveToTop" }, "PCB_ACTIONS::zonePriorityRaise": { id: "zonePriorityRaise", label: "Raise", tip: null, icon: "small_up", key: null, name: "pcbnew.EditorControl.zonePriorityRaise" }, "PCB_ACTIONS::zonePriorityLower": { id: "zonePriorityLower", label: "Lower", tip: null, icon: "small_down", key: null, name: "pcbnew.EditorControl.zonePriorityLower" }, "PCB_ACTIONS::zonePriorityMoveToBottom": { id: "zonePriorityMoveToBottom", label: "Move to Bottom", tip: null, icon: "small_down", key: null, name: "pcbnew.EditorControl.zonePriorityMoveToBottom" }, "PCB_ACTIONS::placeFootprint": { id: "placeFootprint", label: "Place Footprints", tip: null, icon: "module", key: "A", name: "pcbnew.EditorControl.placeFootprint" }, "PCB_ACTIONS::drillOrigin": { id: "drillOrigin", label: "Drill/Place File Origin", tip: "Place origin point for drill files and component placement files", icon: "set_origin", key: null, name: "pcbnew.EditorControl.drillOrigin" }, "PCB_ACTIONS::drillResetOrigin": { id: "drillResetOrigin", label: "Reset Drill Origin", tip: null, icon: null, key: null, name: "pcbnew.EditorControl.drillResetOrigin" }, "PCB_ACTIONS::toggleLock": { id: "toggleLock", label: "Toggle Lock", tip: "Lock or unlock selected items", icon: "lock_unlock", key: "L", name: "pcbnew.EditorControl.toggleLock" }, "PCB_ACTIONS::lineModeFree": { id: "lineModeFree", label: "Line Modes", tip: "Draw and drag at any angle", icon: "lines_any", key: null, name: "pcbnew.EditorControl.lineModeFree" }, "PCB_ACTIONS::lineMode90": { id: "lineMode90", label: "Line Modes", tip: "Constrain drawing and dragging to horizontal or vertical motions", icon: "lines90", key: null, name: "pcbnew.EditorControl.lineModeOrthonal" }, "PCB_ACTIONS::lineMode45": { id: "lineMode45", label: "Line Modes", tip: "Constrain drawing and dragging to horizontal, vertical, or 45-degree angle motions", icon: "hv45mode", key: null, name: "pcbnew.EditorControl.lineMode45" }, "PCB_ACTIONS::lineModeNext": { id: "lineModeNext", label: "Line Modes", tip: "Switch to next angle snapping mode", icon: null, key: "Shift+Space", name: "pcbnew.EditorControl.lineModeNext" }, "PCB_ACTIONS::lock": { id: "lock", label: "Lock", tip: "Prevent items from being moved and/or resized on the canvas", icon: "locked", key: null, name: "pcbnew.EditorControl.lock" }, "PCB_ACTIONS::unlock": { id: "unlock", label: "Unlock", tip: "Allow items to be moved and/or resized on the canvas", icon: "unlocked", key: null, name: "pcbnew.EditorControl.unlock" }, "PCB_ACTIONS::highlightNet": { id: "highlightNet", label: "Highlight Net", tip: "Highlight net under cursor", icon: "net_highlight", key: "`", name: "pcbnew.EditorControl.highlightNet" }, "PCB_ACTIONS::toggleLastNetHighlight": { id: "toggleLastNetHighlight", label: "Toggle Last Net Highlight", tip: "Toggle between last two highlighted nets", icon: null, key: null, name: "pcbnew.EditorControl.toggleLastNetHighlight" }, "PCB_ACTIONS::clearHighlight": { id: "clearHighlight", label: "Clear Net Highlighting", tip: null, icon: null, key: "~", name: "pcbnew.EditorControl.clearHighlight" }, "PCB_ACTIONS::toggleNetHighlight": { id: "toggleNetHighlight", label: "Toggle Net Highlight", tip: null, icon: "net_highlight", key: "Alt+`", name: "pcbnew.EditorControl.toggleNetHighlight" }, "PCB_ACTIONS::highlightNetSelection": { id: "highlightNetSelection", label: "Highlight Net", tip: "Highlight all copper items on the selected net(s)", icon: "net_highlight", key: null, name: "pcbnew.EditorControl.highlightNetSelection" }, "PCB_ACTIONS::highlightNetChain": { id: "highlightNetChain", label: "Highlight Net Chain", tip: "Highlight every net in the net chain", icon: "net_highlight", key: null, name: "pcbnew.EditorControl.highlightNetChain" }, "PCB_ACTIONS::setTerminalPad": { id: "setTerminalPad", label: "Set Terminal Pad", tip: null, icon: null, key: null, name: "pcbnew.EditorControl.setTerminalPad" }, "PCB_ACTIONS::hideNetInRatsnest": { id: "hideNetInRatsnest", label: "Hide Net in Ratsnest", tip: "Hide the selected net in the ratsnest of unconnected net lines/arcs", icon: "hide_ratsnest", key: null, name: "pcbnew.EditorControl.hideNet" }, "PCB_ACTIONS::showNetInRatsnest": { id: "showNetInRatsnest", label: "Show Net in Ratsnest", tip: "Show the selected net in the ratsnest of unconnected net lines/arcs", icon: "show_ratsnest", key: null, name: "pcbnew.EditorControl.showNet" }, "PCB_ACTIONS::showEeschema": { id: "showEeschema", label: "Switch to Schematic Editor", tip: "Open schematic in schematic editor", icon: "icon_eeschema_24", key: null, name: "pcbnew.EditorControl.showEeschema" }, "PCB_ACTIONS::drcRuleEditor": { id: "drcRuleEditor", label: "DRC Rule Editor", tip: "Open DRC rule editor window", icon: null, key: null, name: "pcbnew.DRETool.drcRuleEditor" }, "PCB_ACTIONS::localRatsnestTool": { id: "localRatsnestTool", label: "Local Ratsnest", tip: "Toggle ratsnest display of selected item(s)", icon: "tool_ratsnest", key: null, name: "pcbnew.Control.localRatsnestTool" }, "PCB_ACTIONS::showLayersManager": { id: "showLayersManager", label: "Appearance", tip: "Show/hide the appearance manager", icon: "layers_manager", key: null, name: "pcbnew.Control.showLayersManager" }, "PCB_ACTIONS::showNetInspector": { id: "showNetInspector", label: "Net Inspector", tip: "Show/hide the net inspector", icon: "tools", key: null, name: "pcbnew.Control.showNetInspector" }, "PCB_ACTIONS::zonesManager": { id: "zonesManager", label: "Zone Manager...", tip: "Show the zone manager dialog", icon: "show_zone", key: null, name: "pcbnew.Control.zonesManager" }, "PCB_ACTIONS::flipBoard": { id: "flipBoard", label: "Flip Board View", tip: "View board from the opposite side", icon: "flip_board", key: null, name: "pcbnew.Control.flipBoard" }, "PCB_ACTIONS::showRatsnest": { id: "showRatsnest", label: "Show Ratsnest", tip: "Show lines/arcs representing missing connections on the board", icon: "general_ratsnest", key: null, name: "pcbnew.Control.showRatsnest" }, "PCB_ACTIONS::ratsnestLineMode": { id: "ratsnestLineMode", label: "Curved Ratsnest Lines", tip: "Show ratsnest with curved lines", icon: "curved_ratsnest", key: null, name: "pcbnew.Control.ratsnestLineMode" }, "PCB_ACTIONS::ratsnestModeCycle": { id: "ratsnestModeCycle", label: "Ratsnest Mode (3-state)", tip: "Cycle between showing ratsnests for all layers, just visible layers, and none", icon: null, key: null, name: "pcbnew.Control.ratsnestModeCycle" }, "PCB_ACTIONS::netColorModeCycle": { id: "netColorModeCycle", label: "Net Color Mode (3-state)", tip: "Cycle between using net and netclass colors for all nets, just ratsnests, and none", icon: null, key: null, name: "pcbnew.Control.netColorMode" }, "PCB_ACTIONS::trackDisplayMode": { id: "trackDisplayMode", label: "Sketch Tracks", tip: "Show tracks in outline mode", icon: "showtrack", key: "K", name: "pcbnew.Control.trackDisplayMode" }, "PCB_ACTIONS::padDisplayMode": { id: "padDisplayMode", label: "Sketch Pads", tip: "Show pads in outline mode", icon: "pad_sketch", key: null, name: "pcbnew.Control.padDisplayMode" }, "PCB_ACTIONS::viaDisplayMode": { id: "viaDisplayMode", label: "Sketch Vias", tip: "Show vias in outline mode", icon: "via_sketch", key: null, name: "pcbnew.Control.viaDisplayMode" }, "PCB_ACTIONS::graphicsOutlines": { id: "graphicsOutlines", label: "Sketch Graphic Items", tip: "Show graphic items in outline mode", icon: "show_mod_edge", key: null, name: "pcbnew.Control.graphicOutlines" }, "PCB_ACTIONS::textOutlines": { id: "textOutlines", label: "Sketch Text Items", tip: "Show footprint texts in line mode", icon: "text_sketch", key: null, name: "pcbnew.Control.textOutlines" }, "PCB_ACTIONS::showPadNumbers": { id: "showPadNumbers", label: "Show Pad Numbers", tip: null, icon: "pad_number", key: null, name: "pcbnew.Control.showPadNumbers" }, "PCB_ACTIONS::zoneDisplayFilled": { id: "zoneDisplayFilled", label: "Draw Zone Fills", tip: "Show filled areas of zones", icon: "show_zone", key: null, name: "pcbnew.Control.zoneDisplayEnable" }, "PCB_ACTIONS::zoneDisplayOutline": { id: "zoneDisplayOutline", label: "Draw Zone Outlines", tip: "Show only zone boundaries", icon: "show_zone_disable", key: null, name: "pcbnew.Control.zoneDisplayDisable" }, "PCB_ACTIONS::zoneDisplayFractured": { id: "zoneDisplayFractured", label: "Draw Zone Fill Fracture Borders", tip: null, icon: "show_zone_outline_only", key: null, name: "pcbnew.Control.zoneDisplayOutlines" }, "PCB_ACTIONS::zoneDisplayTriangulated": { id: "zoneDisplayTriangulated", label: "Draw Zone Fill Triangulation", tip: null, icon: "show_zone_triangulation", key: null, name: "pcbnew.Control.zoneDisplayTesselation" }, "PCB_ACTIONS::zoneDisplayToggle": { id: "zoneDisplayToggle", label: "Toggle Zone Display", tip: "Cycle between showing zone fills and just their outlines", icon: "show_zone", key: null, name: "pcbnew.Control.zoneDisplayToggle" }, "PCB_ACTIONS::fpAutoZoom": { id: "fpAutoZoom", label: "Automatic zoom", tip: "Automatic Zoom on footprint change", icon: "zoom_auto_fit_in_page", key: null, name: "pcbnew.Control.fpAutoZoom" }, "PCB_ACTIONS::layerTop": { id: "layerTop", label: "Switch to Component (F.Cu) layer", tip: null, icon: null, key: "PgUp", name: "pcbnew.Control.layerTop" }, "PCB_ACTIONS::layerInner1": { id: "layerInner1", label: "Switch to Inner Layer 1", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner1" }, "PCB_ACTIONS::layerInner2": { id: "layerInner2", label: "Switch to Inner Layer 2", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner2" }, "PCB_ACTIONS::layerInner3": { id: "layerInner3", label: "Switch to Inner Layer 3", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner3" }, "PCB_ACTIONS::layerInner4": { id: "layerInner4", label: "Switch to Inner Layer 4", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner4" }, "PCB_ACTIONS::layerInner5": { id: "layerInner5", label: "Switch to Inner Layer 5", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner5" }, "PCB_ACTIONS::layerInner6": { id: "layerInner6", label: "Switch to Inner Layer 6", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner6" }, "PCB_ACTIONS::layerInner7": { id: "layerInner7", label: "Switch to Inner Layer 7", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner7" }, "PCB_ACTIONS::layerInner8": { id: "layerInner8", label: "Switch to Inner Layer 8", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner8" }, "PCB_ACTIONS::layerInner9": { id: "layerInner9", label: "Switch to Inner Layer 9", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner9" }, "PCB_ACTIONS::layerInner10": { id: "layerInner10", label: "Switch to Inner Layer 10", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner10" }, "PCB_ACTIONS::layerInner11": { id: "layerInner11", label: "Switch to Inner Layer 11", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner11" }, "PCB_ACTIONS::layerInner12": { id: "layerInner12", label: "Switch to Inner Layer 12", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner12" }, "PCB_ACTIONS::layerInner13": { id: "layerInner13", label: "Switch to Inner Layer 13", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner13" }, "PCB_ACTIONS::layerInner14": { id: "layerInner14", label: "Switch to Inner Layer 14", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner14" }, "PCB_ACTIONS::layerInner15": { id: "layerInner15", label: "Switch to Inner Layer 15", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner15" }, "PCB_ACTIONS::layerInner16": { id: "layerInner16", label: "Switch to Inner Layer 16", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner16" }, "PCB_ACTIONS::layerInner17": { id: "layerInner17", label: "Switch to Inner Layer 17", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner17" }, "PCB_ACTIONS::layerInner18": { id: "layerInner18", label: "Switch to Inner Layer 18", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner18" }, "PCB_ACTIONS::layerInner19": { id: "layerInner19", label: "Switch to Inner Layer 19", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner19" }, "PCB_ACTIONS::layerInner20": { id: "layerInner20", label: "Switch to Inner Layer 20", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner20" }, "PCB_ACTIONS::layerInner21": { id: "layerInner21", label: "Switch to Inner Layer 21", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner21" }, "PCB_ACTIONS::layerInner22": { id: "layerInner22", label: "Switch to Inner Layer 22", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner22" }, "PCB_ACTIONS::layerInner23": { id: "layerInner23", label: "Switch to Inner Layer 23", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner23" }, "PCB_ACTIONS::layerInner24": { id: "layerInner24", label: "Switch to Inner Layer 24", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner24" }, "PCB_ACTIONS::layerInner25": { id: "layerInner25", label: "Switch to Inner Layer 25", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner25" }, "PCB_ACTIONS::layerInner26": { id: "layerInner26", label: "Switch to Inner Layer 26", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner26" }, "PCB_ACTIONS::layerInner27": { id: "layerInner27", label: "Switch to Inner Layer 27", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner27" }, "PCB_ACTIONS::layerInner28": { id: "layerInner28", label: "Switch to Inner Layer 28", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner28" }, "PCB_ACTIONS::layerInner29": { id: "layerInner29", label: "Switch to Inner Layer 29", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner29" }, "PCB_ACTIONS::layerInner30": { id: "layerInner30", label: "Switch to Inner Layer 30", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner30" }, "PCB_ACTIONS::layerBottom": { id: "layerBottom", label: "Switch to Copper (B.Cu) Layer", tip: null, icon: null, key: "PgDn", name: "pcbnew.Control.layerBottom" }, "PCB_ACTIONS::layerNext": { id: "layerNext", label: "Switch to Next Layer", tip: null, icon: null, key: "+", name: "pcbnew.Control.layerNext" }, "PCB_ACTIONS::layerPrev": { id: "layerPrev", label: "Switch to Previous Layer", tip: null, icon: null, key: "-", name: "pcbnew.Control.layerPrev" }, "PCB_ACTIONS::layerToggle": { id: "layerToggle", label: "Toggle Layer", tip: "Switch between layers in active layer pair", icon: null, key: "V", name: "pcbnew.Control.layerToggle" }, "PCB_ACTIONS::layerAlphaInc": { id: "layerAlphaInc", label: "Increase Layer Opacity", tip: "Make the current layer less transparent", icon: "contrast_mode", key: "}", name: "pcbnew.Control.layerAlphaInc" }, "PCB_ACTIONS::layerAlphaDec": { id: "layerAlphaDec", label: "Decrease Layer Opacity", tip: "Make the current layer more transparent", icon: "contrast_mode", key: "{", name: "pcbnew.Control.layerAlphaDec" }, "PCB_ACTIONS::layerPairPresetsCycle": { id: "layerPairPresetsCycle", label: "Cycle Layer Pair Presets", tip: "Cycle between preset layer pairs", icon: null, key: "Shift+V", name: "pcbnew.Control.layerPairPresetCycle" }, "PCB_ACTIONS::boardStatistics": { id: "boardStatistics", label: "Show Board Statistics", tip: "Shows board statistics", icon: "editor", key: null, name: "pcbnew.InspectionTool.ShowBoardStatistics" }, "PCB_ACTIONS::inspectClearance": { id: "inspectClearance", label: "Clearance Resolution", tip: "Show clearance resolution for the active layer between two selected objects", icon: "mw_add_gap", key: null, name: "pcbnew.InspectionTool.InspectClearance" }, "PCB_ACTIONS::inspectConstraints": { id: "inspectConstraints", label: "Constraints Resolution", tip: "Show constraints resolution for the selected object", icon: "mw_add_stub", key: null, name: "pcbnew.InspectionTool.InspectConstraints" }, "PCB_ACTIONS::diffFootprint": { id: "diffFootprint", label: "Compare Footprint with Library", tip: "Show differences between board footprint and its library equivalent", icon: "library", key: null, name: "pcbnew.InspectionTool.DiffFootprint" }, "PCB_ACTIONS::compareBoardWithFile": { id: "compareBoardWithFile", label: "Compare Board with File...", tip: "Diff the current PCB against another .kicad_pcb file", icon: "library", key: null, name: "pcbnew.InspectionTool.CompareBoardWithFile" }, "PCB_ACTIONS::compareBoardWithHistory": { id: "compareBoardWithHistory", label: "Compare Board with Local History...", tip: "Diff the current PCB against the most recent local-history snapshot", icon: "library", key: null, name: "pcbnew.InspectionTool.CompareBoardWithHistory" }, "PCB_ACTIONS::showFootprintAssociations": { id: "showFootprintAssociations", label: "Show Footprint Associations", tip: "Show footprint library and schematic symbol associations", icon: "link", key: null, name: "pcbnew.InspectionTool.ShowFootprintAssociations" }, "PCB_ACTIONS::boardReannotate": { id: "boardReannotate", label: "Geographical Reannotate...", tip: "Reannotate PCB in geographical order", icon: "annotate", key: null, name: "pcbnew.ReannotateTool.ShowReannotateDialog" }, "PCB_ACTIONS::repairBoard": { id: "repairBoard", label: "Repair Board", tip: "Run various diagnostics and attempt to repair board", icon: "rescue", key: null, name: "pcbnew.Control.repairBoard" }, "PCB_ACTIONS::repairFootprint": { id: "repairFootprint", label: "Repair Footprint", tip: "Run various diagnostics and attempt to repair footprint", icon: "rescue", key: null, name: "pcbnew.ModuleEditor.repairFootprint" }, "PCB_ACTIONS::nextFootprintTab": { id: "nextFootprintTab", label: "Next Footprint Tab", tip: "Switch to the next open footprint tab", icon: null, key: null, name: "pcbnew.ModuleEditor.nextFootprintTab" }, "PCB_ACTIONS::prevFootprintTab": { id: "prevFootprintTab", label: "Previous Footprint Tab", tip: "Switch to the previous open footprint tab", icon: null, key: null, name: "pcbnew.ModuleEditor.prevFootprintTab" }, "PCB_ACTIONS::closeFootprintTab": { id: "closeFootprintTab", label: "Close Footprint Tab", tip: "Close the active footprint tab", icon: null, key: null, name: "pcbnew.ModuleEditor.closeFootprintTab" }, "PCB_ACTIONS::alignTop": { id: "alignTop", label: "Align to Top", tip: "Aligns selected items to the top edge of the item under the cursor", icon: "align_items_top", key: null, name: "pcbnew.AlignAndDistribute.alignTop" }, "PCB_ACTIONS::alignBottom": { id: "alignBottom", label: "Align to Bottom", tip: "Aligns selected items to the bottom edge of the item under the cursor", icon: "align_items_bottom", key: null, name: "pcbnew.AlignAndDistribute.alignBottom" }, "PCB_ACTIONS::alignLeft": { id: "alignLeft", label: "Align to Left", tip: "Aligns selected items to the left edge of the item under the cursor", icon: "align_items_left", key: null, name: "pcbnew.AlignAndDistribute.alignLeft" }, "PCB_ACTIONS::alignRight": { id: "alignRight", label: "Align to Right", tip: "Aligns selected items to the right edge of the item under the cursor", icon: "align_items_right", key: null, name: "pcbnew.AlignAndDistribute.alignRight" }, "PCB_ACTIONS::alignCenterY": { id: "alignCenterY", label: "Align to Vertical Center", tip: "Aligns selected items to the vertical center of the item under the cursor", icon: "align_items_center", key: null, name: "pcbnew.AlignAndDistribute.alignCenterY" }, "PCB_ACTIONS::alignCenterX": { id: "alignCenterX", label: "Align to Horizontal Center", tip: "Aligns selected items to the horizontal center of the item under the cursor", icon: "align_items_middle", key: null, name: "pcbnew.AlignAndDistribute.alignCenterX" }, "PCB_ACTIONS::distributeHorizontallyCenters": { id: "distributeHorizontallyCenters", label: "Distribute Horizontally by Centers", tip: "Distributes selected items between the left-most item and the right-most item so that the item centers are equally distributed", icon: "distribute_horizontal_centers", key: null, name: "pcbnew.AlignAndDistribute.distributeHorizontallyCenters" }, "PCB_ACTIONS::distributeHorizontallyGaps": { id: "distributeHorizontallyGaps", label: "Distribute Horizontally with Even Gaps", tip: "Distributes selected items between the left-most item and the right-most item so that the gaps between items are equal", icon: "distribute_horizontal_gaps", key: null, name: "pcbnew.AlignAndDistribute.distributeHorizontallyGaps" }, "PCB_ACTIONS::distributeVerticallyGaps": { id: "distributeVerticallyGaps", label: "Distribute Vertically with Even Gaps", tip: "Distributes selected items between the top-most item and the bottom-most item so that the gaps between items are equal", icon: "distribute_vertical_gaps", key: null, name: "pcbnew.AlignAndDistribute.distributeVerticallyGaps" }, "PCB_ACTIONS::distributeVerticallyCenters": { id: "distributeVerticallyCenters", label: "Distribute Vertically by Centers", tip: "Distributes selected items between the top-most item and the bottom-most item so that the item centers are equally distributed", icon: "distribute_vertical_centers", key: null, name: "pcbnew.AlignAndDistribute.distributeVerticallyCenters" }, "PCB_ACTIONS::pointEditorAddCorner": { id: "pointEditorAddCorner", label: "Create Corner", tip: "Create a corner", icon: "add_corner", key: "Ins", name: "pcbnew.PointEditor.addCorner", mac: "F1" }, "PCB_ACTIONS::pointEditorRemoveCorner": { id: "pointEditorRemoveCorner", label: "Remove Corner", tip: "Remove corner", icon: "delete_cursor", key: null, name: "pcbnew.PointEditor.removeCorner" }, "PCB_ACTIONS::pointEditorChamferCorner": { id: "pointEditorChamferCorner", label: "Chamfer Corner", tip: "Chamfer corner", icon: "chamfer", key: null, name: "pcbnew.PointEditor.chamferCorner" }, "PCB_ACTIONS::positionRelative": { id: "positionRelative", label: "Position Relative To...", tip: "Positions the selected item(s) by an exact amount relative to another", icon: "move_relative", key: "Shift+P", name: "pcbnew.PositionRelative.positionRelative" }, "PCB_ACTIONS::interactiveOffsetTool": { id: "interactiveOffsetTool", label: "Interactive Offset Tool", tip: "Interactive tool for offsetting items by exact amounts", icon: "move_relative", key: null, name: "pcbnew.PositionRelative.interactiveOffsetTool" }, "PCB_ACTIONS::selectConnection": { id: "selectConnection", label: "Select/Expand Connection", tip: "Selects a connection or expands an existing selection to junctions, pads, or entire connections", icon: "add_tracks", key: "U", name: "pcbnew.InteractiveSelection.SelectConnection" }, "PCB_ACTIONS::unrouteSelected": { id: "unrouteSelected", label: "Unroute Selected", tip: "Unroutes selected items to the nearest pad.", icon: "general_deletions", key: null, name: "pcbnew.InteractiveSelection.unrouteSelected" }, "PCB_ACTIONS::unrouteSegment": { id: "unrouteSegment", label: "Unroute Segment", tip: "Unroutes segment to the nearest segment.", icon: "general_deletions", key: "Backspace", name: "pcbnew.InteractiveSelection.unrouteSegment" }, "PCB_ACTIONS::selectNet": { id: "selectNet", label: "Select All Tracks in Net", tip: "Selects all tracks & vias belonging to the same net.", icon: null, key: null, name: "pcbnew.InteractiveSelection.SelectNet" }, "PCB_ACTIONS::deselectNet": { id: "deselectNet", label: "Deselect All Tracks in Net", tip: "Deselects all tracks & vias belonging to the same net.", icon: null, key: null, name: "pcbnew.InteractiveSelection.DeselectNet" }, "PCB_ACTIONS::selectNetChain": { id: "selectNetChain", label: "Select All Tracks in Net Chain", tip: "Selects all tracks & vias belonging to every net in the same net chain (nets joined through series passives).", icon: null, key: null, name: "pcbnew.InteractiveSelection.SelectNetChain" }, "PCB_ACTIONS::selectUnconnected": { id: "selectUnconnected", label: "Select All Unconnected Footprints", tip: "Selects all unconnected footprints belonging to each selected net.", icon: null, key: "O", name: "pcbnew.InteractiveSelection.SelectUnconnected" }, "PCB_ACTIONS::grabUnconnected": { id: "grabUnconnected", label: "Grab Nearest Unconnected Footprints", tip: "Selects and initiates moving the nearest unconnected footprint on each selected net.", icon: null, key: "Shift+O", name: "pcbnew.InteractiveSelection.GrabUnconnected" }, "PCB_ACTIONS::selectOnSheetFromEeschema": { id: "selectOnSheetFromEeschema", label: "Sheet", tip: "Selects all footprints and tracks in the schematic sheet", icon: "select_same_sheet", key: null, name: "pcbnew.InteractiveSelection.SelectOnSheet" }, "PCB_ACTIONS::selectSameSheet": { id: "selectSameSheet", label: "Items in Same Hierarchical Sheet", tip: "Selects all footprints and tracks in the same schematic sheet", icon: "select_same_sheet", key: null, name: "pcbnew.InteractiveSelection.SelectSameSheet" }, "PCB_ACTIONS::selectOnSchematic": { id: "selectOnSchematic", label: "Select on Schematic", tip: "Selects corresponding items in Schematic editor", icon: "select_same_sheet", key: null, name: "pcbnew.InteractiveSelection.SelectOnSchematic" }, "PCB_ACTIONS::filterSelection": { id: "filterSelection", label: "Filter Selected Items...", tip: "Remove items from the selection by type", icon: "filter", key: null, name: "pcbnew.InteractiveSelection.FilterSelection" }, "PCB_ACTIONS::zoneFill": { id: "zoneFill", label: "Draft Fill Selected Zone(s)", tip: "Update copper fill of selected zone(s) without regard to other interacting zones", icon: "fill_zone", key: null, name: "pcbnew.ZoneFiller.zoneFill" }, "PCB_ACTIONS::zoneFillAll": { id: "zoneFillAll", label: "Fill All Zones", tip: "Update copper fill of all zones", icon: "fill_zone", key: "B", name: "pcbnew.ZoneFiller.zoneFillAll" }, "PCB_ACTIONS::zoneUnfill": { id: "zoneUnfill", label: "Unfill Selected Zone(s)", tip: "Remove copper fill from selected zone(s)", icon: "zone_unfill", key: null, name: "pcbnew.ZoneFiller.zoneUnfill" }, "PCB_ACTIONS::zoneUnfillAll": { id: "zoneUnfillAll", label: "Unfill All Zones", tip: "Remove copper fill from all zones", icon: "zone_unfill", key: "Ctrl+B", name: "pcbnew.ZoneFiller.zoneUnfillAll" }, "PCB_ACTIONS::autoplaceSelectedComponents": { id: "autoplaceSelectedComponents", label: "Place Selected Footprints", tip: "Performs automatic placement of selected components", icon: null, key: null, name: "pcbnew.Autoplacer.autoplaceSelected" }, "PCB_ACTIONS::autoplaceOffboardComponents": { id: "autoplaceOffboardComponents", label: "Place Off-Board Footprints", tip: "Performs automatic placement of components outside board area", icon: null, key: null, name: "pcbnew.Autoplacer.autoplaceOffboard" }, "PCB_ACTIONS::generatePlacementRuleAreas": { id: "generatePlacementRuleAreas", label: "Generate Placement Rule Areas...", tip: "Creates best-fit placement rule areas", icon: "add_keepout_area", key: null, name: "pcbnew.Multichannel.generatePlacementRuleAreas" }, "PCB_ACTIONS::repeatLayout": { id: "repeatLayout", label: "Repeat Layout...", tip: "Clones placement & routing across multiple identical channels", icon: "copy", key: null, name: "pcbnew.Multichannel.repeatLayout" }, "PCB_ACTIONS::updateLinkedLayouts": { id: "updateLinkedLayouts", label: "Update Linked Layouts", tip: "Copies the selected Rule Area onto the Rule Areas linked to it", icon: "refresh", key: null, name: "pcbnew.Multichannel.updateLinkedLayouts" }, "PCB_ACTIONS::expandToMatchingTopology": { id: "expandToMatchingTopology", label: "Expand Selection by One Step", tip: "Adds the neighbouring parts, as long as the selection still repeats elsewhere on the board", icon: "select_same_sheet", key: null, name: "pcbnew.Multichannel.expandToMatchingTopology" }, "PCB_ACTIONS::expandToLargestTopology": { id: "expandToLargestTopology", label: "Expand Selection to Largest Matching Topology", tip: "Adds parts until the selection no longer repeats elsewhere on the board", icon: "select_same_sheet", key: null, name: "pcbnew.Multichannel.expandToLargestTopology" }, "PCB_ACTIONS::unlinkLayout": { id: "unlinkLayout", label: "Unlink Layout", tip: "Removes the selected Rule Areas from the set of linked layouts", icon: "group_ungroup", key: null, name: "pcbnew.Multichannel.unlinkLayout" }, "PCB_ACTIONS::routeSingleTrack": { id: "routeSingleTrack", label: "Route Single Track", tip: "Route tracks", icon: "add_tracks", key: "X", name: "pcbnew.InteractiveRouter.SingleTrack" }, "PCB_ACTIONS::routeDiffPair": { id: "routeDiffPair", label: "Route Differential Pair", tip: "Route differential pairs", icon: "ps_diff_pair", key: "6", name: "pcbnew.InteractiveRouter.DiffPair" }, "PCB_ACTIONS::routerSettingsDialog": { id: "routerSettingsDialog", label: "Interactive Router Settings...", tip: "Open Interactive Router settings", icon: "tools", key: "Ctrl+<", name: "pcbnew.InteractiveRouter.SettingsDialog" }, "PCB_ACTIONS::routerDiffPairDialog": { id: "routerDiffPairDialog", label: "Differential Pair Dimensions...", tip: "Open Differential Pair Dimension settings", icon: "ps_diff_pair_gap", key: null, name: "pcbnew.InteractiveRouter.DiffPairDialog" }, "PCB_ACTIONS::routerHighlightMode": { id: "routerHighlightMode", label: "Router Highlight Mode", tip: "Switch router to highlight mode", icon: null, key: null, name: "pcbnew.InteractiveRouter.HighlightMode" }, "PCB_ACTIONS::routerShoveMode": { id: "routerShoveMode", label: "Router Shove Mode", tip: "Switch router to shove mode", icon: null, key: null, name: "pcbnew.InteractiveRouter.ShoveMode" }, "PCB_ACTIONS::routerWalkaroundMode": { id: "routerWalkaroundMode", label: "Router Walkaround Mode", tip: "Switch router to walkaround mode", icon: null, key: null, name: "pcbnew.InteractiveRouter.WalkaroundMode" }, "PCB_ACTIONS::cycleRouterMode": { id: "cycleRouterMode", label: "Cycle Router Mode", tip: "Cycle router to the next mode", icon: null, key: null, name: "pcbnew.InteractiveRouter.CycleRouterMode" }, "PCB_ACTIONS::selectLayerPair": { id: "selectLayerPair", label: "Set Layer Pair...", tip: "Change active layer pair for routing", icon: "select_layer_pair", key: null, name: "pcbnew.InteractiveRouter.SelectLayerPair" }, "PCB_ACTIONS::tuneSingleTrack": { id: "tuneSingleTrack", label: "Tune Length of a Single Track", tip: null, icon: "ps_tune_length", key: "7", name: "pcbnew.LengthTuner.TuneSingleTrack" }, "PCB_ACTIONS::tuneDiffPair": { id: "tuneDiffPair", label: "Tune Length of a Differential Pair", tip: null, icon: "ps_diff_pair_tune_length", key: "8", name: "pcbnew.LengthTuner.TuneDiffPair" }, "PCB_ACTIONS::tuneSkew": { id: "tuneSkew", label: "Tune Skew of a Differential Pair", tip: null, icon: "ps_diff_pair_tune_phase", key: "9", name: "pcbnew.LengthTuner.TuneDiffPairSkew" }, "PCB_ACTIONS::routerSpreadTracks": { id: "routerSpreadTracks", label: "Spread Tracks", tip: null, icon: "spread_tracks", key: null, name: "pcbnew.InteractiveRouter.SpreadTracks" }, "PCB_ACTIONS::routerUndoLastSegment": { id: "routerUndoLastSegment", label: "Undo Last Segment", tip: "Walks the current track back one segment.", icon: null, key: "Backspace", name: "pcbnew.InteractiveRouter.UndoLastSegment" }, "PCB_ACTIONS::routerContinueFromEnd": { id: "routerContinueFromEnd", label: "Route From Other End", tip: "Commits current segments and starts next segment from nearest ratsnest end.", icon: null, key: "Ctrl+E", name: "pcbnew.InteractiveRouter.ContinueFromEnd" }, "PCB_ACTIONS::routerAttemptFinish": { id: "routerAttemptFinish", label: "Attempt Finish", tip: "Attempts to complete current route to nearest ratsnest end.", icon: null, key: "F", name: "pcbnew.InteractiveRouter.AttemptFinish" }, "PCB_ACTIONS::routerRouteSelected": { id: "routerRouteSelected", label: "Route Selected", tip: "Sequentially route selected items from ratsnest anchor.", icon: null, key: "Shift+X", name: "pcbnew.InteractiveRouter.RouteSelected" }, "PCB_ACTIONS::routerRouteSelectedFromEnd": { id: "routerRouteSelectedFromEnd", label: "Route Selected From Other End", tip: "Sequentially route selected items from other end of ratsnest anchor.", icon: null, key: "Shift+E", name: "pcbnew.InteractiveRouter.RouteSelectedFromEnd" }, "PCB_ACTIONS::routerAutorouteSelected": { id: "routerAutorouteSelected", label: "Attempt Finish Selected (Autoroute)", tip: "Sequentially attempt to automatically route all selected pads.", icon: null, key: "Shift+F", name: "pcbnew.InteractiveRouter.Autoroute" }, "PCB_ACTIONS::routerOptimizeSelected": { id: "routerOptimizeSelected", label: "Optimize Selected Track(s)", tip: "Simplify selected routed track(s).", icon: null, key: "Shift+T", name: "pcbnew.InteractiveRouter.OptimizeSelected" }, "PCB_ACTIONS::cancelCurrentItem": { id: "cancelCurrentItem", label: "Cancel Current Item", tip: "Skip current item and route next selected item.", icon: null, key: null, name: "pcbnew.InteractiveRouter.CancelCurrentItem" }, "PCB_ACTIONS::breakTrack": { id: "breakTrack", label: "Break Track", tip: "Splits the track segment into two segments connected at the cursor position.", icon: "break_line", key: null, name: "pcbnew.InteractiveRouter.BreakTrack" }, "PCB_ACTIONS::drag45Degree": { id: "drag45Degree", label: "Drag 45 Degree Mode", tip: "Drags a track segment, or a mixed selection as one block, keeping connected tracks at 45 degrees.", icon: "drag_segment_withslope", key: "D", name: "pcbnew.InteractiveRouter.Drag45Degree" }, "PCB_ACTIONS::dragFreeAngle": { id: "dragFreeAngle", label: "Drag Free Angle", tip: "Drags the nearest joint in the track without restricting the track angle.", icon: "drag_segment", key: "G", name: "pcbnew.InteractiveRouter.DragFreeAngle" }, "PCB_ACTIONS::regenerateAllTuning": { id: "regenerateAllTuning", label: "Update All Tuning Patterns", tip: "Attempt to re-tune existing tuning patterns within their bounds", icon: "router_len_tuner", key: null, name: "pcbnew.Generator.regenerateAllTuning" }, "PCB_ACTIONS::regenerateAll": { id: "regenerateAll", label: "Rebuild All Generators", tip: "Rebuilds geometry of all generators", icon: "refresh", key: null, name: "pcbnew.Generator.regenerateAll" }, "PCB_ACTIONS::regenerateSelected": { id: "regenerateSelected", label: "Rebuild Selected Generators", tip: "Rebuilds geometry of selected generator(s)", icon: "refresh", key: null, name: "pcbnew.Generator.regenerateSelected" }, "PCB_ACTIONS::generatorsShowManager": { id: "generatorsShowManager", label: "Generators Manager", tip: "Show a manager dialog for Generator objects", icon: "pin_table", key: null, name: "pcbnew.Generator.showManager" }, "PCB_ACTIONS::excludeStitchVia": { id: "excludeStitchVia", label: "Exclude From Stitching", tip: "Remove the selected via from its via-stitch generator and prevent it from being regenerated", icon: null, key: null, name: "pcbnew.Generator.excludeStitchVia" }, "PCB_ACTIONS::clearStitchViaExclusions": { id: "clearStitchViaExclusions", label: "Clear Via Stitching Exclusions", tip: "Restore all vias previously excluded from the selected via-stitch generators", icon: null, key: null, name: "pcbnew.Generator.clearStitchViaExclusions" }, "PCB_ACTIONS::lengthTunerSettings": { id: "lengthTunerSettings", label: "Length Tuning Settings", tip: "Displays tuning pattern properties dialog", icon: "router_len_tuner_setup", key: "Ctrl+L", name: "pcbnew.LengthTuner.Settings" }, "PCB_ACTIONS::showWizards": { id: "showWizards", label: "Show wizards selector", tip: "Select wizard script to run", icon: "module_wizard", key: null, name: "pcbnew.FpWizard.showWizards" }, "PCB_ACTIONS::resetWizardPrms": { id: "resetWizardPrms", label: "Reset wizard parameters", tip: "Reset wizard parameters to default", icon: "reload", key: null, name: "pcbnew.FpWizard.resetWizardPrms" }, "PCB_ACTIONS::exportFpToEditor": { id: "exportFpToEditor", label: "Export footprint to editor", tip: "Export footprint to editor", icon: "export_footprint_names", key: null, name: "pcbnew.FpWizard.exportFpToEditor" }, "PCB_ACTIONS::showDiffPhaseSkew": { id: "showDiffPhaseSkew", label: "Show relative skew of diff pair tracks", tip: "Show relative skew of diff pair tracks", icon: "tune_diff_pair_skew_legend", key: null, name: "pcbnew.InteractiveDiffPhaseSkew" }, "PCB_ACTIONS::placeSubGrid": { id: "placeSubGrid", label: "Place Sub-grid", tip: "Adds a subgrid to the board", icon: "add_grid_item", key: null, name: "pcbnew.GridItem.place" }, "PCB_ACTIONS::collabStartSession": { id: "collabStartSession", label: "Start Collaboration Session...", tip: "Upload this project to the collaboration server and copy a share link", icon: "library_archive", key: null, name: "pcbnew.Collab.startSession" }, "PCB_ACTIONS::collabJoinSession": { id: "collabJoinSession", label: "Join Shared Project...", tip: "Join a shared project from a share link", icon: "library_archive", key: null, name: "pcbnew.Collab.joinSession" }, "PCB_ACTIONS::collabLeaveSession": { id: "collabLeaveSession", label: "Leave Session", tip: "Disconnect this computer from the live session; the shared project stays on the server for everyone else", icon: null, key: null, name: "pcbnew.Collab.leaveSession" }, "PCB_ACTIONS::collabComments": { id: "collabComments", label: "Comments...", tip: "Browse, answer and resolve the shared project's comment threads", icon: null, key: null, name: "pcbnew.Collab.comments" }, "PCB_ACTIONS::collabProposals": { id: "collabProposals", label: "Proposed Changes", tip: "Show the changes an assistant proposed on this board, to preview, accept or reject", icon: null, key: null, name: "pcbnew.Collab.proposals" }, "PCB_ACTIONS::collabHistory": { id: "collabHistory", label: "History", tip: "Show the shared project's version history panel", icon: null, key: null, name: "pcbnew.Collab.history" }, "PCB_ACTIONS::collabCopyLink": { id: "collabCopyLink", label: "Copy Share Link", tip: "Copy an invite link for the current collaboration session", icon: null, key: null, name: "pcbnew.Collab.copyLink" }, "PCB_ACTIONS::collabVendorParts": { id: "collabVendorParts", label: "Vendor Parts...", tip: "Search LCSC, Mouser and DigiKey for parts and manage saved part libraries (opens in the browser; in a session, placed parts arrive here)", icon: null, key: null, name: "pcbnew.Collab.vendorParts" }, "PCB_ACTIONS::collabGithub": { id: "collabGithub", label: "GitHub Sync...", tip: "Push the shared project to a GitHub repository, or pull and merge changes from it (opens in the browser)", icon: null, key: null, name: "pcbnew.Collab.github" }, "PCB_ACTIONS::collabCompare": { id: "collabCompare", label: "Compare Versions...", tip: "See what changed between the shared board as it is now and a version, a checkpoint or a GitHub commit (opens in the browser)", icon: null, key: null, name: "pcbnew.Collab.compare" }, "PCB_ACTIONS::collabFollow": { id: "collabFollow", label: "Follow Next Peer", tip: null, icon: null, key: null, name: "pcbnew.Collab.follow" }, "CVPCB_ACTIONS::showFootprintViewer": { id: "showFootprintViewer", label: "View Selected Footprint", tip: null, icon: "show_footprint", key: null, name: "cvpcb.Control.ShowFootprintViewer" }, "CVPCB_ACTIONS::showEquFileTable": { id: "showEquFileTable", label: "Manage Footprint Association Files...", tip: "Edit the footprint association files list.  These files are used to automatically assign footprints based on symbol values.", icon: null, key: null, name: "cvpcb.Control.ShowEquFileTable" }, "CVPCB_ACTIONS::saveAssociationsToSchematic": { id: "saveAssociationsToSchematic", label: "Save to Schematic", tip: "Save footprint assignments in 'footprint' fields of schematic symbols", icon: "save", key: "Ctrl+S", name: "cvpcb.Control.SaveAssociationsToSchematic" }, "CVPCB_ACTIONS::saveAssociationsToFile": { id: "saveAssociationsToFile", label: "Save to Schematic and File", tip: "Save footprint assignments in 'footprint' fields of schematic symbols and then save schematic files", icon: "save", key: "Ctrl+S", name: "cvpcb.Control.SaveAssociationsToFile" }, "CVPCB_ACTIONS::gotoNextNA": { id: "gotoNextNA", label: "Select Next Unassigned Symbol", tip: "Select next symbol with no footprint assignment", icon: "right", key: null, name: "cvpcb.Control.GotoNextNA" }, "CVPCB_ACTIONS::gotoPreviousNA": { id: "gotoPreviousNA", label: "Select Previous Unassigned Symbol", tip: "Select previous symbol with no footprint assignment", icon: "left", key: null, name: "cvpcb.Control.GotoPreviousNA" }, "CVPCB_ACTIONS::associate": { id: "associate", label: "Assign Footprint", tip: null, icon: "auto_associate", key: "Enter", name: "cvpcb.Association.Associate" }, "CVPCB_ACTIONS::autoAssociate": { id: "autoAssociate", label: "Automatically Assign Footprints", tip: "Assign footprints automatically using a footprint association file", icon: "auto_associate", key: null, name: "cvpcb.Association.AutoAssociate" }, "CVPCB_ACTIONS::deleteAssoc": { id: "deleteAssoc", label: "Delete Footprint Assignment", tip: null, icon: "delete_association", key: "Del", name: "cvpcb.Association.Delete" }, "CVPCB_ACTIONS::deleteAll": { id: "deleteAll", label: "Delete All Footprint Assignments", tip: null, icon: "delete_association", key: null, name: "cvpcb.Association.DeleteAll" }, "CVPCB_ACTIONS::FilterFPbyFPFilters": { id: "FilterFPbyFPFilters", label: "Use symbol footprint filters", tip: "Filter footprint list by footprint filters defined in the symbol", icon: "module_filtered_list", key: null, name: "cvpcb.Control.FilterFPbyFPFilters" }, "CVPCB_ACTIONS::filterFPbyPin": { id: "filterFPbyPin", label: "Filter by pin count", tip: "Filter footprint list by pin count", icon: "module_pin_filtered_list", key: null, name: "cvpcb.Control.FilterFPByPin" }, "CVPCB_ACTIONS::FilterFPbyLibrary": { id: "FilterFPbyLibrary", label: "Filter by library", tip: "Filter footprint list by library", icon: "module_library_list", key: null, name: "cvpcb.Control.FilterFPbyLibrary" } } };
+    kicad_menu_spec_default = { generated: "server/scripts/gen_kicad_menus.py from KiCad's TOOL_ACTIONs and resources/bitmaps_png \u2014 do not edit by hand", actions: { "ACTIONS::doNew": { id: "doNew", label: "New...", tip: "Create a new document in the editor", icon: "new_generic", key: "Ctrl+N", name: "common.Control.new" }, "ACTIONS::newLibrary": { id: "newLibrary", label: "New Library...", tip: "Create a new library folder", icon: "new_library", key: null, name: "common.Control.newLibrary" }, "ACTIONS::addLibrary": { id: "addLibrary", label: "Add Library...", tip: "Add an existing library folder", icon: "add_library", key: null, name: "common.Control.addLibrary" }, "ACTIONS::open": { id: "open", label: "Open...", tip: "Open existing document", icon: "directory_open", key: "Ctrl+O", name: "common.Control.open" }, "ACTIONS::openWithTextEditor": { id: "openWithTextEditor", label: "Edit in a Text Editor...", tip: "Open a library file with a text editor", icon: "editor", key: null, name: "common.Control.openWithTextEditor" }, "ACTIONS::openDirectory": { id: "openDirectory", label: "Open in file explorer...", tip: "Open a library file with system file explorer", icon: "directory_browser", key: null, name: "common.Control.openDirectory" }, "ACTIONS::save": { id: "save", label: "Save", tip: "Save changes", icon: "save", key: "Ctrl+S", name: "common.Control.save" }, "ACTIONS::saveAs": { id: "saveAs", label: "Save As...", tip: "Save current document to another location", icon: "save_as", key: "Ctrl+Shift+S", name: "common.Control.saveAs" }, "ACTIONS::saveCopy": { id: "saveCopy", label: "Save a Copy...", tip: "Save a copy of the current document to another location", icon: "save_as", key: null, name: "common.Control.saveCopy" }, "ACTIONS::saveAll": { id: "saveAll", label: "Save All", tip: "Save all changes", icon: "save_all", key: null, name: "common.Control.saveAll" }, "ACTIONS::revert": { id: "revert", label: "Revert", tip: "Throw away changes", icon: "restore_from_file", key: null, name: "common.Control.revert" }, "ACTIONS::pageSettings": { id: "pageSettings", label: "Page Settings...", tip: "Settings for paper size and title block info", icon: "sheetset", key: null, name: "common.Control.pageSettings" }, "ACTIONS::print": { id: "print", label: "Print...", tip: null, icon: "print_button", key: "Ctrl+P", name: "common.Control.print" }, "ACTIONS::plot": { id: "plot", label: "Plot...", tip: null, icon: "plot", key: null, name: "common.Control.plot" }, "ACTIONS::quit": { id: "quit", label: "Quit", tip: "Close the current editor", icon: "exit", key: null, name: "common.Control.quit" }, "ACTIONS::group": { id: "group", label: "Group Items", tip: "Group the selected items so that they are treated as a single item", icon: "group", key: null, name: "common.Interactive.group" }, "ACTIONS::ungroup": { id: "ungroup", label: "Ungroup Items", tip: "Ungroup any selected groups", icon: "group_ungroup", key: null, name: "common.Interactive.ungroup" }, "ACTIONS::addToGroup": { id: "addToGroup", label: "Add Items", tip: "Add items to group", icon: "group_remove", key: null, name: "common.Interactive.addToGroup" }, "ACTIONS::removeFromGroup": { id: "removeFromGroup", label: "Remove Items", tip: "Remove items from group", icon: "group_remove", key: null, name: "common.Interactive.removeFromGroup" }, "ACTIONS::groupEnter": { id: "groupEnter", label: "Enter Group", tip: "Enter the group to edit items", icon: "group_enter", key: null, name: "common.Interactive.groupEnter" }, "ACTIONS::groupLeave": { id: "groupLeave", label: "Leave Group", tip: "Leave the current group", icon: "group_leave", key: null, name: "common.Interactive.groupLeave" }, "ACTIONS::cancelInteractive": { id: "cancelInteractive", label: "Cancel", tip: "Cancel current tool", icon: "cancel", key: null, name: "common.Interactive.cancel" }, "ACTIONS::finishInteractive": { id: "finishInteractive", label: "Finish", tip: "Finish current tool", icon: "checked_ok", key: "End", name: "common.Interactive.finish" }, "ACTIONS::showContextMenu": { id: "showContextMenu", label: "Show Context Menu", tip: "Perform the right-mouse-button action", icon: null, key: null, name: "common.Control.showContextMenu" }, "ACTIONS::undo": { id: "undo", label: "Undo", tip: null, icon: "undo", key: "Ctrl+Z", name: "common.Interactive.undo" }, "ACTIONS::redo": { id: "redo", label: "Redo", tip: null, icon: "redo", key: "Ctrl+Y", name: "common.Interactive.redo", mac: "Ctrl+Shift+Z" }, "ACTIONS::cut": { id: "cut", label: "Cut", tip: "Cut selected item(s) to clipboard", icon: "cut", key: "Ctrl+X", name: "common.Interactive.cut" }, "ACTIONS::copy": { id: "copy", label: "Copy", tip: "Copy selected item(s) to clipboard", icon: "copy", key: "Ctrl+C", name: "common.Interactive.copy" }, "ACTIONS::copyAsText": { id: "copyAsText", label: "Copy as Text", tip: "Copy selected item(s) to clipboard as text", icon: "copy", key: "Ctrl+Shift+C", name: "common.Interactive.copyAsText" }, "ACTIONS::paste": { id: "paste", label: "Paste", tip: "Paste item(s) from clipboard", icon: "paste", key: "Ctrl+V", name: "common.Interactive.paste" }, "ACTIONS::selectSetRect": { id: "selectSetRect", label: "Rectangle", tip: "Set selection mode to use rectangle", icon: "cursor", key: null, name: "common.Interactive.selectSetRect" }, "ACTIONS::selectSetLasso": { id: "selectSetLasso", label: "Lasso", tip: "Set selection mode to use polygon lasso", icon: "lasso", key: null, name: "common.Interactive.selectSetLasso" }, "ACTIONS::selectAll": { id: "selectAll", label: "Select All", tip: "Select all items on screen", icon: null, key: "Ctrl+A", name: "common.Interactive.selectAll" }, "ACTIONS::unselectAll": { id: "unselectAll", label: "Unselect All", tip: "Unselect all items on screen", icon: null, key: "Ctrl+Shift+A", name: "common.Interactive.unselectAll" }, "ACTIONS::pasteSpecial": { id: "pasteSpecial", label: "Paste Special...", tip: "Paste item(s) from clipboard with options", icon: "paste_special", key: "Ctrl+Shift+V", name: "common.Interactive.pasteSpecial" }, "ACTIONS::duplicate": { id: "duplicate", label: "Duplicate", tip: "Duplicates the selected item(s)", icon: "duplicate", key: "Ctrl+D", name: "common.Interactive.duplicate" }, "ACTIONS::doDelete": { id: "doDelete", label: "Delete", tip: "Delete selected item(s)", icon: "trash", key: "Del", name: "common.Interactive.delete", alt: "Backspace" }, "ACTIONS::deleteTool": { id: "deleteTool", label: "Interactive Delete Tool", tip: "Delete clicked items", icon: "delete_cursor", key: null, name: "common.Interactive.deleteTool" }, "ACTIONS::leftJustify": { id: "leftJustify", label: "Left Justify", tip: "Left-justify fields and text items", icon: "text_align_left", key: null, name: "common.Control.leftJustify" }, "ACTIONS::centerJustify": { id: "centerJustify", label: "Center Justify", tip: "Center-justify fields and text items", icon: "text_align_center", key: null, name: "common.Control.centerJustify" }, "ACTIONS::rightJustify": { id: "rightJustify", label: "Right Justify", tip: "Right-justify fields and text items", icon: "text_align_right", key: null, name: "common.Control.rightJustify" }, "ACTIONS::expandAll": { id: "expandAll", label: "Expand All", tip: null, icon: "up", key: null, name: "common.Control.expandAll" }, "ACTIONS::collapseAll": { id: "collapseAll", label: "Collapse All", tip: null, icon: "down", key: null, name: "common.Control.collapseAll" }, "ACTIONS::increment": { id: "increment", label: "Increment", tip: "Increment the selected item(s)", icon: null, key: null, name: "eeschema.Interactive.increment" }, "ACTIONS::incrementPrimary": { id: "incrementPrimary", label: "Increment Primary", tip: "Increment the primary field of the selected item(s)", icon: null, key: null, name: "eeschema.Interactive.incrementPrimary" }, "ACTIONS::decrementPrimary": { id: "decrementPrimary", label: "Decrement Primary", tip: "Decrement the primary field of the selected item(s)", icon: null, key: null, name: "eeschema.Interactive.decrementPrimary" }, "ACTIONS::incrementSecondary": { id: "incrementSecondary", label: "Increment Secondary", tip: "Increment the secondary field of the selected item(s)", icon: null, key: null, name: "eeschema.Interactive.incrementSecondary" }, "ACTIONS::decrementSecondary": { id: "decrementSecondary", label: "Decrement Secondary", tip: "Decrement the secondary field of the selected item(s)", icon: null, key: null, name: "eeschema.Interactive.decrementSecondary" }, "ACTIONS::selectColumns": { id: "selectColumns", label: "Select Column(s)", tip: "Select complete column(s) containing the current selected cell(s)", icon: "table_select_column", key: null, name: "common.InteractiveSelection.SelectColumns" }, "ACTIONS::selectRows": { id: "selectRows", label: "Select Row(s)", tip: "Select complete row(s) containing the current selected cell(s)", icon: "table_select_row", key: null, name: "common.InteractiveSelection.Rows" }, "ACTIONS::selectTable": { id: "selectTable", label: "Select Table", tip: "Select parent table of selected cell(s)", icon: "table_select", key: null, name: "common.InteractiveSelection.SelectTable" }, "ACTIONS::addRowAbove": { id: "addRowAbove", label: "Add Row Above", tip: "Insert a new table row above the selected cell(s)", icon: "table_add_row_above", key: null, name: "common.TableEditor.addRowAbove" }, "ACTIONS::addRowBelow": { id: "addRowBelow", label: "Add Row Below", tip: "Insert a new table row below the selected cell(s)", icon: "table_add_row_below", key: null, name: "common.TableEditor.addRowBelow" }, "ACTIONS::addColBefore": { id: "addColBefore", label: "Add Column Before", tip: "Insert a new table column before the selected cell(s)", icon: "table_add_column_before", key: null, name: "common.TableEditor.addColBefore" }, "ACTIONS::addColAfter": { id: "addColAfter", label: "Add Column After", tip: "Insert a new table column after the selected cell(s)", icon: "table_add_column_after", key: null, name: "common.TableEditor.addColAfter" }, "ACTIONS::deleteRows": { id: "deleteRows", label: "Delete Row(s)", tip: "Delete rows containing the currently selected cell(s)", icon: "table_delete_row", key: null, name: "common.TableEditor.deleteRows" }, "ACTIONS::deleteColumns": { id: "deleteColumns", label: "Delete Column(s)", tip: "Delete columns containing the currently selected cell(s)", icon: "table_delete_column", key: null, name: "common.TableEditor.deleteColumns" }, "ACTIONS::mergeCells": { id: "mergeCells", label: "Merge Cells", tip: "Turn selected table cells into a single cell", icon: "table", key: null, name: "common.TableEditor.mergeCells" }, "ACTIONS::unmergeCells": { id: "unmergeCells", label: "Unmerge Cells", tip: "Turn merged table cells back into separate cells.", icon: "table", key: null, name: "common.TableEditor.unmergeCell" }, "ACTIONS::editTable": { id: "editTable", label: "Edit Table...", tip: null, icon: "table_edit", key: "Ctrl+E", name: "pcbnew.TableEditor.editTable" }, "ACTIONS::exportTableCSV": { id: "exportTableCSV", label: "Export Table to CSV", tip: "Export table contents to CSV file with resolved text variables", icon: "export_file", key: null, name: "common.TableEditor.exportTableCSV" }, "ACTIONS::pointEditorArcKeepCenter": { id: "pointEditorArcKeepCenter", label: "Keep Arc Center, Adjust Radius", tip: "Switch arc editing mode to keep center, adjust radius and endpoints", icon: null, key: null, name: "pcbnew.PointEditor.arcKeepCenter" }, "ACTIONS::pointEditorArcKeepEndpoint": { id: "pointEditorArcKeepEndpoint", label: "Keep Arc Endpoints or Direction of Starting Point", tip: "Switch arc editing mode to keep endpoints, or to keep direction of the other point", icon: null, key: null, name: "pcbnew.PointEditor.arcKeepEndpoint" }, "ACTIONS::pointEditorArcKeepRadius": { id: "pointEditorArcKeepRadius", label: "Keep Arc Radius and Center, adjust angle", tip: "Switch arc editing mode to maintaining radius when endpoint are moved", icon: null, key: null, name: "pcbnew.PointEditor.arcKeepRadius" }, "ACTIONS::arcPosture": { id: "arcPosture", label: "Switch Arc Posture", tip: "Switch arc posture between clockwise and counter-clockwise", icon: null, key: "/", name: "common.InteractiveDrawing.arcPosture" }, "ACTIONS::cycleArcDrawMode": { id: "cycleArcDrawMode", label: "Cycle Arc Drawing Mode", tip: "Switch to the next method of drawing arcs", icon: null, key: "Alt+/", name: "common.InteractiveDrawing.cycleArcDrawMode" }, "ACTIONS::deleteLastPoint": { id: "deleteLastPoint", label: "Delete Last Point", tip: "Delete the last point added to the current item", icon: "undo", key: "Backspace", name: "common.InteractiveDrawing.deleteLastPoint" }, "ACTIONS::cycleArcEditMode": { id: "cycleArcEditMode", label: "Cycle Arc Editing Mode", tip: "Switch to a different method of editing arcs", icon: null, key: "Ctrl+Space", name: "common.Interactive.cycleArcEditMode" }, "ACTIONS::showSearch": { id: "showSearch", label: "Search", tip: "Show/hide the search panel", icon: "find", key: "Ctrl+G", name: "common.Interactive.search" }, "ACTIONS::find": { id: "find", label: "Find", tip: null, icon: "find", key: "Ctrl+F", name: "common.Interactive.find" }, "ACTIONS::findAndReplace": { id: "findAndReplace", label: "Find and Replace", tip: null, icon: "find_replace", key: "Ctrl+Alt+F", name: "common.Interactive.findAndReplace" }, "ACTIONS::findNext": { id: "findNext", label: "Find Next", tip: null, icon: "find", key: "F3", name: "common.Interactive.findNext" }, "ACTIONS::findPrevious": { id: "findPrevious", label: "Find Previous", tip: null, icon: "find", key: "Shift+F3", name: "common.Interactive.findPrevious" }, "ACTIONS::findNextMarker": { id: "findNextMarker", label: "Find Next Marker", tip: null, icon: "find", key: "Ctrl+Shift+F3", name: "common.Interactive.findNextMarker" }, "ACTIONS::replaceAndFindNext": { id: "replaceAndFindNext", label: "Replace and Find Next", tip: null, icon: "find_replace", key: null, name: "common.Interactive.replaceAndFindNext" }, "ACTIONS::replaceAll": { id: "replaceAll", label: "Replace All", tip: null, icon: "find_replace", key: null, name: "common.Interactive.replaceAll" }, "ACTIONS::prevMarker": { id: "prevMarker", label: "Previous Marker", tip: null, icon: "marker_previous", key: null, name: "common.Checker.prevMarker" }, "ACTIONS::nextMarker": { id: "nextMarker", label: "Next Marker", tip: null, icon: "marker_next", key: null, name: "common.Checker.nextMarker" }, "ACTIONS::excludeMarker": { id: "excludeMarker", label: "Exclude Marker", tip: "Mark current violation in Checker window as an exclusion", icon: "marker_exclude", key: null, name: "common.Checker.excludeMarker" }, "ACTIONS::zoomRedraw": { id: "zoomRedraw", label: "Refresh", tip: null, icon: "refresh", key: "F5", name: "common.Control.zoomRedraw", mac: "Ctrl+R" }, "ACTIONS::zoomFitScreen": { id: "zoomFitScreen", label: "Zoom to Fit", tip: "Zoom to worksheet area if exists or edited object", icon: "zoom_fit_in_page", key: "Home", name: "common.Control.zoomFitScreen", mac: "Ctrl+0" }, "ACTIONS::zoomFitObjects": { id: "zoomFitObjects", label: "Zoom to All Objects", tip: "Zoom to all objects on screen", icon: "zoom_fit_to_objects", key: "Ctrl+Home", name: "common.Control.zoomFitObjects" }, "ACTIONS::zoomFitSelection": { id: "zoomFitSelection", label: "Zoom to Selected Objects", tip: "Zoom to items currently selected", icon: "zoom_fit_to_objects", key: null, name: "common.Control.zoomFitSelection" }, "ACTIONS::zoomIn": { id: "zoomIn", label: "Zoom In at Cursor", tip: null, icon: "zoom_in", key: "F1", name: "common.Control.zoomIn", mac: "Ctrl++" }, "ACTIONS::zoomOut": { id: "zoomOut", label: "Zoom Out at Cursor", tip: null, icon: "zoom_out", key: "F2", name: "common.Control.zoomOut", mac: "Ctrl+-" }, "ACTIONS::zoomInCenter": { id: "zoomInCenter", label: "Zoom In", tip: null, icon: "zoom_in", key: null, name: "common.Control.zoomInCenter" }, "ACTIONS::zoomOutCenter": { id: "zoomOutCenter", label: "Zoom Out", tip: null, icon: "zoom_out", key: null, name: "common.Control.zoomOutCenter" }, "ACTIONS::zoomInHorizontally": { id: "zoomInHorizontally", label: "Zoom In Horizontally", tip: "Zoom in horizontally the plot area", icon: "zoom_in_horizontally", key: null, name: "common.Control.zoomInHorizontally" }, "ACTIONS::zoomOutHorizontally": { id: "zoomOutHorizontally", label: "Zoom Out Horizontally", tip: "Zoom out horizontally the plot area", icon: "zoom_out_horizontally", key: null, name: "common.Control.zoomOutHorizontally" }, "ACTIONS::zoomInVertically": { id: "zoomInVertically", label: "Zoom In Vertically", tip: "Zoom in vertically the plot area", icon: "zoom_in_vertically", key: null, name: "common.Control.zoomInVertically" }, "ACTIONS::zoomOutVertically": { id: "zoomOutVertically", label: "Zoom Out Vertically", tip: "Zoom out vertically the plot area", icon: "zoom_out_vertically", key: null, name: "common.Control.zoomOutVertically" }, "ACTIONS::zoomCenter": { id: "zoomCenter", label: "Center on Cursor", tip: null, icon: "zoom_center_on_screen", key: "F4", name: "common.Control.zoomCenter" }, "ACTIONS::zoomTool": { id: "zoomTool", label: "Zoom to Selection Area", tip: "Zoom to an area selection created by a mouse drag", icon: "zoom_area", key: "Ctrl+F5", name: "common.Control.zoomTool" }, "ACTIONS::zoomUndo": { id: "zoomUndo", label: "Undo Last Zoom", tip: "Return zoom to level prior to last zoom action", icon: "undo", key: null, name: "common.Control.undoZoom" }, "ACTIONS::zoomRedo": { id: "zoomRedo", label: "Redo Last Zoom", tip: "Return zoom to level prior to last zoom undo", icon: "redo", key: null, name: "common.Control.redoZoom" }, "ACTIONS::centerSelection": { id: "centerSelection", label: "Pan to Center Selected Objects", tip: null, icon: null, key: null, name: "common.Control.centerSelection" }, "ACTIONS::cursorUp": { id: "cursorUp", label: "Cursor Up", tip: null, icon: null, key: "Up", name: "common.Control.cursorUp" }, "ACTIONS::cursorDown": { id: "cursorDown", label: "Cursor Down", tip: null, icon: null, key: "Down", name: "common.Control.cursorDown" }, "ACTIONS::cursorLeft": { id: "cursorLeft", label: "Cursor Left", tip: null, icon: null, key: "Left", name: "common.Control.cursorLeft" }, "ACTIONS::cursorRight": { id: "cursorRight", label: "Cursor Right", tip: null, icon: null, key: "Right", name: "common.Control.cursorRight" }, "ACTIONS::cursorUpFast": { id: "cursorUpFast", label: "Cursor Up Fast", tip: null, icon: null, key: "Ctrl+Up", name: "common.Control.cursorUpFast" }, "ACTIONS::cursorDownFast": { id: "cursorDownFast", label: "Cursor Down Fast", tip: null, icon: null, key: "Ctrl+Down", name: "common.Control.cursorDownFast" }, "ACTIONS::cursorLeftFast": { id: "cursorLeftFast", label: "Cursor Left Fast", tip: null, icon: null, key: "Ctrl+Left", name: "common.Control.cursorLeftFast" }, "ACTIONS::cursorRightFast": { id: "cursorRightFast", label: "Cursor Right Fast", tip: null, icon: null, key: "Ctrl+Right", name: "common.Control.cursorRightFast" }, "ACTIONS::cursorClick": { id: "cursorClick", label: "Click", tip: "Performs left mouse button click", icon: null, key: "Enter", name: "common.Control.cursorClick" }, "ACTIONS::cursorDblClick": { id: "cursorDblClick", label: "Double-click", tip: "Performs left mouse button double-click", icon: null, key: "End", name: "common.Control.cursorDblClick" }, "ACTIONS::pinLibrary": { id: "pinLibrary", label: "Pin Library", tip: "Keep the library at the top of the list", icon: null, key: null, name: "common.Control.pinLibrary" }, "ACTIONS::unpinLibrary": { id: "unpinLibrary", label: "Unpin Library", tip: "No longer keep the library at the top of the list", icon: null, key: null, name: "common.Control.unpinLibrary" }, "ACTIONS::showLibraryTree": { id: "showLibraryTree", label: "Library Tree", tip: null, icon: "search_tree", key: null, name: "common.Control.showLibraryTree" }, "ACTIONS::hideLibraryTree": { id: "hideLibraryTree", label: "Hide Library Tree", tip: null, icon: "search_tree", key: null, name: "common.Control.hideLibraryTree" }, "ACTIONS::libraryTreeSearch": { id: "libraryTreeSearch", label: "Focus Library Tree Search Field", tip: null, icon: null, key: "Ctrl+L", name: "common.Control.libraryTreeSearch" }, "ACTIONS::panUp": { id: "panUp", label: "Pan Up", tip: null, icon: null, key: "Shift+Up", name: "common.Control.panUp" }, "ACTIONS::panDown": { id: "panDown", label: "Pan Down", tip: null, icon: null, key: "Shift+Down", name: "common.Control.panDown" }, "ACTIONS::panLeft": { id: "panLeft", label: "Pan Left", tip: null, icon: null, key: "Shift+Left", name: "common.Control.panLeft" }, "ACTIONS::panRight": { id: "panRight", label: "Pan Right", tip: null, icon: null, key: "Shift+Right", name: "common.Control.panRight" }, "ACTIONS::gridFast1": { id: "gridFast1", label: "Switch to Fast Grid 1", tip: null, icon: null, key: "Alt+1", name: "common.Control.gridFast1" }, "ACTIONS::gridFast2": { id: "gridFast2", label: "Switch to Fast Grid 2", tip: null, icon: null, key: "Alt+2", name: "common.Control.gridFast2" }, "ACTIONS::gridFastCycle": { id: "gridFastCycle", label: "Cycle Fast Grid", tip: null, icon: null, key: "Alt+4", name: "common.Control.gridFastCycle" }, "ACTIONS::gridNext": { id: "gridNext", label: "Switch to Next Grid", tip: null, icon: null, key: "N", name: "common.Control.gridNext" }, "ACTIONS::gridPrev": { id: "gridPrev", label: "Switch to Previous Grid", tip: null, icon: null, key: "Shift+N", name: "common.Control.gridPrev" }, "ACTIONS::gridSetOrigin": { id: "gridSetOrigin", label: "Grid Origin", tip: "Place the grid origin point", icon: "grid_select_axis", key: null, name: "common.Control.gridSetOrigin" }, "ACTIONS::gridResetOrigin": { id: "gridResetOrigin", label: "Reset Grid Origin", tip: null, icon: null, key: null, name: "common.Control.gridResetOrigin" }, "ACTIONS::toggleGrid": { id: "toggleGrid", label: "Show Grid", tip: "Display background grid in the edit window", icon: "grid", key: null, name: "common.Control.toggleGrid" }, "ACTIONS::toggleGridOverrides": { id: "toggleGridOverrides", label: "Grid Overrides", tip: "Enables item-specific grids that override the current grid", icon: "grid_override", key: "Ctrl+Shift+G", name: "common.Control.toggleGridOverrides" }, "ACTIONS::gridProperties": { id: "gridProperties", label: "Edit Grids...", tip: "Edit grid definitions", icon: "grid_select", key: null, name: "common.Control.editGrids" }, "ACTIONS::gridOrigin": { id: "gridOrigin", label: "Grid Origin...", tip: "Set the grid origin point", icon: "grid_select_axis", key: null, name: "common.Control.editGridOrigin" }, "ACTIONS::inchesUnits": { id: "inchesUnits", label: "Inches", tip: null, icon: "unit_inch", key: null, name: "common.Control.imperialUnits" }, "ACTIONS::milsUnits": { id: "milsUnits", label: "Mils", tip: null, icon: "unit_mil", key: null, name: "common.Control.mils" }, "ACTIONS::millimetersUnits": { id: "millimetersUnits", label: "Millimeters", tip: null, icon: "unit_mm", key: null, name: "common.Control.metricUnits" }, "ACTIONS::selectLibTreeColumns": { id: "selectLibTreeColumns", label: "Select Columns...", tip: null, icon: null, key: null, name: "common.Control.selectColumns" }, "ACTIONS::toggleUnits": { id: "toggleUnits", label: "Switch units", tip: "Switch between imperial and metric units", icon: "unit_mm", key: "Ctrl+U", name: "common.Control.toggleUnits" }, "ACTIONS::togglePolarCoords": { id: "togglePolarCoords", label: "Polar Coordinates", tip: "Switch between polar and cartesian coordinate systems", icon: "polar_coord", key: null, name: "common.Control.togglePolarCoords" }, "ACTIONS::resetLocalCoords": { id: "resetLocalCoords", label: "Reset Local Coordinates", tip: null, icon: null, key: "Space", name: "common.Control.resetLocalCoords" }, "ACTIONS::toggleCursor": { id: "toggleCursor", label: "Always Show Crosshairs", tip: "Display crosshairs even when not drawing objects", icon: "cursor", key: null, name: "common.Control.toggleCursor" }, "ACTIONS::cursorSmallCrosshairs": { id: "cursorSmallCrosshairs", label: "Small crosshairs", tip: "Use small crosshairs aligned at 0 and 90 degrees", icon: "cursor_shape", key: null, name: "common.Control.cursorSmallCrosshairs" }, "ACTIONS::cursorFullCrosshairs": { id: "cursorFullCrosshairs", label: "Full-Window Crosshairs", tip: "Display full-window crosshairs aligned at 0 and 90 degrees", icon: "cursor_fullscreen", key: null, name: "common.Control.cursorFullCrosshairs" }, "ACTIONS::cursor45Crosshairs": { id: "cursor45Crosshairs", label: "45 Degree Crosshairs", tip: "Display full-window crosshairs aligned at 45 and 135 degrees", icon: "cursor_fullscreen45", key: null, name: "common.Control.cursor45Crosshairs" }, "ACTIONS::highContrastMode": { id: "highContrastMode", label: "Inactive Layer View Mode", tip: "Toggle inactive layers between normal and dimmed", icon: "contrast_mode", key: null, name: "common.Control.highContrastMode" }, "ACTIONS::highContrastModeCycle": { id: "highContrastModeCycle", label: "Inactive Layer View Mode (3-state)", tip: "Cycle inactive layers between normal, dimmed, and hidden", icon: "contrast_mode", key: "H", name: "common.Control.highContrastModeCycle" }, "ACTIONS::toggleBoundingBoxes": { id: "toggleBoundingBoxes", label: "Draw Bounding Boxes", tip: null, icon: "gerbview_show_negative_objects", key: null, name: "common.Control.toggleBoundingBoxes" }, "ACTIONS::selectionTool": { id: "selectionTool", label: "Select item(s)", tip: null, icon: "cursor", key: null, name: "common.InteractiveSelection.selectionTool" }, "ACTIONS::measureTool": { id: "measureTool", label: "Measure Tool", tip: "Interactively measure distance between points", icon: "measurement", key: "Ctrl+Shift+M", name: "common.Interactive.measureTool" }, "ACTIONS::showProjectManager": { id: "showProjectManager", label: "Switch to Project Manager", tip: "Show project window", icon: "icon_kicad_24", key: null, name: "common.Control.showProjectManager" }, "ACTIONS::show3DViewer": { id: "show3DViewer", label: "3D Viewer", tip: "Show 3D viewer window", icon: "three_d", key: "Alt+3", name: "common.Control.show3DViewer" }, "ACTIONS::showSymbolBrowser": { id: "showSymbolBrowser", label: "Symbol Library Browser", tip: null, icon: "library_browser", key: null, name: "common.Control.showSymbolBrowser" }, "ACTIONS::showSymbolEditor": { id: "showSymbolEditor", label: "Symbol Editor", tip: "Create, delete and edit schematic symbols", icon: "libedit", key: null, name: "common.Control.showSymbolEditor" }, "ACTIONS::showFootprintBrowser": { id: "showFootprintBrowser", label: "Footprint Library Browser", tip: null, icon: "library_browser", key: null, name: "common.Control.showFootprintBrowser" }, "ACTIONS::showFootprintEditor": { id: "showFootprintEditor", label: "Footprint Editor", tip: "Create, delete and edit board footprints", icon: "module_editor", key: null, name: "common.Control.showFootprintEditor" }, "ACTIONS::showCalculatorTools": { id: "showCalculatorTools", label: "Calculator Tools", tip: "Run component calculations, track width calculations, etc.", icon: "icon_pcbcalculator_24", key: null, name: "common.Control.showCalculatorTools" }, "ACTIONS::showProperties": { id: "showProperties", label: "Properties", tip: "Show/hide the properties manager", icon: "tools", key: null, name: "common.Control.showProperties" }, "ACTIONS::showGitCommitPane": { id: "showGitCommitPane", label: "Version Control", tip: "Show/hide the version control panel", icon: "git_good_check", key: null, name: "common.Control.showGitCommitPane" }, "ACTIONS::showDatasheet": { id: "showDatasheet", label: "Show Datasheet", tip: "Open the datasheet in a browser", icon: "datasheet", key: "D", name: "common.Control.showDatasheet" }, "ACTIONS::updatePcbFromSchematic": { id: "updatePcbFromSchematic", label: "Update PCB from Schematic...", tip: "Update PCB with changes made to schematic", icon: "update_pcb_from_sch", key: "F8", name: "common.Control.updatePcbFromSchematic" }, "ACTIONS::updateSchematicFromPcb": { id: "updateSchematicFromPcb", label: "Update Schematic from PCB...", tip: "Update schematic with changes made to PCB", icon: "update_sch_from_pcb", key: null, name: "common.Control.updateSchematicFromPCB" }, "ACTIONS::openPreferences": { id: "openPreferences", label: "Preferences...", tip: "Show preferences for all open tools", icon: "preference", key: "Ctrl+,", name: "common.SuiteControl.openPreferences" }, "ACTIONS::configurePaths": { id: "configurePaths", label: "Configure Paths...", tip: "Edit path configuration environment variables", icon: "path", key: null, name: "common.SuiteControl.configurePaths" }, "ACTIONS::showSymbolLibTable": { id: "showSymbolLibTable", label: "Manage Symbol Libraries...", tip: "Edit the global and project symbol library lists", icon: "library_table", key: null, name: "common.SuiteControl.showSymbolLibTable" }, "ACTIONS::showFootprintLibTable": { id: "showFootprintLibTable", label: "Manage Footprint Libraries...", tip: "Edit the global and project footprint library lists", icon: "library_table", key: null, name: "common.SuiteControl.showFootprintLibTable" }, "ACTIONS::showDesignBlockLibTable": { id: "showDesignBlockLibTable", label: "Manage Design Block Libraries...", tip: "Edit the global and project design block library lists", icon: "library_table", key: null, name: "common.SuiteControl.showDesignBLockLibTable" }, "ACTIONS::gettingStarted": { id: "gettingStarted", label: "Getting Started with KiCad", tip: 'Open "Getting Started in KiCad" guide for beginners', icon: "help", key: null, name: "common.SuiteControl.gettingStarted" }, "ACTIONS::help": { id: "help", label: "Help", tip: "Open product documentation in a web browser", icon: "help_online", key: null, name: "common.SuiteControl.help" }, "ACTIONS::about": { id: "about", label: "About KiCad", tip: null, icon: "about", key: null, name: "common.SuiteControl.about" }, "ACTIONS::listHotKeys": { id: "listHotKeys", label: "List Hotkeys...", tip: "Displays current hotkeys table and corresponding commands", icon: "hotkeys", key: "Ctrl+F1", name: "common.SuiteControl.listHotKeys" }, "ACTIONS::getInvolved": { id: "getInvolved", label: "Get Involved", tip: 'Open "Contribute to KiCad" in a web browser', icon: "info", key: null, name: "common.SuiteControl.getInvolved" }, "ACTIONS::donate": { id: "donate", label: "Donate", tip: 'Open "Donate to KiCad" in a web browser', icon: null, key: null, name: "common.SuiteControl.donate" }, "ACTIONS::reportBug": { id: "reportBug", label: "Report Bug", tip: "Report a problem with KiCad", icon: "bug", key: null, name: "common.SuiteControl.reportBug" }, "ACTIONS::pluginsReload": { id: "pluginsReload", label: "Refresh Plugins", tip: "Reload all python plugins and refresh plugin menus", icon: "reload", key: null, name: "common.API.pluginsReload" }, "ACTIONS::pluginsShowFolder": { id: "pluginsShowFolder", label: "Open Plugin Directory", tip: "Opens the directory in the default system file manager", icon: "directory_open", key: null, name: "common.API.pluginsShowFolder" }, "ACTIONS::embeddedFiles": { id: "embeddedFiles", label: "Embedded Files", tip: "Manage embedded files", icon: null, key: null, name: "common.Embed.embededFile" }, "ACTIONS::removeFile": { id: "removeFile", label: "Remove File", tip: "Remove an embedded file", icon: null, key: null, name: "common.Embed.removeFile" }, "ACTIONS::extractFile": { id: "extractFile", label: "Extract File", tip: "Extract an embedded file", icon: null, key: null, name: "common.Embed.extractFile" }, "SCH_ACTIONS::runERC": { id: "runERC", label: "Electrical Rules Checker", tip: "Show the electrical rules checker window", icon: "erc", key: null, name: "eeschema.InspectionTool.runERC" }, "SCH_ACTIONS::checkSymbol": { id: "checkSymbol", label: "Symbol Checker", tip: "Show the symbol checker window", icon: "erc", key: null, name: "eeschema.InspectionTool.checkSymbol" }, "SCH_ACTIONS::diffSymbol": { id: "diffSymbol", label: "Compare Symbol with Library", tip: "Show differences between schematic symbol and its library equivalent", icon: "library", key: null, name: "eeschema.InspectionTool.diffSymbol" }, "SCH_ACTIONS::compareSchematicWithFile": { id: "compareSchematicWithFile", label: "Compare Schematic with File...", tip: "Diff the current schematic against another .kicad_sch file", icon: "library", key: null, name: "eeschema.InspectionTool.CompareSchematicWithFile" }, "SCH_ACTIONS::compareSchematicWithHistory": { id: "compareSchematicWithHistory", label: "Compare Schematic with Local History...", tip: "Diff the current schematic against the most recent local-history snapshot", icon: "library", key: null, name: "eeschema.InspectionTool.CompareSchematicWithHistory" }, "SCH_ACTIONS::showBusSyntaxHelp": { id: "showBusSyntaxHelp", label: "Show Bus Syntax Help", tip: null, icon: "bus_definition_tool", key: null, name: "eeschema.InspectionTool.showBusSyntaxHelp" }, "SCH_ACTIONS::showSimulator": { id: "showSimulator", label: "Simulator", tip: "Show simulation window for running SPICE or IBIS simulations.", icon: "simulator", key: null, name: "eeschema.EditorControl.showSimulator" }, "SCH_ACTIONS::pointEditorAddCorner": { id: "pointEditorAddCorner", label: "Create Corner", tip: null, icon: "add_corner", key: null, name: "eeschema.PointEditor.addCorner" }, "SCH_ACTIONS::pointEditorRemoveCorner": { id: "pointEditorRemoveCorner", label: "Remove Corner", tip: null, icon: "delete_cursor", key: null, name: "eeschema.PointEditor.removeCorner" }, "SCH_ACTIONS::selectNode": { id: "selectNode", label: "Select Node", tip: "Select a connection item under the cursor", icon: null, key: "Alt+3", name: "eeschema.InteractiveSelection.SelectNode" }, "SCH_ACTIONS::selectConnection": { id: "selectConnection", label: "Select/Expand Connection", tip: "Selects a connection or expands an existing selection to pins, symbols, or entire connections", icon: "net_highlight_schematic", key: "Ctrl+4", name: "eeschema.InteractiveSelection.SelectConnection" }, "SCH_ACTIONS::showDesignBlockPanel": { id: "showDesignBlockPanel", label: "Design Blocks", tip: "Show/hide design blocks library", icon: "search_tree", key: null, name: "eeschema.SchDesignBlockControl.showDesignBlockPanel" }, "SCH_ACTIONS::showRemoteSymbolPanel": { id: "showRemoteSymbolPanel", label: "Remote Symbols", tip: "Show/hide the remote symbol panel", icon: "library_browser", key: null, name: "eeschema.RemoteSymbols.showPanel" }, "SCH_ACTIONS::saveSheetAsDesignBlock": { id: "saveSheetAsDesignBlock", label: "Save Current Sheet as Design Block...", tip: "Create a new design block from the current sheet", icon: "new_component", key: null, name: "eeschema.SchDesignBlockControl.saveSheetAsDesignBlock" }, "SCH_ACTIONS::saveSelectionAsDesignBlock": { id: "saveSelectionAsDesignBlock", label: "Save Selection as Design Block...", tip: "Create a new design block from the current selection", icon: "new_component", key: null, name: "eeschema.SchDesignBlockControl.saveSelectionAsDesignBlock" }, "SCH_ACTIONS::updateDesignBlockFromSheet": { id: "updateDesignBlockFromSheet", label: "Update Design Block from Current Sheet", tip: "Set design block schematic to current sheet", icon: "save", key: null, name: "eeschema.SchDesignBlockControl.updateDesignBlockFromSheet" }, "SCH_ACTIONS::updateDesignBlockFromSelection": { id: "updateDesignBlockFromSelection", label: "Update Design Block from Selection", tip: "Set design block schematic to current selection", icon: "save", key: null, name: "eeschema.SchDesignBlockControl.updateDesignBlockFromSelection" }, "SCH_ACTIONS::deleteDesignBlock": { id: "deleteDesignBlock", label: "Delete Design Block", tip: "Remove the selected design block from its library", icon: "trash", key: null, name: "eeschema.SchDesignBlockControl.deleteDesignBlock" }, "SCH_ACTIONS::editDesignBlockProperties": { id: "editDesignBlockProperties", label: "Properties...", tip: "Edit properties of design block", icon: "edit", key: null, name: "eeschema.SchDesignBlockControl.editDesignBlockProperties" }, "SCH_ACTIONS::saveLibraryAs": { id: "saveLibraryAs", label: "Save Library As...", tip: "Save the current library to a new file", icon: null, key: "Ctrl+Shift+S", name: "eeschema.SymbolLibraryControl.saveLibraryAs" }, "SCH_ACTIONS::saveLibraryAsPacked": { id: "saveLibraryAsPacked", label: "Save Library As Packed...", tip: "Save the current unpacked library to a new packed library file", icon: null, key: null, name: "eeschema.SymbolLibraryControl.saveLibraryAsPacked" }, "SCH_ACTIONS::saveLibraryAsUnpacked": { id: "saveLibraryAsUnpacked", label: "Save Library As Unpacked...", tip: "Save the current packed library to a new unpacked library folder", icon: null, key: null, name: "eeschema.SymbolLibraryControl.saveLibraryAsUnpacked" }, "SCH_ACTIONS::compareLibraryWithFile": { id: "compareLibraryWithFile", label: "Compare Library with File...", tip: "Diff the current symbol library against another .kicad_sym file", icon: "library", key: null, name: "eeschema.SymbolLibraryControl.CompareLibraryWithFile" }, "SCH_ACTIONS::newSymbol": { id: "newSymbol", label: "New Symbol...", tip: "Create a new symbol in an existing library", icon: "new_component", key: "Ctrl+N", name: "eeschema.SymbolLibraryControl.newSymbol" }, "SCH_ACTIONS::deriveFromExistingSymbol": { id: "deriveFromExistingSymbol", label: "Derive from Existing Symbol...", tip: "Create a new symbol, derived from an existing symbol", icon: "new_component", key: null, name: "eeschema.SymbolLibraryControl.deriveFromExistingSymbol" }, "SCH_ACTIONS::editSymbol": { id: "editSymbol", label: "Edit Symbol", tip: "Show selected symbol on editor canvas", icon: "edit", key: null, name: "eeschema.SymbolLibraryControl.editSymbol" }, "SCH_ACTIONS::duplicateSymbol": { id: "duplicateSymbol", label: "Duplicate Symbol", tip: null, icon: "duplicate", key: null, name: "eeschema.SymbolLibraryControl.duplicateSymbol" }, "SCH_ACTIONS::renameSymbol": { id: "renameSymbol", label: "Rename Symbol...", tip: null, icon: "edit", key: null, name: "eeschema.SymbolLibraryControl.renameFootprint" }, "SCH_ACTIONS::saveSymbolAs": { id: "saveSymbolAs", label: "Save As...", tip: "Save the current symbol to a different library or name", icon: "save_as", key: null, name: "eeschema.SymbolLibraryControl.saveSymbolAs" }, "SCH_ACTIONS::saveSymbolCopyAs": { id: "saveSymbolCopyAs", label: "Save Copy As...", tip: "Save a copy of the current symbol to a different library or name", icon: "save_as", key: null, name: "eeschema.SymbolLibraryControl.saveSymbolCopyAs" }, "SCH_ACTIONS::deleteSymbol": { id: "deleteSymbol", label: "Delete Symbol", tip: "Remove the selected symbol from its library", icon: "trash", key: null, name: "eeschema.SymbolLibraryControl.deleteSymbol" }, "SCH_ACTIONS::cutSymbol": { id: "cutSymbol", label: "Cut", tip: null, icon: "cut", key: null, name: "eeschema.SymbolLibraryControl.cutSymbol" }, "SCH_ACTIONS::copySymbol": { id: "copySymbol", label: "Copy", tip: null, icon: "copy", key: null, name: "eeschema.SymbolLibraryControl.copySymbol" }, "SCH_ACTIONS::pasteSymbol": { id: "pasteSymbol", label: "Paste Symbol", tip: null, icon: "paste", key: null, name: "eeschema.SymbolLibraryControl.pasteSymbol" }, "SCH_ACTIONS::importSymbol": { id: "importSymbol", label: "Import Symbol...", tip: "Import a symbol to the current library", icon: "import_part", key: null, name: "eeschema.SymbolLibraryControl.importSymbol" }, "SCH_ACTIONS::exportSymbol": { id: "exportSymbol", label: "Export...", tip: "Export a symbol to a new library file", icon: "export_part", key: null, name: "eeschema.SymbolLibraryControl.exportSymbol" }, "SCH_ACTIONS::updateSymbolFields": { id: "updateSymbolFields", label: "Update Symbol Fields...", tip: "Update symbol to match changes made in parent symbol", icon: "refresh", key: null, name: "eeschema.SymbolLibraryControl.updateSymbolFields" }, "SCH_ACTIONS::flattenSymbol": { id: "flattenSymbol", label: "Flatten Symbol", tip: "Remove inheritance from symbol", icon: null, key: null, name: "eeschema.SymbolLibraryControl.flattenSymbol" }, "SCH_ACTIONS::nextSymbolTab": { id: "nextSymbolTab", label: "Next Symbol Tab", tip: "Switch to the next open symbol tab", icon: null, key: null, name: "eeschema.SymbolLibraryControl.nextSymbolTab" }, "SCH_ACTIONS::prevSymbolTab": { id: "prevSymbolTab", label: "Previous Symbol Tab", tip: "Switch to the previous open symbol tab", icon: null, key: null, name: "eeschema.SymbolLibraryControl.prevSymbolTab" }, "SCH_ACTIONS::closeSymbolTab": { id: "closeSymbolTab", label: "Close Symbol Tab", tip: "Close the active symbol tab", icon: null, key: null, name: "eeschema.SymbolLibraryControl.closeSymbolTab" }, "SCH_ACTIONS::showLibFieldsTable": { id: "showLibFieldsTable", label: "Bulk Edit Symbol Fields...", tip: "Edit a table of fields from all symbols in the library", icon: "table", key: null, name: "eeschema.SymbolLibraryControl.showLibraryFieldsTable" }, "SCH_ACTIONS::showRelatedLibFieldsTable": { id: "showRelatedLibFieldsTable", label: "Bulk Edit Related Symbol Fields...", tip: "Edit a table of fields from all symbols related to the selected symbol", icon: "table", key: null, name: "eeschema.SymbolLibraryControl.showRelatedLibraryFieldsTable" }, "SCH_ACTIONS::addSymbolToSchematic": { id: "addSymbolToSchematic", label: "Add Symbol to Schematic", tip: "Add the current symbol to the schematic", icon: "add_symbol_to_schematic", key: null, name: "eeschema.SymbolLibraryControl.addSymbolToSchematic" }, "SCH_ACTIONS::showElectricalTypes": { id: "showElectricalTypes", label: "Show Pin Electrical Types", tip: "Annotate pins with their electrical types", icon: "pin_show_etype", key: null, name: "eeschema.SymbolLibraryControl.showElectricalTypes" }, "SCH_ACTIONS::showPinNumbers": { id: "showPinNumbers", label: "Show Pin Numbers", tip: "Annotate pins with their numbers", icon: "pin", key: null, name: "eeschema.SymbolLibraryControl.showPinNumbers" }, "SCH_ACTIONS::exportSymbolView": { id: "exportSymbolView", label: "Export View as PNG...", tip: "Create PNG file from the current view", icon: "export_png", key: null, name: "eeschema.SymbolLibraryControl.exportSymbolView" }, "SCH_ACTIONS::exportSymbolAsSVG": { id: "exportSymbolAsSVG", label: "Export Symbol as SVG...", tip: "Create SVG file from the current symbol", icon: "export_svg", key: null, name: "eeschema.SymbolLibraryControl.exportSymbolAsSVG" }, "SCH_ACTIONS::toggleSyncedPinsMode": { id: "toggleSyncedPinsMode", label: "Synchronized Pins Mode", tip: "Synchronized Pins Mode\\nWhen enabled propagates all changes (except pin numbers) to other units.\\nEnabled by default for multiunit parts with interchangeable units.", icon: "pin2pin", key: null, name: "eeschema.SymbolLibraryControl.toggleSyncedPinsMode" }, "SCH_ACTIONS::showHiddenPins": { id: "showHiddenPins", label: "Show Hidden Pins", tip: null, icon: "hidden_pin", key: null, name: "eeschema.SymbolLibraryControl.showHiddenPins" }, "SCH_ACTIONS::showHiddenFields": { id: "showHiddenFields", label: "Show Hidden Fields", tip: null, icon: "text_sketch", key: null, name: "eeschema.SymbolLibraryControl.showHiddenFields" }, "SCH_ACTIONS::previousSymbol": { id: "previousSymbol", label: "Display previous symbol", tip: null, icon: "lib_previous", key: null, name: "eeschema.SymbolLibraryControl.previousSymbol" }, "SCH_ACTIONS::nextSymbol": { id: "nextSymbol", label: "Display next symbol", tip: null, icon: "lib_next", key: null, name: "eeschema.SymbolLibraryControl.nextSymbol" }, "SCH_ACTIONS::placeSymbolPin": { id: "placeSymbolPin", label: "Draw Pins", tip: null, icon: "pin", key: "P", name: "eeschema.SymbolDrawing.placeSymbolPin" }, "SCH_ACTIONS::placeSymbolText": { id: "placeSymbolText", label: "Draw Text", tip: null, icon: "text", key: null, name: "eeschema.SymbolDrawing.placeSymbolText" }, "SCH_ACTIONS::drawSymbolTextBox": { id: "drawSymbolTextBox", label: "Draw Text Boxes", tip: null, icon: "add_textbox", key: null, name: "eeschema.SymbolDrawing.drawSymbolTextBox" }, "SCH_ACTIONS::drawSymbolLines": { id: "drawSymbolLines", label: "Draw Lines", tip: "Draw connected graphic lines", icon: "add_graphical_segments", key: null, name: "eeschema.SymbolDrawing.drawSymbolLines" }, "SCH_ACTIONS::drawSymbolPolygon": { id: "drawSymbolPolygon", label: "Draw Polygons", tip: null, icon: "add_graphical_polygon", key: null, name: "eeschema.SymbolDrawing.drawSymbolPolygon" }, "SCH_ACTIONS::placeSymbolAnchor": { id: "placeSymbolAnchor", label: "Move Symbol Anchor", tip: null, icon: "anchor", key: null, name: "eeschema.SymbolDrawing.placeSymbolAnchor" }, "SCH_ACTIONS::pushPinLength": { id: "pushPinLength", label: "Push Pin Length", tip: "Copy pin length to other pins in symbol", icon: "pin_size_to", key: null, name: "eeschema.PinEditing.pushPinLength" }, "SCH_ACTIONS::pushPinNameSize": { id: "pushPinNameSize", label: "Push Pin Name Size", tip: "Copy pin name size to other pins in symbol", icon: "pin_size_to", key: null, name: "eeschema.PinEditing.pushPinNameSize" }, "SCH_ACTIONS::pushPinNumSize": { id: "pushPinNumSize", label: "Push Pin Number Size", tip: "Copy pin number size to other pins in symbol", icon: "pin_size_to", key: null, name: "eeschema.PinEditing.pushPinNumSize" }, "SCH_ACTIONS::placeSymbol": { id: "placeSymbol", label: "Place Symbols", tip: null, icon: "add_component", key: "A", name: "eeschema.InteractiveDrawing.placeSymbol" }, "SCH_ACTIONS::placeNextSymbolUnit": { id: "placeNextSymbolUnit", label: "Place Next Symbol Unit", tip: "Place the next unit of the current symbol that is missing from the schematic", icon: null, key: null, name: "eeschema.InteractiveDrawing.placeNextSymbolUnit" }, "SCH_ACTIONS::placePower": { id: "placePower", label: "Place Power Symbols", tip: null, icon: "add_power", key: "P", name: "eeschema.InteractiveDrawing.placePowerSymbol" }, "SCH_ACTIONS::placeDesignBlock": { id: "placeDesignBlock", label: "Place Design Block", tip: "Add selected design block to current sheet", icon: "add_component", key: "Shift+B", name: "eeschema.InteractiveDrawing.placeDesignBlock" }, "SCH_ACTIONS::placeLinkedDesignBlock": { id: "placeLinkedDesignBlock", label: "Place Linked Design Block", tip: "Place design block linked to selected group", icon: "add_component", key: null, name: "eeschema.InteractiveDrawing.placeLinkedDesignBlock" }, "SCH_ACTIONS::saveToLinkedDesignBlock": { id: "saveToLinkedDesignBlock", label: "Save to Linked Design Block", tip: "Save selected group to linked design block", icon: "add_component", key: null, name: "eeschema.InteractiveDrawing.saveToLinkedDesignBlock" }, "SCH_ACTIONS::placeNoConnect": { id: "placeNoConnect", label: "Place/Remove No Connect Flags", tip: null, icon: "noconn", key: "Q", name: "eeschema.InteractiveDrawing.placeNoConnect" }, "SCH_ACTIONS::placeJunction": { id: "placeJunction", label: "Place Junctions", tip: null, icon: "add_junction", key: "J", name: "eeschema.InteractiveDrawing.placeJunction" }, "SCH_ACTIONS::placeBusWireEntry": { id: "placeBusWireEntry", label: "Place Wire to Bus Entries", tip: null, icon: "add_line2bus", key: "Z", name: "eeschema.InteractiveDrawing.placeBusWireEntry" }, "SCH_ACTIONS::placeLabel": { id: "placeLabel", label: "Place Net Labels", tip: null, icon: "add_label", key: "L", name: "eeschema.InteractiveDrawing.placeLabel" }, "SCH_ACTIONS::placeClassLabel": { id: "placeClassLabel", label: "Place Directive Labels", tip: null, icon: "add_class_flag", key: null, name: "eeschema.InteractiveDrawing.placeClassLabel" }, "SCH_ACTIONS::placeHierLabel": { id: "placeHierLabel", label: "Place Hierarchical Labels", tip: null, icon: "add_hierarchical_label", key: "H", name: "eeschema.InteractiveDrawing.placeHierarchicalLabel" }, "SCH_ACTIONS::drawSheet": { id: "drawSheet", label: "Draw Hierarchical Sheets", tip: null, icon: "add_hierarchical_subsheet", key: "S", name: "eeschema.InteractiveDrawing.drawSheet" }, "SCH_ACTIONS::drawSheetFromFile": { id: "drawSheetFromFile", label: "Draw Sheet from File", tip: "Copy sheet into project and draw on current sheet", icon: "add_hierarchical_subsheet", key: null, name: "eeschema.InteractiveDrawing.drawSheetFromFile" }, "SCH_ACTIONS::drawSheetFromDesignBlock": { id: "drawSheetFromDesignBlock", label: "Draw Sheet from Design Block", tip: "Copy design block into project as a sheet on current sheet", icon: "add_hierarchical_subsheet", key: null, name: "eeschema.InteractiveDrawing.drawSheetFromDesignBlock" }, "SCH_ACTIONS::placeSheetPin": { id: "placeSheetPin", label: "Place Pins from Sheet", tip: "Add sheet pins from existing hierarchical labels found on that sheet", icon: "add_hierar_pin", key: null, name: "eeschema.InteractiveDrawing.placeSheetPin" }, "SCH_ACTIONS::autoplaceAllSheetPins": { id: "autoplaceAllSheetPins", label: "Autoplace All Sheet Pins", tip: "Imports and auto places all sheet pins", icon: null, key: null, name: "eeschema.InteractiveDrawing.autoplaceAllSheetPins" }, "SCH_ACTIONS::syncSheetPins": { id: "syncSheetPins", label: "Sync Selected Sheet Pins...", tip: "Synchronize selected sheet pins and hierarchical labels", icon: "import_hierarchical_label", key: null, name: "eeschema.InteractiveDrawing.syncSheetPins" }, "SCH_ACTIONS::syncAllSheetsPins": { id: "syncAllSheetsPins", label: "Sync All Sheet Pins...", tip: "Synchronize all sheet pins and hierarchical labels", icon: "import_hierarchical_label", key: null, name: "eeschema.InteractiveDrawing.syncAllSheetsPins" }, "SCH_ACTIONS::importSheet": { id: "importSheet", label: "Import Sheet...", tip: "Import sheet into project", icon: "add_hierarchical_subsheet", key: null, name: "eeschema.InteractiveDrawing.importSheet" }, "SCH_ACTIONS::placeGlobalLabel": { id: "placeGlobalLabel", label: "Place Global Labels", tip: null, icon: "add_glabel", key: "Ctrl+L", name: "eeschema.InteractiveDrawing.placeGlobalLabel" }, "SCH_ACTIONS::placeSchematicText": { id: "placeSchematicText", label: "Draw Text", tip: null, icon: "text", key: "T", name: "eeschema.InteractiveDrawing.placeSchematicText" }, "SCH_ACTIONS::drawTextBox": { id: "drawTextBox", label: "Draw Text Boxes", tip: null, icon: "add_textbox", key: null, name: "eeschema.InteractiveDrawing.drawTextBox" }, "SCH_ACTIONS::drawTable": { id: "drawTable", label: "Draw Tables", tip: null, icon: "table", key: null, name: "eeschema.InteractiveDrawing.drawTable" }, "SCH_ACTIONS::drawRectangle": { id: "drawRectangle", label: "Draw Rectangles", tip: null, icon: "add_rectangle", key: null, name: "eeschema.InteractiveDrawing.drawRectangle" }, "SCH_ACTIONS::drawCircle": { id: "drawCircle", label: "Draw Circles", tip: null, icon: "add_circle", key: null, name: "eeschema.InteractiveDrawing.drawCircle" }, "SCH_ACTIONS::drawEllipse": { id: "drawEllipse", label: "Draw Ellipses", tip: null, icon: "add_ellipse", key: null, name: "eeschema.InteractiveDrawing.drawEllipse" }, "SCH_ACTIONS::drawEllipseArc": { id: "drawEllipseArc", label: "Draw Elliptical Arcs", tip: null, icon: "add_ellipse_arc", key: null, name: "eeschema.InteractiveDrawing.drawEllipseArc" }, "SCH_ACTIONS::drawArc": { id: "drawArc", label: "Draw Arcs", tip: null, icon: "add_arc", key: null, name: "eeschema.InteractiveDrawing.drawArc" }, "SCH_ACTIONS::drawArcCenter": { id: "drawArcCenter", label: "Draw Arc: Center, Start, End", tip: "Draw arcs by clicking the center, the start point, then the end point", icon: "add_arc_center", key: null, name: "eeschema.InteractiveDrawing.drawArcCenter" }, "SCH_ACTIONS::drawArcStartEndMid": { id: "drawArcStartEndMid", label: "Draw Arc: Start, End, Midpoint", tip: "Draw arcs by clicking the start point, the end point, then a point on the arc", icon: "add_arc_start_end_mid", key: null, name: "eeschema.InteractiveDrawing.drawArcStartEndMid" }, "SCH_ACTIONS::drawArcStartEndCenter": { id: "drawArcStartEndCenter", label: "Draw Arc: Start, End, Center", tip: "Draw arcs by clicking the start point, the end point, then the center", icon: "add_arc_start_end_center", key: null, name: "eeschema.InteractiveDrawing.drawArcStartEndCenter" }, "SCH_ACTIONS::drawArcTangent": { id: "drawArcTangent", label: "Draw Arc: Tangent", tip: "Draw arcs tangent to the previous arc or to the line or arc ending at the start point", icon: "add_arc_tangent", key: null, name: "eeschema.InteractiveDrawing.drawArcTangent" }, "SCH_ACTIONS::drawArcStartDirEnd": { id: "drawArcStartDirEnd", label: "Draw Arc: Start, Direction, End", tip: "Draw arcs by clicking the start point, a point giving the start direction, then the end point", icon: "add_arc_start_dir_end", key: null, name: "eeschema.InteractiveDrawing.drawArcStartDirEnd" }, "SCH_ACTIONS::drawBezier": { id: "drawBezier", label: "Draw Bezier Curve", tip: null, icon: "add_bezier", key: null, name: "eeschema.InteractiveDrawing.drawBezier" }, "SCH_ACTIONS::drawPolygon": { id: "drawPolygon", label: "Draw Polygons", tip: null, icon: "add_graphical_polygon", key: null, name: "eeschema.InteractiveDrawing.drawPolygon" }, "SCH_ACTIONS::placeImage": { id: "placeImage", label: "Place Images", tip: null, icon: "image", key: null, name: "eeschema.InteractiveDrawing.placeImage" }, "SCH_ACTIONS::convertImageToOutlines": { id: "convertImageToOutlines", label: "Convert to Outlines...", tip: "Trace the image into schematic graphics", icon: "image", key: null, name: "eeschema.InteractiveDrawing.convertImageToOutlines" }, "SCH_ACTIONS::drawRuleArea": { id: "drawRuleArea", label: "Draw Rule Areas", tip: null, icon: "add_keepout_area", key: null, name: "eeschema.InteractiveDrawing.drawRuleArea" }, "SCH_ACTIONS::closeOutline": { id: "closeOutline", label: "Close Outline", tip: "Close the in-progress outline", icon: "checked_ok", key: null, name: "eeschema.InteractiveDrawing.closeOutline" }, "SCH_ACTIONS::repeatDrawItem": { id: "repeatDrawItem", label: "Repeat Last Item", tip: "Duplicates the last drawn item", icon: null, key: "Ins", name: "eeschema.InteractiveEdit.repeatDrawItem", mac: "F1" }, "SCH_ACTIONS::rotateCW": { id: "rotateCW", label: "Rotate Clockwise", tip: null, icon: "rotate_cw", key: "Shift+R", name: "eeschema.InteractiveEdit.rotateCW" }, "SCH_ACTIONS::rotateCCW": { id: "rotateCCW", label: "Rotate Counterclockwise", tip: null, icon: "rotate_ccw", key: "R", name: "eeschema.InteractiveEdit.rotateCCW" }, "SCH_ACTIONS::mirrorV": { id: "mirrorV", label: "Mirror Vertically", tip: "Flips selected item(s) from top to bottom", icon: "mirror_v", key: "Y", name: "eeschema.InteractiveEdit.mirrorV" }, "SCH_ACTIONS::mirrorH": { id: "mirrorH", label: "Mirror Horizontally", tip: "Flips selected item(s) from left to right", icon: "mirror_h", key: "X", name: "eeschema.InteractiveEdit.mirrorH" }, "SCH_ACTIONS::swap": { id: "swap", label: "Swap", tip: "Swap positions of selected items", icon: "swap", key: "Alt+S", name: "eeschema.InteractiveEdit.swap" }, "SCH_ACTIONS::swapPins": { id: "swapPins", label: "Swap Pins", tip: "Swap the selected symbol pins' positions", icon: "swap", key: null, name: "eeschema.InteractiveEdit.swapPins" }, "SCH_ACTIONS::swapPinLabels": { id: "swapPinLabels", label: "Swap Pin Labels", tip: "Swap the labels attached to selected pins", icon: "swap", key: null, name: "eeschema.InteractiveEdit.swapPinLabels" }, "SCH_ACTIONS::swapUnitLabels": { id: "swapUnitLabels", label: "Swap Unit Labels", tip: "Swap labels between selected units", icon: "swap", key: null, name: "eeschema.InteractiveEdit.swapUnitLabels" }, "SCH_ACTIONS::toggleLock": { id: "toggleLock", label: "Toggle Lock", tip: "Lock or unlock selected items", icon: "lock_unlock", key: null, name: "eeschema.InteractiveEdit.toggleLock" }, "SCH_ACTIONS::lock": { id: "lock", label: "Lock", tip: "Prevent items from being moved and/or resized on the canvas", icon: "locked", key: null, name: "eeschema.InteractiveEdit.lock" }, "SCH_ACTIONS::unlock": { id: "unlock", label: "Unlock", tip: "Allow items to be moved and/or resized on the canvas", icon: "unlocked", key: null, name: "eeschema.InteractiveEdit.unlock" }, "SCH_ACTIONS::properties": { id: "properties", label: "Properties...", tip: null, icon: "edit", key: "E", name: "eeschema.InteractiveEdit.properties" }, "SCH_ACTIONS::editReference": { id: "editReference", label: "Edit Reference Designator...", tip: null, icon: "edit_comp_ref", key: "U", name: "eeschema.InteractiveEdit.editReference" }, "SCH_ACTIONS::editValue": { id: "editValue", label: "Edit Value...", tip: null, icon: "edit_comp_value", key: "V", name: "eeschema.InteractiveEdit.editValue" }, "SCH_ACTIONS::editFootprint": { id: "editFootprint", label: "Edit Footprint...", tip: null, icon: "edit_comp_footprint", key: "F", name: "eeschema.InteractiveEdit.editFootprint" }, "SCH_ACTIONS::autoplaceFields": { id: "autoplaceFields", label: "Autoplace Fields", tip: "Runs the automatic placement algorithm on the symbol's (or sheet's) fields", icon: "autoplace_fields", key: "O", name: "eeschema.InteractiveEdit.autoplaceFields" }, "SCH_ACTIONS::changeSymbols": { id: "changeSymbols", label: "Change Symbols...", tip: "Assign different symbols from the library", icon: "exchange", key: null, name: "eeschema.InteractiveEdit.changeSymbols" }, "SCH_ACTIONS::updateSymbols": { id: "updateSymbols", label: "Update Symbols from Library...", tip: "Update symbols to include any changes from the library", icon: "refresh", key: null, name: "eeschema.InteractiveEdit.updateSymbols" }, "SCH_ACTIONS::changeSymbol": { id: "changeSymbol", label: "Change Symbol...", tip: "Assign a different symbol from the library", icon: "exchange", key: null, name: "eeschema.InteractiveEdit.changeSymbol" }, "SCH_ACTIONS::updateSymbol": { id: "updateSymbol", label: "Update Symbol...", tip: "Update symbol to include any changes from the library", icon: "refresh", key: null, name: "eeschema.InteractiveEdit.updateSymbol" }, "SCH_ACTIONS::setVariantSymbol": { id: "setVariantSymbol", label: "Set Variant Symbol...", tip: "Assign an alternate library symbol for this design variant", icon: "exchange", key: null, name: "eeschema.InteractiveEdit.setVariantSymbol" }, "SCH_ACTIONS::clearVariantSymbol": { id: "clearVariantSymbol", label: "Clear Variant Symbol", tip: "Remove the variant symbol override and revert to the base symbol", icon: "cancel", key: null, name: "eeschema.InteractiveEdit.clearVariantSymbol" }, "SCH_ACTIONS::assignNetclass": { id: "assignNetclass", label: "Assign Netclass...", tip: "Assign a netclass to nets matching a pattern", icon: "netlist", key: null, name: "eeschema.InteractiveEdit.assignNetclass" }, "SCH_ACTIONS::findNetInInspector": { id: "findNetInInspector", label: "Find in Net Navigator", tip: "Locate the selected net in the net navigator", icon: null, key: null, name: "eeschema.InteractiveEdit.findNetInInspector" }, "SCH_ACTIONS::cycleBodyStyle": { id: "cycleBodyStyle", label: "Cycle Body Style", tip: "Switch between De Morgan (or other) representations", icon: "morgan2", key: null, name: "eeschema.InteractiveEdit.toggleDeMorgan" }, "SCH_ACTIONS::toLabel": { id: "toLabel", label: "Change to Label", tip: "Change existing item to a label", icon: "add_line_label", key: null, name: "eeschema.InteractiveEdit.toLabel" }, "SCH_ACTIONS::toDLabel": { id: "toDLabel", label: "Change to Directive Label", tip: "Change existing item to a directive label", icon: "add_class_flag", key: null, name: "eeschema.InteractiveEdit.toCLabel" }, "SCH_ACTIONS::toHLabel": { id: "toHLabel", label: "Change to Hierarchical Label", tip: "Change existing item to a hierarchical label", icon: "add_hierarchical_label", key: null, name: "eeschema.InteractiveEdit.toHLabel" }, "SCH_ACTIONS::toGLabel": { id: "toGLabel", label: "Change to Global Label", tip: "Change existing item to a global label", icon: "add_glabel", key: null, name: "eeschema.InteractiveEdit.toGLabel" }, "SCH_ACTIONS::toText": { id: "toText", label: "Change to Text", tip: "Change existing item to a text comment", icon: "text", key: null, name: "eeschema.InteractiveEdit.toText" }, "SCH_ACTIONS::toTextBox": { id: "toTextBox", label: "Change to Text Box", tip: "Change existing item to a text box", icon: "add_textbox", key: null, name: "eeschema.InteractiveEdit.toTextBox" }, "SCH_ACTIONS::cleanupSheetPins": { id: "cleanupSheetPins", label: "Cleanup Sheet Pins", tip: "Delete unreferenced sheet pins", icon: null, key: null, name: "eeschema.InteractiveEdit.cleanupSheetPins" }, "SCH_ACTIONS::editTextAndGraphics": { id: "editTextAndGraphics", label: "Edit Text & Graphics Properties...", tip: "Edit text and graphics properties globally across schematic", icon: "text", key: null, name: "eeschema.InteractiveEdit.editTextAndGraphics" }, "SCH_ACTIONS::symbolProperties": { id: "symbolProperties", label: "Symbol Properties...", tip: null, icon: "part_properties", key: null, name: "eeschema.InteractiveEdit.symbolProperties" }, "SCH_ACTIONS::editSymbolPinMaps": { id: "editSymbolPinMaps", label: "Symbol Pin Maps...", tip: "Edit the symbol's pin-to-pad maps and associated footprints", icon: "pin_table", key: null, name: "eeschema.InteractiveEdit.editSymbolPinMaps" }, "SCH_ACTIONS::pinTable": { id: "pinTable", label: "Pin Table...", tip: "Displays pin table for bulk editing of pins", icon: "pin_table", key: null, name: "eeschema.InteractiveEdit.pinTable" }, "SCH_ACTIONS::convertStackedPins": { id: "convertStackedPins", label: "Convert Stacked Pins", tip: "Convert multiple pins at the same location to a single pin with stacked notation", icon: "pin", key: null, name: "eeschema.InteractiveEdit.convertStackedPins" }, "SCH_ACTIONS::explodeStackedPin": { id: "explodeStackedPin", label: "Explode Stacked Pin", tip: "Convert a pin with stacked notation to multiple individual pins", icon: "pin", key: null, name: "eeschema.InteractiveEdit.explodeStackedPin" }, "SCH_ACTIONS::breakWire": { id: "breakWire", label: "Break", tip: "Divide into connected segments", icon: "break_line", key: null, name: "eeschema.InteractiveEdit.breakWire" }, "SCH_ACTIONS::slice": { id: "slice", label: "Slice", tip: "Divide into unconnected segments", icon: "slice_line", key: null, name: "eeschema.InteractiveEdit.slice" }, "SCH_ACTIONS::highlightNet": { id: "highlightNet", label: "Highlight Net", tip: "Highlight net under cursor", icon: "net_highlight_schematic", key: "`", name: "eeschema.EditorControl.highlightNet" }, "SCH_ACTIONS::clearHighlight": { id: "clearHighlight", label: "Clear Net Highlighting", tip: "Clear any existing net highlighting", icon: null, key: "~", name: "eeschema.EditorControl.clearHighlight" }, "SCH_ACTIONS::highlightNetTool": { id: "highlightNetTool", label: "Highlight Nets", tip: "Highlight wires and pins of a net", icon: "net_highlight_schematic", key: null, name: "eeschema.EditorControl.highlightNetTool" }, "SCH_ACTIONS::highlightNetChain": { id: "highlightNetChain", label: "Highlight Net Chain", tip: "Highlight the net chain under the cursor", icon: "net_highlight_schematic", key: null, name: "eeschema.EditorControl.highlightNetChain" }, "SCH_ACTIONS::removeFromNetChain": { id: "removeFromNetChain", label: "Remove from Net Chain", tip: "Remove the selected net from its net chain by disabling propagation on the bridging component(s)", icon: null, key: null, name: "eeschema.EditorControl.removeFromNetChain" }, "SCH_ACTIONS::replaceTerminalPin": { id: "replaceTerminalPin", label: "Replace Terminal Pin", tip: null, icon: null, key: null, name: "eeschema.EditorControl.replaceTerminalPin" }, "SCH_ACTIONS::nameNetChain": { id: "nameNetChain", label: "Name Net Chain", tip: "Assign a name to the net chain", icon: null, key: null, name: "eeschema.EditorControl.nameNetChain" }, "SCH_ACTIONS::createNetChainBetweenPins": { id: "createNetChainBetweenPins", label: "Create Net Chain Between Pins", tip: "Create a new net chain connecting the two selected pins", icon: null, key: null, name: "eeschema.EditorControl.createNetChainBetweenPins" }, "SCH_ACTIONS::createNetChain": { id: "createNetChain", label: "Create Net Chain...", tip: "Detect net chain paths through passives and create a named net chain", icon: null, key: null, name: "eeschema.EditorControl.createNetChain" }, "SCH_ACTIONS::showNetNavigator": { id: "showNetNavigator", label: "Net Navigator", tip: "Show/hide the net navigator", icon: null, key: null, name: "eeschema.EditorControl.showNetNavigator" }, "SCH_ACTIONS::editWithLibEdit": { id: "editWithLibEdit", label: "Edit with Symbol Editor", tip: "Open the selected symbol in the Symbol Editor", icon: "libedit", key: "Ctrl+E", name: "eeschema.EditorControl.editWithSymbolEditor" }, "SCH_ACTIONS::setExcludeFromBOM": { id: "setExcludeFromBOM", label: "Exclude from Bill of Materials", tip: "Set the exclude from bill of materials attribute", icon: null, key: null, name: "eeschema.EditorControl.setExcludeFromBOM" }, "SCH_ACTIONS::setExcludeFromSim": { id: "setExcludeFromSim", label: "Exclude from Simulation", tip: "Set the exclude from simulation attribute", icon: null, key: null, name: "eeschema.EditorControl.setExcludeFromSimulation" }, "SCH_ACTIONS::setExcludeFromBoard": { id: "setExcludeFromBoard", label: "Exclude from Board", tip: "Set the exclude from board attribute", icon: null, key: null, name: "eeschema.EditorControl.setExcludeFromBoard" }, "SCH_ACTIONS::setExcludeFromPosFiles": { id: "setExcludeFromPosFiles", label: "Exclude from Position Files", tip: "Set the exclude from position files attribute", icon: null, key: null, name: "eeschema.EditorControl.setExcludeFromPosFiles" }, "SCH_ACTIONS::setDNP": { id: "setDNP", label: "Do not Populate", tip: "Set the do not populate attribute", icon: null, key: null, name: "eeschema.EditorControl.setDNP" }, "SCH_ACTIONS::editLibSymbolWithLibEdit": { id: "editLibSymbolWithLibEdit", label: "Edit Library Symbol...", tip: "Open the library symbol in the Symbol Editor", icon: "libedit", key: "Ctrl+Shift+E", name: "eeschema.EditorControl.editLibSymbolWithSymbolEditor" }, "SCH_ACTIONS::editSymbolFields": { id: "editSymbolFields", label: "Bulk Edit Symbol Fields...", tip: "Edit a table of fields from all symbols in the schematic", icon: "spreadsheet", key: null, name: "eeschema.EditorControl.editSymbolFields" }, "SCH_ACTIONS::editSymbolLibraryLinks": { id: "editSymbolLibraryLinks", label: "Bulk Edit Symbol Library Links...", tip: "Edit a table of links between schematic and library symbols", icon: "link", key: null, name: "eeschema.EditorControl.editSymbolLibraryLinks" }, "SCH_ACTIONS::assignFootprints": { id: "assignFootprints", label: "Assign Footprints...", tip: "Run footprint assignment tool", icon: "icon_cvpcb_24", key: null, name: "eeschema.EditorControl.assignFootprints" }, "SCH_ACTIONS::importFPAssignments": { id: "importFPAssignments", label: "Import Footprint Assignments...", tip: "Import symbol footprint assignments from .cmp file created by board editor", icon: "import_footprint_names", key: null, name: "eeschema.EditorControl.importFPAssignments" }, "SCH_ACTIONS::annotate": { id: "annotate", label: "Annotate Schematic...", tip: "Fill in schematic symbol reference designators", icon: "annotate", key: null, name: "eeschema.EditorControl.annotate" }, "SCH_ACTIONS::incrementAnnotations": { id: "incrementAnnotations", label: "Increment Annotations From...", tip: "Increment a subset of reference designators starting at a particular symbol", icon: "annotate_increment", key: null, name: "eeschema.EditorControl.incrementAnnotations" }, "SCH_ACTIONS::schematicSetup": { id: "schematicSetup", label: "Schematic Setup...", tip: "Edit schematic setup including annotation styles and electrical rules", icon: "options_schematic", key: null, name: "eeschema.EditorControl.schematicSetup" }, "SCH_ACTIONS::editPageNumber": { id: "editPageNumber", label: "Edit Sheet Page Number...", tip: "Edit the page number of the current or selected sheet", icon: null, key: null, name: "eeschema.EditorControl.editPageNumber" }, "SCH_ACTIONS::rescueSymbols": { id: "rescueSymbols", label: "Rescue Symbols...", tip: "Find old symbols in project and rename/rescue them", icon: "rescue", key: null, name: "eeschema.EditorControl.rescueSymbols" }, "SCH_ACTIONS::remapSymbols": { id: "remapSymbols", label: "Remap Legacy Library Symbols...", tip: "Remap library symbol references in legacy schematics to the symbol library table", icon: "rescue", key: null, name: "eeschema.EditorControl.remapSymbols" }, "SCH_ACTIONS::nextNetItem": { id: "nextNetItem", label: "Next Net Item", tip: "Select next item on the current net", icon: null, key: "Tab", name: "eeschema.EditorControl.nextNetItem" }, "SCH_ACTIONS::previousNetItem": { id: "previousNetItem", label: "Previous Net Item", tip: "Select previous item on the current net", icon: null, key: "Shift+Tab", name: "eeschema.EditorControl.previousNetItem" }, "SCH_ACTIONS::drawSheetOnClipboard": { id: "drawSheetOnClipboard", label: "Export Drawing to Clipboard", tip: "Export drawing of current sheet to clipboard", icon: "copy", key: null, name: "eeschema.EditorControl.drawSheetOnClipboard" }, "SCH_ACTIONS::importGraphics": { id: "importGraphics", label: "Import Graphics...", tip: "Import 2D drawing file", icon: "import_vector", key: "Ctrl+Shift+F", name: "eeschema.EditorControl.importGraphics" }, "SCH_ACTIONS::importNonKicadSchematic": { id: "importNonKicadSchematic", label: "Import Non-KiCad Schematic...", tip: "Replace current schematic sheet with one imported from another application", icon: "import_document", key: null, name: "eeschema.EditorControl.importNonKicadSchematic" }, "SCH_ACTIONS::showPcbNew": { id: "showPcbNew", label: "Switch to PCB Editor", tip: "Open PCB in board editor", icon: "icon_pcbnew_24", key: null, name: "eeschema.EditorControl.showPcbNew" }, "SCH_ACTIONS::exportNetlist": { id: "exportNetlist", label: "Export Netlist...", tip: "Export file containing netlist in one of several formats", icon: "netlist", key: null, name: "eeschema.EditorControl.exportNetlist" }, "SCH_ACTIONS::generateBOM": { id: "generateBOM", label: "Generate Bill of Materials...", tip: "Generate a bill of materials for the current schematic", icon: "post_bom", key: null, name: "eeschema.EditorControl.generateBOM" }, "SCH_ACTIONS::generateBOMLegacy": { id: "generateBOMLegacy", label: "Generate Legacy Bill of Materials...", tip: "Generate a bill of materials for the current schematic (Legacy Generator)", icon: "file_bom", key: null, name: "eeschema.EditorControl.generateBOMLegacy" }, "SCH_ACTIONS::generateBOMExternal": { id: "generateBOMExternal", label: "Generate Bill of Materials (External)...", tip: "Generate a bill of materials for the current schematic using external generator", icon: null, key: null, name: "eeschema.EditorControl.generateBOMExternal" }, "SCH_ACTIONS::exportSymbolsToLibrary": { id: "exportSymbolsToLibrary", label: "Export Symbols...", tip: "Add symbols from schematic to a new or an existing symbol library\\n(does not remove other symbols from this library)", icon: "library_archive", key: null, name: "eeschema.EditorControl.exportSymbolsToLibrary" }, "SCH_ACTIONS::selectOnPCB": { id: "selectOnPCB", label: "Select on PCB", tip: "Select corresponding items in PCB editor", icon: "select_same_sheet", key: null, name: "eeschema.EditorControl.selectOnPCB" }, "SCH_ACTIONS::toggleHiddenPins": { id: "toggleHiddenPins", label: "Show Hidden Pins", tip: null, icon: "hidden_pin", key: null, name: "eeschema.EditorControl.showHiddenPins" }, "SCH_ACTIONS::toggleHiddenFields": { id: "toggleHiddenFields", label: "Show Hidden Fields", tip: null, icon: null, key: null, name: "eeschema.EditorControl.showHiddenFields" }, "SCH_ACTIONS::toggleDirectiveLabels": { id: "toggleDirectiveLabels", label: "Show Directive Labels", tip: null, icon: null, key: null, name: "eeschema.EditorControl.showDirectiveLabels" }, "SCH_ACTIONS::toggleERCWarnings": { id: "toggleERCWarnings", label: "Show ERC Warnings", tip: "Show markers for electrical rules checker warnings", icon: null, key: null, name: "eeschema.EditorControl.showERCWarnings" }, "SCH_ACTIONS::toggleERCErrors": { id: "toggleERCErrors", label: "Show ERC Errors", tip: "Show markers for electrical rules checker errors", icon: null, key: null, name: "eeschema.EditorControl.showERCErrors" }, "SCH_ACTIONS::toggleERCExclusions": { id: "toggleERCExclusions", label: "Show ERC Exclusions", tip: "Show markers for excluded electrical rules checker violations", icon: null, key: null, name: "eeschema.EditorControl.showERCExclusions" }, "SCH_ACTIONS::markSimExclusions": { id: "markSimExclusions", label: "Mark items excluded from simulation", tip: "Draw 'X's over items which have been excluded from simulation", icon: null, key: null, name: "eeschema.EditorControl.markSimExclusions" }, "SCH_ACTIONS::toggleOPVoltages": { id: "toggleOPVoltages", label: "Show OP Voltages", tip: "Show operating point voltage data from simulation", icon: null, key: null, name: "eeschema.EditorControl.showOperatingPointVoltages" }, "SCH_ACTIONS::toggleOPCurrents": { id: "toggleOPCurrents", label: "Show OP Currents", tip: "Show operating point current data from simulation", icon: null, key: null, name: "eeschema.EditorControl.showOperatingPointCurrents" }, "SCH_ACTIONS::togglePinAltIcons": { id: "togglePinAltIcons", label: "Show Pin Alternate Icons", tip: "Show indicator icons for pins with alternate modes", icon: null, key: null, name: "eeschema.EditorControl.togglePinAltIcons" }, "SCH_ACTIONS::lineModeFree": { id: "lineModeFree", label: "Line Mode for Wires and Buses", tip: "Draw and drag at any angle", icon: "lines_any", key: null, name: "eeschema.EditorControl.lineModeFree" }, "SCH_ACTIONS::lineMode90": { id: "lineMode90", label: "Line Mode for Wires and Buses", tip: "Constrain drawing and dragging to horizontal or vertical motions", icon: "lines90", key: null, name: "eeschema.EditorControl.lineModeOrthonal" }, "SCH_ACTIONS::lineMode45": { id: "lineMode45", label: "Line Mode for Wires and Buses", tip: "Constrain drawing and dragging to horizontal, vertical, or 45-degree angle motions", icon: "hv45mode", key: null, name: "eeschema.EditorControl.lineMode45" }, "SCH_ACTIONS::lineModeNext": { id: "lineModeNext", label: "Line Mode for Wires and Buses", tip: "Switch to next angle snapping mode", icon: null, key: "Shift+Space", name: "eeschema.EditorControl.lineModeNext" }, "SCH_ACTIONS::toggleAnnotateAuto": { id: "toggleAnnotateAuto", label: "Annotate Automatically", tip: "Toggle automatic annotation of new symbols", icon: "annotate", key: null, name: "eeschema.EditorControl.annotateAutomatically" }, "SCH_ACTIONS::previousUnit": { id: "previousUnit", label: "Previous Symbol Unit", tip: "Open the previous unit of the symbol", icon: null, key: null, name: "eeschema.EditorControl.previousUnit" }, "SCH_ACTIONS::nextUnit": { id: "nextUnit", label: "Next Symbol Unit", tip: "Open the next unit of the symbol", icon: null, key: null, name: "eeschema.EditorControl.nextUnit" }, "SCH_ACTIONS::changeSheet": { id: "changeSheet", label: "Change Sheet", tip: "Change to provided sheet's contents in the schematic editor", icon: "enter_sheet", key: null, name: "eeschema.NavigateTool.changeSheet" }, "SCH_ACTIONS::enterSheet": { id: "enterSheet", label: "Enter Sheet", tip: "Display the selected sheet's contents in the schematic editor", icon: "enter_sheet", key: null, name: "eeschema.NavigateTool.enterSheet" }, "SCH_ACTIONS::leaveSheet": { id: "leaveSheet", label: "Leave Sheet", tip: "Display the parent sheet in the schematic editor", icon: "leave_sheet", key: "Alt+Backspace", name: "eeschema.NavigateTool.leaveSheet" }, "SCH_ACTIONS::navigateUp": { id: "navigateUp", label: "Navigate Up", tip: "Navigate up one sheet in the hierarchy", icon: "up", key: "Alt+Up", name: "eeschema.NavigateTool.up" }, "SCH_ACTIONS::navigateBack": { id: "navigateBack", label: "Navigate Back", tip: "Move backward in sheet navigation history", icon: "left", key: "Alt+Left", name: "eeschema.NavigateTool.back" }, "SCH_ACTIONS::navigateForward": { id: "navigateForward", label: "Navigate Forward", tip: "Move forward in sheet navigation history", icon: "right", key: "Alt+Right", name: "eeschema.NavigateTool.forward" }, "SCH_ACTIONS::navigatePrevious": { id: "navigatePrevious", label: "Previous Sheet", tip: "Move to previous sheet by number", icon: "left", key: "PgUp", name: "eeschema.NavigateTool.previous" }, "SCH_ACTIONS::navigateNext": { id: "navigateNext", label: "Next Sheet", tip: "Move to next sheet by number", icon: "right", key: "PgDn", name: "eeschema.NavigateTool.next" }, "SCH_ACTIONS::showHierarchy": { id: "showHierarchy", label: "Hierarchy Navigator", tip: "Show/hide the schematic sheet hierarchy navigator", icon: "hierarchy_nav", key: "Ctrl+H", name: "eeschema.EditorTool.showHierarchy" }, "SCH_ACTIONS::drawWire": { id: "drawWire", label: "Draw Wires", tip: null, icon: "add_line", key: "W", name: "eeschema.InteractiveDrawingLineWireBus.drawWires" }, "SCH_ACTIONS::drawBus": { id: "drawBus", label: "Draw Buses", tip: null, icon: "add_bus", key: "B", name: "eeschema.InteractiveDrawingLineWireBus.drawBuses" }, "SCH_ACTIONS::unfoldBus": { id: "unfoldBus", label: "Unfold from Bus", tip: "Break a wire out of a bus", icon: "INVALID_BITMAP", key: "C", name: "eeschema.InteractiveDrawingLineWireBus.unfoldBus" }, "SCH_ACTIONS::drawLines": { id: "drawLines", label: "Draw Lines", tip: null, icon: "add_graphical_segments", key: "I", name: "eeschema.InteractiveDrawingLineWireBus.drawLines" }, "SCH_ACTIONS::undoLastSegment": { id: "undoLastSegment", label: "Undo Last Segment", tip: "Walks the current line back one segment.", icon: "undo", key: "Backspace", name: "eeschema.InteractiveDrawingLineWireBus.undoLastSegment" }, "SCH_ACTIONS::switchSegmentPosture": { id: "switchSegmentPosture", label: "Switch Segment Posture", tip: "Switches posture of the current segment.", icon: "change_entry_orient", key: "/", name: "eeschema.InteractiveDrawingLineWireBus.switchPosture" }, "SCH_ACTIONS::move": { id: "move", label: "Move", tip: null, icon: "move", key: "M", name: "eeschema.InteractiveMove.move" }, "SCH_ACTIONS::drag": { id: "drag", label: "Drag", tip: "Move items while keeping their connections", icon: "drag", key: "G", name: "eeschema.InteractiveMove.drag" }, "SCH_ACTIONS::alignToGrid": { id: "alignToGrid", label: "Align Items to Grid", tip: null, icon: "align_elements_to_grid", key: null, name: "eeschema.AlignToGrid" }, "SCH_ACTIONS::alignTop": { id: "alignTop", label: "Align to Top", tip: "Aligns selected items to the top edge of the item under the cursor", icon: "align_items_top", key: null, name: "eeschema.Align.alignTop" }, "SCH_ACTIONS::alignBottom": { id: "alignBottom", label: "Align to Bottom", tip: "Aligns selected items to the bottom edge of the item under the cursor", icon: "align_items_bottom", key: null, name: "eeschema.Align.alignBottom" }, "SCH_ACTIONS::alignLeft": { id: "alignLeft", label: "Align to Left", tip: "Aligns selected items to the left edge of the item under the cursor", icon: "align_items_left", key: null, name: "eeschema.Align.alignLeft" }, "SCH_ACTIONS::alignRight": { id: "alignRight", label: "Align to Right", tip: "Aligns selected items to the right edge of the item under the cursor", icon: "align_items_right", key: null, name: "eeschema.Align.alignRight" }, "SCH_ACTIONS::alignCenterX": { id: "alignCenterX", label: "Align to Horizontal Center", tip: "Aligns selected items to the horizontal center of the item under the cursor", icon: "align_items_middle", key: null, name: "eeschema.Align.alignCenterX" }, "SCH_ACTIONS::alignCenterY": { id: "alignCenterY", label: "Align to Vertical Center", tip: "Aligns selected items to the vertical center of the item under the cursor", icon: "align_items_center", key: null, name: "eeschema.Align.alignCenterY" }, "SCH_ACTIONS::saveCurrSheetCopyAs": { id: "saveCurrSheetCopyAs", label: "Save Current Sheet Copy As...", tip: "Save a copy of the current sheet to another location or name", icon: "save_as", key: null, name: "eeschema.EditorControl.saveCurrSheetCopyAs" }, "SCH_ACTIONS::newAnalysisTab": { id: "newAnalysisTab", label: "New Analysis Tab...", tip: "Create a new tab containing a simulation analysis", icon: "sim_add_plot", key: "Ctrl+N", name: "eeschema.Simulation.newAnalysisTab" }, "SCH_ACTIONS::openWorkbook": { id: "openWorkbook", label: "Open Workbook...", tip: "Open a saved set of analysis tabs and settings", icon: "directory_open", key: "Ctrl+O", name: "eeschema.Simulation.openWorkbook" }, "SCH_ACTIONS::saveWorkbook": { id: "saveWorkbook", label: "Save Workbook", tip: "Save the current set of analysis tabs and settings", icon: "save", key: "Ctrl+S", name: "eeschema.Simulation.saveWorkbook" }, "SCH_ACTIONS::saveWorkbookAs": { id: "saveWorkbookAs", label: "Save Workbook As...", tip: "Save the current set of analysis tabs and settings to another location", icon: "sim_add_signal", key: "Ctrl+Shift+S", name: "eeschema.Simulation.saveWorkbookAs" }, "SCH_ACTIONS::exportPlotAsPNG": { id: "exportPlotAsPNG", label: "Export Current Plot as PNG...", tip: null, icon: "export_png", key: null, name: "eeschema.Simulator.exportPNG" }, "SCH_ACTIONS::exportPlotAsCSV": { id: "exportPlotAsCSV", label: "Export Current Plot as CSV...", tip: null, icon: "export_file", key: null, name: "eeschema.Simulator.exportCSV" }, "SCH_ACTIONS::exportPlotToClipboard": { id: "exportPlotToClipboard", label: "Export Current Plot to Clipboard", tip: null, icon: "export_png", key: null, name: "eeschema.Simulator.exportToClipboard" }, "SCH_ACTIONS::exportPlotToSchematic": { id: "exportPlotToSchematic", label: "Export Current Plot to Schematic", tip: null, icon: "export_png", key: null, name: "eeschema.Simulator.exportPlotToSchematic" }, "SCH_ACTIONS::toggleSimSidePanel": { id: "toggleSimSidePanel", label: "Show Simulation Side Panel", tip: null, icon: null, key: null, name: "eeschema.Simulator.toggleSimSidePanel" }, "SCH_ACTIONS::toggleSimConsole": { id: "toggleSimConsole", label: "Show Simulation Console Panel", tip: null, icon: null, key: null, name: "eeschema.Simulator.toggleSimConsole" }, "SCH_ACTIONS::toggleLegend": { id: "toggleLegend", label: "Show Legend", tip: null, icon: "text", key: null, name: "eeschema.Simulator.toggleLegend" }, "SCH_ACTIONS::toggleDottedSecondary": { id: "toggleDottedSecondary", label: "Dotted Current/Phase", tip: "Draw secondary signal trace (current or phase) with a dotted line", icon: null, key: null, name: "eeschema.Simulator.toggleDottedSecondary" }, "SCH_ACTIONS::toggleSmithChart": { id: "toggleSmithChart", label: "Smith Chart", tip: "Show S-parameter results on a Smith chart", icon: null, key: null, name: "eeschema.Simulator.toggleSmithChart" }, "SCH_ACTIONS::toggleDarkModePlots": { id: "toggleDarkModePlots", label: "Dark Mode Plots", tip: "Draw plots with a black background", icon: null, key: null, name: "eeschema.Simulator.toggleDarkModePlots" }, "SCH_ACTIONS::simAnalysisProperties": { id: "simAnalysisProperties", label: "Edit Analysis Tab...", tip: "Edit the current analysis tab's SPICE command and plot setup", icon: "sim_command", key: null, name: "eeschema.Simulation.simAnalysisProperties" }, "SCH_ACTIONS::runSimulation": { id: "runSimulation", label: "Run Simulation", tip: null, icon: "sim_run", key: "R", name: "eeschema.Simulation.runSimulation" }, "SCH_ACTIONS::stopSimulation": { id: "stopSimulation", label: "Stop Simulation", tip: null, icon: "sim_stop", key: null, name: "eeschema.Simulation.stopSimulation" }, "SCH_ACTIONS::simProbe": { id: "simProbe", label: "Probe Schematic...", tip: "Add a simulator probe", icon: "sim_probe", key: "Shift+P", name: "eeschema.Simulation.probe" }, "SCH_ACTIONS::simTune": { id: "simTune", label: "Add Tuned Value...", tip: "Select a value to be tuned", icon: "sim_tune", key: "Shift+T", name: "eeschema.Simulation.tune" }, "SCH_ACTIONS::editUserDefinedSignals": { id: "editUserDefinedSignals", label: "User-defined Signals...", tip: "Add, edit or delete user-defined simulation signals", icon: "sim_add_signal", key: null, name: "eeschema.Simulation.editUserDefinedSignals" }, "SCH_ACTIONS::showNetlist": { id: "showNetlist", label: "Show SPICE Netlist", tip: null, icon: "netlist", key: null, name: "eeschema.Simulation.showNetlist" }, "SCH_ACTIONS::addVariant": { id: "addVariant", label: "Add Design Variant...", tip: "Add new design variant to the schematic.", icon: null, key: null, name: "eeschema.EditorControl.addVariant" }, "SCH_ACTIONS::removeVariant": { id: "removeVariant", label: "Remove Design Variant...", tip: "Remove an existing design variant from the schematic.", icon: null, key: null, name: "eeschema.EditorControl.removeVariant" }, "SCH_ACTIONS::editVariantDescription": { id: "editVariantDescription", label: "Edit Variant Description...", tip: "Edit the description of an existing design variant.", icon: null, key: null, name: "eeschema.EditorControl.editVariantDescription" }, "SCH_ACTIONS::renameVariant": { id: "renameVariant", label: "Rename Design Variant...", tip: "Rename an existing design variant.", icon: null, key: null, name: "eeschema.EditorControl.renameVariant" }, "SCH_ACTIONS::copyVariant": { id: "copyVariant", label: "Copy Design Variant...", tip: "Create a copy of an existing design variant.", icon: null, key: null, name: "eeschema.EditorControl.copyVariant" }, "SCH_ACTIONS::collabStartSession": { id: "collabStartSession", label: "Start Collaboration Session...", tip: "Upload this project to the collaboration server and copy a share link", icon: "library_archive", key: null, name: "eeschema.Collab.startSession" }, "SCH_ACTIONS::collabJoinSession": { id: "collabJoinSession", label: "Join Shared Project...", tip: "Join a shared project from a share link", icon: "library_archive", key: null, name: "eeschema.Collab.joinSession" }, "SCH_ACTIONS::collabLeaveSession": { id: "collabLeaveSession", label: "Leave Session", tip: "Disconnect this computer from the live session; the shared project stays on the server for everyone else", icon: null, key: null, name: "eeschema.Collab.leaveSession" }, "SCH_ACTIONS::collabHistory": { id: "collabHistory", label: "History", tip: "Show the shared project's version history panel", icon: null, key: null, name: "eeschema.Collab.history" }, "SCH_ACTIONS::collabCopyLink": { id: "collabCopyLink", label: "Copy Share Link", tip: "Copy an invite link for the current collaboration session", icon: null, key: null, name: "eeschema.Collab.copyLink" }, "SCH_ACTIONS::collabVendorParts": { id: "collabVendorParts", label: "Vendor Parts...", tip: "Search LCSC, Mouser and DigiKey for parts and manage saved part libraries (opens in the browser; in a session, placed parts arrive here)", icon: null, key: null, name: "eeschema.Collab.vendorParts" }, "SCH_ACTIONS::collabCompare": { id: "collabCompare", label: "Compare Versions...", tip: "See what changed between the shared sheet as it is now and a version, a checkpoint or a GitHub commit (opens in the browser)", icon: null, key: null, name: "eeschema.Collab.compare" }, "SCH_ACTIONS::collabGithub": { id: "collabGithub", label: "GitHub Sync...", tip: "Push the shared project to a GitHub repository, or pull and merge changes from it (opens in the browser)", icon: null, key: null, name: "eeschema.Collab.github" }, "SCH_ACTIONS::collabComments": { id: "collabComments", label: "Comments...", tip: "Browse, answer and resolve the shared project's comment threads", icon: null, key: null, name: "eeschema.Collab.comments" }, "SCH_ACTIONS::collabFollow": { id: "collabFollow", label: "Follow Next Peer", tip: "Follow a collaborator's view, switching sheets with them; pan or zoom to stop", icon: null, key: null, name: "eeschema.Collab.follow" }, "PCB_ACTIONS::convertToPoly": { id: "convertToPoly", label: "Create Polygon from Selection...", tip: "Creates a graphic polygon from the selection", icon: "add_graphical_polygon", key: null, name: "pcbnew.Convert.convertToPoly" }, "PCB_ACTIONS::convertToZone": { id: "convertToZone", label: "Create Zone from Selection...", tip: "Creates a copper zone from the selection", icon: "add_zone", key: null, name: "pcbnew.Convert.convertToZone" }, "PCB_ACTIONS::addConstraintParallel": { id: "addConstraintParallel", label: "Parallel", tip: "Constrain the two selected segments to be parallel", icon: "constraint_parallel", key: null, name: "pcbnew.ConstraintEditor.addParallel" }, "PCB_ACTIONS::addConstraintPerpendicular": { id: "addConstraintPerpendicular", label: "Perpendicular", tip: "Constrain the two selected segments to be perpendicular", icon: "constraint_perpendicular", key: null, name: "pcbnew.ConstraintEditor.addPerpendicular" }, "PCB_ACTIONS::addConstraintEqualLength": { id: "addConstraintEqualLength", label: "Equal Length", tip: "Constrain the two selected segments to be of equal length", icon: "constraint_equal_length", key: null, name: "pcbnew.ConstraintEditor.addEqualLength" }, "PCB_ACTIONS::addConstraintCollinear": { id: "addConstraintCollinear", label: "Collinear", tip: "Constrain the two selected segments to be collinear", icon: "constraint_collinear", key: null, name: "pcbnew.ConstraintEditor.addCollinear" }, "PCB_ACTIONS::addConstraintAngular": { id: "addConstraintAngular", label: "Angular Dimension", tip: "Constrain the angle between the two selected segments", icon: "constraint_angular_dimension", key: null, name: "pcbnew.ConstraintEditor.addAngular" }, "PCB_ACTIONS::addConstraintTangent": { id: "addConstraintTangent", label: "Tangent", tip: "Constrain the selected line and curve, or two curves, to touch tangentially", icon: "constraint_tangent", key: null, name: "pcbnew.ConstraintEditor.addTangent" }, "PCB_ACTIONS::addConstraintHorizontal": { id: "addConstraintHorizontal", label: "Horizontal", tip: "Constrain the selected segment to be horizontal", icon: "constraint_horizontal", key: null, name: "pcbnew.ConstraintEditor.addHorizontal" }, "PCB_ACTIONS::addConstraintVertical": { id: "addConstraintVertical", label: "Vertical", tip: "Constrain the selected segment to be vertical", icon: "constraint_vertical", key: null, name: "pcbnew.ConstraintEditor.addVertical" }, "PCB_ACTIONS::addConstraintFixedLength": { id: "addConstraintFixedLength", label: "Fixed Length", tip: "Lock the selected segment to its current length", icon: "constraint_fixed_length", key: null, name: "pcbnew.ConstraintEditor.addFixedLength" }, "PCB_ACTIONS::addConstraintConcentric": { id: "addConstraintConcentric", label: "Concentric", tip: "Constrain the two selected circles, arcs or ellipses to share a center", icon: "constraint_concentric", key: null, name: "pcbnew.ConstraintEditor.addConcentric" }, "PCB_ACTIONS::addConstraintEqualRadius": { id: "addConstraintEqualRadius", label: "Equal Radius", tip: "Constrain the two selected circles or arcs to be of equal radius", icon: "constraint_equal_radius", key: null, name: "pcbnew.ConstraintEditor.addEqualRadius" }, "PCB_ACTIONS::addConstraintFixedRadius": { id: "addConstraintFixedRadius", label: "Fixed Radius", tip: "Lock the selected circle or arc to its current radius", icon: "constraint_fixed_radius", key: null, name: "pcbnew.ConstraintEditor.addFixedRadius" }, "PCB_ACTIONS::addConstraintArcAngle": { id: "addConstraintArcAngle", label: "Arc Angle", tip: "Drive the selected arc's swept angle", icon: "constraint_arc_angle", key: null, name: "pcbnew.ConstraintEditor.addArcAngle" }, "PCB_ACTIONS::addConstraintFixedPosition": { id: "addConstraintFixedPosition", label: "Fix in Place...", tip: "Click a point to pin it where it is, grounding the shapes constrained to it", icon: "constraint_fixed_position", key: null, name: "pcbnew.ConstraintEditor.addFixedPosition" }, "PCB_ACTIONS::addConstraintCoincident": { id: "addConstraintCoincident", label: "Coincident...", tip: "Click two shape endpoints to make them coincide", icon: "constraint_coincident", key: null, name: "pcbnew.ConstraintEditor.addCoincident" }, "PCB_ACTIONS::addConstraintPointOnLine": { id: "addConstraintPointOnLine", label: "Point on Line...", tip: "Click an endpoint, then a segment or circle, to put the point on it", icon: "constraint_point_on_line", key: null, name: "pcbnew.ConstraintEditor.addPointOnLine" }, "PCB_ACTIONS::addConstraintMidpoint": { id: "addConstraintMidpoint", label: "Midpoint...", tip: "Click an endpoint, then a segment, to put the point at its midpoint", icon: "constraint_midpoint", key: null, name: "pcbnew.ConstraintEditor.addMidpoint" }, "PCB_ACTIONS::addConstraintSymmetric": { id: "addConstraintSymmetric", label: "Symmetric...", tip: "Click two endpoints, then a segment axis, to mirror them across it", icon: "constraint_symmetric", key: null, name: "pcbnew.ConstraintEditor.addSymmetric" }, "PCB_ACTIONS::showConstraints": { id: "showConstraints", label: "Always Show Geometric Constraints", tip: "Always show the geometric-constraint diagnostics overlay", icon: "measurement", key: null, name: "pcbnew.ConstraintEditor.showConstraints" }, "PCB_ACTIONS::hideConstraints": { id: "hideConstraints", label: "Show Geometric Constraints on Hover Only", tip: "Reveal a shape's geometric constraints only while hovering it", icon: "measurement", key: null, name: "pcbnew.ConstraintEditor.hideConstraints" }, "PCB_ACTIONS::manageConstraints": { id: "manageConstraints", label: "Geometric Constraints...", tip: "List, locate and delete the board's geometric constraints", icon: "measurement", key: null, name: "pcbnew.ConstraintEditor.manageConstraints" }, "PCB_ACTIONS::removeConstraints": { id: "removeConstraints", label: "Remove Geometric Constraints", tip: "Remove geometric constraints referencing the selected items", icon: "measurement", key: null, name: "pcbnew.ConstraintEditor.removeConstraints" }, "PCB_ACTIONS::showConstraintsPanel": { id: "showConstraintsPanel", label: "Geometric Constraints", tip: "Show/hide the geometric constraints panel", icon: "measurement", key: null, name: "pcbnew.EditorControl.showConstraintsPanel" }, "PCB_ACTIONS::toggleAutoConstraints": { id: "toggleAutoConstraints", label: "Automatic Constraints", tip: "Automatically add geometric constraints while drawing", icon: "constraint_auto", key: null, name: "pcbnew.ConstraintEditor.toggleAutoConstraints" }, "PCB_ACTIONS::convertToKeepout": { id: "convertToKeepout", label: "Create Rule Area from Selection...", tip: "Creates a rule area from the selection", icon: "add_keepout_area", key: null, name: "pcbnew.Convert.convertToKeepout" }, "PCB_ACTIONS::convertToLines": { id: "convertToLines", label: "Create Lines from Selection...", tip: "Creates graphic lines from the selection", icon: "add_line", key: null, name: "pcbnew.Convert.convertToLines" }, "PCB_ACTIONS::convertToArc": { id: "convertToArc", label: "Create Arc from Selection", tip: "Creates an arc from the selected line segment", icon: "add_arc", key: null, name: "pcbnew.Convert.convertToArc" }, "PCB_ACTIONS::convertToTracks": { id: "convertToTracks", label: "Create Tracks from Selection", tip: "Creates tracks from the selected graphic lines", icon: "add_tracks", key: null, name: "pcbnew.Convert.convertToTracks" }, "PCB_ACTIONS::outsetItems": { id: "outsetItems", label: "Create Outsets from Selection...", tip: "Create outset lines from the selected item", icon: "outset_from_selection", key: null, name: "pcbnew.Convert.outsetItems" }, "PCB_ACTIONS::drawLine": { id: "drawLine", label: "Draw Lines", tip: null, icon: "add_graphical_segments", key: "Ctrl+Shift+L", name: "pcbnew.InteractiveDrawing.line" }, "PCB_ACTIONS::drawPolygon": { id: "drawPolygon", label: "Draw Polygons", tip: null, icon: "add_graphical_polygon", key: "Ctrl+Shift+P", name: "pcbnew.InteractiveDrawing.graphicPolygon" }, "PCB_ACTIONS::drawViaStitchArea": { id: "drawViaStitchArea", label: "Draw Via Stitch area", tip: "Draw a via stitch area", icon: "add_via_stitch", key: "Ctrl+Shift+N", name: "pcbnew.InteractiveDrawing.drawViaStitchArea" }, "PCB_ACTIONS::drawRectangle": { id: "drawRectangle", label: "Draw Rectangles", tip: null, icon: "add_rectangle", key: null, name: "pcbnew.InteractiveDrawing.rectangle" }, "PCB_ACTIONS::drawCircle": { id: "drawCircle", label: "Draw Circles", tip: null, icon: "add_circle", key: "Ctrl+Shift+C", name: "pcbnew.InteractiveDrawing.circle" }, "PCB_ACTIONS::drawEllipse": { id: "drawEllipse", label: "Draw Ellipse", tip: "Draw an ellipse", icon: "add_ellipse", key: null, name: "pcbnew.InteractiveDrawing.ellipse" }, "PCB_ACTIONS::drawEllipseArc": { id: "drawEllipseArc", label: "Draw Elliptical Arcs", tip: "Draw an elliptical arc", icon: "add_ellipse_arc", key: null, name: "pcbnew.InteractiveDrawing.ellipseArc" }, "PCB_ACTIONS::drawArc": { id: "drawArc", label: "Draw Arcs", tip: null, icon: "add_arc", key: "Ctrl+Shift+A", name: "pcbnew.InteractiveDrawing.arc" }, "PCB_ACTIONS::drawArcCenter": { id: "drawArcCenter", label: "Draw Arc: Center, Start, End", tip: "Draw arcs by clicking the center, the start point, then the end point", icon: "add_arc_center", key: null, name: "pcbnew.InteractiveDrawing.arcCenter" }, "PCB_ACTIONS::drawArcStartEndMid": { id: "drawArcStartEndMid", label: "Draw Arc: Start, End, Midpoint", tip: "Draw arcs by clicking the start point, the end point, then a point on the arc", icon: "add_arc_start_end_mid", key: null, name: "pcbnew.InteractiveDrawing.arcStartEndMid" }, "PCB_ACTIONS::drawArcStartEndCenter": { id: "drawArcStartEndCenter", label: "Draw Arc: Start, End, Center", tip: "Draw arcs by clicking the start point, the end point, then the center", icon: "add_arc_start_end_center", key: null, name: "pcbnew.InteractiveDrawing.arcStartEndCenter" }, "PCB_ACTIONS::drawArcTangent": { id: "drawArcTangent", label: "Draw Arc: Tangent", tip: "Draw arcs tangent to the previous arc or to the line or arc ending at the start point", icon: "add_arc_tangent", key: null, name: "pcbnew.InteractiveDrawing.arcTangent" }, "PCB_ACTIONS::drawArcStartDirEnd": { id: "drawArcStartDirEnd", label: "Draw Arc: Start, Direction, End", tip: "Draw arcs by clicking the start point, a point giving the start direction, then the end point", icon: "add_arc_start_dir_end", key: null, name: "pcbnew.InteractiveDrawing.arcStartDirEnd" }, "PCB_ACTIONS::drawBezier": { id: "drawBezier", label: "Draw Bezier Curve", tip: null, icon: "add_bezier", key: "Ctrl+Shift+B", name: "pcbnew.InteractiveDrawing.bezier" }, "PCB_ACTIONS::placeBarcode": { id: "placeBarcode", label: "Add Barcode", tip: "Add a barcode", icon: "add_barcode", key: null, name: "pcbnew.InteractiveDrawing.barcode" }, "PCB_ACTIONS::placeCharacteristics": { id: "placeCharacteristics", label: "Add Board Characteristics", tip: "Add a board characteristics table on a graphic layer", icon: null, key: null, name: "pcbnew.InteractiveDrawing.placeCharacteristics" }, "PCB_ACTIONS::placeStackup": { id: "placeStackup", label: "Add Stackup Table", tip: "Add a board stackup table that follows the stackup", icon: null, key: null, name: "pcbnew.InteractiveDrawing.placeStackup" }, "PCB_ACTIONS::placeDrillChart": { id: "placeDrillChart", label: "Add Drill Chart", tip: "Add a drill chart that tracks the board's holes", icon: null, key: null, name: "pcbnew.InteractiveDrawing.placeDrillChart" }, "PCB_ACTIONS::placeDrillMap": { id: "placeDrillMap", label: "Add Drill Map", tip: "Draw drill symbols at the holes on a documentation layer", icon: null, key: null, name: "pcbnew.InteractiveDrawing.placeDrillMap" }, "PCB_ACTIONS::showDrillGroups": { id: "showDrillGroups", label: "Drill Groups...", tip: "Inspect drill groups and assign symbols", icon: null, key: null, name: "pcbnew.InteractiveDrawing.showDrillGroups" }, "PCB_ACTIONS::placePoint": { id: "placePoint", label: "Place Point", tip: "Add reference/snap points", icon: "add_point", key: null, name: "pcbnew.InteractiveDrawing.placePoint" }, "PCB_ACTIONS::placeReferenceImage": { id: "placeReferenceImage", label: "Place Reference Images", tip: "Add bitmap images to be used as reference (images will not be included in any output)", icon: "image", key: null, name: "pcbnew.InteractiveDrawing.placeReferenceImage" }, "PCB_ACTIONS::convertImageToOutlines": { id: "convertImageToOutlines", label: "Convert to Outlines...", tip: "Trace the image into board graphics", icon: "image", key: null, name: "pcbnew.InteractiveDrawing.convertImageToOutlines" }, "PCB_ACTIONS::placeText": { id: "placeText", label: "Draw Text", tip: null, icon: "text", key: "Ctrl+Shift+T", name: "pcbnew.InteractiveDrawing.text" }, "PCB_ACTIONS::drawTextBox": { id: "drawTextBox", label: "Draw Text Boxes", tip: null, icon: "add_textbox", key: null, name: "pcbnew.InteractiveDrawing.textbox" }, "PCB_ACTIONS::drawTable": { id: "drawTable", label: "Draw Tables", tip: null, icon: "table", key: null, name: "pcbnew.InteractiveDrawing.drawTable" }, "PCB_ACTIONS::spacingIncrease": { id: "spacingIncrease", label: "Increase Spacing", tip: "Increase tuning pattern spacing by one step.", icon: "router_len_tuner_dist_incr", key: "1", name: "pcbnew.lengthTuner.SpacingIncrease" }, "PCB_ACTIONS::spacingDecrease": { id: "spacingDecrease", label: "Decrease Spacing", tip: "Decrease tuning pattern spacing by one step.", icon: "router_len_tuner_dist_decr", key: "2", name: "pcbnew.lengthTuner.SpacingDecrease" }, "PCB_ACTIONS::amplIncrease": { id: "amplIncrease", label: "Increase Amplitude", tip: "Increase tuning pattern amplitude by one step.", icon: "router_len_tuner_amplitude_incr", key: "3", name: "pcbnew.lengthTuner.AmplIncrease" }, "PCB_ACTIONS::amplDecrease": { id: "amplDecrease", label: "Decrease Amplitude", tip: "Decrease tuning pattern amplitude by one step.", icon: "router_len_tuner_amplitude_decr", key: "4", name: "pcbnew.lengthTuner.AmplDecrease" }, "PCB_ACTIONS::drawAlignedDimension": { id: "drawAlignedDimension", label: "Draw Aligned Dimensions", tip: null, icon: "add_aligned_dimension", key: null, name: "pcbnew.InteractiveDrawing.alignedDimension" }, "PCB_ACTIONS::drawCenterDimension": { id: "drawCenterDimension", label: "Draw Center Dimensions", tip: null, icon: "add_center_dimension", key: null, name: "pcbnew.InteractiveDrawing.centerDimension" }, "PCB_ACTIONS::drawRadialDimension": { id: "drawRadialDimension", label: "Draw Radial Dimensions", tip: null, icon: "add_radial_dimension", key: null, name: "pcbnew.InteractiveDrawing.radialDimension" }, "PCB_ACTIONS::drawOrthogonalDimension": { id: "drawOrthogonalDimension", label: "Draw Orthogonal Dimensions", tip: null, icon: "add_orthogonal_dimension", key: "Ctrl+Shift+H", name: "pcbnew.InteractiveDrawing.orthogonalDimension" }, "PCB_ACTIONS::drawLeader": { id: "drawLeader", label: "Draw Leaders", tip: null, icon: "add_leader", key: null, name: "pcbnew.InteractiveDrawing.leader" }, "PCB_ACTIONS::drawZone": { id: "drawZone", label: "Draw Filled Zones", tip: null, icon: "add_zone", key: "Ctrl+Shift+Z", name: "pcbnew.InteractiveDrawing.zone", mac: "Alt+Z" }, "PCB_ACTIONS::drawCopperThievingZone": { id: "drawCopperThievingZone", label: "Draw Copper Thieving Zone", tip: "Add a non-electrical thieving zone for plating-balance copper", icon: "add_zone", key: null, name: "pcbnew.InteractiveDrawing.copperThievingZone" }, "PCB_ACTIONS::drawVia": { id: "drawVia", label: "Place Vias", tip: "Place free-standing vias", icon: "add_via", key: "Ctrl+Shift+X", name: "pcbnew.InteractiveDrawing.via" }, "PCB_ACTIONS::placeViaStack": { id: "placeViaStack", label: "Place Microvia Stack", tip: "Place a stacked or staggered microvia stack", icon: "add_via_stack", key: null, name: "pcbnew.InteractiveDrawing.viaStack" }, "PCB_ACTIONS::makeViaStack": { id: "makeViaStack", label: "Create Stack from Selection", tip: "Wrap the selected microvias and traces into a microvia stack", icon: "add_via_stack", key: null, name: "pcbnew.Generator.makeViaStack" }, "PCB_ACTIONS::drawRuleArea": { id: "drawRuleArea", label: "Draw Rule Areas", tip: null, icon: "add_keepout_area", key: "Ctrl+Shift+K", name: "pcbnew.InteractiveDrawing.ruleArea" }, "PCB_ACTIONS::drawZoneCutout": { id: "drawZoneCutout", label: "Add a Zone Cutout", tip: "Add a cutout to an existing zone or rule area", icon: "add_zone_cutout", key: "Shift+C", name: "pcbnew.InteractiveDrawing.zoneCutout" }, "PCB_ACTIONS::drawSimilarZone": { id: "drawSimilarZone", label: "Add a Similar Zone", tip: "Add a zone with the same settings as an existing zone", icon: "add_zone", key: "Ctrl+Shift+.", name: "pcbnew.InteractiveDrawing.similarZone" }, "PCB_ACTIONS::placeImportedGraphics": { id: "placeImportedGraphics", label: "Import Graphics...", tip: "Import 2D drawing file", icon: "import_vector", key: "Ctrl+Shift+F", name: "pcbnew.InteractiveDrawing.placeImportedGraphics" }, "PCB_ACTIONS::setAnchor": { id: "setAnchor", label: "Place the Footprint Anchor", tip: "Set the anchor point of the footprint", icon: "anchor", key: "Ctrl+Shift+N", name: "pcbnew.InteractiveDrawing.setAnchor" }, "PCB_ACTIONS::incWidth": { id: "incWidth", label: "Increase Line Width", tip: null, icon: null, key: "Ctrl++", name: "pcbnew.InteractiveDrawing.incWidth" }, "PCB_ACTIONS::decWidth": { id: "decWidth", label: "Decrease Line Width", tip: null, icon: null, key: "Ctrl+-", name: "pcbnew.InteractiveDrawing.decWidth" }, "PCB_ACTIONS::changeDimensionArrows": { id: "changeDimensionArrows", label: "Switch Dimension Arrows", tip: "Switch between inward and outward dimension arrows", icon: null, key: null, name: "pcbnew.InteractiveDrawing.changeDimensionArrows" }, "PCB_ACTIONS::magneticSnapActiveLayer": { id: "magneticSnapActiveLayer", label: "Snap to Objects on the Active Layer Only", tip: "Enables snapping to objects on the active layer only", icon: null, key: null, name: "common.Control.magneticSnapActiveLayer" }, "PCB_ACTIONS::magneticSnapAllLayers": { id: "magneticSnapAllLayers", label: "Snap to Objects on All Layers", tip: "Enables snapping to objects on all visible layers", icon: null, key: null, name: "common.Control.magneticSnapAllLayers" }, "PCB_ACTIONS::magneticSnapToggle": { id: "magneticSnapToggle", label: "Toggle Snapping Between Active and All Layers", tip: "Toggles between snapping on all visible layers and only the active area", icon: null, key: "Shift+S", name: "common.Control.magneticSnapToggle" }, "PCB_ACTIONS::closeOutline": { id: "closeOutline", label: "Close Outline", tip: "Close the in progress outline", icon: "checked_ok", key: null, name: "pcbnew.InteractiveDrawing.closeOutline" }, "PCB_ACTIONS::runDRC": { id: "runDRC", label: "Design Rules Checker", tip: "Show the design rules checker window", icon: "erc", key: null, name: "pcbnew.DRCTool.runDRC" }, "PCB_ACTIONS::placeDesignBlock": { id: "placeDesignBlock", label: "Place Design Block", tip: "Add selected design block to current board", icon: "add_component", key: "Shift+B", name: "pcbnew.InteractiveDrawing.placeDesignBlock" }, "PCB_ACTIONS::placeLinkedDesignBlock": { id: "placeLinkedDesignBlock", label: "Place Linked Design Block", tip: "Place design block linked to selected group", icon: "add_component", key: null, name: "pcbnew.InteractiveDrawing.placeLinkedDesignBlock" }, "PCB_ACTIONS::applyDesignBlockLayout": { id: "applyDesignBlockLayout", label: "Apply Design Block Layout", tip: "Apply linked design block layout to selected group", icon: "add_component", key: null, name: "pcbnew.InteractiveDrawing.applyDesignBlockLayout" }, "PCB_ACTIONS::saveToLinkedDesignBlock": { id: "saveToLinkedDesignBlock", label: "Save to Linked Design Block", tip: "Save selected group to linked design block", icon: "add_component", key: null, name: "pcbnew.InteractiveDrawing.saveToLinkedDesignBlock" }, "PCB_ACTIONS::showDesignBlockPanel": { id: "showDesignBlockPanel", label: "Design Blocks", tip: "Show/hide design blocks library", icon: "search_tree", key: null, name: "pcbnew.PcbDesignBlockControl.showDesignBlockPanel" }, "PCB_ACTIONS::saveBoardAsDesignBlock": { id: "saveBoardAsDesignBlock", label: "Save Board as Design Block...", tip: "Create a new design block from the current board", icon: "new_component", key: null, name: "pcbnew.PcbDesignBlockControl.saveBoardAsDesignBlock" }, "PCB_ACTIONS::saveSelectionAsDesignBlock": { id: "saveSelectionAsDesignBlock", label: "Save Selection as Design Block...", tip: "Create a new design block from the current selection", icon: "new_component", key: null, name: "pcbnew.PcbDesignBlockControl.saveSelectionAsDesignBlock" }, "PCB_ACTIONS::updateDesignBlockFromBoard": { id: "updateDesignBlockFromBoard", label: "Update Design Block from Board", tip: "Set design block layout to current board", icon: "save", key: null, name: "pcbnew.PcbDesignBlockControl.updateDesignBlockFromBoard" }, "PCB_ACTIONS::updateDesignBlockFromSelection": { id: "updateDesignBlockFromSelection", label: "Update Design Block from Selection", tip: "Set design block layout to current selection", icon: "save", key: null, name: "pcbnew.PcbDesignBlockControl.updateDesignBlockFromSelection" }, "PCB_ACTIONS::deleteDesignBlock": { id: "deleteDesignBlock", label: "Delete Design Block", tip: "Remove the selected design block from its library", icon: "trash", key: null, name: "pcbnew.PcbDesignBlockControl.deleteDesignBlock" }, "PCB_ACTIONS::editDesignBlockProperties": { id: "editDesignBlockProperties", label: "Properties...", tip: "Edit properties of design block", icon: "edit", key: null, name: "pcbnew.PcbDesignBlockControl.editDesignBlockProperties" }, "PCB_ACTIONS::editFpInFpEditor": { id: "editFpInFpEditor", label: "Open in Footprint Editor", tip: null, icon: "module_editor", key: "Ctrl+E", name: "pcbnew.EditorControl.EditFpInFpEditor" }, "PCB_ACTIONS::editLibFpInFpEditor": { id: "editLibFpInFpEditor", label: "Edit Library Footprint...", tip: null, icon: "module_editor", key: "Ctrl+Shift+E", name: "pcbnew.EditorControl.EditLibFpInFpEditor" }, "PCB_ACTIONS::toggleExcludeFromBOM": { id: "toggleExcludeFromBOM", label: "Exclude from Bill of Materials", tip: "Toggle the exclude from bill of materials attribute", icon: null, key: null, name: "pcbnew.InteractiveEdit.toggleExcludeFromBOM" }, "PCB_ACTIONS::toggleExcludeFromSim": { id: "toggleExcludeFromSim", label: "Exclude from Simulation", tip: "Toggle the exclude from simulation attribute", icon: null, key: null, name: "pcbnew.InteractiveEdit.toggleExcludeFromSim" }, "PCB_ACTIONS::toggleExcludeFromPosFiles": { id: "toggleExcludeFromPosFiles", label: "Exclude from Position Files", tip: "Toggle the exclude from position files attribute", icon: null, key: null, name: "pcbnew.InteractiveEdit.toggleExcludeFromPosFiles" }, "PCB_ACTIONS::findByProperties": { id: "findByProperties", label: "Find by Properties...", tip: "Find board items matching property criteria or expressions", icon: "find", key: null, name: "pcbnew.EditorControl.findByProperties" }, "PCB_ACTIONS::getAndPlace": { id: "getAndPlace", label: "Get and Move Footprint", tip: "Selects a footprint by reference designator and places it under the cursor for moving", icon: "move", key: "T", name: "pcbnew.InteractiveEdit.FindMove" }, "PCB_ACTIONS::move": { id: "move", label: "Move", tip: null, icon: "move", key: "M", name: "pcbnew.InteractiveMove.move" }, "PCB_ACTIONS::moveIndividually": { id: "moveIndividually", label: "Move Individually", tip: "Moves the selected items one-by-one", icon: "move", key: "Ctrl+M", name: "pcbnew.InteractiveMove.moveIndividually" }, "PCB_ACTIONS::moveWithReference": { id: "moveWithReference", label: "Move with Reference...", tip: "Moves the selected item(s) with a specified starting point", icon: "move", key: null, name: "pcbnew.InteractiveMove.moveWithReference" }, "PCB_ACTIONS::copyWithReference": { id: "copyWithReference", label: "Copy with Reference...", tip: "Copy selected item(s) to clipboard with a specified starting point", icon: "copy", key: null, name: "pcbnew.InteractiveMove.copyWithReference" }, "PCB_ACTIONS::duplicateIncrement": { id: "duplicateIncrement", label: "Duplicate and Increment", tip: "Duplicates the selected item(s), incrementing pad numbers", icon: "duplicate", key: "Ctrl+Shift+D", name: "pcbnew.InteractiveEdit.duplicateIncrementPads" }, "PCB_ACTIONS::moveExact": { id: "moveExact", label: "Move Exactly...", tip: "Moves the selected item(s) by an exact amount", icon: "move_exactly", key: "Shift+M", name: "pcbnew.InteractiveEdit.moveExact" }, "PCB_ACTIONS::pointEditorMoveCorner": { id: "pointEditorMoveCorner", label: "Move Corner To...", tip: "Move the active corner to an exact location", icon: "move_exactly", key: null, name: "pcbnew.InteractiveEdit.moveCorner" }, "PCB_ACTIONS::pointEditorMoveMidpoint": { id: "pointEditorMoveMidpoint", label: "Move Midpoint To...", tip: "Move the active midpoint to an exact location", icon: "move_exactly", key: null, name: "pcbnew.InteractiveEdit.moveMidpoint" }, "PCB_ACTIONS::rotateCw": { id: "rotateCw", label: "Rotate Clockwise", tip: null, icon: "rotate_cw", key: "Shift+R", name: "pcbnew.InteractiveEdit.rotateCw" }, "PCB_ACTIONS::rotateCcw": { id: "rotateCcw", label: "Rotate Counterclockwise", tip: null, icon: "rotate_ccw", key: "R", name: "pcbnew.InteractiveEdit.rotateCcw" }, "PCB_ACTIONS::flip": { id: "flip", label: "Change Side / Flip", tip: "Flips selected item(s) to opposite side of board", icon: "swap_layer", key: "F", name: "pcbnew.InteractiveEdit.flip" }, "PCB_ACTIONS::mirrorH": { id: "mirrorH", label: "Mirror Horizontally", tip: "Mirrors selected item(s) across the Y axis", icon: "mirror_h", key: null, name: "pcbnew.InteractiveEdit.mirrorHoriontally" }, "PCB_ACTIONS::mirrorV": { id: "mirrorV", label: "Mirror Vertically", tip: "Mirrors selected item(s) across the X axis", icon: "mirror_v", key: null, name: "pcbnew.InteractiveEdit.mirrorVertically" }, "PCB_ACTIONS::mirrorInteractive": { id: "mirrorInteractive", label: "Mirror Interactive", tip: "Mirrors selected item(s) interactively", icon: null, key: null, name: "pcbnew.InteractiveEdit.mirrorInteractive" }, "PCB_ACTIONS::swap": { id: "swap", label: "Swap", tip: "Swap positions of selected items", icon: "swap", key: "Alt+S", name: "pcbnew.InteractiveEdit.swap" }, "PCB_ACTIONS::swapPadNets": { id: "swapPadNets", label: "Swap Pad Nets", tip: "Swap nets between two selected pads and their connected copper", icon: "swap", key: null, name: "pcbnew.InteractiveEdit.swapPadNets" }, "PCB_ACTIONS::swapGateNets": { id: "swapGateNets", label: "Swap Gate Nets", tip: "Swap nets between gates of a footprint and their connected copper", icon: "swap", key: null, name: "pcbnew.InteractiveEdit.swapGateNets" }, "PCB_ACTIONS::packAndMoveFootprints": { id: "packAndMoveFootprints", label: "Pack and Move Footprints", tip: "Sorts selected footprints by reference, packs based on size and initiates movement", icon: "pack_footprints", key: "P", name: "pcbnew.InteractiveEdit.packAndMoveFootprints" }, "PCB_ACTIONS::skip": { id: "skip", label: "Skip", tip: "Skip to next item", icon: "right", key: "Tab", name: "pcbnew.InteractiveEdit.skip" }, "PCB_ACTIONS::changeTrackWidth": { id: "changeTrackWidth", label: "Change Track Width", tip: "Updates selected track & via sizes", icon: null, key: null, name: "pcbnew.InteractiveEdit.changeTrackWidth" }, "PCB_ACTIONS::changeTrackLayerNext": { id: "changeTrackLayerNext", label: "Switch Track to Next Layer", tip: "Switch track to next enabled copper layer", icon: null, key: "Ctrl++", name: "pcbnew.Control.changeTrackLayerNext" }, "PCB_ACTIONS::changeTrackLayerPrev": { id: "changeTrackLayerPrev", label: "Switch Track to Previous Layer", tip: "Switch track to previous enabled copper layer", icon: null, key: "Ctrl+-", name: "pcbnew.Control.changeTrackLayerPrev" }, "PCB_ACTIONS::filletTracks": { id: "filletTracks", label: "Fillet Tracks", tip: "Adds arcs tangent to the selected straight track segments", icon: null, key: null, name: "pcbnew.InteractiveEdit.filletTracks" }, "PCB_ACTIONS::filletLines": { id: "filletLines", label: "Fillet Lines...", tip: "Adds arcs tangent to the selected lines", icon: "fillet", key: null, name: "pcbnew.InteractiveEdit.filletLines" }, "PCB_ACTIONS::chamferLines": { id: "chamferLines", label: "Chamfer Lines...", tip: "Cut away corners between selected lines", icon: "chamfer", key: null, name: "pcbnew.InteractiveEdit.chamferLines" }, "PCB_ACTIONS::dogboneCorners": { id: "dogboneCorners", label: "Dogbone Corners...", tip: "Add dogbone corners to selected lines", icon: null, key: null, name: "pcbnew.InteractiveEdit.dogboneCorners" }, "PCB_ACTIONS::simplifyPolygons": { id: "simplifyPolygons", label: "Simplify Polygons", tip: "Simplify polygon outlines, removing superfluous points", icon: null, key: null, name: "pcbnew.InteractiveEdit.simplifyPolygons" }, "PCB_ACTIONS::editVertices": { id: "editVertices", label: "Edit Corners...", tip: "Edit polygon corners using a table", icon: "edit", key: null, name: "pcbnew.InteractiveEdit.editVertices" }, "PCB_ACTIONS::healShapes": { id: "healShapes", label: "Heal Shapes", tip: "Connect shapes, possibly extending or cutting them, or adding extra geometry", icon: "heal_shapes", key: null, name: "pcbnew.InteractiveEdit.healShapes" }, "PCB_ACTIONS::extendLines": { id: "extendLines", label: "Extend Lines to Meet", tip: "Extend lines to meet each other", icon: null, key: null, name: "pcbnew.InteractiveEdit.extendLines" }, "PCB_ACTIONS::extendGraphic": { id: "extendGraphic", label: "Extend Line or Arc", tip: "Hover a graphical line or arc to extend it until it meets another", icon: null, key: null, name: "pcbnew.GraphicEdit.extend" }, "PCB_ACTIONS::trimGraphic": { id: "trimGraphic", label: "Trim Shape", tip: "Hover the part of a graphical shape to remove between the nearest crossings", icon: null, key: null, name: "pcbnew.GraphicEdit.trim" }, "PCB_ACTIONS::mergePolygons": { id: "mergePolygons", label: "Merge Polygons", tip: "Merge selected polygons into a single polygon", icon: "merge_polygons", key: null, name: "pcbnew.InteractiveEdit.mergePolygons" }, "PCB_ACTIONS::subtractPolygons": { id: "subtractPolygons", label: "Subtract Polygons", tip: "Subtract selected polygons from the last one selected", icon: "subtract_polygons", key: null, name: "pcbnew.InteractiveEdit.subtractPolygons" }, "PCB_ACTIONS::intersectPolygons": { id: "intersectPolygons", label: "Intersect Polygons", tip: "Create the intersection of the selected polygons", icon: "intersect_polygons", key: null, name: "pcbnew.InteractiveEdit.intersectPolygons" }, "PCB_ACTIONS::deleteFull": { id: "deleteFull", label: "Delete Full Track", tip: "Deletes selected item(s) and copper connections", icon: "delete_cursor", key: "Shift+Del", name: "pcbnew.InteractiveEdit.deleteFull" }, "PCB_ACTIONS::properties": { id: "properties", label: "Properties...", tip: null, icon: "edit", key: "E", name: "pcbnew.InteractiveEdit.properties" }, "PCB_ACTIONS::matchProperties": { id: "matchProperties", label: "Match Properties", tip: "Copy selected properties from a source item to compatible target items", icon: null, key: null, name: "pcbnew.MatchProperties.match" }, "PCB_ACTIONS::matchPropertiesSettings": { id: "matchPropertiesSettings", label: "Match Properties Settings...", tip: "Choose the properties copied by Match Properties", icon: null, key: "Ctrl+,", name: "pcbnew.MatchProperties.settings" }, "PCB_ACTIONS::createArray": { id: "createArray", label: "Create Array...", tip: null, icon: "array", key: "Ctrl+T", name: "pcbnew.Array.createArray" }, "PCB_ACTIONS::newFootprint": { id: "newFootprint", label: "New Footprint", tip: "Create a new, empty footprint", icon: "new_footprint", key: "Ctrl+N", name: "pcbnew.ModuleEditor.newFootprint" }, "PCB_ACTIONS::createFootprint": { id: "createFootprint", label: "Create Footprint...", tip: "Create a new footprint using the Footprint Wizard", icon: "module_wizard", key: null, name: "pcbnew.ModuleEditor.createFootprint" }, "PCB_ACTIONS::editFootprint": { id: "editFootprint", label: "Edit Footprint", tip: "Show selected footprint on editor canvas", icon: "edit", key: null, name: "pcbnew.ModuleEditor.editFootprint" }, "PCB_ACTIONS::duplicateFootprint": { id: "duplicateFootprint", label: "Duplicate Footprint", tip: null, icon: "duplicate", key: null, name: "pcbnew.ModuleEditor.duplicateFootprint" }, "PCB_ACTIONS::renameFootprint": { id: "renameFootprint", label: "Rename Footprint...", tip: null, icon: "edit", key: null, name: "pcbnew.ModuleEditor.renameFootprint" }, "PCB_ACTIONS::deleteFootprint": { id: "deleteFootprint", label: "Delete Footprint from Library", tip: null, icon: "trash", key: null, name: "pcbnew.ModuleEditor.deleteFootprint" }, "PCB_ACTIONS::cutFootprint": { id: "cutFootprint", label: "Cut Footprint", tip: null, icon: "cut", key: null, name: "pcbnew.ModuleEditor.cutFootprint" }, "PCB_ACTIONS::copyFootprint": { id: "copyFootprint", label: "Copy Footprint", tip: null, icon: "copy", key: null, name: "pcbnew.ModuleEditor.copyFootprint" }, "PCB_ACTIONS::pasteFootprint": { id: "pasteFootprint", label: "Paste Footprint", tip: null, icon: "paste", key: null, name: "pcbnew.ModuleEditor.pasteFootprint" }, "PCB_ACTIONS::importFootprint": { id: "importFootprint", label: "Import Footprint...", tip: "Import footprint from file", icon: "import_module", key: null, name: "pcbnew.ModuleEditor.importFootprint" }, "PCB_ACTIONS::exportFootprint": { id: "exportFootprint", label: "Export Current Footprint...", tip: "Export edited footprint to file", icon: "export_module", key: null, name: "pcbnew.ModuleEditor.exportFootprint" }, "PCB_ACTIONS::exportFootprintAsSVG": { id: "exportFootprintAsSVG", label: "Export Current Footprint as SVG...", tip: "Export the current footprint to an SVG file", icon: "export_svg", key: null, name: "pcbnew.ModuleEditor.exportFootprintAsSVG" }, "PCB_ACTIONS::compareFpLibraryWithFile": { id: "compareFpLibraryWithFile", label: "Compare Library with File...", tip: "Diff the current footprint library against another .pretty directory", icon: "library", key: null, name: "pcbnew.ModuleEditor.CompareFpLibraryWithFile" }, "PCB_ACTIONS::showLibFootprintFieldsTable": { id: "showLibFootprintFieldsTable", label: "Bulk Edit Footprint Fields...", tip: "Edit a table of fields from all footprints in the library", icon: "table", key: null, name: "pcbnew.ModuleEditor.showLibraryFootprintFieldsTable" }, "PCB_ACTIONS::footprintProperties": { id: "footprintProperties", label: "Footprint Properties...", tip: null, icon: "module_options", key: null, name: "pcbnew.ModuleEditor.footprintProperties" }, "PCB_ACTIONS::padTable": { id: "padTable", label: "Pad Table...", tip: "Displays pad table for bulk editing of pads", icon: "pad_table", key: null, name: "pcbnew.ModuleEditor.padTable" }, "PCB_ACTIONS::checkFootprint": { id: "checkFootprint", label: "Footprint Checker", tip: "Show the footprint checker window", icon: "erc", key: null, name: "pcbnew.ModuleEditor.checkFootprint" }, "PCB_ACTIONS::showFootprintUsers": { id: "showFootprintUsers", label: "Footprint Users", tip: "Show the symbols that use this footprint", icon: "module_filtered_list", key: null, name: "pcbnew.ModuleEditor.showFootprintUsers" }, "PCB_ACTIONS::loadFpFromBoard": { id: "loadFpFromBoard", label: "Load footprint from current PCB", tip: "Load footprint from current board", icon: "load_module_board", key: null, name: "pcbnew.ModuleEditor.loadFootprintFromBoard" }, "PCB_ACTIONS::saveFpToBoard": { id: "saveFpToBoard", label: "Insert footprint into PCB", tip: "Insert footprint into current board", icon: "insert_module_board", key: null, name: "pcbnew.ModuleEditor.saveFootprintToBoard" }, "PCB_ACTIONS::previousFootprint": { id: "previousFootprint", label: "Display previous footprint", tip: null, icon: "lib_previous", key: null, name: "pcbnew.Control.previousFootprint" }, "PCB_ACTIONS::nextFootprint": { id: "nextFootprint", label: "Display next footprint", tip: null, icon: "lib_next", key: null, name: "pcbnew.Control.nextFootprint" }, "PCB_ACTIONS::updateFootprint": { id: "updateFootprint", label: "Update Footprint...", tip: "Update footprint to include any changes from the library", icon: "refresh", key: null, name: "pcbnew.GlobalEdit.updateFootprint" }, "PCB_ACTIONS::updateFootprints": { id: "updateFootprints", label: "Update Footprints from Library...", tip: "Update footprints to include any changes from the library", icon: "refresh", key: null, name: "pcbnew.GlobalEdit.updateFootprints" }, "PCB_ACTIONS::migrate3DModels": { id: "migrate3DModels", label: "Migrate 3D Models...", tip: "Replace obsolete WRL 3D model references with current STEP models", icon: "refresh", key: null, name: "pcbnew.GlobalEdit.migrate3DModels" }, "PCB_ACTIONS::removeUnusedPads": { id: "removeUnusedPads", label: "Remove Unused Pads...", tip: "Remove or restore the unconnected inner layers on through hole pads and vias", icon: "pads_remove", key: null, name: "pcbnew.GlobalEdit.removeUnusedPads" }, "PCB_ACTIONS::changeFootprint": { id: "changeFootprint", label: "Change Footprint...", tip: "Assign a different footprint from the library", icon: "exchange", key: null, name: "pcbnew.GlobalEdit.changeFootprint" }, "PCB_ACTIONS::changeFootprints": { id: "changeFootprints", label: "Change Footprints...", tip: "Assign different footprints from the library", icon: "exchange", key: null, name: "pcbnew.GlobalEdit.changeFootprints" }, "PCB_ACTIONS::swapLayers": { id: "swapLayers", label: "Swap Layers...", tip: "Move tracks or drawings from one layer to another", icon: "swap_layer", key: null, name: "pcbnew.GlobalEdit.swapLayers" }, "PCB_ACTIONS::editTracksAndVias": { id: "editTracksAndVias", label: "Edit Track & Via Properties...", tip: "Edit track and via properties globally across board", icon: "width_track_via", key: null, name: "pcbnew.GlobalEdit.editTracksAndVias" }, "PCB_ACTIONS::editTextAndGraphics": { id: "editTextAndGraphics", label: "Edit Text & Graphics Properties...", tip: "Edit Text and graphics properties globally across board", icon: "text", key: null, name: "pcbnew.GlobalEdit.editTextAndGraphics" }, "PCB_ACTIONS::editTeardrops": { id: "editTeardrops", label: "Edit Teardrops...", tip: "Add, remove or edit teardrops globally across board", icon: "via", key: null, name: "pcbnew.GlobalEdit.editTeardrops" }, "PCB_ACTIONS::globalDeletions": { id: "globalDeletions", label: "Global Deletions...", tip: "Delete tracks, footprints and graphic items from board", icon: "general_deletions", key: null, name: "pcbnew.GlobalEdit.globalDeletions" }, "PCB_ACTIONS::cleanupTracksAndVias": { id: "cleanupTracksAndVias", label: "Cleanup Tracks & Vias...", tip: "Cleanup redundant items, shorting items, etc.", icon: "cleanup_tracks_and_vias", key: null, name: "pcbnew.GlobalEdit.cleanupTracksAndVias" }, "PCB_ACTIONS::cleanupGraphics": { id: "cleanupGraphics", label: "Cleanup Graphics...", tip: "Cleanup redundant items, etc.", icon: "cleanup_graphics", key: null, name: "pcbnew.GlobalEdit.cleanupGraphics" }, "PCB_ACTIONS::microwaveCreateGap": { id: "microwaveCreateGap", label: "Draw Microwave Gaps", tip: "Create gap of specified length for microwave applications", icon: "mw_add_gap", key: null, name: "pcbnew.MicrowaveTool.createGap" }, "PCB_ACTIONS::microwaveCreateStub": { id: "microwaveCreateStub", label: "Draw Microwave Stubs", tip: "Create stub of specified length for microwave applications", icon: "mw_add_stub", key: null, name: "pcbnew.MicrowaveTool.createStub" }, "PCB_ACTIONS::microwaveCreateStubArc": { id: "microwaveCreateStubArc", label: "Draw Microwave Arc Stubs", tip: "Create stub (arc) of specified size for microwave applications", icon: "mw_add_stub_arc", key: null, name: "pcbnew.MicrowaveTool.createStubArc" }, "PCB_ACTIONS::microwaveCreateFunctionShape": { id: "microwaveCreateFunctionShape", label: "Draw Microwave Polygonal Shapes", tip: "Create a microwave polygonal shape from a list of vertices", icon: "mw_add_shape", key: null, name: "pcbnew.MicrowaveTool.createFunctionShape" }, "PCB_ACTIONS::microwaveCreateLine": { id: "microwaveCreateLine", label: "Draw Microwave Lines", tip: "Create line of specified length for microwave applications", icon: "mw_add_line", key: null, name: "pcbnew.MicrowaveTool.createLine" }, "PCB_ACTIONS::copyPadSettings": { id: "copyPadSettings", label: "Copy Pad Properties to Default", tip: "Copy current pad's properties", icon: "copy_pad_settings", key: null, name: "pcbnew.PadTool.CopyPadSettings" }, "PCB_ACTIONS::applyPadSettings": { id: "applyPadSettings", label: "Paste Default Pad Properties to Selected", tip: "Replace the current pad's properties with those copied earlier", icon: "apply_pad_settings", key: null, name: "pcbnew.PadTool.ApplyPadSettings" }, "PCB_ACTIONS::pushPadSettings": { id: "pushPadSettings", label: "Push Pad Properties to Other Pads...", tip: "Copy the current pad's properties to other pads", icon: "push_pad_settings", key: null, name: "pcbnew.PadTool.PushPadSettings" }, "PCB_ACTIONS::enumeratePads": { id: "enumeratePads", label: "Renumber Pads...", tip: "Renumber pads by clicking on them in the desired order", icon: "pad_enumerate", key: null, name: "pcbnew.PadTool.enumeratePads" }, "PCB_ACTIONS::placePad": { id: "placePad", label: "Add Pad", tip: "Add a pad of the most recently-placed type, or a copy of the selected pad", icon: "pad", key: null, name: "pcbnew.PadTool.placePad" }, "PCB_ACTIONS::placeThtPad": { id: "placeThtPad", label: "Add a THT Pad", tip: "Add a through-hole pad", icon: "pad_tht", key: null, name: "pcbnew.PadTool.placeThtPad" }, "PCB_ACTIONS::placeSmdPad": { id: "placeSmdPad", label: "Add an SMD Pad", tip: "Add a surface-mount pad", icon: "pad_smd", key: null, name: "pcbnew.PadTool.placeSmdPad" }, "PCB_ACTIONS::placeNpthPad": { id: "placeNpthPad", label: "Add an NPTH Pad", tip: "Add a non-plated through-hole pad", icon: "pad_npth", key: null, name: "pcbnew.PadTool.placeNpthPad" }, "PCB_ACTIONS::placePasteAperturePad": { id: "placePasteAperturePad", label: "Add a Paste Aperture Pad", tip: "Add a paste aperture pad", icon: "pad_paste_aperture", key: null, name: "pcbnew.PadTool.placePasteAperturePad" }, "PCB_ACTIONS::explodePad": { id: "explodePad", label: "Edit Pad as Graphic Shapes", tip: "Ungroups a custom-shaped pad for editing as individual graphic shapes", icon: "custom_pad_to_primitives", key: "Ctrl+E", name: "pcbnew.PadTool.explodePad" }, "PCB_ACTIONS::recombinePad": { id: "recombinePad", label: "Finish Pad Edit", tip: "Regroups all touching graphic shapes into the edited pad", icon: "custom_pad_to_primitives", key: "Ctrl+E", name: "pcbnew.PadTool.recombinePad" }, "PCB_ACTIONS::appendBoard": { id: "appendBoard", label: "Append Board...", tip: "Open another board and append its contents to this board", icon: "add_board", key: null, name: "pcbnew.EditorControl.appendBoard" }, "PCB_ACTIONS::rescueAutosave": { id: "rescueAutosave", label: "Rescue", tip: "Clear board and get last rescue file automatically saved by PCB editor", icon: "rescue", key: null, name: "pcbnew.EditorControl.rescueAutosave" }, "PCB_ACTIONS::openNonKicadBoard": { id: "openNonKicadBoard", label: "Import Non-KiCad Board File...", tip: "Import board file from other applications", icon: "import_brd_file", key: null, name: "pcbnew.EditorControl.openNonKicadBoard" }, "PCB_ACTIONS::exportFootprints": { id: "exportFootprints", label: "Export Footprints...", tip: "Add footprints from board to a new or an existing footprint library\\n(does not remove other footprints from this library)", icon: "library_archive", key: null, name: "pcbnew.EditorControl.exportFootprints" }, "PCB_ACTIONS::boardSetup": { id: "boardSetup", label: "Board Setup...", tip: "Edit board setup including layers, design rules and various defaults", icon: "options_board", key: null, name: "pcbnew.EditorControl.boardSetup" }, "PCB_ACTIONS::importNetlist": { id: "importNetlist", label: "Import Netlist...", tip: "Read netlist and update board connectivity", icon: "netlist", key: null, name: "pcbnew.EditorControl.importNetlist" }, "PCB_ACTIONS::importSpecctraSession": { id: "importSpecctraSession", label: "Import Specctra Session...", tip: "Import routed Specctra session (*.ses) file", icon: "import", key: null, name: "pcbnew.EditorControl.importSpecctraSession" }, "PCB_ACTIONS::exportSpecctraDSN": { id: "exportSpecctraDSN", label: "Export Specctra DSN...", tip: "Export Specctra DSN routing info", icon: "export_dsn", key: null, name: "pcbnew.EditorControl.exportSpecctraDSN" }, "PCB_ACTIONS::editFootprintFields": { id: "editFootprintFields", label: "Bulk Edit Footprint Fields...", tip: "Edit a table of fields from all footprints in the board", icon: "spreadsheet", key: null, name: "pcbnew.EditorControl.editFootprintFields" }, "PCB_ACTIONS::generateGerbers": { id: "generateGerbers", label: "Gerbers (.gbr)...", tip: "Generate Gerbers for fabrication", icon: "post_gerber", key: null, name: "pcbnew.EditorControl.generateGerbers" }, "PCB_ACTIONS::generateDrillFiles": { id: "generateDrillFiles", label: "Drill Files (.drl)...", tip: "Generate Excellon drill file(s)", icon: "post_drill", key: null, name: "pcbnew.EditorControl.generateDrillFiles" }, "PCB_ACTIONS::generatePosFile": { id: "generatePosFile", label: "Component Placement (.pos, .gbr)...", tip: "Generate component placement file(s) for pick and place", icon: "post_compo", key: null, name: "pcbnew.EditorControl.generatePosFile" }, "PCB_ACTIONS::generateReportFile": { id: "generateReportFile", label: "Footprint Report (.rpt)...", tip: "Create report of all footprints from current board", icon: "post_rpt", key: null, name: "pcbnew.EditorControl.generateReportFile" }, "PCB_ACTIONS::generateIPC2581File": { id: "generateIPC2581File", label: "IPC-2581 File (.xml)...", tip: "Generate an IPC-2581 file", icon: "post_xml", key: null, name: "pcbnew.EditorControl.generateIPC2581File" }, "PCB_ACTIONS::generateODBPPFile": { id: "generateODBPPFile", label: "ODB++ Output File...", tip: "Generate ODB++ output files", icon: "post_odb", key: null, name: "pcbnew.EditorControl.generateODBPPFile" }, "PCB_ACTIONS::generateD356File": { id: "generateD356File", label: "IPC-D-356 Netlist File...", tip: "Generate IPC-D-356 netlist file", icon: "post_d356", key: null, name: "pcbnew.EditorControl.generateD356File" }, "PCB_ACTIONS::generateBOM": { id: "generateBOM", label: "Bill of Materials...", tip: "Create bill of materials from board", icon: "post_bom", key: null, name: "pcbnew.EditorControl.generateBOM" }, "PCB_ACTIONS::generateBOMLegacy": { id: "generateBOMLegacy", label: "Generate Legacy Bill of Materials...", tip: "Generate a bill of materials for the current board using the legacy exporter", icon: "file_bom", key: null, name: "pcbnew.EditorControl.generateBOMLegacy" }, "PCB_ACTIONS::exportGenCAD": { id: "exportGenCAD", label: "Export GenCAD...", tip: "Export GenCAD board representation", icon: "post_gencad", key: null, name: "pcbnew.EditorControl.exportGenCAD" }, "PCB_ACTIONS::exportVRML": { id: "exportVRML", label: "Export VRML...", tip: "Export VRML 3D board representation", icon: "export3d", key: null, name: "pcbnew.EditorControl.exportVRML" }, "PCB_ACTIONS::exportIDF": { id: "exportIDF", label: "Export IDFv3...", tip: "Export IDF 3D board representation", icon: "export_idf", key: null, name: "pcbnew.EditorControl.exportIDF" }, "PCB_ACTIONS::exportSTEP": { id: "exportSTEP", label: "Export STEP/GLB/BREP/XAO/PLY/STL...", tip: "Export STEP, GLB, BREP, XAO, PLY or STL 3D board representation", icon: "export_step", key: null, name: "pcbnew.EditorControl.exportSTEP" }, "PCB_ACTIONS::exportCmpFile": { id: "exportCmpFile", label: "Export Footprint Association (.cmp) File...", tip: "Export footprint association file (*.cmp) for schematic back annotation", icon: "export_cmp", key: null, name: "pcbnew.EditorControl.exportFootprintAssociations" }, "PCB_ACTIONS::exportHyperlynx": { id: "exportHyperlynx", label: "Hyperlynx...", tip: null, icon: "export_step", key: null, name: "pcbnew.EditorControl.exportHyperlynx" }, "PCB_ACTIONS::collect3DModels": { id: "collect3DModels", label: "Collect And Embed 3D Models", tip: "Collect footprint 3D models and embed them into the board", icon: "import3d", key: null, name: "pcbnew.EditorControl.collect3DModels" }, "PCB_ACTIONS::trackWidthInc": { id: "trackWidthInc", label: "Switch Track Width to Next", tip: "Change track width to next pre-defined size", icon: null, key: "W", name: "pcbnew.EditorControl.trackWidthInc" }, "PCB_ACTIONS::trackWidthDec": { id: "trackWidthDec", label: "Switch Track Width to Previous", tip: "Change track width to previous pre-defined size", icon: null, key: "Shift+W", name: "pcbnew.EditorControl.trackWidthDec" }, "PCB_ACTIONS::viaSizeInc": { id: "viaSizeInc", label: "Increase Via Size", tip: "Change via size to next pre-defined size", icon: null, key: "'", name: "pcbnew.EditorControl.viaSizeInc" }, "PCB_ACTIONS::viaSizeDec": { id: "viaSizeDec", label: "Decrease Via Size", tip: "Change via size to previous pre-defined size", icon: null, key: "\\", name: "pcbnew.EditorControl.viaSizeDec" }, "PCB_ACTIONS::autoTrackWidth": { id: "autoTrackWidth", label: "Automatically select track width", tip: "When routing from an existing track use its width instead of the current width setting", icon: "auto_track_width", key: null, name: "pcbnew.EditorControl.autoTrackWidth" }, "PCB_ACTIONS::assignNetClass": { id: "assignNetClass", label: "Assign Netclass...", tip: "Assign a netclass to nets matching a pattern", icon: "netlist", key: null, name: "pcbnew.EditorControl.assignNetclass" }, "PCB_ACTIONS::zoneMerge": { id: "zoneMerge", label: "Merge Zones", tip: null, icon: null, key: null, name: "pcbnew.EditorControl.zoneMerge" }, "PCB_ACTIONS::zoneDuplicate": { id: "zoneDuplicate", label: "Duplicate Zone onto Layer...", tip: null, icon: "zone_duplicate", key: null, name: "pcbnew.EditorControl.zoneDuplicate" }, "PCB_ACTIONS::zonePriorityMoveToTop": { id: "zonePriorityMoveToTop", label: "Move to Top", tip: null, icon: "small_up", key: null, name: "pcbnew.EditorControl.zonePriorityMoveToTop" }, "PCB_ACTIONS::zonePriorityRaise": { id: "zonePriorityRaise", label: "Raise", tip: null, icon: "small_up", key: null, name: "pcbnew.EditorControl.zonePriorityRaise" }, "PCB_ACTIONS::zonePriorityLower": { id: "zonePriorityLower", label: "Lower", tip: null, icon: "small_down", key: null, name: "pcbnew.EditorControl.zonePriorityLower" }, "PCB_ACTIONS::zonePriorityMoveToBottom": { id: "zonePriorityMoveToBottom", label: "Move to Bottom", tip: null, icon: "small_down", key: null, name: "pcbnew.EditorControl.zonePriorityMoveToBottom" }, "PCB_ACTIONS::placeFootprint": { id: "placeFootprint", label: "Place Footprints", tip: null, icon: "module", key: "A", name: "pcbnew.EditorControl.placeFootprint" }, "PCB_ACTIONS::drillOrigin": { id: "drillOrigin", label: "Drill/Place File Origin", tip: "Place origin point for drill files and component placement files", icon: "set_origin", key: null, name: "pcbnew.EditorControl.drillOrigin" }, "PCB_ACTIONS::drillResetOrigin": { id: "drillResetOrigin", label: "Reset Drill Origin", tip: null, icon: null, key: null, name: "pcbnew.EditorControl.drillResetOrigin" }, "PCB_ACTIONS::toggleLock": { id: "toggleLock", label: "Toggle Lock", tip: "Lock or unlock selected items", icon: "lock_unlock", key: "L", name: "pcbnew.EditorControl.toggleLock" }, "PCB_ACTIONS::lineModeFree": { id: "lineModeFree", label: "Line Modes", tip: "Draw and drag at any angle", icon: "lines_any", key: null, name: "pcbnew.EditorControl.lineModeFree" }, "PCB_ACTIONS::lineMode90": { id: "lineMode90", label: "Line Modes", tip: "Constrain drawing and dragging to horizontal or vertical motions", icon: "lines90", key: null, name: "pcbnew.EditorControl.lineModeOrthonal" }, "PCB_ACTIONS::lineMode45": { id: "lineMode45", label: "Line Modes", tip: "Constrain drawing and dragging to horizontal, vertical, or 45-degree angle motions", icon: "hv45mode", key: null, name: "pcbnew.EditorControl.lineMode45" }, "PCB_ACTIONS::lineModeNext": { id: "lineModeNext", label: "Line Modes", tip: "Switch to next angle snapping mode", icon: null, key: "Shift+Space", name: "pcbnew.EditorControl.lineModeNext" }, "PCB_ACTIONS::lock": { id: "lock", label: "Lock", tip: "Prevent items from being moved and/or resized on the canvas", icon: "locked", key: null, name: "pcbnew.EditorControl.lock" }, "PCB_ACTIONS::unlock": { id: "unlock", label: "Unlock", tip: "Allow items to be moved and/or resized on the canvas", icon: "unlocked", key: null, name: "pcbnew.EditorControl.unlock" }, "PCB_ACTIONS::highlightNet": { id: "highlightNet", label: "Highlight Net", tip: "Highlight net under cursor", icon: "net_highlight", key: "`", name: "pcbnew.EditorControl.highlightNet" }, "PCB_ACTIONS::toggleLastNetHighlight": { id: "toggleLastNetHighlight", label: "Toggle Last Net Highlight", tip: "Toggle between last two highlighted nets", icon: null, key: null, name: "pcbnew.EditorControl.toggleLastNetHighlight" }, "PCB_ACTIONS::clearHighlight": { id: "clearHighlight", label: "Clear Net Highlighting", tip: null, icon: null, key: "~", name: "pcbnew.EditorControl.clearHighlight" }, "PCB_ACTIONS::toggleNetHighlight": { id: "toggleNetHighlight", label: "Toggle Net Highlight", tip: null, icon: "net_highlight", key: "Alt+`", name: "pcbnew.EditorControl.toggleNetHighlight" }, "PCB_ACTIONS::highlightNetSelection": { id: "highlightNetSelection", label: "Highlight Net", tip: "Highlight all copper items on the selected net(s)", icon: "net_highlight", key: null, name: "pcbnew.EditorControl.highlightNetSelection" }, "PCB_ACTIONS::highlightNetChain": { id: "highlightNetChain", label: "Highlight Net Chain", tip: "Highlight every net in the net chain", icon: "net_highlight", key: null, name: "pcbnew.EditorControl.highlightNetChain" }, "PCB_ACTIONS::setTerminalPad": { id: "setTerminalPad", label: "Set Terminal Pad", tip: null, icon: null, key: null, name: "pcbnew.EditorControl.setTerminalPad" }, "PCB_ACTIONS::hideNetInRatsnest": { id: "hideNetInRatsnest", label: "Hide Net in Ratsnest", tip: "Hide the selected net in the ratsnest of unconnected net lines/arcs", icon: "hide_ratsnest", key: null, name: "pcbnew.EditorControl.hideNet" }, "PCB_ACTIONS::showNetInRatsnest": { id: "showNetInRatsnest", label: "Show Net in Ratsnest", tip: "Show the selected net in the ratsnest of unconnected net lines/arcs", icon: "show_ratsnest", key: null, name: "pcbnew.EditorControl.showNet" }, "PCB_ACTIONS::showEeschema": { id: "showEeschema", label: "Switch to Schematic Editor", tip: "Open schematic in schematic editor", icon: "icon_eeschema_24", key: null, name: "pcbnew.EditorControl.showEeschema" }, "PCB_ACTIONS::drcRuleEditor": { id: "drcRuleEditor", label: "DRC Rule Editor", tip: "Open DRC rule editor window", icon: null, key: null, name: "pcbnew.DRETool.drcRuleEditor" }, "PCB_ACTIONS::localRatsnestTool": { id: "localRatsnestTool", label: "Local Ratsnest", tip: "Toggle ratsnest display of selected item(s)", icon: "tool_ratsnest", key: null, name: "pcbnew.Control.localRatsnestTool" }, "PCB_ACTIONS::showLayersManager": { id: "showLayersManager", label: "Appearance", tip: "Show/hide the appearance manager", icon: "layers_manager", key: null, name: "pcbnew.Control.showLayersManager" }, "PCB_ACTIONS::showNetInspector": { id: "showNetInspector", label: "Net Inspector", tip: "Show/hide the net inspector", icon: "tools", key: null, name: "pcbnew.Control.showNetInspector" }, "PCB_ACTIONS::zonesManager": { id: "zonesManager", label: "Zone Manager...", tip: "Show the zone manager dialog", icon: "show_zone", key: null, name: "pcbnew.Control.zonesManager" }, "PCB_ACTIONS::flipBoard": { id: "flipBoard", label: "Flip Board View", tip: "View board from the opposite side", icon: "flip_board", key: null, name: "pcbnew.Control.flipBoard" }, "PCB_ACTIONS::showRatsnest": { id: "showRatsnest", label: "Show Ratsnest", tip: "Show lines/arcs representing missing connections on the board", icon: "general_ratsnest", key: null, name: "pcbnew.Control.showRatsnest" }, "PCB_ACTIONS::ratsnestLineMode": { id: "ratsnestLineMode", label: "Curved Ratsnest Lines", tip: "Show ratsnest with curved lines", icon: "curved_ratsnest", key: null, name: "pcbnew.Control.ratsnestLineMode" }, "PCB_ACTIONS::ratsnestModeCycle": { id: "ratsnestModeCycle", label: "Ratsnest Mode (3-state)", tip: "Cycle between showing ratsnests for all layers, just visible layers, and none", icon: null, key: null, name: "pcbnew.Control.ratsnestModeCycle" }, "PCB_ACTIONS::netColorModeCycle": { id: "netColorModeCycle", label: "Net Color Mode (3-state)", tip: "Cycle between using net and netclass colors for all nets, just ratsnests, and none", icon: null, key: null, name: "pcbnew.Control.netColorMode" }, "PCB_ACTIONS::trackDisplayMode": { id: "trackDisplayMode", label: "Sketch Tracks", tip: "Show tracks in outline mode", icon: "showtrack", key: "K", name: "pcbnew.Control.trackDisplayMode" }, "PCB_ACTIONS::padDisplayMode": { id: "padDisplayMode", label: "Sketch Pads", tip: "Show pads in outline mode", icon: "pad_sketch", key: null, name: "pcbnew.Control.padDisplayMode" }, "PCB_ACTIONS::viaDisplayMode": { id: "viaDisplayMode", label: "Sketch Vias", tip: "Show vias in outline mode", icon: "via_sketch", key: null, name: "pcbnew.Control.viaDisplayMode" }, "PCB_ACTIONS::graphicsOutlines": { id: "graphicsOutlines", label: "Sketch Graphic Items", tip: "Show graphic items in outline mode", icon: "show_mod_edge", key: null, name: "pcbnew.Control.graphicOutlines" }, "PCB_ACTIONS::textOutlines": { id: "textOutlines", label: "Sketch Text Items", tip: "Show footprint texts in line mode", icon: "text_sketch", key: null, name: "pcbnew.Control.textOutlines" }, "PCB_ACTIONS::showPadNumbers": { id: "showPadNumbers", label: "Show Pad Numbers", tip: null, icon: "pad_number", key: null, name: "pcbnew.Control.showPadNumbers" }, "PCB_ACTIONS::zoneDisplayFilled": { id: "zoneDisplayFilled", label: "Draw Zone Fills", tip: "Show filled areas of zones", icon: "show_zone", key: null, name: "pcbnew.Control.zoneDisplayEnable" }, "PCB_ACTIONS::zoneDisplayOutline": { id: "zoneDisplayOutline", label: "Draw Zone Outlines", tip: "Show only zone boundaries", icon: "show_zone_disable", key: null, name: "pcbnew.Control.zoneDisplayDisable" }, "PCB_ACTIONS::zoneDisplayFractured": { id: "zoneDisplayFractured", label: "Draw Zone Fill Fracture Borders", tip: null, icon: "show_zone_outline_only", key: null, name: "pcbnew.Control.zoneDisplayOutlines" }, "PCB_ACTIONS::zoneDisplayTriangulated": { id: "zoneDisplayTriangulated", label: "Draw Zone Fill Triangulation", tip: null, icon: "show_zone_triangulation", key: null, name: "pcbnew.Control.zoneDisplayTesselation" }, "PCB_ACTIONS::zoneDisplayToggle": { id: "zoneDisplayToggle", label: "Toggle Zone Display", tip: "Cycle between showing zone fills and just their outlines", icon: "show_zone", key: null, name: "pcbnew.Control.zoneDisplayToggle" }, "PCB_ACTIONS::fpAutoZoom": { id: "fpAutoZoom", label: "Automatic zoom", tip: "Automatic Zoom on footprint change", icon: "zoom_auto_fit_in_page", key: null, name: "pcbnew.Control.fpAutoZoom" }, "PCB_ACTIONS::layerTop": { id: "layerTop", label: "Switch to Component (F.Cu) layer", tip: null, icon: null, key: "PgUp", name: "pcbnew.Control.layerTop" }, "PCB_ACTIONS::layerInner1": { id: "layerInner1", label: "Switch to Inner Layer 1", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner1" }, "PCB_ACTIONS::layerInner2": { id: "layerInner2", label: "Switch to Inner Layer 2", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner2" }, "PCB_ACTIONS::layerInner3": { id: "layerInner3", label: "Switch to Inner Layer 3", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner3" }, "PCB_ACTIONS::layerInner4": { id: "layerInner4", label: "Switch to Inner Layer 4", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner4" }, "PCB_ACTIONS::layerInner5": { id: "layerInner5", label: "Switch to Inner Layer 5", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner5" }, "PCB_ACTIONS::layerInner6": { id: "layerInner6", label: "Switch to Inner Layer 6", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner6" }, "PCB_ACTIONS::layerInner7": { id: "layerInner7", label: "Switch to Inner Layer 7", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner7" }, "PCB_ACTIONS::layerInner8": { id: "layerInner8", label: "Switch to Inner Layer 8", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner8" }, "PCB_ACTIONS::layerInner9": { id: "layerInner9", label: "Switch to Inner Layer 9", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner9" }, "PCB_ACTIONS::layerInner10": { id: "layerInner10", label: "Switch to Inner Layer 10", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner10" }, "PCB_ACTIONS::layerInner11": { id: "layerInner11", label: "Switch to Inner Layer 11", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner11" }, "PCB_ACTIONS::layerInner12": { id: "layerInner12", label: "Switch to Inner Layer 12", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner12" }, "PCB_ACTIONS::layerInner13": { id: "layerInner13", label: "Switch to Inner Layer 13", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner13" }, "PCB_ACTIONS::layerInner14": { id: "layerInner14", label: "Switch to Inner Layer 14", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner14" }, "PCB_ACTIONS::layerInner15": { id: "layerInner15", label: "Switch to Inner Layer 15", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner15" }, "PCB_ACTIONS::layerInner16": { id: "layerInner16", label: "Switch to Inner Layer 16", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner16" }, "PCB_ACTIONS::layerInner17": { id: "layerInner17", label: "Switch to Inner Layer 17", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner17" }, "PCB_ACTIONS::layerInner18": { id: "layerInner18", label: "Switch to Inner Layer 18", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner18" }, "PCB_ACTIONS::layerInner19": { id: "layerInner19", label: "Switch to Inner Layer 19", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner19" }, "PCB_ACTIONS::layerInner20": { id: "layerInner20", label: "Switch to Inner Layer 20", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner20" }, "PCB_ACTIONS::layerInner21": { id: "layerInner21", label: "Switch to Inner Layer 21", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner21" }, "PCB_ACTIONS::layerInner22": { id: "layerInner22", label: "Switch to Inner Layer 22", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner22" }, "PCB_ACTIONS::layerInner23": { id: "layerInner23", label: "Switch to Inner Layer 23", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner23" }, "PCB_ACTIONS::layerInner24": { id: "layerInner24", label: "Switch to Inner Layer 24", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner24" }, "PCB_ACTIONS::layerInner25": { id: "layerInner25", label: "Switch to Inner Layer 25", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner25" }, "PCB_ACTIONS::layerInner26": { id: "layerInner26", label: "Switch to Inner Layer 26", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner26" }, "PCB_ACTIONS::layerInner27": { id: "layerInner27", label: "Switch to Inner Layer 27", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner27" }, "PCB_ACTIONS::layerInner28": { id: "layerInner28", label: "Switch to Inner Layer 28", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner28" }, "PCB_ACTIONS::layerInner29": { id: "layerInner29", label: "Switch to Inner Layer 29", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner29" }, "PCB_ACTIONS::layerInner30": { id: "layerInner30", label: "Switch to Inner Layer 30", tip: null, icon: null, key: null, name: "pcbnew.Control.layerInner30" }, "PCB_ACTIONS::layerBottom": { id: "layerBottom", label: "Switch to Copper (B.Cu) Layer", tip: null, icon: null, key: "PgDn", name: "pcbnew.Control.layerBottom" }, "PCB_ACTIONS::layerNext": { id: "layerNext", label: "Switch to Next Layer", tip: null, icon: null, key: "+", name: "pcbnew.Control.layerNext" }, "PCB_ACTIONS::layerPrev": { id: "layerPrev", label: "Switch to Previous Layer", tip: null, icon: null, key: "-", name: "pcbnew.Control.layerPrev" }, "PCB_ACTIONS::layerToggle": { id: "layerToggle", label: "Toggle Layer", tip: "Switch between layers in active layer pair", icon: null, key: "V", name: "pcbnew.Control.layerToggle" }, "PCB_ACTIONS::layerAlphaInc": { id: "layerAlphaInc", label: "Increase Layer Opacity", tip: "Make the current layer less transparent", icon: "contrast_mode", key: "}", name: "pcbnew.Control.layerAlphaInc" }, "PCB_ACTIONS::layerAlphaDec": { id: "layerAlphaDec", label: "Decrease Layer Opacity", tip: "Make the current layer more transparent", icon: "contrast_mode", key: "{", name: "pcbnew.Control.layerAlphaDec" }, "PCB_ACTIONS::layerPairPresetsCycle": { id: "layerPairPresetsCycle", label: "Cycle Layer Pair Presets", tip: "Cycle between preset layer pairs", icon: null, key: "Shift+V", name: "pcbnew.Control.layerPairPresetCycle" }, "PCB_ACTIONS::boardStatistics": { id: "boardStatistics", label: "Show Board Statistics", tip: "Shows board statistics", icon: "editor", key: null, name: "pcbnew.InspectionTool.ShowBoardStatistics" }, "PCB_ACTIONS::inspectClearance": { id: "inspectClearance", label: "Clearance Resolution", tip: "Show clearance resolution for the active layer between two selected objects", icon: "mw_add_gap", key: null, name: "pcbnew.InspectionTool.InspectClearance" }, "PCB_ACTIONS::inspectConstraints": { id: "inspectConstraints", label: "Constraints Resolution", tip: "Show constraints resolution for the selected object", icon: "mw_add_stub", key: null, name: "pcbnew.InspectionTool.InspectConstraints" }, "PCB_ACTIONS::diffFootprint": { id: "diffFootprint", label: "Compare Footprint with Library", tip: "Show differences between board footprint and its library equivalent", icon: "library", key: null, name: "pcbnew.InspectionTool.DiffFootprint" }, "PCB_ACTIONS::compareBoardWithFile": { id: "compareBoardWithFile", label: "Compare Board with File...", tip: "Diff the current PCB against another .kicad_pcb file", icon: "library", key: null, name: "pcbnew.InspectionTool.CompareBoardWithFile" }, "PCB_ACTIONS::compareBoardWithHistory": { id: "compareBoardWithHistory", label: "Compare Board with Local History...", tip: "Diff the current PCB against the most recent local-history snapshot", icon: "library", key: null, name: "pcbnew.InspectionTool.CompareBoardWithHistory" }, "PCB_ACTIONS::showFootprintAssociations": { id: "showFootprintAssociations", label: "Show Footprint Associations", tip: "Show footprint library and schematic symbol associations", icon: "link", key: null, name: "pcbnew.InspectionTool.ShowFootprintAssociations" }, "PCB_ACTIONS::boardReannotate": { id: "boardReannotate", label: "Geographical Reannotate...", tip: "Reannotate PCB in geographical order", icon: "annotate", key: null, name: "pcbnew.ReannotateTool.ShowReannotateDialog" }, "PCB_ACTIONS::repairBoard": { id: "repairBoard", label: "Repair Board", tip: "Run various diagnostics and attempt to repair board", icon: "rescue", key: null, name: "pcbnew.Control.repairBoard" }, "PCB_ACTIONS::repairFootprint": { id: "repairFootprint", label: "Repair Footprint", tip: "Run various diagnostics and attempt to repair footprint", icon: "rescue", key: null, name: "pcbnew.ModuleEditor.repairFootprint" }, "PCB_ACTIONS::nextFootprintTab": { id: "nextFootprintTab", label: "Next Footprint Tab", tip: "Switch to the next open footprint tab", icon: null, key: null, name: "pcbnew.ModuleEditor.nextFootprintTab" }, "PCB_ACTIONS::prevFootprintTab": { id: "prevFootprintTab", label: "Previous Footprint Tab", tip: "Switch to the previous open footprint tab", icon: null, key: null, name: "pcbnew.ModuleEditor.prevFootprintTab" }, "PCB_ACTIONS::closeFootprintTab": { id: "closeFootprintTab", label: "Close Footprint Tab", tip: "Close the active footprint tab", icon: null, key: null, name: "pcbnew.ModuleEditor.closeFootprintTab" }, "PCB_ACTIONS::alignTop": { id: "alignTop", label: "Align to Top", tip: "Aligns selected items to the top edge of the item under the cursor", icon: "align_items_top", key: null, name: "pcbnew.AlignAndDistribute.alignTop" }, "PCB_ACTIONS::alignBottom": { id: "alignBottom", label: "Align to Bottom", tip: "Aligns selected items to the bottom edge of the item under the cursor", icon: "align_items_bottom", key: null, name: "pcbnew.AlignAndDistribute.alignBottom" }, "PCB_ACTIONS::alignLeft": { id: "alignLeft", label: "Align to Left", tip: "Aligns selected items to the left edge of the item under the cursor", icon: "align_items_left", key: null, name: "pcbnew.AlignAndDistribute.alignLeft" }, "PCB_ACTIONS::alignRight": { id: "alignRight", label: "Align to Right", tip: "Aligns selected items to the right edge of the item under the cursor", icon: "align_items_right", key: null, name: "pcbnew.AlignAndDistribute.alignRight" }, "PCB_ACTIONS::alignCenterY": { id: "alignCenterY", label: "Align to Vertical Center", tip: "Aligns selected items to the vertical center of the item under the cursor", icon: "align_items_center", key: null, name: "pcbnew.AlignAndDistribute.alignCenterY" }, "PCB_ACTIONS::alignCenterX": { id: "alignCenterX", label: "Align to Horizontal Center", tip: "Aligns selected items to the horizontal center of the item under the cursor", icon: "align_items_middle", key: null, name: "pcbnew.AlignAndDistribute.alignCenterX" }, "PCB_ACTIONS::distributeHorizontallyCenters": { id: "distributeHorizontallyCenters", label: "Distribute Horizontally by Centers", tip: "Distributes selected items between the left-most item and the right-most item so that the item centers are equally distributed", icon: "distribute_horizontal_centers", key: null, name: "pcbnew.AlignAndDistribute.distributeHorizontallyCenters" }, "PCB_ACTIONS::distributeHorizontallyGaps": { id: "distributeHorizontallyGaps", label: "Distribute Horizontally with Even Gaps", tip: "Distributes selected items between the left-most item and the right-most item so that the gaps between items are equal", icon: "distribute_horizontal_gaps", key: null, name: "pcbnew.AlignAndDistribute.distributeHorizontallyGaps" }, "PCB_ACTIONS::distributeVerticallyGaps": { id: "distributeVerticallyGaps", label: "Distribute Vertically with Even Gaps", tip: "Distributes selected items between the top-most item and the bottom-most item so that the gaps between items are equal", icon: "distribute_vertical_gaps", key: null, name: "pcbnew.AlignAndDistribute.distributeVerticallyGaps" }, "PCB_ACTIONS::distributeVerticallyCenters": { id: "distributeVerticallyCenters", label: "Distribute Vertically by Centers", tip: "Distributes selected items between the top-most item and the bottom-most item so that the item centers are equally distributed", icon: "distribute_vertical_centers", key: null, name: "pcbnew.AlignAndDistribute.distributeVerticallyCenters" }, "PCB_ACTIONS::pointEditorAddCorner": { id: "pointEditorAddCorner", label: "Create Corner", tip: "Create a corner", icon: "add_corner", key: "Ins", name: "pcbnew.PointEditor.addCorner", mac: "F1" }, "PCB_ACTIONS::pointEditorRemoveCorner": { id: "pointEditorRemoveCorner", label: "Remove Corner", tip: "Remove corner", icon: "delete_cursor", key: null, name: "pcbnew.PointEditor.removeCorner" }, "PCB_ACTIONS::pointEditorChamferCorner": { id: "pointEditorChamferCorner", label: "Chamfer Corner", tip: "Chamfer corner", icon: "chamfer", key: null, name: "pcbnew.PointEditor.chamferCorner" }, "PCB_ACTIONS::positionRelative": { id: "positionRelative", label: "Position Relative To...", tip: "Positions the selected item(s) by an exact amount relative to another", icon: "move_relative", key: "Shift+P", name: "pcbnew.PositionRelative.positionRelative" }, "PCB_ACTIONS::interactiveOffsetTool": { id: "interactiveOffsetTool", label: "Interactive Offset Tool", tip: "Interactive tool for offsetting items by exact amounts", icon: "move_relative", key: null, name: "pcbnew.PositionRelative.interactiveOffsetTool" }, "PCB_ACTIONS::selectConnection": { id: "selectConnection", label: "Select/Expand Connection", tip: "Selects a connection or expands an existing selection to junctions, pads, or entire connections", icon: "add_tracks", key: "U", name: "pcbnew.InteractiveSelection.SelectConnection" }, "PCB_ACTIONS::unrouteSelected": { id: "unrouteSelected", label: "Unroute Selected", tip: "Unroutes selected items to the nearest pad.", icon: "general_deletions", key: null, name: "pcbnew.InteractiveSelection.unrouteSelected" }, "PCB_ACTIONS::unrouteSegment": { id: "unrouteSegment", label: "Unroute Segment", tip: "Unroutes segment to the nearest segment.", icon: "general_deletions", key: "Backspace", name: "pcbnew.InteractiveSelection.unrouteSegment" }, "PCB_ACTIONS::selectNet": { id: "selectNet", label: "Select All Tracks in Net", tip: "Selects all tracks & vias belonging to the same net.", icon: null, key: null, name: "pcbnew.InteractiveSelection.SelectNet" }, "PCB_ACTIONS::deselectNet": { id: "deselectNet", label: "Deselect All Tracks in Net", tip: "Deselects all tracks & vias belonging to the same net.", icon: null, key: null, name: "pcbnew.InteractiveSelection.DeselectNet" }, "PCB_ACTIONS::selectNetChain": { id: "selectNetChain", label: "Select All Tracks in Net Chain", tip: "Selects all tracks & vias belonging to every net in the same net chain (nets joined through series passives).", icon: null, key: null, name: "pcbnew.InteractiveSelection.SelectNetChain" }, "PCB_ACTIONS::selectUnconnected": { id: "selectUnconnected", label: "Select All Unconnected Footprints", tip: "Selects all unconnected footprints belonging to each selected net.", icon: null, key: "O", name: "pcbnew.InteractiveSelection.SelectUnconnected" }, "PCB_ACTIONS::grabUnconnected": { id: "grabUnconnected", label: "Grab Nearest Unconnected Footprints", tip: "Selects and initiates moving the nearest unconnected footprint on each selected net.", icon: null, key: "Shift+O", name: "pcbnew.InteractiveSelection.GrabUnconnected" }, "PCB_ACTIONS::selectOnSheetFromEeschema": { id: "selectOnSheetFromEeschema", label: "Sheet", tip: "Selects all footprints and tracks in the schematic sheet", icon: "select_same_sheet", key: null, name: "pcbnew.InteractiveSelection.SelectOnSheet" }, "PCB_ACTIONS::selectSameSheet": { id: "selectSameSheet", label: "Items in Same Hierarchical Sheet", tip: "Selects all footprints and tracks in the same schematic sheet", icon: "select_same_sheet", key: null, name: "pcbnew.InteractiveSelection.SelectSameSheet" }, "PCB_ACTIONS::selectOnSchematic": { id: "selectOnSchematic", label: "Select on Schematic", tip: "Selects corresponding items in Schematic editor", icon: "select_same_sheet", key: null, name: "pcbnew.InteractiveSelection.SelectOnSchematic" }, "PCB_ACTIONS::filterSelection": { id: "filterSelection", label: "Filter Selected Items...", tip: "Remove items from the selection by type", icon: "filter", key: null, name: "pcbnew.InteractiveSelection.FilterSelection" }, "PCB_ACTIONS::zoneFill": { id: "zoneFill", label: "Draft Fill Selected Zone(s)", tip: "Update copper fill of selected zone(s) without regard to other interacting zones", icon: "fill_zone", key: null, name: "pcbnew.ZoneFiller.zoneFill" }, "PCB_ACTIONS::zoneFillAll": { id: "zoneFillAll", label: "Fill All Zones", tip: "Update copper fill of all zones", icon: "fill_zone", key: "B", name: "pcbnew.ZoneFiller.zoneFillAll" }, "PCB_ACTIONS::zoneUnfill": { id: "zoneUnfill", label: "Unfill Selected Zone(s)", tip: "Remove copper fill from selected zone(s)", icon: "zone_unfill", key: null, name: "pcbnew.ZoneFiller.zoneUnfill" }, "PCB_ACTIONS::zoneUnfillAll": { id: "zoneUnfillAll", label: "Unfill All Zones", tip: "Remove copper fill from all zones", icon: "zone_unfill", key: "Ctrl+B", name: "pcbnew.ZoneFiller.zoneUnfillAll" }, "PCB_ACTIONS::autoplaceSelectedComponents": { id: "autoplaceSelectedComponents", label: "Place Selected Footprints", tip: "Performs automatic placement of selected components", icon: null, key: null, name: "pcbnew.Autoplacer.autoplaceSelected" }, "PCB_ACTIONS::autoplaceOffboardComponents": { id: "autoplaceOffboardComponents", label: "Place Off-Board Footprints", tip: "Performs automatic placement of components outside board area", icon: null, key: null, name: "pcbnew.Autoplacer.autoplaceOffboard" }, "PCB_ACTIONS::generatePlacementRuleAreas": { id: "generatePlacementRuleAreas", label: "Generate Placement Rule Areas...", tip: "Creates best-fit placement rule areas", icon: "add_keepout_area", key: null, name: "pcbnew.Multichannel.generatePlacementRuleAreas" }, "PCB_ACTIONS::repeatLayout": { id: "repeatLayout", label: "Repeat Layout...", tip: "Clones placement & routing across multiple identical channels", icon: "copy", key: null, name: "pcbnew.Multichannel.repeatLayout" }, "PCB_ACTIONS::updateLinkedLayouts": { id: "updateLinkedLayouts", label: "Update Linked Layouts", tip: "Copies the selected Rule Area onto the Rule Areas linked to it", icon: "refresh", key: null, name: "pcbnew.Multichannel.updateLinkedLayouts" }, "PCB_ACTIONS::expandToMatchingTopology": { id: "expandToMatchingTopology", label: "Expand Selection by One Step", tip: "Adds the neighbouring parts, as long as the selection still repeats elsewhere on the board", icon: "select_same_sheet", key: null, name: "pcbnew.Multichannel.expandToMatchingTopology" }, "PCB_ACTIONS::expandToLargestTopology": { id: "expandToLargestTopology", label: "Expand Selection to Largest Matching Topology", tip: "Adds parts until the selection no longer repeats elsewhere on the board", icon: "select_same_sheet", key: null, name: "pcbnew.Multichannel.expandToLargestTopology" }, "PCB_ACTIONS::unlinkLayout": { id: "unlinkLayout", label: "Unlink Layout", tip: "Removes the selected Rule Areas from the set of linked layouts", icon: "group_ungroup", key: null, name: "pcbnew.Multichannel.unlinkLayout" }, "PCB_ACTIONS::routeSingleTrack": { id: "routeSingleTrack", label: "Route Single Track", tip: "Route tracks", icon: "add_tracks", key: "X", name: "pcbnew.InteractiveRouter.SingleTrack" }, "PCB_ACTIONS::routeDiffPair": { id: "routeDiffPair", label: "Route Differential Pair", tip: "Route differential pairs", icon: "ps_diff_pair", key: "6", name: "pcbnew.InteractiveRouter.DiffPair" }, "PCB_ACTIONS::routerSettingsDialog": { id: "routerSettingsDialog", label: "Interactive Router Settings...", tip: "Open Interactive Router settings", icon: "tools", key: "Ctrl+<", name: "pcbnew.InteractiveRouter.SettingsDialog" }, "PCB_ACTIONS::routerDiffPairDialog": { id: "routerDiffPairDialog", label: "Differential Pair Dimensions...", tip: "Open Differential Pair Dimension settings", icon: "ps_diff_pair_gap", key: null, name: "pcbnew.InteractiveRouter.DiffPairDialog" }, "PCB_ACTIONS::routerHighlightMode": { id: "routerHighlightMode", label: "Router Highlight Mode", tip: "Switch router to highlight mode", icon: null, key: null, name: "pcbnew.InteractiveRouter.HighlightMode" }, "PCB_ACTIONS::routerShoveMode": { id: "routerShoveMode", label: "Router Shove Mode", tip: "Switch router to shove mode", icon: null, key: null, name: "pcbnew.InteractiveRouter.ShoveMode" }, "PCB_ACTIONS::routerWalkaroundMode": { id: "routerWalkaroundMode", label: "Router Walkaround Mode", tip: "Switch router to walkaround mode", icon: null, key: null, name: "pcbnew.InteractiveRouter.WalkaroundMode" }, "PCB_ACTIONS::cycleRouterMode": { id: "cycleRouterMode", label: "Cycle Router Mode", tip: "Cycle router to the next mode", icon: null, key: null, name: "pcbnew.InteractiveRouter.CycleRouterMode" }, "PCB_ACTIONS::selectLayerPair": { id: "selectLayerPair", label: "Set Layer Pair...", tip: "Change active layer pair for routing", icon: "select_layer_pair", key: null, name: "pcbnew.InteractiveRouter.SelectLayerPair" }, "PCB_ACTIONS::tuneSingleTrack": { id: "tuneSingleTrack", label: "Tune Length of a Single Track", tip: null, icon: "ps_tune_length", key: "7", name: "pcbnew.LengthTuner.TuneSingleTrack" }, "PCB_ACTIONS::tuneDiffPair": { id: "tuneDiffPair", label: "Tune Length of a Differential Pair", tip: null, icon: "ps_diff_pair_tune_length", key: "8", name: "pcbnew.LengthTuner.TuneDiffPair" }, "PCB_ACTIONS::tuneSkew": { id: "tuneSkew", label: "Tune Skew of a Differential Pair", tip: null, icon: "ps_diff_pair_tune_phase", key: "9", name: "pcbnew.LengthTuner.TuneDiffPairSkew" }, "PCB_ACTIONS::routerSpreadTracks": { id: "routerSpreadTracks", label: "Spread Tracks", tip: null, icon: "spread_tracks", key: null, name: "pcbnew.InteractiveRouter.SpreadTracks" }, "PCB_ACTIONS::routerUndoLastSegment": { id: "routerUndoLastSegment", label: "Undo Last Segment", tip: "Walks the current track back one segment.", icon: null, key: "Backspace", name: "pcbnew.InteractiveRouter.UndoLastSegment" }, "PCB_ACTIONS::routerContinueFromEnd": { id: "routerContinueFromEnd", label: "Route From Other End", tip: "Commits current segments and starts next segment from nearest ratsnest end.", icon: null, key: "Ctrl+E", name: "pcbnew.InteractiveRouter.ContinueFromEnd" }, "PCB_ACTIONS::routerAttemptFinish": { id: "routerAttemptFinish", label: "Attempt Finish", tip: "Attempts to complete current route to nearest ratsnest end.", icon: null, key: "F", name: "pcbnew.InteractiveRouter.AttemptFinish" }, "PCB_ACTIONS::routerRouteSelected": { id: "routerRouteSelected", label: "Route Selected", tip: "Sequentially route selected items from ratsnest anchor.", icon: null, key: "Shift+X", name: "pcbnew.InteractiveRouter.RouteSelected" }, "PCB_ACTIONS::routerRouteSelectedFromEnd": { id: "routerRouteSelectedFromEnd", label: "Route Selected From Other End", tip: "Sequentially route selected items from other end of ratsnest anchor.", icon: null, key: "Shift+E", name: "pcbnew.InteractiveRouter.RouteSelectedFromEnd" }, "PCB_ACTIONS::routerAutorouteSelected": { id: "routerAutorouteSelected", label: "Attempt Finish Selected (Autoroute)", tip: "Sequentially attempt to automatically route all selected pads.", icon: null, key: "Shift+F", name: "pcbnew.InteractiveRouter.Autoroute" }, "PCB_ACTIONS::routerOptimizeSelected": { id: "routerOptimizeSelected", label: "Optimize Selected Track(s)", tip: "Simplify selected routed track(s).", icon: null, key: "Shift+T", name: "pcbnew.InteractiveRouter.OptimizeSelected" }, "PCB_ACTIONS::cancelCurrentItem": { id: "cancelCurrentItem", label: "Cancel Current Item", tip: "Skip current item and route next selected item.", icon: null, key: null, name: "pcbnew.InteractiveRouter.CancelCurrentItem" }, "PCB_ACTIONS::breakTrack": { id: "breakTrack", label: "Break Track", tip: "Splits the track segment into two segments connected at the cursor position.", icon: "break_line", key: null, name: "pcbnew.InteractiveRouter.BreakTrack" }, "PCB_ACTIONS::drag45Degree": { id: "drag45Degree", label: "Drag 45 Degree Mode", tip: "Drags a track segment, or a mixed selection as one block, keeping connected tracks at 45 degrees.", icon: "drag_segment_withslope", key: "D", name: "pcbnew.InteractiveRouter.Drag45Degree" }, "PCB_ACTIONS::dragFreeAngle": { id: "dragFreeAngle", label: "Drag Free Angle", tip: "Drags the nearest joint in the track without restricting the track angle.", icon: "drag_segment", key: "G", name: "pcbnew.InteractiveRouter.DragFreeAngle" }, "PCB_ACTIONS::regenerateAllTuning": { id: "regenerateAllTuning", label: "Update All Tuning Patterns", tip: "Attempt to re-tune existing tuning patterns within their bounds", icon: "router_len_tuner", key: null, name: "pcbnew.Generator.regenerateAllTuning" }, "PCB_ACTIONS::regenerateAll": { id: "regenerateAll", label: "Rebuild All Generators", tip: "Rebuilds geometry of all generators", icon: "refresh", key: null, name: "pcbnew.Generator.regenerateAll" }, "PCB_ACTIONS::regenerateSelected": { id: "regenerateSelected", label: "Rebuild Selected Generators", tip: "Rebuilds geometry of selected generator(s)", icon: "refresh", key: null, name: "pcbnew.Generator.regenerateSelected" }, "PCB_ACTIONS::generatorsShowManager": { id: "generatorsShowManager", label: "Generators Manager", tip: "Show a manager dialog for Generator objects", icon: "pin_table", key: null, name: "pcbnew.Generator.showManager" }, "PCB_ACTIONS::excludeStitchVia": { id: "excludeStitchVia", label: "Exclude From Stitching", tip: "Remove the selected via from its via-stitch generator and prevent it from being regenerated", icon: null, key: null, name: "pcbnew.Generator.excludeStitchVia" }, "PCB_ACTIONS::clearStitchViaExclusions": { id: "clearStitchViaExclusions", label: "Clear Via Stitching Exclusions", tip: "Restore all vias previously excluded from the selected via-stitch generators", icon: null, key: null, name: "pcbnew.Generator.clearStitchViaExclusions" }, "PCB_ACTIONS::lengthTunerSettings": { id: "lengthTunerSettings", label: "Length Tuning Settings", tip: "Displays tuning pattern properties dialog", icon: "router_len_tuner_setup", key: "Ctrl+L", name: "pcbnew.LengthTuner.Settings" }, "PCB_ACTIONS::showWizards": { id: "showWizards", label: "Show wizards selector", tip: "Select wizard script to run", icon: "module_wizard", key: null, name: "pcbnew.FpWizard.showWizards" }, "PCB_ACTIONS::resetWizardPrms": { id: "resetWizardPrms", label: "Reset wizard parameters", tip: "Reset wizard parameters to default", icon: "reload", key: null, name: "pcbnew.FpWizard.resetWizardPrms" }, "PCB_ACTIONS::exportFpToEditor": { id: "exportFpToEditor", label: "Export footprint to editor", tip: "Export footprint to editor", icon: "export_footprint_names", key: null, name: "pcbnew.FpWizard.exportFpToEditor" }, "PCB_ACTIONS::showDiffPhaseSkew": { id: "showDiffPhaseSkew", label: "Show relative skew of diff pair tracks", tip: "Show relative skew of diff pair tracks", icon: "tune_diff_pair_skew_legend", key: null, name: "pcbnew.InteractiveDiffPhaseSkew" }, "PCB_ACTIONS::placeSubGrid": { id: "placeSubGrid", label: "Place Sub-grid", tip: "Adds a subgrid to the board", icon: "add_grid_item", key: null, name: "pcbnew.GridItem.place" }, "PCB_ACTIONS::collabStartSession": { id: "collabStartSession", label: "Start Collaboration Session...", tip: "Upload this project to the collaboration server and copy a share link", icon: "library_archive", key: null, name: "pcbnew.Collab.startSession" }, "PCB_ACTIONS::collabJoinSession": { id: "collabJoinSession", label: "Join Shared Project...", tip: "Join a shared project from a share link", icon: "library_archive", key: null, name: "pcbnew.Collab.joinSession" }, "PCB_ACTIONS::collabLeaveSession": { id: "collabLeaveSession", label: "Leave Session", tip: "Disconnect this computer from the live session; the shared project stays on the server for everyone else", icon: null, key: null, name: "pcbnew.Collab.leaveSession" }, "PCB_ACTIONS::collabComments": { id: "collabComments", label: "Comments...", tip: "Browse, answer and resolve the shared project's comment threads", icon: null, key: null, name: "pcbnew.Collab.comments" }, "PCB_ACTIONS::collabHistory": { id: "collabHistory", label: "History", tip: "Show the shared project's version history panel", icon: null, key: null, name: "pcbnew.Collab.history" }, "PCB_ACTIONS::collabCopyLink": { id: "collabCopyLink", label: "Copy Share Link", tip: "Copy an invite link for the current collaboration session", icon: null, key: null, name: "pcbnew.Collab.copyLink" }, "PCB_ACTIONS::collabVendorParts": { id: "collabVendorParts", label: "Vendor Parts...", tip: "Search LCSC, Mouser and DigiKey for parts and manage saved part libraries (opens in the browser; in a session, placed parts arrive here)", icon: null, key: null, name: "pcbnew.Collab.vendorParts" }, "PCB_ACTIONS::collabGithub": { id: "collabGithub", label: "GitHub Sync...", tip: "Push the shared project to a GitHub repository, or pull and merge changes from it (opens in the browser)", icon: null, key: null, name: "pcbnew.Collab.github" }, "PCB_ACTIONS::collabCompare": { id: "collabCompare", label: "Compare Versions...", tip: "See what changed between the shared board as it is now and a version, a checkpoint or a GitHub commit (opens in the browser)", icon: null, key: null, name: "pcbnew.Collab.compare" }, "PCB_ACTIONS::collabFollow": { id: "collabFollow", label: "Follow Next Peer", tip: null, icon: null, key: null, name: "pcbnew.Collab.follow" }, "CVPCB_ACTIONS::showFootprintViewer": { id: "showFootprintViewer", label: "View Selected Footprint", tip: null, icon: "show_footprint", key: null, name: "cvpcb.Control.ShowFootprintViewer" }, "CVPCB_ACTIONS::showEquFileTable": { id: "showEquFileTable", label: "Manage Footprint Association Files...", tip: "Edit the footprint association files list.  These files are used to automatically assign footprints based on symbol values.", icon: null, key: null, name: "cvpcb.Control.ShowEquFileTable" }, "CVPCB_ACTIONS::saveAssociationsToSchematic": { id: "saveAssociationsToSchematic", label: "Save to Schematic", tip: "Save footprint assignments in 'footprint' fields of schematic symbols", icon: "save", key: "Ctrl+S", name: "cvpcb.Control.SaveAssociationsToSchematic" }, "CVPCB_ACTIONS::saveAssociationsToFile": { id: "saveAssociationsToFile", label: "Save to Schematic and File", tip: "Save footprint assignments in 'footprint' fields of schematic symbols and then save schematic files", icon: "save", key: "Ctrl+S", name: "cvpcb.Control.SaveAssociationsToFile" }, "CVPCB_ACTIONS::gotoNextNA": { id: "gotoNextNA", label: "Select Next Unassigned Symbol", tip: "Select next symbol with no footprint assignment", icon: "right", key: null, name: "cvpcb.Control.GotoNextNA" }, "CVPCB_ACTIONS::gotoPreviousNA": { id: "gotoPreviousNA", label: "Select Previous Unassigned Symbol", tip: "Select previous symbol with no footprint assignment", icon: "left", key: null, name: "cvpcb.Control.GotoPreviousNA" }, "CVPCB_ACTIONS::associate": { id: "associate", label: "Assign Footprint", tip: null, icon: "auto_associate", key: "Enter", name: "cvpcb.Association.Associate" }, "CVPCB_ACTIONS::autoAssociate": { id: "autoAssociate", label: "Automatically Assign Footprints", tip: "Assign footprints automatically using a footprint association file", icon: "auto_associate", key: null, name: "cvpcb.Association.AutoAssociate" }, "CVPCB_ACTIONS::deleteAssoc": { id: "deleteAssoc", label: "Delete Footprint Assignment", tip: null, icon: "delete_association", key: "Del", name: "cvpcb.Association.Delete" }, "CVPCB_ACTIONS::deleteAll": { id: "deleteAll", label: "Delete All Footprint Assignments", tip: null, icon: "delete_association", key: null, name: "cvpcb.Association.DeleteAll" }, "CVPCB_ACTIONS::FilterFPbyFPFilters": { id: "FilterFPbyFPFilters", label: "Use symbol footprint filters", tip: "Filter footprint list by footprint filters defined in the symbol", icon: "module_filtered_list", key: null, name: "cvpcb.Control.FilterFPbyFPFilters" }, "CVPCB_ACTIONS::filterFPbyPin": { id: "filterFPbyPin", label: "Filter by pin count", tip: "Filter footprint list by pin count", icon: "module_pin_filtered_list", key: null, name: "cvpcb.Control.FilterFPByPin" }, "CVPCB_ACTIONS::FilterFPbyLibrary": { id: "FilterFPbyLibrary", label: "Filter by library", tip: "Filter footprint list by library", icon: "module_library_list", key: null, name: "cvpcb.Control.FilterFPbyLibrary" } } };
   }
 });
 
@@ -84509,16 +84763,16 @@ function changesTo(text3) {
   return changesBetween(E.kdoc, text3);
 }
 function changesBetween(doc2, text3) {
-  const target2 = KiCadCanvas.parseDoc(text3, "footprint");
+  const target3 = KiCadCanvas.parseDoc(text3, "footprint");
   const out2 = [];
   const wrap = (n2) => PT4().wrapBoard(n2);
-  for (const [id, it] of target2.items) {
+  for (const [id, it] of target3.items) {
     const cur2 = doc2.items.get(id);
     if (!cur2) out2.push({ id, kind: "ADDED", typeName: PT4().typeNameOf(it), sexpr: wrap(it.node) });
     else if (KiCadCanvas.serialize(cur2.node) !== KiCadCanvas.serialize(it.node)) out2.push({ id, kind: "MODIFIED", typeName: PT4().typeNameOf(it), sexpr: wrap(it.node) });
   }
-  for (const [id, it] of doc2.items) if (!target2.items.has(id)) out2.push({ id, kind: "REMOVED", typeName: PT4().typeNameOf(it), properties: [] });
-  const h3 = FD().footprintHeaderSexpr(target2);
+  for (const [id, it] of doc2.items) if (!target3.items.has(id)) out2.push({ id, kind: "REMOVED", typeName: PT4().typeNameOf(it), properties: [] });
+  const h3 = FD().footprintHeaderSexpr(target3);
   if (h3 !== FD().footprintHeaderSexpr(doc2)) out2.push({ id: "footprint", kind: "MODIFIED", typeName: "FOOTPRINT", sexpr: h3 });
   return out2;
 }
@@ -84634,7 +84888,7 @@ function nowUuid() {
 function newFootprintText(name, attr) {
   const q4 = (s2) => JSON.stringify(s2);
   const eff = (t) => `(effects (font (size 1 1) (thickness ${t})))`;
-  const field2 = (n2, v, y, layer3, t, hide) => `(property ${q4(n2)} ${q4(v)} (at 0 ${y} 0) (layer ${q4(layer3)})${hide ? " (hide yes)" : ""} (uuid ${q4(nowUuid())}) ${eff(t)})`;
+  const field2 = (n2, v, y, layer4, t, hide) => `(property ${q4(n2)} ${q4(v)} (at 0 ${y} 0) (layer ${q4(layer4)})${hide ? " (hide yes)" : ""} (uuid ${q4(nowUuid())}) ${eff(t)})`;
   const src = `(footprint ${q4(name)} (version ${NEW_FILE_VERSION}) (generator "pcbnew") (generator_version "10.0") (layer "F.Cu") ${field2("Reference", "REF**", -0.5, "F.SilkS", 0.1, false)} ${field2("Value", name, 1, "F.Fab", 0.15, false)} ${field2("Datasheet", "", 0, "F.Fab", 0.15, true)} ${field2("Description", "", 0, "F.Fab", 0.15, true)}` + (attr ? ` (attr ${attr})` : "") + ` (fp_text user "\${REFERENCE}" (at 0 2.5 0) (layer "F.Fab") (uuid ${q4(nowUuid())}) ${eff(0.15)}) (embedded_fonts no))`;
   return FD().prettify(src);
 }
@@ -85142,8 +85396,8 @@ function footprintProperties() {
       return deleteFootprintDoc(f2.docId, true);
     },
     activeLayer: E.activeLayer || "F.Fab",
-    textStyle: (layer3) => {
-      const st = (PT4().TEXT_STYLE || {})[/^[FB]\.SilkS$/.test(layer3) ? "silk" : /\.Cu$/.test(layer3) ? "copper" : layer3 === "Edge.Cuts" ? "edges" : /^[FB]\.CrtYd$/.test(layer3) ? "courtyard" : /^[FB]\.Fab$/.test(layer3) ? "fab" : "others"] || [1, 0.15];
+    textStyle: (layer4) => {
+      const st = (PT4().TEXT_STYLE || {})[/^[FB]\.SilkS$/.test(layer4) ? "silk" : /\.Cu$/.test(layer4) ? "copper" : layer4 === "Edge.Cuts" ? "edges" : /^[FB]\.CrtYd$/.test(layer4) ? "courtyard" : /^[FB]\.Fab$/.test(layer4) ? "fab" : "others"] || [1, 0.15];
       return { w: st[0], h: st[0], thick: st[1], italic: false };
     },
     libName: lib
@@ -86174,6 +86428,7 @@ function leaveDoc() {
   }
   releaseLayers();
   peersG.replaceChildren();
+  clearPeerCursors();
   selG.replaceChildren();
   dragG.replaceChildren();
   cmtG.replaceChildren();
@@ -86386,8 +86641,8 @@ function navigateDocs(dir) {
   }
 }
 function switchEditor() {
-  const target2 = isSch() ? state.docs.find((d) => d.docType === "kicad_pcb") : rootSchematic();
-  if (target2) openDoc(target2);
+  const target3 = isSch() ? state.docs.find((d) => d.docType === "kicad_pcb") : rootSchematic();
+  if (target3) openDoc(target3);
   else toast(isSch() ? "This project has no board yet" : "This project has no schematic yet");
 }
 var docNav, GRID_CHOICES, sheetNames, sheetPages, ROOT_SHEET_NAME, hierarchyLearned, layerRow, remote;
@@ -86405,6 +86660,7 @@ var init_doc = __esm({
     init_net();
     init_panes();
     init_peers();
+    init_peercursors();
     init_selection();
     init_state();
     init_drawingsheet();
@@ -86465,15 +86721,15 @@ function cursorColor() {
   return id === "classic" ? "#000000" : id === "dark" ? "#E8E8E8" : "#0F0F0F";
 }
 function drawCursorLayer() {
-  const layer3 = document.getElementById("cursorCanvas");
-  if (!layer3) return;
-  const ctx = layer3.getContext("2d");
+  const layer4 = document.getElementById("cursorCanvas");
+  if (!layer4) return;
+  const ctx = layer4.getContext("2d");
   if (!ctx) return;
-  if (layer3.width !== canvas2.width || layer3.height !== canvas2.height) {
-    layer3.width = canvas2.width;
-    layer3.height = canvas2.height;
-  } else ctx.clearRect(0, 0, layer3.width, layer3.height);
-  layer3.style.display = E.kdoc ? "block" : "none";
+  if (layer4.width !== canvas2.width || layer4.height !== canvas2.height) {
+    layer4.width = canvas2.width;
+    layer4.height = canvas2.height;
+  } else ctx.clearRect(0, 0, layer4.width, layer4.height);
+  layer4.style.display = E.kdoc ? "block" : "none";
   if (at3 && E.kdoc && cursorShown()) drawCrosshair(ctx);
 }
 function drawCrosshair(ctx) {
@@ -88152,7 +88408,7 @@ var RULES_HELP_MD;
 var init_rules_help = __esm({
   "web/generated/rules-help.ts"() {
     "use strict";
-    RULES_HELP_MD = '### Top-level Clauses\n\n    (version 2)\n\n    (rule <rule_name> <rule_clause> ...)\n\n<br>\n\n### Rule Clauses\n\n    (constraint <constraint_type> ...)\n\n    (condition "<expression>")\n\n    (layer "<layer_name>")\n\n    (severity <severity_name>)\n\n\n<br>\n\n### Constraints\n\n| Constraint type           | Argument type                                                                                                         | Description                                                                                                                                                                                                                                                                                                                                                                                                                                             |\n|---------------------------|-----------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|\n| `annular_width`           | min/max                                                                                                               | Checks the width of annular rings on vias.<br>                                                                                                                                                                                                                                                                                                                                                                                                          |\n| `assertion`               | "&lt;expression>"                                                                                                     | Checks the given expression.<br>                                                                                                                                                                                                                                                                                                                                                                                                                        |\n| `bridged_mask`            |                                                                                                                       | Checks for solder mask bridges between copper items.  This constraint does not take a min/opt/max value.  In combination with a severity clause, this constraint can be used to allow or disallow solder mask bridging in various conditions.<br>                                                                                                                                                                                                       |\n| `clearance`               | min                                                                                                                   | Specifies the **electrical** clearance between copper objects of different nets.  (See `physical_clearance` if you wish to specify clearance between objects regardless of net.)<br><br>To allow copper objects to overlap (collide), create a `clearance` constraint with the `min` value less than zero (for example, `-1`).<br>                                                                                                                      |\n| `connection_width`        | min                                                                                                                   | Checks the width of connections between pads and zones.  An error will be generated for each pad connection that is narrower than the `min` value.<br>                                                                                                                                                                                  |\n| `courtyard_clearance`     | min                                                                                                                   | Checks the clearance between footprint courtyards and generates an error if any two courtyards are closer than the `min` distance.  If a footprint does not have a courtyard shape, no errors will be generated from this constraint.<br>                                                                                                                                                                                                               |\n| `creepage`                | min                                                                                                                   | Specifies the creepage distance between copper objects of different nets.<br>                                                                                                                                                                                                                                                                                                                                                                           |\n| `diff_pair_gap`           | min/opt/max                                                                                                           | Checks the gap between parallel tracks in a differential pair.  The `opt` setting is used by the interactive router for placing new differential pairs.  An error will be generated if the spacing between tracks in a differential pair is outside of the `min` and `max` settings.  Differential pair gap is not tested on non-parallel portions of a differential pair (for example, the fanout from a component).<br>                                                                                                                                                                                                                                                                       |\n| `diff_pair_uncoupled`     | max                                                                                                                   | Checks the distance that a differential pair track is routed uncoupled from the other polarity track in the pair (for example, where the pair fans out from a component, or becomes uncoupled to pass around another object such as a via).<br>                                                                                                                                                                                                         |\n| `disallow`                | `track`<br>`via`<br>`through_via`<br>`blind_via`<br>`buried_via`<br>`micro_via`<br>`pad`<br>`zone`<br>`text`<br>`graphic`<br>`hole`<br>`footprint`<br> | Specify one or more object types to disallow, separated by spaces.  For example, `(constraint disallow track)` or `(constraint disallow track via pad)`.  If an object of this type matches the rule condition, a DRC error will be created.<br><br>This constraint is essentially the same as a keepout rule area, but can be used to create more specific keepout restrictions.<br>                                  |\n| `edge_clearance`          | min                                                                                                                   | Checks the clearance between objects and the board edge.<br><br>This can also be thought of as the "milling tolerance" as the board edge will include all graphical items on the `Edge.Cuts` layer as well as any *oval* pad holes.  (See `physical_hole_clearance` for the drilling tolerance.)<br>                                                                                                                                                    |\n| `net_chain_length`        | min/max                                                                                                               | Measures the trunk length between the chain\'s two terminal pads (set in the schematic) and checks it against `min`/`max`.  Stubs branching off the trunk are bounded separately by `stub_length`, not counted here.  If the chain has no terminal pads or the routed copper contains a loop, the check falls back to the sum of every member net plus series-passive bridging.  When both `length` and `net_chain_length` match the same item, `net_chain_length` wins. |\n| `hole_clearance`          | min                                                                                                                   | Checks the clearance between a drilled hole in a pad or via and copper objects on a different net.  The clearance is measured from the diameter of the hole, not its center.<br>                                                                                                                                                                                                                                                                        |\n| `hole_size`               | min/opt/max                                                                                                           | Checks the size (diameter) of a drilled hole in a pad or via.  For oval holes, the smaller (minor) diameter will be tested against the `min` value (if specified) and the larger (major) diameter will be tested against the `max` value (if specified).  The `opt` value is used by the interactive router as the default via hole size for nets that match the rule condition.<br>                                                                    |\n| `hole_to_hole`            | min                                                                                                                   | Checks the clearance between mechanically-drilled holes in pads and vias.  The clearance is measured between the diameters of the holes, not between their centers.<br><br>This constraint is soley for the protection of drill bits.  The clearance between **laser-drilled** (microvias) and other non-mechanically-drilled holes is not checked, nor is the clearance between **milled** (oval-shaped) and other non-mechanically-drilled holes.<br> |\n| `length`                  | min/opt/max                                                                                                           | Checks the total routed length for the nets that match the rule condition and generates an error for each net that is below the `min` value (if specified) or above the `max` value (if specified) of the constraint.<br>The `opt` value sets a target length that is used by the length tuning tool for any nets that match the rule condition.<br>                                                                                                    |\n| `line_width`              | min/max                                                                                                               | Checks the stroke width of graphic shapes and text box borders, and the stroke thickness of text.  An error will be generated for each item with a width below the `min` value (if specified) or above the `max` value (if specified).  Shapes with a solid fill are not checked.<br>                                                                                                                                                                   |\n| `min_resolved_spokes`     | `0`<br>`1`<br>`2`<br>`3`<br>`4`<br>                                                                                   | Checks the total number of connections (spokes) to a pad.  An error will be raised for each pad that has fewer than the specified number of spokes.<br>                                                                                                                                                                                 |\n| `hole_aspect_ratio`      | max                                                                                                                   | Checks the depth of a plated hole against the diameter of its drill. The depth runs from the surface the drill enters to the copper it lands on, so the copper passed through counts. Applies to vias, plated pad holes and microvias. A ratio above the maximum raises an error. Fabricators usually allow 6 to 10 for mechanically-drilled holes. IPC-2226 puts the usual microvia limit between 0.75 and 1.0, scoped with `A.Via_Type == \'Micro\'`.<br> |\n| `microvia_stack_depth`   | max                                                                                                                   | Checks how many microvias are stacked on one another. A stack deeper than the maximum raises an error. A rule can set a different limit for part of the board, for instance under a fine pitch BGA.<br> |\n| `physical_clearance`      | min                                                                                                                   | Checks the clearance between two objects on a given layer (including non-copper layers).<br><br>While this can perform more general-purpose checks than `clearance`, it is much slower.  Use `clearance` where possible.<br>                                                                                                                                                                                                                            |\n| `physical_hole_clearance` | min                                                                                                                   | Checks the clearance between a drilled hole in a pad or via and another object, regardless of net. The clearance is measured from the diameter of the hole, not its center.<br><br>This can also be thought of as the "drilling tolerance" as it only includes **round** holes (see `edge_clearance` for the milling tolerance).<br>                                                                                                                    |\n| `silk_clearance`          | min                                                                                                                   | Checks the clearance between objects on silkscreen layers and other objects.<br>                                                                                                                                                                                                                                                                                                                                                                        |\n| `stub_length`             | min/max                                                                                                               | Bounds the length of stub member nets on a multi-net chain.  A stub is a member net that does not touch either of the chain\'s two terminal pads, so it sits off the trunk that runs from one terminal to the other.  Its full routed length is compared against `min`/`max`.<br> |\n| `return_path`             | `(layer "<layer_name>")`<br>`(net "<net_name_or_pattern>")`                                                            | Requires every track and arc on the chain to be shadowed by a zone on the reference layer.  Each uncovered run produces one marker anchored over the gap.  The optional `(net \u2026)` filter restricts the qualifying zone to a specific net (commonly `"GND"`); wildcards are accepted.  Without it, any zone on the reference layer qualifies.  Example: `(constraint return_path (layer "B.Cu") (net "GND"))`<br> |\n| `skew`                    | min/opt/max/within\\_diff\\_pairs                                                                                       | Checks the total skew for the nets that match the rule condition, that is, the difference between the length of each net and the longest net that is matched by the rule.  If the difference between the longest net and any one net is above the constraint `max` value, an error will be generated.<br>This constraint also sets a target skew that is used by the skew tuning tool for any nets that match the rule condition.  The target skew is the `opt` value, if specified, or the `min` value if not.  If neither `min` nor `opt` are specified, the target skew is `0`.<br>If the option `within_diff_pairs` is specified, the skew will be tested separately for every differential pair in the nets matching the rule.  If `within_diff_pairs` is not specified, the skew will be tested for all matching nets (e.g. for skew tuning a bus).<br>                                                          |\n| `solder_mask_expansion`   | opt                                                                                                                   | Specifies the solder mask expansion for pads, shapes and tracks.                                                                                                                                                                                                                                                                                                                                                                                        |\n| `solder_paste_abs_margin` | opt                                                                                                                   | Specifies the absolute solder paste clearance for pads.  Usually negative to inset the paste.<br><br>The final solder paste clearance will be the absolute clearance plus the relative clearance.                                                                                                                                                                                                                                                        |\n| `solder_paste_rel_margin` | opt                                                                                                                   | Specifies the relative solder paste clearance for pads.  Usually negative to inset the paste.<br><br>The final solder paste clearance will be the absolute clearance plus the relative clearance.                                                                                                                                                                                                                                                        |\n| `text_height`             | min/max                                                                                                               | Checks the height of text, including text boxes.  An error will be generated for each text item that has a height below the `min` value (if specified) or above the `max` value (if specified).<br>                                                                                                                                                                                                                                                     |\n| `text_thickness`          | min/max                                                                                                               | Deprecated alias of `line_width`.<br>                                                                                                                                                                                                                                                                                                                                                                                                                   |\n| `thermal_relief_gap`      | min                                                                                                                   | Specifies the width of the gap between a pad and a zone with a thermal-relief connection.<br>                                                                                                                                                                                                                                                                                                                                                           |\n| `thermal_spoke_width`     | opt                                                                                                                   | Specifies the width of the spokes connecting a pad to a zone with a thermal-relief connection.<br>                                                                                                                                                                                                                                                                                                                                                      |\n| `track_angle`             | min/max                                                                                                               | Checks the angle between two connected track segments.  An error will be generated for each connected pair with an angle below the `min` value (if specified) or above the `max` value (if specified).<br>                                                                                                                                                                                                                                              |\n| `track_segment_length`    | min/max                                                                                                               | Checks the length of track and arc segments.  An error will be generated for each segment that has a length below the `min` value (if specified) or above the `max` value (if specified).<br>                                                                                                                                                                                                                                                           |\n| `track_width`             | min/opt/max                                                                                                           | Checks the width of track and arc segments.  An error will be generated for each segment that has a width below the `min` value (if specified) or above the `max` value (if specified).  The `opt` value is used by the interactive router as the default track width for nets that match the rule condition.<br>                                                                                                                                       |\n| `via_count`               | min/max                                                                                                               | Counts the number of vias on every net matched by the rule condition.  An error will be generated for each net that has fewer vias than the `min` value (if specified) or more than the `max` value (if specified).<br>                                                                                                                                                                                                                                 |\n| `via_dangling`            |                                                                                                                       | Checks for vias that are unconnected or connected on only one layer.  This constraint does not take a min/opt/max value.  In combination with a severity clause, this constraint can be used to allow or disallow dangling vias in various conditions.<br>                                                                                                                                                                                              |\n| `via_diameter`            | min/opt/max                                                                                                           | Checks the diameter of vias.  An error will be generated for each via that has a diameter below the `min` value (if specified) or above the `max` value (if specified).  The `opt` value is used by the interactive router as the default via diameter for nets that match the rule condition.<br>                                                                                                                                                      |\n| `zone_connection`         | `solid`<br>`thermal_reliefs`<br>`none`                                                                                | Specifies the connection to be made between a zone and a pad.<br>                                                                                                                                                                                                                                                                                                                                                                                       |\n\n\n### Items\n\n * `A` &nbsp;&nbsp; _the first (or only) item under test_\n * `B` &nbsp;&nbsp; _the second item under test (for binary tests)_\n * `L` &nbsp;&nbsp; _the layer currently under test_\n\nConditions for single-item constraints, such as `hole_size`, have no second item.\nUsing `B` in these conditions is an error.\n\n<br>\n\n### Severity Names\n\n * warning\n * error\n * exclusion\n * ignore\n\n<br>\n\n### Examples\n\n    (version 2)\n\n    (rule HV\n       (constraint clearance (min 1.5mm))\n       (condition "A.hasNetclass(\'HV\')"))\n\n\n    (rule HV\n       (layer outer)\n       (constraint clearance (min 1.5mm))\n       (condition "A.hasNetclass(\'HV\')"))\n\n\n    (rule HV_HV\n       # wider clearance between HV tracks\n       (constraint clearance (min "1.5mm + 2.0mm"))\n       (condition "A.hasNetclass(\'HV\') && B.hasNetclass(\'HV\')"))\n\n\n    (rule HV_unshielded\n       (constraint clearance (min 2mm))\n       (condition "A.hasNetclass(\'HV\') && !A.enclosedByArea(\'Shield*\')"))\n\n\n    (rule heavy_thermals\n       (constraint thermal_spoke_width (min 0.5mm))\n       (condition "A.hasNetclass(\'HV\')"))\n\n    # Total routed length across every net in chain SIG_A\n    (rule sig_group_length\n       (constraint net_chain_length (min 40mm) (max 60mm))\n       (condition "A.Net.NetChain == \'SIG_A\'") )\n\n    # Total propagation delay across every net in chain CLK_GRP\n    (rule sig_group_delay\n       (constraint net_chain_length (min 180ps) (max 220ps) (time_domain yes))\n       (condition "A.Net.NetChain == \'CLK_GRP\'") )\n\n    # --- Net chain rules: multi-net signals through series passives ---\n\n    # Same effect as sig_group_length, scoped via inNetChain() instead.\n    (rule "DDR_DQ chain length"\n       (constraint net_chain_length (min 40mm) (max 60mm))\n       (condition "A.inNetChain(\'DDR_DQ*\')") )\n\n    # Stub branches off the trunk of any DDR chain may not exceed 2 mm.\n    (rule "DDR stub length"\n       (constraint stub_length (max 2mm))\n       (condition "A.inNetChain(\'DDR_*\')") )\n\n    # Every chain in the HighSpeed class needs an unbroken B.Cu return.\n    (rule "HS return path"\n       (constraint return_path (layer "B.Cu"))\n       (condition "A.inNetChainClass(\'HighSpeed\')") )\n\n    # Tighter clearance for any net that belongs to a chain.\n    (rule "chain members tighter clearance"\n       (constraint clearance (min 0.2mm))\n       (condition "A.hasNetChain()") )\n<br><br>\n\n\n### Notes\n\nVersion clause must be the first clause.  It indicates the syntax version of the file so that\nfuture rules parsers can perform automatic updates.  It should be\nset to "1".\n\nRules should be ordered by specificity.  Later rules take\nprecedence over earlier rules; once a matching rule is found\nno further rules will be checked.\n\nUse Ctrl+/ to comment or uncomment line(s).\n\n### Graphical Rule Editor\n\nWhen loading rules into the graphical editor, constraints are automatically\nmapped to appropriate editing panels. Rules with multiple constraints may be\nsplit across panels, each showing a subset of the rule\'s constraints.\n\nMulti-constraint panels like Via Style (`via_diameter` + `hole_size`) and\nDifferential Pair Routing (`track_width` + `diff_pair_gap`) are matched first.\nSingle-constraint panels handle the remainder. Unmapped constraints appear\nin the Custom Rule panel.\n\nRules that are not modified in the graphical editor preserve their original\ntext formatting when saved.\n<br><br><br>\n\n`net_chain_length` vs `length`:\n\nWhen a net belongs to a chain and both constraints match, `net_chain_length` is checked against the trunk (the unique path between the two terminal pads) and `length` is ignored.  Stubs branching off the trunk don\'t count toward the trunk length; use `stub_length` to bound them.  If the chain has no terminal pads or the routed copper contains a loop, `net_chain_length` falls back to the sum of every member net plus series-passive bridging.  Nets that don\'t belong to a chain still see `length`.\n\nTime-domain targets:\n\nBoth constraints accept `(time_domain yes)` to bound propagation delay instead of physical length.  For `net_chain_length` in time-domain mode the delay window applies to the chain as a whole; the tuner subtracts the routed delay from the other member nets to figure out what\'s left for the net being tuned.\n\n\n<br><br><br>### Properties\n\nMany properties of objects are available for testing in custom rule expressions. See the full documentation at [https://docs.kicad.org](https://go.kicad.org/docs/GetMajorMinorVersion/en/pcbnew/pcbnew.html#custom_design_rules) for the complete list.\n<br><br><br>\n\n### Expression functions\n\nAll function parameters support simple wildcards (`*` and `?`).\n\nArguments can also be expressions. For example,\n`A.intersectsFrontCourtyard(B.Parent)` tests whether `A` intersects the front\ncourtyard of `B`\'s parent footprint.\n\n\n```\n    A.enclosedByArea(\'<zone_name>\')\n```\n> True if all of `A` lies within the given zone\'s outline.\n\n> NB: this is potentially a more expensive call than `intersectsArea()`.\nUse `intersectsArea()` where possible.\n\n\n```\n    A.existsOnLayer(\'<layer_name>\')\n```\n> True if `A` exists on the given layer.  The layer name can be\neither the name assigned in Board Setup > Board Editor Layers or\nthe canonical name (ie: `F.Cu`).\n\n> NB: this returns true if `A` is on the given layer, independently\nof whether or not the rule is being evaluated for that layer.\nFor the latter use a `(layer "layer_name")` clause in the rule.\n\n\n```\n    A.fromTo(\'x\', \'y\')\n```\n> True if the object exists on the copper path between the given\npads. `x` and `y` are the full names of pads in the design, such as\n`R1-Pad1`.\n\n\n```\n    A.getField(\'<field_name>\')\n```\n> The value of the given field. Only footprints have fields, so a field is only returned if\n`A` is a footprint.\n\n\n```\n    A.hasComponentClass(\'<component_class_name>\')\n```\n> True if the set of component classes assigned to `A` contains the named\ncomponent class.\n\n\n```\n    A.hasNetclass(\'<netclass_name>\')\n```\n> True if `A` has had the given netclass assigned to it, either by an explicit netclass label\nor through a pattern match assignment.\n\n\n```\n    A.inDiffPair(\'<net_name>\')\n```\n> True if `A` has a net that is part of the specified differential pair.\n`<net_name>` is the base name of the differential pair.\nFor example, `inDiffPair(\'/CLK\')` matches items in the `/CLK_P` and `/CLK_N` nets.\n\n\n\n```\n    A.inNetChain(\'<chain_name>\')\n```\n> True if `A`\'s net is a member of the named chain.  `<chain_name>`\naccepts wildcards: `inNetChain(\'DDR_*\')` matches every chain whose\nname starts with `DDR_`.\n\n\n\n```\n    A.hasNetChain()\n```\n> True if `A`\'s net belongs to any chain.\n\n\n\n```\n    A.inNetChainClass(\'<class_name>\')\n```\n> True if `A`\'s net belongs to a chain whose assigned chain class\nmatches `<class_name>`.  Class assignments live in the project\'s\n`net_chain_classes` map.  `<class_name>` accepts wildcards.\n\n\n\n```\n    A.intersectsArea(\'<zone_name>\')\n```\n> True if any part of `A` lies within the given zone\'s outline.\n\n\n```\n    A.intersectsCourtyard(\'<footprint_identifier>\')\n```\n> True if any part of `A` lies within the given footprint\'s principal courtyard.\n\n\n```\n    A.intersectsFrontCourtyard(\'<footprint_identifier>\')\n```\n> True if any part of `A` lies within the given footprint\'s front courtyard.\n\n\n```\n    A.intersectsBackCourtyard(\'<footprint_identifier>\')\n```\n> True if any part of `A` lies within the given footprint\'s back courtyard.\n\n\n> The `footprint_identifier` listed above can be one of the following:\n\n> 1. A reference designator, possibly containing wildcards `*` and `?`\n> 2. A footprint library identifier such as `LibName:FootprintName`. In this case,\n   the library identifier must contain the `:` character to separate the library\n   name from the footprint name, and either name may contain wildcards.\n> 3. A component class, in the form `${Class:ClassName}`.  The keyword `Class` is not\n   case-sensitive, but component class names are case-sensitive.\n\n\n```\n    AB.isCoupledDiffPair()\n```\n> True if `A` and `B` are members of the same diff pair.\n\n\n```\n    A.isMicroVia()\n```\n> True if `A` is a microvia.\n\n\n```\n    A.isBlindVia()\n```\n> True if `A` is a blind via.\n\n\n```\n    A.isBuriedVia()\n```\n> True if `A` is a buried via.\n\n\n```\n    A.isStackedVia()\n```\n> True if `A` is a microvia that lands on another microvia, or is landed on by one.\n\n> The test is hole overlap, so a staggered pair counts whenever the holes touch.\n\n\n```\n    A.isPlated()\n```\n> True if `A` has a hole which is plated.\n\n\n```\n    A.memberOfGroup(\'<group_name>\')\n```\n> True if `A` is a member of the given group\nThe name can contain wildcards.\nIncludes nested membership.\n\n\n```\n    A.memberOfFootprint(\'<footprint_identifier>\')\n```\n> True if `A` is a member of a given footprint\n(for example, a pad or graphic shape defined inside that footprint).\nThe various ways of specifying `footprint_identifier` are described above.\n\n\n```\n    A.memberOfSheet(\'<sheet_path>\')\n```\n> True if `A` is a member of the given schematic sheet.\nThe sheet path can contain wildcards.\n\n\n```\n    A.memberOfSheetOrChildren(\'<sheet_path>\')\n```\n> True if `A` is a member of the given schematic sheet, or any of its child hierarchical sheets.\nThe sheet path can contain wildcards.\n\n\n### More Examples\n\n    (rule "copper keepout"\n       (constraint disallow track via zone)\n       (condition "A.intersectsArea(\'zone3\')"))\n\n\n    (rule "BGA neckdown"\n       (constraint track_width (min 0.2mm) (opt 0.25mm))\n       (constraint clearance (min 0.05mm) (opt 0.08mm))\n       (condition "A.intersectsCourtyard(\'U3\')"))\n\n\n    # prevent silk over tented vias\n    (rule silk_over_via\n       (constraint silk_clearance (min 0.2mm))\n       (condition "A.Type == \'*Text\' && B.Type == \'Via\'"))\n\n\n    (rule "Distance between Vias of Different Nets"\n        (constraint hole_to_hole (min 0.254mm))\n        (condition "A.Type == \'Via\' && B.Type == \'Via\' && A.Net != B.Net"))\n\n    (rule "Clearance between Pads of Different Nets"\n        (constraint clearance (min 3.0mm))\n        (condition "A.Type == \'Pad\' && B.Type == \'Pad\' && A.Net != B.Net"))\n\n\n    (rule "Via Hole to Track Clearance"\n        (constraint hole_clearance (min 0.254mm))\n        (condition "A.Type == \'Via\' && B.Type == \'Track\'"))\n\n    (rule "Pad to Track Clearance"\n        (constraint clearance (min 0.2mm))\n        (condition "A.Type == \'Pad\' && B.Type == \'Track\'"))\n\n\n    (rule "clearance-to-1mm-cutout"\n        (constraint edge_clearance (min 0.8mm))\n        (condition "A.Layer == \'Edge.Cuts\' && A.Line_Width == 1.0mm"))\n\n\n    (rule "Max Drill Hole Size Mechanical"\n        (constraint hole_size (max 6.3mm))\n        (condition "A.Pad_Type == \'NPTH, mechanical\'"))\n\n    (rule "Max Drill Hole Size PTH"\n        (constraint hole_size (max 6.35mm))\n        (condition "A.Pad_Type == \'Through-hole\'"))\n\n\n    # Specify an optimal gap for a particular diff-pair\n    (rule "dp clock gap"\n        (constraint diff_pair_gap (opt "0.8mm"))\n        (condition "A.inDiffPair(\'/CLK\')"))\n\n    # Specify a larger clearance around any diff-pair\n    (rule "dp clearance"\n        (constraint clearance (min "1.5mm"))\n        (condition "A.inDiffPair(\'*\') && !AB.isCoupledDiffPair()"))\n\n\n    # Don\'t use thermal reliefs on heatsink pads\n    (rule heat_sink_pad\n        (constraint zone_connection solid)\n        (condition "A.Fabrication_Property == \'Heatsink pad\'"))\n\n    # Require all four thermal relief spokes to connect to parent zone\n    (rule fully_spoked_pads\n        (constraint min_resolved_spokes 4))\n\n    # Set thermal relief gap & spoke width for all zones\n    (rule defined_relief\n        (constraint thermal_relief_gap (min 10mil))\n        (constraint thermal_spoke_width (min 12mil)))\n\n    # Override thermal relief gap & spoke width for GND and PWR zones\n    (rule defined_relief_pwr\n        (constraint thermal_relief_gap (min 10mil))\n        (constraint thermal_spoke_width (min 12mil))\n        (condition "A.Name == \'zone_GND\' || A.Name == \'zone_PWR\'"))\n\n    # Prevent copper fills under the courtyards of capacitors\n    (rule no_copper_under_caps\n        (constraint physical_clearance (min 0mm))\n        (condition "A.Type == \'Zone\' && B.Reference == \'C*\'"))\n\n\n    # Prevent solder wicking from SMD pads\n    (rule holes_in_pads\n        (constraint physical_hole_clearance (min 0.2mm))\n        (condition "B.Pad_Type == \'SMD\'"))\n\n    # Disallow solder mask margin overrides\n    (rule "disallow solder mask margin overrides"\n        (constraint assertion "A.Soldermask_Margin_Override == null")\n        (condition "A.Type == \'Pad\'"))\n\n\n    # Enforce a mechanical clearance between components and board edge\n    (rule front_mechanical_board_edge_clearance\n        (layer "F.Courtyard")\n        (constraint physical_clearance (min 3mm))\n        (condition "B.Layer == \'Edge.Cuts\'"))\n\n\n    # Allow silk intersection with board edge for connectors\n    (rule silk_board_edge_clearance\n        (constraint silk_clearance)\n        (severity ignore)\n        (condition "A.memberOfFootprint(\'J*\') && B.Layer==\'Edge.Cuts\'"))\n\n\n    # Check current-carrying capacity\n    (rule high-current\n        (constraint track_width (min 1.0mm))\n        (constraint connection_width (min 0.8mm))\n        (condition "A.hasNetclass(\'Power\')"))\n\n\n    # Separate drill bit and milling cutter size constraints\n    (rule "Plated through-hole size"\n        (constraint hole_size (min 0.2mm) (max 6.35mm))\n        (condition "A.isPlated() && A.Hole_Size_X == A.Hole_Size_Y"))\n    (rule "Plated slot size"\n        (constraint hole_size (min 0.5mm))\n        (condition "A.isPlated() && A.Hole_Size_X != A.Hole_Size_Y"))\n\n\n    # Allow blind to micro-via hole-to-hole violations when it is known that\n    # the fab will mechanically drill blind via holes -before- laser drilling\n    # micro-vias.\n    (rule hole_to_hole_uvia_exclusion\n        (condition "A.Via_Type == \'Blind\' && B.Via_Type == \'Micro\'")\n        (constraint hole_to_hole)\n        (severity ignore))\n\n\n    # No solder mask expansion for vias.\n    (rule "no mask expansion on vias"\n        (constraint solder_mask_expansion (opt 0mm))\n        (condition "A.type == via"))\n\n\n    # Remove solder paste from DNP footprints.\n    (rule remove_solder_paste_from_DNP\n        (constraint solder_paste_abs_margin (opt -50mm))\n        (condition "A.Do_not_Populate"))\n\n\n    # Allow solder mask bridging under guard ring mask apertures\n    (rule guard_ring_bridging\n        (constraint bridged_mask)\n        (condition "A.intersectsArea(\'guard_ring\')")\n        (severity ignore))\n### Documentation\n\nFor the full documentation see [https://docs.kicad.org](https://go.kicad.org/docs/GetMajorMinorVersion/en/pcbnew/pcbnew.html#custom_design_rules).';
+    RULES_HELP_MD = '### Top-level Clauses\n\n    (version 2)\n\n    (rule <rule_name> <rule_clause> ...)\n\n<br>\n\n### Rule Clauses\n\n    (constraint <constraint_type> ...)\n\n    (condition "<expression>")\n\n    (layer "<layer_name>")\n\n    (severity <severity_name>)\n\n\n<br>\n\n### Constraints\n\n| Constraint type           | Argument type                                                                                                         | Description                                                                                                                                                                                                                                                                                                                                                                                                                                             |\n|---------------------------|-----------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|\n| `annular_width`           | min/max                                                                                                               | Checks the width of annular rings on vias.<br>                                                                                                                                                                                                                                                                                                                                                                                                          |\n| `assertion`               | "&lt;expression>"                                                                                                     | Checks the given expression.<br>                                                                                                                                                                                                                                                                                                                                                                                                                        |\n| `bridged_mask`            |                                                                                                                       | Checks for solder mask bridges between copper items.  This constraint does not take a min/opt/max value.  In combination with a severity clause, this constraint can be used to allow or disallow solder mask bridging in various conditions.<br>                                                                                                                                                                                                       |\n| `clearance`               | min                                                                                                                   | Specifies the **electrical** clearance between copper objects of different nets.  (See `physical_clearance` if you wish to specify clearance between objects regardless of net.)<br><br>To allow copper objects to overlap (collide), create a `clearance` constraint with the `min` value less than zero (for example, `-1`).<br>                                                                                                                      |\n| `connection_width`        | min                                                                                                                   | Checks the width of connections between pads and zones.  An error will be generated for each pad connection that is narrower than the `min` value.<br>                                                                                                                                                                                  |\n| `courtyard_clearance`     | min                                                                                                                   | Checks the clearance between footprint courtyards and generates an error if any two courtyards are closer than the `min` distance.  If a footprint does not have a courtyard shape, no errors will be generated from this constraint.<br>                                                                                                                                                                                                               |\n| `creepage`                | min                                                                                                                   | Specifies the creepage distance between copper objects of different nets.<br>                                                                                                                                                                                                                                                                                                                                                                           |\n| `diff_pair_gap`           | min/opt/max                                                                                                           | Checks the gap between parallel tracks in a differential pair.  The `opt` setting is used by the interactive router for placing new differential pairs.  An error will be generated if the spacing between tracks in a differential pair is outside of the `min` and `max` settings.  Differential pair gap is not tested on non-parallel portions of a differential pair (for example, the fanout from a component).<br>                                                                                                                                                                                                                                                                       |\n| `diff_pair_uncoupled`     | max                                                                                                                   | Checks the distance that a differential pair track is routed uncoupled from the other polarity track in the pair (for example, where the pair fans out from a component, or becomes uncoupled to pass around another object such as a via).<br>                                                                                                                                                                                                         |\n| `disallow`                | `track`<br>`via`<br>`through_via`<br>`blind_via`<br>`buried_via`<br>`micro_via`<br>`pad`<br>`zone`<br>`text`<br>`graphic`<br>`hole`<br>`footprint`<br> | Specify one or more object types to disallow, separated by spaces.  For example, `(constraint disallow track)` or `(constraint disallow track via pad)`.  If an object of this type matches the rule condition, a DRC error will be created.<br><br>This constraint is essentially the same as a keepout rule area, but can be used to create more specific keepout restrictions.<br>                                  |\n| `edge_clearance`          | min                                                                                                                   | Checks the clearance between objects and the board edge.<br><br>This can also be thought of as the "milling tolerance" as the board edge will include all graphical items on the `Edge.Cuts` layer as well as any *oval* pad holes.  (See `physical_hole_clearance` for the drilling tolerance.)<br>                                                                                                                                                    |\n| `net_chain_length`        | min/max                                                                                                               | Measures the trunk length between the chain\'s two terminal pads (set in the schematic) and checks it against `min`/`max`.  Stubs branching off the trunk are bounded separately by `stub_length`, not counted here.  If the chain has no terminal pads or the routed copper contains a loop, the check falls back to the sum of every member net plus series-passive bridging.  When both `length` and `net_chain_length` match the same item, `net_chain_length` wins. |\n| `hole_clearance`          | min                                                                                                                   | Checks the clearance between a drilled hole in a pad or via and copper objects on a different net.  The clearance is measured from the diameter of the hole, not its center.<br>                                                                                                                                                                                                                                                                        |\n| `hole_size`               | min/opt/max                                                                                                           | Checks the size (diameter) of a drilled hole in a pad or via.  For oval holes, the smaller (minor) diameter will be tested against the `min` value (if specified) and the larger (major) diameter will be tested against the `max` value (if specified).  The `opt` value is used by the interactive router as the default via hole size for nets that match the rule condition.<br>                                                                    |\n| `hole_to_hole`            | min                                                                                                                   | Checks the clearance between mechanically-drilled holes in pads and vias.  The clearance is measured between the diameters of the holes, not between their centers.<br><br>This constraint is soley for the protection of drill bits.  The clearance between **laser-drilled** (microvias) and other non-mechanically-drilled holes is not checked, nor is the clearance between **milled** (oval-shaped) and other non-mechanically-drilled holes.<br> |\n| `length`                  | min/opt/max                                                                                                           | Checks the total routed length for the nets that match the rule condition and generates an error for each net that is below the `min` value (if specified) or above the `max` value (if specified) of the constraint.<br>The `opt` value sets a target length that is used by the length tuning tool for any nets that match the rule condition.<br>                                                                                                    |\n| `min_resolved_spokes`     | `0`<br>`1`<br>`2`<br>`3`<br>`4`<br>                                                                                   | Checks the total number of connections (spokes) to a pad.  An error will be raised for each pad that has fewer than the specified number of spokes.<br>                                                                                                                                                                                 |\n| `hole_aspect_ratio`      | max                                                                                                                   | Checks the depth of a plated hole against the diameter of its drill. The depth runs from the surface the drill enters to the copper it lands on, so the copper passed through counts. Applies to vias, plated pad holes and microvias. A ratio above the maximum raises an error. Fabricators usually allow 6 to 10 for mechanically-drilled holes. IPC-2226 puts the usual microvia limit between 0.75 and 1.0, scoped with `A.Via_Type == \'Micro\'`.<br> |\n| `microvia_stack_depth`   | max                                                                                                                   | Checks how many microvias are stacked on one another. A stack deeper than the maximum raises an error. A rule can set a different limit for part of the board, for instance under a fine pitch BGA.<br> |\n| `physical_clearance`      | min                                                                                                                   | Checks the clearance between two objects on a given layer (including non-copper layers).<br><br>While this can perform more general-purpose checks than `clearance`, it is much slower.  Use `clearance` where possible.<br>                                                                                                                                                                                                                            |\n| `physical_hole_clearance` | min                                                                                                                   | Checks the clearance between a drilled hole in a pad or via and another object, regardless of net. The clearance is measured from the diameter of the hole, not its center.<br><br>This can also be thought of as the "drilling tolerance" as it only includes **round** holes (see `edge_clearance` for the milling tolerance).<br>                                                                                                                    |\n| `silk_clearance`          | min                                                                                                                   | Checks the clearance between objects on silkscreen layers and other objects.<br>                                                                                                                                                                                                                                                                                                                                                                        |\n| `stub_length`             | min/max                                                                                                               | Bounds the length of stub member nets on a multi-net chain.  A stub is a member net that does not touch either of the chain\'s two terminal pads, so it sits off the trunk that runs from one terminal to the other.  Its full routed length is compared against `min`/`max`.<br> |\n| `return_path`             | `(layer "<layer_name>")`<br>`(net "<net_name_or_pattern>")`                                                            | Requires every track and arc on the chain to be shadowed by a zone on the reference layer.  Each uncovered run produces one marker anchored over the gap.  The optional `(net \u2026)` filter restricts the qualifying zone to a specific net (commonly `"GND"`); wildcards are accepted.  Without it, any zone on the reference layer qualifies.  Example: `(constraint return_path (layer "B.Cu") (net "GND"))`<br> |\n| `skew`                    | min/opt/max/within\\_diff\\_pairs                                                                                       | Checks the total skew for the nets that match the rule condition, that is, the difference between the length of each net and the longest net that is matched by the rule.  If the difference between the longest net and any one net is above the constraint `max` value, an error will be generated.<br>This constraint also sets a target skew that is used by the skew tuning tool for any nets that match the rule condition.  The target skew is the `opt` value, if specified, or the `min` value if not.  If neither `min` nor `opt` are specified, the target skew is `0`.<br>If the option `within_diff_pairs` is specified, the skew will be tested separately for every differential pair in the nets matching the rule.  If `within_diff_pairs` is not specified, the skew will be tested for all matching nets (e.g. for skew tuning a bus).<br>                                                          |\n| `solder_mask_expansion`   | opt                                                                                                                   | Specifies the solder mask expansion for pads, shapes and tracks.                                                                                                                                                                                                                                                                                                                                                                                        |\n| `solder_paste_abs_margin` | opt                                                                                                                   | Specifies the absolute solder paste clearance for pads.  Usually negative to inset the paste.<br><br>The final solder paste clearance will be the absolute clearance plus the relative clearance.                                                                                                                                                                                                                                                        |\n| `solder_paste_rel_margin` | opt                                                                                                                   | Specifies the relative solder paste clearance for pads.  Usually negative to inset the paste.<br><br>The final solder paste clearance will be the absolute clearance plus the relative clearance.                                                                                                                                                                                                                                                        |\n| `text_height`             | min/max                                                                                                               | Checks the height of text, including text boxes.  An error will be generated for each text item that has a height below the `min` value (if specified) or above the `max` value (if specified).<br>                                                                                                                                                                                                                                                     |\n| `text_thickness`          | min/max                                                                                                               | Checks the thickness of text, including text boxes.  An error will be generated for each text item that has a thickness below the `min` value (if specified) or above the `max` value (if specified).<br>                                                                                                                                                                                                                                               |\n| `thermal_relief_gap`      | min                                                                                                                   | Specifies the width of the gap between a pad and a zone with a thermal-relief connection.<br>                                                                                                                                                                                                                                                                                                                                                           |\n| `thermal_spoke_width`     | opt                                                                                                                   | Specifies the width of the spokes connecting a pad to a zone with a thermal-relief connection.<br>                                                                                                                                                                                                                                                                                                                                                      |\n| `track_angle`             | min/max                                                                                                               | Checks the angle between two connected track segments.  An error will be generated for each connected pair with an angle below the `min` value (if specified) or above the `max` value (if specified).<br>                                                                                                                                                                                                                                              |\n| `track_segment_length`    | min/max                                                                                                               | Checks the length of track and arc segments.  An error will be generated for each segment that has a length below the `min` value (if specified) or above the `max` value (if specified).<br>                                                                                                                                                                                                                                                           |\n| `track_width`             | min/opt/max                                                                                                           | Checks the width of track and arc segments.  An error will be generated for each segment that has a width below the `min` value (if specified) or above the `max` value (if specified).  The `opt` value is used by the interactive router as the default track width for nets that match the rule condition.<br>                                                                                                                                       |\n| `via_count`               | min/max                                                                                                               | Counts the number of vias on every net matched by the rule condition.  An error will be generated for each net that has fewer vias than the `min` value (if specified) or more than the `max` value (if specified).<br>                                                                                                                                                                                                                                 |\n| `via_dangling`            |                                                                                                                       | Checks for vias that are unconnected or connected on only one layer.  This constraint does not take a min/opt/max value.  In combination with a severity clause, this constraint can be used to allow or disallow dangling vias in various conditions.<br>                                                                                                                                                                                              |\n| `via_diameter`            | min/opt/max                                                                                                           | Checks the diameter of vias.  An error will be generated for each via that has a diameter below the `min` value (if specified) or above the `max` value (if specified).  The `opt` value is used by the interactive router as the default via diameter for nets that match the rule condition.<br>                                                                                                                                                      |\n| `zone_connection`         | `solid`<br>`thermal_reliefs`<br>`none`                                                                                | Specifies the connection to be made between a zone and a pad.<br>                                                                                                                                                                                                                                                                                                                                                                                       |\n\n\n### Items\n\n * `A` &nbsp;&nbsp; _the first (or only) item under test_\n * `B` &nbsp;&nbsp; _the second item under test (for binary tests)_\n * `L` &nbsp;&nbsp; _the layer currently under test_\n\nConditions for single-item constraints, such as `hole_size`, have no second item.\nUsing `B` in these conditions is an error.\n\n<br>\n\n### Severity Names\n\n * warning\n * error\n * exclusion\n * ignore\n\n<br>\n\n### Examples\n\n    (version 2)\n\n    (rule HV\n       (constraint clearance (min 1.5mm))\n       (condition "A.hasNetclass(\'HV\')"))\n\n\n    (rule HV\n       (layer outer)\n       (constraint clearance (min 1.5mm))\n       (condition "A.hasNetclass(\'HV\')"))\n\n\n    (rule HV_HV\n       # wider clearance between HV tracks\n       (constraint clearance (min "1.5mm + 2.0mm"))\n       (condition "A.hasNetclass(\'HV\') && B.hasNetclass(\'HV\')"))\n\n\n    (rule HV_unshielded\n       (constraint clearance (min 2mm))\n       (condition "A.hasNetclass(\'HV\') && !A.enclosedByArea(\'Shield*\')"))\n\n\n    (rule heavy_thermals\n       (constraint thermal_spoke_width (min 0.5mm))\n       (condition "A.hasNetclass(\'HV\')"))\n\n    # Total routed length across every net in chain SIG_A\n    (rule sig_group_length\n       (constraint net_chain_length (min 40mm) (max 60mm))\n       (condition "A.Net.NetChain == \'SIG_A\'") )\n\n    # Total propagation delay across every net in chain CLK_GRP\n    (rule sig_group_delay\n       (constraint net_chain_length (min 180ps) (max 220ps) (time_domain yes))\n       (condition "A.Net.NetChain == \'CLK_GRP\'") )\n\n    # --- Net chain rules: multi-net signals through series passives ---\n\n    # Same effect as sig_group_length, scoped via inNetChain() instead.\n    (rule "DDR_DQ chain length"\n       (constraint net_chain_length (min 40mm) (max 60mm))\n       (condition "A.inNetChain(\'DDR_DQ*\')") )\n\n    # Stub branches off the trunk of any DDR chain may not exceed 2 mm.\n    (rule "DDR stub length"\n       (constraint stub_length (max 2mm))\n       (condition "A.inNetChain(\'DDR_*\')") )\n\n    # Every chain in the HighSpeed class needs an unbroken B.Cu return.\n    (rule "HS return path"\n       (constraint return_path (layer "B.Cu"))\n       (condition "A.inNetChainClass(\'HighSpeed\')") )\n\n    # Tighter clearance for any net that belongs to a chain.\n    (rule "chain members tighter clearance"\n       (constraint clearance (min 0.2mm))\n       (condition "A.hasNetChain()") )\n<br><br>\n\n\n### Notes\n\nVersion clause must be the first clause.  It indicates the syntax version of the file so that\nfuture rules parsers can perform automatic updates.  It should be\nset to "1".\n\nRules should be ordered by specificity.  Later rules take\nprecedence over earlier rules; once a matching rule is found\nno further rules will be checked.\n\nUse Ctrl+/ to comment or uncomment line(s).\n\n### Graphical Rule Editor\n\nWhen loading rules into the graphical editor, constraints are automatically\nmapped to appropriate editing panels. Rules with multiple constraints may be\nsplit across panels, each showing a subset of the rule\'s constraints.\n\nMulti-constraint panels like Via Style (`via_diameter` + `hole_size`) and\nDifferential Pair Routing (`track_width` + `diff_pair_gap`) are matched first.\nSingle-constraint panels handle the remainder. Unmapped constraints appear\nin the Custom Rule panel.\n\nRules that are not modified in the graphical editor preserve their original\ntext formatting when saved.\n<br><br><br>\n\n`net_chain_length` vs `length`:\n\nWhen a net belongs to a chain and both constraints match, `net_chain_length` is checked against the trunk (the unique path between the two terminal pads) and `length` is ignored.  Stubs branching off the trunk don\'t count toward the trunk length; use `stub_length` to bound them.  If the chain has no terminal pads or the routed copper contains a loop, `net_chain_length` falls back to the sum of every member net plus series-passive bridging.  Nets that don\'t belong to a chain still see `length`.\n\nTime-domain targets:\n\nBoth constraints accept `(time_domain yes)` to bound propagation delay instead of physical length.  For `net_chain_length` in time-domain mode the delay window applies to the chain as a whole; the tuner subtracts the routed delay from the other member nets to figure out what\'s left for the net being tuned.\n\n\n<br><br><br>### Properties\n\nMany properties of objects are available for testing in custom rule expressions. See the full documentation at [https://docs.kicad.org](https://go.kicad.org/docs/GetMajorMinorVersion/en/pcbnew/pcbnew.html#custom_design_rules) for the complete list.\n<br><br><br>\n\n### Expression functions\n\nAll function parameters support simple wildcards (`*` and `?`).\n\nArguments can also be expressions. For example,\n`A.intersectsFrontCourtyard(B.Parent)` tests whether `A` intersects the front\ncourtyard of `B`\'s parent footprint.\n\n\n```\n    A.enclosedByArea(\'<zone_name>\')\n```\n> True if all of `A` lies within the given zone\'s outline.\n\n> NB: this is potentially a more expensive call than `intersectsArea()`.\nUse `intersectsArea()` where possible.\n\n\n```\n    A.existsOnLayer(\'<layer_name>\')\n```\n> True if `A` exists on the given layer.  The layer name can be\neither the name assigned in Board Setup > Board Editor Layers or\nthe canonical name (ie: `F.Cu`).\n\n> NB: this returns true if `A` is on the given layer, independently\nof whether or not the rule is being evaluated for that layer.\nFor the latter use a `(layer "layer_name")` clause in the rule.\n\n\n```\n    A.fromTo(\'x\', \'y\')\n```\n> True if the object exists on the copper path between the given\npads. `x` and `y` are the full names of pads in the design, such as\n`R1-Pad1`.\n\n\n```\n    A.getField(\'<field_name>\')\n```\n> The value of the given field. Only footprints have fields, so a field is only returned if\n`A` is a footprint.\n\n\n```\n    A.hasComponentClass(\'<component_class_name>\')\n```\n> True if the set of component classes assigned to `A` contains the named\ncomponent class.\n\n\n```\n    A.hasNetclass(\'<netclass_name>\')\n```\n> True if `A` has had the given netclass assigned to it, either by an explicit netclass label\nor through a pattern match assignment.\n\n\n```\n    A.inDiffPair(\'<net_name>\')\n```\n> True if `A` has a net that is part of the specified differential pair.\n`<net_name>` is the base name of the differential pair.\nFor example, `inDiffPair(\'/CLK\')` matches items in the `/CLK_P` and `/CLK_N` nets.\n\n\n\n```\n    A.inNetChain(\'<chain_name>\')\n```\n> True if `A`\'s net is a member of the named chain.  `<chain_name>`\naccepts wildcards: `inNetChain(\'DDR_*\')` matches every chain whose\nname starts with `DDR_`.\n\n\n\n```\n    A.hasNetChain()\n```\n> True if `A`\'s net belongs to any chain.\n\n\n\n```\n    A.inNetChainClass(\'<class_name>\')\n```\n> True if `A`\'s net belongs to a chain whose assigned chain class\nmatches `<class_name>`.  Class assignments live in the project\'s\n`net_chain_classes` map.  `<class_name>` accepts wildcards.\n\n\n\n```\n    A.intersectsArea(\'<zone_name>\')\n```\n> True if any part of `A` lies within the given zone\'s outline.\n\n\n```\n    A.intersectsCourtyard(\'<footprint_identifier>\')\n```\n> True if any part of `A` lies within the given footprint\'s principal courtyard.\n\n\n```\n    A.intersectsFrontCourtyard(\'<footprint_identifier>\')\n```\n> True if any part of `A` lies within the given footprint\'s front courtyard.\n\n\n```\n    A.intersectsBackCourtyard(\'<footprint_identifier>\')\n```\n> True if any part of `A` lies within the given footprint\'s back courtyard.\n\n\n> The `footprint_identifier` listed above can be one of the following:\n\n> 1. A reference designator, possibly containing wildcards `*` and `?`\n> 2. A footprint library identifier such as `LibName:FootprintName`. In this case,\n   the library identifier must contain the `:` character to separate the library\n   name from the footprint name, and either name may contain wildcards.\n> 3. A component class, in the form `${Class:ClassName}`.  The keyword `Class` is not\n   case-sensitive, but component class names are case-sensitive.\n\n\n```\n    AB.isCoupledDiffPair()\n```\n> True if `A` and `B` are members of the same diff pair.\n\n\n```\n    A.isMicroVia()\n```\n> True if `A` is a microvia.\n\n\n```\n    A.isBlindVia()\n```\n> True if `A` is a blind via.\n\n\n```\n    A.isBuriedVia()\n```\n> True if `A` is a buried via.\n\n\n```\n    A.isStackedVia()\n```\n> True if `A` is a microvia that lands on another microvia, or is landed on by one.\n\n> The test is hole overlap, so a staggered pair counts whenever the holes touch.\n\n\n```\n    A.isPlated()\n```\n> True if `A` has a hole which is plated.\n\n\n```\n    A.memberOfGroup(\'<group_name>\')\n```\n> True if `A` is a member of the given group\nThe name can contain wildcards.\nIncludes nested membership.\n\n\n```\n    A.memberOfFootprint(\'<footprint_identifier>\')\n```\n> True if `A` is a member of a given footprint\n(for example, a pad or graphic shape defined inside that footprint).\nThe various ways of specifying `footprint_identifier` are described above.\n\n\n```\n    A.memberOfSheet(\'<sheet_path>\')\n```\n> True if `A` is a member of the given schematic sheet.\nThe sheet path can contain wildcards.\n\n\n```\n    A.memberOfSheetOrChildren(\'<sheet_path>\')\n```\n> True if `A` is a member of the given schematic sheet, or any of its child hierarchical sheets.\nThe sheet path can contain wildcards.\n\n\n### More Examples\n\n    (rule "copper keepout"\n       (constraint disallow track via zone)\n       (condition "A.intersectsArea(\'zone3\')"))\n\n\n    (rule "BGA neckdown"\n       (constraint track_width (min 0.2mm) (opt 0.25mm))\n       (constraint clearance (min 0.05mm) (opt 0.08mm))\n       (condition "A.intersectsCourtyard(\'U3\')"))\n\n\n    # prevent silk over tented vias\n    (rule silk_over_via\n       (constraint silk_clearance (min 0.2mm))\n       (condition "A.Type == \'*Text\' && B.Type == \'Via\'"))\n\n\n    (rule "Distance between Vias of Different Nets"\n        (constraint hole_to_hole (min 0.254mm))\n        (condition "A.Type == \'Via\' && B.Type == \'Via\' && A.Net != B.Net"))\n\n    (rule "Clearance between Pads of Different Nets"\n        (constraint clearance (min 3.0mm))\n        (condition "A.Type == \'Pad\' && B.Type == \'Pad\' && A.Net != B.Net"))\n\n\n    (rule "Via Hole to Track Clearance"\n        (constraint hole_clearance (min 0.254mm))\n        (condition "A.Type == \'Via\' && B.Type == \'Track\'"))\n\n    (rule "Pad to Track Clearance"\n        (constraint clearance (min 0.2mm))\n        (condition "A.Type == \'Pad\' && B.Type == \'Track\'"))\n\n\n    (rule "clearance-to-1mm-cutout"\n        (constraint edge_clearance (min 0.8mm))\n        (condition "A.Layer == \'Edge.Cuts\' && A.Line_Width == 1.0mm"))\n\n\n    (rule "Max Drill Hole Size Mechanical"\n        (constraint hole_size (max 6.3mm))\n        (condition "A.Pad_Type == \'NPTH, mechanical\'"))\n\n    (rule "Max Drill Hole Size PTH"\n        (constraint hole_size (max 6.35mm))\n        (condition "A.Pad_Type == \'Through-hole\'"))\n\n\n    # Specify an optimal gap for a particular diff-pair\n    (rule "dp clock gap"\n        (constraint diff_pair_gap (opt "0.8mm"))\n        (condition "A.inDiffPair(\'/CLK\')"))\n\n    # Specify a larger clearance around any diff-pair\n    (rule "dp clearance"\n        (constraint clearance (min "1.5mm"))\n        (condition "A.inDiffPair(\'*\') && !AB.isCoupledDiffPair()"))\n\n\n    # Don\'t use thermal reliefs on heatsink pads\n    (rule heat_sink_pad\n        (constraint zone_connection solid)\n        (condition "A.Fabrication_Property == \'Heatsink pad\'"))\n\n    # Require all four thermal relief spokes to connect to parent zone\n    (rule fully_spoked_pads\n        (constraint min_resolved_spokes 4))\n\n    # Set thermal relief gap & spoke width for all zones\n    (rule defined_relief\n        (constraint thermal_relief_gap (min 10mil))\n        (constraint thermal_spoke_width (min 12mil)))\n\n    # Override thermal relief gap & spoke width for GND and PWR zones\n    (rule defined_relief_pwr\n        (constraint thermal_relief_gap (min 10mil))\n        (constraint thermal_spoke_width (min 12mil))\n        (condition "A.Name == \'zone_GND\' || A.Name == \'zone_PWR\'"))\n\n    # Prevent copper fills under the courtyards of capacitors\n    (rule no_copper_under_caps\n        (constraint physical_clearance (min 0mm))\n        (condition "A.Type == \'Zone\' && B.Reference == \'C*\'"))\n\n\n    # Prevent solder wicking from SMD pads\n    (rule holes_in_pads\n        (constraint physical_hole_clearance (min 0.2mm))\n        (condition "B.Pad_Type == \'SMD\'"))\n\n    # Disallow solder mask margin overrides\n    (rule "disallow solder mask margin overrides"\n        (constraint assertion "A.Soldermask_Margin_Override == null")\n        (condition "A.Type == \'Pad\'"))\n\n\n    # Enforce a mechanical clearance between components and board edge\n    (rule front_mechanical_board_edge_clearance\n        (layer "F.Courtyard")\n        (constraint physical_clearance (min 3mm))\n        (condition "B.Layer == \'Edge.Cuts\'"))\n\n\n    # Allow silk intersection with board edge for connectors\n    (rule silk_board_edge_clearance\n        (constraint silk_clearance)\n        (severity ignore)\n        (condition "A.memberOfFootprint(\'J*\') && B.Layer==\'Edge.Cuts\'"))\n\n\n    # Check current-carrying capacity\n    (rule high-current\n        (constraint track_width (min 1.0mm))\n        (constraint connection_width (min 0.8mm))\n        (condition "A.hasNetclass(\'Power\')"))\n\n\n    # Separate drill bit and milling cutter size constraints\n    (rule "Plated through-hole size"\n        (constraint hole_size (min 0.2mm) (max 6.35mm))\n        (condition "A.isPlated() && A.Hole_Size_X == A.Hole_Size_Y"))\n    (rule "Plated slot size"\n        (constraint hole_size (min 0.5mm))\n        (condition "A.isPlated() && A.Hole_Size_X != A.Hole_Size_Y"))\n\n\n    # Allow blind to micro-via hole-to-hole violations when it is known that\n    # the fab will mechanically drill blind via holes -before- laser drilling\n    # micro-vias.\n    (rule hole_to_hole_uvia_exclusion\n        (condition "A.Via_Type == \'Blind\' && B.Via_Type == \'Micro\'")\n        (constraint hole_to_hole)\n        (severity ignore))\n\n\n    # No solder mask expansion for vias.\n    (rule "no mask expansion on vias"\n        (constraint solder_mask_expansion (opt 0mm))\n        (condition "A.type == via"))\n\n\n    # Remove solder paste from DNP footprints.\n    (rule remove_solder_paste_from_DNP\n        (constraint solder_paste_abs_margin (opt -50mm))\n        (condition "A.Do_not_Populate"))\n\n\n    # Allow solder mask bridging under guard ring mask apertures\n    (rule guard_ring_bridging\n        (constraint bridged_mask)\n        (condition "A.intersectsArea(\'guard_ring\')")\n        (severity ignore))\n### Documentation\n\nFor the full documentation see [https://docs.kicad.org](https://go.kicad.org/docs/GetMajorMinorVersion/en/pcbnew/pcbnew.html#custom_design_rules).';
   }
 });
 
@@ -88853,22 +89109,22 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
   };
   const teardropsPage = (el4) => {
     const params = arr3(ds.teardrop_parameters).map(obj4);
-    const find = (target2) => params.find((p) => p.td_target_name === target2) || {};
+    const find = (target3) => params.find((p) => p.td_target_name === target3) || {};
     const sets = [];
-    const one2 = (title, target2, span, sizeTip, d, bitmap) => {
-      const p = find(target2), ro = roPro;
-      const pct = (k, def, key3) => numField(+(numOr3(p[k], def) * 100).toFixed(2), { ro, key: target2 + "-" + key3 });
-      const bestL = pct("td_length_ratio", 0.5, "bestLength"), maxL = lenField(numOr3(p.td_maxlen, 1), { ro, key: target2 + "-maxLength" });
-      const bestW = pct("td_height_ratio", 1, "bestWidth"), maxW = lenField(numOr3(p.td_maxheight, 2), { ro, key: target2 + "-maxWidth" });
-      const zone = checkField(boolOr2(p.td_on_pad_in_zone, false) === false, "Prefer zone connection", { ro, key: target2 + "-preferZone", tip: "Do not create teardrops on tracks connected to pads that are also connected to a copper zone." });
+    const one2 = (title, target3, span, sizeTip, d, bitmap) => {
+      const p = find(target3), ro = roPro;
+      const pct = (k, def, key3) => numField(+(numOr3(p[k], def) * 100).toFixed(2), { ro, key: target3 + "-" + key3 });
+      const bestL = pct("td_length_ratio", 0.5, "bestLength"), maxL = lenField(numOr3(p.td_maxlen, 1), { ro, key: target3 + "-maxLength" });
+      const bestW = pct("td_height_ratio", 1, "bestWidth"), maxW = lenField(numOr3(p.td_maxheight, 2), { ro, key: target3 + "-maxWidth" });
+      const zone = checkField(boolOr2(p.td_on_pad_in_zone, false) === false, "Prefer zone connection", { ro, key: target3 + "-preferZone", tip: "Do not create teardrops on tracks connected to pads that are also connected to a copper zone." });
       const limit = pct("td_width_to_size_filter_ratio", 0.9, "widthLimit");
       limit.input.title = sizeTip;
-      const two = checkField(boolOr2(p.td_allow_use_two_tracks, true), span, { ro, key: target2 + "-twoTracks", tip: "Allows a teardrop to extend over the first 2 connected track segments if the first track segment is too short to accommodate the best length." });
-      const curved = checkField(p.td_curve_segcount === true || numOr3(p.td_curve_segcount, 0) > 0, "Curved edges", { ro, key: target2 + "-curved" });
+      const two = checkField(boolOr2(p.td_allow_use_two_tracks, true), span, { ro, key: target3 + "-twoTracks", tip: "Allows a teardrop to extend over the first 2 connected track segments if the first track segment is too short to accommodate the best length." });
+      const curved = checkField(p.td_curve_segcount === true || numOr3(p.td_curve_segcount, 0) > 0, "Curved edges", { ro, key: target3 + "-curved" });
       const ratio = unitLabel(`%( ${d} )`);
-      sets.push({ target: target2, ratios: [[bestL, "best_length_ratio"], [bestW, "best_width_ratio"], [limit, "width_to_size_filter_ratio"]], get: () => ({
+      sets.push({ target: target3, ratios: [[bestL, "best_length_ratio"], [bestW, "best_width_ratio"], [limit, "width_to_size_filter_ratio"]], get: () => ({
         ...p,
-        td_target_name: target2,
+        td_target_name: target3,
         td_maxlen: maxL.get(),
         td_maxheight: maxW.get(),
         td_length_ratio: +(bestL.get() / 100).toFixed(6),
@@ -90230,8 +90486,8 @@ function describe2(it) {
   const names2 = CollabTools.props && CollabTools.props.KIND_NAMES || {};
   const kind = names2[it.kind] || it.kind.replace(/^gr_/, "").replace(/_/g, " ").replace(/^./, (ch) => ch.toUpperCase());
   const what = it.ref ? `${it.ref}${it.value ? ` (${it.value})` : ""}` : it.name || (it.kind.includes("label") || it.kind === "text" || it.kind === "gr_text" ? KiCadCanvas.str(it.node[1]) : "");
-  const layer3 = it.docType === "pcb" && it.layer ? ` on ${it.layer}` : "";
-  return `${kind}${what ? " " + what : ""}${layer3}`;
+  const layer4 = it.docType === "pcb" && it.layer ? ` on ${it.layer}` : "";
+  return `${kind}${what ? " " + what : ""}${layer4}`;
 }
 function candidatesAt(mm4, withFields = false) {
   const hits2 = hitsAt(mm4);
@@ -91170,7 +91426,7 @@ function ensureCss5() {
   st.textContent = CSS6;
   document.head.appendChild(st);
 }
-function drawLayer(cv, fab, pkg, layer3, color2) {
+function drawLayer(cv, fab, pkg, layer4, color2) {
   const dpr = window.devicePixelRatio || 1, w = cv.clientWidth, hgt = cv.clientHeight;
   cv.width = Math.max(1, Math.round(w * dpr));
   cv.height = Math.max(1, Math.round(hgt * dpr));
@@ -91210,8 +91466,8 @@ function drawLayer(cv, fab, pkg, layer3, color2) {
     }
     g2.globalCompositeOperation = "source-over";
   };
-  paint(polysOf.get(layer3) || [], color2);
-  if (layer3 !== "Edge.Cuts" && polysOf.has("Edge.Cuts")) {
+  paint(polysOf.get(layer4) || [], color2);
+  if (layer4 !== "Edge.Cuts" && polysOf.has("Edge.Cuts")) {
     g2.globalAlpha = 0.45;
     paint(polysOf.get("Edge.Cuts") || [], getComputedStyle(cv).color);
     g2.globalAlpha = 1;
@@ -92461,8 +92717,8 @@ function describeItem(doc2, id) {
   const it = doc2.items.get(id);
   if (!it) return "";
   const net = KiCadCanvas.netNameOf ? String(KiCadCanvas.netNameOf(doc2, it.node) || "") : "";
-  const layer3 = it.layer || String((KiCadCanvas.kid(it.node, "layer") || [])[1] || "");
-  const on2 = (what) => `${what}${net ? ` [${net}]` : ""}${layer3 ? ` on ${layer3}` : ""}`;
+  const layer4 = it.layer || String((KiCadCanvas.kid(it.node, "layer") || [])[1] || "");
+  const on2 = (what) => `${what}${net ? ` [${net}]` : ""}${layer4 ? ` on ${layer4}` : ""}`;
   switch (it.kind) {
     case "footprint":
       return `Footprint ${it.ref || it.lib || ""}`;
@@ -95154,7 +95410,7 @@ async function openDrcRuleEditor(ctx) {
     });
     const layerOpts = [["", "Any"], ["outer", "Outer layers"], ["inner", "Inner layers"], ...copperLayers().map((l) => [l, l])];
     if (r.layer && !layerOpts.some(([k]) => k === r.layer)) layerOpts.push([r.layer, r.layer]);
-    const layer3 = selectField(r.layer, layerOpts, { ro, key: "ruleLayer", onChange: (v) => {
+    const layer4 = selectField(r.layer, layerOpts, { ro, key: "ruleLayer", onChange: (v) => {
       r.layer = v;
       changed(r);
     } });
@@ -95166,7 +95422,7 @@ async function openDrcRuleEditor(ctx) {
       ...hd("Constraint"),
       constraintPanel(r)
     );
-    if (t.panel !== "custom") out2.append(...hd("Conditions", help), conditionsPanel(r), ...hd("Layer"), layer3.el);
+    if (t.panel !== "custom") out2.append(...hd("Conditions", help), conditionsPanel(r), ...hd("Layer"), layer4.el);
     else out2.querySelector(".dre-hd").append(help);
     out2.append(h2("div", { style: "display:flex;gap:6px;align-items:flex-start;margin-top:12px" }, checkB, h2("div", { style: "flex:1" }, report3), showBtn), msg);
     changed(r);
@@ -95686,9 +95942,9 @@ function sheetPage(s2, count2, o, pageIndex, variant = "") {
       if (ref && !ref.startsWith("#")) bookmarks.push({ group: "Symbols", title: ref });
     } else if (it.kind === "sheet") {
       const m = KiCadCanvas.movableItems(doc2).find((x) => x.id === it.id);
-      const target2 = m && m.page ? pageIndex.get(m.page) : void 0;
-      if (o.links && target2) links.push({ box: box4(b), url: `#${target2}` });
-      else if (o.popups) links.push({ box: box4(b), menu: [...target2 ? [["Go to page " + m.page, `#${target2}`]] : [], ...props.map(([n2, v]) => [`${n2} = ${v}`, ""])] });
+      const target3 = m && m.page ? pageIndex.get(m.page) : void 0;
+      if (o.links && target3) links.push({ box: box4(b), url: `#${target3}` });
+      else if (o.popups) links.push({ box: box4(b), menu: [...target3 ? [["Go to page " + m.page, `#${target3}`]] : [], ...props.map(([n2, v]) => [`${n2} = ${v}`, ""])] });
     }
   }
   const bg = o.background && o.color ? KiCadCanvas.schThemeColors(o.theme).bg : null;
@@ -95839,11 +96095,11 @@ async function pcbPrint() {
     }, messages: [] };
     const groups = o.perLayer ? sel.map((l) => [l, o.edges && l !== "Edge.Cuts" ? ["Edge.Cuts"] : []]) : [[sel[0], sel.slice(1)]];
     const bgc = o.background && o.color ? KiCadCanvas.PCB_BG || "#001023" : null;
-    return groups.map(([layer3, common2], i) => fab.boardPage(m, {
+    return groups.map(([layer4, common2], i) => fab.boardPage(m, {
       params,
-      layer: layer3,
+      layer: layer4,
       common: common2,
-      layerName: o.perLayer ? nameOf3(layer3) : "",
+      layerName: o.perLayer ? nameOf3(layer4) : "",
       colors,
       sheetColor: SHEET_COLOR2,
       background: bgc,
@@ -97401,7 +97657,7 @@ function show3DViewer() {
         if (h3) h3(null);
       },
       links: LINKS,
-      layerVisible: (layer3) => !E.hiddenLayers.has(layer3),
+      layerVisible: (layer4) => !E.hiddenLayers.has(layer4),
       // the plot dialog's layer selection (PCB_PLOT_PARAMS m_layerSelection) as the board stores it
       stackupLayers: async () => {
         const h3 = await loadBoardHeader();
@@ -97412,9 +97668,9 @@ function show3DViewer() {
         return h3 ? BS().boardFinish(h3.setup).copperFinish : null;
       },
       // the Appearance panel's colour of the layer (the user's, else the board editor's theme colour)
-      editorColor: (layer3) => {
+      editorColor: (layer4) => {
         const own = E.renderOpts.layerColors;
-        return own && own.get(layer3) || KiCadCanvas.PCB_COLORS[layer3] || null;
+        return own && own.get(layer4) || KiCadCanvas.PCB_COLORS[layer4] || null;
       },
       plotLayers: async () => {
         const h3 = await loadBoardHeader();
@@ -97595,7 +97851,7 @@ var init_model_fit = __esm({
 });
 
 // web/ai/proposals.ts
-function target(doc2, e) {
+function target2(doc2, e) {
   if (typeof e.id === "string" && e.id) {
     const it = doc2.items.get(e.id);
     if (!it) throw new ToolError(`no item with id ${e.id} on the open document`);
@@ -98040,7 +98296,7 @@ async function planSync(board3, e) {
 }
 async function buildProposal(input) {
   await fetchSources(input.edits);
-  return build(input);
+  return build2(input);
 }
 async function fetchSources(edits) {
   const doc2 = ED()?.kdoc;
@@ -98109,7 +98365,7 @@ function inlineSymbol(e) {
   e.lib_id = libId;
   return { libId, node };
 }
-function build(input) {
+function build2(input) {
   const ed = ED();
   const doc2 = ed?.kdoc;
   const open3 = openEntry();
@@ -98144,7 +98400,7 @@ function build(input) {
         case "set_field": {
           const field2 = text2(e.field, "field");
           if (typeof e.value !== "string") throw new ToolError("value must be a string");
-          const items = all(target(doc2, e)).filter((it) => it.kind === "symbol" || it.kind === "footprint");
+          const items = all(target2(doc2, e)).filter((it) => it.kind === "symbol" || it.kind === "footprint");
           if (!items.length) throw new ToolError("fields belong to symbols and footprints");
           const before = fieldsOf(items[0].node)[field2];
           if (before === e.value) throw new ToolError(`${nameOf2(items[0])} ${field2} is already "${e.value}"`);
@@ -98156,7 +98412,7 @@ function build(input) {
           break;
         }
         case "move": {
-          const it = one(target(doc2, e), e);
+          const it = one(target2(doc2, e), e);
           touch(it, e.op);
           const x = num12(e.x, "x"), y = num12(e.y, "y");
           const rot3 = e.rotation === void 0 ? void 0 : num12(e.rotation, "rotation");
@@ -98169,7 +98425,7 @@ function build(input) {
           break;
         }
         case "remove": {
-          const items = all(target(doc2, e));
+          const items = all(target2(doc2, e));
           for (const it of items) {
             touch(it, e.op);
             changes.push(removed(doc2, it));
@@ -98258,8 +98514,8 @@ function build(input) {
           const P = PCB5();
           const pts = points(e);
           const net = boardNet2(doc2, text2(e.net, "net"));
-          const layer3 = text2(e.layer, "layer");
-          if (!doc2.copper.includes(layer3)) throw new ToolError(`${layer3} is not a copper layer of this board (${doc2.copper.join(", ")})`);
+          const layer4 = text2(e.layer, "layer");
+          if (!doc2.copper.includes(layer4)) throw new ToolError(`${layer4} is not a copper layer of this board (${doc2.copper.join(", ")})`);
           const s2 = P.designSettings(ed.proSettings || null);
           const width = e.width === void 0 ? s2.trackWidth : num12(e.width, "width");
           if (!(width > 0)) throw new ToolError("width must be positive");
@@ -98279,11 +98535,11 @@ function build(input) {
             }
           }
           for (let j = 1; j < pts.length; j++) {
-            const c = added(doc2, P.segmentNode(doc2, pts[j - 1], pts[j], width, layer3, net));
+            const c = added(doc2, P.segmentNode(doc2, pts[j - 1], pts[j], width, layer4, net));
             changes.push(c);
             ids.push(c.id);
           }
-          lines.push({ kind: "add", text: `Add ${fmt3(width)} mm track on ${layer3}, net ${net.name}, ${pts.length - 1} segment${pts.length > 2 ? "s" : ""}`, ids });
+          lines.push({ kind: "add", text: `Add ${fmt3(width)} mm track on ${layer4}, net ${net.name}, ${pts.length - 1} segment${pts.length > 2 ? "s" : ""}`, ids });
           break;
         }
         case "add_via": {
@@ -98366,6 +98622,7 @@ function build(input) {
             score: res.score,
             groups: res.groups,
             unknown_refs: res.unknown,
+            turned: res.turned,
             placements: res.placements.map((pl) => ({ ref: pl.ref, x: r44(pl.x), y: r44(pl.y), rotation: pl.rot, side: pl.side })),
             note: "overlaps, courtyardClashes and outside should be 0; ratsnest is the total length of the connections still to route, lower is better. Adjust groups, anchors, edges or the outline and propose again if the score or the picture is poor."
           } });
@@ -98437,7 +98694,7 @@ function build(input) {
           const groups = e.groups && typeof e.groups === "object" && !Array.isArray(e.groups) ? Object.fromEntries(Object.entries(e.groups).filter(([, v]) => Array.isArray(v)).map(([n2, v]) => [n2, v.map(String)])) : void 0;
           const separate = e.separate === false ? false : e.separate && typeof e.separate === "object" ? { quiet: num13(e.separate.quiet), noisy: num13(e.separate.noisy) } : void 0;
           const fence = e.fence === false ? false : e.fence && typeof e.fence === "object" ? { spacing: num13(e.fence.spacing), nets: Array.isArray(e.fence.nets) ? e.fence.nets.map((n2) => boardNet2(doc2, text2(n2, "net")).name) : void 0, returnVias: e.fence.return_vias === false ? false : void 0 } : void 0;
-          const res = R2.route(k, P, doc2, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : void 0, timeMs: Math.round(1e3 * Math.min(300, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : void 0, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : void 0, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : void 0, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : void 0 });
+          const res = R2.route(k, P, doc2, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : void 0, timeMs: Math.round(1e3 * Math.min(900, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : void 0, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : void 0, planes: e.planes === true ? true : void 0, criticalFirst: e.critical_first === false ? false : void 0, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : void 0, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : void 0 });
           const failed = (res.failed || []).map((f2) => ({ net: f2.net, from: f2.a.map(r44), to: f2.b.map(r44) }));
           if (!res.total) throw new ToolError(`nothing to route: every connection ${nets ? "of " + nets.join(", ") : "on the board"} is already made`);
           if (!res.items.length) throw new ToolError(`the autorouter could not make any of the ${res.total} missing connection${res.total === 1 ? "" : "s"} within the design rules: ${JSON.stringify(failed.slice(0, 12))}`);
@@ -98795,7 +99052,7 @@ function build(input) {
         }
         case "pad_connection": {
           pcbOnly(e.op);
-          const it = one(target(doc2, e), e);
+          const it = one(target2(doc2, e), e);
           if (it.kind !== "footprint") throw new ToolError("pad_connection applies to a footprint's pads");
           const code = { inherit: null, none: 0, thermal: 1, solid: 2 }[String(e.connect)];
           if (code === void 0) throw new ToolError("connect is solid, thermal, none or inherit");
@@ -99067,7 +99324,7 @@ function writeRules(pro, r) {
     if ((rules.min_via_annular_width === void 0 ? 0.1 : rules.min_via_annular_width) > ann) rules.min_via_annular_width = ann;
   }
 }
-function layer2() {
+function layer3() {
   const root5 = document.getElementById("ovRoot");
   if (!root5) return null;
   let g2 = document.getElementById("aiG");
@@ -99106,7 +99363,7 @@ function showPreview(p, quiet = false) {
   clearPreview();
   const ed = ED();
   const doc2 = ed?.kdoc;
-  const g2 = layer2();
+  const g2 = layer3();
   const k = K4();
   if (!doc2 || !g2 || openEntry()?.docId !== p.docId) return;
   previewOf = p.id;
@@ -99708,9 +99965,9 @@ var PcbSizes = class {
     this.emit();
     return this.useConnectedWidth;
   }
-  setActiveLayer(layer3) {
-    if (layer3 === this.activeLayer) return;
-    this.activeLayer = layer3;
+  setActiveLayer(layer4) {
+    if (layer4 === this.activeLayer) return;
+    this.activeLayer = layer4;
     this.emit();
   }
   setLayerPair(top2, bottom) {
@@ -99898,8 +100155,8 @@ var PcbSizes = class {
     return null;
   }
   /** PCB_CONTROL::LayerToggle / the router's via: the other layer of the routing pair (anything but the top goes to the top). */
-  pairedLayer(layer3) {
-    return layer3 === this.layerPair[0] ? this.layerPair[1] : this.layerPair[0];
+  pairedLayer(layer4) {
+    return layer4 === this.layerPair[0] ? this.layerPair[1] : this.layerPair[0];
   }
   /** Snap a coordinate pair to the grid measured from the grid origin. */
   snapToGrid(mm4, pitch) {
@@ -102509,10 +102766,10 @@ function stackupFixedThickness(layers) {
   }
   return +t.toFixed(6);
 }
-function adjustDielectrics(layers, target2) {
+function adjustDielectrics(layers, target3) {
   const free = layers.filter((l) => (l.type === "core" || l.type === "prepreg") && !l.locked);
   if (!free.length) return "All dielectric  thickness layers are locked";
-  const left = target2 - stackupFixedThickness(layers), PREPREG = 0.1;
+  const left = target3 - stackupFixedThickness(layers), PREPREG = 0.1;
   const cores = free.filter((l) => l.type === "core"), pre = free.filter((l) => l.type !== "core");
   let core = cores.length ? (left - PREPREG * pre.length) / cores.length : 0;
   if (!cores.length || core < PREPREG) {
@@ -103818,10 +104075,10 @@ function planUpdate(doc2, netlist, o = {}) {
         touched = true;
         return st;
       };
-      const attr = (key3, label, target2, current) => {
-        if (current === target2) return;
-        say("action", target2 ? `Add ${ref} '${label}' attribute to variant ${v.name}.` : `Remove ${ref} '${label}' attribute from variant ${v.name}.`);
-        add2().flags[key3] = target2;
+      const attr = (key3, label, target3, current) => {
+        if (current === target3) return;
+        say("action", target3 ? `Add ${ref} '${label}' attribute to variant ${v.name}.` : `Remove ${ref} '${label}' attribute from variant ${v.name}.`);
+        add2().flags[key3] = target3;
         changed = true;
       };
       const now = flagsNow();
@@ -103958,7 +104215,7 @@ function planUpdate(doc2, netlist, o = {}) {
   };
   const bb = doc2.bbox || [0, 0, 0, 0];
   let nextX = bb[0], rowY = bb[3] + 10;
-  const place2 = (fp) => {
+  const place3 = (fp) => {
     let w = 10, hgt = 10;
     try {
       const probe2 = { id: "probe", kind: "footprint", node: clone2(fp), geom: [], bbox: null, movable: false, docType: "pcb" };
@@ -103999,7 +104256,7 @@ function planUpdate(doc2, netlist, o = {}) {
       const node2 = clone2(lib);
       say("action", `Add ${c.ref} (footprint '${c.footprint}').`);
       applyComponent(node2, c, true);
-      place2(node2);
+      place3(node2);
       added2.push(node2);
       addedFor.set(c, node2);
       continue;
@@ -104170,8 +104427,8 @@ function footprintFromLibrary(mod, fpid, newUuid2) {
     }
   };
   stamp2(fp);
-  const layer3 = idxOf2(fp, "layer");
-  fp.splice(layer3 > 0 ? layer3 + 1 : 2, 0, qnode("uuid", [newUuid2()]), ["at", 0, 0]);
+  const layer4 = idxOf2(fp, "layer");
+  fp.splice(layer4 > 0 ? layer4 + 1 : 2, 0, qnode("uuid", [newUuid2()]), ["at", 0, 0]);
   return fp;
 }
 function schematicParity(doc2, netlist) {
@@ -107391,9 +107648,9 @@ root.KiCadCanvas = api;
         else brk.wire = true;
       }
     }
-    for (const layer3 of ["wire", "bus"]) if (brk[layer3]) for (const l of mids[layer3]) {
-      exits[layer3].add(angleKey(p, l.b));
-      exits[layer3].add(angleKey(p, l.a));
+    for (const layer4 of ["wire", "bus"]) if (brk[layer4]) for (const l of mids[layer4]) {
+      exits[layer4].add(angleKey(p, l.b));
+      exits[layer4].add(angleKey(p, l.a));
     }
     if (info.hasBusEntry) {
       info.multiWires = exits.wire.size > 2 && exits.bus.size === 1;
@@ -109102,18 +109359,18 @@ root.KiCadCanvas = api;
     if (boxes.length < 2) return [];
     const edge = (b) => which === "top" ? b[1] : which === "bottom" ? b[3] : which === "left" ? b[0] : which === "right" ? b[2] : which === "centerX" ? (b[0] + b[2]) / 2 : (b[1] + b[3]) / 2;
     const locked = items.filter((it) => isLockedNode(it.node)).map((it) => it.bbox || rectOf(it)).filter(Boolean);
-    let target2;
+    let target3;
     if (locked.length) {
       const c = cursorOf(ctx), hit5 = c && locked.find((b) => c[0] >= b[0] && c[0] <= b[2] && c[1] >= b[1] && c[1] <= b[3]);
       const vals = locked.map(edge);
-      target2 = hit5 ? edge(hit5) : which === "bottom" || which === "right" ? Math.max(...vals) : Math.min(...vals);
-    } else target2 = which === "top" ? Math.min(...boxes.map((b) => b[1])) : which === "bottom" ? Math.max(...boxes.map((b) => b[3])) : which === "left" ? Math.min(...boxes.map((b) => b[0])) : which === "right" ? Math.max(...boxes.map((b) => b[2])) : which === "centerX" ? boxes.reduce((t, b) => t + (b[0] + b[2]) / 2, 0) / boxes.length : boxes.reduce((t, b) => t + (b[1] + b[3]) / 2, 0) / boxes.length;
+      target3 = hit5 ? edge(hit5) : which === "bottom" || which === "right" ? Math.max(...vals) : Math.min(...vals);
+    } else target3 = which === "top" ? Math.min(...boxes.map((b) => b[1])) : which === "bottom" ? Math.max(...boxes.map((b) => b[3])) : which === "left" ? Math.min(...boxes.map((b) => b[0])) : which === "right" ? Math.max(...boxes.map((b) => b[2])) : which === "centerX" ? boxes.reduce((t, b) => t + (b[0] + b[2]) / 2, 0) / boxes.length : boxes.reduce((t, b) => t + (b[1] + b[3]) / 2, 0) / boxes.length;
     const out2 = [], touched = [], keep = /* @__PURE__ */ new Set();
     for (const it of items) {
       const b = it.bbox || rectOf(it);
       if (!b || !DRAG_KINDS.has(it.kind) || isLockedNode(it.node)) continue;
       const cur2 = edge(b);
-      const d = ctx.snap ? r45(K11.snap(target2 - cur2, ctx.gridPitch || 1.27)) : r45(target2 - cur2);
+      const d = ctx.snap ? r45(K11.snap(target3 - cur2, ctx.gridPitch || 1.27)) : r45(target3 - cur2);
       if (!d) continue;
       const n2 = deep(it.node);
       shiftNode(it.kind, n2, which === "left" || which === "right" || which === "centerX" ? d : 0, which === "top" || which === "bottom" || which === "centerY" ? d : 0);
@@ -111433,14 +111690,14 @@ ${body}
   async function ensureSheetDoc(ctx, file) {
     file = normSheetFile(file);
     if (!file) throw new Error("no sheet file name");
-    const cur2 = currentDoc2(ctx), dir = cur2 ? dirName(cur2.path) : "", target2 = joinPath2(dir, file);
-    const found = schDocs2(ctx).find((d) => d.path === target2 || d.path === file) || schDocs2(ctx).find((d) => baseName3(d.path) === baseName3(file));
+    const cur2 = currentDoc2(ctx), dir = cur2 ? dirName(cur2.path) : "", target3 = joinPath2(dir, file);
+    const found = schDocs2(ctx).find((d) => d.path === target3 || d.path === file) || schDocs2(ctx).find((d) => baseName3(d.path) === baseName3(file));
     if (found) return { file: relPath(dir, found.path), docId: found.docId, created: false };
     if (typeof ctx.api !== "function" || !ctx.project || !ctx.project.projectId) throw new Error("this session cannot create sheet files");
-    const res = await ctx.api(`/api/projects/${ctx.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path: target2, docType: "kicad_sch" }) });
+    const res = await ctx.api(`/api/projects/${ctx.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path: target3, docType: "kicad_sch" }) });
     if (!res || !res.docId) throw new Error("no document id returned");
     if (!res.existing) await ctx.api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: emptySheetDoc() });
-    const entry = { docId: res.docId, path: res.path || target2, docType: "kicad_sch" };
+    const entry = { docId: res.docId, path: res.path || target3, docType: "kicad_sch" };
     if (Array.isArray(ctx.docs) && !ctx.docs.some((d) => d && d.docId === entry.docId)) ctx.docs.push(entry);
     return { file, docId: entry.docId, created: !res.existing };
   }
@@ -111521,11 +111778,11 @@ ${body}
     job.promise = (async () => {
       try {
         file = normSheetFile(file);
-        const cur2 = currentDoc2(ctx), dir = cur2 ? dirName(cur2.path) : "", target2 = joinPath2(dir, file);
-        const exists = schDocs2(ctx).find((x) => x.path === target2 || x.path === file);
+        const cur2 = currentDoc2(ctx), dir = cur2 ? dirName(cur2.path) : "", target3 = joinPath2(dir, file);
+        const exists = schDocs2(ctx).find((x) => x.path === target3 || x.path === file);
         if (exists && root5.KDialogs && root5.KDialogs.confirm && !await root5.KDialogs.confirm("Confirmation", `'${baseName3(file)}' already exists.
 
-Link '${target2}' to this file?`)) return null;
+Link '${target3}' to this file?`)) return null;
         const ref = await ensureSheetDoc(ctx, file);
         if (S2.sheetJob !== job || ctx.doc !== doc2) return null;
         const fp = kids7(node, "property").find((q4) => /^Sheet ?file$/i.test(str9(q4[1])));
@@ -112976,7 +113233,7 @@ Link '${target2}' to this file?`)) return null;
       if (idx === 4) setImageOriginOffset(item.id, [p[0] - g2.pos[0], p[1] - g2.pos[1]]);
       else if (idx === 5) {
         const cv = [p[0] - origin[0], p[1] - origin[1]];
-        const target2 = Math.atan2(-cv[1], cv[0]) * 180 / Math.PI - 90, d = target2 - g2.rot;
+        const target3 = Math.atan2(-cv[1], cv[0]) * 180 / Math.PI - 90, d = target3 - g2.rot;
         const np = rotDeg([g2.pos[0] - origin[0], g2.pos[1] - origin[1]], d), at4 = kid8(n2, "at");
         at4[1] = r45(origin[0] + np[0]);
         at4[2] = r45(origin[1] + np[1]);
@@ -115414,7 +115671,7 @@ Link '${target2}' to this file?`)) return null;
         swap(1, 3);
       }
     }
-    const place2 = (sp, size2) => {
+    const place3 = (sp, size2) => {
       const [sx2, sy2] = SIDES[sp.side], cx = (body[0] + body[2]) / 2, cy = (body[1] + body[3]) / 2;
       let ox = (symW + size2.w) / 2, oy = (symH + size2.h) / 2;
       if (sx2) ox += AP_HPADDING;
@@ -115432,7 +115689,7 @@ Link '${target2}' to this file?`)) return null;
     };
     const others = Array.from(doc2.items.values()).filter((it) => it !== item && it.id !== item.id && it.bbox);
     const collision = (sp) => {
-      const [x, y] = place2(sp, fbox), box3 = [x, y, x + fbox.w, y + fbox.h];
+      const [x, y] = place3(sp, fbox), box3 = [x, y, x + fbox.w, y + fbox.h];
       let coll = "none";
       for (const it of others) {
         if (!boxesIntersect(it.bbox, box3)) continue;
@@ -115464,7 +115721,7 @@ Link '${target2}' to this file?`)) return null;
       for (const sp of sides) if (sp.pins <= side.pins) side = { side: sp.side, pins: sp.pins };
       chosen = side;
     }
-    let [bx, by] = place2(chosen, fbox);
+    let [bx, by] = place3(chosen, fbox);
     const [sx, sy] = SIDES[chosen.side];
     let wireSpacing = false;
     if (opts2.manual !== false && sy) {
@@ -117860,7 +118117,7 @@ var PROVENANCE = {
 
 // web/router/corners.ts
 var SQUARE_MAX = 91;
-var key = (layer3, net, p) => `${layer3}
+var key = (layer4, net, p) => `${layer4}
 ${net}
 ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
 function cornerAngle(v, p, q4) {
@@ -117884,12 +118141,12 @@ function findSquareCorners(segs, covered, exempt) {
   for (const l of ends.values()) {
     if (l.length !== 2) continue;
     const [e1, e2] = l;
-    const net = e1.s.net, layer3 = e1.s.layer;
+    const net = e1.s.net, layer4 = e1.s.layer;
     if (exempt(net)) continue;
     const angle = cornerAngle(e1.at, e1.other, e2.other);
     if (angle > SQUARE_MAX) continue;
-    if (covered(net, layer3, e1.at)) continue;
-    out2.push({ net, layer: layer3, x: +e1.at[0].toFixed(3), y: +e1.at[1].toFixed(3), angle: Math.round(angle), ids: [e1.s.id, e2.s.id] });
+    if (covered(net, layer4, e1.at)) continue;
+    out2.push({ net, layer: layer4, x: +e1.at[0].toFixed(3), y: +e1.at[1].toFixed(3), angle: Math.round(angle), ids: [e1.s.id, e2.s.id] });
   }
   return out2;
 }
@@ -117901,8 +118158,8 @@ function boardSquareCorners(doc2, P, isRf) {
   const segs = [];
   const cover = /* @__PURE__ */ new Map();
   const rf = /* @__PURE__ */ new Set();
-  const addCover = (net, layer3, s2) => {
-    const k = layer3 + "\n" + net;
+  const addCover = (net, layer4, s2) => {
+    const k = layer4 + "\n" + net;
     let l = cover.get(k);
     if (!l) cover.set(k, l = []);
     l.push(s2);
@@ -117916,7 +118173,7 @@ function boardSquareCorners(doc2, P, isRf) {
       if (c.kind === "pad" && ANTENNA_REF.test(c.item.ref || "") && !GROUND.test(c.net)) rf.add(c.net);
     }
   }
-  return findSquareCorners(segs, (net, layer3, p) => (cover.get(layer3 + "\n" + net) || []).some((s2) => pointGap(s2, p[0], p[1]) <= 1e-6), (net) => rf.has(net) || RF_NAME.test(net.replace(/^\/(.*\/)?/, "")) || netKind(net) === "rf" || !!(isRf && isRf(net)));
+  return findSquareCorners(segs, (net, layer4, p) => (cover.get(layer4 + "\n" + net) || []).some((s2) => pointGap(s2, p[0], p[1]) <= 1e-6), (net) => rf.has(net) || RF_NAME.test(net.replace(/^\/(.*\/)?/, "")) || netKind(net) === "rf" || !!(isRf && isRf(net)));
 }
 
 // web/router/impedance.ts
@@ -117950,9 +118207,9 @@ function stackupOf(K11, doc2) {
   });
   return { layers, assumed: true };
 }
-function traceOn(stack2, layer3) {
+function traceOn(stack2, layer4) {
   const L = stack2.layers;
-  const i = L.findIndex((l) => l.copper && l.name === layer3);
+  const i = L.findIndex((l) => l.copper && l.name === layer4);
   if (i < 0) return null;
   const reach = (dir) => {
     let h3 = 0, er = 0;
@@ -117965,10 +118222,10 @@ function traceOn(stack2, layer3) {
   };
   const up = reach(-1), down = reach(1);
   const t = L[i].thickness;
-  if (up && down) return { kind: "stripline", h: Math.min(up.h, down.h), b: up.h + down.h + t, t, er: (up.er * up.h + down.er * down.h) / (up.h + down.h), layer: layer3, reference: [up.name, down.name] };
+  if (up && down) return { kind: "stripline", h: Math.min(up.h, down.h), b: up.h + down.h + t, t, er: (up.er * up.h + down.er * down.h) / (up.h + down.h), layer: layer4, reference: [up.name, down.name] };
   const one2 = up || down;
   if (!one2) return null;
-  return { kind: "microstrip", h: one2.h, b: one2.h, t, er: one2.er, layer: layer3, reference: [one2.name] };
+  return { kind: "microstrip", h: one2.h, b: one2.h, t, er: one2.er, layer: layer4, reference: [one2.name] };
 }
 function z0(tr, w) {
   if (tr.kind === "stripline") return 60 / Math.sqrt(tr.er) * Math.log(4 * tr.b / (0.67 * Math.PI * (0.8 * w + tr.t)));
@@ -117981,8 +118238,8 @@ function z0(tr, w) {
 function zdiff(tr, w, s2) {
   return tr.kind === "stripline" ? 2 * z0(tr, w) * (1 - 0.347 * Math.exp(-2.9 * s2 / tr.b)) : 2 * z0(tr, w) * (1 - 0.48 * Math.exp(-0.96 * s2 / tr.h));
 }
-function widthFor(tr, target2, s2) {
-  const f2 = (w) => (s2 === void 0 ? z0(tr, w) : zdiff(tr, w, s2)) - target2;
+function widthFor(tr, target3, s2) {
+  const f2 = (w) => (s2 === void 0 ? z0(tr, w) : zdiff(tr, w, s2)) - target3;
   let lo = 0.05, hi = 6;
   if (f2(lo) < 0 || f2(hi) > 0) return null;
   for (let i = 0; i < 60; i++) {
@@ -118006,6 +118263,10 @@ var STEPS_PER_MS = 12e3;
 var BUNDLE_COST = 0.3;
 var FLAT_DETOUR = 1.6;
 var FLAT_SLACK_MM = 5;
+var PLANE_COVER = 0.5;
+var PLANE_HOP_MM = 1.5;
+var FAN_ROWS_MM = [0.8, 1.5, 2.2];
+var FAN_FAR_MM = 4;
 var GROUP_REACH = 5;
 var VIA_PRICE = 2.5;
 var isCritical = (net, kind) => kind === "rf" || usualImpedance(net, true) === 90 || /(^|[\/_\-.(])(XTAL|XIN|XOUT|XI|XO|XC\d?|XL\d?|OSC(_?32K?)?_?(IN|OUT|I|O)|OSCI|OSCO|XTAL_?[PN]|X(32K?)_?[PN])\d*([_\-.)]|$)/i.test(net);
@@ -118055,6 +118316,8 @@ var Router = class _Router {
     this.dropped = [];
     this.stat = { noSoft: 0, noBlockers: 0, tooMany: 0, ripped: 0, ripLimit: 0 };
     this.xtalNets = /* @__PURE__ */ new Set();
+    this.planeLayers = [];
+    this.fanned = 0;
     this.relax = false;
     this.relaxed = /* @__PURE__ */ new Set();
     this.pairNets = /* @__PURE__ */ new Set();
@@ -118122,7 +118385,30 @@ var Router = class _Router {
         if (!l) byPart.set(c.item, l = []);
         l.push(c);
       }
+      const fan = this.opts.fanoutVias === true && copper.length > 1;
+      const viaR = (s2.viaDiameter || 0.5) / 2;
+      const padsOf = /* @__PURE__ */ new Map();
+      const allPads = [];
+      if (fan) {
+        for (const c of nl.conductors) if (c.kind === "pad" && c.pad) {
+          allPads.push({ x: c.pad.x, y: c.pad.y, r: Math.max(c.pad.w, c.pad.h) / 2, net: c.net || "", item: c.item });
+          if (c.net) {
+            let l = padsOf.get(c.net);
+            if (!l) padsOf.set(c.net, l = []);
+            l.push([c.pad.x, c.pad.y]);
+          }
+        }
+      }
+      const zoned = /* @__PURE__ */ new Set();
+      if (fan) {
+        for (const it of doc2.items.values()) if (it.kind === "zone") {
+          const n2 = nl.table.key(P.netOf(it.node));
+          if (n2) zoned.add(n2);
+        }
+      }
       for (const cs of byPart.values()) {
+        let pitch = Infinity;
+        if (fan && cs.length >= 8) for (let i = 1; i < cs.length; i++) pitch = Math.min(pitch, Math.hypot(cs[i].pad.x - cs[i - 1].pad.x, cs[i].pad.y - cs[i - 1].pad.y) || Infinity);
         if (cs.length < 8) continue;
         const cx = cs.reduce((a, c) => a + c.pad.x, 0) / cs.length, cy = cs.reduce((a, c) => a + c.pad.y, 0) / cs.length;
         for (const c of cs) {
@@ -118135,6 +118421,24 @@ var Router = class _Router {
           const layers = Array.from(c.layers).map((l) => copper.indexOf(l)).filter((i) => i >= 0);
           if (!layers.length) continue;
           const a = [p.x + sg * ax[0] * half, p.y + sg * ax[1] * half], b = [a[0] + sg * ax[0] * lane, a[1] + sg * ax[1] * lane];
+          if (fan && pitch <= 0.65 && !isSupply(c.net) && !zoned.has(c.net) && (padsOf.get(c.net) || []).some((q4) => Math.hypot(q4[0] - p.x, q4[1] - p.y) > FAN_FAR_MM)) {
+            const k = Math.round((-(p.x - cx) * ax[1] + (p.y - cy) * ax[0]) / pitch);
+            const depth = FAN_ROWS_MM[(k % 3 + 3) % 3];
+            const e = [a[0] + sg * ax[0] * depth, a[1] + sg * ax[1] * depth];
+            const dx = e[0] - a[0], dy = e[1] - a[1], dd = dx * dx + dy * dy;
+            const hit5 = allPads.some((q4) => {
+              if (q4.net === c.net || q4.item === c.item) return false;
+              const t = Math.max(0, Math.min(1, ((q4.x - a[0]) * dx + (q4.y - a[1]) * dy) / dd));
+              const far = Math.hypot(q4.x - e[0], q4.y - e[1]);
+              return Math.hypot(q4.x - a[0] - t * dx, q4.y - a[1] - t * dy) < q4.r + 0.25 || far < q4.r + viaR + 0.25;
+            });
+            if (!hit5) {
+              push({ net: c.net, layers, shape: { t: "seg", a, b: e, r: 0.05 }, clr: P.netClearance(s2, c.net) });
+              push({ net: c.net, layers: all2, shape: { t: "circle", x: e[0], y: e[1], r: viaR }, clr: P.netClearance(s2, c.net) });
+              this.fanned++;
+              continue;
+            }
+          }
           push({ net: c.net, layers, shape: { t: "seg", a, b, r: 0.05 }, clr: P.netClearance(s2, c.net) });
         }
       }
@@ -118484,6 +118788,26 @@ var Router = class _Router {
       }
     }
     this.pref = hv.map(([h3, v]) => h3 + v > 20 ? (h3 - v) / (h3 + v) : 0);
+    if (!allow && this.opts.planes === true && L > 2) {
+      const area4 = (pts) => {
+        let t = 0;
+        for (let i = 0; i < pts.length; i++) {
+          const p = pts[i], q4 = pts[(i + 1) % pts.length];
+          t += p[0] * q4[1] - q4[0] * p[1];
+        }
+        return Math.abs(t) / 2;
+      };
+      const whole2 = outline ? area4(outline) : (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]);
+      for (let l = 1; l < L - 1; l++) {
+        let a = 0;
+        for (const z2 of zones) if (z2.net && z2.layers.includes(l) && z2.polys.length) a += area4(z2.polys[0]);
+        const ground = zones.some((z2) => z2.layers.includes(l) && /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(z2.net));
+        if (ground && whole2 > 0 && a >= PLANE_COVER * whole2 && routable.filter(Boolean).length > 2) {
+          routable[l] = false;
+          this.planeLayers.push(copper[l]);
+        }
+      }
+    }
     if (hv.every(([h3, v]) => h3 + v <= 20) && routable.filter(Boolean).length > 1) {
       let k = 0;
       this.pref = routable.map((r) => r ? k++ % 2 ? -0.5 : 0.5 : 0);
@@ -118491,6 +118815,30 @@ var Router = class _Router {
     const want2 = this.opts.nets ? new Set(this.opts.nets) : null;
     const useZones = this.opts.zones !== false;
     this.sizeForImpedance(Array.from(nl.nets.values()).map((n2) => n2.key).filter((k) => k && (!want2 || want2.has(k))));
+    let sharedMemo = null;
+    const shared = () => {
+      if (sharedMemo) return sharedMemo;
+      const own = copper.map(() => null);
+      const out2 = copper.map(() => null);
+      const ids = /* @__PURE__ */ new Map();
+      for (const z2 of zones) {
+        if (!z2.net) continue;
+        let id = ids.get(z2.net);
+        if (id === void 0) ids.set(z2.net, id = ids.size + 1);
+        const t = cellsIn(z2.polys);
+        for (const l of z2.layers) {
+          const o = own[l] || (own[l] = new Int32Array(W12 * H));
+          for (let i = 0; i < t.length; i++) if (t[i]) {
+            if (!o[i]) o[i] = id;
+            else if (o[i] !== id) {
+              const m = out2[l] || (out2[l] = new Uint8Array(W12 * H));
+              m[i] = 2;
+            }
+          }
+        }
+      }
+      return sharedMemo = out2;
+    };
     const poured = new Set(useZones ? zones.map((z2) => z2.net).filter(Boolean) : []);
     for (const net of nl.nets.values()) {
       if (!net.key || want2 && !want2.has(net.key) && !poured.has(net.key)) continue;
@@ -118518,9 +118866,31 @@ var Router = class _Router {
       let zoneCells = null;
       let pour;
       const anchors = [].concat(...clusters);
+      let planeEnd = null;
       if (mine.length) {
         const inZone = (a) => mine.some((z2) => z2.layers.some((l) => a.layers.includes(l)) && z2.polys.filter((pts) => pointInPolyPts(pts, a.p)).length % 2 === 1);
         const covered = [], rest = [];
+        const pz = mine.filter((z2) => z2.layers.some((l) => !routable[l]));
+        if (pz.length && !watchOnly) {
+          const pl = pz[0].layers.find((l) => !routable[l]);
+          const edgeGap = (polys, p) => {
+            let d = Infinity;
+            for (const pts of polys) for (let i = 0; i < pts.length; i++) {
+              const a0 = pts[i], b0 = pts[(i + 1) % pts.length];
+              const dx = b0[0] - a0[0], dy = b0[1] - a0[1], L2 = dx * dx + dy * dy;
+              const t = L2 ? Math.max(0, Math.min(1, ((p[0] - a0[0]) * dx + (p[1] - a0[1]) * dy) / L2)) : 0;
+              d = Math.min(d, Math.hypot(p[0] - a0[0] - t * dx, p[1] - a0[1] - t * dy));
+            }
+            return d;
+          };
+          const others = zones.filter((z2) => z2.net !== net.key && z2.layers.includes(pl));
+          const under = (a) => pz.some((z2) => z2.polys.filter((pts) => pointInPolyPts(pts, a.p)).length % 2 === 1 && edgeGap(z2.polys, a.p) >= 0.6) && !others.some((z2) => z2.polys.filter((pts) => pointInPolyPts(pts, a.p)).length % 2 === 1 || edgeGap(z2.polys, a.p) < 0.6);
+          planeEnd = (a) => under(a) && !a.layers.includes(pl) ? { p: [a.p[0], a.p[1]], layers: [pl], shape: { t: "circle", x: a.p[0], y: a.p[1], r: 0.01 }, cluster: 0, plane: true } : null;
+          if (!clusters.some((cl) => cl.some(inZone))) {
+            const a = anchors.find(under);
+            if (a) clusters.push([planeEnd(a) || a]);
+          }
+        }
         clusters.forEach((cl, i) => {
           if (cl.some(inZone)) covered.push(i);
           else rest.push(cl);
@@ -118538,9 +118908,10 @@ var Router = class _Router {
             const t = cellsIn(z2.polys);
             for (const l of z2.layers) {
               const m = pour.mask[l] || (pour.mask[l] = new Uint8Array(W12 * H));
+              const sh = this.opts.splitPlaneEnds ? shared()[l] : null;
               for (let i = 0; i < t.length; i++) if (t[i]) {
                 m[i] = 1;
-                zoneCells.push({ ix: i % W12, iy: i / W12 | 0, l });
+                if (!sh || sh[i] !== 2) zoneCells.push({ ix: i % W12, iy: i / W12 | 0, l });
               }
             }
           }
@@ -118568,6 +118939,15 @@ var Router = class _Router {
         for (const a of clusters[i]) for (const b of clusters[j]) {
           const d = Math.hypot(a.p[0] - b.p[0], a.p[1] - b.p[1]);
           if (!best || d < best[0]) best = [d, a, b];
+        }
+        if (planeEnd && zoneCluster === 0 && (i === 0 || j === 0) && best[0] > PLANE_HOP_MM) {
+          for (const a of clusters[i === 0 ? j : i]) {
+            const e = planeEnd(a);
+            if (e) {
+              best = i === 0 ? [PLANE_HOP_MM, e, a] : [PLANE_HOP_MM, a, e];
+              break;
+            }
+          }
         }
         return best;
       };
@@ -118907,40 +119287,40 @@ var Router = class _Router {
         single.push(...e);
         continue;
       }
-      const target2 = planned2(e[0].key) || planned2(e[1].key) || usualImpedance(e[0].key, true);
-      if (!target2) continue;
+      const target3 = planned2(e[0].key) || planned2(e[1].key) || usualImpedance(e[0].key, true);
+      if (!target3) continue;
       const clr = Math.max(P.netClearance(s2, e[0].key), P.netClearance(s2, e[1].key), s2.minClearance || 0);
       const cw = this.classFor(e[0].key).width;
       let pick = null, first = null;
       for (const g2 of [Math.max(clr, this.opts.pairGap || 0), clr * 1.5, clr * 2, clr * 3]) {
-        const w = widthFor(tr, target2, g2);
+        const w = widthFor(tr, target3, g2);
         if (w !== null && first === null) first = w;
         if (w !== null && w >= minW && w <= Math.max(0.6, cw * 3)) {
           pick = { w: r26(w), g: r26(g2) };
           break;
         }
       }
-      const rep = { nets: e.map((n2) => n2.key), target: target2, differential: true, layer: tr.layer, model, width: pick ? pick.w : first !== null ? r26(first) : null, gap: pick ? pick.g : r26(clr), applied: !!pick };
+      const rep = { nets: e.map((n2) => n2.key), target: target3, differential: true, layer: tr.layer, model, width: pick ? pick.w : first !== null ? r26(first) : null, gap: pick ? pick.g : r26(clr), applied: !!pick };
       if (pick) {
         for (const n2 of e) {
           this.zWidth.set(n2.key, pick.w);
           this.zGap.set(n2.key, pick.g);
         }
         rep.achieved = Math.round(zdiff(tr, pick.w, pick.g));
-      } else rep.note = first !== null ? `${target2} \u03A9 needs ${r26(first)} mm tracks on this stackup, more than the board can carry: routed at the class width (${Math.round(zdiff(tr, cw, clr))} \u03A9). A thinner dielectric under the layer (a 4-layer build) brings the width down.` : `no track width gives ${target2} \u03A9 on this stackup`;
+      } else rep.note = first !== null ? `${target3} \u03A9 needs ${r26(first)} mm tracks on this stackup, more than the board can carry: routed at the class width (${Math.round(zdiff(tr, cw, clr))} \u03A9). A thinner dielectric under the layer (a 4-layer build) brings the width down.` : `no track width gives ${target3} \u03A9 on this stackup`;
       this.zReports.push(rep);
     }
     for (const net of single) {
-      const target2 = planned2(net.key) || usualImpedance(net.key, false);
-      if (!target2) continue;
+      const target3 = planned2(net.key) || usualImpedance(net.key, false);
+      if (!target3) continue;
       const cw = this.classFor(net.key).width;
-      const w = widthFor(tr, target2);
+      const w = widthFor(tr, target3);
       const ok2 = w !== null && w >= minW && w <= Math.max(1.2, cw * 5);
-      const rep = { nets: [net.key], target: target2, differential: false, layer: tr.layer, model, width: w !== null ? r26(w) : null, applied: ok2 };
+      const rep = { nets: [net.key], target: target3, differential: false, layer: tr.layer, model, width: w !== null ? r26(w) : null, applied: ok2 };
       if (ok2) {
         this.zWidth.set(net.key, r26(w));
         rep.achieved = Math.round(z0(tr, r26(w)));
-      } else rep.note = w !== null && w < minW ? `${target2} \u03A9 needs a ${r26(w)} mm track on this stackup, under the board's minimum track width (${r26(minW)} mm): routed at the class width (${Math.round(z0(tr, cw))} \u03A9).` : w !== null ? `${target2} \u03A9 needs a ${r26(w)} mm track on this stackup, more than the board can carry: routed at the class width (${Math.round(z0(tr, cw))} \u03A9). A thinner dielectric under the layer (a 4-layer build), or a coplanar feed with ground beside it, brings the width down.` : `no track width gives ${target2} \u03A9 on this stackup`;
+      } else rep.note = w !== null && w < minW ? `${target3} \u03A9 needs a ${r26(w)} mm track on this stackup, under the board's minimum track width (${r26(minW)} mm): routed at the class width (${Math.round(z0(tr, cw))} \u03A9).` : w !== null ? `${target3} \u03A9 needs a ${r26(w)} mm track on this stackup, more than the board can carry: routed at the class width (${Math.round(z0(tr, cw))} \u03A9). A thinner dielectric under the layer (a 4-layer build), or a coplanar feed with ground beside it, brings the width down.` : `no track width gives ${target3} \u03A9 on this stackup`;
       this.zReports.push(rep);
     }
   }
@@ -119589,15 +119969,15 @@ var Router = class _Router {
     }
     for (const g2 of groups) {
       const before = g2.members.map(lenM);
-      const target2 = g2.length && g2.length > 0 ? g2.length : Math.max(...before);
-      const rep = { group: g2.name, target: +target2.toFixed(3), tolerance: g2.tol, members: [] };
+      const target3 = g2.length && g2.length > 0 ? g2.length : Math.max(...before);
+      const rep = { group: g2.name, target: +target3.toFixed(3), tolerance: g2.tol, members: [] };
       this.matchReports.push(rep);
       g2.members.forEach((mb, i) => {
-        const need = target2 - before[i];
+        const need = target3 - before[i];
         let left = need;
         if (need > g2.tol) left = mb.pr ? this.extendPair(mb.pr, need, g2.tol / 2) : this.extend(mb.conns.slice().sort((a, b) => _Router.lenOf(b) - _Router.lenOf(a))[0], need, g2.tol / 2);
         const now = lenM(mb);
-        const ok2 = Math.abs(target2 - now) <= g2.tol + 1e-6;
+        const ok2 = Math.abs(target3 - now) <= g2.tol + 1e-6;
         rep.members.push({ nets: mb.nets, before: +before[i].toFixed(3), length: +now.toFixed(3), matched: ok2, note: ok2 ? void 0 : need < 0 ? "longer than the length asked for" : `no room for ${left.toFixed(2)} mm more of serpentine beside its track` });
       });
     }
@@ -119615,7 +119995,7 @@ var Router = class _Router {
     this.oidx = null;
   }
   /** Exact: does a piece of track keep its clearance to the board's copper, holes and edges, and to this run's routes? */
-  clearOf(shape3, layer3, net, clr, why2) {
+  clearOf(shape3, layer4, net, clr, why2) {
     const G5 = this.G, P = this.P, B = 2;
     const bbOf = (s2) => s2.t === "circle" ? [s2.x - s2.r, s2.y - s2.r, s2.x + s2.r, s2.y + s2.r] : s2.t === "seg" ? [Math.min(s2.a[0], s2.b[0]) - s2.r, Math.min(s2.a[1], s2.b[1]) - s2.r, Math.max(s2.a[0], s2.b[0]) + s2.r, Math.max(s2.a[1], s2.b[1]) + s2.r] : null;
     this.index();
@@ -119626,7 +120006,7 @@ var Router = class _Router {
       if (seen.has(e)) continue;
       seen.add(e);
       if (e.o.net && e.o.net === net) continue;
-      if (!e.o.layers.includes(layer3)) continue;
+      if (!e.o.layers.includes(layer4)) continue;
       const need = (e.o.edge ? G5.edgeClr : Math.max(e.o.clr, clr)) - 5e-5;
       if (e.bb[0] > bb[2] + need || e.bb[2] < bb[0] - need || e.bb[1] > bb[3] + need || e.bb[3] < bb[1] - need) continue;
       const gap = P.shapeGap(e.o.shape, shape3);
@@ -119643,7 +120023,7 @@ var Router = class _Router {
       if (!c.nodes || c.net === net) continue;
       const need = Math.max(c.cls.clr, clr) - 5e-5;
       for (const o of c.shapes) {
-        if (!o.layers.includes(layer3)) continue;
+        if (!o.layers.includes(layer4)) continue;
         const ob = bbOf(o.shape);
         if (ob[0] > bb[2] + need || ob[2] < bb[0] - need || ob[1] > bb[3] + need || ob[3] < bb[1] - need) continue;
         if (P.shapeGap(o.shape, shape3) < need) return false;
@@ -120152,8 +120532,8 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     }
     const first = /* @__PURE__ */ new Set();
     for (const c of conns) if (critical(c) || gOf.get(c.net).rank < Infinity) first.add(c.id);
-    const tier = (c) => critical(c) ? -3 : inGroup.has(c.id) ? -2 : isSupply(c.net) && !this.netOf(c.net).zoneCells ? -1 : c.len < 3 ? 0 : Math.min(c.a.narrow || Infinity, c.b.narrow || Infinity) <= 0.35 ? 1 : isSupply(c.net) ? 2 : 3;
-    const order = conns.slice().sort((a, b) => cmp(gOf.get(a.net).rank, gOf.get(b.net).rank) || gOf.get(b.net).priority - gOf.get(a.net).priority || tier(a) - tier(b) || (tier(a) === -2 ? inGroup.get(a.id) < inGroup.get(b.id) ? -1 : inGroup.get(a.id) > inGroup.get(b.id) ? 1 : 0 : 0) || (tier(a) === 1 ? b.len - a.len : a.len - b.len) || (a.net < b.net ? -1 : a.net > b.net ? 1 : a.id - b.id));
+    const tier = (c) => this.opts.criticalFirst !== false ? critical(c) ? -3 : inGroup.has(c.id) ? -2 : isSupply(c.net) && !this.netOf(c.net).zoneCells ? -1 : c.len < 3 ? 0 : Math.min(c.a.narrow || Infinity, c.b.narrow || Infinity) <= 0.35 ? 1 : isSupply(c.net) ? 2 : 3 : inGroup.has(c.id) ? -3 : critical(c) ? -2 : isSupply(c.net) && !this.netOf(c.net).zoneCells ? -1 : c.len < 3 ? 0 : Math.min(c.a.narrow || Infinity, c.b.narrow || Infinity) <= 0.35 ? 1 : isSupply(c.net) ? 2 : 3;
+    const order = conns.slice().sort((a, b) => cmp(gOf.get(a.net).rank, gOf.get(b.net).rank) || gOf.get(b.net).priority - gOf.get(a.net).priority || tier(a) - tier(b) || (inGroup.has(a.id) && tier(a) === tier(b) && inGroup.has(b.id) ? inGroup.get(a.id) < inGroup.get(b.id) ? -1 : inGroup.get(a.id) > inGroup.get(b.id) ? 1 : 0 : 0) || (tier(a) === 1 ? b.len - a.len : a.len - b.len) || (a.net < b.net ? -1 : a.net > b.net ? 1 : a.id - b.id));
     let best = null;
     let failedLast = /* @__PURE__ */ new Set();
     let pass = 0;
@@ -121369,9 +121749,9 @@ function drawPreview(c, K11) {
     if (!conn.nodes) continue;
     for (const o of conn.shapes) {
       const sh = o.shape;
-      const layer3 = G5.layers[o.layers[0]];
+      const layer4 = G5.layers[o.layers[0]];
       if (sh.t === "seg") {
-        c.strokeStyle = K11.PCB_COLORS && K11.PCB_COLORS[layer3] || "#C83434";
+        c.strokeStyle = K11.PCB_COLORS && K11.PCB_COLORS[layer4] || "#C83434";
         c.lineWidth = sh.r * 2;
         c.beginPath();
         c.moveTo(sh.a[0], sh.a[1]);
@@ -121417,6 +121797,8 @@ function install() {
 }
 
 // web/router/place.ts
+var CRITICAL_PULL = 4;
+var SQUARE_GAIN = 0.05;
 var GROUNDISH = /^\/?(.*\/)?([ADP]?GND\w*|VSS\w*|EARTH)$/i;
 function crosses(a, b, c, d) {
   const o = (p, q4, r) => {
@@ -121459,8 +121841,8 @@ var GLOBAL_NAME = /^\/?(GND|AGND|DGND|PGND|VSS|VCC|VDD|VBUS|VIN|VBAT|\+?\d+V\d*|
 function partOf(K11, P, doc2, it, spec) {
   let node = it.node;
   const cur2 = K11.atOf(it.node);
-  const layer3 = K11.kid(node, "layer");
-  const isBack2 = !!layer3 && K11.str(layer3[1]) === "B.Cu";
+  const layer4 = K11.kid(node, "layer");
+  const isBack2 = !!layer4 && K11.str(layer4[1]) === "B.Cu";
   const wantBack = spec && spec.side ? spec.side === "back" : isBack2;
   const flip = wantBack !== isBack2;
   if (flip) {
@@ -121553,7 +121935,7 @@ function place(K11, P, doc2, settings3, opts2 = {}) {
   }
   const wide = Math.max(8, total2 * 0.12);
   const weight = /* @__PURE__ */ new Map();
-  for (const [n2, c] of netPads) weight.set(n2, c < 2 ? 0 : GLOBAL_NAME.test(n2) || c > wide ? 0.03 : 1 / Math.sqrt(c - 1));
+  for (const [n2, c] of netPads) weight.set(n2, c < 2 ? 0 : GLOBAL_NAME.test(n2) || c > wide ? 0.03 : (isCritical(n2, void 0) || pairName(n2) ? CRITICAL_PULL : 1) / Math.sqrt(c - 1));
   const w = (n2) => weight.get(n2) || 0;
   for (const p of all2) p.movable = listed ? !!p.spec && !(p.spec.fixed === true) : !(P.isLocked && P.isLocked(p.node)) && p.pads.some((d) => (netPads.get(d.net) || 0) > 1);
   const moving = all2.filter((p) => p.movable), still = all2.filter((p) => !p.movable);
@@ -121613,7 +121995,32 @@ function place(K11, P, doc2, settings3, opts2 = {}) {
     return [p.x + x, p.y + y];
   };
   const boxAt = (p) => shift(turnBox(p.box, p.rot), p.x, p.y);
-  const geo = (p, rot3, x, y) => ({ p, b: shift(turnBox(p.box, rot3), x, y), rot: rot3, x, y });
+  const corners = (b) => [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]];
+  const geo = (p, rot3, x, y) => ({ p, b: shift(turnBox(p.box, rot3), x, y), rot: rot3, x, y, poly: norm2(rot3) % 90 ? corners(p.box).map(([u, v]) => {
+    const [a, c] = rotv(rot3, u, v);
+    return [a + x, c + y];
+  }) : void 0 });
+  const apart = (A, B, g2) => {
+    for (const poly of [A, B]) for (let i = 0; i < poly.length; i++) {
+      const [x0, y0] = poly[i], [x1, y1] = poly[(i + 1) % poly.length];
+      const L = Math.hypot(x1 - x0, y1 - y0);
+      if (!L) continue;
+      const nx = -(y1 - y0) / L, ny = (x1 - x0) / L;
+      let a0 = Infinity, a1 = -Infinity, b0 = Infinity, b1 = -Infinity;
+      for (const [x, y] of A) {
+        const d = x * nx + y * ny;
+        a0 = Math.min(a0, d);
+        a1 = Math.max(a1, d);
+      }
+      for (const [x, y] of B) {
+        const d = x * nx + y * ny;
+        b0 = Math.min(b0, d);
+        b1 = Math.max(b1, d);
+      }
+      if (a0 >= b1 + g2 - 1e-6 || b0 >= a1 + g2 - 1e-6) return true;
+    }
+    return false;
+  };
   const holesAt = (a) => a.p.holes.map((h3) => shift(turnBox(h3, a.rot), a.x, a.y));
   const fineMemo = /* @__PURE__ */ new Map();
   const fine = (p) => {
@@ -121633,100 +122040,120 @@ function place(K11, P, doc2, settings3, opts2 = {}) {
   const clash = (a, b, g0) => {
     const g2 = g0 > 0 && a.p.back === b.p.back && (fine(a.p) || fine(b.p)) ? g0 + ESCAPE : g0;
     if (!hit(a.b, b.b, g2)) return false;
-    if (a.p.back === b.p.back) return true;
+    if (a.p.back === b.p.back) return !(a.poly || b.poly) || !apart(a.poly || corners(a.b), b.poly || corners(b.b), g2);
     if (!a.p.thru && !b.p.thru) return false;
     for (const h3 of holesAt(a)) if (hit(h3, b.b, g2)) return true;
     for (const h3 of holesAt(b)) if (hit(h3, a.b, g2)) return true;
     if (a.p.thru && b.p.thru) return false;
     return false;
   };
+  const turnedChips = [];
   for (const [name, parts] of groupOf) {
     const anchor2 = parts.find(isFixed) || parts.find((p) => p.spec && p.spec.anchor) || parts.slice().sort((a, b) => b.pads.length - a.pads.length || (b.box[2] - b.box[0]) * (b.box[3] - b.box[1]) - (a.box[2] - a.box[0]) * (a.box[3] - a.box[1]))[0];
-    anchor2.x = 0;
-    anchor2.y = 0;
-    anchor2.rot = 0;
-    anchor2.placed = true;
-    const down = [anchor2];
-    const pull = (p) => {
-      let s2 = 0;
-      for (const a of p.pads) for (const q4 of down) for (const b of q4.pads) if (a.net && a.net === b.net) s2 += w(a.net);
-      return s2;
-    };
-    const todo = parts.filter((p) => p !== anchor2);
-    while (todo.length) {
-      todo.sort((a, b) => +(!!b.spec && !!b.spec.near && down.some((q4) => q4.ref === b.spec.near)) - +(!!a.spec && !!a.spec.near && down.some((q4) => q4.ref === a.spec.near)) || pull(b) - pull(a) || b.pads.length - a.pads.length);
-      const p = todo.shift();
-      const nearPart = p.spec && p.spec.near ? down.find((q4) => q4.ref === p.spec.near) || null : null;
-      const targets = [];
-      for (const q4 of nearPart ? [nearPart] : down) for (const b of q4.pads) if (b.net && p.pads.some((a) => a.net === b.net)) targets.push({ at: padAt2(q4, b), wt: w(b.net), net: b.net });
-      if (nearPart && !targets.length) targets.push({ at: [nearPart.x, nearPart.y], wt: 1, net: "" });
-      let focus = [0, 0];
-      {
-        let bw = -1;
-        for (const t of targets) if (t.wt > bw) {
-          bw = t.wt;
-          focus = t.at;
+    const square = !anchor2.thru && anchor2.pads.length >= 16 && !(anchor2.spec && anchor2.spec.rot !== void 0) && !isFixed(anchor2) && (() => {
+      const [x0, y0, x1, y1] = anchor2.padBox;
+      const w2 = x1 - x0, h3 = y1 - y0;
+      return w2 > 0 && h3 > 0 && Math.abs(w2 - h3) <= 0.1 * Math.max(w2, h3);
+    })();
+    const layout2 = (arot) => {
+      for (const p of parts) p.placed = false;
+      anchor2.x = 0;
+      anchor2.y = 0;
+      anchor2.rot = arot;
+      anchor2.placed = true;
+      const down = [anchor2];
+      const pull = (p) => {
+        let s2 = 0;
+        for (const a of p.pads) for (const q4 of down) for (const b of q4.pads) if (a.net && a.net === b.net) s2 += w(a.net);
+        return s2;
+      };
+      const todo = parts.filter((p) => p !== anchor2);
+      while (todo.length) {
+        todo.sort((a, b) => +(!!b.spec && !!b.spec.near && down.some((q4) => q4.ref === b.spec.near)) - +(!!a.spec && !!a.spec.near && down.some((q4) => q4.ref === a.spec.near)) || pull(b) - pull(a) || b.pads.length - a.pads.length);
+        const p = todo.shift();
+        const nearPart = p.spec && p.spec.near ? down.find((q4) => q4.ref === p.spec.near) || null : null;
+        const targets = [];
+        for (const q4 of nearPart ? [nearPart] : down) for (const b of q4.pads) if (b.net && p.pads.some((a) => a.net === b.net)) targets.push({ at: padAt2(q4, b), wt: w(b.net), net: b.net });
+        if (nearPart && !targets.length) targets.push({ at: [nearPart.x, nearPart.y], wt: 1, net: "" });
+        let focus = [0, 0];
+        {
+          let bw = -1;
+          for (const t of targets) if (t.wt > bw) {
+            bw = t.wt;
+            focus = t.at;
+          }
         }
-      }
-      const size2 = Math.max(p.box[2] - p.box[0], p.box[3] - p.box[1]);
-      const core = Math.max(0.15, Math.min(p.padBox[2] - p.padBox[0], p.padBox[3] - p.padBox[1]) * 0.35);
-      const cost = (rot3, x, y) => {
-        let c = 0;
-        const lines = [];
-        for (const a of p.pads) {
-          if (!a.net) continue;
-          let dmin = Infinity, best2 = null;
-          const [dx, dy] = rotv(rot3, a.x, a.y);
-          const at4 = [x + dx, y + dy];
-          for (const t of targets) if (t.net === a.net) {
-            const d = Math.hypot(t.at[0] - at4[0], t.at[1] - at4[1]);
-            if (d < dmin) {
-              dmin = d;
-              best2 = t.at;
+        const size2 = Math.max(p.box[2] - p.box[0], p.box[3] - p.box[1]);
+        const core = Math.max(0.15, Math.min(p.padBox[2] - p.padBox[0], p.padBox[3] - p.padBox[1]) * 0.35);
+        const cost = (rot3, x, y) => {
+          let c = 0;
+          const lines = [];
+          for (const a of p.pads) {
+            if (!a.net) continue;
+            let dmin = Infinity, best2 = null;
+            const [dx, dy] = rotv(rot3, a.x, a.y);
+            const at4 = [x + dx, y + dy];
+            for (const t of targets) if (t.net === a.net) {
+              const d = Math.hypot(t.at[0] - at4[0], t.at[1] - at4[1]);
+              if (d < dmin) {
+                dmin = d;
+                best2 = t.at;
+              }
+            }
+            if (dmin < Infinity) {
+              c += dmin * Math.max(w(a.net), 0.03);
+              if (best2 && !GROUNDISH.test(a.net) && !isSupply(a.net)) lines.push([at4, best2]);
             }
           }
-          if (dmin < Infinity) {
-            c += dmin * Math.max(w(a.net), 0.03);
-            if (best2 && !GROUNDISH.test(a.net) && !isSupply(a.net)) lines.push([at4, best2]);
+          let pen = 0;
+          for (let i = 0; i < lines.length; i++) {
+            for (let j = i + 1; j < lines.length; j++) if (crosses(lines[i][0], lines[i][1], lines[j][0], lines[j][1])) pen += 1;
+            const [a, b] = lines[i];
+            if (Math.hypot(b[0] - x, b[1] - y) > Math.hypot(a[0] - x, a[1] - y) && segDist2(x, y, a, b) < core) pen += 0.6;
+          }
+          return c + pen * Math.max(1, size2 * 0.8) + Math.hypot(x - focus[0], y - focus[1]) * (nearPart ? 0.3 : 0.02) + Math.hypot(x, y) * 5e-3;
+        };
+        const step = 0.25;
+        let best = null;
+        const rots = p.spec && p.spec.rot !== void 0 ? [norm2(p.spec.rot)] : [0, 90, 180, 270];
+        let found = Infinity;
+        for (let ring = 0; ring < 400 && ring * step <= found + size2 + 1.5; ring++) {
+          for (let i = -ring; i <= ring; i++) for (const [ox, oy] of ring === 0 ? [[0, 0]] : [[i, -ring], [i, ring], [-ring, i], [ring, i]]) {
+            if (ring && Math.abs(ox) === ring && Math.abs(oy) === ring && ox !== i) continue;
+            const x = Math.round(focus[0] / step) * step + ox * step, y = Math.round(focus[1] / step) * step + oy * step;
+            for (const rot3 of rots) {
+              const ge = geo(p, rot3, x, y);
+              if (down.some((q4) => clash(ge, geo(q4, q4.rot, q4.x, q4.y), gap))) continue;
+              if (found === Infinity) found = ring * step;
+              const c = cost(rot3, x, y);
+              if (!best || c < best.c) best = { c, rot: rot3, x, y };
+            }
           }
         }
-        let pen = 0;
-        for (let i = 0; i < lines.length; i++) {
-          for (let j = i + 1; j < lines.length; j++) if (crosses(lines[i][0], lines[i][1], lines[j][0], lines[j][1])) pen += 1;
-          const [a, b] = lines[i];
-          if (Math.hypot(b[0] - x, b[1] - y) > Math.hypot(a[0] - x, a[1] - y) && segDist2(x, y, a, b) < core) pen += 0.6;
+        if (best) {
+          p.x = best.x;
+          p.y = best.y;
+          p.rot = best.rot;
+        } else {
+          p.x = focus[0];
+          p.y = focus[1];
+          p.rot = 0;
         }
-        return c + pen * Math.max(1, size2 * 0.8) + Math.hypot(x - focus[0], y - focus[1]) * (nearPart ? 0.3 : 0.02) + Math.hypot(x, y) * 5e-3;
-      };
-      const step = 0.25;
-      let best = null;
-      const rots = p.spec && p.spec.rot !== void 0 ? [norm2(p.spec.rot)] : [0, 90, 180, 270];
-      let found = Infinity;
-      for (let ring = 0; ring < 400 && ring * step <= found + size2 + 1.5; ring++) {
-        for (let i = -ring; i <= ring; i++) for (const [ox, oy] of ring === 0 ? [[0, 0]] : [[i, -ring], [i, ring], [-ring, i], [ring, i]]) {
-          if (ring && Math.abs(ox) === ring && Math.abs(oy) === ring && ox !== i) continue;
-          const x = Math.round(focus[0] / step) * step + ox * step, y = Math.round(focus[1] / step) * step + oy * step;
-          for (const rot3 of rots) {
-            const ge = geo(p, rot3, x, y);
-            if (down.some((q4) => clash(ge, geo(q4, q4.rot, q4.x, q4.y), gap))) continue;
-            if (found === Infinity) found = ring * step;
-            const c = cost(rot3, x, y);
-            if (!best || c < best.c) best = { c, rot: rot3, x, y };
-          }
-        }
+        p.placed = true;
+        down.push(p);
       }
-      if (best) {
-        p.x = best.x;
-        p.y = best.y;
-        p.rot = best.rot;
-      } else {
-        p.x = focus[0];
-        p.y = focus[1];
-        p.rot = 0;
+      let bb = [Infinity, Infinity, -Infinity, -Infinity];
+      for (const p of parts) {
+        const b = boxAt(p);
+        bb = [Math.min(bb[0], b[0]), Math.min(bb[1], b[1]), Math.max(bb[2], b[2]), Math.max(bb[3], b[3])];
       }
-      p.placed = true;
-      down.push(p);
-    }
+      return (bb[2] - bb[0]) * (bb[3] - bb[1]);
+    };
+    if (square && parts.length > 1) {
+      const flat = layout2(0), turned = layout2(45);
+      if (!(turned < (1 - SQUARE_GAIN) * flat)) layout2(0);
+      else turnedChips.push(anchor2.ref);
+    } else layout2(0);
     let box3 = [Infinity, Infinity, -Infinity, -Infinity], padBox = [Infinity, Infinity, -Infinity, -Infinity];
     for (const p of parts) {
       const b = boxAt(p);
@@ -122182,7 +122609,7 @@ function place(K11, P, doc2, settings3, opts2 = {}) {
   }
   const { placements: placements2, score, groups } = res;
   const O = res.O;
-  return { placements: placements2, score, outline: O.map(r3), outlineFromBoard: fromBoard, groups, unknown };
+  return { placements: placements2, score, outline: O.map(r3), outlineFromBoard: fromBoard, groups, unknown, turned: turnedChips.length ? turnedChips : void 0 };
 }
 function mstTotal(pads) {
   const by = /* @__PURE__ */ new Map();
@@ -122222,8 +122649,8 @@ function placementChanges(K11, P, doc2, placements2) {
     const it = pl.id ? doc2.items.get(pl.id) : Array.from(doc2.items.values()).find((i) => i.kind === "footprint" && refOf(K11, i.node) === pl.ref);
     if (!it || it.kind !== "footprint") continue;
     out2.push(...P.transformChanges(doc2, [it.id], (node) => {
-      const layer3 = K11.kid(node, "layer");
-      const back = !!layer3 && K11.str(layer3[1]) === "B.Cu";
+      const layer4 = K11.kid(node, "layer");
+      const back = !!layer4 && K11.str(layer4[1]) === "B.Cu";
       let [x, y, rot3] = K11.atOf(node);
       if (pl.side === "back" !== back) {
         P.flipNode(node, x, doc2);
@@ -127432,9 +127859,9 @@ function readShape(n2, shape3, inherit) {
     primitives: K(n2, "primitives") || (inherit ? inherit.primitives : null)
   };
 }
-function padShapeOn(pad2, layer3, copper) {
+function padShapeOn(pad2, layer4, copper) {
   if (!pad2.stack.size) return pad2.base;
-  const cu = isCopper(layer3) ? layer3 : isBack(layer3) ? "B.Cu" : "F.Cu";
+  const cu = isCopper(layer4) ? layer4 : isBack(layer4) ? "B.Cu" : "F.Cu";
   if (cu === "F.Cu") return pad2.base;
   if (pad2.stackMode === "front_inner_back") {
     if (cu === "B.Cu") return pad2.stack.get("B.Cu") || pad2.base;
@@ -127600,10 +128027,10 @@ function readTrack(n2, kind, nets) {
   const ls = K(n2, "layers");
   const l1 = K(n2, "layer");
   const names2 = ls ? ls.slice(1).map(str) : [l1 ? str(l1[1]) : "F.Cu"];
-  const layer3 = names2.find(isCopper) || names2[0];
+  const layer4 = names2.find(isCopper) || names2[0];
   const maskLayer = names2.find((x) => /\.Mask$/.test(x)) || null;
   const wN = K(n2, "width");
-  const t = { layer: layer3, w: wN ? num(wN[1], 0.25) : 0.25, x1: num(s2[1]), y1: num(s2[2]), x2: num(e[1]), y2: num(e[2]), arc: null, maskLayer, maskMargin: optNum2(n2, "solder_mask_margin"), net: nets ? netName(n2, nets) : void 0 };
+  const t = { layer: layer4, w: wN ? num(wN[1], 0.25) : 0.25, x1: num(s2[1]), y1: num(s2[2]), x2: num(e[1]), y2: num(e[2]), arc: null, maskLayer, maskMargin: optNum2(n2, "solder_mask_margin"), net: nets ? netName(n2, nets) : void 0 };
   if (kind === "arc") {
     const m = K(n2, "mid");
     const a = m ? arcFrom3([t.x1, t.y1], [num(m[1]), num(m[2])], [t.x2, t.y2]) : null;
@@ -128540,9 +128967,9 @@ function customPolys(shape3) {
   }
   return polys.map(clockwise);
 }
-function padPrims(pad2, layer3, m, out2, adj = 0) {
-  const shape3 = padShapeOn(pad2, layer3, m.copper);
-  const onMask = /\.Mask$/.test(layer3), onPaste = /\.Paste$/.test(layer3);
+function padPrims(pad2, layer4, m, out2, adj = 0) {
+  const shape3 = padShapeOn(pad2, layer4, m.copper);
+  const onMask = /\.Mask$/.test(layer4), onPaste = /\.Paste$/.test(layer4);
   let mx = 0, my = 0;
   if (onMask) mx = my = maskMargin(pad2, m, shape3);
   if (onPaste) [mx, my] = pasteMargin(pad2, m, shape3);
@@ -128598,11 +129025,11 @@ function padPrims(pad2, layer3, m, out2, adj = 0) {
 var Connections = class {
   constructor(m) {
     this.ends = /* @__PURE__ */ new Map();
-    const add2 = (layer3, x, y) => {
-      let cells = this.ends.get(layer3);
+    const add2 = (layer4, x, y) => {
+      let cells = this.ends.get(layer4);
       if (!cells) {
         cells = /* @__PURE__ */ new Map();
-        this.ends.set(layer3, cells);
+        this.ends.set(layer4, cells);
       }
       const key3 = Math.floor(x) + "," + Math.floor(y);
       const c = cells.get(key3);
@@ -128615,8 +129042,8 @@ var Connections = class {
     }
   }
   /** Does a track end within `r` of (x, y) on the layer? */
-  near(layer3, x, y, r) {
-    const cells = this.ends.get(layer3);
+  near(layer4, x, y, r) {
+    const cells = this.ends.get(layer4);
     if (!cells) return false;
     for (let cx = Math.floor(x - r); cx <= Math.floor(x + r); cx++) for (let cy = Math.floor(y - r); cy <= Math.floor(y + r); cy++) {
       const c = cells.get(cx + "," + cy);
@@ -128626,11 +129053,11 @@ var Connections = class {
     return false;
   }
 };
-function flashed(removeUnused, keepEnds, zoneLayers, layer3, first, last3, x, y, r, conn) {
+function flashed(removeUnused, keepEnds, zoneLayers, layer4, first, last3, x, y, r, conn) {
   if (!removeUnused) return true;
-  if (keepEnds && (layer3 === first || layer3 === last3)) return true;
-  if (zoneLayers.has(layer3)) return true;
-  return conn.near(layer3, x, y, r);
+  if (keepEnds && (layer4 === first || layer4 === last3)) return true;
+  if (zoneLayers.has(layer4)) return true;
+  return conn.near(layer4, x, y, r);
 }
 function viaOnMask(v, front, m, opt) {
   if (opt.forceTentVias) return false;
@@ -128639,17 +129066,17 @@ function viaOnMask(v, front, m, opt) {
   const tented = own !== null ? own : front ? m.settings.tentFront : m.settings.tentBack;
   return !tented;
 }
-function footprintGeoms(fp, layer3, opt) {
-  if (fp.privateLayers.has(layer3)) return [];
+function footprintGeoms(fp, layer4, opt) {
+  if (fp.privateLayers.has(layer4)) return [];
   const out2 = [];
   for (const g2 of fp.item.geom) {
     if (g2.pad || g2.hole || g2.padText || g2.zoneOutline || g2.zoneFill || g2.zoneHatch || g2.point) continue;
-    if (g2.layer !== layer3 && g2.maskLayer !== layer3) continue;
+    if (g2.layer !== layer4 && g2.maskLayer !== layer4) continue;
     if (g2.t === "text") {
       if (g2.field === "Reference" && !opt.plotReference) continue;
       if (g2.field === "Value" && !opt.plotValue) continue;
     }
-    if (fp.dnp && isFab(layer3) && opt.sketchDnpOnFab !== false && g2.t !== "text") out2.push(Object.assign({}, g2, { w: SKETCH_WIDTH, fill: null, noStroke: false }));
+    if (fp.dnp && isFab(layer4) && opt.sketchDnpOnFab !== false && g2.t !== "text") out2.push(Object.assign({}, g2, { w: SKETCH_WIDTH, fill: null, noStroke: false }));
     else out2.push(g2);
   }
   return out2;
@@ -128705,10 +129132,10 @@ function netOf2(n2, m) {
   if (!nn) return "";
   return typeof nn[1] === "number" ? nn.length > 2 ? str(nn[2]) : str(m.doc.nets.get(nn[1]) || "") : str(nn[1]);
 }
-function padMeta(pad2, layer3, m) {
+function padMeta(pad2, layer4, m) {
   const ref = pad2.fp.ref;
-  if (!isCopper(layer3)) return { info: 4, ref };
-  const external = layer3 === m.copper[0] || layer3 === m.copper[m.copper.length - 1] || layer3 === "F.Cu" || layer3 === "B.Cu";
+  if (!isCopper(layer4)) return { info: 4, ref };
+  const external = layer4 === m.copper[0] || layer4 === m.copper[m.copper.length - 1] || layer4 === "F.Cu" || layer4 === "B.Cu";
   const fnNode = kid(pad2.node, "pinfunction");
   const meta2 = {
     info: external ? 7 : 6,
@@ -128793,16 +129220,16 @@ function padNumber(pad2, shape3, out2) {
     out2.push({ k: "seg", x1: p[0], y1: p[1], x2: q4[0], y2: q4[1], w: pen });
   }
 }
-function plotLayer(m, layer3, opt, log, conn) {
+function plotLayer(m, layer4, opt, log, conn) {
   const out2 = [], knock = [];
-  const cu = isCopper(layer3), mask = /\.Mask$/.test(layer3);
+  const cu = isCopper(layer4), mask = /\.Mask$/.test(layer4);
   const tag = (at4, k0, meta2) => {
     for (let i = at4; i < out2.length; i++) if (!out2[i].meta) out2[i].meta = meta2;
     for (let i = k0; i < knock.length; i++) if (!knock[i].meta) knock[i].meta = meta2;
   };
   const first = m.copper[0], last3 = m.copper[m.copper.length - 1];
   const connections = conn || new Connections(m);
-  const growOf = (g2) => g2.layer !== layer3 && g2.maskLayer === layer3 ? typeof g2.maskMargin === "number" ? g2.maskMargin : m.settings.maskExpansion : 0;
+  const growOf = (g2) => g2.layer !== layer4 && g2.maskLayer === layer4 ? typeof g2.maskMargin === "number" ? g2.maskMargin : m.settings.maskExpansion : 0;
   const useGeom = (g2) => {
     const grow6 = growOf(g2);
     if (grow6 < 0 && N(g2.w) + 2 * grow6 <= 0 && !g2.fill) return;
@@ -128813,19 +129240,19 @@ function plotLayer(m, layer3, opt, log, conn) {
     if (k === "footprint" || k === "segment" || k === "arc" || k === "via" || k === "zone" || k === "image" || k === "group" || k === "point" || k === "generated" || k === "gr_bbox" || k === "grid_item") continue;
     const at4 = out2.length, k0 = knock.length;
     for (const g2 of item.geom) {
-      if (g2.layer !== layer3 && g2.maskLayer !== layer3) continue;
+      if (g2.layer !== layer4 && g2.maskLayer !== layer4) continue;
       if (g2.hiddenText || g2.point) continue;
       useGeom(g2);
     }
     if (out2.length > at4 || knock.length > k0) {
       const net = item.node ? netOf2(item.node, m) : "";
       const text3 = /text|dimension|table|barcode/.test(k);
-      tag(at4, k0, layer3 === "Edge.Cuts" ? { af: "Profile" } : !cu ? {} : text3 || !net ? { af: "NonConductor" } : { af: "Conductor", info: 2, net });
+      tag(at4, k0, layer4 === "Edge.Cuts" ? { af: "Profile" } : !cu ? {} : text3 || !net ? { af: "NonConductor" } : { af: "Conductor", info: 2, net });
     }
   }
-  const hidden = (fp) => fp.dnp && isFab(layer3) && !!opt.hideDnpOnFab;
-  const fpGeoms = m.footprints.map((fp) => hidden(fp) ? [] : footprintGeoms(fp, layer3, opt));
-  const fpMeta = (fp) => ({ info: 4, ref: fp.ref, af: layer3 === "Edge.Cuts" ? "Profile" : cu ? "EtchedComponent" : void 0 });
+  const hidden = (fp) => fp.dnp && isFab(layer4) && !!opt.hideDnpOnFab;
+  const fpGeoms = m.footprints.map((fp) => hidden(fp) ? [] : footprintGeoms(fp, layer4, opt));
+  const fpMeta = (fp) => ({ info: 4, ref: fp.ref, af: layer4 === "Edge.Cuts" ? "Profile" : cu ? "EtchedComponent" : void 0 });
   fpGeoms.forEach((gs, i) => {
     const at4 = out2.length, k0 = knock.length;
     for (const g2 of gs) if (g2.t === "text") useGeom(g2);
@@ -128837,25 +129264,25 @@ function plotLayer(m, layer3, opt, log, conn) {
     tag(at4, k0, fpMeta(m.footprints[i]));
   });
   for (const fp of m.footprints) for (const pad2 of fp.pads) {
-    if (!pad2.layers.has(layer3)) continue;
+    if (!pad2.layers.has(layer4)) continue;
     if (cu) {
-      const shape3 = padShapeOn(pad2, layer3, m.copper);
+      const shape3 = padShapeOn(pad2, layer4, m.copper);
       if (pad2.type === "np_thru_hole" && pad2.drill && !shape3.offset[0] && !shape3.offset[1]) {
         if (shape3.shape === "circle" && !pad2.drill.oval && pad2.drill.w >= shape3.w - 1e-9) continue;
         if (shape3.shape === "oval" && pad2.drill.w >= shape3.w - 1e-9 && pad2.drill.h >= shape3.h - 1e-9) continue;
       }
-      if (pad2.type === "thru_hole" && !flashed(pad2.removeUnused, pad2.keepEnds, pad2.zoneLayers, layer3, first, last3, pad2.x, pad2.y, Math.max(shape3.w, shape3.h) / 2, connections)) continue;
+      if (pad2.type === "thru_hole" && !flashed(pad2.removeUnused, pad2.keepEnds, pad2.zoneLayers, layer4, first, last3, pad2.x, pad2.y, Math.max(shape3.w, shape3.h) / 2, connections)) continue;
     }
     const at4 = out2.length;
-    padPrims(pad2, layer3, m, out2, cu ? opt.widthAdj || 0 : 0);
-    tag(at4, knock.length, Object.assign(padMeta(pad2, layer3, m), { src: pad2 }));
+    padPrims(pad2, layer4, m, out2, cu ? opt.widthAdj || 0 : 0);
+    tag(at4, knock.length, Object.assign(padMeta(pad2, layer4, m), { src: pad2 }));
   }
-  if (isFab(layer3) && opt.sketchPadsOnFab) {
-    const side = layer3 === "F.Fab" ? "F.Cu" : "B.Cu";
+  if (isFab(layer4) && opt.sketchPadsOnFab) {
+    const side = layer4 === "F.Fab" ? "F.Cu" : "B.Cu";
     for (const fp of m.footprints) {
       if (hidden(fp)) continue;
       for (const pad2 of fp.pads) {
-        if (pad2.layers.has(layer3) || !pad2.layers.has(side)) continue;
+        if (pad2.layers.has(layer4) || !pad2.layers.has(side)) continue;
         const shape3 = [];
         padPrims(pad2, side, m, shape3);
         for (const p of shape3) for (const poly of primPolys(p)) polyline(poly, true, SKETCH_WIDTH, {}, out2);
@@ -128863,17 +129290,17 @@ function plotLayer(m, layer3, opt, log, conn) {
       }
     }
   }
-  if (isFab(layer3) && !opt.hideDnpOnFab && opt.crossoutDnpOnFab !== false) {
-    for (const fp of m.footprints) if (fp.dnp && layer3 === "F.Fab" === (fp.side !== "B.Cu")) dnpCross(fp, m, log, out2);
+  if (isFab(layer4) && !opt.hideDnpOnFab && opt.crossoutDnpOnFab !== false) {
+    for (const fp of m.footprints) if (fp.dnp && layer4 === "F.Fab" === (fp.side !== "B.Cu")) dnpCross(fp, m, log, out2);
   }
   for (const v of m.vias) {
     let d = 0;
     if (cu) {
-      if (!v.layers.includes(layer3)) continue;
-      d = v.sizes ? v.sizes.get(layer3) ?? v.size : v.size;
-      if (!flashed(v.removeUnused, v.keepEnds, v.zoneLayers, layer3, v.layers[0], v.layers[v.layers.length - 1], v.x, v.y, d / 2, connections)) continue;
+      if (!v.layers.includes(layer4)) continue;
+      d = v.sizes ? v.sizes.get(layer4) ?? v.size : v.size;
+      if (!flashed(v.removeUnused, v.keepEnds, v.zoneLayers, layer4, v.layers[0], v.layers[v.layers.length - 1], v.x, v.y, d / 2, connections)) continue;
     } else if (mask) {
-      const front = isFront(layer3);
+      const front = isFront(layer4);
       if (!viaOnMask(v, front, m, opt)) continue;
       const cuLayer = front ? "F.Cu" : "B.Cu";
       d = (v.sizes ? v.sizes.get(cuLayer) ?? v.size : v.size) + 2 * m.settings.maskExpansion;
@@ -128883,8 +129310,8 @@ function plotLayer(m, layer3, opt, log, conn) {
   }
   for (const t of m.tracks) {
     let w = t.w;
-    if (t.layer !== layer3) {
-      if (!mask || t.maskLayer !== layer3) continue;
+    if (t.layer !== layer4) {
+      if (!mask || t.maskLayer !== layer4) continue;
       w += 2 * (t.maskMargin ?? m.settings.maskExpansion);
     }
     w += opt.widthAdj || 0;
@@ -128893,7 +129320,7 @@ function plotLayer(m, layer3, opt, log, conn) {
     if (t.arc && Math.hypot(t.x2 - t.x1, t.y2 - t.y1) > 1e-5) out2.push({ k: "arc", cx: t.arc.cx, cy: t.arc.cy, r: t.arc.r, a0: t.arc.a0, a1: t.arc.a1, acw: t.arc.acw, w, meta: meta2 });
     else out2.push({ k: "seg", x1: t.x1, y1: t.y1, x2: t.x2, y2: t.y2, w, meta: meta2 });
   }
-  for (const f2 of m.fills) if (f2.layer === layer3) out2.push({ k: "region", pts: f2.pts, meta: cu ? f2.net ? { af: "Conductor", info: 2, net: f2.net, src: f2 } : { af: "NonConductor", src: f2 } : { src: f2 } });
+  for (const f2 of m.fills) if (f2.layer === layer4) out2.push({ k: "region", pts: f2.pts, meta: cu ? f2.net ? { af: "Conductor", info: 2, net: f2.net, src: f2 } : { af: "NonConductor", src: f2 } : { src: f2 } });
   return knock.concat(out2);
 }
 function maskWithMinWidth(prims, minWidth) {
@@ -128910,19 +129337,19 @@ function maskWithMinWidth(prims, minWidth) {
   const out2 = fracture(all2).map((pts) => ({ k: "region", pts }));
   return out2.concat(cleared);
 }
-function plotFile(m, layer3, opt, log) {
+function plotFile(m, layer4, opt, log) {
   const conn = new Connections(m);
-  let prims = plotLayer(m, layer3, opt, log, conn);
-  const mask = /\.Mask$/.test(layer3), silk = /\.SilkS$/.test(layer3);
+  let prims = plotLayer(m, layer4, opt, log, conn);
+  const mask = /\.Mask$/.test(layer4), silk = /\.SilkS$/.test(layer4);
   if (mask && m.settings.maskMinWidth > 0) prims = maskWithMinWidth(prims, m.settings.maskMinWidth);
   if (silk && opt.subtractMaskFromSilk) {
-    const maskLayer = isBack(layer3) ? "B.Mask" : "F.Mask";
+    const maskLayer = isBack(layer4) ? "B.Mask" : "F.Mask";
     let open3 = plotLayer(m, maskLayer, opt, log, conn).filter((p) => !p.clear);
     if (m.settings.maskMinWidth > 0) open3 = maskWithMinWidth(open3, m.settings.maskMinWidth);
     for (const p of open3) prims.push(Object.assign({}, p, { clear: true }));
   }
   for (const extra of opt.commonLayers || []) {
-    if (extra === layer3) continue;
+    if (extra === layer4) continue;
     for (const p of plotLayer(m, extra, opt, log, conn)) prims.push(p);
   }
   return prims;
@@ -128992,7 +129419,7 @@ var f4 = (v) => {
 };
 function jlcPlacement(fp, origin) {
   const side = fieldOf(fp, LAYER_FIELDS).toLowerCase();
-  const layer3 = side === "top" || side === "bottom" ? side : fp.side === "B.Cu" ? "bottom" : "top";
+  const layer4 = side === "top" || side === "bottom" ? side : fp.side === "B.Cu" ? "bottom" : "top";
   const o = fieldOf(fp, ORIGIN_FIELDS).toLowerCase();
   const centre = o === "center" || o === "centre" ? true : o === "anchor" ? false : !fp.smd;
   const p = centre ? padsCentre(fp) : [fp.x, fp.y];
@@ -129000,7 +129427,7 @@ function jlcPlacement(fp, origin) {
   const off = fieldOf(fp, POS_FIELDS).split(",").map(Number);
   if (off.length === 2 && isFinite(off[0]) && isFinite(off[1])) {
     const r5 = fp.rot * Math.PI / 180, c = Math.cos(r5), s2 = Math.sin(r5);
-    if (layer3 === "bottom") {
+    if (layer4 === "bottom") {
       x += off[0] * c + off[1] * s2;
       y += off[0] * s2 - off[1] * c;
     } else {
@@ -129009,14 +129436,14 @@ function jlcPlacement(fp, origin) {
     }
   }
   let r = fp.rot;
-  if (layer3 === "bottom") r = 180 - r;
+  if (layer4 === "bottom") r = 180 - r;
   for (const [re, add2] of JLC_ROTATIONS) if (re.test(fp.name)) {
     r += add2;
     break;
   }
   const manual = Number(fieldOf(fp, ROT_FIELDS));
   if (isFinite(manual)) r += manual;
-  return { x, y, rot: (r % 360 + 360) % 360, layer: layer3 };
+  return { x, y, rot: (r % 360 + 360) % 360, layer: layer4 };
 }
 function uniqueRefs(fps) {
   const count2 = /* @__PURE__ */ new Map();
@@ -129913,7 +130340,7 @@ ${content}endstream`);
       const n2 = alloc();
       annots.push(n2);
       if (ln.menu && ln.menu.length) {
-        const js = "ShM([\n" + ln.menu.map(([label, target2]) => target2 ? `["${jsStr(label)}", "${jsStr(target2)}"],
+        const js = "ShM([\n" + ln.menu.map(([label, target3]) => target3 ? `["${jsStr(label)}", "${jsStr(target3)}"],
 ` : `["${jsStr(label)}"],
 `).join("") + "]);";
         set2(n2, `<<
@@ -130177,10 +130604,10 @@ function writePs(doc2, o = {}) {
 
 // web/fab/gbrjob.ts
 var mv = (v) => +(+v).toFixed(4);
-function fileFunction(layer3, copper) {
-  const i = copper.indexOf(layer3);
+function fileFunction(layer4, copper) {
+  const i = copper.indexOf(layer4);
   if (i >= 0) return [`Copper,L${i + 1},${i === 0 ? "Top" : i === copper.length - 1 ? "Bot" : "Inr"}`, "Positive"];
-  if (/^User\.\d+$/.test(layer3)) return ["Other,User", "Positive"];
+  if (/^User\.\d+$/.test(layer4)) return ["Other,User", "Positive"];
   const map = {
     "B.Adhes": ["Glue,Bot", "Positive"],
     "F.Adhes": ["Glue,Top", "Positive"],
@@ -130194,7 +130621,7 @@ function fileFunction(layer3, copper) {
     "B.Fab": ["AssemblyDrawing,Bot", "Positive"],
     "F.Fab": ["AssemblyDrawing,Top", "Positive"]
   };
-  return map[layer3] || null;
+  return map[layer4] || null;
 }
 function gerberJobFile(o) {
   const { m } = o;
@@ -130418,9 +130845,9 @@ async function plotBoard(ctx, req) {
   const version3 = String(ctx.doc.kicadVersion || "10.99") + VERSION_SUFFIX;
   const name = (n2) => outputPath(req.outputDir, req.boardDir, n2);
   const layers = req.layers.filter((l) => !/\.Cu$/.test(l) || m.copper.includes(l));
-  const add2 = (n2, data, layer3) => {
+  const add2 = (n2, data, layer4) => {
     const path2 = name(n2);
-    files.push({ name: n2, path: path2, data, layer: layer3 });
+    files.push({ name: n2, path: path2, data, layer: layer4 });
     report3.push({ severity: "action", text: `Plotted to '${path2}'.` });
   };
   if (p.format === 1) {
@@ -130439,10 +130866,10 @@ async function plotBoard(ctx, req) {
     const iso = isoDateTime(date);
     const job = [];
     let edge = void 0;
-    for (const layer3 of layers) {
-      const prims = plotFile(m, layer3, opt, log);
-      if (layer3 === "Edge.Cuts") edge = prims;
-      const text3 = writeGerber(prims, layerAttrs(layer3, m.copper), {
+    for (const layer4 of layers) {
+      const prims = plotFile(m, layer4, opt, log);
+      if (layer4 === "Edge.Cuts") edge = prims;
+      const text3 = writeGerber(prims, layerAttrs(layer4, m.copper), {
         x2: p.useGerberX2,
         origin: p.useAuxOrigin ? m.settings.auxOrigin : [0, 0],
         software: `KiCad,Pcbnew,${version3}`,
@@ -130452,10 +130879,10 @@ async function plotBoard(ctx, req) {
         netAttributes: p.includeNetlistInfo,
         disableMacros: p.disableApertMacros
       });
-      const ext = p.useGerberExtensions ? protelExtension(layer3, m.copper) : "gbr";
-      const n2 = plotFileName(board3, layerDisplayName(ctx.doc, layer3), ext);
-      add2(n2, text3, layer3);
-      job.push({ name: n2, layer: layer3 });
+      const ext = p.useGerberExtensions ? protelExtension(layer4, m.copper) : "gbr";
+      const n2 = plotFileName(board3, layerDisplayName(ctx.doc, layer4), ext);
+      add2(n2, text3, layer4);
+      job.push({ name: n2, layer: layer4 });
     }
     if (p.createJobFile) {
       if (!edge) edge = plotFile(m, "Edge.Cuts", { plotReference: false, plotValue: false, subtractMaskFromSilk: false }, log);
@@ -130480,12 +130907,12 @@ async function plotBoard(ctx, req) {
     }
   } else {
     const pages = [];
-    layers.forEach((layer3, i) => {
-      pages.push({ layer: layer3, page: boardPage(m, {
+    layers.forEach((layer4, i) => {
+      pages.push({ layer: layer4, page: boardPage(m, {
         params: p,
-        layer: layer3,
+        layer: layer4,
         common: req.common,
-        layerName: layerDisplayName(ctx.doc, layer3),
+        layerName: layerDisplayName(ctx.doc, layer4),
         colors: req.colors,
         sheetColor: req.sheetColor,
         background: req.background,
@@ -130502,15 +130929,15 @@ async function plotBoard(ctx, req) {
       const pg = pages[0].page;
       add2(`${board3}.dxf`, writeDxf(pages.map((x) => ({ name: layerDisplayName(ctx.doc, x.layer), color: req.colors[x.layer] || "#000000", page: Object.assign({}, x.page, { h: pg.h }) })), { imperial: p.dxfImperial, polygonMode: p.dxfPolygonMode, nativeText: !p.dxfUsePcbnewFont }));
     } else {
-      for (const { page, layer: layer3 } of pages) {
-        const n2 = plotFileName(board3, layerDisplayName(ctx.doc, layer3), EXT[p.format] || "plt");
+      for (const { page, layer: layer4 } of pages) {
+        const n2 = plotFileName(board3, layerDisplayName(ctx.doc, layer4), EXT[p.format] || "plt");
         let data;
         if (p.format === 5) data = writeSvg(page, { precision: p.svgPrecision, creator: "PCBNEW", fileName: n2, date });
         else if (p.format === 4) data = writePdf(Object.assign({ pages: [page], creator: "PCBNEW", title, date, fileName: n2 }, meta2));
         else if (p.format === 2) data = writePs({ pages: [page], creator: "PCBNEW", title, date }, { scaleX: p.fineScaleX || 1, scaleY: p.fineScaleY || 1, fileName: n2, date });
-        else if (p.format === 3) data = writeDxf([{ name: layerDisplayName(ctx.doc, layer3), color: req.colors[layer3] || "#000000", page }], { imperial: p.dxfImperial, polygonMode: p.dxfPolygonMode, nativeText: !p.dxfUsePcbnewFont });
+        else if (p.format === 3) data = writeDxf([{ name: layerDisplayName(ctx.doc, layer4), color: req.colors[layer4] || "#000000", page }], { imperial: p.dxfImperial, polygonMode: p.dxfPolygonMode, nativeText: !p.dxfUsePcbnewFont });
         else data = await writePng(page, p.pngDpi, p.pngAntialias);
-        add2(n2, data, layer3);
+        add2(n2, data, layer4);
       }
     }
   }
@@ -130572,15 +130999,15 @@ function pluginPlot(ctx, a, colorOf4) {
   const colors = {};
   for (const l of have) colors[l] = colorOf4(l);
   const m = modelOf(ctx), board3 = projectNameOf(ctx), log = new PlotLog(), date = ctx.date || /* @__PURE__ */ new Date(), p = params;
-  const layer3 = have[0], lname = layerDisplayName(ctx.doc, layer3);
-  const page = boardPage(m, { params: p, layer: layer3, common: have.slice(1), layerName: lname, colors, sheetColor: "#C872AB", background: null, pageNumber: 1, pageCount: 1, interactive: false }, log);
+  const layer4 = have[0], lname = layerDisplayName(ctx.doc, layer4);
+  const page = boardPage(m, { params: p, layer: layer4, common: have.slice(1), layerName: lname, colors, sheetColor: "#C872AB", background: null, pageNumber: 1, pageCount: 1, interactive: false }, log);
   const title = ctx.doc.titleBlock && ctx.doc.titleBlock.title || "";
   const name = plotFileName(board3, lname, EXT[format]);
   let data;
   if (format === 5) data = writeSvg(page, { precision: p.svgPrecision, creator: "PCBNEW", fileName: name, date });
   else if (format === 4) data = writePdf({ pages: [page], creator: "PCBNEW", title, date, fileName: name });
   else if (format === 2) data = writePs({ pages: [page], creator: "PCBNEW", title, date }, { scaleX: p.fineScaleX || 1, scaleY: p.fineScaleY || 1, fileName: name, date });
-  else data = writeDxf([{ name: lname, color: colors[layer3] || "#000000", page }], { imperial: p.dxfImperial, polygonMode: p.dxfPolygonMode, nativeText: !p.dxfUsePcbnewFont });
+  else data = writeDxf([{ name: lname, color: colors[layer4] || "#000000", page }], { imperial: p.dxfImperial, polygonMode: p.dxfPolygonMode, nativeText: !p.dxfUsePcbnewFont });
   return { name, base64: base64(data), missing, warnings: [...log.messages] };
 }
 
@@ -131029,14 +131456,14 @@ function pnpRotation(deg, flipped) {
   else if (g2 > 180) g2 -= 360;
   return g2;
 }
-function courtyardLoops(fp, layer3) {
+function courtyardLoops(fp, layer4) {
   const loops = [], open3 = [];
   for (const g2 of fp.node) {
     if (!isList(g2)) continue;
     const t = String(g2[0]);
     if (!/^fp_(line|rect|circle|arc|poly)$/.test(t)) continue;
     const l = kid(g2, "layer");
-    if (!l || str(l[1]) !== layer3) continue;
+    if (!l || str(l[1]) !== layer4) continue;
     const P = (key3) => {
       const k = kid(g2, key3);
       return k ? fp.tf(num(k[1]), num(k[2])) : null;
@@ -131568,22 +131995,22 @@ var ZoneFiller = class {
     return { loops, polylines: chains };
   }
   // ------------------------------------------------------------ item shapes
-  padFlashes(pad2, layer3) {
-    if (!pad2.layers.has(layer3)) return false;
+  padFlashes(pad2, layer4) {
+    if (!pad2.layers.has(layer4)) return false;
     const f2 = this.padFlash.get(pad2);
-    if (f2 && f2.has(layer3)) return f2.get(layer3);
+    if (f2 && f2.has(layer4)) return f2.get(layer4);
     return true;
   }
-  viaFlashes(v, layer3) {
-    if (!v.layers.includes(layer3)) return false;
+  viaFlashes(v, layer4) {
+    if (!v.layers.includes(layer4)) return false;
     const f2 = this.padFlash.get(v);
-    if (f2 && f2.has(layer3)) return f2.get(layer3);
+    if (f2 && f2.has(layer4)) return f2.get(layer4);
     return true;
   }
   /** PAD::TransformShapeToPolygon(layer, clearance). */
-  padShape(pad2, layer3, gap) {
+  padShape(pad2, layer4, gap) {
     const out2 = [];
-    padPrims(pad2, layer3, this.m, out2);
+    padPrims(pad2, layer4, this.m, out2);
     const polys = [];
     for (const p of out2) for (const q4 of primPolys(p)) polys.push(q4);
     const base2 = union3(shapes(polys));
@@ -131599,8 +132026,8 @@ var ZoneFiller = class {
     const [ax, ay] = d.w > d.h ? rot2(-half, 0, pad2.rot) : rot2(0, -half, pad2.rot);
     return [shape(stadium(pad2.x + ax, pad2.y + ay, pad2.x - ax, pad2.y - ay, short2 + 2 * gap))];
   }
-  viaShape(v, layer3, gap) {
-    const d = v.sizes ? v.sizes.get(layer3) ?? v.size : v.size;
+  viaShape(v, layer4, gap) {
+    const d = v.sizes ? v.sizes.get(layer4) ?? v.size : v.size;
     return [shape(circlePoints(v.x, v.y, d / 2 + gap, this.maxError))];
   }
   trackShape(t, gap) {
@@ -131611,8 +132038,8 @@ var ZoneFiller = class {
     for (const p of prims) for (const q4 of primPolys(p)) polys.push(q4);
     return shapes(polys);
   }
-  padShapeName(pad2, layer3) {
-    return padShapeOn(pad2, layer3, this.m.copper).shape;
+  padShapeName(pad2, layer4) {
+    return padShapeOn(pad2, layer4, this.m.copper).shape;
   }
   // ------------------------------------------------------------ rules
   /** CLEARANCE_CONSTRAINT between the zone and an item (netclasses, local clearances, local overrides, board minimum). */
@@ -131740,9 +132167,9 @@ var ZoneFiller = class {
     prog && prog.phase(3, "");
     return results;
   }
-  fillOutlines(z2, layer3) {
+  fillOutlines(z2, layer4) {
     const f2 = this.fills.get(z2);
-    const p = f2 ? f2.get(layer3) : null;
+    const p = f2 ? f2.get(layer4) : null;
     if (!p) return [];
     let o = this.outlineCache.get(p);
     if (!o) {
@@ -131759,11 +132186,11 @@ var ZoneFiller = class {
   /** The first pass of Fill(): which conditionally flashed pads and vias a zone will reach. */
   conditionalFlashing() {
     const first = this.m.copper[0], last3 = this.m.copper[this.m.copper.length - 1];
-    const keepoutAt = (layer3, x, y) => this.zones.some((z2) => z2.ruleArea && z2.noFills && z2.layers.includes(layer3) && contains(z2.outline, x, y));
-    const best = (layer3, net, test) => {
+    const keepoutAt = (layer4, x, y) => this.zones.some((z2) => z2.ruleArea && z2.noFills && z2.layers.includes(layer4) && contains(z2.outline, x, y));
+    const best = (layer4, net, test) => {
       let sameNet2 = null, any = null;
       for (const z2 of this.zones) {
-        if (z2.ruleArea || !z2.layers.includes(layer3) || z2.contours.length === 0 || !test(z2)) continue;
+        if (z2.ruleArea || !z2.layers.includes(layer4) || z2.contours.length === 0 || !test(z2)) continue;
         if (z2.net === net && (!sameNet2 || higherPriority(z2, sameNet2))) sameNet2 = z2;
         if (!any || higherPriority(z2, any)) any = z2;
       }
@@ -131775,7 +132202,7 @@ var ZoneFiller = class {
       l.push([t.x1, t.y1], [t.x2, t.y2]);
       trackEnds.set(t.layer, l);
     }
-    const trackAt = (layer3, x, y, r) => (trackEnds.get(layer3) || []).some((p) => Math.hypot(p[0] - x, p[1] - y) <= r);
+    const trackAt = (layer4, x, y, r) => (trackEnds.get(layer4) || []).some((p) => Math.hypot(p[0] - x, p[1] - y) <= r);
     for (const v of this.m.vias) {
       if (!v.removeUnused) continue;
       const map = /* @__PURE__ */ new Map();
@@ -131811,10 +132238,10 @@ var ZoneFiller = class {
     }
   }
   // ------------------------------------------------------------ fillSingleZone / BuildSmoothedPoly
-  fillSingleZone(z2, layer3) {
-    const { maxExtents, smoothed } = this.buildSmoothedPoly(z2, layer3);
-    if (isCopper(layer3)) return this.fillCopperZone(z2, layer3, smoothed, maxExtents);
-    return this.fillNonCopperZone(z2, layer3, smoothed);
+  fillSingleZone(z2, layer4) {
+    const { maxExtents, smoothed } = this.buildSmoothedPoly(z2, layer4);
+    if (isCopper(layer4)) return this.fillCopperZone(z2, layer4, smoothed, maxExtents);
+    return this.fillNonCopperZone(z2, layer4, smoothed);
   }
   smooth(z2, a) {
     if (!z2.smoothing || !(z2.radius > 0) || z2.teardrop) return a;
@@ -131826,7 +132253,7 @@ var ZoneFiller = class {
     }
     return booleanOpD(ClipType.Union, out2.map(toPath2), null, FillRule.NonZero, PREC);
   }
-  buildSmoothedPoly(z2, layer3) {
+  buildSmoothedPoly(z2, layer4) {
     const flattened = z2.outline;
     const smoothReq = !!z2.smoothing && !z2.teardrop;
     const maxExt = flattened;
@@ -131835,7 +132262,7 @@ var ZoneFiller = class {
     const bb = grow(z2.bbox, eps);
     const sameNet2 = [], diffNet = [];
     for (const c of this.zones) {
-      if (c === z2 || !c.layers.includes(layer3) || c.ruleArea || c.teardrop || !hits(c.bbox, bb)) continue;
+      if (c === z2 || !c.layers.includes(layer4) || c.ruleArea || c.teardrop || !hits(c.bbox, bb)) continue;
       if (c.net === z2.net) {
         if (collide(z2.outline, c.outline)) sameNet2.push(c);
       } else if (collide(z2.outline, c.outline)) diffNet.push(c);
@@ -131857,7 +132284,7 @@ var ZoneFiller = class {
     return { maxExtents, smoothed };
   }
   // ------------------------------------------------------------ knockouts
-  knockoutThermalReliefs(z2, layer3, fill3, thermal, noConn, solid) {
+  knockoutThermalReliefs(z2, layer4, fill3, thermal, noConn, solid) {
     const holes = [];
     let holesP = [];
     const zb = grow(z2.bbox, this.worst);
@@ -131867,9 +132294,9 @@ var ZoneFiller = class {
       if (it.kind !== "pad" || !it.pad) continue;
       const pad2 = it.pad;
       const npthWithHole = pad2.type === "np_thru_hole" && !!pad2.drill && pad2.drill.w > 0;
-      if (!pad2.layers.has(layer3) && !npthWithHole) continue;
+      if (!pad2.layers.has(layer4) && !npthWithHole) continue;
       if (!hits(grow(it.bbox, this.worst), z2.bbox) && !hits(it.bbox, zb)) continue;
-      const sh = padShapeOn(pad2, layer3, this.m.copper);
+      const sh = padShapeOn(pad2, layer4, this.m.copper);
       if (sh.shape !== "custom") {
         const eff = sh.shape === "circle" ? Math.max(sh.w, sh.h, pad2.drill ? Math.max(pad2.drill.w, pad2.drill.h) : 0) : 0;
         const key3 = [pad2.x.toFixed(6), pad2.y.toFixed(6), eff ? eff : sh.w, eff ? eff : sh.h, sh.shape, pad2.rot, pad2.net].join("|");
@@ -131877,17 +132304,17 @@ var ZoneFiller = class {
         seen.add(key3);
       }
       let noConnection = pad2.net !== z2.net;
-      if (!z2.teardrop && (z2.net === "" || this.padFlash.get(pad2)?.get(layer3) === false)) noConnection = true;
+      if (!z2.teardrop && (z2.net === "" || this.padFlash.get(pad2)?.get(layer4) === false)) noConnection = true;
       if (noConnection) {
         noConn.push(pad2);
         continue;
       }
       let conn = z2.teardrop ? "FULL" : this.connection(z2, pad2);
-      if (conn === "THERMAL" && !this.padFlashes(pad2, layer3)) conn = "NONE";
+      if (conn === "THERMAL" && !this.padFlashes(pad2, layer4)) conn = "NONE";
       if (conn === "THERMAL") {
-        if (collide(fill3, this.padShape(pad2, layer3, 0))) {
+        if (collide(fill3, this.padShape(pad2, layer4, 0))) {
           thermal.push(pad2);
-          holesP = holesP.concat(this.padShape(pad2, layer3, this.thermalGap(z2, pad2)));
+          holesP = holesP.concat(this.padShape(pad2, layer4, this.thermalGap(z2, pad2)));
         }
       } else if (conn === "NONE") {
         if (hatch) {
@@ -131895,27 +132322,27 @@ var ZoneFiller = class {
           continue;
         }
         const padClr = Math.max(z2.clearance, 0);
-        if (this.padFlashes(pad2, layer3)) holesP = holesP.concat(this.padShape(pad2, layer3, padClr));
+        if (this.padFlashes(pad2, layer4)) holesP = holesP.concat(this.padShape(pad2, layer4, padClr));
         else if (pad2.drill && pad2.drill.w > 0) holesP = holesP.concat(this.holeShape(pad2, Math.max(this.rules.holeClearance, padClr)));
       }
     }
     if (hatch) {
       const seenV = /* @__PURE__ */ new Set();
       for (const v of this.m.vias) {
-        if (!v.layers.includes(layer3)) continue;
+        if (!v.layers.includes(layer4)) continue;
         const vb = { x0: v.x - v.size / 2 - this.worst, y0: v.y - v.size / 2 - this.worst, x1: v.x + v.size / 2 + this.worst, y1: v.y + v.size / 2 + this.worst };
         if (!hits(vb, z2.bbox)) continue;
         const key3 = [v.x.toFixed(6), v.y.toFixed(6), Math.max(v.drill, v.size), v.net].join("|");
         if (seenV.has(key3)) continue;
         seenV.add(key3);
         let noConnection = v.net !== z2.net;
-        if (this.padFlash.get(v)?.get(layer3) === false) noConnection = true;
+        if (this.padFlash.get(v)?.get(layer4) === false) noConnection = true;
         if (noConnection) continue;
         const gap = z2.thermalGap;
         if (z2.connect === "THERMAL") {
           if (gap > 0) {
             thermal.push(v);
-            holesP = holesP.concat(this.viaShape(v, layer3, gap));
+            holesP = holesP.concat(this.viaShape(v, layer4, gap));
           }
         } else if (z2.connect === "NONE") {
         } else solid.push(v);
@@ -131924,13 +132351,13 @@ var ZoneFiller = class {
     if (holes.length) holesP = holesP.concat(shapes(holes));
     return holesP.length ? subtract2(fill3, union3(holesP)) : fill3;
   }
-  buildCopperItemClearances(z2, layer3, noConn) {
+  buildCopperItemClearances(z2, layer4, noConn) {
     const out2 = [];
     const extra = EXTRA_MARGIN;
     const zb = grow(z2.bbox, this.worst + extra);
     const seenP = /* @__PURE__ */ new Set();
     for (const pad2 of noConn) {
-      const sh = padShapeOn(pad2, layer3, this.m.copper);
+      const sh = padShapeOn(pad2, layer4, this.m.copper);
       if (sh.shape !== "custom") {
         const eff = sh.shape === "circle" ? Math.max(sh.w, sh.h, pad2.drill ? Math.max(pad2.drill.w, pad2.drill.h) : 0) : 0;
         const key3 = [pad2.x.toFixed(6), pad2.y.toFixed(6), eff ? eff : sh.w, eff ? eff : sh.h, sh.shape, pad2.rot, pad2.net].join("|");
@@ -131940,13 +132367,13 @@ var ZoneFiller = class {
       const initGap = -1;
       let gap = initGap;
       const hasHole = !!pad2.drill && pad2.drill.w > 0;
-      const flash = this.padFlashes(pad2, layer3) && pad2.layers.has(layer3);
+      const flash = this.padFlashes(pad2, layer4) && pad2.layers.has(layer4);
       const plated = hasHole && pad2.type === "thru_hole";
       const override2 = padOverride(pad2, "clearance");
       if (flash || plated) gap = Math.max(gap, this.clearance(z2, pad2.net, override2));
       if (flash && gap >= 0) {
         const npthBare = pad2.type === "np_thru_hole" && pad2.drill && (sh.shape === "circle" && pad2.drill.w >= sh.w - 1e-9 || sh.shape === "oval" && pad2.drill.w >= sh.w - 1e-9 && pad2.drill.h >= sh.h - 1e-9);
-        if (!npthBare) out2.push(this.padShape(pad2, layer3, gap + extra));
+        if (!npthBare) out2.push(this.padShape(pad2, layer4, gap + extra));
       }
       if (hasHole) {
         let holeGap = this.rules.holeClearance || 0;
@@ -131958,7 +132385,7 @@ var ZoneFiller = class {
     }
     const seenT = /* @__PURE__ */ new Set();
     for (const it of this.items) {
-      if (it.kind === "pad" || !it.layers.has(layer3) || !hits(it.bbox, zb)) continue;
+      if (it.kind === "pad" || !it.layers.has(layer4) || !hits(it.bbox, zb)) continue;
       if (it.kind === "via" && it.via) {
         const v = it.via;
         const key3 = [v.x.toFixed(6), v.y.toFixed(6), Math.max(v.drill, v.size), v.net].join("|");
@@ -131966,10 +132393,10 @@ var ZoneFiller = class {
         seenT.add(key3);
         let sameNet2 = v.net === z2.net;
         if (!z2.teardrop && z2.net === "") sameNet2 = false;
-        if (this.padFlash.get(v)?.get(layer3) === false) sameNet2 = false;
+        if (this.padFlash.get(v)?.get(layer4) === false) sameNet2 = false;
         let gap = -1;
         if (!sameNet2) gap = Math.max(gap, this.clearance(z2, v.net, null));
-        if (this.viaFlashes(v, layer3) && gap > 0) out2.push(this.viaShape(v, layer3, gap + extra));
+        if (this.viaFlashes(v, layer4) && gap > 0) out2.push(this.viaShape(v, layer4, gap + extra));
         let holeGap = -1;
         if (!sameNet2) holeGap = Math.max(holeGap, this.rules.holeClearance || 0);
         gap = Math.max(gap, holeGap);
@@ -132010,14 +132437,14 @@ var ZoneFiller = class {
       const gnet = netN ? typeof netN[1] === "number" ? this.m.doc.nets.get(netN[1]) || "" : str(netN[1]) : null;
       for (const g2 of it.geom) {
         if (g2.point) continue;
-        if (g2.layer === layer3) {
+        if (g2.layer === layer4) {
           const same = gnet !== null && gnet === z2.net && z2.net !== "";
           addGeom2(g2, same ? -1 : gfxGap);
         } else if (g2.layer === "Margin") addGeom2(g2, Math.max(gfxGap, edgeGap));
       }
     }
     for (const fp of this.m.footprints) {
-      for (const g2 of footprintGeoms(fp, layer3, { plotReference: true, plotValue: true, subtractMaskFromSilk: false })) {
+      for (const g2 of footprintGeoms(fp, layer4, { plotReference: true, plotValue: true, subtractMaskFromSilk: false })) {
         if (g2.hiddenText) continue;
         if (has(fp.node, "net_tie_pad_groups") || K3(fp.node, "net_tie_pad_groups")) continue;
         addGeom2(g2, gfxGap);
@@ -132034,19 +132461,19 @@ var ZoneFiller = class {
       }
       if (polys.length) out2.push(union3(shapes(polys)));
     }
-    for (const k of this.zones) if (k.ruleArea && k.noFills && k.layers.includes(layer3) && hits(k.bbox, z2.bbox) && !z2.teardrop) out2.push(k.outline);
+    for (const k of this.zones) if (k.ruleArea && k.noFills && k.layers.includes(layer4) && hits(k.bbox, z2.bbox) && !z2.teardrop) out2.push(k.outline);
     return union3(out2.flat());
   }
   /** buildDifferentNetZoneClearances: higher-priority zones of other nets, as filled, grown by the clearance. */
-  differentNetZoneClearances(z2, layer3) {
+  differentNetZoneClearances(z2, layer4) {
     const out2 = [];
     for (const k of this.zones) {
-      if (k === z2 || k.ruleArea || k.teardrop || !k.layers.includes(layer3)) continue;
+      if (k === z2 || k.ruleArea || k.teardrop || !k.layers.includes(layer4)) continue;
       if (!higherPriority(k, z2) || k.net === z2.net) continue;
       const reach = this.worst + z2.minThickness;
       if (!hits(grow(z2.bbox, reach), k.bbox) || !collide(z2.outline, k.outline, reach)) continue;
       const f2 = this.fills.get(k);
-      const fp = f2 ? f2.get(layer3) : null;
+      const fp = f2 ? f2.get(layer4) : null;
       if (!fp || !fp.length) continue;
       const gap = Math.max(-1, this.clearance(z2, k.net, null), k.clearance);
       if (gap < 0) continue;
@@ -132054,13 +132481,13 @@ var ZoneFiller = class {
     }
     return union3(out2.flat());
   }
-  subtractHigherPriorityZones(z2, layer3, fill3) {
+  subtractHigherPriorityZones(z2, layer4, fill3) {
     const ko = [];
-    for (const k of this.zones) if (k !== z2 && !k.ruleArea && !k.teardrop && k.net === z2.net && k.priority > z2.priority && k.layers.includes(layer3) && hits(k.bbox, z2.bbox)) ko.push(k.outline);
+    for (const k of this.zones) if (k !== z2 && !k.ruleArea && !k.teardrop && k.net === z2.net && k.priority > z2.priority && k.layers.includes(layer4) && hits(k.bbox, z2.bbox)) ko.push(k.outline);
     return ko.length ? subtract2(fill3, union3(ko.flat())) : fill3;
   }
   // ------------------------------------------------------------ thermal spokes
-  buildThermalSpokes(z2, layer3, items) {
+  buildThermalSpokes(z2, layer4, items) {
     const spokes = [];
     const halfW = (z2.hatch ? z2.hatch.thickness : z2.minThickness) / 2;
     const eps = this.maxError;
@@ -132069,8 +132496,8 @@ var ZoneFiller = class {
       const pad2 = isVia ? null : item, via = isVia ? item : null;
       let gap, spokeW, circular;
       if (pad2) {
-        if (!pad2.layers.has(layer3)) continue;
-        const sh = padShapeOn(pad2, layer3, this.m.copper);
+        if (!pad2.layers.has(layer4)) continue;
+        const sh = padShapeOn(pad2, layer4, this.m.copper);
         circular = sh.shape === "circle" || sh.shape === "oval" && Math.abs(sh.w - sh.h) < 1e-9;
         gap = this.thermalGap(z2, pad2);
         spokeW = Math.min(this.spokeWidth(z2, pad2), Math.min(sh.w, sh.h));
@@ -132078,15 +132505,15 @@ var ZoneFiller = class {
       } else if (via && z2.hatch) {
         circular = true;
         gap = z2.thermalGap;
-        spokeW = Math.min(z2.spokeWidth, via.sizes ? via.sizes.get(layer3) ?? via.size : via.size);
+        spokeW = Math.min(z2.spokeWidth, via.sizes ? via.sizes.get(layer4) ?? via.size : via.size);
         if (spokeW < z2.minThickness) continue;
       } else continue;
       const half = spokeW / 2;
       let bw, bh, cx, cy, orient = 0, angle = 0;
       if (pad2) {
-        const sh = padShapeOn(pad2, layer3, this.m.copper);
+        const sh = padShapeOn(pad2, layer4, this.m.copper);
         if (sh.shape === "custom") {
-          const polys = this.padShape(pad2, layer3, 0);
+          const polys = this.padShape(pad2, layer4, 0);
           const b = bboxOf3(polys.map((p) => p.map((q4) => {
             const [x, y] = rot2(q4.x - pad2.x, q4.y - pad2.y, -pad2.rot);
             return { x, y };
@@ -132103,14 +132530,14 @@ var ZoneFiller = class {
         orient = pad2.rot;
         angle = this.spokeAngle(pad2);
       } else {
-        const d = via.sizes ? via.sizes.get(layer3) ?? via.size : via.size;
+        const d = via.sizes ? via.sizes.get(layer4) ?? via.size : via.size;
         bw = bh = d;
         cx = via.x;
         cy = via.y;
       }
       const infl = gap + eps + halfW;
       const hx = bw / 2 + infl, hy = bh / 2 + infl;
-      const build2 = (base2) => {
+      const build3 = (base2) => {
         const out2 = [];
         for (const k of [0, 90, 180, 270]) {
           const a = (k + base2) * Math.PI / 180;
@@ -132140,9 +132567,9 @@ var ZoneFiller = class {
       };
       let four;
       if (circular) {
-        four = build2(0);
+        four = build3(0);
         if (angle) four = four.map((s2) => s2.map((p) => rot2(p[0], p[1], angle)));
-      } else four = build2(angle);
+      } else four = build3(angle);
       for (const s2 of four) spokes.push(s2.map((p) => {
         const [x, y] = rot2(p[0], p[1], orient);
         return [cx + x, cy + y];
@@ -132151,22 +132578,22 @@ var ZoneFiller = class {
     return spokes;
   }
   // ------------------------------------------------------------ fillCopperZone
-  fillCopperZone(z2, layer3, smoothed, maxExtents) {
+  fillCopperZone(z2, layer4, smoothed, maxExtents) {
     const halfMin = z2.minThickness / 2;
     const eps = EPSILON;
     const prune = halfMin - eps > eps;
     const thermal = [], noConn = [], solidVias = [];
     let fill3 = smoothed;
-    fill3 = this.knockoutThermalReliefs(z2, layer3, fill3, thermal, noConn, solidVias);
+    fill3 = this.knockoutThermalReliefs(z2, layer4, fill3, thermal, noConn, solidVias);
     let rings = [];
     if (z2.hatch) {
-      const r = this.hatchThermalRings(z2, layer3, smoothed, thermal);
+      const r = this.hatchThermalRings(z2, layer4, smoothed, thermal);
       rings = r;
       if (r.length) fill3 = union3(fill3, r);
     }
-    const clearanceHoles = this.buildCopperItemClearances(z2, layer3, noConn);
-    const spokes = this.buildThermalSpokes(z2, layer3, thermal);
-    const zoneClr = this.differentNetZoneClearances(z2, layer3);
+    const clearanceHoles = this.buildCopperItemClearances(z2, layer4, noConn);
+    const spokes = this.buildThermalSpokes(z2, layer4, thermal);
+    const zoneClr = this.differentNetZoneClearances(z2, layer4);
     if (spokes.length) {
       const reach = 2 * Math.max(halfMin - eps, 0) + 0.05;
       const windows = shapes(spokes.map((sp) => {
@@ -132203,10 +132630,10 @@ var ZoneFiller = class {
     }));
     if (z2.hatch) {
       const discs = [];
-      for (const v of solidVias) if (v.layers.includes(layer3)) for (const d of this.viaShape(v, layer3, 0)) discs.push(d);
+      for (const v of solidVias) if (v.layers.includes(layer4)) for (const d of this.viaShape(v, layer4, 0)) discs.push(d);
       const protect = union3(union3(rings, clearanceHoles), discs.length ? intersect2(union3(discs), smoothed) : []);
-      fill3 = this.addHatch(z2, layer3, fill3, protect);
-    } else if (z2.thieving) fill3 = this.addCopperThievingPattern(z2, layer3, fill3);
+      fill3 = this.addHatch(z2, layer4, fill3, protect);
+    } else if (z2.thieving) fill3 = this.addCopperThievingPattern(z2, layer4, fill3);
     if (prune) fill3 = inflate2(fill3, halfMin - eps, true, this.maxError);
     if (rings.length) fill3 = union3(fill3, rings);
     const padHoles = [];
@@ -132220,7 +132647,7 @@ var ZoneFiller = class {
       apron = subtract2(apron, zoneClr);
       fill3 = this.postKnockoutMinWidthPrune(z2, fill3, apron);
     }
-    fill3 = this.subtractHigherPriorityZones(z2, layer3, fill3);
+    fill3 = this.subtractHigherPriorityZones(z2, layer4, fill3);
     const noise = this.maxError * this.maxError;
     fill3 = fromPolygons(polygonsOf(fill3).filter((pg) => Math.abs(signedArea(pg[0])) >= noise));
     return fill3;
@@ -132240,14 +132667,14 @@ var ZoneFiller = class {
     return intersect2(f2, pre);
   }
   // ------------------------------------------------------------ hatch
-  hatchThermalRings(z2, layer3, smoothed, items) {
+  hatchThermalRings(z2, layer4, smoothed, items) {
     const all2 = [];
     for (const item of items) {
       const pad2 = item.fp ? item : null, via = pad2 ? null : item;
       let ring;
       if (pad2) {
-        if (!pad2.layers.has(layer3)) continue;
-        const sh = padShapeOn(pad2, layer3, this.m.copper);
+        if (!pad2.layers.has(layer4)) continue;
+        const sh = padShapeOn(pad2, layer4, this.m.copper);
         const circ = sh.shape === "circle" || sh.shape === "oval" && Math.abs(sh.w - sh.h) < 1e-9;
         const gap = this.thermalGap(z2, pad2);
         const sw = Math.min(this.spokeWidth(z2, pad2), Math.min(sh.w, sh.h));
@@ -132256,9 +132683,9 @@ var ZoneFiller = class {
           const [ox, oy] = rot2(sh.offset[0], sh.offset[1], pad2.rot);
           const r = Math.max(sh.w, sh.h) / 2;
           ring = subtract2([shape(circlePoints(pad2.x + ox, pad2.y + oy, r + gap + sw, this.maxError))], [shape(circlePoints(pad2.x + ox, pad2.y + oy, r + gap, this.maxError))]);
-        } else ring = subtract2(this.padShape(pad2, layer3, gap + sw), this.padShape(pad2, layer3, gap));
+        } else ring = subtract2(this.padShape(pad2, layer4, gap + sw), this.padShape(pad2, layer4, gap));
       } else if (via) {
-        const d = via.sizes ? via.sizes.get(layer3) ?? via.size : via.size;
+        const d = via.sizes ? via.sizes.get(layer4) ?? via.size : via.size;
         const sw = Math.min(z2.spokeWidth, d);
         if (sw < z2.minThickness) continue;
         const r = d / 2 + z2.thermalGap;
@@ -132269,7 +132696,7 @@ var ZoneFiller = class {
     return all2.length ? intersect2(union3(all2), smoothed) : [];
   }
   /** ZONE_FILLER::addHatchFillTypeOnZone. */
-  addHatch(z2, layer3, fill3, rings) {
+  addHatch(z2, layer4, fill3, rings) {
     const h3 = z2.hatch;
     const thickness = Math.max(h3.thickness, z2.minThickness + 1e-3);
     const grid2 = thickness + h3.gap;
@@ -132300,7 +132727,7 @@ var ZoneFiller = class {
         }
       }
     }
-    const off = h3.offsets.get(layer3) || [0, 0];
+    const off = h3.offsets.get(layer4) || [0, 0];
     const mod = (a, b) => a - b * Math.trunc(a / b);
     const x0 = bb.x0 - mod(bb.x0, grid2) - grid2, y0 = bb.y0 - mod(bb.y0, grid2) - grid2;
     const holes = [];
@@ -132341,7 +132768,7 @@ var ZoneFiller = class {
    * inside the fill (the inset sideLen / 2 or the dot radius, + 1 nm) for a whole stamp; hatch keeps a line-width
    * border and carves (gap + min thickness) voids from the interior.  A zero gap or size gives no fill.
    */
-  addCopperThievingPattern(z2, layer3, fill3) {
+  addCopperThievingPattern(z2, layer4, fill3) {
     const t = z2.thieving;
     const IU3 = 1e6;
     const iu3 = (mm4) => Math.round(mm4 * IU3);
@@ -132356,7 +132783,7 @@ var ZoneFiller = class {
     let region = orient ? rotP(fill3, -orient) : fill3;
     const bb = bboxOf3(region);
     const left = iu3(bb.x0), top2 = iu3(bb.y0), right = iu3(bb.x1), bottom = iu3(bb.y1);
-    let off = t.offsets.get(layer3) || [0, 0];
+    let off = t.offsets.get(layer4) || [0, 0];
     if (orient) off = rot2(off[0], off[1], -orient);
     const ox = iu3(off[0]), oy = iu3(off[1]);
     const minT = iu3(z2.minThickness), size2 = iu3(t.size), gap = iu3(t.gap), width = iu3(t.width);
@@ -132413,10 +132840,10 @@ var ZoneFiller = class {
     return stamps;
   }
   // ------------------------------------------------------------ non-copper
-  fillNonCopperZone(z2, layer3, smoothed) {
+  fillNonCopperZone(z2, layer4, smoothed) {
     const holes = [];
     const take = (g2) => {
-      if (!g2.knockout || g2.layer !== layer3) return;
+      if (!g2.knockout || g2.layer !== layer4) return;
       if (g2.t === "text") {
         const p = textKnockout(g2, 0, this.log);
         if (p.length) holes.push(shapes(p));
@@ -132432,12 +132859,12 @@ var ZoneFiller = class {
     for (const it of this.m.doc.items.values()) if (it.kind !== "footprint") for (const g2 of it.geom) take(g2);
     let fill3 = holes.length ? subtract2(smoothed, union3(holes.flat())) : smoothed;
     const ko = [];
-    for (const k of this.zones) if (k.ruleArea && k.noFills && k.layers.includes(layer3) && hits(k.bbox, z2.bbox)) ko.push(k.outline);
+    for (const k of this.zones) if (k.ruleArea && k.noFills && k.layers.includes(layer4) && hits(k.bbox, z2.bbox)) ko.push(k.outline);
     if (ko.length) fill3 = subtract2(fill3, union3(ko.flat()));
     const half = z2.minThickness / 2, eps = EPSILON;
     fill3 = inflate2(fill3, -(half - eps), false, this.maxError);
-    if (z2.hatch) fill3 = this.addHatch(z2, layer3, fill3, []);
-    else if (z2.thieving) fill3 = this.addCopperThievingPattern(z2, layer3, fill3);
+    if (z2.hatch) fill3 = this.addHatch(z2, layer4, fill3, []);
+    else if (z2.thieving) fill3 = this.addCopperThievingPattern(z2, layer4, fill3);
     if (half - eps > eps) fill3 = inflate2(fill3, half - eps, true, this.maxError);
     return fill3;
   }
@@ -132478,24 +132905,24 @@ var ZoneFiller = class {
       return g2;
     };
     const zoneNodes = [];
-    for (const layer3 of this.m.copper) {
+    for (const layer4 of this.m.copper) {
       const nodes = [];
       for (const it of this.items) {
-        if (!it.layers.has(layer3) || !it.net) continue;
+        if (!it.layers.has(layer4) || !it.net) continue;
         if (it.pad) {
           const p = it.pad;
-          if (!p.layers.has(layer3)) continue;
-          if (this.padFlash.get(p)?.get(layer3) === false) continue;
-          const sh = padShapeOn(p, layer3, this.m.copper);
+          if (!p.layers.has(layer4)) continue;
+          if (this.padFlash.get(p)?.get(layer4) === false) continue;
+          const sh = padShapeOn(p, layer4, this.m.copper);
           const [ox, oy] = rot2(sh.offset[0], sh.offset[1], p.rot);
-          const poly = this.padShape(p, layer3, 0);
+          const poly = this.padShape(p, layer4, 0);
           if (!poly.length) continue;
           nodes.push({ g: idOf(p, true), net: p.net, poly, anchors: [[p.x + ox, p.y + oy]], bbox: bboxOf3(poly) });
         } else if (it.via) {
           const v = it.via;
           const g2 = idOf(v, false);
-          if (this.padFlash.get(v)?.get(layer3) === false) continue;
-          const poly = this.viaShape(v, layer3, 0);
+          if (this.padFlash.get(v)?.get(layer4) === false) continue;
+          const poly = this.viaShape(v, layer4, 0);
           nodes.push({ g: g2, net: v.net, poly, anchors: [[v.x, v.y]], bbox: bboxOf3(poly) });
         } else if (it.track) {
           const t = it.track;
@@ -132505,14 +132932,14 @@ var ZoneFiller = class {
         }
       }
       for (const z2 of this.zones) {
-        if (z2.ruleArea || !z2.layers.includes(layer3) || !z2.net) continue;
-        const outl = this.fillOutlines(z2, layer3);
+        if (z2.ruleArea || !z2.layers.includes(layer4) || !z2.net) continue;
+        const outl = this.fillOutlines(z2, layer4);
         outl.forEach((o, i) => {
           const p = [shape(o)];
           const index = new PathIndex(p[0]);
           const n2 = { g: newId(false), net: z2.net, poly: p, anchors: [], bbox: index.bbox, zone: z2, idx: i, index };
           nodes.push(n2);
-          zoneNodes.push({ n: n2, layer: layer3 });
+          zoneNodes.push({ n: n2, layer: layer4 });
         });
       }
       const byNet = /* @__PURE__ */ new Map();
@@ -132550,7 +132977,7 @@ var ZoneFiller = class {
     isPad.forEach((p, i) => {
       if (p) withPad.add(find(i));
     });
-    for (const { n: n2, layer: layer3 } of zoneNodes) {
+    for (const { n: n2, layer: layer4 } of zoneNodes) {
       const z2 = n2.zone;
       if (!zones.includes(z2)) continue;
       let m = out2.get(z2);
@@ -132558,10 +132985,10 @@ var ZoneFiller = class {
         m = /* @__PURE__ */ new Map();
         out2.set(z2, m);
       }
-      let s2 = m.get(layer3);
+      let s2 = m.get(layer4);
       if (!s2) {
         s2 = /* @__PURE__ */ new Set();
-        m.set(layer3, s2);
+        m.set(layer4, s2);
       }
       if (!withPad.has(find(n2.g))) s2.add(n2.idx);
     }
@@ -132894,7 +133321,7 @@ function statAreas(m, o) {
   }
   const opt = { plotReference: true, plotValue: true, subtractMaskFromSilk: false };
   const log = new PlotLog();
-  const layerPolys = (layer3) => {
+  const layerPolys = (layer4) => {
     let have = [], add2 = [];
     const flush = () => {
       if (add2.length) {
@@ -132902,7 +133329,7 @@ function statAreas(m, o) {
         add2 = [];
       }
     };
-    for (const p of plotLayer(m, layer3, opt, log)) {
+    for (const p of plotLayer(m, layer4, opt, log)) {
       const polys = primPolys(p);
       if (!polys.length) continue;
       if (p.clear) {
@@ -132938,9 +133365,9 @@ function statAreas(m, o) {
     if (!p.drill || !(p.drill.w > 0)) continue;
     if (p.type !== "np_thru_hole") {
       const own = localClearance(p.node) ?? localClearance(fp.node) ?? defClr, cl = Math.min(defClr, own);
-      for (const [layer3, list] of [["F.Cu", fc], ["B.Cu", bc2]]) {
+      for (const [layer4, list] of [["F.Cu", fc], ["B.Cu", bc2]]) {
         const prims = [];
-        padPrims(p, layer3, m, prims, 2 * cl);
+        padPrims(p, layer4, m, prims, 2 * cl);
         for (const pr of prims) list.push(...primPolys(pr).filter((q4) => q4.length > 2));
       }
     } else {
@@ -133656,7 +134083,7 @@ function writeVrml(m, o, meshOf) {
   const frame = (polys) => polys.map((p) => p.map((q4) => [X2(q4[0]), Y(q4[1])]).reverse());
   const opt = { plotReference: true, plotValue: true, subtractMaskFromSilk: false };
   const log = new PlotLog();
-  const layerPolys = (layer3) => {
+  const layerPolys = (layer4) => {
     let have = [];
     let add2 = [];
     const flush = () => {
@@ -133665,7 +134092,7 @@ function writeVrml(m, o, meshOf) {
         add2 = [];
       }
     };
-    for (const p of plotLayer(m, layer3, opt, log)) {
+    for (const p of plotLayer(m, layer4, opt, log)) {
       const polys = primPolys(p);
       if (!polys.length) continue;
       if (p.clear) {
@@ -134692,16 +135119,16 @@ F ${this.recs.length}
   const rows3 = [];
   const stepUid = uid();
   const hasTop = m.footprints.some((fp) => fp.side !== "B.Cu"), hasBot = m.footprints.some((fp) => fp.side === "B.Cu");
-  const boardRow = (layer3) => {
-    const name = legalEntityName(o.nameOf(layer3));
-    if (/\.Paste$/.test(layer3)) return { name, type: "SOLDER_PASTE", context: "BOARD", polarity: "POSITIVE", uid: 0, layer: layer3, role: "board" };
-    if (/\.SilkS$/.test(layer3)) return { name, type: "SILK_SCREEN", context: "BOARD", polarity: "POSITIVE", uid: 0, layer: layer3, role: "board" };
-    if (/\.Mask$/.test(layer3)) return { name, type: "SOLDER_MASK", context: "BOARD", polarity: "POSITIVE", uid: 0, layer: layer3, role: "board" };
-    if (isCopper(layer3)) {
-      const t = (m.doc.layers.get(layer3) || { type: "signal" }).type;
-      return { name, type: t === "power" ? "POWER_GROUND" : t === "mixed" ? "MIXED" : "SIGNAL", context: "BOARD", polarity: "POSITIVE", uid: 0, layer: layer3, role: "board" };
+  const boardRow = (layer4) => {
+    const name = legalEntityName(o.nameOf(layer4));
+    if (/\.Paste$/.test(layer4)) return { name, type: "SOLDER_PASTE", context: "BOARD", polarity: "POSITIVE", uid: 0, layer: layer4, role: "board" };
+    if (/\.SilkS$/.test(layer4)) return { name, type: "SILK_SCREEN", context: "BOARD", polarity: "POSITIVE", uid: 0, layer: layer4, role: "board" };
+    if (/\.Mask$/.test(layer4)) return { name, type: "SOLDER_MASK", context: "BOARD", polarity: "POSITIVE", uid: 0, layer: layer4, role: "board" };
+    if (isCopper(layer4)) {
+      const t = (m.doc.layers.get(layer4) || { type: "signal" }).type;
+      return { name, type: t === "power" ? "POWER_GROUND" : t === "mixed" ? "MIXED" : "SIGNAL", context: "BOARD", polarity: "POSITIVE", uid: 0, layer: layer4, role: "board" };
     }
-    if (/\.(CrtYd|Fab|Adhes)$/.test(layer3) || /^(Dwgs|Cmts|Eco1|Eco2)\.User$/.test(layer3) || layer3 === "Margin" || /^User\.\d+$/.test(layer3)) return { name, type: "DOCUMENT", context: "MISC", polarity: "POSITIVE", uid: 0, layer: layer3, role: "board" };
+    if (/\.(CrtYd|Fab|Adhes)$/.test(layer4) || /^(Dwgs|Cmts|Eco1|Eco2)\.User$/.test(layer4) || layer4 === "Margin" || /^User\.\d+$/.test(layer4)) return { name, type: "DOCUMENT", context: "MISC", polarity: "POSITIVE", uid: 0, layer: layer4, role: "board" };
     return null;
   };
   if (hasTop) rows3.push({ name: legalEntityName("COMP_+_TOP"), type: "COMPONENT", context: "BOARD", polarity: "POSITIVE", uid: 0, role: "comp", side: "F.Cu" });
@@ -134747,11 +135174,11 @@ F ${this.recs.length}
     }
   }
   const auxItems = /* @__PURE__ */ new Map();
-  const auxAdd = (kind, layer3, to, v) => {
-    const k = `${kind}|${layer3}|${to || ""}`;
+  const auxAdd = (kind, layer4, to, v) => {
+    const k = `${kind}|${layer4}|${to || ""}`;
     let e = auxItems.get(k);
     if (!e) {
-      e = { kind, layer: layer3, to, vias: [] };
+      e = { kind, layer: layer4, to, vias: [] };
       auxItems.set(k, e);
     }
     e.vias.push(v);
@@ -134978,7 +135405,7 @@ CMP ${pkg.index} ${X2(fp.x)} ${Y(fp.y)} ${fp.rot ? fix(norm360(360 - fp.rot)) : 
   const log = new PlotLog();
   const conn = new Connections(m);
   const plotOpt = { plotReference: true, plotValue: true, subtractMaskFromSilk: false };
-  const geometry2 = (v, layer3) => "VIA_RoundD" + Math.round((v.sizes && v.sizes.get(layer3) || v.size) * 1e6);
+  const geometry2 = (v, layer4) => "VIA_RoundD" + Math.round((v.sizes && v.sizes.get(layer4) || v.size) * 1e6);
   const layerDir = (r) => `steps/pcb/layers/${r.name}/`;
   const attrlist = (r) => {
     let s2 = `UNITS=${units}
@@ -135003,8 +135430,8 @@ CMP ${pkg.index} ${X2(fp.x)} ${Y(fp.y)} ${fp.rot ? fix(norm360(360 - fp.rot)) : 
     const dir = layerDir(r);
     put4(dir + "attrlist", attrlist(r));
     if (r.role === "board" && r.layer) {
-      const layer3 = r.layer, cu = isCopper(layer3);
-      for (const p of plotLayer(m, layer3, plotOpt, log, conn)) {
+      const layer4 = r.layer, cu = isCopper(layer4);
+      for (const p of plotLayer(m, layer4, plotOpt, log, conn)) {
         const made = F2.prim(p);
         if (!made.length) continue;
         const src = p.meta ? p.meta.src : void 0;
@@ -135020,7 +135447,7 @@ CMP ${pkg.index} ${X2(fp.x)} ${Y(fp.y)} ${fp.rot ? fix(norm360(360 - fp.rot)) : 
             const v = src;
             if (cu) fid(trackSub.get(v), "C", r.name, i);
             A.sys(rec, "pad_usage", "1");
-            A.text(rec, "geometry", geometry2(v, cu ? layer3 : /^B\./.test(layer3) ? last3 : first));
+            A.text(rec, "geometry", geometry2(v, cu ? layer4 : /^B\./.test(layer4) ? last3 : first));
           } else if (src && trackSet.has(src)) {
             if (cu) fid(trackSub.get(src), "C", r.name, i);
           } else if (src && fillSet.has(src)) {
@@ -135360,7 +135787,7 @@ GROUP=Fabrication
     const fin = boardFinish(setup);
     const yn2 = (b) => b ? "yes" : "no";
     const sides = (t, b, none) => t ? b ? "Both" : "Top" : b ? "Bottom" : none;
-    const hasItems = (layer3) => enabled.has(layer3) && plotLayer(m, layer3, plotOpt, new PlotLog(), conn).length > 0;
+    const hasItems = (layer4) => enabled.has(layer4) && plotLayer(m, layer4, plotOpt, new PlotLog(), conn).length > 0;
     const finishNames = { "HAL SnPb": "HASL", "HAL lead-free": "Lead-Free HASL", "Immersion silver": "Immersion Silver", "Immersion tin": "White Tin", OSP: "OSP (Entek)", None: "Bare Cu" };
     const node = (name, display, value, distance = false) => el4("node", [["name", name], ["display", display], ["value", value]].concat(distance ? [["units", units]] : []), [], 2);
     const header = [node("layer_count", "Layer Count", String(m.copper.length))];
@@ -135662,16 +136089,16 @@ function resolveSections(rev, mode, requested) {
   return out2;
 }
 var sectionKeyString = (s2) => [...SECTION_KEYS].filter((k) => s2.has(k)).join("");
-function sectionForLayer(layer3, copper) {
-  if (isCopper(layer3)) return layer3 === copper[0] || layer3 === copper[copper.length - 1] ? "O" : "I";
-  if (/\.Adhes$/.test(layer3)) return "F";
-  if (/\.Paste$/.test(layer3)) return "P";
-  if (/\.SilkS$/.test(layer3)) return "L";
-  if (/\.Mask$/.test(layer3)) return "M";
-  if (layer3 === "Edge.Cuts") return "U";
-  if (/\.CrtYd$/.test(layer3) || layer3 === "Margin") return "D";
-  if (/\.Fab$/.test(layer3)) return "A";
-  if (/User/.test(layer3)) return "D";
+function sectionForLayer(layer4, copper) {
+  if (isCopper(layer4)) return layer4 === copper[0] || layer4 === copper[copper.length - 1] ? "O" : "I";
+  if (/\.Adhes$/.test(layer4)) return "F";
+  if (/\.Paste$/.test(layer4)) return "P";
+  if (/\.SilkS$/.test(layer4)) return "L";
+  if (/\.Mask$/.test(layer4)) return "M";
+  if (layer4 === "Edge.Cuts") return "U";
+  if (/\.CrtYd$/.test(layer4) || layer4 === "Margin") return "D";
+  if (/\.Fab$/.test(layer4)) return "A";
+  if (/User/.test(layer4)) return "D";
   return null;
 }
 var X = class _X {
@@ -136135,17 +136562,17 @@ function writeIpc2581(m, setup, o) {
     for (const fp of m.footprints) for (const p of fp.pads) {
       const front = p.layers.has("F.Cu"), back = p.layers.has("B.Cu");
       if (!p.net || !front && !back) continue;
-      const layer3 = front ? "F.Cu" : "B.Cu", prims = [];
-      padPrims(p, layer3, m, prims);
-      push(p.net, { x: p.x, y: p.y, layer: layer3, secondary: front && back ? "B.Cu" : null, exposure: exposure(front, back, p.layers.has("F.Mask"), p.layers.has("B.Mask")), end: true, via: false, shape: prims[0] || null, rot: p.rot });
+      const layer4 = front ? "F.Cu" : "B.Cu", prims = [];
+      padPrims(p, layer4, m, prims);
+      push(p.net, { x: p.x, y: p.y, layer: layer4, secondary: front && back ? "B.Cu" : null, exposure: exposure(front, back, p.layers.has("F.Mask"), p.layers.has("B.Mask")), end: true, via: false, shape: prims[0] || null, rot: p.rot });
     }
     for (const v of m.vias) {
       const front = v.layers.includes("F.Cu"), back = v.layers.includes("B.Cu");
       if (!v.net || !front && !back) continue;
       const tf2 = v.tentFront ?? m.settings.tentFront, tb = v.tentBack ?? m.settings.tentBack;
       const tracks = m.tracks.filter((t) => v.layers.includes(t.layer) && (near2(t.x1, v.x) && near2(t.y1, v.y) || near2(t.x2, v.x) && near2(t.y2, v.y))).length;
-      const layer3 = front ? "F.Cu" : "B.Cu", d2 = v.sizes && v.sizes.get(layer3) || v.size;
-      push(v.net, { x: v.x, y: v.y, layer: layer3, secondary: front && back ? "B.Cu" : null, exposure: exposure(front, back, front && !tf2, back && !tb), end: tracks < 2, via: true, shape: { k: "circle", x: v.x, y: v.y, d: d2 }, rot: 0 });
+      const layer4 = front ? "F.Cu" : "B.Cu", d2 = v.sizes && v.sizes.get(layer4) || v.size;
+      push(v.net, { x: v.x, y: v.y, layer: layer4, secondary: front && back ? "B.Cu" : null, exposure: exposure(front, back, front && !tf2, back && !tb), end: tracks < 2, via: true, shape: { k: "circle", x: v.x, y: v.y, d: d2 }, rot: 0 });
     }
     if (byNet.size) {
       const codes = /* @__PURE__ */ new Map();
@@ -136309,30 +136736,30 @@ var DISPLAY = {
   "B.CrtYd": "B.Courtyard"
 };
 var PROTEL = { "F.Cu": "gtl", "B.Cu": "gbl", "F.Adhes": "gta", "B.Adhes": "gba", "F.Paste": "gtp", "B.Paste": "gbp", "F.SilkS": "gto", "B.SilkS": "gbo", "F.Mask": "gts", "B.Mask": "gbs", "Edge.Cuts": "gm1" };
-function layerDisplayName(doc2, layer3) {
-  const info = doc2.layers.get(layer3);
-  return info && info.userName || DISPLAY[layer3] || layer3;
+function layerDisplayName(doc2, layer4) {
+  const info = doc2.layers.get(layer4);
+  return info && info.userName || DISPLAY[layer4] || layer4;
 }
-function protelExtension(layer3, copper) {
-  if (PROTEL[layer3]) return PROTEL[layer3];
-  const i = copper.indexOf(layer3);
+function protelExtension(layer4, copper) {
+  if (PROTEL[layer4]) return PROTEL[layer4];
+  const i = copper.indexOf(layer4);
   if (i > 0) return "g" + (i + 1);
   return "gbr";
 }
-function layerAttrs(layer3, copper) {
-  const side = layer3.startsWith("B.") ? "Bot" : "Top";
-  const i = copper.indexOf(layer3);
+function layerAttrs(layer4, copper) {
+  const side = layer4.startsWith("B.") ? "Bot" : "Top";
+  const i = copper.indexOf(layer4);
   if (i >= 0) return { fileFunction: `Copper,L${i + 1},${i === 0 ? "Top" : i === copper.length - 1 ? "Bot" : "Inr"}`, polarity: "Positive" };
-  if (/\.Adhes$/.test(layer3)) return { fileFunction: `Glue,${side}`, polarity: "Positive" };
-  if (/\.Paste$/.test(layer3)) return { fileFunction: `Paste,${side}`, polarity: "Positive" };
-  if (/\.SilkS$/.test(layer3)) return { fileFunction: `Legend,${side}`, polarity: "Positive" };
-  if (/\.Mask$/.test(layer3)) return { fileFunction: `Soldermask,${side}`, polarity: "Negative" };
-  if (layer3 === "Edge.Cuts") return { fileFunction: "Profile,NP", polarity: "" };
-  if (/\.Fab$/.test(layer3)) return { fileFunction: `AssemblyDrawing,${side}`, polarity: "" };
-  if (layer3 === "Dwgs.User") return { fileFunction: "OtherDrawing,Comment", polarity: "" };
-  if (layer3 === "Cmts.User") return { fileFunction: "Other,Comment", polarity: "" };
-  if (layer3 === "Eco1.User") return { fileFunction: "Other,ECO1", polarity: "" };
-  if (layer3 === "Eco2.User") return { fileFunction: "Other,ECO2", polarity: "" };
+  if (/\.Adhes$/.test(layer4)) return { fileFunction: `Glue,${side}`, polarity: "Positive" };
+  if (/\.Paste$/.test(layer4)) return { fileFunction: `Paste,${side}`, polarity: "Positive" };
+  if (/\.SilkS$/.test(layer4)) return { fileFunction: `Legend,${side}`, polarity: "Positive" };
+  if (/\.Mask$/.test(layer4)) return { fileFunction: `Soldermask,${side}`, polarity: "Negative" };
+  if (layer4 === "Edge.Cuts") return { fileFunction: "Profile,NP", polarity: "" };
+  if (/\.Fab$/.test(layer4)) return { fileFunction: `AssemblyDrawing,${side}`, polarity: "" };
+  if (layer4 === "Dwgs.User") return { fileFunction: "OtherDrawing,Comment", polarity: "" };
+  if (layer4 === "Cmts.User") return { fileFunction: "Other,Comment", polarity: "" };
+  if (layer4 === "Eco1.User") return { fileFunction: "Other,ECO1", polarity: "" };
+  if (layer4 === "Eco2.User") return { fileFunction: "Other,ECO2", polarity: "" };
   return { fileFunction: "Other,User", polarity: "" };
 }
 function plottableLayers(doc2) {
@@ -136390,12 +136817,12 @@ function plotGerbers(ctx, o = {}) {
   const rev = ctx.doc.titleBlock && ctx.doc.titleBlock.rev || "rev?";
   const files = [];
   const prims = /* @__PURE__ */ new Map();
-  for (const layer3 of layers) {
-    const ps = plotFile(m, layer3, plot, log);
-    prims.set(layer3, ps);
-    const text3 = writeGerber(ps, layerAttrs(layer3, m.copper), { x2: o.useGerberX2 !== false, origin, software: `KiCad,Pcbnew,${kicadVersion(ctx.doc)}`, date, project: { name, guid: projectGuid(name), rev }, precision: o.precision });
-    const ext = o.useProtelExtensions ? protelExtension(layer3, m.copper) : "gbr";
-    files.push({ name: `${name}-${layerDisplayName(ctx.doc, layer3).replace(/\./g, "_")}.${ext}`, text: text3, layer: layer3 });
+  for (const layer4 of layers) {
+    const ps = plotFile(m, layer4, plot, log);
+    prims.set(layer4, ps);
+    const text3 = writeGerber(ps, layerAttrs(layer4, m.copper), { x2: o.useGerberX2 !== false, origin, software: `KiCad,Pcbnew,${kicadVersion(ctx.doc)}`, date, project: { name, guid: projectGuid(name), rev }, precision: o.precision });
+    const ext = o.useProtelExtensions ? protelExtension(layer4, m.copper) : "gbr";
+    files.push({ name: `${name}-${layerDisplayName(ctx.doc, layer4).replace(/\./g, "_")}.${ext}`, text: text3, layer: layer4 });
   }
   if (m.unfilledZones) log.warn(`${m.unfilledZones} copper zone${m.unfilledZones > 1 ? "s have" : " has"} no fill stored in the board. Fill them with Edit > Fill All Zones before ordering.`);
   return { files, warnings: [...log.messages], prims };
@@ -137130,10 +137557,10 @@ function survey(doc2, P, k) {
     f2.box = [a - 0.25, b - 0.25, c + 0.25, d + 0.25];
   }
   const outline = isFinite(x0) ? [x0, y0, x1, y1] : null;
-  const pourAt = (x, y, layer3) => {
+  const pourAt = (x, y, layer4) => {
     let other = "";
     if (filled) {
-      for (const f2 of fills.get(layer3) || []) {
+      for (const f2 of fills.get(layer4) || []) {
         if (!inBox(f2.box, x, y) || !inPoly2(f2.pts, x, y)) continue;
         if (isGnd(f2.net)) return "gnd";
         other = "plane";
@@ -137141,15 +137568,15 @@ function survey(doc2, P, k) {
       return other;
     }
     for (const z2 of zoneOutlines) {
-      if (!z2.layers.includes(layer3) || !inPoly2(z2.pts, x, y)) continue;
+      if (!z2.layers.includes(layer4) || !inPoly2(z2.pts, x, y)) continue;
       if (isGnd(z2.net)) return "gnd";
       other = "plane";
     }
     return other;
   };
   const gndLayersAt = (x, y) => copper.filter((l) => pourAt(x, y, l) === "gnd").length;
-  const refLayers = (layer3) => {
-    const i = copper.indexOf(layer3);
+  const refLayers = (layer4) => {
+    const i = copper.indexOf(layer4);
     return i < 0 ? [] : [copper[i - 1], copper[i + 1]].filter(Boolean);
   };
   const nearestStitch = (x, y, skip) => {
@@ -138889,7 +139316,7 @@ var isGnd2 = (n2) => !!n2 && GROUND3.test(bare2(n2));
 var r24 = (v) => Math.round(v * 100) / 100;
 var at2 = (x, y) => `(${r24(x)}, ${r24(y)})`;
 var few2 = (l, n2 = 8) => l.length > n2 ? l.slice(0, n2).concat(`and ${l.length - n2} more`) : l;
-var on = (c, layer3) => c.layers instanceof Set ? c.layers.has(layer3) : Array.isArray(c.layers) ? c.layers.includes(layer3) : false;
+var on = (c, layer4) => c.layers instanceof Set ? c.layers.has(layer4) : Array.isArray(c.layers) ? c.layers.includes(layer4) : false;
 var layersOf = (c) => c.layers instanceof Set ? Array.from(c.layers) : Array.isArray(c.layers) ? c.layers : [];
 var ptsOf3 = (t) => t.shape.t === "seg" ? [t.shape.a, t.shape.b] : t.shape.pts || [];
 var widthOf2 = (t) => t.width || (t.shape.r ? t.shape.r * 2 : 0.2);
@@ -139166,16 +139593,16 @@ function reviewCraft(doc2, P, k, settings3, add2) {
   }
   {
     const items = [];
-    for (const layer3 of copper.slice(1, -1)) {
-      if (!groundLayers.has(layer3)) continue;
+    for (const layer4 of copper.slice(1, -1)) {
+      if (!groundLayers.has(layer4)) continue;
       const by = /* @__PURE__ */ new Map();
       for (const t of tracks) {
-        if (!on(t, layer3) || isGnd2(t.net)) continue;
+        if (!on(t, layer4) || isGnd2(t.net)) continue;
         by.set(t.net, (by.get(t.net) || 0) + (t.length || 0));
       }
       const total2 = Array.from(by.values()).reduce((a, b) => a + b, 0);
       if (total2 < 1) continue;
-      items.push(`${layer3}: ${r24(total2)} mm of track (${few2(Array.from(by.entries()).sort((a, b) => b[1] - a[1]).map(([n2, mm4]) => `${bare2(n2)} ${r24(mm4)} mm`), 5).join(", ")})`);
+      items.push(`${layer4}: ${r24(total2)} mm of track (${few2(Array.from(by.entries()).sort((a, b) => b[1] - a[1]).map(([n2, mm4]) => `${bare2(n2)} ${r24(mm4)} mm`), 5).join(", ")})`);
     }
     if (items.length) add2("planes.signals", "warning", 'A signal is routed on an inner ground plane. Every track there is a slot in the plane that the signals above and below must cross, which is what the plane is there to prevent. Route on the outer layers and keep the plane whole (board.route(layers=["F.Cu", "B.Cu"]); board.unroute(net) takes the track off).', items);
   }

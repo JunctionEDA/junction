@@ -60,6 +60,12 @@ pub enum ClientMsg {
         #[serde(rename = "docId")]
         doc_id: Uuid,
     },
+    /// Answered at once with a `pong` carrying the same `t`: how a client measures its round
+    /// trip to the server (the web editor predicts peers' pointers ahead by the delay).
+    ping {
+        #[serde(default)]
+        t: Value,
+    },
     /// Ask a desktop editor in the document to do something only the desktop
     /// application can.  `action` is "fill_zones": the browser editor has no zone
     /// filler, so it asks a desktop collaborator to refill and share the result.
@@ -145,6 +151,11 @@ pub enum ServerMsg {
         #[serde(rename = "docId")]
         doc_id: Uuid,
         peers: Value,
+    },
+    /// The answer to a `ping`.
+    pong {
+        #[serde(default)]
+        t: Value,
     },
     peer_joined {
         #[serde(rename = "docId")]

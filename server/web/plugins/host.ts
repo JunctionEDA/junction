@@ -74,7 +74,7 @@ const LS_PANEL = "kc.plugins.panel";
 let S: PluginState = {
   loaded: false, signedIn: false, error: null, installed: [], catalog: null, running: {}, logs: {},
   registry: null, registryQuery: "", published: {}, admin: false, moderation: null, project: { id: null, plugins: [], canEdit: false, dismissed: "" },
-  manager: { open: false, tab: "installed", selected: null },
+  manager: { open: false, tab: "catalog", selected: null },
   panel: (() => { try { const j = JSON.parse(ls.get(LS_PANEL) || "{}"); return { open: !!j.open, active: typeof j.active === "string" ? j.active : null, width: Math.min(640, Math.max(240, Number(j.width) || 320)) }; } catch { return { open: false, active: null, width: 320 }; } })(),
   prompt: null, consent: null, editor: null, official: null, officialError: null, pyActions: {}, window: null, actionOrder: [], actionOrderLegacy: false,
 };
@@ -914,8 +914,9 @@ export function closeWindow() {
   // A plugin that does not answer (still busy, or stuck) does not get to keep a window over the editor.
   window.setTimeout(() => { if (S.window === w) { set({ window: null }); showFrames(); } }, run ? 1500 : 0);
 }
+/** Opens the manager on `tab`, or on the Catalog when the caller names none. */
 export function openManager(tab?: PluginState["manager"]["tab"]) {
-  set({ manager: Object.assign({}, S.manager, { open: true, tab: tab || S.manager.tab }) });
+  set({ manager: Object.assign({}, S.manager, { open: true, tab: tab || "catalog" }) });
   if (!S.catalog) void loadCatalog(); void loadRegistry(); void loadProject(); void refresh().then(() => loadModeration());
 }
 export const closeManager = () => set({ manager: Object.assign({}, S.manager, { open: false }), consent: null });

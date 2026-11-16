@@ -1,14 +1,14 @@
 {
  "cyberboard": {
   "hand": {
-   "copper_errors": 200,
+   "copper_errors": 10,
    "ground_pour": {
     "B.Cu": {
      "percent": 49.5,
      "pieces": 9
     },
     "F.Cu": {
-     "percent": 46.2,
+     "percent": 46.4,
      "pieces": 20
     },
     "In1.Cu": {
@@ -19,43 +19,43 @@
    "ground_vias": 85,
    "power_vias": 23,
    "signal_vias": 55,
-   "square_corners": 11,
+   "square_corners": 8,
    "track_mm": 950.0,
    "unrouted": 1
   },
   "parts": {
    "drc": 100,
    "pour_coverage": 100,
-   "pour_pieces": 97,
+   "pour_pieces": 100,
    "signal_vias": 100,
-   "square_corners": 0,
+   "square_corners": 100,
    "track_length": 100,
    "unrouted": 0
   },
   "routed": {
-   "copper_errors": 79,
+   "copper_errors": 9,
    "ground_pour": {
     "B.Cu": {
-     "percent": 70.1,
-     "pieces": 2
+     "percent": 71.2,
+     "pieces": 1
     },
     "F.Cu": {
-     "percent": 43.7,
-     "pieces": 23
+     "percent": 43.4,
+     "pieces": 21
     },
     "In1.Cu": {
-     "percent": 65.5,
+     "percent": 63.0,
      "pieces": 6
     }
    },
-   "ground_vias": 54,
-   "power_vias": 17,
-   "signal_vias": 42,
-   "square_corners": 46,
-   "track_mm": 725.4,
-   "unrouted": 16
+   "ground_vias": 51,
+   "power_vias": 18,
+   "signal_vias": 39,
+   "square_corners": 2,
+   "track_mm": 732.5,
+   "unrouted": 12
   },
-  "score": 70.6
+  "score": 75.0
  },
  "ledify": {
   "hand": {
@@ -77,7 +77,7 @@
    "ground_vias": 259,
    "power_vias": 81,
    "signal_vias": 59,
-   "square_corners": 16,
+   "square_corners": 11,
    "track_mm": 819.7,
    "unrouted": 1
   },
@@ -88,13 +88,13 @@
    "signal_vias": 100,
    "square_corners": 100,
    "track_length": 100,
-   "unrouted": 60
+   "unrouted": 80
   },
   "routed": {
    "copper_errors": 10,
    "ground_pour": {
     "B.Cu": {
-     "percent": 85.9,
+     "percent": 85.5,
      "pieces": 1
     },
     "F.Cu": {
@@ -102,17 +102,17 @@
      "pieces": 14
     },
     "In1.Cu": {
-     "percent": 86.6,
+     "percent": 86.2,
      "pieces": 1
     }
    },
    "ground_vias": 122,
-   "power_vias": 28,
+   "power_vias": 43,
    "signal_vias": 37,
-   "square_corners": 8,
+   "square_corners": 7,
    "track_mm": 768.2,
-   "unrouted": 3
+   "unrouted": 2
   },
-  "score": 88.4
+  "score": 93.4
  }
 }

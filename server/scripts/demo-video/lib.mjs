@@ -84,7 +84,7 @@ export async function record(pages, dirs) {
     // a page that is busy for a long stretch (a big redraw) keeps its previous photograph for this step
     const shot = async (p, i) => { const to = path.join(dirs[i], file);
       const s0 = Date.now();
-      try { await p.screenshot({ path: to, type: 'jpeg', quality: 92, timeout: n === 1 ? 90000 : 25000 }); if (process.env.SHOT_LOG && Date.now() - s0 > 2000) console.log(`  slow photo: page ${i}, frame ${n}, ${Date.now() - s0} ms`); }
+      try { await p.screenshot({ path: to, type: 'jpeg', quality: 95, timeout: n === 1 ? 90000 : 25000 }); if (process.env.SHOT_LOG && Date.now() - s0 > 2000) console.log(`  slow photo: page ${i}, frame ${n}, ${Date.now() - s0} ms`); }
       catch (e) { const prev = n > 1 && path.join(dirs[i], String(n - 1).padStart(5, '0') + '.jpg'); if (!prev || !fs.existsSync(prev)) { if (i > 0) return; throw e; } fs.copyFileSync(prev, to); } };
     await Promise.all(pages.map(shot));
     frames.push({ t: +t.toFixed(3), file }); t += dt;

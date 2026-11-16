@@ -108,6 +108,11 @@ export function startMini(root: HTMLElement): void {
   let tool: Tool = "select", layer: Layer = "F.Cu", box: Box = HOME.slice() as Box;
   let view: View | null = null, selected: string | null = null, hover: Pt | null = null;
   let rats: Rat[] = [], dirty = true, touched = false;
+  // What a teammate is carrying right now.  The board under it is drawn once without it and kept;
+  // only the carried items (and the ratsnest, which follows them) are drawn again each frame.
+  const motion = new Map<string, number>();
+  let motionKey = "", clock = 0;
+  const stir = (id: string): void => { motion.set(id, clock); };
   let drag: { id: string; from: Pt; grab: Pt; moved: boolean } | null = null;
   let pan: { at: Pt; box: Box } | null = null;
   let route: { net: number; from: Pt; layer: Layer; made: string[] } | null = null;
@@ -175,12 +180,11 @@ export function startMini(root: HTMLElement): void {
   }
   /** Puts a cluster, its parts and the tracks laid in it, `off` away from its place on the board. */
   function setUnit(u: number, off: Pt): void {
-    for (const id of meta.units[u].parts) { const it = doc.items.get(id), h = spotOf(id); if (it) K.moveItem(doc, it, f3(h[0] + off[0]), f3(h[1] + off[1]), 1e6); }
+    for (const id of meta.units[u].parts) { const it = doc.items.get(id), h = spotOf(id); if (it) { K.moveItem(doc, it, f3(h[0] + off[0]), f3(h[1] + off[1]), 1e6); stir(id); } }
     meta.routes.forEach((r, i) => {
       if (INNER[i] !== u) return;
-      for (const id of [...r.ids, ...(r.via ? [r.via] : [])]) { const base = orig.get(id); if (!base) continue; const had = doc.items.has(id); if (had) doc.items.set(id, shifted(base, off)); else if (spare.has(id)) spare.set(id, shifted(base, off)); }
+      for (const id of [...r.ids, ...(r.via ? [r.via] : [])]) { const base = orig.get(id); if (!base) continue; const had = doc.items.has(id); if (had) { doc.items.set(id, shifted(base, off)); stir(id); } else if (spare.has(id)) spare.set(id, shifted(base, off)); }
     });
-    dirty = true;
   }
   /** A copy of an item's node with one thing changed, as an item of its own under the same id. */
   function variant(it: any, change: (node: any[]) => void): any {
@@ -428,7 +432,7 @@ export function startMini(root: HTMLElement): void {
   /** Carries an item with the pointer, on the grid measured from `home`. */
   function carry(it: any, c: Pt, home: Pt): void {
     const x = snap(c[0], home[0]), y = snap(c[1], home[1]), q = posOf(it);
-    if (q[0] !== x || q[1] !== y) { K.moveItem(doc, it, x, y, 1e6); dirty = true; }
+    if (q[0] !== x || q[1] !== y) { K.moveItem(doc, it, x, y, 1e6); stir(it.id); }
   }
 
   /** Takes back the visitor's latest change the way a person would: over to it, press, and
@@ -819,13 +823,19 @@ export function startMini(root: HTMLElement): void {
     view = fit(W, H, dpr, box);
     if (!base) base = document.createElement("canvas");
     if (base.width !== canvas.width || base.height !== canvas.height) { base.width = canvas.width; base.height = canvas.height; dirty = true; }
+    clock = now;
+    for (const [id, t] of motion) if (now - t > 250) motion.delete(id);   // put down: it goes back into the kept board
+    const key = [...motion.keys()].sort().join();
+    if (key !== motionKey) { motionKey = key; dirty = true; }
+    const moving = motion.size ? new Set(motion.keys()) : null;
+    if (dirty || moving) rats = ratsnest(doc, { planes: poured ? PLANES : [] });
     if (dirty) {
-      rats = ratsnest(doc, { planes: poured ? PLANES : [] });
-      K.render(doc, base.getContext("2d")!, view, { hidden: HID, grid: 1, ratsnest: rats, selected: selected ? new Set([selected]) : null, zoneFill: true, activeLayer: layer });
+      K.render(doc, base.getContext("2d")!, view, { hidden: HID, grid: 1, ratsnest: moving ? [] : rats, selected: selected ? new Set([selected]) : null, zoneFill: true, activeLayer: layer, skip: moving || undefined });
       dirty = false;
       if (zoomOut) zoomOut.textContent = `Z ${(view.ppm / 3.78).toFixed(2)}`;
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.drawImage(base, 0, 0);
+    if (moving) K.render(doc, ctx, view, { hidden: HID, ids: moving, ratsnest: rats, overlay: true, background: null, frame: false, zoneFill: true, activeLayer: layer });
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     const px = (p: Pt): Pt => toPx(view!, p[0], p[1]);
 
@@ -914,7 +924,8 @@ export function startMini(root: HTMLElement): void {
       });
       ctx.restore();
     }
-    for (const a of actors) { const c = px(a.at); drawCursor(ctx, c[0], c[1], PEERS[a.who].name, PEERS[a.who].color, SANS); }
+    // Where KiCad would draw each of them: the cursor snaps to the 0.25 mm grid, so it moves in small steps.
+    for (const a of actors) { const c = px([snap(a.at[0], BOARD.x), snap(a.at[1], BOARD.y)]); drawCursor(ctx, c[0], c[1], PEERS[a.who].name, PEERS[a.who].color, SANS); }
     return !still;
   });
 

@@ -65,7 +65,7 @@ function registerSource(): boolean {
 
 W.KiCadParts = {
   /** Open the dialog.  `ctx` is the editor's tool context; without one the dialog browses and manages libraries only. */
-  open(opts?: { ctx?: ToolCtx; tab?: "search" | "libraries" | "keys" | "bom"; query?: string }) { if (opts && opts.ctx) lastCtx = opts.ctx; openParts(opts || {}); },
+  open(opts?: { ctx?: ToolCtx; tab?: "search" | "libraries" | "bom"; query?: string }) { if (opts && opts.ctx) lastCtx = opts.ctx; openParts(opts || {}); },
   close: closeParts,
   isOpen,
   /** Fetch a part by reference and put it on the cursor: the same thing the dialog's Place button does. */
@@ -87,7 +87,7 @@ document.addEventListener("DOMContentLoaded", installActions);
 // desktop through the collaboration session.
 (function openFromLink() {
   const want = new URLSearchParams(location.search).get("parts"); if (!want) return;
-  const tab = want === "libraries" || want === "bom" || want === "keys" ? want : "search";
+  const tab = want === "libraries" || want === "bom" ? want : "search";
   const action = tab === "libraries" ? "vendorLibraries" : tab === "bom" ? "vendorBom" : "vendorParts";
   const app = () => (window as unknown as { CollabApp?: { getState(): { document?: { hasDoc?: boolean } }; dispatch(a: unknown): void } }).CollabApp;
   let tries = 0;

@@ -26,6 +26,16 @@
 #include <wx/log.h>
 #include <wx/utils.h>
 
+#include <chrono>
+
+
+/// Milliseconds on a steady clock: what a ping carries and its pong brings back.
+static double collabNowMs()
+{
+    using namespace std::chrono;
+    return duration<double, std::milli>( steady_clock::now().time_since_epoch() ).count();
+}
+
 // Marshal WS-thread callbacks onto the UI thread (KICAD_API_SERVER pattern).
 wxDEFINE_EVENT( COLLAB_WS_CONNECTED_EVENT, wxCommandEvent );
 wxDEFINE_EVENT( COLLAB_WS_DISCONNECTED_EVENT, wxCommandEvent );
@@ -390,6 +400,28 @@ void COLLAB_SESSION::routeMessage( const nlohmann::json& aMsg )
 {
     const std::string type = aMsg.value( "type", "" );
 
+    if( type == "pong" )
+    {
+        if( aMsg.contains( "t" ) && aMsg[ "t" ].is_number() )
+        {
+            const double ms = collabNowMs() - aMsg[ "t" ].get<double>();
+
+            // A running estimate that leans to the fast samples: a slow one is usually a
+            // hiccup, not the distance (the web editor does the same, peercursors.ts).
+            if( ms > 0.0 && ms < 2000.0 )
+            {
+                if( m_rttMs <= 0.0 )
+                    m_rttMs = ms;
+                else if( ms < m_rttMs )
+                    m_rttMs = m_rttMs * 0.5 + ms * 0.5;
+                else
+                    m_rttMs = m_rttMs * 0.9 + ms * 0.1;
+            }
+        }
+
+        return;
+    }
+
     if( type == "hello_ok" )
     {
         m_disconnectReason.clear();
@@ -406,6 +438,19 @@ void COLLAB_SESSION::routeMessage( const nlohmann::json& aMsg )
 
         m_selfColor = wxString::FromUTF8( aMsg.value( "color", "#4477ee" ) );
         m_selfLogin = wxString::FromUTF8( aMsg.value( "login", "" ) );
+
+        // Only a server that says so answers a ping; an older one calls it a bad message.
+        m_serverPings = false;
+        m_lastPingMs = 0.0;
+
+        if( aMsg.contains( "caps" ) && aMsg[ "caps" ].is_array() )
+        {
+            for( const nlohmann::json& cap : aMsg[ "caps" ] )
+            {
+                if( cap.is_string() && cap.get<std::string>() == "ping" )
+                    m_serverPings = true;
+            }
+        }
         m_selfUserId = aMsg.value( "userId", 0LL );
 
         // (Re)join every registered doc — covers both initial connect and
@@ -579,6 +624,8 @@ void COLLAB_SESSION::routeMessage( const nlohmann::json& aMsg )
 
                     if( !inserted )
                         it->second.state = peer.state;
+
+                    it->second.stateSeq++;
                 }
             }
         }
@@ -785,10 +832,28 @@ void COLLAB_SESSION::ClampPresence( nlohmann::json& aState )
 }
 
 
+void COLLAB_SESSION::MaybePing()
+{
+    if( m_state != STATE::LIVE || !m_serverPings )
+        return;
+
+    const double now = collabNowMs();
+
+    // Every 2 s, and a couple of quick ones at the start so the first estimate is soon good.
+    if( m_lastPingMs > 0.0 && now - m_lastPingMs < ( m_rttMs > 0.0 ? 2000.0 : 300.0 ) )
+        return;
+
+    m_lastPingMs = now;
+    sendJson( { { "type", "ping" }, { "t", now } } );
+}
+
+
 void COLLAB_SESSION::SendPresence( const wxString& aDocId, const nlohmann::json& aState )
 {
     if( m_state != STATE::LIVE )
         return;
+
+    MaybePing();
 
     nlohmann::json state = aState;
     ClampPresence( state );

@@ -10,6 +10,7 @@ import { navigate, showView } from "./home";
 import { connect, requestResync, setConn } from "./net";
 import { setupEditorChrome, storedAngleSnap } from "./panes";
 import { renderPeers, stopPresenceKeepalive } from "./peers";
+import { clearPeerCursors } from "./peercursors";
 import { drawSelection, renderProps } from "./selection";
 import { E } from "./state";
 import { applyDrawingSheet } from "./drawingsheet";
@@ -416,7 +417,7 @@ export function leaveDoc() {
   cancelRemoteFlush(); remote.nextAt = 0;
   E.kdoc = null; E.loadedText = null; E.layersSeeded = false; canvas.style.display = "none"; { const cc = document.getElementById("cursorCanvas"); if (cc) cc.style.display = "none"; } if (E.renderReq) { cancelAnimationFrame(E.renderReq); E.renderReq = 0; }
   releaseLayers();   // the cached pass and the zoom levels of the document left
-  peersG.replaceChildren(); selG.replaceChildren(); dragG.replaceChildren(); cmtG.replaceChildren();
+  peersG.replaceChildren(); clearPeerCursors(); selG.replaceChildren(); dragG.replaceChildren(); cmtG.replaceChildren();
   closeThread();
   store.slice("document", { layers: [], hiddenLayers: [], copperLayers: [], items: [], sheets: [], hasDoc: false, notice: null });
   store.set({ comments: [], otherComments: [], openThread: null, peers: { list: [], follow: null } });

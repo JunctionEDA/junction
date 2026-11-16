@@ -63,6 +63,8 @@ use kicad_collab_protocol::ClientMsg;
 
 struct JoinedDoc {
     tx: mpsc::Sender<DocMsg>,
+    /// The document's presence fast lane (presence_lane.rs).
+    lane: std::sync::Arc<crate::presence_lane::PresenceLane>,
     role: String,
     project_id: uuid::Uuid,
     /// AppState::access_epoch when `role` was looked up.
@@ -328,6 +330,8 @@ async fn handle_socket(
             "type": "hello_ok", "proto": PROTO_VERSION, "clientId": client_id,
             "userId": user_id, "login": login, "name": peer.name, "color": peer.color,
             "guest": user.is_none(),
+            // what this server understands beyond protocol 1 as first published
+            "caps": ["ping"],
         })
         .to_string(),
     );
@@ -461,18 +465,18 @@ async fn handle_socket(
                 // The actor may have reaped itself between get_or_spawn and
                 // send; a rejected send hands the message back, so respawn and
                 // retry once rather than registering a dead sender.
-                let mut tx = state.registry.get_or_spawn(&state.pool, &doc);
+                let (mut tx, mut lane) = state.registry.get_or_spawn(&state.pool, &doc);
 
                 let tx = match tx.send(join).await {
                     Ok( () ) => tx,
                     Err( e ) => {
-                        tx = state.registry.get_or_spawn(&state.pool, &doc);
+                        (tx, lane) = state.registry.get_or_spawn(&state.pool, &doc);
                         let _ = tx.send(e.0).await;
                         tx
                     }
                 };
 
-                joined.insert(doc_id, JoinedDoc { tx, role, project_id: doc.project_id, epoch });
+                joined.insert(doc_id, JoinedDoc { tx, lane, role, project_id: doc.project_id, epoch });
             }
             ClientMsg::leave_doc { doc_id } => {
                 if let Some(d) = joined.remove(&doc_id) {
@@ -534,7 +538,8 @@ async fn handle_socket(
                     .await;
             }
             ClientMsg::presence { doc_id, state: presence_state } => {
-                if presence_state.to_string().len() > MAX_PRESENCE_BYTES {
+                let state_json = presence_state.to_string();
+                if state_json.len() > MAX_PRESENCE_BYTES {
                     let _ = out_tx.try_send(
                         json!({ "type": "error", "code": "bad_message", "docId": doc_id,
                                 "message": "presence state too large" })
@@ -567,13 +572,15 @@ async fn handle_socket(
                     }
                 }
                 if let Some(d) = joined.get(&doc_id) {
-                    let _ = d
-                        .tx
-                        .send(DocMsg::Presence {
-                            client_id: client_id.clone(),
-                            state: presence_state,
-                        })
-                        .await;
+                    // Straight to the others on the fast lane; the actor only keeps it.  A
+                    // busy actor (an op waiting on the database) must not hold this socket's
+                    // next cursor back, so a full mailbox just misses this copy.
+                    let laned = d.lane.update(doc_id, &client_id, state_json);
+                    let _ = d.tx.try_send(DocMsg::Presence {
+                        client_id: client_id.clone(),
+                        state: presence_state,
+                        laned,
+                    });
                 }
             }
             ClientMsg::request { doc_id, action } => {
@@ -590,6 +597,9 @@ async fn handle_socket(
                 }
                 let Some(d) = joined.get(&doc_id) else { continue };
                 let _ = d.tx.send(DocMsg::Request { client_id: client_id.clone(), action }).await;
+            }
+            ClientMsg::ping { t } => {
+                let _ = out_tx.try_send(json!({ "type": "pong", "t": t }).to_string());
             }
             ClientMsg::resync { doc_id } => {
                 // A resync hands over the whole file: never to someone whose access went.

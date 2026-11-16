@@ -48,6 +48,11 @@ struct KICOMMON_API COLLAB_PEER
     wxString       name;
     wxString       color;
     nlohmann::json state;   ///< empty/null when the peer has no live presence
+
+    /// Bumped each time a presence message brings this peer a state, so a reader can tell a
+    /// fresh update (even one identical to the last: the sender saying it stopped) from the
+    /// same old state seen again.
+    unsigned long long stateSeq = 0;
 };
 
 /**
@@ -130,6 +135,13 @@ public:
 
     STATE GetState() const { return m_state; }
     bool  IsLive() const { return m_state == STATE::LIVE; }
+
+    /// Our round trip to the server in ms (0 until measured).  Peers' pointers are drawn
+    /// ahead by half of it plus half of theirs, which is how old an update is on arrival.
+    double RttMs() const { return m_rttMs; }
+
+    /// Ask the server for a pong if the last ping was a while ago (and it answers them).
+    void MaybePing();
 
     /// Why the last transition to DISCONNECTED happened ("auth_failed",
     /// "unsupported_protocol", or empty for an ordinary drop/stop).
@@ -273,6 +285,9 @@ private:
     wxString                          m_selfColor;
     wxString                          m_selfLogin;
     long long                         m_selfUserId = 0;
+    bool                              m_serverPings = false; ///< hello_ok offered "ping"
+    double                            m_rttMs = 0.0;
+    double                            m_lastPingMs = 0.0;
     std::map<wxString, JOINED_DOC>    m_docs;
     std::map<void*, std::function<void( const wxString& )>> m_versionsListeners;
 

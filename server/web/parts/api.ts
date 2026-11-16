@@ -70,8 +70,6 @@ export const api = {
   search: (q: string, vendor: string) => call<{ results: PartInfo[]; errors: { vendor: string; code: string; message: string }[] }>("GET", `/api/parts/search?${qs({ q, vendor })}`),
   part: (vendor: string, id: string, opts: { lib?: string; refresh?: boolean } = {}) => call<Part>("GET", `/api/parts/part?${qs({ vendor, id, lib: opts.lib, refresh: opts.refresh ? "1" : undefined })}`),
   linkCad: (vendor: string, id: string, lcsc: string | null, lib?: string) => call<Part>("PUT", `/api/parts/cad?${qs({ vendor, id, lib })}`, { lcsc }),
-  putKey: (vendor: string, body: Record<string, string>) => call<{ ok: boolean; verified: boolean }>("PUT", `/api/parts/keys/${vendor}`, body),
-  deleteKey: (vendor: string) => call<{ ok: boolean }>("DELETE", `/api/parts/keys/${vendor}`),
   libraries: (project?: string | null) => call<{ libraries: LibrarySummary[] }>("GET", `/api/libraries${project ? `?project=${project}` : ""}`).then((r) => r.libraries),
   library: (id: string) => call<Library>("GET", `/api/libraries/${id}`),
   createLibrary: (name: string, project_id?: string | null) => call<Library>("POST", "/api/libraries", { name, project_id: project_id || undefined }),
