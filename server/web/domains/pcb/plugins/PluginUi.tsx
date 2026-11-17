@@ -11,9 +11,9 @@ import { cx } from "../../../shared/util";
 import { keyName } from "../../../shared/keys";
 import {
   actionsFor, actionsOf, orderActions, buttonVisible, answerPrompt, cancelInstall, clearLog, closeManager, closePanels, closeWindow, confirmInstall, dismissRecommended, exportersFor, fetchFromUrl, importersFor, initPlugins,
-  installFromRegistry, installOfficial, loadOfficial, installRecommended, loadRegistry, lookupPublished, missingRecommended, moderate, report, openManager, originOf, panelsFor, publish, readLocalFiles, recommend,
+  installFromRegistry, installOfficial, loadOfficial, loadRepos, loadRepoPlugins, addRepo, removeRepo, installFromRepo, repoOfSource, pluginStore, installRecommended, loadRegistry, lookupPublished, missingRecommended, moderate, report, openManager, originOf, panelsFor, publish, readLocalFiles, recommend,
   recommendedPending, requestInstall, restart, localAllowed, localServersOf, forgetLocal, runPluginUi, setEnabled, setFrameHost, setManager, setPanelWidth, showPanel, uninstall, unpublish, usePlugins,
-  type CatalogEntry, type Compat, type ModerationEntry, type OfficialEntry, type PluginWindowState, type ProjectPlugin, type PromptField, type PromptRequest, type RegistryEntry,
+  type Compat, type RepoEntry, type ModerationEntry, type OfficialEntry, type PluginWindowState, type ProjectPlugin, type PromptField, type PromptRequest, type RegistryEntry,
 } from "./host";
 import { describePermission, isPython, type InstalledPlugin, type PluginAction, type PluginManifest } from "./types";
 
@@ -263,7 +263,12 @@ function ConsentSheet() {
   );
 }
 
-const sourceLabel = (source: string) => (source === "catalog" ? "the built-in catalog" : source.startsWith("kicad") ? `KiCad's plugin repository${source.length > 6 ? `, version ${source.slice(6)}` : ""}` : source === "local" ? "files on your computer" : source.startsWith("registry:") ? `the community registry, published by ${source.slice(9)}` : source);
+const sourceLabel = (source: string) => {
+  if (source.startsWith("repo:")) { const r = repoOfSource(source, pluginStore.get()); const ver = source.split(":")[2] || ""; return `${r ? `the repository "${r.name}"` : "a repository you added"}${ver ? `, version ${ver}` : ""}`; }
+  return source === "catalog" ? "Junction's example plugins" : source.startsWith("kicad") ? `KiCad's plugin repository${source.length > 6 ? `, version ${source.slice(6)}` : ""}` : source === "local" ? "files on your computer" : source.startsWith("registry:") ? `the community registry, published by ${source.slice(9)}` : source;
+};
+/** The repository a plugin was installed from, when that was one the person added (for its icon). */
+const repoIdOf = (source: string) => { const m = /^repo:(\d+)/.exec(source); return m ? Number(m[1]) : undefined; };
 
 function InstalledTab() {
   const s = usePlugins((x) => x); const sel = s.installed.find((p) => p.identifier === s.manager.selected) || s.installed[0] || null;
@@ -275,7 +280,7 @@ function InstalledTab() {
         {s.installed.map((p) => { const run = s.running[p.identifier]; return (
           <li key={p.identifier} className={cx(sel && sel.identifier === p.identifier && "on")} data-plugin={p.identifier} onClick={() => setManager({ selected: p.identifier })}>
             <span className={cx("state", p.withdrawn ? "bad" : !p.enabled ? "off" : run ? (run.failed ? "bad" : run.ready ? "run" : "wait") : "idle")} title={p.withdrawn ? "Taken out of the registry by the administrators" : !p.enabled ? "Disabled" : run ? (run.failed ? "Failed to start" : "Running") : "Starts when you open a project"} />
-            {p.source.startsWith("kicad") ? <PcmIcon identifier={p.identifier} has small /> : null}
+            {p.source.startsWith("kicad") || p.source.startsWith("repo:") ? <PcmIcon identifier={p.identifier} repo={repoIdOf(p.source)} has small /> : null}
             <span className="nm">{p.manifest.name}</span><span className="ver">{p.manifest.version || ""}</span>
           </li>
         ); })}
@@ -317,7 +322,7 @@ function Detail({ p }: { p: InstalledPlugin }) {
   return (
     <div className="plg-detail" id="pluginDetail">
       <div className="plg-row">
-        {p.source.startsWith("kicad") ? <PcmIcon identifier={p.identifier} has /> : null}
+        {p.source.startsWith("kicad") || p.source.startsWith("repo:") ? <PcmIcon identifier={p.identifier} repo={repoIdOf(p.source)} has /> : null}
         <h2>{m.name}</h2><span className="plg-muted">{m.version || ""}</span><span className="grow" />
         <label className="plg-switch"><input type="checkbox" id="pluginEnabled" checked={p.enabled} onChange={(e) => { const on = e.target.checked; if (on && p.withdrawn) { void askConfirm("Withdrawn Plugin", `The administrators took ${m.name} out of the registry:\n\n${p.withdrawn}\n\nSwitch it on anyway?`, { ok: "Switch On" }).then((yes) => { if (yes) void setEnabled(p.identifier, true); }); return; } void setEnabled(p.identifier, on); }} /> Enabled</label>
       </div>
@@ -366,86 +371,138 @@ function Detail({ p }: { p: InstalledPlugin }) {
 const COMPAT_LABEL: Record<Compat["status"], string> = { works: "Runs here", partly: "Partly runs", opens: "Opens, unverified", limited: "Limited here", unsupported: "Does not run here yet", untested: "Not tested yet" };
 /** KiCad's own repository: the plugins the desktop's Plugin and Content Manager lists, runnable here through the Python runtime. */
 /** A KiCad repository plugin's own icon, as KiCad's Plugin and Content Manager shows it; a plain plug mark when it has none. */
-function PcmIcon({ identifier, has, small }: { identifier: string; has: boolean; small?: boolean }) {
+function PcmIcon({ identifier, has, small, repo }: { identifier: string; has: boolean; small?: boolean; repo?: number }) {
   const [failed, setFailed] = useState(false);
+  const src = repo !== undefined ? `/api/plugins/repositories/${repo}/plugins/${encodeURIComponent(identifier)}/icon` : `/api/plugins/pcm/${encodeURIComponent(identifier)}/icon`;
   return has && !failed
-    ? <img className={cx("plg-icon", small && "sm")} src={`/api/plugins/pcm/${encodeURIComponent(identifier)}/icon`} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
+    ? <img className={cx("plg-icon", small && "sm")} src={src} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
     : <span className={cx("plg-icon none", small && "sm")} aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d="M9 3v5M15 3v5M6 8h12v4a6 6 0 0 1-12 0V8zM12 18v3" /></svg></span>;
 }
 
-type Source = "all" | "builtin" | "kicad" | "community";
+type Source = "all" | "kicad" | "community" | `repo:${number}`;
 const sizeOf = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} kB`);
-const SOURCE_NOTE: Record<Source, string> = {
-  all: "Everything you can install, in one list: the plugins built into Junction, the ones in KiCad's own Plugin and Content Manager, and the ones other people published here. You are shown what a plugin asks for before it is installed.",
-  builtin: "These ship with Junction and double as examples: their source is in server/plugins.",
+const SOURCE_NOTE: Record<"all" | "kicad" | "community", string> = {
+  all: "Everything you can install, in one list: the plugins in KiCad's own Plugin and Content Manager, the repositories you added, and the plugins other people published here. You are shown what a plugin asks for before it is installed.",
   kicad: "The plugins in KiCad's own Plugin and Content Manager. They are Python programs written for the desktop; here each runs on a Python interpreter in the plugin sandbox, on your board, with its dialogs drawn in the editor. Each label comes from a test run: the plugin was loaded and every command it adds was run on a demo board.",
   community: "Published by other people and not reviewed. You are shown who published a plugin and everything it asks for before it is installed.",
 };
+const repoNote = (r: RepoEntry) => `A repository you added${r.maintainer ? `, maintained by ${r.maintainer}` : ""}: ${r.url}. Its plugins have not been tested here; you are shown what each asks for before it is installed.`;
 
-/** The one catalog: built-in plugins, KiCad's repository and the community registry in a single searchable list,
- *  as KiCad's Plugin and Content Manager shows its plugins.  Each card says where the plugin comes from. */
+/** The one catalog: KiCad's repository, the repositories the person added and the community registry in a single
+ *  searchable list, as KiCad's Plugin and Content Manager shows its plugins.  Each card says where the plugin comes from. */
 function CatalogTab() {
   const s = usePlugins((x) => x); const [err, setErr] = useState<string | null>(null); const [busy, setBusy] = useState<string | null>(null);
-  const [q, setQ] = useState(""); const [source, setSource] = useState<Source>("all"); const [all, setAll] = useState(false); const timer = useRef(0);
+  const [q, setQ] = useState(""); const [source, setSource] = useState<Source>("all"); const [all, setAll] = useState(false); const [managing, setManaging] = useState(false); const timer = useRef(0);
   // the catalog opens unfiltered each time; KiCad's list is asked for once
-  useEffect(() => { void loadOfficial(); if (s.registryQuery) void loadRegistry(""); return () => clearTimeout(timer.current); }, []);
+  useEffect(() => { void loadOfficial(); void loadRepos(); if (s.registryQuery) void loadRegistry(""); return () => clearTimeout(timer.current); }, []);
+  const repos = s.repos || [];
+  // a repository that was removed takes its filter with it
+  useEffect(() => { if (source.startsWith("repo:") && !repos.some((r) => `repo:${r.id}` === source)) setSource("all"); }, [repos, source]);
   const search = (v: string) => { setQ(v); clearTimeout(timer.current); timer.current = window.setTimeout(() => void loadRegistry(v.trim()), 220); };
   const have = (id: string) => s.installed.find((p) => p.identifier === id);
   const words = q.toLowerCase().split(/\s+/).filter(Boolean);
   const match = (m: PluginManifest, extra = "") => words.every((w) => `${m.name} ${m.description} ${m.identifier} ${m.author || ""} ${extra}`.toLowerCase().includes(w));
-  const builtin = (s.catalog || []).filter((c) => match(c.manifest));
   const official = s.official || []; const hidden = official.filter((e) => e.compat && e.compat.status === "unsupported").length;
   const kicad = official.filter((e) => (all || words.length > 0 || !e.compat || e.compat.status !== "unsupported") && match(e.manifest));
   // the registry is searched by the server; what it sent for an older query is filtered here until the answer arrives
   const community = (s.registry || []).filter((r) => match(r.manifest, r.publisher));
+  const fromRepo = (r: RepoEntry) => (r.plugins || []).filter((e) => match(e.manifest, r.name));
   type Row = { key: string; name: string; node: ReactNode };
   const rows: Row[] = [];
-  const installBuiltin = (c: CatalogEntry) => setErr(s.signedIn ? requestInstall(c.manifest, c.files, "catalog") : "Sign in to install plugins.");
   const installKicad = async (e: OfficialEntry) => { setBusy(e.identifier); setErr(null); setErr(await installOfficial(e.identifier)); setBusy(null); };
-  if (source === "all" || source === "builtin") for (const c of builtin) { const m = c.manifest; const cur = have(m.identifier); const newer = cur && (cur.manifest.version || "") !== (m.version || ""); rows.push({ key: `b:${m.identifier}`, name: m.name, node: (
-    <div className="plg-card with-icon" key={`b:${m.identifier}`} data-plugin={m.identifier} data-source="builtin">
-      <PcmIcon identifier={m.identifier} has={false} />
-      <div className="plg-card-body">
-        <div className="plg-row"><b>{m.name}</b><span className="plg-muted">{m.version || ""}</span><span className="plg-from">Built in</span><span className="grow" /><span className="plg-muted">{scopesOf(m)}</span></div>
-        <p>{m.description}</p>
-        <div className="plg-row"><span className="plg-muted perms">{(m.permissions || []).map((p) => describePermission(p, m).title).join(" · ") || "No permissions"}</span><span className="grow" />
-          {cur && !newer ? <span className="plg-muted">Installed</span> : <button type="button" className="btn sm primary" data-install={m.identifier} onClick={() => installBuiltin(c)}>{newer ? "Update…" : "Install…"}</button>}</div>
+  const installRepo = async (r: RepoEntry, e: OfficialEntry) => { setBusy(`${r.id}:${e.identifier}`); setErr(null); setErr(await installFromRepo(r.id, e.identifier)); setBusy(null); };
+  /** One card of a KiCad-format repository: KiCad's own (`repo` undefined) or one the person added. */
+  const pcmCard = (e: OfficialEntry, repo?: RepoEntry) => {
+    const m = e.manifest; const cur = have(m.identifier); const newer = cur && (cur.manifest.version || "") !== (m.version || ""); const c = e.compat;
+    const key = repo ? `r${repo.id}:${e.identifier}` : `k:${e.identifier}`; const working = busy === (repo ? `${repo.id}:${e.identifier}` : e.identifier);
+    return (
+      <div className="plg-card with-icon" key={key} data-plugin={e.identifier} data-source={repo ? "repo" : "kicad"} data-repo={repo ? repo.id : undefined}>
+        <PcmIcon identifier={e.identifier} has={e.icon !== false} repo={repo ? repo.id : undefined} />
+        <div className="plg-card-body">
+          <div className="plg-row"><b>{m.name}</b><span className="plg-muted">{m.version || ""}</span>{m.author ? <span className="plg-muted">by {m.author}</span> : null}<span className="plg-from" title={repo ? `From ${repo.url}` : "From KiCad's Plugin and Content Manager"}>{repo ? repo.name : "KiCad"}</span><span className="grow" />
+            {c ? <span className={cx("plg-compat", c.status)} title={c.note || ""}>{COMPAT_LABEL[c.status] || c.status}</span> : <span className="plg-compat" title={repo ? "Plugins from repositories you add are not part of this editor's test run" : "Newer than this editor's test run"}>Not tested yet</span>}</div>
+          <p>{m.description}</p>
+          {c && c.note && c.status !== "works" ? <p className="plg-muted">{c.note}</p> : null}
+          <div className="plg-row"><span className="plg-muted perms">{e.identifier}{e.size ? ` · ${sizeOf(e.size)}` : ""}{m.homepage && /^https:\/\//.test(m.homepage) ? <> · <a href={m.homepage} target="_blank" rel="noreferrer noopener">homepage</a></> : null}</span><span className="grow" />
+            {cur && !newer ? <span className="plg-muted">Installed</span> : <button type="button" className="btn sm primary" data-install={e.identifier} disabled={busy !== null} onClick={() => void (repo ? installRepo(repo, e) : installKicad(e))}>{working ? "Downloading…" : newer ? "Update…" : "Install…"}</button>}</div>
+        </div>
       </div>
-    </div>) }); }
-  if (source === "all" || source === "kicad") for (const e of kicad) { const m = e.manifest; const cur = have(m.identifier); const newer = cur && (cur.manifest.version || "") !== (m.version || ""); const c = e.compat; rows.push({ key: `k:${e.identifier}`, name: m.name, node: (
-    <div className="plg-card with-icon" key={`k:${e.identifier}`} data-plugin={e.identifier} data-source="kicad">
-      <PcmIcon identifier={e.identifier} has={e.icon !== false} />
-      <div className="plg-card-body">
-        <div className="plg-row"><b>{m.name}</b><span className="plg-muted">{m.version || ""}</span>{m.author ? <span className="plg-muted">by {m.author}</span> : null}<span className="plg-from" title="From KiCad's Plugin and Content Manager">KiCad</span><span className="grow" />
-          {c ? <span className={cx("plg-compat", c.status)} title={c.note || ""}>{COMPAT_LABEL[c.status] || c.status}</span> : <span className="plg-compat" title="Newer than this editor's test run">Not tested yet</span>}</div>
-        <p>{m.description}</p>
-        {c && c.note && c.status !== "works" ? <p className="plg-muted">{c.note}</p> : null}
-        <div className="plg-row"><span className="plg-muted perms">{e.identifier}{e.size ? ` · ${sizeOf(e.size)}` : ""}{m.homepage && /^https:\/\//.test(m.homepage) ? <> · <a href={m.homepage} target="_blank" rel="noreferrer noopener">homepage</a></> : null}</span><span className="grow" />
-          {cur && !newer ? <span className="plg-muted">Installed</span> : <button type="button" className="btn sm primary" data-install={e.identifier} disabled={busy !== null} onClick={() => void installKicad(e)}>{busy === e.identifier ? "Downloading…" : newer ? "Update…" : "Install…"}</button>}</div>
-      </div>
-    </div>) }); }
+    );
+  };
+  if (source === "all" || source === "kicad") for (const e of kicad) rows.push({ key: `k:${e.identifier}`, name: e.manifest.name, node: pcmCard(e) });
+  for (const r of repos) if (source === "all" || source === `repo:${r.id}`) for (const e of fromRepo(r)) rows.push({ key: `r${r.id}:${e.identifier}`, name: e.manifest.name, node: pcmCard(e, r) });
   if (source === "all" || source === "community") for (const r of community) rows.push({ key: `c:${r.identifier}`, name: r.manifest.name, node: <RegistryCard key={`c:${r.identifier}`} r={r} setErr={setErr} /> });
   rows.sort((a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key));
-  const loadingKicad = s.official === null && source !== "builtin" && source !== "community";
-  const loading = s.catalog === null || s.registry === null;
-  const total = (s.catalog || []).length + official.length + (s.registry || []).length;
-  const chips: [Source, string, number | null][] = [["all", "All", null], ["builtin", "Built in", s.catalog ? builtin.length : null], ["kicad", "KiCad", s.official ? kicad.length : null], ["community", "Community", s.registry ? community.length : null]];
+  const showsKicad = source === "all" || source === "kicad";
+  const loadingKicad = s.official === null && showsKicad;
+  const shownRepos = repos.filter((r) => source === "all" || source === `repo:${r.id}`);
+  const loadingRepos = shownRepos.filter((r) => r.plugins === null && !r.error);
+  const loading = s.registry === null || s.repos === null;
+  const total = official.length + repos.reduce((n, r) => n + (r.plugins || []).length, 0) + (s.registry || []).length;
+  const chips: [Source, string, number | null][] = [["all", "All", null], ["kicad", "KiCad", s.official ? kicad.length : null], ...repos.map((r) => [`repo:${r.id}` as Source, r.name, r.plugins ? fromRepo(r).length : null] as [Source, string, number | null]), ["community", "Community", s.registry ? community.length : null]];
+  const note = source.startsWith("repo:") ? (() => { const r = repos.find((x) => `repo:${x.id}` === source); return r ? repoNote(r) : ""; })() : SOURCE_NOTE[source as "all" | "kicad" | "community"];
   return (
     <div className="plg-catalog" id="pluginCatalog">
-      <div className="plg-row plg-catalog-head"><input type="search" id="pluginSearch" className="plg-search" placeholder={total ? `Search ${total} plugins` : "Search plugins"} value={q} onChange={(e) => search(e.target.value)} /></div>
+      <div className="plg-row plg-catalog-head"><input type="search" id="pluginSearch" className="plg-search" placeholder={total ? `Search ${total} plugins` : "Search plugins"} value={q} onChange={(e) => search(e.target.value)} />
+        <button type="button" className="btn" id="pluginManageRepos" onClick={() => setManaging(true)} title="Add or remove plugin repositories, as in KiCad's Plugin and Content Manager">Manage Repositories…</button></div>
       <div className="plg-row plg-catalog-head">
         <div className="plg-chips" role="tablist" aria-label="Where plugins come from">{chips.map(([id, label, n]) => <button type="button" key={id} role="tab" aria-selected={source === id} className={cx(source === id && "on")} data-source-filter={id} onClick={() => setSource(id)}>{label}{n !== null ? <span className="n">{n}</span> : null}</button>)}</div>
         <span className="grow" />
-        {hidden && source !== "builtin" && source !== "community" ? <label className="plg-check"><input type="checkbox" id="pluginKicadAll" checked={all} onChange={(e) => setAll(e.target.checked)} /> Show the {hidden} KiCad plugins that do not run here</label> : null}
+        {hidden && showsKicad ? <label className="plg-check"><input type="checkbox" id="pluginKicadAll" checked={all} onChange={(e) => setAll(e.target.checked)} /> Show the {hidden} KiCad plugins that do not run here</label> : null}
       </div>
-      <p className="plg-muted plg-source-note">{SOURCE_NOTE[source]}</p>
+      <p className="plg-muted plg-source-note">{note}</p>
       {err ? <p className="plg-err" id="pluginCatalogErr">{err}</p> : null}
-      {s.officialError && source !== "builtin" && source !== "community" ? <p className="plg-err" id="pluginKicadErr">KiCad's repository could not be read: {s.officialError} <button type="button" className="btn sm" onClick={() => void loadOfficial(true)}>Try again</button></p> : null}
+      {s.officialError && showsKicad ? <p className="plg-err" id="pluginKicadErr">KiCad's repository could not be read: {s.officialError} <button type="button" className="btn sm" onClick={() => void loadOfficial(true)}>Try again</button></p> : null}
+      {shownRepos.filter((r) => r.error).map((r) => <p className="plg-err" key={`e${r.id}`} data-repo-error={r.id}>The repository "{r.name}" could not be read: {r.error} <button type="button" className="btn sm" onClick={() => void loadRepoPlugins(r.id)}>Try again</button></p>)}
       {loadingKicad ? <p className="plg-muted plg-loading" id="pluginKicadLoading"><span className="plg-spin" aria-hidden="true" />Loading KiCad's repository…</p> : null}
+      {loadingRepos.map((r) => <p className="plg-muted plg-loading" key={`l${r.id}`}><span className="plg-spin" aria-hidden="true" />Loading {r.name}…</p>)}
       {rows.map((r) => r.node)}
-      {!rows.length && !loading && !loadingKicad ? <div className="plg-empty" id="pluginCatalogEmpty">{words.length ? `Nothing matches "${q.trim()}".` : source === "community" ? "Nothing has been published yet. Yours could be the first: install a plugin from a file, then publish it from its page." : "Nothing here yet."}</div> : null}
+      {!rows.length && !loading && !loadingKicad && !loadingRepos.length ? <div className="plg-empty" id="pluginCatalogEmpty">{words.length ? `Nothing matches "${q.trim()}".` : source === "community" ? "Nothing has been published yet. Yours could be the first: install a plugin from a file, then publish it from its page." : source.startsWith("repo:") ? "This repository lists no plugins." : "Nothing here yet."}</div> : null}
       {!rows.length && loading ? <div className="plg-empty">Loading…</div> : null}
+      {managing ? <ReposSheet close={() => setManaging(false)} /> : null}
     </div>
+  );
+}
+
+/**
+ * Manage Repositories, as in KiCad's Plugin and Content Manager: KiCad's official repository is always there; any other
+ * repository is added by the address of its repository.json (KiCad's PCM format) and its plugins join the catalog.
+ */
+function ReposSheet({ close }: { close: () => void }) {
+  const repos = usePlugins((x) => x.repos) || []; const signedIn = usePlugins((x) => x.signedIn);
+  const [url, setUrl] = useState(""); const [busy, setBusy] = useState(false); const [err, setErr] = useState<string | null>(null);
+  const add = async () => { if (!url.trim() || busy) return; setBusy(true); setErr(null); const e = await addRepo(url); setBusy(false); setErr(e); if (!e) setUrl(""); input.current?.focus(); };
+  const remove = (r: RepoEntry) => { void askConfirm("Remove Repository", `Remove "${r.name}" from your repositories? Plugins you installed from it stay installed.`, { ok: "Remove", danger: true }).then(async (yes) => { if (yes) setErr(await removeRepo(r.id)); }); };
+  const box = useRef<HTMLDivElement>(null); const input = useRef<HTMLInputElement>(null);
+  useEffect(() => { (input.current || box.current)?.focus(); }, []);
+  // Escape closes this dialog only, wherever the focus went (a button that turned disabled drops it to the page)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { const at = document.activeElement; if (e.key === "Escape" && (!at || at === document.body || (box.current && box.current.contains(at)))) { e.preventDefault(); e.stopImmediatePropagation(); close(); } };
+    window.addEventListener("keydown", onKey, true); return () => window.removeEventListener("keydown", onKey, true);
+  }, [close]);
+  return createPortal(
+    <div className="kd-overlay plg-overlay plg-repos-overlay" onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Escape") close(); }} onPointerDown={(e) => { e.stopPropagation(); if (e.target === e.currentTarget) close(); }}>
+      <div className="kd-dialog plg-repos" role="dialog" aria-modal="true" id="pluginRepos" tabIndex={-1} ref={box}>
+        <div className="kd-title"><span>Manage Repositories</span><span className="kd-x" title="Close (Esc)" onClick={close}><CloseMark /></span></div>
+        <div className="kd-body">
+          <p className="plg-muted">Like KiCad's Plugin and Content Manager, the catalog reads plugin repositories in KiCad's format. Add one by the https address of its <code>repository.json</code>; its plugins join the catalog under its name. Repositories belong to your account.</p>
+          <table className="plg-table" id="pluginReposTable">
+            <thead><tr><th>Name</th><th>URL</th><th /></tr></thead>
+            <tbody>
+              <tr data-repo="kicad"><td>KiCad official repository</td><td className="url">https://repository.kicad.org/repository.json</td><td className="plg-muted">Always listed</td></tr>
+              {repos.map((r) => <tr key={r.id} data-repo={r.id}><td>{r.name}{r.maintainer ? <span className="plg-muted"> · {r.maintainer}</span> : null}</td><td className="url" title={r.url}>{r.url}</td><td><button type="button" className="btn sm danger" data-remove-repo={r.id} onClick={() => remove(r)}>Remove</button></td></tr>)}
+            </tbody>
+          </table>
+          <div className="plg-row"><input type="text" ref={input} id="pluginRepoUrl" className="grow" placeholder="https://example.com/kicad/repository.json" value={url} disabled={!signedIn} onChange={(e) => setUrl(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void add(); }} />
+            <button type="button" className="btn primary" id="pluginRepoAdd" disabled={busy || !url.trim() || !signedIn} onClick={() => void add()}>{busy ? "Reading…" : "Add"}</button></div>
+          {!signedIn ? <p className="plg-muted">Sign in to add repositories.</p> : null}
+          {err ? <p className="plg-err" id="pluginRepoErr">{err}</p> : null}
+          <p className="plg-muted">To share one plugin rather than a whole repository, publish it to the community registry from its page under Installed.</p>
+        </div>
+        <div className="kd-foot"><span className="grow" /><button type="button" className="btn" id="pluginReposClose" onClick={close}>Close</button></div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -532,7 +589,7 @@ function ProjectCard({ r, canEdit, setErr }: { r: ProjectPlugin; canEdit: boolea
   const cur = usePlugins((x) => x.installed.find((p) => p.identifier === r.identifier)); const m = r.manifest; const newer = cur && (cur.manifest.version || "") !== (m.version || "");
   return (
     <div className="plg-card" data-plugin={r.identifier}>
-      <div className="plg-row"><b>{m.name}</b><span className="plg-muted">{m.version || ""}</span><span className="plg-from">{r.origin === "catalog" ? "built in" : `by ${r.publisher || "unknown"}`}</span><span className="grow" /><span className="plg-muted">{scopesOf(m)}</span></div>
+      <div className="plg-row"><b>{m.name}</b><span className="plg-muted">{m.version || ""}</span><span className="plg-from">{r.origin === "catalog" ? "example" : `by ${r.publisher || "unknown"}`}</span><span className="grow" /><span className="plg-muted">{scopesOf(m)}</span></div>
       <p>{m.description}</p>
       <div className="plg-row"><span className="plg-muted perms">{r.addedBy ? `Recommended by ${r.addedBy} · ` : ""}{(m.permissions || []).map((p) => describePermission(p, m).title).join(" · ") || "No permissions"}</span><span className="grow" />
         {canEdit ? <button type="button" className="btn sm" data-unrecommend={r.identifier} onClick={async () => setErr(await recommend(r.identifier, r.origin, false))}>Stop recommending</button> : null}
@@ -564,7 +621,7 @@ function DevelopTab() {
       {err ? <p className="plg-err" id="pluginDevErr">{err}</p> : null}
       <h3>Writing a plugin</h3>
       <p>A plugin is a folder with a <code>plugin.json</code> — KiCad's own plugin manifest, with <code>"runtime": {"{"}"type": "web", "entrypoint": "main.js"{"}"}</code> — and a script that uses the <code>kicad</code> object: <code>kicad.actions.register()</code>, <code>kicad.design.components()</code>, <code>kicad.design.apply()</code>, <code>kicad.ui.prompt()</code>…</p>
-      <p>The guide and the API reference are in <a href="https://github.com/JunctionEDA/junction/blob/master/server/plugins/README.md" target="_blank" rel="noreferrer noopener">server/plugins/README.md</a>; the catalog plugins beside it are short, complete examples.</p>
+      <p>The guide and the API reference are in <a href="https://github.com/JunctionEDA/junction/blob/master/server/plugins/README.md" target="_blank" rel="noreferrer noopener">server/plugins/README.md</a>; the example plugins in <a href="https://github.com/JunctionEDA/junction/tree/master/server/plugins/examples" target="_blank" rel="noreferrer noopener">server/plugins/examples</a> are short, complete ones you can install by their address above.</p>
       <p className="plg-muted">Python and exec plugins for the desktop app (KiCad's IPC API and action plugins) are installed there, in its Plugin and Content Manager. What they change in an online project reaches the web like any other edit.</p>
     </div>
   );

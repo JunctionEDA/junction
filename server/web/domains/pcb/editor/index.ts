@@ -23,6 +23,7 @@ import { preloadPcbToolsWhenIdle } from "./pcbtools-loader";
 import { HANDLERS, dispatchAction } from "./actions";
 import { state, store } from "./appstore";
 import { closeThread, placeComment } from "./comments";
+import { startCursorChat } from "./chat";
 import { noteModifiers, refreshCursor } from "./cursors";
 import { followHypertext } from "./hypertext-follow";
 import { IS_WINDOWS, clickMode, dragKeeps, dragModifier, hasModifier, modifiersState, type ModKeys, type ModOpts } from "./selmodes";
@@ -781,7 +782,8 @@ document.addEventListener("keydown", (ev) => {
   // KiCad binds no key to these on a sheet, so the web keeps +/- for zooming there (on a board they switch layers)
   if (isSch() && !ev.ctrlKey && !ev.metaKey && !ev.altKey && (k === "+" || k === "=")) { zoomBy(1.25); return; }
   if (isSch() && !ev.ctrlKey && !ev.metaKey && !ev.altKey && (k === "-" || k === "_")) { zoomBy(0.8); return; }
-  if (comboOf(ev) === "Alt+C") { ev.preventDefault(); setTool("comment"); return; }   // the collab comment tool (C is KiCad's Unfold from Bus)
+  if (comboOf(ev) === "Alt+C") { ev.preventDefault(); setTool("comment"); return; }
+  if (comboOf(ev) === "Alt+M") { if (startCursorChat()) { ev.preventDefault(); return; } }   // cursor chat (chat.ts): say something at the pointer   // the collab comment tool (C is KiCad's Unfold from Bus)
   // Ctrl+Shift+Z is redo on a Mac; elsewhere KiCad's redo is Ctrl+Y and a board has Add Filled Zone on Ctrl+Shift+Z
   if ((ev.metaKey || ev.ctrlKey) && (k === "z" || k === "Z")) { ev.preventDefault(); if (!ev.shiftKey) undoLast(); else if (!runSpecHotkey(ev)) redoLast(); return; }
   if ((ev.metaKey || ev.ctrlKey) && (k === "y" || k === "Y")) { ev.preventDefault(); redoLast(); return; }

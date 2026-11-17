@@ -41,7 +41,7 @@ export const DEFAULT_VISIBILITY: Visibility = {
   extra: EXTRA_LAYERS.filter((l) => l.on).map((l) => l.key),
 };
 
-export interface BoardStats { outlines: number; cutouts: number; holes: number; holesPainted: number; bodies: number; models: number; missingModels: string[]; replacedModels: string[]; fallbackOutline: boolean; texture: [number, number]; thickness: number }
+export interface BoardStats { outlines: number; cutouts: number; holes: number; holesPainted: number; bodies: number; models: number; missingModels: string[]; replacedModels: string[]; generatedModels?: string[]; fallbackOutline: boolean; texture: [number, number]; thickness: number }
 
 /** Accumulates indexed triangles with per-vertex normals, colours and (optionally) texture coordinates. */
 class MeshData {
@@ -417,7 +417,7 @@ export class BoardScene {
     }
     const data: Record<BodyClass, MeshData> = { tht: new MeshData(), smd: new MeshData(), virtual: new MeshData() };
     const lift = 0.04;   // parts sit on the pads, a copper-and-mask thickness above the laminate
-    let real = 0; const missing: string[] = []; const replaced: string[] = [];
+    let real = 0; const missing: string[] = []; const replaced: string[] = []; const generated: string[] = [];
     const v = this.vis, bbox = new MeshData();
     for (const body of this.bodyList) {
       if ((body.dnp && !v.dnp) || (body.notInPos && !v.notInPos)) continue;
@@ -431,6 +431,12 @@ export class BoardScene {
       }
       // no model named, or none of those named can be had (still on their way does not count as missing)
       const isMissing = !body.models.length || (!!this.models && body.models.every((r) => this.models!.get(r.url) === "missing"));
+      // then a model drawn from the footprint itself (server/src/modelgen), before the stand-in
+      if (isMissing && this.models && body.gen) {
+        const g = this.models.get(body.gen.url);
+        if (g === undefined) this.models.want([body.gen]);
+        else if (g !== "missing" && this.addModels(m, { ...body, models: [body.gen] }, lift)) { real++; generated.push(body.ref); if (v.bbox) boxOf(bbox, m, at); continue; }
+      }
       if (isMissing) { missing.push(body.ref); if (!v.missing) continue; }
       this.addBody(m, body, this.toModel, this.thickness, lift);
       if (v.bbox) boxOf(bbox, m, at);
@@ -446,7 +452,7 @@ export class BoardScene {
       const mesh = new THREE.Mesh(data[cls].geometry(), material({ vertexColors: true, shininess: 40, specular: new THREE.Color(0x333333) }));
       mesh.name = "bodies-" + cls; this.bodies[cls] = mesh; this.group.add(mesh);
     }
-    this.stats.models = real; this.stats.missingModels = missing; this.stats.replacedModels = replaced;
+    this.stats.models = real; this.stats.missingModels = missing; this.stats.replacedModels = replaced; this.stats.generatedModels = generated;
   }
 
   /** The footprint's loaded models, placed as KiCad's viewer places them; false when none has loaded. */

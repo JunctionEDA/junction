@@ -1,6 +1,7 @@
 // editor — GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/domains/pcb/editor/index.ts — edit these modules, not the bundle).
 import { KICAD_LAYERS, SCH_LAYERS, setStatusBar, setToggle, state, store } from "./appstore";
 import { centerOn, closeThread, drawComments, loadComments, renderThreads } from "./comments";
+import { leaveCursorChat, loadChat } from "./chat";
 import { loadProposals } from "./proposals";
 import { $ } from "./dom";
 import { pruneSelection, resetInteraction } from "./gestures";
@@ -20,7 +21,7 @@ import { notePreviewDirty } from "./thumbpush";
 import { releaseLayers } from "./paint";
 import { applyVariantToDoc, refreshVariantNames } from "./variant";
 import { fpEntryFor, fpParam, isFpPrivate, isFpReadOnlyLib, onFootprintOpened, privateText } from "./fpedit";
-import { editorDocs, firstDoc, rootSchematicOf } from "./bootpick";
+import { editorDocs, firstDoc, rootSchematicOf, topLevelSheetsOf, type TopLevelSheet } from "./bootpick";
 import { closeHostedDoc, isHostedDoc, openHostedDoc } from "./dochost";
 import { ensurePcbTools, noteBoardOpened, preloadPcbToolsWhenIdle } from "./pcbtools-loader";
 import type { Boot } from "./boot";
@@ -89,29 +90,38 @@ export function projectTextVars(): Record<string, string> | null {
 }
 
 /**
- * Harvest the root schematic's (sheet …) nodes once per project, so a subsheet opened cold by URL —
+ * Harvest the top-level sheets' (sheet …) nodes once per project, so a subsheet opened cold by URL —
  * with no parent ever on screen — still knows the Sheetname and the (page "N") its parent gives it.
  * eeschema always has the whole hierarchy loaded; the browser has one file at a time, so this is the
- * one extra read that makes ${SHEETPATH} and ${#} agree with the desktop.
+ * one extra read (one per top-level sheet) that makes ${SHEETPATH} and ${#} agree with the desktop.
  */
 let hierarchyLearned: string | null = null;
+/** sheet file path -> SCH_SHEET_PATH::PathHumanReadable() of its first instance, when the schematic has several
+ *  top-level sheets ("/<top-level name>/", "/<top-level name>/<sheet name>/") */
+export const sheetHumanPaths = new Map<string, string>();
 export async function learnHierarchy() {
   const pid = state.project ? state.project.projectId : null;
-  const root = pid ? rootSchematic() : null;
-  if (!root || hierarchyLearned === pid) return;
+  const tops = pid ? topLevelSchematics() : [];
+  if (!tops.length || hierarchyLearned === pid) return;
   hierarchyLearned = pid;
-  try {
-    const r = await fetch(`/api/docs/${root.docId}/content`);
-    if (!r.ok) return;
-    const d = KiCadCanvas.parseDoc(await r.text(), "kicad_sch");
-    const dir = root.path.split("/").slice(0, -1).join("/");
-    for (const m of KiCadCanvas.movableItems(d)) {
-      if (m.kind !== "sheet" || !m.file) continue;
-      const path = dir ? `${dir}/${m.file}` : m.file;
-      if (m.name && !sheetNames.has(path)) sheetNames.set(path, m.name);
-      if (m.page && !sheetPages.has(path)) sheetPages.set(path, m.page);
-    }
-  } catch (e) { /* unreadable root: fall back to the file's own stem and page number */ }
+  const multi = tops.length > 1;
+  sheetHumanPaths.clear();
+  if (multi) for (const t of tops) sheetHumanPaths.set(t.doc.path, "/" + t.name + "/");
+  await Promise.all(tops.map(async (t) => {
+    try {
+      const r = await fetch(`/api/docs/${t.doc.docId}/content`);
+      if (!r.ok) return;
+      const d = KiCadCanvas.parseDoc(await r.text(), "kicad_sch");
+      const dir = t.doc.path.split("/").slice(0, -1).join("/");
+      for (const m of KiCadCanvas.movableItems(d)) {
+        if (m.kind !== "sheet" || !m.file) continue;
+        const path = dir ? `${dir}/${m.file}` : m.file;
+        if (m.name && !sheetNames.has(path)) sheetNames.set(path, m.name);
+        if (m.page && !sheetPages.has(path)) sheetPages.set(path, m.page);
+        if (multi && !sheetHumanPaths.has(path)) sheetHumanPaths.set(path, "/" + t.name + "/" + (m.name || m.file.replace(/\.kicad_sch$/, "")) + "/");
+      }
+    } catch (e) { /* unreadable sheet: fall back to the file's own stem and page number */ }
+  }));
 }
 
 /** The title block's text variables the document resolves (${FILENAME}, ${SHEETNAME}, ${#}, ${##}, project variables). */
@@ -126,10 +136,15 @@ export function applySheetContext(d: SheetContextDoc) {
   if (d.type !== "sch") { d.sheetName = ""; d.sheetPath = ""; d.sheetCount = 1; return; }
   const sch = state.docs!.filter((x) => x.docType === "kicad_sch");
   d.sheetCount = sch.length || 1;
-  const root = state.project ? rootSchematic() : null;
-  if (!doc || (root && root.docId === doc.docId)) { d.sheetName = ROOT_SHEET_NAME; d.sheetPath = "/"; return; }
+  const tops = state.project ? topLevelSchematics() : [];
+  const top = doc ? tops.find((t) => t.doc.docId === doc.docId) : undefined;
+  if (tops.length > 1 && top) {
+    // one of several top-level sheets: its name is the project file's, and it is in the path (PathHumanReadable)
+    d.sheetName = top.name; d.sheetPath = "/" + top.name + "/"; return;
+  }
+  if (!doc || (tops[0] && tops[0].doc.docId === doc.docId)) { d.sheetName = ROOT_SHEET_NAME; d.sheetPath = "/"; return; }
   const name = sheetNames.get(doc.path) || d.fileName!.replace(/\.kicad_sch$/, "");
-  d.sheetName = name; d.sheetPath = "/" + name + "/";
+  d.sheetName = name; d.sheetPath = (tops.length > 1 && sheetHumanPaths.get(doc.path)) || "/" + name + "/";
   // ${#} comes from SCH_SCREEN::GetPageNumber(), which the parent's instance data fills in; the
   // child's own (sheet_instances …) — if it even has one — is not what eeschema shows.
   const page = sheetPages.get(doc.path);
@@ -381,22 +396,113 @@ export async function openEditor(id: string) {
 export function rootSchematic(): DocEntry | undefined {
   const pro = state.project!.docs.find((d) => d.docType === "kicad_pro");
   if (pro && E.proSettings === null) { E.proSettings = ""; api(`/api/docs/${pro.docId}/content`).then((t) => { E.proSettings = typeof t === "string" ? t : JSON.stringify(t); if (CollabTools.pcb && CollabTools.pcb.setDesignSettings) { try { CollabTools.pcb.setDesignSettings(E.proSettings); } catch (e) { /* module without rules */ } }
-    // the title block's last resolver arrives with this file, so a sheet already on screen needs a repaint
+    // the title block's last resolver arrives with this file, so a sheet already on screen needs a repaint; the
+    // file's top-level sheets may name another root, so the hierarchy is learned again
+    hierarchyLearned = null; void learnHierarchy().then(() => { if (E.kdoc) { applySheetContext(E.kdoc); requestRender(); } });
+    publishDocs();
     if (E.kdoc) { applySheetContext(E.kdoc); requestRender(); } }).catch(() => { E.proSettings = ""; }); }
   // the custom rules (.kicad_dru) the PCB tools resolve length / skew constraints from
   const dru = state.project!.docs.find((d) => d.docType === "design_rules");
   if (dru && E.druText === null) { E.druText = ""; api(`/api/docs/${dru.docId}/content`).then((t) => { E.druText = typeof t === "string" ? t : ""; }).catch(() => { E.druText = ""; }); }
-  return rootSchematicOf(state.docs!, state.project!.docs);
+  return topLevelSchematics()[0]?.doc || rootSchematicOf(state.docs!, state.project!.docs);
 }
 
+/** SCHEMATIC::GetTopLevelSheets: the project file's top-level sheets in order (the root sheet alone before the file
+ *  is read, or when it lists none).  Several only in a KiCad 10 project that has them (an Altium import). */
+export function topLevelSchematics(): TopLevelSheet<DocEntry>[] {
+  if (!state.project) return [];
+  const key = E.proSettings || "";
+  if (!topsMemo || topsMemo.pro !== key || topsMemo.docs !== state.docs || topsMemo.all !== state.project.docs) {
+    let pro: unknown = null;
+    try { pro = key ? JSON.parse(key) : null; } catch (e) { pro = null; }
+    topsMemo = { pro: key, docs: state.docs!, all: state.project.docs, tops: topLevelSheetsOf(pro, state.docs!, state.project.docs) };
+  }
+  return topsMemo.tops;
+}
+let topsMemo: { pro: string; docs: unknown; all: unknown; tops: TopLevelSheet<DocEntry>[] } | null = null;
+/** The top-level sheets changed (one renamed in the project file): the sheet paths and local net names follow. */
+export function topLevelSheetsChanged(): void {
+  hierarchyLearned = null; sheetHumanPaths.clear();
+  void learnHierarchy().then(() => { if (E.kdoc && E.kdoc.type === "sch") { applySheetContext(E.kdoc); requestRender(); } });
+  publishDocs();
+}
+/** The schematic has more than one top-level sheet: sheet paths and local net names start with the top-level
+ *  sheet's name (SCH_SHEET_PATH::PathHumanReadable). */
+export function multiTopLevel(): boolean { return topLevelSchematics().length > 1; }
 
-export function enterSheet(file: string) {
-  const base = file.split("/").pop();
-  const cur = state.doc ? state.doc.path.split("/").slice(0, -1).join("/") : "";
-  const rel = cur ? `${cur}/${file}` : file;
-  const doc = state.docs!.find((d) => d.docType === "kicad_sch" && (d.path === rel || d.path === file))
+
+/** The project's schematic a sheet's Sheetfile names, seen from the folder of `parentPath` (else by file name). */
+export function findSheetDoc(file: string, parentPath: string): DocEntry | undefined {
+  file = file.replace(/\\/g, "/");
+  const base = file.split("/").pop(), dir = parentPath.split("/").slice(0, -1).join("/");
+  const rel = normPath(dir ? `${dir}/${file}` : file);
+  return state.docs!.find((d) => d.docType === "kicad_sch" && (d.path === rel || d.path === file))
     || state.docs!.find((d) => d.docType === "kicad_sch" && d.path.split("/").pop() === base);
-  if (doc) openDoc(doc); else toast("That sheet isn't in the shared project yet");
+}
+function normPath(p: string): string { const out: string[] = []; for (const x of p.split("/")) { if (!x || x === ".") continue; if (x === "..") out.pop(); else out.push(x); } return out.join("/"); }
+
+let docsFetch: Promise<boolean> | null = null;
+/**
+ * Read the project's file list again: a sheet somebody else drew made a new file after this page loaded (the
+ * server's "docs" notice, or a sheet that names a file this page has not heard of).  True when files were added.
+ */
+export function refreshDocs(): Promise<boolean> {
+  if (!state.project) return Promise.resolve(false);
+  if (docsFetch) return docsFetch;
+  const pid = state.project.projectId;
+  docsFetch = (async () => {
+    try {
+      const info = await api(`/api/projects/${pid}/info`) as ProjectInfo | null;
+      if (!info || !Array.isArray(info.docs) || !state.project || state.project.projectId !== pid) return false;
+      const known = new Set(state.project.docs.map((d) => d.docId));
+      const added = info.docs.filter((d) => !known.has(d.docId));
+      if (!added.length) return false;
+      // new arrays: what is worked out from the lists (the top-level sheets) is kept by their identity
+      state.project.docs = state.project.docs.concat(added); store.set({ project: Object.assign({}, state.project) });
+      state.docs = editorDocs(state.docs!.concat(editorDocs(added).filter((d) => !state.docs!.some((x) => x.docId === d.docId))));
+      publishDocs();
+      return true;
+    } catch (e) { return false; }
+    finally { docsFetch = null; }
+  })();
+  return docsFetch;
+}
+
+/** An empty schematic file (SCH_SCREEN of a new sheet whose file does not exist yet). */
+function emptySchematic(): string {
+  const uuid = KiCadCanvas.newUuid();
+  return `(kicad_sch (version 20250114) (generator "kicad-collab-web") (generator_version "9.0") (uuid "${uuid}") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))\n`;
+}
+
+/**
+ * A sheet whose file is in no one's copy of the project (added by a tool or an older app that did not upload it):
+ * like eeschema, which gives a sheet with a missing file a new empty screen, make the file and enter it.
+ */
+async function createSheetFile(file: string, parentPath: string): Promise<DocEntry | undefined> {
+  if (!state.project) return undefined;
+  const dir = parentPath.split("/").slice(0, -1).join("/"), path = normPath(dir ? `${dir}/${file}` : file);
+  if (!/\.kicad_sch$/i.test(path)) return undefined;
+  const res = await api(`/api/projects/${state.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path, docType: "kicad_sch" }) }) as { docId?: string; path?: string; existing?: boolean } | null;
+  if (!res || !res.docId) return undefined;
+  if (!res.existing) await api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: emptySchematic() });
+  await refreshDocs();
+  return state.docs!.find((d) => d.docId === res.docId);
+}
+
+/**
+ * SCH_NAVIGATE_TOOL::EnterSheet: open the sheet file a sheet symbol names.  `parentPath` is the file that holds
+ * the sheet symbol (the open one by default).  A file this page has not heard of is looked up again first.
+ */
+export async function enterSheet(file: string, parentPath?: string): Promise<void> {
+  const parent = parentPath !== undefined ? parentPath : state.doc ? state.doc.path : "";
+  let doc = findSheetDoc(file, parent);
+  if (!doc && await refreshDocs()) doc = findSheetDoc(file, parent);
+  if (!doc && !E.viewOnly) {
+    try { doc = await createSheetFile(file, parent); }
+    catch (e) { toast(`Could not create the sheet file '${file}': ${(e as Error).message || e}`, 5000); return; }
+  }
+  if (doc) { await openDoc(doc); return; }
+  toast(`The sheet file '${file}' is not in this project`, 4000);
 }
 
 
@@ -423,7 +529,7 @@ export function leaveDoc() {
   E.kdoc = null; E.loadedText = null; E.layersSeeded = false; canvas.style.display = "none"; { const cc = document.getElementById("cursorCanvas"); if (cc) cc.style.display = "none"; } if (E.renderReq) { cancelAnimationFrame(E.renderReq); E.renderReq = 0; }
   releaseLayers();   // the cached pass and the zoom levels of the document left
   peersG.replaceChildren(); clearPeerCursors(); selG.replaceChildren(); dragG.replaceChildren(); cmtG.replaceChildren();
-  closeThread();
+  closeThread(); leaveCursorChat();
   store.slice("document", { layers: [], hiddenLayers: [], copperLayers: [], items: [], sheets: [], hasDoc: false, notice: null });
   store.set({ comments: [], otherComments: [], openThread: null, peers: { list: [], follow: null } });
   renderProps();
@@ -463,6 +569,7 @@ export async function openDoc(doc: DocEntry) {
   const docId = doc.docId;
   setupGridControls();
   loadComments();
+  void loadChat();
   void loadProposals();
   // The document itself, drawn here and kept current by the op stream; the
   // desktop-pushed render is only a fallback when the file can't be read.

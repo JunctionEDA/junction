@@ -1,7 +1,9 @@
 // editor — GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/domains/pcb/editor/index.ts — edit these modules, not the bundle).
 import { state, store } from "./appstore";
 import { noteCommentMsg } from "./comments";
-import { applyChanges, applyRemoteChanges, renderObjects, setDocFromText } from "./doc";
+import { noteChatMsg } from "./chat";
+import { applyChanges, applyRemoteChanges, refreshDocs, renderObjects, setDocFromText } from "./doc";
+import { loadSheets as loadHierarchySheets } from "./panels/hierarchy";
 import { applyFollowWeb, peerName, renderPeers, startPresenceKeepalive } from "./peers";
 import { clearPeerCursors, noteRtt, onlyPointerMoved } from "./peercursors";
 import type { PeerEntry } from "./types";
@@ -156,11 +158,14 @@ export async function connect() {
       if (was !== msg.role) toast(msg.role === "editor" ? "You can now edit this project" : msg.role === "commenter" ? "You can now comment on this project, but not change it" : "You now have view-only access to this project", 4500);
     }
     if (msg.type === "comment") noteCommentMsg(msg);
+    if (msg.type === "chat") noteChatMsg(msg);              // the project chat (chat.ts)
     if (msg.type === "proposal") noteProposalMsg(msg);       // an assistant proposed a change, or somebody decided one (proposals.ts)
     if (msg.type === "versions") onVersionsNotice(msg);       // somebody saved, restored, branched or merged
     if (msg.type === "docs") tellDocsChanged(msg);            // a document of the project was added, renamed or deleted: the tabs follow
     // a document of the project was saved explicitly (the Footprint Editor's Save): fpedit.ts clears its '*', library caches drop the file
     if (msg.type === "saved") window.dispatchEvent(new CustomEvent("kc-doc-saved", { detail: msg }));
+    // a file joined the project (a sheet somebody drew), or its first content arrived: read the file list and the sheets again
+    if (msg.type === "docs") void refreshDocs().then((added) => { if (!added) void loadHierarchySheets(typeof msg.addedDocId === "string" ? msg.addedDocId : null); });
     // An earlier version is on screen (editor/versions.ts): the live stream is not laid over it.  Leaving the
     // timeline asks for the document again, so nothing that arrives meanwhile is lost.
     if (historyActive() && (msg.type === "snapshot" || msg.type === "op" || msg.type === "ops" || msg.type === "reset")) {

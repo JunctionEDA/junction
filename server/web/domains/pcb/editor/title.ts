@@ -8,6 +8,7 @@
 // "*" is IsContentModified: here, edits of this document the server has not acknowledged yet (E.pendingOps), since
 // every acknowledged edit is already saved.  "[Read Only]" is a visitor who may not edit.  The Footprint Editor
 // writes its own title (fpedit.ts refreshTitle) and the Symbol Editor its own (symedit/editor.ts).
+import { topLevelSchematics } from "./doc";
 import { state, store } from "./appstore";
 import { E } from "./state";
 
@@ -29,7 +30,13 @@ export function frameTitle(): string | null {
   const root = rootId ? (s.document.docs as { docId: string; path: string }[]).find((d) => d.docId === rootId) : null;
   const kdoc = E.kdoc as { sheetPath?: string } | null;
   const sub = kdoc && kdoc.sheetPath && kdoc.sheetPath !== "/" ? kdoc.sheetPath.replace(/^\/|\/$/g, "") : "";
-  const sheetPath = (root ? stem(root.path) : name) + (sub ? "/" + sub : "");
+  let sheetPath = (root ? stem(root.path) : name) + (sub ? "/" + sub : "");
+  // several top-level sheets: the path starts at the top-level sheet's own file, its name left out
+  const tops = topLevelSchematics();
+  if (tops.length > 1 && sub) {
+    const segs = sub.split("/"), top = tops.find((t) => t.name === segs[0]);
+    if (top) sheetPath = stem(top.doc.path) + (segs.length > 1 ? "/" + segs.slice(1).join("/") : "");
+  }
   return `${modified ? "*" : ""}${name}${sheetPath !== name ? ` [${sheetPath}]` : ""}${ro} — Schematic Editor`;
 }
 

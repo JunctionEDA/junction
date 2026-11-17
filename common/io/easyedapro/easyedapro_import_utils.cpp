@@ -253,9 +253,65 @@ EASYEDAPRO::ProjectToSelectorDialog( const nlohmann::json& aProject, bool aPcbOn
 }
 
 
+bool EASYEDAPRO::IsProjectArchive( const wxString& aFileName )
+{
+    wxString lower = aFileName.Lower();
+
+    if( lower.EndsWith( wxS( ".epro" ) ) )
+        return true;
+
+    if( lower.EndsWith( wxS( ".eprj" ) ) )
+        return IsEprjFile( aFileName );
+
+    if( lower.EndsWith( wxS( ".zip" ) ) )
+    {
+        std::shared_ptr<wxZipEntry> entry;
+        wxFFileInputStream          in( aFileName );
+
+        if( !in.IsOk() )
+            return false;
+
+        wxZipInputStream zip( in );
+
+        if( !zip.IsOk() )
+            return false;
+
+        while( entry.reset( zip.GetNextEntry() ), entry.get() != nullptr )
+        {
+            if( entry->GetName() == wxS( "project.json" ) )
+                return true;
+        }
+    }
+
+    return false;
+}
+
+
 nlohmann::json EASYEDAPRO::FindJsonFile( const wxString&           aZipFileName,
                                          const std::set<wxString>& aFileNames )
 {
+    if( aZipFileName.Lower().EndsWith( wxS( ".eprj" ) ) )
+    {
+        std::shared_ptr<const EPRJ_FILES> files = ReadEprjFiles( aZipFileName );
+
+        for( const auto& [name, data] : *files )
+        {
+            if( aFileNames.find( name ) == aFileNames.end() )
+                continue;
+
+            try
+            {
+                return nlohmann::json::parse( data );
+            }
+            catch( std::exception& e )
+            {
+                THROW_IO_ERRORF( _( "JSON error reading '%s': %s" ), name, e.what() );
+            }
+        }
+
+        return nlohmann::json{};
+    }
+
     std::shared_ptr<wxZipEntry> entry;
     wxFFileInputStream          in( aZipFileName );
     wxZipInputStream            zip( in );
@@ -310,6 +366,33 @@ void EASYEDAPRO::IterateZipFiles(
         const wxString&                                                         aFileName,
         std::function<bool( const wxString&, const wxString&, wxInputStream& )> aCallback )
 {
+    if( aFileName.Lower().EndsWith( wxS( ".eprj" ) ) )
+    {
+        std::shared_ptr<const EPRJ_FILES> files = ReadEprjFiles( aFileName );
+
+        for( const auto& [name, data] : *files )
+        {
+            wxString            baseName = name.AfterLast( '/' ).BeforeFirst( '.' );
+            wxMemoryInputStream stream( data.data(), data.size() );
+
+            try
+            {
+                if( aCallback( name, baseName, stream ) )
+                    break;
+            }
+            catch( nlohmann::json::exception& e )
+            {
+                THROW_IO_ERRORF( _( "JSON error reading '%s': %s" ), name, e.what() );
+            }
+            catch( std::exception& e )
+            {
+                THROW_IO_ERRORF( _( "Error reading '%s': %s" ), name, e.what() );
+            }
+        }
+
+        return;
+    }
+
     std::shared_ptr<wxZipEntry> entry;
     wxFFileInputStream          in( aFileName );
     wxZipInputStream            zip( in );

@@ -1179,6 +1179,8 @@ void SCH_EASYEDA_PARSER::ParseSchematic( SCHEMATIC* aSchematic, SCH_SHEET* aRoot
 
             schSym->SetPosition( RelPos( origin ) );
             schSym->SetRef( &aSchematic->CurrentSheet(), referenceStr );
+            // the symbol is not on a screen yet, so SetRef leaves its own field at the library prefix
+            schSym->GetField( FIELD_T::REFERENCE )->SetText( referenceStr );
 
             createdItems.push_back( std::move( schSym ) );
         }

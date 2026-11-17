@@ -205,8 +205,8 @@ export async function getComponent(input: { ref: string; doc?: string }): Promis
 }
 function flag(node: any, name: string, dflt = true): boolean { const k = K(); const n = k.kid(node, name); return n ? k.str(n[1]) !== "no" : dflt; }
 
-export async function listNets(input: { doc?: string; filter?: string }): Promise<unknown> {
-  const { doc, path } = await resolveDoc(input.doc); const q = (input.filter || "").toLowerCase(); const cap = 300;
+export async function listNets(input: { doc?: string; filter?: string; limit?: number }): Promise<unknown> {
+  const { doc, path } = await resolveDoc(input.doc); const q = (input.filter || "").toLowerCase(); const cap = Math.max(1, Math.floor(Number(input.limit) || 300));
   if (doc.type === "sch") {
     const rows = schNets(doc).map((n) => ({ name: n.name, pins: n.pins.map((p) => `${p.ref}.${p.number}${p.name ? `(${p.name})` : ""}`), also_labelled: n.labels.filter((l) => l !== n.name).length ? n.labels.filter((l) => l !== n.name) : undefined }))
       .filter((n) => !q || n.name.toLowerCase().includes(q) || n.pins.some((p) => p.toLowerCase().includes(q)));
@@ -256,7 +256,7 @@ export async function geometry(input: { doc?: string; silk?: boolean }): Promise
     // the courtyard's box, as placed: what has to stay clear of the next part
     let cb: number[] | undefined; try { const cy = P.courtyards({ node: it.node }); let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; for (const k of Object.keys(cy)) for (const loop of cy[k]) for (const q of loop) { a = Math.min(a, q[0]); b = Math.min(b, q[1]); c = Math.max(c, q[0]); d = Math.max(d, q[1]); } if (a <= c) cb = [r3(a), r3(b), r3(c), r3(d)]; } catch { /* no courtyard maths */ }
     parts.push({ ref: it.ref || "", id: it.id, value: it.value || "", footprint: it.lib || "", x: r3(it.x), y: r3(it.y), rotation: it.rot || 0, side: it.layer === "B.Cu" ? "back" : "front", box: it.bbox ? it.bbox.map(r3) : undefined, courtyard: cb,
-      pads: P.padsOf(it).map((p: any) => [p.number, r3(p.x), r3(p.y), NT.key(p.net) || ""]) });
+      pads: P.padsOf(it).map((p: any) => [p.number, r3(p.x), r3(p.y), NT.key(p.net) || "", r3(p.w || 0), r3(p.h || 0), r3(p.rot || 0)]) });
   }
   return { document: path, type: "board", outline: isFinite(x0) ? [r3(x0), r3(y0), r3(x1), r3(y1)] : null, copper_layers: doc.copper.slice(), parts, silk: input.silk ? silkBoxes(doc) : undefined };
 }
@@ -321,7 +321,7 @@ export async function runChecks(input: { doc?: string }): Promise<unknown> {
   const refs = (ids: string[]) => Array.from(new Set((ids || []).map((id) => doc.items.get(id)).filter(Boolean).map((it: any) => it.ref).filter(Boolean)));
   const rows: { severity: string; code: string; message: string; x: number; y: number; refs: string[] }[] = markers.map((m) => ({ severity: m.severity, code: m.code, message: m.text, x: r3(m.x), y: r3(m.y), refs: refs(m.ids) as string[] }));
   if (doc.type !== "sch") {   // Junction's own rule on top of KiCad's DRC: no square track corners except on antenna and RF nets
-    try { const R = W.PcbAutoRouter; if (R && R.boardSquareCorners) for (const c of R.boardSquareCorners(doc, PCB())) rows.push({ severity: "error", code: "track_right_angle", message: `Track of net '${c.net}' turns ${c.angle}° on ${c.layer}: use 45° corners (antenna and RF nets are exempt)`, x: r3(c.x), y: r3(c.y), refs: [] }); } catch { /* router not loaded */ }
+    try { const R = W.PcbAutoRouter; if (R && R.boardSquareCorners) for (const c of R.boardSquareCorners(doc, PCB())) rows.push({ severity: "error", code: "track_right_angle", message: `Track of net '${c.net}' has a ${c.angle}° corner on ${c.layer} (${c.angle < 90 ? "an acute hairpin" : "a square bend"}): bend at 135° (two 45° turns) instead (antenna and RF nets are exempt)`, x: r3(c.x), y: r3(c.y), refs: [] }); } catch { /* router not loaded */ }
   }
   const errors = rows.filter((m) => m.severity === "error").length; const cap = 200;
   // counts by kind over every row, so a capped list never hides a kind

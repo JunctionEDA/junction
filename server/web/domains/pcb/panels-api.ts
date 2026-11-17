@@ -78,6 +78,10 @@ export interface HierNode {
   /** the document holding this sheet's (sheet …) symbol and that symbol's uuid (null for the root) */
   parentDocId: string | null; sheetId: string | null;
   current: boolean; children: HierNode[];
+  /** the hidden project root above several top-level sheets (wxTR_HIDE_ROOT): only its children are drawn */
+  virtual?: boolean;
+  /** a top-level sheet of a schematic with several (SCHEMATIC::GetTopLevelSheets): its path names it */
+  topLevel?: boolean;
 }
 
 // ---------------------------------------------------------------- Net navigator (eeschema/net_navigator.cpp)
@@ -124,6 +128,8 @@ export type PanelAction =
   | { t: "hierOpen"; path: string }
   | { t: "hierRename"; path: string }
   | { t: "hierPage"; path: string }
+  | { t: "hierNewTop" }
+  | { t: "hierDeleteTop"; path: string }
   | { t: "searchSelect"; rows: SearchRow[]; zoom: SelectionZoom }
   | { t: "searchActivate"; row: SearchRow; zoom: SelectionZoom }
   | { t: "netNavSelect"; ids: string[]; key?: string }

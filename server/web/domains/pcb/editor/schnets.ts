@@ -13,7 +13,8 @@ import type { NetEntry, SheetFile, SheetInstance } from "../canvas/pcb-netlist";
 import type { schNets } from "../canvas/sch-nets";
 import { setStatusBar, state } from "./appstore";
 import { centerOn } from "./comments";
-import { openDoc, rootSchematic } from "./doc";
+import { openDoc, rootSchematic, topLevelSchematics } from "./doc";
+import { toast } from "./util";
 import { NL } from "./pcbdialogs/canvas";
 import { liveDocument, projectDocs, type ProjectDocInfo } from "./projectfile";
 import { E } from "./state";
@@ -72,7 +73,8 @@ let computed: Computed | null = null, docGen = 0;
 function compute(): Computed | null {
   const h = helpers(); const cur = curEntry(), doc = E.kdoc as KDoc | null;
   if (!h || !cur || !doc || doc.type !== "sch") return null;
-  const key = `${projectKey()}|${cur.docId}|${docGen}|${loadedVer}`;
+  const topKey = topLevelSchematics().map((t) => t.doc.docId + ":" + t.name).join(",");
+  const key = `${projectKey()}|${cur.docId}|${docGen}|${loadedVer}|${topKey}`;
   if (computed && computed.key === key) return computed;
   const files = new Map<string, SheetFile>(), docs = new Map<string, KDoc>();
   for (const d of schDocs()) {
@@ -92,7 +94,9 @@ function compute(): Computed | null {
   const stem = rootFile.file.split("/").pop()!.replace(/\.kicad_sch$/, "");
   const pro = projectDocs().find((d) => d.docType === "kicad_pro");
   const project = pro ? pro.path.split("/").pop()!.replace(/\.kicad_pro$/, "") : stem;
-  const nl = NL().buildNetlist(rootFile, resolve, { symbolPins: h.symbolPins, isPower: (d, it) => h.isPowerSymbol(d, String(((KiCadCanvas.kid(it.node, "lib_id") as SNode | null) || [])[1])) }, project);
+  // the top-level sheets read so far (all of them once loadSheets is done; the root alone before the project file is in)
+  const tops = topLevelSchematics().map((t) => ({ sheet: files.get(t.doc.path) as SheetFile, name: t.name, uuid: t.uuid })).filter((t) => !!t.sheet);
+  const nl = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve, { symbolPins: h.symbolPins, isPower: (d, it) => h.isPowerSymbol(d, String(((KiCadCanvas.kid(it.node, "lib_id") as SNode | null) || [])[1])) }, project);
   const map = nl.netMap || new Map<string, NetEntry>(), instances = nl.instances || [];
   computed = { map, instances, index: SN().nameIndex(map), rootName: stem, docs, key };
   return computed;
@@ -186,6 +190,26 @@ export async function goTo(instIndex: number, at: [number, number] | null): Prom
   if (at) centerOn(at[0], at[1]);
 }
 export function preferInstance(human: string | null): void { preferHuman = human; }
+
+/**
+ * SCH_NAVIGATE_TOOL::LeaveSheet (Navigate > Leave Sheet, Backspace): the parent of the sheet instance on screen.  A
+ * top-level sheet has none (with several top-level sheets, each is one); "the root sheet" names it in the message.
+ */
+export function leaveSheet(): void {
+  const cur = curEntry();
+  const c = netMap(), inst = currentInstance(c);
+  if (c && inst) {
+    if (inst.uuidPath.length <= 1) { toast("Already at the root sheet"); return; }
+    const up = inst.uuidPath.slice(0, -1).join("/");
+    const parent = c.instances.find((i) => i.uuidPath.join("/") === up);
+    const d = parent ? schDocs().find((x) => x.path === parent.file) : null;
+    if (parent && d) { preferInstance(parent.human); if (!cur || d.docId !== cur.docId) void openDoc(d as never); else applyHighlight(); return; }
+  }
+  // the hierarchy is not read yet: the root sheet, unless this is a top-level sheet already
+  const tops = topLevelSchematics();
+  if (cur && tops.some((t) => t.doc.docId === cur.docId)) { toast("Already at the root sheet"); return; }
+  const r = rootSchematic(); if (r) void openDoc(r);
+}
 
 /**
  * SCH_DRAWING_TOOLS::findWireLabelDriverName: the name of the wire's net when its driver on this sheet is a local or

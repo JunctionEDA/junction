@@ -1,0 +1,30 @@
+{
+  "meta": {
+    "filename": "multi.kicad_pro",
+    "version": 3
+  },
+  "schematic": {
+    "top_level_sheets": [
+      {
+        "filename": "multi.kicad_sch",
+        "name": "Main",
+        "uuid": "aaaaaaaa-1111-4111-8111-111111111111"
+      },
+      {
+        "filename": "second.kicad_sch",
+        "name": "Second",
+        "uuid": "bbbbbbbb-2222-4222-8222-222222222222"
+      }
+    ]
+  },
+  "sheets": [
+    [
+      "aaaaaaaa-1111-4111-8111-111111111111",
+      "Main"
+    ],
+    [
+      "bbbbbbbb-2222-4222-8222-222222222222",
+      "Second"
+    ]
+  ]
+}

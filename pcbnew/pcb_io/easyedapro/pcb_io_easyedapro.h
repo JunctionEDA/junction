@@ -35,19 +35,19 @@ class PCB_IO_EASYEDAPRO : public PCB_IO, public PROJECT_CHOOSER_PLUGIN
 public:
     const IO_BASE::IO_FILE_DESC GetBoardFileDesc() const override
     {
-        return IO_BASE::IO_FILE_DESC( _HKI( "EasyEDA (JLCEDA) Pro project" ), { "epro", "zip" } );
+        return IO_BASE::IO_FILE_DESC( _HKI( "EasyEDA (JLCEDA) Pro project" ), { "epro", "eprj", "zip" } );
     }
 
     const IO_BASE::IO_FILE_DESC GetLibraryDesc() const override
     {
         return IO_BASE::IO_FILE_DESC( _HKI( "EasyEDA (JLCEDA) Pro project" ),
-                                      { "elibz", "epro", "zip" } );
+                                      { "elibz", "epro", "eprj", "zip" } );
     }
 
     const IO_BASE::IO_FILE_DESC GetLibraryFileDesc() const override
     {
         return IO_BASE::IO_FILE_DESC( _HKI( "EasyEDA (JLCEDA) Pro files" ),
-                                      { "elibz", "efoo", "epro", "zip" } );
+                                      { "elibz", "efoo", "epro", "eprj", "zip" } );
     }
 
     bool CanReadBoard( const wxString& aFileName ) const override;

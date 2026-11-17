@@ -22,10 +22,29 @@ COPY . .
 COPY --from=web /web/static/dist ./static/dist
 RUN cargo build --release && cp target/release/kicad-collab-server /srv-bin
 
-FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates poppler-utils \
+# Ubuntu 24.04, the system the desktop's Linux build targets: its kicad-cli converts designs from other EDA tools
+# (EasyEDA, Altium, Eagle, ...) uploaded to the web (src/nonkicad_import.rs).  The binaries above are built on
+# Debian 12, whose glibc is older, so they run here unchanged.
+FROM ubuntu:24.04
+ARG DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl poppler-utils \
     && rm -rf /var/lib/apt/lists/*
-# node runs the headless editor behind the MCP endpoint (src/mcp_host.rs); same Debian release as the web stage
+# The newest Junction desktop release for Linux and the Ubuntu packages it lists; JUNCTION_RELEASE pins a tag
+# (v2.2.0), and an image without it still builds and serves everything but the import.
+ARG JUNCTION_RELEASE=latest
+RUN tag="$JUNCTION_RELEASE"; \
+    if [ "$tag" = latest ]; then \
+      tag=$(curl -fsSI https://github.com/JunctionEDA/junction/releases/latest | tr -d '\r' | sed -n 's#^[Ll]ocation: .*/tag/##p'); \
+    fi; \
+    if [ -n "$tag" ] && curl -fsSL "https://github.com/JunctionEDA/junction/releases/download/$tag/Junction-${tag#v}-linux-x64.tar.gz" -o /tmp/junction.tgz; then \
+      mkdir -p /opt/junction && tar -C /opt/junction -xzf /tmp/junction.tgz && rm /tmp/junction.tgz \
+      && apt-get update && xargs -a /opt/junction/usr/share/junction/ubuntu-packages.txt apt-get install -y --no-install-recommends \
+      && rm -rf /var/lib/apt/lists/* \
+      && printf '#!/bin/sh\nexec /opt/junction/usr/bin/junction kicad-cli "$@"\n' > /opt/junction/kicad-cli && chmod +x /opt/junction/kicad-cli \
+      && /opt/junction/kicad-cli version \
+      || { echo "Junction $tag could not be installed; importing other tools' designs is off"; rm -rf /opt/junction; }; \
+    else echo "no Junction Linux release found; importing other tools' designs is off"; fi
+# node runs the headless editor behind the MCP endpoint (src/mcp_host.rs); the Debian build runs on Ubuntu 24.04 too
 COPY --from=web /usr/local/bin/node /usr/local/bin/node
 COPY --from=build /srv-bin /usr/local/bin/kicad-collab-server
 # served as /static/pyodide/*; too large to compile into the binary (src/pcm.rs runtime_dir)

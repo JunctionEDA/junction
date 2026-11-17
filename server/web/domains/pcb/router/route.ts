@@ -10,6 +10,7 @@ const STEPS_PER_MS = 12000;
 const BUNDLE_COST = 0.3;
 import { TRAINED, Weights } from "./weights";
 import { cornerAngle, SQUARE_MAX } from "./corners";
+import { fanout, padRows, type Boxed, type Escape, type FanJob } from "./fanout";
 import { stackupOf, traceOn, usualImpedance, widthFor, z0, zdiff } from "./impedance";
 /** Hole clearance is kept with this much to spare: a diagonal track on the grid can come a few microns closer to a
  *  via's hole than its grown cell says (Cyberboard: 0.2419 mm against a 0.25 mm rule). */
@@ -27,6 +28,11 @@ const PLANE_COST = 1;   // 1.3 and 3 tried 2026-11-17: Ember +1.3, Cyberboard +0
 // far pad of the net.
 const PLANE_COVER = 0.5, PLANE_HOP_MM = 1.5;
 const FAN_ROWS_MM = [0.8, 1.5, 2.2], FAN_FAR_MM = 4;
+// Fine-pitch escapes laid before routing (fanout.ts).  Off unless a run asks: measured 2026-11-17 from bare copper,
+// Ember 22 -> 17 open (with the spreading fan; 20 to 21 without it) and the Cyberboard bench 75.0 -> 75.0, but the
+// Ledify bench 94.9 -> 74.0 (4 to 5 open; also without the spreading fan, and with supply pins left alone)
+const ESCAPES: Escapes = false, SPREAD = 1.5;   // the spreading fan ends its slots 1.5 pitches apart (0.6 mm off a 0.4 mm row)
+export type Escapes = boolean | number | { depth?: number; spread?: number };
 /** How far (mm, pad to pad on a shared net) a small part may stand from a chip and still count as part of its cluster. */
 const GROUP_REACH = 5;
 /** A via costs this many times what the reference boards' routing says it does (4.66 mm of track): people asked for
@@ -90,6 +96,7 @@ export interface RouteOptions {
   impedance?: boolean;           // size tracks for the impedance their nets call for (a plan's impedance, else by name: USB 90 Ω, HDMI/Ethernet 100 Ω, antenna feeds 50 Ω); default true
   splitPairs?: boolean;          // route a differential pair's two lines separately when no coupled run fits (default false: they stay unrouted and the report says why)
   fanoutVias?: boolean;          // true: a longer lane with room for a via at fine-pitch pins whose net goes far
+  escapes?: Escapes;              // lay the escapes of fine-pitch chips (0.65 mm pitch and finer) before routing: a stub out of each pin (a spreading fan, a ring, a leg or a via) and route from its end (fanout.ts); a number sets how far past the pad the first ring lies (mm), { depth, spread } both (spread 0: no spreading fan)
   fanoutLanes?: boolean | number; // keep a lane (mm, default 0.25) out from each fine-pitch chip pin for its own net only; false turns it off
   matchLengths?: boolean;        // lengthen the shorter members of a matched group with serpentines; default true
   match?: { nets: string[]; tolerance?: number; length?: number }[];   // nets to bring to one length (the longest, or the length given), within the tolerance in mm (default 0.25)
@@ -154,6 +161,7 @@ export interface RouteResult {
   grid: { pitch: number; w: number; h: number; layers: string[] }; nets: number;
   connections: ConnReport[]; domains?: DomainReport; fences?: FenceReport[];
   groups?: { clusters: number; inside: number; insideRouted: number; insideVias: number; critical: string[]; members: Record<string, string[]> };   // connections that lie inside one cluster, and how they came out
+  fanout?: { escapes: number; ring: number; via: number; used: number; boxed: Boxed[] };   // the escapes laid before routing, and the pins that got none
 }
 export interface Progress { done: number; total: number; routed: number; pass: number; net: string }
 
@@ -203,6 +211,7 @@ export class Router {
       push({ net: "", layers: all, shape: P.padShape({ shape: w === h ? "circle" : "oval", x: p.x, y: p.y, w, h, rot: p.rot }), clr: Math.max(s.clearance, s.holeClearance !== undefined ? s.holeClearance : 0.25) });   // Board Setup > Constraints: hole clearance
     }
     for (const e of P.edgeShapes(doc).shapes) push({ net: "", layers: all, shape: e, clr: 0, edge: true });
+    for (const o of this.escapeObs) push(o);   // the fan-out laid before routing stays copper of its net
     // Fan-out lanes.  Each pin of a fine-pitch chip (QFN, QFP, 0.5 mm pitch and finer) keeps a short straight lane
     // out from the end of its pad that only its own net may use: a neighbour's track may not jog across in front of
     // it, so every pin can still get out, as a person fans a chip out before routing anything else.
@@ -495,6 +504,82 @@ export class Router {
       }
       this.nets.push(info);
     }
+    if ((this.opts.escapes ?? ESCAPES) !== false) this.fanout(nl);
+  }
+
+  // ------------------------------------------------------------------ fan-out before routing (fanout.ts)
+  escapeObs: Obstacle[] = []; private laid: { e: Escape; anchors: Anchor[]; obs: Obstacle[] }[] = []; private fanReport: RouteResult["fanout"];
+  /** Escape every connected pin of a fine-pitch chip row before anything is routed, and move the ends of its
+   *  connections to the escapes.  The pins whose net goes elsewhere keep their lane even when they get no escape. */
+  private fanout(nl: any): void {
+    const G = this.G; const all = G.layers.map((_, i) => i); const key = (p: Pt) => p[0].toFixed(3) + "," + p[1].toFixed(3);
+    const ends = new Map<string, { anchors: Set<Anchor>; conns: Conn[]; other: Anchor[] }>();
+    for (const net of this.nets) for (const c of net.conns) for (const [a, b] of [[c.a, c.b], [c.b, c.a]] as [Anchor, Anchor][]) {
+      if (!a.axis || !a.narrow || a.plane) continue; let e = ends.get(key(a.p)); if (!e) ends.set(key(a.p), e = { anchors: new Set(), conns: [], other: [] }); e.anchors.add(a); e.conns.push(c); e.other.push(b);
+    }
+    // the rows of every fine-pitch part
+    const byPart = new Map<any, any[]>(); for (const c of nl.conductors) if (c.kind === "pad" && c.pad && c.pad.type === "smd" && c.item && c.layers.size === 1) { let l = byPart.get(c.item); if (!l) byPart.set(c.item, l = []); l.push(c); }
+    const rows = []; for (const cs of byPart.values()) {
+      if (cs.length < 8) continue; const cx = cs.reduce((s, c) => s + c.pad.x, 0) / cs.length, cy = cs.reduce((s, c) => s + c.pad.y, 0) / cs.length;
+      const pads = cs.filter((c) => Math.max(c.pad.w, c.pad.h) >= 1.2 * Math.min(c.pad.w, c.pad.h) && Math.min(c.pad.w, c.pad.h) <= 0.4).map((c) => ({ name: this.padNames.get(key([c.pad.x, c.pad.y])) || key([c.pad.x, c.pad.y]), p: [c.pad.x, c.pad.y] as Pt, len: Math.max(c.pad.w, c.pad.h), across: Math.min(c.pad.w, c.pad.h), axis: padAxis(c.pad), layer: G.layers.indexOf(Array.from(c.layers as Set<string>)[0]) }));
+      for (const r of padRows(pads.filter((q) => q.layer >= 0 && G.routable[q.layer]), [cx, cy])) { let pitch = Infinity; for (let i = 1; i < r.pads.length; i++) pitch = Math.min(pitch, Math.hypot(r.pads[i].p[0] - r.pads[i - 1].p[0], r.pads[i].p[1] - r.pads[i - 1].p[1])); if (pitch <= 0.65 + 1e-6) rows.push(r); }
+    }
+    if (!rows.length) return;
+    // a job for every pin that ends a connection; pins of a differential pair, an RF feed, or with copper of their
+    // net already on them only keep their lane (near = 0: no escape of their own)
+    const jobs = new Map<string, FanJob>(); const at = new Map<string, string>();
+    for (const r of rows) for (const pad of r.pads) {
+      const e = ends.get(key(pad.p)); if (!e || jobs.has(pad.name)) continue; const c = e.conns[0], cls = c.cls, net = this.netOf(c.net);
+      let near = Infinity, partner: Pt = e.other[0].p, off = true;
+      for (const o of e.other) { const d = Math.hypot(o.p[0] - pad.p[0], o.p[1] - pad.p[1]); if (d < near) { near = d; partner = o.p; } if (o.layers.includes(pad.layer)) off = false; }
+      const a = Array.from(e.anchors)[0]; const crowd = (net.anchors || []).filter((x) => x.cluster === a.cluster).length > 1;
+      if (pairName(c.net) || this.kindOf(c.net) === "rf" || crowd || net.guide.allowed) near = 0;   // leaving supply pins out too cost Ember 3 (17 -> 20 open)
+      jobs.set(pad.name, { pad, net: c.net, w: Math.min(cls.width, pad.across), clr: cls.clr, viaD: cls.viaD, viaDrill: cls.viaDrill, partner, near, offLayer: off && net.guide.allowVias && this.allowVias });
+      at.set(pad.name, key(pad.p));
+    }
+    const live = new Map<Escape, Obstacle[]>();
+    const add = (o: Obstacle) => { let l = G.obstacles.get(o.net); if (!l) G.obstacles.set(o.net, l = []); l.push(o); };
+    const why = { net: "", gap: 0, need: 0 };
+    const cellsOf = (s: Shape): number[] => { const out: number[] = []; const pts: Pt[] = s.t === "circle" ? [[s.x, s.y]] : []; if (s.t === "seg") { const n = Math.max(1, Math.ceil(Math.hypot(s.b[0] - s.a[0], s.b[1] - s.a[1]) / (G.g / 2))); for (let k = 0; k <= n; k++) pts.push([s.a[0] + (s.b[0] - s.a[0]) * k / n, s.a[1] + (s.b[1] - s.a[1]) * k / n]); }
+      for (const p of pts) { const ix = Math.round((p[0] - G.ox) / G.g), iy = Math.round((p[1] - G.oy) / G.g); out.push(ix < 0 || iy < 0 || ix >= G.W || iy >= G.H ? -1 : iy * G.W + ix); } return out; };
+    const ctx = {
+      hit: (s: Shape, l: number, net: string, clr: number): string | null => {
+        for (const i of cellsOf(s)) if (i < 0 || (G.outside && G.outside[i]) || (G.keep[l] && G.keep[l]![i])) return "keep-out";
+        return this.clearOf(s, l, net, clr, why) ? null : why.net || "edge";
+      },
+      viaHit: (p: Pt, j: FanJob): string | null => {
+        const s: Shape = { t: "circle", x: p[0], y: p[1], r: j.viaD / 2 }; const clr = Math.max(j.clr, (G.holeClr || 0) + HOLE_SLACK - (j.viaD - j.viaDrill) / 2);
+        for (const i of cellsOf(s)) if (i < 0 || G.noVia[i] || (G.outside && G.outside[i])) return "keep-out";
+        for (const o of G.obstacles.get(j.net) || []) if (o.pad && o.layers.length < G.layers.length && pointGap(o.shape, p[0], p[1]) < j.viaD * 0.3) return "via in pad";   // touching its own pad is fine, sitting on it is not
+        for (const l of all) if (!this.clearOf(s, l, j.net, clr, why)) return why.net || "edge";
+        return null;
+      },
+      place: (e: Escape) => {
+        const j = jobs.get(e.pad.name)!; const obs: Obstacle[] = e.segs.map(([a, b]) => ({ net: e.net, layers: [e.pad.layer], shape: { t: "seg", a, b, r: e.w / 2 } as Shape, clr: j.clr }));
+        if (e.via) obs.push({ net: e.net, layers: all, shape: { t: "circle", x: e.via[0], y: e.via[1], r: j.viaD / 2 } as Shape, clr: Math.max(j.clr, (G.holeClr || 0) + HOLE_SLACK - (j.viaD - j.viaDrill) / 2), thru: e.via });
+        for (const o of obs) add(o); live.set(e, obs); this.oidx = null;
+      },
+      unplace: (e: Escape) => { const obs = live.get(e) || []; const l = G.obstacles.get(e.net); if (l) G.obstacles.set(e.net, l.filter((o) => !obs.includes(o))); live.delete(e); this.oidx = null; },
+    };
+    const want = this.opts.escapes ?? ESCAPES; const o = typeof want === "object" ? want : { depth: typeof want === "number" ? want : 0 };
+    const { escapes, boxed } = fanout(rows, jobs, ctx, o.depth || 0, o.spread ?? SPREAD);
+    // the escapes are board copper of their nets from here on, and their ends are where the connections start
+    for (const e of escapes) {
+      const obs = live.get(e)!; this.escapeObs.push(...obs); for (const c of G.classes.values()) for (const o of obs) stampClass(G, c, o, 1, true);
+      const j = jobs.get(e.pad.name)!; const anchors = Array.from(ends.get(at.get(e.pad.name)!)!.anchors);
+      for (const a of anchors) { a.p = e.end; a.layers = e.via ? all.filter((l) => G.routable[l]) : [e.pad.layer]; a.shape = { t: "circle", x: e.end[0], y: e.end[1], r: e.via ? j.viaD / 2 : e.w / 2 }; a.narrow = e.w; a.axis = e.via ? undefined : e.n; }
+      this.padNames.set(key(e.end), e.pad.name); this.laid.push({ e, anchors, obs });
+    }
+    // the lane kept goes on past each stub's end, as fanoutLanes keeps it past a pad's: only the pin's own net may
+    // use it, so a neighbour's route cannot turn across in front of a stub and box it in
+    const lane = this.opts.fanoutLanes === false ? 0 : typeof this.opts.fanoutLanes === "number" ? this.opts.fanoutLanes : 0.25;
+    if (lane > 0) for (const e of escapes) if (!e.via) {
+      const j = jobs.get(e.pad.name)!; const sh: Shape = { t: "seg", a: e.end, b: [e.end[0] + e.n[0] * lane, e.end[1] + e.n[1] * lane], r: 0.05 };
+      if (ctx.hit({ ...sh, r: e.w / 2 }, e.pad.layer, e.net, j.clr) !== null) continue; const o: Obstacle = { net: e.net, layers: [e.pad.layer], shape: sh, clr: j.clr };
+      add(o); this.escapeObs.push(o); for (const c of G.classes.values()) stampClass(G, c, o, 1, true); this.oidx = null;
+    }
+    this.oidx = null;
+    this.fanReport = { escapes: escapes.length, ring: escapes.filter((e) => e.kind === "ring").length, via: escapes.filter((e) => e.kind === "via").length, used: 0, boxed };
   }
 
   private xtalNets = new Set<string>(); private feedNets = new Set<string>();
@@ -1763,7 +1848,12 @@ export class Router {
     for (const c of this.conns) {
       if (c.moot && !c.nodes) continue;
       const ea = c.ends ? c.ends[0] : c.a, eb = c.ends ? c.ends[1] : c.b; const rep: ConnReport = { net: c.net, from: end(ea.p), to: end(eb.p), routed: !!c.nodes, length: 0, vias: 0, bends: 0, layers: [], detourRatio: 0 }; connections.push(rep);
-      if (!c.nodes) { failed.push({ net: c.net, a: ea.p, b: eb.p }); Object.assign(rep, this.reports.get(c.id) || {}); continue; }
+      if (!c.nodes) {
+        failed.push({ net: c.net, a: ea.p, b: eb.p }); Object.assign(rep, this.reports.get(c.id) || {});
+        const bx = this.fanReport && this.fanReport.boxed.find((b) => b.pad === rep.from.pad || b.pad === rep.to.pad);   // the fan-out found no way out of the pin
+        if (bx) rep.detail = `${bx.pad} is boxed in: ${bx.reason}${bx.blockedBy.length ? " (" + bx.blockedBy.join(", ") + ")" : ""}` + (rep.detail ? "; " + rep.detail : "");
+        continue;
+      }
       { let len = 0; const ls = new Set<number>(); for (const o of c.shapes) { const sh = o.shape as any; if (sh.t === "seg") { len += Math.hypot(sh.a[0] - sh.b[0], sh.a[1] - sh.b[1]); ls.add(o.layers[0]); } }
         rep.length = +len.toFixed(3); rep.vias = c.viaCells.length; rep.bends = c.feat ? c.feat.b45 + c.feat.b90 : 0; rep.layers = Array.from(ls).sort().map((l) => G.layers[l]); rep.detourRatio = c.len > 1e-6 ? +(len / c.len).toFixed(2) : 1; }
       const net = this.netOf(c.net).obj; if (c.zoneEnd) zoneEnds++;
@@ -1771,10 +1861,18 @@ export class Router {
       for (const o of c.shapes) { const sh = o.shape as any; if (sh.t === "seg") seg(sh.a, sh.b, o.layers[0], +(sh.r * 2).toFixed(4)); }   // stubs and runs, each at its own width
       for (const gi of c.viaCells) { const vk = c.net + "\n" + gi; if (viaSeen.has(vk)) continue; viaSeen.add(vk); const p = this.mm({ ix: gi % G.W, iy: (gi / G.W) | 0 }); items.push({ kind: "via", node: P.viaNode(doc, p[0], p[1], c.cls.viaD, c.cls.viaDrill, net, span), net, netName: c.net, conn: c.id }); vias++; }
     }
+    // an escape is laid with the first route that starts from it; one nothing was routed from stays off the board
+    let used = 0;
+    for (const { e, anchors, obs } of this.laid) {
+      const c = this.conns.find((c) => c.nodes && [c.a, c.b, ...(c.ends || [])].some((a) => anchors.includes(a))); if (!c) continue; used++; const net = this.netOf(e.net).obj;
+      for (const o of obs) { const sh = o.shape as any; if (sh.t === "seg") { items.push({ kind: "segment", node: P.segmentNode(doc, sh.a, sh.b, +(sh.r * 2).toFixed(4), G.layers[o.layers[0]], net), net, netName: e.net, conn: c.id }); segments++; length += Math.hypot(sh.a[0] - sh.b[0], sh.a[1] - sh.b[1]); }
+        else { items.push({ kind: "via", node: P.viaNode(doc, sh.x, sh.y, +(sh.r * 2).toFixed(4), c.cls.viaDrill, net, span), net, netName: e.net, conn: c.id }); vias++; } }
+    }
+    if (this.fanReport) this.fanReport.used = used;
     for (const v of this.fenceVias) { items.push({ kind: "via", node: P.viaNode(doc, v.p[0], v.p[1], v.cls.viaD, v.cls.viaDrill, v.obj, span), net: v.obj, netName: v.net, conn: -1 }); vias++; }
     const total = this.conns.filter((c) => c.nodes || !c.moot).length;
     return { items, total, routed: total - failed.length, failed, segments, vias, length, ms, passes, zoneEnds, zoneCovered: this.zoneCovered,
-      grid: { pitch: G.g, w: G.W, h: G.H, layers: G.layers.filter((_, i) => G.routable[i]) }, nets: this.nets.length, connections, pairs: Array.from(this.pairReports.values()), impedance: this.zReports, matched: this.matchReports, domains: this.domainReport(), fences: this.fenceReports, groups: this.groupReport() };
+      grid: { pitch: G.g, w: G.W, h: G.H, layers: G.layers.filter((_, i) => G.routable[i]) }, nets: this.nets.length, connections, pairs: Array.from(this.pairReports.values()), impedance: this.zReports, matched: this.matchReports, domains: this.domainReport(), fences: this.fenceReports, groups: this.groupReport(), fanout: this.fanReport };
   }
 }
 

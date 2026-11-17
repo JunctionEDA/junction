@@ -139,7 +139,8 @@ textarea.hp-input { resize: vertical; min-height: 72px; }
 .hp-trash-row .hp-item-acts { gap: 6px; }
 .hp-side-btn.on { background: var(--paper); box-shadow: inset 2px 0 0 var(--blue); font-weight: 600; }
 .hp-modes { display: flex; margin-bottom: 14px; }
-.hp-modes button { flex: 1; justify-content: center; height: 30px; }
+.hp-modes button { flex: 1; justify-content: center; flex-direction: column; gap: 0; white-space: normal; text-align: center; height: auto; min-height: 28px; padding: 5px 10px; line-height: 1.25; }
+.hp-modes button small { font-size: 11px; font-weight: 400; color: var(--ink-2); }
 
 /* selecting several */
 .hp-selbtn.on { background: color-mix(in srgb, var(--blue) 16%, var(--panel)); border-color: var(--blue); }
@@ -373,6 +374,7 @@ textarea.hp-input { resize: vertical; min-height: 72px; }
   .hp-seg button span { display: none; }
   .hp-modes button span { display: inline; }
   .hp-seg button { flex: 1; justify-content: center; height: 40px; padding: 0 6px; }
+  .hp-seg.hp-modes button { height: auto; min-height: 40px; padding: 4px 6px; }
   .hp-tools .hp-seg button { height: 100%; }
   .hp-tools-end { margin-left: 0; flex: 1 1 100%; }
   .hp-tools .btn, .hp-tools .hp-select { height: 40px; }
@@ -469,6 +471,7 @@ textarea.hp-input { resize: vertical; min-height: 72px; }
   .hp-iconbtn, .hp-star { width: 40px; height: 40px; }
   .hp-nav a, .hp-side-btn { height: 40px; }
   .hp-seg button, .hp-tools .btn, .hp-tools .hp-select, .hp-search, .hp-select, .hp-account { height: 40px; }
+  .hp-seg.hp-modes button { height: auto; min-height: 40px; }
   .hp-tools .hp-seg { height: 42px; }
   .hp .btn, .hp-modal .btn { min-height: 40px; }
   .hp-menu button { padding: 11px 12px; }

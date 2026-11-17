@@ -64,29 +64,8 @@ SCH_IO_EASYEDAPRO::~SCH_IO_EASYEDAPRO()
 
 bool SCH_IO_EASYEDAPRO::CanReadSchematicFile( const wxString& aFileName ) const
 {
-    if( aFileName.Lower().EndsWith( wxS( ".epro" ) ) )
-    {
+    if( EASYEDAPRO::IsProjectArchive( aFileName ) )
         return true;
-    }
-    else if( aFileName.Lower().EndsWith( wxS( ".zip" ) ) )
-    {
-        std::shared_ptr<wxZipEntry> entry;
-        wxFFileInputStream          in( aFileName );
-        wxZipInputStream            zip( in );
-
-        if( !zip.IsOk() )
-            return false;
-
-        while( entry.reset( zip.GetNextEntry() ), entry.get() != NULL )
-        {
-            wxString name = entry->GetName();
-
-            if( name == wxS( "project.json" ) )
-                return true;
-        }
-
-        return false;
-    }
 
     return false;
 }
@@ -134,7 +113,7 @@ static LIB_SYMBOL* loadSymbol( nlohmann::json project, const wxString& aLibraryP
         }
     }
     else */
-    if( libFname.GetExt() == wxS( "elibz" ) || libFname.GetExt() == wxS( "epro" )
+    if( libFname.GetExt() == wxS( "elibz" ) || libFname.GetExt() == wxS( "epro" ) || libFname.GetExt() == wxS( "eprj" )
         || libFname.GetExt() == wxS( "zip" ) )
     {
         std::map<wxString, EASYEDAPRO::PRJ_SYMBOL>    prjSymbols = project.at( "symbols" );
@@ -269,7 +248,7 @@ void SCH_IO_EASYEDAPRO::EnumerateSymbolLib( wxArrayString&         aSymbolNameLi
             }
         }
     }
-    else if( fname.GetExt() == wxS( "elibz" ) || fname.GetExt() == wxS( "epro" )
+    else if( fname.GetExt() == wxS( "elibz" ) || fname.GetExt() == wxS( "epro" ) || fname.GetExt() == wxS( "eprj" )
              || fname.GetExt() == wxS( "zip" ) )
     {
         nlohmann::json project = EASYEDAPRO::ReadProjectOrDeviceFile( aLibraryPath );
@@ -300,7 +279,7 @@ void SCH_IO_EASYEDAPRO::EnumerateSymbolLib( std::vector<LIB_SYMBOL*>& aSymbolLis
 
     EnumerateSymbolLib( symbolNameList, aLibraryPath, aProperties );
 
-    if( libFname.GetExt() == wxS( "elibz" ) || libFname.GetExt() == wxS( "epro" )
+    if( libFname.GetExt() == wxS( "elibz" ) || libFname.GetExt() == wxS( "epro" ) || libFname.GetExt() == wxS( "eprj" )
         || libFname.GetExt() == wxS( "zip" ) )
     {
         project = EASYEDAPRO::ReadProjectOrDeviceFile( aLibraryPath );
@@ -327,7 +306,7 @@ void SCH_IO_EASYEDAPRO::LoadAllDataFromProject( const wxString& aProjectPath )
     wxFileName            fname( aProjectPath );
     wxString              symLibName = EASYEDAPRO::ShortenLibName( fname.GetName() );
 
-    if( fname.GetExt() != wxS( "epro" ) && fname.GetExt() != wxS( "zip" ) )
+    if( fname.GetExt() != wxS( "epro" ) && fname.GetExt() != wxS( "eprj" ) && fname.GetExt() != wxS( "zip" ) )
         return;
 
     nlohmann::json project = EASYEDAPRO::ReadProjectOrDeviceFile( aProjectPath );
@@ -417,7 +396,7 @@ LIB_SYMBOL* SCH_IO_EASYEDAPRO::LoadSymbol( const wxString& aLibraryPath, const w
     wxFileName     libFname( aLibraryPath );
     nlohmann::json project;
 
-    if( libFname.GetExt() == wxS( "elibz" ) || libFname.GetExt() == wxS( "epro" )
+    if( libFname.GetExt() == wxS( "elibz" ) || libFname.GetExt() == wxS( "epro" ) || libFname.GetExt() == wxS( "eprj" )
         || libFname.GetExt() == wxS( "zip" ) )
     {
         project = EASYEDAPRO::ReadProjectOrDeviceFile( aLibraryPath );
@@ -467,7 +446,7 @@ SCH_SHEET* SCH_IO_EASYEDAPRO::LoadSchematicFile( const wxString& aFileName,
     wxFileName            fname( aFileName );
     wxString              libName = EASYEDAPRO::ShortenLibName( fname.GetName() );
 
-    if( fname.GetExt() != wxS( "epro" ) && fname.GetExt() != wxS( "zip" ) )
+    if( fname.GetExt() != wxS( "epro" ) && fname.GetExt() != wxS( "eprj" ) && fname.GetExt() != wxS( "zip" ) )
         return rootSheet;
 
     nlohmann::json project = EASYEDAPRO::ReadProjectOrDeviceFile( aFileName );

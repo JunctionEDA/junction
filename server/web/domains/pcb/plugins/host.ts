@@ -30,7 +30,8 @@ export interface PluginWindowState { plugin: string; pluginName: string; title: 
 export interface PromptField { name: string; label: string; type?: "text" | "number" | "select" | "checkbox" | "textarea" | "file"; default?: unknown; options?: Array<string | { value: string; label: string }>; accept?: string[]; as?: "text" | "bytes"; placeholder?: string; min?: number; max?: number; step?: number }
 export interface PromptRequest { id: number; plugin: string; pluginName: string; kind: "form" | "confirm"; title: string; message?: string; fields: PromptField[]; okLabel?: string; resolve: (v: any) => void }
 export interface Consent { manifest: PluginManifest; files: Record<string, string>; source: string; update: boolean; added: string[] }
-export interface CatalogEntry { manifest: PluginManifest; files: Record<string, string> }
+/** A plugin repository the person added (Manage Repositories, as in KiCad's Plugin and Content Manager), and its plugins as last read. */
+export interface RepoEntry { id: number; url: string; name: string; maintainer: string; plugins: OfficialEntry[] | null; error: string | null }
 /** A plugin someone published to the community registry (no files: they are fetched when the person asks to install). */
 export interface RegistryEntry { identifier: string; manifest: PluginManifest; publisher: string; installs: number; publishedAt?: string; updatedAt?: string }
 /** What the registry says about one identifier. */
@@ -42,7 +43,9 @@ export interface ProjectPlugin { identifier: string; origin: "catalog" | "regist
 
 export interface PluginState {
   loaded: boolean; signedIn: boolean; error: string | null;
-  installed: InstalledPlugin[]; catalog: CatalogEntry[] | null;
+  installed: InstalledPlugin[];
+  /** The plugin repositories this person added; null until read. */
+  repos: RepoEntry[] | null;
   running: Record<string, RunState>; logs: Record<string, LogLine[]>;
   /** The community registry as last searched; `published` is what is known about single identifiers (null: not published). */
   registry: RegistryEntry[] | null; registryQuery: string; published: Record<string, PublishedInfo | null>;
@@ -72,7 +75,7 @@ const ls = { get(k: string) { try { return localStorage.getItem(k); } catch { re
 const LS_PANEL = "kc.plugins.panel";
 
 let S: PluginState = {
-  loaded: false, signedIn: false, error: null, installed: [], catalog: null, running: {}, logs: {},
+  loaded: false, signedIn: false, error: null, installed: [], repos: null, running: {}, logs: {},
   registry: null, registryQuery: "", published: {}, admin: false, moderation: null, project: { id: null, plugins: [], canEdit: false, dismissed: "" },
   manager: { open: false, tab: "catalog", selected: null },
   panel: (() => { try { const j = JSON.parse(ls.get(LS_PANEL) || "{}"); return { open: !!j.open, active: typeof j.active === "string" ? j.active : null, width: Math.min(640, Math.max(240, Number(j.width) || 320)) }; } catch { return { open: false, active: null, width: 320 }; } })(),
@@ -173,10 +176,6 @@ export function actionPluginRows(editor = "pcb"): { id: string; name: string; pl
   return orderActions(actionsFor(S, editor)).map((a) => ({ id: a.uiId, name: a.name, plugin: a.pluginName, description: a.description, visible: buttonVisible(a), icon: a.action.iconUrl || null }));
 }
 
-export async function loadCatalog(): Promise<void> {
-  try { const j = await api("/api/plugins/catalog"); set({ catalog: j.plugins || [] }); } catch (e) { set({ catalog: [], error: e instanceof Error ? e.message : String(e) }); }
-}
-
 
 // ---- the community registry
 
@@ -270,6 +269,61 @@ export async function recommend(identifier: string, origin: "catalog" | "registr
 export function installRecommended(r: ProjectPlugin): string | null {
   if (!S.signedIn) return "Sign in to install plugins.";
   return requestInstall(r.manifest, r.files, r.origin === "catalog" ? "catalog" : `registry:${r.publisher || "unknown"}`);
+}
+
+// ---- repositories the person added
+
+let reposBusy: Promise<void> | null = null;
+/** The repositories this person added, then each one's plugins (read one by one, so one slow repository holds back only itself). */
+export function loadRepos(force = false): Promise<void> {
+  if (!S.signedIn) { if (S.repos === null) set({ repos: [] }); return Promise.resolve(); }
+  if (S.repos && !force) { for (const r of S.repos) if (r.plugins === null && !r.error) void loadRepoPlugins(r.id); return Promise.resolve(); }
+  if (reposBusy) return reposBusy;
+  reposBusy = (async () => {
+    try {
+      const j = await api("/api/plugins/repositories"); const old = S.repos || [];
+      set({ repos: (j.repositories || []).map((r: any) => { const was = old.find((o) => o.id === r.id); return { id: r.id, url: r.url, name: r.name, maintainer: r.maintainer || "", plugins: was ? was.plugins : null, error: was ? was.error : null }; }) });
+      for (const r of S.repos || []) if (r.plugins === null || force) void loadRepoPlugins(r.id);
+    } catch (e) { set({ repos: S.repos || [], error: msg(e) }); }
+    finally { reposBusy = null; }
+  })();
+  return reposBusy;
+}
+const patchRepo = (id: number, patch: Partial<RepoEntry>) => set({ repos: (S.repos || []).map((r) => (r.id === id ? Object.assign({}, r, patch) : r)) });
+const repoIconRetries: Record<number, number> = {};
+export async function loadRepoPlugins(id: number): Promise<void> {
+  patchRepo(id, { error: null });
+  const stop = new AbortController(); const timer = setTimeout(() => stop.abort(), 75000);
+  try {
+    const j = await api(`/api/plugins/repositories/${id}/plugins`, { signal: stop.signal }); patchRepo(id, { plugins: j.plugins || [], error: null });
+    const n = repoIconRetries[id] || 0; if (j.iconsPending && n < 6) { repoIconRetries[id] = n + 1; setTimeout(() => void loadRepoPlugins(id), 5000 * (n + 1)); }
+  } catch (e) { patchRepo(id, { plugins: (S.repos || []).find((r) => r.id === id)?.plugins || [], error: stop.signal.aborted ? "it did not answer in time" : msg(e) }); }
+  finally { clearTimeout(timer); }
+}
+/** Add a repository by the address of its repository.json.  The server reads it first; an error says why it is not one. */
+export async function addRepo(url: string): Promise<string | null> {
+  if (!S.signedIn) return "Sign in to add repositories.";
+  try {
+    const j = await api("/api/plugins/repositories", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: url.trim() }) });
+    const rest = (S.repos || []).filter((r) => r.id !== j.id);
+    set({ repos: [...rest, { id: j.id, url: j.url, name: j.name, maintainer: j.maintainer || "", plugins: null, error: null }] });
+    void loadRepoPlugins(j.id); return null;
+  } catch (e) { return msg(e); }
+}
+export async function removeRepo(id: number): Promise<string | null> {
+  try { await api(`/api/plugins/repositories/${id}`, { method: "DELETE" }); set({ repos: (S.repos || []).filter((r) => r.id !== id) }); return null; }
+  catch (e) { return msg(e); }
+}
+/** Download one plugin of an added repository (the server fetches and unpacks it) and show the consent sheet. */
+export async function installFromRepo(id: number, identifier: string): Promise<string | null> {
+  if (!S.signedIn) return "Sign in to install plugins.";
+  try { const j = await api(`/api/plugins/repositories/${id}/plugins/${encodeURIComponent(identifier)}`); return requestInstall(j.manifest, j.files || {}, String(j.source || `repo:${id}`)); }
+  catch (e) { return msg(e); }
+}
+/** The repository an installed plugin came from (source `repo:<id>:<version>`), if it is still in the list. */
+export function repoOfSource(source: string, s: PluginState = S): RepoEntry | null {
+  const m = /^repo:(\d+)(?::|$)/.exec(source || ""); if (!m) return null;
+  return (s.repos || []).find((r) => r.id === Number(m[1])) || null;
 }
 
 // ---- KiCad's own plugins
@@ -917,7 +971,7 @@ export function closeWindow() {
 /** Opens the manager on `tab`, or on the Catalog when the caller names none. */
 export function openManager(tab?: PluginState["manager"]["tab"]) {
   set({ manager: Object.assign({}, S.manager, { open: true, tab: tab || "catalog" }) });
-  if (!S.catalog) void loadCatalog(); void loadRegistry(); void loadProject(); void refresh().then(() => loadModeration());
+  void loadRepos(); void loadRegistry(); void loadProject(); void refresh().then(() => loadModeration());
 }
 export const closeManager = () => set({ manager: Object.assign({}, S.manager, { open: false }), consent: null });
 export const setManager = (patch: Partial<PluginState["manager"]>) => set({ manager: Object.assign({}, S.manager, patch) });
@@ -987,5 +1041,5 @@ export function initPlugins(): void {
   }, true);
 
   // Other parts of the editor (and the tests) reach plugins and their declared tools through this object.
-  W.KcPlugins = { actionPluginRows, saveActionOrder, pluginErrors, store: pluginStore, tools: assistantTools, callTool: callAssistantTool, openManager, runUi: runPluginUi, runAction, refresh, loadProject };
+  W.KcPlugins = { requestInstall, actionPluginRows, saveActionOrder, pluginErrors, store: pluginStore, tools: assistantTools, callTool: callAssistantTool, openManager, runUi: runPluginUi, runAction, refresh, loadProject };
 }
