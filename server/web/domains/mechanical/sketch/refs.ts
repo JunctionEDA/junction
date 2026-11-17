@@ -1,10 +1,24 @@
 // refs.ts — what a constraint's references mean: the point or the curve a `SketchRef` names, and the small
 // measurements the solver, the dimension drawing and the tools all take from a sketch.  Pure.
 //
-// Two reserved entity ids name things every sketch has without storing them:
-//   "$origin"   the sketch origin, a point fixed at (0, 0)
-// A reference to one is written like any other (`{ entity: "$origin" }`).  Ids made by `newSketchId` never
-// start with "$".
+// What the sketcher writes into the sketch format (sketch/format.ts), beyond what that file spells out.  All of
+// it is additive: a reader that does not know a key keeps it.
+//
+//   • `{ entity: "$origin" }` in a constraint's refs is the sketch origin, a point fixed at (0, 0).  It is not
+//     stored as an entity.  Ids made by the sketcher never start with "$".
+//   • A reference means a point when the entity is a point or `at` is given, else the whole curve.  So
+//     "coincident" of a point and a curve puts the point on the curve; "horizontal" / "vertical" take a line or
+//     two points; "symmetric" takes two points and then the line or point they mirror about; "tangent" of two
+//     curves that end on the same point is tangency at that point.
+//   • "collinear" (two lines) is a constraint type beside the reserved ones.
+//   • A "distance" dimension is: one line (its length); two points; a point and a line (square to the line);
+//     two lines (parallel, the gap between them).  `axis: "x" | "y"` on it makes it the horizontal or vertical
+//     distance instead of the straight one.  A circle or arc stands for its centre with `at: "center"`.
+//   • "angle" (two lines) is the angle at the corner where they meet, in degrees, 0…180.
+//   • `value` is always millimetres or degrees; `expr` is kept only when what was typed was more than a number.
+//   • An entity drawn from the model with the Use tool carries `from: GeomRef` (the edge or vertex it copies)
+//     and is held by a "fix" constraint.  It is a copy: it does not follow the model.
+//   • "fix" pins what it refers to at the coordinates stored in the sketch.
 import type { Vec2 } from "../core/geometry";
 import type { SketchArc, SketchCircle, SketchConstraint, SketchData, SketchEntity, SketchLine, SketchRef } from "./format";
 

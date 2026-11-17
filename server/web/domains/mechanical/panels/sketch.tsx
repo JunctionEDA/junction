@@ -88,7 +88,8 @@ const TITLES: { [type: string]: string } = {
 
 function SketchPanel({ studio }: { studio: PartStudio }) {
   const ed = sketchEditor(studio);
-  useEffect(() => { sketchEditor(studio); }, [studio]);
+  // the editor follows the part studio from here on; when the part studio's view goes, so does its drawing layer
+  useEffect(() => { const e = sketchEditor(studio); return () => e.dispose(); }, [studio]);
   const s = useEditor(ed, (x) => x);
   const open = useStudio(studio, (x) => !!x.sketch);
   if (!open || !s.open) return <p className="note px-2 py-1 m-0">Open a sketch to see its dimensions and constraints.</p>;

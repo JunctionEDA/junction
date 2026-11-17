@@ -375,6 +375,26 @@ try {
   s = await sk();
   check('deleting the offending dimension puts it right', s.health === 'ok' && s.conflicting.length === 0);
 
+  // ---- a constraint's glyph is picked and deleted like anything else; a dimension's text is dragged
+  const glyphOf = (type) => page.evaluate((type) => {
+    const e = window.JunctionSketch, dd = e.getState().data, r = window.JunctionPartStudio.viewport.canvas.getBoundingClientRect();
+    for (const b of e.painter.boxes) if (b.kind === 'glyph' && dd.constraints[b.id].type === type) return { id: b.id, x: r.left + b.x + b.w / 2, y: r.top + b.y + b.h / 2 };
+    return null;
+  }, type);
+  const g = await glyphOf('symmetric');
+  const dofBefore = (await sk()).dof;
+  await page.mouse.move(g.x, g.y); await page.mouse.down(); await page.mouse.up(); await page.waitForTimeout(40);
+  check('a click on a constraint glyph selects the constraint', (await sk()).selection.join() === g.id);
+  await shot('20b-glyph-selected');
+  await key('Delete'); await settledSketch();
+  check('Delete removes it, and the sketch gains the freedom it held', !(await data()).constraints[g.id] && (await sk()).dof === dofBefore + 2, `dof ${dofBefore} → ${(await sk()).dof}`);
+  await page.keyboard.press('Control+z'); await settledSketch();
+  check('and undo brings the constraint back', !!(await data()).constraints[g.id] && (await sk()).dof === dofBefore);
+  lab = await labelOf(32);
+  await page.mouse.move(lab.x, lab.y); await page.mouse.down(); await page.mouse.move(lab.x + 10, lab.y + 20, { steps: 4 }); await page.mouse.move(lab.x + 30, lab.y + 40, { steps: 4 }); await page.mouse.up(); await settledSketch();
+  const moved = await labelOf(32);
+  check('dragging a dimension moves its text and changes nothing else', near(moved.x, lab.x + 30, 2) && near(moved.y, lab.y + 40, 2) && (await data()).constraints[lab.id].value === 32 && (await sk()).health === 'ok', JSON.stringify([lab, moved]));
+
   // ---- an edge of the model, used in the sketch
   const before = (await sk()).entities;
   await key('u');
