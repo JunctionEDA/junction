@@ -33,6 +33,7 @@ mod presence_lane;
 mod projectlibs;
 mod plugins;
 mod registry;
+mod shell;
 mod relay;
 mod templates;
 mod timetrack;
@@ -353,6 +354,12 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/docs/{id}/preview.svg", get(http::doc_preview_svg))
         .route("/api/docs/{id}/items", get(http::doc_items))
         .route("/api/projects/{id}/docs", post(http::create_doc))
+        .route("/api/projects/{id}/shell", post(shell::ensure_shell))
+        .route("/api/projects/{id}/pcbs", post(shell::create_pcb))
+        .route("/api/projects/{id}/folders/move", post(shell::move_folder))
+        .route("/api/projects/{id}/folders/delete", post(shell::delete_folder))
+        .route("/api/projects/{id}/duplicate", post(shell::duplicate))
+        .route("/api/projects/{id}/files", get(shell::files))
         .route("/api/projects/{id}/renamed", post(http::renamed_files))
         .route("/api/docs/{id}/content", get(http::doc_content))
         .route("/api/docs/{id}", delete(http::delete_doc).patch(http::move_doc))
