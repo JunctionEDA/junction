@@ -191,7 +191,7 @@ export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy 
           : <button type="button" className="btn primary" onClick={go} disabled={busy || !kept.length || !!problem || !name.trim()}>{busy ? ((progress || 0) >= 1 ? (eda ? "Converting…" : "Saving…") : "Uploading…") : eda ? "Import" : "Upload"}</button>}</>}>
       <div className="hp-seg hp-modes" role="tablist" aria-label="How to start">
         <button type="button" role="tab" aria-selected={mode === "upload"} className={mode === "upload" ? "on" : undefined} onClick={() => { setMode("upload"); setError(null); }} disabled={busy || creating}>Upload a KiCad project</button>
-        <button type="button" role="tab" aria-selected={mode === "import"} className={mode === "import" ? "on" : undefined} onClick={() => { setMode("import"); setError(null); }} disabled={busy || creating}>Import from another tool</button>
+        <button type="button" role="tab" aria-selected={mode === "import"} className={mode === "import" ? "on" : undefined} onClick={() => { setMode("import"); setError(null); }} disabled={busy || creating}>Import from another EDA<small>(EasyEDA, Altium, Eagle, etc.)</small></button>
         <button type="button" role="tab" aria-selected={mode === "blank"} className={mode === "blank" ? "on" : undefined} onClick={() => { setMode("blank"); setError(null); }} disabled={busy || creating}>Blank project</button>
       </div>
       {mode === "blank" ? (
