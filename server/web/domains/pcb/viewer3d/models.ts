@@ -264,15 +264,24 @@ function headerXyz(v: string | null): V3 | null {
 }
 
 /**
- * A vendor model moved to where the vendor puts it on its footprint (the server's X-Model-Offset / X-Model-Rotate),
- * so a footprint entry with no offset of its own (models.ts foreignModel) draws it in place.  Without the headers the
- * model is left as the file has it.
+ * A vendor (EasyEDA / LCSC) model moved to where the vendor puts it on its footprint, so a footprint entry with no
+ * offset of its own (models.ts foreignModel) draws it in place.  EasyEDA places a model by its bounding box, not by
+ * the STEP file's own origin: the box is centred in X and Y and stood on Z = 0, then moved by the 3D outline's
+ * c_origin and z, and turned by its c_rotation (what easyeda2kicad bakes into its .wrl).  The server's
+ * X-Model-Offset / X-Model-Rotate are that move and turn as a KiCad (model …) entry writes them (Y up, Z = -z).
+ * Without the headers the model is left as the file has it.
  */
 export function vendorPlaced(mesh: ModelMesh, headers: { get(name: string): string | null }): ModelMesh {
   const offset = headerXyz(headers.get("x-model-offset")), rotate = headerXyz(headers.get("x-model-rotate"));
-  if (!offset || !rotate || (offset.every((n) => n === 0) && rotate.every((n) => n === 0))) return mesh;
-  const pos = new Float32Array(mesh.pos.length), nrm = new Float32Array(mesh.nrm.length);
-  placeMesh(mesh, { url: "", source: "vendor", name: "", offset, rotate, scale: [1, 1, 1] }, { x: 0, y: 0, z: 0, rot: 0, back: false }, (x, y, z, nx, ny, nz, i) => {
+  if (!offset || !rotate) return mesh;
+  const p = mesh.pos; if (!p.length) return mesh;
+  let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let i = 0; i < p.length; i += 3) { x0 = Math.min(x0, p[i]); x1 = Math.max(x1, p[i]); y0 = Math.min(y0, p[i + 1]); y1 = Math.max(y1, p[i + 1]); z0 = Math.min(z0, p[i + 2]); }
+  const dx = offset[0] - (x0 + x1) / 2, dy = offset[1] - (y0 + y1) / 2, dz = -offset[2] - z0;
+  const moved = new Float32Array(p.length);
+  for (let i = 0; i < p.length; i += 3) { moved[i] = p[i] + dx; moved[i + 1] = p[i + 1] + dy; moved[i + 2] = p[i + 2] + dz; }
+  const pos = new Float32Array(p.length), nrm = new Float32Array(mesh.nrm.length);
+  placeMesh({ ...mesh, pos: moved }, { url: "", source: "vendor", name: "", offset: [0, 0, 0], rotate, scale: [1, 1, 1] }, { x: 0, y: 0, z: 0, rot: 0, back: false }, (x, y, z, nx, ny, nz, i) => {
     pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z; nrm[i * 3] = nx; nrm[i * 3 + 1] = ny; nrm[i * 3 + 2] = nz;
   });
   return { pos, nrm, col: mesh.col, idx: mesh.idx };
