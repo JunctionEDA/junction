@@ -21,7 +21,8 @@ web/
     mcp/              what a domain hands the headless tool host so an AI assistant can work on its documents
     wakatime/         time tracking
     documents/        how the shell hands a document to a domain's own editor
-    doctabs/          the document tabs of an open project
+    doctabs/          the shell of an open project: its tab bar, what an element and a PCB are, the project's own document
+    projecthome/      the Home tab: the file tree, create, import, who is where
     admin/, styleguide/
   domains/            one folder per kind of design work
     registry.ts       what each domain is, which files it opens and which domains it reads
@@ -44,8 +45,13 @@ Rules of thumb:
 - `domains/mechanical/generated/` and `domains/assembly/generated/` are written by
   `scripts/gen-cad-registry.mjs` (`npm run gen:cad`, which `check`, `build` and the tests run) from the files in
   those domains' `features/`, `tools/`, `panels/`, `services/` and `mates/` folders. They are not committed.
-- A project's documents are tabs (`platform/doctabs`). `domains/registry.ts` says which document kinds exist and
-  which bundle draws each; a domain's editor registers itself through `platform/documents/host.ts`.
+- A project is a Home tab and any number of elements, one tab each: PCBs, part studios, assemblies
+  (`platform/doctabs`, `platform/projecthome`). `domains/registry.ts` says which document kinds exist and which
+  bundle draws each; a domain's editor registers itself through `platform/documents/host.ts`.
+- A PCB is a KiCad project in a folder of its own, and the schematic and board editor sees one PCB at a time:
+  `project.docs` is that PCB's documents with paths relative to its folder, `project.allDocs` is the whole
+  project. Code outside the electronics editor reads `allDocs`. `platform/doctabs/pcbs.ts` has the rules; the
+  section "Document tabs and the shell" of `domains/mechanical/CONTRACT.md` has the rest.
 
 The tests in `server/static/tests` find modules with `webPath()` (`static/tests/web-path.js`), which knows
 which area each top-level folder lives in.

@@ -20,7 +20,7 @@ Junction is meant to cover more than electronics (see [ROADMAP.md](ROADMAP.md)).
 
 | | Platform | Electronics domain (`pcb`) | Future domains |
 |---|---|---|---|
-| Browser | `server/web/platform` (home, sharing, document tabs, landing, onboarding, GitHub, review, time tracking, admin) and `server/web/shared` (UI kit, store, theme, styles, JSON item documents, the 3D viewport) | `server/web/domains/pcb` | `server/web/domains/mechanical` (part studios, in progress: see its `CONTRACT.md`), `assembly` (a stub), and `{physics,silicon,robotics,manufacturing}` with a README each and no code yet |
+| Browser | `server/web/platform` (home, sharing, the project shell (Home tab and document tabs), landing, onboarding, GitHub, review, time tracking, admin) and `server/web/shared` (UI kit, store, theme, styles, JSON item documents, the 3D viewport) | `server/web/domains/pcb` | `server/web/domains/mechanical` (part studios, in progress: see its `CONTRACT.md`), `assembly` (a stub), and `{physics,silicon,robotics,manufacturing}` with a README each and no code yet |
 | Server | see the table below | see the table below | |
 | Desktop | `common/` (with `common/collab`) | `eeschema/`, `pcbnew/`, `cvpcb/`, `gerbview/`, `pagelayout_editor/`, `pcb_calculator/`, `3d-viewer/` | |
 
