@@ -71021,7 +71021,7 @@ async function geometry(input) {
       side: it.layer === "B.Cu" ? "back" : "front",
       box: it.bbox ? it.bbox.map(r33) : void 0,
       courtyard: cb,
-      pads: P.padsOf(it).map((p) => [p.number, r33(p.x), r33(p.y), NT.key(p.net) || ""])
+      pads: P.padsOf(it).map((p) => [p.number, r33(p.x), r33(p.y), NT.key(p.net) || "", r33(p.w || 0), r33(p.h || 0), r33(p.rot || 0)])
     });
   }
   return { document: path2, type: "board", outline: isFinite(x0) ? [r33(x0), r33(y0), r33(x1), r33(y1)] : null, copper_layers: doc2.copper.slice(), parts, silk: input.silk ? silkBoxes(doc2) : void 0 };

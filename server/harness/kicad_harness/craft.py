@@ -395,6 +395,11 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
     narrow space in front of the chip, where neighbouring escapes otherwise box pins in.  Supply and ground pins, pins
     whose net stays close (a decoupling capacitor, the crystal) and pins with no free site keep their pads for the router.
 
+    style="ring" (default) assigns pins to staggered via sites in pin order; style="radial" puts each via straight out
+    from its own pin, the rows staggered (needs a via, a stub and the clearance to fit in one pin pitch: at 0.4 mm
+    pitch with 0.15 mm clearance it does not, and every other pin is skipped); style="bus" lays only straight stubs,
+    side by side, `first` mm past the pad row, no vias, for the router to carry on from.
+
     nets: only these (default: every far-going signal net).  apply=False only plans.  Returns {"vias": n, "pins":
     [pin numbers fanned], "skipped": {pin: why}}.  board.design() calls it for every fine-pitch chip unless fanout=False."""
     parts = {p["ref"]: p for p in self.geometry()["parts"]}

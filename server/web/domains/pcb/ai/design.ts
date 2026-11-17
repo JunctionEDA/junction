@@ -256,7 +256,7 @@ export async function geometry(input: { doc?: string; silk?: boolean }): Promise
     // the courtyard's box, as placed: what has to stay clear of the next part
     let cb: number[] | undefined; try { const cy = P.courtyards({ node: it.node }); let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; for (const k of Object.keys(cy)) for (const loop of cy[k]) for (const q of loop) { a = Math.min(a, q[0]); b = Math.min(b, q[1]); c = Math.max(c, q[0]); d = Math.max(d, q[1]); } if (a <= c) cb = [r3(a), r3(b), r3(c), r3(d)]; } catch { /* no courtyard maths */ }
     parts.push({ ref: it.ref || "", id: it.id, value: it.value || "", footprint: it.lib || "", x: r3(it.x), y: r3(it.y), rotation: it.rot || 0, side: it.layer === "B.Cu" ? "back" : "front", box: it.bbox ? it.bbox.map(r3) : undefined, courtyard: cb,
-      pads: P.padsOf(it).map((p: any) => [p.number, r3(p.x), r3(p.y), NT.key(p.net) || ""]) });
+      pads: P.padsOf(it).map((p: any) => [p.number, r3(p.x), r3(p.y), NT.key(p.net) || "", r3(p.w || 0), r3(p.h || 0), r3(p.rot || 0)]) });
   }
   return { document: path, type: "board", outline: isFinite(x0) ? [r3(x0), r3(y0), r3(x1), r3(y1)] : null, copper_layers: doc.copper.slice(), parts, silk: input.silk ? silkBoxes(doc) : undefined };
 }
