@@ -109,7 +109,8 @@ export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | nu
   // skips any peer whose state.sheetFile differs from the sheet it is showing, and an absent field
   // reads as "" and never matches.  It is the document's project-relative path, which is exactly
   // what the server's doc list carries.
-  const doc = (state.docs || []).find((d) => d.docId === state.docId);
+  // (the path in the whole project: the editor's own list has it relative to the PCB's folder, pcbscope.ts)
+  const doc = ((state.project && state.project.allDocs) || state.docs || []).find((d) => d.docId === state.docId);
   if (doc && doc.path) st.sheetFile = doc.path;
   E.ws.send(JSON.stringify({ type: "presence", docId: state.docId, state: fitPresence(st) }));
 }

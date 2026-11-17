@@ -22,7 +22,15 @@ export interface DocEntry { docId: string; path: string; docType: string; hasPre
 export interface ProjectCan { edit: boolean; comment: boolean; copy: boolean; share: boolean; manage: boolean; join?: string | null }
 export interface ProjectInfo {
   projectId: string; name: string; ownerLogin: string; ownerId?: number;
-  role?: string | null; docs: DocEntry[]; isPublic?: boolean;
+  /**
+   * `docs` is what the schematic and board editor may see: the documents of the PCB it works on, with paths
+   * relative to that PCB's folder (web/platform/doctabs/pcbs.ts).  `allDocs` is every document of the project
+   * with its real path: what the tabs, the Home tab and the other domains' editors read.  In a project that is
+   * one PCB at its root they are the same list.
+   */
+  role?: string | null; docs: DocEntry[]; allDocs?: DocEntry[]; isPublic?: boolean;
+  /** the PCB the schematic and board editor is working on, if any */
+  pcb?: { key: string; dir: string; name: string } | null;
   can?: ProjectCan; isOwner?: boolean; isMember?: boolean;
 }
 
