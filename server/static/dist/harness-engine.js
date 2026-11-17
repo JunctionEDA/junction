@@ -96498,7 +96498,7 @@ var init_import_nonkicad = __esm({
     init_home();
     init_ui();
     init_util();
-    ACCEPT = ".epro,.epro2,.eprj,.elibz,.elibz2,.esch,.epcb,.json,.zip,.pcbdoc,.schdoc,.cmpcbdoc,.cspcbdoc,.swpcbdoc,.cmschdoc,.csschdoc,.brd,.mdd,.dsn,.sch,.cpa,.csa,.dip,.dch,.lay6,.lay,.t3001,.fab,.pcb,.prj,.asc,.cvg,.xml,.txt";
+    ACCEPT = ".epro,.epro2,.eprj,.elibz,.elibz2,.esch,.epcb,.json,.zip,.pcbdoc,.schdoc,.cmpcbdoc,.cspcbdoc,.swpcbdoc,.cmschdoc,.csschdoc,.prjpcb,.brd,.mdd,.dsn,.sch,.cpa,.csa,.dip,.dch,.lay6,.lay,.t3001,.fab,.pcb,.prj,.asc,.cvg,.xml,.txt";
   }
 });
 

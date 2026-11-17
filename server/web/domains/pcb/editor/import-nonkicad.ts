@@ -6,7 +6,7 @@ import { navigate } from "./home";
 import { messageBox } from "./pcbdialogs/ui";
 import { toast } from "./util";
 
-const ACCEPT = ".epro,.epro2,.eprj,.elibz,.elibz2,.esch,.epcb,.json,.zip,.pcbdoc,.schdoc,.cmpcbdoc,.cspcbdoc,.swpcbdoc,.cmschdoc,.csschdoc,.brd,.mdd,.dsn,.sch,.cpa,.csa,.dip,.dch,.lay6,.lay,.t3001,.fab,.pcb,.prj,.asc,.cvg,.xml,.txt";
+const ACCEPT = ".epro,.epro2,.eprj,.elibz,.elibz2,.esch,.epcb,.json,.zip,.pcbdoc,.schdoc,.cmpcbdoc,.cspcbdoc,.swpcbdoc,.cmschdoc,.csschdoc,.prjpcb,.brd,.mdd,.dsn,.sch,.cpa,.csa,.dip,.dch,.lay6,.lay,.t3001,.fab,.pcb,.prj,.asc,.cvg,.xml,.txt";
 
 interface ImportResult { projectId: string; name: string; docs?: { docId?: string; path?: string; docType?: string }[]; converted?: { notes?: string[] } | null }
 
