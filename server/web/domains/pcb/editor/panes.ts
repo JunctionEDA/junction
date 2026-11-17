@@ -13,7 +13,7 @@ import { isSch, requestRender } from "./view";
 import { loadUnits, saveUnits, unitsAppFor } from "../../../shared/units";
 // ================================================================ KiCad frame (the React chrome reads the store)
 // Docked panes: which are open, per editor, remembered in localStorage (kui.panes.<editor>).
-export const PANE_NAMES = ["props", "hier", "filter", "history", "peers", "comments", "appearance", "search", "netnav", "netinsp", "libtree"];
+export const PANE_NAMES = ["props", "hier", "filter", "history", "peers", "comments", "chat", "appearance", "search", "netnav", "netinsp", "libtree"];
 
 export const PANE_EDITOR_ONLY: Record<string, "sch" | "pcb" | undefined> = { hier: "sch", netnav: "sch", netinsp: "pcb" };
 
@@ -44,6 +44,8 @@ export function filterFollows(panes: Record<string, boolean>, ed: "sch" | "pcb")
 }
 
 (E.hooks as Record<string, unknown>).showPane = (name: string, show?: unknown): void => showPane(name, show);   // dialogs/find.ts's "Show search panel"
+/** Panes that belong to the project rather than to one editor: shown or hidden in both at once. */
+const PROJECT_PANES = new Set(["chat"]);
 export function showPane(name: string, show?: unknown) {
   const ed = editorId();
   if (!PANE_NAMES.includes(name) || (PANE_EDITOR_ONLY[name] && PANE_EDITOR_ONLY[name] !== ed) || (name === "libtree" && E.DOC_TYPE !== "footprint")) return;
@@ -51,8 +53,11 @@ export function showPane(name: string, show?: unknown) {
   const next = show === undefined ? !E.panes[name] : !!show;
   E.panes = Object.assign({}, E.panes, { [name]: next });
   E.panes.filter = filterFollows(E.panes, ed);
-  const saved = savedPanes(ed); saved[name] = next; delete saved.filter;
-  try { localStorage.setItem(paneKey(ed), JSON.stringify(saved)); } catch (e) { /* no storage */ }
+  // the project chat is one conversation across the project: open on the schematic, it stays open on the board
+  for (const e of PROJECT_PANES.has(name) ? ["sch", "pcb"] : [ed]) {
+    const saved = savedPanes(e); saved[name] = next; delete saved.filter;
+    try { localStorage.setItem(paneKey(e), JSON.stringify(saved)); } catch (err) { /* no storage */ }
+  }
   store.set({ panes: E.panes });
   requestRender();
 }

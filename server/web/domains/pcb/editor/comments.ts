@@ -45,7 +45,7 @@ let ownHighlight: Set<string> | null = null;
 // ---------------------------------------------------------------- what a thread is pinned to
 const PARTS = new Set(["symbol", "footprint", "sheet"]);
 
-function describe(it: KItem): string {
+export function describe(it: KItem): string {
   if (it.ref) return it.ref;
   if (it.name) return it.name;
   const names = (CollabTools.props && (CollabTools.props as unknown as { KIND_NAMES?: Record<string, string> }).KIND_NAMES) || {};
@@ -87,7 +87,7 @@ function schNetName(ids: string[]): string {
   return sym ? `Net-(${sym.ref})` : "unnamed net";
 }
 /** The items of a net anchor on the open document. */
-function netIds(a: Anchor): string[] {
+export function netIds(a: Anchor): string[] {
   const d = kdoc(); if (!d) return [];
   if (d.type === "pcb") return boardNetIds(a.id);
   const sch = CollabTools.sch; if (!sch) return [];

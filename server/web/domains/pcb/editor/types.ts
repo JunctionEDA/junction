@@ -23,6 +23,8 @@ export interface PresenceState {
   dragAdded?: string[];
   /** an assistant pointing at its selection (MCP highlight): what it says about it, and when the mark goes (epoch ms) */
   ai?: { note?: string; what?: string; until?: number };
+  /** cursor chat: what the peer is typing (or just said) beside their pointer (chat.ts) */
+  say?: string;
 }
 
 export interface PeerUser { name?: string; login?: string; color?: string }

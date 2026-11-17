@@ -5938,11 +5938,11 @@ var init_busname = __esm({
 });
 
 // web/domains/pcb/canvas/hop-over.ts
-function shouldHopOver(me2, other) {
-  const meV = me2.b[0] === me2.a[0], oV = other.b[0] === other.a[0];
+function shouldHopOver(me3, other) {
+  const meV = me3.b[0] === me3.a[0], oV = other.b[0] === other.a[0];
   if (meV && !oV) return false;
   if (oV && !meV) return true;
-  const sMe = (me2.b[1] - me2.a[1]) / (me2.b[0] - me2.a[0]), sO = (other.b[1] - other.a[1]) / (other.b[0] - other.a[0]);
+  const sMe = (me3.b[1] - me3.a[1]) / (me3.b[0] - me3.a[0]), sO = (other.b[1] - other.a[1]) / (other.b[0] - other.a[0]);
   if (Math.abs(sMe) === Math.abs(sO)) return sMe < sO;
   return Math.abs(sMe) < Math.abs(sO);
 }
@@ -5955,32 +5955,32 @@ function crossing(p, q4) {
   if ((eqPt(x, p.a) || eqPt(x, p.b)) && (eqPt(x, q4.a) || eqPt(x, q4.b))) return null;
   return x;
 }
-function wireHopShape(me2, all2, R2) {
+function wireHopShape(me3, all2, R2) {
   const hits2 = [];
   for (const o of all2) {
-    if (eqPt(o.a, me2.a) && eqPt(o.b, me2.b)) continue;
-    if (!shouldHopOver(me2, o)) continue;
-    const x = crossing(me2, o);
+    if (eqPt(o.a, me3.a) && eqPt(o.b, me3.b)) continue;
+    if (!shouldHopOver(me3, o)) continue;
+    const x = crossing(me3, o);
     if (!x) continue;
-    if (eqPt(x, me2.a) || eqPt(x, me2.b) || eqPt(x, o.a) || eqPt(x, o.b)) continue;
+    if (eqPt(x, me3.a) || eqPt(x, me3.b) || eqPt(x, o.a) || eqPt(x, o.b)) continue;
     if (!hits2.length || !eqPt(hits2[hits2.length - 1], x)) hits2.push(x);
   }
-  if (!hits2.length) return [{ t: "seg", a: me2.a, b: me2.b }];
-  const d = (p) => Math.hypot(p[0] - me2.a[0], p[1] - me2.a[1]);
+  if (!hits2.length) return [{ t: "seg", a: me3.a, b: me3.b }];
+  const d = (p) => Math.hypot(p[0] - me3.a[0], p[1] - me3.a[1]);
   hits2.sort((p, q4) => d(p) - d(q4));
-  const ang = Math.atan2(me2.b[1] - me2.a[1], me2.b[0] - me2.a[0]);
+  const ang = Math.atan2(me3.b[1] - me3.a[1], me3.b[0] - me3.a[0]);
   let arcAng = ang;
   if (arcAng < 0) arcAng += Math.PI;
   else if (arcAng >= Math.PI) arcAng -= Math.PI;
   const out2 = [];
-  let cur2 = me2.a;
+  let cur2 = me3.a;
   for (const h3 of hits2) {
     const m = [h3[0] + R2 * Math.sin(arcAng), h3[1] - R2 * Math.cos(arcAng)];
     const before = [h3[0] - R2 * Math.cos(ang), h3[1] - R2 * Math.sin(ang)], after = [h3[0] + R2 * Math.cos(ang), h3[1] + R2 * Math.sin(ang)];
     out2.push({ t: "seg", a: cur2, b: before }, { t: "arc", a: before, m, b: after });
     cur2 = after;
   }
-  out2.push({ t: "seg", a: cur2, b: me2.b });
+  out2.push({ t: "seg", a: cur2, b: me3.b });
   return out2;
 }
 function hopShapes(doc2) {
@@ -28237,20 +28237,20 @@ var require_pcb_tools = __commonJS({
         });
       }
       function loadFromUrl(url, callback) {
-        var request3 = new XMLHttpRequest();
-        request3.open("get", url, true);
-        request3.responseType = "arraybuffer";
-        request3.onload = function() {
-          if (request3.response) {
-            return callback(null, request3.response);
+        var request4 = new XMLHttpRequest();
+        request4.open("get", url, true);
+        request4.responseType = "arraybuffer";
+        request4.onload = function() {
+          if (request4.response) {
+            return callback(null, request4.response);
           } else {
-            return callback("Font could not be loaded: " + request3.statusText);
+            return callback("Font could not be loaded: " + request4.statusText);
           }
         };
-        request3.onerror = function() {
+        request4.onerror = function() {
           callback("Font could not be loaded");
         };
-        request3.send();
+        request4.send();
       }
       function parseOpenTypeTableEntries(data, numTables) {
         var tableEntries = [];
@@ -34881,7 +34881,7 @@ var require_pcb_tools = __commonJS({
         const l = doc2.layers && doc2.layers.get(layer4);
         return l && l.userName ? l.userName : layer4;
       }
-      var IU3 = 1e6;
+      var IU4 = 1e6;
       var MAX_ERROR_IU = 5e3;
       var MIN_SEGCOUNT_FOR_CIRCLE = 8;
       var str32 = (v) => v === void 0 || v === null ? "" : String(v);
@@ -35038,7 +35038,7 @@ var require_pcb_tools = __commonJS({
         const at4 = K11.kid(pad2, "at") || [];
         const orient = num32(at4[3]);
         const sz = K11.kid(pad2, "size");
-        const w = rnd(num32(sz && sz[1]) * IU3), h3 = rnd(num32(sz && sz[2]) * IU3);
+        const w = rnd(num32(sz && sz[1]) * IU4), h3 = rnd(num32(sz && sz[2]) * IU4);
         const shape3 = str32(pad2[3]);
         const minSeg = 16;
         let local;
@@ -35054,7 +35054,7 @@ var require_pcb_tools = __commonJS({
           }
         } else if (shape3 === "rect" || shape3 === "trapezoid") {
           const d = shape3 === "trapezoid" ? K11.kid(pad2, "rect_delta") : null;
-          const ddx = d ? Math.trunc(rnd(num32(d[1]) * IU3) / 2) : 0, ddy = d ? Math.trunc(rnd(num32(d[2]) * IU3) / 2) : 0;
+          const ddx = d ? Math.trunc(rnd(num32(d[1]) * IU4) / 2) : 0, ddy = d ? Math.trunc(rnd(num32(d[2]) * IU4) / 2) : 0;
           local = trapezoidToPolygon([w, h3], ddx, ddy, maxError);
         } else {
           const rr = K11.kid(pad2, "roundrect_rratio");
@@ -35071,7 +35071,7 @@ var require_pcb_tools = __commonJS({
           return [r6mm(rnd(q4[0])) + shapePos2[0], r6mm(rnd(q4[1])) + shapePos2[1]];
         });
       }
-      var r6mm = (iu22) => +(iu22 / IU3).toFixed(6);
+      var r6mm = (iu22) => +(iu22 / IU4).toFixed(6);
       function resolve2(rules, type, doc2, s2, A, B, implicitMin, implicitName = "board setup constraints") {
         const h3 = rules.length ? evalRuleConstraint(rules, type, doc2, s2, A, B) : null;
         if (h3) return h3.severity === "ignore" ? null : { min: h3.min, max: h3.max, name: h3.name, severity: h3.severity || null };
@@ -68424,20 +68424,20 @@ var require_opentype = __commonJS({
         });
       }
       function loadFromUrl(url, callback) {
-        var request3 = new XMLHttpRequest();
-        request3.open("get", url, true);
-        request3.responseType = "arraybuffer";
-        request3.onload = function() {
-          if (request3.response) {
-            return callback(null, request3.response);
+        var request4 = new XMLHttpRequest();
+        request4.open("get", url, true);
+        request4.responseType = "arraybuffer";
+        request4.onload = function() {
+          if (request4.response) {
+            return callback(null, request4.response);
           } else {
-            return callback("Font could not be loaded: " + request3.statusText);
+            return callback("Font could not be loaded: " + request4.statusText);
           }
         };
-        request3.onerror = function() {
+        request4.onerror = function() {
           callback("Font could not be loaded");
         };
-        request3.send();
+        request4.send();
       }
       function parseOpenTypeTableEntries(data, numTables) {
         var tableEntries = [];
@@ -71712,10 +71712,10 @@ function fieldShifts(doc2, input = {}) {
   const want2 = input.refs && input.refs.length ? new Set(input.refs.map((r) => r.toLowerCase())) : null;
   const within = input.within && input.within.length === 4 ? input.within : null;
   const T = 0.2, B = 0.3, G5 = 1.27;
-  const blocked = (me2, box3) => {
+  const blocked = (me3, box3) => {
     const t = shrink(box3, T);
     for (const o of list) {
-      if (o === me2 || o.box[0] > box3[2] || o.box[2] < box3[0] || o.box[1] > box3[3] || o.box[3] < box3[1]) continue;
+      if (o === me3 || o.box[0] > box3[2] || o.box[2] < box3[0] || o.box[1] > box3[3] || o.box[3] < box3[1]) continue;
       if (o.kind === "text") {
         if (hit3(t, shrink(o.box, T))) return true;
       } else if (o.kind === "body") {
@@ -72473,7 +72473,8 @@ var init_state = __esm({
       comments: [],
       openThread: null,
       pendingThread: null,
-      // a thread to open once its document has loaded (comments.ts)
+      chatSay: null,
+      // what this person is saying at their cursor (chat.ts cursor chat), sent with presence as `say`   // a thread to open once its document has loaded (comments.ts)
       layers: {},
       renderTimer: 0,
       renderDirtySince: 0,
@@ -73450,7 +73451,7 @@ function syncPeerCursors(specs) {
   const now = performance.now(), keep = /* @__PURE__ */ new Set();
   for (const sp of specs) {
     keep.add(sp.cid);
-    const key3 = `${sp.name}\0${sp.color}\0${sp.note}\0${sp.following ? 1 : 0}`;
+    const key3 = `${sp.name}\0${sp.color}\0${sp.note}\0${sp.say || ""}\0${sp.following ? 1 : 0}`;
     let c = cursors.get(sp.cid);
     if (!c) {
       const g2 = document.createElementNS(NS2, "g");
@@ -73604,6 +73605,7 @@ function build(c, sp) {
   }
   if (!(tw > 0)) tw = label.textContent.length * 0.6 * th;
   chip2.setAttribute("width", String(tw + 2 * pad2));
+  let below = cy + th + 2 * pad2 + 3;
   if (sp.note) {
     const lines = [];
     let cur2 = "";
@@ -73647,6 +73649,48 @@ function build(c, sp) {
     }
     if (!(nw > 0)) nw = Math.max(...lines.map((l) => l.length)) * 0.55 * th;
     box3.setAttribute("width", String(nw + 2 * pad2));
+    below = ny + nh + 3;
+  }
+  if (sp.say) {
+    const lines = [];
+    let cur2 = "";
+    for (const w of sp.say.split(/\s+/)) {
+      if (cur2 && (cur2 + " " + w).length > 34) {
+        lines.push(cur2);
+        cur2 = w;
+      } else cur2 = cur2 ? cur2 + " " + w : w;
+    }
+    if (cur2) lines.push(cur2);
+    const fs2 = th + 2, lh = fs2 * 1.3, bp = pad2 + 3, bh = lines.length * lh + 2 * bp;
+    const box3 = document.createElementNS(NS2, "rect"), txt = document.createElementNS(NS2, "text");
+    box3.setAttribute("x", String(cx));
+    box3.setAttribute("y", String(below));
+    box3.setAttribute("height", String(bh));
+    box3.setAttribute("rx", String(Math.min(12, bh / 2)));
+    box3.setAttribute("fill", color2);
+    txt.setAttribute("font-size", String(fs2));
+    txt.setAttribute("font-family", "system-ui, sans-serif");
+    txt.setAttribute("fill", brightness(color2) > 0.5 ? "#000" : "#fff");
+    lines.slice(0, 6).forEach((ln, i) => {
+      const ts = document.createElementNS(NS2, "tspan");
+      ts.setAttribute("x", String(cx + bp));
+      ts.setAttribute("y", String(below + bp + lh * i + lh / 2));
+      ts.setAttribute("dominant-baseline", "central");
+      ts.textContent = ln;
+      txt.appendChild(ts);
+    });
+    const say = document.createElementNS(NS2, "g");
+    say.setAttribute("class", "peer-say");
+    say.appendChild(box3);
+    say.appendChild(txt);
+    g2.appendChild(say);
+    let sw = 0;
+    try {
+      sw = txt.getBBox().width;
+    } catch {
+    }
+    if (!(sw > 0)) sw = Math.max(...lines.map((l) => l.length)) * 0.55 * fs2;
+    box3.setAttribute("width", String(sw + 2 * bp));
   }
   tag.addEventListener("click", (ev) => {
     ev.stopPropagation();
@@ -73792,6 +73836,7 @@ function sendPresence(mmPos, ghostSegs) {
   const vp = visibleRectNm();
   if (vp) st.viewport = vp;
   if (ghostSegs) st.ghost = ghostSegs;
+  if (E.chatSay) st.say = E.chatSay;
   const picked = new Set(E.selection || []);
   if (E.selected && E.selected.id) picked.add(E.selected.id);
   const T = typeof CollabTools !== "undefined" ? CollabTools : null;
@@ -73915,8 +73960,263 @@ var init_peers = __esm({
     stopping = false;
     selCache = null;
     PRESENCE_LIMIT = 7600;
-    presenceSelection2 = (doc2, selection, IU3, moving) => KiCadCanvas.presenceSelection(doc2, selection, IU3, moving, MAX_PRESENCE_ITEMS);
+    presenceSelection2 = (doc2, selection, IU4, moving) => KiCadCanvas.presenceSelection(doc2, selection, IU4, moving, MAX_PRESENCE_ITEMS);
     MAX_PRESENCE_ITEMS = 60;
+  }
+});
+
+// web/domains/pcb/editor/chat.ts
+async function loadChat(force = false) {
+  hookOnce();
+  const pid = projectId();
+  if (!pid) {
+    store.set({ chat: EMPTY });
+    return;
+  }
+  if (!force && chat().projectId === pid) {
+    refreshLink();
+    return;
+  }
+  const n2 = ++loadN;
+  store.set({ chat: Object.assign({}, EMPTY, { projectId: pid, loading: true }) });
+  try {
+    const j = await request(`/api/projects/${pid}/chat?limit=100`);
+    if (n2 !== loadN || projectId() !== pid) return;
+    setChat({ messages: j.messages || [], more: !!j.more, lastReadId: j.lastReadId || 0, unread: j.unread || 0, canWrite: !!j.canWrite, loading: false });
+  } catch (e) {
+    if (n2 !== loadN) return;
+    setChat({ loading: false, error: "The chat could not be loaded." });
+    console.warn("chat load failed", e);
+  }
+  refreshLink();
+  maybeMarkRead();
+}
+function noteChatMsg(msg) {
+  const c = chat(), m = msg.message;
+  if (!m || !c.projectId || msg.projectId !== c.projectId) return;
+  let list = c.messages;
+  if (msg.action === "deleted") list = list.filter((x) => x.id !== m.id);
+  else if (msg.action === "updated") list = list.map((x) => x.id === m.id ? m : x);
+  else if (msg.action === "added") {
+    if (list.some((x) => x.id === m.id)) return;
+    list = [...list, m];
+    const mine = me() && m.authorId === me().id;
+    if (!mine) {
+      setChat({ messages: list, unread: c.unread + 1 });
+      if (!watching()) toast(`${m.authorName || m.authorLogin}: ${m.body.length > 90 ? m.body.slice(0, 89) + "\u2026" : m.body}`, 5e3, { text: "Open Chat", run: () => openChat() });
+      maybeMarkRead();
+      return;
+    }
+  }
+  setChat({ messages: list });
+}
+function maybeMarkRead() {
+  const c = chat();
+  if (!c.projectId || !me() || !watching()) return;
+  const last3 = c.messages.filter((m) => m.id > 0).reduce((a, m) => Math.max(a, m.id), 0);
+  if (!c.unread && last3 <= c.lastReadId) return;
+  setChat({ unread: 0 });
+  if (readTimer) return;
+  readTimer = setTimeout(async () => {
+    readTimer = 0;
+    const cc = chat(), pid = cc.projectId;
+    if (!pid) return;
+    const upTo = cc.messages.filter((m) => m.id > 0).reduce((a, m) => Math.max(a, m.id), 0);
+    if (upTo <= cc.lastReadId) return;
+    try {
+      const j = await request(`/api/projects/${pid}/chat/read`, { method: "POST", body: JSON.stringify({ id: upTo }) });
+      if (chat().projectId === pid) setChat({ lastReadId: j.lastReadId, unread: watching() ? 0 : j.unread });
+    } catch {
+    }
+  }, 400);
+}
+function hookOnce() {
+  if (hooked) return;
+  hooked = true;
+  document.addEventListener("visibilitychange", () => maybeMarkRead());
+  store.subscribe((s2) => {
+    const open3 = !!s2.panes.chat;
+    if (open3 && !wasOpen) setTimeout(maybeMarkRead, 0);
+    wasOpen = open3;
+  });
+  selectionHooks.push(() => {
+    if (attach) refreshLink();
+  });
+}
+function openChat() {
+  const show6 = E.hooks.showPane;
+  if (show6) show6("chat", true);
+  setTimeout(() => {
+    const ta = document.getElementById("chatText");
+    if (ta) ta.focus();
+    maybeMarkRead();
+  }, 30);
+}
+function currentLink() {
+  const did = state.docId;
+  if (!did || did.startsWith("board:") || did.startsWith("lib:") || !E.kdoc) return null;
+  const d = E.kdoc;
+  const ids = selectionIds();
+  if (ids.length) {
+    const it = d.items.get(ids[0]);
+    if (it) {
+      const b = it.bbox, x = b ? (b[0] + b[2]) / 2 : 0, y = b ? (b[1] + b[3]) / 2 : 0;
+      if (!it.ref && ids.length === 1) {
+        const net = netOfItem(it, [x, y]);
+        if (net && net.name && net.name !== "unnamed net") return { docId: did, path: docPath(did), kind: "net", id: net.name, label: net.name, x: Math.round(x * IU()), y: Math.round(y * IU()) };
+      }
+      const label = describe(it) + (ids.length > 1 ? ` +${ids.length - 1}` : "");
+      return { docId: did, path: docPath(did), kind: "item", id: it.id, label, x: Math.round(x * IU()), y: Math.round(y * IU()) };
+    }
+  }
+  const v = visibleRectNm();
+  if (!v) return null;
+  return { docId: did, path: docPath(did), kind: "spot", id: "", label: "", x: Math.round(v[0] + v[2] / 2), y: Math.round(v[1] + v[3] / 2) };
+}
+function refreshLink() {
+  const next = attach ? currentLink() : null;
+  if (JSON.stringify(next) !== JSON.stringify(chat().link)) setChat({ link: next });
+}
+async function send(body, link) {
+  const c = chat(), pid = c.projectId, u = me();
+  if (!pid) return false;
+  const text3 = body.trim();
+  if (!text3) return false;
+  if (!E.canComment || !u) {
+    toast(u ? "You can view this project but not write in its chat" : "Sign in to chat");
+    return false;
+  }
+  const temp = { id: -++pendingId, projectId: pid, authorId: u.id, authorLogin: u.login, authorName: u.name, authorAvatar: u.avatarUrl, body: text3, link, createdAt: (/* @__PURE__ */ new Date()).toISOString(), pending: true };
+  setChat({ messages: [...c.messages, temp] });
+  try {
+    const made = await request(`/api/projects/${pid}/chat`, { method: "POST", body: JSON.stringify({ body: text3, link: link || void 0 }) });
+    if (chat().projectId !== pid) return true;
+    const list = chat().messages.filter((m) => m.id !== temp.id && m.id !== made.id);
+    setChat({ messages: [...list, made].sort((a, b) => (a.id < 0 ? Infinity : a.id) - (b.id < 0 ? Infinity : b.id)), lastReadId: Math.max(chat().lastReadId, made.id) });
+    return true;
+  } catch (e) {
+    setChat({ messages: chat().messages.filter((m) => m.id !== temp.id) });
+    toast("The message was not sent: " + String(e.message || e).replace(/^\d+ /, "").slice(0, 120));
+    return false;
+  }
+}
+function setSay(text3) {
+  E.chatSay = text3 ? text3.slice(0, 200) : null;
+  E.lastPresence = 0;
+  sendPresence(null);
+}
+function startCursorChat() {
+  if (state.view !== "editor" || !state.docId || !E.kdoc) return false;
+  if (!E.canComment || !me()) {
+    toast(me() ? "You can view this project but not write in its chat" : "Sign in to chat");
+    return true;
+  }
+  closeCursorChat(false);
+  if (sayClear) {
+    clearTimeout(sayClear);
+    sayClear = 0;
+  }
+  const mm4 = E.lastCursorMm || [0, 0];
+  const at4 = screenOf(mm4);
+  const box3 = document.createElement("div");
+  box3.className = "cursor-chat";
+  box3.id = "cursorChat";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.maxLength = 200;
+  input.placeholder = "Say something";
+  input.setAttribute("aria-label", "Say something at your cursor");
+  const hint = document.createElement("span");
+  hint.className = "hint";
+  hint.textContent = "Enter sends to Chat \xB7 Esc";
+  box3.appendChild(input);
+  box3.appendChild(hint);
+  box3.style.left = Math.round(at4[0] + 14) + "px";
+  box3.style.top = Math.round(at4[1] + 16) + "px";
+  stage.appendChild(box3);
+  bubble = box3;
+  input.addEventListener("input", () => setSay(input.value.trim() || null));
+  input.addEventListener("keydown", (ev) => {
+    ev.stopPropagation();
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      closeCursorChat(true);
+    } else if (ev.key === "Enter") {
+      ev.preventDefault();
+      const text3 = input.value.trim();
+      if (!text3) {
+        closeCursorChat(true);
+        return;
+      }
+      const did = state.docId;
+      void send(text3, { docId: did, path: docPath(did), kind: "spot", id: "", label: "", x: Math.round(mm4[0] * IU()), y: Math.round(mm4[1] * IU()) });
+      closeCursorChat(false);
+      sayClear = setTimeout(() => {
+        sayClear = 0;
+        setSay(null);
+      }, 5e3);
+    }
+  });
+  input.addEventListener("blur", () => setTimeout(() => {
+    if (bubble === box3) closeCursorChat(true);
+  }, 0));
+  setTimeout(() => input.focus(), 0);
+  return true;
+}
+function closeCursorChat(clearSay) {
+  if (bubble) {
+    const b = bubble;
+    bubble = null;
+    b.remove();
+  }
+  if (clearSay && E.chatSay) setSay(null);
+}
+function screenOf(mm4) {
+  const sr = stage.getBoundingClientRect();
+  const probe2 = (px, py) => worldMm({ clientX: sr.left + px, clientY: sr.top + py });
+  const o = probe2(0, 0), u = probe2(100, 100);
+  const sx = (u[0] - o[0]) / 100 || 1, sy = (u[1] - o[1]) / 100 || 1;
+  const x = (mm4[0] - o[0]) / sx, y = (mm4[1] - o[1]) / sy;
+  return [Math.max(4, Math.min(sr.width - 240, x)), Math.max(4, Math.min(sr.height - 40, y))];
+}
+function leaveCursorChat() {
+  closeCursorChat(false);
+  if (sayClear) {
+    clearTimeout(sayClear);
+    sayClear = 0;
+  }
+  E.chatSay = null;
+}
+var request, EMPTY, me, projectId, chat, setChat, attach, pendingId, loadN, chatOpen, watching, readTimer, wasOpen, hooked, IU, docPath, bubble, sayClear;
+var init_chat = __esm({
+  "web/domains/pcb/editor/chat.ts"() {
+    "use strict";
+    init_appstore();
+    init_comments();
+    init_comments();
+    init_gestures();
+    init_peers();
+    init_state();
+    init_util();
+    init_view();
+    request = api4;
+    EMPTY = { projectId: null, messages: [], loading: false, more: false, error: null, lastReadId: 0, unread: 0, canWrite: false, link: null };
+    me = () => state.me;
+    projectId = () => state.project ? state.project.projectId : null;
+    chat = () => store.get().chat || EMPTY;
+    setChat = (patch) => store.set({ chat: Object.assign({}, chat(), patch) });
+    attach = false;
+    pendingId = 0;
+    loadN = 0;
+    chatOpen = () => !!store.get().panes.chat;
+    watching = () => chatOpen() && typeof document !== "undefined" && document.visibilityState === "visible";
+    readTimer = 0;
+    wasOpen = false;
+    hooked = false;
+    IU = () => E.IU;
+    docPath = (id) => ((state.docs || []).find((d) => d.docId === id) || { path: "" }).path;
+    bubble = null;
+    sayClear = 0;
   }
 });
 
@@ -74041,12 +74341,12 @@ async function readDoc(docId3, docType = "kicad_sch") {
     file = await r.text();
   }
   const doc2 = KiCadCanvas.parseDoc(file, docType);
-  const IU3 = docType === "kicad_sch" ? 1e4 : 1e6;
+  const IU4 = docType === "kicad_sch" ? 1e4 : 1e6;
   const applyProps = KiCadCanvas.applyDocProps;
   for (const op of ops) for (const c of Array.isArray(op.changes) ? op.changes : []) {
     try {
       if (c && c.docProps) applyProps(doc2, c.docProps);
-      else KiCadCanvas.applyChange(doc2, c, IU3);
+      else KiCadCanvas.applyChange(doc2, c, IU4);
     } catch (e) {
     }
   }
@@ -76033,7 +76333,7 @@ function listPick(title, label, header, items) {
     });
   });
 }
-var EMPTY_APPEARANCE, S2, subs, panelStore, projectId, projectName, openDocs, currentDocId, kdoc, isSchDoc, KC;
+var EMPTY_APPEARANCE, S2, subs, panelStore, projectId2, projectName, openDocs, currentDocId, kdoc, isSchDoc, KC;
 var init_core = __esm({
   "web/domains/pcb/editor/panels/core.ts"() {
     "use strict";
@@ -76078,7 +76378,7 @@ var init_core = __esm({
         };
       }
     };
-    projectId = () => state.project && state.project.projectId || "";
+    projectId2 = () => state.project && state.project.projectId || "";
     projectName = () => state.project && state.project.name || "";
     openDocs = () => state.docs || [];
     currentDocId = () => state.docId || null;
@@ -76107,9 +76407,9 @@ function schDocs2() {
   return openDocs().filter((d) => d.docType === "kicad_sch");
 }
 function loadSheets(stale) {
-  if (cacheProject !== projectId()) {
+  if (cacheProject !== projectId2()) {
     cache4.clear();
-    cacheProject = projectId();
+    cacheProject = projectId2();
   }
   if (stale) {
     if (live && live.docId === stale && stale !== currentDocId()) cache4.set(stale, { doc: live.doc, sheets: sheetsOf(live.doc), page: String(live.doc.pageNumber || "1") });
@@ -76121,13 +76421,13 @@ function loadSheets(stale) {
     return Promise.resolve();
   }
   if (loading2) return loading2;
-  const pid = projectId();
+  const pid = projectId2();
   loading2 = Promise.all(want2.map(async (d) => {
     try {
       const r = await fetch(`/api/docs/${d.docId}/content?v=${Date.now()}`);
       if (!r.ok) return;
       const doc2 = KC().parseDoc(await r.text(), "kicad_sch");
-      if (pid === projectId()) cache4.set(d.docId, { doc: doc2, sheets: sheetsOf(doc2), page: String(doc2.pageNumber || "1") });
+      if (pid === projectId2()) cache4.set(d.docId, { doc: doc2, sheets: sheetsOf(doc2), page: String(doc2.pageNumber || "1") });
     } catch (e) {
     }
   })).then(() => {
@@ -76305,7 +76605,7 @@ async function loadProposals() {
   render2();
   if (!id || !state.me) return;
   try {
-    const j = await request(`/api/docs/${id}/proposals?status=pending`);
+    const j = await request2(`/api/docs/${id}/proposals?status=pending`);
     if (docId() !== id) return;
     rows = (j.proposals || []).reverse();
   } catch {
@@ -76339,7 +76639,7 @@ async function load2(id) {
   const have = full.get(id);
   if (have) return have;
   try {
-    const r = await request(`/api/proposals/${id}`);
+    const r = await request2(`/api/proposals/${id}`);
     if (!r.body) return null;
     full.set(id, r);
     return r;
@@ -76356,7 +76656,7 @@ async function preview(id, quiet = false) {
 }
 async function settle(id, status, reason = "") {
   try {
-    await request(`/api/proposals/${id}`, { method: "PATCH", body: JSON.stringify({ status, reason }) });
+    await request2(`/api/proposals/${id}`, { method: "PATCH", body: JSON.stringify({ status, reason }) });
     return true;
   } catch (e) {
     toast(/409/.test(String(e)) ? "Someone else has already decided this proposal" : "The decision could not be saved. Try again.");
@@ -76430,14 +76730,14 @@ function card(r) {
     why2.placeholder = "Why (optional, the assistant reads it)";
     why2.maxLength = 300;
     why2.dataset.act = "why";
-    const send2 = el2("button", "btn sm", "Reject"), back = el2("button", "btn sm", "Cancel");
-    send2.type = "button";
+    const send3 = el2("button", "btn sm", "Reject"), back = el2("button", "btn sm", "Cancel");
+    send3.type = "button";
     back.type = "button";
-    send2.dataset.act = "reject-send";
+    send3.dataset.act = "reject-send";
     const go = () => {
       void settle(r.id, "rejected", why2.value.trim());
     };
-    send2.addEventListener("click", go);
+    send3.addEventListener("click", go);
     why2.addEventListener("keydown", (ev) => {
       ev.stopPropagation();
       if (ev.key === "Enter") go();
@@ -76450,7 +76750,7 @@ function card(r) {
       rejecting = null;
       render2();
     });
-    row3.append(why2, send2, back);
+    row3.append(why2, send3, back);
     c.appendChild(row3);
     setTimeout(() => why2.focus(), 0);
     return c;
@@ -76507,7 +76807,7 @@ function render2() {
   for (const r of rows) list.appendChild(card(r));
   p.appendChild(list);
 }
-var rows, open2, rejecting, full, docId, request, nameOf, author, asProposal;
+var rows, open2, rejecting, full, docId, request2, nameOf, author, asProposal;
 var init_proposals = __esm({
   "web/domains/pcb/editor/proposals.ts"() {
     "use strict";
@@ -76526,7 +76826,7 @@ var init_proposals = __esm({
       const id = state.docId;
       return id && !id.startsWith("board:") && !id.startsWith("lib:") ? id : null;
     };
-    request = api4;
+    request2 = api4;
     nameOf = (w) => w ? w.name || w.login : "Someone";
     author = (r) => `${nameOf(r.by)}'s assistant${r.app ? ` (${r.app})` : ""}`;
     asProposal = (r) => ({
@@ -76619,14 +76919,14 @@ async function call(path2, method = "GET", body) {
 async function loadVersions() {
   const p = app().project;
   if (!p) return;
-  const n2 = ++loadN, pid = p.projectId;
+  const n2 = ++loadN2, pid = p.projectId;
   put2({ loading: true });
   try {
     const [tl, br] = await Promise.all([
       call(`/api/projects/${pid}/timeline`),
       app().me ? call(`/api/projects/${pid}/branches`).catch(() => null) : Promise.resolve(null)
     ]);
-    if (n2 !== loadN || !app().project || app().project.projectId !== pid) return;
+    if (n2 !== loadN2 || !app().project || app().project.projectId !== pid) return;
     put2({
       loading: false,
       error: null,
@@ -76649,7 +76949,7 @@ async function loadVersions() {
       } else put2({ view: { ...v, marks: marksFor(v.docId), versionId: versionAt(v.docId, v.seq) } });
     }
   } catch (e) {
-    if (n2 !== loadN) return;
+    if (n2 !== loadN2) return;
     put2({ loading: false, error: why(e) });
   }
 }
@@ -76685,7 +76985,7 @@ function versionAt(docId3, seq) {
   const hit5 = slice().list.find((v) => v.docs.some((d) => d.docId === docId3 && d.seq === seq));
   return hit5 ? hit5.id : null;
 }
-function describe(docId3, seq) {
+function describe2(docId3, seq) {
   const ix = indexes.get(docId3);
   if (!ix) return { at: null, who: null };
   let lo = 0, hi = ix.seqs.length - 1, k = -1;
@@ -76706,7 +77006,7 @@ async function loadIndex(docId3) {
     const ix = await call(`/api/docs/${docId3}/history`);
     indexes.set(docId3, ix);
     const v = slice().view;
-    if (v && v.docId === docId3) put2({ view: { ...v, floor: ix.floor, head: Math.max(v.head, ix.head), ...describe(docId3, v.seq) } });
+    if (v && v.docId === docId3) put2({ view: { ...v, floor: ix.floor, head: Math.max(v.head, ix.head), ...describe2(docId3, v.seq) } });
   } catch (e) {
   }
 }
@@ -76746,7 +77046,7 @@ function saveVersionDialog() {
   const v = slice().view;
   openDialog3(v && v.seq < v.head ? { kind: "save", at: { docId: v.docId, seq: v.seq } } : { kind: "save" });
 }
-var app, slice, put2, why, loadN, noticeTimer, editTimer, indexes, shown, want, playTimer, historyActive, openDialog3;
+var app, slice, put2, why, loadN2, noticeTimer, editTimer, indexes, shown, want, playTimer, historyActive, openDialog3;
 var init_versions = __esm({
   "web/domains/pcb/editor/versions.ts"() {
     "use strict";
@@ -76762,7 +77062,7 @@ var init_versions = __esm({
       store.slice("versions", patch);
     };
     why = (e) => e instanceof Error ? e.message : String(e);
-    loadN = 0;
+    loadN2 = 0;
     noticeTimer = 0;
     editTimer = 0;
     indexes = /* @__PURE__ */ new Map();
@@ -76991,6 +77291,7 @@ async function connect() {
       if (was !== msg.role) toast(msg.role === "editor" ? "You can now edit this project" : msg.role === "commenter" ? "You can now comment on this project, but not change it" : "You now have view-only access to this project", 4500);
     }
     if (msg.type === "comment") noteCommentMsg(msg);
+    if (msg.type === "chat") noteChatMsg(msg);
     if (msg.type === "proposal") noteProposalMsg(msg);
     if (msg.type === "versions") onVersionsNotice(msg);
     if (msg.type === "saved") window.dispatchEvent(new CustomEvent("kc-doc-saved", { detail: msg }));
@@ -77186,6 +77487,7 @@ var init_net = __esm({
     "use strict";
     init_appstore();
     init_comments();
+    init_chat();
     init_doc();
     init_hierarchy();
     init_peers();
@@ -78227,7 +78529,7 @@ var init_tables = __esm({
       donate: "https://go.kicad.org/app-donate",
       reportBug: "https://github.com/JunctionEDA/junction/issues/new"
     };
-    PANE_DEFAULT_HIDDEN = { sch: ["peers", "comments", "appearance", "search", "netnav", "history"], pcb: ["peers", "comments", "search", "history", "netinsp"] };
+    PANE_DEFAULT_HIDDEN = { sch: ["peers", "comments", "chat", "appearance", "search", "netnav", "history"], pcb: ["peers", "comments", "chat", "search", "history", "netinsp"] };
     ZOOM_LIST = {
       sch: [0.05, 0.07, 0.1, 0.15, 0.2, 0.3, 0.5, 0.7, 1, 1.5, 2, 3, 4.5, 6.5, 10, 15, 20, 30, 45, 65, 100],
       pcb: [0.13, 0.22, 0.35, 0.6, 1, 1.5, 2.2, 3.5, 5, 8, 13, 20, 35, 50, 80, 130, 220, 300]
@@ -78262,12 +78564,14 @@ function showPane(name, show6) {
   const next = show6 === void 0 ? !E.panes[name] : !!show6;
   E.panes = Object.assign({}, E.panes, { [name]: next });
   E.panes.filter = filterFollows(E.panes, ed);
-  const saved = savedPanes(ed);
-  saved[name] = next;
-  delete saved.filter;
-  try {
-    localStorage.setItem(paneKey(ed), JSON.stringify(saved));
-  } catch (e) {
+  for (const e of PROJECT_PANES.has(name) ? ["sch", "pcb"] : [ed]) {
+    const saved = savedPanes(e);
+    saved[name] = next;
+    delete saved.filter;
+    try {
+      localStorage.setItem(paneKey(e), JSON.stringify(saved));
+    } catch (err) {
+    }
   }
   store.set({ panes: E.panes });
   requestRender();
@@ -78346,7 +78650,7 @@ function setCrosshair(mode, id) {
   refreshCrosshair();
   rememberCursor({ crosshair: mode });
 }
-var PANE_NAMES, PANE_EDITOR_ONLY, editorId2, paneKey;
+var PANE_NAMES, PANE_EDITOR_ONLY, editorId2, paneKey, PROJECT_PANES;
 var init_panes = __esm({
   "web/domains/pcb/editor/panes.ts"() {
     "use strict";
@@ -78361,11 +78665,12 @@ var init_panes = __esm({
     init_view();
     init_units();
     init_tables();
-    PANE_NAMES = ["props", "hier", "filter", "history", "peers", "comments", "appearance", "search", "netnav", "netinsp", "libtree"];
+    PANE_NAMES = ["props", "hier", "filter", "history", "peers", "comments", "chat", "appearance", "search", "netnav", "netinsp", "libtree"];
     PANE_EDITOR_ONLY = { hier: "sch", netnav: "sch", netinsp: "pcb" };
     editorId2 = () => isSch() ? "sch" : "pcb";
     paneKey = (ed) => "kui.panes." + (ed || "x");
     E.hooks.showPane = (name, show6) => showPane(name, show6);
+    PROJECT_PANES = /* @__PURE__ */ new Set(["chat"]);
     if (typeof window !== "undefined") {
       window.addEventListener("kc:pcb-linemode", () => syncSchModes());
       window.addEventListener("kc:action", () => syncSchModes());
@@ -79345,12 +79650,12 @@ function drawRuler(ctx, view, sch, origin, end) {
   const K11 = globalThis.KiCadCanvas;
   const dpr = view.dpr || 1, s2 = view.ppm * view.zoom;
   const cv = ctx.canvas, W12 = cv.width / dpr, H = cv.height / dpr;
-  const toMm = (p) => [p[0] / IU, p[1] / IU];
+  const toMm = (p) => [p[0] / IU2, p[1] / IU2];
   const rv = {
-    scale: s2 / IU,
-    toScreen: (p) => [(p[0] / IU - view.x0) * s2 + view.panX, (p[1] / IU - view.y0) * s2 + view.panY],
+    scale: s2 / IU2,
+    toScreen: (p) => [(p[0] / IU2 - view.x0) * s2 + view.panX, (p[1] / IU2 - view.y0) * s2 + view.panY],
     screen: [W12, H],
-    viewport: [(view.x0 - view.panX / s2) * IU, (view.y0 - view.panY / s2) * IU, (view.x0 + (W12 - view.panX) / s2) * IU, (view.y0 + (H - view.panY) / s2) * IU],
+    viewport: [(view.x0 - view.panX / s2) * IU2, (view.y0 - view.panY / s2) * IU2, (view.x0 + (W12 - view.panX) / s2) * IU2, (view.y0 + (H - view.panY) / s2) * IU2],
     textWidth: (t, size2, pen) => K11.strokeLineWidth(t) * size2 + pen
   };
   const units = E.units === "in" || E.units === "mil" ? E.units : "mm";
@@ -79365,14 +79670,14 @@ function drawRuler(ctx, view, sch, origin, end) {
     if (op.kind === "line") {
       const a = toMm(op.a), b = toMm(op.b);
       ctx.strokeStyle = c;
-      ctx.lineWidth = Math.max(op.w / IU, minPen);
+      ctx.lineWidth = Math.max(op.w / IU2, minPen);
       ctx.beginPath();
       ctx.moveTo(a[0], a[1]);
       ctx.lineTo(b[0], b[1]);
       ctx.stroke();
     } else {
       const at4 = toMm(op.at);
-      K11.drawStrokeText(ctx, base2, { x: at4[0], y: at4[1], text: op.text, size: op.size / IU, rot: op.rot, mirror: false, h: op.h, v: "center", pen: op.pen / IU, italic: false, dy: 0 }, c, minPen);
+      K11.drawStrokeText(ctx, base2, { x: at4[0], y: at4[1], text: op.text, size: op.size / IU2, rot: op.rot, mirror: false, h: op.h, v: "center", pen: op.pen / IU2, italic: false, dy: 0 }, c, minPen);
     }
   }
 }
@@ -79420,7 +79725,7 @@ function drawFieldUmbilical(ctx, px) {
   ctx.stroke();
   ctx.restore();
 }
-var overlayHooks, IU, SCHEMES;
+var overlayHooks, IU2, SCHEMES;
 var init_overlays = __esm({
   "web/domains/pcb/editor/overlays.ts"() {
     "use strict";
@@ -79428,7 +79733,7 @@ var init_overlays = __esm({
     init_selmodes();
     init_state();
     overlayHooks = [];
-    IU = 1e6;
+    IU2 = 1e6;
     SCHEMES = [
       { normal: "rgba(77,77,179,0.3)", additive: "rgba(77,179,77,0.3)", subtract: "rgba(179,77,77,0.3)", exclusiveOr: "rgba(179,77,77,0.3)", l2r: "rgb(255,255,102)", r2l: "rgb(102,102,255)" },
       { normal: "rgba(128,77,255,0.5)", additive: "rgba(128,255,128,0.5)", subtract: "rgba(255,128,128,0.5)", exclusiveOr: "rgba(255,128,128,0.5)", l2r: "rgb(179,179,0)", r2l: "rgb(26,26,255)" }
@@ -79826,7 +80131,8 @@ function peerCursorSpec(cid, p) {
   if (!Array.isArray(st.cursor)) return null;
   const ai = st.ai && typeof st.ai === "object" ? st.ai : null;
   const note3 = ai && typeof ai.note === "string" ? ai.note.trim().slice(0, 140) : "";
-  return { cid, name: peerName(p), color: p.user && p.user.color || "#4477ee", note: note3, following: E.followPeer === cid, at: [st.cursor[0] / E.IU, st.cursor[1] / E.IU], ts: typeof st.ts === "number" ? st.ts : 0 };
+  const say = typeof st.say === "string" ? st.say.trim().slice(0, 200) : "";
+  return { cid, name: peerName(p), color: p.user && p.user.color || "#4477ee", note: note3, say, following: E.followPeer === cid, at: [st.cursor[0] / E.IU, st.cursor[1] / E.IU], ts: typeof st.ts === "number" ? st.ts : 0 };
 }
 function movePeerCursors(peers) {
   const specs = [];
@@ -80567,12 +80873,54 @@ var init_gestures = __esm({
 });
 
 // web/domains/pcb/editor/comments.ts
+function describe(it) {
+  if (it.ref) return it.ref;
+  if (it.name) return it.name;
+  const names2 = CollabTools.props && CollabTools.props.KIND_NAMES || {};
+  const kind = names2[it.kind] || it.kind.replace(/^gr_/, "").replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+  const text3 = /label|text/.test(it.kind) ? KiCadCanvas.str(it.node[1]) : "";
+  return text3 ? `${kind} ${text3.length > 24 ? text3.slice(0, 23) + "\u2026" : text3}` : kind;
+}
+function netOfItem(it, near2) {
+  const d = kdoc2();
+  if (!d) return null;
+  if (d.type === "pcb") {
+    let name = "";
+    if (it.kind === "footprint") {
+      if (!near2) return null;
+      const pad2 = KiCadCanvas.padAt(d, near2[0], near2[1]);
+      if (pad2 && pad2.item === it) name = pad2.netName || (pad2.pad ? KiCadCanvas.netNameOf(d, pad2.pad) : "");
+    } else name = KiCadCanvas.netNameOf(d, it.node);
+    return name ? { name, ids: boardNetIds(name) } : null;
+  }
+  const sch = CollabTools.sch;
+  if (!sch || !/^(wire|bus|junction|label|global_label|hierarchical_label|bus_entry)$/.test(it.kind)) return null;
+  let ids;
+  try {
+    ids = Array.from(sch.netItems(d, it, near2));
+  } catch {
+    return null;
+  }
+  if (!ids.length) return null;
+  return { name: schNetName(ids), ids };
+}
 function boardNetIds(name) {
   const d = kdoc2(), out2 = [];
   if (!d) return out2;
   const netNameOf3 = KiCadCanvas.netNameOf;
   for (const it of d.items.values()) if ((it.kind === "segment" || it.kind === "arc" || it.kind === "via" || it.kind === "zone") && netNameOf3(d, it.node) === name) out2.push(it.id);
   return out2;
+}
+function schNetName(ids) {
+  const d = kdoc2();
+  if (!d) return "";
+  const items = ids.map((id) => d.items.get(id)).filter((x) => !!x);
+  for (const kind of ["global_label", "hierarchical_label", "label"]) {
+    const l = items.find((it) => it.kind === kind);
+    if (l) return KiCadCanvas.str(l.node[1]);
+  }
+  const sym = items.find((it) => it.kind === "symbol" && it.ref && !it.ref.startsWith("#"));
+  return sym ? `Net-(${sym.ref})` : "unnamed net";
 }
 function netIds(a) {
   const d = kdoc2();
@@ -80589,7 +80937,7 @@ function netIds(a) {
   }
 }
 function pinOf(c) {
-  const d = kdoc2(), sx = c.x / IU2(), sy = c.y / IU2(), a = c.anchor;
+  const d = kdoc2(), sx = c.x / IU3(), sy = c.y / IU3(), a = c.anchor;
   if (!a || !d) return { x: sx, y: sy, found: true };
   const it = d.items.get(a.kind === "item" ? a.id : a.item || "");
   if (!it || !it.bbox) return { x: sx, y: sy, found: a.kind === "net" ? netIds(a).length > 0 : false };
@@ -80606,7 +80954,7 @@ async function loadComments() {
   const id = docId2();
   if (!id) return;
   try {
-    E.comments = (await request2(`/api/docs/${id}/comments`)).comments || [];
+    E.comments = (await request3(`/api/docs/${id}/comments`)).comments || [];
   } catch {
     E.comments = [];
   }
@@ -80625,7 +80973,7 @@ async function loadProjectComments() {
   if (!p) return;
   const n2 = ++projectLoad;
   try {
-    const j = await request2(`/api/projects/${p.projectId}/comments`);
+    const j = await request3(`/api/projects/${p.projectId}/comments`);
     if (n2 !== projectLoad) return;
     const others = j.docs.filter((d) => d.docId !== docId2()).map((d) => ({ docId: d.docId, path: d.path, comments: j.comments.filter((c) => c.docId === d.docId) })).filter((d) => d.comments.length);
     store.set({ otherComments: others });
@@ -80739,7 +81087,7 @@ function submitOnCtrlEnter(ta, go) {
 }
 async function call2(path2, method, body) {
   try {
-    await request2(path2, { method, body: body === void 0 ? void 0 : JSON.stringify(body) });
+    await request3(path2, { method, body: body === void 0 ? void 0 : JSON.stringify(body) });
     return true;
   } catch (e) {
     toast(`That did not go through: ${e.message.replace(/^\d+ /, "").slice(0, 120)}`, 4e3);
@@ -80791,7 +81139,7 @@ function showThread(rootId, keepPlace = false) {
   const was = E.openThread;
   E.openThread = rootId;
   draft = null;
-  const p = pinOf(root5), user = me(), owner = project()?.ownerId, write = canComment();
+  const p = pinOf(root5), user = me2(), owner = project()?.ownerId, write = canComment();
   const thread = [root5, ...list.filter((c) => c.parentId === rootId)];
   panel2.replaceChildren();
   panel2.dataset.thread = String(rootId);
@@ -80870,7 +81218,7 @@ function showThread(rootId, keepPlace = false) {
     reply.id = "replyBtn";
     resolve2.type = "button";
     resolve2.id = "resolveBtn";
-    const send2 = async () => {
+    const send3 = async () => {
       const text3 = ta.value.trim();
       if (!text3) return;
       reply.disabled = true;
@@ -80878,10 +81226,10 @@ function showThread(rootId, keepPlace = false) {
       reply.disabled = false;
     };
     reply.addEventListener("click", () => {
-      void send2();
+      void send3();
     });
     submitOnCtrlEnter(ta, () => {
-      void send2();
+      void send3();
     });
     resolve2.addEventListener("click", () => {
       void call2(`/api/comments/${rootId}`, "PATCH", { resolved: !root5.resolved });
@@ -80912,7 +81260,7 @@ function openThreadAction(id) {
   showThread(c.id);
   if (c.anchor && c.anchor.kind === "item") focusAnchor(c);
 }
-var comments, kdoc2, IU2, me, docId2, project, canComment, panel2, pins, stageEl, worldEl, request2, draft, ownHighlight, PARTS, projectLoad;
+var comments, kdoc2, IU3, me2, docId2, project, canComment, panel2, pins, stageEl, worldEl, request3, draft, ownHighlight, PARTS, projectLoad;
 var init_comments = __esm({
   "web/domains/pcb/editor/comments.ts"() {
     "use strict";
@@ -80929,8 +81277,8 @@ var init_comments = __esm({
     init_kicon_dom();
     comments = () => E.comments;
     kdoc2 = () => E.kdoc;
-    IU2 = () => E.IU;
-    me = () => state.me;
+    IU3 = () => E.IU;
+    me2 = () => state.me;
     docId2 = () => {
       const id = state.docId;
       return id && !id.startsWith("board:") && !id.startsWith("lib:") ? id : null;
@@ -80941,7 +81289,7 @@ var init_comments = __esm({
     pins = cmtG;
     stageEl = stage;
     worldEl = world;
-    request2 = api4;
+    request3 = api4;
     draft = null;
     ownHighlight = null;
     PARTS = /* @__PURE__ */ new Set(["symbol", "footprint", "sheet"]);
@@ -80965,14 +81313,14 @@ var init_history = __esm({
 function wanted() {
   if (!E.kdoc || !state.docId || state.role !== "editor" || historyActive()) return false;
   const docs = state.docs || [];
-  const me2 = docs.find((d) => d.docId === state.docId);
-  if (!me2) return false;
-  if (me2.docType === "kicad_pcb") return true;
-  if (me2.docType !== "kicad_sch") return false;
+  const me3 = docs.find((d) => d.docId === state.docId);
+  if (!me3) return false;
+  if (me3.docType === "kicad_pcb") return true;
+  if (me3.docType !== "kicad_sch") return false;
   const root5 = window.CollabApp?.getState().document.rootDocId;
   return !root5 || root5 === state.docId;
 }
-async function send() {
+async function send2() {
   if (sending) {
     again = true;
     return;
@@ -81013,7 +81361,7 @@ function notePreviewDirty() {
   const wait = Math.max(QUIET_MS, MIN_GAP_MS - (Date.now() - lastSent));
   timer2 = window.setTimeout(() => {
     timer2 = 0;
-    void send();
+    void send2();
   }, lastSent ? wait : 2500);
 }
 var LONG_SIDE, QUIET_MS, MIN_GAP_MS, timer2, lastSent, sending, again, sentAt, toBase64;
@@ -84810,8 +85158,8 @@ function icon(name) {
   if (ic) fill2(el4, ic);
   else {
     waiting.add({ el: el4, name });
-    if (!hooked && g2.KiCadIconsReady) {
-      hooked = true;
+    if (!hooked2 && g2.KiCadIconsReady) {
+      hooked2 = true;
       g2.KiCadIconsReady.then(() => {
         for (const w of waiting) {
           const i = UI().KiCadIconFor?.(w.name);
@@ -84823,7 +85171,7 @@ function icon(name) {
   }
   return el4;
 }
-var UI, NS3, waiting, hooked;
+var UI, NS3, waiting, hooked2;
 var init_ui2 = __esm({
   "web/domains/pcb/symedit/ui.ts"() {
     "use strict";
@@ -84836,7 +85184,7 @@ var init_ui2 = __esm({
     UI = () => window;
     NS3 = "http://www.w3.org/2000/svg";
     waiting = /* @__PURE__ */ new Set();
-    hooked = false;
+    hooked2 = false;
   }
 });
 
@@ -84935,7 +85283,7 @@ The footprint could not be drawn: ${e.message || e}`;
       if (exportBtn) exportBtn.disabled = !ok2;
     };
     const rebuild = () => {
-      if (st) void request3({ op: "build", values: pageValues(st) });
+      if (st) void request4({ op: "build", values: pageValues(st) });
     };
     const showParams = () => {
       grid2.replaceChildren();
@@ -85037,7 +85385,7 @@ The footprint could not be drawn: ${e.message || e}`;
       setExport();
       if (dlg) dlg.setTitle(title());
     };
-    const request3 = async (req) => {
+    const request4 = async (req) => {
       if (!wizard) return;
       const my = ++seq;
       const w = wizard;
@@ -85065,7 +85413,7 @@ The footprint could not be drawn: ${e.message || e}`;
       showMsgPanel();
       msgBox.value = "";
       if (dlg) dlg.setTitle(title());
-      await request3({ op: "describe" });
+      await request4({ op: "describe" });
     };
     const tool2 = (iconName, tip, fn, k) => {
       const b = h2("button", { type: "button", class: "fw-tb-btn", title: tip, "data-k": k });
@@ -85085,7 +85433,7 @@ The footprint could not be drawn: ${e.message || e}`;
       { class: "fw-tb", "data-k": "toolbar" },
       tool2("module_wizard", "Show wizards selector\nSelect wizard script to run", () => void choose(), "tb-wizards"),
       sep(),
-      tool2("reload", "Reset wizard parameters\nReset wizard parameters to default", () => void request3({ op: "reset" }), "tb-reset"),
+      tool2("reload", "Reset wizard parameters\nReset wizard parameters to default", () => void request4({ op: "reset" }), "tb-reset"),
       sep(),
       tool2("refresh", "Refresh", () => draw2(), "tb-refresh"),
       tool2("zoom_in", "Zoom In", () => {
@@ -85142,7 +85490,7 @@ The footprint could not be drawn: ${e.message || e}`;
     }, { passive: false });
     setExport();
     requestAnimationFrame(() => draw2());
-    if (wizard) void request3({ op: "describe" });
+    if (wizard) void request4({ op: "describe" });
     else if (!list.length) messageBox("Footprint Wizard", "No footprint wizards are available. Footprint wizards come from plugins: install one from Manage Plugins.");
   });
 }
@@ -86215,10 +86563,10 @@ async function canLeaveFootprint() {
   const what = isFpReadOnlyLib() && FP.lib ? FP.lib.name : FP.board ? FP.board.reference : "";
   return confirmBox("Footprint Editor", `Save changes to '${what}' before closing?`, "Discard Changes");
 }
-function rememberFootprint(projectId3, docId3) {
+function rememberFootprint(projectId4, docId3) {
   if (docId3.startsWith("board:")) return;
   try {
-    localStorage.setItem(lastKey2(projectId3), docId3);
+    localStorage.setItem(lastKey2(projectId4), docId3);
   } catch {
   }
 }
@@ -86450,7 +86798,7 @@ var init_fpedit = __esm({
         toast("", 1);
       }
     });
-    lastKey2 = (projectId3) => `kc.fpedit.last.${projectId3}`;
+    lastKey2 = (projectId4) => `kc.fpedit.last.${projectId4}`;
     handlersRef = null;
     window.addEventListener("kc-libtable-changed", ((ev) => {
       if (ev.detail && ev.detail.kind === "footprint") void libTableRows2(true).then(() => publishLibs());
@@ -86589,10 +86937,10 @@ function preloadPcbToolsWhenIdle() {
   if (ric) ric(go, { timeout: 3e3 });
   else setTimeout(go, 800);
 }
-function noteBoardOpened(docId3, projectId3) {
+function noteBoardOpened(docId3, projectId4) {
   try {
     const ids = (localStorage.getItem(BOARD_HINT) || "").split(" ").filter(Boolean);
-    for (const id of [docId3, projectId3]) {
+    for (const id of [docId3, projectId4]) {
       if (!id) continue;
       const at4 = ids.indexOf(id);
       if (at4 >= 0) ids.splice(at4, 1);
@@ -86614,18 +86962,18 @@ var init_pcbtools_loader = __esm({
 
 // web/domains/pcb/dialogs/font-picker.ts
 function setFontProject(id) {
-  if (id !== projectId2) {
-    projectId2 = id;
+  if (id !== projectId3) {
+    projectId3 = id;
     projectReq = null;
   }
 }
-var projectId2, projectReq;
+var projectId3, projectReq;
 var init_font_picker = __esm({
   "web/domains/pcb/dialogs/font-picker.ts"() {
     "use strict";
     init_dom2();
     init_kicon_dom();
-    projectId2 = null;
+    projectId3 = null;
     projectReq = null;
   }
 });
@@ -87070,9 +87418,9 @@ function leaveEditor() {
   state.docId = null;
   setConn("offline", "");
 }
-function takeBoot(key3, projectId3) {
+function takeBoot(key3, projectId4) {
   const boot = window.__kcBoot;
-  if (!boot || !boot[key3] || projectId3 !== void 0 && boot.projectId !== projectId3) return void 0;
+  if (!boot || !boot[key3] || projectId4 !== void 0 && boot.projectId !== projectId4) return void 0;
   const v = boot[key3];
   delete boot[key3];
   return v;
@@ -87322,6 +87670,7 @@ function leaveDoc() {
   dragG.replaceChildren();
   cmtG.replaceChildren();
   closeThread();
+  leaveCursorChat();
   store.slice("document", { layers: [], hiddenLayers: [], copperLayers: [], items: [], sheets: [], hasDoc: false, notice: null });
   store.set({ comments: [], otherComments: [], openThread: null, peers: { list: [], follow: null } });
   renderProps();
@@ -87353,6 +87702,7 @@ async function openDoc(doc2) {
   const docId3 = doc2.docId;
   setupGridControls();
   loadComments();
+  void loadChat();
   void loadProposals();
   let ok2 = false;
   const tools = isSch() ? null : ensurePcbTools().catch((e) => {
@@ -87540,6 +87890,7 @@ var init_doc = __esm({
     "use strict";
     init_appstore();
     init_comments();
+    init_chat();
     init_proposals();
     init_dom();
     init_gestures();
@@ -90521,12 +90872,12 @@ function importSettingsDialog(onImport) {
     ok() {
       const v = from.value;
       if (!v) return false;
-      const [projectId3, docId3] = v.split("|");
+      const [projectId4, docId3] = v.split("|");
       const sel = checks.filter((c) => c.f.get()).map((c) => c.k);
       void (async () => {
         let board3 = "", proT = null, rulesT = null;
         try {
-          const info = await api4(`/api/projects/${projectId3}/info`);
+          const info = await api4(`/api/projects/${projectId4}/info`);
           board3 = String(await api4(`/api/docs/${docId3}/content`));
           const proDoc2 = (info.docs || []).find((d) => d.docType === "kicad_pro"), druDoc = (info.docs || []).find((d) => d.docType === "design_rules");
           if (proDoc2) proT = String(await api4(`/api/docs/${proDoc2.docId}/content`));
@@ -91363,7 +91714,7 @@ function unfoldPopup(entries, bus, at4, title) {
   }
   return out2;
 }
-function describe2(it) {
+function describe3(it) {
   const P = window.PcbTools;
   if (!isSch() && P && P.itemDescription && E.kdoc) {
     const t = P.itemDescription(E.kdoc, typeof it === "string" ? it : it.id, E.units);
@@ -91492,7 +91843,7 @@ function clarifyPopup(ev, ids, then, all2, mode = null) {
     selectionChanged();
     if (then) then();
   };
-  const items = ids.map((id, i) => ({ label: i < 9 && !IS_MAC ? `${i + 1}  ${describe2(id)}` : describe2(id), key: i < 9 ? String(i + 1) : void 0, icon: menuImage(id), hover: hoverOf(id), run: runRow(() => pick([id])) }));
+  const items = ids.map((id, i) => ({ label: i < 9 && !IS_MAC ? `${i + 1}  ${describe3(id)}` : describe3(id), key: i < 9 ? String(i + 1) : void 0, icon: menuImage(id), hover: hoverOf(id), run: runRow(() => pick([id])) }));
   items.push({ sep: true }, { label: "Select All", key: "A", run: runRow(() => pick(ids.filter((id) => !id.includes("#")))) });
   const more = all2 ? all2.filter((id) => !ids.includes(id)) : [];
   if (more.length) items.push({ label: "Show More Choices...", key: "M", run: runRow(() => clarifyPopup(ev, ids.concat(more), then, null, mode)) });
@@ -98129,6 +98480,7 @@ var init_actions = __esm({
     init_schnets();
     init_appstore();
     init_comments();
+    init_chat();
     init_versions();
     init_doc();
     init_history();
@@ -98426,7 +98778,13 @@ var init_actions = __esm({
       "tab-props": () => showPane("props", true),
       "tab-peers": () => showPane("peers", true),
       "tab-comments": () => showPane("comments", true),
-      "tab-history": () => showPane("history", true)
+      "tab-history": () => showPane("history", true),
+      // the project chat (chat.ts): the menu bar's Chat button toggles its pane; Alt+M speaks at the pointer
+      showChat: () => showPane("chat"),
+      "tab-chat": () => openChat(),
+      cursorChat: () => {
+        startCursorChat();
+      }
     };
   }
 });
@@ -102166,7 +102524,7 @@ function pruneLibName(doc2, name) {
   }
   doc2.lib.delete(name);
 }
-function applyChange(doc2, change, IU3) {
+function applyChange(doc2, change, IU4) {
   const id = str(change.id), kind = str(change.kind).toUpperCase();
   if (doc2.fpEditor && id === "footprint") {
     const frag2 = change.sexpr || change.itemSexpr;
@@ -102213,10 +102571,10 @@ function applyChange(doc2, change, IU3) {
       const v = Number(after);
       switch (p.name) {
         case "Position X":
-          nx = v / IU3;
+          nx = v / IU4;
           break;
         case "Position Y":
-          ny = v / IU3;
+          ny = v / IU4;
           break;
         case "Orientation":
         case "Rotation":
@@ -102224,25 +102582,25 @@ function applyChange(doc2, change, IU3) {
           break;
         case "Start X":
           if (p2[0]) {
-            p2[0][0] = v / IU3;
+            p2[0][0] = v / IU4;
             changed2 = true;
           }
           break;
         case "Start Y":
           if (p2[0]) {
-            p2[0][1] = v / IU3;
+            p2[0][1] = v / IU4;
             changed2 = true;
           }
           break;
         case "End X":
           if (p2[1]) {
-            p2[1][0] = v / IU3;
+            p2[1][0] = v / IU4;
             changed2 = true;
           }
           break;
         case "End Y":
           if (p2[1]) {
-            p2[1][1] = v / IU3;
+            p2[1][1] = v / IU4;
             changed2 = true;
           }
           break;
@@ -102300,7 +102658,7 @@ init_sexpr();
 init_tables_images();
 init_text();
 init_outline_text();
-function moveItem(doc2, item, x, y, IU3) {
+function moveItem(doc2, item, x, y, IU4) {
   const [ox, oy] = item.kind === "table" ? [item.x || 0, item.y || 0] : atOf(item.node);
   const dx = x - ox, dy = y - oy;
   if (doc2.type === "sch" && (item.kind === "wire" || item.kind === "bus" || item.kind === "polyline")) {
@@ -102324,8 +102682,8 @@ function moveItem(doc2, item, x, y, IU3) {
   }
   buildGeom(doc2, item);
   return { id: item.id, kind: "MODIFIED", typeName: typeNameOf(item), properties: [
-    { name: "Position X", before: { type: "int", v: Math.round(ox * IU3) }, after: { type: "int", v: Math.round(x * IU3) } },
-    { name: "Position Y", before: { type: "int", v: Math.round(oy * IU3) }, after: { type: "int", v: Math.round(y * IU3) } }
+    { name: "Position X", before: { type: "int", v: Math.round(ox * IU4) }, after: { type: "int", v: Math.round(x * IU4) } },
+    { name: "Position Y", before: { type: "int", v: Math.round(oy * IU4) }, after: { type: "int", v: Math.round(y * IU4) } }
   ] };
 }
 function boardChangeExtras(doc2, item, change) {
@@ -105482,23 +105840,23 @@ function addGeom(b, g2) {
     }
   }
 }
-var iu = (mm4, IU3) => Math.round(mm4 * IU3);
-function toIU(b, IU3) {
+var iu = (mm4, IU4) => Math.round(mm4 * IU4);
+function toIU(b, IU4) {
   if (b.empty) return null;
-  const x = iu(b.x0, IU3), y = iu(b.y0, IU3);
-  return [x, y, iu(b.x1, IU3) - x, iu(b.y1, IU3) - y];
+  const x = iu(b.x0, IU4), y = iu(b.y0, IU4);
+  return [x, y, iu(b.x1, IU4) - x, iu(b.y1, IU4) - y];
 }
 var pt3 = (node, key3) => {
   const c = kid(node, key3);
   return c ? [num(c[1]), num(c[2])] : null;
 };
-function boardItemBox(item, IU3 = 1e6) {
+function boardItemBox(item, IU4 = 1e6) {
   const n2 = item.node, k = item.kind;
   if (k === "segment") {
     const s2 = pt3(n2, "start"), e = pt3(n2, "end");
     if (!s2 || !e) return null;
-    const wN = kid(n2, "width"), radius = Math.floor((iu(wN ? num(wN[1]) : 0, IU3) + 1) / 2);
-    const xs = [iu(s2[0], IU3), iu(e[0], IU3)], ys = [iu(s2[1], IU3), iu(e[1], IU3)];
+    const wN = kid(n2, "width"), radius = Math.floor((iu(wN ? num(wN[1]) : 0, IU4) + 1) / 2);
+    const xs = [iu(s2[0], IU4), iu(e[0], IU4)], ys = [iu(s2[1], IU4), iu(e[1], IU4)];
     const x0 = Math.min(xs[0], xs[1]) - radius, y0 = Math.min(ys[0], ys[1]) - radius;
     return [x0, y0, Math.max(xs[0], xs[1]) + radius - x0 + 1, Math.max(ys[0], ys[1]) + radius - y0 + 1];
   }
@@ -105506,7 +105864,7 @@ function boardItemBox(item, IU3 = 1e6) {
     const at4 = pt3(n2, "at");
     if (!at4) return null;
     const sN = kid(n2, "size"), dN = kid(n2, "drill");
-    const radius = Math.floor((Math.max(iu(sN ? num(sN[1]) : 0, IU3), iu(dN ? num(dN[1]) : 0, IU3)) + 1) / 2), x = iu(at4[0], IU3), y = iu(at4[1], IU3);
+    const radius = Math.floor((Math.max(iu(sN ? num(sN[1]) : 0, IU4), iu(dN ? num(dN[1]) : 0, IU4)) + 1) / 2), x = iu(at4[0], IU4), y = iu(at4[1], IU4);
     return [x - radius, y - radius, 2 * radius + 1, 2 * radius + 1];
   }
   const b = new Box();
@@ -105515,16 +105873,16 @@ function boardItemBox(item, IU3 = 1e6) {
       const pts = kid(poly, "pts");
       if (pts) for (const xy of kids(pts, "xy")) b.add(num(xy[1]), num(xy[2]));
     }
-    if (!b.empty) return toIU(b, IU3);
+    if (!b.empty) return toIU(b, IU4);
   }
   if (k === "arc") {
-    const wN = kid(n2, "width"), radius = Math.floor((iu(wN ? num(wN[1]) : 0, IU3) + 1) / 2);
+    const wN = kid(n2, "width"), radius = Math.floor((iu(wN ? num(wN[1]) : 0, IU4) + 1) / 2);
     for (const g2 of item.geom || []) if (g2.t === "arc") addArc(b, g2, 0);
     else if (g2.t === "line") {
       b.add(g2.x1 || 0, g2.y1 || 0);
       b.add(g2.x2 || 0, g2.y2 || 0);
     }
-    const r = toIU(b, IU3);
+    const r = toIU(b, IU4);
     return r ? [r[0] - radius, r[1] - radius, r[2] + 2 * radius + 1, r[3] + 2 * radius + 1] : null;
   }
   if (k === "footprint" && typeof item.x === "number" && typeof item.y === "number") b.add(item.x, item.y, 0.25);
@@ -105536,9 +105894,9 @@ function boardItemBox(item, IU3 = 1e6) {
     b.add(item.bbox[0], item.bbox[1]);
     b.add(item.bbox[2], item.bbox[3]);
   }
-  return toIU(b, IU3);
+  return toIU(b, IU4);
 }
-function presenceSelection(doc2, selection, IU3, moving, max = 60) {
+function presenceSelection(doc2, selection, IU4, moving, max = 60) {
   if (!doc2 || !selection) return null;
   const board3 = doc2.type !== "sch";
   const ids = [], boxes = [], plain = [];
@@ -105551,10 +105909,10 @@ function presenceSelection(doc2, selection, IU3, moving, max = 60) {
       continue;
     }
     let box3 = null;
-    if (board3) box3 = boardItemBox(it, IU3);
+    if (board3) box3 = boardItemBox(it, IU4);
     else if (it.bbox) {
       const b = it.bbox;
-      box3 = [Math.round(b[0] * IU3), Math.round(b[1] * IU3), Math.round((b[2] - b[0]) * IU3), Math.round((b[3] - b[1]) * IU3)];
+      box3 = [Math.round(b[0] * IU4), Math.round(b[1] * IU4), Math.round((b[2] - b[0]) * IU4), Math.round((b[3] - b[1]) * IU4)];
     }
     if (!box3) {
       plain.push(id);
@@ -114286,8 +114644,8 @@ Link '${target2}' to this file?`)) return null;
     }
     c.restore();
   }
-  var IU3 = 1e-4;
-  var MIN_R = 800 * IU3;
+  var IU4 = 1e-4;
+  var MIN_R = 800 * IU4;
   var LINE_PX = 4;
   var BASE = [255, 0, 0, 0.8];
   var WARNING_CURSOR = 'url("data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" shape-rendering="crispEdges"><path fill="#FFFFFF" d="M0 0h1v1h-1zM0 1h2v1h-2zM0 2h1v1h-1zM2 2h1v1h-1zM0 3h1v1h-1zM3 3h1v1h-1zM0 4h1v1h-1zM4 4h1v1h-1zM0 5h1v1h-1zM5 5h1v1h-1zM0 6h1v1h-1zM6 6h1v1h-1zM0 7h1v1h-1zM7 7h1v1h-1zM0 8h1v1h-1zM8 8h1v1h-1zM0 9h1v1h-1zM9 9h1v1h-1zM0 10h1v1h-1zM10 10h1v1h-1zM0 11h1v1h-1zM7 11h5v1h-5zM0 12h1v1h-1zM7 12h1v1h-1zM0 13h1v1h-1zM3 13h2v1h-2zM7 13h1v1h-1zM0 14h1v1h-1zM2 14h1v1h-1zM4 14h1v1h-1zM8 14h1v1h-1zM0 15h2v1h-2zM5 15h1v1h-1zM8 15h1v1h-1zM0 16h1v1h-1zM5 16h1v1h-1zM9 16h1v1h-1zM6 17h1v1h-1zM8 17h1v1h-1zM21 17h1v1h-1zM6 18h2v1h-2zM20 18h3v1h-3zM19 19h5v1h-5zM9 20h2v1h-2zM21 20h1v1h-1zM8 21h4v1h-4zM17 21h1v1h-1zM21 21h1v1h-1zM25 21h1v1h-1zM8 22h1v1h-1zM11 22h1v1h-1zM16 22h2v1h-2zM21 22h1v1h-1zM25 22h2v1h-2zM7 23h2v1h-2zM11 23h2v1h-2zM15 23h13v1h-13zM7 24h2v1h-2zM11 24h2v1h-2zM16 24h2v1h-2zM21 24h1v1h-1zM25 24h2v1h-2zM6 25h3v1h-3zM11 25h3v1h-3zM17 25h1v1h-1zM21 25h1v1h-1zM25 25h1v1h-1zM5 26h10v1h-10zM21 26h1v1h-1zM5 27h4v1h-4zM11 27h4v1h-4zM19 27h5v1h-5zM4 28h5v1h-5zM11 28h5v1h-5zM20 28h3v1h-3zM4 29h12v1h-12zM21 29h1v1h-1z"/><path fill="#000000" d="M1 2h1v1h-1zM1 3h2v1h-2zM1 4h3v1h-3zM1 5h4v1h-4zM1 6h5v1h-5zM1 7h6v1h-6zM1 8h7v1h-7zM1 9h8v1h-8zM1 10h9v1h-9zM1 11h6v1h-6zM1 12h6v1h-6zM1 13h2v1h-2zM5 13h2v1h-2zM1 14h1v1h-1zM5 14h3v1h-3zM6 15h2v1h-2zM6 16h3v1h-3zM21 16h1v1h-1zM7 17h1v1h-1zM20 17h1v1h-1zM22 17h1v1h-1zM19 18h1v1h-1zM23 18h1v1h-1zM18 19h1v1h-1zM24 19h1v1h-1zM17 20h1v1h-1zM19 20h2v1h-2zM22 20h2v1h-2zM25 20h1v1h-1zM16 21h1v1h-1zM18 21h1v1h-1zM20 21h1v1h-1zM22 21h1v1h-1zM24 21h1v1h-1zM26 21h1v1h-1zM9 22h2v1h-2zM15 22h1v1h-1zM18 22h3v1h-3zM22 22h3v1h-3zM27 22h1v1h-1zM9 23h2v1h-2zM14 23h1v1h-1zM28 23h1v1h-1zM9 24h2v1h-2zM15 24h1v1h-1zM18 24h3v1h-3zM22 24h3v1h-3zM27 24h1v1h-1zM9 25h2v1h-2zM16 25h1v1h-1zM18 25h1v1h-1zM20 25h1v1h-1zM22 25h1v1h-1zM24 25h1v1h-1zM26 25h1v1h-1zM17 26h1v1h-1zM19 26h2v1h-2zM22 26h2v1h-2zM25 26h1v1h-1zM9 27h2v1h-2zM18 27h1v1h-1zM24 27h1v1h-1zM9 28h2v1h-2zM19 28h1v1h-1zM23 28h1v1h-1zM20 29h1v1h-1zM22 29h1v1h-1zM21 30h1v1h-1z"/><path fill="#FF0000" d="M9 18h2v1h-2zM8 19h4v1h-4zM7 20h2v1h-2zM11 20h2v1h-2zM7 21h1v1h-1zM12 21h1v1h-1zM6 22h2v1h-2zM12 22h2v1h-2zM6 23h1v1h-1zM13 23h1v1h-1zM5 24h2v1h-2zM13 24h2v1h-2zM4 25h2v1h-2zM14 25h2v1h-2zM4 26h1v1h-1zM15 26h1v1h-1zM3 27h2v1h-2zM15 27h2v1h-2zM3 28h1v1h-1zM16 28h1v1h-1zM2 29h2v1h-2zM16 29h2v1h-2zM2 30h16v1h-16zM3 31h14v1h-14z"/></svg>') + '") 1 1, auto';
@@ -114344,7 +114702,7 @@ Link '${target2}' to this file?`)) return null;
   function collisionMarkers(doc2, nc, junctions) {
     const out2 = { junctions: [], breaks: [] };
     const ss = doc2.schSettings;
-    const jd = ss && typeof ss.junctionDiameter === "number" ? Math.max(ss.junctionDiameter, IU3) : 0.9144;
+    const jd = ss && typeof ss.junctionDiameter === "number" ? Math.max(ss.junctionDiameter, IU4) : 0.9144;
     const jr = Math.max(jd * 1.5, MIN_R);
     for (const p of junctions) {
       let first, diff = false, movedNet = false;
@@ -114940,11 +115298,11 @@ Link '${target2}' to this file?`)) return null;
     }
     const minRef = interval ? sheetNum * interval + 1 : start + 1;
     const firstFree = (r, multi) => {
-      const m = used.get(r.prefix), me2 = holder(r);
+      const m = used.get(r.prefix), me3 = holder(r);
       for (let n2 = minRef; ; n2++) {
         const hs = m && m.get(n2);
         if (!hs || !hs.length) return n2;
-        if (multi && hs.every((h3) => h3.lib === me2.lib && h3.value === me2.value && h3.unit !== me2.unit)) return n2;
+        if (multi && hs.every((h3) => h3.lib === me3.lib && h3.value === me3.value && h3.unit !== me3.unit)) return n2;
       }
     };
     const assigned = /* @__PURE__ */ new Map();
@@ -121861,20 +122219,20 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     routed.forEach((c, i) => node.set(c, ng + pieces3 + 1 + i));
     const owner = /* @__PURE__ */ new Map();
     for (const c of routed) {
-      const me2 = node.get(c);
+      const me3 = node.get(c);
       const first = this.mm(c.nodes[0]), last3 = this.mm(c.nodes[c.nodes.length - 1]);
-      for (const e of c.ends || [c.a, c.b]) if (c.stubs.some((st) => st[0] === e.p) || [first, last3].some((q4) => Math.hypot(q4[0] - e.p[0], q4[1] - e.p[1]) < 1e-3)) join(me2, e.grp || 0);
-      if (c.landed >= 0 && node.has(this.conns[c.landed])) join(me2, node.get(this.conns[c.landed]));
+      for (const e of c.ends || [c.a, c.b]) if (c.stubs.some((st) => st[0] === e.p) || [first, last3].some((q4) => Math.hypot(q4[0] - e.p[0], q4[1] - e.p[1]) < 1e-3)) join(me3, e.grp || 0);
+      if (c.landed >= 0 && node.has(this.conns[c.landed])) join(me3, node.get(this.conns[c.landed]));
       const cells2 = [];
       this.cellsOf(c, cells2, owner);
       for (const n2 of c.nodes) cells2.push(n2);
       for (const n2 of cells2) {
         const id = at4(n2.l, n2.ix, n2.iy);
-        if (id) join(me2, ng + id);
+        if (id) join(me3, ng + id);
       }
       for (const gi of c.viaCells) for (let l = 0; l < label.length; l++) {
         const id = at4(l, gi % W12, gi / W12 | 0);
-        if (id) join(me2, ng + id);
+        if (id) join(me3, ng + id);
       }
     }
     const count2 = /* @__PURE__ */ new Map();
@@ -122488,7 +122846,7 @@ async function autoroute(ctx, opts2 = {}, ui) {
   if (!doc2 || ctx.viewOnly || running) return empty2;
   const stamp2 = docStamp(doc2);
   const router = new Router(K11, P, doc2, settingsOf(ctx), opts2);
-  const me2 = running = { router, cancelled: false, done: false };
+  const me3 = running = { router, cancelled: false, done: false };
   let res;
   try {
     const it = router.run();
@@ -122505,10 +122863,10 @@ async function autoroute(ctx, opts2 = {}, ui) {
     }
     res = step.value;
   } finally {
-    me2.done = true;
-    if (running === me2) running = null;
+    me3.done = true;
+    if (running === me3) running = null;
   }
-  if (me2.cancelled) {
+  if (me3.cancelled) {
     if (ctx.requestRender) ctx.requestRender();
     return Object.assign(empty2, { cancelled: true, total: res.total });
   }
@@ -133773,8 +134131,8 @@ var ZoneFiller = class {
    */
   addCopperThievingPattern(z2, layer4, fill3) {
     const t = z2.thieving;
-    const IU3 = 1e6;
-    const iu3 = (mm4) => Math.round(mm4 * IU3);
+    const IU4 = 1e6;
+    const iu3 = (mm4) => Math.round(mm4 * IU4);
     const needsSize = t.pattern !== "hatch", needsWidth = t.pattern === "hatch";
     if (t.gap <= 0 || needsSize && t.size <= 0 || needsWidth && t.width <= 0) return [];
     if (!fill3.length) return [];
@@ -133804,7 +134162,7 @@ var ZoneFiller = class {
       for (let yy = yVoid; yy <= bottom + voidSize; yy += lineStride) for (let xx = xVoid; xx <= right + voidSize; xx += lineStride) {
         const sq = [[xx - hv, yy - hv], [xx + hv, yy - hv], [xx + hv, yy + hv], [xx - hv, yy + hv]];
         voids.push(shape(sq.map(([x, y]) => {
-          const p = [x / IU3, y / IU3];
+          const p = [x / IU4, y / IU4];
           return orient ? rot2(p[0], p[1], orient) : p;
         })));
       }
@@ -133814,7 +134172,7 @@ var ZoneFiller = class {
     const dotRadius = Math.max(Math.trunc(size2 / 2) - Math.trunc(minT / 2), 1);
     const sideLen = Math.max(size2 - minT, 1);
     const inset = (t.pattern === "squares" ? Math.trunc(sideLen / 2) : dotRadius) + 1;
-    region = inflate2(region, -inset / IU3, false, this.maxError);
+    region = inflate2(region, -inset / IU4, false, this.maxError);
     if (!region.length) return [];
     let xStart = left - cmod(left, dotStride) + ox, yStart = top2 - cmod(top2, dotStride) + oy;
     while (xStart > left) xStart -= dotStride;
@@ -133830,13 +134188,13 @@ var ZoneFiller = class {
     for (let yy = yStart; yy <= bottom + dotRadius; yy += dotStride, row3++) {
       const rowOff = t.stagger && row3 & 1 ? Math.trunc(dotStride / 2) : 0;
       for (let xx = xStart + rowOff; xx <= right + dotRadius; xx += dotStride) {
-        const cx = xx / IU3, cy = yy / IU3;
+        const cx = xx / IU4, cy = yy / IU4;
         if (!inside2(cx, cy)) continue;
         let pts;
         if (t.pattern === "squares") {
-          const h3 = sideLen / 2 / IU3;
+          const h3 = sideLen / 2 / IU4;
           pts = [[cx - h3, cy - h3], [cx + h3, cy - h3], [cx + h3, cy + h3], [cx - h3, cy + h3]];
-        } else pts = circlePoints(cx, cy, dotRadius / IU3 + this.maxError, this.maxError);
+        } else pts = circlePoints(cx, cy, dotRadius / IU4 + this.maxError, this.maxError);
         stamps.push(shape(orient ? pts.map((p) => rot2(p[0], p[1], orient)) : pts));
       }
     }

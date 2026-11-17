@@ -7,6 +7,7 @@ mod downloads;
 mod kicadlib;
 mod modelgen;
 mod auth;
+mod chat;
 mod compact;
 mod doc_actor;
 mod nonkicad_import;
@@ -355,6 +356,9 @@ async fn main() -> anyhow::Result<()> {
             get(http::list_comments).post(http::create_comment),
         )
         .route("/api/projects/{id}/comments", get(http::list_project_comments))
+        .route("/api/projects/{id}/chat", get(chat::list_messages).post(chat::post_message))
+        .route("/api/projects/{id}/chat/read", post(chat::mark_messages_read))
+        .route("/api/chat/{id}", axum::routing::patch(chat::edit_message).delete(chat::delete_message))
         .route(
             "/api/comments/{id}",
             axum::routing::patch(http::update_comment).delete(http::delete_comment),

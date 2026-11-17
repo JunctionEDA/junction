@@ -1,6 +1,7 @@
 // editor — GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/domains/pcb/editor/index.ts — edit these modules, not the bundle).
 import { state, store } from "./appstore";
 import { noteCommentMsg } from "./comments";
+import { noteChatMsg } from "./chat";
 import { applyChanges, applyRemoteChanges, refreshDocs, renderObjects, setDocFromText } from "./doc";
 import { loadSheets as loadHierarchySheets } from "./panels/hierarchy";
 import { applyFollowWeb, peerName, renderPeers, startPresenceKeepalive } from "./peers";
@@ -156,6 +157,7 @@ export async function connect() {
       if (was !== msg.role) toast(msg.role === "editor" ? "You can now edit this project" : msg.role === "commenter" ? "You can now comment on this project, but not change it" : "You now have view-only access to this project", 4500);
     }
     if (msg.type === "comment") noteCommentMsg(msg);
+    if (msg.type === "chat") noteChatMsg(msg);              // the project chat (chat.ts)
     if (msg.type === "proposal") noteProposalMsg(msg);       // an assistant proposed a change, or somebody decided one (proposals.ts)
     if (msg.type === "versions") onVersionsNotice(msg);       // somebody saved, restored, branched or merged
     // a document of the project was saved explicitly (the Footprint Editor's Save): fpedit.ts clears its '*', library caches drop the file

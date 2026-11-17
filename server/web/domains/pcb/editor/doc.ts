@@ -1,6 +1,7 @@
 // editor — GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/domains/pcb/editor/index.ts — edit these modules, not the bundle).
 import { KICAD_LAYERS, SCH_LAYERS, setStatusBar, setToggle, state, store } from "./appstore";
 import { centerOn, closeThread, drawComments, loadComments, renderThreads } from "./comments";
+import { leaveCursorChat, loadChat } from "./chat";
 import { loadProposals } from "./proposals";
 import { $ } from "./dom";
 import { pruneSelection, resetInteraction } from "./gestures";
@@ -523,7 +524,7 @@ export function leaveDoc() {
   E.kdoc = null; E.loadedText = null; E.layersSeeded = false; canvas.style.display = "none"; { const cc = document.getElementById("cursorCanvas"); if (cc) cc.style.display = "none"; } if (E.renderReq) { cancelAnimationFrame(E.renderReq); E.renderReq = 0; }
   releaseLayers();   // the cached pass and the zoom levels of the document left
   peersG.replaceChildren(); clearPeerCursors(); selG.replaceChildren(); dragG.replaceChildren(); cmtG.replaceChildren();
-  closeThread();
+  closeThread(); leaveCursorChat();
   store.slice("document", { layers: [], hiddenLayers: [], copperLayers: [], items: [], sheets: [], hasDoc: false, notice: null });
   store.set({ comments: [], otherComments: [], openThread: null, peers: { list: [], follow: null } });
   renderProps();
@@ -549,6 +550,7 @@ export async function openDoc(doc: DocEntry) {
   const docId = doc.docId;
   setupGridControls();
   loadComments();
+  void loadChat();
   void loadProposals();
   // The document itself, drawn here and kept current by the op stream; the
   // desktop-pushed render is only a fallback when the file can't be read.
