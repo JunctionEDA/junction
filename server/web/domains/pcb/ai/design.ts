@@ -430,7 +430,7 @@ export function getSelection(): unknown {
 }
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + ` … (${s.length - n} more characters)` : s);
 
-export async function getItems(input: { doc?: string; kinds?: string[]; ids?: string[]; near?: { x: number; y: number; radius: number }; net?: string }): Promise<unknown> {
+export async function getItems(input: { doc?: string; kinds?: string[]; ids?: string[]; near?: { x: number; y: number; radius: number }; net?: string; offset?: number }): Promise<unknown> {
   const { doc, path } = await resolveDoc(input.doc); const k = K();
   if (!input.kinds && !input.ids && !input.near && !input.net) throw new ToolError("Give at least one of kinds, ids, near or net.");
   const kinds = input.kinds ? new Set(input.kinds) : null; const ids = input.ids ? new Set(input.ids) : null; const near = input.near;
@@ -441,7 +441,7 @@ export async function getItems(input: { doc?: string; kinds?: string[]; ids?: st
     if (near) { const b = it.bbox; if (!b || b[2] < near.x - near.radius || b[0] > near.x + near.radius || b[3] < near.y - near.radius || b[1] > near.y + near.radius) continue; }
     if (input.net) { if (!NT) continue; const own = NT.key(PCB().netOf(it.node)); const pad = it.kind === "footprint" && k.kids(it.node, "pad").some((p: any) => NT.key(PCB().netOf(p)) === input.net); if (own !== input.net && !pad) continue; }
     total++;
-    if (rows.length >= 150 || budget <= 0) continue;
+    if (total <= (input.offset || 0) || rows.length >= 150 || budget <= 0) continue;
     // a footprint or symbol is mostly drawing data: its fields say more in less
     const big = it.kind === "footprint" || it.kind === "symbol" || it.kind === "zone";
     const row: any = { id: it.id, kind: it.kind }; if (it.ref) row.ref = it.ref; if (it.bbox) row.bbox = it.bbox.map(r3);
@@ -449,7 +449,7 @@ export async function getItems(input: { doc?: string; kinds?: string[]; ids?: st
     row.sexpr = clip(k.serialize(it.node), big && !ids ? 400 : 4000); budget -= row.sexpr.length;
     rows.push(row);
   }
-  return { document: path, count: total, items: rows, truncated: total > rows.length ? `showing ${rows.length} of ${total}; filter more narrowly` : undefined };
+  return { document: path, count: total, items: rows, truncated: total > rows.length + (input.offset || 0) ? `showing ${rows.length} of ${total} from ${input.offset || 0}; filter more narrowly or pass offset` : undefined };
 }
 
 export async function findDatasheets(input: { doc?: string; refs?: string[] }): Promise<unknown> {

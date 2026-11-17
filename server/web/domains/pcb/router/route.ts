@@ -193,7 +193,9 @@ export class Router {
     for (const c of nl.conductors) {
       if (c.kind === "zone") continue;
       const layers = Array.from(c.layers as Set<string>).map((l) => copper.indexOf(l)).filter((i) => i >= 0); if (!layers.length) continue;
-      push({ net: c.net || "", layers, shape: c.shape, clr: P.netClearance(s, c.net), pad: c.kind === "pad", thru: L > 1 && layers.length === L && (c.kind === "pad" || c.kind === "via") ? [c.anchors[0][0], c.anchors[0][1]] : undefined });
+      // a via's drilled hole needs the hole clearance from other nets' copper, which beats the copper clearance when the ring is thin
+      const hole = c.kind === "via" && s.holeClearance && c.size && c.drill ? s.holeClearance + HOLE_SLACK - (c.size - c.drill) / 2 : 0;
+      push({ net: c.net || "", layers, shape: c.shape, clr: Math.max(P.netClearance(s, c.net), hole), pad: c.kind === "pad", thru: L > 1 && layers.length === L && (c.kind === "pad" || c.kind === "via") ? [c.anchors[0][0], c.anchors[0][1]] : undefined });
     }
     for (const it of doc.items.values()) if (it.kind === "footprint") for (const p of P.padsOf(it)) if (p.type === "np_thru_hole") {
       const d = K.kid(p.node, "drill"); const nums: number[] = d ? d.slice(1).filter((v: any) => typeof v === "number") : [];
