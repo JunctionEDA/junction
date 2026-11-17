@@ -863,7 +863,7 @@ function layout(text3, italic) {
   const strokes = [];
   const tilt = italic ? ITALIC_TILT : 0;
   let cursor = 0;
-  const run = (str9, sub2, sup) => {
+  const run2 = (str9, sub2, sup) => {
     const k = sub2 || sup ? SUPER_SUB_SIZE_MULTIPLIER : 1;
     const dy = sub2 ? k * SUB_HEIGHT_OFFSET : sup ? -k * SUPER_HEIGHT_OFFSET : 0;
     const x0 = cursor;
@@ -898,7 +898,7 @@ function layout(text3, italic) {
   const node = (n2, sub2, sup) => {
     const start = cursor;
     const s2 = sub2 || n2.kind === "_", p2 = sup || n2.kind === "^";
-    if (n2.text) run(n2.text, s2, p2);
+    if (n2.text) run2(n2.text, s2, p2);
     for (const c of n2.children) node(c, s2, p2);
     if (n2.kind === "~") strokes.push([start + 0.1, -fontMetrics.overbarHeight, cursor - 0.1, -fontMetrics.overbarHeight]);
   };
@@ -1108,9 +1108,9 @@ function urlRunBox(g2, start, end) {
   const src = g2.raw || g2.text;
   const sx = g2.sizeX && g2.sizeX > 0 ? g2.sizeX : g2.size;
   const shown2 = (s2) => parseMarkup(s2).text;
-  const W12 = textWidth(shown2(src), sx, 0), lead = shown2(src.slice(0, start)), run = shown2(src.slice(0, end));
+  const W12 = textWidth(shown2(src), sx, 0), lead = shown2(src.slice(0, start)), run2 = shown2(src.slice(0, end));
   const left = g2.h === "left" ? 0 : g2.h === "right" ? -W12 : -W12 / 2;
-  const x0 = left + (lead ? textWidth(lead, sx, 0) + 0.2 * sx : 0), x1 = left + textWidth(run, sx, 0);
+  const x0 = left + (lead ? textWidth(lead, sx, 0) + 0.2 * sx : 0), x1 = left + textWidth(run2, sx, 0);
   const base2 = g2.v === "top" ? g2.size : g2.v === "bottom" ? 0 : g2.size / 2;
   return { x0, x1, y0: base2 - g2.size * 1.05, y1: base2 + g2.size * 0.3, base: base2 };
 }
@@ -6705,11 +6705,11 @@ function render(doc2, ctx, view, opts2) {
     setAlpha(alpha);
     const t = g2.t;
     if (t === "text") {
-      const roll = rollGeoms !== null && rollGeoms.has(g2), run = roll && opts2.rolloverRun ? opts2.rolloverRun : null;
-      if (roll && !run) color2 = SCH.hovered;
+      const roll = rollGeoms !== null && rollGeoms.has(g2), run2 = roll && opts2.rolloverRun ? opts2.rolloverRun : null;
+      if (roll && !run2) color2 = SCH.hovered;
       drawText(ctx, sketched && sketched.has(g2) ? Object.assign({}, g2, { w: minW }) : g2, s2, doc2.type, minW, color2, base2, flip, bg || PCB_BG);
-      if (roll && !run) drawUnderline(ctx, g2, color2, minW, base2);
-      else if (run && base2) drawRunHover(ctx, g2, run, s2, doc2.type, minW, base2, bg || PCB_BG);
+      if (roll && !run2) drawUnderline(ctx, g2, color2, minW, base2);
+      else if (run2 && base2) drawRunHover(ctx, g2, run2, s2, doc2.type, minW, base2, bg || PCB_BG);
       curStroke = curFill = null;
       curWidth = -1;
       curCap = "round";
@@ -7959,8 +7959,8 @@ function drawTextStroke(ctx, g2, minW, color2, base2, flip, bgColor) {
   }
   drawStrokeText(ctx, base2, spec, color2, minW);
 }
-function drawRunHover(ctx, g2, run, s2, docType, minW, base2, bg) {
-  const b = urlRunBox(g2, run.start, run.end);
+function drawRunHover(ctx, g2, run2, s2, docType, minW, base2, bg) {
+  const b = urlRunBox(g2, run2.start, run2.end);
   if (!(b.x1 > b.x0)) return;
   const a = -(g2.rot || 0) * Math.PI / 180, c = Math.cos(a), sn = Math.sin(a), mx = g2.mirror ? -1 : 1;
   const local = () => ctx.setTransform(base2[0] * c * mx, base2[3] * sn * mx, -base2[0] * sn, base2[3] * c, base2[0] * g2.x + base2[4], base2[3] * g2.y + base2[5]);
@@ -28688,11 +28688,11 @@ var require_pcb_tools = __commonJS({
         const font3 = held.font;
         const laid = { contours: [], bars: [], width: 0 };
         let x = 0;
-        for (const run2 of runs2(line3)) {
-          const small = run2.sup || run2.sub, k = small ? SUPERSUB2 : 1;
+        for (const run22 of runs2(line3)) {
+          const small = run22.sup || run22.sub, k = small ? SUPERSUB2 : 1;
           const sx = sizeX * EM2 * k, sy = size2 * EM2 * k;
-          const dy = run2.sub ? size2 * SUPERSUB2 * SUB_DROP2 : run2.sup ? -size2 * SUPERSUB2 * SUPER_RISE2 : 0;
-          const glyphs = glyphsOf2(font3, run2.text), start = x, script = scriptOf2(run2.text);
+          const dy = run22.sub ? size2 * SUPERSUB2 * SUB_DROP2 : run22.sup ? -size2 * SUPERSUB2 * SUPER_RISE2 : 0;
+          const glyphs = glyphsOf2(font3, run22.text), start = x, script = scriptOf2(run22.text);
           for (let i = 0; i < glyphs.length; i++) {
             const g2 = glyphs[i];
             for (const c of contours2(g2)) laid.contours.push(c.map(([gx, gy]) => [x + (slant ? SQUEEZE2 * gx - SLANT2 * gy : gx) * sx, dy + gy * sy]));
@@ -28700,7 +28700,7 @@ var require_pcb_tools = __commonJS({
             if (i + 1 < glyphs.length) adv += kerning2(held, script, g2, glyphs[i + 1]) / font3.unitsPerEm;
             x += adv * sx;
           }
-          if (run2.over && x > start) laid.bars.push([start + sizeX * 0.1, -size2 * OVERBAR2, x - sizeX * 0.1, -size2 * OVERBAR2]);
+          if (run22.over && x > start) laid.bars.push([start + sizeX * 0.1, -size2 * OVERBAR2, x - sizeX * 0.1, -size2 * OVERBAR2]);
         }
         laid.width = x;
         return laid;
@@ -40513,7 +40513,7 @@ var require_pcb_tools = __commonJS({
         if (along2 <= 1e-6) return { pts: [gw.mid.slice()], reached: samePt(goal, gw.mid) };
         const lead = Math.abs((goal[0] - gw.mid[0]) * gw.n[0] + (goal[1] - gw.mid[1]) * gw.n[1]);
         if (lead <= h3) goal = rp(vadd(gw.mid, vmul(gw.d, along2)));
-        const run2 = (from) => {
+        const run22 = (from) => {
           const a = legPts(from, goal, false), b = legPts(from, goal, true);
           const score = (p) => p.length > 1 ? dirAngle(gw.dIdx, dir8(p[0], p[1])) : 0;
           let first = rt.diagFirst ? b : a;
@@ -40521,12 +40521,12 @@ var require_pcb_tools = __commonJS({
           if (mode2 === RM_MARK || !O) return { pts: first, reached: true };
           return walkHead(O, from, goal, R2, first === b, gw.dIdx);
         };
-        let r = run2(gw.mid);
+        let r = run22(gw.mid);
         const turn = r.pts.length > 1 ? dirAngle(gw.dIdx, dir8(r.pts[0], r.pts[1])) : 0;
         if (turn >= 3) return { pts: [gw.mid.slice()], reached: false };
         if (turn > 0) {
           const ahead = rp(vadd(gw.mid, vmul(gw.d, h3 * Math.tan(turn * Math.PI / 8) + 1e-3)));
-          const r26 = run2(ahead);
+          const r26 = run22(ahead);
           r = { pts: simplifyPts([gw.mid.slice()].concat(r26.pts)), reached: r26.reached };
         }
         return r;
@@ -47087,8 +47087,8 @@ Press <esc> to cancel all; double-click to finish`;
       }
       var VIA_SIZES = [[0.6, 0.3], [0.8, 0.4], [1, 0.5], [1.2, 0.6], [1.6, 0.8]];
       var ACTIONS2 = {};
-      function act(id, label, key3, run2, extra) {
-        ACTIONS2[id] = Object.assign({ id, label, key: key3, run: run2 }, extra || {});
+      function act(id, label, key3, run22, extra) {
+        ACTIONS2[id] = Object.assign({ id, label, key: key3, run: run22 }, extra || {});
         return ACTIONS2[id];
       }
       var alias2 = (id, of, label, key3) => {
@@ -47243,14 +47243,14 @@ Press <esc> to cancel all; double-click to finish`;
       act("selectConnection", "Select/Expand Connection", "U", (ctx) => {
         const ids = needSel(ctx, "Select a track first");
         if (!ids) return true;
-        const run2 = connectedRun(ctx.doc, ids);
-        if (!run2.size) {
+        const run22 = connectedRun(ctx.doc, ids);
+        if (!run22.size) {
           ctx.toast("No tracks in the selection");
           return true;
         }
-        for (const id of ids) run2.add(id);
-        applySelection(ctx, run2);
-        ctx.toast(run2.size > ids.size ? `Selected the connected run (${run2.size} items)` : "Nothing else connected");
+        for (const id of ids) run22.add(id);
+        applySelection(ctx, run22);
+        ctx.toast(run22.size > ids.size ? `Selected the connected run (${run22.size} items)` : "Nothing else connected");
         return true;
       });
       function unconnectedNeighbours(ctx) {
@@ -47425,13 +47425,13 @@ Press <esc> to cancel all; double-click to finish`;
         const sel = requestSelection(ctx, { rerun: (c) => runAction2("moveExactly", c) });
         if (!sel) return true;
         const ids = sel.ids;
-        const run2 = (v) => {
+        const run22 = (v) => {
           commitSel(ctx, moveExactChanges(ctx.doc, ids, { dx: v.dx, dy: v.dy, rotation: v.rotation, about: v.about }), "Move Exactly");
           if (sel.hover) applySelection(ctx, []);
         };
         if (routingDialogs.moveExact) {
           const items = ids.map((id) => ctx.doc.items.get(id)).filter(Boolean);
-          routingDialogs.moveExact({ single: ids.length === 1, bbox: bboxUnion(items) }, run2);
+          routingDialogs.moveExact({ single: ids.length === 1, bbox: bboxUnion(items) }, run22);
           return true;
         }
         return openForm({
@@ -47442,7 +47442,7 @@ Press <esc> to cancel all; double-click to finish`;
             { k: "rotation", label: "Rotate:", type: "num", value: 0, unit: "deg" },
             { k: "about", label: "", type: "select", value: ids.length > 1 ? "center" : "anchor", options: [[ids.length > 1 ? "center" : "anchor", ids.length > 1 ? "Rotate around selection center" : "Rotate around item anchor"]] }
           ],
-          apply: (v) => run2({ dx: num0(v.dx, 0), dy: num0(v.dy, 0), rotation: num0(v.rotation, 0), about: v.about === "anchor" ? "anchor" : "center" })
+          apply: (v) => run22({ dx: num0(v.dx, 0), dy: num0(v.dy, 0), rotation: num0(v.rotation, 0), about: v.about === "anchor" ? "anchor" : "center" })
         });
       });
       alias2("moveExact", "moveExactly");
@@ -47524,12 +47524,12 @@ Press <esc> to cancel all; double-click to finish`;
         const ids = sel.ids;
         const items = ids.map((id) => ctx.doc.items.get(id)).filter(Boolean);
         const a = topLeftAnchor(items);
-        const run2 = (ref, dx, dy) => {
+        const run22 = (ref, dx, dy) => {
           commitSel(ctx, positionRelativeChanges(ctx.doc, ids, ref, dx, dy), "Position Relative");
           if (sel.hover) applySelection(ctx, []);
         };
         if (routingDialogs.positionRelative) {
-          routingDialogs.positionRelative({ ctx, selAnchor: [a[0], a[1]] }, run2);
+          routingDialogs.positionRelative({ ctx, selAnchor: [a[0], a[1]] }, run22);
           return true;
         }
         const fps = Array.from(ctx.doc.items.values()).filter((it) => it.kind === "footprint" && !ids.includes(it.id)).sort((p, q4) => (p.ref || "").localeCompare(q4.ref || "", void 0, { numeric: true }));
@@ -47544,7 +47544,7 @@ Press <esc> to cancel all; double-click to finish`;
           ],
           apply: (v) => {
             const ref = v.ref === "origin" ? [0, 0] : v.ref === "point" ? [num0(v.px, 0), num0(v.py, 0)] : anchorOf(ctx.doc.items.get(v.ref));
-            run2(ref, num0(v.dx, 0), num0(v.dy, 0));
+            run22(ref, num0(v.dx, 0), num0(v.dy, 0));
           }
         });
       });
@@ -47706,19 +47706,19 @@ Press <esc> to cancel all; double-click to finish`;
         if (!canEdit2(ctx)) return true;
         const doc2 = ctx.doc;
         const copper = copperOf(doc2);
-        const run2 = (map) => {
+        const run22 = (map) => {
           const ch = swapLayerChanges(doc2, map);
           if (ch.length) ctx.commit(ch, "Swap Layers");
           ctx.requestRender();
         };
         if (routingDialogs.swapLayers) {
-          routingDialogs.swapLayers({ copper }, run2);
+          routingDialogs.swapLayers({ copper }, run22);
           return true;
         }
         return openForm({ title: "Swap Layers", width: 380, fields: copper.map((l) => ({ k: l, label: l, type: "select", value: l, options: copper })), apply: (v) => {
           const map = {};
           for (const l of copper) if (v[l] && v[l] !== l) map[l] = v[l];
-          run2(map);
+          run22(map);
         } });
       });
       function swapLayerChanges(doc2, map) {
@@ -48139,10 +48139,10 @@ Press <esc> to cancel all; double-click to finish`;
       act("deleteFull", "Delete Full Track", "Shift+Delete", (ctx) => {
         const ids = selectionOrToast(ctx, "Select a track first");
         if (!ids) return true;
-        const run2 = connectedRun(ctx.doc, ids);
-        for (const id of ids) run2.add(id);
+        const run22 = connectedRun(ctx.doc, ids);
+        for (const id of ids) run22.add(id);
         S2.sel.clear();
-        return commitSel(ctx, deleteChanges(ctx.doc, Array.from(run2)), "delete full track");
+        return commitSel(ctx, deleteChanges(ctx.doc, Array.from(run22)), "delete full track");
       });
       act("runDRC", "Design Rules Checker\u2026", "", (ctx) => {
         bind(ctx);
@@ -51433,44 +51433,44 @@ Press <esc> to cancel all; double-click to finish`;
         return limited ? `This footprint is referenced by more than ${n2} symbols` : `This footprint is referenced by ${n2} symbols`;
       }
       var fpUsersApi = { footprintUsers, usersStatus, filterMatches, referenceMatches, pinCount, MAX_USER_RESULTS };
-      var run = null;
+      var run2 = null;
       var enumParams = null;
       function setEnumParams(p) {
         enumParams = p;
       }
-      var enumRunning = () => !!run;
+      var enumRunning = () => !!run2;
       var escHooked = false;
       function hookEsc() {
         if (escHooked || typeof document === "undefined") return;
         escHooked = true;
         document.addEventListener("keydown", (ev) => {
-          if (ev.key === "Escape" && run) run.cancelled = true;
+          if (ev.key === "Escape" && run2) run2.cancelled = true;
         }, true);
       }
       function popup2(ctx, at4) {
-        if (!run) return;
-        S2.popup = { text: enumPopup(run.st), at: at4.slice(), until: Number.MAX_SAFE_INTEGER };
+        if (!run2) return;
+        S2.popup = { text: enumPopup(run2.st), at: at4.slice(), until: Number.MAX_SAFE_INTEGER };
         ctx.requestRender();
       }
       function preview3(ctx) {
-        if (!run || !ctx.doc) return;
+        if (!run2 || !ctx.doc) return;
         const ch = [];
-        for (const [id, label] of run.st.numbers) {
+        for (const [id, label] of run2.st.numbers) {
           const it = ctx.doc.items.get(id);
           if (!it) continue;
-          if (!run.orig.has(id)) run.orig.set(id, clone5(it.node));
+          if (!run2.orig.has(id)) run2.orig.set(id, clone5(it.node));
           if (String(it.node[1]) === label) continue;
           const n2 = clone5(it.node);
           n2[1] = label;
           ch.push(replacedChange(it, n2));
         }
         if (ch.length && ctx.applyLocal) ctx.applyLocal(ch);
-        ctx.setHighlight(new Set(run.st.picked));
+        ctx.setHighlight(new Set(run2.st.picked));
       }
       function restore(ctx) {
-        if (!run || !ctx.doc) return;
+        if (!run2 || !ctx.doc) return;
         const ch = [];
-        for (const [id, node] of run.orig) {
+        for (const [id, node] of run2.orig) {
           const it = ctx.doc.items.get(id);
           if (it) ch.push(replacedChange(it, node));
         }
@@ -51479,17 +51479,17 @@ Press <esc> to cancel all; double-click to finish`;
       function enumActivate(ctx) {
         hookEsc();
         const p = enumParams || { start: 1, step: 1, prefix: "" };
-        run = { st: enumBegin(p.prefix, p.start, p.step), orig: /* @__PURE__ */ new Map(), last: null, cancelled: false, clickT: 0, clickAt: null };
+        run2 = { st: enumBegin(p.prefix, p.start, p.step), orig: /* @__PURE__ */ new Map(), last: null, cancelled: false, clickT: 0, clickAt: null };
         S2.sel.clear();
         S2.padSel = null;
         if (ctx.setStatus) ctx.setStatus("Renumber Pads");
         popup2(ctx, ctx.cursor || [0, 0]);
       }
       function enumLeave(ctx, commit) {
-        if (!run) return;
-        const r = run;
+        if (!run2) return;
+        const r = run2;
         restore(ctx);
-        run = null;
+        run2 = null;
         S2.popup = null;
         ctx.setHighlight(null);
         if (commit && !r.cancelled && ctx.doc) {
@@ -51500,26 +51500,26 @@ Press <esc> to cancel all; double-click to finish`;
         ctx.requestRender();
       }
       function enumDown(ev, mm5, ctx) {
-        if (!run || !ctx.doc) return;
-        const now2 = Date.now(), at4 = run.clickAt;
-        const dbl = (ev.detail || 0) >= 2 || !!at4 && now2 - run.clickT < DBL_MS && Math.hypot(mm5[0] - at4[0], mm5[1] - at4[1]) < 0.3;
-        run.clickT = now2;
-        run.clickAt = mm5.slice();
+        if (!run2 || !ctx.doc) return;
+        const now2 = Date.now(), at4 = run2.clickAt;
+        const dbl = (ev.detail || 0) >= 2 || !!at4 && now2 - run2.clickT < DBL_MS && Math.hypot(mm5[0] - at4[0], mm5[1] - at4[1]) < 0.3;
+        run2.clickT = now2;
+        run2.clickAt = mm5.slice();
         if (dbl) {
           enumLeave(ctx, true);
           ctx.setTool("select");
           return;
         }
-        run.last = mm5.slice();
-        if (enumPick(run.st, ctx.doc, padsAt(ctx.doc, mm5), true)) preview3(ctx);
+        run2.last = mm5.slice();
+        if (enumPick(run2.st, ctx.doc, padsAt(ctx.doc, mm5), true)) preview3(ctx);
         popup2(ctx, mm5);
       }
       function enumMove(ev, mm5, ctx) {
-        if (!run || !ctx.doc) return;
-        if (ev && (ev.buttons || 0) & 1 && run.last) {
-          if (enumPick(run.st, ctx.doc, padsAlong(ctx.doc, run.last, mm5), false)) preview3(ctx);
+        if (!run2 || !ctx.doc) return;
+        if (ev && (ev.buttons || 0) & 1 && run2.last) {
+          if (enumPick(run2.st, ctx.doc, padsAlong(ctx.doc, run2.last, mm5), false)) preview3(ctx);
         }
-        run.last = ev && (ev.buttons || 0) & 1 ? mm5.slice() : null;
+        run2.last = ev && (ev.buttons || 0) & 1 ? mm5.slice() : null;
         popup2(ctx, mm5);
       }
       var EPSILON2 = 5e-4;
@@ -52822,7 +52822,7 @@ Press <esc> to cancel all; double-click to finish`;
           const l = closedShapeLoop(it);
           return l ? [l.map(([x, y]) => ({ x, y }))] : [];
         };
-        const run2 = (list) => {
+        const run22 = (list) => {
           let work2 = paths(list[0]);
           for (const it of list.slice(1)) {
             const p = paths(it);
@@ -52830,13 +52830,13 @@ Press <esc> to cancel all; double-click to finish`;
           }
           return work2;
         };
-        let result = run2(order);
+        let result = run22(order);
         if (op === "subtractPolygons" && !result.length) {
           const area42 = (it) => {
             const b = it.bbox;
             return b ? (b[2] - b[0]) * (b[3] - b[1]) : 0;
           };
-          result = run2(items.slice().sort((a, b) => area42(b) - area42(a)));
+          result = run22(items.slice().sort((a, b) => area42(b) - area42(a)));
         }
         const donor = order[0].node;
         const changes = order.map((it) => removedChange(it)), select2 = [];
@@ -76461,11 +76461,11 @@ function coversGrown(L, view, r, W12, H) {
 function scheduleIdle() {
   if (idleHandle) return;
   const ric = window.requestIdleCallback;
-  const run = (d) => {
+  const run2 = (d) => {
     idleHandle = 0;
     idleStep(d || null);
   };
-  idleHandle = ric ? ric(run, { timeout: 200 }) : window.setTimeout(run, 20);
+  idleHandle = ric ? ric(run2, { timeout: 200 }) : window.setTimeout(run2, 20);
 }
 function logSlice(log, rows3, ms) {
   return { rows: rows3, ms, prev: log ? { rows: log.rows, ms: log.ms } : null };
@@ -90536,7 +90536,7 @@ function unfoldPopup(entries, bus, at4, title) {
   if (!U) return [];
   if (!bus) return [{ label: "No bus selected", disabled: true }];
   if (!entries.length) return [{ label: "Bus has no members", disabled: true }];
-  const run = (net) => () => {
+  const run2 = (net) => () => {
     U.unfoldAction(toolCtx3(), { bus, member: net, at: at4 });
     requestRender();
   };
@@ -90545,7 +90545,7 @@ function unfoldPopup(entries, bus, at4, title) {
   const stem2 = (n2) => /[+\-PN]$/.test(n2) ? n2.slice(0, -1) : null;
   for (const e of entries) {
     if (!e.bus) {
-      out2.push({ label: U.printBusForUI(e.name), run: run(e.name) });
+      out2.push({ label: U.printBusForUI(e.name), run: run2(e.name) });
       continue;
     }
     let sub2;
@@ -90571,8 +90571,8 @@ function unfoldPopup(entries, bus, at4, title) {
           diff.set(s2, d);
           sub2.sub.push(d);
         }
-        d.sub.push({ label: U.printBusForUI(n2), run: run(n2) });
-      } else sub2.sub.push({ label: U.printBusForUI(n2), run: run(n2) });
+        d.sub.push({ label: U.printBusForUI(n2), run: run2(n2) });
+      } else sub2.sub.push({ label: U.printBusForUI(n2), run: run2(n2) });
     }
   }
   return out2;
@@ -91597,7 +91597,7 @@ function show(fab, ctx, focus) {
   const all2 = fab.plottableLayers(doc2);
   const colors = /* @__PURE__ */ new Map();
   for (const l of app2.get().document.layers || []) colors.set(l.key, l.color);
-  let pkg = null, selected = "", run = 0, timer3 = 0;
+  let pkg = null, selected = "", run2 = 0, timer3 = 0;
   let preset = fab.presetById(rememberedPreset());
   const copper = doc2.copper && doc2.copper.length ? doc2.copper : ["F.Cu", "B.Cu"];
   let layers = new Set(preset.layers(all2, copper));
@@ -91676,14 +91676,14 @@ function show(fab, ctx, focus) {
     }, 120);
   }
   async function generate() {
-    const mine = ++run;
+    const mine = ++run2;
     view.replaceChildren(h2("div", { class: "empty" }, h2("span", { class: "spinner" }), "Generating the files"));
     await new Promise((r) => setTimeout(r, 0));
     let made;
     try {
       made = await fab.buildPackage(ctx, options());
     } catch (e) {
-      if (mine !== run) return;
+      if (mine !== run2) return;
       pkg = null;
       files.replaceChildren();
       view.replaceChildren(h2("div", { class: "empty" }, "The files could not be generated"));
@@ -91691,7 +91691,7 @@ function show(fab, ctx, focus) {
       console.warn(e);
       return;
     }
-    if (mine !== run) return;
+    if (mine !== run2) return;
     pkg = made;
     if (!pkg.files.some((f2) => f2.name === selected)) {
       const first = pkg.files.find((f2) => f2.kind === focus) || pkg.files[0];
@@ -93086,7 +93086,7 @@ function openDrc(ctx) {
       }
     } })));
   };
-  const run = async () => {
+  const run2 = async () => {
     const t0 = Date.now();
     const tick = setInterval(() => {
       status.textContent = `Elapsed: ${Math.round((Date.now() - t0) / 1e3)} s`;
@@ -93249,7 +93249,7 @@ function openDrc(ctx) {
       refresh();
     },
     ok() {
-      void run();
+      void run2();
       return false;
     },
     cancel() {
@@ -94374,7 +94374,7 @@ async function openOdbpp() {
   const origin = selectField(pref.origin, [[0, "Absolute coordinates"], [1, "Drill/place file origin"], [2, "Grid origin"]], { key: "origin" });
   out2.input.title = "Output archive or directory";
   const read3 = () => ({ inch: units.get() === 1, precision: clamp(), compress: compress.get(), origin: origin.get(), product: product.get().trim() });
-  async function run(close) {
+  async function run2(close) {
     const p = read3();
     savePrefs(KEY6, p);
     const name = out2.get().trim().replace(/\\/g, "/").split("/").pop() || `${board3}-odb`;
@@ -94411,7 +94411,7 @@ ${e instanceof Error ? e.message : String(e)}`);
     buttons: [
       { label: "Close", close: true, id: "close" },
       { label: "Export", primary: true, isDefault: true, id: "export", fn: () => {
-        void run(closeDlg);
+        void run2(closeDlg);
       } }
     ],
     cancel: () => savePrefs(KEY6, read3()),
@@ -94565,7 +94565,7 @@ async function openIpc2581() {
     }, { key: "bomDlg" });
   });
   const read3 = () => ({ inch: units.get() === 1, precision: precision.get(), rev: version3.get(), compress: compress.get(), mode: mode(), sections, anonymize: netNames2.get() === 1, omitRefDes: refDes.get() === 1, ...bomFields });
-  async function run() {
+  async function run2() {
     const p = read3();
     savePrefs(KEY7, p);
     const lines = [];
@@ -94669,7 +94669,7 @@ ${e instanceof Error ? e.message : String(e)}` }]);
       summary();
     },
     ok() {
-      void run();
+      void run2();
       return false;
     },
     cancel() {
@@ -96441,6 +96441,67 @@ var init_print = __esm({
   }
 });
 
+// web/domains/pcb/editor/import-nonkicad.ts
+function importNonKicad(kind) {
+  const input = document.createElement("input");
+  input.type = "file";
+  input.multiple = true;
+  input.accept = ACCEPT;
+  input.style.display = "none";
+  document.body.appendChild(input);
+  input.onchange = () => {
+    const files = Array.from(input.files || []);
+    input.remove();
+    if (files.length) void run(kind, files);
+  };
+  input.click();
+}
+async function run(kind, files) {
+  const form3 = new FormData();
+  if (files.length === 1 && /\.zip$/i.test(files[0].name)) form3.append("archive", files[0], files[0].name);
+  else for (const f2 of files) form3.append("file", f2, f2.name);
+  toast(`Importing ${files.map((f2) => f2.name).join(", ")}\u2026`, 6e4);
+  let r;
+  try {
+    r = await fetch("/api/projects", { method: "POST", body: form3, credentials: "same-origin" });
+  } catch {
+    toast("");
+    messageBox("Error", "Can't reach the server. Check your connection.");
+    return;
+  }
+  const text3 = await r.text();
+  if (!r.ok) {
+    let why2 = text3;
+    try {
+      const j = JSON.parse(text3);
+      why2 = j.error || j.message || text3;
+    } catch {
+    }
+    toast("");
+    messageBox("Error", `Error loading ${kind} file:
+${files[0].name}
+
+${why2}`);
+    return;
+  }
+  const res = JSON.parse(text3);
+  const want2 = kind === "board" ? "kicad_pcb" : "kicad_sch";
+  const doc2 = (res.docs || []).filter((d) => d.docType === want2 && d.docId && d.path).sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
+  const notes = res.converted?.notes || [];
+  toast(`Imported as the new project \u201C${res.name}\u201D${notes.length ? ` (${notes.length} importer message${notes.length === 1 ? "" : "s"})` : ""}`, 5e3);
+  navigate(`/p/${res.projectId}/edit` + (doc2 ? `?doc=${doc2.docId}` : ""));
+}
+var ACCEPT;
+var init_import_nonkicad = __esm({
+  "web/domains/pcb/editor/import-nonkicad.ts"() {
+    "use strict";
+    init_home();
+    init_ui();
+    init_util();
+    ACCEPT = ".epro,.epro2,.eprj,.elibz,.elibz2,.esch,.epcb,.json,.zip,.pcbdoc,.schdoc,.cmpcbdoc,.cspcbdoc,.swpcbdoc,.cmschdoc,.csschdoc,.brd,.mdd,.dsn,.sch,.cpa,.csa,.dip,.dch,.lay6,.lay,.t3001,.fab,.pcb,.prj,.asc,.cvg,.xml,.txt";
+  }
+});
+
 // web/domains/pcb/calculator/model.ts
 function coefficients(internal, thMils) {
   if (!internal) return EXTERNAL;
@@ -97400,6 +97461,7 @@ var init_actions = __esm({
     init_drc_rule_editor();
     init_plot_schematic();
     init_print();
+    init_import_nonkicad();
     init_calculator();
     HANDLERS = {
       selectSetRect: () => {
@@ -97606,6 +97668,9 @@ var init_actions = __esm({
       collabCompare: () => openCompare(),
       compareSchematicWithFile: () => openCompare({ pickFile: true }),
       compareBoardWithFile: () => openCompare({ pickFile: true }),
+      // File > Import > Non-KiCad Board File... / Non-KiCad Schematic...: EasyEDA files become a new online project
+      openNonKicadBoard: () => importNonKicad("board"),
+      importNonKicadSchematic: () => importNonKicad("schematic"),
       // File's collaboration block (this fork's SCH_ACTIONS / PCB_ACTIONS::collab*): Start Collaboration Session opens the
       // share dialog, Join Shared Project the home's join box, Vendor Parts the parts window (web/domains/pcb/parts)
       collabStartSession: (a) => runAction("share", a),
@@ -103231,7 +103296,7 @@ var PlotRecorder = class {
       if (s2.length < 2) continue;
       const pts = closed && (s2[0][0] !== s2[s2.length - 1][0] || s2[0][1] !== s2[s2.length - 1][1]) ? s2.concat([s2[0]]) : s2;
       if (dash) {
-        for (const run of dashRuns(pts, dash, this.st.dashOff * scaleOf2(this.st.m) * scaleOf2(this.outer))) this.items.push({ k: "line", pts: run, w, color: color2, alpha, cap: this.st.cap });
+        for (const run2 of dashRuns(pts, dash, this.st.dashOff * scaleOf2(this.st.m) * scaleOf2(this.outer))) this.items.push({ k: "line", pts: run2, w, color: color2, alpha, cap: this.st.cap });
         continue;
       }
       this.items.push({ k: "line", pts, w, color: color2, alpha, closed: closed || void 0, cap: this.st.cap });
@@ -103297,7 +103362,7 @@ function dashRuns(pts, pattern, offset = 0) {
     }
   }
   const out2 = [];
-  let run = on2 ? [pts[0]] : null;
+  let run2 = on2 ? [pts[0]] : null;
   for (let i = 0; i + 1 < pts.length; i++) {
     let [x, y] = pts[i];
     const [ex, ey] = pts[i + 1];
@@ -103310,20 +103375,20 @@ function dashRuns(pts, pattern, offset = 0) {
       y += uy * step;
       len -= step;
       left -= step;
-      if (on2 && run) run.push([x, y]);
+      if (on2 && run2) run2.push([x, y]);
       if (left <= 1e-12) {
         pi = (pi + 1) % pattern.length;
         left = pattern[pi];
         on2 = !on2;
-        if (on2) run = [[x, y]];
+        if (on2) run2 = [[x, y]];
         else {
-          if (run && run.length > 1) out2.push(run);
-          run = null;
+          if (run2 && run2.length > 1) out2.push(run2);
+          run2 = null;
         }
       }
     }
   }
-  if (on2 && run && run.length > 1) out2.push(run);
+  if (on2 && run2 && run2.length > 1) out2.push(run2);
   return out2;
 }
 function plotRecorder(o) {
@@ -116048,8 +116113,8 @@ Link '${target2}' to this file?`)) return null;
     if (lineMode === "45") {
       const ax = Math.abs(Pn[0] - Q[0]), ay = Math.abs(Pn[1] - Q[1]);
       const C45 = horiz ? [r45(Pn[0] - Math.sign(Pn[0] - Q[0]) * ay), Q[1]] : [Q[0], r45(Pn[1] - Math.sign(Pn[1] - Q[1]) * ax)];
-      const run = horiz ? (C45[0] - Q[0]) * (Pn[0] - Q[0]) : (C45[1] - Q[1]) * (Pn[1] - Q[1]);
-      if (run > 1e-6) C = C45;
+      const run2 = horiz ? (C45[0] - Q[0]) * (Pn[0] - Q[0]) : (C45[1] - Q[1]) * (Pn[1] - Q[1]);
+      if (run2 > 1e-6) C = C45;
       else if ((horiz ? ax : ay) <= 1e-6) return [Q, Pn];
     }
     C = [r45(C[0]), r45(C[1])];
@@ -116972,8 +117037,8 @@ Link '${target2}' to this file?`)) return null;
     return true;
   }
   var ARC_MODE_LABELS = ["Draw Arc: Center, Start, End", "Draw Arc: Start, End, Midpoint", "Draw Arc: Start, End, Center", "Draw Arc: Tangent", "Draw Arc: Start, Direction, End"];
-  function act(id, label, key3, run) {
-    return { id, label, key: key3, run };
+  function act(id, label, key3, run2) {
+    return { id, label, key: key3, run: run2 };
   }
   var ACTION_LIST = [
     act("cut", "Cut", "Ctrl+X", (ctx) => cutSelection(ctx)),
@@ -119619,8 +119684,8 @@ var Router = class _Router {
     for (const end of ["b", "a"]) {
       const other = end === "a" ? "b" : "a";
       const pv = cp2[end], nv = cn[nEnd(end)], po = cp2[other], no = cn[nEnd(other)];
-      const mine = all2.filter((l) => pv.layers.includes(l) && nv.layers.includes(l)), run = all2.filter((l) => po.layers.includes(l) && no.layers.includes(l));
-      if (!mine.length || !run.length) continue;
+      const mine = all2.filter((l) => pv.layers.includes(l) && nv.layers.includes(l)), run2 = all2.filter((l) => po.layers.includes(l) && no.layers.includes(l));
+      if (!mine.length || !run2.length) continue;
       const lv = mine[0];
       const mx = (pv.p[0] + nv.p[0]) / 2, my = (pv.p[1] + nv.p[1]) / 2;
       let ux = nv.p[0] - pv.p[0], uy = nv.p[1] - pv.p[1];
@@ -119655,8 +119720,8 @@ var Router = class _Router {
         this.cur = cn;
         if (!all2.every((l) => this.clearOf(via(vn), l, pr.n.key, clrV)) || !sn.every((x) => this.clearOf(x, lv, pr.n.key, clr))) continue;
         const keepP = cp2[end], keepN = cn[nEnd(end)];
-        cp2[end] = { p: vp, layers: run.slice(), shape: via(vp), cluster: keepP.cluster, grp: keepP.grp };
-        cn[nEnd(end)] = { p: vn, layers: run.slice(), shape: via(vn), cluster: keepN.cluster, grp: keepN.grp };
+        cp2[end] = { p: vp, layers: run2.slice(), shape: via(vp), cluster: keepP.cluster, grp: keepP.grp };
+        cn[nEnd(end)] = { p: vn, layers: run2.slice(), shape: via(vn), cluster: keepN.cluster, grp: keepN.grp };
         let r = "";
         try {
           r = this.layPair(pr);
@@ -119664,8 +119729,8 @@ var Router = class _Router {
           cp2[end] = keepP;
           cn[nEnd(end)] = keepN;
         }
-        if (r === "the two ends are too close together for a coupled run" && run.length) {
-          const l = run[0], tp = stub(vp, po.p), tn = stub(vn, no.p);
+        if (r === "the two ends are too close together for a coupled run" && run2.length) {
+          const l = run2[0], tp = stub(vp, po.p), tn = stub(vn, no.p);
           this.cur = cp2;
           const okP = P.shapeGap(tp, tn) >= clr - 1e-4 && P.shapeGap(tp, via(vn)) >= clr - 1e-4 && P.shapeGap(tn, via(vp)) >= clr - 1e-4 && this.clearOf(tp, l, pr.p.key, clr);
           this.cur = cn;
@@ -120334,15 +120399,15 @@ var Router = class _Router {
       if (!collect && this.rim && this.opts.edgeRuns !== true) {
         const rim = this.rim, before = extra;
         extra = (nodes) => {
-          let run = 0;
+          let run2 = 0;
           for (let i = 0; i + 1 < nodes.length; i++) {
             const a = nodes[i], b = nodes[i + 1];
             if (a.l !== b.l) continue;
             const n2 = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy);
             const step = Math.hypot(sx, sy) * G5.g;
-            for (let k = 0; k < n2; k++) if (rim[(a.iy + sy * k) * G5.W + a.ix + sx * k] && rim[(a.iy + sy * (k + 1)) * G5.W + a.ix + sx * (k + 1)]) run += step;
+            for (let k = 0; k < n2; k++) if (rim[(a.iy + sy * k) * G5.W + a.ix + sx * k] && rim[(a.iy + sy * (k + 1)) * G5.W + a.ix + sx * (k + 1)]) run2 += step;
           }
-          return Math.max(0, run - RIM_FREE_MM) * RIM_COST * this.W.length + (before ? before(nodes) : 0);
+          return Math.max(0, run2 - RIM_FREE_MM) * RIM_COST * this.W.length + (before ? before(nodes) : 0);
         };
       }
       if (!collect && !soft && this.opts.bundle !== false && !isSupply(conn.net) && this.kindOf(conn.net) === "digital" && !/DDR|SDRAM|DRAM|(^|[\/_])DQ[SM]?_?\d/i.test(conn.net) && !(this.opts.match || []).some((g2) => g2.nets.includes(conn.net))) {
@@ -120448,7 +120513,7 @@ var Router = class _Router {
     const G5 = this.G;
     const maxCells = Math.max(1, Math.round(this.W.mitre / G5.g));
     const out2 = [nodes[0]];
-    const run = (a, b) => Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy));
+    const run2 = (a, b) => Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy));
     const corner = (i) => {
       if (i <= 0 || i >= nodes.length - 1) return 0;
       const a = nodes[i - 1], b = nodes[i], c = nodes[i + 1];
@@ -120461,14 +120526,14 @@ var Router = class _Router {
       const b = nodes[i];
       if (corner(i) === 2) {
         const a = out2[out2.length - 1], c = nodes[i + 1];
-        const la = run(a, b), lc = run(b, c);
+        const la = run2(a, b), lc = run2(b, c);
         const ia = [Math.sign(b.ix - a.ix), Math.sign(b.iy - a.iy)], oc = [Math.sign(c.ix - b.ix), Math.sign(c.iy - b.iy)];
         const endA = corner(i - 1) === 0 && out2.length === 1, endC = i + 1 === nodes.length - 1;
         let m = Math.min(maxCells, endA ? la : la >> 1, endC ? lc : lc >> 1);
         let done = false;
         for (; m >= 1 && !done; m--) {
           const p1 = { ix: b.ix - ia[0] * m, iy: b.iy - ia[1] * m, l: b.l }, p2 = { ix: b.ix + oc[0] * m, iy: b.iy + oc[1] * m, l: b.l };
-          const sx = Math.sign(p2.ix - p1.ix), sy = Math.sign(p2.iy - p1.iy), n2 = run(p1, p2);
+          const sx = Math.sign(p2.ix - p1.ix), sy = Math.sign(p2.iy - p1.iy), n2 = run2(p1, p2);
           let ok2 = true;
           for (let k = 1; k < n2 && ok2; k++) if (maps[b.l][(p1.iy + sy * k) * G5.W + p1.ix + sx * k]) ok2 = false;
           if (ok2) {
@@ -128883,11 +128948,11 @@ function layLine(held, slant, line, size2, sizeX) {
   const font = held.font;
   const laid = { contours: [], bars: [], width: 0 };
   let x = 0;
-  for (const run of runs(line)) {
-    const small = run.sup || run.sub, k = small ? SUPERSUB : 1;
+  for (const run2 of runs(line)) {
+    const small = run2.sup || run2.sub, k = small ? SUPERSUB : 1;
     const sx = sizeX * EM * k, sy = size2 * EM * k;
-    const dy = run.sub ? size2 * SUPERSUB * SUB_DROP : run.sup ? -size2 * SUPERSUB * SUPER_RISE : 0;
-    const glyphs = glyphsOf(font, run.text), start = x, script = scriptOf(run.text);
+    const dy = run2.sub ? size2 * SUPERSUB * SUB_DROP : run2.sup ? -size2 * SUPERSUB * SUPER_RISE : 0;
+    const glyphs = glyphsOf(font, run2.text), start = x, script = scriptOf(run2.text);
     for (let i = 0; i < glyphs.length; i++) {
       const g2 = glyphs[i];
       for (const c of contours(g2)) laid.contours.push(c.map(([gx, gy]) => [x + (slant ? SQUEEZE * gx - SLANT * gy : gx) * sx, dy + gy * sy]));
@@ -128895,7 +128960,7 @@ function layLine(held, slant, line, size2, sizeX) {
       if (i + 1 < glyphs.length) adv += kerning(held, script, g2, glyphs[i + 1]) / font.unitsPerEm;
       x += adv * sx;
     }
-    if (run.over && x > start) laid.bars.push([start + sizeX * 0.1, -size2 * OVERBAR, x - sizeX * 0.1, -size2 * OVERBAR]);
+    if (run2.over && x > start) laid.bars.push([start + sizeX * 0.1, -size2 * OVERBAR, x - sizeX * 0.1, -size2 * OVERBAR]);
   }
   laid.width = x;
   return laid;
@@ -140084,7 +140149,7 @@ function reviewCraft(doc2, P, k, settings3, add2) {
       const kd = kindOf2(t.net);
       return kd === "fast" || kd === "switching";
     });
-    const run = /* @__PURE__ */ new Map();
+    const run2 = /* @__PURE__ */ new Map();
     if (loud.length) for (const t of tracks) {
       const kd = kindOf2(t.net);
       const victim = kd === "analog" || VICTIM.test(bare2(t.net));
@@ -140100,8 +140165,8 @@ function reviewCraft(doc2, P, k, settings3, add2) {
           const gap = P.shapeGap({ t: "circle", x, y, r: 0 }, q4.shape) - w / 2;
           if (gap >= need) continue;
           const key3 = `${t.net}\0${q4.net}`;
-          const e = run.get(key3) || { mm: 0, gap, x, y };
-          run.set(key3, e);
+          const e = run2.get(key3) || { mm: 0, gap, x, y };
+          run2.set(key3, e);
           e.mm += d;
           if (gap < e.gap) {
             e.gap = gap;
@@ -140111,7 +140176,7 @@ function reviewCraft(doc2, P, k, settings3, add2) {
         }
       });
     }
-    const items = Array.from(run.entries()).filter(([, e]) => e.mm >= CRAFT_LIMITS.victimRun).map(([key3, e]) => {
+    const items = Array.from(run2.entries()).filter(([, e]) => e.mm >= CRAFT_LIMITS.victimRun).map(([key3, e]) => {
       const [v, a] = key3.split("\0");
       return `${bare2(v)} beside ${bare2(a)}: ${r24(e.mm)} mm, ${r24(Math.max(0, e.gap))} mm apart near ${at2(e.x, e.y)}`;
     });

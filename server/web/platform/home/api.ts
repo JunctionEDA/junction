@@ -123,7 +123,9 @@ export function linkToken(raw: string): string | null {
 export interface UploadFile { path: string; file: File }
 /** A library or 3D model the uploaded project names as its own (${KIPRJMOD}) and did not bring along. */
 export interface MissingFile { kind: "symbol_library" | "footprint_library" | "model"; path: string }
-export interface UploadResult { projectId: string; name: string; docs: unknown[]; skipped?: string[]; missing?: MissingFile[] }
+/** An upload of EasyEDA files comes back converted: which files, and what the importer said about them. */
+export interface Converted { format: string; files: string[]; notes: string[] }
+export interface UploadResult { projectId: string; name: string; docs: unknown[]; skipped?: string[]; missing?: MissingFile[]; converted?: Converted | null }
 
 /** What an upload may hold (GET /api/limits); the defaults are the server's own, for a server that predates the route. */
 export interface Limits { maxFiles: number; maxFileBytes: number; maxTotalBytes: number; maxUploadBytes: number }
@@ -171,6 +173,14 @@ export function isProjectFile(path: string): boolean {
   if (base === "sym-lib-table" || base === "fp-lib-table" || base === "design-block-lib-table") return true;
   return /\.(kicad_pro|kicad_sch|kicad_pcb|kicad_prl|kicad_sym|kicad_mod|kicad_dru|kicad_wks|step|stp|wrl|wrz|lib|sub|cir|mod|model|sp|spice|ibs|in|equ|wbk)$/i.test(base);
 }
+/** Another EDA tool's design the server converts to a KiCad project (server/src/nonkicad_import.rs): EasyEDA in every
+ *  version, Altium, Allegro / OrCAD, Eagle, CADSTAR, PADS, P-CAD, DipTrace, Easy-PC, TARGET 3001!, Sprint Layout,
+ *  Autotrax, Fabmaster, gEDA, LTspice, IPC-2581 and ODB++ (what Flux exports).  .json / .xml / .txt / .zip are
+ *  decided by the server from their content. */
+export function isNonKicadFile(path: string): boolean {
+  return /\.(epro|epro2|eprj|elibz|elibz2|esch|epcb|esym|efoo|eblob|ecop|json|zip|pcbdoc|schdoc|cmpcbdoc|cspcbdoc|swpcbdoc|cmschdoc|csschdoc|brd|mdd|dsn|sch|cpa|csa|dip|dch|lay6|lay|t3001|fab|pcb|prj|asc|cvg|xml|txt)$/i.test(path.split("/").pop() || path);
+}
+export const NONKICAD_ACCEPT = ".epro,.epro2,.eprj,.elibz,.elibz2,.esch,.epcb,.json,.zip,.pcbdoc,.schdoc,.cmpcbdoc,.cspcbdoc,.swpcbdoc,.cmschdoc,.csschdoc,.brd,.mdd,.dsn,.sch,.cpa,.csa,.dip,.dch,.lay6,.lay,.t3001,.fab,.pcb,.prj,.asc,.cvg,.xml,.txt";
 export function isLocalState(path: string): boolean {
   return path.split("/").some((d) => d.endsWith(".collab") || d.endsWith("-backups") || d === ".history" || d === ".git");
 }

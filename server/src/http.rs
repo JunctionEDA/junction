@@ -151,6 +151,12 @@ impl Drop for SpoolDir {
     fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
 }
 
+/// The folder a non-KiCad conversion wrote into, removed once the project is stored.
+struct ConvertedWork(std::path::PathBuf);
+impl Drop for ConvertedWork {
+    fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); }
+}
+
 /// Write one multipart part to `to` as it arrives, at most `cap` bytes.  Ok(None) when the part
 /// is larger: the rest of it has been read and dropped, so the request can still be answered
 /// with a sentence instead of a closed connection.
@@ -178,7 +184,11 @@ pub async fn create_project(
     let spool = SpoolDir::new().map_err(|e| anyhow::anyhow!("upload spool: {e}"))?;
     let mut spooled = 0usize;
     let mut archive: Option<std::path::PathBuf> = None;
+    let mut archive_name: Option<String> = None;
     let mut name: Option<String> = None;
+    // Files that may be another tool's design (EasyEDA, Altium, Eagle, ... by extension, or a .json / .xml / .txt /
+    // .zip whose content decides); converted to a KiCad project below when the upload holds no KiCad design.
+    let mut easyeda: Vec<(String, std::path::PathBuf)> = Vec::new();
     // Loose files (the web's folder / multi-file upload): each `file` part
     // carries its project-relative path as the part's file name.
     let mut loose: Vec<(String, std::path::PathBuf)> = Vec::new();
@@ -194,6 +204,7 @@ pub async fn create_project(
     {
         match field.name() {
             Some("archive") => {
+                archive_name = field.file_name().map(str::to_string);
                 let to = spool.next(spooled);
                 spooled += 1;
                 match spool_field(field, &to, if refused.is_some() { 0 } else { MAX_TOTAL_BYTES }).await? {
@@ -207,6 +218,25 @@ pub async fn create_project(
                 let Some(path) = safe_zip_name(&raw) else {
                     return Err(AppError::BadRequest(format!("unsafe file path: {raw}")));
                 };
+                let maybe_easyeda = refused.is_none() && !is_local_state_path(&path) && !allowed_file(&path)
+                    && crate::nonkicad_import::may_be_source(&path);
+                if maybe_easyeda {
+                    if loose.len() + easyeda.len() >= MAX_FILES {
+                        refused = Some(format!("too many files (max {MAX_FILES})"));
+                        continue;
+                    }
+                    let to = spool.next(spooled);
+                    spooled += 1;
+                    match spool_field(field, &to, MAX_FILE_BYTES).await? {
+                        Some(len) => {
+                            loose_bytes += len;
+                            if loose_bytes > MAX_TOTAL_BYTES { refused = Some(project_too_large()); }
+                            easyeda.push((path, to));
+                        }
+                        None => { refused.get_or_insert_with(|| file_too_large(&path, MAX_FILE_BYTES + 1)); }
+                    }
+                    continue;
+                }
                 if refused.is_some() || is_local_state_path(&path) || !allowed_file(&path) {
                     if refused.is_none() && !is_local_state_path(&path) { skipped.push(path); }
                     let mut field = field;
@@ -248,6 +278,53 @@ pub async fn create_project(
     }
     if let Some(reason) = refused {
         return Err(AppError::BadRequest(reason));
+    }
+
+    // Other tools' designs: a zip that is one, or loose files with no KiCad design beside them, become the KiCad
+    // project the desktop's File > Import Non-KiCad Project makes from them.
+    if let Some(at) = archive.as_ref() {
+        let probe = at.clone();
+        let is_eda = tokio::task::spawn_blocking(move || crate::nonkicad_import::zip_is_source(&probe)).await.unwrap_or(false);
+        if is_eda {
+            easyeda.push((archive_name.clone().unwrap_or_else(|| "project.zip".into()), at.clone()));
+            archive = None;
+        }
+    }
+    let (eda_sources, eda_other): (Vec<_>, Vec<_>) = {
+        let candidates = std::mem::take(&mut easyeda);
+        tokio::task::spawn_blocking(move || {
+            candidates.into_iter().partition(|(n, at): &(String, std::path::PathBuf)| crate::nonkicad_import::is_source(n, at))
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("easyeda probe: {e}"))?
+    };
+    skipped.extend(eda_other.into_iter().map(|(n, _)| n));
+    let has_kicad_design = loose.iter().any(|(n, _)| {
+        let l = n.to_ascii_lowercase();
+        l.ends_with(".kicad_pro") || l.ends_with(".kicad_sch") || l.ends_with(".kicad_pcb")
+    });
+    let mut converted_from: Option<serde_json::Value> = None;
+    let mut _converted_work: Option<ConvertedWork> = None;
+    if !eda_sources.is_empty() && archive.is_none() && !has_kicad_design {
+        let suggested = name
+            .as_deref()
+            .map(str::trim)
+            .filter(|n| !n.is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| crate::nonkicad_import::project_name_for(&eda_sources[0].0));
+        let converted = crate::nonkicad_import::convert(&eda_sources, &suggested).await.map_err(AppError::BadRequest)?;
+        if name.as_deref().map(str::trim).unwrap_or("").is_empty() {
+            name = Some(suggested);
+        }
+        converted_from = Some(json!({
+            "format": crate::nonkicad_import::format_name(&eda_sources),
+            "files": eda_sources.iter().map(|(n, _)| n.clone()).collect::<Vec<_>>(),
+            "notes": converted.notes,
+        }));
+        loose = converted.files;
+        _converted_work = Some(ConvertedWork(converted.work));
+    } else {
+        skipped.extend(eda_sources.into_iter().map(|(n, _)| n));
     }
 
     let files: Vec<(String, std::path::PathBuf)> = if let Some(archive) = archive {
@@ -378,6 +455,7 @@ pub async fn create_project(
 
     Ok(Json(json!({
         "projectId": project.id, "name": project.name, "docs": docs, "skipped": skipped, "missing": missing,
+        "converted": converted_from,
     }))
     .into_response())
 }
