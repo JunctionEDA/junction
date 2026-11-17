@@ -44,7 +44,15 @@ export interface Comment {
   resolved?: boolean; x: number; y: number; anchor?: CommentAnchor | null;
 }
 /** Where a chat message points: a part or other item, a net, or a spot, on one of the project's documents (nm). */
-export interface ChatLink { docId: string; path?: string; kind: "item" | "net" | "spot"; id: string; label: string; x: number; y: number }
+export interface ChatLink {
+  docId: string; path?: string; kind: "item" | "net" | "pin" | "pad" | "field" | "spot"; id: string; label: string; x: number; y: number;
+  /** a net's item (an unnamed net is found through it) */
+  item?: string | null;
+  /** exactly what was selected: item uuids, "<fp>#<pad>", "pin:<symbol>#<number>", "field:<item>#<name>" */
+  sel?: string[];
+  /** the selection's box on the writer's screen, nm */
+  bbox?: number[] | null;
+}
 /** One message of the project chat (server/src/chat.rs). */
 export interface ChatMessage {
   id: number; projectId: string; authorId: number; authorLogin: string; authorName?: string | null; authorAvatar?: string | null;

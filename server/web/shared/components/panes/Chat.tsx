@@ -14,7 +14,7 @@ function when(iso: string): string {
   return `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
 }
 function linkText(l: ChatLink): string {
-  const where = l.kind === "net" ? `Net ${l.label || l.id}` : l.kind === "item" ? l.label || "Item" : "A spot";
+  const where = l.kind === "net" ? `Net ${l.label || l.id}` : l.kind === "spot" ? "A spot" : l.label || "Item";
   const file = (l.path || "").split("/").pop() || "";
   return file ? `${where} · ${file}` : where;
 }

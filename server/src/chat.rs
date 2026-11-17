@@ -79,7 +79,20 @@ pub struct LinkIn {
     pub x: Option<i64>,
     #[serde(default)]
     pub y: Option<i64>,
+    /// For a net: the item it was picked from (an unnamed net has no name to find it by).
+    #[serde(default)]
+    pub item: Option<String>,
+    /// Exactly what was selected: item uuids, a pad ("<footprint>#<number>"), a pin ("pin:<symbol>#<number>"),
+    /// a field ("field:<item>#<name>").  The reader's editor selects the same and outlines it.
+    #[serde(default)]
+    pub sel: Option<Vec<String>>,
+    /// The union box of the selection on the writer's screen, nm: [x0, y0, x1, y1].
+    #[serde(default)]
+    pub bbox: Option<Vec<i64>>,
 }
+
+/// The kinds of place a message can point at.
+pub const LINK_KINDS: &[&str] = &["item", "net", "pin", "pad", "field", "spot"];
 
 /// Check a link against the project: its document must be one of the project's, and its
 /// kind one the editors know.  Returns the JSON stored with the message.
@@ -88,14 +101,17 @@ pub fn checked_link(link: &LinkIn, docs: &[persist::Document]) -> Result<Value, 
         .iter()
         .find(|d| d.id == link.doc_id)
         .ok_or_else(|| AppError::BadRequest("the link's document is not in this project".into()))?;
-    if !matches!(link.kind.as_str(), "item" | "net" | "spot") {
-        return Err(AppError::BadRequest("link kind must be item, net or spot".into()));
+    if !LINK_KINDS.contains(&link.kind.as_str()) {
+        return Err(AppError::BadRequest(format!("link kind must be one of {}", LINK_KINDS.join(", "))));
     }
     let id = link.id.as_deref().unwrap_or("").trim();
     if link.kind != "spot" && id.is_empty() {
         return Err(AppError::BadRequest("an item or net link needs its id".into()));
     }
     let clip = |s: &str, n: usize| -> String { s.chars().take(n).collect() };
+    let sel: Vec<String> = link.sel.as_deref().unwrap_or(&[]).iter()
+        .map(|t| clip(t.trim(), 120)).filter(|t| !t.is_empty()).take(200).collect();
+    let bbox = link.bbox.as_ref().filter(|b| b.len() == 4).cloned();
     Ok(json!({
         "docId": doc.id,
         "path": doc.path,
@@ -104,6 +120,9 @@ pub fn checked_link(link: &LinkIn, docs: &[persist::Document]) -> Result<Value, 
         "label": clip(link.label.as_deref().unwrap_or("").trim(), 120),
         "x": link.x.unwrap_or(0),
         "y": link.y.unwrap_or(0),
+        "item": link.item.as_deref().map(|i| clip(i.trim(), 120)),
+        "sel": sel,
+        "bbox": bbox,
     }))
 }
 
@@ -384,19 +403,23 @@ mod tests {
     #[test]
     fn link_must_name_a_project_document() {
         let docs = vec![doc("main.kicad_sch"), doc("board.kicad_pcb")];
-        let ok = LinkIn { doc_id: docs[1].id, kind: "item".into(), id: Some("abc".into()), label: Some(" U3 ".into()), x: Some(5), y: None };
+        let ok = LinkIn { doc_id: docs[1].id, kind: "item".into(), id: Some("abc".into()), label: Some(" U3 ".into()), x: Some(5), y: None, item: None, sel: Some(vec!["abc".into(), " ".into()]), bbox: Some(vec![1, 2, 3, 4]) };
         let v = checked_link(&ok, &docs).unwrap();
         assert_eq!(v["path"], "board.kicad_pcb");
         assert_eq!(v["label"], "U3");
         assert_eq!(v["y"], 0);
+        assert_eq!(v["sel"], serde_json::json!(["abc"]));
+        assert_eq!(v["bbox"], serde_json::json!([1, 2, 3, 4]));
 
-        let stranger = LinkIn { doc_id: Uuid::new_v4(), kind: "spot".into(), id: None, label: None, x: None, y: None };
+        let stranger = LinkIn { doc_id: Uuid::new_v4(), kind: "spot".into(), id: None, label: None, x: None, y: None, item: None, sel: None, bbox: None };
         assert!(checked_link(&stranger, &docs).is_err());
-        let bad_kind = LinkIn { doc_id: docs[0].id, kind: "url".into(), id: Some("x".into()), label: None, x: None, y: None };
+        let bad_kind = LinkIn { doc_id: docs[0].id, kind: "url".into(), id: Some("x".into()), label: None, x: None, y: None, item: None, sel: None, bbox: None };
         assert!(checked_link(&bad_kind, &docs).is_err());
-        let no_id = LinkIn { doc_id: docs[0].id, kind: "net".into(), id: Some("  ".into()), label: None, x: None, y: None };
+        let pin = LinkIn { doc_id: docs[0].id, kind: "pin".into(), id: Some("pin:abc#5".into()), label: Some("U1 pin 5".into()), x: None, y: None, item: None, sel: None, bbox: None };
+        assert_eq!(checked_link(&pin, &docs).unwrap()["kind"], "pin");
+        let no_id = LinkIn { doc_id: docs[0].id, kind: "net".into(), id: Some("  ".into()), label: None, x: None, y: None, item: None, sel: None, bbox: None };
         assert!(checked_link(&no_id, &docs).is_err());
-        let spot = LinkIn { doc_id: docs[0].id, kind: "spot".into(), id: None, label: None, x: Some(1), y: Some(2) };
+        let spot = LinkIn { doc_id: docs[0].id, kind: "spot".into(), id: None, label: None, x: Some(1), y: Some(2), item: None, sel: None, bbox: None };
         assert_eq!(checked_link(&spot, &docs).unwrap()["kind"], "spot");
     }
 }

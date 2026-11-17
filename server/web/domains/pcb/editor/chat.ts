@@ -13,11 +13,11 @@ import type { ChatLink, ChatMessage, ChatState } from "../../../shared/store";
 import { state, store } from "./appstore";
 import { describe, netIds, netOfItem } from "./comments";
 import { centerOn } from "./comments";
-import { clearAllSelection, selectionChanged, selectionHooks, selectionIds, selectItemId } from "./gestures";
+import { applyPickMode, clearAllSelection, selectionChanged, selectionHooks, selectionIds } from "./gestures";
 import { sendPresence } from "./peers";
 import { E } from "./state";
 import { api, toast } from "./util";
-import { requestRender, stage, visibleRectNm, worldMm } from "./view";
+import { pxPerMm, requestRender, stage, visibleRectNm, worldMm, zoomBy } from "./view";
 
 const request = api as (path: string, opts?: RequestInit) => Promise<unknown>;
 const EMPTY: ChatState = { projectId: null, messages: [], loading: false, more: false, error: null, lastReadId: 0, unread: 0, canWrite: false, link: null };
@@ -130,31 +130,71 @@ export function openChat(): void {
 const IU = (): number => E.IU as number;
 const docPath = (id: string): string => ((state.docs || []).find((d) => d.docId === id) || { path: "" }).path;
 
-/** What the composer would link right now: the selected part (or its net), else the middle of the view. */
+const refOf = (id: string): string => { const it = E.kdoc ? (E.kdoc as KDoc).items.get(id) : null; return (it && (it.ref || it.name)) || "Part"; };
+const nm = (v: number): number => Math.round(v * IU());
+/** A pad's number from the board module's pad key ("<footprint>#<index among its pads>"). */
+function padNumber(fpId: string, index: number): string {
+  const it = E.kdoc ? (E.kdoc as KDoc).items.get(fpId) : null; if (!it) return String(index + 1);
+  const pads = (it.node as unknown as unknown[]).filter((c) => Array.isArray(c) && c[0] === "pad") as unknown[][];
+  const p = pads[index]; return p ? KiCadCanvas.str(p[1] as SNode) : String(index + 1);
+}
+
+/** Everything selected now, as link tokens: item uuids, a pad, pins, a field (the forms ChatLink.sel names). */
+function selectionTokens(): string[] {
+  const out: string[] = [...selectionIds()];
+  const ps = !E.kdoc || (E.kdoc as KDoc).type !== "pcb" ? null : (CollabTools.pcb && CollabTools.pcb.state as unknown as { padSel?: string | null });
+  if (ps && ps.padSel) out.push(ps.padSel);
+  for (const p of (E.selPins || []) as { id: string; number: string }[]) out.push(`pin:${p.id}#${p.number}`);
+  if (E.selField) out.push(`field:${E.selField.id}#${E.selField.name}`);
+  return out;
+}
+
+/** What the composer would link right now: exactly the selection (a part, a pin, a pad, a field, a track or wire
+ *  by its net, several things), else the middle of the view. */
 export function currentLink(): ChatLink | null {
   const did = state.docId; if (!did || did.startsWith("board:") || did.startsWith("lib:") || !E.kdoc) return null;
-  const d = E.kdoc as KDoc;
-  const ids = selectionIds();
-  if (ids.length) {
-    const it = d.items.get(ids[0]);
+  const d = E.kdoc as KDoc, base = { docId: did, path: docPath(did) };
+  const sel = selectionTokens();
+  const box = selectionBoxNm(sel);
+  const cx = box ? (box[0] + box[2]) / 2 : 0, cy = box ? (box[1] + box[3]) / 2 : 0;
+  if (sel.length) {
+    const more = sel.length > 1 ? ` +${sel.length - 1}` : "";
+    const t = sel[0];
+    if (t.startsWith("pin:")) { const [id, num] = t.slice(4).split("#"); return { ...base, kind: "pin", id: t, label: `${refOf(id)} pin ${num}${more}`, x: cx, y: cy, sel, bbox: box }; }
+    if (t.startsWith("field:")) { const i = t.indexOf("#"); return { ...base, kind: "field", id: t, label: `${refOf(t.slice(6, i))} ${t.slice(i + 1)}${more}`, x: cx, y: cy, sel, bbox: box }; }
+    if (!d.items.has(t) && t.includes("#")) { const i = t.lastIndexOf("#"); return { ...base, kind: "pad", id: t, label: `${refOf(t.slice(0, i))} pad ${padNumber(t.slice(0, i), Number(t.slice(i + 1)))}${more}`, x: cx, y: cy, sel, bbox: box }; }
+    const it = d.items.get(t);
     if (it) {
-      const b = it.bbox, x = b ? (b[0] + b[2]) / 2 : 0, y = b ? (b[1] + b[3]) / 2 : 0;
-      // a wire, a track, a label: its net says more than "Wire"
-      if (!it.ref && ids.length === 1) {
-        const net = netOfItem(it, [x, y]);
-        if (net && net.name && net.name !== "unnamed net") return { docId: did, path: docPath(did), kind: "net", id: net.name, label: net.name, x: Math.round(x * IU()), y: Math.round(y * IU()) };
+      const b = it.bbox, mx = b ? (b[0] + b[2]) / 2 : 0, my = b ? (b[1] + b[3]) / 2 : 0;
+      // one wire, track or label: its net says more than "Wire" (and the reader lights the whole net)
+      if (!it.ref && sel.length === 1) {
+        const net = netOfItem(it, [mx, my]);
+        if (net && net.name) return { ...base, kind: "net", id: net.name, label: net.name, item: it.id, x: cx, y: cy, sel, bbox: box };
       }
-      const label = describe(it) + (ids.length > 1 ? ` +${ids.length - 1}` : "");
-      return { docId: did, path: docPath(did), kind: "item", id: it.id, label, x: Math.round(x * IU()), y: Math.round(y * IU()) };
+      return { ...base, kind: "item", id: it.id, label: describe(it) + more, x: cx, y: cy, sel, bbox: box };
     }
   }
   const v = visibleRectNm(); if (!v) return null;
-  return { docId: did, path: docPath(did), kind: "spot", id: "", label: "", x: Math.round(v[0] + v[2] / 2), y: Math.round(v[1] + v[3] / 2) };
+  return { ...base, kind: "spot", id: "", label: "", x: Math.round(v[0] + v[2] / 2), y: Math.round(v[1] + v[3] / 2) };
+}
+/** The box (nm) round the selection as this editor draws it (selG holds the halos of items, pads, pins and fields). */
+function selectionBoxNm(sel: string[]): number[] | null {
+  if (!sel.length) return null;
+  const b = haloBoxMm();
+  if (b) return b.map((v) => nm(v));
+  const d = E.kdoc as KDoc; let out: number[] | null = null;
+  for (const t of sel) { const it = d.items.get(t.replace(/^(pin|field):/, "").split("#")[0]); const q = it && it.bbox; if (!q) continue; out = out ? [Math.min(out[0], q[0]), Math.min(out[1], q[1]), Math.max(out[2], q[2]), Math.max(out[3], q[3])] : [q[0], q[1], q[2], q[3]]; }
+  return out ? out.map((v) => nm(v)) : null;
+}
+function haloBoxMm(): number[] | null {
+  const g = document.getElementById("selG") as unknown as SVGGraphicsElement | null;
+  if (!g || !g.childNodes.length) return null;
+  try { const r = g.getBBox(); return r.width > 0 || r.height > 0 ? [r.x, r.y, r.x + r.width, r.y + r.height] : null; } catch { return null; }
 }
 function refreshLink(): void { const next = attach ? currentLink() : null; if (JSON.stringify(next) !== JSON.stringify(chat().link)) setChat({ link: next }); }
 
 export function linkText(l: ChatLink): string {
-  const where = l.kind === "net" ? `Net ${l.label || l.id}` : l.kind === "item" ? l.label || "Item" : "A spot";
+  const where = l.kind === "net" ? `Net ${l.label || l.id}` : l.kind === "spot" ? "A spot" : l.label || "Item";
   const file = (l.path || docPath(l.docId) || "").split("/").pop() || "";
   return file ? `${where} · ${file}` : where;
 }
@@ -174,22 +214,80 @@ export function gotoLink(l: ChatLink): void {
   }
   gotoHere(l);
 }
+/** Select what the writer had selected, light the net, centre it, and flash an outline round it. */
 function gotoHere(l: ChatLink): void {
   const d = E.kdoc as KDoc | null; if (!d) return;
-  let x = l.x / IU(), y = l.y / IU();
-  if (l.kind === "item") {
-    const it = d.items.get(l.id);
-    if (!it) toast(`${l.label || "That item"} is no longer here; showing where it was`);
-    else {
-      if (it.bbox) { x = (it.bbox[0] + it.bbox[2]) / 2; y = (it.bbox[1] + it.bbox[3]) / 2; }
-      clearAllSelection(false); selectItemId(it.id); selectionChanged();
+  // older messages carry no selection: their one item
+  const sel = l.sel && l.sel.length ? l.sel : l.kind === "item" ? [l.id] : l.kind === "net" && l.item ? [l.item] : [];
+  clearAllSelection(false);
+  let found = 0;
+  const pins: { id: string; number: string }[] = [];
+  for (const t of sel) {
+    if (t.startsWith("pin:")) { const [id, num] = t.slice(4).split("#"); if (d.items.has(id)) { pins.push({ id, number: num }); found++; } continue; }
+    if (t.startsWith("field:")) { const i = t.indexOf("#"), id = t.slice(6, i); if (d.items.has(id)) { E.selField = { id, name: t.slice(i + 1) }; found++; } continue; }
+    if (!d.items.has(t) && t.includes("#")) {   // a pad
+      const fp = t.slice(0, t.lastIndexOf("#")), ps = CollabTools.pcb && (CollabTools.pcb.state as unknown as { padSel?: string | null });
+      if (d.items.has(fp) && ps) { ps.padSel = t; found++; }
+      continue;
     }
-  } else if (l.kind === "net") {
-    const ids = netIds({ kind: "net", id: l.id, label: l.label, item: null });
-    if (ids.length) { E.highlightIds = new Set(ids); requestRender(); }
-    else toast(`Net ${l.label || l.id} is not on this document`);
+    if (d.items.has(t)) { applyPickMode(t, "add"); found++; }
   }
+  if (pins.length) E.selPins = pins;
+  selectionChanged();
+  let lit = 0, netBox: number[] | null = null;
+  if (l.kind === "net") {
+    // an unnamed net (Net-(C6)) has no label to find it by: go through the item it was picked from
+    const from = l.item ? d.items.get(l.item) : null;
+    const viaItem = from ? netOfItem(from, from.bbox ? [(from.bbox[0] + from.bbox[2]) / 2, (from.bbox[1] + from.bbox[3]) / 2] : undefined) : null;
+    const ids = viaItem && viaItem.ids.length ? viaItem.ids : netIds({ kind: "net", id: l.id, label: l.label, item: l.item || null });
+    if (ids.length) { E.highlightIds = new Set(ids); lit = ids.length; requestRender(); netBox = unionBox(ids); }
+  }
+  if (sel.length && !found && !lit) toast(`${l.label || "That"} is no longer here; showing where it was`);
+  else if (!sel.length && l.kind === "net" && !lit) toast(`Net ${l.label || l.id} is not on this document`);
+  // the outline: what this editor now draws as the selection, else the box the writer saw, else the spot
+  const halo = found ? haloBoxMm() : null;
+  const wb = l.bbox && l.bbox.length === 4 ? l.bbox.map((v) => v / IU()) : null;
+  const box = netBox || halo || wb;
+  const x = box ? (box[0] + box[2]) / 2 : l.x / IU(), y = box ? (box[1] + box[3]) / 2 : l.y / IU();
   centerOn(x, y);
+  // close enough to see it: a pin or a pad seen from a whole sheet is a few pixels (never zooms out)
+  if (box) {
+    const ppm = pxPerMm(), w = Math.max((box[2] - box[0]) * ppm, 1), h = Math.max((box[3] - box[1]) * ppm, 1);
+    // …but not closer than about 30 mm across the stage: what is round it is part of the answer
+    const minView = 30 * ppm / stage.clientWidth;   // zoom factor at which the stage spans 30 mm
+    const f = Math.min(8, 1 / Math.max(minView, 1e-6), (stage.clientWidth * 0.3) / w, (stage.clientHeight * 0.3) / h);
+    if (f > 1.15) zoomBy(f);
+  }
+  flash(box, [x, y], l);
+}
+
+function unionBox(ids: Iterable<string>): number[] | null {
+  const d = E.kdoc as KDoc; let out: number[] | null = null;
+  for (const id of ids) { const q = d.items.get(id)?.bbox; if (!q) continue; out = out ? [Math.min(out[0], q[0]), Math.min(out[1], q[1]), Math.max(out[2], q[2]), Math.max(out[3], q[3])] : [q[0], q[1], q[2], q[3]]; }
+  return out;
+}
+
+let flashTimer: ReturnType<typeof setTimeout> | 0 = 0;
+/** A pulsing outline (or a ring, for a spot) with the link's name, for a few seconds, so the eye lands on it. */
+function flash(box: number[] | null, at: [number, number], l: ChatLink): void {
+  const host = (document.getElementById("selG") as SVGGElement | null)?.parentNode as SVGElement | null; if (!host) return;
+  let g = document.getElementById("chatFlash") as SVGGElement | null;
+  if (!g) { g = document.createElementNS("http://www.w3.org/2000/svg", "g") as SVGGElement; g.id = "chatFlash"; host.appendChild(g); }
+  g.replaceChildren();
+  const px = 1 / pxPerMm(), ns = "http://www.w3.org/2000/svg";
+  const shape = box && (box[2] - box[0] > 0.05 || box[3] - box[1] > 0.05)
+    ? (() => { const pad = 6 * px, r = document.createElementNS(ns, "rect");
+        r.setAttribute("x", String(box[0] - pad)); r.setAttribute("y", String(box[1] - pad)); r.setAttribute("width", String(box[2] - box[0] + 2 * pad)); r.setAttribute("height", String(box[3] - box[1] + 2 * pad)); r.setAttribute("rx", String(4 * px)); return r; })()
+    : (() => { const c = document.createElementNS(ns, "circle"); c.setAttribute("cx", String(at[0])); c.setAttribute("cy", String(at[1])); c.setAttribute("r", String(18 * px)); return c; })();
+  shape.setAttribute("class", "chat-flash"); shape.setAttribute("stroke-width", String(2.5 * px));
+  g.appendChild(shape);
+  const label = document.createElementNS(ns, "text"), top = box ? box[1] - 6 * px : at[1] - 18 * px;
+  label.setAttribute("x", String(box ? box[0] - 6 * px : at[0] - 18 * px)); label.setAttribute("y", String(top - 5 * px));
+  label.setAttribute("font-size", String(12 * px)); label.setAttribute("class", "chat-flash-label");
+  label.textContent = l.kind === "spot" ? "here" : l.kind === "net" ? `Net ${l.label || l.id}` : l.label;
+  g.appendChild(label);
+  if (flashTimer) clearTimeout(flashTimer);
+  flashTimer = setTimeout(() => { flashTimer = 0; g!.replaceChildren(); }, 4500);
 }
 
 // ---------------------------------------------------------------- sending
@@ -278,7 +376,7 @@ export function startCursorChat(): boolean {
     }
   });
   input.addEventListener("blur", () => setTimeout(() => { if (bubble === box) closeCursorChat(true); }, 0));
-  setTimeout(() => input.focus(), 0);
+  input.focus();   // now, not on the next tick: the first key typed after Alt+M must land in the bubble
   return true;
 }
 function closeCursorChat(clearSay: boolean): void {
