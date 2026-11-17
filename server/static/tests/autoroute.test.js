@@ -472,3 +472,22 @@ test("plan: the global plan sends the connection with the cheaper detour round a
   assert.ok(on.plan.overflowFirst > 0 && on.plan.overflow === 0 && on.plan.iterations >= 2, JSON.stringify(on.plan));
   apply(doc, on); assert.deepEqual(errors(doc, null), []); assert.equal(P.ratsnest(doc).length, 0);
 });
+
+test("ripup mincut: the repair takes up the route that is cheap to lay again, not the one in the shortest way", () => {
+  // a wall on F.Cu at x = 108..112 with two one-track gaps, at y = 50 and y = 64.  X (named first, so its route is
+  // dear to take up, and kept off vias) runs through the upper gap, Y through the lower one; C (no vias either) has
+  // no gap left.  The way through X is the shorter one, but X has nowhere else to go: taking everything in that way
+  // up lays C and then fails to lay X again, and C stays open.  The minimum cut prices X (named first) eight times
+  // over a plain route: it takes up Y alone, C goes through the lower gap and Y hops the wall on B.Cu.
+  const wall = [{ layers: ["F.Cu"], box: [108, 40, 112, 49.8] }, { layers: ["F.Cu"], box: [108, 50.2, 112, 63.8] }, { layers: ["F.Cu"], box: [108, 64.2, 112, 70] }];
+  const make = () => board(smd(100, 50, "X"), smd(120, 50, "X"), smd(100, 64, "Y"), smd(120, 64, "Y"), smd(95, 51, "C"), smd(125, 51, "C"));
+  const opts = { order: ["X"], keepouts: wall, netOpts: { X: { allowVias: false }, C: { allowVias: false } } };
+  const near = R.route(K, P, make(), null, { ...opts, ripup: "near" });
+  const doc = make(); const cut = R.route(K, P, doc, null, { ...opts, ripup: "mincut" });
+  const of = (res, net) => res.connections.find((c) => c.net === net);
+  assert.equal(near.routed, 2); assert.equal(of(near, "C").routed, false);
+  assert.equal(cut.routed, 3, JSON.stringify(cut.connections.map((c) => [c.net, c.routed, c.length, c.vias])));
+  assert.ok(Math.abs(of(cut, "X").length - 20) < 0.5 && of(cut, "X").vias === 0, "X keeps its straight run through the upper gap");
+  assert.ok(of(cut, "Y").vias >= 2 && of(cut, "C").vias === 0, "Y changes layer to get past the wall, C takes the lower gap");
+  apply(doc, cut); assert.deepEqual(errors(doc, null), []); assert.equal(P.ratsnest(doc).length, 0);
+});

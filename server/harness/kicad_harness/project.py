@@ -2751,7 +2751,7 @@ class Board(_Doc):
               net_options: dict | None = None, keepouts: list | None = None, allow_vias: bool = True, time_s: float | None = None,
               fill: bool = True, max_vias: int | None = None, kinds: dict | None = None, separate=None, fence=None,
               ground_vias: bool = True, fanout_lanes=None, via_cost: float | None = None, groups=None, explain: bool = False,
-              keep_rules: bool = False, escapes=None, plan=None) -> dict:
+              keep_rules: bool = False, escapes=None, plan=None, ripup: str | None = None) -> dict:
         """Autoroute the missing connections (every unrouted net by default) and report what was done.
 
         order: the few nets to lay first (USB pair, crystal); widths: {net: mm} for supply nets; net_options and
@@ -2806,6 +2806,13 @@ class Board(_Doc):
         planned layer, "vias": True lets a connection the plan sends through a via change layer at once, "open": mm}
         tune it.  The result's `plan` gives the overflow before and after negotiation and how many routes stayed
         inside their corridors.  Off by default: it made no board of the benchmark better (Ledify lost connections).
+        ripup="mincut" changes what the repair after the routing passes takes up to lay a connection left open: the
+        cheapest set of routes whose removal opens a way (a minimum cut, after Copper's repair stage), each route priced
+        by what laying it again costs (4 mm, more for a wide or critical one), instead of everything the cheapest way
+        through runs into.  Only those come up, the open connection is laid, they are laid again, and the board is kept
+        only when fewer connections are open; a cut that did not pay is not tried again, and where no cut pays the
+        old rule is tried after it.  ripup="near" (the default) is the old rule alone.  Off by default: Cyberboard
+        went from 12 to 10 open, but Ledify lost a little (94.9 -> 94.5, one connection left open).
         
         A board still on KiCad's stock via (0.6 on 0.3 mm) gets the house via (0.5 on 0.2 mm) first, and the result says
         so under "rules_changed"; keep_rules=True leaves the rules exactly as they are (the person said not to touch them).
@@ -2866,6 +2873,8 @@ class Board(_Doc):
             e["escapes"] = escapes
         if plan is not None:
             e["plan"] = plan
+        if ripup is not None:
+            e["ripup"] = ripup
         if via_cost is not None:
             e["via_cost"] = via_cost
         if fence is not None:
