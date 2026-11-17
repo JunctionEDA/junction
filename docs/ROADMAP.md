@@ -40,8 +40,10 @@ once against an interface instead of once per file format.
   apply a change, diff two versions, merge three, and draw a thumbnail. KiCad's current code becomes the first
   implementation. Decide whether new domains keep this item-sync model or use a CRDT (Yjs or Automerge) for their
   own documents. Recommendation: keep one change protocol on the wire and let each domain's document type choose.
-- **Projects hold many kinds of documents.** A project holds a schematic and a board, and now part studios and
-  assemblies, as tabs (`server/web/platform/doctabs`, `server/web/domains/registry.ts`), and documents follow
+- **Projects hold many kinds of documents.** A project holds any number of PCBs (each a schematic and a board,
+  a KiCad project in a folder of its own), part studios and assemblies, as tabs after a Home tab that lists
+  everything (`server/web/platform/doctabs`, `server/web/platform/projecthome`,
+  `server/web/domains/registry.ts`), and documents follow
   each other live: a board in a part studio, a part studio driving a board, both placed in an assembly. Still to
   do: simulations and toolpaths (a part that a toolpath machines).
 - **JSON item documents.** New domains' documents are JSON files of items with stable ids, edited by item

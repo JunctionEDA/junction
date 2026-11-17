@@ -130,7 +130,7 @@ try {
   page.on('response', (r) => { if (r.status() >= 400) missing.push(`${r.status()} ${new URL(r.url()).pathname}`); });
   await page.goto(`${BASE}/auth/dev?jwt=${jwt(uid, 'cad-patterns-ui')}&next=/`);
   await page.waitForLoadState('networkidle');
-  const project = await page.evaluate(async () => (await (await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Patterns UI test' }) })).json()));
+  const project = await page.evaluate(async () => (await (await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Patterns UI test', template: 'pcb' }) })).json()));
   await page.goto(`${BASE}/p/${project.projectId}/edit`);
   await page.waitForSelector('#doctabs [role=tab]', { timeout: 30000 });
   await page.click('[data-doc-add]');

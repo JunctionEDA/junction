@@ -14,7 +14,7 @@ export interface RoomMember {
   name: string;
   /** the colour they have on every tab */
   color: string;
-  /** the document they have open (a document id), or null on the project's home */
+  /** the tab they are on: a document id, "home", or "bom:<PCB key>"; null before they have said */
   tab: string | null;
 }
 
@@ -98,8 +98,12 @@ export function pickColor(mine: { key: string; color: string }, others: readonly
   return ROOM_COLORS.find((c) => !taken.has(c)) || mine.color;
 }
 
-/** The document types whose sessions carry a room: the JSON item documents (no KiCad client ever joins one). */
-export const ROOM_DOC_TYPES: readonly string[] = ["part_studio", "assembly"];
+/**
+ * The document types whose sessions carry a room: the JSON item documents (no KiCad client ever joins one).  The
+ * project's own document (server/src/shell.rs) is one, and the room's first choice: every project that has it
+ * has a room, whatever else it holds.
+ */
+export const ROOM_DOC_TYPES: readonly string[] = ["project_shell", "part_studio", "assembly"];
 /** How many documents a room joins at most. */
 export const ROOM_DOCS_MAX = 4;
 
@@ -109,7 +113,8 @@ export const ROOM_DOCS_MAX = 4;
  * of the change reaches them through it.
  */
 export function roomDocs(docs: readonly Pick<DocEntry, "docId" | "docType">[]): string[] {
-  return docs.filter((d) => ROOM_DOC_TYPES.includes(d.docType)).map((d) => d.docId).sort().slice(0, ROOM_DOCS_MAX);
+  const first = (d: Pick<DocEntry, "docType">): number => (d.docType === "project_shell" ? 0 : 1);
+  return docs.filter((d) => ROOM_DOC_TYPES.includes(d.docType)).sort((a, b) => first(a) - first(b) || (a.docId < b.docId ? -1 : a.docId > b.docId ? 1 : 0)).map((d) => d.docId).slice(0, ROOM_DOCS_MAX);
 }
 
 /** The tab a member is shown on: their document's own tab, or the schematic's tab for any sheet of it. */

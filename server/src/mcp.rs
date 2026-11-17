@@ -94,7 +94,7 @@ fn project_prop() -> Value {
 }
 
 fn document_prop() -> Value {
-    json!({ "type": "string", "description": "Which document: its path as listed by get_project or get_design_overview (for example \"power.kicad_sch\"), or \"board\" for the board." })
+    json!({ "type": "string", "description": "Which document: its path as listed by get_project or get_design_overview (for example \"power.kicad_sch\"), or \"board\" for the board. In a project with several PCBs (each a folder, as get_project lists them) say which PCB: \"Motor driver/board\", \"Motor driver/schematic\" or the full path \"Motor driver/power.kicad_sch\"; a call that names none works on the PCB used last." })
 }
 
 fn annotations(title: &str, write: bool, destructive: bool) -> Value {
@@ -637,6 +637,11 @@ fn find_doc<'a>(p: &'a ProjectCtx, name: &str) -> Result<&'a persist::Document, 
         .find(|d| d.path.to_lowercase() == q)
         .or_else(|| p.docs.iter().find(|d| base(&d.path) == q))
         .or_else(|| if matches!(q.as_str(), "board" | "pcb") { p.docs.iter().find(|d| d.doc_type == "kicad_pcb") } else { None })
+        // "<PCB folder>/board": the board of that PCB, in a project that has several
+        .or_else(|| {
+            let folder = q.strip_suffix("/board").or_else(|| q.strip_suffix("/pcb"))?;
+            p.docs.iter().find(|d| d.doc_type == "kicad_pcb" && d.path.to_lowercase().starts_with(&format!("{folder}/")))
+        })
         .ok_or_else(|| format!("There is no document \"{name}\" in {}.", p.name))
 }
 
