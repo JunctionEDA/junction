@@ -1,12 +1,15 @@
 // sketch.ts — the Sketch feature: 2D curves on a plane or a planar face, and the closed regions they enclose.
 //
-// It solves nothing.  The document stores the curves where they are (sketch/format.ts); this turns them into
-// kernel wires and faces that later features extrude, revolve or sweep.  Its editor is tools/sketch.tsx.
+// It solves nothing.  The document stores the curves where they are, already solved by the sketcher in the page
+// (sketch/format.ts, sketch/solver); this turns them into kernel wires and faces that later features extrude,
+// revolve or sweep.  Regions come from sketch/planar.ts, so curves that cross enclose regions too.  Its editor
+// is sketch/editor.ts with the tools in tools/sketch-*.ts.
 import type { TopoDS_Edge } from "replicad-opencascadejs";
 import { defineFeature } from "../core/feature";
 import { toWorld, type PlaneRef } from "../core/geometry";
 import { emptySketch, pointOf, type SketchData } from "../sketch/format";
-import { findRegions, type Loop } from "../sketch/profiles";
+import { findRegions, type SpanEdge } from "../sketch/planar";
+import type { Loop } from "../sketch/profiles";
 import type { EvalContext, SketchRegion } from "../kernel/types";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -31,11 +34,15 @@ export default defineFeature<SketchParams>({
     const plane = ctx.tmp(new oc.gp_Pln(ctx.tmp(new oc.gp_Ax3(origin, normal, xdir))));
 
     // one kernel edge per curve of a loop, running the way the loop runs
-    const edgeFor = (entity: string, reversed: boolean): TopoDS_Edge => {
+    // (a loop edge with a `span` is only that stretch of its curve: the curve was cut where another crosses it)
+    const edgeFor = ({ entity, reversed, span }: SpanEdge): TopoDS_Edge => {
       const e = data.entities[entity];
       let edge: any;
       if (e.type === "line") {
-        const a = pointOf(data, reversed ? e.b : e.a)!, b = pointOf(data, reversed ? e.a : e.b)!;
+        const p = pointOf(data, e.a)!, q = pointOf(data, e.b)!;
+        const on = (t: number): [number, number] => [p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t];
+        const from = span ? on(span[0]) : p, to = span ? on(span[1]) : q;
+        const a = reversed ? to : from, b = reversed ? from : to;
         edge = new oc.BRepBuilderAPI_MakeEdge(ctx.tmp(k.pnt(toWorld(frame, a))), ctx.tmp(k.pnt(toWorld(frame, b)))).Edge();
       } else if (e.type === "circle" || e.type === "arc") {
         const c = pointOf(data, e.center)!;
@@ -44,7 +51,8 @@ export default defineFeature<SketchParams>({
         const r = circle ? e.r : Math.hypot(start![0] - c[0], start![1] - c[1]);
         if (!(r > 0)) throw ctx.fail("The sketch has a circle or arc with no radius.");
         const circ = ctx.tmp(new oc.gp_Circ(ctx.tmp(new oc.gp_Ax2(ctx.tmp(k.pnt(toWorld(frame, c))), normal, xdir)), r));
-        if (circle) edge = new oc.BRepBuilderAPI_MakeEdge(circ).Edge();
+        if (span) edge = new oc.BRepBuilderAPI_MakeEdge(circ, span[0], span[1]).Edge();
+        else if (circle) edge = new oc.BRepBuilderAPI_MakeEdge(circ).Edge();
         else {
           // by angle, counter-clockwise from start to end, so an end point slightly off the circle still closes
           const a0 = Math.atan2(start![1] - c[1], start![0] - c[0]); let a1 = Math.atan2(end![1] - c[1], end![0] - c[0]);
@@ -58,7 +66,7 @@ export default defineFeature<SketchParams>({
     const wireFor = (loop: Loop, edges: { entity: string; edge: TopoDS_Edge }[] | null): any => {
       const mw = ctx.tmp(new oc.BRepBuilderAPI_MakeWire());
       for (const le of loop.edges) {
-        mw.Add(edgeFor(le.entity, le.reversed));
+        mw.Add(edgeFor(le));
         if (!mw.IsDone()) throw ctx.fail("A sketch loop could not be closed.");
         if (edges) edges.push({ entity: le.entity, edge: ctx.own(mw.Edge()) });   // the edge as the wire holds it: what the kernel's history speaks of
       }
