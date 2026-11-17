@@ -105,7 +105,7 @@ export async function kicadFootprint(fpid: string): Promise<string> {
 
 // ---------------------------------------------------------------- vendor parts
 
-export interface VendorPart { vendor: string; vendor_id: string; mpn: string; manufacturer: string; description: string; package: string; datasheet: string; fields: Record<string, string>; cad: any }
+export interface VendorPart { vendor: string; vendor_id: string; mpn: string; manufacturer: string; description: string; package: string; datasheet: string; value?: string; fields: Record<string, string>; cad: any }
 export const vendorPart = (vendor: string, id: string): Promise<VendorPart> =>
   once(`part:${vendor}:${id}`, () => getJson(`/api/parts/part?vendor=${encodeURIComponent(vendor)}&id=${encodeURIComponent(id)}`, `${vendor} part ${id}`));
 
@@ -116,7 +116,7 @@ export async function vendorSymbol(vendor: string, id: string): Promise<{ libId:
   const node = K().parse(sym.sexpr); if (!node) throw new ToolError(`${vendor} part ${id}: its symbol could not be read.`);
   node[1] = sym.lib_id;
   const fields: Record<string, string> = Object.assign({}, part.fields, part.datasheet ? { Datasheet: part.datasheet } : {}, part.cad.footprint ? { Footprint: part.cad.footprint.fpid } : {});
-  return { libId: sym.lib_id, node, fields, value: part.mpn || sym.name };
+  return { libId: sym.lib_id, node, fields, value: part.value || part.mpn || sym.name };
 }
 
 // ---------------------------------------------------------------- what a part looks like, before it is placed

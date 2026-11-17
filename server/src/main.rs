@@ -440,6 +440,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/parts/part", get(parts::get_part))
         .route("/api/parts/cad", axum::routing::put(parts::link_cad))
         .route("/api/parts/model.step", get(parts::get_model))
+        .route("/api/parts/image", get(parts::get_image))
         .route("/api/libraries", get(parts::list_libraries).post(parts::create_library))
         .route("/api/libraries/{id}", get(parts::get_library).patch(parts::update_library).delete(parts::delete_library))
         .route("/api/libraries/{id}/items", post(parts::add_item))

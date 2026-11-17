@@ -346,7 +346,8 @@ fn lcsc_from_jlcpcb(c: &Value) -> Option<PartInfo> {
         package: s(c, "componentSpecificationEn"),
         category: [s(c, "secondSortName"), s(c, "firstSortName")].into_iter().filter(|x| !x.is_empty()).collect::<Vec<_>>().join(" / "),
         datasheet: s(c, "dataManualUrl"),
-        image: s(c, "minImageAccessIdUrl"),
+        // the large photo when there is one: the small one is a 100-pixel thumbnail
+        image: [s(c, "productBigImageAccessIdUrl"), s(c, "minImageAccessIdUrl")].into_iter().find(|u| u.starts_with("http")).unwrap_or_default(),
         url,
         stock: int(c.get("stockCount")),
         prices,
@@ -474,6 +475,36 @@ pub async fn easyeda_step(uuid: &str) -> VResult<Vec<u8>> {
         return Err(VendorErr::new(ErrKind::NotFound, "EasyEDA has no 3D model for this part."));
     }
     Ok(bytes.to_vec())
+}
+
+/// A product photo, from the link a vendor gave for it: its media type and bytes.
+pub async fn fetch_image(url: &str) -> VResult<(String, Vec<u8>)> {
+    let url = if url.starts_with("//") { format!("https:{url}") } else { url.to_string() };
+    if !url.starts_with("https://") && !url.starts_with("http://") {
+        return Err(VendorErr::new(ErrKind::NotFound, "No photo."));
+    }
+    let resp = http().get(&url).send().await.map_err(|e| VendorErr::net("the vendor's photo store", e))?;
+    if !resp.status().is_success() {
+        return Err(VendorErr::new(if resp.status().is_server_error() { ErrKind::Unreachable } else { ErrKind::NotFound }, "The vendor has no photo of this part."));
+    }
+    let ctype = resp.headers().get(reqwest::header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("").split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    let bytes = resp.bytes().await.map_err(|e| VendorErr::net("the vendor's photo store", e))?;
+    // only raster photos are served on: an SVG could carry script
+    let sniffed = if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        "image/jpeg"
+    } else if bytes.starts_with(b"\x89PNG") {
+        "image/png"
+    } else if bytes.starts_with(b"GIF8") {
+        "image/gif"
+    } else if bytes.len() > 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        "image/webp"
+    } else {
+        ""
+    };
+    if sniffed.is_empty() || bytes.len() > 4 * 1024 * 1024 {
+        return Err(VendorErr::new(ErrKind::NotFound, format!("The vendor's photo of this part could not be used ({}).", if ctype.is_empty() { "unknown type" } else { &ctype })));
+    }
+    Ok((sniffed.to_string(), bytes.to_vec()))
 }
 
 // ------------------------------------------------------------------ Mouser

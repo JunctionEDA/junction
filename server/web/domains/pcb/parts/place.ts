@@ -100,7 +100,7 @@ export async function placePart(ctx: ToolCtx, part: Part): Promise<boolean> {
 
   if (ctx.isSch) {
     const sym = cad.symbol!;
-    if (W.KiCadLibrary && W.KiCadLibrary.placeSymbol) { await W.KiCadLibrary.placeSymbol({ libId: sym.lib_id, symbol: sym.sexpr, fields: { Value: part.mpn || sym.name, Footprint: cad.footprint ? cad.footprint.fpid : "", ...fields } }); return true; }
+    if (W.KiCadLibrary && W.KiCadLibrary.placeSymbol) { await W.KiCadLibrary.placeSymbol({ libId: sym.lib_id, symbol: sym.sexpr, fields: { Value: part.value || part.mpn || sym.name, Footprint: cad.footprint ? cad.footprint.fpid : "", ...fields } }); return true; }
     const sch = W.CollabTools && W.CollabTools.sch; const h = sch && (sch._ as Record<string, (...a: unknown[]) => unknown>);
     if (!h || !h.symbolNode || !h.startCarry) { ctx.toast("Placing symbols is not available in this editor build.", 3500); return false; }
     // In a sheet's lib_symbols the top symbol is named by its library id; its units keep the bare name.
@@ -115,7 +115,7 @@ export async function placePart(ctx: ToolCtx, part: Part): Promise<boolean> {
   }
 
   const fp = cad.footprint!;
-  if (W.KiCadLibrary && W.KiCadLibrary.placeFootprint) { await W.KiCadLibrary.placeFootprint({ fpid: fp.fpid, footprint: fp.sexpr, fields: { Value: part.mpn || fp.name, ...fields } }); return true; }
+  if (W.KiCadLibrary && W.KiCadLibrary.placeFootprint) { await W.KiCadLibrary.placeFootprint({ fpid: fp.fpid, footprint: fp.sexpr, fields: { Value: part.value || part.mpn || fp.name, ...fields } }); return true; }
   const pcb = W.CollabTools && W.CollabTools.pcb; const h = pcb && { ...((pcb as unknown as { _?: Record<string, (...a: unknown[]) => unknown> })._ || {}), ...(pcb as unknown as Record<string, (...a: unknown[]) => unknown>) };
   if (!h || !h.pasteChanges) { ctx.toast("Placing footprints is not available in this editor build.", 3500); return false; }
   const ref = nextRef(doc, cad.reference || "U");
