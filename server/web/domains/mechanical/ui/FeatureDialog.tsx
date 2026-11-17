@@ -113,6 +113,16 @@ function Field({ studio, field, params }: { studio: PartStudio; field: ParamFiel
         : wide ? describeTargets(refs, (id) => features.find((f) => f.id === id)?.name)
         : `${refs.length} ${noun}${refs.length === 1 ? "" : "s"}`;
       control = <PickBox param={field.key} armed={armed} empty={!refs.length} text={text} onArm={arm} onClear={() => set(field.single ? null : [])} />;
+      if (field.planes) {
+        // the default planes are often behind the model: offer them as buttons too
+        const add = (id: DefaultPlaneId) => { const t = { kind: "plane", plane: id }; set(field.single ? t : [...refs.filter((r) => !(r.kind === "plane" && r.plane === id)), t]); };
+        control = (
+          <span className="flex flex-col gap-1">
+            {control}
+            <span className="seg">{(Object.keys(DEFAULT_PLANES) as DefaultPlaneId[]).map((id) => <button key={id} type="button" data-plane={id} className={cx(refs.some((r) => r.kind === "plane" && r.plane === id) && "on")} onClick={() => add(id)}>{DEFAULT_PLANES[id].title}</button>)}</span>
+          </span>
+        );
+      }
       break;
     }
     case "features": {
