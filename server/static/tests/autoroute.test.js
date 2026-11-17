@@ -436,3 +436,22 @@ test("a fine-pitch pin boxed in by its neighbours gets the row laid again in pin
   assert.equal(res.routed, 4, JSON.stringify(res.failed)); assert.equal(res.vias, 0);
   apply(doc, res); assert.deepEqual(errors(doc, settings), []); assert.equal(P.ratsnest(doc).length, 0);
 });
+
+test("escapes: a 0.4 mm QFN turned 45 degrees is fanned out before routing and every pin is routed from its escape", () => {
+  // forty pins on four sides, each to a pad on a ring round the chip (every seventh on the back: it must change layer)
+  const pads = [], far = []; let k = 0;
+  for (let side = 0; side < 4; side++) for (let i = 0; i < 10; i++) {
+    const u = (i - 4.5) * 0.4; const [x, y, pr] = side === 0 ? [u, -2.4, 0] : side === 1 ? [2.4, u, 90] : side === 2 ? [-u, 2.4, 0] : [-2.4, -u, 90];
+    const net = "S" + (++k); pads.push(`(pad "${k}" smd rect (at ${x.toFixed(3)} ${y.toFixed(3)} ${pr + 45}) (size 0.2 0.8) (layers "F.Cu" "F.Mask") (net "${net}") (uuid "q${k}"))`);
+    const a = Math.atan2(y, x) - Math.PI / 4 + (k % 3 - 1) * 0.15, r = 11 + (k % 4), l = k % 7 === 0 ? "B.Cu" : "F.Cu";
+    far.push(`(footprint "T:P" (layer "${l}") (uuid "fp-${++n}") (at ${+(110 + r * Math.cos(a)).toFixed(3)} ${+(55 + r * Math.sin(a)).toFixed(3)}) (pad "1" smd rect (at 0 0) (size 0.8 0.8) (layers "${l}" "${l[0]}.Mask") (net "${net}") (uuid "pad-${n}")))`);
+  }
+  pads.push(`(pad "41" smd rect (at 0 0 45) (size 3.2 3.2) (layers "F.Cu" "F.Mask") (net "GND") (uuid "ep"))`);
+  const doc = K.parseDoc(HEAD.replace("(start 90 40) (end 130 70)", "(start 90 35) (end 130 75)") + `\n(footprint "T:QFN" (layer "F.Cu") (uuid "fp-qfn") (at 110 55 45)\n ${pads.join("\n ")})\n` + far.join("\n") + "\n)", "kicad_pcb");
+  const settings = P.designSettings({ net_settings: { classes: [{ name: "Default", clearance: 0.15, track_width: 0.2, via_diameter: 0.45, via_drill: 0.2 }] } });
+  const res = R.route(K, P, doc, settings, { escapes: true, timeMs: 20000 });
+  assert.equal(res.fanout.escapes, 40); assert.deepEqual(res.fanout.boxed, []);
+  assert.equal(res.routed, 40, JSON.stringify(res.connections.filter((c) => !c.routed).map((c) => [c.net, c.reason, c.detail])));
+  assert.equal(res.fanout.used, 40, "each escape is laid with the route that starts from it");
+  apply(doc, res); assert.deepEqual(errors(doc, settings), []); assert.equal(P.ratsnest(doc).length, 0);
+});

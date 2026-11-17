@@ -2727,7 +2727,7 @@ class Board(_Doc):
               net_options: dict | None = None, keepouts: list | None = None, allow_vias: bool = True, time_s: float | None = None,
               fill: bool = True, max_vias: int | None = None, kinds: dict | None = None, separate=None, fence=None,
               ground_vias: bool = True, fanout_lanes=None, via_cost: float | None = None, groups=None, explain: bool = False,
-              keep_rules: bool = False) -> dict:
+              keep_rules: bool = False, escapes=None) -> dict:
         """Autoroute the missing connections (every unrouted net by default) and report what was done.
 
         order: the few nets to lay first (USB pair, crystal); widths: {net: mm} for supply nets; net_options and
@@ -2768,6 +2768,12 @@ class Board(_Doc):
         fanout_lanes: each pin of a fine-pitch chip keeps a straight lane this long (mm, 0.25 by default) out from its
         pad that only its own net may use, so neighbours cannot box a pin in; raise it (0.8 to 1.2) when a QFN's pins
         are left "blocked", False turns it off.
+        escapes=True lays the escapes of every fine-pitch chip (QFN/QFP, 0.65 mm pitch and finer) before anything is
+        routed: a fan that spreads each row's pins to 1.5 times their pitch, else a straight stub out of the pin or a
+        45-degree leg where the stub is blocked, and a via for a pin that must change layer, none closing another
+        pin's way out; the pin's connections are then routed from the escape's end.  A number is how far past the pad
+        the first ring lies (mm); {"depth": mm, "spread": 1.5} sets both (spread 0: no spreading fan).  The result's
+        `fanout` counts them and names the pins that got none (`boxed`) with what blocks them.  Off by default.
         
         A board still on KiCad's stock via (0.6 on 0.3 mm) gets the house via (0.5 on 0.2 mm) first, and the result says
         so under "rules_changed"; keep_rules=True leaves the rules exactly as they are (the person said not to touch them).
@@ -2824,6 +2830,8 @@ class Board(_Doc):
             e["separate"] = separate
         if fanout_lanes is not None:
             e["fanout_lanes"] = fanout_lanes
+        if escapes is not None:
+            e["escapes"] = escapes
         if via_cost is not None:
             e["via_cost"] = via_cost
         if fence is not None:
@@ -2909,7 +2917,7 @@ class Board(_Doc):
             out["more_unrouted"] = len(un) - 25
         if d.get("explain"):
             out["explain"] = dict(d["explain"], longest_detours=d.get("longest_detours") or [])
-        for k in ("domains", "ground_vias", "groups"):
+        for k in ("domains", "ground_vias", "groups", "fanout"):
             if d.get(k):
                 out[k] = d[k]
         return out
