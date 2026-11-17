@@ -676,6 +676,41 @@ With `KC_DEV_LOGIN=1`, `/auth/dev?jwt=<token>&next=/` signs a browser in with a 
 `window.JunctionPartStudio.getState()` (for example `kernel.state === "ready"`) rather than on timers, and
 start Chromium with `--use-gl=swiftshader --enable-unsafe-swiftshader` when there is no GPU.
 
+## Reference geometry, patterns and variables
+
+Features `plane`, `axis`, `point` and `helix` make **datums**: reference geometry kept in the model
+(`ModelState.datums`, by feature id), sent to the page as `RegenResult.datums` (`DatumView`: a plane's frame,
+centre and size; an axis' origin, direction and length; a point; a curve as a polyline), drawn and picked by
+`viewport/datums.ts` as `Pick { kind: "datum", featureId, datum }`.
+
+- A sketch can lie on a reference plane: `PlaneRef` has a third member `{ kind: "datum", feature }`, and
+  `frameOf` resolves it. Selecting a reference plane and pressing Sketch starts one there.
+- In `evaluate`: `ctx.datum(id)`, `ctx.setDatum(d)`, and `ctx.history(id)`, the model just before and just after
+  an earlier feature (what patterns and mirrors read).
+- A `refs` field may also take `datums: ["plane" | "axis" | "point" | "curve"]`, `planes: true` (the default
+  planes, also offered as buttons) and `sketch: true` (sketch curves). Those picks are stored as the `RefTarget`s
+  of `features/_refs.ts`: `{ kind: "plane", plane }`, `{ kind: "datum", feature }`, `{ kind: "sketch", feature,
+  entity }`, besides GeomRefs. `kernel/ops/ref-geom.ts` turns any of them into a plane, axis, point or curve.
+  A straight edge's or a cylinder's direction is made canonical (its largest component positive), because the
+  kernel may reverse an edge on a rebuild.
+- A `features` field stores earlier feature ids in the order picked (`types` / `exclude` filter the list).
+
+**Patterns and Mirror** (`linear-pattern`, `circular-pattern`, `mirror`; `kernel/ops/pattern-core.ts`) copy
+bodies, or what earlier features did: the seed's effect on each body is read from `ctx.history` as two tools,
+removed (before − after) and added (after − before); every copy is that tool moved, and all copies go into one
+cut and one fuse per body. A seed that made a body has the body copied. A copy's faces are named
+`<pattern id>:<key>:<seed face name>`, the key naming the copy by its place: `i<n>.<m>` (n-th along the first
+direction, m-th along the second, the seed is `i1.1`; a circular pattern uses `i<n>.1`), `m` for a mirror.
+Exact for features whose effect does not depend on where they are; a copy of, say, a fillet keeps the seed's
+shape. **Sweep** and **Loft** name faces `<id>:start…`, `<id>:end…`, `<id>:side:<sketch entity>`.
+
+**Variables** are items `{ id, type: "variable", name, expr, order }` (`document/variables.ts`, the Variables
+panel). A number field accepts an expression; the feature keeps the number and the text under
+`params.$expr = { <key>: "<text>" }`. The page evaluates every `$expr` again before each regeneration
+(`resolveInputs`, in `studio.ts`), and editing a variable rewrites the stored numbers that depend on it in the same
+change. A reader of a `.jpart` that does not know variables sees plain numbers. Anything else that regenerates a
+part studio (an assembly drawing an instance) should call `resolveInputs` too.
+
 ## Limits, in one place
 
 - **No constraint solver, no dimensions.** Sketch tools snap to existing points, to the origin and to round

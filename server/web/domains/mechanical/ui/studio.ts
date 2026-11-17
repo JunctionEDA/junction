@@ -179,12 +179,15 @@ export class PartStudio {
   /** A sketch is shown while it is open, selected, being used by the dialog, or not yet used by a later feature. */
   private refreshSketches(): void {
     const s = this.state, { features, rollback } = this.effective();
+    // a dialog field that takes sketch curves or a profile shows every sketch while it listens
+    const armed = s.editing && s.editing.field ? featureDef(s.editing.draft.featureType)?.schema.find((x) => x.key === s.editing!.field) : undefined;
+    const pickingCurves = !!armed && ((armed.kind === "refs" && !!armed.sketch) || armed.kind === "profile");
     const visible = new Set<string>();
     features.slice(0, rollback).forEach((f, i) => {
       if (f.featureType !== "sketch") return;
       const used = features.slice(i + 1, rollback).some((later) => JSON.stringify(later.params).includes(f.id));
       const inDialog = !!s.editing && JSON.stringify(s.editing.draft.params).includes(f.id);
-      if (!used || inDialog || s.selectedFeature === f.id) visible.add(f.id);
+      if (!used || inDialog || pickingCurves || s.selectedFeature === f.id) visible.add(f.id);
     });
     this.view.setSketches(s.sketches, visible, s.sketch ? s.sketch.featureId : null);
   }
@@ -249,6 +252,7 @@ export class PartStudio {
     const e = this.state.editing; if (!e) return;
     this.set({ editing: { ...e, field: key } });
     this.applyFieldFilter();
+    this.refreshSketches();
   }
   private applyFieldFilter(): void {
     const e = this.state.editing;

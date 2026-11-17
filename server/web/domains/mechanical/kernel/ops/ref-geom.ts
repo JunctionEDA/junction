@@ -14,6 +14,16 @@ export interface Axis { origin: Vec3; dir: Vec3 }
 
 const EPS = 1e-9;
 
+/**
+ * An edge's or a cylinder's direction made independent of how the kernel happened to orient it: the largest
+ * component is positive.  The kernel may reverse an edge on a rebuild; a pattern along it must not turn round.
+ */
+export function canonical(d: Vec3): Vec3 {
+  let i = 0;
+  for (let a = 1; a < 3; a++) if (Math.abs(d[a]) > Math.abs(d[i]) + 1e-9) i = a;
+  return d[i] < 0 ? scale(d, -1) : d;
+}
+
 /** A frame on a plane through `origin` with this normal; x follows `xHint` (or world X, or world Y) projected onto it. */
 export function frameFromNormal(origin: Vec3, normal: Vec3, xHint?: Vec3): Frame {
   const n = normalize(normal);
@@ -114,18 +124,18 @@ export function axisOf(ctx: EvalContext, t: RefTarget | null | undefined, what =
   }
   if (t.kind === "sketch") {
     const e = edgeInfo(ctx, sketchEdge(ctx, t.feature, t.entity));
-    if (e.kind === "line") return { origin: e.start, dir: e.dir! };
-    if (e.kind === "circle") return { origin: e.centre!, dir: e.axis! };
+    if (e.kind === "line") return { origin: e.start, dir: canonical(e.dir!) };
+    if (e.kind === "circle") return { origin: e.centre!, dir: canonical(e.axis!) };
     throw ctx.fail(`The ${what} must be ${NEED.axis}.`);
   }
   const r = ctx.resolve(t);
   if (r.kind === "edge") {
     const e = edgeInfo(ctx, r.shape);
-    if (e.kind === "line") return { origin: e.start, dir: e.dir! };
-    if (e.kind === "circle") return { origin: e.centre!, dir: e.axis! };
+    if (e.kind === "line") return { origin: e.start, dir: canonical(e.dir!) };
+    if (e.kind === "circle") return { origin: e.centre!, dir: canonical(e.axis!) };
   } else if (r.kind === "face") {
     const f = faceInfo(ctx, r.shape);
-    if (f.axis) return f.axis;
+    if (f.axis) return { origin: f.axis.origin, dir: canonical(f.axis.dir) };
     if (f.frame) return { origin: f.centre, dir: f.frame.normal };
   }
   throw ctx.fail(`The ${what} must be ${NEED.axis}.`);

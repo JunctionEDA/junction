@@ -307,6 +307,30 @@ test("a swept handle: a circle carried along a line, an arc and a line, joined t
   near(vol(k, engine), 60 * 20 * 5 + Math.PI * 9 * L, 1e-3);
 });
 
+test("a path drawn with the line tool, with sharp corners: round or mitred corners, and a tube with a hole", async () => {
+  const poly = sketch("path", { a: { type: "point", x: -20, y: 5 }, b: { type: "point", x: -20, y: 25 }, c: { type: "point", x: 20, y: 25 }, d: { type: "point", x: 20, y: 5 },
+    l1: { type: "line", a: "a", b: "b" }, l2: { type: "line", a: "b", b: "c" }, l3: { type: "line", a: "c", b: "d" } }, front);
+  const feats = (corners, prof) => [poly, feature("pn", "plane", { method: "normal", curve: { kind: "sketch", feature: "path", entity: "l1" }, position: 0 }),
+    sketch("prof", prof, datum("pn")),
+    feature("sw", "sweep", { profile: { sketch: "prof", regions: null }, path: [{ kind: "sketch", feature: "path", entity: "l2" }], corners, operation: "new", targets: [] })];
+  const valid = (k, s) => new k.oc.BRepCheck_Analyzer(s, true, false).IsValid();
+  for (const corners of ["round", "sharp"]) {
+    const { k, engine, r } = await run(feats(corners, circle(0, 0, 3, "c")));
+    allOk(r);
+    const b = engine.state.bodies[0];
+    assert.ok(valid(k, b.shape), corners);
+    const v = k.volume(b.shape), straight = Math.PI * 9 * 80;
+    assert.ok(Math.abs(v - straight) / straight < 0.03, `${corners}: ${v} vs ${straight}`);
+    const names = b.topo.faces.map((f) => f.name);
+    assert.ok(names.includes("sw:start:c") && names.includes("sw:end:c") && names.includes("sw:side:c~3"), names.join(" "));
+  }
+  const { k, engine, r } = await run(feats("round", { ...circle(0, 0, 3, "c"), ...circle(0, 0, 2, "i") }));
+  allOk(r);
+  const v = k.volume(engine.state.bodies[0].shape), tube = Math.PI * 5 * 80;
+  assert.ok(Math.abs(v - tube) / tube < 0.03, `${v} vs ${tube}`);
+  assert.ok(valid(k, engine.state.bodies[0].shape));
+});
+
 test("a sweep with its path in the profile's sketch, or with no path, says what to do", async () => {
   const { r } = await run([sketch("prof", circle(0, 0, 3, "c")), feature("sw", "sweep", { profile: { sketch: "prof", regions: null }, path: [], operation: "new", targets: [] })]);
   assert.match(r.features[1].message, /Pick the path/);

@@ -311,6 +311,9 @@ export class ModelView {
     if (want("datum")) {
       const h = this.datums.pick(ray, px, rc, (k) => k !== "plane", false);
       if (h && h.d + (h.datum === "point" ? 1e9 : 1e8) <= faceD + slack) offer({ kind: "datum", featureId: h.featureId, datum: h.datum, point: h.point }, h.d, 0);
+      // a reference plane lying on the face under the pointer is drawn over it, so it is what is picked there
+      const hp = faceD < Infinity ? this.datums.pick(ray, px, rc, (k) => k === "plane", true) : null;
+      if (hp && Math.abs(hp.d - faceD) <= slack) offer({ kind: "datum", featureId: hp.featureId, datum: hp.datum, point: hp.point }, hp.d, 5e3);
     }
     if (best) return (best as { pick: Pick }).pick;
 
