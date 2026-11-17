@@ -259,6 +259,8 @@ export class BoardScene {
   private bodyList: Body[] = [];
   private toModel: (p: Pt) => Pt = (p) => p;
   private thickness = 1.6;
+  /** Where the board file's origin (0, 0) is in this scene: what places solids given in board coordinates (Viewer.setExtras). */
+  origin(): Pt { return this.toModel([0, 0]); }
   private models: ModelStore | null = null;
   private vis: Visibility;
   /** true when this scene took its board meshes from the one it replaced (tests) */
