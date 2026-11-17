@@ -44,6 +44,7 @@ export default defineFeature<BoardReferenceParams>({
   title: "Board",
   icon: '<rect x="4" y="6" width="16" height="12" rx="1.5"/><rect x="7" y="9" width="5" height="4"/><circle cx="16.5" cy="9.5" r="1"/><circle cx="16.5" cy="14.5" r="1"/><path d="M9 13v2.5h4"/>',
   toolbarOrder: 15,
+  toolbarSection: "board", toolbarMenu: "Board",
   defaults: () => ({ board: null, plane: { kind: "plane", plane: "top" }, x: 0, y: 0, z: 0, angle: 0, flip: false, origin: null, minHole: 1.5, minHeight: 1.5 }),
   schema: [
     { key: "board", label: "Board", kind: "document", docTypes: ["kicad_pcb"], hint: "A board of this project. The part studio follows it as it is edited." },

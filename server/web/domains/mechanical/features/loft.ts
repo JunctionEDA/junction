@@ -15,7 +15,8 @@ export default defineFeature<LoftParams>({
   type: "loft",
   title: "Loft",
   icon: '<rect x="4" y="16" width="16" height="4"/><ellipse cx="12" cy="5" rx="4" ry="1.8"/><path d="M4 16L8 5M20 16L16 5"/>',
-  toolbarOrder: 31,
+  toolbarOrder: 25,
+  toolbarSection: "solid", toolbarMenu: "Sweep",
   defaults: () => ({ profiles: [], ruled: false, operation: "new", targets: [] }),
   schema: [
     { key: "profiles", label: "Profiles", kind: "features", types: ["sketch"], hint: "Two or more sketches, in the order the loft passes through them." },

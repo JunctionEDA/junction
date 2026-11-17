@@ -36,6 +36,7 @@ export default defineFeature<PlaneParams>({
   title: "Plane",
   icon: '<path d="M3 15l5-8h13l-5 8z"/><path d="M12 11v9"/><path d="M10 18l2 2 2-2"/>',
   toolbarOrder: 60,
+  toolbarSection: "reference", toolbarMenu: "Reference",
   defaults: () => ({ method: "offset", ref: null, distance: 10, flip: false, points: [], faces: [], axis: null, angle: 45, curve: null, position: 0, cylinder: null }),
   schema: [
     { key: "method", label: "Placed", kind: "enum", options: [

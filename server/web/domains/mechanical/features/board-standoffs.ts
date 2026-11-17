@@ -29,6 +29,7 @@ export default defineFeature<BoardStandoffsParams>({
   title: "Standoffs",
   icon: '<path d="M3 7h18"/><path d="M7 7v10h3V7"/><path d="M14 7v10h3V7"/><path d="M4 17h16"/>',
   toolbarOrder: 17,
+  toolbarSection: "board", toolbarMenu: "Board",
   defaults: () => ({ holes: [], height: 5, diameter: 6, bore: 2.5, operation: "new" }),
   schema: [
     { key: "holes", label: "Holes", kind: "refs", of: ["face"], hint: "The walls of the board's mounting holes." },

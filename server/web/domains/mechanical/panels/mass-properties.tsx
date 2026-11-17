@@ -2,6 +2,7 @@
 // area, mass, centre of mass, moments of inertia and box of the selected parts (every part when none is
 // selected), exact from the worker.  A click on a value copies it.
 import { useEffect } from "react";
+import { usePanelOpen } from "../ui/panels";
 import { cx } from "../../../shared/util";
 import { definePanel } from "../core/tool";
 import { assignMaterial, materialsOf } from "../document/mass-materials";
@@ -27,7 +28,8 @@ function MassProperties({ studio }: { studio: PartStudio }) {
   const bodies = useStudio(studio, (x) => x.bodies);
   const canEdit = useStudio(studio, (x) => x.canEdit);
   useStudio(studio, (x) => x.features);
-  useEffect(() => mass.watch(), [mass]);
+  const open = usePanelOpen(studio, "mass-properties");
+  useEffect(() => (open ? mass.watch() : undefined), [mass, open]);   // nothing is weighed while the panel is folded
   const { library, assign } = materialsOf(studio.doc);
   const names = Object.entries(library).sort((a, b) => a[1].name.localeCompare(b[1].name));
   const t = s.total;
@@ -84,4 +86,4 @@ function MassProperties({ studio }: { studio: PartStudio }) {
   );
 }
 
-export default definePanel({ id: "mass-properties", title: "Mass properties", side: "right", order: 20, render: (studio) => <MassProperties studio={studio} /> });
+export default definePanel({ id: "mass-properties", title: "Mass properties", side: "right", order: 20, open: false, render: (studio) => <MassProperties studio={studio} /> });

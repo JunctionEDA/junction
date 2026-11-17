@@ -21,6 +21,7 @@ export default defineFeature<SketchParams>({
   title: "Sketch",
   icon: '<path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/>',
   toolbarOrder: 10,
+  toolbarSection: "sketch",
   defaults: () => ({ plane: { kind: "plane", plane: "top" }, sketch: emptySketch() }),
   schema: [{ key: "plane", label: "Sketch plane", kind: "plane" }],
 

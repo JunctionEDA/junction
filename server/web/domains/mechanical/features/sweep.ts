@@ -25,7 +25,8 @@ export default defineFeature<SweepParams>({
   type: "sweep",
   title: "Sweep",
   icon: '<circle cx="5" cy="17" r="2.5"/><path d="M7.5 17C13 17 11 6 19 6"/><path d="M19 3.5v5"/>',
-  toolbarOrder: 30,
+  toolbarOrder: 24,
+  toolbarSection: "solid", toolbarMenu: "Sweep",
   defaults: () => ({ profile: null, path: [], corners: "round", operation: "new", targets: [] }),
   schema: [
     { key: "profile", label: "Profile", kind: "profile" },

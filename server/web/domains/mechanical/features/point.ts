@@ -15,6 +15,7 @@ export default defineFeature<PointParams>({
   title: "Point",
   icon: '<circle cx="12" cy="12" r="2.5"/><path d="M12 3v5M12 16v5M3 12h5M16 12h5"/>',
   toolbarOrder: 62,
+  toolbarSection: "reference", toolbarMenu: "Reference",
   defaults: () => ({ method: "reference", ref: null, x: 0, y: 0, z: 0 }),
   schema: [
     { key: "method", label: "Placed", kind: "enum", options: [{ value: "reference", label: "On geometry" }, { value: "coordinates", label: "Coordinates" }] },

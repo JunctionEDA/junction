@@ -25,6 +25,7 @@ export default defineFeature<LinearPatternParams>({
   title: "Linear pattern",
   icon: '<rect x="3" y="9" width="5" height="5"/><rect x="10" y="9" width="5" height="5" stroke-dasharray="2 1.5"/><rect x="17" y="9" width="4" height="5" stroke-dasharray="2 1.5"/>',
   toolbarOrder: 70,
+  toolbarSection: "pattern", toolbarMenu: "Pattern",
   defaults: () => ({ ...copyDefaults(), direction: null, spacing: 10, count: 3, flip: false, second: false, direction2: null, spacing2: 10, count2: 2, flip2: false, skip: "" }),
   schema: [
     ...copyFields("Copy"),

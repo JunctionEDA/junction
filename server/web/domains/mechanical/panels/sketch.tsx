@@ -140,4 +140,4 @@ function SketchChrome({ studio }: { studio: PartStudio }) {
   );
 }
 
-export default definePanel({ id: "sketch", title: "Sketch", side: "right", order: 10, render: (studio) => <SketchChrome studio={studio} /> });
+export default definePanel({ id: "sketch", title: "Sketch", side: "right", order: 5, visible: (studio) => !!studio.getState().sketch, render: (studio) => <SketchChrome studio={studio} /> });

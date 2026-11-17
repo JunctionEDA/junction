@@ -3,6 +3,7 @@
 import { startComment } from "../collab/CommentsList";
 import { studioCollab } from "../collab/studio-collab";
 import { defineTool } from "../core/tool";
+import { showPanel } from "../ui/panels";
 
 export default defineTool({
   id: "comment", title: "Comment", hint: "Pin a comment to a face, an edge, a vertex or a feature", group: "inspect", order: 90,
@@ -16,5 +17,5 @@ export default defineTool({
     return null;
   },
   active: (studio) => !!studioCollab(studio)?.comments.getState().picking,
-  run: (studio) => { const c = studioCollab(studio); if (c) startComment(studio, c); },
+  run: (studio) => { const c = studioCollab(studio); if (c) { showPanel("comments"); startComment(studio, c); } },
 });

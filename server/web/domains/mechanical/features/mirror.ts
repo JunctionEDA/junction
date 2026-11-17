@@ -16,7 +16,8 @@ export default defineFeature<MirrorParams>({
   type: "mirror",
   title: "Mirror",
   icon: '<path d="M12 3v18" stroke-dasharray="2 2"/><path d="M9 6L4 18h5z"/><path d="M15 6l5 12h-5z"/>',
-  toolbarOrder: 69,
+  toolbarOrder: 72,
+  toolbarSection: "pattern", toolbarMenu: "Pattern",
   defaults: () => ({ ...copyDefaults(), plane: null }),
   schema: [
     ...copyFields("Mirror"),

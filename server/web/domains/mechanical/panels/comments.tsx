@@ -15,4 +15,4 @@ function Comments({ studio }: { studio: PartStudio }) {
   return c ? <CommentsList c={c} /> : null;
 }
 
-export default definePanel({ id: "comments", title: "Comments", side: "right", order: 90, render: (studio) => <Comments studio={studio} /> });
+export default definePanel({ id: "comments", title: "Comments", side: "right", order: 90, open: false, render: (studio) => <Comments studio={studio} /> });

@@ -20,6 +20,7 @@ export default defineFeature<AxisParams>({
   title: "Axis",
   icon: '<path d="M12 2v20" stroke-dasharray="3 2"/><path d="M8 7a6 3 0 1 0 8 0"/>',
   toolbarOrder: 61,
+  toolbarSection: "reference", toolbarMenu: "Reference",
   defaults: () => ({ method: "reference", ref: null, points: [], planes: [], flip: false }),
   schema: [
     { key: "method", label: "Placed", kind: "enum", options: [{ value: "reference", label: "Along" }, { value: "points", label: "Two points" }, { value: "planes", label: "Two planes" }] },
