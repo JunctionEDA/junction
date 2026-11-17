@@ -2226,6 +2226,8 @@ class Board(_Doc):
         out = {"placed": len(d.get("placements", [])), "score": d.get("score"), "outline": d.get("outline"), "unknown_refs": d.get("unknown_refs") or []}
         if d.get("turned"):      # square chips the engine stood at 45 degrees because their cluster came out smaller
             out["turned_45"] = d["turned"]
+        if d.get("motion_sensors"):      # accelerometers, gyros, IMUs: square to the board, and which way their axes point
+            out["motion_sensors"] = d["motion_sensors"]
         self.project.note(f"board: placed {out['placed']} footprints, score {out['score']}")
         # the small parts, in the order a person seats them: the matching network at the radio pin, the bypass capacitors
         # at their supply pins, then the crystal at its oscillator pins and the parts that serve one pin (a pull-down in

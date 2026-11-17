@@ -23,7 +23,7 @@ export interface PlaceSpec {
 export interface PlaceOptions { footprints?: PlaceSpec[]; outline?: Box; spacing?: number; grid?: number; fit?: boolean; maxFill?: number }
 export interface Placement { ref: string; id: string; x: number; y: number; rot: number; side: "front" | "back"; group: string }
 export interface PlaceScore { ratsnest: number; overlaps: number; courtyardClashes: number; outside: number; area: number; clashes: [string, string][]; outsideRefs: string[] }
-export interface PlaceResult { placements: Placement[]; score: PlaceScore; outline: Box; outlineFromBoard: boolean; groups: { name: string; anchor: string; refs: string[]; box: Box }[]; unknown: string[]; turned?: string[] }
+export interface PlaceResult { motion_sensors?: { ref: string; rot: number | null; axes: string }[]; placements: Placement[]; score: PlaceScore; outline: Box; outlineFromBoard: boolean; groups: { name: string; anchor: string; refs: string[]; box: Box }[]; unknown: string[]; turned?: string[] }
 
 interface Pad { x: number; y: number; net: string; thru: boolean }
 interface Part {
@@ -55,6 +55,16 @@ function turnBox(b: Box, deg: number): Box {
 const shift = (b: Box, x: number, y: number): Box => [b[0] + x, b[1] + y, b[2] + x, b[3] + y];
 const hit = (a: Box, b: Box, gap: number) => a[0] < b[2] + gap - 1e-6 && a[2] > b[0] - gap + 1e-6 && a[1] < b[3] + gap - 1e-6 && a[3] > b[1] - gap + 1e-6;
 const GLOBAL_NAME = /^\/?(GND|AGND|DGND|PGND|VSS|VCC|VDD|VBUS|VIN|VBAT|\+?\d+V\d*|\+?\d+\.\d+V|\+\d*V\d*[A-Z]*)$/i;
+
+// A motion sensor (accelerometer, gyroscope, IMU, magnetometer) measures along its own axes: the firmware has to map
+// them to the board's, so it stands square to the board (never at 45°), at the same turn as every other such sensor,
+// 0° unless asked otherwise, so its X and Y are the board's X and Y.
+const MOTION = /\b(IMU|accelerometer|accel|gyro\w*|magnetometer|compass|inertial|6-?axis|9-?axis)\b|^(ICM-?\d|MPU-?\d|BMI\d|BMX\d|BNO\d|BMM\d|BMA\d|LSM\d|LIS\d|ASM330|ISM330|IIS\d|IAM-?\d|ADXL\d|ADXRS|MMA\d|FXOS|FXAS|KX\w?\d|MMC\d|QMC\d|HMC\d|AK09|SCH16|MC34X)/i;
+export function isMotionSensor(K: any, node: any): boolean {
+  const ref = refOf(K, node); if (/^(C|R|L|D|J|P|TP|SW|Y|X|FB|F)\d/i.test(ref)) return false;
+  const props = K.kids(node, "property").filter((q: any) => /^(Value|Description|MPN|Part ?Number|Manufacturer_Part_Number|LCSC)$/i.test(K.str(q[1]))).map((q: any) => K.str(q[2]));
+  return props.some((v: string) => MOTION.test(v.trim()));
+}
 
 function partOf(K: any, P: any, doc: any, it: any, spec: PlaceSpec | null): Part {
   let node = it.node; const cur = K.atOf(it.node) as [number, number, number]; const layer = K.kid(node, "layer"); const isBack = !!layer && K.str(layer[1]) === "B.Cu";
@@ -93,7 +103,12 @@ function partOf(K: any, P: any, doc: any, it: any, spec: PlaceSpec | null): Part
 export function place(K: any, P: any, doc: any, settings: any, opts: PlaceOptions = {}): PlaceResult {
   void settings; const gap = opts.spacing !== undefined ? Math.max(0, +opts.spacing) : 0.5; const specs = new Map<string, PlaceSpec>(); for (const s of opts.footprints || []) if (s && s.ref) specs.set(s.ref, s);
   const all: Part[] = []; const byRef = new Map<string, Part>();
-  for (const it of doc.items.values()) if (it.kind === "footprint") { const ref = refOf(K, it.node); const p = partOf(K, P, doc, it, specs.get(ref) || null); all.push(p); if (ref && !byRef.has(ref)) byRef.set(ref, p); }
+  const motion: string[] = [];
+  for (const it of doc.items.values()) if (it.kind === "footprint") {
+    const ref = refOf(K, it.node); let sp = specs.get(ref) || null;
+    if (isMotionSensor(K, it.node)) { motion.push(ref); if (!sp || (sp.rot === undefined && !(typeof sp.fixed === "object" && sp.fixed && sp.fixed.rot !== undefined))) sp = { ...(sp || {}), ref, rot: 0 }; }
+    const p = partOf(K, P, doc, it, sp); all.push(p); if (ref && !byRef.has(ref)) byRef.set(ref, p);
+  }
   const unknown = Array.from(specs.keys()).filter((r) => !byRef.has(r));
   const listed = specs.size > 0;
 
@@ -293,7 +308,9 @@ export function place(K: any, P: any, doc: any, settings: any, opts: PlaceOption
       b.rot = rot; b.x = spec.fixed.x - px; b.y = spec.fixed.y - py; b.placed = true; return true;
     }
     let rots = [0, 90, 180, 270];
-    if (spec && spec.rot !== undefined) rots = [norm(spec.rot - ap.rot)];
+    // a turn asked for any part of the block (a motion sensor's) holds the whole block to it, on the board
+    const held = spec && spec.rot !== undefined ? ap : b.parts.find((q) => q.spec && q.spec.rot !== undefined && !b.edge) || null;
+    if (held) rots = [norm(held.spec!.rot! - held.rot)];
     else if (b.edge) {   // a connector faces out: its pads sit towards the inside of the board
       const pc = ap.pads.length ? ap.pads.reduce((s, d) => [s[0] + d.x / ap.pads.length, s[1] + d.y / ap.pads.length], [0, 0]) : [0, 0]; const bc = [(ap.box[0] + ap.box[2]) / 2, (ap.box[1] + ap.box[3]) / 2];
       const inward: Pt = b.edge === "left" ? [1, 0] : b.edge === "right" ? [-1, 0] : b.edge === "top" ? [0, 1] : [0, -1]; let bestDot = -Infinity, pick = rots;
@@ -394,7 +411,8 @@ export function place(K: any, P: any, doc: any, settings: any, opts: PlaceOption
     if (!good(res)) res = best;    // the coarse grid's placement is legal too: better a few tenths off the fine grid than the board size thrown away
   }
   const { placements, score, groups } = res; const O = res.O;
-  return { placements, score, outline: O.map(r3) as Box, outlineFromBoard: fromBoard, groups, unknown, turned: turnedChips.length ? turnedChips : undefined };
+  const oriented = motion.length ? motion.map((ref) => { const pl = placements.find((q) => q.ref === ref); return { ref, rot: pl ? pl.rot : null, axes: pl && norm(pl.rot) % 90 === 0 ? ("sensor X points " + ["right", "up", "left", "down"][norm(pl.rot) / 90] + " and Y " + ["up", "left", "down", "right"][norm(pl.rot) / 90] + " on the board seen from the top (pin 1 top left at 0°, as in most datasheets' top view)" + (pl.side === "back" ? "; on the back, so X is mirrored and Z points down" : "")) : "not square to the board" }; }) : undefined;
+  return { placements, score, outline: O.map(r3) as Box, outlineFromBoard: fromBoard, groups, unknown, turned: turnedChips.length ? turnedChips : undefined, motion_sensors: oriented };
 }
 
 /** The total length of the per-net spanning trees over pad centres: what is left to route, as the crow flies. */
