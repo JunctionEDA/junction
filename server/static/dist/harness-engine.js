@@ -74166,6 +74166,16 @@ var init_host = __esm({
 });
 
 // web/domains/registry.ts
+function partStudioImporting(file, featureId) {
+  const sorted = (v) => Array.isArray(v) ? "[" + v.map(sorted).join(",") + "]" : v && typeof v === "object" ? "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + sorted(v[k])).join(",") + "}" : JSON.stringify(v);
+  const stem2 = file.name.replace(/\.[^.]+$/, "");
+  const format = /\.(brep|brp)$/i.test(file.path) ? "brep" : "step";
+  const items = [
+    { featureType: "import", id: featureId, name: stem2, order: "V", params: { file: { ...file, format }, split: "solids" }, type: "feature" },
+    { id: "studio", rollback: null, type: "studio", units: "mm" }
+  ].sort((a, b) => a.id < b.id ? -1 : 1);
+  return '{"junction":"part-studio","version":1,"items":[\n' + items.map(sorted).join(",\n") + "\n]}\n";
+}
 function documentKind(docType) {
   return DOCUMENT_KINDS.find((k) => k.docType === docType);
 }
@@ -74203,7 +74213,9 @@ var init_registry = __esm({
             newName: "Part Studio",
             icon: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5"/><path d="M12 12v9"/>',
             // the same text as web/domains/mechanical/document/format.ts newPartStudioText() (a test compares them)
-            newText: '{"junction":"part-studio","version":1,"items":[\n{"id":"studio","rollback":null,"type":"studio","units":"mm"}\n]}\n'
+            newText: '{"junction":"part-studio","version":1,"items":[\n{"id":"studio","rollback":null,"type":"studio","units":"mm"}\n]}\n',
+            // a STEP file opens as a part studio that imports it (web/domains/mechanical/features/import-file.ts)
+            fromFile: { title: "STEP file", accept: [".step", ".stp"], folder: "models", text: (f2) => partStudioImporting(f2, crypto.randomUUID()) }
           }
         ]
       },

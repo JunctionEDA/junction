@@ -3,6 +3,7 @@
 // the order they arrive, except that a regeneration is skipped when a newer one is already waiting.
 import { loadKernel } from "./load";
 import { FEATURES, SERVICES, RegenEngine, resultBuffers, type FromWorker, type ToWorker } from "./index";
+import { transferables } from "./ops/exchange-export";
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 const scope = self as any;
@@ -45,7 +46,8 @@ async function handle(msg: ToWorker): Promise<void> {
     k.scope = mine;
     try {
       const value = await svc.run({ oc: k.oc, k, state, fail: (m) => new Error(m) }, msg.args);
-      post({ t: "call", seq: msg.seq, ok: true, value });
+      // a file in the result (an export) is a typed array: transferred, not copied
+      post({ t: "call", seq: msg.seq, ok: true, value }, transferables(value));
     } catch (e) { post({ t: "call", seq: msg.seq, ok: false, error: k.describe(e) }); }
     finally { k.scope = null; for (const o of mine.reverse()) { try { o.delete(); } catch (x) { /* already gone */ } } }
   }
