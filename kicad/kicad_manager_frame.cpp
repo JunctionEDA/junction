@@ -726,11 +726,11 @@ void KICAD_MANAGER_FRAME::PreloadAllLibraries()
     CallAfter(
             [&]()
             {
-                KIFACE *schface = Kiway().KiFACE( KIWAY::FACE_SCH );
-                schface->PreloadLibraries( &Kiway() );
-
-                KIFACE *pcbface = Kiway().KiFACE( KIWAY::FACE_PCB );
-                pcbface->PreloadLibraries( &Kiway() );
+                for( KIWAY::FACE_T face : { KIWAY::FACE_SCH, KIWAY::FACE_PCB } )
+                {
+                    if( KIFACE* kiface = Kiway().KiFACE( face ) )
+                        kiface->PreloadLibraries( &Kiway() );
+                }
 
                 Pgm().PreloadDesignBlockLibraries( &Kiway() );
             } );
@@ -870,6 +870,30 @@ void KICAD_MANAGER_FRAME::DoWithAcceptedFiles()
 
 bool KICAD_MANAGER_FRAME::canCloseWindow( wxCloseEvent& aEvent )
 {
+    // Shutdown blocks must be determined and vetoed as early as possible, before any jobset prompt
+    if( isBlockableSessionEnd() )
+    {
+        for( size_t i = 0; i < m_notebook->GetPageCount(); i++ )
+        {
+            PANEL_JOBSET* jobset = dynamic_cast<PANEL_JOBSET*>( m_notebook->GetPage( i ) );
+
+            if( jobset && jobset->GetJobsFile()->GetDirty() )
+            {
+                KIPLATFORM::APP::SetShutdownBlockReason( this, _( "Jobset changes are unsaved" ) );
+                return false;
+            }
+        }
+
+        if( m_onlinePane && !m_onlinePane->CanClose() )
+        {
+            KIPLATFORM::APP::SetShutdownBlockReason( this, _( "A project is being downloaded or published" ) );
+            return false;
+        }
+
+        // Drop the reason a cancelled logoff left behind once its jobset has been saved
+        KIPLATFORM::APP::RemoveShutdownBlockReason( this );
+    }
+
     // Quitting mid-download would leave a folder nothing knows to be a copy of the
     // project, and mid-publish a project online with nothing here knowing this folder is
     // its copy.
@@ -978,11 +1002,11 @@ bool KICAD_MANAGER_FRAME::CloseProject( bool aSave )
         return false;
 
     // Abort any in-progress background load, since the threads depend on the project not changing
-    KIFACE *schface = Kiway().KiFACE( KIWAY::FACE_SCH );
-    schface->CancelPreload();
-
-    KIFACE *pcbface = Kiway().KiFACE( KIWAY::FACE_PCB );
-    pcbface->CancelPreload();
+    for( KIWAY::FACE_T face : { KIWAY::FACE_SCH, KIWAY::FACE_PCB } )
+    {
+        if( KIFACE* kiface = Kiway().KiFACE( face ) )
+            kiface->CancelPreload();
+    }
 
     // Save the project file for the currently loaded project.
     if( m_active_project )
