@@ -21,6 +21,7 @@ import { releaseLayers } from "./paint";
 import { applyVariantToDoc, refreshVariantNames } from "./variant";
 import { fpEntryFor, fpParam, isFpPrivate, isFpReadOnlyLib, onFootprintOpened, privateText } from "./fpedit";
 import { editorDocs, firstDoc, rootSchematicOf } from "./bootpick";
+import { closeHostedDoc, isHostedDoc, openHostedDoc } from "./dochost";
 import { ensurePcbTools, noteBoardOpened, preloadPcbToolsWhenIdle } from "./pcbtools-loader";
 import type { Boot } from "./boot";
 import type { DocEntry, ProjectInfo } from "../../../shared/store";
@@ -312,6 +313,7 @@ export function snapMm(mm: number[]): number[] {
 
 
 export function leaveEditor() {
+  closeHostedDoc();
   leaveDoc();
   state.doc = null; state.docId = null;
   setConn("offline", "");
@@ -327,7 +329,7 @@ export function takeBoot<K extends "me" | "info" | "content">(key: K, projectId?
 }
 
 export async function openEditor(id: string) {
-  if (state.project && state.project.projectId === id && state.view === "editor") return;
+  if (state.project && state.project.projectId === id && (state.view === "editor" || state.view === "cad")) return;
   leaveEditor();
   showView("editor");
   let info: ProjectInfo;
@@ -364,6 +366,9 @@ export async function openEditor(id: string) {
   // manager leads first; the board is one click away (and ?doc= still opens exactly what a link names).
   // Only a project with no schematic at all opens on the board.
   rootSchematic();   // also starts reading the project file and the custom rules
+  // a link that names a part studio or an assembly opens it; a project with nothing of KiCad's opens on its first one
+  const hosted = info.docs.find((d) => d.docId === wanted && isHostedDoc(d)) || (state.docs!.length ? undefined : info.docs.find((d) => isHostedDoc(d)));
+  if (hosted) { await openDoc(hosted); return; }
   const doc = firstDoc(state.docs!, info.docs, wanted);
   if (!doc) {
     base.replaceChildren(); setDocNotice("This project has no board or schematic yet. Open it in the desktop app.");
@@ -427,6 +432,20 @@ export function leaveDoc() {
 
 export async function openDoc(doc: DocEntry) {
   leaveDoc();
+  // A part studio, an assembly: the domain's own editor draws it in the "cad" view (dochost.ts).  The tabs, the
+  // menu bar and the status bar stay; nothing of the schematic or board editor runs meanwhile.
+  if (isHostedDoc(doc)) {
+    state.doc = doc; state.docId = doc.docId;
+    const url = `/p/${state.project!.projectId}/edit?doc=${doc.docId}`;
+    if (location.pathname + location.search !== url) history.replaceState(null, "", url);
+    document.title = `${doc.path.split("/").pop()!.replace(/\.[^.]+$/, "")} — ${state.project!.name} — Junction`;
+    await openHostedDoc(doc, () => {
+      showView("cad"); document.body.dataset.editor = "cad";   // the chrome's project layout (menu bar, status bar), none of KiCad's panes
+      store.slice("document", { editor: null, docType: null, docId: doc.docId, doc, hasDoc: false, notice: null });
+    }, openDocId);
+    return;
+  }
+  if (state.view === "cad") { showView("editor"); document.title = `${state.project!.name} — Junction`; }
   state.doc = doc; state.docId = doc.docId; bindUndoDoc(doc.docId);
   E.DOC_TYPE = doc.docType;
   E.IU = isSch() ? 1e4 : 1e6;
@@ -580,7 +599,30 @@ export function selectItemAction(id: string) {
   E.selected = fp; drawSelection(); renderProps(); centerOn(fp.x / E.IU, fp.y / E.IU);
 }
 
-export function openDocId(id: string) { const d = state.docs!.find((x) => x.docId === id); if (d) openDoc(d); }
+export function openDocId(id: string) {
+  const d = state.docs!.find((x) => x.docId === id) || (state.project ? state.project.docs.find((x) => x.docId === id && isHostedDoc(x)) : undefined);
+  if (d) openDoc(d);
+}
+
+/**
+ * The project's documents changed under the open project (the document tabs added, renamed or deleted one):
+ * take the new list, and open `open` when it names one.  A document that was open and is gone gives way to the
+ * project's first document.
+ */
+export function setProjectDocs(docs: DocEntry[], open?: string) {
+  if (!state.project) return;
+  state.project = { ...state.project, docs };
+  state.docs = editorDocs(docs);
+  store.set({ project: state.project });
+  const cur = state.docId ? docs.find((d) => d.docId === state.docId) : undefined;
+  if (cur && state.doc && cur.path !== state.doc.path) state.doc = cur;
+  publishDocs();
+  if (open) { openDocId(open); return; }
+  if (state.docId && !cur && !state.docId.startsWith("board:") && !state.docId.startsWith("lib:")) {
+    const next = firstDoc(state.docs!, docs, null) || docs.find((d) => isHostedDoc(d));
+    if (next) openDoc(next);
+  }
+}
 
 export function navigateDocs(dir: number) {
   const i = docNav.idx + dir; if (i < 0 || i >= docNav.list.length) { toast(dir < 0 ? "No previous sheet" : "No next sheet"); return; }
