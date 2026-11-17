@@ -322,7 +322,7 @@ pub async fn cad(info: &PartInfo, lib: &str, fields: &[(String, String)]) -> Opt
     let fp_text = fp.get("footprint")?.as_str()?.to_string();
     let fpid = format!("{fp_lib}:{fp_name}");
     let pads = pad_numbers(&fp_text);
-    let value = if info.mpn.is_empty() { fp_name.clone() } else { info.mpn.clone() };
+    let value = super::display_value(info, &fp_name);
 
     let symbol = match kind.device_symbol() {
         Some(dev) => match libs.symbol_json("Device", dev).await.ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()) {
@@ -330,7 +330,7 @@ pub async fn cad(info: &PartInfo, lib: &str, fields: &[(String, String)]) -> Opt
             None => None,
         },
         None if (3..=256).contains(&pads.len()) => {
-            let name = easyeda::lib_name(&value);
+            let name = easyeda::lib_name(if info.mpn.is_empty() { &fp_name } else { &info.mpn });
             let sym = generic_symbol(&name, &pads);
             let sexpr = easyeda::symbol_sexpr(&sym, kind.reference(), &value, &fpid, &info.datasheet, &info.description, fields);
             Some(json!({ "name": name, "lib_id": format!("{lib}:{name}"), "sexpr": sexpr, "units": 1, "pins": sym.pins, "generic": true }))

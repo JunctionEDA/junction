@@ -83,7 +83,8 @@ fn asset_version() -> &'static str {
                    include_str!("../static/kicad-dialogs.js"), include_str!("../static/dist/ui.js"), include_str!("../static/dist/ui.css"), include_str!("../static/app.html"), THEME_CSS,
                    include_str!("../static/dist/viewer3d.js"), include_str!("../static/dist/fab.js"), include_str!("../static/dist/kicad-icons.json"),
                    include_str!("../static/dist/sim-ngspice.js"), include_str!("../static/dist/autoroute.js"), include_str!("../static/dist/parts.js"),
-                   include_str!("../static/dist/boot.js")];
+                   include_str!("../static/dist/boot.js"),
+                   include_str!("../static/dist/mechanical.js"), include_str!("../static/dist/assembly.js"), include_str!("../static/dist/cad-worker.js")];
         for b in all.iter().flat_map(|s| s.bytes()) {
             h ^= b as u64;
             h = h.wrapping_mul(0x100000001b3);
@@ -237,6 +238,12 @@ pub async fn autoroute_js_map() -> Response {
 // The 3D viewer (server/web/domains/pcb/viewer3d, three.js bundled): fetched by the editor on first use of
 // View → 3D Viewer, with the same ?v= as the editor bundle (asset_version covers it).
 pub async fn viewer3d_js() -> Response { js_response(include_str!("../static/dist/viewer3d.js")) }
+// The mechanical and assembly editors (server/web/domains/mechanical, server/web/domains/assembly; three.js and
+// React bundled) and the modelling worker they share: fetched when a part studio or an assembly tab is first
+// opened, with the same ?v= as the editor bundle (asset_version covers them).
+pub async fn mechanical_js() -> Response { js_response(include_str!("../static/dist/mechanical.js")) }
+pub async fn assembly_js() -> Response { js_response(include_str!("../static/dist/assembly.js")) }
+pub async fn cad_worker_js() -> Response { js_response(include_str!("../static/dist/cad-worker.js")) }
 // Fabrication outputs (server/web/domains/pcb/fab: Gerber, drill, placement and BOM writers): fetched by the editor on
 // first use of File → Fabrication Outputs and by plugins that plot, with the same ?v= as the editor bundle.
 // The ngspice model parameter tables (web/domains/pcb/dialogs/sim-model-ngspice.ts): fetched by the Simulation Model
@@ -610,12 +617,16 @@ pub async fn project_page(
                          esc(&d.path), esc(&d.doc_type)))
         .collect();
 
-    let preview = if docs.iter().any(|d| d.doc_type == "kicad_pcb") {
+    // the board's picture, or for a project without one the picture of a part studio or an assembly (dockind.rs)
+    let has_board = docs.iter().any(|d| d.doc_type == "kicad_pcb");
+    let preview = if has_board || docs.iter().any(|d| !d.doc_type.starts_with("kicad_") && crate::dockind::of(&d.doc_type).thumbnail) {
+        let live = if has_board { format!(r#"<p><a class="btn secondary" href="/p/{id}/live">Watch live</a></p>"#) } else { String::new() };
         format!(
             r#"<p><img style="width:100%;background:var(--sheet);border:1px solid var(--line);border-radius:var(--r-2);padding:10px"
-                 alt="Board preview" onerror="this.parentNode.style.display='none'"
+                 alt="{alt}" onerror="this.parentNode.style.display='none'"
                  src="/api/projects/{id}/preview.svg"></p>
-<p><a class="btn secondary" href="/p/{id}/live">Watch live</a></p>"#
+{live}"#,
+            alt = if has_board { "Board preview" } else { "Project preview" },
         )
     } else {
         String::new()

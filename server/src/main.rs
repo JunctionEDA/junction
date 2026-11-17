@@ -10,12 +10,15 @@ mod auth;
 mod chat;
 mod compact;
 mod doc_actor;
+mod dockind;
 mod nonkicad_import;
 mod error;
 mod fonts;
 mod github;
 mod github_app;
 mod http;
+mod itemdoc;
+mod itemmerge;
 mod lenient_json;
 mod merge;
 mod libs;
@@ -275,6 +278,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/static/dist/autoroute.js", get(pages::autoroute_js))
         .route("/static/dist/autoroute.js.map", get(pages::autoroute_js_map))
         .route("/static/dist/viewer3d.js", get(pages::viewer3d_js))
+        .route("/static/dist/mechanical.js", get(pages::mechanical_js))
+        .route("/static/dist/assembly.js", get(pages::assembly_js))
+        .route("/static/dist/cad-worker.js", get(pages::cad_worker_js))
         .route("/static/dist/sim-ngspice.js", get(pages::sim_ngspice_js))
         .route("/static/dist/fab.js", get(pages::fab_js))
         .route("/static/dist/fab.js.map", get(pages::fab_js_map))
@@ -449,6 +455,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/parts/part", get(parts::get_part))
         .route("/api/parts/cad", axum::routing::put(parts::link_cad))
         .route("/api/parts/model.step", get(parts::get_model))
+        .route("/api/parts/image", get(parts::get_image))
         .route("/api/parts/model-file", get(parts::get_model_file))
         .route("/api/libraries", get(parts::list_libraries).post(parts::create_library))
         .route("/api/libraries/{id}", get(parts::get_library).patch(parts::update_library).delete(parts::delete_library))

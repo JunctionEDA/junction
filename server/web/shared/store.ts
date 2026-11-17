@@ -187,7 +187,8 @@ export interface FpLibRow {
   pinned?: boolean;
 }
 export interface AppState {
-  view: "home" | "editor";
+  /** "editor" is KiCad's frame (schematic, board); "cad" is a document a domain's own editor draws (web/platform/documents/host.ts) */
+  view: "home" | "editor" | "cad";
   /** which page of the home view is showing, and a counter bumped on every visit (web/platform/home) */
   homeTab?: "projects" | "explore" | "trash" | "time";
   homeTick?: number;
@@ -269,6 +270,8 @@ export type AppAction =
   | { type: "setGroupCurrent"; group: string; id: string }
   | { type: "showPane"; pane: string; show?: boolean }
   | { type: "openDoc"; docId: string }
+  /** the project's documents changed (a tab was added, renamed or deleted): the new list, and the one to open, if any */
+  | { type: "projectDocs"; docs: DocEntry[]; open?: string }
   | { type: "enterSheet"; file: string }
   | { type: "setLayerVisible"; key: string; visible: boolean }
   | { type: "setActiveLayer"; layer: string }

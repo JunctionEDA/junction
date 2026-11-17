@@ -15,6 +15,8 @@ import { countsText, diffDocs, type Category, type Change, type DocDiff } from "
 import { changeAt, extent, fitBox, paint, type DiffView, type Mode, type PaintInput } from "./paint";
 import { SourceError, listVersions, loadVersion, refLabel, sameRef, type Choice, type DocEntry, type Listing, type Loaded, type VersionRef } from "./sources";
 import { closeCompare, openCompare, reviewStore, takeLinkRequest, type CompareRequest } from "./store";
+import { HostedCompare } from "./HostedCompare";
+import { isHostedKind } from "./renderers";
 
 const CATS: Category[] = ["added", "removed", "modified"];
 const CAT_NAME: Record<Category, string> = { added: "Added", removed: "Removed", modified: "Modified" };
@@ -27,6 +29,11 @@ const editor = (): EditorGlobals => ((window as unknown as { CollabEditor?: Edit
 export function CompareWindow() {
   const st = useSyncExternalStore(reviewStore.subscribe, reviewStore.get, reviewStore.get);
   const hasDoc = useApp((s) => s.view === "editor" && s.document.hasDoc);
+  const asked = st.request.docId;
+  const hosted = useApp((s) => {
+    const d = asked ? (s.project ? s.project.docs.find((x) => x.docId === asked) : undefined) : s.view === "cad" ? s.document.doc : undefined;
+    return d && isHostedKind(d.docType) ? d : null;
+  });
   // a link that asks for the window (?compare=1, as the desktop's File ▸ Compare with Checkpoint… opens)
   const linked = useRef(false);
   useEffect(() => {
@@ -34,6 +41,8 @@ export function CompareWindow() {
     linked.current = true;
     if (takeLinkRequest()) openCompare();
   }, [hasDoc]);
+  // a document a domain's own editor draws (a part studio): the same window, drawn by that domain's renderer
+  if (st.open && hosted) return <HostedCompare key={st.n} request={st.request} entry={hosted} />;
   if (!st.open || !hasDoc) return null;
   return <CompareDialog key={st.n} request={st.request} />;
 }

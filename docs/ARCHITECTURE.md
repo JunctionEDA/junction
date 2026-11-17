@@ -8,8 +8,10 @@ Junction has three programs in one repository:
 | Server | `server/src`, `server/protocol`, `server/migrations` | Rust (axum, Postgres) | Projects, accounts, sharing, the collaboration socket, version history, GitHub sync, the MCP endpoint |
 | Browser app | `server/web`, built into `server/static` | TypeScript, React | The home page and project list, and the web editors |
 
-They share one document model: KiCad's own files, synchronized item by item over the collaboration protocol
-(`server/protocol`, [COLLABORATION.md](../COLLABORATION.md)).
+They share one document model: files made of items with stable ids, synchronized item by item over the
+collaboration protocol (`server/protocol`, [COLLABORATION.md](../COLLABORATION.md)). KiCad's own files are
+one kind; part studios (`.jpart`) and assemblies (`.jasm`) are JSON item documents (`server/src/itemdoc.rs`,
+`server/web/shared/itemdoc`) on the same path. A project's documents are tabs in the browser.
 
 ## Platform and domains
 
@@ -18,7 +20,7 @@ Junction is meant to cover more than electronics (see [ROADMAP.md](ROADMAP.md)).
 
 | | Platform | Electronics domain (`pcb`) | Future domains |
 |---|---|---|---|
-| Browser | `server/web/platform` (home, sharing, landing, onboarding, GitHub, review, time tracking, admin) and `server/web/shared` (UI kit, store, theme, styles) | `server/web/domains/pcb` | `server/web/domains/{mechanical,assembly,physics,silicon,robotics,manufacturing}`, with a README each and no code yet |
+| Browser | `server/web/platform` (home, sharing, document tabs, landing, onboarding, GitHub, review, time tracking, admin) and `server/web/shared` (UI kit, store, theme, styles, JSON item documents, the 3D viewport) | `server/web/domains/pcb` | `server/web/domains/mechanical` (part studios, in progress: see its `CONTRACT.md`), `assembly` (a stub), and `{physics,silicon,robotics,manufacturing}` with a README each and no code yet |
 | Server | see the table below | see the table below | |
 | Desktop | `common/` (with `common/collab`) | `eeschema/`, `pcbnew/`, `cvpcb/`, `gerbview/`, `pagelayout_editor/`, `pcb_calculator/`, `3d-viewer/` | |
 
@@ -31,7 +33,7 @@ The Rust server is one crate and has not been split into folders. This is which 
 
 | Platform | Electronics-specific |
 |---|---|
-| `main`, `http`, `pages`, `ws`, `relay`, `presence_lane`, `doc_actor`, `persist`, `error`, `lenient_json` | `kicadlib`, `libs`, `projectlibs` (KiCad libraries) |
+| `main`, `http`, `pages`, `ws`, `relay`, `presence_lane`, `doc_actor`, `persist`, `error`, `lenient_json`, `itemdoc` and `itemmerge` (JSON item documents and their three-way merge), `dockind` (how each document type behaves for history, merging, folding and thumbnails) | `kicadlib`, `libs`, `projectlibs` (KiCad libraries) |
 | `auth`, `oauth`, `access` (accounts, sign-in, roles) | `parts/`, `datasheet` (vendor parts, datasheets) |
 | `versions`, `proposals`, `github`, `github/`, `github_app` | `merge`, `compact` (KiCad s-expression merge and journal folding) |
 | `mcp` (the MCP endpoint), `admin`, `timetrack`, `exports`, `plugins`, `registry` | `ai`, `mcp_host`, `pcm`, `fonts`, `templates` |
@@ -61,6 +63,9 @@ code keeps KiCad's layout:
   so `cargo run` works without Node. CI checks that they match the source.
 - `server/web/domains/pcb/generated/*` is generated from the C++ sources by `server/scripts/gen_*.py`. The weekly
   sync regenerates it (`tools/upstream-sync/regen_web.sh`).
+- `static/dist/mechanical.js`, `assembly.js` and `cad-worker.js` are the part studio editor, the assembly editor
+  and the modelling worker, loaded when such a tab is first opened. The kernel's `.wasm` is copied to
+  `static/dist/pyodide` by the build and is not committed.
 
 ## Checks
 

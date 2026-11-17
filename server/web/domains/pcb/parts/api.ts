@@ -20,6 +20,10 @@ export interface PartCad {
 /** A fetched part: its data, the KiCad drawings when there are any, and the fields a placed symbol carries. */
 export interface Part extends PartInfo {
   cad: PartCad | null; fields: Record<string, string>; fetched_at: string | null; stale: boolean; stale_reason: string | null;
+  /** The Value a placed part carries: "220Ω", "100nF" for a passive, else the manufacturer part number. */
+  value?: string;
+  /** The server's copy of the vendor's product photo (/api/parts/image?…), when the vendor has one. */
+  photo?: string | null;
 }
 
 export interface Vendor {
