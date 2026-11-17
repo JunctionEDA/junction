@@ -105,6 +105,7 @@
 #include <dialogs/dialog_export_netlist.h>
 #include <dialogs/dialog_plot_schematic.h>
 #include <dialogs/dialog_erc_job_config.h>
+#include <wx/fileconf.h>
 #include <dialogs/dialog_symbol_fields_table.h>
 #include <confirm.h>
 #include <project_sch.h>
@@ -2494,10 +2495,16 @@ int EESCHEMA_JOBS_HANDLER::JobImport( JOB* aJob )
     // AUTO restricts autodetect to non-KiCad plugins so a native file is not re-imported.
     SCH_IO_MGR::SCH_FILE_T fileType = SCH_IO_MGR::SCH_FILE_UNKNOWN;
 
+    // An Altium project (.PrjPcb) is imported as the hierarchy of the sheets it lists
+    const bool altiumProject = wxFileName( job->m_inputFile ).GetExt().IsSameAs( wxS( "PrjPcb" ), false )
+                               && ( job->m_format == JOB_SCH_IMPORT::FORMAT::AUTO
+                                    || job->m_format == JOB_SCH_IMPORT::FORMAT::ALTIUM );
+
     switch( job->m_format )
     {
     case JOB_SCH_IMPORT::FORMAT::AUTO:
-        fileType = SCH_IO_MGR::GuessPluginTypeFromSchPath( job->m_inputFile, KICTL_NONKICAD_ONLY );
+        fileType = altiumProject ? SCH_IO_MGR::SCH_ALTIUM
+                                 : SCH_IO_MGR::GuessPluginTypeFromSchPath( job->m_inputFile, KICTL_NONKICAD_ONLY );
         break;
     case JOB_SCH_IMPORT::FORMAT::ALTIUM:     fileType = SCH_IO_MGR::SCH_ALTIUM;          break;
     case JOB_SCH_IMPORT::FORMAT::EAGLE:      fileType = SCH_IO_MGR::SCH_EAGLE;           break;
@@ -2598,7 +2605,50 @@ int EESCHEMA_JOBS_HANDLER::JobImport( JOB* aJob )
                                               inputFn.GetFullPath(), formatName ),
                             RPT_SEVERITY_INFO );
 
-        loadedSheet = pi->LoadSchematicFile( inputFn.GetFullPath(), schematic.get() );
+        if( altiumProject )
+        {
+            std::map<std::string, UTF8> props = job->m_properties;
+            props["project_file"] = inputFn.GetFullPath().ToStdString();
+
+            wxFileConfig config( wxEmptyString, wxEmptyString, wxEmptyString, inputFn.GetFullPath(),
+                                 wxCONFIG_USE_NO_ESCAPE_CHARACTERS );
+            wxString     group;
+            long         index;
+            int          sheets = 0;
+
+            for( bool more = config.GetFirstGroup( group, index ); more; more = config.GetNextGroup( group, index ) )
+            {
+                long number;
+
+                if( !group.StartsWith( wxS( "Document" ) ) || !group.Mid( 8 ).ToLong( &number ) )
+                    continue;
+
+                wxFileName doc( config.Read( group + wxS( "/DocumentPath" ), wxEmptyString ), wxPATH_WIN );
+
+                if( !doc.GetExt().IsSameAs( wxS( "SchDoc" ), false ) )
+                    continue;
+
+                if( !doc.IsAbsolute() )
+                    doc.MakeAbsolute( inputFn.GetPath() );
+
+                props["sch" + std::to_string( sheets++ )] = doc.GetFullPath().ToStdString();
+            }
+
+            if( !sheets )
+            {
+                m_reporter->Report( wxString::Format( _( "No schematic importer recognizes the file format "
+                                                         "of '%s'\n" ),
+                                                      job->m_inputFile ),
+                                    RPT_SEVERITY_INFO );
+                return CLI::EXIT_CODES::ERR_UNKNOWN_FILE_FORMAT;
+            }
+
+            loadedSheet = pi->LoadSchematicFile( wxEmptyString, schematic.get(), nullptr, &props );
+        }
+        else
+        {
+            loadedSheet = pi->LoadSchematicFile( inputFn.GetFullPath(), schematic.get() );
+        }
 
         if( !loadedSheet )
         {

@@ -476,6 +476,7 @@ target_link_libraries( kicommon
     glad
     thread-pool
     ${ZSTD_LIBRARY}
+    ${KICAD_SQLITE3_TARGET}
     ${wxWidgets_LIBRARIES}
     ${LIBGIT2_LIBRARIES}
     ${SPNAV_LIBRARIES}
@@ -868,6 +869,7 @@ set( COMMON_IO_SRCS
     # EasyEDA pro
     io/easyedapro/easyedapro_parser.cpp
     io/easyedapro/easyedapro_import_utils.cpp
+    io/easyedapro/easyedapro_eprj.cpp
     io/easyedapro/easyedapro_v3_parser.cpp
 
     # DipTrace

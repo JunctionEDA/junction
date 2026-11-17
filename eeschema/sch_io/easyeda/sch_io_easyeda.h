@@ -43,7 +43,7 @@ public:
 
     const IO_BASE::IO_FILE_DESC GetSchematicFileDesc() const override
     {
-        return IO_BASE::IO_FILE_DESC( _HKI( "EasyEDA (JLCEDA) Std files" ), { "json" } );
+        return IO_BASE::IO_FILE_DESC( _HKI( "EasyEDA (JLCEDA) Std files" ), { "json", "zip" } );
     }
 
     const IO_BASE::IO_FILE_DESC GetLibraryDesc() const override { return GetSchematicFileDesc(); }

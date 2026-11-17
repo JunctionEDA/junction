@@ -19,6 +19,7 @@
  */
 
 #include "pcb_io_easyedapro_parser.h"
+#include <set>
 #include <io/easyedapro/easyedapro_import_utils.h>
 #include "pcb_io_easyedapro_v3_parser.h"
 
@@ -1220,6 +1221,10 @@ void PCB_IO_EASYEDAPRO_PARSER::ParseBoard( BOARD* aBoard, const nlohmann::json& 
     }
 
 
+    // Several EasyEDA layers land on one KiCad layer (Board Outline and Multi-Layer both on Edge.Cuts); the layer
+    // keeps the name of the first, so Edge.Cuts is not called "Multi-Layer".
+    std::set<PCB_LAYER_ID> namedLayers;
+
     for( const nlohmann::json& line : aLines )
     {
         if( line.size() == 0 )
@@ -1241,7 +1246,9 @@ void PCB_IO_EASYEDAPRO_PARSER::ParseBoard( BOARD* aBoard, const nlohmann::json& 
                 LSET blayers = aBoard->GetEnabledLayers();
                 blayers.set( klayer );
                 aBoard->SetEnabledLayers( blayers );
-                aBoard->SetLayerName( klayer, layerName );
+
+                if( layer != 12 && namedLayers.insert( klayer ).second )
+                    aBoard->SetLayerName( klayer, layerName );
             }
         }
         else if( type == wxS( "NET" ) )

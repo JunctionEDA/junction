@@ -82,6 +82,10 @@ static bool FindSchFileInStream( const wxString& aName, wxInputStream& aStream,
         {
             wxString name = entry->GetName();
 
+            // An EasyEDA Pro project export (project.json at the top) is the Pro importer's
+            if( name == wxS( "project.json" ) )
+                return false;
+
             if( FindSchFileInStream( name, zip, aOut, aDoc, aDocType ) )
                 return true;
         }
@@ -515,6 +519,12 @@ static void LoadSchematic( SCHEMATIC* aSchematic, SCH_SHEET* aRootSheet, const w
 
         if( !FindSchFileInStream( aFileName, in, js, topDoc, topDocType ) )
             THROW_IO_ERRORF( _( "Unable to find a valid schematic file in '%s'" ), aFileName );
+
+        // Symbols take their instance path from the current sheet, which must be this root (not whatever
+        // sheet the schematic held before) or every reference on a one-sheet design is orphaned
+        SCH_SHEET_PATH rootPath;
+        rootPath.push_back( aRootSheet );
+        aSchematic->SetCurrentSheet( rootPath );
 
         if( topDocType == EASYEDA::DOC_TYPE::SCHEMATIC_SHEET || topDocType == EASYEDA::DOC_TYPE::SCHEMATIC_LIST )
         {
