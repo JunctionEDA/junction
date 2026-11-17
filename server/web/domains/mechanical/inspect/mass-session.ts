@@ -24,7 +24,7 @@ export interface MassState {
 export class MassSession extends Store<MassState> {
   private seq = 0;
   private timer = 0;
-  private last: { sel: unknown; bodies: unknown; features: unknown } = { sel: null, bodies: null, features: null };
+  private last: { sel: unknown; bodies: unknown; features: unknown; editing: boolean } = { sel: null, bodies: null, features: null, editing: false };
   private readonly marker = new THREE.Group();
   /** Panels that show mass properties say so: nothing is computed while no one is looking. */
   private watchers = 0;
@@ -35,9 +35,11 @@ export class MassSession extends Store<MassState> {
     studio.viewport.onTheme.push(() => this.drawMarker());
     studio.subscribe(() => {
       const s = studio.getState();
-      if (s.selection === this.last.sel && s.bodies === this.last.bodies && s.features === this.last.features) return;
+      if (s.selection === this.last.sel && s.bodies === this.last.bodies && s.features === this.last.features && !!s.editing === this.last.editing) return;
       const changed = s.bodies !== this.last.bodies || s.features !== this.last.features || this.pickBodies().join() !== this.state.bodies.join();
-      this.last = { sel: s.selection, bodies: s.bodies, features: s.features };
+      const ended = this.last.editing && !s.editing;
+      this.last = { sel: s.selection, bodies: s.bodies, features: s.features, editing: !!s.editing };
+      if (ended) { this.schedule(); return; }
       if (changed) this.schedule();
     });
   }
@@ -54,6 +56,10 @@ export class MassSession extends Store<MassState> {
 
   private async compute(): Promise<void> {
     if (!this.watchers && !this.state.showCentre) return;
+    // not while a dialog previews or a sketch is open: the one modelling thread is busy with those, and the
+    // bodies are a draft; the result of accepting or closing triggers a new computation
+    const st = this.studio.getState();
+    if (st.editing || st.sketch) return;
     const seq = ++this.seq;
     const bodies = this.pickBodies();
     const fromSelection = selectedBodies(this.studio).length > 0;
