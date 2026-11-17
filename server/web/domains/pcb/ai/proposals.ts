@@ -512,6 +512,11 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
           pcbOnly(e.op); const P = PCB(); const net = boardNet(doc, text(e.net, "net")); const s = P.designSettings(ed.proSettings || null);
           const size = e.size === undefined ? s.viaDiameter : num(e.size, "size"), drill = e.drill === undefined ? s.viaDrill : num(e.drill, "drill");
           if (!(drill > 0 && size > drill)) throw new ToolError("a via's size must be larger than its drill");
+          {   // a via of the same net already standing on the spot: a second one on top adds nothing (stitching run twice stacked hundreds)
+            const k = K(), vx = num(e.x, "x"), vy = num(e.y, "y"); let same: any = null;
+            for (const it of doc.items.values() as Iterable<any>) { if (it.kind !== "via" || touched.has(it.id)) continue; const at = k.kid(it.node, "at"); if (!at || Math.abs(k.num(at[1]) - vx) > 1e-3 || Math.abs(k.num(at[2]) - vy) > 1e-3) continue; same = it; break; }
+            if (same) { lines.push({ kind: "add", text: `A via already stands at (${fmt(e.x)}, ${fmt(e.y)}): none added`, ids: [same.id] }); break; }
+          }
           const c = added(doc, P.viaNode(doc, num(e.x, "x"), num(e.y, "y"), size, drill, net)); changes.push(c);
           lines.push({ kind: "add", text: `Add via ${fmt(size)}/${fmt(drill)} mm on net ${net.name} at (${fmt(e.x)}, ${fmt(e.y)})`, ids: [c.id] });
           break;
