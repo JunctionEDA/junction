@@ -205,7 +205,13 @@ test("the room's documents and tabs: the same few for everybody, a sheet counts 
   const m = (tab) => ({ key: "k", userId: 1, login: "l", name: "n", color: "#fff", tab });
   const tabs = ["s", "b", "a"];
   assert.equal(RA.tabOf(m("a"), docs, tabs, "s"), "a"); assert.equal(RA.tabOf(m("s2"), docs, tabs, "s"), "s"); assert.equal(RA.tabOf(m("zz"), docs, tabs, "s"), null); assert.equal(RA.tabOf(m(null), docs, tabs, "s"), null);
-  assert.deepEqual(RA.parseRoomPresence({ room: 1, tab: "a", rev: 5, note: { what: "added", name: "Part Studio 2" } }), { room: 1, tab: "a", rev: 5, note: { what: "added", name: "Part Studio 2" } });
+  assert.deepEqual(RA.parseRoomPresence({ room: 1, tab: "a", col: "#aabbcc" }), { room: 1, tab: "a", col: "#aabbcc" });
+  // the server's notice that the project's documents changed (src/http.rs notify_docs), as the tabs read it
+  const notice = { type: "docs", docId: "d1", projectId: "p", n: "n1", change: "renamed", from: "A.jpart", doc: { docId: "d2", path: "B.jpart", docType: "part_studio" }, by: { userId: 2, login: "bob", name: "Bob Stone" } };
+  assert.deepEqual(RA.parseDocsNotice(notice), { n: "n1", projectId: "p", note: { what: "renamed", name: "A to B" }, by: { userId: 2, login: "bob", name: "Bob Stone" } });
+  assert.equal(RA.parseDocsNotice({ ...notice, change: "added", by: { userId: 3, login: "cy", name: null } }).by.name, "cy");
+  assert.equal(RA.parseDocsNotice({ ...notice, change: "exploded" }), null);
+  assert.equal(RA.parseDocsNotice({ type: "versions" }), null);
   assert.equal(RA.parseRoomPresence({ cad: 1 }), null);
   assert.equal(RA.noteText("Ada", { what: "renamed", name: "A to B" }), "Ada renamed A to B");
   // two people the server gave one colour: exactly one of them takes another, the first nobody has
@@ -223,7 +229,7 @@ class FakeSocket {
 
 test("the room joins the project's item documents, says which tab this person is on, and hears where the others are", async () => {
   const news = [];
-  const room = new R.ProjectRoom({ signedIn: true, socketUrl: "ws://test", fetchTicket: async () => "t", WebSocketImpl: FakeSocket, pollMs: 1e9, onDocsChanged: (by, note) => news.push([by ? by.name : null, note ? note.what + " " + note.name : null]) });
+  const room = new R.ProjectRoom({ signedIn: true, socketUrl: "ws://test", fetchTicket: async () => "t", WebSocketImpl: FakeSocket, onDocsChanged: () => news.push("look") });
   let changes = 0; room.subscribe(() => changes++);
   room.setTab("p1");
   room.setDocs([{ docId: "sch", docType: "kicad_sch" }]);
@@ -253,17 +259,11 @@ test("the room joins the project's item documents, says which tab this person is
   assert.equal(sock.sent[sock.sent.length - 1].state.col, "#e05d44");
   sock.say({ type: "presence", docId: "p0", peers: { "0:room-zed": null } });
   assert.deepEqual(news, [], "nothing changed in the project yet");
-  // Bob adds a document: his counter moves, with a line saying what he did
-  sock.say({ type: "presence", docId: "p0", peers: { "2:room-bob": { state: { room: 1, tab: "p0", rev: 1234, note: { what: "added", name: "Part Studio 3" } } } } });
-  sock.say({ type: "presence", docId: "p0", peers: { "2:room-bob": { state: { room: 1, tab: "p0", rev: 1234, note: { what: "added", name: "Part Studio 3" } } } } });
-  assert.deepEqual(news, [["Bob", "added Part Studio 3"]], "told once");
-  // somebody first seen with a counter from after this page loaded: fetch, but there is nothing to say
-  sock.say({ type: "presence", docId: "p0", peers: { "3:room-c": { user: { clientId: "3:room-c", userId: 3, login: "carol", name: "Carol", color: "#111" }, state: { room: 1, tab: null, rev: Date.now() + 5000, note: { what: "deleted", name: "X" } } } } });
-  assert.deepEqual(news[1], ["Carol", null]);
-  // this person renames one: the counter in what we say moves
-  room.announce({ what: "renamed", name: "A to B" });
-  const mine = sock.sent[sock.sent.length - 1];
-  assert.ok(mine.state.rev > 0 && mine.state.note.what === "renamed");
+  // the server says a document was added: the watcher passes the notice on (roomapi.ts tellDocsChanged), and
+  // the room itself asks for nothing
+  sock.say({ type: "docs", docId: "p0", projectId: "p", n: "n-7", change: "added", doc: { docId: "p9", path: "Part Studio 3.jpart", docType: "part_studio" }, by: { userId: 2, login: "bob", name: "Bob" } });
+  assert.deepEqual(news, []);
+  sock.say({ type: "presence", docId: "p0", peers: { "3:room-c": { user: { clientId: "3:room-c", userId: 3, login: "carol", name: "Carol", color: "#111" }, state: { room: 1, tab: null } } } });
   // a new document that sorts first is joined on the same socket
   room.setDocs([{ docId: "p1", docType: "part_studio" }, { docId: "p0", docType: "part_studio" }, { docId: "a0", docType: "assembly" }]);
   assert.deepEqual(sock.sent.filter((m) => m.type === "join_doc").map((m) => m.docId), ["p0", "p1", "a0"]);

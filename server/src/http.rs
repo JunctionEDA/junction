@@ -2203,10 +2203,31 @@ pub async fn create_doc(
 
     let doc_type = req.doc_type.unwrap_or_else(|| doc_type_for(&path).to_string());
     let doc = persist::create_document(&state.pool, id, &path, &doc_type).await?;
+    notify_docs(&state, id, &user, "added", doc.id, &doc.path, &doc.doc_type, None).await;
 
     Ok(Json(json!({ "docId": doc.id, "path": doc.path, "docType": doc.doc_type,
                     "existing": false }))
         .into_response())
+}
+
+/// Tell everyone who has the project open that its list of documents changed (a document was added, renamed
+/// or deleted), so their tabs follow without asking.  Each socket has joined documents, not the project, so the
+/// notice goes to every open document of the project (`also`: one that is no longer in the list).
+#[allow(clippy::too_many_arguments)]
+async fn notify_docs(state: &AppState, project_id: Uuid, user: &persist::User, change: &str, doc_id: Uuid, path: &str,
+                     doc_type: &str, from: Option<&str>) {
+    let Ok(docs) = persist::project_documents(&state.pool, project_id).await else { return };
+    let n = Uuid::new_v4();
+    let mut ids: Vec<Uuid> = docs.iter().map(|d| d.id).collect();
+    if !ids.contains(&doc_id) {
+        ids.push(doc_id);
+    }
+    for id in ids {
+        let payload = json!({ "type": "docs", "docId": id, "projectId": project_id, "n": n, "change": change, "from": from,
+                              "doc": { "docId": doc_id, "path": path, "docType": doc_type },
+                              "by": { "userId": user.id, "login": user.login, "name": user.name } });
+        state.doc_event(id, crate::doc_actor::DocMsg::Notice { payload }).await;
+    }
 }
 
 /// The document types a client may delete or move: library files (a footprint, a symbol library, a library table,
@@ -2234,6 +2255,9 @@ pub async fn delete_doc(
         return Err(AppError::BadRequest(format!("a {} cannot be deleted here", doc.doc_type)));
     }
     let deleted = persist::delete_document(&state.pool, doc_id).await?;
+    if deleted {
+        notify_docs(&state, doc.project_id, &user, "deleted", doc_id, &doc.path, &doc.doc_type, None).await;
+    }
     Ok(Json(json!({ "ok": deleted, "docId": doc_id })).into_response())
 }
 
@@ -2274,6 +2298,7 @@ pub async fn move_doc(
         }
     }
     let moved = persist::rename_document(&state.pool, doc_id, &path).await?.ok_or(AppError::NotFound)?;
+    notify_docs(&state, doc.project_id, &user, "renamed", moved.id, &moved.path, &moved.doc_type, Some(&doc.path)).await;
     Ok(Json(json!({ "ok": true, "docId": moved.id, "path": moved.path, "docType": moved.doc_type })).into_response())
 }
 

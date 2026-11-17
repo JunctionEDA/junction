@@ -32,8 +32,34 @@ export interface RoomState {
 export interface ProjectRoomApi {
   getState(): RoomState;
   subscribe(fn: () => void): () => void;
-  /** Tell the others the project's documents changed (after creating, renaming or deleting one). */
-  announce(note?: DocsNote): void;
+}
+
+/**
+ * The server's notice that a document of the project was added, renamed or deleted (src/http.rs notify_docs).
+ * It is sent to every open document of the project, so a page may hear it on several sockets (its editor's, the
+ * room's): `tellDocsChanged` hands each notice on once, as a window event the document tabs listen for.
+ */
+export interface DocsNotice { n: string; projectId: string; note: DocsNote; by: { userId: number; login: string; name: string } }
+export const DOCS_EVENT = "junction-project-docs";
+
+const stem = (path: string): string => (path.split("/").pop() || path).replace(/\.[^.]+$/, "");
+
+export function parseDocsNotice(msg: unknown): DocsNotice | null {
+  const m = msg as { type?: unknown; n?: unknown; projectId?: unknown; change?: unknown; from?: unknown; doc?: { path?: unknown }; by?: { userId?: unknown; login?: unknown; name?: unknown } } | null;
+  if (!m || m.type !== "docs" || typeof m.n !== "string" || typeof m.projectId !== "string" || !m.doc || typeof m.doc.path !== "string") return null;
+  if (m.change !== "added" && m.change !== "renamed" && m.change !== "deleted") return null;
+  const name = m.change === "renamed" && typeof m.from === "string" ? `${stem(m.from)} to ${stem(m.doc.path)}` : stem(m.doc.path);
+  const login = m.by && typeof m.by.login === "string" ? m.by.login : "";
+  return { n: m.n, projectId: m.projectId, note: { what: m.change, name: name.slice(0, 120) }, by: { userId: m.by && typeof m.by.userId === "number" ? m.by.userId : 0, login, name: (m.by && typeof m.by.name === "string" && m.by.name) || login || "Someone" } };
+}
+
+const told: string[] = [];
+/** A socket of this page was sent a `docs` notice: tell the page, unless another socket already did. */
+export function tellDocsChanged(msg: unknown): void {
+  const notice = parseDocsNotice(msg);
+  if (!notice || told.includes(notice.n) || typeof window === "undefined") return;
+  told.push(notice.n); if (told.length > 50) told.shift();
+  window.dispatchEvent(new CustomEvent(DOCS_EVENT, { detail: notice }));
 }
 
 declare global {
@@ -44,15 +70,14 @@ declare global {
 export function projectRoom(): ProjectRoomApi | null { return (typeof window !== "undefined" && window.JunctionRoom) || null; }
 
 /** What a room's watcher says on the presence lane of the documents it has joined. */
-export interface RoomPresence { room: 1; tab: string | null; rev: number; note?: DocsNote; col?: string; ts?: number }
+export interface RoomPresence { room: 1; tab: string | null; col?: string; ts?: number }
 
 export function parseRoomPresence(raw: unknown): RoomPresence | null {
   if (!raw || typeof raw !== "object" || (raw as { room?: unknown }).room !== 1) return null;
-  const r = raw as { tab?: unknown; rev?: unknown; note?: { what?: unknown; name?: unknown } };
-  const out: RoomPresence = { room: 1, tab: typeof r.tab === "string" ? r.tab : null, rev: typeof r.rev === "number" && Number.isFinite(r.rev) ? r.rev : 0 };
+  const r = raw as { tab?: unknown };
+  const out: RoomPresence = { room: 1, tab: typeof r.tab === "string" ? r.tab : null };
   const col = (raw as { col?: unknown }).col;
   if (typeof col === "string" && /^#[0-9a-fA-F]{6}$/.test(col)) out.col = col;
-  if (r.note && typeof r.note === "object" && (r.note.what === "added" || r.note.what === "renamed" || r.note.what === "deleted") && typeof r.note.name === "string") out.note = { what: r.note.what, name: r.note.name.slice(0, 120) };
   return out;
 }
 

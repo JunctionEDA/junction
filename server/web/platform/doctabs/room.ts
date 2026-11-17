@@ -1,33 +1,33 @@
-// room.ts — the project room: who is in the project, on which tab, and the news that its documents changed.
+// room.ts — the project room: who is in the project, and on which tab.
 //
-// The server has no channel for a project: every socket joins documents, and presence is per document.  So
-// the room is built on what there is.  Each page opens one more socket (the "watcher") and joins the
-// project's first few part studios and assemblies with it (roomapi.ts roomDocs), sends there which tab the
-// person is on, and listens to what the other watchers say.  Nothing is stored and the server is unchanged.
+// Presence on the server is per document: every socket joins documents.  So the room is built on that.  Each
+// page opens one more socket (the "watcher") and joins the project's first few part studios and assemblies with
+// it (roomapi.ts roomDocs), sends there which tab the person is on, and listens to what the other watchers say.
 //
 //   · Only JSON item documents are joined: no KiCad client is ever in one, so a watcher shows up in nobody's
 //     collaborator list.  A session of those documents leaves watchers out of its peers: it knows one by its
 //     client id, "room-…" (shared/itemdoc/sync.ts isRoomWatcher), and by the state it sends (`room: 1`, where a
 //     person's editor sends `cad: 1`; domains/mechanical/collab/presence.ts).
 //   · A watcher takes the document's file once when it joins and then its edits as they come, and ignores
-//     both.  That is the cost of having no server support; it is why at most four documents are joined.
-//   · A project with no part studio or assembly has no room.  Its tabs are looked at again every twenty
-//     seconds while the window is visible, so the first one somebody adds still appears.
-//   · "The documents changed" is a counter in the watcher's state (`rev`): whoever adds, renames or deletes a
-//     document raises theirs, and everybody who sees a counter move fetches the list again.
+//     both.  That is why at most four documents are joined.
+//   · A project with no part studio or assembly has no room: nobody is shown on its tabs.
+//
+// That the project's DOCUMENTS changed (one was added, renamed, deleted) is not the room's business any more:
+// the server says so itself, to every open document of the project (`docs` notice, src/http.rs notify_docs).
+// The watcher hears it like every other socket and passes it on (roomapi.ts tellDocsChanged).
 import type { DocEntry } from "../../shared/store";
-import { parseRoomPresence, pickColor, roomDocs, type DocsNote, type ProjectRoomApi, type RoomMember, type RoomState } from "./roomapi";
+import { parseRoomPresence, pickColor, roomDocs, tellDocsChanged, type ProjectRoomApi, type RoomMember, type RoomState } from "./roomapi";
 
 export interface RoomOptions {
   signedIn: boolean;
-  /** Somebody changed the project's documents (`by` is null when the room only suspects it): fetch them again. */
-  onDocsChanged(by: RoomMember | null, note?: DocsNote): void;
+  /** The room suspects the list of documents is stale (it was away, or a document it joined is gone): fetch it again. */
+  onDocsChanged(): void;
   /** test seams */
-  socketUrl?: string; fetchTicket?: () => Promise<string>; WebSocketImpl?: typeof WebSocket; pollMs?: number;
+  socketUrl?: string; fetchTicket?: () => Promise<string>; WebSocketImpl?: typeof WebSocket;
 }
 
 interface PeerUser { clientId: string; userId: number; login: string; name?: string | null; color: string }
-interface Seen { user: PeerUser; tab: string | null; rev: number; col?: string }
+interface Seen { user: PeerUser; tab: string | null; col?: string }
 
 const EMPTY: RoomState = { live: false, me: null, members: [] };
 
@@ -49,23 +49,13 @@ export class ProjectRoom implements ProjectRoomApi {
   /** documents the server would not let us join; not asked again until the list changes */
   private refused = new Set<string>();
   private seen = new Map<string, Map<string, Seen>>();
-  private revs = new Map<string, number>();
   private tab: string | null = null;
-  private rev = 0;
-  private note: DocsNote | undefined;
   private everLive = false;
-  private readonly started = Date.now();
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
   private beat: ReturnType<typeof setInterval> | undefined;
-  private poll: ReturnType<typeof setInterval> | undefined;
 
   constructor(private readonly opts: RoomOptions) {
     this.beat = setInterval(() => this.say(), 10000);
-    // no room to hear the news in: look now and then
-    this.poll = setInterval(() => {
-      if (this.closed || this.want.length || (typeof document !== "undefined" && document.visibilityState === "hidden")) return;
-      this.opts.onDocsChanged(null);
-    }, opts.pollMs || 20000);
   }
 
   getState = (): RoomState => this.state;
@@ -86,11 +76,9 @@ export class ProjectRoom implements ProjectRoomApi {
   /** The tab this person is on. */
   setTab(docId: string | null): void { if (docId !== this.tab) { this.tab = docId; this.say(); } }
 
-  announce(note?: DocsNote): void { this.rev = Math.max(Date.now(), this.rev + 1); this.note = note; this.say(); }
-
   close(): void {
     this.closed = true;
-    clearInterval(this.beat); clearInterval(this.poll);
+    clearInterval(this.beat);
     this.drop(); this.listeners.clear();
   }
 
@@ -123,7 +111,7 @@ export class ProjectRoom implements ProjectRoomApi {
 
   private say(to?: string): void {
     const ws = this.ws; if (!ws || ws.readyState !== 1) return;
-    const state = { room: 1, tab: this.tab, rev: this.rev, ...(this.note ? { note: this.note } : {}), ...(this.col ? { col: this.col } : {}), ts: Date.now() };
+    const state = { room: 1, tab: this.tab, ...(this.col ? { col: this.col } : {}), ts: Date.now() };
     for (const docId of to ? [to] : Array.from(this.joined)) ws.send(JSON.stringify({ type: "presence", docId, state }));
   }
 
@@ -199,7 +187,7 @@ export class ProjectRoom implements ProjectRoomApi {
         if (!this.seen.has(docId)) this.seen.set(docId, new Map());
         this.say(docId); this.publish();
         // back after being away: the list may have changed while nobody could say so
-        if (again) this.opts.onDocsChanged(null);
+        if (again) this.opts.onDocsChanged();
         return;
       }
       case "presence": {
@@ -210,16 +198,12 @@ export class ProjectRoom implements ProjectRoomApi {
           const user = e && e.user ? e.user : doc.get(cid)?.user;
           if (!e) { doc.delete(cid); continue; }      // they left, or fell silent
           if (!room || !user) continue;               // a person's editor session, not a watcher
-          doc.set(cid, { user, tab: room.tab, rev: room.rev, col: room.col });
-          const before = this.revs.get(cid);
-          this.revs.set(cid, room.rev);
-          if (room.rev && room.rev !== before && (before !== undefined || room.rev > this.started)) {
-            this.opts.onDocsChanged({ key: cid, userId: user.userId, login: user.login, name: user.name || user.login || "Someone", color: user.color, tab: room.tab }, before !== undefined ? room.note : undefined);
-          }
+          doc.set(cid, { user, tab: room.tab, col: room.col });
         }
         this.publish();
         return;
       }
+      case "docs": tellDocsChanged(msg); return;   // the server: a document was added, renamed or deleted
       case "peer_left": {
         const doc = this.seen.get(docId);
         if (doc && typeof msg.clientId === "string" && doc.delete(msg.clientId)) this.publish();
@@ -233,7 +217,7 @@ export class ProjectRoom implements ProjectRoomApi {
           if (code === "not_found") {
             // either the list is stale (the document was deleted), or the document is so new that its first
             // file is not stored yet: look at the list, and ask once more in a moment
-            this.opts.onDocsChanged(null);
+            this.opts.onDocsChanged();
             const gen = this.gen;
             setTimeout(() => { if (gen !== this.gen || this.closed) return; this.refused.delete(docId); this.asked.delete(docId); this.join(); }, 5000);
           }
