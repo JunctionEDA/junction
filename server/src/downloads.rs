@@ -15,7 +15,7 @@ use axum::response::{IntoResponse, Redirect, Response};
 use crate::AppState;
 
 /// The public repository the desktop app is released from.
-pub const REPO: &str = "notaroomba/junction";
+pub const REPO: &str = "JunctionEDA/junction";
 const TTL: Duration = Duration::from_secs(600);
 
 struct Cached {

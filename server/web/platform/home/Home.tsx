@@ -15,7 +15,7 @@ import { FirstProject } from "../onboarding/FirstProject";
 import { miniBoard, startGuidedProject } from "../onboarding/state";
 import { ago, Avatar, Confirm, copyText, Ic, layerOpen, Menu, Modal, PHONE, toast, toastError, useMedia, type MenuAt, type MenuEntry } from "./ui";
 
-const RELEASES = "https://github.com/notaroomba/junction/releases";
+const RELEASES = "https://github.com/JunctionEDA/junction/releases";
 type Tab = "projects" | "explore" | "trash" | "time";
 type Scope = "all" | "owned" | "shared" | "starred";
 type Sort = "updated" | "name" | "created";
@@ -709,7 +709,7 @@ function Welcome({ onJoin }: { onJoin: () => void }) {
         <li><b>Share it.</b> Invite people by GitHub username or email, or send a link.</li>
         <li><b>Work together.</b> Everyone edits the same schematic and board, from Junction or the browser.</li>
       </ol>
-      <p className="hp-note">Junction is open source under GPL-3.0. The code is on <a href="https://github.com/notaroomba/junction" target="_blank" rel="noreferrer">GitHub</a>, and projects from any KiCad version from 6 to 10 open as they are.</p>
+      <p className="hp-note">Junction is open source under GPL-3.0. The code is on <a href="https://github.com/JunctionEDA/junction" target="_blank" rel="noreferrer">GitHub</a>, and projects from any KiCad version from 6 to 10 open as they are.</p>
     </div>
   );
 }

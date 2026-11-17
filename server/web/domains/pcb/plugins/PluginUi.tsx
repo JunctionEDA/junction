@@ -564,7 +564,7 @@ function DevelopTab() {
       {err ? <p className="plg-err" id="pluginDevErr">{err}</p> : null}
       <h3>Writing a plugin</h3>
       <p>A plugin is a folder with a <code>plugin.json</code> — KiCad's own plugin manifest, with <code>"runtime": {"{"}"type": "web", "entrypoint": "main.js"{"}"}</code> — and a script that uses the <code>kicad</code> object: <code>kicad.actions.register()</code>, <code>kicad.design.components()</code>, <code>kicad.design.apply()</code>, <code>kicad.ui.prompt()</code>…</p>
-      <p>The guide and the API reference are in <a href="https://github.com/notaroomba/junction/blob/master/server/plugins/README.md" target="_blank" rel="noreferrer noopener">server/plugins/README.md</a>; the catalog plugins beside it are short, complete examples.</p>
+      <p>The guide and the API reference are in <a href="https://github.com/JunctionEDA/junction/blob/master/server/plugins/README.md" target="_blank" rel="noreferrer noopener">server/plugins/README.md</a>; the catalog plugins beside it are short, complete examples.</p>
       <p className="plg-muted">Python and exec plugins for the desktop app (KiCad's IPC API and action plugins) are installed there, in its Plugin and Content Manager. What they change in an online project reaches the web like any other edit.</p>
     </div>
   );
