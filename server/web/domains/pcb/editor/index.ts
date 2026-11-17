@@ -59,6 +59,7 @@ import { installTableCells } from "./tablecells";   // last: its imports must no
 import { fontCommitObserver, initFonts } from "./fonts";
 import { installViewSwitcher } from "./view-switcher";
 import "./title";
+import "./cad-usage";   // on a board: the way to the part studios and assemblies that use it
 window.CollabApp = { getState: store.get, subscribe: store.subscribe, dispatch: (a) => dispatchAction(a), renderProps: (el) => renderPropsInto(el), selectionCount };
 
 
