@@ -1414,7 +1414,10 @@ void SCH_EASYEDAPRO_PARSER::ParseSchematic( SCHEMATIC* aSchematic, SCH_SHEET* aR
                     }
                 }
 
-                std::unique_ptr<SCH_LABEL> label = std::make_unique<SCH_LABEL>();
+                // A wire's net name joins that net on every sheet of the project (the board EasyEDA
+                // makes from it has one net per name), so it is a global label, not a sheet-local one
+                std::unique_ptr<SCH_GLOBALLABEL> label = std::make_unique<SCH_GLOBALLABEL>();
+                label->SetShape( LABEL_FLAG_SHAPE::L_UNSPECIFIED );
 
                 label->SetHorizJustify( GR_TEXT_H_ALIGN_LEFT );
                 label->SetVertJustify( GR_TEXT_V_ALIGN_BOTTOM );
