@@ -40,7 +40,7 @@ pub fn is_source_ext(name: &str) -> bool {
         // EasyEDA / JLCEDA
         "epro" | "epro2" | "eprj" | "elibz" | "elibz2" | "esch" | "epcb" | "esym" | "efoo" | "eblob" | "ecop"
         // Altium Designer, CircuitStudio, CircuitMaker, Solidworks PCB
-        | "pcbdoc" | "schdoc" | "cmpcbdoc" | "cspcbdoc" | "swpcbdoc" | "cmschdoc" | "csschdoc"
+        | "pcbdoc" | "schdoc" | "cmpcbdoc" | "cspcbdoc" | "swpcbdoc" | "cmschdoc" | "csschdoc" | "prjpcb"
         // Cadence Allegro / OrCAD (Eagle 6+ XML boards are .brd as well)
         | "brd" | "mdd" | "dsn"
         // Autodesk Eagle schematics, P-CAD, gEDA, Easy-PC and legacy KiCad 4/5 schematics
@@ -166,7 +166,7 @@ pub fn format_name(inputs: &[(String, PathBuf)]) -> String {
     for (n, _) in inputs {
         let name = match ext(n).as_str() {
             "epro" | "epro2" | "eprj" | "elibz" | "elibz2" | "esch" | "epcb" | "json" => "EasyEDA",
-            "pcbdoc" | "schdoc" | "cmpcbdoc" | "cspcbdoc" | "cmschdoc" | "csschdoc" => "Altium",
+            "pcbdoc" | "schdoc" | "cmpcbdoc" | "cspcbdoc" | "cmschdoc" | "csschdoc" | "prjpcb" => "Altium",
             "swpcbdoc" => "Solidworks PCB",
             "mdd" | "dsn" => "Cadence OrCAD / Allegro",
             "cpa" | "csa" => "CADSTAR",
@@ -181,7 +181,16 @@ pub fn format_name(inputs: &[(String, PathBuf)]) -> String {
             "pcb" | "prj" => "another EDA tool",
             "zip" => {
                 let l = n.to_ascii_lowercase();
-                if l.contains("odb") { "ODB++" } else { "EasyEDA" }
+                let at = inputs.iter().find(|(m, _)| m == n).map(|(_, p)| p.as_path()).unwrap_or(Path::new(""));
+                if l.contains("odb") { "ODB++" } else if zip_needs_unpacking(at) {
+                    // the tool of the design files inside
+                    let inner: Vec<(String, PathBuf)> = std::fs::File::open(at)
+                        .ok()
+                        .and_then(|f| zip::ZipArchive::new(std::io::BufReader::new(f)).ok())
+                        .map(|z| z.file_names().filter(|m| is_source_ext(m)).map(|m| (m.to_string(), PathBuf::new())).collect())
+                        .unwrap_or_default();
+                    return format_name(&inner);
+                } else { "EasyEDA" }
             }
             _ => continue,
         };
@@ -237,6 +246,80 @@ fn safe_stem(name: &str) -> String {
         .collect();
     let s = s.trim().to_string();
     if s.is_empty() { "imported".into() } else { s }
+}
+
+/// Whether a .zip is a plain zipped folder of another tool's files that `kicad-cli import` cannot read as it is
+/// (Altium, Eagle, OrCAD ..., or an unpacked EasyEDA Pro project inside a folder).  EasyEDA Pro exports
+/// (project.json at the top), EasyEDA Standard zips and ODB++ jobs are read as zips by their importers.
+fn zip_needs_unpacking(at: &Path) -> bool {
+    let Ok(file) = std::fs::File::open(at) else { return false };
+    let Ok(mut zip) = zip::ZipArchive::new(std::io::BufReader::new(file)) else { return false };
+    let mut foreign = false;
+    for i in 0..zip.len() {
+        let Ok(f) = zip.by_index_raw(i) else { continue };
+        let name = f.name().to_ascii_lowercase();
+        let base = name.rsplit('/').next().unwrap_or(&name);
+        if name == "project.json" || name.ends_with("matrix/matrix") {
+            return false;
+        }
+        let easyeda_part = ["esch", "epcb", "esym", "efoo", "eblob", "ecop", "json"].iter().any(|e| base.ends_with(&format!(".{e}")));
+        if (base == "project.json" && name.contains('/')) || (is_source_ext(base) && !easyeda_part) {
+            foreign = true;
+        }
+    }
+    foreign
+}
+
+/// The files of a zipped folder, extracted under `dest` and named by their path in the zip.
+fn unpack_zip(at: &Path, dest: &Path) -> Result<Vec<(String, PathBuf)>, String> {
+    use std::io::Read;
+    const MAX_TOTAL: u64 = 1024 * 1024 * 1024;
+    let file = std::fs::File::open(at).map_err(|e| format!("open zip: {e}"))?;
+    let mut zip = zip::ZipArchive::new(std::io::BufReader::new(file)).map_err(|e| format!("read zip: {e}"))?;
+    let mut out = Vec::new();
+    let mut total = 0u64;
+    for i in 0..zip.len() {
+        let mut f = zip.by_index(i).map_err(|e| format!("read zip: {e}"))?;
+        if f.is_dir() { continue; }
+        let Some(rel) = f.enclosed_name() else { continue };
+        let name = rel.to_string_lossy().replace('\\', "/");
+        if name.starts_with("__MACOSX/") || name.rsplit('/').next().is_some_and(|b| b.starts_with("._")) { continue; }
+        total += f.size();
+        if total > MAX_TOTAL { return Err("The zip unpacks to more than 1 GB.".into()); }
+        let to = dest.join(format!("{i}"));
+        let mut w = std::fs::File::create(&to).map_err(|e| format!("unpack zip: {e}"))?;
+        std::io::copy(&mut (&mut f).take(MAX_TOTAL), &mut w).map_err(|e| format!("unpack zip: {e}"))?;
+        out.push((name, to));
+    }
+    Ok(out)
+}
+
+/// `inputs` with each zipped folder replaced by the design files inside it.
+fn unpack_folder_zips(inputs: &[(String, PathBuf)], work: &Path) -> Result<Option<Vec<(String, PathBuf)>>, String> {
+    if !inputs.iter().any(|(n, at)| n.to_ascii_lowercase().ends_with(".zip") && zip_needs_unpacking(at)) {
+        return Ok(None);
+    }
+    let mut out = Vec::new();
+    for (k, (n, at)) in inputs.iter().enumerate() {
+        if !(n.to_ascii_lowercase().ends_with(".zip") && zip_needs_unpacking(at)) {
+            out.push((n.clone(), at.clone()));
+            continue;
+        }
+        let dest = work.join(format!("unzip-{k}"));
+        std::fs::create_dir_all(&dest).map_err(|e| format!("unpack zip: {e}"))?;
+        for (name, file) in unpack_zip(at, &dest)? {
+            // the project folder's Pro parts go to pack_unpacked_pro whatever their content; the rest only when
+            // they are a design
+            let top_part = name.split('/').any(|seg| matches!(seg, "SHEET" | "PCB" | "SYMBOL" | "FOOTPRINT" | "POUR" | "BLOB" | "INSTANCE" | "PANEL" | "FONT"));
+            if top_part || is_source(&name, &file) {
+                out.push((name, file));
+            }
+        }
+    }
+    if out.is_empty() {
+        return Err("The zip holds no design files that can be imported.".into());
+    }
+    Ok(Some(out))
 }
 
 /// When `inputs` hold an unpacked EasyEDA Pro project, the .epro made from it (and the other inputs).
@@ -296,6 +379,16 @@ pub async fn convert(inputs: &[(String, PathBuf)], stem: &str) -> Result<Convert
 
     // An unpacked EasyEDA Pro project (project.json beside SHEET/, PCB/, SYMBOL/, FOOTPRINT/ ...), as people commit
     // it to git: zipped back into the .epro it came from.
+    // A zipped folder of another tool's files: the design files inside it
+    let unpacked;
+    let inputs: &[(String, PathBuf)] = match unpack_folder_zips(inputs, &work) {
+        Ok(Some(u)) => {
+            unpacked = u;
+            &unpacked
+        }
+        Ok(None) => inputs,
+        Err(e) => return Err(fail(&work, e)),
+    };
     let packed;
     let inputs: &[(String, PathBuf)] = match pack_unpacked_pro(inputs, &work) {
         Ok(Some(p)) => {
@@ -328,6 +421,26 @@ pub async fn convert(inputs: &[(String, PathBuf)], stem: &str) -> Result<Convert
             tokio::fs::copy(at, &to).await.map_err(|e| fail(&work, format!("copy input: {e}")))?;
         }
         args.push(to);
+    }
+
+    // Several Altium sheets are one hierarchy: they go in as an Altium project listing them (written afresh, as the
+    // uploaded .PrjPcb names the documents by the paths they had on the designer's computer)
+    let has_ext = |p: &Path, e: &str| p.extension().is_some_and(|x| x.eq_ignore_ascii_case(e));
+    let sheets: Vec<PathBuf> = args.iter().filter(|p| has_ext(p, "schdoc")).cloned().collect();
+    if sheets.len() > 1 || args.iter().any(|p| has_ext(p, "prjpcb")) {
+        args.retain(|p| !has_ext(p, "prjpcb"));
+        if !sheets.is_empty() {
+            let mut prj = String::from("[Design]\r\n");
+            let docs = args.iter().filter(|p| has_ext(p, "pcbdoc")).take(1).chain(sheets.iter());
+            for (k, doc) in docs.enumerate() {
+                let name = doc.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+                prj.push_str(&format!("\r\n[Document{}]\r\nDocumentPath={}\r\n", k + 1, name));
+            }
+            let at = input_dir.join("project.PrjPcb");
+            tokio::fs::write(&at, prj).await.map_err(|e| fail(&work, format!("write project: {e}")))?;
+            args.retain(|p| !has_ext(p, "schdoc"));
+            args.push(at);
+        }
     }
 
     let stem = safe_stem(stem);
@@ -422,5 +535,30 @@ mod tests {
         assert!(!is_source_text("pom.xml", br#"<?xml version="1.0"?><project>"#));
         assert!(is_source_text("board.txt", b"!PADS-POWERPCB-V9.0-MILS!"));
         assert!(!is_source_text("README.txt", b"hello"));
+    }
+
+    #[test]
+    fn unpacks_only_folder_zips() {
+        let dir = std::env::temp_dir().join(format!("nk-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let make = |name: &str, entries: &[&str]| {
+            let at = dir.join(name);
+            let mut z = zip::ZipWriter::new(std::fs::File::create(&at).unwrap());
+            for e in entries {
+                z.start_file(*e, zip::write::SimpleFileOptions::default()).unwrap();
+                std::io::Write::write_all(&mut z, b"x").unwrap();
+            }
+            z.finish().unwrap();
+            at
+        };
+        assert!(zip_needs_unpacking(&make("altium.zip", &["proj/board.PcbDoc", "proj/a.SchDoc", "proj/readme.pdf"])));
+        assert!(zip_needs_unpacking(&make("eagle.zip", &["x/board.brd", "x/board.sch"])));
+        assert!(zip_needs_unpacking(&make("pro-folder.zip", &["athena/project.json", "athena/SHEET/1/1.esch"])));
+        assert!(!zip_needs_unpacking(&make("pro.zip", &["project.json", "SHEET/1/1.esch"])));
+        assert!(!zip_needs_unpacking(&make("odb.zip", &["job/matrix/matrix", "job/steps/pcb/profile"])));
+        assert!(!zip_needs_unpacking(&make("std.zip", &["PCB_x.json", "SCH_x.json"])));
+        let files = unpack_zip(&dir.join("altium.zip"), &dir).unwrap();
+        assert_eq!(files.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(), ["proj/board.PcbDoc", "proj/a.SchDoc", "proj/readme.pdf"]);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

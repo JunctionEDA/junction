@@ -61,7 +61,7 @@ const KIND: Record<MissingFile["kind"], string> = { symbol_library: "symbol libr
 
 export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy }: { initial?: UploadFile[]; start?: NewMode; onClose: () => void; onDone: (r: UploadResult) => void; onBlank: (r: UploadResult) => void; onBusy?: (busy: boolean) => void }) {
   // Dropped files that hold no KiCad design but another tool's open on the import.
-  const easyOnly = (list: UploadFile[]) => list.length > 0 && !list.some((f) => /\.kicad_(pro|sch|pcb)$/i.test(f.path)) && list.some((f) => /\.(epro|epro2|eprj|elibz|elibz2|esch|epcb|pcbdoc|schdoc|cmpcbdoc|cspcbdoc|swpcbdoc|cmschdoc|csschdoc|brd|mdd|dsn|sch|cpa|csa|dip|dch|lay6|lay|t3001|fab|pcb|prj|asc|cvg)$/i.test(f.path));
+  const easyOnly = (list: UploadFile[]) => list.length > 0 && !list.some((f) => /\.kicad_(pro|sch|pcb)$/i.test(f.path)) && list.some((f) => /\.(epro|epro2|eprj|elibz|elibz2|esch|epcb|pcbdoc|schdoc|cmpcbdoc|cspcbdoc|swpcbdoc|cmschdoc|csschdoc|prjpcb|brd|mdd|dsn|sch|cpa|csa|dip|dch|lay6|lay|t3001|fab|pcb|prj|asc|cvg)$/i.test(f.path));
   const [mode, setMode] = useState<NewMode>(initial && initial.length ? (easyOnly(initial) ? "import" : "upload") : start || "upload");
   // A phone has no drag and drop, and iOS cannot pick a folder: one "choose files" button, worded for that.
   const touch = useMedia(PHONE) || !("webkitdirectory" in HTMLInputElement.prototype);
@@ -206,7 +206,7 @@ export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy 
         onDragOver={(ev) => { ev.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
         onDrop={async (ev) => { ev.preventDefault(); ev.stopPropagation(); setOver(false); take(await filesFromDrop(ev.dataTransfer)); }}>
         <Ic name="upload" size={26} />
-        {eda ? <p><b>{touch ? "Choose a design from another EDA tool" : "Drop a design from another EDA tool here"}</b><br /><span className="hp-dim">EasyEDA Std and Pro (.json, .epro, .eprj, .epro2, .zip) · Altium (.PcbDoc, .SchDoc) · Eagle (.brd, .sch) · OrCAD / Allegro (.dsn, .brd) · CADSTAR · PADS · DipTrace · Easy-PC · P-CAD · TARGET 3001! · Sprint Layout · IPC-2581 and ODB++ (Flux and others export these). Choose the schematic and the board together.</span></p>
+        {eda ? <p><b>{touch ? "Choose a design from another EDA tool" : "Drop a design from another EDA tool here"}</b><br /><span className="hp-dim">EasyEDA Std and Pro (.json, .epro, .eprj, .epro2, .zip) · Altium (.PrjPcb, .PcbDoc, .SchDoc) · Eagle (.brd, .sch) · OrCAD / Allegro (.dsn, .brd) · CADSTAR · PADS · DipTrace · Easy-PC · P-CAD · TARGET 3001! · Sprint Layout · IPC-2581 and ODB++ (Flux and others export these). Choose the schematic and the board together.</span></p>
           : touch ? <p><b>Choose your KiCad project files</b><br /><span className="hp-dim">the .kicad_pro, .kicad_sch and .kicad_pcb files together, or a .zip of the project folder</span></p>
           : <p><b>Drop a KiCad project here</b><br /><span className="hp-dim">a project folder, its files, or a .zip</span></p>}
         <div className="hp-drop-btns">

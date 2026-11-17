@@ -178,9 +178,9 @@ export function isProjectFile(path: string): boolean {
  *  Autotrax, Fabmaster, gEDA, LTspice, IPC-2581 and ODB++ (what Flux exports).  .json / .xml / .txt / .zip are
  *  decided by the server from their content. */
 export function isNonKicadFile(path: string): boolean {
-  return /\.(epro|epro2|eprj|elibz|elibz2|esch|epcb|esym|efoo|eblob|ecop|json|zip|pcbdoc|schdoc|cmpcbdoc|cspcbdoc|swpcbdoc|cmschdoc|csschdoc|brd|mdd|dsn|sch|cpa|csa|dip|dch|lay6|lay|t3001|fab|pcb|prj|asc|cvg|xml|txt)$/i.test(path.split("/").pop() || path);
+  return /\.(epro|epro2|eprj|elibz|elibz2|esch|epcb|esym|efoo|eblob|ecop|json|zip|pcbdoc|schdoc|cmpcbdoc|cspcbdoc|swpcbdoc|cmschdoc|csschdoc|prjpcb|brd|mdd|dsn|sch|cpa|csa|dip|dch|lay6|lay|t3001|fab|pcb|prj|asc|cvg|xml|txt)$/i.test(path.split("/").pop() || path);
 }
-export const NONKICAD_ACCEPT = ".epro,.epro2,.eprj,.elibz,.elibz2,.esch,.epcb,.json,.zip,.pcbdoc,.schdoc,.cmpcbdoc,.cspcbdoc,.swpcbdoc,.cmschdoc,.csschdoc,.brd,.mdd,.dsn,.sch,.cpa,.csa,.dip,.dch,.lay6,.lay,.t3001,.fab,.pcb,.prj,.asc,.cvg,.xml,.txt";
+export const NONKICAD_ACCEPT = ".epro,.epro2,.eprj,.elibz,.elibz2,.esch,.epcb,.json,.zip,.pcbdoc,.schdoc,.cmpcbdoc,.cspcbdoc,.swpcbdoc,.cmschdoc,.csschdoc,.prjpcb,.brd,.mdd,.dsn,.sch,.cpa,.csa,.dip,.dch,.lay6,.lay,.t3001,.fab,.pcb,.prj,.asc,.cvg,.xml,.txt";
 export function isLocalState(path: string): boolean {
   return path.split("/").some((d) => d.endsWith(".collab") || d.endsWith("-backups") || d === ".history" || d === ".git");
 }
