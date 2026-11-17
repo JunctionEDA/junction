@@ -5,6 +5,7 @@
 // the PARENT sheet — where KiCad keeps the Sheetname field and the instance's page — as an ordinary op.
 import type { HierNode, PanelAction } from "../../panels-api";
 import { store } from "../appstore";
+import { requestRender } from "../view";
 import { enterSheet, openDoc, publishDocs, rootSchematic, topLevelSchematics, topLevelSheetsChanged } from "../doc";
 import { E } from "../state";
 import { api, toast } from "../util";
@@ -13,6 +14,7 @@ import { applyHighlight, preferInstance } from "../schnets";
 import { loadProject, onProjectChanged, projectJson, saveProject, sub } from "../../dialogs/project";
 import { confirmBox } from "../../dialogs/dom";
 import { commitRootPage } from "../../dialogs/page-settings";
+import { repairPageNumbers, type PageSheet } from "../../sim/sheet-pages";
 import { KC, currentDocId, isSchDoc, kdoc, openDocs, panelStore, projectId, projectName, textEntry, type DocEntryLite, tctx } from "./core";
 
 interface SheetRef { id: string; name: string; file: string; page: string }
@@ -63,6 +65,21 @@ function resolveChild(parent: DocEntryLite, file: string): DocEntryLite | null {
   return docs.find((d) => d.path === rel || d.path === file) || docs.find((d) => d.path.split("/").pop() === base) || null;
 }
 
+/** The pages eeschema shows once the schematic is loaded (RepairPageNumbers: a page stored twice, like the "#" every
+ *  top-level sheet of an Altium import has, is renumbered), written onto the tree's nodes. */
+function repairPages(tree: HierNode, topUuid: (n: HierNode) => string): HierNode {
+  const nodes: HierNode[] = [], list: PageSheet[] = [];
+  const walk = (n: HierNode, uuids: string[], virt: { n: number }): void => {
+    nodes.push(n); list.push({ uuids, page: n.page, virt: virt.n++ });
+    for (const c of n.children) walk(c, uuids.concat(c.sheetId || ""), virt);
+  };
+  for (const top of tree.virtual ? tree.children : [tree]) walk(top, [topUuid(top)], { n: 1 });
+  const { pages } = repairPageNumbers(list);
+  nodes.forEach((n, i) => { n.page = pages[i]; });
+  return tree;
+}
+const fileUuid = (docId: string | null): string => { const e = docId ? entry(docId) : null; return String((e && (e.doc as unknown as { uuid?: string }).uuid) || ""); };
+
 function build(): HierNode | null {
   const root = (store.get().project ? rootSchematic() : null) as DocEntryLite | null; if (!root) return null;
   const cur = currentDocId();
@@ -85,16 +102,21 @@ function build(): HierNode | null {
       return { path: p, name: t.name || d.path.split("/").pop()!.replace(/\.kicad_sch$/, ""), page: e ? e.page : "", docId: d.docId, file: d.path.split("/").pop() || "", parentDocId: null, sheetId: null,
         current: d.docId === cur, children: walk(d, p, 0), topLevel: true };
     });
-    return { path: "", name: projectName() || "Schematic", page: "", docId: null, file: "", parentDocId: null, sheetId: null, current: false, children, virtual: true };
+    const uuidOf = new Map(tops.map((t) => [t.doc.docId, t.uuid]));
+    return repairPages({ path: "", name: projectName() || "Schematic", page: "", docId: null, file: "", parentDocId: null, sheetId: null, current: false, children, virtual: true },
+      (n) => uuidOf.get(n.docId || "") || fileUuid(n.docId));
   }
   const tl = topLevelEntry(root.path);
-  return { path: "/", name: (tl && typeof tl.name === "string" && tl.name) || stem || projectName() || "Schematic", page: rootEntry ? rootEntry.page : "1", docId: root.docId, file: root.path.split("/").pop() || "", parentDocId: null, sheetId: null,
-    current: root.docId === cur, children: walk(root, "/", 0) };
+  return repairPages({ path: "/", name: (tl && typeof tl.name === "string" && tl.name) || stem || projectName() || "Schematic", page: rootEntry ? rootEntry.page : "1", docId: root.docId, file: root.path.split("/").pop() || "", parentDocId: null, sheetId: null,
+    current: root.docId === cur, children: walk(root, "/", 0) }, () => fileUuid(root.docId));
 }
 
 export function publishHierarchy(): void {
   let root: HierNode | null = null;
   try { root = build(); } catch (e) { console.warn(e); }
+  // the top-level sheet on screen shows its repaired page in the title block's ${#}, as eeschema does after loading
+  const d = kdoc() as (KDoc & { pageNumber?: string }) | null, cur = root && root.virtual ? root.children.find((c) => c.current) : null;
+  if (d && cur && cur.page && d.pageNumber !== cur.page) { d.pageNumber = cur.page; requestRender(); }
   const h = panelStore.get().hierarchy;
   panelStore.set({ hierarchy: { root, version: h.version + 1, marked: h.marked, markColor: h.markColor } });
 }
