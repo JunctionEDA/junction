@@ -221,12 +221,7 @@ export class Collab {
     this.applied = null; this.goneSince = 0; this.switching = false;
     this.followName = who ? who.name : "";
     setMemo(key && who ? { key, name: who.name } : null);
-    if (key) {
-      // stop any turn the viewport is in the middle of: it would read as the person moving their own view
-      const v = this.host.viewport;
-      v.lookAlong(new THREE.Vector3(0, 0, -1).applyQuaternion(v.camera.quaternion), new THREE.Vector3(0, 1, 0).applyQuaternion(v.camera.quaternion), false);
-      if (!quiet) this.host.ctx.toast(`Following ${who!.name}. Zoom or pan to stop`, 2600);
-    }
+    if (key && !quiet) this.host.ctx.toast(`Following ${who!.name}. Zoom or pan to stop`, 2600);
     this.set({ follow: key });
     this.draw(); this.touch();
     this.followTick();

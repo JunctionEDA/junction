@@ -532,6 +532,23 @@ try {
     await bob.waitForSelector('[data-thread-open] [data-resolve]');
     await bob.click('[data-thread-open] [data-resolve]');
     check('Bob resolves it: the count goes for Alice and the thread is under Resolved', await until(alice, (id) => !document.querySelector(`[data-feature-row="${id}"] [data-row-comments]`), ids.e2) && await until(alice, () => /Resolved1/.test(document.querySelector('#cadComments .cmt-tabs')?.textContent || '')));
+    // nothing selected: the tool waits for a click on the model
+    for (const p of [alice, bob]) if (await p.$('[data-thread-open] .cmt-x')) await p.click('[data-thread-open] .cmt-x');
+    await until(alice, () => document.querySelectorAll('.cad-pins [data-pin]').length === 1);
+    await bob.evaluate(() => { window.JunctionPartStudio.select([]); window.JunctionPartStudio.selectFeature(null); });
+    await bob.click('[data-tool=Comment]');
+    check('with nothing selected the Comment tool asks for a click', await until(bob, () => !!document.querySelector('[data-comment-picking]')));
+    await click(bob, bc.x + 130, bc.y + 60);
+    await bob.waitForSelector('[data-compose] textarea');
+    const label = await bob.textContent('[data-compose] .cmt-anchor');
+    await bob.fill('[data-compose] textarea', 'Chamfer here.');
+    await bob.click('[data-compose] button[type=submit]');
+    check('the click names what the thread is about, and the thread appears for Alice', /^(Face|Edge|Vertex) of /.test(label || '') && await until(alice, () => document.querySelectorAll('.cad-pins [data-pin]').length === 2), label || '');
+    await bob.waitForSelector('[data-thread-open] .acts .del', { state: 'attached' });
+    await bob.hover('[data-thread-open] .cmt-item');
+    await bob.click('[data-thread-open] .acts .del');
+    check('Bob deletes his comment: its pin goes for Alice too', await until(alice, () => document.querySelectorAll('.cad-pins [data-pin]').length === 1),
+      JSON.stringify(await Promise.all([alice, bob].map((p) => p.evaluate(() => { const s = window.JunctionCadCollab.comments.getState(); return { n: s.comments.map((c) => c.id + (c.resolved ? 'r' : '')), open: s.open, error: s.error, pins: document.querySelectorAll('.cad-pins [data-pin]').length }; })))));
     // the geometry goes
     await menu(alice, `[data-feature-row="${ids.e1}"]`, 'Suppress');
     check('when the face is gone the pin stays where the thread was started, marked as lost', await until(bob, () => !!document.querySelector('.cad-pins [data-pin][data-pin-lost]')));
