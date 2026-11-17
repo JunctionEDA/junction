@@ -248,11 +248,14 @@ test("a model under another tool's path variable: the project's copy, else the p
   globalThis.KiCadProjectModel = (stem) => (stem === "/easyeda2kicad.3dshapes/USB-A-TH_4P-L14.5-W14.0-H7.6-S2.71" ? "/api/docs/e2k/content" : null);
   try { const p = G.footprintModels(first(fp(wrl)).node); assert.strictEqual(p[0].source, "project"); assert.strictEqual(p[0].url, "/api/docs/e2k/content"); }
   finally { delete globalThis.KiCadProjectModel; }
-  // the server's placement is baked into the vendor mesh
-  const mesh = { pos: new Float32Array([1, 0, 0]), nrm: new Float32Array([1, 0, 0]), col: new Float32Array(3), idx: new Uint32Array(0) };
+  // the vendor mesh is placed as EasyEDA places it: its box centred and stood on Z = 0, moved, then turned
+  // (USB-A C456018: box x ±7.75, y -13.5..0.5, z -3.87..7.64; offset 0,-4.9,3.8 puts its leads on its pads, y = 1.35)
+  const mesh = { pos: new Float32Array([-7.75, -13.5, -3.87, 7.75, 0.5, 7.64, 3.5, -0.25, -3.87]), nrm: new Float32Array(9), col: new Float32Array(9), idx: new Uint32Array(0) };
   const h = (o, r) => ({ get: (n) => (n === "x-model-offset" ? o : n === "x-model-rotate" ? r : null) });
-  const m = G.vendorPlaced(mesh, h("0,2,1", "0,0,90"));
-  [0, 1, 1].forEach((v, i) => near(m.pos[i], v, 1e-6, `pos ${i}`));
+  const m = G.vendorPlaced(mesh, h("0,-4.9,3.8", "0,0,0"));
+  [3.5, 1.35, -0.07].forEach((v, i) => near(m.pos[6 + i], v, 1e-4, `lead ${i}`));
+  const tt = G.vendorPlaced(mesh, h("0,-4.9,3.8", "0,0,90"));
+  [1.35, -3.5].forEach((v, i) => near(tt.pos[6 + i], v, 1e-4, `turned lead ${i}`));
   assert.strictEqual(G.vendorPlaced(mesh, h(null, null)), mesh, "no headers: as the file has it");
 });
 
