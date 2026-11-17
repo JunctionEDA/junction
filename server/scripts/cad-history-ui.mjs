@@ -308,6 +308,17 @@ try {
   check('a version saved there pins every document of the project, the assembly and the part studio included', kept.docs.some((d) => d.path === 'Assembly 1.jasm') && kept.docs.some((d) => d.path === 'Part Studio 1.jpart') && kept.docs.some((d) => /\.kicad_pcb$/.test(d.path)), kept.docs.map((d) => d.path).join(' '));
   await shot(main, 'assembly-history');
 
+  // ---------------------------------------------------------------- compare, asked for where the part studio's code is not loaded yet
+  const fresh = await open(aliceId, 'cad-hist-alice');
+  await fresh.goto(`${BASE}/p/${pid}/edit`);
+  await fresh.waitForFunction(() => window.CollabApp && window.CollabApp.getState().view === 'editor' && window.CollabApp.getState().document.hasDoc, null, { timeout: 30000 });
+  check('on the schematic, the part studio\'s bundle is not on the page', await fresh.evaluate(() => !window.JunctionCompareRenderers));
+  await fresh.evaluate((at) => window.CollabReview.openCompare({ docId: at.docId, a: { kind: 'at', docId: at.docId, seq: at.seq, label: 'Plate, first cut' }, b: { kind: 'at', docId: at.docId, seq: 'head', label: 'Current' } }), { docId, seq: firstRun.to });
+  await fresh.waitForSelector('[data-compare][data-compare-kind="part_studio"] [data-compare-state="done"]', { timeout: 90000 });
+  check('the Compare window loads it and compares the part studio from there', await fresh.locator('[data-compare] .rv-row').count() >= 3 && /Added [\d.]+ cm³/.test(await fresh.locator('[data-compare-legend]').innerText()));
+  await fresh.click('#rvClose');
+  await fresh.context().close();
+
   check('no page errors', errors.length === 0, errors.join(' | '));
 } catch (e) {
   check('the script ran to the end', false, e.stack || e.message);
