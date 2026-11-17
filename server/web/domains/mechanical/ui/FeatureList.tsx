@@ -153,7 +153,8 @@ export function FeatureList({ studio }: { studio: PartStudio }) {
     const def = featureDef(f.featureType);
     const rep = reports[f.id];
     const below = !isDraft && gap - 1 >= rollback;
-    const state = f.suppressed ? "suppressed" : below ? "rolled-back" : rep ? rep.status : "ok";
+    // the row of a feature that is still being given its geometry is not an error yet
+    const state = f.suppressed ? "suppressed" : below ? "rolled-back" : rep ? (isDraft && rep.status === "error" ? "ok" : rep.status) : "ok";
     const on = selected.includes(f.id) || sketch === f.id || isDraft;
     const hideable = !isDraft && HIDEABLE.has(f.featureType);
     const shown = hideable ? studio.isVisible(f.id) : true;

@@ -134,8 +134,8 @@ export function ContextMenu({ studio }: { studio: PartStudio }) {
 }
 
 const MOUSE: [string, string][] = [
-  ["Right drag", "Turn the view"], ["Middle drag, or Ctrl + right drag", "Slide the view"], ["Wheel", "Zoom about the pointer"],
-  ["Double click, middle button", "Zoom to fit"], ["Click", "Select; Shift or Ctrl adds"], ["Drag left to right", "Select what is wholly inside the box"],
+  ["Right drag", "Turn the view"], ["Middle drag", "Slide the view (also Ctrl + right drag)"], ["Wheel", "Zoom about the pointer"],
+  ["Middle double click", "Zoom to fit"], ["Click", "Select; Shift or Ctrl adds"], ["Drag left to right", "Select what is wholly inside the box"],
   ["Drag right to left", "Select what the box touches"], ["Right click", "The menu for what is under the pointer; in a sketch, put the tool down"],
 ];
 

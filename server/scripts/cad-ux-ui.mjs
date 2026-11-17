@@ -310,6 +310,7 @@ try {
   await page.waitForSelector('.cad-features [data-feature-type=fillet] input');
   await page.keyboard.type('Soft edges'); await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.JunctionPartStudio.getState().features[2].name === 'Soft edges');
+  await page.waitForSelector('.cad-features [data-feature-type=fillet] input', { state: 'detached' });
   check('F2 renames the selected feature in place', (await rows()).join() === 'Sketch 1,Extrude 1,Soft edges');
   // Ctrl and Shift select several
   await page.click('.cad-features [data-feature-type=sketch]');
