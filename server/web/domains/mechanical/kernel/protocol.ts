@@ -61,10 +61,29 @@ export interface SketchView {
   open: string[];
 }
 
+/**
+ * Reference geometry a feature made (features/plane.ts, axis.ts, point.ts, helix.ts), ready to draw and pick.
+ * One per feature: `featureId` is the feature that made it.
+ */
+export interface DatumView {
+  featureId: string;
+  kind: "plane" | "axis" | "point" | "curve";
+  /** plane: its frame (a sketch on it uses this), and the square drawn `size` wide about `centre` */
+  frame?: Frame; centre?: Vec3; size?: number;
+  /** axis: a point on it and its direction; drawn `length` long, centred on `origin` */
+  origin?: Vec3; dir?: Vec3; length?: number;
+  /** point */
+  at?: Vec3;
+  /** curve: a polyline, x y z after x y z */
+  points?: number[];
+}
+
 export interface RegenResult {
   features: FeatureReport[];
   bodies: BodyResult[];
   sketches: SketchView[];
+  /** reference planes, axes, points and curves (absent from engines that know none) */
+  datums?: DatumView[];
   /** the index of the first feature that was evaluated again; features.length when everything was cached */
   rebuiltFrom: number;
   ms: number;

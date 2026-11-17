@@ -11,14 +11,14 @@ import type { FeatureDefinition } from "../core/feature";
 import { DEFAULT_PLANES, toWorld, type Frame, type GeomRef, type PlaneRef } from "../core/geometry";
 import { curvePoints, pointOf } from "../sketch/format";
 import { ShapeIndex, type Kernel } from "./occ";
-import type { BodyResult, FeatureInput, FeatureReport, RegenResult, SketchView } from "./protocol";
+import type { BodyResult, DatumView, FeatureInput, FeatureReport, RegenResult, SketchView } from "./protocol";
 import { DEFAULT_QUALITY, tessellate, type MeshQuality } from "./tessellate";
-import { FeatureError, type Body, type BodyTopo, type EvalContext, type FaceNamer, type ModelState, type NamedShape, type Resolved, type Shape, type SketchGeometry } from "./types";
+import { FeatureError, type Body, type BodyTopo, type Datum, type EvalContext, type FaceNamer, type ModelState, type NamedShape, type Resolved, type Shape, type SketchGeometry } from "./types";
 
 interface Deletable { delete(): void }
 interface Entry { json: string; state: ModelState; owned: Deletable[]; report: FeatureReport }
 
-const EMPTY: ModelState = { bodies: [], sketches: {} };
+const EMPTY: ModelState = { bodies: [], sketches: {}, datums: {} };
 let nextRev = 1;
 
 /** Names for every face, edge and vertex of a shape.  An edge is named by the faces it lies between, a vertex by the faces that meet there. */
@@ -94,13 +94,15 @@ export class RegenEngine {
       return out;
     });
     const sketches = Object.values(state.sketches).map(sketchView);
-    return { features: reports, bodies, sketches, rebuiltFrom, ms: Date.now() - t0 };
+    const datums = Object.values(state.datums || {}).map((d): DatumView => { const v: Datum = { ...d }; delete v.shape; return v; });
+    return { features: reports, bodies, sketches, datums, rebuiltFrom, ms: Date.now() - t0 };
   }
 
   private async run(f: FeatureInput, json: string, before: ModelState): Promise<Entry> {
     const k = this.k;
     const def = this.defs.get(f.type);
-    const state: ModelState = { bodies: before.bodies.slice(), sketches: { ...before.sketches } };
+    const datums: NonNullable<ModelState["datums"]> = { ...(before.datums || {}) };
+    const state: ModelState = { bodies: before.bodies.slice(), sketches: { ...before.sketches }, datums };
     const owned: Deletable[] = [], temp: Deletable[] = [], notes: string[] = [];
     const t0 = Date.now();
     const made = (body: Body) => { owned.push(body.shape); return body; };
@@ -131,6 +133,16 @@ export class RegenEngine {
         return s;
       },
       setSketch: (s) => { state.sketches[s.featureId] = s; },
+      datum: (id) => {
+        const d = datums[id];
+        if (!d) throw new FeatureError("The reference geometry this feature uses is missing, suppressed or failed.");
+        return d;
+      },
+      setDatum: (d) => { datums[d.featureId] = d; },
+      history: (id) => {
+        const i = this.entries.findIndex((e) => e.report.id === id);
+        return i < 0 ? null : { before: i ? this.entries[i - 1].state : EMPTY, after: this.entries[i].state, status: this.entries[i].report.status };
+      },
       resolve: (ref) => resolveRef(state, ref),
       frameOf: (plane) => frameOf(k, state, plane),
       own: (o) => { owned.push(o); return o; },
@@ -172,6 +184,11 @@ export function frameOf(k: Kernel, state: ModelState, plane: PlaneRef): Frame {
     const p = DEFAULT_PLANES[(plane && plane.plane) || "top"];
     if (!p) throw new FeatureError("The sketch plane is not one of Top, Front or Right.");
     return p.frame;
+  }
+  if (plane.kind === "datum") {
+    const d = state.datums && state.datums[plane.feature];
+    if (!d || d.kind !== "plane" || !d.frame) throw new FeatureError("The reference plane this sketch is on is missing, suppressed or failed.");
+    return d.frame;
   }
   const r = resolveRef(state, plane.ref);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

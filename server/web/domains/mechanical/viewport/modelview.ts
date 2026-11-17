@@ -9,15 +9,18 @@ import { LineSegments2 } from "three/examples/jsm/lines/LineSegments2.js";
 import { LineSegmentsGeometry } from "three/examples/jsm/lines/LineSegmentsGeometry.js";
 import { tokenColor, type Viewport3D } from "../../../shared/viewport3d/viewport3d";
 import { DEFAULT_PLANES, toPlane, type DefaultPlaneId, type Frame, type Vec2, type Vec3 } from "../core/geometry";
-import type { BodyResult, SketchView } from "../kernel/protocol";
+import type { BodyResult, DatumView, SketchView } from "../kernel/protocol";
+import { DatumLayer } from "./datums";
 
 /** Something in the viewport that can be hovered or selected. */
 export type Pick =
   | { kind: "face" | "edge" | "vertex"; body: string; name: string; point: Vec3 }
   | { kind: "plane"; plane: DefaultPlaneId; point: Vec3 }
-  | { kind: "sketch"; featureId: string; entity: string | null; region: string | null; point: Vec3 };
+  | { kind: "sketch"; featureId: string; entity: string | null; region: string | null; point: Vec3 }
+  /** reference geometry: the plane, axis, point or curve a feature made (viewport/datums.ts) */
+  | { kind: "datum"; featureId: string; datum: DatumView["kind"]; point: Vec3 };
 
-export const pickKey = (p: Pick): string => (p.kind === "plane" ? `plane:${p.plane}` : p.kind === "sketch" ? `sketch:${p.featureId}:${p.entity || ""}:${p.region || ""}` : `${p.kind}:${p.body}:${p.name}`);
+export const pickKey = (p: Pick): string => (p.kind === "plane" ? `plane:${p.plane}` : p.kind === "datum" ? `datum:${p.featureId}` : p.kind === "sketch" ? `sketch:${p.featureId}:${p.entity || ""}:${p.region || ""}` : `${p.kind}:${p.body}:${p.name}`);
 
 export type PickKind = Pick["kind"];
 
@@ -50,9 +53,10 @@ export class ModelView {
   /** While set, left-button pointer events go here instead of picking (a sketch tool is drawing). */
   pointerTool: { down?(ev: PointerEvent): void; move?(ev: PointerEvent): void; up?(ev: PointerEvent): void } | null = null;
   private downAt: { x: number; y: number } | null = null;
+  private readonly datums = new DatumLayer((c, w, o) => this.fatMaterial(c, w, o));
 
   constructor(readonly viewport: Viewport3D) {
-    viewport.scene.add(this.root, this.planes, this.highlight, this.overlay);
+    viewport.scene.add(this.root, this.planes, this.highlight, this.overlay, this.datums.group);
     this.buildPlanes();
     viewport.onTheme.push(() => this.readColors());
     viewport.onFrame.push(() => { for (const m of this.fat) m.resolution.set(viewport.width, viewport.height); });
@@ -86,6 +90,7 @@ export class ModelView {
     this.edgeMaterial.color.copy(this.colors.edge);
     this.planes.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material & { color?: THREE.Color }; if (m && m.color) m.color.copy(this.colors.plane); });
     for (const s of this.sketches.values()) this.styleSketch(s);
+    this.datums.group.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material & { color?: THREE.Color }; if (m && m.color) m.color.copy(this.colors.plane); });
     this.drawHighlight();
   }
 
@@ -140,6 +145,9 @@ export class ModelView {
     this.root.remove(b.group);
     b.mesh.geometry.dispose(); b.edges.geometry.dispose(); b.points.geometry.dispose();
   }
+  /** Show the reference planes, axes, points and curves of a regeneration. */
+  setDatums(views: readonly DatumView[]): void { this.datums.set(views, this.colors.plane); this.drawHighlight(); this.viewport.invalidate(); }
+
   /** True when at least one body is on screen. */
   get hasBodies(): boolean { return this.bodies.size > 0; }
 
@@ -204,6 +212,7 @@ export class ModelView {
         if (quad) { const m = new THREE.Mesh(quad.geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: strong ? 0.3 : 0.18, side: THREE.DoubleSide, depthWrite: false })); this.highlight.add(m); }
         return;
       }
+      if (p.kind === "datum") { for (const o of this.datums.highlight(p.featureId, color, strong)) this.highlight.add(o); return; }
       if (p.kind === "sketch") {
         const s = this.sketches.get(p.featureId); if (!s) return;
         if (p.region) { const f = s.fills.find((x) => x.userData.region === p.region); if (f) { const m = new THREE.Mesh(f.geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: strong ? 0.45 : 0.3, side: THREE.DoubleSide, depthWrite: false, depthTest: false })); m.position.copy(f.position); m.quaternion.copy(f.quaternion); m.scale.copy(f.scale); this.highlight.add(m); } }
@@ -298,6 +307,11 @@ export class ModelView {
         if (hit && hit.index != null && hit.distance <= faceD + slack) offer({ kind: "vertex", body: id, name: mesh.vertices.names[hit.index], point: at(hit.point) }, hit.distance, 2e4);
       }
     }
+    // reference points, axes and curves win over the face behind them, as edges do
+    if (want("datum")) {
+      const h = this.datums.pick(ray, px, rc, (k) => k !== "plane", false);
+      if (h && h.d + (h.datum === "point" ? 1e9 : 1e8) <= faceD + slack) offer({ kind: "datum", featureId: h.featureId, datum: h.datum, point: h.point }, h.d, 0);
+    }
     if (best) return (best as { pick: Pick }).pick;
 
     if (want("sketch")) {
@@ -313,6 +327,10 @@ export class ModelView {
         if (entity || region) { const d = ray.origin.distanceTo(w); if (!found || d < found.d) found = { pick: { kind: "sketch", featureId: id, entity, region, point: at(w) }, d }; }
       }
       if (found) return (found as { pick: Pick }).pick;
+    }
+    if (want("datum")) {
+      const h = this.datums.pick(ray, px, rc, (k) => k === "plane", true);
+      if (h) return { kind: "datum", featureId: h.featureId, datum: h.datum, point: h.point };
     }
     if (want("plane") && this.planes.visible) {
       const hit = rc.intersectObjects(this.planes.children.filter((o) => o.userData.plane), false)[0];
@@ -353,7 +371,7 @@ export class ModelView {
   dispose(): void {
     const c = this.viewport.canvas;
     c.removeEventListener("pointermove", this.onMove); c.removeEventListener("pointerdown", this.onDown); c.removeEventListener("pointerup", this.onUp);
-    this.viewport.scene.remove(this.root, this.planes, this.highlight, this.overlay);
+    this.viewport.scene.remove(this.root, this.planes, this.highlight, this.overlay, this.datums.group);
   }
 }
 

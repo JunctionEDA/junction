@@ -6,20 +6,36 @@ import { useEffect, useState } from "react";
 import type { JsonObject } from "../../../shared/itemdoc/itemdoc";
 import { cx } from "../../../shared/util";
 import type { ParamField } from "../core/feature";
-import { DEFAULT_PLANES, type DefaultPlaneId, type GeomRef, type PlaneRef } from "../core/geometry";
+import { DEFAULT_PLANES, type DefaultPlaneId, type PlaneRef } from "../core/geometry";
+import { EXPR_KEY, evaluate, exprsOf, isPlainNumber, variableValues, variablesOf } from "../document/variables";
+import { describeTargets, targetsIn } from "../features/_refs";
 import { useStudio } from "./hooks";
 import { featureDef, type PartStudio } from "./studio";
 
 const row = "grid grid-cols-[104px_minmax(0,1fr)] items-center gap-x-2 gap-y-1 min-h-7";
 
-function NumberField({ field, value, set }: { field: Extract<ParamField, { kind: "number" }>; value: unknown; set(v: number): void }) {
-  const [text, setText] = useState(String(value ?? ""));
-  useEffect(() => { if (Number(text) !== value) setText(String(value ?? "")); /* the draft changed elsewhere */ }, [value]);   // eslint-disable-line react-hooks/exhaustive-deps
-  const n = Number(text), bad = text.trim() === "" || !Number.isFinite(n) || (field.min !== undefined && n < field.min) || (field.max !== undefined && n > field.max);
+function NumberField({ field, value, set, expr, setExpr, lookup }: { field: Extract<ParamField, { kind: "number" }>; value: unknown; set(v: number): void; expr?: string; setExpr?(v: number, text: string | null): void; lookup?(name: string): number | undefined }) {
+  const shown = expr ?? String(value ?? "");
+  const [text, setText] = useState(shown);
+  // a number typed as is, or an expression (with variables) when the field takes one
+  const read = (t: string): number | null => {
+    if (t.trim() === "") return null;
+    if (isPlainNumber(t)) return Number(t);
+    if (!setExpr) return null;
+    try { return evaluate(t, lookup); } catch (e) { return null; }
+  };
+  useEffect(() => { if (text !== shown && read(text) !== value) setText(shown); /* the draft changed elsewhere */ }, [value, expr]);   // eslint-disable-line react-hooks/exhaustive-deps
+  const ok = (v: number | null): v is number => v !== null && Number.isFinite(v) && (field.min === undefined || v >= field.min) && (field.max === undefined || v <= field.max);
+  const n = read(text), bad = !ok(n);
+  const isExpr = !!setExpr && text.trim() !== "" && !isPlainNumber(text);
   return (
     <span className="flex items-center gap-1.5">
-      <input className={cx("input mono w-full", bad && "bad")} inputMode="decimal" value={text} data-param={field.key} aria-label={field.label}
-        onChange={(ev) => { setText(ev.target.value); const v = Number(ev.target.value); if (ev.target.value.trim() !== "" && Number.isFinite(v) && (field.min === undefined || v >= field.min) && (field.max === undefined || v <= field.max)) set(v); }} />
+      <input className={cx("input mono w-full", bad && "bad")} inputMode="decimal" value={text} data-param={field.key} aria-label={field.label} title={isExpr && !bad ? `= ${Math.round(n! * 1e6) / 1e6}` : undefined}
+        onChange={(ev) => {
+          const t = ev.target.value; setText(t);
+          const v = read(t); if (!ok(v)) return;
+          if (setExpr && (!isPlainNumber(t) || expr !== undefined)) setExpr(v, isPlainNumber(t) ? null : t); else set(v);
+        }} />
       {field.unit && field.unit !== "none" ? <span className="text-ink-3 font-mono text-xs">{field.unit === "deg" ? "°" : field.unit}</span> : null}
     </span>
   );
@@ -46,7 +62,16 @@ function Field({ studio, field, params }: { studio: PartStudio; field: ParamFiel
   const arm = () => studio.setField(armed ? null : field.key);
   let control: JSX.Element;
   switch (field.kind) {
-    case "number": control = <NumberField field={field} value={value} set={set} />; break;
+    case "number": {
+      const exprs = exprsOf(params);
+      const values = variableValues(studio.doc ? variablesOf(studio.doc) : []).values;
+      const setExpr = (v: number, text: string | null) => {
+        const next = { ...exprs }; if (text === null) delete next[field.key]; else next[field.key] = text;
+        studio.setDraft({ params: { [field.key]: v, [EXPR_KEY]: Object.keys(next).length ? next : null } });
+      };
+      control = <NumberField field={field} value={value} set={set} expr={exprs[field.key]} setExpr={setExpr} lookup={(n) => values.get(n)} />;
+      break;
+    }
     case "boolean": control = <input type="checkbox" checked={!!value} data-param={field.key} aria-label={field.label} onChange={(ev) => set(ev.target.checked)} />; break;
     case "text": control = <input className="input w-full" value={String(value ?? "")} data-param={field.key} aria-label={field.label} onChange={(ev) => set(ev.target.value)} />; break;
     case "enum":
@@ -71,7 +96,7 @@ function Field({ studio, field, params }: { studio: PartStudio; field: ParamFiel
     }
     case "plane": {
       const ref = (value as unknown as PlaneRef | undefined) || { kind: "plane", plane: "top" };
-      const text = ref.kind === "plane" ? `${DEFAULT_PLANES[ref.plane]?.title || ref.plane} plane` : "A face of the model";
+      const text = ref.kind === "plane" ? `${DEFAULT_PLANES[ref.plane]?.title || ref.plane} plane` : ref.kind === "datum" ? features.find((f) => f.id === ref.feature)?.name || "A missing plane" : "A face of the model";
       control = (
         <span className="flex flex-col gap-1">
           <PickBox param={field.key} armed={armed} text={text} empty={false} onArm={arm} />
@@ -81,9 +106,32 @@ function Field({ studio, field, params }: { studio: PartStudio; field: ParamFiel
       break;
     }
     case "refs": {
-      const refs: GeomRef[] = Array.isArray(value) ? (value as GeomRef[]) : value ? [value as GeomRef] : [];
-      const noun = field.of.length === 1 ? field.of[0] : "item";
-      control = <PickBox param={field.key} armed={armed} empty={!refs.length} text={refs.length ? `${refs.length} ${noun}${refs.length === 1 ? "" : "s"}` : `Click ${field.single ? "a" : "the"} ${noun}${field.single ? "" : "s"}`} onArm={arm} onClear={() => set(field.single ? null : [])} />;
+      const refs = targetsIn(value);
+      const wide = !!(field.datums || field.planes || field.sketch);
+      const noun = field.of.length === 1 && !wide ? field.of[0] : "item";
+      const text = !refs.length ? `Click ${field.single ? "a" : "the"} ${noun}${field.single ? "" : "s"}`
+        : wide ? describeTargets(refs, (id) => features.find((f) => f.id === id)?.name)
+        : `${refs.length} ${noun}${refs.length === 1 ? "" : "s"}`;
+      control = <PickBox param={field.key} armed={armed} empty={!refs.length} text={text} onArm={arm} onClear={() => set(field.single ? null : [])} />;
+      break;
+    }
+    case "features": {
+      const me = features.findIndex((f) => f.id === draftId);
+      const ids = Array.isArray(value) ? (value as string[]) : [];
+      const offered = features.filter((f, i) => (me < 0 || i < me) && (!field.types || field.types.includes(f.featureType)) && !(field.exclude || []).includes(f.featureType));
+      control = (
+        <span className="flex flex-col gap-0.5 max-h-32 overflow-y-auto rounded-sm border border-line bg-panel px-1 py-0.5" data-param={field.key}>
+          {offered.length ? offered.map((f) => {
+            const at = ids.indexOf(f.id);
+            return (
+              <button key={f.id} type="button" data-feature-option={f.id} aria-pressed={at >= 0} className={cx("flex items-center gap-1.5 text-left px-1 rounded-sm", at >= 0 ? "bg-sel text-ink" : "text-ink-2")}
+                onClick={() => set(at >= 0 ? ids.filter((x) => x !== f.id) : [...ids, f.id])}>
+                <span className="w-3 font-mono text-xs text-ink-3">{at >= 0 ? at + 1 : ""}</span><span className="truncate">{f.name}</span>
+              </button>
+            );
+          }) : <span className="text-ink-3">Nothing above this feature to choose.</span>}
+        </span>
+      );
       break;
     }
     case "bodies": {
