@@ -18,7 +18,7 @@ async function handle(msg: ToWorker): Promise<void> {
   if (msg.t === "init") {
     if (!starting) {
       const t0 = Date.now();
-      starting = loadKernel({ wasmUrl: msg.wasmUrl }).then((k) => { engine = new RegenEngine(k, FEATURES); post({ t: "ready", ms: Date.now() - t0 }); })
+      starting = loadKernel({ wasmUrl: msg.wasmUrl, module: msg.module }).then((k) => { engine = new RegenEngine(k, FEATURES); post({ t: "ready", ms: Date.now() - t0 }); })
         .catch((e) => { starting = null; post({ t: "failed", message: `The modelling kernel could not start: ${e && e.message ? e.message : e}` }); });
     }
     await starting;

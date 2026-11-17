@@ -16,7 +16,7 @@ import { mmH, mmW, mmX0, mmY0, world } from "../editor/view";
 installMechPanel();
 
 // for tests and the console
-(window as unknown as { JunctionBoardLink?: unknown }).JunctionBoardLink = {
+(window as unknown as { JunctionBoardMech?: unknown }).JunctionBoardMech = {
   mech, enclosure,
   /** where a board position (mm) is on screen: the inverse of the editor's worldMm */
   clientOf(x: number, y: number): { x: number; y: number } { const r = world.getBoundingClientRect(); return { x: r.left + (x - mmX0()) / mmW() * r.width, y: r.top + (y - mmY0()) / mmH() * r.height }; },

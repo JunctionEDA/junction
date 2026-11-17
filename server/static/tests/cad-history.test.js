@@ -147,6 +147,17 @@ test("the 3D diff: a hole moved is material removed in one place and added in an
   near(centreX(r.added), 10, 0.05); near(centreX(r.removed), 30, 0.05);
 });
 
+test("the 3D diff: a part studio of several parts is compared as a whole (a second part added beside the first)", async () => {
+  const a = edit(plate(), [
+    { id: "s2", kind: "ADDED", item: sketch("s2", "Block sketch", "k", { b1: { type: "point", x: 60, y: 0 }, b2: { type: "point", x: 70, y: 0 }, b3: { type: "point", x: 70, y: 10 }, b4: { type: "point", x: 60, y: 10 }, ba: { type: "line", a: "b1", b: "b2" }, bb: { type: "line", a: "b2", b: "b3" }, bc: { type: "line", a: "b3", b: "b4" }, bd: { type: "line", a: "b4", b: "b1" } }) },
+    { id: "e2", kind: "ADDED", item: extrude("e2", "Block", "r", "s2", { operation: "new", depth: 5 }) }]);
+  const b = edit(a, [modified("e2", { path: ["params", "depth"], value: 8 })]);
+  const r = await compare(a, b);
+  assert.deepEqual([r.a.bodies, r.b.bodies], [2, 2]);
+  near(r.a.volume, PLATE + 500); near(r.b.volume, PLATE + 800);
+  near(r.volumes.common, PLATE + 500); near(r.volumes.added, 300); assert.equal(r.volumes.removed, 0);
+});
+
 test("the 3D diff: the same version twice, an empty version, and a version that fails", async () => {
   const a = plate();
   const same = await compare(a, plate());

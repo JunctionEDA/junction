@@ -146,8 +146,11 @@ export class BodyDisplay extends Store<DisplayState> {
       o.edges.material = edge;
       this.dressed.set(b.id, { mats, edge });
       // the view mode
-      o.mesh.visible = s.mode !== "wireframe";
-      o.edges.visible = s.mode !== "shaded";
+      // (a body something else draws in its own way, as the Board feature's solids under the board's picture,
+      // stays hidden: viewport/modelview.ts bodyStyle)
+      const style = this.studio.view.bodyStyle ? this.studio.view.bodyStyle(o.result) : null;
+      o.mesh.visible = s.mode !== "wireframe" && !(style && style.faces === false);
+      o.edges.visible = s.mode !== "shaded" && !(style && style.edges === false);
       // hidden parts: not drawn, and not on the layer the picking ray sees
       const visible = this.isVisible(b.id);
       o.group.visible = visible;
