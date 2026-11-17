@@ -51,6 +51,8 @@ export interface InstanceItem extends Item {
   fixed?: boolean;
   suppressed?: boolean;
   hidden?: boolean;
+  /** the id of the group item (a folder in the instance list, document/edits.ts) this instance is in */
+  group?: string;
 }
 
 /** One end of a mate: geometry of an instance's source, and which way its axis points. */
@@ -59,6 +61,8 @@ export interface MateConnector extends JsonObject {
   ref: GeomRef;
   /** turn the connector's axis round (the other side of the face) */
   flip?: boolean;
+  /** the id of an explicit connector item (document/edits.ts) this end uses; `ref` is then that connector's geometry */
+  connector?: string;
 }
 
 export interface MateItem extends Item {
