@@ -15,7 +15,9 @@
 //!
 //! Moving every CARTESIAN_POINT by the same T moves the whole model by T, also through an assembly's placements
 //! (each ITEM_DEFINED_TRANSFORMATION maps one placement onto another, both moved by T, so the move passes through it
-//! once).  The box is the box of the points: exact at the vertices that bound most parts, a little short of a round
+//! once).  A shape representation's own frame (an AXIS2_PLACEMENT_3D among its items that no transformation uses)
+//! stays where it is: OpenCASCADE, and so KiCad, places the shapes by that frame, and moving it as well moves the
+//! model twice (LCSC C456018 came out 6.5 mm off and 3.7 mm sunk into the board).  The box is the box of the points: exact at the vertices that bound most parts, a little short of a round
 //! face that bulges past its edges' vertices.
 
 /// Length unit of the file: millimetres per file unit.
@@ -150,12 +152,111 @@ pub fn fit_move(text: &str, offset: [f64; 3], rotate: [f64; 3]) -> Option<[f64; 
     Some([0, 1, 2].map(|a| target[a] - box_at[a] - back[a]))
 }
 
-/// The file with every 3D point moved by `t` millimetres.
+/// The #id of the entity a byte offset of the text lies in: "#123 = KEY ( ..." before it.
+fn owner(text: &str, at: usize) -> Option<&str> {
+    let head = &text[..at];
+    let eq = head.rfind('=')?;
+    let hash = head[..eq].rfind('#')?;
+    Some(head[hash + 1..eq].trim())
+}
+
+/// Every entity's body (after its "#id =", up to its ';'), by id; strings may hold ';' and are skipped over.
+fn entities(text: &str) -> std::collections::HashMap<&str, &str> {
+    let b = text.as_bytes();
+    let mut out = std::collections::HashMap::new();
+    let (mut i, mut start, mut quoted) = (0, 0, false);
+    while i < b.len() {
+        match b[i] {
+            b'\'' => quoted = !quoted,
+            b';' if !quoted => {
+                let stmt = &text[start..i];
+                if let Some(eq) = stmt.find('=') {
+                    let id = stmt[..eq].trim();
+                    if let Some(id) = id.strip_prefix('#') {
+                        out.insert(id, &stmt[eq + 1..]);
+                    }
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The #ids referenced in `body`, strings left out.
+fn refs(body: &str) -> Vec<&str> {
+    let b = body.as_bytes();
+    let (mut out, mut i, mut quoted) = (Vec::new(), 0, false);
+    while i < b.len() {
+        if b[i] == b'\'' {
+            quoted = !quoted;
+        } else if !quoted && b[i] == b'#' {
+            let s = i + 1;
+            let mut e = s;
+            while e < b.len() && b[e].is_ascii_digit() {
+                e += 1;
+            }
+            out.push(&body[s..e]);
+            i = e;
+            continue;
+        }
+        i += 1;
+    }
+    out
+}
+
+/// The points and directions of each shape representation's own frame (an AXIS2_PLACEMENT_3D among its items that
+/// no ITEM_DEFINED_TRANSFORMATION uses), which a move or turn of the model must leave alone.
+fn frames(text: &str) -> std::collections::HashSet<String> {
+    let all = entities(text);
+    let mut placed_by: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    let mut items: Vec<&str> = Vec::new();
+    for body in all.values() {
+        if body.contains("ITEM_DEFINED_TRANSFORMATION") {
+            placed_by.extend(refs(body));
+            continue;
+        }
+        let mut from = 0;
+        while let Some(i) = body[from..].find("SHAPE_REPRESENTATION") {
+            let at = from + i + "SHAPE_REPRESENTATION".len();
+            from = at;
+            if body[at..].starts_with('_') || body[..at - "SHAPE_REPRESENTATION".len()].ends_with("CONTEXT_DEPENDENT_") {
+                continue;
+            }
+            // KEY ( 'name' , ( #a , #b ) , #context ): the list after the name
+            let rest = &body[at..];
+            let Some(q1) = rest.find('\'') else { continue };
+            let Some(q2) = rest[q1 + 1..].find('\'').map(|k| q1 + 1 + k) else { continue };
+            let Some(open) = rest[q2..].find('(').map(|k| q2 + k) else { continue };
+            let Some(close) = rest[open..].find(')').map(|k| open + k) else { continue };
+            items.extend(refs(&rest[open..close]));
+        }
+    }
+    let mut out = std::collections::HashSet::new();
+    for id in items {
+        if placed_by.contains(id) {
+            continue;
+        }
+        let Some(body) = all.get(id) else { continue };
+        if body.trim_start().starts_with("AXIS2_PLACEMENT_3D") {
+            out.extend(refs(body).into_iter().map(str::to_string));
+        }
+    }
+    out
+}
+
+/// The file with every 3D point moved by `t` millimetres (a shape representation's own frame left alone).
 pub fn moved(text: &str, t: [f64; 3]) -> String {
     let k = unit_mm(text);
+    let keep = frames(text);
     let mut out = String::with_capacity(text.len() + text.len() / 8);
     let mut last = 0;
     for (range, p) in points(text) {
+        if owner(text, range.start).is_some_and(|id| keep.contains(id)) {
+            continue;
+        }
         out.push_str(&text[last..range.start]);
         let n = [0, 1, 2].map(|a| p[a] + t[a] / k);
         out.push_str(&format!("{},{},{}", real(n[0]), real(n[1]), real(n[2])));
@@ -169,12 +270,20 @@ pub fn moved(text: &str, t: [f64; 3]) -> String {
 /// which turns and moves the whole model, through an assembly's placements too.
 pub fn transformed(text: &str, rotate: [f64; 3], t: [f64; 3]) -> String {
     let k = unit_mm(text);
+    let keep = frames(text);
+    let kept = |r: &std::ops::Range<usize>| owner(text, r.start).is_some_and(|id| keep.contains(id));
     let mut edits: Vec<(std::ops::Range<usize>, [f64; 3])> = Vec::new();
     for (range, p) in points(text) {
+        if kept(&range) {
+            continue;
+        }
         let r = turn(p, rotate, false);
         edits.push((range, [0, 1, 2].map(|a| r[a] + t[a] / k)));
     }
     for (range, d) in triples(text, "DIRECTION") {
+        if kept(&range) {
+            continue;
+        }
         edits.push((range, turn(d, rotate, false)));
     }
     edits.sort_by_key(|(r, _)| r.start);
@@ -245,6 +354,22 @@ mod tests {
         }
         assert!(out.contains("CARTESIAN_POINT('it''s',("), "names are kept");
         assert!(out.contains("(1.,2.)"));
+    }
+
+    #[test]
+    fn the_shapes_own_frame_stays_put() {
+        // EasyEDA's C456018: ADVANCED_BREP_SHAPE_REPRESENTATION('…',(#solid,#frame),#ctx); OpenCASCADE places the
+        // solid by #frame, so moving it too moved the model twice
+        let file = BOX.replace(
+            "ENDSEC;",
+            "#10=ADVANCED_BREP_SHAPE_REPRESENTATION('a;b',(#9,#11),#1);\n#11=AXIS2_PLACEMENT_3D('',#12,#13,#14);\n#12=CARTESIAN_POINT('',(0.,0.,0.));\n#13=DIRECTION('',(0.,0.,1.));\n#14=DIRECTION('',(1.,0.,0.));\nENDSEC;",
+        );
+        for out in [fitted(file.as_bytes(), [0.0, -4.9, 3.8], [0.0; 3]), placed(file.as_bytes(), [0.0, -4.9, 3.8], [0.0, 0.0, 90.0])] {
+            let out = String::from_utf8(out).unwrap();
+            assert!(out.contains("#12=CARTESIAN_POINT('',(0.,0.,0.))"), "{out}");
+            assert!(out.contains("#14=DIRECTION('',(1.,0.,0.))"), "{out}");
+            assert!(!out.contains("(3.5,-0.25,-3.87)"), "the solid moves");
+        }
     }
 
     #[test]

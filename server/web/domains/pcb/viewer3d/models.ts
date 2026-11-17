@@ -132,7 +132,7 @@ export function footprintModels(node: SNode, guess = true, boardFiles: SNode | n
       const hit = VENDOR_FIELDS.map(([f, v]) => [v, fieldOf(node, f)]).find(([, id]) => id); if (!hit) continue;
       // the server lines the vendor's file up for the entry Junction wrote (parts/step_fit.rs), so the entry is read
       // as KiCad reads it, here as on the desktop and in a downloaded library
-      out.push({ ...ref, source: "vendor", url: `/api/parts/model.step?vendor=${hit[0]}&id=${encodeURIComponent(hit[1])}&fit=3` });
+      out.push({ ...ref, source: "vendor", url: `/api/parts/model.step?vendor=${hit[0]}&id=${encodeURIComponent(hit[1])}&fit=4` });
     } else out.push({ ...ref, source: "kicad", url: kicadModelUrl(m[1], m[2]) });
   }
   if (!named && guess) { const g = guessedModel(node); if (g) out.push(g); }
@@ -171,8 +171,8 @@ function foreignModel(node: SNode, path: string, ref: Omit<ModelRef, "url" | "so
   // easyeda2kicad's .step is the vendor's file as it is, placed by the entry's own numbers (KiCad does the same with
   // the author's copy, and the desktop app with the server's: /api/parts/model-file?as=raw)
   if (/\.(?:step|stp)$/i.test(path)) return { ...ref, source: "vendor", url };
-  // the file lined up for the vendor's entry (fit=3) and that entry's offset and turn applied by the store (placed=1)
-  return { ...ref, offset: [0, 0, 0], rotate: [0, 0, 0], source: "vendor", url: url + "&fit=3&placed=1" };
+  // the file lined up for the vendor's entry (fit=4) and that entry's offset and turn applied by the store (placed=1)
+  return { ...ref, offset: [0, 0, 0], rotate: [0, 0, 0], source: "vendor", url: url + "&fit=4&placed=1" };
 }
 
 /** The model to try for a footprint that names none: its own "Library:Name" in KiCad's 3D library (or the closest to it). */
@@ -287,7 +287,7 @@ function headerXyz(v: string | null): V3 | null {
 }
 
 /**
- * A vendor model the server lined up for its footprint entry (/api/parts/model.step?fit=3, parts/step_fit.rs) with
+ * A vendor model the server lined up for its footprint entry (/api/parts/model.step?fit=4, parts/step_fit.rs) with
  * that entry's offset and turn (X-Model-Offset / X-Model-Rotate) applied, for a footprint whose own entry has none
  * (models.ts foreignModel).  Without the headers the model is left as it is.
  */
