@@ -2714,7 +2714,10 @@ int EESCHEMA_JOBS_HANDLER::JobImport( JOB* aJob )
 
         wxString errorMsg;
 
-        if( !PrepareSaveAsFiles( *schematic, screens, inputFn, outputFn, /*aSaveCopy*/ true,
+        // The imported schematic is transient, so its sheets move to the output folder (not a save
+        // copy): the sheet symbols then name their files relative to the output, where they are
+        // written, instead of relative paths back to the source folder.
+        if( !PrepareSaveAsFiles( *schematic, screens, inputFn, outputFn, /*aSaveCopy*/ false,
                                  /*aCopySubsheets*/ true, /*aIncludeExternSheets*/ true,
                                  filenameMap, errorMsg ) )
         {
@@ -2722,8 +2725,16 @@ int EESCHEMA_JOBS_HANDLER::JobImport( JOB* aJob )
             return CLI::EXIT_CODES::ERR_UNKNOWN;
         }
 
-        // PrepareSaveAsFiles seeds an entry (empty for sheets it does not relocate) for every
-        // screen; empty paths are skipped.
+        for( size_t i = 0; i < screens.GetCount(); i++ )
+        {
+            SCH_SCREEN* screen = screens.GetScreen( i );
+
+            // the virtual root's screen has no file of its own
+            if( screen && !filenameMap.count( screen ) && screen != schematic->Root().GetScreen() )
+                filenameMap[screen] = screen->GetFileName();
+        }
+
+        // Screens without a destination are skipped.
         IO_RELEASER<SCH_IO> kicadPi( SCH_IO_MGR::FindPlugin( SCH_IO_MGR::SCH_KICAD ) );
 
         for( size_t i = 0; i < screens.GetCount(); i++ )

@@ -15,6 +15,11 @@ version it is based on.
   as well as the board.
 - On EasyEDA Pro boards the outline layer is named for EasyEDA's board
   outline, not "Multi-Layer".
+- Imported multi-sheet schematics link their sheets by file name, so the
+  hierarchy (and its netlist) opens in KiCad; they used to point back to
+  the folder the design was imported from.
+- EasyEDA Pro net names on wires connect across every sheet, as in EasyEDA,
+  so the schematic's nets match the board's.
 - `kicad-cli import` takes an Altium project (`.PrjPcb`): all its schematic
   sheets come in as one design, together with its board. The web's "Import
   from another EDA" uses it for Altium designs with several sheets.
