@@ -22,9 +22,15 @@ class RfFeedGeometry(unittest.TestCase):
         self.assertAlmostEqual(r1, r2, places=6)                        # mid point halfway round
 
     def test_short_legs_shrink_the_radius(self):
-        parts = _rounded([(0, 0), (0.3, 0), (0.3, 0.3)], 0.4)
+        parts = _rounded([(0, 0), (0.3, 0), (0.3, 0.3)], 0.2)
         _, a, _, b = parts[1] if parts[0][0] == "seg" else parts[0]
         self.assertLessEqual(math.hypot(a[0] - 0.3, a[1]), 0.3)
+
+    def test_pad_stubs_are_folded_not_rounded(self):
+        parts = _rounded([(131.056, 74.2846), (131.0, 74.225), (124.0, 74.225), (121.875, 76.35), (121.9, 76.4106)], 0.465)
+        self.assertEqual([p[0] for p in parts], ["seg", "arc", "seg"])
+        self.assertEqual(parts[0][1], (131.0, 74.225))           # the straight leg stays straight
+        self.assertEqual(parts[-1][2], (121.875, 76.35))
 
 
 if __name__ == "__main__":

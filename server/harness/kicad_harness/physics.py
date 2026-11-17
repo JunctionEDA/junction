@@ -496,7 +496,17 @@ def _chain(segs):
 
 def _rounded(pts, w):
     """A run with every bend turned into an arc of radius about three track widths (less where the run is short):
-    [("seg", a, b) | ("arc", a, mid, b)]."""
+    [("seg", a, b) | ("arc", a, mid, b)].  Stubs shorter than the width (the router's short leg into a pad centre) are
+    folded into the leg next to them first, so they do not become slivers and tiny arcs."""
+    pts = list(pts)
+    while len(pts) > 2:
+        legs = [math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]) for i in range(len(pts) - 1)]
+        k = min(range(len(legs)), key=legs.__getitem__)
+        if legs[k] >= w:
+            break
+        # a stub at an end runs from the pad centre to a point still on the pad: end the track there instead, so
+        # the long leg stays straight; a stub inside the run loses its inner corner
+        del pts[0 if k == 0 else (len(pts) - 1 if k == len(legs) - 1 else k)]
     out, cur = [], pts[0]
     for i in range(1, len(pts) - 1):
         p0, p1, p2 = pts[i - 1], pts[i], pts[i + 1]
@@ -504,7 +514,7 @@ def _rounded(pts, w):
         cosang = max(-1.0, min(1.0, (u[0] * v[0] + u[1] * v[1]) / (lu * lv)))
         theta = math.acos(cosang)                 # the angle inside the corner
         turn = math.pi - theta
-        if turn < 1e-3:
+        if turn < math.radians(3):
             continue
         want = 3 * w
         d = want / math.tan(theta / 2)            # how far the arc starts from the corner
@@ -519,6 +529,33 @@ def _rounded(pts, w):
         out.append(("arc", a, m, b)); cur = b
     out.append(("seg", cur, pts[-1]))
     return out
+
+
+def _seg_dist(p, a, b):
+    ax, ay = b[0] - a[0], b[1] - a[1]; L = ax * ax + ay * ay
+    t = 0 if L == 0 else max(0.0, min(1.0, ((p[0] - a[0]) * ax + (p[1] - a[1]) * ay) / L))
+    return math.hypot(p[0] - a[0] - t * ax, p[1] - a[1] - t * ay)
+
+
+def _clear_stitching(self, segs, reach):
+    """Take out the free-standing ground vias (stitching, no track ending on them) within `reach` of the feed, so
+    the fence can stand at its own pitch instead of in the gaps an earlier stitch grid left.  Returns how many."""
+    gnd = self._net("GND")
+    ends = set()
+    for it in self._all_items(["segment", "arc"], net=gnd):
+        for m in re.finditer(r"\((?:start|end) ([\d.\-]+) ([\d.\-]+)\)", it["sexpr"]):
+            ends.add((round(float(m.group(1)), 3), round(float(m.group(2)), 3)))
+    n = 0
+    for v in self._all_items(["via"], net=gnd):
+        m = re.search(r"\(at ([\d.\-]+) ([\d.\-]+)\)", v["sexpr"])
+        if not m:
+            continue
+        c = (float(m.group(1)), float(m.group(2)))
+        if (round(c[0], 3), round(c[1], 3)) in ends or not any(_seg_dist(c, a, b) < reach for a, b in segs):
+            continue
+        self._edit({"op": "remove", "id": v["id"]}); n += 1
+    self.flush()
+    return n
 
 
 def _rf_feeds(self, net: str | None = None, impedance: float = 50, min_width: float = 0.3, fence: bool = True,
@@ -565,8 +602,12 @@ def _rf_feeds(self, net: str | None = None, impedance: float = 50, min_width: fl
         row = {k: f[k] for k in ("net", "layer", "width", "gap", "impedance", "model", "reference", "voided") if k in f}
         if fence:
             try:
-                vd = (self.rules().get("net_classes") or {}).get("Default", {}).get("via_diameter") or 0.45
-                row["fence"] = self.fence_net(full, spacing=spacing, offset=w / 2 + max(f.get("gap") or 0.1, 0.1) + vd / 2 + 0.05, size=vd)
+                rl = self.rules(); dc = (rl.get("net_classes") or {}).get("Default", {})
+                vd, dr = dc.get("via_diameter") or 0.45, dc.get("via_drill") or 0.2
+                hc = rl.get("hole_clearance") or 0.25          # copper to the via's hole, KiCad's default when unset
+                off = w / 2 + max(max(f.get("gap") or 0.1, 0.1) + vd / 2, hc + dr / 2) + 0.05
+                row["cleared"] = _clear_stitching(self, segs, off + vd / 2 + hc + dr / 2)
+                row["fence"] = self.fence_net(full, spacing=spacing, offset=off, size=vd)
             except HarnessError as err:
                 row["fence"] = {"error": str(err)}
         out.append(row)
