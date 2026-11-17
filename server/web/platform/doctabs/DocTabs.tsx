@@ -8,12 +8,31 @@
 //
 //   click opens · double-click or the menu renames · the menu deletes (documents the tabs created; a project's
 //   schematic and board stay put) · "+" adds a part studio or an assembly
-import { useCallback, useEffect, useRef, useState } from "react";
+//
+// The tabs also start the project room (room.ts): a dot on a tab for each person who is on it, and the list is
+// fetched again the moment somebody else adds, renames or deletes a document.
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { DOCUMENT_KINDS, type DocumentKind } from "../../domains/registry";
 import { askConfirm } from "../../shared/components/msgbox";
 import { dispatch, useApp, type DocEntry } from "../../shared/store";
 import { cx } from "../../shared/util";
-import { createDocument, deleteDocument, fetchDocs, renameDocument, renamedPath, tabsOf, type Tab } from "./api";
+import { createDocument, deleteDocument, fetchDocs, renameDocument, renamedPath, stemOf, tabsOf, type Tab } from "./api";
+import { ProjectRoom } from "./room";
+import { noteText, tabOf, type RoomMember, type RoomState } from "./roomapi";
+
+const NO_ROOM: RoomState = { live: false, me: null, members: [] };
+const noRoom = () => () => {};
+
+/** The people on a tab: a dot each (three at most, then a count), named in the tooltip. */
+function TabPeople({ people }: { people: RoomMember[] }) {
+  if (!people.length) return null;
+  return (
+    <span className="flex flex-none items-center -space-x-0.5" data-tab-people={people.map((m) => m.login).join(" ")} title={people.map((m) => m.name).join(", ") + (people.length === 1 ? " is here" : " are here")}>
+      {people.slice(0, 3).map((m) => <i key={m.key} className="block w-2 h-2 rounded-full ring-1 ring-bench" style={{ background: m.color }} />)}
+      {people.length > 3 ? <span className="pl-1 text-2xs text-ink-3 font-mono">+{people.length - 3}</span> : null}
+    </span>
+  );
+}
 
 function Glyph({ svg }: { svg: string }) {
   return <svg width={15} height={15} viewBox="0 0 24 24" aria-hidden="true" className="flex-none fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round]" strokeWidth={1.7} dangerouslySetInnerHTML={{ __html: svg }} />;
@@ -30,6 +49,9 @@ export function DocTabs() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [room, setRoom] = useState<ProjectRoom | null>(null);
+  const signedIn = useApp((s) => !!s.me);
   const plus = useRef<HTMLButtonElement>(null);
   const projectId = project ? project.projectId : null;
   const docsRef = useRef<DocEntry[]>([]); docsRef.current = project ? project.docs : [];
@@ -55,9 +77,27 @@ export function DocTabs() {
     return () => { window.removeEventListener("pointerdown", close); window.removeEventListener("blur", close); };
   }, [menu]);
   useEffect(() => { if (!error) return; const t = window.setTimeout(() => setError(null), 5000); return () => window.clearTimeout(t); }, [error]);
+  useEffect(() => { if (!notice) return; const t = window.setTimeout(() => setNotice(null), 5000); return () => window.clearTimeout(t); }, [notice]);
+
+  // the project room: one for as long as this project is open
+  const refreshRef = useRef(refresh); refreshRef.current = refresh;
+  useEffect(() => {
+    if (!projectId || view === "home") return;
+    const r = new ProjectRoom({
+      signedIn,
+      onDocsChanged: (by, note) => { if (by && note) setNotice(noteText(by.name, note)); void refreshRef.current().catch(() => {}); },
+    });
+    window.JunctionRoom = r; setRoom(r);
+    return () => { r.close(); if (window.JunctionRoom === r) delete window.JunctionRoom; setRoom(null); };
+  }, [projectId, view === "home", signedIn]);
+  const docs = project ? project.docs : null;
+  useEffect(() => { if (room && docs) room.setDocs(docs); }, [room, docs]);
+  useEffect(() => { if (room) room.setTab(docId || null); }, [room, docId]);
+  const people = useSyncExternalStore(room ? room.subscribe : noRoom, () => (room ? room.getState() : NO_ROOM));
 
   if (!project || view === "home") return <div id="doctabs" hidden />;
   const tabs = tabsOf(project.docs, rootDocId);
+  const tabIds = tabs.map((t) => t.doc.docId);
   const active = (t: Tab) => t.doc.docId === docId || (t.doc.docType === "kicad_sch" && openType === "kicad_sch");
   const creatable = DOCUMENT_KINDS.filter((k) => k.newName && k.newText !== undefined);
   const run = async (what: () => Promise<void>) => {
@@ -65,18 +105,24 @@ export function DocTabs() {
     try { await what(); } catch (e) { setError((e as Error).message || "That did not work."); }
     setBusy(false);
   };
-  const create = (kind: DocumentKind) => run(async () => { const id = await createDocument(project.projectId, kind, project.docs); await refresh(id); });
+  const create = (kind: DocumentKind) => run(async () => {
+    const id = await createDocument(project.projectId, kind, project.docs);
+    const made = (await fetchDocs(project.projectId)).find((d) => d.docId === id);
+    await refresh(id);
+    room?.announce({ what: "added", name: made ? stemOf(made.path) : kind.title });
+  });
   const rename = (tab: Tab, name: string) => {
     setRenaming(null);
     const to = renamedPath(tab.doc, name, project.docs);
     if ("error" in to) { setError(to.error); return; }
     if (to.path === tab.doc.path) return;
-    void run(async () => { await renameDocument(tab.doc, to.path); await refresh(); });
+    void run(async () => { await renameDocument(tab.doc, to.path); await refresh(); room?.announce({ what: "renamed", name: `${tab.label} to ${stemOf(to.path)}` }); });
   };
   const remove = (tab: Tab) => run(async () => {
     if (!(await askConfirm(`Delete ${tab.label}?`, `“${tab.label}” and its history are deleted for everyone in this project. This cannot be undone.`, { ok: "Delete", danger: true }))) return;
     await deleteDocument(tab.doc);
     await refresh();
+    room?.announce({ what: "deleted", name: tab.label });
   });
   const item = (label: string, onRun: () => void, o: { danger?: boolean; icon?: string } = {}) => (
     <button type="button" key={label} role="menuitem" className={cx("flex items-center gap-2 w-full text-left px-3 h-7 hover:bg-sel-soft", o.danger && "text-err")}
@@ -99,6 +145,7 @@ export function DocTabs() {
                   onBlur={(ev) => rename(t, ev.target.value)}
                   onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === "Enter") (ev.target as HTMLInputElement).blur(); if (ev.key === "Escape") setRenaming(null); }} />
               : <span className="truncate">{t.label}</span>}
+            <TabPeople people={people.members.filter((m) => tabOf(m, project.docs, tabIds, rootDocId) === t.doc.docId)} />
           </div>
         ))}
       </div>
@@ -110,6 +157,7 @@ export function DocTabs() {
         </button>
       ) : null}
       {error ? <span className="flex items-center px-3 text-err truncate" role="alert">{error}</span> : null}
+      {notice && !error ? <span className="flex items-center px-3 text-ink-2 truncate" role="status" data-docs-notice>{notice}</span> : null}
       {menu ? (
         <div className="fixed z-[60] min-w-48 py-1 rounded-md border border-line bg-panel shadow-panel text-base text-ink" role="menu" style={{ left: Math.min(menu.x, window.innerWidth - 220), bottom: window.innerHeight - menu.y + 2 }}>
           {menu.tab
