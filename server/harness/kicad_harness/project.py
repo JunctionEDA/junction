@@ -2486,6 +2486,53 @@ class Board(_Doc):
                     self.add_item(snap[i])
                 self.flush()
 
+    def optimize(self, nets: list | None = None, time_s: float = 10, stretch: float = 1.6, keep_rules: bool = True) -> dict:
+        """Take out layer changes a finished route does not need, net by net: each signal net with vias (or `nets`) is
+        taken up and laid again on its own several ways (front only with no via, front and back, every layer, front
+        with each inner layer), and the best is kept only when the net is whole, it has fewer vias (or the same and is
+        shorter), it is no more than `stretch` times as long plus 4 mm, nothing else opened and the DRC has no more
+        errors.  Supply and ground nets are left alone.  Returns {"before", "after" (signal vias), "kept": [...]}.
+        About time_s seconds per try; run it last, on a board with every connection made."""
+        supply = re.compile(r"^(GND|AGND|DGND|PGND|VSS|VBUS|VIN|VCC|VDD|VBAT)|^\+|^-|3V3|5V|1V8|LDO", re.I)
+        def st(n):
+            t = self.trace(n)
+            return t.get("vias", 0), t.get("routed_length_mm", 0.0), t.get("open_connections", 0)
+        errs = lambda: self.check(limit=1, refill=False)["errors"]
+        e0 = errs(); open0 = self.info()["unrouted_connections"]
+        names = nets or [n for n in self.nets() if not supply.search(n) and not n.startswith("unconnected")]
+        cands = sorted(((st(n), n) for n in names), key=lambda c: -c[0][0])
+        cands = [(s, n) for s, n in cands if s[0] > 0 and s[2] == 0]
+        before = sum(s[0] for s, _ in cands)
+        options = [dict(layers=["F.Cu"], allow_vias=False), dict(layers=["F.Cu", "B.Cu"], via_cost=8), dict(via_cost=8), dict(via_cost=20)]
+        options += [dict(layers=["F.Cu", l], via_cost=8) for l in (self.info().get("copper_layers") or [])[1:-1] if isinstance(l, str)]
+        kept, after = [], before
+        for (v0, l0, _), net in cands:
+            best = None
+            for k, opt in enumerate(options):
+                with self.trial():
+                    self.unroute(net, keep=())
+                    try:
+                        self.route(nets=[net], fill=False, time_s=time_s, keep_rules=keep_rules, ground_vias=False, fence=False, **opt)
+                    except HarnessError:
+                        continue
+                    v, l, o = st(net)
+                    if o == 0 and self.info()["unrouted_connections"] <= open0 and (v < v0 or (v == v0 and l < l0 - 0.5)) and l <= l0 * stretch + 4:
+                        if best is None or (v, l) < best[0]:
+                            best = ((v, l), k)
+            if best is None:
+                continue
+            with self.trial() as t:
+                self.unroute(net, keep=())
+                self.route(nets=[net], fill=False, time_s=time_s, keep_rules=keep_rules, ground_vias=False, fence=False, **options[best[1]])
+                v, l, o = st(net)
+                if o == 0 and self.info()["unrouted_connections"] <= open0 and (v, l) < (v0, l0) and errs() <= e0:
+                    t.keep = True; after -= v0 - v
+                    kept.append(f"{net}: {v0} -> {v} vias, {l0:.1f} -> {l:.1f} mm")
+        if kept:
+            self.fill()
+        self.project.note(f"board: optimized {len(kept)} nets, signal vias {before} -> {after}")
+        return {"before": before, "after": after, "kept": kept}
+
     def _all_items(self, kinds, **filt) -> list:
         """Every item of these kinds, page by page (get_items returns at most 150 at a time)."""
         out = []
