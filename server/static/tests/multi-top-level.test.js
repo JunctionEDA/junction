@@ -50,5 +50,19 @@ test("one root sheet still names its nets from \"/\" (no top-level name in the p
   assert.ok(one.nets.has("/SIG") && one.nets.has("/child/IN"), Array.from(one.nets.keys()).join(", "));
 });
 
+// SCH_SHEET_LIST::RepairPageNumbers after SortByPageNumbers (sim/sheet-pages.ts, bundled here on the fly): the Altium
+// eDP adapter stores page "#" on both top-level sheets; eeschema 2.2.0 shows it6251_core as page 1 and power as "#"
+// (the tie goes to the path hash, and power's is lower)
+const SP = (() => {
+  const out = require("esbuild").buildSync({ entryPoints: [path.join(__dirname, "..", "..", "web", "domains", "pcb", "sim", "sheet-pages.ts")], bundle: true, format: "cjs", platform: "node", write: false, logLevel: "silent" });
+  const m = { exports: {} }; new Function("module", "exports", "require", out.outputFiles[0].text)(m, m.exports, require); return m.exports;
+})();
+test("page numbers repaired as eeschema shows them: a duplicate \"#\" renumbered by sort order", () => {
+  const r = SP.repairPageNumbers([{ uuids: ["8c64ea52-1828-45f5-b8fd-d99a1e5ce683"], page: "#", virt: 1 }, { uuids: ["4e140f21-2b6b-4ad5-bc34-36c658be1c1b"], page: "#", virt: 1 }]);
+  assert.deepStrictEqual(r.pages, ["1", "#"]);
+  assert.deepStrictEqual(SP.repairPageNumbers([{ uuids: ["a"], page: "", virt: 1 }, { uuids: ["a", "b"], page: "", virt: 2 }]).pages, ["1", "2"], "all empty: numbered in order");
+  assert.deepStrictEqual(SP.repairPageNumbers([{ uuids: ["a"], page: "1", virt: 1 }, { uuids: ["a", "b"], page: "1", virt: 2 }, { uuids: ["a", "c"], page: "2", virt: 3 }]).pages, ["1", "3", "2"], "a duplicate takes the lowest unused number");
+});
+
 console.log(`${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);

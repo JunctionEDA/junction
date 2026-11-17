@@ -8805,6 +8805,123 @@ var init_export = __esm({
   }
 });
 
+// web/domains/pcb/canvas/prettify.ts
+function prettify(source, mode = "normal") {
+  const quoteChar = '"', indentChar = "	", indentSize = 1;
+  const xySpecialCaseColumnLimit = 99, consecutiveTokenWrapThreshold = 72;
+  const textSpecialCase = mode === "compactText", libSpecialCase = mode === "libraryTable";
+  const src = source, n2 = src.length;
+  let out2 = "";
+  let listDepth = 0, libDepth = 0, lastNonWhitespace = "", inQuote = false, hasInsertedSpace = false, inMultiLineList = false;
+  let inXY = false, inShortForm = false, inLibRow = false, shortFormDepth = 0, column = 0, backslashCount = 0;
+  const isWs = (c) => c === " " || c === "	" || c === "\n" || c === "\r";
+  const nextNonWhitespace = (i2) => {
+    while (i2 < n2 && isWs(src[i2])) i2++;
+    return i2 < n2 ? src[i2] : "";
+  };
+  const isXY = (i2) => src[i2 + 1] === "x" && src[i2 + 2] === "y" && src[i2 + 3] === " ";
+  const tokenAfter = (i2) => {
+    let t = "";
+    let j = i2 + 1;
+    while (j < n2 && /[A-Za-z]/.test(src[j])) t += src[j++];
+    return t;
+  };
+  const isShortForm = (i2) => {
+    const t = tokenAfter(i2);
+    return t === "font" || t === "stroke" || t === "fill" || t === "teardrop" || t === "offset" || t === "rotate" || t === "scale";
+  };
+  const isLib = (i2) => tokenAfter(i2) === "lib";
+  const indent = (d) => indentChar.repeat(d * indentSize);
+  let i = 0;
+  while (i < n2) {
+    const c = src[i];
+    if (listDepth === 0 && c === "#" && (out2 === "" || out2[out2.length - 1] === "\n")) {
+      const e = src.indexOf("\n", i);
+      const end = e < 0 ? n2 : e;
+      out2 += src.slice(i, end) + "\n";
+      if (e < 0) break;
+      i = e + 1;
+      continue;
+    }
+    const next = nextNonWhitespace(i);
+    if (isWs(c) && !inQuote) {
+      if (!hasInsertedSpace && listDepth > 0 && lastNonWhitespace !== "(" && next !== ")" && next !== "(") {
+        if (inXY || column < consecutiveTokenWrapThreshold) {
+          out2 += " ";
+          column++;
+        } else if (inShortForm || inLibRow) out2 += " ";
+        else {
+          out2 += "\n" + indent(listDepth);
+          column = listDepth * indentSize;
+          inMultiLineList = true;
+        }
+        hasInsertedSpace = true;
+      }
+    } else {
+      hasInsertedSpace = false;
+      if (c === "(" && !inQuote) {
+        const currentIsXY = isXY(i), currentIsShortForm = textSpecialCase && isShortForm(i), currentIsLib = libSpecialCase && isLib(i);
+        if (out2 === "" || out2[out2.length - 1] === "\n") {
+          out2 += "(";
+          column++;
+        } else if (inXY && currentIsXY && column < xySpecialCaseColumnLimit) {
+          out2 += " (";
+          column += 2;
+        } else if (inShortForm || inLibRow) {
+          out2 += " (";
+          column += 2;
+        } else {
+          out2 += "\n" + indent(listDepth) + "(";
+          column = listDepth * indentSize + 1;
+        }
+        inXY = currentIsXY;
+        if (currentIsShortForm) {
+          inShortForm = true;
+          shortFormDepth = listDepth;
+        } else if (currentIsLib) {
+          inLibRow = true;
+          libDepth = listDepth;
+        }
+        listDepth++;
+      } else if (c === ")" && !inQuote) {
+        if (listDepth > 0) listDepth--;
+        if (inShortForm) {
+          out2 += ")";
+          column++;
+        } else if (inLibRow && listDepth === libDepth) {
+          out2 += ")";
+          inLibRow = false;
+        } else if (lastNonWhitespace === ")" || inMultiLineList) {
+          out2 += "\n" + indent(listDepth) + ")";
+          column = listDepth * indentSize + 1;
+          inMultiLineList = false;
+        } else {
+          out2 += ")";
+          column++;
+        }
+        if (shortFormDepth === listDepth) {
+          inShortForm = false;
+          shortFormDepth = 0;
+        }
+      } else {
+        if (c === "\\") backslashCount++;
+        else if (c === quoteChar && (backslashCount & 1) === 0) inQuote = !inQuote;
+        if (c !== "\\") backslashCount = 0;
+        out2 += c;
+        column++;
+      }
+      lastNonWhitespace = c;
+    }
+    i++;
+  }
+  return out2 + "\n";
+}
+var init_prettify = __esm({
+  "web/domains/pcb/canvas/prettify.ts"() {
+    "use strict";
+  }
+});
+
 // web/domains/pcb/canvas/drc-items.ts
 var DRC_ITEMS, drcItemTitle;
 var init_drc_items = __esm({
@@ -33491,8 +33608,8 @@ var require_pcb_tools = __commonJS({
           if (!isKnownProp(m[2])) throw new Error(`Unrecognized property '${m[2]}'`);
           return { k: "prop", who, nav, name: m[2] };
         };
-        const cmp = bin(primary, ["==", "!=", "<", ">", "<=", ">="]);
-        const and2 = bin(cmp, ["&&"]);
+        const cmp2 = bin(primary, ["==", "!=", "<", ">", "<=", ">="]);
+        const and2 = bin(cmp2, ["&&"]);
         const or2 = bin(and2, ["||"]);
         const e = or2();
         if (p < t.length) throw new Error(`Unexpected '${t[p]}'`);
@@ -36866,7 +36983,7 @@ var require_pcb_tools = __commonJS({
         if (a === "np_thru_hole") return "npth";
         return null;
       }
-      function strNumCmp5(a, b) {
+      function strNumCmp6(a, b) {
         const ra = a.match(/\d+|\D+/g) || [], rb = b.match(/\d+|\D+/g) || [];
         for (let i = 0; i < Math.min(ra.length, rb.length); i++) {
           const x = ra[i], y = rb[i];
@@ -36905,7 +37022,7 @@ var require_pcb_tools = __commonJS({
       }
       var padMemory = { lastType: "auto", lastByType: {}, lastNumber: "1" };
       function masterPad(doc2, type, selected) {
-        const pads = fpPads(doc2).slice().sort((a, b) => strNumCmp5(str42(b[1]), str42(a[1])));
+        const pads = fpPads(doc2).slice().sort((a, b) => strNumCmp6(str42(b[1]), str42(a[1])));
         let t = type;
         if (t === "auto") {
           const sel = selected ? typeFromPad(selected) : null;
@@ -36991,7 +37108,7 @@ var require_pcb_tools = __commonJS({
         });
         return out2;
       }
-      var padToolApi = { nextPadNumber, masterPad, defaultPad, typeFromPad, newPadNode, placePad, moveAnchorChanges, enumerateChanges, padMemory, strNumCmp: strNumCmp5, ipcRoundingRatio, refDesPrefix, trailingInt, canHaveNumber };
+      var padToolApi = { nextPadNumber, masterPad, defaultPad, typeFromPad, newPadNode, placePad, moveAnchorChanges, enumerateChanges, padMemory, strNumCmp: strNumCmp6, ipcRoundingRatio, refDesPrefix, trailingInt, canHaveNumber };
       function layersBlock(doc2) {
         const rows3 = [];
         for (const [name, l] of doc2.layers) if (/\./.test(name) || name === "Margin") rows3.push([l.id, name, l.type || "user"].concat(l.userName ? [l.userName] : []));
@@ -50862,8 +50979,8 @@ Please remove the objects that use these layers first.`, page: 1 };
           complex: !!K11.kid(n2, "padstack")
         };
       }
-      function padTableRows(doc2, cmp) {
-        return padItems(doc2).map(padRow).sort((a, b) => cmp(a.number, b.number));
+      function padTableRows(doc2, cmp2) {
+        return padItems(doc2).map(padRow).sort((a, b) => cmp2(a.number, b.number));
       }
       var SMD_MASK = ["F.Cu", "F.Mask", "F.Paste"];
       var isBackOnly = (ls) => ls.some((l) => /^B\./.test(l)) && !ls.some((l) => /^F\./.test(l) || /^\*\./.test(l));
@@ -50947,8 +51064,8 @@ Please remove the objects that use these layers first.`, page: 1 };
         for (const it of padItems(doc2)) if (!keep.has(it.id) && !out2.some((c) => c.id === it.id)) out2.push(removedChange(it));
         return out2;
       }
-      function padNumberSummary(numbers, cmp) {
-        const sorted = numbers.filter(Boolean).slice().sort(cmp);
+      function padNumberSummary(numbers, cmp2) {
+        const sorted = numbers.filter(Boolean).slice().sort(cmp2);
         const seen = /* @__PURE__ */ new Set(), dup = [];
         for (const n2 of sorted) {
           if (seen.has(n2) && !dup.includes(n2)) dup.push(n2);
@@ -51425,8 +51542,8 @@ Press <esc> to cancel all; double-click to finish`;
           }
           if (limited) break;
         }
-        const cmp = (a, b) => a.localeCompare(b, void 0, { numeric: true, sensitivity: "base" });
-        out2.sort((a, b) => cmp(a.lib, b.lib) || cmp(a.symbol, b.symbol));
+        const cmp2 = (a, b) => a.localeCompare(b, void 0, { numeric: true, sensitivity: "base" });
+        out2.sort((a, b) => cmp2(a.lib, b.lib) || cmp2(a.symbol, b.symbol));
         return { matches: out2, limited };
       }
       function usersStatus(n2, limited) {
@@ -75773,6 +75890,77 @@ var init_page_settings = __esm({
   }
 });
 
+// web/domains/pcb/sim/netlist-kicad.ts
+function strNumCmp3(a, b, ignoreCase = false) {
+  return ignoreCase ? strNumCmp2(a.toUpperCase(), b.toUpperCase()) : strNumCmp2(a, b);
+}
+function comparePageNum(a, b) {
+  if (a === b) return 0;
+  const ia = /^[+-]?\d+$/.test(a.trim()), ib = /^[+-]?\d+$/.test(b.trim());
+  if (ia && ib) return parseInt(a, 10) < parseInt(b, 10) ? -1 : 1;
+  if (ia) return -1;
+  if (ib) return 1;
+  return strNumCmp3(a, b) || cmp(a, b);
+}
+var cmp;
+var init_netlist_kicad = __esm({
+  "web/domains/pcb/sim/netlist-kicad.ts"() {
+    "use strict";
+    init_prettify();
+    init_variant_model();
+    init_variant_model();
+    cmp = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+  }
+});
+
+// web/domains/pcb/sim/sheet-pages.ts
+function uuidHash(u) {
+  const hex2 = u.replace(/-/g, "");
+  let seed = 0n;
+  for (let i = 0; i + 1 < hex2.length && i < 32; i += 2) seed = combine(seed, BigInt(parseInt(hex2.slice(i, i + 2), 16) || 0));
+  return seed;
+}
+function pathHash(uuids) {
+  let h3 = 0n;
+  for (const u of uuids) h3 = combine(h3, uuidHash(u));
+  return h3;
+}
+function repairPageNumbers(list) {
+  const hashes = list.map((s2) => pathHash(s2.uuids));
+  const order = list.map((_s, i) => i).sort((a, b) => comparePageNum(list[a].page, list[b].page) || list[a].virt - list[b].virt || (hashes[a] < hashes[b] ? -1 : hashes[a] > hashes[b] ? 1 : 0));
+  const pages = list.map((s2) => s2.page);
+  if (list.every((s2) => !s2.page)) {
+    order.forEach((i, k) => {
+      pages[i] = String(k + 1);
+    });
+    return { pages, order };
+  }
+  const reserved = new Set(list.map((s2) => s2.page).filter((p) => !!p)), assigned = /* @__PURE__ */ new Set();
+  let next = 1;
+  for (const i of order) {
+    const p = list[i].page;
+    if (p && !assigned.has(p)) {
+      assigned.add(p);
+      continue;
+    }
+    while (reserved.has(String(next)) || assigned.has(String(next))) next++;
+    pages[i] = String(next);
+    assigned.add(pages[i]);
+    next++;
+  }
+  return { pages, order };
+}
+var M642, GOLDEN, combine;
+var init_sheet_pages = __esm({
+  "web/domains/pcb/sim/sheet-pages.ts"() {
+    "use strict";
+    init_netlist_kicad();
+    M642 = (1n << 64n) - 1n;
+    GOLDEN = 0x9e3779b9n;
+    combine = (seed, v) => (seed ^ v + GOLDEN + (seed << 6n & M642) + (seed >> 2n) & M642) & M642;
+  }
+});
+
 // web/domains/pcb/editor/panels/core.ts
 function esc5(s2) {
   return s2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
@@ -75954,6 +76142,20 @@ function resolveChild(parent, file) {
   const docs = schDocs2();
   return docs.find((d) => d.path === rel || d.path === file) || docs.find((d) => d.path.split("/").pop() === base2) || null;
 }
+function repairPages(tree, topUuid) {
+  const nodes = [], list = [];
+  const walk2 = (n2, uuids, virt) => {
+    nodes.push(n2);
+    list.push({ uuids, page: n2.page, virt: virt.n++ });
+    for (const c of n2.children) walk2(c, uuids.concat(c.sheetId || ""), virt);
+  };
+  for (const top2 of tree.virtual ? tree.children : [tree]) walk2(top2, [topUuid(top2)], { n: 1 });
+  const { pages } = repairPageNumbers(list);
+  nodes.forEach((n2, i) => {
+    n2.page = pages[i];
+  });
+  return tree;
+}
 function build2() {
   const root5 = store.get().project ? rootSchematic() : null;
   if (!root5) return null;
@@ -75996,10 +76198,14 @@ function build2() {
         topLevel: true
       };
     });
-    return { path: "", name: projectName() || "Schematic", page: "", docId: null, file: "", parentDocId: null, sheetId: null, current: false, children, virtual: true };
+    const uuidOf2 = new Map(tops.map((t) => [t.doc.docId, t.uuid]));
+    return repairPages(
+      { path: "", name: projectName() || "Schematic", page: "", docId: null, file: "", parentDocId: null, sheetId: null, current: false, children, virtual: true },
+      (n2) => uuidOf2.get(n2.docId || "") || fileUuid(n2.docId)
+    );
   }
   const tl = topLevelEntry(root5.path);
-  return {
+  return repairPages({
     path: "/",
     name: tl && typeof tl.name === "string" && tl.name || stem2 || projectName() || "Schematic",
     page: rootEntry ? rootEntry.page : "1",
@@ -76009,7 +76215,7 @@ function build2() {
     sheetId: null,
     current: root5.docId === cur2,
     children: walk2(root5, "/", 0)
-  };
+  }, () => fileUuid(root5.docId));
 }
 function publishHierarchy() {
   let root5 = null;
@@ -76017,6 +76223,11 @@ function publishHierarchy() {
     root5 = build2();
   } catch (e) {
     console.warn(e);
+  }
+  const d = kdoc(), cur2 = root5 && root5.virtual ? root5.children.find((c) => c.current) : null;
+  if (d && cur2 && cur2.page && d.pageNumber !== cur2.page) {
+    d.pageNumber = cur2.page;
+    requestRender();
   }
   const h3 = panelStore.get().hierarchy;
   panelStore.set({ hierarchy: { root: root5, version: h3.version + 1, marked: h3.marked, markColor: h3.markColor } });
@@ -76026,11 +76237,12 @@ function topLevelEntry(file, pro = projectJson()) {
   const base2 = file.split("/").pop();
   return list.find((e) => e && (e.filename === file || e.filename === base2)) || null;
 }
-var cache4, cacheProject, loading2, live, topSig;
+var cache4, cacheProject, loading2, live, fileUuid, topSig;
 var init_hierarchy = __esm({
   "web/domains/pcb/editor/panels/hierarchy.ts"() {
     "use strict";
     init_appstore();
+    init_view();
     init_doc();
     init_state();
     init_util();
@@ -76039,11 +76251,16 @@ var init_hierarchy = __esm({
     init_project();
     init_dom2();
     init_page_settings();
+    init_sheet_pages();
     init_core();
     cache4 = /* @__PURE__ */ new Map();
     cacheProject = "";
     loading2 = null;
     live = null;
+    fileUuid = (docId3) => {
+      const e = docId3 ? entry(docId3) : null;
+      return String(e && e.doc.uuid || "");
+    };
     topSig = "";
     onProjectChanged(() => {
       let sig = "";
@@ -85088,9 +85305,9 @@ function treeLibs() {
     const d = KiCadCanvas.footprintDoc.headerKids(E.kdoc, "descr")[0];
     for (const l of out2) for (const f2 of l.footprints) if (f2.docId === state.docId) f2.descr = d ? str7(d[1]) : "";
   }
-  const cmp = PT4() && PT4().pad ? PT4().pad.strNumCmp : (a, b) => a.localeCompare(b);
+  const cmp2 = PT4() && PT4().pad ? PT4().pad.strNumCmp : (a, b) => a.localeCompare(b);
   const pinned = pinnedFpLibs();
-  return out2.sort((a, b) => pinned.has(a.name) !== pinned.has(b.name) ? pinned.has(a.name) ? -1 : 1 : cmp(a.name, b.name)).map((l) => pinned.has(l.name) ? Object.assign(l, { pinned: true }) : l);
+  return out2.sort((a, b) => pinned.has(a.name) !== pinned.has(b.name) ? pinned.has(a.name) ? -1 : 1 : cmp2(a.name, b.name)).map((l) => pinned.has(l.name) ? Object.assign(l, { pinned: true }) : l);
 }
 async function loadBoardCopy(boardDocId, fpUuid, info) {
   const board3 = info.docs.find((d) => d.docId === boardDocId);
@@ -91592,6 +91809,7 @@ async function sheetList() {
       return;
     }
     out2.push({ docId: d.docId, path: d.path, name, sheetPath, page, doc: doc2, uuidPath, sheetItemId, parentDocId });
+    pageKeys.push({ uuids: [topUuid || String(doc2.uuid || "")].concat(uuidPath), page: depth === 0 && !pageFromFile ? "" : page, virt: virt++ });
     const dir = d.path.split("/").slice(0, -1).join("/");
     for (const m of KiCadCanvas.movableItems(doc2)) {
       if (m.kind !== "sheet" || !m.file) continue;
@@ -91602,6 +91820,8 @@ async function sheetList() {
       await walk2(child2, nm3, sheetPath + nm3 + "/", m.page || "", uuidPath.concat(m.id), m.id, d.docId, depth + 1);
     }
   };
+  const pageKeys = [];
+  let virt = 1, topUuid = "", pageFromFile = true;
   for (const t of tops) {
     const d = t.doc, livePage = E2.kdoc && S3.docId === d.docId ? E2.kdoc.pageNumber : "";
     let page = livePage || "";
@@ -91612,7 +91832,18 @@ async function sheetList() {
         page = "";
       }
     }
+    virt = 1;
+    topUuid = t.uuid;
+    pageFromFile = !!page;
     await walk2(d, multi ? t.name : ROOT_SHEET_NAME2, multi ? "/" + t.name + "/" : "/", page || "1", [], null, null, 0);
+  }
+  if (multi) {
+    const { pages } = repairPageNumbers(pageKeys);
+    out2.forEach((x, i) => {
+      x.page = pages[i];
+    });
+    const { order } = repairPageNumbers(pageKeys.map((k, i) => ({ ...k, page: pages[i] })));
+    return order.map((i) => out2[i]);
   }
   const num13 = (p) => {
     const n2 = parseInt(p, 10);
@@ -91645,6 +91876,7 @@ var init_sch_hierarchy = __esm({
     init_editor();
     init_project();
     init_doc();
+    init_sheet_pages();
     topLevelSchematics2 = topLevelSchematics;
     projectTextVars2 = projectTextVars;
     ROOT_SHEET_NAME2 = ROOT_SHEET_NAME;
@@ -96165,9 +96397,9 @@ function schVariantNames(docs, pro) {
   if (Array.isArray(listed)) {
     for (const e of listed) if (e && typeof e === "object" && typeof e.name === "string" && e.name) names2.add(e.name);
   }
-  return [DEFAULT_VARIANT2, ...[...names2].sort(strNumCmp4)];
+  return [DEFAULT_VARIANT2, ...[...names2].sort(strNumCmp5)];
 }
-function strNumCmp4(a, b) {
+function strNumCmp5(a, b) {
   let i = 0, j = 0;
   const dig = (c) => c >= "0" && c <= "9";
   while (i < a.length && j < b.length) {
@@ -100834,120 +101066,7 @@ var pcbSizes = {
 // web/domains/pcb/canvas/footprint-doc.ts
 init_export();
 init_sexpr();
-
-// web/domains/pcb/canvas/prettify.ts
-function prettify(source, mode = "normal") {
-  const quoteChar = '"', indentChar = "	", indentSize = 1;
-  const xySpecialCaseColumnLimit = 99, consecutiveTokenWrapThreshold = 72;
-  const textSpecialCase = mode === "compactText", libSpecialCase = mode === "libraryTable";
-  const src = source, n2 = src.length;
-  let out2 = "";
-  let listDepth = 0, libDepth = 0, lastNonWhitespace = "", inQuote = false, hasInsertedSpace = false, inMultiLineList = false;
-  let inXY = false, inShortForm = false, inLibRow = false, shortFormDepth = 0, column = 0, backslashCount = 0;
-  const isWs = (c) => c === " " || c === "	" || c === "\n" || c === "\r";
-  const nextNonWhitespace = (i2) => {
-    while (i2 < n2 && isWs(src[i2])) i2++;
-    return i2 < n2 ? src[i2] : "";
-  };
-  const isXY = (i2) => src[i2 + 1] === "x" && src[i2 + 2] === "y" && src[i2 + 3] === " ";
-  const tokenAfter = (i2) => {
-    let t = "";
-    let j = i2 + 1;
-    while (j < n2 && /[A-Za-z]/.test(src[j])) t += src[j++];
-    return t;
-  };
-  const isShortForm = (i2) => {
-    const t = tokenAfter(i2);
-    return t === "font" || t === "stroke" || t === "fill" || t === "teardrop" || t === "offset" || t === "rotate" || t === "scale";
-  };
-  const isLib = (i2) => tokenAfter(i2) === "lib";
-  const indent = (d) => indentChar.repeat(d * indentSize);
-  let i = 0;
-  while (i < n2) {
-    const c = src[i];
-    if (listDepth === 0 && c === "#" && (out2 === "" || out2[out2.length - 1] === "\n")) {
-      const e = src.indexOf("\n", i);
-      const end = e < 0 ? n2 : e;
-      out2 += src.slice(i, end) + "\n";
-      if (e < 0) break;
-      i = e + 1;
-      continue;
-    }
-    const next = nextNonWhitespace(i);
-    if (isWs(c) && !inQuote) {
-      if (!hasInsertedSpace && listDepth > 0 && lastNonWhitespace !== "(" && next !== ")" && next !== "(") {
-        if (inXY || column < consecutiveTokenWrapThreshold) {
-          out2 += " ";
-          column++;
-        } else if (inShortForm || inLibRow) out2 += " ";
-        else {
-          out2 += "\n" + indent(listDepth);
-          column = listDepth * indentSize;
-          inMultiLineList = true;
-        }
-        hasInsertedSpace = true;
-      }
-    } else {
-      hasInsertedSpace = false;
-      if (c === "(" && !inQuote) {
-        const currentIsXY = isXY(i), currentIsShortForm = textSpecialCase && isShortForm(i), currentIsLib = libSpecialCase && isLib(i);
-        if (out2 === "" || out2[out2.length - 1] === "\n") {
-          out2 += "(";
-          column++;
-        } else if (inXY && currentIsXY && column < xySpecialCaseColumnLimit) {
-          out2 += " (";
-          column += 2;
-        } else if (inShortForm || inLibRow) {
-          out2 += " (";
-          column += 2;
-        } else {
-          out2 += "\n" + indent(listDepth) + "(";
-          column = listDepth * indentSize + 1;
-        }
-        inXY = currentIsXY;
-        if (currentIsShortForm) {
-          inShortForm = true;
-          shortFormDepth = listDepth;
-        } else if (currentIsLib) {
-          inLibRow = true;
-          libDepth = listDepth;
-        }
-        listDepth++;
-      } else if (c === ")" && !inQuote) {
-        if (listDepth > 0) listDepth--;
-        if (inShortForm) {
-          out2 += ")";
-          column++;
-        } else if (inLibRow && listDepth === libDepth) {
-          out2 += ")";
-          inLibRow = false;
-        } else if (lastNonWhitespace === ")" || inMultiLineList) {
-          out2 += "\n" + indent(listDepth) + ")";
-          column = listDepth * indentSize + 1;
-          inMultiLineList = false;
-        } else {
-          out2 += ")";
-          column++;
-        }
-        if (shortFormDepth === listDepth) {
-          inShortForm = false;
-          shortFormDepth = 0;
-        }
-      } else {
-        if (c === "\\") backslashCount++;
-        else if (c === quoteChar && (backslashCount & 1) === 0) inQuote = !inQuote;
-        if (c !== "\\") backslashCount = 0;
-        out2 += c;
-        column++;
-      }
-      lastNonWhitespace = c;
-    }
-    i++;
-  }
-  return out2 + "\n";
-}
-
-// web/domains/pcb/canvas/footprint-doc.ts
+init_prettify();
 var FP_TO_BOARD = {
   fp_line: "gr_line",
   fp_rect: "gr_rect",
@@ -111875,7 +111994,7 @@ ${body}
     const loose = (t) => t === "passive" || t === "free";
     return a.item === b.item && ptKey(a.p) === ptKey(b.p) && a.pin.name === b.pin.name && (a.pin.type === b.pin.type || loose(a.pin.type) || loose(b.pin.type));
   }
-  function strNumCmp5(a, b) {
+  function strNumCmp6(a, b) {
     let i = 0, j = 0;
     const digit = (c) => c >= "0" && c <= "9";
     while (i < a.length && j < b.length) {
@@ -112024,7 +112143,7 @@ ${body}
         if (t.pin.type === "no_connect" || noConnectAt(doc2, t.p) && net.terms.some((u) => u !== t && u.item !== t.item))
           mark("no_connect_connected", "warning", t.p, `A pin with a "no connection" flag is connected: ${pinLabel(t)}`, [t.item.id], [pinItemRef(t)]);
       }
-      const all2 = pins2.slice().sort((a, b) => strNumCmp5(a.item.ref || "", b.item.ref || "") || strNumCmp5(a.pin.number, b.pin.number));
+      const all2 = pins2.slice().sort((a, b) => strNumCmp6(a.item.ref || "", b.item.ref || "") || strNumCmp6(a.pin.number, b.pin.number));
       const isPower2 = all2.some((t) => t.pin.type === "power_in"), pinMap = opts2.pinMap || PIN_MATRIX;
       let hasDriver = false, needs = null;
       const needAll = [], mismatches = [], weight = /* @__PURE__ */ new Map();
@@ -112488,7 +112607,7 @@ Link '${target2}' to this file?`)) return null;
       const sh = kid8(o.node, "shape");
       return { name: str9(o.node[1]), shape: sh ? str9(sh[1]) : "input" };
     });
-    labels.sort((a, b) => strNumCmp5(a.name.toUpperCase(), b.name.toUpperCase()));
+    labels.sort((a, b) => strNumCmp6(a.name.toUpperCase(), b.name.toUpperCase()));
     return labels.find((l) => !have.has(l.name)) || null;
   }
   function sheetDocOf(ctx, sheet) {
@@ -117966,7 +118085,7 @@ Link '${target2}' to this file?`)) return null;
       pinErrorAt,
       pinErrorSeverity,
       stackedPins,
-      strNumCmp: strNumCmp5,
+      strNumCmp: strNumCmp6,
       isLockedNode,
       isLockedItem,
       setLockedNode,
@@ -121258,7 +121377,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     const passes = Math.max(1, this.opts.passes || 3);
     const ripUp = this.opts.ripUp !== false;
     const gOf = new Map(this.nets.map((n2) => [n2.key, n2.guide]));
-    const cmp = (x, y) => x === y ? 0 : x < y ? -1 : 1;
+    const cmp2 = (x, y) => x === y ? 0 : x < y ? -1 : 1;
     const critical = (c) => isCritical(c.net, this.kindOf(c.net));
     const inGroup = /* @__PURE__ */ new Map();
     for (const c of conns) {
@@ -121268,7 +121387,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     const first = /* @__PURE__ */ new Set();
     for (const c of conns) if (critical(c) || gOf.get(c.net).rank < Infinity) first.add(c.id);
     const tier = (c) => this.opts.criticalFirst !== false ? critical(c) ? -3 : inGroup.has(c.id) ? -2 : isSupply(c.net) && !this.netOf(c.net).zoneCells ? -1 : c.len < 3 ? 0 : Math.min(c.a.narrow || Infinity, c.b.narrow || Infinity) <= 0.35 ? 1 : isSupply(c.net) ? 2 : 3 : inGroup.has(c.id) ? -3 : critical(c) ? -2 : isSupply(c.net) && !this.netOf(c.net).zoneCells ? -1 : c.len < 3 ? 0 : Math.min(c.a.narrow || Infinity, c.b.narrow || Infinity) <= 0.35 ? 1 : isSupply(c.net) ? 2 : 3;
-    const order = conns.slice().sort((a, b) => cmp(gOf.get(a.net).rank, gOf.get(b.net).rank) || gOf.get(b.net).priority - gOf.get(a.net).priority || tier(a) - tier(b) || (inGroup.has(a.id) && tier(a) === tier(b) && inGroup.has(b.id) ? inGroup.get(a.id) < inGroup.get(b.id) ? -1 : inGroup.get(a.id) > inGroup.get(b.id) ? 1 : 0 : 0) || (tier(a) === 1 ? b.len - a.len : a.len - b.len) || (a.net < b.net ? -1 : a.net > b.net ? 1 : a.id - b.id));
+    const order = conns.slice().sort((a, b) => cmp2(gOf.get(a.net).rank, gOf.get(b.net).rank) || gOf.get(b.net).priority - gOf.get(a.net).priority || tier(a) - tier(b) || (inGroup.has(a.id) && tier(a) === tier(b) && inGroup.has(b.id) ? inGroup.get(a.id) < inGroup.get(b.id) ? -1 : inGroup.get(a.id) > inGroup.get(b.id) ? 1 : 0 : 0) || (tier(a) === 1 ? b.len - a.len : a.len - b.len) || (a.net < b.net ? -1 : a.net > b.net ? 1 : a.id - b.id));
     let best = null;
     let failedLast = /* @__PURE__ */ new Set();
     let pass = 0;
@@ -128840,14 +128959,14 @@ function applyFootprintVariant(fp, variant) {
   fp.props = props;
   fp.value = props.get("Value") || "";
 }
-function boardVariantNames(variants, cmp) {
+function boardVariantNames(variants, cmp2) {
   const names2 = [];
   for (const v of variants ? kids(variants, "variant") : []) {
     const nm3 = K(v, "name");
     const s2 = nm3 ? str(nm3[1]) : "";
     if (s2 && !names2.includes(s2)) names2.push(s2);
   }
-  return [DEFAULT_VARIANT, ...names2.sort(cmp)];
+  return [DEFAULT_VARIANT, ...names2.sort(cmp2)];
 }
 function readFootprint(item, copper, nets) {
   const n2 = item.node;

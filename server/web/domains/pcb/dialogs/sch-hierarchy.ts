@@ -6,6 +6,7 @@
 import { E, appState, type DocEntry } from "./editor";
 import { readDoc } from "./project";
 import * as docMod from "../editor/doc";
+import { repairPageNumbers, type PageSheet } from "../sim/sheet-pages";
 
 export interface SheetInstance { docId: string; path: string; name: string; sheetPath: string; page: string; doc: KDoc; uuidPath: string[]; sheetItemId: string | null; parentDocId: string | null }
 
@@ -29,6 +30,7 @@ export async function sheetList(): Promise<SheetInstance[]> {
     if (depth > 32) return;   // a recursive hierarchy: KiCad refuses it, we stop
     let doc: KDoc; try { doc = await load(d); } catch (e) { return; }
     out.push({ docId: d.docId, path: d.path, name, sheetPath, page, doc, uuidPath, sheetItemId, parentDocId });
+    pageKeys.push({ uuids: [topUuid || String((doc as KDoc & { uuid?: string }).uuid || "")].concat(uuidPath), page: depth === 0 && !pageFromFile ? "" : page, virt: virt++ });
     const dir = d.path.split("/").slice(0, -1).join("/");
     for (const m of KiCadCanvas.movableItems(doc)) {
       if (m.kind !== "sheet" || !m.file) continue;
@@ -41,11 +43,21 @@ export async function sheetList(): Promise<SheetInstance[]> {
   };
   // each top-level sheet (SCHEMATIC::GetTopLevelSheets), its page its own file's (sheet_instances (path "/" (page …))); with
   // several, the path starts with the top-level sheet's name and uuidPath stays below it, as KIID paths leave it out
+  const pageKeys: PageSheet[] = []; let virt = 1, topUuid = "", pageFromFile = true;
   for (const t of tops) {
     const d = t.doc, livePage = E.kdoc && S.docId === d.docId ? (E.kdoc as KDoc & { pageNumber?: string }).pageNumber : "";
     let page = livePage || "";
     if (!page && multi) { try { page = String((await load(d) as KDoc & { pageNumber?: string }).pageNumber || ""); } catch (e) { page = ""; } }
+    virt = 1; topUuid = t.uuid; pageFromFile = !!page;
     await walk(d, multi ? t.name : ROOT_SHEET_NAME, multi ? "/" + t.name + "/" : "/", page || "1", [], null, null, 0);
+  }
+  if (multi) {
+    // SCHEMATIC::BuildSheetListSortedByPageNumbers, then RepairPageNumbers: the order and pages eeschema shows
+    const { pages } = repairPageNumbers(pageKeys);
+    out.forEach((x, i) => { x.page = pages[i]; });
+    // the list re-sorted on the repaired pages (SCHEMATIC::RefreshHierarchy)
+    const { order } = repairPageNumbers(pageKeys.map((k, i) => ({ ...k, page: pages[i] })));
+    return order.map((i) => out[i]);
   }
   // pages without a number keep their place after the numbered ones (the first top-level sheet stays first)
   const num = (p: string): number => { const n = parseInt(p, 10); return isFinite(n) ? n : Infinity; };
