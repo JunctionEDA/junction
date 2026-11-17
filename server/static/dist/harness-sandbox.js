@@ -448,6 +448,7 @@ class _Doc:
         return False
 
     def remove(self, *refs: str) -> None:
+        """Delete parts by reference, or single items (a track segment, a via) by the id whats_at() or get_items gives."""
         for ref in refs:
             self._edit({"op": "remove", "ref": ref} if not re.fullmatch(r"[0-9a-f-]{36}", ref) else {"op": "remove", "id": ref}, "item:" + ref)
 
@@ -468,10 +469,11 @@ class _Doc:
             e["italic"] = True
         self._edit(e)
 
-    def svg(self, path: str | None = None, box=None, zones: bool = True, hide=None) -> str:
+    def svg(self, path: str | None = None, box=None, zones: bool = True, hide=None, copper_only: bool = False) -> str:
         """The sheet or the board as an SVG drawing, the way the editor shows it (local projects).  Written to \`path\` when given.
-        zones=False leaves the pours out (to see a fan-out under a ground fill); hide=["B.Cu", "In1.Cu"] leaves those layers out."""
-        r = self._call("render", **({"box": list(box)} if box else {}), **({"zones": False} if not zones else {}), **({"hide": list(hide)} if hide else {}))
+        zones=False leaves the pours out (to see a fan-out under a ground fill); hide=["B.Cu", "In1.Cu"] leaves those layers out
+        copper_only=True leaves silkscreen, fab and courtyard drawings out, to read a fine-pitch fan-out."""
+        r = self._call("render", **({"copper_only": True} if copper_only else {}), **({"box": list(box)} if box else {}), **({"zones": False} if not zones else {}), **({"hide": list(hide)} if hide else {}))
         if path:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(r["svg"])
@@ -2135,8 +2137,12 @@ class Board(_Doc):
         if o:
             self.outline(o[0], o[1], o[2], o[3], radius=radius)
 
-    def rules(self, **rules) -> None:
-        """Set design rules in mm: clearance, track_width, via_diameter, via_drill, min_track_width, min_clearance, edge_clearance, hole_clearance (copper to a hole of something else), min_text_height (the smallest silkscreen text the rules check accepts, 0.8 unless set), net_class."""
+    def rules(self, **rules):
+        """With no arguments: the rules as they stand (clearance, edge_clearance, net_classes with track and via sizes).
+        Otherwise set design rules in mm: clearance, track_width, via_diameter, via_drill, min_track_width, min_clearance, edge_clearance, hole_clearance (copper to a hole of something else), min_text_height (the smallest silkscreen text the rules check accepts, 0.8 unless set), net_class."""
+        if not rules:
+            self.flush()
+            return self.project.transport.call("get_board_info", {}).get("design_rules") or {}
         self._edit(dict({"op": "set_rules"}, **rules))
         self.flush()
 
@@ -2677,7 +2683,7 @@ class Board(_Doc):
         are still open.  fill=False skips the zone fill and the clean-up passes after it: a try that takes seconds,
         not minutes (fill and check once at the end).
         time_s: the engine's budget; left out it grows with the board (30 s plus 1.5 s per open connection, 300 at most).
-        via_cost: how many millimetres of extra track a via is worth (12 by default: the engine goes round on the pad's
+        via_cost: how many millimetres of extra track a via is worth (the engine goes round on the pad's
         own layer before it changes layer); lower it only for a board that cannot route otherwise.
 
         Signal domains.  The engine tells analog nets (ADC, VREF, crystal, sense, feedback), RF nets (ANT, RF),

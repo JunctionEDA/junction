@@ -140835,7 +140835,7 @@ function renderPicture(doc2, opts2) {
     const b = it.bbox;
     if (b && (b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1)) continue;
     for (const g2 of it.geom) {
-      if (hidden.has(g2.layer) || opts2.padNumbers === false && g2.padNum) continue;
+      if (hidden.has(g2.layer) || opts2.padNumbers === false && g2.padNum || opts2.copperOnly && g2.layer && !/Cu$|Edge/.test(g2.layer)) continue;
       take(g2);
     }
   }
@@ -141057,7 +141057,7 @@ var Workspace = class {
       case "render": {
         const h3 = this.find(args.document);
         const ed = this.open(h3);
-        return { document: h3.path, svg: renderPicture(ed.kdoc, { ...args.box ? { bbox: args.box, frame: false } : {}, ...args.zones === false ? { zones: false } : {}, ...Array.isArray(args.hide) ? { hidden: new Set(args.hide) } : {} }) };
+        return { document: h3.path, svg: renderPicture(ed.kdoc, { ...args.box ? { bbox: args.box, frame: false } : {}, ...args.zones === false ? { zones: false } : {}, ...Array.isArray(args.hide) ? { hidden: new Set(args.hide) } : {}, ...args.copper_only ? { copperOnly: true } : {} }) };
       }
       case "run_checks":
         return on2(() => runChecks(rest()));
