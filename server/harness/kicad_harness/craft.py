@@ -398,7 +398,8 @@ def _segs_dist(a, b, c, d) -> float:
 
 
 def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len: float | None = None, apply: bool = True,
-            rows: int | None = None, first: float | None = None, style: str = "ring", length: float = 1.5, spacing: float | None = None) -> dict:
+            rows: int | None = None, first: float | None = None, style: str = "ring", length: float = 1.5, spacing: float | None = None,
+            turn: str | None = None, toward=None, vias: bool = False, via: tuple | None = None) -> dict:
     """Escape a fine-pitch chip (QFN or QFP, 0.5 mm pitch or finer) the way it is done by hand, before anything else is
     routed: every pin whose net goes far (another pad more than `far` mm away) gets a short stub straight out of its pad
     and a via in a staggered ring of two rows just outside the pin row, the vias in the order of the pins so no two stubs
@@ -412,6 +413,15 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
     escape: no vias, every far pin straight out `first` mm (0.3) past its pad, then the side's bus turns 45 degrees
     towards where its nets go, lanes `spacing` mm apart (default track + clearance, the tightest the rules allow), and runs on `length` mm (1.5) for the router to carry on
     from (layer changes then happen out there, where the bus has room).
+
+    Bus options: turn="cw"|"ccw" turns the whole side one way round the chip (clockwise as seen on screen, Y down)
+    instead of towards the nets, for when that way runs into a capacitor or a supply track; toward=(x, y) turns each
+    side towards that point instead of the nets' own pads.  vias=True ends every lane in a via, staggered: the lane on
+    the outside of the turn (away from the chip) stops first and each next lane runs on one via pitch further, every
+    via stepped outwards just enough to clear the lane beside it, the way the owner's Ember drops its buses.
+    via=(0.4, 0.2) sets that via's size and drill (default the net class's; 0.4/0.2 is what fits beside 0.4 mm pitch
+    lanes when the rules allow it).  At 0.4 mm pitch two neighbouring pins can never both drop to vias straight out:
+    the deeper stub passes the shallower via closer than via/2 + clearance + track/2, so let the bus turn first.
 
     nets: only these (default: every far-going signal net).  apply=False only plans.  Returns {"vias": n, "pins":
     [pin numbers fanned], "skipped": {pin: why}}.  board.design() calls it for every fine-pitch chip unless fanout=False."""
@@ -427,6 +437,8 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
     r = (self.project.transport.call("get_board_info", {}).get("design_rules") or {})
     nc = (r.get("net_classes") or {}).get("Default") or {}
     clr = float(nc.get("clearance") or r.get("clearance") or 0.15); vd = float(nc.get("via_diameter") or 0.5); tw = min(0.2, float(nc.get("track_width") or 0.2))
+    if via:
+        vd = float(via[0])
     vr = vd / 2
     if style in ("radial", "bus"):
         tw = min(tw, 0.15)      # a stub passes a neighbour's via 0.4 mm away on a 0.4 mm pitch
@@ -475,8 +487,8 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
             sp = max(spacing if spacing else tw + clr, tw + clr)
             T = math.sqrt(2) * sp / pitch - 1
             obst = [(q[1], q[2], q[3], (max(q[4], q[5]) / 2 if len(q) > 5 and q[4] else 0.4)) for pp in parts.values() if pp["ref"] != ref for q in pp["pads"]]
-            def toward(q):
-                pts = [(x, y) for x, y, rr in where.get(q[3], []) if rr != ref]
+            def toward_(q):
+                pts = [tuple(toward)] if toward else [(x, y) for x, y, rr in where.get(q[3], []) if rr != ref]
                 if not pts:
                     return 0.0
                 mx, my = sum(x for x, _ in pts) / len(pts), sum(y for _, y in pts) / len(pts)
@@ -485,23 +497,32 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
             # the split: pins before it turn to -t, from it on to +t, with the fewest pins turned against their net
             best_k, best_bad = 0, None
             for k in range(len(order_) + 1):
-                bad = sum(1 for q in order_[:k] if toward(q) > 0) + sum(1 for q in order_[k:] if toward(q) < 0)
+                bad = sum(1 for q in order_[:k] if toward_(q) > 0) + sum(1 for q in order_[k:] if toward_(q) < 0)
                 if best_bad is None or bad < best_bad:
                     best_k, best_bad = k, bad
             groups = [(order_[:best_k], -1), (order_[best_k:], 1)]
+            if turn in ("cw", "ccw"):      # tng points clockwise round the chip on screen (Y down)
+                groups = [(order_, 1 if turn == "cw" else -1)]
             d0 = proj + half + (first if first is not None else 0.3)
             run = length
             for grp, sg in groups:
                 if not grp:
                     continue
                 ss = [s_of(q[1], q[2]) for q in grp]; inner = max(ss) if sg > 0 else min(ss)
+                vstep = vd + clr + 0.05                            # how much further each next lane runs before its via
+                jog = max(0.0, vr + clr + tw / 2 - sp) + 0.01      # how far a via steps out to clear the lane beside it
+                rank = {si: k for k, si in enumerate(sorted(ss, key=lambda x_: sg * x_))}     # 0: the lane outside the turn
                 for q, si in zip(grp, ss):
                     far_ = max(abs(inner - x_) for x_ in ss)
                     D = d0 + T * abs(inner - si) - min(0.0, T * far_)      # the bend line; never inside the first ring
                     pt = lambda s_, d_: (cx + n[0] * d_ + tng[0] * s_, cy + n[1] * d_ + tng[1] * s_)   # noqa: E731
                     a, bnd = (q[1], q[2]), pt(si, D)
-                    end = pt(si + sg * run / math.sqrt(2), D + run / math.sqrt(2))
-                    path = [a, bnd, end] if run > 0 else [a, bnd]
+                    rl = run + (rank[si] * vstep if vias else 0.0)
+                    end = pt(si + sg * rl / math.sqrt(2), D + rl / math.sqrt(2))
+                    path = [a, bnd, end] if rl > 0 else [a, bnd]
+                    if vias and jog > 0.011:       # a short step straight out from the chip puts the via clear of the next lane
+                        path.append(pt(si + sg * rl / math.sqrt(2), D + rl / math.sqrt(2) + math.sqrt(2) * jog))
+                    full_end = path[-1]
                     # a lane stops short of another part's pad in its way (a decoupling capacitor in front of the chip)
                     cut = []
                     for x0, x1 in zip(path, path[1:]):
@@ -518,6 +539,10 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
                             cut.append((x0[0] + (x1[0] - x0[0]) * stop, x0[1] + (x1[1] - x0[1]) * stop))
                         break
                     path = cut
+                    v_at = path[-1] if vias and path and math.hypot(path[-1][0] - full_end[0], path[-1][1] - full_end[1]) < 1e-6 else None
+                    if v_at is not None and (any(math.hypot(v_at[0] - ox, v_at[1] - oy) < rr_ + clr + vr for ox, oy, nt, rr_ in obst if nt != q[3])
+                                             or any(math.hypot(v_at[0] - x_[0], v_at[1] - x_[1]) < vd + clr - 1e-6 for x_ in placed_v)):
+                        v_at = None
                     if len(path) < 2 or math.hypot(path[-1][0] - a[0], path[-1][1] - a[1]) < half + 0.3:
                         skipped[q[0]] = "no room: another part's pad stands in front of it"; continue
                     segs = list(zip(path, path[1:]))
@@ -531,7 +556,9 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
                         skipped[q[0]] = "too close: " + why; continue
                     for x0, x1 in segs:
                         placed_s.append((x0, x1, q[3]))
-                    plan.append((q, path, None))
+                    if v_at is not None:
+                        placed_v.append(v_at)
+                    plan.append((q, path, v_at))
             continue
         span = max(abs(s_of(q[1], q[2])) for q in row) + 0.3
         # rows of via sites, each row in the gaps of the one inside it; as many rows as the pin pitch needs (a 0.4 mm
@@ -629,7 +656,7 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
         for q, path, v in plan:
             self.track(q[3], [[round(x, 4), round(y, 4)] for x, y in path], layer="F.Cu" if part.get("side", "front") == "front" else "B.Cu", width=tw)
             if v is not None:
-                self.via(q[3], [round(v[0], 4), round(v[1], 4)])
+                self.via(q[3], [round(v[0], 4), round(v[1], 4)], size=via[0] if via else None, drill=via[1] if via else None)
             res = self.flush() or {}
             laid.append((q, path, list(res.get("added") or [])))
         bad = {}
@@ -639,7 +666,7 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
             if e.get("severity") != "error" or e.get("code") in ("unconnected_items", "track_right_angle") or (e["code"], round(e["x"], 2), round(e["y"], 2)) in before:
                 continue
             for i, (q, path, _) in enumerate(laid):
-                if any(_seg_dist((e["x"], e["y"]), a, b) < 0.6 for a, b in zip(path, path[1:])):
+                if any(_seg_dist((e["x"], e["y"]), a, b) < 0.6 for a, b in zip(path, path[1:])) or (plan[i][2] is not None and math.hypot(e["x"] - plan[i][2][0], e["y"] - plan[i][2][1]) < 0.6):
                     bad.setdefault(i, (e.get("message") or e.get("code") or "")[:120] + (f" {e.get('refs')}" if e.get("refs") else "") + f" at ({round(e['x'], 2)}, {round(e['y'], 2)})")
         for i in bad:
             for item in laid[i][2]:
