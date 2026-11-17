@@ -2275,9 +2275,52 @@ class Board(_Doc):
             e["drill"] = drill
         self._edit(e)
 
+    def fits(self, net: str, via=None, track=None, layer: str = "F.Cu", width: float | None = None, size: float | None = None,
+             drill: float | None = None) -> dict:
+        """Would a via at `via`=(x, y) or a track through `track`=[(x, y), ...] on `layer` keep every rule against the
+        copper already there?  Checks the copper clearance (real pad shapes, turned pads included), the hole clearance
+        both ways, by net class.  Returns {"fits", "blocked_by": [{"id", "kind", "ref", "net", "layer", "rule",
+        "slack_mm"}], "nearest": [...]}; a negative slack_mm is how far it falls short.  Nothing is drawn."""
+        self.flush()
+        args = {"net": self._net(net)}
+        if via is not None:
+            args["via"] = {"x": float(via[0]), "y": float(via[1]), **({"size": size} if size else {}), **({"drill": drill} if drill else {})}
+        if track is not None:
+            pts = [(lambda q: [q["x"], q["y"]])(self.pad(p)) if isinstance(p, str) else [float(p[0]), float(p[1])] for p in track]
+            args["track"] = {"pts": pts, "layer": layer, **({"width": width} if width else {})}
+        return self._call("fits", **args)
+
+    def move_via(self, via_id: str, to) -> None:
+        """Move a via to `to`=(x, y) and drag the ends of the tracks that met it along, on every layer (check the new
+        spot with board.fits(net, via=to) first).  The tracks keep their other ends, so a long run may need a new bend."""
+        self.flush()
+        got = self._call("get_items", ids=[via_id]).get("items", [])
+        if not got:
+            raise HarnessError(f"There is no via {via_id} on the board.")
+        sx = got[0]["sexpr"]
+        m = re.search(r"\(at ([\d.\-]+) ([\d.\-]+)\)", sx)
+        x0, y0 = float(m.group(1)), float(m.group(2)); x1, y1 = float(to[0]), float(to[1])
+        moved = []
+        for it in self._call("get_items", kinds=["segment"], near={"x": x0, "y": y0, "radius": 0.05}).get("items", []):
+            t = it["sexpr"]
+            for end in ("start", "end"):
+                e = re.search(r"\(" + end + r" ([\d.\-]+) ([\d.\-]+)\)", t)
+                if e and abs(float(e.group(1)) - x0) < 0.002 and abs(float(e.group(2)) - y0) < 0.002:
+                    t = t[:e.start()] + f"({end} {_r(x1)} {_r(y1)})" + t[e.end():]
+            if t != it["sexpr"]:
+                moved.append((it["id"], t))
+        fresh = lambda t: re.sub(r'\s*\(uuid "[^"]*"\)', "", t)
+        self._edit({"op": "remove", "id": via_id})
+        self.add_item(fresh(sx[:m.start()] + f"(at {_r(x1)} {_r(y1)})" + sx[m.end():]))
+        for i, t in moved:
+            self._edit({"op": "remove", "id": i})
+            self.add_item(fresh(t))
+        self.flush()
+
     def whats_at(self, at, radius: float = 0.8) -> list:
-        """The copper within `radius` mm of a point, nearest first: [{"kind", "net", "layer", "gap_mm", "id"}], gap_mm
-        from the point to the item's copper edge (pads by their bounding box).  Use it before a hand-placed via or
+        """The copper within `radius` mm of a point, nearest first: [{"kind", "net", "layer", "gap_mm", "id", and "start",
+        "end", "width" for a track or "at", "size" for a via or pad}], gap_mm from the point to the item's copper edge
+        (a pad's is rough: centre distance less 0.3 mm).  Use it before a hand-placed via or
         track: a 0.45 mm via needs gap_mm of at least half its size plus the clearance to every other net's item."""
         self.flush()
         x, y = float(at[0]), float(at[1])
@@ -2294,7 +2337,7 @@ class Board(_Doc):
                 for q in (self._part(it.get("ref") or "").get("pads") if it.get("ref") else []) or []:
                     d = math.hypot(q[1] - x, q[2] - y)
                     if d <= radius + 0.5:
-                        out.append({"kind": "pad", "net": q[3], "layer": "", "gap_mm": round(max(0.0, d - 0.3), 3), "id": f"{it.get('ref')}.{q[0]}"})
+                        out.append({"kind": "pad", "net": q[3], "layer": "", "gap_mm": round(max(0.0, d - 0.3), 3), "id": f"{it.get('ref')}.{q[0]}", "at": [q[1], q[2]]})
                 continue
             nm = re.search(r'\(net (?:"((?:[^"\\]|\\.)*)"|(\d+))\)', sx); net = (nm.group(1) or names.get(nm.group(2), nm.group(2))) if nm else ""
             lay = re.search(r'\(layers? "([^"]+)"', sx); layer = lay.group(1) if lay else ""
@@ -2303,14 +2346,15 @@ class Board(_Doc):
                 x0, y0, x1, y1 = map(float, a.groups()); w = float((re.search(r"\(width ([\d.]+)\)", sx) or [0, 0.2])[1])
                 dx, dy = x1 - x0, y1 - y0; t = max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / ((dx * dx + dy * dy) or 1)))
                 gap = math.hypot(x - (x0 + t * dx), y - (y0 + t * dy)) - w / 2
+                where = {"start": [x0, y0], "end": [x1, y1], "width": w}
             else:
                 v = re.search(r"\(at ([\d.\-]+) ([\d.\-]+)\)", sx); z = re.search(r"\(size ([\d.]+)", sx)
                 if not v:
                     continue
                 gap = math.hypot(x - float(v.group(1)), y - float(v.group(2))) - (float(z.group(1)) / 2 if z else 0.25)
-                layer = "via"
+                layer = "via"; where = {"at": [float(v.group(1)), float(v.group(2))], "size": float(z.group(1)) if z else None}
             if gap <= radius:
-                out.append({"kind": it.get("kind"), "net": net, "layer": layer, "gap_mm": round(max(0.0, gap), 3), "id": it["id"]})
+                out.append({"kind": it.get("kind"), "net": net, "layer": layer, "gap_mm": round(max(0.0, gap), 3), "id": it["id"], **where})
         return sorted(out, key=lambda r: r["gap_mm"])
 
     def clear(self, keep: tuple = (), outline: bool = True) -> int:
@@ -2364,6 +2408,9 @@ class Board(_Doc):
         parts = {p["ref"]: p for p in self.geometry()["parts"]}
         done = set()
         for k in range(passes):
+            if k and self.info()["unrouted_connections"] >= before:
+                tried.append(f"pass {k + 1} skipped: pass {k} freed nothing, so a wider radius would not either")
+                break
             rows = [v for v in self._call("run_checks").get("violations", []) if v.get("code") == "unconnected_items"]
             for v in rows:
                 m = re.search(r"net '((?:[^'\\]|\\.)*)'", v.get("message", ""))
@@ -2438,6 +2485,53 @@ class Board(_Doc):
                 for i in set(snap) - now:
                     self.add_item(snap[i])
                 self.flush()
+
+    def optimize(self, nets: list | None = None, time_s: float = 10, stretch: float = 1.6, keep_rules: bool = True) -> dict:
+        """Take out layer changes a finished route does not need, net by net: each signal net with vias (or `nets`) is
+        taken up and laid again on its own several ways (front only with no via, front and back, every layer, front
+        with each inner layer), and the best is kept only when the net is whole, it has fewer vias (or the same and is
+        shorter), it is no more than `stretch` times as long plus 4 mm, nothing else opened and the DRC has no more
+        errors.  Supply and ground nets are left alone.  Returns {"before", "after" (signal vias), "kept": [...]}.
+        About time_s seconds per try; run it last, on a board with every connection made."""
+        supply = re.compile(r"^(GND|AGND|DGND|PGND|VSS|VBUS|VIN|VCC|VDD|VBAT)|^\+|^-|3V3|5V|1V8|LDO", re.I)
+        def st(n):
+            t = self.trace(n)
+            return t.get("vias", 0), t.get("routed_length_mm", 0.0), t.get("open_connections", 0)
+        errs = lambda: self.check(limit=1, refill=False)["errors"]
+        e0 = errs(); open0 = self.info()["unrouted_connections"]
+        names = nets or [n for n in self.nets() if not supply.search(n) and not n.startswith("unconnected")]
+        cands = sorted(((st(n), n) for n in names), key=lambda c: -c[0][0])
+        cands = [(s, n) for s, n in cands if s[0] > 0 and s[2] == 0]
+        before = sum(s[0] for s, _ in cands)
+        options = [dict(layers=["F.Cu"], allow_vias=False), dict(layers=["F.Cu", "B.Cu"], via_cost=8), dict(via_cost=8), dict(via_cost=20)]
+        options += [dict(layers=["F.Cu", l], via_cost=8) for l in (self.info().get("copper_layers") or [])[1:-1] if isinstance(l, str)]
+        kept, after = [], before
+        for (v0, l0, _), net in cands:
+            best = None
+            for k, opt in enumerate(options):
+                with self.trial():
+                    self.unroute(net, keep=())
+                    try:
+                        self.route(nets=[net], fill=False, time_s=time_s, keep_rules=keep_rules, ground_vias=False, fence=False, **opt)
+                    except HarnessError:
+                        continue
+                    v, l, o = st(net)
+                    if o == 0 and self.info()["unrouted_connections"] <= open0 and (v < v0 or (v == v0 and l < l0 - 0.5)) and l <= l0 * stretch + 4:
+                        if best is None or (v, l) < best[0]:
+                            best = ((v, l), k)
+            if best is None:
+                continue
+            with self.trial() as t:
+                self.unroute(net, keep=())
+                self.route(nets=[net], fill=False, time_s=time_s, keep_rules=keep_rules, ground_vias=False, fence=False, **options[best[1]])
+                v, l, o = st(net)
+                if o == 0 and self.info()["unrouted_connections"] <= open0 and (v, l) < (v0, l0) and errs() <= e0:
+                    t.keep = True; after -= v0 - v
+                    kept.append(f"{net}: {v0} -> {v} vias, {l0:.1f} -> {l:.1f} mm")
+        if kept:
+            self.fill()
+        self.project.note(f"board: optimized {len(kept)} nets, signal vias {before} -> {after}")
+        return {"before": before, "after": after, "kept": kept}
 
     def _all_items(self, kinds, **filt) -> list:
         """Every item of these kinds, page by page (get_items returns at most 150 at a time)."""

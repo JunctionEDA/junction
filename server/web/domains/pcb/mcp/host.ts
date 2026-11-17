@@ -926,6 +926,7 @@ const TOOLS: Record<string, (req: Request) => Promise<Reply>> = {
   list_nets: (req) => withDocument(req, req.args.document, async () => ({ result: await design.listNets(without(req.args)) })),
   run_checks: (req) => withDocument(req, req.args.document, async () => ({ result: await design.runChecks({}) })),
   get_items: (req) => withDocument(req, req.args.document, async () => ({ result: await design.getItems(without(req.args)) })),
+  fits: (req) => withDocument(req, req.args.document, async () => ({ result: await design.fitsCheck(without(req.args)) })),
   get_geometry: (req) => withDocument(req, req.args.document, async () => ({ result: await design.geometry({ silk: req.args.silk === true }) })),
   check_layout: (req) => withDocument(req, req.args.document, async () => ({ result: await checkLayout({ within: req.args.within, of: req.args.of, wrap: req.args.wrap, limit: req.args.limit, free: req.args.free }) })),
   review_design: (req) => withDocument(req, req.args.document, async () => ({ result: await reviewDesign({ level: req.args.level, rule: req.args.rule, plan: req.args.plan }) })),

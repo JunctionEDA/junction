@@ -430,6 +430,40 @@ export function getSelection(): unknown {
 }
 const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + ` … (${s.length - n} more characters)` : s);
 
+/** Whether a via or a track of `net` would keep every rule against the copper already on the board, before it is drawn:
+ * the copper clearance to other nets' tracks, vias and pads (by their real shapes, turned pads included), the hole
+ * clearance between its hole and their copper and between their holes and it, and the edge clearance.  Returns the
+ * nearest items with the gap, what the rules need and by how much it falls short. */
+export async function fitsCheck(input: { doc?: string; net: string; via?: { x: number; y: number; size?: number; drill?: number }; track?: { pts: number[][]; width?: number; layer?: string } }): Promise<unknown> {
+  const { doc, path } = await resolveDoc(input.doc); const P = PCB(); if (!P || doc.type !== "pcb") throw new ToolError("fits works on a board.");
+  const s = P.designSettings(ED().proSettings || null); const nc = P.netclassOf ? P.netclassOf(s, input.net) : {};
+  const NT = P.netTable(doc); const want = input.net; const copper: string[] = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"];
+  const own: { shape: any; layers: string[]; hole?: any }[] = [];
+  if (input.via) { const size = input.via.size || nc.via_diameter || s.viaDiameter || 0.6, drill = input.via.drill || nc.via_drill || s.viaDrill || 0.3;
+    own.push({ shape: { t: "circle", x: input.via.x, y: input.via.y, r: size / 2 }, layers: copper, hole: { t: "circle", x: input.via.x, y: input.via.y, r: drill / 2 } }); }
+  if (input.track) { const w = input.track.width || nc.track_width || s.trackWidth || 0.2; const pts = input.track.pts.map((q) => [Number(q[0]), Number(q[1])]);
+    for (let i = 1; i < pts.length; i++) own.push({ shape: { t: "seg", a: pts[i - 1], b: pts[i], r: w / 2 }, layers: [input.track.layer || "F.Cu"] }); }
+  if (!own.length) throw new ToolError("Give via {x, y} or track {pts, layer}.");
+  const clr = P.netClearance(s, input.net), hc = s.holeClearance || 0, rows: any[] = []; const k = K();
+  const padHole = (p: any) => { const d = k.kid(p.node, "drill"); const nums: number[] = d ? d.slice(1).filter((v: any) => typeof v === "number") : []; return nums.length ? { t: "circle", x: p.x, y: p.y, r: Math.min(...nums) / 2 } : null; };
+  for (const c of P.conductors(doc)) {
+    if (c.kind === "zone" || c.net === want) continue;
+    const need = Math.max(clr, P.netClearance(s, c.net)); const theirHole = c.kind === "via" ? { t: "circle", x: c.anchors[0][0], y: c.anchors[0][1], r: (c.drill || 0) / 2 } : c.kind === "pad" && c.pad && c.pad.type === "thru_hole" ? padHole(c.pad) : null;
+    for (const o of own) {
+      const layers = o.layers.filter((l) => c.layers.has(l));
+      let gap = Infinity, kind = "";
+      if (layers.length) { const g = P.shapeGap(o.shape, c.shape) - need; if (g < gap) { gap = g; kind = "clearance"; } }
+      if (o.hole && hc) { const g = P.shapeGap(o.hole, c.shape) - hc; if (g < gap) { gap = g; kind = "hole_clearance"; } }
+      if (theirHole && theirHole.r > 0 && hc) { const g = P.shapeGap(o.shape, theirHole) - hc; if (g < gap) { gap = g; kind = "hole_clearance"; } }
+      if (gap > 1) continue;
+      rows.push({ id: c.id, kind: c.kind, ref: c.kind === "pad" ? `${c.item.ref || "?"}.${c.pad.number || ""}` : undefined, net: (c.netObj && c.netObj.name) || NT.name?.(c.net) || c.net, layer: layers.join(" ") || "hole", rule: kind, slack_mm: r3(gap) });
+    }
+  }
+  rows.sort((a, b) => a.slack_mm - b.slack_mm); const seen = new Set<string>(); const near = rows.filter((r) => (seen.has(r.id) ? false : (seen.add(r.id), true))).slice(0, 12);
+  const bad = near.filter((r) => r.slack_mm < -0.0005);
+  return { document: path, fits: !bad.length, blocked_by: bad, nearest: near.filter((r) => r.slack_mm >= -0.0005).slice(0, 5) };
+}
+
 export async function getItems(input: { doc?: string; kinds?: string[]; ids?: string[]; near?: { x: number; y: number; radius: number }; net?: string; offset?: number }): Promise<unknown> {
   const { doc, path } = await resolveDoc(input.doc); const k = K();
   if (!input.kinds && !input.ids && !input.near && !input.net) throw new ToolError("Give at least one of kinds, ids, near or net.");
