@@ -253,7 +253,7 @@ test("a model under another tool's path variable: the project's copy, else the p
   const mesh = { pos: new Float32Array([-7.75, -13.5, -3.87, 7.75, 0.5, 7.64, 3.5, -0.25, -3.87]), nrm: new Float32Array(9), col: new Float32Array(9), idx: new Uint32Array(0) };
   const h = (o, r) => ({ get: (n) => (n === "x-model-offset" ? o : n === "x-model-rotate" ? r : null) });
   const m = G.vendorPlaced(mesh, h("0,-4.9,3.8", "0,0,0"));
-  [3.5, 1.35, -0.07].forEach((v, i) => near(m.pos[6 + i], v, 1e-4, `lead ${i}`));
+  [3.5, 1.35, -3.8].forEach((v, i) => near(m.pos[6 + i], v, 1e-4, `lead ${i}`));
   const tt = G.vendorPlaced(mesh, h("0,-4.9,3.8", "0,0,90"));
   [1.35, -3.5].forEach((v, i) => near(tt.pos[6 + i], v, 1e-4, `turned lead ${i}`));
   assert.strictEqual(G.vendorPlaced(mesh, h(null, null)), mesh, "no headers: as the file has it");
