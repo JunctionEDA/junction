@@ -16,6 +16,9 @@ import { stackupOf, traceOn, usualImpedance, widthFor, z0, zdiff } from "./imped
 /** A supply net by its name: ground, a rail voltage, or one of the usual rail names. */
 /** A signal laid without a via may be this much longer than the straight line between its pads (times, plus mm) before a layer change is tried instead. */
 const FLAT_DETOUR = 1.6, FLAT_SLACK_MM = 5;
+// What a mm of track on an inner plane layer counts against one on an outer layer: a little more, so a route that could
+// take the back or an inner layer takes the back (the probe otherwise tries the layers in stack order and an inner one wins a tie).
+const PLANE_COST = 1;   // 1.3 and 3 tried 2026-11-17: Ember +1.3, Cyberboard +0.2, but Ledify -10 (two more opens), so off
 // An inner layer that pours cover this much of is a plane: it takes no tracks, only the vias of its own nets.  A pad of
 // a plane's net under it counts as this far from the plane (a stub and a via), so it drops in rather than run to a
 // far pad of the net.
@@ -110,6 +113,7 @@ export interface RouteOptions {
   splitPlaneEnds?: boolean;      // true: no route ends where two nets' pours overlap on a layer
   planeShortcuts?: boolean;      // false: keep long supply tracks that could drop into the net's inner plane at both ends
   planeDrops?: boolean;          // true: a pad of a net with an inner plane counts as 1.5 mm from it, so it drops in rather than run to a far pad
+  planeCost?: number;           // what a mm of track on an inner plane layer counts (default 1, like any layer; 3 matched the owner's layer split but cut the back pour: Ledify -11, Ember -0.8)
   planes?: boolean;              // true keeps tracks off an inner ground layer its pour covers, and drops ground pins straight into it
   order?: string[];              // net names to route first, in this order; the rest follow in the heuristic order
   netOpts?: Record<string, NetPlan>;
@@ -379,6 +383,15 @@ export class Router {
       const whole = outline ? area(outline) : (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]);
       for (let l = 1; l < L - 1; l++) { let a = 0; for (const z of zones) if (z.net && z.layers.includes(l) && z.polys.length) a += area(z.polys[0]); const ground = zones.some((z) => z.layers.includes(l) && /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(z.net));
         if (ground && whole > 0 && a >= PLANE_COVER * whole && routable.filter(Boolean).length > 2) { routable[l] = false; this.planeLayers.push(copper[l]); } }   // a supply plane stays open to tracks: the owner runs a few signals on it (Ledify, Ember)
+    }
+    // The owner keeps inner planes whole and runs signals on the outer layers, the back as much as the front (Ledify,
+    // Ember, Cyberboard: 2 to 15% of their track on inner layers, where the router laid 30 to 40%): a mm of track on an
+    // inner layer a pour covers counts more, so a route takes the back first and a plane only when it saves a lot.
+    if (L > 2 && (this.opts.planeCost ?? PLANE_COST) > 1) {
+      const area = (pts: Pt[]) => { let t = 0; for (let i = 0; i < pts.length; i++) { const p = pts[i], q = pts[(i + 1) % pts.length]; t += p[0] * q[1] - q[0] * p[1]; } return Math.abs(t) / 2; };
+      const whole = outline ? area(outline) : (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]); const k = this.opts.planeCost ?? PLANE_COST;
+      const lc = copper.map(() => 1); for (let l = 1; l < L - 1; l++) { let a = 0; for (const z of zones) if (z.net && z.layers.includes(l) && z.polys.length) a += area(z.polys[0]); if (whole > 0 && a >= PLANE_COVER * whole) lc[l] = k; }
+      if (lc.some((c) => c !== 1)) G.layerCost = lc;
     }
     if (hv.every(([h, v]) => h + v <= 20) && routable.filter(Boolean).length > 1) { let k = 0; this.pref = routable.map((r) => r ? (k++ % 2 ? -0.5 : 0.5) : 0); }
 
@@ -1215,8 +1228,10 @@ export class Router {
     this.lift(net, -1, conn.cls);
     conn.nodes = nodes; conn.shapes = shapes; conn.viaCells = viaCells; conn.stubs = []; conn.feat = featuresOf(G, nodes, this.pref); conn.zoneEnd = !!(res as any).zoneEnd;
     const A = flip ? conn.b : conn.a, B = flip ? conn.a : conn.b; const first = nodes[0], last = nodes[nodes.length - 1];
-    const piece = (from: Pt, to: Pt, l: number) => { if (Math.hypot(to[0] - from[0], to[1] - from[1]) > 1e-4) { conn.stubs.push([from, to, l]); conn.shapes.push({ net: conn.net, layers: [l], shape: { t: "seg", a: from, b: to, r: w / 2 }, clr }); } };
-    const stub = (anchor: Anchor, n: Node, esc?: Pt) => { const p = this.mm(n); if (esc) { piece(anchor.p, esc, n.l); piece(esc, p, n.l); } else piece(anchor.p, p, n.l); };
+    // the stub from a pad's centre to the first grid node necks down to the pad's own width: a wide supply track drawn
+    // from the middle of a narrow pad would reach past the pad towards its neighbour (Ledify U6: 0.08 mm from SW)
+    const piece = (from: Pt, to: Pt, l: number, sw = w) => { if (Math.hypot(to[0] - from[0], to[1] - from[1]) > 1e-4) { conn.stubs.push([from, to, l]); conn.shapes.push({ net: conn.net, layers: [l], shape: { t: "seg", a: from, b: to, r: sw / 2 }, clr }); } };
+    const stub = (anchor: Anchor, n: Node, esc?: Pt) => { const p = this.mm(n); const sw = anchor.narrow ? Math.min(w, anchor.narrow) : w; if (esc) { piece(anchor.p, esc, n.l, sw); piece(esc, p, n.l, sw); } else piece(anchor.p, p, n.l, sw); };
     const esc = found.esc || []; stub(A, first, esc[0]); if (!res.onTerm) stub(B, last, esc[1]);
     conn.landed = -1;
     if (res.onTerm) { const o = found.owner.get(last.l * G.W * G.H + last.iy * G.W + last.ix); if (o !== undefined) conn.landed = o; }
@@ -1628,7 +1643,7 @@ export class Router {
             if (e.o.net && e.o.net === o.net) continue; if (!e.o.layers.some((l) => o.layers.includes(l))) continue;
             const need = (e.o.edge ? G.edgeClr : Math.max(e.o.clr, o.clr)) - 1e-4;
             if (e.bb[0] > bb[2] + need || e.bb[2] < bb[0] - need || e.bb[1] > bb[3] + need || e.bb[3] < bb[1] - need) continue;
-            const gap = P.shapeGap(e.o.shape, o.shape); if (gap < need) { bad.add(c.id); c.why = "rule"; this.ruleHit.set(c.id, e.o.net); this.dropped.push({ net: c.net, other: e.o.net, gap, need, shape: o.shape, against: e.o.shape, stub: c.stubs.some((st) => st[0] === o.shape.a) }); break; }
+            const gap = P.shapeGap(e.o.shape, o.shape); if (gap < need) { if ((globalThis as { KC_PS_DEBUG?: unknown }).KC_PS_DEBUG) console.error("drop", c.net, this.padName(c.a.p), this.padName(c.b.p), "vs", e.o.net, gap.toFixed(3), need.toFixed(3), JSON.stringify(o.shape), JSON.stringify(e.o.shape).slice(0, 240)); bad.add(c.id); c.why = "rule"; this.ruleHit.set(c.id, e.o.net); this.dropped.push({ net: c.net, other: e.o.net, gap, need, shape: o.shape, against: e.o.shape, stub: c.stubs.some((st) => st[0] === o.shape.a) }); break; }
           }
         }
         if (bad.has(c.id)) break;

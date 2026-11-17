@@ -50,18 +50,11 @@
 #include <build_version.h>
 
 
-struct UPDATE_REQUEST
-{
-    wxString platform;
-    wxString arch;
-    wxString current_version;
-    wxString lang;
-    wxString last_check;
-};
+#include <collab/collab_product.h>
 
+#include <algorithm>
+#include <vector>
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE( UPDATE_REQUEST, platform, arch, current_version, lang,
-                                    last_check )
 
 struct UPDATE_RESPONSE
 {
@@ -74,7 +67,69 @@ struct UPDATE_RESPONSE
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE( UPDATE_RESPONSE, version, release_date, details_url,
                                     downloads_url )
 
-#define UPDATE_QUERY_ENDPOINT wxS( "https://downloads.kicad.org/api/v1/update" )
+/*
+ * Junction asks its own site for the newest desktop release instead of KiCad's update service,
+ * which knows nothing about Junction.  The site reads the newest GitHub release; the answer names
+ * the version and a /download/<platform> link that always serves that release's file.
+ */
+#define UPDATE_QUERY_ENDPOINT wxS( "https://junctioneda.com/api/desktop/latest" )
+
+
+/// "2.10.1" -> {2, 10, 1}; anything after the numbers ("-rc1", "+abc") is ignored.
+static std::vector<long> versionParts( const wxString& aVersion )
+{
+    std::vector<long> parts;
+    wxString          v = aVersion;
+
+    v.Trim( false ).Trim( true );
+
+    if( v.StartsWith( wxS( "v" ) ) || v.StartsWith( wxS( "V" ) ) )
+        v = v.Mid( 1 );
+
+    long  cur = 0;
+    bool  any = false;
+
+    for( wxUniChar c : v )
+    {
+        if( c >= '0' && c <= '9' )
+        {
+            cur = cur * 10 + ( c - '0' );
+            any = true;
+        }
+        else if( c == '.' && any )
+        {
+            parts.push_back( cur );
+            cur = 0;
+            any = false;
+        }
+        else
+        {
+            break;
+        }
+    }
+
+    if( any )
+        parts.push_back( cur );
+
+    return parts;
+}
+
+
+/// True when aOffered is a later version than aCurrent.
+bool UPDATE_MANAGER::IsNewerVersion( const wxString& aOffered, const wxString& aCurrent )
+{
+    std::vector<long> a = versionParts( aOffered );
+    std::vector<long> b = versionParts( aCurrent );
+
+    if( a.empty() )
+        return false;
+
+    size_t n = std::max( a.size(), b.size() );
+    a.resize( n, 0 );
+    b.resize( n, 0 );
+
+    return a > b;
+}
 
 
 UPDATE_MANAGER::UPDATE_MANAGER() : m_working( false )
@@ -133,11 +188,16 @@ int UPDATE_MANAGER::PostRequest( const wxString& aUrl, std::string aRequestBody,
 
     KICAD_CURL_EASY curl;
     curl.SetHeader( "Accept", "application/json" );
-    curl.SetHeader( "Content-Type", "application/json" );
-    curl.SetHeader( "charset", "utf-8" );
     curl.SetOutputStream( aOutput );
     curl.SetURL( aUrl.ToUTF8().data() );
-    curl.SetPostFields( aRequestBody );
+
+    // An empty body makes a plain GET (Junction's endpoint); KiCad's POSTed JSON.
+    if( !aRequestBody.empty() )
+    {
+        curl.SetHeader( "Content-Type", "application/json" );
+        curl.SetHeader( "charset", "utf-8" );
+        curl.SetPostFields( aRequestBody );
+    }
     curl.SetFollowRedirects( true );
     curl.SetTransferCallback( callback, 250000L );
     curl.SetTimeout( 30L );
@@ -176,53 +236,25 @@ void UPDATE_MANAGER::CheckForUpdate( wxWindow* aNoticeParent )
         std::shared_ptr<BACKGROUND_JOB_REPORTER> reporter = m_updateBackgroundJob->m_reporter;
 
         std::stringstream update_json_stream;
-        std::stringstream request_json_stream;
 
-        wxString aUrl = UPDATE_QUERY_ENDPOINT;
         reporter->SetNumPhases( 1 );
-        reporter->Report( _( "Requesting update info" ) );
+        reporter->Report( _( "Checking for a newer Junction" ) );
 
-        UPDATE_REQUEST requestContent;
-
-
-        // These platform keys are specific to the downloads site
 #if defined( __WXMSW__ )
-        requestContent.platform = "windows";
-
-    #if defined( KICAD_BUILD_ARCH_X64 )
-        requestContent.arch = "amd64";
-    #elif defined( KICAD_BUILD_ARCH_X86 )
-        requestContent.arch = "i686";
-    #elif defined( KICAD_BUILD_ARCH_ARM )
-        requestContent.arch = "arm";
-    #elif defined( KICAD_BUILD_ARCH_ARM64 )
-        requestContent.arch = "arm64";
-    #endif
+        wxString platform = wxS( "windows" );
 #elif defined( __WXOSX__ )
-        requestContent.platform = "macos";
-        requestContent.arch = "unified";
+        wxString platform = wxS( "macos" );
 #else
-        //everything else gets lumped as linux
-        requestContent.platform = "linux";
-        requestContent.arch = "";
+        wxString platform = wxS( "linux" );
 #endif
-        wxString verString = GetSemanticVersion();
-        verString.Replace( "~", "-" ); // make the string valid for semver
-        requestContent.current_version = verString;
-        requestContent.lang = Pgm().GetLanguageTag();
+        wxString aUrl = wxString( UPDATE_QUERY_ENDPOINT ) + wxS( "?platform=" ) + platform;
 
         KICAD_SETTINGS* settings = GetAppSettings<KICAD_SETTINGS>( "kicad" );
 
-        requestContent.last_check = settings->m_lastUpdateCheckTime;
-
-        nlohmann::json requestJson = nlohmann::json( requestContent );
-        request_json_stream << requestJson;
-
-        int responseCode = PostRequest( aUrl, request_json_stream.str(), &update_json_stream,
-                                        reporter.get(), 20480 );
+        int responseCode = PostRequest( aUrl, std::string(), &update_json_stream, reporter.get(),
+                                        20480 );
 
         // Check that the response is 200 (content provided)
-        // We can also return 204 for no update
         if( responseCode == 200 && !Pgm().m_Quitting )
         {
             nlohmann::json  update_json;
@@ -233,7 +265,9 @@ void UPDATE_MANAGER::CheckForUpdate( wxWindow* aNoticeParent )
                 update_json_stream >> update_json;
                 response = update_json.get<UPDATE_RESPONSE>();
 
-                if( response.version != settings->m_lastReceivedUpdate && !Pgm().m_Quitting )
+                // Only a later release is offered, and one the person skipped is not offered again.
+                if( IsNewerVersion( response.version, KICAD_COLLAB_PRODUCT_VERSION )
+                    && response.version != settings->m_lastReceivedUpdate && !Pgm().m_Quitting )
                 {
                     aNoticeParent->CallAfter(
                             [aNoticeParent, response]()
@@ -260,7 +294,9 @@ void UPDATE_MANAGER::CheckForUpdate( wxWindow* aNoticeParent )
             }
             catch( const std::exception& e )
             {
-                wxLogError( wxString::Format( _( "Unable to parse update response: %s" ), e.what() ) );
+                // A bad answer is not the person's problem: no error dialog, try again next start.
+                wxLogTrace( wxS( "KICAD_UPDATE" ), wxS( "Unable to parse update response: %s" ),
+                            e.what() );
             }
         }
 

@@ -8,7 +8,7 @@ import { DX, DY, Grid, viaFits } from "./grid";
 import type { Weights } from "./weights";
 
 export interface Node { ix: number; iy: number; l: number }
-export interface Features { length: number; vias: number; b45: number; b90: number; wrong: number }
+export interface Features { length: number; vias: number; b45: number; b90: number; wrong: number; plane?: number }
 export interface Terminal { ix: number; iy: number; layers: number[]; esc?: [number, number] }
 export interface Win { x0: number; y0: number; x1: number; y1: number }
 export interface ProbeInput {
@@ -26,7 +26,7 @@ export interface ProbeInput {
 export const work = { steps: 0 };
 export interface ProbeResult { nodes: Node[]; feat: Features; cost: number; corners: number; onTerm: boolean; steps: number }
 
-export const costOf = (f: Features, W: Weights) => f.length * W.length + f.vias * W.via + f.b45 * W.bend45 + f.b90 * W.bend90 + f.wrong * W.wrongDir;
+export const costOf = (f: Features, W: Weights) => (f.length + (f.plane || 0)) * W.length + f.vias * W.via + f.b45 * W.bend45 + f.b90 * W.bend90 + f.wrong * W.wrongDir;
 
 /** Length, vias, corners and against-the-grain length of a route given as grid nodes. */
 export function featuresOf(G: Grid, nodes: Node[], pref: number[]): Features {
@@ -38,6 +38,7 @@ export function featuresOf(G: Grid, nodes: Node[], pref: number[]): Features {
     const diag = dx !== 0 && dy !== 0; const len = Math.max(Math.abs(dx), Math.abs(dy)) * G.g * (diag ? Math.SQRT2 : 1);
     const dir = dirOf(dx, dy);
     f.length += len; const p = pref[a.l] || 0;
+    const lc = G.layerCost ? G.layerCost[a.l] || 1 : 1; if (lc !== 1) f.plane = (f.plane || 0) + len * (lc - 1);   // a mm across a plane counts more: it cuts the plane
     f.wrong += diag ? len * Math.abs(p) / 2 : dy === 0 ? len * Math.max(0, -p) : len * Math.max(0, p);
     if (prev >= 0 && dir !== prev) { let d = Math.abs(dir - prev); d = Math.min(d, 8 - d); if (d === 1) f.b45++; else f.b90 += d - 1; }
     prev = dir;

@@ -55,7 +55,9 @@ def open(path: str, libs: list | None = None, server: str | None = None, token: 
     name = stem or (_os.path.splitext(_os.path.basename(pro[0]))[0] if pro else _os.path.basename(folder))
     # the root sheet (named like the project) first, so it is the default schematic
     files.sort(key=lambda f: (0 if _os.path.splitext(_os.path.basename(f))[0] == name else 1, f))
-    return Project(LocalEngine(files, name=name, libs=libs, server=server, token=token))
+    p = Project(LocalEngine(files, name=name, libs=libs, server=server, token=token))
+    p.folder = folder
+    return p
 
 
 def new(folder: str, name: str | None = None) -> Project:

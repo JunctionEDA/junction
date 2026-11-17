@@ -24,7 +24,7 @@ PANEL_STARTWIZARD_PRIVACY_BASE::PANEL_STARTWIZARD_PRIVACY_BASE( wxWindow* parent
 	m_stIntro->Wrap( 550 );
 	sbSizer1->Add( m_stIntro, 0, wxALL|wxEXPAND, 5 );
 
-	m_cbAutoUpdateKiCad = new wxCheckBox( sbSizer1->GetStaticBox(), wxID_ANY, _("Check for KiCad updates on startup"), wxDefaultPosition, wxDefaultSize, 0 );
+	m_cbAutoUpdateKiCad = new wxCheckBox( sbSizer1->GetStaticBox(), wxID_ANY, _("Check for Junction updates on startup"), wxDefaultPosition, wxDefaultSize, 0 );
 	sbSizer1->Add( m_cbAutoUpdateKiCad, 0, wxALL, 5 );
 
 	m_cbAutoUpdatePCM = new wxCheckBox( sbSizer1->GetStaticBox(), wxID_ANY, _("Check for package updates on startup"), wxDefaultPosition, wxDefaultSize, 0 );

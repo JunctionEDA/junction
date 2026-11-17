@@ -18,9 +18,17 @@ use crate::AppState;
 pub const REPO: &str = "JunctionEDA/junction";
 const TTL: Duration = Duration::from_secs(600);
 
+#[derive(Clone, Default)]
+struct Release {
+    tag: String,       // "v2.2.0"
+    published: String, // ISO date
+    page: String,      // the release's page on GitHub
+    assets: Vec<(String, String)>, // (file name, download address)
+}
+
 struct Cached {
     at: Instant,
-    assets: Vec<(String, String)>, // (file name, download address)
+    release: Release,
 }
 
 static CACHE: Mutex<Option<Cached>> = Mutex::new(None);
@@ -40,9 +48,13 @@ fn pick(assets: &[(String, String)], suffix: &str) -> Option<String> {
 }
 
 async fn latest_assets(state: &AppState) -> Option<Vec<(String, String)>> {
+    latest_release(state).await.map(|r| r.assets)
+}
+
+async fn latest_release(state: &AppState) -> Option<Release> {
     if let Some(c) = CACHE.lock().ok()?.as_ref() {
         if c.at.elapsed() < TTL {
-            return Some(c.assets.clone());
+            return Some(c.release.clone());
         }
     }
     let http = reqwest::Client::builder()
@@ -59,18 +71,23 @@ async fn latest_assets(state: &AppState) -> Option<Vec<(String, String)>> {
             .iter()
             .filter_map(|a| Some((a["name"].as_str()?.to_string(), a["browser_download_url"].as_str()?.to_string())))
             .collect();
-        Some(assets)
+        Some(Release {
+            tag: v["tag_name"].as_str()?.to_string(),
+            published: v["published_at"].as_str().unwrap_or_default().to_string(),
+            page: v["html_url"].as_str().unwrap_or_default().to_string(),
+            assets,
+        })
     }
     .await;
     match fetched {
-        Some(assets) => {
+        Some(release) => {
             if let Ok(mut c) = CACHE.lock() {
-                *c = Some(Cached { at: Instant::now(), assets: assets.clone() });
+                *c = Some(Cached { at: Instant::now(), release: release.clone() });
             }
-            Some(assets)
+            Some(release)
         }
         // GitHub is down or rate limited: keep using what we had, however old.
-        None => CACHE.lock().ok()?.as_ref().map(|c| c.assets.clone()),
+        None => CACHE.lock().ok()?.as_ref().map(|c| c.release.clone()),
     }
 }
 
@@ -82,6 +99,41 @@ pub async fn download(State(state): State<AppState>, Path(os): Path<String>) -> 
         None => fallback,
     };
     ([(header::CACHE_CONTROL, "no-store")], Redirect::to(&target)).into_response()
+}
+
+/// GET /api/desktop/latest: what the desktop app's update check asks at start-up.
+///
+/// `{version, release_date, details_url, downloads_url}`, the newest release's version without the
+/// leading "v".  `downloads_url` is the stable `/download/{os}` link when the caller names its
+/// platform (`?platform=macos|windows|linux`), else the releases page.  The app compares the version
+/// with its own and only then shows its notice, so this never says whether an update is needed.
+/// 503 when GitHub has never answered.
+pub async fn latest(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let Some(r) = latest_release(&state).await else {
+        return (axum::http::StatusCode::SERVICE_UNAVAILABLE, [(header::CACHE_CONTROL, "no-store")], "release info unavailable").into_response();
+    };
+    let base = state.cfg.site_url.trim_end_matches('/');
+    let platform = q.get("platform").map(|p| p.to_ascii_lowercase());
+    let downloads_url = match platform.as_deref().and_then(|p| suffix(p).map(|_| p.to_string())) {
+        Some(p) => format!("{base}/download/{p}"),
+        None => format!("https://github.com/{REPO}/releases/latest"),
+    };
+    let details_url = if r.page.is_empty() { format!("https://github.com/{REPO}/releases/latest") } else { r.page.clone() };
+    let body = serde_json::json!({
+        "version": version_of(&r.tag),
+        "release_date": r.published,
+        "details_url": details_url,
+        "downloads_url": downloads_url,
+    });
+    ([(header::CACHE_CONTROL, "public, max-age=300")], axum::Json(body)).into_response()
+}
+
+/// "v2.2.0" -> "2.2.0".
+fn version_of(tag: &str) -> &str {
+    tag.strip_prefix('v').or_else(|| tag.strip_prefix('V')).unwrap_or(tag)
 }
 
 /// GET /download: the releases page, where every platform's file is listed.
@@ -103,5 +155,11 @@ mod tests {
         assert_eq!(pick(&assets, suffix("windows").unwrap()).unwrap(), "https://example.test/Junction-2.1.4-windows-x64.exe");
         assert_eq!(pick(&assets, suffix("linux").unwrap()).unwrap(), "https://example.test/Junction-2.1.4-linux-x64.tar.gz");
         assert!(suffix("amiga").is_none());
+    }
+
+    #[test]
+    fn version_drops_the_v() {
+        assert_eq!(version_of("v2.2.0"), "2.2.0");
+        assert_eq!(version_of("2.2.0"), "2.2.0");
     }
 }

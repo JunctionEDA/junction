@@ -35,6 +35,9 @@ public:
     ~UPDATE_MANAGER();
 
     void CheckForUpdate( wxWindow* aNoticeParent );
+
+    /// True when aOffered ("2.2.0", "v2.2.0") is a later version than aCurrent.
+    static bool IsNewerVersion( const wxString& aOffered, const wxString& aCurrent );
     int PostRequest( const wxString& aUrl, std::string aRequestBody, std::ostream* aOutput,
                                            PROGRESS_REPORTER* aReporter, const size_t aSizeLimit );
 

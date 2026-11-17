@@ -23,6 +23,7 @@
 #include <settings/settings_manager.h>
 #include <settings/kicad_settings.h>
 #include <pgm_base.h>
+#include <collab/collab_product.h>
 
 DIALOG_UPDATE_NOTICE::DIALOG_UPDATE_NOTICE( wxWindow* aWindow, const wxString& aNewVersion,
                                             const wxString& aDetailsUrl,
@@ -31,7 +32,8 @@ DIALOG_UPDATE_NOTICE::DIALOG_UPDATE_NOTICE( wxWindow* aWindow, const wxString& a
         m_detailsUrl( aDetailsUrl ),
         m_downloadsUrl( aDownloadsUrl )
 {
-    wxString msg = wxString::Format( _( "KiCad %s is now available (you have %s). Would you like to download it now?" ), aNewVersion, GetMajorMinorPatchVersion()  );
+    wxString msg = wxString::Format( _( "Junction %s is out (you have %s). Download it now?" ), aNewVersion,
+                                     KICAD_COLLAB_PRODUCT_VERSION );
     m_messageLine2->SetLabelText( msg );
 
     Fit();

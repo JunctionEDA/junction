@@ -125,6 +125,13 @@ option( KICAD_UPDATE_CHECK
     "Build in update check"
     ON )
 
+# Junction's own update check (kicad/update_manager.cpp asks junctioneda.com for the newest
+# desktop release).  The release workflows pass -DKICAD_UPDATE_CHECK=OFF from the days when the
+# check went to KiCad's service; this option is separate so those builds still get Junction's.
+option( JUNCTION_UPDATE_CHECK
+    "Check junctioneda.com for a newer Junction at start-up"
+    ON )
+
 cmake_dependent_option( KICAD_BUILD_NATIVE_MODEL_PREVIEW
     "Build native operating-system 3D model preview components"
     OFF "MINGW"
@@ -336,7 +343,7 @@ add_compile_definitions( $<$<BOOL:${KICAD_SIGNAL_INTEGRITY}>:KICAD_SIGNAL_INTEGR
 add_compile_definitions( $<$<BOOL:${KICAD_USE_VALGRIND}>:KICAD_USE_VALGRIND> )
 add_compile_definitions( $<$<BOOL:${KICAD_GAL_PROFILE}>:KICAD_GAL_PROFILE> )
 add_compile_definitions( $<$<BOOL:${KICAD_WIN32_VERIFY_CODESIGN}>:KICAD_WIN32_VERIFY_CODESIGN> )
-add_compile_definitions( $<$<BOOL:${KICAD_UPDATE_CHECK}>:KICAD_UPDATE_CHECK> )
+add_compile_definitions( $<$<OR:$<BOOL:${KICAD_UPDATE_CHECK}>,$<BOOL:${JUNCTION_UPDATE_CHECK}>>:KICAD_UPDATE_CHECK> )
 
 # Ensure DEBUG is defined for all platforms in Debug builds
 add_compile_definitions( $<$<CONFIG:Debug>:DEBUG> )

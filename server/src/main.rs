@@ -290,6 +290,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/welcome", get(pages::landing_page))
         .route("/download", get(downloads::releases))
         .route("/download/{os}", get(downloads::download))
+        .route("/api/desktop/latest", get(downloads::latest))
         .route("/favicon.svg", get(pages::favicon))
         .route("/brand/{v}/{name}", get(pages::brand_file))
         .route("/favicon.ico", get(pages::favicon_ico))

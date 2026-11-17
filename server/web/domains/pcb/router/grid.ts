@@ -22,6 +22,7 @@ export interface RuleClass {
 }
 
 export interface Grid {
+  layerCost?: number[];   // per layer, what a mm of track counts there (1 = plain; a plane layer counts more, so tracks keep to the outer layers)
   g: number; ox: number; oy: number; W: number; H: number;
   layers: string[]; routable: boolean[];
   noVia: Uint16Array;                    // SMD pads and via keep-outs: no via may be centred here
