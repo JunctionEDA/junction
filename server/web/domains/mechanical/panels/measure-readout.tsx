@@ -17,6 +17,7 @@ function Readout({ studio }: { studio: PartStudio }) {
   const active = useStore(m, (s) => s.active);
   const pins = useStore(m, (s) => s.pins);
   const sketch = useStudio(studio, (s) => !!s.sketch);
+  useStudio(studio, (s) => s.units);   // the rows are written in the document's units
   if (sketch) return null;
   const r = readout(result);
   if (!items.length && !pins.length && !active) return null;

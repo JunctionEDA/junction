@@ -45,7 +45,7 @@ async function handle(msg: ToWorker): Promise<void> {
     const mine: { delete(): void }[] = [];
     k.scope = mine;
     try {
-      const value = await svc.run({ oc: k.oc, k, state, fail: (m) => new Error(m) }, msg.args);
+      const value = await svc.run({ oc: k.oc, k, state, before: (id) => (engine ? engine.before(id) : null), fail: (m) => new Error(m) }, msg.args);
       // a file in the result (an export) is a typed array: transferred, not copied
       post({ t: "call", seq: msg.seq, ok: true, value }, transferables(value));
     } catch (e) { post({ t: "call", seq: msg.seq, ok: false, error: k.describe(e) }); }

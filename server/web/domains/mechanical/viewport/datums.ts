@@ -10,7 +10,7 @@ import type { DatumView } from "../kernel/protocol";
 export interface DatumHit { featureId: string; datum: DatumView["kind"]; point: Vec3; d: number }
 type Fat = (color: THREE.Color, width: number, o?: Partial<{ dashed: boolean; depthTest: boolean }>) => LineMaterial;
 
-interface Drawn { view: DatumView; quad?: THREE.Mesh; segments?: number[]; at?: THREE.Vector3 }
+interface Drawn { view: DatumView; group: THREE.Group; quad?: THREE.Mesh; segments?: number[]; at?: THREE.Vector3 }
 
 const v3 = (p: Vec3) => new THREE.Vector3(p[0], p[1], p[2]);
 
@@ -35,6 +35,27 @@ export class DatumLayer {
   readonly group = new THREE.Group();
   private drawn = new Map<string, Drawn>();
   private color = new THREE.Color();
+  private hidden = new Set<string>();
+
+  /** Which datums (by feature id) are not drawn and not picked: a person hid them in the feature list. */
+  setHidden(ids: ReadonlySet<string>): void {
+    this.hidden = new Set(ids);
+    for (const [id, d] of this.drawn) d.group.visible = !this.hidden.has(id);
+  }
+  /** The reference planes on screen, with the corners of their rectangles (for their name labels). */
+  planes(): { featureId: string; corners: THREE.Vector3[]; normal: THREE.Vector3; shown: boolean }[] {
+    const out: { featureId: string; corners: THREE.Vector3[]; normal: THREE.Vector3; shown: boolean }[] = [];
+    for (const [id, d] of this.drawn) if (d.view.kind === "plane" && d.view.frame) out.push({ featureId: id, corners: corners(d.view), normal: v3(d.view.frame.normal), shown: !this.hidden.has(id) });
+    return out;
+  }
+  /** The box of a datum, for zooming to it. */
+  boxOf(featureId: string): THREE.Box3 | null {
+    const d = this.drawn.get(featureId); if (!d) return null;
+    const b = new THREE.Box3();
+    if (d.segments) for (let i = 0; i + 2 < d.segments.length; i += 3) b.expandByPoint(new THREE.Vector3(d.segments[i], d.segments[i + 1], d.segments[i + 2]));
+    if (d.at) b.expandByPoint(d.at);
+    return b.isEmpty() ? null : b;
+  }
 
   constructor(private readonly fat: Fat) {}
 
@@ -43,18 +64,21 @@ export class DatumLayer {
     this.clear();
     this.color.copy(color);
     for (const d of views) {
-      const drawn: Drawn = { view: d };
+      const sub = new THREE.Group();
+      sub.visible = !this.hidden.has(d.featureId);
+      this.group.add(sub);
+      const drawn: Drawn = { view: d, group: sub };
       if (d.kind === "plane" && d.frame) {
         const g = new THREE.BufferGeometry().setFromPoints(corners(d)); g.setIndex([0, 1, 2, 0, 2, 3]);
         const quad = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false }));
         quad.userData.datum = d.featureId;
-        this.group.add(quad);
+        sub.add(quad);
         drawn.quad = quad;
       }
       if (d.kind === "point" && d.at) {
         drawn.at = v3(d.at);
         const p = new THREE.Points(new THREE.BufferGeometry().setFromPoints([drawn.at]), new THREE.PointsMaterial({ color, size: 7, sizeAttenuation: false, depthTest: false }));
-        p.renderOrder = 6; this.group.add(p);
+        p.renderOrder = 6; sub.add(p);
       }
       const seg = segmentsOf(d);
       if (seg.length >= 6) {
@@ -63,14 +87,14 @@ export class DatumLayer {
         const line = new LineSegments2(g, this.fat(color, d.kind === "plane" ? 1 : 1.5, { dashed: d.kind === "axis", depthTest: d.kind === "plane" }));
         line.computeLineDistances();
         line.renderOrder = 4;
-        this.group.add(line);
+        sub.add(line);
       }
       this.drawn.set(d.featureId, drawn);
     }
   }
 
   private clear(): void {
-    for (const o of this.group.children.slice()) { this.group.remove(o); (o as THREE.Mesh).geometry.dispose(); }
+    for (const o of this.group.children.slice()) { this.group.remove(o); o.traverse((x) => { (x as THREE.Mesh).geometry?.dispose(); }); }
     this.drawn.clear();
   }
 
@@ -87,7 +111,7 @@ export class DatumLayer {
     const closest = new THREE.Vector3(), onSeg = new THREE.Vector3();
     for (const [id, dr] of this.drawn) {
       const k = dr.view.kind;
-      if (!want(k)) continue;
+      if (!want(k) || this.hidden.has(id)) continue;
       if (k === "point" && dr.at) {
         if (ray.distanceSqToPoint(dr.at) < (7 * px) ** 2) offer({ featureId: id, datum: k, point: [dr.at.x, dr.at.y, dr.at.z], d: ray.origin.distanceTo(dr.at) - 1e9 });
       } else if ((k === "axis" || k === "curve") && dr.segments) {
@@ -108,7 +132,7 @@ export class DatumLayer {
   /** Objects that draw a datum highlighted, for ModelView's highlight group. */
   highlight(featureId: string, color: THREE.Color, strong: boolean): THREE.Object3D[] {
     const dr = this.drawn.get(featureId);
-    if (!dr) return [];
+    if (!dr || this.hidden.has(featureId)) return [];
     const out: THREE.Object3D[] = [];
     if (dr.quad) {
       const m = new THREE.Mesh(dr.quad.geometry, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: strong ? 0.3 : 0.18, side: THREE.DoubleSide, depthWrite: false }));

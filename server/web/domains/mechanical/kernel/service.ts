@@ -10,6 +10,8 @@ export interface ServiceContext {
   readonly k: Kernel;
   /** the model as the last regeneration left it (the bodies the page is showing) */
   readonly state: ModelState;
+  /** the model just before a feature was built (null: that feature is not built); absent outside the page's worker */
+  before?(featureId: string): ModelState | null;
   /** `throw ctx.fail("…")` with a message a person can act on */
   fail(message: string): Error;
 }

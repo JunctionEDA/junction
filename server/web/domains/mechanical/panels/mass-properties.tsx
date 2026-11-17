@@ -23,6 +23,7 @@ function Value({ studio, label, text, value, minor }: { studio: PartStudio; labe
 }
 
 function MassProperties({ studio }: { studio: PartStudio }) {
+  useStudio(studio, (s) => s.units);   // the values are written in the document's units
   const mass = massOf(studio);
   const s = useStore(mass, (x) => x);
   const bodies = useStudio(studio, (x) => x.bodies);
