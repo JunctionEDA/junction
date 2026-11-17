@@ -407,24 +407,16 @@ class _Doc:
     def check(self, limit: int = 6, kind: str | None = None, warnings: bool = False) -> dict:
         """Run the rules check (ERC on a sheet, DRC on the board): counts by kind and the first few violations, errors first.
         \`kind\` lists only that kind ("unconnected_items", "clearance"); \`warnings=True\` lists warnings after the errors.
-        Violations inside one footprint (its own pads, holes or courtyard, as the library drew it) are counted apart under
-        "in_footprints" and left out of errors and by_kind: the layout did not cause them and cannot fix them."""
+        What lies wholly inside one footprint (its own pads, holes, silk or courtyard, as its maker drew it) is not reported."""
         r = self._call("run_checks")
-        kinds, wkinds, lib = {}, {}, {}
+        kinds, wkinds = {}, {}
         for v in r.get("violations", []):
-            if v.get("footprint"):   # inside one library footprint (its own pads, holes or courtyard): not the layout's doing
-                k = f"{v['code']} ({v['footprint']})" if isinstance(v["footprint"], str) else v["code"]
-                lib[k] = lib.get(k, 0) + 1
-                continue
             d = kinds if v["severity"] == "error" else wkinds
             d[v["code"]] = d.get(v["code"], 0) + 1
-        mine = [v for v in r.get("violations", []) if not v.get("footprint")]
-        rows = [v for v in mine if (v["code"] == kind if kind else v["severity"] == "error" or warnings)]
+        rows = [v for v in r.get("violations", []) if (v["code"] == kind if kind else v["severity"] == "error" or warnings)]
         rows.sort(key=lambda v: v["severity"] != "error")
         first = [f"{v['severity']} {v['code']}: {v['message']}" + (f" [{', '.join(v['refs'])}]" if v.get("refs") else "") + f" at ({v['x']}, {v['y']})" for v in rows[:limit]]
-        out = {"check": r.get("check"), "errors": sum(kinds.values()), "warnings": sum(wkinds.values()), "by_kind": kinds, "first": first}
-        if lib:
-            out["in_footprints"] = lib   # left out of errors and by_kind: they come with the imported footprint
+        out = {"check": r.get("check"), "errors": r.get("errors", 0), "warnings": r.get("warnings", 0), "by_kind": kinds, "first": first}
         if warnings or kind:
             out["warnings_by_kind"] = wkinds
         return out
@@ -2464,10 +2456,21 @@ class Board(_Doc):
         self.project.note(f"board: freed boxed-in pins, open connections {before} -> {after}")
         return {"before": before, "after": after, "tried": tried}
 
-    def fix_corners(self) -> int:
+    def fix_corners(self, passes: int = 3) -> int:
         """Cut every square or sharper track corner the rules check reports (track_right_angle) into 45\xB0 bends: the two
         segments that meet there are laid again as one track through the same three points, which add_track chamfers.
-        Antenna and RF nets are left as drawn.  Returns how many corners were cut.  design() calls it before its checks."""
+        A track that doubles back on itself loses its dead tip, and an acute zigzag becomes one run with a 45\xB0 knee; each
+        pass can uncover the next corner, so it runs up to \`passes\` times.  Antenna and RF nets are left as drawn.
+        Returns how many corners were cut.  design() calls it before its checks."""
+        total = 0
+        for _ in range(max(1, passes)):
+            n = self._fix_corners_once()
+            total += n
+            if not n:
+                break
+        return total
+
+    def _fix_corners_once(self) -> int:
         rows = self._call("run_checks").get("violations", [])
         done = 0
         for v in rows:
@@ -2483,6 +2486,9 @@ class Board(_Doc):
                 if not a:
                     continue
                 x0, y0, x1, y1 = map(float, a.groups())
+                if math.hypot(x0 - x1, y0 - y1) < 1e-4:      # a zero-length segment left at the corner: it goes
+                    self._edit({"op": "remove", "id": it["id"]})
+                    continue
                 if math.hypot(x0 - x, y0 - y) < 0.002:
                     far = (x1, y1)
                 elif math.hypot(x1 - x, y1 - y) < 0.002:
@@ -2494,8 +2500,21 @@ class Board(_Doc):
             if len(segs) != 2 or segs[0][3] != segs[1][3] or segs[0][4] != segs[1][4]:
                 continue
             (i1, f1, w1, layer, net), (i2, f2, w2, _, _) = segs
+            u, w = (f1[0] - x, f1[1] - y), (f2[0] - x, f2[1] - y)
+            back = (u[0] * w[0] + u[1] * w[1]) / ((math.hypot(*u) * math.hypot(*w)) or 1) > 0.985   # the track doubles back on itself
             self._edit({"op": "remove", "id": i1}); self._edit({"op": "remove", "id": i2})
-            self._edit({"op": "add_track", "net": net, "layer": layer, "points": [[f1[0], f1[1]], [x, y], [f2[0], f2[1]]], "width": min(w1, w2)})
+            # a doubled-back tip is cut off (one straight run between the far ends); a real bend is laid again through its corner
+            cosa = (u[0] * w[0] + u[1] * w[1]) / ((math.hypot(*u) * math.hypot(*w)) or 1)
+            if back:
+                pts = [[f1[0], f1[1]], [f2[0], f2[1]]]
+            elif cosa > 0.2:      # an acute zigzag: go straight from end to end with one 45-degree knee instead
+                dx, dy = f2[0] - f1[0], f2[1] - f1[1]; d = min(abs(dx), abs(dy))
+                knee = [f1[0] + math.copysign(d, dx), f1[1] + math.copysign(d, dy)]
+                pts = [[f1[0], f1[1]], knee, [f2[0], f2[1]]]
+            else:
+                pts = [[f1[0], f1[1]], [x, y], [f2[0], f2[1]]]
+            if math.hypot(f1[0] - f2[0], f1[1] - f2[1]) > 1e-4:      # out and back to the same point is a dead spur: nothing is laid
+                self._edit({"op": "add_track", "net": net, "layer": layer, "points": pts, "width": min(w1, w2)})
             done += 1
         if done:
             self.flush()

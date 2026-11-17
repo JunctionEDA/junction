@@ -71100,11 +71100,7 @@ async function runChecks(input) {
     markers = P.drc(doc2, P.designSettings(ED().proSettings || null), {});
   }
   const refs = (ids) => Array.from(new Set((ids || []).map((id) => doc2.items.get(id)).filter(Boolean).map((it) => it.ref).filter(Boolean)));
-  const inFootprint = (ids) => {
-    const its = (ids || []).map((id) => doc2.items.get(id));
-    return its.length > 0 && its.every((it) => it && it.kind === "footprint" && it === its[0]) ? its[0].ref || true : void 0;
-  };
-  const rows3 = markers.map((m) => ({ severity: m.severity, code: m.code, message: m.text, x: r33(m.x), y: r33(m.y), refs: refs(m.ids), footprint: m.code === "unconnected_items" ? void 0 : inFootprint(m.ids) }));
+  const rows3 = markers.map((m) => ({ severity: m.severity, code: m.code, message: m.text, x: r33(m.x), y: r33(m.y), refs: refs(m.ids) }));
   if (doc2.type !== "sch") {
     try {
       const R2 = W3.PcbAutoRouter;
