@@ -52,7 +52,7 @@ r = board.design(reroute=True, explain=True, time_s=180)
 print(r["routed"]["left"], r["drc"], r["review"]["findings"])
 ```
 
-Never drive `board.route()` over a whole board: `design()` also pours, stitches, frees boxed-in pins (`board.free_pins()`), cuts square corners and checks, in order. With `reroute=True` placement findings go to `placement_notes`, and DRC errors from before routing to `drc.already_there`, uncounted. DRC never reports what lies inside one footprint (its maker drew it so). `time_s` is the router's budget; the call takes 2-4x.
+Never drive `board.route()` over a whole board: `design()` also pours, stitches, frees boxed-in pins (`board.free_pins()`), cuts square corners and checks, in order. With `reroute=True` placement findings go to `placement_notes`, and DRC errors from before routing to `drc.already_there`, uncounted. DRC skips what lies inside one footprint. `time_s` is the router's budget. Rule changes go under `rules_changed` (`keep_rules=True`: none); `layers=["F.Cu", "B.Cu"]` spares inner planes.
 
 A pin still open with `no-room` in `why_open` was boxed in: `board.unroute(near="U1.8"); board.route(order=["/NET"], time_s=60)`, then `board.finish()`.
 

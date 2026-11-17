@@ -2297,7 +2297,7 @@ class Board(_Doc):
             self.project.note(f"board: took up {count} tracks and vias of {len(names)} nets")
         return count
 
-    def free_pins(self, radius: float = 1.5, time_s: float = 60, passes: int = 2) -> dict:
+    def free_pins(self, radius: float = 1.5, time_s: float = 60, passes: int = 2, keep_rules: bool = False, layers: list | None = None) -> dict:
         """Close connections the router left open because earlier tracks boxed a pin in: for each open connection, the
         copper within `radius` mm of its pin on the busiest part (the fine-pitch chip) comes up, and the open net is laid
         first, then the nets that were taken up.  An attempt that does not lower the count of open connections is taken
@@ -2332,7 +2332,7 @@ class Board(_Doc):
                 self._track = []
                 try:
                     self.flush()
-                    self.route(nets=sorted(nets), order=[net], time_s=time_s, ground_vias=False, fill=False)   # pours are filled once, at the end
+                    self.route(nets=sorted(nets), order=[net], time_s=time_s, ground_vias=False, fill=False, keep_rules=keep_rules, layers=layers)   # pours are filled once, at the end
                     n1 = self.info()["unrouted_connections"]
                     if n1 >= n0:          # no better: put the board back as it was
                         for i in self._track:
@@ -2390,8 +2390,9 @@ class Board(_Doc):
                     far = (x0, y0)
                 else:
                     continue
+                nm = re.search(r'\(net (?:"((?:[^"\\]|\\.)*)"|(\d+))\)', s)      # a name, or a net number in older files
                 segs.append((it["id"], far, float(re.search(r"\(width ([\d.]+)\)", s).group(1)), re.search(r'\(layer "([^"]+)"\)', s).group(1),
-                             re.search(r'\(net "((?:[^"\\]|\\.)*)"\)', s).group(1)))
+                             (m.group(1) if m else None) or (nm.group(1) or nm.group(2) if nm else "")))
             if len(segs) != 2 or segs[0][3] != segs[1][3] or segs[0][4] != segs[1][4]:
                 continue
             (i1, f1, w1, layer, net), (i2, f2, w2, _, _) = segs

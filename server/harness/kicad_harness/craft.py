@@ -43,8 +43,12 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             order: list | None = None, widths: dict | None = None, kinds: dict | None = None, time_s: float | None = None, max_vias: int = 2,
             stitch: float | None = 2.0, name: str | bool | None = None, rev: str | None = None, silk: bool = True, place: bool = True, route: bool = True,
             accept: list | None = None, reroute: bool = False, explain: bool = False, fanout: bool = False,
-            free_pins: bool = True) -> dict:
+            free_pins: bool = True, keep_rules: bool = False) -> dict:
     """Lay the whole board out in one call and say how it came out.
+
+    keep_rules=True never touches the design rules (no house via either), for a person who said not to change them;
+    otherwise any change is listed under "rules_changed".  layers=["F.Cu", "B.Cu", ...] keeps the tracks on those
+    layers (an inner ground plane left whole); a number is how many copper layers the board should have.
 
     explain=True adds "reasoning": a list of plain lines saying where every part stands and why (its cluster, the
     pin it serves, how far from it), which parts belong to no cluster, the order the nets were routed in and why,
@@ -106,6 +110,9 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     plan = step("plan", lambda: self.plan(edge=edge)) or {"place": {"near": {}, "edges": {}}, "route": {}, "notes": []}
     out["notes"] = [n.split(". ")[0] for n in plan.get("notes", [])][:6]
     rec = dict((plan.get("stackup") or {}).get("recommended") or {})
+    route_layers = list(layers) if isinstance(layers, (list, tuple)) else None
+    if route_layers:
+        layers = None
     if layers:
         rec["layers"] = layers
     want = int(rec.get("layers") or len(self.info().get("copper_layers") or []) or 2)
@@ -179,7 +186,9 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                     fo = step(f"fanout {part['ref']}", lambda ref=part["ref"]: self.fanout(ref))
                     if fo and fo.get("vias"):
                         out.setdefault("fanout", {})[part["ref"]] = {"vias": fo["vias"], "skipped": len(fo.get("skipped") or {})}
-        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain))
+        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules))
+        if got and got.get("rules_changed"):
+            out["rules_changed"] = got["rules_changed"]
         if got:
             out["routed"] = {k: got.get(k) for k in ("routed", "connections", "vias", "length_mm")}
             if got.get("groups"):
@@ -193,7 +202,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                 out["routed"]["why_open"] = [u[:160] for u in got["unrouted"][:8]]
             left = got.get("left") or {}
             if left:      # one more pass at only what is open, as a person goes back over the last few
-                more = step("route again", lambda: self.route(nets=list(left), widths=r["widths"], kinds=r["kinds"], time_s=(time_s or 60) / 2, max_vias=max_vias))
+                more = step("route again", lambda: self.route(nets=list(left), widths=r["widths"], kinds=r["kinds"], time_s=(time_s or 60) / 2, max_vias=max_vias, layers=route_layers, keep_rules=True))
                 if more:
                     out["routed"]["vias"] = (out["routed"]["vias"] or 0) + (more.get("vias") or 0)
                     left = more.get("left") or {}
@@ -208,10 +217,10 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         if still:
             if any(n.split("/")[-1].upper().endswith("GND") for n in still):
                 step("ground pads", self.ground_pads)
-            step("route last", lambda: self.route(nets=list(still), widths=r["widths"], kinds=r["kinds"], time_s=30, max_vias=max_vias))
+            step("route last", lambda: self.route(nets=list(still), widths=r["widths"], kinds=r["kinds"], time_s=30, max_vias=max_vias, layers=route_layers, keep_rules=True))
             out["routed"]["left"] = step("unrouted", self.unrouted) or {}
         if (out.get("routed") or {}).get("left") and free_pins:     # pins boxed in by earlier tracks: free each and lay it first, never worse
-            fp = step("free pins", lambda: self.free_pins(passes=1))
+            fp = step("free pins", lambda: self.free_pins(passes=1, keep_rules=True, layers=route_layers))
             if fp:
                 out["routed"]["freed"] = f"open {fp['before']} -> {fp['after']}"
                 if fp["after"] < fp["before"]:
@@ -288,6 +297,9 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     self.project.refused = [r for r in self.project.refused if not r.startswith("board ")] + ["board " + r for r in refused]
     if not out["skipped"]:
         del out["skipped"]
+    # the verdict first, the long explanations last: a printed result that gets cut keeps what matters
+    head = ("refused", "rules_changed", "routed", "drc", "seconds")
+    out = {**{k: out[k] for k in head if k in out}, **{k: v for k, v in out.items() if k not in head and k != "reasoning"}, **({"reasoning": out["reasoning"]} if "reasoning" in out else {})}
     self.project.note(f"board: design() {out.get('routed', {}).get('routed', 0)} connections routed, {out.get('vias')} vias, DRC {out.get('drc', {}).get('errors', '?')} errors, review {out.get('review', {}).get('errors', '?')} errors")
     return out
 
