@@ -8,6 +8,7 @@
 import type { JsonObject } from "../../../shared/itemdoc/itemdoc";
 import type { Frame, ParamField } from "../../mechanical/api";
 import type { Transform } from "../document/format";
+import type { MateSolve } from "../solver/types";
 
 export interface MateDefinition {
   /** Stable id, stored in documents as `mateType`.  Never rename one that has shipped. */
@@ -26,6 +27,15 @@ export interface MateDefinition {
    * transform.  The freedoms the mate leaves keep b as close to where it is as they allow.
    */
   place(a: Frame, b: Frame, bNow: Transform, params: JsonObject): Transform;
+  /**
+   * The solver's hook, beside `place`: this mate's residuals (zero when it holds), the values it leaves free
+   * (an angle, a distance: what limits, dragging and animation act on) and whether it welds its two instances.
+   * A mate without it is kept in the document and shown, but the solver does not enforce it.  See
+   * solver/types.ts (MateSolve) and the helpers in mates/_residuals.ts.
+   */
+  solve?: MateSolve;
+  /** lower first in the toolbar; ties in title order */
+  order?: number;
 }
 
 export function defineMate(def: MateDefinition): MateDefinition { return def; }
