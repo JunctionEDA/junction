@@ -65,6 +65,60 @@ export async function createDocument(projectId: string, kind: DocumentKind, docs
   return made.docId;
 }
 
+/** "models/bracket.step", or "models/bracket 2.step" when the project has that (whatever the letter case). */
+export function freeFilePath(folder: string, name: string, docs: readonly { path: string }[]): string {
+  const clean = (base(name).replace(/[\\/:*?"<>|]+/g, "_").trim() || "file").replace(/^\.+/, "_");
+  const dir = folder ? folder.replace(/\/+$/, "") + "/" : "";
+  const dot = clean.lastIndexOf("."), stem = dot > 0 ? clean.slice(0, dot) : clean, ext = dot > 0 ? clean.slice(dot) : "";
+  const taken = new Set(docs.map((d) => d.path.toLowerCase()));
+  for (let n = 1; ; n++) { const p = `${dir}${n === 1 ? stem : `${stem} ${n}`}${ext}`; if (!taken.has(p.toLowerCase())) return p; }
+}
+
+/**
+ * Store a file in the project as it is (its bytes become the document's first snapshot): a STEP model, say.
+ * `onProgress` hears the upload's progress, 0 to 1.  Returns the new document.
+ */
+export async function uploadFile(projectId: string, folder: string, name: string, data: Blob, onProgress?: (done: number) => void): Promise<DocEntry> {
+  let docs = await fetchDocs(projectId);
+  let made: { docId: string; path: string; docType: string; existing?: boolean } | null = null;
+  for (let tries = 0; tries < 3 && !made; tries++) {
+    const r = (await call(`/api/projects/${projectId}/docs`, json({ path: freeFilePath(folder, name, docs) }))) as { docId: string; path: string; docType: string; existing?: boolean };
+    if (!r.existing) made = r; else docs = await fetchDocs(projectId);   // somebody took the name meanwhile
+  }
+  if (!made) throw new Error(`“${name}” could not be added to the project.`);
+  await new Promise<void>((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open("POST", `/api/docs/${made!.docId}/snapshots?seq=0`);
+    x.setRequestHeader("content-type", "application/octet-stream");
+    x.upload.onprogress = (ev) => { if (ev.lengthComputable && onProgress) onProgress(ev.loaded / ev.total); };
+    x.onload = () => (x.status >= 200 && x.status < 300 ? resolve() : reject(new Error(x.responseText || `${x.status} ${x.statusText}`)));
+    x.onerror = () => reject(new Error(`“${name}” could not be uploaded.`));
+    x.send(data);
+  });
+  return { docId: made.docId, path: made.path, docType: made.docType };
+}
+
+/** Make a document of `kind` from a file (kind.fromFile): store the file, then the document that uses it.  Returns the new document's id. */
+export async function documentFromFile(projectId: string, kind: DocumentKind, file: File, onProgress?: (done: number) => void): Promise<string> {
+  const from = kind.fromFile;
+  if (!from) throw new Error(`A ${kind.title} cannot be made from a file.`);
+  if (!from.accept.some((ext) => file.name.toLowerCase().endsWith(ext))) throw new Error(`“${file.name}” is not a ${from.title} (${from.accept.join(", ")}).`);
+  const stored = await uploadFile(projectId, from.folder, file.name, file, onProgress);
+  const docs = await fetchDocs(projectId);
+  const stem = stemOf(stored.path);
+  const path = freeFilePath("", stem + kind.ext, docs);
+  const made = (await call(`/api/projects/${projectId}/docs`, json({ path }))) as { docId: string };
+  const text = from.text({ docId: stored.docId, path: stored.path, name: base(stored.path), bytes: file.size });
+  await call(`/api/docs/${made.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: text });
+  return made.docId;
+}
+
+/** The kind a dropped or chosen file makes, by its extension. */
+export function kindForFile(name: string): DocumentKind | undefined {
+  const lower = name.toLowerCase();
+  return DOCUMENT_KINDS.find((k) => k.fromFile && k.fromFile.accept.some((ext) => lower.endsWith(ext)));
+}
+
 export async function renameDocument(doc: DocEntry, path: string): Promise<void> {
   await call(`/api/docs/${doc.docId}`, { ...json({ path }), method: "PATCH" });
 }
