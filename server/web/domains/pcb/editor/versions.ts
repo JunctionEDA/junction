@@ -14,10 +14,12 @@
 // the project (onVersionsNotice), so the History pane of everyone connected stays current without a refresh.
 import { state, store } from "./appstore";
 import { applyChanges, openDoc, setDocFromText } from "./doc";
+import { isHostedDoc } from "./dochost";
 import { navigate } from "./home";
 import { requestResync } from "./net";
 import { E } from "./state";
 import { toast } from "./util";
+import { askHostedHistory } from "../../../platform/history/request";
 import type { AppState, BranchInfo, HistoryAt, HistoryRun, HistoryView, VersionDialog, VersionInfo, VersionsCmd, VersionsState } from "../../../shared/store";
 
 interface DocRef { docId: string; path: string; docType: string }
@@ -183,7 +185,13 @@ export async function viewAt(docId: string, seq: number): Promise<void> {
   const st = app();
   if (st.docId !== docId) {
     const doc = st.docs.find((d) => d.docId === docId);
-    if (!doc) { toast("That file has no drawing to show here"); return; }
+    if (!doc) {
+      // a document a domain's own editor draws (a part studio): its tab is opened and its editor is asked to show
+      // that point (web/platform/history/request.ts); the timeline there is the editor's own
+      const hosted = ((st.project as unknown as { docs?: DocRef[] } | null)?.docs || []).find((d) => d.docId === docId && isHostedDoc(d));
+      if (hosted) { askHostedHistory({ docId, seq }); await openDoc(hosted); return; }
+      toast("That file has no drawing to show here"); return;
+    }
     await openDoc(doc);
     if (app().docId !== docId) return;
   }
