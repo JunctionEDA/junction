@@ -205,13 +205,24 @@ try {
   const invited = await alice.evaluate(async (pid) => (await fetch(`/api/projects/${pid}/invites`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ login: 'cad-x-bob', role: 'editor' }) })).status, pid);
   check('a second person is invited', invited === 200, `status ${invited}`);
   const bob = await open(bobId, 'cad-x-bob');
+  const tBob = Date.now();
   await bob.goto(url);
   await settled(bob, 3, 180000);
+  const coldMs = Date.now() - tBob;
   const seen = await studio(bob, () => window.JunctionPartStudio.getState().bodies.length);
   check('a collaborator opening the part studio builds the same imported parts from the stored file', seen === imported.bodies, `${seen} bodies`);
+  // Alice's browser has read the file: a reload takes the bodies from the B-rep it kept and does not download the file again
+  const fetched = [];
+  alice.context().on('request', (r) => { if (r.url().includes(`/api/docs/${imported.file.docId}/content`)) fetched.push(r.url()); });
+  const tAlice = Date.now();
   await alice.reload();
   await settled(alice, 3, 180000);
-  check('a reload rebuilds them too', (await studio(alice, () => window.JunctionPartStudio.getState().bodies.length)) === imported.bodies);
+  const warmMs = Date.now() - tAlice;
+  const again = await studio(alice, () => { const s = window.JunctionPartStudio.getState(), f = s.features[2]; return { bodies: s.bodies.length, names: s.bodies.map((b) => b.name).join('|'), ms: s.reports[f.id].ms, faces: s.bodies.reduce((n, b) => n + b.mesh.faces.names.length, 0) }; });
+  const first = await studio(bob, () => { const s = window.JunctionPartStudio.getState(), f = s.features[2]; return { names: s.bodies.map((b) => b.name).join('|'), ms: s.reports[f.id].ms, faces: s.bodies.reduce((n, b) => n + b.mesh.faces.names.length, 0) }; });
+  check('a reload rebuilds them too', again.bodies === imported.bodies);
+  check('…from the B-rep kept in the browser: the file is not downloaded again, and the parts and faces are the same', fetched.length === 0 && again.names === first.names && again.faces === first.faces, `${fetched.length} downloads; ${again.faces} faces against ${first.faces}`);
+  console.log(`      (4.4 MB STEP, 22 parts: the import feature ${(first.ms / 1000).toFixed(1)} s reading the file in a browser that never had it, ${(again.ms / 1000).toFixed(1)} s from the kept B-rep; page load to model on screen ${(coldMs / 1000).toFixed(1)} s and ${(warmMs / 1000).toFixed(1)} s)`);
   await shot(bob, '08-bob-sees-import');
 
   check('no page errors', errors.length === 0, errors.join(' | '));
