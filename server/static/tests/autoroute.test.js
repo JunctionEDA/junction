@@ -455,3 +455,20 @@ test("escapes: a 0.4 mm QFN turned 45 degrees is fanned out before routing and e
   assert.equal(res.fanout.used, 40, "each escape is laid with the route that starts from it");
   apply(doc, res); assert.deepEqual(errors(doc, settings), []); assert.equal(P.ratsnest(doc).length, 0);
 });
+
+test("plan: the global plan sends the connection with the cheaper detour round a wall, so the other keeps the one-track gap", () => {
+  // a wall (a keep-out from the left edge to x = 124) with a gap at x = 118 that takes one track; the board is open
+  // beyond x = 124.  Shortest first, A takes the gap and B must go all the way round.  Negotiated over the tiles, the
+  // gap goes to B, whose detour is twice A's, and A searched inside its corridor goes round.
+  const make = () => board(smd(115, 48, "A"), smd(121, 62, "A"), smd(105, 44, "B"), smd(105, 66, "B"));
+  const keepouts = [{ box: [89, 52, 117.8, 58] }, { box: [118.2, 52, 124, 58] }];
+  const len = (res, net) => res.connections.filter((c) => c.net === net).reduce((s, c) => s + c.length, 0);
+  const off = R.route(K, P, make(), null, { layers: ["F.Cu"], keepouts, plan: false });
+  const doc = make(); const on = R.route(K, P, doc, null, { layers: ["F.Cu"], keepouts, plan: { mask: true } });
+  assert.equal(off.routed, 2); assert.equal(on.routed, 2); assert.equal(off.plan, undefined);
+  assert.ok(len(off, "B") > 50 && len(off, "A") < 20, "without the plan A takes the gap: " + JSON.stringify(off.connections.map((c) => [c.net, c.length])));
+  assert.ok(len(on, "B") < 45 && len(on, "A") > 20, "with it B takes the gap: " + JSON.stringify(on.connections.map((c) => [c.net, c.length])));
+  assert.ok(on.length < off.length - 5, `${on.length} mm against ${off.length} mm`);
+  assert.ok(on.plan.overflowFirst > 0 && on.plan.overflow === 0 && on.plan.iterations >= 2, JSON.stringify(on.plan));
+  apply(doc, on); assert.deepEqual(errors(doc, null), []); assert.equal(P.ratsnest(doc).length, 0);
+});

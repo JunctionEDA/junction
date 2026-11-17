@@ -11,6 +11,7 @@ const BUNDLE_COST = 0.3;
 import { TRAINED, Weights } from "./weights";
 import { cornerAngle, SQUARE_MAX } from "./corners";
 import { fanout, padRows, type Boxed, type Escape, type FanJob } from "./fanout";
+import { plan as globalPlan, type Corridor, type PlanResult } from "./globalplan";
 import { stackupOf, traceOn, usualImpedance, RF_CONTROL, widthFor, z0, zdiff } from "./impedance";
 /** Hole clearance is kept with this much to spare: a diagonal track on the grid can come a few microns closer to a
  *  via's hole than its grown cell says (Cyberboard: 0.2419 mm against a 0.25 mm rule). */
@@ -33,6 +34,20 @@ const FAN_ROWS_MM = [0.8, 1.5, 2.2], FAN_FAR_MM = 4;
 // Ledify bench 94.9 -> 74.0 (4 to 5 open; also without the spreading fan, and with supply pins left alone)
 const ESCAPES: Escapes = false, SPREAD = 1.5;   // the spreading fan ends its slots 1.5 pitches apart (0.6 mm off a 0.4 mm row)
 export type Escapes = boolean | number | { depth?: number; spread?: number };
+// Global planning before routing (globalplan.ts, after Copper): coarse paths on a tile graph with negotiated
+// congestion, layers assigned along them, and each connection steered by its corridor.  Off unless a run asks:
+// measured 2026-11-17 with board-bench.py (Ledify / Cyberboard score, open connections; off: 94.9 with 0 open /
+// 75.0 with 12 open), Cyberboard gained a little every way but Ledify lost connections every way:
+//   corridor as a mask, searched first:           Ledify 69.4 (8 open)  Cyberboard 75.0 (10 open)
+//   the same, pour nets and one-layer tries left alone:  78.2 (4 open)             75.0 (11 open)
+//   corridor and layer as a cost (0.5 per mm):          90.0 (2 open)             75.0 (10 open)
+const PLAN: Plan = false;
+/** tile: tile size in mm (default 2.5); iters: negotiation rounds (16); layerCost: what a mm off the planned layer
+ *  costs, in mm of track (0.5); outside: what a mm outside the corridor costs (0.5); mask: search inside the corridor
+ *  only first, the whole board only when that finds nothing (default false: the corridor is a cost, not a wall); vias:
+ *  a connection the plan routes through a via may change layer at once instead of being tried on one layer first
+ *  (default false); open: with mask, mm round each end the corridor never closes (1). */
+export type Plan = boolean | { tile?: number; iters?: number; layerCost?: number; outside?: number; mask?: boolean; vias?: boolean; open?: number };
 /** How far (mm, pad to pad on a shared net) a small part may stand from a chip and still count as part of its cluster. */
 const GROUP_REACH = 5;
 /** A via costs this many times what the reference boards' routing says it does (4.66 mm of track): people asked for
@@ -96,6 +111,7 @@ export interface RouteOptions {
   impedance?: boolean;           // size tracks for the impedance their nets call for (a plan's impedance, else by name: USB 90 Ω, HDMI/Ethernet 100 Ω, antenna feeds 50 Ω); default true
   splitPairs?: boolean;          // route a differential pair's two lines separately when no coupled run fits (default false: they stay unrouted and the report says why)
   fanoutVias?: boolean;          // true: a longer lane with room for a via at fine-pitch pins whose net goes far
+  plan?: Plan;                    // plan every connection on a coarse tile graph first (negotiated congestion, layers per tile) and search each inside its corridor first (globalplan.ts); see Plan
   escapes?: Escapes;              // lay the escapes of fine-pitch chips (0.65 mm pitch and finer) before routing: a stub out of each pin (a spreading fan, a ring, a leg or a via) and route from its end (fanout.ts); a number sets how far past the pad the first ring lies (mm), { depth, spread } both (spread 0: no spreading fan)
   fanoutLanes?: boolean | number; // keep a lane (mm, default 0.25) out from each fine-pitch chip pin for its own net only; false turns it off
   matchLengths?: boolean;        // lengthen the shorter members of a matched group with serpentines; default true
@@ -162,6 +178,7 @@ export interface RouteResult {
   connections: ConnReport[]; domains?: DomainReport; fences?: FenceReport[];
   groups?: { clusters: number; inside: number; insideRouted: number; insideVias: number; critical: string[]; members: Record<string, string[]> };   // connections that lie inside one cluster, and how they came out
   fanout?: { escapes: number; ring: number; via: number; used: number; boxed: Boxed[] };   // the escapes laid before routing, and the pins that got none
+  plan?: { tile: number; tiles: [number, number]; conns: number; iterations: number; overflowFirst: number; overflow: number; crossings: number; relayered: number; viaConns: number; ms: number; inside: number; outside: number };   // the global plan: overflow (mm) before and after negotiation, and how many searches found their route inside the corridor
 }
 export interface Progress { done: number; total: number; routed: number; pass: number; net: string }
 
@@ -1216,19 +1233,69 @@ export class Router {
       if (!tgt && !term.length) return null;
       const x0 = Math.min(src.ix, tgt ? tgt.ix : src.ix), x1 = Math.max(src.ix, tgt ? tgt.ix : src.ix), y0 = Math.min(src.iy, tgt ? tgt.iy : src.iy), y1 = Math.max(src.iy, tgt ? tgt.iy : src.iy);
       const span = Math.max(x1 - x0, y1 - y0);
+      const finish = (res: ProbeResult): Found => {
+        res.nodes = this.mitre(simplify(res.nodes), maps);
+        if (res.onTerm) { const e = res.nodes[res.nodes.length - 1]; const k = e.l * G.W * G.H + e.iy * G.W + e.ix; if (zoneSet && zoneSet.has(k) && !owner.has(k)) (res as any).zoneEnd = true; }
+        return { res, owner, flip, esc: [src.esc, tgt ? tgt.esc : undefined] };
+      };
+      // A global plan steers the search: every mm outside the connection's corridor and every mm off the layer the plan
+      // put a tile on costs extra (`outside`, `layerCost`).  With `mask` the search first looks inside the corridor
+      // only, and at the whole board when nothing is found there.  Not a net with a pour (it may end anywhere in it),
+      // and not a one-layer try of a connection the plan sends through a via.
+      const cor = this.gplan && !collect && !net.zoneCells ? this.gplan.corridors.get(conn.id) : undefined;
+      let steer = extra;
+      if (cor && !(cor.vias > 0 && maxVias <= 0)) {
+        const pl = this.gplan!, kk = pl.k, po = this.planOpts(); const lc = G.routable.filter(Boolean).length > 1 ? po.layerCost : 0, oc = po.outside, lay = cor.layer, tl = cor.tiles, before = extra;
+        if (lc > 0 || oc > 0) steer = (nodes) => { let off = 0, out = 0; for (let i = 0; i + 1 < nodes.length; i++) { const a = nodes[i], b = nodes[i + 1]; if (a.l !== b.l) continue; const n = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy); const step = Math.hypot(sx, sy) * G.g;
+          for (let q = 0; q < n; q++) { const r = (((a.iy + sy * q) / kk) | 0) * pl.nx + (((a.ix + sx * q) / kk) | 0); if (!tl[r]) out += step; else { const want = lay[r]; if (want >= 0 && want !== a.l) off += step; } } }
+          return (off * lc + out * oc) * this.W.length + (before ? before(nodes) : 0); };
+        if (po.mask) {
+          let tx0 = Infinity, ty0 = Infinity, tx1 = -Infinity, ty1 = -Infinity; for (let r = 0; r < tl.length; r++) if (tl[r]) { const tx = r % pl.nx, ty = (r / pl.nx) | 0; if (tx < tx0) tx0 = tx; if (tx > tx1) tx1 = tx; if (ty < ty0) ty0 = ty; if (ty > ty1) ty1 = ty; }
+          const win: Win = { x0: Math.max(0, Math.min(tx0 * kk, x0)), y0: Math.max(0, Math.min(ty0 * kk, y0)), x1: Math.min(G.W - 1, Math.max((tx1 + 1) * kk - 1, x1)), y1: Math.min(G.H - 1, Math.max((ty1 + 1) * kk - 1, y1)) };
+          const res = probe({ G, maps, vmaps, src, tgt, term, win, pref: this.pref, W: this.W, allowVias: gd.allowVias && maxVias > 0, maxSteps: 6e6, routable: rt, maxVias: maxVias === Infinity ? undefined : maxVias, extra: steer, block: this.corridorMask(cor, [A.p, B.p], po.open, win) });
+          if (res) { this.planStat.inside++; return finish(res); }
+          this.planStat.outside++;
+        }
+      }
       const margins = [Math.max(14, Math.round(span * 0.35)), Math.max(50, Math.round(span * 1.2)), Math.max(G.W, G.H)];
       for (let i = 0; i < margins.length; i++) {
         const m = margins[i]; const win: Win = { x0: Math.max(0, x0 - m), y0: Math.max(0, y0 - m), x1: Math.min(G.W - 1, x1 + m), y1: Math.min(G.H - 1, y1 + m) };
-        const res = probe({ G, maps, vmaps, src, tgt, term, win, pref: this.pref, W: this.W, allowVias: gd.allowVias && maxVias > 0, maxSteps: 6e6, collect, routable: rt, maxVias: maxVias === Infinity ? undefined : maxVias, extra });
-        if (res) {
-          res.nodes = this.mitre(simplify(res.nodes), maps);
-          if (res.onTerm) { const e = res.nodes[res.nodes.length - 1]; const k = e.l * G.W * G.H + e.iy * G.W + e.ix; if (zoneSet && zoneSet.has(k) && !owner.has(k)) (res as any).zoneEnd = true; }
-          return { res, owner, flip, esc: [src.esc, tgt ? tgt.esc : undefined] };
-        }
+        const res = probe({ G, maps, vmaps, src, tgt, term, win, pref: this.pref, W: this.W, allowVias: gd.allowVias && maxVias > 0, maxSteps: 6e6, collect, routable: rt, maxVias: maxVias === Infinity ? undefined : maxVias, extra: steer });
+        if (res) { if (steer !== extra) { const n = res.nodes; let inside = true; for (const x of n) if (!cor!.tiles[((x.iy / this.gplan!.k) | 0) * this.gplan!.nx + ((x.ix / this.gplan!.k) | 0)]) { inside = false; break; } this.planStat[inside ? "inside" : "outside"]++; } return finish(res); }
         if (win.x0 === 0 && win.y0 === 0 && win.x1 === G.W - 1 && win.y1 === G.H - 1) break;
       }
       return null;
     } finally { this.lift(net, -1, conn.cls); }
+  }
+  // ------------------------------------------------------------------ global plan (globalplan.ts)
+  private gplan: PlanResult | null = null; private planBlk: Uint8Array | null = null; private planStat = { inside: 0, outside: 0 };
+  private planOpts(): { tile: number; iters: number; layerCost: number; outside: number; mask: boolean; vias: boolean; open: number } {
+    const o = this.opts.plan ?? PLAN; const q = typeof o === "object" ? o : {};
+    return { tile: q.tile || 2.5, iters: q.iters || 16, layerCost: q.layerCost ?? 0.5, outside: q.outside ?? 0.5, mask: !!q.mask, vias: !!q.vias, open: q.open ?? 1 };
+  }
+  /** Plan every connection still to be laid on the tile graph; their corridors steer find(). */
+  private planGlobal(): void {
+    const G = this.G, po = this.planOpts(); const conns = this.conns.filter((c) => !c.nodes && !c.moot && c.planeOnly === undefined && !c.pairOnly);
+    if (!conns.length) return;
+    const count = new Map<RuleClass, number>(); for (const c of conns) count.set(c.cls, (count.get(c.cls) || 0) + 1);
+    let ref = conns[0].cls; for (const [cls, n] of count) if (n > count.get(ref)!) ref = cls;
+    this.gplan = globalPlan({ G, maps: ref.fixed, vmaps: ref.vfixed, pitch: ref.width + ref.clr, viaPitch: ref.viaD + ref.clr, pref: this.pref, viaMm: this.W.via / Math.max(1e-6, this.W.length), tile: po.tile, iters: po.iters },
+      conns.map((c) => ({ id: c.id, net: c.net, a: { p: c.a.p, layers: c.a.layers }, b: { p: c.b.p, layers: c.b.layers }, demand: c.cls.width + c.cls.clr })));
+  }
+  private planReport(): RouteResult["plan"] {
+    const pl = this.gplan; if (!pl) return undefined; const r3 = (v: number) => +v.toFixed(3);
+    let viaConns = 0; for (const c of pl.corridors.values()) if (c.vias > 0) viaConns++;
+    return { tile: r3(pl.T), tiles: [pl.nx, pl.ny], conns: pl.corridors.size, iterations: pl.iterations, overflowFirst: r3(pl.overflowFirst), overflow: r3(pl.overflow), crossings: pl.crossings, relayered: pl.relayered, viaConns, ms: pl.ms, inside: this.planStat.inside, outside: this.planStat.outside };
+  }
+  /** The grid cells a search inside the corridor may not enter, outside its tiles except near the ends (a shared
+   *  buffer, written only inside the search window: the search reads nothing beyond it). */
+  private corridorMask(cor: Corridor, ends: Pt[], open: number, win: Win): Uint8Array {
+    const G = this.G, pl = this.gplan!, k = pl.k; const m = this.planBlk || (this.planBlk = new Uint8Array(G.W * G.H));
+    for (let iy = win.y0; iy <= win.y1; iy++) m.fill(1, iy * G.W + win.x0, iy * G.W + win.x1 + 1);
+    for (let r = 0; r < cor.tiles.length; r++) if (cor.tiles[r]) { const tx = r % pl.nx, ty = (r / pl.nx) | 0; for (let iy = ty * k; iy < Math.min(G.H, (ty + 1) * k); iy++) m.fill(0, iy * G.W + tx * k, iy * G.W + Math.min(G.W, (tx + 1) * k)); }
+    const R = Math.ceil(open / G.g);
+    for (const p of ends) { const cx = Math.round((p[0] - G.ox) / G.g), cy = Math.round((p[1] - G.oy) / G.g); for (let iy = Math.max(0, cy - R); iy <= Math.min(G.H - 1, cy + R); iy++) m.fill(0, iy * G.W + Math.max(0, cx - R), iy * G.W + Math.min(G.W, cx + R + 1)); }
+    return m;
   }
   /** Chamfer the 90° corners the search was forced into, as far as the neighbouring copper allows. */
   private mitre(nodes: Node[], maps: Uint16Array[]): Node[] {
@@ -1399,6 +1466,7 @@ export class Router {
     const w0 = work.steps; const budget = this.opts.timeMs ? this.opts.timeMs * STEPS_PER_MS : 0;
     const timeUp = () => this.stopped || (!!budget && (work.steps - w0 > budget || Date.now() - t0 > 4 * this.opts.timeMs!));
     const later = new Set<number>();   // connections found to need a layer change: in the next pass they go first and may take it at once
+    if ((this.opts.plan ?? PLAN) !== false) { this.planGlobal(); if (this.gplan && this.planOpts().vias) for (const [id, cor] of this.gplan.corridors) if (cor.vias > 0) later.add(id); }
     for (; pass < passes; pass++) {
       for (const c of conns) if (c.nodes) this.rip(c);
       for (const c of conns) c.rips = 0;
@@ -1872,7 +1940,7 @@ export class Router {
     for (const v of this.fenceVias) { items.push({ kind: "via", node: P.viaNode(doc, v.p[0], v.p[1], v.cls.viaD, v.cls.viaDrill, v.obj, span), net: v.obj, netName: v.net, conn: -1 }); vias++; }
     const total = this.conns.filter((c) => c.nodes || !c.moot).length;
     return { items, total, routed: total - failed.length, failed, segments, vias, length, ms, passes, zoneEnds, zoneCovered: this.zoneCovered,
-      grid: { pitch: G.g, w: G.W, h: G.H, layers: G.layers.filter((_, i) => G.routable[i]) }, nets: this.nets.length, connections, pairs: Array.from(this.pairReports.values()), impedance: this.zReports, matched: this.matchReports, domains: this.domainReport(), fences: this.fenceReports, groups: this.groupReport(), fanout: this.fanReport };
+      grid: { pitch: G.g, w: G.W, h: G.H, layers: G.layers.filter((_, i) => G.routable[i]) }, nets: this.nets.length, connections, pairs: Array.from(this.pairReports.values()), impedance: this.zReports, matched: this.matchReports, domains: this.domainReport(), fences: this.fenceReports, groups: this.groupReport(), fanout: this.fanReport, plan: this.planReport() };
   }
 }
 

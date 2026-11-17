@@ -2727,7 +2727,7 @@ class Board(_Doc):
               net_options: dict | None = None, keepouts: list | None = None, allow_vias: bool = True, time_s: float | None = None,
               fill: bool = True, max_vias: int | None = None, kinds: dict | None = None, separate=None, fence=None,
               ground_vias: bool = True, fanout_lanes=None, via_cost: float | None = None, groups=None, explain: bool = False,
-              keep_rules: bool = False, escapes=None) -> dict:
+              keep_rules: bool = False, escapes=None, plan=None) -> dict:
         """Autoroute the missing connections (every unrouted net by default) and report what was done.
 
         order: the few nets to lay first (USB pair, crystal); widths: {net: mm} for supply nets; net_options and
@@ -2774,6 +2774,14 @@ class Board(_Doc):
         pin's way out; the pin's connections are then routed from the escape's end.  A number is how far past the pad
         the first ring lies (mm); {"depth": mm, "spread": 1.5} sets both (spread 0: no spreading fan).  The result's
         `fanout` counts them and names the pins that got none (`boxed`) with what blocks them.  Off by default.
+        plan=True plans every connection on a coarse tile graph first (a global router after Copper's): congestion is
+        negotiated over 2.5 mm tiles (PathFinder), forced crossings are found, a layer is assigned along each coarse
+        path, and each connection's search then pays for every mm outside its corridor (its tiles and a ring round
+        them) and off the planned layer.  {"mask": True} searches inside the corridor only first, falling back to the
+        whole board; {"tile": mm, "iters": n, "outside": cost per mm outside, "layer_cost": cost per mm off the
+        planned layer, "vias": True lets a connection the plan sends through a via change layer at once, "open": mm}
+        tune it.  The result's `plan` gives the overflow before and after negotiation and how many routes stayed
+        inside their corridors.  Off by default: it made no board of the benchmark better (Ledify lost connections).
         
         A board still on KiCad's stock via (0.6 on 0.3 mm) gets the house via (0.5 on 0.2 mm) first, and the result says
         so under "rules_changed"; keep_rules=True leaves the rules exactly as they are (the person said not to touch them).
@@ -2832,6 +2840,8 @@ class Board(_Doc):
             e["fanout_lanes"] = fanout_lanes
         if escapes is not None:
             e["escapes"] = escapes
+        if plan is not None:
+            e["plan"] = plan
         if via_cost is not None:
             e["via_cost"] = via_cost
         if fence is not None:
@@ -2917,7 +2927,7 @@ class Board(_Doc):
             out["more_unrouted"] = len(un) - 25
         if d.get("explain"):
             out["explain"] = dict(d["explain"], longest_detours=d.get("longest_detours") or [])
-        for k in ("domains", "ground_vias", "groups", "fanout"):
+        for k in ("domains", "ground_vias", "groups", "fanout", "plan"):
             if d.get(k):
                 out[k] = d[k]
         return out

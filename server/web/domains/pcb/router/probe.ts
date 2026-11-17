@@ -21,6 +21,7 @@ export interface ProbeInput {
   routable?: boolean[];        // this connection's own layer set (a plan may confine a net to some layers)
   maxVias?: number;            // candidates with more vias than this are not considered
   extra?: (nodes: Node[]) => number;   // a plan's own cost on top of the trained one
+  block?: Uint8Array;          // per grid cell, 1 where this search may not go on any layer (a global plan's corridor, globalplan.ts)
 }
 /** Search steps taken by every probe so far: the router's measure of work done, the same on any machine (a clock is not). */
 export const work = { steps: 0 };
@@ -72,7 +73,7 @@ export function probe(inp: ProbeInput): ProbeResult | null {
   const buckets: number[][][] = [[], []];
   let steps = 0, meets = 0, best: ProbeResult | null = null, bestCorners = Infinity;
   const multi = RT.filter(Boolean).length > 1; const maxVias = inp.maxVias === undefined ? Infinity : inp.maxVias;
-  const viaLevel = Math.max(1, Math.round(W.viaLevel));
+  const viaLevel = Math.max(1, Math.round(W.viaLevel)); const blk = inp.block;
 
   const toNode = (li: number, l: number): Node => ({ ix: win.x0 + li % ww, iy: win.y0 + ((li / ww) | 0), l });
   const chain = (id: number, li: number): Node[] => {
@@ -103,12 +104,12 @@ export function probe(inp: ProbeInput): ProbeResult | null {
   const addRay = (side: number, l: number, d: number, sx: number, sy: number, startLi: number, parent: number, level: number): void => {
     const m = maps[l], sn = seen[side][l], ow = own[side][l], oo = own[1 - side][l], tm = side === 0 ? term[l] : null, bit = 1 << d;
     let x = sx + DX[d], y = sy + DY[d];
-    if (x < 0 || y < 0 || x >= ww || y >= wh || m[(y + win.y0) * G.W + x + win.x0] || (sn[y * ww + x] & bit)) { steps++; return; }
+    if (x < 0 || y < 0 || x >= ww || y >= wh || m[(y + win.y0) * G.W + x + win.x0] || (blk && blk[(y + win.y0) * G.W + x + win.x0]) || (sn[y * ww + x] & bit)) { steps++; return; }
     const id = rl.length; let len = 0, lastMeet = -2; const dx = DX[d], dy = DY[d], dl = dy * ww + dx, dg = dy * G.W + dx;
     rl.push(l); rd.push(d); rs.push(startLi); rn.push(0); rp.push(parent); rv.push(level); rside.push(side);
     let li = y * ww + x, gi = (y + win.y0) * G.W + x + win.x0;
     while (x >= 0 && y >= 0 && x < ww && y < wh) {
-      if (m[gi] || (sn[li] & bit)) break;
+      if (m[gi] || (blk && blk[gi]) || (sn[li] & bit)) break;
       sn[li] |= bit; if (ow[li] < 0) ow[li] = id;
       const o = oo[li]; if (o >= 0 && o !== lastMeet) { lastMeet = o; if (side === 0) meet(id, li, o); else meet(o, li, id); }
       if (tm && tm[li]) meetTerm(id, li);
