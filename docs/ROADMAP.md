@@ -40,9 +40,13 @@ once against an interface instead of once per file format.
   apply a change, diff two versions, merge three, and draw a thumbnail. KiCad's current code becomes the first
   implementation. Decide whether new domains keep this item-sync model or use a CRDT (Yjs or Automerge) for their
   own documents. Recommendation: keep one change protocol on the wire and let each domain's document type choose.
-- **Projects hold many kinds of documents.** A project already holds a schematic and a board. It should also be
-  able to hold parts, assemblies, simulations and toolpaths, with links between them (a board placed in an
-  enclosure, a part that a toolpath machines).
+- **Projects hold many kinds of documents.** A project holds a schematic and a board, and now part studios and
+  assemblies, as tabs (`server/web/platform/doctabs`, `server/web/domains/registry.ts`). Still to do: simulations
+  and toolpaths, and links between documents (a board placed in an enclosure, a part that a toolpath machines).
+- **JSON item documents.** New domains' documents are JSON files of items with stable ids, edited by item
+  changes over the existing op path and folded into the stored file by the server (`server/src/itemdoc.rs`,
+  `server/web/shared/itemdoc`). Storage, roles and live co-editing work for them; version history, compare,
+  branch merge, comments and MCP still read KiCad files only.
 - **Compute jobs.** Simulation, meshing, synthesis and toolpath generation are too heavy for a browser tab. Add
   a job queue on the server: a job takes a document version, runs a sandboxed worker and stores the result as a
   version-linked artifact, with progress shown to everyone in the project.
@@ -74,16 +78,21 @@ the cross-domain desktop app should be the browser app in Electron.
 This comes first because boards need enclosures, and the 3D viewer already ships an OpenCascade build
 (`occt-import-js`).
 
+The foundation is in: part studios as documents and tabs, the kernel in a worker, a feature registry with
+regeneration and caching, Sketch (no constraints) and Extrude, a 3D viewport with named-geometry picking, and
+item-level live co-editing. [server/web/domains/mechanical/CONTRACT.md](../server/web/domains/mechanical/CONTRACT.md)
+is the contract the rest is built against.
+
 1. View and measure STEP files in a project, with comments pinned to faces.
-2. Sketches with constraints, then extrude, revolve, fillet, chamfer, shell and pattern, with an editable history
-   tree. OpenCascade (WebAssembly) is the kernel and a 2D solver such as PlaneGCS handles sketches.
-3. Live collaboration on the feature tree: each feature is an item, and two people edit different features at
-   once.
+2. Sketches with constraints (a 2D solver such as PlaneGCS), then revolve, fillet, chamfer, shell and pattern.
+3. Live collaboration on the feature tree beyond item sync: presence, who has which feature open.
 4. STEP export, and STEP import as a base feature.
 
 **Done when** a team can model a simple enclosure together and export it as STEP.
 
 ## Phase 4: Assemblies (`domains/assembly`)
+
+The assembly document, its tab and its instance and mate format exist (a stub editor); nothing is placed yet.
 
 - Place parts and boards in one scene. A board comes from the electronics domain and follows its changes (move a
   connector on the board and the assembly updates).
@@ -150,7 +159,7 @@ This is last because it shares the least with the other domains and needs the mo
 
 | Decision | Options | Leaning |
 |---|---|---|
-| Sync model for new domains | Extend KiCad's item sync to all domains / CRDT per domain behind one protocol | One protocol, each document type chooses |
+| Sync model for new domains | Extend KiCad's item sync to all domains / CRDT per domain behind one protocol | Decided for mechanical and assembly: the item sync, with JSON items and last-writer-wins per path |
 | Native KiCad desktop app long term | Keep it / retire it for Electron | Keep it until the web editor reaches parity |
 | Where heavy compute runs | Hosted workers / the user's own machine (Electron) / both | Both, with the same job interface |
-| Geometry kernel | OpenCascade (WASM) / a newer kernel | OpenCascade: mature, LGPL, and already shipped |
+| Geometry kernel | OpenCascade (WASM) / a newer kernel | Decided: OpenCascade, through npm `replicad-opencascadejs` (LGPL-2.1) |
