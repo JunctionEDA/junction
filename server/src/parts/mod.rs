@@ -804,7 +804,8 @@ pub async fn get_model(State(state): State<AppState>, AuthUser(user): AuthUser, 
     remember_model(&state, &d).await;
     let model = d.conv.footprint.as_ref().and_then(|f| f.model.clone()).ok_or(AppError::NotFound)?;
     let bytes = model_bytes(&state, &model.uuid).await?;
-    let bytes = if truthy(&q.fit) { step_fit::fitted(&bytes, model.offset, model.rotate) } else { bytes };
+    // fit=<n>: the number only changes the address, so a browser does not keep a file lined up the old way
+    let bytes = if q.fit.as_deref().is_some_and(|v| !v.is_empty() && v != "0") { step_fit::fitted(&bytes, model.offset, model.rotate) } else { bytes };
     let name = easyeda::lib_name(if model.title.is_empty() { &id } else { &model.title });
     let xyz = |v: [f64; 3]| v.iter().map(|n| format!("{n}")).collect::<Vec<_>>().join(",");
     Ok((

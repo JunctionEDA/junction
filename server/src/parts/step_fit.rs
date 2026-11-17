@@ -85,6 +85,37 @@ fn triples(text: &str, key: &str) -> Vec<(std::ops::Range<usize>, [f64; 3])> {
     out
 }
 
+/// The points the box is taken over: the solid's vertices (VERTEX_POINT), which bound it as its faces do; a curve's
+/// control points and a placement's origin can lie well outside the part.  Every 3D point when the file names no vertex.
+fn corners(text: &str) -> Vec<[f64; 3]> {
+    let mut at: std::collections::HashMap<&str, [f64; 3]> = std::collections::HashMap::new();
+    for (range, p) in points(text) {
+        // the entity's own #id: "#123 = CARTESIAN_POINT ( ..." before the coordinate list
+        let head = &text[..range.start];
+        let Some(eq) = head.rfind("CARTESIAN_POINT").and_then(|i| head[..i].rfind('=')) else { continue };
+        let Some(hash) = head[..eq].rfind('#') else { continue };
+        at.insert(head[hash + 1..eq].trim(), p);
+    }
+    let mut out = Vec::new();
+    let key = "VERTEX_POINT";
+    let mut from = 0;
+    while let Some(i) = text[from..].find(key) {
+        let start = from + i + key.len();
+        from = start;
+        let Some(end) = text[start..].find(';').map(|e| start + e) else { break };
+        if let Some(h) = text[start..end].rfind('#') {
+            let id: String = text[start + h + 1..end].chars().take_while(|c| c.is_ascii_digit()).collect();
+            if let Some(p) = at.get(id.as_str()) {
+                out.push(*p);
+            }
+        }
+    }
+    if out.is_empty() {
+        out = points(text).into_iter().map(|(_, p)| p).collect();
+    }
+    out
+}
+
 /// KiCad's model rotation (3d-viewer: rotateZ(-rz) · rotateY(-ry) · rotateX(-rx)) applied to `v`; `inverse` undoes it.
 fn turn(v: [f64; 3], rot: [f64; 3], inverse: bool) -> [f64; 3] {
     let r = |a: f64| (-a).to_radians();
@@ -102,12 +133,12 @@ fn turn(v: [f64; 3], rot: [f64; 3], inverse: bool) -> [f64; 3] {
 /// The move T (millimetres) for a model with these points, offset and rotate; None when the file has no 3D point.
 pub fn fit_move(text: &str, offset: [f64; 3], rotate: [f64; 3]) -> Option<[f64; 3]> {
     let k = unit_mm(text);
-    let pts = points(text);
+    let pts = corners(text);
     if pts.is_empty() {
         return None;
     }
     let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
-    for (_, p) in &pts {
+    for p in &pts {
         for a in 0..3 {
             lo[a] = lo[a].min(p[a] * k);
             hi[a] = hi[a].max(p[a] * k);
@@ -186,7 +217,7 @@ pub fn fitted(bytes: &[u8], offset: [f64; 3], rotate: [f64; 3]) -> Vec<u8> {
 mod tests {
     use super::*;
 
-    const BOX: &str = "ISO-10303-21;\nDATA;\n#1=SI_UNIT(.MILLI.,.METRE.);\n#2=CARTESIAN_POINT('',(-7.75,-13.5,-3.87));\n#3=CARTESIAN_POINT('it''s',(7.75,0.5,7.64));\n#4=CARTESIAN_POINT('',(3.5,-0.25,-3.87));\n#5=CARTESIAN_POINT('',(1.,2.));\nENDSEC;\n";
+    const BOX: &str = "ISO-10303-21;\nDATA;\n#1=SI_UNIT(.MILLI.,.METRE.);\n#2=CARTESIAN_POINT('',(-7.75,-13.5,-3.87));\n#3=CARTESIAN_POINT('it''s',(7.75,0.5,7.64));\n#4=CARTESIAN_POINT('',(3.5,-0.25,-3.87));\n#5=CARTESIAN_POINT('',(1.,2.));\n#7=CARTESIAN_POINT('',(40.,40.,40.));\n#8=VERTEX_POINT('',#2);\n#9=VERTEX_POINT('',#3);\nENDSEC;\n";
 
     fn pts(text: &str) -> Vec<[f64; 3]> {
         points(text).into_iter().map(|(_, p)| p).collect()
@@ -197,7 +228,7 @@ mod tests {
         // LCSC C456018: EasyEDA's offset 0,-4.9,3.8; KiCad then adds the same offset
         let out = String::from_utf8(fitted(BOX.as_bytes(), [0.0, -4.9, 3.8], [0.0; 3])).unwrap();
         let p = pts(&out);
-        assert_eq!(p.len(), 3, "the 2D point is left alone");
+        assert_eq!(p.len(), 4, "the 2D point is left alone");
         let lead = [p[2][0], p[2][1] - 4.9, p[2][2] + 3.8];
         for (a, want) in [3.5, 1.35, -3.8].iter().enumerate() {
             assert!((lead[a] - want).abs() < 1e-4, "{a}: {lead:?}");
