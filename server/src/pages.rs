@@ -617,12 +617,16 @@ pub async fn project_page(
                          esc(&d.path), esc(&d.doc_type)))
         .collect();
 
-    let preview = if docs.iter().any(|d| d.doc_type == "kicad_pcb") {
+    // the board's picture, or for a project without one the picture of a part studio or an assembly (dockind.rs)
+    let has_board = docs.iter().any(|d| d.doc_type == "kicad_pcb");
+    let preview = if has_board || docs.iter().any(|d| !d.doc_type.starts_with("kicad_") && crate::dockind::of(&d.doc_type).thumbnail) {
+        let live = if has_board { format!(r#"<p><a class="btn secondary" href="/p/{id}/live">Watch live</a></p>"#) } else { String::new() };
         format!(
             r#"<p><img style="width:100%;background:var(--sheet);border:1px solid var(--line);border-radius:var(--r-2);padding:10px"
-                 alt="Board preview" onerror="this.parentNode.style.display='none'"
+                 alt="{alt}" onerror="this.parentNode.style.display='none'"
                  src="/api/projects/{id}/preview.svg"></p>
-<p><a class="btn secondary" href="/p/{id}/live">Watch live</a></p>"#
+{live}"#,
+            alt = if has_board { "Board preview" } else { "Project preview" },
         )
     } else {
         String::new()

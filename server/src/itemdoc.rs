@@ -54,7 +54,7 @@ fn apply_change(items: &mut Map<String, Value>, change: &Value) {
 }
 
 /// Set (or with `None` remove) the value at a path of object keys, making the objects on the way.
-fn set_path(root: &mut Value, path: &[&str], value: Option<Value>) {
+pub(crate) fn set_path(root: &mut Value, path: &[&str], value: Option<Value>) {
     let mut at = root;
     for key in &path[..path.len() - 1] {
         if !at.is_object() {
