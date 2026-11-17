@@ -18,6 +18,7 @@
 // the assembly lists them, when the solids add up (one per occurrence, or as many as each part's shape holds),
 // and "<assembly> n" otherwise.  Checked against an XCAF reader on six assemblies from the demos.
 import { defineFeature } from "../core/feature";
+import { importCache, importKey } from "../kernel/ops/exchange-cache";
 import { projectFileBytes, type ProjectFileRef } from "../kernel/ops/exchange-files";
 import { bodiesOf, readBrep, readStep, sniffFormat, type ReadResult } from "../kernel/ops/exchange-step";
 import { leafParts, rootName, stepStructure } from "../kernel/ops/exchange-stepinfo";
@@ -66,6 +67,25 @@ export default defineFeature<ImportParams>({
     const file = p.file;
     if (!file || !file.docId) throw ctx.fail("Choose a file to import.");
     const fileName = file.name || stem(file.path);
+    const fid = ctx.feature.id;
+    const namer = (tag: string) => (_face: unknown, index: number) => `${fid}:${tag}:f${index + 1}`;
+    // Read before in this browser: the bodies come back from their B-rep, and the file is not downloaded
+    // (kernel/ops/exchange-cache.ts).  Faces keep their order through BREP, so the names are the same.
+    const cache = importCache(), key = importKey(file, p.split);
+    if (cache) {
+      const hit = await cache.get(key).catch(() => null);
+      if (hit && hit.bodies.length) {
+        const shapes: Shape[] = [];
+        try {
+          for (const b of hit.bodies) { const s = (ctx.oc as never as { BRepToolsWrapper: { Read(text: string): Shape } }).BRepToolsWrapper.Read(b.brep); if (!s || s.IsNull()) throw new Error("empty"); shapes.push(s); }
+        } catch (e) { for (const s of shapes) { try { (s as never as { delete(): void }).delete(); } catch (x) { /* gone */ } } shapes.length = 0; }
+        if (shapes.length) {
+          shapes.forEach((shape, i) => ctx.addBody(shape, namer(`s${i + 1}`), { suffix: shapes.length > 1 ? `s${i + 1}` : undefined, name: hit.bodies[i].name }));
+          if (hit.sheets) ctx.warn(`${hit.sheets} of the imported bodies ${hit.sheets === 1 ? "is a surface" : "are surfaces"}, not ${hit.sheets === 1 ? "a solid" : "solids"}.`);
+          return;
+        }
+      }
+    }
     const bytes = await projectFileBytes(file);
     const format = file.format || sniffFormat(file.path, bytes.subarray(0, 64));
     if (format !== "step" && format !== "brep") throw ctx.fail(`“${fileName}” is not a STEP or BREP file.`);
@@ -76,7 +96,6 @@ export default defineFeature<ImportParams>({
     const loose: { delete(): void }[] = [read.shape as never, ...read.roots.map((r) => r.shape as never)];
     const keep = new Set<unknown>();
     try {
-      const fid = ctx.feature.id;
       let bodies: Shape[], perRoot: number[];
       if (p.split === "one") { bodies = [read.shape]; perRoot = read.roots.length ? read.roots.map((_r, i) => (i ? 0 : 1)) : [1]; }
       else if (read.roots.length > 1) {
@@ -90,8 +109,15 @@ export default defineFeature<ImportParams>({
       bodies.forEach((shape, i) => {
         const tag = `s${i + 1}`;
         keep.add(shape);
-        ctx.addBody(shape, (_face, index) => `${fid}:${tag}:f${index + 1}`, { suffix: bodies.length > 1 ? tag : undefined, name: names[i] || `${stem(fileName)} ${i + 1}` });
+        ctx.addBody(shape, namer(tag), { suffix: bodies.length > 1 ? tag : undefined, name: names[i] || `${stem(fileName)} ${i + 1}` });
       });
+      if (cache) {
+        // kept for the next time; a store that is full or refused is not an error
+        try {
+          const write = (ctx.oc as never as { BRepToolsWrapper: { Write(shape: Shape): string } }).BRepToolsWrapper;
+          await cache.set(key, { v: 1, bodies: bodies.map((shape, i) => ({ brep: write.Write(shape), name: names[i] || `${stem(fileName)} ${i + 1}` })), sheets }).catch(() => undefined);
+        } catch (e) { /* too large to write out: read the file again next time */ }
+      }
       if (sheets) ctx.warn(`${sheets} of the imported bodies ${sheets === 1 ? "is a surface" : "are surfaces"}, not ${sheets === 1 ? "a solid" : "solids"}.`);
     } finally {
       for (const o of loose) if (!keep.has(o)) { try { o.delete(); } catch (e) { /* shared */ } }

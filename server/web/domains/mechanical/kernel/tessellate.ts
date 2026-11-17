@@ -9,9 +9,38 @@ import type { Body } from "./types";
 
 /** Chord tolerance in millimetres and angular tolerance in radians. */
 export interface MeshQuality { linear: number; angular: number }
+/** The finest a body is ever meshed (what a small, simple part gets). */
 export const DEFAULT_QUALITY: MeshQuality = { linear: 0.05, angular: 0.3 };
 
-export function tessellate(k: Kernel, body: Body, q: MeshQuality = DEFAULT_QUALITY): BodyMesh {
+/**
+ * How finely to mesh this body for the screen.  A fixed tolerance is wrong at both ends: too coarse for a
+ * watch part, and on a large part with hundreds of small features (a 20 × 20 pattern of holes) it spends
+ * seconds on roundness nobody can see at the size the part is looked at.  So:
+ *
+ *   linear   half a thousandth of the body's diagonal, between 0.01 and 0.5 mm (a 100 mm part: 0.05 mm)
+ *   angular  0.3 rad; 0.5 on a body of more than 150 faces and 0.8 on one of more than 300.  The angle is what
+ *            decides how many segments a SMALL hole or fillet gets (the chord limit only bites on large radii),
+ *            and the mesher's time grows faster than the number of points on a face's boundaries.
+ *
+ * Measured on a 200 mm plate with 400 holes (static/tests/mechanical-patterns.test.js prints it): 4.0 s of
+ * meshing at the fixed 0.05 mm / 0.3 rad, 0.7 s with this.
+ */
+export function qualityFor(k: Kernel, body: Body): MeshQuality {
+  const oc = k.oc as any;
+  let diagonal = 0;
+  const box = new oc.Bnd_Box();
+  try {
+    oc.BRepBndLib.Add(body.shape, box, false);
+    if (!box.IsVoid()) diagonal = Math.hypot(box.GetXMax() - box.GetXMin(), box.GetYMax() - box.GetYMin(), box.GetZMax() - box.GetZMin());
+  } catch (e) { /* a shape with no box: the default below */ } finally { box.delete(); }
+  const faces = body.topo.faces.length;
+  return {
+    linear: diagonal > 0 ? Math.min(0.5, Math.max(0.01, diagonal * 0.0005)) : DEFAULT_QUALITY.linear,
+    angular: faces > 300 ? 0.8 : faces > 150 ? 0.5 : DEFAULT_QUALITY.angular,
+  };
+}
+
+export function tessellate(k: Kernel, body: Body, q: MeshQuality = qualityFor(k, body)): BodyMesh {
   const oc = k.oc as any;
   const heap = (): ArrayBuffer => oc.wasmMemory.buffer;
 

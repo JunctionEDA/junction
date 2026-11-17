@@ -97,6 +97,50 @@ test("STEP export → import: the same parts, volumes, face counts and names", a
   engine.dispose(); back.dispose();
 });
 
+test("an import read before comes back from its cached B-rep: no file read, the same bodies, names and face places", async () => {
+  const k = await boot(), engine = new K.RegenEngine(k, K.FEATURES);
+  await engine.regenerate(model(), 4);
+  const out = await call(k, engine, "export-step", { format: "step", schema: "AP242" });
+  files.set("cached.step", out.data);
+  const kept = new Map(); let gets = 0, sets = 0, reads = 0;
+  globalThis.__junctionImportCache = { get: async (key) => { gets++; return kept.get(key) || null; }, set: async (key, v) => { sets++; kept.set(key, JSON.parse(JSON.stringify(v))); } };
+  const before = globalThis.__junctionProjectFile;
+  globalThis.__junctionProjectFile = (f) => { reads++; return before(f); };
+  try {
+    // where each named face is: its centre, from the triangles the viewport would draw
+    const places = (r) => r.bodies.map((b) => b.mesh.faces.names.map((name, i) => {
+      const c = [0, 0, 0]; let n = 0;
+      for (let t = b.mesh.faces.start[i]; t < b.mesh.faces.start[i] + b.mesh.faces.count[i]; t++) { const v = b.mesh.indices[t]; for (let a = 0; a < 3; a++) c[a] += b.mesh.positions[v * 3 + a]; n++; }
+      return [name, ...c.map((x) => Math.round((x / n) * 1000) / 1000)];
+    }));
+    const first = new K.RegenEngine(k, K.FEATURES);
+    const t0 = Date.now();
+    const r1 = await quiet(() => first.regenerate([importOf("imp", "cached.step")], 1));
+    const cold = Date.now() - t0;
+    assert.deepEqual(r1.features.map((f) => f.status), ["ok"]);
+    assert.deepEqual([reads, sets, kept.size], [1, 1, 1], "the first read fills the cache");
+    const second = new K.RegenEngine(k, K.FEATURES);
+    const t1 = Date.now();
+    const r2 = await quiet(() => second.regenerate([importOf("imp", "cached.step")], 1));
+    const warm = Date.now() - t1;
+    assert.deepEqual(r2.features.map((f) => f.status), ["ok"], JSON.stringify(r2.features));
+    assert.equal(reads, 1, "the file is not read again");
+    assert.deepEqual(second.state.bodies.map((b) => [b.id, b.name]), first.state.bodies.map((b) => [b.id, b.name]));
+    assert.deepEqual(places(r2), places(r1), "every face has the name it had, where it was");
+    near(k.volume(second.state.bodies[0].shape), k.volume(first.state.bodies[0].shape), 1e-9);
+    // a different split is a different entry; a cache that holds rubbish is passed over
+    const one = new K.RegenEngine(k, K.FEATURES);
+    await quiet(() => one.regenerate([importOf("imp", "cached.step", { split: "one" })], 1));
+    assert.deepEqual([reads, kept.size], [2, 2]);
+    for (const key of kept.keys()) kept.set(key, { v: 1, bodies: [{ brep: "not a shape", name: "x" }], sheets: 0 });
+    const again = new K.RegenEngine(k, K.FEATURES);
+    const r4 = await quiet(() => again.regenerate([importOf("imp", "cached.step")], 1));
+    assert.deepEqual(r4.features.map((f) => f.status), ["ok"]); assert.equal(reads, 3); assert.equal(again.state.bodies.length, 2);
+    console.log(`      (a two-part STEP: ${cold} ms read from the file, ${warm} ms from the cache)`);
+    first.dispose(); second.dispose(); one.dispose(); again.dispose();
+  } finally { delete globalThis.__junctionImportCache; globalThis.__junctionProjectFile = before; engine.dispose(); }
+});
+
 test("an imported body is a real base feature: a sketch on its face cuts it, and the names survive a rebuild", async () => {
   const k = await boot(), engine = new K.RegenEngine(k, K.FEATURES);
   await engine.regenerate(model().slice(0, 2), 2);

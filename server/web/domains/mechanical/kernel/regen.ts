@@ -12,7 +12,7 @@ import { DEFAULT_PLANES, toWorld, type Frame, type GeomRef, type PlaneRef } from
 import { curvePoints, pointOf } from "../sketch/format";
 import { ShapeIndex, type Kernel } from "./occ";
 import type { BodyResult, DatumView, FeatureInput, FeatureReport, RegenResult, SketchView } from "./protocol";
-import { DEFAULT_QUALITY, tessellate, type MeshQuality } from "./tessellate";
+import { qualityFor, tessellate, type MeshQuality } from "./tessellate";
 import { FeatureError, type Body, type BodyTopo, type Datum, type EvalContext, type FaceNamer, type ModelState, type NamedShape, type Resolved, type Shape, type SketchGeometry } from "./types";
 
 interface Deletable { delete(): void }
@@ -47,7 +47,8 @@ export class RegenEngine {
   /** the model after the last regeneration, for services (measure, export) */
   state: ModelState = EMPTY;
 
-  constructor(readonly k: Kernel, defs: readonly FeatureDefinition[], private quality: MeshQuality = DEFAULT_QUALITY) {
+  /** `quality`: one tolerance for every body (a test, an export preview); by default each body gets what suits its size (tessellate.ts qualityFor). */
+  constructor(readonly k: Kernel, defs: readonly FeatureDefinition[], private quality?: MeshQuality) {
     for (const d of defs) this.defs.set(d.type, d);
   }
 
@@ -89,8 +90,8 @@ export class RegenEngine {
 
     const haveSet = new Set(have);
     const bodies: BodyResult[] = state.bodies.map((b) => {
-      const out: BodyResult = { id: b.id, name: b.name, createdBy: b.createdBy, rev: b.rev };
-      if (!haveSet.has(b.rev)) out.mesh = this.k.withScope(() => tessellate(this.k, b, this.quality));
+      const out: BodyResult = { id: b.id, name: b.name, createdBy: b.createdBy, rev: b.rev, ...(b.reference ? { reference: true as const } : {}) };
+      if (!haveSet.has(b.rev)) out.mesh = this.k.withScope(() => tessellate(this.k, b, this.quality || qualityFor(this.k, b)));
       return out;
     });
     const sketches = Object.values(state.sketches).map(sketchView);

@@ -3,7 +3,7 @@
 // (static/tests/mechanical-kernel.test.js) both start here.
 export { Kernel, ShapeIndex, type History, type Keep, type NamedResult } from "./occ";
 export { RegenEngine, buildTopo, frameOf, resolveRef, resultBuffers, sketchView } from "./regen";
-export { DEFAULT_QUALITY, tessellate, type MeshQuality } from "./tessellate";
+export { DEFAULT_QUALITY, qualityFor, tessellate, type MeshQuality } from "./tessellate";
 export { FeatureError } from "./types";
 export type * from "./types";
 export type * from "./protocol";
