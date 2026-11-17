@@ -205,7 +205,7 @@ test("a footprint's 3D models: KiCad's library by library and name, a vendor par
   const old = G.footprintModels(first(fp(`(model "\${KISYS3DMOD}/Crystal.3dshapes/Crystal_SMD_3225-4Pin_3.2x2.5mm.wrl" (at (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`)).node);
   assert.strictEqual(old[0].url, "/api/kicad-lib/model?lib=Crystal&name=Crystal_SMD_3225-4Pin_3.2x2.5mm&fallback=1", "an old .wrl path names the same library model");
   const v = G.footprintModels(first(fp(`(model "\${KICAD_COLLAB_3DMODELS}/Parts.3dshapes/TS-1187A.step" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`, `(property "LCSC" "C318884" (at 0 0) (layer "F.Fab") (hide yes))`)).node);
-  assert.strictEqual(v[0].source, "vendor"); assert.strictEqual(v[0].url, "/api/parts/model.step?vendor=lcsc&id=C318884&fit=3", "the server lines the file up for the entry");
+  assert.strictEqual(v[0].source, "vendor"); assert.strictEqual(v[0].url, "/api/parts/model.step?vendor=lcsc&id=C318884&fit=4", "the server lines the file up for the entry");
   assert.deepStrictEqual(v[0].offset, [0, 0, 0]);
   assert.strictEqual(G.footprintModels(first(fp(`(model "\${KICAD10_3DMODEL_DIR}/A.3dshapes/B.step" (hide yes))`)).node).length, 0, "a hidden model is not drawn");
   // a footprint that names no model is looked up under its own library name, unless the caller wants only what the file names
@@ -235,7 +235,7 @@ test("a model under another tool's path variable: the project's copy, else the p
   const wrl = `(model "\${EASYEDA2KICAD}/easyeda2kicad.3dshapes/USB-A-TH_4P-L14.5-W14.0-H7.6-S2.71.wrl" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`;
   const a = G.footprintModels(first(fp(wrl)).node);
   assert.strictEqual(a.length, 1); assert.strictEqual(a[0].source, "vendor");
-  assert.strictEqual(a[0].url, "/api/parts/model.step?vendor=lcsc&id=C456018&fit=3&placed=1", "easyeda2kicad's .wrl has the offset baked in: the vendor's own placement is used");
+  assert.strictEqual(a[0].url, "/api/parts/model.step?vendor=lcsc&id=C456018&fit=4&placed=1", "easyeda2kicad's .wrl has the offset baked in: the vendor's own placement is used");
   // a .step lined up by hand keeps its offset; the hidden .wrl beside it is not drawn
   const tuned = `(model "\${EASYEDA2KICAD}/easyeda2kicad.3dshapes/X.wrl" (hide yes)) (model "\${EASYEDA2KICAD}/easyeda2kicad.3dshapes/X.step" (offset (xyz 0 -1.5 1.7)) (scale (xyz 1 1 1)) (rotate (xyz -0 -0 -0)))`;
   const t = G.footprintModels(first(fp(tuned)).node);
