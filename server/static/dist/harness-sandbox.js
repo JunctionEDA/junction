@@ -1763,6 +1763,15 @@ def _ref_key(r: str):
     return (m.group(1), int(m.group(2) or 0), m.group(3))
 
 
+
+def _overlap_frac(a, b) -> float:
+    """How much of the smaller of two boxes [x0, y0, x1, y1] the other covers (0 to 1)."""
+    w = min(a[2], b[2]) - max(a[0], b[0]); h = min(a[3], b[3]) - max(a[1], b[1])
+    if w <= 0 or h <= 0:
+        return 0.0
+    small = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+    return (w * h) / small if small > 0 else 0.0
+
 class Board(_Doc):
     """The board."""
 
@@ -2157,6 +2166,11 @@ class Board(_Doc):
         pts = " ".join(f"(xy {_r(x)} {_r(y)})" for x, y in ((b[0], b[1]), (b[2], b[1]), (b[2], b[3]), (b[0], b[3])))
         net = self._net(net)
         self.flush()
+        for z in self.zones():      # a plane of another net already over this area of the layer: a second pour at its priority would fight it
+            if z.get("keepout") or z["net"] in ("", net) or layer not in z["layers"] or z["priority"] != 0 or not z.get("box"):
+                continue
+            if _overlap_frac(z["box"], [min(b[0], b[2]), min(b[1], b[3]), max(b[0], b[2]), max(b[1], b[3])]) > 0.5:
+                raise HarnessError(f'zone: {layer} already carries a {z["net"]} pour over most of this area; a {net} pour at the same priority would fight it for the copper. Give one a priority or pick another layer.')
         for z in self._call("get_items", kinds=["zone"]).get("items", []):      # one pour of a net on a layer over a box: asking again adds nothing
             sx = z.get("sexpr", "")
             if "keepout" in sx or f'"{layer}"' not in sx or not re.search(r'\\(net(_name)? "?' + re.escape(net) + r'"?\\)', sx):
@@ -2771,6 +2785,16 @@ class Board(_Doc):
             if ko:
                 z["keepout"] = dict(re.findall(r"\\((\\w+) (\\w+)\\)", ko.group(1)))
             out.append(z)
+        # two pours of different nets over one area of a layer at the same priority: only one fills there, and which is
+        # not obvious (an inner layer meant as a supply plane came out ground this way)
+        for i, a in enumerate(out):
+            for b in out[i + 1:]:
+                if a.get("keepout") or b.get("keepout") or a["net"] == b["net"] or a["priority"] != b["priority"] or not a.get("box") or not b.get("box"):
+                    continue
+                for l in set(a["layers"]) & set(b["layers"]):
+                    if _overlap_frac(a["box"], b["box"]) > 0.25:
+                        a.setdefault("conflicts", []).append(f'{b["net"]} on {l} at the same priority')
+                        b.setdefault("conflicts", []).append(f'{a["net"]} on {l} at the same priority')
         return out
 
     def _unroute_near(self, near, radius, only: list, keep: tuple) -> int:
@@ -6737,6 +6761,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         step("sync", self.sync)
     if outline:
         self.outline(*outline, radius=0 if place else 1.0)      # square while the placement may still pull it in; rounded after
+    global_plan = plan      # the router's global plan option; \`plan\` below is the board's layout plan
     plan = step("plan", lambda: self.plan(edge=edge)) or {"place": {"near": {}, "edges": {}}, "route": {}, "notes": []}
     out["notes"] = [n.split(". ")[0] for n in plan.get("notes", [])][:6]
     rec = dict((plan.get("stackup") or {}).get("recommended") or {})
@@ -6827,7 +6852,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                     if fo and fo.get("vias"):
                         out.setdefault("fanout", {})[part["ref"]] = {"vias": fo["vias"], "skipped": len(fo.get("skipped") or {})}
         auto_layers = False
-        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts, escapes=escapes, plan=plan))
+        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts, escapes=escapes, plan=global_plan))
         if got and got.get("rules_changed"):
             out["rules_changed"] = got["rules_changed"]
         if got:
@@ -6847,7 +6872,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                 out["routed"]["why_open"] = [u[:160] for u in got["unrouted"][:8]]
             left = got.get("left") or {}
             if left:      # one more pass at only what is open, as a person goes back over the last few
-                more = step("route again", lambda: self.route(nets=list(left), widths=r["widths"], kinds=r["kinds"], time_s=(time_s or 60) / 2, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes, plan=plan))
+                more = step("route again", lambda: self.route(nets=list(left), widths=r["widths"], kinds=r["kinds"], time_s=(time_s or 60) / 2, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes, plan=global_plan))
                 if more:
                     out["routed"]["vias"] = (out["routed"]["vias"] or 0) + (more.get("vias") or 0)
                     left = more.get("left") or {}
@@ -6865,7 +6890,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         if still:
             if any(n.split("/")[-1].upper().endswith("GND") for n in still):
                 step("ground pads", self.ground_pads)
-            step("route last", lambda: self.route(nets=list(still), widths=r["widths"], kinds=r["kinds"], time_s=30, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes, plan=plan))
+            step("route last", lambda: self.route(nets=list(still), widths=r["widths"], kinds=r["kinds"], time_s=30, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes, plan=global_plan))
             out["routed"]["left"] = step("unrouted", self.unrouted) or {}
         if (out.get("routed") or {}).get("left") and free_pins:     # pins boxed in by earlier tracks: free each and lay it first, never worse
             fp = step("free pins", lambda: self.free_pins(passes=1, keep_rules=True, layers=None if auto_layers else route_layers, time_s=min(60, max(20, (time_s or 60) / 3)), budget_s=max(120, 2 * (time_s or 60))))
