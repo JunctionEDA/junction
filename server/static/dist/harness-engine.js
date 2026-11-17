@@ -71256,7 +71256,7 @@ async function runChecks(input) {
   if (doc2.type !== "sch") {
     try {
       const R2 = W3.PcbAutoRouter;
-      if (R2 && R2.boardSquareCorners) for (const c of R2.boardSquareCorners(doc2, PCB3())) rows3.push({ severity: "error", code: "track_right_angle", message: `Track of net '${c.net}' turns ${c.angle}\xB0 on ${c.layer}: use 45\xB0 corners (antenna and RF nets are exempt)`, x: r33(c.x), y: r33(c.y), refs: [] });
+      if (R2 && R2.boardSquareCorners) for (const c of R2.boardSquareCorners(doc2, PCB3())) rows3.push({ severity: "error", code: "track_right_angle", message: `Track of net '${c.net}' has a ${c.angle}\xB0 corner on ${c.layer} (${c.angle < 90 ? "an acute hairpin" : "a square bend"}): bend at 135\xB0 (two 45\xB0 turns) instead (antenna and RF nets are exempt)`, x: r33(c.x), y: r33(c.y), refs: [] });
     } catch {
     }
   }
@@ -98776,7 +98776,7 @@ function moveItem2(doc2, it, x, y, rot3, side) {
     k.setPts(node, pts.map((p) => [p[0] + dx2, p[1] + dy2]));
     return modified(doc2, it, node);
   }
-  if (!k.kid(node, "at")) throw new ToolError(`a ${it.kind} has no single position; remove it and add it again where it should go`);
+  if (!k.kid(node, "at") && !k.kid(node, "transform")) throw new ToolError(`a ${it.kind} has no single position; remove it and add it again where it should go`);
   const [ox, oy, orot] = k.atOf(node);
   const dx = x - ox, dy = y - oy;
   if (doc2.type === "pcb" && it.kind === "footprint") {

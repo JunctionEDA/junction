@@ -100,7 +100,7 @@ function moveItem(doc: any, it: any, x: number, y: number, rot: number | undefin
     const dx = x - pts[0][0], dy = y - pts[0][1]; k.setPts(node, pts.map((p: number[]) => [p[0] + dx, p[1] + dy]));
     return modified(doc, it, node);
   }
-  if (!k.kid(node, "at")) throw new ToolError(`a ${it.kind} has no single position; remove it and add it again where it should go`);
+  if (!k.kid(node, "at") && !k.kid(node, "transform")) throw new ToolError(`a ${it.kind} has no single position; remove it and add it again where it should go`);
   const [ox, oy, orot] = k.atOf(node); const dx = x - ox, dy = y - oy;
   if (doc.type === "pcb" && it.kind === "footprint") {
     const P = PCB();

@@ -2464,7 +2464,9 @@ class Board(_Doc):
                 if not v:
                     continue
                 gap = math.hypot(x - float(v.group(1)), y - float(v.group(2))) - (float(z.group(1)) / 2 if z else 0.25)
-                layer = "via"; where = {"at": [float(v.group(1)), float(v.group(2))], "size": float(z.group(1)) if z else None}
+                ls = re.search(r'\\(layers ((?:"[^"]+"\\s*)+)\\)', sx)
+                layer = "via"; where = {"at": [float(v.group(1)), float(v.group(2))], "size": float(z.group(1)) if z else None,
+                                        "layers": re.findall(r'"([^"]+)"', ls.group(1)) if ls else ["F.Cu", "B.Cu"]}
             if gap <= radius:
                 out.append({"kind": it.get("kind"), "net": net, "layer": layer, "gap_mm": round(max(0.0, gap), 3), "id": it["id"], **where})
         return sorted(out, key=lambda r: r["gap_mm"])
@@ -2711,10 +2713,10 @@ class Board(_Doc):
                     continue
                 nm = re.search(r'\\(net (?:"((?:[^"\\\\]|\\\\.)*)"|(\\d+))\\)', s)      # a name, or a net number in older files
                 segs.append((it["id"], far, float(re.search(r"\\(width ([\\d.]+)\\)", s).group(1)), re.search(r'\\(layer "([^"]+)"\\)', s).group(1),
-                             (m.group(1) if m else None) or (nm.group(1) or nm.group(2) if nm else "")))
+                             (m.group(1) if m else None) or (nm.group(1) or nm.group(2) if nm else ""), re.sub(r'\\s*\\(uuid "[^"]*"\\)', "", s)))
             if len(segs) != 2 or segs[0][3] != segs[1][3] or segs[0][4] != segs[1][4]:
                 continue
-            (i1, f1, w1, layer, net), (i2, f2, w2, _, _) = segs
+            (i1, f1, w1, layer, net, sx1), (i2, f2, w2, _, _, sx2) = segs
             u, w = (f1[0] - x, f1[1] - y), (f2[0] - x, f2[1] - y)
             back = (u[0] * w[0] + u[1] * w[1]) / ((math.hypot(*u) * math.hypot(*w)) or 1) > 0.985   # the track doubles back on itself
             self._edit({"op": "remove", "id": i1}); self._edit({"op": "remove", "id": i2})
@@ -2729,6 +2731,15 @@ class Board(_Doc):
             else:
                 pts = [[f1[0], f1[1]], [x, y], [f2[0], f2[1]]]
             if math.hypot(f1[0] - f2[0], f1[1] - f2[1]) > 1e-4:      # out and back to the same point is a dead spur: nothing is laid
+                # the new path must keep every rule; when it does not (a straightened zigzag through a pad), the two
+                # segments go back as they were and the corner is left for a person
+                self.flush()
+                ok = True
+                with contextlib.suppress(Exception):
+                    ok = bool(self.fits(net, track=[tuple(q) for q in pts], layer=layer, width=min(w1, w2)).get("fits", True))
+                if not ok:
+                    self.add_item(sx1); self.add_item(sx2); self.flush()
+                    continue
                 self._edit({"op": "add_track", "net": net, "layer": layer, "points": pts, "width": min(w1, w2)})
             done += 1
         if done:
@@ -6721,6 +6732,8 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         if outline:
             kw["outline"] = tuple(outline)
         placed = step("place", lambda: self.autoplace(**kw))
+        if "place" in out["skipped"]:      # routing an old placement wastes the whole run: stop here and say why
+            raise HarnessError("design: placement failed, nothing was routed: " + out["skipped"]["place"])
         if placed:
             sc = placed.get("score") or {}
             out["placed"] = {"parts": placed.get("placed"), "clashes": len(sc.get("clashes") or []), "outside": sc.get("outside", 0)}
@@ -6967,7 +6980,7 @@ def _segs_dist(a, b, c, d) -> float:
 
 
 def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len: float | None = None, apply: bool = True,
-            rows: int | None = None, first: float | None = None, style: str = "ring", length: float = 1.5) -> dict:
+            rows: int | None = None, first: float | None = None, style: str = "ring", length: float = 1.5, spacing: float | None = None) -> dict:
     """Escape a fine-pitch chip (QFN or QFP, 0.5 mm pitch or finer) the way it is done by hand, before anything else is
     routed: every pin whose net goes far (another pad more than \`far\` mm away) gets a short stub straight out of its pad
     and a via in a staggered ring of two rows just outside the pin row, the vias in the order of the pins so no two stubs
@@ -6979,7 +6992,7 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
     from its own pin, the rows staggered (needs a via, a stub and the clearance to fit in one pin pitch: at 0.4 mm
     pitch with 0.15 mm clearance it does not, and every other pin is skipped); style="bus" is the owner's Ember
     escape: no vias, every far pin straight out \`first\` mm (0.3) past its pad, then the side's bus turns 45 degrees
-    towards where its nets go, lanes kept one pitch apart, and runs on \`length\` mm (1.5) for the router to carry on
+    towards where its nets go, lanes \`spacing\` mm apart (default track + clearance, the tightest the rules allow), and runs on \`length\` mm (1.5) for the router to carry on
     from (layer changes then happen out there, where the bus has room).
 
     nets: only these (default: every far-going signal net).  apply=False only plans.  Returns {"vias": n, "pins":
@@ -7040,7 +7053,9 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
             # destinations do) and runs on \`length\` mm, with no via near the chip; the bends of each half lie on the
             # line that keeps the lanes one pin pitch apart through the turn (the inside lane turns first, each lane
             # further out (sqrt(2) - 1) x its distance later), and the router carries on from the bus ends
-            T = math.sqrt(2) - 1
+            # lanes \`spacing\` apart after the turn (default: track width + clearance, the tightest the rules allow)
+            sp = max(spacing if spacing else tw + clr, tw + clr)
+            T = math.sqrt(2) * sp / pitch - 1
             obst = [(q[1], q[2], q[3], (max(q[4], q[5]) / 2 if len(q) > 5 and q[4] else 0.4)) for pp in parts.values() if pp["ref"] != ref for q in pp["pads"]]
             def toward(q):
                 pts = [(x, y) for x, y, rr in where.get(q[3], []) if rr != ref]
@@ -7063,7 +7078,8 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
                     continue
                 ss = [s_of(q[1], q[2]) for q in grp]; inner = max(ss) if sg > 0 else min(ss)
                 for q, si in zip(grp, ss):
-                    D = d0 + T * abs(inner - si)
+                    far_ = max(abs(inner - x_) for x_ in ss)
+                    D = d0 + T * abs(inner - si) - min(0.0, T * far_)      # the bend line; never inside the first ring
                     pt = lambda s_, d_: (cx + n[0] * d_ + tng[0] * s_, cy + n[1] * d_ + tng[1] * s_)   # noqa: E731
                     a, bnd = (q[1], q[2]), pt(si, D)
                     end = pt(si + sg * run / math.sqrt(2), D + run / math.sqrt(2))

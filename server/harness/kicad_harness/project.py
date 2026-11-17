@@ -2359,7 +2359,9 @@ class Board(_Doc):
                 if not v:
                     continue
                 gap = math.hypot(x - float(v.group(1)), y - float(v.group(2))) - (float(z.group(1)) / 2 if z else 0.25)
-                layer = "via"; where = {"at": [float(v.group(1)), float(v.group(2))], "size": float(z.group(1)) if z else None}
+                ls = re.search(r'\(layers ((?:"[^"]+"\s*)+)\)', sx)
+                layer = "via"; where = {"at": [float(v.group(1)), float(v.group(2))], "size": float(z.group(1)) if z else None,
+                                        "layers": re.findall(r'"([^"]+)"', ls.group(1)) if ls else ["F.Cu", "B.Cu"]}
             if gap <= radius:
                 out.append({"kind": it.get("kind"), "net": net, "layer": layer, "gap_mm": round(max(0.0, gap), 3), "id": it["id"], **where})
         return sorted(out, key=lambda r: r["gap_mm"])
@@ -2606,10 +2608,10 @@ class Board(_Doc):
                     continue
                 nm = re.search(r'\(net (?:"((?:[^"\\]|\\.)*)"|(\d+))\)', s)      # a name, or a net number in older files
                 segs.append((it["id"], far, float(re.search(r"\(width ([\d.]+)\)", s).group(1)), re.search(r'\(layer "([^"]+)"\)', s).group(1),
-                             (m.group(1) if m else None) or (nm.group(1) or nm.group(2) if nm else "")))
+                             (m.group(1) if m else None) or (nm.group(1) or nm.group(2) if nm else ""), re.sub(r'\s*\(uuid "[^"]*"\)', "", s)))
             if len(segs) != 2 or segs[0][3] != segs[1][3] or segs[0][4] != segs[1][4]:
                 continue
-            (i1, f1, w1, layer, net), (i2, f2, w2, _, _) = segs
+            (i1, f1, w1, layer, net, sx1), (i2, f2, w2, _, _, sx2) = segs
             u, w = (f1[0] - x, f1[1] - y), (f2[0] - x, f2[1] - y)
             back = (u[0] * w[0] + u[1] * w[1]) / ((math.hypot(*u) * math.hypot(*w)) or 1) > 0.985   # the track doubles back on itself
             self._edit({"op": "remove", "id": i1}); self._edit({"op": "remove", "id": i2})
@@ -2624,6 +2626,15 @@ class Board(_Doc):
             else:
                 pts = [[f1[0], f1[1]], [x, y], [f2[0], f2[1]]]
             if math.hypot(f1[0] - f2[0], f1[1] - f2[1]) > 1e-4:      # out and back to the same point is a dead spur: nothing is laid
+                # the new path must keep every rule; when it does not (a straightened zigzag through a pad), the two
+                # segments go back as they were and the corner is left for a person
+                self.flush()
+                ok = True
+                with contextlib.suppress(Exception):
+                    ok = bool(self.fits(net, track=[tuple(q) for q in pts], layer=layer, width=min(w1, w2)).get("fits", True))
+                if not ok:
+                    self.add_item(sx1); self.add_item(sx2); self.flush()
+                    continue
                 self._edit({"op": "add_track", "net": net, "layer": layer, "points": pts, "width": min(w1, w2)})
             done += 1
         if done:

@@ -321,7 +321,7 @@ export async function runChecks(input: { doc?: string }): Promise<unknown> {
   const refs = (ids: string[]) => Array.from(new Set((ids || []).map((id) => doc.items.get(id)).filter(Boolean).map((it: any) => it.ref).filter(Boolean)));
   const rows: { severity: string; code: string; message: string; x: number; y: number; refs: string[] }[] = markers.map((m) => ({ severity: m.severity, code: m.code, message: m.text, x: r3(m.x), y: r3(m.y), refs: refs(m.ids) as string[] }));
   if (doc.type !== "sch") {   // Junction's own rule on top of KiCad's DRC: no square track corners except on antenna and RF nets
-    try { const R = W.PcbAutoRouter; if (R && R.boardSquareCorners) for (const c of R.boardSquareCorners(doc, PCB())) rows.push({ severity: "error", code: "track_right_angle", message: `Track of net '${c.net}' turns ${c.angle}° on ${c.layer}: use 45° corners (antenna and RF nets are exempt)`, x: r3(c.x), y: r3(c.y), refs: [] }); } catch { /* router not loaded */ }
+    try { const R = W.PcbAutoRouter; if (R && R.boardSquareCorners) for (const c of R.boardSquareCorners(doc, PCB())) rows.push({ severity: "error", code: "track_right_angle", message: `Track of net '${c.net}' has a ${c.angle}° corner on ${c.layer} (${c.angle < 90 ? "an acute hairpin" : "a square bend"}): bend at 135° (two 45° turns) instead (antenna and RF nets are exempt)`, x: r3(c.x), y: r3(c.y), refs: [] }); } catch { /* router not loaded */ }
   }
   const errors = rows.filter((m) => m.severity === "error").length; const cap = 200;
   // counts by kind over every row, so a capped list never hides a kind

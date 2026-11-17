@@ -147,6 +147,8 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         if outline:
             kw["outline"] = tuple(outline)
         placed = step("place", lambda: self.autoplace(**kw))
+        if "place" in out["skipped"]:      # routing an old placement wastes the whole run: stop here and say why
+            raise HarnessError("design: placement failed, nothing was routed: " + out["skipped"]["place"])
         if placed:
             sc = placed.get("score") or {}
             out["placed"] = {"parts": placed.get("placed"), "clashes": len(sc.get("clashes") or []), "outside": sc.get("outside", 0)}
@@ -393,7 +395,7 @@ def _segs_dist(a, b, c, d) -> float:
 
 
 def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len: float | None = None, apply: bool = True,
-            rows: int | None = None, first: float | None = None, style: str = "ring", length: float = 1.5) -> dict:
+            rows: int | None = None, first: float | None = None, style: str = "ring", length: float = 1.5, spacing: float | None = None) -> dict:
     """Escape a fine-pitch chip (QFN or QFP, 0.5 mm pitch or finer) the way it is done by hand, before anything else is
     routed: every pin whose net goes far (another pad more than `far` mm away) gets a short stub straight out of its pad
     and a via in a staggered ring of two rows just outside the pin row, the vias in the order of the pins so no two stubs
@@ -405,7 +407,7 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
     from its own pin, the rows staggered (needs a via, a stub and the clearance to fit in one pin pitch: at 0.4 mm
     pitch with 0.15 mm clearance it does not, and every other pin is skipped); style="bus" is the owner's Ember
     escape: no vias, every far pin straight out `first` mm (0.3) past its pad, then the side's bus turns 45 degrees
-    towards where its nets go, lanes kept one pitch apart, and runs on `length` mm (1.5) for the router to carry on
+    towards where its nets go, lanes `spacing` mm apart (default track + clearance, the tightest the rules allow), and runs on `length` mm (1.5) for the router to carry on
     from (layer changes then happen out there, where the bus has room).
 
     nets: only these (default: every far-going signal net).  apply=False only plans.  Returns {"vias": n, "pins":
@@ -466,7 +468,9 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
             # destinations do) and runs on `length` mm, with no via near the chip; the bends of each half lie on the
             # line that keeps the lanes one pin pitch apart through the turn (the inside lane turns first, each lane
             # further out (sqrt(2) - 1) x its distance later), and the router carries on from the bus ends
-            T = math.sqrt(2) - 1
+            # lanes `spacing` apart after the turn (default: track width + clearance, the tightest the rules allow)
+            sp = max(spacing if spacing else tw + clr, tw + clr)
+            T = math.sqrt(2) * sp / pitch - 1
             obst = [(q[1], q[2], q[3], (max(q[4], q[5]) / 2 if len(q) > 5 and q[4] else 0.4)) for pp in parts.values() if pp["ref"] != ref for q in pp["pads"]]
             def toward(q):
                 pts = [(x, y) for x, y, rr in where.get(q[3], []) if rr != ref]
@@ -489,7 +493,8 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
                     continue
                 ss = [s_of(q[1], q[2]) for q in grp]; inner = max(ss) if sg > 0 else min(ss)
                 for q, si in zip(grp, ss):
-                    D = d0 + T * abs(inner - si)
+                    far_ = max(abs(inner - x_) for x_ in ss)
+                    D = d0 + T * abs(inner - si) - min(0.0, T * far_)      # the bend line; never inside the first ring
                     pt = lambda s_, d_: (cx + n[0] * d_ + tng[0] * s_, cy + n[1] * d_ + tng[1] * s_)   # noqa: E731
                     a, bnd = (q[1], q[2]), pt(si, D)
                     end = pt(si + sg * run / math.sqrt(2), D + run / math.sqrt(2))
