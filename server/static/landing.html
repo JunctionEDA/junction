@@ -305,6 +305,7 @@
   .win, .scene, .shot, .get-grid { border-radius: 2px; box-shadow: none; border-color: var(--line-2); }
   .js .win.rv, .js .win.rv.in { transform: none; }
   .close { padding-top: clamp(40px, 6vw, 72px) !important; }
+  #get { padding-bottom: clamp(40px, 5vw, 64px); }   /* the page ends at Get it now, straight into the footer */
   .close .lead { max-width: 60ch; }
   .close .acts { margin-top: 18px; }
   @media (max-width: 640px) { .sheet-n { display: none; } .sheet-h h2 { padding: 12px 12px 10px; } }
@@ -387,7 +388,7 @@
             <a class="btn primary" data-signin data-long href="/auth/github/login?next=/"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 .2a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.93-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.67.07-.52.28-.87.5-1.07-1.77-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.19c0 .21.15.46.55.38A8 8 0 0 0 8 .2z"/></svg><span>Sign in with GitHub</span></a>
             <a class="btn" href="#get">Get the desktop app</a>
           </div>
-          <p class="also">Or <a href="/gallery">browse public projects</a> without an account. Backwards compatible: it opens projects from any KiCad version from 6 to 10. Open source under GPL-3.0, <a href="https://github.com/notaroomba/junction">on GitHub</a>, for macOS, Windows, Linux and the browser.</p>
+          <p class="also">Or <a href="/gallery">browse public projects</a> without an account. Backwards compatible: it opens projects from any KiCad version from 6 to 10. Open source under GPL-3.0, <a href="https://github.com/JunctionEDA/junction">on GitHub</a>, for macOS, Windows, Linux and the browser.</p>
         </div>
       </div>
     </div>
@@ -534,7 +535,7 @@
           <li>Use <b>Share</b> to invite someone, then open the same sheet or board.</li>
         </ol>
         <div class="acts"><a class="btn primary" href="/download/macos">macOS</a><a class="btn" href="/download/windows">Windows</a><a class="btn" href="/download/linux">Linux</a></div>
-        <p class="os">Apple Silicon (macOS 15+) / Windows x64 / Linux x64 (Ubuntu 24.04) · <a href="https://github.com/notaroomba/junction/releases/latest">Release notes and all files</a></p>
+        <p class="os">Apple Silicon (macOS 15+) / Windows x64 / Linux x64 (Ubuntu 24.04) · <a href="https://github.com/JunctionEDA/junction/releases/latest">Release notes and all files</a></p>
       </div>
       <div>
         <h3>Browser</h3>
@@ -552,25 +553,27 @@
   </div>
 </section>
 
+<!-- The closing call repeated Get it's buttons; the person asked for it to go (2026-11-16).
 <section class="close" style="padding-top:0">
   <div class="wrap">
     <p class="lead rv">Sign in to start a project in the browser, or get the desktop app and open it from there.</p>
-    <div class="acts rv" style="--i:1">
+    <div class="acts rv" style="- -i:1">
       <a class="btn primary" data-signin data-long href="/auth/github/login?next=/"><span>Sign in with GitHub</span></a>
       <a class="btn" href="#get">Get the desktop app</a>
     </div>
   </div>
 </section>
+-->
 </main>
 
 <footer class="wrap">
   <div class="titleblock">
     <div class="t1"><small>Title</small><span class="big">{{MARK}}Junction</span></div>
-    <div><small>Source</small><a href="https://github.com/notaroomba/junction">GitHub</a></div>
-    <div><small>Releases</small><a href="https://github.com/notaroomba/junction/releases">Downloads</a></div>
+    <div><small>Source</small><a href="https://github.com/JunctionEDA/junction">GitHub</a></div>
+    <div><small>Releases</small><a href="https://github.com/JunctionEDA/junction/releases">Downloads</a></div>
     <div><small>License</small>Open source, GPL-3.0</div>
     <div class="t1"><small>Drawn by</small><a href="https://github.com/notaroomba">notaroomba</a></div>
-    <div><small>Guide</small><a href="https://github.com/notaroomba/junction/blob/master/COLLABORATION.md">Collaboration</a></div>
+    <div><small>Guide</small><a href="https://github.com/JunctionEDA/junction/blob/master/COLLABORATION.md">Collaboration</a></div>
     <div><small>Explore</small><a href="/gallery">Public projects</a></div>
     <div><small>Sheet</small>1 / 1</div>
     <div class="wide">An independent fork of <a href="https://www.kicad.org/">KiCad</a>, not affiliated with or endorsed by the KiCad project. Built on the work of the KiCad developers.</div>
