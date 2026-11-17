@@ -38,7 +38,7 @@ export function MateList({ assembly }: { assembly: AssemblyEditor }) {
     <>
       <section className="flex flex-col min-h-0 flex-[1_1_0] border-b border-line last:border-b-0" data-panel="mates">
         <Caption right={bad ? <span className="font-normal text-err text-xs" data-conflicts>{bad} with a problem</span> : null}>Mates</Caption>
-        <div className="flex-1 min-h-0 overflow-y-auto bg-paper py-1 text-sm" role="listbox" aria-label="Mates" onClick={(ev) => { if (ev.target === ev.currentTarget) assembly.select(null); }}>
+        <div className="flex-1 min-h-0 overflow-y-auto bg-paper py-1 text-sm outline-none" role="listbox" tabIndex={0} aria-label="Mates" onClick={(ev) => { if (ev.target === ev.currentTarget) assembly.select(null); }}>
           {s.mates.map((m) => {
             const def = mateDef(m.mateType), info = s.mateInfo[m.id], st = info?.state;
             const problem = st === "conflict" || st === "error";

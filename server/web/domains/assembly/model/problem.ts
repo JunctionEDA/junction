@@ -7,7 +7,7 @@ import type { GeomRef } from "../../mechanical/api";
 import type { MateDefinition } from "../core/mate";
 import type { ConnectorItem } from "../document/edits";
 import { transformOf as storedTransform, type InstanceItem, type MateConnector, type MateItem } from "../document/format";
-import { flipped, prepareA, prepareB, shifted, turned } from "../solver/frames";
+import { flipped, frameInWorld, prepareA, prepareB, shifted, turned } from "../solver/frames";
 import { poseOf, type Pose } from "../solver/math";
 import { solve } from "../solver/solver";
 import type { MateFrame, SolveOptions, SolveResult, SolverBody, SolverMate } from "../solver/types";
@@ -94,6 +94,20 @@ export function solveProblem(p: Problem, opts: SolveOptions = {}): Solved {
   const mates = new Map(p.info);
   for (const [id, r] of result.mates) mates.set(id, { state: r.status, message: r.message, values: r.values });
   return { result, mates };
+}
+
+/** Every active mate's values (mm, degrees) as the bodies stand in `poses`: what is stored with the placements. */
+export function measureMates(p: Problem, poses: ReadonlyMap<string, Pose>): Map<string, { [key: string]: number }> {
+  const out = new Map<string, { [key: string]: number }>();
+  for (const m of p.mates) {
+    const pa = poses.get(m.a.body), pb = poses.get(m.b.body), values = m.solve.values;
+    if (!pa || !pb || !values || !values.length) continue;
+    const a = frameInWorld(pa, m.a.frame), b = frameInWorld(pb, m.b.frame);
+    const v: { [key: string]: number } = {};
+    for (const x of values) v[x.key] = x.unit === "deg" ? (x.measure(a, b) * 180) / Math.PI : x.measure(a, b);
+    out.set(m.id, v);
+  }
+  return out;
 }
 
 /** A sensible `reach` for the solver: about the size of what is being assembled. */

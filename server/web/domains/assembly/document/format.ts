@@ -74,6 +74,13 @@ export interface MateItem extends Item {
   b: MateConnector;
   params: JsonObject;
   suppressed?: boolean;
+  /**
+   * The values the mate had when the placements were last stored (an angle in degrees, a distance in mm, by the
+   * mate type's value keys).  Written with the transforms.  When a part changes upstream and the stored
+   * placements no longer satisfy the mates, every reader re-solves towards these, so a lid left open at 45° is
+   * still at 45° and two people's windows agree.
+   */
+  values?: { [key: string]: number };
 }
 
 export interface AssemblyItem extends Item { type: "assembly"; units: "mm" | "in" }
