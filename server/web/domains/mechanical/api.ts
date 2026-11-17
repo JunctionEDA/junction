@@ -10,3 +10,5 @@ export type { BodyMesh, BodyResult, FeatureInput, FeatureReport, FeatureStatus, 
 export { DEFAULT_PLANES, add, cross, dot, isGeomRef, length, normalize, scale, sub, toPlane, toWorld, type DefaultPlaneId, type Frame, type GeomKind, type GeomRef, type PlaneRef, type Vec2, type Vec3 } from "./core/geometry";
 export type { ParamField } from "./core/feature";
 export { densities, materialOf, materialsOf, type Material } from "./document/mass-materials";
+// the board link (boardlink/): the link item a part studio drives a board with, as the board editor reads it
+export * from "./boardlink/api";
