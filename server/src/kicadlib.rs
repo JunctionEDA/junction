@@ -218,7 +218,21 @@ pub async fn item(AuthUser(_user): AuthUser, Query(q): Query<ItemQuery>) -> AppR
 }
 
 #[derive(Deserialize)]
-pub struct ModelQuery { lib: String, name: String, fallback: Option<String> }
+pub struct ModelQuery { lib: String, name: String, fallback: Option<String>, generate: Option<String> }
+
+/// A footprint file of KiCad's library (kept like `item`), for drawing its model.
+async fn footprint_text(lib: &str, name: &str) -> Option<String> {
+    let key = format!("item:footprint:{lib}:{name}");
+    if let Some(v) = cached(&key, ITEM_TTL) { return v.get("sexpr").and_then(|s| s.as_str()).map(str::to_string); }
+    let url = format!("{}/kicad/libraries/{}/-/raw/{}/{}{}/{}{}", base(), Kind::Footprint.repo(), enc(git_ref()), enc(lib), Kind::Footprint.dir_ext(), enc(name), Kind::Footprint.file_ext());
+    let resp = http().get(&url).send().await.ok()?;
+    if !resp.status().is_success() { return None; }
+    let text = resp.text().await.ok()?;
+    let head = text.trim_start();
+    if text.len() > MAX_ITEM_BYTES || !(head.starts_with("(footprint") || head.starts_with("(module")) { return None; }
+    remember(key, &json!({ "kind": "footprint", "library": lib, "name": name, "id": format!("{lib}:{name}"), "sexpr": text }));
+    Some(text)
+}
 
 const MAX_MODEL_BYTES: usize = 24 * 1024 * 1024;
 
@@ -317,7 +331,19 @@ pub async fn model(State(state): State<AppState>, AuthUser(_user): AuthUser, Que
     let reply = |bytes: Vec<u8>| ([(header::CONTENT_TYPE, "model/step"), (header::CACHE_CONTROL, "private, max-age=604800")], bytes).into_response();
     if let Some(bytes) = model_bytes(&state, lib, name).await? { return Ok(reply(bytes)); }
     if q.fallback.as_deref().map(|v| !v.is_empty() && v != "0").unwrap_or(false) {
-        if let Some((l, n, how)) = replacement(lib, name).await? {
+        let hit = replacement(lib, name).await?;
+        // another make of the same family ("similar") can sit wrong on these pads: a model drawn from the
+        // footprint itself (modelgen) comes first, when the footprint is KiCad's own
+        let close = hit.as_ref().map(|(_, _, how)| how != "similar").unwrap_or(false);
+        if !close && q.generate.as_deref() != Some("0") {
+            if let Some(text) = footprint_text(lib, name).await {
+                if let Some(mut resp) = crate::modelgen::service::for_library(&state, &text).await? {
+                    resp.headers_mut().insert("x-model-match", header::HeaderValue::from_static("generated"));
+                    return Ok(resp);
+                }
+            }
+        }
+        if let Some((l, n, how)) = hit {
             if let (Ok(l), Ok(n)) = (safe(&l), safe(&n)) {
                 if let Some(bytes) = model_bytes(&state, l, n).await? {
                     let mut resp = reply(bytes);

@@ -199,6 +199,12 @@ fn remember(key: &str, doc: &Doc) {
     }
 }
 
+/// A datasheet's page texts (fetched and kept as `read` does), for the model generator.
+pub(crate) async fn pages(state: &AppState, url: &str) -> AppResult<Doc> { Ok(load(state, url).await?.0) }
+
+/// Page numbers (1-based) best answering `query`, best first.
+pub(crate) fn rank_pages(doc: &[String], query: &str) -> Vec<usize> { rank(doc, query).into_iter().map(|(i, _)| i + 1).collect() }
+
 /// The document's pages and whether they came from the cache.
 async fn load(state: &AppState, url: &str) -> AppResult<(Doc, bool)> {
     // The fragment (#page=12) names a place in the document, not another document.

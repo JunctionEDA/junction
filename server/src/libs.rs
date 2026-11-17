@@ -115,41 +115,41 @@ type LibResult<T> = Result<T, LibError>;
 // ---------------------------------------------------------------- s-expressions (just enough to index a library)
 
 #[derive(Debug)]
-enum Sx {
+pub(crate) enum Sx {
     Atom(String),
     /// Children plus the byte span of the list in the source, parentheses included.
     List(Vec<Sx>, usize, usize),
 }
 
 impl Sx {
-    fn head(&self) -> &str {
+    pub(crate) fn head(&self) -> &str {
         match self {
             Sx::List(c, _, _) => c.first().and_then(Sx::atom).unwrap_or(""),
             Sx::Atom(_) => "",
         }
     }
-    fn atom(&self) -> Option<&str> {
+    pub(crate) fn atom(&self) -> Option<&str> {
         match self {
             Sx::Atom(s) => Some(s),
             Sx::List(..) => None,
         }
     }
-    fn children(&self) -> &[Sx] {
+    pub(crate) fn children(&self) -> &[Sx] {
         match self {
             Sx::List(c, _, _) => c,
             Sx::Atom(_) => &[],
         }
     }
-    fn arg(&self, i: usize) -> Option<&str> {
+    pub(crate) fn arg(&self, i: usize) -> Option<&str> {
         self.children().get(i).and_then(Sx::atom)
     }
-    fn lists<'a>(&'a self, head: &'a str) -> impl Iterator<Item = &'a Sx> + 'a {
+    pub(crate) fn lists<'a>(&'a self, head: &'a str) -> impl Iterator<Item = &'a Sx> + 'a {
         self.children().iter().filter(move |c| c.head() == head)
     }
-    fn list(&self, head: &str) -> Option<&Sx> {
+    pub(crate) fn list(&self, head: &str) -> Option<&Sx> {
         self.children().iter().find(|c| c.head() == head)
     }
-    fn span(&self) -> (usize, usize) {
+    pub(crate) fn span(&self) -> (usize, usize) {
         match self {
             Sx::List(_, a, b) => (*a, *b),
             Sx::Atom(_) => (0, 0),
@@ -158,7 +158,7 @@ impl Sx {
 }
 
 /// Parse every top-level list of `src`.  Lenient: an unterminated list ends at the end of input.
-fn parse_sexpr(src: &str) -> Vec<Sx> {
+pub(crate) fn parse_sexpr(src: &str) -> Vec<Sx> {
     let b = src.as_bytes();
     let mut i = 0usize;
     let mut stack: Vec<(Vec<Sx>, usize)> = Vec::new();

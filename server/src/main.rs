@@ -5,6 +5,7 @@ mod datasheet;
 mod demo;
 mod downloads;
 mod kicadlib;
+mod modelgen;
 mod auth;
 mod compact;
 mod doc_actor;
@@ -432,6 +433,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/kicad-lib/search", get(kicadlib::search))
         .route("/api/kicad-lib/model", get(kicadlib::model))
         .route("/api/kicad-lib/model-match", get(kicadlib::model_match))
+        // 3D models drawn from footprints when a part has none (src/modelgen)
+        .route("/api/models/generate", post(modelgen::service::generate))
+        .route("/api/footprints/generate", post(modelgen::service::generate_footprint))
         // vendor parts and saved part libraries (src/parts)
         .route("/static/dist/parts.js", get(pages::parts_js))
         .route("/static/dist/parts.js.map", get(pages::parts_js_map))

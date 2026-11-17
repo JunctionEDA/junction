@@ -1,7 +1,7 @@
 // viewer3d/bodies.ts — placeholder component bodies.  The web has no 3D models (.step / .wrl), so each
 // footprint gets a simple solid drawn from its courtyard (or, failing that, its fabrication outline),
 // extruded to a plausible height for the kind of part.  Pure geometry: no DOM, no three.js.
-import { ModelRef, footprintModels } from "./models";
+import { ModelRef, footprintModels, generatedModel } from "./models";
 import type { RGBA } from "./colors";
 import type { Pt } from "./outline";
 import { type Solid, localPads, partSolids } from "./parts";
@@ -23,6 +23,8 @@ export interface Body {
   solids?: Solid[];
   /** the footprint's own 3D models (models.ts) and where it stands; a model that has loaded is drawn instead of the stand-in */
   models: ModelRef[];
+  /** the model the server draws from the footprint when none of `models` can be had (modelgen) */
+  gen?: ModelRef | null;
   x: number; y: number; rot: number;
   /** (attr dnp) and (attr exclude_from_pos_files): the Appearance rows "Models marked DNP" / "Models not in POS File" */
   dnp?: boolean; notInPos?: boolean;
@@ -105,7 +107,7 @@ export function footprintBody(item: KItem, withDnp = false, boardFiles: SNode | 
   if (ext.pts.length < 2) { ext = layerExtent(item, back ? "B.Fab" : "F.Fab"); inset = 0; }
   if (ext.pts.length < 2) return null;
   const ref = item.ref || "";
-  const stand = { models: footprintModels(item.node, true, boardFiles), x: num(item.x), y: num(item.y), rot: num(item.rot), dnp: attrs.has("dnp"), notInPos: attrs.has("exclude_from_pos_files") };
+  const stand = { models: footprintModels(item.node, true, boardFiles), gen: generatedModel(item.node), x: num(item.x), y: num(item.y), rot: num(item.rot), dnp: attrs.has("dnp"), notInPos: attrs.has("exclude_from_pos_files") };
   const solids = modelSolids(item, cls === "smd" || (cls === "virtual" && !hasDrill(item)), back);
   if (ext.circle) {
     const r = Math.max(0.15, ext.circle.r - inset); const n = 32; const pts: Pt[] = [];
