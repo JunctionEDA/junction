@@ -98,6 +98,7 @@ function appEntries(me: AppState["me"], project: AppState["project"], inEditor: 
     const noCopy = r.canCopy ? null : "The owner does not let viewers download or copy this project";
     out.push("-",
       { id: "tab-peers", label: "Collaborators", icon: "" },
+      { id: "tab-chat", label: "Project Chat", icon: "" },
       { id: "clone", label: "Clone to My Account", icon: "duplicate", why: noCopy || (r.guest || !me ? "Sign in to make your own copy" : null) },
       { id: "archive", label: "Download Project (.zip)", icon: "library_archive", why: noCopy || (!me ? "Sign in to download the project" : null) },
       { id: "openInKicad", label: "Open in Junction...", icon: "icon_kicad" });
@@ -113,6 +114,19 @@ function appEntries(me: AppState["me"], project: AppState["project"], inEditor: 
     { id: "about", label: "About Junction", icon: "about" });
   if (me) out.push({ id: "signOut", label: "Log Out", icon: "" });
   return out;
+}
+/** The project chat's button, beside AI: toggles the Chat pane and counts what has come in since you last looked. */
+function ChatButton() {
+  const unread = useApp((s) => (s.chat ? s.chat.unread : 0));
+  const open = useApp((s) => !!s.panes.chat);
+  return (
+    <button type="button" className="chat-btn" id="chatBtn" aria-pressed={open} title={unread ? `Project chat: ${unread} new` : "Project chat: talk with everyone on this project"}
+      onClick={() => dispatch({ type: "showPane", pane: "chat", show: !open })}>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>
+      Chat
+      {unread ? <span className="badge" data-chat-unread="">{unread > 99 ? "99+" : unread}</span> : null}
+    </button>
+  );
 }
 function AppMenu({ inEditor }: { inEditor: boolean }) {
   const me = useApp((s) => s.me), project = useApp((s) => s.project), can = useApp((s) => s.can), guest = useApp((s) => s.guest);
@@ -447,6 +461,7 @@ export function MenuBar() {
         </>
       ) : null}
       <div className="spacer flex-1" />
+      {inEditor && project ? <ChatButton /> : null}
       {inEditor ? (
         <a id="aiConnect" className="ai-connect" href="/connect" target="_blank" rel="noopener" title="Design with AI: connect any AI model or service that speaks MCP (Claude, ChatGPT, Gemini, Copilot, Cursor, your own) to this project. It edits here live, with its own cursor.">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>

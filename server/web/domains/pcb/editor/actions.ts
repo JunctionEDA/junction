@@ -2,6 +2,7 @@
 import { leaveSheet } from "./schnets";
 import { setGroupCurrent, setToggle, setToggles, state, store } from "./appstore";
 import { commentOnAction, openThreadAction, openThreadOnDoc } from "./comments";
+import { chatAction, openChat, startCursorChat } from "./chat";
 import { saveVersionDialog, versionsCommand } from "./versions";
 import { enterSheet, navigateDocs, openDoc, openDocId, rootSchematic, selectItemAction, setActiveLayer, setGridPitch, setLayerVisible, switchEditor, updateGridStatus } from "./doc";
 import { loadHistory, restoreCheckpoint } from "./history";
@@ -165,6 +166,8 @@ export const HANDLERS: Record<string, ActionHandler> = {
   share: (a) => runAction("share", a), checkpoint: (a) => runAction("checkpoint", a), kicad: (a) => runAction("kicad", a),
   zoomin: () => zoomStep(true), zoomout: () => zoomStep(false), fit: () => fitView(), grid: () => runAction("grid"), snap: () => runAction("snap"), linemode: () => runAction("linemode"),
   "tab-appearance": () => showPane("appearance", true), "tab-props": () => showPane("props", true), "tab-peers": () => showPane("peers", true), "tab-comments": () => showPane("comments", true), "tab-history": () => showPane("history", true),
+  // the project chat (chat.ts): the menu bar's Chat button toggles its pane; Alt+M speaks at the pointer
+  showChat: () => showPane("chat"), "tab-chat": () => openChat(), cursorChat: () => { startCursorChat(); },
 };
 
 
@@ -199,6 +202,7 @@ export function dispatchAction(a: AppAction) {
       case "follow": followAction(a.cid); return;
       case "openThread": if (a.docId) openThreadOnDoc(a.docId, a.id); else openThreadAction(a.id); return;
       case "commentOn": commentOnAction(a); return;
+      case "chat": chatAction(a); return;
       case "compare": openCompare({ a: a.a, b: a.b, docId: a.docId }); return;
       case "selectItem": selectItemAction(a.id); return;
       case "restore": restoreCheckpoint(a.name); return;

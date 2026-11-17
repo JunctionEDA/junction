@@ -17,6 +17,7 @@ import { HistoryPane, HistoryButtons } from "./panes/History";
 import { AppearancePane } from "./panes/Appearance";
 import { CollaboratorsPane } from "./panes/Collaborators";
 import { CommentsPane } from "./panes/Comments";
+import { ChatPane } from "./panes/Chat";
 import { SearchPane } from "./panes/Search";
 import { NetNavigatorPane } from "./panes/NetNavigator";
 import { LibrariesPane } from "./panes/Libraries";
@@ -78,7 +79,7 @@ function dragSash(ev: RPointerEvent, move: (dx: number, dy: number) => void, don
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
 // How each pane shares the dock's height until it is resized (was `.kpane[data-pane=…] { flex: … }`).
-const PANE_FLEX: Record<string, string> = { libtree: "flex-[2_1_0]", props: "flex-[2_1_0]", filter: "flex-none", history: "flex-[1.4_1_0]", appearance: "flex-[3_1_0]" };
+const PANE_FLEX: Record<string, string> = { chat: "flex-[4_1_0]", libtree: "flex-[2_1_0]", props: "flex-[2_1_0]", filter: "flex-none", history: "flex-[1.4_1_0]", appearance: "flex-[3_1_0]" };
 const MIN_PANE = 46;
 
 /** The sash above a pane: drags the boundary with the visible pane before it. */
@@ -121,6 +122,7 @@ function Pane({ name, first, count, children, footer }: { name: string; first: b
 function PaneFor({ name, first }: { name: string; first: boolean }) {
   const peerN = useApp((s) => s.peers.list.length);
   const cmtN = useApp((s) => s.comments.filter((c) => !c.parentId && !c.resolved).length);
+  const chatN = useApp((s) => (s.chat ? s.chat.unread : 0));
   switch (name) {
     case "props": return <Pane name={name} first={first}><PropertiesPane /></Pane>;
     case "hier": return <Pane name={name} first={first}><HierarchyPane /></Pane>;
@@ -128,6 +130,7 @@ function PaneFor({ name, first }: { name: string; first: boolean }) {
     case "history": return <Pane name={name} first={first} footer={<HistoryButtons />}><HistoryPane /></Pane>;
     case "peers": return <Pane name={name} first={first} count={peerN}><CollaboratorsPane /></Pane>;
     case "comments": return <Pane name={name} first={first} count={cmtN}><CommentsPane /></Pane>;
+    case "chat": return <Pane name={name} first={first} count={chatN || undefined}><ChatPane /></Pane>;
     case "appearance": return <Pane name={name} first={first}><AppearancePane /></Pane>;
     case "search": return <Pane name={name} first={first}><SearchPane /></Pane>;
     case "netnav": return <Pane name={name} first={first}><NetNavigatorPane /></Pane>;

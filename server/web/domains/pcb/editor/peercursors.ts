@@ -87,6 +87,7 @@ export function clearPeerCursors() {
 }
 
 export interface PeerCursorSpec { cid: string; name: string; color: string; note: string; following: boolean; at: number[];
+  /** cursor chat: what they are saying, in a bubble of their colour (chat.ts) */ say?: string;
   /** the sender's clock when it sent this point, ms (0 when it does not say) */ ts: number }
 
 /** The pointers there should be now (mm), from the presence map. */
@@ -95,7 +96,7 @@ export function syncPeerCursors(specs: PeerCursorSpec[]) {
   const now = performance.now(), keep = new Set<string>();
   for (const sp of specs) {
     keep.add(sp.cid);
-    const key = `${sp.name}\u0000${sp.color}\u0000${sp.note}\u0000${sp.following ? 1 : 0}`;
+    const key = `${sp.name}\u0000${sp.color}\u0000${sp.note}\u0000${sp.say || ""}\u0000${sp.following ? 1 : 0}`;
     let c = cursors.get(sp.cid);
     if (!c) {
       const g = document.createElementNS(NS, "g") as SVGGElement;
@@ -208,6 +209,7 @@ function build(c: Cursor, sp: PeerCursorSpec) {
   let tw = 0; try { tw = label.getComputedTextLength(); } catch { /* not laid out */ }
   if (!(tw > 0)) tw = label.textContent.length * 0.6 * th;
   chip.setAttribute("width", String(tw + 2 * pad));
+  let below = cy + th + 2 * pad + 3;   // where the next chip under the name goes
   // what the assistant says about what it is pointing at: a second chip under its name, wrapped to a few lines
   if (sp.note) {
     const lines: string[] = []; let cur = "";
@@ -223,6 +225,23 @@ function build(c: Cursor, sp: PeerCursorSpec) {
     let nw = 0; try { nw = txt.getBBox().width; } catch { /* not laid out */ }
     if (!(nw > 0)) nw = Math.max(...lines.map((l) => l.length)) * 0.55 * th;
     box.setAttribute("width", String(nw + 2 * pad));
+    below = ny + nh + 3;
+  }
+  // cursor chat (chat.ts): what the person is typing, in a speech bubble of their own colour, as Figma draws it
+  if (sp.say) {
+    const lines: string[] = []; let cur = "";
+    for (const w of sp.say.split(/\s+/)) { if (cur && (cur + " " + w).length > 34) { lines.push(cur); cur = w; } else cur = cur ? cur + " " + w : w; }
+    if (cur) lines.push(cur);
+    const fs = th + 2, lh = fs * 1.3, bp = pad + 3, bh = lines.length * lh + 2 * bp;
+    const box = document.createElementNS(NS, "rect"), txt = document.createElementNS(NS, "text");
+    box.setAttribute("x", String(cx)); box.setAttribute("y", String(below)); box.setAttribute("height", String(bh)); box.setAttribute("rx", String(Math.min(12, bh / 2)));
+    box.setAttribute("fill", color);
+    txt.setAttribute("font-size", String(fs)); txt.setAttribute("font-family", "system-ui, sans-serif"); txt.setAttribute("fill", brightness(color) > 0.5 ? "#000" : "#fff");
+    lines.slice(0, 6).forEach((ln, i) => { const ts = document.createElementNS(NS, "tspan"); ts.setAttribute("x", String(cx + bp)); ts.setAttribute("y", String(below + bp + lh * i + lh / 2)); ts.setAttribute("dominant-baseline", "central"); ts.textContent = ln; txt.appendChild(ts); });
+    const say = document.createElementNS(NS, "g"); say.setAttribute("class", "peer-say"); say.appendChild(box); say.appendChild(txt); g.appendChild(say);
+    let sw = 0; try { sw = txt.getBBox().width; } catch { /* not laid out */ }
+    if (!(sw > 0)) sw = Math.max(...lines.map((l) => l.length)) * 0.55 * fs;
+    box.setAttribute("width", String(sw + 2 * bp));
   }
   tag.addEventListener("click", (ev) => { ev.stopPropagation(); onFollow(sp.cid, sp.name); });
 }

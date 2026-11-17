@@ -150,6 +150,8 @@
 /* Design review: the Compare window and the comment threads (web/platform/review/review.css).  Unlayered on purpose:
    it resizes theme.css's dialog frame (.kd-dialog), and theme.css is unlayered, so a layered rule would lose to it. */
 @import "../../platform/review/review.css";
+/* The project chat: its pane, the menu bar button and the cursor-chat bubble (chat.css). */
+@import "./chat.css";
 
 @tailwind utilities source(none);
 

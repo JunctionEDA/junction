@@ -311,21 +311,21 @@ export const LINKS: Record<string, string> = {
 
 /** Docked pane ids and the KiCad "show …" action that toggles each. */
 export const PANE_ACTION: Record<string, string> = { libtree: "showLibraryTree", props: "showProperties", hier: "showHierarchy", filter: "showSelectionFilter", history: "showGitCommitPane", peers: "showPeers", comments: "showComments", appearance: "showLayersManager", search: "showSearch", netnav: "showNetNavigator", netinsp: "showNetInspector" };
-export const PANE_TITLES: Record<string, string> = { libtree: "Libraries", props: "Properties", hier: "Schematic Hierarchy", filter: "Selection Filter", history: "History", peers: "Collaborators", comments: "Comments", appearance: "Appearance", search: "Search", netnav: "Net Navigator", netinsp: "Net Inspector" };
+export const PANE_TITLES: Record<string, string> = { libtree: "Libraries", props: "Properties", hier: "Schematic Hierarchy", filter: "Selection Filter", history: "History", peers: "Collaborators", comments: "Comments", chat: "Chat", appearance: "Appearance", search: "Search", netnav: "Net Navigator", netinsp: "Net Inspector" };
 /**
  * Dock layout per editor, in KiCad's AUI order.  eeschema's left column (Layer 3) stacks Net Navigator (Position 0),
  * Schematic Hierarchy (1), Properties (2) and the Selection Filter (4) (eeschema_settings.cpp:64-125,
  * sch_edit_frame.cpp:305-315); pcbnew's Properties fills its left column alone (pcb_edit_frame.cpp:394-399) and
  * Appearance with the filter sits right.  The Version Control pane (the web's History) docks right on Layer 5 and
  * starts hidden in both (sch_edit_frame.cpp:347-360).  pcbnew docks the Net Inspector at the bottom, added before
- * Search (pcb_edit_frame.cpp:406-420), hidden until shown (m_ShowNetInspector).  Collaborators and Comments are the web's own.
+ * Search (pcb_edit_frame.cpp:406-420), hidden until shown (m_ShowNetInspector).  Collaborators, Comments and Chat are the web's own (Chat docks right, under History: a conversation reads down the side of the canvas, as in Figma).
  */
 export const DOCKS: Record<Editor, { left: string[]; right: string[]; bottom?: string[] }> = {
-  sch: { left: ["netnav", "hier", "props", "filter", "peers", "comments", "appearance"], right: ["history"], bottom: ["search"] },
-  pcb: { left: ["props", "peers", "comments"], right: ["appearance", "filter", "history"], bottom: ["netinsp", "search"] },
+  sch: { left: ["netnav", "hier", "props", "filter", "peers", "comments", "appearance"], right: ["history", "chat"], bottom: ["search"] },
+  pcb: { left: ["props", "peers", "comments"], right: ["appearance", "filter", "history", "chat"], bottom: ["netinsp", "search"] },
 };
 /** Panes hidden until the user opens them (per editor). */
-export const PANE_DEFAULT_HIDDEN: Record<Editor, string[]> = { sch: ["peers", "comments", "appearance", "search", "netnav", "history"], pcb: ["peers", "comments", "search", "history", "netinsp"] };
+export const PANE_DEFAULT_HIDDEN: Record<Editor, string[]> = { sch: ["peers", "comments", "chat", "appearance", "search", "netnav", "history"], pcb: ["peers", "comments", "chat", "search", "history", "netinsp"] };
 
 export const FILTERS: Record<Editor, [string, string][]> = {
   sch: [["symbols", "Symbols"], ["pins", "Pins"], ["wires", "Wires"], ["labels", "Labels"], ["graphics", "Graphics"], ["images", "Images"], ["text", "Text"], ["other", "Other items"], ["ruleAreas", "Rule Areas"]],

@@ -43,6 +43,22 @@ export interface Comment {
   id: number; docId?: string; parentId?: number | null; body: string; authorId?: number; authorLogin: string; createdAt: string; editedAt?: string | null;
   resolved?: boolean; x: number; y: number; anchor?: CommentAnchor | null;
 }
+/** Where a chat message points: a part or other item, a net, or a spot, on one of the project's documents (nm). */
+export interface ChatLink { docId: string; path?: string; kind: "item" | "net" | "spot"; id: string; label: string; x: number; y: number }
+/** One message of the project chat (server/src/chat.rs). */
+export interface ChatMessage {
+  id: number; projectId: string; authorId: number; authorLogin: string; authorName?: string | null; authorAvatar?: string | null;
+  body: string; link?: ChatLink | null; createdAt: string; editedAt?: string | null;
+  /** still on its way to the server (shown greyed until it arrives) */
+  pending?: boolean;
+}
+/** The project chat: its messages (oldest first), where this person left off, and what the composer will link. */
+export interface ChatState {
+  projectId: string | null; messages: ChatMessage[]; loading: boolean; more: boolean; error: string | null;
+  lastReadId: number; unread: number; canWrite: boolean;
+  /** the link the composer attaches to the next message (the selection, or the view's centre) */
+  link: ChatLink | null;
+}
 /** The threads of another document of the project (the Comments pane lists them under the open document's). */
 export interface DocComments { docId: string; path: string; comments: Comment[] }
 
@@ -218,6 +234,8 @@ export interface AppState {
   /** the comments on the project's other documents, and the thread whose card is open on the canvas */
   otherComments?: DocComments[];
   openThread?: number | null;
+  /** the project chat (web/domains/pcb/editor/chat.ts) */
+  chat?: ChatState;
   history: { groups: CheckpointGroup[]; loading: boolean; error: string | null };
   versions: VersionsState;
   tool: { current: string; appTools: string[]; moduleTools: ModuleTool[]; moduleActions: ModuleAction[]; handled: string[] };
@@ -265,6 +283,14 @@ export type AppAction =
   | { type: "openThread"; id: number; docId?: string }
   /** start a comment thread on an item of the open document, or at a place (mm) */
   | { type: "commentOn"; itemId?: string; at?: [number, number]; body?: string }
+  /** the project chat: send a message (with the composer's link), edit or delete one, go to a link, mark read, attach a link */
+  | { type: "chat"; cmd: "send"; body: string }
+  | { type: "chat"; cmd: "edit"; id: number; body: string }
+  | { type: "chat"; cmd: "delete"; id: number }
+  | { type: "chat"; cmd: "goto"; link: ChatLink }
+  | { type: "chat"; cmd: "read" }
+  | { type: "chat"; cmd: "older" }
+  | { type: "chat"; cmd: "attach"; on: boolean }
   /** open the Compare window (web/platform/review); a and b are VersionRefs, see web/platform/review/sources.ts */
   | { type: "compare"; a?: unknown; b?: unknown; docId?: string }
   | { type: "selectItem"; id: string }

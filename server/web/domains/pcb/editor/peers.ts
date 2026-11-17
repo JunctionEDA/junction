@@ -81,6 +81,7 @@ export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | nu
   st.ts = Math.round(performance.now() * 10) / 10;
   const vp = visibleRectNm(); if (vp) st.viewport = vp;
   if (ghostSegs) st.ghost = ghostSegs;
+  if (E.chatSay) st.say = E.chatSay as string;   // cursor chat (chat.ts)
   // What the peer has selected (desktop rebuildOverlay pairs selection[i] with boxes[i] and at[i]; boxes are
   // BOX2I(origin, size) in IU).  Everything this client has picked: the multi-selection, the single symbol /
   // footprint (E.selected), and the schematic or board module's own pick (wires, labels, tracks, vias, graphics).
