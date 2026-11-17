@@ -175,6 +175,16 @@ try {
   const stored = await (await fetch(`${BASE}/api/projects/${pid}/archive`, { headers: { authorization: `Bearer ${token}`, cookie: `kc_session=${token}` } })).arrayBuffer().catch(() => null);
   check('the project archive can be downloaded with the part studio folded in', !!stored && Buffer.from(stored).includes('Bracket.jpart'), stored ? `${stored.byteLength} bytes` : 'no archive');
 
+  // ---------------------------------------------------------------- the electronics tools beside them, each undoing its own
+  const sch = docs.find((d) => d.type === 'schematic').path;
+  const wire = await tool('apply_changes', { project, document: sch, title: 'A wire', edits: [{ op: 'add_wire', points: [[100.33, 100.33], [110.49, 100.33]] }] });
+  check('an electronics change is applied by the same host', !wire.error && typeof wire.data.change_id === 'number', wire.error || '');
+  const renamed = await tool('cad_edit_features', { project, edits: [{ op: 'rename', feature: 'Base', name: 'Plate' }] });
+  const newest = await tool('undo_changes', { project });
+  check('undo_changes without an id takes back the newest change, the part studio\'s, by its own domain', !newest.error && newest.data.change_id === renamed.data.change_id && newest.data.features[1].name === 'Base', newest.error || JSON.stringify(newest.data).slice(0, 200));
+  const unwire = await tool('undo_changes', { project, change_id: wire.data.change_id });
+  check('…and the schematic\'s change is undone by the electronics code', !unwire.error && unwire.data.undone === 'A wire' && unwire.data.document === sch, unwire.error || JSON.stringify(unwire.data).slice(0, 200));
+
   // ---------------------------------------------------------------- roles
   sql(`INSERT INTO permissions (project_id, user_id, role, created_by) VALUES ('${pid}', ${eveId}, 'viewer', ${adaId})`);
   const eveRead = await tool('cad_get_features', { project: pid }, eveToken);

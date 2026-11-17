@@ -31,7 +31,8 @@ function kernel(): Promise<Kernel> {
   if (!kernelLoading) {
     kernelLoading = (async () => {
       const fs = require("node:fs"), path = require("node:path");
-      const dirs = [process.env.KC_OCC_WASM, process.env.KC_PYODIDE_DIR && path.join(process.env.KC_PYODIDE_DIR, "occ-kernel.wasm")].filter(Boolean) as string[];
+      // beside the Python runtime the server serves (scripts/build-python.mjs puts it there), or where KC_OCC_WASM says
+      const dirs = [process.env.KC_OCC_WASM, process.env.KC_PYODIDE_DIR && path.join(process.env.KC_PYODIDE_DIR, "occ-kernel.wasm"), path.join(process.cwd(), "static", "dist", "pyodide", "occ-kernel.wasm")].filter(Boolean) as string[];
       const file = dirs.find((f) => fs.existsSync(f));
       if (!file) throw new McpToolError("The modelling kernel is not installed on this server (occ-kernel.wasm is missing from its runtime folder), so part studios cannot be rebuilt here. The feature list can still be read with cad_get_features.");
       // in Node the kernel's loader reads the file itself, from the path it is told

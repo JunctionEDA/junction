@@ -51,9 +51,10 @@ page draws them. The page never touches the kernel and the worker never touches 
 | `domains/mechanical/api.ts` | What other domains may import from this one. |
 | `domains/assembly/` | The `.jasm` format, the mate registry (`mates/`, **one file per mate type**), the editor stub. |
 
-Server: `server/src/itemdoc.rs` (the document types and the fold), two lines each in `http.rs` (`doc_type_for`,
-`allowed_file`, `doc_is_movable`), `compact.rs`, `pcm.rs` (serves the `.wasm`), `pages.rs` and `main.rs` (serve
-the bundles).
+Server: `server/src/itemdoc.rs` (the document types and the fold), `dockind.rs` (how each document type behaves
+for history, merging, folding and thumbnails), `itemmerge.rs` (the three-way merge), two lines each in `http.rs`
+(`doc_type_for`, `allowed_file`, `doc_is_movable`), `compact.rs`, `pcm.rs` (serves the `.wasm`), `pages.rs` and
+`main.rs` (serve the bundles).
 
 ## Adding things without colliding
 
@@ -174,17 +175,57 @@ What the platform gives these documents today, and what it does not:
 | Live co-editing, item by item, property by property | the existing `/ws` op path; verified with two browsers |
 | Presence transport | `session.setPresence(state)` / `onPeers`; **nothing draws it yet** |
 | The stored file kept current | `compact.rs` folds the ops into a snapshot on the server (`itemdoc.rs`), with no client involved |
-| Project archive, clone, GitHub sync | they read the folded file like any other |
+| Project archive, clone, GitHub sync | they read the folded file like any other; a pull with changes on both sides merges item by item (`itemmerge.rs`) |
 | Create, rename, delete from the tabs | `POST /api/projects/{id}/docs`, `PATCH` / `DELETE /api/docs/{id}` |
+| Version history, restore, looking at an earlier version | the History drawer (`platform/history`, the part studio's is `mechanical/history`); see "Platform features" below |
+| Compare two versions | the Compare window with the domain's renderer (`platform/review/renderers.ts`, `mechanical/compare`) |
+| Branches and merging, conflicts put to a choice | `versions.rs` with `itemmerge.rs`; the drawer's merge dialog |
+| Thumbnails | `platform/documents/thumbnail.ts`, `mechanical/thumbnail.ts` (part studios; an assembly draws nothing yet) |
+| MCP tools for an AI assistant | `mechanical/mcp` (part studios); see "Platform features" below |
 
 | Does not work yet | |
 |---|---|
-| Version history timeline, named versions restore, compare | the server stores what they need (snapshot + ops at any seq) but the UI (`versions.ts`, `platform/review`) reads KiCad files only |
-| Branch merge | `merge.rs` is s-expression only: a part studio on a branch can be replaced, not merged |
 | Comments pinned to geometry | the comments API is per document and would work; no UI in the part studio |
-| MCP tools | `mcp.rs` lists and reads KiCad documents only |
 | Tabs appearing for others without a reload | the tab list is fetched on open and when the window regains focus; there is no push |
-| Thumbnails | none for these kinds |
+| An earlier version of an assembly on screen, comparing assemblies, MCP tools for assemblies | the assembly editor has no read-only view of another state and registers no compare renderer; the server side is the same as for a part studio |
+
+### Platform features, and how another kind of document gets them
+
+The server asks `server/src/dockind.rs` how a document type behaves (journalled as ops or stored whole, who
+folds its journal, how a branch merges, how two files merge, whether its picture can stand for the project). A
+new JSON item document kind is one line there and gets history, branches, merging and GitHub sync with it.
+
+- **History** (`platform/history/`): `api.ts` is the server's versions, timeline, branches and merge as plain
+  calls; `HistoryDrawer.tsx` is the drawer, handed a `HistoryHost` (`viewing`, `view(at | null)`, `compare?`,
+  `canEdit`, `navigate`, `toast`). The part studio's host is `mechanical/history/index.tsx`: `view` fetches the
+  document at that point (`itemDocAt`) and calls `studio.showPast(doc, label)`; `showPast(null)` brings the live
+  document back. While a past document is on screen `studio.getState().past` is set, `canEdit` is false and
+  `commit` refuses. The toolbar button is `tools/history.ts`. `platform/history/request.ts` lets another editor
+  (the electronics History pane) ask for a point to be shown.
+- **Merging** (`server/src/itemmerge.rs`): each side's work since the two last met becomes one net effect per
+  item (added or replaced whole, removed, or paths set or deleted). Different items never conflict, nor do
+  different paths of one item; the same path set to the same value is not a conflict; the same path set
+  differently, or a path inside a path the other side set, conflicts at the shorter path; removed against
+  changed conflicts on the item. `POST /api/projects/{branch}/merge` reports the conflicts (`dryRun`) and takes
+  `choices: { <conflict id>: "incoming" | "current" }`. So, again: keep data that two people may change apart in
+  maps keyed by id, not in arrays.
+- **Compare** (`platform/review/renderers.ts`): `registerCompareRenderer({ docTypes, mount(ctx) })` from the
+  domain's bundle; `ctx` has an empty element, the two files as text (`ctx.a.text`, `ctx.b.text`) and
+  `setSummary`. The part studio's (`mechanical/compare/`) is `diff.ts` (features matched by id, parameters named
+  by the registry's labels) and the worker service `compare-versions` (both versions built by engines of their
+  own, compared by booleans: common, added, removed, each tessellated).
+- **Thumbnails** (`platform/documents/thumbnail.ts`): `new ThumbnailPusher(docId, () => canvas | null)`, then
+  `dirty()` when the document changes. `mechanical/thumbnail.ts` draws the bodies into a render target on the
+  viewport's own WebGL context.
+- **AI tools** (`platform/mcp/host.ts`): a domain's `mcp/host.ts` exports an `McpDomainTools` table and
+  `mcp/tools.json` lists the tools; add the table to `domains/mcp-tools.ts` and the JSON to `DOMAIN_TOOLS` in
+  `server/src/mcp.rs`. They run in the same Node host as the electronics tools (`npm run build:mcp`). The part
+  studio's are `cad_feature_types` (from the feature registry), `cad_get_features`, `cad_get_bodies`,
+  `cad_edit_features`, `cad_render_view`, `cad_create_part_studio`; edits are planned and validated in
+  `mcp/model.ts` against each feature's `schema`, so a new feature type is editable by an assistant with no
+  further work as long as its parameters are described by its schema.
+- **Interface state of a tool or panel**: `studio.setUi({ myKey: value })` keeps it in `getState().ui` and
+  redraws the toolbar, so a tool's `active` can read it (the History button does).
 
 ### The part studio (`.jpart`, `document/format.ts`)
 
@@ -650,6 +691,13 @@ Tests for this work, each runnable alone with `node static/tests/<name>.test.js`
 | `mechanical-kernel` | **the real kernel in node**: sketch → extrude, booleans, names across rebuilds, cache, rollback, errors |
 | `assembly-doc` | the `.jasm` format, the mate registry, Fastened |
 | `cargo test itemdoc` | the server's fold of ops into the stored file |
+| `cargo test itemmerge`, `cargo test dockind` | the merge rules for item documents, and what each document kind answers |
+| `cad-history` | the feature diff, the 3D diff in the real kernel, the history list |
+| `cad-mcp` | the AI tools' planning and validation, a plan built in the real kernel, the software render |
+
+Against a running server: `scripts/cad-history-ui.mjs` (history, compare, branches and merge, thumbnails, in
+Chromium), `scripts/cad-history-mcp.mjs` (a JSON-RPC session on `/mcp` that makes and edits a part) and
+`scripts/cad-history-github.mjs` (push, pull and merge against `scripts/fake-github.mjs`).
 
 `static/tests/cad-load.js` bundles a module for a node test: `const { load } = require("./cad-load"); const F =
 load("domains/mechanical/document/format.ts");`. New test files must be added to the `for t in …` list of the
@@ -691,8 +739,11 @@ start Chromium with `--use-gl=swiftshader --enable-unsafe-swiftshader` when ther
 - **The feature dialog** has no expression input and no units other than millimetres and degrees.
 - **Collaboration:** edits merge per path, last writer wins. Two people editing one parameter at once: the later
   one wins, silently. Presence is carried but not drawn. There is no lock on a feature someone else has open.
-- **Platform gaps** for these documents: history timeline, compare, branch merge, comments UI, MCP, thumbnails,
-  live tab list (see the table under "How a change is committed and synced").
+- **Platform gaps** for these documents: comments UI, live tab list, and for assemblies an earlier version on
+  screen, compare and MCP tools (see the tables under "How a change is committed and synced").
+- **Merging** keeps the journal's rule that a delete beats a modify: a conflict "removed here, changed there"
+  resolved for the changed side keeps the item only on the side that still has it. Arrays merge as one value.
+- **The assistant's picture** (`cad_render_view`) is a software render: flat shading, no sketches or planes.
 - **Bundles:** `mechanical.js` and `assembly.js` each bundle three.js and React (about 0.8 MB and 0.7 MB
   minified), loaded on demand. Sharing them with `viewer3d.js` and `ui.js` is not done.
 - **Assembly** is a stub, as described above.
