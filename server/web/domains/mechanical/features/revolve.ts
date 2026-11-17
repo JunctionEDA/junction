@@ -8,10 +8,12 @@
 // Names (CONTRACT.md "Geometry names"), as Extrude's: the faces swept by sketch curves are
 // `<id>:side:<entity>`, the caps of a partial revolve `<id>:start:<region>` and `<id>:end:<region>`.
 import { defineFeature } from "../core/feature";
-import { cross, dot, scale, sub, toWorld, type GeomRef } from "../core/geometry";
+import { cross, dot, isGeomRef, scale, sub, toWorld, type GeomRef } from "../core/geometry";
 import type { EvalContext } from "../kernel/types";
 import { ShapeIndex, type NamedResult } from "../kernel/occ";
 import { edgeAxis, sketchLineAxis, type Axis } from "../kernel/ops/axis";
+import { axisOf } from "../kernel/ops/ref-geom";
+import type { RefTarget } from "./_refs";
 import { combine, OPERATION_OPTIONS, type Operation, type Tool } from "../kernel/ops/combine";
 import { moveNamed } from "../kernel/ops/shapes";
 
@@ -21,9 +23,10 @@ export interface RevolveParams {
   [key: string]: any;
   profile: { sketch: string; regions: string[] | null } | null;
   operation: Operation;
-  /** "line": a loose line of the sketch; "x" / "y": the sketch's own axes; "edge": a straight model edge */
+  /** "line": a loose line of the sketch; "x" / "y": the sketch's own axes; "edge": what `axisEdge` names */
   axisType: "line" | "x" | "y" | "edge";
-  axisEdge?: GeomRef | null;
+  /** a straight model edge, or (a RefTarget, features/_refs.ts) a line of any sketch or a reference axis */
+  axisEdge?: GeomRef | RefTarget | null;
   endType: "full" | "angle" | "symmetric";
   angle: number;
   flip: boolean;
@@ -39,8 +42,8 @@ export default defineFeature<RevolveParams>({
   schema: [
     { key: "profile", label: "Sketch to revolve", kind: "profile" },
     { key: "operation", label: "Result", kind: "enum", options: OPERATION_OPTIONS },
-    { key: "axisType", label: "Axis", kind: "enum", options: [{ value: "line", label: "Sketch line" }, { value: "x", label: "Sketch X" }, { value: "y", label: "Sketch Y" }, { value: "edge", label: "Edge" }], hint: "Sketch line: a line drawn in the sketch that is not part of the outline." },
-    { key: "axisEdge", label: "Axis edge", kind: "refs", of: ["edge"], single: true, visible: (p) => p.axisType === "edge" },
+    { key: "axisType", label: "Axis", kind: "enum", options: [{ value: "line", label: "Sketch line" }, { value: "x", label: "Sketch X" }, { value: "y", label: "Sketch Y" }, { value: "edge", label: "Picked" }], hint: "Sketch line: a line drawn in the sketch that is not part of the outline. Picked: an edge, a line of any sketch or a reference axis you click." },
+    { key: "axisEdge", label: "Axis", kind: "refs", of: ["edge"], single: true, sketch: true, datums: ["axis"], hint: "A straight edge, a line of a sketch (one among several, a construction line too), or a reference axis.", visible: (p) => p.axisType === "edge" },
     { key: "endType", label: "End", kind: "enum", options: [{ value: "full", label: "Full" }, { value: "angle", label: "Angle" }, { value: "symmetric", label: "Symmetric" }] },
     { key: "angle", label: "Angle", kind: "number", unit: "deg", min: 0.01, max: 360, step: 5, visible: (p) => p.endType !== "full" },
     { key: "flip", label: "Opposite direction", kind: "boolean", visible: (p) => p.endType === "angle" },
@@ -58,7 +61,7 @@ export default defineFeature<RevolveParams>({
     if (!regions.length) throw ctx.fail(sketch.regions.length ? "The regions this feature used are gone from the sketch. Edit the feature and pick the sketch again." : "The sketch has no closed region to revolve. Close its outline first.");
 
     let axis: Axis;
-    if (p.axisType === "edge") axis = edgeAxis(ctx, p.axisEdge);
+    if (p.axisType === "edge") axis = !p.axisEdge || isGeomRef(p.axisEdge) ? edgeAxis(ctx, p.axisEdge as GeomRef | null) : axisOf(ctx, p.axisEdge, "axis");
     else if (p.axisType === "x") axis = { origin: sketch.frame.origin, dir: sketch.frame.x };
     else if (p.axisType === "y") axis = { origin: sketch.frame.origin, dir: sketch.frame.y };
     else axis = sketchLineAxis(ctx, sketch).axis;

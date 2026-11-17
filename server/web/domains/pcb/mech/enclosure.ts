@@ -11,7 +11,7 @@
 // re-evaluates only the features it touches (the worker's cache), so the enclosure follows within a rebuild.
 import { store } from "../editor/appstore";
 import { E } from "../editor/state";
-import { KernelClient, directionToBoard3D, featureInputs, featuresOf, modelToBoard3D, placementOf, rollbackIndex, type BodyResult, type Placement } from "../../mechanical/api";
+import { BoardFeed, KernelClient, directionToBoard3D, modelToBoard3D, placementOf, studioInputs, type BodyResult, type Placement } from "../../mechanical/api";
 import { stableJson, type Json } from "../../../shared/itemdoc/itemdoc";
 import { headroom, type PartBody } from "./check";
 import { mech } from "./sync";
@@ -27,7 +27,7 @@ const MODE_KEY = "kui.v3d.enclosure";
 // scene colours, like viewer3d/colors.ts: the enclosure, the selected component, a limit it clears, one it breaks
 const SHELL: RGB = [0.62, 0.65, 0.70], PICK: RGB = [1.0, 0.78, 0.18], CLEAR: RGB = [0.20, 0.72, 0.62], BREAK: RGB = [0.90, 0.22, 0.20];
 
-interface Studio { client: KernelClient; key: string; /** the document version `key` was worked out for */ seen: number; bodies: BodyResult[]; busy: boolean; failed: string }
+interface Studio { client: KernelClient; /** the boards of the studio's own Board features (a studio may show the board it drives) */ feed: BoardFeed; key: string; /** the document version `key` was worked out for */ seen: number; bodies: BodyResult[]; busy: boolean; failed: string }
 
 /** A box in the board's 3D space as a mesh. */
 function box(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, color: RGB, opacity: number): ExtraMesh {
@@ -83,7 +83,7 @@ class Enclosure {
   private detach(): void {
     for (const f of this.stop.splice(0)) f();
     clearTimeout(this.timer);
-    for (const s of this.studios.values()) s.client.dispose();
+    for (const s of this.studios.values()) { s.client.dispose(); s.feed.close(); }
     this.studios.clear(); this.placed.clear(); this.pick = [];
     this.drawn = "";
     if (this.control) this.control.remove();
@@ -126,24 +126,30 @@ class Enclosure {
     const placed = state.sources.filter((s) => placementOf(s.link));
     if (this.control) this.control.style.display = placed.length ? "flex" : "none";
     const wanted = new Set(this.mode === "hidden" ? [] : placed.map((s) => s.studioDoc));
-    for (const [id, s] of Array.from(this.studios)) if (!wanted.has(id)) { s.client.dispose(); this.studios.delete(id); }
+    for (const [id, s] of Array.from(this.studios)) if (!wanted.has(id)) { s.client.dispose(); s.feed.close(); this.studios.delete(id); }
     let working = false;
     for (const id of wanted) {
       const doc = mech.links.studioDoc(id); if (!doc) continue;
       let s = this.studios.get(id);
-      if (!s) { s = { client: new KernelClient(), key: "", seen: -1, bodies: [], busy: false, failed: "" }; this.studios.set(id, s); }
+      if (!s) {
+        const made: Studio = { client: new KernelClient(), feed: null as unknown as BoardFeed, key: "", seen: -1, bodies: [], busy: false, failed: "" };
+        made.feed = new BoardFeed({ signedIn: mech.links.signedIn, changed: () => { made.seen = -1; this.schedule(); } });
+        this.studios.set(id, made); s = made;
+      }
       // most changes of the board's state are not changes of this part studio: do not walk its features for those
       const version = mech.links.version(id);
       if (version === s.seen) { working = working || s.busy; continue; }
       s.seen = version;
-      const features = featuresOf(doc), rollback = rollbackIndex(doc, features), inputs = featureInputs(features);
+      // as the studio's own page builds it: variables applied, boards supplied (mechanical document/inputs.ts)
+      const { features: inputs, rollback } = studioInputs(doc, { filters: [s.feed.filter] });
       const key = rollback + "|" + stableJson(inputs as unknown as Json);
       if (key === s.key) { working = working || s.busy; continue; }
       s.key = key; s.busy = true; working = true;
       const mine = s;
       mine.client.regenerate(inputs, rollback).then((result) => {
         if (this.studios.get(id) !== mine) return;
-        if (result) { mine.bodies = result.bodies; mine.failed = ""; }
+        // not the board's own stand-in solids (a Board feature's reference bodies): the real board is right here
+        if (result) { mine.bodies = result.bodies.filter((b) => !b.reference); mine.failed = ""; }
         if (mine.key === key) mine.busy = false;
         this.draw();
       }).catch((e: unknown) => { mine.busy = false; mine.failed = (e as Error).message || String(e); this.draw(); });

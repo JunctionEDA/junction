@@ -14,7 +14,9 @@ import * as THREE from "three";
 import { registerCompareRenderer, type CompareContext } from "../../../platform/review/renderers";
 import { parseItemDoc, type ItemDoc, type Json } from "../../../shared/itemdoc/itemdoc";
 import { Viewport3D, tokenColor } from "../../../shared/viewport3d/viewport3d";
-import { PART_STUDIO_KIND, featureInputs, featuresOf, rollbackIndex } from "../document/format";
+import { BoardFeed } from "../board/feed";
+import { PART_STUDIO_KIND } from "../document/format";
+import { studioInputs } from "../document/inputs";
 import { FEATURES } from "../generated/page";
 import { KernelClient } from "../kernel/client";
 import type { CompareResult, PlainMesh } from "../services/compare-versions";
@@ -103,14 +105,18 @@ function StudioCompare({ ctx }: { ctx: CompareContext }) {
     let gone = false;
     const kernel = new KernelClient();
     setState("working"); setMessage("");
-    const side = (doc: ItemDoc) => { const features = featuresOf(doc); return { features: featureInputs(features), rollback: rollbackIndex(doc, features) }; };
-    kernel.call("compare-versions", { a: side(a), b: side(b) } as unknown as Json).then((r) => {
+    // Each version as its own page would build it (document/inputs.ts): its variables applied, and the boards
+    // of its Board features supplied.  A board is not stored with a version: both sides get it as it is now.
+    const feeds = [new BoardFeed({ signedIn: true, changed: () => {} }), new BoardFeed({ signedIn: true, changed: () => {} })];
+    const side = (doc: ItemDoc, i: number) => studioInputs(doc, { filters: [feeds[i].filter] });
+    side(a, 0); side(b, 1);   // opens the boards the two versions name
+    Promise.all(feeds.map((f) => f.settled())).then(() => kernel.call("compare-versions", { a: side(a, 0), b: side(b, 1) } as unknown as Json)).then((r) => {
       if (gone) return;
       const result = r as unknown as CompareResult;
       setSolid(result); setState("done");
       scene.current?.set(result);
     }).catch((e) => { if (!gone) { setState("failed"); setMessage(e instanceof Error ? e.message : String(e)); } });
-    return () => { gone = true; kernel.dispose(); };
+    return () => { gone = true; kernel.dispose(); for (const f of feeds) f.close(); };
   }, [a, b]);
   useEffect(() => { scene.current?.show(t / 100, marked); }, [t, marked, solid]);
 

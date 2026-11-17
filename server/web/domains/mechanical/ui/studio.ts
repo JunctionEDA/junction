@@ -22,7 +22,7 @@ import { PART_STUDIO_KIND, featureInputs, featuresOf, nextName, orderAt, rollbac
 import { FEATURES, TOOLS } from "../generated/page";
 import { KernelClient, type KernelState } from "../kernel/client";
 import type { BodyResult, DatumView, FeatureInput, FeatureReport, RegenResult, SketchView } from "../kernel/protocol";
-import { resolveInputs, variableValues, variablesOf } from "../document/variables";
+import { studioInputs, type InputFilter } from "../document/inputs";
 import { pickKindsOf, sameTarget, targetOf, targetsIn, type RefTarget } from "../features/_refs";
 import { ModelView, pickKey, type Pick, type PickKind } from "../viewport/modelview";
 
@@ -95,7 +95,7 @@ export class PartStudio {
    * data a feature needs that is not in this document (the Board feature's board, read live from another
    * document): what a filter adds is never stored.
    */
-  readonly inputFilters: ((inputs: FeatureInput[]) => FeatureInput[])[] = [];
+  readonly inputFilters: InputFilter[] = [];
   /** Called after every regeneration whose result was shown. */
   readonly onRegen: ((result: RegenResult) => void)[] = [];
   private extensionClosers: (() => void)[] = [];
@@ -220,8 +220,9 @@ export class PartStudio {
     if (this.closed || !this.state.loaded) return;
     const { features, rollback } = this.effective();
     // numbers typed as expressions follow the variables (document/variables.ts)
-    let inputs = this.doc ? resolveInputs(featureInputs(features), variableValues(variablesOf(this.doc)).values) : featureInputs(features);
-    for (const filter of this.inputFilters) inputs = filter(inputs);
+    // the one function every builder of a part studio uses (document/inputs.ts): variables, then the filters
+    const doc = this.doc; if (!doc) return;
+    const inputs = studioInputs(doc, { features, rollback, filters: this.inputFilters }).features;
     const result = await this.kernel.regenerate(inputs, rollback);
     if (!result || this.closed) return;
     const reports: StudioState["reports"] = {};
@@ -357,6 +358,17 @@ export class PartStudio {
       if (p.kind !== "face") return;
       const now = (e.draft.params[key] as string[] | undefined) || [];
       this.setDraft({ params: { [key]: now.includes(p.body) ? now.filter((b) => b !== p.body) : [...now, p.body] } });
+      return;
+    }
+    if (field.kind === "profile") {
+      // The first click on a sketch takes all of it.  Clicks inside its regions then choose among them: from
+      // "all", a click leaves just that region; further clicks add and take away; none left is all again.
+      if (p.kind !== "sketch") return;
+      const cur = e.draft.params[key] as { sketch?: string; regions?: string[] | null } | null;
+      if (!cur || cur.sketch !== p.featureId || !p.region) { this.setDraft({ params: { [key]: { sketch: p.featureId, regions: null } } }); return; }
+      const now = Array.isArray(cur.regions) ? cur.regions : [];
+      const next = now.includes(p.region) ? now.filter((r) => r !== p.region) : [...now, p.region];
+      this.setDraft({ params: { [key]: { sketch: p.featureId, regions: next.length ? next : null } } });
       return;
     }
     const v = this.fromSelection(field, [p]);
