@@ -10,6 +10,7 @@ import { state } from "../appstore";
 import type { Netlist, SheetFile, UpdateOptions, UpdatePlan } from "../../canvas/pcb-netlist";
 import { liveDocument, projectDocs, type ProjectDocInfo } from "../projectfile";
 import { NL } from "./canvas";
+import { topLevelSheetsOf } from "../bootpick";
 import { box, checkField, confirmBox, h, openDialog, reportPanel, type Field } from "./ui";
 
 interface SchModuleInternals { _?: { symbolPins(doc: KDoc, item: KItem): { x: number; y: number; number: string; name: string; type: string; hidden: boolean }[]; isPowerSymbol(doc: KDoc, libId: string): boolean } }
@@ -41,7 +42,15 @@ export async function projectNetlist(): Promise<{ netlist: Netlist; root: string
       files.set(d.path, { doc, uuid: m ? m[1] : "", file: d.path });
     } catch (e) { /* reported below as a missing sheet */ }
   }));
-  const rootFile = files.get(root.path);
+  // SCHEMATIC::GetTopLevelSheets: a KiCad 10 project may list several top-level sheets in its project file
+  let pro: unknown = null;
+  try {
+    const proDoc = docs.find((d) => d.docType === "kicad_pro");
+    const text = E.proSettings || (proDoc ? await fetch(`/api/docs/${proDoc.docId}/content`).then((r) => (r.ok ? r.text() : "")) : "");
+    pro = text ? JSON.parse(text) : null;
+  } catch (e) { pro = null; }
+  const tops = topLevelSheetsOf(pro, docs, docs).map((t) => ({ sheet: files.get(t.doc.path) as SheetFile, name: t.name, uuid: t.uuid, path: t.doc.path })).filter((t) => !!t.sheet);
+  const rootFile = tops.length > 1 ? tops[0].sheet : files.get(root.path);
   if (!rootFile) return { error: "The root schematic could not be read." };
   const resolve = (file: string, parent: SheetFile): SheetFile | null => {
     const dir = parent.file.split("/").slice(0, -1);
@@ -49,8 +58,8 @@ export async function projectNetlist(): Promise<{ netlist: Netlist; root: string
     const out: string[] = []; for (const p of parts) { if (p === "..") out.pop(); else out.push(p); }
     return files.get(out.join("/")) || files.get(file) || null;
   };
-  const netlist = NL().buildNetlist(rootFile, resolve, { symbolPins: helpers.symbolPins, isPower: (d, it) => helpers.isPowerSymbol(d, String(((KiCadCanvas.kid(it.node, "lib_id") as SNode | null) || [])[1])) }, root.path.split("/").pop()!.replace(/\.kicad_sch$/, ""));
-  return { netlist, root: root.path, files };
+  const netlist = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve, { symbolPins: helpers.symbolPins, isPower: (d, it) => helpers.isPowerSymbol(d, String(((KiCadCanvas.kid(it.node, "lib_id") as SNode | null) || [])[1])) }, root.path.split("/").pop()!.replace(/\.kicad_sch$/, ""));
+  return { netlist, root: tops.length > 1 ? tops[0].path : root.path, files };
 }
 
 // ---------------------------------------------------------------- the footprint library (optional service)

@@ -8,6 +8,7 @@
 //            units (remembered), reset local coordinates, Show Hidden Fields, sheet navigation
 //   Route    layer switching (board)
 //   Help     List Hotkeys, About (help-dialogs.ts)
+import { leaveSheet } from "./schnets";
 import type { ActionHandler } from "./types";
 import { cursorStep, panStep } from "./crosshair";
 import { gridIndex, gridList, navigateDocs, openDoc, rootSchematic, setActiveLayer, setGridIndex } from "./doc";
@@ -118,7 +119,6 @@ function stepLayer(dir: number): void {
 }
 function copperLayer(name: string): void { const cu = (store.get().document.copperLayers || []) as LayerRow[]; if (cu.some((l) => l.name === name)) setActiveLayer(name); }
 
-const leaveSheet = () => { const r = rootSchematic(); if (r && (state as unknown as { doc?: unknown }).doc !== r) openDoc(r); else toast("Already at the root sheet"); };
 
 export const MENU_HANDLERS: Record<string, ActionHandler> = {
   saveCopy: () => saveDocCopy(), saveCurrSheetCopyAs: () => saveDocCopy(),

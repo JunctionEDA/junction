@@ -108,7 +108,8 @@ export function distribute(all: HierMarker[]): HierMarker[] {
   for (const s of sheets) s.markers = [];
   const live: HierMarker[] = [];
   for (const m of all) {
-    const s = sheets.find((x) => x.key === m.sheetKey) || (m.docId ? null : open) || null;
+    // keys leave the top-level sheet out, so several top-level sheets all have the key "": the document tells them apart
+    const s = sheets.find((x) => x.key === m.sheetKey && (!m.docId || x.docId === m.docId)) || (m.docId ? null : open) || null;
     if (s) s.markers.push(m);
     if (s ? s === open : !m.docId || m.docId === hereDoc()) live.push(m);
   }

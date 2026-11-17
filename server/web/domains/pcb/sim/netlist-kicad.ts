@@ -399,7 +399,8 @@ export function kicadNetlist(inp: NlInput): string {
     for (const p of kidsOf(sym.node, "property")) { const f = fieldParts(p); if (MANDATORY.includes(f.name) || f.priv) continue; prop(f.name, shown(sym, f.name)); }
     // the sheet's fields (the root's: Sheetname "", Sheetfile <file>)
     if (sym.sheet.sheetNode) for (const p of kidsOf(sym.sheet.sheetNode, "property")) { const f = fieldParts(p); prop(f.name, f.value); }
-    else { prop("Sheetname", inp.rootSheetName || ""); prop("Sheetfile", sym.sheet.file.split("/").pop() || sym.sheet.file); }
+    // (one of several top-level sheets: its own name, which its path "/<name>/" carries)
+    else { prop("Sheetname", sym.sheet.human !== "/" ? sym.sheet.human.slice(1, -1) : inp.rootSheetName || ""); prop("Sheetfile", sym.sheet.file.split("/").pop() || sym.sheet.file); }
     const sf = sheetFlags(inp.sheets, sym.sheet), f = sym.flags;
     if (f.excludedFromBOM || sf.excludedFromBOM) prop("exclude_from_bom");
     if (f.excludedFromSim || sf.excludedFromSim) prop("exclude_from_sim");

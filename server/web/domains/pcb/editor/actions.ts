@@ -1,4 +1,5 @@
 // editor — GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/domains/pcb/editor/index.ts — edit these modules, not the bundle).
+import { leaveSheet } from "./schnets";
 import { setGroupCurrent, setToggle, setToggles, state, store } from "./appstore";
 import { commentOnAction, openThreadAction, openThreadOnDoc } from "./comments";
 import { saveVersionDialog, versionsCommand } from "./versions";
@@ -90,7 +91,7 @@ export const HANDLERS: Record<string, ActionHandler> = {
   save: (a) => runAction("checkpoint", a), refreshHistory: () => loadHistory(),
   undo: () => undoLast(), redo: () => redoLast(), find: () => undefined, doDelete: () => deleteAction(),
   zoomRedraw: () => requestRender(), zoomInCenter: () => zoomStep(true), zoomOutCenter: () => zoomStep(false), zoomFitScreen: () => fitView(), zoomFitObjects: () => fitObjects(),
-  navigateBack: () => navigateDocs(-1), navigateForward: () => navigateDocs(1), navigateUp: () => { const r = rootSchematic(); if (r && state.doc !== r) openDoc(r); else toast("Already at the root sheet"); },
+  navigateBack: () => navigateDocs(-1), navigateForward: () => navigateDocs(1), navigateUp: () => leaveSheet(),
   rotateCCW: () => orientSelected("ccw"), rotateCW: () => orientSelected("cw"), rotateCcw: () => orientSelected("ccw"), rotateCw: () => orientSelected("cw"),
   mirrorV: () => orientSelected("mv"), mirrorH: () => orientSelected("mh"),
   showPcbNew: () => switchEditor(), showEeschema: () => switchEditor(),

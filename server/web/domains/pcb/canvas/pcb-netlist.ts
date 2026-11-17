@@ -203,7 +203,15 @@ export function componentVariants(sym: SNode, path: string, ref: string, ver?: n
   return out.sort((a, b) => lowerCmp(a.name, b.name));
 }
 
-export function buildNetlist(root: SheetFile, loadSheet: (file: string, parent: SheetFile) => SheetFile | null, h: NetlistHelpers, project?: string): Netlist {
+/** One top-level sheet for buildNetlist: its file, its name (TOP_LEVEL_SHEET_INFO::name) and the uuid the project file
+ *  gives it ("" or absent: the file's own). */
+export interface TopSheetFile { sheet: SheetFile; name: string; uuid?: string }
+/**
+ * `root` is the root sheet, or the schematic's top-level sheets in order (SCHEMATIC::GetTopLevelSheets).  With more
+ * than one, every top-level sheet is an instance of its own whose path names it ("/<name>/"), so local labels of the
+ * same text on two top-level sheets stay apart (SCH_SHEET_PATH::PathHumanReadable).
+ */
+export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file: string, parent: SheetFile) => SheetFile | null, h: NetlistHelpers, project?: string): Netlist {
   const warnings: string[] = [];
   const uf = new UnionFind();
   const keyNodes = new Map<string, number>();
@@ -217,7 +225,9 @@ export function buildNetlist(root: SheetFile, loadSheet: (file: string, parent: 
   const compPins = new Map<string, PinRef[]>();
 
   // ---- the sheet instances, breadth first
-  const instances: Instance[] = [{ sheet: root, uuidPath: [root.uuid], human: "/", depth: 0, index: 0, sheetUuids: [], name: "" }];
+  const tops: TopSheetFile[] = Array.isArray(root) ? root : [{ sheet: root, name: "" }];
+  const multi = tops.length > 1, legacyRoot = tops.length ? tops[0].sheet.doc : null;
+  const instances: Instance[] = tops.map((t, i) => ({ sheet: t.sheet, uuidPath: [t.uuid || t.sheet.uuid], human: multi ? "/" + t.name + "/" : "/", depth: 0, index: i, sheetUuids: [], name: multi ? t.name : "" }));
   const mem = new Map<number, NetMember[]>();           // node -> the items attached to it (the net map's members)
   const addMem = (n: number, m: NetMember): void => { const l = mem.get(n); if (l) l.push(m); else mem.set(n, [m]); };
   const childOf = new Map<string, number>();            // "<instance index>|<sheet item id>" -> child instance index
@@ -310,9 +320,9 @@ export function buildNetlist(root: SheetFile, loadSheet: (file: string, parent: 
           }
         }
       } else if (k === "symbol") {
-        const legacyValue = root.doc.legacySymbolInstances && root.doc.legacySymbolInstances.get("/" + [...inst.uuidPath.slice(1), it.id].join("/"));
+        const legacyValue = legacyRoot && legacyRoot.legacySymbolInstances && legacyRoot.legacySymbolInstances.get("/" + [...inst.uuidPath.slice(1), it.id].join("/"));
         const power = h.isPower(doc, it), value = legacyValue && legacyValue.value ? legacyValue.value : propVal(n, "Value"), localPower = power && (h.isLocalPower ? h.isLocalPower(doc, it) : libIsLocalPower(doc, n));
-        const { ref, unit } = instanceRef(n, "/" + inst.uuidPath.join("/"), project, root.doc.legacySymbolInstances);
+        const { ref, unit } = instanceRef(n, "/" + inst.uuidPath.join("/"), project, legacyRoot ? legacyRoot.legacySymbolInstances : undefined);
         const inNetlist = !ref.startsWith("#") && !power, onBoard = yes(n, "on_board", true);
         const pins = h.symbolPins(doc, it);
         const units = unitCount(doc, n), unitRef = units > 1 ? ref + unitLetter(unit) : ref;

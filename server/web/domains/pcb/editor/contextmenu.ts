@@ -14,7 +14,7 @@ import { deleteSelectedField } from "./fieldops";
 import { HANDLERS } from "./actions";
 import { canComment, commentOnItem, commentOnNet, netOfItem, showThread, startThread, threadsOnItem } from "./comments";
 import { APP_TOOLS, state, store } from "./appstore";
-import { enterSheet, rootSchematic, setGridPitch } from "./doc";
+import { enterSheet, rootSchematic, setGridPitch, topLevelSchematics } from "./doc";
 import { FP } from "./fpedit";
 import { ARC_EDIT_MODE_MENU, evaluate, GRID_ORIGIN, menuFor, type MenuCtx, type MenuDef, type Resolved } from "./ctxmenus";
 import { activeModuleTool, applyPickMode, clearAllSelection, hitsAt, markerUnder, interactionBusy, pcbState, pickAt, schState, selectAt, selectionBox, selectionChanged, selectionIds, selectionItems, selectItemId, stage, startFieldMove, startMove, toolCtx, worldMm, zoomBy } from "./gestures";
@@ -100,7 +100,7 @@ function menuCtx(): MenuCtx {
     canAddCorner, canRemoveCorner, editableCorners: !sch && editableCornersSelected(),
     canClose: outline && n >= 3, canUndoPoint: (outline || (!!draw && (draw.shape === "lines" || draw.shape === "gcurve"))) && n >= 1,
     pinAlts: !!(E.selPins.length === 1 && E.kdoc && schPins() && schPins()!.pinAlternates(E.kdoc as KDoc, E.selPins[0])),   // ALT_PIN_FUNCTION_MENU: one pin only
-    highlight: !!E.highlightIds, belowRoot: !!root && (state as { doc?: unknown }).doc !== root,
+    highlight: !!E.highlightIds, belowRoot: !!root && !topLevelSchematics().some((t) => t.doc === (state as { doc?: unknown }).doc),
     hasLocked: items.some((it) => isLocked(it.node)), hasUnlocked: items.some((it) => !isLocked(it.node)),
     groupSelected: boardGroupSelected(), inGroup: !sch && !!(CollabTools.pcb && (CollabTools.pcb.state as { enteredGroup?: string | null }).enteredGroup),
     hasItems: !!E.kdoc && E.kdoc.items.size > 0, checks: attributeChecks(items),
