@@ -9,3 +9,7 @@ export { KernelClient, type KernelOptions, type KernelState } from "./kernel/cli
 export type { BodyMesh, BodyResult, FeatureInput, FeatureReport, FeatureStatus, RegenResult, SketchView } from "./kernel/protocol";
 export { DEFAULT_PLANES, add, cross, dot, isGeomRef, length, normalize, scale, sub, toPlane, toWorld, type DefaultPlaneId, type Frame, type GeomKind, type GeomRef, type PlaneRef, type Vec2, type Vec3 } from "./core/geometry";
 export type { ParamField } from "./core/feature";
+// Live presence for another domain's 3D editor (who is here, pointers, views, Follow): collab/attach.tsx.
+export { mountViewportCollab, type ViewportCollabOptions } from "./collab/attach";
+export type { Collab, CollabHost, CollabState, LocalPresence } from "./collab/collab";
+export type { CadPresence, Collaborator, SelRef } from "./collab/presence";
