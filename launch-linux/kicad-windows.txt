@@ -1,0 +1,3 @@
+     0x20001c "Junction Setup": ("Junction" "Junction")  630x445+485+277  +485+277
+     0x200003 "Junction": ("Junction" "Junction")  200x200+0+0  +0+0
+     0x200001 "Junction": ("Junction" "Junction")  10x10+10+10  +10+10

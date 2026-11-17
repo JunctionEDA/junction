@@ -1,0 +1,6 @@
+
+ProcessName     MainWindowTitle
+-----------     ---------------
+pcbnew          Information
+WindowsTerminal C:\ProgramData\GitHub\HostedComputeAgent\hosted-compute-agent
+

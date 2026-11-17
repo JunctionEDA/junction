@@ -1,0 +1,6 @@
+
+ProcessName     MainWindowTitle
+-----------     ---------------
+eeschema        Information
+WindowsTerminal C:\ProgramData\GitHub\HostedComputeAgent\hosted-compute-agent
+

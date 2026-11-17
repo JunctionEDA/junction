@@ -1,0 +1,2 @@
+
+(pcbnew:4627): dbind-WARNING **: 20:04:44.311: AT-SPI: Error retrieving accessibility bus address: org.freedesktop.DBus.Error.ServiceUnknown: The name org.a11y.Bus was not provided by any .service files

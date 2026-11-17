@@ -1,0 +1,4 @@
+     0x200130 "Junction Setup": ("eeschema" "eeschema")  630x445+485+277  +485+277
+     0x20011f "untitled [Unsaved] — Schematic Editor": ("org.kicad.eeschema" "org.kicad.eeschema")  1280x720+0+0  +0+0
+     0x200003 "eeschema": ("eeschema" "eeschema")  200x200+0+0  +0+0
+     0x200001 "eeschema": ("eeschema" "Eeschema")  10x10+10+10  +10+10
