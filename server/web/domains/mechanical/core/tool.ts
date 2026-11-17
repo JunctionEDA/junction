@@ -1,0 +1,53 @@
+// tool.ts — the toolbar and side-panel contracts: what one file under tools/ or panels/ exports.
+//
+// The part studio's toolbar is drawn from a list, not written by hand.  Every feature type gets a button for
+// free (core/feature.ts).  Anything else — a sketch tool, a measure command, a view option, an export — is a
+// ToolDefinition in its own file under tools/, and shows up in the toolbar group it names.
+import type { ReactNode } from "react";
+import type { PartStudio } from "../ui/studio";
+
+/**
+ * The toolbar's groups, in the order they are drawn.  A tool in "sketch" shows only while a sketch is open, and
+ * the feature buttons (which sit in "feature") are hidden meanwhile.
+ */
+export type ToolGroup = "edit" | "sketch" | "feature" | "inspect" | "view" | "file";
+export const TOOL_GROUPS: readonly ToolGroup[] = ["edit", "sketch", "feature", "inspect", "view", "file"];
+
+export interface ToolDefinition {
+  /** stable id, unique among tools */
+  id: string;
+  title: string;
+  /** shown in the tooltip after the title */
+  hint?: string;
+  /** inline SVG markup for a 24×24 stroke glyph (currentColor) */
+  icon?: string;
+  group: ToolGroup;
+  /** lower first inside the group; ties in title order */
+  order?: number;
+  /** a single key that runs the tool while the viewport has the keyboard ("l", "Escape") */
+  key?: string;
+  /** false hides the button (a tool reached only by its key or from a menu) */
+  button?: boolean;
+  /** Greyed out, with this as the reason, when it returns a string.  Called on every toolbar draw: keep it cheap. */
+  disabled?(studio: PartStudio): string | null;
+  /** Drawn pressed when true (a mode that is on, the active sketch tool). */
+  active?(studio: PartStudio): boolean;
+  /** The button was pressed (or the key).  A mode tool usually calls `studio.setMode(...)`. */
+  run(studio: PartStudio): void;
+}
+
+export function defineTool(def: ToolDefinition): ToolDefinition { return def; }
+
+/** A panel docked beside the viewport (the feature list is one).  One file under panels/. */
+export interface PanelDefinition {
+  id: string;
+  title: string;
+  side: "left" | "right";
+  order?: number;
+  /** A React component; it reads the studio with the hooks in ui/hooks.ts. */
+  render(studio: PartStudio): ReactNode;
+  /** false: the panel starts closed and is opened from the View group */
+  open?: boolean;
+}
+
+export function definePanel(def: PanelDefinition): PanelDefinition { return def; }
