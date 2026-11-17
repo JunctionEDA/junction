@@ -2,7 +2,16 @@
 
 This is the document to read before adding anything to the mechanical or assembly domains. It says what the
 formats and interfaces are, how to add a feature, a tool, a panel, a worker service or a mate without editing a
-shared file, and which folder each piece of future work belongs in.
+shared file, how the pieces built by different people fit together, and where each piece of future work belongs.
+
+It is the one entry point. The parts with a README of their own are linked from here and not repeated:
+
+| Part | README |
+|---|---|
+| Assemblies: instances, mates, the solver, sources | [`../assembly/README.md`](../assembly/README.md) |
+| A board shown in a part studio (PCB → CAD) | [`board/README.md`](board/README.md) |
+| A part studio driving a board (CAD → PCB), the part studio's half | [`boardlink/README.md`](boardlink/README.md) |
+| … and the board editor's half | [`../pcb/mech/README.md`](../pcb/mech/README.md) |
 
 Everything here is implemented and tested unless a line says otherwise. The limits are listed at the end; read
 them before promising something to a user.
@@ -13,20 +22,30 @@ them before promising something to a user.
 project (Postgres: documents, snapshots, ops)
  ├─ *.kicad_sch, *.kicad_pcb      drawn by the electronics editor (web/domains/pcb)
  ├─ *.jpart   part studio         drawn by web/domains/mechanical   (static/dist/mechanical.js)
- └─ *.jasm    assembly            drawn by web/domains/assembly     (static/dist/assembly.js)
+ ├─ *.jasm    assembly            drawn by web/domains/assembly     (static/dist/assembly.js)
+ └─ models/*.step                 files an Import feature reads
 
 page                                             worker (static/dist/cad-worker.js)
- document tabs (web/platform/doctabs)             OpenCascade (occ-kernel.wasm, fetched on first use)
- └─ PartStudio (ui/studio.ts)                     RegenEngine (kernel/regen.ts)
-     ├─ ItemDocSession  ⇄ /ws ⇄ server             ├─ features/*.ts  evaluate()
-     ├─ KernelClient    ⇄ postMessage ⇄            └─ services/*.ts  run()
-     ├─ ModelView on Viewport3D (three.js)
-     └─ React: toolbar, panels, feature dialog
+ document tabs (web/platform/doctabs)             OpenCascade (occ-kernel.wasm; compiled once per page,
+ └─ PartStudio (ui/studio.ts)                       handed to every worker)
+     ├─ ItemDocSession  ⇄ /ws ⇄ server             RegenEngine (kernel/regen.ts)
+     ├─ KernelClient    ⇄ postMessage ⇄             ├─ features/*.ts  evaluate()
+     ├─ ModelView on Viewport3D (three.js)          └─ services/*.ts  run()
+     ├─ SketchEditor (sketch/editor.ts, PlaneGCS)
+     └─ React: toolbar, docks, feature dialog
 ```
 
 A part studio is a list of features. The page holds the document and sends the feature list to the worker; the
 worker runs each feature's `evaluate` in order on the kernel and sends back triangles, edge lines and names; the
 page draws them. The page never touches the kernel and the worker never touches the document.
+
+Three things cross between documents, and each has one place:
+
+```
+board (.kicad_pcb) ──read live──▶ Board feature in a part studio      board/        (BoardLink on the page, BoardFeed elsewhere)
+part studio ──link item, solved──▶ the board's outline, holes, keep-outs   boardlink/ + pcb/mech/
+part studio, board, assembly ──read live──▶ instances of an assembly   assembly/sources/
+```
 
 ## Where things are
 
@@ -34,27 +53,36 @@ page draws them. The page never touches the kernel and the worker never touches 
 |---|---|
 | `shared/itemdoc/itemdoc.ts` | JSON item documents: file format, item changes, order keys. Pure. |
 | `shared/itemdoc/sync.ts` | `ItemDocSession`: a live document over the collaboration socket, with undo. |
-| `shared/viewport3d/viewport3d.ts` | `Viewport3D`: canvas, orthographic camera, orbit/pan/zoom, standard views, theme colours. |
+| `shared/viewport3d/viewport3d.ts` | `Viewport3D`: canvas, camera, orbit/pan/zoom, standard views, theme colours. |
 | `platform/documents/host.ts` | How the shell hands a document to a domain's editor. |
-| `platform/doctabs/` | The document tabs. |
+| `platform/doctabs/` | The document tabs; `room.ts` is who is on which tab. |
+| `platform/history/`, `platform/review/renderers.ts`, `platform/mcp/host.ts` | Version history, Compare, the assistant's tools: what a domain plugs into. |
 | `domains/registry.ts` | Which document kinds exist, which bundle opens them, what a new one contains. |
 | `domains/mechanical/core/` | Contracts: `feature.ts`, `tool.ts`, `geometry.ts`. |
-| `domains/mechanical/document/` | The `.jpart` format (`format.ts`) and every edit as item changes (`edits.ts`). |
-| `domains/mechanical/sketch/` | Sketch data format, region finding, the two-point drawing engine. |
-| `domains/mechanical/kernel/` | Worker side: OpenCascade helpers, regeneration, tessellation, protocol, the page's client. |
+| `domains/mechanical/document/` | The `.jpart` format (`format.ts`), every edit as item changes (`edits.ts`), variables, materials, appearance, and **`inputs.ts`: a document as the worker's input**. |
+| `domains/mechanical/sketch/` | The sketcher: format, the solver (PlaneGCS), tools, dimensions, painting, regions. |
+| `domains/mechanical/kernel/` | Worker side: OpenCascade helpers (`occ.ts`, `ops/`), regeneration, tessellation, protocol, the page's client. |
 | `domains/mechanical/features/` | **One file per feature type.** |
 | `domains/mechanical/tools/` | **One file per toolbar tool.** |
 | `domains/mechanical/panels/` | **One file per docked panel.** |
 | `domains/mechanical/services/` | **One file per worker service.** |
-| `domains/mechanical/viewport/modelview.ts` | Bodies, planes, sketches, highlighting and picking in the viewport. |
-| `domains/mechanical/ui/` | The part studio controller (`studio.ts`) and its React frame. |
+| `domains/mechanical/viewport/` | Bodies, planes, sketches, reference geometry, highlighting and picking. |
+| `domains/mechanical/ui/` | The part studio controller (`studio.ts`), its React frame, the toolbar, the docks (`panels.ts`). |
+| `domains/mechanical/collab/` | Presence, Follow, two people in one feature, comments pinned to geometry. |
+| `domains/mechanical/inspect/` | Measure, section view, mass properties, appearance and display modes. |
+| `domains/mechanical/board/` | A board in a part studio: reading it live, its picture, its solids, `BoardFeed`. |
+| `domains/mechanical/boardlink/` | The link item with which a part studio drives a board. |
+| `domains/mechanical/history/`, `compare/`, `mcp/`, `thumbnail.ts` | The part studio's side of the platform's history, Compare, assistant tools and thumbnails. |
 | `domains/mechanical/api.ts` | What other domains may import from this one. |
-| `domains/assembly/` | The `.jasm` format, the mate registry (`mates/`, **one file per mate type**), the editor stub. |
+| `domains/assembly/` | The assembly editor: see its README. |
+| `domains/pcb/mech/` | The board editor's side of the board link. |
+| `domains/pcb/exports/` | What the electronics domain offers the others (the board as geometry, as 3D pieces). |
 
 Server: `server/src/itemdoc.rs` (the document types and the fold), `dockind.rs` (how each document type behaves
-for history, merging, folding and thumbnails), `itemmerge.rs` (the three-way merge), two lines each in `http.rs`
-(`doc_type_for`, `allowed_file`, `doc_is_movable`), `compact.rs`, `pcm.rs` (serves the `.wasm`), `pages.rs` and
-`main.rs` (serve the bundles).
+for history, merging, folding and thumbnails), `itemmerge.rs` (the three-way merge), `http.rs` (`doc_type_for`,
+`allowed_file`, `doc_is_movable`, and `notify_docs`: the notice that a project's documents changed),
+`compact.rs`, `pcm.rs` (serves the `.wasm`), `pages.rs` and `main.rs` (serve the bundles), `mcp.rs` (the
+assistant's tool catalogue).
 
 ## Adding things without colliding
 
@@ -72,14 +100,13 @@ tests run it first. So:
 
 | Work | Put new files in | Registers through |
 |---|---|---|
-| Sketcher and constraint solver | `mechanical/sketch/` (solver, constraint UI, new entity kinds), `mechanical/tools/sketch-*.ts` | tools; the sketch format below |
-| More features (fillet, chamfer, shell, revolve, patterns, …) | `mechanical/features/<type>.ts`; shared kernel code in `mechanical/kernel/ops/` (new folder) | features |
-| Live collaboration on the feature tree (presence, cursors, who edits what) | `mechanical/collab/` (new), `mechanical/panels/` | `ItemDocSession.setPresence`, `onPeers`; panels |
-| Live PCB board model in CAD | `mechanical/features/board-reference.ts`, `mechanical/board/` (new) | features; `pcb` domain's documented exports |
-| Assemblies and mates | `assembly/mates/`, `assembly/tools/`, `assembly/solver/` (new), `assembly/ui/` | mates, assembly tools |
-| Measurement, section, mass properties | `mechanical/services/`, `mechanical/tools/`, `mechanical/panels/` | services, tools, panels |
-| Export and import (STEP, STL, 3MF) | `mechanical/services/export-*.ts`, `mechanical/tools/export-*.ts`, `mechanical/features/import-*.ts` | services, tools, features |
-| Variables, configurations, materials | new item types in the `.jpart` (see "Unknown items"), `mechanical/document/` in new files | — |
+| A sketch tool, a constraint, a new entity kind | `mechanical/sketch/`, `mechanical/tools/sketch-*.ts` | tools (group `sketch`); the sketch format below |
+| A feature | `mechanical/features/<type>.ts`; shared kernel code in `mechanical/kernel/ops/` | features (`toolbarSection`, `toolbarMenu`) |
+| Something that lives as long as a studio is open (a link to another document, a presence layer) | a file a panel or tool imports, pushing onto `studioExtensions` (`ui/studio.ts`) | studio extensions |
+| Data a feature needs that is not in the document | an input filter (`studio.inputFilters`), and the same data outside the page (see "Building a part studio outside its page") | `document/inputs.ts` |
+| A measurement, a check, an export | `mechanical/services/`, `mechanical/tools/`, `mechanical/panels/` | services, tools, panels |
+| A mate, an assembly tool, a kind of instance source | `assembly/mates/`, `assembly/tools/`, `assembly/sources/` | mates, assembly tools, the provider list in `sources/manager.ts` |
+| New data in a `.jpart` (as variables, materials, appearance and board links are) | new item types (see "Unknown items"), in a new file under `mechanical/document/` or the folder that owns them | — |
 
 ### Shared files: do not edit without need
 
@@ -89,11 +116,11 @@ field, a new method) and say so in your pull request.
 - `shared/itemdoc/itemdoc.ts`, `shared/itemdoc/sync.ts` and their mirror `server/src/itemdoc.rs`
 - `shared/viewport3d/viewport3d.ts`
 - `platform/documents/host.ts`, `platform/doctabs/*`, `domains/registry.ts`
-- `mechanical/core/*`, `mechanical/kernel/{types,protocol,regen,occ,tessellate,worker,client}.ts`
-- `mechanical/document/{format,edits}.ts`, `mechanical/sketch/{format,profiles}.ts`
-- `mechanical/ui/{studio.ts,PartStudioView.tsx,Toolbar.tsx,FeatureDialog.tsx,FeatureList.tsx}`,
+- `mechanical/core/*`, `mechanical/kernel/{types,protocol,regen,occ,tessellate,worker,client,load,wasm}.ts`
+- `mechanical/document/{format,edits,inputs}.ts`, `mechanical/sketch/{format,profiles,planar}.ts`
+- `mechanical/ui/{studio.ts,PartStudioView.tsx,Toolbar.tsx,panels.ts,FeatureDialog.tsx,FeatureList.tsx}`,
   `mechanical/viewport/modelview.ts`, `mechanical/api.ts`
-- `assembly/core/*`, `assembly/document/format.ts`
+- `assembly/core/*`, `assembly/document/format.ts`, `assembly/sources/types.ts`, `assembly/ui/assembly.ts`
 - `scripts/gen-cad-registry.mjs`, `server/package.json` (the `build:cad` and `test` entries), `static/app.html`
 - `web/domains/pcb/editor/{dochost,doc,home}.ts` (the shell's side of the tabs)
 
@@ -105,6 +132,10 @@ Likely needs, and where they go instead of an edit:
 - *A new pick kind in the viewport*: additive member of `Pick` in `viewport/modelview.ts`.
 - *A feature that needs its own editor* (as Sketch has `openSketch` / `finishSketch`): tools in `tools/` drive
   it; if `studio.ts` lacks a method you need, add one rather than special-casing the feature inside existing ones.
+- *A global for tests and the console*: `window.Junction<YourThing>`, a name nobody else has. Two slices once
+  both took `JunctionBoardLink`; the page is one page for every tab. In use: `JunctionPartStudio`,
+  `JunctionSketch`, `JunctionCadCollab`, `JunctionBoardLink` (a studio's boards), `JunctionBoardMech` (the board
+  editor's link side), `JunctionAssembly`, `JunctionRoom`.
 
 ## Documents
 
@@ -167,29 +198,35 @@ Build your own changes the same way for anything else. Never mutate `session.doc
 A dialog does not commit while it is open: it edits a draft (`studio.getState().editing.draft`) that the worker
 previews, and Done commits once.
 
-What the platform gives these documents today, and what it does not:
+What the platform gives these documents:
 
 | Works | How |
 |---|---|
 | Storage, roles (viewer / commenter / editor), share links | the existing `documents`, `ops`, `snapshots` tables and `access.rs` |
-| Live co-editing, item by item, property by property | the existing `/ws` op path; verified with two browsers |
+| Live co-editing, item by item, property by property | the existing `/ws` op path |
 | Presence: who is here, pointers, views, selections, Follow | `mechanical/collab/` over `session.setPresence` / `peerList()`; see "Collaboration" |
 | Comments pinned to a feature, a face, an edge or a vertex | the platform's comments (`/api/docs/{id}/comments`), anchored by geometry name; see "Collaboration" |
-| Tabs appearing for others without a reload, and who is on which tab | the project room (`platform/doctabs/room.ts`); see "Collaboration" for its limits |
+| Tabs appearing, renaming and going for everybody without a reload | the server's `docs` notice (below); who is on which tab is the project room (`platform/doctabs/room.ts`) |
 | The stored file kept current | `compact.rs` folds the ops into a snapshot on the server (`itemdoc.rs`), with no client involved |
 | Project archive, clone, GitHub sync | they read the folded file like any other; a pull with changes on both sides merges item by item (`itemmerge.rs`) |
 | Create, rename, delete from the tabs | `POST /api/projects/{id}/docs`, `PATCH` / `DELETE /api/docs/{id}` |
-| Version history, restore, looking at an earlier version | the History drawer (`platform/history`, the part studio's is `mechanical/history`); see "Platform features" below |
+| Version history, restore, looking at an earlier version | the History drawer (`platform/history`); the part studio's host is `mechanical/history` |
 | Compare two versions | the Compare window with the domain's renderer (`platform/review/renderers.ts`, `mechanical/compare`) |
 | Branches and merging, conflicts put to a choice | `versions.rs` with `itemmerge.rs`; the drawer's merge dialog |
-| Thumbnails | `platform/documents/thumbnail.ts`, `mechanical/thumbnail.ts` (part studios; an assembly draws nothing yet) |
-| MCP tools for an AI assistant | `mechanical/mcp` (part studios); see "Platform features" below |
+| Thumbnails | `platform/documents/thumbnail.ts`, `mechanical/thumbnail.ts` (part studios) |
+| MCP tools for an AI assistant | `mechanical/mcp` (part studios) |
 
 | Does not work yet | |
 |---|---|
-| Comments pinned to geometry | the comments API is per document and would work; no UI in the part studio |
-| Tabs appearing for others without a reload | the tab list is fetched on open and when the window regains focus; there is no push |
-| An earlier version of an assembly on screen, comparing assemblies, MCP tools for assemblies | the assembly editor has no read-only view of another state and registers no compare renderer; the server side is the same as for a part studio |
+| An earlier version of an assembly on screen, comparing assemblies, MCP tools and thumbnails for assemblies | the assembly editor has a History tool for versions and branches but no read-only view of another state, and registers no compare renderer; the server side is the same as for a part studio |
+
+**The `docs` notice.** When a document of a project is created, renamed or deleted (`http.rs` `create_doc`,
+`move_doc`, `delete_doc`), the server sends every open document of that project
+`{ type: "docs", docId, projectId, n, change: "added" | "renamed" | "deleted", from, doc: { docId, path, docType },
+by: { userId, login, name } }`. A page may hear it on several sockets (its editor's, the room's);
+`platform/doctabs/roomapi.ts tellDocsChanged` hands each notice on once, as the window event the tabs listen
+for. So a document made by anything (the tabs, an upload, an assistant) appears for everybody at once, and no
+page polls.
 
 ### Platform features, and how another kind of document gets them
 
@@ -251,7 +288,7 @@ new JSON item document kind is one line there and gets history, branches, mergin
 
 ```ts
 params: {
-  plane: { kind: "plane", plane: "top" | "front" | "right" } | { kind: "face", ref: GeomRef },
+  plane: { kind: "plane", plane: "top" | "front" | "right" } | { kind: "face", ref: GeomRef } | { kind: "datum", feature },
   sketch: {
     version: 1,
     entities: {                                  // a map, keyed by short ids
@@ -260,7 +297,7 @@ params: {
       c1: { type: "circle", center: "p3", r: 5 },
       a1: { type: "arc", center: "p3", start: "p4", end: "p5" },   // counter-clockwise from start to end
     },
-    constraints: {                               // a map; nothing reads it yet
+    constraints: {                               // a map
       k1: { type: "horizontal", refs: [{ entity: "l1" }] },
       d1: { type: "distance", refs: [{ entity: "l1", at: "start" }, { entity: "l1", at: "end" }], value: 40,
             driving: true, expr: "width", label: { x: 20, y: -5 } },
@@ -269,31 +306,57 @@ params: {
 }
 ```
 
-Rules that are fixed now:
+Rules that are fixed:
 
 - **Points are entities and curves refer to them by id.** Two curves that share a point id are joined there. A
   rectangle is four points and four lines.
-- **The document always stores solved coordinates.** A tool or a solver writes the resulting positions and radii
-  into the entities; the kernel builds geometry from the entities alone and never solves. A reader that does not
-  know a constraint type keeps it and ignores it. This is what lets a solver arrive without changing the format
-  or the kernel.
+- **The document always stores solved coordinates.** The sketcher solves every edit before committing it (the
+  solver is PlaneGCS compiled to WebAssembly, embedded in the page's bundle; `sketch/solver`) and writes the
+  resulting positions and radii into the entities; the kernel builds geometry from the entities alone and never
+  solves. A reader that does not know a constraint type keeps it and ignores it.
 - A dimension is a constraint with a `value` (mm, or degrees for an angle). `driving: false` is a reference
-  dimension. `expr` is the text it was typed as, for when variables exist. `label` is where its text sits.
-- `construction: true` on an entity keeps it out of profiles.
-- Reserved constraint type names: `coincident`, `horizontal`, `vertical`, `parallel`, `perpendicular`,
-  `tangent`, `equal`, `midpoint`, `concentric`, `symmetric`, `fix`, `distance`, `radius`, `diameter`, `angle`.
-- A sketch edit is one `MODIFIED` change on the feature item with one prop per entity
-  (`sketchEntitiesChange(featureId, { id: entity | null })` in `sketch/drawing.ts`).
-- New entity kinds (ellipse, spline, text) are new `type` values; `sketch/format.ts curvePoints` and
-  `features/sketch.ts edgeFor` are the two places that must learn them.
+  dimension. `expr` is the text it was typed as (`sketch/expr.ts`: arithmetic, units, variables). `label` is
+  where its text sits.
+- `construction: true` on an entity keeps it out of profiles. `from: GeomRef` on an entity says which edge of
+  the model it was projected from (Use edge).
+- Constraint type names: `coincident`, `horizontal`, `vertical`, `parallel`, `perpendicular`, `tangent`,
+  `equal`, `midpoint`, `concentric`, `collinear`, `symmetric`, `fix`, `distance`, `radius`, `diameter`, `angle`.
+  `sketch/refs.ts` says what their references mean.
+- A sketch edit is one `MODIFIED` change on the feature item with one prop per entity or constraint that
+  changed (`sketch/model.ts` `Draft`; the editor's `edit((draft) => …)` is the one way a tool changes a sketch).
+- New entity kinds (ellipse, spline, text) are new `type` values; `sketch/format.ts curvePoints`,
+  `features/sketch.ts edgeFor` and the solver's translation are the places that must learn them.
 
 Sketch planes: `top` is XY (normal +Z), `front` is XZ (normal −Y), `right` is YZ (normal +X). The ids are
 stored; never rename them. On a face, the frame comes from `Kernel.faceFrame`: the normal points out of the
 solid, x is the surface's own first direction, and the origin is the point of the plane nearest the world origin.
 
-Regions (`sketch/profiles.ts findRegions`): a closed loop is a chain of lines and arcs in which every point
-joins exactly two curves (by shared id or by position), or a circle. A loop inside another is a hole; a loop
-inside a hole is a region again. A region's id is the smallest entity id on its outer loop; treat it as opaque.
+**Regions** (`sketch/planar.ts`, with `sketch/profiles.ts` for the types): the closed regions of the planar
+arrangement of the sketch's curves, so curves may cross: two overlapping circles enclose three regions, a line
+across a rectangle splits it. A region's id is made from the curves on its boundary; treat it as opaque. A
+`profile` parameter is `{ sketch, regions: null | string[] }`: `null` is every region. In a dialog, the first
+click on a sketch takes all of it; clicks inside its regions then choose among them (from "all", a click leaves
+just that region, further clicks add and take away, "All" puts every region back).
+
+**The sketcher** (`sketch/editor.ts`, one `SketchEditor` per studio, `window.JunctionSketch` while a sketch is
+open) owns the pointer and the keys while a sketch is open, draws the sketch itself on a 2D canvas over the
+viewport, and shows its tools in a palette in the viewport (the `sketch` tools have no toolbar button; the
+toolbar shows Finish sketch). The Sketch panel in the right dock lists the dimensions and constraints. Esc
+puts a tool down and clears the selection; it never leaves the sketch (Finish sketch does).
+
+- Drawing tools (`sketch/shapes.ts`, engine `sketch/draw.ts`): line, rectangle, centre rectangle, circle, three
+  kinds of arc, slot, point; inference while drawing (`sketch/infer.ts`); a measure typed while drawing becomes
+  a dimension.
+- Modify (`sketch/ops.ts`): fillet, trim, extend, offset, mirror, construction, and **Use edge**
+  (`sketch/modify.ts`, the `sketch-project` service): an edge or a corner of the model drawn in the sketch,
+  projected onto its plane and fixed there. Any edge of the model as it is at that point of the tree can be
+  used, including a Board feature's outline and hole rims when the Board feature comes before the sketch (its
+  solids are hidden under the board's picture but are there for the pointer).
+- Constraints (`sketch/constrain.ts`) and dimensions (`sketch/dimension.ts`): select then press, or press then
+  click. The status line says under-constrained with the freedoms left, fully constrained, or names what
+  conflicts.
+
+## Features
 
 ## Features
 
@@ -309,6 +372,8 @@ export interface FeatureDefinition<P> {
   evaluate(ctx: EvalContext, params: P): void | Promise<void>;   // runs in the worker
   toolbar?: boolean;            // false: no toolbar button
   toolbarOrder?: number;
+  toolbarSection?: "sketch" | "solid" | "pattern" | "reference" | "board";   // which part of the toolbar ("solid")
+  toolbarMenu?: string;         // features of one section with the same menu share a drop-down ("Fillet")
 }
 ```
 
@@ -320,10 +385,14 @@ export interface FeatureDefinition<P> {
 | `boolean` | a boolean | a checkbox |
 | `text` | a string | a text field |
 | `enum` (`options`) | a string | a segmented control, or a select above four options |
-| `profile` | `{ sketch: <feature id>, regions: null \| string[] }` | a list of earlier sketches; click one in the viewport |
-| `plane` | a `PlaneRef` | Top / Front / Right, or click a planar face |
-| `refs` (`of: GeomKind[]`, `single?`) | `GeomRef[]` (or one) | click faces, edges or vertices in the viewport |
+| `profile` | `{ sketch: <feature id>, regions: null \| string[] }` | a list of earlier sketches; click one in the viewport, then its regions to choose among them |
+| `plane` | a `PlaneRef` | Top / Front / Right, or click a planar face or a reference plane |
+| `refs` (`of: GeomKind[]`, `single?`, `datums?`, `planes?`, `sketch?`) | `GeomRef[]` (or one); a `RefTarget` (`features/_refs.ts`) for a default plane, reference geometry or a sketch curve | click faces, edges or vertices in the viewport; with the options, reference geometry, the default planes (also buttons) and sketch curves |
+| `features` (`types?`, `exclude?`) | `string[]` of earlier feature ids, in the order picked | a list of the earlier features |
 | `bodies` | `string[]` of body ids; empty means every body | click a body |
+| `document` (`docTypes`) | another document's id | a list of the project's documents of those types |
+
+A number field accepts an expression (see "Variables").
 
 A feature file is bundled into both the page and the worker. **It must not touch the DOM, three.js or React at
 module level**, and `evaluate` must use only its context.
@@ -334,8 +403,11 @@ module level**, and `evaluate` must use only its context.
 ctx.oc                         // the raw OpenCascade bindings (typed: OpenCascadeInstance)
 ctx.k                          // helpers: sub(), list(), prism(), boolean(), carryNames(), faceFrame(), volume(), …
 ctx.feature                    // { id, type, name }
-ctx.bodies(), ctx.body(id)
-ctx.addBody(shape, names, { suffix?, name? })      // names: (face, index) => string | null
+ctx.bodies(), ctx.body(id)     // bodies() leaves out reference bodies (a Board feature's board); body(id) finds any
+ctx.allBodies()
+ctx.addBody(shape, names, { suffix?, name?, reference? })   // names: (face, index) => string | null
+ctx.datum(id), ctx.setDatum(d) // reference planes, axes, points, curves
+ctx.history(id)                // the model just before and just after an earlier feature (patterns, mirror)
 ctx.replaceBody(body, shape, names)                // keeps the body's id and name
 ctx.removeBody(body)
 ctx.sketch(featureId)          // SketchGeometry: frame, regions (kernel faces with their edges), open curves
@@ -425,6 +497,43 @@ before relying on them: the example has not been run.)
 - While a dialog is open the page sends the draft in place of (or inserted among) the document's features, and
   while a sketch is open it sends the list rolled back to that sketch. That is local: the document's `rollback`
   is not touched.
+- A body may be a **reference body** (`Body.reference`, `BodyResult.reference`): there to be referred to and
+  drawn, not a part. Features that act on "every body" leave it alone, mass properties leave it out by default,
+  the Parts panel marks it, and the board editor's enclosure does not draw it.
+
+### Building a part studio outside its page (`document/inputs.ts`)
+
+A part studio is built in many places besides its own tab: an assembly drawing an instance, Compare, the
+history view, the assistant's host, the board editor's enclosure, the interference check. **All of them turn the
+document into the worker's input with one function**, so they all build the same model:
+
+```ts
+import { studioInputs, BoardFeed } from "mechanical/api";
+const feed = new BoardFeed({ signedIn, changed: () => rebuild() });       // only if the studio may hold a Board feature
+const { features, rollback } = studioInputs(doc, { filters: [feed.filter] });
+const result = await kernel.regenerate(features, rollback);
+```
+
+`studioInputs` takes the features in order, replaces numbers typed as expressions by their values under the
+document's variables (`document/variables.ts resolveInputs`), then runs the input filters. A filter supplies
+what a feature needs that is not in the document. There is one today: a Board feature's board (`$board`),
+which is read live from the board document and never stored. On the studio's own page the filter is
+`board/link.ts` (which also draws the board); everywhere else it is `board/feed.ts` `BoardFeed`, which opens the
+boards it meets on the collaboration socket, read-only, and calls `changed` when a board arrives or an edit of
+it changes what a feature is built from. A caller that builds once awaits `feed.settled()` first.
+
+| Who builds a part studio | Where | How |
+|---|---|---|
+| Its own page | `ui/studio.ts regen` | `studioInputs` with `studio.inputFilters` (the dialog's draft laid over the features) |
+| An assembly instance of a part | `assembly/sources/part.ts` | `studioInputs` + a `BoardFeed` per studio; rebuilt when the studio or its boards change |
+| The interference check, the bill of materials | `assembly/services/interference-sources.ts` | nothing of its own: the editor's handles and workers (`handle.ensureKernel()`) |
+| Compare | `compare/index.tsx` | `studioInputs` + a `BoardFeed` per side, awaited |
+| An earlier version on screen | `studio.showPast(doc)` | the page's own path |
+| The assistant | `mcp/host.ts` | `studioInputs` + a `BoardFeed` on the host's socket |
+| The board editor's 3D enclosure | `pcb/mech/enclosure.ts` | `studioInputs` + a `BoardFeed`; reference bodies are not drawn |
+| Thumbnails, exports | the page | the page's own model |
+
+A board is not part of a version: an earlier version of a part studio is built with the board as it is now.
 
 ## Geometry names
 
@@ -487,7 +596,7 @@ material elsewhere on the body. Tested: `static/tests/mechanical-kernel.test.js`
 ### Protocol (`kernel/protocol.ts`)
 
 ```
-page → worker   { t: "init", wasmUrl }
+page → worker   { t: "init", wasmUrl, module? }      // module: the kernel as the page compiled it
                 { t: "regen", seq, features: FeatureInput[], rollback: number, have: number[] }
                 { t: "call", seq, service: string, args: Json }
 worker → page   { t: "ready", ms } | { t: "failed", message }
@@ -511,7 +620,16 @@ bbox:     [xmin, ymin, zmin, xmax, ymax, zmax]
 Messages are handled one at a time, in order; a regeneration is skipped when a newer one is already waiting.
 `KernelClient` (`kernel/client.ts`) is the page's end: `regenerate(features, rollback)` resolves with the
 result, or null when a newer request overtook it; `call(service, args)` resolves with the service's JSON.
-Nothing is loaded until the first regeneration: opening a board never fetches the kernel.
+Nothing is loaded until the first regeneration: opening a board never fetches the kernel. The kernel's module
+is compiled once per page (`kernel/wasm.ts`, retried when a download is cut short) and handed to every worker
+the page starts, so an assembly's second and third worker do not download or compile 23 MB again.
+
+**Meshes** (`kernel/tessellate.ts qualityFor`). A body is meshed for the screen with a chord tolerance of half a
+thousandth of its diagonal (between 0.01 and 0.5 mm) and an angular tolerance of 0.3 rad, loosened to 0.5 on a
+body of more than 150 faces and 0.8 on one of more than 300. The angle is what decides how many segments a
+small hole or fillet gets, and the mesher's time grows faster than the number of points on a face's
+boundaries: a 200 mm plate with 400 holes took 4.0 s to mesh at the former fixed 0.05 mm / 0.3 rad and 0.6 s
+now (the whole rebuild 5.8 s → 1.8 s; measured in node). Exports mesh at their own resolution.
 
 ### Services (`kernel/service.ts`)
 
@@ -526,9 +644,12 @@ export default defineService({
 // page:  const mass = await studio.kernel.call("mass-properties", { body: bodyId });
 ```
 
-`ctx.state` is the model the page is showing (after the last regeneration). The result is JSON; to return large
-binary data (an STL), return a base64 string for now, or extend the protocol with a transferable result
-(additive: a `buffers` field on the `call` reply).
+`ctx.state` is the model the page is showing (after the last regeneration). The result is JSON, and may hold
+typed arrays (an exported file): they are transferred (`kernel/ops/exchange-export.ts transferables`).
+
+Services today: `mass-properties`, `measure-entities`, `measure-clearance`, `interference` and `clearance`
+(shapes sent as BRep text, for the assembly), `body-brep`, `export-step`, `export-mesh`, `export-outline`,
+`export-convert`, `sketch-project`, `compare-versions`, `board-placement`, `boardlink-solve`.
 
 ### The kernel
 
@@ -547,33 +668,80 @@ offset, thick solid, draft, loft, pipe, STEP read and write, `GProp`, `BRepExtre
 
 ## The toolbar and panels
 
-### Tools (`core/tool.ts`)
+### The toolbar (`ui/Toolbar.tsx`)
+
+Drawn from the registries; nothing is listed by hand.
+
+```
+undo redo delete │ Sketch │ Extrude Revolve Sweep▾ Fillet▾ Shell Hole Boolean▾ │ Pattern▾ │ Reference▾ │ Board▾ │ Measure Section Comment │ Planes Display Perspective │ History Import Export
+     edit          sketch                     solid                              pattern    reference    board            inspect                    view                    file
+```
+
+- A **feature** says which section it is in (`toolbarSection`, "solid" when absent) and, when it is one of a
+  family, which drop-down it shares (`toolbarMenu`): Sweep ▾ holds Sweep and Loft; Fillet ▾ Fillet, Chamfer and
+  Draft; Boolean ▾ Boolean, Split, Delete body and Transform; Pattern ▾ Linear pattern, Circular pattern and
+  Mirror; Reference ▾ Plane, Axis, Point and Helix; Board ▾ Board, Opening and Standoffs. A family of one is a
+  plain button. Order inside a section is `toolbarOrder`.
+- A **tool** (`core/tool.ts`) names its group (`edit`, `sketch`, `feature`, `inspect`, `view`, `file`) and may
+  name a `menu` the same way. Tools in `sketch` show only while a sketch is open, and the feature sections are
+  hidden meanwhile.
+- **The bar does not scroll sideways** in a window of ordinary width. When the buttons do not fit, the tools
+  lose their labels (`data-density="1"`), then the features (`"2"`: about 1000 px of icons); every button keeps
+  its tooltip, with its key. In a script, click a button with `scripts/cad-chrome.mjs` `tool(page, "Chamfer")`,
+  which opens the drop-down when the button is in one.
 
 ```ts
 export default defineTool({
   id: "measure", title: "Measure", hint: "Click two things", icon: "<path …/>",
-  group: "inspect",            // "edit" | "sketch" | "feature" | "inspect" | "view" | "file"
-  order: 10, key: "m",
+  group: "inspect", order: 10, key: "m",
   disabled: (studio) => (studio.getState().bodies.length ? null : "Nothing to measure"),
   active: (studio) => false,
   run: (studio) => { … },
 });
 ```
 
-Every feature type gets a button in the `feature` group for free. Tools in `sketch` show only while a sketch is
-open, and the feature buttons are hidden meanwhile. `key` runs the tool while the viewport has the keyboard.
+**Keys.** `key` runs the tool while the viewport has the keyboard. While a sketch is open the sketcher gets
+every key first and looks only among the `sketch` tools, so a letter may mean one thing in a sketch and another
+outside it. Taken today:
 
-A tool that takes over the pointer (a sketch tool, a measure tool) sets `studio.view.pointerTool = { down, move,
-up }` and `studio.keyHandler`, and draws its rubber band with `studio.view.setOverlay(segments, dots)`. The
-two-point sketch tools share `sketch/drawing.ts startTwoPointTool`; `tools/sketch-rectangle.ts` is nine lines.
+| | Outside a sketch | In a sketch |
+|---|---|---|
+| M | Measure | Mirror |
+| X | Section view | Extend |
+| H / I | Hide / Isolate the selected parts | Horizontal / Coincident |
+| W, P | Display mode, Perspective | the same |
+| L R C A, Q, F T O U, V B E D | — | Line, Rectangle, Circle, Arc; Construction; Fillet, Trim, Offset, Use edge; Vertical, Parallel, Equal, Dimension |
+| Del, Esc, Enter, Ctrl+Z / Y | delete; cancel or clear; accept the dialog; undo / redo | delete; put the tool down; accept a typed value; undo / redo |
 
-### Panels
+Do not give a tool outside the `sketch` group a letter another such tool has (`static/tests/mechanical-doc.test.js`
+checks it). The assembly's keys are its own (I Insert, F Fix, E Explode).
+
+A tool that takes over the pointer sets `studio.view.pointerTool = { down, move, up }` and `studio.keyHandler`,
+and draws its rubber band with `studio.view.setOverlay(segments, dots)`.
+
+### Panels and docks (`core/tool.ts`, `ui/panels.ts`)
 
 ```ts
-export default definePanel({ id: "measure", title: "Measure", side: "right", order: 10, render: (studio) => <Measure studio={studio} /> });
+export default definePanel({
+  id: "mass-properties", title: "Mass properties", side: "right", order: 20,
+  open: false,                                       // or (studio) => boolean; open when absent
+  visible: (studio) => true,                         // in its dock only while this holds
+  render: (studio) => <MassProperties studio={studio} />,
+});
 ```
 
 A panel is a React component that reads the studio with `useStudio(studio, (s) => s.bodies)` (`ui/hooks.ts`).
+`side: "overlay"` is drawn over the viewport with no frame (the measure readout, the section controls).
+
+- **Every panel folds** by its header, and each dock folds to a rail; what a person chose is remembered in the
+  browser. A panel the person has not touched follows `open`: the Board panel unfolds when the part studio has a
+  Board feature or a link. `showPanel(id)` (`ui/panels.ts`) unfolds a panel from a tool (Comment does).
+- **A folded panel stays mounted**: some panels keep a part of the studio alive (the Collaborators panel the
+  collaboration layer, the Sketch panel the sketch palette). A panel whose content costs something to keep
+  current asks `usePanelOpen(studio, id)` and does nothing while folded (mass properties does).
+- Left dock: Features, Parts. Right dock: Sketch (while a sketch is open), Variables, Mass properties (folded),
+  Appearance (folded), Board (unfolds itself), Collaborators, Comments (folded).
+- In a script, `scripts/cad-chrome.mjs` `openPanel(page, id)` unfolds one.
 
 ### `PartStudio` (`ui/studio.ts`)
 
@@ -593,7 +761,14 @@ studio.select(picks), studio.selectFeature(id)
 studio.startFeature(type), studio.editFeature(id), studio.setDraft(patch), studio.acceptFeature(), studio.cancelFeature()
 studio.openSketch(id), studio.finishSketch(), studio.setSketchTool(id)
 studio.host                    // DocumentHostContext: project, doc, docs, toast(), openDoc()
+studio.inputFilters            // what is added to the worker's input before every regeneration (never stored)
+studio.onRegen                 // called after every regeneration whose result was shown
+studio.scheduleRegen()         // an input filter's data changed: build again
+studio.showPast(doc, label)    // an earlier version in place of the live document (null: back)
+studio.setUi({ key: value })   // interface state of a tool or panel, kept in getState().ui
 ```
+
+`studioExtensions.push((studio) => stop)` registers something that lives as long as each studio is open.
 
 `window.JunctionPartStudio` is the open studio, for tests and the console.
 
@@ -603,11 +778,14 @@ studio.host                    // DocumentHostContext: project, doc, docs, toast
 type Pick =
   | { kind: "face" | "edge" | "vertex"; body: string; name: string; point: Vec3 }
   | { kind: "plane"; plane: "top" | "front" | "right"; point: Vec3 }
-  | { kind: "sketch"; featureId: string; entity: string | null; region: string | null; point: Vec3 };
+  | { kind: "sketch"; featureId: string; entity: string | null; region: string | null; point: Vec3 }
+  | { kind: "datum"; featureId: string; datum: "plane" | "axis" | "point" | "curve"; point: Vec3 };
 ```
 
 A vertex wins over an edge wins over a face when the pointer is within a few pixels; a body wins over a sketch
-wins over a plane. Hover and selection are highlighted from the same picks. Turn a pick into a stored reference
+wins over a plane. A body that is drawn in another way (`view.bodyStyle` returns `faces: false`: a Board
+feature's solids under the board's picture) is still found by the pointer; anything that sets a body's
+visibility (display modes do) must ask `bodyStyle` first. Hover and selection are highlighted from the same picks. Turn a pick into a stored reference
 with `{ kind, body, name }`.
 
 Viewport navigation: right-drag orbits, middle-drag or Shift + right-drag pans, the wheel zooms about the
@@ -660,13 +838,11 @@ the ack was lost), so that op is not put back on top of what others did after it
 runs several sessions against a sequencing server in every delivery order and checks they end on the server's fold.
 
 **The project room** (`platform/doctabs/room.ts`, started by the tabs; `projectRoom()` in `roomapi.ts` for a
-bundle). The server has no channel per project, so every page opens one more socket, joins the project's first
-four part studios and assemblies (by id) with it, and says there which tab the person is on and a counter that
-it raises when it adds, renames or deletes a document. Everybody who sees a counter move fetches the tab list.
-Limits: a project with no part studio or assembly has no room and looks at its tabs every twenty seconds
-instead; a document made by something that is not the tabs (an upload, an agent) is announced by nobody and
-appears on the next look or focus; the watcher receives the joined documents' files once and their edits as they
-come, and ignores them. A server-side "project changed" notice would replace all of it.
+bundle) is who is in the project and on which tab. Presence on the server is per document, so every page opens
+one more socket, joins the project's first four part studios and assemblies (by id) with it, and says there
+which tab the person is on. A project with no part studio or assembly has no room: nobody is shown on its tabs.
+That the project's documents changed is not the room's business: the server says so (the `docs` notice, under
+"How a change is committed and synced").
 
 **Comments** (`collab/comments.ts`, `collab/anchor.ts`). A thread's anchor is the platform's `{ kind: "item",
 id, label, item }`: `id` is a feature id, or `face:<name>` / `edge:<name>` / `vertex:<name>` with the body id in
@@ -704,45 +880,58 @@ registerDocumentEditor({
 - The menu bar shows the project name and role in the `cad` view and no KiCad menus. A domain that needs menus
   should get them through an interface on the menu bar, not by importing into `shared/` (see the roadmap).
 
-## The assembly (`.jasm`, `assembly/document/format.ts`)
+## Boards (`board/`, `boardlink/`, `../pcb/mech/`)
+
+Two directions, each with its README; what joins them is here.
+
+- **PCB → CAD.** The Board feature (`features/board-reference.ts`) shows a board of the project in a part
+  studio as two reference bodies with stable names (`<feature>:front`, `:hole:H1`, `:part:J1:top`, …) under a
+  picture of the board as it looks, and follows the board while it is edited. Opening and Standoffs hang off
+  those names. [`board/README.md`](board/README.md).
+- **CAD → PCB.** A `board-link` item per board says what the model drives on it: the outline, mounting holes,
+  keep-outs with height limits. The part studio's page solves the drives into board geometry and stores the
+  answer in the link; the board editor writes the items. [`boardlink/README.md`](boardlink/README.md),
+  [`../pcb/mech/README.md`](../pcb/mech/README.md).
+- **One placement.** A board that is both shown in a part studio and driven by it lies in one place: where its
+  Board feature puts it. The link names the feature (`feature: <id>`); its own `plane`, `lift`, `anchor` and
+  `rotation` are then not used. The worker takes the frame the feature was built with, and the feature's
+  `origin` as the sheet point at that frame's origin (`boardlink/solve.ts`); the answer carries them
+  (`solved.frame`, `solved.anchor`, `solved.rotation`), which is what the board editor reads (`placementOf`).
+  In the Board panel either way is one step: **Link this board** on a studio that shows the board makes a link
+  placed by the feature; **Show the board in the model** on a link without one adds a Board feature exactly
+  where the link has the board (the link's plane and lift, its sheet anchor as the feature's origin, the
+  opposite turn) and hands the placement to it. A link with no Board feature keeps its own four values.
+- **One panel.** "Board" in the right dock lists the boards the studio shows and the board it drives.
+- The loop is closed and stable: the tray drives the outline, the outline changes the board, the Board feature
+  is rebuilt from the board, the link is solved again and gives the same answer.
+
+## Assemblies (`.jasm`)
+
+[`../assembly/README.md`](../assembly/README.md) is the contract: the document, mates and the solver, sources,
+what a tool is handed. In short:
 
 ```ts
 { id: "assembly", type: "assembly", units: "mm" }
-{ id, type: "instance", name, order, source, transform, fixed?, suppressed?, hidden? }
+{ id, type: "instance", name, order, source, transform, fixed?, suppressed?, hidden?, group? }
 { id, type: "mate", mateType: "fastened", name, order, a, b, params, suppressed? }
 ```
 
-- `source` is `{ kind: "part", docId, body }`, `{ kind: "board", docId }`, `{ kind: "assembly", docId }` or
-  `{ kind: "file", docId }`, each with an optional `version` to pin it. An instance copies no geometry: the
-  assembly follows the source document.
-- `transform` is twelve numbers, the rows of a 3 × 4 matrix (rotation and translation, mm).
-  **The document always stores solved placements**, as the sketch stores solved coordinates.
-- A mate ties connector `a` to connector `b`: `{ instance, ref: GeomRef, flip? }`. The `ref` uses the geometry
-  names above, in the instance's source body. For a board, the electronics domain must define the names it
-  offers (mounting holes, connector faces); that is not designed yet.
-- Mate types are files under `assembly/mates/` (`core/mate.ts`):
-
-```ts
-export default defineMate({
-  type: "revolute", title: "Revolute", icon: "…", defaults: () => ({ offset: 0 }),
-  schema: [{ key: "offset", label: "Offset", kind: "number", unit: "mm" }],
-  freedom: { translation: 0, rotation: 1 },
-  place(a, b, bNow, params) { /* frames in assembly space → b's new Transform */ },
-});
-```
-
-  `place` answers one mate alone. A solver for several mates at once is not built; when it is, it reads the
-  same definitions and adds its own hook beside `place`.
-
-What exists: the document kind, its tab, the editor frame (`assembly/ui`) with the instance and mate lists and
-an empty viewport, a toolbar drawn from `assembly/tools/*.ts` (none yet), `mates/fastened.ts`, placement
-arithmetic (`core/transform.ts`). What does not: inserting anything, drawing instances, connectors, solving.
-
-To draw a part-studio instance: open its document with `ItemDocSession` (`expectKind: PART_STUDIO_KIND`), turn
-it into worker input with `featuresOf` and `featureInputs`, regenerate with a `KernelClient`, and draw each
-`BodyMesh` (all exported from `mechanical/api.ts`). One worker can serve several documents only one at a time
-(the engine caches one feature list); use one `KernelClient` per source document, or extend the protocol with a
-document key (additive).
+- `source` is `{ kind: "part", docId, body }`, `{ kind: "board", docId }` or `{ kind: "assembly", docId }`
+  (`{ kind: "file" }` is carried and has no provider). An instance copies no geometry: the assembly follows the
+  source document, live.
+- `transform` is twelve numbers, the rows of a 3 × 4 matrix. **The document stores solved placements.**
+- A mate ties connector `a` to connector `b`: `{ instance, ref: GeomRef, flip? }`, by the geometry names above.
+- **A part studio that holds a Board feature** is built with its board (see "Building a part studio outside its
+  page"), so its board bodies can be instanced like any part.
+- **A board itself** (`sources/board.ts`) is built by the same code as a Board feature, as a studio of one Board
+  feature with id `board` on the Top plane and the sheet's origin as its origin: pieces `board:board` and
+  `board:parts`, faces `board:front`, `board:back`, `board:hole:H1`, `board:part:J1:top`. The pieces are ghosts:
+  the editor draws the board as it looks (`viewport/boards.ts`) and the solids are there for the pointer, the
+  mates and the checks. Insert puts a new one with its middle at the origin.
+- **Interference and the bill of materials** (`tools/interference.ts`, `tools/bom.ts`) read the editor's own
+  instances, placements, source handles and workers (`assembly.placed()`, `handle.ensureKernel()`), open as
+  docked panels (`assembly.showPanel`; the table at the bottom), and mark the instances that clash
+  (`scene.setMarked`). Parts and boards are checked exactly; the parts inside a sub-assembly are not yet.
 
 ## Running and testing
 
@@ -750,29 +939,25 @@ document key (additive).
 cd server
 npm ci
 npm run check                      # generates the registries, then tsc
-npm run build                      # every bundle; static/dist/{mechanical,assembly,cad-worker}.js are committed
-node scripts/ci-web-tests.mjs      # all web tests, including the five below
+npm run build                      # every bundle; the outputs under static/ are committed
+node scripts/ci-web-tests.mjs      # all web tests, including the ones below
 cargo test --locked && cargo clippy --locked --all-targets
 ```
 
-Tests for this work, each runnable alone with `node static/tests/<name>.test.js`:
+Tests, each runnable alone with `node static/tests/<name>.test.js`:
 
 | Test | Covers |
 |---|---|
-| `itemdoc` | file format, change rules, order keys, the session against a scripted socket |
-| `doctabs` | which documents get tabs, new names, renames, the registry's document kinds |
-| `mechanical-doc` | the `.jpart` format, every edit, sketch helpers, region finding |
+| `itemdoc`, `doctabs` | file format, change rules, order keys, the session against a scripted socket; the tabs |
+| `mechanical-doc` | the `.jpart` format, every edit, sketch helpers, region finding, the toolbar's keys |
 | `mechanical-kernel` | **the real kernel in node**: sketch → extrude, booleans, names across rebuilds, cache, rollback, errors |
-| `assembly-doc` | the `.jasm` format, the mate registry, Fastened |
-| `mechanical-collab` | presence states, the draft's rebase, comment anchors and pins, the project room, and sessions under concurrent edits (random delivery orders, offline periods) against the server's fold |
-| `cargo test itemdoc` | the server's fold of ops into the stored file |
-| `cargo test itemmerge`, `cargo test dockind` | the merge rules for item documents, and what each document kind answers |
-| `cad-history` | the feature diff, the 3D diff in the real kernel, the history list |
-| `cad-mcp` | the AI tools' planning and validation, a plan built in the real kernel, the software render |
-
-Against a running server: `scripts/cad-history-ui.mjs` (history, compare, branches and merge, thumbnails, in
-Chromium), `scripts/cad-history-mcp.mjs` (a JSON-RPC session on `/mcp` that makes and edits a part) and
-`scripts/cad-history-github.mjs` (push, pull and merge against `scripts/fake-github.mjs`).
+| `mechanical-features`, `mechanical-patterns` | every solid feature; reference geometry, patterns, sweep, loft, variables |
+| `mechanical-collab` | presence, the draft's rebase, comment anchors, the project room, the `docs` notice, sessions under concurrent edits |
+| `mechanical-board`, `cad-boardlink`, `pcb-mech` | the board reader and its solids; the link, its transform and solver; the board editor's reconciler and check |
+| `mechanical-exchange`, `cad-analysis` | import (with its cache) and every export; measure, section, mass, interference, the bill of materials |
+| `assembly-doc`, `assembly-solver`, `assembly-model` | the `.jasm` format; every mate and the solver; connectors, an assembly following a rebuilt part |
+| `cad-history`, `cad-mcp` | the feature diff and the 3D diff; the assistant's planning and a plan built in the real kernel |
+| `cargo test itemdoc`, `itemmerge`, `dockind` | the server's fold, merge rules, and what each document kind answers |
 
 `static/tests/cad-load.js` bundles a module for a node test: `const { load } = require("./cad-load"); const F =
 load("domains/mechanical/document/format.ts");`. New test files must be added to the `for t in …` list of the
@@ -785,24 +970,33 @@ DATABASE_URL=postgres://user:pass@127.0.0.1:5432/db JWT_SECRET=dev PUBLIC_URL=ht
   KC_DEV_LOGIN=1 cargo run
 ```
 
-`scripts/cad-ui.mjs` drives the real app in Chromium against such a server (Playwright, and `psql` to make its
-two test users): tabs, sketch, extrude, picking, tab switching, two people editing, a sketch on a face, the
-rollback bar, the error state, the server's fold. Run it after any change to the shell, the session or the
-studio; add to it when you add something a person does:
+**Browser scripts**, against such a server (Playwright, and `psql` to make their test users; each header says
+what it needs):
 
 ```sh
-E2E_PG_URL=postgres://user:pass@127.0.0.1:5432/db E2E_JWT_SECRET=dev SHOTS=/tmp/shots node scripts/cad-ui.mjs
+E2E_PG_URL=postgres://user:pass@127.0.0.1:5432/db E2E_JWT_SECRET=dev E2E_BASE=http://127.0.0.1:8099 SHOTS=/tmp/shots \
+  node scripts/cad-e2e.mjs
 ```
 
-`scripts/cad-collab-ui.mjs` is the same for collaboration, with two and three people in separate browser
-contexts: presence, Follow (also across tabs), two people in one dialog, a delete under an open dialog, bursts of
-edits, time offline, the live tab list, comments. `ONLY=tabs,comments` runs some of its parts.
+| Script | What a person does in it |
+|---|---|
+| **`cad-e2e`** | **the whole story, two people, one project**: a constrained tray, shell, fillet, patterned bosses, the board in the tray, the tray driving the board, an opening following a connector, an assembly with a hinged lid and the board, interference, the bill of materials, measure, versions compared, STEP. Run it after any change that crosses folders. |
+| `cad-ui` | tabs, sketch, extrude, picking, two people editing, rollback, the stored file |
+| `cad-sketch-ui` | the sketcher: every tool, constraints, dimensions, conflicts |
+| `cad-features-ui`, `cad-patterns-ui` | the solid features; reference geometry, patterns, sweep, variables |
+| `cad-collab-ui` | presence, Follow, two people in one dialog, the live tab list, comments (`ONLY=tabs,comments`) |
+| `cad-board-ui`, `cad-boardlink-ui` | a board in a part studio following the board editor; a part studio driving a board |
+| `cad-assembly-ui`, `cad-analysis-ui`, `cad-exchange-ui` | assemblies and mates; inspection, interference, the bill of materials; import and export |
+| `cad-history-ui`, `cad-history-mcp`, `cad-history-github` | history, compare, branches; the assistant's tools over `/mcp`; GitHub sync against `scripts/fake-github.mjs` |
+
+`scripts/cad-chrome.mjs` is what they share about the chrome (`tool`, `toolTitles`, `openPanel`). Each script
+makes its own users (distinct `github_id`s: give a new script its own range).
 
 The server embeds the browser bundles when it is compiled, so a change under `server/web` does not show in a
-server that is already built. `scripts/cad-static-proxy.mjs` stands in front of such a server and answers the
-bundle requests from `server/static` on disk: `npm run build`, start the server on another port with
-`PUBLIC_URL` set to the proxy's address, then `PORT=8099 UPSTREAM=http://127.0.0.1:18099 node
-scripts/cad-static-proxy.mjs` and point the browser or the scripts at it.
+server that is already built: `npm run build`, then `cargo build`. While working, `scripts/cad-static-proxy.mjs`
+stands in front of a built server and answers the bundle requests from `server/static` on disk: start the
+server on another port with `PUBLIC_URL` set to the proxy's address, then `PORT=8099
+UPSTREAM=http://127.0.0.1:18099 node scripts/cad-static-proxy.mjs` and point the browser or the scripts at it.
 
 With `KC_DEV_LOGIN=1`, `/auth/dev?jwt=<token>&next=/` signs a browser in with a JWT signed by `JWT_SECRET`
 (`{ sub: <users.id>, login, iat, exp }`, HS256); insert the user row first. In a browser test, wait on
@@ -841,42 +1035,52 @@ shape. **Sweep** and **Loft** name faces `<id>:start…`, `<id>:end…`, `<id>:s
 panel). A number field accepts an expression; the feature keeps the number and the text under
 `params.$expr = { <key>: "<text>" }`. The page evaluates every `$expr` again before each regeneration
 (`resolveInputs`, in `studio.ts`), and editing a variable rewrites the stored numbers that depend on it in the same
-change. A reader of a `.jpart` that does not know variables sees plain numbers. Anything else that regenerates a
-part studio (an assembly drawing an instance) should call `resolveInputs` too.
+change. A reader of a `.jpart` that does not know variables sees plain numbers. Everything else that builds a part
+studio applies them through `studioInputs` (see "Building a part studio outside its page").
+
+**Import** (`features/import-file.ts`, the Import tool, "+" › Open STEP file…) reads a STEP or BREP file stored
+with the project into real bodies; faces are named `<feature>:s<solid>:f<face>` by their place in the file.
+What was read is kept in the browser as BREP (`kernel/ops/exchange-cache.ts`, IndexedDB, keyed by the file's
+document id, size and path; the newest six): the next evaluation in that browser reads the BREP back and does
+not download the file. Measured on the 4.4 MB demo STEP in Chromium: the figures are in
+`scripts/cad-exchange-ui.mjs`' output.
 
 ## Limits, in one place
 
-- **No constraint solver, no dimensions.** Sketch tools snap to existing points, to the origin and to round
-  numbers (1-2-5 steps that depend on the zoom). There is no way to type a size while drawing.
-- **Sketch tools:** line, rectangle, circle, select, delete. No arc tool (arcs in the data are built and tested),
-  no trim, no drag to move a point, no construction toggle.
-- **Regions** are simple closed loops with even-odd nesting. Crossing curves and T-junctions make no region.
-  Extrude takes all regions of a sketch or the ones listed in `regions`; the dialog cannot pick single regions yet.
-- **Solid features** (`features/`, shared kernel code in `kernel/ops/`, tested by `static/tests/mechanical-features.test.js`
-  and `scripts/cad-features-ui.mjs`): Extrude (depth, symmetric, through all, up to face, up to next, second
-  direction, draft, thin; new / add / remove / intersect), Revolve, Fillet, Chamfer, Shell, Draft, Hole, Boolean,
-  Delete body, Split, Transform.  Not done: up to face with an offset, up to a vertex or body; a fillet with a
-  variable radius or one that stops tangent propagation; hole threads (a tapped hole is its tap drill); thicken
-  and offset face.  "Up to face" on a curved face stops at that face's body (as Up to next, against one body).
-  Revolve's axis is a loose line of the sketch, the sketch's X or Y, or a straight edge: the dialog cannot pick
-  one sketch line among several (the first loose line is used, with a warning).
+- **Sketcher.** No ellipse, spline or text. Use edge takes straight and circular edges, and what it draws does
+  not follow the model afterwards (the source is recorded as `from`). A sketch cannot use a feature that comes
+  after it in the tree: to project a board's outline, the Board feature must come first.
+- **Regions** come from the curves as drawn: a region id may change when the curves around it are redrawn, and a
+  feature that listed it then says its regions are gone.
+- **Solid features.** Not done: up to face with an offset, up to a vertex or body; a fillet with a variable
+  radius or one that stops tangent propagation; hole threads (a tapped hole is its tap drill); thicken and
+  offset face. "Up to face" on a curved face stops at that face's body. Revolve's axis is a loose line of its
+  sketch, the sketch's X or Y, or anything picked: an edge, a line of any sketch, a reference axis.
+- **Patterns** copy what a feature did, moved; a copy of a feature whose shape depends on where it is (a fillet
+  meeting other geometry) keeps the seed's shape.
 - **Geometry names** have the limits listed under "Geometry names".
-- **One kernel thread, no cancellation.** A long evaluation blocks the next; the page stays responsive.
+- **One kernel thread per worker, no cancellation.** A long evaluation blocks the next; the page stays responsive.
+- **Meshes** are per body, not per view: a small hole on a large part with hundreds of faces is an octagon when
+  zoomed into (see "Meshes"); there is no refinement on zoom.
 - **Kernel memory** is released per cached feature; a very long session on a very large model has not been profiled.
-- **The feature dialog** has no expression input and no units other than millimetres and degrees.
-- **Collaboration:** edits merge per path, last writer wins. Two people editing one parameter at once: the later
-  one wins, silently. Presence is carried but not drawn. There is no lock on a feature someone else has open.
-- **Platform gaps** for these documents: comments UI, live tab list, and for assemblies an earlier version on
-  screen, compare and MCP tools (see the tables under "How a change is committed and synced").
+- **Import.** The cache is per browser: every collaborator's browser reads a file once. A file replaced under
+  the same document id and size would be served from the cache; uploads never do that. Reading a large STEP for
+  the first time is still slow (the 24 MB module of the demos: about a minute and a half to first draw).
+- **Boards.** See the READMEs. Here: a board is not part of a version (an earlier version shows the board as it
+  is now); outside the studio's own page part envelopes come from the footprints, not the 3D models, so a tall
+  connector's box may differ slightly between an assembly and the studio (names do not); a board lying parts
+  side down can be shown but the height limits of a link assume the front faces away from the plane.
+- **Assemblies.** See the README. Here: the parts inside a sub-assembly are not checked for interference; a
+  board inserted before it has been read is placed at the sheet's origin, not its middle; no earlier version on
+  screen, no Compare, no MCP tools, no thumbnail.
+- **Collaboration.** Edits merge per path, last writer wins; two direct commits to one parameter: the later one
+  wins, silently. No lock on a feature someone else has open, by design. Not done: a thread on a sketch entity
+  or an assembly instance; mentions; a pin hidden behind the model is still drawn. Who is on which tab is only
+  shown in projects that have a part studio or an assembly.
 - **Merging** keeps the journal's rule that a delete beats a modify: a conflict "removed here, changed there"
   resolved for the changed side keeps the item only on the side that still has it. Arrays merge as one value.
 - **The assistant's picture** (`cad_render_view`) is a software render: flat shading, no sketches or planes.
-- **Collaboration:** see the limits at the end of "Collaboration". In the stored document, edits merge per path,
-  last writer wins. Two people editing one parameter at once without a dialog (two direct commits): the later
-  one wins, silently. There is no lock on a feature someone else has open, by design: both dialogs stay usable.
-- **Platform gaps** for these documents: history timeline, compare, branch merge, MCP, thumbnails (see the table
-  under "How a change is committed and synced").
-- **Bundles:** `mechanical.js` and `assembly.js` each bundle three.js and React (about 0.8 MB and 0.7 MB
-  minified), loaded on demand. Sharing them with `viewer3d.js` and `ui.js` is not done.
-- **Assembly** is a stub, as described above.
-- **Narrow windows:** the part studio's docks do not collapse; it has not been laid out for phones.
+- **Bundles:** `mechanical.js` and `assembly.js` each bundle three.js and React, loaded on demand. Sharing them
+  with `viewer3d.js` and `ui.js` is not done.
+- **Windows narrower than about 1000 px:** the toolbar scrolls sideways; the docks fold by hand, not by
+  themselves; nothing is laid out for phones.

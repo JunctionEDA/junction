@@ -27,8 +27,8 @@ web/
     registry.ts       what each domain is, which files it opens and which domains it reads
     mcp-tools.ts      the domains that bring AI tools of their own (each from its mcp/ folder)
     pcb/              electronics: schematic, symbols, board, footprints, fab, simulation (shipped)
-    mechanical/       part studios: sketch, features, history tree, on OpenCascade (in progress; CONTRACT.md)
-    assembly/         assemblies: the document and its mate format (a stub)
+    mechanical/       part studios: sketcher, features, history tree, boards in and out, on OpenCascade (CONTRACT.md)
+    assembly/         assemblies: instances of parts and boards, mates and their solver, interference, BOM
     physics/  silicon/  robotics/  manufacturing/   (planned)
 ```
 

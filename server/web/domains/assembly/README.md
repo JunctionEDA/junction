@@ -2,7 +2,7 @@
 
 Status: **in progress, usable**. An assembly (`.jasm`) places parts of the project's part studios, and other
 assemblies, as instances; mates tie them together; a solver keeps the mates while parts are dragged and while
-the part studios change. Boards cannot be placed yet (see "Sources").
+the part studios change. A board of the project is placed like a part and follows the board editor.
 
 **Read [../mechanical/CONTRACT.md](../mechanical/CONTRACT.md)** first: the item document format, how a change
 is committed and synced, geometry names. This file covers what the assembly adds.
@@ -19,9 +19,11 @@ tools/                 ONE FILE PER TOOLBAR TOOL
 solver/                math.ts (poses), frames.ts (connector frames), linear.ts, solver.ts, types.ts
 connectors/infer.ts    implicit mate connectors from a part's tessellation
 model/problem.ts       document + geometry → the solver's input → what to tell a person about each mate
-sources/               where an instance's geometry comes from: part.ts, subassembly.ts, board.ts (a stub),
+sources/               where an instance's geometry comes from: part.ts, subassembly.ts, board.ts,
                        manager.ts (the open source documents), kernels.ts (worker pool), cache.ts (IndexedDB)
+services/, panels/     interference and the bill of materials: the logic (pure), and their panels
 viewport/scene.ts      instances drawn from shared geometry, picking, connector glyphs     triad.ts  the manipulator
+viewport/boards.ts     board instances as they look (the mechanical domain's BoardDisplay)
 ui/assembly.ts         AssemblyEditor: the object every tool and panel is handed
 ui/*.tsx               the frame, the instance tree, the mates list, the mate and Insert dialogs
 generated/             written by scripts/gen-cad-registry.mjs; not committed
@@ -29,12 +31,16 @@ generated/             written by scripts/gen-cad-registry.mjs; not committed
 
 Tests: `static/tests/assembly-solver.test.js` (the solver and every mate, in node),
 `assembly-model.test.js` (connectors from the real kernel, edits, an assembly following a rebuilt part),
-`assembly-doc.test.js` (the format), and `scripts/cad-assembly-ui.mjs` (the real app in Chromium, two people).
+`assembly-doc.test.js` (the format), `cad-analysis.test.js` (interference and the bill of materials),
+`scripts/cad-assembly-ui.mjs` (the real app in Chromium, two people), `scripts/cad-analysis-ui.mjs` (the
+panels) and `scripts/cad-e2e.mjs` (a board fastened in a tray, a hinged lid, a clash found).
 
 ## What a person can do
 
-- **Insert** parts of any part studio of the project (one, several, the whole studio) and other assemblies.
-  A part studio is read and built without opening its tab.
+- **Insert** parts of any part studio of the project (one, several, the whole studio), other assemblies, and
+  the project's boards.  A part studio is read and built without opening its tab, with its variables applied
+  and the boards of its Board features supplied (mechanical `studioInputs`), so a studio that shows a board
+  offers the board's bodies too.
 - **Instance tree**: rename, hide, suppress, fix, group, copy in a row, replace, delete; each row says how many
   freedoms its mates leave it.
 - **Drag** an instance in the viewport, or use the manipulator on the selected one (arrows slide, arcs turn, in
@@ -45,13 +51,18 @@ Tests: `static/tests/assembly-solver.test.js` (the solver and every mate, in nod
   A mate's value can be typed or animated in its dialog. Nothing is stored until Done.
 - **Explicit mate connectors** (Connector tool): a connector kept on a part with its own offset, turn and flip.
 - **Named positions**, an **exploded view** (a way of looking: not stored), undo and redo.
-- Two people can edit one assembly at once; an assembly open in one window follows a part studio edited in
-  another, live.
+- **Interference** (exact overlap volumes between parts and boards, drawn on the model, the clashing instances
+  marked; clearance between two) and the **bill of materials** (parts with quantities, and under each board
+  its electronic parts; CSV), as docked panels.
+- Two people can edit one assembly at once; an assembly open in one window follows a part studio or a board
+  edited in another, live.
 
 ## For tools and panels (interference, bill of materials, …)
 
 A tool is a file under `tools/` (`defineAssemblyTool`, `core/tool.ts`); its `run(assembly)` gets the
 `AssemblyEditor`. There is no panel registry: a tool opens a panel with `assembly.showPanel(...)`.
+`tools/interference.ts` and `tools/bom.ts` are the examples: `services/interference-sources.ts` is all they
+need of the editor (no session, no worker of their own).
 
 ```ts
 assembly.placed(): PlacedInstance[]
@@ -71,18 +82,22 @@ assembly.transformOf(instanceId)    // one solved placement
 
 assembly.sources.handle(kind, docId)   // the open source document of an instance (kind = item.source.kind):
   .snapshot()                          //   { status, pieces, version }
-  .kernel?.()                          //   the KernelClient whose worker holds that part studio's B-rep, or null
-  .features?.()                        //   { features, rollback }: the studio as worker input
+  .kernel?.()                          //   the KernelClient whose worker holds that source's B-rep, or null
+  .ensureKernel?.()                    //   the same, built first when no worker holds it: what an analysis tool awaits
+  .doc?.()                             //   a part studio's ItemDoc (its materials, its names)
+  .features?.()                        //   { features, rollback }: the source as worker input
+  .board?.()                           //   a board source: its reader, and its changes as they arrive
 // B-rep.  Each part studio has its own worker (one model per worker), so `kernel().call("mass-properties",
 // { body: piece.id })` answers about ONE studio's bodies (piece.id is the body id for a part instance).
 // A worker exists only while that studio was built in this session: after a reload the meshes come from the
-// cache and kernel() is null until the studio changes; call `kernel()?.regenerate(features, rollback)` on a
-// KernelClient of your own if you need the B-rep.  A question that needs bodies of two studios in one kernel
-// (exact interference) has to rebuild both feature lists in a worker it owns; mesh-level work needs none of this.
+// cache and kernel() is null until the studio changes; `await ensureKernel()` builds it in the pool when you
+// need the B-rep.  A question that needs bodies of two sources in one kernel (exact interference) reads each
+// source's bodies as BRep text ("body-brep") and sends them to one of those workers; mesh-level work needs none
+// of this.
 
 assembly.scene.setMarked(instanceIds)  // tint instances as a problem (clear with [])
 assembly.select(ids)                   // select instances, mates, …
-assembly.showPanel({ id, title, side: "right" | "left", render: (assembly) => <ReactNode> })
+assembly.showPanel({ id, title, side: "right" | "left" | "bottom", render: (assembly) => <ReactNode> })   // "bottom": under the viewport, for a table
 assembly.closePanel(id)
 assembly.ask({ title, fields: [{ key, label, kind: "number" | "text", value, unit? }], accept(values) })
 assembly.commit(changes)               // item changes (document/edits.ts builds them); undoable, shared
@@ -133,14 +148,24 @@ The solver runs on the page's thread; it has not needed a worker.
   a pooled worker (`kernels.ts`, three kept), or not at all when the cache has this content (`cache.ts`).
 - `assembly`: another assembly, rigid. Its own stored placements are used; piece ids are
   `<its instance id>/<piece id>`. An assembly that contains itself is refused.
-- `board`: **a stub.** `sources/board.ts` says what it must provide (a mesh with names for the faces, the
-  outline and the mounting holes). The mechanical domain's board reference builds such bodies inside a part
-  studio; note that a part studio holding a Board feature needs the board fed to its worker (`$board`), which
-  `sources/part.ts` does not do, so such a studio's board bodies do not appear in an assembly yet.
+- `board`: a board of the project. The handle reads the board live (the mechanical domain's `BoardFeed`) and
+  builds it in a pooled worker by the same code as a Board feature in a part studio: pieces `board:board` (the
+  laminate) and `board:parts` (the parts' envelopes), with the names of
+  [`../mechanical/board/README.md`](../mechanical/board/README.md) and `board` as the feature id:
+  `board:front`, `board:back`, `board:edge:<uuid>`, `board:hole:H1`, `board:part:J1:top`. They do not change
+  when the board is edited. The pieces are **ghosts** (`SourcePiece.ghost`): `viewport/boards.ts` draws the board
+  as it looks at the instance's placement, a moved footprint at a time, and the solids are there for the
+  pointer, the connectors and the interference check. The geometry is in the sheet's own coordinates (x right,
+  y up, z from the back face), so Insert places a new board with its middle at the assembly's origin.
+- A part studio that holds a Board feature is built with its board, so "Board 1" and "Board 1 parts" are
+  offered among its parts, already where the studio puts them.
 
 ## Limits
 
-- **Boards** cannot be inserted (above). **STEP files** (`kind: "file"`) have no provider.
+- **STEP files** (`kind: "file"`) have no provider (import the file into a part studio and instance that).
+- **A board** inserted before it has been read lands with the sheet's origin, not its middle, at the origin.
+  Its part envelopes come from the footprints (courtyards), refined by the 3D models as they load.
+- **Interference** does not look inside sub-assemblies yet.
 - **Connectors come from the tessellation**, not the B-rep: planes, cylinders, circles, lines and points are
   recognised; a cone, a sphere or a spline face gives its middle and average normal. Tangent works for a plane
   with a cylinder and for two cylinders only.
