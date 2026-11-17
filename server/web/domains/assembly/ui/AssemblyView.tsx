@@ -74,6 +74,7 @@ function StatusNote({ assembly }: { assembly: AssemblyEditor }) {
   if (!s.loaded) text = s.status.state === "error" ? s.status.text : "Opening the assembly…";
   else if (s.kernelFailure) { text = s.kernelFailure; tone = "err"; }
   else if (s.readout) text = s.readout;
+  else if (s.connecting) text = "Click a face, an edge or a point to put a mate connector there. Esc to stop.";
   else if (s.building) text = s.building === 1 ? "Building a part…" : `Building ${s.building} parts…`;
   else if (!s.instances.length) text = "An empty assembly. Insert parts to begin; right-drag turns the view, the wheel zooms.";
   else {
@@ -105,7 +106,8 @@ export function AssemblyView({ assembly, canvasHost }: { assembly: AssemblyEdito
   const form = useAssembly(assembly, (s) => s.form);
   const left = panels.filter((p) => p.side === "left"), right = panels.filter((p) => p.side !== "left");
   return (
-    <div className="cad-root grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] text-ink" data-doc-kind="assembly">
+    <div className="cad-root grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] text-ink" data-doc-kind="assembly"
+      onKeyDown={(ev) => { const t = ev.target as HTMLElement; if (t === assembly.viewport.canvas || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName) || t.isContentEditable) return; assembly.handleKey(ev.nativeEvent); }}>
       <Toolbar assembly={assembly} />
       <div className="flex min-h-0 min-w-0">
         <aside className="cad-dock flex flex-col min-h-0 w-60 flex-none bg-bench border-r border-line">

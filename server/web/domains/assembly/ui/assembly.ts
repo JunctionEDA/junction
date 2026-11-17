@@ -19,8 +19,8 @@ import { connectorOf } from "../connectors/infer";
 import { multiply } from "../core/transform";
 import type { MateDefinition } from "../core/mate";
 import {
-  addMate, connectorsOf, copyInstances, deleteItems, groupInstances, groupsOf, insertInstances, numberedName, positionsOf, renameItem, replaceSource, savePosition, setCollapsed,
-  setFixed, setHidden, setSuppressed, setTransforms, ungroup, updateMate, type ConnectorItem, type GroupItem, type PositionItem,
+  addConnector, addMate, connectorsOf, copyInstances, deleteItems, groupInstances, groupsOf, insertInstances, numberedName, positionsOf, renameItem, replaceSource, savePosition, setCollapsed,
+  setFixed, setHidden, setSuppressed, setTransforms, ungroup, updateConnector, updateMate, type ConnectorItem, type GroupItem, type PositionItem,
 } from "../document/edits";
 import { ASSEMBLY_KIND, instancesOf, isInstance, isMate, matesOf, transformOf as storedTransform, type InstanceItem, type InstanceSource, type MateConnector, type MateItem, type Transform } from "../document/format";
 import { MATES, TOOLS } from "../generated/page";
@@ -76,6 +76,8 @@ export interface AssemblyState {
   mates: MateItem[];
   groups: GroupItem[];
   positions: PositionItem[];
+  /** explicit mate connectors (document/edits.ts) */
+  connectors: ConnectorItem[];
   /** ids of the selected instances, mates, groups or positions */
   selection: string[];
   instanceInfo: { [id: string]: InstanceInfo };
@@ -89,6 +91,8 @@ export interface AssemblyState {
   kernelFailure: string | null;
   mating: MateDraft | null;
   inserting: { replace: string | null } | null;
+  /** true while the next click in the model adds an explicit mate connector */
+  connecting: boolean;
   /** the id of the item whose name is being typed in the lists */
   renaming: string | null;
   /** 0: assembled; above: how far the exploded view pulls the parts apart */
@@ -103,8 +107,8 @@ export interface AssemblyState {
 
 const EMPTY: AssemblyState = {
   loaded: false, status: { state: "connecting", text: "connecting…", role: null, canEdit: false }, canEdit: false, canUndo: false, canRedo: false,
-  instances: [], mates: [], groups: [], positions: [], selection: [], instanceInfo: {}, mateInfo: {}, dof: null, solveMs: 0, building: 0, kernelFailure: null,
-  mating: null, inserting: null, renaming: null, explode: 0, exploding: false, animating: null, readout: null, panels: [], form: null,
+  instances: [], mates: [], groups: [], positions: [], connectors: [], selection: [], instanceInfo: {}, mateInfo: {}, dof: null, solveMs: 0, building: 0, kernelFailure: null,
+  mating: null, inserting: null, connecting: false, renaming: null, explode: 0, exploding: false, animating: null, readout: null, panels: [], form: null,
 };
 
 export const mateDef = (type: string): MateDefinition | undefined => MATES.find((d) => d.type === type);
@@ -252,10 +256,12 @@ export class AssemblyEditor {
     const groups = groupsOf(doc), positions = positionsOf(doc);
     for (const g of groups) ids.add(g.id);
     for (const p of positions) ids.add(p.id);
+    const connectors = Array.from(this.connectors.values());
+    for (const c of connectors) ids.add(c.id);
     const activity = this.sources.activity;
     this.draw(instances);
     this.set({
-      instances, mates, groups, positions, instanceInfo, mateInfo, dof: solved.result.dof, solveMs: solved.result.ms,
+      instances, mates, groups, positions, connectors, instanceInfo, mateInfo, dof: solved.result.dof, solveMs: solved.result.ms,
       selection: this.state.selection.filter((id) => ids.has(id)), building: activity.building, kernelFailure: activity.failure,
       canUndo: this.session.canUndo, canRedo: this.session.canRedo,
       renaming: this.state.renaming && ids.has(this.state.renaming) ? this.state.renaming : null,
@@ -334,7 +340,10 @@ export class AssemblyEditor {
     };
     if (s.mating) ends(s.mating);
     else for (const id of s.selection) { const m = s.mates.find((x) => x.id === id); if (m) ends(m); }
-    if (s.mating && s.mating.field && this.hover) { const f = this.pickFrame(this.hover); if (f) marks.push({ frame: f }); }
+    // explicit connectors are always there to be picked; the one under the pointer and the selected ones stand out
+    const near = this.nearConnector;
+    for (const c of s.connectors) { const f = this.explicitFrame(c); if (f) marks.push({ frame: f, strong: c.id === near || s.selection.includes(c.id) }); }
+    if ((s.connecting || (s.mating && s.mating.field)) && this.hover && !near) { const f = this.pickFrame(this.hover); if (f) marks.push({ frame: f }); }
     this.scene.setConnectors(marks);
   }
 
@@ -441,11 +450,50 @@ export class AssemblyEditor {
   flipMate(side: "a" | "b"): void { const d = this.state.mating, end = d && d[side]; if (d && end) this.setMateDraft({ [side]: { ...end, flip: !end.flip } }, true); }
   reorientMate(): void { const d = this.state.mating; if (d) this.setMateDraft({ params: { reorient: ((Number(d.params.reorient) || 0) + 1) % 4 } }, true); }
 
-  private pickConnector(pick: AssemblyPick): void {
+  /** An explicit connector as a frame in assembly space, or null when its instance is not shown. */
+  private explicitFrame(c: ConnectorItem): MateFrame | null {
+    const inst = this.instance(c.instance);
+    if (!inst || inst.suppressed || inst.hidden) return null;
+    return this.worldConnector({ instance: c.instance, ref: c.ref, connector: c.id }, "b", {});
+  }
+  /** The explicit connector whose glyph is under the pointer (within a dozen pixels of its origin). */
+  private nearConnector: string | null = null;
+  private connectorAt(ev: { clientX: number; clientY: number }): string | null {
+    const r = this.viewport.canvas.getBoundingClientRect();
+    let best: string | null = null, bd = 13;
+    for (const c of this.state.connectors) {
+      const f = this.explicitFrame(c); if (!f) continue;
+      const s = this.viewport.project(this.viewport.target.clone().set(f.o[0], f.o[1], f.o[2]));
+      const d = Math.hypot(s.x - (ev.clientX - r.left), s.y - (ev.clientY - r.top));
+      if (d < bd) { bd = d; best = c.id; }
+    }
+    return best;
+  }
+
+  /** The next click in the model adds an explicit mate connector to the instance under it. */
+  setConnecting(on: boolean): void {
+    if (on && this.state.mating) this.cancelMate();
+    this.hover = null; this.scene.setHover(null);
+    this.set({ connecting: on && this.state.canEdit, inserting: null });
+    this.decorate();
+  }
+  private addConnectorAt(pick: AssemblyPick): void {
+    const doc = this.session.doc; if (!doc) return;
+    const made = addConnector(doc, { instance: pick.instance, ref: { kind: pick.kind, body: pick.piece, name: pick.name } as GeomRef });
+    this.state = { ...this.state, connecting: false };
+    this.hover = null; this.scene.setHover(null);
+    if (this.commit(made.changes)) this.select(made.item.id); else this.refresh();
+  }
+  /** Move an explicit connector on its geometry: an offset along its own axes (mm), a turn about its axis (degrees), a flip. */
+  editConnector(id: string, patch: { offset?: number[]; rotation?: number; flip?: boolean }): void { this.edit((doc) => updateConnector(doc, id, patch)); }
+
+  private pickConnector(pick: AssemblyPick | null, explicit: string | null = null): void {
     const d = this.state.mating; if (!d || !d.field) return;
-    const end: MateConnector = { instance: pick.instance, ref: { kind: pick.kind, body: pick.piece, name: pick.name } as GeomRef };
+    const item = explicit ? this.connectors.get(explicit) : undefined;
+    if (!item && !pick) return;
+    const end: MateConnector = item ? { instance: item.instance, ref: item.ref, connector: item.id } : { instance: pick!.instance, ref: { kind: pick!.kind, body: pick!.piece, name: pick!.name } as GeomRef };
     const other = d.field === "a" ? d.b : d.a;
-    if (other && other.instance === pick.instance) { this.host.toast("A mate joins two different instances. Pick a face, an edge or a point of another one.", 4000); return; }
+    if (other && other.instance === end.instance) { this.host.toast("A mate joins two different instances. Pick a face, an edge or a point of another one.", 4000); return; }
     const patch: Partial<MateDraft> = { [d.field]: end };
     const a = d.field === "a" ? end : d.a, b = d.field === "b" ? end : d.b;
     if (a && b) {
@@ -579,10 +627,11 @@ export class AssemblyEditor {
       if (d.pick && !s.mating && !s.exploding && s.canEdit && Math.hypot(ev.clientX - d.x, ev.clientY - d.y) > 4) { this.startBodyDrag(d.pick, ev); this.down = null; }
       return;
     }
-    if (s.mating && s.mating.field) {
-      const pick = this.scene.pick(ev);
+    if (s.connecting || (s.mating && s.mating.field)) {
+      this.nearConnector = s.mating ? this.connectorAt(ev) : null;
+      const pick = this.nearConnector ? null : this.scene.pick(ev);
       this.hover = pick; this.scene.setHover(pick); this.decorate();
-      this.viewport.canvas.style.cursor = pick ? "crosshair" : "";
+      this.viewport.canvas.style.cursor = pick || this.nearConnector ? "crosshair" : "";
     } else {
       const over = !s.mating && !s.exploding && s.canEdit && (this.scene.triad.hit(ev) || this.scene.pick(ev, { faces: true }));
       this.viewport.canvas.style.cursor = over ? "grab" : "";
@@ -595,7 +644,8 @@ export class AssemblyEditor {
     const d = this.down; this.down = null;
     if (!d || Math.hypot(ev.clientX - d.x, ev.clientY - d.y) >= 5) return;
     const s = this.state;
-    if (s.mating) { if (s.mating.field && d.pick) this.pickConnector(d.pick); return; }
+    if (s.mating) { if (s.mating.field) { const explicit = this.connectorAt(ev); if (explicit || d.pick) this.pickConnector(d.pick, explicit); } return; }
+    if (s.connecting) { if (d.pick) this.addConnectorAt(d.pick); return; }
     if (d.pick) this.select(d.pick.instance, { toggle: d.toggle }); else if (!d.toggle) this.select(null);
   };
 
@@ -603,11 +653,13 @@ export class AssemblyEditor {
 
   /** A tool or a view may take keys first (return true when handled). */
   keyHandler: ((ev: KeyboardEvent) => boolean) | null = null;
+  /** A key pressed anywhere in the assembly's frame (the view passes on the ones no field took). */
+  handleKey(ev: KeyboardEvent): void { this.onKey(ev); }
   private onKey = (ev: KeyboardEvent): void => {
     if (this.keyHandler && this.keyHandler(ev)) { ev.preventDefault(); return; }
     const s = this.state, mod = ev.ctrlKey || ev.metaKey;
     const done = () => { ev.preventDefault(); ev.stopPropagation(); };
-    if (ev.key === "Escape") { if (s.form) this.ask(null); else if (s.mating) this.cancelMate(); else if (s.inserting) this.closeInsert(); else if (s.exploding) this.setExploding(false); else this.select(null); done(); return; }
+    if (ev.key === "Escape") { if (s.form) this.ask(null); else if (s.mating) this.cancelMate(); else if (s.connecting) this.setConnecting(false); else if (s.inserting) this.closeInsert(); else if (s.exploding) this.setExploding(false); else this.select(null); done(); return; }
     if (ev.key === "Enter" && s.mating) { this.acceptMate(); done(); return; }
     if (mod && ev.key.toLowerCase() === "z") { if (ev.shiftKey) this.redo(); else this.undo(); done(); return; }
     if (mod && ev.key.toLowerCase() === "y") { this.redo(); done(); return; }
@@ -667,11 +719,13 @@ export class AssemblyEditor {
     const d = this.drag; if (!d) return;
     d.frame = 0;
     const ev = d.pending; d.pending = null;
+    const t0 = performance.now();
     if (!ev || !this.live) return;
     const goal = d.goal(ev);
     if (!goal) return;
     for (const b of d.problem.bodies) { const p = this.live.get(b.id); if (p) b.pose = p; }
     const r = solve(d.problem.bodies, d.problem.mates, { drag: goal, reach: d.reach, maxIterations: 16 });
+    this.dragMs = r.ms;
     if (!r.ok) return;   // the mates would not hold there: stay where they did
     d.moved = true;
     this.live = r.poses; this.display = r.poses;
@@ -679,6 +733,7 @@ export class AssemblyEditor {
     if (d.triad) { const pose = r.poses.get(d.triad.instance); if (pose) this.scene.triad.setPose({ p: applyPose(pose, d.triad.local), q: pose.q }); }
     const readout = d.label(ev);
     if (readout !== this.state.readout) this.set({ readout });
+    this.stepMs = performance.now() - t0;
   }
 
   private finishDrag(ev: PointerEvent): void {
@@ -694,6 +749,11 @@ export class AssemblyEditor {
     this.state = { ...this.state, readout: null };
     if (!changes.length || !this.commit(changes)) this.refresh();
   }
+
+  /** how long the solver took for the last step of a drag, ms */
+  dragMs = 0;
+  /** how long the whole last step of a drag took (solve, then moving what is drawn), ms */
+  stepMs = 0;
 
   /** How far the display is from what the document stores, mm: zero once everything is committed (tests wait on it). */
   get unsettled(): number {

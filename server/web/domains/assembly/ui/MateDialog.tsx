@@ -12,7 +12,8 @@ const row = "grid grid-cols-[104px_minmax(0,1fr)] items-center gap-x-2 gap-y-1 m
 
 function ConnectorBox({ assembly, side, end, armed, label }: { assembly: AssemblyEditor; side: "a" | "b"; end: MateConnector | null; armed: boolean; label: string }) {
   const name = useAssembly(assembly, (s) => (end ? s.instances.find((i) => i.id === end.instance)?.name || "a deleted instance" : ""));
-  const what = end ? `${name}: ${end.ref.kind === "face" ? "face" : end.ref.kind === "edge" ? "edge" : "point"}${end.flip ? " (flipped)" : ""}` : armed ? "Click a face, an edge or a point" : "Not chosen";
+  const explicit = useAssembly(assembly, (s) => (end && typeof end.connector === "string" ? s.connectors.find((c) => c.id === end.connector)?.name || "a deleted connector" : ""));
+  const what = end ? `${name}: ${explicit || (end.ref.kind === "face" ? "face" : end.ref.kind === "edge" ? "edge" : "point")}${end.flip ? " (flipped)" : ""}` : armed ? "Click a face, an edge or a point" : "Not chosen";
   return (
     <div className={row}>
       <span className="text-ink-2 truncate">{label}</span>

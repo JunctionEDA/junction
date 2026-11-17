@@ -224,15 +224,17 @@ try {
   // ---------------------------------------------------------------- the pin in the hole: Cylindrical, then the manipulator
   await alice.click('[data-mate-tool=cylindrical]');
   await alice.waitForSelector('[data-mate-dialog=cylindrical] [data-connector=a][data-armed]');
-  const rim = await at(alice, [24, 30, 40]);           // the rim of the box's hole (x = 20 ± 4)
+  const rim = await at(alice, [20, 26, 40]);           // the rim of the box's hole (its seam vertex is at x = 24: not there)
   await alice.mouse.move(rim.x, rim.y, { steps: 3 }); await click(alice, rim);
   await alice.waitForSelector('[data-mate-dialog] [data-connector=a][data-set]');
-  const pinTop = await at(alice, [154, 30, 30]);       // the rim of the pin's top
+  const pinTop = await at(alice, [150, 26, 30]);       // the rim of the pin's top
   await alice.mouse.move(pinTop.x, pinTop.y, { steps: 3 }); await click(alice, pinTop);
   await alice.waitForFunction(() => { const s = window.JunctionAssembly.getState(); return s.mating && s.mating.b && s.mateInfo[s.mating.id]?.state === 'ok'; }, null, { timeout: 10000 });
   await alice.click('[data-mate-dialog] [data-accept]');
   await settled(alice, 3);
   let pin = await inst(alice, 'Pin');
+  const cyl = await mate(alice, 'Cylindrical 1');
+  check('the two rims were taken as circular edges: their connectors are the circles\' centres', cyl.a.ref.kind === 'edge' && cyl.b.ref.kind === 'edge', `${cyl.a.ref.name} / ${cyl.b.ref.name}`);
   check('a Cylindrical mate puts the pin on the hole\'s axis with two freedoms', near(pin.t[3], -130, 1e-3) && near(pin.t[7], 0, 1e-3) && pin.info.dof === 2, `x ${pin.t[3]} dof ${pin.info.dof}`);
   // the manipulator: slide the pin up its axis by a round step
   await alice.click('[data-instance=Pin]');
@@ -296,7 +298,7 @@ try {
   check('Delete removes the selected instances', true);
 
   // ---------------------------------------------------------------- named positions, exploded view
-  await alice.click("[data-tool='Save position']");
+  await alice.click("[data-tool=Position]");
   await alice.fill('[data-form] input[data-param=name]', 'Half open');
   await alice.click('[data-form] [data-accept]');
   await alice.waitForSelector("[data-position='Half open']");
@@ -333,6 +335,48 @@ try {
   await menu(alice, '[data-mate][data-state=conflict]', 'Delete');
   await alice.waitForFunction(() => window.JunctionAssembly.getState().mates.length === 2);
   await settled(alice, 3);
+
+  // ---------------------------------------------------------------- an explicit mate connector, and a mate that uses it
+  await alice.click("[data-tool=Connector]");
+  const side = await at(alice, [100, 30, 20]);
+  await alice.mouse.move(side.x, side.y, { steps: 3 });
+  await click(alice, side);
+  await alice.waitForSelector('[data-connector-row]');
+  await menu(alice, '[data-connector-row]', 'Move or turn…');
+  await alice.fill('[data-form] input[data-param=z]', '12');
+  await alice.click('[data-form] [data-accept]');
+  await alice.waitForFunction(() => window.JunctionAssembly.getState().connectors[0]?.offset?.[2] === 12);
+  check('a click on the box\'s side keeps a mate connector there, 12 mm off the face', (await asm(alice, () => { const c = window.JunctionAssembly.getState().connectors[0]; return c.ref.kind + ':' + c.name; })) === 'face:Mate connector 1');
+  // a second pin, joined to that connector by a ball mate
+  await alice.click('[data-tool=Insert]');
+  await alice.waitForSelector("[data-insert-dialog] [data-offer='Part 2']", { timeout: 60000 });
+  await alice.click("[data-insert-dialog] [data-offer='Part 2']");
+  await alice.click('[data-insert-dialog] [data-accept]');
+  await settled(alice, 4);
+  const second = await inst(alice, 'Part 2');
+  check('a part that is already there is set beside the first one, not on it', second.t[3] > 5, `x ${second.t[3]}`);
+  await alice.click('[data-mate-tool=ball]');
+  await alice.waitForSelector('[data-mate-dialog=ball] [data-connector=a][data-armed]');
+  const glyph = await at(alice, [112, 30, 20]);
+  await alice.mouse.move(glyph.x, glyph.y, { steps: 3 });
+  await click(alice, glyph);
+  await alice.waitForSelector('[data-mate-dialog] [data-connector=a][data-set]');
+  check('the connector\'s mark is picked as a mate\'s first connector', (await alice.textContent('[data-mate-dialog] [data-connector=a]')).includes('Mate connector 1'), await alice.textContent('[data-mate-dialog] [data-connector=a]'));
+  const pin2 = await at(alice, [150 + second.t[3], 26, 30]);
+  await alice.mouse.move(pin2.x, pin2.y, { steps: 3 });
+  await click(alice, pin2);
+  await alice.waitForFunction(() => { const s = window.JunctionAssembly.getState(); return s.mating && s.mating.b && s.mateInfo[s.mating.id]?.state === 'ok'; }, null, { timeout: 10000 });
+  await shot(alice, '14b-explicit-connector');
+  await alice.click('[data-mate-dialog] [data-accept]');
+  await settled(alice, 4);
+  const ball = await inst(alice, 'Part 2');
+  const centre = [ball.t[0] * 150 + ball.t[1] * 30 + ball.t[2] * 30 + ball.t[3], ball.t[4] * 150 + ball.t[5] * 30 + ball.t[6] * 30 + ball.t[7], ball.t[8] * 150 + ball.t[9] * 30 + ball.t[10] * 30 + ball.t[11]];
+  check('the ball mate holds the pin\'s end on the connector and leaves it three freedoms', near(centre[0], 112, 1e-3) && near(centre[1], 30, 1e-3) && near(centre[2], 20, 1e-3) && ball.info.dof === 3, centre.map((v) => v.toFixed(3)).join(' '));
+  await alice.click("[data-instance='Part 2']");
+  await alice.focus('.cad-stage canvas');
+  await alice.keyboard.press('Delete');
+  await settled(alice, 3);
+  check('deleting the pin takes its mate with it', (await asm(alice, () => window.JunctionAssembly.getState().mates.length)) === 2);
 
   // ---------------------------------------------------------------- someone else changes the box: the assembly follows, live
   const invited = await alice.evaluate(async (pid) => (await fetch(`/api/projects/${pid}/invites`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ login: 'asm-ui-bob', role: 'editor' }) })).status, pid);
@@ -380,6 +424,21 @@ try {
   check('after a reload the parts come from the mesh cache: the kernel is not started', started === 0, `workers started: ${started}`);
   check('…and the assembly is as it was left', near((await mate(alice, 'Hinge')).info.values.angle, closed, 1e-3) && (await inst(alice, 'Enclosure base')).fixed);
 
+  // ---------------------------------------------------------------- the same person: edit the box in its tab, come back
+  await alice.click('#doctabs [role=tab] >> text=Enclosure');
+  await alice.waitForFunction(() => { const s = window.JunctionPartStudio && window.JunctionPartStudio.getState(); return s && s.loaded && s.kernel.state === 'ready' && s.bodies.length === 1; }, null, { timeout: 90000 });
+  await alice.dblclick('[data-feature-row][data-feature-type=extrude]');
+  await alice.waitForSelector('.cad-dialog[data-feature=extrude]');
+  await alice.fill('.cad-dialog input[data-param=depth]', '55');
+  await alice.click('.cad-dialog [data-accept]');
+  await alice.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return !s.editing && s.kernel.state === 'ready' && Math.abs(s.bodies[0]?.mesh?.bbox[5] - 55) < 1e-6; }, null, { timeout: 60000 });
+  await alice.click('#doctabs [role=tab] >> text=Assembly 1');
+  await alice.waitForFunction(() => window.JunctionAssembly && window.JunctionAssembly.getState().loaded, null, { timeout: 30000 });
+  await settled(alice, 3);
+  const back = await inst(alice, 'Lid');
+  check('the box is made 55 mm tall in its own tab; back in the assembly the lid sits at 55', near(back.t[9] * 160 + back.t[11], 55, 1e-3) && near(back.stored[11], back.t[11], 1e-6), `hinge z ${(back.t[9] * 160 + back.t[11]).toFixed(3)}`);
+  await shot(alice, '17b-after-own-edit');
+
   // ---------------------------------------------------------------- a sub-assembly
   await alice.click('[data-doc-add]');
   await alice.click('text=New assembly');
@@ -394,6 +453,29 @@ try {
   const sub = await asm(alice, () => { const a = window.JunctionAssembly; return { pieces: a.placed()[0].pieces.length, stats: a.scene.stats, dof: a.getState().dof }; });
   check('another assembly comes in as one rigid instance with its three parts', sub.pieces === 3 && sub.stats.instances === 1 && sub.dof === 6, JSON.stringify(sub));
   await shot(alice, '18-sub-assembly');
+
+  // ---------------------------------------------------------------- a few hundred instances
+  await alice.click('[data-panel=instances] [data-instance]');
+  await menu(alice, '[data-panel=instances] [data-instance]', 'Copy in a row…');
+  await alice.fill('[data-form] input[data-param=count]', '119');
+  await alice.fill('[data-form] input[data-param=x]', '0');
+  await alice.fill('[data-form] input[data-param=y]', '130');
+  await alice.click('[data-form] [data-accept]');
+  await settled(alice, 120);
+  await alice.evaluate(() => window.JunctionAssembly.fit());
+  const many = await asm(alice, () => { const a = window.JunctionAssembly; return { ...a.scene.stats, solveMs: a.getState().solveMs }; });
+  check('120 sub-assemblies (360 parts) are drawn from three geometries', many.instances === 120 && many.pieces === 360 && many.geometries === 3, JSON.stringify(many));
+  await shot(alice, '19-many');
+  const first = await asm(alice, () => { const a = window.JunctionAssembly, i = a.getState().instances[0]; return { id: i.id, y: a.transformOf(i.id)[7] }; });
+  const p0 = await at(alice, [50, 30, 70]);
+  await alice.mouse.move(p0.x, p0.y); await alice.mouse.down();
+  const steps = [];
+  for (let k = 1; k <= 10; k++) { await alice.mouse.move(p0.x - 12 * k, p0.y + 4 * k); await alice.waitForTimeout(60); steps.push(await asm(alice, () => window.JunctionAssembly.stepMs)); }
+  await alice.mouse.up();
+  await settled(alice, 120);
+  const movedY = (await asm(alice, (id) => window.JunctionAssembly.transformOf(id), first.id))[7];
+  const worstStep = Math.max(...steps);
+  check('dragging one of them stays quick: each step (solve and redraw of 360 parts) is a few milliseconds of script', Math.abs(movedY - first.y) > 1 && worstStep < 50, `worst step ${worstStep.toFixed(1)} ms, full solve ${many.solveMs.toFixed(1)} ms`);
 
   check('no script errors on either page', errors.length === 0, errors.slice(0, 5).join(' | '));
 } catch (e) {

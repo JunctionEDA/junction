@@ -58,6 +58,29 @@ export function MateList({ assembly }: { assembly: AssemblyEditor }) {
         </div>
         <ContextMenu menu={menu} close={() => setMenu(null)} />
       </section>
+      {s.connectors.length ? (
+        <section className="flex flex-col min-h-0 flex-[0_1_auto] max-h-[30%] border-b border-line last:border-b-0" data-panel="connectors">
+          <Caption>Mate connectors</Caption>
+          <div className="min-h-0 overflow-y-auto bg-paper py-1 text-sm" role="listbox" aria-label="Mate connectors">
+            {s.connectors.map((c) => {
+              const owner = s.instances.find((i) => i.id === c.instance), o = c.offset || [0, 0, 0];
+              return (
+                <div key={c.id} role="option" aria-selected={selected.has(c.id)} data-connector-row={c.name} className={cx("flex items-center gap-1.5 h-6.5 px-2 cursor-default", selected.has(c.id) ? "bg-sel" : "hover:bg-sel-soft")}
+                  title="An explicit mate connector: click its mark in the model when making a mate" onClick={() => assembly.select(c.id)} onDoubleClick={() => { if (s.canEdit) assembly.startRename(c.id); }}
+                  onContextMenu={(ev) => { ev.preventDefault(); assembly.select(c.id); setMenu({ x: ev.clientX, y: ev.clientY, items: [
+                    { label: "Move or turn…", disabled: !s.canEdit, run: () => assembly.ask({ title: c.name, fields: [{ key: "x", label: "Along X", kind: "number", value: o[0], unit: "mm" }, { key: "y", label: "Along Y", kind: "number", value: o[1], unit: "mm" }, { key: "z", label: "Along its axis", kind: "number", value: o[2], unit: "mm" }, { key: "r", label: "Turn", kind: "number", value: c.rotation || 0, unit: "°" }], accept: (v) => assembly.editConnector(c.id, { offset: [Number(v.x), Number(v.y), Number(v.z)], rotation: Number(v.r) }) }) },
+                    { label: c.flip ? "Unflip" : "Flip", disabled: !s.canEdit, run: () => assembly.editConnector(c.id, { flip: !c.flip }) },
+                    { label: "Rename", disabled: !s.canEdit, run: () => assembly.startRename(c.id) },
+                    { label: "Delete", danger: true, disabled: !s.canEdit, run: () => assembly.remove([c.id]) },
+                  ] }); }}>
+                  {s.renaming === c.id ? <NameField name={c.name} done={(n) => (n === null ? assembly.startRename(null) : assembly.rename(c.id, n))} /> : <span className="flex-1 truncate">{c.name}</span>}
+                  <span className="flex-none text-xs text-ink-3 truncate max-w-[45%]">{owner ? owner.name : "?"}</span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
       {s.positions.length ? (
         <section className="flex flex-col min-h-0 flex-[0_1_auto] max-h-[30%] border-b border-line last:border-b-0" data-panel="positions">
           <Caption>Named positions</Caption>

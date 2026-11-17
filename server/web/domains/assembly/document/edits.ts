@@ -115,12 +115,15 @@ export function deleteInstances(doc: ItemDoc, ids: readonly string[]): ItemChang
 /** Copies of instances, each moved by `step` × (1 … count): a linear pattern, written as plain instances. */
 export function copyInstances(doc: ItemDoc, ids: readonly string[], count: number, step: readonly [number, number, number]): { changes: ItemChange[]; items: InstanceItem[] } {
   const list: NewInstance[] = [];
+  const names = new Set(instancesOf(doc).map((i) => i.name));
   for (let n = 1; n <= count; n++) for (const id of ids) {
     const i = doc.items.get(id);
     if (!isInstance(i)) continue;
     const t = (Array.isArray(i.transform) && i.transform.length === 12 ? i.transform.slice() : IDENTITY.slice()) as Transform;
     t[3] += step[0] * n; t[7] += step[1] * n; t[11] += step[2] * n;
-    list.push({ source: i.source, name: i.name.replace(/ \d+$/, ""), transform: t, group: typeof i.group === "string" ? i.group : undefined });
+    // a copy of "Lid 2" (itself a copy of "Lid") is "Lid 3"; a copy of "Part 1" (its own name) is "Part 1 2"
+    const stem = i.name.replace(/ \d+$/, "");
+    list.push({ source: i.source, name: stem !== i.name && names.has(stem) ? stem : i.name, transform: t, group: typeof i.group === "string" ? i.group : undefined });
   }
   return insertInstances(doc, list);
 }
@@ -177,6 +180,17 @@ export function addConnector(doc: ItemDoc, c: { instance: string; ref: GeomRef; 
   if (c.offset && c.offset.some((v) => v)) item.offset = c.offset.slice(0, 3);
   if (c.rotation) item.rotation = c.rotation;
   return { changes: [addedChange(item)], item };
+}
+
+/** Move, turn or flip an explicit connector on its geometry. */
+export function updateConnector(doc: ItemDoc, id: string, patch: { offset?: number[]; rotation?: number; flip?: boolean }): ItemChange[] {
+  return modify<ConnectorItem>(doc, id, (c) => {
+    const o = { ...c } as ConnectorItem;
+    if (patch.offset) { if (patch.offset.some((v) => v)) o.offset = patch.offset.slice(0, 3); else delete o.offset; }
+    if (patch.rotation !== undefined) { if (patch.rotation) o.rotation = patch.rotation; else delete o.rotation; }
+    if (patch.flip !== undefined) { if (patch.flip) o.flip = true; else delete o.flip; }
+    return o;
+  });
 }
 
 export function savePosition(doc: ItemDoc, transforms: ReadonlyMap<string, readonly number[]>, name?: string): { changes: ItemChange[]; item: PositionItem } {
