@@ -27,7 +27,7 @@ export function SketchDialog({ studio }: { studio: PartStudio }) {
   const where = !plane ? "No plane" : plane.kind === "plane" ? `${DEFAULT_PLANES[plane.plane]?.title || plane.plane} plane` : plane.kind === "datum" ? features.find((f) => f.id === plane.feature)?.name || "A missing plane" : "A face of the model";
   const s = standing(st);
   return (
-    <DialogShell className="cad-sketch-dialog" icon={featureDef("sketch")?.icon} name={feature.name} attrs={{ "data-sketch": feature.id }}
+    <DialogShell className="cad-sketch-dialog" keepFold icon={featureDef("sketch")?.icon} name={feature.name} attrs={{ "data-sketch": feature.id }}
       onAccept={() => studio.finishSketch()} onCancel={() => studio.cancelSketch()} acceptAttrs={{ "data-sketch-accept": true }} cancelAttrs={{ "data-sketch-cancel": true }}
       acceptTip={{ title: "Finish sketch", hint: "Keep the sketch and go back to the part." }} cancelTip={{ title: "Cancel sketch", hint: open.isNew ? "Leave, and take this new sketch away again." : "Leave, and put the sketch back as it was when you opened it." }}>
       <div className={row}>
@@ -40,15 +40,14 @@ export function SketchDialog({ studio }: { studio: PartStudio }) {
           <span className="seg">{(Object.keys(DEFAULT_PLANES) as DefaultPlaneId[]).map((id) => <button key={id} type="button" data-plane={id} className={cx(plane && plane.kind === "plane" && plane.plane === id && "on")} onClick={() => { studio.pickSketchPlane(false); if (!(plane && plane.kind === "plane" && plane.plane === id)) studio.setSketchPlane({ kind: "plane", plane: id }); }}>{DEFAULT_PLANES[id].title}</button>)}</span>
         </span>
       </div>
-      <label className="flex items-center gap-2 h-6 cursor-pointer"><input type="checkbox" checked={glyphs} data-pref="showConstraints" onChange={(ev) => setPrefs({ showConstraints: ev.target.checked })} /><span>Show constraints</span></label>
-      <label className="flex items-center gap-2 h-6 cursor-pointer" {...tipHandlers({ title: "Face the plane", hint: "Opening a sketch turns the view to look straight at it, and finishing turns it back. N does it at any time." })}><input type="checkbox" checked={normal} data-pref="sketchNormal" onChange={(ev) => { setPrefs({ sketchNormal: ev.target.checked }); if (ev.target.checked) studio.faceSketch(); }} /><span>Face the plane when a sketch opens</span></label>
-      <div className="flex items-center gap-2 pt-1 border-t border-line text-xs" data-sketch-standing={s.tone}>
-        <span className={cx("font-semibold", TONE[s.tone])}>{s.text}</span>{s.detail ? <span className="text-ink-2 truncate">{s.detail}</span> : null}
+      <div className="flex items-center gap-4 h-6">
+        <label className="flex items-center gap-1.5 cursor-pointer" {...tipHandlers({ title: "Show constraints", hint: "The small marks that say what holds the sketch: horizontal, coincident, tangent… Those in conflict are always shown." })}><input type="checkbox" checked={glyphs} data-pref="showConstraints" onChange={(ev) => setPrefs({ showConstraints: ev.target.checked })} /><span>Constraints</span></label>
+        <label className="flex items-center gap-1.5 cursor-pointer" {...tipHandlers({ title: "Face the plane", shortcut: "N", hint: "Opening a sketch turns the view to look straight at it, and finishing turns it back. N does it at any time." })}><input type="checkbox" checked={normal} data-pref="sketchNormal" onChange={(ev) => { setPrefs({ sketchNormal: ev.target.checked }); if (ev.target.checked) studio.faceSketch(); }} /><span>Face the plane on opening</span></label>
       </div>
-      <div className="flex items-center gap-3 text-xs text-ink-3" aria-label="What the colours of the sketch mean">
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-teal" />free</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-ink" />settled</span>
-        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-err" />in conflict</span>
+      <div className="flex items-center gap-2 pt-1.5 border-t border-line text-xs" data-sketch-standing={s.tone} {...tipHandlers({ title: "The colours of the sketch", hint: "Teal: still free to move. Ink: settled by its dimensions and constraints. Red: constraints that cannot all hold." })}>
+        <span className={cx("font-semibold whitespace-nowrap", TONE[s.tone])}>{s.text}</span>{s.detail ? <span className="text-ink-2 truncate">{s.detail}</span> : null}
+        <span className="flex-1" />
+        <span className="flex items-center gap-1 text-ink-3" aria-hidden="true"><span className="w-2 h-2 rounded-full bg-teal" /><span className="w-2 h-2 rounded-full bg-ink" /><span className="w-2 h-2 rounded-full bg-err" /></span>
       </div>
     </DialogShell>
   );

@@ -159,7 +159,7 @@ export function FeatureList({ studio }: { studio: PartStudio }) {
     const shown = hideable ? studio.isVisible(f.id) : true;
     const dep = deps ? (deps.of === f.id ? "this" : deps.uses.includes(f.id) ? "uses" : deps.usedBy.includes(f.id) ? "used by" : null) : null;
     rowsOut.push(
-      <div key={f.id} data-feature-row={isDraft ? undefined : f.id} data-feature-type={f.featureType} data-state={state} data-made-hover={made === f.id || undefined} role="option" aria-selected={selected.includes(f.id)}
+      <div key={f.id} data-feature-row={isDraft ? undefined : f.id} data-feature-type={f.featureType} data-state={state} data-message={rep && rep.message ? rep.message : undefined} data-made-hover={made === f.id || undefined} role="option" aria-selected={selected.includes(f.id)}
         draggable={canEdit && !isDraft && renaming !== f.id && !q}
         className={cx("group flex items-center gap-1.5 h-6.5 pl-2 pr-1.5 cursor-default select-none", on ? "bg-sel" : made === f.id ? "bg-sel-soft" : "hover:bg-sel-soft", (below || f.suppressed) && "text-ink-3", isDraft && "italic")}
         onClick={(ev) => { if (!isDraft) clickRow(f, ev); }}

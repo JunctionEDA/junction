@@ -139,6 +139,7 @@ export class PartStudio {
     this.viewport.canvas.addEventListener("keydown", this.onKey);
     this.viewport.canvas.addEventListener("pointermove", this.onPointerSeen);
     this.viewport.canvas.addEventListener("mousedown", this.onMiddle);
+    window.addEventListener("keydown", this.onKeyElsewhere);
     this.viewport.fit(new THREE.Box3(new THREE.Vector3(-40, -40, -40), new THREE.Vector3(40, 40, 40)));
     this.kernel = new KernelClient({
       onState: (s, message) => { if (!this.closed) this.set({ kernel: { state: s, message: message || "", working: s === "working" || s === "loading" } }); },
@@ -191,6 +192,7 @@ export class PartStudio {
     this.viewport.canvas.removeEventListener("keydown", this.onKey);
     this.viewport.canvas.removeEventListener("pointermove", this.onPointerSeen);
     this.viewport.canvas.removeEventListener("mousedown", this.onMiddle);
+    window.removeEventListener("keydown", this.onKeyElsewhere);
     this.session.close(); this.kernel.dispose(); this.view.dispose(); this.viewport.dispose();
     this.listeners.clear();
   }
@@ -712,6 +714,22 @@ export class PartStudio {
   };
 
   // ---------------------------------------------------------------- keys
+  /**
+   * The keys work wherever the keyboard is in the part studio, not only in the viewport: after a click on a
+   * toolbar button, a row of the feature list or a dialog's chevron, L is still Line.  Typing into a field is
+   * typing, and a key that means something to the button in focus (Enter, Space, Tab) is that button's.
+   */
+  private onKeyElsewhere = (ev: KeyboardEvent): void => {
+    const t = ev.target as HTMLElement | null, canvas = this.viewport.canvas;
+    if (this.closed || ev.defaultPrevented || !t || t === canvas || !canvas.isConnected || canvas.offsetParent === null) return;
+    if (typeof t.closest !== "function" || t.closest("input, textarea, select, [contenteditable=true]")) return;
+    const root = canvas.closest(".cad-root");
+    if (t !== document.body && !(root && root.contains(t))) return;
+    if (t.closest("button, a, summary") && (ev.key === "Enter" || ev.key === " ")) return;
+    if (ev.key === "Tab" && t.closest("form, [role=menu], [role=dialog], [role=listbox]")) return;
+    this.onKey(ev);
+    if (ev.defaultPrevented) canvas.focus();
+  };
   private onKey = (ev: KeyboardEvent): void => {
     // Shift + letter starts a feature wherever the keyboard is; in a sketch it comes before the sketch's own keys
     if (ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey && ev.key.length === 1 && this.state.sketch && !this.state.editing) {

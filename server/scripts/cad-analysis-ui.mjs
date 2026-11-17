@@ -373,13 +373,13 @@ try {
   }
   // perspective
   await page.focus('.cad-stage canvas');
-  await page.keyboard.press('p');
-  check('P switches to perspective', (await S(page, () => window.JunctionPartStudio.viewport.projection)) === 'perspective' && (await page.getAttribute('[data-tool=Perspective]', 'aria-pressed')) === 'true');
+  await page.click('.cad-toolbar [data-tool=Perspective]');   // P is the planes now, as in Onshape; the projection is a button and in the view cube's menu
+  check('the Perspective button switches to perspective', (await S(page, () => window.JunctionPartStudio.viewport.projection)) === 'perspective' && (await page.getAttribute('[data-tool=Perspective]', 'aria-pressed')) === 'true');
   const persHit = await spot(page, 'face', 'Block', 'Block:end:ka');
   check('picking works in perspective', !!persHit);
   await page.waitForTimeout(200);
   await shot(page, '11-perspective');
-  await page.keyboard.press('p');
+  await page.click('.cad-toolbar [data-tool=Perspective]');
   // hide, isolate, show all
   await clickAt(page, await spot(page, 'face', 'Block', 'Block:end:ka'));
   await page.keyboard.press('h');
