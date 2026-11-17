@@ -64,6 +64,8 @@ pub(crate) fn allowed_file(name: &str) -> bool {
             | "equ"
             // the simulator's workbook (SIMULATOR_FRAME_UI::SaveWorkbook, <project>.wbk)
             | "wbk"
+            // Junction's own documents: a part studio and an assembly (JSON item documents, itemdoc.rs)
+            | "jpart" | "jasm"
     )
 }
 
@@ -82,6 +84,8 @@ pub(crate) fn doc_type_for(path: &str) -> &'static str {
         "kicad_mod" => "footprint",
         "kicad_wks" => "worksheet",
         "kicad_dru" => "design_rules",
+        "jpart" => "part_studio",
+        "jasm" => "assembly",
         "step" | "stp" | "wrl" | "wrz" => "model3d",
         "lib" | "sub" | "cir" | "mod" | "model" | "sp" | "spice" | "ibs" => "spice_model",
         _ => "other",
@@ -622,7 +626,9 @@ pub async fn preview_svg(
         // pushes a picture of an empty board), shows its root sheet.
         let fit = q.fit.unwrap_or(true);
         let mut svg = None;
-        for doc in docs.iter().find(|d| d.doc_type == "kicad_pcb").into_iter().chain(root_schematic(&docs)) {
+        // A project of mechanical parts alone shows its first part studio or assembly (dockind.rs).
+        let others = docs.iter().filter(|d| !d.doc_type.starts_with("kicad_") && crate::dockind::of(&d.doc_type).thumbnail);
+        for doc in docs.iter().find(|d| d.doc_type == "kicad_pcb").into_iter().chain(root_schematic(&docs)).chain(others) {
             if let Some((_seq, found)) = persist::get_preview(&state.pool, doc.id, fit).await? {
                 svg = Some(found);
                 break;
@@ -2275,11 +2281,34 @@ pub async fn create_doc(
 
     let doc_type = req.doc_type.unwrap_or_else(|| doc_type_for(&path).to_string());
     let doc = persist::create_document(&state.pool, id, &path, &doc_type).await?;
-    notify_docs_added(&state, id, doc.id).await;
+    notify_docs(&state, id, &user, "added", doc.id, &doc.path, &doc.doc_type, None).await;
 
     Ok(Json(json!({ "docId": doc.id, "path": doc.path, "docType": doc.doc_type,
                     "existing": false }))
         .into_response())
+}
+
+/// Tell everyone who has the project open that its list of documents changed (a document was added, renamed
+/// or deleted), so their tabs follow without asking.  Each socket has joined documents, not the project, so the
+/// notice goes to every open document of the project (`also`: one that is no longer in the list).
+#[allow(clippy::too_many_arguments)]
+async fn notify_docs(state: &AppState, project_id: Uuid, user: &persist::User, change: &str, doc_id: Uuid, path: &str,
+                     doc_type: &str, from: Option<&str>) {
+    let Ok(docs) = persist::project_documents(&state.pool, project_id).await else { return };
+    let n = Uuid::new_v4();
+    let mut ids: Vec<Uuid> = docs.iter().map(|d| d.id).collect();
+    if !ids.contains(&doc_id) {
+        ids.push(doc_id);
+    }
+    for id in ids {
+        // `addedDocId`: what the schematic editor reads to open a new sheet (as notify_docs_added sends it)
+        let added = (change == "added").then_some(doc_id);
+        let payload = json!({ "type": "docs", "docId": id, "projectId": project_id, "n": n, "change": change, "from": from,
+                              "addedDocId": added,
+                              "doc": { "docId": doc_id, "path": path, "docType": doc_type },
+                              "by": { "userId": user.id, "login": user.login, "name": user.name } });
+        state.doc_event(id, crate::doc_actor::DocMsg::Notice { payload }).await;
+    }
 }
 
 /// Tell every open document of a project that a file joined it (a sheet drawn by somebody else): the web
@@ -2295,9 +2324,11 @@ pub async fn notify_docs_added(state: &AppState, project_id: Uuid, doc_id: Uuid)
 }
 
 /// The document types a client may delete or move: library files (a footprint, a symbol library, a library table,
-/// a 3D model, a drawing sheet) and other loose files.  A project's own schematic, board and project file stay put.
+/// a 3D model, a drawing sheet), other loose files, and the part studios and assemblies the document tabs create,
+/// rename and delete.  A project's own schematic, board and project file stay put.
 fn doc_is_movable(doc_type: &str) -> bool {
     matches!(doc_type, "footprint" | "symbol_lib" | "lib_table" | "model3d" | "worksheet" | "spice_model" | "other")
+        || crate::itemdoc::is_item_doc(doc_type)
 }
 
 /// DELETE /api/docs/{id}: the Footprint Editor's Delete Footprint (and the same for other library files).
@@ -2317,6 +2348,9 @@ pub async fn delete_doc(
         return Err(AppError::BadRequest(format!("a {} cannot be deleted here", doc.doc_type)));
     }
     let deleted = persist::delete_document(&state.pool, doc_id).await?;
+    if deleted {
+        notify_docs(&state, doc.project_id, &user, "deleted", doc_id, &doc.path, &doc.doc_type, None).await;
+    }
     Ok(Json(json!({ "ok": deleted, "docId": doc_id })).into_response())
 }
 
@@ -2357,6 +2391,7 @@ pub async fn move_doc(
         }
     }
     let moved = persist::rename_document(&state.pool, doc_id, &path).await?.ok_or(AppError::NotFound)?;
+    notify_docs(&state, doc.project_id, &user, "renamed", moved.id, &moved.path, &moved.doc_type, Some(&doc.path)).await;
     Ok(Json(json!({ "ok": true, "docId": moved.id, "path": moved.path, "docType": moved.doc_type })).into_response())
 }
 
@@ -2564,6 +2599,10 @@ mod tests {
         assert_eq!(doc_type_for("sim/test.CIR"), "spice_model");
         assert!(allowed_file("2n2222.model") && allowed_file("Simulation_SPICE.sp") && allowed_file("state-3bit-count.in"));
         assert_eq!(doc_type_for("2n2222.model"), "spice_model");
+        assert_eq!(doc_type_for("Enclosure.jpart"), "part_studio");
+        assert_eq!(doc_type_for("cad/Product.JASM"), "assembly");
+        assert!(allowed_file("Enclosure.jpart") && allowed_file("Product.jasm"));
+        assert!(doc_is_movable("part_studio") && doc_is_movable("assembly") && !doc_is_movable("kicad_pcb"));
     }
 
     /// The extraction loop must bound the decoder, not trust the header's

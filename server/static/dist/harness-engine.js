@@ -819,11 +819,11 @@ function parseStrokeMarkup(s2) {
     if (s2) root5.children.push({ kind: "", text: s2, children: [] });
     return root5;
   }
-  const closeOf = (open3) => {
+  const closeOf = (open4) => {
     let depth = 0;
-    for (let i = open3; i < s2.length; i++) {
+    for (let i = open4; i < s2.length; i++) {
       const c = s2[i];
-      if (c === "{" && i > 0 && (s2[i - 1] === "~" || s2[i - 1] === "_" || s2[i - 1] === "^" || i === open3)) depth++;
+      if (c === "{" && i > 0 && (s2[i - 1] === "~" || s2[i - 1] === "_" || s2[i - 1] === "^" || i === open4)) depth++;
       else if (c === "}") {
         depth--;
         if (depth === 0) return i;
@@ -8161,24 +8161,24 @@ function drawDrawingSheet(ctx, doc2, s2, minW, pageLimits = true) {
     }
   };
   ctx.beginPath();
-  let open3 = false;
+  let open4 = false;
   for (const it of items) {
     if (it.t === "line" || it.t === "rect") {
       const w = Math.max(it.t === "line" ? it.w : it.lw, minW);
-      if (open3 && w !== width) {
+      if (open4 && w !== width) {
         ctx.stroke();
         ctx.beginPath();
-        open3 = false;
+        open4 = false;
       }
       setWidth(w);
       if (it.t === "line") {
         ctx.moveTo(it.x1, it.y1);
         ctx.lineTo(it.x2, it.y2);
       } else ctx.rect(it.x, it.y, it.w, it.h);
-      open3 = true;
+      open4 = true;
     }
   }
-  if (open3) ctx.stroke();
+  if (open4) ctx.stroke();
   for (const it of items) {
     if (it.t !== "text") continue;
     drawText(ctx, {
@@ -9876,26 +9876,26 @@ var require_pcb_tools = __commonJS({
         if (typeof dd.keep_text_aligned === "boolean") DIM_DEFAULTS.keepAligned = dd.keep_text_aligned;
         if (typeof dd.arrow_length === "number" && dd.arrow_length > 0) DIM_DEFAULTS.arrowLength = dd.arrow_length / 1e6;
         if (typeof dd.extension_offset === "number" && dd.extension_offset >= 0) DIM_DEFAULTS.extOffset = dd.extension_offset / 1e6;
-        for (const [cls, stem2] of [["silk", "silk"], ["copper", "copper"], ["edges", "board_outline"], ["courtyard", "courtyard"], ["fab", "fab"], ["others", "other"]]) {
-          const w = d[stem2 + "_line_width"];
+        for (const [cls, stem3] of [["silk", "silk"], ["copper", "copper"], ["edges", "board_outline"], ["courtyard", "courtyard"], ["fab", "fab"], ["others", "other"]]) {
+          const w = d[stem3 + "_line_width"];
           if (typeof w === "number" && w > 0) LINE_W[cls] = w;
-          const sz = d[stem2 + "_text_size_h"], th = d[stem2 + "_text_thickness"];
+          const sz = d[stem3 + "_text_size_h"], th = d[stem3 + "_text_thickness"];
           if (typeof sz === "number" && sz > 0) TEXT_STYLE[cls] = [sz, typeof th === "number" && th > 0 ? th : TEXT_STYLE[cls][1]];
         }
       }
       function layerStyle(layer4) {
         const cls = layerClass(layer4);
-        const stem2 = { silk: "silk", copper: "copper", edges: "board_outline", courtyard: "courtyard", fab: "fab", others: "other" }[cls];
+        const stem3 = { silk: "silk", copper: "copper", edges: "board_outline", courtyard: "courtyard", fab: "fab", others: "other" }[cls];
         const d = rawDefaults;
         const [size2, thick] = TEXT_STYLE[cls];
-        const v = d[stem2 + "_text_size_v"];
+        const v = d[stem3 + "_text_size_v"];
         return {
           line: LINE_W[cls],
           w: size2,
           h: typeof v === "number" && v > 0 ? v : size2,
           thick,
-          italic: d[stem2 + "_text_italic"] === true,
-          upright: typeof d[stem2 + "_text_upright"] === "boolean" ? d[stem2 + "_text_upright"] : true
+          italic: d[stem3 + "_text_italic"] === true,
+          upright: typeof d[stem3 + "_text_upright"] === "boolean" ? d[stem3 + "_text_upright"] : true
         };
       }
       var textStyle = (layer4) => {
@@ -11520,8 +11520,8 @@ var require_pcb_tools = __commonJS({
           const pp = K22(setup, "pcbplotparams");
           const v = K22(pp, "viasonmask");
           if (v) {
-            const open3 = str9(v[1]) === "true" || str9(v[1]) === "yes";
-            tentFront = tentBack = !open3;
+            const open4 = str9(v[1]) === "true" || str9(v[1]) === "yes";
+            tentFront = tentBack = !open4;
           }
         }
         const ax = K22(setup, "aux_axis_origin"), gx = K22(setup, "grid_origin");
@@ -20257,7 +20257,7 @@ var require_pcb_tools = __commonJS({
         var stack2 = [];
         var nStems = 0;
         var haveWidth = false;
-        var open3 = false;
+        var open4 = false;
         var x = 0;
         var y = 0;
         var subrs;
@@ -20279,11 +20279,11 @@ var require_pcb_tools = __commonJS({
         }
         var width = defaultWidthX;
         function newContour(x2, y2) {
-          if (open3) {
+          if (open4) {
             p.closePath();
           }
           p.moveTo(x2, y2);
-          open3 = true;
+          open4 = true;
         }
         function parseStems() {
           var hasWidthArg;
@@ -20456,9 +20456,9 @@ var require_pcb_tools = __commonJS({
                   width = stack2.shift() + nominalWidthX;
                   haveWidth = true;
                 }
-                if (open3) {
+                if (open4) {
                   p.closePath();
-                  open3 = false;
+                  open4 = false;
                 }
                 break;
               case 18:
@@ -35914,7 +35914,7 @@ var require_pcb_tools = __commonJS({
             continue;
           }
           const { loops, dangling } = chainLoops2(chains[layer4], 0.02);
-          let open3 = null;
+          let open4 = null;
           if (dangling) {
             const ends = [];
             for (const c of chains[layer4]) {
@@ -35922,9 +35922,9 @@ var require_pcb_tools = __commonJS({
               if (Math.hypot(a[0] - b[0], a[1] - b[1]) > 0.02) ends.push(a, b);
             }
             const free = ends.filter((e) => ends.filter((o) => Math.hypot(o[0] - e[0], o[1] - e[1]) <= 0.02).length < 2);
-            open3 = free[0] || ends[0] || chains[layer4][0][0];
+            open4 = free[0] || ends[0] || chains[layer4][0][0];
           }
-          res[layer4] = { loops, open: open3 };
+          res[layer4] = { loops, open: open4 };
         }
         return res;
       }
@@ -36542,10 +36542,10 @@ var require_pcb_tools = __commonJS({
       function chainLoops2(chains, tol) {
         tol = tol || 0.01;
         const same4 = (a, b) => Math.abs(a[0] - b[0]) <= tol && Math.abs(a[1] - b[1]) <= tol;
-        const loops = [], open3 = chains.filter((c) => c.some((q4) => !same4(q4, c[0]))).map((c) => c.slice());
+        const loops = [], open4 = chains.filter((c) => c.some((q4) => !same4(q4, c[0]))).map((c) => c.slice());
         let dangling = false;
-        while (open3.length) {
-          let cur2 = open3.pop();
+        while (open4.length) {
+          let cur2 = open4.pop();
           if (cur2.length > 2 && same4(cur2[0], cur2[cur2.length - 1])) {
             loops.push(cur2.slice(0, -1));
             continue;
@@ -36554,17 +36554,17 @@ var require_pcb_tools = __commonJS({
           while (grew && !same4(cur2[0], cur2[cur2.length - 1])) {
             grew = false;
             const tail = cur2[cur2.length - 1];
-            for (let i = 0; i < open3.length; i++) {
-              const c = open3[i];
+            for (let i = 0; i < open4.length; i++) {
+              const c = open4[i];
               if (same4(c[0], tail)) {
                 cur2 = cur2.concat(c.slice(1));
-                open3.splice(i, 1);
+                open4.splice(i, 1);
                 grew = true;
                 break;
               }
               if (same4(c[c.length - 1], tail)) {
                 cur2 = cur2.concat(c.slice(0, -1).reverse());
-                open3.splice(i, 1);
+                open4.splice(i, 1);
                 grew = true;
                 break;
               }
@@ -55772,17 +55772,17 @@ function bitmapButton(icon2, title, onClick, opts2) {
   if (onClick) b.addEventListener("click", (ev) => onClick(ev));
   return b;
 }
-function treeExpander(open3, kids7 = true) {
+function treeExpander(open4, kids7 = true) {
   ensureIconCss();
   const s2 = document.createElement("span");
   s2.setAttribute("aria-hidden", "true");
   s2.dataset.twist = "";
-  setExpander(s2, open3, kids7);
+  setExpander(s2, open4, kids7);
   return s2;
 }
-function setExpander(s2, open3, kids7 = true) {
-  s2.className = "ktw" + (kids7 ? open3 ? "" : " shut" : " leaf");
-  if (kids7) s2.dataset.open = String(open3);
+function setExpander(s2, open4, kids7 = true) {
+  s2.className = "ktw" + (kids7 ? open4 ? "" : " shut" : " leaf");
+  if (kids7) s2.dataset.open = String(open4);
   else delete s2.dataset.open;
 }
 function menuArrow() {
@@ -60444,7 +60444,7 @@ var require_opentype = __commonJS({
         var stack2 = [];
         var nStems = 0;
         var haveWidth = false;
-        var open3 = false;
+        var open4 = false;
         var x = 0;
         var y = 0;
         var subrs;
@@ -60466,11 +60466,11 @@ var require_opentype = __commonJS({
         }
         var width = defaultWidthX;
         function newContour(x2, y2) {
-          if (open3) {
+          if (open4) {
             p.closePath();
           }
           p.moveTo(x2, y2);
-          open3 = true;
+          open4 = true;
         }
         function parseStems() {
           var hasWidthArg;
@@ -60643,9 +60643,9 @@ var require_opentype = __commonJS({
                   width = stack2.shift() + nominalWidthX;
                   haveWidth = true;
                 }
-                if (open3) {
+                if (open4) {
                   p.closePath();
-                  open3 = false;
+                  open4 = false;
                 }
                 break;
               case 18:
@@ -69607,10 +69607,10 @@ function projectModel(path2) {
   }
   const m = /^\$[{(]KIPRJMOD[})][\/\\](.+)\.(?:step|stp|wrl|wrz)$/i.exec(path2);
   if (!m) return null;
-  const stem2 = m[1].replace(/\\/g, "/").replace(/^\.\//, "");
-  if (stem2.replace(/^(?:\.\.\/)+/, "").split("/").includes("..")) return null;
+  const stem3 = m[1].replace(/\\/g, "/").replace(/^\.\//, "");
+  if (stem3.replace(/^(?:\.\.\/)+/, "").split("/").includes("..")) return null;
   try {
-    return typeof fn === "function" ? fn(stem2) || null : null;
+    return typeof fn === "function" ? fn(stem3) || null : null;
   } catch {
     return null;
   }
@@ -69679,12 +69679,12 @@ function foreignModel(node, path2, ref) {
   if (!v) return null;
   if (/^(KICAD\d*_3DMODEL_DIR|KISYS3DMOD|KICAD_COLLAB_3DMODELS|KIPRJMOD)$/.test(v[1])) return null;
   const tail = v[2].replace(/\\/g, "/").replace(/^\.\//, "");
-  const stem2 = tail.replace(/\.(?:step|stp|wrl|wrz)$/i, "");
-  if (stem2 !== tail && !stem2.split("/").includes("..")) {
+  const stem3 = tail.replace(/\.(?:step|stp|wrl|wrz)$/i, "");
+  if (stem3 !== tail && !stem3.split("/").includes("..")) {
     const fn = globalThis.KiCadProjectModel;
     let own = null;
     try {
-      own = typeof fn === "function" ? fn(stem2) || (stem2.includes("/") ? fn("/" + stem2) : null) || null : null;
+      own = typeof fn === "function" ? fn(stem3) || (stem3.includes("/") ? fn("/" + stem3) : null) || null : null;
     } catch {
       own = null;
     }
@@ -69945,7 +69945,7 @@ async function vendorSymbol(vendor, id) {
   if (!node) throw new ToolError(`${vendor} part ${id}: its symbol could not be read.`);
   node[1] = sym.lib_id;
   const fields = Object.assign({}, part.fields, part.datasheet ? { Datasheet: part.datasheet } : {}, part.cad.footprint ? { Footprint: part.cad.footprint.fpid } : {});
-  return { libId: sym.lib_id, node, fields, value: part.mpn || sym.name };
+  return { libId: sym.lib_id, node, fields, value: part.value || part.mpn || sym.name };
 }
 function symbolFacts(libId, node) {
   const k = K4();
@@ -70853,11 +70853,11 @@ function forgetDocs() {
   cache2.clear();
 }
 async function resolveDoc(name) {
-  const open3 = openEntry();
+  const open4 = openEntry();
   const live3 = ED()?.kdoc;
-  if (!name || open3 && findDoc(name)?.docId === open3.docId) {
-    if (!open3 || !live3) throw new ToolError("No document is open in the editor yet.");
-    return { doc: live3, path: open3.path, docId: open3.docId, open: true };
+  if (!name || open4 && findDoc(name)?.docId === open4.docId) {
+    if (!open4 || !live3) throw new ToolError("No document is open in the editor yet.");
+    return { doc: live3, path: open4.path, docId: open4.docId, open: true };
   }
   const entry2 = findDoc(name);
   if (!entry2) throw new ToolError(`There is no document "${name}" in this project. The documents are: ${projectDocs().map((d) => d.path).join(", ") || "(none)"}.`);
@@ -70944,21 +70944,21 @@ function overview() {
   const ed = ED();
   const st = ed?.api?.state;
   const doc2 = ed?.kdoc;
-  const open3 = openEntry();
+  const open4 = openEntry();
   if (!st || !st.project) throw new ToolError("No project is open.");
   const out2 = {
     project: st.project.name,
     your_role: st.role || "guest",
-    documents: projectDocs().map((d) => ({ path: d.path, type: d.docType === "kicad_pcb" ? "board" : "schematic", open: !!open3 && d.docId === open3.docId }))
+    documents: projectDocs().map((d) => ({ path: d.path, type: d.docType === "kicad_pcb" ? "board" : "schematic", open: !!open4 && d.docId === open4.docId }))
   };
-  if (!doc2 || !open3) {
+  if (!doc2 || !open4) {
     out2.open_document = null;
     return out2;
   }
   const comps = components(doc2);
   const kinds = {};
   for (const it of doc2.items.values()) kinds[it.kind] = (kinds[it.kind] || 0) + 1;
-  const od = { path: open3.path, type: doc2.type === "sch" ? "schematic" : "board", title_block: doc2.titleBlock || {}, item_counts: kinds };
+  const od = { path: open4.path, type: doc2.type === "sch" ? "schematic" : "board", title_block: doc2.titleBlock || {}, item_counts: kinds };
   if (doc2.type === "sch") {
     const real = comps.filter((it) => !isPower(doc2, it));
     od.page_mm = doc2.page.map(r33);
@@ -72922,13 +72922,13 @@ function compute() {
     }
     return files.get(out2.join("/")) || files.get(file) || Array.from(files.values()).find((f2) => f2.file.split("/").pop() === file.split("/").pop()) || null;
   };
-  const stem2 = rootFile.file.split("/").pop().replace(/\.kicad_sch$/, "");
+  const stem3 = rootFile.file.split("/").pop().replace(/\.kicad_sch$/, "");
   const pro = projectDocs2().find((d) => d.docType === "kicad_pro");
-  const project3 = pro ? pro.path.split("/").pop().replace(/\.kicad_pro$/, "") : stem2;
+  const project3 = pro ? pro.path.split("/").pop().replace(/\.kicad_pro$/, "") : stem3;
   const tops = topLevelSchematics().map((t) => ({ sheet: files.get(t.doc.path), name: t.name, uuid: t.uuid })).filter((t) => !!t.sheet);
   const nl = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve2, { symbolPins: h3.symbolPins, isPower: (d, it) => h3.isPowerSymbol(d, String((KiCadCanvas.kid(it.node, "lib_id") || [])[1])) }, project3);
   const map = nl.netMap || /* @__PURE__ */ new Map(), instances = nl.instances || [];
-  computed = { map, instances, index: SN().nameIndex(map), rootName: stem2, docs, key: key3 };
+  computed = { map, instances, index: SN().nameIndex(map), rootName: stem3, docs, key: key3 };
   return computed;
 }
 function netMap() {
@@ -74035,9 +74035,9 @@ function hookOnce() {
   hooked = true;
   document.addEventListener("visibilitychange", () => maybeMarkRead());
   store.subscribe((s2) => {
-    const open3 = !!s2.panes.chat;
-    if (open3 && !wasOpen) setTimeout(maybeMarkRead, 0);
-    wasOpen = open3;
+    const open4 = !!s2.panes.chat;
+    if (open4 && !wasOpen) setTimeout(maybeMarkRead, 0);
+    wasOpen = open4;
   });
   selectionHooks.push(() => {
     if (attach) refreshLink();
@@ -76460,7 +76460,7 @@ function build2() {
   if (!root5) return null;
   const cur2 = currentDocId();
   const rootEntry = entry(root5.docId);
-  const stem2 = root5.path.split("/").pop().replace(/\.kicad_sch$/, "");
+  const stem3 = root5.path.split("/").pop().replace(/\.kicad_sch$/, "");
   const walk2 = (doc2, path2, depth) => {
     const e = entry(doc2.docId);
     if (!e || depth > 8) return [];
@@ -76506,7 +76506,7 @@ function build2() {
   const tl = topLevelEntry(root5.path);
   return repairPages({
     path: "/",
-    name: tl && typeof tl.name === "string" && tl.name || stem2 || projectName() || "Schematic",
+    name: tl && typeof tl.name === "string" && tl.name || stem3 || projectName() || "Schematic",
     page: rootEntry ? rootEntry.page : "1",
     docId: root5.docId,
     file: root5.path.split("/").pop() || "",
@@ -76844,6 +76844,222 @@ var init_proposals = __esm({
   }
 });
 
+// web/platform/documents/host.ts
+function documentEditorFor(docType) {
+  return (window.JunctionDocEditors || []).find((f2) => f2.docTypes.includes(docType));
+}
+var init_host = __esm({
+  "web/platform/documents/host.ts"() {
+    "use strict";
+  }
+});
+
+// web/domains/registry.ts
+function partStudioImporting(file, featureId) {
+  const sorted = (v) => Array.isArray(v) ? "[" + v.map(sorted).join(",") + "]" : v && typeof v === "object" ? "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + sorted(v[k])).join(",") + "}" : JSON.stringify(v);
+  const stem3 = file.name.replace(/\.[^.]+$/, "");
+  const format = /\.(brep|brp)$/i.test(file.path) ? "brep" : "step";
+  const items = [
+    { featureType: "import", id: featureId, name: stem3, order: "V", params: { file: { ...file, format }, split: "solids" }, type: "feature" },
+    { id: "studio", rollback: null, type: "studio", units: "mm" }
+  ].sort((a, b) => a.id < b.id ? -1 : 1);
+  return '{"junction":"part-studio","version":1,"items":[\n' + items.map(sorted).join(",\n") + "\n]}\n";
+}
+function documentKind(docType) {
+  return DOCUMENT_KINDS.find((k) => k.docType === docType);
+}
+var DOMAINS, DOCUMENT_KINDS;
+var init_registry = __esm({
+  "web/domains/registry.ts"() {
+    "use strict";
+    DOMAINS = [
+      {
+        id: "pcb",
+        title: "Electronics",
+        status: "shipped",
+        summary: "Schematics, symbols, footprints and circuit boards, through to fabrication outputs and SPICE.",
+        fileTypes: [".kicad_pro", ".kicad_sch", ".kicad_pcb", ".kicad_sym", ".kicad_mod", ".kicad_wks"],
+        reads: [],
+        documents: [
+          { docType: "kicad_sch", ext: ".kicad_sch", title: "Schematic", icon: '<path d="M3 12h5"/><path d="M16 12h5"/><rect x="8" y="8" width="8" height="8"/><path d="M12 4v4"/><path d="M12 16v4"/>' },
+          { docType: "kicad_pcb", ext: ".kicad_pcb", title: "Board", icon: '<rect x="4" y="5" width="16" height="14" rx="1.5"/><circle cx="8.5" cy="9.5" r="1.2"/><circle cx="15.5" cy="14.5" r="1.2"/><path d="M9.5 10.5l5 3"/>' }
+        ]
+      },
+      {
+        id: "mechanical",
+        title: "Mechanical CAD",
+        status: "in-progress",
+        summary: "Parametric solid parts: sketches, features and a history tree on a B-rep kernel.",
+        // .jpart is the part studio (web/domains/mechanical/CONTRACT.md); STEP and IGES are what it will import and export
+        fileTypes: [".jpart", ".step", ".stp", ".iges", ".igs"],
+        reads: [],
+        documents: [
+          {
+            docType: "part_studio",
+            ext: ".jpart",
+            title: "Part Studio",
+            bundle: "/static/dist/mechanical.js",
+            newName: "Part Studio",
+            icon: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5"/><path d="M12 12v9"/>',
+            // the same text as web/domains/mechanical/document/format.ts newPartStudioText() (a test compares them)
+            newText: '{"junction":"part-studio","version":1,"items":[\n{"id":"studio","rollback":null,"type":"studio","units":"mm"}\n]}\n',
+            // a STEP file opens as a part studio that imports it (web/domains/mechanical/features/import-file.ts)
+            fromFile: { title: "STEP file", accept: [".step", ".stp"], folder: "models", text: (f2) => partStudioImporting(f2, crypto.randomUUID()) }
+          }
+        ]
+      },
+      {
+        id: "assembly",
+        title: "Assemblies",
+        status: "in-progress",
+        summary: "Parts and boards put together with mates and joints, with interference checks and a bill of materials.",
+        fileTypes: [".jasm"],
+        reads: ["mechanical", "pcb"],
+        documents: [
+          {
+            docType: "assembly",
+            ext: ".jasm",
+            title: "Assembly",
+            bundle: "/static/dist/assembly.js",
+            newName: "Assembly",
+            icon: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/><path d="M11 7.5h5.5V13"/>',
+            // the same text as web/domains/assembly/document/format.ts newAssemblyText() (a test compares them)
+            newText: '{"junction":"assembly","version":1,"items":[\n{"id":"assembly","type":"assembly","units":"mm"}\n]}\n'
+          }
+        ]
+      },
+      {
+        id: "physics",
+        title: "Physics simulation",
+        status: "planned",
+        summary: "Structural, thermal and rigid-body analysis of parts and assemblies.",
+        fileTypes: [],
+        reads: ["mechanical", "assembly", "pcb"]
+      },
+      {
+        id: "silicon",
+        title: "IC and chip design",
+        status: "planned",
+        summary: "RTL, synthesis, place and route and layout of digital and analog chips on open PDKs.",
+        fileTypes: [".v", ".sv", ".vhd", ".gds", ".lef", ".def"],
+        reads: []
+      },
+      {
+        id: "robotics",
+        title: "Robotics simulation",
+        status: "planned",
+        summary: "Robots built from assemblies, with actuators, sensors and controllers simulated together.",
+        fileTypes: [".urdf", ".sdf", ".mjcf"],
+        reads: ["assembly", "pcb", "physics"]
+      },
+      {
+        id: "manufacturing",
+        title: "Manufacturing and CAM",
+        status: "planned",
+        summary: "Toolpaths for milling, turning and cutting, slicing for printing, and setup sheets.",
+        fileTypes: [".nc", ".gcode"],
+        reads: ["mechanical", "assembly", "pcb"]
+      }
+    ];
+    DOCUMENT_KINDS = DOMAINS.flatMap((d) => d.documents || []);
+  }
+});
+
+// web/domains/pcb/editor/dochost.ts
+function isHostedDoc(doc2) {
+  const kind = doc2 ? documentKind(doc2.docType) : void 0;
+  return !!kind && !!kind.bundle;
+}
+function loadBundle(src) {
+  let p = loading3.get(src);
+  if (!p) {
+    const v = window.__kcAssetV;
+    p = new Promise((resolve2, reject) => {
+      const tag = document.createElement("script");
+      tag.src = src + (v ? "?v=" + v : "");
+      tag.onload = () => resolve2();
+      tag.onerror = () => {
+        tag.parentNode?.removeChild(tag);
+        loading3.delete(src);
+        reject(new Error(`could not load ${src}`));
+      };
+      document.head.appendChild(tag);
+    });
+    loading3.set(src, p);
+  }
+  return p;
+}
+function closeHostedDoc() {
+  const was = open3;
+  open3 = null;
+  if (was && was.editor) {
+    try {
+      was.editor.close();
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+  const el4 = document.getElementById("cadHost");
+  if (el4) el4.replaceChildren();
+}
+async function openHostedDoc(doc2, showCad, openDocId2) {
+  closeHostedDoc();
+  const kind = documentKind(doc2.docType);
+  const mine = { docId: doc2.docId, editor: null };
+  open3 = mine;
+  showCad();
+  store.slice("connection", { status: "connecting", text: "opening\u2026", edits: 0 });
+  const el4 = document.getElementById("cadHost");
+  if (!el4) return;
+  el4.replaceChildren();
+  try {
+    await loadBundle(kind.bundle);
+    if (open3 !== mine) return;
+    const factory = documentEditorFor(doc2.docType);
+    if (!factory) throw new Error(`${kind.bundle} did not register an editor for ${doc2.docType}`);
+    const ctx = {
+      el: el4,
+      project: { projectId: state.project.projectId, name: state.project.name },
+      doc: { docId: doc2.docId, path: doc2.path, docType: doc2.docType },
+      docs: state.project.docs.map((d) => ({ docId: d.docId, path: d.path, docType: d.docType })),
+      signedIn: !!state.me,
+      userId: state.me ? state.me.id : null,
+      setConnection: (s2, text3) => {
+        if (open3 === mine) store.slice("connection", { status: s2, text: text3 });
+      },
+      toast: (text3, ms) => toast(text3, ms),
+      openDoc: (id) => openDocId2(id)
+    };
+    const editor3 = await factory.open(ctx);
+    if (open3 !== mine) {
+      editor3.close();
+      return;
+    }
+    mine.editor = editor3;
+  } catch (e) {
+    console.warn(e);
+    if (open3 !== mine) return;
+    store.slice("connection", { status: "error", text: "could not open" });
+    const p = document.createElement("p");
+    p.className = "empty";
+    p.style.margin = "48px auto";
+    p.textContent = `This ${kind.title.toLowerCase()} could not be opened. Reload the page to try again.`;
+    el4.replaceChildren(p);
+  }
+}
+var open3, loading3;
+var init_dochost = __esm({
+  "web/domains/pcb/editor/dochost.ts"() {
+    "use strict";
+    init_host();
+    init_registry();
+    init_appstore();
+    init_util();
+    open3 = null;
+    loading3 = /* @__PURE__ */ new Map();
+  }
+});
+
 // web/domains/pcb/editor/home.ts
 function navigate(path2, replace) {
   if (replace) history.replaceState(null, "", path2);
@@ -76870,6 +77086,7 @@ async function loadMe() {
 function showView(name) {
   state.view = name;
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === name));
+  if (name !== "cad") closeHostedDoc();
   if (name === "home") {
     leaveEditor();
     delete document.body.dataset.editor;
@@ -76890,12 +77107,20 @@ var init_home = __esm({
     "use strict";
     init_appstore();
     init_doc();
+    init_dochost();
     init_dom();
     init_util();
     window.CollabNav = { navigate, reloadMe: async () => {
       await loadMe();
       renderHome();
     } };
+  }
+});
+
+// web/platform/history/request.ts
+var init_request = __esm({
+  "web/platform/history/request.ts"() {
+    "use strict";
   }
 });
 
@@ -77052,10 +77277,12 @@ var init_versions = __esm({
     "use strict";
     init_appstore();
     init_doc();
+    init_dochost();
     init_home();
     init_net();
     init_state();
     init_util();
+    init_request();
     app = () => state;
     slice = () => store.get().versions;
     put2 = (patch) => {
@@ -77116,6 +77343,32 @@ var init_title = __esm({
     stem = (path2) => (path2 || "").split("/").pop().replace(/\.kicad_(sch|pcb)$/, "");
     last = "";
     store.subscribe(() => updateTitle());
+  }
+});
+
+// web/platform/doctabs/roomapi.ts
+function parseDocsNotice(msg) {
+  const m = msg;
+  if (!m || m.type !== "docs" || typeof m.n !== "string" || typeof m.projectId !== "string" || !m.doc || typeof m.doc.path !== "string") return null;
+  if (m.change !== "added" && m.change !== "renamed" && m.change !== "deleted") return null;
+  const name = m.change === "renamed" && typeof m.from === "string" ? `${stem2(m.from)} to ${stem2(m.doc.path)}` : stem2(m.doc.path);
+  const login = m.by && typeof m.by.login === "string" ? m.by.login : "";
+  return { n: m.n, projectId: m.projectId, note: { what: m.change, name: name.slice(0, 120) }, by: { userId: m.by && typeof m.by.userId === "number" ? m.by.userId : 0, login, name: m.by && typeof m.by.name === "string" && m.by.name || login || "Someone" } };
+}
+function tellDocsChanged(msg) {
+  const notice = parseDocsNotice(msg);
+  if (!notice || told.includes(notice.n) || typeof window === "undefined") return;
+  told.push(notice.n);
+  if (told.length > 50) told.shift();
+  window.dispatchEvent(new CustomEvent(DOCS_EVENT, { detail: notice }));
+}
+var DOCS_EVENT, stem2, told;
+var init_roomapi = __esm({
+  "web/platform/doctabs/roomapi.ts"() {
+    "use strict";
+    DOCS_EVENT = "junction-project-docs";
+    stem2 = (path2) => (path2.split("/").pop() || path2).replace(/\.[^.]+$/, "");
+    told = [];
   }
 });
 
@@ -77294,6 +77547,7 @@ async function connect() {
     if (msg.type === "chat") noteChatMsg(msg);
     if (msg.type === "proposal") noteProposalMsg(msg);
     if (msg.type === "versions") onVersionsNotice(msg);
+    if (msg.type === "docs") tellDocsChanged(msg);
     if (msg.type === "saved") window.dispatchEvent(new CustomEvent("kc-doc-saved", { detail: msg }));
     if (msg.type === "docs") void refreshDocs().then((added2) => {
       if (!added2) void loadSheets(typeof msg.addedDocId === "string" ? msg.addedDocId : null);
@@ -77500,6 +77754,7 @@ var init_net = __esm({
     init_versions();
     init_view();
     init_title();
+    init_roomapi();
     editsTimer = 0;
   }
 });
@@ -81008,10 +81263,10 @@ function drawComments() {
   const list = comments();
   for (const c of list) {
     if (c.parentId || c.resolved) continue;
-    const p = pinOf(c), r = 9 / s2, open3 = E.openThread === c.id;
+    const p = pinOf(c), r = 9 / s2, open4 = E.openThread === c.id;
     const g2 = svg("g", { cursor: "pointer", "data-thread": c.id, "data-anchor": c.anchor ? c.anchor.kind : "spot" });
     const fill3 = p.found ? "#ffb43a" : "#8a939c";
-    if (open3) g2.appendChild(svg("circle", { cx: p.x, cy: p.y, r: r + 3.5 / s2, fill: "none", stroke: "#4d7fc4", "stroke-width": 2 / s2 }));
+    if (open4) g2.appendChild(svg("circle", { cx: p.x, cy: p.y, r: r + 3.5 / s2, fill: "none", stroke: "#4d7fc4", "stroke-width": 2 / s2 }));
     if (c.anchor && c.anchor.kind === "net") g2.appendChild(svg("rect", { x: p.x - r, y: p.y - r, width: 2 * r, height: 2 * r, rx: 3 / s2, fill: fill3, stroke: "#001023", "stroke-width": 1.5 / s2 }));
     else g2.appendChild(svg("circle", { cx: p.x, cy: p.y, r, fill: fill3, stroke: "#001023", "stroke-width": 1.5 / s2 }));
     const glyph = svg("text", { x: p.x, y: p.y + 3.4 / s2, "text-anchor": "middle", fill: "#001023", "font-size": 10 / s2, "font-family": "system-ui, sans-serif", "font-weight": 700 });
@@ -81562,8 +81817,8 @@ function projectModelFile(path2, files) {
   const low = path2.toLowerCase();
   const hit5 = files.find((f2) => f2.toLowerCase() === low);
   if (hit5) return hit5;
-  const stem2 = low.replace(/\.(wrl|step|stp)$/i, "");
-  return files.find((f2) => /\.(step|stp)$/i.test(f2) && f2.toLowerCase().replace(/\.(step|stp)$/i, "") === stem2) || null;
+  const stem3 = low.replace(/\.(wrl|step|stp)$/i, "");
+  return files.find((f2) => /\.(step|stp)$/i.test(f2) && f2.toLowerCase().replace(/\.(step|stp)$/i, "") === stem3) || null;
 }
 function modelProblem(path2, env) {
   if (!path2) return { icon: "warning", text: "No filename entered" };
@@ -86866,8 +87121,8 @@ function editorDocs(docs) {
 function rootSchematicOf(shown2, all2) {
   const sch = shown2.filter((d) => d.docType === "kicad_sch");
   const pro = all2.find((d) => d.docType === "kicad_pro");
-  const stem2 = pro && pro.path.split("/").pop().replace(/\.kicad_pro$/, "");
-  return sch.find((d) => d.path.split("/").pop() === stem2 + ".kicad_sch") || sch.sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
+  const stem3 = pro && pro.path.split("/").pop().replace(/\.kicad_pro$/, "");
+  return sch.find((d) => d.path.split("/").pop() === stem3 + ".kicad_sch") || sch.sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
 }
 function firstDoc(shown2, all2, wanted2) {
   return shown2.find((d) => d.docId === wanted2) || rootSchematicOf(shown2, all2) || shown2.find((d) => d.docType === "kicad_pcb") || null;
@@ -87066,6 +87321,7 @@ __export(doc_exports, {
   setGridIndex: () => setGridIndex,
   setGridPitch: () => setGridPitch,
   setLayerVisible: () => setLayerVisible,
+  setProjectDocs: () => setProjectDocs,
   setupGridControls: () => setupGridControls,
   sheetHumanPaths: () => sheetHumanPaths,
   sheetNames: () => sheetNames,
@@ -87413,6 +87669,7 @@ function snapMm(mm4) {
   return [KiCadCanvas.snap(mm4[0], p), KiCadCanvas.snap(mm4[1], p)];
 }
 function leaveEditor() {
+  closeHostedDoc();
   leaveDoc();
   state.doc = null;
   state.docId = null;
@@ -87426,7 +87683,7 @@ function takeBoot(key3, projectId4) {
   return v;
 }
 async function openEditor(id) {
-  if (state.project && state.project.projectId === id && state.view === "editor") return;
+  if (state.project && state.project.projectId === id && (state.view === "editor" || state.view === "cad")) return;
   leaveEditor();
   showView("editor");
   let info;
@@ -87465,6 +87722,11 @@ async function openEditor(id) {
   }
   const wanted2 = new URLSearchParams(location.search).get("doc");
   rootSchematic();
+  const hosted = info.docs.find((d) => d.docId === wanted2 && isHostedDoc(d)) || (state.docs.length ? void 0 : info.docs.find((d) => isHostedDoc(d)));
+  if (hosted) {
+    await openDoc(hosted);
+    return;
+  }
   const doc2 = firstDoc(state.docs, info.docs, wanted2);
   if (!doc2) {
     base.replaceChildren();
@@ -87677,6 +87939,23 @@ function leaveDoc() {
 }
 async function openDoc(doc2) {
   leaveDoc();
+  if (isHostedDoc(doc2)) {
+    state.doc = doc2;
+    state.docId = doc2.docId;
+    const url2 = `/p/${state.project.projectId}/edit?doc=${doc2.docId}`;
+    if (location.pathname + location.search !== url2) history.replaceState(null, "", url2);
+    document.title = `${doc2.path.split("/").pop().replace(/\.[^.]+$/, "")} \u2014 ${state.project.name} \u2014 Junction`;
+    await openHostedDoc(doc2, () => {
+      showView("cad");
+      document.body.dataset.editor = "cad";
+      store.slice("document", { editor: null, docType: null, docId: doc2.docId, doc: doc2, hasDoc: false, notice: null });
+    }, openDocId);
+    return;
+  }
+  if (state.view === "cad") {
+    showView("editor");
+    document.title = `${state.project.name} \u2014 Junction`;
+  }
   state.doc = doc2;
   state.docId = doc2.docId;
   bindUndoDoc(doc2.docId);
@@ -87862,8 +88141,25 @@ function selectItemAction(id) {
   centerOn(fp.x / E.IU, fp.y / E.IU);
 }
 function openDocId(id) {
-  const d = state.docs.find((x) => x.docId === id);
+  const d = state.docs.find((x) => x.docId === id) || (state.project ? state.project.docs.find((x) => x.docId === id && isHostedDoc(x)) : void 0);
   if (d) openDoc(d);
+}
+function setProjectDocs(docs, open4) {
+  if (!state.project) return;
+  state.project = { ...state.project, docs };
+  state.docs = editorDocs(docs);
+  store.set({ project: state.project });
+  const cur2 = state.docId ? docs.find((d) => d.docId === state.docId) : void 0;
+  if (cur2 && state.doc && cur2.path !== state.doc.path) state.doc = cur2;
+  publishDocs();
+  if (open4) {
+    openDocId(open4);
+    return;
+  }
+  if (state.docId && !cur2 && !state.docId.startsWith("board:") && !state.docId.startsWith("lib:")) {
+    const next = firstDoc(state.docs, docs, null) || docs.find((d) => isHostedDoc(d));
+    if (next) openDoc(next);
+  }
 }
 function navigateDocs(dir) {
   const i = docNav.idx + dir;
@@ -87911,6 +88207,7 @@ var init_doc = __esm({
     init_variant();
     init_fpedit();
     init_bootpick();
+    init_dochost();
     init_pcbtools_loader();
     init_view();
     init_fonts();
@@ -90078,17 +90375,17 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
   };
   const defaultsPage = (el4) => {
     const val = (k) => numOr3(defaults[k], Number(DEFAULTS_DEFAULTS[k]));
-    const rows3 = LAYER_CLASSES.map(([stem2, label]) => {
-      const text3 = `${stem2}_text_size_h` in DEFAULTS_DEFAULTS;
+    const rows3 = LAYER_CLASSES.map(([stem3, label]) => {
+      const text3 = `${stem3}_text_size_h` in DEFAULTS_DEFAULTS;
       return {
-        stem: stem2,
+        stem: stem3,
         label,
-        line: val(`${stem2}_line_width`),
-        w: text3 ? val(`${stem2}_text_size_h`) : NaN,
-        ht: text3 ? val(`${stem2}_text_size_v`) : NaN,
-        th: text3 ? val(`${stem2}_text_thickness`) : NaN,
-        italic: text3 ? boolOr2(defaults[`${stem2}_text_italic`], false) : false,
-        upright: text3 ? boolOr2(defaults[`${stem2}_text_upright`], false) : false,
+        line: val(`${stem3}_line_width`),
+        w: text3 ? val(`${stem3}_text_size_h`) : NaN,
+        ht: text3 ? val(`${stem3}_text_size_v`) : NaN,
+        th: text3 ? val(`${stem3}_text_thickness`) : NaN,
+        italic: text3 ? boolOr2(defaults[`${stem3}_text_italic`], false) : false,
+        upright: text3 ? boolOr2(defaults[`${stem3}_text_upright`], false) : false,
         text: text3
       };
     });
@@ -90127,11 +90424,11 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
     register("Defaults", { edits: () => {
       const out2 = [], P = [...DS3, "defaults"];
       for (const r of g2.rows()) {
-        const stem2 = String(r.stem);
-        if (isFinite(Number(r.line))) out2.push({ path: [...P, `${stem2}_line_width`], value: Number(r.line) });
+        const stem3 = String(r.stem);
+        if (isFinite(Number(r.line))) out2.push({ path: [...P, `${stem3}_line_width`], value: Number(r.line) });
         if (!r.text) continue;
-        for (const [k, key3] of [["w", "text_size_h"], ["ht", "text_size_v"], ["th", "text_thickness"]]) if (isFinite(Number(r[k]))) out2.push({ path: [...P, `${stem2}_${key3}`], value: Number(r[k]) });
-        out2.push({ path: [...P, `${stem2}_text_italic`], value: !!r.italic }, { path: [...P, `${stem2}_text_upright`], value: !!r.upright });
+        for (const [k, key3] of [["w", "text_size_h"], ["ht", "text_size_v"], ["th", "text_thickness"]]) if (isFinite(Number(r[k]))) out2.push({ path: [...P, `${stem3}_${key3}`], value: Number(r[k]) });
+        out2.push({ path: [...P, `${stem3}_text_italic`], value: !!r.italic }, { path: [...P, `${stem3}_text_upright`], value: !!r.upright });
       }
       out2.push(
         { path: [...P, "dimension_units"], value: dUnits.get(), ints: true },
@@ -91679,14 +91976,14 @@ function unfoldPopup(entries, bus, at5, title) {
   };
   const out2 = title ? [{ label: "Unfold from Bus", disabled: true }] : [];
   const diff = /* @__PURE__ */ new Map();
-  const stem2 = (n2) => /[+\-PN]$/.test(n2) ? n2.slice(0, -1) : null;
+  const stem3 = (n2) => /[+\-PN]$/.test(n2) ? n2.slice(0, -1) : null;
   for (const e of entries) {
     if (!e.bus) {
       out2.push({ label: U.printBusForUI(e.name), run: run2(e.name) });
       continue;
     }
     let sub2;
-    const st = stem2(e.name);
+    const st = stem3(e.name);
     if (st !== null && e.members.length) {
       const had = diff.get(st);
       if (had) sub2 = had;
@@ -91700,7 +91997,7 @@ function unfoldPopup(entries, bus, at5, title) {
       out2.push(sub2);
     }
     for (const n2 of e.members) {
-      const s2 = stem2(n2);
+      const s2 = stem3(n2);
       if (s2 !== null) {
         let d = diff.get(s2);
         if (!d) {
@@ -92557,8 +92854,8 @@ function loadFab() {
 function loadFabScript() {
   const ready = fabGlobal();
   if (ready && typeof ready.buildPackage === "function") return Promise.resolve(ready);
-  if (loading3) return loading3;
-  loading3 = new Promise((resolve2, reject) => {
+  if (loading4) return loading4;
+  loading4 = new Promise((resolve2, reject) => {
     const own = document.querySelector('script[src*="/static/dist/editor.js"]');
     const query = own ? (own.getAttribute("src") || "").split("?")[1] : "";
     const s2 = document.createElement("script");
@@ -92571,10 +92868,10 @@ function loadFabScript() {
     s2.onerror = () => reject(new Error("could not load fab.js"));
     document.head.appendChild(s2);
   });
-  loading3.catch(() => {
-    loading3 = null;
+  loading4.catch(() => {
+    loading4 = null;
   });
-  return loading3;
+  return loading4;
 }
 function boardDoc() {
   const d = E.kdoc;
@@ -92858,7 +93155,7 @@ function show(fab, ctx, focus) {
     }
   });
 }
-var app2, loading3, PRESET_KEY, KIND_LABEL, size, blobOf, CSS6, cssDone4;
+var app2, loading4, PRESET_KEY, KIND_LABEL, size, blobOf, CSS6, cssDone4;
 var init_fab_outputs = __esm({
   "web/domains/pcb/editor/fab-outputs.ts"() {
     "use strict";
@@ -92869,7 +93166,7 @@ var init_fab_outputs = __esm({
     init_board_setup();
     init_ui();
     app2 = store;
-    loading3 = null;
+    loading4 = null;
     PRESET_KEY = "kicad.fab.preset";
     KIND_LABEL = { gerber: "Gerber", drill: "Drill", placement: "Placement", bom: "BOM", archive: "Archive" };
     size = (d) => {
@@ -92936,7 +93233,7 @@ function colorSwatch(init, opts2 = {}) {
     el4.dataset.color = cur2 ? colorText(cur2) : "";
   };
   let disabled = false;
-  const open3 = () => {
+  const open4 = () => {
     if (opts2.readOnly || disabled) return;
     const pick = opts2.pick || colorPicker;
     pick(cur2, !!opts2.opacity, (c) => {
@@ -92949,23 +93246,23 @@ function colorSwatch(init, opts2 = {}) {
     el4.addEventListener("dblclick", (ev) => {
       ev.preventDefault();
       ev.stopPropagation();
-      open3();
+      open4();
     });
     el4.addEventListener("auxclick", (ev) => {
       if (ev.button === 1) {
         ev.preventDefault();
-        open3();
+        open4();
       }
     });
   } else el4.addEventListener("click", (ev) => {
     ev.preventDefault();
     ev.stopPropagation();
-    open3();
+    open4();
   });
   el4.addEventListener("keydown", (ev) => {
     if (ev.key === "Enter" || ev.key === " ") {
       ev.preventDefault();
-      open3();
+      open4();
     }
   });
   paint();
@@ -92978,7 +93275,7 @@ function colorSwatch(init, opts2 = {}) {
   return { el: el4, get: () => cur2 ? { ...cur2 } : null, set(c) {
     cur2 = c ? { ...c } : null;
     paint();
-  }, open: open3, setDisabled };
+  }, open: open4, setDisabled };
 }
 var CHECKER, b2552;
 var init_colorswatch = __esm({
@@ -92995,9 +93292,9 @@ function rootSchematicOf2(docs) {
   const sch = docs.filter((d) => d.docType === "kicad_sch");
   if (!sch.length) return null;
   const pro = docs.find((d) => d.docType === "kicad_pro");
-  const stem2 = (p) => p.replace(/\.[^./]+$/, "");
+  const stem3 = (p) => p.replace(/\.[^./]+$/, "");
   const board3 = docs.find((d) => d.docId === state.docId);
-  return pro && sch.find((d) => stem2(d.path) === stem2(pro.path)) || board3 && sch.find((d) => stem2(d.path) === stem2(board3.path)) || sch.slice().sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
+  return pro && sch.find((d) => stem3(d.path) === stem3(pro.path)) || board3 && sch.find((d) => stem3(d.path) === stem3(board3.path)) || sch.slice().sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
 }
 async function projectNetlist() {
   const docs = projectDocs2(), root5 = rootSchematicOf2(docs);
@@ -98803,8 +99100,8 @@ function viewerGlobal() {
 function loadViewer() {
   const ready = viewerGlobal();
   if (ready) return Promise.resolve(ready);
-  if (loading4) return loading4;
-  loading4 = new Promise((resolve2, reject) => {
+  if (loading5) return loading5;
+  loading5 = new Promise((resolve2, reject) => {
     const own = document.querySelector('script[src*="/static/dist/editor.js"]');
     const query = own ? (own.getAttribute("src") || "").split("?")[1] : "";
     const s2 = document.createElement("script");
@@ -98817,10 +99114,10 @@ function loadViewer() {
     s2.onerror = () => reject(new Error("could not load viewer3d.js"));
     document.head.appendChild(s2);
   });
-  loading4.catch(() => {
-    loading4 = null;
+  loading5.catch(() => {
+    loading5 = null;
   });
-  return loading4;
+  return loading5;
 }
 function boardDoc2() {
   const d = editor2.kdoc;
@@ -98934,7 +99231,7 @@ function close3DViewer() {
   const v = viewerGlobal();
   if (v && v.isOpen()) v.close();
 }
-var editor2, app3, loading4;
+var editor2, app3, loading5;
 var init_viewer3d_loader = __esm({
   "web/domains/pcb/editor/viewer3d-loader.ts"() {
     "use strict";
@@ -98951,7 +99248,7 @@ var init_viewer3d_loader = __esm({
     init_tables();
     editor2 = E;
     app3 = store;
-    loading4 = null;
+    loading5 = null;
     document.addEventListener("keydown", (ev) => {
       if (!ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.code !== "Digit3") return;
       const t = ev.target;
@@ -99585,8 +99882,8 @@ function inlineSymbol(e) {
 function build3(input) {
   const ed = ED();
   const doc2 = ed?.kdoc;
-  const open3 = openEntry();
-  if (!doc2 || !open3) throw new ToolError("No document is open in the editor, so there is nothing to change.");
+  const open4 = openEntry();
+  if (!doc2 || !open4) throw new ToolError("No document is open in the editor, so there is nothing to change.");
   const edits = input.edits;
   if (!Array.isArray(edits) || !edits.length) throw new ToolError("edits must be a non-empty list.");
   if (edits.length > 400) throw new ToolError("That is too many edits for one proposal; split it into steps a person can review.");
@@ -99986,16 +100283,16 @@ function build3(input) {
             changes.push(modified(doc2, it, node));
             ids.push(it.id);
           }
-          const open4 = {};
+          const open5 = {};
           let left = 0;
           try {
             for (const l of P.ratsnest(scratch)) {
-              open4[l.name] = (open4[l.name] || 0) + 1;
+              open5[l.name] = (open5[l.name] || 0) + 1;
               left++;
             }
           } catch {
           }
-          details.push({ fill_zones: { zones: res.length, refilled: ids.length, outlines, islands, unconnected: left, unconnected_by_net: left ? open4 : void 0 } });
+          details.push({ fill_zones: { zones: res.length, refilled: ids.length, outlines, islands, unconnected: left, unconnected_by_net: left ? open5 : void 0 } });
           if (!ids.length) throw new ToolError("the zones are already filled for the board as it stands");
           lines.push({ kind: "modify", text: `Fill ${res.length} zone${res.length === 1 ? "" : "s"}: ${outlines} filled area${outlines === 1 ? "" : "s"}${islands ? `, ${islands} isolated` : ""}${left ? `, ${left} connection${left === 1 ? "" : "s"} still open` : ""}`, ids });
           break;
@@ -100456,8 +100753,8 @@ function build3(input) {
     id: "p" + Math.random().toString(36).slice(2, 9),
     title: String(input.title || "Proposed change").slice(0, 120),
     rationale: String(input.rationale || "").slice(0, 600),
-    docId: open3.docId,
-    docPath: open3.path,
+    docId: open4.docId,
+    docPath: open4.path,
     lines,
     changes,
     basis,
@@ -100506,9 +100803,9 @@ function connectivityDiff(doc2, changes) {
 function staleReason(p) {
   const ed = ED();
   const doc2 = ed?.kdoc;
-  const open3 = openEntry();
+  const open4 = openEntry();
   const k = K4();
-  if (!doc2 || !open3 || open3.docId !== p.docId) return `Open ${p.docPath} to apply this.`;
+  if (!doc2 || !open4 || open4.docId !== p.docId) return `Open ${p.docPath} to apply this.`;
   for (const [id, was] of Object.entries(p.basis)) {
     const it = doc2.items.get(id);
     if (!it) return "An item this would change has been deleted since.";
@@ -112064,8 +112361,8 @@ ${body}
     return u.includes("GND") || u === "EARTH" || u.startsWith("EARTH_") || u === "VSS" || u === "VSSA";
   }
   function stackedPinNotationValid(n2) {
-    const open3 = n2.includes("["), close = n2.includes("]");
-    if (!open3 && !close) return true;
+    const open4 = n2.includes("["), close = n2.includes("]");
+    if (!open4 && !close) return true;
     if (!n2.startsWith("[") || !n2.endsWith("]")) return false;
     const inner = n2.slice(1, -1), parts = inner.split(/(?<!\\),/).map((s2) => s2.trim()).filter((s2) => s2);
     if (!parts.length) return false;
@@ -112796,8 +113093,8 @@ ${body}
       if (d) return d;
     }
     if (ctx.docPath) return { path: ctx.docPath };
-    const pro = (ctx.docs || []).find((d) => d && d.docType === "kicad_pro"), stem2 = pro ? baseName3(pro.path).replace(/\.kicad_pro$/, "") : null;
-    return stem2 && docs.find((d) => baseName3(d.path) === stem2 + SHEET_EXT) || docs.slice().sort((x, y) => x.path.split("/").length - y.path.split("/").length || x.path.length - y.path.length)[0] || null;
+    const pro = (ctx.docs || []).find((d) => d && d.docType === "kicad_pro"), stem3 = pro ? baseName3(pro.path).replace(/\.kicad_pro$/, "") : null;
+    return stem3 && docs.find((d) => baseName3(d.path) === stem3 + SHEET_EXT) || docs.slice().sort((x, y) => x.path.split("/").length - y.path.split("/").length || x.path.length - y.path.length)[0] || null;
   }
   function normSheetFile(file) {
     file = str9(file).trim().replace(/\\/g, "/").replace(/^\/+/, "");
@@ -118929,9 +119226,9 @@ function stampClass(G5, c, o, sign2, fixed2) {
   stampObstacle(G5, c, o, sign2, c.full, c.vfull);
   if (fixed2) stampObstacle(G5, c, o, sign2, c.fixed, c.vfixed);
 }
-function buildClass(G5, key3, width, clr, viaD, viaDrill, kind, open3 = true, feed = false) {
+function buildClass(G5, key3, width, clr, viaD, viaDrill, kind, open4 = true, feed = false) {
   const n2 = G5.W * G5.H;
-  const c = { key: key3, width, clr, viaD, viaDrill, kind, open: open3, feed, full: [], fixed: [], vfull: [], vfixed: [] };
+  const c = { key: key3, width, clr, viaD, viaDrill, kind, open: open4, feed, full: [], fixed: [], vfull: [], vfixed: [] };
   for (let l = 0; l < G5.layers.length; l++) {
     const m = new Uint16Array(n2);
     if (G5.outside) {
@@ -118941,7 +119238,7 @@ function buildClass(G5, key3, width, clr, viaD, viaDrill, kind, open3 = true, fe
     if (k) {
       for (let i = 0; i < n2; i++) if (k[i]) m[i]++;
     }
-    if (!open3 && G5.quiet) {
+    if (!open4 && G5.quiet) {
       for (let i = 0; i < n2; i++) if (G5.quiet[i]) m[i]++;
     }
     if (!feed && G5.clear) {
@@ -120746,12 +121043,12 @@ var Router = class _Router {
       }
     }
     const kind = this.relax ? void 0 : this.kindFor(netKey);
-    const open3 = !G5.quiet || this.xtalNets.has(netKey) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(netKey);
+    const open4 = !G5.quiet || this.xtalNets.has(netKey) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(netKey);
     const feed = this.feedNets.has(netKey);
-    const key3 = `${width}/${clr}/${viaD}/${viaDrill}` + (kind ? "/" + kind : "") + (open3 ? "" : "/q") + (feed ? "/f" : "");
+    const key3 = `${width}/${clr}/${viaD}/${viaDrill}` + (kind ? "/" + kind : "") + (open4 ? "" : "/q") + (feed ? "/f" : "");
     let c = G5.classes.get(key3);
     if (!c) {
-      c = buildClass(G5, key3, width, clr, viaD, viaDrill, kind, open3, feed);
+      c = buildClass(G5, key3, width, clr, viaD, viaDrill, kind, open4, feed);
       if (this.conns.length) {
         for (const o of this.conns) if (o.nodes) for (const sh of o.shapes) stampClass(G5, c, sh, 1, false);
       }
@@ -121870,16 +122167,16 @@ var Router = class _Router {
       let rt = G5.routable, extra;
       if (gd.allowed && !collect) {
         const want2 = gd.allowed.map((v, l) => v && G5.routable[l]);
-        const open3 = want2.slice();
+        const open4 = want2.slice();
         let relaxed = false;
         if (want2.some(Boolean)) {
           for (const e of [A, B]) if (!e.layers.some((l) => want2[l])) {
-            for (const l of e.layers) if (G5.routable[l] && !open3[l]) {
-              open3[l] = true;
+            for (const l of e.layers) if (G5.routable[l] && !open4[l]) {
+              open4[l] = true;
               relaxed = true;
             }
           }
-          rt = open3;
+          rt = open4;
           if (relaxed) extra = (nodes) => {
             let off = 0;
             for (let i = 0; i + 1 < nodes.length; i++) {
@@ -122490,10 +122787,10 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       return true;
     };
     for (let round = 0; round < 3; round++) {
-      const open3 = conns.filter((c) => !c.nodes && c.why !== "budget");
-      if (!open3.length) return;
+      const open4 = conns.filter((c) => !c.nodes && c.why !== "budget");
+      if (!open4.length) return;
       let gained = false;
-      for (const c of open3) {
+      for (const c of open4) {
         if (timeUp()) return;
         if (c.nodes) continue;
         const snap2 = snapOf();
@@ -124625,10 +124922,10 @@ function evaluate(K11, P, doc2, settings3, opts2 = {}) {
   void K11;
   const nl = P.netlist(doc2);
   const rats = P.ratsnest(doc2, nl);
-  const open3 = /* @__PURE__ */ new Map();
+  const open4 = /* @__PURE__ */ new Map();
   let ratsnest = 0;
   for (const l of rats) {
-    open3.set(l.net, (open3.get(l.net) || 0) + 1);
+    open4.set(l.net, (open4.get(l.net) || 0) + 1);
     ratsnest += l.length;
   }
   const acc = /* @__PURE__ */ new Map();
@@ -124657,7 +124954,7 @@ function evaluate(K11, P, doc2, settings3, opts2 = {}) {
       continue;
     }
     const shortest = mst(e.pads);
-    const unrouted = open3.get(net) || 0;
+    const unrouted = open4.get(net) || 0;
     vias += e.vias;
     trackLength += e.len;
     if (!unrouted) routedNets++;
@@ -129740,8 +130037,8 @@ function boardSettings(setup, doc2) {
     const pp = K(setup, "pcbplotparams");
     const v = K(pp, "viasonmask");
     if (v) {
-      const open3 = str(v[1]) === "true" || str(v[1]) === "yes";
-      tentFront = tentBack = !open3;
+      const open4 = str(v[1]) === "true" || str(v[1]) === "yes";
+      tentFront = tentBack = !open4;
     }
   }
   const ax = K(setup, "aux_axis_origin"), gx = K(setup, "grid_origin");
@@ -131299,9 +131596,9 @@ function plotFile(m, layer4, opt, log) {
   if (mask && m.settings.maskMinWidth > 0) prims = maskWithMinWidth(prims, m.settings.maskMinWidth);
   if (silk && opt.subtractMaskFromSilk) {
     const maskLayer = isBack(layer4) ? "B.Mask" : "F.Mask";
-    let open3 = plotLayer(m, maskLayer, opt, log, conn).filter((p) => !p.clear);
-    if (m.settings.maskMinWidth > 0) open3 = maskWithMinWidth(open3, m.settings.maskMinWidth);
-    for (const p of open3) prims.push(Object.assign({}, p, { clear: true }));
+    let open4 = plotLayer(m, maskLayer, opt, log, conn).filter((p) => !p.clear);
+    if (m.settings.maskMinWidth > 0) open4 = maskWithMinWidth(open4, m.settings.maskMinWidth);
+    for (const p of open4) prims.push(Object.assign({}, p, { clear: true }));
   }
   for (const extra of opt.commonLayers || []) {
     if (extra === layer4) continue;
@@ -133412,7 +133709,7 @@ function pnpRotation(deg, flipped) {
   return g2;
 }
 function courtyardLoops(fp, layer4) {
-  const loops = [], open3 = [];
+  const loops = [], open4 = [];
   for (const g2 of fp.node) {
     if (!isList(g2)) continue;
     const t = String(g2[0]);
@@ -133425,7 +133722,7 @@ function courtyardLoops(fp, layer4) {
     };
     if (t === "fp_line") {
       const a = P("start"), b = P("end");
-      if (a && b) open3.push([a, b]);
+      if (a && b) open4.push([a, b]);
     } else if (t === "fp_rect") {
       const s2 = kid(g2, "start"), e = kid(g2, "end");
       if (!s2 || !e) continue;
@@ -133439,14 +133736,14 @@ function courtyardLoops(fp, layer4) {
       const a = P("start"), m = P("mid"), b = P("end");
       if (!a || !m || !b) continue;
       const arc = arcFrom3(a, m, b);
-      open3.push(arc ? arcPoints(arc.x, arc.y, arc.r, arc.a0, arc.a1, arc.anticlockwise, MAX_ERROR) : [a, b]);
+      open4.push(arc ? arcPoints(arc.x, arc.y, arc.r, arc.a0, arc.a1, arc.anticlockwise, MAX_ERROR) : [a, b]);
     } else {
       const pts = ptsOf(g2).map((q4) => fp.tf(q4[0], q4[1]));
       if (pts.length > 2) loops.push(pts);
     }
   }
   const eps = 0.02, near2 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) <= eps;
-  const pool = open3.slice();
+  const pool = open4.slice();
   while (pool.length) {
     let chain = pool.shift().slice();
     for (let grew = true; grew && !near2(chain[0], chain[chain.length - 1]); ) {
@@ -133921,25 +134218,25 @@ var ZoneFiller = class {
     }
     const tol = 1e-3;
     const same = (a, b) => Math.abs(a[0] - b[0]) <= tol && Math.abs(a[1] - b[1]) <= tol;
-    const open3 = chains.map((c) => c.slice());
+    const open4 = chains.map((c) => c.slice());
     const loops = [];
-    while (open3.length) {
-      let cur2 = open3.pop();
+    while (open4.length) {
+      let cur2 = open4.pop();
       let grew = true;
       while (grew && !(cur2.length > 2 && same(cur2[0], cur2[cur2.length - 1]))) {
         grew = false;
         const tail = cur2[cur2.length - 1];
-        for (let i = 0; i < open3.length; i++) {
-          const c = open3[i];
+        for (let i = 0; i < open4.length; i++) {
+          const c = open4[i];
           if (same(c[0], tail)) {
             cur2 = cur2.concat(c.slice(1));
-            open3.splice(i, 1);
+            open4.splice(i, 1);
             grew = true;
             break;
           }
           if (same(c[c.length - 1], tail)) {
             cur2 = cur2.concat(c.slice(0, -1).reverse());
-            open3.splice(i, 1);
+            open4.splice(i, 1);
             grew = true;
             break;
           }
@@ -135063,7 +135360,7 @@ function cleanLoop(pts, eps = 1e-6) {
   return out2;
 }
 function chainLoops(paths, tol = 0.01) {
-  const loops = [], open3 = [];
+  const loops = [], open4 = [];
   const used = new Array(paths.length).fill(false);
   const near2 = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]) <= tol;
   const cell = Math.max(tol * 4, 0.05);
@@ -135123,9 +135420,9 @@ function chainLoops(paths, tol = 0.01) {
     }
     const c = cleanLoop(chain);
     if (closed && c.length >= 3) loops.push(c);
-    else open3.push(chain);
+    else open4.push(chain);
   }
-  return { loops, open: open3 };
+  return { loops, open: open4 };
 }
 function nestLoops(loops) {
   const L = loops.filter((l) => l.length >= 3 && Math.abs(polyArea3(l)) > 1e-6).sort((a, b) => Math.abs(polyArea3(b)) - Math.abs(polyArea3(a)));
@@ -139152,7 +139449,7 @@ function traceNet(doc2, path2, name) {
     }
     return best || `${r34(pt4[0])}, ${r34(pt4[1])}`;
   };
-  const open3 = P.ratsnest(doc2).filter((l) => l.net === net.key).map((l) => ({ from: near2(l.a), to: near2(l.b), gap_mm: r34(l.length) }));
+  const open4 = P.ratsnest(doc2).filter((l) => l.net === net.key).map((l) => ({ from: near2(l.a), to: near2(l.b), gap_mm: r34(l.length) }));
   const t = resolveTargets(doc2, { nets: [name] });
   return {
     document: path2,
@@ -139166,7 +139463,7 @@ function traceNet(doc2, path2, name) {
     via_positions: net.vias.slice(0, 40).map((c) => [r34(c.shape.x), r34(c.shape.y)]),
     zones: net.zones.length ? new Set(net.zones.map((c) => c.id)).size : void 0,
     islands: net.clusters.length,
-    open_connections: open3.length ? open3.slice(0, 40) : 0,
+    open_connections: open4.length ? open4.slice(0, 40) : 0,
     shorted_to: net.shorts.length ? Array.from(new Set(net.shorts.flatMap((c) => Array.from(c.nets)))).filter((n2) => n2 !== net.key) : void 0,
     box: t.box ? t.box.map(r34) : void 0
   };
@@ -139791,10 +140088,10 @@ function survey(doc2, P, k) {
     let best = 0;
     for (let j = 0; j < parts.length; j++) {
       const dist = /* @__PURE__ */ new Map([[n0 + j, 0]]);
-      const open3 = [n0 + j];
-      while (open3.length) {
-        open3.sort((a, b) => dist.get(b) - dist.get(a));
-        const u = open3.pop();
+      const open4 = [n0 + j];
+      while (open4.length) {
+        open4.sort((a, b) => dist.get(b) - dist.get(a));
+        const u = open4.pop();
         const du = dist.get(u);
         for (const [v, w] of adj[u] || []) {
           if (v >= n0 && v !== n0 + j) {
@@ -139805,7 +140102,7 @@ function survey(doc2, P, k) {
           const dv = dist.get(v);
           if (dv === void 0 || du + w < dv - 1e-9) {
             dist.set(v, du + w);
-            open3.push(v);
+            open4.push(v);
           }
         }
       }
@@ -139897,7 +140194,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
   });
   {
     const crowded = [];
-    const dirty = [], inland = [], open3 = [], bare_ = [], thin = [], noGround = [];
+    const dirty = [], inland = [], open4 = [], bare_ = [], thin = [], noGround = [];
     for (const a of antennas) {
       const own = new Set(a.pads.map((p) => p.net).filter(Boolean));
       const core = grow5(a.box, LIMITS.antennaClear), shape3 = rectShape(core);
@@ -139930,7 +140227,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
         if (d > LIMITS.antennaEdge) inland.push(`${a.ref} is ${r22(d)} mm from the nearest board edge`);
       }
       const ko = S3.keepouts.find((q4) => q4.copper && hit4(q4.box, a.box));
-      if (gz && !ko) open3.push(a.ref);
+      if (gz && !ko) open4.push(a.ref);
       const region = ko ? ko.box : antennaRegion(S3, a, LIMITS.antennaClear);
       {
         const band = grow5(region, 1.2), bshape = rectShape(band), inner = rectShape(grow5(region, 0.05));
@@ -139958,7 +140255,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
     if (crowded.length) add2("antenna.ground", "error", "Other nets stand or run in the ground right beside an antenna's clear area. That ground is the antenna's counterpoise: keep a band of 1.2 mm round the clear area whole, with only the feed and ground vias in it. Move the parts away (board.autoplace() and board.seat() keep them out) and route again (the router keeps other nets out of the band).", crowded);
     if (dirty.length) add2("antenna.keepout", "error", "There is copper in an antenna's clear area. An antenna radiates into the space around it: copper under or beside it, on any layer, detunes it and swallows the signal. Clear every layer (board.antenna(ref) adds the keep-out and refills).", dirty);
     if (inland.length) add2("antenna.keepout", "warning", `An antenna belongs at a board edge, preferably a corner, pointing away from the rest of the board (within ${LIMITS.antennaEdge} mm of the edge).`, inland);
-    if (open3.length) add2("antenna.keepout", "warning", "No keep-out area covers these antennas, so the next zone fill pours copper under them. board.antenna(ref) adds one on every layer.", open3);
+    if (open4.length) add2("antenna.keepout", "warning", "No keep-out area covers these antennas, so the next zone fill pours copper under them. board.antenna(ref) adds one on every layer.", open4);
     if (bare_.length) add2("antenna.fence", "error", `The ground around these antennas has no stitching vias. The edge of a ground pour that faces an antenna is part of the antenna: unstitched, the top and bottom pours are driven against each other and the edge radiates and resonates on its own. Tie the layers together along that edge with vias no more than ${pitch} mm apart (a twentieth of a wavelength; ${radio.why}): board.antenna(ref).`, bare_);
     if (thin.length) add2("antenna.fence", "warning", `The ground edge around an antenna needs a via at least every ${pitch} mm (a twentieth of a wavelength; ${radio.why}). board.antenna(ref) fills the gaps.`, thin);
     if (noGround.length) add2("antenna.keepout", "warning", "A patch antenna (GPS, GNSS) works against the ground plane under it: it needs unbroken ground beneath and around it, as large as its datasheet asks (often 50 mm square or more), not a keep-out.", noGround);
@@ -140660,22 +140957,22 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       const atHole = (q4) => holes.some((h3) => Math.hypot(h3[0] - q4[0], h3[1] - q4[1]) <= 0.35);
       const tied = (p, maxLen = 6) => {
         const dist = /* @__PURE__ */ new Map();
-        const open3 = [];
+        const open4 = [];
         gpts.forEach((q4, i) => {
           if (inBox(p.box, q4[0], q4[1])) {
             dist.set(i, 0);
-            open3.push(i);
+            open4.push(i);
           }
         });
-        while (open3.length) {
-          const u = open3.shift();
+        while (open4.length) {
+          const u = open4.shift();
           const du = dist.get(u);
           if (atHole(gpts[u])) return true;
           for (const [v, w] of gadj[u]) {
             const d = du + w;
             if (d <= maxLen && (dist.get(v) === void 0 || d < dist.get(v) - 1e-9)) {
               dist.set(v, d);
-              open3.push(v);
+              open4.push(v);
             }
           }
         }
@@ -141884,14 +142181,14 @@ function reviewCraft(doc2, P, k, settings3, add2) {
     for (const v of vias) if (v.net) count2.set(v.net, (count2.get(v.net) || 0) + 1);
     const routed = new Set(tracks.map((t) => t.net));
     const items = [];
-    for (const [stem2, g2] of groups) {
+    for (const [stem3, g2] of groups) {
       const r = g2.filter((n2) => routed.has(n2));
       if (r.length < 4) continue;
       const c = r.map((n2) => count2.get(n2) || 0);
       const lo = Math.min(...c), hi = Math.max(...c);
       if (lo === hi) continue;
       const odd = r.filter((n2) => (count2.get(n2) || 0) !== lo).sort();
-      items.push(`${stem2}: most lines have ${lo} via${lo === 1 ? "" : "s"}; ${few2(odd.map((n2) => `${bare2(n2)} ${count2.get(n2)}`), 6).join(", ")}`);
+      items.push(`${stem3}: most lines have ${lo} via${lo === 1 ? "" : "s"}; ${few2(odd.map((n2) => `${bare2(n2)} ${count2.get(n2)}`), 6).join(", ")}`);
     }
     if (items.length) add2("bus.transitions", "warning", "The lines of one bus should take the same route through the board: the same layers and the same number of vias. A via's delay is hard to know, so lines that differ in vias cannot be matched by track length alone, and each via is one more step for the edge to reflect from. Route the whole group on one layer where it fits (board.route(max_vias=0, nets=[...]) for the group after board.unroute), or give every line the same layer change.", items);
   }
@@ -142374,7 +142671,7 @@ async function reviewSchematic(doc2, path2) {
     if (mixed.length) add2("domains", "warning", "These signals join ICs on different supply voltages. Check that each input tolerates the other side's level, and that neither side is powered through its pins while its own supply is off (a level shifter or a series resistor where it is not).", mixed);
   }
   {
-    const swapped = [], bare3 = [], open3 = [], floating = [];
+    const swapped = [], bare3 = [], open4 = [], floating = [];
     const pulled = (net, hops = 0) => (netPins.get(net) || []).some((q4) => {
       if (!/^(R|RN|D|LED)\d/i.test(q4.ref)) return false;
       const r = byRef2.get(q4.ref);
@@ -142396,13 +142693,13 @@ async function reviewSchematic(doc2, path2) {
       if (icOnly(rx).length >= 2 && !tx.length) swapped.push(`${n2.name}: ${rx.map((q4) => `${q4.ref}.${q4.name}`).join(" and ")} are both receivers`);
       if (n2.named && /^(UART\d*_?)?(TXD?|RXD?)\d*$/i.test(n2.name)) bare3.push(`${n2.name}: whose TX? Name it after its source (MCU_TX, GPS_TX)`);
       const od = n2.pins.some((q4) => q4.type === "open_collector" || q4.type === "open_emitter") || n2.pins.some((q4) => /^(SDA|SCL|SCK\/SCL|SDA\/SDI|I2C\d*_?(SDA|SCL))\d*$/i.test(q4.name)) || /(^|_)(SDA|SCL)\d*$/i.test(n2.name);
-      if (od && n2.pins.some((q4) => isIc(byRef2.get(q4.ref) || { pins: [], ref: "" })) && !pulled(n2.name)) open3.push(`${n2.name}: ${n2.pins.slice(0, 3).map((q4) => `${q4.ref}.${q4.name || q4.number}`).join(", ")}`);
+      if (od && n2.pins.some((q4) => isIc(byRef2.get(q4.ref) || { pins: [], ref: "" })) && !pulled(n2.name)) open4.push(`${n2.name}: ${n2.pins.slice(0, 3).map((q4) => `${q4.ref}.${q4.name || q4.number}`).join(", ")}`);
       const ctl = n2.pins.filter((q4) => q4.type === "input" && /^~?\{?(N?RST|N?RESET|RUN|EN|ENABLE|SHDN|N?SHUTDOWN|BOOT\d*|CE|CHIP_EN|CHIP_PU|PWRKEY)\}?$/i.test(q4.name) && isIc(byRef2.get(q4.ref) || { pins: [], ref: "" }));
       if (ctl.length && !pulled(n2.name) && !n2.pins.some((q4) => q4.type === "output" || q4.type === "power_out")) floating.push(`${n2.name}: ${ctl.map((q4) => `${q4.ref}.${q4.name}`).join(", ")}`);
     }
     if (swapped.length) add2("uart", "error", "UART lines cross: one side's TX goes to the other side's RX.", swapped);
     if (bare3.length) add2("uart", "warning", "UART nets are named after the device that transmits on them.", bare3);
-    if (open3.length) add2("pullups", "error", "Open-drain lines need a pull-up resistor to their supply (I2C: one on SDA and one on SCL).", open3);
+    if (open4.length) add2("pullups", "error", "Open-drain lines need a pull-up resistor to their supply (I2C: one on SDA and one on SCL).", open4);
     if (floating.length) add2("pullups", "warning", "These reset, enable or boot pins have nothing that holds them in a known state at power up. Add a pull-up or pull-down resistor, or say in a note that the pin has one inside.", floating);
   }
   {

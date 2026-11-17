@@ -16,6 +16,7 @@ import { historyActive, holdViewOnly, noteEdit, onVersionsNotice } from "./versi
 import type { ItemSummary, PendingOp, ServerError } from "./types";
 import { dragG, drawPeers, movePeerCursors, peersG, scheduleRenderRefresh } from "./view";
 import { updateTitle } from "./title";
+import { tellDocsChanged } from "../../../platform/doctabs/roomapi";
 // ---- websocket / presence / ops ----
 export function setConn(cls: string, text?: string) { store.slice("connection", { status: cls === "live" ? "live" : cls === "err" ? "error" : "offline", text: text || (cls === "live" ? "live" : "offline") }); }
 
@@ -160,6 +161,7 @@ export async function connect() {
     if (msg.type === "chat") noteChatMsg(msg);              // the project chat (chat.ts)
     if (msg.type === "proposal") noteProposalMsg(msg);       // an assistant proposed a change, or somebody decided one (proposals.ts)
     if (msg.type === "versions") onVersionsNotice(msg);       // somebody saved, restored, branched or merged
+    if (msg.type === "docs") tellDocsChanged(msg);            // a document of the project was added, renamed or deleted: the tabs follow
     // a document of the project was saved explicitly (the Footprint Editor's Save): fpedit.ts clears its '*', library caches drop the file
     if (msg.type === "saved") window.dispatchEvent(new CustomEvent("kc-doc-saved", { detail: msg }));
     // a file joined the project (a sheet somebody drew), or its first content arrived: read the file list and the sheets again

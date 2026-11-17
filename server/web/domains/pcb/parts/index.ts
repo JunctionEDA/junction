@@ -56,8 +56,8 @@ function registerSource(): boolean {
       const fields = { ...p.fields, ...(p.datasheet ? { Datasheet: p.datasheet } : {}) };
       if (!p.cad || (kind === "symbol" ? !p.cad.symbol : !p.cad.footprint)) throw new Error(`No ${kind} is available for ${p.mpn || id}.`);
       return kind === "symbol"
-        ? { libId: p.cad.symbol!.lib_id, symbol: p.cad.symbol!.sexpr, fields: { Value: p.mpn || p.cad.symbol!.name, Footprint: p.cad.footprint ? p.cad.footprint.fpid : "", ...fields } }
-        : { fpid: p.cad.footprint!.fpid, footprint: p.cad.footprint!.sexpr, fields: { Value: p.mpn || p.cad.footprint!.name, ...fields } };
+        ? { libId: p.cad.symbol!.lib_id, symbol: p.cad.symbol!.sexpr, fields: { Value: p.value || p.mpn || p.cad.symbol!.name, Footprint: p.cad.footprint ? p.cad.footprint.fpid : "", ...fields } }
+        : { fpid: p.cad.footprint!.fpid, footprint: p.cad.footprint!.sexpr, fields: { Value: p.value || p.mpn || p.cad.footprint!.name, ...fields } };
     },
   });
   return true;

@@ -16,6 +16,14 @@ export type ViewName = "top" | "bottom" | "front" | "back" | "left" | "right";
 export type Axis = "x" | "y" | "z";
 export type RGB = [number, number, number];
 export interface RenderLights { top?: RGB; bottom?: RGB; side?: RGB; camera?: RGB; sideElevation?: number }
+/**
+ * A solid drawn with the board that is not part of it: the enclosure of a linked part studio, a marker over a
+ * component (web/domains/pcb/mech/enclosure.ts).  Coordinates are the board's own right-handed space in
+ * millimetres: X as in the board file, Y UP (the file's Y negated), Z the height above the board's front face.
+ */
+export interface ExtraMesh { positions: Float32Array; normals: Float32Array; indices: Uint32Array; color: RGB; opacity: number; /** cut by the section plane, when there is one */ section?: boolean }
+/** Points with normal · p + constant < 0 are cut away (same space as ExtraMesh). */
+export interface SectionPlane { normal: RGB; constant: number }
 
 const FOV = 45;                          // CAMERA: m_frustum.angle
 const ZOOM_STEP = 1.26;                  // EDA_3D_CANVAS::SetView3D: three steps per doubling
@@ -60,6 +68,9 @@ export class Viewer {
   /** View > 3D Grid (render.grid_type, NONE by default) and its line mesh */
   grid: Grid3D = 0;
   private gridMesh: THREE.LineSegments | null = null;
+  private extras = new THREE.Group();
+  private extraSection: THREE.Plane | null = null;
+  private extraClip = new THREE.Plane();
   private lights: THREE.Object3D[] = [];
   /** the camera's position; it always looks down −Z */
   private cam = new THREE.Vector3(0, 0, 300);
@@ -116,12 +127,44 @@ export class Viewer {
     // turn about the middle of the laminate, not its front face
     next.group.position.set(0, 0, next.size.t / 2);
     this.pivot.add(next.group);
+    this.placeExtras();
     if (fit || this.fitted) { this.cam.set(0, 0, this.fitDistance()); this.fitted = true; }
     this.buildGrid();
     this.requestRender();
     // the parts' real models: those already here were drawn just now, the rest are fetched and drawn as they arrive
     if (this.models) this.models.want(next.modelRefs());
     return next.stats;
+  }
+
+  /** Draw these solids with the board (replacing the ones drawn before); `section` cuts those that ask for it. */
+  setExtras(meshes: readonly ExtraMesh[], section: SectionPlane | null = null): void {
+    this.clearExtras();
+    this.extraSection = section ? new THREE.Plane(new THREE.Vector3(...section.normal).normalize(), section.constant) : null;
+    this.renderer.localClippingEnabled = !!section;
+    for (const m of meshes) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute("position", new THREE.BufferAttribute(m.positions, 3));
+      g.setAttribute("normal", new THREE.BufferAttribute(m.normals, 3));
+      g.setIndex(new THREE.BufferAttribute(m.indices, 1));
+      const see = m.opacity < 1;
+      const mat = new THREE.MeshStandardMaterial({ color: new THREE.Color().setRGB(m.color[0], m.color[1], m.color[2], THREE.SRGBColorSpace), roughness: 0.75, metalness: 0.05, transparent: see, opacity: m.opacity, depthWrite: !see, side: THREE.DoubleSide });
+      if (section && m.section) mat.clippingPlanes = [this.extraClip];
+      const mesh = new THREE.Mesh(g, mat); mesh.name = "extra"; mesh.renderOrder = see ? 2 : 0;
+      this.extras.add(mesh);
+    }
+    if (!this.extras.parent) this.pivot.add(this.extras);
+    this.placeExtras();
+    this.requestRender();
+  }
+  get extraCount(): number { return this.extras.children.length; }
+  private clearExtras(): void {
+    for (const c of this.extras.children.slice()) { const m = c as THREE.Mesh; this.extras.remove(m); m.geometry.dispose(); (m.material as THREE.Material).dispose(); }
+  }
+  /** The extras are given in board coordinates: put that frame where this board's scene has it. */
+  private placeExtras(): void {
+    if (!this.board) return;
+    const o = this.board.origin();
+    this.extras.position.set(o[0], o[1], this.board.size.t / 2);
   }
 
   /** Real 3D models (models.ts) replace the stand-in solids as they load; `false` keeps the stand-ins (tests, a page with no server). */
@@ -436,6 +479,7 @@ export class Viewer {
 
   renderNow(): void {
     if (this.disposed) return;
+    if (this.extraSection) { this.extras.updateWorldMatrix(true, false); this.extraClip.copy(this.extraSection).applyMatrix4(this.extras.matrixWorld); }
     this.renderer.render(this.scene, this.camera());
     this.frames++;
     if (this.onFrame) this.onFrame();
@@ -492,6 +536,7 @@ export class Viewer {
     if (this.raf) cancelAnimationFrame(this.raf);
     if (this.anim.raf) cancelAnimationFrame(this.anim.raf);
     if (this.resizeObs) this.resizeObs.disconnect();
+    this.clearExtras();
     if (this.board) { this.pivot.remove(this.board.group); this.board.dispose(); this.board = null; }
     this.renderer.dispose();
     this.renderer.forceContextLoss();

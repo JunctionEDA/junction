@@ -24,6 +24,7 @@ pub mod standard;
 pub mod step_fit;
 pub mod tidy;
 pub mod transistor;
+pub mod value;
 pub mod vendors;
 
 use std::io::{Cursor, Write};
@@ -250,6 +251,13 @@ async fn load_part(state: &AppState, vendor: &str, id: &str) -> AppResult<Option
 }
 
 async fn store_part(state: &AppState, info: &PartInfo, cad_raw: Option<&Value>) -> AppResult<()> {
+    if !info.image.is_empty() {
+        // the photo is fetched while its link is good; the part does not wait for it
+        let (state, vendor, id, url) = (state.clone(), info.vendor.clone(), info.vendor_id.clone(), info.image.clone());
+        tokio::spawn(async move {
+            let _ = cache_image(&state, &vendor, &id, &url, false).await;
+        });
+    }
     let mut stored = info.clone();
     // JLCPCB's image links are signed for half an hour; a cached copy would only ever be a dead link.
     if stored.vendor == "lcsc" {
@@ -338,6 +346,9 @@ async fn fetch_part(state: &AppState, keys: &Keys, vendor: &str, id: &str) -> Re
                 if !h.datasheet.is_empty() {
                     info.datasheet = h.datasheet;
                 }
+                if !h.image.is_empty() {
+                    info.image = h.image;
+                }
                 if h.prices.len() > info.prices.len() {
                     info.prices = h.prices;
                 }
@@ -423,6 +434,12 @@ fn info_of(row: &PartRow) -> PartInfo {
     info
 }
 
+/// The Value a placed part carries: what a passive is ("220Ω", "100nF"), else its
+/// manufacturer part number, else `fallback`.
+pub fn display_value(info: &PartInfo, fallback: &str) -> String {
+    value::component_value(info).unwrap_or_else(|| if info.mpn.is_empty() { fallback.to_string() } else { info.mpn.clone() })
+}
+
 /// Vendors that were asked for a part's package and had none, and when: not asked again for a day.
 static NO_PACKAGE: std::sync::Mutex<Option<std::collections::HashMap<String, std::time::Instant>>> = std::sync::Mutex::new(None);
 
@@ -487,7 +504,7 @@ fn drawings(info: &PartInfo, src: &PartRow, lib: &str) -> Option<Drawings> {
     let fields = part_fields(info, Some(&src.vendor_id));
     let fp_ref = conv.footprint.as_ref().map(|f| format!("{lib}:{}", f.name)).unwrap_or_default();
     let datasheet = if info.datasheet.is_empty() { conv.datasheet.clone() } else { info.datasheet.clone() };
-    let value = if info.mpn.is_empty() { conv.name.clone() } else { info.mpn.clone() };
+    let value = display_value(info, &conv.name);
     let symbol = conv.symbol.as_ref().map(|s| easyeda::symbol_sexpr(s, &conv.prefix, &value, &fp_ref, &datasheet, &info.description, &fields));
     let footprint = conv.footprint.as_ref().map(|f| {
         let model = f.model.as_ref().map(|m| format!("${{KICAD_COLLAB_3DMODELS}}/{lib}.3dshapes/{}.step", easyeda::lib_name(if m.title.is_empty() { &f.name } else { &m.title })));
@@ -542,6 +559,10 @@ async fn part_view(state: &AppState, keys: &Keys, row: &PartRow, src: Option<&Pa
     o.insert("vendor_name".into(), json!(vendors::vendor_label(&info.vendor)));
     o.insert("cad".into(), cad.or(fallback).unwrap_or(Value::Null));
     o.insert("fields".into(), Value::Object(fields));
+    // LCSC's cached parts keep no link (it expires), but LCSC has a photo of nearly every part
+    let photo = (row.vendor == "lcsc" || !info.image.is_empty()).then(|| format!("/api/parts/image?vendor={}&id={}", row.vendor, urlencode(&row.vendor_id)));
+    o.insert("photo".into(), json!(photo));
+    o.insert("value".into(), json!(value::component_value(&info).unwrap_or_else(|| info.mpn.clone())));
     o.insert("fetched_at".into(), json!(row.info_fetched_at));
     o.insert("stale".into(), json!(stale.is_some()));
     o.insert("stale_reason".into(), json!(stale));
@@ -785,6 +806,71 @@ async fn model_bytes(state: &AppState, uuid: &str) -> AppResult<Vec<u8>> {
     let bytes = vendors::easyeda_step(uuid).await?;
     sqlx::query("INSERT INTO part_models (uuid, step) VALUES ($1, $2) ON CONFLICT (uuid) DO NOTHING").bind(uuid).bind(&bytes).execute(&state.pool).await?;
     Ok(bytes)
+}
+
+/// Parts the vendor has no photo of, and when that was found: not asked again for a day.
+static NO_IMAGE: std::sync::Mutex<Option<std::collections::HashMap<String, std::time::Instant>>> = std::sync::Mutex::new(None);
+
+async fn cached_image(state: &AppState, vendor: &str, id: &str) -> AppResult<Option<(String, Vec<u8>)>> {
+    Ok(sqlx::query_as::<_, (String, Vec<u8>)>("SELECT content_type, bytes FROM part_images WHERE vendor = $1 AND vendor_id = $2")
+        .bind(vendor)
+        .bind(id)
+        .fetch_optional(&state.pool)
+        .await?)
+}
+
+/// Fetch the photo at `url` and keep it for the part, unless one is kept already (or `replace`).
+async fn cache_image(state: &AppState, vendor: &str, id: &str, url: &str, replace: bool) -> Result<(String, Vec<u8>), VendorErr> {
+    if !replace {
+        if let Ok(Some(have)) = cached_image(state, vendor, id).await {
+            return Ok(have);
+        }
+    }
+    let (ctype, bytes) = vendors::fetch_image(url).await?;
+    let _ = sqlx::query(
+        "INSERT INTO part_images (vendor, vendor_id, content_type, bytes) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (vendor, vendor_id) DO UPDATE SET content_type = EXCLUDED.content_type, bytes = EXCLUDED.bytes, fetched_at = now()",
+    )
+    .bind(vendor)
+    .bind(id)
+    .bind(&ctype)
+    .bind(&bytes)
+    .execute(&state.pool)
+    .await;
+    Ok((ctype, bytes))
+}
+
+/// GET /api/parts/image?vendor=&id= — the vendor's product photo of a part, fetched once and kept.
+pub async fn get_image(State(state): State<AppState>, AuthUser(user): AuthUser, Query(q): Query<PartQuery>) -> AppResult<Response> {
+    let vendor = check_vendor(&q.vendor)?;
+    let id = clean_id(vendor, &q.id)?;
+    let reply = |(ctype, bytes): (String, Vec<u8>)| ([(header::CONTENT_TYPE, ctype), (header::CACHE_CONTROL, "private, max-age=604800".to_string())], bytes).into_response();
+    if let Some(have) = cached_image(&state, vendor, &id).await? {
+        return Ok(reply(have));
+    }
+    let memo = format!("{vendor}:{id}");
+    if NO_IMAGE.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).get(&memo).is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(86_400)) {
+        return Err(AppError::NotFound);
+    }
+    let keys = keys_for(&state, user.id).await?;
+    let (row, _) = ensure_part(&state, &keys, vendor, &id, false).await?;
+    let mut url = info_of(&row).image;
+    if url.is_empty() && vendor == "lcsc" {
+        // LCSC's links expire, so the cached part keeps none: ask for a fresh one
+        if let Ok(hits) = vendors::search("lcsc", &keys, &id, 5).await {
+            url = hits.into_iter().find(|h| h.vendor_id == id).map(|h| h.image).unwrap_or_default();
+        }
+    }
+    let got = if url.is_empty() { Err(VendorErr { kind: ErrKind::NotFound, message: String::new() }) } else { cache_image(&state, vendor, &id, &url, false).await };
+    match got {
+        Ok(img) => Ok(reply(img)),
+        Err(e) => {
+            if e.kind == ErrKind::NotFound {
+                NO_IMAGE.lock().unwrap_or_else(|e| e.into_inner()).get_or_insert_with(Default::default).insert(memo, std::time::Instant::now());
+            }
+            Err(AppError::NotFound)
+        }
+    }
 }
 
 /// GET /api/parts/model.step?vendor=&id=

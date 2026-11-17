@@ -23,6 +23,10 @@
 @source "../../domains/pcb/ai/**/*.tsx";
 @source "../../domains/pcb/plugins/**/*.tsx";
 @source "../../platform/review/**/*.tsx";
+@source "../../platform/doctabs/**/*.tsx";
+@source "../../platform/history/**/*.tsx";
+@source "../../domains/mechanical/**/*.tsx";
+@source "../../domains/assembly/**/*.tsx";
 @source "../*.ts";
 @source "../../domains/pcb/*.ts";
 @source not "../../domains/pcb/generated";

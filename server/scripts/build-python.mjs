@@ -22,6 +22,14 @@ for (const f of ["occt-import-js.js", "occt-import-js.wasm"]) {
   const src = path.join(server, "node_modules", "occt-import-js", "dist", f), dst = path.join(out, f);
   if (!fs.existsSync(dst) || fs.statSync(dst).size !== fs.statSync(src).size) fs.copyFileSync(src, dst);
 }
+// The modelling kernel of the mechanical domain: OpenCascade compiled to WebAssembly (npm replicad-opencascadejs,
+// LGPL-2.1; only its bindings are used).  About 23 MB (7 MB compressed), fetched by the CAD worker
+// (web/domains/mechanical/kernel) the first time a part studio regenerates; its JavaScript half is bundled into
+// static/dist/cad-worker.js.
+{
+  const src = path.join(server, "node_modules", "replicad-opencascadejs", "dist", "replicad_single.wasm"), dst = path.join(out, "occ-kernel.wasm");
+  if (!fs.existsSync(dst) || fs.statSync(dst).size !== fs.statSync(src).size) fs.copyFileSync(src, dst);
+}
 // ngspice 45.2 compiled to WebAssembly with XSPICE and its code models (scripts/ngspice-wasm/build.sh, which makes
 // vendor/ngspice/ngspice-core.mjs.br): the circuit simulator behind the simulator frame, the `ngspice` program and the
 // libngspice stand-in (plugins/python/kicad_spice.py), with its JavaScript face (web/domains/pcb/plugins/ngspice-module.ts).  About
