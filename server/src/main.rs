@@ -13,6 +13,7 @@ mod fonts;
 mod github;
 mod github_app;
 mod http;
+mod itemdoc;
 mod lenient_json;
 mod merge;
 mod libs;

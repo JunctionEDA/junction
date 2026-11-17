@@ -64,6 +64,8 @@ pub(crate) fn allowed_file(name: &str) -> bool {
             | "equ"
             // the simulator's workbook (SIMULATOR_FRAME_UI::SaveWorkbook, <project>.wbk)
             | "wbk"
+            // Junction's own documents: a part studio and an assembly (JSON item documents, itemdoc.rs)
+            | "jpart" | "jasm"
     )
 }
 
@@ -82,6 +84,8 @@ pub(crate) fn doc_type_for(path: &str) -> &'static str {
         "kicad_mod" => "footprint",
         "kicad_wks" => "worksheet",
         "kicad_dru" => "design_rules",
+        "jpart" => "part_studio",
+        "jasm" => "assembly",
         "step" | "stp" | "wrl" | "wrz" => "model3d",
         "lib" | "sub" | "cir" | "mod" | "model" | "sp" | "spice" | "ibs" => "spice_model",
         _ => "other",
@@ -2204,9 +2208,11 @@ pub async fn create_doc(
 }
 
 /// The document types a client may delete or move: library files (a footprint, a symbol library, a library table,
-/// a 3D model, a drawing sheet) and other loose files.  A project's own schematic, board and project file stay put.
+/// a 3D model, a drawing sheet), other loose files, and the part studios and assemblies the document tabs create,
+/// rename and delete.  A project's own schematic, board and project file stay put.
 fn doc_is_movable(doc_type: &str) -> bool {
     matches!(doc_type, "footprint" | "symbol_lib" | "lib_table" | "model3d" | "worksheet" | "spice_model" | "other")
+        || crate::itemdoc::is_item_doc(doc_type)
 }
 
 /// DELETE /api/docs/{id}: the Footprint Editor's Delete Footprint (and the same for other library files).
@@ -2469,6 +2475,10 @@ mod tests {
         assert_eq!(doc_type_for("sim/test.CIR"), "spice_model");
         assert!(allowed_file("2n2222.model") && allowed_file("Simulation_SPICE.sp") && allowed_file("state-3bit-count.in"));
         assert_eq!(doc_type_for("2n2222.model"), "spice_model");
+        assert_eq!(doc_type_for("Enclosure.jpart"), "part_studio");
+        assert_eq!(doc_type_for("cad/Product.JASM"), "assembly");
+        assert!(allowed_file("Enclosure.jpart") && allowed_file("Product.jasm"));
+        assert!(doc_is_movable("part_studio") && doc_is_movable("assembly") && !doc_is_movable("kicad_pcb"));
     }
 
     /// The extraction loop must bound the decoder, not trust the header's

@@ -25,7 +25,7 @@ use crate::persist::{self, Document};
 const FOLD_HOST: i64 = i64::MIN;
 
 pub fn foldable(doc_type: &str) -> bool {
-    matches!(doc_type, "kicad_sch" | "kicad_pcb")
+    matches!(doc_type, "kicad_sch" | "kicad_pcb") || crate::itemdoc::is_item_doc(doc_type)
 }
 
 /// Fold the ops after the newest snapshot into a snapshot at the last of them.
@@ -46,6 +46,13 @@ pub async fn fold(pool: &PgPool, doc: &Document) -> Result<Option<i64>, String> 
         return Err(format!("the journal after seq {snap_seq} has a gap"));
     }
     let file = String::from_utf8(content).map_err(|_| "the stored file is not text".to_string())?;
+    // A JSON item document (a part studio, an assembly) is folded here: its changes are plain
+    // JSON the server can apply itself (itemdoc.rs), with no editor to ask.
+    if crate::itemdoc::is_item_doc(&doc.doc_type) {
+        let text = crate::itemdoc::fold_text(&file, &ops.iter().map(|o| &o.changes).collect::<Vec<_>>())?;
+        persist::insert_snapshot_new(pool, doc.id, last, text.as_bytes(), None).await.map_err(|e| e.to_string())?;
+        return Ok(Some(last));
+    }
     let request = json!({
         "base": "", "token": "", "agent": "", "canWrite": false,
         "user": { "id": 0, "login": "", "name": "" },
