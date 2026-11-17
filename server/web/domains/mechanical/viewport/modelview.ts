@@ -43,6 +43,11 @@ export class ModelView {
   private selection: Pick[] = [];
   private filter: Set<PickKind> | null = null;
   private activeSketch: string | null = null;
+  /**
+   * How a body is drawn, asked when its meshes are made: `faces: false` / `edges: false` leave them undrawn (the
+   * body is still picked and highlighted).  For reference bodies something else draws (a board's display model).
+   */
+  bodyStyle: ((body: BodyResult) => { faces?: boolean; edges?: boolean } | null) | null = null;
   /** The pointer moved onto something else (or nothing). */
   onHover: (pick: Pick | null) => void = () => {};
   /** A left click, with what was under it. */
@@ -128,6 +133,9 @@ export class ModelView {
       const edges = new THREE.LineSegments(eg, this.edgeMaterial);
       const pg = new THREE.BufferGeometry(); pg.setAttribute("position", new THREE.BufferAttribute(m.vertices.positions, 3));
       const points = new THREE.Points(pg, this.pointMaterial);
+      const style = this.bodyStyle ? this.bodyStyle(r) : null;
+      if (style && style.faces === false) { mesh.visible = false; mesh.userData.fit = false; }
+      if (style && style.edges === false) edges.visible = false;
       const group = new THREE.Group(); group.add(mesh, edges, points);
       this.root.add(group);
       this.bodies.set(r.id, { rev: r.rev, group, mesh, edges, points, result: r });

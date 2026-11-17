@@ -86,6 +86,17 @@ function Field({ studio, field, params }: { studio: PartStudio; field: ParamFiel
       control = <PickBox param={field.key} armed={armed} empty={!refs.length} text={refs.length ? `${refs.length} ${noun}${refs.length === 1 ? "" : "s"}` : `Click ${field.single ? "a" : "the"} ${noun}${field.single ? "" : "s"}`} onArm={arm} onClear={() => set(field.single ? null : [])} />;
       break;
     }
+    case "document": {
+      const docs = studio.host.docs.filter((d) => field.docTypes.includes(d.docType));
+      const title = (path: string) => (path.split("/").pop() || path).replace(/\.[^.]+$/, "");
+      control = (
+        <select className="input w-full" value={typeof value === "string" ? value : ""} data-param={field.key} aria-label={field.label} onChange={(ev) => set(ev.target.value || null)}>
+          <option value="">{docs.length ? "Choose…" : "The project has none"}</option>
+          {docs.map((d) => <option key={d.docId} value={d.docId}>{title(d.path)}</option>)}
+        </select>
+      );
+      break;
+    }
     case "bodies": {
       const ids = Array.isArray(value) ? (value as string[]) : [];
       const names = ids.map((id) => bodies.find((b) => b.id === id)?.name || "missing body");
