@@ -1,34 +1,35 @@
-// api.ts — adding, renaming and deleting the documents of an open project, over the endpoints every client uses
-// (server/src/http.rs: POST /api/projects/{id}/docs, POST /api/docs/{id}/snapshots, PATCH and DELETE /api/docs/{id}).
+// api.ts — adding, renaming, moving, copying and deleting the documents and folders of an open project, over the
+// endpoints every client uses (server/src/http.rs: POST /api/projects/{id}/docs, POST /api/docs/{id}/snapshots,
+// PATCH and DELETE /api/docs/{id}) and the shell's own (server/src/shell.rs: PCBs, folders, copies, the file list).
 // Pure helpers are separate from the network calls so they can be tested.
+//
+// Every path here is a path in the whole project.  The requests go through the browser's own fetch (rawfetch.ts),
+// not the one the schematic and board editor wraps to stay inside its PCB.
 import type { DocEntry } from "../../shared/store";
-import { DOCUMENT_KINDS, documentKind, type DocumentKind } from "../../domains/registry";
+import { DOCUMENT_KINDS, type DocumentKind } from "../../domains/registry";
+import { rawFetch } from "../documents/rawfetch";
 
 const base = (path: string): string => path.split("/").pop() || path;
 /** A document's name as its tab shows it: the file name without its folder and extension. */
 export const stemOf = (path: string): string => base(path).replace(/\.[^.]+$/, "");
 
-export interface Tab { doc: DocEntry; kind: DocumentKind; label: string }
-
-/** The documents that get a tab, in tab order: by kind as the registry lists them, then by name. */
-export function tabsOf(docs: readonly DocEntry[], rootDocId: string | null): Tab[] {
-  const out: Tab[] = [];
-  const boards = docs.filter((d) => d.docType === "kicad_pcb").length;
-  for (const doc of docs) {
-    const kind = documentKind(doc.docType); if (!kind) continue;
-    // a schematic's sheets are reached from the schematic itself: only the root sheet has a tab
-    if (doc.docType === "kicad_sch" && rootDocId && doc.docId !== rootDocId) continue;
-    const own = !!kind.newName;   // a document the tabs made carries the name its maker gave it
-    out.push({ doc, kind, label: own || (doc.docType === "kicad_pcb" && boards > 1) ? stemOf(doc.path) : kind.title });
-  }
-  const rank = (t: Tab) => DOCUMENT_KINDS.indexOf(t.kind);
-  return out.sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label, undefined, { numeric: true }));
-}
-
 /** "Part Studio 2.jpart": the first name of that kind no document of the project has (whatever the letter case). */
 export function freeName(kind: DocumentKind, docs: readonly { path: string }[]): string {
   const taken = new Set(docs.map((d) => base(d.path).toLowerCase()));
   for (let n = 1; ; n++) { const name = `${kind.newName || kind.title} ${n}${kind.ext}`; if (!taken.has(name.toLowerCase())) return name; }
+}
+
+/** "PCB 2": the first such name no folder or file at the project's root has (whatever the letter case). */
+export function freeElementName(stem: string, docs: readonly { path: string }[]): string {
+  const taken = new Set(docs.map((d) => d.path.split("/")[0].toLowerCase().replace(/\.[^.]+$/, "")));
+  for (let n = 1; ; n++) { const name = `${stem} ${n}`; if (!taken.has(name.toLowerCase())) return name; }
+}
+
+/** "Lid copy", "Lid copy 2": a name for a copy that nothing beside the original has. */
+export function copyName(name: string, taken: readonly string[]): string {
+  const have = new Set(taken.map((t) => t.toLowerCase()));
+  const stem = name.replace(/ copy( \d+)?$/i, "");
+  for (let n = 1; ; n++) { const c = n === 1 ? `${stem} copy` : `${stem} copy ${n}`; if (!have.has(c.toLowerCase())) return c; }
 }
 
 /** The path a document gets when its tab is renamed to `name`, or why that name will not do. */
@@ -45,7 +46,7 @@ export function renamedPath(doc: { path: string }, name: string, docs: readonly 
 }
 
 async function call(path: string, init: RequestInit): Promise<unknown> {
-  const r = await fetch(path, init);
+  const r = await rawFetch()(path, init);
   if (!r.ok) { const t = await r.text().catch(() => ""); throw new Error(t || `${r.status} ${r.statusText}`); }
   return (r.headers.get("content-type") || "").includes("json") ? r.json() : r.text();
 }
@@ -58,9 +59,9 @@ export async function fetchDocs(projectId: string): Promise<DocEntry[]> {
 }
 
 /** Make a new, empty document of a kind; returns its id.  The document's first snapshot is the kind's empty file. */
-export async function createDocument(projectId: string, kind: DocumentKind, docs: readonly DocEntry[]): Promise<string> {
+export async function createDocument(projectId: string, kind: DocumentKind, docs: readonly DocEntry[], folder = ""): Promise<string> {
   if (kind.newText === undefined) throw new Error(`A ${kind.title} cannot be created here.`);
-  const made = (await call(`/api/projects/${projectId}/docs`, json({ path: freeName(kind, docs) }))) as { docId: string };
+  const made = (await call(`/api/projects/${projectId}/docs`, json({ path: (folder ? folder + "/" : "") + freeName(kind, docs) }))) as { docId: string };
   await call(`/api/docs/${made.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: kind.newText });
   return made.docId;
 }
@@ -125,4 +126,48 @@ export async function renameDocument(doc: DocEntry, path: string): Promise<void>
 
 export async function deleteDocument(doc: DocEntry): Promise<void> {
   await call(`/api/docs/${doc.docId}`, { method: "DELETE", headers: { "content-type": "application/json" } });
+}
+
+// ---------------------------------------------------------------- the shell's own routes (server/src/shell.rs)
+
+/** A file of the project as the Home tab lists it. */
+export interface ProjectFile extends DocEntry { bytes: number | null; updatedAt: string | null; updatedBy: { login: string; name: string | null } | null }
+
+export async function fetchFiles(projectId: string): Promise<ProjectFile[]> {
+  const r = (await call(`/api/projects/${projectId}/files`, { headers: { "content-type": "application/json" } })) as { files: ProjectFile[] };
+  return r.files || [];
+}
+
+/** The project's own document (tab order, folders, the room), made if the project has none.  Returns its id. */
+export async function ensureShellDoc(projectId: string): Promise<string> {
+  return ((await call(`/api/projects/${projectId}/shell`, json({}))) as { docId: string }).docId;
+}
+
+/** A new PCB: a KiCad project in a folder of its own.  Returns its folder and the documents made. */
+export async function createPcb(projectId: string, name: string, folder = "", o: { stem?: string; only?: string[] } = {}): Promise<{ dir: string; name: string; docs: DocEntry[] }> {
+  return (await call(`/api/projects/${projectId}/pcbs`, json({ name, folder, ...o }))) as { dir: string; name: string; docs: DocEntry[] };
+}
+
+/** Rename or move a folder with everything in it (a PCB is renamed this way). */
+export async function moveFolder(projectId: string, from: string, to: string, o: { stems?: boolean } = {}): Promise<void> {
+  await call(`/api/projects/${projectId}/folders/move`, json({ from, to, ...o }));
+}
+
+export async function deleteFolder(projectId: string, path: string): Promise<void> {
+  await call(`/api/projects/${projectId}/folders/delete`, json({ path }));
+}
+
+/** A copy of one document at `path`.  Returns the copy. */
+export async function duplicateDocument(projectId: string, docId: string, path: string): Promise<DocEntry> {
+  return ((await call(`/api/projects/${projectId}/duplicate`, json({ docId, path }))) as { docs: DocEntry[] }).docs[0];
+}
+
+/** A copy of a folder with everything in it.  Returns the copies (`from`: the document each was copied from). */
+export async function duplicateFolder(projectId: string, folder: string, to: string, o: { stems?: boolean } = {}): Promise<(DocEntry & { from: string })[]> {
+  return ((await call(`/api/projects/${projectId}/duplicate`, json({ folder, to, ...o }))) as { docs: (DocEntry & { from: string })[] }).docs;
+}
+
+/** Move one document to another folder, keeping its name. */
+export async function moveDocument(doc: DocEntry, folder: string): Promise<void> {
+  await renameDocument(doc, (folder ? folder + "/" : "") + base(doc.path));
 }

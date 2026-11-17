@@ -24,6 +24,7 @@
 @source "../../domains/pcb/plugins/**/*.tsx";
 @source "../../platform/review/**/*.tsx";
 @source "../../platform/doctabs/**/*.tsx";
+@source "../../platform/projecthome/**/*.tsx";
 @source "../../platform/history/**/*.tsx";
 @source "../../domains/mechanical/**/*.tsx";
 @source "../../domains/assembly/**/*.tsx";
