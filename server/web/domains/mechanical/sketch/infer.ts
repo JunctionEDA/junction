@@ -120,9 +120,14 @@ export function snap(raw: Vec2, ctx: SnapContext): Snap {
   }
 
   // 3. nothing near: a tidy number, unless the stroke lines up with something
-  const step = gridStep(px);
-  if (ctx.grid !== false) out.p = [roundTo(raw[0], step), roundTo(raw[1], step)];
-  return relate(out, ctx, false);
+  //    (the relation is judged where the pointer is, then what it leaves free is rounded)
+  relate(out, ctx, false);
+  if (ctx.grid !== false && !out.perpendicularTo) {
+    const step = gridStep(px);
+    out.p = [out.vertical ? out.p[0] : roundTo(out.p[0], step), out.horizontal ? out.p[1] : roundTo(out.p[1], step)];
+    for (const h of out.hints) if (ctx.from && (h.kind === "horizontal" || h.kind === "vertical")) h.at = mid(ctx.from, out.p);
+  }
+  return out;
 }
 
 /** Add what the stroke from `ctx.from` to the snapped position implies.  `held`: the position is already fixed by a snap. */

@@ -4,7 +4,7 @@
 // a trimmed end stays on the curve that cut it, a mirror stays a mirror).  Pure: no pointer, no solver.
 import type { Vec2 } from "../core/geometry";
 import type { SketchData, SketchEntity } from "./format";
-import { curvesAt } from "./infer";
+import { curvesAt, nearestOn } from "./infer";
 import type { Draft } from "./model";
 import { arcSweep, dist, lineMeet, pointAt, pointsOf, resolveEntity, type Resolved } from "./refs";
 
@@ -174,6 +174,18 @@ export function fillet(d: Draft, corner: string, r: number): string | null {
   const bis = unit([u[0] + v[0], u[1] + v[1]]), reach = r / Math.sin(angle / 2);
   const c: Vec2 = [p[0] + bis[0] * reach, p[1] + bis[1] * reach];
   const q1 = d.point(t1), q2 = d.point(t2), centre = d.point(c);
+  // What was said about the lines up to the corner is still meant up to the corner, not up to where the arc
+  // now starts: a length becomes the distance from the far end to the sharp corner, and a reference to the
+  // line's end at the corner becomes a reference to the corner itself.
+  lines.forEach((id, i) => {
+    const e = d.data.entities[id] as { a: string; b: string };
+    const end = e.a === corner ? "start" : "end";
+    for (const cid of d.constraintsOn(id)) {
+      const k = d.data.constraints[cid];
+      if (k.type === "distance" && k.refs.length === 1 && !k.refs[0].at) d.data.constraints[cid] = { ...k, refs: [{ entity: far[i] }, { entity: corner }] };
+      else if (k.refs.some((r) => r.entity === id && r.at === end)) d.data.constraints[cid] = { ...k, refs: k.refs.map((r) => (r.entity === id && r.at === end ? { entity: corner } : r)) };
+    }
+  });
   const swap = (id: string, to: string) => { const e = d.data.entities[id] as { type: "line"; a: string; b: string }; d.set(id, { ...e, a: e.a === corner ? to : e.a, b: e.b === corner ? to : e.b }); };
   swap(lines[0], q1); swap(lines[1], q2);
   // counter-clockwise the short way round
@@ -240,7 +252,7 @@ export function offset(d: Draft, ids: readonly string[], distance: number, towar
     let best = Infinity, left = true;
     for (const c of chain) {
       const k = resolveEntity(data, c.id) as Curve;
-      const t = k.kind === "line" ? Math.min(1, Math.max(0, paramOf(k, toward))) : paramOf(k, toward), on = pointOn(k, t), dd = dist(on, toward);
+      const n = nearestOn(k, toward), dd = n ? n.d : Infinity;
       if (dd >= best) continue;
       best = dd;
       const onLeft = k.kind === "line" ? (k.b[0] - k.a[0]) * (toward[1] - k.a[1]) - (k.b[1] - k.a[1]) * (toward[0] - k.a[0]) > 0 : dist(toward, k.c) < k.r;

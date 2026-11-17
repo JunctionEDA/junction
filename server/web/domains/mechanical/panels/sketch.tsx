@@ -38,7 +38,7 @@ export function standing(s: EditorState): { text: string; detail: string; tone: 
   if (s.dof === 0) return { text: "Fully constrained", detail: s.redundant.length ? `${s.redundant.length} redundant` : "", tone: "ok" };
   return { text: "Under-constrained", detail: `${s.dof} degree${s.dof === 1 ? "" : "s"} of freedom`, tone: "free" };
 }
-const TONE = { ok: "text-ink", free: "text-blue", bad: "text-err", wait: "text-ink-3" } as const;
+const TONE = { ok: "text-ink", free: "text-teal", bad: "text-err", wait: "text-ink-3" } as const;
 
 function Palette({ studio, ed }: { studio: PartStudio; ed: SketchEditor }) {
   const tool = useEditor(ed, (s) => s.tool);
@@ -102,7 +102,7 @@ function SketchPanel({ studio }: { studio: PartStudio }) {
         onPointerEnter={() => ed.setHover(id)} onPointerLeave={() => ed.setHover(null)} onClick={(e) => (e.shiftKey || e.ctrlKey || e.metaKey ? ed.toggle(id) : ed.select([id]))}
         onDoubleClick={() => { if (value) ed.editDimension(id); }}>
         <span className={cx("truncate", flag === "conflict" && "text-err", flag === "redundant" && "text-warn")}>{label}</span>
-        {value ? <span className="mono text-teal ml-auto whitespace-nowrap">{value}</span> : <span className="ml-auto" />}
+        {value ? <span className="mono text-ink-2 ml-auto whitespace-nowrap">{value}</span> : <span className="ml-auto" />}
         {flag ? <span className={cx("pill", flag === "conflict" ? "err" : "warn")}>{flag}</span> : null}
         <button type="button" className="btn sm ghost p-0 w-5 min-h-0 h-5 opacity-0 group-hover:opacity-100 focus:opacity-100" title="Delete" aria-label={`Delete ${label}`} onClick={(e) => { e.stopPropagation(); ed.edit((d) => d.remove([id])); }}>×</button>
       </div>

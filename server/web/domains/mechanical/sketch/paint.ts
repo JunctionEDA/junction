@@ -4,8 +4,9 @@
 //
 // The camera is orthographic, so a sketch-plane point maps to the screen by one affine transform per frame
 // (three projected points); curves are drawn as their true shapes under it.  Colours are the theme's tokens:
-//   ink     fully constrained          blue    still free to move            red     in conflict
-//   mark    selected or hovered        teal    dimensions                    ink-3   construction geometry
+//   ink     fully constrained          teal    still free to move            red     in conflict
+//   mark    selected or hovered        ink-2   dimensions                    dashed  construction geometry
+// (The theme has no blue: its `--blue` is a neutral.  Teal is its colour for what can still take a value.)
 import * as THREE from "three";
 import type { Viewport3D } from "../../../shared/viewport3d/viewport3d";
 import { toWorld, type Frame, type Vec2 } from "../core/geometry";
@@ -123,7 +124,7 @@ export class SketchPainter {
 
     // ---- curves
     const lit = (id: string) => s.selection.has(id) || s.hover === id || s.related.has(id);
-    const colorOf = (id: string) => (lit(id) ? c.mark : s.state(id) === "conflict" ? c.err : s.state(id) === "under" ? c.blue : c.ink);
+    const colorOf = (id: string) => (lit(id) ? c.mark : s.state(id) === "conflict" ? c.err : s.state(id) === "under" ? c.teal : c.ink);
     const ids = Object.keys(s.data.entities);
     for (const pass of [0, 1]) for (const id of ids) {
       const e = s.data.entities[id];
@@ -151,7 +152,7 @@ export class SketchPainter {
       if (!isDimension(k)) continue;
       const d = drawDimension(s.data, k, px); if (!d) continue;
       const on = s.selection.has(id) || s.hover === id;
-      this.dimension(d, s.conflicting.has(id) ? c.err : on ? c.mark : k.driving === false ? c.ink3 : c.teal, on, id, s.editing === id, text ? "text" : "lines");
+      this.dimension(d, s.conflicting.has(id) ? c.err : on ? c.mark : k.driving === false ? c.ink3 : c.ink2, on, id, s.editing === id, text ? "text" : "lines");
     }
 
     // ---- constraint glyphs, stacked where several sit on one thing
@@ -159,6 +160,8 @@ export class SketchPainter {
     for (const [id, k] of Object.entries(s.data.constraints)) {
       if (isDimension(k)) continue;
       const anchor = glyphAnchor(s.data, k); if (!anchor) continue;
+      // zoomed far out, a glyph would be bigger than the line it sits on: leave it out until there is room
+      if (anchor.room < 26 * px && !s.selection.has(id) && s.hover !== id && !s.conflicting.has(id)) continue;
       const q = this.screen(anchor.at);
       const key = `${Math.round(q.x / 4)},${Math.round(q.y / 4)}`, n = stacks.get(key) || 0; stacks.set(key, n + 1);
       const x = q.x + anchor.dx * 14 + n * (GLYPH + 2) - GLYPH / 2, y = q.y + anchor.dy * 14 - GLYPH / 2;
@@ -238,7 +241,12 @@ export class SketchPainter {
 }
 
 /** Where a constraint's glyph sits: a point of the sketch and the side to step off to (in glyph steps, screen axes). */
-export function glyphAnchor(data: SketchData, k: SketchConstraint): { at: Vec2; dx: number; dy: number } | null {
+export function glyphAnchor(data: SketchData, k: SketchConstraint): { at: Vec2; dx: number; dy: number; /** the size of what it sits on, mm */ room: number } | null {
+  const a = anchorOf(data, k); if (!a) return null;
+  const sizes = (k.refs || []).map((ref) => resolve(data, ref)).map((x) => (!x || x.kind === "point" ? Infinity : x.kind === "line" ? Math.hypot(x.b[0] - x.a[0], x.b[1] - x.a[1]) : x.r * 2));
+  return { ...a, room: Math.min(...sizes) };
+}
+function anchorOf(data: SketchData, k: SketchConstraint): { at: Vec2; dx: number; dy: number } | null {
   const r = (k.refs || []).map((ref) => resolve(data, ref));
   if (!r.length || r.some((x) => !x)) return null;
   const first = r[0] as Resolved;

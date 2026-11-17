@@ -38,7 +38,7 @@ export default defineService({
         const t0 = ad.FirstParameter(), t1 = ad.LastParameter();
         const at = (t: number): Vec3 => { const p = ad.Value(t), v = k.xyz(p); p.delete(); return v; };
         const type = ad.GetType();
-        const is = (name: string) => type === oc.GeomAbs_CurveType[name] || (type && oc.GeomAbs_CurveType[name] && type.value === oc.GeomAbs_CurveType[name].value);
+        const is = (name: string) => type === oc.GeomAbs_CurveType[name];   // this build's enums are strings
         if (is("GeomAbs_Line")) {
           const p = flat(at(t0)), q = flat(at(t1));
           if (Math.hypot(q[0] - p[0], q[1] - p[1]) < 1e-7) curves.push({ type: "point", p, from: ref });   // an edge square to the plane
