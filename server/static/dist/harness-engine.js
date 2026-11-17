@@ -40941,13 +40941,13 @@ var require_pcb_tools = __commonJS({
           S3.layer = rt.layer;
           sizesOf(ctx).setActiveLayer(rt.layer);
         } else {
-          const plan = viaPlan(ctx, Object.assign({}, rt, { ratAnchor: null }), type, target2);
-          if (typeof plan === "string") {
-            ctx.toast(plan);
+          const plan2 = viaPlan(ctx, Object.assign({}, rt, { ratAnchor: null }), type, target2);
+          if (typeof plan2 === "string") {
+            ctx.toast(plan2);
             return true;
           }
-          rt.placingVia = plan;
-          sizesOf(ctx).setActiveLayer(plan.toLayer);
+          rt.placingVia = plan2;
+          sizesOf(ctx).setActiveLayer(plan2.toLayer);
           S3.layer = rt.layer;
         }
         dpUpdateHead(ctx, S3.hover);
@@ -41795,13 +41795,13 @@ var require_pcb_tools = __commonJS({
           ctx.requestRender();
           return true;
         }
-        const plan = viaPlan(ctx, rt, type, target2);
-        if (typeof plan === "string") {
-          ctx.toast(plan);
+        const plan2 = viaPlan(ctx, rt, type, target2);
+        if (typeof plan2 === "string") {
+          ctx.toast(plan2);
           return true;
         }
-        rt.placingVia = plan;
-        sizesOf(ctx).setActiveLayer(plan.toLayer);
+        rt.placingVia = plan2;
+        sizesOf(ctx).setActiveLayer(plan2.toLayer);
         S3.layer = rt.layer;
         if (rt.cursor) updateHead(ctx);
         refreshChip(ctx);
@@ -46707,10 +46707,10 @@ var require_pcb_tools = __commonJS({
         for (const [id, node] of replace) if (!remove.has(id)) replaceOut.push({ item: doc2.items.get(id), node });
         return { remove, replace: replaceOut, items };
       }
-      function cleanupChanges(doc2, plan) {
+      function cleanupChanges(doc2, plan2) {
         const out2 = [];
-        for (const { item, node } of plan.replace) out2.push(replacedChange(item, node));
-        for (const id of plan.remove) {
+        for (const { item, node } of plan2.replace) out2.push(replacedChange(item, node));
+        for (const id of plan2.remove) {
           const it = doc2.items.get(id);
           if (it) out2.push(removedChange(it));
         }
@@ -48214,12 +48214,12 @@ Press <esc> to cancel all; double-click to finish`;
           apply: (o) => {
             applySelection(ctx, []);
             highlightIds(ctx, null);
-            const plan = cleanupPlan(doc2, opts2(o));
-            const ch = cleanupChanges(doc2, plan);
+            const plan2 = cleanupPlan(doc2, opts2(o));
+            const ch = cleanupChanges(doc2, plan2);
             if (ch.length) ctx.commit(ch, "Board Cleanup");
             if (o.refill) runAction2("zoneFillAll", ctx);
             ctx.requestRender();
-            return plan.items.length;
+            return plan2.items.length;
           },
           focus: (ids) => highlightIds(ctx, ids ? new Set(ids) : null)
         };
@@ -53833,11 +53833,11 @@ ${i + 1} ${f2.ref || "unannotated footprint"} at ${coord(f2.x, f2.y)} (rounded t
         if (front.length) build4(front, o.frontStart, o.frontPrefix, o.removeFrontPrefix);
         if (back.length) build4(back, o.backStart, o.backPrefix, o.removeBackPrefix);
         changes.sort((a, b) => strNumCmp22(a.from, b.from));
-        let plan = "Reference Designator Prefixes in Use\n-------------------------------------------------------------\n";
-        plan += prefixes.map((p, i) => p.prefix + ((i + 1) % 16 === 0 ? "\n" : " ")).join("");
-        if (excludes.length) plan += `
+        let plan2 = "Reference Designator Prefixes in Use\n-------------------------------------------------------------\n";
+        plan2 += prefixes.map((p, i) => p.prefix + ((i + 1) % 16 === 0 ? "\n" : " ")).join("");
+        if (excludes.length) plan2 += `
 (Excluding ${excludes.join(" ")} from reannotation.)`;
-        show6("info", plan);
+        show6("info", plan2);
         let log = "Change Log\n-------------------------------------------------------------";
         for (const c of changes) log += c.action !== 0 ? `
 ${c.from || "unannotated footprint"}  ${ACTION_MESSAGE[c.action]}` : `
@@ -100160,38 +100160,38 @@ function build3(input) {
         }
         case "update_from_schematic": {
           pcbOnly(e.op);
-          const plan = e.__sync;
-          if (!plan) throw new ToolError("the schematic could not be read");
-          if (plan.problems.length && !plan.adds.length && !plan.updates.length) throw new ToolError(plan.problems.join("; "));
-          for (const a of plan.adds) {
+          const plan2 = e.__sync;
+          if (!plan2) throw new ToolError("the schematic could not be read");
+          if (plan2.problems.length && !plan2.adds.length && !plan2.updates.length) throw new ToolError(plan2.problems.join("; "));
+          for (const a of plan2.adds) {
             const c = added(doc2, a.node);
             c.padNets = a.padNets;
             changes.push(c);
             lines.push({ kind: "add", text: `Add ${a.ref} ${a.value} (${a.fpid}) at (${fmt3(a.x)}, ${fmt3(a.y)})`, ids: [c.id] });
           }
-          for (const u of plan.updates) {
+          for (const u of plan2.updates) {
             touch(u.item, e.op);
             const c = modified(doc2, u.item, u.node);
             c.padNets = u.padNets;
             changes.push(c);
             lines.push({ kind: "modify", text: `Update ${u.item.ref}: ${u.what}`, ids: [u.item.id] });
           }
-          for (const c of plan.copper) {
+          for (const c of plan2.copper) {
             touch(c.item, e.op);
             changes.push(modified(doc2, c.item, c.node));
           }
-          const names2 = Object.entries(plan.renamed);
-          if (names2.length) lines.push({ kind: "modify", text: `Rename ${names2.length} net${names2.length === 1 ? "" : "s"} on tracks, vias and zones: ${names2.slice(0, 4).map(([a, b]) => `${a} \u2192 ${b}`).join(", ")}${names2.length > 4 ? ` and ${names2.length - 4} more` : ""}`, ids: plan.copper.map((c) => c.item.id) });
-          if (!plan.adds.length && !plan.updates.length) throw new ToolError("the board already matches the schematic: every part is on it with the right nets" + (plan.extra.length ? `; on the board but not in the schematic: ${plan.extra.join(", ")}` : ""));
+          const names2 = Object.entries(plan2.renamed);
+          if (names2.length) lines.push({ kind: "modify", text: `Rename ${names2.length} net${names2.length === 1 ? "" : "s"} on tracks, vias and zones: ${names2.slice(0, 4).map(([a, b]) => `${a} \u2192 ${b}`).join(", ")}${names2.length > 4 ? ` and ${names2.length - 4} more` : ""}`, ids: plan2.copper.map((c) => c.item.id) });
+          if (!plan2.adds.length && !plan2.updates.length) throw new ToolError("the board already matches the schematic: every part is on it with the right nets" + (plan2.extra.length ? `; on the board but not in the schematic: ${plan2.extra.join(", ")}` : ""));
           details.push({ update_from_schematic: {
-            added: plan.adds.map((a) => a.ref),
-            updated: plan.updates.map((u) => u.item.ref),
-            nets: plan.nets,
-            not_in_schematic: plan.extra,
-            problems: plan.problems,
-            nets_renamed: names2.length ? plan.renamed : void 0,
-            copper_renamed: plan.copper.length || void 0,
-            note: !plan.adds.length ? void 0 : plan.adds.every((a) => e.placements && typeof e.placements === "object" && e.placements[a.ref]) ? "New footprints are at the positions given in placements." : "New footprints without a position in placements are parked in rows beside the board; place them next (move edits, or give placements with this edit)."
+            added: plan2.adds.map((a) => a.ref),
+            updated: plan2.updates.map((u) => u.item.ref),
+            nets: plan2.nets,
+            not_in_schematic: plan2.extra,
+            problems: plan2.problems,
+            nets_renamed: names2.length ? plan2.renamed : void 0,
+            copper_renamed: plan2.copper.length || void 0,
+            note: !plan2.adds.length ? void 0 : plan2.adds.every((a) => e.placements && typeof e.placements === "object" && e.placements[a.ref]) ? "New footprints are at the positions given in placements." : "New footprints without a position in placements are parked in rows beside the board; place them next (move edits, or give placements with this edit)."
           } });
           break;
         }
@@ -100225,7 +100225,7 @@ function build3(input) {
           const groups = e.groups && typeof e.groups === "object" && !Array.isArray(e.groups) ? Object.fromEntries(Object.entries(e.groups).filter(([, v]) => Array.isArray(v)).map(([n2, v]) => [n2, v.map(String)])) : void 0;
           const separate = e.separate === false ? false : e.separate && typeof e.separate === "object" ? { quiet: num13(e.separate.quiet), noisy: num13(e.separate.noisy) } : void 0;
           const fence = e.fence === false ? false : e.fence && typeof e.fence === "object" ? { spacing: num13(e.fence.spacing), nets: Array.isArray(e.fence.nets) ? e.fence.nets.map((n2) => boardNet2(doc2, text2(n2, "net")).name) : void 0, returnVias: e.fence.return_vias === false ? false : void 0 } : void 0;
-          const res = R2.route(k, P, doc2, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : void 0, timeMs: Math.round(1e3 * Math.min(900, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : void 0, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : void 0, planes: e.planes === true ? true : void 0, criticalFirst: e.critical_first === false ? false : void 0, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : void 0, escapes: e.escapes === true || e.escapes === false ? e.escapes : typeof e.escapes === "number" && e.escapes >= 0 ? e.escapes : e.escapes && typeof e.escapes === "object" ? { depth: num13(e.escapes.depth), spread: num13(e.escapes.spread) } : void 0, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : void 0 });
+          const res = R2.route(k, P, doc2, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : void 0, timeMs: Math.round(1e3 * Math.min(900, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : void 0, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : void 0, planes: e.planes === true ? true : void 0, criticalFirst: e.critical_first === false ? false : void 0, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : void 0, escapes: e.escapes === true || e.escapes === false ? e.escapes : typeof e.escapes === "number" && e.escapes >= 0 ? e.escapes : e.escapes && typeof e.escapes === "object" ? { depth: num13(e.escapes.depth), spread: num13(e.escapes.spread) } : void 0, plan: e.plan === true || e.plan === false ? e.plan : e.plan && typeof e.plan === "object" ? { tile: num13(e.plan.tile), iters: num13(e.plan.iters), layerCost: num13(e.plan.layer_cost), outside: num13(e.plan.outside), mask: e.plan.mask === true ? true : void 0, vias: e.plan.vias === true ? true : void 0, open: num13(e.plan.open) } : void 0, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : void 0 });
           const failed = (res.failed || []).map((f2) => ({ net: f2.net, from: f2.a.map(r44), to: f2.b.map(r44) }));
           if (!res.total) throw new ToolError(`nothing to route: every connection ${nets ? "of " + nets.join(", ") : "on the board"} is already made`);
           if (!res.items.length) throw new ToolError(`the autorouter could not make any of the ${res.total} missing connection${res.total === 1 ? "" : "s"} within the design rules: ${JSON.stringify(failed.slice(0, 12))}`);
@@ -100246,6 +100246,7 @@ function build3(input) {
             unrouted: conns.length ? conns.filter((c) => !c.routed).slice(0, 40).map((c) => ({ net: c.net, from: c.from && c.from.pad, to: c.to && c.to.pad, reason: c.reason, detail: c.detail, blocked_by_nets: c.blockedBy && c.blockedBy.nets })) : failed.slice(0, 40),
             longest_detours: conns.filter((c) => c.routed && c.detourRatio > 1.6).sort((a, b) => b.detourRatio - a.detourRatio).slice(0, 12).map((c) => ({ net: c.net, from: c.from && c.from.pad, to: c.to && c.to.pad, length_mm: r44(c.length), detour_ratio: r44(c.detourRatio), vias: c.vias, layers: c.layers })),
             fanout: res.fanout && res.fanout.escapes + res.fanout.boxed.length ? { escapes: res.fanout.escapes, ring: res.fanout.ring, via: res.fanout.via, used: res.fanout.used, boxed: res.fanout.boxed.slice(0, 20).map((b) => ({ pad: b.pad, net: b.net, reason: b.reason, blocked_by: b.blockedBy })) } : void 0,
+            plan: res.plan ? { tile_mm: res.plan.tile, tiles: res.plan.tiles, connections: res.plan.conns, iterations: res.plan.iterations, overflow_first_mm: res.plan.overflowFirst, overflow_mm: res.plan.overflow, crossings_left: res.plan.crossings, relayered: res.plan.relayered, via_connections: res.plan.viaConns, ms: res.plan.ms, inside: res.plan.inside, outside: res.plan.outside } : void 0,
             groups: res.groups && res.groups.inside ? { clusters: res.groups.clusters, inside: res.groups.inside, routed: res.groups.insideRouted, vias: res.groups.insideVias } : void 0,
             // explain: true asks for the reasoning behind the run: which nets went first, which parts formed which cluster, and every connection that changed layer or wandered
             explain: e.explain === true ? {
@@ -100415,17 +100416,17 @@ function build3(input) {
           pcbOnly(e.op);
           const P = PCB5();
           if (!P.cleanupPlan) throw new ToolError("the track clean-up is not loaded in this editor");
-          const plan = P.cleanupPlan(doc2, { shorts: e.shorts === true, vias: e.vias !== false, merge: e.merge !== false, dangling: e.dangling === true, danglingVias: e.dangling === true, inPads: e.in_pads === true });
+          const plan2 = P.cleanupPlan(doc2, { shorts: e.shorts === true, vias: e.vias !== false, merge: e.merge !== false, dangling: e.dangling === true, danglingVias: e.dangling === true, inPads: e.in_pads === true });
           const ids = [];
           const by = {};
-          for (const { item, node } of plan.replace) {
-            if (touched.has(item.id) || plan.remove.has(item.id)) continue;
+          for (const { item, node } of plan2.replace) {
+            if (touched.has(item.id) || plan2.remove.has(item.id)) continue;
             touch(item, e.op);
             changes.push(modified(doc2, item, node));
             ids.push(item.id);
           }
           let gone = 0;
-          for (const id of plan.remove) {
+          for (const id of plan2.remove) {
             const it = doc2.items.get(id);
             if (!it || touched.has(id)) continue;
             touch(it, e.op);
@@ -100433,15 +100434,15 @@ function build3(input) {
             ids.push(id);
             gone++;
           }
-          for (const it of plan.items) by[it.code] = (by[it.code] || 0) + 1;
+          for (const it of plan2.items) by[it.code] = (by[it.code] || 0) + 1;
           if (!ids.length) throw new ToolError("the tracks and vias are clean already: nothing to merge or remove");
-          lines.push({ kind: "modify", text: `Clean up tracks and vias: ${gone} removed, ${plan.replace.length} merged or shortened`, ids });
-          details.push({ cleanup: { removed: gone, changed: plan.replace.length, by_kind: by } });
+          lines.push({ kind: "modify", text: `Clean up tracks and vias: ${gone} removed, ${plan2.replace.length} merged or shortened`, ids });
+          details.push({ cleanup: { removed: gone, changed: plan2.replace.length, by_kind: by } });
           break;
         }
         case "silkscreen": {
           pcbOnly(e.op);
-          const plan = planSilk(doc2, {
+          const plan2 = planSilk(doc2, {
             size: typeof e.size === "number" ? e.size : void 0,
             minSize: typeof e.min_size === "number" ? e.min_size : void 0,
             refs: Array.isArray(e.refs) ? e.refs.map(String) : void 0,
@@ -100451,19 +100452,19 @@ function build3(input) {
             mark: Array.isArray(e.mark) && e.mark.every((l) => Array.isArray(l)) ? { shapes: e.mark.map((l) => l.map(String)), size: typeof e.mark_size === "number" ? e.mark_size : void 0, layer: typeof e.layer === "string" ? e.layer : void 0 } : void 0
           });
           const ids = [];
-          for (const [id, node] of plan.nodes) {
+          for (const [id, node] of plan2.nodes) {
             const it = doc2.items.get(id);
             if (!it || touched.has(id)) continue;
             touch(it, e.op);
             changes.push(modified(doc2, it, node));
             ids.push(id);
           }
-          for (const node of plan.adds) {
+          for (const node of plan2.adds) {
             const c = added(doc2, node);
             changes.push(c);
             ids.push(c.id);
           }
-          const rp = plan.report;
+          const rp = plan2.report;
           const nl = Object.values(rp.pin_labels).reduce((n2, l) => n2 + l.length, 0);
           lines.push({ kind: "modify", text: `Silkscreen: ${rp.references} reference${rp.references === 1 ? "" : "s"} placed clear of pads, other silkscreen, other parts and the edge (${Object.keys(rp.resized).length} made smaller, ${rp.turned.length} turned, ${rp.hidden.length} hidden)${nl ? `, ${nl} pin name${nl === 1 ? "" : "s"} printed` : ""}`, ids });
           details.push({ silkscreen: rp });
@@ -100471,13 +100472,13 @@ function build3(input) {
         }
         case "assign_models": {
           pcbOnly(e.op);
-          const plan = Array.isArray(e.__models) ? e.__models : [];
+          const plan2 = Array.isArray(e.__models) ? e.__models : [];
           const only = Array.isArray(e.refs) ? new Set(e.refs.map(String)) : null;
           const loose = e.similar !== false;
           const ids = [];
           const done = [];
           const left = [];
-          for (const p of plan) {
+          for (const p of plan2) {
             const it = doc2.items.get(p.it.id);
             if (!it || only && !only.has(it.ref)) continue;
             if (p.state === "none") {
@@ -100517,13 +100518,13 @@ function build3(input) {
         }
         case "align_models": {
           pcbOnly(e.op);
-          const plan = e.__fit;
-          if (!plan) throw new ToolError("the 3D models could not be loaded here");
+          const plan2 = e.__fit;
+          if (!plan2) throw new ToolError("the 3D models could not be loaded here");
           const ids = [];
           const turned = [];
           const left = [];
           const byId = /* @__PURE__ */ new Map();
-          for (const row3 of plan.misaligned) {
+          for (const row3 of plan2.misaligned) {
             if (row3.turn === null) {
               left.push({ ref: row3.ref, model: row3.model, off: row3.off });
               continue;
@@ -100560,7 +100561,7 @@ function build3(input) {
             ids.push(id);
           }
           if (ids.length) lines.push({ kind: "modify", text: `3D models turned onto their pads: ${turned.slice(0, 5).map((t) => `${t.ref} ${t.turn}\xB0`).join(", ")}${turned.length > 5 ? ", ..." : ""}`, ids });
-          details.push({ align_models: { checked: plan.checked, aligned: plan.aligned, turned, misaligned: e.fix === false ? plan.misaligned.map((r) => ({ ref: r.ref, model: r.model, off: r.off, turn: r.turn })) : left, not_loaded: plan.not_loaded, note: plan.note } });
+          details.push({ align_models: { checked: plan2.checked, aligned: plan2.aligned, turned, misaligned: e.fix === false ? plan2.misaligned.map((r) => ({ ref: r.ref, model: r.model, off: r.off, turn: r.turn })) : left, not_loaded: plan2.not_loaded, note: plan2.note } });
           break;
         }
         case "move_region": {
@@ -119329,6 +119330,7 @@ function probe(inp) {
   const multi = RT.filter(Boolean).length > 1;
   const maxVias = inp.maxVias === void 0 ? Infinity : inp.maxVias;
   const viaLevel = Math.max(1, Math.round(W12.viaLevel));
+  const blk = inp.block;
   const toNode = (li, l) => ({ ix: win.x0 + li % ww, iy: win.y0 + (li / ww | 0), l });
   const chain = (id, li) => {
     const out2 = [toNode(li, rl2[id])];
@@ -119373,7 +119375,7 @@ function probe(inp) {
   const addRay = (side, l, d, sx, sy, startLi, parent, level) => {
     const m = maps[l], sn = seen[side][l], ow = own[side][l], oo = own[1 - side][l], tm = side === 0 ? term[l] : null, bit = 1 << d;
     let x = sx + DX[d], y = sy + DY[d];
-    if (x < 0 || y < 0 || x >= ww || y >= wh || m[(y + win.y0) * G5.W + x + win.x0] || sn[y * ww + x] & bit) {
+    if (x < 0 || y < 0 || x >= ww || y >= wh || m[(y + win.y0) * G5.W + x + win.x0] || blk && blk[(y + win.y0) * G5.W + x + win.x0] || sn[y * ww + x] & bit) {
       steps++;
       return;
     }
@@ -119389,7 +119391,7 @@ function probe(inp) {
     rside.push(side);
     let li = y * ww + x, gi = (y + win.y0) * G5.W + x + win.x0;
     while (x >= 0 && y >= 0 && x < ww && y < wh) {
-      if (m[gi] || sn[li] & bit) break;
+      if (m[gi] || blk && blk[gi] || sn[li] & bit) break;
       sn[li] |= bit;
       if (ow[li] < 0) ow[li] = id;
       const o = oo[li];
@@ -120016,6 +120018,541 @@ function viaCheck(j, o, ctx) {
   return ctx.viaHit(o.via, j);
 }
 
+// web/domains/pcb/router/globalplan.ts
+var WALL = 8;
+var WALL_VIA = 2;
+var DIR_BIAS = 0.3;
+var MAX_ITERS = 16;
+var BOX_MARGIN = 8;
+var MAX_DP_VIAS = 6;
+var TURN_AT_TRAFFIC = 1;
+var INF = Infinity;
+function plan(inp, conns) {
+  const t0 = Date.now();
+  const { G: G5 } = inp;
+  const g2 = G5.g;
+  const k = Math.max(4, Math.round((inp.tile || 2.5) / g2)), T = k * g2;
+  const nx = Math.max(1, Math.ceil(G5.W / k)), ny = Math.max(1, Math.ceil(G5.H / k)), GT = nx * ny, L = G5.layers.length, N2 = GT * L;
+  const p = inp.pitch, rt = G5.routable;
+  const capE = new Float64Array(N2), capN = new Float64Array(N2), capV = new Int32Array(GT);
+  const tracks = (run2) => run2 > 0 ? (Math.floor((run2 - 1) * g2 / p + 1e-9) + 1) * p : 0;
+  for (let l = 0; l < L; l++) {
+    if (!rt[l]) continue;
+    const m = inp.maps[l];
+    for (let ty = 0; ty < ny; ty++) for (let tx = 0; tx < nx; tx++) {
+      const s2 = l * GT + ty * nx + tx;
+      if (tx + 1 < nx) {
+        const ix = (tx + 1) * k;
+        let cap = 0, run2 = 0;
+        if (ix < G5.W) for (let iy = ty * k; iy < Math.min(G5.H, (ty + 1) * k); iy++) {
+          if (!m[iy * G5.W + ix]) run2++;
+          else {
+            cap += tracks(run2);
+            run2 = 0;
+          }
+        }
+        capE[s2] = cap + tracks(run2);
+      }
+      if (ty + 1 < ny) {
+        const iy = (ty + 1) * k;
+        let cap = 0, run2 = 0;
+        if (iy < G5.H) for (let ix = tx * k; ix < Math.min(G5.W, (tx + 1) * k); ix++) {
+          if (!m[iy * G5.W + ix]) run2++;
+          else {
+            cap += tracks(run2);
+            run2 = 0;
+          }
+        }
+        capN[s2] = cap + tracks(run2);
+      }
+    }
+  }
+  const per = Math.max(1, inp.viaPitch * inp.viaPitch / (g2 * g2));
+  for (let ty = 0; ty < ny; ty++) for (let tx = 0; tx < nx; tx++) {
+    let n2 = 0;
+    for (let iy = ty * k; iy < Math.min(G5.H, (ty + 1) * k); iy++) for (let ix = tx * k; ix < Math.min(G5.W, (tx + 1) * k); ix++) {
+      const gi = iy * G5.W + ix;
+      if (!(G5.outside && G5.outside[gi]) && viaFits(G5, inp.vmaps, gi)) n2++;
+    }
+    capV[ty * nx + tx] = Math.floor(n2 / per);
+  }
+  const useE = new Float64Array(N2), useN = new Float64Array(N2), useV = new Int32Array(GT);
+  const histE = new Float64Array(N2), histN = new Float64Array(N2), histV = new Float64Array(GT), histX = new Float64Array(N2);
+  const hT = new Float64Array(N2), vT = new Float64Array(N2);
+  const shared = /* @__PURE__ */ new Map();
+  const paths = /* @__PURE__ */ new Map();
+  const byId = new Map(conns.map((c) => [c.id, c]));
+  let anyX = false, pres = 0, margin = BOX_MARGIN;
+  const tileOf = (q4) => {
+    const tx = Math.min(nx - 1, Math.max(0, Math.floor((q4[0] - G5.ox) / g2 / k))), ty = Math.min(ny - 1, Math.max(0, Math.floor((q4[1] - G5.oy) / g2 / k)));
+    return ty * nx + tx;
+  };
+  const layersOf2 = (ls) => {
+    const out2 = ls.filter((l) => l >= 0 && l < L && rt[l]);
+    return out2.length ? out2 : rt.map((r, l) => r ? l : -1).filter((l) => l >= 0);
+  };
+  const netOn = (code, net) => {
+    const m = shared.get(code);
+    return !!m && (m.get(net)?.n || 0) > 0;
+  };
+  const apply3 = (c, path2, sign2) => {
+    let pd = 0;
+    for (let i = 0; i + 1 < path2.length; i++) {
+      const a = path2[i], b = path2[i + 1];
+      let st = b - a;
+      const lo = Math.min(a, b), df = Math.abs(st);
+      if (df >= GT) {
+        useV[lo % GT] += sign2;
+        st = 0;
+      } else {
+        const vert = df === nx && a % GT % nx === b % GT % nx;
+        const code = lo * 2 + (vert ? 1 : 0);
+        let m = shared.get(code);
+        if (!m) shared.set(code, m = /* @__PURE__ */ new Map());
+        const e = m.get(c.net) || { n: 0, d: c.demand };
+        if (sign2 > 0) {
+          if (!e.n) {
+            e.d = c.demand;
+            (vert ? useN : useE)[lo] += e.d;
+          }
+          e.n++;
+          m.set(c.net, e);
+        } else {
+          e.n--;
+          if (!e.n) {
+            (vert ? useN : useE)[lo] -= e.d;
+            m.delete(c.net);
+          }
+        }
+        if (st === pd) (vert ? vT : hT)[a] += sign2 * c.demand;
+      }
+      pd = st;
+    }
+  };
+  const ecost = (l, ra, rb, c, pr) => {
+    const lo = ra < rb ? ra : rb, vert = Math.abs(rb - ra) === nx && ra % nx === rb % nx, s2 = l * GT + lo, code = s2 * 2 + (vert ? 1 : 0);
+    const cap = vert ? capN[s2] : capE[s2], use = vert ? useN[s2] : useE[s2], hist = vert ? histN[s2] : histE[s2];
+    const pf = inp.pref[l] || 0;
+    const against = vert ? Math.max(0, pf) : Math.max(0, -pf);
+    let cost = T * (1 + DIR_BIAS * against) * (1 + hist + (cap <= 0 ? WALL : 0));
+    const o = netOn(code, c.net) ? use - cap : use + c.demand - cap;
+    if (pr && o > 0) cost *= 1 + pr * o / p;
+    const sa = l * GT + ra, sb = l * GT + rb;
+    if (pr) {
+      const other = vert ? hT : vT;
+      const x = (other[sa] + other[sb]) / 2;
+      if (x > 0) cost *= 1 + pr * Math.min(x, c.demand) / p;
+    }
+    if (anyX) cost *= 1 + histX[sa] + histX[sb];
+    return cost;
+  };
+  const vcost = (r, pr) => {
+    let v = inp.viaMm * (1 + histV[r] + (capV[r] <= 0 ? WALL_VIA : 0));
+    const o = useV[r] + 1 - capV[r];
+    if (pr && o > 0) v *= 1 + pr * o;
+    return v;
+  };
+  const dist = new Float64Array(N2), prev = new Int32Array(N2), seen = new Int32Array(N2);
+  let gen = 0;
+  const hk = [], hn = [];
+  const push = (key3, n2) => {
+    let i = hk.length;
+    hk.push(key3);
+    hn.push(n2);
+    while (i > 0) {
+      const j = i - 1 >> 1;
+      if (hk[j] <= key3) break;
+      hk[i] = hk[j];
+      hn[i] = hn[j];
+      i = j;
+    }
+    hk[i] = key3;
+    hn[i] = n2;
+  };
+  const pop = () => {
+    const top2 = hn[0];
+    const lk = hk.pop(), ln = hn.pop();
+    const n2 = hk.length;
+    if (n2) {
+      let i = 0;
+      for (; ; ) {
+        let j = 2 * i + 1;
+        if (j >= n2) break;
+        if (j + 1 < n2 && hk[j + 1] < hk[j]) j++;
+        if (hk[j] >= lk) break;
+        hk[i] = hk[j];
+        hn[i] = hn[j];
+        i = j;
+      }
+      hk[i] = lk;
+      hn[i] = ln;
+    }
+    return top2;
+  };
+  const search = (c, pr, box3) => {
+    gen++;
+    hk.length = 0;
+    hn.length = 0;
+    const ra = tileOf(c.a.p), rb = tileOf(c.b.p);
+    const tgt = new Set(layersOf2(c.b.layers).map((l) => l * GT + rb));
+    for (const l of layersOf2(c.a.layers)) {
+      const n2 = l * GT + ra;
+      seen[n2] = gen;
+      dist[n2] = 0;
+      prev[n2] = -1;
+      push(0, n2);
+    }
+    const relax = (n2, m, w) => {
+      if (w === INF) return;
+      const d = dist[n2] + w;
+      if (seen[m] !== gen || d < dist[m] - 1e-12) {
+        seen[m] = gen;
+        dist[m] = d;
+        prev[m] = n2;
+        push(d, m);
+      }
+    };
+    while (hk.length) {
+      const key3 = hk[0], n2 = pop();
+      if (key3 > dist[n2] + 1e-12) continue;
+      if (tgt.has(n2)) {
+        const out2 = [];
+        for (let x = n2; x >= 0; x = prev[x]) out2.push(x);
+        return out2.reverse();
+      }
+      const l = n2 / GT | 0, r = n2 - l * GT, tx = r % nx, ty = r / nx | 0;
+      const inBox3 = (x, y) => x >= 0 && y >= 0 && x < nx && y < ny && (!box3 || x >= box3[0] && x <= box3[2] && y >= box3[1] && y <= box3[3]);
+      if (inBox3(tx + 1, ty)) relax(n2, n2 + 1, ecost(l, r, r + 1, c, pr));
+      if (inBox3(tx - 1, ty)) relax(n2, n2 - 1, ecost(l, r, r - 1, c, pr));
+      if (inBox3(tx, ty + 1)) relax(n2, n2 + nx, ecost(l, r, r + nx, c, pr));
+      if (inBox3(tx, ty - 1)) relax(n2, n2 - nx, ecost(l, r, r - nx, c, pr));
+      for (let l2 = 0; l2 < L; l2++) if (l2 !== l && rt[l2]) relax(n2, l2 * GT + r, vcost(r, pr));
+    }
+    return null;
+  };
+  const route3 = (c, pr) => {
+    const ra = tileOf(c.a.p), rb = tileOf(c.b.p);
+    const box3 = [Math.min(ra % nx, rb % nx) - margin, Math.min(ra / nx | 0, rb / nx | 0) - margin, Math.max(ra % nx, rb % nx) + margin, Math.max(ra / nx | 0, rb / nx | 0) + margin];
+    const path2 = search(c, pr, box3) || search(c, pr, null);
+    if (!path2) return false;
+    paths.set(c.id, path2);
+    apply3(c, path2, 1);
+    return true;
+  };
+  const rip = (c) => {
+    const q4 = paths.get(c.id);
+    if (q4) {
+      apply3(c, q4, -1);
+      paths.delete(c.id);
+    }
+  };
+  const crossings = (only) => {
+    const occ = /* @__PURE__ */ new Map();
+    const mine = only !== void 0 ? new Set(paths.get(only) || []) : null;
+    for (const [id, q4] of paths) for (const n2 of q4) if (!mine || mine.has(n2)) {
+      let l = occ.get(n2);
+      if (!l) occ.set(n2, l = []);
+      if (l[l.length - 1] !== id) l.push(id);
+    }
+    const pairs = /* @__PURE__ */ new Map();
+    for (const [n2, ids] of occ) if (ids.length > 1) for (let i = 0; i < ids.length; i++) for (let j = i + 1; j < ids.length; j++) {
+      const x = Math.min(ids[i], ids[j]), y = Math.max(ids[i], ids[j]);
+      if (byId.get(x).net === byId.get(y).net || only !== void 0 && x !== only && y !== only) continue;
+      const key3 = x + "," + y;
+      let l = pairs.get(key3);
+      if (!l) pairs.set(key3, l = []);
+      l.push(n2);
+    }
+    const out2 = [];
+    const pos = /* @__PURE__ */ new Map();
+    const posOf = (id) => {
+      let m = pos.get(id);
+      if (!m) {
+        m = /* @__PURE__ */ new Map();
+        paths.get(id).forEach((n2, i) => m.set(n2, i));
+        pos.set(id, m);
+      }
+      return m;
+    };
+    const xy = (n2) => {
+      const r = n2 % GT;
+      return [r % nx, r / nx | 0];
+    };
+    for (const [key3, nodes] of pairs) {
+      const [ip, iq] = key3.split(",").map(Number);
+      const P = paths.get(ip), Q = paths.get(iq);
+      const pp = posOf(ip), pq = posOf(iq);
+      const common2 = nodes.map((n2) => pp.get(n2)).sort((a, b) => a - b);
+      for (let kk = 0; kk < common2.length; ) {
+        const i = common2[kk];
+        let j = i;
+        while (kk + 1 < common2.length && common2[kk + 1] === j + 1 && Math.abs(P[j + 1] - P[j]) < GT && Math.abs(pq.get(P[j + 1]) - pq.get(P[j])) === 1) {
+          j++;
+          kk++;
+        }
+        kk++;
+        if (i === 0 || j === P.length - 1) continue;
+        const a = P[i - 1], b = P[j + 1], t02 = P[i], tm = P[j];
+        if (Math.abs(t02 - a) >= GT || Math.abs(b - tm) >= GT) continue;
+        const qi = pq.get(t02), qj = pq.get(tm);
+        let ci, di;
+        if (i === j) {
+          ci = qi - 1;
+          di = qi + 1;
+        } else {
+          const dq = qj > qi ? 1 : -1;
+          ci = qi - dq;
+          di = qj + dq;
+        }
+        if (ci < 0 || di < 0 || ci >= Q.length || di >= Q.length) continue;
+        const cc = Q[ci], dd = Q[di];
+        if (Math.abs(cc - t02) >= GT || Math.abs(dd - tm) >= GT || cc === a || dd === b) continue;
+        const [ax, ay] = xy(a), [bx, by] = xy(b), [x0, y0] = xy(t02), [xm, ym] = xy(tm), [x1, y1] = xy(P[i + 1]), [xl, yl] = xy(P[j - 1]), [cx, cy] = xy(cc), [dx, dy] = xy(dd);
+        let ux = x0 - ax + (x1 - x0), uy = y0 - ay + (y1 - y0);
+        const s0 = ux * (cy - y0) - uy * (cx - x0);
+        ux = xm - xl + (bx - xm);
+        uy = ym - yl + (by - ym);
+        const sm = ux * (dy - ym) - uy * (dx - xm);
+        if (s0 * sm < 0) out2.push([Math.min(byId.get(ip).demand, byId.get(iq).demand), P.slice(i, j + 1), ip, iq]);
+      }
+    }
+    return out2;
+  };
+  const pv = inp.viaPitch;
+  const overflow = () => {
+    let tot = 0;
+    const edges = [], cols = [];
+    for (let s2 = 0; s2 < N2; s2++) {
+      if (useE[s2] > 1e-9) {
+        const o = useE[s2] - capE[s2];
+        if (o > 1e-6) {
+          tot += o;
+          edges.push([o, s2 * 2]);
+        }
+      }
+      if (useN[s2] > 1e-9) {
+        const o = useN[s2] - capN[s2];
+        if (o > 1e-6) {
+          tot += o;
+          edges.push([o, s2 * 2 + 1]);
+        }
+      }
+    }
+    for (let r = 0; r < GT; r++) if (useV[r] > 0) {
+      const o = useV[r] - capV[r];
+      if (o > 0) {
+        tot += o * pv;
+        cols.push([o, r]);
+      }
+    }
+    const xruns = crossings();
+    for (const x of xruns) tot += x[0];
+    return { tot, edges, cols, xruns };
+  };
+  const wire = () => {
+    let w = 0;
+    for (const q4 of paths.values()) for (let i = 0; i + 1 < q4.length; i++) w += Math.abs(q4[i + 1] - q4[i]) >= GT ? inp.viaMm : T;
+    return w;
+  };
+  const codesOf = (q4) => {
+    const out2 = [];
+    for (let i = 0; i + 1 < q4.length; i++) {
+      const a = q4[i], b = q4[i + 1], lo = Math.min(a, b), df = Math.abs(b - a);
+      if (df >= GT) out2.push(-1 - lo % GT);
+      else out2.push(lo * 2 + (df === nx && a % nx === b % nx ? 1 : 0));
+    }
+    return out2;
+  };
+  const maxIters = Math.max(1, inp.iters || MAX_ITERS), maxMs = inp.maxMs || 8e3;
+  for (const c of conns) route3(c, 0);
+  let ov = overflow();
+  const first = ov.tot;
+  let best = { tot: ov.tot, wire: wire(), paths: new Map(paths) };
+  let its = 1;
+  for (let it = 0; ov.tot > 1e-6 && its < maxIters && Date.now() - t0 < maxMs; it++) {
+    pres = 0.5 * Math.pow(1.5, it);
+    margin = BOX_MARGIN + 2 * (it + 1);
+    const hot = /* @__PURE__ */ new Set();
+    for (const [o, code] of ov.edges) {
+      hot.add(code);
+      const s2 = code >> 1;
+      if (code & 1) histN[s2] += o / p;
+      else histE[s2] += o / p;
+    }
+    for (const [o, r] of ov.cols) {
+      histV[r] += o;
+      hot.add(-1 - r);
+    }
+    const hotx = /* @__PURE__ */ new Set();
+    for (const [o, run2, a, b] of ov.xruns) {
+      for (const n2 of run2) histX[n2] += o / p;
+      hotx.add(a);
+      hotx.add(b);
+      anyX = true;
+    }
+    const redo = conns.filter((c) => {
+      const q4 = paths.get(c.id);
+      if (!q4) return true;
+      return hotx.has(c.id) || codesOf(q4).some((x) => hot.has(x));
+    });
+    if (!redo.length) break;
+    for (const c of redo) {
+      const old = paths.get(c.id);
+      rip(c);
+      if (!route3(c, pres) && old) {
+        paths.set(c.id, old);
+        apply3(c, old, 1);
+      }
+      if (Date.now() - t0 > maxMs) break;
+    }
+    its++;
+    ov = overflow();
+    const w = wire();
+    if (ov.tot < best.tot - 1e-9 || Math.abs(ov.tot - best.tot) <= 1e-9 && w < best.wire) best = { tot: ov.tot, wire: w, paths: new Map(paths) };
+  }
+  if (best.paths !== paths) {
+    for (const c of conns) rip(c);
+    for (const [id, q4] of best.paths) {
+      paths.set(id, q4);
+      apply3(byId.get(id), q4, 1);
+    }
+  }
+  const assign = (c, cols, start, end) => {
+    const n2 = cols.length, VM = MAX_DP_VIAS, S3 = L * (VM + 1);
+    const lays = rt.map((r, l) => r ? l : -1).filter((l) => l >= 0);
+    let cur2 = new Float64Array(S3).fill(INF);
+    for (const l of start) cur2[l * (VM + 1)] = 0;
+    const back = [];
+    for (let i = 0; i < n2; i++) {
+      const r = cols[i];
+      const here = new Float64Array(S3).fill(INF), from = new Int32Array(S3).fill(-1);
+      const turn = i > 0 && i < n2 - 1 && cols[i] - cols[i - 1] !== cols[i + 1] - cols[i];
+      for (let st2 = 0; st2 < S3; st2++) {
+        if (cur2[st2] === INF) continue;
+        const l = st2 / (VM + 1) | 0;
+        let gc = cur2[st2];
+        if (turn && hT[l * GT + r] + vT[l * GT + r] > 1e-6) gc += inp.viaMm * TURN_AT_TRAFFIC;
+        if (gc < here[st2]) {
+          here[st2] = gc;
+          from[st2] = st2;
+        }
+      }
+      const vc = vcost(r, pres);
+      for (let st2 = 0; st2 < S3; st2++) {
+        if (cur2[st2] === INF) continue;
+        const l = st2 / (VM + 1) | 0, v = st2 % (VM + 1);
+        if (v >= VM) continue;
+        for (const l2 of i < n2 - 1 ? lays : end) {
+          if (l2 === l) continue;
+          const s2 = l2 * (VM + 1) + v + 1, gc = cur2[st2] + vc;
+          if (gc < here[s2] - 1e-12) {
+            here[s2] = gc;
+            from[s2] = st2 + S3;
+          }
+        }
+      }
+      back.push(from);
+      if (i === n2 - 1) {
+        cur2 = here;
+        break;
+      }
+      const nxt = new Float64Array(S3).fill(INF);
+      let any = false;
+      for (let st2 = 0; st2 < S3; st2++) {
+        if (here[st2] === INF) continue;
+        const l = st2 / (VM + 1) | 0;
+        const e = ecost(l, r, cols[i + 1], c, pres);
+        if (e === INF) continue;
+        nxt[st2] = here[st2] + e;
+        any = true;
+      }
+      if (!any) return null;
+      cur2 = nxt;
+    }
+    let bs = -1;
+    for (let st2 = 0; st2 < S3; st2++) if (cur2[st2] < INF && end.includes(st2 / (VM + 1) | 0) && (bs < 0 || cur2[st2] < cur2[bs])) bs = st2;
+    if (bs < 0) return null;
+    const out2 = [];
+    let st = bs;
+    for (let i = n2 - 1; i >= 0; i--) {
+      const f2 = back[i][st];
+      const l = st / (VM + 1) | 0;
+      if (f2 >= S3) {
+        const l0 = (f2 - S3) / (VM + 1) | 0;
+        out2.push([l0 * GT + cols[i], l * GT + cols[i]]);
+        st = f2 - S3;
+      } else {
+        out2.push([l * GT + cols[i]]);
+        st = f2 < 0 ? st : f2;
+      }
+    }
+    return out2.reverse().flat();
+  };
+  const overAt = (...qs) => {
+    let tot = 0;
+    for (const code of new Set(qs.flatMap(codesOf))) {
+      if (code < 0) {
+        const r = -1 - code;
+        const o = useV[r] - capV[r];
+        if (o > 0) tot += o * pv;
+      } else {
+        const s2 = code >> 1;
+        const o = code & 1 ? useN[s2] - capN[s2] : useE[s2] - capE[s2];
+        if (o > 1e-6) tot += o;
+      }
+    }
+    return tot;
+  };
+  const crossOf = (id) => crossings(id).reduce((s2, x) => s2 + x[0], 0);
+  let relayered = 0;
+  for (const c of conns) {
+    const q4 = paths.get(c.id);
+    if (!q4 || q4.length < 2) continue;
+    const cols = [];
+    for (const n2 of q4) {
+      const r = n2 % GT;
+      if (cols[cols.length - 1] !== r) cols.push(r);
+    }
+    const start = layersOf2(c.a.layers), end = layersOf2(c.b.layers);
+    apply3(c, q4, -1);
+    const nq = assign(c, cols, start, end);
+    apply3(c, q4, 1);
+    if (!nq || nq.join() === q4.join()) continue;
+    const before = overAt(q4, nq) + crossOf(c.id);
+    apply3(c, q4, -1);
+    apply3(c, nq, 1);
+    paths.set(c.id, nq);
+    if (overAt(q4, nq) + crossOf(c.id) > before + 1e-9) {
+      apply3(c, nq, -1);
+      apply3(c, q4, 1);
+      paths.set(c.id, q4);
+    } else relayered++;
+  }
+  ov = overflow();
+  const overOf = /* @__PURE__ */ new Map();
+  for (const [o, , a, b] of ov.xruns) {
+    overOf.set(a, (overOf.get(a) || 0) + o);
+    overOf.set(b, (overOf.get(b) || 0) + o);
+  }
+  const corridors = /* @__PURE__ */ new Map();
+  for (const c of conns) {
+    const q4 = paths.get(c.id);
+    if (!q4) continue;
+    const tiles = new Uint8Array(GT), layer4 = new Int8Array(GT).fill(-2);
+    let vias = 0;
+    for (let i = 0; i < q4.length; i++) {
+      const r = q4[i] % GT, l = q4[i] / GT | 0;
+      const tx = r % nx, ty = r / nx | 0;
+      for (let y = Math.max(0, ty - 1); y <= Math.min(ny - 1, ty + 1); y++) for (let x = Math.max(0, tx - 1); x <= Math.min(nx - 1, tx + 1); x++) tiles[y * nx + x] = 1;
+      if (i > 0 && q4[i - 1] % GT === r) vias++;
+      layer4[r] = layer4[r] === -2 || layer4[r] === l ? l : -1;
+    }
+    for (let r = 0; r < GT; r++) if (layer4[r] === -2) layer4[r] = -1;
+    corridors.set(c.id, { tiles, layer: layer4, vias, overflow: (overOf.get(c.id) || 0) + overAt(q4), path: q4 });
+  }
+  return { k, T, nx, ny, corridors, iterations: its, overflowFirst: first, overflow: ov.tot, crossings: ov.xruns.length, relayered, ms: Date.now() - t0 };
+}
+
 // web/domains/pcb/router/impedance.ts
 var num3 = (K11, n2, key3, d) => {
   const c = n2 && K11.kid(n2, key3);
@@ -120112,6 +120649,7 @@ var FAN_ROWS_MM = [0.8, 1.5, 2.2];
 var FAN_FAR_MM = 4;
 var ESCAPES = false;
 var SPREAD = 1.5;
+var PLAN = false;
 var GROUP_REACH = 5;
 var VIA_PRICE = 2.5;
 var isCritical = (net, kind) => kind === "rf" || usualImpedance(net, true) === 90 || /(^|[\/_\-.(])(XTAL|XIN|XOUT|XI|XO|XC\d?|XL\d?|OSC(_?32K?)?_?(IN|OUT|I|O)|OSCI|OSCO|XTAL_?[PN]|X(32K?)_?[PN])\d*([_\-.)]|$)/i.test(net);
@@ -120187,6 +120725,10 @@ var Router = class _Router {
     this.cur = null;
     this.curSoft = false;
     this.oidx = null;
+    // ------------------------------------------------------------------ global plan (globalplan.ts)
+    this.gplan = null;
+    this.planBlk = null;
+    this.planStat = { inside: 0, outside: 0 };
     this.fenceVias = [];
     this.fenceReports = [];
     this.fenceShapes = [];
@@ -121028,8 +121570,8 @@ var Router = class _Router {
   classFor(netKey, cap = Infinity, want2 = 0, smallVia = false) {
     const { P, s: s2, G: G5 } = this;
     const nc = P.netclassOf(s2, netKey);
-    const plan = (this.opts.netOpts || {})[netKey];
-    const pw = plan && +plan.width > 0 ? +plan.width : 0;
+    const plan2 = (this.opts.netOpts || {})[netKey];
+    const pw = plan2 && +plan2.width > 0 ? +plan2.width : 0;
     const zw = pw ? 0 : this.zWidth.get(netKey) || 0;
     let width = Math.max(pw || zw || Math.max(nc.track_width !== void 0 ? nc.track_width : s2.trackWidth, want2), s2.minTrackWidth || 0);
     if (cap < width) width = Math.max(s2.minTrackWidth || 0.1, 0.1, Math.floor(cap * 100 + 1e-6) / 100);
@@ -121060,8 +121602,8 @@ var Router = class _Router {
   kindOf(netKey) {
     let k = this.kindMemo.get(netKey);
     if (!k) {
-      const plan = (this.opts.netOpts || {})[netKey];
-      k = plan && plan.kind || netKind(netKey, this.pairNets.has(netKey) || void 0);
+      const plan2 = (this.opts.netOpts || {})[netKey];
+      k = plan2 && plan2.kind || netKind(netKey, this.pairNets.has(netKey) || void 0);
       this.kindMemo.set(netKey, k);
     }
     return k;
@@ -121122,8 +121664,8 @@ var Router = class _Router {
     const o = this.opts.signalWidth;
     const want2 = o === void 0 ? 0.2 : +o;
     if (!(want2 > 0) || c.pair || isSupply(c.net)) return 0;
-    const plan = (this.opts.netOpts || {})[c.net];
-    if (plan && +plan.width > 0 || this.zWidth.get(c.net)) return 0;
+    const plan2 = (this.opts.netOpts || {})[c.net];
+    if (plan2 && +plan2.width > 0 || this.zWidth.get(c.net)) return 0;
     return want2;
   }
   powerWidth(netKey) {
@@ -121151,22 +121693,22 @@ var Router = class _Router {
   }
   /** The plan's wishes for a net, resolved against this board. */
   guideFor(netKey) {
-    const G5 = this.G, plan = (this.opts.netOpts || {})[netKey] || {};
+    const G5 = this.G, plan2 = (this.opts.netOpts || {})[netKey] || {};
     const rank = (this.opts.order || []).indexOf(netKey);
     let allowed = null;
-    if (plan.layers && plan.layers.length) {
-      allowed = G5.layers.map((nm3) => plan.layers.includes(nm3));
+    if (plan2.layers && plan2.layers.length) {
+      allowed = G5.layers.map((nm3) => plan2.layers.includes(nm3));
       if (!allowed.some(Boolean)) allowed = null;
     }
-    const usbData = plan.maxVias === void 0 && usualImpedance(netKey, true) === 90 && /USB|(^|[\/_(])D[+\-PM]\)?$/i.test(netKey) && !!pairName(netKey);
+    const usbData = plan2.maxVias === void 0 && usualImpedance(netKey, true) === 90 && /USB|(^|[\/_(])D[+\-PM]\)?$/i.test(netKey) && !!pairName(netKey);
     return {
       allowed,
-      allowVias: this.allowVias && plan.allowVias !== false,
-      maxVias: usbData ? 0 : plan.maxVias === void 0 || plan.maxVias === null ? Infinity : Math.max(0, +plan.maxVias),
-      avoid: (plan.avoid || []).map((b) => this.cellBox(b)).filter(Boolean),
-      viaAvoid: (plan.viaAvoid || []).map((b) => this.cellBox(b)).filter(Boolean),
+      allowVias: this.allowVias && plan2.allowVias !== false,
+      maxVias: usbData ? 0 : plan2.maxVias === void 0 || plan2.maxVias === null ? Infinity : Math.max(0, +plan2.maxVias),
+      avoid: (plan2.avoid || []).map((b) => this.cellBox(b)).filter(Boolean),
+      viaAvoid: (plan2.viaAvoid || []).map((b) => this.cellBox(b)).filter(Boolean),
       rank: rank < 0 ? Infinity : rank,
-      priority: +plan.priority || 0
+      priority: +plan2.priority || 0
     };
   }
   /** A connection between two given points of a net, outside the run's own list (the trainer and tools use this). */
@@ -122189,7 +122731,7 @@ var Router = class _Router {
         }
       }
       if (soft && !collect) {
-        const full3 = conn.cls.full, plan = extra;
+        const full3 = conn.cls.full, plan2 = extra;
         extra = (nodes) => {
           let hit5 = 0;
           for (let i = 0; i + 1 < nodes.length; i++) {
@@ -122199,7 +122741,7 @@ var Router = class _Router {
             const m = full3[a.l];
             for (let k = 0; k <= n2; k++) if (m[(a.iy + sy * k) * G5.W + a.ix + sx * k]) hit5++;
           }
-          return hit5 * G5.g * 12 * this.W.length + (plan ? plan(nodes) : 0);
+          return hit5 * G5.g * 12 * this.W.length + (plan2 ? plan2(nodes) : 0);
         };
       }
       if (!collect && this.rim && this.opts.edgeRuns !== true) {
@@ -122293,19 +122835,72 @@ var Router = class _Router {
       if (!tgt && !term.length) return null;
       const x0 = Math.min(src.ix, tgt ? tgt.ix : src.ix), x1 = Math.max(src.ix, tgt ? tgt.ix : src.ix), y0 = Math.min(src.iy, tgt ? tgt.iy : src.iy), y1 = Math.max(src.iy, tgt ? tgt.iy : src.iy);
       const span = Math.max(x1 - x0, y1 - y0);
+      const finish = (res) => {
+        res.nodes = this.mitre(simplify(res.nodes), maps);
+        if (res.onTerm) {
+          const e = res.nodes[res.nodes.length - 1];
+          const k = e.l * G5.W * G5.H + e.iy * G5.W + e.ix;
+          if (zoneSet && zoneSet.has(k) && !owner.has(k)) res.zoneEnd = true;
+        }
+        return { res, owner, flip, esc: [src.esc, tgt ? tgt.esc : void 0] };
+      };
+      const cor = this.gplan && !collect && !net.zoneCells ? this.gplan.corridors.get(conn.id) : void 0;
+      let steer = extra;
+      if (cor && !(cor.vias > 0 && maxVias <= 0)) {
+        const pl = this.gplan, kk = pl.k, po = this.planOpts();
+        const lc = G5.routable.filter(Boolean).length > 1 ? po.layerCost : 0, oc = po.outside, lay = cor.layer, tl = cor.tiles, before = extra;
+        if (lc > 0 || oc > 0) steer = (nodes) => {
+          let off = 0, out2 = 0;
+          for (let i = 0; i + 1 < nodes.length; i++) {
+            const a = nodes[i], b = nodes[i + 1];
+            if (a.l !== b.l) continue;
+            const n2 = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy);
+            const step = Math.hypot(sx, sy) * G5.g;
+            for (let q4 = 0; q4 < n2; q4++) {
+              const r = ((a.iy + sy * q4) / kk | 0) * pl.nx + ((a.ix + sx * q4) / kk | 0);
+              if (!tl[r]) out2 += step;
+              else {
+                const want2 = lay[r];
+                if (want2 >= 0 && want2 !== a.l) off += step;
+              }
+            }
+          }
+          return (off * lc + out2 * oc) * this.W.length + (before ? before(nodes) : 0);
+        };
+        if (po.mask) {
+          let tx0 = Infinity, ty0 = Infinity, tx1 = -Infinity, ty1 = -Infinity;
+          for (let r = 0; r < tl.length; r++) if (tl[r]) {
+            const tx = r % pl.nx, ty = r / pl.nx | 0;
+            if (tx < tx0) tx0 = tx;
+            if (tx > tx1) tx1 = tx;
+            if (ty < ty0) ty0 = ty;
+            if (ty > ty1) ty1 = ty;
+          }
+          const win = { x0: Math.max(0, Math.min(tx0 * kk, x0)), y0: Math.max(0, Math.min(ty0 * kk, y0)), x1: Math.min(G5.W - 1, Math.max((tx1 + 1) * kk - 1, x1)), y1: Math.min(G5.H - 1, Math.max((ty1 + 1) * kk - 1, y1)) };
+          const res = probe({ G: G5, maps, vmaps, src, tgt, term, win, pref: this.pref, W: this.W, allowVias: gd.allowVias && maxVias > 0, maxSteps: 6e6, routable: rt, maxVias: maxVias === Infinity ? void 0 : maxVias, extra: steer, block: this.corridorMask(cor, [A.p, B.p], po.open, win) });
+          if (res) {
+            this.planStat.inside++;
+            return finish(res);
+          }
+          this.planStat.outside++;
+        }
+      }
       const margins = [Math.max(14, Math.round(span * 0.35)), Math.max(50, Math.round(span * 1.2)), Math.max(G5.W, G5.H)];
       for (let i = 0; i < margins.length; i++) {
         const m = margins[i];
         const win = { x0: Math.max(0, x0 - m), y0: Math.max(0, y0 - m), x1: Math.min(G5.W - 1, x1 + m), y1: Math.min(G5.H - 1, y1 + m) };
-        const res = probe({ G: G5, maps, vmaps, src, tgt, term, win, pref: this.pref, W: this.W, allowVias: gd.allowVias && maxVias > 0, maxSteps: 6e6, collect, routable: rt, maxVias: maxVias === Infinity ? void 0 : maxVias, extra });
+        const res = probe({ G: G5, maps, vmaps, src, tgt, term, win, pref: this.pref, W: this.W, allowVias: gd.allowVias && maxVias > 0, maxSteps: 6e6, collect, routable: rt, maxVias: maxVias === Infinity ? void 0 : maxVias, extra: steer });
         if (res) {
-          res.nodes = this.mitre(simplify(res.nodes), maps);
-          if (res.onTerm) {
-            const e = res.nodes[res.nodes.length - 1];
-            const k = e.l * G5.W * G5.H + e.iy * G5.W + e.ix;
-            if (zoneSet && zoneSet.has(k) && !owner.has(k)) res.zoneEnd = true;
+          if (steer !== extra) {
+            const n2 = res.nodes;
+            let inside2 = true;
+            for (const x of n2) if (!cor.tiles[(x.iy / this.gplan.k | 0) * this.gplan.nx + (x.ix / this.gplan.k | 0)]) {
+              inside2 = false;
+              break;
+            }
+            this.planStat[inside2 ? "inside" : "outside"]++;
           }
-          return { res, owner, flip, esc: [src.esc, tgt ? tgt.esc : void 0] };
+          return finish(res);
         }
         if (win.x0 === 0 && win.y0 === 0 && win.x1 === G5.W - 1 && win.y1 === G5.H - 1) break;
       }
@@ -122313,6 +122908,50 @@ var Router = class _Router {
     } finally {
       this.lift(net, -1, conn.cls);
     }
+  }
+  planOpts() {
+    const o = this.opts.plan ?? PLAN;
+    const q4 = typeof o === "object" ? o : {};
+    return { tile: q4.tile || 2.5, iters: q4.iters || 16, layerCost: q4.layerCost ?? 0.5, outside: q4.outside ?? 0.5, mask: !!q4.mask, vias: !!q4.vias, open: q4.open ?? 1 };
+  }
+  /** Plan every connection still to be laid on the tile graph; their corridors steer find(). */
+  planGlobal() {
+    const G5 = this.G, po = this.planOpts();
+    const conns = this.conns.filter((c) => !c.nodes && !c.moot && c.planeOnly === void 0 && !c.pairOnly);
+    if (!conns.length) return;
+    const count2 = /* @__PURE__ */ new Map();
+    for (const c of conns) count2.set(c.cls, (count2.get(c.cls) || 0) + 1);
+    let ref = conns[0].cls;
+    for (const [cls, n2] of count2) if (n2 > count2.get(ref)) ref = cls;
+    this.gplan = plan(
+      { G: G5, maps: ref.fixed, vmaps: ref.vfixed, pitch: ref.width + ref.clr, viaPitch: ref.viaD + ref.clr, pref: this.pref, viaMm: this.W.via / Math.max(1e-6, this.W.length), tile: po.tile, iters: po.iters },
+      conns.map((c) => ({ id: c.id, net: c.net, a: { p: c.a.p, layers: c.a.layers }, b: { p: c.b.p, layers: c.b.layers }, demand: c.cls.width + c.cls.clr }))
+    );
+  }
+  planReport() {
+    const pl = this.gplan;
+    if (!pl) return void 0;
+    const r35 = (v) => +v.toFixed(3);
+    let viaConns = 0;
+    for (const c of pl.corridors.values()) if (c.vias > 0) viaConns++;
+    return { tile: r35(pl.T), tiles: [pl.nx, pl.ny], conns: pl.corridors.size, iterations: pl.iterations, overflowFirst: r35(pl.overflowFirst), overflow: r35(pl.overflow), crossings: pl.crossings, relayered: pl.relayered, viaConns, ms: pl.ms, inside: this.planStat.inside, outside: this.planStat.outside };
+  }
+  /** The grid cells a search inside the corridor may not enter, outside its tiles except near the ends (a shared
+   *  buffer, written only inside the search window: the search reads nothing beyond it). */
+  corridorMask(cor, ends, open4, win) {
+    const G5 = this.G, pl = this.gplan, k = pl.k;
+    const m = this.planBlk || (this.planBlk = new Uint8Array(G5.W * G5.H));
+    for (let iy = win.y0; iy <= win.y1; iy++) m.fill(1, iy * G5.W + win.x0, iy * G5.W + win.x1 + 1);
+    for (let r = 0; r < cor.tiles.length; r++) if (cor.tiles[r]) {
+      const tx = r % pl.nx, ty = r / pl.nx | 0;
+      for (let iy = ty * k; iy < Math.min(G5.H, (ty + 1) * k); iy++) m.fill(0, iy * G5.W + tx * k, iy * G5.W + Math.min(G5.W, (tx + 1) * k));
+    }
+    const R2 = Math.ceil(open4 / G5.g);
+    for (const p of ends) {
+      const cx = Math.round((p[0] - G5.ox) / G5.g), cy = Math.round((p[1] - G5.oy) / G5.g);
+      for (let iy = Math.max(0, cy - R2); iy <= Math.min(G5.H - 1, cy + R2); iy++) m.fill(0, iy * G5.W + Math.max(0, cx - R2), iy * G5.W + Math.min(G5.W, cx + R2 + 1));
+    }
+    return m;
   }
   /** Chamfer the 90° corners the search was forced into, as far as the neighbouring copper allows. */
   mitre(nodes, maps) {
@@ -122623,6 +123262,12 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     const budget = this.opts.timeMs ? this.opts.timeMs * STEPS_PER_MS : 0;
     const timeUp = () => this.stopped || !!budget && (work.steps - w0 > budget || Date.now() - t0 > 4 * this.opts.timeMs);
     const later = /* @__PURE__ */ new Set();
+    if ((this.opts.plan ?? PLAN) !== false) {
+      this.planGlobal();
+      if (this.gplan && this.planOpts().vias) {
+        for (const [id, cor] of this.gplan.corridors) if (cor.vias > 0) later.add(id);
+      }
+    }
     for (; pass < passes; pass++) {
       for (const c of conns) if (c.nodes) this.rip(c);
       for (const c of conns) c.rips = 0;
@@ -123650,7 +124295,8 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       domains: this.domainReport(),
       fences: this.fenceReports,
       groups: this.groupReport(),
-      fanout: this.fanReport
+      fanout: this.fanReport,
+      plan: this.planReport()
     };
   }
 };
@@ -141033,25 +141679,25 @@ function viaFits2(S3, P, x, y, r, clr, net, pads) {
   }
   return true;
 }
-function physicsPlan(doc2, P, k, settings3, plan) {
+function physicsPlan(doc2, P, k, settings3, plan2) {
   const S3 = survey(doc2, P, k);
-  const size2 = plan.size > 0 ? plan.size : 0.6, r = size2 / 2;
+  const size2 = plan2.size > 0 ? plan2.size : 0.6, r = size2 / 2;
   const clr = Math.max(0.15, settings3 && settings3.clearance || 0.2);
   const gndNet = Array.from(S3.padsOf.keys()).find((n2) => isGnd(n2) && /^\/?GND$/i.test(n2)) || Array.from(S3.padsOf.keys()).find(isGnd) || "GND";
   const find = (ref) => S3.fps.find((f2) => f2.ref.toLowerCase() === String(ref || "").toLowerCase());
   const taken = [];
   const free = (x, y, gap) => !taken.some((q4) => Math.hypot(q4[0] - x, q4[1] - y) < gap);
   const ground = (x, y) => S3.zones ? S3.gndLayersAt(x, y) >= Math.min(2, S3.copper.length) : true;
-  if (plan.what === "antenna") {
-    const ants = plan.ref ? [find(plan.ref)].filter(Boolean) : S3.fps.filter(isAntenna);
-    if (!ants.length) return { error: plan.ref ? `There is no part ${plan.ref} on the board.` : "The board has no antenna (a part with reference AE or ANT, or an antenna footprint)." };
-    const pitch = Math.max(0.8, plan.pitch || 1), out2 = [];
+  if (plan2.what === "antenna") {
+    const ants = plan2.ref ? [find(plan2.ref)].filter(Boolean) : S3.fps.filter(isAntenna);
+    if (!ants.length) return { error: plan2.ref ? `There is no part ${plan2.ref} on the board.` : "The board has no antenna (a part with reference AE or ANT, or an antenna footprint)." };
+    const pitch = Math.max(0.8, plan2.pitch || 1), out2 = [];
     const radio = radioGHz(S3.fps, S3.padsOf.keys());
     for (const a of ants) {
-      const patch = plan.kind ? plan.kind === "patch" : isPatch(a);
+      const patch = plan2.kind ? plan2.kind === "patch" : isPatch(a);
       const ko = S3.keepouts.find((q4) => q4.copper && hit4(q4.box, a.box));
       const have = !!ko;
-      const box3 = patch ? a.box : ko && !(plan.clearance >= 0) ? ko.box : antennaRegion(S3, a, plan.clearance >= 0 ? plan.clearance : LIMITS.antennaKeepout);
+      const box3 = patch ? a.box : ko && !(plan2.clearance >= 0) ? ko.box : antennaRegion(S3, a, plan2.clearance >= 0 ? plan2.clearance : LIMITS.antennaKeepout);
       const pts = [];
       let skipped = 0;
       for (const [x, y] of ringPoints(S3, box3, r + 0.4, pitch, r + 0.3)) {
@@ -141083,13 +141729,13 @@ function physicsPlan(doc2, P, k, settings3, plan) {
     }
     return { what: "antenna", net: gndNet, layers: S3.copper, antennas: out2 };
   }
-  if (plan.what === "fence") {
-    const spacing = Math.max(0.6, plan.spacing || 2);
+  if (plan2.what === "fence") {
+    const spacing = Math.max(0.6, plan2.spacing || 2);
     let paths = [];
     let net = "";
-    if (plan.path) paths = [{ pts: plan.path.map((p) => [p[0], p[1]]), w: plan.width || 0.3 }];
+    if (plan2.path) paths = [{ pts: plan2.path.map((p) => [p[0], p[1]]), w: plan2.width || 0.3 }];
     else {
-      const want2 = String(plan.net || "");
+      const want2 = String(plan2.net || "");
       net = Array.from(S3.tracksOf.keys()).find((n2) => n2 === want2 || bare(n2) === bare(want2)) || "";
       if (!net) return { error: `No routed net named ${want2}. Route it first, or give path=[(x, y), ...].` };
       paths = (S3.tracksOf.get(net) || []).map((t) => ({ pts: t.shape.t === "seg" ? [t.shape.a, t.shape.b] : t.shape.pts, w: t.width }));
@@ -141097,7 +141743,7 @@ function physicsPlan(doc2, P, k, settings3, plan) {
     const pts = [];
     let wanted2 = 0;
     for (const p of paths) {
-      const off = plan.offset > 0 ? plan.offset : p.w / 2 + Math.max(clr + 0.25, 0.5) + r;
+      const off = plan2.offset > 0 ? plan2.offset : p.w / 2 + Math.max(clr + 0.25, 0.5) + r;
       for (let i = 1; i < p.pts.length; i++) {
         const a = p.pts[i - 1], b = p.pts[i];
         const L = Math.hypot(b[0] - a[0], b[1] - a[1]);
@@ -141134,14 +141780,14 @@ function physicsPlan(doc2, P, k, settings3, plan) {
     }
     return { what: "fence", net: gndNet, of: bare(net), vias: pts.map((p) => [r22(p[0]), r22(p[1])]), no_room: Math.max(0, wanted2 - pts.length), spacing };
   }
-  if (plan.what === "thermal") {
-    const parts = plan.ref ? [find(plan.ref)].filter(Boolean) : S3.fps;
-    if (plan.ref && !parts.length) return { error: `There is no part ${plan.ref} on the board.` };
-    const pitch = Math.max(0.6, plan.pitch || LIMITS.thermalPitch), out2 = [];
+  if (plan2.what === "thermal") {
+    const parts = plan2.ref ? [find(plan2.ref)].filter(Boolean) : S3.fps;
+    if (plan2.ref && !parts.length) return { error: `There is no part ${plan2.ref} on the board.` };
+    const pitch = Math.max(0.6, plan2.pitch || LIMITS.thermalPitch), out2 = [];
     for (const f2 of parts) {
       const e = thermalPad(f2);
       if (!e) {
-        if (plan.ref) return { error: `${f2.ref} has no exposed pad (one large pad in the middle of the package).` };
+        if (plan2.ref) return { error: `${f2.ref} has no exposed pad (one large pad in the middle of the package).` };
         continue;
       }
       const w = e.box[2] - e.box[0] - 2 * (r + 0.15), h3 = e.box[3] - e.box[1] - 2 * (r + 0.15);
@@ -141158,8 +141804,8 @@ function physicsPlan(doc2, P, k, settings3, plan) {
     }
     return { what: "thermal", pads: out2 };
   }
-  if (plan.what === "layout") return layoutPlan(S3, doc2, k, plan);
-  if (plan.what === "stackup") {
+  if (plan2.what === "layout") return layoutPlan(S3, doc2, k, plan2);
+  if (plan2.what === "stackup") {
     const st = physicalStack(doc2, k);
     const sim = stackupOf(k, doc2);
     const outer = traceOn(sim, S3.copper[0]);
@@ -141176,15 +141822,15 @@ function physicsPlan(doc2, P, k, settings3, plan) {
       outer: outer ? { kind: outer.kind, height: r22(outer.h), epsilon_r: r22(outer.er), reference: outer.reference, width_50_ohm: w50 ? r22(w50) : null } : null
     };
   }
-  if (plan.what === "rf_feed") return rfFeedPlan(S3, doc2, P, k, settings3, plan);
-  if (plan.what === "interfaces") return { what: "interfaces", interfaces: INTERFACES };
-  return { error: `Unknown plan "${plan.what}": antenna, fence, thermal, layout, stackup or interfaces.` };
+  if (plan2.what === "rf_feed") return rfFeedPlan(S3, doc2, P, k, settings3, plan2);
+  if (plan2.what === "interfaces") return { what: "interfaces", interfaces: INTERFACES };
+  return { error: `Unknown plan "${plan2.what}": antenna, fence, thermal, layout, stackup or interfaces.` };
 }
-function rfFeedPlan(S3, doc2, P, k, settings3, plan) {
+function rfFeedPlan(S3, doc2, P, k, settings3, plan2) {
   const r35 = (v) => Math.round(v * 1e3) / 1e3;
-  const want2 = plan.net ? String(plan.net) : "";
-  const target2 = plan.impedance > 0 ? plan.impedance : 50;
-  const minW = plan.min_width > 0 ? plan.min_width : 0.3;
+  const want2 = plan2.net ? String(plan2.net) : "";
+  const target2 = plan2.impedance > 0 ? plan2.impedance : 50;
+  const minW = plan2.min_width > 0 ? plan2.min_width : 0.3;
   const nets = Array.from(S3.tracksOf.keys()).filter((n2) => want2 ? n2 === want2 || bare(n2) === bare(want2) : netKind(n2) === "rf" || /ANT/i.test(n2));
   if (!nets.length) return { error: want2 ? `No routed net named ${want2}.` : "No routed RF or antenna net on the board." };
   const stack2 = stackupOf(k, doc2);
@@ -141315,7 +141961,7 @@ function rfFeedPlan(S3, doc2, P, k, settings3, plan) {
   }
   return { what: "rf_feed", feeds: out2 };
 }
-function layoutPlan(S3, doc2, k, plan) {
+function layoutPlan(S3, doc2, k, plan2) {
   const { fps, padsOf, copper } = S3;
   const near2 = {}, why2 = {}, edges = {};
   const apart = [], notes = [];
@@ -141399,7 +142045,7 @@ function layoutPlan(S3, doc2, k, plan) {
     caps.forEach((c, i) => put4(c.ref, want2[i % want2.length].ref, `decoupling of ${want2[i % want2.length].ref} on ${bare(rail)}: at the supply pin, its ground straight into the plane`));
   }
   for (const a of antennas) {
-    if (!isPatch(a)) edges[a.ref] = typeof plan.edge === "string" ? plan.edge : "top";
+    if (!isPatch(a)) edges[a.ref] = typeof plan2.edge === "string" ? plan2.edge : "top";
     for (const net of a.pads.map((p) => p.net).filter((n2) => n2 && !isGnd(n2))) for (const q4 of padsOf.get(net) || []) if (q4.fp !== a && two(q4.fp)) {
       put4(q4.fp.ref, a.ref, `matching network of ${a.ref}: in line with the feed`);
       const far = other(q4.fp, net);

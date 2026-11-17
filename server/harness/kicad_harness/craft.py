@@ -45,7 +45,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             order: list | None = None, widths: dict | None = None, kinds: dict | None = None, time_s: float | None = None, max_vias: int = 2,
             stitch: float | None = 2.0, name: str | bool | None = None, rev: str | None = None, silk: bool = True, place: bool = True, route: bool = True,
             accept: list | None = None, reroute: bool = False, explain: bool = False, fanout: bool = False,
-            free_pins: bool = True, keep_rules: bool = False, keepouts: list | None = None, escapes=None) -> dict:
+            free_pins: bool = True, keep_rules: bool = False, keepouts: list | None = None, escapes=None, plan=None) -> dict:
     """Lay the whole board out in one call and say how it came out.
 
     keep_rules=True never touches the design rules (no house via either), for a person who said not to change them;
@@ -77,6 +77,10 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     layer) that closes no other pin's way out, and is routed from there.  For a dense QFN whose pins are left open
     (Ember's 0.4 mm U9 turned 45 degrees: 22 -> 17 open); off by default, since on a board whose chips escape anyway
     the stubs take room other routes need (Ledify: 0 -> 5 open).
+
+    plan=True plans every connection on a coarse tile graph before each routing pass (board.route(plan=...)): congestion
+    negotiated over the tiles, forced crossings found, layers assigned along each coarse path, and every connection
+    steered into its corridor and onto the planned layers.  Off by default (see board.route).
 
     reroute=True lays only the copper again on a board somebody placed: every track and via comes up, and the parts,
     the outline, the zones, the rules, the stackup and the silkscreen stay exactly as they are (no sync from the
@@ -214,7 +218,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                     if fo and fo.get("vias"):
                         out.setdefault("fanout", {})[part["ref"]] = {"vias": fo["vias"], "skipped": len(fo.get("skipped") or {})}
         auto_layers = False
-        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts, escapes=escapes))
+        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts, escapes=escapes, plan=plan))
         if got and got.get("rules_changed"):
             out["rules_changed"] = got["rules_changed"]
         if got:
@@ -223,6 +227,8 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                 out["routed"]["inside_groups"] = got["groups"]
             if got.get("fanout"):
                 out["routed"]["fanout"] = got["fanout"]
+            if got.get("plan"):
+                out["routed"]["plan"] = got["plan"]
             if explain:
                 try:
                     out["reasoning"] = _reasoning(self, plan, clusters, got)
@@ -232,7 +238,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                 out["routed"]["why_open"] = [u[:160] for u in got["unrouted"][:8]]
             left = got.get("left") or {}
             if left:      # one more pass at only what is open, as a person goes back over the last few
-                more = step("route again", lambda: self.route(nets=list(left), widths=r["widths"], kinds=r["kinds"], time_s=(time_s or 60) / 2, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes))
+                more = step("route again", lambda: self.route(nets=list(left), widths=r["widths"], kinds=r["kinds"], time_s=(time_s or 60) / 2, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes, plan=plan))
                 if more:
                     out["routed"]["vias"] = (out["routed"]["vias"] or 0) + (more.get("vias") or 0)
                     left = more.get("left") or {}
@@ -250,7 +256,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         if still:
             if any(n.split("/")[-1].upper().endswith("GND") for n in still):
                 step("ground pads", self.ground_pads)
-            step("route last", lambda: self.route(nets=list(still), widths=r["widths"], kinds=r["kinds"], time_s=30, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes))
+            step("route last", lambda: self.route(nets=list(still), widths=r["widths"], kinds=r["kinds"], time_s=30, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes, plan=plan))
             out["routed"]["left"] = step("unrouted", self.unrouted) or {}
         if (out.get("routed") or {}).get("left") and free_pins:     # pins boxed in by earlier tracks: free each and lay it first, never worse
             fp = step("free pins", lambda: self.free_pins(passes=1, keep_rules=True, layers=None if auto_layers else route_layers, time_s=min(60, max(20, (time_s or 60) / 3)), budget_s=max(120, 2 * (time_s or 60))))
