@@ -83,13 +83,26 @@ function Field({ studio, field, params }: { studio: PartStudio; field: ParamFiel
       const me = features.findIndex((f) => f.id === draftId);
       const sketches = features.filter((f, i) => f.featureType === "sketch" && (me < 0 || i < me));
       const cur = (value as { sketch?: string } | null)?.sketch || "";
+      // which of the sketch's regions are used: all of them, or the ones clicked in the viewport
+      const chosen = (value as { regions?: string[] | null } | null)?.regions || null;
+      const all = cur ? (studio.getState().sketches.find((v) => v.featureId === cur)?.regions.length ?? 0) : 0;
+      const used = chosen ? chosen.length : all;
       control = (
-        <span className={cx("flex rounded-sm", armed && "outline outline-1 outline-blue")}>
-          <select className="input w-full" value={cur} data-param={field.key} aria-label={field.label} onFocus={() => { if (!armed) studio.setField(field.key); }}
-            onChange={(ev) => set(ev.target.value ? { sketch: ev.target.value, regions: null } : null)}>
-            <option value="">{sketches.length ? "Choose a sketch, or click one" : "Draw a sketch first"}</option>
-            {sketches.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
-          </select>
+        <span className="flex flex-col gap-1 min-w-0">
+          <span className={cx("flex rounded-sm", armed && "outline outline-1 outline-blue")}>
+            <select className="input w-full" value={cur} data-param={field.key} aria-label={field.label} onFocus={() => { if (!armed) studio.setField(field.key); }}
+              onChange={(ev) => set(ev.target.value ? { sketch: ev.target.value, regions: null } : null)}>
+              <option value="">{sketches.length ? "Choose a sketch, or click one" : "Draw a sketch first"}</option>
+              {sketches.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+            </select>
+          </span>
+          {cur && all > 1 ? (
+            <span className="flex items-center gap-1.5 text-xs text-ink-2" data-regions={chosen ? chosen.join(" ") : "all"}>
+              <span className="flex-1">{chosen ? `${used} of ${all} regions` : `All ${all} regions`}{armed ? ": click a region to choose" : ""}</span>
+              {chosen ? <button type="button" className="btn sm ghost h-5 px-1" data-act="all-regions" onClick={() => set({ sketch: cur, regions: null })}>All</button>
+                : !armed ? <button type="button" className="btn sm ghost h-5 px-1" data-act="pick-regions" onClick={() => studio.setField(field.key)}>Choose</button> : null}
+            </span>
+          ) : null}
         </span>
       );
       break;

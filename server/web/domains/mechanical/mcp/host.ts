@@ -12,7 +12,9 @@
 import { McpToolError, type McpDocEntry, type McpDomainTools, type McpProject, type McpReply, type McpRequest } from "../../../platform/mcp/host";
 import type { ItemChange, ItemDoc } from "../../../shared/itemdoc/itemdoc";
 import { ItemDocSession } from "../../../shared/itemdoc/sync";
-import { PART_STUDIO_KIND, featureInputs, featuresOf, newPartStudioText, rollbackIndex } from "../document/format";
+import { BoardFeed } from "../board/feed";
+import { PART_STUDIO_KIND, featuresOf, newPartStudioText } from "../document/format";
+import { studioInputs } from "../document/inputs";
 import { FEATURES, SERVICES, RegenEngine, type Kernel, type RegenResult } from "../kernel/index";
 import { loadKernel } from "../kernel/load";
 import { applyRecorded, featureTypes, planEdits, treeOf } from "./model";
@@ -73,6 +75,8 @@ class OpenStudio {
   conn: { base: string; token: string; agent: string };
   private loaded: Promise<void>;
   private failed = "";
+  /** the boards of the studio's Board features, read over the same socket route (board/feed.ts) */
+  private readonly boards: BoardFeed;
 
   constructor(readonly entry: McpDocEntry, req: McpRequest) {
     this.conn = { base: req.base, token: req.token, agent: req.agent };
@@ -87,6 +91,7 @@ class OpenStudio {
       WebSocketImpl: agentSocket(() => this.conn.agent || "AI assistant"),
     });
     this.session.start();
+    this.boards = new BoardFeed({ signedIn: true, changed: () => {}, socket: { socketUrl: req.base.replace(/^http/, "ws") + "/ws", fetchTicket: async () => this.conn.token, WebSocketImpl: agentSocket(() => this.conn.agent || "AI assistant") } });
   }
 
   async doc(): Promise<ItemDoc> {
@@ -100,8 +105,11 @@ class OpenStudio {
   async regen(doc: ItemDoc): Promise<{ k: Kernel; engine: RegenEngine; result: RegenResult }> {
     const k = await kernel();
     if (!this.engine) this.engine = new RegenEngine(k, FEATURES);
-    const features = featuresOf(doc);
-    const result = await this.engine.regenerate(featureInputs(features), rollbackIndex(doc, features));
+    // as the studio's own page builds it (document/inputs.ts): variables applied, the Board features' boards supplied
+    studioInputs(doc, { filters: [this.boards.filter] });   // opens the boards it names
+    await this.boards.settled(15000);
+    const input = studioInputs(doc, { filters: [this.boards.filter] });
+    const result = await this.engine.regenerate(input.features, input.rollback);
     return { k, engine: this.engine, result };
   }
 
@@ -114,7 +122,7 @@ class OpenStudio {
     if (this.session.unsaved) throw new McpToolError("The edit was made but the server has not confirmed it yet. Read the feature list again before changing more.");
   }
 
-  close(): void { this.session.close(); if (this.engine) this.engine.dispose(); this.engine = null; }
+  close(): void { this.session.close(); this.boards.close(); if (this.engine) this.engine.dispose(); this.engine = null; }
 }
 
 const open = new Map<string, OpenStudio>();

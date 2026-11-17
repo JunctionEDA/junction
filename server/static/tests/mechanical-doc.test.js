@@ -159,3 +159,55 @@ test("regions: closed loops, holes, islands inside holes; open chains and branch
   assert.equal(r.regions.length, 1);
   assert.ok(Math.abs(r.regions[0].outer.area - Math.PI * 25 / 2) < 0.1);
 });
+
+// ---------------------------------------------------------------- a document as the worker's input
+test("studioInputs: the one way a part studio becomes worker input: variables applied, then the filters", () => {
+  const IN = load("domains/mechanical/document/inputs.ts");
+  const { doc, add, apply } = studio();
+  add(SKETCH);
+  const ex = add(EXTRUDE, { depth: 10, $expr: { depth: "height * 2" } });
+  apply([{ id: "v1", kind: "ADDED", typeName: "variable", item: { id: "v1", type: "variable", name: "height", expr: "7", order: "V" } }]);
+  const plain = IN.studioInputs(doc);
+  assert.equal(plain.rollback, 2);
+  assert.deepEqual(plain.features.map((f) => f.type), ["sketch", "extrude"]);
+  assert.equal(plain.features[1].params.depth, 14, "the number follows the variable, whatever was stored");
+  assert.equal(F.featuresOf(doc)[1].params.depth, 10, "and the document is not touched");
+  // a filter adds what is not in the document (a Board feature's board); it sees the resolved numbers
+  const seen = [];
+  const withBoard = IN.studioInputs(doc, { filters: [(inputs) => { seen.push(inputs[1].params.depth); return inputs.map((f) => (f.id === ex.id ? { ...f, params: { ...f.params, $extra: 1 } } : f)); }] });
+  assert.deepEqual(seen, [14]);
+  assert.equal(withBoard.features[1].params.$extra, 1);
+  assert.equal(F.featuresOf(doc)[1].params.$extra, undefined);
+  // a page lays a draft over the features and says where the bar is
+  const draft = IN.studioInputs(doc, { features: F.featuresOf(doc).slice(0, 1), rollback: 1 });
+  assert.deepEqual([draft.features.length, draft.rollback], [1, 1]);
+});
+
+// ---------------------------------------------------------------- the toolbar's keys and sections
+test("tools: no two tools outside a sketch share a key, nor two inside one; every feature names a known toolbar section", () => {
+  const fs = require("node:fs"), path = require("node:path");
+  const root = path.join(__dirname, "..", "..", "web", "domains", "mechanical");
+  const keys = { sketch: new Map(), model: new Map() };
+  for (const file of fs.readdirSync(path.join(root, "tools"))) {
+    if (file.startsWith("_") || !/\.tsx?$/.test(file)) continue;
+    const text = fs.readFileSync(path.join(root, "tools", file), "utf8");
+    const key = /\bkey: "([^"]+)"/.exec(text), group = /\bgroup: "([^"]+)"/.exec(text);
+    if (!key || !group) continue;
+    const where = group[1] === "sketch" ? keys.sketch : keys.model, k = key[1].toLowerCase();
+    assert.ok(!where.has(k), `${file} and ${where.get(k)} both take the key ${k} ${group[1] === "sketch" ? "in a sketch" : "outside a sketch"}`);
+    where.set(k, file);
+  }
+  assert.ok(keys.sketch.size >= 10 && keys.model.size >= 4);
+  const sections = new Set(["sketch", "solid", "pattern", "reference", "board"]);
+  const menus = new Map();
+  for (const file of fs.readdirSync(path.join(root, "features"))) {
+    if (file.startsWith("_") || !/\.ts$/.test(file)) continue;
+    const text = fs.readFileSync(path.join(root, "features", file), "utf8");
+    const section = /toolbarSection: "([^"]+)"/.exec(text), menu = /toolbarMenu: "([^"]+)"/.exec(text);
+    if (section) assert.ok(sections.has(section[1]), `${file}: ${section[1]}`);
+    if (menu) menus.set(menu[1], (menus.get(menu[1]) || 0) + 1);
+  }
+  // the families a person finds under one button
+  assert.deepEqual(Object.fromEntries([...menus].sort()), { Board: 3, Boolean: 4, Fillet: 3, Pattern: 3, Reference: 4, Sweep: 2 });
+});
+

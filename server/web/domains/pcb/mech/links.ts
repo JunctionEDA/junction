@@ -25,11 +25,14 @@ export class LinkWatch {
   private truncated = false;
   boardId = "";
 
+  /** whether the person is signed in (what a reader of another document of the project needs to know) */
+  signedIn = false;
   subscribe(fn: () => void): () => void { this.listeners.add(fn); return () => { this.listeners.delete(fn); }; }
   private notify(): void { for (const fn of Array.from(this.listeners)) { try { fn(); } catch (e) { console.warn(e); } } }
 
   /** Watch the part studios among `docs` for links to `boardId`.  Calling it again with the same board keeps the sessions. */
   start(boardId: string, docs: readonly ProjectDoc[], signedIn: boolean): void {
+    this.signedIn = signedIn;
     const studios = docs.filter((d) => d.docType === STUDIO_DOC_TYPE);
     this.truncated = studios.length > MAX_STUDIOS;
     const want = new Map(studios.slice(0, MAX_STUDIOS).map((d) => [d.docId, d]));
