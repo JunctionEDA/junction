@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
+const { tool, toolTitles, openPanel } = await import(new URL('./cad-chrome.mjs', import.meta.url));
 
 const BASE = (process.env.E2E_BASE || 'http://127.0.0.1:8099').replace(/\/$/, '');
 const SECRET = process.env.E2E_JWT_SECRET, PG_URL = process.env.E2E_PG_URL;
@@ -79,7 +80,7 @@ fs.writeFileSync(path.join(dir, 'gadget.kicad_pcb'), board);
 fs.writeFileSync(path.join(dir, 'gadget.kicad_pro'), JSON.stringify({ meta: { filename: 'gadget.kicad_pro', version: 3 } }));
 execFileSync('zip', ['-qr', 'p.zip', 'gadget.kicad_pro', 'gadget.kicad_pcb'], { cwd: dir });
 
-const aliceId = user('boardlink-alice', 990101);
+const aliceId = user('boardlink-alice', 990501);
 const token = jwt(aliceId, 'boardlink-alice');
 const form = new FormData(); form.append('name', 'Board link test'); form.append('archive', new Blob([fs.readFileSync(path.join(dir, 'p.zip'))]), 'p.zip');
 const created = await (await fetch(`${BASE}/api/projects`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form })).json();
@@ -141,9 +142,9 @@ async function setField(page, scope, name, value) {
 }
 
 // ---- helpers: the board
-const mech = (page) => page.evaluate(() => { const s = window.JunctionBoardLink.mech.getState(); return JSON.parse(JSON.stringify({ ...s, sources: s.sources.map((x) => ({ studio: x.studio, link: x.link.id, drives: Object.keys(x.link.drives), errors: x.link.solved.errors })) })); });
+const mech = (page) => page.evaluate(() => { const s = window.JunctionBoardMech.mech.getState(); return JSON.parse(JSON.stringify({ ...s, sources: s.sources.map((x) => ({ studio: x.studio, link: x.link.id, drives: Object.keys(x.link.drives), errors: x.link.solved.errors })) })); });
 const boardItems = (page) => page.evaluate(() => {
-  const doc = window.JunctionBoardLink.mech.board();
+  const doc = window.JunctionBoardMech.mech.board();
   const out = { edges: [], holes: [], zones: [], groups: [], locked: 0, driven: 0 };
   if (!doc) return out;
   const K = window.KiCadCanvas;
@@ -165,7 +166,7 @@ const outlineBox = (items) => {
 };
 /** Wait for the board's driven items to satisfy `fn(counts)`. */
 const boardIs = (page, fn, arg) => page.waitForFunction(([src, arg]) => {
-  const api = window.JunctionBoardLink; const doc = api && api.mech.board(); if (!doc) return false;
+  const api = window.JunctionBoardMech; const doc = api && api.mech.board(); if (!doc) return false;
   const K = window.KiCadCanvas; const c = { edges: 0, holes: 0, zones: 0, groups: 0, x1: -Infinity, holeXs: [], unlockedEdges: 0 };
   for (const it of doc.items.values()) {
     if (!it.id.startsWith('6a756e63-')) continue;
@@ -179,7 +180,7 @@ const boardIs = (page, fn, arg) => page.waitForFunction(([src, arg]) => {
   return (0, eval)(`(${src})`)(c, arg);
 }, [fn.toString(), arg], { timeout: 30000 });
 /** Where a board position (mm) is on screen. */
-const onScreen = (page, x, y) => page.evaluate(([x, y]) => window.JunctionBoardLink.clientOf(x, y), [x, y]);
+const onScreen = (page, x, y) => page.evaluate(([x, y]) => window.JunctionBoardMech.clientOf(x, y), [x, y]);
 
 try {
   // ================================================================ the part studio: a tray
@@ -221,11 +222,12 @@ try {
   // ================================================================ the board, in a second context
   const pcb = await open('pcb');
   await pcb.goto(`${BASE}/p/${pid}/edit?doc=${pcbDoc.docId}`);
-  await pcb.waitForFunction(() => window.JunctionBoardLink && window.JunctionBoardLink.mech.getState().active && window.JunctionBoardLink.mech.getState().complete, null, { timeout: 60000 });
+  await pcb.waitForFunction(() => window.JunctionBoardMech && window.JunctionBoardMech.mech.getState().active && window.JunctionBoardMech.mech.getState().complete, null, { timeout: 60000 });
   check('the board editor watches the project\'s part studio and finds no link yet', (await mech(pcb)).sources.length === 0 && !(await pcb.isVisible('#mechBadge')));
 
   // ================================================================ link the board; outline from the floor
   check('the Board panel names the project\'s board', (await cad.textContent('[data-panel=boardlink]')).includes('gadget'));
+  await openPanel(cad, 'boardlink');   // folded until the part studio has to do with a board
   // the board will stand on the bosses: lay it on the floor of the pocket and raise it by their height
   await clickAt(cad, [45, 20, 2]);
   check('a click in the model selects the floor of the pocket', (await selection(cad)).join() === 'face:e2:end:pa', (await selection(cad)).join());
@@ -247,6 +249,8 @@ try {
 
   await boardIs(pcb, (c) => c.edges === 4 && c.groups === 1);
   let items = await boardItems(pcb);
+  // the board had the outline without the clearance a moment before: wait for the one just solved to arrive
+  for (let i = 0; i < 100 && outlineBox(items)[0] !== 102.5; i++) { await pcb.waitForTimeout(100); items = await boardItems(pcb); }
   check('the board follows live: four Edge.Cuts lines appear', items.edges.length === 4 && items.edges.every((e) => e.kind === 'gr_line'));
   check('the outline is the pocket less the clearance, where the link places it (Y down)', outlineBox(items).join() === '102.5,62.5,157.5,97.5', outlineBox(items).join());
   check('every driven item is locked and grouped under the part studio\'s name', items.locked === items.driven && items.groups[0] === 'Board outline (driven by Part Studio 1)', `${items.locked}/${items.driven} ${items.groups.join()}`);
@@ -265,7 +269,7 @@ try {
   await boardIs(pcb, (c) => c.holes === 4);
   items = await boardItems(pcb);
   check('four mounting holes appear on the board at the bosses', items.holes.map((h) => `${h.x},${h.y}`).sort().join(' ') === '108,68 108,92 152,68 152,92', items.holes.map((h) => `${h.x},${h.y}`).join(' '));
-  check('the holes are 3.2 mm unplated footprints', await pcb.evaluate(() => { const K = window.KiCadCanvas; const doc = window.JunctionBoardLink.mech.board(); return Array.from(doc.items.values()).filter((i) => i.kind === 'footprint' && i.id.startsWith('6a756e63-')).every((i) => { const p = K.kid(i.node, 'pad'); return K.str(p[2]) === 'np_thru_hole' && K.kid(p, 'drill')[1] === 3.2; }); }));
+  check('the holes are 3.2 mm unplated footprints', await pcb.evaluate(() => { const K = window.KiCadCanvas; const doc = window.JunctionBoardMech.mech.board(); return Array.from(doc.items.values()).filter((i) => i.kind === 'footprint' && i.id.startsWith('6a756e63-')).every((i) => { const p = K.kid(i.node, 'pad'); return K.str(p[2]) === 'np_thru_hole' && K.kid(p, 'drill')[1] === 3.2; }); }));
 
   // ================================================================ the model changes: the board follows
   // widen the tray by 20 mm: the block, the pocket and the two right-hand bosses (edits of three sketches)
@@ -311,7 +315,7 @@ try {
   await pcb.mouse.down();
   await pcb.mouse.move((from.x + to.x) / 2, (from.y + to.y) / 2, { steps: 6 }); await pcb.mouse.move(to.x, to.y, { steps: 6 });
   await pcb.mouse.up();
-  const c1 = await pcb.evaluate(() => { const doc = window.JunctionBoardLink.mech.board(); for (const it of doc.items.values()) if (it.ref === 'C1') return [it.x, it.y]; return null; });
+  const c1 = await pcb.evaluate(() => { const doc = window.JunctionBoardMech.mech.board(); for (const it of doc.items.values()) if (it.ref === 'C1') return [it.x, it.y]; return null; });
   check('C1 is dragged under the rib', c1 && Math.abs(c1[0] - 125) < 2 && Math.abs(c1[1] - 88) < 2, JSON.stringify(c1));
   await boardIs(pcb, (c) => c.clashes.length === 1 && c.clashes[0] === 'C1');
   const state = await mech(pcb);
@@ -322,9 +326,9 @@ try {
   await pcb.waitForSelector('#mechPanel [data-clash=C1]');
   check('the panel lists the clash in words', /C1 is [\d.]+ mm tall \(estimated\): “Keep-out” allows 0.9 mm/.test(await pcb.textContent('#mechPanel [data-clash=C1]')), await pcb.textContent('#mechPanel [data-clash=C1]'));
   // from the clash to the items on the board
-  await pcb.evaluate(() => window.JunctionBoardLink.mech.select([], false));
+  await pcb.evaluate(() => window.JunctionBoardMech.mech.select([], false));
   await pcb.click('#mechPanel [data-clash=C1] >> text=Part');
-  check('"Part" selects the component', await pcb.evaluate(() => { const s = window.CollabApp.getState().selection.ids; const doc = window.JunctionBoardLink.mech.board(); return s.length === 1 && doc.items.get(s[0]).ref === 'C1'; }));
+  check('"Part" selects the component', await pcb.evaluate(() => { const s = window.CollabApp.getState().selection.ids; const doc = window.JunctionBoardMech.mech.board(); return s.length === 1 && doc.items.get(s[0]).ref === 'C1'; }));
   await pcb.waitForSelector('#mechPanel [data-room]');
   check('the selected component\'s room under the enclosure is said', /C1 stands [\d.]+ mm above the front.*too tall/.test(await pcb.textContent('#mechPanel [data-room]')), await pcb.textContent('#mechPanel [data-room]'));
   await shot(pcb, '05-board-clash');
@@ -332,7 +336,7 @@ try {
   // ================================================================ the enclosure in the 3D viewer
   await pcb.click('#mechPanel >> text=3D');
   await pcb.waitForSelector('.v3d-win', { timeout: 30000 });
-  await pcb.waitForFunction(() => { const e = window.JunctionBoardLink.enclosure; return e.lastBodies === 1 && window.KiCadViewer3D.current && window.KiCadViewer3D.current.viewer.extraCount >= 1; }, null, { timeout: 120000 });
+  await pcb.waitForFunction(() => { const e = window.JunctionBoardMech.enclosure; return e.lastBodies === 1 && window.KiCadViewer3D.current && window.KiCadViewer3D.current.viewer.extraCount >= 1; }, null, { timeout: 120000 });
   check('the 3D viewer draws the tray around the board (a headless modelling worker on the board page)', true);
   const where = await pcb.evaluate(() => {
     // the tray's mesh in the viewer's scene: its extent against the board's
@@ -355,10 +359,10 @@ try {
   await pcb.waitForTimeout(1200);
   await shot(pcb, '07-viewer3d-section');
   // the model changes while the viewer is open
-  const drawsBefore = await pcb.evaluate(() => window.JunctionBoardLink.enclosure.draws);
+  const drawsBefore = await pcb.evaluate(() => window.JunctionBoardMech.enclosure.draws);
   await cad.evaluate(() => { const st = window.JunctionPartStudio; st.commit([{ id: 'e1', kind: 'MODIFIED', typeName: 'feature', props: [{ path: ['params', 'depth'], value: 16 }] }]); });
   await pcb.waitForFunction((n) => {
-    const e = window.JunctionBoardLink.enclosure, v = window.KiCadViewer3D.current.viewer; if (e.draws <= n || !v.extras.children.length) return false;
+    const e = window.JunctionBoardMech.enclosure, v = window.KiCadViewer3D.current.viewer; if (e.draws <= n || !v.extras.children.length) return false;
     // the pocket is cut from the top, so its floor (which the board stands on) rises by 4 and the underside is 11 + 1.6 below the front
     const pos = v.extras.children[0].geometry.getAttribute('position'); let low = Infinity; for (let i = 0; i < pos.count; i++) low = Math.min(low, pos.getZ(i));
     return Math.abs(low - (-1.6 - 11)) < 0.01;
@@ -371,7 +375,7 @@ try {
   // make the rib 1 mm thinner: its underside is 1 mm further from the board, and the limit follows
   await cad.evaluate(() => { const st = window.JunctionPartStudio; st.commit([{ id: 'e4', kind: 'MODIFIED', typeName: 'feature', props: [{ path: ['params', 'depth'], value: 1 }] }]); });
   await boardIs(pcb, (c) => c.zones === 1);
-  await pcb.waitForFunction(() => { const K = window.KiCadCanvas, doc = window.JunctionBoardLink.mech.board(); for (const it of doc.items.values()) if (it.kind === 'zone' && it.id.startsWith('6a756e63-')) return K.str(K.kid(it.node, 'name')[1]) === 'Height ≤ 1.9 mm: Keep-out'; return false; }, null, { timeout: 30000 });
+  await pcb.waitForFunction(() => { const K = window.KiCadCanvas, doc = window.JunctionBoardMech.mech.board(); for (const it of doc.items.values()) if (it.kind === 'zone' && it.id.startsWith('6a756e63-')) return K.str(K.kid(it.node, 'name')[1]) === 'Height ≤ 1.9 mm: Keep-out'; return false; }, null, { timeout: 30000 });
   check('the height limit follows the model: a thinner rib leaves 1.9 mm under it', true);
   // suppress the rib: its face is gone; the keep-out stays and is reported as not following
   await cad.evaluate(() => { const st = window.JunctionPartStudio; st.commit([{ id: 'e4', kind: 'MODIFIED', typeName: 'feature', props: [{ path: ['suppressed'], value: true }] }]); });
@@ -399,7 +403,7 @@ try {
   await shot(pcb, '08-jump-to-model');
   // and back: Open in the Board panel returns to the board, which is reconciled on open
   await pcb.click('[data-panel=boardlink] [data-act=open-board]');
-  await pcb.waitForFunction(() => window.JunctionBoardLink.mech.getState().active && window.JunctionBoardLink.mech.getState().complete && window.JunctionBoardLink.mech.getState().sources.length === 1, null, { timeout: 60000 });
+  await pcb.waitForFunction(() => window.JunctionBoardMech.mech.getState().active && window.JunctionBoardMech.mech.getState().complete && window.JunctionBoardMech.mech.getState().sources.length === 1, null, { timeout: 60000 });
   await pcb.waitForSelector('#mechPanel', { state: 'visible' });
   check('"Open" in the Board panel returns to the board with the link\'s panel open', true);
 
@@ -417,17 +421,17 @@ try {
   await linkIs(cad, (l) => { const d = Object.values(l.solved.drives).find((x) => x.kind === 'holes'); return d && d.holes.filter((h) => h[0] === 112000000).length === 2; });
   check('with no browser on the board, the part studio still solves the link (the answer waits in its document)', true);
   await pcb.goto(`${BASE}/p/${pid}/edit?doc=${pcbDoc.docId}`);
-  await pcb.waitForFunction(() => window.JunctionBoardLink && window.JunctionBoardLink.mech.getState().complete, null, { timeout: 60000 });
+  await pcb.waitForFunction(() => window.JunctionBoardMech && window.JunctionBoardMech.mech.getState().complete, null, { timeout: 60000 });
   await boardIs(pcb, (c) => c.holeXs.filter((x) => x === 112).length === 2);
   check('opening the board reconciles it: the two holes are where the bosses now are', true);
   // a third browser finds the board as it was left: the driven items came through the board's stored ops, and
   // being a function of the link, there is nothing for its reconciler to write
   const late = await open('late');
   await late.goto(`${BASE}/p/${pid}/edit?doc=${pcbDoc.docId}`);
-  await late.waitForFunction(() => window.JunctionBoardLink && window.JunctionBoardLink.mech.getState().complete && window.JunctionBoardLink.mech.getState().checked, null, { timeout: 60000 });
+  await late.waitForFunction(() => window.JunctionBoardMech && window.JunctionBoardMech.mech.getState().complete && window.JunctionBoardMech.mech.getState().checked, null, { timeout: 60000 });
   await late.waitForTimeout(1200);
   const lateItems = await boardItems(late);
-  check('another browser opening the board finds the same driven items and writes nothing', lateItems.holes.length === 4 && lateItems.zones.length === 1 && (await late.evaluate(() => window.JunctionBoardLink.mech.getState().writes)) === 0, JSON.stringify([lateItems.holes.length, lateItems.zones.length]));
+  check('another browser opening the board finds the same driven items and writes nothing', lateItems.holes.length === 4 && lateItems.zones.length === 1 && (await late.evaluate(() => window.JunctionBoardMech.mech.getState().writes)) === 0, JSON.stringify([lateItems.holes.length, lateItems.zones.length]));
   await late.evaluate(() => window.CollabApp.dispatch({ type: 'action', id: 'zoomFitScreen' }));
   await late.waitForTimeout(500);
   await shot(late, '10-board-reopened');

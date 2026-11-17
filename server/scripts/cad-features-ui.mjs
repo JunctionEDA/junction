@@ -18,6 +18,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
+const { tool, toolTitles, openPanel } = await import(new URL('./cad-chrome.mjs', import.meta.url));
 
 const BASE = (process.env.E2E_BASE || 'http://127.0.0.1:8099').replace(/\/$/, '');
 const SECRET = process.env.E2E_JWT_SECRET, PG_URL = process.env.E2E_PG_URL;
@@ -127,7 +128,7 @@ try {
   await page.click('[data-doc-add]');
   await page.click('text=New part studio');
   await page.waitForFunction(() => window.JunctionPartStudio && window.JunctionPartStudio.getState().loaded, null, { timeout: 30000 });
-  const tools = await page.$$eval('.cad-toolbar [data-group=feature] [data-tool]', (els) => els.map((e) => e.getAttribute('data-tool')));
+  const tools = await toolTitles(page, 'feature');
   check('the toolbar has a button for every feature', ['Extrude', 'Revolve', 'Fillet', 'Chamfer', 'Shell', 'Draft', 'Hole', 'Boolean', 'Split', 'Transform', 'Delete body'].every((t) => tools.includes(t)), tools.join(', '));
 
   // ---------------------------------------------------------------- the box: a 60 × 40 rectangle, 25 tall
@@ -170,7 +171,7 @@ try {
   await shot(page, '02-box');
 
   // ---------------------------------------------------------------- round the four vertical edges, by clicking them
-  await page.click('[data-tool=Fillet]');
+  await tool(page, 'Fillet');
   await page.waitForSelector('.cad-dialog[data-feature=fillet] [data-param=edges][data-armed]');
   let clicked = 0;
   const verticals = await S(page, () => {
@@ -346,7 +347,7 @@ try {
   await shot(page, '11-revolve');
 
   // chamfer the top outer rim: click it
-  await page.click('[data-tool=Chamfer]');
+  await tool(page, 'Chamfer');
   await page.waitForSelector('.cad-dialog[data-feature=chamfer] [data-param=edges][data-armed]');
   // the outer top circle: the highest edge, and of those the widest
   const outer = await S(page, () => {
@@ -372,7 +373,7 @@ try {
 
   // transform: a copy, 40 mm along X
   await S(page, () => { const st = window.JunctionPartStudio, b = st.getState().bodies[0]; st.select([{ kind: 'face', body: b.id, name: b.mesh.faces.names[0], point: [0, 0, 0] }]); });
-  await page.click('[data-tool=Transform]');
+  await tool(page, 'Transform');
   await page.waitForSelector('.cad-dialog[data-feature=transform]');
   await page.click('.cad-dialog [data-param=bodies]');
   const b0 = await facePoint(page, ['side:']);

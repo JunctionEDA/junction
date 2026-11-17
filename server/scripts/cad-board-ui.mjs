@@ -25,6 +25,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
+const { tool, toolTitles, openPanel } = await import(new URL('./cad-chrome.mjs', import.meta.url));
 
 const BASE = (process.env.E2E_BASE || 'http://127.0.0.1:8099').replace(/\/$/, '');
 const SECRET = process.env.E2E_JWT_SECRET, PG_URL = process.env.E2E_PG_URL;
@@ -84,7 +85,7 @@ async function newPartStudio(page) {
 
 /** Board feature through its dialog: choose the board, lift it `z` mm, Done. */
 async function addBoard(page, z, minHole) {
-  await page.click('[data-tool=Board]');
+  await tool(page, 'Board');
   await page.waitForSelector('.cad-dialog[data-feature=board-reference]');
   const boards = await page.$$eval('.cad-dialog select[data-param=board] option', (els) => els.map((e) => e.value).filter(Boolean));
   await page.selectOption('.cad-dialog select[data-param=board]', boards[0]);
@@ -117,7 +118,7 @@ async function faceOnScreen(page, bodySuffix, pick, pad, offset = [0, 0, 0]) {
 
 /** Opening feature through its dialog: click the face on screen, set the reach, Done. */
 async function addOpening(page, at, reach, back) {
-  await page.click('[data-tool=Opening]');
+  await tool(page, 'Opening');
   await page.waitForSelector('.cad-dialog[data-feature=board-cutout]');
   await page.waitForTimeout(300);
   await click(page, at.x, at.y);
@@ -266,8 +267,8 @@ try {
   await alice.goto(`${BASE}/p/${pid}/edit`);
   await alice.waitForSelector('#doctabs [role=tab]', { timeout: 60000 });
   await newPartStudio(alice);
-  check('the part studio has the Board, Opening and Standoffs tools', (await alice.$$eval('[data-tool]', (els) => els.map((e) => e.getAttribute('data-tool')))).filter((t) => ['Board', 'Opening', 'Standoffs'].includes(t)).length === 3);
-  check('the Boards panel says how to start', /Choose Board/.test(await alice.textContent('[data-panel=boards]')));
+  check('the part studio has the Board, Opening and Standoffs tools', (await toolTitles(alice)).filter((t) => ['Board', 'Opening', 'Standoffs'].includes(t)).length === 3);
+  check('the Board panel says how to start', /Choose Board/.test(await alice.textContent('[data-panel=boardlink]')));
 
   const t0 = Date.now();
   const boards = await addBoard(alice, 4, 0.9);
@@ -297,7 +298,7 @@ try {
   check('the board lies 4 mm above the Top plane', !!built.board && built.board.bbox[2] === 4, JSON.stringify(built.board && built.board.bbox));
   check('the feature keeps the board\'s origin; the board itself is not stored in the part studio', Array.isArray(built.origin) && !built.hasTransient, JSON.stringify(built.origin));
   check('the display model is drawn (a mesh per part, the laminate, two face images) over hidden solids', built.meshes >= 60 && built.hidden >= 2 && st.display[0].faceBuilds >= 2, `${built.meshes} meshes, ${Math.round(built.tris)} triangles, ${st.display[0].realModels} parts from their 3D models; laminate ${ms(st.display[0].slabMs)}, a face image ${ms(st.display[0].facesMs)}`);
-  check('the Boards panel shows the board live', (await alice.getAttribute('[data-panel=boards] [data-board]', 'data-state')) === 'live', await alice.textContent('[data-panel=boards]'));
+  check('the Board panel shows the board live', (await alice.getAttribute('[data-panel=boardlink] [data-board]', 'data-state')) === 'live', await alice.textContent('[data-panel=boardlink]'));
   await alice.evaluate(() => { window.JunctionPartStudio.setPlanesVisible(false); window.JunctionPartStudio.viewport.fit(); });
   await alice.waitForTimeout(900);
   await shot(alice, '02-board-in-part-studio');
@@ -389,7 +390,7 @@ try {
   await bob.waitForTimeout(1500);
   await shot(bob, '08-bob-in-part-studio');
   // and back, from the Boards panel
-  await bob.click('[data-panel=boards] [data-open-board]');
+  await bob.click('[data-panel=boardlink] [data-open-board]');
   await bob.waitForFunction(() => { const s = window.CollabApp.getState(); return s.view === 'editor' && s.document.editor === 'pcb'; }, null, { timeout: 60000 });
   check('the Boards panel\'s Open goes to the board editor', true);
 
@@ -427,7 +428,7 @@ try {
     // standoffs under two of the mounting holes, before the wall is there to hide them: the wall of a hole is
     // clicked through the display model.  From the
     // iso view the far side of a hole's wall shows through its mouth; the face's centre is on the axis, in the air.
-    await alice.click('[data-tool=Standoffs]');
+    await tool(alice, 'Standoffs');
     await alice.waitForSelector('.cad-dialog[data-feature=board-standoffs]');
     for (const h of ['H2', 'H3']) {
       const at = await faceOnScreen(alice, ':board', { name: `:hole:${h}` }, 5, [-1.6 * Math.SQRT1_2, 1.6 * Math.SQRT1_2, 0]);
