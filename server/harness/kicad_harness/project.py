@@ -2297,12 +2297,16 @@ class Board(_Doc):
             self.project.note(f"board: took up {count} tracks and vias of {len(names)} nets")
         return count
 
-    def free_pins(self, radius: float = 1.5, time_s: float = 60, passes: int = 2, keep_rules: bool = False, layers: list | None = None) -> dict:
+    def free_pins(self, radius: float = 1.5, time_s: float = 60, passes: int = 2, keep_rules: bool = False, layers: list | None = None,
+                  budget_s: float | None = None) -> dict:
         """Close connections the router left open because earlier tracks boxed a pin in: for each open connection, the
         copper within `radius` mm of its pin on the busiest part (the fine-pitch chip) comes up, and the open net is laid
         first, then the nets that were taken up.  An attempt that does not lower the count of open connections is taken
         back exactly, so the board never gets worse.  A second pass tries what is still open with twice the radius.
-        Returns {"before": n, "after": n, "tried": [...]}.  Costs about time_s per open pin."""
+        Returns {"before": n, "after": n, "tried": [...]}.  Costs about time_s per open pin; budget_s stops it starting
+        another pin once that many seconds have gone (what is left is listed under "not_tried")."""
+        import time as _t
+        t0 = _t.time(); skipped = []
         before = self.info()["unrouted_connections"]
         tried = []
         parts = {p["ref"]: p for p in self.geometry()["parts"]}
@@ -2317,6 +2321,9 @@ class Board(_Doc):
                 refs = sorted((r for r in (v.get("refs") or []) if r in parts), key=lambda r: -len(parts[r]["pads"]))
                 pin = next((f"{r}.{q[0]}" for r in refs for q in parts[r]["pads"] if q[3] == net and q[0]), None)
                 if not pin or (pin, k) in done:
+                    continue
+                if budget_s is not None and _t.time() - t0 > budget_s:
+                    skipped.append(pin)
                     continue
                 done.add((pin, k))
                 q = self.pad(pin); r = radius * (1 + k)
@@ -2349,7 +2356,7 @@ class Board(_Doc):
             self.fill()
         after = self.info()["unrouted_connections"]
         self.project.note(f"board: freed boxed-in pins, open connections {before} -> {after}")
-        return {"before": before, "after": after, "tried": tried}
+        return {"before": before, "after": after, "tried": tried, **({"not_tried": skipped} if skipped else {})}
 
     def fix_corners(self, passes: int = 3) -> int:
         """Cut every square or sharper track corner the rules check reports (track_right_angle) into 45° bends: the two

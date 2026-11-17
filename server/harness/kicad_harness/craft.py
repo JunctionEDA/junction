@@ -56,7 +56,8 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     to check the thinking behind a layout; read it for the line that is wrong and fix that step.
 
     free_pins=True (the default): connections still open at the end because earlier tracks boxed a pin in are freed one
-    pin at a time (board.free_pins); a try that does not help is taken back.  It costs about a minute per open pin.
+    pin at a time (board.free_pins); a try that does not help is taken back.  It stops starting new pins after twice
+    time_s (at least two minutes), so the whole call stays within about four times time_s.
 
     fanout=True escapes every fine-pitch chip (20 pins or more, 0.65 mm pitch or finer) to a staggered ring of vias
     before routing (board.fanout): for a dense QFN whose pins are left open because neighbouring tracks box them in.
@@ -182,8 +183,8 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             clusters[str(gname)] = list(refs)
         if fanout:      # fine-pitch chips escaped to a via ring first, the way they are by hand
             for part in self.geometry()["parts"]:
-                if len([q for q in part["pads"] if q[0]]) >= 20:
-                    fo = step(f"fanout {part['ref']}", lambda ref=part["ref"]: self.fanout(ref))
+                if (part["ref"] in fanout) if isinstance(fanout, dict) else len([q for q in part["pads"] if q[0]]) >= 20:
+                    fo = step(f"fanout {part['ref']}", lambda ref=part["ref"]: self.fanout(ref, nets=fanout.get(ref) if isinstance(fanout, dict) else None))
                     if fo and fo.get("vias"):
                         out.setdefault("fanout", {})[part["ref"]] = {"vias": fo["vias"], "skipped": len(fo.get("skipped") or {})}
         got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules))
@@ -220,7 +221,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             step("route last", lambda: self.route(nets=list(still), widths=r["widths"], kinds=r["kinds"], time_s=30, max_vias=max_vias, layers=route_layers, keep_rules=True))
             out["routed"]["left"] = step("unrouted", self.unrouted) or {}
         if (out.get("routed") or {}).get("left") and free_pins:     # pins boxed in by earlier tracks: free each and lay it first, never worse
-            fp = step("free pins", lambda: self.free_pins(passes=1, keep_rules=True, layers=route_layers))
+            fp = step("free pins", lambda: self.free_pins(passes=1, keep_rules=True, layers=route_layers, time_s=min(60, max(20, (time_s or 60) / 3)), budget_s=max(120, 2 * (time_s or 60))))
             if fp:
                 out["routed"]["freed"] = f"open {fp['before']} -> {fp['after']}"
                 if fp["after"] < fp["before"]:
@@ -374,7 +375,8 @@ def _segs_dist(a, b, c, d) -> float:
     return min(_seg_dist(a, c, d), _seg_dist(b, c, d), _seg_dist(c, a, b), _seg_dist(d, a, b))
 
 
-def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len: float | None = None, apply: bool = True) -> dict:
+def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len: float | None = None, apply: bool = True,
+            rows: int | None = None, first: float | None = None) -> dict:
     """Escape a fine-pitch chip (QFN or QFP, 0.5 mm pitch or finer) the way it is done by hand, before anything else is
     routed: every pin whose net goes far (another pad more than `far` mm away) gets a short stub straight out of its pad
     and a via in a staggered ring of two rows just outside the pin row, the vias in the order of the pins so no two stubs
@@ -433,14 +435,20 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
         if not want:
             continue
         span = max(abs(s_of(q[1], q[2])) for q in row) + 0.3
-        d1 = half + clr + vr + 0.15; d2 = d1 + vd + clr       # two rows of via sites; row two sits in row one's gaps
+        # rows of via sites, each row in the gaps of the one inside it; as many rows as the pin pitch needs (a 0.4 mm
+        # QFN with 0.45 mm vias takes three, as the person's Cyberboard does), the first row 1.3 mm out like theirs
         P = vd + 2 * clr + tw + 0.05
+        nrows = rows or max(2, math.ceil(P / max(pitch, 0.1) - 1e-6))
+        step_s = P / nrows
+        gap = max(vd + clr, math.sqrt(max(0.0, (vd + clr) ** 2 - step_s ** 2)) + vd / 2)
+        d1 = max(half + clr + vr + 0.15, first or 0.0)
         sites = []
         j = -int(span / P) - 1
         while j * P <= span + P:
-            for s, d in ((j * P, d1), (j * P + P / 2, d2)):
-                if abs(s) <= span:
-                    sites.append((s, d))
+            for k in range(nrows):
+                s_, d_ = j * P + k * step_s, d1 + k * gap
+                if abs(s_) <= span:
+                    sites.append((s_, d_))
             j += 1
         sites.sort()
         # order-keeping assignment of pins to sites, least total sideways travel; a pin may stay unfanned
@@ -476,25 +484,25 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
             v = pt(s, d); bend = pt(si, d - abs(dev)) if abs(dev) > 1e-3 else v
             path = [(q[1], q[2]), exit_, bend, v] if abs(dev) > 1e-3 else [(q[1], q[2]), exit_, v]
             segs = list(zip(path[1:], path[2:]))
-            ok = True
+            why = ""
             for (x, y) in [v]:
                 if any(math.hypot(x - a[0], y - a[1]) < 2 * vr + clr - 1e-6 for a in placed_v):
-                    ok = False
-                if any(math.hypot(x - a[0], y - a[1]) < vr + clr + 0.3 and net_ != q[3] for a in [(o[0], o[1]) for o in others] for net_ in [None]):
-                    ok = False
+                    why = why or "via by a via"
+                if any(math.hypot(x - o[0], y - o[1]) < vr + clr + 0.3 for o in others):
+                    why = why or "via by another part's pad"
                 if any(math.hypot(x - o[1], y - o[2]) < vr + clr + 0.15 for o in pads if o[0] != q[0]):
-                    ok = False
+                    why = why or "via by a pin"
                 if any(_seg_dist((x, y), a, b) < vr + tw / 2 + clr - 1e-6 for a, b, _ in placed_s):
-                    ok = False
+                    why = why or "via by a stub"
             for a, b in segs:
                 if any(_seg_dist(c, a, b) < vr + tw / 2 + clr - 1e-6 for c in placed_v):
-                    ok = False
+                    why = why or "stub by a via"
                 if any(_segs_dist(a, b, c, d) < tw + clr - 1e-6 for c, d, _ in placed_s):
-                    ok = False
+                    why = why or "stub by a stub"
                 if any(_seg_dist((o[1], o[2]), a, b) < pitch / 4 + tw / 2 + clr - 1e-6 for o in pads if o[0] != q[0] and o[0]):
-                    ok = False
-            if not ok:
-                skipped[q[0]] = "too close to a neighbour"
+                    why = why or "stub by a pin"
+            if why:
+                skipped[q[0]] = "too close: " + why
                 continue
             placed_v.append(v)
             for a, b in segs:

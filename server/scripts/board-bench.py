@@ -232,14 +232,26 @@ def rules_as_routed(folders: list) -> dict:
                for m in [re.search(r"actual ([\d.]+)", v.get("message", ""))] if m and float(m.group(1)) > 0.02]
     finally:
         p.close()
-    if not got:
+    # the via the person used most is the via the copy routes with (Cyberboard: 0.45 mm vias round a 0.4 mm pitch QFN
+    # on a board whose net class still says KiCad's stock 0.6/0.3)
+    pcb = next((os.path.join(folders[0], n) for n in os.listdir(folders[0]) if n.endswith(".kicad_pcb")), None)
+    sizes = copper(pcb)["via_sizes"] if pcb else {}
+    via = None
+    if sizes:
+        k = max(sizes, key=sizes.get)
+        try:
+            via = tuple(float(x) for x in k.split("/"))
+        except ValueError:
+            via = None
+    if not got and not via:
         return {}
-    clr = max(0.08, math.floor(min(got) * 100 + 1e-6) / 100)
+    clr = max(0.08, math.floor(min(got) * 100 + 1e-6) / 100) if got else None
     for f in folders:
         p = kh.open(f)
-        p.board().rules(clearance=clr)
+        kw = {**({"clearance": clr} if clr else {}), **({"via_diameter": via[0], "via_drill": via[1]} if via else {})}
+        p.board().rules(**kw)
         p.save(force=True); p.close()
-    return {"clearance": clr, "was_violations": len(got)}
+    return {**({"clearance": clr, "was_violations": len(got)} if clr else {}), **({"via": f"{via[0]}/{via[1]}"} if via else {})}
 
 
 def differences(hand: dict, auto: dict) -> dict:
@@ -412,7 +424,11 @@ def table(r: dict) -> str:
     lines += [f"  {n:20}{str(x):>14}  {str(y):>14}" for n, x, y in rows]
     lines.append("  parts: " + ", ".join(f"{k} {v}" for k, v in r["parts"].items()))
     if r.get("rules_as_routed"):
-        lines.append(f"  judged at the clearance the hand routing keeps: {r['rules_as_routed']['clearance']} mm (its own net class is broken {r['rules_as_routed']['was_violations']} times)")
+        ra = r["rules_as_routed"]
+        if ra.get("clearance"):
+            lines.append(f"  judged at the clearance the hand routing keeps: {ra['clearance']} mm (its own net class is broken {ra['was_violations']} times)")
+        if ra.get("via"):
+            lines.append(f"  routed with the via the hand routing uses most: {ra['via']} mm")
     for k, title in (("more_vias", "more vias than by hand"), ("longer", "longer than by hand")):
         if r["differences"][k]:
             lines.append(f"  {title}: " + "; ".join(r["differences"][k][:6]))
