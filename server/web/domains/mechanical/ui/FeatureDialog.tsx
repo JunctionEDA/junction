@@ -21,7 +21,7 @@ import { EXPR_KEY, UNIT_KEY, exprUnitsOf, exprsOf, lookupOf, variableValues, var
 import { targetsIn } from "../features/_refs";
 import type { Pick } from "../viewport/modelview";
 import { DialogShell } from "./DialogShell";
-import { describeKinds, heldItems, pickKindsFor, type HeldItem } from "./fields";
+import { describeKinds, heldItems, nextEmptyField, pickKindsFor, type HeldItem } from "./fields";
 import { Glyph } from "./Glyph";
 import { useStudio } from "./hooks";
 import { featureDef, type PartStudio } from "./studio";
@@ -158,7 +158,7 @@ function Field({ studio, field, params }: { studio: PartStudio; field: ParamFiel
           <span className={cx("flex rounded-sm", armed && "outline outline-1 outline-blue")}>
             <select className="input w-full" value={cur} data-param={field.key} aria-label={field.label} onFocus={() => { if (!armed) studio.setField(field.key); }}
               onChange={(ev) => set(ev.target.value ? { sketch: ev.target.value, regions: null } : null)}>
-              <option value="">{sketches.length ? "Choose a sketch, or click one" : "Draw a sketch first"}</option>
+              <option value="">{sketches.length ? "Click a sketch" : "Draw a sketch first"}</option>
               {sketches.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
             </select>
           </span>
@@ -237,9 +237,11 @@ function Field({ studio, field, params }: { studio: PartStudio; field: ParamFiel
       break;
     }
   }
+  // a row of choices too long for the column beside the label goes under it, the full width of the dialog: no clipped words
+  const wide = field.kind === "enum" && field.options.length <= 4 && field.options.reduce((n, o) => n + o.label.length + 3, 0) > 26;
   return (
-    <label className={row} data-field={field.key} onClick={(ev) => { if (field.kind !== "boolean" && field.kind !== "text") ev.preventDefault(); }}>
-      <span className={labelCls} {...(field.hint ? tipHandlers({ title: field.label, hint: field.hint }) : {})}>{field.label}</span>
+    <label className={wide ? "flex flex-col gap-0.5 pb-0.5" : row} data-field={field.key} onClick={(ev) => { if (field.kind !== "boolean" && field.kind !== "text") ev.preventDefault(); }}>
+      <span className={wide ? "text-ink-2 truncate leading-6" : labelCls} {...(field.hint ? tipHandlers({ title: field.label, hint: field.hint }) : {})}>{field.label}</span>
       {control}
     </label>
   );
@@ -255,6 +257,8 @@ export function FeatureDialog({ studio }: { studio: PartStudio }) {
   const params = editing.draft.params;
   const fields = def ? def.schema.filter((f) => !f.visible || f.visible(params)) : [];
   const failed = report && report.status === "error";
+  // a new feature that has not been given its geometry yet is not in error: it is waiting, and says for what
+  const waiting = !!failed && editing.isNew && !!def && nextEmptyField(def.schema, params) !== null;
   // a new sketch asks only where it goes: a click on a plane and drawing starts
   const sketchPlane = editing.isNew && editing.draft.featureType === "sketch";
   return (
@@ -277,9 +281,9 @@ export function FeatureDialog({ studio }: { studio: PartStudio }) {
         {sketchPlane ? <p className="note m-0">Click a plane or a flat face to draw on.</p> : null}
         {def ? fields.map((f) => <Field key={f.key} studio={studio} field={f} params={params} />) : <p className="note">This Junction does not know the feature type “{editing.draft.featureType}”.</p>}
         {report && report.message ? (
-          <div className={cx("callout m-0 flex items-start gap-2", failed ? "err" : "warn")} role="status">
+          <div className={cx("callout m-0 flex items-start gap-2", waiting ? "" : failed ? "err" : "warn")} role="status" data-waiting={waiting || undefined}>
             <span className="flex-1">{report.message}</span>
-            <button type="button" className="btn sm ghost flex-none h-5 min-h-0 px-1 text-xs" data-show-problem onClick={() => studio.zoomToFeature(editing.draft.id)}><Glyph svg='<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>' size={12} />Show</button>
+            {waiting ? null : <button type="button" className="btn sm ghost flex-none h-5 min-h-0 px-1 text-xs" data-show-problem onClick={() => studio.zoomToFeature(editing.draft.id)}><Glyph svg='<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.500-4.500"/>' size={12} />Show</button>}
           </div>
         ) : null}
       </div>
