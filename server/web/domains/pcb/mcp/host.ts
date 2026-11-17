@@ -41,6 +41,8 @@ import { buildPackage, packageZip } from "../fab/index";
 import { renderPicture, type Emphasis } from "./picture";
 import { findPerson, highlight, people, resolveTargets, settle, traceNet } from "./teammate";
 import { DocSession, editProjectFile, readTextDocument, type Conn, type DocEntry, type UndoRecord } from "./session";
+import { McpToolError } from "../../../platform/mcp/host";
+import { DOMAIN_TOOLS } from "../../mcp-tools";
 
 declare const process: any;
 declare function require(name: string): any;
@@ -447,7 +449,10 @@ async function simulate(req: Request): Promise<Reply> {
 
 async function undoChanges(req: Request): Promise<Reply> {
   const p = needProject(req); needWrite(req, p);
-  const rec = req.args.__record as { docId: string; title: string; undo: UndoRecord & { rules?: any } };
+  const rec = req.args.__record as { docId: string; title: string; undo: UndoRecord & { rules?: any; domain?: string } };
+  // a change one of the other domains' tools made is that domain's to take back
+  const owner = rec.undo && rec.undo.domain ? DOMAIN_TOOLS.find((d) => d.domain === rec.undo.domain && d.undo) : undefined;
+  if (owner) return owner.undo!(req);
   const entry = p.docs.find((d) => d.docId === rec.docId); if (!entry) throw new ToolError("The document of that change is no longer in the project.");
   return withDocument(req, entry.path, async (sess, doc) => {
     const k = K(); const blocked: string[] = [];
@@ -967,12 +972,14 @@ const TOOLS: Record<string, (req: Request) => Promise<Reply>> = {
 async function handle(req: Request): Promise<any> {
   useFontProject(req.project ? req.project.projectId : "");
   conn = { base: req.base, token: req.token, agent: req.agent || "" };
-  const tool = TOOLS[req.tool];
+  // the electronics tools are this file's; every other domain brings its own table (web/domains/mcp-tools.ts)
+  const tool = TOOLS[req.tool] || DOMAIN_TOOLS.map((d) => d.tools[req.tool]).find(Boolean);
   if (!tool) return { id: req.id, ok: false, error: `Unknown tool ${req.tool}.` };
   try { const r = await tool(req); return Object.assign({ id: req.id, ok: true }, r); }
   catch (e) {
-    if (!(e instanceof ToolError)) console.error("mcp host: tool failed", req.tool, e);
-    return { id: req.id, ok: false, error: e instanceof ToolError ? plain(e.message) : `The tool failed: ${e instanceof Error ? e.message : String(e)}` };
+    const told = e instanceof ToolError || e instanceof McpToolError;
+    if (!told) console.error("mcp host: tool failed", req.tool, e);
+    return { id: req.id, ok: false, error: told ? plain((e as Error).message) : `The tool failed: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 
@@ -991,6 +998,7 @@ rl.on("close", () => process.exit(0));
 const sweep = setInterval(() => {
   const now = Date.now();
   for (const [id, s] of sessions) if (now - s.lastUsed > SESSION_IDLE_MS) { s.close(); sessions.delete(id); }
+  for (const d of DOMAIN_TOOLS) if (d.sweep) d.sweep(SESSION_IDLE_MS);
   if (!busy && now - lastCall > PROCESS_IDLE_MS) process.exit(0);
 }, 30000);
 if (typeof (sweep as any).unref === "function") (sweep as any).unref();
