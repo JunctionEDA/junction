@@ -30,6 +30,10 @@ export function DocTabs() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // the picture of a document, shown over its tab while the pointer rests there (the document's editor posts it:
+  // web/platform/documents/thumbnail.ts); a document nobody has drawn yet has none, and then nothing is shown
+  const [thumb, setThumb] = useState<{ docId: string; x: number; y: number; v: number } | null>(null);
+  const thumbTimer = useRef(0);
   const plus = useRef<HTMLButtonElement>(null);
   const projectId = project ? project.projectId : null;
   const docsRef = useRef<DocEntry[]>([]); docsRef.current = project ? project.docs : [];
@@ -92,7 +96,13 @@ export function DocTabs() {
             onClick={() => { if (!active(t) || t.doc.docId !== docId) dispatch({ type: "openDoc", docId: t.doc.docId }); }}
             onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); dispatch({ type: "openDoc", docId: t.doc.docId }); } if (ev.key === "F2" && canEdit && t.kind.newName) setRenaming(t.doc.docId); }}
             onDoubleClick={() => { if (canEdit && t.kind.newName) setRenaming(t.doc.docId); }}
-            onContextMenu={(ev) => { ev.preventDefault(); if (canEdit && t.kind.newName) setMenu({ x: ev.clientX, y: ev.clientY, tab: t }); }}>
+            onContextMenu={(ev) => { ev.preventDefault(); if (canEdit && t.kind.newName) setMenu({ x: ev.clientX, y: ev.clientY, tab: t }); }}
+            onPointerEnter={(ev) => {
+              const r = ev.currentTarget.getBoundingClientRect(), id = t.doc.docId;
+              window.clearTimeout(thumbTimer.current);
+              thumbTimer.current = window.setTimeout(() => setThumb({ docId: id, x: r.left, y: r.top, v: Math.floor(Date.now() / 30000) }), 350);
+            }}
+            onPointerLeave={() => { window.clearTimeout(thumbTimer.current); setThumb(null); }}>
             <Glyph svg={t.kind.icon} />
             {renaming === t.doc.docId
               ? <input autoFocus className="input h-5 w-36" defaultValue={t.label} aria-label="Document name" onClick={(ev) => ev.stopPropagation()}
@@ -110,6 +120,11 @@ export function DocTabs() {
         </button>
       ) : null}
       {error ? <span className="flex items-center px-3 text-err truncate" role="alert">{error}</span> : null}
+      {thumb && !menu && !renaming ? (
+        <div className="fixed z-[55] p-1 rounded-md border border-line bg-panel shadow-panel pointer-events-none" data-doc-thumb={thumb.docId} style={{ left: Math.min(thumb.x, window.innerWidth - 260), bottom: window.innerHeight - thumb.y + 4 }}>
+          <img className="block w-60 h-auto rounded-sm bg-paper" alt="" src={`/api/docs/${thumb.docId}/preview.svg?v=${thumb.v}`} onError={() => setThumb(null)} />
+        </div>
+      ) : null}
       {menu ? (
         <div className="fixed z-[60] min-w-48 py-1 rounded-md border border-line bg-panel shadow-panel text-base text-ink" role="menu" style={{ left: Math.min(menu.x, window.innerWidth - 220), bottom: window.innerHeight - menu.y + 2 }}>
           {menu.tab
