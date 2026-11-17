@@ -77,9 +77,11 @@ function evaluate(s: MateSolve, params: JsonObject, a: MateFrame, b: MateFrame, 
 /** The frame moved by one unknown: k < 3 a translation of h · reach along a world axis, else a turn of h about that axis through `c`. */
 function perturb(f: MateFrame, c: Vec3, k: number, h: number, reach: number): MateFrame {
   if (k < 3) { const o: Vec3 = [f.o[0], f.o[1], f.o[2]]; o[k] += h * reach; return { o, x: f.x, y: f.y, z: f.z, surface: f.surface, radius: f.radius }; }
-  const w: Vec3 = [0, 0, 0]; w[k - 3] = h;
-  const q = qexp(w);
-  return { o: add(c, qrot(q, sub(f.o, c))), x: qrot(q, f.x), y: qrot(q, f.y), z: qrot(q, f.z), surface: f.surface, radius: f.radius };
+  // a turn about a world axis only mixes the two other coordinates: no quaternion needed in the innermost loop
+  const i = (k - 2) % 3, j = (k - 1) % 3, s = Math.sin(h), co = Math.cos(h);
+  const turn = (v: Vec3): Vec3 => { const out: Vec3 = [v[0], v[1], v[2]]; out[i] = co * v[i] - s * v[j]; out[j] = s * v[i] + co * v[j]; return out; };
+  const d = turn([f.o[0] - c[0], f.o[1] - c[1], f.o[2] - c[2]]);
+  return { o: [c[0] + d[0], c[1] + d[1], c[2] + d[2]], x: turn(f.x), y: turn(f.y), z: turn(f.z), surface: f.surface, radius: f.radius };
 }
 
 interface Prepared { m: SolverMate; ia: number; ib: number; ga: number; gb: number; va: number; vb: number; drives?: { key: string; value: number }[] }
@@ -242,7 +244,7 @@ class Core {
     let lambda = goal && goalVar >= 0 ? 1e-7 : 1e-4;
     const J = new Float64Array(24 * 12);
     for (let iter = 0; iter < maxIterations; iter++) {
-      if (now.top < TOLERANCE && (!(goal && goalVar >= 0) || now.cost < 1e-13)) break;
+      if (now.top < TOLERANCE && (!(goal && goalVar >= 0) || now.cost < 1e-24)) break;
       this.iterations++;
       A.clear(); g.fill(0);
       const pivots = c.groups.map((gr) => this.pivot(gr));
@@ -314,12 +316,12 @@ class Core {
           this.G[gr] = compose(delta, saved[v]);
         });
         const next = cost();
-        if (next.cost <= now.cost) { accepted = true; const gain = now.cost - next.cost; now = next; lambda = Math.max(lambda / 6, 1e-9); if (gain < 1e-18 + now.cost * 1e-13 && stepSize < 1e-9) iter = maxIterations; break; }
+        if (next.cost <= now.cost) { accepted = true; const gain = now.cost - next.cost; now = next; lambda = Math.max(lambda / 6, 1e-9); if (gain <= now.cost * 1e-8 + 1e-26) iter = maxIterations; break; }
         c.groups.forEach((gr, v) => { this.G[gr] = saved[v]; });
         lambda *= 8;
       }
       if (!accepted) break;
-      if (stepSize < 1e-11) break;
+      if (stepSize < 1e-10) break;
     }
   }
 

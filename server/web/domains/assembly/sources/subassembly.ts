@@ -60,7 +60,8 @@ class SubAssemblyHandle implements SourceHandle {
       }
     }
     this.made = made;
-    this.set({ status: loading && !pieces.length ? "loading" : "ready", message: trouble || (loading ? "Loading its parts…" : undefined), pieces });
+    // "loading" until every part is in: the pieces that are ready are shown meanwhile, but nothing is mated to half an assembly
+    this.set({ status: loading ? "loading" : "ready", message: trouble || (loading ? "Loading its parts…" : undefined), pieces });
   }
 }
 
