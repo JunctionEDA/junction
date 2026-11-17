@@ -19,7 +19,7 @@ import { dispatch, useApp, type DocEntry } from "../../shared/store";
 import { cx } from "../../shared/util";
 import { createDocument, deleteDocument, documentFromFile, fetchDocs, kindForFile, renameDocument, renamedPath, stemOf, tabsOf, type Tab } from "./api";
 import { ProjectRoom } from "./room";
-import { noteText, tabOf, type RoomMember, type RoomState } from "./roomapi";
+import { DOCS_EVENT, noteText, tabOf, type DocsNotice, type RoomMember, type RoomState } from "./roomapi";
 
 const NO_ROOM: RoomState = { live: false, me: null, members: [] };
 const noRoom = () => () => {};
@@ -46,6 +46,7 @@ export function DocTabs() {
   const openType = useApp((s) => s.document.doc?.docType || null);
   const rootDocId = useApp((s) => s.document.rootDocId);
   const canEdit = useApp((s) => !!s.me && !s.viewOnly);
+  const myId = useApp((s) => (s.me ? s.me.id : 0));
   const [menu, setMenu] = useState<{ x: number; y: number; tab: Tab | null } | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -92,11 +93,24 @@ export function DocTabs() {
     if (!projectId || view === "home") return;
     const r = new ProjectRoom({
       signedIn,
-      onDocsChanged: (by, note) => { if (by && note) setNotice(noteText(by.name, note)); void refreshRef.current().catch(() => {}); },
+      onDocsChanged: () => { void refreshRef.current().catch(() => {}); },
     });
     window.JunctionRoom = r; setRoom(r);
     return () => { r.close(); if (window.JunctionRoom === r) delete window.JunctionRoom; setRoom(null); };
   }, [projectId, view === "home", signedIn]);
+  // the server says when a document of the project is added, renamed or deleted (roomapi.ts tellDocsChanged):
+  // the tabs follow, and say who did it unless it was this person
+  useEffect(() => {
+    if (!projectId || view === "home") return;
+    const heard = (ev: Event) => {
+      const n = (ev as CustomEvent<DocsNotice>).detail;
+      if (!n || n.projectId !== projectId) return;
+      if (n.by.userId !== myId) setNotice(noteText(n.by.name, n.note));
+      void refreshRef.current().catch(() => {});
+    };
+    window.addEventListener(DOCS_EVENT, heard);
+    return () => window.removeEventListener(DOCS_EVENT, heard);
+  }, [projectId, view === "home", myId]);
   const docs = project ? project.docs : null;
   useEffect(() => { if (room && docs) room.setDocs(docs); }, [room, docs]);
   useEffect(() => { if (room) room.setTab(docId || null); }, [room, docId]);
@@ -115,16 +129,14 @@ export function DocTabs() {
   };
   const create = (kind: DocumentKind) => run(async () => {
     const id = await createDocument(project.projectId, kind, project.docs);
-    const made = (await fetchDocs(project.projectId)).find((d) => d.docId === id);
     await refresh(id);
-    room?.announce({ what: "added", name: made ? stemOf(made.path) : kind.title });
   });
   const rename = (tab: Tab, name: string) => {
     setRenaming(null);
     const to = renamedPath(tab.doc, name, project.docs);
     if ("error" in to) { setError(to.error); return; }
     if (to.path === tab.doc.path) return;
-    void run(async () => { await renameDocument(tab.doc, to.path); await refresh(); room?.announce({ what: "renamed", name: `${tab.label} to ${stemOf(to.path)}` }); });
+    void run(async () => { await renameDocument(tab.doc, to.path); await refresh(); });
   };
   const fromFile = (file: File, kind = kindForFile(file.name)) => run(async () => {
     if (!kind) throw new Error(`Junction cannot open “${file.name}” as a document.`);
@@ -146,7 +158,6 @@ export function DocTabs() {
     if (!(await askConfirm(`Delete ${tab.label}?`, `“${tab.label}” and its history are deleted for everyone in this project. This cannot be undone.`, { ok: "Delete", danger: true }))) return;
     await deleteDocument(tab.doc);
     await refresh();
-    room?.announce({ what: "deleted", name: tab.label });
   });
   const item = (label: string, onRun: () => void, o: { danger?: boolean; icon?: string } = {}) => (
     <button type="button" key={label} role="menuitem" className={cx("flex items-center gap-2 w-full text-left px-3 h-7 hover:bg-sel-soft", o.danger && "text-err")}
