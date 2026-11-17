@@ -42,8 +42,8 @@ export type GeomKind = "face" | "edge" | "vertex";
  */
 export interface GeomRef extends JsonObject { kind: GeomKind; body: string; name: string }
 
-/** Where a sketch lies: a default plane or a planar face of a body. */
-export type PlaneRef = { kind: "plane"; plane: DefaultPlaneId } | { kind: "face"; ref: GeomRef };
+/** Where a sketch lies: a default plane, a planar face of a body, or a reference plane (a `plane` feature). */
+export type PlaneRef = { kind: "plane"; plane: DefaultPlaneId } | { kind: "face"; ref: GeomRef } | { kind: "datum"; feature: string };
 
 export function isGeomRef(v: unknown): v is GeomRef {
   const r = v as GeomRef | null;

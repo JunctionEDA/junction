@@ -19,8 +19,14 @@ export type ParamField = { key: string; label: string; hint?: string; visible?: 
   | { kind: "profile" }
   /** a sketch plane: stores a PlaneRef (a default plane, or a planar face picked in the viewport) */
   | { kind: "plane" }
-  /** faces, edges or vertices picked in the viewport: stores GeomRef[] (or one GeomRef when `single`) */
-  | { kind: "refs"; of: GeomKind[]; single?: boolean }
+  /**
+   * faces, edges or vertices picked in the viewport: stores GeomRef[] (or one GeomRef when `single`).  With
+   * `datums`, `planes` or `sketch` it also takes reference geometry, the default planes or sketch curves, and
+   * stores a RefTarget (features/_refs.ts) for those picks.
+   */
+  | { kind: "refs"; of: GeomKind[]; single?: boolean; datums?: ("plane" | "axis" | "point" | "curve")[]; planes?: boolean; sketch?: boolean }
+  /** earlier features of the tree, in the order picked: stores string[] of feature ids */
+  | { kind: "features"; types?: string[]; exclude?: string[] }
   /** bodies picked in the viewport or from the list: stores string[] of body ids; empty means every body */
   | { kind: "bodies" }
 );

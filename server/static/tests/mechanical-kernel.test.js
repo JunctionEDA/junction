@@ -40,7 +40,7 @@ const volume = (k, engine, i = 0) => k.volume(engine.state.bodies[i].shape);
 const near = (a, b, eps = 1e-6) => assert.ok(Math.abs(a - b) < eps * Math.max(1, Math.abs(b)), `${a} is not ${b}`);
 
 test("the feature and service lists are generated from the folders", async () => {
-  assert.deepEqual(K.FEATURES.map((f) => f.type).sort(), ["extrude", "sketch"]);
+  for (const t of ["extrude", "sketch"]) assert.ok(K.FEATURES.some((f) => f.type === t), t);   // other feature files add to the list
   assert.ok(K.SERVICES.some((s) => s.name === "mass-properties"));
   for (const f of K.FEATURES) { assert.equal(typeof f.evaluate, "function"); assert.ok(f.title && f.defaults() && Array.isArray(f.schema)); }
 });

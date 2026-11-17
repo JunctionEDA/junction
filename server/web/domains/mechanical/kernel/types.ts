@@ -5,6 +5,7 @@ import type { Frame, GeomKind, GeomRef, PlaneRef, Vec3 } from "../core/geometry"
 import type { Region } from "../sketch/profiles";
 import type { SketchData } from "../sketch/format";
 import type { Kernel } from "./occ";
+import type { DatumView } from "./protocol";
 
 /** The OpenCascade bindings (npm replicad-opencascadejs): `new oc.BRepPrimAPI_MakePrism(face, vec)` and so on. */
 export type OC = OpenCascadeInstance;
@@ -44,10 +45,15 @@ export interface SketchRegion {
   edges: { entity: string; edge: TopoDS_Edge }[];
 }
 
+/** Reference geometry (a plane, an axis, a point, a curve) a feature made; `shape` is a curve's wire. */
+export type Datum = DatumView & { shape?: Shape };
+
 /** Everything that exists after some feature has run.  Treated as immutable: a feature gets a working copy. */
 export interface ModelState {
   bodies: Body[];
   sketches: { [featureId: string]: SketchGeometry };
+  /** reference geometry by the id of the feature that made it */
+  datums?: { [featureId: string]: Datum };
 }
 
 /** An error a person can act on.  Anything else a feature throws is reported as an internal error. */
@@ -83,6 +89,15 @@ export interface EvalContext {
   /** The sketch a feature made, or a FeatureError that says why there is none. */
   sketch(featureId: string): SketchGeometry;
   setSketch(sketch: SketchGeometry): void;
+
+  /** The reference geometry an earlier feature made, or a FeatureError that says why there is none. */
+  datum(featureId: string): Datum;
+  setDatum(datum: Datum): void;
+  /**
+   * The model just before and just after an earlier feature ran, or null when it is not earlier in the tree.
+   * What patterns and mirrors read to find what a feature added and removed.
+   */
+  history(featureId: string): { before: ModelState; after: ModelState; status: string } | null;
 
   /** Find the geometry a stored reference names, or throw a FeatureError that says the reference was lost. */
   resolve(ref: GeomRef): Resolved;
