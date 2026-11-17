@@ -4,6 +4,29 @@ Releases of Junction, which was called KiCad Collaborative up to 1.0.9. The
 version here is the product version (`packaging/VERSION`), not the KiCad
 version it is based on.
 
+## 2.2.1 (2026-11-17)
+
+### Import from another EDA
+- EasyEDA Pro 2.x projects saved as `.eprj` open like `.epro`, with every
+  sheet, the board's layer stack and names, footprints, tracks, vias and
+  zones.
+- EasyEDA Standard schematics keep their reference designators (U8, R11 ...)
+  instead of showing "U", "R", and Standard backup zips import the schematic
+  as well as the board.
+- On EasyEDA Pro boards the outline layer is named for EasyEDA's board
+  outline, not "Multi-Layer".
+- `kicad-cli import` takes an Altium project (`.PrjPcb`): all its schematic
+  sheets come in as one design, together with its board. The web's "Import
+  from another EDA" uses it for Altium designs with several sheets.
+
+### Downloads
+
+| Platform | File | Notes |
+|---|---|---|
+| macOS (Apple Silicon, macOS 15+) | `Junction-2.2.1-macos.dmg` | Ad-hoc signed: first launch is right-click, Open. Replace the old app in Applications. |
+| Windows x64 | `Junction-2.2.1-windows-x64.exe` | Installer; upgrades earlier versions in place. |
+| Linux x64 (Ubuntu 24.04 LTS) | `Junction-2.2.1-linux-x64.tar.gz` | Extract anywhere, install the packages listed in `usr/share/junction/ubuntu-packages.txt` (`sudo apt install $(cat usr/share/junction/ubuntu-packages.txt)`), run `usr/bin/junction`. |
+
 ## 2.2.0 (2026-11-17)
 
 ### Desktop
