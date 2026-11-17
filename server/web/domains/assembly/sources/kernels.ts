@@ -52,6 +52,8 @@ export class KernelPool {
   get failure(): string | null { for (const s of this.slots.values()) if (s.state === "failed") return s.message || "The modelling kernel could not start."; return null; }
   /** True when any worker was ever started (a test asks: did opening this assembly need the kernel?). */
   get started(): number { return this.tick; }
+  /** How many workers are alive now (one per source document built in this session, the most recent few). */
+  get workers(): number { return this.slots.size; }
   forget(docId: string): void { const s = this.slots.get(docId); if (s && !s.busy) { s.client.dispose(); this.slots.delete(docId); } }
   dispose(): void { for (const s of this.slots.values()) s.client.dispose(); this.slots.clear(); }
 }

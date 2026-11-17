@@ -18,8 +18,8 @@ export async function readBom(instances: readonly InstanceItem[], docs: readonly
   const live = instances.filter((i) => !i.suppressed);
   const boardIds = Array.from(new Set(live.filter((i) => i.source.kind === "board").map((i) => i.source.docId)));
   const boards: { [docId: string]: ElectronicBomLine[] | { error: string } } = {};
-  const [names] = await Promise.all([
-    parts.bodyNames(live),
+  const names = parts.bodyNames();
+  await Promise.all([
     ...boardIds.map(async (d) => {
       const doc = docs.find((x) => x.docId === d);
       try { boards[d] = await boardBom(d, doc ? doc.docType : "kicad_pcb"); } catch (e) { boards[d] = { error: e instanceof Error ? e.message : String(e) }; }

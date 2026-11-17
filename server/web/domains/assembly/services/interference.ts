@@ -72,8 +72,9 @@ async function withShapes<T extends { missing?: string[] }>(shapes: readonly Ins
 /** Which instances overlap, and by how much (mm³).  `mesh: true` also returns each clash's triangles. */
 export async function checkInterference(shapes: readonly InstanceShape[], call: KernelCall, o: { mesh?: boolean } = {}): Promise<InterferenceResult> {
   const t0 = Date.now();
-  const pairs = candidatePairs(shapes.map((s) => worldBox(s.bbox, s.transform)));
-  // instances of the same instance never clash with themselves; two instances may share a key (same body)
+  // the solids of one instance (a board's laminate and its parts) are not checked against each other; two
+  // instances may share a key (the same body placed twice)
+  const pairs = candidatePairs(shapes.map((s) => worldBox(s.bbox, s.transform))).filter(([i, j]) => shapes[i].instance !== shapes[j].instance);
   if (!pairs.length) return { clashes: [], candidates: 0, checked: 0, ms: Date.now() - t0 };
   const r = await withShapes<{ missing: string[]; checked: number; clashes: { a: number; b: number; volume: number | null; centre?: number[]; bbox?: number[]; mesh?: Clash["mesh"]; error?: string }[] }>(shapes, call, "interference", { pairs, mesh: !!o.mesh });
   const clashes: Clash[] = r.clashes.map((c) => ({ ...c, a: shapes[c.a].instance, b: shapes[c.b].instance }));

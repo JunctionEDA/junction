@@ -132,6 +132,8 @@ export class AssemblyScene {
           mesh.userData.fit = true; mesh.userData.shade = s.shade;
           const edges = new THREE.LineSegments(s.edges, this.edgeMaterial);
           const points = new THREE.Points(s.points, this.pointMaterial);
+          // a ghost is drawn by something else (a board's picture); it stays in the scene for the pointer
+          if (piece.ghost) { mesh.visible = false; mesh.userData.fit = false; edges.visible = false; points.visible = false; }
           group.add(mesh, edges, points);
           o.group.add(group);
           o.pieces.push({ piece, group, mesh, edges, points });
@@ -175,7 +177,14 @@ export class AssemblyScene {
   box(): THREE.Box3 { const box = new THREE.Box3(); for (const [id, o] of this.instances) if (!o.hidden) { const b = this.boxOf(id); if (b) box.union(b); } return box; }
 
   // ---------------------------------------------------------------- selection, marks, hover
-  private restyle(): void { for (const o of this.instances.values()) for (const p of o.pieces) p.mesh.material = this.materialFor(o.id, p.mesh.userData.shade); this.viewport.invalidate(); }
+  private restyle(): void {
+    for (const o of this.instances.values()) for (const p of o.pieces) {
+      p.mesh.material = this.materialFor(o.id, p.mesh.userData.shade);
+      // a ghost shows its edges while it is selected or marked: that is how a board instance looks chosen
+      if (p.piece.ghost) p.edges.visible = this.selection.has(o.id) || this.marked.has(o.id);
+    }
+    this.viewport.invalidate();
+  }
   setSelection(ids: Iterable<string>): void { this.selection = new Set(ids); this.restyle(); }
   /** Tint instances as a problem (interference, an error): an analysis tool's result. */
   setMarked(ids: Iterable<string>): void { this.marked = new Set(ids); this.restyle(); }

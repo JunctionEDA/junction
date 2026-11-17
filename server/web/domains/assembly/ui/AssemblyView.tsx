@@ -1,6 +1,6 @@
 // AssemblyView.tsx — the assembly's frame: a toolbar drawn from tools/*.ts and one button per mate type
 // (mates/*.ts), the instance tree, the mates, the viewport with its dialogs, and whatever panels tools add.
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { cx } from "../../../shared/util";
 import type { AssemblyEditor, FormDefinition, PanelDefinition } from "./assembly";
 import { InsertDialog } from "./InsertDialog";
@@ -13,18 +13,38 @@ function Toolbar({ assembly }: { assembly: AssemblyEditor }) {
   const s = useAssembly(assembly, (x) => x);
   const tools = assembly.tools().slice().sort((a, b) => (a.order ?? 1e6) - (b.order ?? 1e6) || a.title.localeCompare(b.title));
   const mates = assembly.mateTypes().slice().sort((a, b) => (a.order ?? 1e6) - (b.order ?? 1e6) || a.title.localeCompare(b.title));
+  // As in the part studio: the bar does not scroll sideways in a window of ordinary width.  When the buttons do
+  // not fit, the mates lose their labels first (density 1), then the tools (2); a tooltip names every button.
+  const bar = useRef<HTMLDivElement>(null);
+  const [density, setDensity] = useState(0);
+  const needs = useRef<(number | undefined)[]>([]);
+  useLayoutEffect(() => {
+    const el = bar.current; if (!el) return;
+    const fit = () => {
+      let need = 12;
+      for (const c of Array.from(el.children)) need += (c as HTMLElement).offsetWidth + 2;
+      const room = el.clientWidth, at = needs.current;
+      at[density] = need;
+      if (need > room && density < 2) setDensity(density + 1);
+      else if (density > 0 && at[density - 1] !== undefined && at[density - 1]! <= room) setDensity(density - 1);
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [density]);
   return (
-    <div className="cad-toolbar flex items-center gap-0.5 h-9 px-1.5 bg-bench border-b border-line overflow-x-auto select-none" role="toolbar" aria-label="Assembly tools">
+    <div ref={bar} className="cad-toolbar flex items-center gap-0.5 h-9 px-1.5 bg-bench border-b border-line overflow-x-auto select-none" role="toolbar" aria-label="Assembly tools" data-density={density}>
       {tools.map((t) => {
         const why = t.disabled ? t.disabled(assembly) : null;
-        return <button key={t.id} type="button" data-tool={t.title} className={cx("btn sm ghost flex flex-none items-center gap-1.5 px-1.5", t.active && t.active(assembly) && "on", why && "opacity-45")} aria-disabled={!!why} title={why ? `${t.title}: ${why}` : `${t.title}${t.key ? ` (${t.key.toUpperCase()})` : ""}${t.hint ? `\n${t.hint}` : ""}`} onClick={() => { if (!why) t.run(assembly); }}><Glyph svg={t.icon} /><span>{t.title}</span></button>;
+        return <button key={t.id} type="button" data-tool={t.title} aria-label={t.title} className={cx("btn sm ghost flex flex-none items-center gap-1.5 px-1.5", t.active && t.active(assembly) && "on", why && "opacity-45")} aria-disabled={!!why} title={why ? `${t.title}: ${why}` : `${t.title}${t.key ? ` (${t.key.toUpperCase()})` : ""}${t.hint ? `\n${t.hint}` : ""}`} onClick={() => { if (!why) t.run(assembly); }}><Glyph svg={t.icon} />{density < 2 ? <span>{t.title}</span> : null}</button>;
       })}
       <span className="flex-none w-px h-5 mx-1 bg-line" />
-      <span className="flex items-center gap-0.5" data-group="mates">
+      <span className="flex flex-none items-center gap-0.5" data-group="mates">
         {mates.filter((m) => m.solve).map((m) => (
-          <button key={m.type} type="button" data-mate-tool={m.type} className={cx("btn sm ghost flex flex-none items-center gap-1.5 px-1.5", s.mating?.isNew && s.mating.mateType === m.type && "on", !s.canEdit && "opacity-45")} aria-disabled={!s.canEdit}
+          <button key={m.type} type="button" data-mate-tool={m.type} aria-label={`${m.title} mate`} className={cx("btn sm ghost flex flex-none items-center gap-1.5 px-1.5", s.mating?.isNew && s.mating.mateType === m.type && "on", !s.canEdit && "opacity-45")} aria-disabled={!s.canEdit}
             title={s.canEdit ? `${m.title} mate\nThen click a connector on each of two instances.` : `${m.title}: you have view-only access`} onClick={() => { if (!s.canEdit) return; if (s.mating?.isNew && s.mating.mateType === m.type) assembly.cancelMate(); else { if (s.mating) assembly.cancelMate(); assembly.startMate(m.type); } }}>
-            <Glyph svg={m.icon} /><span>{m.title}</span>
+            <Glyph svg={m.icon} />{density < 1 ? <span>{m.title}</span> : null}
           </button>
         ))}
       </span>
@@ -104,7 +124,7 @@ export function AssemblyView({ assembly, canvasHost }: { assembly: AssemblyEdito
   useEffect(() => { stage.current?.prepend(canvasHost); return () => canvasHost.remove(); }, [canvasHost]);
   const panels = useAssembly(assembly, (s) => s.panels);
   const form = useAssembly(assembly, (s) => s.form);
-  const left = panels.filter((p) => p.side === "left"), right = panels.filter((p) => p.side !== "left");
+  const left = panels.filter((p) => p.side === "left"), right = panels.filter((p) => p.side !== "left" && p.side !== "bottom"), bottom = panels.filter((p) => p.side === "bottom");
   return (
     <div className="cad-root grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] text-ink" data-doc-kind="assembly"
       onKeyDown={(ev) => { const t = ev.target as HTMLElement; if (t === assembly.viewport.canvas || /^(INPUT|SELECT|TEXTAREA)$/.test(t.tagName) || t.isContentEditable) return; assembly.handleKey(ev.nativeEvent); }}>
@@ -115,12 +135,15 @@ export function AssemblyView({ assembly, canvasHost }: { assembly: AssemblyEdito
           <MateList assembly={assembly} />
           {left.map((p) => <Panel key={p.id} assembly={assembly} panel={p} />)}
         </aside>
-        <div ref={stage} className="cad-stage relative flex-1 min-w-0 min-h-0 overflow-hidden">
-          <MateDialog assembly={assembly} />
-          <InsertDialog assembly={assembly} />
-          {form ? <FormDialog key={form.title} assembly={assembly} form={form} /> : null}
-          <ExplodeBar assembly={assembly} />
-          <StatusNote assembly={assembly} />
+        <div className="flex flex-col flex-1 min-w-0 min-h-0">
+          <div ref={stage} className="cad-stage relative flex-1 min-w-0 min-h-0 overflow-hidden">
+            <MateDialog assembly={assembly} />
+            <InsertDialog assembly={assembly} />
+            {form ? <FormDialog key={form.title} assembly={assembly} form={form} /> : null}
+            <ExplodeBar assembly={assembly} />
+            <StatusNote assembly={assembly} />
+          </div>
+          {bottom.length ? <aside className="cad-dock flex flex-col min-h-0 h-[38%] flex-none bg-bench border-t border-line" data-side="bottom">{bottom.map((p) => <Panel key={p.id} assembly={assembly} panel={p} />)}</aside> : null}
         </div>
         {right.length ? <aside className="cad-dock flex flex-col min-h-0 w-72 flex-none bg-bench border-l border-line">{right.map((p) => <Panel key={p.id} assembly={assembly} panel={p} />)}</aside> : null}
       </div>

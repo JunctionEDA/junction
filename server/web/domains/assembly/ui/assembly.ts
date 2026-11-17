@@ -30,6 +30,7 @@ import { applyPose, dot, inverse, poseDistance, poseOf, qaxis, qmul, qnorm, tran
 import { solve } from "../solver/solver";
 import type { DragGoal, MateFrame } from "../solver/types";
 import { SourceManager } from "../sources/manager";
+import { BoardPictures } from "../viewport/boards";
 import type { SourceOffer } from "../sources/types";
 import { AssemblyScene, type AssemblyPick, type ConnectorMark } from "../viewport/scene";
 import type { TriadHandle } from "../viewport/triad";
@@ -57,7 +58,7 @@ export interface InstanceInfo {
 }
 
 /** A panel a tool adds beside the viewport (a bill of materials, an interference report). */
-export interface PanelDefinition { id: string; title: string; side?: "left" | "right"; render(assembly: AssemblyEditor): ReactNode }
+export interface PanelDefinition { id: string; title: string; /** "bottom": under the viewport, for something wide (a table) */ side?: "left" | "right" | "bottom"; render(assembly: AssemblyEditor): ReactNode }
 /** A small form a tool asks ("how many copies?"). */
 export interface FormField { key: string; label: string; kind: "number" | "text"; value: number | string; unit?: string }
 export interface FormDefinition { title: string; fields: FormField[]; acceptLabel?: string; accept(values: { [key: string]: number | string }): void }
@@ -117,6 +118,8 @@ export class AssemblyEditor {
   readonly session: ItemDocSession;
   readonly viewport: Viewport3D;
   readonly scene: AssemblyScene;
+  /** board instances as they look (viewport/boards.ts) */
+  readonly boards: BoardPictures;
   readonly sources: SourceManager;
   private state: AssemblyState = EMPTY;
   private listeners = new Set<() => void>();
@@ -139,6 +142,7 @@ export class AssemblyEditor {
     this.viewport.fit();
     this.scene = new AssemblyScene(this.viewport);
     this.sources = new SourceManager(host.doc.docId, host.signedIn, () => this.queueRefresh());
+    this.boards = new BoardPictures(this.viewport, this.sources);
     this.session = new ItemDocSession({
       docId: host.doc.docId, signedIn: host.signedIn, expectKind: ASSEMBLY_KIND,
       onChange: () => { this.state = { ...this.state, loaded: true }; this.refresh(); },
@@ -329,6 +333,8 @@ export class AssemblyEditor {
       out.set(id, t);
     }
     this.scene.setTransforms(out);
+    // the boards' pictures stand where their instances do
+    this.boards.sync(instances.filter((i) => !i.suppressed && i.source && i.source.kind === "board").map((i) => ({ id: i.id, docId: i.source.docId, hidden: !!i.hidden })), (id) => out.get(id) || null);
   }
 
   /** Selection tint, the manipulator and the connector glyphs. */
@@ -415,11 +421,16 @@ export class AssemblyEditor {
       const n = existing.filter((i) => same(i.source, o.source)).length + offers.filter((x) => counts.has(x) && same(x.source, o.source)).length;
       counts.set(o, n);
       const t: Transform = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0];
+      // a source that says where it belongs (a board: its middle at the origin); the Insert dialog offers a
+      // board before it has been read, so ask again now that it probably has
+      const snapNow = this.sources.snapshot(o.source.kind, o.source.docId), prov = this.sources.provider(o.source.kind);
+      const at = o.transform || (snapNow && prov ? prov.offers(o.source.docId, o.name, snapNow).find((x) => same(x.source, o.source))?.transform : undefined);
+      if (at) for (let k = 0; k < 12; k++) t[k] = at[k];
       if (n) {
         const snap = this.sources.snapshot(o.source.kind, o.source.docId), p = this.sources.provider(o.source.kind);
         let width = 0;
         for (const piece of snap && p ? p.select(o.source, snap) : []) width = Math.max(width, piece.mesh.bbox[3] - piece.mesh.bbox[0]);
-        t[3] = n * (width * 1.15 + 5);
+        t[3] += n * (width * 1.15 + 5);
       }
       return { source: o.source, name: o.name, transform: t };
     });
@@ -777,6 +788,6 @@ export class AssemblyEditor {
     const c = this.viewport.canvas;
     c.removeEventListener("pointerdown", this.onDown); c.removeEventListener("pointermove", this.onMove); c.removeEventListener("pointerup", this.onUp);
     c.removeEventListener("pointercancel", this.onUp); c.removeEventListener("pointerleave", this.onLeave); c.removeEventListener("dblclick", this.onDouble); c.removeEventListener("keydown", this.onKey);
-    this.session.close(); this.sources.dispose(); this.scene.dispose(); this.viewport.dispose(); this.listeners.clear();
+    this.session.close(); this.boards.dispose(); this.sources.dispose(); this.scene.dispose(); this.viewport.dispose(); this.listeners.clear();
   }
 }
