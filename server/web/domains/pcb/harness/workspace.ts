@@ -166,7 +166,7 @@ export class Workspace {
       case "get_geometry": return on(() => design.geometry(rest()));
       case "check_layout": return on(() => checkLayout(rest()));
       case "review_design": return on(() => reviewDesign(rest()));
-      case "render": { const h = this.find(args.document); const ed = this.open(h); return { document: h.path, svg: renderPicture(ed.kdoc, args.box ? { bbox: args.box, frame: false } : {}) }; }
+      case "render": { const h = this.find(args.document); const ed = this.open(h); return { document: h.path, svg: renderPicture(ed.kdoc, { ...(args.box ? { bbox: args.box, frame: false } : {}), ...(args.zones === false ? { zones: false } : {}), ...(Array.isArray(args.hide) ? { hidden: new Set(args.hide) } : {}) }) }; }
       case "run_checks": return on(() => design.runChecks(rest()));
       case "trace_net": { const h = this.find(args.document); const ed = this.open(h); return traceNet(ed.kdoc, h.path, args.net); }
       case "highlight": return { document: this.find(args.document).path, highlighted: [], note: "These are files on disk: nobody has them open, so there is nobody to show a highlight to." };

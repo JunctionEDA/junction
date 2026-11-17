@@ -361,9 +361,10 @@ class _Doc:
             e["italic"] = True
         self._edit(e)
 
-    def svg(self, path: str | None = None, box=None) -> str:
-        """The sheet or the board as an SVG drawing, the way the editor shows it (local projects).  Written to `path` when given."""
-        r = self._call("render", **({"box": list(box)} if box else {}))
+    def svg(self, path: str | None = None, box=None, zones: bool = True, hide=None) -> str:
+        """The sheet or the board as an SVG drawing, the way the editor shows it (local projects).  Written to `path` when given.
+        zones=False leaves the pours out (to see a fan-out under a ground fill); hide=["B.Cu", "In1.Cu"] leaves those layers out."""
+        r = self._call("render", **({"box": list(box)} if box else {}), **({"zones": False} if not zones else {}), **({"hide": list(hide)} if hide else {}))
         if path:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(r["svg"])

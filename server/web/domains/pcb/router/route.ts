@@ -11,6 +11,9 @@ const BUNDLE_COST = 0.3;
 import { TRAINED, Weights } from "./weights";
 import { cornerAngle, SQUARE_MAX } from "./corners";
 import { stackupOf, traceOn, usualImpedance, widthFor, z0, zdiff } from "./impedance";
+/** Hole clearance is kept with this much to spare: a diagonal track on the grid can come a few microns closer to a
+ *  via's hole than its grown cell says (Cyberboard: 0.2419 mm against a 0.25 mm rule). */
+export const HOLE_SLACK = 0.012;
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /** A supply net by its name: ground, a rail voltage, or one of the usual rail names. */
@@ -744,7 +747,7 @@ export class Router {
    *  the other end's layer.  Both lines change layer at the same place through matched vias. */
   private layPairVias(pr: Pair): string {
     const G = this.G, P = this.P, { cp, cn } = pr; const w = Math.min(cp.cls.width, cn.cls.width), clr = Math.max(cp.cls.clr, cn.cls.clr), gap = Math.max(clr, this.opts.pairGap || 0, this.zGap.get(pr.p.key) || 0);
-    const viaD = Math.max(cp.cls.viaD, cn.cls.viaD), drill = Math.max(cp.cls.viaDrill, cn.cls.viaDrill), clrV = Math.max(clr, (G.holeClr || 0) - (viaD - drill) / 2), pitch = viaD + Math.max(clrV, gap); const all = G.layers.map((_, l) => l).filter((l) => G.routable[l]);
+    const viaD = Math.max(cp.cls.viaD, cn.cls.viaD), drill = Math.max(cp.cls.viaDrill, cn.cls.viaDrill), clrV = Math.max(clr, (G.holeClr || 0) + HOLE_SLACK - (viaD - drill) / 2), pitch = viaD + Math.max(clrV, gap); const all = G.layers.map((_, l) => l).filter((l) => G.routable[l]);
     if (!this.allowVias || !pr.p.guide.allowVias || !pr.n.guide.allowVias) return "its pads are not all on one layer and vias are not allowed";
     const nEnd = (e: "a" | "b"): "a" | "b" => (pr.swap ? (e === "a" ? "b" : "a") : e);
     const half = (a: Anchor) => { const sh = a.shape as any; return sh ? (sh.t === "circle" ? sh.r : Math.max(sh.w || 0, sh.h || 0) / 2 || sh.r || 0) : 0; };
@@ -1224,7 +1227,7 @@ export class Router {
     this.lift(net, 1, conn.cls);
     for (let i = 0; i + 1 < nodes.length; i++) {
       const a = nodes[i], b = nodes[i + 1];
-      if (a.l !== b.l) { const gi = a.iy * G.W + a.ix; if ((!G.thru[gi] || !holes.has(gi)) && !viaCells.includes(gi)) { viaCells.push(gi); const p = this.mm(a); shapes.push({ net: conn.net, layers: all, shape: { t: "circle", x: p[0], y: p[1], r: conn.cls.viaD / 2 }, clr: Math.max(clr, (G.holeClr || 0) - (conn.cls.viaD - conn.cls.viaDrill) / 2) }); } }
+      if (a.l !== b.l) { const gi = a.iy * G.W + a.ix; if ((!G.thru[gi] || !holes.has(gi)) && !viaCells.includes(gi)) { viaCells.push(gi); const p = this.mm(a); shapes.push({ net: conn.net, layers: all, shape: { t: "circle", x: p[0], y: p[1], r: conn.cls.viaD / 2 }, clr: Math.max(clr, (G.holeClr || 0) + HOLE_SLACK - (conn.cls.viaD - conn.cls.viaDrill) / 2) }); } }
       else shapes.push({ net: conn.net, layers: [a.l], shape: { t: "seg", a: this.mm(a), b: this.mm(b), r: w / 2 }, clr });
     }
     this.lift(net, -1, conn.cls);

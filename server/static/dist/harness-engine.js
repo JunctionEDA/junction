@@ -117818,7 +117818,7 @@ function pickGrid(pads, bounds, nLayers, forced) {
   return { g: best.g, ox, oy };
 }
 var growFor = (G5, c, o) => (o.edge ? G5.edgeClr : Math.max(c.clr, o.clr)) + c.width / 2 + G5.margin;
-var growVia = (G5, c, o) => (o.edge ? G5.edgeClr + c.viaD / 2 : Math.max(Math.max(c.clr, o.clr) + c.viaD / 2, (G5.holeClr || 0) + c.viaDrill / 2)) + G5.margin;
+var growVia = (G5, c, o) => (o.edge ? G5.edgeClr + c.viaD / 2 : Math.max(Math.max(c.clr, o.clr) + c.viaD / 2, (G5.holeClr ? G5.holeClr + 0.012 : 0) + c.viaDrill / 2)) + G5.margin;
 var domainGap = (G5, c, o) => {
   if (!c.kind || !G5.kinds || !G5.sep || o.pad || o.edge || !o.net) return 0;
   const k = G5.kinds.get(o.net);
@@ -118300,6 +118300,7 @@ function usualImpedance(net, paired) {
 // web/domains/pcb/router/route.ts
 var STEPS_PER_MS = 12e3;
 var BUNDLE_COST = 0.3;
+var HOLE_SLACK = 0.012;
 var FLAT_DETOUR = 1.6;
 var FLAT_SLACK_MM = 5;
 var PLANE_COST = 1;
@@ -119529,7 +119530,7 @@ var Router = class _Router {
   layPairVias(pr) {
     const G5 = this.G, P = this.P, { cp: cp2, cn } = pr;
     const w = Math.min(cp2.cls.width, cn.cls.width), clr = Math.max(cp2.cls.clr, cn.cls.clr), gap = Math.max(clr, this.opts.pairGap || 0, this.zGap.get(pr.p.key) || 0);
-    const viaD = Math.max(cp2.cls.viaD, cn.cls.viaD), drill2 = Math.max(cp2.cls.viaDrill, cn.cls.viaDrill), clrV = Math.max(clr, (G5.holeClr || 0) - (viaD - drill2) / 2), pitch = viaD + Math.max(clrV, gap);
+    const viaD = Math.max(cp2.cls.viaD, cn.cls.viaD), drill2 = Math.max(cp2.cls.viaDrill, cn.cls.viaDrill), clrV = Math.max(clr, (G5.holeClr || 0) + HOLE_SLACK - (viaD - drill2) / 2), pitch = viaD + Math.max(clrV, gap);
     const all2 = G5.layers.map((_, l) => l).filter((l) => G5.routable[l]);
     if (!this.allowVias || !pr.p.guide.allowVias || !pr.n.guide.allowVias) return "its pads are not all on one layer and vias are not allowed";
     const nEnd = (e) => pr.swap ? e === "a" ? "b" : "a" : e;
@@ -120532,7 +120533,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
         if ((!G5.thru[gi] || !holes.has(gi)) && !viaCells.includes(gi)) {
           viaCells.push(gi);
           const p = this.mm(a);
-          shapes2.push({ net: conn.net, layers: all2, shape: { t: "circle", x: p[0], y: p[1], r: conn.cls.viaD / 2 }, clr: Math.max(clr, (G5.holeClr || 0) - (conn.cls.viaD - conn.cls.viaDrill) / 2) });
+          shapes2.push({ net: conn.net, layers: all2, shape: { t: "circle", x: p[0], y: p[1], r: conn.cls.viaD / 2 }, clr: Math.max(clr, (G5.holeClr || 0) + HOLE_SLACK - (conn.cls.viaD - conn.cls.viaDrill) / 2) });
         }
       } else shapes2.push({ net: conn.net, layers: [a.l], shape: { t: "seg", a: this.mm(a), b: this.mm(b), r: w / 2 }, clr });
     }
@@ -140819,6 +140820,7 @@ function renderPicture(doc2, opts2) {
   };
   for (const it of doc2.items.values()) {
     if (ids && !ids.has(it.id)) continue;
+    if (opts2.zones === false && it.kind === "zone") continue;
     const b = it.bbox;
     if (b && (b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1)) continue;
     for (const g2 of it.geom) {
@@ -141044,7 +141046,7 @@ var Workspace = class {
       case "render": {
         const h3 = this.find(args.document);
         const ed = this.open(h3);
-        return { document: h3.path, svg: renderPicture(ed.kdoc, args.box ? { bbox: args.box, frame: false } : {}) };
+        return { document: h3.path, svg: renderPicture(ed.kdoc, { ...args.box ? { bbox: args.box, frame: false } : {}, ...args.zones === false ? { zones: false } : {}, ...Array.isArray(args.hide) ? { hidden: new Set(args.hide) } : {} }) };
       }
       case "run_checks":
         return on2(() => runChecks(rest()));
