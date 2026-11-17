@@ -437,7 +437,7 @@ const clip = (s: string, n: number) => (s.length > n ? s.slice(0, n) + ` … (${
 export async function fitsCheck(input: { doc?: string; net: string; via?: { x: number; y: number; size?: number; drill?: number }; track?: { pts: number[][]; width?: number; layer?: string } }): Promise<unknown> {
   const { doc, path } = await resolveDoc(input.doc); const P = PCB(); if (!P || doc.type !== "pcb") throw new ToolError("fits works on a board.");
   const s = P.designSettings(ED().proSettings || null); const nc = P.netclassOf ? P.netclassOf(s, input.net) : {};
-  const NT = P.netTable(doc); const want = NT.key(input.net) ?? input.net; const copper: string[] = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"];
+  const NT = P.netTable(doc); const want = input.net; const copper: string[] = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"];
   const own: { shape: any; layers: string[]; hole?: any }[] = [];
   if (input.via) { const size = input.via.size || nc.via_diameter || s.viaDiameter || 0.6, drill = input.via.drill || nc.via_drill || s.viaDrill || 0.3;
     own.push({ shape: { t: "circle", x: input.via.x, y: input.via.y, r: size / 2 }, layers: copper, hole: { t: "circle", x: input.via.x, y: input.via.y, r: drill / 2 } }); }

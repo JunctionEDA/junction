@@ -71272,7 +71272,7 @@ async function fitsCheck(input) {
   const s2 = P.designSettings(ED().proSettings || null);
   const nc = P.netclassOf ? P.netclassOf(s2, input.net) : {};
   const NT = P.netTable(doc2);
-  const want2 = NT.key(input.net) ?? input.net;
+  const want2 = input.net;
   const copper = doc2.copper.length ? doc2.copper : ["F.Cu", "B.Cu"];
   const own = [];
   if (input.via) {
