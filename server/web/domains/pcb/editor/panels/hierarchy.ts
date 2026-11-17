@@ -5,7 +5,7 @@
 // the PARENT sheet — where KiCad keeps the Sheetname field and the instance's page — as an ordinary op.
 import type { HierNode, PanelAction } from "../../panels-api";
 import { store } from "../appstore";
-import { openDoc, publishDocs, rootSchematic, topLevelSchematics, topLevelSheetsChanged } from "../doc";
+import { enterSheet, openDoc, publishDocs, rootSchematic, topLevelSchematics, topLevelSheetsChanged } from "../doc";
 import { E } from "../state";
 import { api, toast } from "../util";
 import { selectionIds } from "../gestures";
@@ -226,7 +226,13 @@ function namesTo(path: string): string[] {
 export function hierarchyDispatch(a: PanelAction): boolean {
   switch (a.t) {
     case "hierOpen": {
-      const n = find(a.path); if (!n) return true; if (!n.docId) { toast("That sheet isn't in the shared project yet"); return true; }
+      const n = find(a.path); if (!n) return true;
+      if (!n.docId) {   // a file this page has not heard of: enterSheet reads the file list again (or makes the file, as eeschema would)
+        const parent = schDocs().find((x) => x.docId === n.parentDocId);
+        preferInstance(humanOf(a.path));
+        void enterSheet(n.file, parent ? parent.path : undefined);
+        return true;
+      }
       // the SCH_SHEET_PATH the row stands for: a sheet used twice shows as the instance that was clicked
       preferInstance(humanOf(a.path));
       if (n.docId !== currentDocId()) { const d = schDocs().find((x) => x.docId === n.docId); if (d) void openDoc(d); }

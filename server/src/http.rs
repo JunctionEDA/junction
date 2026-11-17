@@ -2275,10 +2275,23 @@ pub async fn create_doc(
 
     let doc_type = req.doc_type.unwrap_or_else(|| doc_type_for(&path).to_string());
     let doc = persist::create_document(&state.pool, id, &path, &doc_type).await?;
+    notify_docs_added(&state, id, doc.id).await;
 
     Ok(Json(json!({ "docId": doc.id, "path": doc.path, "docType": doc.doc_type,
                     "existing": false }))
         .into_response())
+}
+
+/// Tell every open document of a project that a file joined it (a sheet drawn by somebody else): the web
+/// editors read the project's file list again, so the new sheet opens and shows in the hierarchy without a reload.
+/// Sent when the document is made and again when its first content arrives.
+pub async fn notify_docs_added(state: &AppState, project_id: Uuid, doc_id: Uuid) {
+    if let Ok(docs) = persist::project_documents(&state.pool, project_id).await {
+        for d in docs {
+            let payload = json!({ "type": "docs", "docId": d.id, "addedDocId": doc_id, "projectId": project_id });
+            state.doc_event(d.id, crate::doc_actor::DocMsg::Notice { payload }).await;
+        }
+    }
 }
 
 /// The document types a client may delete or move: library files (a footprint, a symbol library, a library table,
@@ -2469,6 +2482,10 @@ pub async fn upload_snapshot(
     // which an update would silently clobber — that corrupted a restore once).
     let written =
         persist::insert_snapshot_new(&state.pool, doc_id, q.seq, &body, Some(user.id)).await?;
+    if written && q.seq == 0 {
+        // a new file's first content (after POST /api/projects/{id}/docs): peers that cached it empty read it again
+        notify_docs_added(&state, doc.project_id, doc_id).await;
+    }
     if q.saved == Some(true) {
         // Tell every open document of the project (each socket joins one document): the saved
         // document's own editors clear their '*', the others drop what they cached of it.
