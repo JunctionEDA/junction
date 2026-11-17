@@ -69658,7 +69658,8 @@ function footprintModels(node, guess = true, boardFiles2 = null) {
     if (/KICAD_COLLAB_3DMODELS/.test(path2)) {
       const hit5 = VENDOR_FIELDS.map(([f2, v]) => [v, fieldOf2(node, f2)]).find(([, id]) => id);
       if (!hit5) continue;
-      out2.push({ ...ref, source: "vendor", url: `/api/parts/model.step?vendor=${hit5[0]}&id=${encodeURIComponent(hit5[1])}` });
+      const at4 = [...ref.offset, ...ref.rotate].map((n2) => +n2.toFixed(4)).join(",");
+      out2.push({ ...ref, offset: [0, 0, 0], rotate: [0, 0, 0], source: "vendor", url: `/api/parts/model.step?vendor=${hit5[0]}&id=${encodeURIComponent(hit5[1])}&placed=1&at=${at4}` });
     } else out2.push({ ...ref, source: "kicad", url: kicadModelUrl(m[1], m[2]) });
   }
   if (!named && guess) {
