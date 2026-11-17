@@ -158,7 +158,7 @@ try {
   const uid = user('cad-analysis', 990401);
   const page = await open(uid, 'cad-analysis');
   const made = await S(page, async (text) => {
-    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'CAD analysis test' }) });
+    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'CAD analysis test', template: 'pcb' }) });
     const pid = (await r.json()).projectId;
     const d = await (await fetch(`/api/projects/${pid}/docs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: 'Bracket.jpart' }) })).json();
     const up = await fetch(`/api/docs/${d.docId}/snapshots?seq=0`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: text });

@@ -119,7 +119,7 @@ try {
   const uid = user('cad-features-ui', 990201);
   const page = await open(uid, 'cad-features-ui');
   const project = await page.evaluate(async () => {
-    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Enclosure test' }) });
+    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Enclosure test', template: 'pcb' }) });
     return { status: r.status, body: await r.json().catch(() => null) };
   });
   const pid = project.body.projectId;
