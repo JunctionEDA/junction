@@ -548,7 +548,9 @@ pub async fn preview_svg(
         // pushes a picture of an empty board), shows its root sheet.
         let fit = q.fit.unwrap_or(true);
         let mut svg = None;
-        for doc in docs.iter().find(|d| d.doc_type == "kicad_pcb").into_iter().chain(root_schematic(&docs)) {
+        // A project of mechanical parts alone shows its first part studio or assembly (dockind.rs).
+        let others = docs.iter().filter(|d| !d.doc_type.starts_with("kicad_") && crate::dockind::of(&d.doc_type).thumbnail);
+        for doc in docs.iter().find(|d| d.doc_type == "kicad_pcb").into_iter().chain(root_schematic(&docs)).chain(others) {
             if let Some((_seq, found)) = persist::get_preview(&state.pool, doc.id, fit).await? {
                 svg = Some(found);
                 break;

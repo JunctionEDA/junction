@@ -30,8 +30,10 @@ use uuid::Uuid;
 
 use crate::auth::{AuthUser, MaybeAuthUser};
 use crate::doc_actor::DocMsg;
+use crate::dockind::{self, BranchMerge};
 use crate::error::{AppError, AppResult};
 use crate::lenient_json::LenientJson;
+use crate::itemmerge;
 use crate::persist::{self, Document, User};
 use crate::AppState;
 
@@ -67,7 +69,7 @@ fn bad(msg: impl Into<String>) -> AppError {
 /// Documents that are edited item by item through ops.  Everything else (the project
 /// file, library tables, rules) is stored whole: each edit is a new snapshot.
 fn is_item_doc(doc_type: &str) -> bool {
-    matches!(doc_type, "kicad_sch" | "kicad_pcb")
+    dockind::of(doc_type).journalled()
 }
 
 #[derive(Debug, Clone)]
@@ -1419,6 +1421,10 @@ pub struct MergeRequest {
     /// Who has the last word on items both sides changed: `incoming` (default) or `current`.
     #[serde(default)]
     prefer: Option<String>,
+    /// The same, conflict by conflict: the `id` of a reported conflict to `incoming` or
+    /// `current`.  A conflict not named here goes by `prefer`.
+    #[serde(default)]
+    choices: HashMap<String, String>,
     #[serde(rename = "dryRun", default)]
     dry_run: bool,
 }
@@ -1428,6 +1434,14 @@ struct Pair {
     dst: Option<Document>,
     /// (src's ops after this are new to dst, dst's ops after this are new to src)
     since: Option<(i64, i64)>,
+}
+
+/// The items of a JSON item document as it is now (its snapshot with the ops since laid over it).
+async fn head_items(pool: &PgPool, doc: Uuid) -> AppResult<BTreeMap<String, Value>> {
+    let Some((seq, content)) = persist::latest_snapshot(pool, doc).await? else { return Ok(BTreeMap::new()) };
+    let ops = persist::ops_since(pool, doc, seq).await?;
+    let text = crate::itemdoc::fold_text(&String::from_utf8_lossy(&content), &ops.iter().map(|o| &o.changes).collect::<Vec<_>>()).unwrap_or_default();
+    Ok(itemmerge::items_of(&text).unwrap_or_default())
 }
 
 async fn latest_bytes(pool: &PgPool, doc: Uuid) -> AppResult<Option<Vec<u8>>> {
@@ -1493,13 +1507,18 @@ pub async fn merge(
         action: &'static str,
         incoming: Vec<Incoming>,
         conflicts: Vec<(String, String)>,
+        /// for a document merged path by path: the incoming side's net effect and the
+        /// conflicts found in it
+        paths: Option<(itemmerge::Net, Vec<itemmerge::Conflict>)>,
+        /// each conflict as the report shows it
+        detail: Vec<Value>,
         linear: bool,
         dst_changed: bool,
     }
     let mut steps = Vec::new();
     let mut all_linear = true;
     for pair in pairs {
-        let mut step = Step { action: "none", incoming: Vec::new(), conflicts: Vec::new(), linear: true, dst_changed: false, pair };
+        let mut step = Step { action: "none", incoming: Vec::new(), conflicts: Vec::new(), paths: None, detail: Vec::new(), linear: true, dst_changed: false, pair };
         let Some(dst) = step.pair.dst.clone() else {
             step.action = "add";
             steps.push(step);
@@ -1512,16 +1531,34 @@ pub async fn merge(
                 let theirs = own_ops(pool, dst.id, dst_after, src.id).await?;
                 step.dst_changed = !theirs.is_empty();
                 step.linear = linear(pool, src.id, src_after).await? && linear(pool, dst.id, dst_after).await?;
-                let mut dst_keys: HashSet<String> = HashSet::new();
-                for op in &theirs {
-                    dst_keys.extend(op.changes.iter().filter_map(change_key));
-                }
-                let mut seen = HashSet::new();
-                for op in &step.incoming {
-                    for c in &op.changes {
-                        if let Some(k) = change_key(c) {
-                            if dst_keys.contains(&k) && seen.insert(k.clone()) {
-                                step.conflicts.push((k, change_label(c)));
+                if dockind::of(&src.doc_type).branch_merge == BranchMerge::Paths {
+                    // item by item and path by path (itemmerge.rs)
+                    let incoming = itemmerge::net_of_ops(step.incoming.iter().flat_map(|op| op.changes.iter()));
+                    let current = itemmerge::net_of_ops(theirs.iter().flat_map(|op| op.changes.iter()));
+                    let found = itemmerge::conflicts(&incoming, &current);
+                    if !found.is_empty() {
+                        let (here, there) = (head_items(pool, dst.id).await?, head_items(pool, src.id).await?);
+                        for c in &found {
+                            let label = itemmerge::conflict_label(c, here.get(&c.id).or_else(|| there.get(&c.id)));
+                            step.detail.push(json!({ "id": c.key(), "label": label, "item": c.id, "path": c.path,
+                                                     "incoming": c.incoming.to_json(), "current": c.current.to_json() }));
+                            step.conflicts.push((c.key(), label));
+                        }
+                    }
+                    step.paths = Some((incoming, found));
+                } else {
+                    let mut dst_keys: HashSet<String> = HashSet::new();
+                    for op in &theirs {
+                        dst_keys.extend(op.changes.iter().filter_map(change_key));
+                    }
+                    let mut seen = HashSet::new();
+                    for op in &step.incoming {
+                        for c in &op.changes {
+                            if let Some(k) = change_key(c) {
+                                if dst_keys.contains(&k) && seen.insert(k.clone()) {
+                                    step.detail.push(json!({ "id": k, "label": change_label(c) }));
+                                    step.conflicts.push((k, change_label(c)));
+                                }
                             }
                         }
                     }
@@ -1554,6 +1591,7 @@ pub async fn merge(
                     } else {
                         step.action = "take";
                         step.dst_changed = true;
+                        step.detail.push(json!({ "id": src.path, "label": format!("the file {}", src.path) }));
                         step.conflicts.push((src.path.clone(), format!("the file {}", src.path)));
                     }
                 }
@@ -1567,9 +1605,9 @@ pub async fn merge(
         .iter()
         .map(|s| {
             json!({
-                "path": s.pair.src.path, "action": s.action, "ops": s.incoming.len(),
+                "path": s.pair.src.path, "docType": s.pair.src.doc_type, "action": s.action, "ops": s.incoming.len(),
                 "changes": s.incoming.iter().map(|o| o.changes.len()).sum::<usize>(),
-                "conflicts": s.conflicts.iter().map(|(id, label)| json!({ "id": id, "label": label })).collect::<Vec<_>>(),
+                "conflicts": s.detail,
                 "changedHere": s.dst_changed,
             })
         })
@@ -1597,6 +1635,12 @@ pub async fn merge(
     let before = if into_main { format!("Before merging \"{branch_label}\"") } else { "Before updating from main".to_string() };
     keep_before(&state, &user, dst_project, &before).await?;
 
+    // who has the last word on one conflict: the person's choice for it, else `prefer`
+    let keeps_current = |key: &str| match req.choices.get(key).map(String::as_str) {
+        Some("current") => true,
+        Some("incoming") => false,
+        _ => keep_current,
+    };
     for step in steps {
         let src = step.pair.src;
         match (step.pair.dst, step.action) {
@@ -1624,8 +1668,14 @@ pub async fn merge(
                         let Some(p) = head_point(pool, &src).await? else { continue };
                         restore_point(&state, user.id, dst.id, &p).await?;
                     }
+                } else if let (true, Some((net, found))) = (item, &step.paths) {
+                    // one op: the incoming side's net effect, less what the person kept
+                    let changes = itemmerge::resolve(net, found, |c| keeps_current(&c.key()));
+                    if let (Some(last), false) = (step.incoming.last(), changes.is_empty()) {
+                        replay(&state, user.id, src.id, dst.id, &[Incoming { seq: last.seq, changes }]).await?;
+                    }
                 } else if item {
-                    let skip: HashSet<&str> = if keep_current { step.conflicts.iter().map(|(k, _)| k.as_str()).collect() } else { HashSet::new() };
+                    let skip: HashSet<&str> = step.conflicts.iter().map(|(k, _)| k.as_str()).filter(|k| keeps_current(k)).collect();
                     let ops: Vec<Incoming> = step
                         .incoming
                         .into_iter()
@@ -1636,7 +1686,7 @@ pub async fn merge(
                         .filter(|op| !op.changes.is_empty())
                         .collect();
                     replay(&state, user.id, src.id, dst.id, &ops).await?;
-                } else if action == "take" && !(keep_current && !step.conflicts.is_empty()) {
+                } else if action == "take" && !step.conflicts.iter().any(|(k, _)| keeps_current(k)) {
                     let Some(p) = head_point(pool, &src).await? else { continue };
                     restore_point(&state, user.id, dst.id, &p).await?;
                 }
