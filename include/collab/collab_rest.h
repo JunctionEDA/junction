@@ -102,6 +102,15 @@ KICOMMON_API std::optional<std::string> DownloadLibraryModel( const wxString& aS
                                                               const wxString& aName,
                                                               bool* aNoAnswer = nullptr );
 
+/// GET /api/parts/model-file?name=&as= -> the STEP file of a vendor part's model, by the name a footprint gives it:
+/// ${KICAD_COLLAB_3DMODELS}/<lib>.3dshapes/<aName>.step (aForm "fit": lined up for the footprint Junction wrote), or
+/// an easyeda2kicad path (aForm "placed" for its .wrl, "raw" for its .step).  aNoAnswer as for DownloadLibraryModel.
+KICOMMON_API std::optional<std::string> DownloadPartModel( const wxString& aServerUrl,
+                                                           const wxString& aToken,
+                                                           const wxString& aName,
+                                                           const wxString& aForm,
+                                                           bool* aNoAnswer = nullptr );
+
 /// PUT /api/projects/{id}/fonts/file?family=&bold=&italic=&index=&name= with the font file:
 /// keep a font of this computer with the project.  Refused (403, with the reason) when the
 /// font's embedding permission forbids it.

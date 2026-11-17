@@ -205,9 +205,8 @@ test("a footprint's 3D models: KiCad's library by library and name, a vendor par
   const old = G.footprintModels(first(fp(`(model "\${KISYS3DMOD}/Crystal.3dshapes/Crystal_SMD_3225-4Pin_3.2x2.5mm.wrl" (at (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`)).node);
   assert.strictEqual(old[0].url, "/api/kicad-lib/model?lib=Crystal&name=Crystal_SMD_3225-4Pin_3.2x2.5mm&fallback=1", "an old .wrl path names the same library model");
   const v = G.footprintModels(first(fp(`(model "\${KICAD_COLLAB_3DMODELS}/Parts.3dshapes/TS-1187A.step" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`, `(property "LCSC" "C318884" (at 0 0) (layer "F.Fab") (hide yes))`)).node);
-  assert.strictEqual(v[0].source, "vendor"); assert.strictEqual(v[0].url, "/api/parts/model.step?vendor=lcsc&id=C318884&placed=1&at=0,0,0,0,0,0", "placed by the store, the entry's numbers in the URL");
+  assert.strictEqual(v[0].source, "vendor"); assert.strictEqual(v[0].url, "/api/parts/model.step?vendor=lcsc&id=C318884&fit=1", "the server lines the file up for the entry");
   assert.deepStrictEqual(v[0].offset, [0, 0, 0]);
-  assert.deepStrictEqual(G.entryAt("/api/parts/model.step?vendor=lcsc&id=C1&placed=1&at=0,-4.9,3.8,0,0,90"), { offset: [0, -4.9, 3.8], rotate: [0, 0, 90] });
   assert.strictEqual(G.footprintModels(first(fp(`(model "\${KICAD10_3DMODEL_DIR}/A.3dshapes/B.step" (hide yes))`)).node).length, 0, "a hidden model is not drawn");
   // a footprint that names no model is looked up under its own library name, unless the caller wants only what the file names
   const bare = first(fp("")).node; const g = G.footprintModels(bare);
@@ -236,13 +235,16 @@ test("a model under another tool's path variable: the project's copy, else the p
   const wrl = `(model "\${EASYEDA2KICAD}/easyeda2kicad.3dshapes/USB-A-TH_4P-L14.5-W14.0-H7.6-S2.71.wrl" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`;
   const a = G.footprintModels(first(fp(wrl)).node);
   assert.strictEqual(a.length, 1); assert.strictEqual(a[0].source, "vendor");
-  assert.strictEqual(a[0].url, "/api/parts/model.step?vendor=lcsc&id=C456018&placed=1", "easyeda2kicad's .wrl has the offset baked in: the vendor's own placement is used");
+  assert.strictEqual(a[0].url, "/api/parts/model.step?vendor=lcsc&id=C456018&fit=1&placed=1", "easyeda2kicad's .wrl has the offset baked in: the vendor's own placement is used");
   // a .step lined up by hand keeps its offset; the hidden .wrl beside it is not drawn
   const tuned = `(model "\${EASYEDA2KICAD}/easyeda2kicad.3dshapes/X.wrl" (hide yes)) (model "\${EASYEDA2KICAD}/easyeda2kicad.3dshapes/X.step" (offset (xyz 0 -1.5 1.7)) (scale (xyz 1 1 1)) (rotate (xyz -0 -0 -0)))`;
   const t = G.footprintModels(first(fp(tuned)).node);
   assert.strictEqual(t.length, 1); assert.strictEqual(t[0].url, "/api/parts/model.step?vendor=lcsc&id=C456018"); assert.deepStrictEqual(t[0].offset, [0, -1.5, 1.7]);
-  // a .wrl and a .step of the same part both visible: drawn once
-  assert.strictEqual(G.footprintModels(first(fp(wrl + wrl.replace(".wrl", ".step"))).node).length, 1);
+  // easyeda2kicad's .step is the vendor's file as it is, at the entry's numbers (0 0 0 here), as KiCad draws it
+  const raw = G.footprintModels(first(fp(wrl.replace(".wrl", ".step"))).node);
+  assert.strictEqual(raw[0].url, "/api/parts/model.step?vendor=lcsc&id=C456018"); assert.deepStrictEqual(raw[0].offset, [0, 0, 0]);
+  // the same .wrl twice: drawn once
+  assert.strictEqual(G.footprintModels(first(fp(wrl + wrl)).node).length, 1);
   // no LCSC number: KiCad's library is asked as before (the closest model it has, or the stand-in)
   const none = G.footprintModels(first(fp(wrl, "")).node);
   assert.strictEqual(none[0].source, "kicad");
@@ -250,20 +252,11 @@ test("a model under another tool's path variable: the project's copy, else the p
   globalThis.KiCadProjectModel = (stem) => (stem === "/easyeda2kicad.3dshapes/USB-A-TH_4P-L14.5-W14.0-H7.6-S2.71" ? "/api/docs/e2k/content" : null);
   try { const p = G.footprintModels(first(fp(wrl)).node); assert.strictEqual(p[0].source, "project"); assert.strictEqual(p[0].url, "/api/docs/e2k/content"); }
   finally { delete globalThis.KiCadProjectModel; }
-  // the vendor mesh is placed as EasyEDA places it: its box centred and stood on Z = 0, moved, then turned
-  // (USB-A C456018: box x ±7.75, y -13.5..0.5, z -3.87..7.64; offset 0,-4.9,3.8 puts its leads on its pads, y = 1.35)
-  const mesh = { pos: new Float32Array([-7.75, -13.5, -3.87, 7.75, 0.5, 7.64, 3.5, -0.25, -3.87]), nrm: new Float32Array(9), col: new Float32Array(9), idx: new Uint32Array(0) };
+  // the lined-up file gets the vendor's offset and turn, as KiCad would apply them
+  const mesh = { pos: new Float32Array([1, 0, 0]), nrm: new Float32Array([1, 0, 0]), col: new Float32Array(3), idx: new Uint32Array(0) };
   const h = (o, r) => ({ get: (n) => (n === "x-model-offset" ? o : n === "x-model-rotate" ? r : null) });
-  const m = G.vendorPlaced(mesh, h("0,-4.9,3.8", "0,0,0"));
-  [3.5, 1.35, -3.8].forEach((v, i) => near(m.pos[6 + i], v, 1e-4, `lead ${i}`));
-  const tt = G.vendorPlaced(mesh, h("0,-4.9,3.8", "0,0,90"));
-  [1.35, -3.5].forEach((v, i) => near(tt.pos[6 + i], v, 1e-4, `turned lead ${i}`));
-  // Junction's own part import writes the vendor's numbers into the footprint: placed as EasyEDA places it
-  const same = G.vendorPlaced(mesh, h("0,-4.9,3.8", "0,0,0"), { offset: [0, -4.9, 3.8], rotate: [0, 0, 0] });
-  [3.5, 1.35, -3.8].forEach((v, i) => near(same.pos[6 + i], v, 1e-4, `imported lead ${i}`));
-  // an entry someone moved is KiCad's offset on the file as it is
-  const moved = G.vendorPlaced(mesh, h("0,-4.9,3.8", "0,0,0"), { offset: [0, 1.6, 0], rotate: [0, 0, 0] });
-  [3.5, 1.35, -3.87].forEach((v, i) => near(moved.pos[6 + i], v, 1e-4, `moved lead ${i}`));
+  const m = G.vendorPlaced(mesh, h("0,2,1", "0,0,90"));
+  [0, 1, 1].forEach((v, i) => near(m.pos[i], v, 1e-6, `pos ${i}`));
   assert.strictEqual(G.vendorPlaced(mesh, h(null, null)), mesh, "no headers: as the file has it");
 });
 
