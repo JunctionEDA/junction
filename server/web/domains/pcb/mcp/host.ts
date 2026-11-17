@@ -40,6 +40,7 @@ import { getBom } from "./bom";
 import { buildPackage, packageZip } from "../fab/index";
 import { renderPicture, type Emphasis } from "./picture";
 import { findPerson, highlight, people, resolveTargets, settle, traceNet } from "./teammate";
+import { topLevelSheetsOf } from "../editor/bootpick";
 import { DocSession, editProjectFile, readTextDocument, type Conn, type DocEntry, type UndoRecord } from "./session";
 
 declare const process: any;
@@ -143,8 +144,13 @@ function sheetContext(doc: any, entry: DocEntry, p: Project, pro: string | null)
   try { const v = pro ? JSON.parse(pro).text_variables : null; doc.projectVars = v && typeof v === "object" && Object.keys(v).length ? v : null; } catch { doc.projectVars = null; }
   if (doc.type !== "sch") { doc.sheetName = ""; doc.sheetPath = ""; doc.sheetCount = 1; return; }
   doc.sheetCount = p.docs.filter((d) => d.docType === "kicad_sch").length || 1;
+  // several top-level sheets (SCHEMATIC::GetTopLevelSheets): each is named by the project file, and in its path
+  let tops: { doc: DocEntry; name: string }[] = [];
+  try { tops = topLevelSheetsOf(pro ? JSON.parse(pro) : null, p.docs, p.docs); } catch { tops = []; }
+  const top = tops.length > 1 ? tops.find((t) => t.doc.docId === entry.docId) : undefined;
   const root = rootSchematic(p);
-  if (root && root.docId === entry.docId) { doc.sheetName = "Root"; doc.sheetPath = "/"; }
+  if (top) { doc.sheetName = top.name; doc.sheetPath = "/" + top.name + "/"; }
+  else if (root && root.docId === entry.docId) { doc.sheetName = "Root"; doc.sheetPath = "/"; }
   else { doc.sheetName = baseName(entry.path).replace(/\.kicad_sch$/, ""); doc.sheetPath = "/" + doc.sheetName + "/"; }
 }
 
@@ -369,13 +375,16 @@ async function schematicSpice(req: Request, p: Project, withCommands: boolean, n
     const files = new Map<string, { doc: any; uuid: string; file: string }>();
     for (const d of schs) { try { const dd = d.path === root.path ? doc : (await design.resolveDoc(d.path)).doc; files.set(d.path, { doc: dd, uuid: dd.uuid || "", file: d.path }); } catch { /* reported as a missing sheet */ } }
     const rootFile = files.get(root.path)!;
+    // a KiCad 10 project with several top-level sheets: the netlist covers all of them (unless a sheet was named)
+    let tops: { sheet: { doc: any; uuid: string; file: string }; name: string; uuid: string }[] = [];
+    if (!req.args.document) { try { const pt = await projectFile(p); tops = topLevelSheetsOf(pt ? JSON.parse(pt) : null, p.docs, p.docs).map((t) => ({ sheet: files.get(t.doc.path)!, name: t.name, uuid: t.uuid })).filter((t) => !!t.sheet); } catch { tops = []; } }
     const resolve = (file: string, parent: { file: string }) => {
       const parts = [...parent.file.split("/").slice(0, -1), ...file.split("/")].filter((x) => x && x !== "."); const out: string[] = [];
       for (const x of parts) { if (x === "..") out.pop(); else out.push(x); }
       return files.get(out.join("/")) || files.get(file) || null;
     };
     const isPower = (d: any, it: any) => hp.isPowerSymbol(d, String((k.kid(it.node, "lib_id") || [])[1]));
-    const nl = k.pcbNetlist.buildNetlist(rootFile, resolve, { symbolPins: hp.symbolPins, isPower }, root.path.split("/").pop()!.replace(/\.kicad_sch$/, ""));
+    const nl = k.pcbNetlist.buildNetlist(tops.length > 1 ? tops : rootFile, resolve, { symbolPins: hp.symbolPins, isPower }, root.path.split("/").pop()!.replace(/\.kicad_sch$/, ""));
     const insts: any[] = nl.instances || []; const docOf = (f: string) => { const x = files.get(f); return x ? x.doc : null; };
     const placed = new Map<string, any>(NK.nlSheets(insts, docOf).map((x: any) => [x.uuidPath.join("/"), x]));
     const parentDoc = (u: string[]) => { const par = insts.find((i) => i.uuidPath.length === u.length - 1 && i.uuidPath.every((x: string, j: number) => u[j] === x)); return par ? docOf(par.file) : null; };

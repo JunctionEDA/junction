@@ -2715,15 +2715,15 @@ function buildSymbolGeom(doc2, item) {
     const hideNames = !!(pn && (has(pn, "hide") || kid(pn, "hide") && str(kid(pn, "hide")[1]) === "yes"));
     const pnu = kid(lib, "pin_numbers");
     const hideNums = !!(pnu && (has(pnu, "hide") || kid(pnu, "hide") && str(kid(pnu, "hide")[1]) === "yes"));
-    const subs = kids(lib, "symbol");
+    const subs2 = kids(lib, "symbol");
     let maxNameHalf = 0;
-    for (const sub2 of subs) for (const p of kids(sub2, "pin")) {
+    for (const sub2 of subs2) for (const p of kids(sub2, "pin")) {
       const nm3 = kid(p, "name");
       if (nm3 && str(nm3[1]) && (str(nm3[1]) !== "~" || (doc2.version || 0) >= TILDE_LITERAL_VERSION)) maxNameHalf = Math.max(maxNameHalf, effectsOf(nm3).size / 2);
     }
     const sym = { nameOff, hideNames, hideNums, maxNameHalf, col, alpha, literalTilde: (doc2.version || 0) >= TILDE_LITERAL_VERSION, altIcons: schDisplay.pinAltIcons };
     const geomStart = item.geom.length;
-    for (const sub2 of subs) {
+    for (const sub2 of subs2) {
       const m = str(sub2[1]).match(/_(\d+)_(\d+)$/);
       const u = m ? +m[1] : 0, s2 = m ? +m[2] : 1;
       if (u !== 0 && u !== unit2 || s2 !== 0 && s2 !== style) continue;
@@ -5128,9 +5128,9 @@ function cmapLookup(dv, cmap) {
       if (f42 < 0 || pid === 3) f42 = off;
     }
   }
-  const cache5 = /* @__PURE__ */ new Map();
+  const cache6 = /* @__PURE__ */ new Map();
   return (cp2) => {
-    let g2 = cache5.get(cp2);
+    let g2 = cache6.get(cp2);
     if (g2 !== void 0) return g2;
     g2 = 0;
     if (f12 >= 0) {
@@ -5157,7 +5157,7 @@ function cmapLookup(dv, cmap) {
         break;
       }
     }
-    cache5.set(cp2, g2);
+    cache6.set(cp2, g2);
     return g2;
   };
 }
@@ -9124,12 +9124,12 @@ function writeVariantRegistry(pro, reg) {
   Object.assign(sch, rebuilt);
 }
 function renameSymbolVariants(sym, from, to, copy = false) {
-  let changed = false;
+  let changed2 = false;
   const out2 = clone(sym);
   for (const inst of symbolInstancePaths(out2)) {
     const v = symVariantIn(inst, from);
     if (!v) continue;
-    changed = true;
+    changed2 = true;
     if (to === null) {
       inst.splice(inst.indexOf(v), 1);
       continue;
@@ -9148,7 +9148,7 @@ function renameSymbolVariants(sym, from, to, copy = false) {
       inst.splice(after ? inst.indexOf(after) + 1 : others.length ? inst.indexOf(others[0]) : inst.length, 0, nv);
     }
   }
-  return changed ? out2 : sym;
+  return changed2 ? out2 : sym;
 }
 function insertVariantSorted(inst, node) {
   const others = kids2(inst, "variant"), name = variantName(node);
@@ -9158,7 +9158,7 @@ function insertVariantSorted(inst, node) {
 function restoreSymbolVariants(cur2, snap2, names2) {
   if (!names2.length) return cur2;
   const want2 = new Set(names2), out2 = clone(cur2);
-  let changed = false;
+  let changed2 = false;
   const snapInst = /* @__PURE__ */ new Map();
   for (const p of symbolInstancePaths(snap2)) snapInst.set(str2(p[1]), p);
   for (const inst of symbolInstancePaths(out2)) {
@@ -9166,11 +9166,11 @@ function restoreSymbolVariants(cur2, snap2, names2) {
     const wanted2 = src ? kids2(src, "variant").filter((v) => want2.has(variantName(v))) : [];
     const have = kids2(inst, "variant").filter((v) => want2.has(variantName(v)));
     if (JSON.stringify(wanted2) === JSON.stringify(have)) continue;
-    changed = true;
+    changed2 = true;
     for (const v of have) inst.splice(inst.indexOf(v), 1);
     for (const v of wanted2) insertVariantSorted(inst, clone(v));
   }
-  return changed ? out2 : cur2;
+  return changed2 ? out2 : cur2;
 }
 function registryDelta(before, after) {
   const out2 = [];
@@ -9404,8 +9404,8 @@ function setPath(root5, path2, value, floats = true) {
 }
 function editProject(text3, edits) {
   const root5 = parseProject(text3);
-  const changed = edits.filter((e) => setPath(root5, e.path, e.value, !e.ints));
-  return { text: changed.length ? stringifyProject(root5) : text3, changed };
+  const changed2 = edits.filter((e) => setPath(root5, e.path, e.value, !e.ints));
+  return { text: changed2.length ? stringifyProject(root5) : text3, changed: changed2 };
 }
 function designSettingsOf(root5) {
   const p = toPlain(getPath(root5, ["board", "design_settings"]));
@@ -9641,7 +9641,7 @@ var require_pcb_tools = __commonJS({
       var HIT_MM = 0.2;
       var DBL_MS = 400;
       var BOARD_VERSION = 20260728;
-      var S2 = {
+      var S3 = {
         layer: "F.Cu",
         gfxLayer: "F.Cu",
         // graphics, text and dimensions are drawn on the active layer, as DRAWING_TOOL does
@@ -9734,7 +9734,7 @@ var require_pcb_tools = __commonJS({
       var fpEditorDefaults = false;
       var footprintEditorDefaults = () => fpEditorDefaults;
       function useFootprintEditorDefaults(on2) {
-        if (on2 !== fpEditorDefaults) S2.angleSnap = void 0;
+        if (on2 !== fpEditorDefaults) S3.angleSnap = void 0;
         fpEditorDefaults = on2;
         if (on2) {
           Object.assign(DIM_DEFAULTS, DIM_DEFAULTS0);
@@ -10412,7 +10412,7 @@ var require_pcb_tools = __commonJS({
         setAngleKid(node, angleKid(node) + 180);
       }
       function selectionIds2(ctx) {
-        const s2 = new Set(S2.sel);
+        const s2 = new Set(S3.sel);
         if (ctx.selection) for (const id of ctx.selection) s2.add(id);
         if (ctx.selected && ctx.selected.id) s2.add(ctx.selected.id);
         for (const id of Array.from(s2)) if (!ctx.doc.items.has(id)) s2.delete(id);
@@ -10422,10 +10422,10 @@ var require_pcb_tools = __commonJS({
       function applySelection(ctx, ids) {
         const arr4 = Array.from(ids).filter((id) => ctx.doc.items.has(id));
         if (typeof ctx.setSelection === "function") {
-          S2.sel.clear();
+          S3.sel.clear();
           ctx.setSelection(arr4);
         } else {
-          S2.sel = new Set(arr4.filter((id) => ctx.doc.items.get(id).kind !== "footprint"));
+          S3.sel = new Set(arr4.filter((id) => ctx.doc.items.get(id).kind !== "footprint"));
           if (ctx.setSelected) {
             const fp = arr4.map((id) => ctx.doc.items.get(id)).find((it) => it.kind === "footprint");
             ctx.setSelected(fp ? { id: fp.id } : null);
@@ -10453,7 +10453,7 @@ var require_pcb_tools = __commonJS({
       }
       function scopeOf(doc2) {
         const out2 = /* @__PURE__ */ new Set();
-        let g2 = S2.enteredGroup && doc2.items.has(S2.enteredGroup) ? S2.enteredGroup : null, guard = 0;
+        let g2 = S3.enteredGroup && doc2.items.has(S3.enteredGroup) ? S3.enteredGroup : null, guard = 0;
         while (g2 && guard++ < 32) {
           out2.add(g2);
           const p = parentOf(doc2, g2);
@@ -11662,16 +11662,16 @@ var require_pcb_tools = __commonJS({
         const ps = K22(n2, "padstack");
         if (ps) {
           const mode2 = str9((K22(ps, "mode") || [])[1]);
-          const entry = /* @__PURE__ */ new Map();
+          const entry2 = /* @__PURE__ */ new Map();
           for (const l of kids7(ps, "layer")) {
             const s2 = K22(l, "size");
-            if (s2) entry.set(str9(l[1]), num13(s2[1], size2));
+            if (s2) entry2.set(str9(l[1]), num13(s2[1], size2));
           }
           sizes2 = /* @__PURE__ */ new Map();
           for (const l of layers) {
             if (l === "F.Cu") sizes2.set(l, size2);
-            else if (mode2 === "front_inner_back") sizes2.set(l, l === "B.Cu" ? entry.get("B.Cu") ?? size2 : entry.get("Inner") ?? entry.get(copper[1]) ?? size2);
-            else sizes2.set(l, entry.get(l) ?? size2);
+            else if (mode2 === "front_inner_back") sizes2.set(l, l === "B.Cu" ? entry2.get("B.Cu") ?? size2 : entry2.get("Inner") ?? entry2.get(copper[1]) ?? size2);
+            else sizes2.set(l, entry2.get(l) ?? size2);
           }
         }
         const ru = K22(n2, "remove_unused_layers"), ke = K22(n2, "keep_end_layers"), zl = K22(n2, "zone_layer_connections");
@@ -20668,13 +20668,13 @@ var require_pcb_tools = __commonJS({
       function makeDict(meta22, attrs, strings) {
         var m = {};
         for (var i = 0; i < meta22.length; i += 1) {
-          var entry = meta22[i];
-          var value = attrs[entry.name];
-          if (value !== void 0 && !equals2(value, entry.value)) {
-            if (entry.type === "SID") {
+          var entry2 = meta22[i];
+          var value = attrs[entry2.name];
+          if (value !== void 0 && !equals2(value, entry2.value)) {
+            if (entry2.type === "SID") {
               value = encodeString(value, strings);
             }
-            m[entry.op] = { name: entry.name, type: entry.type, value };
+            m[entry2.op] = { name: entry2.name, type: entry2.type, value };
           }
         }
         return m;
@@ -28515,7 +28515,7 @@ var require_pcb_tools = __commonJS({
           if (li >= u16(lookups)) continue;
           const lk = lookups + u16(lookups + 2 + 2 * li);
           let type = u16(lk);
-          const subs = [];
+          const subs2 = [];
           for (let i = 0, c = u16(lk + 4); i < c; i++) {
             let so = lk + u16(lk + 6 + 2 * i), t = type;
             if (t === 9) {
@@ -28524,9 +28524,9 @@ var require_pcb_tools = __commonJS({
             }
             if (t !== 2) continue;
             const s2 = subtable(so);
-            if (s2) subs.push(s2);
+            if (s2) subs2.push(s2);
           }
-          if (subs.length) tables2.push(subs);
+          if (subs2.length) tables2.push(subs2);
           type = 0;
         }
         if (!tables2.length) return NONE2;
@@ -28536,7 +28536,7 @@ var require_pcb_tools = __commonJS({
           let v = memo.get(key3);
           if (v === void 0) {
             v = 0;
-            for (const subs of tables2) for (const s2 of subs) {
+            for (const subs2 of tables2) for (const s2 of subs2) {
               const k = s2(l, r);
               if (k !== void 0) {
                 v += k;
@@ -29269,14 +29269,14 @@ var require_pcb_tools = __commonJS({
         if (![CM_M45, CM_R45, CM_M90, CM_R90].includes(out2.corner_mode)) out2.corner_mode = CM_M45;
         return out2;
       }
-      S2.rs = parseRouterSettings(lsGet(RS_KEY));
+      S3.rs = parseRouterSettings(lsGet(RS_KEY));
       function setRouterSettings(patch) {
-        Object.assign(S2.rs, patch);
-        S2.rs = parseRouterSettings(JSON.stringify(S2.rs));
-        lsSet(RS_KEY, JSON.stringify(S2.rs));
+        Object.assign(S3.rs, patch);
+        S3.rs = parseRouterSettings(JSON.stringify(S3.rs));
+        lsSet(RS_KEY, JSON.stringify(S3.rs));
         const ctx = lastCtx;
-        if (ctx && ctx.doc && S2.route) {
-          S2.route.collisions = null;
+        if (ctx && ctx.doc && S3.route) {
+          S3.route.collisions = null;
           updateHead(ctx);
         }
         if (ctx && ctx.requestRender) ctx.requestRender();
@@ -29290,7 +29290,7 @@ var require_pcb_tools = __commonJS({
       var is90 = (cm) => cm === CM_M90 || cm === CM_R90;
       var isRounded = (cm) => cm === CM_R45 || cm === CM_R90;
       function routerChecks() {
-        const rs = S2.rs;
+        const rs = S3.rs;
         return {
           "PCB_ACTIONS::routerHighlightMode": rs.mode === RM_MARK,
           "PCB_ACTIONS::routerShoveMode": rs.mode === RM_SHOVE,
@@ -29474,7 +29474,7 @@ var require_pcb_tools = __commonJS({
           if (coupled && cNet && cNet.name) add22("Routed Lengths", V(len3) + ", " + V(routedLength(doc2, coupled.id)));
           else add22("Routed Length", V(len3));
         }
-        const rule2 = S2.ruleConstraint ? S2.ruleConstraint(doc2, mode2 === "diff_pair_skew" ? "skew" : "length", primary, coupled) : null;
+        const rule2 = S3.ruleConstraint ? S3.ruleConstraint(doc2, mode2 === "diff_pair_skew" ? "skew" : "length", primary, coupled) : null;
         if (mode2 === "diff_pair_skew") {
           if (!rule2 || override2) add22(`Target Skew: ${V(numOf("target_skew") || 0)}`, "(from tuning pattern properties)");
           else if (rule2.text) add22(`Skew Constraints: ${rule2.text}`, `(from ${rule2.name})`);
@@ -29493,7 +29493,7 @@ var require_pcb_tools = __commonJS({
         const rt = opts2.route;
         if (rt) {
           const net = rt.net && (rt.net.name || "");
-          const rs = opts2.routerSettings || S2.rs;
+          const rs = opts2.routerSettings || S3.rs;
           if (rt.dp) {
             const netB = rt.netN && rt.netN.name || "";
             const ncA = NN(net), ncB = NN(netB);
@@ -29822,13 +29822,13 @@ var require_pcb_tools = __commonJS({
       }
       var CLR_TYPES = /* @__PURE__ */ new Set(["clearance", "hole_clearance", "edge_clearance", "physical_clearance", "physical_hole_clearance", "hole_to_hole"]);
       function routerRules() {
-        const d = S2.dru;
+        const d = S3.dru;
         if (!d || !d.rules.length) return null;
-        if (S2.routerRulesFor !== d) {
-          S2.routerRulesFor = d;
-          S2.routerRulesList = d.rules.filter((r) => !r.error && r.constraints.some((c) => CLR_TYPES.has(c.type)));
+        if (S3.routerRulesFor !== d) {
+          S3.routerRulesFor = d;
+          S3.routerRulesList = d.rules.filter((r) => !r.error && r.constraints.some((c) => CLR_TYPES.has(c.type)));
         }
-        return S2.routerRulesList && S2.routerRulesList.length ? S2.routerRulesList : null;
+        return S3.routerRulesList && S3.routerRulesList.length ? S3.routerRulesList : null;
       }
       function routedRuleItem(A) {
         const net = ["net", A.net || ""];
@@ -29841,19 +29841,19 @@ var require_pcb_tools = __commonJS({
         const kind = ob.kind === "track" || ob.kind === "line" ? "segment" : ob.kind;
         return { kind, node: [kind, ["layer", layer4 || "F.Cu"], ["net", ob.net || ""]], layer: layer4 };
       }
-      var cache5 = /* @__PURE__ */ new Map();
+      var cache6 = /* @__PURE__ */ new Map();
       var cacheVer = null;
       var cacheDru = null;
       function customRouteClearance(doc2, s2, A, ob, layer4) {
         const rules = routerRules();
         if (!rules || !doc2) return null;
-        if (cacheVer !== S2.docVer || cacheDru !== S2.dru) {
-          cache5.clear();
-          cacheVer = S2.docVer;
-          cacheDru = S2.dru;
+        if (cacheVer !== S3.docVer || cacheDru !== S3.dru) {
+          cache6.clear();
+          cacheVer = S3.docVer;
+          cacheDru = S3.dru;
         }
         const key3 = (A.kind || "segment") + "|" + A.net + "|" + (layer4 || "") + "|" + (A.width || "") + "|" + ob.kind + "|" + (ob.id || "") + "|" + ob.net;
-        if (cache5.has(key3)) return cache5.get(key3);
+        if (cache6.has(key3)) return cache6.get(key3);
         const a = routedRuleItem(Object.assign({}, A, { layer: layer4 })), b = obstacleRuleItem(ob, layer4);
         const q4 = (type) => {
           const h3 = evalRuleConstraint(rules, type, doc2, s2, a, b) || evalRuleConstraint(rules, type, doc2, s2, b, a);
@@ -29873,7 +29873,7 @@ var require_pcb_tools = __commonJS({
           if (c != null) take(c > 0 ? Math.max(c, s2.minClearance || 0) : 0);
         }
         take(q4("physical_clearance"));
-        cache5.set(key3, rv);
+        cache6.set(key3, rv);
         return rv;
       }
       function rulePairClearance(doc2, s2, netA, netB, layer4, kindB) {
@@ -29889,7 +29889,7 @@ var require_pcb_tools = __commonJS({
         return v;
       };
       function ruleSizes(doc2, s2, net, layer4, coupled) {
-        const d = S2.dru;
+        const d = S3.dru;
         const out2 = { width: null, viaDiameter: null, viaDrill: null, dpGap: null, dpWidth: null, widthRule: null, gapRule: null };
         if (!d || !d.rules.length || !doc2) return out2;
         const tr = routedRuleItem({ net, layer: layer4 }), via = routedRuleItem({ kind: "via", net, layer: layer4 }), co = coupled ? routedRuleItem({ net: coupled, layer: layer4 }) : null;
@@ -29923,7 +29923,7 @@ var require_pcb_tools = __commonJS({
       }
       function routerWorld(doc2) {
         if (doc2.__bc && doc2.__bc.rworld) return doc2.__bc.rworld;
-        if (!doc2.__bc && S2.rworld && S2.rworld.doc === doc2 && S2.rworld.ver === S2.docVer) return S2.rworld;
+        if (!doc2.__bc && S3.rworld && S3.rworld.doc === doc2 && S3.rworld.ver === S3.docVer) return S3.rworld;
         const copper = copperOf(doc2);
         const conds = conductors(doc2).filter((c) => c.kind !== "zone");
         const holes = [], keepouts2 = [];
@@ -29961,11 +29961,11 @@ var require_pcb_tools = __commonJS({
           }
         }
         const edges = edgeShapes(doc2).shapes.map((shape3) => ({ id: null, kind: "edge", shape: shape3, bbox: shapeBBox(shape3) }));
-        const W12 = { doc: doc2, ver: S2.docVer, conds, holes, keepouts: keepouts2, edges, copper };
+        const W12 = { doc: doc2, ver: S3.docVer, conds, holes, keepouts: keepouts2, edges, copper };
         if (doc2.__bc) doc2.__bc.rworld = W12;
         else {
-          S2.rworld = W12;
-          S2.sworld = null;
+          S3.rworld = W12;
+          S3.sworld = null;
         }
         return W12;
       }
@@ -30388,10 +30388,10 @@ var require_pcb_tools = __commonJS({
       function arcTrackNode(doc2, a, m, b, width, layer4, net) {
         return ["arc", ["start", r65(a[0]), r65(a[1])], ["mid", r65(m[0]), r65(m[1])], ["end", r65(b[0]), r65(b[1])], ["width", r65(width)], ["layer", layer4], netNode(doc2, net)];
       }
-      S2.tuneSettings = { single: meanderDefaults(), diffpair: meanderDefaults(), skew: meanderDefaults() };
+      S3.tuneSettings = { single: meanderDefaults(), diffpair: meanderDefaults(), skew: meanderDefaults() };
       var TUNE_TOOLS = /* @__PURE__ */ new Set(["tunesingle", "tunediff", "tuneskew"]);
       var isTuneTool = (t) => TUNE_TOOLS.has(t);
-      var tuneMode = () => S2.modTool === "tuneskew" ? "skew" : S2.modTool === "tunediff" ? "diffpair" : "single";
+      var tuneMode = () => S3.modTool === "tuneskew" ? "skew" : S3.modTool === "tunediff" ? "diffpair" : "single";
       var TUNE_MSG_DP_NETS = "Unable to find complementary differential pair net for length tuning. Make sure the names of the nets belonging to a differential pair end with either _N/_P or +/-.";
       var tuningModeName = (mode2) => mode2 === "skew" ? "diff_pair_skew" : mode2 === "diffpair" ? "diff_pair" : "single";
       function assembleDiffPair(doc2, item, line3) {
@@ -30443,8 +30443,8 @@ var require_pcb_tools = __commonJS({
       }
       function tunePick(ctx, mm5) {
         const doc2 = ctx.doc;
-        const thr = 5 * (S2.mmPerPx || 0.05);
-        const active = S2.layer;
+        const thr = 5 * (S3.mmPerPx || 0.05);
+        const active = S3.layer;
         const hits2 = [];
         for (const it of doc2.items.values()) {
           if (it.kind !== "segment" && it.kind !== "arc") continue;
@@ -30499,12 +30499,12 @@ var require_pcb_tools = __commonJS({
           ctx.toast(dpa ? TUNE_MSG_INSIDE : TUNE_MSG_DP_NETS);
           return;
         }
-        if (layerOf2(item.node) !== S2.layer) setLayer(ctx, layerOf2(item.node));
+        if (layerOf2(item.node) !== S3.layer) setLayer(ctx, layerOf2(item.node));
         const a = pt4(item.node, "start"), b = pt4(item.node, "end");
         const at4 = closestOnSeg(mm5, a, b);
         const s2 = settingsOf2(ctx);
-        const st = tuneCopy(S2.tuneSettings[tuneMode()]);
-        S2.tune.pattern = {
+        const st = tuneCopy(S3.tuneSettings[tuneMode()]);
+        S3.tune.pattern = {
           item: item.id,
           line: line3,
           layer: line3.layer,
@@ -30524,16 +30524,16 @@ var require_pcb_tools = __commonJS({
         };
         applyRuleTarget(doc2, st, tuneMode(), item, dpa ? dpa.item : null);
         if (dpa) {
-          const lenMine = S2.tune.pattern.lineLength, lenOther = routedLength(doc2, dpa.item.id);
-          S2.tune.pattern.dp = { line: dpa.line, net: dpa.net, netKey: dpa.netKey, mineIsP: dpa.mineIsP, gap: dpa.gap, lenMine, lenOther };
-          S2.tune.pattern.lineLength = Math.max(lenMine, lenOther);
-          S2.tune.pattern.dpGap = dpa.gap;
+          const lenMine = S3.tune.pattern.lineLength, lenOther = routedLength(doc2, dpa.item.id);
+          S3.tune.pattern.dp = { line: dpa.line, net: dpa.net, netKey: dpa.netKey, mineIsP: dpa.mineIsP, gap: dpa.gap, lenMine, lenOther };
+          S3.tune.pattern.lineLength = Math.max(lenMine, lenOther);
+          S3.tune.pattern.dpGap = dpa.gap;
         }
       }
       function applyRuleTarget(doc2, st, mode2, a, b) {
-        if (st.overrideCustomRules || !S2.ruleConstraint || !a) return false;
+        if (st.overrideCustomRules || !S3.ruleConstraint || !a) return false;
         const skew = mode2 === "skew" || mode2 === "diff_pair_skew";
-        const c = S2.ruleConstraint(doc2, skew ? "skew" : "length", a, b);
+        const c = S3.ruleConstraint(doc2, skew ? "skew" : "length", a, b);
         if (!c) return false;
         const I = (v) => Math.round(v * TUNE_IU), opt = c.opt != null ? c.opt : c.min != null ? c.min : 0;
         if (skew) {
@@ -30548,7 +30548,7 @@ var require_pcb_tools = __commonJS({
         return true;
       }
       function tuneUpdate(ctx) {
-        const T = S2.tune.pattern;
+        const T = S3.tune.pattern;
         if (!T) return;
         const ln = T.line;
         const pts = ln.pts;
@@ -30690,14 +30690,14 @@ var require_pcb_tools = __commonJS({
         return false;
       }
       function tuneFinish(ctx) {
-        const T = S2.tune.pattern;
+        const T = S3.tune.pattern;
         if (!T) return;
         tuneUpdate(ctx);
         const res = T.res;
         if (!res) return;
         if (!res.hasMeanders) {
-          S2.tune.pattern = null;
-          S2.tune.picker = null;
+          S3.tune.pattern = null;
+          S3.tune.picker = null;
           ctx.toast(`No tuning pattern added: no meanders were needed or would fit (${TUNE_STATUS_TEXT[res.status]}).`);
           ctx.requestRender();
           return;
@@ -30732,9 +30732,9 @@ var require_pcb_tools = __commonJS({
         if (!T.dp) T.dpGap = sizesOf(ctx).routeDiffPair ? sizesOf(ctx).routeDiffPair(T.netName).gap : 0.25;
         const gen = K11.createItem(scratch, tuningPatternNode(T, res, members));
         changes.push(upsertChange(gen, "ADDED"));
-        S2.tuneSettings[tuneMode()].initialSide = T.st.initialSide;
-        S2.tune.pattern = null;
-        S2.tune.picker = null;
+        S3.tuneSettings[tuneMode()].initialSide = T.st.initialSide;
+        S3.tune.pattern = null;
+        S3.tune.picker = null;
         ctx.commit(changes, "Tune");
         ctx.requestRender();
       }
@@ -31016,18 +31016,18 @@ var require_pcb_tools = __commonJS({
         return true;
       }
       function tuneCancel(ctx) {
-        if (!S2.tune.pattern) return false;
-        S2.tune.pattern = null;
+        if (!S3.tune.pattern) return false;
+        S3.tune.pattern = null;
         if (ctx) ctx.requestRender();
         return true;
       }
       function tuneStep(ctx, what, sign2) {
-        const T = S2.tune.pattern;
+        const T = S3.tune.pattern;
         if (!T) {
           ctx.toast(TUNE_MSG_SELECT);
           return true;
         }
-        const st = T.st, keep = S2.tuneSettings[tuneMode()];
+        const st = T.st, keep = S3.tuneSettings[tuneMode()];
         if (what === "spacing") {
           st.spacing = Math.max(st.spacing + sign2 * st.step, Math.round(T.width * TUNE_IU) + Math.round(T.clearance * TUNE_IU));
           keep.spacing = st.spacing;
@@ -31040,7 +31040,7 @@ var require_pcb_tools = __commonJS({
         return true;
       }
       function tuneMove(ctx, mm5) {
-        const U2 = S2.tune;
+        const U2 = S3.tune;
         if (!U2.pattern) {
           const it = tunePick(ctx, mm5);
           U2.picker = it ? it.id : null;
@@ -31052,7 +31052,7 @@ var require_pcb_tools = __commonJS({
         tuneUpdate(ctx);
       }
       function tuneClick(ctx, mm5) {
-        const U2 = S2.tune;
+        const U2 = S3.tune;
         if (ctx.viewOnly) {
           ctx.toast("View-only access");
           return;
@@ -31067,7 +31067,7 @@ var require_pcb_tools = __commonJS({
         tuneFinish(ctx);
       }
       function tuneStatus(ctx) {
-        const U2 = S2.tune;
+        const U2 = S3.tune;
         const doc2 = ctx.doc;
         const units = sizeUnits();
         let net = null, len3 = null;
@@ -31089,19 +31089,19 @@ var require_pcb_tools = __commonJS({
         } else return null;
         const name = netNameOf3(ctx, net);
         const mm5 = (v) => msgValue(v / TUNE_IU, units).replace(/ (mm|mils|in)$/, "");
-        const st = U2.pattern ? U2.pattern.st : S2.tuneSettings[tuneMode()];
+        const st = U2.pattern ? U2.pattern.st : S3.tuneSettings[tuneMode()];
         let min = "---", max = "---";
         if (skew) {
           min = mm5(st.skew.min);
           max = mm5(st.skew.max);
-        } else if (S2.ruleConstraint && net) {
+        } else if (S3.ruleConstraint && net) {
           const NT = netTable(doc2), k = NT.key(net);
           let rep = null;
           for (const it of doc2.items.values()) if ((it.kind === "segment" || it.kind === "arc") && NT.key(netOf3(it.node)) === k) {
             rep = it;
             break;
           }
-          const c = rep ? S2.ruleConstraint(doc2, "length", rep, null) : null;
+          const c = rep ? S3.ruleConstraint(doc2, "length", rep, null) : null;
           if (c && c.severity !== "ignore") {
             min = mm5((c.min || 0) * TUNE_IU);
             max = c.max != null ? mm5(c.max * TUNE_IU) : "---";
@@ -31153,7 +31153,7 @@ var require_pcb_tools = __commonJS({
         c.restore();
       }
       function drawTune(c, ctx, px) {
-        const U2 = S2.tune;
+        const U2 = S3.tune;
         const doc2 = ctx.doc;
         if (U2.pattern && U2.pattern.res) {
           const T = U2.pattern;
@@ -31199,17 +31199,17 @@ var require_pcb_tools = __commonJS({
         c.globalAlpha = 1;
       }
       function tuneHiddenIds() {
-        const T = S2.tune && S2.tune.pattern;
+        const T = S3.tune && S3.tune.pattern;
         return T && T.res ? new Set(T.line.ids.concat(T.dp ? T.dp.line.ids : [])) : null;
       }
       function setCustomRules(text3) {
         const d = text3 ? parseDru(text3) : null;
-        S2.dru = d;
-        S2.ruleConstraint = d && d.rules.length ? (doc2, what, a, b) => evalRuleConstraint(d.rules, what, doc2, S2.settingsCache || S2.settings || designSettings(null), a, b, (v) => msgValue(v, sizeUnits())) : null;
+        S3.dru = d;
+        S3.ruleConstraint = d && d.rules.length ? (doc2, what, a, b) => evalRuleConstraint(d.rules, what, doc2, S3.settingsCache || S3.settings || designSettings(null), a, b, (v) => msgValue(v, sizeUnits())) : null;
         const st = K11.pcbSizes && K11.pcbSizes.state;
         if (st) st.ruleSizes = d && d.rules.some((r) => r.constraints.some((c) => c.type === "track_width" || c.type === "via_diameter" || c.type === "hole_size" || c.type === "diff_pair_gap")) ? (net) => {
           const m = matchDpSuffix(net);
-          return ruleSizes(S2.doc || null, S2.settingsCache || S2.settings || designSettings(null), net, S2.route && S2.route.layer || "F.Cu", m.rv ? m.complement : null);
+          return ruleSizes(S3.doc || null, S3.settingsCache || S3.settings || designSettings(null), net, S3.route && S3.route.layer || "F.Cu", m.rv ? m.complement : null);
         } : null;
       }
       var TUNING_COMMIT_MESSAGE = "Edit Tuning Pattern";
@@ -31337,7 +31337,7 @@ var require_pcb_tools = __commonJS({
         c.stroke();
       }
       function drawTuningSelection(c, ctx, px) {
-        const ge = S2.genEdit;
+        const ge = S3.genEdit;
         const gen = ge ? (ge.fin ? ge.fin.items.get(ge.id) : null) || { node: ge.node } : selectedTuningPattern(ctx);
         if (!gen) return;
         const info = tuningPatternInfo(gen);
@@ -31428,11 +31428,11 @@ var require_pcb_tools = __commonJS({
       }
       function genStartEdit(ctx, gen, label) {
         const ge = { id: gen.id, orig: clone5(gen.node), node: clone5(gen.node), fin: null, hidden: /* @__PURE__ */ new Set(), label: label || TUNING_COMMIT_MESSAGE };
-        S2.genEdit = ge;
+        S3.genEdit = ge;
         return ge;
       }
       function genUpdateEdit(ctx, node, doc2) {
-        const ge = S2.genEdit;
+        const ge = S3.genEdit;
         if (!ge) return null;
         ge.node = clone5(node);
         const fin = regenerateTuningBranch(ctx, { id: ge.id, kind: "generated", node: ge.node }, doc2);
@@ -31447,8 +31447,8 @@ var require_pcb_tools = __commonJS({
         return fin;
       }
       function genFinishEdit(ctx, extra) {
-        const ge = S2.genEdit;
-        S2.genEdit = null;
+        const ge = S3.genEdit;
+        S3.genEdit = null;
         if (!ge) return false;
         if (!ge.fin || K11.serialize(ge.node) === K11.serialize(ge.orig)) {
           ctx.requestRender();
@@ -31462,17 +31462,17 @@ var require_pcb_tools = __commonJS({
         return true;
       }
       function genCancelEdit(ctx) {
-        const had = !!S2.genEdit;
-        S2.genEdit = null;
+        const had = !!S3.genEdit;
+        S3.genEdit = null;
         if (had) ctx.requestRender();
         return had;
       }
       function genHiddenIds() {
-        const ge = S2.genEdit;
+        const ge = S3.genEdit;
         return ge && ge.fin && ge.hidden.size ? ge.hidden : null;
       }
       function drawGenEditPreview(c, ctx) {
-        const ge = S2.genEdit;
+        const ge = S3.genEdit;
         if (!ge || !ge.fin) return;
         c.save();
         c.globalAlpha = 1;
@@ -31536,7 +31536,7 @@ var require_pcb_tools = __commonJS({
         }
         genStartEdit(ctx, gen);
         genUpdateEdit(ctx, node, doc2);
-        const ge = S2.genEdit;
+        const ge = S3.genEdit;
         if (ge && !ge.fin && doc2) ge.fin = doc2;
         return genFinishEdit(ctx);
       }
@@ -31598,14 +31598,14 @@ var require_pcb_tools = __commonJS({
       var ARC_EDIT_KEY = "kc.pcb.arcEditMode";
       var ARC_EDIT_ACTIONS = ["pointEditorArcKeepCenter", "pointEditorArcKeepEndpoint", "pointEditorArcKeepRadius"];
       function arcEditMode() {
-        if (S2.arcEditMode == null) {
+        if (S3.arcEditMode == null) {
           const v = lsGet(ARC_EDIT_KEY);
-          S2.arcEditMode = v !== null && /^[0-2]$/.test(v) ? +v : ARC_KEEP_CENTER;
+          S3.arcEditMode = v !== null && /^[0-2]$/.test(v) ? +v : ARC_KEEP_CENTER;
         }
-        return S2.arcEditMode;
+        return S3.arcEditMode;
       }
       function setArcEditMode(m) {
-        S2.arcEditMode = m;
+        S3.arcEditMode = m;
         lsSet(ARC_EDIT_KEY, String(m));
       }
       var nextArcEditMode = (m) => m === ARC_KEEP_CENTER ? ARC_KEEP_RADIUS : m === ARC_KEEP_RADIUS ? ARC_KEEP_ENDPOINTS : ARC_KEEP_CENTER;
@@ -31776,7 +31776,7 @@ var require_pcb_tools = __commonJS({
       }
       function peSingleId(ctx) {
         const c = ctx || lastCtx;
-        const ids = c && c.doc ? selectionIds2(c) : S2.sel;
+        const ids = c && c.doc ? selectionIds2(c) : S3.sel;
         if (c && c.doc && ids.size > 1) {
           const gen = selectedTuningPattern(c, ids);
           if (gen) return gen.id;
@@ -31868,11 +31868,11 @@ var require_pcb_tools = __commonJS({
         pn.splice(pn.indexOf(K11.kids(pn, "xy")[bi]), 1);
         return [replacedChange(it, node)];
       }
-      var handleTol = () => 6 * (S2.mmPerPx || 0.05);
+      var handleTol = () => 6 * (S3.mmPerPx || 0.05);
       function onHandlePointerDown(ev) {
         const ctx = lastCtx;
         if (!ctx || !isBoardLikeDoc() || ev.button !== 0 || ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey || appTool() !== "select") return;
-        if (S2.route || S2.draw || S2.drag || S2.move || S2.pedit || ctx.viewOnly) return;
+        if (S3.route || S3.draw || S3.drag || S3.move || S3.pedit || ctx.viewOnly) return;
         const stage3 = ctx.stage;
         if (!stage3 || !(ev.target instanceof Element) || !stage3.contains(ev.target) || ev.target.closest("#cmtPanel")) return;
         const doc2 = liveDoc();
@@ -31882,7 +31882,7 @@ var require_pcb_tools = __commonJS({
         if (!hit5) return;
         ev.stopImmediatePropagation();
         ev.preventDefault();
-        S2.pedit = { id: hit5.it.id, kind: hit5.it.kind, key: hit5.h.key, orig: clone5(hit5.it.node), start: mm5, moved: false, ignoreGrid: !!hit5.h.ignoreGrid };
+        S3.pedit = { id: hit5.it.id, kind: hit5.it.kind, key: hit5.h.key, orig: clone5(hit5.it.node), start: mm5, moved: false, ignoreGrid: !!hit5.h.ignoreGrid };
         if (isTuningPattern(hit5.it)) genStartEdit(ctx, hit5.it);
         try {
           stage3.setPointerCapture(ev.pointerId);
@@ -31890,11 +31890,11 @@ var require_pcb_tools = __commonJS({
         }
       }
       function editHandleMove(ctx, mm5) {
-        const pe = S2.pedit;
+        const pe = S3.pedit;
         if (!pe) return;
         const it = ctx.doc.items.get(pe.id);
         if (!it) {
-          S2.pedit = null;
+          S3.pedit = null;
           return;
         }
         if (!pe.moved && Math.hypot(mm5[0] - pe.start[0], mm5[1] - pe.start[1]) < 1e-3) return;
@@ -31913,8 +31913,8 @@ var require_pcb_tools = __commonJS({
         ctx.requestRender();
       }
       function editHandleUp(ctx, commit) {
-        const pe = S2.pedit;
-        S2.pedit = null;
+        const pe = S3.pedit;
+        S3.pedit = null;
         if (!pe) return;
         const it = ctx.doc.items.get(pe.id);
         if (!it) {
@@ -31933,16 +31933,16 @@ var require_pcb_tools = __commonJS({
         ctx.requestRender();
       }
       function drawEditPoints(c, ctx, px) {
-        if (S2.route || S2.draw || S2.drag || S2.move || S2.modTool) return;
+        if (S3.route || S3.draw || S3.drag || S3.move || S3.modTool) return;
         const id = peSingleId(ctx);
-        const ge = S2.genEdit;
+        const ge = S3.genEdit;
         const it = id ? ge && ge.id === id && ge.fin && ge.fin.items.get(id) || ctx.doc.items.get(id) : null;
         if (!it || isLocked3(it.node)) return;
         const hs = editPoints(it);
         if (!hs.length) return;
         const cur2 = ctx.cursor || null;
         const size2 = 4 * px;
-        const hotKey = S2.pedit ? S2.pedit.key : cur2 ? ((editHandleAt(ctx.doc, cur2[0], cur2[1], handleTol()) || {}).h || {}).key : null;
+        const hotKey = S3.pedit ? S3.pedit.key : cur2 ? ((editHandleAt(ctx.doc, cur2[0], cur2[1], handleTol()) || {}).h || {}).key : null;
         c.save();
         c.globalAlpha = 1;
         c.setLineDash([]);
@@ -33583,7 +33583,7 @@ var require_pcb_tools = __commonJS({
               const v = evalExpr2(x, doc2, s2, A, B);
               return v.t === "s" ? v.v : v.t === "n" ? String(v.v) : "";
             });
-            return callFunc(e.fn, it, args, { doc: doc2, s: s2, A, B, constraint: curConstraint, ver: S2.docVer }, wildMatch, wxMatches);
+            return callFunc(e.fn, it, args, { doc: doc2, s: s2, A, B, constraint: curConstraint, ver: S3.docVer }, wildMatch, wxMatches);
           }
         }
       }
@@ -36687,10 +36687,10 @@ var require_pcb_tools = __commonJS({
         });
       }
       function enteredGroup(doc2) {
-        const g2 = S2.enteredGroup;
+        const g2 = S3.enteredGroup;
         if (!g2) return null;
         if (doc2 && !doc2.items.has(g2)) {
-          S2.enteredGroup = null;
+          S3.enteredGroup = null;
           return null;
         }
         return g2;
@@ -36745,21 +36745,21 @@ var require_pcb_tools = __commonJS({
       }
       function enterGroup(ctx, id) {
         if (!ctx.doc || !ctx.doc.items.has(id)) return false;
-        S2.enteredGroup = id;
-        S2.sel.clear();
+        S3.enteredGroup = id;
+        S3.sel.clear();
         if (ctx.setSelection) ctx.setSelection([]);
         else if (ctx.setSelected) ctx.setSelected(null);
         ctx.requestRender();
         return true;
       }
       function exitGroup(ctx, select2) {
-        const g2 = S2.enteredGroup;
+        const g2 = S3.enteredGroup;
         if (!g2) return false;
-        S2.enteredGroup = null;
+        S3.enteredGroup = null;
         if (ctx && ctx.doc) {
           if (select2 && ctx.doc.items.has(g2)) {
             const ids = [g2, ...groupDeepMembers(ctx.doc, g2)].filter((id) => ctx.doc.items.has(id));
-            S2.sel = new Set(ids);
+            S3.sel = new Set(ids);
             if (ctx.setSelection) {
               ctx.setSelection(ids);
             }
@@ -36942,7 +36942,7 @@ var require_pcb_tools = __commonJS({
       function placePad(ctx, type, at4, angle) {
         const doc2 = ctx.doc;
         if (!doc2) return null;
-        const selected = S2.padTemplate || null;
+        const selected = S3.padTemplate || null;
         const probe2 = masterPad(doc2, type, selected);
         let number = "";
         if (canHaveNumber(probe2)) {
@@ -37255,7 +37255,7 @@ var require_pcb_tools = __commonJS({
         done(clipBuffer);
       }
       function cursorPoint2(ctx) {
-        let p = ctx.cursor || (S2.hover ? [S2.hover.x, S2.hover.y] : null);
+        let p = ctx.cursor || (S3.hover ? [S3.hover.x, S3.hover.y] : null);
         if (!p && ctx.doc && ctx.doc.bbox) p = [(ctx.doc.bbox[0] + ctx.doc.bbox[2]) / 2, (ctx.doc.bbox[1] + ctx.doc.bbox[3]) / 2];
         if (!p) return [0, 0];
         return ctx.snapOn && ctx.snap ? ctx.snap(p) : p;
@@ -37275,7 +37275,7 @@ var require_pcb_tools = __commonJS({
         }
         return out2;
       }
-      var pairClr = (s2, a, b, layer4, kindB) => S2.dru && S2.dru.rules.length ? rulePairClearance(S2.shoveDoc || null, s2, a, b, layer4 || null, kindB) : Math.max(netClearance(s2, a), netClearance(s2, b), s2.minClearance || 0);
+      var pairClr = (s2, a, b, layer4, kindB) => S3.dru && S3.dru.rules.length ? rulePairClearance(S3.shoveDoc || null, s2, a, b, layer4 || null, kindB) : Math.max(netClearance(s2, a), netClearance(s2, b), s2.minClearance || 0);
       var sameNetKey = (a, b) => !!a && a === b;
       function insideConvex(P4, p) {
         let sign2 = 0;
@@ -37354,7 +37354,7 @@ var require_pcb_tools = __commonJS({
         const bc2 = doc2.__bc;
         const key3 = "sw" + (shoveVias ? 1 : 0);
         if (bc2 && bc2[key3]) return bc2[key3];
-        if (!bc2 && S2.sworld && S2.sworld.doc === doc2 && S2.sworld.ver === S2.docVer && S2.sworld.key === key3) return S2.sworld.w;
+        if (!bc2 && S3.sworld && S3.sworld.doc === doc2 && S3.sworld.ver === S3.docVer && S3.sworld.key === key3) return S3.sworld.w;
         const Wd = routerWorld(doc2);
         const tracks = /* @__PURE__ */ new Map(), vias = /* @__PURE__ */ new Map(), solids = [];
         const CELL = 2.5;
@@ -37404,13 +37404,13 @@ var require_pcb_tools = __commonJS({
           gadd(o, e.bbox);
         }
         const w = { doc: doc2, tracks, vias, solids, grid: grid2, CELL, maxW, s: s2 };
-        S2.shoveDoc = doc2;
+        S3.shoveDoc = doc2;
         if (bc2) bc2[key3] = w;
-        else S2.sworld = { doc: doc2, ver: S2.docVer, key: key3, w };
+        else S3.sworld = { doc: doc2, ver: S3.docVer, key: key3, w };
         return w;
       }
       function solidClr(s2, net, o, layer4) {
-        return routeClearance(s2, net, { kind: o.ckind === "hole" ? "hole" : o.ckind === "keepout" ? "keepout" : o.ckind === "edge" ? "edge" : o.ckind, net: o.net, id: o.id, src: o.src }, layer4, S2.shoveDoc || null);
+        return routeClearance(s2, net, { kind: o.ckind === "hole" ? "hole" : o.ckind === "keepout" ? "keepout" : o.ckind === "edge" ? "edge" : o.ckind, net: o.net, id: o.id, src: o.src }, layer4, S3.shoveDoc || null);
       }
       function shoveNear(SW, st, box3, grow6, fn) {
         const C = SW.CELL, seen = /* @__PURE__ */ new Set();
@@ -37722,9 +37722,9 @@ var require_pcb_tools = __commonJS({
         layer4 = layer4 || rt.layer;
         const doc2 = routeDoc(ctx, rt);
         const s2 = settingsOf2(ctx);
-        const key3 = S2.docVer + "|" + layer4 + "|" + rt.width + "|" + rt.stages.length + "|" + rt.netKey + "|" + S2.rs.shove_vias;
+        const key3 = S3.docVer + "|" + layer4 + "|" + rt.width + "|" + rt.stages.length + "|" + rt.netKey + "|" + S3.rs.shove_vias;
         if (rt.sobs && rt.sobs.key === key3 && rt.sobs.doc === doc2) return rt.sobs;
-        const SW = shoveWorld(doc2, s2, S2.rs.shove_vias);
+        const SW = shoveWorld(doc2, s2, S3.rs.shove_vias);
         const skip2 = /* @__PURE__ */ new Set([...SW.tracks.keys(), ...SW.vias.keys()]);
         rt.sobs = routeObstacles(doc2, s2, rt.netKey, layer4, rt.netKey ? null : routeOwn(rt), skip2);
         rt.sobs.key = key3;
@@ -37742,8 +37742,8 @@ var require_pcb_tools = __commonJS({
           const hv = head22.via = { at: w.pts[w.pts.length - 1].slice(), r: via.diameter / 2, layers: new Set(viaSpanLayers(doc2, via.layers)) };
           for (const L of hv.layers) if (pathHits(solidObs(ctx, rt, L), [hv.at], hv.r).length) return null;
         }
-        const SW = shoveWorld(doc2, s2, S2.rs.shove_vias);
-        const st = shoveRun(SW, [head22], S2.rs);
+        const SW = shoveWorld(doc2, s2, S3.rs.shove_vias);
+        const st = shoveRun(SW, [head22], S3.rs);
         if (!st) return null;
         return { pts: w.pts, reached: w.reached, shove: { ops: shoveOps(doc2, st), preview: shovePreview(doc2, st), viaOk: true } };
       }
@@ -37867,14 +37867,14 @@ var require_pcb_tools = __commonJS({
       }
       function runSmartPads(doc2, pts, width, layer4, netKey2, clear) {
         if (!netKey2 || pts.length < 3) return null;
-        let line3 = pts.map((q4) => q4.slice()), changed = false, vtx = -1;
+        let line3 = pts.map((q4) => q4.slice()), changed2 = false, vtx = -1;
         const sp = padOrViaAt(doc2, layer4, netKey2, line3[0]);
         if (sp && sp.pad) {
           const r = smartPadsSingle(line3, sp.pad, width, false, 3, clear);
           if (r) {
             line3 = r.pts;
             vtx = r.p;
-            changed = true;
+            changed2 = true;
           }
         }
         const ep = padOrViaAt(doc2, layer4, netKey2, line3[line3.length - 1]);
@@ -37882,10 +37882,10 @@ var require_pcb_tools = __commonJS({
           const r = smartPadsSingle(line3, ep.pad, width, true, vtx < 0 ? line3.length - 1 : line3.length - 1 - vtx, clear);
           if (r) {
             line3 = r.pts;
-            changed = true;
+            changed2 = true;
           }
         }
-        return changed ? simplifyPts(line3) : null;
+        return changed2 ? simplifyPts(line3) : null;
       }
       var segPtDist = (a, b, p) => distSeg3(p[0], p[1], a[0], a[1], b[0], b[1]);
       function changedArea(pts, orig, w) {
@@ -38007,17 +38007,17 @@ var require_pcb_tools = __commonJS({
           heads.push({ pts: [sol.viaAt.slice()], w: 0, layer: Array.from(layers)[0], net: d.netKey, ownIds: d.ids, viaId: d.via.id, via: { at: sol.viaAt.slice(), r, layers } });
         }
         if (!heads.length) return { ops: [], preview: { hidden: /* @__PURE__ */ new Set(), lines: [], vias: [] } };
-        const SW = shoveWorld(doc2, s2, S2.rs.shove_vias);
-        const st = shoveRun(SW, heads, S2.rs);
+        const SW = shoveWorld(doc2, s2, S3.rs.shove_vias);
+        const st = shoveRun(SW, heads, S3.rs);
         if (!st) return null;
         return { ops: shoveOps(doc2, st), preview: shovePreview(doc2, st) };
       }
       function dragSolidObs(ctx, d, layer4) {
-        const key3 = "s|" + layer4 + "|" + S2.rs.shove_vias;
+        const key3 = "s|" + layer4 + "|" + S3.rs.shove_vias;
         let O = d.obs.get(key3);
         if (O) return O;
         const s2 = settingsOf2(ctx);
-        const SW = shoveWorld(ctx.doc, s2, S2.rs.shove_vias);
+        const SW = shoveWorld(ctx.doc, s2, S3.rs.shove_vias);
         const skip2 = /* @__PURE__ */ new Set([...SW.tracks.keys(), ...SW.vias.keys(), ...d.excl || []]);
         O = routeObstacles(ctx.doc, s2, d.netKey, layer4, d.netKey ? null : d.ids, skip2);
         d.obs.set(key3, O);
@@ -38028,7 +38028,7 @@ var require_pcb_tools = __commonJS({
         const first = d.first;
         d.first = false;
         const raw2 = dragSolution(d, p);
-        const mode2 = S2.rs.mode;
+        const mode2 = S3.rs.mode;
         if (d.free || d.forceMark) {
           d.sol = raw2;
           d.shove = null;
@@ -38041,7 +38041,7 @@ var require_pcb_tools = __commonJS({
           d.sol = raw2;
           d.shove = null;
           d.hits = solutionHits(ctx, d, raw2);
-          d.status = !!S2.rs.can_violate_drc || !d.hits.length;
+          d.status = !!S3.rs.can_violate_drc || !d.hits.length;
           d.lastValid = p.slice();
           return true;
         }
@@ -38173,22 +38173,22 @@ var require_pcb_tools = __commonJS({
       var SNAP_KEY = (fp) => "kc.magneticAllLayers." + (fp ? "fpedit" : "pcb");
       function snapAllLayers(ctx) {
         const fp = !!(ctx && ctx.fpEditor);
-        const v = fp ? S2.snapAllLayersFp : S2.snapAllLayers;
+        const v = fp ? S3.snapAllLayersFp : S3.snapAllLayers;
         if (typeof v === "boolean") return v;
         let stored2 = false;
         try {
           stored2 = typeof localStorage !== "undefined" && localStorage.getItem(SNAP_KEY(fp)) === "1";
         } catch {
         }
-        if (fp) S2.snapAllLayersFp = stored2;
-        else S2.snapAllLayers = stored2;
+        if (fp) S3.snapAllLayersFp = stored2;
+        else S3.snapAllLayers = stored2;
         return stored2;
       }
       function setSnapMode(ctx, mode2) {
         const fp = !!ctx.fpEditor, now2 = snapAllLayers(ctx);
         const v = mode2 === "toggle" ? !now2 : mode2 === "all";
-        if (fp) S2.snapAllLayersFp = v;
-        else S2.snapAllLayers = v;
+        if (fp) S3.snapAllLayersFp = v;
+        else S3.snapAllLayers = v;
         try {
           if (typeof localStorage !== "undefined") localStorage.setItem(SNAP_KEY(fp), v ? "1" : "0");
         } catch {
@@ -38229,8 +38229,8 @@ var require_pcb_tools = __commonJS({
             }
           }
         }
-        S2.move = m;
-        S2.sel = /* @__PURE__ */ new Set([it.id]);
+        S3.move = m;
+        S3.sel = /* @__PURE__ */ new Set([it.id]);
         displayConstraintsMsg(MOVE_SNAP_MSG[angleSnapMode()]);
         return true;
       }
@@ -38352,7 +38352,7 @@ var require_pcb_tools = __commonJS({
         const scale = SNAP_SCREEN_RADIUS / Math.max(1e-6, ctx.pxPerMm || 4);
         const range = gridOn && ctx.gridPitch ? Math.min(scale, ctx.gridPitch) : scale;
         let best = null, bd = range;
-        const only = snapAllLayers(ctx) ? "" : K11.pcbSizes.state.activeLayer || S2.gfxLayer || S2.layer || "";
+        const only = snapAllLayers(ctx) ? "" : K11.pcbSizes.state.activeLayer || S3.gfxLayer || S3.layer || "";
         for (const it of ctx.doc.items.values()) {
           if (skip2 && skip2.has(it.id)) continue;
           const b = it.bbox;
@@ -38537,7 +38537,7 @@ var require_pcb_tools = __commonJS({
         return sides === 2 && hasAnchoredSide || sides === 1 ? candidates.flat() : [];
       }
       function removeRedundant(base2, b, rt) {
-        if (!S2.rs.remove_loops) return b;
+        if (!S3.rs.remove_loops) return b;
         const out2 = Object.assign({}, b, { items: new Map(b.items), __bc: {} });
         for (const id of loopRemovals(base2, out2)) out2.items.delete(id);
         out2.__bc = {};
@@ -38691,9 +38691,9 @@ var require_pcb_tools = __commonJS({
       }
       function routeUnhighlight(ctx, rt) {
         if (!ctx || !rt || !rt.netKey) return;
-        if (rt.keepHighlight && S2.highlightNet === rt.netKey) highlightIds(ctx, netHighlightIds(ctx.doc, rt.netKey, netlistCached(ctx.doc)));
+        if (rt.keepHighlight && S3.highlightNet === rt.netKey) highlightIds(ctx, netHighlightIds(ctx.doc, rt.netKey, netlistCached(ctx.doc)));
         else {
-          S2.highlightNet = null;
+          S3.highlightNet = null;
           highlightIds(ctx, null);
         }
       }
@@ -38773,8 +38773,8 @@ var require_pcb_tools = __commonJS({
       }
       function fixHead(ctx, opts2) {
         opts2 = opts2 || {};
-        const rt = S2.route;
-        const rs = S2.rs;
+        const rt = S3.route;
+        const rs = S3.rs;
         const doc2 = routeDoc(ctx, rt);
         let els = rt.els && rt.els.length ? foldMicro(rt.els) : [];
         const via = headVia(ctx, rt);
@@ -38830,7 +38830,7 @@ var require_pcb_tools = __commonJS({
         rt.startIds = [];
         if (via) {
           rt.layer = rt.placingVia.toLayer;
-          S2.layer = rt.layer;
+          S3.layer = rt.layer;
           sizesOf(ctx).setActiveLayer(rt.layer);
           rt.placingVia = null;
           rt.tracer = newTracer(rt.width, -1);
@@ -38845,7 +38845,7 @@ var require_pcb_tools = __commonJS({
         if (!lockOk && isLocked3(sorted[0].node) && !overrideLocks()) return askDragLocked(ctx, () => beginInlineDrag(ctx, its, mm5, free, "tool", true));
         const lead = dragStart(ctx, sorted[0], mm5, free);
         if (!lead) return false;
-        const subs = [lead], taken = new Set(lead.ids);
+        const subs2 = [lead], taken = new Set(lead.ids);
         for (const it of sorted.slice(1)) {
           if (taken.has(it.id) || it.kind !== "segment") continue;
           const [a, b] = trackEnds(it);
@@ -38854,30 +38854,30 @@ var require_pcb_tools = __commonJS({
           if (!d) continue;
           if (d.mode !== "segment" && !free) d.mode = "segment";
           d.ids.forEach((id) => taken.add(id));
-          subs.push(d);
+          subs2.push(d);
         }
-        if (subs.length === 1 && lead.mode === "segment" && !free && S2.rs.keep_diff_pair_coupling_when_dragging) {
+        if (subs2.length === 1 && lead.mode === "segment" && !free && S3.rs.keep_diff_pair_coupling_when_dragging) {
           const c = dpCoupledSegment(ctx, sorted[0]);
           if (c && !taken.has(c.item.id)) {
             const d = dragStart(ctx, c.item, c.grab, false);
             if (d) {
               d.mode = "segment";
               d.dpPartner = true;
-              subs.push(d);
+              subs2.push(d);
             }
           }
         }
-        if (subs.length > 1) {
+        if (subs2.length > 1) {
           const excl = /* @__PURE__ */ new Set();
-          for (const d of subs) d.ids.forEach((id) => excl.add(id));
-          for (const d of subs) {
+          for (const d of subs2) d.ids.forEach((id) => excl.add(id));
+          for (const d of subs2) {
             d.excl = excl;
             d.obs = /* @__PURE__ */ new Map();
           }
         }
         cancelOps();
-        S2.violations = null;
-        S2.drag = { subs, tool: how === "tool", bySelect: how !== "tool", moved: false, cursor: lead.start.slice(), appSel: how === "app" };
+        S3.violations = null;
+        S3.drag = { subs: subs2, tool: how === "tool", bySelect: how !== "tool", moved: false, cursor: lead.start.slice(), appSel: how === "app" };
         dragHighlight(ctx, lead);
         ctx.requestRender();
         return true;
@@ -38962,11 +38962,11 @@ var require_pcb_tools = __commonJS({
       }
       function dragHighlight(ctx, d) {
         if (!d.netKey) return;
-        d.keepHighlight = S2.highlightNet === d.netKey;
+        d.keepHighlight = S3.highlightNet === d.netKey;
         highlightIds(ctx, netHighlightIds(ctx.doc, d.netKey, netlistCached(ctx.doc)));
       }
       function dragMove(ctx, mm5) {
-        const D = S2.drag;
+        const D = S3.drag;
         if (!D) return;
         const p = ctx.snapOn ? ctx.snap(mm5.slice()) : mm5.slice();
         D.cursor = mm5.slice();
@@ -39023,9 +39023,9 @@ var require_pcb_tools = __commonJS({
         return solutionChanged(d) ? dragChanges(ctx, d) : [];
       }
       function finishDrag(ctx, commit, force) {
-        const D = S2.drag;
+        const D = S3.drag;
         if (!D) return false;
-        S2.drag = null;
+        S3.drag = null;
         let done = false;
         if (commit && D.moved && !ctx.viewOnly) {
           const all2 = [];
@@ -39050,12 +39050,12 @@ var require_pcb_tools = __commonJS({
         return done;
       }
       function dragHiddenIds() {
-        if (S2.move && S2.move.conns && S2.move.conns.length && S2.move.moved) {
+        if (S3.move && S3.move.conns && S3.move.conns.length && S3.move.moved) {
           const out22 = /* @__PURE__ */ new Set();
-          for (const c of S2.move.conns) for (const id of c.l.ids) out22.add(id);
+          for (const c of S3.move.conns) for (const id of c.l.ids) out22.add(id);
           return out22;
         }
-        const D = S2.drag;
+        const D = S3.drag;
         if (!D || !D.moved) return null;
         const out2 = /* @__PURE__ */ new Set();
         for (const d of D.subs) {
@@ -39065,7 +39065,7 @@ var require_pcb_tools = __commonJS({
         return out2;
       }
       function genMoveStep(ctx, dx, dy) {
-        const ge = S2.genEdit;
+        const ge = S3.genEdit;
         if (!ge) return;
         const node = clone5(ge.orig);
         for (const k of ["origin", "end"]) {
@@ -39117,7 +39117,7 @@ var require_pcb_tools = __commonJS({
         }
       }
       function moveTransform(ctx, how, arg) {
-        const m = S2.move;
+        const m = S3.move;
         if (!m) return false;
         if (m.gen) return true;
         if (m.conns && m.conns.length || m.ends.length) return true;
@@ -39143,7 +39143,7 @@ var require_pcb_tools = __commonJS({
         return true;
       }
       function selectMoveTo(ctx, mm5, mods2) {
-        const m = S2.move;
+        const m = S3.move;
         if (!m) return;
         const dirs = angleSnapDirections(angleSnapMode());
         const sn = snapCursor(ctx, [mm5[0], mm5[1]], m.skip || new Set(m.orig.keys()), mods2 || m.mods, dirs.length ? { origin: m.start, dirs } : null);
@@ -39153,7 +39153,7 @@ var require_pcb_tools = __commonJS({
           m.guide = guide;
           ctx.requestRender();
         }
-        if (S2.moveSeq && S2.popup) S2.popup.at = [mm5[0], mm5[1]];
+        if (S3.moveSeq && S3.popup) S3.popup.at = [mm5[0], mm5[1]];
         const sN = sn.p;
         const dx = r65(sN[0] - m.start[0]), dy = r65(sN[1] - m.start[1]);
         if (dx === m.last[0] && dy === m.last[1]) return;
@@ -39168,7 +39168,7 @@ var require_pcb_tools = __commonJS({
       }
       var sameGuide = (a, b) => !a && !b || !!a && !!b && samePt(a[0], b[0]) && samePt(a[1], b[1]);
       function finishSelectMove(ctx, commit, force) {
-        const m = S2.move;
+        const m = S3.move;
         if (!m) return;
         if (!m.after) {
           finishMove(ctx, m, commit, force);
@@ -39178,7 +39178,7 @@ var require_pcb_tools = __commonJS({
         m.after(commit, wrote);
       }
       function finishMove(ctx, m, commit, force) {
-        S2.move = null;
+        S3.move = null;
         moveCursor(ctx, false);
         if (m.gen) {
           if (commit && m.moved && (m.last[0] || m.last[1])) genFinishEdit(ctx);
@@ -39209,8 +39209,8 @@ var require_pcb_tools = __commonJS({
           moveApply(ctx, m, dx, dy);
           const hits2 = componentDragHits(ctx, m, dx, dy);
           moveApply(ctx, m, 0, 0);
-          S2.rworld = null;
-          S2.sworld = null;
+          S3.rworld = null;
+          S3.sworld = null;
           if (hits2.length) {
             showViolations(hits2, hits2.at || cursorPoint2(ctx));
             ctx.toast("Track violates DRC.");
@@ -39248,7 +39248,7 @@ var require_pcb_tools = __commonJS({
           m.orig = /* @__PURE__ */ new Map();
           m.ids = [];
           genStartEdit(ctx, gen, "Move");
-          S2.move = m;
+          S3.move = m;
           moveCursor(ctx, true);
           displayConstraintsMsg(MOVE_SNAP_MSG[angleSnapMode()]);
           ctx.requestRender();
@@ -39256,7 +39256,7 @@ var require_pcb_tools = __commonJS({
         }
         if (opts2.drag) dragEnds(doc2, m);
         m.skip = new Set(m.orig.keys());
-        S2.move = m;
+        S3.move = m;
         moveCursor(ctx, true);
         displayConstraintsMsg(MOVE_SNAP_MSG[angleSnapMode()]);
         ctx.requestRender();
@@ -39266,11 +39266,11 @@ var require_pcb_tools = __commonJS({
         const st = ctx.stage && ctx.stage.style;
         if (!st) return;
         if (on2) {
-          if (S2.cursorBefore === void 0) S2.cursorBefore = st.cursor;
+          if (S3.cursorBefore === void 0) S3.cursorBefore = st.cursor;
           st.cursor = "move";
-        } else if (S2.cursorBefore !== void 0) {
-          st.cursor = S2.cursorBefore;
-          S2.cursorBefore = void 0;
+        } else if (S3.cursorBefore !== void 0) {
+          st.cursor = S3.cursorBefore;
+          S3.cursorBefore = void 0;
         }
       }
       function dragEnds(doc2, m) {
@@ -39320,8 +39320,8 @@ var require_pcb_tools = __commonJS({
       }
       function componentDragHits(ctx, m, dx, dy) {
         const doc2 = ctx.doc, s2 = settingsOf2(ctx);
-        S2.rworld = null;
-        S2.sworld = null;
+        S3.rworld = null;
+        S3.sworld = null;
         const lines = connLines(m, dx, dy);
         const gone = /* @__PURE__ */ new Set();
         for (const c of m.conns || []) for (const id of c.l.ids) gone.add(id);
@@ -39366,8 +39366,8 @@ var require_pcb_tools = __commonJS({
             }
           }
         }
-        S2.rworld = null;
-        S2.sworld = null;
+        S3.rworld = null;
+        S3.sworld = null;
         const out2 = Array.from(hits2);
         out2.at = at4;
         return out2;
@@ -39380,21 +39380,21 @@ var require_pcb_tools = __commonJS({
       }
       function onStickyPointerDown(ev) {
         const ctx = lastCtx;
-        const m = S2.move;
+        const m = S3.move;
         if (!m || !m.sticky || !ctx || !isBoardLikeDoc()) return;
         if (ev.target.closest && (ev.target.closest("#pcbChip") || ev.target.closest("#cmtPanel"))) return;
         ev.stopImmediatePropagation();
         ev.preventDefault();
         if (ev.button !== 0) return;
         selectMoveTo(ctx, ctx.worldMm(ev));
-        S2.stickyUp = true;
+        S3.stickyUp = true;
         finishSelectMove(ctx, true, !!(ev.ctrlKey || ev.metaKey));
       }
       var DRAG_PX = 5;
       function startPendingDrag(ctx, pd) {
         const ids = pd.ids.filter((id) => ctx.doc.items.has(id));
         if (!ids.length) return false;
-        const mode2 = S2.trackDragAction || "drag";
+        const mode2 = S3.trackDragAction || "drag";
         const its = mode2 === "move" ? null : routableItems(ctx.doc, ids);
         if (its) return beginInlineDrag(ctx, its, pd.mm, mode2 === "dragFree", pd.app ? "app" : "select");
         if (ids.length > 1) return beginCarryMove(ctx, { at: pd.mm, sticky: false });
@@ -39403,37 +39403,37 @@ var require_pcb_tools = __commonJS({
       function onStagePointerMove(ev) {
         const ctx = lastCtx;
         if (!ctx || !isBoardLikeDoc()) return;
-        if (S2.pedit) {
+        if (S3.pedit) {
           ev.stopImmediatePropagation();
           editHandleMove(ctx, ctx.worldMm(ev));
           return;
         }
-        if (S2.pending) {
-          const pd = S2.pending;
+        if (S3.pending) {
+          const pd = S3.pending;
           if (Math.hypot(ev.clientX - pd.client[0], ev.clientY - pd.client[1]) <= DRAG_PX) return;
-          S2.pending = null;
+          S3.pending = null;
           startPendingDrag(ctx, pd);
         }
-        if (S2.drag && S2.drag.bySelect) {
+        if (S3.drag && S3.drag.bySelect) {
           dragMove(ctx, ctx.worldMm(ev));
           ctx.requestRender();
-        } else if (S2.move) {
-          S2.move.mods = { shiftKey: !!ev.shiftKey, ctrlKey: !!ev.ctrlKey, metaKey: !!ev.metaKey };
+        } else if (S3.move) {
+          S3.move.mods = { shiftKey: !!ev.shiftKey, ctrlKey: !!ev.ctrlKey, metaKey: !!ev.metaKey };
           selectMoveTo(ctx, ctx.worldMm(ev));
         }
       }
       function onStagePointerUp(ev) {
         const ctx = lastCtx;
-        const pd = S2.pending;
-        S2.pending = null;
+        const pd = S3.pending;
+        S3.pending = null;
         if (!ctx) return;
-        if (pd && !pd.app && pd.item && ev && ev.type === "pointerup" && ctx.doc && S2.sel.size > 1 && Math.hypot(ev.clientX - pd.client[0], ev.clientY - pd.client[1]) <= DRAG_PX) {
+        if (pd && !pd.app && pd.item && ev && ev.type === "pointerup" && ctx.doc && S3.sel.size > 1 && Math.hypot(ev.clientX - pd.client[0], ev.clientY - pd.client[1]) <= DRAG_PX) {
           const pick = topParentOf(ctx.doc, pd.item.id) ? Array.from(expandGroups(ctx.doc, [pd.item.id])) : [pd.item.id];
-          S2.sel = new Set(pick);
+          S3.sel = new Set(pick);
           if (ctx.setSelection) ctx.setSelection([]);
           ctx.requestRender();
         }
-        if (S2.pedit) {
+        if (S3.pedit) {
           if (ev) {
             ev.stopImmediatePropagation();
             editHandleMove(ctx, ctx.worldMm(ev));
@@ -39441,33 +39441,33 @@ var require_pcb_tools = __commonJS({
           editHandleUp(ctx, !!ev && ev.type === "pointerup");
           return;
         }
-        if (S2.stickyUp) {
-          S2.stickyUp = false;
+        if (S3.stickyUp) {
+          S3.stickyUp = false;
           if (ev) {
             ev.stopImmediatePropagation();
             ev.preventDefault();
           }
           return;
         }
-        if (S2.drag && S2.drag.bySelect) {
+        if (S3.drag && S3.drag.bySelect) {
           if (ev) dragMove(ctx, ctx.worldMm(ev));
           finishDrag(ctx, true, !!(ev && (ev.ctrlKey || ev.metaKey)));
-        } else if (S2.move && !S2.move.sticky) finishSelectMove(ctx, true);
+        } else if (S3.move && !S3.move.sticky) finishSelectMove(ctx, true);
       }
       function previewColor(layer4, netKey2) {
-        if (netKey2 && S2.netColorMode === "all" && S2.ratsnestColors && /\.Cu$/.test(layer4)) {
-          const c = S2.ratsnestColors.get(netKey2);
+        if (netKey2 && S3.netColorMode === "all" && S3.ratsnestColors && /\.Cu$/.test(layer4)) {
+          const c = S3.ratsnestColors.get(netKey2);
           if (c) return c;
         }
         return color2(layer4);
       }
       function ratlineColor(netKey2) {
-        const base2 = netKey2 && S2.netColorMode && S2.netColorMode !== "off" && S2.ratsnestColors && S2.ratsnestColors.get(netKey2) || RATSNEST;
+        const base2 = netKey2 && S3.netColorMode && S3.netColorMode !== "off" && S3.ratsnestColors && S3.ratsnestColors.get(netKey2) || RATSNEST;
         return adjustColor(base2, 0.5, alphaOf(base2) + 0.4);
       }
-      var mode = () => typeof S2.trackClearance === "number" ? S2.trackClearance : CLEARANCE_MODE.ROUTING_VIA;
+      var mode = () => typeof S3.trackClearance === "number" ? S3.trackClearance : CLEARANCE_MODE.ROUTING_VIA;
       function drawDragPreview(c, ctx, view, px) {
-        const m = S2.move;
+        const m = S3.move;
         if (m && m.conns && m.conns.length && m.moved) {
           for (const { l, pts } of connLines(m, m.last[0], m.last[1])) {
             if (pts.length < 2) continue;
@@ -39477,7 +39477,7 @@ var require_pcb_tools = __commonJS({
             polyline22(c, pts, false);
           }
         }
-        const D = S2.drag;
+        const D = S3.drag;
         if (!D || !D.moved) return;
         for (const d of D.subs) {
           const bad = d.hits && d.hits.length;
@@ -39547,7 +39547,7 @@ var require_pcb_tools = __commonJS({
         return null;
       }
       function drawRoute(c, ctx, px) {
-        const rt = S2.route;
+        const rt = S3.route;
         for (const st of rt.stages) for (const op of st.ops) {
           const node = op.add || op.set && op.node;
           if (!node) continue;
@@ -39607,7 +39607,7 @@ var require_pcb_tools = __commonJS({
           }
           drawViaPreview(c, at4, via.diameter, via.drill, px, 0.8);
         }
-        if (rt.ratline && S2.showRatsnest) {
+        if (rt.ratline && S3.showRatsnest) {
           c.globalAlpha = 1;
           c.strokeStyle = ratlineColor(rt.netKey);
           c.lineWidth = 1 * px;
@@ -39615,7 +39615,7 @@ var require_pcb_tools = __commonJS({
         }
       }
       function routeHiddenIds() {
-        const rt = S2.route;
+        const rt = S3.route;
         if (!rt) return null;
         const out2 = /* @__PURE__ */ new Set();
         for (const st of rt.stages) for (const op of st.ops) {
@@ -39758,12 +39758,12 @@ var require_pcb_tools = __commonJS({
         return i0 >= 0 && i1 >= 0 && i >= 0 ? i >= Math.min(i0, i1) && i <= Math.max(i0, i1) : pair.includes(layer4);
       }
       function drawClearanceOutlines(c, ctx, cpx) {
-        const doc2 = ctx.doc, s2 = settingsOf2(ctx), layer4 = S2.layer;
+        const doc2 = ctx.doc, s2 = settingsOf2(ctx), layer4 = S3.layer;
         const hidden2 = appGlobal(() => editorState().hiddenLayers, null);
         const hl = appGlobal(() => editorState().highlightIds || null, null);
         const sel = new Set(selectionIds2(ctx));
         const objHide = appGlobal(() => editorState().renderOpts?.objects?.hide || null, null);
-        const list = clearanceOutlines(doc2, s2, layer4, { tracks: S2.trackClearance === CLEARANCE_MODE.ALWAYS, pads: S2.padClearance !== false, netName: (net) => netNameOf3(ctx, net), hidden: hidden2, objHide });
+        const list = clearanceOutlines(doc2, s2, layer4, { tracks: S3.trackClearance === CLEARANCE_MODE.ALWAYS, pads: S3.padClearance !== false, netName: (net) => netNameOf3(ctx, net), hidden: hidden2, objHide });
         if (!list.length) return;
         const KC2 = K11;
         c.save();
@@ -39850,11 +39850,11 @@ var require_pcb_tools = __commonJS({
         return `rgba(${k(r)}, ${k(g2)}, ${k(b)}, ${+Math.min(alpha, 1).toFixed(4)})`;
       }
       function ratsnestLines(doc2) {
-        if (!S2.rats || S2.rats.doc !== doc2 || S2.ratsDirty) {
-          S2.rats = { doc: doc2, lines: ratsnest(doc2, netlistCached(doc2)) };
-          S2.ratsDirty = false;
+        if (!S3.rats || S3.rats.doc !== doc2 || S3.ratsDirty) {
+          S3.rats = { doc: doc2, lines: ratsnest(doc2, netlistCached(doc2)) };
+          S3.ratsDirty = false;
         }
-        return S2.rats.lines;
+        return S3.rats.lines;
       }
       function dynamicRatsnest(doc2, moving) {
         if (!moving || !moving.size) return [];
@@ -39904,9 +39904,9 @@ var require_pcb_tools = __commonJS({
           if (d.group) for (const g2 of d.group) out2.add(g2.fp.id);
           else if (d.fp) out2.add(d.fp.id);
         }
-        if (S2.move && S2.move.moved) {
-          for (const id of S2.move.ids || []) out2.add(id);
-          for (const c of S2.move.conns || []) for (const id of c.l.ids) out2.add(id);
+        if (S3.move && S3.move.moved) {
+          for (const id of S3.move.ids || []) out2.add(id);
+          for (const c of S3.move.conns || []) for (const id of c.l.ids) out2.add(id);
         }
         return out2;
       }
@@ -40031,7 +40031,7 @@ var require_pcb_tools = __commonJS({
         c.stroke();
       }
       function drawDimPreview(c, d, px) {
-        const type = DIM_TYPE[d.shape], layer4 = S2.gfxLayer, s2 = d.start;
+        const type = DIM_TYPE[d.shape], layer4 = S3.gfxLayer, s2 = d.start;
         const dd = { start: s2, end: d.end || d.cur, height: d.height || 0, orientation: d.orientation, arrowInward: !!d.arrowInward, thickness: drawWidth(layer4) };
         if (type === "center" && !d.end) dd.end = vadd(s2, snap45(vsub(d.cur, s2)));
         if (samePt(dd.start, dd.end)) return;
@@ -40064,12 +40064,12 @@ var require_pcb_tools = __commonJS({
         const doc2 = ctx.doc;
         if (!doc2) return;
         const px = 1 / (view.ppm * view.zoom * (view.dpr || 1));
-        S2.mmPerPx = px * (view.dpr || 1);
+        S3.mmPerPx = px * (view.dpr || 1);
         c.lineCap = "round";
         c.lineJoin = "round";
-        if (S2.showRatsnest) {
+        if (S3.showRatsnest) {
           const lines = ratsnestLines(doc2);
-          const sel = S2.localRatsnest ? selectionIds2(ctx) : null;
+          const sel = S3.localRatsnest ? selectionIds2(ctx) : null;
           c.globalAlpha = 1;
           c.lineWidth = 1 * px;
           const curved = K11.pcbSizes.state.curvedRatsnest;
@@ -40082,18 +40082,18 @@ var require_pcb_tools = __commonJS({
           };
           const moving = movingIds();
           const hlNets = /* @__PURE__ */ new Set();
-          if (S2.route && S2.route.netKey) hlNets.add(S2.route.netKey);
-          if (S2.route && S2.route.netKeyN) hlNets.add(S2.route.netKeyN);
-          if (S2.highlightNet) hlNets.add(S2.highlightNet);
-          if (S2.drag) {
-            for (const d of S2.drag.subs) if (d.netKey) hlNets.add(d.netKey);
+          if (S3.route && S3.route.netKey) hlNets.add(S3.route.netKey);
+          if (S3.route && S3.route.netKeyN) hlNets.add(S3.route.netKeyN);
+          if (S3.highlightNet) hlNets.add(S3.highlightNet);
+          if (S3.drag) {
+            for (const d of S3.drag.subs) if (d.netKey) hlNets.add(d.netKey);
           }
           const dimStatic = moving.size > 0 || hlNets.size > 0;
           const lightBg = brightness2(K11.PCB_BG) >= 0.5;
-          const baseOf = (net) => S2.ratsnestColors && S2.ratsnestColors.get(net) || S2.ratsnestBase || RATSNEST;
+          const baseOf = (net) => S3.ratsnestColors && S3.ratsnestColors.get(net) || S3.ratsnestBase || RATSNEST;
           const byColor = /* @__PURE__ */ new Map();
           for (const l of lines) {
-            if (S2.hiddenNets.has(l.net)) continue;
+            if (S3.hiddenNets.has(l.net)) continue;
             if (sel && !l.ids.some((id) => sel.has(id))) continue;
             if (moving.size && l.ids.some((id) => moving.has(id))) continue;
             let col = baseOf(l.net), a = alphaOf(col);
@@ -40115,7 +40115,7 @@ var require_pcb_tools = __commonJS({
           if (moving.size) {
             const dyn = /* @__PURE__ */ new Map();
             for (const l of dynamicRatsnest(doc2, moving)) {
-              if (S2.hiddenNets.has(l.net)) continue;
+              if (S3.hiddenNets.has(l.net)) continue;
               const b = baseOf(l.net);
               const col = adjustColor(b, 0.5, alphaOf(b) + 0.3, lightBg);
               let arr4 = dyn.get(col);
@@ -40135,7 +40135,7 @@ var require_pcb_tools = __commonJS({
           const r = 16 * px;
           c.globalAlpha = 1;
           c.lineWidth = 1 * px;
-          const g2 = S2.modTool === "gridorigin" && S2.hover ? [S2.hover.x, S2.hover.y] : R2.gridOrigin, d = S2.modTool === "drillorigin" && S2.hover ? [S2.hover.x, S2.hover.y] : R2.auxOrigin;
+          const g2 = S3.modTool === "gridorigin" && S3.hover ? [S3.hover.x, S3.hover.y] : R2.gridOrigin, d = S3.modTool === "drillorigin" && S3.hover ? [S3.hover.x, S3.hover.y] : R2.auxOrigin;
           if (g2[0] || g2[1]) {
             c.strokeStyle = gridOriginColor();
             ring(c, g2, r);
@@ -40149,12 +40149,12 @@ var require_pcb_tools = __commonJS({
             line2(c, [d[0], d[1] - r], [d[0], d[1] + r]);
           }
         }
-        if (S2.markers.length && K11.drawMarkers) {
-          const shown2 = S2.hiddenSeverities && S2.hiddenSeverities.size ? S2.markers.filter((m) => !S2.hiddenSeverities.has(m.severity)) : S2.markers;
+        if (S3.markers.length && K11.drawMarkers) {
+          const shown2 = S3.hiddenSeverities && S3.hiddenSeverities.size ? S3.markers.filter((m) => !S3.hiddenSeverities.has(m.severity)) : S3.markers;
           if (shown2.length) K11.drawMarkers(c, shown2, "pcb", K11.markerScale("pcb", view), K11.PCB_BG);
         }
-        if (S2.move && S2.move.moved && S2.showCourtyardCollisions !== false && S2.showCourtyardConflicts !== false) {
-          const m = S2.move, key3 = m.last[0] + "," + m.last[1] + (m.xformed ? "x" : "");
+        if (S3.move && S3.move.moved && S3.showCourtyardCollisions !== false && S3.showCourtyardConflicts !== false) {
+          const m = S3.move, key3 = m.last[0] + "," + m.last[1] + (m.xformed ? "x" : "");
           if (!m.conflicts || m.conflicts.key !== key3) m.conflicts = { key: key3, fps: courtyardConflicts(doc2, new Set(m.ids)) };
           if (m.conflicts.fps.size) {
             c.globalAlpha = 1;
@@ -40170,18 +40170,18 @@ var require_pcb_tools = __commonJS({
         }
         drawDragPreview(c, ctx, view, px);
         drawGenEditPreview(c, ctx);
-        if (!S2.route && !S2.draw && !S2.drag && !S2.modTool) drawTuningSelection(c, ctx, px);
+        if (!S3.route && !S3.draw && !S3.drag && !S3.modTool) drawTuningSelection(c, ctx, px);
         drawEditPoints(c, ctx, px);
-        if (S2.modTool && PAD_TOOLS[S2.modTool] && S2.hover) drawPadPreview(c, doc2, PAD_TOOLS[S2.modTool], [S2.hover.x, S2.hover.y], S2.padPlace ? S2.padPlace.angle : 0, px);
-        if (S2.violations) for (const ob of S2.violations.obs) {
+        if (S3.modTool && PAD_TOOLS[S3.modTool] && S3.hover) drawPadPreview(c, doc2, PAD_TOOLS[S3.modTool], [S3.hover.x, S3.hover.y], S3.padPlace ? S3.padPlace.angle : 0, px);
+        if (S3.violations) for (const ob of S3.violations.obs) {
           drawShape(c, ob.shape, ob.clr, HALO_COLOR, 0.7);
           drawShape(c, ob.shape, 0, "#00FF00", 1);
         }
-        if (S2.route) drawRoute(c, ctx, px);
-        if (isTuneTool(S2.modTool)) drawTune(c, ctx, px);
-        if (S2.draw) {
-          const d = S2.draw;
-          const layer4 = d.layer || (d.shape === "zone" || d.shape === "thievingzone" ? S2.layer : d.shape === "rulearea" ? RULE_AREA_LAYERS[0] : S2.gfxLayer);
+        if (S3.route) drawRoute(c, ctx, px);
+        if (isTuneTool(S3.modTool)) drawTune(c, ctx, px);
+        if (S3.draw) {
+          const d = S3.draw;
+          const layer4 = d.layer || (d.shape === "zone" || d.shape === "thievingzone" ? S3.layer : d.shape === "rulearea" ? RULE_AREA_LAYERS[0] : S3.gfxLayer);
           c.globalAlpha = 0.85;
           c.strokeStyle = color2(layer4);
           c.lineWidth = Math.max(drawWidth(layer4), 1.5 * px);
@@ -40235,27 +40235,27 @@ var require_pcb_tools = __commonJS({
           }
           drawTwoPointAssistant(c, d, px, color2(layer4));
         }
-        if (S2.image && S2.hover && S2.modTool === "image") {
-          const img = S2.image;
+        if (S3.image && S3.hover && S3.modTool === "image") {
+          const img = S3.image;
           if (img.el && img.el.complete && img.el.naturalWidth) {
-            c.drawImage(img.el, S2.hover.x - img.w / 2, S2.hover.y - img.h / 2, img.w, img.h);
+            c.drawImage(img.el, S3.hover.x - img.w / 2, S3.hover.y - img.h / 2, img.w, img.h);
           } else {
             c.globalAlpha = 0.85;
-            c.strokeStyle = color2(S2.gfxLayer);
+            c.strokeStyle = color2(S3.gfxLayer);
             c.lineWidth = 1.5 * px;
             c.setLineDash([4 * px, 3 * px]);
-            c.strokeRect(S2.hover.x - img.w / 2, S2.hover.y - img.h / 2, img.w, img.h);
+            c.strokeRect(S3.hover.x - img.w / 2, S3.hover.y - img.h / 2, img.w, img.h);
             c.setLineDash([]);
-            line2(c, [S2.hover.x - img.w / 2, S2.hover.y - img.h / 2], [S2.hover.x + img.w / 2, S2.hover.y + img.h / 2]);
-            line2(c, [S2.hover.x + img.w / 2, S2.hover.y - img.h / 2], [S2.hover.x - img.w / 2, S2.hover.y + img.h / 2]);
+            line2(c, [S3.hover.x - img.w / 2, S3.hover.y - img.h / 2], [S3.hover.x + img.w / 2, S3.hover.y + img.h / 2]);
+            line2(c, [S3.hover.x + img.w / 2, S3.hover.y - img.h / 2], [S3.hover.x - img.w / 2, S3.hover.y + img.h / 2]);
           }
         }
         drawClearanceOutlines(c, ctx, px * (view.dpr || 1));
         drawGroupFrames(c, ctx, px * (view.dpr || 1));
         drawStatusPopup(c, px * (view.dpr || 1));
         const cpx = px * (view.dpr || 1);
-        if (S2.move && S2.move.snapAt) drawSnapIndicator(c, S2.move.snapAt, S2.move.snapAt.t, cpx);
-        const gl = S2.move && S2.move.guide;
+        if (S3.move && S3.move.snapAt) drawSnapIndicator(c, S3.move.snapAt, S3.move.snapAt.t, cpx);
+        const gl = S3.move && S3.move.guide;
         if (gl && Math.hypot(gl[1][0] - gl[0][0], gl[1][1] - gl[0][1]) >= 1e-5) {
           const [a, b] = gl;
           c.globalAlpha = 1;
@@ -40279,21 +40279,21 @@ var require_pcb_tools = __commonJS({
             c.stroke();
           }
         }
-        const hv = S2.hover;
-        if (hv && S2.modTool) {
-          if (S2.modTool === "via" && !S2.route) {
+        const hv = S3.hover;
+        if (hv && S3.modTool) {
+          if (S3.modTool === "via" && !S3.route) {
             const v = sizesOf(ctx).routeVia(netNameOf3(ctx, hv.snap ? hv.snap.net : null));
             c.globalAlpha = 0.6;
             c.strokeStyle = VIA;
             c.lineWidth = (v.diameter - v.drill) / 2;
             ring(c, [hv.x, hv.y], (v.diameter + v.drill) / 4);
           }
-          if (hv.snap && !ROUTER_TOOLS.has(S2.modTool) && !S2.route) drawSnapIndicator(c, [hv.x, hv.y], snapTypeOf(hv.snap), cpx);
+          if (hv.snap && !ROUTER_TOOLS.has(S3.modTool) && !S3.route) drawSnapIndicator(c, [hv.x, hv.y], snapTypeOf(hv.snap), cpx);
         }
         c.globalAlpha = 1;
       }
       function drawPadPreview(c, doc2, type, at4, angle, px) {
-        const pad2 = masterPad(doc2, type, S2.padTemplate || null);
+        const pad2 = masterPad(doc2, type, S3.padTemplate || null);
         const sz = K11.kid(pad2, "size");
         const w = sz ? K11.num(sz[1]) : 1, h3 = sz ? K11.num(sz[2]) : 1;
         const layers = (K11.kid(pad2, "layers") || []).slice(1).map(String);
@@ -40479,8 +40479,8 @@ var require_pcb_tools = __commonJS({
         const mid2 = rp(vadd(M, vmul(d, L)));
         const sP = rp(vadd(mid2, vmul(n2, sideP * h3))), sN = rp(vadd(mid2, vmul(n2, -sideP * h3)));
         const df = !isDiagDir(dir8([0, 0], d));
-        const entry = (a, s2) => simplifyPts(legPts(a.map(r65), s2, df).map(rp));
-        return { d, dIdx: dir8([0, 0], d), n: n2, sideP, mid: mid2, sP, sN, entryP: entry(aP, sP), entryN: entry(aN, sN), anchorP: aP.slice(), anchorN: aN.slice() };
+        const entry2 = (a, s2) => simplifyPts(legPts(a.map(r65), s2, df).map(rp));
+        return { d, dIdx: dir8([0, 0], d), n: n2, sideP, mid: mid2, sP, sN, entryP: entry2(aP, sP), entryN: entry2(aN, sN), anchorP: aP.slice(), anchorN: aN.slice() };
       }
       function dpSizes(ctx, nets) {
         const d = sizesOf(ctx).routeDiffPair(nets.P.name || "");
@@ -40488,7 +40488,7 @@ var require_pcb_tools = __commonJS({
       }
       function dpObstacles(ctx, rt) {
         const doc2 = routeDoc(ctx, rt);
-        const key3 = S2.docVer + "|" + rt.layer + "|" + rt.stages.length + "|" + rt.netKey;
+        const key3 = S3.docVer + "|" + rt.layer + "|" + rt.stages.length + "|" + rt.netKey;
         if (!rt.dpObs || rt.dpObs.key !== key3 || rt.dpObs.doc !== doc2) {
           const O = routeObstacles(doc2, settingsOf2(ctx), rt.netKey, rt.layer, null);
           rt.dpObs = indexObstacles(O.list.filter((ob) => ob.net !== rt.netKeyN));
@@ -40532,9 +40532,9 @@ var require_pcb_tools = __commonJS({
         return r;
       }
       function dpUpdateHead(ctx, hv) {
-        const rt = S2.route;
+        const rt = S3.route;
         if (!rt || !ctx.doc) return;
-        const rs = S2.rs;
+        const rs = S3.rs;
         const sz = rt.dpSizes;
         const h3 = sz.h;
         const R2 = h3 + sz.width / 2;
@@ -40621,7 +40621,7 @@ var require_pcb_tools = __commonJS({
       function dpStart(ctx, hv, mm5) {
         const p = [hv.x, hv.y];
         const doc2 = ctx.doc;
-        const layer4 = S2.layer;
+        const layer4 = S3.layer;
         const snap2 = hv.snap && hv.snap.kind !== "anchor" ? hv.snap : null;
         let net = snap2 ? snap2.net : null, s2 = snap2;
         if (!snap2) {
@@ -40645,7 +40645,7 @@ var require_pcb_tools = __commonJS({
           return;
         }
         const sizes2 = dpSizes(ctx, nets);
-        if (!S2.rs.can_violate_drc && sizes2.gap < (settingsOf2(ctx).minClearance || 0) - 1e-9) {
+        if (!S3.rs.can_violate_drc && sizes2.gap < (settingsOf2(ctx).minClearance || 0) - 1e-9) {
           ctx.toast(DP_MSG_GAP);
           return;
         }
@@ -40655,7 +40655,7 @@ var require_pcb_tools = __commonJS({
           return;
         }
         const NT = netTable(doc2);
-        S2.route = {
+        S3.route = {
           dp: true,
           start: p.slice(),
           startLayer: layer4,
@@ -40676,7 +40676,7 @@ var require_pcb_tools = __commonJS({
           dpStart: fp.pair,
           dpLines: null,
           dpFit: false,
-          diagFirst: !!S2.rs.start_diagonal,
+          diagFirst: !!S3.rs.start_diagonal,
           clickT: Date.now(),
           clickAt: p.slice(),
           stages: [],
@@ -40690,7 +40690,7 @@ var require_pcb_tools = __commonJS({
           tracer: newTracer(sizes2.width, -1),
           keepHighlight: false
         };
-        const rt = S2.route;
+        const rt = S3.route;
         trailAdd(rt.tracer, p);
         const R2 = sizesOf(ctx);
         if (R2.activeLayer !== layer4) R2.setActiveLayer(layer4);
@@ -40701,9 +40701,9 @@ var require_pcb_tools = __commonJS({
       }
       function dpFix(ctx, opts2) {
         opts2 = opts2 || {};
-        const rt = S2.route;
+        const rt = S3.route;
         const L = rt.dpLines;
-        const rs = S2.rs;
+        const rs = S3.rs;
         if (!L || L.P.length < 2 || L.N.length < 2) return false;
         if (!rt.dpFit && !(rs.mode === RM_MARK && rs.can_violate_drc)) {
           if (rt.collisions) showViolations(rt.collisions, rt.target);
@@ -40748,7 +40748,7 @@ var require_pcb_tools = __commonJS({
         if (P4.length > 2) rt.diagFirst = !isDiagDir(dir8(P4[P4.length - 3], P4[P4.length - 2]));
         if (L.vias) {
           rt.layer = rt.placingVia.toLayer;
-          S2.layer = rt.layer;
+          S3.layer = rt.layer;
           sizesOf(ctx).setActiveLayer(rt.layer);
           rt.placingVia = null;
           rt.tracer = newTracer(rt.width, -1);
@@ -40761,12 +40761,12 @@ var require_pcb_tools = __commonJS({
         opts2 = opts2 || {};
         const now2 = Date.now();
         const p = [hv.x, hv.y];
-        S2.violations = null;
-        if (!S2.route) {
+        S3.violations = null;
+        if (!S3.route) {
           dpStart(ctx, hv, mm5);
           return;
         }
-        const rt = S2.route;
+        const rt = S3.route;
         const dbl = !opts2.enter && now2 - rt.clickT < DBL_MS && Math.hypot(p[0] - rt.clickAt[0], p[1] - rt.clickAt[1]) < 0.3;
         rt.clickT = now2;
         rt.clickAt = p.slice();
@@ -40791,7 +40791,7 @@ var require_pcb_tools = __commonJS({
         ctx.requestRender();
       }
       function dpUndoLeg(ctx) {
-        const rt = S2.route;
+        const rt = S3.route;
         const st = rt && rt.stages.pop();
         if (!st) return false;
         rt.bdoc = null;
@@ -40803,25 +40803,25 @@ var require_pcb_tools = __commonJS({
         rt.placingVia = null;
         if (st.layer !== rt.layer) {
           rt.layer = st.layer;
-          S2.layer = st.layer;
+          S3.layer = st.layer;
           sizesOf(ctx).setActiveLayer(st.layer);
         }
         rt.tracer = newTracer(rt.width, rt.stages.length ? st.dir : -1);
         trailAdd(rt.tracer, rt.last);
         rt.dpLines = null;
         rt.chained = rt.stages.length > 0 && !rt.stages[rt.stages.length - 1].placingVia;
-        dpUpdateHead(ctx, S2.hover);
+        dpUpdateHead(ctx, S3.hover);
         routeHighlight(ctx, rt);
         refreshChip(ctx);
         ctx.requestRender();
         return true;
       }
       function dpToggleVia(ctx, type, target2) {
-        const rt = S2.route;
+        const rt = S3.route;
         if (!rt) return false;
         if (rt.placingVia && !target2) {
           rt.placingVia = null;
-          S2.layer = rt.layer;
+          S3.layer = rt.layer;
           sizesOf(ctx).setActiveLayer(rt.layer);
         } else {
           const plan = viaPlan(ctx, Object.assign({}, rt, { ratAnchor: null }), type, target2);
@@ -40831,15 +40831,15 @@ var require_pcb_tools = __commonJS({
           }
           rt.placingVia = plan;
           sizesOf(ctx).setActiveLayer(plan.toLayer);
-          S2.layer = rt.layer;
+          S3.layer = rt.layer;
         }
-        dpUpdateHead(ctx, S2.hover);
+        dpUpdateHead(ctx, S3.hover);
         refreshChip(ctx);
         ctx.requestRender();
         return true;
       }
       function dpSetLayer(ctx, layer4) {
-        const rt = S2.route;
+        const rt = S3.route;
         if (layer4 === rt.layer) {
           if (rt.placingVia) dpToggleVia(ctx);
           return;
@@ -40849,12 +40849,12 @@ var require_pcb_tools = __commonJS({
         const reaches = (q4) => q4.kind === "pad" || q4.kind === "via" ? dpPrimitives(doc2, q4 === st.P ? rt.netKey : rt.netKeyN, layer4).some((x) => x.kind === q4.kind && samePt(x.p, q4.p)) : false;
         if (!rt.placingVia && (!rt.stages.length && reaches(st.P) && reaches(st.N) || rt.stages.length && !rt.chained)) {
           rt.layer = layer4;
-          S2.layer = layer4;
+          S3.layer = layer4;
           sizesOf(ctx).setActiveLayer(layer4);
           rt.dpObs = null;
           rt.tracer = newTracer(rt.width, -1);
           trailAdd(rt.tracer, rt.last);
-          dpUpdateHead(ctx, S2.hover);
+          dpUpdateHead(ctx, S3.hover);
           refreshChip(ctx);
           ctx.requestRender();
           return;
@@ -40863,7 +40863,7 @@ var require_pcb_tools = __commonJS({
         dpToggleVia(ctx, "through", layer4);
       }
       function drawDpRoute(c, ctx, px) {
-        const rt = S2.route;
+        const rt = S3.route;
         const L = rt.dpLines;
         const w = rt.dpSizes.width;
         const clr = routeHaloClearance(ctx, rt);
@@ -40873,7 +40873,7 @@ var require_pcb_tools = __commonJS({
           drawShape(c, ob.shape, 0, "#00FF00", 1);
         }
         if (L) {
-          const tc = typeof S2.trackClearance === "number" ? S2.trackClearance : 2;
+          const tc = typeof S3.trackClearance === "number" ? S3.trackClearance : 2;
           if (tc >= 1) {
             c.globalAlpha = 0.9;
             c.strokeStyle = HALO_COLOR;
@@ -40898,7 +40898,7 @@ var require_pcb_tools = __commonJS({
             drawViaPreview(c, at4, rt.placingVia.diameter, rt.placingVia.drill, px, 0.8);
           }
         }
-        if (rt.ratline && S2.showRatsnest) {
+        if (rt.ratline && S3.showRatsnest) {
           c.globalAlpha = 1;
           c.lineWidth = 1 * px;
           rt.ratline.forEach((r, i) => {
@@ -40956,9 +40956,9 @@ var require_pcb_tools = __commonJS({
       }
       function routeDoc(ctx, rt) {
         if (!rt.stages.length) return ctx.doc;
-        if (!rt.bdoc || rt.bdoc.__base !== ctx.doc || rt.bdocVer !== S2.docVer) {
+        if (!rt.bdoc || rt.bdoc.__base !== ctx.doc || rt.bdocVer !== S3.docVer) {
           rt.bdoc = branchDoc(ctx.doc, rt.stages.flatMap((s2) => s2.ops));
-          rt.bdocVer = S2.docVer;
+          rt.bdocVer = S3.docVer;
         }
         return rt.bdoc;
       }
@@ -40983,7 +40983,7 @@ var require_pcb_tools = __commonJS({
       function routeObs(ctx, rt, layer4) {
         layer4 = layer4 || rt.layer;
         const doc2 = routeDoc(ctx, rt);
-        const key3 = S2.docVer + "|" + layer4 + "|" + rt.width + "|" + rt.stages.length + "|" + rt.netKey;
+        const key3 = S3.docVer + "|" + layer4 + "|" + rt.width + "|" + rt.stages.length + "|" + rt.netKey;
         if (!rt.obs || rt.obs.key !== key3 || rt.obs.doc !== doc2) {
           rt.obs = routeObstacles(doc2, settingsOf2(ctx), rt.netKey, layer4, rt.netKey ? null : routeOwn(rt));
           rt.obs.key = key3;
@@ -41014,13 +41014,13 @@ var require_pcb_tools = __commonJS({
         return cu.slice(Math.min(i, j), Math.max(i, j) + 1);
       }
       function updateHead(ctx) {
-        const rt = S2.route;
+        const rt = S3.route;
         if (!rt || !ctx.doc) return;
         if (rt.dp) {
-          dpUpdateHead(ctx, S2.hover);
+          dpUpdateHead(ctx, S3.hover);
           return;
         }
-        const rs = S2.rs, rc = routeCtx(ctx, rt), O = routeObs(ctx, rt);
+        const rs = S3.rs, rc = routeCtx(ctx, rt), O = routeObs(ctx, rt);
         const r = rt.width / 2;
         trailAdd(rt.tracer, rt.cursor);
         if (rs.auto_posture || rt.tracer.manuallyForced) rt.diagFirst = isDiagDir(tracerPosture(rt.tracer, rt.cursor));
@@ -41080,7 +41080,7 @@ var require_pcb_tools = __commonJS({
         rt.loopHidden = previewLoops(ctx, rt, rc);
       }
       function previewLoops(ctx, rt, rc) {
-        if (!S2.rs.remove_loops || !rt.reached || !rt.netKey || !rt.els || !rt.els.length) return null;
+        if (!S3.rs.remove_loops || !rt.reached || !rt.netKey || !rt.els || !rt.els.length) return null;
         const doc2 = rc.doc;
         if (!jointAt(doc2, rt.layer, rt.target, rt.netKey).count) return null;
         const b = branchDoc(doc2, trackOps(doc2, rt.els, rt.width, rt.layer, rt.net));
@@ -41392,18 +41392,18 @@ var require_pcb_tools = __commonJS({
         return true;
       }
       function endRoute(ctx, fixCurrent) {
-        const rt = S2.route;
+        const rt = S3.route;
         if (!rt) return;
         if (rt.dp) {
           if (fixCurrent && rt.dpLines) dpFix(ctx, { finish: true });
         } else if (fixCurrent && (rt.els && rt.els.length || rt.placingVia)) fixHead(ctx, { finish: true });
-        S2.route = null;
+        S3.route = null;
         commitRoute(ctx, rt);
         routeUnhighlight(ctx, rt);
         sizesOf(ctx).endRoute();
         refreshChip(ctx);
         ctx.requestRender();
-        if (S2.routeQueue && routeQueueNext) {
+        if (S3.routeQueue && routeQueueNext) {
           const next = routeQueueNext;
           Promise.resolve().then(() => next(ctx));
         }
@@ -41413,8 +41413,8 @@ var require_pcb_tools = __commonJS({
         routeQueueNext = fn;
       }
       function undoRouteLeg(ctx) {
-        if (S2.route && S2.route.dp) return dpUndoLeg(ctx);
-        const rt = S2.route;
+        if (S3.route && S3.route.dp) return dpUndoLeg(ctx);
+        const rt = S3.route;
         const st = rt && rt.stages.pop();
         if (!st) return false;
         rt.bdoc = null;
@@ -41427,7 +41427,7 @@ var require_pcb_tools = __commonJS({
         rt.placingVia = null;
         if (st.layer !== rt.layer) {
           rt.layer = st.layer;
-          S2.layer = st.layer;
+          S3.layer = st.layer;
           sizesOf(ctx).setActiveLayer(st.layer);
         }
         rt.tracer = newTracer(rt.width, rt.stages.length ? st.dir : -1);
@@ -41461,12 +41461,12 @@ var require_pcb_tools = __commonJS({
           return snap2.onLayer || null;
         }
         const q4 = mm5 || [hv.x, hv.y];
-        if (trackUnder(ctx.doc, q4[0], q4[1], S2.layer)) return S2.layer;
-        for (const l of otherCopperLayers(ctx, S2.layer)) if (trackUnder(ctx.doc, q4[0], q4[1], l)) return l;
+        if (trackUnder(ctx.doc, q4[0], q4[1], S3.layer)) return S3.layer;
+        for (const l of otherCopperLayers(ctx, S3.layer)) if (trackUnder(ctx.doc, q4[0], q4[1], l)) return l;
         return null;
       }
       function showViolations(obs, at4) {
-        S2.violations = obs.length ? { obs, at: at4.slice() } : null;
+        S3.violations = obs.length ? { obs, at: at4.slice() } : null;
       }
       function startRefusal(ctx, p, mm5, net, width, layer4, own, snapped) {
         const doc2 = ctx.doc;
@@ -41480,7 +41480,7 @@ var require_pcb_tools = __commonJS({
           if (t && (t.kind === "gr_text" || t.kind === "gr_text_box") && /\.Cu$/.test(layerOf2(t.node, ""))) return "Cannot start routing from a text item.";
         }
         if (!/\.Cu$/.test(layer4)) return "Tracks on Copper layers only.";
-        if (S2.rs.mode === RM_MARK) return null;
+        if (S3.rs.mode === RM_MARK) return null;
         const s2 = settingsOf2(ctx);
         const key3 = netTable(doc2).key(net);
         const O = routeObstacles(doc2, s2, key3, layer4, key3 ? null : own);
@@ -41493,21 +41493,21 @@ var require_pcb_tools = __commonJS({
         return null;
       }
       function routeClick(ctx, hv, mm5, opts2) {
-        if (S2.route && S2.route.dp || !S2.route && S2.modTool === "routediff") {
+        if (S3.route && S3.route.dp || !S3.route && S3.modTool === "routediff") {
           dpClick(ctx, hv, mm5, opts2);
           return;
         }
         opts2 = opts2 || {};
         const now2 = Date.now();
         let p = [hv.x, hv.y];
-        S2.violations = null;
-        if (!S2.route) {
-          let net = hv.snap ? hv.snap.net : netUnder(ctx.doc, hv.x, hv.y, S2.layer);
+        S3.violations = null;
+        if (!S3.route) {
+          let net = hv.snap ? hv.snap.net : netUnder(ctx.doc, hv.x, hv.y, S3.layer);
           let split = null, startIds = [], startKind = hv.snap ? hv.snap.kind : null;
           const startOn = startLayerOf(ctx, hv, mm5);
-          if (startOn && startOn !== S2.layer) setLayer(ctx, startOn);
+          if (startOn && startOn !== S3.layer) setLayer(ctx, startOn);
           if (!hv.snap) {
-            const on2 = trackUnder(ctx.doc, mm5 ? mm5[0] : hv.x, mm5 ? mm5[1] : hv.y, S2.layer);
+            const on2 = trackUnder(ctx.doc, mm5 ? mm5[0] : hv.x, mm5 ? mm5[1] : hv.y, S3.layer);
             if (on2) {
               p = on2.point;
               net = netOf3(on2.item.node);
@@ -41520,18 +41520,18 @@ var require_pcb_tools = __commonJS({
             if (it) startIds.push(it.id);
           }
           const R2 = sizesOf(ctx);
-          const connected = connectedWidth(ctx.doc, p, S2.layer, mm5 || p);
+          const connected = connectedWidth(ctx.doc, p, S3.layer, mm5 || p);
           const width = R2.routeWidth(netNameOf3(ctx, net), connected);
-          const refusal = startRefusal(ctx, p, mm5, net, width, S2.layer, new Set(startIds), !!hv.snap);
+          const refusal = startRefusal(ctx, p, mm5, net, width, S3.layer, new Set(startIds), !!hv.snap);
           if (refusal) {
             ctx.toast(refusal);
             ctx.requestRender();
             return;
           }
           const netKey2 = netTable(ctx.doc).key(net);
-          S2.route = {
+          S3.route = {
             start: p.slice(),
-            startLayer: S2.layer,
+            startLayer: S3.layer,
             startKind,
             startSpan: hv.snap && (hv.snap.kind === "pad" || hv.snap.kind === "via") ? hv.snap.layers || null : null,
             last: p,
@@ -41542,10 +41542,10 @@ var require_pcb_tools = __commonJS({
             reached: true,
             net,
             netKey: netKey2,
-            layer: S2.layer,
+            layer: S3.layer,
             width,
             connected,
-            diagFirst: !!S2.rs.start_diagonal,
+            diagFirst: !!S3.rs.start_diagonal,
             clickT: now2,
             clickAt: p.slice(),
             stages: [],
@@ -41557,26 +41557,26 @@ var require_pcb_tools = __commonJS({
             collisions: null,
             shove: null,
             tracer: newTracer(width, -1),
-            keepHighlight: !!netKey2 && S2.highlightNet === netKey2
+            keepHighlight: !!netKey2 && S3.highlightNet === netKey2
           };
-          trailAdd(S2.route.tracer, p);
-          if (R2.activeLayer !== S2.layer) R2.setActiveLayer(S2.layer);
-          routeHighlight(ctx, S2.route);
-          S2.route.ratline = leadingRatline(ctx, S2.route);
-          const swv = S2.startWithVia;
-          S2.startWithVia = null;
-          if (swv && swv.from !== S2.route.layer && !startSpans(ctx, S2.route, S2.route.layer)) {
-            const to = S2.route.layer;
-            S2.route.layer = swv.from;
-            S2.layer = swv.from;
-            S2.route.obs = null;
+          trailAdd(S3.route.tracer, p);
+          if (R2.activeLayer !== S3.layer) R2.setActiveLayer(S3.layer);
+          routeHighlight(ctx, S3.route);
+          S3.route.ratline = leadingRatline(ctx, S3.route);
+          const swv = S3.startWithVia;
+          S3.startWithVia = null;
+          if (swv && swv.from !== S3.route.layer && !startSpans(ctx, S3.route, S3.route.layer)) {
+            const to = S3.route.layer;
+            S3.route.layer = swv.from;
+            S3.layer = swv.from;
+            S3.route.obs = null;
             toggleViaPlacement(ctx, "through", to);
           }
           refreshChip(ctx);
           ctx.requestRender();
           return;
         }
-        const rt = S2.route;
+        const rt = S3.route;
         const dbl = !opts2.enter && now2 - rt.clickT < DBL_MS && Math.hypot(p[0] - rt.clickAt[0], p[1] - rt.clickAt[1]) < 0.3;
         rt.clickT = now2;
         rt.clickAt = p.slice();
@@ -41596,7 +41596,7 @@ var require_pcb_tools = __commonJS({
           const it = rc.doc.items.get(hv.snap.id);
           if (it) endSplit = { id: it.id, point: [hv.x, hv.y], node: clone5(it.node) };
         }
-        const markEnd = S2.rs.mode === RM_MARK && hv.snap && samePt(rt.target, [hv.x, hv.y]) ? hv.snap : null;
+        const markEnd = S3.rs.mode === RM_MARK && hv.snap && samePt(rt.target, [hv.x, hv.y]) ? hv.snap : null;
         const placingVia = !!rt.placingVia;
         if (!fixHead(ctx, { endSplit, snap: markEnd })) {
           ctx.requestRender();
@@ -41662,16 +41662,16 @@ var require_pcb_tools = __commonJS({
         return { type, toLayer: next, span, diameter: size2.diameter, drill: size2.drill };
       }
       function toggleViaPlacement(ctx, type, target2) {
-        const rt = S2.route;
+        const rt = S3.route;
         if (rt && rt.dp) return dpToggleVia(ctx, type, target2);
         if (!rt) {
-          if (S2.modTool === "routediff") return true;
+          if (S3.modTool === "routediff") return true;
           startWithVia(ctx);
           return true;
         }
         if (rt.placingVia && !target2) {
           rt.placingVia = null;
-          S2.layer = rt.layer;
+          S3.layer = rt.layer;
           sizesOf(ctx).setActiveLayer(rt.layer);
           if (rt.cursor) updateHead(ctx);
           refreshChip(ctx);
@@ -41685,25 +41685,25 @@ var require_pcb_tools = __commonJS({
         }
         rt.placingVia = plan;
         sizesOf(ctx).setActiveLayer(plan.toLayer);
-        S2.layer = rt.layer;
+        S3.layer = rt.layer;
         if (rt.cursor) updateHead(ctx);
         refreshChip(ctx);
         ctx.requestRender();
         return true;
       }
       function startWithVia(ctx) {
-        S2.startWithVia = { from: S2.layer };
+        S3.startWithVia = { from: S3.layer };
         runAction2("layerToggle", ctx);
       }
       function selectLayerAndPlaceVia(ctx, type) {
-        const rt = S2.route;
+        const rt = S3.route;
         if (!rt) return false;
         const doc2 = routeDoc(ctx, rt);
         const cu = K11.pcbSizes.copperStack(copperOf(doc2));
         const disallow = new Set(type === "through" ? [] : [rt.layer]);
         const at4 = rt.target || rt.last;
-        layerPickerImpl({ layers: cu, current: rt.layer, disallow, at: at4, client: S2.client }, (layer4) => {
-          if (!layer4 || !S2.route || S2.route !== rt) return;
+        layerPickerImpl({ layers: cu, current: rt.layer, disallow, at: at4, client: S3.client }, (layer4) => {
+          if (!layer4 || !S3.route || S3.route !== rt) return;
           if (type !== "through" && layer4 === rt.layer) return;
           if (rt.placingVia) rt.placingVia = null;
           toggleViaPlacement(lastCtx || ctx, type, layer4);
@@ -41716,7 +41716,7 @@ var require_pcb_tools = __commonJS({
         ctx.commit([addedChange(ctx.doc, viaNode(ctx.doc, hv.x, hv.y, via.diameter, via.drill, net, viaSpan2(ctx.doc)), net)], "via");
       }
       function setLayer(ctx, layer4) {
-        const rt = S2.route;
+        const rt = S3.route;
         if (rt && rt.dp) {
           dpSetLayer(ctx, layer4);
           return;
@@ -41730,7 +41730,7 @@ var require_pcb_tools = __commonJS({
           const afterVia = rt.stages.length && !rt.chained;
           if (!rt.placingVia && (spans2 || afterVia)) {
             rt.layer = layer4;
-            S2.layer = layer4;
+            S3.layer = layer4;
             sizesOf(ctx).setActiveLayer(layer4);
             rt.obs = null;
             rt.tracer = newTracer(rt.width, -1);
@@ -41746,8 +41746,8 @@ var require_pcb_tools = __commonJS({
           toggleViaPlacement(ctx, "through", layer4);
           return;
         }
-        S2.layer = layer4;
-        S2.gfxLayer = layer4;
+        S3.layer = layer4;
+        S3.gfxLayer = layer4;
         sizesOf(ctx).setActiveLayer(layer4);
         refreshChip(ctx);
         ctx.requestRender();
@@ -41775,7 +41775,7 @@ var require_pcb_tools = __commonJS({
         layerPickerImpl = fn;
       }
       function attemptFinish(ctx) {
-        const rt = S2.route;
+        const rt = S3.route;
         if (!rt || rt.dp) return false;
         leadingRatline(ctx, rt);
         const a = rt.ratAnchor;
@@ -41790,14 +41790,14 @@ var require_pcb_tools = __commonJS({
         if (samePt(rt.target, goal) && (a.layers.includes(rt.layer) || a.layers.includes("*.Cu"))) {
           const hv = hoverPoint(ctx, goal, true);
           routeClick(ctx, { x: goal[0], y: goal[1], snap: hv.snap }, goal, { enter: true });
-          if (S2.route === rt) endRoute(ctx, false);
+          if (S3.route === rt) endRoute(ctx, false);
           return true;
         }
         ctx.requestRender();
         return true;
       }
       function continueFromEnd(ctx) {
-        const rt = S2.route;
+        const rt = S3.route;
         if (!rt || rt.dp) return false;
         leadingRatline(ctx, rt);
         const a = rt.ratAnchor;
@@ -41808,10 +41808,10 @@ var require_pcb_tools = __commonJS({
         const currentEnd = rt.target.slice(), layer4 = rt.layer;
         endRoute(ctx, false);
         const next = a.layers.includes(layer4) || a.layers.includes("*.Cu") || !a.layers.length ? layer4 : a.layers[0];
-        if (next !== S2.layer) setLayer(ctx, next);
+        if (next !== S3.layer) setLayer(ctx, next);
         const hv = hoverPoint(ctx, a.p.slice(), true);
         routeClick(ctx, { x: a.p[0], y: a.p[1], snap: hv.snap }, a.p.slice());
-        const nr = S2.route;
+        const nr = S3.route;
         if (!nr) return true;
         nr.cursor = currentEnd;
         updateHead(ctx);
@@ -41827,7 +41827,7 @@ var require_pcb_tools = __commonJS({
         return null;
       }
       function requestField(ctx, cursor) {
-        if (S2.forceHover || selectionIds2(ctx).size || S2.padSel) return null;
+        if (S3.forceHover || selectionIds2(ctx).size || S3.padSel) return null;
         const sel = typeof ctx.selectedField === "function" ? ctx.selectedField() : null;
         if (sel) return ctx.doc.items.has(sel.id) && footprintFieldNode(ctx.doc.items.get(sel.id).node, sel.name) ? { id: sel.id, name: sel.name, hover: false } : null;
         if (!cursor || typeof ctx.fieldAt !== "function") return null;
@@ -41887,7 +41887,7 @@ var require_pcb_tools = __commonJS({
       function stepLayer(ctx, forward) {
         const R2 = sizesOf(ctx);
         const hidden2 = appGlobal(() => editorState().hiddenLayers, null);
-        const to = K11.pcbSizes.stepCopperLayer(copperOf(ctx.doc), S2.route ? S2.route.layer : R2.activeLayer || S2.layer, forward, hidden2);
+        const to = K11.pcbSizes.stepCopperLayer(copperOf(ctx.doc), S3.route ? S3.route.layer : R2.activeLayer || S3.layer, forward, hidden2);
         if (to) setLayer(ctx, to);
         return true;
       }
@@ -41898,10 +41898,10 @@ var require_pcb_tools = __commonJS({
         return runAction2("flipSelection", ctx);
       }
       function deleteSelection2(ctx) {
-        const ids = unlockedIds(ctx, Array.from(expandGroups(ctx.doc, S2.sel)));
+        const ids = unlockedIds(ctx, Array.from(expandGroups(ctx.doc, S3.sel)));
         if (!ids.length) return;
         const changes = deleteChanges(ctx.doc, ids);
-        S2.sel.clear();
+        S3.sel.clear();
         if (!changes.length && !changes.infoError) return;
         ctx.commit(changes, "delete");
       }
@@ -41925,16 +41925,16 @@ var require_pcb_tools = __commonJS({
         return bare3 ? String(x) : x + (u === "mil" ? " mils" : u === "in" ? " in" : " mm");
       }
       function sizeSelection(ctx) {
-        if (S2.modTool) return null;
+        if (S3.modTool) return null;
         const items = selectedItems(ctx);
         if (!items.length || !items.every((it) => it.kind === "segment" || it.kind === "arc" || it.kind === "via")) return null;
         return items;
       }
       function cycleWidth(ctx, dir) {
         const R2 = sizesOf(ctx), fwd = dir !== -1;
-        if (S2.route) {
+        if (S3.route) {
           R2.stepTrackWidth(fwd, true);
-          S2.route.width = R2.routeWidth(netNameOf3(ctx, S2.route.net), S2.route.connected);
+          S3.route.width = R2.routeWidth(netNameOf3(ctx, S3.route.net), S3.route.connected);
           refreshChip(ctx);
           ctx.requestRender();
           return;
@@ -41960,7 +41960,7 @@ var require_pcb_tools = __commonJS({
       }
       function cycleVia(ctx, dir) {
         const R2 = sizesOf(ctx), fwd = dir !== -1;
-        const sel = S2.route ? null : sizeSelection(ctx);
+        const sel = S3.route ? null : sizeSelection(ctx);
         if (sel) {
           const changes = [];
           for (const it of sel) {
@@ -41988,14 +41988,14 @@ var require_pcb_tools = __commonJS({
           return { size: s2 ? K11.num(s2[1]) : 0, drill: d ? K11.num(d[1]) : 0 };
         }
         const R2 = sizesOf(lastCtx);
-        const v = S2.route ? R2.routeVia(netNameOf3(lastCtx || {}, S2.route.net)) : R2.currentVia();
+        const v = S3.route ? R2.routeVia(netNameOf3(lastCtx || {}, S3.route.net)) : R2.currentVia();
         return { size: v.diameter, drill: v.drill };
       }
       function expandSelection(ctx) {
-        if (!S2.sel.size) return false;
-        const before = S2.sel.size;
-        S2.sel = connectedRun(ctx.doc, S2.sel);
-        ctx.toast(S2.sel.size > before ? `Selected the connected run (${S2.sel.size} items)` : "Nothing else connected");
+        if (!S3.sel.size) return false;
+        const before = S3.sel.size;
+        S3.sel = connectedRun(ctx.doc, S3.sel);
+        ctx.toast(S3.sel.size > before ? `Selected the connected run (${S3.sel.size} items)` : "Nothing else connected");
         ctx.requestRender();
         return true;
       }
@@ -42192,7 +42192,7 @@ var require_pcb_tools = __commonJS({
       }
       function jointIndex(doc2) {
         if (doc2.__bc && doc2.__bc.joints) return doc2.__bc.joints;
-        if (!doc2.__bc && S2.joints && S2.joints.doc === doc2 && S2.joints.ver === S2.docVer) return S2.joints;
+        if (!doc2.__bc && S3.joints && S3.joints.doc === doc2 && S3.joints.ver === S3.docVer) return S3.joints;
         const NT = netTable(doc2);
         const ends = /* @__PURE__ */ new Map(), vias = /* @__PURE__ */ new Map(), pads = /* @__PURE__ */ new Map();
         const copper = doc2.copper.length ? doc2.copper : ["F.Cu", "B.Cu"];
@@ -42213,9 +42213,9 @@ var require_pcb_tools = __commonJS({
             if (a) add22(vias, ptKey(a), { item: it, layers: viaLayers(it.node, copper), net: NT.key(netOf3(it.node)) });
           } else if (it.kind === "footprint") for (const p of padsOf(it)) add22(pads, ptKey([p.x, p.y]), { item: it, pad: p, layers: padCopperLayers(p, copper) });
         }
-        const J = { doc: doc2, ver: S2.docVer, ends, vias, pads, NT };
+        const J = { doc: doc2, ver: S3.docVer, ends, vias, pads, NT };
         if (doc2.__bc) doc2.__bc.joints = J;
-        else S2.joints = J;
+        else S3.joints = J;
         return J;
       }
       var trackEnds = (it) => [pt4(it.node, "start"), pt4(it.node, "end")];
@@ -42863,42 +42863,42 @@ var require_pcb_tools = __commonJS({
         return { changes, first };
       }
       function drawClick(ctx, hv, t, ev) {
-        if (S2.draw && S2.draw.shape !== "garc") {
-          const c = constrainDraw(S2.draw, [hv.x, hv.y], !!(ev && (ev.ctrlKey || ev.metaKey)));
+        if (S3.draw && S3.draw.shape !== "garc") {
+          const c = constrainDraw(S3.draw, [hv.x, hv.y], !!(ev && (ev.ctrlKey || ev.metaKey)));
           hv = Object.assign({}, hv, { x: c[0], y: c[1] });
         }
-        if (t === "garc" && S2.draw && S2.draw.shape === "garc") arcMove(S2.draw, [hv.x, hv.y], !!(ev && (ev.ctrlKey || ev.metaKey)));
-        const p = [hv.x, hv.y], layer4 = S2.gfxLayer;
-        if (!S2.draw && t === "thievingzone" && !thievingAllowed(ctx.doc)) {
+        if (t === "garc" && S3.draw && S3.draw.shape === "garc") arcMove(S3.draw, [hv.x, hv.y], !!(ev && (ev.ctrlKey || ev.metaKey)));
+        const p = [hv.x, hv.y], layer4 = S3.gfxLayer;
+        if (!S3.draw && t === "thievingzone" && !thievingAllowed(ctx.doc)) {
           ctx.toast(THIEVING_NEEDS_VERSION_MSG);
           return;
         }
-        if (!S2.draw && t === "thievingzone") {
+        if (!S3.draw && t === "thievingzone") {
           const tpl = zoneTemplate(ctx, false, true);
-          S2.draw = { shape: t, start: p, cur: p.slice(), pts: [p], template: tpl, layer: zoneLayers(tpl)[0] };
+          S3.draw = { shape: t, start: p, cur: p.slice(), pts: [p], template: tpl, layer: zoneLayers(tpl)[0] };
           ctx.requestRender();
           return;
         }
-        if (!S2.draw && t === "zone" && S2.zoneMode) {
-          const src = ctx.doc.items.get(S2.zoneMode.src);
+        if (!S3.draw && t === "zone" && S3.zoneMode) {
+          const src = ctx.doc.items.get(S3.zoneMode.src);
           if (!src) {
-            S2.zoneMode = null;
+            S3.zoneMode = null;
             ctx.setTool("select");
             return;
           }
-          const layers = zoneLayerList(src.node), active = sizesOf(ctx).activeLayer || S2.layer;
-          S2.draw = { shape: t, start: p, cur: p.slice(), pts: [p], template: src.node, layer: S2.zoneMode.mode === "similar" && !layers.includes(active) ? layers[0] : active, zoneMode: S2.zoneMode.mode };
+          const layers = zoneLayerList(src.node), active = sizesOf(ctx).activeLayer || S3.layer;
+          S3.draw = { shape: t, start: p, cur: p.slice(), pts: [p], template: src.node, layer: S3.zoneMode.mode === "similar" && !layers.includes(active) ? layers[0] : active, zoneMode: S3.zoneMode.mode };
           ctx.requestRender();
           return;
         }
-        if (!S2.draw && (t === "zone" || t === "rulearea") && newItemDialogs.zone) {
+        if (!S3.draw && (t === "zone" || t === "rulearea") && newItemDialogs.zone) {
           const tpl = zoneTemplate(ctx, t === "rulearea"), d3 = { shape: t, start: p, cur: p.slice(), pts: [p], pending: true, template: null, layer: zoneLayers(tpl)[0] };
-          S2.draw = d3;
+          S3.draw = d3;
           ctx.requestRender();
           newItemDialogs.zone(ctx, tpl, (node2) => {
-            if (S2.draw !== d3) return;
+            if (S3.draw !== d3) return;
             if (!node2) {
-              S2.draw = null;
+              S3.draw = null;
               ctx.requestRender();
               return;
             }
@@ -42913,13 +42913,13 @@ var require_pcb_tools = __commonJS({
           arcClick(ctx, p);
           return;
         }
-        if (!S2.draw) {
-          S2.draw = { shape: t, start: p, cur: p.slice(), pts: [p] };
-          if (t === "dimortho") S2.draw.orientation = "h";
+        if (!S3.draw) {
+          S3.draw = { shape: t, start: p, cur: p.slice(), pts: [p] };
+          if (t === "dimortho") S3.draw.orientation = "h";
           ctx.requestRender();
           return;
         }
-        const d = S2.draw;
+        const d = S3.draw;
         if (POLY_TOOLS.has(t)) {
           if (d.pending) return;
           drawTrack(d, p, !!(ev && (ev.ctrlKey || ev.metaKey)));
@@ -42943,13 +42943,13 @@ var require_pcb_tools = __commonJS({
           d.pts.push(p);
           if (d.pts.length === 4) {
             ctx.commit([addedChange(ctx.doc, withStroke(curveNode(d.pts, layer4)))], "curve");
-            S2.draw = null;
+            S3.draw = null;
           }
           ctx.requestRender();
           return;
         }
         if (t === "gtextbox" || t === "table") {
-          S2.draw = null;
+          S3.draw = null;
           ctx.requestRender();
           if (t === "gtextbox" && samePt(p, d.start)) return;
           if (t === "gtextbox") {
@@ -42997,24 +42997,24 @@ var require_pcb_tools = __commonJS({
           return;
         }
         if (samePt(p, d.start)) {
-          S2.draw = null;
+          S3.draw = null;
           ctx.requestRender();
           return;
         }
         const node = withStroke(t === "gline" ? lineNode(d.start, p, layer4) : t === "grect" ? rectNode(d.start, p, layer4) : circleNode(d.start, p, layer4));
         const add22 = addedChange(ctx.doc, node);
         ctx.commit([add22], t === "gline" ? "line" : t === "grect" ? "rectangle" : "circle");
-        S2.draw = t === "gline" ? { shape: t, start: p, cur: p.slice(), pts: [p], chain: (d.chain || []).concat([{ id: add22.id, start: d.start, end: p }]) } : null;
+        S3.draw = t === "gline" ? { shape: t, start: p, cur: p.slice(), pts: [p], chain: (d.chain || []).concat([{ id: add22.id, start: d.start, end: p }]) } : null;
         ctx.requestRender();
       }
       function zoneTemplate(ctx, keepout, thieving = false) {
-        const doc2 = ctx.doc, layer4 = sizesOf(ctx).activeLayer || S2.layer;
+        const doc2 = ctx.doc, layer4 = sizesOf(ctx).activeLayer || S3.layer;
         if (keepout) return ruleAreaNode([], [layer4]);
         if (thieving) return thievingZoneNode(doc2, [], layer4);
         let net = { code: 0, name: "" };
-        if (S2.highlightNet) {
+        if (S3.highlightNet) {
           const t = netTable(doc2);
-          const n2 = boardNets(doc2).find((x) => t.key(x) === S2.highlightNet);
+          const n2 = boardNets(doc2).find((x) => t.key(x) === S3.highlightNet);
           if (n2) net = n2;
         }
         if (!net.name) {
@@ -43039,14 +43039,14 @@ var require_pcb_tools = __commonJS({
         return out2;
       }
       function finishPoly(ctx) {
-        const d = S2.draw;
+        const d = S3.draw;
         if (!d || !POLY_TOOLS.has(d.shape) || d.pending) return;
-        S2.draw = null;
+        S3.draw = null;
         ctx.requestRender();
         d.pts = polyOutline(d);
         if (d.template && d.zoneMode) {
           if (d.pts.length < 3) return;
-          const src = S2.zoneMode && ctx.doc.items.get(S2.zoneMode.src);
+          const src = S3.zoneMode && ctx.doc.items.get(S3.zoneMode.src);
           if (!src) return;
           if (d.zoneMode === "similar") {
             const c = addedChange(ctx.doc, similarZoneNode(ctx.doc, src.node, d.pts), netOf3(src.node));
@@ -43058,10 +43058,10 @@ var require_pcb_tools = __commonJS({
           const { changes, first } = zoneCutoutChanges(ctx.doc, src, d.pts);
           ctx.commit(changes, "Add Zone Cutout");
           if (first) {
-            S2.zoneMode = { mode: "cutout", src: first };
+            S3.zoneMode = { mode: "cutout", src: first };
             applySelection(ctx, [first]);
           } else {
-            S2.zoneMode = null;
+            S3.zoneMode = null;
             ctx.setTool("select");
           }
           return;
@@ -43080,14 +43080,14 @@ var require_pcb_tools = __commonJS({
           return;
         }
         if (d.shape === "gpoly") {
-          ctx.commit([addedChange(ctx.doc, withStroke(polyNode(d.pts, S2.gfxLayer)))], "polygon");
+          ctx.commit([addedChange(ctx.doc, withStroke(polyNode(d.pts, S3.gfxLayer)))], "polygon");
           return;
         }
         if (d.shape === "rulearea") {
           ctx.commit([addedChange(ctx.doc, ruleAreaNode(d.pts, RULE_AREA_LAYERS))], "rule area");
           return;
         }
-        const layer4 = S2.layer, nets = boardNets(ctx.doc), under = netUnder(ctx.doc, d.pts[0][0], d.pts[0][1], layer4);
+        const layer4 = S3.layer, nets = boardNets(ctx.doc), under = netUnder(ctx.doc, d.pts[0][0], d.pts[0][1], layer4);
         askText(ctx, "Zone net", under.name, (name) => {
           if (name === null) return;
           const net = name ? nets.find((n2) => n2.name === name) || { code: -1, name } : { code: 0, name: "" };
@@ -43095,7 +43095,7 @@ var require_pcb_tools = __commonJS({
         }, nets.map((n2) => n2.name));
       }
       function dimClick(ctx, p, t) {
-        const d = S2.draw, type = DIM_TYPE[t];
+        const d = S3.draw, type = DIM_TYPE[t];
         if (d.pts.length === 1) {
           if (samePt(p, d.start)) return;
           d.end = type === "center" ? vadd(d.start, snap45(vsub(p, d.start))) : p;
@@ -43112,8 +43112,8 @@ var require_pcb_tools = __commonJS({
         commitDim(ctx, type, d);
       }
       function commitDim(ctx, type, d) {
-        S2.draw = null;
-        const add22 = addedChange(ctx.doc, dimensionNode(type, Object.assign({}, d, { textPos: type === "radial" || type === "leader" ? null : d.textPos, thickness: drawWidth(S2.gfxLayer) }), S2.gfxLayer));
+        S3.draw = null;
+        const add22 = addedChange(ctx.doc, dimensionNode(type, Object.assign({}, d, { textPos: type === "radial" || type === "leader" ? null : d.textPos, thickness: drawWidth(S3.gfxLayer) }), S3.gfxLayer));
         ctx.commit([add22], "Draw Dimension");
         ctx.requestRender();
         if (add22.id) applySelection(ctx, [add22.id]);
@@ -43148,33 +43148,33 @@ var require_pcb_tools = __commonJS({
           return;
         }
         const [w, h3] = imageMm(info);
-        S2.image = { base64: res.base64, info, w, h: h3, name: res.name || "", el: null };
+        S3.image = { base64: res.base64, info, w, h: h3, name: res.name || "", el: null };
         if (typeof Image !== "undefined") {
           const el4 = new Image();
           el4.onload = () => {
             if (lastCtx) lastCtx.requestRender();
           };
           el4.src = `data:image/${info.type === "jpeg" ? "jpeg" : "png"};base64,${res.base64}`;
-          S2.image.el = el4;
+          S3.image.el = el4;
         }
         ctx.requestRender();
       }
       function openImagePicker() {
         pickerImpl((res) => {
-          if (lastCtx && S2.modTool === "image") loadImage(lastCtx, res);
+          if (lastCtx && S3.modTool === "image") loadImage(lastCtx, res);
         });
       }
       function placeImage(ctx, hv) {
-        const img = S2.image;
-        S2.image = null;
-        const c = addedChange(ctx.doc, imageNode(hv.x, hv.y, img.base64, S2.gfxLayer));
+        const img = S3.image;
+        S3.image = null;
+        const c = addedChange(ctx.doc, imageNode(hv.x, hv.y, img.base64, S3.gfxLayer));
         ctx.commit([c], "Place Image");
         applySelection(ctx, [c.id]);
         ctx.requestRender();
       }
       function askText(ctx, title, initial, done, options) {
-        promptImpl(title, initial || "", S2.client, (v) => {
-          S2.text = null;
+        promptImpl(title, initial || "", S3.client, (v) => {
+          S3.text = null;
           done(v);
         }, options || null);
       }
@@ -43198,20 +43198,20 @@ var require_pcb_tools = __commonJS({
       var FP_ANGLE_SNAP_KEY = "kc.fpedit.angleSnapMode";
       var snapKey = () => footprintEditorDefaults() ? FP_ANGLE_SNAP_KEY : ANGLE_SNAP_KEY;
       function angleSnapMode() {
-        if (!S2.angleSnap) {
+        if (!S3.angleSnap) {
           const v = lsGet(snapKey());
-          S2.angleSnap = ANGLE_SNAP_MODES.includes(v) ? v : footprintEditorDefaults() ? "45" : "free";
+          S3.angleSnap = ANGLE_SNAP_MODES.includes(v) ? v : footprintEditorDefaults() ? "45" : "free";
         }
-        return S2.angleSnap;
+        return S3.angleSnap;
       }
       function setAngleSnap(ctx, mode2) {
         if (!ANGLE_SNAP_MODES.includes(mode2)) return angleSnapMode();
-        S2.angleSnap = mode2;
+        S3.angleSnap = mode2;
         lsSet(snapKey(), mode2);
-        if (ctx && S2.draw && S2.drawRaw) {
-          drawTrack(S2.draw, S2.drawRaw, S2.drawCtrl);
+        if (ctx && S3.draw && S3.drawRaw) {
+          drawTrack(S3.draw, S3.drawRaw, S3.drawCtrl);
         }
-        if (S2.move) displayConstraintsMsg(MOVE_SNAP_MSG[mode2]);
+        if (S3.move) displayConstraintsMsg(MOVE_SNAP_MSG[mode2]);
         if (ctx) ctx.requestRender();
         try {
           if (typeof root5.dispatchEvent === "function" && typeof CustomEvent === "function") root5.dispatchEvent(new CustomEvent("kc:pcb-linemode", { detail: { mode: mode2, msg: ANGLE_SNAP_MSG[mode2] } }));
@@ -43286,21 +43286,21 @@ var require_pcb_tools = __commonJS({
       }
       var WIDTH_STEP = 0.1;
       function drawWidth(layer4) {
-        return S2.strokeW != null ? S2.strokeW : gfxWidth(layer4);
+        return S3.strokeW != null ? S3.strokeW : gfxWidth(layer4);
       }
       function stepDrawWidth(ctx, dir) {
-        const d = S2.draw;
+        const d = S3.draw;
         if (!d || d.shape === "gtextbox" || d.shape === "table") return false;
         if (DIM_TYPE[d.shape] && d.pts.length < 2 && !d.end && d.pts.length === 0) return false;
-        const w = drawWidth(S2.gfxLayer);
-        if (dir > 0) S2.strokeW = +(w + WIDTH_STEP).toFixed(6);
-        else if (w > WIDTH_STEP) S2.strokeW = +(w - WIDTH_STEP).toFixed(6);
+        const w = drawWidth(S3.gfxLayer);
+        if (dir > 0) S3.strokeW = +(w + WIDTH_STEP).toFixed(6);
+        else if (w > WIDTH_STEP) S3.strokeW = +(w - WIDTH_STEP).toFixed(6);
         ctx.requestRender();
         return true;
       }
       function withStroke(node) {
-        if (S2.strokeW == null || !Array.isArray(node)) return node;
-        const w = r65(S2.strokeW);
+        if (S3.strokeW == null || !Array.isArray(node)) return node;
+        const w = r65(S3.strokeW);
         const st = node.find((c) => Array.isArray(c) && c[0] === "stroke");
         if (st) {
           const wi = st.find((c) => Array.isArray(c) && c[0] === "width");
@@ -43314,7 +43314,7 @@ var require_pcb_tools = __commonJS({
         return node;
       }
       function undoChainSegment(ctx) {
-        const d = S2.draw;
+        const d = S3.draw;
         if (!d || d.shape !== "gline" || !d.chain || !d.chain.length) return false;
         const last3 = d.chain.pop();
         if (ctx.doc.items.has(last3.id)) ctx.commit(deleteChanges(ctx.doc, [last3.id]), "line", { amend: true, discard: true });
@@ -43493,7 +43493,7 @@ var require_pcb_tools = __commonJS({
       function guessCandidates(doc2, ids, where, opts2) {
         opts2 = opts2 || {};
         if (!ids || ids.length < 2) return (ids || []).slice();
-        const px = opts2.px || 0.01, maxSlop = 5 * px, [x, y] = where, active = opts2.activeLayer || S2.layer || "F.Cu";
+        const px = opts2.px || 0.01, maxSlop = 5 * px, [x, y] = where, active = opts2.activeLayer || S3.layer || "F.Cu";
         let list = ids.map((id) => candidateEntry(doc2, id, opts2.hidden)).filter(Boolean);
         if (list.length < 2) return list.map((e) => e.id);
         let preferred = [];
@@ -43546,14 +43546,14 @@ var require_pcb_tools = __commonJS({
         return itemAt(ctx, mm5);
       }
       function deleteAt(ctx, mm5) {
-        const it = S2.hover && S2.hover.del !== void 0 ? S2.hover.del : deleteCandidate(ctx, mm5);
+        const it = S3.hover && S3.hover.del !== void 0 ? S3.hover.del : deleteCandidate(ctx, mm5);
         if (!it || !ctx.doc.items.has(it.id)) return null;
         if (isLocked3(it.node)) {
           statusPopup(ctx, "Item locked.", mm5, 2e3);
           return null;
         }
-        S2.sel.delete(it.id);
-        if (S2.hover) S2.hover.del = null;
+        S3.sel.delete(it.id);
+        if (S3.hover) S3.hover.del = null;
         if (ctx.selected && ctx.selected.id === it.id) ctx.setSelected(null);
         ctx.commit(deleteChanges(ctx.doc, Array.from(expandGroups(ctx.doc, [it.id]))), "delete");
         ctx.requestRender();
@@ -43577,23 +43577,23 @@ var require_pcb_tools = __commonJS({
         refreshChip(ctx);
       }
       function refreshChip(ctx) {
-        if (!isPcbDoc() || !gfxTool(S2.modTool)) return;
+        if (!isPcbDoc() || !gfxTool(S3.modTool)) return;
         const opts2 = gfxLayers(ctx && ctx.doc);
-        if (!opts2.includes(S2.gfxLayer)) {
-          S2.gfxLayer = opts2[0] || "F.SilkS";
-          if (ctx) sizesOf(ctx).setActiveLayer(S2.gfxLayer);
+        if (!opts2.includes(S3.gfxLayer)) {
+          S3.gfxLayer = opts2[0] || "F.SilkS";
+          if (ctx) sizesOf(ctx).setActiveLayer(S3.gfxLayer);
         }
       }
       function onStagePointerDown(ev) {
         if (ev.button !== 0 || !isPcbDoc() || appTool() !== "select") return;
-        if (S2.downHandled === ev) return;
+        if (S3.downHandled === ev) return;
         if (ev.target.closest && (ev.target.closest("#cmtPanel") || ev.target.closest("#signinOverlay"))) return;
         const ctx = lastCtx, doc2 = liveDoc();
         if (!ctx || !doc2) return;
         const [x, y] = ctx.worldMm(ev);
         if (K11.hitTest(doc2, x, y, Math.min(5 / Math.max(1, liveZoom() * 0.6), 0.5))) {
-          if (S2.sel.size && !selMode(ev)) {
-            S2.sel.clear();
+          if (S3.sel.size && !selMode(ev)) {
+            S3.sel.clear();
             ctx.requestRender();
           }
           return;
@@ -43601,9 +43601,9 @@ var require_pcb_tools = __commonJS({
         const it = hitTestItem(doc2, x, y, HIT_MM + 2 / Math.max(1, ctx.pxPerMm || 1));
         const mode2 = selMode(ev);
         if (it) {
-          if (mode2) applySelMode(S2.sel, it.id, mode2);
-          else S2.sel = /* @__PURE__ */ new Set([it.id]);
-        } else if (!mode2) S2.sel.clear();
+          if (mode2) applySelMode(S3.sel, it.id, mode2);
+          else S3.sel = /* @__PURE__ */ new Set([it.id]);
+        } else if (!mode2) S3.sel.clear();
         ctx.requestRender();
       }
       function selMode(ev) {
@@ -43627,19 +43627,19 @@ var require_pcb_tools = __commonJS({
       var liveSelection = () => appGlobal(() => editorState().selection, null);
       function pickInteractively(ctx, mode2, prompt, done) {
         bind(ctx);
-        S2.pick = { done, prompt };
+        S3.pick = { done, prompt };
         ctx.setTool(mode2 === "item" ? "pickitem" : "pickpoint");
       }
       function pickClick(ctx, t, hv, mm5) {
-        const pk = S2.pick;
-        S2.pick = null;
+        const pk = S3.pick;
+        S3.pick = null;
         let res = null;
         if (t === "pickpoint") res = [hv.x, hv.y];
         else {
           const it = itemAt(ctx, mm5);
           res = it || null;
           if (!it) {
-            S2.pick = pk;
+            S3.pick = pk;
             return;
           }
         }
@@ -43647,21 +43647,21 @@ var require_pcb_tools = __commonJS({
         if (pk && pk.done) pk.done(res);
       }
       function pickCancel() {
-        const pk = S2.pick;
-        S2.pick = null;
+        const pk = S3.pick;
+        S3.pick = null;
         if (lastCtx) lastCtx.setTool("select");
         if (pk && pk.done) pk.done(null);
         return true;
       }
       function cancelInFlight(any) {
-        if (S2.pick) return pickCancel();
-        if (S2.pedit && lastCtx) {
+        if (S3.pick) return pickCancel();
+        if (S3.pedit && lastCtx) {
           editHandleUp(lastCtx, false);
           return true;
         }
-        if (S2.tune.pattern) return tuneCancel(lastCtx);
-        if (S2.route || S2.draw || S2.drag || S2.text || S2.image || S2.move && (any || S2.move.sticky)) {
-          const dragTool = S2.drag && S2.drag.tool;
+        if (S3.tune.pattern) return tuneCancel(lastCtx);
+        if (S3.route || S3.draw || S3.drag || S3.text || S3.image || S3.move && (any || S3.move.sticky)) {
+          const dragTool = S3.drag && S3.drag.tool;
           cancelOps();
           if (dragTool && lastCtx) lastCtx.setTool("select");
           if (lastCtx) {
@@ -43673,21 +43673,21 @@ var require_pcb_tools = __commonJS({
         return false;
       }
       function undoRedoInFlight(ctx, which) {
-        if (S2.tune.pattern) {
+        if (S3.tune.pattern) {
           if (which === "undo") tuneCancel(ctx);
           return true;
         }
-        if (S2.route) {
+        if (S3.route) {
           if (which === "undo" && !ctx.viewOnly) undoRouteLeg(ctx);
           return true;
         }
-        if (!(S2.pedit || S2.draw || S2.drag || S2.image || S2.move)) return false;
+        if (!(S3.pedit || S3.draw || S3.drag || S3.image || S3.move)) return false;
         if (which === "undo") cancelInFlight(true);
         return true;
       }
       function routerKeyAction(ev) {
         const ctrl = !!(ev.ctrlKey || ev.metaKey), alt = !!ev.altKey, shift2 = !!ev.shiftKey, code = ev.code || "", k = ev.key;
-        if (S2.route) {
+        if (S3.route) {
           if (ctrl && !alt && !shift2 && (k === "z" || k === "Z")) return "routerUndoLastSegment";
           if (ctrl && !alt && !shift2 && (code === "KeyV" || k === "v" || k === "V")) return "ACT_PlaceMicroVia";
           if (alt && shift2 && !ctrl && code === "KeyV") return "ACT_PlaceBlindVia";
@@ -43708,7 +43708,7 @@ var require_pcb_tools = __commonJS({
         if (root5.KDialogs && root5.KDialogs.isOpen && root5.KDialogs.isOpen()) return;
         if (typeof document !== "undefined" && document.body && document.body.dataset.menuOpen === "1" || appGlobal(() => !!root5.CollabApp.getState().contextMenu, false)) return;
         const k = ev.key;
-        if (S2.route || S2.modTool === "route" || S2.modTool === "routediff") {
+        if (S3.route || S3.modTool === "route" || S3.modTool === "routediff") {
           const id = routerKeyAction(ev);
           if (id && lastCtx) {
             ev.stopImmediatePropagation();
@@ -43717,7 +43717,7 @@ var require_pcb_tools = __commonJS({
             return;
           }
         }
-        if (S2.draw && (ev.ctrlKey || ev.metaKey) && !ev.altKey && (k === "+" || k === "=" || k === "-" || k === "_") && lastCtx) {
+        if (S3.draw && (ev.ctrlKey || ev.metaKey) && !ev.altKey && (k === "+" || k === "=" || k === "-" || k === "_") && lastCtx) {
           ev.stopImmediatePropagation();
           ev.preventDefault();
           stepDrawWidth(lastCtx, k === "-" || k === "_" ? -1 : 1);
@@ -43750,17 +43750,17 @@ var require_pcb_tools = __commonJS({
           if (cancelInFlight()) {
             ev.stopImmediatePropagation();
             ev.preventDefault();
-          } else if (S2.sel.size || S2.padSel) {
-            S2.sel.clear();
-            S2.padSel = null;
-            S2.escCleared = ev;
+          } else if (S3.sel.size || S3.padSel) {
+            S3.sel.clear();
+            S3.padSel = null;
+            S3.escCleared = ev;
             if (lastCtx) lastCtx.requestRender();
           }
           return;
         }
         let remap = null;
         const sel = liveSelection();
-        if ((k === "f" || k === "F") && !ev.shiftKey && (liveSelected() || sel && sel.size || S2.sel.size)) remap = "Flip";
+        if ((k === "f" || k === "F") && !ev.shiftKey && (liveSelected() || sel && sel.size || S3.sel.size)) remap = "Flip";
         else if (k === "C" && ev.shiftKey) remap = "Circle";
         if (remap) {
           ev.stopImmediatePropagation();
@@ -43813,15 +43813,15 @@ var require_pcb_tools = __commonJS({
         inp.addEventListener("blur", () => setTimeout(() => finish(null), 0));
         box3.addEventListener("pointerdown", (e) => e.stopPropagation());
         document.body.appendChild(box3);
-        S2.text = { box: box3 };
+        S3.text = { box: box3 };
         setTimeout(() => {
           inp.focus();
           inp.select();
         }, 0);
       };
       function closeTextPrompt() {
-        const t = S2.text;
-        S2.text = null;
+        const t = S3.text;
+        S3.text = null;
         if (t && t.box && t.box.parentNode) t.box.parentNode.removeChild(t.box);
       }
       var pickerImpl = function(done) {
@@ -43862,11 +43862,11 @@ var require_pcb_tools = __commonJS({
         pickerImpl = fn;
       }
       function statusPopup(ctx, text3, at4, ms) {
-        S2.popup = { text: text3, at: at4.slice(), until: Date.now() + ms };
+        S3.popup = { text: text3, at: at4.slice(), until: Date.now() + ms };
         ctx.requestRender();
         if (typeof setTimeout === "function") setTimeout(() => {
-          if (S2.popup && Date.now() >= S2.popup.until - 5) {
-            S2.popup = null;
+          if (S3.popup && Date.now() >= S3.popup.until - 5) {
+            S3.popup = null;
             if (lastCtx) lastCtx.requestRender();
           }
         }, ms);
@@ -43911,10 +43911,10 @@ var require_pcb_tools = __commonJS({
         c.restore();
       }
       function drawStatusPopup(c, px) {
-        const p = S2.popup;
+        const p = S3.popup;
         if (!p) return;
         if (Date.now() > p.until) {
-          S2.popup = null;
+          S3.popup = null;
           return;
         }
         const css = (name, dflt) => {
@@ -43942,11 +43942,11 @@ var require_pcb_tools = __commonJS({
         c.restore();
       }
       function placeText(ctx, mm5, text3) {
-        ctx.commit([addedChange(ctx.doc, textNode(text3, mm5[0], mm5[1], S2.gfxLayer))], "text");
+        ctx.commit([addedChange(ctx.doc, textNode(text3, mm5[0], mm5[1], S3.gfxLayer))], "text");
       }
       var newItemDialogs = {};
       function placeTextAt(ctx, at4) {
-        if (ctx.viewOnly || S2.move) return;
+        if (ctx.viewOnly || S3.move) return;
         const dlg = newItemDialogs.gr_text;
         if (!dlg) {
           askText(ctx, "Text", "", (v) => {
@@ -43955,7 +43955,7 @@ var require_pcb_tools = __commonJS({
           return;
         }
         applySelection(ctx, []);
-        dlg(ctx, textNode("", at4[0], at4[1], S2.gfxLayer), (n2) => {
+        dlg(ctx, textNode("", at4[0], at4[1], S3.gfxLayer), (n2) => {
           if (!n2 || !/[^\s]/.test(K11.str(n2[1]).replace(/\\n/g, ""))) return;
           const p = K11.atOf(n2);
           const moved = Math.abs(p[0] - at4[0]) > 1e-9 || Math.abs(p[1] - at4[1]) > 1e-9;
@@ -43967,7 +43967,7 @@ var require_pcb_tools = __commonJS({
         });
       }
       function placeBarcodeAt(ctx, at4) {
-        if (ctx.viewOnly || S2.move || !ctx.doc) return;
+        if (ctx.viewOnly || S3.move || !ctx.doc) return;
         if (!barcodeAllowed(ctx.doc)) {
           ctx.toast(BARCODE_NEEDS_VERSION_MSG);
           return;
@@ -43978,7 +43978,7 @@ var require_pcb_tools = __commonJS({
           return;
         }
         applySelection(ctx, []);
-        dlg(ctx, barcodeNode(at4[0], at4[1], S2.gfxLayer), (n2) => {
+        dlg(ctx, barcodeNode(at4[0], at4[1], S3.gfxLayer), (n2) => {
           if (!n2) return;
           const c = addedChange(ctx.doc, n2);
           ctx.commit([c], "Draw Barcode");
@@ -43987,28 +43987,28 @@ var require_pcb_tools = __commonJS({
         });
       }
       function cancelOps() {
-        if (S2.drag && lastCtx && lastCtx.doc) {
-          const D = S2.drag;
-          S2.drag = null;
+        if (S3.drag && lastCtx && lastCtx.doc) {
+          const D = S3.drag;
+          S3.drag = null;
           routeUnhighlight(lastCtx, D.subs[0]);
         }
-        if (S2.route) {
+        if (S3.route) {
           K11.pcbSizes.state.endRoute();
-          const rt = S2.route;
-          S2.route = null;
+          const rt = S3.route;
+          S3.route = null;
           if (lastCtx && lastCtx.doc) routeUnhighlight(lastCtx, rt);
         }
-        S2.violations = null;
-        S2.routeQueue = null;
-        S2.draw = null;
-        S2.drag = null;
-        S2.image = null;
-        S2.pending = null;
-        if (S2.move && lastCtx) finishSelectMove(lastCtx, false);
-        S2.move = null;
-        if (S2.pedit && lastCtx) editHandleUp(lastCtx, false);
+        S3.violations = null;
+        S3.routeQueue = null;
+        S3.draw = null;
+        S3.drag = null;
+        S3.image = null;
+        S3.pending = null;
+        if (S3.move && lastCtx) finishSelectMove(lastCtx, false);
+        S3.move = null;
+        if (S3.pedit && lastCtx) editHandleUp(lastCtx, false);
         closeTextPrompt();
-        if (S2.tune) S2.tune.pattern = null;
+        if (S3.tune) S3.tune.pattern = null;
       }
       function setNewItemDialogsImpl(d) {
         newItemDialogs = d;
@@ -44426,17 +44426,17 @@ var require_pcb_tools = __commonJS({
       }
       var ARC_MODE_KEY = "kc.pcb.arcDrawMode";
       function arcDrawMode() {
-        if (S2.arcMode == null) {
+        if (S3.arcMode == null) {
           const v = lsGet(ARC_MODE_KEY);
-          S2.arcMode = v !== null && /^[0-4]$/.test(v) ? +v : ARC_CENTER_START_END;
+          S3.arcMode = v !== null && /^[0-4]$/.test(v) ? +v : ARC_CENTER_START_END;
         }
-        return S2.arcMode;
+        return S3.arcMode;
       }
       function showArcMode(ctx) {
         if (ctx && ctx.setGroupCurrent) ctx.setGroupCurrent("Arc", ARC_MODE_ACTIONS[arcDrawMode()]);
       }
       function setArcDrawMode(m) {
-        S2.arcMode = m;
+        S3.arcMode = m;
         lsSet(ARC_MODE_KEY, String(m));
       }
       function seedShapeOf(it) {
@@ -44461,7 +44461,7 @@ var require_pcb_tools = __commonJS({
         return null;
       }
       function findTangentSeed(ctx, pos) {
-        const tol = kiRound(5 / Math.max(1e-9, ctx.pxPerMm || 1) * NM), layer4 = S2.gfxLayer;
+        const tol = kiRound(5 / Math.max(1e-9, ctx.pxPerMm || 1) * NM), layer4 = S3.gfxLayer;
         for (const it of ctx.doc.items.values()) {
           if (!/^gr_(line|arc|curve|poly)$/.test(it.kind)) continue;
           const l = K11.kid(it.node, "layer");
@@ -44488,7 +44488,7 @@ var require_pcb_tools = __commonJS({
       function switchArcMode(ctx, m) {
         setArcDrawMode(m);
         showArcMode(ctx);
-        const d = S2.draw;
+        const d = S3.draw;
         if (d && d.shape === "garc") {
           d.arc.setMode(m);
           d.chainSeeded = false;
@@ -44503,9 +44503,9 @@ var require_pcb_tools = __commonJS({
         d.start = fromNm(g2.pts[0]);
       }
       function arcClick(ctx, p) {
-        let d = S2.draw;
+        let d = S3.draw;
         if (!d || d.shape !== "garc") {
-          d = S2.draw = newArcDraw(null);
+          d = S3.draw = newArcDraw(null);
         }
         const g2 = d.arc, pos = toNm(p);
         if (!d.started) {
@@ -44532,14 +44532,14 @@ var require_pcb_tools = __commonJS({
       }
       function commitArc(ctx, d) {
         const sh = d.arc.shape();
-        S2.draw = null;
+        S3.draw = null;
         if (!sh) return;
-        const node = withStroke(arcNode(fromNm(sh.start), fromNm(sh.mid), fromNm(sh.end), S2.gfxLayer));
+        const node = withStroke(arcNode(fromNm(sh.start), fromNm(sh.mid), fromNm(sh.end), S3.gfxLayer));
         const add22 = addedChange(ctx.doc, node);
         ctx.commit([add22], "Draw Arc");
         if (add22.id) applySelection(ctx, [add22.id]);
         const committed = { t: "arc", start: sh.start, mid: sh.mid, end: sh.end, center: [sh.center[0], sh.center[1]] };
-        S2.draw = newArcDraw(arcDrawMode() === ARC_TANGENT ? arcTangentSeedNear(committed, d.lastClick || sh.end) : null);
+        S3.draw = newArcDraw(arcDrawMode() === ARC_TANGENT ? arcTangentSeedNear(committed, d.lastClick || sh.end) : null);
       }
       function arcMove(d, p, ctrl) {
         const g2 = d.arc;
@@ -44548,21 +44548,21 @@ var require_pcb_tools = __commonJS({
         if (g2.hasPreview()) g2.addPoint(toNm(p), false);
       }
       function arcBackup(ctx) {
-        const d = S2.draw, g2 = d.arc;
+        const d = S3.draw, g2 = d.arc;
         if (d.clickSeeded) {
           g2.reset();
           d.clickSeeded = false;
         } else if (g2.isReset() && !g2.hasTangentSeed()) {
-          S2.draw = null;
+          S3.draw = null;
         } else g2.removeLastPoint();
-        if (S2.draw) syncArcDraw(d);
+        if (S3.draw) syncArcDraw(d);
         ctx.requestRender();
       }
       function finishArc(ctx, editing) {
-        const d = S2.draw, sh = d.started ? d.arc.shape() : null;
-        S2.draw = null;
+        const d = S3.draw, sh = d.started ? d.arc.shape() : null;
+        S3.draw = null;
         if (sh && editing()) {
-          const add22 = addedChange(ctx.doc, withStroke(arcNode(fromNm(sh.start), fromNm(sh.mid), fromNm(sh.end), S2.gfxLayer)));
+          const add22 = addedChange(ctx.doc, withStroke(arcNode(fromNm(sh.start), fromNm(sh.mid), fromNm(sh.end), S3.gfxLayer)));
           ctx.commit([add22], "Draw Arc");
           if (add22.id) applySelection(ctx, [add22.id]);
         }
@@ -46136,19 +46136,19 @@ var require_pcb_tools = __commonJS({
       var openForm = (spec) => formImpl(spec);
       var copperOf = (doc2) => doc2.copper.length ? doc2.copper : ["F.Cu", "B.Cu"];
       function settingsOf2(ctx) {
-        if (ctx && ctx.customRules !== void 0 && ctx.customRules !== S2.druSrc) {
-          S2.druSrc = ctx.customRules;
+        if (ctx && ctx.customRules !== void 0 && ctx.customRules !== S3.druSrc) {
+          S3.druSrc = ctx.customRules;
           setCustomRules(ctx.customRules || null);
         }
         const src = ctx && ctx.designSettings;
         if (src) {
-          if (S2.settingsSrc !== src) {
-            S2.settingsSrc = src;
-            S2.settingsCache = designSettings(src);
+          if (S3.settingsSrc !== src) {
+            S3.settingsSrc = src;
+            S3.settingsCache = designSettings(src);
           }
-          return S2.settingsCache;
+          return S3.settingsCache;
         }
-        return S2.settings || (S2.settings = designSettings(null));
+        return S3.settings || (S3.settings = designSettings(null));
       }
       var num0 = (v, d) => typeof v === "number" && !isNaN(v) ? v : d;
       function padProperties(ctx, fpItem, index) {
@@ -46207,7 +46207,7 @@ var require_pcb_tools = __commonJS({
         }
       }
       var editorState = () => root5.CollabEditor || null;
-      var appTool = () => appGlobal(() => editorState().tool, S2.modTool || "select");
+      var appTool = () => appGlobal(() => editorState().tool, S3.modTool || "select");
       var isPcbDoc = () => appGlobal(() => editorState().DOC_TYPE === "kicad_pcb" && !!editorState().kdoc && root5.CollabApp.getState().view === "editor", !!(lastCtx && !lastCtx.isSch && lastCtx.doc));
       var isBoardLikeDoc = () => appGlobal(() => (editorState().DOC_TYPE === "kicad_pcb" || editorState().DOC_TYPE === "footprint") && !!editorState().kdoc && root5.CollabApp.getState().view === "editor", !!(lastCtx && !lastCtx.isSch && lastCtx.doc));
       var liveDoc = () => appGlobal(() => editorState().kdoc, lastCtx && lastCtx.doc);
@@ -46262,10 +46262,10 @@ var require_pcb_tools = __commonJS({
         const g2 = sn.p;
         const out2 = { x: g2[0], y: g2[1], snap: sn.anchor ? { x: g2[0], y: g2[1], kind: "anchor", type: sn.anchor.t || "none" } : null };
         if (magnetic && ctx.doc) {
-          const rt = S2.route;
+          const rt = S3.route;
           const near3 = (a, b) => !a ? b : !b ? a : Math.hypot(a.x - mm5[0], a.y - mm5[1]) <= Math.hypot(b.x - mm5[0], b.y - mm5[1]) ? a : b;
-          const s2 = rt && rt.dp ? near3(snapTarget(ctx.doc, mm5[0], mm5[1], SNAP_MM, rt.layer, rt.net, true), snapTarget(ctx.doc, mm5[0], mm5[1], SNAP_MM, rt.layer, rt.netN, true)) : rt ? S2.rs.mode === RM_MARK ? snapTarget(ctx.doc, mm5[0], mm5[1], SNAP_MM, rt.layer, rt.netKey ? rt.net : null, false) : rt.netKey ? snapTarget(ctx.doc, mm5[0], mm5[1], SNAP_MM, rt.layer, rt.net, true) : null : snapTarget(ctx.doc, mm5[0], mm5[1], SNAP_MM, S2.layer, null);
-          const s22 = s2 || (rt ? null : otherLayerSnap(ctx, mm5, S2.layer));
+          const s2 = rt && rt.dp ? near3(snapTarget(ctx.doc, mm5[0], mm5[1], SNAP_MM, rt.layer, rt.net, true), snapTarget(ctx.doc, mm5[0], mm5[1], SNAP_MM, rt.layer, rt.netN, true)) : rt ? S3.rs.mode === RM_MARK ? snapTarget(ctx.doc, mm5[0], mm5[1], SNAP_MM, rt.layer, rt.netKey ? rt.net : null, false) : rt.netKey ? snapTarget(ctx.doc, mm5[0], mm5[1], SNAP_MM, rt.layer, rt.net, true) : null : snapTarget(ctx.doc, mm5[0], mm5[1], SNAP_MM, S3.layer, null);
+          const s22 = s2 || (rt ? null : otherLayerSnap(ctx, mm5, S3.layer));
           if (s22) {
             out2.x = s22.x;
             out2.y = s22.y;
@@ -46293,8 +46293,8 @@ var require_pcb_tools = __commonJS({
       }
       function netlistCached(doc2) {
         if (doc2.__bc) return doc2.__bc.nl || (doc2.__bc.nl = netlist2(doc2));
-        if (!S2.nlc || S2.nlc.doc !== doc2 || S2.nlc.ver !== S2.docVer) S2.nlc = { doc: doc2, ver: S2.docVer, nl: netlist2(doc2) };
-        return S2.nlc.nl;
+        if (!S3.nlc || S3.nlc.doc !== doc2 || S3.nlc.ver !== S3.docVer) S3.nlc = { doc: doc2, ver: S3.docVer, nl: netlist2(doc2) };
+        return S3.nlc.nl;
       }
       var AIU = 1e6;
       var arraySize = (o) => o.type === "circular" ? Math.max(0, Math.trunc(o.count)) : Math.max(0, Math.trunc(o.nx)) * Math.max(0, Math.trunc(o.ny));
@@ -46520,9 +46520,9 @@ var require_pcb_tools = __commonJS({
           }
         }
         if (opts2.merge) {
-          let changed = true;
-          while (changed) {
-            changed = false;
+          let changed2 = true;
+          while (changed2) {
+            changed2 = false;
             const segs = tracks().filter((c) => c.kind === "segment");
             outer: for (let i = 0; i < segs.length; i++) for (let j = 0; j < segs.length; j++) {
               if (i === j) continue;
@@ -46541,7 +46541,7 @@ var require_pcb_tools = __commonJS({
               if (lo >= -EPS && hi <= L + EPS && widthOf3(qn, 0.25) <= widthOf3(pn, 0.25) + 1e-9) {
                 remove.add(q4.id);
                 report3(Math.abs(lo) < EPS && Math.abs(hi - L) < EPS ? "duplicate_track" : "contained_track", "Remove duplicate track", [q4.id]);
-                changed = true;
+                changed2 = true;
                 break outer;
               }
               if (Math.abs(widthOf3(pn, 0.25) - widthOf3(qn, 0.25)) > 1e-9) continue;
@@ -46559,7 +46559,7 @@ var require_pcb_tools = __commonJS({
               p.anchors = [joint[1], joint[2]];
               p.bbox = shapeBBox(p.shape);
               p.length = Math.hypot(joint[2][0] - joint[1][0], joint[2][1] - joint[1][1]);
-              changed = true;
+              changed2 = true;
               break outer;
             }
           }
@@ -46628,14 +46628,14 @@ var require_pcb_tools = __commonJS({
             if (setFlags(n2, "keep_end_layers", false)) out2.push(replacedChange(it, n2));
           } else if (it.kind === "footprint" && o.pads) {
             const whole2 = !pick || pick.has(it.id), n2 = clone5(it.node);
-            let changed = false;
+            let changed2 = false;
             for (const p of K11.kids(n2, "pad")) {
               if (K11.str(p[2]) !== "thru_hole") continue;
               const u = K11.kid(p, "uuid");
               if (!whole2 && !(pick && u && pick.has(K11.str(u[1])))) continue;
-              if (setFlags(p, "keep_end_layers", true)) changed = true;
+              if (setFlags(p, "keep_end_layers", true)) changed2 = true;
             }
-            if (changed) out2.push(replacedChange(it, n2));
+            if (changed2) out2.push(replacedChange(it, n2));
           }
         }
         return out2;
@@ -46649,22 +46649,22 @@ var require_pcb_tools = __commonJS({
         return out2;
       }
       function routeSelected(ctx, mode2) {
-        if (S2.route) return false;
+        if (S3.route) return false;
         const ids = Array.from(selectionIds2(ctx));
         if (!ids.length) return false;
         applySelection(ctx, []);
-        S2.routeQueue = { items: ids, idx: 0, anchors: [], mode: mode2, layer: S2.layer };
-        if (S2.modTool !== "route") ctx.setTool("route");
+        S3.routeQueue = { items: ids, idx: 0, anchors: [], mode: mode2, layer: S3.layer };
+        if (S3.modTool !== "route") ctx.setTool("route");
         routeNext(ctx);
         return true;
       }
       function routeNext(ctx) {
-        const q4 = S2.routeQueue;
-        if (!q4 || S2.route) return false;
+        const q4 = S3.routeQueue;
+        if (!q4 || S3.route) return false;
         for (; ; ) {
           if (!q4.anchors.length) {
             if (q4.idx >= q4.items.length) {
-              S2.routeQueue = null;
+              S3.routeQueue = null;
               return false;
             }
             const id = q4.items[q4.idx++];
@@ -46674,13 +46674,13 @@ var require_pcb_tools = __commonJS({
           }
           const p = q4.anchors.shift();
           if (!ratsnest(ctx.doc, netlist2(ctx.doc)).some((l) => samePt(l.a, p) || samePt(l.b, p))) continue;
-          if (S2.layer !== q4.layer) setLayer(ctx, q4.layer);
+          if (S3.layer !== q4.layer) setLayer(ctx, q4.layer);
           const hv = hoverPoint(ctx, p, true);
           routeClick(ctx, { x: p[0], y: p[1], snap: hv.snap }, p);
-          if (!S2.route) continue;
+          if (!S3.route) continue;
           if (q4.mode === "auto") {
             attemptFinish(ctx);
-            if (S2.route) return true;
+            if (S3.route) return true;
             continue;
           }
           if (q4.mode === "otherEnd") continueFromEnd(ctx);
@@ -46797,7 +46797,7 @@ Press <esc> to cancel all; double-click to finish`;
         if (!items.length) return true;
         const seq = { ids: items.map((it) => it.id), idx: 0, base: /* @__PURE__ */ new Map(), committed: false };
         for (const it of items) seq.base.set(it.id, clone5(it.node));
-        S2.moveSeq = seq;
+        S3.moveSeq = seq;
         pickUp(ctx, seq);
         return true;
       }
@@ -46808,14 +46808,14 @@ Press <esc> to cancel all; double-click to finish`;
           return;
         }
         applySelection(ctx, [id]);
-        if (!beginCarryMove(ctx, { ids: [id], origin: anchorOf(it) }) || !S2.move) {
-          S2.moveSeq = null;
+        if (!beginCarryMove(ctx, { ids: [id], origin: anchorOf(it) }) || !S3.move) {
+          S3.moveSeq = null;
           return;
         }
-        const m = S2.move;
+        const m = S3.move;
         m.amend = seq.committed;
         m.after = (placed, wrote) => {
-          if (S2.moveSeq !== seq) return;
+          if (S3.moveSeq !== seq) return;
           if (wrote) seq.committed = true;
           if (!placed) {
             cancelAll(ctx, seq);
@@ -46823,7 +46823,7 @@ Press <esc> to cancel all; double-click to finish`;
           }
           nextItem(ctx, seq);
         };
-        S2.popup = { text: moveIndividuallyText(it, seq.idx + 1, seq.ids.length), at: ctx.cursor ? ctx.cursor.slice() : cursorPoint2(ctx), until: Number.MAX_SAFE_INTEGER };
+        S3.popup = { text: moveIndividuallyText(it, seq.idx + 1, seq.ids.length), at: ctx.cursor ? ctx.cursor.slice() : cursorPoint2(ctx), until: Number.MAX_SAFE_INTEGER };
         ctx.requestRender();
       }
       function nextItem(ctx, seq) {
@@ -46831,14 +46831,14 @@ Press <esc> to cancel all; double-click to finish`;
           pickUp(ctx, seq);
           return;
         }
-        S2.moveSeq = null;
-        S2.popup = null;
+        S3.moveSeq = null;
+        S3.popup = null;
         applySelection(ctx, seq.ids.filter((id) => ctx.doc.items.has(id)));
         ctx.requestRender();
       }
       function cancelAll(ctx, seq) {
-        S2.moveSeq = null;
-        S2.popup = null;
+        S3.moveSeq = null;
+        S3.popup = null;
         if (seq.committed) {
           const back = seq.ids.slice(0, seq.idx).filter((id) => ctx.doc.items.has(id)).map((id) => replacedChange(ctx.doc.items.get(id), seq.base.get(id)));
           if (back.length) ctx.commit(back, "cancel", { amend: true, discard: true });
@@ -46847,7 +46847,7 @@ Press <esc> to cancel all; double-click to finish`;
         ctx.requestRender();
       }
       function skipMoveItem(ctx) {
-        const seq = S2.moveSeq, m = S2.move;
+        const seq = S3.moveSeq, m = S3.move;
         if (!seq || !m || !m.after) return false;
         m.after = void 0;
         finishSelectMove(ctx, false);
@@ -47287,7 +47287,7 @@ Press <esc> to cancel all; double-click to finish`;
         return true;
       });
       act("selectAllOnLayer", "Select All on Active Layer", "", (ctx) => {
-        const layer4 = ctx.activeLayer || S2.layer;
+        const layer4 = ctx.activeLayer || S3.layer;
         const ids = idsOnLayer(ctx.doc, layer4);
         applySelection(ctx, ids);
         ctx.toast(`${plural3(ids.size, "item")} on ${layer4}`);
@@ -47360,9 +47360,9 @@ Press <esc> to cancel all; double-click to finish`;
           const m = ctx.doc.items.get(id);
           return !!m && opts2.filter(m);
         }) : opts2.filter(it)));
-        let ids = Array.from(selectionIds2(ctx)), hover = !!S2.forceHover;
-        if (!ids.length && S2.padSel) {
-          const i = S2.padSel.lastIndexOf("#"), fp = S2.padSel.slice(0, i);
+        let ids = Array.from(selectionIds2(ctx)), hover = !!S3.forceHover;
+        if (!ids.length && S3.padSel) {
+          const i = S3.padSel.lastIndexOf("#"), fp = S3.padSel.slice(0, i);
           if (ctx.doc.items.has(fp)) ids = [fp];
         }
         if (!ids.length) {
@@ -47372,11 +47372,11 @@ Press <esc> to cancel all; double-click to finish`;
           if (!cands.length) return null;
           if (cands.length > 1 && opts2.rerun && typeof ctx.clarify === "function") {
             ctx.clarify(cands, (fresh) => {
-              S2.forceHover = true;
+              S3.forceHover = true;
               try {
                 opts2.rerun(fresh || ctx);
               } finally {
-                S2.forceHover = false;
+                S3.forceHover = false;
               }
             });
             return null;
@@ -47412,7 +47412,7 @@ Press <esc> to cancel all; double-click to finish`;
         return ids && canEdit2(ctx) ? Array.from(expandGroups(ctx.doc, ids)) : null;
       }
       act("move", "Move", "M", (ctx) => {
-        if (S2.route || S2.move) return true;
+        if (S3.route || S3.move) return true;
         if (!canEdit2(ctx)) return true;
         const sel = requestSelection(ctx, { rerun: (c) => runAction2("move", c) });
         if (!sel) return true;
@@ -47421,7 +47421,7 @@ Press <esc> to cancel all; double-click to finish`;
         return true;
       });
       act("moveExactly", "Move Exactly\u2026", "Shift+M", (ctx) => {
-        if (!canEdit2(ctx) || S2.route) return true;
+        if (!canEdit2(ctx) || S3.route) return true;
         const sel = requestSelection(ctx, { rerun: (c) => runAction2("moveExactly", c) });
         if (!sel) return true;
         const ids = sel.ids;
@@ -47447,19 +47447,19 @@ Press <esc> to cancel all; double-click to finish`;
       });
       alias2("moveExact", "moveExactly");
       act("moveWithReference", "Move with Reference...", "", (ctx) => {
-        if (S2.route || S2.move || !canEdit2(ctx)) return true;
+        if (S3.route || S3.move || !canEdit2(ctx)) return true;
         const sel = requestSelection(ctx, { rerun: (c) => runAction2("moveWithReference", c) });
         if (!sel) return true;
         return moveWithReference(ctx, sel.ids, sel.hover);
       }, { tip: "Moves the selected item(s) with a specified starting point" });
       act("copyWithReference", "Copy with Reference...", "", (ctx) => {
-        if (S2.route || S2.move) return true;
+        if (S3.route || S3.move) return true;
         const sel = requestSelection(ctx, { locks: false, rerun: (c) => runAction2("copyWithReference", c) });
         if (!sel) return true;
         return copyWithReference(ctx, sel.ids, sel.hover);
       }, { tip: "Copy selected item(s) to clipboard with a specified starting point" });
       act("moveIndividually", "Move Individually", "Ctrl+M", (ctx) => {
-        if (S2.route || S2.move || !canEdit2(ctx)) return true;
+        if (S3.route || S3.move || !canEdit2(ctx)) return true;
         const sel = requestSelection(ctx, { rerun: (c) => runAction2("moveIndividually", c) });
         if (!sel) return true;
         return moveIndividually(ctx, sel.ids.filter((id) => {
@@ -47469,7 +47469,7 @@ Press <esc> to cancel all; double-click to finish`;
       }, { tip: "Moves the selected items one-by-one" });
       act("skip", "Skip", "Tab", (ctx) => skipMoveItem(ctx), { menu: false, tip: "Skip to next item" });
       act("interactiveOffsetTool", "Interactive Offset Tool", "", (ctx) => {
-        if (S2.route || S2.move || !canEdit2(ctx)) return true;
+        if (S3.route || S3.move || !canEdit2(ctx)) return true;
         const sel = requestSelection(ctx, { rerun: (c) => runAction2("interactiveOffsetTool", c) });
         if (!sel) return true;
         return interactiveOffset(ctx, sel.ids, sel.hover);
@@ -47486,7 +47486,7 @@ Press <esc> to cancel all; double-click to finish`;
         return null;
       }
       act("getAndPlace", "Get and Move Footprint", "T", (ctx) => {
-        if (S2.route || S2.move) return true;
+        if (S3.route || S3.move) return true;
         if (appGlobal(() => editorState().DOC_TYPE === "footprint", false) || !canEdit2(ctx)) return true;
         const choices = footprintRefChoices(ctx.doc);
         const refOf2 = (c) => c.split(" ")[0];
@@ -47568,9 +47568,9 @@ Press <esc> to cancel all; double-click to finish`;
       alias2("distributeVerticallyGaps", "distributeV");
       alias2("distributeHorizontallyCenters", "distributeHCenters");
       alias2("distributeVerticallyCenters", "distributeVCenters");
-      var moveInFlight = (ctx) => !!S2.move || !!(ctx.handoffDrag && ctx.handoffDrag() && S2.move);
+      var moveInFlight = (ctx) => !!S3.move || !!(ctx.handoffDrag && ctx.handoffDrag() && S3.move);
       function rotateBy(ctx, deg3) {
-        if (S2.route) return true;
+        if (S3.route) return true;
         if (moveInFlight(ctx)) return moveTransform(ctx, "rotate", deg3);
         if (!canEdit2(ctx)) return true;
         const fr = requestField(ctx, ctx.cursor ? ctx.cursor.slice() : cursorPoint2(ctx));
@@ -47590,7 +47590,7 @@ Press <esc> to cancel all; double-click to finish`;
         return true;
       }
       var rotationStep = (ctx) => {
-        const a = ctx && ctx.fpEditor ? S2.fpRotationAngle : S2.rotationAngle;
+        const a = ctx && ctx.fpEditor ? S3.fpRotationAngle : S3.rotationAngle;
         return typeof a === "number" && a > 0 ? a : 90;
       };
       act("rotateSelection", "Rotate Counterclockwise", "R", (ctx) => rotateBy(ctx, rotationStep(ctx)));
@@ -47598,7 +47598,7 @@ Press <esc> to cancel all; double-click to finish`;
       act("rotateSelectionCw", "Rotate Clockwise", "", (ctx) => rotateBy(ctx, -rotationStep(ctx)));
       alias2("rotateCw", "rotateSelectionCw");
       function flipBy(ctx) {
-        if (S2.route) {
+        if (S3.route) {
           attemptFinish(ctx);
           return true;
         }
@@ -47627,7 +47627,7 @@ Press <esc> to cancel all; double-click to finish`;
       var MIRROR_FOOTPRINTS = "Footprints cannot be mirrored. Use Flip to move them to the other side of the board.";
       var MIRROR_GROUPS = "Groups containing footprints or other items that cannot be mirrored were skipped.";
       function mirrorBy(ctx, axis) {
-        if (S2.route) return true;
+        if (S3.route) return true;
         if (moveInFlight(ctx)) return moveTransform(ctx, "mirror", axis);
         if (!canEdit2(ctx)) return true;
         const sel = requestSelection(ctx, { rerun: (c) => mirrorBy(c, axis) });
@@ -47678,7 +47678,7 @@ Press <esc> to cancel all; double-click to finish`;
         if (!sel) return true;
         const ch = packChanges(ctx.doc, sel.ids);
         if (ch.length) ctx.commit(ch, "pack footprints");
-        if (S2.route || S2.move) {
+        if (S3.route || S3.move) {
           endHover(ctx, sel);
           ctx.requestRender();
           return true;
@@ -47831,7 +47831,7 @@ Press <esc> to cancel all; double-click to finish`;
       act("layerNext", "Switch to Next Layer", "+", (ctx) => stepLayer(ctx, true), { menu: "-" });
       act("layerPrev", "Switch to Previous Layer", "-", (ctx) => stepLayer(ctx, false), { menu: "-" });
       act("layerToggle", "Toggle Layer", "", (ctx) => {
-        setLayer(ctx, sizesOf(ctx).pairedLayer(S2.route ? S2.route.layer : S2.layer));
+        setLayer(ctx, sizesOf(ctx).pairedLayer(S3.route ? S3.route.layer : S3.layer));
         return true;
       }, { menu: "-" });
       act("ratsnestLineMode", "Curved Ratsnest Lines", "", (ctx) => {
@@ -47850,17 +47850,17 @@ Press <esc> to cancel all; double-click to finish`;
       act("routerHighlightMode", "Router Highlight Mode", "", () => {
         setRouterSettings({ mode: RM_MARK });
         return true;
-      }, Object.assign({ tip: "Switch router to highlight mode", check: () => S2.rs.mode === RM_MARK }, ROUTER_ACTION));
+      }, Object.assign({ tip: "Switch router to highlight mode", check: () => S3.rs.mode === RM_MARK }, ROUTER_ACTION));
       act("routerShoveMode", "Router Shove Mode", "", () => {
         setRouterSettings({ mode: RM_SHOVE });
         return true;
-      }, Object.assign({ tip: "Switch router to shove mode", check: () => S2.rs.mode === RM_SHOVE }, ROUTER_ACTION));
+      }, Object.assign({ tip: "Switch router to shove mode", check: () => S3.rs.mode === RM_SHOVE }, ROUTER_ACTION));
       act("routerWalkaroundMode", "Router Walkaround Mode", "", () => {
         setRouterSettings({ mode: RM_WALK });
         return true;
-      }, Object.assign({ tip: "Switch router to walkaround mode", check: () => S2.rs.mode === RM_WALK }, ROUTER_ACTION));
+      }, Object.assign({ tip: "Switch router to walkaround mode", check: () => S3.rs.mode === RM_WALK }, ROUTER_ACTION));
       act("cycleRouterMode", "Cycle Router Mode", "", () => {
-        setRouterSettings({ mode: S2.rs.mode === RM_MARK ? RM_SHOVE : S2.rs.mode === RM_SHOVE ? RM_WALK : RM_MARK });
+        setRouterSettings({ mode: S3.rs.mode === RM_MARK ? RM_SHOVE : S3.rs.mode === RM_SHOVE ? RM_WALK : RM_MARK });
         return true;
       }, Object.assign({ tip: "Cycle router to the next mode" }, ROUTER_ACTION));
       act("routerSettingsDialog", "Interactive Router Settings...", "", (ctx) => {
@@ -47894,28 +47894,28 @@ Press <esc> to cancel all; double-click to finish`;
       }
       function openTuneSettings(ctx) {
         const mode2 = tuneMode();
-        const T = S2.tune.pattern;
-        const cur2 = T ? T.st : S2.tuneSettings[mode2];
+        const T = S3.tune.pattern;
+        const cur2 = T ? T.st : S3.tuneSettings[mode2];
         if (!routingDialogs.tuning) {
           ctx.toast("Length Tuning Settings: dialogs are unavailable here");
           return true;
         }
         routingDialogs.tuning({ mode: mode2 === "skew" ? "diff_pair_skew" : mode2 === "diffpair" ? "diff_pair" : "single", settings: tuneSettingsView(cur2, mode2) }, (v) => {
-          applyTuneSettings(S2.tuneSettings[mode2], v, mode2);
-          if (S2.tune.pattern) {
-            const side = S2.tune.pattern.st.initialSide;
-            S2.tune.pattern.st = tuneCopy(S2.tuneSettings[mode2]);
-            S2.tune.pattern.st.initialSide = side;
+          applyTuneSettings(S3.tuneSettings[mode2], v, mode2);
+          if (S3.tune.pattern) {
+            const side = S3.tune.pattern.st.initialSide;
+            S3.tune.pattern.st = tuneCopy(S3.tuneSettings[mode2]);
+            S3.tune.pattern.st.initialSide = side;
             tuneUpdate(lastCtx || ctx);
           }
           (lastCtx || ctx).requestRender();
         });
         return true;
       }
-      act("lengthTunerSettings", "Length Tuning Settings...", "Ctrl+L", (ctx) => isTuneTool(S2.modTool) ? openTuneSettings(ctx) : true, { menu: false, tip: "Displays tuning pattern properties dialog" });
+      act("lengthTunerSettings", "Length Tuning Settings...", "Ctrl+L", (ctx) => isTuneTool(S3.modTool) ? openTuneSettings(ctx) : true, { menu: false, tip: "Displays tuning pattern properties dialog" });
       function tunerProperties(ctx) {
         bind(ctx);
-        if (isTuneTool(S2.modTool)) return openTuneSettings(ctx);
+        if (isTuneTool(S3.modTool)) return openTuneSettings(ctx);
         const gen = selectedTuningPattern(ctx);
         if (!gen) return false;
         return openPatternProperties(ctx, gen);
@@ -47928,9 +47928,9 @@ Press <esc> to cancel all; double-click to finish`;
         const info = tuningPatternInfo(gen);
         const mode2 = info.mode === "diff_pair_skew" ? "skew" : "single";
         const st = tuneCopy(info.st);
-        if (!st.overrideCustomRules && S2.ruleConstraint) {
+        if (!st.overrideCustomRules && S3.ruleConstraint) {
           const mem = K11.groupMemberIds(gen.node).map((id) => ctx.doc.items.get(id)).filter((it) => it && (it.kind === "segment" || it.kind === "arc"));
-          const c = S2.ruleConstraint(ctx.doc, mode2 === "skew" ? "skew" : "length", mem[0] || null, null);
+          const c = S3.ruleConstraint(ctx.doc, mode2 === "skew" ? "skew" : "length", mem[0] || null, null);
           if (c && c.opt != null) {
             if (mode2 === "skew") setTargetSkew(st, Math.round(c.opt * TUNE_IU));
             else setTargetLength(st, Math.round(c.opt * TUNE_IU));
@@ -47949,10 +47949,10 @@ Press <esc> to cancel all; double-click to finish`;
         });
         return true;
       }
-      act("spacingIncrease", "Increase Spacing", "1", (ctx) => isTuneTool(S2.modTool) ? tuneStep(ctx, "spacing", 1) : false, { menu: false, tip: "Increase tuning pattern spacing by one step." });
-      act("spacingDecrease", "Decrease Spacing", "2", (ctx) => isTuneTool(S2.modTool) ? tuneStep(ctx, "spacing", -1) : false, { menu: false, tip: "Decrease tuning pattern spacing by one step." });
-      act("amplIncrease", "Increase Amplitude", "3", (ctx) => isTuneTool(S2.modTool) ? tuneStep(ctx, "ampl", 1) : false, { menu: false, tip: "Increase tuning pattern amplitude by one step." });
-      act("amplDecrease", "Decrease Amplitude", "4", (ctx) => isTuneTool(S2.modTool) ? tuneStep(ctx, "ampl", -1) : false, { menu: false, tip: "Decrease tuning pattern amplitude by one step." });
+      act("spacingIncrease", "Increase Spacing", "1", (ctx) => isTuneTool(S3.modTool) ? tuneStep(ctx, "spacing", 1) : false, { menu: false, tip: "Increase tuning pattern spacing by one step." });
+      act("spacingDecrease", "Decrease Spacing", "2", (ctx) => isTuneTool(S3.modTool) ? tuneStep(ctx, "spacing", -1) : false, { menu: false, tip: "Decrease tuning pattern spacing by one step." });
+      act("amplIncrease", "Increase Amplitude", "3", (ctx) => isTuneTool(S3.modTool) ? tuneStep(ctx, "ampl", 1) : false, { menu: false, tip: "Increase tuning pattern amplitude by one step." });
+      act("amplDecrease", "Decrease Amplitude", "4", (ctx) => isTuneTool(S3.modTool) ? tuneStep(ctx, "ampl", -1) : false, { menu: false, tip: "Decrease tuning pattern amplitude by one step." });
       act("regenerateAllTuning", "Update All Tuning Patterns", "", (ctx) => regenerateTuning(ctx, [...ctx.doc.items.values()].filter(isTuningPattern), "Update Tuning Patterns"), { menu: false, tip: "Attempt to re-tune existing tuning patterns within their bounds" });
       act("regenerateAll", "Rebuild All Generators", "", (ctx) => regenerateTuning(ctx, [...ctx.doc.items.values()].filter(isTuningPattern), "Regenerate All"), { menu: false, tip: "Rebuilds geometry of all generators" });
       act("regenerateSelected", "Rebuild Selected Generators", "", (ctx) => {
@@ -47960,35 +47960,35 @@ Press <esc> to cancel all; double-click to finish`;
         return regenerateTuning(ctx, [...sel].map((id) => ctx.doc.items.get(id)).filter(isTuningPattern), "Regenerate Selected");
       }, { menu: false, tip: "Rebuilds geometry of selected generator(s)" });
       act("ACT_SwitchCornerModeToNext", "Track Corner Mode Switch", "", () => {
-        setRouterSettings({ corner_mode: (S2.rs.corner_mode + 1) % 4 });
+        setRouterSettings({ corner_mode: (S3.rs.corner_mode + 1) % 4 });
         return true;
       }, Object.assign({ tip: "Switches between sharp/rounded and 45\xB0/90\xB0 corners when routing tracks." }, ROUTER_ACTION));
       act("ACT_SwitchCornerMode45", "Track Corner Mode 45", "", () => {
         setRouterSettings({ corner_mode: CM_M45 });
         return true;
-      }, Object.assign({ tip: "Switch to 45\xB0 corner when routing tracks.", check: () => S2.rs.corner_mode === CM_M45 }, ROUTER_ACTION));
+      }, Object.assign({ tip: "Switch to 45\xB0 corner when routing tracks.", check: () => S3.rs.corner_mode === CM_M45 }, ROUTER_ACTION));
       act("ACT_SwitchCornerModeArc45", "Track Corner Mode Arc 45", "", () => {
         setRouterSettings({ corner_mode: CM_R45 });
         return true;
-      }, Object.assign({ tip: "Switch to arc 45\xB0 corner when routing tracks.", check: () => S2.rs.corner_mode === CM_R45 }, ROUTER_ACTION));
+      }, Object.assign({ tip: "Switch to arc 45\xB0 corner when routing tracks.", check: () => S3.rs.corner_mode === CM_R45 }, ROUTER_ACTION));
       act("ACT_SwitchCornerMode90", "Track Corner Mode 90", "", () => {
         setRouterSettings({ corner_mode: CM_M90 });
         return true;
-      }, Object.assign({ tip: "Switch to 90\xB0 corner when routing tracks.", check: () => S2.rs.corner_mode === CM_M90 }, ROUTER_ACTION));
+      }, Object.assign({ tip: "Switch to 90\xB0 corner when routing tracks.", check: () => S3.rs.corner_mode === CM_M90 }, ROUTER_ACTION));
       act("ACT_SwitchCornerModeArc90", "Track Corner Mode Arc 90", "", () => {
         setRouterSettings({ corner_mode: CM_R90 });
         return true;
-      }, Object.assign({ tip: "Switch to arc 90\xB0 corner when routing tracks.", check: () => S2.rs.corner_mode === CM_R90 }, ROUTER_ACTION));
+      }, Object.assign({ tip: "Switch to arc 90\xB0 corner when routing tracks.", check: () => S3.rs.corner_mode === CM_R90 }, ROUTER_ACTION));
       var routingOnly = (ctx, fn) => {
-        if (!S2.route) return false;
+        if (!S3.route) return false;
         if (!canEdit2(ctx)) return true;
         fn();
         return true;
       };
       act("ACT_PlaceThroughVia", "Place Through Via", "", (ctx) => {
-        if (S2.route) return routingOnly(ctx, () => toggleViaPlacement(ctx, "through"));
-        if (S2.modTool === "routediff") return true;
-        if (S2.modTool !== "route") return false;
+        if (S3.route) return routingOnly(ctx, () => toggleViaPlacement(ctx, "through"));
+        if (S3.modTool === "routediff") return true;
+        if (S3.modTool !== "route") return false;
         startWithVia(ctx);
         return true;
       }, Object.assign({ tip: "Adds a through-hole via at the end of currently routed track." }, ROUTER_ACTION));
@@ -48002,8 +48002,8 @@ Press <esc> to cancel all; double-click to finish`;
         else ctx.toast("Differential Pair Dimensions: dialogs are unavailable here");
         return true;
       }, Object.assign({ tip: "Open Differential Pair Dimension settings" }, ROUTER_ACTION));
-      act("routerAttemptFinish", "Attempt Finish", "F", (ctx) => S2.route ? (attemptFinish(ctx), true) : false, Object.assign({ tip: "Attempts to complete current route to nearest ratsnest end." }, ROUTER_ACTION));
-      act("routerContinueFromEnd", "Route From Other End", "Ctrl+E", (ctx) => S2.route ? (continueFromEnd(ctx), true) : false, Object.assign({ tip: "Commits current segments and starts next segment from nearest ratsnest end." }, ROUTER_ACTION));
+      act("routerAttemptFinish", "Attempt Finish", "F", (ctx) => S3.route ? (attemptFinish(ctx), true) : false, Object.assign({ tip: "Attempts to complete current route to nearest ratsnest end." }, ROUTER_ACTION));
+      act("routerContinueFromEnd", "Route From Other End", "Ctrl+E", (ctx) => S3.route ? (continueFromEnd(ctx), true) : false, Object.assign({ tip: "Commits current segments and starts next segment from nearest ratsnest end." }, ROUTER_ACTION));
       act("routerRouteSelected", "Route Selected", "Shift+X", (ctx) => {
         if (!canEdit2(ctx)) return true;
         routeSelected(ctx, "manual");
@@ -48019,7 +48019,7 @@ Press <esc> to cancel all; double-click to finish`;
         routeSelected(ctx, "auto");
         return true;
       }, { menu: false, tip: "Sequentially trigger routing and attempt to finish all selected items" });
-      act("unrouteSegment", "Unroute Segment", "Backspace", (ctx) => S2.route || S2.draw || S2.move || !canEdit2(ctx) ? false : unrouteSegment(ctx), { menu: false, tip: "Unroutes the selected track segment and selects the connected tracks" });
+      act("unrouteSegment", "Unroute Segment", "Backspace", (ctx) => S3.route || S3.draw || S3.move || !canEdit2(ctx) ? false : unrouteSegment(ctx), { menu: false, tip: "Unroutes the selected track segment and selects the connected tracks" });
       act("layerPairPresetsCycle", "Cycle Layer Pair Presets", "Shift+V", (ctx) => {
         cycleLayerPairPresets(ctx);
         return true;
@@ -48069,7 +48069,7 @@ Press <esc> to cancel all; double-click to finish`;
       act("cleanupTracks", "Cleanup Tracks & Vias\u2026", "", (ctx) => {
         if (!canEdit2(ctx)) return true;
         const doc2 = ctx.doc;
-        const settings3 = settingsOf2(ctx), selNow = new Set(expandGroups(doc2, Array.from(S2.sel)));
+        const settings3 = settingsOf2(ctx), selNow = new Set(expandGroups(doc2, Array.from(S3.sel)));
         const netName3 = (it) => netOf3(it.node).name;
         const layerOf5 = (it) => {
           const l = K11.kid(it.node, "layer");
@@ -48090,8 +48090,8 @@ Press <esc> to cancel all; double-click to finish`;
           nets: boardNets(doc2).map((n2) => n2.name),
           netclasses: ["Default", ...Object.keys(settings3.netclasses).filter((n2) => n2 !== "Default")],
           copper: copperOf(doc2),
-          activeLayer: ctx.activeLayer || S2.layer,
-          highlightNet: typeof S2.highlightNet === "string" ? S2.highlightNet : null,
+          activeLayer: ctx.activeLayer || S3.layer,
+          highlightNet: typeof S3.highlightNet === "string" ? S3.highlightNet : null,
           currentNetclass: "Default",
           plan: (o) => cleanupPlan(doc2, opts2(o)).items.map((i) => ({ text: i.text, ids: i.ids })),
           apply: (o) => {
@@ -48141,25 +48141,25 @@ Press <esc> to cancel all; double-click to finish`;
         if (!ids) return true;
         const run22 = connectedRun(ctx.doc, ids);
         for (const id of ids) run22.add(id);
-        S2.sel.clear();
+        S3.sel.clear();
         return commitSel(ctx, deleteChanges(ctx.doc, Array.from(run22)), "delete full track");
       });
       act("runDRC", "Design Rules Checker\u2026", "", (ctx) => {
         bind(ctx);
         const s2 = settingsOf2(ctx);
-        S2.markers = drc(ctx.doc, s2, { rules: S2.dru ? S2.dru.rules : null }).concat(S2.dru ? matchedLengthMarkers(ctx.doc, s2, S2.dru.rules).concat(diffPairMarkers(ctx.doc, s2, S2.dru.rules)) : []);
+        S3.markers = drc(ctx.doc, s2, { rules: S3.dru ? S3.dru.rules : null }).concat(S3.dru ? matchedLengthMarkers(ctx.doc, s2, S3.dru.rules).concat(diffPairMarkers(ctx.doc, s2, S3.dru.rules)) : []);
         ctx.requestRender();
-        const errors = S2.markers.filter((m) => m.severity === "error").length, warnings = S2.markers.length - errors;
-        openForm({ title: "DRC Control", width: 620, fields: [{ type: "note", value: `${plural3(errors, "error")}, ${plural3(warnings, "warning")} \u2014 click a row to highlight it.` }, { k: "list", type: "table", columns: [{ label: "Severity", width: "70px" }, { label: "Violation", width: "1fr" }], rows: S2.markers.map((m) => [m.severity, m.text]), empty: "No violations found.", onRow: (i) => {
-          highlightIds(ctx, new Set(S2.markers[i].ids));
-          if (ctx.setSelection && S2.markers[i].ids.length) applySelection(ctx, S2.markers[i].ids);
+        const errors = S3.markers.filter((m) => m.severity === "error").length, warnings = S3.markers.length - errors;
+        openForm({ title: "DRC Control", width: 620, fields: [{ type: "note", value: `${plural3(errors, "error")}, ${plural3(warnings, "warning")} \u2014 click a row to highlight it.` }, { k: "list", type: "table", columns: [{ label: "Severity", width: "70px" }, { label: "Violation", width: "1fr" }], rows: S3.markers.map((m) => [m.severity, m.text]), empty: "No violations found.", onRow: (i) => {
+          highlightIds(ctx, new Set(S3.markers[i].ids));
+          if (ctx.setSelection && S3.markers[i].ids.length) applySelection(ctx, S3.markers[i].ids);
         } }], apply: () => {
           highlightIds(ctx, null);
         } });
         return true;
       });
       act("clearMarkers", "Clear DRC Markers", "", (ctx) => {
-        S2.markers = [];
+        S3.markers = [];
         ctx.requestRender();
         return true;
       });
@@ -48188,21 +48188,21 @@ Press <esc> to cancel all; double-click to finish`;
         return openForm({ title: "Clearance Report", fields: [{ type: "note", value: r.sameNet ? `Both items are on net '${r.nets[0]}': no clearance applies.` : r.gap === null ? "The items share no copper layer." : `Clearance required ${mm4(r.required)}; actual ${mm4(r.gap)} \u2014 ${r.gap >= r.required ? "OK" : "VIOLATION"}` }] });
       });
       act("showRatsnest", "Show Ratsnest", "", (ctx) => {
-        S2.showRatsnest = !S2.showRatsnest;
-        ctx.toast(S2.showRatsnest ? "Ratsnest shown" : "Ratsnest hidden");
+        S3.showRatsnest = !S3.showRatsnest;
+        ctx.toast(S3.showRatsnest ? "Ratsnest shown" : "Ratsnest hidden");
         ctx.requestRender();
         return true;
-      }, { toggle: () => !!S2.showRatsnest });
+      }, { toggle: () => !!S3.showRatsnest });
       act("localRatsnestTool", "Local Ratsnest (selected footprints only)", "", (ctx) => {
-        S2.localRatsnest = !S2.localRatsnest;
-        ctx.toast(S2.localRatsnest ? "Ratsnest: selected footprints only" : "Ratsnest: whole board");
+        S3.localRatsnest = !S3.localRatsnest;
+        ctx.toast(S3.localRatsnest ? "Ratsnest: selected footprints only" : "Ratsnest: whole board");
         ctx.requestRender();
         return true;
-      }, { toggle: () => !!S2.localRatsnest });
+      }, { toggle: () => !!S3.localRatsnest });
       act("hideNetInRatsnest", "Hide Net in Ratsnest", "", (ctx) => {
         const nl = netlist2(ctx.doc);
         const keys = selectionNets(ctx, nl);
-        for (const k of keys) S2.hiddenNets.add(k);
+        for (const k of keys) S3.hiddenNets.add(k);
         ctx.toast(keys.size ? `Hidden: ${Array.from(keys).join(", ")}` : "Select something on a net");
         ctx.requestRender();
         return true;
@@ -48210,8 +48210,8 @@ Press <esc> to cancel all; double-click to finish`;
       act("showNetInRatsnest", "Show Net in Ratsnest", "", (ctx) => {
         const nl = netlist2(ctx.doc);
         const keys = selectionNets(ctx, nl);
-        if (!keys.size) S2.hiddenNets.clear();
-        else for (const k of keys) S2.hiddenNets.delete(k);
+        if (!keys.size) S3.hiddenNets.clear();
+        else for (const k of keys) S3.hiddenNets.delete(k);
         ctx.requestRender();
         return true;
       });
@@ -48226,16 +48226,16 @@ Press <esc> to cancel all; double-click to finish`;
         }
         if (!keys.size) {
           highlightIds(ctx, null);
-          S2.highlightNet = null;
+          S3.highlightNet = null;
           return true;
         }
         const key3 = keys.values().next().value;
-        if (S2.highlightNet === key3) {
-          S2.highlightNet = null;
+        if (S3.highlightNet === key3) {
+          S3.highlightNet = null;
           highlightIds(ctx, null);
           return true;
         }
-        S2.highlightNet = key3;
+        S3.highlightNet = key3;
         const ids = /* @__PURE__ */ new Set();
         for (const k of keys) for (const id of netHighlightIds(ctx.doc, k, nl)) ids.add(id);
         highlightIds(ctx, ids);
@@ -48243,7 +48243,7 @@ Press <esc> to cancel all; double-click to finish`;
       }
       act("highlightNet", "Highlight Net", "`", (ctx) => highlightNetAt(ctx));
       act("clearHighlight", "Clear Net Highlighting", "~", (ctx) => {
-        S2.highlightNet = null;
+        S3.highlightNet = null;
         highlightIds(ctx, null);
         return true;
       });
@@ -48357,7 +48357,7 @@ Press <esc> to cancel all; double-click to finish`;
           if (!ids) return true;
           if (to === "zone") {
             const items = ids.map((i) => ctx.doc.items.get(i));
-            const layer4 = /\.Cu$/.test(layerOf2(items[0].node, "")) ? layerOf2(items[0].node) : S2.layer;
+            const layer4 = /\.Cu$/.test(layerOf2(items[0].node, "")) ? layerOf2(items[0].node) : S3.layer;
             const nets = boardNets(ctx.doc);
             askText(ctx, "Zone net", "", (name) => {
               if (name === null) return;
@@ -48376,12 +48376,12 @@ Press <esc> to cancel all; double-click to finish`;
         });
       function zoneModeAction(mode2) {
         return (ctx) => {
-          if (!canEdit2(ctx) || S2.route || S2.move) return true;
+          if (!canEdit2(ctx) || S3.route || S3.move) return true;
           const sel = Array.from(selectionIds2(ctx));
           const z2 = sourceZone(ctx, sel, sel.length ? [] : cursorCandidates(ctx, ctx.cursor ? ctx.cursor.slice() : cursorPoint2(ctx)));
           if (!z2) return true;
           if (!sel.length) applySelection(ctx, [z2.id]);
-          S2.zoneModeNext = { mode: mode2, src: z2.id };
+          S3.zoneModeNext = { mode: mode2, src: z2.id };
           ctx.setTool("zone");
           return true;
         };
@@ -48450,7 +48450,7 @@ Press <esc> to cancel all; double-click to finish`;
           label,
           "",
           (ctx) => {
-            if (S2.modTool === "garc") switchArcMode(ctx, m);
+            if (S3.modTool === "garc") switchArcMode(ctx, m);
             else {
               setArcDrawMode(m);
               ctx.setTool("garc");
@@ -48461,8 +48461,8 @@ Press <esc> to cancel all; double-click to finish`;
         );
       });
       act("arcPosture", "Switch Arc Posture", "/", (ctx) => {
-        const d = S2.draw;
-        if (S2.modTool !== "garc") return false;
+        const d = S3.draw;
+        if (S3.modTool !== "garc") return false;
         if (d && d.shape === "garc") {
           d.arc.toggleClockwise();
           syncArcDraw(d);
@@ -48475,14 +48475,14 @@ Press <esc> to cancel all; double-click to finish`;
         "Cycle Arc Drawing Mode",
         "Alt+/",
         (ctx) => {
-          if (S2.modTool !== "garc") return false;
+          if (S3.modTool !== "garc") return false;
           switchArcMode(ctx, (arcDrawMode() + 1) % 5);
           return true;
         },
         { tip: "Switch to the next method of drawing arcs" }
       );
       act("changeDimensionArrows", "Switch Dimension Arrows", "", (ctx) => {
-        const d = S2.draw;
+        const d = S3.draw;
         if (!d || !DIM_TYPE[d.shape]) return false;
         const type = DIM_TYPE[d.shape];
         if (type === "aligned" || type === "orthogonal" || type === "radial") {
@@ -48513,17 +48513,17 @@ Press <esc> to cancel all; double-click to finish`;
         for (const z2 of zones) {
           if (!z2 || z2.kind !== "zone") continue;
           const node = clone5(z2.node);
-          let changed = false;
+          let changed2 = false;
           for (let i = node.length - 1; i > 0; i--) if (Array.isArray(node[i]) && node[i][0] === "filled_polygon") {
             node.splice(i, 1);
-            changed = true;
+            changed2 = true;
           }
           const fill22 = K11.kid(node, "fill");
           if (fill22 && fill22[1] === "yes") {
             fill22.splice(1, 1);
-            changed = true;
+            changed2 = true;
           }
-          if (changed) out2.push(replacedChange(z2, node));
+          if (changed2) out2.push(replacedChange(z2, node));
         }
         return out2;
       }
@@ -48920,18 +48920,18 @@ Press <esc> to cancel all; double-click to finish`;
         { id: "pickitem", label: "Select Item", key: "", cursor: "BULLSEYE", hidden: true, icon: '<path d="M5 3l14 9-6 1.5L10 20z"/>' }
       ];
       function ghostSegs() {
-        const rt = S2.route;
+        const rt = S3.route;
         const lineSegs2 = (lines) => {
           const out22 = [];
           for (const { l, pts } of lines) for (let i = 0; i + 1 < pts.length; i++) out22.push([pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], l.width]);
           return out22;
         };
-        if (!rt && S2.drag && S2.drag.moved) {
+        if (!rt && S3.drag && S3.drag.moved) {
           const out22 = [];
-          for (const d of S2.drag.subs) if (d.sol) out22.push(...lineSegs2(d.sol.lines));
+          for (const d of S3.drag.subs) if (d.sol) out22.push(...lineSegs2(d.sol.lines));
           return out22;
         }
-        if (!rt && S2.move && S2.move.conns && S2.move.conns.length && S2.move.moved) return lineSegs2(connLines(S2.move, S2.move.last[0], S2.move.last[1]));
+        if (!rt && S3.move && S3.move.conns && S3.move.conns.length && S3.move.moved) return lineSegs2(connLines(S3.move, S3.move.last[0], S3.move.last[1]));
         if (!rt)
           return [];
         const out2 = [];
@@ -49933,7 +49933,7 @@ Press <esc> to cancel all; double-click to finish`;
         for (const it of doc2.items.values()) {
           if (it.kind !== "footprint") continue;
           const n2 = K11.cloneNode(it.node);
-          let changed = false;
+          let changed2 = false;
           const ref = (() => {
             const p = K11.kids(n2, "property").find((x) => x[1] === "Reference") || K11.kids(n2, "fp_text").find((x) => x[1] === "reference");
             return p ? K11.str(p[2]) : "";
@@ -49952,7 +49952,7 @@ Press <esc> to cancel all; double-click to finish`;
             if (f2.footprint && !wildCompare2(f2.footprint, K11.str(n2[1]))) return;
             const before = K11.serialize(c);
             processNode(c, job, true, center);
-            if (K11.serialize(c) !== before) changed = true;
+            if (K11.serialize(c) !== before) changed2 = true;
           };
           for (const c of n2) {
             if (!isList10(c)) continue;
@@ -49983,7 +49983,7 @@ Press <esc> to cancel all; double-click to finish`;
               if (sc.footprintGraphics) visit(node);
             }
           }
-          if (changed) out2.push([it.id, n2]);
+          if (changed2) out2.push([it.id, n2]);
         }
         for (const it of doc2.items.values()) {
           const k = it.kind;
@@ -49995,17 +49995,17 @@ Press <esc> to cancel all; double-click to finish`;
             processNode(c, job, false, null);
             return K11.serialize(c) !== before;
           };
-          let changed = false;
+          let changed2 = false;
           if (k === "gr_text" || k === "gr_text_box") {
-            if (sc.boardText) changed = visit(n2);
+            if (sc.boardText) changed2 = visit(n2);
           } else if (k === "table") {
-            if (sc.boardText) for (const cell of K11.kids(K11.kid(n2, "cells") || n2, "table_cell")) changed = visit(cell) || changed;
+            if (sc.boardText) for (const cell of K11.kids(K11.kid(n2, "cells") || n2, "table_cell")) changed2 = visit(cell) || changed2;
           } else if (k === "dimension") {
-            if (sc.boardDimensions) changed = visit(n2);
+            if (sc.boardDimensions) changed2 = visit(n2);
           } else if (GRAPHICS.has(k)) {
-            if (sc.boardGraphics) changed = visit(n2);
+            if (sc.boardGraphics) changed2 = visit(n2);
           }
-          if (changed) out2.push([it.id, n2]);
+          if (changed2) out2.push([it.id, n2]);
         }
         return out2;
       }
@@ -51449,7 +51449,7 @@ Press <esc> to cancel all; double-click to finish`;
       }
       function popup2(ctx, at4) {
         if (!run2) return;
-        S2.popup = { text: enumPopup(run2.st), at: at4.slice(), until: Number.MAX_SAFE_INTEGER };
+        S3.popup = { text: enumPopup(run2.st), at: at4.slice(), until: Number.MAX_SAFE_INTEGER };
         ctx.requestRender();
       }
       function preview3(ctx) {
@@ -51480,8 +51480,8 @@ Press <esc> to cancel all; double-click to finish`;
         hookEsc();
         const p = enumParams || { start: 1, step: 1, prefix: "" };
         run2 = { st: enumBegin(p.prefix, p.start, p.step), orig: /* @__PURE__ */ new Map(), last: null, cancelled: false, clickT: 0, clickAt: null };
-        S2.sel.clear();
-        S2.padSel = null;
+        S3.sel.clear();
+        S3.padSel = null;
         if (ctx.setStatus) ctx.setStatus("Renumber Pads");
         popup2(ctx, ctx.cursor || [0, 0]);
       }
@@ -51490,7 +51490,7 @@ Press <esc> to cancel all; double-click to finish`;
         const r = run2;
         restore(ctx);
         run2 = null;
-        S2.popup = null;
+        S3.popup = null;
         ctx.setHighlight(null);
         if (commit && !r.cancelled && ctx.doc) {
           const ch = enumChanges(ctx.doc, r.st);
@@ -51955,21 +51955,21 @@ Press <esc> to cancel all; double-click to finish`;
             }
           } else if (it.kind === "footprint") {
             const n2 = clone5(it.node);
-            let changed = false;
+            let changed2 = false;
             for (const p of K11.kids(n2, "pad")) {
               const u = K11.kid(p, "uuid"), picked = !!o.selected && (o.selected.has(it.id) || !!u && o.selected.has(K11.str(u[1])));
               const type = K11.str(p[2]);
               if (removeAll) {
-                if (visit(p, false, picked, true)) changed = true;
+                if (visit(p, false, picked, true)) changed2 = true;
                 continue;
               }
               if (o.pthPads && type === "thru_hole") {
-                if (visit(p, false, picked, false)) changed = true;
+                if (visit(p, false, picked, false)) changed2 = true;
               } else if (o.smdPads && (type === "smd" || type === "connect" || type === "non_component")) {
-                if (visit(p, false, picked, false)) changed = true;
+                if (visit(p, false, picked, false)) changed2 = true;
               }
             }
-            if (changed) {
+            if (changed2) {
               out2.push(replacedChange(it, n2));
               edited.set(it.id, n2);
             }
@@ -52187,7 +52187,7 @@ Press <esc> to cancel all; double-click to finish`;
         return l ? K11.str(l[1]) : "";
       }
       function ruleSize(doc2, s2, n2, type, fallback) {
-        const d = S2.dru;
+        const d = S3.dru;
         if (d && d.rules.length) {
           const item = n2[0] === "via" ? routedRuleItem({ kind: "via", net: netName22(doc2, n2), layer: layerOf3(n2), size: kidNum22(n2, "size"), drill: kidNum22(n2, "drill") }) : routedRuleItem({ kind: n2[0] === "arc" ? "arc" : "segment", net: netName22(doc2, n2), layer: layerOf3(n2), width: kidNum22(n2, "width") });
           item.node = n2;
@@ -52458,7 +52458,7 @@ Press <esc> to cancel all; double-click to finish`;
             apply3(im.v);
           } else lines.push("Membership not satisfied; constraint ignored.");
         }
-        const rules = S2.dru ? S2.dru.rules : [];
+        const rules = S3.dru ? S3.dru.rules : [];
         const A = { kind: it.kind, node: it.node, layer: layerOf4(it.node), item: it, id: it.id };
         for (const r of rules) {
           const k = r.constraints.find((x) => x.type === type);
@@ -52771,15 +52771,15 @@ Press <esc> to cancel all; double-click to finish`;
       }
       function simplifyLoop(pts, tol) {
         let out2 = pts.slice();
-        for (let changed = true; changed && out2.length > 3; ) {
-          changed = false;
+        for (let changed2 = true; changed2 && out2.length > 3; ) {
+          changed2 = false;
           for (let i = 0; i < out2.length && out2.length > 3; i++) {
             const a = out2[(i + out2.length - 1) % out2.length], p = out2[i], b = out2[(i + 1) % out2.length];
             const ab = sub2(b, a), L = len(ab);
             const d = L < EPS3 ? len(sub2(p, a)) : Math.abs(ab[0] * (p[1] - a[1]) - ab[1] * (p[0] - a[0])) / L;
             if (d < tol) {
               out2.splice(i, 1);
-              changed = true;
+              changed2 = true;
               i--;
             }
           }
@@ -53679,7 +53679,7 @@ Press <esc> to cancel all; double-click to finish`;
           if (f2.action === 3) prefixInfo(f2.prefix).unavailable.add(refDesNumber(f2.ref));
         }
         const changes = [], bad = [];
-        const build3 = (side, startText, prefix, remove) => {
+        const build4 = (side, startText, prefix, remove) => {
           const start = Math.max(0, parseInt(startText, 10) || 0);
           const have = prefix.length > 0, add22 = have && !remove;
           remove = remove && have;
@@ -53713,8 +53713,8 @@ ${i + 1} ${f2.ref || "unannotated footprint"} at ${coord(f2.x, f2.y)} (rounded t
             changes.push(c);
           }
         };
-        if (front.length) build3(front, o.frontStart, o.frontPrefix, o.removeFrontPrefix);
-        if (back.length) build3(back, o.backStart, o.backPrefix, o.removeBackPrefix);
+        if (front.length) build4(front, o.frontStart, o.frontPrefix, o.removeFrontPrefix);
+        if (back.length) build4(back, o.backStart, o.backPrefix, o.removeBackPrefix);
         changes.sort((a, b) => strNumCmp22(a.from, b.from));
         let plan = "Reference Designator Prefixes in Use\n-------------------------------------------------------------\n";
         plan += prefixes.map((p, i) => p.prefix + ((i + 1) % 16 === 0 ? "\n" : " ")).join("");
@@ -53820,10 +53820,10 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         } else if (code === "unconnected_items" && p.length > 6) ids = [p[5], p[6]];
         return exclusionOf(null, { code, x: x / 1e6, y: y / 1e6, ids: ids.filter(Boolean), layer: layer4 }, comment);
       }
-      function readExclusion(entry) {
-        if (entry && typeof entry === "object" && !Array.isArray(entry)) return entry.marker ? entry : null;
-        if (Array.isArray(entry) && entry.length) return legacyExclusion(String(entry[0]), entry.length > 1 ? String(entry[1]) : "");
-        if (typeof entry === "string") return legacyExclusion(entry, "");
+      function readExclusion(entry2) {
+        if (entry2 && typeof entry2 === "object" && !Array.isArray(entry2)) return entry2.marker ? entry2 : null;
+        if (Array.isArray(entry2) && entry2.length) return legacyExclusion(String(entry2[0]), entry2.length > 1 ? String(entry2[1]) : "");
+        if (typeof entry2 === "string") return legacyExclusion(entry2, "");
         return null;
       }
       function projectExclusions(proText) {
@@ -53895,9 +53895,9 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         return null;
       }
       function selectedPadKeys() {
-        if (!S2.padSel) return [];
-        const also = S2.padAlso && S2.padAlso.anchor === S2.padSel ? S2.padAlso.keys : [];
-        return [S2.padSel, ...also.filter((k) => k !== S2.padSel)];
+        if (!S3.padSel) return [];
+        const also = S3.padAlso && S3.padAlso.anchor === S3.padSel ? S3.padAlso.keys : [];
+        return [S3.padSel, ...also.filter((k) => k !== S3.padSel)];
       }
       function dragKey(ctx, free) {
         bind(ctx);
@@ -53911,7 +53911,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         };
         const ids = selectionIds2(ctx);
         const it = liveSelected();
-        if (!S2.sel.size && it && ids.size === 1 && ctx.doc.items.get(it.id)?.kind === "footprint") return editing() && beginCarryMove(ctx, { drag: true });
+        if (!S3.sel.size && it && ids.size === 1 && ctx.doc.items.get(it.id)?.kind === "footprint") return editing() && beginCarryMove(ctx, { drag: true });
         if (ids.size && !routableItems(ctx.doc, ids)) return false;
         if (!ids.size && !dragCandidate(ctx, cursorPoint2(ctx))) {
           if (!editing()) return true;
@@ -53923,7 +53923,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
           return true;
         }
         if (editing()) {
-          S2.dragFree = free;
+          S3.dragFree = free;
           ctx.setTool("drag");
         }
         return true;
@@ -53932,7 +53932,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
       var pcb = {
         id: "pcb",
         tools: TOOLS,
-        state: S2,
+        state: S3,
         ghostSegs,
         /** The KICURSOR a running tool switched to (null: its declared one): MOVING while a move, a drag or a placed image rides the cursor. */
         /**
@@ -53940,14 +53940,14 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
          * of m_cursor), the routed head, or a tool's resolved cursor (the grid helper's magnetic snap); null: the grid snap.
          */
         cursorPos() {
-          const m = S2.move;
+          const m = S3.move;
           if (m) return [r65(m.start[0] + m.last[0]), r65(m.start[1] + m.last[1])];
-          if (S2.route && S2.route.cursor) return S2.route.cursor.slice();
-          if (S2.modTool && S2.hover && S2.modTool !== "drag") return [S2.hover.x, S2.hover.y];
+          if (S3.route && S3.route.cursor) return S3.route.cursor.slice();
+          if (S3.modTool && S3.hover && S3.modTool !== "drag") return [S3.hover.x, S3.hover.y];
           return null;
         },
         cursorNow() {
-          const st = S2;
+          const st = S3;
           return st.move || st.drag || st.image ? "MOVING" : null;
         },
         /** Drag (D / G) of the selected footprints and vias with their tracks attached; false when nothing can be dragged. */
@@ -53960,15 +53960,15 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         inlineDrag(ctx, free) {
           bind(ctx);
           if (ctx.viewOnly || !ctx.doc) return false;
-          S2.dragFree = !!free;
+          S3.dragFree = !!free;
           ctx.setTool("drag");
-          return S2.modTool === "drag";
+          return S3.modTool === "drag";
         },
         /** A press on a multi-item app selection (a box selection): a routable one arms the router's drag instead of a Move. */
         routableDown(ev, mm5, ctx, ids) {
           bind(ctx);
           if (!ctx.doc || ctx.viewOnly || !ctx.live || !routableItems(ctx.doc, ids)) return false;
-          S2.pending = { ids: Array.from(ids), item: ctx.doc.items.get(ids[0]), mm: mm5.slice(), client: [ev.clientX || 0, ev.clientY || 0], app: true };
+          S3.pending = { ids: Array.from(ids), item: ctx.doc.items.get(ids[0]), mm: mm5.slice(), client: [ev.clientX || 0, ev.clientY || 0], app: true };
           return true;
         },
         /** What the canvas leaves out while it is drawn elsewhere (the lines being dragged). */
@@ -53978,62 +53978,62 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         onActivate(t, ctx) {
           bind(ctx);
           const mine = TOOLS.some((x) => x.id === t);
-          if (S2.route && t !== (S2.route.dp ? "routediff" : "route")) {
-            const rt = S2.route;
-            S2.route = null;
+          if (S3.route && t !== (S3.route.dp ? "routediff" : "route")) {
+            const rt = S3.route;
+            S3.route = null;
             routeUnhighlight(ctx, rt);
           }
-          S2.violations = null;
-          if (!isTuneTool(t) || t !== S2.modTool) {
-            S2.tune.pattern = null;
-            S2.tune.picker = null;
+          S3.violations = null;
+          if (!isTuneTool(t) || t !== S3.modTool) {
+            S3.tune.pattern = null;
+            S3.tune.picker = null;
           }
-          if (S2.drag && t !== "drag") {
-            const D = S2.drag;
-            S2.drag = null;
+          if (S3.drag && t !== "drag") {
+            const D = S3.drag;
+            S3.drag = null;
             routeUnhighlight(ctx, D.subs[0]);
           }
-          S2.zoneMode = t === "zone" ? S2.zoneModeNext || null : null;
-          S2.zoneModeNext = null;
-          S2.draw = null;
-          S2.strokeW = null;
+          S3.zoneMode = t === "zone" ? S3.zoneModeNext || null : null;
+          S3.zoneModeNext = null;
+          S3.draw = null;
+          S3.strokeW = null;
           closeTextPrompt();
-          S2.hover = null;
-          if (t !== "image") S2.image = null;
+          S3.hover = null;
+          if (t !== "image") S3.image = null;
           if (enumRunning() && t !== "enumpads") enumLeave(ctx, true);
-          S2.modTool = mine ? t : null;
+          S3.modTool = mine ? t : null;
           if (DRAWING_TOOL_IDS.has(t)) displayConstraintsMsg(ANGLE_SNAP_MSG[angleSnapMode()]);
           if (t === "enumpads") enumActivate(ctx);
-          S2.padPlace = PAD_TOOLS[t] ? { type: PAD_TOOLS[t], angle: 0 } : null;
+          S3.padPlace = PAD_TOOLS[t] ? { type: PAD_TOOLS[t], angle: 0 } : null;
           if (PAD_TOOLS[t]) {
-            const selPad = [...S2.sel].map((id) => ctx.doc && ctx.doc.items.get(id)).find((it) => it && it.kind === "pad");
-            S2.padTemplate = selPad ? selPad.node : null;
+            const selPad = [...S3.sel].map((id) => ctx.doc && ctx.doc.items.get(id)).find((it) => it && it.kind === "pad");
+            S3.padTemplate = selPad ? selPad.node : null;
             if (ctx.setStatus) ctx.setStatus("Place pad");
           }
           if (t === "garc") showArcMode(ctx);
           if (t === "thievingzone" && !ctx.viewOnly && !thievingAllowed(ctx.doc)) {
-            S2.modTool = null;
+            S3.modTool = null;
             ctx.toast(THIEVING_NEEDS_VERSION_MSG);
             ctx.setTool("select");
             return;
           }
-          if (t === "drag" && !beginToolDrag(ctx, !!S2.dragFree)) {
-            S2.modTool = null;
+          if (t === "drag" && !beginToolDrag(ctx, !!S3.dragFree)) {
+            S3.modTool = null;
             ctx.toast("Select a track or a via first, or point at one, then press D to drag it");
             ctx.setTool("select");
             return;
           }
           refreshChip(ctx);
           ctx.requestRender();
-          if (t === "image" && !S2.image && !ctx.viewOnly) openImagePicker();
+          if (t === "image" && !S3.image && !ctx.viewOnly) openImagePicker();
         },
         onPointerDown(ev, mm5, ctx) {
           bind(ctx);
-          const t = S2.modTool;
+          const t = S3.modTool;
           if (!t || ev.button !== 0 || !ctx.doc) return false;
-          if (typeof ev.clientX === "number") S2.client = [ev.clientX, ev.clientY];
+          if (typeof ev.clientX === "number") S3.client = [ev.clientX, ev.clientY];
           const hv = hoverPoint(ctx, mm5, t === "route" || t === "routediff" || t === "via" || t === "gridorigin" || t === "drillorigin" || t === "pickpoint" || t === "anchor" || !!PAD_TOOLS[t], ev);
-          S2.hover = hv;
+          S3.hover = hv;
           if (t === "enumpads") {
             enumDown(ev, mm5, ctx);
             return true;
@@ -54051,8 +54051,8 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
             }
             ctx.setTool("select");
           } else if (t === "via") placeVia(ctx, hv);
-          else if (PAD_TOOLS[t] && S2.padPlace) {
-            if (!ctx.viewOnly) placePad(ctx, S2.padPlace.type, [hv.x, hv.y], S2.padPlace.angle);
+          else if (PAD_TOOLS[t] && S3.padPlace) {
+            if (!ctx.viewOnly) placePad(ctx, S3.padPlace.type, [hv.x, hv.y], S3.padPlace.angle);
           } else if (t === "anchor") {
             if (!ctx.viewOnly) {
               const ch = moveAnchorChanges(ctx.doc, [hv.x, hv.y]);
@@ -54060,14 +54060,14 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
             }
             ctx.setTool("select");
           } else if (t === "drag") {
-            if (S2.drag) {
+            if (S3.drag) {
               dragMove(ctx, mm5);
-              if (S2.drag.moved) finishDrag(ctx, true, !!(ev.ctrlKey || ev.metaKey));
+              if (S3.drag.moved) finishDrag(ctx, true, !!(ev.ctrlKey || ev.metaKey));
             } else ctx.setTool("select");
           } else if (t === "gtext") placeTextAt(ctx, [hv.x, hv.y]);
           else if (t === "barcode") placeBarcodeAt(ctx, [hv.x, hv.y]);
           else if (t === "image") {
-            if (S2.image) placeImage(ctx, hv);
+            if (S3.image) placeImage(ctx, hv);
             else openImagePicker();
           } else if (t === "pickpoint" || t === "pickitem") pickClick(ctx, t, hv, mm5);
           else if (t === "delete") deleteAt(ctx, mm5);
@@ -54093,16 +54093,16 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
           if (!pad2 || !pad2.item || pad2.index === void 0) return false;
           const allowed = root5.CollabEditor && root5.CollabEditor.pickAllowed;
           if (allowed && !allowed(pad2.item)) return false;
-          const key3 = pad2.item.id + "#" + pad2.index, was = S2.padSel === key3;
+          const key3 = pad2.item.id + "#" + pad2.index, was = S3.padSel === key3;
           if (selMode(ev) === "add") {
             const before = selectedPadKeys().filter((k) => k !== key3);
-            S2.padAlso = before.length ? { anchor: key3, keys: before } : null;
+            S3.padAlso = before.length ? { anchor: key3, keys: before } : null;
           } else {
-            S2.sel.clear();
-            S2.padAlso = null;
+            S3.sel.clear();
+            S3.padAlso = null;
           }
-          S2.padSel = key3;
-          S2.downHandled = ev;
+          S3.padSel = key3;
+          S3.downHandled = ev;
           ctx.requestRender();
           return was ? true : "box";
         },
@@ -54113,8 +54113,8 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         // PCB_CONTROL::InteractiveDelete brightens the item a click would remove
         // VIEW_CONTROLS::ForceCursorPosition: the cursor sits where the tool snapped (a move's anchor, a tool's hover point)
         toolCursorPoint() {
-          if (S2.move && S2.move.snapAt) return [S2.move.snapAt[0], S2.move.snapAt[1]];
-          if ((S2.modTool || S2.route || S2.drag) && S2.hover) return [S2.hover.x, S2.hover.y];
+          if (S3.move && S3.move.snapAt) return [S3.move.snapAt[0], S3.move.snapAt[1]];
+          if ((S3.modTool || S3.route || S3.drag) && S3.hover) return [S3.hover.x, S3.hover.y];
           return null;
         },
         /** RENDER_SETTINGS::isInEnteredGroup: the entered group's members (the rest is drawn at the Outside Group opacity), or null. */
@@ -54141,8 +54141,8 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         /** PCB_SELECTION_TOOL::selectPoint: a click outside the entered group's box leaves the group. */
         leaveGroupOutside(mm5, ctx) {
           bind(ctx);
-          if (!S2.enteredGroup || !ctx.doc) return false;
-          const b = groupBox(ctx.doc, S2.enteredGroup);
+          if (!S3.enteredGroup || !ctx.doc) return false;
+          const b = groupBox(ctx.doc, S3.enteredGroup);
           if (b && mm5[0] >= b[0] && mm5[0] <= b[2] && mm5[1] >= b[1] && mm5[1] <= b[3]) return false;
           return exitGroup(ctx, false);
         },
@@ -54158,11 +54158,11 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
           return exitGroup(ctx || null, false);
         },
         brightenedIds() {
-          return S2.modTool === "delete" && S2.hover && S2.hover.del && S2.hover.del.id ? [S2.hover.del.id] : [];
+          return S3.modTool === "delete" && S3.hover && S3.hover.del && S3.hover.del.id ? [S3.hover.del.id] : [];
         },
         /** The selected pad as { item, index }, or null. */
         selectedPad(doc2) {
-          const k = S2.padSel;
+          const k = S3.padSel;
           if (!k || !doc2) return null;
           const i = k.lastIndexOf("#");
           const it = doc2.items.get(k.slice(0, i));
@@ -54181,40 +54181,40 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
           if (it.kind === "zone" && f2.zones === false) return false;
           if ((it.kind === "gr_text" || it.kind === "gr_text_box") && f2.text === false) return false;
           if (/^gr_/.test(it.kind) && it.kind !== "gr_text" && it.kind !== "gr_text_box" && f2.graphics === false) return false;
-          S2.downHandled = ev;
-          const wasSelected = S2.sel.has(it.id), mode2 = selMode(ev);
-          if (mode2 !== "add") S2.padSel = null;
+          S3.downHandled = ev;
+          const wasSelected = S3.sel.has(it.id), mode2 = selMode(ev);
+          if (mode2 !== "add") S3.padSel = null;
           const pick = topParentOf(ctx.doc, it.id) ? Array.from(expandGroups(ctx.doc, [it.id])) : [it.id];
           if (mode2) {
-            const on2 = mode2 === "toggle" ? !S2.sel.has(it.id) : mode2 === "add";
-            for (const id of pick) applySelMode(S2.sel, id, mode2 === "toggle" ? on2 ? "add" : "remove" : mode2);
-          } else if (!wasSelected) S2.sel = new Set(pick);
+            const on2 = mode2 === "toggle" ? !S3.sel.has(it.id) : mode2 === "add";
+            for (const id of pick) applySelMode(S3.sel, id, mode2 === "toggle" ? on2 ? "add" : "remove" : mode2);
+          } else if (!wasSelected) S3.sel = new Set(pick);
           if (ctx.setSelection && !mode2 && !wasSelected) ctx.setSelection([]);
-          S2.pending = !ctx.viewOnly && ctx.live && !mode2 && wasSelected ? { ids: Array.from(S2.sel), item: it, mm: mm5.slice(), client: [ev.clientX || 0, ev.clientY || 0] } : null;
+          S3.pending = !ctx.viewOnly && ctx.live && !mode2 && wasSelected ? { ids: Array.from(S3.sel), item: it, mm: mm5.slice(), client: [ev.clientX || 0, ev.clientY || 0] } : null;
           ctx.requestRender();
           return wasSelected || mode2 ? true : "box";
         },
         onPointerMove(ev, mm5, ctx) {
           bind(ctx);
-          const t = S2.modTool;
+          const t = S3.modTool;
           if (!t || !ctx.doc) return;
-          if (ev && typeof ev.clientX === "number") S2.client = [ev.clientX, ev.clientY];
+          if (ev && typeof ev.clientX === "number") S3.client = [ev.clientX, ev.clientY];
           const hv = hoverPoint(ctx, mm5, t === "route" || t === "routediff" || t === "via" || t === "gridorigin" || t === "drillorigin" || t === "pickpoint" || t === "anchor" || !!PAD_TOOLS[t], ev);
-          S2.hover = hv;
+          S3.hover = hv;
           if (t === "enumpads") enumMove(ev, mm5, ctx);
           if (t === "delete") hv.del = ctx.viewOnly ? null : deleteCandidate(ctx, mm5);
-          if (S2.violations && Math.hypot(hv.x - S2.violations.at[0], hv.y - S2.violations.at[1]) > 0.5) S2.violations = null;
-          if (S2.route) {
-            S2.route.cursor = [hv.x, hv.y];
+          if (S3.violations && Math.hypot(hv.x - S3.violations.at[0], hv.y - S3.violations.at[1]) > 0.5) S3.violations = null;
+          if (S3.route) {
+            S3.route.cursor = [hv.x, hv.y];
             updateHead(ctx);
           }
-          if (S2.drag) dragMove(ctx, mm5);
+          if (S3.drag) dragMove(ctx, mm5);
           if (isTuneTool(t)) tuneMove(ctx, mm5);
-          if (S2.draw) {
-            S2.drawRaw = [hv.x, hv.y];
-            S2.drawCtrl = !!(ev && (ev.ctrlKey || ev.metaKey));
-            if (S2.draw.shape === "garc") arcMove(S2.draw, S2.drawRaw, S2.drawCtrl);
-            else drawTrack(S2.draw, S2.drawRaw, S2.drawCtrl);
+          if (S3.draw) {
+            S3.drawRaw = [hv.x, hv.y];
+            S3.drawCtrl = !!(ev && (ev.ctrlKey || ev.metaKey));
+            if (S3.draw.shape === "garc") arcMove(S3.draw, S3.drawRaw, S3.drawCtrl);
+            else drawTrack(S3.draw, S3.drawRaw, S3.drawCtrl);
           }
           ctx.requestRender();
         },
@@ -54231,8 +54231,8 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
             return true;
           };
           const shift2 = !!ev.shiftKey;
-          if (S2.padPlace && (k === "r" || k === "R")) {
-            S2.padPlace.angle = (S2.padPlace.angle + (shift2 ? -90 : 90) + 360) % 360;
+          if (S3.padPlace && (k === "r" || k === "R")) {
+            S3.padPlace.angle = (S3.padPlace.angle + (shift2 ? -90 : 90) + 360) % 360;
             ctx.requestRender();
             return true;
           }
@@ -54249,13 +54249,13 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
             case "v":
             case "V":
               if (shift2) return false;
-              if (S2.route || S2.modTool === "route" || S2.modTool === "routediff") {
+              if (S3.route || S3.modTool === "route" || S3.modTool === "routediff") {
                 if (editing()) runAction2("ACT_PlaceThroughVia", ctx);
                 return true;
               }
               return false;
             case "<":
-              if (S2.route) {
+              if (S3.route) {
                 if (editing()) runAction2("ACT_SelLayerAndPlaceThroughVia", ctx);
                 return true;
               }
@@ -54271,7 +54271,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
               return dragKey(ctx, k === "g" || k === "G");
             case "q":
             case "Q":
-              if (!shift2 && !(ev.ctrlKey || ev.metaKey || ev.altKey) && (S2.route || S2.modTool === "route" || S2.modTool === "routediff")) return runAction2("ACT_CustomTrackWidth", ctx);
+              if (!shift2 && !(ev.ctrlKey || ev.metaKey || ev.altKey) && (S3.route || S3.modTool === "route" || S3.modTool === "routediff")) return runAction2("ACT_CustomTrackWidth", ctx);
               return false;
             case "t":
             case "T":
@@ -54320,10 +54320,10 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
             case "Flip":
               return editing() && flipSelected(ctx);
             case "/":
-              if ((ev.ctrlKey || ev.metaKey) && (S2.modTool === "route" || S2.modTool === "routediff")) return runAction2("ACT_SwitchCornerModeToNext", ctx);
-              if (S2.modTool === "garc" && !(ev.ctrlKey || ev.metaKey)) return runAction2(ev.altKey ? "cycleArcDrawMode" : "arcPosture", ctx);
-              if (S2.route) {
-                const rt = S2.route;
+              if ((ev.ctrlKey || ev.metaKey) && (S3.modTool === "route" || S3.modTool === "routediff")) return runAction2("ACT_SwitchCornerModeToNext", ctx);
+              if (S3.modTool === "garc" && !(ev.ctrlKey || ev.metaKey)) return runAction2(ev.altKey ? "cycleArcDrawMode" : "arcPosture", ctx);
+              if (S3.route) {
+                const rt = S3.route;
                 tracerFlip(rt.tracer, rt.head && rt.head.length > 1 ? dir8(rt.head[0], rt.head[1]) : -1);
                 updateHead(ctx);
                 ctx.requestRender();
@@ -54343,13 +54343,13 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
             case "2":
             case "3":
             case "4":
-              if (!isTuneTool(S2.modTool) || ev.ctrlKey || ev.metaKey || ev.altKey) return false;
+              if (!isTuneTool(S3.modTool) || ev.ctrlKey || ev.metaKey || ev.altKey) return false;
               return runAction2({ 1: "spacingIncrease", 2: "spacingDecrease", 3: "amplIncrease", 4: "amplDecrease" }[k], ctx);
             case "Tab":
-              return S2.moveSeq ? runAction2("skip", ctx) : false;
+              return S3.moveSeq ? runAction2("skip", ctx) : false;
             // PCB_ACTIONS::skip while moving individually
             case "End":
-              if (S2.route) {
+              if (S3.route) {
                 if (editing()) endRoute(ctx, true);
                 return true;
               }
@@ -54396,69 +54396,69 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
             case "\\":
               return runAction2("viaSizeDec", ctx);
             case "Enter":
-              if (S2.route) {
+              if (S3.route) {
                 if (editing()) {
-                  const rt = S2.route;
-                  const hv = S2.hover || { x: rt.cursor[0], y: rt.cursor[1], snap: null };
+                  const rt = S3.route;
+                  const hv = S3.hover || { x: rt.cursor[0], y: rt.cursor[1], snap: null };
                   routeClick(ctx, hv, [hv.x, hv.y], { enter: true });
                 }
                 return true;
               }
-              if (S2.draw && S2.draw.shape === "garc") {
+              if (S3.draw && S3.draw.shape === "garc") {
                 finishArc(ctx, editing);
                 return true;
               }
-              if (S2.draw) {
-                if (POLY_TOOLS.has(S2.draw.shape)) {
+              if (S3.draw) {
+                if (POLY_TOOLS.has(S3.draw.shape)) {
                   if (editing()) finishPoly(ctx);
                 } else {
-                  S2.draw = null;
+                  S3.draw = null;
                   ctx.requestRender();
                 }
                 return true;
               }
-              if (S2.drag) {
+              if (S3.drag) {
                 if (editing()) finishDrag(ctx, true, false);
                 return true;
               }
               return false;
             // @ts-expect-error -- TS7029: the fall-through to "Delete" below is intended
             case "Backspace":
-              if (S2.route) {
+              if (S3.route) {
                 if (editing()) undoRouteLeg(ctx);
                 return true;
               }
-              if (!S2.draw && !S2.move && !ev.shiftKey && !ctx.viewOnly && unrouteSegment(ctx)) return true;
+              if (!S3.draw && !S3.move && !ev.shiftKey && !ctx.viewOnly && unrouteSegment(ctx)) return true;
             // PCB_ACTIONS::unrouteSegment on selected tracks / vias
             // fall through: deleteLastPoint and doDelete are the same while drawing; with nothing drawn Backspace deletes like Delete
             case "Delete":
-              if (S2.draw && S2.draw.shape === "garc") {
+              if (S3.draw && S3.draw.shape === "garc") {
                 arcBackup(ctx);
                 return true;
               }
-              if (S2.draw && (POLY_TOOLS.has(S2.draw.shape) || S2.draw.shape === "gcurve")) {
-                const d = S2.draw;
+              if (S3.draw && (POLY_TOOLS.has(S3.draw.shape) || S3.draw.shape === "gcurve")) {
+                const d = S3.draw;
                 if (d.pending) return true;
                 if (d.pts.length > 1) {
                   d.pts.pop();
-                  if (POLY_TOOLS.has(d.shape)) drawTrack(d, d.cur, !!S2.drawCtrl);
-                } else S2.draw = null;
+                  if (POLY_TOOLS.has(d.shape)) drawTrack(d, d.cur, !!S3.drawCtrl);
+                } else S3.draw = null;
                 ctx.requestRender();
                 return true;
               }
-              if (S2.draw && S2.draw.shape === "gline") {
+              if (S3.draw && S3.draw.shape === "gline") {
                 if (editing() && !undoChainSegment(ctx)) {
-                  S2.draw = null;
+                  S3.draw = null;
                   ctx.requestRender();
                 }
                 return true;
               }
-              if (S2.route) {
+              if (S3.route) {
                 if (editing()) undoRouteLeg(ctx);
                 return true;
               }
               if (shift2 && selectionIds2(ctx).size && connectedRun(ctx.doc, selectionIds2(ctx)).size) return runAction2("deleteFull", ctx);
-              if (S2.sel.size) {
+              if (S3.sel.size) {
                 if (editing()) deleteSelection2(ctx);
                 return true;
               }
@@ -54472,7 +54472,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
                 }
                 return true;
               }
-              if (!selectionIds2(ctx).size && !S2.padSel) {
+              if (!selectionIds2(ctx).size && !S3.padSel) {
                 if (editing()) hoverDelete(ctx);
                 return true;
               }
@@ -54490,30 +54490,30 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         // only a new document object resets the tool state; an update just prunes what vanished.
         onDocChanged(ctx) {
           bind(ctx);
-          S2.ratsDirty = true;
-          S2.docVer++;
-          if (S2.route && ctx.doc === S2.doc) {
-            routeHighlight(ctx, S2.route);
-            if (S2.route.cursor) updateHead(ctx);
+          S3.ratsDirty = true;
+          S3.docVer++;
+          if (S3.route && ctx.doc === S3.doc) {
+            routeHighlight(ctx, S3.route);
+            if (S3.route.cursor) updateHead(ctx);
           }
-          if (ctx.doc !== S2.doc) {
-            S2.doc = ctx.doc;
+          if (ctx.doc !== S3.doc) {
+            S3.doc = ctx.doc;
             cancelOps();
-            S2.sel.clear();
-            S2.padSel = null;
-            S2.hover = null;
-            S2.markers = [];
-            S2.hiddenNets.clear();
-            S2.highlightNet = null;
+            S3.sel.clear();
+            S3.padSel = null;
+            S3.hover = null;
+            S3.markers = [];
+            S3.hiddenNets.clear();
+            S3.highlightNet = null;
           } else if (ctx.doc) {
-            for (const id of Array.from(S2.sel)) if (!ctx.doc.items.has(id)) S2.sel.delete(id);
-            if (S2.drag && S2.drag.subs.some((d) => Array.from(d.ids).some((id) => !ctx.doc.items.has(id)))) {
-              const D = S2.drag;
-              S2.drag = null;
+            for (const id of Array.from(S3.sel)) if (!ctx.doc.items.has(id)) S3.sel.delete(id);
+            if (S3.drag && S3.drag.subs.some((d) => Array.from(d.ids).some((id) => !ctx.doc.items.has(id)))) {
+              const D = S3.drag;
+              S3.drag = null;
               routeUnhighlight(ctx, D.subs[0]);
             }
-            if (S2.move && [...S2.move.orig.keys()].some((id) => !ctx.doc.items.has(id))) S2.move = null;
-            S2.pending = null;
+            if (S3.move && [...S3.move.orig.keys()].some((id) => !ctx.doc.items.has(id))) S3.move = null;
+            S3.pending = null;
           }
           refreshChip(ctx);
         },
@@ -54587,11 +54587,11 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
           if (!layer4) return;
           const R2 = sizesOf(ctx);
           if (/\.Cu$/.test(layer4)) {
-            if (layer4 !== (S2.route ? S2.route.layer : S2.layer) || R2.activeLayer !== layer4) setLayer(ctx, layer4);
+            if (layer4 !== (S3.route ? S3.route.layer : S3.layer) || R2.activeLayer !== layer4) setLayer(ctx, layer4);
             return;
           }
-          if (R2.activeLayer === layer4 && S2.gfxLayer === layer4) return;
-          S2.gfxLayer = layer4;
+          if (R2.activeLayer === layer4 && S3.gfxLayer === layer4) return;
+          S3.gfxLayer = layer4;
           R2.setActiveLayer(layer4);
           refreshChip(ctx);
           ctx.requestRender();
@@ -54606,7 +54606,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         },
         /** The interactive router's settings (ROUTING_SETTINGS), and changing them (persisted per viewer). */
         routerSettings() {
-          return Object.assign({}, S2.rs);
+          return Object.assign({}, S3.rs);
         },
         setRouterSettings(patch) {
           setRouterSettings(patch || {});
@@ -54625,9 +54625,9 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
           const fmt32 = (v) => messageText2(v, u === "mil" ? "mil" : u === "in" ? "in" : "mm", "pcb", true);
           const pick = (i) => () => {
             R2.setDiffPairIndex(i);
-            if (S2.route && S2.route.dp && lastCtx) {
-              S2.route.dpSizes = dpSizes(lastCtx, { P: S2.route.net });
-              S2.route.width = S2.route.dpSizes.width;
+            if (S3.route && S3.route.dp && lastCtx) {
+              S3.route.dpSizes = dpSizes(lastCtx, { P: S3.route.net });
+              S3.route.width = S3.route.dpSizes.width;
               updateHead(lastCtx);
               lastCtx.requestRender();
             }
@@ -54653,9 +54653,9 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
           const R2 = sizesOf(ctx);
           const u = sizeUnits(), fmt32 = (v) => messageText2(v, u === "mil" ? "mil" : u === "in" ? "in" : "mm", "pcb", true);
           const useIndex = !R2.useConnectedWidth && !R2.useCustomTrackVia;
-          const changed = () => {
+          const changed2 = () => {
             if (lastCtx) {
-              const rt = S2.route;
+              const rt = S3.route;
               if (rt) {
                 rt.width = R2.routeWidth(netNameOf3(lastCtx, rt.net), rt.connected);
                 updateHead(lastCtx);
@@ -54672,7 +54672,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
                 R2.setUseCustomTrackVia(false);
                 R2.setUseConnectedWidth(true);
                 R2.tempOverride = false;
-                changed();
+                changed2();
               }
             },
             {
@@ -54683,7 +54683,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
                 R2.setUseConnectedWidth(false);
                 R2.setViaIndex(0);
                 R2.setTrackIndex(0);
-                changed();
+                changed2();
               }
             },
             {
@@ -54704,7 +54704,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
             run: () => {
               R2.tempOverride = true;
               R2.setTrackIndex(i);
-              changed();
+              changed2();
             }
           }));
           rows3.push({ sep: true });
@@ -54713,7 +54713,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
             checked: useIndex && R2.viaIndex === i,
             run: () => {
               R2.setViaIndex(i);
-              changed();
+              changed2();
             }
           }));
           return rows3;
@@ -54727,7 +54727,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
           ctx = ctx || lastCtx;
           if (!ctx) return;
           bind(ctx);
-          const rt = S2.route;
+          const rt = S3.route;
           if (rt) {
             rt.width = sizesOf(ctx).routeWidth(netNameOf3(ctx, rt.net), rt.connected);
             updateHead(ctx);
@@ -54736,14 +54736,14 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         },
         /** The net being routed (the first of a pair), "" with none: what the size dialogs resolve the netclass of. */
         routedNet() {
-          return S2.route && S2.route.net ? S2.route.net.name || "" : "";
+          return S3.route && S3.route.net ? S3.route.net.name || "" : "";
         },
         /** The router's pair sizes changed (the Differential Pair Dimensions dialog): a pair being routed takes them at once. */
         diffPairSizesChanged(ctx) {
           ctx = ctx || lastCtx;
           if (!ctx) return;
           bind(ctx);
-          const rt = S2.route;
+          const rt = S3.route;
           if (rt && rt.dp) {
             rt.dpSizes = dpSizes(ctx, { P: rt.net });
             rt.width = rt.dpSizes.width;
@@ -54792,14 +54792,14 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         canAddCorner,
         canRemoveCorner,
         get markers() {
-          return S2.markers;
+          return S3.markers;
         },
         runDRC(ctx) {
           return runAction2("runDRC", ctx);
         },
         setDesignSettings(src) {
-          S2.settings = src ? designSettings(src) : null;
-          S2.settingsSrc = null;
+          S3.settings = src ? designSettings(src) : null;
+          S3.settingsSrc = null;
         },
         setCustomRules(text3) {
           setCustomRules(text3);
@@ -54838,7 +54838,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         useFootprintEditorDefaults,
         LINE_W,
         TEXT_STYLE,
-        state: S2,
+        state: S3,
         pad: padToolApi,
         exchange: exchangeApi,
         fpProps: fpPropsApi,
@@ -60855,13 +60855,13 @@ var require_opentype = __commonJS({
       function makeDict(meta3, attrs, strings) {
         var m = {};
         for (var i = 0; i < meta3.length; i += 1) {
-          var entry = meta3[i];
-          var value = attrs[entry.name];
-          if (value !== void 0 && !equals2(value, entry.value)) {
-            if (entry.type === "SID") {
+          var entry2 = meta3[i];
+          var value = attrs[entry2.name];
+          if (value !== void 0 && !equals2(value, entry2.value)) {
+            if (entry2.type === "SID") {
               value = encodeString(value, strings);
             }
-            m[entry.op] = { name: entry.name, type: entry.type, value };
+            m[entry2.op] = { name: entry2.name, type: entry2.type, value };
           }
         }
         return m;
@@ -70702,41 +70702,41 @@ function forgetDocs() {
 }
 async function resolveDoc(name) {
   const open3 = openEntry();
-  const live2 = ED()?.kdoc;
+  const live3 = ED()?.kdoc;
   if (!name || open3 && findDoc(name)?.docId === open3.docId) {
-    if (!open3 || !live2) throw new ToolError("No document is open in the editor yet.");
-    return { doc: live2, path: open3.path, docId: open3.docId, open: true };
+    if (!open3 || !live3) throw new ToolError("No document is open in the editor yet.");
+    return { doc: live3, path: open3.path, docId: open3.docId, open: true };
   }
-  const entry = findDoc(name);
-  if (!entry) throw new ToolError(`There is no document "${name}" in this project. The documents are: ${projectDocs().map((d) => d.path).join(", ") || "(none)"}.`);
-  const mine = planned.doc ? planned.doc(entry.docId) : null;
-  if (mine) return { doc: mine, path: entry.path, docId: entry.docId, open: false };
-  const hit5 = cache2.get(entry.docId);
-  if (hit5 && Date.now() - hit5.at < 8e3) return { doc: hit5.doc, path: entry.path, docId: entry.docId, open: false };
-  const r = await fetch(`/api/docs/${entry.docId}/content?v=${Date.now()}`);
-  if (!r.ok) throw new ToolError(`Could not read ${entry.path} (${r.status}).`);
+  const entry2 = findDoc(name);
+  if (!entry2) throw new ToolError(`There is no document "${name}" in this project. The documents are: ${projectDocs().map((d) => d.path).join(", ") || "(none)"}.`);
+  const mine = planned.doc ? planned.doc(entry2.docId) : null;
+  if (mine) return { doc: mine, path: entry2.path, docId: entry2.docId, open: false };
+  const hit5 = cache2.get(entry2.docId);
+  if (hit5 && Date.now() - hit5.at < 8e3) return { doc: hit5.doc, path: entry2.path, docId: entry2.docId, open: false };
+  const r = await fetch(`/api/docs/${entry2.docId}/content?v=${Date.now()}`);
+  if (!r.ok) throw new ToolError(`Could not read ${entry2.path} (${r.status}).`);
   let doc2;
   try {
-    doc2 = K4().parseDoc(await r.text(), entry.docType);
+    doc2 = K4().parseDoc(await r.text(), entry2.docType);
   } catch {
-    throw new ToolError(`${entry.path} could not be parsed.`);
+    throw new ToolError(`${entry2.path} could not be parsed.`);
   }
   const seq = Number(r.headers.get("x-snapshot-seq"));
   if (isFinite(seq)) {
     try {
-      const o = await fetch(`/api/docs/${entry.docId}/ops?since=${seq}`, { credentials: "same-origin" });
+      const o = await fetch(`/api/docs/${entry2.docId}/ops?since=${seq}`, { credentials: "same-origin" });
       if (o.ok) for (const op of (await o.json()).ops || []) for (const c of op.changes || []) {
         try {
           K4().applyChange(doc2, c, ED()?.IU);
         } catch (e) {
-          console.warn("assistant: an edit could not be replayed on", entry.path, e);
+          console.warn("assistant: an edit could not be replayed on", entry2.path, e);
         }
       }
     } catch {
     }
   }
-  cache2.set(entry.docId, { at: Date.now(), doc: doc2 });
-  return { doc: doc2, path: entry.path, docId: entry.docId, open: false };
+  cache2.set(entry2.docId, { at: Date.now(), doc: doc2 });
+  return { doc: doc2, path: entry2.path, docId: entry2.docId, open: false };
 }
 function fieldsOf(node) {
   const k = K4();
@@ -71129,9 +71129,9 @@ async function runChecks(input) {
   };
 }
 async function boardInfo() {
-  const entry = projectDocs().find((d) => d.docType === "kicad_pcb");
-  if (!entry) throw new ToolError("This project has no board.");
-  const { doc: doc2, path: path2 } = await resolveDoc(entry.path);
+  const entry2 = projectDocs().find((d) => d.docType === "kicad_pcb");
+  if (!entry2) throw new ToolError("This project has no board.");
+  const { doc: doc2, path: path2 } = await resolveDoc(entry2.path);
   const P = PCB3();
   if (!P) throw new ToolError("The board tools are not loaded.");
   const st = P.boardStatistics(doc2);
@@ -72168,7 +72168,7 @@ var init_appstore = __esm({
     };
     APP_TOOLS = ["select", "pan", "comment", "follow", "zoomtool", "measure"];
     store = /* @__PURE__ */ (() => {
-      let S2 = {
+      let S3 = {
         view: "home",
         homeTab: "projects",
         homeTick: 0,
@@ -72224,30 +72224,30 @@ var init_appstore = __esm({
         routing: { trackLabels: [], trackIndex: 0, viaLabels: [], viaIndex: 0, viaStacks: [], viaStackIndex: 0, layers: [], layerPair: ["F.Cu", "B.Cu"] }
         // the board's size selectors (editor/pcbrouting.ts)
       };
-      const subs = /* @__PURE__ */ new Set();
+      const subs2 = /* @__PURE__ */ new Set();
       const notify = () => {
-        for (const fn of Array.from(subs)) {
+        for (const fn of Array.from(subs2)) {
           try {
-            fn(S2);
+            fn(S3);
           } catch (e) {
             console.warn(e);
           }
         }
       };
       return {
-        get: () => S2,
+        get: () => S3,
         set(patch) {
-          S2 = Object.assign({}, S2, patch);
+          S3 = Object.assign({}, S3, patch);
           notify();
         },
         slice(key3, patch) {
-          S2 = Object.assign({}, S2, { [key3]: Object.assign({}, S2[key3], patch) });
+          S3 = Object.assign({}, S3, { [key3]: Object.assign({}, S3[key3], patch) });
           notify();
         },
         subscribe(fn) {
-          subs.add(fn);
+          subs2.add(fn);
           return () => {
-            subs.delete(fn);
+            subs2.delete(fn);
           };
         }
       };
@@ -72626,11 +72626,11 @@ function withDocument(docId3, onJoined, timeoutMs = 15e3) {
   });
 }
 function liveDocument(docId3) {
-  return withDocument(docId3, (live2) => Promise.resolve(live2));
+  return withDocument(docId3, (live3) => Promise.resolve(live3));
 }
 function sendDocOps(docId3, changes) {
-  return withDocument(docId3, async (live2, sendOp3) => {
-    if (live2.role !== "editor") throw new Error("permission_denied");
+  return withDocument(docId3, async (live3, sendOp3) => {
+    if (live3.role !== "editor") throw new Error("permission_denied");
     return sendOp3(changes);
   });
 }
@@ -72659,8 +72659,8 @@ async function loadProjectFile() {
     }
   }
   try {
-    const live2 = await liveDocument(pro.docId);
-    return withFileOps(live2.file, live2.ops);
+    const live3 = await liveDocument(pro.docId);
+    return withFileOps(live3.file, live3.ops);
   } catch (e) {
     try {
       const t = await api4(`/api/docs/${pro.docId}/content?v=${Date.now()}`);
@@ -72672,8 +72672,8 @@ async function loadProjectFile() {
 }
 function saveTextDocument(docId3, text3, change) {
   if (!canWriteProject()) return Promise.resolve(false);
-  return withDocument(docId3, async (live2, sendOp3) => {
-    if (live2.role !== "editor") return false;
+  return withDocument(docId3, async (live3, sendOp3) => {
+    if (live3.role !== "editor") return false;
     const seq = await sendOp3([change]);
     const r = await fetch(`/api/docs/${docId3}/snapshots?seq=${seq}`, { method: "POST", headers: { "content-type": "application/octet-stream" }, body: text3 });
     return r.ok;
@@ -72742,7 +72742,8 @@ function compute() {
   const h3 = helpers();
   const cur2 = curEntry(), doc2 = E.kdoc;
   if (!h3 || !cur2 || !doc2 || doc2.type !== "sch") return null;
-  const key3 = `${projectKey()}|${cur2.docId}|${docGen}|${loadedVer}`;
+  const topKey = topLevelSchematics().map((t) => t.doc.docId + ":" + t.name).join(",");
+  const key3 = `${projectKey()}|${cur2.docId}|${docGen}|${loadedVer}|${topKey}`;
   if (computed && computed.key === key3) return computed;
   const files = /* @__PURE__ */ new Map(), docs = /* @__PURE__ */ new Map();
   for (const d of schDocs()) {
@@ -72771,7 +72772,8 @@ function compute() {
   const stem2 = rootFile.file.split("/").pop().replace(/\.kicad_sch$/, "");
   const pro = projectDocs2().find((d) => d.docType === "kicad_pro");
   const project3 = pro ? pro.path.split("/").pop().replace(/\.kicad_pro$/, "") : stem2;
-  const nl = NL().buildNetlist(rootFile, resolve2, { symbolPins: h3.symbolPins, isPower: (d, it) => h3.isPowerSymbol(d, String((KiCadCanvas.kid(it.node, "lib_id") || [])[1])) }, project3);
+  const tops = topLevelSchematics().map((t) => ({ sheet: files.get(t.doc.path), name: t.name, uuid: t.uuid })).filter((t) => !!t.sheet);
+  const nl = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve2, { symbolPins: h3.symbolPins, isPower: (d, it) => h3.isPowerSymbol(d, String((KiCadCanvas.kid(it.node, "lib_id") || [])[1])) }, project3);
   const map = nl.netMap || /* @__PURE__ */ new Map(), instances = nl.instances || [];
   computed = { map, instances, index: SN().nameIndex(map), rootName: stem2, docs, key: key3 };
   return computed;
@@ -72789,6 +72791,30 @@ function currentInstance(c = netMap()) {
   if (!c || !cur2) return null;
   const asked = preferHuman && c.instances.some((i) => i.file === cur2.path && i.human === preferHuman) ? preferHuman : null;
   return SN().instanceFor(c.instances, cur2.path, asked || E.kdoc?.sheetPath || null);
+}
+function changed() {
+  for (const fn of listeners) {
+    try {
+      fn();
+    } catch (e) {
+      console.warn(e);
+    }
+  }
+}
+function applyHighlight(ctx = toolCtx()) {
+  const h3 = helpers();
+  if (!h3) return;
+  if (!HL.name) {
+    h3.setHighlight(ctx, null);
+    setStatusBar({ message: "" });
+    changed();
+    return;
+  }
+  const c = netMap(), inst = currentInstance(c);
+  const keys = c && inst ? SN().collectKeys(c.map, HL.name, inst.index, HL.busMembers) : /* @__PURE__ */ new Set();
+  h3.setHighlight(ctx, keys.size ? keys : null);
+  setStatusBar({ message: SN().highlightStatus(HL.name) });
+  changed();
 }
 function nameOfPick(pick) {
   if (!pick || !pick.item) return null;
@@ -72826,13 +72852,43 @@ function nameOfPick(pick) {
   const key3 = inst.index + "|" + it.id + (pin !== void 0 ? "#pin:" + pin : "");
   return { name: c.index.get(key3) || null, inst: inst.index, id: it.id, pin };
 }
-var SN, schMod, helpers, preferHuman, sheets, loadedVer, projectKey, schDocs, curEntry, computed, docGen;
+function preferInstance(human) {
+  preferHuman = human;
+}
+function leaveSheet() {
+  const cur2 = curEntry();
+  const c = netMap(), inst = currentInstance(c);
+  if (c && inst) {
+    if (inst.uuidPath.length <= 1) {
+      toast("Already at the root sheet");
+      return;
+    }
+    const up = inst.uuidPath.slice(0, -1).join("/");
+    const parent = c.instances.find((i) => i.uuidPath.join("/") === up);
+    const d = parent ? schDocs().find((x) => x.path === parent.file) : null;
+    if (parent && d) {
+      preferInstance(parent.human);
+      if (!cur2 || d.docId !== cur2.docId) void openDoc(d);
+      else applyHighlight();
+      return;
+    }
+  }
+  const tops = topLevelSchematics();
+  if (cur2 && tops.some((t) => t.doc.docId === cur2.docId)) {
+    toast("Already at the root sheet");
+    return;
+  }
+  const r = rootSchematic();
+  if (r) void openDoc(r);
+}
+var SN, schMod, helpers, HL, preferHuman, sheets, loadedVer, projectKey, schDocs, curEntry, computed, docGen, listeners;
 var init_schnets = __esm({
   "web/domains/pcb/editor/schnets.ts"() {
     "use strict";
     init_appstore();
     init_comments();
     init_doc();
+    init_util();
     init_canvas();
     init_projectfile();
     init_state();
@@ -72843,6 +72899,7 @@ var init_schnets = __esm({
       const m = schMod();
       return m && m._ ? m._ : null;
     };
+    HL = { name: null, busMembers: false, nav: null };
     preferHuman = null;
     sheets = /* @__PURE__ */ new Map();
     loadedVer = 0;
@@ -72854,6 +72911,7 @@ var init_schnets = __esm({
     curEntry = () => state.doc || null;
     computed = null;
     docGen = 0;
+    listeners = /* @__PURE__ */ new Set();
   }
 });
 
@@ -72926,12 +72984,12 @@ function applyVariantToDoc(doc2) {
 function setCurrentVariant(name) {
   const ed = editorOf();
   const v = isDefaultVariant(name) ? "" : name;
-  const changed = (byEditor[ed] || "") !== v;
+  const changed2 = (byEditor[ed] || "") !== v;
   byEditor[ed] = v;
   variantCache.clear();
   lastView = null;
   publish();
-  if (!changed) return;
+  if (!changed2) return;
   const doc2 = E.kdoc;
   if (doc2) {
     applyVariantToDoc(doc2);
@@ -73511,14 +73569,14 @@ function peerName(p) {
 }
 function applyFollowWeb(peers) {
   if (!E.followPeer) return;
-  const entry = peers[E.followPeer];
-  if (!entry) {
+  const entry2 = peers[E.followPeer];
+  if (!entry2) {
     E.followPeer = null;
     toast("Stopped following (they left)");
     renderPeers();
     return;
   }
-  const vp = (entry.state || {}).viewport;
+  const vp = (entry2.state || {}).viewport;
   if (!vp || vp.length < 4 || vp[2] <= 0) return;
   const w = world.clientWidth || stage.clientWidth;
   const xMm = vp[0] / E.IU, yMm = vp[1] / E.IU, wMm = vp[2] / E.IU;
@@ -73856,7 +73914,7 @@ async function saveProject(mutate, label = "project settings") {
   return cur2;
 }
 function onProjectChanged(fn) {
-  listeners.add(fn);
+  listeners2.add(fn);
 }
 function adoptProject(text3) {
   E2.proSettings = text3;
@@ -73871,7 +73929,7 @@ function adoptProject(text3) {
     applySheetContext2(E2.kdoc);
     requestRender2();
   }
-  for (const fn of listeners) {
+  for (const fn of listeners2) {
     try {
       fn();
     } catch (e) {
@@ -73879,12 +73937,12 @@ function adoptProject(text3) {
     }
   }
 }
-var listeners;
+var listeners2;
 var init_project = __esm({
   "web/domains/pcb/dialogs/project.ts"() {
     "use strict";
     init_editor();
-    listeners = /* @__PURE__ */ new Set();
+    listeners2 = /* @__PURE__ */ new Set();
   }
 });
 
@@ -74403,7 +74461,12 @@ function frameTitle() {
   const root5 = rootId ? s2.document.docs.find((d) => d.docId === rootId) : null;
   const kdoc3 = E.kdoc;
   const sub2 = kdoc3 && kdoc3.sheetPath && kdoc3.sheetPath !== "/" ? kdoc3.sheetPath.replace(/^\/|\/$/g, "") : "";
-  const sheetPath = (root5 ? stem(root5.path) : name) + (sub2 ? "/" + sub2 : "");
+  let sheetPath = (root5 ? stem(root5.path) : name) + (sub2 ? "/" + sub2 : "");
+  const tops = topLevelSchematics();
+  if (tops.length > 1 && sub2) {
+    const segs = sub2.split("/"), top2 = tops.find((t) => t.name === segs[0]);
+    if (top2) sheetPath = stem(top2.doc.path) + (segs.length > 1 ? "/" + segs.slice(1).join("/") : "");
+  }
   return `${modified2 ? "*" : ""}${name}${sheetPath !== name ? ` [${sheetPath}]` : ""}${ro} \u2014 Schematic Editor`;
 }
 function updateTitle() {
@@ -74416,6 +74479,7 @@ var stem, last;
 var init_title = __esm({
   "web/domains/pcb/editor/title.ts"() {
     "use strict";
+    init_doc();
     init_appstore();
     init_state();
     stem = (path2) => (path2 || "").split("/").pop().replace(/\.kicad_(sch|pcb)$/, "");
@@ -76340,12 +76404,12 @@ function findLevel(view, W12, H, complete) {
   for (const L of levels) if ((!complete || L.rows >= L.h) && covers(L, view, W12, H) && (!best || L.s < best.s || L.s === best.s && L.rows > best.rows)) best = L;
   return best;
 }
-function newLevel(view, S2, x0, y0, x1, y1, low) {
-  const dpr = view.dpr || 1, s2 = scaleOf4(view), r = S2 / s2, M = LEVEL_MARGIN;
+function newLevel(view, S3, x0, y0, x1, y1, low) {
+  const dpr = view.dpr || 1, s2 = scaleOf4(view), r = S3 / s2, M = LEVEL_MARGIN;
   const w = Math.ceil((x1 - x0) * r) + 2 * M, h3 = Math.ceil((y1 - y0) * r) + 2 * M;
   if (w <= 0 || h3 <= 0 || w > 16e3 || h3 > 16e3) return null;
   const tx = M + (txOf(view) - x0) * r, ty = M + (tyOf(view) - y0) * r;
-  const lv = Object.assign({}, view, { zoom: S2 / (view.ppm * dpr), panX: (tx + view.x0 * S2) / dpr, panY: (ty + view.y0 * S2) / dpr });
+  const lv = Object.assign({}, view, { zoom: S3 / (view.ppm * dpr), panX: (tx + view.x0 * S3) / dpr, panY: (ty + view.y0 * S3) / dpr });
   let cv;
   if (paintConfig.bitmap && typeof OffscreenCanvas !== "undefined") cv = new OffscreenCanvas(w, h3);
   else {
@@ -76355,7 +76419,7 @@ function newLevel(view, S2, x0, y0, x1, y1, low) {
   }
   const ctx = cv.getContext("2d");
   if (!ctx) return null;
-  const L = { cv, ctx, el: null, s: S2, tx, ty, w, h: h3, dpr, view: lv, rows: 0, slice: null, used: performance.now(), low };
+  const L = { cv, ctx, el: null, s: S3, tx, ty, w, h: h3, dpr, view: lv, rows: 0, slice: null, used: performance.now(), low };
   levels.push(L);
   const budget = LEVEL_BUDGET * Math.max(1, layer2 ? layer2.cv.width * layer2.cv.height : w * h3);
   let total2 = 0;
@@ -76425,10 +76489,10 @@ function prefetchAhead(L, view, hint, W12, H) {
   const dpr = view.dpr || 1, s2 = scaleOf4(view), sT = view.ppm * hint.to * dpr;
   if (Math.abs(sT / s2 - 1) < 1e-3) return;
   const ax = hint.cx * dpr, ay = hint.cy * dpr;
-  const S2 = sT > s2 ? L.s * LEVEL_SPAN : L.low, r = sT > s2 ? s2 / L.s : s2 / (S2 / LEVEL_SPAN);
-  if (levels.some((x) => x.dpr === dpr && Math.abs(x.s / S2 - 1) < 0.05)) return;
+  const S3 = sT > s2 ? L.s * LEVEL_SPAN : L.low, r = sT > s2 ? s2 / L.s : s2 / (S3 / LEVEL_SPAN);
+  if (levels.some((x) => x.dpr === dpr && Math.abs(x.s / S3 - 1) < 0.05)) return;
   const x0 = ax - ax * r, x1 = ax + (W12 - ax) * r, y0 = ay - ay * r, y1 = ay + (H - ay) * r;
-  const N2 = newLevel(view, S2, x0, y0, x1, y1, sT > s2 ? L.s : S2 / LEVEL_SPAN);
+  const N2 = newLevel(view, S3, x0, y0, x1, y1, sT > s2 ? L.s : S3 / LEVEL_SPAN);
   if (N2) {
     queue.push(N2);
     scheduleIdle();
@@ -76442,10 +76506,10 @@ function prefetchRest(view, W12, H) {
     [s2, W12 * (1 - REST_SPAN), H * (1 - REST_SPAN), W12 * REST_SPAN, H * REST_SPAN, s2 / REST_SPAN]
     // out, from any anchor
   ];
-  for (const [S2, x0, y0, x1, y1, low] of want2) {
-    const have = levels.some((L) => L.dpr === dpr && L.s >= S2 * 0.999 && L.s <= S2 * 1.1 && (S2 > s2 ? coversShrunk(L, view, W12, H) : coversGrown(L, view, REST_SPAN, W12, H)));
+  for (const [S3, x0, y0, x1, y1, low] of want2) {
+    const have = levels.some((L) => L.dpr === dpr && L.s >= S3 * 0.999 && L.s <= S3 * 1.1 && (S3 > s2 ? coversShrunk(L, view, W12, H) : coversGrown(L, view, REST_SPAN, W12, H)));
     if (have) continue;
-    const N2 = newLevel(view, S2, x0, y0, x1, y1, low);
+    const N2 = newLevel(view, S3, x0, y0, x1, y1, low);
     if (N2) queue.push(N2);
   }
   if (queue.length) scheduleIdle();
@@ -77204,13 +77268,13 @@ function boardSelected() {
   const base2 = selectedSet();
   const pcb = CollabTools.pcb && CollabTools.pcb.state;
   if (isSch()) {
-    const S2 = CollabTools.sch && CollabTools.sch.state;
+    const S3 = CollabTools.sch && CollabTools.sch.state;
     const extra = [];
-    if (S2 && S2.sel) extra.push(S2.sel);
+    if (S3 && S3.sel) extra.push(S3.sel);
     if (E.selField) extra.push(E.selField.id + "#field:" + E.selField.name);
     for (const p of E.selPins || []) extra.push(p.id + "#pin:" + p.number);
-    if (S2 && S2.drag && S2.drag.items) {
-      for (const e of S2.drag.items) if (e && e.item && e.item.id) extra.push(e.item.id);
+    if (S3 && S3.drag && S3.drag.items) {
+      for (const e of S3.drag.items) if (e && e.item && e.item.id) extra.push(e.item.id);
     }
     if (!extra.length && !base2) return base2;
     const out3 = new Set(base2 || []);
@@ -78728,7 +78792,7 @@ function load2(docId3) {
       applyDrawingSheet(E.kdoc);
       requestRender();
     }
-    for (const fn of listeners2) fn();
+    for (const fn of listeners3) fn();
   }, () => {
     loading.delete(docId3);
     if (!cache4.has(docId3)) cache4.set(docId3, { text: "", sheet: null });
@@ -78748,7 +78812,7 @@ function applyDrawingSheet(d) {
   const ws = resolveWorksheet(drawingSheetName(E.proSettings, sch), projectWorksheets2());
   d.drawingSheet = ws ? sheetOf(ws.docId) : null;
 }
-var projectWorksheets2, cache4, loading, listeners2;
+var projectWorksheets2, cache4, loading, listeners3;
 var init_drawingsheet = __esm({
   "web/domains/pcb/editor/drawingsheet.ts"() {
     "use strict";
@@ -78760,7 +78824,7 @@ var init_drawingsheet = __esm({
     projectWorksheets2 = () => projectWorksheets(state.docs || []);
     cache4 = /* @__PURE__ */ new Map();
     loading = /* @__PURE__ */ new Set();
-    listeners2 = /* @__PURE__ */ new Set();
+    listeners3 = /* @__PURE__ */ new Set();
     if (typeof window !== "undefined") {
       window.addEventListener("kc-doc-saved", ((ev) => {
         const id = ev.detail && String(ev.detail.savedDocId || ev.detail.docId || "");
@@ -79173,7 +79237,7 @@ function confirmBox(title, message, okLabel = "OK") {
 }
 function popupMenu(x, y, items) {
   for (const old of Array.from(document.querySelectorAll(".kd-pop"))) old.remove();
-  const build3 = (list, px, py, depth) => {
+  const build4 = (list, px, py, depth) => {
     const m = h("div", { class: "kd-pop", role: "menu", "data-depth": depth, style: `position:fixed;left:${px}px;top:${py}px;z-index:${80 + depth};min-width:160px;background:var(--panel);border:1px solid var(--line);border-radius:4px;box-shadow:0 6px 18px rgba(0,0,0,.25);padding:3px 0;font-size:12px;color:var(--ink)` });
     for (const it of list) {
       if (it.sep) {
@@ -79194,7 +79258,7 @@ function popupMenu(x, y, items) {
         row3.style.color = "var(--on-accent)";
         for (const o of Array.from(document.querySelectorAll(".kd-pop"))) if (Number(o.dataset.depth) > depth) o.remove();
         if (it.sub && !it.disabled) {
-          const r = row3.getBoundingClientRect(), sub2 = build3(it.sub, r.right - 2, r.top - 3, depth + 1);
+          const r = row3.getBoundingClientRect(), sub2 = build4(it.sub, r.right - 2, r.top - 3, depth + 1);
           document.body.append(sub2);
           fitMenu(sub2, { row: r, parent: m.getBoundingClientRect(), overlap: 2 });
         }
@@ -79230,7 +79294,7 @@ function popupMenu(x, y, items) {
       closeAll();
     }
   };
-  const root5 = build3(items, x, y, 0);
+  const root5 = build4(items, x, y, 0);
   document.body.append(root5);
   fitMenu(root5, { at: { x, y } });
   setTimeout(() => {
@@ -79470,7 +79534,7 @@ function messageBox(title, message, buttons = [{ label: "OK" }], escape2) {
   else dlg.focus();
   return ov;
 }
-function subDialog(title, width, build3, ok2, opts2) {
+function subDialog(title, width, build4, ok2, opts2) {
   if (typeof document === "undefined") return null;
   ensureCss2();
   const ov = h2("div", { class: "kd-overlay", style: "z-index:10040", "data-k": opts2 && opts2.key || "subdialog" });
@@ -79491,7 +79555,7 @@ function subDialog(title, width, build3, ok2, opts2) {
       ov.remove();
     }
   });
-  build3(body);
+  build4(body);
   document.body.append(ov);
   dlg.focus();
   return ov;
@@ -79876,7 +79940,7 @@ function grid(columns, rows3, opts2) {
   let data = rows3, sel = -1, anchor2 = -1;
   const more = /* @__PURE__ */ new Set();
   const table = h2("table"), wrap = h2("div", { class: "pd-grid", style: opts2 && opts2.height ? `max-height:${opts2.height}` : null, "data-k": opts2 && opts2.key }, table);
-  const changed = () => {
+  const changed2 = () => {
     if (opts2 && opts2.onChange) opts2.onChange();
   };
   const isSel = (k) => k === sel || more.has(k);
@@ -79955,7 +80019,7 @@ function grid(columns, rows3, opts2) {
           const cb = h2("input", { type: "checkbox", checked: !!v, disabled: ro });
           cb.addEventListener("change", () => {
             row3[c.key] = cb.checked;
-            changed();
+            changed2();
           });
           tr.append(h2("td", { class: "chk" }, cb));
         } else if (c.type === "color") {
@@ -79965,7 +80029,7 @@ function grid(columns, rows3, opts2) {
               row3[c.key] = css;
               b.replaceChildren(swatch(css));
               b.title = css;
-              changed();
+              changed2();
             });
           });
           tr.append(h2("td", null, b));
@@ -79980,7 +80044,7 @@ function grid(columns, rows3, opts2) {
             const o = (c.options || [])[s2.selectedIndex];
             if (o) {
               row3[c.key] = o[0];
-              changed();
+              changed2();
             }
           });
           tr.append(h2("td", null, s2));
@@ -80008,7 +80072,7 @@ function grid(columns, rows3, opts2) {
               else if (isNaN(x)) inp.value = text3;
               else row3[c.key] = x;
             } else row3[c.key] = inp.value;
-            changed();
+            changed2();
           });
           inp.addEventListener("keydown", (ev) => {
             if (ev.key === "Enter") {
@@ -80041,7 +80105,7 @@ function grid(columns, rows3, opts2) {
                   });
                 });
                 refresh();
-                changed();
+                changed2();
               });
             }
           });
@@ -80051,7 +80115,7 @@ function grid(columns, rows3, opts2) {
             b.addEventListener("click", () => bt.run(row3, i, (val) => {
               row3[c.key] = val;
               inp.value = val;
-              changed();
+              changed2();
             }));
             tr.append(h2("td", { class: "withbtn" }, h2("div", { class: "pd-cellwrap" }, inp, b)));
           } else tr.append(h2("td", null, inp));
@@ -80945,17 +81009,17 @@ function colorPicker(current, allowOpacity, done, def = null) {
     paintNew();
     setEdit("alpha", false);
   });
-  const setEdit = (changed, checkTransparency) => {
+  const setEdit = (changed2, checkTransparency) => {
     if (checkTransparency && col.a === 0) col.a = 1;
     alpha.set(Math.round(col.a * 100));
-    if (changed === "r" || changed === "g" || changed === "b") [hue, sat, val] = toHSV(col);
-    if (changed !== "r") red.set(b255(col.r));
-    if (changed !== "g") green.set(b255(col.g));
-    if (changed !== "b") blue.set(b255(col.b));
-    if (changed !== "hue") hueSpin.set(Math.trunc(hue));
-    if (changed !== "sat") satSpin.set(Math.trunc(sat * 255));
-    if (changed !== "val") value.set(b255(val));
-    if (changed !== "hex") hex2.value = toHex(col);
+    if (changed2 === "r" || changed2 === "g" || changed2 === "b") [hue, sat, val] = toHSV(col);
+    if (changed2 !== "r") red.set(b255(col.r));
+    if (changed2 !== "g") green.set(b255(col.g));
+    if (changed2 !== "b") blue.set(b255(col.b));
+    if (changed2 !== "hue") hueSpin.set(Math.trunc(hue));
+    if (changed2 !== "sat") satSpin.set(Math.trunc(sat * 255));
+    if (changed2 !== "val") value.set(b255(val));
+    if (changed2 !== "hex") hex2.value = toHex(col);
   };
   const drawAll = () => {
     paintNew();
@@ -81277,19 +81341,19 @@ function projectLibraryExists(kind, row3, paths) {
   if (io && io.folder || kind === "symbol" && row3.type === "KiCad" && !/\.kicad_sym$/i.test(p)) return paths.some((x) => x.startsWith(p + "/"));
   return paths.includes(p);
 }
-function projectCandidates(kind, entry, paths) {
-  const io = plugins(kind).find((x) => x.type === entry.type);
+function projectCandidates(kind, entry2, paths) {
+  const io = plugins(kind).find((x) => x.type === entry2.type);
   const out2 = /* @__PURE__ */ new Set();
   const dirOf2 = (p) => p.split("/").slice(0, -1).join("/");
   for (const p of paths) {
     const ext = extOf(p).toLowerCase();
     const name = p.split("/").pop() || "";
-    if (entry.type === TABLE_TYPE) {
+    if (entry2.type === TABLE_TYPE) {
       if (name === tableFileName(kind) && p.includes("/")) out2.add(p);
       continue;
     }
     if (!io) continue;
-    if (kind === "symbol" && entry.folder) {
+    if (kind === "symbol" && entry2.folder) {
       if (ext === "kicad_sym" && p.includes("/")) out2.add(dirOf2(p));
       continue;
     }
@@ -81970,9 +82034,9 @@ function onSourcesChanged(fn) {
     sourceListeners.delete(fn);
   };
 }
-function libraryIndex(kind, entry, ctx) {
-  if (entry.source === "official") return officialIndex(kind, entry.name);
-  const pl = projectLibraries(kind, ctx.docs).find((l) => l.name === entry.name);
+function libraryIndex(kind, entry2, ctx) {
+  if (entry2.source === "official") return officialIndex(kind, entry2.name);
+  const pl = projectLibraries(kind, ctx.docs).find((l) => l.name === entry2.name);
   return pl ? projectIndex(kind, pl) : Promise.resolve([]);
 }
 function placedItems(kind, doc2) {
@@ -82394,8 +82458,8 @@ async function openLibTables(opts2) {
   };
   const browsePath = async (r, set2) => {
     const io = plugins(kind).find((x) => x.type === r.type);
-    const entry = { type: r.type, folder: !!(io && io.folder) || sym && r.type === "KiCad" && /\.kicad_symdir$|\/$/.test(r.uri) };
-    const cands = projectCandidates(kind, entry, projectPaths());
+    const entry2 = { type: r.type, folder: !!(io && io.folder) || sym && r.type === "KiCad" && /\.kicad_symdir$|\/$/.test(r.uri) };
+    const cands = projectCandidates(kind, entry2, projectPaths());
     const cur0 = projectPath(r.uri);
     const got = await pickProjectPaths(r.type === TABLE_TYPE ? "Select Library Table" : `Select ${r.type} Library`, cands, { select: cur0 || void 0 });
     if (!got || !got[0]) return;
@@ -82578,16 +82642,16 @@ async function openLibTables(opts2) {
     });
     b.append(reset, migrate2);
   };
-  const browseLibraries = async (entry) => {
+  const browseLibraries = async (entry2) => {
     const p = pageOf();
     if (p.readOnly || !p.grid) return;
-    const title = entry.type === TABLE_TYPE ? "Select Library Table" : `Select ${entry.type} Library`;
-    const cands = projectCandidates(kind, entry, projectPaths());
-    const files = await pickProjectPaths(title, cands, { multiple: true, empty: `The project has no ${entry.label.replace(/^[^(]*\(|\)$/g, "")} to add.` });
+    const title = entry2.type === TABLE_TYPE ? "Select Library Table" : `Select ${entry2.type} Library`;
+    const cands = projectCandidates(kind, entry2, projectPaths());
+    const files = await pickProjectPaths(title, cands, { multiple: true, empty: `The project has no ${entry2.label.replace(/^[^(]*\(|\)$/g, "")} to add.` });
     if (!files || !files.length) return;
     let addDuplicates = false, applyToAll = false;
     for (const f2 of files) {
-      const nick = nicknameFor(kind, f2, entry.type);
+      const nick = nicknameFor(kind, f2, entry2.type);
       let doAdd = true;
       if (p.rows.some((r) => r.nickname === nick)) {
         if (!applyToAll) {
@@ -82597,7 +82661,7 @@ async function openLibTables(opts2) {
         }
         doAdd = addDuplicates;
       }
-      if (doAdd) p.rows.push({ ...blankRow(), nickname: nick, type: entry.type, uri: projectUri(f2) });
+      if (doAdd) p.rows.push({ ...blankRow(), nickname: nick, type: entry2.type, uri: projectUri(f2) });
     }
     p.grid.refresh();
     p.grid.select(p.rows.length - 1);
@@ -83439,7 +83503,7 @@ function models3dPanel(o) {
   };
   const pathChoice = selectField("Automatic", configuredPathChoices().map((c) => [c, c]), { ro, key: "configuredPath" });
   pathChoice.input.title = "Choose the folder used when opening the 3D model picker";
-  const build3 = (el4) => {
+  const build4 = (el4) => {
     const unitSpan = (k) => unitLabel(k === "deg" ? "" : k);
     const units = () => currentUnits();
     const spin = (k) => stepper(mf[k], k[0] === "s" ? stepScale : k[0] === "r" ? stepRotation : (v, sg, fine) => stepOffset(v, sg, fine, units()), updatePreview);
@@ -83558,7 +83622,7 @@ function models3dPanel(o) {
     updatePreview();
   };
   return {
-    build: build3,
+    build: build4,
     models: () => {
       syncModels();
       return models.filter((x) => x.file);
@@ -84672,9 +84736,9 @@ async function loadBoardCopy(boardDocId, fpUuid, info) {
   if (!board3) return null;
   let file = "", ops = [];
   try {
-    const live2 = await liveDocument(boardDocId);
-    file = live2.file;
-    ops = live2.ops;
+    const live3 = await liveDocument(boardDocId);
+    file = live3.file;
+    ops = live3.ops;
   } catch {
     try {
       const r = await fetch(`/api/docs/${boardDocId}/content?v=${Date.now()}`, { credentials: "same-origin" });
@@ -84947,9 +85011,9 @@ async function saveToBoard() {
   }
   if (!r) {
     try {
-      const live2 = await liveDocument(cp2.boardDocId);
-      const bd = KiCadCanvas.parseDoc(live2.file, "kicad_pcb");
-      for (const op of live2.ops) for (const c of op.changes || []) {
+      const live3 = await liveDocument(cp2.boardDocId);
+      const bd = KiCadCanvas.parseDoc(live3.file, "kicad_pcb");
+      for (const op of live3.ops) for (const c of op.changes || []) {
         try {
           KiCadCanvas.applyChange(bd, c, 1e6);
         } catch {
@@ -85022,10 +85086,10 @@ async function createFootprintDoc(lib, name, text3) {
     toast("The footprint could not be saved", 4e3);
     return null;
   }
-  const entry = { docId: res.docId, path: res.path || path2, docType: "footprint" };
-  project3.docs.push(entry);
+  const entry2 = { docId: res.docId, path: res.path || path2, docType: "footprint" };
+  project3.docs.push(entry2);
   store.set({ project: Object.assign({}, project3) });
-  return entry;
+  return entry2;
 }
 async function overwriteFootprintDoc(docId3, text3, label) {
   if (docId3 === state.docId && E.kdoc) {
@@ -85035,10 +85099,10 @@ async function overwriteFootprintDoc(docId3, text3, label) {
     return saveFootprint();
   }
   try {
-    const live2 = await liveDocument(docId3);
-    const fd = KiCadCanvas.parseDoc(live2.file, "footprint");
-    let seq = live2.seq;
-    for (const op of live2.ops) {
+    const live3 = await liveDocument(docId3);
+    const fd = KiCadCanvas.parseDoc(live3.file, "footprint");
+    let seq = live3.seq;
+    for (const op of live3.ops) {
       seq = Math.max(seq, op.seq || 0);
       for (const c of op.changes || []) {
         try {
@@ -85268,8 +85332,8 @@ async function newLibraryRow(nick, uri) {
   let text3 = "";
   if (d) {
     try {
-      const live2 = await liveDocument(d.docId);
-      text3 = live2.file;
+      const live3 = await liveDocument(d.docId);
+      text3 = live3.file;
     } catch {
       const r = await fetch(`/api/docs/${d.docId}/content?v=${Date.now()}`, { credentials: "same-origin" });
       text3 = r.ok ? await r.text() : "";
@@ -85359,9 +85423,9 @@ async function renameFootprint(docId3) {
     refreshTitle();
   } else {
     try {
-      const live2 = await liveDocument(docId3);
-      const fd = KiCadCanvas.parseDoc(live2.file, "footprint");
-      for (const op of live2.ops) for (const c of op.changes || []) KiCadCanvas.applyChange(fd, c, 1e6);
+      const live3 = await liveDocument(docId3);
+      const fd = KiCadCanvas.parseDoc(live3.file, "footprint");
+      for (const op of live3.ops) for (const c of op.changes || []) KiCadCanvas.applyChange(fd, c, 1e6);
       const h3 = KiCadCanvas.parse(FD().footprintHeaderSexpr(fd));
       h3[1] = clean;
       await sendDocOps(docId3, [{ id: "footprint", kind: "MODIFIED", typeName: "FOOTPRINT", sexpr: KiCadCanvas.serialize(h3) }]);
@@ -85379,10 +85443,10 @@ async function footprintTextOf(docId3) {
     return fetchLibFootprint(rest.slice(0, i), rest.slice(i + 1));
   }
   try {
-    const live2 = await liveDocument(docId3);
-    if (!live2.ops.length) return live2.file;
-    const fd = KiCadCanvas.parseDoc(live2.file, "footprint");
-    for (const op of live2.ops) for (const c of op.changes || []) {
+    const live3 = await liveDocument(docId3);
+    if (!live3.ops.length) return live3.file;
+    const fd = KiCadCanvas.parseDoc(live3.file, "footprint");
+    for (const op of live3.ops) for (const c of op.changes || []) {
       try {
         KiCadCanvas.applyChange(fd, c, 1e6);
       } catch {
@@ -85883,11 +85947,35 @@ function rootSchematicOf(shown2, all2) {
 function firstDoc(shown2, all2, wanted2) {
   return shown2.find((d) => d.docId === wanted2) || rootSchematicOf(shown2, all2) || shown2.find((d) => d.docType === "kicad_pcb") || null;
 }
-var BOARD_HINT;
+function topLevelSheetsOf(pro, shown2, all2) {
+  const sch = pro && typeof pro === "object" ? pro.schematic : void 0;
+  const list = sch && Array.isArray(sch.top_level_sheets) ? sch.top_level_sheets : [];
+  const proDoc2 = all2.find((d) => d.docType === "kicad_pro");
+  const dir = proDoc2 ? proDoc2.path.split("/").slice(0, -1).join("/") : "";
+  const out2 = [];
+  for (const e of list) {
+    if (!e || typeof e.filename !== "string" || !e.filename) continue;
+    const parts = [...dir ? dir.split("/") : [], ...e.filename.replace(/\\/g, "/").split("/")].filter((p) => p && p !== ".");
+    const norm3 = [];
+    for (const p of parts) {
+      if (p === "..") norm3.pop();
+      else norm3.push(p);
+    }
+    const path2 = norm3.join("/");
+    const doc2 = shown2.find((d) => d.docType === "kicad_sch" && d.path === path2);
+    if (!doc2 || out2.some((o) => o.doc === doc2)) continue;
+    out2.push({ doc: doc2, name: typeof e.name === "string" ? e.name : "", uuid: typeof e.uuid === "string" && e.uuid !== NIL_UUID ? e.uuid : "" });
+  }
+  if (out2.length) return out2;
+  const root5 = rootSchematicOf(shown2, all2);
+  return root5 ? [{ doc: root5, name: "Root", uuid: "" }] : [];
+}
+var BOARD_HINT, NIL_UUID;
 var init_bootpick = __esm({
   "web/domains/pcb/editor/bootpick.ts"() {
     "use strict";
     BOARD_HINT = "kui.boardDocs";
+    NIL_UUID = "00000000-0000-0000-0000-000000000000";
   }
 });
 
@@ -86032,6 +86120,7 @@ __export(doc_exports, {
   leaveDoc: () => leaveDoc,
   leaveEditor: () => leaveEditor,
   loadBase: () => loadBase,
+  multiTopLevel: () => multiTopLevel,
   navigateDocs: () => navigateDocs,
   noteDroppedChange: () => noteDroppedChange,
   openDoc: () => openDoc,
@@ -86051,6 +86140,7 @@ __export(doc_exports, {
   setGridPitch: () => setGridPitch,
   setLayerVisible: () => setLayerVisible,
   setupGridControls: () => setupGridControls,
+  sheetHumanPaths: () => sheetHumanPaths,
   sheetNames: () => sheetNames,
   sheetPages: () => sheetPages,
   snapMm: () => snapMm,
@@ -86058,6 +86148,8 @@ __export(doc_exports, {
   syncItemsFromDoc: () => syncItemsFromDoc,
   tagLayers: () => tagLayers,
   takeBoot: () => takeBoot,
+  topLevelSchematics: () => topLevelSchematics,
+  topLevelSheetsChanged: () => topLevelSheetsChanged,
   updateGridStatus: () => updateGridStatus
 });
 function gridListKey() {
@@ -86093,22 +86185,28 @@ function projectTextVars() {
 }
 async function learnHierarchy() {
   const pid = state.project ? state.project.projectId : null;
-  const root5 = pid ? rootSchematic() : null;
-  if (!root5 || hierarchyLearned === pid) return;
+  const tops = pid ? topLevelSchematics() : [];
+  if (!tops.length || hierarchyLearned === pid) return;
   hierarchyLearned = pid;
-  try {
-    const r = await fetch(`/api/docs/${root5.docId}/content`);
-    if (!r.ok) return;
-    const d = KiCadCanvas.parseDoc(await r.text(), "kicad_sch");
-    const dir = root5.path.split("/").slice(0, -1).join("/");
-    for (const m of KiCadCanvas.movableItems(d)) {
-      if (m.kind !== "sheet" || !m.file) continue;
-      const path2 = dir ? `${dir}/${m.file}` : m.file;
-      if (m.name && !sheetNames.has(path2)) sheetNames.set(path2, m.name);
-      if (m.page && !sheetPages.has(path2)) sheetPages.set(path2, m.page);
+  const multi = tops.length > 1;
+  sheetHumanPaths.clear();
+  if (multi) for (const t of tops) sheetHumanPaths.set(t.doc.path, "/" + t.name + "/");
+  await Promise.all(tops.map(async (t) => {
+    try {
+      const r = await fetch(`/api/docs/${t.doc.docId}/content`);
+      if (!r.ok) return;
+      const d = KiCadCanvas.parseDoc(await r.text(), "kicad_sch");
+      const dir = t.doc.path.split("/").slice(0, -1).join("/");
+      for (const m of KiCadCanvas.movableItems(d)) {
+        if (m.kind !== "sheet" || !m.file) continue;
+        const path2 = dir ? `${dir}/${m.file}` : m.file;
+        if (m.name && !sheetNames.has(path2)) sheetNames.set(path2, m.name);
+        if (m.page && !sheetPages.has(path2)) sheetPages.set(path2, m.page);
+        if (multi && !sheetHumanPaths.has(path2)) sheetHumanPaths.set(path2, "/" + t.name + "/" + (m.name || m.file.replace(/\.kicad_sch$/, "")) + "/");
+      }
+    } catch (e) {
     }
-  } catch (e) {
-  }
+  }));
 }
 function applySheetContext(d) {
   const doc2 = state.doc;
@@ -86125,15 +86223,21 @@ function applySheetContext(d) {
   }
   const sch = state.docs.filter((x) => x.docType === "kicad_sch");
   d.sheetCount = sch.length || 1;
-  const root5 = state.project ? rootSchematic() : null;
-  if (!doc2 || root5 && root5.docId === doc2.docId) {
+  const tops = state.project ? topLevelSchematics() : [];
+  const top2 = doc2 ? tops.find((t) => t.doc.docId === doc2.docId) : void 0;
+  if (tops.length > 1 && top2) {
+    d.sheetName = top2.name;
+    d.sheetPath = "/" + top2.name + "/";
+    return;
+  }
+  if (!doc2 || tops[0] && tops[0].doc.docId === doc2.docId) {
     d.sheetName = ROOT_SHEET_NAME;
     d.sheetPath = "/";
     return;
   }
   const name = sheetNames.get(doc2.path) || d.fileName.replace(/\.kicad_sch$/, "");
   d.sheetName = name;
-  d.sheetPath = "/" + name + "/";
+  d.sheetPath = tops.length > 1 && sheetHumanPaths.get(doc2.path) || "/" + name + "/";
   const page = sheetPages.get(doc2.path);
   if (page) d.pageNumber = page;
 }
@@ -86426,9 +86530,9 @@ async function openEditor(id) {
   loadHistory();
   const fp = fpParam();
   if (fp) {
-    const entry = await fpEntryFor(info, fp);
-    if (entry) {
-      await openDoc(entry);
+    const entry2 = await fpEntryFor(info, fp);
+    if (entry2) {
+      await openDoc(entry2);
       return;
     }
   }
@@ -86455,6 +86559,14 @@ function rootSchematic() {
         } catch (e) {
         }
       }
+      hierarchyLearned = null;
+      void learnHierarchy().then(() => {
+        if (E.kdoc) {
+          applySheetContext(E.kdoc);
+          requestRender();
+        }
+      });
+      publishDocs();
       if (E.kdoc) {
         applySheetContext(E.kdoc);
         requestRender();
@@ -86472,7 +86584,35 @@ function rootSchematic() {
       E.druText = "";
     });
   }
-  return rootSchematicOf(state.docs, state.project.docs);
+  return topLevelSchematics()[0]?.doc || rootSchematicOf(state.docs, state.project.docs);
+}
+function topLevelSchematics() {
+  if (!state.project) return [];
+  const key3 = E.proSettings || "";
+  if (!topsMemo || topsMemo.pro !== key3 || topsMemo.docs !== state.docs || topsMemo.all !== state.project.docs) {
+    let pro = null;
+    try {
+      pro = key3 ? JSON.parse(key3) : null;
+    } catch (e) {
+      pro = null;
+    }
+    topsMemo = { pro: key3, docs: state.docs, all: state.project.docs, tops: topLevelSheetsOf(pro, state.docs, state.project.docs) };
+  }
+  return topsMemo.tops;
+}
+function topLevelSheetsChanged() {
+  hierarchyLearned = null;
+  sheetHumanPaths.clear();
+  void learnHierarchy().then(() => {
+    if (E.kdoc && E.kdoc.type === "sch") {
+      applySheetContext(E.kdoc);
+      requestRender();
+    }
+  });
+  publishDocs();
+}
+function multiTopLevel() {
+  return topLevelSchematics().length > 1;
 }
 function enterSheet(file) {
   const base2 = file.split("/").pop();
@@ -86751,7 +86891,7 @@ function switchEditor() {
   if (target2) openDoc(target2);
   else toast(isSch() ? "This project has no board yet" : "This project has no schematic yet");
 }
-var docNav, GRID_CHOICES, sheetNames, sheetPages, ROOT_SHEET_NAME, hierarchyLearned, layerRow, remote;
+var docNav, GRID_CHOICES, sheetNames, sheetPages, ROOT_SHEET_NAME, hierarchyLearned, sheetHumanPaths, layerRow, remote, topsMemo;
 var init_doc = __esm({
   "web/domains/pcb/editor/doc.ts"() {
     "use strict";
@@ -86786,11 +86926,13 @@ var init_doc = __esm({
     sheetPages = /* @__PURE__ */ new Map();
     ROOT_SHEET_NAME = "Root";
     hierarchyLearned = null;
+    sheetHumanPaths = /* @__PURE__ */ new Map();
     layerRow = (l) => ({ key: l.key, name: l.name, color: l.color, count: l.count });
     remote = { dirty: false, timer: 0, nextAt: 0 };
     if (typeof window !== "undefined") window.addEventListener("kc:constraint-msg", (ev) => {
       if (!isSch()) setStatusBar({ constraint: String(ev.detail?.msg || "") });
     });
+    topsMemo = null;
   }
 });
 
@@ -87080,9 +87222,9 @@ function commitChanges(changes, label, opts2) {
     top2.changes = top2.changes.concat(changes);
     top2.inverse = inverse.concat(top2.inverse);
   } else {
-    const entry = { label: label || "edit", changes, inverse };
-    if (opts2 && opts2.tentative) entry.heldRedo = redoStack.slice();
-    undoStack.push(entry);
+    const entry2 = { label: label || "edit", changes, inverse };
+    if (opts2 && opts2.tentative) entry2.heldRedo = redoStack.slice();
+    undoStack.push(entry2);
     if (undoStack.length > 200) undoStack.shift();
   }
   redoStack.length = 0;
@@ -87110,15 +87252,15 @@ function bindUndoDoc(docId3) {
   undoDocId = docId3;
   publishUndo();
 }
-function pushUndoFor(docId3, entry) {
+function pushUndoFor(docId3, entry2) {
   if (!docId3 || docId3 === undoDocId) {
-    undoStack.push(entry);
+    undoStack.push(entry2);
     redoStack.length = 0;
     publishUndo();
     return;
   }
   const st = undoByDoc.get(docId3) || { undo: [], redo: [] };
-  st.undo.push(entry);
+  st.undo.push(entry2);
   st.redo = [];
   undoByDoc.set(docId3, st);
 }
@@ -88525,9 +88667,9 @@ async function loadBoardHeader() {
   const cached = E.kdoc?.boardSetup;
   let file = "", ops = [];
   try {
-    const live2 = await liveDocument(docId3);
-    file = live2.file;
-    ops = live2.ops;
+    const live3 = await liveDocument(docId3);
+    file = live3.file;
+    ops = live3.ops;
   } catch (e) {
     try {
       const t = await api4(`/api/docs/${docId3}/content`);
@@ -90424,7 +90566,7 @@ function menuCtx() {
     pinAlts: !!(E.selPins.length === 1 && E.kdoc && schPins() && schPins().pinAlternates(E.kdoc, E.selPins[0])),
     // ALT_PIN_FUNCTION_MENU: one pin only
     highlight: !!E.highlightIds,
-    belowRoot: !!root5 && state.doc !== root5,
+    belowRoot: !!root5 && !topLevelSchematics().some((t) => t.doc === state.doc),
     hasLocked: items.some((it) => isLocked2(it.node)),
     hasUnlocked: items.some((it) => !isLocked2(it.node)),
     groupSelected: boardGroupSelected(),
@@ -90583,9 +90725,9 @@ function describe2(it) {
     const t = P.itemDescription(E.kdoc, typeof it === "string" ? it : it.id, E.units);
     if (t) return t;
   }
-  const S2 = CollabTools.sch;
-  if (isSch() && S2 && S2.itemDescription && E.kdoc) {
-    const t = S2.itemDescription(E.kdoc, typeof it === "string" ? it : it.id, E.units);
+  const S3 = CollabTools.sch;
+  if (isSch() && S3 && S3.itemDescription && E.kdoc) {
+    const t = S3.itemDescription(E.kdoc, typeof it === "string" ? it : it.id, E.units);
     if (t) return t;
   }
   if (typeof it === "string") return it;
@@ -91069,6 +91211,7 @@ function listPick(title, label, header, items) {
     });
   });
 }
+var EMPTY_APPEARANCE, S2, subs, panelStore, projectId2, projectName, openDocs, currentDocId, kdoc2, isSchDoc, KC;
 var init_core2 = __esm({
   "web/domains/pcb/editor/panels/core.ts"() {
     "use strict";
@@ -91076,21 +91219,66 @@ var init_core2 = __esm({
     init_state();
     init_tools();
     init_kselect();
+    EMPTY_APPEARANCE = {
+      layers: [],
+      active: "",
+      objects: [],
+      nets: [],
+      netClasses: [],
+      inactive: "normal",
+      flip: false,
+      netColorMode: "ratsnest",
+      ratsnestMode: "all",
+      presets: [],
+      builtinPresets: [],
+      preset: null,
+      viewports: [],
+      viewport: null
+    };
+    S2 = { appearance: EMPTY_APPEARANCE, hierarchy: { root: null, version: 0 }, netNav: { root: null, version: 0 }, selVersion: 0 };
+    subs = /* @__PURE__ */ new Set();
+    panelStore = {
+      get: () => S2,
+      set(patch) {
+        S2 = Object.assign({}, S2, patch);
+        for (const fn of Array.from(subs)) {
+          try {
+            fn();
+          } catch (e) {
+            console.warn(e);
+          }
+        }
+      },
+      subscribe(fn) {
+        subs.add(fn);
+        return () => {
+          subs.delete(fn);
+        };
+      }
+    };
+    projectId2 = () => state.project && state.project.projectId || "";
+    projectName = () => state.project && state.project.name || "";
+    openDocs = () => state.docs || [];
+    currentDocId = () => state.docId || null;
+    kdoc2 = () => E.kdoc || null;
+    isSchDoc = () => E.DOC_TYPE === "kicad_sch";
+    KC = () => window.KiCadCanvas;
   }
 });
 
 // web/domains/pcb/dialogs/sch-hierarchy.ts
 async function sheetList() {
-  const S2 = appState2;
-  const root5 = rootSchematic2();
-  if (!root5) return [];
-  const cache5 = /* @__PURE__ */ new Map();
+  const S3 = appState2;
+  const tops = topLevelSchematics2();
+  if (!tops.length) return [];
+  const multi = tops.length > 1;
+  const cache6 = /* @__PURE__ */ new Map();
   const load4 = async (d) => {
-    if (d.docId === S2.docId && E2.kdoc) return E2.kdoc;
-    let doc2 = cache5.get(d.docId);
+    if (d.docId === S3.docId && E2.kdoc) return E2.kdoc;
+    let doc2 = cache6.get(d.docId);
     if (!doc2) {
       doc2 = await readDoc(d.docId, "kicad_sch");
-      cache5.set(d.docId, doc2);
+      cache6.set(d.docId, doc2);
     }
     return doc2;
   };
@@ -91108,13 +91296,24 @@ async function sheetList() {
     for (const m of KiCadCanvas.movableItems(doc2)) {
       if (m.kind !== "sheet" || !m.file) continue;
       const rel = dir ? `${dir}/${m.file}` : m.file;
-      const child2 = S2.docs.find((x) => x.docType === "kicad_sch" && x.path === rel) || S2.docs.find((x) => x.docType === "kicad_sch" && x.path.split("/").pop() === m.file.split("/").pop());
+      const child2 = S3.docs.find((x) => x.docType === "kicad_sch" && x.path === rel) || S3.docs.find((x) => x.docType === "kicad_sch" && x.path.split("/").pop() === m.file.split("/").pop());
       if (!child2) continue;
       const nm3 = m.name || m.file.replace(/\.kicad_sch$/, "");
       await walk2(child2, nm3, sheetPath + nm3 + "/", m.page || "", uuidPath.concat(m.id), m.id, d.docId, depth + 1);
     }
   };
-  await walk2(root5, ROOT_SHEET_NAME2, "/", String((E2.kdoc && S2.docId === root5.docId ? E2.kdoc.pageNumber : "") || "1"), [], null, null, 0);
+  for (const t of tops) {
+    const d = t.doc, livePage = E2.kdoc && S3.docId === d.docId ? E2.kdoc.pageNumber : "";
+    let page = livePage || "";
+    if (!page && multi) {
+      try {
+        page = String((await load4(d)).pageNumber || "");
+      } catch (e) {
+        page = "";
+      }
+    }
+    await walk2(d, multi ? t.name : ROOT_SHEET_NAME2, multi ? "/" + t.name + "/" : "/", page || "1", [], null, null, 0);
+  }
   const num13 = (p) => {
     const n2 = parseInt(p, 10);
     return isFinite(n2) ? n2 : Infinity;
@@ -91127,11 +91326,11 @@ async function sheetList() {
   return list;
 }
 function withSheetContext(s2, count2) {
-  const S2 = appState2;
+  const S3 = appState2;
   const d = Object.create(s2.doc);
   d.fileName = s2.path.split("/").pop();
   d.filePath = s2.path;
-  d.projectName = S2.project ? S2.project.name : "";
+  d.projectName = S3.project ? S3.project.name : "";
   d.projectVars = projectTextVars2();
   d.sheetName = s2.name;
   d.sheetPath = s2.sheetPath;
@@ -91139,14 +91338,14 @@ function withSheetContext(s2, count2) {
   d.pageNumber = s2.page;
   return d;
 }
-var rootSchematic2, projectTextVars2, ROOT_SHEET_NAME2;
+var topLevelSchematics2, projectTextVars2, ROOT_SHEET_NAME2;
 var init_sch_hierarchy = __esm({
   "web/domains/pcb/dialogs/sch-hierarchy.ts"() {
     "use strict";
     init_editor();
     init_project();
     init_doc();
-    rootSchematic2 = rootSchematic;
+    topLevelSchematics2 = topLevelSchematics;
     projectTextVars2 = projectTextVars;
     ROOT_SHEET_NAME2 = ROOT_SHEET_NAME;
   }
@@ -91927,20 +92126,29 @@ async function projectNetlist() {
   const files = /* @__PURE__ */ new Map();
   await Promise.all(docs.filter((d) => d.docType === "kicad_sch").map(async (d) => {
     try {
-      const live2 = await liveDocument(d.docId);
-      const doc2 = KiCadCanvas.parseDoc(live2.file, "kicad_sch");
-      for (const op of live2.ops) for (const c of op.changes || []) {
+      const live3 = await liveDocument(d.docId);
+      const doc2 = KiCadCanvas.parseDoc(live3.file, "kicad_sch");
+      for (const op of live3.ops) for (const c of op.changes || []) {
         try {
           KiCadCanvas.applyChange(doc2, c, SCH_IU);
         } catch (e) {
         }
       }
-      const m = /\(uuid\s+"?([0-9a-fA-F-]{36})"?\s*\)/.exec(live2.file.slice(0, 4e3));
+      const m = /\(uuid\s+"?([0-9a-fA-F-]{36})"?\s*\)/.exec(live3.file.slice(0, 4e3));
       files.set(d.path, { doc: doc2, uuid: m ? m[1] : "", file: d.path });
     } catch (e) {
     }
   }));
-  const rootFile = files.get(root5.path);
+  let pro = null;
+  try {
+    const proDoc2 = docs.find((d) => d.docType === "kicad_pro");
+    const text3 = E.proSettings || (proDoc2 ? await fetch(`/api/docs/${proDoc2.docId}/content`).then((r) => r.ok ? r.text() : "") : "");
+    pro = text3 ? JSON.parse(text3) : null;
+  } catch (e) {
+    pro = null;
+  }
+  const tops = topLevelSheetsOf(pro, docs, docs).map((t) => ({ sheet: files.get(t.doc.path), name: t.name, uuid: t.uuid, path: t.doc.path })).filter((t) => !!t.sheet);
+  const rootFile = tops.length > 1 ? tops[0].sheet : files.get(root5.path);
   if (!rootFile) return { error: "The root schematic could not be read." };
   const resolve2 = (file, parent) => {
     const dir = parent.file.split("/").slice(0, -1);
@@ -91952,8 +92160,8 @@ async function projectNetlist() {
     }
     return files.get(out2.join("/")) || files.get(file) || null;
   };
-  const netlist = NL().buildNetlist(rootFile, resolve2, { symbolPins: helpers2.symbolPins, isPower: (d, it) => helpers2.isPowerSymbol(d, String((KiCadCanvas.kid(it.node, "lib_id") || [])[1])) }, root5.path.split("/").pop().replace(/\.kicad_sch$/, ""));
-  return { netlist, root: root5.path, files };
+  const netlist = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve2, { symbolPins: helpers2.symbolPins, isPower: (d, it) => helpers2.isPowerSymbol(d, String((KiCadCanvas.kid(it.node, "lib_id") || [])[1])) }, root5.path.split("/").pop().replace(/\.kicad_sch$/, ""));
+  return { netlist, root: tops.length > 1 ? tops[0].path : root5.path, files };
 }
 var SCH_IU;
 var init_update_pcb = __esm({
@@ -91963,6 +92171,7 @@ var init_update_pcb = __esm({
     init_appstore();
     init_projectfile();
     init_canvas();
+    init_bootpick();
     init_ui();
     SCH_IU = 1e4;
   }
@@ -92357,6 +92566,131 @@ var init_page_settings = __esm({
 });
 
 // web/domains/pcb/editor/panels/hierarchy.ts
+function sheetsOf(doc2) {
+  const out2 = [];
+  for (const m of KC().movableItems(doc2)) if (m.kind === "sheet" && m.file) out2.push({ id: m.id, name: m.name || "", file: m.file, page: String(m.page || "") });
+  return out2;
+}
+function entry(docId3) {
+  if (docId3 === currentDocId()) {
+    const d = kdoc2();
+    if (!d || !isSchDoc()) return null;
+    live = { docId: docId3, doc: d };
+    return { doc: d, sheets: sheetsOf(d), page: String(d.pageNumber || "1") };
+  }
+  return cache5.get(docId3) || null;
+}
+function schDocs2() {
+  return openDocs().filter((d) => d.docType === "kicad_sch");
+}
+function loadSheets(stale) {
+  if (cacheProject !== projectId2()) {
+    cache5.clear();
+    cacheProject = projectId2();
+  }
+  if (stale) {
+    if (live && live.docId === stale && stale !== currentDocId()) cache5.set(stale, { doc: live.doc, sheets: sheetsOf(live.doc), page: String(live.doc.pageNumber || "1") });
+    else cache5.delete(stale);
+  }
+  const want2 = schDocs2().filter((d) => d.docId !== currentDocId() && !cache5.has(d.docId));
+  if (!want2.length) {
+    publishHierarchy();
+    return Promise.resolve();
+  }
+  if (loading3) return loading3;
+  const pid = projectId2();
+  loading3 = Promise.all(want2.map(async (d) => {
+    try {
+      const r = await fetch(`/api/docs/${d.docId}/content?v=${Date.now()}`);
+      if (!r.ok) return;
+      const doc2 = KC().parseDoc(await r.text(), "kicad_sch");
+      if (pid === projectId2()) cache5.set(d.docId, { doc: doc2, sheets: sheetsOf(doc2), page: String(doc2.pageNumber || "1") });
+    } catch (e) {
+    }
+  })).then(() => {
+    loading3 = null;
+    publishHierarchy();
+  });
+  return loading3;
+}
+function resolveChild(parent, file) {
+  const dir = parent.path.split("/").slice(0, -1).join("/"), rel = dir ? `${dir}/${file}` : file, base2 = file.split("/").pop();
+  const docs = schDocs2();
+  return docs.find((d) => d.path === rel || d.path === file) || docs.find((d) => d.path.split("/").pop() === base2) || null;
+}
+function build2() {
+  const root5 = store.get().project ? rootSchematic() : null;
+  if (!root5) return null;
+  const cur2 = currentDocId();
+  const rootEntry = entry(root5.docId);
+  const stem2 = root5.path.split("/").pop().replace(/\.kicad_sch$/, "");
+  const walk2 = (doc2, path2, depth) => {
+    const e = entry(doc2.docId);
+    if (!e || depth > 8) return [];
+    return e.sheets.map((sh) => {
+      const child2 = resolveChild(doc2, sh.file);
+      const p = path2 + sh.id + "/";
+      return {
+        path: p,
+        name: sh.name || sh.file.replace(/\.kicad_sch$/, ""),
+        page: sh.page,
+        docId: child2 ? child2.docId : null,
+        file: sh.file,
+        parentDocId: doc2.docId,
+        sheetId: sh.id,
+        current: !!child2 && child2.docId === cur2,
+        children: child2 ? walk2(child2, p, depth + 1) : []
+      };
+    });
+  };
+  const tops = topLevelSchematics();
+  if (tops.length > 1) {
+    const children = tops.map((t) => {
+      const d = t.doc, e = entry(d.docId), p = "/" + (t.uuid || d.docId) + "/";
+      return {
+        path: p,
+        name: t.name || d.path.split("/").pop().replace(/\.kicad_sch$/, ""),
+        page: e ? e.page : "",
+        docId: d.docId,
+        file: d.path.split("/").pop() || "",
+        parentDocId: null,
+        sheetId: null,
+        current: d.docId === cur2,
+        children: walk2(d, p, 0),
+        topLevel: true
+      };
+    });
+    return { path: "", name: projectName() || "Schematic", page: "", docId: null, file: "", parentDocId: null, sheetId: null, current: false, children, virtual: true };
+  }
+  const tl = topLevelEntry(root5.path);
+  return {
+    path: "/",
+    name: tl && typeof tl.name === "string" && tl.name || stem2 || projectName() || "Schematic",
+    page: rootEntry ? rootEntry.page : "1",
+    docId: root5.docId,
+    file: root5.path.split("/").pop() || "",
+    parentDocId: null,
+    sheetId: null,
+    current: root5.docId === cur2,
+    children: walk2(root5, "/", 0)
+  };
+}
+function publishHierarchy() {
+  let root5 = null;
+  try {
+    root5 = build2();
+  } catch (e) {
+    console.warn(e);
+  }
+  const h3 = panelStore.get().hierarchy;
+  panelStore.set({ hierarchy: { root: root5, version: h3.version + 1, marked: h3.marked, markColor: h3.markColor } });
+}
+function topLevelEntry(file, pro = projectJson()) {
+  const sch = pro.schematic, list = sch && Array.isArray(sch.top_level_sheets) ? sch.top_level_sheets : [];
+  const base2 = file.split("/").pop();
+  return list.find((e) => e && (e.filename === file || e.filename === base2)) || null;
+}
+var cache5, cacheProject, loading3, live, topSig;
 var init_hierarchy = __esm({
   "web/domains/pcb/editor/panels/hierarchy.ts"() {
     "use strict";
@@ -92367,8 +92701,27 @@ var init_hierarchy = __esm({
     init_gestures();
     init_schnets();
     init_project();
+    init_dom2();
     init_page_settings();
     init_core2();
+    cache5 = /* @__PURE__ */ new Map();
+    cacheProject = "";
+    loading3 = null;
+    live = null;
+    topSig = "";
+    onProjectChanged(() => {
+      let sig = "";
+      try {
+        sig = topLevelSchematics().map((t) => t.doc.docId + ":" + t.name + ":" + t.uuid).join(",");
+      } catch (e) {
+        sig = "";
+      }
+      if (sig === topSig) return;
+      topSig = sig;
+      topLevelSheetsChanged();
+      publishHierarchy();
+      void loadSheets();
+    });
   }
 });
 
@@ -93243,7 +93596,7 @@ function openDrc(ctx) {
         book.el,
         h2("div", { class: "pd-row pd-showrow" }, h2("label", null, "Show:"), all2.el, errors.el, badge.errors, warnings.el, badge.warnings, excl.el, badge.exclusions, h2("span", { style: "flex:1" }), save2)
       );
-      live = { step, exclude: () => {
+      live2 = { step, exclude: () => {
         if (selected && !selected.excluded) exclude(selected, "");
       } };
       refresh();
@@ -93253,7 +93606,7 @@ function openDrc(ctx) {
       return false;
     },
     cancel() {
-      live = null;
+      live2 = null;
       ctx.setHighlight(null);
       let any = false;
       for (const x of last2.markers) if (x.selected) {
@@ -93264,7 +93617,7 @@ function openDrc(ctx) {
     }
   });
 }
-var PT6, settings2, board2, UNCONNECTED, PARITY, last2, prefs2, XA, sessionExclusions, exclusions, DS2, sevOverride, severityOf, errorText, OPT_KEY, opts, saveOpts, live;
+var PT6, settings2, board2, UNCONNECTED, PARITY, last2, prefs2, XA, sessionExclusions, exclusions, DS2, sevOverride, severityOf, errorText, OPT_KEY, opts, saveOpts, live2;
 var init_inspect = __esm({
   "web/domains/pcb/editor/pcbdialogs/inspect.ts"() {
     "use strict";
@@ -93312,7 +93665,7 @@ var init_inspect = __esm({
       } catch (e) {
       }
     };
-    live = null;
+    live2 = null;
   }
 });
 
@@ -94474,7 +94827,7 @@ async function openIpc2581() {
   }
   const first = await fabContext();
   if (!first) return;
-  const S2 = fab.ipc2581Sections;
+  const S3 = fab.ipc2581Sections;
   const board3 = first.projectName || "board";
   const pref = loadPrefs(KEY7, DEFAULTS5);
   const fieldNames2 = [];
@@ -94510,15 +94863,15 @@ async function openIpc2581() {
   const bomFields = { id: pref.id, mpn: pref.mpn, mfg: pref.mfg, distPn: pref.distPn, dist: pref.dist, bomRev: pref.bomRev || first.doc.titleBlock && first.doc.titleBlock.rev || "" };
   const report3 = reportPanel("150px", { empty: "", fileName: `${board3}-ipc2581-report.txt` });
   const mode = () => dataSet.get();
-  const requested = () => sections !== null ? new Set(sections) : S2.recommended(mode());
-  const resolved = () => S2.resolve("C", mode(), requested()).included;
+  const requested = () => sections !== null ? new Set(sections) : S3.recommended(mode());
+  const resolved = () => S3.resolve("C", mode(), requested()).included;
   function summary() {
     const r = resolved();
     includes.textContent = includesSummary(r);
     bomBtn.disabled = !r.has("B");
   }
   custBtn.addEventListener("click", () => {
-    const opt = S2.optional(mode()), cur2 = resolved();
+    const opt = S3.optional(mode()), cur2 = resolved();
     const rows3 = SECTION_ROWS.map(([k, label, ipc]) => ({ key: k, on: cur2.has(k), label, ipc, edit: opt.has(k) }));
     subDialog("Customize IPC-2581 Content", 520, (body) => {
       body.append(
@@ -94904,8 +95257,8 @@ function loadRules(text3) {
   for (const r of root5.slice(1)) {
     if (!Array.isArray(r) || r[0] !== "rule") continue;
     const src = raws[ri++] || { text: "", lead: "" }, raw2 = src.text;
-    const S2 = (x) => String(x ?? "");
-    const rule2 = { type: "CUSTOM_RULE", name: S2(r[1]), comment: "", layer: "", severity: "", conds: [], v: {}, text: raw2, raw: raw2 };
+    const S3 = (x) => String(x ?? "");
+    const rule2 = { type: "CUSTOM_RULE", name: S3(r[1]), comment: "", layer: "", severity: "", conds: [], v: {}, text: raw2, raw: raw2 };
     if (src.lead) rule2.lead = src.lead;
     const comments2 = /\(rule[^\n]*\n((?:\s*#[^\n]*\n)*)/.exec(raw2);
     if (comments2) rule2.comment = comments2[1].split("\n").map((l) => l.replace(/^\s*#\s?/, "")).filter(Boolean).join("\n");
@@ -94914,21 +95267,21 @@ function loadRules(text3) {
     for (const c of r.slice(2)) {
       if (!Array.isArray(c)) continue;
       if (c[0] === "constraint") cons.push(c);
-      else if (c[0] === "condition") cond = S2(c[1]);
-      else if (c[0] === "layer") rule2.layer = S2(c[1]);
-      else if (c[0] === "severity") rule2.severity = S2(c[1]);
+      else if (c[0] === "condition") cond = S3(c[1]);
+      else if (c[0] === "layer") rule2.layer = S3(c[1]);
+      else if (c[0] === "severity") rule2.severity = S3(c[1]);
     }
     const bound = (c, k) => {
       if (!c) return null;
       const b = c.find((x) => Array.isArray(x) && x[0] === k);
       if (!b) return null;
-      const m = /^(-?[\d.]+)\s*(mm|mil|mils|in|um)?$/.exec(S2(b[1]));
+      const m = /^(-?[\d.]+)\s*(mm|mil|mils|in|um)?$/.exec(S3(b[1]));
       if (!m) return null;
       const f2 = m[2] === "mil" || m[2] === "mils" ? 0.0254 : m[2] === "in" ? 25.4 : m[2] === "um" ? 1e-3 : 1;
       return +m[1] * f2;
     };
     const by = (code) => cons.find((c) => c[1] === code);
-    const codes = cons.map((c) => S2(c[1])).sort().join(",");
+    const codes = cons.map((c) => S3(c[1])).sort().join(",");
     const set2 = (type, v) => {
       rule2.type = type;
       rule2.v = v;
@@ -94944,19 +95297,19 @@ function loadRules(text3) {
       const l = by("length"), sk = by("skew");
       set2("MATCHED_LENGTH_DIFF_PAIR", { min: bound(l, "min"), opt: bound(l, "opt"), max: bound(l, "max"), skew: bound(sk, "max"), within: !!sk && sk.some((x) => Array.isArray(x) && x[0] === "within_diff_pairs") });
     } else if (cons.length === 1) {
-      const c = cons[0], code = S2(c[1]);
-      if (code === "assertion" && /A\.Layer == /.test(S2(c[2]))) set2("PERMITTED_LAYERS", { top: /'F\.Cu'/.test(S2(c[2])), bottom: /'B\.Cu'/.test(S2(c[2])) });
-      else if (code === "assertion" && /A\.Orientation == /.test(S2(c[2]))) {
+      const c = cons[0], code = S3(c[1]);
+      if (code === "assertion" && /A\.Layer == /.test(S3(c[2]))) set2("PERMITTED_LAYERS", { top: /'F\.Cu'/.test(S3(c[2])), bottom: /'B\.Cu'/.test(S3(c[2])) });
+      else if (code === "assertion" && /A\.Orientation == /.test(S3(c[2]))) {
         const v = {};
-        for (const d of [0, 90, 180, 270]) v["o" + d] = new RegExp(`== ${d} deg`).test(S2(c[2]));
+        for (const d of [0, 90, 180, 270]) v["o" + d] = new RegExp(`== ${d} deg`).test(S3(c[2]));
         set2("ALLOWED_ORIENTATION", v);
       } else if (code === "disallow") {
-        const items = c.slice(2).map(S2);
+        const items = c.slice(2).map(S3);
         const all2 = items.includes("via");
         set2("VIAS_UNDER_SMD", { through: all2 || items.includes("through_via"), micro: all2 || items.includes("micro_via"), blind: all2 || items.includes("blind_via"), buried: all2 || items.includes("buried_via") });
       } else if (code === "track_width") set2("ROUTING_WIDTH", { min: bound(c, "min"), opt: bound(c, "opt"), max: bound(c, "max") });
       else if (code === "length") set2("ABSOLUTE_LENGTH", { min: bound(c, "min"), max: bound(c, "max") });
-      else if (code === "min_resolved_spokes") set2("MINIMUM_THERMAL_RELIEF_SPOKE_COUNT", { value: +S2(c[2]) || 0 });
+      else if (code === "min_resolved_spokes") set2("MINIMUM_THERMAL_RELIEF_SPOKE_COUNT", { value: +S3(c[2]) || 0 });
       else if (code === "via_count" || code === "microvia_stack_depth" || code === "hole_aspect_ratio") set2(RULE_TYPES.find((t) => t.code === code).id, { value: bound(c, "max") });
       else {
         const t = RULE_TYPES.find((x) => x.panel === "num" && x.code === code);
@@ -95337,7 +95690,7 @@ async function openDrcRuleEditor(ctx) {
     }
     return e;
   };
-  const changed = (r) => {
+  const changed2 = (r) => {
     const errs = validate(r);
     msg.textContent = errs.join("\n");
     msg.classList.toggle("err", errs.length > 0);
@@ -95345,7 +95698,7 @@ async function openDrcRuleEditor(ctx) {
     syncButtons();
   };
   const constraintPanel = (r) => {
-    const t = typeById(r.type), u = () => h2("span", { class: "unit" }, unitName()), on2 = () => changed(r);
+    const t = typeById(r.type), u = () => h2("span", { class: "unit" }, unitName()), on2 = () => changed2(r);
     const row3 = (label, ctl, unit2) => [h2("label", null, label), ctl, unit2 || h2("span")];
     const grid3 = (...rows3) => h2("div", { class: "dre-grid" }, ...rows3.flat());
     const mom = (p, q4) => grid3(row3(`Minimum ${q4}:`, lenIn(r, p + "min", p + "min", on2), u()), row3(`Preferred ${q4}:`, lenIn(r, p + "opt", p + "opt", on2), u()), row3(`Maximum ${q4}:`, lenIn(r, p + "max", p + "max", on2), u()));
@@ -95394,12 +95747,12 @@ async function openDrcRuleEditor(ctx) {
         const parts = [];
         if (i > 0) parts.push(selectField(c.op, [["&&", "AND"], ["||", "OR"], ["&& !", "AND NOT"], ["|| !", "OR NOT"]], { ro, key: "op" + i, onChange: (v) => {
           c.op = v;
-          changed(r);
+          changed2(r);
         } }).el);
         if (t.two) {
           const o = selectField(c.obj, [["A", "Object A"], ["B", "Object B"]], { ro, key: "obj" + i, onChange: (v) => {
             c.obj = v;
-            changed(r);
+            changed2(r);
           } });
           o.input.title = "Which of the two compared objects this condition applies to";
           parts.push(o.el);
@@ -95408,7 +95761,7 @@ async function openDrcRuleEditor(ctx) {
           c.kind = v;
           c.value = "";
           draw2();
-          changed(r);
+          changed2(r);
         } });
         k.input.title = "How items are matched by this condition";
         parts.push(k.el);
@@ -95433,18 +95786,18 @@ async function openDrcRuleEditor(ctx) {
           const f2 = val;
           f2.input.addEventListener("change", () => {
             c.value = f2.get();
-            changed(r);
+            changed2(r);
           });
           f2.input.addEventListener("input", () => {
             c.value = f2.get();
-            changed(r);
+            changed2(r);
           });
           parts.push(h2("div", { class: "grow" }, f2.el));
         } else parts.push(h2("div", { class: "grow" }));
         const rm = bitmapButton("small_trash", "Remove this condition", () => {
           r.conds.splice(i, 1);
           draw2();
-          changed(r);
+          changed2(r);
         }, { key: "removeCond" + i, disabled: ro || r.conds.length < 2 });
         parts.push(rm);
         return h2("div", { class: "dre-cond" }, ...parts);
@@ -95452,7 +95805,7 @@ async function openDrcRuleEditor(ctx) {
       const add2 = bitmapButton("small_plus", "Add another condition", () => {
         r.conds.push({ op: "&&", obj: "A", kind: "any", value: "" });
         draw2();
-        changed(r);
+        changed2(r);
       }, { key: "addCond", disabled: ro });
       host2.replaceChildren(h2("div", { class: "pd-lbl" }, t.two ? "Where conditions match:" : "Where object matches:"), ...rowsEl, add2);
     };
@@ -95480,11 +95833,11 @@ async function openDrcRuleEditor(ctx) {
     const name = textField(r.name, { ro: ro || t.panel === "custom", key: "ruleName" }), comment = textField(r.comment, { ro, key: "ruleComment" });
     name.input.addEventListener("input", () => {
       r.name = name.get();
-      changed(r);
+      changed2(r);
     });
     comment.input.addEventListener("input", () => {
       r.comment = comment.get();
-      changed(r);
+      changed2(r);
     });
     const showBtn = h2("button", { type: "button", class: "btn", "data-k": "showMatches" }, "Show Matches");
     showBtn.addEventListener("click", () => {
@@ -95518,7 +95871,7 @@ async function openDrcRuleEditor(ctx) {
     if (r.layer && !layerOpts.some(([k]) => k === r.layer)) layerOpts.push([r.layer, r.layer]);
     const layer4 = selectField(r.layer, layerOpts, { ro, key: "ruleLayer", onChange: (v) => {
       r.layer = v;
-      changed(r);
+      changed2(r);
     } });
     const hd = (label, ...extra) => [h2("div", { class: "dre-hd" }, label, ...extra), h2("hr")];
     const out2 = h2(
@@ -95531,7 +95884,7 @@ async function openDrcRuleEditor(ctx) {
     if (t.panel !== "custom") out2.append(...hd("Conditions", help), conditionsPanel(r), ...hd("Layer"), layer4.el);
     else out2.querySelector(".dre-hd").append(help);
     out2.append(h2("div", { style: "display:flex;gap:6px;align-items:flex-start;margin-top:12px" }, checkB, h2("div", { style: "flex:1" }, report3), showBtn), msg);
-    changed(r);
+    changed2(r);
     return out2;
   }
   function groupPanel() {
@@ -95908,11 +96261,11 @@ function show5(fab, variants) {
     } catch (e) {
       sheets2 = [];
     }
-    const S2 = appState2;
-    const current = sheets2.find((s2) => s2.docId === S2.docId) || null;
+    const S3 = appState2;
+    const current = sheets2.find((s2) => s2.docId === S3.docId) || null;
     const list = all2 ? sheets2 : current ? [current] : [];
     if (!list.length) {
-      if (!all2 || !sheets2.length) list.push({ docId: S2.docId || "", path: E2.kdoc.filePath || "sheet.kicad_sch", name: "", sheetPath: "/", page: "1", doc: E2.kdoc, uuidPath: [], sheetItemId: null, parentDocId: null });
+      if (!all2 || !sheets2.length) list.push({ docId: S3.docId || "", path: E2.kdoc.filePath || "sheet.kicad_sch", name: "", sheetPath: "/", page: "1", doc: E2.kdoc, uuidPath: [], sheetItemId: null, parentDocId: null });
     }
     if (!list.length) {
       say("error", "No sheets to plot.");
@@ -97435,6 +97788,7 @@ var HANDLERS;
 var init_actions = __esm({
   "web/domains/pcb/editor/actions.ts"() {
     "use strict";
+    init_schnets();
     init_appstore();
     init_comments();
     init_versions();
@@ -97490,11 +97844,7 @@ var init_actions = __esm({
       zoomFitObjects: () => fitObjects(),
       navigateBack: () => navigateDocs(-1),
       navigateForward: () => navigateDocs(1),
-      navigateUp: () => {
-        const r = rootSchematic();
-        if (r && state.doc !== r) openDoc(r);
-        else toast("Already at the root sheet");
-      },
+      navigateUp: () => leaveSheet(),
       rotateCCW: () => orientSelected("ccw"),
       rotateCW: () => orientSelected("cw"),
       rotateCcw: () => orientSelected("ccw"),
@@ -97757,8 +98107,8 @@ function viewerGlobal() {
 function loadViewer() {
   const ready = viewerGlobal();
   if (ready) return Promise.resolve(ready);
-  if (loading3) return loading3;
-  loading3 = new Promise((resolve2, reject) => {
+  if (loading4) return loading4;
+  loading4 = new Promise((resolve2, reject) => {
     const own = document.querySelector('script[src*="/static/dist/editor.js"]');
     const query = own ? (own.getAttribute("src") || "").split("?")[1] : "";
     const s2 = document.createElement("script");
@@ -97771,10 +98121,10 @@ function loadViewer() {
     s2.onerror = () => reject(new Error("could not load viewer3d.js"));
     document.head.appendChild(s2);
   });
-  loading3.catch(() => {
-    loading3 = null;
+  loading4.catch(() => {
+    loading4 = null;
   });
-  return loading3;
+  return loading4;
 }
 function boardDoc2() {
   const d = editor2.kdoc;
@@ -97888,7 +98238,7 @@ function close3DViewer() {
   const v = viewerGlobal();
   if (v && v.isOpen()) v.close();
 }
-var editor2, app3, loading3;
+var editor2, app3, loading4;
 var init_viewer3d_loader = __esm({
   "web/domains/pcb/editor/viewer3d-loader.ts"() {
     "use strict";
@@ -97905,7 +98255,7 @@ var init_viewer3d_loader = __esm({
     init_tables();
     editor2 = E;
     app3 = store;
-    loading3 = null;
+    loading4 = null;
     document.addEventListener("keydown", (ev) => {
       if (!ev.altKey || ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.code !== "Digit3") return;
       const t = ev.target;
@@ -98467,7 +98817,7 @@ async function planSync(board3, e) {
 }
 async function buildProposal(input) {
   await fetchSources(input.edits);
-  return build2(input);
+  return build3(input);
 }
 async function fetchSources(edits) {
   const doc2 = ED()?.kdoc;
@@ -98536,7 +98886,7 @@ function inlineSymbol(e) {
   e.lib_id = libId;
   return { libId, node };
 }
-function build2(input) {
+function build3(input) {
   const ed = ED();
   const doc2 = ed?.kdoc;
   const open3 = openEntry();
@@ -101630,7 +101980,7 @@ function applyChange(doc2, change, IU3) {
   const item = doc2.items.get(id);
   if (!item) return false;
   if (kind === "MODIFIED" && Array.isArray(change.properties) && change.properties.length) {
-    let nx, ny, nrot, changed = false;
+    let nx, ny, nrot, changed2 = false;
     const p2 = ptsOf(item.node);
     for (const p of change.properties) {
       const after = p.after && p.after.v;
@@ -101650,25 +102000,25 @@ function applyChange(doc2, change, IU3) {
         case "Start X":
           if (p2[0]) {
             p2[0][0] = v / IU3;
-            changed = true;
+            changed2 = true;
           }
           break;
         case "Start Y":
           if (p2[0]) {
             p2[0][1] = v / IU3;
-            changed = true;
+            changed2 = true;
           }
           break;
         case "End X":
           if (p2[1]) {
             p2[1][0] = v / IU3;
-            changed = true;
+            changed2 = true;
           }
           break;
         case "End Y":
           if (p2[1]) {
             p2[1][1] = v / IU3;
-            changed = true;
+            changed2 = true;
           }
           break;
         case "Value":
@@ -101677,18 +102027,18 @@ function applyChange(doc2, change, IU3) {
           if (doc2.type === "sch" && item.kind === "symbol") {
             for (const pr of kids(item.node, "property")) if (str(pr[1]) === p.name) {
               pr[2] = String(after);
-              changed = true;
+              changed2 = true;
             }
           } else if (typeof item.node[1] === "string") {
             item.node[1] = String(after);
-            changed = true;
+            changed2 = true;
           }
           break;
         default:
           break;
       }
     }
-    if (changed && p2.length) setPts(item.node, p2);
+    if (changed2 && p2.length) setPts(item.node, p2);
     if (nx !== void 0 || ny !== void 0 || nrot !== void 0) {
       const ox = item.x !== void 0 ? item.x : atOf(item.node)[0], oy = item.y !== void 0 ? item.y : atOf(item.node)[1];
       const dx = nx !== void 0 ? nx - ox : 0, dy = ny !== void 0 ? ny - oy : 0;
@@ -101701,9 +102051,9 @@ function applyChange(doc2, change, IU3) {
           a[2] = num(a[2]) + dy;
         }
       }
-      changed = true;
+      changed2 = true;
     }
-    if (changed) {
+    if (changed2) {
       buildGeom(doc2, item);
       return true;
     }
@@ -103265,8 +103615,8 @@ var PlotRecorder = class {
     return apply(this.outer, p[0], p[1]);
   }
   subpaths(path2) {
-    const subs = path2 instanceof RecPath ? path2.subs.map((s2) => s2.map((q4) => this.dev(q4[0], q4[1]))) : this.path;
-    return subs.filter((s2) => s2.length > 0).map((s2) => ({ pts: s2.map((q4) => this.toPage(q4)), closed: !!s2.closed }));
+    const subs2 = path2 instanceof RecPath ? path2.subs.map((s2) => s2.map((q4) => this.dev(q4[0], q4[1]))) : this.path;
+    return subs2.filter((s2) => s2.length > 0).map((s2) => ({ pts: s2.map((q4) => this.toPage(q4)), closed: !!s2.closed }));
   }
   alpha(c) {
     let a = this.st.alpha;
@@ -103698,7 +104048,9 @@ function buildNetlist(root5, loadSheet, h3, project3) {
   };
   const components2 = /* @__PURE__ */ new Map();
   const compPins = /* @__PURE__ */ new Map();
-  const instances = [{ sheet: root5, uuidPath: [root5.uuid], human: "/", depth: 0, index: 0, sheetUuids: [], name: "" }];
+  const tops = Array.isArray(root5) ? root5 : [{ sheet: root5, name: "" }];
+  const multi = tops.length > 1, legacyRoot = tops.length ? tops[0].sheet.doc : null;
+  const instances = tops.map((t, i) => ({ sheet: t.sheet, uuidPath: [t.uuid || t.sheet.uuid], human: multi ? "/" + t.name + "/" : "/", depth: 0, index: i, sheetUuids: [], name: multi ? t.name : "" }));
   const mem = /* @__PURE__ */ new Map();
   const addMem = (n2, m) => {
     const l = mem.get(n2);
@@ -103822,9 +104174,9 @@ function buildNetlist(root5, loadSheet, h3, project3) {
           }
         }
       } else if (k === "symbol") {
-        const legacyValue = root5.doc.legacySymbolInstances && root5.doc.legacySymbolInstances.get("/" + [...inst.uuidPath.slice(1), it.id].join("/"));
+        const legacyValue = legacyRoot && legacyRoot.legacySymbolInstances && legacyRoot.legacySymbolInstances.get("/" + [...inst.uuidPath.slice(1), it.id].join("/"));
         const power = h3.isPower(doc2, it), value = legacyValue && legacyValue.value ? legacyValue.value : propVal(n2, "Value"), localPower = power && (h3.isLocalPower ? h3.isLocalPower(doc2, it) : libIsLocalPower(doc2, n2));
-        const { ref, unit: unit2 } = instanceRef(n2, "/" + inst.uuidPath.join("/"), project3, root5.doc.legacySymbolInstances);
+        const { ref, unit: unit2 } = instanceRef(n2, "/" + inst.uuidPath.join("/"), project3, legacyRoot ? legacyRoot.legacySymbolInstances : void 0);
         const inNetlist = !ref.startsWith("#") && !power, onBoard = yes3(n2, "on_board", true);
         const pins2 = h3.symbolPins(doc2, it);
         const units = unitCount(doc2, n2), unitRef = units > 1 ? ref + unitLetter2(unit2) : ref;
@@ -104175,7 +104527,7 @@ function planUpdate(doc2, netlist, o = {}) {
   }
   const padsOf = (fp) => kids(fp, "pad");
   const applyNets = (ref, fp, c) => {
-    let changed = false;
+    let changed2 = false;
     for (const pad2 of padsOf(fp)) {
       const number = str(pad2[1]), pin = number ? c.pins.get(number) : void 0, cur2 = netNameOf2(doc2, pad2);
       const layers = kid(pad2, "layers"), onCopper = !layers || layers.slice(1).some((l) => /\.Cu$/.test(str(l)));
@@ -104185,7 +104537,7 @@ function planUpdate(doc2, netlist, o = {}) {
           delKid(pad2, "net");
           delKid(pad2, "pinfunction");
           delKid(pad2, "pintype");
-          changed = true;
+          changed2 = true;
         } else if (onCopper && number && str(pad2[2]) !== "np_thru_hole") say("warning", `No net found for component ${ref} pad ${number} (no pin ${number} in symbol).`);
         continue;
       }
@@ -104199,25 +104551,25 @@ function planUpdate(doc2, netlist, o = {}) {
           say("action", `Reconnect ${ref} pin ${number} from ${unescapeNetName(cur2)} to ${unescapeNetName(pin.net)}.`);
         } else say("action", `Connect ${ref} pin ${number} to ${unescapeNetName(pin.net)}.`);
         setKid(pad2, "net", netValues(pin.net), PAD_AFTER_NET);
-        changed = true;
+        changed2 = true;
       }
       if (kidStr2(pad2, "pinfunction") !== pin.name) {
         if (pin.name) setKid(pad2, "pinfunction", [pin.name], PAD_AFTER_NET.slice(1));
         else delKid(pad2, "pinfunction");
-        changed = true;
+        changed2 = true;
       }
       if (kidStr2(pad2, "pintype") !== pin.type) {
         if (pin.type) setKid(pad2, "pintype", [pin.type], PAD_AFTER_NET.slice(2));
         else delKid(pad2, "pintype");
-        changed = true;
+        changed2 = true;
       }
     }
-    return changed;
+    return changed2;
   };
   const applyVariants = (fp, c, orig, isBaseOverride) => {
     if (!c.footprint) return false;
     const ref = c.ref, fpid = str(fp[1]);
-    let changed = false;
+    let changed2 = false;
     const isBase = isBaseOverride || fpidsEquivalent(fpid, c.footprint);
     const baseDnp = attrFlags(fp).has("dnp");
     let effDnp = baseDnp;
@@ -104225,7 +104577,7 @@ function planUpdate(doc2, netlist, o = {}) {
       say("action", `Add ${ref} 'Do not place' fabrication attribute.`);
       setAttrFlag(fp, "dnp", true);
       effDnp = true;
-      changed = true;
+      changed2 = true;
     }
     const excess = /* @__PURE__ */ new Map();
     for (const v of kids(orig, "variant")) {
@@ -104252,7 +104604,7 @@ function planUpdate(doc2, netlist, o = {}) {
         if (current === target2) return;
         say("action", target2 ? `Add ${ref} '${label}' attribute to variant ${v.name}.` : `Remove ${ref} '${label}' attribute from variant ${v.name}.`);
         add2().flags[key3] = target2;
-        changed = true;
+        changed2 = true;
       };
       const now = flagsNow();
       attr("dnp", "Do not place", v.dnp ?? baseDnp, cur2 ? cur2.flags.dnp : effDnp);
@@ -104271,7 +104623,7 @@ function planUpdate(doc2, netlist, o = {}) {
           if (current !== val) {
             say("action", `Change ${ref} field '${k}' to '${val}' on variant ${v.name}.`);
             add2().fields.set(k, val);
-            changed = true;
+            changed2 = true;
           }
         }
         for (const k of [...fpFields.keys()].sort(codeCmp)) {
@@ -104281,7 +104633,7 @@ function planUpdate(doc2, netlist, o = {}) {
             say("action", `Remove ${ref} field '${k}' override on variant ${v.name}.`);
             s2.fields.delete(k);
             touched = true;
-            changed = true;
+            changed2 = true;
           }
         }
       }
@@ -104301,30 +104653,30 @@ function planUpdate(doc2, netlist, o = {}) {
       say("action", `Remove variant ${ref}:${name} no longer associated with footprint ${fpid}.`);
       const node = footprintVariantNode(fp, name);
       if (node) fp.splice(fp.indexOf(node), 1);
-      changed = true;
+      changed2 = true;
     }
-    return changed;
+    return changed2;
   };
   const applyComponent = (fp, c, fresh, isBase = false) => {
-    let changed = false;
+    let changed2 = false;
     const orig = clone2(fp);
     const oldRef = fpRef(fp);
     if (oldRef !== c.ref) {
       if (!fresh) say("action", `Change ${oldRef} reference designator to ${c.ref}.`);
       setFpText(fp, "Reference", c.ref);
-      changed = true;
+      changed2 = true;
     }
     const oldVal = fpValue(fp);
     if (oldVal !== c.value) {
       if (!fresh) say("action", `Change ${c.ref} value from ${oldVal} to ${c.value}.`);
       setFpText(fp, "Value", c.value);
-      changed = true;
+      changed2 = true;
     }
     const path2 = kidStr2(fp, "path");
     if (!c.paths.includes(path2)) {
       if (!fresh) say("action", `Update ${c.ref} symbol association from ${path2} to ${c.paths[0]}.`);
       setKid(fp, "path", [c.paths[0]], ["sheetname", "sheetfile", "units", "solder_mask_margin", "solder_paste_margin", "clearance", "zone_connect", "attr", "duplicate_pad_numbers_are_jumpers", "fp_text", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly", "pad", "embedded_fonts", "model"]);
-      changed = true;
+      changed2 = true;
     }
     if (o.updateFields !== false) {
       let touched = false;
@@ -104343,7 +104695,7 @@ function planUpdate(doc2, netlist, o = {}) {
       }
       if (touched) {
         if (!fresh) say("action", `Update ${c.ref} fields.`);
-        changed = true;
+        changed2 = true;
       }
     }
     if (o.removeExtraFields) {
@@ -104358,33 +104710,33 @@ function planUpdate(doc2, netlist, o = {}) {
       }
       if (dropped) {
         if (!fresh) say("action", `Remove ${c.ref} footprint fields not in symbol.`);
-        changed = true;
+        changed2 = true;
       }
     }
     if (kidStr2(fp, "sheetname") !== c.sheetName) {
       if (!fresh) say("action", `Update ${c.ref} sheetname to '${c.sheetName}'.`);
       setKid(fp, "sheetname", [c.sheetName], ["sheetfile", "units", "attr", "fp_text", "fp_line", "pad", "embedded_fonts", "model"]);
-      changed = true;
+      changed2 = true;
     }
     if (kidStr2(fp, "sheetfile") !== c.sheetFile) {
       if (!fresh) say("action", `Update ${c.ref} sheetfile to '${c.sheetFile}'.`);
       setKid(fp, "sheetfile", [c.sheetFile], ["units", "attr", "fp_text", "fp_line", "pad", "embedded_fonts", "model"]);
-      changed = true;
+      changed2 = true;
     }
     const flags = attrFlags(fp);
     if (flags.has("exclude_from_bom") !== c.excludeFromBom) {
       if (!fresh) say("action", `${c.excludeFromBom ? "Add" : "Remove"} ${c.ref} 'exclude from BOM' fabrication attribute.`);
       setAttrFlag(fp, "exclude_from_bom", c.excludeFromBom);
-      changed = true;
+      changed2 = true;
     }
     if (flags.has("dnp") !== c.dnp) {
       if (!fresh) say("action", `${c.dnp ? "Add" : "Remove"} ${c.ref} 'Do not place' fabrication attribute.`);
       setAttrFlag(fp, "dnp", c.dnp);
-      changed = true;
+      changed2 = true;
     }
-    if (applyNets(c.ref, fp, c)) changed = true;
-    if (applyVariants(fp, c, orig, isBase)) changed = true;
-    return changed;
+    if (applyNets(c.ref, fp, c)) changed2 = true;
+    if (applyVariants(fp, c, orig, isBase)) changed2 = true;
+    return changed2;
   };
   const bb = doc2.bbox || [0, 0, 0, 0];
   let nextX = bb[0], rowY = bb[3] + 10;
@@ -104529,15 +104881,15 @@ function planUpdate(doc2, netlist, o = {}) {
       removed2.push(fp.id);
     } else if (padsOf(fp.node).some((p) => netNameOf2(doc2, p))) {
       const node = clone2(fp.node);
-      let changed = false;
+      let changed2 = false;
       for (const pad2 of padsOf(node)) if (netNameOf2(doc2, pad2)) {
         say("action", `Disconnect ${ref} pin ${str(pad2[1])}.`);
         delKid(pad2, "net");
         delKid(pad2, "pinfunction");
         delKid(pad2, "pintype");
-        changed = true;
+        changed2 = true;
       }
-      if (changed) modified2.set(fp.id, node);
+      if (changed2) modified2.set(fp.id, node);
     }
   }
   const still = /* @__PURE__ */ new Set();
@@ -106032,9 +106384,9 @@ function pasteIntoError(node, sel, generated, mixed = false) {
 var CELL_ATTRS = ["effects", "fill", "stroke"];
 function pasteCells(target0, isPcb, sel, src, uuid) {
   let node = cloneNode(target0);
-  const S2 = tableInfo(src);
+  const S3 = tableInfo(src);
   const b = cellBlockBounds(node, sel);
-  const endRow = b.rowMin + S2.rows, endCol = b.colMin + S2.cols;
+  const endRow = b.rowMin + S3.rows, endCol = b.colMin + S3.cols;
   let T = tableInfo(node);
   if (endRow > T.rows || endCol > T.cols) {
     const pos = tablePosition(node, isPcb);
@@ -106043,21 +106395,21 @@ function pasteCells(target0, isPcb, sel, src, uuid) {
     const heights = T.heights.slice(), widths = T.widths.slice();
     for (let k = 0; k < rowsToAdd; k++) {
       const insertRow = rows3, clipRow = insertRow - b.rowMin;
-      const sources = Array.from({ length: S2.cols }, (_, c) => S2.cells[clipRow * S2.cols + c]);
+      const sources = Array.from({ length: S3.cols }, (_, c) => S3.cells[clipRow * S3.cols + c]);
       const add2 = [];
-      for (let c = 0; c < cols; c++) add2.push(copyCell(c < S2.cols ? sources[c] : sources[0], uuid()));
+      for (let c = 0; c < cols; c++) add2.push(copyCell(c < S3.cols ? sources[c] : sources[0], uuid()));
       cells.splice(insertRow * cols, 0, ...add2);
       rows3++;
       for (let r = rows3 - 1; r > insertRow; r--) heights[r] = at0(heights, r - 1);
-      heights[insertRow] = at0(S2.heights, clipRow);
+      heights[insertRow] = at0(S3.heights, clipRow);
     }
     for (let k = 0; k < colsToAdd; k++) {
       const insertCol = cols, clipCol = insertCol - b.colMin;
       cols++;
-      const sources = Array.from({ length: S2.rows }, (_, r) => S2.cells[r * S2.cols + clipCol]);
-      for (let r = 0; r < rows3; r++) cells.splice(r * cols + insertCol, 0, copyCell(r < S2.rows ? sources[r] : sources[0], uuid()));
+      const sources = Array.from({ length: S3.rows }, (_, r) => S3.cells[r * S3.cols + clipCol]);
+      for (let r = 0; r < rows3; r++) cells.splice(r * cols + insertCol, 0, copyCell(r < S3.rows ? sources[r] : sources[0], uuid()));
       for (let c = cols - 1; c > insertCol; c--) widths[c] = at0(widths, c - 1);
-      widths[insertCol] = at0(S2.widths, clipCol);
+      widths[insertCol] = at0(S3.widths, clipCol);
     }
     setColCount(node, cols);
     setCells(node, cells);
@@ -106067,10 +106419,10 @@ function pasteCells(target0, isPcb, sel, src, uuid) {
     T = tableInfo(node);
     cells = T.cells;
   }
-  for (let sr = 0; sr < S2.rows; sr++) for (let sc = 0; sc < S2.cols; sc++) {
+  for (let sr = 0; sr < S3.rows; sr++) for (let sc = 0; sc < S3.cols; sc++) {
     const dr = b.rowMin + sr, dc = b.colMin + sc;
     if (dr >= T.rows || dc >= T.cols) continue;
-    const s2 = S2.cells[sr * S2.cols + sc], t = T.cells[dr * T.cols + dc];
+    const s2 = S3.cells[sr * S3.cols + sc], t = T.cells[dr * T.cols + dc];
     if (!s2 || !t) continue;
     setText(t, cellText(s2));
     for (const key3 of CELL_ATTRS) {
@@ -106255,7 +106607,7 @@ var api = {
   // Schematic Setup > Formatting: the painter's text offset / label size ratios, pin symbol size, DNP markers and
   // default line width; the document's items are rebuilt with them
   setSchFormatting(o, doc2) {
-    let changed = false;
+    let changed2 = false;
     if (typeof o.overbarHeight === "number" && isFinite(o.overbarHeight) && o.overbarHeight > 0) schFormat.overbarHeight = o.overbarHeight;
     if (typeof o.hopOverChoice === "number" && o.hopOverChoice >= 0) schFormat.hopOverChoice = Math.min(5, Math.round(o.hopOverChoice));
     hopOver.radius = SCH_PEN * HOPOVER_MULT[schFormat.hopOverChoice];
@@ -106263,25 +106615,25 @@ var api = {
       const v = o[k];
       if (typeof v === "number" && isFinite(v) && v >= 0 && Math.abs(v - schFormat[k]) > 1e-9) {
         schFormat[k] = v;
-        changed = true;
+        changed2 = true;
       }
     }
     if (typeof o.showDnpMarkers === "boolean" && o.showDnpMarkers !== schFormat.showDnpMarkers) {
       schFormat.showDnpMarkers = o.showDnpMarkers;
-      changed = true;
+      changed2 = true;
     }
     if (typeof o.lineWidth === "number" && o.lineWidth > 0 && Math.abs(o.lineWidth - SCH_PEN) > 1e-9) {
       setSchPen(o.lineWidth);
-      changed = true;
+      changed2 = true;
       hopOver.radius = SCH_PEN * HOPOVER_MULT[schFormat.hopOverChoice];
     }
-    if (changed && doc2 && doc2.type === "sch") for (const it of doc2.items.values()) {
+    if (changed2 && doc2 && doc2.type === "sch") for (const it of doc2.items.values()) {
       try {
         buildGeom(doc2, it);
       } catch (e) {
       }
     }
-    return changed;
+    return changed2;
   },
   schFormat,
   /** The open sheet's intersheet references (Doc.intersheetRefs); its global labels are rebuilt with them. */
@@ -106613,7 +106965,7 @@ root.KiCadCanvas = api;
     { id: "highlight", label: "Highlight net", key: "", cursor: "BULLSEYE", icon: '<path d="M3 12h6l3-6 3 12 3-6h3"/><circle cx="12" cy="12" r="9" stroke-dasharray="2 2"/>' }
   ];
   var toolOf = (id) => TOOLS.find((t) => t.id === id) || null;
-  var S2 = {
+  var S3 = {
     ctx: null,
     tool: "select",
     wire: null,
@@ -106704,14 +107056,14 @@ root.KiCadCanvas = api;
     if (it) doc2.items.delete(it.id);
     return it;
   }
-  S2.markers = [];
-  S2.markersDoc = null;
-  S2.lastPlaced = null;
-  S2.repeatOffset = [0, 2.54];
-  S2.repeatIncrement = 1;
-  S2.annotateAuto = true;
-  S2.unfold = null;
-  S2.docRef = null;
+  S3.markers = [];
+  S3.markersDoc = null;
+  S3.lastPlaced = null;
+  S3.repeatOffset = [0, 2.54];
+  S3.repeatIncrement = 1;
+  S3.annotateAuto = true;
+  S3.unfold = null;
+  S3.docRef = null;
   function selectedItems(ctx) {
     const doc2 = ctx.doc, out2 = [], seen = /* @__PURE__ */ new Set();
     const take = (id) => {
@@ -106726,15 +107078,15 @@ root.KiCadCanvas = api;
       ctx.selection.forEach((id) => take(id));
       if (ctx.selected) take(ctx.selected.id);
     } else if (ctx.selected) take(ctx.selected.id);
-    else take(S2.sel);
+    else take(S3.sel);
     return out2;
   }
   function setSelectionIds(ctx, ids) {
     ids = Array.from(ids || []).filter((id) => ctx.doc.items.has(id));
-    S2.sel = null;
-    S2.hover = null;
-    S2.pending = null;
-    S2.selEnds = null;
+    S3.sel = null;
+    S3.hover = null;
+    S3.pending = null;
+    S3.selEnds = null;
     if (typeof ctx.setSelection === "function") ctx.setSelection(ids);
     else {
       if (ctx.selection && typeof ctx.selection.clear === "function") {
@@ -106745,13 +107097,13 @@ root.KiCadCanvas = api;
       if (prim) ctx.setSelected({ id: prim.id });
       else {
         ctx.setSelected(null);
-        S2.sel = ids[0] || null;
+        S3.sel = ids[0] || null;
       }
     }
     ctx.requestRender();
   }
   function cursorOf(ctx) {
-    return ctx.cursor || S2.cursor || [ctx.doc.page[0] / 2, ctx.doc.page[1] / 2];
+    return ctx.cursor || S3.cursor || [ctx.doc.page[0] / 2, ctx.doc.page[1] / 2];
   }
   function snapCursor(ctx) {
     const c = cursorOf(ctx);
@@ -107404,7 +107756,7 @@ root.KiCadCanvas = api;
   var SPIN_UP = 1;
   var SPIN_LEFT = 2;
   var SPIN_BOTTOM = 3;
-  var autoIds = () => S2.autoRotateIds = S2.autoRotateIds || /* @__PURE__ */ new Set();
+  var autoIds = () => S3.autoRotateIds = S3.autoRotateIds || /* @__PURE__ */ new Set();
   function autoRotateOf(id) {
     return autoIds().has(id);
   }
@@ -107525,9 +107877,9 @@ root.KiCadCanvas = api;
     }
     return swap.size ? changes.map((c) => swap.get(c.id) || c) : changes;
   }
-  S2.posture = false;
+  S3.posture = false;
   var segNull = (s2) => same(s2[0], s2[1]);
-  var twoSegments = () => S2.lineMode !== "free";
+  var twoSegments = () => S3.lineMode !== "free";
   function sheetPinSideAt(doc2, p) {
     for (const it of doc2.items.values()) {
       if (it.kind !== "sheet") continue;
@@ -107589,11 +107941,11 @@ root.KiCadCanvas = api;
     return pos;
   }
   function wireFollow(ctx, p) {
-    const w = S2.wire;
+    const w = S3.wire;
     if (!w) return;
-    if (S2.unfold && !S2.unfold.placed) unfoldFollow(ctx, w, p);
+    if (S3.unfold && !S3.unfold.placed) unfoldFollow(ctx, w, p);
     const n2 = w.segs.length, seg2 = w.segs[n2 - 1];
-    if (twoSegments() && n2 >= 2) computeBreakPoint(ctx.doc, w.segs[n2 - 2], seg2, p, S2.lineMode, S2.posture, ctx.gridPitch);
+    if (twoSegments() && n2 >= 2) computeBreakPoint(ctx.doc, w.segs[n2 - 2], seg2, p, S3.lineMode, S3.posture, ctx.gridPitch);
     else seg2[1] = p.slice();
     w.cur = p.slice();
   }
@@ -107610,7 +107962,7 @@ root.KiCadCanvas = api;
     const segs2 = [[p.slice(), p.slice()]];
     if (twoSegments()) segs2.push([p.slice(), p.slice()]);
     const src = opts2 && opts2.source || sourceLine(ctx.doc, kind, p), st = src && kid8(src.node, "stroke");
-    S2.wire = { kind, segs: segs2, cur: p.slice(), quitOnDraw: !!(opts2 && opts2.quitOnDraw), stroke: st ? deep(st) : null };
+    S3.wire = { kind, segs: segs2, cur: p.slice(), quitOnDraw: !!(opts2 && opts2.quitOnDraw), stroke: st ? deep(st) : null };
     ctx.requestRender();
   }
   function sourceLine(doc2, kind, p) {
@@ -107638,53 +107990,53 @@ root.KiCadCanvas = api;
     return labelsAt(doc2, p).length > 0 || sheetPinsAt(doc2, p).length > 0;
   }
   function wireClick(ctx, p, dbl) {
-    const w = S2.wire;
+    const w = S3.wire;
     if (!w) return;
     wireFollow(ctx, p);
-    if (S2.unfold && !S2.unfold.placed) S2.unfold.placed = true;
+    if (S3.unfold && !S3.unfold.placed) S3.unfold.placed = true;
     const n2 = w.segs.length, seg2 = w.segs[n2 - 1];
     if (!segNull(seg2) || twoSegments() && n2 >= 2 && !segNull(w.segs[n2 - 2])) {
       if (isTerminalPoint(ctx.doc, p, w.kind)) {
         finishWire(ctx);
         return;
       }
-      const placed = S2.lineMode === "45" ? 2 : 1;
+      const placed = S3.lineMode === "45" ? 2 : 1;
       seg2[1] = p.slice();
       for (let i = 0; i < placed; i++) w.segs.push([p.slice(), p.slice()]);
     }
-    if (dbl && S2.wire) finishWire(ctx);
+    if (dbl && S3.wire) finishWire(ctx);
     else ctx.requestRender();
   }
   function undoSegment(ctx) {
-    const w = S2.wire;
+    const w = S3.wire;
     if (!w) return false;
     const n2 = w.segs.length;
-    if (!(S2.lineMode === "free" && n2 > 1 || n2 > 2)) return false;
+    if (!(S3.lineMode === "free" && n2 > 1 || n2 > 2)) return false;
     w.segs.pop();
     const seg2 = w.segs[w.segs.length - 1], p = seg2[1].slice();
-    S2.cursor = p.slice();
+    S3.cursor = p.slice();
     if (typeof ctx.warpCursor === "function") ctx.warpCursor(p);
-    if (twoSegments() && w.segs.length >= 2) computeBreakPoint(ctx.doc, w.segs[w.segs.length - 2], seg2, p, S2.lineMode, S2.posture, ctx.gridPitch);
+    if (twoSegments() && w.segs.length >= 2) computeBreakPoint(ctx.doc, w.segs[w.segs.length - 2], seg2, p, S3.lineMode, S3.posture, ctx.gridPitch);
     else seg2[1] = p;
     w.cur = p;
     ctx.requestRender();
     return true;
   }
   function switchPosture(ctx) {
-    const w = S2.wire;
+    const w = S3.wire;
     if (!w || w.segs.length < 2) return false;
-    S2.posture = !S2.posture;
+    S3.posture = !S3.posture;
     const n2 = w.segs.length, l2 = w.segs[n2 - 1], l1 = w.segs[n2 - 2];
-    if (S2.lineMode === "90") {
+    if (S3.lineMode === "90") {
       const d2 = [l2[1][0] - l2[0][0], l2[1][1] - l2[0][1]], d1 = [l1[1][0] - l1[0][0], l1[1][1] - l1[0][1]];
       l2[0] = [r45(l2[1][0] - d1[0]), r45(l2[1][1] - d1[1])];
       l1[1] = [r45(l1[0][0] + d2[0]), r45(l1[0][1] + d2[1])];
-    } else computeBreakPoint(ctx.doc, l1, l2, w.cur || l2[1], S2.lineMode, S2.posture, ctx.gridPitch);
+    } else computeBreakPoint(ctx.doc, l1, l2, w.cur || l2[1], S3.lineMode, S3.posture, ctx.gridPitch);
     ctx.requestRender();
     return true;
   }
   function wireModeChanged(ctx, from, to) {
-    const w = S2.wire;
+    const w = S3.wire;
     if (!w || from === to) return;
     const cur2 = (w.cur || w.segs[w.segs.length - 1][1]).slice();
     if (to === "free" && w.segs.length >= 2) {
@@ -107932,25 +108284,25 @@ root.KiCadCanvas = api;
     return t.add(junctionNode(p));
   }
   function txnCleanUp(t, doc2, seed, points2) {
-    const live2 = new Set(seed);
+    const live3 = new Set(seed);
     for (const p of points2 || []) {
       const j = junctionAt(doc2, p[0], p[1]);
       if (j && !t.has(j.id) && !explicitJunctionAllowed(doc2, p)) t.remove(j);
     }
-    for (let changed = true, guard = 0; changed && guard < 200; guard++) {
-      changed = false;
-      outer: for (const id of Array.from(live2)) {
+    for (let changed2 = true, guard = 0; changed2 && guard < 200; guard++) {
+      changed2 = false;
+      outer: for (const id of Array.from(live3)) {
         const A = doc2.items.get(id);
         if (!A || !isNetLine(A.kind)) {
-          live2.delete(id);
+          live3.delete(id);
           continue;
         }
         const sa = segOf(A);
         if (!sa) continue;
         if (same(sa[0], sa[1])) {
           t.remove(A);
-          live2.delete(id);
-          changed = true;
+          live3.delete(id);
+          changed2 = true;
           break;
         }
         for (const B of Array.from(doc2.items.values())) {
@@ -107964,9 +108316,9 @@ root.KiCadCanvas = api;
           const [keepIt, dropIt] = t.isNew(A.id) && !t.isNew(B.id) ? [B, A] : [A, B];
           if (same(sa[0], sb[0]) && same(sa[1], sb[1]) || same(sa[0], sb[1]) && same(sa[1], sb[0])) {
             t.remove(dropIt);
-            live2.delete(dropIt.id);
-            live2.add(keepIt.id);
-            changed = true;
+            live3.delete(dropIt.id);
+            live3.add(keepIt.id);
+            changed2 = true;
             break outer;
           }
           const m = mergeOverlap(sa, sb, (q4) => isJunctionPoint(doc2, q4) || !!junctionAt(doc2, q4[0], q4[1]));
@@ -107975,14 +108327,14 @@ root.KiCadCanvas = api;
           setPts2(n2, m);
           t.remove(dropIt);
           t.modify(keepIt, n2);
-          live2.delete(dropIt.id);
-          live2.add(keepIt.id);
-          changed = true;
+          live3.delete(dropIt.id);
+          live3.add(keepIt.id);
+          changed2 = true;
           break outer;
         }
       }
     }
-    return live2;
+    return live3;
   }
   function txnTrimWire(t, doc2, a, b, only) {
     if (same(a, b)) return false;
@@ -108010,13 +108362,13 @@ root.KiCadCanvas = api;
     return false;
   }
   function finishWire(ctx) {
-    const w = S2.wire;
-    S2.wire = null;
+    const w = S3.wire;
+    S3.wire = null;
     if (!w) return;
-    S2.wireEndedAt = Date.now();
+    S3.wireEndedAt = Date.now();
     const list = simplifyWireList(w.segs);
-    const unfold = S2.unfold;
-    S2.unfold = null;
+    const unfold = S3.unfold;
+    S3.unfold = null;
     const doc2 = ctx.doc, held = unfold ? dropUnfold(doc2, unfold) : null;
     if (!list.length) {
       ctx.requestRender();
@@ -108033,12 +108385,12 @@ root.KiCadCanvas = api;
     }
     try {
       if (w.kind !== "polyline") {
-        const live2 = txnCleanUp(t, doc2, added2, []);
+        const live3 = txnCleanUp(t, doc2, added2, []);
         for (const it of Array.from(doc2.items.values())) {
           if (it.kind !== "symbol") continue;
           const pts = connPoints(doc2, it);
           if (pts.length > 2) continue;
-          for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) txnTrimWire(t, doc2, pts[i], pts[j], live2);
+          for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) txnTrimWire(t, doc2, pts[i], pts[j], live3);
         }
         const seen = /* @__PURE__ */ new Set();
         for (const p of newEnds) {
@@ -108053,16 +108405,16 @@ root.KiCadCanvas = api;
     }
     const changes = t.changes();
     ctx.commit(changes, "Draw Wires");
-    S2.lastPlaced = list.map((s2) => ({ kind: w.kind, node: wireNode(w, s2[0], s2[1]) }));
-    if (held && unfold.placed) S2.lastPlaced = held.map((n2) => ({ kind: n2[0], node: deep(n2) })).concat(S2.lastPlaced);
+    S3.lastPlaced = list.map((s2) => ({ kind: w.kind, node: wireNode(w, s2[0], s2[1]) }));
+    if (held && unfold.placed) S3.lastPlaced = held.map((n2) => ({ kind: n2[0], node: deep(n2) })).concat(S3.lastPlaced);
     ctx.requestRender();
     if (w.quitOnDraw) switchTool(ctx, "select");
   }
   function cancelWire(ctx) {
-    const w = S2.wire;
-    S2.wire = null;
-    if (S2.unfold) dropUnfold(ctx.doc, S2.unfold);
-    S2.unfold = null;
+    const w = S3.wire;
+    S3.wire = null;
+    if (S3.unfold) dropUnfold(ctx.doc, S3.unfold);
+    S3.unfold = null;
     ctx.requestRender();
     if (w && w.quitOnDraw) switchTool(ctx, "select");
   }
@@ -108078,7 +108430,7 @@ root.KiCadCanvas = api;
     return out2;
   }
   function unfoldFollow(ctx, w, p) {
-    const u = S2.unfold, doc2 = ctx.doc, en = doc2.items.get(u.entryId), lb = doc2.items.get(u.labelId);
+    const u = S3.unfold, doc2 = ctx.doc, en = doc2.items.get(u.entryId), lb = doc2.items.get(u.labelId);
     if (!en || !lb) return;
     const sz = kid8(en.node, "size"), sx = p[0] - u.origin[0] < 0 ? -1 : 1, sy = p[1] - u.origin[1] < 0 ? -1 : 1;
     if (sz && (Math.sign(num13(sz[1])) !== sx || Math.sign(num13(sz[2])) !== sy)) {
@@ -108093,11 +108445,11 @@ root.KiCadCanvas = api;
     K11.replaceChange(doc2, lb);
   }
   function switchTool(ctx, id) {
-    S2.internalSwitch = true;
+    S3.internalSwitch = true;
     try {
       ctx.setTool(id);
     } finally {
-      S2.internalSwitch = false;
+      S3.internalSwitch = false;
     }
   }
   function mmPerPx(ctx) {
@@ -109347,7 +109699,7 @@ root.KiCadCanvas = api;
     return out2.concat(extra);
   }
   function orientDrag(ctx, op) {
-    const d = S2.drag;
+    const d = S3.drag;
     if (!d) return false;
     if (d.brk || d.ends && d.ends.length) return true;
     const [dx, dy] = d.last, doc2 = ctx.doc, C = [d.anchor0[0], d.anchor0[1]], lone = d.items.length === 1;
@@ -109616,7 +109968,7 @@ root.KiCadCanvas = api;
       setSelectionIds(ctx, mode2 === "break" ? cuts2.flatMap((x) => [x.head, x.tail]) : cuts2.map((x) => x.head));
       return true;
     }
-    if (S2.drag) endDrag(ctx, false);
+    if (S3.drag) endDrag(ctx, false);
     const brk = { mode: mode2, label, orig: /* @__PURE__ */ new Map(), local: /* @__PURE__ */ new Set(), clicks: 0 }, cuts = [];
     for (const it of lines) {
       const cut = splitLocal(doc2, brk, it, atFor(it));
@@ -109624,7 +109976,7 @@ root.KiCadCanvas = api;
     }
     if (!cuts.length) return false;
     const p0 = cuts[0].p;
-    S2.drag = {
+    S3.drag = {
       items: [],
       item: cuts[0].head,
       kind: "wire",
@@ -109640,9 +109992,9 @@ root.KiCadCanvas = api;
       preview: [],
       mode: mode2,
       brk,
-      restoreMode: S2.dragMode
+      restoreMode: S3.dragMode
     };
-    S2.dragMode = "drag";
+    S3.dragMode = "drag";
     announceModes(ctx);
     setSelectionIds(ctx, mode2 === "break" ? cuts.flatMap((x) => [x.head.id, x.tail.id]) : cuts.map((x) => x.head.id));
     return true;
@@ -109670,7 +110022,7 @@ root.KiCadCanvas = api;
     });
   }
   function breakAgain(ctx) {
-    const d = S2.drag;
+    const d = S3.drag;
     if (!d || !d.brk || d.brk.mode !== "break") return false;
     const doc2 = ctx.doc, cuts = [];
     for (const a of d.anchors) {
@@ -109762,12 +110114,12 @@ root.KiCadCanvas = api;
     setSelectionIds(ctx, keepSel.filter((id) => doc2.items.has(id)));
   }
   function selectedItem(ctx) {
-    const id = ctx.selected ? ctx.selected.id : S2.sel;
+    const id = ctx.selected ? ctx.selected.id : S3.sel;
     return id ? ctx.doc.items.get(id) || null : null;
   }
   function orientSelected2(ctx, op) {
-    if (S2.drag) return orientDrag(ctx, op);
-    const c = S2.carry;
+    if (S3.drag) return orientDrag(ctx, op);
+    const c = S3.carry;
     if (c) {
       const ok22 = op === "x" || op === "y" ? mirrorNode(c.kind, c.node, op) : rotateNode(c.kind, c.node, op === "cw");
       if (ok22 === false) transformNode(c.kind, c.node, op, anchorOf(c.kind, c.node), true);
@@ -109816,12 +110168,12 @@ root.KiCadCanvas = api;
     return changes;
   }
   function deleteSelected2(ctx) {
-    const it = S2.sel ? ctx.doc.items.get(S2.sel) : null;
+    const it = S3.sel ? ctx.doc.items.get(S3.sel) : null;
     if (!it) return false;
     if (isLockedItem(ctx.doc, it)) return true;
     const changes = deleteChanges(ctx.doc, it);
-    S2.sel = null;
-    S2.hover = null;
+    S3.sel = null;
+    S3.hover = null;
     ctx.commit(changes, "delete");
     ctx.requestRender();
     return true;
@@ -109830,8 +110182,8 @@ root.KiCadCanvas = api;
     const it = pickAny(ctx, mm4);
     if (!it || isLockedItem(ctx.doc, it)) return null;
     const changes = deleteChanges(ctx.doc, it);
-    S2.sel = null;
-    S2.hover = null;
+    S3.sel = null;
+    S3.hover = null;
     if (ctx.selected && ctx.selected.id === it.id) ctx.setSelected(null);
     ctx.commit(changes, "delete");
     ctx.requestRender();
@@ -109842,8 +110194,8 @@ root.KiCadCanvas = api;
     if (!it || it.kind === "sheet") return false;
     const node = cloneNode3(it);
     shiftNode(it.kind, node, 2.54, 2.54);
-    S2.carry = { kind: it.kind, node, item: ghost(ctx.doc, node), pos: anchorOf(it.kind, node) };
-    S2.sel = null;
+    S3.carry = { kind: it.kind, node, item: ghost(ctx.doc, node), pos: anchorOf(it.kind, node) };
+    S3.sel = null;
     ctx.setSelected(null);
     switchTool(ctx, "place");
     ctx.requestRender();
@@ -109908,7 +110260,7 @@ ${body}
     return m ? +m[1] : -1;
   };
   function usedReferences(doc2, skip) {
-    const used = new Set(S2.otherRefs || []);
+    const used = new Set(S3.otherRefs || []);
     for (const it of doc2.items.values()) if (it.kind === "symbol" && it.ref && !(skip && skip.has(it.id))) used.add(it.ref);
     return used;
   }
@@ -109936,7 +110288,7 @@ ${body}
       return;
     }
     let next = unannotated(ref);
-    if (S2.annotateAuto) {
+    if (S3.annotateAuto) {
       const prefix = refPrefix2(ref);
       let n2 = 1;
       while (!free(prefix + n2)) n2++;
@@ -110025,7 +110377,7 @@ ${body}
     }
     const fresh = parsed2.nodes.map((n2) => cloneNode3({ kind: n2[0], node: deep(n2) }));
     const used = usedReferences(doc2);
-    const mode2 = opts2 && (opts2.pasteMode || (opts2.keepAnnotations ? "keep" : null)) || (S2.annotateAuto ? "unique" : "remove");
+    const mode2 = opts2 && (opts2.pasteMode || (opts2.keepAnnotations ? "keep" : null)) || (S3.annotateAuto ? "unique" : "remove");
     if (mode2 === "reset") resetAnnotation(fresh, used);
     for (const n2 of fresh) {
       if (n2[0] !== "symbol" || mode2 === "keep" || mode2 === "reset") continue;
@@ -110035,12 +110387,12 @@ ${body}
         continue;
       }
       if (mode2 === "unique") {
-        const auto = S2.annotateAuto;
-        S2.annotateAuto = true;
+        const auto = S3.annotateAuto;
+        S3.annotateAuto = true;
         try {
           assignPastedRef(doc2, n2, used);
         } finally {
-          S2.annotateAuto = auto;
+          S3.annotateAuto = auto;
         }
         continue;
       }
@@ -110088,26 +110440,26 @@ ${body}
       if (str9(text3).trim()) ctx.toast("Clipboard has no schematic items");
       return false;
     }
-    const label = opts2 && opts2.label || "paste", live2 = canFollow(ctx);
-    const { changes, ids, libs } = pasteChanges(ctx.doc, parsed2, opts2 && opts2.at || snapCursor(ctx), Object.assign({}, opts2, { noJunctions: live2 }));
+    const label = opts2 && opts2.label || "paste", live3 = canFollow(ctx);
+    const { changes, ids, libs } = pasteChanges(ctx.doc, parsed2, opts2 && opts2.at || snapCursor(ctx), Object.assign({}, opts2, { noJunctions: live3 }));
     if (!changes.length) return false;
-    if (live2 && followPaste(ctx, ids, libs, opts2 && opts2.at || cursorOf(ctx), label)) return true;
-    if (live2) changes.push(...junctionsForNew(ctx.doc, ids.map((id) => ctx.doc.items.get(id)).filter(Boolean)));
+    if (live3 && followPaste(ctx, ids, libs, opts2 && opts2.at || cursorOf(ctx), label)) return true;
+    if (live3) changes.push(...junctionsForNew(ctx.doc, ids.map((id) => ctx.doc.items.get(id)).filter(Boolean)));
     ctx.commit(changes, label);
     setSelectionIds(ctx, ids);
     return true;
   }
   function canFollow(ctx) {
-    return S2.forceFollow || typeof document !== "undefined" && !!S2.dom && !!ctx.stage;
+    return S3.forceFollow || typeof document !== "undefined" && !!S3.dom && !!ctx.stage;
   }
   function followPaste(ctx, ids, libs, at4, label) {
     const items = ids.map((id) => ctx.doc.items.get(id)).filter(Boolean);
     if (!items.length) return false;
-    const mode2 = S2.dragMode;
-    S2.dragMode = "move";
+    const mode2 = S3.dragMode;
+    S3.dragMode = "move";
     const d = beginDrag(ctx, items, at4, false, { plain: true });
     if (!d) {
-      S2.dragMode = mode2;
+      S3.dragMode = mode2;
       return false;
     }
     d.pasted = true;
@@ -110133,7 +110485,7 @@ ${body}
     const KD2 = typeof root5.KDialogs !== "undefined" ? root5.KDialogs : null;
     if (opts2 && (opts2.pasteMode || opts2.keepAnnotations !== void 0) || !KD2 || !KD2.open) return pasteSelection(ctx, Object.assign({ keepAnnotations: true }, opts2 || {}));
     const at4 = snapCursor(ctx);
-    let mode2 = S2.annotateAuto ? "unique" : "remove";
+    let mode2 = S3.annotateAuto ? "unique" : "remove";
     const choices = [
       ["unique", "Assign unique reference designators to pasted symbols", "Finds the next available reference designator for any designators that already exist in the design."],
       ["keep", "Keep existing reference designators, even if they are duplicated", ""],
@@ -110179,7 +110531,7 @@ ${body}
     if (!editable(ctx) || !nodes.length) return false;
     const label = opts2.label || "Import Graphic";
     for (const n2 of nodes) if (!kid8(n2, "uuid")) n2.push(["uuid", K11.newUuid()]);
-    const live2 = opts2.interactive && canFollow(ctx), at4 = live2 ? snapCursor(ctx) : null;
+    const live3 = opts2.interactive && canFollow(ctx), at4 = live3 ? snapCursor(ctx) : null;
     if (at4) for (const n2 of nodes) shiftNode(n2[0], n2, at4[0], at4[1]);
     const all2 = nodes.slice();
     if (opts2.group && nodes.length >= 2) all2.push(["group", "", ["uuid", K11.newUuid()], ["members", ...nodes.map((n2) => str9((kid8(n2, "uuid") || [])[1]))]]);
@@ -110190,7 +110542,7 @@ ${body}
       ids.push(item.id);
     }
     const sel = opts2.group && nodes.length >= 2 ? [ids[ids.length - 1]] : ids.slice();
-    if (live2 && at4 && followPaste(ctx, ids, [], at4, label)) {
+    if (live3 && at4 && followPaste(ctx, ids, [], at4, label)) {
       setSelectionIds(ctx, sel);
       return true;
     }
@@ -110201,7 +110553,7 @@ ${body}
   }
   function rememberPlaced(kind, node) {
     if (kind === "junction") return;
-    S2.lastPlaced = [{ kind, node: deep(node) }];
+    S3.lastPlaced = [{ kind, node: deep(node) }];
   }
   function incrementText(text3, delta) {
     const m = str9(text3).match(/^([\s\S]*?)(\d+)(\D*)$/);
@@ -110260,26 +110612,26 @@ ${body}
   }
   function repeatLast(ctx) {
     if (!editable(ctx)) return false;
-    const src = S2.lastPlaced;
+    const src = S3.lastPlaced;
     if (!src || !src.length) return false;
     const doc2 = ctx.doc, t = editTxn(doc2, ctx.IU), used = usedReferences(doc2), added2 = [];
     let symbolId = null, warned = false;
     try {
       for (const lp of src) {
         const node = cloneNode3({ kind: lp.kind, node: deep(lp.node) });
-        if (LABEL_KINDS2.has(lp.kind) && !incrementLabelNode(lp.kind, node, S2.repeatIncrement)) {
+        if (LABEL_KINDS2.has(lp.kind) && !incrementLabelNode(lp.kind, node, S3.repeatIncrement)) {
           if (!warned) ctx.toast("Label value cannot go below zero", 4e3);
           warned = true;
         }
         if (lp.kind === "symbol") {
           const p = snapCursor(ctx), a = anchorOf("symbol", node);
           shiftNode("symbol", node, r45(p[0] - a[0]), r45(p[1] - a[1]));
-          if (S2.annotateAuto) {
+          if (S3.annotateAuto) {
             const rf = refField(node);
             if (rf) setReference(node, unannotated(str9(rf[2])));
             assignPastedRef(doc2, node, used);
           }
-        } else shiftNode(lp.kind, node, S2.repeatOffset[0], S2.repeatOffset[1]);
+        } else shiftNode(lp.kind, node, S3.repeatOffset[0], S3.repeatOffset[1]);
         const it = t.add(node);
         added2.push(it.id);
         if (lp.kind === "symbol" && !symbolId) symbolId = it.id;
@@ -110299,16 +110651,16 @@ ${body}
     if (!changes.length) return false;
     ctx.commit(changes, "Repeat Item");
     const now = added2.map((id) => doc2.items.get(id)).filter(Boolean);
-    S2.lastPlaced = now.map((it) => ({ kind: it.kind, node: deep(it.node) }));
+    S3.lastPlaced = now.map((it) => ({ kind: it.kind, node: deep(it.node) }));
     setSelectionIds(ctx, now.map((it) => it.id));
     if (symbolId && canFollow(ctx)) {
-      const it = doc2.items.get(symbolId), mode2 = S2.dragMode;
-      S2.dragMode = "move";
+      const it = doc2.items.get(symbolId), mode2 = S3.dragMode;
+      S3.dragMode = "move";
       const d = it ? beginDrag(ctx, [it], cursorOf(ctx), false) : null;
       if (d) {
         d.restoreMode = mode2;
         d.moved = true;
-      } else S2.dragMode = mode2;
+      } else S3.dragMode = mode2;
     }
     return true;
   }
@@ -110328,11 +110680,11 @@ ${body}
     return true;
   }
   function startCarry(ctx, kind, node, mm4) {
-    S2.carry = { kind, node, item: null, pos: null };
-    placeCarry(ctx, mm4 || S2.cursor || [ctx.doc.page[0] / 2, ctx.doc.page[1] / 2]);
+    S3.carry = { kind, node, item: null, pos: null };
+    placeCarry(ctx, mm4 || S3.cursor || [ctx.doc.page[0] / 2, ctx.doc.page[1] / 2]);
   }
   function placeCarry(ctx, mm4, ev) {
-    const c = S2.carry;
+    const c = S3.carry;
     if (!c) return;
     const gridOnly = c.kind === "symbol" || c.kind === "text" || SHAPE_KINDS2.has(c.kind) || c.kind === "text_box" || c.kind === "image" || c.kind === "table" || c.kind === "bezier" || c.kind === "rule_area" || c.kind === "sheet";
     const noGrid = !!(ev && (ev.ctrlKey || ev.metaKey));
@@ -110345,23 +110697,23 @@ ${body}
     ctx.requestRender();
   }
   function refreshCarry(ctx) {
-    const c = S2.carry;
+    const c = S3.carry;
     if (c) {
       c.item = ghost(ctx.doc, c.node);
       ctx.requestRender();
     }
   }
   function cancelCarry(ctx) {
-    S2.carry = null;
-    S2.labelQueue = null;
+    S3.carry = null;
+    S3.labelQueue = null;
     ctx.requestRender();
   }
   function dropCarry(ctx) {
-    const c = S2.carry;
+    const c = S3.carry;
     if (!c) return null;
-    S2.carry = null;
+    S3.carry = null;
     const doc2 = ctx.doc, p = anchorOf(c.kind, c.node);
-    const auto = supportsAutoRotate(c.kind) && !!S2.lastAutoRotate;
+    const auto = supportsAutoRotate(c.kind) && !!S3.lastAutoRotate;
     if (auto) {
       const n2 = autoRotateNode(doc2, c.kind, c.node, uuidOf2(c.node) || null, true);
       if (n2) c.node = n2;
@@ -110381,22 +110733,22 @@ ${body}
     rememberPlaced(item.kind, item.node);
     if (c.kind === "symbol" || c.kind === "sheet") ctx.setSelected({ id: item.id });
     else {
-      S2.sel = item.id;
+      S3.sel = item.id;
       ctx.setSelected(null);
     }
-    if (S2.labelQueue && S2.labelQueue.length && (TEXT_KINDS.has(c.kind) || c.kind === "netclass_flag")) {
-      const next = S2.labelQueue.shift();
+    if (S3.labelQueue && S3.labelQueue.length && (TEXT_KINDS.has(c.kind) || c.kind === "netclass_flag")) {
+      const next = S3.labelQueue.shift();
       startCarry(ctx, c.kind, next, p);
     }
     ctx.requestRender();
     return item;
   }
   function singleClickPlace(ctx, toolId, dbl) {
-    const c = S2.carry;
+    const c = S3.carry;
     if (!c) return null;
-    S2.carry = null;
+    S3.carry = null;
     const keep = () => {
-      S2.carry = c;
+      S3.carry = c;
     };
     const doc2 = ctx.doc, p = anchorOf(c.kind, c.node);
     let existing = null;
@@ -110408,7 +110760,7 @@ ${body}
     if (existing) {
       if (c.kind === "no_connect") {
         ctx.commit([removeChange2(existing)], "Remove No Connect Flag");
-        if (S2.sel === existing.id) S2.sel = null;
+        if (S3.sel === existing.id) S3.sel = null;
       }
     } else if (c.kind === "junction") {
       if (!explicitJunctionAllowed(doc2, p)) {
@@ -110428,15 +110780,15 @@ ${body}
       const r = addNode(doc2, deep(c.node));
       placed = r.item;
       ctx.commit([r.change], c.kind === "no_connect" ? "Add No Connect Flag" : "Add Wire to Bus Entry");
-      S2.lastPlaced = [{ kind: r.item.kind, node: deep(r.item.node) }];
+      S3.lastPlaced = [{ kind: r.item.kind, node: deep(r.item.node) }];
     }
     if (dbl) {
-      S2.carry = null;
+      S3.carry = null;
       switchTool(ctx, "select");
       return placed;
     }
     const node = cloneNode3({ kind: c.kind, node: c.node });
-    S2.carry = { kind: c.kind, node, item: ghost(doc2, node), pos: c.pos };
+    S3.carry = { kind: c.kind, node, item: ghost(doc2, node), pos: c.pos };
     ctx.requestRender();
     return placed;
   }
@@ -110445,7 +110797,7 @@ ${body}
     const { item, change } = addNode(doc2, labelNode(kind, text3, p, rot3 || 0));
     ctx.commit([change], kind.replace("_", " "));
     rememberPlaced(item.kind, item.node);
-    S2.sel = item.id;
+    S3.sel = item.id;
     ctx.setSelected(null);
     ctx.requestRender();
     return item;
@@ -111075,8 +111427,8 @@ ${body}
     return null;
   }
   function setHighlight(ctx, ids) {
-    S2.highlight = ids && ids.size ? ids : null;
-    if (typeof ctx.setHighlight === "function") ctx.setHighlight(S2.highlight);
+    S3.highlight = ids && ids.size ? ids : null;
+    if (typeof ctx.setHighlight === "function") ctx.setHighlight(S3.highlight);
     ctx.requestRender();
   }
   function highlightNetNow(ctx) {
@@ -111086,14 +111438,14 @@ ${body}
     return true;
   }
   function clearHighlight2(ctx) {
-    if (S2.netHL) S2.netHL.clear(ctx);
+    if (S3.netHL) S3.netHL.clear(ctx);
     else setHighlight(ctx, null);
   }
   function highlightClick(ctx, mm4) {
     const pick = pickNet(ctx, mm4);
-    if (S2.netHL) {
-      S2.netHL.highlightPick(ctx, pick);
-      return S2.highlight;
+    if (S3.netHL) {
+      S3.netHL.highlightPick(ctx, pick);
+      return S3.highlight;
     }
     if (!pick) {
       setHighlight(ctx, null);
@@ -111275,14 +111627,14 @@ ${body}
     });
     for (const [ref, units] of groups) {
       const doc0 = insts[units[0].inst].doc, lib = K11.resolveLib(doc0, symbolLibId(units[0].it.node));
-      const subs = lib ? kids7(lib, "symbol") : [];
+      const subs2 = lib ? kids7(lib, "symbol") : [];
       let count2 = 1;
-      for (const s2 of subs) {
+      for (const s2 of subs2) {
         const m = str9(s2[1]).match(/_(\d+)_(\d+)$/);
         if (m) count2 = Math.max(count2, +m[1]);
       }
       const unitName4 = (u) => {
-        for (const s2 of subs) {
+        for (const s2 of subs2) {
           const m = str9(s2[1]).match(/_(\d+)_(\d+)$/);
           if (m && +m[1] === u) {
             const un = kid8(s2, "unit_name");
@@ -111303,13 +111655,13 @@ ${body}
         const num0 = ref.match(/(\d+)$/), base0 = num0 ? ref.slice(0, -num0[1].length) : ref, n2 = num0 ? num0[1] : "";
         mark(a.inst, "unit_value_mismatch", "error", atOf4(a.it.node), `Different values for ${base0}${n2}${letterSubReference(a.unit)} (${a.value}) and ${base0}${n2}${letterSubReference(b.unit)} (${b.value})`, [a.it.id, b.it.id], [itemRef2(insts[a.inst].doc, a.it), itemRef2(insts[b.inst].doc, b.it)]);
       }
-      if (count2 > 1 && subs.length) {
+      if (count2 > 1 && subs2.length) {
         const placed = new Set(units.map((x) => x.unit)), missing = [], power = [], input = [], bidi = [];
         for (let u = 1; u <= count2; u++) {
           if (placed.has(u)) continue;
           missing.push(u);
           const types = /* @__PURE__ */ new Set();
-          for (const s2 of subs) {
+          for (const s2 of subs2) {
             const m = str9(s2[1]).match(/_(\d+)_(\d+)$/);
             if (!m || +m[1] !== u && +m[1] !== 0) continue;
             for (const g2 of kids7(s2, "pin")) types.add(str9(g2[1]));
@@ -111701,8 +112053,8 @@ ${body}
   }
   function runERC(ctx, opts2) {
     const markers = ercCheck(ctx.doc, Object.assign({ sheetDocs: ctx.sheetDocs, parentPins: ctx.parentSheetPins }, opts2 || {}));
-    S2.markers = markers;
-    S2.markersDoc = ctx.doc;
+    S3.markers = markers;
+    S3.markersDoc = ctx.doc;
     if (typeof ctx.setMarkers === "function") ctx.setMarkers(markers);
     const errors = markers.filter((m) => m.severity === "error").length;
     ctx.toast(markers.length ? `ERC: ${errors} error${errors === 1 ? "" : "s"}, ${markers.length - errors} warning${markers.length - errors === 1 ? "" : "s"}` : "ERC: no problems found");
@@ -111835,11 +112187,11 @@ ${body}
     while (i < a.length && i < b.length - 1 && a[i] === b[i]) i++;
     return [...Array(a.length - i).fill(".."), ...b.slice(i)].join("/");
   }
-  function schDocs2(ctx) {
+  function schDocs3(ctx) {
     return (ctx.docs || []).filter((d) => d && d.docType === "kicad_sch");
   }
   function currentDoc2(ctx) {
-    const docs = schDocs2(ctx);
+    const docs = schDocs3(ctx);
     if (ctx.docId) {
       const d = docs.find((x) => x.docId === ctx.docId);
       if (d) return d;
@@ -111865,15 +112217,15 @@ ${body}
     file = normSheetFile(file);
     if (!file) throw new Error("no sheet file name");
     const cur2 = currentDoc2(ctx), dir = cur2 ? dirName(cur2.path) : "", target2 = joinPath2(dir, file);
-    const found = schDocs2(ctx).find((d) => d.path === target2 || d.path === file) || schDocs2(ctx).find((d) => baseName3(d.path) === baseName3(file));
+    const found = schDocs3(ctx).find((d) => d.path === target2 || d.path === file) || schDocs3(ctx).find((d) => baseName3(d.path) === baseName3(file));
     if (found) return { file: relPath(dir, found.path), docId: found.docId, created: false };
     if (typeof ctx.api !== "function" || !ctx.project || !ctx.project.projectId) throw new Error("this session cannot create sheet files");
     const res = await ctx.api(`/api/projects/${ctx.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path: target2, docType: "kicad_sch" }) });
     if (!res || !res.docId) throw new Error("no document id returned");
     if (!res.existing) await ctx.api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: emptySheetDoc() });
-    const entry = { docId: res.docId, path: res.path || target2, docType: "kicad_sch" };
-    if (Array.isArray(ctx.docs) && !ctx.docs.some((d) => d && d.docId === entry.docId)) ctx.docs.push(entry);
-    return { file, docId: entry.docId, created: !res.existing };
+    const entry2 = { docId: res.docId, path: res.path || target2, docType: "kicad_sch" };
+    if (Array.isArray(ctx.docs) && !ctx.docs.some((d) => d && d.docId === entry2.docId)) ctx.docs.push(entry2);
+    return { file, docId: entry2.docId, created: !res.existing };
   }
   function sheetPathHere(doc2) {
     const paths = /* @__PURE__ */ new Map(), names2 = /* @__PURE__ */ new Map(), vote = (m, k) => {
@@ -111902,7 +112254,7 @@ ${body}
       const pg = kid8(pa, "page");
       if (pg) used.add(str9(pg[1]));
     }
-    let n2 = Math.max(2, schDocs2(ctx).length);
+    let n2 = Math.max(2, schDocs3(ctx).length);
     while (used.has(String(n2))) n2++;
     return n2;
   }
@@ -111914,16 +112266,16 @@ ${body}
     return ["instances", ["project", name, ["path", path2, ["page", String(page)]]]];
   }
   function placeSheet(ctx, a, b, name, file) {
-    if (S2.sheetJob) {
+    if (S3.sheetJob) {
       ctx.toast("Still creating the previous sheet\u2026");
-      return S2.sheetJob.promise;
+      return S3.sheetJob.promise;
     }
     const doc2 = ctx.doc, job = { doc: doc2, promise: null };
-    S2.sheetJob = job;
+    S3.sheetJob = job;
     job.promise = (async () => {
       try {
         const ref = await ensureSheetDoc(ctx, normSheetFile(file));
-        if (S2.sheetJob !== job || ctx.doc !== doc2) return null;
+        if (S3.sheetJob !== job || ctx.doc !== doc2) return null;
         const node = sheetNode(a, b, name, ref.file);
         const inst = sheetInstance(ctx, doc2, nextPage(ctx, doc2));
         if (inst) node.push(inst);
@@ -111936,29 +112288,29 @@ ${body}
         ctx.toast("Could not create the sheet: " + (e && e.message || e), 4e3);
         return null;
       } finally {
-        if (S2.sheetJob === job) S2.sheetJob = null;
+        if (S3.sheetJob === job) S3.sheetJob = null;
         ctx.requestRender();
       }
     })();
     return job.promise;
   }
   function placeSheetNode(ctx, node, file) {
-    if (S2.sheetJob) {
+    if (S3.sheetJob) {
       ctx.toast("Still creating the previous sheet\u2026");
-      return S2.sheetJob.promise;
+      return S3.sheetJob.promise;
     }
     const doc2 = ctx.doc, job = { doc: doc2, promise: null };
-    S2.sheetJob = job;
+    S3.sheetJob = job;
     job.promise = (async () => {
       try {
         file = normSheetFile(file);
         const cur2 = currentDoc2(ctx), dir = cur2 ? dirName(cur2.path) : "", target2 = joinPath2(dir, file);
-        const exists = schDocs2(ctx).find((x) => x.path === target2 || x.path === file);
+        const exists = schDocs3(ctx).find((x) => x.path === target2 || x.path === file);
         if (exists && root5.KDialogs && root5.KDialogs.confirm && !await root5.KDialogs.confirm("Confirmation", `'${baseName3(file)}' already exists.
 
 Link '${target2}' to this file?`)) return null;
         const ref = await ensureSheetDoc(ctx, file);
-        if (S2.sheetJob !== job || ctx.doc !== doc2) return null;
+        if (S3.sheetJob !== job || ctx.doc !== doc2) return null;
         const fp = kids7(node, "property").find((q4) => /^Sheet ?file$/i.test(str9(q4[1])));
         if (fp) fp[2] = ref.file;
         const { item, change } = addNode(doc2, node);
@@ -111970,7 +112322,7 @@ Link '${target2}' to this file?`)) return null;
         ctx.toast("Could not create the sheet: " + (e && e.message || e), 4e3);
         return null;
       } finally {
-        if (S2.sheetJob === job) S2.sheetJob = null;
+        if (S3.sheetJob === job) S3.sheetJob = null;
         ctx.requestRender();
       }
     })();
@@ -112038,24 +112390,24 @@ Link '${target2}' to this file?`)) return null;
     return ctx.loadSheetDoc ? ctx.loadSheetDoc(sheet) : null;
   }
   function sheetPinClick(ctx, mm4) {
-    if (S2.pinPlace) {
+    if (S3.pinPlace) {
       placePinPlace(ctx, mm4);
       return null;
     }
-    let sheet = S2.pinSheet ? ctx.doc.items.get(S2.pinSheet) || null : null;
+    let sheet = S3.pinSheet ? ctx.doc.items.get(S3.pinSheet) || null : null;
     if (!sheet) sheet = sheetAt(ctx.doc, mm4, Math.max(0.5, 4 * mmPerPx(ctx)));
     if (!sheet) {
       ctx.toast("Click over a sheet.", 2e3);
       return null;
     }
-    S2.pinSheet = sheet.id;
+    S3.pinSheet = sheet.id;
     beginPinPlace(ctx, sheet, mm4);
     return sheet;
   }
   function beginPinPlace(ctx, sheet, mm4) {
     const got = sheetDocOf(ctx, sheet);
     const go = (sub3) => {
-      if (S2.tool !== "sheetpin" || S2.pinPlace) return;
+      if (S3.tool !== "sheetpin" || S3.pinPlace) return;
       const cur2 = ctx.doc.items.get(sheet.id);
       if (!cur2) return;
       if (!sub3) {
@@ -112065,23 +112417,23 @@ Link '${target2}' to this file?`)) return null;
       const label = importHierLabel(cur2, sub3);
       if (!label) {
         ctx.toast("No new hierarchical labels found.", 2e3);
-        S2.pinSheet = null;
+        S3.pinSheet = null;
         switchTool(ctx, "select");
         ctx.requestRender();
         return;
       }
-      S2.pinPlace = { sheetId: cur2.id, name: label.name, shape: label.shape, node: cur2.node, item: null, p: [0, 0], side: "left" };
-      movePinPlace(ctx, S2.cursor || mm4);
+      S3.pinPlace = { sheetId: cur2.id, name: label.name, shape: label.shape, node: cur2.node, item: null, p: [0, 0], side: "left" };
+      movePinPlace(ctx, S3.cursor || mm4);
     };
     if (got && typeof got.then === "function") got.then(go, () => go(null));
     else go(got);
   }
   function movePinPlace(ctx, mm4) {
-    const pp = S2.pinPlace;
+    const pp = S3.pinPlace;
     if (!pp) return;
     const sheet = ctx.doc.items.get(pp.sheetId);
     if (!sheet) {
-      S2.pinPlace = null;
+      S3.pinPlace = null;
       ctx.requestRender();
       return;
     }
@@ -112103,15 +112455,15 @@ Link '${target2}' to this file?`)) return null;
     ctx.requestRender();
   }
   function cancelPinPlace(ctx) {
-    S2.pinPlace = null;
+    S3.pinPlace = null;
     ctx.requestRender();
   }
   function placePinPlace(ctx, mm4) {
-    const pp = S2.pinPlace;
+    const pp = S3.pinPlace;
     if (!pp) return;
     movePinPlace(ctx, mm4);
     const sheet = ctx.doc.items.get(pp.sheetId);
-    S2.pinPlace = null;
+    S3.pinPlace = null;
     if (!sheet) return;
     const node = deep(sheet.node), pin = deep(kids7(pp.node, "pin").find((q4) => str9(q4[1]) === pp.name && !kids7(sheet.node, "pin").some((o) => str9(o[1]) === pp.name && uuidOfNode(o) === uuidOfNode(q4))));
     const i = node.findIndex((c) => Array.isArray(c) && c[0] === "instances");
@@ -112119,7 +112471,7 @@ Link '${target2}' to this file?`)) return null;
     else node.push(pin);
     ctx.commit([modChange(ctx.doc, sheet, node)], "Add Sheet Pin");
     const cur2 = ctx.doc.items.get(pp.sheetId);
-    if (cur2) beginPinPlace(ctx, cur2, S2.cursor || mm4);
+    if (cur2) beginPinPlace(ctx, cur2, S3.cursor || mm4);
     ctx.requestRender();
   }
   var uuidOfNode = (n2) => {
@@ -112550,19 +112902,19 @@ Link '${target2}' to this file?`)) return null;
     return ctx.snap([mm4[0], mm4[1]]).map(r45);
   }
   function startDraw(ctx, shape3, p) {
-    S2.draw = { shape: shape3, pts: [p], cur: p.slice() };
+    S3.draw = { shape: shape3, pts: [p], cur: p.slice() };
     ctx.requestRender();
   }
   function cancelDraw(ctx) {
-    S2.draw = null;
+    S3.draw = null;
     closePrompt();
     ctx.requestRender();
   }
   function undoDrawPoint(ctx) {
-    const d = S2.draw;
+    const d = S3.draw;
     if (!d) return;
     if (d.pts.length > 1) d.pts.pop();
-    else S2.draw = null;
+    else S3.draw = null;
     ctx.requestRender();
   }
   function drawClick(ctx, shape3, p) {
@@ -112570,7 +112922,7 @@ Link '${target2}' to this file?`)) return null;
       schArcClick(ctx, p);
       return;
     }
-    const d = S2.draw;
+    const d = S3.draw;
     if (!d || d.shape !== shape3) {
       startDraw(ctx, shape3, p);
       return;
@@ -112617,7 +112969,7 @@ Link '${target2}' to this file?`)) return null;
     finishDraw(ctx);
   }
   function finishDraw(ctx) {
-    const d = S2.draw;
+    const d = S3.draw;
     if (!d) return;
     const doc2 = ctx.doc, pts = d.pts;
     let node = null, label = d.shape;
@@ -112658,8 +113010,8 @@ Link '${target2}' to this file?`)) return null;
       d.await = true;
       ctx.requestRender();
       const done = (n2) => {
-        if (S2.draw !== d) return;
-        S2.draw = null;
+        if (S3.draw !== d) return;
+        S3.draw = null;
         if (n2) commitShape(ctx, n2, "Draw Table");
         ctx.requestRender();
       };
@@ -112675,35 +113027,35 @@ Link '${target2}' to this file?`)) return null;
       ctx.requestRender();
       const KD2 = typeof root5.KDialogs !== "undefined" ? root5.KDialogs : null;
       if (KD2 && KD2.schItemDialog && !ctx.viewOnly) {
-        const pre = S2.sheetPreset;
-        S2.sheetPreset = null;
+        const pre = S3.sheetPreset;
+        S3.sheetPreset = null;
         const sn = pre ? sheetNode(pts[0], pts[1], pre.name, pre.file) : sheetNode(pts[0], pts[1], "Untitled Sheet", "untitled" + SHEET_EXT);
         const inst = sheetInstance(ctx, ctx.doc, nextPage(ctx, ctx.doc));
         if (inst) sn.push(inst);
         const it = { id: "", kind: "sheet", node: sn, geom: [], bbox: null };
         KD2.schItemDialog(ctx, it, { cancel() {
-          if (S2.draw === d) {
-            S2.draw = null;
+          if (S3.draw === d) {
+            S3.draw = null;
             ctx.requestRender();
           }
         }, onCreate(staged) {
-          if (S2.draw !== d) return;
-          S2.draw = null;
+          if (S3.draw !== d) return;
+          S3.draw = null;
           const fp = kids7(staged, "property").find((q4) => /^Sheet ?file$/i.test(str9(q4[1])));
           placeSheetNode(ctx, staged, fp ? str9(fp[2]) : "untitled" + SHEET_EXT);
         } });
         return;
       }
-      promptImpl("Sheet name", "", S2.cursorClient, (name) => {
-        if (S2.draw !== d) return;
+      promptImpl("Sheet name", "", S3.cursorClient, (name) => {
+        if (S3.draw !== d) return;
         if (!name) {
-          S2.draw = null;
+          S3.draw = null;
           ctx.requestRender();
           return;
         }
-        promptImpl("Sheet file", sheetFileFor(name), S2.cursorClient, (file) => {
-          if (S2.draw !== d) return;
-          S2.draw = null;
+        promptImpl("Sheet file", sheetFileFor(name), S3.cursorClient, (file) => {
+          if (S3.draw !== d) return;
+          S3.draw = null;
           if (file) placeSheet(ctx, pts[0], pts[1], name, file);
           else ctx.requestRender();
         });
@@ -112718,29 +113070,29 @@ Link '${target2}' to this file?`)) return null;
         KD2.openItem(ctx, { id: "", kind: "text_box", node: tb, geom: [], bbox: null }, {
           generic: true,
           cancel() {
-            if (S2.draw === d) {
-              S2.draw = null;
+            if (S3.draw === d) {
+              S3.draw = null;
               ctx.requestRender();
             }
           },
           onCreate(staged) {
-            if (S2.draw !== d) return;
-            S2.draw = null;
+            if (S3.draw !== d) return;
+            S3.draw = null;
             commitShape(ctx, staged, "text box");
             ctx.requestRender();
           }
         });
         return;
       }
-      promptImpl("Text box", "", S2.cursorClient, (text3) => {
-        if (S2.draw !== d) return;
-        S2.draw = null;
+      promptImpl("Text box", "", S3.cursorClient, (text3) => {
+        if (S3.draw !== d) return;
+        S3.draw = null;
         if (text3) commitShape(ctx, textBoxNode(text3, pts[0], pts[1]), "text box");
         ctx.requestRender();
       });
       return;
     }
-    S2.draw = null;
+    S3.draw = null;
     if (node) commitShape(ctx, node, label);
     ctx.requestRender();
   }
@@ -112748,7 +113100,7 @@ Link '${target2}' to this file?`)) return null;
     const { item, change } = addNode(ctx.doc, node);
     ctx.commit([change], label);
     rememberPlaced(item.kind, item.node);
-    S2.sel = item.id;
+    S3.sel = item.id;
     ctx.setSelected(null);
     return item;
   }
@@ -112851,7 +113203,7 @@ Link '${target2}' to this file?`)) return null;
   function switchSchArcMode(ctx, m) {
     setSchArcDrawMode(m);
     showSchArcMode(ctx);
-    const d = S2.draw;
+    const d = S3.draw;
     if (d && d.shape === "arc" && d.arc) {
       d.arc.setMode(m);
       d.chainSeeded = false;
@@ -112861,11 +113213,11 @@ Link '${target2}' to this file?`)) return null;
     ctx.requestRender();
   }
   function schArcClick(ctx, p) {
-    let d = S2.draw;
-    if (!d || d.shape !== "arc" || !d.arc) d = S2.draw = newSchArc(null);
+    let d = S3.draw;
+    if (!d || d.shape !== "arc" || !d.arc) d = S3.draw = newSchArc(null);
     const g2 = d.arc, pos = toNm(p);
     if (!d.started) {
-      S2.sel = null;
+      S3.sel = null;
       ctx.setSelected(null);
       d.started = true;
     }
@@ -112900,43 +113252,43 @@ Link '${target2}' to this file?`)) return null;
   }
   function commitSchArc(ctx, d, next) {
     const a = schArcPoints(d);
-    S2.draw = null;
+    S3.draw = null;
     if (a) commitShape(ctx, arcNode(a.start, a.mid, a.end), "arc");
     if (!next) return;
     const sh = d.arc.shape();
     const seed = sh && schArcDrawMode() === ARC_TANGENT ? arcTangentSeedNear({ t: "arc", start: sh.start, mid: sh.mid, end: sh.end, center: sh.center }, d.lastClick || sh.end) : null;
-    S2.draw = newSchArc(seed);
-    S2.draw.cur = d.cur.slice();
+    S3.draw = newSchArc(seed);
+    S3.draw.cur = d.cur.slice();
   }
   function finishSchArc(ctx) {
-    const d = S2.draw, a = d && d.started ? schArcPoints(d) : null;
-    S2.draw = null;
+    const d = S3.draw, a = d && d.started ? schArcPoints(d) : null;
+    S3.draw = null;
     if (a) commitShape(ctx, arcNode(a.start, a.mid, a.end), "arc");
     ctx.setTool("select");
     ctx.requestRender();
   }
   function schArcBackup(ctx) {
-    const d = S2.draw, g2 = d.arc;
+    const d = S3.draw, g2 = d.arc;
     if (d.clickSeeded) {
       g2.reset();
       d.clickSeeded = false;
     } else if (g2.isReset() && !g2.hasTangentSeed()) {
-      S2.draw = null;
+      S3.draw = null;
     } else g2.removeLastPoint();
-    if (S2.draw) syncSchArc(d);
+    if (S3.draw) syncSchArc(d);
     ctx.requestRender();
   }
   function schArcUndo(ctx) {
-    const d = S2.draw;
+    const d = S3.draw;
     if (!d || !d.arc) return;
-    S2.draw = newSchArc(null);
-    S2.draw.cur = d.cur.slice();
-    S2.sel = null;
+    S3.draw = newSchArc(null);
+    S3.draw.cur = d.cur.slice();
+    S3.sel = null;
     ctx.setSelected(null);
     ctx.requestRender();
   }
   function schArcPosture(ctx) {
-    const d = S2.draw;
+    const d = S3.draw;
     if (!d || !d.arc) return false;
     d.arc.toggleClockwise();
     ctx.requestRender();
@@ -112997,12 +113349,12 @@ Link '${target2}' to this file?`)) return null;
   }
   function ghostSegs() {
     const out2 = [];
-    const w = S2.wire;
+    const w = S3.wire;
     if (w) {
       const width = w.kind === "bus" ? 0.3048 : 0.1524;
       for (const sg of w.segs) if (!segNull(sg)) out2.push([sg[0][0], sg[0][1], sg[1][0], sg[1][1], width]);
     }
-    for (const seg2 of S2.drag && S2.drag.preview || []) {
+    for (const seg2 of S3.drag && S3.drag.preview || []) {
       const width = seg2.kind === "bus" ? 0.3048 : 0.1524;
       for (let i = 1; i < seg2.pts.length; i++) out2.push([seg2.pts[i - 1][0], seg2.pts[i - 1][1], seg2.pts[i][0], seg2.pts[i][1], width]);
     }
@@ -113012,13 +113364,13 @@ Link '${target2}' to this file?`)) return null;
     const path2 = (pts) => {
       for (let i = 1; i < pts.length && out2.length < 120; i++) out2.push([pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1], 0.1524]);
     };
-    const d = S2.drag;
+    const d = S3.drag;
     if (d && d.moved) for (const e of d.items) {
       if (LINE_KINDS.has(e.kind)) path2(ptsOf4(e.item.node));
       else box3(e.item.bbox || rectOf(e.item));
     }
-    if (S2.carry && S2.carry.item) box3(S2.carry.item.bbox || rectOf(S2.carry.item));
-    const dr = S2.draw;
+    if (S3.carry && S3.carry.item) box3(S3.carry.item.bbox || rectOf(S3.carry.item));
+    const dr = S3.draw;
     if (dr && dr.arc) {
       const a = schArcPoints(dr), arc = a ? K11.arcFrom3(a.start, a.mid, a.end) : null;
       if (arc) {
@@ -113032,8 +113384,8 @@ Link '${target2}' to this file?`)) return null;
     } else if (dr && dr.pts.length && dr.cur) {
       const a = dr.pts[0], c = dr.cur;
       if (dr.shape === "table") {
-        for (const l of drawTableLines(a, c, S2.ctx && S2.ctx.gridPitch || 1.27, labelDefaults2().textSize)) if (out2.length < 120) out2.push([l[0], l[1], l[2], l[3], 0.1524]);
-      } else if (dr.shape === "sheet") box3(corners(a, dr.await && dr.pts[1] ? dr.pts[1] : sheetCorner(a, c, S2.ctx && S2.ctx.gridPitch || 1.27)));
+        for (const l of drawTableLines(a, c, S3.ctx && S3.ctx.gridPitch || 1.27, labelDefaults2().textSize)) if (out2.length < 120) out2.push([l[0], l[1], l[2], l[3], 0.1524]);
+      } else if (dr.shape === "sheet") box3(corners(a, dr.await && dr.pts[1] ? dr.pts[1] : sheetCorner(a, c, S3.ctx && S3.ctx.gridPitch || 1.27)));
       else if (dr.shape === "rect" || dr.shape === "textbox") box3(corners(a, c));
       else if (dr.shape === "ellipse" || dr.shape === "ellipse_arc") {
         const e = ellipseFromBox(a, dr.pts[1] || c), r = e.rotation * Math.PI / 180, ring = [];
@@ -113263,11 +113615,11 @@ Link '${target2}' to this file?`)) return null;
     return [w * c + h3 * s2, w * s2 + h3 * c];
   }
   function imageOriginOffset(id) {
-    const o = S2.imgOrigin && S2.imgOrigin.get(id);
+    const o = S3.imgOrigin && S3.imgOrigin.get(id);
     return o ? o.slice() : [0, 0];
   }
   function setImageOriginOffset(id, o) {
-    (S2.imgOrigin || (S2.imgOrigin = /* @__PURE__ */ new Map())).set(id, o);
+    (S3.imgOrigin || (S3.imgOrigin = /* @__PURE__ */ new Map())).set(id, o);
   }
   var IMAGE_MIN_SIZE = 50 * 0.0254;
   function setImageToken(n2, key3, v, dflt) {
@@ -113603,15 +113955,15 @@ Link '${target2}' to this file?`)) return null;
     return out2;
   }
   function pointEditTarget(ctx) {
-    if (S2.multi && S2.multi.size > 1) return null;
+    if (S3.multi && S3.multi.size > 1) return null;
     if (ctx.selection && ctx.selection.size > 1) return null;
-    const it = S2.sel ? ctx.doc.items.get(S2.sel) : ctx.selected ? ctx.doc.items.get(ctx.selected.id) : null;
+    const it = S3.sel ? ctx.doc.items.get(S3.sel) : ctx.selected ? ctx.doc.items.get(ctx.selected.id) : null;
     if (!it) return null;
     const ep = editPoints(ctx.doc, it);
     return ep ? { item: it, ep } : null;
   }
   function pointEditStart(ctx, mm4, ev) {
-    if (ctx.viewOnly || S2.drag || S2.wire || S2.carry) return false;
+    if (ctx.viewOnly || S3.drag || S3.wire || S3.carry) return false;
     const t = pointEditTarget(ctx);
     if (!t) return false;
     const tol = (EDIT_POINT_PX / 2 + 2) * mmPerPx(ctx), hs = editHandles(t.ep);
@@ -113624,10 +113976,10 @@ Link '${target2}' to this file?`)) return null;
       }
     });
     if (best < 0) return false;
-    S2.pedit = { item: t.item, ep: t.ep, idx: best, orig: deep(t.item.node), followers: editFollowers(ctx.doc, t.item, t.ep), start: hs[best], moved: false, last: hs[best] };
+    S3.pedit = { item: t.item, ep: t.ep, idx: best, orig: deep(t.item.node), followers: editFollowers(ctx.doc, t.item, t.ep), start: hs[best], moved: false, last: hs[best] };
     if (t.item.kind === "image") {
-      S2.pedit.imgOrigin0 = imageOriginOffset(t.item.id);
-      S2.pedit.imgSize0 = [t.item.w || 10, t.item.h || 10];
+      S3.pedit.imgOrigin0 = imageOriginOffset(t.item.id);
+      S3.pedit.imgSize0 = [t.item.w || 10, t.item.h || 10];
     }
     try {
       if (ev && ev.pointerId !== void 0) ctx.stage.setPointerCapture(ev.pointerId);
@@ -113637,13 +113989,13 @@ Link '${target2}' to this file?`)) return null;
     return true;
   }
   function pointEditSnap(ctx, mm4, ev) {
-    const pe = S2.pedit, k = pe.item.kind;
+    const pe = S3.pedit, k = pe.item.kind;
     if (k === "wire" || k === "bus") return snapConn(ctx, mm4, k, ev);
     if (ev && (ev.ctrlKey || ev.metaKey)) return [r45(mm4[0]), r45(mm4[1])];
     return ctx.snap([mm4[0], mm4[1]]).map(r45);
   }
   function pointEditMove(ctx, mm4, ev) {
-    const pe = S2.pedit;
+    const pe = S3.pedit;
     if (!pe) return;
     const p = pointEditSnap(ctx, mm4, ev);
     if (!pe.moved && same(p, pe.start)) return;
@@ -113653,8 +114005,8 @@ Link '${target2}' to this file?`)) return null;
     ctx.requestRender();
   }
   function pointEditEnd(ctx, commit) {
-    const pe = S2.pedit;
-    S2.pedit = null;
+    const pe = S3.pedit;
+    S3.pedit = null;
     if (!pe) return null;
     const doc2 = ctx.doc;
     let nodes = null;
@@ -113681,7 +114033,7 @@ Link '${target2}' to this file?`)) return null;
     return changes;
   }
   function drawEditPoints(c, ctx, px) {
-    const t = S2.pedit ? { item: S2.pedit.item, ep: editPoints(ctx.doc, S2.pedit.item) } : pointEditTarget(ctx);
+    const t = S3.pedit ? { item: S3.pedit.item, ep: editPoints(ctx.doc, S3.pedit.item) } : pointEditTarget(ctx);
     if (!t || !t.ep) return;
     const { fill: fill22, border } = editPointColors(K11.SCH.aux || "#000000", K11.SCH.bg || "#F5F4EF"), size2 = EDIT_POINT_PX * px / 2, bw = EDIT_BORDER_PX * px;
     const ep = t.ep, circ = new Set(ep.circles || []);
@@ -113831,12 +114183,12 @@ Link '${target2}' to this file?`)) return null;
   }
   function collisionCursor(stage3, on2) {
     if (!stage3) return;
-    if (on2 && S2.collisionCursor == null) {
-      S2.collisionCursor = stage3.style.cursor || "";
+    if (on2 && S3.collisionCursor == null) {
+      S3.collisionCursor = stage3.style.cursor || "";
       stage3.style.cursor = WARNING_CURSOR;
-    } else if (!on2 && S2.collisionCursor != null) {
-      stage3.style.cursor = S2.collisionCursor;
-      S2.collisionCursor = null;
+    } else if (!on2 && S3.collisionCursor != null) {
+      stage3.style.cursor = S3.collisionCursor;
+      S3.collisionCursor = null;
     }
   }
   var DANGLE_LABEL_COLOR = { label: "label", global_label: "glabel", hierarchical_label: "hlabel", netclass_flag: "netclass", directive_label: "netclass" };
@@ -113947,7 +114299,7 @@ Link '${target2}' to this file?`)) return null;
   }
   var AUTOSTART_CURSOR = { wire: "LINE_WIRE", bus: "LINE_BUS", polyline: "LINE_GRAPHIC" };
   var AUTOSTART_TOOL = { wire: "wire", bus: "bus", polyline: "lines" };
-  S2.autoStartWires = true;
+  S3.autoStartWires = true;
   var brighten = (hex2, f2) => {
     const m = /^#?([0-9a-f]{6})$/i.exec(String(hex2 || ""));
     if (!m) return hex2;
@@ -113961,9 +114313,9 @@ Link '${target2}' to this file?`)) return null;
   var DEFAULT_PEN = 6 * MIL6;
   var TARGET_BUSENTRY_RADIUS = 12 * MIL6;
   var danglingCache = { doc: null, gen: -1, list: [] };
-  S2.docGen = 0;
+  S3.docGen = 0;
   function danglingList(doc2) {
-    if (danglingCache.doc !== doc2 || danglingCache.gen !== S2.docGen || S2.drag) danglingCache = { doc: doc2, gen: S2.docGen, list: danglingEnds(doc2) };
+    if (danglingCache.doc !== doc2 || danglingCache.gen !== S3.docGen || S3.drag) danglingCache = { doc: doc2, gen: S3.docGen, list: danglingEnds(doc2) };
     return danglingCache.list;
   }
   var danglingIdsCache = { list: null, ids: /* @__PURE__ */ new Set() };
@@ -114012,23 +114364,23 @@ Link '${target2}' to this file?`)) return null;
     c.restore();
   }
   function drawOverlay(c, view, ctx) {
-    S2.ctx = ctx;
+    S3.ctx = ctx;
     installDom(ctx);
     const px = 1 / (view.ppm * view.zoom * (view.dpr || 1)), doc2 = ctx.doc;
-    if (S2.showDangling !== false) drawDangling(c, doc2, px);
-    if (S2.hover && !S2.drag && curTool() === "delete") {
-      const it = doc2.items.get(S2.hover);
+    if (S3.showDangling !== false) drawDangling(c, doc2, px);
+    if (S3.hover && !S3.drag && curTool() === "delete") {
+      const it = doc2.items.get(S3.hover);
       if (it) paintItems(c, view, doc2, [it], { highlight: /* @__PURE__ */ new Set([it.id]) });
     }
-    if (curTool() === "select" && !S2.drag) drawEditPoints(c, ctx, px);
-    if (S2.highlight && typeof ctx.setHighlight !== "function") {
-      for (const id of S2.highlight) {
+    if (curTool() === "select" && !S3.drag) drawEditPoints(c, ctx, px);
+    if (S3.highlight && typeof ctx.setHighlight !== "function") {
+      for (const id of S3.highlight) {
         const it = doc2.items.get(id);
         if (it) outline(c, it, "#FF40FF", px, 2);
       }
     }
-    if (S2.markers.length && S2.markersDoc === doc2 && typeof ctx.setMarkers !== "function") {
-      for (const m of S2.markers) {
+    if (S3.markers.length && S3.markersDoc === doc2 && typeof ctx.setMarkers !== "function") {
+      for (const m of S3.markers) {
         const s2 = 6 * px;
         c.save();
         c.fillStyle = m.severity === "error" ? "rgba(255,0,0,0.85)" : "rgba(255,180,0,0.9)";
@@ -114045,8 +114397,8 @@ Link '${target2}' to this file?`)) return null;
         c.restore();
       }
     }
-    if (S2.drag) {
-      for (const s2 of S2.drag.preview || []) {
+    if (S3.drag) {
+      for (const s2 of S3.drag.preview || []) {
         c.save();
         c.strokeStyle = s2.kind === "bus" ? CLR.bus : CLR.wire;
         c.lineWidth = Math.max(s2.kind === "bus" ? 0.3048 : 0.1524, 2 * px);
@@ -114059,18 +114411,18 @@ Link '${target2}' to this file?`)) return null;
         c.restore();
       }
       let warn = false;
-      if (S2.drag.moved) {
-        const js = dragJunctions(doc2, S2.drag);
+      if (S3.drag.moved) {
+        const js = dragJunctions(doc2, S3.drag);
         drawJunctionDots(c, js, px);
-        if (S2.drag.collision) {
-          const m = collisionMarkers(doc2, S2.drag.collision, js);
+        if (S3.drag.collision) {
+          const m = collisionMarkers(doc2, S3.drag.collision, js);
           drawCollision(c, m, px);
           warn = m.junctions.length + m.breaks.length > 0;
         }
       }
       collisionCursor(ctx.stage, warn);
-    } else if (S2.collisionCursor != null) collisionCursor(ctx.stage, false);
-    const w = S2.wire;
+    } else if (S3.collisionCursor != null) collisionCursor(ctx.stage, false);
+    const w = S3.wire;
     if (w) {
       c.save();
       c.strokeStyle = w.kind === "bus" ? CLR.bus : w.kind === "polyline" ? K11.SCH.notes : CLR.wire;
@@ -114087,7 +114439,7 @@ Link '${target2}' to this file?`)) return null;
       c.restore();
       if (w.kind !== "polyline") drawJunctionDots(c, previewJunctions(doc2, w.segs.map((sg) => ({ kind: w.kind, a: sg[0], b: sg[1] }))), px);
     }
-    const d = S2.draw;
+    const d = S3.draw;
     if (d) {
       c.save();
       c.strokeStyle = K11.SCH.notes;
@@ -114103,13 +114455,13 @@ Link '${target2}' to this file?`)) return null;
       }
       if (d.shape === "table") {
         c.beginPath();
-        for (const l of drawTableLines(p0, cur2, S2.ctx ? S2.ctx.gridPitch : 1.27, labelDefaults2().textSize)) {
+        for (const l of drawTableLines(p0, cur2, S3.ctx ? S3.ctx.gridPitch : 1.27, labelDefaults2().textSize)) {
           c.moveTo(l[0], l[1]);
           c.lineTo(l[2], l[3]);
         }
         c.stroke();
       } else if (d.shape === "sheet") {
-        const b = d.await ? cur2 : sheetCorner(p0, cur2, S2.ctx ? S2.ctx.gridPitch : 1.27), it = ghost(doc2, sheetNode(p0, b, S2.sheetPreset ? S2.sheetPreset.name : "Untitled Sheet", S2.sheetPreset ? S2.sheetPreset.file : "untitled.kicad_sch"));
+        const b = d.await ? cur2 : sheetCorner(p0, cur2, S3.ctx ? S3.ctx.gridPitch : 1.27), it = ghost(doc2, sheetNode(p0, b, S3.sheetPreset ? S3.sheetPreset.name : "Untitled Sheet", S3.sheetPreset ? S3.sheetPreset.file : "untitled.kicad_sch"));
         if (it) {
           c.restore();
           paintItems(c, view, doc2, [it], {});
@@ -114162,9 +114514,9 @@ Link '${target2}' to this file?`)) return null;
       }
       c.restore();
     }
-    if (S2.pinPlace && S2.pinPlace.item) paintItems(c, view, doc2, [S2.pinPlace.item], { selected: /* @__PURE__ */ new Set([S2.pinPlace.item.id]) });
-    if (S2.carry && S2.carry.item) {
-      const it = S2.carry.item;
+    if (S3.pinPlace && S3.pinPlace.item) paintItems(c, view, doc2, [S3.pinPlace.item], { selected: /* @__PURE__ */ new Set([S3.pinPlace.item.id]) });
+    if (S3.carry && S3.carry.item) {
+      const it = S3.carry.item;
       paintItems(c, view, doc2, [it], { selected: /* @__PURE__ */ new Set([it.id]), moving: /* @__PURE__ */ new Set([it.id]) });
     }
     const sp = snapIndicatorAt(ctx);
@@ -114174,19 +114526,19 @@ Link '${target2}' to this file?`)) return null;
     const one2 = Object.assign({}, doc2, { items: new Map(items.map((it) => [it.id, it])) });
     c.save();
     try {
-      K11.render(one2, c, view, Object.assign({ background: false, overlay: true, grid: 0, frame: false, hidden: S2.ctx && S2.ctx.hiddenLayers || void 0 }, opts2));
+      K11.render(one2, c, view, Object.assign({ background: false, overlay: true, grid: 0, frame: false, hidden: S3.ctx && S3.ctx.hiddenLayers || void 0 }, opts2));
     } finally {
       c.restore();
     }
   }
   function snapIndicatorAt(ctx) {
-    const t = toolOf(S2.tool);
-    if (!S2.cursor || t && t.id === "delete") return null;
-    if (S2.mods && S2.mods.shiftKey) return null;
-    const c = S2.carry;
-    const kind = S2.wire ? S2.wire.kind : c ? TEXT_KINDS_SNAP.has(c.kind) ? c.kind === "bus" ? "bus" : "wire" : null : t && (t.kind === "wire" || t.kind === "bus") ? t.kind : null;
+    const t = toolOf(S3.tool);
+    if (!S3.cursor || t && t.id === "delete") return null;
+    if (S3.mods && S3.mods.shiftKey) return null;
+    const c = S3.carry;
+    const kind = S3.wire ? S3.wire.kind : c ? TEXT_KINDS_SNAP.has(c.kind) ? c.kind === "bus" ? "bus" : "wire" : null : t && (t.kind === "wire" || t.kind === "bus") ? t.kind : null;
     if (!kind || kind === "polyline") return null;
-    return snapAnchor(ctx, S2.cursor, kind);
+    return snapAnchor(ctx, S3.cursor, kind);
   }
   var TEXT_KINDS_SNAP = /* @__PURE__ */ new Set(["label", "global_label", "hierarchical_label", "netclass_flag", "directive_label", "no_connect", "junction", "bus_entry", "wire", "bus"]);
   var SNAP_INDICATOR_COLOR = "rgb(0,26,102)";
@@ -114498,7 +114850,7 @@ Link '${target2}' to this file?`)) return null;
     const p = kids7(it.node, "property").find((q4) => str9(q4[1]) === name);
     const cur2 = p ? str9(p[2]) : "";
     if (p && root5.KDialogs && root5.KDialogs.schFieldDialog && root5.KDialogs.schFieldDialog(ctx, it, name)) return true;
-    promptImpl(title, cur2, S2.cursorClient, (text3) => {
+    promptImpl(title, cur2, S3.cursorClient, (text3) => {
       if (text3 === null || text3 === void 0 || text3 === cur2) return;
       const node = deep(it.node);
       if (name === "Reference") setReference(node, text3);
@@ -114633,8 +114985,8 @@ Link '${target2}' to this file?`)) return null;
     }
     const node = cloneNode3(it);
     replaceKid(node, ["unit", next]);
-    S2.carry = { kind: "symbol", node, item: ghost(ctx.doc, node), pos: anchorOf("symbol", node) };
-    S2.sel = null;
+    S3.carry = { kind: "symbol", node, item: ghost(ctx.doc, node), pos: anchorOf("symbol", node) };
+    S3.sel = null;
     ctx.setSelected(null);
     switchTool(ctx, "place");
     ctx.requestRender();
@@ -114689,11 +115041,11 @@ Link '${target2}' to this file?`)) return null;
     imagePickerImpl = fn;
   }
   function openImagePicker(ctx) {
-    if (S2.imageWait) return;
-    S2.imageWait = true;
+    if (S3.imageWait) return;
+    S3.imageWait = true;
     imagePickerImpl(ctx, (file) => {
-      S2.imageWait = false;
-      if (!file || S2.tool !== "image") return;
+      S3.imageWait = false;
+      if (!file || S3.tool !== "image") return;
       const bytes = file.bytes || (file.base64 ? base64ToBytes(file.base64) : null);
       const base643 = file.base64 || (bytes ? bytesToBase64(bytes) : "");
       if (!base643) {
@@ -114701,17 +115053,17 @@ Link '${target2}' to this file?`)) return null;
         return;
       }
       const px = bytes ? imageSize(bytes) : null;
-      startCarry(ctx, "image", imageNode(S2.cursor || [0, 0], base643), S2.cursor);
-      if (S2.carry) S2.carry.size = px ? [px[0] * 25.4 / IMAGE_PPI, px[1] * 25.4 / IMAGE_PPI] : [20, 20];
+      startCarry(ctx, "image", imageNode(S3.cursor || [0, 0], base643), S3.cursor);
+      if (S3.carry) S3.carry.size = px ? [px[0] * 25.4 / IMAGE_PPI, px[1] * 25.4 / IMAGE_PPI] : [20, 20];
     });
   }
   function busyMessage() {
-    if (S2.wire) return "Press <ESC> to cancel drawing.";
-    if (S2.drag) return S2.drag.mode === "break" ? "Press <ESC> to cancel break." : S2.drag.mode === "slice" ? "Press <ESC> to cancel slice." : S2.dragMode === "move" ? "Press <ESC> to cancel move." : "Press <ESC> to cancel drag.";
-    if (S2.draw && S2.draw.shape === "sheet") return "Press <ESC> to cancel sheet creation.";
-    if (S2.pinPlace) return "Press <ESC> to cancel item creation.";
-    if (S2.carry) {
-      const k = S2.carry.kind;
+    if (S3.wire) return "Press <ESC> to cancel drawing.";
+    if (S3.drag) return S3.drag.mode === "break" ? "Press <ESC> to cancel break." : S3.drag.mode === "slice" ? "Press <ESC> to cancel slice." : S3.dragMode === "move" ? "Press <ESC> to cancel move." : "Press <ESC> to cancel drag.";
+    if (S3.draw && S3.draw.shape === "sheet") return "Press <ESC> to cancel sheet creation.";
+    if (S3.pinPlace) return "Press <ESC> to cancel item creation.";
+    if (S3.carry) {
+      const k = S3.carry.kind;
       if (k === "symbol") return "Press <ESC> to cancel symbol creation.";
       if (k === "image") return "Press <ESC> to cancel image creation.";
       if (TEXT_KINDS.has(k) || k === "netclass_flag" || k === "directive_label" || k === "text_box") return "Press <ESC> to cancel item creation.";
@@ -114719,56 +115071,56 @@ Link '${target2}' to this file?`)) return null;
     return null;
   }
   function vetoTool(toolId, ctx) {
-    if (S2.internalSwitch) return false;
+    if (S3.internalSwitch) return false;
     const msg = busyMessage();
     if (!msg) return false;
     if (ctx && ctx.toast) ctx.toast(msg);
     return true;
   }
   function syntheticClick(ctx) {
-    if (!S2.cursor) return false;
-    return onPointerDown({ button: 0, synthetic: true }, S2.cursor, ctx);
+    if (!S3.cursor) return false;
+    return onPointerDown({ button: 0, synthetic: true }, S3.cursor, ctx);
   }
   function onActivate(toolId, ctx, before = []) {
-    S2.ctx = ctx;
+    S3.ctx = ctx;
     installDom(ctx);
     announceModes(ctx);
-    if (!S2.internalSwitch && busyMessage()) {
+    if (!S3.internalSwitch && busyMessage()) {
       ctx.toast(busyMessage());
       ctx.requestRender();
       return;
     }
-    S2.tool = toolId;
+    S3.tool = toolId;
     closePrompt();
-    S2.pending = null;
-    if (S2.drag) endDrag(ctx, false);
-    if (S2.draw) S2.draw = null;
-    if (S2.sheetPreset && S2.sheetPreset.armed && toolId === "sheet") S2.sheetPreset.armed = false;
-    else S2.sheetPreset = null;
+    S3.pending = null;
+    if (S3.drag) endDrag(ctx, false);
+    if (S3.draw) S3.draw = null;
+    if (S3.sheetPreset && S3.sheetPreset.armed && toolId === "sheet") S3.sheetPreset.armed = false;
+    else S3.sheetPreset = null;
     if (toolId === "arc") showSchArcMode(ctx);
     if (!toolOf(toolId)) {
       closePicker();
-      S2.carry = null;
+      S3.carry = null;
       ctx.requestRender();
       return;
     }
-    S2.sel = null;
-    S2.hover = null;
-    S2.selEnds = null;
-    if (toolId !== "place" && toolId !== "power" && toolId !== "image") S2.carry = null;
-    if (toolId !== "image") S2.imageWait = false;
-    S2.pinPlace = null;
-    S2.pinSheet = null;
+    S3.sel = null;
+    S3.hover = null;
+    S3.selEnds = null;
+    if (toolId !== "place" && toolId !== "power" && toolId !== "image") S3.carry = null;
+    if (toolId !== "image") S3.imageWait = false;
+    S3.pinPlace = null;
+    S3.pinSheet = null;
     if (toolId === "sheetpin" && !ctx.viewOnly) {
       const front = before.length ? ctx.doc.items.get(before[0]) : void 0;
-      if (front && front.kind === "sheet") S2.pinSheet = front.id;
+      if (front && front.kind === "sheet") S3.pinSheet = front.id;
     }
-    if (toolId === "junction") startCarry(ctx, "junction", junctionNode(S2.cursor || [0, 0]), S2.cursor);
-    else if (toolId === "noconnect") startCarry(ctx, "no_connect", noConnectNode(S2.cursor || [0, 0]), S2.cursor);
-    else if (toolId === "busentry") startCarry(ctx, "bus_entry", busEntryNode(S2.cursor || [0, 0], 2.54, 2.54), S2.cursor);
-    else if (toolId === "place" && !S2.carry) openPicker(ctx, S2.cursorClient);
-    else if (toolId === "power" && !S2.carry) openPowerPicker(ctx, S2.cursorClient);
-    else if (toolId === "image" && !S2.carry) openImagePicker(ctx);
+    if (toolId === "junction") startCarry(ctx, "junction", junctionNode(S3.cursor || [0, 0]), S3.cursor);
+    else if (toolId === "noconnect") startCarry(ctx, "no_connect", noConnectNode(S3.cursor || [0, 0]), S3.cursor);
+    else if (toolId === "busentry") startCarry(ctx, "bus_entry", busEntryNode(S3.cursor || [0, 0], 2.54, 2.54), S3.cursor);
+    else if (toolId === "place" && !S3.carry) openPicker(ctx, S3.cursorClient);
+    else if (toolId === "power" && !S3.carry) openPowerPicker(ctx, S3.cursorClient);
+    else if (toolId === "image" && !S3.carry) openImagePicker(ctx);
     ctx.requestRender();
   }
   var lastDown = null;
@@ -114781,50 +115133,50 @@ Link '${target2}' to this file?`)) return null;
     return n2;
   }
   function onPointerDown(ev, mm4, ctx) {
-    S2.ctx = ctx;
+    S3.ctx = ctx;
     installDom(ctx);
     if (ev.button !== void 0 && ev.button !== 0) return false;
-    const t = toolOf(S2.tool);
+    const t = toolOf(S3.tool);
     if (!t) return false;
     const dbl = clickCount(ev) === 2;
-    S2.cursor = mm4;
-    if (ev.clientX !== void 0) S2.cursorClient = [ev.clientX, ev.clientY];
+    S3.cursor = mm4;
+    if (ev.clientX !== void 0) S3.cursorClient = [ev.clientX, ev.clientY];
     if (t.kind === "wire" || t.kind === "bus" || t.kind === "polyline") {
       const p = snapConn(ctx, mm4, t.kind, ev);
-      if (!S2.wire) {
+      if (!S3.wire) {
         if (!dbl) startWire(ctx, t.kind, p);
       } else wireClick(ctx, p, dbl);
       return true;
     }
     if (TEXT_KINDS.has(t.kind)) {
-      if (S2.carry) dropCarry(ctx);
-      else promptFor(ctx, t.kind, mm4, S2.cursorClient);
+      if (S3.carry) dropCarry(ctx);
+      else promptFor(ctx, t.kind, mm4, S3.cursorClient);
       return true;
     }
     if (t.id === "junction" || t.id === "noconnect" || t.id === "busentry") {
-      if (!S2.carry) onActivate(t.id, ctx);
+      if (!S3.carry) onActivate(t.id, ctx);
       placeCarry(ctx, mm4, ev);
       singleClickPlace(ctx, t.id, dbl);
       return true;
     }
     if (t.id === "place" || t.id === "power") {
-      if (S2.carry) {
+      if (S3.carry) {
         placeCarry(ctx, mm4);
         const placed = dropCarry(ctx);
         if (root5.KiCadLibrary && root5.KiCadLibrary.afterPlace) root5.KiCadLibrary.afterPlace(ctx, placed, t.id);
-      } else if (t.id === "place") openPicker(ctx, S2.cursorClient);
-      else openPowerPicker(ctx, S2.cursorClient);
+      } else if (t.id === "place") openPicker(ctx, S3.cursorClient);
+      else openPowerPicker(ctx, S3.cursorClient);
       return true;
     }
     if (t.id === "classlabel") {
-      if (S2.carry) {
+      if (S3.carry) {
         placeCarry(ctx, mm4);
         dropCarry(ctx);
-      } else promptClassLabel(ctx, mm4, S2.cursorClient);
+      } else promptClassLabel(ctx, mm4, S3.cursorClient);
       return true;
     }
     if (t.id === "image") {
-      if (S2.carry) {
+      if (S3.carry) {
         placeCarry(ctx, mm4);
         dropCarry(ctx);
       } else openImagePicker(ctx);
@@ -114838,13 +115190,13 @@ Link '${target2}' to this file?`)) return null;
       highlightClick(ctx, mm4);
       return true;
     }
-    if (t.id === "sheet" && S2.sheetJob) {
+    if (t.id === "sheet" && S3.sheetJob) {
       ctx.toast("Still creating the previous sheet\u2026");
       return true;
     }
     if (DRAW_TOOLS.has(t.id)) {
-      if (S2.draw && S2.draw.await) return true;
-      if (t.id === "arc" && dbl && S2.draw && S2.draw.arc) {
+      if (S3.draw && S3.draw.await) return true;
+      if (t.id === "arc" && dbl && S3.draw && S3.draw.arc) {
         finishSchArc(ctx);
         return true;
       }
@@ -114858,71 +115210,71 @@ Link '${target2}' to this file?`)) return null;
     return false;
   }
   function onPointerMove(ev, mm4, ctx) {
-    S2.ctx = ctx;
-    S2.cursor = mm4;
-    if (ev && ev.clientX !== void 0) S2.cursorClient = [ev.clientX, ev.clientY];
-    S2.mods = ev ? { shiftKey: !!ev.shiftKey, ctrlKey: !!ev.ctrlKey, metaKey: !!ev.metaKey, altKey: !!ev.altKey } : null;
-    if (S2.wire) {
-      const p = snapConn(ctx, mm4, S2.wire.kind, ev);
-      if (!same(S2.wire.cur, p)) {
+    S3.ctx = ctx;
+    S3.cursor = mm4;
+    if (ev && ev.clientX !== void 0) S3.cursorClient = [ev.clientX, ev.clientY];
+    S3.mods = ev ? { shiftKey: !!ev.shiftKey, ctrlKey: !!ev.ctrlKey, metaKey: !!ev.metaKey, altKey: !!ev.altKey } : null;
+    if (S3.wire) {
+      const p = snapConn(ctx, mm4, S3.wire.kind, ev);
+      if (!same(S3.wire.cur, p)) {
         wireFollow(ctx, p);
         ctx.requestRender();
       }
       return;
     }
-    if (S2.carry) {
+    if (S3.carry) {
       placeCarry(ctx, mm4, ev);
       return;
     }
-    if (S2.draw && S2.draw.arc) {
+    if (S3.draw && S3.draw.arc) {
       const p = drawPoint(ctx, mm4);
-      if (!same(S2.draw.cur, p)) {
-        schArcMove(S2.draw, p);
+      if (!same(S3.draw.cur, p)) {
+        schArcMove(S3.draw, p);
         ctx.requestRender();
       }
       return;
     }
-    if (S2.draw && !S2.draw.await) {
+    if (S3.draw && !S3.draw.await) {
       const p = drawPoint(ctx, mm4);
-      if (!same(S2.draw.cur, p)) {
-        S2.draw.cur = p;
+      if (!same(S3.draw.cur, p)) {
+        S3.draw.cur = p;
         ctx.requestRender();
       }
       return;
     }
-    if (S2.pinPlace) {
+    if (S3.pinPlace) {
       movePinPlace(ctx, mm4);
       return;
     }
-    if (S2.tool === "highlight" || S2.tool === "sheetpin") {
+    if (S3.tool === "highlight" || S3.tool === "sheetpin") {
       let id = null;
-      if (S2.tool === "highlight") {
+      if (S3.tool === "highlight") {
         const p = pickNet(ctx, mm4);
         id = p ? p.item.id : null;
       } else if (!ctx.viewOnly) {
-        const e = S2.pinSheet ? ctx.doc.items.get(S2.pinSheet) : sheetAt(ctx.doc, mm4, Math.max(0.5, 4 * mmPerPx(ctx)));
+        const e = S3.pinSheet ? ctx.doc.items.get(S3.pinSheet) : sheetAt(ctx.doc, mm4, Math.max(0.5, 4 * mmPerPx(ctx)));
         id = e ? e.id : null;
       }
-      if (id !== S2.hover) {
-        S2.hover = id;
+      if (id !== S3.hover) {
+        S3.hover = id;
         ctx.requestRender();
       }
       return;
     }
-    if (S2.tool === "delete") {
+    if (S3.tool === "delete") {
       const hit5 = ctx.viewOnly ? null : pickAny(ctx, mm4), id = hit5 ? hit5.id : null;
-      if (id !== S2.hover) {
-        S2.hover = id;
+      if (id !== S3.hover) {
+        S3.hover = id;
         ctx.requestRender();
       }
       return;
     }
-    if (toolOf(S2.tool)) ctx.requestRender();
+    if (toolOf(S3.tool)) ctx.requestRender();
   }
   function onPointerUp() {
   }
   function wireKey(ctx, combo) {
-    if (!S2.wire) return false;
+    if (!S3.wire) return false;
     if (combo === "/") {
       switchPosture(ctx);
       return true;
@@ -114940,29 +115292,29 @@ Link '${target2}' to this file?`)) return null;
     return false;
   }
   function onKey(key3, ev, ctx) {
-    S2.ctx = ctx;
+    S3.ctx = ctx;
     installDom(ctx);
     if (ctx.viewOnly) return false;
     const lower22 = key3.length === 1 ? key3.toLowerCase() : key3;
     const armTool = (id, kind) => {
       const busy = busyMessage();
       if (busy) {
-        if (id === S2.tool) syntheticClick(ctx);
+        if (id === S3.tool) syntheticClick(ctx);
         else ctx.toast(busy);
         return true;
       }
       ctx.setTool(id);
-      if (S2.cursor && (kind === "wire" || kind === "bus" || kind === "polyline")) startWire(ctx, kind, snapConn(ctx, S2.cursor, kind));
-      else if (S2.cursor && TEXT_KINDS.has(kind)) promptFor(ctx, kind, S2.cursor, S2.cursorClient);
+      if (S3.cursor && (kind === "wire" || kind === "bus" || kind === "polyline")) startWire(ctx, kind, snapConn(ctx, S3.cursor, kind));
+      else if (S3.cursor && TEXT_KINDS.has(kind)) promptFor(ctx, kind, S3.cursor, S3.cursorClient);
       return true;
     };
-    if (S2.wire && wireKey(ctx, key3 === "Backspace" ? "Backspace" : key3 === "Delete" ? "Del" : key3)) return true;
-    if (S2.draw && S2.draw.arc) {
+    if (S3.wire && wireKey(ctx, key3 === "Backspace" ? "Backspace" : key3 === "Delete" ? "Del" : key3)) return true;
+    if (S3.draw && S3.draw.arc) {
       if (key3 === "Enter" || key3 === "End") {
         finishSchArc(ctx);
         return true;
       }
-      if (key3 === "Backspace" || key3 === "Delete" && S2.draw.started) {
+      if (key3 === "Backspace" || key3 === "Delete" && S3.draw.started) {
         schArcBackup(ctx);
         return true;
       }
@@ -114976,9 +115328,9 @@ Link '${target2}' to this file?`)) return null;
         return true;
       }
     }
-    if (S2.draw && !S2.draw.await) {
+    if (S3.draw && !S3.draw.await) {
       if (key3 === "Enter" || key3 === "End") {
-        const sh = S2.draw.shape, n2 = S2.draw.pts.length;
+        const sh = S3.draw.shape, n2 = S3.draw.pts.length;
         if (sh === "lines" && n2 >= 2 || (sh === "polygon" || sh === "rulearea") && n2 >= 3) finishDraw(ctx);
         else cancelDraw(ctx);
         return true;
@@ -115058,7 +115410,7 @@ Link '${target2}' to this file?`)) return null;
       case "V":
         return editFieldPrompt(ctx, "Value", "Value", true);
       case "~":
-        if (!S2.highlight && !(S2.netHL && S2.netHL.active())) return false;
+        if (!S3.highlight && !(S3.netHL && S3.netHL.active())) return false;
         clearHighlight2(ctx);
         return true;
       case "g":
@@ -115066,10 +115418,10 @@ Link '${target2}' to this file?`)) return null;
       case "m":
       case "M": {
         setDragMode(ctx, lower22 === "m" ? "move" : "drag");
-        if (S2.drag) return true;
-        const it = S2.sel ? ctx.doc.items.get(S2.sel) : null;
-        if (!it || !S2.cursor) return false;
-        return !!beginDrag(ctx, it, S2.cursor, false);
+        if (S3.drag) return true;
+        const it = S3.sel ? ctx.doc.items.get(S3.sel) : null;
+        if (!it || !S3.cursor) return false;
+        return !!beginDrag(ctx, it, S3.cursor, false);
       }
       case " ":
         if (ev && ev.shiftKey) {
@@ -115085,54 +115437,54 @@ Link '${target2}' to this file?`)) return null;
     }
   }
   function onDocChanged(ctx) {
-    S2.ctx = ctx;
+    S3.ctx = ctx;
     installDom(ctx);
-    S2.docGen++;
-    const sameDoc = S2.docRef === ctx.doc;
+    S3.docGen++;
+    const sameDoc = S3.docRef === ctx.doc;
     if (!sameDoc) {
-      S2.wire = null;
-      S2.carry = null;
-      S2.draw = null;
-      S2.pinPlace = null;
-      S2.pinSheet = null;
-    } else if (S2.pinPlace) {
-      const pp = S2.pinPlace;
+      S3.wire = null;
+      S3.carry = null;
+      S3.draw = null;
+      S3.pinPlace = null;
+      S3.pinSheet = null;
+    } else if (S3.pinPlace) {
+      const pp = S3.pinPlace;
       pp.item = null;
-      movePinPlace(ctx, S2.cursor || pp.p);
-    } else if (S2.carry) S2.carry.item = ghost(ctx.doc, S2.carry.node);
-    if (S2.drag) {
-      const d = S2.drag;
+      movePinPlace(ctx, S3.cursor || pp.p);
+    } else if (S3.carry) S3.carry.item = ghost(ctx.doc, S3.carry.node);
+    if (S3.drag) {
+      const d = S3.drag;
       const ours = d.local || d.brk && d.brk.mode === "wirepins" && d.brk.orig.size === 0 && [...d.brk.local].every((id) => ctx.doc.items.has(id));
       if (!(ours && sameDoc)) {
-        S2.drag = null;
-        if (d.restoreMode) S2.dragMode = d.restoreMode;
+        S3.drag = null;
+        if (d.restoreMode) S3.dragMode = d.restoreMode;
         if (sameDoc && d.brk) restoreBreak(ctx.doc, d.brk);
       }
     }
-    S2.pending = null;
-    S2.hover = null;
-    S2.sheetJob = sameDoc ? S2.sheetJob : null;
-    S2.imageWait = false;
-    if (!sameDoc || !(S2.sel && ctx.doc.items.has(S2.sel))) S2.sel = null;
-    if (S2.docRef !== ctx.doc) {
-      S2.docRef = ctx.doc;
-      S2.lastPlaced = null;
-      S2.unfold = null;
-      if (S2.markersDoc !== ctx.doc) {
-        S2.markers = [];
-        S2.markersDoc = null;
+    S3.pending = null;
+    S3.hover = null;
+    S3.sheetJob = sameDoc ? S3.sheetJob : null;
+    S3.imageWait = false;
+    if (!sameDoc || !(S3.sel && ctx.doc.items.has(S3.sel))) S3.sel = null;
+    if (S3.docRef !== ctx.doc) {
+      S3.docRef = ctx.doc;
+      S3.lastPlaced = null;
+      S3.unfold = null;
+      if (S3.markersDoc !== ctx.doc) {
+        S3.markers = [];
+        S3.markersDoc = null;
       }
     }
-    if (S2.netHL) S2.netHL.docChanged(ctx, sameDoc);
-    else if (S2.highlight && !sameDoc) setHighlight(ctx, null);
+    if (S3.netHL) S3.netHL.docChanged(ctx, sameDoc);
+    else if (S3.highlight && !sameDoc) setHighlight(ctx, null);
     if (!sameDoc) {
       closePrompt();
       closePicker();
     }
     announceModes(ctx);
-    S2.tool = curTool();
+    S3.tool = curTool();
   }
-  var hasDom = () => typeof document !== "undefined" && S2.ctx && S2.ctx.stage;
+  var hasDom = () => typeof document !== "undefined" && S3.ctx && S3.ctx.stage;
   function el4(tag, css, text3) {
     const e = document.createElement(tag);
     if (css) e.style.cssText = css;
@@ -115143,7 +115495,7 @@ Link '${target2}' to this file?`)) return null;
   var PANEL_CSS = "position:absolute;z-index:30;background:var(--panel,#fff);color:var(--ink,#1b1b1b);border:1px solid var(--line,#ccc);border-radius:4px;box-shadow:var(--shadow,0 6px 20px #0003);font:12px var(--font,system-ui,sans-serif);";
   var INPUT_CSS = "background:var(--paper,#f5f4ef);color:inherit;border:1px solid var(--line,#ccc);border-radius:3px;padding:3px 6px;font:12px var(--mono,ui-monospace,monospace);outline:none;";
   function placePanel(box3, client) {
-    const r = S2.ctx.stage.getBoundingClientRect();
+    const r = S3.ctx.stage.getBoundingClientRect();
     const x = client ? client[0] - r.left + 10 : 12, y = client ? client[1] - r.top + 10 : 12;
     box3.style.left = Math.max(4, Math.min(r.width - 280, x)) + "px";
     box3.style.top = Math.max(4, Math.min(r.height - 60, y)) + "px";
@@ -115174,8 +115526,8 @@ Link '${target2}' to this file?`)) return null;
     });
     inp.addEventListener("blur", () => setTimeout(() => finish(null), 0));
     placePanel(box3, client);
-    S2.ctx.stage.appendChild(box3);
-    S2.prompt = box3;
+    S3.ctx.stage.appendChild(box3);
+    S3.prompt = box3;
     inp.focus();
     inp.select();
   };
@@ -115183,9 +115535,9 @@ Link '${target2}' to this file?`)) return null;
     promptImpl = fn;
   }
   function closePrompt() {
-    if (S2.prompt) {
-      S2.prompt.remove();
-      S2.prompt = null;
+    if (S3.prompt) {
+      S3.prompt.remove();
+      S3.prompt = null;
     }
   }
   function isPowerSymbol(doc2, name) {
@@ -115202,7 +115554,7 @@ Link '${target2}' to this file?`)) return null;
   }
   function pickSymbol(ctx, name) {
     closePicker();
-    startCarry(ctx, "symbol", symbolNode(ctx.doc, name, S2.cursor || [0, 0], 0, ""), S2.cursor);
+    startCarry(ctx, "symbol", symbolNode(ctx.doc, name, S3.cursor || [0, 0], 0, ""), S3.cursor);
   }
   function openPicker(ctx, client, opts2) {
     if (!hasDom()) return;
@@ -115250,13 +115602,13 @@ Link '${target2}' to this file?`)) return null;
     fill22();
     placePanel(box3, client);
     ctx.stage.appendChild(box3);
-    S2.picker = box3;
+    S3.picker = box3;
     inp.focus();
   }
   function closePicker() {
-    if (S2.picker) {
-      S2.picker.remove();
-      S2.picker = null;
+    if (S3.picker) {
+      S3.picker.remove();
+      S3.picker = null;
     }
   }
   var NO_POWER = "This sheet's library has no power symbols yet \u2014 place one from the desktop first";
@@ -115276,28 +115628,28 @@ Link '${target2}' to this file?`)) return null;
   function curTool() {
     if (typeof document !== "undefined") {
       const b = document.querySelector("#ltools .tb.on");
-      if (b) return b.dataset.modtool || b.dataset.tool || S2.tool;
+      if (b) return b.dataset.modtool || b.dataset.tool || S3.tool;
     }
-    return S2.tool;
+    return S3.tool;
   }
   function installDom(ctx) {
-    if (S2.dom || typeof document === "undefined" || !ctx.stage) return;
-    S2.dom = true;
+    if (S3.dom || typeof document === "undefined" || !ctx.stage) return;
+    S3.dom = true;
     const stage3 = ctx.stage;
     stage3.addEventListener("pointerdown", onDownCapture, true);
     stage3.addEventListener("pointermove", onMoveCapture, true);
     stage3.addEventListener("pointerup", onUpCapture, true);
     stage3.addEventListener("dblclick", (ev) => {
       if (!schActive()) return;
-      const ctx2 = S2.ctx;
-      if (S2.drag && ctx2) {
+      const ctx2 = S3.ctx;
+      if (S3.drag && ctx2) {
         endDrag(ctx2, true);
         ev.stopImmediatePropagation();
         ev.preventDefault();
         return;
       }
       const now = Date.now();
-      if (toolOf(curTool()) || now - (S2.dragEndedAt || 0) < 600 || now - (S2.wireEndedAt || 0) < 600) {
+      if (toolOf(curTool()) || now - (S3.dragEndedAt || 0) < 600 || now - (S3.wireEndedAt || 0) < 600) {
         ev.stopImmediatePropagation();
         ev.preventDefault();
       }
@@ -115305,7 +115657,7 @@ Link '${target2}' to this file?`)) return null;
     document.addEventListener("keydown", onKeyCapture, true);
   }
   function onDownCapture(ev) {
-    const ctx = S2.ctx;
+    const ctx = S3.ctx;
     if (!ctx || !schActive()) return;
     const tgt = ev.target;
     if (tgt && tgt.closest && tgt.closest("[data-schtools]")) {
@@ -115318,8 +115670,8 @@ Link '${target2}' to this file?`)) return null;
     if (toolOf(tool2)) return;
     if (tool2 !== "select" || ev.button !== 0) return;
     const mm4 = ctx.worldMm(ev);
-    if (S2.drag) {
-      if (!(S2.drag.brk && breakAgain(ctx))) endDrag(ctx, true);
+    if (S3.drag) {
+      if (!(S3.drag.brk && breakAgain(ctx))) endDrag(ctx, true);
       ev.stopImmediatePropagation();
       ev.preventDefault();
       return;
@@ -115330,11 +115682,11 @@ Link '${target2}' to this file?`)) return null;
       ev.preventDefault();
       return;
     }
-    S2.autoPress = autostartAt(ctx, mm4, ev, true) ? { mm: mm4, client: [ev.clientX, ev.clientY], mods: ev } : null;
+    S3.autoPress = autostartAt(ctx, mm4, ev, true) ? { mm: mm4, client: [ev.clientX, ev.clientY], mods: ev } : null;
     const hit5 = ctx.viewOnly ? null : pickNonSymbol(ctx, mm4);
     if (!hit5) {
-      if (S2.sel) {
-        S2.sel = null;
+      if (S3.sel) {
+        S3.sel = null;
         setSelEnd(null, null);
         ctx.requestRender();
       }
@@ -115342,16 +115694,16 @@ Link '${target2}' to this file?`)) return null;
     }
     ev.stopImmediatePropagation();
     ev.preventDefault();
-    const already = S2.sel === hit5.id;
-    S2.sel = hit5.id;
-    S2.hover = null;
+    const already = S3.sel === hit5.id;
+    S3.sel = hit5.id;
+    S3.hover = null;
     if (ctx.selection && ctx.selection.size && ctx.setSelection) {
-      const keepEnds = S2.selEnds;
+      const keepEnds = S3.selEnds;
       ctx.setSelection([]);
-      S2.selEnds = keepEnds;
+      S3.selEnds = keepEnds;
     } else ctx.setSelected(null);
     if (!already) setSelEnd(hit5.id, lineEndAt(hit5, mm4, selectThreshold(ctx)));
-    S2.pending = { item: hit5, mm: mm4 };
+    S3.pending = { item: hit5, mm: mm4 };
     try {
       ctx.stage.setPointerCapture(ev.pointerId);
     } catch (e) {
@@ -115359,99 +115711,99 @@ Link '${target2}' to this file?`)) return null;
     ctx.requestRender();
   }
   function autostartAt(ctx, mm4, ev, probe2) {
-    if (!S2.autoStartWires || ctx.viewOnly || ev && (ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey)) return false;
+    if (!S3.autoStartWires || ctx.viewOnly || ev && (ev.shiftKey || ev.ctrlKey || ev.metaKey || ev.altKey)) return false;
     const p = snapConn(ctx, mm4, "wire"), kind = autostartKind(ctx.doc, p);
     if (!kind) return false;
     if (Math.hypot(p[0] - mm4[0], p[1] - mm4[1]) > Math.max((ctx.gridPitch || 1.27) * 0.5, 6 * mmPerPx(ctx))) return false;
     if (probe2) return true;
-    S2.sel = null;
-    S2.hover = null;
-    S2.pending = null;
-    S2.selEnds = null;
+    S3.sel = null;
+    S3.hover = null;
+    S3.pending = null;
+    S3.selEnds = null;
     if (ctx.setSelection) ctx.setSelection([]);
     else ctx.setSelected(null);
     switchTool(ctx, AUTOSTART_TOOL[kind]);
     startWire(ctx, kind, p, { quitOnDraw: true });
-    S2.cursor = p;
+    S3.cursor = p;
     return true;
   }
   function autostartCursor(ctx, mm4) {
-    if (!ctx.stage || !S2.autoStartWires || ctx.viewOnly) return;
+    if (!ctx.stage || !S3.autoStartWires || ctx.viewOnly) return;
     const p = snapConn(ctx, mm4, "wire");
     let kind = null;
     if (Math.hypot(p[0] - mm4[0], p[1] - mm4[1]) <= Math.max((ctx.gridPitch || 1.27) * 0.5, 6 * mmPerPx(ctx))) kind = autostartKind(ctx.doc, p);
     const want2 = kind ? AUTOSTART_CURSOR[kind] : "";
-    S2.autoCursor = want2 || null;
+    S3.autoCursor = want2 || null;
   }
   var PLACE_KINDS = /* @__PURE__ */ new Set(["label", "global_label", "hierarchical_label", "directive_label", "netclass_flag", "text", "text_box", "sheet_pin", "junction", "no_connect", "bus_entry"]);
   function cursorPos() {
-    if (S2.wire) return S2.wire.cur.slice();
-    if (S2.carry && S2.carry.pos) return S2.carry.pos.slice();
-    if (S2.draw && S2.draw.cur && !S2.draw.await) return S2.draw.cur.slice();
-    const ctx = S2.ctx;
-    const t = S2.tool;
-    if (ctx && ctx.doc && S2.cursor && (t === "wire" || t === "bus" || t === "lines")) return snapConn(ctx, S2.cursor, t === "lines" ? "polyline" : t);
+    if (S3.wire) return S3.wire.cur.slice();
+    if (S3.carry && S3.carry.pos) return S3.carry.pos.slice();
+    if (S3.draw && S3.draw.cur && !S3.draw.await) return S3.draw.cur.slice();
+    const ctx = S3.ctx;
+    const t = S3.tool;
+    if (ctx && ctx.doc && S3.cursor && (t === "wire" || t === "bus" || t === "lines")) return snapConn(ctx, S3.cursor, t === "lines" ? "polyline" : t);
     return null;
   }
   function cursorNow() {
-    if (S2.drag && S2.drag.moved !== false) return "MOVING";
-    if (S2.carry) return PLACE_KINDS.has(S2.carry.kind) ? "PLACE" : "MOVING";
+    if (S3.drag && S3.drag.moved !== false) return "MOVING";
+    if (S3.carry) return PLACE_KINDS.has(S3.carry.kind) ? "PLACE" : "MOVING";
     return null;
   }
   function onMoveCapture(ev) {
-    const ctx = S2.ctx;
+    const ctx = S3.ctx;
     if (!ctx || !schActive()) return;
     const mm4 = ctx.worldMm(ev);
-    S2.cursor = mm4;
-    S2.cursorClient = [ev.clientX, ev.clientY];
-    if (S2.pedit) {
+    S3.cursor = mm4;
+    S3.cursorClient = [ev.clientX, ev.clientY];
+    if (S3.pedit) {
       pointEditMove(ctx, mm4, ev);
       return;
     }
-    if (S2.drag) {
+    if (S3.drag) {
       moveDrag(ctx, mm4);
       return;
     }
-    if (S2.pending) {
-      if (Math.hypot(mm4[0] - S2.pending.mm[0], mm4[1] - S2.pending.mm[1]) > 0.4) {
-        const p = S2.pending;
-        S2.pending = null;
+    if (S3.pending) {
+      if (Math.hypot(mm4[0] - S3.pending.mm[0], mm4[1] - S3.pending.mm[1]) > 0.4) {
+        const p = S3.pending;
+        S3.pending = null;
         if (beginDrag(ctx, p.item, p.mm, true)) moveDrag(ctx, mm4);
       }
       return;
     }
     const tool2 = curTool();
     if (tool2 !== "select") {
-      S2.autoCursor = null;
-      if (S2.hover && tool2 !== "delete") {
-        S2.hover = null;
+      S3.autoCursor = null;
+      if (S3.hover && tool2 !== "delete") {
+        S3.hover = null;
         ctx.requestRender();
       }
       return;
     }
     const hit5 = ctx.viewOnly ? null : pickNonSymbol(ctx, mm4), id = hit5 ? hit5.id : null;
-    if (id !== S2.hover) {
-      S2.hover = id;
+    if (id !== S3.hover) {
+      S3.hover = id;
       ctx.requestRender();
     }
     if (!ev.buttons) autostartCursor(ctx, mm4);
   }
   function onUpCapture(ev) {
-    const ctx = S2.ctx;
+    const ctx = S3.ctx;
     if (!ctx) return;
-    const press = S2.autoPress;
-    S2.autoPress = null;
-    const pend = S2.pending;
-    S2.pending = null;
-    if (pend && S2.sel === pend.item.id && !S2.drag) setSelEnd(pend.item.id, lineEndAt(pend.item, pend.mm, selectThreshold(ctx)));
-    if (S2.pedit) pointEditEnd(ctx, true);
-    if (S2.drag && S2.drag.byPointer) {
+    const press = S3.autoPress;
+    S3.autoPress = null;
+    const pend = S3.pending;
+    S3.pending = null;
+    if (pend && S3.sel === pend.item.id && !S3.drag) setSelEnd(pend.item.id, lineEndAt(pend.item, pend.mm, selectThreshold(ctx)));
+    if (S3.pedit) pointEditEnd(ctx, true);
+    if (S3.drag && S3.drag.byPointer) {
       endDrag(ctx, true);
       return;
     }
-    if (press && ev && Math.hypot(ev.clientX - press.client[0], ev.clientY - press.client[1]) < CLICK_PX && curTool() === "select" && !S2.drag && !S2.wire) {
+    if (press && ev && Math.hypot(ev.clientX - press.client[0], ev.clientY - press.client[1]) < CLICK_PX && curTool() === "select" && !S3.drag && !S3.wire) {
       setTimeout(() => {
-        if (curTool() === "select" && !S2.drag && !S2.wire && !S2.carry) {
+        if (curTool() === "select" && !S3.drag && !S3.wire && !S3.carry) {
           autostartAt(ctx, press.mm, press.mods);
           ctx.requestRender();
         }
@@ -115460,7 +115812,7 @@ Link '${target2}' to this file?`)) return null;
   }
   var CLICK_PX = 4;
   function onKeyCapture(ev) {
-    const ctx = S2.ctx;
+    const ctx = S3.ctx;
     if (!ctx || !schActive()) return;
     const tgt = ev.target;
     const tag = tgt && tgt.tagName;
@@ -115468,7 +115820,7 @@ Link '${target2}' to this file?`)) return null;
     if (tgt && tgt.closest && tgt.closest(".kd-overlay, [role='dialog'], [role='menu'], [data-prop-label]")) return;
     const ctrl = ev.ctrlKey || ev.metaKey, k = ev.key && ev.key.length === 1 ? ev.key.toUpperCase() : ev.key;
     const combo = ctrl ? "Ctrl+" + (ev.shiftKey ? "Shift+" : "") + k : k === "Delete" ? "Del" : k;
-    if (S2.wire && (combo === "Del" || combo === "Backspace" || combo === "Ctrl+Z" || combo === "Ctrl+Y" || combo === "Ctrl+Shift+Z")) {
+    if (S3.wire && (combo === "Del" || combo === "Backspace" || combo === "Ctrl+Z" || combo === "Ctrl+Y" || combo === "Ctrl+Shift+Z")) {
       if (wireKey(ctx, combo)) {
         ev.stopImmediatePropagation();
         ev.preventDefault();
@@ -115479,7 +115831,7 @@ Link '${target2}' to this file?`)) return null;
       ev.stopImmediatePropagation();
       ev.preventDefault();
     };
-    if (S2.draw && S2.draw.arc && S2.draw.started) {
+    if (S3.draw && S3.draw.arc && S3.draw.started) {
       if (combo === "Ctrl+Z") {
         schArcUndo(ctx);
         eat();
@@ -115490,9 +115842,9 @@ Link '${target2}' to this file?`)) return null;
         return;
       }
     }
-    if (S2.drag && !S2.pedit) {
+    if (S3.drag && !S3.pedit) {
       if (combo === "Ctrl+Z") {
-        S2.drag.cancel = "undo";
+        S3.drag.cancel = "undo";
         endDrag(ctx, false);
         eat();
         return;
@@ -115502,7 +115854,7 @@ Link '${target2}' to this file?`)) return null;
         return;
       }
       if (combo === "Del" || combo === "Backspace") {
-        if (S2.drag.local) {
+        if (S3.drag.local) {
           endDrag(ctx, false);
           eat();
           return;
@@ -115511,12 +115863,12 @@ Link '${target2}' to this file?`)) return null;
         return;
       }
     }
-    if (S2.pinPlace && (combo === "Ctrl+Z" || combo === "Del" || combo === "Backspace")) {
+    if (S3.pinPlace && (combo === "Ctrl+Z" || combo === "Del" || combo === "Backspace")) {
       cancelPinPlace(ctx);
       eat();
       return;
     }
-    if (S2.carry && busyMessage()) {
+    if (S3.carry && busyMessage()) {
       if (combo === "Ctrl+Z" || combo === "Del" || combo === "Backspace") {
         cancelCarry(ctx);
         eat();
@@ -115531,21 +115883,21 @@ Link '${target2}' to this file?`)) return null;
     if (tag === "INPUT" && (ev.key === " " || ev.key === "Enter")) return;
     if (ev.key === "Escape") {
       let took = true;
-      if (S2.pedit) pointEditEnd(ctx, false);
-      else if (S2.picker) closePicker();
-      else if (S2.prompt) closePrompt();
-      else if (S2.wire) cancelWire(ctx);
-      else if (S2.draw) cancelDraw(ctx);
-      else if (S2.carry) cancelCarry(ctx);
-      else if (S2.pinPlace) cancelPinPlace(ctx);
-      else if (S2.drag) endDrag(ctx, false);
-      else if (S2.highlight && S2.escClearsNetHighlight !== false && !hasSelection(ctx)) clearHighlight2(ctx);
+      if (S3.pedit) pointEditEnd(ctx, false);
+      else if (S3.picker) closePicker();
+      else if (S3.prompt) closePrompt();
+      else if (S3.wire) cancelWire(ctx);
+      else if (S3.draw) cancelDraw(ctx);
+      else if (S3.carry) cancelCarry(ctx);
+      else if (S3.pinPlace) cancelPinPlace(ctx);
+      else if (S3.drag) endDrag(ctx, false);
+      else if (S3.highlight && S3.escClearsNetHighlight !== false && !hasSelection(ctx)) clearHighlight2(ctx);
       else took = false;
-      if (S2.sel || S2.hover) {
-        S2.sel = null;
-        S2.hover = null;
-        S2.pending = null;
-        S2.selEnds = null;
+      if (S3.sel || S3.hover) {
+        S3.sel = null;
+        S3.hover = null;
+        S3.pending = null;
+        S3.selEnds = null;
         ctx.requestRender();
       }
       if (took) {
@@ -115557,17 +115909,17 @@ Link '${target2}' to this file?`)) return null;
       ev.preventDefault();
       const busy = busyMessage();
       if (busy) {
-        if (S2.tool === "hlabel") syntheticClick(ctx);
+        if (S3.tool === "hlabel") syntheticClick(ctx);
         else ctx.toast(busy);
         return;
       }
       ctx.setTool("hlabel");
-      if (S2.cursor) promptFor(ctx, "hierarchical_label", S2.cursor, S2.cursorClient);
+      if (S3.cursor) promptFor(ctx, "hierarchical_label", S3.cursor, S3.cursorClient);
     }
   }
   function hasSelection(ctx) {
     const c = ctx;
-    return !!(S2.sel || S2.selEnds || c.selected || c.selection && c.selection.size || c.selField);
+    return !!(S3.sel || S3.selEnds || c.selected || c.selection && c.selection.size || c.selField);
   }
   function wireAtPoint(doc2, p) {
     for (const it of doc2.items.values()) if (it.kind === "wire") {
@@ -115576,32 +115928,32 @@ Link '${target2}' to this file?`)) return null;
     return null;
   }
   function labelDefaults2() {
-    const d = S2.netHL && S2.netHL.labelDefaults ? S2.netHL.labelDefaults() : null;
+    const d = S3.netHL && S3.netHL.labelDefaults ? S3.netHL.labelDefaults() : null;
     return { textSize: d && d.textSize > 0 ? d.textSize : 1.27, intersheetRefsShow: !!(d && d.intersheetRefsShow) };
   }
   var SPIN_ROT2 = [0, 90, 180, 270];
   function newLabelNode(ctx, kind, p) {
-    const d = labelDefaults2(), spin = S2.lastTextSpin || 0, rot3 = SPIN_ROT2[spin] || 0;
+    const d = labelDefaults2(), spin = S3.lastTextSpin || 0, rot3 = SPIN_ROT2[spin] || 0;
     let node;
     if (kind === "netclass_flag") {
       node = classLabelNode("", p, rot3);
       const sh = kid8(node, "shape");
-      if (sh && S2.lastFlagShape) sh[1] = S2.lastFlagShape;
+      if (sh && S3.lastFlagShape) sh[1] = S3.lastFlagShape;
       const nc = kids7(node, "property").find((q4) => str9(q4[1]) === "Netclass");
       const cc = ["property", "Component Class", "", deep(kid8(nc, "at")), ["effects", ["font", ["size", d.textSize, d.textSize], ["italic", "yes"]], ["justify", "left", "bottom"]]];
       node.splice(node.indexOf(nc) + 1, 0, cc);
       return node;
     }
     if (kind === "text") {
-      node = labelNode("text", "", p, S2.lastTextVertical ? 90 : 0);
+      node = labelNode("text", "", p, S3.lastTextVertical ? 90 : 0);
       const e2 = kid8(node, "effects"), f22 = kid8(e2, "font");
       replaceKid(f22, ["size", d.textSize, d.textSize]);
-      if (S2.lastTextBold) f22.push(["bold", "yes"]);
-      if (S2.lastTextItalic) f22.push(["italic", "yes"]);
-      if (S2.lastTextH || S2.lastTextV) {
+      if (S3.lastTextBold) f22.push(["bold", "yes"]);
+      if (S3.lastTextItalic) f22.push(["italic", "yes"]);
+      if (S3.lastTextH || S3.lastTextV) {
         const jv = [];
-        if (S2.lastTextH && S2.lastTextH !== "center") jv.push(S2.lastTextH);
-        if (S2.lastTextV && S2.lastTextV !== "center") jv.push(S2.lastTextV);
+        if (S3.lastTextH && S3.lastTextH !== "center") jv.push(S3.lastTextH);
+        if (S3.lastTextV && S3.lastTextV !== "center") jv.push(S3.lastTextV);
         replaceKid(e2, ["justify", ...jv]);
         if (!jv.length) e2.splice(e2.indexOf(kid8(e2, "justify")), 1);
       }
@@ -115610,11 +115962,11 @@ Link '${target2}' to this file?`)) return null;
     node = labelNode(kind, "", p, rot3);
     const e = kid8(node, "effects"), f2 = kid8(e, "font");
     replaceKid(f2, ["size", d.textSize, d.textSize]);
-    if (S2.lastTextBold) f2.push(["bold", "yes"]);
-    if (S2.lastTextItalic) f2.push(["italic", "yes"]);
-    if ((kind === "global_label" || kind === "hierarchical_label") && S2.lastLabelShape) {
+    if (S3.lastTextBold) f2.push(["bold", "yes"]);
+    if (S3.lastTextItalic) f2.push(["italic", "yes"]);
+    if ((kind === "global_label" || kind === "hierarchical_label") && S3.lastLabelShape) {
       const sh = kid8(node, "shape");
-      if (sh) sh[1] = S2.lastLabelShape;
+      if (sh) sh[1] = S3.lastLabelShape;
     }
     if (kind === "global_label") {
       const isr = kids7(node, "property").find((q4) => str9(q4[1]) === "Intersheetrefs");
@@ -115630,11 +115982,11 @@ Link '${target2}' to this file?`)) return null;
     const KD2 = typeof root5.KDialogs !== "undefined" ? root5.KDialogs : null;
     if (KD2 && KD2.openNew && !ctx.viewOnly) {
       const node = newLabelNode(ctx, kind, p);
-      if ((kind === "label" || kind === "global_label") && S2.netHL && S2.netHL.wireDriverName) {
-        const w = wireAtPoint(ctx.doc, p), name = w ? S2.netHL.wireDriverName(w.id) : "";
+      if ((kind === "label" || kind === "global_label") && S3.netHL && S3.netHL.wireDriverName) {
+        const w = wireAtPoint(ctx.doc, p), name = w ? S3.netHL.wireDriverName(w.id) : "";
         if (name) {
           node[1] = name;
-          startCarry(ctx, kind, node, S2.cursor || p);
+          startCarry(ctx, kind, node, S3.cursor || p);
           return;
         }
       }
@@ -115644,9 +115996,9 @@ Link '${target2}' to this file?`)) return null;
           return false;
         }
         const sh = kid8(staged, "shape");
-        if (sh && (kind === "global_label" || kind === "hierarchical_label")) S2.lastLabelShape = str9(sh[1]);
-        S2.labelQueue = Array.isArray(more) ? more.slice() : [];
-        startCarry(ctx, kind, staged, S2.cursor || p);
+        if (sh && (kind === "global_label" || kind === "hierarchical_label")) S3.lastLabelShape = str9(sh[1]);
+        S3.labelQueue = Array.isArray(more) ? more.slice() : [];
+        startCarry(ctx, kind, staged, S3.cursor || p);
       });
       return;
     }
@@ -115671,7 +116023,7 @@ Link '${target2}' to this file?`)) return null;
     const { item, change } = addNode(doc2, classLabelNode(name, p, rot3 || 0));
     ctx.commit([change], "directive label");
     rememberPlaced(item.kind, item.node);
-    S2.sel = item.id;
+    S3.sel = item.id;
     ctx.setSelected(null);
     ctx.requestRender();
     return item;
@@ -115949,8 +116301,8 @@ Link '${target2}' to this file?`)) return null;
     ctx.commit(changes, "autoplace fields");
     return true;
   }
-  S2.dragMode = "drag";
-  S2.lineMode = "90";
+  S3.dragMode = "drag";
+  S3.lineMode = "90";
   var LINE_MODES = ["90", "45", "free"];
   var LINE_MODE_LABEL = { "90": "90\xB0", "45": "45\xB0", free: "free" };
   var LABEL_KINDS2 = /* @__PURE__ */ new Set(["label", "global_label", "hierarchical_label", "netclass_flag", "directive_label"]);
@@ -115983,43 +116335,43 @@ Link '${target2}' to this file?`)) return null;
   ]);
   var isNetLine = (k) => k === "wire" || k === "bus";
   function modeText() {
-    return `${S2.dragMode === "drag" ? "drag keeps connections (G)" : "move leaves connections (M)"} \xB7 wires ${LINE_MODE_LABEL[S2.lineMode]} (Shift+Space)`;
+    return `${S3.dragMode === "drag" ? "drag keeps connections (G)" : "move leaves connections (M)"} \xB7 wires ${LINE_MODE_LABEL[S3.lineMode]} (Shift+Space)`;
   }
   function announceModes(ctx) {
     if (ctx && ctx.setStatus) ctx.setStatus(modeText());
     if (typeof document !== "undefined") {
       const b = document.querySelector("[data-act=linemode]");
       if (b) {
-        b.textContent = LINE_MODE_LABEL[S2.lineMode];
-        b.title = `Wire angle mode: ${LINE_MODE_LABEL[S2.lineMode]} (Shift+Space)`;
+        b.textContent = LINE_MODE_LABEL[S3.lineMode];
+        b.title = `Wire angle mode: ${LINE_MODE_LABEL[S3.lineMode]} (Shift+Space)`;
       }
     }
   }
   function setLineMode(ctx, mode2) {
-    if (!LINE_MODES.includes(mode2)) return S2.lineMode;
-    const from = S2.lineMode;
-    S2.lineMode = mode2;
+    if (!LINE_MODES.includes(mode2)) return S3.lineMode;
+    const from = S3.lineMode;
+    S3.lineMode = mode2;
     announceModes(ctx);
-    if (S2.drag) {
-      applyDrag(ctx.doc, S2.drag, S2.drag.last[0], S2.drag.last[1]);
+    if (S3.drag) {
+      applyDrag(ctx.doc, S3.drag, S3.drag.last[0], S3.drag.last[1]);
       ctx.requestRender();
-    } else if (S2.wire) {
+    } else if (S3.wire) {
       wireModeChanged(ctx, from, mode2);
       ctx.requestRender();
     }
     return mode2;
   }
   function cycleLineMode(ctx) {
-    return setLineMode(ctx, LINE_MODES[(LINE_MODES.indexOf(S2.lineMode) + 1) % LINE_MODES.length]);
+    return setLineMode(ctx, LINE_MODES[(LINE_MODES.indexOf(S3.lineMode) + 1) % LINE_MODES.length]);
   }
   function setDragMode(ctx, mode2) {
-    S2.dragMode = mode2 === "move" ? "move" : "drag";
+    S3.dragMode = mode2 === "move" ? "move" : "drag";
     announceModes(ctx);
-    if (S2.drag) {
-      applyDrag(ctx.doc, S2.drag, S2.drag.last[0], S2.drag.last[1]);
+    if (S3.drag) {
+      applyDrag(ctx.doc, S3.drag, S3.drag.last[0], S3.drag.last[1]);
       ctx.requestRender();
     }
-    return S2.dragMode;
+    return S3.dragMode;
   }
   function connPoints(doc2, item) {
     const k = item.kind, n2 = item.node;
@@ -116148,12 +116500,12 @@ Link '${target2}' to this file?`)) return null;
     const doc2 = ctx.doc, seen = /* @__PURE__ */ new Set(), list = [], partial = [];
     for (const it of Array.isArray(items) ? items : [items]) if (it && DRAG_KINDS.has(it.kind) && !seen.has(it.id) && !isLockedItem(doc2, it)) {
       seen.add(it.id);
-      const e = !(opts2 && opts2.plain) && S2.selEnds ? S2.selEnds.get(it.id) : void 0, pts = e === 0 || e === 1 ? ptsOf4(it.node) : null;
+      const e = !(opts2 && opts2.plain) && S3.selEnds ? S3.selEnds.get(it.id) : void 0, pts = e === 0 || e === 1 ? ptsOf4(it.node) : null;
       if (pts && pts.length === 2) partial.push({ item: it, index: e, orig: pts.map((q4) => q4.slice()) });
       else list.push(it);
     }
     if (!list.length && !partial.length) return null;
-    if (S2.drag) endDrag(ctx, false);
+    if (S3.drag) endDrag(ctx, false);
     const item = list[0] || partial[0].item, anchor0 = list.length ? anchorOf(item.kind, item.node) : partial[0].orig[partial[0].index].slice();
     const d = {
       items: list.map((it) => ({ item: it, kind: it.kind, orig: deep(it.node) })),
@@ -116218,7 +116570,7 @@ Link '${target2}' to this file?`)) return null;
       for (const it of spanned) d.items.push({ item: it, kind: it.kind, orig: deep(it.node) });
     }
     d.collision = d.items.some((e) => connPoints(doc2, e.item).length) ? collisionInit(doc2, d, !!(opts2 && opts2.plain)) : null;
-    S2.drag = d;
+    S3.drag = d;
     announceModes(ctx);
     return d;
   }
@@ -116239,9 +116591,9 @@ Link '${target2}' to this file?`)) return null;
       K11.replaceChange(doc2, r.item);
     }
     d.preview = [];
-    const connected = S2.dragMode === "drag";
+    const connected = S3.dragMode === "drag";
     for (const e of d.ends || []) {
-      const g2 = partialGeometry(e, dx, dy, connected && !d.mode && S2.lineMode !== "free");
+      const g2 = partialGeometry(e, dx, dy, connected && !d.mode && S3.lineMode !== "free");
       setPts2(e.item.node, g2.pts);
       K11.replaceChange(doc2, e.item);
       if (e.attach) for (const l of e.attach.lines) {
@@ -116257,7 +116609,7 @@ Link '${target2}' to this file?`)) return null;
       for (const e of a.ends) {
         let pts = e.orig.map((q4) => q4.slice());
         if (connected) {
-          const g2 = endGeometry(e, Pn, d.mode ? "free" : S2.lineMode);
+          const g2 = endGeometry(e, Pn, d.mode ? "free" : S3.lineMode);
           pts = g2.extra ? e.index === 0 ? [g2.extra[1], g2.extra[0], g2.pts[1]] : [g2.pts[0], g2.extra[0], g2.extra[1]] : g2.pts;
         }
         setPts2(e.item.node, pts);
@@ -116298,7 +116650,7 @@ Link '${target2}' to this file?`)) return null;
     }
   }
   function moveDrag(ctx, mm4) {
-    const d = S2.drag;
+    const d = S3.drag;
     if (!d) return;
     const t = ctx.snap([mm4[0] - d.grab[0], mm4[1] - d.grab[1]]);
     const dx = r45(t[0] - d.anchor0[0]), dy = r45(t[1] - d.anchor0[1]);
@@ -116309,18 +116661,18 @@ Link '${target2}' to this file?`)) return null;
     ctx.requestRender();
   }
   function endDrag(ctx, commit) {
-    const d = S2.drag;
-    S2.drag = null;
+    const d = S3.drag;
+    S3.drag = null;
     collisionCursor(ctx.stage, false);
     if (!d) return;
-    if (d.moved || !d.byPointer) S2.dragEndedAt = Date.now();
+    if (d.moved || !d.byPointer) S3.dragEndedAt = Date.now();
     const [dx, dy] = d.last, doc2 = ctx.doc;
     applyDrag(doc2, d, 0, 0);
     const done = () => {
-      S2.docGen++;
-      S2.autoCursor = null;
+      S3.docGen++;
+      S3.autoCursor = null;
       if (d.restoreMode) {
-        S2.dragMode = d.restoreMode;
+        S3.dragMode = d.restoreMode;
         announceModes(ctx);
       }
       ctx.requestRender();
@@ -116350,7 +116702,7 @@ Link '${target2}' to this file?`)) return null;
       return;
     }
     const changes = dragChanges(ctx, d, dx, dy, true);
-    if (changes.length) ctx.commit(changes, S2.dragMode === "drag" ? "drag" : "move");
+    if (changes.length) ctx.commit(changes, S3.dragMode === "drag" ? "drag" : "move");
     done();
   }
   function dropLocal(ctx, d) {
@@ -116359,10 +116711,10 @@ Link '${target2}' to this file?`)) return null;
     setSelectionIds(ctx, []);
   }
   function cancelDrag(ctx) {
-    if (S2.drag) endDrag(ctx, false);
+    if (S3.drag) endDrag(ctx, false);
   }
   function dragChanges(ctx, d, dx, dy, pristine = false) {
-    const doc2 = ctx.doc, connected = S2.dragMode === "drag", out2 = /* @__PURE__ */ new Map();
+    const doc2 = ctx.doc, connected = S3.dragMode === "drag", out2 = /* @__PURE__ */ new Map();
     const res = dragChangeList(ctx, d, dx, dy, connected, out2);
     if (pristine) restorePristine(doc2, d);
     return res;
@@ -116397,7 +116749,7 @@ Link '${target2}' to this file?`)) return null;
       if (it && !DRAG_KINDS.has(it.kind)) put4(Object.assign(modChange(doc2, it, deep(it.node)), { kind: "ADDED" }));
     }
     for (const e of d.ends || []) {
-      const g2 = partialGeometry(e, dx, dy, connected && !d.mode && S2.lineMode !== "free"), pts = g2.pts;
+      const g2 = partialGeometry(e, dx, dy, connected && !d.mode && S3.lineMode !== "free"), pts = g2.pts;
       touched.push(...e.orig, ...pts);
       if (same(pts[0], pts[1])) put4(K11.removeChange(e.item));
       else {
@@ -116430,7 +116782,7 @@ Link '${target2}' to this file?`)) return null;
       const Pn = anchorTo(d, a.p, dx, dy);
       touched.push(a.p, Pn);
       for (const e of a.ends) {
-        const g2 = endGeometry(e, Pn, d.mode ? "free" : S2.lineMode);
+        const g2 = endGeometry(e, Pn, d.mode ? "free" : S3.lineMode);
         if (g2.zero) {
           put4(K11.removeChange(e.item));
           continue;
@@ -116563,22 +116915,22 @@ Link '${target2}' to this file?`)) return null;
     return null;
   }
   function setSelEnd(id, end) {
-    S2.selEnds = id && end !== null ? /* @__PURE__ */ new Map([[id, end]]) : null;
+    S3.selEnds = id && end !== null ? /* @__PURE__ */ new Map([[id, end]]) : null;
   }
   function putSelEnd(id, end) {
     if (end === null) {
-      if (S2.selEnds) S2.selEnds.delete(id);
+      if (S3.selEnds) S3.selEnds.delete(id);
       return;
     }
-    (S2.selEnds || (S2.selEnds = /* @__PURE__ */ new Map())).set(id, end);
+    (S3.selEnds || (S3.selEnds = /* @__PURE__ */ new Map())).set(id, end);
   }
   function selEndOf(id) {
-    const e = S2.selEnds ? S2.selEnds.get(id) : void 0;
+    const e = S3.selEnds ? S3.selEnds.get(id) : void 0;
     return e === 0 || e === 1 ? e : null;
   }
   function selEndKeys(selected) {
     const out2 = [];
-    if (!S2.selEnds || !S2.selEnds.size) return out2;
+    if (!S3.selEnds || !S3.selEnds.size) return out2;
     for (const id of selected) {
       const e = selEndOf(id);
       if (e !== null) out2.push(id + "#end:" + e);
@@ -116747,7 +117099,7 @@ Link '${target2}' to this file?`)) return null;
       const it = doc2.items.get(e.id);
       if (!it || it.kind !== "symbol") continue;
       const n2 = deep(it.node);
-      let changed = false;
+      let changed2 = false;
       for (const [name, text3] of Object.entries(e.values || {})) {
         let p = kids7(n2, "property").find((q4) => str9(q4[1]) === name);
         if (!p) {
@@ -116758,9 +117110,9 @@ Link '${target2}' to this file?`)) return null;
         if (str9(p[2]) === str9(text3)) continue;
         if (name === "Reference") setReference(n2, str9(text3));
         else p[2] = str9(text3);
-        changed = true;
+        changed2 = true;
       }
-      if (changed) out2.push(modChange(doc2, it, n2));
+      if (changed2) out2.push(modChange(doc2, it, n2));
     }
     return out2;
   }
@@ -117011,12 +117363,12 @@ Link '${target2}' to this file?`)) return null;
     let rot3 = 0;
     if (vertical) rot3 = end[0] < p[0] ? 180 : 0;
     else if (horizontal) rot3 = end[1] < p[1] ? 90 : 270;
-    const entry = addNode(doc2, busEntryNode(p, r45(dx), r45(dy))), label = addNode(doc2, labelNode("label", member, end, rot3));
+    const entry2 = addNode(doc2, busEntryNode(p, r45(dx), r45(dy))), label = addNode(doc2, labelNode("label", member, end, rot3));
     switchTool(ctx, "wire");
     startWire(ctx, "wire", end);
-    S2.unfold = { labelId: label.item.id, entryId: entry.item.id, origin: p, placed: false };
+    S3.unfold = { labelId: label.item.id, entryId: entry2.item.id, origin: p, placed: false };
     ctx.requestRender();
-    return { entry: entry.item, label: label.item, start: end };
+    return { entry: entry2.item, label: label.item, start: end };
   }
   function unfoldAction(ctx, opts2) {
     if (!editable(ctx)) return false;
@@ -117079,13 +117431,13 @@ Link '${target2}' to this file?`)) return null;
     act("annotate", "Annotate Schematic...", "", (ctx, opts2) => annotate(ctx, opts2)),
     act("clearAnnotation", "Clear Annotation", "", (ctx, opts2) => clearAnnotation(ctx, opts2)),
     act("toggleAnnotateAuto", "Annotate Automatically", "", (ctx) => {
-      S2.annotateAuto = !S2.annotateAuto;
-      if (ctx && ctx.toast) ctx.toast("Automatic annotation " + (S2.annotateAuto ? "on" : "off"));
+      S3.annotateAuto = !S3.annotateAuto;
+      if (ctx && ctx.toast) ctx.toast("Automatic annotation " + (S3.annotateAuto ? "on" : "off"));
       return true;
     }),
     act("runERC", "Electrical Rules Checker", "", (ctx, opts2) => runERC(ctx, opts2)),
     act("clearMarkers", "Clear ERC Markers", "", (ctx) => {
-      S2.markers = [];
+      S3.markers = [];
       if (typeof ctx.setMarkers === "function") ctx.setMarkers([]);
       ctx.requestRender();
       return true;
@@ -117121,7 +117473,7 @@ Link '${target2}' to this file?`)) return null;
     // EE_GRAPHIC_TOOL::DrawArc's modes (SCH_ACTIONS::drawArcCenter …): each starts Draw Arcs in its mode, or switches the
     // arc being drawn to it (ARC_MODE_SESSION::HandleModeEvent); the Arc toolbar group then shows that mode's button
     ...ARC_MODE_ACTIONS.map((id, m) => act(id, ARC_MODE_LABELS[m], "", (ctx) => {
-      if (S2.tool === "arc") switchSchArcMode(ctx, m);
+      if (S3.tool === "arc") switchSchArcMode(ctx, m);
       else {
         setSchArcDrawMode(m);
         ctx.setTool("arc");
@@ -117129,9 +117481,9 @@ Link '${target2}' to this file?`)) return null;
       }
       return true;
     })),
-    act("arcPosture", "Switch Arc Posture", "/", (ctx) => S2.tool === "arc" && schArcPosture(ctx)),
+    act("arcPosture", "Switch Arc Posture", "/", (ctx) => S3.tool === "arc" && schArcPosture(ctx)),
     act("cycleArcDrawMode", "Cycle Arc Drawing Mode", "Alt+/", (ctx) => {
-      if (S2.tool !== "arc") return false;
+      if (S3.tool !== "arc") return false;
       switchSchArcMode(ctx, (schArcDrawMode() + 1) % 5);
       return true;
     })
@@ -117141,7 +117493,7 @@ Link '${target2}' to this file?`)) return null;
   function runAction2(id, ctx, opts2) {
     const a = actions2[id];
     if (!a) return false;
-    S2.ctx = ctx;
+    S3.ctx = ctx;
     installDom(ctx);
     try {
       return !!a.run(ctx, opts2);
@@ -117297,7 +117649,7 @@ Link '${target2}' to this file?`)) return null;
   }
   function wireStubsInFlight(ctx, ids) {
     const doc2 = ctx.doc;
-    if (S2.drag) endDrag(ctx, false);
+    if (S3.drag) endDrag(ctx, false);
     const brk = { mode: "wirepins", label: "Wire Pins", orig: /* @__PURE__ */ new Map(), local: new Set(ids), clicks: 0 };
     const anchors = [];
     for (const id of ids) {
@@ -117307,7 +117659,7 @@ Link '${target2}' to this file?`)) return null;
       anchors.push({ p: q4[1], ends: [{ item: it, index: 1, orig: q4.map((v) => v.slice()) }], stub: null, followers: [] });
     }
     const p0 = anchors[0].p, c = cursorOf(ctx);
-    S2.drag = {
+    S3.drag = {
       items: [],
       item: doc2.items.get(ids[0]),
       kind: "wire",
@@ -117323,9 +117675,9 @@ Link '${target2}' to this file?`)) return null;
       preview: [],
       mode: "wirepins",
       brk,
-      restoreMode: S2.dragMode
+      restoreMode: S3.dragMode
     };
-    S2.dragMode = "drag";
+    S3.dragMode = "drag";
     announceModes(ctx);
     setSelectionIds(ctx, ids);
     ctx.requestRender();
@@ -117443,10 +117795,10 @@ Link '${target2}' to this file?`)) return null;
     ghostSegs,
     vetoTool,
     // for tests and the props panel
-    state: S2,
+    state: S3,
     select(id) {
-      if (!id || S2.sel !== id) S2.selEnds = null;
-      S2.sel = id || null;
+      if (!id || S3.sel !== id) S3.selEnds = null;
+      S3.sel = id || null;
     },
     selEndKeys,
     putSelEnd,
@@ -117455,7 +117807,7 @@ Link '${target2}' to this file?`)) return null;
       setPromptImpl(fn);
     },
     setNetHighlighter(h3) {
-      S2.netHL = h3 || null;
+      S3.netHL = h3 || null;
     },
     setImagePicker(fn) {
       setImagePickerImpl(fn);
@@ -117481,7 +117833,7 @@ Link '${target2}' to this file?`)) return null;
     actions: actions2,
     runAction: runAction2,
     markers() {
-      return S2.markers;
+      return S3.markers;
     },
     // clipboard text in the desktop's format and its parser, ERC and annotation as pure functions over a doc
     clipboardText,
@@ -117498,7 +117850,7 @@ Link '${target2}' to this file?`)) return null;
     busMembers,
     _: {
       setFollow(on2) {
-        S2.forceFollow = !!on2;
+        S3.forceFollow = !!on2;
       },
       isGroundName,
       stackedPinNotationValid,
@@ -120008,14 +120360,14 @@ var Router = class _Router {
   }
   /** A run of n serpentine humps on the piece a→b, swinging A to one side: square humps S wide and S apart with
    *  chamfered corners.  Each adds 2A − 2.343·ch to the length. */
-  humps(a, b, n2, A, S2, ch, side) {
+  humps(a, b, n2, A, S3, ch, side) {
     const L = Math.hypot(b[0] - a[0], b[1] - a[1]), ux = (b[0] - a[0]) / L, uy = (b[1] - a[1]) / L, nx = -uy * side, ny = ux * side;
     const at4 = (x, y) => [r62(a[0] + ux * x + nx * y), r62(a[1] + uy * x + ny * y)];
     const out2 = [a];
-    const s0 = (L - (2 * n2 - 1) * S2) / 2;
+    const s0 = (L - (2 * n2 - 1) * S3) / 2;
     for (let k = 0; k < n2; k++) {
-      const x = s0 + 2 * k * S2;
-      out2.push(at4(x - ch, 0), at4(x, ch), at4(x, A - ch), at4(x + ch, A), at4(x + S2 - ch, A), at4(x + S2, A - ch), at4(x + S2, ch), at4(x + S2 + ch, 0));
+      const x = s0 + 2 * k * S3;
+      out2.push(at4(x - ch, 0), at4(x, ch), at4(x, A - ch), at4(x + ch, A), at4(x + S3 - ch, A), at4(x + S3, A - ch), at4(x + S3, ch), at4(x + S3 + ch, 0));
     }
     out2.push(b);
     return out2;
@@ -120069,14 +120421,14 @@ var Router = class _Router {
   /** Lengthen one track by `extra` with serpentines on its longest straight pieces; returns what is still missing. */
   extend(c, extra, tol) {
     const w = c.cls.width, clr = c.cls.clr, Amax = this.opts.maxAmplitude || 3;
-    const ch = Math.max(0.1, w / 2), S2 = Math.max(w + 2 * clr, 3 * w, 2 * ch + 0.1), Amin = 2 * ch + 0.05, m = ch + 0.1;
+    const ch = Math.max(0.1, w / 2), S3 = Math.max(w + 2 * clr, 3 * w, 2 * ch + 0.1), Amin = 2 * ch + 0.05, m = ch + 0.1;
     let left = extra;
     for (let round = 0; round < 6 && left > tol; round++) {
-      const cand = c.shapes.map((o, i) => ({ o, i, L: o.shape.t === "seg" ? Math.hypot(o.shape.a[0] - o.shape.b[0], o.shape.a[1] - o.shape.b[1]) : 0 })).filter((x) => x.L >= S2 + 2 * m).sort((x, y) => y.L - x.L);
+      const cand = c.shapes.map((o, i) => ({ o, i, L: o.shape.t === "seg" ? Math.hypot(o.shape.a[0] - o.shape.b[0], o.shape.a[1] - o.shape.b[1]) : 0 })).filter((x) => x.L >= S3 + 2 * m).sort((x, y) => y.L - x.L);
       let done = false;
       for (const { o, i, L } of cand) {
         const sh = o.shape;
-        for (const cand2 of this.meanders(sh.a, sh.b, L, left, tol, { S: S2, ch, Amin, Amax, m, hmin: Math.max(0.1, w / 2) })) {
+        for (const cand2 of this.meanders(sh.a, sh.b, L, left, tol, { S: S3, ch, Amin, Amax, m, hmin: Math.max(0.1, w / 2) })) {
           const pts = cand2.pts;
           const add2 = [];
           for (let k = 0; k + 1 < pts.length; k++) add2.push({ net: c.net, layers: o.layers, shape: { t: "seg", a: pts[k], b: pts[k + 1], r: sh.r }, clr: o.clr });
@@ -120106,7 +120458,7 @@ var Router = class _Router {
     const Ld = pr.laid;
     const { cp: cp2, cn } = pr;
     const w = Ld.w, d = Ld.d, Wt = 2 * d + w, Amax = this.opts.maxAmplitude || 3;
-    const ch = Math.max(0.15, 0.6 * d + 0.06), S2 = Math.max(Wt + 2 * Ld.clr, 2 * ch + d + 0.1), Amin = 2 * ch + d + 0.05, m = ch + d + 0.1;
+    const ch = Math.max(0.15, 0.6 * d + 0.06), S3 = Math.max(Wt + 2 * Ld.clr, 2 * ch + d + 0.1), Amin = 2 * ch + d + 0.05, m = ch + d + 0.1;
     let left = extra;
     const total2 = () => (_Router.lenOf(cp2) + _Router.lenOf(cn)) / 2;
     for (let round = 0; round < 6 && left > tol; round++) {
@@ -120114,12 +120466,12 @@ var Router = class _Router {
       const cand = [];
       for (let i = 1; i + 2 < c.length; i++) {
         const L = Math.hypot(c[i + 1][0] - c[i][0], c[i + 1][1] - c[i][1]);
-        if (L >= S2 + 2 * m) cand.push({ i, L });
+        if (L >= S3 + 2 * m) cand.push({ i, L });
       }
       cand.sort((x, y) => y.L - x.L);
       let done = false;
       for (const { i, L } of cand) {
-        for (const cand2 of this.meanders(c[i], c[i + 1], L, left, tol, { S: S2, ch, Amin, Amax, m, hmin: 0.6 * d + 0.06 })) {
+        for (const cand2 of this.meanders(c[i], c[i + 1], L, left, tol, { S: S3, ch, Amin, Amax, m, hmin: 0.6 * d + 0.06 })) {
           const c2 = c.slice(0, i).concat(cand2.pts, c.slice(i + 2));
           const before = total2();
           this.place(cp2, -1);
@@ -120558,8 +120910,8 @@ var Router = class _Router {
    * hair is left for review_design to report.
    */
   unsquare() {
-    const live2 = this.conns.filter((c) => c.nodes && this.kindOf(c.net) !== "rf");
-    if (!live2.length) return;
+    const live3 = this.conns.filter((c) => c.nodes && this.kindOf(c.net) !== "rf");
+    if (!live3.length) return;
     const P = this.P;
     const kf = (l, net, p) => `${l}
 ${net}
@@ -120587,7 +120939,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
         e.push(ob.shape);
       }
     }
-    for (const c of live2) this.place(c, -1);
+    for (const c of live3) this.place(c, -1);
     try {
       for (let round = 0; round < 4; round++) {
         const ends = /* @__PURE__ */ new Map();
@@ -120654,7 +121006,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
         if (!cut) break;
       }
     } finally {
-      for (const c of live2) this.place(c, 1);
+      for (const c of live3) this.place(c, 1);
     }
   }
   /** Lay a found route: its copper becomes an obstacle for every other net. */
@@ -128480,16 +128832,16 @@ function readVia(n2, copper, nets) {
   const ps = K(n2, "padstack");
   if (ps) {
     const mode = str((K(ps, "mode") || [])[1]);
-    const entry = /* @__PURE__ */ new Map();
+    const entry2 = /* @__PURE__ */ new Map();
     for (const l of kids(ps, "layer")) {
       const s2 = K(l, "size");
-      if (s2) entry.set(str(l[1]), num(s2[1], size2));
+      if (s2) entry2.set(str(l[1]), num(s2[1], size2));
     }
     sizes2 = /* @__PURE__ */ new Map();
     for (const l of layers) {
       if (l === "F.Cu") sizes2.set(l, size2);
-      else if (mode === "front_inner_back") sizes2.set(l, l === "B.Cu" ? entry.get("B.Cu") ?? size2 : entry.get("Inner") ?? entry.get(copper[1]) ?? size2);
-      else sizes2.set(l, entry.get(l) ?? size2);
+      else if (mode === "front_inner_back") sizes2.set(l, l === "B.Cu" ? entry2.get("B.Cu") ?? size2 : entry2.get("Inner") ?? entry2.get(copper[1]) ?? size2);
+      else sizes2.set(l, entry2.get(l) ?? size2);
     }
   }
   const ru = K(n2, "remove_unused_layers"), ke = K(n2, "keep_end_layers"), zl = K(n2, "zone_layer_connections");
@@ -128793,7 +129145,7 @@ function read(d, script) {
     if (li >= u16(lookups)) continue;
     const lk = lookups + u16(lookups + 2 + 2 * li);
     let type = u16(lk);
-    const subs = [];
+    const subs2 = [];
     for (let i = 0, c = u16(lk + 4); i < c; i++) {
       let so = lk + u16(lk + 6 + 2 * i), t = type;
       if (t === 9) {
@@ -128802,9 +129154,9 @@ function read(d, script) {
       }
       if (t !== 2) continue;
       const s2 = subtable(so);
-      if (s2) subs.push(s2);
+      if (s2) subs2.push(s2);
     }
-    if (subs.length) tables2.push(subs);
+    if (subs2.length) tables2.push(subs2);
     type = 0;
   }
   if (!tables2.length) return NONE;
@@ -128814,7 +129166,7 @@ function read(d, script) {
     let v = memo.get(key3);
     if (v === void 0) {
       v = 0;
-      for (const subs of tables2) for (const s2 of subs) {
+      for (const subs2 of tables2) for (const s2 of subs2) {
         const k = s2(l, r);
         if (k !== void 0) {
           v += k;
@@ -132963,7 +133315,7 @@ var ZoneFiller = class {
       }
       const infl = gap + eps + halfW;
       const hx = bw / 2 + infl, hy = bh / 2 + infl;
-      const build3 = (base2) => {
+      const build4 = (base2) => {
         const out2 = [];
         for (const k of [0, 90, 180, 270]) {
           const a = (k + base2) * Math.PI / 180;
@@ -132993,9 +133345,9 @@ var ZoneFiller = class {
       };
       let four;
       if (circular) {
-        four = build3(0);
+        four = build4(0);
         if (angle) four = four.map((s2) => s2.map((p) => rot2(p[0], p[1], angle)));
-      } else four = build3(angle);
+      } else four = build4(angle);
       for (const s2 of four) spokes.push(s2.map((p) => {
         const [x, y] = rot2(p[0], p[1], orient);
         return [cx + x, cy + y];
@@ -135529,17 +135881,17 @@ F ${this.recs.length}
     hits2.push({ x: v.x, y: v.y, d: v.drill, slot: null, plated: true, from: through ? first : v.layers[0], to: through ? last3 : v.layers[v.layers.length - 1], via: v });
   }
   const viaFlag = (v, own, dflt) => own !== null ? own : dflt;
-  const S2 = m.settings;
+  const S3 = m.settings;
   const viaTop = (v) => v.layers[0] === first, viaBottom = (v) => v.layers[v.layers.length - 1] === last3;
   const protection = (v) => ({
-    filled: viaFlag(v, v.filled, S2.fillVias),
-    capped: viaFlag(v, v.capped, S2.capVias),
-    tentF: viaTop(v) && viaFlag(v, v.tentFront, S2.tentFront),
-    tentB: viaBottom(v) && viaFlag(v, v.tentBack, S2.tentBack),
-    covF: viaTop(v) && viaFlag(v, v.coverFront, S2.coverFront),
-    covB: viaBottom(v) && viaFlag(v, v.coverBack, S2.coverBack),
-    plugF: viaTop(v) && viaFlag(v, v.plugFront, S2.plugFront),
-    plugB: viaBottom(v) && viaFlag(v, v.plugBack, S2.plugBack)
+    filled: viaFlag(v, v.filled, S3.fillVias),
+    capped: viaFlag(v, v.capped, S3.capVias),
+    tentF: viaTop(v) && viaFlag(v, v.tentFront, S3.tentFront),
+    tentB: viaBottom(v) && viaFlag(v, v.tentBack, S3.tentBack),
+    covF: viaTop(v) && viaFlag(v, v.coverFront, S3.coverFront),
+    covB: viaBottom(v) && viaFlag(v, v.coverBack, S3.coverBack),
+    plugF: viaTop(v) && viaFlag(v, v.plugFront, S3.plugFront),
+    plugB: viaBottom(v) && viaFlag(v, v.plugBack, S3.plugBack)
   });
   const ipcType = (filled, capped, plugged, covered, tented) => filled ? capped ? 7 : tented || covered ? 6 : 5 : plugged ? tented || covered ? 4 : 3 : covered ? 2 : tented ? 1 : 0;
   const rows3 = [];
@@ -136140,7 +136492,7 @@ ${p.text}#
       const net = netOf3(v.net);
       let ends = 0;
       for (const t of m.tracks) if (Math.abs(t.x1 - v.x) < 1e-6 && Math.abs(t.y1 - v.y) < 1e-6 || Math.abs(t.x2 - v.x) < 1e-6 && Math.abs(t.y2 - v.y) < 1e-6) ends++;
-      const openF = top2 && !viaFlag(v, v.tentFront, S2.tentFront), openB = bot && !viaFlag(v, v.tentBack, S2.tentBack);
+      const openF = top2 && !viaFlag(v, v.tentFront, S3.tentFront), openB = bot && !viaFlag(v, v.tentBack, S3.tentBack);
       add2(net, `${net.index} ${data(v.drill / 2)} ${X2(v.x)} ${Y(v.y)} ${top2 && bot ? "B" : top2 ? "T" : "D"} ${ends < 2 ? "e" : "m"} ${maskOf(openF, openB)} staggered 0 0 0 v`);
     }
     for (const fp of m.footprints) for (const pad3 of fp.pads) {
@@ -137493,7 +137845,7 @@ function resolveTargets(doc2, a) {
         t.missing.push(name);
         continue;
       }
-      const k = K5(), S2 = W4.CollabTools && W4.CollabTools.sch;
+      const k = K5(), S3 = W4.CollabTools && W4.CollabTools.sch;
       const pinsOf = /* @__PURE__ */ new Map();
       for (const p of net.pins) {
         let s2 = pinsOf.get(p.ref);
@@ -137509,12 +137861,12 @@ function resolveTargets(doc2, a) {
           add2(it);
         } else if (/label$/.test(it.kind) || it.kind === "junction") add2(it);
       }
-      if (S2 && S2._ && S2._.symbolPins) for (const it of doc2.items.values()) {
+      if (S3 && S3._ && S3._.symbolPins) for (const it of doc2.items.values()) {
         if (it.kind !== "symbol") continue;
         const power = it.lib && /^power:/.test(it.lib) && same(it.value || "");
         const nums = pinsOf.get(it.ref || "");
         if (!nums && !power) continue;
-        for (const p of S2._.symbolPins(doc2, it)) if (power || nums && nums.has(p.number)) {
+        for (const p of S3._.symbolPins(doc2, it)) if (power || nums && nums.has(p.number)) {
           const b = [p.x - 0.9, p.y - 0.9, p.x + 0.9, p.y + 0.9];
           t.boxes.push(b);
           grow3(t, b);
@@ -138310,9 +138662,9 @@ function thermalPad(f2) {
   const w = f2.box[2] - f2.box[0], h3 = f2.box[3] - f2.box[1];
   return Math.abs(big.x - (f2.box[0] + f2.box[2]) / 2) < w / 4 && Math.abs(big.y - (f2.box[1] + f2.box[3]) / 2) < h3 / 4 ? big : null;
 }
-function antennaRegion(S2, f2, clear) {
+function antennaRegion(S3, f2, clear) {
   const b = grow5(f2.box, clear);
-  const o = S2.outline;
+  const o = S3.outline;
   if (!o) return b;
   const out2 = [b[0], b[1], b[2], b[3]];
   if (b[0] - o[0] < LIMITS.antennaEdge) out2[0] = o[0];
@@ -138321,8 +138673,8 @@ function antennaRegion(S2, f2, clear) {
   if (o[3] - b[3] < LIMITS.antennaEdge) out2[3] = o[3];
   return [Math.max(out2[0], o[0]), Math.max(out2[1], o[1]), Math.min(out2[2], o[2]), Math.min(out2[3], o[3])];
 }
-function ringPoints(S2, b, off, pitch, margin) {
-  const g2 = grow5(b, off), o = S2.outline;
+function ringPoints(S3, b, off, pitch, margin) {
+  const g2 = grow5(b, off), o = S3.outline;
   const out2 = [];
   const side = (ax, ay, bx, by) => {
     const L = Math.hypot(bx - ax, by - ay);
@@ -138336,9 +138688,9 @@ function ringPoints(S2, b, off, pitch, margin) {
   return o ? out2.filter(([x, y]) => x >= o[0] + margin && x <= o[2] - margin && y >= o[1] + margin && y <= o[3] - margin) : out2;
 }
 function reviewPhysics(doc2, P, k, settings3, add2) {
-  const S2 = survey(doc2, P, k);
-  const { copper, fps, tracksOf, viasOf, padsOf } = S2;
-  const gz = S2.zones > 0;
+  const S3 = survey(doc2, P, k);
+  const { copper, fps, tracksOf, viasOf, padsOf } = S3;
+  const gz = S3.zones > 0;
   const twoGround = gz && copper.length >= 2;
   const pairBase = /* @__PURE__ */ new Map();
   for (const net of padsOf.keys()) {
@@ -138361,10 +138713,10 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
   const rfNets = Array.from(padsOf.keys()).filter((n2) => kindOf2(n2) === "rf"), fastNets = Array.from(padsOf.keys()).filter((n2) => kindOf2(n2) === "fast");
   const radio = radioGHz(fps, padsOf.keys());
   const pitch = r22(viaPitchFor(radio.ghz)), reach = pitch / 2 + 1, rfShort = Math.max(3, r22(pitch * 2));
-  if (gz && !S2.filled) add2("return.path", "note", "The zones are not filled, so the ground checks below read each pour's outline instead of its real copper. Fill them first (board.fill()).");
+  if (gz && !S3.filled) add2("return.path", "note", "The zones are not filled, so the ground checks below read each pour's outline instead of its real copper. Fill them first (board.fill()).");
   const antRegions = antennas.filter((a) => !isPatch(a)).map((a) => {
-    const ko = S2.keepouts.find((q4) => q4.copper && hit4(q4.box, a.box));
-    return grow5(ko ? ko.box : antennaRegion(S2, a, LIMITS.antennaClear), 0.3);
+    const ko = S3.keepouts.find((q4) => q4.copper && hit4(q4.box, a.box));
+    return grow5(ko ? ko.box : antennaRegion(S3, a, LIMITS.antennaClear), 0.3);
   });
   {
     const crowded = [];
@@ -138375,15 +138727,15 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       const what = /* @__PURE__ */ new Set();
       if (isPatch(a)) {
         const cx = (a.box[0] + a.box[2]) / 2, cy = (a.box[1] + a.box[3]) / 2;
-        if (gz && !copper.some((l) => S2.pourAt(cx, cy, l) === "gnd")) noGround.push(`${a.ref}: no ground under it`);
-        const ringP = ringPoints(S2, a.box, 1, 0.5, 0.4).filter(([x, y]) => S2.gndLayersAt(x, y) >= 2);
+        if (gz && !copper.some((l) => S3.pourAt(cx, cy, l) === "gnd")) noGround.push(`${a.ref}: no ground under it`);
+        const ringP = ringPoints(S3, a.box, 1, 0.5, 0.4).filter(([x, y]) => S3.gndLayersAt(x, y) >= 2);
         if (ringP.length >= 4) {
-          const gaps = ringP.filter(([x, y]) => S2.nearestStitch(x, y) > reach);
+          const gaps = ringP.filter(([x, y]) => S3.nearestStitch(x, y) > reach);
           if (gaps.length > ringP.length * 0.5) thin.push(`${a.ref}: ${Math.round(gaps.length * 0.5)} mm of the ground round the patch has no via within ${r22(reach)} mm`);
         }
         continue;
       }
-      for (const c of S2.conds) {
+      for (const c of S3.conds) {
         if (!hit4(c.bbox, core)) continue;
         if (c.kind === "pad") {
           const f2 = c.item.id === a.id ? null : fps.find((q4) => q4.id === c.item.id);
@@ -138395,19 +138747,19 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
         what.add(c.kind === "zone" ? `${bare(c.net) || "copper"} pour on ${Array.from(c.layers).join(", ")}` : `${c.kind === "via" ? "a via" : "a track"} of ${bare(c.net) || "no net"}`);
       }
       if (what.size) dirty.push(`${a.ref}: ${Array.from(what).slice(0, 5).join("; ")}`);
-      if (S2.outline) {
-        const o = S2.outline;
+      if (S3.outline) {
+        const o = S3.outline;
         const d = Math.min(a.box[0] - o[0], o[2] - a.box[2], a.box[1] - o[1], o[3] - a.box[3]);
         if (d > LIMITS.antennaEdge) inland.push(`${a.ref} is ${r22(d)} mm from the nearest board edge`);
       }
-      const ko = S2.keepouts.find((q4) => q4.copper && hit4(q4.box, a.box));
+      const ko = S3.keepouts.find((q4) => q4.copper && hit4(q4.box, a.box));
       if (gz && !ko) open3.push(a.ref);
-      const region = ko ? ko.box : antennaRegion(S2, a, LIMITS.antennaClear);
+      const region = ko ? ko.box : antennaRegion(S3, a, LIMITS.antennaClear);
       {
         const band = grow5(region, 1.2), bshape = rectShape(band), inner = rectShape(grow5(region, 0.05));
         const cut = /* @__PURE__ */ new Set();
         const quiet = (n2) => !n2 || own.has(n2) || rfNets.includes(n2) || /^\/?(GND|AGND|DGND|PGND|VSS)/i.test(n2);
-        for (const c of S2.conds) {
+        for (const c of S3.conds) {
           if (c.kind === "zone" || quiet(c.net) || !hit4(c.bbox, band) || P.shapeGap(c.shape, bshape) > 0) continue;
           if (c.kind === "pad") {
             const f2 = fps.find((q4) => q4.id === c.item.id);
@@ -138419,9 +138771,9 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
         }
         if (cut.size) crowded.push(`${a.ref}: ${Array.from(cut).slice(0, 6).join("; ")}`);
       }
-      const ring = ringPoints(S2, region, 1, 0.5, 0.4).filter(([x, y]) => S2.gndLayersAt(x, y) >= 2);
+      const ring = ringPoints(S3, region, 1, 0.5, 0.4).filter(([x, y]) => S3.gndLayersAt(x, y) >= 2);
       if (ring.length >= 4) {
-        const gaps = ring.filter(([x, y]) => S2.nearestStitch(x, y) > reach);
+        const gaps = ring.filter(([x, y]) => S3.nearestStitch(x, y) > reach);
         if (gaps.length === ring.length) bare_.push(a.ref);
         else if (gaps.length > ring.length * 0.2) thin.push(`${a.ref}: ${Math.round(gaps.length * 0.5)} mm of ${Math.round(ring.length * 0.5)} mm of ground edge has no via within ${r22(reach)} mm, first near ${at(gaps[0][0], gaps[0][1])}`);
       }
@@ -138440,7 +138792,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       const segs = tracksOf.get(net) || [];
       if (!segs.length) continue;
       const name = bare(net);
-      const L = S2.lengthOf(net);
+      const L = S3.lengthOf(net);
       const items = [];
       let level = "warning";
       const nv = (viasOf.get(net) || []).length;
@@ -138476,15 +138828,15 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       let n2 = 0, noRef = 0, noFence = 0;
       let first = null;
       for (const t of segs) {
-        const refs = S2.refLayers(Array.from(t.layers)[0]);
-        S2.walk(t, 0.5, (x, y) => {
+        const refs = S3.refLayers(Array.from(t.layers)[0]);
+        S3.walk(t, 0.5, (x, y) => {
           n2++;
           if (antRegions.some((b) => inBox(b, x, y))) return;
-          if (refs.length && !refs.some((l) => S2.pourAt(x, y, l) === "gnd")) {
+          if (refs.length && !refs.some((l) => S3.pourAt(x, y, l) === "gnd")) {
             noRef++;
             if (!first) first = [x, y];
           }
-          if (S2.nearestStitch(x, y) > Math.max(pitch, 2.5)) noFence++;
+          if (S3.nearestStitch(x, y) > Math.max(pitch, 2.5)) noFence++;
         });
       }
       if (gz && noRef * 0.5 > 0.5 && first) {
@@ -138500,11 +138852,11 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
   const fastWithTracks = rfNets.concat(fastNets).filter((n2) => (tracksOf.get(n2) || []).length);
   if (fastWithTracks.length) {
     if (copper.length >= 4) {
-      const o = S2.outline;
+      const o = S3.outline;
       const probe2 = o ? [0.25, 0.5, 0.75].flatMap((u) => [0.25, 0.5, 0.75].map((v) => [o[0] + (o[2] - o[0]) * u, o[1] + (o[3] - o[1]) * v])) : [];
-      const hits2 = probe2.filter(([x, y]) => S2.pourAt(x, y, copper[1]) === "gnd").length;
+      const hits2 = probe2.filter(([x, y]) => S3.pourAt(x, y, copper[1]) === "gnd").length;
       if (probe2.length && hits2 < 5) add2("stackup.reference", "warning", `${copper[1]}, the layer under the parts, is not a ground plane. On four layers make it one, unbroken (signal, ground, power, signal or signal, ground, ground, signal): board.layers(4, planes=["${copper[1]}"]) and board.zone("GND", layer="${copper[1]}").`);
-    } else if (rfNets.some((n2) => S2.lengthOf(n2) > rfShort)) {
+    } else if (rfNets.some((n2) => S3.lengthOf(n2) > rfShort)) {
       const st = stackupOf(k, doc2);
       const tr = traceOn(st, copper[0]);
       if (tr && tr.h > 1) add2("stackup.reference", "note", `A 50 ohm track on a two-layer ${r22(tr.h)} mm board is about ${r22(widthFor(tr, 50) || 3)} mm wide. Keep the feed shorter than ${rfShort} mm (a tenth of a wavelength; ${radio.why}), or use four layers (ground ${0.2} mm under the top) or a thinner board.`);
@@ -138520,12 +138872,12 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       let first = null;
       const own = viasOf.get(net) || [];
       for (const t of segs) {
-        const refs = S2.refLayers(Array.from(t.layers)[0]);
+        const refs = S3.refLayers(Array.from(t.layers)[0]);
         if (!refs.length) continue;
-        S2.walk(t, 0.5, (x, y) => {
+        S3.walk(t, 0.5, (x, y) => {
           n2++;
           if (own.some((v) => Math.hypot(v.shape.x - x, v.shape.y - y) < 1)) return;
-          const what = refs.map((l) => S2.pourAt(x, y, l));
+          const what = refs.map((l) => S3.pourAt(x, y, l));
           if (what.includes("gnd")) return;
           if (what.includes("plane")) pl++;
           else {
@@ -138549,7 +138901,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
   if (twoGround) {
     const far = [];
     for (const net of rfNets.concat(fastNets)) for (const v of viasOf.get(net) || []) {
-      const d = S2.nearestStitch(v.shape.x, v.shape.y);
+      const d = S3.nearestStitch(v.shape.x, v.shape.y);
       if (d > LIMITS.returnVia) far.push(`${bare(net)} at ${at(v.shape.x, v.shape.y)}${isFinite(d) ? `: nearest ground via ${r22(d)} mm away` : ""}`);
     }
     if (far.length) add2("return.vias", "warning", 'Where a fast signal changes layer its return current must change planes too, and it can only do that through a ground via. Put one beside each of these signal vias, as close as fits (board.route(fence=...) does it while routing; board.via("GND", (x, y)) by hand).', far);
@@ -138562,7 +138914,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       if (!tp.length || !tn.length) continue;
       if (/^(XTAL|XTL|OSC|XIN|XOUT|XI\b|XO\b)/i.test(bare(e.p))) continue;
       const name = bare(base2).replace(/[_\-]$/, "") || bare(e.p);
-      const lp = S2.pathLengthOf(e.p), ln = S2.pathLengthOf(e.n);
+      const lp = S3.pathLengthOf(e.p), ln = S3.pathLengthOf(e.n);
       const ifc = pairInterface(bare(e.p));
       const rule2 = ifc ? INTERFACES[ifc] : null;
       const label = ifc ? `${name} (${ifc})` : name;
@@ -138586,7 +138938,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       for (const t of tp) {
         const lay = Array.from(t.layers)[0];
         const others = tn.filter((q4) => q4.layers.has(lay));
-        S2.walk(t, 0.25, (x, y) => {
+        S3.walk(t, 0.25, (x, y) => {
           if (ends.some((q4) => Math.hypot(q4.x - x, q4.y - y) < 1.5)) return;
           n2++;
           const reach2 = Math.max(0.6, 2.5 * t.width);
@@ -138618,10 +138970,10 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       for (const [prefix, g2] of groups) {
         if (!g2.clk || g2.data.length < 2) continue;
         const lim = INTERFACES[b.iface].bus, max = INTERFACES[b.iface].max;
-        const lc = S2.lengthOf(g2.clk);
-        const off = g2.data.map((n2) => ({ n: n2, d: S2.lengthOf(n2) - lc })).filter((q4) => Math.abs(q4.d) > lim).sort((x, y) => Math.abs(y.d) - Math.abs(x.d));
+        const lc = S3.lengthOf(g2.clk);
+        const off = g2.data.map((n2) => ({ n: n2, d: S3.lengthOf(n2) - lc })).filter((q4) => Math.abs(q4.d) > lim).sort((x, y) => Math.abs(y.d) - Math.abs(x.d));
         if (off.length) out2.push(`${prefix} (${b.name}): clock ${r22(lc)} mm; ${off.slice(0, 4).map((q4) => `${bare(q4.n)} ${q4.d > 0 ? "+" : ""}${r22(q4.d)} mm`).join(", ")} (within ${lim} mm)`);
-        const longest = Math.max(lc, ...g2.data.map((n2) => S2.lengthOf(n2)));
+        const longest = Math.max(lc, ...g2.data.map((n2) => S3.lengthOf(n2)));
         if (longest > max) out2.push(`${prefix} (${b.name}): ${r22(longest)} mm long (keep it under about ${max} mm)`);
       }
     }
@@ -138641,8 +138993,8 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
         const [prefix, lane] = key3.split("|");
         const st = strobe(prefix, Number(lane));
         if (!st) continue;
-        const ls = S2.lengthOf(st);
-        const off = nets.map((n2) => ({ n: n2, d: S2.lengthOf(n2) - ls })).filter((q4) => Math.abs(q4.d) > lim);
+        const ls = S3.lengthOf(st);
+        const off = nets.map((n2) => ({ n: n2, d: S3.lengthOf(n2) - ls })).filter((q4) => Math.abs(q4.d) > lim);
         const lay = new Set(nets.flatMap((n2) => (tracksOf.get(n2) || []).flatMap((t) => Array.from(t.layers))));
         if (off.length) out2.push(`${prefix || "DDR"} byte lane ${lane} (${gen}): strobe ${r22(ls)} mm; ${off.slice(0, 4).map((q4) => `${bare(q4.n)} ${q4.d > 0 ? "+" : ""}${r22(q4.d)} mm`).join(", ")} (within ${lim} mm)`);
         if (lay.size > 2) out2.push(`${prefix || "DDR"} byte lane ${lane}: routed on ${Array.from(lay).join(", ")}; keep a byte lane on one layer (two at most, with equal vias)`);
@@ -138654,7 +139006,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
     const out2 = [];
     for (const u of fps.filter(isOpamp)) for (const p of u.pads) {
       if (!/^(-|IN-|-IN|INN|IN_N|VIN-|INM|IN\d-|-IN[A-D]?|IN[A-D]-|\d?IN-)$/i.test(p.fn) || !p.net || isGnd(p.net) || isSup(p.net)) continue;
-      const L = S2.lengthOf(p.net);
+      const L = S3.lengthOf(p.net);
       if (L > 8) out2.push(`${u.ref}.${p.number} (${bare(p.net)}): ${r22(L)} mm of track on the inverting input`);
       const farP = (padsOf.get(p.net) || []).filter((q4) => /^(R|C)\d/i.test(q4.fp.ref) && Math.hypot(q4.x - p.x, q4.y - p.y) > 6).map((q4) => q4.fp.ref);
       if (farP.length) out2.push(`${u.ref}.${p.number} (${bare(p.net)}): ${Array.from(new Set(farP)).slice(0, 4).join(", ")} more than 6 mm from the pin`);
@@ -138684,7 +139036,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       }
       const under = /* @__PURE__ */ new Set();
       const shape3 = rectShape(y.box);
-      for (const c of S2.conds) {
+      for (const c of S3.conds) {
         if (c.kind !== "segment" && c.kind !== "arc" && c.kind !== "via") continue;
         if (!c.net || nets.has(c.net) || isGnd(c.net) || !hit4(c.bbox, y.box)) continue;
         if (P.shapeGap(c.shape, shape3) <= 0) under.add(bare(c.net));
@@ -138693,7 +139045,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       if (gz && copper.length >= 2) {
         const cx = (y.box[0] + y.box[2]) / 2, cy = (y.box[1] + y.box[3]) / 2;
         const lay = y.side === "back" ? copper[copper.length - 1] : copper[0];
-        if (!S2.refLayers(lay).some((l) => S2.pourAt(cx, cy, l) === "gnd")) out2.push(`${y.ref}: no ground under it on the next layer`);
+        if (!S3.refLayers(lay).some((l) => S3.pourAt(cx, cy, l) === "gnd")) out2.push(`${y.ref}: no ground under it on the next layer`);
       }
       for (const l of fps.filter(isPowerInductor)) {
         const d = boxGap(l.box, y.box);
@@ -138739,11 +139091,11 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
         if (best > LIMITS.hotLoopCap) loop.push(`${reg.ref}: input capacitor ${cap.fp.ref} is ${r22(best)} mm from the ${bare(v.net)} pin (at most ${LIMITS.hotLoopCap} mm)`);
         else if (round > LIMITS.hotLoop) loop.push(`${reg.ref}: the loop ${bare(v.net)} pin, ${cap.fp.ref}, ground pin is ${r22(round)} mm round (at most ${LIMITS.hotLoop} mm); turn ${cap.fp.ref} so its ground pad faces the ground pin`);
       }
-      const len = S2.lengthOf(sw);
+      const len = S3.lengthOf(sw);
       if (len > LIMITS.switchNode) node.push(`${bare(sw)}: ${r22(len)} mm of track; move ${ind.ref} against ${reg.ref}`);
       const nv = (viasOf.get(sw) || []).length;
       if (nv) node.push(`${bare(sw)}: ${nv} via${nv > 1 ? "s" : ""}; keep the switch node on one layer`);
-      const swCopper = S2.conds.filter((c) => c.net === sw && c.kind !== "zone");
+      const swCopper = S3.conds.filter((c) => c.net === sw && c.kind !== "zone");
       for (const fbp of reg.pads.filter((p) => /^(V?FB|VSENSE|VOS|ADJ)\d*$/i.test(p.fn) || /(^|[_\-.])V?FB\d*$/i.test(bare(p.net)))) {
         const segs = tracksOf.get(fbp.net) || [];
         let close = false, over = false;
@@ -138776,8 +139128,8 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
         if (!g2 || !s2) continue;
         if (!ics.some((u) => u.pads.some((p) => p.net === s2.net && Math.hypot(p.x - s2.x, p.y - s2.y) < 5))) continue;
         const lay = c.side === "back" ? copper[copper.length - 1] : copper[0];
-        if (S2.pourAt(g2.x, g2.y, lay) === "gnd" && (copper.length < 3 || S2.nearestStitch(g2.x, g2.y) <= LIMITS.bypassVia * 2)) continue;
-        if (S2.nearestStitch(g2.x, g2.y) <= LIMITS.bypassVia) continue;
+        if (S3.pourAt(g2.x, g2.y, lay) === "gnd" && (copper.length < 3 || S3.nearestStitch(g2.x, g2.y) <= LIMITS.bypassVia * 2)) continue;
+        if (S3.nearestStitch(g2.x, g2.y) <= LIMITS.bypassVia) continue;
         lost.push(`${c.ref} (${bare(s2.net)}) at ${at(g2.x, g2.y)}`);
       }
       if (lost.length) add2("bypass.return", "warning", `A decoupling capacitor only works through a short loop: supply pin, capacitor, ground, and back to the chip's ground. These capacitors' ground pads are not in the ground pour and have no ground via within ${LIMITS.bypassVia} mm. Put a via to the plane right at each ground pad (board.via("GND", (x, y))).`, lost);
@@ -138785,7 +139137,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
     if (copper.length >= 2) {
       const none = [], fewV = [], wide = [];
       for (const [e, f2] of epads) {
-        const inside2 = S2.vias.filter((v) => inBox(e.box, v.shape.x, v.shape.y));
+        const inside2 = S3.vias.filter((v) => inBox(e.box, v.shape.x, v.shape.y));
         const area4 = (e.box[2] - e.box[0]) * (e.box[3] - e.box[1]);
         const need = Math.max(1, Math.min(9, Math.floor(area4 / 1.5)));
         if (!inside2.length) none.push(`${f2.ref} ${f2.value} pad ${e.number} (${r22(e.box[2] - e.box[0])} x ${r22(e.box[3] - e.box[1])} mm, ${bare(e.net) || "no net"})`);
@@ -138804,7 +139156,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
         if (p.type !== "smd" || epads.has(p)) continue;
         const a = (p.box[2] - p.box[0]) * (p.box[3] - p.box[1]);
         if (a > 4) continue;
-        if (S2.vias.some((v) => inBox(p.box, v.shape.x, v.shape.y))) inPad.push(`${f2.ref}.${p.number}`);
+        if (S3.vias.some((v) => inBox(p.box, v.shape.x, v.shape.y))) inPad.push(`${f2.ref}.${p.number}`);
       }
     }
     if (inPad.length) add2("dfm.via_in_pad", "warning", "A via in a small part's solder pad drains the solder and stands the part on end (tombstoning) unless the fabricator fills and caps it, which costs extra. Move the via just off the pad on a short track.", inPad);
@@ -138855,7 +139207,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
     const lyr = (t) => Array.from(t.layers)[0];
     const st = physicalStack(doc2, k);
     const flex = st.rows.some((r) => !r.copper && FLEX_MATERIAL.test(r.material));
-    const bends = S2.keepouts.filter((q4) => BEND_NAME.test(q4.name));
+    const bends = S3.keepouts.filter((q4) => BEND_NAME.test(q4.name));
     if (flex || bends.length) {
       const total2 = st.thickness || doc2.thickness || 0;
       const rmin = total2 ? r22(total2 * (copper.length <= 1 ? 6 : 10)) : 0;
@@ -138863,11 +139215,11 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       const rigid = [], corners = [], solid = [], stacked = [];
       for (const b of bends) {
         const where = `the bend area at ${at((b.box[0] + b.box[2]) / 2, (b.box[1] + b.box[3]) / 2)}`;
-        for (const v of S2.vias) if (inBox(b.box, v.shape.x, v.shape.y)) rigid.push(`via at ${at(v.shape.x, v.shape.y)} (${bare(v.net) || "no net"})`);
+        for (const v of S3.vias) if (inBox(b.box, v.shape.x, v.shape.y)) rigid.push(`via at ${at(v.shape.x, v.shape.y)} (${bare(v.net) || "no net"})`);
         for (const f2 of fps) {
           if (hit4(f2.box, b.box)) rigid.push(`${f2.ref} ${f2.value}`.trim() + ` is in ${where}`);
         }
-        const inside2 = S2.tracks.filter((t) => hit4(t.bbox, b.box));
+        const inside2 = S3.tracks.filter((t) => hit4(t.bbox, b.box));
         const ends = /* @__PURE__ */ new Map();
         for (const t of inside2) {
           if (t.shape.t !== "seg") {
@@ -138898,7 +139250,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
           if (para && off < ((a.shape.r || 0.1) + (c.shape.r || 0.1)) / 2) beams.add(`${bare(a.net)} over ${bare(c.net)}`);
         }
         for (const x of beams) stacked.push(`${x} in ${where}`);
-        for (const z2 of S2.zoneOutlines) {
+        for (const z2 of S3.zoneOutlines) {
           if (z2.hatched) continue;
           let a = Infinity, bb = Infinity, c = -Infinity, d = -Infinity;
           for (const q4 of z2.pts) {
@@ -138915,10 +139267,10 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       if (stacked.length) add2("flex.copper", "warning", "Tracks lie directly over each other on the two sides of the bend (an I-beam). That stiffens the fold and cracks the outer copper: stagger them so each sits over the gap between the tracks on the other side.", few(stacked));
       if (solid.length) add2("flex.bend", "warning", "A solid copper pour across a bend is stiff and cracks. Use a hatched (cross-hatch) pour there, or keep the pour out of the bend area and carry ground across on a wide track.", few(solid));
       if (bends.length && copper.length > 2) add2("flex.copper", "warning", `The board has ${copper.length} copper layers and a bend area. Keep the bending part to one or two layers (the fabricator can leave the inner layers out of that region); bend radius grows with every layer.`);
-      if (S2.outline) {
-        const o = S2.outline;
+      if (S3.outline) {
+        const o = S3.outline;
         const near2 = [];
-        for (const t of S2.tracks) {
+        for (const t of S3.tracks) {
           const d = Math.min(t.bbox[0] - o[0], o[2] - t.bbox[2], t.bbox[1] - o[1], o[3] - t.bbox[3]);
           if (d < FLEX_EDGE - 1e-6) near2.push(`${bare(t.net)} on ${lyr(t)}: ${r22(Math.max(0, d))} mm from the edge`);
           if (near2.length > 12) break;
@@ -138928,14 +139280,14 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
     }
     const metal = st.rows.find((r) => !r.copper && METAL_CORE.test(r.material));
     if (metal) {
-      const back = S2.tracks.filter((t) => lyr(t) !== copper[0]).length, through = S2.vias.length + fps.reduce((a, f2) => a + f2.pads.filter((p) => p.type === "thru_hole").length, 0);
+      const back = S3.tracks.filter((t) => lyr(t) !== copper[0]).length, through = S3.vias.length + fps.reduce((a, f2) => a + f2.pads.filter((p) => p.type === "thru_hole").length, 0);
       if (back || through) add2("stackup.material", "error", `The board is on a ${metal.material} core, which is one-sided: the copper is on the front only and a plated hole would short to the metal. Take away the ${back ? `${back} track${back > 1 ? "s" : ""} off the front layer` : ""}${back && through ? " and the " : ""}${through ? `${through} via${through > 1 ? "s" : ""} or through-hole pad${through > 1 ? "s" : ""}` : ""}, and use surface-mount parts only.`);
     }
     if (!st.assumed && radio.ghz >= 1) {
       const lossy = st.rows.find((r) => !r.copper && r.loss >= 0.015);
       const long = [];
       for (const n2 of rfNets) {
-        const L = S2.lengthOf(n2);
+        const L = S3.lengthOf(n2);
         if (L > 300 / (radio.ghz * 2)) long.push(`${bare(n2)}: ${r22(L)} mm at ${radio.ghz} GHz`);
       }
       if (lossy && long.length) add2("stackup.material", "note", `These radio tracks are long for ${lossy.material || "FR-4"} (loss tangent ${lossy.loss}): standard FR-4 loses roughly 0.1 to 0.3 dB per 25 mm at 2.4 GHz and more above. Shorten them, or build the board on a low-loss laminate (kh.materials: Rogers RO4350B, PTFE).`, long);
@@ -138959,7 +139311,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
     if (out2.length) add2("esd.near", "warning", "An ESD strike must meet the protection before it meets anything else. Put the protection part right at the connector, with the track running connector, protection, then chip, and its ground straight into the plane.", out2);
   }
   {
-    const swCopper = S2.conds.filter((c) => c.net && c.kind !== "zone" && c.kind !== "pad" && kindOf2(c.net) === "switching");
+    const swCopper = S3.conds.filter((c) => c.net && c.kind !== "zone" && c.kind !== "pad" && kindOf2(c.net) === "switching");
     const near2 = [];
     if (swCopper.length) for (const [net, segs] of tracksOf) {
       if (kindOf2(net) !== "analog") continue;
@@ -138980,12 +139332,12 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       if (!p.net || isGnd(p.net) || isSup(p.net)) continue;
       const segs = tracksOf.get(p.net) || [];
       const name = bare(p.net);
-      const L = S2.lengthOf(p.net);
+      const L = S3.lengthOf(p.net);
       if (L > LIMITS.highZLength) hz.push(`${d.ref} ${name}: ${r22(L)} mm of track; put the amplifier's input right at the photodiode`);
       const nv = (viasOf.get(p.net) || []).length;
       if (nv) hz.push(`${d.ref} ${name}: ${nv} via${nv > 1 ? "s" : ""}; keep the photodiode and its amplifier on one side`);
       const beside = /* @__PURE__ */ new Set();
-      for (const t of segs) for (const c of S2.conds) {
+      for (const t of segs) for (const c of S3.conds) {
         if (c.kind === "zone" || c.kind === "pad" || !c.net || c.net === p.net || isGnd(c.net) || ![...c.layers].some((l) => t.layers.has(l)) || boxGap(t.bbox, c.bbox) > LIMITS.quiet) continue;
         if (P.shapeGap(t.shape, c.shape) < LIMITS.quiet) beside.add(bare(c.net));
       }
@@ -139017,7 +139369,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       const strip = axis ? [f2.box[0], a + 0.1, f2.box[2], b - 0.1] : [a + 0.1, f2.box[1], b - 0.1, f2.box[3]];
       const shape3 = rectShape(strip);
       const what = /* @__PURE__ */ new Set();
-      for (const c of S2.conds) {
+      for (const c of S3.conds) {
         if (c.kind === "pad" && c.item.id === f2.id) continue;
         if (!hit4(c.bbox, strip) || P.shapeGap(c.shape, shape3) > 0) continue;
         what.add(c.kind === "zone" ? `${bare(c.net) || "copper"} pour on ${Array.from(c.layers).join(", ")}` : `${bare(c.net) || "copper"} ${c.kind}`);
@@ -139040,7 +139392,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
     if (hv.size) {
       const worst = /* @__PURE__ */ new Map();
       const outer = /* @__PURE__ */ new Set([copper[0], copper[copper.length - 1]]);
-      const others = S2.conds.filter((c) => c.kind !== "zone");
+      const others = S3.conds.filter((c) => c.kind !== "zone");
       for (const c of others) {
         const v = hv.get(c.net);
         if (v === void 0) continue;
@@ -139100,11 +139452,11 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
     if (holed.length) add2("usb.vias", "error", "USB data lines should take no via at all: each one is a stub and an impedance step on the 90 ohm pair. Route D+ and D- on one layer (board.route() gives USB data lines no vias unless max_vias is set for them), or turn or swap the parts in their way, for example the ESD part's package.", holed);
     if (uneven.length) add2("usb.vias", "error", "Where a USB pair must change layer, both lines change together: one via each, side by side, and the pair keeps one width and matched lengths.", uneven);
   }
-  if (gz && S2.filled) {
-    const planeLayers = copper.filter((l) => S2.zoneOutlines.some((z2) => isGnd(z2.net) && z2.layers.includes(l)));
+  if (gz && S3.filled) {
+    const planeLayers = copper.filter((l) => S3.zoneOutlines.some((z2) => isGnd(z2.net) && z2.layers.includes(l)));
     const outer = /* @__PURE__ */ new Set([copper[0], copper[copper.length - 1]]);
     const holes = [];
-    for (const v of S2.vias) if (isGnd(v.net)) holes.push([v.shape.x, v.shape.y]);
+    for (const v of S3.vias) if (isGnd(v.net)) holes.push([v.shape.x, v.shape.y]);
     for (const f2 of fps) for (const p of f2.pads) if (isGnd(p.net) && p.type === "thru_hole") holes.push([p.x, p.y]);
     const near2 = (x, y, r) => holes.some((h3) => Math.hypot(h3[0] - x, h3[1] - y) <= r);
     if (planeLayers.some((l) => !outer.has(l)) || planeLayers.length >= 2) {
@@ -139121,7 +139473,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
         }
         return i;
       };
-      for (const [net, ts] of S2.tracksOf) if (isGnd(net)) for (const t of ts) {
+      for (const [net, ts] of S3.tracksOf) if (isGnd(net)) for (const t of ts) {
         if (!t.shape || t.shape.t !== "seg") continue;
         const a = gnode(t.shape.a), b = gnode(t.shape.b);
         const w = Math.hypot(t.shape.a[0] - t.shape.b[0], t.shape.a[1] - t.shape.b[1]);
@@ -139152,7 +139504,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
         }
         return false;
       };
-      const pours = S2.conds.filter((c) => c.kind === "zone" && isGnd(c.net) && c.shape && c.shape.pts && [...c.layers].some((l) => outer.has(l)));
+      const pours = S3.conds.filter((c) => c.kind === "zone" && isGnd(c.net) && c.shape && c.shape.pts && [...c.layers].some((l) => outer.has(l)));
       const poured = (p) => {
         const m = 0.45, b = p.box;
         const probes = [[b[0] - m, p.y], [b[2] + m, p.y], [p.x, b[1] - m], [p.x, b[3] + m], [b[0] - m, b[1] - m], [b[2] + m, b[1] - m], [b[0] - m, b[3] + m], [b[2] + m, b[3] + m]];
@@ -139175,7 +139527,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
     }
     const islands = [];
     let pieces3 = 0;
-    for (const c of S2.conds) {
+    for (const c of S3.conds) {
       if (c.kind !== "zone" || !isGnd(c.net) || ![...c.layers].some((l) => outer.has(l))) continue;
       pieces3++;
       const pts = c.shape.pts;
@@ -139192,13 +139544,13 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
   }
   void settings3;
 }
-function viaFits2(S2, P, x, y, r, clr, net, pads) {
-  const o = S2.outline;
+function viaFits2(S3, P, x, y, r, clr, net, pads) {
+  const o = S3.outline;
   if (o && (x < o[0] + r + 0.3 || x > o[2] - r - 0.3 || y < o[1] + r + 0.3 || y > o[3] - r - 0.3)) return false;
-  for (const kz of S2.keepouts) if (kz.vias && inBox(grow5(kz.box, r), x, y)) return false;
+  for (const kz of S3.keepouts) if (kz.vias && inBox(grow5(kz.box, r), x, y)) return false;
   const b = [x - r - clr, y - r - clr, x + r + clr, y + r + clr];
   const sh = { t: "circle", x, y, r };
-  for (const c of S2.conds) {
+  for (const c of S3.conds) {
     if (c.kind === "zone" || !hit4(c.bbox, b)) continue;
     if (c.kind === "pad" && !pads && P.shapeGap(sh, c.shape) < (c.net === net ? 0.1 : clr)) return false;
     if (c.kind === "via" && Math.hypot(c.shape.x - x, c.shape.y - y) < r + c.shape.r + 0.25) return false;
@@ -139207,33 +139559,33 @@ function viaFits2(S2, P, x, y, r, clr, net, pads) {
   return true;
 }
 function physicsPlan(doc2, P, k, settings3, plan) {
-  const S2 = survey(doc2, P, k);
+  const S3 = survey(doc2, P, k);
   const size2 = plan.size > 0 ? plan.size : 0.6, r = size2 / 2;
   const clr = Math.max(0.15, settings3 && settings3.clearance || 0.2);
-  const gndNet = Array.from(S2.padsOf.keys()).find((n2) => isGnd(n2) && /^\/?GND$/i.test(n2)) || Array.from(S2.padsOf.keys()).find(isGnd) || "GND";
-  const find = (ref) => S2.fps.find((f2) => f2.ref.toLowerCase() === String(ref || "").toLowerCase());
+  const gndNet = Array.from(S3.padsOf.keys()).find((n2) => isGnd(n2) && /^\/?GND$/i.test(n2)) || Array.from(S3.padsOf.keys()).find(isGnd) || "GND";
+  const find = (ref) => S3.fps.find((f2) => f2.ref.toLowerCase() === String(ref || "").toLowerCase());
   const taken = [];
   const free = (x, y, gap) => !taken.some((q4) => Math.hypot(q4[0] - x, q4[1] - y) < gap);
-  const ground = (x, y) => S2.zones ? S2.gndLayersAt(x, y) >= Math.min(2, S2.copper.length) : true;
+  const ground = (x, y) => S3.zones ? S3.gndLayersAt(x, y) >= Math.min(2, S3.copper.length) : true;
   if (plan.what === "antenna") {
-    const ants = plan.ref ? [find(plan.ref)].filter(Boolean) : S2.fps.filter(isAntenna);
+    const ants = plan.ref ? [find(plan.ref)].filter(Boolean) : S3.fps.filter(isAntenna);
     if (!ants.length) return { error: plan.ref ? `There is no part ${plan.ref} on the board.` : "The board has no antenna (a part with reference AE or ANT, or an antenna footprint)." };
     const pitch = Math.max(0.8, plan.pitch || 1), out2 = [];
-    const radio = radioGHz(S2.fps, S2.padsOf.keys());
+    const radio = radioGHz(S3.fps, S3.padsOf.keys());
     for (const a of ants) {
       const patch = plan.kind ? plan.kind === "patch" : isPatch(a);
-      const ko = S2.keepouts.find((q4) => q4.copper && hit4(q4.box, a.box));
+      const ko = S3.keepouts.find((q4) => q4.copper && hit4(q4.box, a.box));
       const have = !!ko;
-      const box3 = patch ? a.box : ko && !(plan.clearance >= 0) ? ko.box : antennaRegion(S2, a, plan.clearance >= 0 ? plan.clearance : LIMITS.antennaKeepout);
+      const box3 = patch ? a.box : ko && !(plan.clearance >= 0) ? ko.box : antennaRegion(S3, a, plan.clearance >= 0 ? plan.clearance : LIMITS.antennaKeepout);
       const pts = [];
       let skipped = 0;
-      for (const [x, y] of ringPoints(S2, box3, r + 0.4, pitch, r + 0.3)) {
-        if (S2.nearestStitch(x, y) < pitch * 0.6 || !free(x, y, pitch * 0.6)) continue;
+      for (const [x, y] of ringPoints(S3, box3, r + 0.4, pitch, r + 0.3)) {
+        if (S3.nearestStitch(x, y) < pitch * 0.6 || !free(x, y, pitch * 0.6)) continue;
         let ok2 = null;
         for (const [dx, dy] of [[0, 0], [0.4, 0], [-0.4, 0], [0, 0.4], [0, -0.4], [0.8, 0], [-0.8, 0], [0, 0.8], [0, -0.8]]) {
           const px = x + dx, py = y + dy;
           if (inBox(grow5(box3, r + 0.2), px, py)) continue;
-          if (ground(px, py) && viaFits2(S2, P, px, py, r, clr, gndNet, false) && free(px, py, pitch * 0.6)) {
+          if (ground(px, py) && viaFits2(S3, P, px, py, r, clr, gndNet, false) && free(px, py, pitch * 0.6)) {
             ok2 = [px, py];
             break;
           }
@@ -139246,15 +139598,15 @@ function physicsPlan(doc2, P, k, settings3, plan) {
       const remove = [], blocked = /* @__PURE__ */ new Set();
       const own = new Set(a.pads.map((p) => p.net).filter(Boolean));
       const shape3 = rectShape(box3);
-      if (!patch) for (const c of S2.conds) {
+      if (!patch) for (const c of S3.conds) {
         if (c.kind === "zone" || c.kind === "pad" || !hit4(c.bbox, box3) || P.shapeGap(c.shape, shape3) > 0) continue;
         if (c.kind === "via" && isGnd(c.net) && inBox(box3, c.shape.x, c.shape.y)) remove.push(c.id);
         else if (!own.has(c.net)) blocked.add(`${c.kind === "via" ? "a via" : "a track"} of ${bare(c.net) || "no net"}`);
       }
-      const edge = S2.outline ? Math.min(a.box[0] - S2.outline[0], S2.outline[2] - a.box[2], a.box[1] - S2.outline[1], S2.outline[3] - a.box[3]) : 0;
+      const edge = S3.outline ? Math.min(a.box[0] - S3.outline[0], S3.outline[2] - a.box[2], a.box[1] - S3.outline[1], S3.outline[3] - a.box[3]) : 0;
       out2.push({ ref: a.ref, box: box3.map(r22), has_keepout: have, remove, blocked: Array.from(blocked), patch, frequency_ghz: radio.ghz, vias: pts.map((p) => [r22(p[0]), r22(p[1])]), no_room: skipped, edge_distance: r22(edge), feed: a.pads.map((p) => p.net).filter((n2) => n2 && !isGnd(n2)).map(bare) });
     }
-    return { what: "antenna", net: gndNet, layers: S2.copper, antennas: out2 };
+    return { what: "antenna", net: gndNet, layers: S3.copper, antennas: out2 };
   }
   if (plan.what === "fence") {
     const spacing = Math.max(0.6, plan.spacing || 2);
@@ -139263,9 +139615,9 @@ function physicsPlan(doc2, P, k, settings3, plan) {
     if (plan.path) paths = [{ pts: plan.path.map((p) => [p[0], p[1]]), w: plan.width || 0.3 }];
     else {
       const want2 = String(plan.net || "");
-      net = Array.from(S2.tracksOf.keys()).find((n2) => n2 === want2 || bare(n2) === bare(want2)) || "";
+      net = Array.from(S3.tracksOf.keys()).find((n2) => n2 === want2 || bare(n2) === bare(want2)) || "";
       if (!net) return { error: `No routed net named ${want2}. Route it first, or give path=[(x, y), ...].` };
-      paths = (S2.tracksOf.get(net) || []).map((t) => ({ pts: t.shape.t === "seg" ? [t.shape.a, t.shape.b] : t.shape.pts, w: t.width }));
+      paths = (S3.tracksOf.get(net) || []).map((t) => ({ pts: t.shape.t === "seg" ? [t.shape.a, t.shape.b] : t.shape.pts, w: t.width }));
     }
     const pts = [];
     let wanted2 = 0;
@@ -139288,12 +139640,12 @@ function physicsPlan(doc2, P, k, settings3, plan) {
               wanted2--;
               break;
             }
-            if (S2.nearestStitch(x, y) < spacing * 0.5) {
+            if (S3.nearestStitch(x, y) < spacing * 0.5) {
               ok2 = null;
               wanted2--;
               break;
             }
-            if (ground(x, y) && viaFits2(S2, P, x, y, r, clr, gndNet, false)) {
+            if (ground(x, y) && viaFits2(S3, P, x, y, r, clr, gndNet, false)) {
               ok2 = [x, y];
               break;
             }
@@ -139308,7 +139660,7 @@ function physicsPlan(doc2, P, k, settings3, plan) {
     return { what: "fence", net: gndNet, of: bare(net), vias: pts.map((p) => [r22(p[0]), r22(p[1])]), no_room: Math.max(0, wanted2 - pts.length), spacing };
   }
   if (plan.what === "thermal") {
-    const parts = plan.ref ? [find(plan.ref)].filter(Boolean) : S2.fps;
+    const parts = plan.ref ? [find(plan.ref)].filter(Boolean) : S3.fps;
     if (plan.ref && !parts.length) return { error: `There is no part ${plan.ref} on the board.` };
     const pitch = Math.max(0.6, plan.pitch || LIMITS.thermalPitch), out2 = [];
     for (const f2 of parts) {
@@ -139321,7 +139673,7 @@ function physicsPlan(doc2, P, k, settings3, plan) {
       const nx = Math.max(1, Math.floor(w / pitch) + 1), ny = Math.max(1, Math.floor(h3 / pitch) + 1);
       const pts = [];
       const cx = (e.box[0] + e.box[2]) / 2, cy = (e.box[1] + e.box[3]) / 2;
-      const have = S2.vias.filter((v) => inBox(e.box, v.shape.x, v.shape.y));
+      const have = S3.vias.filter((v) => inBox(e.box, v.shape.x, v.shape.y));
       for (let i = 0; i < nx; i++) for (let j = 0; j < ny; j++) {
         const x = cx + (i - (nx - 1) / 2) * Math.min(pitch, nx > 1 ? w / (nx - 1) : 0), y = cy + (j - (ny - 1) / 2) * Math.min(pitch, ny > 1 ? h3 / (ny - 1) : 0);
         if (have.some((v) => Math.hypot(v.shape.x - x, v.shape.y - y) < r + v.shape.r + 0.2)) continue;
@@ -139331,40 +139683,40 @@ function physicsPlan(doc2, P, k, settings3, plan) {
     }
     return { what: "thermal", pads: out2 };
   }
-  if (plan.what === "layout") return layoutPlan(S2, doc2, k, plan);
+  if (plan.what === "layout") return layoutPlan(S3, doc2, k, plan);
   if (plan.what === "stackup") {
     const st = physicalStack(doc2, k);
     const sim = stackupOf(k, doc2);
-    const outer = traceOn(sim, S2.copper[0]);
+    const outer = traceOn(sim, S3.copper[0]);
     const w50 = outer ? widthFor(outer, 50) : null;
     return {
       what: "stackup",
-      copper_layers: S2.copper,
+      copper_layers: S3.copper,
       thickness: st.thickness || doc2.thickness || 1.6,
       finish: st.finish,
       assumed: st.assumed,
       layers: st.rows.map((r5) => ({ name: r5.name, type: r5.type, thickness: r5.thickness, material: r5.material, epsilon_r: r5.er, loss_tangent: r5.loss })),
       flex: st.rows.some((r5) => !r5.copper && FLEX_MATERIAL.test(r5.material)),
-      bend_areas: S2.keepouts.filter((q4) => BEND_NAME.test(q4.name)).map((q4) => q4.box.map(r22)),
+      bend_areas: S3.keepouts.filter((q4) => BEND_NAME.test(q4.name)).map((q4) => q4.box.map(r22)),
       outer: outer ? { kind: outer.kind, height: r22(outer.h), epsilon_r: r22(outer.er), reference: outer.reference, width_50_ohm: w50 ? r22(w50) : null } : null
     };
   }
-  if (plan.what === "rf_feed") return rfFeedPlan(S2, doc2, P, k, settings3, plan);
+  if (plan.what === "rf_feed") return rfFeedPlan(S3, doc2, P, k, settings3, plan);
   if (plan.what === "interfaces") return { what: "interfaces", interfaces: INTERFACES };
   return { error: `Unknown plan "${plan.what}": antenna, fence, thermal, layout, stackup or interfaces.` };
 }
-function rfFeedPlan(S2, doc2, P, k, settings3, plan) {
+function rfFeedPlan(S3, doc2, P, k, settings3, plan) {
   const r35 = (v) => Math.round(v * 1e3) / 1e3;
   const want2 = plan.net ? String(plan.net) : "";
   const target2 = plan.impedance > 0 ? plan.impedance : 50;
   const minW = plan.min_width > 0 ? plan.min_width : 0.3;
-  const nets = Array.from(S2.tracksOf.keys()).filter((n2) => want2 ? n2 === want2 || bare(n2) === bare(want2) : netKind(n2) === "rf" || /ANT/i.test(n2));
+  const nets = Array.from(S3.tracksOf.keys()).filter((n2) => want2 ? n2 === want2 || bare(n2) === bare(want2) : netKind(n2) === "rf" || /ANT/i.test(n2));
   if (!nets.length) return { error: want2 ? `No routed net named ${want2}.` : "No routed RF or antenna net on the board." };
   const stack2 = stackupOf(k, doc2);
   const L = stack2.layers;
   const out2 = [];
   for (const net of nets) {
-    const segs = S2.tracksOf.get(net) || [];
+    const segs = S3.tracksOf.get(net) || [];
     const byLayer = /* @__PURE__ */ new Map();
     for (const t2 of segs) for (const l of t2.layers) byLayer.set(l, (byLayer.get(l) || 0) + t2.length);
     const layer4 = Array.from(byLayer.entries()).sort((a, b) => b[1] - a[1])[0][0];
@@ -139443,7 +139795,7 @@ function rfFeedPlan(S2, doc2, P, k, settings3, plan) {
       if (c < best) best = c;
     }
     if (best < Infinity) gap = Math.max(best, P.netClearance(settings3, net));
-    const radio = radioGHz(S2.fps, S2.padsOf.keys());
+    const radio = radioGHz(S3.fps, S3.padsOf.keys());
     const length = segs.reduce((a, tk) => a + tk.length, 0);
     const lambda = 300 / (radio.ghz || 2.4) / Math.sqrt(3.2);
     if (length < lambda / 20 && !want2) {
@@ -139488,8 +139840,8 @@ function rfFeedPlan(S2, doc2, P, k, settings3, plan) {
   }
   return { what: "rf_feed", feeds: out2 };
 }
-function layoutPlan(S2, doc2, k, plan) {
-  const { fps, padsOf, copper } = S2;
+function layoutPlan(S3, doc2, k, plan) {
+  const { fps, padsOf, copper } = S3;
   const near2 = {}, why2 = {}, edges = {};
   const apart = [], notes = [];
   const put4 = (ref, by, reason) => {
@@ -139642,7 +139994,7 @@ function layoutPlan(S2, doc2, k, plan) {
   ];
   let finePitch = Infinity;
   let bga = false;
-  for (const f2 of S2.fps) {
+  for (const f2 of S3.fps) {
     if (f2.pads.length < 8) continue;
     if (/BGA|WLCSP|CSP/i.test(f2.lib)) bga = true;
     const ps = f2.pads;
@@ -139718,7 +140070,7 @@ var fieldOf3 = (p, re) => {
 };
 function reviewCircuit(c) {
   const { parts, nets, byRef: byRef2, netPins, supplyNets, pinNet, railV, isIc, isGround: isGround2, add: add2 } = c;
-  const live2 = parts.filter((p) => !p.dnp);
+  const live3 = parts.filter((p) => !p.dnp);
   const isR = (p) => !!p && /^R\d/i.test(p.ref) && p.pins.length === 2, isC = (p) => !!p && /^C\d/i.test(p.ref) && p.pins.length === 2;
   const other = (p, pin) => p.pins.find((q4) => q4 !== pin && q4.number !== pin.number);
   const across = (net, kind) => (netPins.get(net) || []).map((q4) => ({ pin: q4, part: byRef2.get(q4.ref) })).filter((x) => kind(x.part) && !x.part.dnp).map((x) => ({ part: x.part, far: pinNet(other(x.part, x.pin)) }));
@@ -139766,7 +140118,7 @@ function reviewCircuit(c) {
   }
   {
     const missing = [], wrong = [], unknown = [];
-    for (const p of live2) {
+    for (const p of live3) {
       if (!(/^(Y|XTAL)\d/i.test(p.ref) || /crystal|xtal/i.test(p.lib)) || /oscillator|MEMS|TCXO|VCXO/i.test(p.lib + " " + p.value)) continue;
       if (p.pins.some((q4) => supplyNets.has(pinNet(q4)) && !isGround2(pinNet(q4)))) continue;
       const legs = Array.from(new Set(p.pins.map(pinNet).filter((n2) => n2 && !isGround2(n2))));
@@ -139798,7 +140150,7 @@ function reviewCircuit(c) {
   }
   {
     const cc = [], ccVal = [], noEsd = [];
-    for (const p of live2) {
+    for (const p of live3) {
       const usb = /usb/i.test(p.lib + " " + p.value);
       if (!usb || !/^(J|P|CN|X|USB)\d/i.test(p.ref)) continue;
       const c1 = pinNamed(p, /^CC1$/i), c2 = pinNamed(p, /^CC2$/i);
@@ -139843,7 +140195,7 @@ function reviewCircuit(c) {
   }
   {
     const noCap = [], off = [], noRef = [], hot = [], warm = [];
-    for (const p of live2) {
+    for (const p of live3) {
       const isReg = /^Regulator_|^Converter_DCDC/i.test(p.lib) || isIc(p) && pinNamed(p, /^(VOUT|OUT|VO)$/i).length > 0 && pinNamed(p, /^(VIN|IN|VI)$/i).length > 0 && /reg|ldo|buck|boost|dcdc|conver/i.test(p.lib + " " + p.value + " " + fieldOf3(p, /^description$/i));
       if (!isReg) continue;
       const vin = pinNamed(p, /^(VIN|IN|VI|PVIN|AVIN|VCC|VDD)\d*$/i).map(pinNet).find(Boolean) || "", vout = pinNamed(p, /^(VOUT|OUT|VO|OUTPUT)\d*$/i).map(pinNet).find(Boolean) || "";
@@ -139894,7 +140246,7 @@ function reviewCircuit(c) {
   }
   {
     const bare3 = [], bright = [];
-    for (const p of live2) {
+    for (const p of live3) {
       if (!(/^(D|LED)\d/i.test(p.ref) && /led/i.test(p.lib + " " + p.value)) || p.pins.length !== 2 || /WS28|SK68|APA10|neopixel|RGB/i.test(p.lib + " " + p.value)) continue;
       const ends = p.pins.map(pinNet);
       if (!ends[0] || !ends[1]) continue;
@@ -139973,7 +140325,7 @@ function reviewCircuit(c) {
   }
   {
     const sizes2 = /* @__PURE__ */ new Map();
-    for (const p of live2) {
+    for (const p of live3) {
       if (!/^[RC]\d/i.test(p.ref) || p.pins.length !== 2) continue;
       const f2 = farads(p.value);
       if (/^C/i.test(p.ref) && f2 !== null && f2 > 22e-7) continue;
@@ -140004,7 +140356,7 @@ function reviewCircuit(c) {
   }
   {
     const rows3 = [];
-    for (const p of live2) {
+    for (const p of live3) {
       const a = pinNamed(p, /^(AGND|GNDA|AVSS|VSSA|AGND\d*)$/i).map(pinNet).filter(Boolean), d = pinNamed(p, /^(DGND|GNDD|DVSS|VSSD|DGND\d*)$/i).map(pinNet).filter(Boolean);
       if (!a.length || !d.length) continue;
       const an = new Set(a), dn = new Set(d);
@@ -140894,8 +141246,8 @@ async function reviewSchematic(doc2, path2) {
     if (unreachable.length) add2("test.points", "error", "These programming and debug pins reach no connector or pad, so the IC cannot be programmed on the board.", unreachable);
     if (parts.some(isIc) && !parts.some((p) => /led/i.test(p.lib + " " + p.value)) && !parts.some(isTp)) add2("test.points", "note", "The board has no LED and no test point. Add something to debug with: a status LED, a UART header, a scope probe point.");
     const feeds = (p) => p && isConn(p) && /usb|barrel|jack|batt|terminal|screw|jst|dc|power|pwr/i.test(p.lib + " " + p.value);
-    const entry = rails.filter((n2) => (netPins.get(n2) || []).some((q4) => feeds(byRef2.get(q4.ref))) && !(netPins.get(n2) || []).some((q4) => /^(F|D|Q|TVS|FB)\d/i.test(q4.ref) || q4.type === "power_out" || /^(Battery_Management|Power_Protection):|(^|:)(BQ2\d|TPS2\d|TPD\d|LTC4\d|MCP73|TP40|STBC|MAX1[45]\d\d)/i.test(((byRef2.get(q4.ref) || { lib: "" }).lib || "") + ":" + ((byRef2.get(q4.ref) || { value: "" }).value || ""))));
-    if (entry.length) add2("fail.safe", "warning", "These supplies come in through a connector with no fuse, diode, TVS or MOSFET on them. Add over-voltage and reverse polarity protection where a user can get it wrong.", entry);
+    const entry2 = rails.filter((n2) => (netPins.get(n2) || []).some((q4) => feeds(byRef2.get(q4.ref))) && !(netPins.get(n2) || []).some((q4) => /^(F|D|Q|TVS|FB)\d/i.test(q4.ref) || q4.type === "power_out" || /^(Battery_Management|Power_Protection):|(^|:)(BQ2\d|TPS2\d|TPD\d|LTC4\d|MCP73|TP40|STBC|MAX1[45]\d\d)/i.test(((byRef2.get(q4.ref) || { lib: "" }).lib || "") + ":" + ((byRef2.get(q4.ref) || { value: "" }).value || ""))));
+    if (entry2.length) add2("fail.safe", "warning", "These supplies come in through a connector with no fuse, diode, TVS or MOSFET on them. Add over-voltage and reverse polarity protection where a user can get it wrong.", entry2);
     const regs = parts.filter((p) => isIc(p) && p.pins.some((q4) => q4.type === "power_out"));
     if (regs.length && !parts.some((p) => /^(JP|SB)\d/i.test(p.ref) || /^R\d/i.test(p.ref) && ohms(p.value) === 0)) add2("fail.safe", "note", `${regs.length} regulator${regs.length > 1 ? "s" : ""} and no 0 ohm link or cuttable jumper. One in series with each regulator output lets a faulty supply be cut off from the rest of the board.`, regs.map((p) => p.ref));
     let nc = 0;

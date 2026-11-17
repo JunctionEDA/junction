@@ -9,14 +9,15 @@ import * as docMod from "../editor/doc";
 
 export interface SheetInstance { docId: string; path: string; name: string; sheetPath: string; page: string; doc: KDoc; uuidPath: string[]; sheetItemId: string | null; parentDocId: string | null }
 
-const rootSchematic = docMod.rootSchematic as () => DocEntry | undefined;
+const topLevelSchematics = docMod.topLevelSchematics as () => { doc: DocEntry; name: string; uuid: string }[];
 const projectTextVars = docMod.projectTextVars as () => Record<string, string> | null;
 const ROOT_SHEET_NAME = docMod.ROOT_SHEET_NAME as string;
 
 /** The sheet list (root first, then by page number). */
 export async function sheetList(): Promise<SheetInstance[]> {
   const S = appState as unknown as { docs: DocEntry[]; docId: string | null; project: { name: string } | null };
-  const root = rootSchematic(); if (!root) return [];
+  const tops = topLevelSchematics(); if (!tops.length) return [];
+  const multi = tops.length > 1;
   const cache = new Map<string, KDoc>();
   const load = async (d: DocEntry): Promise<KDoc> => {
     if (d.docId === S.docId && E.kdoc) return E.kdoc;
@@ -38,8 +39,15 @@ export async function sheetList(): Promise<SheetInstance[]> {
       await walk(child, nm, sheetPath + nm + "/", m.page || "", uuidPath.concat(m.id), m.id, d.docId, depth + 1);
     }
   };
-  await walk(root, ROOT_SHEET_NAME, "/", String((E.kdoc && S.docId === root.docId ? (E.kdoc as KDoc & { pageNumber?: string }).pageNumber : "") || "1"), [], null, null, 0);
-  // pages without a number keep their place after the numbered ones
+  // each top-level sheet (SCHEMATIC::GetTopLevelSheets), its page its own file's (sheet_instances (path "/" (page …))); with
+  // several, the path starts with the top-level sheet's name and uuidPath stays below it, as KIID paths leave it out
+  for (const t of tops) {
+    const d = t.doc, livePage = E.kdoc && S.docId === d.docId ? (E.kdoc as KDoc & { pageNumber?: string }).pageNumber : "";
+    let page = livePage || "";
+    if (!page && multi) { try { page = String((await load(d) as KDoc & { pageNumber?: string }).pageNumber || ""); } catch (e) { page = ""; } }
+    await walk(d, multi ? t.name : ROOT_SHEET_NAME, multi ? "/" + t.name + "/" : "/", page || "1", [], null, null, 0);
+  }
+  // pages without a number keep their place after the numbered ones (the first top-level sheet stays first)
   const num = (p: string): number => { const n = parseInt(p, 10); return isFinite(n) ? n : Infinity; };
   const rest = out.slice(1).map((s, i) => ({ s, i })).sort((a, b) => num(a.s.page) - num(b.s.page) || a.i - b.i).map((x) => x.s);
   const list = [out[0], ...rest];
