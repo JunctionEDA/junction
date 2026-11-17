@@ -12,7 +12,7 @@
 //! code that asked used to decide for itself.
 
 use crate::merge::{self, Prefer};
-use crate::{itemdoc, itemmerge};
+use crate::itemmerge;
 
 /// How a document's edits are stored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -129,6 +129,7 @@ pub fn diff_text(old: &str, new: &str) -> Option<Vec<merge::ItemChange>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::itemdoc;
 
     #[test]
     fn kicad_kinds_answer_as_the_platform_always_decided() {

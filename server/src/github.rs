@@ -601,6 +601,16 @@ struct LocalFile {
 async fn local_files(state: &AppState, project_id: Uuid) -> AppResult<BTreeMap<String, LocalFile>> {
     let mut out = BTreeMap::new();
     for doc in persist::project_documents(&state.pool, project_id).await? {
+        // A document whose journal this server folds itself (a part studio, an assembly) is read
+        // as it is now: its stored file is brought up to its last edit first, so it never shows
+        // as having edits that some editor still has to save.
+        if crate::dockind::of(&doc.doc_type).fold == crate::dockind::Fold::Server
+            && persist::latest_snapshot_seq(&state.pool, doc.id).await? < persist::head_seq(&state.pool, doc.id).await?
+        {
+            if let Err(why) = crate::compact::fold(&state.pool, &doc).await {
+                tracing::warn!(doc = %doc.id, "journal not folded: {why}");
+            }
+        }
         let Some((seq, content)) = persist::latest_snapshot(&state.pool, doc.id).await? else {
             continue;
         };
