@@ -104,8 +104,11 @@ export function footprintModels(node: SNode, guess = true, boardFiles: SNode | n
     if (emb) { out.push({ name: path.slice("kicad-embed://".length), offset: xyzOf(c as SNode, "offset", 0), scale: xyzOf(c as SNode, "scale", 1), rotate: xyzOf(c as SNode, "rotate", 0), source: "embedded", url: emb }); continue; }
     const own = projectModel(path);
     if (own) { out.push({ name: path.replace(/^\$[{(]KIPRJMOD[})][\/\\]/i, ""), offset: xyzOf(c as SNode, "offset", 0), scale: xyzOf(c as SNode, "scale", 1), rotate: xyzOf(c as SNode, "rotate", 0), source: "project", url: own }); continue; }
-    const m = /([^\/\\${}]+)\.3dshapes[\/\\]([^\/\\]+)\.(?:step|stp|wrl)$/i.exec(path); if (!m) continue;
-    const ref = { name: `${m[1]}/${m[2]}`, offset: xyzOf(c as SNode, "offset", 0), scale: xyzOf(c as SNode, "scale", 1), rotate: xyzOf(c as SNode, "rotate", 0) };
+    const m = /([^\/\\${}]+)\.3dshapes[\/\\]([^\/\\]+)\.(?:step|stp|wrl|wrz)$/i.exec(path);
+    const ref = { name: m ? `${m[1]}/${m[2]}` : path.replace(/^.*[\/\\]/, ""), offset: xyzOf(c as SNode, "offset", 0), scale: xyzOf(c as SNode, "scale", 1), rotate: xyzOf(c as SNode, "rotate", 0) };
+    const foreign = foreignModel(node, path, ref);
+    if (foreign) { if (!out.some((o) => o.url === foreign.url)) out.push(foreign); continue; }
+    if (!m) continue;
     if (/KICAD_COLLAB_3DMODELS/.test(path)) {
       const hit = VENDOR_FIELDS.map(([f, v]) => [v, fieldOf(node, f)]).find(([, id]) => id); if (!hit) continue;
       out.push({ ...ref, source: "vendor", url: `/api/parts/model.step?vendor=${hit[0]}&id=${encodeURIComponent(hit[1])}` });
@@ -113,6 +116,40 @@ export function footprintModels(node: SNode, guess = true, boardFiles: SNode | n
   }
   if (!named && guess) { const g = guessedModel(node); if (g) out.push(g); }
   return out;
+}
+
+/** Fields a footprint keeps its LCSC part number in (easyeda2kicad writes "LCSC Part", JLC's tools "LCSC Part #" or "JLCPCB Part #"). */
+const LCSC_FIELDS = ["LCSC", "LCSC Part", "LCSC Part #", "LCSC PN", "LCSC P/N", "LCSC Part No.", "LCSC Part Number", "LCSC#", "JLCPCB Part #", "JLCPCB Part", "JLCPCB PN", "JLCPCB P/N", "JLC", "JLCPCB"];
+function lcscOf(node: SNode): string {
+  for (const f of LCSC_FIELDS) { const v = fieldOf(node, f); if (/^C\d{1,9}$/i.test(v)) return v.toUpperCase(); }
+  return "";
+}
+
+/**
+ * A model under a path variable that is not KiCad's own library (${EASYEDA2KICAD}/easyeda2kicad.3dshapes/…, a
+ * personal ${MY_3D}/…): the file sits on the machine of whoever made the board, so the server never has it.
+ * The project may keep a copy (the same folder and file name anywhere in it); else, for a part with an LCSC number,
+ * the vendor's own STEP model of that part is drawn.  easyeda2kicad bakes the part's offset into the .wrl it writes
+ * and leaves the .step at (offset 0 0 0) in the vendor's frame, so for a .wrl, or a .step nobody moved, the
+ * vendor's own placement on its footprint is used (the footprint has the vendor's origin); a .step someone lined up
+ * by hand keeps their offset and rotation.  Null for KiCad's library paths and paths without a variable.
+ */
+function foreignModel(node: SNode, path: string, ref: Omit<ModelRef, "url" | "source">): ModelRef | null {
+  const v = /^\$[{(]([A-Za-z0-9_]+)[})][\/\\](.+)$/.exec(path); if (!v) return null;
+  if (/^(KICAD\d*_3DMODEL_DIR|KISYS3DMOD|KICAD_COLLAB_3DMODELS|KIPRJMOD)$/.test(v[1])) return null;
+  const tail = v[2].replace(/\\/g, "/").replace(/^\.\//, "");
+  const stem = tail.replace(/\.(?:step|stp|wrl|wrz)$/i, "");
+  if (stem !== tail && !stem.split("/").includes("..")) {
+    const fn = (globalThis as { KiCadProjectModel?: (stem: string) => string | null }).KiCadProjectModel;
+    let own: string | null = null;
+    try { own = typeof fn === "function" ? fn(stem) || (stem.includes("/") ? fn("/" + stem) : null) || null : null; } catch { own = null; }
+    if (own) return { ...ref, name: tail, source: "project", url: own };
+  }
+  const lcsc = lcscOf(node); if (!lcsc) return null;
+  const url = `/api/parts/model.step?vendor=lcsc&id=${encodeURIComponent(lcsc)}`;
+  const moved = ref.offset.some((n) => n !== 0) || ref.rotate.some((n) => n !== 0);
+  if (/\.(?:step|stp)$/i.test(path) && moved) return { ...ref, source: "vendor", url };
+  return { ...ref, offset: [0, 0, 0], rotate: [0, 0, 0], source: "vendor", url: url + "&placed=1" };
 }
 
 /** The model to try for a footprint that names none: its own "Library:Name" in KiCad's 3D library (or the closest to it). */
@@ -220,6 +257,27 @@ export function flattenOcct(result: { success?: boolean; meshes?: any[] }): Mode
   return { pos, nrm, col, idx };
 }
 
+/** "x,y,z" as the server's X-Model-Offset / X-Model-Rotate headers write it. */
+function headerXyz(v: string | null): V3 | null {
+  const n = String(v ?? "").split(",").map(Number);
+  return n.length === 3 && n.every(isFinite) ? [n[0], n[1], n[2]] : null;
+}
+
+/**
+ * A vendor model moved to where the vendor puts it on its footprint (the server's X-Model-Offset / X-Model-Rotate),
+ * so a footprint entry with no offset of its own (models.ts foreignModel) draws it in place.  Without the headers the
+ * model is left as the file has it.
+ */
+export function vendorPlaced(mesh: ModelMesh, headers: { get(name: string): string | null }): ModelMesh {
+  const offset = headerXyz(headers.get("x-model-offset")), rotate = headerXyz(headers.get("x-model-rotate"));
+  if (!offset || !rotate || (offset.every((n) => n === 0) && rotate.every((n) => n === 0))) return mesh;
+  const pos = new Float32Array(mesh.pos.length), nrm = new Float32Array(mesh.nrm.length);
+  placeMesh(mesh, { url: "", source: "vendor", name: "", offset, rotate, scale: [1, 1, 1] }, { x: 0, y: 0, z: 0, rot: 0, back: false }, (x, y, z, nx, ny, nz, i) => {
+    pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z; nrm[i * 3] = nx; nrm[i * 3 + 1] = ny; nrm[i * 3 + 2] = nz;
+  });
+  return { pos, nrm, col: mesh.col, idx: mesh.idx };
+}
+
 // ---------------------------------------------------------------- the browser half
 
 const RUNTIME = "/static/pyodide/";
@@ -271,7 +329,7 @@ export class ModelStore {
       if (resp.ok) {
         const bytes = await resp.arrayBuffer();
         const mesh = flattenOcct(await this.tessellate(bytes));
-        if (mesh) { state = mesh; const rep = resp.headers.get("x-model-replacement"); if (rep) this.swapped.set(url, rep); }
+        if (mesh) { state = /[?&]placed=1(?:&|$)/.test(url) ? vendorPlaced(mesh, resp.headers) : mesh; const rep = resp.headers.get("x-model-replacement"); if (rep) this.swapped.set(url, rep); }
       }
     } catch { /* stays missing: the stand-in solid is drawn */ }
     this.have.set(url, state); this.asked.delete(url);
