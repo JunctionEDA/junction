@@ -2,7 +2,8 @@
 
 A board of the project (`.kicad_pcb`) inside a part studio, as real geometry that follows the board while it is
 edited. This folder is the PCB → CAD direction. The other direction (CAD geometry driving the board's outline,
-holes and keep-outs) is `mechanical/boardlink/`; what it can read from here is under "For the other direction".
+holes and keep-outs) is `mechanical/boardlink/`. A board that is both shown and driven has **one placement**,
+this folder's: the link names the Board feature and takes its frame (CONTRACT.md "Boards").
 
 ## The pieces
 
@@ -16,10 +17,12 @@ holes and keep-outs) is `mechanical/boardlink/`; what it can read from here is u
 | `brep.ts` `buildBoard` | worker | The snapshot as named solids. |
 | `placement.ts` | page, worker | The board's frame on a plane. |
 | `link.ts` `BoardLink` | page | One per open part studio: sources, displays, the worker's input, the debounce. |
+| `feed.ts` `BoardFeed` | page, node | The same input for everything that builds a part studio outside its own page (an assembly, Compare, the assistant, the board editor's enclosure): an input filter that supplies `$board`. |
+| `ShownBoards.tsx` | page | The first part of the Board panel: the boards this studio shows. |
 | `../features/board-reference.ts` | page, worker | The **Board** feature. |
 | `../features/board-cutout.ts`, `board-standoffs.ts` | page, worker | **Opening** and **Standoffs**: features that hang off a board's faces. |
 | `../services/board-placement.ts` | worker | Where the worker put each board (for a board on a face of the model). |
-| `../panels/boards.tsx` | page | The Boards panel; importing `link.ts` here is what starts the link. |
+| `../panels/boardlink.tsx` | page | The Board panel (with `../boardlink/Panel.tsx`); importing `link.ts` through it is what starts the link. |
 | `../../pcb/editor/cad-usage.ts` | board editor | "Used in Part Studio 1": from a board to the CAD documents that use it. |
 
 ## How a board edit reaches the model
@@ -106,16 +109,17 @@ toFootprint(c, p) / fromFootprint(c, p)           // board point ↔ a footprint
 Mounting holes are the holes of footprints whose `component.body` is null and that have one NPTH pad; there is
 no flag for them, the names (`H1`) carry it.
 
-**An assembly that instances a board** (`source: { kind: "board", docId }`) can draw it without a kernel:
-`new BoardSource(…)`, then one `BoardDisplay` per instance (`display.update(reader, origin, delta)` on every
-`onChange`, `display.setFrame(frame)` for the instance's transform). For mates it needs the names: build the
-solids in its worker with `buildBoard(ctx, snapshot, frame, prefix)` or, simpler, instance a part studio that
-holds the Board feature. A mate connector on a board should use the names above (`…:hole:H1` for a fastener,
-`…:back` for the seat). `BoardLink` is written against `PartStudio`; an assembly needs its own few lines that do
-what `filter` and `boardChanged` do.
+**An assembly that instances a board** (`source: { kind: "board", docId }`, `assembly/sources/board.ts`) builds
+it as a part studio of one Board feature with id `board` (so the names are the ones above with `board` for
+`<f>`), from a `BoardFeed`, and draws a `BoardDisplay` per instance (`assembly/viewport/boards.ts`:
+`display.update(reader, [0, 0], delta)` as changes arrive, `display.setFrame(frame)` for the instance's
+transform). A mate connector on a board uses the names above (`board:hole:H1` for a fastener, `board:back` for
+the seat).
 
-**Regenerating a part studio outside its page** (an assembly, an export): the Board feature needs `$board` in its
-parameters. Without it the feature fails with "has not been read yet" and so do the features built on it.
+**Building a part studio outside its page** (an assembly, Compare, the assistant, the board editor's
+enclosure): the Board feature needs `$board` in its parameters. `BoardFeed.filter` supplies it:
+`studioInputs(doc, { filters: [feed.filter] })` (CONTRACT.md "Building a part studio outside its page").
+Without it the feature fails with "has not been read yet" and so do the features built on it.
 
 ## Performance, measured
 

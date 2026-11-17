@@ -2,8 +2,9 @@
 
 A part studio can drive a board of the same project: the board's outline, its mounting holes and keep-out areas
 with height limits are taken from the model and follow it. This folder is the part studio's half; the board
-editor's half is [`web/domains/pcb/mech`](../../pcb/mech/README.md). (The opposite direction, the board shown as
-a model inside a part studio, is `mechanical/board/` and is separate.)
+editor's half is [`web/domains/pcb/mech`](../../pcb/mech/README.md). The opposite direction, the board shown as
+a model inside a part studio, is `mechanical/board/`; when a studio does both, the board lies where its Board
+feature puts it (see "Placement").
 
 ## The model
 
@@ -31,10 +32,20 @@ part studio (.jpart)                                   board (.kicad_pcb)
   opened. It is the *last good* answer: a drive whose source is lost (a face renamed by a redrawn sketch, a
   suppressed feature) keeps its geometry and gets a message in `solved.errors`; both editors show it as not
   following. A broken reference never deletes a board outline.
-- **Placement.** `plane` (a default plane or a planar face) raised by `lift` is the board's *back* face; the
-  plane's normal points to the board's front. `anchor` is where the plane's origin lands on the KiCad sheet and
-  `rotation` turns the board about it. The picked face of a boss top therefore places a board on the bosses
-  with its components facing away from them, whichever way the bosses point.
+- **Placement.** One of two, never both:
+  - *By a Board feature* (`feature: <id>` on the link): the board is shown in the model by that feature and
+    lies where it puts it. The worker takes the frame the feature was built with (`board/placement.ts
+    builtFrames`) and the feature's `origin` as the sheet point at the frame's origin, with no further turn; the
+    answer carries them as `solved.frame`, `solved.anchor` and `solved.rotation` (`placementOf` reads those).
+    The link's own `plane`, `lift`, `anchor` and `rotation` are not used. This is what **Link this board** makes
+    when the studio already shows the board, and what **Show the board in the model** turns a link into (it adds
+    a Board feature on the link's plane, raised by its lift, with the link's anchor as its origin and the
+    opposite turn: the same place exactly). A feature that is suppressed or gone leaves the link "not
+    following", with its last geometry.
+  - *By the link itself*: `plane` (a default plane or a planar face) raised by `lift` is the board's *back* face;
+    the plane's normal points to the board's front. `anchor` is where the plane's origin lands on the KiCad
+    sheet and `rotation` turns the board about it. The picked face of a boss top therefore places a board on the
+    bosses with its components facing away from them, whichever way the bosses point.
 
 ## Units and coordinates
 
@@ -64,6 +75,6 @@ drawing a model around a board (a rigid motion: no mirror). Nothing else convert
 | `ids.ts` | ids of driven board items |
 | `solve.ts` | worker: drives → board geometry on OpenCascade (`services/boardlink-solve.ts` registers it) |
 | `driver.ts` | page: keeps the links solved |
-| `Panel.tsx` | the Board panel (`panels/boardlink.tsx` registers it) |
+| `Panel.tsx` | the Board panel (`panels/boardlink.tsx` registers it); its first part is `board/ShownBoards.tsx` |
 | `hint.ts` | the note one editor leaves the other for a jump between a board item and its source |
 | `api.ts` | what the board editor imports (re-exported by `mechanical/api.ts`) |

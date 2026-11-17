@@ -41,12 +41,14 @@ once against an interface instead of once per file format.
   implementation. Decide whether new domains keep this item-sync model or use a CRDT (Yjs or Automerge) for their
   own documents. Recommendation: keep one change protocol on the wire and let each domain's document type choose.
 - **Projects hold many kinds of documents.** A project holds a schematic and a board, and now part studios and
-  assemblies, as tabs (`server/web/platform/doctabs`, `server/web/domains/registry.ts`). Still to do: simulations
-  and toolpaths, and links between documents (a board placed in an enclosure, a part that a toolpath machines).
+  assemblies, as tabs (`server/web/platform/doctabs`, `server/web/domains/registry.ts`), and documents follow
+  each other live: a board in a part studio, a part studio driving a board, both placed in an assembly. Still to
+  do: simulations and toolpaths (a part that a toolpath machines).
 - **JSON item documents.** New domains' documents are JSON files of items with stable ids, edited by item
   changes over the existing op path and folded into the stored file by the server (`server/src/itemdoc.rs`,
-  `server/web/shared/itemdoc`). Storage, roles and live co-editing work for them; version history, compare,
-  branch merge, comments and MCP still read KiCad files only.
+  `server/web/shared/itemdoc`). Storage, roles, live co-editing, version history, branch merge and comments
+  work for them (`server/src/dockind.rs` says how each document kind behaves); Compare, thumbnails and MCP tools
+  are per domain, and part studios have them.
 - **Compute jobs.** Simulation, meshing, synthesis and toolpath generation are too heavy for a browser tab. Add
   a job queue on the server: a job takes a document version, runs a sandboxed worker and stores the result as a
   version-linked artifact, with progress shown to everyone in the project.
@@ -78,30 +80,38 @@ the cross-domain desktop app should be the browser app in Electron.
 This comes first because boards need enclosures, and the 3D viewer already ships an OpenCascade build
 (`occt-import-js`).
 
-The foundation is in: part studios as documents and tabs, the kernel in a worker, a feature registry with
-regeneration and caching, Sketch (no constraints) and Extrude, a 3D viewport with named-geometry picking, and
-item-level live co-editing. [server/web/domains/mechanical/CONTRACT.md](../server/web/domains/mechanical/CONTRACT.md)
-is the contract the rest is built against.
+Where it stands: part studios are documents and tabs, with the kernel in a worker and a feature registry with
+regeneration and caching. [server/web/domains/mechanical/CONTRACT.md](../server/web/domains/mechanical/CONTRACT.md)
+is the contract everything is built against, and lists the limits.
 
-1. View and measure STEP files in a project, with comments pinned to faces.
-2. Sketches with constraints (a 2D solver such as PlaneGCS), then revolve, fillet, chamfer, shell and pattern.
-3. Live collaboration on the feature tree beyond item sync: presence, who has which feature open.
-4. STEP export, and STEP import as a base feature.
+- [x] Sketches with constraints and dimensions (PlaneGCS), then extrude, revolve, sweep, loft, fillet, chamfer,
+  draft, shell, hole, booleans, patterns, mirror, reference geometry and variables.
+- [x] Live collaboration on the feature tree beyond item sync: presence, Follow, who has which feature open,
+  comments pinned to faces.
+- [x] STEP and BREP import as a base feature; STEP, STL, 3MF, OBJ, GLB, DXF and SVG export.
+- [x] Measure, section view, mass properties, appearance.
+- [x] Version history, Compare, branches and merging, thumbnails and AI (MCP) tools for part studios.
+- [ ] View a STEP file without importing it; ellipses and splines in sketches; threads; meshes refined on zoom.
 
-**Done when** a team can model a simple enclosure together and export it as STEP.
+**Done when** a team can model a simple enclosure together and export it as STEP: `server/scripts/cad-e2e.mjs`
+does this, with two people, in the real app.
 
 ## Phase 4: Assemblies (`domains/assembly`)
 
-The assembly document, its tab and its instance and mate format exist (a stub editor); nothing is placed yet.
+Where it stands ([server/web/domains/assembly/README.md](../server/web/domains/assembly/README.md)):
 
-- Place parts and boards in one scene. A board comes from the electronics domain and follows its changes (move a
-  connector on the board and the assembly updates).
-- Mates and joints, interference and clearance checks, exploded views, and a combined BOM across mechanical and
-  electronic parts.
-- Electrical-mechanical checks: the board outline against the enclosure, connector cut-outs, keep-outs from the
-  board's courtyard.
+- [x] Place parts, sub-assemblies and boards in one scene. A board comes from the electronics domain and follows
+  its changes (move a connector on the board and the assembly, and the opening cut for it in a part studio,
+  update).
+- [x] Mates and joints with a solver, interference and clearance checks, an exploded view, and a combined BOM
+  across mechanical and electronic parts.
+- [x] Electrical-mechanical links: the board outline, mounting holes and keep-outs with height limits driven
+  from the enclosure, a height check in the board editor, connector cut-outs and standoffs driven from the board.
+- [ ] An earlier version of an assembly on screen, Compare, thumbnails and AI tools for assemblies; interference
+  inside sub-assemblies; screw, gear and rack relations; STEP files placed directly.
 
-**Done when** a board and its enclosure stay in step as either one changes.
+**Done when** a board and its enclosure stay in step as either one changes: they do, both ways
+(`server/scripts/cad-e2e.mjs`).
 
 ## Phase 5: Manufacturing and CAM (`domains/manufacturing`)
 

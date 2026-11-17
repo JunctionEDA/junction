@@ -65,8 +65,10 @@ also a real KiCad keep-out (`footprints not_allowed`), so KiCad's own DRC report
 
 **The enclosure's meshes.** A part studio document stores features, not triangles, and nothing is cached with
 it (a mesh in the document would go through the collaboration log on every edit). The board page runs the
-modelling worker itself: one `KernelClient` per linked part studio, fed the features of the session `links.ts`
-already holds. The worker and its kernel are fetched only when the 3D viewer is open on a linked board with the
+modelling worker itself: one `KernelClient` per linked part studio, fed the session `links.ts` already holds
+through the mechanical domain's `studioInputs` (variables applied; a `BoardFeed` supplies the board of a studio
+that also shows this board, so its openings and standoffs are built). The studio's reference bodies, the
+board's own stand-in solids, are not drawn: the real board is right there. The worker and its kernel are fetched only when the 3D viewer is open on a linked board with the
 enclosure shown, and are dropped when the viewer closes. `viewer3d` gained three small additions for this:
 `Viewer.setExtras(meshes, section)`, `BoardScene.origin()` and the `KiCadViewer3DOpened` hook list.
 
