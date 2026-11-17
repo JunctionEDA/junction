@@ -53,7 +53,18 @@ export interface FeatureDefinition<P extends JsonObject = JsonObject> {
   toolbar?: boolean;
   /** where the toolbar button goes; lower first.  Features without one follow in title order. */
   toolbarOrder?: number;
+  /** which part of the toolbar the button is in ("solid" when not given) */
+  toolbarSection?: FeatureSection;
+  /**
+   * Features of one section that name the same menu share one drop-down button with that title (Fillet,
+   * Chamfer and Draft under "Fillet").  A feature without one has a button of its own.
+   */
+  toolbarMenu?: string;
 }
+
+/** The feature parts of the toolbar, in the order they are drawn. */
+export type FeatureSection = "sketch" | "solid" | "pattern" | "reference" | "board";
+export const FEATURE_SECTIONS: readonly FeatureSection[] = ["sketch", "solid", "pattern", "reference", "board"];
 
 /** Typed helper: `export default defineFeature<MyParams>({ ... })`. */
 export function defineFeature<P extends JsonObject>(def: FeatureDefinition<P>): FeatureDefinition<JsonObject> {

@@ -18,6 +18,7 @@ export default defineFeature<FilletParams>({
   title: "Fillet",
   icon: '<path d="M5 19V12a7 7 0 0 1 7-7h7"/><path d="M5 5h3M19 19v-3" stroke-dasharray="1.5 2"/>',
   toolbarOrder: 30,
+  toolbarSection: "solid", toolbarMenu: "Fillet",
   defaults: () => ({ edges: [], radius: 1 }),
   schema: [
     { key: "edges", label: "Edges or faces", kind: "refs", of: ["edge", "face"], hint: "A face rounds every edge around it." },

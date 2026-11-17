@@ -15,6 +15,7 @@ export default defineFeature<HelixParams>({
   title: "Helix",
   icon: '<path d="M6 4c12 0 12 4 0 4s-0 4 12 4-0 4-12 4 0 4 12 4"/>',
   toolbarOrder: 63,
+  toolbarSection: "reference", toolbarMenu: "Reference",
   defaults: () => ({ axis: null, radius: 10, pitch: 5, turns: 4, start: 0, left: false }),
   schema: [
     { key: "axis", label: "Axis", kind: "refs", of: ["edge", "face"], single: true, planes: true, datums: ["axis", "plane"], sketch: true, hint: "An axis, a round edge or cylindrical face, or a plane (along its normal)." },

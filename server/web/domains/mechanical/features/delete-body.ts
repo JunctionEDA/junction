@@ -12,6 +12,7 @@ export default defineFeature<DeleteBodyParams>({
   title: "Delete body",
   icon: '<path d="M4 9l8-4 8 4v8l-8 4-8-4z"/><path d="M9 11l6 6M15 11l-6 6"/>',
   toolbarOrder: 42,
+  toolbarSection: "solid", toolbarMenu: "Boolean",
   defaults: () => ({ bodies: [] }),
   schema: [{ key: "bodies", label: "Bodies", kind: "bodies", hint: "Click the bodies to delete." }],
 

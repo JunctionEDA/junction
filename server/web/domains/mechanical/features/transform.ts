@@ -24,6 +24,7 @@ export default defineFeature<TransformParams>({
   title: "Transform",
   icon: '<path d="M12 3v18M3 12h18"/><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>',
   toolbarOrder: 44,
+  toolbarSection: "solid", toolbarMenu: "Boolean",
   defaults: () => ({ bodies: [], dx: 0, dy: 0, dz: 0, axis: "z", axisEdge: null, angle: 0, copy: false }),
   schema: [
     { key: "bodies", label: "Bodies", kind: "bodies", hint: "Click the bodies to move." },

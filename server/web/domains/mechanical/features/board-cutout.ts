@@ -32,6 +32,7 @@ export default defineFeature<BoardCutoutParams>({
   title: "Opening",
   icon: '<path d="M4 5h16v14H4z"/><rect x="9" y="10" width="6" height="4" rx="0.5"/>',
   toolbarOrder: 16,
+  toolbarSection: "board", toolbarMenu: "Board",
   defaults: () => ({ face: null, clearance: 0.5, depth: 10, back: 1, targets: [] }),
   schema: [
     { key: "face", label: "In front of", kind: "refs", of: ["face"], single: true, hint: "A flat face: the side of a connector that looks at the wall." },

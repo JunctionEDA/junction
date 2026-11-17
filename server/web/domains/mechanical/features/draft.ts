@@ -16,7 +16,8 @@ export default defineFeature<DraftParams>({
   type: "draft",
   title: "Draft",
   icon: '<path d="M6 20l3-15h6l3 15z"/><path d="M3 20h18"/>',
-  toolbarOrder: 34,
+  toolbarOrder: 32,
+  toolbarSection: "solid", toolbarMenu: "Fillet",
   defaults: () => ({ faces: [], neutral: { kind: "plane", plane: "top" }, angle: 3, flip: false }),
   schema: [
     { key: "faces", label: "Faces to draft", kind: "refs", of: ["face"] },

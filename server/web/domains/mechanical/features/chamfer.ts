@@ -26,6 +26,7 @@ export default defineFeature<ChamferParams>({
   title: "Chamfer",
   icon: '<path d="M5 19v-8l6-6h8"/><path d="M5 5h3M19 19v-3" stroke-dasharray="1.5 2"/>',
   toolbarOrder: 31,
+  toolbarSection: "solid", toolbarMenu: "Fillet",
   defaults: () => ({ edges: [], chamferType: "equal", distance: 1, distance2: 2, angle: 45, flip: false }),
   schema: [
     { key: "edges", label: "Edges or faces", kind: "refs", of: ["edge", "face"], hint: "A face bevels every edge around it." },

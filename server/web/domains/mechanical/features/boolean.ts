@@ -15,6 +15,7 @@ export default defineFeature<BooleanParams>({
   title: "Boolean",
   icon: '<circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/>',
   toolbarOrder: 40,
+  toolbarSection: "solid", toolbarMenu: "Boolean",
   defaults: () => ({ operation: "union", targets: [], tools: [], keepTools: false }),
   schema: [
     { key: "operation", label: "Operation", kind: "enum", options: [{ value: "union", label: "Union" }, { value: "subtract", label: "Subtract" }, { value: "intersect", label: "Intersect" }] },

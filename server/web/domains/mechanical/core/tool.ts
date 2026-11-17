@@ -26,6 +26,8 @@ export interface ToolDefinition {
   order?: number;
   /** a single key that runs the tool while the viewport has the keyboard ("l", "Escape") */
   key?: string;
+  /** tools of one group that name the same menu share one drop-down button with that title */
+  menu?: string;
   /** false hides the button (a tool reached only by its key or from a menu) */
   button?: boolean;
   /** Greyed out, with this as the reason, when it returns a string.  Called on every toolbar draw: keep it cheap. */
@@ -55,8 +57,14 @@ export interface PanelDefinition {
   order?: number;
   /** A React component; it reads the studio with the hooks in ui/hooks.ts. */
   render(studio: PartStudio): ReactNode;
-  /** false: the panel starts closed and is opened from the View group */
-  open?: boolean;
+  /**
+   * Whether the panel starts open (its header folds and unfolds it; what a person chose is remembered).  A
+   * function is asked each time the studio's state changes until the person chooses: a panel that is about
+   * something not every part studio has (a board) opens when there is one.  Open when not given.
+   */
+  open?: boolean | ((studio: PartStudio) => boolean);
+  /** The panel is in its dock only while this returns true (the Sketch panel, while a sketch is open). */
+  visible?(studio: PartStudio): boolean;
 }
 
 export function definePanel(def: PanelDefinition): PanelDefinition { return def; }

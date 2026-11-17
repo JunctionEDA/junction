@@ -20,6 +20,7 @@ export default defineFeature<CircularPatternParams>({
   title: "Circular pattern",
   icon: '<circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="4.5" r="2"/><circle cx="19" cy="15" r="2" stroke-dasharray="2 1.5"/><circle cx="5" cy="15" r="2" stroke-dasharray="2 1.5"/>',
   toolbarOrder: 71,
+  toolbarSection: "pattern", toolbarMenu: "Pattern",
   defaults: () => ({ ...copyDefaults(), axis: null, count: 4, angle: 360, equal: true, flip: false, skip: "" }),
   schema: [
     ...copyFields("Copy"),

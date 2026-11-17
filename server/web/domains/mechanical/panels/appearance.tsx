@@ -114,4 +114,4 @@ function Appearance({ studio }: { studio: PartStudio }) {
   );
 }
 
-export default definePanel({ id: "appearance", title: "Appearance", side: "right", order: 10, render: (studio) => <Appearance studio={studio} /> });
+export default definePanel({ id: "appearance", title: "Appearance", side: "right", order: 30, open: false, render: (studio) => <Appearance studio={studio} /> });

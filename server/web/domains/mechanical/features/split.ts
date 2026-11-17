@@ -20,6 +20,7 @@ export default defineFeature<SplitParams>({
   title: "Split",
   icon: '<path d="M4 9l8-4 8 4v8l-8 4-8-4z"/><path d="M3 13h18" stroke-dasharray="2 2"/>',
   toolbarOrder: 43,
+  toolbarSection: "solid", toolbarMenu: "Boolean",
   defaults: () => ({ plane: { kind: "plane", plane: "front" }, bodies: [], keep: "both" }),
   schema: [
     { key: "plane", label: "Split with", kind: "plane" },
