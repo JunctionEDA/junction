@@ -23,8 +23,12 @@ import { FEATURES, TOOLS } from "../generated/page";
 import { KernelClient, type KernelState } from "../kernel/client";
 import type { BodyResult, DatumView, FeatureInput, FeatureReport, RegenResult, SketchView } from "../kernel/protocol";
 import { studioInputs, type InputFilter } from "../document/inputs";
-import { pickKindsOf, sameTarget, targetOf, targetsIn, type RefTarget } from "../features/_refs";
+import { DEFAULT_UNITS, setUnits as unitChanges, unitsOf, type Units } from "../document/units";
+import { setMeasureUnits } from "../inspect/measure-format";
 import { ModelView, pickKey, type Pick, type PickKind } from "../viewport/modelview";
+import { DEFAULT_GEOMETRY } from "../viewport/planes";
+import { fillFromSelection, heldPicks, holdsOne, neighbourField, nextEmptyField, pickKindsFor, takesPicks, valueAfterPick } from "./fields";
+import { getPrefs, readVisibility, writeVisibility, type Visibility } from "./prefs";
 
 export interface EditingFeature {
   /** the feature as the dialog shows it; the document is not changed until the dialog is accepted */
@@ -32,6 +36,8 @@ export interface EditingFeature {
   isNew: boolean;
   /** the dialog field that viewport clicks fill, when one is active */
   field: string | null;
+  /** show the whole model with this feature in it (every later feature built), not the model as far as this feature */
+  final?: boolean;
 }
 
 export interface StudioState {
@@ -54,7 +60,15 @@ export interface StudioState {
   selectedFeature: string | null;
   editing: EditingFeature | null;
   /** the sketch that is open for editing, and the sketch tool in hand ("select" when none) */
-  sketch: { featureId: string; tool: string } | null;
+  sketch: { featureId: string; tool: string; /** made by this visit: cancelling takes the feature away again */ isNew?: boolean; /** its parameters when it was opened: what cancelling puts back */ before?: JsonObject } | null;
+  /** every row selected in the feature list (Shift and Ctrl add); `selectedFeature` is the one clicked last */
+  selectedFeatures: readonly string[];
+  /** the feature row under the pointer: its geometry is highlighted in the model */
+  hoverFeature: string | null;
+  /** how lengths and angles are shown and typed (document/units.ts): the document's, the same for everybody */
+  units: Units;
+  /** what this person has hidden or shown: "origin", "top", "front", "right", feature ids (ui/prefs.ts) */
+  visibility: Visibility;
   peers: SessionPeer[];
   canUndo: boolean; canRedo: boolean;
   planesVisible: boolean;
@@ -88,6 +102,12 @@ export class PartStudio {
   private closed = false;
   /** the document on screen in place of the live one, while an earlier version is looked at */
   private pastDoc: ItemDoc | null = null;
+  /** where the view was before a sketch turned it to its plane: finishing the sketch goes back there */
+  private viewBefore: ReturnType<Viewport3D["cameraState"]> | null = null;
+  /** While set, the pointer in an open sketch goes here, not to the sketcher (choosing another sketch plane). */
+  pointerOverride: { move?(ev: PointerEvent): void; up?(ev: PointerEvent): void } | null = null;
+  /** the last place the pointer was over the page, for what opens "at the pointer" (the tool search) */
+  lastPointer = { x: 0, y: 0 };
   /** A sketch tool that is drawing gets the keys first; it returns true for the ones it used. */
   keyHandler: ((ev: KeyboardEvent) => boolean) | null = null;
   /**
@@ -105,12 +125,21 @@ export class PartStudio {
       loaded: false, status: { state: "connecting", text: "connecting…", role: null, canEdit: false }, canEdit: false,
       features: [], rollback: 0, reports: {}, bodies: [], sketches: [], datums: [], kernel: { state: "idle", message: "", working: false },
       selection: [], hover: null, selectedFeature: null, editing: null, sketch: null, peers: [], canUndo: false, canRedo: false, planesVisible: true,
+      selectedFeatures: [], hoverFeature: null, units: DEFAULT_UNITS, visibility: readVisibility(host.doc.docId),
     };
-    this.viewport = new Viewport3D(canvasHost);
+    this.state.planesVisible = DEFAULT_GEOMETRY.some((g) => g.id !== "origin" && this.state.visibility[g.id] !== false);
+    // the part studio has a view cube (ui/ViewCube.tsx) in place of the viewport's own view buttons
+    this.viewport = new Viewport3D(canvasHost, { viewButtons: false });
     this.view = new ModelView(this.viewport);
     this.view.onHover = (p) => this.set({ hover: p });
     this.view.onPick = (p, ev) => this.onPick(p, ev);
+    this.view.onBox = (picks, ev) => this.onBox(picks, ev);
+    this.view.onContext = (p, ev) => this.onContext(p, ev);
+    this.applyVisibility();
     this.viewport.canvas.addEventListener("keydown", this.onKey);
+    this.viewport.canvas.addEventListener("pointermove", this.onPointerSeen);
+    this.viewport.canvas.addEventListener("mousedown", this.onMiddle);
+    window.addEventListener("keydown", this.onKeyElsewhere);
     this.viewport.fit(new THREE.Box3(new THREE.Vector3(-40, -40, -40), new THREE.Vector3(40, 40, 40)));
     this.kernel = new KernelClient({
       onState: (s, message) => { if (!this.closed) this.set({ kernel: { state: s, message: message || "", working: s === "working" || s === "loading" } }); },
@@ -149,7 +178,7 @@ export class PartStudio {
     if (this.state.editing) this.cancelFeature();
     this.pastDoc = doc;
     this.select([]);
-    this.set({ past: doc ? { label } : null, canEdit: this.session.status.canEdit && !doc, selectedFeature: null });
+    this.set({ past: doc ? { label } : null, canEdit: this.session.status.canEdit && !doc, selectedFeature: null, selectedFeatures: [] });
     this.documentChanged();
   }
   definitions(): readonly FeatureDefinition[] { return FEATURES; }
@@ -161,6 +190,9 @@ export class PartStudio {
     clearTimeout(this.regenTimer);
     if (this.regenWhenShown) document.removeEventListener("visibilitychange", this.regenWhenShown);
     this.viewport.canvas.removeEventListener("keydown", this.onKey);
+    this.viewport.canvas.removeEventListener("pointermove", this.onPointerSeen);
+    this.viewport.canvas.removeEventListener("mousedown", this.onMiddle);
+    window.removeEventListener("keydown", this.onKeyElsewhere);
     this.session.close(); this.kernel.dispose(); this.view.dispose(); this.viewport.dispose();
     this.listeners.clear();
   }
@@ -178,11 +210,17 @@ export class PartStudio {
     const doc = this.doc; if (!doc) return;
     const features = featuresOf(doc);
     const patch: Partial<StudioState> = { loaded: true, features, rollback: rollbackIndex(doc, features), canUndo: !this.pastDoc && this.session.canUndo, canRedo: !this.pastDoc && this.session.canRedo };
+    const units = unitsOf(doc), was = this.state.units;
+    if (units.length !== was.length || units.angle !== was.angle || units.places !== was.places) patch.units = units;
+    setMeasureUnits(units);   // the measure readout and mass properties write their numbers in them
+    this.view.setDatumNames(new Map(features.map((f) => [f.id, f.name])));
     // somebody deleted what is open here
     const s = this.state;
     if (s.sketch && !features.some((f) => f.id === s.sketch!.featureId)) { patch.sketch = null; this.view.pointerTool = null; this.view.setOverlay(null); }
     if (s.editing && !s.editing.isNew && !features.some((f) => f.id === s.editing!.draft.id)) patch.editing = null;
     if (s.selectedFeature && !features.some((f) => f.id === s.selectedFeature)) patch.selectedFeature = null;
+    if (s.selectedFeatures.some((id) => !features.some((f) => f.id === id))) patch.selectedFeatures = s.selectedFeatures.filter((id) => features.some((f) => f.id === id));
+    if (s.hoverFeature && !features.some((f) => f.id === s.hoverFeature)) patch.hoverFeature = null;
     this.set(patch);
     this.scheduleRegen();
   }
@@ -194,7 +232,7 @@ export class PartStudio {
     if (s.editing) {
       const d = s.editing.draft;
       if (s.editing.isNew) { features = features.slice(); features.splice(rollback, 0, d); rollback += 1; }
-      else { const i = features.findIndex((f) => f.id === d.id); if (i >= 0) { features = features.slice(); features[i] = d; rollback = i + 1; } }
+      else { const i = features.findIndex((f) => f.id === d.id); if (i >= 0) { features = features.slice(); features[i] = d; rollback = s.editing.final ? Math.max(rollback, i + 1) : i + 1; } }
     } else if (s.sketch) {
       // while a sketch is open the model is shown as it was when the sketch was made
       const i = features.findIndex((f) => f.id === s.sketch!.featureId);
@@ -231,6 +269,7 @@ export class PartStudio {
     this.view.setBodies(result.bodies);
     this.view.setDatums(result.datums || []);
     this.refreshSketches();
+    this.refreshMarks();
     // frame the model when there first is one (a sketch being drawn is left where the person put it)
     if (!this.fitted && result.bodies.length && !this.state.sketch) { this.fitted = true; this.viewport.fit(); }
     for (const fn of this.onRegen) fn(result);
@@ -247,44 +286,123 @@ export class PartStudio {
       if (f.featureType !== "sketch") return;
       const used = features.slice(i + 1, rollback).some((later) => JSON.stringify(later.params).includes(f.id));
       const inDialog = !!s.editing && JSON.stringify(s.editing.draft.params).includes(f.id);
-      if (!used || inDialog || pickingCurves || s.selectedFeature === f.id) visible.add(f.id);
+      // what the person chose with the eye in the feature list wins, except over a dialog that needs the sketch
+      const chosen = s.visibility[f.id];
+      if (inDialog || pickingCurves || (chosen === undefined ? !used || s.selectedFeature === f.id : chosen)) visible.add(f.id);
     });
     this.view.setSketches(s.sketches, visible, s.sketch ? s.sketch.featureId : null);
   }
 
   // ---------------------------------------------------------------- selection
   select(picks: Pick[]): void { this.set({ selection: picks }); this.view.setSelection(picks); }
-  selectFeature(id: string | null): void { this.set({ selectedFeature: id }); this.refreshSketches(); }
+  /** Select a row of the feature list (null: none).  `add` keeps the rows already selected (Ctrl), toggling this one. */
+  selectFeature(id: string | null, add = false): void {
+    const now = this.state.selectedFeatures;
+    const many = !id ? [] : !add ? [id] : now.includes(id) ? now.filter((x) => x !== id) : [...now, id];
+    this.set({ selectedFeature: many.length ? (many.includes(id!) ? id : many[many.length - 1]) : null, selectedFeatures: many });
+    this.refreshSketches();
+  }
+  /** Select these rows of the feature list (a Shift-click's range). */
+  selectFeatures(ids: readonly string[]): void { this.set({ selectedFeatures: ids.slice(), selectedFeature: ids.length ? ids[ids.length - 1] : null }); this.refreshSketches(); }
+  /** The pointer is over a row of the feature list (null: it left): what the feature made lights up in the model. */
+  setHoverFeature(id: string | null): void {
+    if (id === this.state.hoverFeature) return;
+    this.set({ hoverFeature: id });
+    this.view.setFeatureHover(id ? this.view.picksOfFeature(id) : null);
+  }
+  /** The feature that made what the pointer is over in the model, for the feature list to mark its row. */
+  hoveredFeature(): string | null {
+    const s = this.state, p = s.hover;
+    return p ? this.view.featureOf(p, s.features.map((f) => f.id)) : null;
+  }
+
+  /**
+   * Something was chosen outside the viewport (a plane's row in the feature list): it means what a click on it
+   * in the model would.  A dialog field that is listening takes it; otherwise it is selected.
+   */
+  pickFromList(p: Pick, ev?: { shiftKey?: boolean; ctrlKey?: boolean; metaKey?: boolean }): void {
+    if (this.planeTaker) { this.planeTaker(p); return; }
+    const s = this.state;
+    if (s.editing && s.editing.field) { this.fillField(s.editing.field, p); return; }
+    if (s.editing || s.sketch) return;
+    const many = !!ev && (ev.shiftKey || ev.ctrlKey || ev.metaKey);
+    const has = s.selection.some((x) => pickKey(x) === pickKey(p));
+    this.select(many ? (has ? s.selection.filter((x) => pickKey(x) !== pickKey(p)) : [...s.selection, p]) : has && s.selection.length === 1 ? [] : [p]);
+  }
 
   private onPick(p: Pick | null, ev: PointerEvent): void {
     const s = this.state;
+    // A listening field keeps what it has: a click on nothing neither empties it nor closes the dialog.
     if (s.editing && s.editing.field) { if (p) this.fillField(s.editing.field, p); return; }
+    // a dialog is open but no field listens: the click must not wander off into a selection the dialog cannot use
+    if (s.editing) { if (p) { const key = this.fieldFor(p); if (key) { this.setField(key); this.fillField(key, p); } } return; }
     const many = ev.shiftKey || ev.ctrlKey || ev.metaKey;
     if (!p) { if (!many) this.select([]); return; }
     const has = s.selection.some((x) => pickKey(x) === pickKey(p));
     this.select(many ? (has ? s.selection.filter((x) => pickKey(x) !== pickKey(p)) : [...s.selection, p]) : has && s.selection.length === 1 ? [] : [p]);
+  }
+  /** A selection box: into the listening field (adding only), or the selection (Shift and Ctrl add to it). */
+  private onBox(picks: Pick[], ev: PointerEvent): void {
+    const s = this.state;
+    if (s.editing) {
+      const key = s.editing.field; if (!key) return;
+      const field = featureDef(s.editing.draft.featureType)?.schema.find((f) => f.key === key); if (!field) return;
+      let value = s.editing.draft.params[key], changed = false;
+      for (const p of picks) { const v = valueAfterPick(field, value, p, { addOnly: true }); if (v !== undefined) { value = v; changed = true; } }
+      if (changed) this.setDraft({ params: { [key]: value } });
+      return;
+    }
+    const many = ev.shiftKey || ev.ctrlKey || ev.metaKey;
+    const keys = new Set(many ? s.selection.map(pickKey) : []);
+    this.select([...(many ? s.selection : []), ...picks.filter((p) => !keys.has(pickKey(p)))]);
+  }
+  /** A right click that did not turn the view: the menu for what is under it (ui/ContextMenu.tsx draws it). */
+  private onContext(p: Pick | null, ev: PointerEvent): void {
+    const s = this.state;
+    if (s.sketch && s.sketch.tool !== "select") { this.setSketchTool("select"); return; }   // a right click puts the tool down
+    if (p && !s.editing && !s.sketch && !s.selection.some((x) => pickKey(x) === pickKey(p))) this.select([p]);
+    this.setUi({ menu: { x: ev.clientX, y: ev.clientY, pick: p } });
+  }
+  /** The first field of the open dialog that would take this pick. */
+  private fieldFor(p: Pick): string | null {
+    const e = this.state.editing, def = e ? featureDef(e.draft.featureType) : undefined;
+    if (!e || !def) return null;
+    for (const f of def.schema) { if (f.visible && !f.visible(e.draft.params)) continue; if (takesPicks(f) && valueAfterPick(f, e.draft.params[f.key], p, { addOnly: true }) !== undefined) return f.key; }
+    return null;
   }
 
   // ---------------------------------------------------------------- features
   /** Open the dialog for a new feature of this type.  The selection fills what it can (a plane, a sketch). */
   startFeature(type: string): void {
     const def = featureDef(type); if (!def || !this.requireEdit()) return;
+    // started from inside a sketch, a feature takes that sketch
+    const fromSketch = this.state.sketch ? this.state.sketch.featureId : null;
     if (this.state.sketch) this.finishSketch();
+    if (this.state.editing) this.cancelFeature();
     const s = this.state;
     const params = def.defaults() as JsonObject;
+    const picked = fillFromSelection(def.schema, params, s.selection);
+    Object.assign(params, picked);
     for (const field of def.schema) {
-      const v = this.fromSelection(field, s.selection);
-      if (v !== undefined) params[field.key] = v;
-      else if (field.kind === "profile") {
-        // the newest sketch that nothing uses yet is what an extrude is usually for
-        const free = s.features.slice(0, s.rollback).filter((f, i) => f.featureType === "sketch" && !s.features.slice(i + 1).some((l) => JSON.stringify(l.params).includes(f.id))).pop();
-        if (free) params[field.key] = { sketch: free.id, regions: null };
-      }
+      if (field.kind !== "profile" || params[field.key]) continue;
+      // the sketch just left, or else the newest sketch that nothing uses yet, is what an extrude is usually for
+      const free = fromSketch ? s.features.find((f) => f.id === fromSketch) : s.features.slice(0, s.rollback).filter((f, i) => f.featureType === "sketch" && !s.features.slice(i + 1).some((l) => JSON.stringify(l.params).includes(f.id))).pop();
+      if (free) params[field.key] = { sketch: free.id, regions: null };
     }
     const draft: FeatureItem = { id: crypto.randomUUID(), type: "feature", featureType: def.type, name: nextName(s.features, def.title), order: orderAt(s.features, s.rollback), params };
     this.select([]);
+    // A sketch needs nothing but its plane: with one selected, drawing starts at once; without, the dialog asks
+    // for it and drawing starts when it is chosen (acceptFeature opens the sketch).
+    if (def.type === "sketch") {
+      const planeKey = def.schema.find((f) => f.kind === "plane")?.key || null;
+      this.set({ editing: { draft, isNew: true, field: planeKey } });
+      if (planeKey && picked[planeKey] !== undefined) { this.acceptFeature(); return; }
+      this.applyFieldFilter(); this.refreshMarks(); this.scheduleRegen();
+      return;
+    }
     this.set({ editing: { draft, isNew: true, field: this.firstEmptyField(def, params) } });
     this.applyFieldFilter();
+    this.refreshMarks();
     this.scheduleRegen();
   }
 
@@ -292,10 +410,13 @@ export class PartStudio {
   editFeature(id: string): void {
     const f = this.state.features.find((x) => x.id === id); if (!f) return;
     if (this.state.sketch) this.finishSketch();
+    if (this.state.editing) this.cancelFeature();
     if (f.featureType === "sketch") { this.openSketch(id); return; }
     if (!this.requireEdit()) return;
     this.select([]);
-    this.set({ editing: { draft: clone(f), isNew: false, field: null }, selectedFeature: id });
+    this.set({ editing: { draft: clone(f), isNew: false, field: null }, selectedFeature: id, selectedFeatures: [id] });
+    this.view.setFilter(null);
+    this.refreshMarks();
     this.scheduleRegen();
   }
 
@@ -305,6 +426,14 @@ export class PartStudio {
     const draft = { ...e.draft, ...(patch.name !== undefined ? { name: patch.name } : {}), params: patch.params ? { ...e.draft.params, ...patch.params } : e.draft.params };
     this.set({ editing: { ...e, draft } });
     this.refreshSketches();
+    this.refreshMarks();
+    this.scheduleRegen();
+  }
+  /** Show the whole model with the feature being edited in it (true), or the model as far as that feature. */
+  setFinal(on: boolean): void {
+    const e = this.state.editing; if (!e || !!e.final === on) return;
+    this.set({ editing: { ...e, final: on } });
+    this.refreshSketches();
     this.scheduleRegen();
   }
   /** Make a dialog field the one that viewport clicks fill (null: none). */
@@ -313,14 +442,41 @@ export class PartStudio {
     this.set({ editing: { ...e, field: key } });
     this.applyFieldFilter();
     this.refreshSketches();
+    this.refreshMarks();
   }
+  /** Keep what the dialog's fields hold drawn on the model for as long as the dialog is open. */
+  private refreshMarks(): void {
+    const e = this.state.editing, def = e ? featureDef(e.draft.featureType) : undefined;
+    if (!e || !def) { this.view.setMarks([], []); return; }
+    const s = this.state;
+    const held = heldPicks(def.schema, e.draft.params, e.field, {
+      feature: (id) => s.features.find((f) => f.id === id)?.name, body: (id) => s.bodies.find((b) => b.id === id)?.name,
+      faces: (id) => s.bodies.find((b) => b.id === id)?.mesh?.faces.names || this.view.bodyObjects(id)?.result.mesh?.faces.names || [],
+    });
+    const at = (p: (typeof held.active)[number]): Pick => ({ ...p, point: [0, 0, 0] } as Pick);
+    const active = held.active.map(at), other = held.other.map(at);
+    this.view.setMarks(active, other);
+    // What the feature has consumed (the edges an existing fillet rounds) is not in the model on screen: ask the
+    // worker what it looked like before the feature, once, so it is drawn as chosen and can be clicked out.
+    const id = e.draft.id;
+    if (this.heldFor !== id) { this.heldFor = id; this.heldAsked.clear(); }
+    const missing = [...active, ...other].filter((p) => !this.view.hasGeometry(p) && !this.heldAsked.has(pickKey(p)));
+    if (!missing.length || this.state.kernel.state !== "ready" || !this.state.reports[id]) return;
+    for (const p of missing) this.heldAsked.add(pickKey(p));
+    void this.kernel.call("ref-geometry", { feature: id, refs: missing.map((p) => ({ kind: p.kind, body: (p as { body: string }).body, name: (p as { name: string }).name })) }).then((r) => {
+      if (this.closed || this.state.editing?.draft.id !== id) return;
+      for (const item of ((r as { items?: { kind: string; body: string; name: string; segments?: number[]; triangles?: number[]; at?: [number, number, number] }[] } | null)?.items || [])) {
+        this.view.hold({ kind: item.kind, body: item.body, name: item.name, point: [0, 0, 0] } as Pick, item);
+      }
+    }, () => { /* the highlight is a nicety: the dialog works without it */ });
+  }
+  private heldFor: string | null = null;
+  private heldAsked = new Set<string>();
   private applyFieldFilter(): void {
     const e = this.state.editing;
     const def = e ? featureDef(e.draft.featureType) : undefined;
     const field = e && e.field && def ? def.schema.find((f) => f.key === e.field) : undefined;
-    const kinds: PickKind[] | null = !field ? null
-      : field.kind === "refs" ? (pickKindsOf(field) as PickKind[]) : field.kind === "plane" ? ["plane", "face", "datum"] : field.kind === "profile" ? ["sketch"] : field.kind === "bodies" ? ["face"] : null;
-    this.view.setFilter(kinds);
+    this.view.setFilter(pickKindsFor(field) as PickKind[] | null);
   }
   private firstEmptyField(def: FeatureDefinition, params: JsonObject): string | null {
     for (const f of def.schema) {
@@ -330,49 +486,32 @@ export class PartStudio {
     return null;
   }
 
-  /** What a pick means for a field of the dialog, or undefined when it means nothing. */
-  private fromSelection(field: ParamField, picks: readonly Pick[]): JsonObject[string] | undefined {
-    if (field.kind === "plane") {
-      const p = picks.find((x) => x.kind === "plane" || x.kind === "face" || (x.kind === "datum" && x.datum === "plane"));
-      if (!p) return undefined;
-      const ref: PlaneRef = p.kind === "plane" ? { kind: "plane", plane: p.plane } : p.kind === "datum" ? { kind: "datum", feature: p.featureId } : { kind: "face", ref: { kind: "face", body: (p as { body: string }).body, name: (p as { name: string }).name } };
-      return ref as unknown as JsonObject;
-    }
-    if (field.kind === "profile") { const p = picks.find((x) => x.kind === "sketch"); return p && p.kind === "sketch" ? { sketch: p.featureId, regions: null } : undefined; }
-    if (field.kind === "refs") {
-      const refs = picks.map((x) => targetOf(field, x)).filter((x): x is RefTarget => !!x);
-      return refs.length ? (field.single ? refs[0] : refs) : undefined;
-    }
-    return undefined;
+  /** The kinds of thing a click picks just now: the listening field's, or a sketch's; null when anything. */
+  pickFilter(): string[] | null {
+    const e = this.state.editing, def = e ? featureDef(e.draft.featureType) : undefined;
+    const field = e && e.field && def ? def.schema.find((f) => f.key === e.field) : undefined;
+    return pickKindsFor(field);
   }
-  private fillField(key: string, p: Pick): void {
+  /** A pick for a field of the open dialog, as a click in the model while it listens would give it. */
+  fillField(key: string, p: Pick): void {
     const e = this.state.editing; if (!e) return;
-    const def = featureDef(e.draft.featureType), field = def && def.schema.find((f) => f.key === key); if (!field) return;
-    if (field.kind === "refs" && !field.single) {
-      const t = targetOf(field, p); if (!t) return;
-      const now = targetsIn(e.draft.params[key]);
-      this.setDraft({ params: { [key]: now.some((r) => sameTarget(r, t)) ? now.filter((r) => !sameTarget(r, t)) : [...now, t] } });
-      return;
-    }
-    if (field.kind === "bodies") {
-      if (p.kind !== "face") return;
-      const now = (e.draft.params[key] as string[] | undefined) || [];
-      this.setDraft({ params: { [key]: now.includes(p.body) ? now.filter((b) => b !== p.body) : [...now, p.body] } });
-      return;
-    }
-    if (field.kind === "profile") {
-      // The first click on a sketch takes all of it.  Clicks inside its regions then choose among them: from
-      // "all", a click leaves just that region; further clicks add and take away; none left is all again.
-      if (p.kind !== "sketch") return;
-      const cur = e.draft.params[key] as { sketch?: string; regions?: string[] | null } | null;
-      if (!cur || cur.sketch !== p.featureId || !p.region) { this.setDraft({ params: { [key]: { sketch: p.featureId, regions: null } } }); return; }
-      const now = Array.isArray(cur.regions) ? cur.regions : [];
-      const next = now.includes(p.region) ? now.filter((r) => r !== p.region) : [...now, p.region];
-      this.setDraft({ params: { [key]: { sketch: p.featureId, regions: next.length ? next : null } } });
-      return;
-    }
-    const v = this.fromSelection(field, [p]);
-    if (v !== undefined) this.setDraft({ params: { [key]: v } });
+    const def = featureDef(e.draft.featureType), field = def && def.schema.find((f) => f.key === key); if (!def || !field) return;
+    const v = valueAfterPick(field, e.draft.params[key], p);
+    if (v === undefined) return;
+    this.setDraft({ params: { [key]: v } });
+    // a new sketch needs only its plane: with it chosen, drawing starts
+    if (e.isNew && def.type === "sketch" && field.kind === "plane") { this.acceptFeature(); return; }
+    // a field that holds one thing is done with one click: the next empty one listens
+    if (holdsOne(field)) this.setField(nextEmptyField(def.schema, this.state.editing!.draft.params, key));
+  }
+  /** Take one thing out of a field of the dialog (the × beside it), or everything (index null). */
+  clearField(key: string, index: number | null = null): void {
+    const e = this.state.editing; if (!e) return;
+    const field = featureDef(e.draft.featureType)?.schema.find((f) => f.key === key); if (!field) return;
+    const value = e.draft.params[key];
+    if (field.kind === "refs") this.setDraft({ params: { [key]: field.single ? null : index === null ? [] : (Array.isArray(value) ? value : []).filter((_x, i) => i !== index) } });
+    else if (field.kind === "bodies") this.setDraft({ params: { [key]: index === null ? [] : (Array.isArray(value) ? value : []).filter((_x, i) => i !== index) } });
+    else if (field.kind === "profile") this.setDraft({ params: { [key]: null } });
   }
 
   /** Accept the dialog: the draft becomes (or replaces) the feature in the document, as one undoable step. */
@@ -382,15 +521,17 @@ export class PartStudio {
     const changes: ItemChange[] = e.isNew
       ? [{ id: d.id, kind: "ADDED", typeName: "feature", item: { ...d, order: orderAt(featuresOf(this.doc), rollbackIndex(this.doc)) } }]
       : [...edits.setParams(this.doc, d.id, d.params), ...edits.renameFeature(this.doc, d.id, d.name)];
-    this.set({ editing: null, selectedFeature: d.id });
+    this.set({ editing: null, selectedFeature: d.id, selectedFeatures: [d.id] });
     this.view.setFilter(null);
+    this.view.setMarks([], []);
     if (changes.length) this.commit(changes); else this.scheduleRegen();
-    if (e.isNew && d.featureType === "sketch") this.openSketch(d.id);
+    if (e.isNew && d.featureType === "sketch") this.openSketch(d.id, true);
   }
   cancelFeature(): void {
     if (!this.state.editing) return;
     this.set({ editing: null });
     this.view.setFilter(null);
+    this.view.setMarks([], []);
     this.refreshSketches();
     this.scheduleRegen();
   }
@@ -403,32 +544,91 @@ export class PartStudio {
   }
 
   // ---------------------------------------------------------------- sketches
-  /** Open a sketch for drawing: the camera turns to face its plane and the sketch tools appear. */
-  openSketch(featureId: string): void {
+  /**
+   * Open a sketch for drawing: the sketch tools take the toolbar's place and, when the person likes it so
+   * (ui/prefs.ts sketchNormal), the view turns to face the sketch plane.  `isNew`: the sketch was made just now.
+   */
+  openSketch(featureId: string, isNew = false): void {
     if (!this.requireEdit()) return;
+    const f = this.state.features.find((x) => x.id === featureId) || (this.doc ? featuresOf(this.doc).find((x) => x.id === featureId) : undefined);
     this.select([]);
-    this.set({ sketch: { featureId, tool: "select" }, editing: null, selectedFeature: featureId });
+    this.set({ sketch: { featureId, tool: "select", isNew, before: f ? clone(f.params) : undefined }, editing: null, selectedFeature: featureId, selectedFeatures: [featureId] });
     this.view.setFilter(["sketch"]);
+    this.view.setMarks([], []);
     this.refreshSketches();
     this.scheduleRegen();
-    const face = () => {
-      const f = this.state.features.find((x) => x.id === featureId);
-      const plane = f && (f.params.plane as unknown as PlaneRef | undefined);
-      const datum = plane && plane.kind === "datum" ? this.state.datums.find((d) => d.featureId === plane.feature) : undefined;
-      const frame = this.view.sketchFrame(featureId) || (plane && plane.kind === "plane" ? DEFAULT_PLANES[plane.plane]?.frame : datum?.frame || null);
-      if (frame) this.viewport.lookAlong(new THREE.Vector3(...frame.normal).negate(), new THREE.Vector3(...frame.y));
-    };
-    face(); window.setTimeout(face, 400);   // again once the worker has said where a sketch on a face lies
+    this.viewBefore = null;
+    if (!getPrefs().sketchNormal) return;
+    this.viewBefore = this.viewport.cameraState();
+    this.faceSketch();
+    window.setTimeout(() => { if (this.state.sketch?.featureId === featureId) this.faceSketch(); }, 400);   // again once the worker has said where a sketch on a face lies
   }
+  /** Turn the view to look straight at the open sketch's plane. */
+  faceSketch(): void {
+    const id = this.state.sketch?.featureId; if (!id) return;
+    const f = this.state.features.find((x) => x.id === id);
+    const plane = f && (f.params.plane as unknown as PlaneRef | undefined);
+    const datum = plane && plane.kind === "datum" ? this.state.datums.find((d) => d.featureId === plane.feature) : undefined;
+    const frame = this.view.sketchFrame(id) || (plane && plane.kind === "plane" ? DEFAULT_PLANES[plane.plane]?.frame : datum?.frame || null);
+    if (frame) this.viewport.lookAlong(new THREE.Vector3(...frame.normal).negate(), new THREE.Vector3(...frame.y));
+  }
+  /** Leave the open sketch, keeping what was drawn (the ✓). */
   finishSketch(): void {
     if (!this.state.sketch) return;
+    this.planeTaker = null; this.pointerOverride = null;
     this.view.pointerTool = null; this.keyHandler = null;
     this.view.setOverlay(null); this.view.setFilter(null);
     this.set({ sketch: null });
     this.select([]);
     this.refreshSketches();
     this.scheduleRegen();
-    this.viewport.setView("iso");
+    // back to where the person was looking from before the sketch turned the view
+    if (this.viewBefore) { this.viewport.setCameraState({ ...this.viewport.cameraState(), quaternion: this.viewBefore.quaternion }); this.viewBefore = null; }
+  }
+  /** True when the open sketch is not as it was when it was opened. */
+  sketchChanged(): boolean {
+    const s = this.state.sketch; if (!s) return false;
+    const f = this.state.features.find((x) => x.id === s.featureId);
+    return !!f && JSON.stringify(f.params) !== JSON.stringify(s.before || null);
+  }
+  /**
+   * Leave the open sketch and put it back as it was when it was opened (the ✗); a sketch made by this visit is
+   * taken away again.  One undoable step, so nothing is lost for good.
+   */
+  cancelSketch(): void {
+    const s = this.state.sketch; if (!s || !this.doc) return;
+    const changes: ItemChange[] = s.isNew ? edits.deleteFeature(this.doc, s.featureId) : this.sketchChanged() && s.before ? edits.setParams(this.doc, s.featureId, s.before) : [];
+    const drawn = this.sketchChanged();
+    this.finishSketch();
+    if (changes.length) this.commit(changes);
+    if (s.isNew) this.set({ selectedFeature: null, selectedFeatures: [] });
+    // nothing is thrown away for good, and the person should know where it went
+    if (changes.length && drawn) this.host.toast(s.isNew ? "The new sketch was taken away. Undo brings it back." : "The sketch is as it was when you opened it. Undo brings your changes back.", 4000);
+  }
+  private planeTaker: ((p: Pick) => void) | null = null;
+  /**
+   * Choose another plane for the open sketch: the next click on a plane, a flat face or a reference plane (in the
+   * model or in the feature list) moves the sketch there.  Esc, or `false`, stops listening.
+   */
+  pickSketchPlane(on = true): void {
+    const s = this.state.sketch;
+    if (!on || !s) { this.planeTaker = null; this.pointerOverride = null; this.view.setFilter(s ? ["sketch"] : null); this.setUi({ pickingPlane: false }); return; }
+    this.view.setFilter(["plane", "face", "datum"]);
+    const take = (p: Pick) => {
+      const ref = valueAfterPick({ key: "plane", label: "", kind: "plane" }, undefined, p);
+      if (ref === undefined || !this.doc) return;
+      this.pickSketchPlane(false);
+      this.setSketchPlane(ref as unknown as PlaneRef);
+    };
+    this.planeTaker = take;
+    this.pointerOverride = { move: (ev) => this.view.hoverAt(ev), up: (ev) => { const p = this.view.pick(ev); if (p) take(p); } };
+    this.setUi({ pickingPlane: true });
+  }
+  /** Move the open sketch to another plane. */
+  setSketchPlane(ref: PlaneRef): void {
+    const s = this.state.sketch; if (!s || !this.doc) return;
+    this.commit(edits.setParamPath(this.doc, s.featureId, ["plane"], ref as unknown as JsonObject));
+    if (getPrefs().sketchNormal) window.setTimeout(() => this.faceSketch(), 250);
   }
   /** Take a sketch tool in hand ("select" puts it down).  The tool's own file installs its pointer handling. */
   setSketchTool(tool: string): void {
@@ -437,29 +637,161 @@ export class PartStudio {
     this.set({ sketch: { ...s, tool } });
   }
 
-  setPlanesVisible(on: boolean): void { this.view.setPlanesVisible(on); this.set({ planesVisible: on }); }
+  // ---------------------------------------------------------------- what is hidden and shown
+  /** Is this drawn?  `id`: "origin", "top", "front", "right", or the id of a sketch or of reference geometry. */
+  isVisible(id: string): boolean {
+    const s = this.state, chosen = s.visibility[id];
+    if (chosen !== undefined) return chosen;
+    const i = s.features.findIndex((f) => f.id === id);
+    if (i < 0 || s.features[i].featureType !== "sketch") return true;
+    return !s.features.slice(i + 1, s.rollback).some((later) => JSON.stringify(later.params).includes(id));
+  }
+  /** Hide or show the origin, a plane, a sketch or reference geometry.  A way of looking: this person's alone. */
+  setVisible(ids: string | readonly string[], on: boolean): void {
+    const visibility = { ...this.state.visibility };
+    for (const id of typeof ids === "string" ? [ids] : ids) visibility[id] = on;
+    this.set({ visibility, planesVisible: DEFAULT_GEOMETRY.some((g) => g.id !== "origin" && visibility[g.id] !== false) });
+    writeVisibility(this.host.doc.docId, visibility);
+    this.applyVisibility();
+    this.refreshSketches();
+  }
+  toggleVisible(id: string): void { this.setVisible(id, !this.isVisible(id)); }
+  private applyVisibility(): void {
+    const hidden = new Set<string>();
+    for (const [id, on] of Object.entries(this.state.visibility)) if (!on) hidden.add(id);
+    this.view.setHiddenItems(hidden);
+  }
+  /** Show or hide every plane at once: the default three and the reference planes (P). */
+  setPlanesVisible(on: boolean): void {
+    this.setVisible([...DEFAULT_GEOMETRY.map((g) => g.id), ...this.state.datums.filter((d) => d.kind === "plane").map((d) => d.featureId)], on);
+  }
+
+  // ---------------------------------------------------------------- units
+  /** Change the units the document is worked in.  Everybody sees it; nothing in the model moves. */
+  setUnits(patch: Partial<Units>): void {
+    if (!this.doc || !this.requireEdit()) return;
+    const changes = unitChanges(this.doc, patch);
+    if (changes.length) this.commit(changes);
+  }
+
+  // ---------------------------------------------------------------- the view
+  /** Zoom so that everything is in view (F, a double click with the middle button). */
+  fit(): void { this.viewport.fit(); }
+  /** Zoom to what is selected (or to everything when nothing is). */
+  zoomToSelection(): void {
+    const s = this.state;
+    const picks = s.selection.length ? s.selection : s.selectedFeature ? this.view.picksOfFeature(s.selectedFeature) : [];
+    const box = this.view.boxOf(picks);
+    if (box) this.viewport.fit(box.expandByScalar(Math.max(1, box.getSize(new THREE.Vector3()).length() * 0.15))); else this.viewport.fit();
+  }
+  /** Zoom to what a feature made: where to look when it reports a problem. */
+  zoomToFeature(id: string): void {
+    const i = this.state.features.findIndex((f) => f.id === id);
+    let box = this.view.boxOf(this.view.picksOfFeature(id));
+    // a feature that failed made nothing: look at what it was given instead
+    if (!box && i >= 0) { const f = this.state.features[i]; for (const g of this.state.features.slice(0, i).reverse()) if (JSON.stringify(f.params).includes(g.id)) { box = this.view.boxOf(this.view.picksOfFeature(g.id)); if (box) break; } }
+    if (box) this.viewport.fit(box.expandByScalar(Math.max(1, box.getSize(new THREE.Vector3()).length() * 0.15))); else this.viewport.fit();
+  }
+  /** Look straight at the selected flat face or plane, or at the open sketch's plane (N). */
+  normalTo(): void {
+    const s = this.state;
+    if (s.sketch) { this.faceSketch(); return; }
+    const marks = s.editing ? [] : s.selection;
+    for (const p of marks.slice().reverse()) {
+      const n = this.view.normalOf(p); if (!n) continue;
+      const dir = new THREE.Vector3(...n.normal).negate();
+      const up = n.up ? new THREE.Vector3(...n.up) : Math.abs(dir.z) > 0.99 ? new THREE.Vector3(0, 1, 0) : new THREE.Vector3(0, 0, 1);
+      this.viewport.lookAlong(dir, up);
+      return;
+    }
+    this.host.toast("Select a flat face or a plane to look straight at it.", 2500);
+  }
+
+  private onPointerSeen = (ev: PointerEvent): void => { this.lastPointer = { x: ev.clientX, y: ev.clientY }; };
+  private lastMiddle = 0;
+  private onMiddle = (ev: MouseEvent): void => {
+    if (ev.button !== 1) return;
+    ev.preventDefault();   // no autoscroll
+    const now = performance.now();
+    if (now - this.lastMiddle < 400) { this.lastMiddle = 0; this.fit(); } else this.lastMiddle = now;
+  };
 
   // ---------------------------------------------------------------- keys
+  /**
+   * The keys work wherever the keyboard is in the part studio, not only in the viewport: after a click on a
+   * toolbar button, a row of the feature list or a dialog's chevron, L is still Line.  Typing into a field is
+   * typing, and a key that means something to the button in focus (Enter, Space, Tab) is that button's.
+   */
+  private onKeyElsewhere = (ev: KeyboardEvent): void => {
+    const t = ev.target as HTMLElement | null, canvas = this.viewport.canvas;
+    if (this.closed || ev.defaultPrevented || !t || t === canvas || !canvas.isConnected || canvas.offsetParent === null) return;
+    if (typeof t.closest !== "function" || t.closest("input, textarea, select, [contenteditable=true]")) return;
+    const root = canvas.closest(".cad-root");
+    if (t !== document.body && !(root && root.contains(t))) return;
+    if (t.closest("button, a, summary") && (ev.key === "Enter" || ev.key === " ")) return;
+    if (ev.key === "Tab" && t.closest("form, [role=menu], [role=dialog], [role=listbox]")) return;
+    this.onKey(ev);
+    if (ev.defaultPrevented) canvas.focus();
+  };
   private onKey = (ev: KeyboardEvent): void => {
+    // Shift + letter starts a feature wherever the keyboard is; in a sketch it comes before the sketch's own keys
+    if (ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey && ev.key.length === 1 && this.state.sketch && !this.state.editing) {
+      const type = FEATURE_KEYS[ev.key.toLowerCase()];
+      if (type && type !== "sketch" && featureDef(type)) { this.startFeature(type); ev.preventDefault(); ev.stopPropagation(); return; }
+    }
     if (this.keyHandler && this.keyHandler(ev)) { ev.preventDefault(); ev.stopPropagation(); return; }
     const s = this.state, mod = ev.ctrlKey || ev.metaKey;
     const used = () => { ev.preventDefault(); ev.stopPropagation(); };
     if (mod && !ev.shiftKey && ev.key.toLowerCase() === "z") { this.undo(); used(); return; }
     if (mod && (ev.key.toLowerCase() === "y" || (ev.shiftKey && ev.key.toLowerCase() === "z"))) { this.redo(); used(); return; }
+    if (mod && ev.key.toLowerCase() === "k") { this.setUi({ palette: { x: null, y: null } }); used(); return; }
     if (mod || ev.altKey) return;
     if (ev.key === "Escape") {
-      if (s.editing) this.cancelFeature();
+      if (this.planeTaker) this.pickSketchPlane(false);
+      else if (s.editing) { if (s.editing.field && !(s.editing.isNew && s.editing.draft.featureType === "sketch")) this.setField(null); else this.cancelFeature(); }
       else if (s.sketch && s.sketch.tool !== "select") this.setSketchTool("select");
       else if (s.selection.length) this.select([]);
-      else if (s.sketch) this.finishSketch();
+      else if (s.selectedFeatures.length) this.selectFeature(null);
       used(); return;
     }
     if (ev.key === "Enter" && s.editing) { this.acceptFeature(); used(); return; }
+    if (ev.key === "Tab" && s.editing) {
+      const def = featureDef(s.editing.draft.featureType);
+      if (def) this.setField(neighbourField(def.schema, s.editing.draft.params, s.editing.field, ev.shiftKey));
+      used(); return;
+    }
+    // Shift + a digit: the standard views, numbered as an Onshape user's fingers know them
+    if (ev.shiftKey && /^Digit[1-7]$/.test(ev.code)) {
+      this.viewport.setView((["front", "back", "left", "right", "top", "bottom", "iso"] as const)[Number(ev.code.slice(5)) - 1]);
+      used(); return;
+    }
+    if (ev.shiftKey && ev.key.length === 1) {
+      const type = FEATURE_KEYS[ev.key.toLowerCase()];
+      if (type && featureDef(type)) { this.startFeature(type); used(); return; }
+    }
+    if (ev.key === "?") { this.setUi({ help: true }); used(); return; }
+    if (ev.key.startsWith("Arrow") && !s.sketch) {
+      const step = ((ev.shiftKey ? 90 : 15) * Math.PI) / 180;
+      this.viewport.rotateBy(ev.key === "ArrowLeft" ? -step : ev.key === "ArrowRight" ? step : 0, ev.key === "ArrowUp" ? -step : ev.key === "ArrowDown" ? step : 0);
+      used(); return;
+    }
+    const k = ev.key.toLowerCase();
+    if (!ev.shiftKey) {
+      if (k === "s") { this.setUi({ palette: { x: this.lastPointer.x, y: this.lastPointer.y } }); used(); return; }
+      if (k === "n") { this.normalTo(); used(); return; }
+      if (k === "f" && !s.sketch) { this.fit(); used(); return; }
+      if (k === "z" && !s.sketch) { this.zoomToSelection(); used(); return; }
+      if (k === "f2" && s.selectedFeature) { this.setUi({ renaming: s.selectedFeature }); used(); return; }
+    }
+    if (ev.shiftKey) return;
     for (const t of TOOLS) {
-      if (!t.key || t.key.toLowerCase() !== ev.key.toLowerCase()) continue;
+      if (!t.key || t.key.toLowerCase() !== k) continue;
       if (t.group === "sketch" && !s.sketch) continue;
       if (t.disabled && t.disabled(this)) continue;
       t.run(this); used(); return;
     }
   };
 }
+
+/** Shift + letter starts these features, in a sketch too (where the feature takes that sketch). */
+export const FEATURE_KEYS: { readonly [key: string]: string } = { s: "sketch", e: "extrude", w: "revolve", f: "fillet", c: "chamfer", h: "hole", p: "plane" };

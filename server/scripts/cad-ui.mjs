@@ -189,6 +189,7 @@ try {
   check('a rename reaches the other person', true);
   await menu(bob, '[data-feature-row][data-feature-type=extrude]', 'Suppress');
   await alice.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.features[1].suppressed && s.bodies.length === 0 && s.reports[s.features[1].id]?.status === 'suppressed'; }, null, { timeout: 30000 });
+  await bob.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.kernel.state === 'ready' && s.reports[s.features[1].id]?.status === 'suppressed'; }, null, { timeout: 30000 });
   check('suppressing a feature removes its body for both', (await studio(bob, () => window.JunctionPartStudio.getState().bodies.length)) === 0);
   await bob.focus('.cad-stage canvas');
   await bob.keyboard.press('Control+z');
@@ -199,10 +200,11 @@ try {
   await settled(alice, 2);
   await alice.click('.v3-views [data-view=fit]');
   const top = await studio(alice, () => { const st = window.JunctionPartStudio, b = st.getState().bodies[0]; const name = b.mesh.faces.names.find((n) => n.includes(':end:')); st.select([{ kind: 'face', body: b.id, name, point: [0, 0, 0] }]); return name; });
+  // with a flat face selected, Sketch needs to ask nothing: drawing starts on that face
   await alice.click('[data-tool=Sketch]');
-  await alice.waitForSelector('.cad-dialog[data-feature=sketch]');
-  check('a selected face is offered as the sketch plane', (await alice.textContent('.cad-dialog [data-param=plane]')).includes('face'), top);
-  await alice.click('.cad-dialog [data-accept]');
+  await alice.waitForSelector('.cad-sketch-dialog');
+  const onFace = await studio(alice, () => { const s = window.JunctionPartStudio.getState(); return s.features.find((f) => f.id === s.sketch.featureId).params.plane; });
+  check('a selected face is taken as the sketch plane', onFace.kind === 'face' && onFace.ref.name === top && (await alice.textContent('.cad-sketch-dialog [data-sketch-plane]')).includes('face'), top);
   await alice.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.sketches.some((v) => v.featureId === s.sketch.featureId) && s.kernel.state === 'ready'; }, null, { timeout: 30000 });
   await alice.waitForTimeout(900);
   const frame = await studio(alice, () => { const s = window.JunctionPartStudio.getState(); return s.sketches.find((v) => v.featureId === s.sketch.featureId).frame; });
@@ -237,7 +239,8 @@ try {
 
   await menu(alice, '[data-feature-row][data-feature-type=sketch] >> nth=1', 'Delete');
   await alice.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.features.length === 3 && s.reports[s.features[2].id]?.status === 'error'; }, null, { timeout: 30000 });
-  const why = await alice.getAttribute('[data-feature-row][data-state=error]', 'title');
+  // the row carries the message (its "error" mark shows it on hover and looks at the feature when clicked)
+  const why = await alice.getAttribute('[data-feature-row][data-state=error]', 'data-message');
   check('a feature whose sketch is gone says so', /sketch/i.test(why || ''), why);
   await shot(alice, '12-error');
   await alice.focus('.cad-stage canvas');

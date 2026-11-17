@@ -63,6 +63,8 @@ export interface PanelDefinition {
    * something not every part studio has (a board) opens when there is one.  Open when not given.
    */
   open?: boolean | ((studio: PartStudio) => boolean);
+  /** A number shown beside the title (how many parts there are); null or absent: none. */
+  count?(studio: PartStudio): number | null;
   /** The panel is in its dock only while this returns true (the Sketch panel, while a sketch is open). */
   visible?(studio: PartStudio): boolean;
 }

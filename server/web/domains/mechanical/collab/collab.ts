@@ -95,9 +95,11 @@ export class Collab {
     // moving one's own view ends a follow: turning or panning (not the left button, which selects), the wheel,
     // a standard-view button
     const own = (ev: Event) => { if (!this.state.follow) return; if (ev.type === "pointerdown" && (ev as PointerEvent).button === 0) return; this.stopFollowing("Stopped following"); };
-    const views = host.viewport.host.querySelector(".v3-views");
-    canvas.addEventListener("pointerdown", own, true); canvas.addEventListener("wheel", own, { capture: true, passive: true }); views?.addEventListener("click", own, true);
-    this.offs.push(() => { canvas.removeEventListener("pointerdown", own, true); canvas.removeEventListener("wheel", own, true); views?.removeEventListener("click", own, true); });
+    // the view buttons are the viewport's own (an assembly) or the part studio's view cube beside the canvas, which
+    // is drawn after this layer starts: both are called .v3-views, wherever in the editor they are
+    const views = (ev: Event) => { const t = ev.target as Element | null, v = t && t.closest ? t.closest(".v3-views") : null; if (v && (host.viewport.host.contains(v) || host.viewport.host.parentElement?.contains(v))) own(ev); };
+    canvas.addEventListener("pointerdown", own, true); canvas.addEventListener("wheel", own, { capture: true, passive: true }); document.addEventListener("click", views, true);
+    this.offs.push(() => { canvas.removeEventListener("pointerdown", own, true); canvas.removeEventListener("wheel", own, true); document.removeEventListener("click", views, true); });
 
     const frame = () => this.onFrame();
     host.viewport.onFrame.push(frame);

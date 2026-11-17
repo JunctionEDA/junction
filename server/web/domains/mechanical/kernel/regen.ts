@@ -56,6 +56,11 @@ export class RegenEngine {
     for (const e of this.entries.splice(from)) for (const o of e.owned.reverse()) { try { o.delete(); } catch (x) { /* already gone */ } }
   }
   dispose(): void { this.drop(0); this.state = EMPTY; }
+  /** The model just before a feature was built, as the last regeneration has it (null: no such feature built). */
+  before(featureId: string): ModelState | null {
+    const i = this.entries.findIndex((e) => e.report.id === featureId);
+    return i < 0 ? null : i ? this.entries[i - 1].state : EMPTY;
+  }
 
   /**
    * Build `features[0 .. rollback)`.  `have` lists the body revisions the caller already holds meshes for.
