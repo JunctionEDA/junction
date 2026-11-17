@@ -205,7 +205,9 @@ test("a footprint's 3D models: KiCad's library by library and name, a vendor par
   const old = G.footprintModels(first(fp(`(model "\${KISYS3DMOD}/Crystal.3dshapes/Crystal_SMD_3225-4Pin_3.2x2.5mm.wrl" (at (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`)).node);
   assert.strictEqual(old[0].url, "/api/kicad-lib/model?lib=Crystal&name=Crystal_SMD_3225-4Pin_3.2x2.5mm&fallback=1", "an old .wrl path names the same library model");
   const v = G.footprintModels(first(fp(`(model "\${KICAD_COLLAB_3DMODELS}/Parts.3dshapes/TS-1187A.step" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0)))`, `(property "LCSC" "C318884" (at 0 0) (layer "F.Fab") (hide yes))`)).node);
-  assert.strictEqual(v[0].source, "vendor"); assert.strictEqual(v[0].url, "/api/parts/model.step?vendor=lcsc&id=C318884");
+  assert.strictEqual(v[0].source, "vendor"); assert.strictEqual(v[0].url, "/api/parts/model.step?vendor=lcsc&id=C318884&placed=1&at=0,0,0,0,0,0", "placed by the store, the entry's numbers in the URL");
+  assert.deepStrictEqual(v[0].offset, [0, 0, 0]);
+  assert.deepStrictEqual(G.entryAt("/api/parts/model.step?vendor=lcsc&id=C1&placed=1&at=0,-4.9,3.8,0,0,90"), { offset: [0, -4.9, 3.8], rotate: [0, 0, 90] });
   assert.strictEqual(G.footprintModels(first(fp(`(model "\${KICAD10_3DMODEL_DIR}/A.3dshapes/B.step" (hide yes))`)).node).length, 0, "a hidden model is not drawn");
   // a footprint that names no model is looked up under its own library name, unless the caller wants only what the file names
   const bare = first(fp("")).node; const g = G.footprintModels(bare);
@@ -256,6 +258,12 @@ test("a model under another tool's path variable: the project's copy, else the p
   [3.5, 1.35, -3.8].forEach((v, i) => near(m.pos[6 + i], v, 1e-4, `lead ${i}`));
   const tt = G.vendorPlaced(mesh, h("0,-4.9,3.8", "0,0,90"));
   [1.35, -3.5].forEach((v, i) => near(tt.pos[6 + i], v, 1e-4, `turned lead ${i}`));
+  // Junction's own part import writes the vendor's numbers into the footprint: placed as EasyEDA places it
+  const same = G.vendorPlaced(mesh, h("0,-4.9,3.8", "0,0,0"), { offset: [0, -4.9, 3.8], rotate: [0, 0, 0] });
+  [3.5, 1.35, -3.8].forEach((v, i) => near(same.pos[6 + i], v, 1e-4, `imported lead ${i}`));
+  // an entry someone moved is KiCad's offset on the file as it is
+  const moved = G.vendorPlaced(mesh, h("0,-4.9,3.8", "0,0,0"), { offset: [0, 1.6, 0], rotate: [0, 0, 0] });
+  [3.5, 1.35, -3.87].forEach((v, i) => near(moved.pos[6 + i], v, 1e-4, `moved lead ${i}`));
   assert.strictEqual(G.vendorPlaced(mesh, h(null, null)), mesh, "no headers: as the file has it");
 });
 
