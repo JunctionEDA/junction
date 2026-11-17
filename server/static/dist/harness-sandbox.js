@@ -6585,6 +6585,7 @@ get, and hands back one short result, so a model does not carry the rules or nin
 """
 from __future__ import annotations
 
+import contextlib
 import math
 import re
 
@@ -6618,13 +6619,18 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             order: list | None = None, widths: dict | None = None, kinds: dict | None = None, time_s: float | None = None, max_vias: int = 2,
             stitch: float | None = 2.0, name: str | bool | None = None, rev: str | None = None, silk: bool = True, place: bool = True, route: bool = True,
             accept: list | None = None, reroute: bool = False, explain: bool = False, fanout: bool = False,
-            free_pins: bool = True, keep_rules: bool = False) -> dict:
+            free_pins: bool = True, keep_rules: bool = False, keepouts: list | None = None) -> dict:
     """Lay the whole board out in one call and say how it came out.
 
     keep_rules=True never touches the design rules (no house via either), for a person who said not to change them;
     otherwise any change is listed under "rules_changed".  layers=["F.Cu", "B.Cu", ...] names the routing layers (an
     inner ground plane left whole costs open connections on a dense board: measured 9 to 12 on Cyberboard, 13 to 29
     on Ember); a number is how many copper layers the board should have.
+
+    keepouts=[{"box": [x0, y0, x1, y1], "layers": [...]}] holds the first routing pass out of areas: no via in the box,
+    and no track on the named layers (all when none named).  For a fine-pitch chip routed the owner's way: a box round
+    it with layers=[every layer but the chip's own], so its escapes leave as buses on its layer and change layer only
+    outside; the later passes may go in again to finish what is left.
 
     explain=True adds "reasoning": a list of plain lines saying where every part stands and why (its cluster, the
     pin it serves, how far from it), which parts belong to no cluster, the order the nets were routed in and why,
@@ -6769,7 +6775,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                     if fo and fo.get("vias"):
                         out.setdefault("fanout", {})[part["ref"]] = {"vias": fo["vias"], "skipped": len(fo.get("skipped") or {})}
         auto_layers = False
-        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules))
+        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts))
         if got and got.get("rules_changed"):
             out["rules_changed"] = got["rules_changed"]
         if got:
@@ -6961,7 +6967,7 @@ def _segs_dist(a, b, c, d) -> float:
 
 
 def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len: float | None = None, apply: bool = True,
-            rows: int | None = None, first: float | None = None, style: str = "ring") -> dict:
+            rows: int | None = None, first: float | None = None, style: str = "ring", length: float = 1.5) -> dict:
     """Escape a fine-pitch chip (QFN or QFP, 0.5 mm pitch or finer) the way it is done by hand, before anything else is
     routed: every pin whose net goes far (another pad more than \`far\` mm away) gets a short stub straight out of its pad
     and a via in a staggered ring of two rows just outside the pin row, the vias in the order of the pins so no two stubs
@@ -6971,8 +6977,10 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
 
     style="ring" (default) assigns pins to staggered via sites in pin order; style="radial" puts each via straight out
     from its own pin, the rows staggered (needs a via, a stub and the clearance to fit in one pin pitch: at 0.4 mm
-    pitch with 0.15 mm clearance it does not, and every other pin is skipped); style="bus" lays only straight stubs,
-    side by side, \`first\` mm past the pad row, no vias, for the router to carry on from.
+    pitch with 0.15 mm clearance it does not, and every other pin is skipped); style="bus" is the owner's Ember
+    escape: no vias, every far pin straight out \`first\` mm (0.3) past its pad, then the side's bus turns 45 degrees
+    towards where its nets go, lanes kept one pitch apart, and runs on \`length\` mm (1.5) for the router to carry on
+    from (layer changes then happen out there, where the bus has room).
 
     nets: only these (default: every far-going signal net).  apply=False only plans.  Returns {"vias": n, "pins":
     [pin numbers fanned], "skipped": {pin: why}}.  board.design() calls it for every fine-pitch chip unless fanout=False."""
@@ -7028,17 +7036,68 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
             continue
         if style == "bus":
             # the person's Ember escape: every far-going pin leaves straight out on the chip's own layer, side by side
-            # at the pin pitch, to \`first\` mm past the pad row, with no via near the chip; the router carries the
-            # bus on from the stub ends, where there is room to turn and to change layer
-            for q in want:
-                si = s_of(q[1], q[2]); base = (q[1] - cx) * n[0] + (q[2] - cy) * n[1]
-                end = (cx + n[0] * (proj + half + (first or 1.2)) + tng[0] * si, cy + n[1] * (proj + half + (first or 1.2)) + tng[1] * si)
-                a, b = (q[1], q[2]), end
-                if any(_seg_dist((o[1], o[2]), a, b) < pitch / 4 + tw / 2 + clr - 1e-6 for o in pads if o[0] != q[0] and o[0]):
-                    skipped[q[0]] = "too close: stub by a pin"; continue
-                if any(_segs_dist(a, b, c, d) < tw + clr - 1e-6 for c, d, _ in placed_s):
-                    skipped[q[0]] = "too close: stub by a stub"; continue
-                placed_s.append((a, b, q[3])); plan.append((q, [a, b], None))
+            # at the pin pitch, then the bus turns 45 degrees towards where its nets go (the side splits where the
+            # destinations do) and runs on \`length\` mm, with no via near the chip; the bends of each half lie on the
+            # line that keeps the lanes one pin pitch apart through the turn (the inside lane turns first, each lane
+            # further out (sqrt(2) - 1) x its distance later), and the router carries on from the bus ends
+            T = math.sqrt(2) - 1
+            obst = [(q[1], q[2], q[3], (max(q[4], q[5]) / 2 if len(q) > 5 and q[4] else 0.4)) for pp in parts.values() if pp["ref"] != ref for q in pp["pads"]]
+            def toward(q):
+                pts = [(x, y) for x, y, rr in where.get(q[3], []) if rr != ref]
+                if not pts:
+                    return 0.0
+                mx, my = sum(x for x, _ in pts) / len(pts), sum(y for _, y in pts) / len(pts)
+                return (mx - q[1]) * tng[0] + (my - q[2]) * tng[1]
+            order_ = sorted(want, key=lambda q: s_of(q[1], q[2]))
+            # the split: pins before it turn to -t, from it on to +t, with the fewest pins turned against their net
+            best_k, best_bad = 0, None
+            for k in range(len(order_) + 1):
+                bad = sum(1 for q in order_[:k] if toward(q) > 0) + sum(1 for q in order_[k:] if toward(q) < 0)
+                if best_bad is None or bad < best_bad:
+                    best_k, best_bad = k, bad
+            groups = [(order_[:best_k], -1), (order_[best_k:], 1)]
+            d0 = proj + half + (first if first is not None else 0.3)
+            run = length
+            for grp, sg in groups:
+                if not grp:
+                    continue
+                ss = [s_of(q[1], q[2]) for q in grp]; inner = max(ss) if sg > 0 else min(ss)
+                for q, si in zip(grp, ss):
+                    D = d0 + T * abs(inner - si)
+                    pt = lambda s_, d_: (cx + n[0] * d_ + tng[0] * s_, cy + n[1] * d_ + tng[1] * s_)   # noqa: E731
+                    a, bnd = (q[1], q[2]), pt(si, D)
+                    end = pt(si + sg * run / math.sqrt(2), D + run / math.sqrt(2))
+                    path = [a, bnd, end] if run > 0 else [a, bnd]
+                    # a lane stops short of another part's pad in its way (a decoupling capacitor in front of the chip)
+                    cut = []
+                    for x0, x1 in zip(path, path[1:]):
+                        L = math.hypot(x1[0] - x0[0], x1[1] - x0[1]); steps = max(1, int(L / 0.05)); stop = None
+                        for k in range(steps + 1):
+                            t_ = k / steps; px, py = x0[0] + (x1[0] - x0[0]) * t_, x0[1] + (x1[1] - x0[1]) * t_
+                            if any(nt != q[3] and math.hypot(px - ox, py - oy) < rr_ + clr + tw / 2 for ox, oy, nt, rr_ in obst):
+                                stop = max(0.0, t_ - 0.1 / max(L, 1e-6)); break
+                        if not cut:
+                            cut.append(x0)
+                        if stop is None:
+                            cut.append(x1); continue
+                        if stop > 0:
+                            cut.append((x0[0] + (x1[0] - x0[0]) * stop, x0[1] + (x1[1] - x0[1]) * stop))
+                        break
+                    path = cut
+                    if len(path) < 2 or math.hypot(path[-1][0] - a[0], path[-1][1] - a[1]) < half + 0.3:
+                        skipped[q[0]] = "no room: another part's pad stands in front of it"; continue
+                    segs = list(zip(path, path[1:]))
+                    why = ""
+                    for x0, x1 in segs:
+                        if any(_seg_dist((o[1], o[2]), x0, x1) < pitch / 4 + tw / 2 + clr - 1e-6 for o in pads if o[0] != q[0] and o[0]):
+                            why = why or "stub by a pin"
+                        if any(_segs_dist(x0, x1, c, d) < tw + clr - 1e-6 for c, d, _ in placed_s):
+                            why = why or "stub by a stub"
+                    if why:
+                        skipped[q[0]] = "too close: " + why; continue
+                    for x0, x1 in segs:
+                        placed_s.append((x0, x1, q[3]))
+                    plan.append((q, path, None))
             continue
         span = max(abs(s_of(q[1], q[2])) for q in row) + 0.3
         # rows of via sites, each row in the gaps of the one inside it; as many rows as the pin pitch needs (a 0.4 mm
@@ -7139,17 +7198,19 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
                 self.via(q[3], [round(v[0], 4), round(v[1], 4)])
             res = self.flush() or {}
             laid.append((q, path, list(res.get("added") or [])))
-        bad = set()
+        bad = {}
+        with contextlib.suppress(Exception):
+            self.fill()          # a pour filled before the escapes were drawn would sit on them: refill, then judge
         for e in self._call("run_checks").get("violations", []):
             if e.get("severity") != "error" or e.get("code") in ("unconnected_items", "track_right_angle") or (e["code"], round(e["x"], 2), round(e["y"], 2)) in before:
                 continue
             for i, (q, path, _) in enumerate(laid):
                 if any(_seg_dist((e["x"], e["y"]), a, b) < 0.6 for a, b in zip(path, path[1:])):
-                    bad.add(i)
+                    bad.setdefault(i, (e.get("message") or e.get("code") or "")[:120] + (f" {e.get('refs')}" if e.get("refs") else "") + f" at ({round(e['x'], 2)}, {round(e['y'], 2)})")
         for i in bad:
             for item in laid[i][2]:
                 self._edit({"op": "remove", "id": item})
-            skipped[laid[i][0][0]] = "taken back: it broke a rule against copper already there"
+            skipped[laid[i][0][0]] = "taken back: " + bad[i]
         if bad:
             self.flush()
         plan = [p for i, p in enumerate(plan) if i not in bad]

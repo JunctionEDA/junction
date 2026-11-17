@@ -58,7 +58,7 @@ const GLOBAL_NAME = /^\/?(GND|AGND|DGND|PGND|VSS|VCC|VDD|VBUS|VIN|VBAT|\+?\d+V\d
 
 // A motion sensor (accelerometer, gyroscope, IMU, magnetometer) measures along its own axes: the firmware has to map
 // them to the board's, so it stands square to the board (never at 45°), at the same turn as every other such sensor,
-// 0° unless asked otherwise, so its X and Y are the board's X and Y.
+// 0° and on the top side unless asked otherwise, so its X, Y and Z are the board's X, Y and Z.
 const MOTION = /\b(IMU|accelerometer|accel|gyro\w*|magnetometer|compass|inertial|6-?axis|9-?axis)\b|^(ICM-?\d|MPU-?\d|BMI\d|BMX\d|BNO\d|BMM\d|BMA\d|LSM\d|LIS\d|ASM330|ISM330|IIS\d|IAM-?\d|ADXL\d|ADXRS|MMA\d|FXOS|FXAS|KX\w?\d|MMC\d|QMC\d|HMC\d|AK09|SCH16|MC34X)/i;
 export function isMotionSensor(K: any, node: any): boolean {
   const ref = refOf(K, node); if (/^(C|R|L|D|J|P|TP|SW|Y|X|FB|F)\d/i.test(ref)) return false;
@@ -106,7 +106,7 @@ export function place(K: any, P: any, doc: any, settings: any, opts: PlaceOption
   const motion: string[] = [];
   for (const it of doc.items.values()) if (it.kind === "footprint") {
     const ref = refOf(K, it.node); let sp = specs.get(ref) || null;
-    if (isMotionSensor(K, it.node)) { motion.push(ref); if (!sp || (sp.rot === undefined && !(typeof sp.fixed === "object" && sp.fixed && sp.fixed.rot !== undefined))) sp = { ...(sp || {}), ref, rot: 0 }; }
+    if (isMotionSensor(K, it.node)) { motion.push(ref); if (!sp || (sp.rot === undefined && !(typeof sp.fixed === "object" && sp.fixed && sp.fixed.rot !== undefined))) sp = { ...(sp || {}), ref, rot: 0 }; if (!sp.side) sp = { ...sp, side: "front" }; }   // on top, so Z is the board's Z too
     const p = partOf(K, P, doc, it, sp); all.push(p); if (ref && !byRef.has(ref)) byRef.set(ref, p);
   }
   const unknown = Array.from(specs.keys()).filter((r) => !byRef.has(r));
