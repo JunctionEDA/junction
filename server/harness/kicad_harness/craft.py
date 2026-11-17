@@ -128,6 +128,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         step("sync", self.sync)
     if outline:
         self.outline(*outline, radius=0 if place else 1.0)      # square while the placement may still pull it in; rounded after
+    global_plan = plan      # the router's global plan option; `plan` below is the board's layout plan
     plan = step("plan", lambda: self.plan(edge=edge)) or {"place": {"near": {}, "edges": {}}, "route": {}, "notes": []}
     out["notes"] = [n.split(". ")[0] for n in plan.get("notes", [])][:6]
     rec = dict((plan.get("stackup") or {}).get("recommended") or {})
@@ -218,7 +219,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                     if fo and fo.get("vias"):
                         out.setdefault("fanout", {})[part["ref"]] = {"vias": fo["vias"], "skipped": len(fo.get("skipped") or {})}
         auto_layers = False
-        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts, escapes=escapes, plan=plan))
+        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts, escapes=escapes, plan=global_plan))
         if got and got.get("rules_changed"):
             out["rules_changed"] = got["rules_changed"]
         if got:
@@ -238,7 +239,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                 out["routed"]["why_open"] = [u[:160] for u in got["unrouted"][:8]]
             left = got.get("left") or {}
             if left:      # one more pass at only what is open, as a person goes back over the last few
-                more = step("route again", lambda: self.route(nets=list(left), widths=r["widths"], kinds=r["kinds"], time_s=(time_s or 60) / 2, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes, plan=plan))
+                more = step("route again", lambda: self.route(nets=list(left), widths=r["widths"], kinds=r["kinds"], time_s=(time_s or 60) / 2, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes, plan=global_plan))
                 if more:
                     out["routed"]["vias"] = (out["routed"]["vias"] or 0) + (more.get("vias") or 0)
                     left = more.get("left") or {}
@@ -256,7 +257,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         if still:
             if any(n.split("/")[-1].upper().endswith("GND") for n in still):
                 step("ground pads", self.ground_pads)
-            step("route last", lambda: self.route(nets=list(still), widths=r["widths"], kinds=r["kinds"], time_s=30, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes, plan=plan))
+            step("route last", lambda: self.route(nets=list(still), widths=r["widths"], kinds=r["kinds"], time_s=30, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes, plan=global_plan))
             out["routed"]["left"] = step("unrouted", self.unrouted) or {}
         if (out.get("routed") or {}).get("left") and free_pins:     # pins boxed in by earlier tracks: free each and lay it first, never worse
             fp = step("free pins", lambda: self.free_pins(passes=1, keep_rules=True, layers=None if auto_layers else route_layers, time_s=min(60, max(20, (time_s or 60) / 3)), budget_s=max(120, 2 * (time_s or 60))))
