@@ -69793,7 +69793,7 @@ async function vendorSymbol(vendor, id) {
   if (!node) throw new ToolError(`${vendor} part ${id}: its symbol could not be read.`);
   node[1] = sym.lib_id;
   const fields = Object.assign({}, part.fields, part.datasheet ? { Datasheet: part.datasheet } : {}, part.cad.footprint ? { Footprint: part.cad.footprint.fpid } : {});
-  return { libId: sym.lib_id, node, fields, value: part.mpn || sym.name };
+  return { libId: sym.lib_id, node, fields, value: part.value || part.mpn || sym.name };
 }
 function symbolFacts(libId, node) {
   const k = K4();

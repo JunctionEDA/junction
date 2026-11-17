@@ -73,6 +73,9 @@ const CSS = `
 .kp-detail{flex:1;min-height:0;overflow:auto;padding:10px 12px}
 .kp-detail h3{margin:0;font-size:15px;font-weight:600;word-break:break-word}
 .kp-sub{color:var(--ink-2);margin:2px 0 6px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.kp-photo{display:flex;justify-content:center;align-items:center;margin:8px 0 0;border:1px solid var(--line);border-radius:var(--r-2);background:#fff;overflow:hidden}
+.kp-photo img{display:block;max-width:100%;height:150px;object-fit:contain;cursor:zoom-in}
+.kp-zoom img{max-width:min(90vw,800px);max-height:85vh;object-fit:contain;background:#fff;border-radius:var(--r-2)}
 .kp-views{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:8px 0}
 .kp-view{border:1px solid var(--line);border-radius:var(--r-2);overflow:hidden;background:var(--panel)}
 .kp-view canvas{display:block;width:100%;height:172px;cursor:zoom-in}
@@ -245,6 +248,12 @@ class PartsDialog {
     if (kind === "symbol") drawSymbol(canvas, cad.symbol ? cad.symbol.sexpr : null); else drawFootprint(canvas, cad.footprint ? cad.footprint.sexpr : null);
   }
 
+  /** The product photo at full size. */
+  private zoomPhoto(src: string, alt: string) {
+    const back = h("div", { class: "kp-zoom", id: "kp-zoom-photo", onclick: () => back.remove() }, h("img", { src, alt }));
+    this.root.append(back);
+  }
+
   private vendorBadge(vendor: string, name: string) { return h("span", { class: `kp-badge ${vendor}` }, name); }
 
   private renderSearch(): HTMLElement {
@@ -303,6 +312,7 @@ class PartsDialog {
     const cad = p.cad;
     const facts = h("dl", { class: "kp-facts" });
     const fact = (k: string, v: Child | Child[]) => { if (v === "" || v === null || v === undefined || v === false) return; facts.append(h("dt", null, k), h("dd", null, v)); };
+    if (p.value && p.value !== p.mpn) fact("Value", p.value);
     fact("Package", p.package);
     // the stock and prices are the listing vendor's; the drawings can come from somewhere else (said under Drawings)
     const at = p.vendor_name ? ` at ${p.vendor_name}` : "";
@@ -325,6 +335,10 @@ class PartsDialog {
       p.stale ? h("div", { class: "kp-note warn", style: "border:0;padding:0 0 6px" }, `Showing the saved copy: ${p.stale_reason || "the vendor could not be reached."}`) : null,
       this.partErr ? h("div", { class: "kp-note err", style: "border:0;padding:0 0 6px" }, this.partErr) : null,
       h("div", null, p.description),
+      p.photo ? h("div", { class: "kp-photo", id: "kp-photo" }, h("img", { src: p.photo, alt: `Photo of ${p.mpn || p.vendor_id}`, title: "Click to enlarge", loading: "lazy",
+        onclick: () => this.zoomPhoto(p.photo!, `Photo of ${p.mpn || p.vendor_id}`),
+        // no photo at the vendor: the box goes rather than showing a broken image
+        onerror: (ev: Event) => { const box = (ev.target as HTMLElement).parentElement; if (box) box.remove(); } })) : null,
       cad ? h("div", { class: "kp-views" },
         h("div", { class: "kp-view" }, h("canvas", { id: "kp-sym", title: "Click to enlarge", onclick: () => this.zoom("symbol") }), h("div", { title: cad.symbol ? cad.symbol.lib_id : "" }, cad.symbol ? `Symbol · ${cad.symbol.pins} pins${cad.symbol.units > 1 ? ` · ${cad.symbol.units} units` : ""}` : "No symbol")),
         h("div", { class: "kp-view" }, h("canvas", { id: "kp-fp", title: "Click to enlarge", onclick: () => this.zoom("footprint") }), h("div", { title: cad.footprint ? cad.footprint.fpid : "" }, cad.footprint ? `${cad.footprint.name} · ${cad.footprint.pads} pads` : "No footprint")))
