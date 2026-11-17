@@ -12,7 +12,7 @@
 import type { Vec2 } from "../core/geometry";
 import type { PartStudio } from "../ui/studio";
 import { fmt } from "./dims";
-import { sketchEditor, type SketchEditor } from "./editor";
+import { sketchEditor } from "./editor";
 import { tryEvaluate } from "./expr";
 import type { SketchData } from "./format";
 import { snap, type Snap, type SnapContext } from "./infer";
@@ -48,7 +48,6 @@ export interface ShapeSpec {
   reset?(): void;
 }
 
-const free = (p: Vec2): Snap => ({ p, hints: [], guides: [] });
 
 export function startDrawTool(studio: PartStudio, spec: ShapeSpec): void {
   const ed = sketchEditor(studio);
@@ -164,4 +163,3 @@ export function startDrawTool(studio: PartStudio, spec: ShapeSpec): void {
   }, spec.hint(0));
 }
 
-export type { SketchEditor };
