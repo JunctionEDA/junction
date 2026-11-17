@@ -111,7 +111,10 @@ export function footprintModels(node: SNode, guess = true, boardFiles: SNode | n
     if (!m) continue;
     if (/KICAD_COLLAB_3DMODELS/.test(path)) {
       const hit = VENDOR_FIELDS.map(([f, v]) => [v, fieldOf(node, f)]).find(([, id]) => id); if (!hit) continue;
-      out.push({ ...ref, source: "vendor", url: `/api/parts/model.step?vendor=${hit[0]}&id=${encodeURIComponent(hit[1])}` });
+      // the entry's own offset and turn ride in the URL: the store places the model as EasyEDA does when they are the
+      // vendor's (what Junction's part import writes), or by them, in the file's own frame, when someone moved it
+      const at = [...ref.offset, ...ref.rotate].map((n) => +n.toFixed(4)).join(",");
+      out.push({ ...ref, offset: [0, 0, 0], rotate: [0, 0, 0], source: "vendor", url: `/api/parts/model.step?vendor=${hit[0]}&id=${encodeURIComponent(hit[1])}&placed=1&at=${at}` });
     } else out.push({ ...ref, source: "kicad", url: kicadModelUrl(m[1], m[2]) });
   }
   if (!named && guess) { const g = guessedModel(node); if (g) out.push(g); }
@@ -271,8 +274,11 @@ function headerXyz(v: string | null): V3 | null {
  * X-Model-Offset / X-Model-Rotate are that move and turn as a KiCad (model …) entry writes them (Y up, Z = -z).
  * Without the headers the model is left as the file has it.
  */
-export function vendorPlaced(mesh: ModelMesh, headers: { get(name: string): string | null }): ModelMesh {
+export function vendorPlaced(mesh: ModelMesh, headers: { get(name: string): string | null }, entry: { offset: V3; rotate: V3 } | null = null): ModelMesh {
   const offset = headerXyz(headers.get("x-model-offset")), rotate = headerXyz(headers.get("x-model-rotate"));
+  const same = (a: V3, b: V3 | null) => !!b && a.every((n, i) => Math.abs(n - b[i]) < 1e-3);
+  // a footprint entry someone moved off the vendor's numbers: KiCad's own reading of it, in the file's frame
+  if (entry && !(same(entry.offset, offset) && same(entry.rotate, rotate))) return bake(mesh, entry.offset, entry.rotate);
   if (!offset || !rotate) return mesh;
   const p = mesh.pos; if (!p.length) return mesh;
   let x0 = Infinity, y0 = Infinity, z0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -280,11 +286,23 @@ export function vendorPlaced(mesh: ModelMesh, headers: { get(name: string): stri
   const dx = offset[0] - (x0 + x1) / 2, dy = offset[1] - (y0 + y1) / 2, dz = -offset[2] - z0;
   const moved = new Float32Array(p.length);
   for (let i = 0; i < p.length; i += 3) { moved[i] = p[i] + dx; moved[i + 1] = p[i + 1] + dy; moved[i + 2] = p[i + 2] + dz; }
-  const pos = new Float32Array(p.length), nrm = new Float32Array(mesh.nrm.length);
-  placeMesh({ ...mesh, pos: moved }, { url: "", source: "vendor", name: "", offset: [0, 0, 0], rotate, scale: [1, 1, 1] }, { x: 0, y: 0, z: 0, rot: 0, back: false }, (x, y, z, nx, ny, nz, i) => {
+  return bake({ ...mesh, pos: moved }, [0, 0, 0], rotate);
+}
+
+/** The mesh with a (model …) entry's offset and turn applied, as KiCad's viewer applies them. */
+function bake(mesh: ModelMesh, offset: V3, rotate: V3): ModelMesh {
+  const pos = new Float32Array(mesh.pos.length), nrm = new Float32Array(mesh.nrm.length);
+  placeMesh(mesh, { url: "", source: "vendor", name: "", offset, rotate, scale: [1, 1, 1] }, { x: 0, y: 0, z: 0, rot: 0, back: false }, (x, y, z, nx, ny, nz, i) => {
     pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z; nrm[i * 3] = nx; nrm[i * 3 + 1] = ny; nrm[i * 3 + 2] = nz;
   });
   return { pos, nrm, col: mesh.col, idx: mesh.idx };
+}
+
+/** The footprint entry's offset and turn a vendor model URL carries (&at=ox,oy,oz,rx,ry,rz), or null. */
+export function entryAt(url: string): { offset: V3; rotate: V3 } | null {
+  const m = /[?&]at=([^&]+)/.exec(url); if (!m) return null;
+  const n = decodeURIComponent(m[1]).split(",").map(Number);
+  return n.length === 6 && n.every(isFinite) ? { offset: [n[0], n[1], n[2]], rotate: [n[3], n[4], n[5]] } : null;
 }
 
 // ---------------------------------------------------------------- the browser half
@@ -338,7 +356,7 @@ export class ModelStore {
       if (resp.ok) {
         const bytes = await resp.arrayBuffer();
         const mesh = flattenOcct(await this.tessellate(bytes));
-        if (mesh) { state = /[?&]placed=1(?:&|$)/.test(url) ? vendorPlaced(mesh, resp.headers) : mesh; const rep = resp.headers.get("x-model-replacement"); if (rep) this.swapped.set(url, rep); }
+        if (mesh) { state = /[?&]placed=1(?:&|$)/.test(url) ? vendorPlaced(mesh, resp.headers, entryAt(url)) : mesh; const rep = resp.headers.get("x-model-replacement"); if (rep) this.swapped.set(url, rep); }
       }
     } catch { /* stays missing: the stand-in solid is drawn */ }
     this.have.set(url, state); this.asked.delete(url);
