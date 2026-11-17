@@ -127,7 +127,10 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         layers = None
     if layers:
         rec["layers"] = layers
-    want = int(rec.get("layers") or len(self.info().get("copper_layers") or []) or 2)
+    have_layers = len(self.info().get("copper_layers") or [])
+    want = int(rec.get("layers") or have_layers or 2)
+    if not layers and want < have_layers:       # never take copper layers off a board unless the caller asked for fewer
+        want = rec["layers"] = have_layers
     if want > len(self.info().get("copper_layers") or []) and not reroute:
         step("layers", lambda: self.layers(want, planes=list(INNER_GROUND) if want >= 4 else None))
     if not reroute:

@@ -71076,7 +71076,7 @@ function flag(node, name, dflt = true) {
 async function listNets(input) {
   const { doc: doc2, path: path2 } = await resolveDoc(input.doc);
   const q4 = (input.filter || "").toLowerCase();
-  const cap = 300;
+  const cap = Math.max(1, Math.floor(Number(input.limit) || 300));
   if (doc2.type === "sch") {
     const rows4 = schNets2(doc2).map((n2) => ({ name: n2.name, pins: n2.pins.map((p) => `${p.ref}.${p.number}${p.name ? `(${p.name})` : ""}`), also_labelled: n2.labels.filter((l) => l !== n2.name).length ? n2.labels.filter((l) => l !== n2.name) : void 0 })).filter((n2) => !q4 || n2.name.toLowerCase().includes(q4) || n2.pins.some((p) => p.toLowerCase().includes(q4)));
     return { document: path2, count: rows4.length, nets: rows4.slice(0, cap), truncated: rows4.length > cap ? `showing ${cap} of ${rows4.length}; narrow with filter` : void 0 };

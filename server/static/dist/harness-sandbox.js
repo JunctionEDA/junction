@@ -552,7 +552,7 @@ class Schematic(_Doc):
 
     def nets(self, filter: str | None = None) -> dict:
         """The nets of the sheet: name -> ["REF.pin", ...]."""
-        r = self._call("list_nets", **({"filter": filter} if filter else {}))
+        r = self._call("list_nets", limit=1000000, **({"filter": filter} if filter else {}))
         return {n["name"]: [re.sub(r"\\(.*\\)$", "", p) for p in n["pins"]] for n in r.get("nets", [])}
 
     def net_of(self, spec: str) -> str:
@@ -1999,7 +1999,7 @@ class Board(_Doc):
 
     def nets(self, filter: str | None = None) -> dict:
         """name -> {"pads": [...], "unrouted": n, "length_mm": x}"""
-        r = self._call("list_nets", **({"filter": filter} if filter else {}))
+        r = self._call("list_nets", limit=1000000, **({"filter": filter} if filter else {}))
         return {n["name"]: {"pads": n["pads"], "unrouted": n["unrouted_connections"], "length_mm": n["routed_length_mm"]} for n in r.get("nets", [])}
 
     def unrouted(self) -> dict:
@@ -6558,6 +6558,12 @@ def _stackup(self, fab: str | None = None, layers: int | None = None, thickness:
     applied = None
     if rules and fabkey:
         applied = rules_for(fabkey, st["material"], want, copper_oz)
+        try:      # the fab's copper-to-edge is a floor: a board its owner set wider keeps it (0.3 stays 0.3; KiCad's stock 0.5 does not)
+            cur = (self.rules() or {}).get("edge_clearance")
+        except HarnessError:
+            cur = None
+        if isinstance(cur, (int, float)) and abs(cur - 0.5) > 1e-6 and cur > applied.get("edge_clearance", 0):
+            applied["edge_clearance"] = cur
         self.rules(**applied)
     now = _physics._plan(self, what="stackup")
     notes += st["notes"]
@@ -6712,7 +6718,10 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         layers = None
     if layers:
         rec["layers"] = layers
-    want = int(rec.get("layers") or len(self.info().get("copper_layers") or []) or 2)
+    have_layers = len(self.info().get("copper_layers") or [])
+    want = int(rec.get("layers") or have_layers or 2)
+    if not layers and want < have_layers:       # never take copper layers off a board unless the caller asked for fewer
+        want = rec["layers"] = have_layers
     if want > len(self.info().get("copper_layers") or []) and not reroute:
         step("layers", lambda: self.layers(want, planes=list(INNER_GROUND) if want >= 4 else None))
     if not reroute:

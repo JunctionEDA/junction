@@ -205,8 +205,8 @@ export async function getComponent(input: { ref: string; doc?: string }): Promis
 }
 function flag(node: any, name: string, dflt = true): boolean { const k = K(); const n = k.kid(node, name); return n ? k.str(n[1]) !== "no" : dflt; }
 
-export async function listNets(input: { doc?: string; filter?: string }): Promise<unknown> {
-  const { doc, path } = await resolveDoc(input.doc); const q = (input.filter || "").toLowerCase(); const cap = 300;
+export async function listNets(input: { doc?: string; filter?: string; limit?: number }): Promise<unknown> {
+  const { doc, path } = await resolveDoc(input.doc); const q = (input.filter || "").toLowerCase(); const cap = Math.max(1, Math.floor(Number(input.limit) || 300));
   if (doc.type === "sch") {
     const rows = schNets(doc).map((n) => ({ name: n.name, pins: n.pins.map((p) => `${p.ref}.${p.number}${p.name ? `(${p.name})` : ""}`), also_labelled: n.labels.filter((l) => l !== n.name).length ? n.labels.filter((l) => l !== n.name) : undefined }))
       .filter((n) => !q || n.name.toLowerCase().includes(q) || n.pins.some((p) => p.toLowerCase().includes(q)));
