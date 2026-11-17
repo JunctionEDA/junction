@@ -144,6 +144,38 @@ test("a sketch on a reference plane that fails reports why", async () => {
 
 // ---------------------------------------------------------------- linear and circular patterns
 
+test("a 20 × 20 pattern is meshed for the screen in a fraction of the time a fixed tolerance takes", async () => {
+  const k = await boot();
+  const top = { kind: "plane", plane: "top" }, right = { kind: "plane", plane: "right" }, front = { kind: "plane", plane: "front" };
+  const big = [sketch("s1", rect(0, 0, 200, 200, "r")), extrude("e1", "s1", { depth: 5 }),
+    sketch("s2", circle(5, 5, 2, "h"), { kind: "face", ref: { kind: "face", body: "e1", name: "e1:end:ra" } }),
+    extrude("cut", "s2", { operation: "remove", depth: 5, flip: true, endType: "throughAll" }),
+    feature("lp", "linear-pattern", { of: "features", features: ["cut"], bodies: [], direction: right, spacing: 10, count: 20, flip: false, second: true, direction2: front, spacing2: -10, count2: 20, flip2: false, skip: "" })];
+  void top;
+  const build = async (quality) => {
+    const engine = quality ? new K.RegenEngine(k, K.FEATURES, quality) : new K.RegenEngine(k, K.FEATURES);
+    const t0 = Date.now();
+    const r = await engine.regenerate(big, big.length, []);
+    const total = Date.now() - t0, features = r.features.reduce((n, f) => n + (f.ms || 0), 0);
+    const body = engine.state.bodies[0], q = K.qualityFor(k, body), mesh = r.bodies[0].mesh;
+    engine.dispose();
+    return { total, mesh: Math.round(total - features), triangles: mesh.indices.length / 3, faces: mesh.faces.names.length, status: r.features.map((f) => f.status).join(), q };
+  };
+  const fixed = await build(K.DEFAULT_QUALITY), now = await build(null);
+  assert.equal(now.status, "ok,ok,ok,ok,ok"); assert.equal(now.faces, 406);
+  // a 200 mm plate: a chord of 0.14 mm, and the loosest angle for a body of 406 faces
+  assert.ok(Math.abs(now.q.linear - Math.hypot(200, 200, 5) * 0.0005) < 1e-9 && now.q.angular === 0.8, JSON.stringify(now.q));
+  assert.ok(now.triangles < fixed.triangles / 2 && now.triangles > 406 * 4, `${now.triangles} triangles against ${fixed.triangles}`);
+  assert.ok(now.mesh < fixed.mesh, `meshing ${now.mesh} ms against ${fixed.mesh} ms`);
+  console.log(`      (400 holes: the rebuild ${fixed.total} ms with a fixed 0.05 mm / 0.3 rad, of which meshing ${fixed.mesh} ms and ${fixed.triangles} triangles; ${now.total} ms now, meshing ${now.mesh} ms and ${now.triangles} triangles)`);
+  // a small part keeps the fine mesh: a 20 mm block with one hole
+  const small = new K.RegenEngine(k, K.FEATURES);
+  await small.regenerate([sketch("s1", { ...rect(0, 0, 20, 20, "r"), ...circle(10, 10, 2, "h") }), extrude("e1", "s1", { depth: 5 })], 2, []);
+  const sq = K.qualityFor(k, small.state.bodies[0]);
+  assert.ok(sq.angular === 0.3 && sq.linear < 0.02 && sq.linear >= 0.01, JSON.stringify(sq));
+  small.dispose();
+});
+
 test("a 5 × 3 grid of a hole: one plate, fourteen more holes, every copy's faces named by its place", async () => {
   const t0 = Date.now();
   const { k, engine, r } = await run([...plate(), feature("lp", "linear-pattern", {
@@ -231,7 +263,8 @@ test("patterning a feature that made a new body copies the body", async () => {
     feature("cp", "circular-pattern", { of: "features", features: ["e1"], bodies: [], axis: top, count: 4, angle: 360, equal: true, flip: false, skip: "" })]);
   allOk(r);
   assert.equal(r.bodies.length, 4);
-  const c = (b) => [(b.mesh.bbox[0] + b.mesh.bbox[3]) / 2, (b.mesh.bbox[1] + b.mesh.bbox[4]) / 2].map((v) => Math.round(v * 1e3) / 1e3);
+  // the middle of each copy, from its mesh: good to the mesh's chord tolerance (a circle is a polygon there)
+  const c = (b) => [(b.mesh.bbox[0] + b.mesh.bbox[3]) / 2, (b.mesh.bbox[1] + b.mesh.bbox[4]) / 2].map((v) => { const r = Math.round(v * 1e2) / 1e2; return r === 0 ? 0 : r; });
   assert.deepEqual(r.bodies.map(c), [[10, 0], [0, 10], [-10, 0], [0, -10]]);
 });
 
