@@ -25,12 +25,31 @@ export interface ModelRef {
   url: string;
   /** "kicad" for KiCad's 3D library, "vendor" for a vendor part's model, "project" for a model file kept in the project,
    *  "embedded" for a file embedded in the footprint */
-  source: "kicad" | "vendor" | "project" | "embedded";
+  source: "kicad" | "vendor" | "project" | "embedded" | "generated";
   /** Library/Name as the footprint wrote it, for messages */
   name: string;
   offset: V3; scale: V3; rotate: V3;
   /** the footprint names no model: this one is looked up under the footprint's own library name */
   guess?: boolean;
+  /** a generated model: the footprint (as s-expression text) the server draws it from (POST /api/models/generate) */
+  footprint?: string;
+}
+
+// The parts of a footprint the model generator reads (server/src/modelgen/footprint.rs): pads, outlines, fields.
+const GEN_KEEP = new Set(["layer", "at", "attr", "property", "fp_text", "descr", "tags", "pad", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly"]);
+const GEN_LAYERS = /^[FB]\.(Fab|CrtYd|SilkS)$/;
+function genText(n: unknown): string { return Array.isArray(n) ? "(" + n.map(genText).join(" ") + ")" : JSON.stringify(String(n)); }
+function fnv(s: string): string { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(36); }
+
+/**
+ * The model drawn for a footprint that has none anywhere (server/src/modelgen): from its pads, outline, name and
+ * datasheet, the last stop before the plain stand-in shape.  Null for a footprint with no pads.
+ */
+export function generatedModel(node: SNode): ModelRef | null {
+  if (!node.some((c) => Array.isArray(c) && c[0] === "pad")) return null;
+  const keep = node.filter((c, i) => i < 2 || (Array.isArray(c) && GEN_KEEP.has(String(c[0])) && (!/^fp_/.test(String(c[0])) || (() => { const l = (c as SNode).find((k) => Array.isArray(k) && k[0] === "layer") as SNode | undefined; return !!l && GEN_LAYERS.test(String(l[1])); })())));
+  const text = genText(keep);
+  return { url: `/api/models/generate#${fnv(text)}${text.length}`, source: "generated", name: "generated", offset: [0, 0, 0], scale: [1, 1, 1], rotate: [0, 0, 0], footprint: text };
 }
 
 /** A tessellated model in its own frame: millimetres, Z up, per-vertex normals and colours (linear 0..1 RGB as in the file). */
@@ -302,6 +321,8 @@ export type ModelState = ModelMesh | "missing";
 export class ModelStore {
   private have = new Map<string, ModelState>();
   private swapped = new Map<string, string>();
+  private generated = new Map<string, string>();
+  private bodies = new Map<string, string>();
   private asked = new Map<string, Promise<void>>();
   private worker: Worker | null = null;
   private waiting = new Map<number, (r: { result?: any; error?: string }) => void>();
@@ -318,9 +339,15 @@ export class ModelStore {
   /** "Library/Name" of the model the server gave in place of the one asked for, when it had to. */
   replacement(url: string): string | undefined { return this.swapped.get(url); }
 
+  /** The package family of a model drawn by the generator (server/src/modelgen), for messages. */
+  generatedFamily(url: string): string | undefined { return this.generated.get(url); }
+
   /** Ask for these models; those not seen before are fetched in the background. */
   want(refs: ModelRef[]): void {
-    for (const r of refs) if (!this.have.has(r.url) && !this.asked.has(r.url)) this.asked.set(r.url, this.load(r.url));
+    for (const r of refs) {
+      if (r.footprint) this.bodies.set(r.url, r.footprint);
+      if (!this.have.has(r.url) && !this.asked.has(r.url)) this.asked.set(r.url, this.load(r.url));
+    }
   }
 
   /** Resolves when everything asked for so far has arrived or failed. */
@@ -329,11 +356,14 @@ export class ModelStore {
   private async load(url: string): Promise<void> {
     let state: ModelState = "missing";
     try {
-      const resp = await fetch(url, { credentials: "same-origin" });
+      const body = this.bodies.get(url);
+      const resp = body !== undefined
+        ? await fetch("/api/models/generate", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ footprint: body }) })
+        : await fetch(url, { credentials: "same-origin" });
       if (resp.ok) {
         const bytes = await resp.arrayBuffer();
         const mesh = flattenOcct(await this.tessellate(bytes));
-        if (mesh) { state = /[?&]placed=1(?:&|$)/.test(url) ? vendorPlaced(mesh, resp.headers) : mesh; const rep = resp.headers.get("x-model-replacement"); if (rep) this.swapped.set(url, rep); }
+        if (mesh) { state = /[?&]placed=1(?:&|$)/.test(url) ? vendorPlaced(mesh, resp.headers) : mesh; const rep = resp.headers.get("x-model-replacement"); if (rep) this.swapped.set(url, rep); const gen = resp.headers.get("x-model-generated"); if (gen) this.generated.set(url, gen); }
       }
     } catch { /* stays missing: the stand-in solid is drawn */ }
     this.have.set(url, state); this.asked.delete(url);
