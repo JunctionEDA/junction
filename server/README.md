@@ -77,6 +77,11 @@ Apply rules (client side, in seq order): MODIFIED sets each named property
 unconditionally; ADDED with an existing UUID is an upsert-replace; REMOVED or
 MODIFIED for an unknown UUID is a no-op (delete beats a concurrent modify).
 
+Documents that are not KiCad's (a part studio `.jpart`, an assembly `.jasm`) are JSON item documents
+(`src/itemdoc.rs`) on the same ops: `ADDED` carries `item`, `MODIFIED` carries
+`props: [{ path: [...], value } | { path, del: true }]`, last writer wins per path. The server can apply these
+itself, so it folds their journal into a snapshot with no editor present (`src/compact.rs`).
+
 ## Auth
 
 The server brokers GitHub OAuth so no client secret ships in KiCad.
