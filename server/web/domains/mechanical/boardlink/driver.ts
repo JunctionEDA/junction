@@ -8,6 +8,7 @@
 // Every editor of the studio runs this; the answer is a function of the model, so they all write the same
 // thing and whoever is second sends nothing.
 import { stableJson, type ItemChange, type Json } from "../../../shared/itemdoc/itemdoc";
+import { featuresOf } from "../document/format";
 import type { PartStudio } from "../ui/studio";
 import { linksOf, setSolved, type Solved } from "./format";
 
@@ -54,13 +55,16 @@ export class BoardLinkDriver {
     const links = linksOf(doc);
     if (!links.length) return;
     const reports = this.studio.getState().reports;
-    const asked = stableJson(links.map((l) => ({ ...l, solved: null })) as unknown as Json);
+    // a link placed by a Board feature takes that feature's origin on the sheet (solve.ts)
+    const origins: { [featureId: string]: Json } = {};
+    for (const f of featuresOf(doc)) if (f.featureType === "board-reference" && Array.isArray(f.params.origin)) origins[f.id] = f.params.origin as Json;
+    const asked = stableJson([links.map((l) => ({ ...l, solved: null })), origins] as unknown as Json);
     if (reports !== this.seenReports) { this.seenReports = reports; this.rebuilds++; }
     const key = `${this.rebuilds}|${asked}`;
     if (key === this.lastKey) return;
     this.running = true; this.set({ solving: true });
     try {
-      const answer = await this.studio.kernel.call<Json>("boardlink-solve", { links: links as unknown as Json }) as unknown as { [id: string]: Solved };
+      const answer = await this.studio.kernel.call<Json>("boardlink-solve", { links: links as unknown as Json, origins }) as unknown as { [id: string]: Solved };
       // the model moved on while the worker was busy: this answer may be of a preview
       if (!this.quiet() || this.studio.getState().reports !== reports || !this.studio.doc) { this.again = true; return; }
       const now = this.studio.doc;

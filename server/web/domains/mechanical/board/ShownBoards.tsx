@@ -1,22 +1,22 @@
-// The Boards panel: the boards this part studio brings in (Board features), whether each is being followed
-// live, and the way to its own editor.  Importing board/link.ts is also what starts the link for every studio.
+// ShownBoards.tsx — the first part of the Board panel (boardlink/Panel.tsx): the boards this part studio brings
+// in (Board features), whether each is being followed live, and the way to its own editor.  Importing
+// board/link.ts is also what starts the link for every studio.
 import { useEffect, useReducer } from "react";
-import { definePanel } from "../core/tool";
-import { boardLinkOf } from "../board/link";
+import { boardLinkOf } from "./link";
 import { useStudio } from "../ui/hooks";
 import type { PartStudio } from "../ui/studio";
 
 const title = (path: string): string => (path.split("/").pop() || path).replace(/\.[^.]+$/, "");
 
-function Boards({ studio }: { studio: PartStudio }) {
+export function ShownBoards({ studio }: { studio: PartStudio }) {
   const link = boardLinkOf(studio);
   const [, again] = useReducer((n: number) => n + 1, 0);
   useEffect(() => (link ? link.subscribe(again) : undefined), [link]);
   useStudio(studio, (s) => s.features);
   const boards = link ? link.boards() : [];
-  if (!boards.length) return <p className="note px-2 py-1 m-0">No board here yet. Choose Board to bring one of the project’s boards in.</p>;
+  if (!boards.length) return <p className="note px-2 py-1 m-0" data-section="shown">No board is shown here yet. Choose Board in the toolbar to bring one of the project’s boards into the model.</p>;
   return (
-    <div className="flex flex-col py-1 text-sm" role="list" aria-label="Boards">
+    <div className="flex flex-col py-1 text-sm" role="list" aria-label="Boards shown in this part studio" data-section="shown">
       {boards.map((b) => (
         <div key={b.featureId} role="listitem" data-board={b.docId} data-state={b.status.state} className="flex items-center gap-1.5 min-h-7 px-2">
           <span className={"flex-none w-2 h-2 rounded-full " + (b.status.state === "live" ? "bg-ok" : b.status.state === "error" ? "bg-err" : "bg-ink-3")} title={b.status.text} />
@@ -30,4 +30,3 @@ function Boards({ studio }: { studio: PartStudio }) {
   );
 }
 
-export default definePanel({ id: "boards", title: "Boards", side: "left", order: 30, render: (studio) => <Boards studio={studio} /> });
