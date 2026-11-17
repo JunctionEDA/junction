@@ -166,12 +166,13 @@ export class Workspace {
       case "get_geometry": return on(() => design.geometry(rest()));
       case "check_layout": return on(() => checkLayout(rest()));
       case "review_design": return on(() => reviewDesign(rest()));
-      case "render": { const h = this.find(args.document); const ed = this.open(h); return { document: h.path, svg: renderPicture(ed.kdoc, { ...(args.box ? { bbox: args.box, frame: false } : {}), ...(args.zones === false ? { zones: false } : {}), ...(Array.isArray(args.hide) ? { hidden: new Set(args.hide) } : {}), ...(args.copper_only ? { copperOnly: true } : {}) }) }; }
+      case "render": { const h = this.find(args.document); const ed = this.open(h); return { document: h.path, svg: renderPicture(ed.kdoc, { ...(args.box ? { bbox: args.box, frame: false } : {}), ...(args.zones === false ? { zones: false } : {}), ...(Array.isArray(args.hide) ? { hidden: new Set(args.hide) } : {}), ...(args.copper_only ? { copperOnly: true, padNumbers: false } : {}) }) }; }
       case "run_checks": return on(() => design.runChecks(rest()));
       case "trace_net": { const h = this.find(args.document); const ed = this.open(h); return traceNet(ed.kdoc, h.path, args.net); }
       case "highlight": return { document: this.find(args.document).path, highlighted: [], note: "These are files on disk: nobody has them open, so there is nobody to show a highlight to." };
       case "get_board_info": { const b = this.docs.find((d) => d.docType === "kicad_pcb"); if (!b) throw new ToolError("This project has no board."); this.open(b); return design.boardInfo(); }
       case "get_items": return on(() => design.getItems(rest()));
+      case "fits": return on(() => design.fitsCheck(rest()));
       case "find_datasheets": return on(() => design.findDatasheets(rest()));
       case "find_parts": return library.findParts(rest());
       case "get_library_part": return library.getLibraryPart(rest());
