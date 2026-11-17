@@ -302,6 +302,34 @@ std::optional<std::string> COLLAB_REST::DownloadLibraryModel( const wxString& aS
 }
 
 
+std::optional<std::string> COLLAB_REST::DownloadPartModel( const wxString& aServerUrl,
+                                                           const wxString& aToken,
+                                                           const wxString& aName,
+                                                           const wxString& aForm,
+                                                           bool* aNoAnswer )
+{
+    KICAD_CURL_EASY curl;
+    setupRequest( curl,
+                  wxString::Format( wxS( "%s/api/parts/model-file?name=%s&as=%s" ), aServerUrl,
+                                    wxString::FromUTF8( curl.Escape( aName.ToStdString( wxConvUTF8 ) ) ),
+                                    wxString::FromUTF8( curl.Escape( aForm.ToStdString( wxConvUTF8 ) ) ) ),
+                  aToken );
+    curl.SetHeader( "Accept", "*/*" );
+    curl.SetTimeout( 15 );
+
+    int rc = curl.Perform();
+    int status = curl.GetResponseStatusCode();
+
+    if( aNoAnswer )
+        *aNoAnswer = rc != 0 || status == 0;
+
+    if( rc != 0 || status < 200 || status >= 300 || curl.GetBuffer().empty() )
+        return std::nullopt;
+
+    return curl.GetBuffer();
+}
+
+
 static wxString fontFileUrl( KICAD_CURL_EASY& aCurl, const wxString& aServerUrl,
                              const wxString& aProjectId, const wxString& aFamily, bool aBold,
                              bool aItalic )

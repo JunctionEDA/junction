@@ -21,6 +21,7 @@
 
 pub mod easyeda;
 pub mod standard;
+pub mod step_fit;
 pub mod tidy;
 pub mod transistor;
 pub mod vendors;
@@ -648,6 +649,9 @@ pub struct PartQuery {
     refresh: Option<String>,
     #[serde(default)]
     lib: Option<String>,
+    /// model.step: the file lined up for the footprint's (model …) entry (step_fit)
+    #[serde(default)]
+    fit: Option<String>,
 }
 
 fn truthy(v: &Option<String>) -> bool {
@@ -663,7 +667,73 @@ pub async fn get_part(State(state): State<AppState>, AuthUser(user): AuthUser, Q
     let (row, stale) = ensure_part(&state, &keys, vendor, &id, truthy(&q.refresh)).await?;
     let info = info_of(&row);
     let src = cad_source(&state, &keys, &row, &info).await?;
+    if let Some(d) = src.as_ref().and_then(|s| drawings(&info, s, DEFAULT_LIB)) {
+        remember_model(&state, &d).await;
+    }
     Ok(Json(part_view(&state, &keys, &row, src.as_ref(), &lib_nick(q.lib.as_deref()), stale).await))
+}
+
+/// The footprints Junction writes name their model ${KICAD_COLLAB_3DMODELS}/<lib>.3dshapes/<name>.step: kept here by
+/// that name, so a desktop app that meets the path can ask for the file (GET /api/parts/model-file).
+async fn remember_model(state: &AppState, d: &Drawings) {
+    let Some(f) = d.conv.footprint.as_ref() else { return };
+    let Some(m) = f.model.as_ref() else { return };
+    let name = easyeda::lib_name(if m.title.is_empty() { &f.name } else { &m.title });
+    let xyz = |v: [f64; 3]| v.iter().map(|n| format!("{n}")).collect::<Vec<_>>().join(",");
+    let _ = sqlx::query(
+        "INSERT INTO part_model_names (name, uuid, model_offset, model_rotate) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (name) DO UPDATE SET uuid = EXCLUDED.uuid, model_offset = EXCLUDED.model_offset, model_rotate = EXCLUDED.model_rotate",
+    )
+    .bind(&name)
+    .bind(&m.uuid)
+    .bind(xyz(m.offset))
+    .bind(xyz(m.rotate))
+    .execute(&state.pool)
+    .await;
+}
+
+#[derive(Deserialize)]
+pub struct ModelFileQuery {
+    name: String,
+    /// "fit" (default): lined up for the entry Junction writes; "placed": as EasyEDA places it, for an entry with no
+    /// offset (easyeda2kicad's .wrl); "raw": the vendor's file as it is (easyeda2kicad's .step)
+    #[serde(default, rename = "as")]
+    form: Option<String>,
+}
+
+/// GET /api/parts/model-file?name=<name>[&as=fit|placed|raw] — the STEP file a Junction footprint names as
+/// ${KICAD_COLLAB_3DMODELS}/<lib>.3dshapes/<name>.step, lined up for that footprint's (model …) entry; also the vendor
+/// model behind an easyeda2kicad path (${EASYEDA2KICAD}/easyeda2kicad.3dshapes/<name>.wrl|.step), for a desktop app
+/// that does not have that folder.
+pub async fn get_model_file(State(state): State<AppState>, AuthUser(_user): AuthUser, Query(q): Query<ModelFileQuery>) -> AppResult<Response> {
+    let name = q.name.trim().trim_end_matches(".step").trim_end_matches(".STEP");
+    if name.is_empty() || name.len() > 200 {
+        return Err(AppError::NotFound);
+    }
+    let row = sqlx::query_as::<_, (String, String, String)>("SELECT uuid, model_offset, model_rotate FROM part_model_names WHERE name = $1")
+        .bind(name)
+        .fetch_optional(&state.pool)
+        .await?
+        .ok_or(AppError::NotFound)?;
+    let xyz = |s: &str| {
+        let n: Vec<f64> = s.split(',').filter_map(|v| v.trim().parse().ok()).collect();
+        if n.len() == 3 { [n[0], n[1], n[2]] } else { [0.0; 3] }
+    };
+    let bytes = model_bytes(&state, &row.0).await?;
+    let bytes = match q.form.as_deref() {
+        Some("raw") => bytes,
+        Some("placed") => step_fit::placed(&bytes, xyz(&row.1), xyz(&row.2)),
+        _ => step_fit::fitted(&bytes, xyz(&row.1), xyz(&row.2)),
+    };
+    Ok((
+        [
+            (header::CONTENT_TYPE, "model/step".to_string()),
+            (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{name}.step\"")),
+            (header::CACHE_CONTROL, "private, max-age=86400".to_string()),
+        ],
+        bytes,
+    )
+        .into_response())
 }
 
 #[derive(Deserialize)]
@@ -731,8 +801,10 @@ pub async fn get_model(State(state): State<AppState>, AuthUser(user): AuthUser, 
     let info = info_of(&row);
     let src = cad_source(&state, &keys, &row, &info).await?.ok_or(AppError::NotFound)?;
     let d = drawings(&info, &src, DEFAULT_LIB).ok_or(AppError::NotFound)?;
-    let model = d.conv.footprint.and_then(|f| f.model).ok_or(AppError::NotFound)?;
+    remember_model(&state, &d).await;
+    let model = d.conv.footprint.as_ref().and_then(|f| f.model.clone()).ok_or(AppError::NotFound)?;
     let bytes = model_bytes(&state, &model.uuid).await?;
+    let bytes = if truthy(&q.fit) { step_fit::fitted(&bytes, model.offset, model.rotate) } else { bytes };
     let name = easyeda::lib_name(if model.title.is_empty() { &id } else { &model.title });
     let xyz = |v: [f64; 3]| v.iter().map(|n| format!("{n}")).collect::<Vec<_>>().join(",");
     Ok((
@@ -1107,7 +1179,8 @@ pub async fn export_library(State(state): State<AppState>, AuthUser(user): AuthU
                     let name = easyeda::lib_name(if m.title.is_empty() { &f.name } else { &m.title });
                     if !models.iter().any(|(n, _)| n == &name) {
                         match model_bytes(&state, &m.uuid).await {
-                            Ok(bytes) => models.push((name, bytes)),
+                            // lined up for the footprint's (model …) entry, as KiCad reads it (step_fit)
+                            Ok(bytes) => models.push((name, step_fit::fitted(&bytes, m.offset, m.rotate))),
                             Err(_) => notes.push(format!("{label} ({}): its 3D model could not be fetched.", info.mpn)),
                         }
                     }

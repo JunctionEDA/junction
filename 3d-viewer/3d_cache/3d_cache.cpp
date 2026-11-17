@@ -177,6 +177,114 @@ static bool isStepFile( const wxString& aPath )
  * all ends the asking for this run, so a dead connection costs one short timeout, not one per
  * part.  The board is never changed: only where the file is read from.
  */
+/**
+ * A vendor part's model the server keeps by name (GET /api/parts/model-file), for a footprint that names it under a
+ * folder this computer does not have: kept beside the downloaded libraries ("3dmodels/junction-parts/<form>"), each
+ * fetched once.  aForm is how the file is lined up (COLLAB_REST::DownloadPartModel).
+ */
+static wxString fetchPartModel( const wxString& aName, const wxString& aExt, const wxString& aForm, bool aNested )
+{
+    if( aName.IsEmpty() || aNested
+        || ( aExt != wxS( "wrl" ) && aExt != wxS( "step" ) && aExt != wxS( "stp" ) && aExt != wxS( "wrz" ) ) )
+    {
+        return wxEmptyString;
+    }
+
+    static std::mutex         s_mutex;
+    static std::set<wxString> s_misses;
+    static wxLongLong         s_offlineUntil = 0;
+
+    wxFileName cached( PATHS::GetManagedLibrariesPath(), aName + wxS( ".step" ) );
+    cached.AppendDir( wxS( "3dmodels" ) );
+    cached.AppendDir( wxS( "junction-parts" ) );
+    cached.AppendDir( aForm );
+
+    const wxString key = aForm + wxS( "/" ) + aName;
+    wxString       server;
+    wxString       token;
+
+    {
+        std::lock_guard<std::mutex> lock( s_mutex );
+
+        if( cached.FileExists() )
+        {
+            if( isStepFile( cached.GetFullPath() ) )
+                return cached.GetFullPath();
+
+            wxLogNull noLog;
+            wxRemoveFile( cached.GetFullPath() );
+        }
+
+        if( wxGetLocalTimeMillis() < s_offlineUntil || s_misses.count( key ) )
+            return wxEmptyString;
+
+        server = COLLAB_SESSION::ServerUrl();
+        token = COLLAB_AUTH::StoredToken( server );
+
+        if( token.IsEmpty() )
+            return wxEmptyString;
+
+        server = wxString( server.wc_str() );
+        token = wxString( token.wc_str() );
+    }
+
+    auto miss = [&]( bool aOffline )
+    {
+        std::lock_guard<std::mutex> lock( s_mutex );
+
+        if( aOffline )
+            s_offlineUntil = wxGetLocalTimeMillis() + 60000;
+        else
+            s_misses.insert( key );
+
+        return wxString();
+    };
+
+    bool                       noAnswer = false;
+    std::optional<std::string> bytes;
+
+    for( int attempt = 0; attempt < 3; attempt++ )
+    {
+        noAnswer = false;
+        bytes = COLLAB_REST::DownloadPartModel( server, token, aName, aForm, &noAnswer );
+
+        if( bytes || !noAnswer )
+            break;
+
+        wxMilliSleep( attempt == 0 ? 1000 : 3000 );
+    }
+
+    if( !bytes )
+        return miss( noAnswer );
+
+    if( bytes->substr( 0, 256 ).find( "ISO-10303-21" ) == std::string::npos )
+        return miss( false );
+
+    wxLogNull  noLog;
+    wxFileName partial( cached );
+    partial.SetFullName( cached.GetFullName()
+                         + wxString::Format( wxS( ".%zx.part" ), std::hash<std::thread::id>()( std::this_thread::get_id() ) ) );
+
+    if( !wxFileName::Mkdir( cached.GetPath(), wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL ) )
+        return wxEmptyString;
+
+    {
+        wxFFile out( partial.GetFullPath(), wxS( "wb" ) );
+
+        if( !out.IsOpened() || out.Write( bytes->data(), bytes->size() ) != bytes->size() || !out.Close() )
+            return miss( false );
+    }
+
+    if( !wxRenameFile( partial.GetFullPath(), cached.GetFullPath(), true ) )
+    {
+        wxRemoveFile( partial.GetFullPath() );
+        return miss( false );
+    }
+
+    return cached.GetFullPath();
+}
+
+
 static wxString fetchLibraryModel( const wxString& aModelFile )
 {
     wxString norm = aModelFile;
@@ -198,10 +306,22 @@ static wxString fetchLibraryModel( const wxString& aModelFile )
     // the project, and asking the server for them would only find a namesake.
     // Only KiCad's own library is on the server: a third-party folder (${KICAD9_3RD_PARTY},
     // an absolute path on somebody's computer) would only cost a request to be told so.
-    const wxString head = aModelFile.BeforeFirst( '/' ).Upper();
+    // Two other folders hold vendor parts' models the server also has, by name: the one Junction's
+    // part libraries name (${KICAD_COLLAB_3DMODELS}), and easyeda2kicad's (${EASYEDA2KICAD}).
+    const wxString head = norm.BeforeFirst( '/' ).Upper();
     const bool     standard = head.StartsWith( wxS( "${KICAD" ) ) ? head.EndsWith( wxS( "_3DMODEL_DIR}" ) )
                                                                   : ( head == wxS( "${KISYS3DMOD}" )
                                                                       || head == wxS( "$(KISYS3DMOD)" ) );
+    wxString vendorForm;
+
+    if( head == wxS( "${KICAD_COLLAB_3DMODELS}" ) || head == wxS( "$(KICAD_COLLAB_3DMODELS)" ) )
+        vendorForm = wxS( "fit" );     // lined up for the (model …) entry Junction wrote
+    else if( head == wxS( "${EASYEDA2KICAD}" ) || head == wxS( "$(EASYEDA2KICAD)" ) )
+        vendorForm = ext == wxS( "step" ) || ext == wxS( "stp" ) ? wxS( "raw" )      // the vendor's file as it is
+                                                                 : wxS( "placed" );  // its .wrl has the move built in
+
+    if( !vendorForm.IsEmpty() )
+        return fetchPartModel( name, ext, vendorForm, item.GetDirCount() > 0 );
 
     if( !standard || library.IsEmpty() || name.IsEmpty()
         || item.GetDirCount() > 0
