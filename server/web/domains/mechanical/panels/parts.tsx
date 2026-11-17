@@ -8,7 +8,7 @@ function Parts({ studio }: { studio: PartStudio }) {
   if (!bodies.length) return <p className="note px-2 py-1 m-0">No parts yet.</p>;
   return (
     <div className="flex flex-col py-1 text-sm" role="list" aria-label="Parts">
-      {bodies.map((b) => <div key={b.id} role="listitem" data-body={b.id} className="flex items-center h-6.5 px-2 truncate">{b.name}</div>)}
+      {bodies.map((b) => <div key={b.id} role="listitem" data-body={b.id} className={"flex items-center gap-1.5 h-6.5 px-2 truncate" + (b.reference ? " text-ink-2" : "")} title={b.reference ? `${b.name}: reference geometry (not a part of this studio)` : b.name}>{b.name}{b.reference ? <span className="text-xs text-ink-3">reference</span> : null}</div>)}
     </div>
   );
 }

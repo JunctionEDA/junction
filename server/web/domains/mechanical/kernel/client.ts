@@ -8,6 +8,7 @@
 // The client remembers which body revisions it has meshes for, so an edit sends back only the bodies it changed.
 import type { Json } from "../../../shared/itemdoc/itemdoc";
 import type { BodyMesh, FeatureInput, FromWorker, RegenResult, ToWorker } from "./protocol";
+import { compileKernel } from "./wasm";
 
 export type KernelState = "idle" | "loading" | "ready" | "working" | "failed";
 export interface KernelOptions {
@@ -17,6 +18,17 @@ export interface KernelOptions {
 }
 
 const assetV = (): string => { const v = (globalThis as { __kcAssetV?: string }).__kcAssetV; return v ? "?v=" + v : ""; };
+
+/** The page's compiled kernel, by URL; null when it could not be compiled here (each worker then tries for itself). */
+const modules = new Map<string, Promise<WebAssembly.Module | null>>();
+function sharedModule(url: string): Promise<WebAssembly.Module | null> {
+  let m = modules.get(url);
+  if (!m) {
+    m = compileKernel(url).catch(() => { modules.delete(url); return null; });
+    modules.set(url, m);
+  }
+  return m;
+}
 
 export class KernelClient {
   state: KernelState = "idle";
@@ -39,11 +51,16 @@ export class KernelClient {
     this.setState("loading");
     w.onmessage = (ev: MessageEvent<FromWorker>) => this.onMessage(ev.data);
     w.onerror = (ev) => { this.fail(`The modelling worker stopped: ${ev.message || "unknown error"}`); };
-    this.post({ t: "init", wasmUrl: new URL(this.opts.wasmUrl || "/static/pyodide/occ-kernel.wasm", location.href).href });
+    // The kernel is compiled once per page and handed to every worker: an assembly's second and third worker
+    // start without downloading or compiling 23 MB again.  Messages wait their turn behind it.
+    const wasmUrl = new URL(this.opts.wasmUrl || "/static/pyodide/occ-kernel.wasm", location.href).href;
+    this.sending = sharedModule(wasmUrl).then((module) => { if (this.worker === w) w.postMessage({ t: "init", wasmUrl, module } satisfies ToWorker); });
     return w;
   }
 
-  private post(msg: ToWorker): void { this.worker!.postMessage(msg); }
+  /** what is still to be handed to the worker, in order (the init waits for the page's compiled kernel) */
+  private sending: Promise<void> = Promise.resolve();
+  private post(msg: ToWorker): void { const w = this.worker!; this.sending = this.sending.then(() => { if (this.worker === w) w.postMessage(msg); }); }
 
   private fail(message: string): void {
     this.setState("failed", message);

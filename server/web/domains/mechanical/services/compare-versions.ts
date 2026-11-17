@@ -9,6 +9,7 @@
 import { stableJson, type Json } from "../../../shared/itemdoc/itemdoc";
 import { FEATURES } from "../generated/worker";
 import { RegenEngine } from "../kernel/regen";
+import { compound } from "../kernel/ops/shapes";
 import { defineService } from "../kernel/service";
 import { DEFAULT_QUALITY } from "../kernel/tessellate";
 import type { FeatureInput, FeatureReport } from "../kernel/protocol";
@@ -60,13 +61,11 @@ export default defineService({
       const sideB = same ? ea : eb;
       /** every body of a version as one shape (null when it has none) */
       const whole = (engine: RegenEngine): Shape | null => {
-        const bodies = engine.state.bodies;
+        // the parts, not what is only there to be referred to: a board shown in the studio is not part of a version
+        const bodies = engine.state.bodies.filter((body) => !body.reference);
         if (!bodies.length) return null;
         if (bodies.length === 1) return bodies[0].shape;
-        const builder = keep(new oc.BRep_Builder()), compound = keep(new oc.TopoDS_Compound());
-        builder.MakeCompound(compound);
-        for (const body of bodies) builder.Add(compound, body.shape);
-        return compound;
+        return compound(k, bodies.map((body) => body.shape), keep);
       };
       const boolean = (op: "cut" | "common", x: Shape, y: Shape): Shape => {
         const range = new oc.Message_ProgressRange();

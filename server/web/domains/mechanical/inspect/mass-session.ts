@@ -47,9 +47,10 @@ export class MassSession extends Store<MassState> {
   watch(): () => void { this.watchers++; this.schedule(); return () => { this.watchers--; }; }
 
   private pickBodies(): string[] {
-    const sel = selectedBodies(this.studio), all = this.studio.getState().bodies.map((b) => b.id);
+    const sel = selectedBodies(this.studio), bodies = this.studio.getState().bodies, all = bodies.map((b) => b.id);
     const chosen = sel.filter((b) => all.includes(b));
-    return chosen.length ? chosen : all;
+    // with nothing selected: every part, but not a body that is only there to be referred to (a board)
+    return chosen.length ? chosen : bodies.filter((b) => !b.reference).map((b) => b.id);
   }
 
   schedule(): void { clearTimeout(this.timer); this.timer = window.setTimeout(() => void this.compute(), 40); }

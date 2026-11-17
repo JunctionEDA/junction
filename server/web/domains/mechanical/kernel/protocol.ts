@@ -1,7 +1,7 @@
 // protocol.ts — the messages between the page and the modelling worker (static/dist/cad-worker.js), and the
 // shape of what comes back.  Typed arrays in a result are transferred, not copied.
 //
-//   page → worker   { t: "init", wasmUrl }
+//   page → worker   { t: "init", wasmUrl, module? }
 //                   { t: "regen", seq, features, rollback, have }
 //                   { t: "call", seq, service, args }
 //   worker → page   { t: "ready", ms } | { t: "failed", message }
@@ -48,6 +48,8 @@ export interface BodyResult {
   rev: number;
   /** absent when the page said it already has this revision (`have`) */
   mesh?: BodyMesh;
+  /** a body that is there to be referred to, not a part (the Board feature's board): kernel/types.ts Body.reference */
+  reference?: true;
 }
 
 /** A sketch, ready to draw: its plane and every curve as a polyline in model space. */
@@ -90,7 +92,7 @@ export interface RegenResult {
 }
 
 export type ToWorker =
-  | { t: "init"; wasmUrl: string }
+  | { t: "init"; wasmUrl: string; /** the kernel as the page compiled it, for every worker of the page (absent: the worker fetches it) */ module?: WebAssembly.Module | null }
   | { t: "regen"; seq: number; features: FeatureInput[]; /** how many features to build: the rollback bar's place */ rollback: number; /** body revisions the page holds */ have: number[] }
   | { t: "call"; seq: number; service: string; args: Json };
 
