@@ -43,7 +43,14 @@ export interface MateSolve {
   check?(a: MateFrame, b: MateFrame, params: JsonObject): string | null;
 }
 
-export interface SolverBody { id: string; pose: Pose; fixed: boolean }
+export interface SolverBody {
+  id: string; pose: Pose; fixed: boolean;
+  /**
+   * The middle of the body's geometry, in its own space (default: its origin).  Steps turn a body about this
+   * point, so "the smallest change" slides a part rather than swinging it about an origin that may be far from it.
+   */
+  centre?: Vec3;
+}
 
 export interface SolverMate {
   id: string;

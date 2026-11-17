@@ -221,7 +221,7 @@ class Core {
 
   private pivot(g: number): Vec3 {
     const c: Vec3 = [0, 0, 0]; const ms = this.members[g];
-    for (const i of ms) { c[0] += this.rel[i].p[0]; c[1] += this.rel[i].p[1]; c[2] += this.rel[i].p[2]; }
+    for (const i of ms) { const b = this.bodies[i], p = b.centre ? applyPose(this.rel[i], b.centre) : this.rel[i].p; c[0] += p[0]; c[1] += p[1]; c[2] += p[2]; }
     return applyPose(this.G[g], [c[0] / ms.length, c[1] / ms.length, c[2] / ms.length]);
   }
 

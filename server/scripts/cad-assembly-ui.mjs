@@ -355,6 +355,19 @@ try {
   await settled(alice, 4);
   const second = await inst(alice, 'Part 2');
   check('a part that is already there is set beside the first one, not on it', second.t[3] > 5, `x ${second.t[3]}`);
+  // Tangent: the pin's round side against the box's flat side
+  await alice.click('[data-mate-tool=tangent]');
+  await alice.waitForSelector('[data-mate-dialog=tangent] [data-connector=a][data-armed]');
+  await click(alice, await at(alice, [100, 12, 30]));
+  await alice.waitForSelector('[data-mate-dialog] [data-connector=a][data-set]');
+  await click(alice, await at(alice, [150 + second.t[3] + 2.83, 30 - 2.83, 15]));
+  await alice.waitForFunction(() => { const s = window.JunctionAssembly.getState(); return s.mating && s.mating.b && s.mateInfo[s.mating.id]?.state === 'ok'; }, null, { timeout: 10000 });
+  await alice.click('[data-mate-dialog] [data-accept]');
+  await settled(alice, 4);
+  const rolled = await inst(alice, 'Part 2');
+  check('a Tangent mate slides the pin until its round side rests on the box\'s flat side (its axis one radius from the face), without turning it', near(rolled.t[0] * 150 + rolled.t[1] * 30 + rolled.t[3], 104, 1e-3) && near(Math.abs(rolled.t[2]), 0, 1e-6) && near(rolled.t[0], 1, 1e-6) && rolled.info.dof === 4, `axis x ${(rolled.t[0] * 150 + rolled.t[1] * 30 + rolled.t[3]).toFixed(3)}, dof ${rolled.info.dof}`);
+  await menu(alice, "[data-mate='Tangent 1']", 'Delete');
+  await alice.waitForFunction(() => window.JunctionAssembly.getState().mates.length === 2);
   await alice.click('[data-mate-tool=ball]');
   await alice.waitForSelector('[data-mate-dialog=ball] [data-connector=a][data-armed]');
   const glyph = await at(alice, [112, 30, 20]);
@@ -362,7 +375,7 @@ try {
   await click(alice, glyph);
   await alice.waitForSelector('[data-mate-dialog] [data-connector=a][data-set]');
   check('the connector\'s mark is picked as a mate\'s first connector', (await alice.textContent('[data-mate-dialog] [data-connector=a]')).includes('Mate connector 1'), await alice.textContent('[data-mate-dialog] [data-connector=a]'));
-  const pin2 = await at(alice, [150 + second.t[3], 26, 30]);
+  const pin2 = await at(alice, [rolled.t[0] * 150 + rolled.t[1] * 26 + rolled.t[2] * 30 + rolled.t[3], rolled.t[4] * 150 + rolled.t[5] * 26 + rolled.t[6] * 30 + rolled.t[7], rolled.t[8] * 150 + rolled.t[9] * 26 + rolled.t[10] * 30 + rolled.t[11]]);
   await alice.mouse.move(pin2.x, pin2.y, { steps: 3 });
   await click(alice, pin2);
   await alice.waitForFunction(() => { const s = window.JunctionAssembly.getState(); return s.mating && s.mating.b && s.mateInfo[s.mating.id]?.state === 'ok'; }, null, { timeout: 10000 });

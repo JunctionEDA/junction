@@ -19,6 +19,8 @@ export interface Geometry {
    * loading, so nothing can be said yet.
    */
   frame(instance: InstanceItem, ref: GeomRef): MateFrame | null | undefined;
+  /** The middle of an instance's geometry in its own space, when known: the point the solver turns it about. */
+  centre?(instance: InstanceItem): [number, number, number] | null;
 }
 
 export type MateState = "ok" | "conflict" | "error" | "suppressed" | "inactive" | "pending" | "unknown-type";
@@ -65,7 +67,8 @@ export function buildProblem(
   for (const i of instances) {
     byId.set(i.id, i);
     if (i.suppressed) continue;
-    bodies.push({ id: i.id, pose: poses?.get(i.id) || poseOf(storedTransform(i)), fixed: !!i.fixed });
+    const centre = geometry.centre ? geometry.centre(i) : null;
+    bodies.push({ id: i.id, pose: poses?.get(i.id) || poseOf(storedTransform(i)), fixed: !!i.fixed, ...(centre ? { centre } : {}) });
   }
   const out: SolverMate[] = [];
   const info = new Map<string, MateInfo>();
