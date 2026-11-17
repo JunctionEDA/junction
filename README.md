@@ -96,7 +96,7 @@ script prints, so a design costs few tokens. The Pico board in the video was dra
 
 ## Status
 
-Junction 2.2.0 is the current release (the name changed from KiCad Collaborative at 2.0.0). What to know:
+Junction 2.2.1 is the current release (the name changed from KiCad Collaborative at 2.0.0). What to know:
 
 - **It is a fork.** Collaboration is built into the editors, so you run Junction's build, not a plugin for stock
   KiCad. It follows upstream KiCad master (merged through 2026-11-17); About says "based on KiCad 10".
