@@ -95,8 +95,13 @@ export class SketchEditor {
   /** the last pointer event over the viewport, for tools that redraw on a key */
   lastPointer: PointerEvent | null = null;
 
+  private disposed = false;
+  private pendingDrag: DragTarget[] | null = null;
+  private dragFrame = 0;
+  private readonly unsubscribe: () => void;
+
   constructor(readonly studio: PartStudio) {
-    studio.subscribe(() => this.sync());
+    this.unsubscribe = studio.subscribe(() => this.sync());
     studio.viewport.onFrame.push(() => this.paint());
     studio.viewport.onTheme.push(() => { this.painter?.readColors(); this.invalidate(); });
     this.sync();
@@ -125,7 +130,7 @@ export class SketchEditor {
 
   // ---------------------------------------------------------------- following the part studio
   private sync(): void {
-    if (this.syncing) return;
+    if (this.syncing || this.disposed) return;
     this.syncing = true;
     try {
       const s = this.studio.getState();
@@ -158,10 +163,22 @@ export class SketchEditor {
     this.closeInput();
     const w = window as unknown as { JunctionSketch?: SketchEditor }; if (w.JunctionSketch === this) delete w.JunctionSketch;
     this.studio.view.setSketchHidden(null);
+    this.studio.viewport.canvas.style.cursor = "";
     this.painter?.clear();
     this.dragData = null; this.preview = null; this.box = null; this.docRef = null;
     clearTimeout(this.probe);
     this.set({ open: false, featureId: null, data: EMPTY, selection: [], hover: null, tool: "select", hint: "" });
+  }
+
+  /** The part studio is going away: put everything down and take the drawing layer out of the viewport. */
+  dispose(): void {
+    if (this.disposed) return;
+    if (this.state.open) this.close();
+    this.disposed = true;
+    this.unsubscribe();
+    this.painter?.dispose(); this.painter = null;
+    this.listeners.clear();
+    if (editors.get(this.studio) === this) editors.delete(this.studio);
   }
 
   /** The document's sketch changed (an edit here, an undo, somebody else): take it and see how it stands. */
@@ -265,6 +282,7 @@ export class SketchEditor {
   private adopt(id: string, handlers: ToolHandlers, hint: string): void {
     this.handlers.stop?.(this);
     this.closeInput();
+    this.studio.viewport.canvas.style.cursor = id === "select" ? "" : "crosshair";
     this.handlers = handlers; this.preview = null; this.box = null; this.dragData = null;
     this.set({ tool: id, hint, hover: null });
   }
@@ -290,6 +308,9 @@ export class SketchEditor {
     }
     if (ev.key === "Delete" || ev.key === "Backspace") { this.deleteSelection(); return true; }
     if (ev.key === "Tab") return true;   // Tab moves between typed measures; it never takes the keyboard away from the sketch
+    // a sketch tool's key wins over any other tool's while a sketch is open (M is Mirror here, whatever it is outside)
+    const tool = ev.key.length === 1 ? this.studio.tools().find((t) => t.group === "sketch" && !!t.key && t.key.toLowerCase() === ev.key.toLowerCase()) : undefined;
+    if (tool && !(tool.disabled && tool.disabled(this.studio))) { tool.run(this.studio); return true; }
     return false;
   };
 
@@ -345,10 +366,22 @@ export class SketchEditor {
     this.invalidate();
     return true;
   }
+  /**
+   * `drag`, at most once a frame: pointer moves can arrive faster than a large sketch solves, and only the
+   * latest position matters.
+   */
+  dragSoon(targets: DragTarget[]): void {
+    this.pendingDrag = targets;
+    if (this.dragFrame) return;
+    this.dragFrame = requestAnimationFrame(() => { this.dragFrame = 0; const t = this.pendingDrag; this.pendingDrag = null; if (t && this.state.open) this.drag(t); });
+  }
   /** Show a changed sketch without solving or committing it (a dimension's text being moved). */
   showDraft(data: SketchData | null): void { this.dragData = data; this.invalidate(); }
   /** Commit what a drag arrived at (or drop it). */
   endDrag(commit = true): void {
+    if (this.dragFrame) { cancelAnimationFrame(this.dragFrame); this.dragFrame = 0; }
+    const last = this.pendingDrag; this.pendingDrag = null;
+    if (last && commit) this.drag(last);   // the position the pointer was let go at
     const d = this.dragData; this.dragData = null;
     if (d && commit) this.commit(d, { quiet: true }); else this.invalidate();
   }
@@ -413,7 +446,7 @@ export class SketchEditor {
 
   // ---------------------------------------------------------------- drawing
   private paint(): void {
-    if (!this.state.open || !this.painter) return;
+    if (!this.state.open || !this.painter || this.disposed) return;
     const frame = this.frame; if (!frame) { this.painter.clear(); return; }
     const s = this.state, data = this.shown;
     if (this.regionsOf !== data) { this.regionsOf = data; try { this.regions = findRegions(data); } catch { this.regions = null; } }
@@ -462,7 +495,7 @@ function selectTool(ed: SketchEditor): ToolHandlers {
       const p = ed.planePoint(ev); if (!p) return;
       const t = down.target, data = ed.getState().data;
       if (!t) { const a = ed.canvasPoint({ clientX: down.x, clientY: down.y }), b = ed.canvasPoint(ev); ed.setBox({ x0: a.x, y0: a.y, x1: b.x, y1: b.y }); return; }
-      if (t.kind === "point") { if (t.id !== ORIGIN) ed.drag([{ point: t.id, to: p }]); return; }
+      if (t.kind === "point") { if (t.id !== ORIGIN) ed.dragSoon([{ point: t.id, to: p }]); return; }
       if (t.kind === "dimension" && down.label) {
         const c = data.constraints[t.id]; if (!c) return;
         const at: Vec2 = [down.label[0] + p[0] - down.start[0], down.label[1] + p[1] - down.start[1]];
@@ -471,8 +504,8 @@ function selectTool(ed: SketchEditor): ToolHandlers {
       }
       if (t.kind !== "curve") return;
       const e = data.entities[t.id]; if (!e) return;
-      if (e.type === "line") ed.drag([e.a, e.b].filter((pid) => down!.origin[pid]).map((pid) => ({ point: pid, to: [down!.origin[pid][0] + p[0] - down!.start[0], down!.origin[pid][1] + p[1] - down!.start[1]] as Vec2 })));
-      else if (e.type === "circle" || e.type === "arc") { const c = down.origin[e.center]; if (c) ed.drag([{ curve: t.id, radius: Math.max(1e-3, Math.hypot(p[0] - c[0], p[1] - c[1])) }]); }
+      if (e.type === "line") ed.dragSoon([e.a, e.b].filter((pid) => down!.origin[pid]).map((pid) => ({ point: pid, to: [down!.origin[pid][0] + p[0] - down!.start[0], down!.origin[pid][1] + p[1] - down!.start[1]] as Vec2 })));
+      else if (e.type === "circle" || e.type === "arc") { const c = down.origin[e.center]; if (c) ed.dragSoon([{ curve: t.id, radius: Math.max(1e-3, Math.hypot(p[0] - c[0], p[1] - c[1])) }]); }
     },
     up(ev) {
       const d = down; down = null;

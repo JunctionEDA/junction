@@ -9,7 +9,7 @@
 import type { Vec2 } from "../core/geometry";
 import type { SketchData } from "./format";
 import type { Draft } from "./model";
-import { ORIGIN, arcSweep, dist, mid, pointAt, pointsOf, resolveEntity, type Resolved } from "./refs";
+import { ORIGIN, arcSweep, dist, mid, pointAt, resolveEntity, type Resolved } from "./refs";
 
 export type HintKind = "point" | "origin" | "on" | "midpoint" | "horizontal" | "vertical" | "perpendicular" | "tangent" | "parallel";
 export interface Hint { kind: HintKind; at: Vec2 }
@@ -183,7 +183,10 @@ export function relateLine(draft: Draft, line: string, s: Snap): void {
   if (s.tangentTo && draft.data.entities[s.tangentTo]) draft.constrain("tangent", [line, s.tangentTo]);
 }
 
-/** The curves that end on a point. */
+/** The lines and arcs that end on a point (a circle or arc centred on it does not count). */
 export function curvesAt(data: SketchData, point: string): string[] {
-  return Object.keys(data.entities).filter((id) => { const e = data.entities[id]; return e.type !== "point" && pointsOf(e).includes(point) && !(e.type !== "line" && (e as { center: string }).center === point && !((e as { start?: string }).start === point || (e as { end?: string }).end === point)); });
+  return Object.keys(data.entities).filter((id) => {
+    const e = data.entities[id];
+    return (e.type === "line" && (e.a === point || e.b === point)) || (e.type === "arc" && (e.start === point || e.end === point));
+  });
 }
