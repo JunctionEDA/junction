@@ -599,7 +599,7 @@ def _rf_feeds(self, net: str | None = None, impedance: float = 50, min_width: fl
                 else:
                     self.add_item(f'(arc (start {_r(p[1][0])} {_r(p[1][1])}) (mid {_r(p[2][0])} {_r(p[2][1])}) (end {_r(p[3][0])} {_r(p[3][1])}) (width {_r(w)}) (layer "{layer}") (net "{nm}"))')
         self.flush()
-        row = {k: f[k] for k in ("net", "layer", "width", "gap", "impedance", "model", "reference", "voided") if k in f}
+        row = {k: f[k] for k in ("net", "layer", "width", "gap", "impedance", "model", "reference", "voided", "note") if k in f}
         if fence:
             try:
                 rl = self.rules(); dc = (rl.get("net_classes") or {}).get("Default", {})

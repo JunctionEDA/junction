@@ -37,3 +37,11 @@ test("feedWidth finds 50 ohm, wider when the near plane is voided", () => {
   assert.ok(near && Math.abs(near.z - 50) < 1.5, JSON.stringify(near));
   assert.ok(deep && deep.w > near.w * 1.5, `voided ${deep && deep.w} vs ${near.w}`);
 });
+
+test("symmetric stripline matches the closed form within 4%", () => {
+  // Cohn / IPC-2141 for a thin strip centred between planes b apart: Z = 60/sqrt(er) ln(4b / (0.67 pi (0.8w + t)))
+  const h = 0.2, w = 0.15, t = 0.0175, er = 4.2, b = 2 * h + t;
+  const z = feedImpedance({ w, t, gap: 0, dielectrics: [{ th: h, er }], above: [{ th: h, er }], voidHalf: 0, reference: 0, referenceAbove: 0 }, 0.01).z;
+  const ref = 60 / Math.sqrt(er) * Math.log(4 * b / (0.67 * Math.PI * (0.8 * w + t)));
+  assert.ok(Math.abs(z - ref) / ref < 0.04, `solver ${z.toFixed(1)} vs ${ref.toFixed(1)}`);
+});

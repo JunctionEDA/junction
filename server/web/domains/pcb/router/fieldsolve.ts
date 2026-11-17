@@ -12,6 +12,8 @@ export interface FeedSection {
   dielectrics: { th: number; er: number }[];    // from the track's layer downwards, each ending at a copper layer
   voidHalf: number;          // the planes above the reference are cut away within this distance of the centre line (0: none)
   reference: number;         // index of the dielectric under which the reference plane lies (the planes above it are voided)
+  above?: { th: number; er: number }[];          // stripline: the dielectrics from the track's layer upwards, each ending at a copper layer
+  referenceAbove?: number;   // stripline: index of the dielectric above which the upper reference lies (the planes nearer are voided)
 }
 
 interface Field { V: Float64Array; nx: number; ny: number; res: number; half: number; air: number }
@@ -20,9 +22,11 @@ function solveField(s: FeedSection, res: number, withDielectric: boolean): { ene
   // a coarser solution first, as the starting guess: SOR is slow on the long waves, and the coarse grid gets those cheaply
   const coarse = res < 0.03 ? solveField(s, res * 2, withDielectric).f : null;
   const depth = s.dielectrics.slice(0, s.reference + 1).reduce((a, d) => a + d.th, 0);
-  const side = s.gap > 0 ? s.w / 2 + s.gap + Math.max(0.6, 1.2 * depth) : s.w / 2 + Math.max(1.5, 5 * depth);
-  const half = Math.max(side, s.voidHalf + Math.max(0.5, depth));
-  const air = Math.max(0.8, 2 * s.w);
+  const up = s.above && s.above.length ? s.above.slice(0, (s.referenceAbove ?? 0) + 1) : null;
+  const depthUp = up ? s.t + up.reduce((a, d) => a + d.th, 0) : 0, deep = Math.max(depth, depthUp);
+  const side = s.gap > 0 ? s.w / 2 + s.gap + Math.max(0.6, 1.2 * deep) : s.w / 2 + Math.max(1.5, 5 * deep);
+  const half = Math.max(side, s.voidHalf + Math.max(0.5, deep));
+  const air = up ? depthUp + res : Math.max(0.8, 2 * s.w);            // above the track: open air, or the stack up to the upper plane
   const nx = Math.round((2 * half) / res) + 1, ny = Math.round((air + depth + res) / res) + 1;
   const V = new Float64Array(nx * ny), eps = new Float64Array(nx * ny).fill(1), fixed = new Uint8Array(nx * ny);
   const X = (i: number) => -half + i * res, Y = (j: number) => -air + j * res;
@@ -31,15 +35,18 @@ function solveField(s: FeedSection, res: number, withDielectric: boolean): { ene
     const c = coarse.V, n = coarse.nx; V[j * nx + i] = (c[j0 * n + i0] * (1 - fx) + c[j0 * n + i0 + 1] * fx) * (1 - fy) + (c[(j0 + 1) * n + i0] * (1 - fx) + c[(j0 + 1) * n + i0 + 1] * fx) * fy;
   }
   const planes: number[] = []; let acc = 0; for (let k = 0; k <= s.reference; k++) { acc += s.dielectrics[k].th; planes.push(acc); }
+  const planesUp: number[] = []; if (up) { let a = -s.t; for (const d of up) { a -= d.th; planesUp.push(a); } }
   for (let j = 0; j < ny; j++) {
     const y = Y(j);
     let er = 1; if (withDielectric && y >= 0) { let a = 0; er = s.dielectrics[s.dielectrics.length - 1].er; for (const d of s.dielectrics) { if (y < a + d.th) { er = d.er; break; } a += d.th; } }
+    else if (withDielectric && up) { let a = -s.t; er = up[0].er; if (y < a) for (const d of up) { er = d.er; if (y >= a - d.th) break; a -= d.th; } }
     for (let i = 0; i < nx; i++) {
       const x = X(i), id = j * nx + i; eps[id] = er;
       if (i === 0 || j === 0 || i === nx - 1 || j === ny - 1) { fixed[id] = 1; V[id] = 0; continue; }
       if (y >= -s.t - 1e-9 && y <= 1e-9) { if (Math.abs(x) <= s.w / 2 + 1e-9) { fixed[id] = 1; V[id] = 1; continue; } if (s.gap > 0 && Math.abs(x) >= s.w / 2 + s.gap - 1e-9) { fixed[id] = 1; V[id] = 0; continue; } }
       for (let k = 0; k < planes.length; k++) if (Math.abs(y - planes[k]) < res / 2 && (k === planes.length - 1 || Math.abs(x) >= s.voidHalf)) { fixed[id] = 1; V[id] = 0; break; }
       if (y > planes[planes.length - 1]) { fixed[id] = 1; V[id] = 0; }
+      if (up && !fixed[id]) { for (let k = 0; k < planesUp.length; k++) if (Math.abs(y - planesUp[k]) < res / 2 && (k === planesUp.length - 1 || Math.abs(x) >= s.voidHalf)) { fixed[id] = 1; V[id] = 0; break; } if (y < planesUp[planesUp.length - 1]) { fixed[id] = 1; V[id] = 0; } }
     }
   }
   const om = 1.94;
