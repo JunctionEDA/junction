@@ -13,7 +13,7 @@
 //     entry that cannot apply right now (nothing selected, nothing to undo, a view-only visitor) is greyed out.
 //
 // A tool-module action KiCad's menus do not place (CollabTools.<m>.actions) keeps its hotkey and context menu only.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { FPEDIT_MENUS, HOME_MENUS, LINKS, MENUS, MENU_CHECKS, NEEDS_SELECTION, READ_ONLY_OK, SUBMENU_ICONS, type MenuEntry } from "../../domains/pcb/tables";
 import { dispatch, useApp, type AppState, type Editor, type ModuleAction } from "../store";
 import { iconFor, isOn, keyFor, labelFor, runUiAction, unavailable, useAvail, type Avail } from "../../domains/pcb/actions";
@@ -24,6 +24,7 @@ import { usePluginMenus } from "../../domains/pcb/plugins/PluginUi";
 import { PRODUCT_VERSION } from "../../domains/pcb/generated/product-version";
 import { ComboArrow, KIcon, MenuArrow, MenuCheck } from "./Icon";
 import { ICON_URL } from "../brand";
+import { behindTab, frontTabs, subscribeFront } from "../../domains/pcb/editor/pane-tabs";
 
 // ---------------------------------------------------------------- the menu tree
 interface ItemNode { kind: "item"; id: string; label?: string }
@@ -118,10 +119,13 @@ function appEntries(me: AppState["me"], project: AppState["project"], inEditor: 
 /** The project chat's button, beside AI: toggles the Chat pane and counts what has come in since you last looked. */
 function ChatButton() {
   const unread = useApp((s) => (s.chat ? s.chat.unread : 0));
-  const open = useApp((s) => !!s.panes.chat);
+  const panes = useApp((s) => s.panes);
+  useSyncExternalStore(subscribeFront, frontTabs);
+  // shown behind the History tab counts as closed: a press brings it to the front (panes.ts showPane)
+  const open = !!panes.chat && !behindTab("chat", panes);
   return (
     <button type="button" className="chat-btn" id="chatBtn" aria-pressed={open} title={unread ? `Project chat: ${unread} new` : "Project chat: talk with everyone on this project"}
-      onClick={() => dispatch({ type: "showPane", pane: "chat", show: !open })}>
+      onClick={() => dispatch({ type: "showPane", pane: "chat", show: open ? false : undefined })}>
       <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" /></svg>
       Chat
       {unread ? <span className="badge" data-chat-unread="">{unread > 99 ? "99+" : unread}</span> : null}

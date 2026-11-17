@@ -11,6 +11,7 @@ import { renderModuleTools } from "./tools";
 import { UNITS, setRadio } from "./util";
 import { isSch, requestRender } from "./view";
 import { loadUnits, saveUnits, unitsAppFor } from "../../../shared/units";
+import { behindTab, bringToFront } from "./pane-tabs";
 // ================================================================ KiCad frame (the React chrome reads the store)
 // Docked panes: which are open, per editor, remembered in localStorage (kui.panes.<editor>).
 export const PANE_NAMES = ["props", "hier", "filter", "history", "peers", "comments", "chat", "appearance", "search", "netnav", "netinsp", "libtree"];
@@ -50,7 +51,10 @@ export function showPane(name: string, show?: unknown) {
   const ed = editorId();
   if (!PANE_NAMES.includes(name) || (PANE_EDITOR_ONLY[name] && PANE_EDITOR_ONLY[name] !== ed) || (name === "libtree" && E.DOC_TYPE !== "footprint")) return;
   if (name === "filter") return;   // follows the panes it docks with (filterFollows)
+  // a pane shown behind another tab of its dock slot (pane-tabs.ts) comes to the front instead of closing
+  if (show === undefined && behindTab(name, E.panes)) { bringToFront(name); return; }
   const next = show === undefined ? !E.panes[name] : !!show;
+  if (next) bringToFront(name);
   E.panes = Object.assign({}, E.panes, { [name]: next });
   E.panes.filter = filterFollows(E.panes, ed);
   // the project chat is one conversation across the project: open on the schematic, it stays open on the board

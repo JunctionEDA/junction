@@ -255,7 +255,7 @@ function NetsTab() {
   );
 }
 
-const SELECT = "w-full text-sm";
+const SELECT = "flex-1 min-w-0 text-sm";
 // include/dialogs/eda_view_switcher.h: on macOS the physical Control key (WXK_RAW_CONTROL, Cmd+Tab is the system's
 // application switcher) and Option; elsewhere Ctrl and Shift.  APPEARANCE_CONTROLS::rebuildLayerPresetsWidget /
 // rebuildViewportsWidget write the labels with KeyNameFromKeyCode over the form's "Ctrl+Tab" / "Alt+Tab".
@@ -272,15 +272,17 @@ function PresetsAndViewports() {
   const viewport = usePanels((s) => s.appearance.viewport);
   const user = presets.filter((p) => !builtin.includes(p));
   return (
-    <div className="flex-none px-1.5 py-1.5 border-t border-line bg-bench">
-      <div className="mb-0.5" data-label="presets" title={keyName(PRESET_SWITCH_KEY + "+" + PRESET_SWITCH_STEP)}>Presets ({keyName(PRESET_SWITCH_KEY + "+Tab")}):</div>
+    // one row (KiCad stacks two labelled combos; in a narrow dock that footer crowded the layer list out): the
+    // labels are short and their tooltips carry KiCad's labels with the switch keys
+    <div className="flex flex-none items-center gap-1.5 px-1.5 py-1 border-t border-line bg-bench">
+      <span className="flex-none text-ink-2" data-label="presets" title={`Presets (${keyName(PRESET_SWITCH_KEY + "+Tab")}, or ${keyName(PRESET_SWITCH_KEY + "+" + PRESET_SWITCH_STEP)} in a browser)`}>Preset</span>
       {/* rebuildLayerPresetsWidget: the built-in presets, then "---" and the user's own (both alphabetical), then
           "---", Save, Delete; no preset matching what is shown selects that last separator (count - 3) */}
       <Select id="presetSel" className={SELECT} title="Layer presets" value={preset && presets.includes(preset) ? preset : "\u0001sep"}
         options={[...builtin.map((p) => ({ value: p, label: p })), ...(user.length ? [{ value: "\u0001sepUser", label: "---", sep: true }, ...user.map((p) => ({ value: p, label: p }))] : []),
           { value: "\u0001sep", label: "---", sep: true }, { value: "\u0001save", label: "Save preset..." }, { value: "\u0001delete", label: "Delete preset...", disabled: !user.length }]}
         onChange={(v) => { if (v === "\u0001save") pdispatch({ t: "presetSave" }); else if (v === "\u0001delete") pdispatch({ t: "presetDelete" }); else if (v && !v.startsWith("\u0001")) pdispatch({ t: "preset", name: v }); }} />
-      <div className="mt-1.5 mb-0.5" data-label="viewports">Viewports ({keyName(VIEWPORT_SWITCH_KEY + "+Tab")}):</div>
+      <span className="flex-none text-ink-2 ml-1" data-label="viewports" title={`Viewports (${keyName(VIEWPORT_SWITCH_KEY + "+Tab")})`}>View</span>
       {/* rebuildViewportsWidget: the saved viewports, "---", Save, Delete; the separator while none is current */}
       <Select id="viewportSel" className={SELECT} title="Viewports" value={viewport && viewports.includes(viewport) ? viewport : "\u0001sep"}
         options={[...viewports.map((p) => ({ value: p, label: p })),

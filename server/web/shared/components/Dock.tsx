@@ -22,6 +22,8 @@ import { SearchPane } from "./panes/Search";
 import { NetNavigatorPane } from "./panes/NetNavigator";
 import { LibrariesPane } from "./panes/Libraries";
 import { NetInspectorPane } from "./panes/NetInspector";
+import { FilterSummary } from "./panes/SelectionFilter";
+import { bringToFront, frontOf, frontTabs, groupKey, groupOf, subscribeFront } from "../../domains/pcb/editor/pane-tabs";
 
 // ---------------------------------------------------------------- remembered sizes
 interface DockLayout { left?: number; right?: number; bottom?: number; panes: Record<string, number> }
@@ -78,15 +80,25 @@ function dragSash(ev: RPointerEvent, move: (dx: number, dy: number) => void, don
 }
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
 
-// How each pane shares the dock's height until it is resized (was `.kpane[data-pane=…] { flex: … }`).
-const PANE_FLEX: Record<string, string> = { chat: "flex-[4_1_0]", libtree: "flex-[2_1_0]", props: "flex-[2_1_0]", filter: "flex-none", history: "flex-[1.4_1_0]", appearance: "flex-[3_1_0]" };
+// How each pane shares the dock's height until it is resized (was `.kpane[data-pane=…] { flex: … }`).  The Selection
+// Filter keeps its natural height (a fixed grid of check boxes, as in KiCad): it never takes a share or a sash, and
+// only shrinks (scrolling its grid) when the window is too short for everything.
+const PANE_FLEX: Record<string, string> = { "chat+history": "flex-[2.4_1_0]", chat: "flex-[4_1_0]", libtree: "flex-[2_1_0]", props: "flex-[2_1_0]", history: "flex-[1.4_1_0]", appearance: "flex-[3_1_0]" };
+const FIXED = new Set(["filter"]);
+// The least a sash may leave a pane: room for its caption, tabs and fixed footer plus a few rows of its list,
+// so the fixed parts (Appearance's presets row, the chat composer) are never squeezed out of it.
 const MIN_PANE = 46;
+const PANE_MIN: Record<string, number> = { appearance: 170, chat: 130, history: 110, "chat+history": 130, props: 90 };
+const minOf = (name: string) => PANE_MIN[name] || MIN_PANE;
+// In a short window the fixed-height Selection Filter gives way first (its grid scrolls), so Appearance keeps its
+// tabs and presets row and the chat its composer.
+const CSS_MIN: Record<string, number> = { appearance: 150, "chat+history": 110, chat: 110, history: 90 };
 
-/** The sash above a pane: drags the boundary with the visible pane before it. */
+/** The sash above a pane: drags the boundary with the visible, resizable pane before it. */
 function PaneSash({ name, editor }: { name: string; editor: string }) {
   const down = (ev: RPointerEvent) => {
     const me = (ev.currentTarget as HTMLElement).closest<HTMLElement>(".kpane"); const dock = me ? me.parentElement : null; if (!me || !dock) return;
-    const vis = Array.from(dock.querySelectorAll<HTMLElement>(":scope > .kpane")).filter((p) => !p.hidden);
+    const vis = Array.from(dock.querySelectorAll<HTMLElement>(":scope > .kpane")).filter((p) => !p.hidden && !FIXED.has(p.dataset.pane || ""));
     const i = vis.indexOf(me); if (i < 1) return;
     const prev = vis[i - 1], prevName = prev.dataset.pane || "";
     // from here on every visible pane of this dock holds its measured height as its share
@@ -94,50 +106,141 @@ function PaneSash({ name, editor }: { name: string; editor: string }) {
     for (const p of vis) sizes[p.dataset.pane || ""] = p.getBoundingClientRect().height;
     const a0 = sizes[prevName], b0 = sizes[name], total = a0 + b0;
     dragSash(ev, (_dx, dy) => {
-      const a = clamp(a0 + dy, MIN_PANE, total - MIN_PANE);
+      const a = clamp(a0 + dy, Math.min(minOf(prevName), total / 2), Math.max(total - minOf(name), total / 2));
       setLayout(editor, { panes: Object.assign({}, sizes, { [prevName]: a, [name]: total - a }) }, false);
     }, () => setLayout(editor, {}, true));
   };
   return <div className="ksash-h flex-none h-[4px] -mt-[2px] -mb-[2px] relative z-[2] cursor-row-resize hover:bg-blue/40" data-sash={name} onPointerDown={down} />;
 }
 
-function Pane({ name, first, count, children, footer }: { name: string; first: boolean; count?: number; children: ReactNode; footer?: ReactNode }) {
-  const shown = useApp((s) => !!s.panes[name]);
+const CAPTION = "flex flex-none items-center h-5.5 px-1.5 text-sm font-semibold text-ink bg-[linear-gradient(var(--color-paper),var(--color-bench))] border-b border-line select-none";
+const CLOSE = "kx ml-auto w-4 h-4 p-0 inline-flex items-center justify-center border-0 rounded-xs bg-transparent text-ink-2 text-lg font-sans font-normal leading-none hover:bg-err hover:text-white";
+const countId = (name: string) => (name === "peers" ? "peerN" : name === "comments" ? "cmtN" : undefined);
+
+// The Selection Filter folds to its caption (remembered in kui.filterFolded); folded, the caption says what it lets through.
+let filterFolded = (() => { try { return localStorage.getItem("kui.filterFolded") === "1"; } catch (e) { return false; } })();
+const foldSubs = new Set<() => void>();
+function setFilterFolded(on: boolean): void {
+  filterFolded = on;
+  try { localStorage.setItem("kui.filterFolded", on ? "1" : "0"); } catch (e) { /* no storage */ }
+  for (const fn of Array.from(foldSubs)) fn();
+}
+function useFilterFolded(): boolean {
+  return useSyncExternalStore((fn) => { foldSubs.add(fn); return () => { foldSubs.delete(fn); }; }, () => filterFolded);
+}
+
+/** A pane's section: its share of the dock (or its remembered height), the sash above it, and what it holds. */
+function Section({ name, first, shown, className, children }: { name: string; first: boolean; shown: boolean; className?: string; children: ReactNode }) {
   const editor = useApp((s) => s.document.editor) || "x";
-  const size = useLayout(editor).panes[name];
+  const saved = useLayout(editor).panes[name];
+  const size = FIXED.has(name) ? undefined : saved;
+  // overflow-hidden: a pane squeezed below its content clips it instead of drawing over the pane under it
   return (
-    <section className={cx("kpane flex flex-col min-h-0 min-w-0 border-b border-line [&[hidden]]:hidden", size ? "" : PANE_FLEX[name] || "flex-[1_1_0]")} style={size ? { flex: `${Math.round(size)} 1 0px` } : undefined} data-pane={name} hidden={!shown}>
-      {first ? null : <PaneSash name={name} editor={editor} />}
-      <header className="flex flex-none items-center h-5.5 px-1.5 text-sm font-semibold text-ink bg-[linear-gradient(var(--color-paper),var(--color-bench))] border-b border-line select-none">
-        {PANE_TITLES[name] || name}
-        {count !== undefined ? <span className="n ml-1.5 font-normal text-ink-3" id={name === "peers" ? "peerN" : name === "comments" ? "cmtN" : undefined}>{count}</span> : null}
-        {name === "filter" ? null : <button type="button" className="kx ml-auto w-4 h-4 p-0 inline-flex items-center justify-center border-0 rounded-xs bg-transparent text-ink-2 text-lg font-sans font-normal leading-none hover:bg-err hover:text-white" data-pane-close={name} title="Close" aria-label="Close" onClick={() => dispatch({ type: "showPane", pane: name, show: false })}><CloseMark /></button>}
-      </header>
+    <section className={cx("kpane flex flex-col min-h-0 min-w-0 overflow-hidden border-b border-line [&[hidden]]:hidden", FIXED.has(name) ? "flex-[0_1_auto]" : size ? "" : PANE_FLEX[name] || "flex-[1_1_0]", className)}
+      style={Object.assign({}, size ? { flex: `${Math.round(size)} 1 0px` } : {}, CSS_MIN[name] ? { minHeight: CSS_MIN[name] } : {})} data-pane={name} hidden={!shown}>
+      {first || FIXED.has(name) ? null : <PaneSash name={name} editor={editor} />}
       {children}
-      {footer}
     </section>
   );
 }
 
-function PaneFor({ name, first }: { name: string; first: boolean }) {
+function Pane({ name, first, count, children, footer }: { name: string; first: boolean; count?: number; children: ReactNode; footer?: ReactNode }) {
+  const shown = useApp((s) => !!s.panes[name]);
+  const folded = useFilterFolded();
+  const fold = name === "filter";
+  return (
+    <Section name={name} first={first} shown={shown}>
+      <header className={cx(CAPTION, fold && "cursor-default")} onClick={fold ? () => setFilterFolded(!folded) : undefined} data-fold={fold ? (folded ? "closed" : "open") : undefined}
+        title={fold ? (folded ? "Show the Selection Filter" : "Fold the Selection Filter") : undefined}>
+        {fold ? <svg viewBox="0 0 8 8" width="8" height="8" aria-hidden="true" className={cx("mr-1.5 flex-none text-ink-2 transition-transform", !folded && "rotate-90")}><path d="M2 1l4 3-4 3z" fill="currentColor" /></svg> : null}
+        {PANE_TITLES[name] || name}
+        {count !== undefined ? <span className="n ml-1.5 font-normal text-ink-3" id={countId(name)}>{count}</span> : null}
+        {fold ? <span className="ml-auto font-normal text-xs text-ink-3"><FilterSummary /></span>
+          : <button type="button" className={CLOSE} data-pane-close={name} title="Close" aria-label="Close" onClick={() => dispatch({ type: "showPane", pane: name, show: false })}><CloseMark /></button>}
+      </header>
+      {fold && folded ? null : children}
+      {fold && folded ? null : footer}
+    </Section>
+  );
+}
+
+/** What a pane holds below its caption, and its footer. */
+function paneBody(name: string): { body: ReactNode; footer?: ReactNode } | null {
+  switch (name) {
+    case "props": return { body: <PropertiesPane /> };
+    case "hier": return { body: <HierarchyPane /> };
+    case "filter": return { body: <SelectionFilterPane /> };
+    case "history": return { body: <HistoryPane />, footer: <HistoryButtons /> };
+    case "peers": return { body: <CollaboratorsPane /> };
+    case "comments": return { body: <CommentsPane /> };
+    case "chat": return { body: <ChatPane /> };
+    case "appearance": return { body: <AppearancePane /> };
+    case "search": return { body: <SearchPane /> };
+    case "netnav": return { body: <NetNavigatorPane /> };
+    case "netinsp": return { body: <NetInspectorPane /> };
+    case "libtree": return { body: <LibrariesPane /> };
+    default: return null;
+  }
+}
+
+function usePaneCount(name: string): number | undefined {
   const peerN = useApp((s) => s.peers.list.length);
   const cmtN = useApp((s) => s.comments.filter((c) => !c.parentId && !c.resolved).length);
   const chatN = useApp((s) => (s.chat ? s.chat.unread : 0));
-  switch (name) {
-    case "props": return <Pane name={name} first={first}><PropertiesPane /></Pane>;
-    case "hier": return <Pane name={name} first={first}><HierarchyPane /></Pane>;
-    case "filter": return <Pane name={name} first={first}><SelectionFilterPane /></Pane>;
-    case "history": return <Pane name={name} first={first} footer={<HistoryButtons />}><HistoryPane /></Pane>;
-    case "peers": return <Pane name={name} first={first} count={peerN}><CollaboratorsPane /></Pane>;
-    case "comments": return <Pane name={name} first={first} count={cmtN}><CommentsPane /></Pane>;
-    case "chat": return <Pane name={name} first={first} count={chatN || undefined}><ChatPane /></Pane>;
-    case "appearance": return <Pane name={name} first={first}><AppearancePane /></Pane>;
-    case "search": return <Pane name={name} first={first}><SearchPane /></Pane>;
-    case "netnav": return <Pane name={name} first={first}><NetNavigatorPane /></Pane>;
-    case "netinsp": return <Pane name={name} first={first}><NetInspectorPane /></Pane>;
-    case "libtree": return <Pane name={name} first={first}><LibrariesPane /></Pane>;
-    default: return null;
+  return name === "peers" ? peerN : name === "comments" ? cmtN : name === "chat" ? chatN || undefined : undefined;
+}
+
+function PaneFor({ name, first }: { name: string; first: boolean }) {
+  const count = usePaneCount(name);
+  const b = paneBody(name);
+  return b ? <Pane name={name} first={first} count={count} footer={b.footer}>{b.body}</Pane> : null;
+}
+
+const TAB = "ptab relative h-full flex-1 min-w-0 inline-flex items-center justify-center gap-1.5 px-2 bg-transparent border-0 border-b-2 border-b-transparent text-sm font-normal text-ink-2 hover:text-ink on:text-ink on:font-semibold on:border-b-blue on:bg-paper";
+
+/** Panes that share one slot of the dock (pane-tabs.ts): tabs in the caption when more than one is shown, the
+ *  usual caption when one is.  Every member stays mounted; the ones behind are hidden. */
+function TabGroup({ names, first }: { names: string[]; first: boolean }) {
+  const panes = useApp((s) => s.panes);
+  useSyncExternalStore(subscribeFront, frontTabs);
+  const chatN = usePaneCount("chat");
+  const shown = names.filter((n) => panes[n]);
+  const front = frontOf(names, (n) => !!panes[n]);
+  const key = groupKey(names);
+  const tabs = shown.length > 1;
+  return (
+    <Section name={key} first={first} shown={shown.length > 0}>
+      <header className={cx(CAPTION, tabs && "px-0 h-6.5 bg-bench bg-none")} data-tabs={tabs ? key : undefined}>
+        {tabs ? shown.map((n) => (
+          <button type="button" key={n} className={cx(TAB, n === front && "on")} data-ptab={n} aria-selected={n === front} role="tab" onClick={() => bringToFront(n)}>
+            {PANE_TITLES[n] || n}{n === "chat" && chatN ? <span className="n text-ink-3 font-normal">{chatN}</span> : null}
+          </button>
+        )) : <>{front ? PANE_TITLES[front] || front : null}{front === "chat" && chatN ? <span className="n ml-1.5 font-normal text-ink-3">{chatN}</span> : null}</>}
+        {front ? <button type="button" className={cx(CLOSE, tabs && "ml-0 mx-1.5 flex-none")} data-pane-close={front} title={`Close ${PANE_TITLES[front] || front}`} aria-label="Close"
+          onClick={() => dispatch({ type: "showPane", pane: front, show: false })}><CloseMark /></button> : null}
+      </header>
+      {names.map((n) => {
+        const b = paneBody(n);
+        return b ? <div key={n} className="flex flex-col flex-auto min-h-0 [&[hidden]]:hidden" data-pane-tab={n} hidden={n !== front}>{b.body}{b.footer}</div> : null;
+      })}
+    </Section>
+  );
+}
+
+/** The dock's panes in order, a tab group taking the place of its first member. */
+function DockPanes({ names, firstShown }: { names: string[]; firstShown?: string }) {
+  const done = new Set<string>();
+  const out: ReactNode[] = [];
+  for (const n of names) {
+    const g = groupOf(n);
+    if (g && g.every((m) => names.includes(m))) {
+      if (done.has(groupKey(g))) continue;
+      done.add(groupKey(g));
+      const members = g.filter((m) => names.includes(m));
+      out.push(<TabGroup key={groupKey(g)} names={members} first={!!firstShown && members.includes(firstShown)} />);
+    } else out.push(<PaneFor name={n} key={n} first={n === firstShown} />);
   }
+  return <>{out}</>;
 }
 
 function Dock({ side }: { side: "left" | "right" | "bottom" }) {
@@ -159,7 +262,7 @@ function Dock({ side }: { side: "left" | "right" | "bottom" }) {
     return (
       <aside id="dockB" className="kdock relative flex flex-col min-w-0 overflow-hidden bg-bench border-t border-line [&[hidden]]:hidden" style={{ height: h }} hidden={!any}>
         <div className="ksash absolute left-0 right-0 top-0 h-[4px] z-[3] cursor-row-resize hover:bg-blue/40" data-dock-sash="bottom" onPointerDown={down} />
-        {names.map((n) => <PaneFor name={n} key={n} first={n === firstShown} />)}
+        <DockPanes names={names} firstShown={firstShown} />
       </aside>
     );
   }
@@ -195,7 +298,7 @@ function SideDock({ side, ed, names, any, firstShown, w }: { side: Side; ed: str
         hidden={!any || !open}
       >
         <div className={cx("ksash absolute top-0 bottom-0 w-[4px] z-[3] cursor-col-resize hover:bg-blue/40", side === "left" ? "right-0" : "left-0")} data-dock-sash={side} onPointerDown={down} />
-        {names.map((n) => <PaneFor name={n} key={n} first={n === firstShown} />)}
+        <DockPanes names={names} firstShown={firstShown} />
       </aside>
       {narrow && any ? (
         <button type="button" className={cx("kdrawer-tab absolute z-41 top-2 w-4.5 h-12 p-0 flex items-center justify-center bg-bench text-ink-2 border border-line text-xs leading-none hover:text-ink hover:bg-paper",
