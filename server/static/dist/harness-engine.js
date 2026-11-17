@@ -119602,7 +119602,7 @@ function boardSquareCorners(doc2, P, isRf) {
       if (c.kind === "pad" && ANTENNA_REF.test(c.item.ref || "") && !GROUND.test(c.net)) rf.add(c.net);
     }
   }
-  return findSquareCorners(segs, (net, layer4, p) => (cover.get(layer4 + "\n" + net) || []).some((s2) => pointGap(s2, p[0], p[1]) <= 1e-6), (net) => rf.has(net) || RF_NAME.test(net.replace(/^\/(.*\/)?/, "")) || netKind(net) === "rf" || !!(isRf && isRf(net)));
+  return findSquareCorners(segs, (net, layer4, p) => (cover.get(layer4 + "\n" + net) || []).some((s2) => pointGap(s2, p[0], p[1]) <= 1e-6), (net) => rf.has(net) || RF_NAME.test(net.replace(/^\/(.*\/)?/, "")) && netKind(net) === "rf" || netKind(net) === "rf" || !!(isRf && isRf(net)));
 }
 
 // web/domains/pcb/router/fanout.ts
@@ -120095,8 +120095,9 @@ function usualImpedance(net, paired) {
     if (/HDMI|TMDS|ETH|MDI|ENET|RGMII|LVDS|MIPI|DSI|CSI|SATA|TX|RX|TD|RD|CLK|CK/i.test(net)) return 100;
     return 0;
   }
-  return /(^|[\/_\-(])(ANT|ANTENNA|RF|RFIO|RF_?IN|RF_?OUT)([_\-\d)]|$)/i.test(net) ? 50 : 0;
+  return /(^|[\/_\-(])(ANT|ANTENNA|RF|RFIO|RF_?IN|RF_?OUT)([_\-\d)]|$)/i.test(net) && !RF_CONTROL.test(net) ? 50 : 0;
 }
+var RF_CONTROL = /(^|[\/_\-(])(CS|NSS|SS|SCK|SCLK|CLK|MOSI|MISO|SDI|SDO|SDA|SCL|DIO\d*|GPIO\d*|IO\d+|IRQ|INT\d*|RST|RESET|NRST|BUSY|EN|ENABLE|TXD|RXD|CTS|RTS|PWR|SLEEP|WAKE|DATA|D\d+|LED|STATUS|BOOT|SEL|CTRL|CTL)\d*([_\-)]|$)/i;
 
 // web/domains/pcb/router/route.ts
 var STEPS_PER_MS = 12e3;
@@ -120122,7 +120123,7 @@ function netKind(net, paired = /(\+|-|_P|_N)\)?$/.test(net)) {
   const auto = !!m;
   if (auto && /^(Pad)?\d+$/i.test(n2)) return "digital";
   if (/^(GPIO|GP|IO|P[A-Z]?)_?\d+([_.\-]|$)/i.test(n2)) return "digital";
-  if (usualImpedance(net, false) || /^(ANT\d*|RF\w*|ANTENNA)$/i.test(n2) || m && /^(AE|ANT)\d+$/i.test(m[1])) return "rf";
+  if (usualImpedance(net, false) || /^(ANT\d*|RF\w*|ANTENNA)$/i.test(n2) && !RF_CONTROL.test(n2) || m && /^(AE|ANT)\d+$/i.test(m[1])) return "rf";
   if (/(^|[_\-.])(SW|LX|PHASE|PH|BST|SWN|GATE|HG|LG|HDRV|LDRV|UGATE|LGATE)\d*([_\-.]|$)/i.test(n2) && !/SW(D|O|CLK|DIO)/i.test(n2) && (auto || !/^SW\d+$/i.test(n2))) return "switching";
   if (auto && /^(BOOT|CB|BS)$/i.test(n2)) return "switching";
   if (/(^|[_\-.])(AIN|ADC|DAC|VREF|AREF|REF|MIC|AUDIO|AUD|LINE_?IN|LINE_?OUT|HP_?[LR]|SENSE|SNS|ISENSE|ISNS|VSENSE|THERM|NTC|XTAL|XIN|XOUT|XI|XO|XC|XL|OSC_?IN|OSC_?OUT|OSCI|OSCO|COMP|FB|VFB|ANALOG|ANA)[A-Z]?\d*([_\-.+]|$)/i.test(n2)) return "analog";

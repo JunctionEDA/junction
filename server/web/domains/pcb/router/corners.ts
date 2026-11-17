@@ -57,5 +57,5 @@ export function boardSquareCorners(doc: any, P: any, isRf?: (net: string) => boo
     if (c.kind === "segment" && c.shape && c.shape.t === "seg") { for (const l of c.layers) segs.push({ id: c.item.id, net: c.net, layer: l, a: c.shape.a, b: c.shape.b }); }
     else if (c.kind === "pad" || c.kind === "via") { for (const l of c.layers) addCover(c.net, l, c.shape); if (c.kind === "pad" && ANTENNA_REF.test(c.item.ref || "") && !GROUND.test(c.net)) rf.add(c.net); }
   }
-  return findSquareCorners(segs, (net, layer, p) => (cover.get(layer + "\n" + net) || []).some((s) => pointGap(s, p[0], p[1]) <= 1e-6), (net) => rf.has(net) || RF_NAME.test(net.replace(/^\/(.*\/)?/, "")) || netKind(net) === "rf" || !!(isRf && isRf(net)));
+  return findSquareCorners(segs, (net, layer, p) => (cover.get(layer + "\n" + net) || []).some((s) => pointGap(s, p[0], p[1]) <= 1e-6), (net) => rf.has(net) || (RF_NAME.test(net.replace(/^\/(.*\/)?/, "")) && netKind(net) === "rf") || netKind(net) === "rf" || !!(isRf && isRf(net)));
 }
