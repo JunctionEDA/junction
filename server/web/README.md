@@ -16,13 +16,16 @@ web/
     landing/          the public home page and its demos
     onboarding/       first-run guide
     github/           GitHub sync
-    review/           version compare and review
+    review/           version compare and review (a domain's own documents through a renderer it registers)
+    history/          versions, branches and merging for the editor of any document that is not KiCad's
+    mcp/              what a domain hands the headless tool host so an AI assistant can work on its documents
     wakatime/         time tracking
     documents/        how the shell hands a document to a domain's own editor
     doctabs/          the document tabs of an open project
     admin/, styleguide/
   domains/            one folder per kind of design work
     registry.ts       what each domain is, which files it opens and which domains it reads
+    mcp-tools.ts      the domains that bring AI tools of their own (each from its mcp/ folder)
     pcb/              electronics: schematic, symbols, board, footprints, fab, simulation (shipped)
     mechanical/       part studios: sketch, features, history tree, on OpenCascade (in progress; CONTRACT.md)
     assembly/         assemblies: the document and its mate format (a stub)

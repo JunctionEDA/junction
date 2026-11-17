@@ -74428,6 +74428,13 @@ var init_home = __esm({
   }
 });
 
+// web/platform/history/request.ts
+var init_request = __esm({
+  "web/platform/history/request.ts"() {
+    "use strict";
+  }
+});
+
 // web/domains/pcb/editor/versions.ts
 async function call(path2, method = "GET", body) {
   const r = await fetch(path2, { method, credentials: "same-origin", headers: body === void 0 ? {} : { "content-type": "application/json" }, body: body === void 0 ? void 0 : JSON.stringify(body) });
@@ -74581,10 +74588,12 @@ var init_versions = __esm({
     "use strict";
     init_appstore();
     init_doc();
+    init_dochost();
     init_home();
     init_net();
     init_state();
     init_util();
+    init_request();
     app = () => state;
     slice = () => store.get().versions;
     put = (patch) => {

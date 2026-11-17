@@ -54,6 +54,10 @@ export interface StudioState {
   peers: SessionPeer[];
   canUndo: boolean; canRedo: boolean;
   planesVisible: boolean;
+  /** set while an earlier version of the document is on screen (showPast): nothing can be edited meanwhile */
+  past?: { label: string } | null;
+  /** interface state that tools and panels keep for themselves (setUi), by a key of their own */
+  ui?: { readonly [key: string]: unknown };
 }
 
 export const featureDef = (type: string): FeatureDefinition | undefined => FEATURES.find((f) => f.type === type);
@@ -68,6 +72,8 @@ export class PartStudio {
   private regenTimer = 0;
   private fitted = false;
   private closed = false;
+  /** the document on screen in place of the live one, while an earlier version is looked at */
+  private pastDoc: ItemDoc | null = null;
   /** A sketch tool that is drawing gets the keys first; it returns true for the ones it used. */
   keyHandler: ((ev: KeyboardEvent) => boolean) | null = null;
 
@@ -89,7 +95,7 @@ export class PartStudio {
     this.session = new ItemDocSession({
       docId: host.doc.docId, signedIn: host.signedIn, expectKind: PART_STUDIO_KIND,
       onChange: () => this.documentChanged(),
-      onStatus: (status) => { host.setConnection(status.state === "live" ? "live" : status.state === "error" ? "error" : "offline", status.text); this.set({ status, canEdit: status.canEdit }); },
+      onStatus: (status) => { host.setConnection(status.state === "live" ? "live" : status.state === "error" ? "error" : "offline", status.text); this.set({ status, canEdit: status.canEdit && !this.pastDoc }); },
       onPeers: (peers) => this.set({ peers }),
       onNotice: (text) => host.toast(text, 4000),
     });
@@ -104,7 +110,24 @@ export class PartStudio {
     this.state = { ...this.state, ...patch };
     for (const fn of Array.from(this.listeners)) fn();
   }
-  get doc(): ItemDoc | null { return this.session.doc; }
+  get doc(): ItemDoc | null { return this.pastDoc || this.session.doc; }
+  /** Keep a piece of interface state of a tool or a panel; the toolbar and the panels redraw. */
+  setUi(patch: { [key: string]: unknown }): void { this.set({ ui: { ...(this.state.ui || {}), ...patch } }); }
+
+  /**
+   * Show an earlier version of the document in place of the live one (null: the live one again).  The model
+   * is rebuilt from it and nothing can be edited until the live document is back; edits other people make
+   * meanwhile are kept by the session and shown then.
+   */
+  showPast(doc: ItemDoc | null, label = ""): void {
+    if (!doc && !this.pastDoc) return;
+    if (this.state.sketch) this.finishSketch();
+    if (this.state.editing) this.cancelFeature();
+    this.pastDoc = doc;
+    this.select([]);
+    this.set({ past: doc ? { label } : null, canEdit: this.session.status.canEdit && !doc, selectedFeature: null });
+    this.documentChanged();
+  }
   definitions(): readonly FeatureDefinition[] { return FEATURES; }
   tools() { return TOOLS; }
 
@@ -118,14 +141,17 @@ export class PartStudio {
 
   // ---------------------------------------------------------------- the document
   /** Make an edit.  The changes come from document/edits.ts (or are built the same way). */
-  commit(changes: ItemChange[], o: { undoable?: boolean } = {}): boolean { return this.session.commit(changes, o); }
-  undo(): void { if (this.session.undo()) this.host.toast("Undone", 1200); }
-  redo(): void { if (this.session.redo()) this.host.toast("Redone", 1200); }
+  commit(changes: ItemChange[], o: { undoable?: boolean } = {}): boolean {
+    if (this.pastDoc) { this.host.toast("This is an earlier version. Go back to the current one to edit.", 3000); return false; }
+    return this.session.commit(changes, o);
+  }
+  undo(): void { if (!this.pastDoc && this.session.undo()) this.host.toast("Undone", 1200); }
+  redo(): void { if (!this.pastDoc && this.session.redo()) this.host.toast("Redone", 1200); }
 
   private documentChanged(): void {
-    const doc = this.session.doc; if (!doc) return;
+    const doc = this.doc; if (!doc) return;
     const features = featuresOf(doc);
-    const patch: Partial<StudioState> = { loaded: true, features, rollback: rollbackIndex(doc, features), canUndo: this.session.canUndo, canRedo: this.session.canRedo };
+    const patch: Partial<StudioState> = { loaded: true, features, rollback: rollbackIndex(doc, features), canUndo: !this.pastDoc && this.session.canUndo, canRedo: !this.pastDoc && this.session.canRedo };
     // somebody deleted what is open here
     const s = this.state;
     if (s.sketch && !features.some((f) => f.id === s.sketch!.featureId)) { patch.sketch = null; this.view.pointerTool = null; this.view.setOverlay(null); }
@@ -316,6 +342,7 @@ export class PartStudio {
 
   private requireEdit(): boolean {
     if (this.state.canEdit) return true;
+    if (this.pastDoc) { this.host.toast("This is an earlier version. Go back to the current one to edit.", 3000); return false; }
     this.host.toast(this.state.status.role === "commenter" ? "You can comment here, but not edit." : this.host.signedIn ? "You have view-only access to this project." : "Sign in to edit.", 3000);
     return false;
   }

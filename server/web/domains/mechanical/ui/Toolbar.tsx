@@ -25,6 +25,7 @@ export function Toolbar({ studio }: { studio: PartStudio }) {
   useStudio(studio, (s) => s.canUndo); useStudio(studio, (s) => s.canRedo); useStudio(studio, (s) => s.planesVisible);
   useSyncExternalStore(subscribeTools, toolsRevision);   // tools with state of their own (core/tool.ts toolsChanged)
   useStudio(studio, (s) => s.bodies);
+  useStudio(studio, (s) => s.ui); useStudio(studio, (s) => s.past);
 
   const features = studio.definitions().filter((f) => f.toolbar !== false).slice().sort((a, b) => (a.toolbarOrder ?? 1e6) - (b.toolbarOrder ?? 1e6) || a.title.localeCompare(b.title));
   const tools = (group: string): ToolDefinition[] => studio.tools().filter((t) => t.group === group && t.button !== false).slice().sort((a, b) => (a.order ?? 1e6) - (b.order ?? 1e6) || a.title.localeCompare(b.title));
