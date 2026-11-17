@@ -1,5 +1,6 @@
-// UploadDialog.tsx — put a KiCad project online from the browser: pick or drop a project folder,
-// its files, or a .zip.  Only KiCad project files are sent; everything else is listed as left out.
+// UploadDialog.tsx — start a project: put a KiCad project online from the browser (pick or drop a project
+// folder, its files, or a .zip; only KiCad project files are sent, everything else is listed as left out),
+// import one from another EDA tool, or start a blank project, which is empty and opens on its Home tab.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { addProjectFile, createBlank, DEFAULT_LIMITS, NONKICAD_ACCEPT, getLimits, isNonKicadFile, isLocalState, isProjectFile, uploadProject, type MissingFile, type UploadFile, type UploadResult } from "./api";
 import { Ic, Modal, PHONE, useMedia } from "./ui";
@@ -197,9 +198,9 @@ export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy 
       {mode === "blank" ? (
         <>
           <label className="hp-field"><span>Project name</span>
-            <input className="hp-input" autoFocus value={blankName} maxLength={120} placeholder="My board" disabled={creating} onChange={(ev) => setBlankName(ev.target.value)}
+            <input className="hp-input" autoFocus value={blankName} maxLength={120} placeholder="My project" disabled={creating} onChange={(ev) => setBlankName(ev.target.value)}
               onKeyDown={(ev) => { if (ev.key === "Enter") createEmpty(); }} /></label>
-          <p className="hp-note">Starts an empty schematic and board, the same files KiCad makes for File &gt; New Project, and opens it in the editor. You can share it straight away.</p>
+          <p className="hp-note">Starts an empty project and opens its Home tab. From there you add what it needs, as many as you like: PCBs (each a schematic and a board), part studios and assemblies. You can share it straight away.</p>
         </>
       ) : (<>
       <div className={"hp-drop" + (over ? " over" : "") + (files.length ? " has" : "")}

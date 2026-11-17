@@ -98,7 +98,7 @@ try {
   const alice = await open(aliceId, 'asm-ui-alice');
 
   // ---------------------------------------------------------------- a project with two part studios and an assembly
-  const project = await alice.evaluate(async () => (await (await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Assembly UI test' }) })).json()));
+  const project = await alice.evaluate(async () => (await (await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Assembly UI test', template: 'pcb' }) })).json()));
   const pid = project.projectId;
   const newDoc = (page, name, text) => page.evaluate(async ({ pid, name, text }) => {
     const made = await (await fetch(`/api/projects/${pid}/docs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: name }) })).json();

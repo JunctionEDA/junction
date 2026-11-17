@@ -55,7 +55,7 @@ part studio, board, assembly ──read live──▶ instances of an assembly  
 | `shared/itemdoc/sync.ts` | `ItemDocSession`: a live document over the collaboration socket, with undo. |
 | `shared/viewport3d/viewport3d.ts` | `Viewport3D`: canvas, camera, orbit/pan/zoom, standard views, theme colours. |
 | `platform/documents/host.ts` | How the shell hands a document to a domain's editor. |
-| `platform/doctabs/` | The document tabs; `room.ts` is who is on which tab. |
+| `platform/doctabs/`, `platform/projecthome/` | The project shell: the tab bar, the Home tab, what a PCB is (`pcbs.ts`); `room.ts` is who is on which tab. See "Document tabs and the shell". |
 | `platform/history/`, `platform/review/renderers.ts`, `platform/mcp/host.ts` | Version history, Compare, the assistant's tools: what a domain plugs into. |
 | `domains/registry.ts` | Which document kinds exist, which bundle opens them, what a new one contains. |
 | `domains/mechanical/core/` | Contracts: `feature.ts`, `tool.ts`, `geometry.ts`. |
@@ -840,7 +840,9 @@ runs several sessions against a sequencing server in every delivery order and ch
 **The project room** (`platform/doctabs/room.ts`, started by the tabs; `projectRoom()` in `roomapi.ts` for a
 bundle) is who is in the project and on which tab. Presence on the server is per document, so every page opens
 one more socket, joins the project's first four part studios and assemblies (by id) with it, and says there
-which tab the person is on. A project with no part studio or assembly has no room: nobody is shown on its tabs.
+which tab the person is on (a document id, `home`, or `bom:<PCB key>`). The room joins the project's own document
+first (`project.jproj`, see "Document tabs and the shell"), so every project that has one has a room; an older
+project with neither that document, a part studio nor an assembly has none, and nobody is shown on its tabs.
 That the project's documents changed is not the room's business: the server says so (the `docs` notice, under
 "How a change is committed and synced").
 
@@ -857,15 +859,93 @@ still drawn; the presence of a person on a schematic or board tab is their tab o
 
 ## Document tabs and the shell
 
-- `domains/registry.ts` lists the document kinds: `docType`, `ext`, `title`, `icon`, and for kinds a domain's
-  own editor draws, `bundle`, `newName` and `newText`. A new kind of document is an entry there, two lines in
-  `server/src/http.rs` (`doc_type_for`, `allowed_file`) and one in `itemdoc.rs` (`is_item_doc`).
-- The tabs (`platform/doctabs`) show the root schematic, each board, and every document whose kind has
-  `newName`. "+" offers the kinds with `newText`. Rename and delete are offered for those kinds only: a
-  project's schematic and board stay put.
-- Opening a tab dispatches `openDoc`. For a kind with a `bundle`, the shell (`pcb/editor/dochost.ts`) leaves the
-  KiCad document, shows the `cad` view, loads the bundle once, and calls the `DocumentEditorFactory` it
-  registered (`platform/documents/host.ts`):
+A project is a set of **elements**, each one tab: any number of PCBs, part studios and assemblies, after a first
+tab, **Home**, that is always there. Everything else in the project is a file: a library, a 3D model, a STEP
+file, the sheets of a PCB. The shell is `platform/doctabs` (the tab bar and what both it and Home do),
+`platform/projecthome` (Home) and, on the electronics editor's side, `pcb/editor/{dochost,doc,pcbscope}.ts`.
+
+| File | What |
+|---|---|
+| `platform/doctabs/pcbs.ts` | **Which PCBs a project holds and what each one's editor may see.** Pure. Read it first. |
+| `platform/doctabs/elements.ts` | Elements, their order, folders, the rows of Home's tree. Pure. |
+| `platform/doctabs/actions.ts` | Create, rename, duplicate, move, delete (with a few seconds to undo), import: the same ones for the bar and for Home. |
+| `platform/doctabs/api.ts`, `server/src/shell.rs` | The requests, and the routes that answer them. |
+| `platform/doctabs/shell.ts`, `useshell.ts` | The project's own document, live; the project as the React parts read it (`useProjectShell()`). |
+| `platform/doctabs/DocTabs.tsx`, `platform/projecthome/ProjectHome.tsx` | The bar (with the tab manager and "+"); Home. |
+| `pcb/editor/pcbscope.ts` | The PCB the schematic and board editor is on, and what keeps it inside that PCB. |
+| `pcb/parts/bomview.ts` | A PCB's bill of materials as a view. |
+
+### Elements, and what a PCB is
+
+- `domains/registry.ts` lists the document kinds: `docType`, `ext`, `title`, `icon`, `tint`, and for kinds a
+  domain's own editor draws, `bundle`, `newName` and `newText`. A new kind of document is an entry there, two
+  lines in `server/src/http.rs` (`doc_type_for`, `allowed_file`) and one in `itemdoc.rs` (`is_item_doc`). It then
+  has a tab, a row on Home, a place in "+" and in Home's create buttons, with nothing else to write.
+  `PCB_ELEMENT` in the same file describes the one kind of element that is more than one document.
+- **A PCB is a KiCad project in a folder of its own**: `<name>/<name>.kicad_pro`, `.kicad_sch`, `.kicad_pcb`, its
+  other sheets, its `fp-lib-table`, its libraries. Its name is the folder's. The folder is a valid KiCad project
+  on disk and in a GitHub repository. `POST /api/projects/{id}/pcbs` makes one; renaming, moving, copying and
+  deleting a PCB are folder operations (`/folders/move`, `/duplicate`, `/folders/delete`), and a rename or a
+  copy gives the PCB's own three files the new name (`shell.rs` `restem`), so a board is always called what its
+  PCB is called wherever boards are listed by file name (the assembly's Insert, a part studio's Board feature
+  and board link).
+- **A project from before** (KiCad's files at the project's root) is one PCB whose folder is the root. Nothing
+  about it changes and nothing is added to it: its editor gets the very document list it always got, it opens on
+  its root schematic, and the shell does not offer to rename, move or delete it. More PCBs can be added beside it.
+- Which document belongs to which PCB (`pcbsOf`): the PCB whose folder is the longest that contains it. A
+  schematic or board outside every PCB folder rides with the project's only PCB, or, when there are several,
+  makes a PCB at the root. A part studio, a model or a library outside every PCB folder belongs to none.
+- A PCB's `key` is the id of its project file: it survives a rename, and is what the tab order and
+  `bom:<key>` are keyed by.
+
+### One PCB at a time: how the editor is kept inside it
+
+The schematic and board editor finds "the" project file, root sheet, board, rules and library tables by
+looking through the project's documents, in more than a hundred places, and remembers a good deal per project.
+Pairing a schematic with another PCB's board would be silent and serious, so the rule is structural:
+
+- `state.project.docs` (and `state.docs`, and `store.project.docs`) is the **scoped view**: the documents of the
+  bound PCB and of no other, with paths relative to its folder, plus what belongs to no PCB at `../…`
+  (`scopedDocs`). Inside it, `fp-lib-table` is the PCB's own and `${KIPRJMOD}` is the PCB's folder.
+  `state.project.allDocs` is the whole project with real paths: **shell code and other domains read `allDocs`**
+  (`DocumentHostContext.docs` is `allDocs`). Document ids are the same in both.
+- The editor names files it makes as it sees them. `installPathScope` wraps `fetch` for exactly two requests
+  (`POST /api/projects/{id}/docs`, `PATCH /api/docs/{id}`) and puts the folder in front of `path` on the way out
+  and takes it off the answer. Shell code sends real paths through `rawFetch()` (`platform/documents/rawfetch.ts`).
+  A new project-level request that carries a path needs the same treatment there.
+- **One PCB per page.** Opening a document of another PCB than the one this page has bound loads the page again
+  at that document (`bindPcb` answers `"reload"`), and so does the bound PCB being renamed under the page.
+  Moving between the views of one PCB, or between a PCB and a part studio, an assembly or Home, stays in the
+  page. This costs a second when switching PCBs and removes a class of stale-cache bugs; lifting it means
+  auditing every per-project cache of the editor.
+- The assistant's electronics tools are narrowed the same way (`pcb/mcp/host.ts` `scopeToPcb`): a call names its
+  PCB in `document` (`"Motor driver/board"`, or a path as `get_project` lists it); one that names none works on
+  the PCB used last and says so in its result (`pcb`, `pcbs`). The other domains' tools see the whole project.
+- Server routes that pick a board or schematic for a whole project (`preview.svg`, `first-doc`) only choose a
+  picture or a first guess the editor checks; `board-items` takes `?doc=`.
+
+### Tabs
+
+- The bar shows Home, then one tab per element in the project's order. A PCB's tab holds its views:
+  **Schematic** (any sheet of it; a caret lists the sheets when there are several), **Board** (one per board),
+  **BOM**, and, on the board, **3D** and **Outputs** (the 3D viewer and the fabrication outputs, which are the
+  board editor's own dialogs). The views show on the open PCB's tab, and always in a project with one PCB.
+- A tab id is what `openDoc` takes, what the address carries (`/p/<project>/edit?doc=<id>`) and what the room
+  says: a document id, `home`, or `bom:<PCB key>`. A link to a sheet or board opens its PCB on that view. With
+  no `doc`, a project with a PCB at its root opens on that PCB's root schematic and any other project on Home.
+- Home and the BOM are opened like documents: `dochost.ts` gives the `cad` view to the editor registered for
+  `@home` (`ProjectHome.tsx`) or `@bom` (`bomview.ts`). A view of the shell's own is a `registerDocumentEditor`
+  with a doc type that starts with `@` and no bundle.
+- Each sheet and board remembers where it was being looked at (`doc.ts` `viewMemo`), for the page's life.
+- **The project's own document**, `project.jproj` (type `project_shell`, a JSON item document like a part studio),
+  holds what is shared about the shell: `{ id: "tab:<key>", type: "tab", order }` for each tab somebody placed,
+  and `{ id: "folder:<uuid>", type: "folder", path }` for a folder that is still empty. A blank project is made
+  with it; an older project gets it the first time somebody reorders a tab or makes a folder (`POST …/shell`).
+  It is also what the project room joins first, so every project that has it shows who is on which tab.
+- Folders are paths. A part studio in `Enclosure/` is `Enclosure/Lid.jpart`; tabs of one folder stand together
+  in the bar behind the folder's name. A PCB's own folder is not a folder to put things in.
+- Opening a hosted kind: the shell leaves the KiCad document, shows the `cad` view, loads the bundle once, and
+  calls the `DocumentEditorFactory` it registered (`platform/documents/host.ts`):
 
 ```ts
 registerDocumentEditor({
@@ -876,9 +956,31 @@ registerDocumentEditor({
 });
 ```
 
-- The address is `/p/<project>/edit?doc=<document id>` for every kind.
 - The menu bar shows the project name and role in the `cad` view and no KiCad menus. A domain that needs menus
   should get them through an interface on the menu bar, not by importing into `shared/` (see the roadmap).
+
+### Testing the shell
+
+`node static/tests/project-shell.test.js` covers the model: PCBs and the scoped view (including "no PCB's editor
+sees another's files"), paths both ways, binding, tab order, Home's tree, what dropped files become.
+`cargo test shell` covers the folder routes' planning. `scripts/shell-ui.mjs` is two people in the browser: a
+blank project, two PCBs, a part studio and an assembly, an imported KiCad folder, the views of a PCB, **Update PCB
+from Schematic in one PCB leaving the other's board alone**, reorder, rename, duplicate, folders, the tab manager,
+delete and undo, deep links, and a project from before. Its header says how to start the server for it
+(`KC_LIBS_FOOTPRINTS_URL=$PWD/scripts/fixtures/shell-ui/footprints`). `scripts/shell-mcp.mjs` calls the
+assistant's tools over `/mcp` in a project with two PCBs: each reads and edits the PCB it names and no other.
+
+### Not done
+
+- Opening another PCB reloads the page (above). Deleting is undone within six seconds or not at all: the server
+  deletes a document with its history.
+- A PCB at the project's root cannot be renamed, moved, duplicated or deleted from the shell.
+- Home's rows are dragged onto folders; tab order is changed in the tab bar, not on Home.
+- A project from before has no room (nobody is shown on its tabs) until it has the project's own document, a
+  part studio or an assembly.
+- The desktop app sees a multi-PCB project as folders of KiCad projects; it has not been taught to pick one.
+- GitHub sync carries the folders as they are (paths are paths to it); it has not been run against a project
+  with several PCBs.
 
 ## Boards (`board/`, `boardlink/`, `../pcb/mech/`)
 
@@ -1079,7 +1181,8 @@ from page load to the model on screen 14.4 s and 7.0 s.
 - **Collaboration.** Edits merge per path, last writer wins; two direct commits to one parameter: the later one
   wins, silently. No lock on a feature someone else has open, by design. Not done: a thread on a sketch entity
   or an assembly instance; mentions; a pin hidden behind the model is still drawn. Who is on which tab is only
-  shown in projects that have a part studio or an assembly.
+  shown in projects that have the project's own document (every project made blank, and any project once a tab
+  was reordered or a folder made), a part studio or an assembly.
 - **Merging** keeps the journal's rule that a delete beats a modify: a conflict "removed here, changed there"
   resolved for the changed side keeps the item only on the side that still has it. Arrays merge as one value.
 - **The assistant's picture** (`cad_render_view`) is a software render: flat shading, no sketches or planes.

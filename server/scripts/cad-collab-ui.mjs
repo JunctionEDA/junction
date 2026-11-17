@@ -126,7 +126,7 @@ try {
   const aliceId = user('collab-alice', 991001, 'Alice Liddell'), bobId = user('collab-bob', 991002, 'Bob Stone'), carolId = user('collab-carol', 991003, 'Carol Reed');
   const alice = await open(aliceId, 'collab-alice');
   const project = await alice.evaluate(async () => {
-    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'CAD collab test' }) });
+    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'CAD collab test', template: 'pcb' }) });
     return { status: r.status, body: await r.json().catch(() => null) };
   });
   const pid = project.body.projectId;
@@ -413,7 +413,9 @@ try {
   await section('tabs', async () => {
     await withCarol();
     const tabNames = (page) => page.$$eval('#doctabs [role=tab]', (els) => els.map((e) => e.querySelector('.truncate').textContent.trim()).join());
-    check('Carol opens the project on the schematic', /^Schematic,Board,Part Studio 1$/.test(await tabNames(carol)), await tabNames(carol));
+    // (one tab per element: Home, the PCB with its views inside it, the part studio)
+    const openTabs = (page) => page.$$eval('#doctabs [role=tab][aria-selected=true]', (els) => els.map((e) => e.querySelector('.truncate').textContent.trim()).join());
+    check('Carol opens the project on the schematic', /^Home,CAD_collab_test,Schematic,Board,BOM,Part Studio 1$/.test(await tabNames(carol)) && (await openTabs(carol)) === 'CAD_collab_test,Schematic', `${await tabNames(carol)} / open: ${await openTabs(carol)}`);
     const on = (page, type) => page.evaluate((type) => document.querySelector(`#doctabs [role=tab][data-doc-type=${type}] [data-tab-people]`)?.getAttribute('data-tab-people') || '', type);
     check('her tabs show who is in the part studio', await until(carol, () => (document.querySelector('#doctabs [role=tab][data-doc-type=part_studio] [data-tab-people]')?.getAttribute('data-tab-people') || '').split(' ').sort().join() === 'collab-alice,collab-bob'), await on(carol, 'part_studio'));
     check('and theirs show her on the schematic', await until(alice, () => document.querySelector('#doctabs [role=tab][data-doc-type=kicad_sch] [data-tab-people]')?.getAttribute('data-tab-people') === 'collab-carol'), await on(alice, 'kicad_sch'));
