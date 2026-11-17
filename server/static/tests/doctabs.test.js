@@ -1,5 +1,6 @@
-// Node test for the document tabs' pure parts (web/platform/doctabs/api.ts) and the domain registry's document
-// kinds (web/domains/registry.ts): which documents get a tab and in what order, new names, renames.
+// Node test for the document tabs' pure parts (web/platform/doctabs/api.ts, elements.ts) and the domain registry's
+// document kinds (web/domains/registry.ts): which elements get a tab and in what order, new names, renames.
+// The project shell's own model (several PCBs, folders, tab order) is in project-shell.test.js.
 // Run: node server/static/tests/doctabs.test.js
 "use strict";
 const test = require("node:test");
@@ -20,12 +21,17 @@ const docs = [
   { docId: "step", path: "case.step", docType: "model3d" },
 ];
 
-test("tabs: the root schematic, the board, then part studios and assemblies by name; libraries and models have none", () => {
-  const tabs = A.tabsOf(docs, "root");
-  assert.deepEqual(tabs.map((t) => `${t.label}=${t.doc.docId}`), ["Schematic=root", "Board=pcb", "Part Studio 2=p2", "Part Studio 10=p10", "Product=asm"]);
-  // two boards are told apart by their file names
-  const two = A.tabsOf([...docs, { docId: "pcb2", path: "panel.kicad_pcb", docType: "kicad_pcb" }], "root");
-  assert.deepEqual(two.filter((t) => t.doc.docType === "kicad_pcb").map((t) => t.label), ["amp", "panel"]);
+test("tabs: one per element (a PCB with its schematic and board inside it, then part studios and assemblies by name); libraries and models have none", () => {
+  const E = load("platform/doctabs/elements.ts");
+  const tabs = E.elementsOf(docs, "Amplifier");
+  assert.deepEqual(tabs.map((t) => `${t.title}:${t.name}=${t.key}`), ["PCB:amp=pro", "Part Studio:Part Studio 2=p2", "Part Studio:Part Studio 10=p10", "Assembly:Product=asm"]);
+  // the PCB's views: its root sheet (the sheets under it), its board
+  assert.equal(tabs[0].pcb.schematic.docId, "root");
+  assert.deepEqual(tabs[0].pcb.sheets.map((d) => d.docId), ["root", "sub"]);
+  assert.deepEqual(tabs[0].pcb.boards.map((d) => d.docId), ["pcb"]);
+  // two boards in one KiCad project: the one named like the project first, both views of the one PCB tab
+  const two = E.elementsOf([...docs, { docId: "pcb2", path: "panel.kicad_pcb", docType: "kicad_pcb" }], "Amplifier");
+  assert.deepEqual(two.filter((t) => t.pcb).map((t) => t.pcb.boards.map((d) => d.path)), [["amp.kicad_pcb", "panel.kicad_pcb"]]);
 });
 
 test("the registry says which kinds can be created, which bundle opens them and what a new one holds", () => {
