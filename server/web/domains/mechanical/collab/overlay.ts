@@ -302,8 +302,11 @@ export class PeerOverlay {
       obj.stalk.visible = !!at && !!cam;
       if (at && cam) {
         const back = new THREE.Vector3(0, 0, 1).applyQuaternion(new THREE.Quaternion(cam.q[0], cam.q[1], cam.q[2], cam.q[3]));
-        obj.stalk.geometry.dispose();
-        obj.stalk.geometry = new THREE.BufferGeometry().setFromPoints([at, at.clone().addScaledVector(back, 34 * px)]);
+        const end = at.clone().addScaledVector(back, 34 * px);
+        let pos = obj.stalk.geometry.getAttribute("position") as THREE.BufferAttribute | undefined;
+        if (!pos) { pos = new THREE.BufferAttribute(new Float32Array(6), 3); obj.stalk.geometry.setAttribute("position", pos); }
+        pos.setXYZ(0, at.x, at.y, at.z); pos.setXYZ(1, end.x, end.y, end.z);
+        pos.needsUpdate = true;
       }
       // a view that is one's own, near enough, would only draw one's own window's edge
       obj.view.visible = obj.viewOn && !!cam && !this.sameView(cam);
