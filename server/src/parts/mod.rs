@@ -718,6 +718,11 @@ async fn model_bytes(state: &AppState, uuid: &str) -> AppResult<Vec<u8>> {
 }
 
 /// GET /api/parts/model.step?vendor=&id=
+///
+/// The STEP file is the vendor's own, in its own frame; `X-Model-Offset` and `X-Model-Rotate` ("x,y,z", millimetres and
+/// degrees as a KiCad (model …) entry writes them) say where it sits on the footprint the vendor's data describes, so a
+/// footprint that names the part's model by another path (easyeda2kicad's ${EASYEDA2KICAD}/….3dshapes, with the offset
+/// baked into its own copy) can still be drawn with it.
 pub async fn get_model(State(state): State<AppState>, AuthUser(user): AuthUser, Query(q): Query<PartQuery>) -> AppResult<Response> {
     let vendor = check_vendor(&q.vendor)?;
     let id = clean_id(vendor, &q.id)?;
@@ -729,11 +734,14 @@ pub async fn get_model(State(state): State<AppState>, AuthUser(user): AuthUser, 
     let model = d.conv.footprint.and_then(|f| f.model).ok_or(AppError::NotFound)?;
     let bytes = model_bytes(&state, &model.uuid).await?;
     let name = easyeda::lib_name(if model.title.is_empty() { &id } else { &model.title });
+    let xyz = |v: [f64; 3]| v.iter().map(|n| format!("{n}")).collect::<Vec<_>>().join(",");
     Ok((
         [
             (header::CONTENT_TYPE, "model/step".to_string()),
             (header::CONTENT_DISPOSITION, format!("attachment; filename=\"{name}.step\"")),
             (header::CACHE_CONTROL, "private, max-age=86400".to_string()),
+            (header::HeaderName::from_static("x-model-offset"), xyz(model.offset)),
+            (header::HeaderName::from_static("x-model-rotate"), xyz(model.rotate)),
         ],
         bytes,
     )
