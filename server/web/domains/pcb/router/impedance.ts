@@ -65,5 +65,7 @@ export function widthFor(tr: Trace, target: number, s?: number): number | null {
  *  100 Ω; antenna and RF feeds 50 Ω single-ended.  0 when the name says nothing. */
 export function usualImpedance(net: string, paired: boolean): number {
   if (paired) { if (/USB|(^|[\/_(])D[+\-PM]\)?$/i.test(net)) return 90; if (/HDMI|TMDS|ETH|MDI|ENET|RGMII|LVDS|MIPI|DSI|CSI|SATA|TX|RX|TD|RD|CLK|CK/i.test(net)) return 100; return 0; }
-  return /(^|[\/_\-(])(ANT|ANTENNA|RF|RFIO|RF_?IN|RF_?OUT)([_\-\d)]|$)/i.test(net) ? 50 : 0;
+  return /(^|[\/_\-(])(ANT|ANTENNA|RF|RFIO|RF_?IN|RF_?OUT)([_\-\d)]|$)/i.test(net) && !RF_CONTROL.test(net) ? 50 : 0;
 }
+/** A radio module's control and data lines (RF_CS, RF_SCK, RF_DIO0, LORA_RST, ...): named after the radio, but logic, not a feed. */
+export const RF_CONTROL = /(^|[\/_\-(])(CS|NSS|SS|SCK|SCLK|CLK|MOSI|MISO|SDI|SDO|SDA|SCL|DIO\d*|GPIO\d*|IO\d+|IRQ|INT\d*|RST|RESET|NRST|BUSY|EN|ENABLE|TXD|RXD|CTS|RTS|PWR|SLEEP|WAKE|DATA|D\d+|LED|STATUS|BOOT|SEL|CTRL|CTL)\d*([_\-)]|$)/i;

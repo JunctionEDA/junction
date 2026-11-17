@@ -140,7 +140,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     if want > len(self.info().get("copper_layers") or []) and not reroute:
         step("layers", lambda: self.layers(want, planes=list(INNER_GROUND) if want >= 4 else None))
     if not reroute:
-        step("stackup", lambda: self.stackup(fab=fab, **rec))
+        step("stackup", lambda: self.stackup(fab=fab, rules=not keep_rules, **rec))
     if place:
         # a board laid out before is laid out again from its parts: its old copper comes up first, so a second run of
         # the script needs no board.clear() (what comes out the same is left alone when the plan is drawn)
@@ -179,7 +179,9 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         copper = self.info().get("copper_layers") or ["F.Cu", "B.Cu"]
         names = [c if isinstance(c, str) else c.get("name") for c in copper]
         for layer in names:
-            if layer in ("F.Cu", "B.Cu") or layer in INNER_GROUND or len(names) > 4:
+            inner = [x for x in names if x.startswith("In")]
+            # four layers: both inner layers ground; six and up: the inner layer next to each outer one, the middle ones left for power and signals
+            if layer in ("F.Cu", "B.Cu") or (len(names) <= 4 and layer in INNER_GROUND) or (len(names) > 4 and inner and layer in (inner[0], inner[-1])):
                 step(f"zone {layer}", lambda layer=layer: self.zone("GND", layer=layer, connect="solid" if layer.startswith("In") else "thermal"))
     if not reroute:
         step("corners", self.round_corners)      # board corners are always rounded
@@ -261,6 +263,10 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             s = step("silkscreen", lambda: self.silkscreen(name=name, rev=rev))
             if s and s.get("hidden"):
                 out["silk_hidden"] = s["hidden"]
+    if route:
+        dropped = step("bad stitches", lambda: _drop_bad_stitches(self))      # a stitching or fence via the later passes routed against
+        if dropped:
+            out.setdefault("added", {})["stitches_dropped"] = dropped
     step("thermals", self.fix_thermals)      # a relief the last tracks left with too few spokes joins its pour solidly
     fit = None if reroute else step("3d models", self.align_models)   # every model's pins on its pads (pin 1 and the farthest pad), turned when not
     if fit and (fit.get("turned") or fit.get("misaligned")):
@@ -385,6 +391,29 @@ def _reasoning(self, plan: dict, clusters: dict, got: dict) -> list:
     for u in got.get("unrouted") or []:
         lines.append(f"Open: {u}")
     return lines
+
+
+def _drop_bad_stitches(self) -> int:
+    """Ground vias with no track of their own (stitching, fences) that a rules error now sits on: taken out, since the
+    router's later passes may have laid tracks past them and a stitch is worth less than a clean board."""
+    gone = 0
+    for v in self._call("run_checks").get("violations", []):
+        if v.get("severity") != "error" or v.get("code") not in ("clearance", "shorting_items", "hole_clearance", "copper_edge_clearance", "tracks_crossing", "hole_to_hole"):
+            continue
+        items = self.whats_at((v["x"], v["y"]), radius=0.5)
+        for it in items:
+            if it.get("kind") != "via" or not re.fullmatch(r"/?(A|D|P)?(GND|VSS)\w*", it.get("net") or "", re.I):
+                continue
+            at = it.get("at") or [v["x"], v["y"]]
+            own = [t for t in self.whats_at(at, radius=float((it.get("size")[0] if isinstance(it.get("size"), list) else it.get("size")) or 0.5) / 2) if t.get("kind") in ("track", "segment", "arc") and t.get("net") == it.get("net")]
+            if own:
+                continue
+            with contextlib.suppress(HarnessError):
+                self.remove(it["id"]); gone += 1
+            break
+    if gone:
+        self.flush()
+    return gone
 
 
 def _has_ground(self) -> bool:

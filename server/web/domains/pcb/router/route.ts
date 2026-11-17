@@ -11,7 +11,7 @@ const BUNDLE_COST = 0.3;
 import { TRAINED, Weights } from "./weights";
 import { cornerAngle, SQUARE_MAX } from "./corners";
 import { fanout, padRows, type Boxed, type Escape, type FanJob } from "./fanout";
-import { stackupOf, traceOn, usualImpedance, widthFor, z0, zdiff } from "./impedance";
+import { stackupOf, traceOn, usualImpedance, RF_CONTROL, widthFor, z0, zdiff } from "./impedance";
 /** Hole clearance is kept with this much to spare: a diagonal track on the grid can come a few microns closer to a
  *  via's hole than its grown cell says (Cyberboard: 0.2419 mm against a 0.25 mm rule). */
 export const HOLE_SLACK = 0.012;
@@ -54,7 +54,7 @@ export function netKind(net: string, paired = /(\+|-|_P|_N)\)?$/.test(net)): Net
   const m = /^Net-\((.+)-([^-]+)\)$/.exec(net); const n = m ? m[2] : net.replace(/^.*\//, ""); const auto = !!m;
   if (auto && /^(Pad)?\d+$/i.test(n)) return "digital";
   if (/^(GPIO|GP|IO|P[A-Z]?)_?\d+([_.\-]|$)/i.test(n)) return "digital";   // a general-purpose pin broken out, whatever else it can do
-  if (usualImpedance(net, false) || /^(ANT\d*|RF\w*|ANTENNA)$/i.test(n) || (m && /^(AE|ANT)\d+$/i.test(m[1]))) return "rf";
+  if (usualImpedance(net, false) || (/^(ANT\d*|RF\w*|ANTENNA)$/i.test(n) && !RF_CONTROL.test(n)) || (m && /^(AE|ANT)\d+$/i.test(m[1]))) return "rf";
   if (/(^|[_\-.])(SW|LX|PHASE|PH|BST|SWN|GATE|HG|LG|HDRV|LDRV|UGATE|LGATE)\d*([_\-.]|$)/i.test(n) && !/SW(D|O|CLK|DIO)/i.test(n) && (auto || !/^SW\d+$/i.test(n))) return "switching";
   if (auto && /^(BOOT|CB|BS)$/i.test(n)) return "switching";
   if (/(^|[_\-.])(AIN|ADC|DAC|VREF|AREF|REF|MIC|AUDIO|AUD|LINE_?IN|LINE_?OUT|HP_?[LR]|SENSE|SNS|ISENSE|ISNS|VSENSE|THERM|NTC|XTAL|XIN|XOUT|XI|XO|XC|XL|OSC_?IN|OSC_?OUT|OSCI|OSCO|COMP|FB|VFB|ANALOG|ANA)[A-Z]?\d*([_\-.+]|$)/i.test(n)) return "analog";
