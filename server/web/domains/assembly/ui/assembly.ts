@@ -199,6 +199,7 @@ export class AssemblyEditor {
       if (!f || !piece) return null;
       return piece.transform ? frameInWorld(poseOf(piece.transform), f) : f;
     },
+    centre: (instance) => this.localCentre(instance),
   };
 
   private queueRefresh(): void {
