@@ -26,6 +26,11 @@ function findFace(ctx: ServiceContext, ref: GeomRef): { body: Body; shape: Shape
 
 function planeFrame(ctx: ServiceContext, plane: PlaneRef): Frame {
   if (plane.kind === "plane") { const p = DEFAULT_PLANES[plane.plane]; if (!p) throw lost("The board's plane is not a plane of this part studio."); return p.frame; }
+  if (plane.kind === "datum") {   // a reference plane feature
+    const d = ctx.state.datums && ctx.state.datums[plane.feature];
+    if (!d || d.kind !== "plane" || !d.frame) throw lost("The reference plane the board lies on is missing, suppressed or failed.");
+    return d.frame;
+  }
   const f = ctx.k.faceFrame(findFace(ctx, plane.ref).shape as Any);
   if (!f) throw lost("The face the board lies on is no longer flat.");
   return f;
