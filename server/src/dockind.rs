@@ -78,6 +78,7 @@ const KINDS: &[(&str, DocKind)] = &[
     ("kicad_pcb", DocKind { name: "board", ..KICAD_DESIGN }),
     ("part_studio", DocKind { name: "part studio", ..ITEM_DOC }),
     ("assembly", DocKind { name: "assembly", ..ITEM_DOC }),
+    ("project_shell", DocKind { name: "project", thumbnail: false, ..ITEM_DOC }),
     ("kicad_pro", DocKind { name: "project file", ..PLAIN_FILE }),
     ("symbol_lib", DocKind { name: "symbol library", ..SEXPR_FILE }),
     ("footprint", DocKind { name: "footprint", ..SEXPR_FILE }),

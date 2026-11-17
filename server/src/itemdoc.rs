@@ -20,7 +20,7 @@ use serde_json::{Map, Value};
 
 /// The document types stored as JSON item documents.
 pub fn is_item_doc(doc_type: &str) -> bool {
-    matches!(doc_type, "part_studio" | "assembly")
+    matches!(doc_type, "part_studio" | "assembly" | "project_shell")
 }
 
 /// Apply one change to the items (keyed by id).
