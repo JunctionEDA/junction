@@ -2366,6 +2366,9 @@ class Board(_Doc):
         parts = {p["ref"]: p for p in self.geometry()["parts"]}
         done = set()
         for k in range(passes):
+            if k and self.info()["unrouted_connections"] >= before:
+                tried.append(f"pass {k + 1} skipped: pass {k} freed nothing, so a wider radius would not either")
+                break
             rows = [v for v in self._call("run_checks").get("violations", []) if v.get("code") == "unconnected_items"]
             for v in rows:
                 m = re.search(r"net '((?:[^'\\]|\\.)*)'", v.get("message", ""))
