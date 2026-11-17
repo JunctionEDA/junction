@@ -7,13 +7,14 @@
 // and a part studio is a tab switch and nothing else.
 //
 //   click opens · double-click or the menu renames · the menu deletes (documents the tabs created; a project's
-//   schematic and board stay put) · "+" adds a part studio or an assembly
+//   schematic and board stay put) · "+" adds a part studio or an assembly, or opens a file a kind can be made from
+//   (a STEP file opens as a part studio that imports it) · such a file dropped on the tabs does the same
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DOCUMENT_KINDS, type DocumentKind } from "../../domains/registry";
 import { askConfirm } from "../../shared/components/msgbox";
 import { dispatch, useApp, type DocEntry } from "../../shared/store";
 import { cx } from "../../shared/util";
-import { createDocument, deleteDocument, fetchDocs, renameDocument, renamedPath, tabsOf, type Tab } from "./api";
+import { createDocument, deleteDocument, documentFromFile, fetchDocs, kindForFile, renameDocument, renamedPath, tabsOf, type Tab } from "./api";
 
 function Glyph({ svg }: { svg: string }) {
   return <svg width={15} height={15} viewBox="0 0 24 24" aria-hidden="true" className="flex-none fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round]" strokeWidth={1.7} dangerouslySetInnerHTML={{ __html: svg }} />;
@@ -30,6 +31,8 @@ export function DocTabs() {
   const [renaming, setRenaming] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [note, setNote] = useState<string | null>(null);
+  const [dropping, setDropping] = useState(false);
   const plus = useRef<HTMLButtonElement>(null);
   const projectId = project ? project.projectId : null;
   const docsRef = useRef<DocEntry[]>([]); docsRef.current = project ? project.docs : [];
@@ -60,6 +63,7 @@ export function DocTabs() {
   const tabs = tabsOf(project.docs, rootDocId);
   const active = (t: Tab) => t.doc.docId === docId || (t.doc.docType === "kicad_sch" && openType === "kicad_sch");
   const creatable = DOCUMENT_KINDS.filter((k) => k.newName && k.newText !== undefined);
+  const openers = canEdit ? DOCUMENT_KINDS.filter((k) => k.fromFile) : [];
   const run = async (what: () => Promise<void>) => {
     setBusy(true); setError(null);
     try { await what(); } catch (e) { setError((e as Error).message || "That did not work."); }
@@ -73,6 +77,22 @@ export function DocTabs() {
     if (to.path === tab.doc.path) return;
     void run(async () => { await renameDocument(tab.doc, to.path); await refresh(); });
   };
+  const fromFile = (file: File, kind = kindForFile(file.name)) => run(async () => {
+    if (!kind) throw new Error(`Junction cannot open “${file.name}” as a document.`);
+    const mb = (file.size / 1048576).toFixed(1);
+    setNote(`Uploading ${file.name} (${mb} MB)…`);
+    try {
+      const id = await documentFromFile(project.projectId, kind, file, (f) => setNote(`Uploading ${file.name}: ${Math.round(f * 100)}% of ${mb} MB`));
+      await refresh(id);
+    } finally { setNote(null); }
+  });
+  const pick = (kind: DocumentKind) => {
+    const input = document.createElement("input");
+    input.type = "file"; input.accept = kind.fromFile!.accept.join(","); input.hidden = true; input.dataset.docOpenFile = "";
+    input.addEventListener("change", () => { const f = input.files && input.files[0]; input.remove(); if (f) void fromFile(f, kind); });
+    document.body.append(input); input.click();
+  };
+  const filesIn = (ev: React.DragEvent) => Array.from(ev.dataTransfer.items || []).some((i) => i.kind === "file");
   const remove = (tab: Tab) => run(async () => {
     if (!(await askConfirm(`Delete ${tab.label}?`, `“${tab.label}” and its history are deleted for everyone in this project. This cannot be undone.`, { ok: "Delete", danger: true }))) return;
     await deleteDocument(tab.doc);
@@ -84,7 +104,10 @@ export function DocTabs() {
   );
 
   return (
-    <div id="doctabs" className="flex items-stretch h-7 min-w-0 bg-bench border-t border-line text-sm select-none" role="tablist" aria-label="Documents" aria-busy={busy || undefined}>
+    <div id="doctabs" className={cx("flex items-stretch h-7 min-w-0 bg-bench border-t border-line text-sm select-none", dropping && "outline outline-2 -outline-offset-2 outline-blue")} role="tablist" aria-label="Documents" aria-busy={busy || undefined}
+      onDragOver={(ev) => { if (!openers.length || !filesIn(ev)) return; ev.preventDefault(); ev.dataTransfer.dropEffect = "copy"; setDropping(true); }}
+      onDragLeave={() => setDropping(false)}
+      onDrop={(ev) => { if (!openers.length || !ev.dataTransfer.files.length) return; ev.preventDefault(); setDropping(false); for (const f of Array.from(ev.dataTransfer.files)) void fromFile(f); }}>
       <div className="flex items-stretch min-w-0 overflow-x-auto">
         {tabs.map((t) => (
           <div key={t.doc.docId} role="tab" aria-selected={active(t)} tabIndex={0} data-doc-tab={t.doc.docId} data-doc-type={t.doc.docType} title={t.doc.path}
@@ -102,19 +125,21 @@ export function DocTabs() {
           </div>
         ))}
       </div>
-      {canEdit && creatable.length ? (
+      {canEdit && (creatable.length || openers.length) ? (
         <button ref={plus} type="button" className="flex-none w-8 grid place-items-center text-ink-2 hover:bg-paper hover:text-ink border-r border-line" title="Add a document to this project" aria-label="Add a document" aria-haspopup="menu" data-doc-add
           onPointerDown={(ev) => ev.stopPropagation()}
           onClick={() => { const r = plus.current!.getBoundingClientRect(); setMenu(menu && !menu.tab ? null : { x: r.left, y: r.top, tab: null }); }}>
           <Glyph svg='<path d="M12 5v14"/><path d="M5 12h14"/>' />
         </button>
       ) : null}
+      {note ? <span className="flex items-center px-3 text-ink-2 truncate" role="status" data-doc-upload>{note}</span> : null}
       {error ? <span className="flex items-center px-3 text-err truncate" role="alert">{error}</span> : null}
       {menu ? (
         <div className="fixed z-[60] min-w-48 py-1 rounded-md border border-line bg-panel shadow-panel text-base text-ink" role="menu" style={{ left: Math.min(menu.x, window.innerWidth - 220), bottom: window.innerHeight - menu.y + 2 }}>
           {menu.tab
             ? [item("Rename", () => setRenaming(menu.tab!.doc.docId)), item("Delete…", () => void remove(menu.tab!), { danger: true })]
-            : creatable.map((k) => item(`New ${k.title.toLowerCase()}`, () => void create(k), { icon: k.icon }))}
+            : [...creatable.map((k) => item(`New ${k.title.toLowerCase()}`, () => void create(k), { icon: k.icon })),
+              ...openers.map((k) => item(`Open ${k.fromFile!.title}…`, () => pick(k), { icon: k.icon }))]}
         </div>
       ) : null}
     </div>

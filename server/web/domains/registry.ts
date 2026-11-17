@@ -31,6 +31,28 @@ export interface DocumentKind {
   newName?: string;
   /** The text of a new, empty document of this kind: what is uploaded as its first snapshot. */
   newText?: string;
+  /**
+   * A file a document of this kind can be made from: "+" offers "Open <title>…", and such a file dropped on the
+   * tabs does the same.  The file is stored in the project as it is (in `folder`), and the new document, named
+   * after the file, starts as `text(file)`.
+   */
+  fromFile?: { title: string; accept: string[]; folder: string; text(file: StoredFile): string };
+}
+
+/** A file stored in a project, as a document made from it refers to it. */
+export interface StoredFile { docId: string; path: string; name: string; bytes: number }
+
+/** A part studio whose one feature imports a stored file (the Import feature, web/domains/mechanical/features/import-file.ts). */
+export function partStudioImporting(file: StoredFile, featureId: string): string {
+  const sorted = (v: unknown): string => Array.isArray(v) ? "[" + v.map(sorted).join(",") + "]"
+    : v && typeof v === "object" ? "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + sorted((v as Record<string, unknown>)[k])).join(",") + "}" : JSON.stringify(v);
+  const stem = file.name.replace(/\.[^.]+$/, "");
+  const format = /\.(brep|brp)$/i.test(file.path) ? "brep" : "step";
+  const items = [
+    { featureType: "import", id: featureId, name: stem, order: "V", params: { file: { ...file, format }, split: "solids" }, type: "feature" },
+    { id: "studio", rollback: null, type: "studio", units: "mm" },
+  ].sort((a, b) => (a.id < b.id ? -1 : 1));
+  return '{"junction":"part-studio","version":1,"items":[\n' + items.map(sorted).join(",\n") + "\n]}\n";
 }
 
 export interface DomainDescriptor {
@@ -76,6 +98,8 @@ export const DOMAINS: readonly DomainDescriptor[] = [
         icon: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5"/><path d="M12 12v9"/>',
         // the same text as web/domains/mechanical/document/format.ts newPartStudioText() (a test compares them)
         newText: '{"junction":"part-studio","version":1,"items":[\n{"id":"studio","rollback":null,"type":"studio","units":"mm"}\n]}\n',
+        // a STEP file opens as a part studio that imports it (web/domains/mechanical/features/import-file.ts)
+        fromFile: { title: "STEP file", accept: [".step", ".stp"], folder: "models", text: (f) => partStudioImporting(f, crypto.randomUUID()) },
       },
     ],
   },
