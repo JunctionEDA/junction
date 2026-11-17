@@ -1781,7 +1781,8 @@ class Board(_Doc):
     def pads(self, ref: str) -> list:
         for p in self.geometry()["parts"]:
             if p["ref"].lower() == ref.lower():
-                return [{"ref": p["ref"], "number": q[0], "x": q[1], "y": q[2], "net": q[3]} for q in p["pads"]]
+                # size: the pad's width and height in its own frame, rot: its turn on the board (degrees)
+                return [{"ref": p["ref"], "number": q[0], "x": q[1], "y": q[2], "net": q[3], **({"size": [q[4], q[5]], "rot": q[6]} if len(q) > 6 else {})} for q in p["pads"]]
         raise HarnessError(f"There is no footprint {ref} on the board.")
 
     def courtyards(self, refs=None) -> dict:
@@ -2430,7 +2431,7 @@ class Board(_Doc):
     def whats_at(self, at, radius: float = 0.8) -> list:
         """The copper within \`radius\` mm of a point, nearest first: [{"kind", "net", "layer", "gap_mm", "id", and "start",
         "end", "width" for a track or "at", "size" for a via or pad}], gap_mm from the point to the item's copper edge
-        (a pad's is rough: centre distance less 0.3 mm).  Use it before a hand-placed via or
+        (a pad's is rough: centre distance less half its narrow side).  Every item in reach is listed, however many.  Use it before a hand-placed via or
         track: a 0.45 mm via needs gap_mm of at least half its size plus the clearance to every other net's item."""
         self.flush()
         x, y = float(at[0]), float(at[1])
@@ -2441,13 +2442,14 @@ class Board(_Doc):
             if folder:
                 with open(os.path.join(folder, self.path)) as fh:
                     names = dict(re.findall(r'\\(net (\\d+) "((?:[^"\\\\]|\\\\.)*)"\\)', fh.read()))
-        for it in self._call("get_items", kinds=["segment", "arc", "via", "footprint"], near={"x": x, "y": y, "radius": radius}).get("items", []):
+        for it in self._all_items(["segment", "arc", "via", "footprint"], near={"x": x, "y": y, "radius": radius}):   # every page, never cut short
             sx = it.get("sexpr", "")
             if it.get("kind") == "footprint":
                 for q in (self._part(it.get("ref") or "").get("pads") if it.get("ref") else []) or []:
                     d = math.hypot(q[1] - x, q[2] - y)
                     if d <= radius + 0.5:
-                        out.append({"kind": "pad", "net": q[3], "layer": "", "gap_mm": round(max(0.0, d - 0.3), 3), "id": f"{it.get('ref')}.{q[0]}", "at": [q[1], q[2]]})
+                        half = min(q[4], q[5]) / 2 if len(q) > 5 and q[4] else 0.3
+                        out.append({"kind": "pad", "net": q[3], "layer": "", "gap_mm": round(max(0.0, d - half), 3), "id": f"{it.get('ref')}.{q[0]}", "at": [q[1], q[2]], **({"size": [q[4], q[5]], "rot": q[6]} if len(q) > 6 else {})})
                 continue
             nm = re.search(r'\\(net (?:"((?:[^"\\\\]|\\\\.)*)"|(\\d+))\\)', sx); net = (nm.group(1) or names.get(nm.group(2), nm.group(2))) if nm else ""
             lay = re.search(r'\\(layers? "([^"]+)"', sx); layer = lay.group(1) if lay else ""
@@ -2476,7 +2478,7 @@ class Board(_Doc):
     def _kept(self, it: dict) -> bool:
         return getattr(self, "_keep_outline", True) and str(it.get("kind", "")).startswith("gr_") and "Edge.Cuts" in it.get("sexpr", "")
 
-    def unroute(self, *nets: str, keep: tuple = ("GND",), near=None, radius: float | None = None) -> int:
+    def unroute(self, *nets: str, keep: tuple = ("GND",), near=None, radius: float | None = None, attached: bool = False) -> int:
         """Take the tracks and vias of these nets off the board (of every net but \`keep\` when none is named), so that
         a crowded area can be laid again together.  Returns how many were removed.
 
@@ -2485,7 +2487,13 @@ class Board(_Doc):
         round it (1.5 mm by default) and lay the open net first, then the nets that were taken up, in one call:
             board.unroute(near="U1.8"); board.route(order=["/LED_SW_V"], time_s=60)
         A part's radius defaults to its pad ring plus 2.5 mm: that takes up most of a chip's fan-out, so use it only
-        when many of its pins are open."""
+        when many of its pins are open.  attached=True (with near= a part or pin) takes up only the nets of that part's
+        pins, leaving the tracks that merely pass through the area (a USB pair round the chip) where they are."""
+        if near is not None and attached and not nets and isinstance(near, str):
+            ref = near.split(".")[0]
+            nets = tuple(sorted({q["net"] for q in self.pads(ref) if q["net"] and q["net"] not in keep and self._net(q["net"]) not in keep}))
+            if not nets:
+                return 0
         if near is not None:
             return self._unroute_near(near, radius, [self._net(n) for n in nets], keep)
         names = [self._net(n) for n in nets] if nets else [n for n in self.nets() if n not in keep]
@@ -6960,6 +6968,11 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
     cross.  The router then starts those nets from the via, on whichever layer is free, instead of fighting for the
     narrow space in front of the chip, where neighbouring escapes otherwise box pins in.  Supply and ground pins, pins
     whose net stays close (a decoupling capacitor, the crystal) and pins with no free site keep their pads for the router.
+
+    style="ring" (default) assigns pins to staggered via sites in pin order; style="radial" puts each via straight out
+    from its own pin, the rows staggered (needs a via, a stub and the clearance to fit in one pin pitch: at 0.4 mm
+    pitch with 0.15 mm clearance it does not, and every other pin is skipped); style="bus" lays only straight stubs,
+    side by side, \`first\` mm past the pad row, no vias, for the router to carry on from.
 
     nets: only these (default: every far-going signal net).  apply=False only plans.  Returns {"vias": n, "pins":
     [pin numbers fanned], "skipped": {pin: why}}.  board.design() calls it for every fine-pitch chip unless fanout=False."""
