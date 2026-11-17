@@ -189,12 +189,22 @@ pub fn transformed(text: &str, rotate: [f64; 3], t: [f64; 3]) -> String {
     out
 }
 
+/// The file's bytes as text, one character per byte: a STEP file is ASCII but its names may hold any bytes (Latin-1,
+/// GBK from a Chinese CAD tool), which must come back out exactly as they went in.
+fn latin1(bytes: &[u8]) -> String {
+    bytes.iter().map(|&b| b as char).collect()
+}
+
+fn unlatin1(text: &str) -> Vec<u8> {
+    text.chars().map(|c| c as u32 as u8).collect()
+}
+
 /// The vendor's file placed as EasyEDA places it on its footprint, for an entry with no offset or turn of its own
 /// (easyeda2kicad's .wrl, whose own copy has the move built in): the lined-up file with the vendor's turn and offset.
 pub fn placed(bytes: &[u8], offset: [f64; 3], rotate: [f64; 3]) -> Vec<u8> {
-    let Ok(text) = std::str::from_utf8(bytes) else { return bytes.to_vec() };
+    let text = &latin1(bytes);
     let Some(t) = fit_move(text, offset, rotate) else { return bytes.to_vec() };
-    transformed(&moved(text, t), rotate, offset).into_bytes()
+    unlatin1(&transformed(&moved(text, t), rotate, offset))
 }
 
 /// A STEP REAL: always with a decimal point.
@@ -206,9 +216,9 @@ fn real(v: f64) -> String {
 
 /// The vendor's STEP file lined up for its (model …) entry; the file as it is when it cannot be read as text.
 pub fn fitted(bytes: &[u8], offset: [f64; 3], rotate: [f64; 3]) -> Vec<u8> {
-    let Ok(text) = std::str::from_utf8(bytes) else { return bytes.to_vec() };
+    let text = &latin1(bytes);
     match fit_move(text, offset, rotate) {
-        Some(t) => moved(text, t).into_bytes(),
+        Some(t) => unlatin1(&moved(text, t)),
         None => bytes.to_vec(),
     }
 }
@@ -271,6 +281,16 @@ mod tests {
         assert!((t[2] - 3.87 * 25.4).abs() < 1e-6);
         let p = pts(&moved(&inch, t))[0];
         assert!((p[2] * 25.4).abs() < 1e-4, "the box stands on 0: {p:?}");
+    }
+
+    #[test]
+    fn names_that_are_not_utf8_are_kept() {
+        let mut bytes = BOX.replace("'it''s'", "'\u{1}'").into_bytes();
+        let at = bytes.iter().position(|&b| b == 1).unwrap();
+        bytes[at] = 0xC4; // a GBK lead byte: not UTF-8 on its own
+        let out = fitted(&bytes, [0.0, -4.9, 3.8], [0.0; 3]);
+        assert_ne!(out, bytes, "the file is moved");
+        assert!(out.windows(2).any(|w| w == [b'\'', 0xC4]), "the name's byte is kept");
     }
 
     #[test]
