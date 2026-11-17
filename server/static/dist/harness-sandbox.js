@@ -2381,8 +2381,9 @@ class Board(_Doc):
         self._edit(e)
 
     def whats_at(self, at, radius: float = 0.8) -> list:
-        """The copper within \`radius\` mm of a point, nearest first: [{"kind", "net", "layer", "gap_mm", "id"}], gap_mm
-        from the point to the item's copper edge (pads by their bounding box).  Use it before a hand-placed via or
+        """The copper within \`radius\` mm of a point, nearest first: [{"kind", "net", "layer", "gap_mm", "id", and "start",
+        "end", "width" for a track or "at", "size" for a via or pad}], gap_mm from the point to the item's copper edge
+        (a pad's is rough: centre distance less 0.3 mm).  Use it before a hand-placed via or
         track: a 0.45 mm via needs gap_mm of at least half its size plus the clearance to every other net's item."""
         self.flush()
         x, y = float(at[0]), float(at[1])
@@ -2399,7 +2400,7 @@ class Board(_Doc):
                 for q in (self._part(it.get("ref") or "").get("pads") if it.get("ref") else []) or []:
                     d = math.hypot(q[1] - x, q[2] - y)
                     if d <= radius + 0.5:
-                        out.append({"kind": "pad", "net": q[3], "layer": "", "gap_mm": round(max(0.0, d - 0.3), 3), "id": f"{it.get('ref')}.{q[0]}"})
+                        out.append({"kind": "pad", "net": q[3], "layer": "", "gap_mm": round(max(0.0, d - 0.3), 3), "id": f"{it.get('ref')}.{q[0]}", "at": [q[1], q[2]]})
                 continue
             nm = re.search(r'\\(net (?:"((?:[^"\\\\]|\\\\.)*)"|(\\d+))\\)', sx); net = (nm.group(1) or names.get(nm.group(2), nm.group(2))) if nm else ""
             lay = re.search(r'\\(layers? "([^"]+)"', sx); layer = lay.group(1) if lay else ""
@@ -2408,14 +2409,15 @@ class Board(_Doc):
                 x0, y0, x1, y1 = map(float, a.groups()); w = float((re.search(r"\\(width ([\\d.]+)\\)", sx) or [0, 0.2])[1])
                 dx, dy = x1 - x0, y1 - y0; t = max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / ((dx * dx + dy * dy) or 1)))
                 gap = math.hypot(x - (x0 + t * dx), y - (y0 + t * dy)) - w / 2
+                where = {"start": [x0, y0], "end": [x1, y1], "width": w}
             else:
                 v = re.search(r"\\(at ([\\d.\\-]+) ([\\d.\\-]+)\\)", sx); z = re.search(r"\\(size ([\\d.]+)", sx)
                 if not v:
                     continue
                 gap = math.hypot(x - float(v.group(1)), y - float(v.group(2))) - (float(z.group(1)) / 2 if z else 0.25)
-                layer = "via"
+                layer = "via"; where = {"at": [float(v.group(1)), float(v.group(2))], "size": float(z.group(1)) if z else None}
             if gap <= radius:
-                out.append({"kind": it.get("kind"), "net": net, "layer": layer, "gap_mm": round(max(0.0, gap), 3), "id": it["id"]})
+                out.append({"kind": it.get("kind"), "net": net, "layer": layer, "gap_mm": round(max(0.0, gap), 3), "id": it["id"], **where})
         return sorted(out, key=lambda r: r["gap_mm"])
 
     def clear(self, keep: tuple = (), outline: bool = True) -> int:

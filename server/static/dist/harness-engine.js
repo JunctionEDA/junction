@@ -141058,7 +141058,7 @@ var Workspace = class {
       case "render": {
         const h3 = this.find(args.document);
         const ed = this.open(h3);
-        return { document: h3.path, svg: renderPicture(ed.kdoc, { ...args.box ? { bbox: args.box, frame: false } : {}, ...args.zones === false ? { zones: false } : {}, ...Array.isArray(args.hide) ? { hidden: new Set(args.hide) } : {}, ...args.copper_only ? { copperOnly: true } : {} }) };
+        return { document: h3.path, svg: renderPicture(ed.kdoc, { ...args.box ? { bbox: args.box, frame: false } : {}, ...args.zones === false ? { zones: false } : {}, ...Array.isArray(args.hide) ? { hidden: new Set(args.hide) } : {}, ...args.copper_only ? { copperOnly: true, padNumbers: false } : {} }) };
       }
       case "run_checks":
         return on2(() => runChecks(rest()));
