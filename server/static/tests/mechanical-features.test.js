@@ -200,7 +200,8 @@ test("revolve: full, angle, symmetric about a sketch line; Remove; a profile acr
   engine.dispose();
 
   // across the axis
-  const bad = sketch("s1", { ...rect(-5, 0, 15, 20, "r"), o1: { type: "point", x: 0, y: -5 }, o2: { type: "point", x: 0, y: 25 }, ax: { type: "line", a: "o1", b: "o2" } }, { kind: "plane", plane: "front" });
+  const bad = sketch("s1", { ...rect(-5, 0, 15, 20, "r"), o1: { type: "point", x: 0, y: -5 }, o2: { type: "point", x: 0, y: 25 }, ax: { type: "line", a: "o1", b: "o2", construction: true } }, { kind: "plane", plane: "front" });
+  // (a construction line: an ordinary line across the outline would cut it into two regions, sketch/planar.ts)
   ({ engine, r } = await run([bad, revolve("v1", "s1")]));
   assert.equal(r.features[1].status, "error");
   assert.match(r.features[1].message, /crosses the axis/);
