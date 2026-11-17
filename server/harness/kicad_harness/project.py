@@ -308,6 +308,8 @@ class _Doc:
         for v in r.get("violations", []):
             d = kinds if v["severity"] == "error" else wkinds
             d[v["code"]] = d.get(v["code"], 0) + 1
+        if r.get("by_kind") is not None:      # counted over every row (the list itself stops at 200)
+            kinds, wkinds = dict(r["by_kind"]), dict(r.get("warnings_by_kind") or {})
         rows = [v for v in r.get("violations", []) if (v["code"] == kind if kind else v["severity"] == "error" or warnings)]
         rows.sort(key=lambda v: v["severity"] != "error")
         first = [f"{v['severity']} {v['code']}: {v['message']}" + (f" [{', '.join(v['refs'])}]" if v.get("refs") else "") + f" at ({v['x']}, {v['y']})" for v in rows[:limit]]
@@ -1904,6 +1906,7 @@ class Board(_Doc):
         rules = r.get("design_rules") or {}
         return {"size_mm": r.get("size_mm"), "copper_layers": r.get("copper_layers"), "footprints": (r.get("statistics") or {}).get("footprints", {}).get("total"),
                 "nets": r.get("nets"), "unrouted_connections": r.get("unrouted_connections"), "ratsnest_mm": lay.get("ratsnest_mm"), "vias": lay.get("vias"),
+                "ground_vias": lay.get("ground_vias"), "signal_and_supply_vias": lay.get("other_vias"),
                 "track_length_mm": lay.get("track_length_mm"), "clearance": rules.get("clearance"), "min_track_width": rules.get("min_track_width")}
 
     def models(self) -> dict:

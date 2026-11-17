@@ -71110,11 +71110,19 @@ async function runChecks(input) {
   }
   const errors = rows3.filter((m) => m.severity === "error").length;
   const cap = 200;
+  const byKind = {}, warnKind = {};
+  for (const m of rows3) {
+    const d = m.severity === "error" ? byKind : warnKind;
+    d[m.code] = (d[m.code] || 0) + 1;
+  }
+  rows3.sort((a, b) => (a.severity === "error" ? 0 : 1) - (b.severity === "error" ? 0 : 1));
   return {
     document: path2,
     check: doc2.type === "sch" ? "ERC" : "DRC",
     errors,
     warnings: rows3.length - errors,
+    by_kind: byKind,
+    warnings_by_kind: warnKind,
     violations: rows3.slice(0, cap),
     truncated: rows3.length > cap ? `showing ${cap} of ${rows3.length}` : void 0,
     note: doc2.type === "sch" ? "This ERC covers the one sheet; nets that leave it through hierarchical or global labels are treated as driven elsewhere. The tests across sheets (symbol units, footprints and values of a multi-unit symbol, label names) look at every sheet of the hierarchy." : "This DRC is the editor's subset: clearance, edge clearance, unconnected items, shorts, dangling tracks, annular width, courtyards, plus Junction's own track_right_angle (no square corners outside antenna and RF nets)."
@@ -71152,7 +71160,10 @@ async function boardInfo() {
     const R2 = W3.PcbAutoRouter;
     if (R2 && R2.evaluate) {
       const ev = R2.evaluate(K4(), P, doc2, s2, {});
-      layout2 = { ratsnest_mm: r33(ev.ratsnest), unrouted: ev.unrouted, vias: ev.vias, track_length_mm: r33(ev.trackLength), routed_nets: ev.routedNets, worst_detours: (ev.worstDetours || []).slice(0, 10) };
+      const GND = /^\/?(.*\/)?([ADP]?GND\w*|VSS\w*)$/i;
+      let gv = 0;
+      for (const [name, n2] of nl.nets) if (GND.test(String(n2.netObj && n2.netObj.name || name)) && n2.vias) gv += n2.vias.length;
+      layout2 = { ratsnest_mm: r33(ev.ratsnest), unrouted: ev.unrouted, vias: ev.vias, ground_vias: gv, other_vias: Math.max(0, (ev.vias || 0) - gv), track_length_mm: r33(ev.trackLength), routed_nets: ev.routedNets, worst_detours: (ev.worstDetours || []).slice(0, 10) };
     }
   } catch {
   }

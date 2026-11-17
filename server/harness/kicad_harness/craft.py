@@ -528,10 +528,30 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
             for a, b in segs:
                 placed_s.append((a, b, q[3]))
             plan.append((q, path, v))
-    if apply:
+    if apply and plan:
+        # on a board that already has copper a stub or via can land on another net's track: each pin's escape is laid,
+        # the rules checked, and any escape a new error sits on is taken out again, so fanout never adds a DRC error
+        before = {(v["code"], round(v["x"], 2), round(v["y"], 2)) for v in self._call("run_checks").get("violations", []) if v.get("severity") == "error"}
+        laid = []
         for q, path, v in plan:
             self.track(q[3], [[round(x, 4), round(y, 4)] for x, y in path], layer="F.Cu" if part.get("side", "front") == "front" else "B.Cu", width=tw)
             self.via(q[3], [round(v[0], 4), round(v[1], 4)])
+            res = self.flush() or {}
+            laid.append((q, path, list(res.get("added") or [])))
+        bad = set()
+        for e in self._call("run_checks").get("violations", []):
+            if e.get("severity") != "error" or e.get("code") in ("unconnected_items", "track_right_angle") or (e["code"], round(e["x"], 2), round(e["y"], 2)) in before:
+                continue
+            for i, (q, path, _) in enumerate(laid):
+                if any(_seg_dist((e["x"], e["y"]), a, b) < 0.6 for a, b in zip(path, path[1:])):
+                    bad.add(i)
+        for i in bad:
+            for item in laid[i][2]:
+                self._edit({"op": "remove", "id": item})
+            skipped[laid[i][0][0]] = "taken back: it broke a rule against copper already there"
+        if bad:
+            self.flush()
+        plan = [p for i, p in enumerate(plan) if i not in bad]
         if plan:
             self.project.note(f"board: fanned out {ref}: {len(plan)} pins to a staggered via ring")
     return {"vias": len(plan), "pins": sorted((q[0] for q, _, _ in plan), key=lambda x: (len(x), x)), "skipped": skipped}
