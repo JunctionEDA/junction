@@ -36,8 +36,42 @@
 #include <wx/filename.h>
 
 #include <string>
+#include <algorithm>
 #include <set>
 #include <vector>
+#include <wx/fileconf.h>
+
+
+/// The documents an Altium .PrjPcb lists ([DocumentN] DocumentPath=...), as absolute paths.
+static std::vector<wxFileName> altiumProjectDocuments( const wxString& aProjectFile )
+{
+    std::vector<wxFileName> docs;
+    wxFileConfig config( wxEmptyString, wxEmptyString, wxEmptyString, aProjectFile, wxCONFIG_USE_NO_ESCAPE_CHARACTERS );
+    wxString     group;
+    long         index;
+
+    for( bool more = config.GetFirstGroup( group, index ); more; more = config.GetNextGroup( group, index ) )
+    {
+        long number;
+
+        if( !group.StartsWith( wxS( "Document" ) ) || !group.Mid( 8 ).ToLong( &number ) )
+            continue;
+
+        wxString path = config.Read( group + wxS( "/DocumentPath" ), wxEmptyString );
+
+        if( path.empty() )
+            continue;
+
+        wxFileName fn( path, wxPATH_WIN );
+
+        if( !fn.IsAbsolute() )
+            fn.MakeAbsolute( wxFileName( aProjectFile ).GetPath() );
+
+        docs.push_back( fn );
+    }
+
+    return docs;
+}
 
 
 #define ARG_LAYER_MAP "--layer-map"
@@ -84,6 +118,63 @@ int CLI::IMPORT_COMMAND::doPerform( KIWAY& aKiway )
 
     for( const std::string& raw : rawInputs )
         inputFiles.push_back( From_UTF8( raw.c_str() ) );
+
+    // An Altium project (.PrjPcb) imports all its schematic sheets as one hierarchy, so the sheets themselves
+    // are not separate inputs; its board is imported with it when not given as well.
+    for( size_t i = 0; i < inputFiles.size(); ++i )
+    {
+        if( !wxFileName( inputFiles[i] ).GetExt().IsSameAs( wxS( "PrjPcb" ), false ) )
+            continue;
+
+        wxFileName projectFile( inputFiles[i] );
+        projectFile.MakeAbsolute();
+
+        std::vector<wxFileName> docs = altiumProjectDocuments( projectFile.GetFullPath() );
+
+        auto listed = [&]( const wxString& aInput )
+        {
+            wxFileName in( aInput );
+            in.MakeAbsolute();
+
+            return std::any_of( docs.begin(), docs.end(),
+                                [&]( const wxFileName& d ) { return d.GetFullPath().IsSameAs( in.GetFullPath(), false ); } );
+        };
+
+        bool haveBoardInput = false;
+
+        for( size_t j = 0; j < inputFiles.size(); )
+        {
+            wxString ext = wxFileName( inputFiles[j] ).GetExt();
+
+            if( j != i && ext.IsSameAs( wxS( "SchDoc" ), false ) && listed( inputFiles[j] ) )
+            {
+                inputFiles.erase( inputFiles.begin() + j );
+
+                if( j < i )
+                    --i;
+
+                continue;
+            }
+
+            if( ext.Lower().EndsWith( wxS( "pcbdoc" ) ) )
+                haveBoardInput = true;
+
+            ++j;
+        }
+
+        if( !haveBoardInput )
+        {
+            for( const wxFileName& doc : docs )
+            {
+                if( doc.GetExt().Lower().EndsWith( wxS( "pcbdoc" ) ) && doc.FileExists() )
+                {
+                    inputFiles.insert( inputFiles.begin() + i, doc.GetFullPath() );
+                    ++i;
+                    break;
+                }
+            }
+        }
+    }
 
     std::map<wxString, wxString> layerMap;
     wxString layerMapFile = From_UTF8( m_argParser.get<std::string>( ARG_LAYER_MAP ).c_str() );
