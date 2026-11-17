@@ -83,8 +83,9 @@ export function edgeShapes(doc: BoardDoc) {
 }
 /** Join open polylines end to end (0.01 mm) into closed loops; returns the loops and whether anything stayed open. */
 export function chainLoops(chains: Pt[][], tol?: number) {
-  tol = tol || 0.01; const loops: Pt[][] = [], open = chains.map((c) => c.slice()); let dangling = false;
-  const same = (a: Pt, b: Pt) => Math.abs(a[0] - b[0]) <= tol! && Math.abs(a[1] - b[1]) <= tol!;
+  tol = tol || 0.01; const same = (a: Pt, b: Pt) => Math.abs(a[0] - b[0]) <= tol! && Math.abs(a[1] - b[1]) <= tol!;
+  // a zero-length line (a stray dot in a library footprint) joins nothing and ends nothing: KiCad's chaining walks through it
+  const loops: Pt[][] = [], open = chains.filter((c) => c.some((q) => !same(q, c[0]))).map((c) => c.slice()); let dangling = false;
   while (open.length) {
     let cur = open.pop()!; if (cur.length > 2 && same(cur[0], cur[cur.length - 1])) { loops.push(cur.slice(0, -1)); continue; }
     let grew = true;
@@ -138,6 +139,8 @@ export const boxCenter = (a: Box, b: Box) => [(Math.max(a[0], b[0]) + Math.min(a
  * board edge, missing connections (from the ratsnest), shorts, zero-length and dangling tracks, via annular
  * width, courtyard overlaps and items outside the outline.  Returns markers [{ x, y, severity, text, ids, code }].
  */
+/** Rules a footprint can break on its own, as its library drew it: waived when every item named is that one footprint. */
+export const FOOTPRINT_OWN = new Set(["clearance", "shorting_items", "hole_clearance", "hole_to_hole", "holes_co_located", "solder_mask_bridge", "silk_over_copper", "silk_overlap", "malformed_courtyard", "missing_courtyard", "pth_inside_courtyard", "npth_inside_courtyard", "isolated_copper"]);
 export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | string | null | undefined, opts?: { unconnected?: boolean; outline?: boolean; rules?: DruRule[] | string | null }) {
   const s = settings && (settings as DesignSettings).netclasses ? settings as DesignSettings : designSettings(settings); opts = opts || {}; const out: DrcMarker[] = [];
   const nl = netlist(doc); const conds = nl.conductors.filter((c) => c.kind !== "zone");
@@ -155,6 +158,8 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
     for (let j = i + 1; j < order.length; j++) {
       const b = order[j]; if (b.bbox[0] > a.bbox[2] + maxClr) break;
       if (a.net && a.net === b.net) continue; if (!shareLayer(a.layers, b.layers)) continue;
+      // PAD::SameLogicalPadAs: pads of one footprint with one (non-empty) number are one pad; only different real nets short
+      if (a.kind === "pad" && b.kind === "pad" && a.item === b.item && a.pad.number && a.pad.number === b.pad.number && !(a.net && b.net)) continue;
       let need = Math.max(clr(a), clr(b), s.minClearance || 0), by = "";   // Board Setup > Constraints: the board minimum is a floor
       if (clrRules.length && boxesTouch(a.bbox, b.bbox, maxClr)) {
         const layer = [...a.layers].find((l) => b.layers.has(l)) || ""; const hit = ruleClearance(clrRules, doc, s, ruleItem(a, layer), ruleItem(b, layer));
@@ -240,6 +245,10 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
   out.push(...silkMaskMarkers(doc, s, rules));
   // thermal reliefs short of spokes (drc-zones.ts)
   out.push(...starvedThermalMarkers(doc, s, rules, nl.conductors), ...isolatedCopperMarkers(doc, nl.conductors));
+  // Junction's rule: a footprint is drawn the way its maker wants it, so what lies wholly inside one footprint (its own pads,
+  // holes, mask and silk, its courtyard) is not reported.  Anything the layout causes (another item, the edge, a keep-out) still is.
+  const inOne = (m: DrcMarker) => m.ids.length > 0 && m.ids.every((id) => id === m.ids[0]) && (doc.items.get(m.ids[0]) as KItem | undefined)?.kind === "footprint";
+  const kept = out.filter((m) => !(FOOTPRINT_OWN.has(m.code) && inOne(m)));
   // the project's rule severities: ignored rules drop out, the rest take the severity the project gives them
-  return out.filter((m) => s.severities[m.code] !== "ignore").map((m) => { const sev = s.severities[m.code]; if (sev === "warning" || sev === "error") m.severity = sev; return m; });
+  return kept.filter((m) => s.severities[m.code] !== "ignore").map((m) => { const sev = s.severities[m.code]; if (sev === "warning" || sev === "error") m.severity = sev; return m; });
 }

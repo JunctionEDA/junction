@@ -26990,9 +26990,9 @@
   }
   function chainLoops(chains, tol) {
     tol = tol || 0.01;
-    const loops = [], open = chains.map((c) => c.slice());
-    let dangling = false;
     const same4 = (a, b) => Math.abs(a[0] - b[0]) <= tol && Math.abs(a[1] - b[1]) <= tol;
+    const loops = [], open = chains.filter((c) => c.some((q) => !same4(q, c[0]))).map((c) => c.slice());
+    let dangling = false;
     while (open.length) {
       let cur = open.pop();
       if (cur.length > 2 && same4(cur[0], cur[cur.length - 1])) {
@@ -27106,6 +27106,7 @@
   }
   var marker = (code, severity, x, y, text, ids) => ({ code, severity, x: r6(x), y: r6(y), text, ids });
   var boxCenter = (a, b) => [(Math.max(a[0], b[0]) + Math.min(a[2], b[2])) / 2, (Math.max(a[1], b[1]) + Math.min(a[3], b[3])) / 2];
+  var FOOTPRINT_OWN = /* @__PURE__ */ new Set(["clearance", "shorting_items", "hole_clearance", "hole_to_hole", "holes_co_located", "solder_mask_bridge", "silk_over_copper", "silk_overlap", "malformed_courtyard", "missing_courtyard", "pth_inside_courtyard", "npth_inside_courtyard", "isolated_copper"]);
   function drc(doc, settings, opts) {
     const s = settings && settings.netclasses ? settings : designSettings(settings);
     opts = opts || {};
@@ -27126,6 +27127,7 @@
         if (b.bbox[0] > a.bbox[2] + maxClr) break;
         if (a.net && a.net === b.net) continue;
         if (!shareLayer(a.layers, b.layers)) continue;
+        if (a.kind === "pad" && b.kind === "pad" && a.item === b.item && a.pad.number && a.pad.number === b.pad.number && !(a.net && b.net)) continue;
         let need = Math.max(clr(a), clr(b), s.minClearance || 0), by = "";
         if (clrRules.length && boxesTouch(a.bbox, b.bbox, maxClr)) {
           const layer = [...a.layers].find((l) => b.layers.has(l)) || "";
@@ -27242,7 +27244,9 @@
     out.push(...moreDrcMarkers(doc, s, rules));
     out.push(...silkMaskMarkers(doc, s, rules));
     out.push(...starvedThermalMarkers(doc, s, rules, nl.conductors), ...isolatedCopperMarkers(doc, nl.conductors));
-    return out.filter((m) => s.severities[m.code] !== "ignore").map((m) => {
+    const inOne = (m) => m.ids.length > 0 && m.ids.every((id) => id === m.ids[0]) && doc.items.get(m.ids[0])?.kind === "footprint";
+    const kept = out.filter((m) => !(FOOTPRINT_OWN.has(m.code) && inOne(m)));
+    return kept.filter((m) => s.severities[m.code] !== "ignore").map((m) => {
       const sev3 = s.severities[m.code];
       if (sev3 === "warning" || sev3 === "error") m.severity = sev3;
       return m;

@@ -319,7 +319,9 @@ export async function runChecks(input: { doc?: string }): Promise<unknown> {
   if (doc.type === "sch") markers = await projectErc(doc, path);
   else { const P = PCB(); if (!P || !P.drc) throw new ToolError("The DRC is not available."); markers = P.drc(doc, P.designSettings(ED().proSettings || null), {}); }
   const refs = (ids: string[]) => Array.from(new Set((ids || []).map((id) => doc.items.get(id)).filter(Boolean).map((it: any) => it.ref).filter(Boolean)));
-  const rows = markers.map((m) => ({ severity: m.severity, code: m.code, message: m.text, x: r3(m.x), y: r3(m.y), refs: refs(m.ids) }));
+  // a violation between parts of one footprint comes with the library footprint, not from the layout: it is flagged so the person and the AI can set it aside
+  const inFootprint = (ids: string[]) => { const its = (ids || []).map((id) => doc.items.get(id)); return its.length > 0 && its.every((it: any) => it && it.kind === "footprint" && it === its[0]) ? (its[0] as any).ref || true : undefined; };
+  const rows: { severity: string; code: string; message: string; x: number; y: number; refs: string[]; footprint?: string | true }[] = markers.map((m) => ({ severity: m.severity, code: m.code, message: m.text, x: r3(m.x), y: r3(m.y), refs: refs(m.ids) as string[], footprint: m.code === "unconnected_items" ? undefined : inFootprint(m.ids) }));
   if (doc.type !== "sch") {   // Junction's own rule on top of KiCad's DRC: no square track corners except on antenna and RF nets
     try { const R = W.PcbAutoRouter; if (R && R.boardSquareCorners) for (const c of R.boardSquareCorners(doc, PCB())) rows.push({ severity: "error", code: "track_right_angle", message: `Track of net '${c.net}' turns ${c.angle}° on ${c.layer}: use 45° corners (antenna and RF nets are exempt)`, x: r3(c.x), y: r3(c.y), refs: [] }); } catch { /* router not loaded */ }
   }

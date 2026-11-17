@@ -127,6 +127,7 @@ export interface NetPlan {
   impedance?: number;            // ohms: single-ended, or differential when the net is one of a pair
   allowVias?: boolean; maxVias?: number;
   avoid?: Box[];                 // areas this net stays out of
+  viaAvoid?: Box[];              // areas where this net may run tracks but put no via (a supply joined on the top layer round a fine-pitch chip)
   priority?: number;             // higher routes earlier (after `order`)
   kind?: NetKind;                // what the net carries, when its name does not say (see netKind)
 }
@@ -164,7 +165,7 @@ export function pairName(net: string): { base: string; pol: 1 | -1 } | null {
 }
 interface Pair { p: NetInfo; n: NetInfo; cp: Conn; cn: Conn; swap: boolean; laid?: { c: Pt[]; l: number; w: number; d: number; clr: number; sgn: number; lead: Lead[] } }
 interface Lead { e: Pt; s: number }   // each track first leaves its pad straight, this far, before it turns in to its partner
-interface Guide { allowed: boolean[] | null; allowVias: boolean; maxVias: number; avoid: [number, number, number, number][]; rank: number; priority: number }
+interface Guide { allowed: boolean[] | null; allowVias: boolean; maxVias: number; avoid: [number, number, number, number][]; viaAvoid: [number, number, number, number][]; rank: number; priority: number }
 interface Found { res: ProbeResult; owner: Map<number, number>; flip: boolean; esc?: (Pt | undefined)[] }
 interface NetInfo { key: string; obj: any; cls: RuleClass; conns: Conn[]; clusters: number; zoneCells: Node[] | null; zoneCluster: number; guide: Guide; anchors?: Anchor[]; drop?: (a: Anchor) => Anchor | null; pour?: { mask: (Uint8Array | null)[]; width: number; clr: number } }
 
@@ -571,7 +572,7 @@ export class Router {
     // USB 2.0 data lines take no via unless the plan allows one: a via is a stub and an impedance step on a 90 ohm pair (the person's rule)
     const usbData = plan.maxVias === undefined && usualImpedance(netKey, true) === 90 && /USB|(^|[\/_(])D[+\-PM]\)?$/i.test(netKey) && !!pairName(netKey);
     return { allowed, allowVias: this.allowVias && plan.allowVias !== false, maxVias: usbData ? 0 : plan.maxVias === undefined || plan.maxVias === null ? Infinity : Math.max(0, +plan.maxVias),
-      avoid: (plan.avoid || []).map((b) => this.cellBox(b)).filter(Boolean) as [number, number, number, number][], rank: rank < 0 ? Infinity : rank, priority: +plan.priority! || 0 };
+      avoid: (plan.avoid || []).map((b) => this.cellBox(b)).filter(Boolean) as [number, number, number, number][], viaAvoid: (plan.viaAvoid || []).map((b) => this.cellBox(b)).filter(Boolean) as [number, number, number, number][], rank: rank < 0 ? Infinity : rank, priority: +plan.priority! || 0 };
   }
   /** A connection between two given points of a net, outside the run's own list (the trainer and tools use this). */
   adhoc(netKey: string, a: { p: Pt; layers: number[]; shape: Shape | null }, b: { p: Pt; layers: number[]; shape: Shape | null }): Conn {
@@ -592,6 +593,7 @@ export class Router {
       }
     }
     for (const b of net.guide.avoid) for (const maps of [c.full, c.fixed, c.vfull, c.vfixed]) for (const m of maps) for (let iy = b[1]; iy <= b[3]; iy++) for (let i = iy * G.W + b[0]; i <= iy * G.W + b[2]; i++) m[i] += sign;
+    for (const b of net.guide.viaAvoid) for (let iy = b[1]; iy <= b[3]; iy++) for (let i = iy * G.W + b[0]; i <= iy * G.W + b[2]; i++) G.noVia[i] += sign;
     for (const conn of net.conns) if (conn.nodes) {
       for (const o of conn.shapes) stampClass(G, c, o, -sign, false);
       for (const gi of conn.viaCells) G.thru[gi] = sign > 0 ? 1 : 0;

@@ -36424,9 +36424,9 @@ var require_pcb_tools = __commonJS({
       }
       function chainLoops2(chains, tol) {
         tol = tol || 0.01;
-        const loops = [], open3 = chains.map((c) => c.slice());
-        let dangling = false;
         const same4 = (a, b) => Math.abs(a[0] - b[0]) <= tol && Math.abs(a[1] - b[1]) <= tol;
+        const loops = [], open3 = chains.filter((c) => c.some((q4) => !same4(q4, c[0]))).map((c) => c.slice());
+        let dangling = false;
         while (open3.length) {
           let cur2 = open3.pop();
           if (cur2.length > 2 && same4(cur2[0], cur2[cur2.length - 1])) {
@@ -36540,6 +36540,7 @@ var require_pcb_tools = __commonJS({
       }
       var marker = (code, severity, x, y, text3, ids) => ({ code, severity, x: r65(x), y: r65(y), text: text3, ids });
       var boxCenter = (a, b) => [(Math.max(a[0], b[0]) + Math.min(a[2], b[2])) / 2, (Math.max(a[1], b[1]) + Math.min(a[3], b[3])) / 2];
+      var FOOTPRINT_OWN = /* @__PURE__ */ new Set(["clearance", "shorting_items", "hole_clearance", "hole_to_hole", "holes_co_located", "solder_mask_bridge", "silk_over_copper", "silk_overlap", "malformed_courtyard", "missing_courtyard", "pth_inside_courtyard", "npth_inside_courtyard", "isolated_copper"]);
       function drc(doc2, settings3, opts2) {
         const s2 = settings3 && settings3.netclasses ? settings3 : designSettings(settings3);
         opts2 = opts2 || {};
@@ -36560,6 +36561,7 @@ var require_pcb_tools = __commonJS({
             if (b.bbox[0] > a.bbox[2] + maxClr) break;
             if (a.net && a.net === b.net) continue;
             if (!shareLayer(a.layers, b.layers)) continue;
+            if (a.kind === "pad" && b.kind === "pad" && a.item === b.item && a.pad.number && a.pad.number === b.pad.number && !(a.net && b.net)) continue;
             let need = Math.max(clr(a), clr(b), s2.minClearance || 0), by = "";
             if (clrRules.length && boxesTouch(a.bbox, b.bbox, maxClr)) {
               const layer4 = [...a.layers].find((l) => b.layers.has(l)) || "";
@@ -36676,7 +36678,9 @@ var require_pcb_tools = __commonJS({
         out2.push(...moreDrcMarkers(doc2, s2, rules));
         out2.push(...silkMaskMarkers(doc2, s2, rules));
         out2.push(...starvedThermalMarkers(doc2, s2, rules, nl.conductors), ...isolatedCopperMarkers(doc2, nl.conductors));
-        return out2.filter((m) => s2.severities[m.code] !== "ignore").map((m) => {
+        const inOne = (m) => m.ids.length > 0 && m.ids.every((id) => id === m.ids[0]) && doc2.items.get(m.ids[0])?.kind === "footprint";
+        const kept = out2.filter((m) => !(FOOTPRINT_OWN.has(m.code) && inOne(m)));
+        return kept.filter((m) => s2.severities[m.code] !== "ignore").map((m) => {
           const sev3 = s2.severities[m.code];
           if (sev3 === "warning" || sev3 === "error") m.severity = sev3;
           return m;
@@ -71096,7 +71100,11 @@ async function runChecks(input) {
     markers = P.drc(doc2, P.designSettings(ED().proSettings || null), {});
   }
   const refs = (ids) => Array.from(new Set((ids || []).map((id) => doc2.items.get(id)).filter(Boolean).map((it) => it.ref).filter(Boolean)));
-  const rows3 = markers.map((m) => ({ severity: m.severity, code: m.code, message: m.text, x: r33(m.x), y: r33(m.y), refs: refs(m.ids) }));
+  const inFootprint = (ids) => {
+    const its = (ids || []).map((id) => doc2.items.get(id));
+    return its.length > 0 && its.every((it) => it && it.kind === "footprint" && it === its[0]) ? its[0].ref || true : void 0;
+  };
+  const rows3 = markers.map((m) => ({ severity: m.severity, code: m.code, message: m.text, x: r33(m.x), y: r33(m.y), refs: refs(m.ids), footprint: m.code === "unconnected_items" ? void 0 : inFootprint(m.ids) }));
   if (doc2.type !== "sch") {
     try {
       const R2 = W3.PcbAutoRouter;
@@ -98708,6 +98716,7 @@ function build2(input) {
               allowVias: typeof o.allow_vias === "boolean" ? o.allow_vias : void 0,
               maxVias: typeof o.max_vias === "number" ? o.max_vias : void 0,
               avoid: Array.isArray(o.avoid) ? o.avoid : void 0,
+              viaAvoid: Array.isArray(o.via_avoid) ? o.via_avoid : void 0,
               // named: what the schematic's author called a net that carries no label (it is wired inside its block), so its name still says what it carries
               kind: ["analog", "rf", "switching", "fast", "digital", "supply"].includes(o.kind) ? o.kind : typeof o.named === "string" && o.named && R2.netKind ? R2.netKind(o.named) : void 0,
               impedance: typeof o.impedance === "number" && o.impedance > 0 ? o.impedance : void 0
@@ -118176,6 +118185,7 @@ function findSquareCorners(segs, covered, exempt) {
     const [e1, e2] = l;
     const net = e1.s.net, layer4 = e1.s.layer;
     if (exempt(net)) continue;
+    if (Math.hypot(e1.other[0] - e1.at[0], e1.other[1] - e1.at[1]) < 0.03 || Math.hypot(e2.other[0] - e2.at[0], e2.other[1] - e2.at[1]) < 0.03) continue;
     const angle = cornerAngle(e1.at, e1.other, e2.other);
     if (angle > SQUARE_MAX) continue;
     if (covered(net, layer4, e1.at)) continue;
@@ -119209,6 +119219,7 @@ var Router = class _Router {
       allowVias: this.allowVias && plan.allowVias !== false,
       maxVias: usbData ? 0 : plan.maxVias === void 0 || plan.maxVias === null ? Infinity : Math.max(0, +plan.maxVias),
       avoid: (plan.avoid || []).map((b) => this.cellBox(b)).filter(Boolean),
+      viaAvoid: (plan.viaAvoid || []).map((b) => this.cellBox(b)).filter(Boolean),
       rank: rank < 0 ? Infinity : rank,
       priority: +plan.priority || 0
     };
@@ -119236,6 +119247,7 @@ var Router = class _Router {
       }
     }
     for (const b of net.guide.avoid) for (const maps of [c.full, c.fixed, c.vfull, c.vfixed]) for (const m of maps) for (let iy = b[1]; iy <= b[3]; iy++) for (let i = iy * G5.W + b[0]; i <= iy * G5.W + b[2]; i++) m[i] += sign2;
+    for (const b of net.guide.viaAvoid) for (let iy = b[1]; iy <= b[3]; iy++) for (let i = iy * G5.W + b[0]; i <= iy * G5.W + b[2]; i++) G5.noVia[i] += sign2;
     for (const conn of net.conns) if (conn.nodes) {
       for (const o of conn.shapes) stampClass(G5, c, o, -sign2, false);
       for (const gi of conn.viaCells) G5.thru[gi] = sign2 > 0 ? 1 : 0;
@@ -137702,7 +137714,8 @@ function radioGHz(fps, nets) {
   if (/5\.?[0-9]?\s?GHZ|WIFI_?5G|5G_?WIFI|U-?NII|802\.11A[CX]?\b|UWB|DW1000|DW3/i.test(text3)) found.push([5.8, "5 GHz"]);
   if (/2\.4|2450|BLE|BLUETOOTH|WIFI|WLAN|ESP32|ESP8266|ESP-|NRF5|NRF24|ZIGBEE|THREAD|CC25|CC26|RP2040W|CYW43|ATWINC/i.test(text3)) found.push([2.45, "2.4 GHz"]);
   if (/GPS|GNSS|GLONASS|GALILEO|NEO-|MAX-M|L76|L80|L86|SAM-M|ATGM|TESEO|1575/i.test(text3)) found.push([1.575, "GPS L1"]);
-  if (/LTE|GSM|NB-?IOT|CAT-?M|SIM7|SIM8|BG9\d|EC2\d|SARA-|CELLULAR/i.test(text3)) found.push([2.7, "cellular"]);
+  if (/\b(LTE|GSM|NB-?IOT|CAT-?M1?|SIM7\d+|SIM8\d+|BG9\d|EC2\d|SARA-\w+|CELLULAR)\b/i.test(text3))
+    found.push([2.7, "cellular"]);
   if (/LORA|SX12[67]\d|RFM9\d|RFM6\d|LLCC68|STM32WL|RA-0\d|E22-|E220|915M|868M|SUB-?G|CC1[12]\d\d|SI44\d\d|RFM69/i.test(text3)) found.push([0.915, "sub-GHz (LoRa, 868/915 MHz)"]);
   if (/433M|RFM9[68]|315M/i.test(text3) && !found.length) found.push([0.433, "433 MHz"]);
   if (!found.length) return { ghz: 2.45, why: "2.4 GHz assumed" };
@@ -137948,7 +137961,7 @@ function survey(doc2, P, k) {
   return { copper, conds, fps, keepouts, zoneOutlines, zones, filled, outline, tracks, vias, stitches, pourAt, gndLayersAt, refLayers, nearestStitch, walk: walk2, tracksOf, viasOf, padsOf, lengthOf, pathLengthOf };
 }
 var isConnector = (f2) => /^(J|P|CN|X|USB)\d/i.test(f2.ref) || /^Connector/i.test(f2.lib);
-var isAntenna = (f2) => (/^(AE|ANT)\d/i.test(f2.ref) || /antenna/i.test(f2.lib + " " + f2.value)) && !isConnector(f2) && !/u\.?fl|sma|ipex|mmcx|coax/i.test(f2.lib + " " + f2.value);
+var isAntenna = (f2) => (/^(AE|ANT)\d/i.test(f2.ref) || /antenna/i.test(f2.lib + " " + f2.value)) && !isConnector(f2) && !/u\.?fl|sma|ipex|mmcx|coax/i.test(f2.lib + " " + f2.value) && !/NFC|RFID|13\.56|QI\b|WPC|LOOP/i.test(f2.lib + " " + f2.value);
 var isCrystal = (f2) => (/^(Y|XTAL)\d/i.test(f2.ref) || /crystal|xtal|resonator/i.test(f2.lib + " " + f2.value)) && !f2.pads.some((p) => isSup(p.net));
 var isPowerInductor = (f2) => /^L\d/i.test(f2.ref) && (f2.box[2] - f2.box[0]) * (f2.box[3] - f2.box[1]) >= 4;
 var isEsd = (f2) => /(^|[^a-z])(tvs|esd)|usblc|prtr5v|tpd\d|sp05|pesd|srv05|ip4220|pusb|nup\d|rclamp|esda|sm[abc]j\d|smf\d/i.test(f2.lib + " " + f2.value);
