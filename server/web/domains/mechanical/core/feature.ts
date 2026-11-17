@@ -23,6 +23,8 @@ export type ParamField = { key: string; label: string; hint?: string; visible?: 
   | { kind: "refs"; of: GeomKind[]; single?: boolean }
   /** bodies picked in the viewport or from the list: stores string[] of body ids; empty means every body */
   | { kind: "bodies" }
+  /** another document of the project, chosen from a list: stores its document id (a string), or null */
+  | { kind: "document"; docTypes: string[] }
 );
 
 export interface FeatureDefinition<P extends JsonObject = JsonObject> {
