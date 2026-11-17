@@ -447,7 +447,7 @@ class Schematic(_Doc):
 
     def nets(self, filter: str | None = None) -> dict:
         """The nets of the sheet: name -> ["REF.pin", ...]."""
-        r = self._call("list_nets", **({"filter": filter} if filter else {}))
+        r = self._call("list_nets", limit=1000000, **({"filter": filter} if filter else {}))
         return {n["name"]: [re.sub(r"\(.*\)$", "", p) for p in n["pins"]] for n in r.get("nets", [])}
 
     def net_of(self, spec: str) -> str:
@@ -1894,7 +1894,7 @@ class Board(_Doc):
 
     def nets(self, filter: str | None = None) -> dict:
         """name -> {"pads": [...], "unrouted": n, "length_mm": x}"""
-        r = self._call("list_nets", **({"filter": filter} if filter else {}))
+        r = self._call("list_nets", limit=1000000, **({"filter": filter} if filter else {}))
         return {n["name"]: {"pads": n["pads"], "unrouted": n["unrouted_connections"], "length_mm": n["routed_length_mm"]} for n in r.get("nets", [])}
 
     def unrouted(self) -> dict:
