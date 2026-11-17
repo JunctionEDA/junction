@@ -9,6 +9,8 @@ web/
   shared/             used by every area: the store contract, theme, keys, units, menus, the UI kit, styles
     components/       menu bar, toolbars, docks, panes, selects, dialogs' widgets
     styles/           the Tailwind entry and home.css
+    itemdoc/          JSON item documents (.jpart, .jasm): the format, item changes, the live session
+    viewport3d/       the 3D viewport the modelling domains draw in
   platform/           what every kind of project shares
     home/             projects list, upload, sharing (ShareDialog), time page
     landing/          the public home page and its demos
@@ -16,11 +18,15 @@ web/
     github/           GitHub sync
     review/           version compare and review
     wakatime/         time tracking
+    documents/        how the shell hands a document to a domain's own editor
+    doctabs/          the document tabs of an open project
     admin/, styleguide/
   domains/            one folder per kind of design work
     registry.ts       what each domain is, which files it opens and which domains it reads
     pcb/              electronics: schematic, symbols, board, footprints, fab, simulation (shipped)
-    mechanical/  assembly/  physics/  silicon/  robotics/  manufacturing/   (planned)
+    mechanical/       part studios: sketch, features, history tree, on OpenCascade (in progress; CONTRACT.md)
+    assembly/         assemblies: the document and its mate format (a stub)
+    physics/  silicon/  robotics/  manufacturing/   (planned)
 ```
 
 Rules of thumb:
@@ -32,6 +38,11 @@ Rules of thumb:
   `shared/` or the domain's documented exports instead.
 - Files under `domains/pcb/generated/` are written by `server/scripts/gen_*.py` from the C++ sources. Don't edit
   them by hand.
+- `domains/mechanical/generated/` and `domains/assembly/generated/` are written by
+  `scripts/gen-cad-registry.mjs` (`npm run gen:cad`, which `check`, `build` and the tests run) from the files in
+  those domains' `features/`, `tools/`, `panels/`, `services/` and `mates/` folders. They are not committed.
+- A project's documents are tabs (`platform/doctabs`). `domains/registry.ts` says which document kinds exist and
+  which bundle draws each; a domain's editor registers itself through `platform/documents/host.ts`.
 
 The tests in `server/static/tests` find modules with `webPath()` (`static/tests/web-path.js`), which knows
 which area each top-level folder lives in.
