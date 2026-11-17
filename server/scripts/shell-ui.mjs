@@ -295,6 +295,17 @@ try {
   check('its folder and its own three files take the name', ['Sensor/Sensor.kicad_pro', 'Sensor/Sensor.kicad_sch', 'Sensor/Sensor.kicad_pcb'].every((p) => s.all.some((d) => d.path === p)) && !s.all.some((d) => d.path.startsWith('PCB 2')), JSON.stringify(s.all.map((d) => d.path).filter((p) => /Sensor|PCB 2/.test(p))));
   check('Bob sees the new name', await until(bob, () => !!document.querySelector('#doctabs [data-el-tab][data-tab-name="Sensor"]')));
 
+  // the other domains list the boards of every PCB, by the PCB's name (now that one was renamed)
+  await alice.click(tab('Assembly 1'));
+  await alice.waitForSelector('.cad-root[data-doc-kind=assembly] [data-tool=Insert]', { timeout: 60000 });
+  await alice.click('[data-tool=Insert]');
+  await alice.waitForSelector('[data-insert-dialog]', { timeout: 30000 });
+  const offered = await until(alice, () => { const t = document.querySelector('[data-insert-dialog]').innerText; return ['Amp', 'PCB 1', 'Sensor', 'Part Studio 1', 'Part Studio 2'].every((n) => t.includes(n)) && !t.includes('PCB 2'); }, null, 60000);
+  check('the assembly\'s Insert lists the board of every PCB by the PCB\'s name, and the part studios', offered, (await alice.locator('[data-insert-dialog]').innerText()).replace(/\s+/g, ' ').slice(0, 300));
+  await shot(alice, '11a-insert-lists-pcbs');
+  await alice.keyboard.press('Escape');
+  if (await alice.$('[data-insert-dialog]')) await alice.evaluate(() => window.JunctionAssembly && window.JunctionAssembly.closeInsert && window.JunctionAssembly.closeInsert());
+
   await alice.click(tab('Part Studio 1'), { button: 'right' });
   await shot(alice, '11-tab-menu');
   await alice.click('.hp-menu button:has-text("Duplicate")');

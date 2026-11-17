@@ -90,7 +90,7 @@ try {
   const alice = await open(aliceId, 'cad-hist-alice');
 
   // ---------------------------------------------------------------- a project with a part
-  const project = await api(alice, 'POST', '/api/projects/blank', { name: `CAD history ${Date.now().toString(36)}` });
+  const project = await api(alice, 'POST', '/api/projects/blank', { name: `CAD history ${Date.now().toString(36)}`, template: 'pcb' });
   check('a blank project is created', project.status === 200 && !!project.json?.projectId, `status ${project.status}`);
   const pid = project.json.projectId;
   await alice.goto(`${BASE}/p/${pid}/edit`);

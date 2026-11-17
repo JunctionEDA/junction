@@ -99,7 +99,7 @@ const newSketch = async (n) => {
 try {
   await page.goto(`${BASE}/auth/dev?jwt=${jwt(uid, 'sketch-ui')}&next=/`);
   await page.waitForLoadState('networkidle');
-  const project = await page.evaluate(async () => { const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Sketch UI test' }) }); return r.json(); });
+  const project = await page.evaluate(async () => { const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Sketch UI test', template: 'pcb' }) }); return r.json(); });
   await page.goto(`${BASE}/p/${project.projectId}/edit`);
   await page.waitForSelector('#doctabs [role=tab]', { timeout: 30000 });
   await page.click('[data-doc-add]');

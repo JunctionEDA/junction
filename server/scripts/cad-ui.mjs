@@ -67,15 +67,17 @@ try {
 
   // ---------------------------------------------------------------- tabs, and a part studio from "+"
   const project = await alice.evaluate(async () => {
-    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'CAD UI test' }) });
+    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'CAD UI test', template: 'pcb' }) });
     return { status: r.status, body: await r.json().catch(() => null) };
   });
   check('a blank project is created', project.status === 200 && !!project.body?.projectId, `status ${project.status}`);
   const pid = project.body.projectId;
   await alice.goto(`${BASE}/p/${pid}/edit`);
   await alice.waitForSelector('#doctabs [role=tab]', { timeout: 30000 });
-  const tabs = () => alice.$$eval('#doctabs [role=tab]', (els) => els.map((e) => `${e.textContent.trim()}:${e.getAttribute('aria-selected')}`));
-  check('the tabs list the schematic and the board', (await tabs()).join() === 'Schematic:true,Board:false', (await tabs()).join(' | '));
+  // one tab per element (Home, the PCB, each part studio and assembly); the PCB's tab holds its views
+  const tabs = () => alice.$$eval('#doctabs [data-doc-tab=home], #doctabs [data-el-tab]', (els) => els.map((e) => `${e.dataset.elTab ? e.dataset.tabName : 'Home'}:${e.getAttribute('aria-selected')}`));
+  const pcbViews = () => alice.$$eval('#doctabs [data-el-tab][data-doc-type=pcb] [data-pcb-view]', (els) => els.map((e) => `${e.textContent.trim()}:${e.getAttribute('aria-selected')}`));
+  check('the tabs list Home and the PCB; the PCB\'s tab holds the schematic, the board and the BOM', (await tabs()).join() === 'Home:false,CAD_UI_test:true' && (await pcbViews()).join() === 'Schematic:true,Board:false,BOM:false', `${(await tabs()).join(' | ')} / ${(await pcbViews()).join(' | ')}`);
 
   await alice.click('[data-doc-add]');
   await alice.click('text=New part studio');

@@ -80,7 +80,7 @@ try {
   const aliceId = user('cad-x-alice', 990701), bobId = user('cad-x-bob', 990702);
   const alice = await open(aliceId, 'cad-x-alice');
   const project = await alice.evaluate(async () => {
-    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'CAD exchange test' }) });
+    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'CAD exchange test', template: 'pcb' }) });
     return { status: r.status, body: await r.json().catch(() => null) };
   });
   check('a blank project is created', project.status === 200 && !!project.body?.projectId, `status ${project.status}`);
