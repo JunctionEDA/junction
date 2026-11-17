@@ -17,6 +17,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { netKind, pairName } from "../router/route";
+import { isMotionSensor } from "../router/place";
 
 type Level = "error" | "warning" | "note";
 type Add = (rule: string, level: Level, message: string, items?: string[]) => void;
@@ -85,6 +86,21 @@ interface Pad { number: string; x: number; y: number; net: string; box: Box; typ
 interface Fp { ref: string; value: string; lib: string; pads: Pad[] }
 
 export function reviewCraft(doc: any, P: any, k: any, settings: any, add: Add): void {
+  // motion sensors (IMU, accelerometer, gyro, magnetometer): axes the board's, so the firmware needs no remapping
+  {
+    const items: string[] = []; const turns = new Set<string>();
+    for (const it of doc.items.values() as Iterable<any>) {
+      if (it.kind !== "footprint" || !isMotionSensor(k, it.node)) continue; const ref = it.ref || "?";
+      const at = k.kid(it.node, "at"); const rot = at && at.length > 3 ? ((Math.round(k.num(at[3], 0)) % 360) + 360) % 360 : 0;
+      const lay = k.kid(it.node, "layer"); const back = !!lay && k.str(lay[1]) === "B.Cu"; turns.add(`${rot}${back ? "b" : ""}`);
+      if (rot % 90) items.push(`${ref} stands at ${rot}°, not square to the board: its axes are mixed in the firmware`);
+      else if (rot || back) items.push(`${ref} at ${rot}°${back ? " on the back" : ""}: its X, Y${back ? " and Z" : ""} are not the board's (0° on the top side makes them so)`);
+      const p1 = k.kids(it.node, "pad").find((q: any) => k.str(q[1]) === "1"); const pa = p1 ? k.kid(p1, "at") : null;
+      if (pa) { const x = k.num(pa[1], 0), y = k.num(pa[2], 0); if (!(x < 0 && y < 0)) items.push(`${ref}: pin 1 is not at the top left of its footprint, so the footprint is drawn turned against most datasheets' top view; check the axis drawing in the datasheet and set the turn that matches it`); }
+    }
+    if (turns.size > 1) items.push(`the motion sensors stand at different turns (${Array.from(turns).join(", ")}): turn them all the same way`);
+    if (items.length) add("motion.orientation", "warning", "A motion sensor's axes should be the board's own, so firmware reads X, Y and Z without remapping: every accelerometer, gyro, IMU and magnetometer square to the board at 0° on the top side (board.move(ref, rotation=0)).", items);
+  }
   const copper: string[] = doc.copper && doc.copper.length ? doc.copper.slice() : ["F.Cu", "B.Cu"];
   const conds: any[] = P.conductors(doc); const NT = P.netTable(doc);
   const byId = new Map<string, Fp>(); const groundLayers = new Set<string>();

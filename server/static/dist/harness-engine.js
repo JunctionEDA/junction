@@ -122340,6 +122340,7 @@ function place(K11, P, doc2, settings3, opts2 = {}) {
     if (isMotionSensor(K11, it.node)) {
       motion.push(ref);
       if (!sp || sp.rot === void 0 && !(typeof sp.fixed === "object" && sp.fixed && sp.fixed.rot !== void 0)) sp = { ...sp || {}, ref, rot: 0 };
+      if (!sp.side) sp = { ...sp, side: "front" };
     }
     const p = partOf(K11, P, doc2, it, sp);
     all2.push(p);
@@ -140094,6 +140095,29 @@ function walk(t, step, fn) {
   }
 }
 function reviewCraft(doc2, P, k, settings3, add2) {
+  {
+    const items = [];
+    const turns = /* @__PURE__ */ new Set();
+    for (const it of doc2.items.values()) {
+      if (it.kind !== "footprint" || !isMotionSensor(k, it.node)) continue;
+      const ref = it.ref || "?";
+      const at4 = k.kid(it.node, "at");
+      const rot3 = at4 && at4.length > 3 ? (Math.round(k.num(at4[3], 0)) % 360 + 360) % 360 : 0;
+      const lay = k.kid(it.node, "layer");
+      const back = !!lay && k.str(lay[1]) === "B.Cu";
+      turns.add(`${rot3}${back ? "b" : ""}`);
+      if (rot3 % 90) items.push(`${ref} stands at ${rot3}\xB0, not square to the board: its axes are mixed in the firmware`);
+      else if (rot3 || back) items.push(`${ref} at ${rot3}\xB0${back ? " on the back" : ""}: its X, Y${back ? " and Z" : ""} are not the board's (0\xB0 on the top side makes them so)`);
+      const p1 = k.kids(it.node, "pad").find((q4) => k.str(q4[1]) === "1");
+      const pa = p1 ? k.kid(p1, "at") : null;
+      if (pa) {
+        const x = k.num(pa[1], 0), y = k.num(pa[2], 0);
+        if (!(x < 0 && y < 0)) items.push(`${ref}: pin 1 is not at the top left of its footprint, so the footprint is drawn turned against most datasheets' top view; check the axis drawing in the datasheet and set the turn that matches it`);
+      }
+    }
+    if (turns.size > 1) items.push(`the motion sensors stand at different turns (${Array.from(turns).join(", ")}): turn them all the same way`);
+    if (items.length) add2("motion.orientation", "warning", "A motion sensor's axes should be the board's own, so firmware reads X, Y and Z without remapping: every accelerometer, gyro, IMU and magnetometer square to the board at 0\xB0 on the top side (board.move(ref, rotation=0)).", items);
+  }
   const copper = doc2.copper && doc2.copper.length ? doc2.copper.slice() : ["F.Cu", "B.Cu"];
   const conds = P.conductors(doc2);
   const NT = P.netTable(doc2);
