@@ -144,7 +144,7 @@ export function runMirror(studio: PartStudio, toolId: string): void {
       const e = ed.getState().data.entities[t.id];
       if (pre.length) {
         if (!e || e.type !== "line") { studio.host.toast("Click a line to mirror about.", 2500); return; }
-        if (apply(ed, (d) => mirror(d, pre, t.id))) ed.useSelect();
+        if (apply(ed, (d) => mirror(d, pre, t.id))) { ed.select([]); ed.useSelect(); }
         return;
       }
       if (!axis) {

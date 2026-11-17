@@ -285,10 +285,11 @@ export class SketchEditor {
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return false;
     if (ev.key === "Escape") {
       if (this.state.tool !== "select") { this.useSelect(); return true; }
-      if (this.state.selection.length) { this.select([]); return true; }
-      return false;   // the part studio finishes the sketch
+      if (this.state.selection.length) this.select([]);
+      return true;   // Esc never leaves the sketch: one press too many would throw the person out of it
     }
     if (ev.key === "Delete" || ev.key === "Backspace") { this.deleteSelection(); return true; }
+    if (ev.key === "Tab") return true;   // Tab moves between typed measures; it never takes the keyboard away from the sketch
     return false;
   };
 

@@ -53,6 +53,7 @@ const free = (p: Vec2): Snap => ({ p, hints: [], guides: [] });
 export function startDrawTool(studio: PartStudio, spec: ShapeSpec): void {
   const ed = sketchEditor(studio);
   if (!ed.getState().open) return;
+  ed.select([]);
   let pts: Snap[] = [];
   let typed: Typed = {};
   let buffer = "", field = 0;
