@@ -1756,14 +1756,14 @@ function buildTableGeom(doc2, item, n2) {
   const bs = strokeOf(borderN, isPcb ? 0 : SCH_PEN), ss = strokeOf(sepN, isPcb ? 0 : SCH_PEN);
   const lineColor = (st) => isPcb ? pcbColor(layer4) : st.color || SCH.notes;
   const lineWidth = (st) => isPcb ? Math.max(st.w, 0) : st.w > 0 ? st.w : SCH_PEN;
-  const cells = cellNodes.map((c) => {
+  const cells2 = cellNodes.map((c) => {
     const b = boxOf(c);
     if (!b) return null;
     const sp = kid(c, "span");
     const cs = sp ? num(sp[1], 1) : 1, rs = sp ? num(sp[2], 1) : 1;
     return { node: c, box: b, cs, rs };
   });
-  const first = cells.find((c) => c);
+  const first = cells2.find((c) => c);
   item.movable = true;
   item.rot = 0;
   if (isPcb) item.layer = layer4;
@@ -1778,8 +1778,8 @@ function buildTableGeom(doc2, item, n2) {
   item.x = num(a0[1]);
   item.y = num(a0[2]);
   const drawAngle = first.box.rot;
-  for (let ci = 0; ci < cells.length; ci++) {
-    const c = cells[ci];
+  for (let ci = 0; ci < cells2.length; ci++) {
+    const c = cells2[ci];
     if (!c) continue;
     const b = c.box;
     bboxAdd(item, b.x0, b.y0);
@@ -1827,7 +1827,7 @@ function buildTableGeom(doc2, item, n2) {
       textLines(item, tx, ty, text3, ef.size, ef.color || SCH.notes, b.rot, [j.h, j.v], layer4, { z: z2, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX });
     }
   }
-  const cellAt2 = (r, c) => cells[r * cols + c] || null;
+  const cellAt2 = (r, c) => cells2[r * cols + c] || null;
   const line = (p, q4, st) => G(item, { t: "line", x1: p[0], y1: p[1], x2: q4[0], y2: q4[1], w: lineWidth(st), color: lineColor(st), layer: layer4, z: z2, cap: "butt", dash: st.dash || void 0, dashType: st.type || void 0 });
   for (let col = 0; col < cols - 1; col++) for (let row3 = 0; row3 < rows3; row3++) {
     const st = row3 === 0 && header ? bs : colsOn ? ss : null;
@@ -7752,10 +7752,10 @@ function shadowBoxes(it) {
     return b ? [b] : null;
   }
   if (it.kind !== "table") return null;
-  const cells = kidOf2(it.node, "cells");
-  if (!cells) return null;
+  const cells2 = kidOf2(it.node, "cells");
+  if (!cells2) return null;
   const out2 = [];
-  for (const c of cells.slice(1)) {
+  for (const c of cells2.slice(1)) {
     if (!Array.isArray(c) || c[0] !== "table_cell") continue;
     const sp = kidOf2(c, "span");
     if (sp && (+sp[1] <= 0 || +sp[2] <= 0)) continue;
@@ -10104,8 +10104,8 @@ var require_pcb_tools = __commonJS({
           return node;
         }
         if (k === "table") {
-          const cells = K11.kid(node, "cells");
-          const first = cells && K11.kids(cells, "table_cell")[0];
+          const cells2 = K11.kid(node, "cells");
+          const first = cells2 && K11.kids(cells2, "table_cell")[0];
           const s2 = first && K11.kid(first, "start");
           if (!s2) return node;
           const [ax, ay] = [K11.num(s2[1]), K11.num(s2[2])];
@@ -10174,9 +10174,9 @@ var require_pcb_tools = __commonJS({
         }
         if ((k === "gr_text_box" || k === "table_cell") && K11.kid(node, "start") && K11.kid(node, "end")) return rotateTextBoxNode(node, cx, cy, deg3);
         if (k === "table") {
-          const cells = K11.kid(node, "cells");
-          if (!cells) return node;
-          for (const c of K11.kids(cells, "table_cell")) if (K11.kid(c, "start") && K11.kid(c, "end")) rotateTextBoxNode(c, cx, cy, deg3);
+          const cells2 = K11.kid(node, "cells");
+          if (!cells2) return node;
+          for (const c of K11.kids(cells2, "table_cell")) if (K11.kid(c, "start") && K11.kid(c, "end")) rotateTextBoxNode(c, cx, cy, deg3);
           K11.tableModel.normalizeTable(node, true);
           return node;
         }
@@ -10294,8 +10294,8 @@ var require_pcb_tools = __commonJS({
           }
         }
         if (k === "table") {
-          const cells = K11.kid(node, "cells");
-          if (cells) for (const c of K11.kids(cells, "table_cell")) {
+          const cells2 = K11.kid(node, "cells");
+          if (cells2) for (const c of K11.kids(cells2, "table_cell")) {
             flipLayerKid(c);
             toggleMirror(c);
           }
@@ -10578,7 +10578,7 @@ var require_pcb_tools = __commonJS({
         }
         return out2;
       }
-      function groupOf(doc2, id) {
+      function groupOf2(doc2, id) {
         for (const it of doc2.items.values()) if (it.kind === "group" && groupMembers(it.node).includes(id)) return it;
         return null;
       }
@@ -10616,7 +10616,7 @@ var require_pcb_tools = __commonJS({
         const seen = /* @__PURE__ */ new Set();
         for (const id of ids) {
           const it = doc2.items.get(id);
-          const g2 = it && it.kind === "group" ? it : groupOf(doc2, id);
+          const g2 = it && it.kind === "group" ? it : groupOf2(doc2, id);
           if (g2 && !seen.has(g2.id)) {
             seen.add(g2.id);
             out2.push(removedChange(g2));
@@ -11000,7 +11000,7 @@ var require_pcb_tools = __commonJS({
         return false;
       };
       function boxGrid(items, boxOf22, cell = 2) {
-        const cells = /* @__PURE__ */ new Map();
+        const cells2 = /* @__PURE__ */ new Map();
         const big = [];
         const boxes = items.map(boxOf22);
         const key3 = (cx, cy) => cx * 1048576 + cy;
@@ -11012,9 +11012,9 @@ var require_pcb_tools = __commonJS({
           }
           for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
             const k = key3(x, y);
-            const l = cells.get(k);
+            const l = cells2.get(k);
             if (l) l.push(i);
-            else cells.set(k, [i]);
+            else cells2.set(k, [i]);
           }
         });
         return {
@@ -11023,7 +11023,7 @@ var require_pcb_tools = __commonJS({
             const x0 = Math.floor((b[0] - slop) / cell), x1 = Math.floor((b[2] + slop) / cell), y0 = Math.floor((b[1] - slop) / cell), y1 = Math.floor((b[3] + slop) / cell);
             if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4096) return items.slice();
             for (let x = x0; x <= x1; x++) for (let y = y0; y <= y1; y++) {
-              const l = cells.get(key3(x, y));
+              const l = cells2.get(key3(x, y));
               if (l) for (const i of l) hit5.add(i);
             }
             return [...hit5].sort((p, q4) => p - q4).filter((i) => boxesTouch(boxes[i], b, slop)).map((i) => items[i]);
@@ -11133,12 +11133,12 @@ var require_pcb_tools = __commonJS({
       function tableNode(origin, cursor, layer4, grid2) {
         const L = tableGrid(origin, cursor, layer4, grid2);
         const w = gfxWidth(layer4);
-        const cells = ["cells"];
+        const cells2 = ["cells"];
         const just = ["justify", "left"];
         if (isBack2(layer4)) just.push("mirror");
         for (let r = 0; r < L.rows; r++) for (let c = 0; c < L.cols; c++) {
           const x = r66(L.x + c * L.cw), y = r66(L.y + r * L.ch);
-          cells.push([
+          cells2.push([
             "table_cell",
             "",
             ["start", x, y],
@@ -11160,7 +11160,7 @@ var require_pcb_tools = __commonJS({
           ["separators", ["rows", "yes"], ["cols", "yes"], strokeNode(w)],
           ["column_widths", ...Array(L.cols).fill(L.cw)],
           ["row_heights", ...Array(L.rows).fill(L.ch)],
-          cells
+          cells2
         ];
       }
       function imageNode(x, y, base643, layer4) {
@@ -34051,15 +34051,15 @@ var require_pcb_tools = __commonJS({
         };
       }
       function polyIndex(pts) {
-        const G32 = 1, cells = /* @__PURE__ */ new Map(), rows3 = /* @__PURE__ */ new Map();
+        const G32 = 1, cells2 = /* @__PURE__ */ new Map(), rows3 = /* @__PURE__ */ new Map();
         const cell = (v) => Math.floor(v / G32);
         for (let i = 0; i < pts.length; i++) {
           const a = pts[i], b = pts[(i + 1) % pts.length];
           for (let gx = cell(Math.min(a[0], b[0])); gx <= cell(Math.max(a[0], b[0])); gx++) for (let gy = cell(Math.min(a[1], b[1])); gy <= cell(Math.max(a[1], b[1])); gy++) {
             const k = gx + "," + gy;
-            const l = cells.get(k);
+            const l = cells2.get(k);
             if (l) l.push(i);
-            else cells.set(k, [i]);
+            else cells2.set(k, [i]);
           }
           for (let gy = cell(Math.min(a[1], b[1])); gy <= cell(Math.max(a[1], b[1])); gy++) {
             const l = rows3.get(gy);
@@ -34082,7 +34082,7 @@ var require_pcb_tools = __commonJS({
             if (inside3((b[0] + b[2]) / 2, (b[1] + b[3]) / 2)) return -1;
             const seen = /* @__PURE__ */ new Set();
             const r = reach + Math.max(0, e.grow);
-            for (let gx = cell(b[0] - r); gx <= cell(b[2] + r); gx++) for (let gy = cell(b[1] - r); gy <= cell(b[3] + r); gy++) for (const i of cells.get(gx + "," + gy) || []) {
+            for (let gx = cell(b[0] - r); gx <= cell(b[2] + r); gx++) for (let gy = cell(b[1] - r); gy <= cell(b[3] + r); gy++) for (const i of cells2.get(gx + "," + gy) || []) {
               if (seen.has(i)) continue;
               seen.add(i);
               const g2 = rawGap(sh, { t: "seg", a: pts[i], b: pts[(i + 1) % pts.length], r: 0 }) - e.grow;
@@ -34772,12 +34772,12 @@ var require_pcb_tools = __commonJS({
               const a = o[i], b = o[(i + 1) % n2];
               return [Math.min(a[0], b[0]), Math.min(a[1], b[1]), Math.max(a[0], b[0]), Math.max(a[1], b[1])];
             };
-            const cells = (bx) => {
+            const cells2 = (bx) => {
               const out2 = [];
               for (let gx = Math.floor(bx[0] / cell); gx <= Math.floor(bx[2] / cell); gx++) for (let gy = Math.floor(bx[1] / cell); gy <= Math.floor(bx[3] / cell); gy++) out2.push(gx + "," + gy);
               return out2;
             };
-            for (let i = 0; i < n2; i++) for (const k of cells(box3(i))) {
+            for (let i = 0; i < n2; i++) for (const k of cells2(box3(i))) {
               let l = grid2.get(k);
               if (!l) grid2.set(k, l = []);
               l.push(i);
@@ -34788,7 +34788,7 @@ var require_pcb_tools = __commonJS({
               const seg2 = [a, b];
               const bi = box3(i);
               const seen = /* @__PURE__ */ new Set();
-              for (const k of cells(bi)) for (const j of grid2.get(k) || []) {
+              for (const k of cells2(bi)) for (const j of grid2.get(k) || []) {
                 if (segA >= 0 || seen.has(j)) continue;
                 seen.add(j);
                 if (j === i || j === (i + 1) % n2 || j === (i + n2 - 1) % n2) continue;
@@ -37334,7 +37334,7 @@ var require_pcb_tools = __commonJS({
             out2.ids.push(c.id);
             if (i === 0) topId = c.id;
           }
-          const g2 = groupOf(doc2, id);
+          const g2 = groupOf2(doc2, id);
           if (g2 && topId) {
             if (!joins.has(g2.id)) joins.set(g2.id, []);
             joins.get(g2.id).push(topId);
@@ -47754,7 +47754,7 @@ Press <esc> to cancel all; double-click to finish`;
         const skip2 = /* @__PURE__ */ new Set();
         for (const id of sel.ids) {
           const it = doc2.items.get(id);
-          if (!it || it.kind !== "group" || groupOf(doc2, id)) continue;
+          if (!it || it.kind !== "group" || groupOf2(doc2, id)) continue;
           const inner = Array.from(expandGroups(doc2, [id]));
           if (inner.some((x) => {
             const m = doc2.items.get(x);
@@ -48386,7 +48386,7 @@ Press <esc> to cancel all; double-click to finish`;
       act("addToGroup", "Add Items to Group", "", (ctx) => {
         const ids = needSel(ctx);
         if (!ids || !canEdit2(ctx)) return true;
-        const g2 = Array.from(ids).map((id) => groupOf(ctx.doc, id) || (ctx.doc.items.get(id).kind === "group" ? ctx.doc.items.get(id) : null)).find(Boolean);
+        const g2 = Array.from(ids).map((id) => groupOf2(ctx.doc, id) || (ctx.doc.items.get(id).kind === "group" ? ctx.doc.items.get(id) : null)).find(Boolean);
         if (!g2) {
           ctx.toast("The selection touches no group");
           return true;
@@ -48399,7 +48399,7 @@ Press <esc> to cancel all; double-click to finish`;
         const out2 = [];
         const seen = /* @__PURE__ */ new Map();
         for (const id of ids) {
-          const g2 = groupOf(ctx.doc, id);
+          const g2 = groupOf2(ctx.doc, id);
           if (g2) {
             if (!seen.has(g2.id)) seen.set(g2.id, { g: g2, ids: [] });
             seen.get(g2.id).ids.push(id);
@@ -52454,11 +52454,11 @@ Press <esc> to cancel all; double-click to finish`;
         const pairs = [];
         for (let i = 0; i < zones.length; i++) for (let j = i + 1; j < zones.length; j++) {
           const a = zones[i], b = zones[j];
-          const shared2 = new Set([...a.layers].filter((l) => b.layers.has(l)));
-          if (!shared2.size) continue;
+          const shared22 = new Set([...a.layers].filter((l) => b.layers.has(l)));
+          if (!shared22.size) continue;
           if (a.bbox[2] < b.bbox[0] || b.bbox[2] < a.bbox[0] || a.bbox[3] < b.bbox[1] || b.bbox[3] < a.bbox[1]) continue;
           const inter = intersectD2(toPaths22(a), toPaths22(b), FillRule2.EvenOdd, 6);
-          if (areaPathsD2(inter) !== 0 || inZone(b.outlines[0][0], a) || inZone(a.outlines[0][0], b)) pairs.push({ a, b, shared: shared2 });
+          if (areaPathsD2(inter) !== 0 || inZone(b.outlines[0][0], a) || inZone(a.outlines[0][0], b)) pairs.push({ a, b, shared: shared22 });
         }
         if (!pairs.length) return null;
         const parent = new Map(zones.map((z2) => [z2, z2]));
@@ -52760,7 +52760,7 @@ Press <esc> to cancel all; double-click to finish`;
       var same3 = (a, b) => Math.abs(a[0] - b[0]) < EPS3 && Math.abs(a[1] - b[1]) < EPS3;
       var strokeOf2 = (n2) => clone5(K11.kid(n2, "stroke") || ["stroke", ["width", 0.1], ["type", "default"]]);
       var lineOf = (a, b, like) => ["gr_line", ["start", r66(a[0]), r66(a[1])], ["end", r66(b[0]), r66(b[1])], strokeOf2(like), ["layer", layerOf2(like)], ["uuid", K11.newUuid()]];
-      function shared(A, B) {
+      function shared2(A, B) {
         if (same3(A.a, B.a)) return [0, 0];
         if (same3(A.a, B.b)) return [0, 1];
         if (same3(A.b, B.a)) return [1, 0];
@@ -52775,7 +52775,7 @@ Press <esc> to cancel all; double-click to finish`;
         if (len(sub2(L.b, L.a)) < EPS3) L.deleted = true;
       };
       function filletPair(A, B, r, out2) {
-        const s2 = shared(A, B);
+        const s2 = shared2(A, B);
         if (!s2) return null;
         const P4 = endOf2(A, s2[0]), fa = endOf2(A, 1 - s2[0]), fb = endOf2(B, 1 - s2[1]);
         const ua = sub2(fa, P4), ub = sub2(fb, P4), la = len(ua), lb = len(ub);
@@ -52794,7 +52794,7 @@ Press <esc> to cancel all; double-click to finish`;
         return true;
       }
       function chamferPair(A, B, setback, out2) {
-        const s2 = shared(A, B);
+        const s2 = shared2(A, B);
         if (!s2) return null;
         const P4 = endOf2(A, s2[0]), fa = endOf2(A, 1 - s2[0]), fb = endOf2(B, 1 - s2[1]);
         const ua = sub2(fa, P4), ub = sub2(fb, P4), la = len(ua), lb = len(ub);
@@ -53282,12 +53282,12 @@ Press <esc> to cancel all; double-click to finish`;
             const B = order[j];
             if (B.box[0] - A.box[2] > (isFinite(minClear) ? minClear : 50) + 2 * maxR) break;
             if (A.net === B.net) continue;
-            let shared2 = false;
+            let shared22 = false;
             for (const l of A.layers) if (B.layers.has(l)) {
-              shared2 = true;
+              shared22 = true;
               break;
             }
-            if (!shared2) continue;
+            if (!shared22) continue;
             if (B.box[1] - A.box[3] > (isFinite(minClear) ? minClear : 50) + 2 * maxR || A.box[1] - B.box[3] > (isFinite(minClear) ? minClear : 50) + 2 * maxR) continue;
             let d = Infinity;
             for (const [a, b] of A.segs) for (const [c, e] of B.segs) d = Math.min(d, a === b && c === e ? Math.hypot(a[0] - c[0], a[1] - c[1]) : c === e ? dPS(c, a, b) : a === b ? dPS(a, c, e) : segSegDist(a, b, c, e));
@@ -54891,7 +54891,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         padAt: padAt2,
         padProperties,
         tunerProperties,
-        groupOf,
+        groupOf: groupOf2,
         expandGroups,
         groupMembers: (doc2, id) => {
           const it = doc2.items.get(id);
@@ -55312,7 +55312,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         clearNets,
         LOCKED_WARNING,
         groupNode,
-        groupOf,
+        groupOf: groupOf2,
         groupMembers,
         expandGroups,
         groupChanges,
@@ -78218,6 +78218,55 @@ var init_prefs = __esm({
   }
 });
 
+// web/domains/pcb/editor/pane-tabs.ts
+function groupOf(name) {
+  return TAB_GROUPS.find((g2) => g2.includes(name));
+}
+function groupKey(g2) {
+  return g2.join("+");
+}
+function frontOf(g2, shown2) {
+  const f2 = shared.front[groupKey(g2)];
+  return f2 && g2.includes(f2) && shown2(f2) ? f2 : g2.find(shown2);
+}
+function bringToFront(name) {
+  const g2 = groupOf(name);
+  if (!g2) return;
+  const k = groupKey(g2);
+  if (shared.front[k] === name) return;
+  shared.front = Object.assign({}, shared.front, { [k]: name });
+  try {
+    localStorage.setItem(KEY3, JSON.stringify(shared.front));
+  } catch (e) {
+  }
+  for (const fn of Array.from(shared.subs)) fn();
+}
+function behindTab(name, panes) {
+  const g2 = groupOf(name);
+  if (!g2 || !panes[name]) return false;
+  return frontOf(g2, (n2) => !!panes[n2]) !== name;
+}
+var TAB_GROUPS, KEY3, shared;
+var init_pane_tabs = __esm({
+  "web/domains/pcb/editor/pane-tabs.ts"() {
+    "use strict";
+    TAB_GROUPS = [["chat", "history"]];
+    KEY3 = "kui.paneTab";
+    shared = (() => {
+      const g2 = globalThis;
+      if (!g2.__kuiPaneTabs) {
+        let front = {};
+        try {
+          front = JSON.parse(localStorage.getItem(KEY3) || "{}");
+        } catch (e) {
+        }
+        g2.__kuiPaneTabs = { front, subs: /* @__PURE__ */ new Set() };
+      }
+      return g2.__kuiPaneTabs;
+    })();
+  }
+});
+
 // web/domains/pcb/tables.ts
 function toolFor(editor3, actionId) {
   const extra = EXTRA_TOOLS.find((e) => e.id === actionId);
@@ -78875,7 +78924,12 @@ function showPane(name, show6) {
   const ed = editorId2();
   if (!PANE_NAMES.includes(name) || PANE_EDITOR_ONLY[name] && PANE_EDITOR_ONLY[name] !== ed || name === "libtree" && E.DOC_TYPE !== "footprint") return;
   if (name === "filter") return;
+  if (show6 === void 0 && behindTab(name, E.panes)) {
+    bringToFront(name);
+    return;
+  }
   const next = show6 === void 0 ? !E.panes[name] : !!show6;
+  if (next) bringToFront(name);
   E.panes = Object.assign({}, E.panes, { [name]: next });
   E.panes.filter = filterFollows(E.panes, ed);
   for (const e of PROJECT_PANES.has(name) ? ["sch", "pcb"] : [ed]) {
@@ -78978,6 +79032,7 @@ var init_panes = __esm({
     init_util();
     init_view();
     init_units();
+    init_pane_tabs();
     init_tables();
     PANE_NAMES = ["props", "hier", "filter", "history", "peers", "comments", "chat", "appearance", "search", "netnav", "netinsp", "libtree"];
     PANE_EDITOR_ONLY = { hier: "sch", netnav: "sch", netinsp: "pcb" };
@@ -81712,7 +81767,7 @@ function read2(key3) {
   }
 }
 function loadPinnedLibs(kind) {
-  const s2 = new Set(read2(KEY3(kind)));
+  const s2 = new Set(read2(KEY4(kind)));
   const old = read2(OLD[kind]);
   if (old.length) {
     for (const n2 of old) s2.add(n2);
@@ -81726,7 +81781,7 @@ function loadPinnedLibs(kind) {
 }
 function savePinnedLibs(kind, s2) {
   try {
-    localStorage.setItem(KEY3(kind), JSON.stringify([...s2]));
+    localStorage.setItem(KEY4(kind), JSON.stringify([...s2]));
   } catch {
   }
 }
@@ -81737,11 +81792,11 @@ function setLibPinned(kind, nick, on2) {
   savePinnedLibs(kind, s2);
   return s2;
 }
-var KEY3, OLD;
+var KEY4, OLD;
 var init_pinned = __esm({
   "web/domains/pcb/library/pinned.ts"() {
     "use strict";
-    KEY3 = (k) => "kui.libtree.pinned." + k;
+    KEY4 = (k) => "kui.libtree.pinned." + k;
     OLD = { symbol: "kui.symedit.pinned", footprint: "kui.fpedit.pinned" };
   }
 });
@@ -82540,8 +82595,8 @@ function pasteCells2(text3) {
   if (!t.includes("	") && t.includes(",")) t = t.replace(/,/g, "	");
   return t.split("\n").filter((l, i, a) => l !== "" || i < a.length - 1).map((l) => l.split("	"));
 }
-function applyPaste(rows3, cells, row3, col, blank) {
-  cells.forEach((line, i) => {
+function applyPaste(rows3, cells2, row3, col, blank) {
+  cells2.forEach((line, i) => {
     const r = row3 + i;
     while (rows3.length <= r) rows3.push(blank());
     line.forEach((v, j) => {
@@ -84048,8 +84103,8 @@ The web editor cannot read ${r.type} libraries; migrate this one in KiCad.`);
       if (focus && focus.dataset && focus.dataset.col && p.rows[row3] && p.rows[row3].nickname) return;
       if (row3 >= p.rows.length) row3 = p.rows.length;
       const startCol = focus && focus.dataset && focus.dataset.col ? Math.max(0, TEXT_COLS.indexOf(focus.dataset.col)) : TEXT_COLS.indexOf("nickname");
-      const cells = pasteCells2(text3);
-      const cols = sym ? cells : cells.map((l) => startCol <= 1 ? [...l.slice(0, 1 - startCol), "1", ...l.slice(1 - startCol)] : l);
+      const cells2 = pasteCells2(text3);
+      const cols = sym ? cells2 : cells2.map((l) => startCol <= 1 ? [...l.slice(0, 1 - startCol), "1", ...l.slice(1 - startCol)] : l);
       applyPaste(p.rows, cols, row3, startCol, blankRow);
     }
     p.grid.refresh();
@@ -89957,11 +90012,11 @@ function markdownToHtml(md) {
     }
     if (/^\s*\|/.test(l) && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1])) {
       flush();
-      const cells = (row3) => row3.trim().replace(/^\|/, "").replace(/\|$/, "").split(/(?<!\\)\|/).map((c) => c.trim());
-      const head3 = cells(l);
+      const cells2 = (row3) => row3.trim().replace(/^\|/, "").replace(/\|$/, "").split(/(?<!\\)\|/).map((c) => c.trim());
+      const head3 = cells2(l);
       i += 2;
       const rows3 = [];
-      while (i < lines.length && /^\s*\|/.test(lines[i])) rows3.push(cells(lines[i++]));
+      while (i < lines.length && /^\s*\|/.test(lines[i])) rows3.push(cells2(lines[i++]));
       out2.push("<table><tr>" + head3.map((c) => "<th align=left>" + mdInline(c) + "</th>").join("") + "</tr>" + rows3.map((r) => "<tr>" + r.map((c) => "<td valign=top>" + mdInline(c) + "</td>").join("") + "</tr>").join("") + "</table>");
       continue;
     }
@@ -91884,8 +91939,8 @@ function menuCtx() {
   const kinds = items.map(kindOf);
   if (E.selField && !kinds.length) kinds.push("field");
   if (E.selPins.length && !kinds.length) for (let i = 0; i < E.selPins.length; i++) kinds.push("pin");
-  const cells = tableMenu.state();
-  if (cells) for (let i = 0; i < cells.n; i++) kinds.push("table_cell");
+  const cells2 = tableMenu.state();
+  if (cells2) for (let i = 0; i < cells2.n; i++) kinds.push("table_cell");
   if (sch && !kinds.length) {
     const mk = (E.markers || []).find((m) => m && m.selected);
     if (mk) kinds.push(mk.severity === "exclusion" ? "marker_excluded" : "marker");
@@ -91925,7 +91980,7 @@ function menuCtx() {
     hasItems: !!E.kdoc && E.kdoc.items.size > 0,
     checks: attributeChecks(items),
     overDrawingSheet: sch && !items.length && overDrawingSheet(),
-    cells: cells ? { block: cells.block, merged: cells.merged, structure: cells.structure } : null
+    cells: cells2 ? { block: cells2.block, merged: cells2.merged, structure: cells2.structure } : null
   };
 }
 function overDrawingSheet() {
@@ -94836,7 +94891,7 @@ async function openGendrill(o = {}) {
   show2(fab, ctx, p, stored2, version3);
 }
 function show2(fab, ctx, p, stored2, version3) {
-  const pref = loadPrefs(KEY4, DEFAULTS2);
+  const pref = loadPrefs(KEY5, DEFAULTS2);
   const outDir = textField(p.outputDirectory, { key: "outputDir" });
   const rbExcellon = h2("input", { type: "radio", name: "gd-fmt", checked: !pref.gerber, "data-k": "excellon" }), rbGerber = h2("input", { type: "radio", name: "gd-fmt", checked: pref.gerber, "data-k": "gerberX2" });
   const mirror = checkField(pref.mirror, "Mirror Y axis", { key: "mirror", tip: "Not recommended.\nUsed mostly by users who make the boards themselves." });
@@ -94875,7 +94930,7 @@ function show2(fab, ctx, p, stored2, version3) {
   }
   rbExcellon.addEventListener("change", update);
   rbGerber.addEventListener("change", update);
-  const remember = () => savePrefs(KEY4, { gerber: rbGerber.checked, mirror: mirror.get(), minimal: minimal.get(), merge: merge2.get(), altOval: altOval.get(), tenting: tenting.get(), genMap: genMap.get(), mapFormat: mapFmt.get(), metric: units.get() === 0, zeros: zeros.get() });
+  const remember = () => savePrefs(KEY5, { gerber: rbGerber.checked, mirror: mirror.get(), minimal: minimal.get(), merge: merge2.get(), altOval: altOval.get(), tenting: tenting.get(), genMap: genMap.get(), mapFormat: mapFmt.get(), metric: units.get() === 0, zeros: zeros.get() });
   const updateConfig = () => {
     remember();
     p.outputDirectory = outDir.get().replace(/\\/g, "/");
@@ -94979,7 +95034,7 @@ function show2(fab, ctx, p, stored2, version3) {
     }
   });
 }
-var KEY4, DEFAULTS2, ZEROS, MAP_FORMATS, MAP_PLOT;
+var KEY5, DEFAULTS2, ZEROS, MAP_FORMATS, MAP_PLOT;
 var init_gendrill = __esm({
   "web/domains/pcb/editor/pcbdialogs/gendrill.ts"() {
     "use strict";
@@ -94991,7 +95046,7 @@ var init_gendrill = __esm({
     init_plot();
     init_plot_out();
     init_ui();
-    KEY4 = "kicad.gendrill";
+    KEY5 = "kicad.gendrill";
     DEFAULTS2 = { gerber: false, mirror: false, minimal: false, merge: false, altOval: false, tenting: false, genMap: false, mapFormat: 1, metric: true, zeros: 0 };
     ZEROS = ["decimal", "suppress_leading", "suppress_trailing", "keep"];
     MAP_FORMATS = [[0, "Postscript"], [1, "Gerber X2"], [2, "DXF"], [3, "SVG"], [4, "PDF"]];
@@ -95591,7 +95646,7 @@ async function openPosFile() {
   show4(fab, outDir, plotAux, variants);
 }
 function show4(fab, boardOutDir, plotAux, variants) {
-  const pref = loadPrefs(KEY5, DEFAULTS3);
+  const pref = loadPrefs(KEY6, DEFAULTS3);
   const cur2 = String(E.currentVariant || "");
   const variant = selectField(cur2 && variants.includes(cur2) ? cur2 : variants[0], variants.map((v) => [v, v]), { key: "variant" });
   const selectedVariant = () => variant.get() !== variants[0] ? variant.get() : "";
@@ -95622,7 +95677,7 @@ function show4(fab, boardOutDir, plotAux, variants) {
     en(smdOnly, !gerber);
     en(excludeTH, !gerber);
   }
-  const remember = () => savePrefs(KEY5, { format: format.get(), mm: units.get() === 1, smdOnly: smdOnly.get(), excludeTH: excludeTH.get(), excludeDnp: excludeDnp.get(), excludeBom: excludeBom.get(), boardEdge: boardEdge.get(), auxOrigin: auxOrigin.get(), negateX: negateX.get(), single: single.get(), outputDir: outDir.get() });
+  const remember = () => savePrefs(KEY6, { format: format.get(), mm: units.get() === 1, smdOnly: smdOnly.get(), excludeTH: excludeTH.get(), excludeDnp: excludeDnp.get(), excludeBom: excludeBom.get(), boardEdge: boardEdge.get(), auxOrigin: auxOrigin.get(), negateX: negateX.get(), single: single.get(), outputDir: outDir.get() });
   async function generate() {
     remember();
     const fctx = await fabContext();
@@ -95720,7 +95775,7 @@ function show4(fab, boardOutDir, plotAux, variants) {
     }
   });
 }
-var KEY5, DEFAULTS3;
+var KEY6, DEFAULTS3;
 var init_posfile = __esm({
   "web/domains/pcb/editor/pcbdialogs/posfile.ts"() {
     "use strict";
@@ -95731,7 +95786,7 @@ var init_posfile = __esm({
     init_canvas();
     init_plot_out();
     init_ui();
-    KEY5 = "kicad.posfile";
+    KEY6 = "kicad.posfile";
     DEFAULTS3 = { format: 0, mm: true, smdOnly: false, excludeTH: false, excludeDnp: false, excludeBom: false, boardEdge: false, auxOrigin: true, negateX: false, single: true, outputDir: null };
   }
 });
@@ -95754,7 +95809,7 @@ async function openOdbpp() {
   const first = await fabContext();
   if (!first) return;
   const board3 = first.projectName || "board";
-  const pref = loadPrefs(KEY6, DEFAULTS4);
+  const pref = loadPrefs(KEY7, DEFAULTS4);
   const out2 = textField(`${board3}-odb${EXT2[pref.compress] || ""}`, { key: "outputFile" });
   const withExt = (c) => {
     out2.set(out2.get().replace(/\.(zip|tgz)$/i, "") + EXT2[c]);
@@ -95774,7 +95829,7 @@ async function openOdbpp() {
   const read3 = () => ({ inch: units.get() === 1, precision: clamp(), compress: compress.get(), origin: origin.get(), product: product.get().trim() });
   async function run2(close) {
     const p = read3();
-    savePrefs(KEY6, p);
+    savePrefs(KEY7, p);
     const name = out2.get().trim().replace(/\\/g, "/").split("/").pop() || `${board3}-odb`;
     const fctx = await fabContext();
     if (!fctx) return;
@@ -95812,7 +95867,7 @@ ${e instanceof Error ? e.message : String(e)}`);
         void run2(closeDlg);
       } }
     ],
-    cancel: () => savePrefs(KEY6, read3()),
+    cancel: () => savePrefs(KEY7, read3()),
     build(body) {
       ensureCss2();
       body.append(
@@ -95827,7 +95882,7 @@ ${e instanceof Error ? e.message : String(e)}`);
     }
   });
 }
-var KEY6, DEFAULTS4, ORIGINS, minPrecision, MAX_PRECISION, EXT2;
+var KEY7, DEFAULTS4, ORIGINS, minPrecision, MAX_PRECISION, EXT2;
 var init_odbpp = __esm({
   "web/domains/pcb/editor/pcbdialogs/odbpp.ts"() {
     "use strict";
@@ -95836,7 +95891,7 @@ var init_odbpp = __esm({
     init_fab_outputs();
     init_plot_out();
     init_ui();
-    KEY6 = "kicad.odbpp";
+    KEY7 = "kicad.odbpp";
     DEFAULTS4 = { inch: false, precision: 6, compress: 1, origin: 0, product: "" };
     ORIGINS = ["absolute", "aux", "grid"];
     minPrecision = (inch) => inch ? 4 : 3;
@@ -95874,7 +95929,7 @@ async function openIpc2581() {
   if (!first) return;
   const S3 = fab.ipc2581Sections;
   const board3 = first.projectName || "board";
-  const pref = loadPrefs(KEY7, DEFAULTS5);
+  const pref = loadPrefs(KEY8, DEFAULTS5);
   const fieldNames2 = [];
   for (const it of first.doc.items.values()) if (it.kind === "footprint") {
     for (const c of it.node) if (Array.isArray(c) && c[0] === "property" && typeof c[1] === "string" && !["Reference", "Value", "Footprint", "Datasheet", "Description"].includes(c[1]) && !fieldNames2.includes(c[1])) fieldNames2.push(c[1]);
@@ -95965,7 +96020,7 @@ async function openIpc2581() {
   const read3 = () => ({ inch: units.get() === 1, precision: precision.get(), rev: version3.get(), compress: compress.get(), mode: mode(), sections, anonymize: netNames2.get() === 1, omitRefDes: refDes.get() === 1, ...bomFields });
   async function run2() {
     const p = read3();
-    savePrefs(KEY7, p);
+    savePrefs(KEY8, p);
     const lines = [];
     const name = (out2.get().trim().replace(/\\/g, "/").split("/").pop() || "").trim();
     if (!name) {
@@ -96071,11 +96126,11 @@ ${e instanceof Error ? e.message : String(e)}` }]);
       return false;
     },
     cancel() {
-      savePrefs(KEY7, read3());
+      savePrefs(KEY8, read3());
     }
   });
 }
-var SECTION_ROWS, DATA_SETS, KEY7, DEFAULTS5;
+var SECTION_ROWS, DATA_SETS, KEY8, DEFAULTS5;
 var init_ipc2581 = __esm({
   "web/domains/pcb/editor/pcbdialogs/ipc2581.ts"() {
     "use strict";
@@ -96105,7 +96160,7 @@ var init_ipc2581 = __esm({
       ["Y", "physical netlist", "PhyNetGroup"]
     ];
     DATA_SETS = [["USERDEF", "All data (user-defined)"], ["BOM", "Bill of materials"], ["STACKUP", "Stackup"], ["FABRICATION", "Fabrication"], ["ASSEMBLY", "Assembly"], ["TEST", "Test"], ["STENCIL", "Stencil"]];
-    KEY7 = "kicad.ipc2581";
+    KEY8 = "kicad.ipc2581";
     DEFAULTS5 = { inch: false, precision: 6, rev: "C", compress: false, mode: "USERDEF", sections: null, anonymize: false, omitRefDes: false, id: "", mpn: "", mfg: "", distPn: "", dist: "N/A", bomRev: "" };
   }
 });
@@ -97215,7 +97270,7 @@ function docForVariant(doc2, uuidPath, variant) {
   return copy || doc2;
 }
 function show5(fab, variants) {
-  const pref = loadPrefs(KEY8, SCH_PLOT_DEFAULTS);
+  const pref = loadPrefs(KEY9, SCH_PLOT_DEFAULTS);
   const pro = projectJson();
   const cur2 = String(E2.currentVariant || "");
   const variantSel = selectField(cur2 && variants.includes(cur2) ? cur2 : variants[0], variants.map((v) => [v, v]), { key: "variant" });
@@ -97290,7 +97345,7 @@ function show5(fab, variants) {
   });
   async function plot(all2) {
     const o = prefsNow();
-    savePrefs(KEY8, o);
+    savePrefs(KEY9, o);
     const lines = [];
     const say = (severity, text3) => {
       lines.push({ severity, text: text3 });
@@ -97371,7 +97426,7 @@ function show5(fab, variants) {
       } },
       { label: "Close", close: true, id: "close" }
     ],
-    cancel: () => savePrefs(KEY8, prefsNow()),
+    cancel: () => savePrefs(KEY9, prefsNow()),
     build(body) {
       ensureCss2();
       body.append(
@@ -97466,7 +97521,7 @@ async function saveDirectory(dir) {
     console.warn("plot directory not saved", e);
   }
 }
-var KEY8, SCH_PLOT_DEFAULTS, FORMATS2, EXT3, lastReport2;
+var KEY9, SCH_PLOT_DEFAULTS, FORMATS2, EXT3, lastReport2;
 var init_plot_schematic = __esm({
   "web/domains/pcb/dialogs/plot-schematic.ts"() {
     "use strict";
@@ -97480,7 +97535,7 @@ var init_plot_schematic = __esm({
     init_project();
     init_sch_hierarchy();
     init_sch_variants();
-    KEY8 = "kicad.plot.schematic";
+    KEY9 = "kicad.plot.schematic";
     SCH_PLOT_DEFAULTS = { format: 1, pageSize: 0, frame: true, color: true, theme: "default", background: false, minWidth: 0.1524, popups: true, links: true, metadata: true, dxfInch: false, dpi: 300, antialias: true, openAfter: false };
     FORMATS2 = ["Postscript", "PDF", "SVG", "DXF", "PNG"];
     EXT3 = ["ps", "pdf", "svg", "dxf", "png"];
@@ -100284,7 +100339,7 @@ function build3(input) {
           const groups = e.groups && typeof e.groups === "object" && !Array.isArray(e.groups) ? Object.fromEntries(Object.entries(e.groups).filter(([, v]) => Array.isArray(v)).map(([n2, v]) => [n2, v.map(String)])) : void 0;
           const separate = e.separate === false ? false : e.separate && typeof e.separate === "object" ? { quiet: num13(e.separate.quiet), noisy: num13(e.separate.noisy) } : void 0;
           const fence = e.fence === false ? false : e.fence && typeof e.fence === "object" ? { spacing: num13(e.fence.spacing), nets: Array.isArray(e.fence.nets) ? e.fence.nets.map((n2) => boardNet2(doc2, text2(n2, "net")).name) : void 0, returnVias: e.fence.return_vias === false ? false : void 0 } : void 0;
-          const res = R2.route(k, P, doc2, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : void 0, timeMs: Math.round(1e3 * Math.min(900, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : void 0, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : void 0, planes: e.planes === true ? true : void 0, criticalFirst: e.critical_first === false ? false : void 0, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : void 0, escapes: e.escapes === true || e.escapes === false ? e.escapes : typeof e.escapes === "number" && e.escapes >= 0 ? e.escapes : e.escapes && typeof e.escapes === "object" ? { depth: num13(e.escapes.depth), spread: num13(e.escapes.spread) } : void 0, plan: e.plan === true || e.plan === false ? e.plan : e.plan && typeof e.plan === "object" ? { tile: num13(e.plan.tile), iters: num13(e.plan.iters), layerCost: num13(e.plan.layer_cost), outside: num13(e.plan.outside), mask: e.plan.mask === true ? true : void 0, vias: e.plan.vias === true ? true : void 0, open: num13(e.plan.open) } : void 0, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : void 0 });
+          const res = R2.route(k, P, doc2, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : void 0, timeMs: Math.round(1e3 * Math.min(900, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : void 0, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : void 0, planes: e.planes === true ? true : void 0, criticalFirst: e.critical_first === false ? false : void 0, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : void 0, escapes: e.escapes === true || e.escapes === false ? e.escapes : typeof e.escapes === "number" && e.escapes >= 0 ? e.escapes : e.escapes && typeof e.escapes === "object" ? { depth: num13(e.escapes.depth), spread: num13(e.escapes.spread) } : void 0, plan: e.plan === true || e.plan === false ? e.plan : e.plan && typeof e.plan === "object" ? { tile: num13(e.plan.tile), iters: num13(e.plan.iters), layerCost: num13(e.plan.layer_cost), outside: num13(e.plan.outside), mask: e.plan.mask === true ? true : void 0, vias: e.plan.vias === true ? true : void 0, open: num13(e.plan.open) } : void 0, ripup: e.ripup === "mincut" || e.ripup === "near" ? e.ripup : void 0, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : void 0 });
           const failed = (res.failed || []).map((f2) => ({ net: f2.net, from: f2.a.map(r44), to: f2.b.map(r44) }));
           if (!res.total) throw new ToolError(`nothing to route: every connection ${nets ? "of " + nets.join(", ") : "on the board"} is already made`);
           if (!res.items.length) throw new ToolError(`the autorouter could not make any of the ${res.total} missing connection${res.total === 1 ? "" : "s"} within the design rules: ${JSON.stringify(failed.slice(0, 12))}`);
@@ -105259,7 +105314,7 @@ function buildNetlist(root5, loadSheet, h3, project3) {
     }
   }
   const groups = /* @__PURE__ */ new Map();
-  const groupOf = (n2) => {
+  const groupOf2 = (n2) => {
     const r = uf.find(n2);
     let g2 = groups.get(r);
     if (!g2) {
@@ -105268,10 +105323,10 @@ function buildNetlist(root5, loadSheet, h3, project3) {
     }
     return g2;
   };
-  for (const [n2, l] of drivers) groupOf(n2).drivers.push(...l);
-  for (const [n2, l] of pinsAt) groupOf(n2).pins.push(...l);
-  for (const n2 of ncNodes) groupOf(n2).nc = true;
-  for (const n2 of sheetPinNodes) groupOf(n2).sheetPin = true;
+  for (const [n2, l] of drivers) groupOf2(n2).drivers.push(...l);
+  for (const [n2, l] of pinsAt) groupOf2(n2).pins.push(...l);
+  for (const n2 of ncNodes) groupOf2(n2).nc = true;
+  for (const n2 of sheetPinNodes) groupOf2(n2).sheetPin = true;
   const nets = /* @__PURE__ */ new Map();
   const nameOf3 = (g2) => {
     const strong = g2.drivers.filter((d) => d.prio >= P_HIER);
@@ -106895,11 +106950,11 @@ var roundIU = (v, isPcb) => {
 function tableInfo(node) {
   const cols = Math.max(1, Math.round(num((kid(node, "column_count") || [])[1], 1)) || 1);
   const cellsN = kid(node, "cells");
-  const cells = cellsN ? kids(cellsN, "table_cell") : [];
-  const rows3 = Math.floor(cells.length / cols);
+  const cells2 = cellsN ? kids(cellsN, "table_cell") : [];
+  const rows3 = Math.floor(cells2.length / cols);
   const cw = kid(node, "column_widths"), rh = kid(node, "row_heights");
   const widths = cw ? cw.slice(1).map((v) => num(v)) : [], heights = rh ? rh.slice(1).map((v) => num(v)) : [];
-  return { cols, rows: rows3, cells, widths, heights };
+  return { cols, rows: rows3, cells: cells2, widths, heights };
 }
 var at0 = (a, i) => i >= 0 && i < a.length && isFinite(a[i]) ? a[i] : 0;
 function spanOf(cell) {
@@ -107119,14 +107174,14 @@ function setColCount(node, n2) {
   if (cc) cc[1] = n2;
   else node.splice(1, 0, ["column_count", n2]);
 }
-function setCells(node, cells) {
+function setCells(node, cells2) {
   const cn = kid(node, "cells");
   if (!cn) {
-    node.push(["cells", ...cells]);
+    node.push(["cells", ...cells2]);
     return;
   }
   const rest = cn.slice(1).filter((c) => !(Array.isArray(c) && c[0] === "table_cell"));
-  cn.splice(1, cn.length - 1, ...cells, ...rest);
+  cn.splice(1, cn.length - 1, ...cells2, ...rest);
 }
 function copyCell(src, uuid) {
   const c = cloneNode(src);
@@ -107142,12 +107197,12 @@ function addRow(node0, isPcb, row3, below, uuid) {
   const node = cloneNode(node0), T = tableInfo(node);
   const pos = tablePosition(node, isPcb);
   const sources = Array.from({ length: T.cols }, (_, c) => T.cells[row3 * T.cols + c]);
-  const cells = T.cells.slice();
+  const cells2 = T.cells.slice();
   const at5 = (below ? row3 + 1 : row3) * T.cols;
-  cells.splice(at5, 0, ...sources.map((s2) => copyCell(s2, uuid())));
+  cells2.splice(at5, 0, ...sources.map((s2) => copyCell(s2, uuid())));
   const rows3 = T.rows + 1, heights = T.heights.slice(0, Math.max(T.heights.length, rows3));
   for (let r = rows3 - 1; r > row3; r--) heights[r] = at0(heights, r - 1);
-  setCells(node, cells);
+  setCells(node, cells2);
   writeSizes(node, isPcb, T.widths, heights, T.cols, rows3);
   setTablePosition(node, isPcb, pos);
   normalizeTable(node, isPcb);
@@ -107157,12 +107212,12 @@ function addCol(node0, isPcb, col, after, uuid) {
   const node = cloneNode(node0), T = tableInfo(node);
   const pos = tablePosition(node, isPcb);
   const sources = Array.from({ length: T.rows }, (_, r) => T.cells[r * T.cols + col]);
-  const cols = T.cols + 1, cells = T.cells.slice();
-  for (let r = 0; r < T.rows; r++) cells.splice(r * cols + col + (after ? 1 : 0), 0, copyCell(sources[r], uuid()));
+  const cols = T.cols + 1, cells2 = T.cells.slice();
+  for (let r = 0; r < T.rows; r++) cells2.splice(r * cols + col + (after ? 1 : 0), 0, copyCell(sources[r], uuid()));
   const widths = T.widths.slice(0, Math.max(T.widths.length, cols));
   for (let c = cols - 1; c > col; c--) widths[c] = at0(widths, c - 1);
   setColCount(node, cols);
-  setCells(node, cells);
+  setCells(node, cells2);
   writeSizes(node, isPcb, widths, T.heights, cols, T.rows);
   setTablePosition(node, isPcb, pos);
   normalizeTable(node, isPcb);
@@ -107182,9 +107237,9 @@ function deleteRows(node0, isPcb, rows3) {
   if (del.size === T0.rows) return "remove";
   const node = cloneNode(node0), T = tableInfo(node);
   const pos = tablePosition(node, isPcb);
-  const cells = T.cells.filter((_, i) => !del.has(rowOf(i, T.cols)));
+  const cells2 = T.cells.filter((_, i) => !del.has(rowOf(i, T.cols)));
   const keep = Array.from({ length: T.rows }, (_, r) => r).filter((r) => !del.has(r));
-  setCells(node, cells);
+  setCells(node, cells2);
   writeSizes(node, isPcb, T.widths, keep.map((r) => at0(T.heights, r)), T.cols, keep.length);
   setTablePosition(node, isPcb, pos);
   normalizeTable(node, isPcb);
@@ -107196,10 +107251,10 @@ function deleteCols(node0, isPcb, cols) {
   if (del.size === T0.cols) return "remove";
   const node = cloneNode(node0), T = tableInfo(node);
   const pos = tablePosition(node, isPcb);
-  const cells = T.cells.filter((_, i) => !del.has(colOf(i, T.cols)));
+  const cells2 = T.cells.filter((_, i) => !del.has(colOf(i, T.cols)));
   const keep = Array.from({ length: T.cols }, (_, c) => c).filter((c) => !del.has(c));
   setColCount(node, keep.length);
-  setCells(node, cells);
+  setCells(node, cells2);
   writeSizes(node, isPcb, keep.map((c) => at0(T.widths, c)), T.heights, keep.length, T.rows);
   setTablePosition(node, isPcb, pos);
   normalizeTable(node, isPcb);
@@ -107317,10 +107372,10 @@ function trimToSelection(node0, isPcb, sel) {
   const heights = T.heights.slice(), widths = T.widths.slice();
   for (let r = minR, d = 0; r <= maxR; r++) heights[d++] = at0(T.heights, r);
   for (let c = minC, d = 0; c <= maxC; c++) widths[d++] = at0(T.widths, c);
-  const cols = maxC - minC + 1, cells = T.cells.filter((_, i) => s2.has(i));
+  const cols = maxC - minC + 1, cells2 = T.cells.filter((_, i) => s2.has(i));
   setColCount(node, cols);
-  setCells(node, cells);
-  writeSizes(node, isPcb, widths, heights, cols, Math.floor(cells.length / cols));
+  setCells(node, cells2);
+  writeSizes(node, isPcb, widths, heights, cols, Math.floor(cells2.length / cols));
   if (isPcb) normalizeTable(node, true);
   return node;
 }
@@ -107347,14 +107402,14 @@ function pasteCells(target0, isPcb, sel, src, uuid) {
   if (endRow > T.rows || endCol > T.cols) {
     const pos = tablePosition(node, isPcb);
     const rowsToAdd = Math.max(0, endRow - T.rows), colsToAdd = Math.max(0, endCol - T.cols);
-    let cells = T.cells.slice(), cols = T.cols, rows3 = T.rows;
+    let cells2 = T.cells.slice(), cols = T.cols, rows3 = T.rows;
     const heights = T.heights.slice(), widths = T.widths.slice();
     for (let k = 0; k < rowsToAdd; k++) {
       const insertRow = rows3, clipRow = insertRow - b.rowMin;
       const sources = Array.from({ length: S3.cols }, (_, c) => S3.cells[clipRow * S3.cols + c]);
       const add2 = [];
       for (let c = 0; c < cols; c++) add2.push(copyCell(c < S3.cols ? sources[c] : sources[0], uuid()));
-      cells.splice(insertRow * cols, 0, ...add2);
+      cells2.splice(insertRow * cols, 0, ...add2);
       rows3++;
       for (let r = rows3 - 1; r > insertRow; r--) heights[r] = at0(heights, r - 1);
       heights[insertRow] = at0(S3.heights, clipRow);
@@ -107363,17 +107418,17 @@ function pasteCells(target0, isPcb, sel, src, uuid) {
       const insertCol = cols, clipCol = insertCol - b.colMin;
       cols++;
       const sources = Array.from({ length: S3.rows }, (_, r) => S3.cells[r * S3.cols + clipCol]);
-      for (let r = 0; r < rows3; r++) cells.splice(r * cols + insertCol, 0, copyCell(r < S3.rows ? sources[r] : sources[0], uuid()));
+      for (let r = 0; r < rows3; r++) cells2.splice(r * cols + insertCol, 0, copyCell(r < S3.rows ? sources[r] : sources[0], uuid()));
       for (let c = cols - 1; c > insertCol; c--) widths[c] = at0(widths, c - 1);
       widths[insertCol] = at0(S3.widths, clipCol);
     }
     setColCount(node, cols);
-    setCells(node, cells);
+    setCells(node, cells2);
     writeSizes(node, isPcb, widths, heights, cols, rows3);
     setTablePosition(node, isPcb, pos);
     normalizeTable(node, isPcb);
     T = tableInfo(node);
-    cells = T.cells;
+    cells2 = T.cells;
   }
   for (let sr = 0; sr < S3.rows; sr++) for (let sc = 0; sc < S3.cols; sc++) {
     const dr = b.rowMin + sr, dc = b.colMin + sc;
@@ -108275,8 +108330,8 @@ root.KiCadCanvas = api;
       return p[0] || [0, 0];
     }
     if (kind === "table") {
-      const cells = kid8(node, "cells");
-      const c = cells && kid8(cells, "table_cell");
+      const cells2 = kid8(node, "cells");
+      const c = cells2 && kid8(cells2, "table_cell");
       if (c) {
         const [x2, y2] = atOf4(c);
         return [x2, y2];
@@ -108314,8 +108369,8 @@ root.KiCadCanvas = api;
       return;
     }
     if (kind === "table") {
-      const cells = kid8(node, "cells");
-      if (cells) for (const c of kids7(cells, "table_cell")) shiftAt(c, dx, dy);
+      const cells2 = kid8(node, "cells");
+      if (cells2) for (const c of kids7(cells2, "table_cell")) shiftAt(c, dx, dy);
       return;
     }
     const [x, y] = atOf4(node);
@@ -108332,8 +108387,8 @@ root.KiCadCanvas = api;
     }
     replaceKid(node, ["uuid", K11.newUuid()]);
     for (const pin of kids7(node, "pin")) replaceKid(pin, ["uuid", K11.newUuid()]);
-    const cells = item.kind === "table" ? kid8(node, "cells") : null;
-    if (cells) for (const c of kids7(cells, "table_cell")) replaceKid(c, ["uuid", K11.newUuid()]);
+    const cells2 = item.kind === "table" ? kid8(node, "cells") : null;
+    if (cells2) for (const c of kids7(cells2, "table_cell")) replaceKid(c, ["uuid", K11.newUuid()]);
     dropKid(node, "instances");
     return node;
   }
@@ -108495,8 +108550,8 @@ root.KiCadCanvas = api;
   }
   function tableGridNode(o, rows3, cols, cw, ch, textSize = DEFAULT_TEXT_SIZE) {
     const [x0, y0] = o;
-    const cells = [];
-    for (let r = 0; r < rows3; r++) for (let c = 0; c < cols; c++) cells.push([
+    const cells2 = [];
+    for (let r = 0; r < rows3; r++) for (let c = 0; c < cols; c++) cells2.push([
       "table_cell",
       "",
       ["exclude_from_sim", "no"],
@@ -108516,7 +108571,7 @@ root.KiCadCanvas = api;
       ["column_widths", ...Array(cols).fill(cw)],
       ["row_heights", ...Array(rows3).fill(ch)],
       ["uuid", K11.newUuid()],
-      ["cells", ...cells]
+      ["cells", ...cells2]
     ];
   }
   function bezierNode(p0, c1, c2, p1) {
@@ -110582,11 +110637,11 @@ root.KiCadCanvas = api;
         return true;
       }
       case "table": {
-        const cells = kid8(node, "cells");
-        if (!cells || !rot3) return false;
+        const cells2 = kid8(node, "cells");
+        if (!cells2 || !rot3) return false;
         if (lone) C = tableCentre(node);
         const before = tableRawCentre(node);
-        for (const c of kids7(cells, "table_cell")) {
+        for (const c of kids7(cells2, "table_cell")) {
           const a = kid8(c, "at"), sz = kid8(c, "size");
           if (!a || !sz) continue;
           const p0 = [num13(a[1]), num13(a[2])], p1 = [p0[0] + num13(sz[1]), p0[1] + num13(sz[2])];
@@ -119552,6 +119607,226 @@ function probe(inp) {
   return best;
 }
 
+// web/domains/pcb/router/ripcut.ts
+var SHAPE_PIECE = 1.5;
+function cells(G5, win, s2, grow6, out2) {
+  const ww = win.x1 - win.x0 + 1;
+  const one2 = (gap, bb) => {
+    const x0 = Math.max(win.x0, Math.ceil((bb[0] - grow6 - G5.ox) / G5.g)), x1 = Math.min(win.x1, Math.floor((bb[2] + grow6 - G5.ox) / G5.g));
+    const y0 = Math.max(win.y0, Math.ceil((bb[1] - grow6 - G5.oy) / G5.g)), y1 = Math.min(win.y1, Math.floor((bb[3] + grow6 - G5.oy) / G5.g));
+    for (let iy = y0; iy <= y1; iy++) {
+      const y = G5.oy + iy * G5.g;
+      for (let ix = x0; ix <= x1; ix++) if (gap(G5.ox + ix * G5.g, y) <= grow6) out2((iy - win.y0) * ww + ix - win.x0);
+    }
+  };
+  const seg2 = (a, b, r) => {
+    const len = Math.hypot(b[0] - a[0], b[1] - a[1]);
+    const n2 = Math.max(1, Math.ceil(len / SHAPE_PIECE));
+    for (let i = 0; i < n2; i++) {
+      const p = [a[0] + (b[0] - a[0]) * i / n2, a[1] + (b[1] - a[1]) * i / n2], q4 = [a[0] + (b[0] - a[0]) * (i + 1) / n2, a[1] + (b[1] - a[1]) * (i + 1) / n2];
+      const dx = q4[0] - p[0], dy = q4[1] - p[1], l2 = dx * dx + dy * dy;
+      one2(
+        (x, y) => {
+          let t = l2 ? ((x - p[0]) * dx + (y - p[1]) * dy) / l2 : 0;
+          t = t < 0 ? 0 : t > 1 ? 1 : t;
+          return Math.max(0, Math.hypot(x - p[0] - t * dx, y - p[1] - t * dy) - r);
+        },
+        [Math.min(p[0], q4[0]) - r, Math.min(p[1], q4[1]) - r, Math.max(p[0], q4[0]) + r, Math.max(p[1], q4[1]) + r]
+      );
+    }
+  };
+  if (s2.t === "circle") one2((x, y) => Math.max(0, Math.hypot(x - s2.x, y - s2.y) - s2.r), [s2.x - s2.r, s2.y - s2.r, s2.x + s2.r, s2.y + s2.r]);
+  else if (s2.t === "seg") seg2(s2.a, s2.b, s2.r);
+  else if (s2.t === "path") for (let i = 0; i + 1 < s2.pts.length; i++) seg2(s2.pts[i], s2.pts[i + 1], s2.r || 0);
+}
+var Owners = class {
+  constructor(n2) {
+    this.lists = [];
+    this.own = new Int32Array(n2).fill(-1);
+  }
+  add(k, id) {
+    const o = this.own[k];
+    if (o === id) return;
+    if (o === -1) {
+      this.own[k] = id;
+      return;
+    }
+    if (o >= 0) {
+      this.own[k] = -2 - this.lists.length;
+      this.lists.push([o, id]);
+      return;
+    }
+    const l = this.lists[-2 - o];
+    if (!l.includes(id)) l.push(id);
+  }
+  at(k) {
+    const o = this.own[k];
+    return o === -1 ? [] : o >= 0 ? [o] : this.lists[-2 - o];
+  }
+};
+var Heap = class {
+  constructor() {
+    this.k = [];
+    this.v = [];
+  }
+  get size() {
+    return this.k.length;
+  }
+  push(key3, val) {
+    const k = this.k, v = this.v;
+    let i = k.length;
+    k.push(key3);
+    v.push(val);
+    while (i > 0) {
+      const p = i - 1 >> 1;
+      if (k[p] <= key3) break;
+      k[i] = k[p];
+      v[i] = v[p];
+      i = p;
+    }
+    k[i] = key3;
+    v[i] = val;
+  }
+  pop() {
+    const k = this.k, v = this.v;
+    const top2 = [k[0], v[0]];
+    const lk = k.pop(), lv = v.pop();
+    const n2 = k.length;
+    if (n2) {
+      let i = 0;
+      for (; ; ) {
+        let c = 2 * i + 1;
+        if (c >= n2) break;
+        if (c + 1 < n2 && k[c + 1] < k[c]) c++;
+        if (k[c] >= lk) break;
+        k[i] = k[c];
+        v[i] = v[c];
+        i = c;
+      }
+      k[i] = lk;
+      v[i] = lv;
+    }
+    return top2;
+  }
+};
+function minCut(inp) {
+  const { G: G5, maps, vmaps, win, routable: RT } = inp;
+  const L = G5.layers.length;
+  const ww = win.x1 - win.x0 + 1, wh = win.y1 - win.y0 + 1, n2 = ww * wh;
+  if (ww <= 0 || wh <= 0) return null;
+  const own = [];
+  for (let l = 0; l < L; l++) own.push(new Owners(RT[l] ? n2 : 0));
+  const vown = new Owners(inp.allowVias ? n2 : 0);
+  const price = /* @__PURE__ */ new Map();
+  const bbOf = (s2) => s2.t === "circle" ? [s2.x - s2.r, s2.y - s2.r, s2.x + s2.r, s2.y + s2.r] : s2.t === "seg" ? [Math.min(s2.a[0], s2.b[0]) - s2.r, Math.min(s2.a[1], s2.b[1]) - s2.r, Math.max(s2.a[0], s2.b[0]) + s2.r, Math.max(s2.a[1], s2.b[1]) + s2.r] : null;
+  const wx0 = G5.ox + win.x0 * G5.g, wy0 = G5.oy + win.y0 * G5.g, wx1 = G5.ox + win.x1 * G5.g, wy1 = G5.oy + win.y1 * G5.g;
+  for (const r of inp.routes) {
+    price.set(r.id, r.price);
+    for (const o of r.shapes) {
+      const gt = inp.grow(o), gv = inp.vgrow(o), bb = bbOf(o.shape);
+      const m = Math.max(gt, gv);
+      if (bb && (bb[0] - m > wx1 || bb[2] + m < wx0 || bb[1] - m > wy1 || bb[3] + m < wy0)) continue;
+      for (const l of o.layers) if (RT[l]) cells(G5, win, o.shape, gt, (k) => own[l].add(k, r.id));
+      if (inp.allowVias) cells(G5, win, o.shape, gv, (k) => vown.add(k, r.id));
+    }
+  }
+  const P = (id) => price.get(id) ?? Infinity;
+  const charge = (ob, oa) => {
+    let c = 0;
+    for (const x of ob) if (!oa.includes(x)) c += P(x);
+    return c;
+  };
+  const N2 = L * n2;
+  const dist = new Float64Array(N2).fill(Infinity), from = new Int32Array(N2).fill(-1);
+  const goal = new Uint8Array(N2);
+  let goals = 0;
+  const local = (p) => p.ix >= win.x0 && p.ix <= win.x1 && p.iy >= win.y0 && p.iy <= win.y1 && RT[p.l] ? p.l * n2 + (p.iy - win.y0) * ww + p.ix - win.x0 : -1;
+  for (const p of inp.dst) {
+    const k = local(p);
+    if (k >= 0) {
+      goal[k] = 1;
+      goals++;
+    }
+  }
+  if (!goals) return null;
+  const heap = new Heap();
+  for (const p of inp.src) {
+    const k = local(p);
+    if (k < 0) continue;
+    const c = charge(own[p.l].at(k - p.l * n2), []);
+    if (c < dist[k]) {
+      dist[k] = c;
+      heap.push(c, k);
+    }
+  }
+  const D = [G5.g, G5.g * Math.SQRT2];
+  let steps = 0, end = -1;
+  const max = inp.maxSteps || 4e6;
+  while (heap.size) {
+    const [d, k] = heap.pop();
+    if (d > dist[k]) continue;
+    steps++;
+    if (goal[k]) {
+      end = k;
+      break;
+    }
+    if (steps > max) break;
+    const l = k / n2 | 0, li = k - l * n2, x = li % ww, y = li / ww | 0;
+    const m = maps[l], ow = own[l], oa = ow.at(li);
+    for (let dd = 0; dd < 8; dd++) {
+      const nx = x + DX[dd], ny = y + DY[dd];
+      if (nx < 0 || ny < 0 || nx >= ww || ny >= wh) continue;
+      const nli = ny * ww + nx;
+      if (m[(ny + win.y0) * G5.W + nx + win.x0]) continue;
+      const c = d + D[dd & 1] + (ow.own[nli] === -1 ? 0 : charge(ow.at(nli), oa));
+      const nk = l * n2 + nli;
+      if (c < dist[nk]) {
+        dist[nk] = c;
+        from[nk] = k;
+        heap.push(c, nk);
+      }
+    }
+    if (inp.allowVias) {
+      const gi = (y + win.y0) * G5.W + x + win.x0;
+      const thru = G5.thru[gi] !== 0;
+      if (!thru && !viaFits(G5, vmaps, gi)) continue;
+      const vc = thru ? 0 : inp.viaMm + charge(vown.at(li), oa);
+      for (let l2 = 0; l2 < L; l2++) {
+        if (l2 === l || !RT[l2] || maps[l2][gi]) continue;
+        const c = d + vc + charge(own[l2].at(li), thru ? oa : oa.concat(vown.at(li)));
+        const nk = l2 * n2 + li;
+        if (c < dist[nk]) {
+          dist[nk] = c;
+          from[nk] = k;
+          heap.push(c, nk);
+        }
+      }
+    }
+  }
+  work.steps += steps * 4;
+  if (end < 0 || !isFinite(dist[end])) return null;
+  const hit5 = /* @__PURE__ */ new Set();
+  let length = 0, vias = 0;
+  for (let k = end; k >= 0; k = from[k]) {
+    const l = k / n2 | 0, li = k - l * n2;
+    for (const x of own[l].at(li)) hit5.add(x);
+    const p = from[k];
+    if (p < 0) break;
+    const pl = p / n2 | 0, pli = p - pl * n2;
+    if (pl !== l) {
+      const gi = (li / ww | 0) * G5.W + win.y0 * G5.W + li % ww + win.x0;
+      if (!G5.thru[gi]) {
+        vias++;
+        for (const x of vown.at(li)) hit5.add(x);
+      }
+    } else length += pli % ww !== li % ww && (pli / ww | 0) !== (li / ww | 0) ? D[1] : D[0];
+  }
+  const victims = Array.from(hit5).sort((a, b) => a - b);
+  let total2 = 0;
+  for (const v of victims) total2 += P(v);
+  return { victims, price: total2, length, vias, steps };
+}
+
 // web/domains/pcb/router/weights.ts
 var DEFAULT_WEIGHTS = { length: 1, via: 6, bend45: 0.6, bend90: 2.5, wrongDir: 0.3, viaLevel: 2, extraLevels: 2, mitre: 1.2 };
 var TRAINED = { "length": 1, "via": 4.66, "bend45": 0.05, "bend90": 3.13, "wrongDir": 0, "viaLevel": 1, "extraLevels": 2, "mitre": 1.22 };
@@ -120138,7 +120413,7 @@ function plan(inp, conns) {
   const useE = new Float64Array(N2), useN = new Float64Array(N2), useV = new Int32Array(GT);
   const histE = new Float64Array(N2), histN = new Float64Array(N2), histV = new Float64Array(GT), histX = new Float64Array(N2);
   const hT = new Float64Array(N2), vT = new Float64Array(N2);
-  const shared = /* @__PURE__ */ new Map();
+  const shared2 = /* @__PURE__ */ new Map();
   const paths = /* @__PURE__ */ new Map();
   const byId = new Map(conns.map((c) => [c.id, c]));
   let anyX = false, pres = 0, margin = BOX_MARGIN;
@@ -120151,7 +120426,7 @@ function plan(inp, conns) {
     return out2.length ? out2 : rt.map((r, l) => r ? l : -1).filter((l) => l >= 0);
   };
   const netOn = (code, net) => {
-    const m = shared.get(code);
+    const m = shared2.get(code);
     return !!m && (m.get(net)?.n || 0) > 0;
   };
   const apply3 = (c, path2, sign2) => {
@@ -120166,8 +120441,8 @@ function plan(inp, conns) {
       } else {
         const vert = df === nx && a % GT % nx === b % GT % nx;
         const code = lo * 2 + (vert ? 1 : 0);
-        let m = shared.get(code);
-        if (!m) shared.set(code, m = /* @__PURE__ */ new Map());
+        let m = shared2.get(code);
+        if (!m) shared2.set(code, m = /* @__PURE__ */ new Map());
         const e = m.get(c.net) || { n: 0, d: c.demand };
         if (sign2 > 0) {
           if (!e.n) {
@@ -120711,6 +120986,12 @@ var SPREAD = 1.5;
 var PLAN = false;
 var GROUP_REACH = 5;
 var VIA_PRICE = 2.5;
+var CUT_RIP_MM = 4;
+var CUT_HISTORY_MM = 0.3;
+var CUT_TRIES = 3;
+var CUT_DEPTH = 2;
+var RIPUP = "near";
+var CUT_ORDER = "cut-first";
 var isCritical = (net, kind) => kind === "rf" || usualImpedance(net, true) === 90 || /(^|[\/_\-.(])(XTAL|XIN|XOUT|XI|XO|XC\d?|XL\d?|OSC(_?32K?)?_?(IN|OUT|I|O)|OSCI|OSCO|XTAL_?[PN]|X(32K?)_?[PN])\d*([_\-.)]|$)/i.test(net);
 var isSupply = (net) => /^\/?(.*\/)?(A|D|P)?(GND|VSS|VEE)\w*$|^\/?(.*\/)?[+-]?\d+(V\d*|\.\d+V)\w*$|^\/?(.*\/)?(VCC|VDD|VBUS|VBAT|VIN|VSYS|VPP|VAA|VREF|VOUT|V\d+V\d*|PWR|\+BATT|-BATT)\w*$/i.test(net) && !/(_|\b)(EN|SENSE|SNS|FB|PG|OK|DET|MON|ADC)\w*$/i.test(net);
 function netKind(net, paired = /(\+|-|_P|_N)\)?$/.test(net)) {
@@ -120788,6 +121069,11 @@ var Router = class _Router {
     this.gplan = null;
     this.planBlk = null;
     this.planStat = { inside: 0, outside: 0 };
+    /** What taking a laid route up and laying it again costs, in mm of detour (Copper's rip price): 4 mm, times its
+     *  width over the narrowest, eight times for a critical net, less for a route that already wanders, and more each
+     *  time taking it up did not pay. */
+    this.ripHist = /* @__PURE__ */ new Map();
+    this.wmin = 0;
     this.fenceVias = [];
     this.fenceReports = [];
     this.fenceShapes = [];
@@ -121300,7 +121586,7 @@ var Router = class _Router {
     const useZones = this.opts.zones !== false;
     this.sizeForImpedance(Array.from(nl.nets.values()).map((n2) => n2.key).filter((k) => k && (!want2 || want2.has(k))));
     let sharedMemo = null;
-    const shared = () => {
+    const shared2 = () => {
       if (sharedMemo) return sharedMemo;
       const own = copper.map(() => null);
       const out2 = copper.map(() => null);
@@ -121413,7 +121699,7 @@ var Router = class _Router {
             const t = cellsIn(z2.polys);
             for (const l of z2.layers) {
               const m = pour.mask[l] || (pour.mask[l] = new Uint8Array(W12 * H));
-              const sh = this.opts.splitPlaneEnds ? shared()[l] : null;
+              const sh = this.opts.splitPlaneEnds ? shared2()[l] : null;
               for (let i = 0; i < t.length; i++) if (t[i] && !(G5.noPour && G5.noPour[i])) {
                 m[i] = 1;
                 if (!sh || sh[i] !== 2) zoneCells.push({ ix: i % W12, iy: i / W12 | 0, l });
@@ -122746,13 +123032,13 @@ var Router = class _Router {
       const maps = soft ? conn.cls.fixed : conn.cls.full, vmaps = soft ? conn.cls.vfixed : conn.cls.vfull;
       const comp = this.components(net);
       const owner = /* @__PURE__ */ new Map();
-      const cells = (cluster) => {
+      const cells2 = (cluster) => {
         const out2 = [];
         if (collect) return out2;
         for (const c of net.conns) if (c.nodes && c !== conn && comp[c.a.cluster] === comp[cluster]) this.cellsOf(c, out2, owner);
         return out2;
       };
-      let ta = cells(conn.a.cluster), tb = cells(conn.b.cluster);
+      let ta = cells2(conn.a.cluster), tb = cells2(conn.b.cluster);
       if (conn.planeOnly !== void 0) {
         ta = [];
         tb = [];
@@ -123275,6 +123561,74 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     }
     return out2;
   }
+  ripPrice(o) {
+    if (!this.wmin) {
+      let w = Infinity;
+      for (const c of this.conns) w = Math.min(w, c.cls.width);
+      this.wmin = Math.max(0.05, isFinite(w) ? w : 0.2);
+    }
+    const crit = isCritical(o.net, this.kindOf(o.net)) || this.netOf(o.net).guide.rank < Infinity;
+    const wander = Math.max(1, (o.feat ? o.feat.length : o.len) / Math.max(o.len, 0.1));
+    return CUT_RIP_MM * Math.max(1, o.cls.width / this.wmin) * (crit ? 8 : 1) / wander + (this.ripHist.get(o.id) || 0);
+  }
+  /** The routes of other nets to take up so that `conn` gets through: the minimum cut (ripcut.ts).  `wall`: routes
+   *  that may not come up.  null when there is no way even through every route that may. */
+  cutFor(conn, wall = () => false) {
+    const G5 = this.G, net = this.netOf(conn.net);
+    this.lift(net, 1, conn.cls);
+    try {
+      const maps = conn.cls.fixed, vmaps = conn.cls.vfixed;
+      const comp = this.components(net);
+      if (comp[conn.a.cluster] === comp[conn.b.cluster]) return null;
+      const gd = net.guide;
+      let rt = G5.routable.slice();
+      if (gd.allowed && gd.allowed.some((v, l) => v && G5.routable[l])) {
+        rt = gd.allowed.map((v, l) => v && G5.routable[l]);
+        for (const e of [conn.a, conn.b]) if (!e.layers.some((l) => rt[l])) {
+          for (const l of e.layers) if (G5.routable[l]) rt[l] = true;
+        }
+      }
+      const ends = (an) => {
+        const out2 = [];
+        const t = this.access(an, maps, rt);
+        if (t) for (const l of t.layers) out2.push({ ix: t.ix, iy: t.iy, l });
+        const owner = /* @__PURE__ */ new Map();
+        for (const o of net.conns) if (o.nodes && o !== conn && comp[o.a.cluster] === comp[an.cluster]) this.cellsOf(o, out2, owner);
+        if (net.zoneCells && comp[an.cluster] === comp[net.zoneCluster]) {
+          for (const z2 of net.zoneCells) if (!maps[z2.l][z2.iy * G5.W + z2.ix]) {
+            out2.push(z2);
+            rt[z2.l] = true;
+          }
+        }
+        return out2;
+      };
+      const src = ends(conn.a), dst = ends(conn.b);
+      if (!src.length || !dst.length) return null;
+      const byId = /* @__PURE__ */ new Map();
+      const routes = [];
+      for (const o of this.conns) if (o.nodes && o.net !== conn.net) {
+        byId.set(o.id, o);
+        routes.push({ id: o.id, shapes: o.shapes, price: wall(o) ? Infinity : this.ripPrice(o) });
+      }
+      if (!routes.length) return null;
+      const cls = conn.cls;
+      const slack = G5.g * 0.5;
+      const grow6 = (o) => growFor(G5, cls, o) + domainGap(G5, cls, o) + slack, vgrow = (o) => growVia(G5, cls, o) + domainGap(G5, cls, o) + slack;
+      const cx = [conn.a.p, conn.b.p].map((p) => Math.round((p[0] - G5.ox) / G5.g)), cy = [conn.a.p, conn.b.p].map((p) => Math.round((p[1] - G5.oy) / G5.g));
+      const span = Math.max(Math.abs(cx[0] - cx[1]), Math.abs(cy[0] - cy[1]));
+      const perConn = this.opts.maxViasPerConnection;
+      const allowVias = this.allowVias && gd.allowVias && gd.maxVias > 0 && !(perConn !== void 0 && perConn !== null && +perConn <= 0) && rt.filter(Boolean).length > 1;
+      for (const m of [Math.max(40, Math.round(span * 0.5)), Math.max(G5.W, G5.H)]) {
+        const win = { x0: Math.max(0, Math.min(...cx) - m), y0: Math.max(0, Math.min(...cy) - m), x1: Math.min(G5.W - 1, Math.max(...cx) + m), y1: Math.min(G5.H - 1, Math.max(...cy) + m) };
+        const cut = minCut({ G: G5, maps, vmaps, routable: rt, allowVias, viaMm: this.W.via / Math.max(1e-6, this.W.length), src, dst, win, routes, grow: grow6, vgrow });
+        if (cut) return cut.victims.map((id) => byId.get(id)).filter(Boolean);
+        if (win.x0 === 0 && win.y0 === 0 && win.x1 === G5.W - 1 && win.y1 === G5.H - 1) break;
+      }
+      return null;
+    } finally {
+      this.lift(net, -1, conn.cls);
+    }
+  }
   /** Is every cell of a route free in the full map (after its blockers were ripped)? */
   fits(conn, res) {
     const G5 = this.G, net = this.netOf(conn.net);
@@ -123445,7 +123799,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     this.ms = Date.now() - t0;
     this.passes = pass;
     const env = globalThis.process?.env;
-    if (env && env.KC_ROUTER_WORK) console.error("router work", work.steps - w0, "steps in", this.ms, "ms");
+    if (env && env.KC_ROUTER_WORK) console.error("router work", work.steps - w0, "steps in", this.ms, "ms", JSON.stringify(this.stat), "open", conns.filter((c) => !c.nodes && !c.moot).map((c) => c.net + (c.why ? "(" + c.why + ")" : "")).join(" "));
     return this.result();
   }
   /**
@@ -123491,6 +123845,64 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       for (const r of ripped) if (!r.nodes && !force(r, depth - 1, keep)) return false;
       return true;
     };
+    const tabu = /* @__PURE__ */ new Set();
+    const cutForce = (c, depth, keep) => {
+      if (c.pairOnly && this.opts.splitPairs !== true) return false;
+      if (lay(c)) {
+        keep.add(c);
+        return true;
+      }
+      if (depth <= 0 || timeUp()) return false;
+      const hard = /* @__PURE__ */ new Set();
+      for (let attempt = 0; attempt < CUT_TRIES && !timeUp(); attempt++) {
+        const cut = this.cutFor(c, (o) => keep.has(o) || !!o.pair || hard.has(o.id));
+        this.stat.cuts = (this.stat.cuts || 0) + 1;
+        if (!cut || !cut.length) {
+          this.stat.noCut = (this.stat.noCut || 0) + 1;
+          return false;
+        }
+        const key3 = c.id + ":" + cut.map((o) => o.id).join(",");
+        if (tabu.has(key3)) {
+          for (const o of cut) hard.add(o.id);
+          continue;
+        }
+        tabu.add(key3);
+        const snap2 = snapOf();
+        const ripped = [];
+        for (const b of cut) this.rip(b, ripped);
+        let blamed = cut;
+        let ok2 = lay(c);
+        if (ok2) {
+          keep.add(c);
+          ripped.sort((a, b) => a.len - b.len || a.id - b.id);
+          for (const r of ripped) if (!r.nodes && !cutForce(r, depth - 1, keep)) {
+            ok2 = false;
+            blamed = [r];
+            break;
+          }
+        }
+        if (ok2) {
+          this.stat.cutRipped = (this.stat.cutRipped || 0) + ripped.length;
+          return true;
+        }
+        back(snap2);
+        keep.delete(c);
+        for (const o of cut) this.ripHist.set(o.id, (this.ripHist.get(o.id) || 0) + CUT_HISTORY_MM);
+        for (const o of blamed) hard.add(o.id);
+      }
+      return false;
+    };
+    const mincut = (this.opts.ripup ?? RIPUP) === "mincut";
+    const forceAny = (c, depth, keep) => {
+      if (!mincut) return force(c, depth, keep);
+      if (CUT_ORDER === "near-first") {
+        const s2 = snapOf();
+        if (force(c, depth, keep)) return true;
+        back(s2);
+        return !timeUp() && cutForce(c, Math.min(depth, CUT_DEPTH), /* @__PURE__ */ new Set());
+      }
+      return cutForce(c, Math.min(depth, CUT_DEPTH), keep) || CUT_ORDER === "cut-first" && !timeUp() && force(c, depth, /* @__PURE__ */ new Set());
+    };
     for (let round = 0; round < 3; round++) {
       const open4 = conns.filter((c) => !c.nodes && c.why !== "budget");
       if (!open4.length) return;
@@ -123500,7 +123912,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
         if (c.nodes) continue;
         const snap2 = snapOf();
         const n0 = snap2.filter((x) => x.nodes).length;
-        if (force(c, 3, /* @__PURE__ */ new Set()) && conns.filter((x) => x.nodes).length > n0) gained = true;
+        if (forceAny(c, 3, /* @__PURE__ */ new Set()) && conns.filter((x) => x.nodes).length > n0) gained = true;
         else back(snap2);
       }
       if (!gained) break;
@@ -123574,7 +123986,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
         c.cls = thin;
         const snap2 = snapOf();
         const n0 = snap2.filter((x) => x.nodes).length;
-        if (force(c, 3, /* @__PURE__ */ new Set()) && conns.filter((x) => x.nodes).length > n0) {
+        if (forceAny(c, 3, /* @__PURE__ */ new Set()) && conns.filter((x) => x.nodes).length > n0) {
           if (relax) this.relaxed.add(c.net);
           break;
         }
@@ -123797,10 +124209,10 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       const first = this.mm(c.nodes[0]), last3 = this.mm(c.nodes[c.nodes.length - 1]);
       for (const e of c.ends || [c.a, c.b]) if (c.stubs.some((st) => st[0] === e.p) || [first, last3].some((q4) => Math.hypot(q4[0] - e.p[0], q4[1] - e.p[1]) < 1e-3)) join(me3, e.grp || 0);
       if (c.landed >= 0 && node.has(this.conns[c.landed])) join(me3, node.get(this.conns[c.landed]));
-      const cells2 = [];
-      this.cellsOf(c, cells2, owner);
-      for (const n2 of c.nodes) cells2.push(n2);
-      for (const n2 of cells2) {
+      const cells3 = [];
+      this.cellsOf(c, cells3, owner);
+      for (const n2 of c.nodes) cells3.push(n2);
+      for (const n2 of cells3) {
         const id = at5(n2.l, n2.ix, n2.iy);
         if (id) join(me3, ng + id);
       }
@@ -123819,13 +124231,13 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     let main = -1;
     for (const [r, n2] of count2) if (hasPiece.has(r) && (main < 0 || n2 > count2.get(main))) main = r;
     if (main < 0) return null;
-    const cells = [];
+    const cells2 = [];
     for (let l = 0; l < label.length; l++) {
       const lab = label[l];
       if (!lab) continue;
-      for (let i = 0; i < W12 * H; i++) if (lab[i] && find(ng + lab[i]) === main) cells.push({ ix: i % W12, iy: i / W12 | 0, l });
+      for (let i = 0; i < W12 * H; i++) if (lab[i] && find(ng + lab[i]) === main) cells2.push({ ix: i % W12, iy: i / W12 | 0, l });
     }
-    return { root: (g2) => find(g2), main, cells, connRoot: (c) => node.has(c) ? find(node.get(c)) : -1 };
+    return { root: (g2) => find(g2), main, cells: cells2, connRoot: (c) => node.has(c) ? find(node.get(c)) : -1 };
   }
   /** Tracks cut a pour into pieces.  Whatever the pour was counted on to join but that ends up in a cut-off piece is
    *  joined to the main body with a track of its own; a route that ended in a cut-off piece is taken out again. */
@@ -124892,11 +125304,11 @@ function place(K11, P, doc2, settings3, opts2 = {}) {
   const w = (n2) => weight.get(n2) || 0;
   for (const p of all2) p.movable = listed ? !!p.spec && !(p.spec.fixed === true) : !(P.isLocked && P.isLocked(p.node)) && p.pads.some((d) => (netPads.get(d.net) || 0) > 1);
   const moving = all2.filter((p) => p.movable), still = all2.filter((p) => !p.movable);
-  const groupOf = /* @__PURE__ */ new Map();
+  const groupOf2 = /* @__PURE__ */ new Map();
   const join = (g2, p) => {
     p.group = g2;
-    let l = groupOf.get(g2);
-    if (!l) groupOf.set(g2, l = []);
+    let l = groupOf2.get(g2);
+    if (!l) groupOf2.set(g2, l = []);
     l.push(p);
   };
   const loose = [];
@@ -125001,7 +125413,7 @@ function place(K11, P, doc2, settings3, opts2 = {}) {
     return false;
   };
   const turnedChips = [];
-  for (const [name, parts] of groupOf) {
+  for (const [name, parts] of groupOf2) {
     const anchor2 = parts.find(isFixed) || parts.find((p) => p.spec && p.spec.anchor) || parts.slice().sort((a, b) => b.pads.length - a.pads.length || (b.box[2] - b.box[0]) * (b.box[3] - b.box[1]) - (a.box[2] - a.box[0]) * (a.box[3] - a.box[1]))[0];
     const square = !anchor2.thru && anchor2.pads.length >= 16 && !(anchor2.spec && anchor2.spec.rot !== void 0) && !isFixed(anchor2) && (() => {
       const [x0, y0, x1, y1] = anchor2.padBox;
@@ -131984,15 +132396,15 @@ var Connections = class {
   constructor(m) {
     this.ends = /* @__PURE__ */ new Map();
     const add2 = (layer4, x, y) => {
-      let cells = this.ends.get(layer4);
-      if (!cells) {
-        cells = /* @__PURE__ */ new Map();
-        this.ends.set(layer4, cells);
+      let cells2 = this.ends.get(layer4);
+      if (!cells2) {
+        cells2 = /* @__PURE__ */ new Map();
+        this.ends.set(layer4, cells2);
       }
       const key3 = Math.floor(x) + "," + Math.floor(y);
-      const c = cells.get(key3);
+      const c = cells2.get(key3);
       if (c) c.push([x, y]);
-      else cells.set(key3, [[x, y]]);
+      else cells2.set(key3, [[x, y]]);
     };
     for (const t of m.tracks) {
       add2(t.layer, t.x1, t.y1);
@@ -132001,10 +132413,10 @@ var Connections = class {
   }
   /** Does a track end within `r` of (x, y) on the layer? */
   near(layer4, x, y, r) {
-    const cells = this.ends.get(layer4);
-    if (!cells) return false;
+    const cells2 = this.ends.get(layer4);
+    if (!cells2) return false;
     for (let cx = Math.floor(x - r); cx <= Math.floor(x + r); cx++) for (let cy = Math.floor(y - r); cy <= Math.floor(y + r); cy++) {
-      const c = cells.get(cx + "," + cy);
+      const c = cells2.get(cx + "," + cy);
       if (!c) continue;
       for (const p of c) if (Math.hypot(p[0] - x, p[1] - y) <= r) return true;
     }
@@ -141526,7 +141938,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
     if (hz.length) add2("analog.highz", "warning", "A photodiode's output is a current of nanoamps into a node of very high impedance: every picofarad on it costs bandwidth and adds noise, and any leakage across the board is signal.", hz);
   }
   {
-    const bridged = [], shared = [];
+    const bridged = [], shared2 = [];
     for (const f2 of fps.filter(isIsolator)) {
       if (f2.pads.length < 4) continue;
       const gapOn = (axis2) => {
@@ -141557,10 +141969,10 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       if (what.size) bridged.push(`${f2.ref} ${f2.value} (${r22(b - a)} mm gap): ${Array.from(what).slice(0, 4).join("; ")}`);
       const lo = new Set(g2.lo.map((p) => p.net).filter(Boolean));
       const both = Array.from(new Set(g2.hi.map((p) => p.net).filter((n2) => n2 && lo.has(n2))));
-      if (both.length) shared.push(`${f2.ref}: ${both.map(bare).join(", ")} on both sides`);
+      if (both.length) shared2.push(`${f2.ref}: ${both.map(bare).join(", ")} on both sides`);
     }
     if (bridged.length) add2("isolation", "error", "There is copper in the gap under an isolator. The gap between its two pin rows is the isolation barrier: any copper in it, on any layer, shortens the creepage path to less than the part's own rating. Keep every layer clear between the rows (board.keepout(box)), and for mains consider a slot in the board there.", bridged);
-    if (shared.length) add2("isolation", "warning", "The same net is on both sides of an isolator, so nothing is isolated. Each side needs its own supply and its own ground.", shared);
+    if (shared2.length) add2("isolation", "warning", "The same net is on both sides of an isolator, so nothing is isolated. Each side needs its own supply and its own ground.", shared2);
   }
   {
     const hv = /* @__PURE__ */ new Map();

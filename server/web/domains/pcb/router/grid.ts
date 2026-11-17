@@ -175,7 +175,7 @@ export function pickGrid(pads: (Pt | number[])[], bounds: [number, number, numbe
 export const growFor = (G: Grid, c: RuleClass, o: Obstacle) => (o.edge ? G.edgeClr : Math.max(c.clr, o.clr)) + c.width / 2 + G.margin;
 export const growVia = (G: Grid, c: RuleClass, o: Obstacle) => (o.edge ? G.edgeClr + c.viaD / 2 : Math.max(Math.max(c.clr, o.clr) + c.viaD / 2, (G.holeClr ? G.holeClr + 0.012 : 0) + c.viaDrill / 2)) + G.margin;   // 0.012: HOLE_SLACK in route.ts
 /** The extra a track of another signal domain adds to the gap (0 when the two are of a kind, or it is a pad). */
-const domainGap = (G: Grid, c: RuleClass, o: Obstacle): number => {
+export const domainGap = (G: Grid, c: RuleClass, o: Obstacle): number => {
   if (!c.kind || !G.kinds || !G.sep || o.pad || o.edge || !o.net) return 0; const k = G.kinds.get(o.net); if (!k || k === c.kind) return 0;
   return Math.max(0, G.sep(c.kind, k) - Math.max(c.clr, o.clr));
 };

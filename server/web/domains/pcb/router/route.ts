@@ -1,7 +1,8 @@
 // Autorouter — the run: what to connect, in which order, with rip-up and retry, and the tracks and vias that
 // come out.  Pure: reads a parsed board and the design rules, returns item nodes; nothing is written to the board
 // here (the caller commits them as ordinary edits).
-import { buildClass, DX, DY, fillPoly, Grid, Obstacle, pickGrid, pointGap, Pt, RuleClass, Shape, stamp, stampClass, viaFits } from "./grid";
+import { buildClass, domainGap, DX, DY, fillPoly, Grid, growFor, growVia, Obstacle, pickGrid, pointGap, Pt, RuleClass, Shape, stamp, stampClass, viaFits } from "./grid";
+import { minCut } from "./ripcut";
 import { costOf, dirOf, Features, featuresOf, Node, probe, ProbeResult, Terminal, Win, work } from "./probe";
 
 /** Search steps an ordinary machine takes per millisecond of routing: turns the time allowed into a work budget. */
@@ -53,6 +54,17 @@ const GROUP_REACH = 5;
 /** A via costs this many times what the reference boards' routing says it does (4.66 mm of track): people asked for
  *  fewer vias than those boards use, but at four times a signal ran 80 mm round the board to save two. */
 const VIA_PRICE = 2.5;
+// rip-up by minimum cut (ripcut.ts, after Copper's repair.py): a route's base price in mm, what a cut that did not pay
+// adds to each of its routes, how many cuts are tried per connection, and how deep a route taken up may take up its own
+const CUT_RIP_MM = 4, CUT_HISTORY_MM = 0.3, CUT_TRIES = 3, CUT_DEPTH = 2;
+// With "mincut" the cut is tried first and the old rule after it (CUT_ORDER).  Measured 2026-11-17 with board-bench.py
+// (score, open connections at the end of board.design(); "near": Ledify 94.9 with 0 open, Cyberboard 75.0 with 12):
+//   cut first, then the old rule:             Ledify 94.5 (1 open)   Cyberboard 75.0 (10 open)
+//   the old rule first, then the cut:                93.7 (1 open)               75.0 (10 open)
+// Inside route() the cut leaves no more open than the old rule on Ledify (1 either way, a different one); the board
+// loses its point in the steps of design() after it.  So "near" stays the default.
+const RIPUP: "near" | "mincut" = "near";
+const CUT_ORDER = "cut-first" as "near-first" | "cut-first" | "cut-only";
 /** Nets a person routes before anything else: RF feeds, crystal lines and USB data. */
 export const isCritical = (net: string, kind: NetKind): boolean => kind === "rf" || usualImpedance(net, true) === 90
   || /(^|[\/_\-.(])(XTAL|XIN|XOUT|XI|XO|XC\d?|XL\d?|OSC(_?32K?)?_?(IN|OUT|I|O)|OSCI|OSCO|XTAL_?[PN]|X(32K?)_?[PN])\d*([_\-.)]|$)/i.test(net);
@@ -103,6 +115,12 @@ export interface RouteOptions {
   layers?: string[] | null;      // copper layers tracks may use; default the signal layers
   allowVias?: boolean;           // default true
   ripUp?: boolean;               // default true
+  /** What the repair after the passes takes up to lay a connection left open.  "near": every route the cheapest way
+   *  through runs into (and so on, a few levels deep).  "mincut": the cheapest set of routes whose removal opens a
+   *  way, each priced by what laying it again costs (ripcut.ts, after Copper); only those come up, are laid again,
+   *  and the result is kept only when fewer connections are open; where no cut pays, the "near" rule is tried after
+   *  it.  Default "near" (see RIPUP for what the benchmark boards said). */
+  ripup?: "near" | "mincut";
   passes?: number;               // whole-board attempts with a different order; default 3
   pitch?: number;                // force the grid pitch, mm
   weights?: Partial<Weights>;
@@ -1421,6 +1439,49 @@ export class Router {
     }
     return out;
   }
+  /** What taking a laid route up and laying it again costs, in mm of detour (Copper's rip price): 4 mm, times its
+   *  width over the narrowest, eight times for a critical net, less for a route that already wanders, and more each
+   *  time taking it up did not pay. */
+  private ripHist = new Map<number, number>(); private wmin = 0;
+  private ripPrice(o: Conn): number {
+    if (!this.wmin) { let w = Infinity; for (const c of this.conns) w = Math.min(w, c.cls.width); this.wmin = Math.max(0.05, isFinite(w) ? w : 0.2); }
+    const crit = isCritical(o.net, this.kindOf(o.net)) || this.netOf(o.net).guide.rank < Infinity;
+    const wander = Math.max(1, (o.feat ? o.feat.length : o.len) / Math.max(o.len, 0.1));
+    return CUT_RIP_MM * Math.max(1, o.cls.width / this.wmin) * (crit ? 8 : 1) / wander + (this.ripHist.get(o.id) || 0);
+  }
+  /** The routes of other nets to take up so that `conn` gets through: the minimum cut (ripcut.ts).  `wall`: routes
+   *  that may not come up.  null when there is no way even through every route that may. */
+  cutFor(conn: Conn, wall: (o: Conn) => boolean = () => false): Conn[] | null {
+    const G = this.G, net = this.netOf(conn.net); this.lift(net, 1, conn.cls);
+    try {
+      const maps = conn.cls.fixed, vmaps = conn.cls.vfixed; const comp = this.components(net);
+      if (comp[conn.a.cluster] === comp[conn.b.cluster]) return null;
+      const gd = net.guide; let rt = G.routable.slice();
+      if (gd.allowed && gd.allowed.some((v, l) => v && G.routable[l])) { rt = gd.allowed.map((v, l) => v && G.routable[l]); for (const e of [conn.a, conn.b]) if (!e.layers.some((l) => rt[l])) for (const l of e.layers) if (G.routable[l]) rt[l] = true; }
+      const ends = (an: Anchor): Node[] => {
+        const out: Node[] = []; const t = this.access(an, maps, rt); if (t) for (const l of t.layers) out.push({ ix: t.ix, iy: t.iy, l });
+        const owner = new Map<number, number>(); for (const o of net.conns) if (o.nodes && o !== conn && comp[o.a.cluster] === comp[an.cluster]) this.cellsOf(o, out, owner);
+        if (net.zoneCells && comp[an.cluster] === comp[net.zoneCluster]) for (const z of net.zoneCells) if (!maps[z.l][z.iy * G.W + z.ix]) { out.push(z); rt[z.l] = true; }
+        return out;
+      };
+      const src = ends(conn.a), dst = ends(conn.b); if (!src.length || !dst.length) return null;
+      const byId = new Map<number, Conn>(); const routes: { id: number; shapes: Obstacle[]; price: number }[] = [];
+      for (const o of this.conns) if (o.nodes && o.net !== conn.net) { byId.set(o.id, o); routes.push({ id: o.id, shapes: o.shapes, price: wall(o) ? Infinity : this.ripPrice(o) }); }
+      if (!routes.length) return null;
+      const cls = conn.cls; const slack = G.g * 0.5;
+      const grow = (o: Obstacle) => growFor(G, cls, o) + domainGap(G, cls, o) + slack, vgrow = (o: Obstacle) => growVia(G, cls, o) + domainGap(G, cls, o) + slack;
+      const cx = [conn.a.p, conn.b.p].map((p) => Math.round((p[0] - G.ox) / G.g)), cy = [conn.a.p, conn.b.p].map((p) => Math.round((p[1] - G.oy) / G.g));
+      const span = Math.max(Math.abs(cx[0] - cx[1]), Math.abs(cy[0] - cy[1]));
+      const perConn = this.opts.maxViasPerConnection; const allowVias = this.allowVias && gd.allowVias && gd.maxVias > 0 && !(perConn !== undefined && perConn !== null && +perConn <= 0) && rt.filter(Boolean).length > 1;
+      for (const m of [Math.max(40, Math.round(span * 0.5)), Math.max(G.W, G.H)]) {
+        const win: Win = { x0: Math.max(0, Math.min(...cx) - m), y0: Math.max(0, Math.min(...cy) - m), x1: Math.min(G.W - 1, Math.max(...cx) + m), y1: Math.min(G.H - 1, Math.max(...cy) + m) };
+        const cut = minCut({ G, maps, vmaps, routable: rt, allowVias, viaMm: this.W.via / Math.max(1e-6, this.W.length), src, dst, win, routes, grow, vgrow });
+        if (cut) return cut.victims.map((id) => byId.get(id)!).filter(Boolean);
+        if (win.x0 === 0 && win.y0 === 0 && win.x1 === G.W - 1 && win.y1 === G.H - 1) break;
+      }
+      return null;
+    } finally { this.lift(net, -1, conn.cls); }
+  }
   /** Is every cell of a route free in the full map (after its blockers were ripped)? */
   private fits(conn: Conn, res: ProbeResult): boolean {
     const G = this.G, net = this.netOf(conn.net); this.lift(net, 1, conn.cls);
@@ -1545,7 +1606,7 @@ export class Router {
     this.ms = Date.now() - t0; this.passes = pass;
     // `process` exists only under node (the router's tests); the browser build has no node types
     const env = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env;
-    if (env && env.KC_ROUTER_WORK) console.error('router work', work.steps - w0, 'steps in', this.ms, 'ms');
+    if (env && env.KC_ROUTER_WORK) console.error('router work', work.steps - w0, 'steps in', this.ms, 'ms', JSON.stringify(this.stat), 'open', conns.filter((c) => !c.nodes && !c.moot).map((c) => c.net + (c.why ? '(' + c.why + ')' : '')).join(' '));
     return this.result();
   }
 
@@ -1569,11 +1630,45 @@ export class Router {
       ripped.sort((a, b) => a.len - b.len); for (const r of ripped) if (!r.nodes && !force(r, depth - 1, keep)) return false;
       return true;
     };
+    // The min-cut variant (ripcut.ts, after Copper's repair): take up only the cheapest set of routes in the way,
+    // lay c, lay them again (each may in turn take up its own cut, one level less deep).  A set that did not pay is
+    // not tried again for c, its routes cost a little more from then on, and those that could not be laid again
+    // are walls on the next try (at most three tries).
+    const tabu = new Set<string>();
+    const cutForce = (c: Conn, depth: number, keep: Set<Conn>): boolean => {
+      if (c.pairOnly && this.opts.splitPairs !== true) return false;
+      if (lay(c)) { keep.add(c); return true; } if (depth <= 0 || timeUp()) return false;
+      const hard = new Set<number>();
+      for (let attempt = 0; attempt < CUT_TRIES && !timeUp(); attempt++) {
+        const cut = this.cutFor(c, (o) => keep.has(o) || !!o.pair || hard.has(o.id)); this.stat.cuts = (this.stat.cuts || 0) + 1;
+        if (!cut || !cut.length) { this.stat.noCut = (this.stat.noCut || 0) + 1; return false; }
+        const key = c.id + ":" + cut.map((o) => o.id).join(",");
+        if (tabu.has(key)) { for (const o of cut) hard.add(o.id); continue; }
+        tabu.add(key);
+        const snap = snapOf(); const ripped: Conn[] = []; for (const b of cut) this.rip(b, ripped);
+        let blamed: Conn[] = cut; let ok = lay(c);
+        if (ok) {
+          keep.add(c); ripped.sort((a, b) => a.len - b.len || a.id - b.id);
+          for (const r of ripped) if (!r.nodes && !cutForce(r, depth - 1, keep)) { ok = false; blamed = [r]; break; }
+        }
+        if (ok) { this.stat.cutRipped = (this.stat.cutRipped || 0) + ripped.length; return true; }
+        back(snap); keep.delete(c);
+        for (const o of cut) this.ripHist.set(o.id, (this.ripHist.get(o.id) || 0) + CUT_HISTORY_MM);
+        for (const o of blamed) hard.add(o.id);
+      }
+      return false;
+    };
+    const mincut = (this.opts.ripup ?? RIPUP) === "mincut";
+    const forceAny = (c: Conn, depth: number, keep: Set<Conn>): boolean => {
+      if (!mincut) return force(c, depth, keep);
+      if (CUT_ORDER === "near-first") { const s = snapOf(); if (force(c, depth, keep)) return true; back(s); return !timeUp() && cutForce(c, Math.min(depth, CUT_DEPTH), new Set()); }
+      return cutForce(c, Math.min(depth, CUT_DEPTH), keep) || (CUT_ORDER === "cut-first" && !timeUp() && force(c, depth, new Set()));
+    };
     for (let round = 0; round < 3; round++) {
       const open = conns.filter((c) => !c.nodes && c.why !== "budget"); if (!open.length) return; let gained = false;
       for (const c of open) {
         if (timeUp()) return; if (c.nodes) continue; const snap = snapOf(); const n0 = snap.filter((x) => x.nodes).length;
-        if (force(c, 3, new Set()) && conns.filter((x) => x.nodes).length > n0) gained = true; else back(snap);
+        if (forceAny(c, 3, new Set()) && conns.filter((x) => x.nodes).length > n0) gained = true; else back(snap);
       }
       if (!gained) break;
     }
@@ -1611,7 +1706,7 @@ export class Router {
       for (const relax of wide.kind ? [false, true] : [false]) {   // last of all, without the gap its signal domain asks for
         let thin: RuleClass; this.relax = relax; try { thin = this.classFor(c.net, Math.min(floor, wide.width), 0, this.opts.smallVias !== false); } finally { this.relax = false; } if (thin === wide) continue;
         c.cls = thin; const snap = snapOf(); const n0 = snap.filter((x) => x.nodes).length;
-        if (force(c, 3, new Set()) && conns.filter((x) => x.nodes).length > n0) { if (relax) this.relaxed.add(c.net); break; }
+        if (forceAny(c, 3, new Set()) && conns.filter((x) => x.nodes).length > n0) { if (relax) this.relaxed.add(c.net); break; }
         c.cls = wide; back(snap);
       }
     }
