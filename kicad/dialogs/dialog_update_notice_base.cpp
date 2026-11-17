@@ -27,7 +27,7 @@ DIALOG_UPDATE_NOTICE_BASE::DIALOG_UPDATE_NOTICE_BASE( wxWindow* parent, wxWindow
 	wxBoxSizer* bSizer4;
 	bSizer4 = new wxBoxSizer( wxVERTICAL );
 
-	m_messageLine1 = new wxStaticText( this, wxID_ANY, _("A new version of KiCad is available!"), wxDefaultPosition, wxDefaultSize, 0 );
+	m_messageLine1 = new wxStaticText( this, wxID_ANY, _("A new version of Junction is available!"), wxDefaultPosition, wxDefaultSize, 0 );
 	m_messageLine1->Wrap( -1 );
 	m_messageLine1->SetFont( wxFont( wxNORMAL_FONT->GetPointSize(), wxFONTFAMILY_DEFAULT, wxFONTSTYLE_NORMAL, wxFONTWEIGHT_BOLD, false, wxEmptyString ) );
 
@@ -58,7 +58,7 @@ DIALOG_UPDATE_NOTICE_BASE::DIALOG_UPDATE_NOTICE_BASE( wxWindow* parent, wxWindow
 	bButtonSizer->Add( 0, 0, 1, wxEXPAND, 5 );
 
 	m_btnRemind = new wxButton( this, wxID_ANY, _("&Remind Me Later"), wxDefaultPosition, wxDefaultSize, 0 );
-	m_btnRemind->SetToolTip( _("Close this update notice. The update notice will be shown again when you relaunch KiCad.") );
+	m_btnRemind->SetToolTip( _("Close this update notice. The update notice will be shown again when you relaunch Junction.") );
 
 	bButtonSizer->Add( m_btnRemind, 0, wxALIGN_CENTER_VERTICAL|wxBOTTOM|wxLEFT|wxRIGHT|wxTOP, 5 );
 
@@ -67,8 +67,8 @@ DIALOG_UPDATE_NOTICE_BASE::DIALOG_UPDATE_NOTICE_BASE( wxWindow* parent, wxWindow
 
 	bButtonSizer->Add( m_btnDetailsPage, 0, wxALIGN_CENTER_VERTICAL|wxBOTTOM|wxRIGHT|wxTOP, 5 );
 
-	m_btnDownloadPage = new wxButton( this, wxID_ANY, _("Open &Downloads Page"), wxDefaultPosition, wxDefaultSize, 0 );
-	m_btnDownloadPage->SetToolTip( _("Go to the platform appropriate downloads page.") );
+	m_btnDownloadPage = new wxButton( this, wxID_ANY, _("&Download"), wxDefaultPosition, wxDefaultSize, 0 );
+	m_btnDownloadPage->SetToolTip( _("Download the new version for this computer.") );
 
 	bButtonSizer->Add( m_btnDownloadPage, 0, wxALIGN_CENTER_VERTICAL|wxBOTTOM|wxRIGHT|wxTOP, 5 );
 

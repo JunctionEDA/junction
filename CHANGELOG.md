@@ -4,6 +4,16 @@ Releases of Junction, which was called KiCad Collaborative up to 1.0.9. The
 version here is the product version (`packaging/VERSION`), not the KiCad
 version it is based on.
 
+## 2.2.0 (unreleased)
+
+### Desktop
+- Junction tells you when a newer version is out. At start-up it asks
+  junctioneda.com for the newest release, and if it is later than yours a
+  notice offers Download (straight to the file for your system), View
+  Details, Remind Me Later and Skip This Version. Turn it off in
+  Preferences, Packages and Updates, or in the first-run wizard, whose
+  update checkbox now does what it says.
+
 ## 2.1.4 (2026-11-15)
 
 ### Desktop
