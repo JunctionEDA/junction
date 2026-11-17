@@ -8,6 +8,7 @@ mod kicadlib;
 mod auth;
 mod compact;
 mod doc_actor;
+mod nonkicad_import;
 mod error;
 mod fonts;
 mod github;

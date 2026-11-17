@@ -25,6 +25,7 @@ import { openIpc2581 } from "./pcbdialogs/ipc2581";
 import { openDrcRuleEditor } from "./pcbdialogs/drc-rule-editor";
 import { openPlotSchematic } from "../dialogs/plot-schematic";
 import { printDialog } from "./print";
+import { importNonKicad } from "./import-nonkicad";
 import { openCalculator } from "../calculator";
 import type { AppAction } from "../../../shared/store";
 import type { ActionAnchor, ActionHandler } from "./types";
@@ -140,6 +141,8 @@ export const HANDLERS: Record<string, ActionHandler> = {
   // design review (web/platform/review): KiCad's File > Compare … entries open the Compare window
   compareSchematicWithHistory: () => openCompare(), compareBoardWithHistory: () => openCompare(), collabCompare: () => openCompare(),
   compareSchematicWithFile: () => openCompare({ pickFile: true }), compareBoardWithFile: () => openCompare({ pickFile: true }),
+  // File > Import > Non-KiCad Board File... / Non-KiCad Schematic...: EasyEDA files become a new online project
+  openNonKicadBoard: () => importNonKicad("board"), importNonKicadSchematic: () => importNonKicad("schematic"),
   // File's collaboration block (this fork's SCH_ACTIONS / PCB_ACTIONS::collab*): Start Collaboration Session opens the
   // share dialog, Join Shared Project the home's join box, Vendor Parts the parts window (web/domains/pcb/parts)
   collabStartSession: (a) => runAction("share", a), collabJoinSession: () => runAction("joinLink"), collabGithub: (a) => runAction("github", a),
