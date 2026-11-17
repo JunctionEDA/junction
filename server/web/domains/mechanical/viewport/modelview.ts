@@ -43,6 +43,7 @@ export class ModelView {
   private selection: Pick[] = [];
   private filter: Set<PickKind> | null = null;
   private activeSketch: string | null = null;
+  private hiddenSketch: string | null = null;
   /** The pointer moved onto something else (or nothing). */
   onHover: (pick: Pick | null) => void = () => {};
   /** A left click, with what was under it. */
@@ -178,6 +179,7 @@ export class ModelView {
         fill.userData.region = r.id;
         fills.push(fill); group.add(fill);
       }
+      group.visible = v.featureId !== this.hiddenSketch;
       this.root.add(group);
       const s: SketchObjects = { group, view: v, lines, fills };
       this.sketches.set(v.featureId, s);
@@ -191,6 +193,15 @@ export class ModelView {
     (s.lines.material as LineMaterial).color.copy(active ? this.colors.edge : this.colors.sketch);
     (s.lines.material as LineMaterial).linewidth = active ? 2 : 1.5;
     for (const f of s.fills) (f.material as THREE.MeshBasicMaterial).color.copy(this.colors.edge);
+  }
+  /**
+   * Keep a sketch but do not draw it (null: draw them all).  The sketch editor draws the open sketch itself
+   * (sketch/paint.ts), so that it follows a drag without waiting for the worker; its frame is still answered.
+   */
+  setSketchHidden(featureId: string | null): void {
+    this.hiddenSketch = featureId;
+    for (const s of this.sketches.values()) s.group.visible = s.view.featureId !== featureId;
+    this.viewport.invalidate();
   }
   /** The frame of a sketch on screen, or null. */
   sketchFrame(featureId: string): Frame | null { return this.sketches.get(featureId)?.view.frame || null; }
