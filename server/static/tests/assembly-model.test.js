@@ -118,11 +118,28 @@ test("a lid hinged on a box from real geometry; the assembly follows when the bo
   nearV(s.result.poses.get(l).p, [0, 0, 40], 1e-4, "the lid sits on the box");
   assert.ok(Math.abs(s.mates.get(hinge.item.id).values.angle) < 1e-3, "closed");
   commit(E.setTransforms(doc, new Map([[l, M.transformOf(s.result.poses.get(l))]])));
+  // open the lid 40° and store that: the placements, and the mate's value with them
+  s = run({ drives: [{ mate: hinge.item.id, key: "angle", value: (-40 * Math.PI) / 180 }] });
+  commit(E.setTransforms(doc, new Map([[l, M.transformOf(s.result.poses.get(l))]])));
+  const problem = P.buildProblem(F.instancesOf(doc), F.matesOf(doc), new Map(), G.MATES, geometry);
+  const values = P.measureMates(problem, s.result.poses);
+  const stored = E.setMateValues(doc, values);
+  assert.equal(stored.length, 1); commit(stored);
+  assert.ok(Math.abs(F.matesOf(doc)[0].values.angle + 40) < 1e-5, JSON.stringify(F.matesOf(doc)[0].values));
+  assert.equal(E.setMateValues(doc, values).length, 0, "the same values again change nothing");
   // the box grows from 40 to 65 in its part studio: the same names, new geometry
   boxMesh = (await box(65)).box;
   s = run({});
   assert.equal(s.result.ok, true);
-  nearV(s.result.poses.get(l).p, [0, 0, 65], 1e-4, "the lid went up with the box");
+  assert.ok(s.result.iterations > 0, "the stored placement no longer satisfies the hinge");
+  // what the editor does then: aim at the stored value, so the lid keeps its angle and only rises
+  s = run({ drives: [{ mate: hinge.item.id, key: "angle", value: (F.matesOf(doc)[0].values.angle * Math.PI) / 180 }] });
+  assert.equal(s.result.ok, true);
+  assert.ok(Math.abs(s.mates.get(hinge.item.id).values.angle + 40) < 1e-4);
+  nearV(M.applyPose(s.result.poses.get(l), [50, 60, 0]), [50, 60, 65], 1e-4, "the hinge line went up with the box");
+  s = run({ drives: [{ mate: hinge.item.id, key: "angle", value: 0 }] });
+  nearV(s.result.poses.get(l).p, [0, 0, 65], 1e-4, "closed, the lid sits on the taller box");
+  commit(E.setTransforms(doc, new Map([[l, M.transformOf(s.result.poses.get(l))]])));
   // the edge is removed upstream (here: a mate that names geometry that is not there)
   commit(E.updateMate(doc, hinge.item.id, { a: { instance: b, ref: { kind: "edge", body: "box", name: "edge(gone)" } } }));
   s = run({});

@@ -85,7 +85,7 @@ const settled = (page, n) => page.waitForFunction((n) => {
   return !!s && s.loaded && !s.building && s.instances.length === n && s.instances.every((i) => i.suppressed || s.instanceInfo[i.id]?.status === 'ready') && (!s.canEdit || a.unsettled < 1e-6) && a.session.unsaved === 0;
 }, n, { timeout: 90000 });
 const inst = (page, name) => page.evaluate((name) => { const a = window.JunctionAssembly, i = a.getState().instances.find((x) => x.name === name); return i ? { id: i.id, t: a.transformOf(i.id), stored: i.transform, info: a.getState().instanceInfo[i.id], fixed: !!i.fixed, hidden: !!i.hidden, suppressed: !!i.suppressed } : null; }, name);
-const mate = (page, name) => page.evaluate((name) => { const s = window.JunctionAssembly.getState(), m = s.mates.find((x) => x.name === name); return m ? { id: m.id, params: m.params, info: s.mateInfo[m.id], a: m.a, b: m.b } : null; }, name);
+const mate = (page, name) => page.evaluate((name) => { const s = window.JunctionAssembly.getState(), m = s.mates.find((x) => x.name === name); return m ? { id: m.id, params: m.params, values: m.values || null, info: s.mateInfo[m.id], a: m.a, b: m.b } : null; }, name);
 const near = (a, b, eps = 1e-3) => Math.abs(a - b) <= eps;
 const click = async (page, p) => { await page.mouse.move(p.x, p.y); await page.mouse.down(); await page.mouse.up(); };
 const drag = async (page, from, to, steps = 12) => { await page.mouse.move(from.x, from.y); await page.mouse.down(); await page.mouse.move(to.x, to.y, { steps }); await page.waitForTimeout(120); await page.mouse.up(); };
@@ -425,6 +425,12 @@ try {
   check('…and the assembly is as it was left', near((await mate(alice, 'Hinge')).info.values.angle, closed, 1e-3) && (await inst(alice, 'Enclosure base')).fixed);
 
   // ---------------------------------------------------------------- the same person: edit the box in its tab, come back
+  await alice.dblclick('[data-mate=Hinge]');
+  await alice.fill('[data-mate-dialog] input[data-param=value-angle]', '-30');
+  await alice.waitForFunction(() => { const s = window.JunctionAssembly.getState(); return Math.abs(s.mateInfo[s.mating.id].values.angle + 30) < 1e-3; });
+  await alice.click('[data-mate-dialog] [data-accept]');
+  await settled(alice, 3);
+  check('the mate\'s value is stored with the placements', near((await mate(alice, 'Hinge')).values.angle, -30, 1e-5), JSON.stringify((await mate(alice, 'Hinge')).values));
   await alice.click('#doctabs [role=tab] >> text=Enclosure');
   await alice.waitForFunction(() => { const s = window.JunctionPartStudio && window.JunctionPartStudio.getState(); return s && s.loaded && s.kernel.state === 'ready' && s.bodies.length === 1; }, null, { timeout: 90000 });
   await alice.dblclick('[data-feature-row][data-feature-type=extrude]');
@@ -436,7 +442,7 @@ try {
   await alice.waitForFunction(() => window.JunctionAssembly && window.JunctionAssembly.getState().loaded, null, { timeout: 30000 });
   await settled(alice, 3);
   const back = await inst(alice, 'Lid');
-  check('the box is made 55 mm tall in its own tab; back in the assembly the lid sits at 55', near(back.t[9] * 160 + back.t[11], 55, 1e-3) && near(back.stored[11], back.t[11], 1e-6), `hinge z ${(back.t[9] * 160 + back.t[11]).toFixed(3)}`);
+  check('the box is made 55 mm tall in its own tab; back in the assembly the lid is hinged at 55, still open 30°', near(back.t[9] * 160 + back.t[11], 55, 1e-3) && near(back.stored[11], back.t[11], 1e-6) && near((await mate(alice, 'Hinge')).info.values.angle, -30, 1e-3), `hinge z ${(back.t[9] * 160 + back.t[11]).toFixed(3)}, angle ${(await mate(alice, 'Hinge')).info.values.angle.toFixed(3)}°`);
   await shot(alice, '17b-after-own-edit');
 
   // ---------------------------------------------------------------- a sub-assembly

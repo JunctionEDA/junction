@@ -91,7 +91,7 @@ export function InstanceList({ assembly }: { assembly: AssemblyEditor }) {
   return (
     <section className="flex flex-col min-h-0 flex-[2_1_0] border-b border-line" data-panel="instances">
       <Caption right={<span className="font-normal text-ink-3 text-xs font-mono">{s.instances.length || ""}</span>}>Instances</Caption>
-      <div className="flex-1 min-h-0 overflow-y-auto bg-paper py-1 text-sm" role="listbox" aria-label="Instances" aria-multiselectable="true" onClick={(ev) => { if (ev.target === ev.currentTarget) assembly.select(null); }}>
+      <div className="flex-1 min-h-0 overflow-y-auto bg-paper py-1 text-sm outline-none" role="listbox" tabIndex={0} aria-label="Instances" aria-multiselectable="true" onClick={(ev) => { if (ev.target === ev.currentTarget) assembly.select(null); }}>
         {rows.map((r) => {
           if (r.kind === "group") {
             const g = s.groups.find((x) => x.id === r.id)!;

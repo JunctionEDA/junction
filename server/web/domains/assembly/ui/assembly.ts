@@ -20,11 +20,11 @@ import { multiply } from "../core/transform";
 import type { MateDefinition } from "../core/mate";
 import {
   addConnector, addMate, connectorsOf, copyInstances, deleteItems, groupInstances, groupsOf, insertInstances, numberedName, positionsOf, renameItem, replaceSource, savePosition, setCollapsed,
-  setFixed, setHidden, setSuppressed, setTransforms, ungroup, updateConnector, updateMate, type ConnectorItem, type GroupItem, type PositionItem,
+  setFixed, setHidden, setMateValues, setSuppressed, setTransforms, ungroup, updateConnector, updateMate, type ConnectorItem, type GroupItem, type PositionItem,
 } from "../document/edits";
 import { ASSEMBLY_KIND, instancesOf, isInstance, isMate, matesOf, transformOf as storedTransform, type InstanceItem, type InstanceSource, type MateConnector, type MateItem, type Transform } from "../document/format";
 import { MATES, TOOLS } from "../generated/page";
-import { buildProblem, endFrame, reachOf, solveProblem, type Geometry, type MateInfo, type Problem } from "../model/problem";
+import { buildProblem, endFrame, measureMates, reachOf, solveProblem, type Geometry, type MateInfo, type Problem } from "../model/problem";
 import { frameInWorld, prepareA, prepareB } from "../solver/frames";
 import { applyPose, dot, inverse, poseDistance, poseOf, qaxis, qmul, qnorm, transformOf, type Pose } from "../solver/math";
 import { solve } from "../solver/solver";
@@ -234,9 +234,11 @@ export class AssemblyEditor {
       // at 45° when its box grows); only when that is impossible, the nearest one.
       const drives: { mate: string; key: string; value: number }[] = [];
       for (const m of problem.mates) {
-        const was = this.state.mateInfo[m.id];
-        if (!was || was.state !== "ok") continue;
-        for (const v of m.solve.values || []) { const x = was.values[v.key]; if (typeof x === "number") drives.push({ mate: m.id, key: v.key, value: v.unit === "deg" ? (x * Math.PI) / 180 : x }); }
+        // the values stored with the placements; for a mate that has none yet, the ones last seen here
+        const item = doc.items.get(m.id), was = this.state.mateInfo[m.id];
+        const kept = isMate(item) && item.values && typeof item.values === "object" ? item.values : was && was.state === "ok" ? was.values : null;
+        if (!kept) continue;
+        for (const v of m.solve.values || []) { const x = kept[v.key]; if (typeof x === "number") drives.push({ mate: m.id, key: v.key, value: v.unit === "deg" ? (x * Math.PI) / 180 : x }); }
       }
       if (drives.length) { const held = solveProblem(problem, { analyze: true, reach, drives }); if (held.result.ok) solved = held; }
     }
@@ -279,10 +281,14 @@ export class AssemblyEditor {
     clearTimeout(this.followTimer);
     if (!sound || this.live || !this.state.canEdit) return;
     const pending = (): ItemChange[] => (this.session.doc ? setTransforms(this.session.doc, this.transforms(), 1e-7) : []);
-    if (!pending().length) return;
+    if (!pending().length) return;   // (mate values are not rewritten here: they are what the solve aimed at)
     this.followTimer = setTimeout(() => { if (this.closed || this.live || this.drag || !this.state.canEdit) return; const changes = pending(); if (changes.length) this.session.commit(changes, { undoable: false }); }, 500);
   }
 
+  /** What a finished gesture stores: the placements on screen and the values the mates have in them. */
+  private settled(doc: ItemDoc): ItemChange[] {
+    return [...setTransforms(doc, this.transforms()), ...setMateValues(doc, measureMates(this.problem(doc), this.display))];
+  }
   private transforms(): Map<string, Transform> { const out = new Map<string, Transform>(); for (const [id, p] of this.display) out.set(id, transformOf(p)); return out; }
 
   /** The instances' own centres (in their own space), for the exploded view and the manipulator. */
@@ -517,7 +523,7 @@ export class AssemblyEditor {
     this.stopAnimation();
     const changes = d.isNew ? addMate(doc, { mateType: d.mateType, name: d.name.trim() || "Mate", a: d.a, b: d.b, params: d.params }, d.id).changes
       : updateMate(doc, d.id, { name: d.name.trim() || "Mate", a: d.a, b: d.b, params: d.params, mateType: d.mateType });
-    changes.push(...setTransforms(doc, this.transforms()));
+    changes.push(...this.settled(doc));
     this.live = null;
     this.state = { ...this.state, mating: null, selection: [d.id] };
     if (!this.commit(changes)) this.refresh();
@@ -544,7 +550,7 @@ export class AssemblyEditor {
     if (!this.live) this.live = new Map(this.display);
     this.refresh({ drives: [{ mate: id, key, value: v.unit === "deg" ? (value * Math.PI) / 180 : value }] });
     const ok = this.state.mateInfo[id]?.state === "ok";
-    if (!drafting && !this.anim) { const doc = this.session.doc; const changes = doc && ok ? setTransforms(doc, this.transforms()) : []; this.live = null; if (!changes.length || !this.commit(changes)) this.refresh(); }
+    if (!drafting && !this.anim) { const doc = this.session.doc; const changes = doc && ok ? this.settled(doc) : []; this.live = null; if (!changes.length || !this.commit(changes)) this.refresh(); }
     return ok;
   }
   /** Sweep a mate's value back and forth between its limits (or through a full turn) until stopped.  Nothing is stored. */
@@ -600,7 +606,7 @@ export class AssemblyEditor {
     const solved = solveProblem(problem, { reach: reachOf(problem.mates) });
     const out = new Map<string, Transform>();
     for (const [inst, pose] of solved.result.poses) out.set(inst, transformOf(pose));
-    const changes = setTransforms(doc, out);
+    const changes = [...setTransforms(doc, out), ...setMateValues(doc, measureMates(problem, solved.result.poses))];
     if (changes.length) this.commit(changes);
     this.set({ selection: [id] });
   }
@@ -744,7 +750,7 @@ export class AssemblyEditor {
     this.viewport.canvas.style.cursor = "";
     this.scene.triad.setActive(null);
     const doc = this.session.doc;
-    const changes = doc && d.moved ? setTransforms(doc, this.transforms()) : [];
+    const changes = doc && d.moved ? this.settled(doc) : [];
     this.live = null;
     this.state = { ...this.state, readout: null };
     if (!changes.length || !this.commit(changes)) this.refresh();

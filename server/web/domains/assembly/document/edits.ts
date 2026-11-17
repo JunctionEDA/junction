@@ -13,7 +13,7 @@
 //              { id, type: "position", name, order, transforms: { <instance id>: [12 numbers] } }
 //
 // Instances keep their place in the list by `order` (shared/itemdoc orderBetween), as features do.
-import { addedChange, byOrder, modifiedChange, newId, orderBetween, removedChange, type Item, type ItemChange, type ItemDoc, type JsonObject } from "../../../shared/itemdoc/itemdoc";
+import { addedChange, byOrder, modifiedChange, newId, orderBetween, removedChange, stableJson, type Item, type ItemChange, type ItemDoc, type JsonObject } from "../../../shared/itemdoc/itemdoc";
 import type { GeomRef } from "../../mechanical/api";
 import { IDENTITY, instancesOf, isInstance, isMate, matesOf, type InstanceItem, type InstanceSource, type MateConnector, type MateItem, type Transform } from "./format";
 
@@ -92,6 +92,25 @@ export function setTransforms(doc: ItemDoc, transforms: ReadonlyMap<string, read
   }
   return out;
 }
+/**
+ * The values each mate has now (document/format.ts MateItem.values), to be committed with the placements.
+ * Only mates whose values changed are written; a mate that is not in the document yet (it is added by an
+ * earlier change of the same commit) is written too.
+ */
+export function setMateValues(doc: ItemDoc, values: ReadonlyMap<string, { [key: string]: number }>): ItemChange[] {
+  const out: ItemChange[] = [];
+  for (const [id, v] of values) {
+    const rounded: { [key: string]: number } = {};
+    for (const k of Object.keys(v)) { const r = Math.round(v[k] * 1e6) / 1e6; rounded[k] = Object.is(r, -0) ? 0 : r; }
+    const item = doc.items.get(id);
+    if (item && !isMate(item)) continue;
+    if (item && stableJson(item.values) === stableJson(rounded)) continue;
+    if (item && item.values === undefined && !Object.keys(rounded).length) continue;
+    out.push({ id, kind: "MODIFIED", typeName: "mate", props: [{ path: ["values"], value: rounded }] });
+  }
+  return out;
+}
+
 /** Numbers as they are stored: rounded to a nanometre (and a billionth of a turn), so equal placements are equal text. */
 const clean = (v: number): number => { const r = Math.round(v * 1e9) / 1e9; return Object.is(r, -0) ? 0 : r; };
 
