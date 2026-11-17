@@ -598,9 +598,12 @@ export class PartStudio {
   cancelSketch(): void {
     const s = this.state.sketch; if (!s || !this.doc) return;
     const changes: ItemChange[] = s.isNew ? edits.deleteFeature(this.doc, s.featureId) : this.sketchChanged() && s.before ? edits.setParams(this.doc, s.featureId, s.before) : [];
+    const drawn = this.sketchChanged();
     this.finishSketch();
     if (changes.length) this.commit(changes);
     if (s.isNew) this.set({ selectedFeature: null, selectedFeatures: [] });
+    // nothing is thrown away for good, and the person should know where it went
+    if (changes.length && drawn) this.host.toast(s.isNew ? "The new sketch was taken away. Undo brings it back." : "The sketch is as it was when you opened it. Undo brings your changes back.", 4000);
   }
   private planeTaker: ((p: Pick) => void) | null = null;
   /**

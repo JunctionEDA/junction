@@ -265,6 +265,11 @@ try {
   check('… and folds to its title', (await page.locator('.cad-dialog').boundingBox()).height < 40 && await page.isHidden(edges));
   await page.click('.cad-dialog [data-dialog-fold]');
   await page.fill('.cad-dialog [data-param=radius]', '3');
+  // dragging a number's label scrubs it: six pixels a step, and a fillet's radius steps by half a millimetre
+  const label = await page.locator('.cad-dialog [data-field=radius] > span').first().boundingBox();
+  await page.mouse.move(label.x + 10, label.y + 10); await page.mouse.down(); await page.mouse.move(label.x + 10 + 31, label.y + 10, { steps: 5 }); await page.mouse.up();
+  check('dragging a number\'s label scrubs it', (await st()).editing.params.radius === 5.5 && (await page.inputValue('.cad-dialog [data-param=radius]')) === '5.5', String((await st()).editing.params.radius));
+  await page.fill('.cad-dialog [data-param=radius]', '3');
   await previewed(page);
   await key('Enter');
   await settled(page, 3);
