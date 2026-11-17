@@ -32,10 +32,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates
 # The newest Junction desktop release for Linux and the Ubuntu packages it lists; JUNCTION_RELEASE pins a tag
 # (v2.2.0), and an image without it still builds and serves everything but the import.
 ARG JUNCTION_RELEASE=latest
+# The releases feed is fetched on every build, so a new release invalidates the cached layer below and the next
+# deploy installs it
+ADD https://github.com/JunctionEDA/junction/releases.atom /tmp/junction-releases.atom
 RUN tag="$JUNCTION_RELEASE"; \
     if [ "$tag" = latest ]; then \
       tag=$(curl -fsSI https://github.com/JunctionEDA/junction/releases/latest | tr -d '\r' | sed -n 's#^[Ll]ocation: .*/tag/##p'); \
     fi; \
+    rm -f /tmp/junction-releases.atom; \
     if [ -n "$tag" ] && curl -fsSL "https://github.com/JunctionEDA/junction/releases/download/$tag/Junction-${tag#v}-linux-x64.tar.gz" -o /tmp/junction.tgz; then \
       mkdir -p /opt/junction && tar -C /opt/junction -xzf /tmp/junction.tgz && rm /tmp/junction.tgz \
       && apt-get update && xargs -a /opt/junction/usr/share/junction/ubuntu-packages.txt apt-get install -y --no-install-recommends \
