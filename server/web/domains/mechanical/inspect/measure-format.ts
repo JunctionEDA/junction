@@ -1,10 +1,12 @@
 // measure-format.ts — what the measure readout says: the rows a measurement turns into, with their numbers
 // formatted for reading and for copying.  Pure (no DOM, no kernel); tested in static/tests/cad-analysis.test.js.
 //
-// Lengths are millimetres throughout the model; the readout shows them with up to three decimals, trailing zeros
-// dropped ("12.5 mm"), and copies the number alone at full working precision ("12.5"), so a pasted value is
-// the value.
+// Lengths are millimetres throughout the model; the readout shows them in the units of the document being
+// looked at (document/units.ts; `setMeasureUnits`, millimetres with three decimals until told otherwise),
+// trailing zeros dropped ("12.5 mm"), and copies the number alone, in those units, at full working precision
+// ("12.5"), so a pasted value is the value.
 import type { Vec3 } from "../core/geometry";
+import { DEFAULT_UNITS, angleFactor, formatAngle, formatArea, formatLength, formatVolume, lengthFactor, type Units } from "../document/units";
 import type { EntityInfo, PairInfo } from "../services/_measure-kernel";
 import type { MeasureResult } from "../services/measure-entities";
 
@@ -30,15 +32,31 @@ export function num(v: number, places = 3): string {
 /** The number as copied: enough digits to round-trip a measurement (1e-9 mm), none beyond. */
 export function copyNum(v: number): string { return Number.isFinite(v) ? trim((Math.abs(v) < 5e-10 ? 0 : v).toFixed(9)) : ""; }
 
-export const mm = (v: number) => `${num(v)} mm`;
-export const mm2 = (v: number) => `${num(v)} mm²`;
-export const mm3 = (v: number) => `${num(v)} mm³`;
-export const deg = (v: number) => `${num(v, 2)}°`;
+// The units readouts are written in: those of the part studio on screen.  The part studio sets them when its
+// document's units change; the functions below stay plain functions of a number.
+let U: Units = DEFAULT_UNITS;
+export function setMeasureUnits(u: Units): void { U = u; }
+export const measureUnits = (): Units => U;
+
+/** A length, an area, a volume (given in mm, mm², mm³) and an angle (degrees) in the units on screen. */
+export const mm = (v: number) => formatLength(v, U);
+export const mm2 = (v: number) => formatArea(v, U);
+export const mm3 = (v: number) => formatVolume(v, U);
+export const deg = (v: number) => formatAngle(v, U);
+/** The number a row copies: the value in the units its text is in. */
+function shownValue(text: string, value: number): number {
+  const f = lengthFactor(U.length);
+  if (text.endsWith(`${U.length}³`)) return value / (f * f * f);
+  if (text.endsWith(`${U.length}²`)) return value / (f * f);
+  if (text.endsWith(` ${U.length}`)) return value / f;
+  if (text.endsWith("°") || text.endsWith(" rad")) return value / angleFactor(U.angle);
+  return value;
+}
 /** Kilograms, shown in grams below one kilogram. */
 export const kg = (v: number) => (Math.abs(v) < 1 ? `${num(v * 1000)} g` : `${num(v, 4)} kg`);
 export const inertia = (v: number) => `${num(v, 3)} kg·mm²`;
 
-const row = (key: string, label: string, text: string, value: number, minor = false): Row => ({ key, label, text, copy: copyNum(value), ...(minor ? { minor } : {}) });
+const row = (key: string, label: string, text: string, value: number, minor = false): Row => ({ key, label, text, copy: copyNum(shownValue(text, value)), ...(minor ? { minor } : {}) });
 const point = (key: string, label: string, p: Vec3): Row[] => [
   row(`${key}.x`, `${label} X`, mm(p[0]), p[0]), row(`${key}.y`, `${label} Y`, mm(p[1]), p[1]), row(`${key}.z`, `${label} Z`, mm(p[2]), p[2]),
 ];

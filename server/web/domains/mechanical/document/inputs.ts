@@ -31,7 +31,8 @@ export interface StudioInputOptions {
 export function studioInputs(doc: ItemDoc, o: StudioInputOptions = {}): StudioInput {
   const features = o.features || featuresOf(doc);
   const rollback = o.features && o.rollback !== undefined ? o.rollback : rollbackIndex(doc, features);
-  let inputs = resolveInputs(featureInputs(features), variableValues(variablesOf(doc)).values);
+  const vv = variableValues(variablesOf(doc));
+  let inputs = resolveInputs(featureInputs(features), vv.values, vv.dims);
   for (const filter of o.filters || []) inputs = filter(inputs);
   return { features: inputs, rollback };
 }

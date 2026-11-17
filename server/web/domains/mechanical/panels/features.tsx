@@ -2,4 +2,4 @@
 import { definePanel } from "../core/tool";
 import { FeatureList } from "../ui/FeatureList";
 
-export default definePanel({ id: "features", title: "Features", side: "left", order: 10, render: (studio) => <FeatureList studio={studio} /> });
+export default definePanel({ id: "features", title: "Features", side: "left", order: 10, count: (studio) => studio.getState().features.length || null, render: (studio) => <FeatureList studio={studio} /> });

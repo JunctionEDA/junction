@@ -11,7 +11,7 @@
 // It replaces the two-point engine in sketch/drawing.ts, which knew nothing of constraints.
 import type { Vec2 } from "../core/geometry";
 import type { PartStudio } from "../ui/studio";
-import { fmt } from "./dims";
+import { angText, lenText, typedFactor } from "./dims";
 import { sketchEditor } from "./editor";
 import { tryEvaluate } from "./expr";
 import type { SketchData } from "./format";
@@ -90,7 +90,7 @@ export function startDrawTool(studio: PartStudio, spec: ShapeSpec): void {
       const el = document.createElement("span");
       const typing = i === field && buffer !== "", fixed = f.key in typed;
       el.dataset.field = f.key;
-      el.textContent = `${f.label} ${typing ? buffer : fmt(fixed ? typed[f.key] : f.value)}${f.unit === "deg" ? "°" : " mm"}`;
+      el.textContent = `${f.label} ${typing ? buffer : (f.unit === "deg" ? angText : lenText)(fixed ? typed[f.key] : f.value)}`;
       el.style.cssText = typing ? "outline:1px solid var(--blue);outline-offset:1px;border-radius:2px" : fixed ? "font-weight:600" : i === field ? "" : "color:var(--ink-3)";
       return el;
     }));
@@ -115,7 +115,7 @@ export function startDrawTool(studio: PartStudio, spec: ShapeSpec): void {
   const takeBuffer = (): boolean => {
     if (buffer === "") return true;
     const fs = fields(), f = fs[field]; if (!f) { buffer = ""; return true; }
-    const v = tryEvaluate(buffer, f.unit === "deg" ? "angle" : "length");
+    const v = tryEvaluate(buffer, f.unit === "deg" ? "angle" : "length", typedFactor(f.unit === "deg"));
     if (!v || (f.unit === "mm" && !(v.value > 0))) { studio.host.toast(f.unit === "mm" ? "Type a length, like 25 or 1.5 in." : "Type an angle in degrees.", 2500); return false; }
     typed = { ...typed, [f.key]: v.value }; buffer = "";
     return true;

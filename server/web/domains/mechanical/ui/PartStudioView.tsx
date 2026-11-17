@@ -1,5 +1,9 @@
-// PartStudioView.tsx — the part studio's frame: the generated toolbar, the docked panels (panels/*.tsx), the
-// viewport with the feature dialog over it, and what the worker is doing.
+// PartStudioView.tsx — the part studio's frame:
+//
+//   the toolbar            the tools of the mode the studio is in (Toolbar.tsx)
+//   left dock │ viewport │ right dock      the docked panels (panels/*.tsx); over the viewport the dialog of the
+//                                          feature or sketch being edited, the view cube, and the overlay panels
+//   the status bar         what is going on, what a click picks, the units (StatusBar.tsx)
 import { Fragment, useEffect, useRef } from "react";
 import { PANELS } from "../generated/page";
 import { cx } from "../../../shared/util";
@@ -8,24 +12,12 @@ import { Glyph } from "./Glyph";
 import { useStudio } from "./hooks";
 import { dockFolded, panelOpen, setDockFolded, setPanelOpen, usePanels } from "./panels";
 import type { PartStudio } from "./studio";
+import { CommandPalette, ContextMenu, Shortcuts } from "./Overlays";
+import { SketchDialog } from "./SketchDialog";
+import { StatusBar } from "./StatusBar";
+import { TipHost } from "./Tip";
 import { Toolbar } from "./Toolbar";
-
-function KernelNote({ studio }: { studio: PartStudio }) {
-  const kernel = useStudio(studio, (s) => s.kernel);
-  const loaded = useStudio(studio, (s) => s.loaded);
-  const status = useStudio(studio, (s) => s.status);
-  const empty = useStudio(studio, (s) => s.loaded && !s.features.length && !s.editing);
-  const sketch = useStudio(studio, (s) => s.sketch);
-  let text = "";
-  if (!loaded) text = status.state === "error" ? status.text : "Opening the part studio…";
-  else if (kernel.state === "loading") text = "Starting the modelling kernel…";
-  else if (kernel.state === "failed") text = kernel.message || "The modelling kernel stopped.";
-  else if (kernel.state === "working") text = "Rebuilding…";
-  else if (sketch) text = "Sketching. Right-drag turns the view, the wheel zooms.";
-  else if (empty) text = "Choose Sketch to start a part.";
-  if (!text) return null;
-  return <div className="cad-note absolute left-2 bottom-2 z-[2] px-2 py-0.5 rounded-sm border border-line bg-panel text-ink-2 text-xs pointer-events-none" role="status" data-kernel={kernel.state}>{text}</div>;
-}
+import { ViewCube } from "./ViewCube";
 
 /** a button with nothing of the browser's own look */
 export const BARE = "appearance-none bg-transparent border-0 m-0 p-0 text-inherit [font-family:inherit] [font-size:inherit] cursor-pointer";
@@ -34,7 +26,7 @@ const CHEVRON = '<path d="M9 6l6 6-6 6"/>';
 function Dock({ studio, where }: { studio: PartStudio; where: "left" | "right" }) {
   usePanels();
   // a panel's `open` and `visible` may read anything of the studio: look again whenever it changes
-  useStudio(studio, (s) => s.features); useStudio(studio, (s) => !!s.sketch); useStudio(studio, (s) => s.ui);
+  useStudio(studio, (s) => s.features); useStudio(studio, (s) => !!s.sketch); useStudio(studio, (s) => s.ui); useStudio(studio, (s) => s.bodies);
   const panels = PANELS.filter((p) => p.side === where).slice().sort((a, b) => (a.order ?? 1e6) - (b.order ?? 1e6));
   if (!panels.length) return null;
   const folded = dockFolded(where);
@@ -59,6 +51,7 @@ function Dock({ studio, where }: { studio: PartStudio; where: "left" | "right" }
               <button type="button" className={cx(BARE, "flex flex-1 min-w-0 items-center gap-1 h-full px-1 text-left font-semibold")} aria-expanded={open} data-panel-toggle={p.id} title={open ? `Fold ${p.title}` : `Unfold ${p.title}`} onClick={() => setPanelOpen(p.id, !open)}>
                 <span className={cx("flex-none text-ink-3 transition-transform", open && "rotate-90")}><Glyph svg={CHEVRON} size={12} /></span>
                 <span className="truncate">{p.title}</span>
+                {p.count && p.count(studio) !== null ? <span className="mono text-xs font-normal text-ink-3" data-panel-count={p.count(studio)}>{p.count(studio)}</span> : null}
               </button>
               {p === shown[0] ? (
                 <button type="button" className={cx(BARE, "flex flex-none items-center h-full px-1 text-ink-3 hover:text-ink")} title="Fold these panels away" aria-label="Fold these panels away" data-dock-fold={where} onClick={() => setDockFolded(where, true)}>
@@ -78,17 +71,23 @@ export function PartStudioView({ studio, canvasHost }: { studio: PartStudio; can
   const stage = useRef<HTMLDivElement>(null);
   useEffect(() => { stage.current?.prepend(canvasHost); return () => canvasHost.remove(); }, [canvasHost]);
   return (
-    <div className="cad-root grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] text-ink" data-doc-kind="part-studio">
+    <div className="cad-root grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)_auto] text-ink" data-doc-kind="part-studio">
       <Toolbar studio={studio} />
       <div className="flex min-h-0 min-w-0">
         <Dock studio={studio} where="left" />
         <div ref={stage} className="cad-stage relative flex-1 min-w-0 min-h-0 overflow-hidden">
           <FeatureDialog studio={studio} />
-          <KernelNote studio={studio} />
+          <SketchDialog studio={studio} />
+          <ViewCube studio={studio} />
           {PANELS.filter((p) => p.side === "overlay").map((p) => <Fragment key={p.id}>{p.render(studio)}</Fragment>)}
         </div>
         <Dock studio={studio} where="right" />
       </div>
+      <StatusBar studio={studio} />
+      <CommandPalette studio={studio} />
+      <ContextMenu studio={studio} />
+      <Shortcuts studio={studio} />
+      <TipHost />
     </div>
   );
 }
