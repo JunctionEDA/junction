@@ -4,15 +4,29 @@ Releases of Junction, which was called KiCad Collaborative up to 1.0.9. The
 version here is the product version (`packaging/VERSION`), not the KiCad
 version it is based on.
 
-## 2.2.0 (unreleased)
+## 2.2.0 (2026-11-17)
 
 ### Desktop
+- Up to date with upstream KiCad master (merged 2026-11-17): every editor
+  carries KiCad's latest fixes and features, built and tested on all three
+  systems before it landed.
+- Collaborators' cursors move live: presence takes a fast lane through the
+  server and is sent every frame, and each peer's pointer is replayed at the
+  pace it actually moved, so it no longer jumps or lags behind.
 - Junction tells you when a newer version is out. At start-up it asks
   junctioneda.com for the newest release, and if it is later than yours a
   notice offers Download (straight to the file for your system), View
   Details, Remind Me Later and Skip This Version. Turn it off in
   Preferences, Packages and Updates, or in the first-run wizard, whose
   update checkbox now does what it says.
+
+### Downloads
+
+| Platform | File | Notes |
+|---|---|---|
+| macOS (Apple Silicon, macOS 15+) | `Junction-2.2.0-macos.dmg` | Ad-hoc signed: first launch is right-click, Open. Replace the old app in Applications. |
+| Windows x64 | `Junction-2.2.0-windows-x64.exe` | Installer; upgrades earlier versions in place. |
+| Linux x64 (Ubuntu 24.04 LTS) | `Junction-2.2.0-linux-x64.tar.gz` | Extract anywhere, install the packages listed in `usr/share/junction/ubuntu-packages.txt` (`sudo apt install $(cat usr/share/junction/ubuntu-packages.txt)`), run `usr/bin/junction`. |
 
 ## 2.1.4 (2026-11-15)
 
