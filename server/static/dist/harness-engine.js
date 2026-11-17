@@ -69658,7 +69658,7 @@ function footprintModels(node, guess = true, boardFiles2 = null) {
     if (/KICAD_COLLAB_3DMODELS/.test(path2)) {
       const hit5 = VENDOR_FIELDS.map(([f2, v]) => [v, fieldOf2(node, f2)]).find(([, id]) => id);
       if (!hit5) continue;
-      out2.push({ ...ref, source: "vendor", url: `/api/parts/model.step?vendor=${hit5[0]}&id=${encodeURIComponent(hit5[1])}&fit=1` });
+      out2.push({ ...ref, source: "vendor", url: `/api/parts/model.step?vendor=${hit5[0]}&id=${encodeURIComponent(hit5[1])}&fit=2` });
     } else out2.push({ ...ref, source: "kicad", url: kicadModelUrl(m[1], m[2]) });
   }
   if (!named && guess) {
@@ -69694,7 +69694,7 @@ function foreignModel(node, path2, ref) {
   if (!lcsc) return null;
   const url = `/api/parts/model.step?vendor=lcsc&id=${encodeURIComponent(lcsc)}`;
   if (/\.(?:step|stp)$/i.test(path2)) return { ...ref, source: "vendor", url };
-  return { ...ref, offset: [0, 0, 0], rotate: [0, 0, 0], source: "vendor", url: url + "&fit=1&placed=1" };
+  return { ...ref, offset: [0, 0, 0], rotate: [0, 0, 0], source: "vendor", url: url + "&fit=2&placed=1" };
 }
 function guessedModel(node) {
   const m = /^([^:\/\\${}]+):([^:\/\\]+)$/.exec(String(node[1] ?? ""));
