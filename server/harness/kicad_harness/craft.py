@@ -214,6 +214,9 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                     out["routed"]["vias"] = (out["routed"]["vias"] or 0) + (more.get("vias") or 0)
                     left = more.get("left") or {}
             out["routed"]["left"] = left
+        rf = step("rf feeds", self.rf_feeds)      # every antenna feed to 50 ohm from the stackup: width, planes cut away under it, arcs, fence
+        if rf and any(f.get("width") for f in rf.get("feeds", [])):
+            out["rf_feeds"] = [{k: f[k] for k in ("net", "width", "impedance", "reference", "voided") if k in f} | ({"fence_vias": f["fence"].get("vias")} if isinstance(f.get("fence"), dict) else {}) for f in rf["feeds"] if f.get("width")]
         fin = step("finish", lambda: self.finish(stitch=stitch))
         if fin:
             out["added"] = {k: (sum(v.values()) if isinstance(v, dict) and all(isinstance(x, (int, float)) for x in v.values()) else v) for k, v in fin.items() if v not in (None, {}, 0)}

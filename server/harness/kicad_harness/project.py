@@ -2062,15 +2062,18 @@ class Board(_Doc):
                       f'(fill (thermal_gap 0.3) (thermal_bridge_width 0.4)) (polygon (pts {pts})))')
 
     def keepout(self, box, layers=None, tracks: bool = True, vias: bool = True, copper: bool = True, footprints: bool = False, name: str = "") -> None:
-        """A rule area (KiCad keepout) over a rectangle [x0, y0, x1, y1]: nothing of the kinds named may enter it.
+        """A rule area (KiCad keepout) over a rectangle [x0, y0, x1, y1] (or a polygon [(x, y), ...]): nothing of the kinds named may enter it.
 
         Use it under an antenna (no copper on any layer), for the gap between an analog and a digital section, or to
         hold tracks off a switching converter's inductor.  layers: copper layers it applies to (default all of
         them).  tracks / vias / copper (pours) / footprints: True keeps that out.  The autorouter, the zone filler
         and the design rule check all honour it."""
         ls = list(layers) if layers else list(self.info().get("copper_layers") or ["F.Cu", "B.Cu"])
-        x0, y0, x1, y1 = (min(box[0], box[2]), min(box[1], box[3]), max(box[0], box[2]), max(box[1], box[3]))
-        pts = " ".join(f"(xy {_r(x)} {_r(y)})" for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)))
+        if box and isinstance(box[0], (list, tuple)):       # a polygon [(x, y), ...]
+            pts = " ".join(f"(xy {_r(x)} {_r(y)})" for x, y in box)
+        else:
+            x0, y0, x1, y1 = (min(box[0], box[2]), min(box[1], box[3]), max(box[0], box[2]), max(box[1], box[3]))
+            pts = " ".join(f"(xy {_r(x)} {_r(y)})" for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)))
         ok = lambda keep: "not_allowed" if keep else "allowed"
         lay = f'(layer "{ls[0]}")' if len(ls) == 1 else "(layers " + " ".join(f'"{l}"' for l in ls) + ")"
         self.add_item(f'(zone (net 0) (net_name "") {lay} (uuid "{_uuid.uuid4()}")' + (f' (name "{name}")' if name else "") + ' (hatch edge 0.5) (connect_pads (clearance 0)) (min_thickness 0.25) '
