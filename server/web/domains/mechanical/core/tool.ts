@@ -38,11 +38,20 @@ export interface ToolDefinition {
 
 export function defineTool(def: ToolDefinition): ToolDefinition { return def; }
 
+// A tool whose `active` or `disabled` reads state of its own (not the studio's) calls `toolsChanged()` when that
+// state changes, and the toolbar draws again.
+let toolsVersion = 0;
+const toolListeners = new Set<() => void>();
+export function toolsChanged(): void { toolsVersion++; for (const fn of Array.from(toolListeners)) fn(); }
+export function subscribeTools(fn: () => void): () => void { toolListeners.add(fn); return () => { toolListeners.delete(fn); }; }
+export function toolsRevision(): number { return toolsVersion; }
+
 /** A panel docked beside the viewport (the feature list is one).  One file under panels/. */
 export interface PanelDefinition {
   id: string;
   title: string;
-  side: "left" | "right";
+  /** "overlay": drawn over the viewport with no frame of its own; the component places itself (a corner readout). */
+  side: "left" | "right" | "overlay";
   order?: number;
   /** A React component; it reads the studio with the hooks in ui/hooks.ts. */
   render(studio: PartStudio): ReactNode;

@@ -1,6 +1,7 @@
 // Toolbar.tsx — the part studio's toolbar, drawn from the registries: one button per feature type
 // (features/*.ts) and one per tool (tools/*.ts), in the tool groups' order.  Nothing is listed here by hand.
-import { TOOL_GROUPS, type ToolDefinition } from "../core/tool";
+import { useSyncExternalStore } from "react";
+import { TOOL_GROUPS, subscribeTools, toolsRevision, type ToolDefinition } from "../core/tool";
 import { cx } from "../../../shared/util";
 import { Glyph } from "./Glyph";
 import { useStudio } from "./hooks";
@@ -22,6 +23,8 @@ export function Toolbar({ studio }: { studio: PartStudio }) {
   const editing = useStudio(studio, (s) => !!s.editing);
   useStudio(studio, (s) => s.selection); useStudio(studio, (s) => s.selectedFeature);
   useStudio(studio, (s) => s.canUndo); useStudio(studio, (s) => s.canRedo); useStudio(studio, (s) => s.planesVisible);
+  useSyncExternalStore(subscribeTools, toolsRevision);   // tools with state of their own (core/tool.ts toolsChanged)
+  useStudio(studio, (s) => s.bodies);
 
   const features = studio.definitions().filter((f) => f.toolbar !== false).slice().sort((a, b) => (a.toolbarOrder ?? 1e6) - (b.toolbarOrder ?? 1e6) || a.title.localeCompare(b.title));
   const tools = (group: string): ToolDefinition[] => studio.tools().filter((t) => t.group === group && t.button !== false).slice().sort((a, b) => (a.order ?? 1e6) - (b.order ?? 1e6) || a.title.localeCompare(b.title));
