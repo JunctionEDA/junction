@@ -180,9 +180,10 @@ const skSettled = (page) => page.waitForFunction(() => { const e = window.Juncti
 const enter = async (page, text) => { await page.waitForSelector('.cad-dim-input'); await page.fill('.cad-dim-input', text); await page.keyboard.press('Enter'); await page.waitForSelector('.cad-dim-input', { state: 'detached' }); await skSettled(page); };
 const dimension = async (page, pick, label, value) => { await page.keyboard.press('d'); await skClick(page, ...pick); await skClick(page, ...label); await enter(page, String(value)); };
 async function newSketch(page, count) {
+  // with a plane or a flat face selected the sketch starts at once; otherwise the dialog asks, and ✓ takes Top
   await tool(page, 'Sketch');
-  await page.waitForSelector('.cad-dialog[data-feature=sketch]');
-  await page.click('.cad-dialog [data-accept]');
+  await page.waitForSelector('.cad-dialog[data-feature=sketch], .cad-sketch-dialog');
+  if (await page.locator('.cad-dialog[data-feature=sketch]').count()) await page.click('.cad-dialog [data-accept]');
   await page.waitForFunction((count) => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.features.length === count && window.JunctionSketch && window.JunctionSketch.getState().ready && window.JunctionSketch.frame; }, count, { timeout: 120000 });
   await page.waitForTimeout(800);   // the camera turns to face the plane
 }

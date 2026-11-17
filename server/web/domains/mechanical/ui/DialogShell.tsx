@@ -1,6 +1,8 @@
 // DialogShell.tsx — the frame every dialog over the viewport shares (a feature's, the open sketch's): a title
 // that can be edited, ✓ and ✗ at its right, a body.  It stays where it is put: drag it by its title, fold it to
-// its title with the chevron; the place and the fold are kept for the next dialog, so a dialog never jumps.
+// its title with the chevron.  The place is kept for the next dialog, so a dialog never jumps; the fold is kept
+// only where `keepFold` asks (the sketch's dialog, which a person folds to draw under it): a feature's dialog
+// always opens showing its fields.
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { cx } from "../../../shared/util";
 import { Glyph } from "./Glyph";
@@ -9,10 +11,12 @@ import { tipHandlers } from "./Tip";
 
 // where the person last left a dialog (pixels from the stage's top left), and whether it was folded
 let place = { x: 8, y: 8 };
-let folded = false;
+const folded: { [kind: string]: boolean } = {};
 
 export interface ShellProps {
   className: string;
+  /** remember, for the next dialog of this kind, that this one was folded to its title */
+  keepFold?: boolean;
   icon?: string;
   name: string;
   /** given: the name is an input */
@@ -34,7 +38,7 @@ export interface ShellProps {
 export function DialogShell(p: ShellProps) {
   const form = useRef<HTMLFormElement>(null);
   const [at, setAt] = useState(place);
-  const [shut, setShut] = useState(folded);
+  const [shut, setShut] = useState(!!p.keepFold && !!folded[p.className]);
   // inside the stage, whatever its size is now
   const clamp = (x: number, y: number) => {
     const el = form.current, host = el?.parentElement;
@@ -43,7 +47,7 @@ export function DialogShell(p: ShellProps) {
   };
   useLayoutEffect(() => { const c = clamp(at.x, at.y); if (c.x !== at.x || c.y !== at.y) setAt(c); });   // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { place = at; }, [at]);
-  useEffect(() => { folded = shut; }, [shut]);
+  useEffect(() => { if (p.keepFold) folded[p.className] = shut; }, [shut, p.keepFold, p.className]);
 
   const drag = (ev: React.PointerEvent) => {
     const target = ev.target as HTMLElement;
