@@ -15,13 +15,15 @@ import type { DocumentHostContext } from "../../../platform/documents/host";
 import { Viewport3D } from "../../../shared/viewport3d/viewport3d";
 import * as THREE from "three";
 import type { FeatureDefinition, ParamField } from "../core/feature";
-import type { GeomRef, PlaneRef } from "../core/geometry";
+import type { PlaneRef } from "../core/geometry";
 import { DEFAULT_PLANES } from "../core/geometry";
 import * as edits from "../document/edits";
 import { PART_STUDIO_KIND, featureInputs, featuresOf, nextName, orderAt, rollbackIndex, type FeatureItem } from "../document/format";
 import { FEATURES, TOOLS } from "../generated/page";
 import { KernelClient, type KernelState } from "../kernel/client";
-import type { BodyResult, FeatureReport, SketchView } from "../kernel/protocol";
+import type { BodyResult, DatumView, FeatureReport, SketchView } from "../kernel/protocol";
+import { resolveInputs, variableValues, variablesOf } from "../document/variables";
+import { pickKindsOf, sameTarget, targetOf, targetsIn, type RefTarget } from "../features/_refs";
 import { ModelView, pickKey, type Pick, type PickKind } from "../viewport/modelview";
 
 export interface EditingFeature {
@@ -43,6 +45,8 @@ export interface StudioState {
   reports: { [featureId: string]: FeatureReport };
   bodies: BodyResult[];
   sketches: SketchView[];
+  /** reference planes, axes, points and curves */
+  datums: DatumView[];
   kernel: { state: KernelState; message: string; working: boolean };
   selection: Pick[];
   hover: Pick | null;
@@ -80,7 +84,7 @@ export class PartStudio {
   constructor(readonly host: DocumentHostContext, canvasHost: HTMLElement) {
     this.state = {
       loaded: false, status: { state: "connecting", text: "connecting…", role: null, canEdit: false }, canEdit: false,
-      features: [], rollback: 0, reports: {}, bodies: [], sketches: [], kernel: { state: "idle", message: "", working: false },
+      features: [], rollback: 0, reports: {}, bodies: [], sketches: [], datums: [], kernel: { state: "idle", message: "", working: false },
       selection: [], hover: null, selectedFeature: null, editing: null, sketch: null, peers: [], canUndo: false, canRedo: false, planesVisible: true,
     };
     this.viewport = new Viewport3D(canvasHost);
@@ -184,12 +188,15 @@ export class PartStudio {
   private async regen(): Promise<void> {
     if (this.closed || !this.state.loaded) return;
     const { features, rollback } = this.effective();
-    const result = await this.kernel.regenerate(featureInputs(features), rollback);
+    // numbers typed as expressions follow the variables (document/variables.ts)
+    const inputs = this.doc ? resolveInputs(featureInputs(features), variableValues(variablesOf(this.doc)).values) : featureInputs(features);
+    const result = await this.kernel.regenerate(inputs, rollback);
     if (!result || this.closed) return;
     const reports: StudioState["reports"] = {};
     for (const r of result.features) reports[r.id] = r;
-    this.set({ reports, bodies: result.bodies, sketches: result.sketches });
+    this.set({ reports, bodies: result.bodies, sketches: result.sketches, datums: result.datums || [] });
     this.view.setBodies(result.bodies);
+    this.view.setDatums(result.datums || []);
     this.refreshSketches();
     // frame the model when there first is one (a sketch being drawn is left where the person put it)
     if (!this.fitted && result.bodies.length && !this.state.sketch) { this.fitted = true; this.viewport.fit(); }
@@ -198,12 +205,15 @@ export class PartStudio {
   /** A sketch is shown while it is open, selected, being used by the dialog, or not yet used by a later feature. */
   private refreshSketches(): void {
     const s = this.state, { features, rollback } = this.effective();
+    // a dialog field that takes sketch curves or a profile shows every sketch while it listens
+    const armed = s.editing && s.editing.field ? featureDef(s.editing.draft.featureType)?.schema.find((x) => x.key === s.editing!.field) : undefined;
+    const pickingCurves = !!armed && ((armed.kind === "refs" && !!armed.sketch) || armed.kind === "profile");
     const visible = new Set<string>();
     features.slice(0, rollback).forEach((f, i) => {
       if (f.featureType !== "sketch") return;
       const used = features.slice(i + 1, rollback).some((later) => JSON.stringify(later.params).includes(f.id));
       const inDialog = !!s.editing && JSON.stringify(s.editing.draft.params).includes(f.id);
-      if (!used || inDialog || s.selectedFeature === f.id) visible.add(f.id);
+      if (!used || inDialog || pickingCurves || s.selectedFeature === f.id) visible.add(f.id);
     });
     this.view.setSketches(s.sketches, visible, s.sketch ? s.sketch.featureId : null);
   }
@@ -268,13 +278,14 @@ export class PartStudio {
     const e = this.state.editing; if (!e) return;
     this.set({ editing: { ...e, field: key } });
     this.applyFieldFilter();
+    this.refreshSketches();
   }
   private applyFieldFilter(): void {
     const e = this.state.editing;
     const def = e ? featureDef(e.draft.featureType) : undefined;
     const field = e && e.field && def ? def.schema.find((f) => f.key === e.field) : undefined;
     const kinds: PickKind[] | null = !field ? null
-      : field.kind === "refs" ? field.of : field.kind === "plane" ? ["plane", "face"] : field.kind === "profile" ? ["sketch"] : field.kind === "bodies" ? ["face"] : null;
+      : field.kind === "refs" ? (pickKindsOf(field) as PickKind[]) : field.kind === "plane" ? ["plane", "face", "datum"] : field.kind === "profile" ? ["sketch"] : field.kind === "bodies" ? ["face"] : null;
     this.view.setFilter(kinds);
   }
   private firstEmptyField(def: FeatureDefinition, params: JsonObject): string | null {
@@ -288,14 +299,14 @@ export class PartStudio {
   /** What a pick means for a field of the dialog, or undefined when it means nothing. */
   private fromSelection(field: ParamField, picks: readonly Pick[]): JsonObject[string] | undefined {
     if (field.kind === "plane") {
-      const p = picks.find((x) => x.kind === "plane" || x.kind === "face");
+      const p = picks.find((x) => x.kind === "plane" || x.kind === "face" || (x.kind === "datum" && x.datum === "plane"));
       if (!p) return undefined;
-      const ref: PlaneRef = p.kind === "plane" ? { kind: "plane", plane: p.plane } : { kind: "face", ref: { kind: "face", body: (p as { body: string }).body, name: (p as { name: string }).name } };
+      const ref: PlaneRef = p.kind === "plane" ? { kind: "plane", plane: p.plane } : p.kind === "datum" ? { kind: "datum", feature: p.featureId } : { kind: "face", ref: { kind: "face", body: (p as { body: string }).body, name: (p as { name: string }).name } };
       return ref as unknown as JsonObject;
     }
     if (field.kind === "profile") { const p = picks.find((x) => x.kind === "sketch"); return p && p.kind === "sketch" ? { sketch: p.featureId, regions: null } : undefined; }
     if (field.kind === "refs") {
-      const refs = picks.filter((x): x is Extract<Pick, { body: string }> => x.kind !== "plane" && x.kind !== "sketch" && field.of.includes(x.kind)).map((x): GeomRef => ({ kind: x.kind, body: x.body, name: x.name }));
+      const refs = picks.map((x) => targetOf(field, x)).filter((x): x is RefTarget => !!x);
       return refs.length ? (field.single ? refs[0] : refs) : undefined;
     }
     return undefined;
@@ -304,10 +315,9 @@ export class PartStudio {
     const e = this.state.editing; if (!e) return;
     const def = featureDef(e.draft.featureType), field = def && def.schema.find((f) => f.key === key); if (!field) return;
     if (field.kind === "refs" && !field.single) {
-      if (p.kind === "plane" || p.kind === "sketch") return;
-      const now = (e.draft.params[key] as GeomRef[] | undefined) || [];
-      const same = (r: GeomRef) => r.kind === p.kind && r.body === p.body && r.name === p.name;
-      this.setDraft({ params: { [key]: now.some(same) ? now.filter((r) => !same(r)) : [...now, { kind: p.kind, body: p.body, name: p.name }] } });
+      const t = targetOf(field, p); if (!t) return;
+      const now = targetsIn(e.draft.params[key]);
+      this.setDraft({ params: { [key]: now.some((r) => sameTarget(r, t)) ? now.filter((r) => !sameTarget(r, t)) : [...now, t] } });
       return;
     }
     if (field.kind === "bodies") {
@@ -359,7 +369,8 @@ export class PartStudio {
     const face = () => {
       const f = this.state.features.find((x) => x.id === featureId);
       const plane = f && (f.params.plane as unknown as PlaneRef | undefined);
-      const frame = this.view.sketchFrame(featureId) || (plane && plane.kind === "plane" ? DEFAULT_PLANES[plane.plane]?.frame : null);
+      const datum = plane && plane.kind === "datum" ? this.state.datums.find((d) => d.featureId === plane.feature) : undefined;
+      const frame = this.view.sketchFrame(featureId) || (plane && plane.kind === "plane" ? DEFAULT_PLANES[plane.plane]?.frame : datum?.frame || null);
       if (frame) this.viewport.lookAlong(new THREE.Vector3(...frame.normal).negate(), new THREE.Vector3(...frame.y));
     };
     face(); window.setTimeout(face, 400);   // again once the worker has said where a sketch on a face lies
