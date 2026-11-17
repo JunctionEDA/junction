@@ -404,6 +404,13 @@ How names are made:
 | One named face split into several | the first keeps the name; the others get `name~2`, `name~3`, … |
 | A face generated from a named input (a fillet from an edge) | `<feature id>:from(<that name>)` |
 | A face with no history | `<feature id>:new#<n>` |
+| A face an extrusion stops on (up to face, up to next) | its end cap, `<feature id>:end:<region id>` |
+| Thin extrude wall offset from a side | `<feature id>:side:<entity>:inner` / `:outer` |
+| Revolve | as Extrude: `:side:<entity>`, and `:start:` / `:end:<region>` when not a full turn |
+| Shell or thin wall face | `<feature id>:from(<the face it is offset from>)`; an opening's rim keeps the removed face's name |
+| Drafted face, moved or copied body (Transform) | the name it had |
+| Hole | `<feature id>:<sketch point id>:wall`, `:floor`, `:cbore`, `:cbore-floor`, `:csink` |
+| Split | the new flat face on each piece is `<feature id>:cut` |
 | Edge | `edge(<face>\|<face>)`: the names of the faces it lies between, sorted |
 | Vertex | `vertex(<face>\|<face>\|<face>)`: the faces that meet there, sorted |
 | Several edges or vertices with the same faces | `…~2`, `…~3` |
@@ -684,7 +691,14 @@ start Chromium with `--use-gl=swiftshader --enable-unsafe-swiftshader` when ther
   no trim, no drag to move a point, no construction toggle.
 - **Regions** are simple closed loops with even-odd nesting. Crossing curves and T-junctions make no region.
   Extrude takes all regions of a sketch or the ones listed in `regions`; the dialog cannot pick single regions yet.
-- **Extrude** is blind only (`endType: "blind"`); no symmetric, through-all, up-to, draft or thin.
+- **Solid features** (`features/`, shared kernel code in `kernel/ops/`, tested by `static/tests/mechanical-features.test.js`
+  and `scripts/cad-features-ui.mjs`): Extrude (depth, symmetric, through all, up to face, up to next, second
+  direction, draft, thin; new / add / remove / intersect), Revolve, Fillet, Chamfer, Shell, Draft, Hole, Boolean,
+  Delete body, Split, Transform.  Not done: up to face with an offset, up to a vertex or body; a fillet with a
+  variable radius or one that stops tangent propagation; hole threads (a tapped hole is its tap drill); thicken
+  and offset face.  "Up to face" on a curved face stops at that face's body (as Up to next, against one body).
+  Revolve's axis is a loose line of the sketch, the sketch's X or Y, or a straight edge: the dialog cannot pick
+  one sketch line among several (the first loose line is used, with a warning).
 - **Geometry names** have the limits listed under "Geometry names".
 - **One kernel thread, no cancellation.** A long evaluation blocks the next; the page stays responsive.
 - **Kernel memory** is released per cached feature; a very long session on a very large model has not been profiled.
