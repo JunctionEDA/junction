@@ -1,52 +1,126 @@
-// AssemblyView.tsx — the assembly's frame: a toolbar drawn from tools/*.ts, the instance and mate lists, the
-// viewport.
-import { useEffect, useRef, useSyncExternalStore } from "react";
+// AssemblyView.tsx — the assembly's frame: a toolbar drawn from tools/*.ts and one button per mate type
+// (mates/*.ts), the instance tree, the mates, the viewport with its dialogs, and whatever panels tools add.
+import { useEffect, useRef, useState } from "react";
 import { cx } from "../../../shared/util";
-import type { AssemblyEditor, AssemblyState } from "./assembly";
+import type { AssemblyEditor, FormDefinition, PanelDefinition } from "./assembly";
+import { InsertDialog } from "./InsertDialog";
+import { InstanceList } from "./InstanceList";
+import { MateDialog } from "./MateDialog";
+import { MateList } from "./MateList";
+import { Caption, Glyph, useAssembly } from "./parts";
 
-function useAssembly<T>(a: AssemblyEditor, selector: (s: AssemblyState) => T): T { return useSyncExternalStore(a.subscribe, () => selector(a.getState())); }
+function Toolbar({ assembly }: { assembly: AssemblyEditor }) {
+  const s = useAssembly(assembly, (x) => x);
+  const tools = assembly.tools().slice().sort((a, b) => (a.order ?? 1e6) - (b.order ?? 1e6) || a.title.localeCompare(b.title));
+  const mates = assembly.mateTypes().slice().sort((a, b) => (a.order ?? 1e6) - (b.order ?? 1e6) || a.title.localeCompare(b.title));
+  return (
+    <div className="cad-toolbar flex items-center gap-0.5 h-9 px-1.5 bg-bench border-b border-line overflow-x-auto select-none" role="toolbar" aria-label="Assembly tools">
+      {tools.map((t) => {
+        const why = t.disabled ? t.disabled(assembly) : null;
+        return <button key={t.id} type="button" data-tool={t.title} className={cx("btn sm ghost flex flex-none items-center gap-1.5 px-1.5", t.active && t.active(assembly) && "on", why && "opacity-45")} aria-disabled={!!why} title={why ? `${t.title}: ${why}` : `${t.title}${t.key ? ` (${t.key.toUpperCase()})` : ""}${t.hint ? `\n${t.hint}` : ""}`} onClick={() => { if (!why) t.run(assembly); }}><Glyph svg={t.icon} /><span>{t.title}</span></button>;
+      })}
+      <span className="flex-none w-px h-5 mx-1 bg-line" />
+      <span className="flex items-center gap-0.5" data-group="mates">
+        {mates.filter((m) => m.solve).map((m) => (
+          <button key={m.type} type="button" data-mate-tool={m.type} className={cx("btn sm ghost flex flex-none items-center gap-1.5 px-1.5", s.mating?.isNew && s.mating.mateType === m.type && "on", !s.canEdit && "opacity-45")} aria-disabled={!s.canEdit}
+            title={s.canEdit ? `${m.title} mate\nThen click a connector on each of two instances.` : `${m.title}: you have view-only access`} onClick={() => { if (!s.canEdit) return; if (s.mating?.isNew && s.mating.mateType === m.type) assembly.cancelMate(); else { if (s.mating) assembly.cancelMate(); assembly.startMate(m.type); } }}>
+            <Glyph svg={m.icon} /><span>{m.title}</span>
+          </button>
+        ))}
+      </span>
+    </div>
+  );
+}
 
-function Glyph({ svg }: { svg?: string }) {
-  return <svg width={18} height={18} viewBox="0 0 24 24" aria-hidden="true" className="flex-none fill-none stroke-current [stroke-linecap:round] [stroke-linejoin:round]" strokeWidth={1.7} dangerouslySetInnerHTML={{ __html: svg || '<rect x="5" y="5" width="14" height="14" rx="2"/>' }} />;
+function FormDialog({ assembly, form }: { assembly: AssemblyEditor; form: FormDefinition }) {
+  const [values, setValues] = useState<{ [key: string]: string }>(() => Object.fromEntries(form.fields.map((f) => [f.key, String(f.value)])));
+  const bad = form.fields.some((f) => f.kind === "number" && (values[f.key].trim() === "" || !Number.isFinite(Number(values[f.key]))));
+  return (
+    <form className="cad-dialog absolute left-2 top-2 z-[5] w-[280px] flex flex-col rounded-md border border-line bg-bench shadow-panel text-sm" data-form={form.title}
+      onSubmit={(ev) => { ev.preventDefault(); if (bad) return; assembly.ask(null); form.accept(Object.fromEntries(form.fields.map((f) => [f.key, f.kind === "number" ? Number(values[f.key]) : values[f.key]]))); }}
+      onKeyDown={(ev) => { if (ev.key === "Escape") { ev.stopPropagation(); assembly.ask(null); } }}>
+      <header className="flex items-center h-8 px-2 border-b border-line bg-paper rounded-t-md font-semibold text-base">{form.title}</header>
+      <div className="flex flex-col gap-1.5 p-2">
+        {form.fields.map((f, i) => (
+          <label key={f.key} className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-x-2 min-h-7">
+            <span className="text-ink-2 truncate">{f.label}</span>
+            <span className="flex items-center gap-1.5">
+              <input autoFocus={i === 0} className={cx("input w-full", f.kind === "number" && "mono")} inputMode={f.kind === "number" ? "decimal" : undefined} value={values[f.key]} data-param={f.key} aria-label={f.label} onChange={(ev) => setValues({ ...values, [f.key]: ev.target.value })} />
+              {f.unit ? <span className="text-ink-3 font-mono text-xs w-5">{f.unit}</span> : null}
+            </span>
+          </label>
+        ))}
+      </div>
+      <footer className="flex justify-end gap-1.5 p-2 border-t border-line">
+        <button type="button" className="btn sm" onClick={() => assembly.ask(null)}>Cancel</button>
+        <button type="submit" className="btn sm primary" data-accept disabled={bad}>{form.acceptLabel || "Done"}</button>
+      </footer>
+    </form>
+  );
+}
+
+function Panel({ assembly, panel }: { assembly: AssemblyEditor; panel: PanelDefinition }) {
+  return (
+    <section className="flex flex-col min-h-0 flex-[1_1_0] border-b border-line last:border-b-0" data-panel={panel.id}>
+      <Caption right={<button type="button" className="btn sm ghost px-1" title="Close" aria-label={`Close ${panel.title}`} onClick={() => assembly.closePanel(panel.id)}>×</button>}>{panel.title}</Caption>
+      <div className="flex-1 min-h-0 overflow-auto bg-paper text-sm">{panel.render(assembly)}</div>
+    </section>
+  );
+}
+
+function StatusNote({ assembly }: { assembly: AssemblyEditor }) {
+  const s = useAssembly(assembly, (x) => x);
+  let text: string, tone = "";
+  if (!s.loaded) text = s.status.state === "error" ? s.status.text : "Opening the assembly…";
+  else if (s.kernelFailure) { text = s.kernelFailure; tone = "err"; }
+  else if (s.readout) text = s.readout;
+  else if (s.building) text = s.building === 1 ? "Building a part…" : `Building ${s.building} parts…`;
+  else if (!s.instances.length) text = "An empty assembly. Insert parts to begin; right-drag turns the view, the wheel zooms.";
+  else {
+    const bad = s.mates.filter((m) => { const st = s.mateInfo[m.id]?.state; return st === "conflict" || st === "error"; }).length;
+    if (bad) { text = `${bad} mate${bad === 1 ? " has" : "s have"} a problem: see the list`; tone = "err"; }
+    else if (s.dof === null) text = `${s.instances.length} instances`;
+    else if (s.dof === 0) text = "Fully held: nothing can move";
+    else text = `${s.dof} freedom${s.dof === 1 ? "" : "s"} left: drag a part to move it`;
+  }
+  return <div className={cx("cad-note absolute left-2 bottom-2 z-[2] px-2 py-0.5 rounded-sm border border-line bg-panel text-xs pointer-events-none", tone === "err" ? "text-err" : "text-ink-2")} role="status" data-status-note data-dof={s.dof ?? ""} data-building={s.building}>{text}</div>;
+}
+
+function ExplodeBar({ assembly }: { assembly: AssemblyEditor }) {
+  const on = useAssembly(assembly, (s) => s.exploding), k = useAssembly(assembly, (s) => s.explode);
+  if (!on) return null;
+  return (
+    <div className="absolute left-1/2 -translate-x-1/2 top-2 z-[3] flex items-center gap-2 h-8 px-2 rounded-md border border-line bg-bench shadow-panel text-sm" data-explode>
+      <span className="text-ink-2">Exploded view</span>
+      <input type="range" min={0} max={2} step={0.02} value={k} aria-label="How far apart" onChange={(ev) => assembly.setExplode(Number(ev.target.value))} />
+      <button type="button" className="btn sm" onClick={() => assembly.setExploding(false)}>Done</button>
+    </div>
+  );
 }
 
 export function AssemblyView({ assembly, canvasHost }: { assembly: AssemblyEditor; canvasHost: HTMLElement }) {
   const stage = useRef<HTMLDivElement>(null);
   useEffect(() => { stage.current?.prepend(canvasHost); return () => canvasHost.remove(); }, [canvasHost]);
-  const s = useAssembly(assembly, (x) => x);
-  const tools = assembly.tools().slice().sort((a, b) => (a.order ?? 1e6) - (b.order ?? 1e6) || a.title.localeCompare(b.title));
-  const list = (title: string, id: string, rows: { id: string; name: string; note?: string }[], empty: string) => (
-    <section className="flex flex-col min-h-0 flex-[1_1_0] border-b border-line last:border-b-0" data-panel={id}>
-      <header className="flex flex-none items-center h-5.5 px-1.5 text-sm font-semibold text-ink bg-[linear-gradient(var(--color-paper),var(--color-bench))] border-b border-line select-none">{title}</header>
-      <div className="flex-1 min-h-0 overflow-y-auto bg-paper py-1 text-sm" role="listbox" aria-label={title}>
-        {rows.map((r) => (
-          <div key={r.id} role="option" aria-selected={s.selected === r.id} className={cx("flex items-center gap-2 h-6.5 px-2 cursor-default", s.selected === r.id ? "bg-sel" : "hover:bg-sel-soft")} onClick={() => assembly.select(r.id)}>
-            <span className="flex-1 truncate">{r.name}</span>{r.note ? <span className="text-ink-3 text-xs">{r.note}</span> : null}
-          </div>
-        ))}
-        {s.loaded && !rows.length ? <p className="note px-2 m-0">{empty}</p> : null}
-        {!s.loaded ? <p className="note px-2 m-0">Loading…</p> : null}
-      </div>
-    </section>
-  );
+  const panels = useAssembly(assembly, (s) => s.panels);
+  const form = useAssembly(assembly, (s) => s.form);
+  const left = panels.filter((p) => p.side === "left"), right = panels.filter((p) => p.side !== "left");
   return (
     <div className="cad-root grid h-full min-h-0 min-w-0 grid-rows-[auto_minmax(0,1fr)] text-ink" data-doc-kind="assembly">
-      <div className="cad-toolbar flex items-center gap-0.5 h-9 px-1.5 bg-bench border-b border-line overflow-x-auto select-none" role="toolbar" aria-label="Assembly tools">
-        {tools.map((t) => {
-          const why = t.disabled ? t.disabled(assembly) : null;
-          return <button key={t.id} type="button" className={cx("btn sm ghost flex items-center gap-1.5 px-1.5", t.active && t.active(assembly) && "on", why && "opacity-45")} title={why ? `${t.title}: ${why}` : t.hint ? `${t.title}\n${t.hint}` : t.title} onClick={() => { if (!why) t.run(assembly); }}><Glyph svg={t.icon} /><span>{t.title}</span></button>;
-        })}
-        {!tools.length ? <span className="px-1.5 text-ink-3 text-sm">Inserting parts and boards, and mating them, is not built yet.</span> : null}
-      </div>
+      <Toolbar assembly={assembly} />
       <div className="flex min-h-0 min-w-0">
-        <aside className="cad-dock flex flex-col min-h-0 w-60 bg-bench border-r border-line">
-          {list("Instances", "instances", s.instances.map((i) => ({ id: i.id, name: i.name, note: i.fixed ? "fixed" : i.source.kind })), "Nothing is placed in this assembly yet.")}
-          {list("Mates", "mates", s.mates.map((m) => ({ id: m.id, name: m.name, note: assembly.mateTypes().find((d) => d.type === m.mateType)?.title || m.mateType })), "No mates yet.")}
+        <aside className="cad-dock flex flex-col min-h-0 w-60 flex-none bg-bench border-r border-line">
+          <InstanceList assembly={assembly} />
+          <MateList assembly={assembly} />
+          {left.map((p) => <Panel key={p.id} assembly={assembly} panel={p} />)}
         </aside>
         <div ref={stage} className="cad-stage relative flex-1 min-w-0 min-h-0 overflow-hidden">
-          {s.loaded && !s.instances.length ? <div className="cad-note absolute left-2 bottom-2 z-[2] px-2 py-0.5 rounded-sm border border-line bg-panel text-ink-2 text-xs pointer-events-none" role="status">An empty assembly. Right-drag turns the view, the wheel zooms.</div> : null}
-          {!s.loaded ? <div className="cad-note absolute left-2 bottom-2 z-[2] px-2 py-0.5 rounded-sm border border-line bg-panel text-ink-2 text-xs pointer-events-none" role="status">{s.status.state === "error" ? s.status.text : "Opening the assembly…"}</div> : null}
+          <MateDialog assembly={assembly} />
+          <InsertDialog assembly={assembly} />
+          {form ? <FormDialog key={form.title} assembly={assembly} form={form} /> : null}
+          <ExplodeBar assembly={assembly} />
+          <StatusNote assembly={assembly} />
         </div>
+        {right.length ? <aside className="cad-dock flex flex-col min-h-0 w-72 flex-none bg-bench border-l border-line">{right.map((p) => <Panel key={p.id} assembly={assembly} panel={p} />)}</aside> : null}
       </div>
     </div>
   );

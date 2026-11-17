@@ -92,7 +92,8 @@ export function partSource(pool: KernelPool): SourceProvider {
     unavailable: () => null,
     open: (docId, env) => new PartHandle(docId, env, pool),
     select: (source, snapshot) => (source.kind === "part" ? snapshot.pieces.filter((p) => p.id === source.body) : []),
-    offers: (docId, _docName, snapshot) => snapshot.pieces.map((p) => ({ source: { kind: "part", docId, body: p.id }, name: p.name })),
+    // a studio with one part is known by its own name ("Enclosure"), not by the part's default one ("Part 1")
+    offers: (docId, docName, snapshot) => snapshot.pieces.map((p) => ({ source: { kind: "part", docId, body: p.id }, name: snapshot.pieces.length === 1 ? docName : p.name })),
     offersAll: true,
   };
 }
