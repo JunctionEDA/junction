@@ -193,7 +193,8 @@ function radioGHz(fps: { value: string; lib: string }[], nets: Iterable<string>)
   if (/5\.?[0-9]?\s?GHZ|WIFI_?5G|5G_?WIFI|U-?NII|802\.11A[CX]?\b|UWB|DW1000|DW3/i.test(text)) found.push([5.8, "5 GHz"]);
   if (/2\.4|2450|BLE|BLUETOOTH|WIFI|WLAN|ESP32|ESP8266|ESP-|NRF5|NRF24|ZIGBEE|THREAD|CC25|CC26|RP2040W|CYW43|ATWINC/i.test(text)) found.push([2.45, "2.4 GHz"]);
   if (/GPS|GNSS|GLONASS|GALILEO|NEO-|MAX-M|L76|L80|L86|SAM-M|ATGM|TESEO|1575/i.test(text)) found.push([1.575, "GPS L1"]);
-  if (/LTE|GSM|NB-?IOT|CAT-?M|SIM7|SIM8|BG9\d|EC2\d|SARA-|CELLULAR/i.test(text)) found.push([2.7, "cellular"]);
+  if (/\b(LTE|GSM|NB-?IOT|CAT-?M1?|SIM7\d+|SIM8\d+|BG9\d|EC2\d|SARA-\w+|CELLULAR)\b/i.test(text))   // whole words: FILTER is not LTE
+    found.push([2.7, "cellular"]);
   if (/LORA|SX12[67]\d|RFM9\d|RFM6\d|LLCC68|STM32WL|RA-0\d|E22-|E220|915M|868M|SUB-?G|CC1[12]\d\d|SI44\d\d|RFM69/i.test(text)) found.push([0.915, "sub-GHz (LoRa, 868/915 MHz)"]);
   if (/433M|RFM9[68]|315M/i.test(text) && !found.length) found.push([0.433, "433 MHz"]);
   if (!found.length) return { ghz: 2.45, why: "2.4 GHz assumed" };
@@ -285,7 +286,8 @@ function survey(doc: any, P: any, k: any) {
 type Survey = ReturnType<typeof survey>;
 
 const isConnector = (f: Fp) => /^(J|P|CN|X|USB)\d/i.test(f.ref) || /^Connector/i.test(f.lib);
-const isAntenna = (f: Fp) => (/^(AE|ANT)\d/i.test(f.ref) || /antenna/i.test(f.lib + " " + f.value)) && !isConnector(f) && !/u\.?fl|sma|ipex|mmcx|coax/i.test(f.lib + " " + f.value);
+// an NFC or RFID loop (13.56 MHz, near field) is a coil, not a radiating antenna: no GHz clear band or via fence round it
+const isAntenna = (f: Fp) => (/^(AE|ANT)\d/i.test(f.ref) || /antenna/i.test(f.lib + " " + f.value)) && !isConnector(f) && !/u\.?fl|sma|ipex|mmcx|coax/i.test(f.lib + " " + f.value) && !/NFC|RFID|13\.56|QI\b|WPC|LOOP/i.test(f.lib + " " + f.value);
 const isCrystal = (f: Fp) => (/^(Y|XTAL)\d/i.test(f.ref) || /crystal|xtal|resonator/i.test(f.lib + " " + f.value)) && !f.pads.some((p) => isSup(p.net));
 const isPowerInductor = (f: Fp) => /^L\d/i.test(f.ref) && (f.box[2] - f.box[0]) * (f.box[3] - f.box[1]) >= 4;
 const isEsd = (f: Fp) => /(^|[^a-z])(tvs|esd)|usblc|prtr5v|tpd\d|sp05|pesd|srv05|ip4220|pusb|nup\d|rclamp|esda|sm[abc]j\d|smf\d/i.test(f.lib + " " + f.value);

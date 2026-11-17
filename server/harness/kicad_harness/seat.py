@@ -103,7 +103,10 @@ class _Survey:
         return (bool(re.match(r"^(Y|XTAL)\d", p["ref"], re.I)) or bool(_CRYSTAL.search(p.get("footprint", "") + " " + str(p.get("value", ""))))) and 2 <= len(p["pads"]) <= 6
 
     def antenna(self, p) -> bool:
-        return bool(re.match(r"^(AE|ANT)\d", p["ref"], re.I)) or bool(_ANTENNA.search(p.get("footprint", "") + " " + str(p.get("value", ""))))
+        text = p.get("footprint", "") + " " + str(p.get("value", ""))
+        if re.search(r"NFC|RFID|13\.56|\bQI\b|WPC|LOOP", text, re.I):      # a near-field coil, not a radiating antenna
+            return False
+        return bool(re.match(r"^(AE|ANT)\d", p["ref"], re.I)) or bool(_ANTENNA.search(text))
 
     def out_of(self, part, pad):
         """(row direction, outward direction) of a pad on its part: the row is towards its nearest neighbour pad, outward

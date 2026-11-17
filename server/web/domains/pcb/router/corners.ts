@@ -36,6 +36,8 @@ export function findSquareCorners(segs: CornerSeg[], covered: (net: string, laye
   for (const l of ends.values()) {
     if (l.length !== 2) continue; const [e1, e2] = l; const net = e1.s.net, layer = e1.s.layer;
     if (exempt(net)) continue;
+    // a jog shorter than a few microns' worth of copper (a pad-centre stub snapped to the grid) is no corner anyone etches
+    if (Math.hypot(e1.other[0] - e1.at[0], e1.other[1] - e1.at[1]) < 0.03 || Math.hypot(e2.other[0] - e2.at[0], e2.other[1] - e2.at[1]) < 0.03) continue;
     const angle = cornerAngle(e1.at, e1.other, e2.other); if (angle > SQUARE_MAX) continue;
     if (covered(net, layer, e1.at)) continue;
     out.push({ net, layer, x: +e1.at[0].toFixed(3), y: +e1.at[1].toFixed(3), angle: Math.round(angle), ids: [e1.s.id, e2.s.id] });

@@ -144,10 +144,25 @@ test("DRC courtyards: malformed and missing courtyards, holes inside another foo
     (footprint "D" (layer "F.Cu") (uuid "d") (at 60 10) (fp_line (start -1 -1) (end 1 -1) (layer "F.CrtYd") (uuid "l1")) (fp_line (start 1 -1) (end 1 1) (layer "F.CrtYd") (uuid "l2")))`);
   const m = P.drc(doc, null, { unconnected: false });
   assert.equal(codes(m, "missing_courtyard").length, 0, "missing courtyards are ignored by default");
-  const mal = codes(m, "malformed_courtyard"); assert.deepEqual(mal.map((x) => x.ids[0]), ["d"]); assert.equal(mal[0].text, "Footprint has malformed courtyard (not a closed shape)");
+  // Junction waives what lies wholly inside one footprint (the library's drawing is taken as the maker's intent)
+  assert.equal(codes(m, "malformed_courtyard").length, 0, "D's open courtyard is its own");
+  assert.deepEqual(P.courtyardMarkers(doc).filter((x) => x.code === "malformed_courtyard").map((x) => x.ids[0]), ["d"], "the raw check still finds it");
   assert.deepEqual(codes(m, "pth_inside_courtyard").map((x) => x.ids), [["b", "a"]]); assert.deepEqual(codes(m, "npth_inside_courtyard").map((x) => [x.x, x.y]), [[12, 10]]);
   const s = P.designSettings({ board: { design_settings: { rule_severities: { missing_courtyard: "warning" } } } });
-  assert.deepEqual(codes(P.drc(doc, s, { unconnected: false }), "missing_courtyard").map((x) => [x.ids[0], x.severity]), [["b", "warning"]], "B has none; C allows it");
+  assert.deepEqual(codes(P.drc(doc, s, { unconnected: false }), "missing_courtyard"), [], "B's missing courtyard is its own");
+});
+test("DRC footprint waivers: same-number pads are one pad, zero-length courtyard lines, a footprint's own hole clearance", () => {
+  const doc = drcBoard(`(footprint "H" (layer "F.Cu") (uuid "h") (at 10 10) (fp_rect (start -3 -3) (end 3 3) (layer "F.CrtYd") (uuid "ch"))
+      (pad "1" thru_hole circle (at 0 0) (size 4 4) (drill 2.2) (layers "*.Cu") (uuid "h0")) (pad "1" thru_hole circle (at 1.65 0) (size 0.7 0.7) (drill 0.4) (layers "*.Cu") (uuid "h1")))
+    (footprint "U" (layer "F.Cu") (uuid "u") (at 30 10) (fp_line (start -1 -1) (end -1 1) (layer "F.CrtYd") (uuid "u1")) (fp_line (start -1 1) (end 1 1) (layer "F.CrtYd") (uuid "u2"))
+      (fp_line (start 1 1) (end 1 -1) (layer "F.CrtYd") (uuid "u3")) (fp_line (start 1 -1) (end -1 -1) (layer "F.CrtYd") (uuid "u4")) (fp_line (start 1 1) (end 1 1) (layer "F.CrtYd") (uuid "u5")))
+    (footprint "J" (layer "F.Cu") (uuid "j") (at 50 10) (fp_rect (start -3 -3) (end 3 3) (layer "F.CrtYd") (uuid "cj"))
+      (pad "" np_thru_hole circle (at 0 0) (size 0.65 0.65) (drill 0.65) (layers "*.Mask") (uuid "j0")) (pad "2" smd rect (at 0.7 0) (size 0.4 0.4) (layers "F.Cu") (uuid "j1")))`);
+  const m = P.drc(doc, null, { unconnected: false });
+  assert.deepEqual(codes(m, "clearance"), [], "H's pads share number 1");
+  assert.deepEqual(P.courtyardMarkers(doc).filter((x) => x.code === "malformed_courtyard"), [], "a zero-length line closes nothing and opens nothing");
+  assert.deepEqual(codes(m, "hole_clearance"), [], "J's hole and pad are drawn that way by its maker");
+  assert.ok(P.holeClearanceMarkers(doc, P.designSettings(null), () => null).length > 0, "the raw check still sees J");
 });
 test("DRC disallow and misc: text on Edge.Cuts, tracks / vias in keepout areas, items on disabled copper layers", () => {
   const doc = drcBoard(`(gr_text "edge" (at 5 5) (layer "Edge.Cuts") (uuid "te") (effects (font (size 1 1) (thickness 0.15))))

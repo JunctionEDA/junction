@@ -284,6 +284,31 @@ def _clear_of_pads(g, at, net: str, r: float) -> bool:
     return True
 
 
+def _clear_of_copper(self, at, net: str, need: float) -> bool:
+    """No track or via of another net within `need` mm of a via's centre at `at` (edge to centre): checked before the via
+    is laid, so ground_pads tries its spots in one look instead of a rules check per spot."""
+    near = {"x": at[0], "y": at[1], "radius": need + 0.6}
+    try:
+        mine = {it["id"] for it in self._call("get_items", kinds=["segment", "via"], near=near, net=net).get("items", [])}
+        got = self._call("get_items", kinds=["segment", "via"], near=near).get("items", [])
+    except HarnessError:
+        return True
+    for it in got:
+        if it["id"] in mine:
+            continue
+        sx = it.get("sexpr", "")
+        a = re.search(r"\(start ([\d.\-]+) ([\d.\-]+)\)\s*\(end ([\d.\-]+) ([\d.\-]+)\)", sx)
+        if a and it.get("kind") == "segment":
+            x0, y0, x1, y1 = map(float, a.groups()); w = float((re.search(r"\(width ([\d.]+)\)", sx) or [0, 0.2])[1])
+            if _seg_dist(at, (x0, y0), (x1, y1)) - w / 2 < need:
+                return False
+        else:
+            v = re.search(r"\(at ([\d.\-]+) ([\d.\-]+)\)", sx); z = re.search(r"\(size ([\d.]+)", sx)
+            if v and math.hypot(at[0] - float(v.group(1)), at[1] - float(v.group(2))) - (float(z.group(1)) / 2 if z else 0.25) < need:
+                return False
+    return True
+
+
 def _board_fiducials(self, inset: float = 2.5) -> dict:
     """Put the board's fiducials (FID1..) in three corners, as far apart as the outline allows, clear of other parts.
     The schematic must have them first (sch.fiducials(), then board.sync())."""
@@ -936,7 +961,7 @@ def _ground_pads(self, net: str = "GND", size: float | None = None, drill: float
                 n = math.hypot(dx, dy)
                 at = (_r(q["x"] + dx / n * dist), _r(q["y"] + dy / n * dist))
                 k += 1
-                if _clear_of_pads(g, at, name, 0.6):
+                if _clear_of_pads(g, at, name, 0.6) and _clear_of_copper(self, at, name, 0.25 + 0.2):
                     break
             else:
                 state[spec] = k

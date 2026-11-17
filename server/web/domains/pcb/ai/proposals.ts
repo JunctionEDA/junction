@@ -568,7 +568,7 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
           for (const [name, o] of Object.entries((e.net_options && typeof e.net_options === "object" ? e.net_options : {}) as Record<string, any>)) {
             const net = boardNet(doc, name).name; if (!o || typeof o !== "object") continue;
             netOpts[net] = { layers: Array.isArray(o.layers) && o.layers.length ? o.layers : undefined, width: typeof o.width === "number" ? o.width : undefined, allowVias: typeof o.allow_vias === "boolean" ? o.allow_vias : undefined,
-              maxVias: typeof o.max_vias === "number" ? o.max_vias : undefined, avoid: Array.isArray(o.avoid) ? o.avoid : undefined,
+              maxVias: typeof o.max_vias === "number" ? o.max_vias : undefined, avoid: Array.isArray(o.avoid) ? o.avoid : undefined, viaAvoid: Array.isArray(o.via_avoid) ? o.via_avoid : undefined,
               // named: what the schematic's author called a net that carries no label (it is wired inside its block), so its name still says what it carries
               kind: ["analog", "rf", "switching", "fast", "digital", "supply"].includes(o.kind) ? o.kind : typeof o.named === "string" && o.named && R.netKind ? R.netKind(o.named) : undefined, impedance: typeof o.impedance === "number" && o.impedance > 0 ? o.impedance : undefined };
             if (o.kind !== undefined && !netOpts[net].kind) throw new ToolError(`net_options.${name}.kind must be one of analog, rf, switching, fast, digital, supply`);

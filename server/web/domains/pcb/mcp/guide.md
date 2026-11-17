@@ -32,7 +32,7 @@ Datasheets: `find_datasheets` lists each part with its Datasheet link and part n
 
 ## A board in one call
 
-The cheapest way to lay out a board: one `run_python` script, one harness call. The harness holds the layout rules (`server/docs/pcb-design-rules.md`), applies them in order and checks the result, so the long topics (`board`, `routing`, `layout`) are only for when a finding sends you there.
+One `run_python` script, one harness call: the harness holds and checks the layout rules; read the long topics (`board`, `routing`, `layout`) only when a finding sends you there.
 
 ```python
 board = project.board()
@@ -43,17 +43,30 @@ r = board.design(outline=(100, 50, 140, 80),            # the largest it may be;
 print(r)
 ```
 
-`board.design()` works cluster first: each chip and the parts that serve it form one tight cluster (each part's pad about 2 mm from its pin, ground end out). Critical nets (USB, RF, crystal) go first, then every cluster is wired inside itself, then power, then the tracks between clusters. It also syncs, plans, sets stackup and rules, pours and stitches ground, writes the silkscreen, runs DRC and review. Other arguments: `layers=`, `fixed={ref: (x, y, rotation)}`, `near=`, `rotations=`, `order=`, `widths=`, `kinds=`, `time_s=`, `place=False`, `route=False`.
+**Already placed** (the person's placement is final): this relays all copper and keeps parts, outline, zones, rules and silkscreen:
 
-**Plan first, draw once.** People watch the project and every published change is a line in their history. Run the script with `dry_run: true` first: it runs on a private copy, publishes nothing, and returns the result plus `would_change` and `refused`. Fix the script until the dry run is clean, then run it once for real. Never start with `sch.clear()` or `board.clear()`: `sch.build()` and `board.design()` already replace what changed. A script publishes once, at its end.
+```python
+board = project.board()
+print(board.zones())                                    # pours and keep-outs already there
+r = board.design(reroute=True, explain=True, time_s=180)
+print(r["routed"]["left"], r["drc"], r["review"]["findings"])
+```
 
-**Give the floor plan, not the coordinates.** `fixed=` is for the few big parts whose place is a design decision (connectors on their edges, the antenna at its corner, the main chip). Never type coordinates for small parts: the harness seats each one in front of the pin it serves, far end towards its other net (CC resistors, pull-ups, series resistors, regulator capacitors, the crystal turned so no via is needed, the matching network in line from the RF pin to the feed). `board.seat()` does this again after a move; `board.seating()` lists what is still wrong.
+Never drive `board.route()` over a whole board: `design()` also pours, stitches, frees boxed-in pins (`board.free_pins()`), cuts square corners and checks, in order. With `reroute=True` placement findings go to `placement_notes`, and DRC errors from before routing to `drc.already_there`, uncounted. DRC skips what lies inside one footprint. `time_s` is the router's budget. Rule changes go under `rules_changed` (`keep_rules=True`: none); `layers=["F.Cu", "B.Cu"]` spares inner planes.
 
-**A bad layout is refused.** `design()` ends with a gate: clashing or off-board parts, a pin-serving part away from its pin (`serve.near`, `usb.cc`), a crystal far away or with a via (`crystal.near`, `crystal.vias`), a wandering match or feed (`rf.match`, `rf.feed`), copper in an antenna's ground band (`antenna.ground`), open connections, DRC and review errors. A refused script publishes nothing and lists the reasons; fix the cause (usually the floor plan or a rotation) and dry-run again. `accept=["routing.open"]` lets a named reason through when the person has agreed; say so in your reply.
+A pin still open with `no-room` in `why_open` was boxed in: `board.unroute(near="U1.8"); board.route(order=["/NET"], time_s=60)`, then `board.finish()`.
 
-`explain=True` adds `reasoning`: where each part stands and why, the routing order, every via, detour and open net with its cause, for checking the thinking.
+`board.design()` works cluster first: each chip and the parts that serve it form one tight cluster (each part's pad about 2 mm from its pin, ground end out). Critical nets (USB, RF, crystal) go first, then every cluster is wired inside itself, then power, then the tracks between clusters. Also: `layers=`, `fixed={ref: (x, y, rot)}`, `near=`, `rotations=`, `order=`, `widths=`, `place=False`, `route=False`.
 
-Read the result, which is short on purpose: `routed.left` (open connections by net; empty is done), `drc.errors`, `review.findings` (one line each) and `skipped` (a step that could not run, and why). Fix only what is named, with the one call that fixes it, and look again with `board.brief()` or `board.brief(rule="vias.slot")`; `board.review(rule=...)` gives one finding's full text.
+**Plan first, draw once.** Every published change is a line in the person's history: run with `dry_run: true` (a private copy; returns `would_change` and `refused`) until clean, then once for real. Never start with `sch.clear()` or `board.clear()`: `sch.build()` and `board.design()` already replace what changed. A script publishes once, at its end.
+
+**Give the floor plan, not the coordinates.** `fixed=` is for the few big parts whose place is a design decision (connectors on their edges, the antenna at its corner, the main chip). Never type coordinates for small parts: the harness seats each in front of the pin it serves (`board.seat()` after a move; `board.seating()` lists what is wrong).
+
+**A bad layout is refused.** `design()` ends with a gate (clashing parts, a serving part away from its pin, a far crystal, copper in an antenna band, open connections, DRC and review errors). A refused script publishes nothing and lists why; fix the cause (usually floor plan or rotation) and dry-run again. `accept=["routing.open"]` passes a reason the person agreed to.
+
+`explain=True` adds `reasoning`: each part's place, the routing order, every via, detour and open net with its cause.
+
+Read the result, which is short on purpose: `routed.left` (open connections by net; empty is done), `drc.errors`, `review.findings` (one line each) and `skipped` (a step that could not run, and why). Fix only what is named, then look again with `board.brief()`; `board.review(rule=...)` gives a finding's full text.
 
 What to do about the usual findings: an open connection or a signal via is a crossing, so move or turn the part, or give `swap=` more nets, before routing again (`board.unroute(net)`, `board.route(nets=[...])`); `bypass.near` and `bypass.order` are placement (`board.place_bypass("U1")`); `pour.islands` and `ground.pour_only` want `board.ground_pads()` or `board.stitch()`; `tracks.minimum` and `power.width` want `widths=`.
 
@@ -212,10 +225,10 @@ Schematic (`sch = project.schematic()`, or `project.schematic("power")` for a sh
 - Reading: `sch.refs()`, `sch.parts()`, `sch.nets()`, `sch.net_of(pin)`, `sch.unconnected()`, `sch.check()` (ERC counts and the first messages).
 
 Board (`board = project.board()`):
-- `board.sync()` brings footprints and nets across from the schematic (generated parts bring their footprints). `board.outline(x0, y0, x1, y1)` draws the edge; `board.rules(clearance=0.15, track_width=0.2, ...)` sets the rules (vias are 0.4/0.25 mm unless there is a reason for another size: leave `via_diameter` and `via_drill` out, or give exactly those; the board minimums follow the via so it passes the rules check); `board.zone("GND", layer="B.Cu")` adds a pour over the outline.
+- `board.sync()` brings footprints and nets across from the schematic (generated parts bring their footprints). `board.outline(x0, y0, x1, y1)` draws the edge; `board.rules(clearance=0.15, track_width=0.2, ...)` sets the rules (vias are 0.5/0.2 mm unless there is a reason for another size: leave `via_diameter` and `via_drill` out, or give exactly those; the board minimums follow the via so it passes the rules check); `board.zone("GND", layer="B.Cu")` adds a pour over the outline.
 - `board.autoplace(groups={block: [refs]}, near={"C1": "U1"}, edges={"J1": "left"}, fixed={"U1": (x, y, rotation)}, rotations={"U1": 90})` places by block (`rotations` turns a chip so the pins of each block face the parts they serve, the engine still picks where); `board.place(ref, (x, y), rotation=None, side=None)`, `board.move`, `board.rotate`, `board.flip` place by hand. Every part goes on the top side: `autoplace` never moves a part to the back by itself, and a back-side part (`side="back"`) is only for a board that cannot hold its parts on one side, said in the report with the reason. `board.courtyards()` gives each part's box as placed (ref -> [x0, y0, x1, y1, side]) and `board.clashes(gap=0.05)` the pairs that overlap with by how much: plan a hand floorplan from the real sizes and get `clashes()` empty before `route()`, which is the slow step.
 - `board.route(nets=None, order=[...], widths={"VBUS": 0.5}, time_s=120, max_vias=2)` runs the autorouter over every unrouted net (or the ones named) and reports what is left; `via_cost=` (mm of track a via is worth, 19 by default) is only lowered for a board that cannot route otherwise; `board.place_bypass(ref=None, caps=None)` puts bypass capacitors beside their supply pins and clear of the signal pins' ways out (run by `autoplace` and `swap_pins`; `autoplace(bypass=False)` leaves them); `board.swap_pins(ref, nets)` reassigns a chip's interchangeable pins from the placement so nets do not cross (and `sch.assign_pins(ref, {pin: net})` sets them by hand); `board.connect("U1.3", "R1.1")` routes one connection; `board.track(net, [(x, y), ...])` and `board.via(net, (x, y))` draw copper by hand.
-- `board.unroute("SDA", "SCL")` takes the tracks and vias of those nets off again (of every net except ground when none is named), to lay a crowded area again together with `board.route(nets=[...])`.
+- `board.unroute("SDA", "SCL")` takes the tracks and vias of those nets off again (of every net except ground when none is named), to lay a crowded area again together with `board.route(nets=[...])`. `board.unroute(near="U9")` (or `near=(x, y), radius=3`) takes up only the copper round a part, of every net but ground: the way to free a fine-pitch chip's boxed-in pins before routing again with no nets named. `board.zones()` lists the pours, planes and keep-outs already on the board (net, layers, priority, box, keep-out rules). `board.route(keep_rules=True)` leaves a board on KiCad's stock via alone (by default it gets the house 0.5/0.2 mm via and the result says so under `rules_changed`).
 - `board.route(kinds={"TEMP_OUT": "analog"}, separate={"quiet": 0.5, "noisy": 1.0}, fence={"spacing": 1.5, "nets": ["LO_CLK"]})` controls the signal domains and ground vias described under "Keeping signals apart"; both are on by default and reported in the result's `domains` and `ground_vias`. `board.keepout([x0, y0, x1, y1], layers=None, tracks=True, vias=True, copper=True, footprints=False, name="")` adds a rule area (under an antenna, across an isolation gap).
 - `board.fill()` fills every copper zone (KiCad's Fill All Zones) and reports the connections still open; a pour connects nothing until it is filled. `board.route()` and `board.check()` fill for you when the board has zones, so a ground pour counts the way it does in KiCad.
 - `board.layers(4, planes=["In1.Cu"])` sets the number of copper layers (do it before zones and routing; give each plane a zone, for example `board.zone("GND", layer="In1.Cu")`). Net names are the schematic's everywhere: `"SW"` finds the board's `"/SW"`.
