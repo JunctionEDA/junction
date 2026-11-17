@@ -10,13 +10,21 @@
 // document, replay on join, roles (a viewer's ops are refused), presence.  The rules it follows are the web
 // editor's (web/domains/pcb/editor/net.ts): an op is journalled before it is sent and replayed after a
 // reconnect (the server drops a clientOpId it has seen), an op of ours that is not acknowledged yet is put back
-// on top of whatever arrives before its ack, and a gap in the sequence asks for a fresh copy.
-import { applyChanges, invertChange, parseItemDoc, type ItemChange, type ItemDoc, type Json } from "./itemdoc";
+// on top of whatever arrives before its ack, and a gap in the sequence asks for a fresh copy.  An op the server
+// stored just before the connection dropped (its ack was lost) is recognised when it comes back in the catch-up,
+// so it is not put on top of what others did after it.
+import { applyChanges, invertChange, parseItemDoc, stableJson, type ItemChange, type ItemDoc, type Json } from "./itemdoc";
 
 export type SessionState = "connecting" | "live" | "offline" | "error";
 export interface SessionStatus { state: SessionState; text: string; role: string | null; canEdit: boolean }
 export interface SessionPeer { clientId: string; userId: number; login: string; name?: string | null; color: string; state?: Json }
 export type ChangeOrigin = "load" | "local" | "remote" | "undo";
+
+/**
+ * A project room's watcher (web/platform/doctabs/room.ts) joins a document only to hear who is in the project;
+ * it is not somebody in the document, and a session leaves it out of its peers.  It is known by its client id.
+ */
+export const isRoomWatcher = (clientId: string): boolean => /(^|:)room-[a-z0-9]+$/.test(clientId);
 
 export interface SessionOptions {
   docId: string;
@@ -52,8 +60,17 @@ export class ItemDocSession {
   private redoStack: UndoEntry[] = [];
   private peers = new Map<string, SessionPeer>();
   private resyncAt = 0;
+  /** a fresh copy was asked for because an op of ours turned out to be older than what we hold (see "ack") */
+  private refetching = false;
   private closed = false;
   private retryTimer: ReturnType<typeof setTimeout> | undefined;
+  /**
+   * Listeners that are shown every message the server sends for this document, before the session handles it
+   * (so `doc` is still as it was), and this session's own edits as `{ type: "local_op", changes, origin }`
+   * after they are applied.  A collaboration layer reads from here what the session itself does not keep: who
+   * made an op (`author`), comment events, notices.  A listener must not change the message.
+   */
+  readonly taps = new Set<(msg: Record<string, unknown>) => void>();
 
   constructor(private readonly opts: SessionOptions) {}
 
@@ -61,6 +78,8 @@ export class ItemDocSession {
   get canRedo(): boolean { return this.redoStack.length > 0; }
   /** edits made here that the server has not acknowledged yet */
   get unsaved(): number { return this.pending.length; }
+  /** everybody else in the document now (the list `onPeers` is given) */
+  peerList(): SessionPeer[] { return Array.from(this.peers.values()); }
 
   start(): void { this.closed = false; void this.connect(); }
 
@@ -103,6 +122,7 @@ export class ItemDocSession {
     const op: Pending = { clientOpId: `web:${Date.now().toString(36)}:${++this.opN}`, changes: done };
     this.pending.push(op);       // journal first, send second: a dropped socket replays it
     this.send(op);
+    for (const tap of Array.from(this.taps)) { try { tap({ type: "local_op", changes: done, origin }); } catch (e) { console.warn(e); } }
     this.opts.onChange(touched, origin);
     return true;
   }
@@ -142,7 +162,7 @@ export class ItemDocSession {
     const url = this.opts.socketUrl || `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws`;
     let sock: WebSocket;
     try { sock = new (this.opts.WebSocketImpl || WebSocket)(url); } catch (e) { this.setStatus("error", "connection blocked (VPN or proxy?)"); return; }
-    this.ws = sock; this.joined = false;
+    this.ws = sock; this.joined = false; this.refetching = false;
     let greeted = false;
     const watchdog = setTimeout(() => { if (this.ws === sock && !greeted) { try { sock.close(); } catch (e) { /* closing */ } } }, 8000);
     sock.onopen = () => {
@@ -174,11 +194,12 @@ export class ItemDocSession {
   private onMessage(sock: WebSocket, msg: Record<string, unknown>): void {
     const docId = this.opts.docId;
     if (msg.docId && msg.docId !== docId) return;
+    for (const tap of Array.from(this.taps)) { try { tap(msg); } catch (e) { console.warn(e); } }
     switch (msg.type) {
       case "doc_info": {
         this.joined = true;
         this.peers.clear();
-        for (const p of (msg.peers as SessionPeer[]) || []) this.peers.set(p.clientId, p);
+        for (const p of (msg.peers as SessionPeer[]) || []) if (!isRoomWatcher(p.clientId)) this.peers.set(p.clientId, p);
         this.opts.onPeers?.(Array.from(this.peers.values()));
         const role = typeof msg.role === "string" ? msg.role : null;
         this.setStatus("live", role === "editor" && this.opts.signedIn ? "live" : role === "commenter" ? "live · comment-only" : "live · view-only", role);
@@ -196,26 +217,33 @@ export class ItemDocSession {
         this.lastSeq = then.length ? Number(then[then.length - 1].seq) || Number(msg.seq) || 0 : Number(msg.seq) || 0;
         // the server's document does not have our unacknowledged edits yet: put them back, and send them again
         for (const op of this.pending) applyChanges(doc, op.changes);
-        this.doc = doc;
+        this.doc = doc; this.refetching = false;
         for (const op of this.pending) this.send(op);
         this.opts.onChange(null, "load");
         return;
       }
-      case "op": this.remote(sock, Number(msg.seq), msg.changes as ItemChange[]); return;
-      case "ops": for (const op of (msg.ops as { seq: number; changes: ItemChange[] }[]) || []) if (!this.remote(sock, Number(op.seq), op.changes)) break; return;
+      case "op": this.remote(sock, Number(msg.seq), msg.changes as ItemChange[], (msg.author as { clientId?: string } | undefined)?.clientId); return;
+      case "ops": for (const op of (msg.ops as { seq: number; changes: ItemChange[]; author?: { clientId?: string } }[]) || []) if (!this.remote(sock, Number(op.seq), op.changes, op.author?.clientId)) break; return;
       case "ack": {
-        const i = this.pending.findIndex((p) => p.clientOpId === msg.clientOpId);
-        if (i >= 0) this.pending.splice(i, 1);
-        this.lastSeq = Math.max(this.lastSeq, Number(msg.seq) || 0);
+        const i = this.pending.findIndex((p) => p.clientOpId === msg.clientOpId), seq = Number(msg.seq) || 0;
+        if (i >= 0) {
+          this.pending.splice(i, 1);
+          // The op was sequenced before something we already hold: it was stored just before the connection
+          // dropped, its ack was lost, and since the reconnect it has sat on top of what others did after it.
+          // Only a fresh copy puts it back in its place.  (An op of ours that came by in the catch-up was
+          // taken out of `pending` there, in `remote`, and does not get here.)
+          if (seq && seq <= this.lastSeq && !this.refetching) { this.refetching = true; this.resync(sock, true); }
+        }
+        this.lastSeq = Math.max(this.lastSeq, seq);
         return;
       }
       case "reset": this.resync(sock, true); return;
       case "role": if (typeof msg.role === "string") this.setStatus("live", msg.role === "editor" ? "live" : msg.role === "commenter" ? "live · comment-only" : "live · view-only", msg.role); return;
-      case "peer_joined": { const p = (msg.user || msg.peer) as SessionPeer | undefined; if (p && p.clientId) { this.peers.set(p.clientId, p); this.opts.onPeers?.(Array.from(this.peers.values())); } return; }
+      case "peer_joined": { const p = (msg.user || msg.peer) as SessionPeer | undefined; if (p && p.clientId && !isRoomWatcher(p.clientId)) { this.peers.set(p.clientId, p); this.opts.onPeers?.(Array.from(this.peers.values())); } return; }
       case "peer_left": if (typeof msg.clientId === "string" && this.peers.delete(msg.clientId)) this.opts.onPeers?.(Array.from(this.peers.values())); return;
       case "presence": {
         for (const [cid, e] of Object.entries((msg.peers as Record<string, { user?: SessionPeer; state?: Json } | null>) || {})) {
-          if (cid === this.clientId || cid.endsWith(":" + this.clientId)) continue;
+          if (cid === this.clientId || cid.endsWith(":" + this.clientId) || isRoomWatcher(cid)) continue;
           if (e === null) this.peers.delete(cid);
           else { const old = this.peers.get(cid); const user = e.user || old; if (user) this.peers.set(cid, { ...user, clientId: cid, state: e.state }); }
         }
@@ -226,12 +254,18 @@ export class ItemDocSession {
     }
   }
 
-  /** One sequenced op from somebody else.  False when it left a gap (a fresh copy is on its way). */
-  private remote(sock: WebSocket, seq: number, changes: ItemChange[]): boolean {
+  /**
+   * One sequenced op: somebody else's, or (in the catch-up after a reconnect) one of ours that the server stored
+   * before the connection dropped.  False when it left a gap (a fresh copy is on its way).
+   */
+  private remote(sock: WebSocket, seq: number, changes: ItemChange[], author?: string): boolean {
     if (!this.doc) return true;
     if (seq && this.lastSeq && seq <= this.lastSeq) return true;                       // already applied
     if (seq && this.lastSeq && seq > this.lastSeq + 1) { this.resync(sock, false); return false; }
     if (seq) this.lastSeq = seq;
+    // Ours: it has its place in the sequence now, so it is no longer "on top".  Our ops are stored in the order
+    // we sent them, so it is the oldest one waiting (checked by content; if it is not, the ack sorts it out).
+    if (author && this.clientId && author === this.clientId && this.pending.length && stableJson(this.pending[0].changes as unknown as Json) === stableJson(changes as unknown as Json)) this.pending.shift();
     const touched = applyChanges(this.doc, changes);
     // ours that are not acknowledged come after this one in the server's order: they stay on top
     for (const op of this.pending) for (const c of op.changes) if (touched.has(c.id)) applyChanges(this.doc, [c]);

@@ -173,7 +173,9 @@ What the platform gives these documents today, and what it does not:
 |---|---|
 | Storage, roles (viewer / commenter / editor), share links | the existing `documents`, `ops`, `snapshots` tables and `access.rs` |
 | Live co-editing, item by item, property by property | the existing `/ws` op path; verified with two browsers |
-| Presence transport | `session.setPresence(state)` / `onPeers`; **nothing draws it yet** |
+| Presence: who is here, pointers, views, selections, Follow | `mechanical/collab/` over `session.setPresence` / `peerList()`; see "Collaboration" |
+| Comments pinned to a feature, a face, an edge or a vertex | the platform's comments (`/api/docs/{id}/comments`), anchored by geometry name; see "Collaboration" |
+| Tabs appearing for others without a reload, and who is on which tab | the project room (`platform/doctabs/room.ts`); see "Collaboration" for its limits |
 | The stored file kept current | `compact.rs` folds the ops into a snapshot on the server (`itemdoc.rs`), with no client involved |
 | Project archive, clone, GitHub sync | they read the folded file like any other; a pull with changes on both sides merges item by item (`itemmerge.rs`) |
 | Create, rename, delete from the tabs | `POST /api/projects/{id}/docs`, `PATCH` / `DELETE /api/docs/{id}` |
@@ -612,6 +614,71 @@ Viewport navigation: right-drag orbits, middle-drag or Shift + right-drag pans, 
 pointer, the buttons at the top right give Top / Front / Right / Iso / Fit. Model space is millimetres, Z up.
 Colours come from the theme tokens (`tokenColor("--mark")`); do not write colour literals.
 
+## Collaboration (`mechanical/collab/`, `platform/doctabs/room.ts`)
+
+Everything here sits on the document session and changes nothing on the server.
+
+**Presence.** `collab/collab.ts` (`Collab`) sends a small state on the session's presence lane, at most twenty
+times a second and only when it changed (`collab/presence.ts`): `cam` (orientation, target, zoom, aspect), `cur`
+(the model point under the pointer), `sel` (picks as `["f"|"e"|"v", body, name]`, `["p", plane]`,
+`["s", sketch, entity, region]`), `feat` (the selected row), `edit` (`{ id, kind: "dialog" | "sketch", isNew?,
+name? }`), `fol` (whom this person follows), and `key` / `col` (the person's window and colour, the same on every
+tab). `collab/overlay.ts` draws the others in the viewport; `panels/collab.tsx` lists them; `ui/slots.ts`
+`addFeatureRowSlot` is how they get into the feature list (a slot is a component at the right end of every row;
+use it for your own marks too). The part studio's layer is `studioCollab(studio)` (`collab/studio-collab.ts`):
+`{ collab, guard, comments, meshes }`, alive while the Collaborators panel is mounted;
+`window.JunctionCadCollab` is the open one, for tests.
+
+- A feature with an editor of its own needs nothing: presence reads `studio.getState().editing` and `.sketch`.
+- Another 3D editor gets presence with one call, `mountViewportCollab({ session, viewport, ctx, local, subscribe })`
+  (exported from `mechanical/api.ts`; the assembly uses it): avatars, pointers, views, Follow. Pass `sources`
+  to have other people's selected faces and edges drawn on your meshes.
+- Presence never rebuilds anything. A window that is hidden does not rebuild on other people's edits; it
+  rebuilds once when it is shown again (`studio.scheduleRegen`).
+
+**Follow.** `collab.follow(key)` eases the camera to the other person's each time theirs moves; turning, panning
+or zooming one's own view, a standard-view button, or starting to edit stops it. When the person goes to another
+tab the follower is taken there and the follow carries over (to an editor that has presence).
+
+**Two people in one feature** (`collab/guard.ts`, `collab/merge.ts`). The document merges per path, so:
+
+- a dialog's draft is rebased whenever its feature changes in the document: values the other person changed and
+  this one did not appear in the open dialog and its preview; a value both changed stays this person's, and the
+  dialog says whose value Done will replace and offers theirs;
+- a feature deleted under an open dialog or sketch, or while an edit to it was on its way (or was made offline),
+  is offered back with this person's values ("Put it back": an `ADDED` of the item, for everybody);
+- two people in one sketch both draw: entities are separate paths. Two people moving the same point at once: the
+  later one wins, and both see it happen.
+
+Do not commit "the draft as it is" from code that keeps a draft: diff against what the document holds now, after
+a rebase (`rebase(base, mine, theirs)`), or the other person's edit is undone without a word.
+
+**The session** (`shared/itemdoc/sync.ts`) has two additions for this: `session.taps` (a set of listeners shown
+every message for the document before it is handled, and the session's own edits as `local_op`) and
+`session.peerList()`. It also recognises an op of its own in the catch-up after a reconnect (the server stored it,
+the ack was lost), so that op is not put back on top of what others did after it; `static/tests/mechanical-collab`
+runs several sessions against a sequencing server in every delivery order and checks they end on the server's fold.
+
+**The project room** (`platform/doctabs/room.ts`, started by the tabs; `projectRoom()` in `roomapi.ts` for a
+bundle). The server has no channel per project, so every page opens one more socket, joins the project's first
+four part studios and assemblies (by id) with it, and says there which tab the person is on and a counter that
+it raises when it adds, renames or deletes a document. Everybody who sees a counter move fetches the tab list.
+Limits: a project with no part studio or assembly has no room and looks at its tabs every twenty seconds
+instead; a document made by something that is not the tabs (an upload, an agent) is announced by nobody and
+appears on the next look or focus; the watcher receives the joined documents' files once and their edits as they
+come, and ignores them. A server-side "project changed" notice would replace all of it.
+
+**Comments** (`collab/comments.ts`, `collab/anchor.ts`). A thread's anchor is the platform's `{ kind: "item",
+id, label, item }`: `id` is a feature id, or `face:<name>` / `edge:<name>` / `vertex:<name>` with the body id in
+`item`. The pin is drawn at the middle of that geometry as it is now, so it follows rebuilds; `x`, `y` carry
+the point the thread was started at (micrometres, packed: `packPoint3`), where the pin stays when the geometry
+is gone. A name over 300 characters falls back to the feature that made the body. The project's review list
+(`/api/projects/{id}/comments`) includes these threads; the electronics editor's Comments pane lists them under
+their document but cannot jump to the geometry.
+
+Not done: a thread on a sketch entity or on an assembly instance; mentions; a pin hidden behind the model is
+still drawn; the presence of a person on a schematic or board tab is their tab only, not their pointer.
+
 ## Document tabs and the shell
 
 - `domains/registry.ts` lists the document kinds: `docType`, `ext`, `title`, `icon`, and for kinds a domain's
@@ -697,6 +764,7 @@ Tests for this work, each runnable alone with `node static/tests/<name>.test.js`
 | `mechanical-doc` | the `.jpart` format, every edit, sketch helpers, region finding |
 | `mechanical-kernel` | **the real kernel in node**: sketch → extrude, booleans, names across rebuilds, cache, rollback, errors |
 | `assembly-doc` | the `.jasm` format, the mate registry, Fastened |
+| `mechanical-collab` | presence states, the draft's rebase, comment anchors and pins, the project room, and sessions under concurrent edits (random delivery orders, offline periods) against the server's fold |
 | `cargo test itemdoc` | the server's fold of ops into the stored file |
 | `cargo test itemmerge`, `cargo test dockind` | the merge rules for item documents, and what each document kind answers |
 | `cad-history` | the feature diff, the 3D diff in the real kernel, the history list |
@@ -725,6 +793,16 @@ studio; add to it when you add something a person does:
 ```sh
 E2E_PG_URL=postgres://user:pass@127.0.0.1:5432/db E2E_JWT_SECRET=dev SHOTS=/tmp/shots node scripts/cad-ui.mjs
 ```
+
+`scripts/cad-collab-ui.mjs` is the same for collaboration, with two and three people in separate browser
+contexts: presence, Follow (also across tabs), two people in one dialog, a delete under an open dialog, bursts of
+edits, time offline, the live tab list, comments. `ONLY=tabs,comments` runs some of its parts.
+
+The server embeds the browser bundles when it is compiled, so a change under `server/web` does not show in a
+server that is already built. `scripts/cad-static-proxy.mjs` stands in front of such a server and answers the
+bundle requests from `server/static` on disk: `npm run build`, start the server on another port with
+`PUBLIC_URL` set to the proxy's address, then `PORT=8099 UPSTREAM=http://127.0.0.1:18099 node
+scripts/cad-static-proxy.mjs` and point the browser or the scripts at it.
 
 With `KC_DEV_LOGIN=1`, `/auth/dev?jwt=<token>&next=/` signs a browser in with a JWT signed by `JWT_SECRET`
 (`{ sub: <users.id>, login, iat, exp }`, HS256); insert the user row first. In a browser test, wait on
@@ -793,6 +871,11 @@ part studio (an assembly drawing an instance) should call `resolveInputs` too.
 - **Merging** keeps the journal's rule that a delete beats a modify: a conflict "removed here, changed there"
   resolved for the changed side keeps the item only on the side that still has it. Arrays merge as one value.
 - **The assistant's picture** (`cad_render_view`) is a software render: flat shading, no sketches or planes.
+- **Collaboration:** see the limits at the end of "Collaboration". In the stored document, edits merge per path,
+  last writer wins. Two people editing one parameter at once without a dialog (two direct commits): the later
+  one wins, silently. There is no lock on a feature someone else has open, by design: both dialogs stay usable.
+- **Platform gaps** for these documents: history timeline, compare, branch merge, MCP, thumbnails (see the table
+  under "How a change is committed and synced").
 - **Bundles:** `mechanical.js` and `assembly.js` each bundle three.js and React (about 0.8 MB and 0.7 MB
   minified), loaded on demand. Sharing them with `viewer3d.js` and `ui.js` is not done.
 - **Assembly** is a stub, as described above.

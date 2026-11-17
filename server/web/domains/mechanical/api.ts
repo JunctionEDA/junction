@@ -12,3 +12,7 @@ export type { ParamField } from "./core/feature";
 export { densities, materialOf, materialsOf, type Material } from "./document/mass-materials";
 // the board link (boardlink/): the link item a part studio drives a board with, as the board editor reads it
 export * from "./boardlink/api";
+// Live presence for another domain's 3D editor (who is here, pointers, views, Follow): collab/attach.tsx.
+export { mountViewportCollab, type ViewportCollabOptions } from "./collab/attach";
+export type { Collab, CollabHost, CollabState, LocalPresence } from "./collab/collab";
+export type { CadPresence, Collaborator, SelRef } from "./collab/presence";
