@@ -191,6 +191,18 @@ try {
   s = await sk();
   check('the plate with two holes is fully constrained', s.dof === 0 && s.health === 'ok', `dof ${s.dof}`);
   await shot('05-plate-fully-constrained');
+  // the drawing is laid over the 3D view and follows it: turned, and in the dark theme
+  await studio(() => window.JunctionPartStudio.viewport.setView('iso', false));
+  const turned = await at(80, 50), flat = await studio(() => { const p = window.JunctionSketch.painter.screen([80, 50]), r = window.JunctionPartStudio.viewport.canvas.getBoundingClientRect(); return { x: r.left + p.x, y: r.top + p.y }; });
+  await page.waitForTimeout(150);
+  const flat2 = await studio(() => { const p = window.JunctionSketch.painter.screen([80, 50]), r = window.JunctionPartStudio.viewport.canvas.getBoundingClientRect(); return { x: r.left + p.x, y: r.top + p.y }; });
+  check('the sketch is drawn where the 3D view puts it when the view is turned', near(flat2.x, turned.x, 0.5) && near(flat2.y, turned.y, 0.5) && !(near(flat.x, turned.x, 0.5) && near(flat.y, turned.y, 0.5)), JSON.stringify([flat, flat2, turned]));
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+  await page.waitForTimeout(300);
+  await shot('05b-turned-dark');
+  await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+  await studio(() => window.JunctionPartStudio.viewport.setView('top', false));
+  await page.waitForTimeout(200);
 
   // ================================================================ extrude, then change a dimension
   await page.click("[data-tool='Finish sketch']");
