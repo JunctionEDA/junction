@@ -214,6 +214,78 @@ await step('cursor chat', b, async () => {
   await shot(a, '09-alice-chat-with-spot-link');
 });
 
+// ---------------------------------------------------------------- every kind of selection makes a link that lands on it
+const lastLink = async (page) => (await chatOf(page)).last.link;
+const flashOn = (page) => page.evaluate(() => { const g = document.getElementById('chatFlash'); return g ? { n: g.childNodes.length, text: g.textContent } : { n: 0, text: '' }; });
+const sendLinked = async (page, text, select, arg) => {
+  await page.keyboard.press('Escape'); await page.keyboard.press('Escape');
+  await page.evaluate(() => { const E = window.CollabEditor; E.selPins = []; E.selField = null; const ps = window.CollabTools.pcb && window.CollabTools.pcb.state; if (ps) ps.padSel = null; });
+  await page.evaluate(select, arg);
+  await page.click('[data-chat-attach]');
+  await page.waitForTimeout(150);
+  await page.fill('#chatText', text); await page.keyboard.press('Enter');
+  await until(async () => (await chatOf(page)).last.body === text && !(await chatOf(page)).last.pending);
+};
+const follow = async (page) => { await page.locator('#chatPane [data-chat-link]').last().click(); await page.waitForTimeout(900); };
+const toasts = (page) => page.evaluate(() => { const t = window.CollabApp.getState().toast; return t ? t.text : ''; });
+
+const s2 = await open(alice, sch, { scale: 2, scheme: 'light' });
+if (!(await s2.locator('#chatPane').isVisible())) await s2.click('#chatBtn');
+await s2.waitForSelector('#chatPane');
+
+await step('pin link', s2, async () => {
+  const sym = await s2.evaluate(() => { for (const it of window.CollabEditor.kdoc.items.values()) if (it.kind === 'symbol' && it.ref && /^U/.test(it.ref)) return { id: it.id, ref: it.ref }; return null; });
+  await sendLinked(s2, 'check this pin', (id) => { window.CollabEditor.selPins = [{ id, number: '1' }]; }, sym.id);
+  const l = await lastLink(s2);
+  check('a selected pin makes a pin link', l && l.kind === 'pin' && l.label === `${sym.ref} pin 1` && l.sel[0] === `pin:${sym.id}#1`, JSON.stringify(l));
+  await shot(s2, '12-pin-link-sent');
+  await follow(b);
+  check('following it from the board opens the schematic and selects that pin', await until(async () => b.evaluate((id) => (window.CollabEditor.selPins || []).some((p) => p.id === id && p.number === '1'), sym.id), 15000));
+  const f = await flashOn(b);
+  check('…with an outline flashing round it, named', f.n >= 2 && f.text.includes(`${sym.ref} pin 1`), JSON.stringify(f));
+  await shot(b, '13-bob-follows-pin-link');
+});
+
+await step('unnamed net link', s2, async () => {
+  const w = await s2.evaluate(() => {
+    const E = window.CollabEditor, sch = window.CollabTools.sch;
+    for (const it of E.kdoc.items.values()) if (it.kind === 'wire') {
+      let ids = []; try { ids = [...sch.netItems(E.kdoc, it)]; } catch { continue; }
+      if (ids.some((id) => /label$/.test(E.kdoc.items.get(id)?.kind || ''))) continue;   // an unnamed net
+      if (ids.length > 2) return { id: it.id };
+    }
+    return null;
+  });
+  await sendLinked(s2, 'this net', (id) => window.CollabTools.sch.select(id), w.id);
+  const l = await lastLink(s2);
+  check('a selected wire on an unnamed net makes a net link through that wire', l && l.kind === 'net' && /^Net-\(/.test(l.id) && l.item === w.id, JSON.stringify(l));
+  await b.evaluate(() => window.CollabApp.dispatch({ type: 'toastDone', id: 0 }));
+  await follow(b);
+  const lit = await b.evaluate(() => window.CollabEditor.highlightIds ? window.CollabEditor.highlightIds.size : 0);
+  check('following it lights the net (no "not on this document")', lit > 2 && !/not on this document/.test(await toasts(b)), `${lit} ${await toasts(b)}`);
+  await shot(b, '14-bob-follows-unnamed-net');
+});
+
+await step('text link', s2, async () => {
+  const t = await s2.evaluate(() => { for (const it of window.CollabEditor.kdoc.items.values()) if (it.kind === 'text') return { id: it.id }; return null; });
+  await sendLinked(s2, 'typo here', (id) => window.CollabTools.sch.select(id), t.id);
+  const l = await lastLink(s2);
+  check('selected text makes a link to that text', l && l.kind === 'item' && l.id === t.id && /^Text/.test(l.label), JSON.stringify(l));
+  await follow(b);
+  check('following it selects the text and flashes it', await until(async () => b.evaluate((id) => window.CollabApp.getState().selection.ids.includes(id), t.id)) && (await flashOn(b)).n >= 2);
+});
+
+await step('pad link', a, async () => {
+  const fp = await a.evaluate(() => { for (const it of window.CollabEditor.kdoc.items.values()) if (it.kind === 'footprint' && /^U/.test(it.ref || '')) return { id: it.id, ref: it.ref }; return null; });
+  await sendLinked(a, 'this pad', (id) => { window.CollabTools.pcb.state.padSel = id + '#3'; }, fp.id);
+  const l = await lastLink(a);
+  const num = await a.evaluate((id) => window.CollabEditor.kdoc.items.get(id).node.filter((c) => Array.isArray(c) && c[0] === 'pad')[3][1], fp.id);
+  check('a selected pad makes a pad link, named by its pad number', l && l.kind === 'pad' && l.label === `${fp.ref} pad ${String(num).replace(/"/g, '')}`, JSON.stringify(l) + ' ' + num);
+  await follow(b);
+  check('following it opens the board and selects that pad', await until(async () => b.evaluate((k) => window.CollabTools.pcb && window.CollabTools.pcb.state && window.CollabTools.pcb.state.padSel === k, fp.id + '#3'), 15000));
+  await shot(b, '15-bob-follows-pad-link');
+});
+
 await step('a viewer reads only', a, async () => {
   const d = await open(dan, pcb, { scheme: 'light' });
   await d.click('#chatBtn');

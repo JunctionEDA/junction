@@ -2718,8 +2718,8 @@ function buildSymbolGeom(doc2, item) {
     const subs2 = kids(lib, "symbol");
     let maxNameHalf = 0;
     for (const sub2 of subs2) for (const p of kids(sub2, "pin")) {
-      const nm3 = kid(p, "name");
-      if (nm3 && str(nm3[1]) && (str(nm3[1]) !== "~" || (doc2.version || 0) >= TILDE_LITERAL_VERSION)) maxNameHalf = Math.max(maxNameHalf, effectsOf(nm3).size / 2);
+      const nm4 = kid(p, "name");
+      if (nm4 && str(nm4[1]) && (str(nm4[1]) !== "~" || (doc2.version || 0) >= TILDE_LITERAL_VERSION)) maxNameHalf = Math.max(maxNameHalf, effectsOf(nm4).size / 2);
     }
     const sym = { nameOff, hideNames, hideNums, maxNameHalf, col, alpha, literalTilde: (doc2.version || 0) >= TILDE_LITERAL_VERSION, altIcons: schDisplay.pinAltIcons };
     const geomStart = item.geom.length;
@@ -9035,8 +9035,8 @@ function footprintVariant(fp, name) {
   for (const k of FP_FLAG_KEYS) flags[k] = boolOf2(kid2(v, k), base2[k]);
   const fields = /* @__PURE__ */ new Map();
   for (const f2 of kids2(v, "field")) {
-    const nm3 = str2((kid2(f2, "name") || [])[1]);
-    if (nm3) fields.set(nm3, str2((kid2(f2, "value") || [])[1]));
+    const nm4 = str2((kid2(f2, "name") || [])[1]);
+    if (nm4) fields.set(nm4, str2((kid2(f2, "value") || [])[1]));
   }
   return { name: str2((kid2(v, "name") || [])[1]), flags, fields };
 }
@@ -9164,8 +9164,8 @@ function symbolVariant(sym, name, path2, ver) {
   }
   const fields = /* @__PURE__ */ new Map();
   for (const f2 of kids2(v, "field")) {
-    const nm3 = str2((kid2(f2, "name") || [])[1]);
-    if (nm3) fields.set(nm3, str2((kid2(f2, "value") || [])[1]));
+    const nm4 = str2((kid2(f2, "name") || [])[1]);
+    if (nm4) fields.set(nm4, str2((kid2(f2, "value") || [])[1]));
   }
   return { flags, fields };
 }
@@ -9252,8 +9252,8 @@ function renameSymbolVariants(sym, from, to, copy = false) {
       continue;
     }
     const nv = copy ? clone(v) : v;
-    const nm3 = kid2(nv, "name");
-    if (nm3) nm3[1] = to;
+    const nm4 = kid2(nv, "name");
+    if (nm4) nm4[1] = to;
     if (copy) {
       const others = kids2(inst, "variant");
       const after = others.filter((x) => cmpCode(str2((kid2(x, "name") || [])[1]), to) < 0).pop();
@@ -47606,21 +47606,21 @@ Press <esc> to cancel all; double-click to finish`;
         if (S3.route || S3.move) return true;
         if (appGlobal(() => editorState().DOC_TYPE === "footprint", false) || !canEdit2(ctx)) return true;
         const choices = footprintRefChoices(ctx.doc);
-        const refOf2 = (c) => c.split(" ")[0];
+        const refOf3 = (c) => c.split(" ")[0];
         return openForm({
           title: "Get and Move Footprint",
           width: 400,
           fields: [
             { k: "ref", label: "Reference designator:", type: "text", value: "" },
-            { k: "list", label: "Available footprints:", type: "select", value: "", options: choices.map((c) => [refOf2(c), c.replace(/ /g, "\xA0")]) }
+            { k: "list", label: "Available footprints:", type: "select", value: "", options: choices.map((c) => [refOf3(c), c.replace(/ /g, "\xA0")]) }
           ],
           // a wxChoice keeps the spaces an HTML option collapses
           change: (k, v, set2) => {
             if (k === "list") set2("ref", v);
             else if (k === "ref") {
               const e = String(v).trim().toLowerCase();
-              const hit5 = choices.find((c) => refOf2(c).toLowerCase() === e);
-              set2("list", hit5 ? refOf2(hit5) : "");
+              const hit5 = choices.find((c) => refOf3(c).toLowerCase() === e);
+              set2("list", hit5 ? refOf3(hit5) : "");
             }
           },
           apply: (v) => {
@@ -53686,7 +53686,7 @@ Press <esc> to cancel all; double-click to finish`;
       var MINGRID = 1e3;
       var MAXERROR = 10;
       var ACTION_MESSAGE = ["", "(not updated)", "(unannotated; not updated)", "(excluded)"];
-      var nm3 = (mm5) => Math.round(mm5 * 1e6);
+      var nm4 = (mm5) => Math.round(mm5 * 1e6);
       function roundToGrid2(c, grid2) {
         if (!grid2) grid2 = MINGRID;
         const r = c % grid2;
@@ -53732,7 +53732,7 @@ Press <esc> to cancel all; double-click to finish`;
         const fmt32 = o.fmt || ((v) => v.toFixed(4) + " mm");
         const coord = (x, y) => `${fmt32(x / 1e6)}, ${fmt32(y / 1e6)}`;
         const excludes = o.exclude.split(/[,\s]+/).filter(Boolean);
-        const grid2 = nm3(o.grid);
+        const grid2 = nm4(o.grid);
         const front = [], back = [];
         const fps = Array.from(doc2.items.values()).filter((it) => it.kind === "footprint");
         for (const fp of fps) {
@@ -53748,7 +53748,7 @@ Press <esc> to cancel all; double-click to finish`;
             }
           }
           const layer4 = K11.kid(n2, "layer"), isFront2 = !layer4 || K11.str(layer4[1]) === "F.Cu";
-          const info = { id: fp.id, ref, fpid: K11.str(n2[1]), x: nm3(x), y: nm3(y), rx: roundToGrid2(nm3(x), grid2), ry: roundToGrid2(nm3(y), grid2), front: isFront2, action: 0, prefix: "" };
+          const info = { id: fp.id, ref, fpid: K11.str(n2[1]), x: nm4(x), y: nm4(y), rx: roundToGrid2(nm4(x), grid2), ry: roundToGrid2(nm4(y), grid2), front: isFront2, action: 0, prefix: "" };
           let firstnum = -1;
           if (!ref) info.action = 1;
           else {
@@ -53862,7 +53862,7 @@ ${c.from || "unannotated footprint"} -> ${c.to || "unannotated footprint"}`;
           let m = `PCB has ${bad.length} empty or invalid reference designations.
 You may wish to run DRC with 'Test for parity between PCB and schematic' checked.`;
           for (const b of bad) m += `
-    RefDes: ${b.ref || "unannotated footprint"}; footprint: ${b.fpid || "unknown"} at ${coord(nm3(b.x), nm3(b.y))} on PCB.`;
+    RefDes: ${b.ref || "unannotated footprint"}; footprint: ${b.fpid || "unknown"} at ${coord(nm4(b.x), nm4(b.y))} on PCB.`;
           show6("warning", m);
         }
         const out2 = [], renames = [];
@@ -73106,8 +73106,8 @@ function refreshVariantNames(schNames) {
     if (!schNames && E.kdoc) for (const it of E.kdoc.items.values()) {
       if (it.kind !== "symbol" && it.kind !== "sheet") continue;
       for (const p of symbolInstancePaths(it.node)) for (const c of p) if (Array.isArray(c) && c[0] === "variant") {
-        const nm3 = c.find((x) => Array.isArray(x) && x[0] === "name");
-        if (nm3 && nm3[1]) set2.add(String(nm3[1]));
+        const nm4 = c.find((x) => Array.isArray(x) && x[0] === "name");
+        if (nm4 && nm4[1]) set2.add(String(nm4[1]));
       }
     }
     for (const r of reg) set2.add(r.name);
@@ -74052,26 +74052,80 @@ function openChat() {
     maybeMarkRead();
   }, 30);
 }
+function padNumber2(fpId, index) {
+  const it = E.kdoc ? E.kdoc.items.get(fpId) : null;
+  if (!it) return String(index + 1);
+  const pads = it.node.filter((c) => Array.isArray(c) && c[0] === "pad");
+  const p = pads[index];
+  return p ? KiCadCanvas.str(p[1]) : String(index + 1);
+}
+function selectionTokens() {
+  const out2 = [...selectionIds()];
+  const ps = !E.kdoc || E.kdoc.type !== "pcb" ? null : CollabTools.pcb && CollabTools.pcb.state;
+  if (ps && ps.padSel) out2.push(ps.padSel);
+  for (const p of E.selPins || []) out2.push(`pin:${p.id}#${p.number}`);
+  if (E.selField) out2.push(`field:${E.selField.id}#${E.selField.name}`);
+  return out2;
+}
 function currentLink() {
   const did = state.docId;
   if (!did || did.startsWith("board:") || did.startsWith("lib:") || !E.kdoc) return null;
-  const d = E.kdoc;
-  const ids = selectionIds();
-  if (ids.length) {
-    const it = d.items.get(ids[0]);
+  const d = E.kdoc, base2 = { docId: did, path: docPath(did) };
+  const sel = selectionTokens();
+  const box3 = selectionBoxNm(sel);
+  const cx = box3 ? (box3[0] + box3[2]) / 2 : 0, cy = box3 ? (box3[1] + box3[3]) / 2 : 0;
+  if (sel.length) {
+    const more = sel.length > 1 ? ` +${sel.length - 1}` : "";
+    const t = sel[0];
+    if (t.startsWith("pin:")) {
+      const [id, num13] = t.slice(4).split("#");
+      return { ...base2, kind: "pin", id: t, label: `${refOf2(id)} pin ${num13}${more}`, x: cx, y: cy, sel, bbox: box3 };
+    }
+    if (t.startsWith("field:")) {
+      const i = t.indexOf("#");
+      return { ...base2, kind: "field", id: t, label: `${refOf2(t.slice(6, i))} ${t.slice(i + 1)}${more}`, x: cx, y: cy, sel, bbox: box3 };
+    }
+    if (!d.items.has(t) && t.includes("#")) {
+      const i = t.lastIndexOf("#");
+      return { ...base2, kind: "pad", id: t, label: `${refOf2(t.slice(0, i))} pad ${padNumber2(t.slice(0, i), Number(t.slice(i + 1)))}${more}`, x: cx, y: cy, sel, bbox: box3 };
+    }
+    const it = d.items.get(t);
     if (it) {
-      const b = it.bbox, x = b ? (b[0] + b[2]) / 2 : 0, y = b ? (b[1] + b[3]) / 2 : 0;
-      if (!it.ref && ids.length === 1) {
-        const net = netOfItem(it, [x, y]);
-        if (net && net.name && net.name !== "unnamed net") return { docId: did, path: docPath(did), kind: "net", id: net.name, label: net.name, x: Math.round(x * IU()), y: Math.round(y * IU()) };
+      const b = it.bbox, mx = b ? (b[0] + b[2]) / 2 : 0, my = b ? (b[1] + b[3]) / 2 : 0;
+      if (!it.ref && sel.length === 1) {
+        const net = netOfItem(it, [mx, my]);
+        if (net && net.name) return { ...base2, kind: "net", id: net.name, label: net.name, item: it.id, x: cx, y: cy, sel, bbox: box3 };
       }
-      const label = describe(it) + (ids.length > 1 ? ` +${ids.length - 1}` : "");
-      return { docId: did, path: docPath(did), kind: "item", id: it.id, label, x: Math.round(x * IU()), y: Math.round(y * IU()) };
+      return { ...base2, kind: "item", id: it.id, label: describe(it) + more, x: cx, y: cy, sel, bbox: box3 };
     }
   }
   const v = visibleRectNm();
   if (!v) return null;
-  return { docId: did, path: docPath(did), kind: "spot", id: "", label: "", x: Math.round(v[0] + v[2] / 2), y: Math.round(v[1] + v[3] / 2) };
+  return { ...base2, kind: "spot", id: "", label: "", x: Math.round(v[0] + v[2] / 2), y: Math.round(v[1] + v[3] / 2) };
+}
+function selectionBoxNm(sel) {
+  if (!sel.length) return null;
+  const b = haloBoxMm();
+  if (b) return b.map((v) => nm3(v));
+  const d = E.kdoc;
+  let out2 = null;
+  for (const t of sel) {
+    const it = d.items.get(t.replace(/^(pin|field):/, "").split("#")[0]);
+    const q4 = it && it.bbox;
+    if (!q4) continue;
+    out2 = out2 ? [Math.min(out2[0], q4[0]), Math.min(out2[1], q4[1]), Math.max(out2[2], q4[2]), Math.max(out2[3], q4[3])] : [q4[0], q4[1], q4[2], q4[3]];
+  }
+  return out2 ? out2.map((v) => nm3(v)) : null;
+}
+function haloBoxMm() {
+  const g2 = document.getElementById("selG");
+  if (!g2 || !g2.childNodes.length) return null;
+  try {
+    const r = g2.getBBox();
+    return r.width > 0 || r.height > 0 ? [r.x, r.y, r.x + r.width, r.y + r.height] : null;
+  } catch {
+    return null;
+  }
 }
 function refreshLink() {
   const next = attach ? currentLink() : null;
@@ -74160,7 +74214,7 @@ function startCursorChat() {
   input.addEventListener("blur", () => setTimeout(() => {
     if (bubble === box3) closeCursorChat(true);
   }, 0));
-  setTimeout(() => input.focus(), 0);
+  input.focus();
   return true;
 }
 function closeCursorChat(clearSay) {
@@ -74187,7 +74241,7 @@ function leaveCursorChat() {
   }
   E.chatSay = null;
 }
-var request, EMPTY, me, projectId, chat, setChat, attach, pendingId, loadN, chatOpen, watching, readTimer, wasOpen, hooked, IU, docPath, bubble, sayClear;
+var request, EMPTY, me, projectId, chat, setChat, attach, pendingId, loadN, chatOpen, watching, readTimer, wasOpen, hooked, IU, docPath, refOf2, nm3, bubble, sayClear;
 var init_chat = __esm({
   "web/domains/pcb/editor/chat.ts"() {
     "use strict";
@@ -74215,6 +74269,11 @@ var init_chat = __esm({
     hooked = false;
     IU = () => E.IU;
     docPath = (id) => ((state.docs || []).find((d) => d.docId === id) || { path: "" }).path;
+    refOf2 = (id) => {
+      const it = E.kdoc ? E.kdoc.items.get(id) : null;
+      return it && (it.ref || it.name) || "Part";
+    };
+    nm3 = (v) => Math.round(v * IU());
     bubble = null;
     sayClear = 0;
   }
@@ -80399,7 +80458,7 @@ function movePeerCursors(peers) {
 }
 function drawPeers(peers) {
   peersG.replaceChildren();
-  const s2 = pxPerMm(), mm4 = (nm3) => nm3 / E.IU;
+  const s2 = pxPerMm(), mm4 = (nm4) => nm4 / E.IU;
   const ghosts = [], cursorSpecs = [];
   initPeerCursors(peersG, pxPerMm, (cid, name) => toggleFollowToast(cid, name, () => {
     renderPeers();
@@ -91332,7 +91391,7 @@ function deleteSelectedField() {
   }
   const it = E.kdoc.items.get(f2.id), k = kit();
   if (!it || !k) return true;
-  const node = hiddenFieldNode(it.node, f2.name, k, (n2, nm3) => fieldOf4({ node: n2 }, nm3));
+  const node = hiddenFieldNode(it.node, f2.name, k, (n2, nm4) => fieldOf4({ node: n2 }, nm4));
   if (!node) return true;
   commitChanges([KiCadCanvas.replaceChange(E.kdoc, Object.assign({}, it, { node, geom: [], bbox: null }))], "Delete");
   E.selField = null;
@@ -92463,8 +92522,8 @@ async function sheetList() {
       const rel = dir ? `${dir}/${m.file}` : m.file;
       const child2 = S3.docs.find((x) => x.docType === "kicad_sch" && x.path === rel) || S3.docs.find((x) => x.docType === "kicad_sch" && x.path.split("/").pop() === m.file.split("/").pop());
       if (!child2) continue;
-      const nm3 = m.name || m.file.replace(/\.kicad_sch$/, "");
-      await walk2(child2, nm3, sheetPath + nm3 + "/", m.page || "", uuidPath.concat(m.id), m.id, d.docId, depth + 1);
+      const nm4 = m.name || m.file.replace(/\.kicad_sch$/, "");
+      await walk2(child2, nm4, sheetPath + nm4 + "/", m.page || "", uuidPath.concat(m.id), m.id, d.docId, depth + 1);
     }
   };
   const pageKeys = [];
@@ -97035,8 +97094,8 @@ function schVariantNames(docs, pro) {
   for (const d of docs) for (const it of d.items.values()) {
     if (it.kind !== "symbol" && it.kind !== "sheet") continue;
     for (const { variant } of instanceVariants(it.node)) {
-      const nm3 = sexprKid(variant, "name");
-      if (nm3 && sstr(nm3[1])) names2.add(sstr(nm3[1]));
+      const nm4 = sexprKid(variant, "name");
+      if (nm4 && sstr(nm4[1])) names2.add(sstr(nm4[1]));
     }
   }
   const sch = pro.schematic;
@@ -97078,8 +97137,8 @@ function symbolNodeForVariant(node, uuidPath, variant) {
     return segs.length === uuidPath.length + 1 && uuidPath.every((u, i) => segs[i + 1] === u);
   };
   const hit5 = instanceVariants(node).find((e) => here(e.path) && (() => {
-    const nm3 = sexprKid(e.variant, "name");
-    return !!nm3 && sstr(nm3[1]) === variant;
+    const nm4 = sexprKid(e.variant, "name");
+    return !!nm4 && sstr(nm4[1]) === variant;
   })());
   if (!hit5) return null;
   const copy = JSON.parse(JSON.stringify(node));
@@ -97093,9 +97152,9 @@ function symbolNodeForVariant(node, uuidPath, variant) {
     if (k) setFlag(out2, /^(yes|true)$/.test(sstr(k[1])));
   }
   for (const f2 of sexprKids(hit5.variant, "field")) {
-    const nm3 = sexprKid(f2, "name"), val = sexprKid(f2, "value");
-    if (!nm3) continue;
-    const prop2 = copy.find((x) => Array.isArray(x) && x[0] === "property" && sstr(x[1]) === sstr(nm3[1]));
+    const nm4 = sexprKid(f2, "name"), val = sexprKid(f2, "value");
+    if (!nm4) continue;
+    const prop2 = copy.find((x) => Array.isArray(x) && x[0] === "property" && sstr(x[1]) === sstr(nm4[1]));
     if (prop2) prop2[2] = val ? sstr(val[1]) : "";
   }
   return copy;
@@ -103618,8 +103677,8 @@ function widthAdjustLimits(proText) {
     for (const c of classes) if (c && c.name !== "Default" && typeof c.clearance === "number") clearance = Math.min(clearance, c.clearance);
   } catch (e) {
   }
-  const nm3 = 1e-6, r66 = (v) => Math.round(v * 1e6) / 1e6;
-  return [r66(-(minTrack - nm3)), r66(clearance - nm3)];
+  const nm4 = 1e-6, r66 = (v) => Math.round(v * 1e6) / 1e6;
+  return [r66(-(minTrack - nm4)), r66(clearance - nm4)];
 }
 var plotParams = { widthAdjustLimits, readPlotParams, plotParamsText, samePlotParams, defaultPlotParams, lsetHex, lsetNames, fmtHex, parseHex, layerId, layerName, seqStackupForPlotting, allCuNames, dialogLayerSelection, scaleOf, PLOT_FORMAT, DRILL_MARKS };
 
@@ -106706,8 +106765,8 @@ function pinSymOf(sym, col, fileVersion = 0) {
   const hideNums = !!(pnu && (has(pnu, "hide") || kid(pnu, "hide") && str(kid(pnu, "hide")[1]) === "yes"));
   let maxNameHalf = 0;
   for (const sub2 of kids(sym, "symbol")) for (const p of kids(sub2, "pin")) {
-    const nm3 = kid(p, "name");
-    if (nm3 && str(nm3[1]) && (str(nm3[1]) !== "~" || literalTilde)) maxNameHalf = Math.max(maxNameHalf, effectsOf(nm3).size / 2);
+    const nm4 = kid(p, "name");
+    if (nm4 && str(nm4[1]) && (str(nm4[1]) !== "~" || literalTilde)) maxNameHalf = Math.max(maxNameHalf, effectsOf(nm4).size / 2);
   }
   return { nameOff, hideNames, hideNums, maxNameHalf, col, literalTilde };
 }
@@ -112221,9 +112280,9 @@ ${body}
         return `${it.kind === "ellipse" ? "Ellipse" : "Elliptical Arc"}, ${L(v("major_radius"))} x ${L(v("minor_radius"))}`;
       }
       case "group": {
-        const nm3 = kid8(n2, "name") ? str9(kid8(n2, "name")[1]) : str9(n2[1]), m = kid8(n2, "members");
+        const nm4 = kid8(n2, "name") ? str9(kid8(n2, "name")[1]) : str9(n2[1]), m = kid8(n2, "members");
         const cnt = m ? m.length - 1 : 0;
-        return nm3 ? `Group '${nm3}', ${cnt} members` : `Unnamed Group, ${cnt} members`;
+        return nm4 ? `Group '${nm4}', ${cnt} members` : `Unnamed Group, ${cnt} members`;
       }
       default:
         return it.kind;
@@ -114746,8 +114805,8 @@ Link '${target2}' to this file?`)) return null;
           ne = p1;
         }
       }
-      const nm3 = arcMid(cc, ns, ne, ccw);
-      for (const [key3, q4] of [["start", ns], ["mid", nm3], ["end", ne]]) {
+      const nm4 = arcMid(cc, ns, ne, ccw);
+      for (const [key3, q4] of [["start", ns], ["mid", nm4], ["end", ne]]) {
         const kk = kid8(n2, key3);
         kk[1] = r45(q4[0]);
         kk[2] = r45(q4[1]);
@@ -115528,8 +115587,8 @@ Link '${target2}' to this file?`)) return null;
     }
     const fields = /* @__PURE__ */ new Map();
     for (const f2 of kids32(v, "field")) {
-      const nm3 = str22((kid22(f2, "name") || [])[1]);
-      if (nm3) fields.set(nm3, str22((kid22(f2, "value") || [])[1]));
+      const nm4 = str22((kid22(f2, "name") || [])[1]);
+      if (nm4) fields.set(nm4, str22((kid22(f2, "value") || [])[1]));
     }
     return { flags, fields };
   }
@@ -117980,10 +118039,10 @@ Link '${target2}' to this file?`)) return null;
       if (it.kind !== "symbol") continue;
       const values = {};
       for (const p of kids7(it.node, "property")) {
-        const nm3 = str9(p[1]);
-        if (nm3.startsWith("ki_")) continue;
-        values[nm3] = str9(p[2]);
-        if (!fields.includes(nm3)) fields.push(nm3);
+        const nm4 = str9(p[1]);
+        if (nm4.startsWith("ki_")) continue;
+        values[nm4] = str9(p[2]);
+        if (!fields.includes(nm4)) fields.push(nm4);
       }
       rows3.push({ id: it.id, ref: values.Reference || "", values });
     }
@@ -120971,10 +121030,10 @@ var Router = class _Router {
       const l = K11.kid(n2, "layer"), ls = K11.kid(n2, "layers");
       const names2 = l ? [K11.str(l[1])] : ls ? ls.slice(1).map(K11.str) : [];
       const out2 = /* @__PURE__ */ new Set();
-      for (const nm3 of names2) {
-        if (nm3 === "*.Cu" || nm3 === "F&B.Cu") all2.forEach((i) => out2.add(i));
+      for (const nm4 of names2) {
+        if (nm4 === "*.Cu" || nm4 === "F&B.Cu") all2.forEach((i) => out2.add(i));
         else {
-          const i = copper.indexOf(nm3);
+          const i = copper.indexOf(nm4);
           if (i >= 0) out2.add(i);
         }
       }
@@ -121053,7 +121112,7 @@ var Router = class _Router {
     for (const ko of this.opts.keepouts || []) {
       const b = this.cellBox(ko.box);
       if (!b) continue;
-      const ls = ko.layers && ko.layers.length ? ko.layers.map((nm3) => copper.indexOf(nm3)).filter((i) => i >= 0) : all2;
+      const ls = ko.layers && ko.layers.length ? ko.layers.map((nm4) => copper.indexOf(nm4)).filter((i) => i >= 0) : all2;
       for (const l of ls) {
         const m = G5.keep[l] || (G5.keep[l] = new Uint8Array(W12 * H));
         for (let iy = b[1]; iy <= b[3]; iy++) m.fill(1, iy * W12 + b[0], iy * W12 + b[2] + 1);
@@ -121697,7 +121756,7 @@ var Router = class _Router {
     const rank = (this.opts.order || []).indexOf(netKey);
     let allowed = null;
     if (plan2.layers && plan2.layers.length) {
-      allowed = G5.layers.map((nm3) => plan2.layers.includes(nm3));
+      allowed = G5.layers.map((nm4) => plan2.layers.includes(nm4));
       if (!allowed.some(Boolean)) allowed = null;
     }
     const usbData = plan2.maxVias === void 0 && usualImpedance(netKey, true) === 90 && /USB|(^|[\/_(])D[+\-PM]\)?$/i.test(netKey) && !!pairName(netKey);
@@ -124534,7 +124593,7 @@ function openDialog(ctx) {
       if (n2) note(body, `Rule-based line-probe router; its route scoring was fitted on ${n2} hand-routed connections from ${PROVENANCE.boards.length} open hardware boards.`);
     },
     ok() {
-      const layers = layerBoxes.filter(([, c]) => c.checked).map(([nm3]) => nm3);
+      const layers = layerBoxes.filter(([, c]) => c.checked).map(([nm4]) => nm4);
       if (!layers.length) {
         ctx.toast("Autoroute: pick at least one layer");
         return false;
@@ -130835,8 +130894,8 @@ var isDefaultVariant2 = (v) => !v || v.toLowerCase() === DEFAULT_VARIANT.toLower
 function applyFootprintVariant(fp, variant) {
   if (isDefaultVariant2(variant)) return;
   const v = kids(fp.node, "variant").find((x) => {
-    const nm3 = K(x, "name");
-    return !!nm3 && str(nm3[1]) === variant;
+    const nm4 = K(x, "name");
+    return !!nm4 && str(nm4[1]) === variant;
   });
   if (!v) return;
   const flag3 = (key3, own) => {
@@ -130848,8 +130907,8 @@ function applyFootprintVariant(fp, variant) {
   fp.excludeFromPos = flag3("exclude_from_pos_files", fp.excludeFromPos);
   const props = new Map(fp.props);
   for (const f2 of kids(v, "field")) {
-    const nm3 = K(f2, "name"), val = K(f2, "value");
-    if (nm3 && str(nm3[1])) props.set(str(nm3[1]), val ? str(val[1]) : "");
+    const nm4 = K(f2, "name"), val = K(f2, "value");
+    if (nm4 && str(nm4[1])) props.set(str(nm4[1]), val ? str(val[1]) : "");
   }
   fp.props = props;
   fp.value = props.get("Value") || "";
@@ -130857,8 +130916,8 @@ function applyFootprintVariant(fp, variant) {
 function boardVariantNames(variants, cmp2) {
   const names2 = [];
   for (const v of variants ? kids(variants, "variant") : []) {
-    const nm3 = K(v, "name");
-    const s2 = nm3 ? str(nm3[1]) : "";
+    const nm4 = K(v, "name");
+    const s2 = nm4 ? str(nm4[1]) : "";
     if (s2 && !names2.includes(s2)) names2.push(s2);
   }
   return [DEFAULT_VARIANT, ...names2.sort(cmp2)];
@@ -131843,8 +131902,8 @@ function customPolys(shape3) {
           const ux = ((ax * ax + ay * ay) * (by - cy) + (bx * bx + by * by) * (cy - ay) + (cx * cx + cy * cy) * (ay - by)) / d;
           const uy = ((ax * ax + ay * ay) * (cx - bx) + (bx * bx + by * by) * (ax - cx) + (cx * cx + cy * cy) * (bx - ax)) / d;
           const a0 = Math.atan2(ay - uy, ax - ux), am = Math.atan2(by - uy, bx - ux), a1 = Math.atan2(cy - uy, cx - ux);
-          const nm3 = (a) => (a % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
-          pts = arcPoints(ux, uy, Math.hypot(ax - ux, ay - uy), a0, a1, !(nm3(am - a0) <= nm3(a1 - a0)), MAX_ERROR);
+          const nm4 = (a) => (a % (2 * Math.PI) + 2 * Math.PI) % (2 * Math.PI);
+          pts = arcPoints(ux, uy, Math.hypot(ax - ux, ay - uy), a0, a1, !(nm4(am - a0) <= nm4(a1 - a0)), MAX_ERROR);
         }
       } else if (ang) {
         const cx = num(s2[1]), cy = num(s2[2]), sx = num(e[1]), sy = num(e[2]);
@@ -133960,12 +134019,12 @@ var fileFunction2 = (s2, m) => {
   const oblong = s2.holes.some((h3) => h3.slot), round = s2.holes.some((h3) => !h3.slot);
   return t + (oblong && round ? ",Mixed" : oblong ? ",Rout" : ",Drill");
 };
-function gerberDrill(s2, m, ctx, req, date, refOf2) {
+function gerberDrill(s2, m, ctx, req, date, refOf3) {
   const prims = [];
   for (const h3 of toolsOf(s2.holes).sorted) {
     const via = h3.attr === 1 || h3.attr === 2;
     const af = via ? "ViaDrill" : h3.attr === 5 ? "CastellatedDrill" : h3.attr === 6 ? "ComponentDrill,PressFit" : "ComponentDrill";
-    const meta2 = via ? { af } : { af, info: 4, ref: refOf2(h3) };
+    const meta2 = via ? { af } : { af, info: 4, ref: refOf3(h3) };
     if (h3.slot) {
       const half = Math.abs(h3.slot.w - h3.slot.h) / 2, r = h3.slot.rot * Math.PI / 180, along2 = h3.slot.w >= h3.slot.h ? 0 : Math.PI / 2;
       const c = Math.cos(along2 - r) * half, sn = Math.sin(along2 - r) * half;
@@ -134195,7 +134254,7 @@ function drillJob(ctx, req) {
   const gerber = req.format === "gerber";
   const refs = /* @__PURE__ */ new Map();
   for (const fp of m.footprints) for (const p of fp.pads) refs.set(`${p.x.toFixed(4)},${p.y.toFixed(4)}`, fp.ref);
-  const refOf2 = (h3) => refs.get(`${h3.x.toFixed(4)},${h3.y.toFixed(4)}`) || "";
+  const refOf3 = (h3) => refs.get(`${h3.x.toFixed(4)},${h3.y.toFixed(4)}`) || "";
   const sp = spans(m, board3, req.merge, gerber);
   if (req.genDrill) {
     if (!gerber) {
@@ -134229,7 +134288,7 @@ function drillJob(ctx, req) {
       if (!s2.holes.length) continue;
       if (req.genDrill) {
         const n2 = s2.name;
-        files.push({ name: n2, path: path2(n2), data: gerberDrill(s2, m, ctx, req, date, refOf2) });
+        files.push({ name: n2, path: path2(n2), data: gerberDrill(s2, m, ctx, req, date, refOf3) });
         report3.push({ severity: "action", text: `Created file '${path2(n2)}'.` });
       }
       if (s2.npth) continue;
@@ -137832,9 +137891,9 @@ function writeOdb(m, setup, o) {
     if (s2[0] === "-" && !/[1-9]/.test(s2)) s2 = s2.slice(1);
     return s2;
   };
-  const nm3 = (mm4) => Math.round(mm4 * 1e6);
-  const data = (mm4) => fix(nm3(mm4) * scale / 1e6);
-  const sym = (mm4) => fix(nm3(mm4) * scale / 1e3);
+  const nm4 = (mm4) => Math.round(mm4 * 1e6);
+  const data = (mm4) => fix(nm4(mm4) * scale / 1e6);
+  const sym = (mm4) => fix(nm4(mm4) * scale / 1e3);
   const [ox, oy] = o.origin === "aux" ? m.settings.auxOrigin : o.origin === "grid" ? m.settings.gridOrigin : [0, 0];
   const X2 = (x) => data(x - ox), Y = (y) => data(oy - y);
   let maxUid = 0;
@@ -138898,20 +138957,20 @@ function d356(m, o) {
   }
   for (const c of canonCount.keys()) taken.add(c);
   const names2 = [...map.keys()].sort();
-  for (const nm3 of names2) {
-    const c = sanitize(nm3, true);
-    if (c.length <= 14 && c !== NC && canonCount.get(c) === 1) map.set(nm3, c);
+  for (const nm4 of names2) {
+    const c = sanitize(nm4, true);
+    if (c.length <= 14 && c !== NC && canonCount.get(c) === 1) map.set(nm4, c);
   }
   let ai = 0;
-  for (const nm3 of names2) {
-    if (map.get(nm3)) continue;
+  for (const nm4 of names2) {
+    if (map.get(nm4)) continue;
     let c;
     do {
       c = alias(ai++);
     } while (taken.has(c));
     taken.add(c);
-    map.set(nm3, c);
-    out2 += `P  NNAME${pad(c, 5)} ${pad(sanitize(nm3, false).slice(-58), 66)}
+    map.set(nm4, c);
+    out2 += `P  NNAME${pad(c, 5)} ${pad(sanitize(nm4, false).slice(-58), 66)}
 `;
   }
   const sig = (r) => r.netname ? map.get(r.netname) : NC;
@@ -139312,7 +139371,7 @@ function writeIpc2581(m, setup, o) {
   };
   const bySeq = (a, b) => layerId3(a) - layerId3(b);
   const layerOk = (l) => (isCopper(l) ? m.copper.includes(l) : !o.layers.length || o.layers.includes(l)) && layerIncluded(l);
-  const nm3 = (v) => Math.round(v * 1e6);
+  const nm4 = (v) => Math.round(v * 1e6);
   const padstackNames = /* @__PURE__ */ new Map(), pkgStacks = [], featStacks = [];
   let stackList = pkgStacks;
   const register = (def) => {
@@ -139331,7 +139390,7 @@ function writeIpc2581(m, setup, o) {
     const def = new X("PadStackDef"), dr = p.drill;
     if (dr && dr.w > 0 && !(dr.oval && Math.abs(dr.w - dr.h) > 1e-9)) {
       const dh = dr.h > 0 ? dr.h : dr.w, off = padShapeOn(p, "F.Cu", m.copper).offset;
-      xy(def.add("PadstackHoleDef").a("name", `${p.type === "thru_hole" ? "PTH" : "NPTH"}${nm3(dr.w)}_${nm3(dh)}`).a("diameter", fv(Math.min(dr.w, dh))).a("platingStatus", p.type === "thru_hole" ? "PLATED" : "NONPLATED").a("plusTol", "0.0").a("minusTol", "0.0"), off[0], off[1]);
+      xy(def.add("PadstackHoleDef").a("name", `${p.type === "thru_hole" ? "PTH" : "NPTH"}${nm4(dr.w)}_${nm4(dh)}`).a("diameter", fv(Math.min(dr.w, dh))).a("platingStatus", p.type === "thru_hole" ? "PLATED" : "NONPLATED").a("plusTol", "0.0").a("minusTol", "0.0"), off[0], off[1]);
     }
     for (const l of [...p.layers].sort(bySeq)) {
       if (!layerOk(l)) continue;
@@ -139350,7 +139409,7 @@ function writeIpc2581(m, setup, o) {
   };
   const viaStack = (v) => {
     const def = new X("PadStackDef");
-    def.add("PadstackHoleDef").a("name", `PH${nm3(v.drill)}`).a("diameter", fv(v.drill)).a("platingStatus", "VIA").a("plusTol", "0.0").a("minusTol", "0.0").a("x", "0.0").a("y", "0.0");
+    def.add("PadstackHoleDef").a("name", `PH${nm4(v.drill)}`).a("diameter", fv(v.drill)).a("platingStatus", "VIA").a("plusTol", "0.0").a("minusTol", "0.0").a("x", "0.0").a("y", "0.0");
     const ls = [...v.layers];
     if (!(v.tentFront ?? m.settings.tentFront) && ls.includes("F.Cu")) ls.push("F.Mask");
     if (!(v.tentBack ?? m.settings.tentBack) && ls.includes("B.Cu")) ls.push("B.Mask");
@@ -140580,8 +140639,8 @@ function survey(doc2, P, k) {
         }
         const cp2 = k.kid(ko, "copperpour");
         const kv = k.kid(ko, "vias");
-        const nm3 = k.kid(n2, "name");
-        keepouts.push({ box: [a, b, c, d], layers, copper: !!cp2 && k.str(cp2[1]) === "not_allowed", vias: !kv || k.str(kv[1]) === "not_allowed", name: nm3 ? k.str(nm3[1]) : "" });
+        const nm4 = k.kid(n2, "name");
+        keepouts.push({ box: [a, b, c, d], layers, copper: !!cp2 && k.str(cp2[1]) === "not_allowed", vias: !kv || k.str(kv[1]) === "not_allowed", name: nm4 ? k.str(nm4[1]) : "" });
       } else {
         zones++;
         const nn = k.kid(n2, "net_name");
@@ -142278,9 +142337,9 @@ function reviewCircuit(c) {
       if (c1.length && c2.length) {
         const n1 = pinNet(c1[0]), n2 = pinNet(c2[0]);
         if (n1 && n1 === n2) cc.push(`${p.ref}: CC1 and CC2 are joined (${n1}); each needs its own resistor, or a cable with a chip in it shorts them and no power arrives`);
-        for (const [nm3, n3] of [["CC1", n1], ["CC2", n2]]) {
+        for (const [nm4, n3] of [["CC1", n1], ["CC2", n2]]) {
           if (!n3) {
-            cc.push(`${p.ref}.${nm3} is not connected; without its resistor a USB-C to USB-C cable supplies nothing`);
+            cc.push(`${p.ref}.${nm4} is not connected; without its resistor a USB-C to USB-C cable supplies nothing`);
             continue;
           }
           if ((netPins.get(n3) || []).some((q4) => {
@@ -142290,16 +142349,16 @@ function reviewCircuit(c) {
           const rs = across(n3, isR);
           const down = rs.filter((x) => isGround2(x.far)), up = rs.filter((x) => supplyNets.has(x.far) && !isGround2(x.far));
           if (!down.length && !up.length) {
-            cc.push(`${p.ref}.${nm3} (${n3}) has no resistor: 5.1k to ground makes it a device that takes power, 56k, 22k or 10k to VBUS a source`);
+            cc.push(`${p.ref}.${nm4} (${n3}) has no resistor: 5.1k to ground makes it a device that takes power, 56k, 22k or 10k to VBUS a source`);
             continue;
           }
           for (const x of down) {
             const v = ohms(x.part.value);
-            if (v !== null && Math.abs(v - 5100) > 5100 * 0.06) ccVal.push(`${p.ref}.${nm3}: ${x.part.ref} is ${x.part.value}; a device's pull-down is 5.1k`);
+            if (v !== null && Math.abs(v - 5100) > 5100 * 0.06) ccVal.push(`${p.ref}.${nm4}: ${x.part.ref} is ${x.part.value}; a device's pull-down is 5.1k`);
           }
           for (const x of up) {
             const v = ohms(x.part.value);
-            if (v !== null && ![56e3, 22e3, 1e4].some((t) => Math.abs(v - t) <= t * 0.06)) ccVal.push(`${p.ref}.${nm3}: ${x.part.ref} is ${x.part.value}; a source's pull-up is 56k (default current), 22k (1.5 A) or 10k (3 A) to 5 V`);
+            if (v !== null && ![56e3, 22e3, 1e4].some((t) => Math.abs(v - t) <= t * 0.06)) ccVal.push(`${p.ref}.${nm4}: ${x.part.ref} is ${x.part.value}; a source's pull-up is 56k (default current), 22k (1.5 A) or 10k (3 A) to 5 V`);
           }
         }
       }
