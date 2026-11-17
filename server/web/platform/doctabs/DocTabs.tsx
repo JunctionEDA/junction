@@ -301,7 +301,7 @@ export function DocTabs() {
         onClick={(ev) => { ev.stopPropagation(); unhover(); if (id !== current) dispatch({ type: "openDoc", docId: id }); }}
         onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); ev.stopPropagation(); dispatch({ type: "openDoc", docId: id }); } }}
         onPointerDown={(ev) => ev.stopPropagation()} onDoubleClick={(ev) => ev.stopPropagation()}
-        onPointerEnter={(ev) => hover(on ? undefined : thumbDoc, ev)} onPointerLeave={unhover}>
+        onPointerEnter={(ev) => hover(thumbDoc, ev)} onPointerLeave={unhover}>
         <span className="truncate">{label}</span>
         <TabPeople people={people} />
       </div>
@@ -372,7 +372,7 @@ export function DocTabs() {
           onDoubleClick={() => { window.clearTimeout(openTimer.current); startRename(e); }}
           onContextMenu={(ev) => { ev.preventDefault(); const r = ev.currentTarget.getBoundingClientRect(); tabMenu(e, { x: ev.clientX, y: r.top - 4, top: r.top }); }}
           onPointerDown={(ev) => beginDrag(e, ev)}
-          onPointerEnter={(ev) => hover(on ? undefined : thumbDoc, ev)} onPointerLeave={unhover}>
+          onPointerEnter={(ev) => hover(thumbDoc, ev)} onPointerLeave={unhover}>
           <Glyph svg={e.icon} className={tint} />
           {renaming === e.key
             ? <input autoFocus className="input h-5 w-36" defaultValue={e.name} aria-label="Document name" maxLength={80} onClick={(ev) => ev.stopPropagation()} onPointerDown={(ev) => ev.stopPropagation()} onDoubleClick={(ev) => ev.stopPropagation()}
