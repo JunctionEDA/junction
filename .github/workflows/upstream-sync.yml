@@ -365,42 +365,50 @@ jobs:
             echo "master moved while the merge was being built; started the sync again (run $((ATTEMPT + 1)) of 5)." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           }
-          git fetch -q origin master
-          tip=$(git rev-parse FETCH_HEAD)
-          if [ "$tip" != "$BASE" ]; then
-            # master moved while the builds ran.  Changes that cannot alter the desktop
-            # that was just tested are merged in; anything else is built again.
-            moved=$(git diff --name-only "$BASE" "$tip")
-            safe='^(\.github/|docs/|tools/upstream-sync/|server/|[^/]*\.md$)'
-            if echo "$moved" | grep -qvE "$safe"; then
-              restart "master changed desktop code: $(echo "$moved" | grep -vE "$safe" | head -5 | tr '\n' ' ')"
-            fi
-            if echo "$moved" | grep -q '^server/' && ! git diff --quiet "$BASE" HEAD -- server; then
-              # Both sides changed the web editor.  The sync only touched it to regenerate
-              # tables from the C++ tree, so take master's web editor as it is and regenerate
-              # them here; nothing the desktop builds tested depends on server/.  (Restarting
-              # the whole 3.5 h run instead never finished: master's web code moves daily.)
-              git merge -q --no-commit "$tip" || true
-              git checkout -q "$tip" -- server
-              if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
-                git merge --abort
-                restart "the new master does not merge cleanly: outside server/"
+          # Master can move again while the web editor is rebuilt here: merge that in too
+          # instead of restarting the whole run (a few tries).
+          pushed=false
+          for try in 1 2 3 4 5; do
+            git fetch -q origin master
+            tip=$(git rev-parse FETCH_HEAD)
+            if [ "$tip" != "$BASE" ]; then
+              # master moved while the builds ran.  Changes that cannot alter the desktop
+              # that was just tested are merged in; anything else is built again.
+              moved=$(git diff --name-only "$BASE" "$tip")
+              safe='^(\.github/|docs/|tools/upstream-sync/|server/|[^/]*\.md$)'
+              if echo "$moved" | grep -qvE "$safe"; then
+                restart "master changed desktop code: $(echo "$moved" | grep -vE "$safe" | head -5 | tr '\n' ' ')"
               fi
-              git commit -q --no-edit
-              if sh tools/upstream-sync/regen_web.sh web-regen.log; then
-                if ! git diff --quiet -- server; then
-                  git add -A server
-                  git commit -q -m "Web editor: tables regenerated from the merged KiCad sources"
+              if echo "$moved" | grep -q '^server/' && ! git diff --quiet "$BASE" HEAD -- server; then
+                # Both sides changed the web editor.  The sync only touched it to regenerate
+                # tables from the C++ tree, so take master's web editor as it is and regenerate
+                # them here; nothing the desktop builds tested depends on server/.  (Restarting
+                # the whole 3.5 h run instead never finished: master's web code moves daily.)
+                git merge -q --no-commit "$tip" || true
+                git checkout -q "$tip" -- server
+                if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+                  git merge --abort
+                  restart "the new master does not merge cleanly: outside server/"
+                fi
+                git commit -q --no-edit
+                if sh tools/upstream-sync/regen_web.sh web-regen.log; then
+                  if ! git diff --quiet -- server; then
+                    git add -A server
+                    git commit -q -m "Web editor: tables regenerated from the merged KiCad sources"
+                  fi
+                else
+                  echo "::warning::The regenerated tables do not pass the web checks on the new master; the web editor keeps master's tables."
                 fi
               else
-                echo "::warning::The regenerated tables do not pass the web checks on the new master; the web editor keeps master's tables."
+                git merge -q --no-edit "$tip" || restart "the new master does not merge cleanly"
               fi
-            else
-              git merge -q --no-edit "$tip" || restart "the new master does not merge cleanly"
             fi
-          fi
-          git log -1 --format='%h %an <%ae> | %cn <%ce> | %s'
-          git push origin HEAD:refs/heads/master || restart "master moved again during the push"
+            git log -1 --format='%h %an <%ae> | %cn <%ce> | %s'
+            if git push origin HEAD:refs/heads/master; then pushed=true; break; fi
+            echo "master moved during the push (try $try); merging it in again"
+            BASE=$tip
+          done
+          [ "$pushed" = true ] || restart "master moved again during the push five times"
           echo "master=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           echo "result=pushed" >> "$GITHUB_OUTPUT"
           git push origin --delete "$SYNC_BRANCH" || true

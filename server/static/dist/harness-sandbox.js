@@ -2515,6 +2515,54 @@ class Board(_Doc):
         self.project.note(f"board: freed boxed-in pins, open connections {before} -> {after}")
         return {"before": before, "after": after, "tried": tried, **({"not_tried": skipped} if skipped else {})}
 
+    @contextlib.contextmanager
+    def trial(self):
+        """Try something and keep it only if it helped: inside \`with board.trial() as t:\` change the copper as you like,
+        then set \`t.keep = True\` when the result is better; otherwise every track and via goes back exactly as it was
+        when the block began (an exception puts it back too).  Parts, zones and rules are not tracked.
+            with board.trial() as t:
+                board.unroute(near="U4.20", radius=2)
+                board.route(nets=list(board.unrouted()), fill=False, time_s=30)
+                t.keep = board.info()["unrouted_connections"] < before"""
+        class _T:
+            keep = False
+        t = _T()
+        self.flush()
+        snap = {it["id"]: it["sexpr"] for it in self._all_items(["segment", "arc", "via"]) if "more characters" not in it.get("sexpr", "")}
+        try:
+            yield t
+        except BaseException:
+            t.keep = False
+            raise
+        finally:
+            self.flush()
+            if not t.keep:
+                now = {it["id"] for it in self._all_items(["segment", "arc", "via"])}
+                for i in now - set(snap):
+                    self._edit({"op": "remove", "id": i})
+                for i in set(snap) - now:
+                    self.add_item(snap[i])
+                self.flush()
+
+    def _all_items(self, kinds, **filt) -> list:
+        """Every item of these kinds, page by page (get_items returns at most 150 at a time)."""
+        out = []
+        while True:
+            r = self._call("get_items", kinds=list(kinds), offset=len(out), **filt)
+            got = r.get("items", [])
+            out += got
+            if not got or len(out) >= r.get("count", 0):
+                return out
+
+    def _net_names(self) -> dict:
+        names = {}
+        with contextlib.suppress(OSError):
+            folder = getattr(self.project, "folder", None)
+            if folder:
+                with open(os.path.join(folder, self.path)) as fh:
+                    names = dict(re.findall(r'\\(net (\\d+) "((?:[^"\\\\]|\\\\.)*)"\\)', fh.read()))
+        return names
+
     def fix_corners(self, passes: int = 3) -> int:
         """Cut every square or sharper track corner the rules check reports (track_right_angle) into 45\xB0 bends: the two
         segments that meet there are laid again as one track through the same three points, which add_track chamfers.
@@ -6327,6 +6375,8 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
 
     fanout=True escapes every fine-pitch chip (20 pins or more, 0.65 mm pitch or finer) to a staggered ring of vias
     before routing (board.fanout): for a dense QFN whose pins are left open because neighbouring tracks box them in.
+    fanout={"U4": [nets]} drops only those pins to a via straight out (radial, rows staggered), the way the person's
+    boards do it: name the pins whose other end lies behind the chip or across the other escapes.
 
     reroute=True lays only the copper again on a board somebody placed: every track and via comes up, and the parts,
     the outline, the zones, the rules, the stackup and the silkscreen stay exactly as they are (no sync from the
@@ -6451,7 +6501,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         if fanout:      # fine-pitch chips escaped to a via ring first, the way they are by hand
             for part in self.geometry()["parts"]:
                 if (part["ref"] in fanout) if isinstance(fanout, dict) else len([q for q in part["pads"] if q[0]]) >= 20:
-                    fo = step(f"fanout {part['ref']}", lambda ref=part["ref"]: self.fanout(ref, nets=fanout.get(ref) if isinstance(fanout, dict) else None))
+                    fo = step(f"fanout {part['ref']}", lambda ref=part["ref"]: self.fanout(ref, nets=fanout.get(ref), style="radial") if isinstance(fanout, dict) else self.fanout(ref))
                     if fo and fo.get("vias"):
                         out.setdefault("fanout", {})[part["ref"]] = {"vias": fo["vias"], "skipped": len(fo.get("skipped") or {})}
         auto_layers = False
