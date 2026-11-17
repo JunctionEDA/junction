@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { cx } from "../../../shared/util";
 import { bomCsv, type BomRow } from "../services/bom";
 import { readBom } from "../services/bom-sources";
-import { mountFloating, partSourcesOf } from "../services/interference-view";
+import { partSourcesOf, ready } from "../services/interference-view";
 import type { AssemblyEditor } from "../ui/assembly";
 
 const stem = (p: string) => (p.split("/").pop() || p).replace(/\.[^.]+$/, "");
@@ -16,27 +16,25 @@ function download(name: string, text: string): void {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-function Bom({ a, close }: { a: AssemblyEditor; close(): void }) {
+function Bom({ a }: { a: AssemblyEditor }) {
   const [state, setState] = useState<"reading" | "done" | "error">("reading");
   const [rows, setRows] = useState<BomRow[]>([]);
   const [error, setError] = useState("");
   const [src] = useState(() => partSourcesOf(a));
   const read = async () => {
     setState("reading"); setError("");
-    try { setRows(await readBom(a.getState().instances, a.host.docs, src.sources)); setState("done"); }
+    try { await ready(a); setRows(await readBom(a.getState().instances, a.host.docs, src.sources)); setState("done"); }
     catch (e) { setError(e instanceof Error ? e.message : String(e)); setState("error"); }
   };
   useEffect(() => { void read(); return () => src.release(); }, []);   // eslint-disable-line react-hooks/exhaustive-deps
   const parts = rows.filter((r) => r.kind !== "component").reduce((n, r) => n + r.quantity, 0);
   const electronic = rows.filter((r) => r.kind === "component").reduce((n, r) => n + r.quantity, 0);
   return (
-    <div className="asm-bom absolute left-2 right-2 top-2 z-[3] max-h-[85%] flex flex-col rounded-sm border border-line bg-panel text-sm shadow-panel" data-state={state} role="dialog" aria-label="Bill of materials">
-      <header className="flex items-center gap-1 h-7 px-2 border-b border-line font-semibold text-ink">
-        <span className="flex-1">Bill of materials</span>
-        <span className="text-xs font-normal text-ink-2 mr-2">{state === "done" ? `${parts} parts${electronic ? `, ${electronic} electronic parts` : ""}` : ""}</span>
+    <div className="asm-bom flex flex-col min-h-0 h-full text-sm" data-state={state}>
+      <header className="flex flex-none items-center gap-1 h-7 px-2 border-b border-line text-ink">
+        <span className="flex-1 text-xs text-ink-2">{state === "done" ? `${parts} parts${electronic ? `, ${electronic} electronic parts` : ""}` : ""}</span>
         <button type="button" className="btn sm h-5 px-1.5" disabled={state !== "done"} onClick={() => download(`${stem(a.host.doc.path)} BOM.csv`, bomCsv(rows))}>Export CSV</button>
         <button type="button" className="btn sm ghost h-5 px-1" onClick={() => void read()} disabled={state === "reading"}>Refresh</button>
-        <button type="button" className="btn sm ghost h-5 px-1" aria-label="Close" onClick={close}>×</button>
       </header>
       <div className="overflow-auto">
         {state === "reading" ? <p className="note m-0 p-2 text-xs">Reading the parts and boards…</p> : null}
@@ -70,4 +68,7 @@ function Bom({ a, close }: { a: AssemblyEditor; close(): void }) {
   );
 }
 
-export function openBom(a: AssemblyEditor): void { mountFloating(a, "bom", (close) => <Bom a={a} close={close} />); }
+export function openBom(a: AssemblyEditor): void {
+  // a wide table: docked under the viewport (ui/AssemblyView.tsx)
+  a.showPanel({ id: "bom", title: "Bill of materials", side: "bottom", render: (x) => <Bom key={x.host.doc.docId} a={x} /> });
+}

@@ -7,7 +7,8 @@
 // To add a kind (a board, a STEP file): write `sources/<kind>.ts`, add it to the list in manager.ts, and give
 // every piece a mesh in the mechanical domain's BodyMesh form with stable names for its faces, edges and
 // vertices.  Those names are what mates store, so they must survive a rebuild of the source.
-import type { BodyMesh, KernelClient } from "../../mechanical/api";
+import type { BoardDelta, BoardReader, BodyMesh, KernelClient } from "../../mechanical/api";
+import type { ItemDoc } from "../../../shared/itemdoc/itemdoc";
 import type { InstanceSource, Transform } from "../document/format";
 
 /** One rigid piece of geometry a source offers: a body of a part studio, a part inside a sub-assembly. */
@@ -19,6 +20,13 @@ export interface SourcePiece {
   mesh: BodyMesh;
   /** where the piece sits in the source's own space; null is "where the mesh already is" */
   transform: Transform | null;
+  /**
+   * The piece is not drawn as a solid: something else draws what it stands for (a board's picture,
+   * viewport/boards.ts).  It is still there for the pointer, for connectors and for analysis.
+   */
+  ghost?: boolean;
+  /** a body that is in its part studio to be referred to, not as a part (a Board feature's board): not counted as "the part" of a studio */
+  reference?: boolean;
 }
 
 export interface SourceSnapshot {
@@ -35,8 +43,17 @@ export interface SourceHandle {
   snapshot(): SourceSnapshot;
   /** the worker that holds this document's B-rep, when the kind has one and it is running (analysis tools) */
   kernel?(): KernelClient | null;
+  /**
+   * The worker that holds this document's B-rep, built now if it is not (the editor drew the part from its
+   * cache, or the worker was retired).  What an analysis tool calls before asking the worker about bodies.
+   */
+  ensureKernel?(): Promise<KernelClient | null>;
+  /** the source document itself, when it is an item document (a part studio): its materials, its names */
+  doc?(): ItemDoc | null;
   /** the document as worker input, for a tool that wants to rebuild it in a worker of its own */
   features?(): { features: unknown[]; rollback: number } | null;
+  /** a board source: the board as read, and its changes as they arrive (`null`: everything), for its picture */
+  board?(): { reader(): BoardReader | null; subscribe(fn: (delta: BoardDelta | null) => void): () => void; measured(): void } | null;
   close(): void;
 }
 
@@ -50,7 +67,7 @@ export interface SourceEnv {
   open(kind: InstanceSource["kind"], docId: string, changed: () => void): SourceHandle;
 }
 
-export interface SourceOffer { source: InstanceSource; name: string }
+export interface SourceOffer { source: InstanceSource; name: string; /** where a new instance of it goes (the editor decides when absent) */ transform?: Transform }
 
 export interface SourceProvider {
   kind: InstanceSource["kind"];

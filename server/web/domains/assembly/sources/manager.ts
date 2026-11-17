@@ -24,7 +24,7 @@ export class SourceManager {
   /** `self` is the assembly being edited: it may not contain itself.  `changed` is called (once per tick) when any source changed. */
   constructor(private readonly self: string, private readonly signedIn: boolean, private readonly changed: () => void) {
     const list: SourceProvider[] = [];
-    list.push(partSource(this.kernels), subAssemblySource(() => list), boardSource());
+    list.push(partSource(this.kernels), subAssemblySource(() => list), boardSource(this.kernels));
     this.providers = list;
     this.kernels.onActivity = () => this.notify();
   }

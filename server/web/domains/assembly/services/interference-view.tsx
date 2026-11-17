@@ -3,7 +3,6 @@
 // viewport in the error colour, and measures the clearance between two chosen instances.  Thin: the logic is in
 // interference.ts and interference-sources.ts.
 import { useEffect, useState } from "react";
-import { createRoot, type Root } from "react-dom/client";
 import * as THREE from "three";
 import { tokenColor } from "../../../shared/viewport3d/viewport3d";
 import { cx } from "../../../shared/util";
@@ -15,33 +14,13 @@ const fmt = (v: number, places = 3) => { const s = v.toFixed(places); return s.i
 
 interface Shared { sources: PartSources; users: number }
 const shared = new WeakMap<AssemblyEditor, Shared>();
-/** The part sources of an assembly, shared by its Interference and Bill of materials windows. */
+/** The part sources of an assembly (its own handles and workers), shared by its Interference and Bill of materials panels. */
 export function partSourcesOf(a: AssemblyEditor): { sources: PartSources; release(): void } {
   let s = shared.get(a);
-  if (!s) {
-    s = { sources: new PartSources(a.host.signedIn), users: 0 };
-    shared.set(a, s);
-    // the workers stop with the assembly
-    const close = a.close.bind(a), mine = s;
-    a.close = () => { mine.sources.dispose(); shared.delete(a); close(); };
-  }
+  if (!s) { s = { sources: new PartSources(a), users: 0 }; shared.set(a, s); }
   s.users++;
   const me = s;
   return { sources: s.sources, release: () => { if (--me.users <= 0) { me.sources.dispose(); shared.delete(a); } } };
-}
-
-/** A floating window in the assembly's viewport, mounted once per assembly and id. */
-const mounted = new WeakMap<AssemblyEditor, Map<string, { el: HTMLElement; root: Root }>>();
-export function mountFloating(a: AssemblyEditor, id: string, render: (close: () => void) => JSX.Element): void {
-  let m = mounted.get(a); if (!m) { m = new Map(); mounted.set(a, m); }
-  const old = m.get(id);
-  if (old) { old.root.unmount(); old.el.remove(); m.delete(id); }
-  const el = document.createElement("div");
-  a.viewport.host.appendChild(el);
-  const root = createRoot(el);
-  const close = () => { root.unmount(); el.remove(); m!.delete(id); };
-  m.set(id, { el, root });
-  root.render(render(close));
 }
 
 class ClashDrawing {
@@ -97,10 +76,13 @@ function Interference({ a, close }: { a: AssemblyEditor; close(): void }) {
   const run = async () => {
     setState("running"); setError(""); setGap(null);
     try {
-      const { shapes, skipped } = await src.sources.shapes(a.getState().instances);
+      await ready(a);
+      const { shapes, skipped } = await src.sources.shapes();
       const r = await checkInterference(shapes, src.sources.call, { mesh: true });
-      setClashes(r.clashes); setInfo({ parts: shapes.length, candidates: r.candidates, ms: r.ms, skipped });
+      setClashes(r.clashes); setInfo({ parts: new Set(shapes.map((x) => x.instance)).size, candidates: r.candidates, ms: r.ms, skipped });
       drawing.draw(r.clashes, null);
+      // the instances that clash are tinted where they are drawn
+      a.scene.setMarked(new Set(r.clashes.flatMap((c) => [c.a, c.b])));
       setState("done");
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); setState("error"); }
   };
@@ -108,25 +90,24 @@ function Interference({ a, close }: { a: AssemblyEditor; close(): void }) {
     if (!pair[0] || !pair[1] || pair[0] === pair[1]) return;
     setMeasuring(true); setError("");
     try {
-      const { shapes } = await src.sources.shapes(a.getState().instances.filter((i) => i.id === pair[0] || i.id === pair[1]));
+      const { shapes, skipped } = await src.sources.shapes(new Set(pair));
       const sa = shapes.find((s) => s.instance === pair[0]), sb = shapes.find((s) => s.instance === pair[1]);
-      if (!sa || !sb) throw new Error("Clearance is measured between part instances.");
+      if (!sa || !sb) throw new Error(skipped.length ? `${name(skipped[0].instance)}: ${skipped[0].why}.` : "Clearance is measured between parts.");
       const g = await clearance(sa, sb, src.sources.call);
       setGap(g); drawing.draw(clashes, g);
     } catch (e) { setError(e instanceof Error ? e.message : String(e)); }
     setMeasuring(false);
   };
-  useEffect(() => { void run(); return () => { drawing.dispose(); src.release(); }; }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { void run(); return () => { drawing.dispose(); a.scene.setMarked([]); src.release(); }; }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const parts = instances.filter((i) => !i.suppressed && i.source.kind === "part");
+  const parts = instances.filter((i) => !i.suppressed && (i.source.kind === "part" || i.source.kind === "board"));
   return (
-    <div className="asm-interference absolute left-2 top-2 z-[3] w-72 max-h-[80%] flex flex-col rounded-sm border border-line bg-panel text-sm shadow-panel" data-state={state} role="dialog" aria-label="Interference">
-      <header className="flex items-center gap-1 h-7 px-2 border-b border-line font-semibold text-ink">
-        <span className="flex-1">Interference</span>
-        <button type="button" className="btn sm ghost h-5 px-1" onClick={() => void run()} disabled={state === "running"}>Check again</button>
-        <button type="button" className="btn sm ghost h-5 px-1" aria-label="Close" onClick={close}>×</button>
-      </header>
-      <div className="overflow-y-auto p-2 flex flex-col gap-1.5">
+    <div className="asm-interference flex flex-col text-sm" data-state={state}>
+      <div className="p-2 flex flex-col gap-1.5">
+        <div className="flex items-center gap-1">
+          <span className="flex-1 text-xs text-ink-2">{state === "running" ? "Checking…" : clashes.length ? `${clashes.length} ${clashes.length === 1 ? "clash" : "clashes"}` : ""}</span>
+          <button type="button" className="btn sm h-6" data-act="check" onClick={() => void run()} disabled={state === "running"}>Check again</button>
+        </div>
         {state === "running" ? <p className="note m-0 text-xs">Checking the parts against each other…</p> : null}
         {state === "error" || error ? <p className="m-0 text-xs text-err">{error}</p> : null}
         {state === "done" ? (
@@ -135,7 +116,8 @@ function Interference({ a, close }: { a: AssemblyEditor; close(): void }) {
             {clashes.length ? (
               <ul className="m-0 p-0 list-none flex flex-col" aria-label="Clashes">
                 {clashes.map((c) => (
-                  <li key={`${c.a}|${c.b}`} data-clash={`${c.a}|${c.b}`} data-volume={c.volume ?? ""} className="flex items-center gap-2 h-6 text-xs">
+                  <li key={`${c.a}|${c.b}`} data-clash={`${c.a}|${c.b}`} data-volume={c.volume ?? ""} className="flex items-center gap-2 h-6 text-xs cursor-default hover:bg-sel-soft" title="Select the two parts"
+                    onClick={() => { a.select([c.a, c.b]); drawing.draw([c], null); }}>
                     <span className="w-2 h-2 rounded-full bg-err flex-none" aria-hidden="true" />
                     <span className="flex-1 truncate text-ink">{clashTitle(c, name)}</span>
                     <span className="mono text-ink-2">{c.volume === null ? c.error : `${fmt(c.volume)} mm³`}</span>
@@ -143,6 +125,7 @@ function Interference({ a, close }: { a: AssemblyEditor; close(): void }) {
                 ))}
               </ul>
             ) : <p className="m-0 text-xs text-ink">No parts overlap.</p>}
+            {clashes.length > 1 ? <button type="button" className="btn sm ghost self-start h-6" onClick={() => drawing.draw(clashes, null)}>Show all</button> : null}
             {info.skipped.length ? <p className="note m-0 text-xs">Not checked: {info.skipped.map((s) => `${name(s.instance)} (${s.why})`).join(", ")}</p> : null}
           </>
         ) : null}
@@ -164,4 +147,13 @@ function Interference({ a, close }: { a: AssemblyEditor; close(): void }) {
   );
 }
 
-export function openInterference(a: AssemblyEditor): void { mountFloating(a, "interference", (close) => <Interference a={a} close={close} />); }
+/** Wait until every instance has been built (the editor says how many are on their way). */
+export async function ready(a: AssemblyEditor, ms = 120000): Promise<void> {
+  const until = Date.now() + ms;
+  while (Date.now() < until && (a.getState().building > 0 || a.placed().some((p) => p.status === "loading"))) await new Promise((r) => setTimeout(r, 100));
+}
+
+export function openInterference(a: AssemblyEditor): void {
+  // a panel docked at the right of the assembly (ui/AssemblyView.tsx); closing it clears the marks
+  a.showPanel({ id: "interference", title: "Interference", side: "right", render: (x) => <Interference key={x.host.doc.docId} a={x} close={() => x.closePanel("interference")} /> });
+}

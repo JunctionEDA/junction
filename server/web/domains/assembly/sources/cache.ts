@@ -6,7 +6,7 @@
 // full disk or a private window just mean the kernel runs.
 import type { BodyMesh } from "../../mechanical/api";
 
-export interface CachedBody { id: string; name: string; mesh: BodyMesh }
+export interface CachedBody { id: string; name: string; mesh: BodyMesh; reference?: boolean }
 interface Entry { hash: string; bodies: CachedBody[]; at: number }
 
 const DB = "junction-cad", STORE = "part-meshes";

@@ -65,7 +65,8 @@ export function InsertDialog({ assembly }: { assembly: AssemblyEditor }) {
   useEffect(() => {
     // take the newly opened ones before letting any go, so a document that stays open is never closed and reopened
     const want = new Map<string, [InstanceSource["kind"], string]>();
-    if (active) for (const g of docs) for (const d of g.docs) if (open.has(d.docId) && !g.provider.unavailable()) want.set(g.provider.kind + ":" + d.docId, [g.provider.kind, d.docId]);
+    // (a kind with one offer per document, a board, is read while the dialog is open: Insert then knows where it belongs)
+    if (active) for (const g of docs) for (const d of g.docs) if ((open.has(d.docId) || !g.provider.offersAll) && !g.provider.unavailable()) want.set(g.provider.kind + ":" + d.docId, [g.provider.kind, d.docId]);
     for (const [k, [kind, id]] of want) if (!held.current.has(k)) assembly.sources.hold(kind, id, "insert");
     for (const [k, [kind, id]] of held.current) if (!want.has(k)) assembly.sources.release(kind, id, "insert");
     held.current = want;

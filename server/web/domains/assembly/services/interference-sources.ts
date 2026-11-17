@@ -1,98 +1,99 @@
 // interference-sources.ts — where the interference check and the bill of materials get the parts of an
-// assembly from: each part studio an instance names is opened (its live document, through ItemDocSession),
-// rebuilt in a modelling worker of its own (one KernelClient per part studio, as CONTRACT.md "The assembly"
-// says), and asked for its bodies as BRep text ("body-brep").  The first of those workers also does the checking.
+// assembly from: the assembly editor itself.  The instances, where they stand (solved), their source documents
+// and the modelling workers that hold their B-reps are the editor's (`assembly.placed()`,
+// `assembly.sources.handle(...)`): nothing is opened or built a second time here.
 //
-// This is the thin page side; the logic is in interference.ts and bom.ts.  When the assembly editor draws its
-// instances it will hold these same sessions and clients; this class can then take them from it.
-import { ItemDocSession } from "../../../shared/itemdoc/sync";
+// For a check, each source document's bodies are read once as BRep text from the worker that built it
+// ("body-brep"); the worker is asked to build first when the editor drew the part from its cache and no worker
+// holds it yet.  One of those workers also does the checking.
 import type { ItemDoc } from "../../../shared/itemdoc/itemdoc";
-import { KernelClient, PART_STUDIO_KIND, featureInputs, featuresOf, materialOf, rollbackIndex } from "../../mechanical/api";
-import { transformOf, type InstanceItem } from "../document/format";
+import { KernelClient, materialOf } from "../../mechanical/api";
+import { soleName } from "../sources/part";
+import type { AssemblyEditor } from "../ui/assembly";
 import { textHash, type Box, type InstanceShape } from "./interference";
 
-interface BodyInfo { id: string; name: string; brep: string; bbox: Box; key: string; material?: string }
-interface Source { doc: ItemDoc; kernel: KernelClient; bodies: Map<string, BodyInfo> }
+interface BodyInfo { id: string; name: string; brep: string; bbox: Box; key: string }
+interface Read { version: number; bodies: Map<string, BodyInfo>; kernel: KernelClient }
 
-/** Open a JSON item document once and close the session: its state now, edits since the last snapshot included. */
-export function readItemDoc(docId: string, signedIn: boolean, expectKind: string, ms = 30000): Promise<ItemDoc> {
-  return new Promise((resolve, reject) => {
-    let done = false;
-    const s: ItemDocSession = new ItemDocSession({
-      docId, signedIn, expectKind,
-      onChange: () => { if (done || !s.doc) return; done = true; const doc = s.doc; s.close(); resolve(doc); },
-      onStatus: (st) => { if (!done && st.state === "error") { done = true; s.close(); reject(new Error(st.text || "The document could not be opened.")); } },
-    });
-    s.start();
-    setTimeout(() => { if (!done) { done = true; s.close(); reject(new Error("The document took too long to open.")); } }, ms);
-  });
-}
+const sourceKey = (kind: string, docId: string): string => kind + ":" + docId;
 
 export class PartSources {
-  private readonly sources = new Map<string, Source>();
-  /** the worker that checks, where shapes from every part studio meet: the first part studio's own (a second
-   *  kernel would cost another start of the 23 MB module), or one of its own when there is none */
+  private readonly read = new Map<string, Read>();
+  /** a worker of this class's own, only when no source has one (nothing to check, then) */
   private own: KernelClient | null = null;
+
+  constructor(private readonly a: AssemblyEditor) {}
+
+  /** The worker that checks: one that already holds shapes, so the 23 MB kernel is not started again. */
   private get checker(): KernelClient {
-    const first = this.sources.values().next();
-    if (!first.done) return first.value.kernel;
+    for (const r of this.read.values()) return r.kernel;
     if (!this.own) this.own = new KernelClient();
     return this.own;
   }
 
-  constructor(private readonly signedIn: boolean) {}
-
-  /** Open and rebuild a part studio (again, so edits made since are followed) and read its bodies. */
-  async load(docId: string): Promise<Source> {
-    const doc = await readItemDoc(docId, this.signedIn, PART_STUDIO_KIND);
-    let src = this.sources.get(docId);
-    if (!src) { src = { doc, kernel: new KernelClient(), bodies: new Map() }; this.sources.set(docId, src); }
-    src.doc = doc;
-    const features = featuresOf(doc);
-    const result = await src.kernel.regenerate(featureInputs(features), rollbackIndex(doc, features));
-    if (!result) throw new Error("The part studio was rebuilt again before it finished.");
-    const failed = result.features.filter((f) => f.status === "error").length;
-    if (failed && !result.bodies.length) throw new Error("The part studio's features failed to build.");
-    const r = await src.kernel.call("body-brep", { bodies: null }) as unknown as { bodies: { id: string; name: string; brep: string; bbox: Box }[] };
-    src.bodies = new Map(r.bodies.map((b) => [b.id, { ...b, key: `${docId}:${b.id}:${textHash(b.brep)}`, material: materialOf(doc, b.id)?.name }]));
-    return src;
+  /** The bodies of one source document as BRep text, from the worker that holds it. */
+  private async bodies(kind: string, docId: string): Promise<Read> {
+    const handle = this.a.sources.handle(kind, docId);
+    if (!handle) throw new Error("Its source is not open.");
+    const snap = handle.snapshot();
+    if (snap.status === "loading") throw new Error("It is still being built.");
+    const k = sourceKey(kind, docId);
+    const had = this.read.get(k);
+    if (had && had.version === snap.version) return had;
+    const kernel = handle.ensureKernel ? await handle.ensureKernel() : null;
+    if (!kernel) throw new Error(snap.message || "Its source could not be built.");
+    const r = await kernel.call("body-brep", { bodies: null }) as unknown as { bodies: { id: string; name: string; brep: string; bbox: Box }[] };
+    const now: Read = { version: snap.version, kernel, bodies: new Map(r.bodies.map((b) => [b.id, { ...b, key: `${k}:${b.id}:${textHash(b.brep)}` }])) };
+    this.read.set(k, now);
+    return now;
   }
 
-  /** The solids of the unsuppressed part instances, placed.  Instances whose source is gone are listed apart. */
-  async shapes(instances: readonly InstanceItem[]): Promise<{ shapes: InstanceShape[]; skipped: { instance: string; why: string }[] }> {
-    const parts = instances.filter((i) => !i.suppressed && i.source.kind === "part");
-    const docIds = Array.from(new Set(parts.map((i) => i.source.docId)));
-    const loaded = new Map<string, Source | Error>();
-    await Promise.all(docIds.map(async (d) => { try { loaded.set(d, await this.load(d)); } catch (e) { loaded.set(d, e instanceof Error ? e : new Error(String(e))); } }));
+  /**
+   * The solids of the instances as they stand: one per body of a part instance, the laminate and the parts'
+   * envelopes of a board.  What cannot be checked is listed apart with the reason.  `only`: just these instances.
+   */
+  async shapes(only?: ReadonlySet<string>): Promise<{ shapes: InstanceShape[]; skipped: { instance: string; why: string }[] }> {
+    const placed = this.a.placed().filter((p) => !only || only.has(p.item.id));
     const shapes: InstanceShape[] = [], skipped: { instance: string; why: string }[] = [];
-    for (const i of instances) {
-      if (i.suppressed) continue;
-      if (i.source.kind !== "part") { skipped.push({ instance: i.id, why: i.source.kind === "board" ? "Boards are not checked yet." : "Only part studio bodies are checked." }); continue; }
-      const src = loaded.get(i.source.docId);
-      if (!src || src instanceof Error) { skipped.push({ instance: i.id, why: src ? src.message : "Not loaded." }); continue; }
-      const b = src.bodies.get((i.source as { body: string }).body);
-      if (!b) { skipped.push({ instance: i.id, why: "Its body is no longer in the part studio." }); continue; }
-      shapes.push({ instance: i.id, key: b.key, brep: b.brep, bbox: b.bbox, transform: transformOf(i) });
+    const docs = new Map<string, Read | Error>();
+    const wanted = new Map<string, [string, string]>();
+    for (const p of placed) { const s = p.item.source; if (s.kind === "part" || s.kind === "board") wanted.set(sourceKey(s.kind, s.docId), [s.kind, s.docId]); }
+    await Promise.all(Array.from(wanted).map(async ([k, [kind, docId]]) => { try { docs.set(k, await this.bodies(kind, docId)); } catch (e) { docs.set(k, e instanceof Error ? e : new Error(String(e))); } }));
+    for (const p of placed) {
+      const s = p.item.source;
+      if (s.kind !== "part" && s.kind !== "board") { skipped.push({ instance: p.item.id, why: s.kind === "assembly" ? "the parts inside a sub-assembly are not checked yet" : "only parts and boards are checked" }); continue; }
+      const src = docs.get(sourceKey(s.kind, s.docId));
+      if (!src || src instanceof Error) { skipped.push({ instance: p.item.id, why: src ? src.message : "not loaded" }); continue; }
+      let any = false;
+      for (const piece of p.pieces) {
+        const b = src.bodies.get(piece.id);
+        if (!b) continue;
+        any = true;
+        shapes.push({ instance: p.item.id, key: b.key, brep: b.brep, bbox: b.bbox, transform: piece.transform });
+      }
+      if (!any) skipped.push({ instance: p.item.id, why: "its body is no longer in its source" });
     }
     return { shapes, skipped };
   }
 
-  /** What each body of the part studios these instances use is called and made of (for the bill of materials). */
-  async bodyNames(instances: readonly InstanceItem[]): Promise<{ [docId: string]: { [bodyId: string]: { name: string; material?: string } } }> {
+  /** What each body of the part studios in use is called and made of (for the bill of materials): no kernel needed. */
+  bodyNames(): { [docId: string]: { [bodyId: string]: { name: string; material?: string } } } {
     const out: { [docId: string]: { [bodyId: string]: { name: string; material?: string } } } = {};
-    const docIds = Array.from(new Set(instances.filter((i) => i.source.kind === "part").map((i) => i.source.docId)));
-    await Promise.all(docIds.map(async (d) => {
-      try {
-        const src = await this.load(d);
-        out[d] = {};
-        for (const b of src.bodies.values()) out[d][b.id] = { name: b.name, ...(b.material ? { material: b.material } : {}) };
-      } catch (e) { /* the row falls back to the instance's name */ }
-    }));
+    for (const p of this.a.placed()) {
+      const s = p.item.source;
+      if (s.kind !== "part" || out[s.docId]) continue;
+      const handle = this.a.sources.handle("part", s.docId); if (!handle) continue;
+      const doc: ItemDoc | null = handle.doc ? handle.doc() : null;
+      out[s.docId] = {};
+      const pieces = handle.snapshot().pieces, entry = this.a.host.docs.find((d) => d.docId === s.docId);
+      const docName = entry ? (entry.path.split("/").pop() || entry.path).replace(/\.[^.]+$/, "") : "";
+      for (const piece of pieces) { const m = doc ? materialOf(doc, piece.id)?.name : undefined; out[s.docId][piece.id] = { name: docName ? soleName(pieces, piece, docName) : piece.name, ...(m ? { material: m } : {}) }; }
+    }
     return out;
   }
 
   /** The checking worker's `call`, as interference.ts takes it. */
   call = (service: string, args: unknown): Promise<unknown> => this.checker.call(service, args as never);
 
-  dispose(): void { this.own?.dispose(); this.own = null; for (const s of this.sources.values()) s.kernel.dispose(); this.sources.clear(); }
+  dispose(): void { this.own?.dispose(); this.own = null; this.read.clear(); }
 }
