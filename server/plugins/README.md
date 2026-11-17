@@ -9,7 +9,9 @@ Junction runs plugins in two places.
 - **Web editor.** Plugins are JavaScript that runs sandboxed in the browser of the person who
   installed them. This document is about those.
 
-The folders next to this file are the built-in catalog and are meant to be read as examples:
+The example plugins are in [`examples/`](examples). They are not listed in the Plugin Manager; read
+them, copy one as a starting point, or install one by its address under **Install from file or
+URL** (for example `https://github.com/JunctionEDA/junction/tree/master/server/plugins/examples/bom-export`):
 
 | Folder | Shows |
 |---|---|
@@ -163,13 +165,13 @@ Community section) under your account name, where anyone can search for it and i
 manifest needs a `version`; publish again after loading a newer copy and people who have it are
 offered **Update…**, with any new permission pointed out. The identifier is yours from the first
 publish, and **Unpublish** takes the listing down again (people who installed it keep their copy).
-Identifiers under `dev.notaroomba.kicad-collab.` are the built-in catalog's.
+Identifiers under `dev.notaroomba.kicad-collab.` belong to the examples.
 
 Publishing shares a copy and nothing else. Community plugins are not reviewed: whoever installs
 one is told who published it and sees every permission before it is stored.
 
 **Recommend it to a project.** With a project open, an editor can tick **Recommend to this
-project's collaborators** on a built-in or published plugin. Everyone who opens the project then
+project's collaborators** on a published plugin. Everyone who opens the project then
 sees a notice across the top of the canvas and the list under **This project** in the manager. A
 recommendation is a pointer: each person installs for themselves through the same consent sheet,
 and nothing is installed or run for anyone who does not. A private plugin (from a file or an
@@ -191,6 +193,21 @@ The endpoints: `GET /api/plugins/registry?q=`, `GET|PUT|DELETE /api/plugins/regi
 `POST /api/plugins/registry/{identifier}/report`, `GET /api/plugins/moderation`,
 `POST /api/plugins/registry/{identifier}/moderate`, `GET /api/projects/{id}/plugins`,
 `PUT|DELETE /api/projects/{id}/plugins/{identifier}`.
+
+**Run a repository.** KiCad's Plugin and Content Manager reads repositories: a `repository.json`
+naming a package list, each package a zip with `metadata.json` and `plugins/`. The web Plugin
+Manager reads the same format. **Catalog > Manage Repositories…** lists KiCad's official repository
+(always there) and lets a person add any other by the https address of its `repository.json`; its
+plugins join the catalog under the repository's name, with the icons from its resources archive,
+and install through the consent sheet with the source `repo:<id>:<version>`. Repositories belong
+to the account; removing one keeps the plugins installed from it. Only `"type": "plugin"` packages
+are listed (libraries, colour themes and fonts are desktop-only). The server reads these
+repositories for the person, so every download (the index, the package list, the zips, the icons)
+is limited to https on port 443 and public internet addresses, checked again after each redirect;
+`KC_PLUGIN_NETWORK=test` relaxes that for tests. Endpoints: `GET|POST /api/plugins/repositories`,
+`DELETE /api/plugins/repositories/{id}`, `GET /api/plugins/repositories/{id}/plugins`,
+`GET /api/plugins/repositories/{id}/plugins/{identifier}` (download for the consent sheet) and
+`…/{identifier}/icon`. Test: `scripts/plugins-repos-ui.mjs`.
 
 ## How plugins are contained
 
@@ -217,7 +234,7 @@ loop can stall the tab there. WebRTC is not covered by the frame's policy.
 
 The plugins in KiCad's Plugin and Content Manager are Python programs written for the desktop's
 `pcbnew` and `wx` modules.  The web editor runs them as they are: the Plugin Manager's
-**Catalog** lists KiCad's repository beside the built-in and community plugins (each card says
+**Catalog** lists KiCad's repository beside the repositories you added and the community plugins (each card says
 where it comes from, with each plugin's own icon), and installing one stores the package with your
 account like any other plugin.
 

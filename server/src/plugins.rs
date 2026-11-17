@@ -1,4 +1,4 @@
-//! Web editor plugins (web/domains/pcb/plugins): the per-account store and the built-in catalog.
+//! Web editor plugins (web/domains/pcb/plugins): the per-account store and the example plugins (server/plugins/examples).
 //!
 //! The server's part is deliberately small.  A plugin is code that runs in a sandbox in the
 //! browser of the person who installed it (web/domains/pcb/plugins/sandbox.ts) and reaches the design
@@ -26,17 +26,19 @@ const MAX_FILES: usize = 40;
 const MAX_FILE_BYTES: usize = 2 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: usize = 128 * 1024;
 
-/// The plugins that ship with the server (server/plugins/<folder>): useful on their own and
-/// the worked examples the developer guide points at.
+/// The example plugins (server/plugins/examples/<folder>), the worked examples the developer guide points at.  They
+/// used to be listed in the Plugin Manager as "Built in"; now they live in the repository only.  The server still knows
+/// them so that copies installed back then, and projects that recommend one, keep working, and so that nobody can
+/// publish under their identifiers.
 const CATALOG: &[(&str, &[(&str, &str)])] = &[
-    (include_str!("../plugins/bom-export/plugin.json"), &[("main.js", include_str!("../plugins/bom-export/main.js"))]),
-    (include_str!("../plugins/design-stats/plugin.json"), &[
-        ("main.js", include_str!("../plugins/design-stats/main.js")),
-        ("panel.html", include_str!("../plugins/design-stats/panel.html")),
+    (include_str!("../plugins/examples/bom-export/plugin.json"), &[("main.js", include_str!("../plugins/examples/bom-export/main.js"))]),
+    (include_str!("../plugins/examples/design-stats/plugin.json"), &[
+        ("main.js", include_str!("../plugins/examples/design-stats/main.js")),
+        ("panel.html", include_str!("../plugins/examples/design-stats/panel.html")),
     ]),
-    (include_str!("../plugins/snap-to-grid/plugin.json"), &[("main.js", include_str!("../plugins/snap-to-grid/main.js"))]),
-    (include_str!("../plugins/field-lint/plugin.json"), &[("main.js", include_str!("../plugins/field-lint/main.js"))]),
-    (include_str!("../plugins/placement-import/plugin.json"), &[("main.js", include_str!("../plugins/placement-import/main.js"))]),
+    (include_str!("../plugins/examples/snap-to-grid/plugin.json"), &[("main.js", include_str!("../plugins/examples/snap-to-grid/main.js"))]),
+    (include_str!("../plugins/examples/field-lint/plugin.json"), &[("main.js", include_str!("../plugins/examples/field-lint/main.js"))]),
+    (include_str!("../plugins/examples/placement-import/plugin.json"), &[("main.js", include_str!("../plugins/examples/placement-import/main.js"))]),
 ];
 
 fn bad(msg: impl Into<String>) -> AppError {
@@ -178,19 +180,6 @@ pub async fn plugin_files(State(state): State<AppState>, AuthUser(user): AuthUse
     Ok(Json(json!({ "files": files.ok_or(AppError::NotFound)? })))
 }
 
-/// `GET /api/plugins/catalog` — the built-in plugins.  Public: it is the same for everyone.
-pub async fn catalog() -> Json<Value> {
-    let plugins: Vec<Value> = CATALOG
-        .iter()
-        .map(|(manifest, files)| {
-            let manifest: Value = serde_json::from_str(manifest).expect("server/plugins manifests are valid JSON");
-            let files: Map<String, Value> = files.iter().map(|(k, v)| (k.to_string(), Value::String(v.to_string()))).collect();
-            json!({ "manifest": manifest, "files": files })
-        })
-        .collect();
-    Json(json!({ "plugins": plugins }))
-}
-
 #[derive(Deserialize)]
 pub struct InstallRequest {
     manifest: Value,
@@ -269,7 +258,7 @@ pub async fn uninstall(State(state): State<AppState>, AuthUser(user): AuthUser, 
 
 // ---------------------------------------------------------------- the community registry
 
-/// Identifiers under this prefix are the built-in catalog's; nobody may publish under it.
+/// Identifiers under this prefix are the example plugins'; nobody may publish under it.
 const RESERVED_PREFIX: &str = "dev.notaroomba.kicad-collab.";
 
 fn catalog_entry(identifier: &str) -> Option<(Value, Map<String, Value>)> {
@@ -363,7 +352,7 @@ pub async fn registry_publish(
         return Err(bad("KiCad's own Python plugins are installed from KiCad's repository; they are not republished here"));
     }
     if identifier.starts_with(RESERVED_PREFIX) || catalog_entry(&identifier).is_some() {
-        return Err(bad("that identifier belongs to the built-in catalog; publish under an identifier of your own"));
+        return Err(bad("that identifier belongs to Junction's example plugins; publish under an identifier of your own"));
     }
     if req.manifest.get("version").and_then(Value::as_str).map(|v| v.is_empty() || v.len() > 40).unwrap_or(true) {
         return Err(bad("a published plugin needs a version in its manifest, so people can tell an update from what they have"));
