@@ -831,7 +831,7 @@ export class SymbolEditor {
         tw, h("span", { class: "nm" + (canvasLib ? " canvas" : "") }, (pinned.has(lib.nick) ? "☆ " : "") + lib.nick + (modified ? " *" : "")), note ? h("span", { class: "ds" }, note) : null);
       const toggle = () => { lib.open = !open; if (lib.open && lib.kind === "official") void this.loadOfficial(lib); this.renderTree(); };
       tw.addEventListener("click", (ev) => { ev.stopPropagation(); this.treeSel = { lib: lib.nick }; toggle(); });
-      row.addEventListener("click", () => { this.treeSel = { lib: lib.nick }; this.renderTree(); this.renderMenus(); });
+      row.addEventListener("click", () => { this.selectTreeRow({ lib: lib.nick }); this.renderMenus(); });
       row.addEventListener("dblclick", () => toggle());
       row.addEventListener("contextmenu", (ev) => { ev.preventDefault(); this.treeSel = { lib: lib.nick }; this.renderTree(); showMenu(ev.clientX, ev.clientY, this.treeMenu(lib, null)); });
       frag.append(row);
@@ -846,7 +846,7 @@ export class SymbolEditor {
           stw, h("span", { class: "nm" + (cur ? " canvas" : "") }, M.unescapeLibId(r.name) + (mod ? " *" : "")), h("span", { class: "ds" }, r.desc));
         const utoggle = () => { if (r.units < 2) return; if (this.symOpen.has(key)) this.symOpen.delete(key); else this.symOpen.add(key); this.renderTree(); };
         stw.addEventListener("click", (ev) => { ev.stopPropagation(); utoggle(); });
-        sr.addEventListener("click", () => { this.treeSel = { lib: lib.nick, name: r.name }; this.renderTree(); });
+        sr.addEventListener("click", () => this.selectTreeRow({ lib: lib.nick, name: r.name }));
         sr.addEventListener("dblclick", () => { this.hidePreview(); void this.loadSymbol(lib.nick, r.name); });
         sr.addEventListener("contextmenu", (ev) => { ev.preventDefault(); this.treeSel = { lib: lib.nick, name: r.name }; this.renderTree(); showMenu(ev.clientX, ev.clientY, this.treeMenu(lib, r.name)); });
         frag.append(sr); order.push({ lib: lib.nick, name: r.name });
@@ -854,7 +854,7 @@ export class SymbolEditor {
           const usel = this.treeSel && this.treeSel.lib === lib.nick && this.treeSel.name === r.name && this.treeSel.unit === u;
           const label = (r.unitNames && r.unitNames[u - 1]) || `Unit ${M.unitLetter(u)}`;
           const ur = h("div", { class: "se-row unit" + (usel ? " cur" : ""), "data-unit": key + ":" + u, style: "padding-left:36px" }, h("span", { class: "nm" }, label));
-          ur.addEventListener("click", () => { this.treeSel = { lib: lib.nick, name: r.name, unit: u }; this.renderTree(); });
+          ur.addEventListener("click", () => this.selectTreeRow({ lib: lib.nick, name: r.name, unit: u }));
           // LIB_TREE activation of a unit: the symbol opens on that unit
           ur.addEventListener("dblclick", () => void (async () => { if (cur || (await this.loadSymbol(lib.nick, r.name))) this.setUnit(u); })());
           frag.append(ur); order.push({ lib: lib.nick, name: r.name, unit: u });
@@ -866,6 +866,23 @@ export class SymbolEditor {
     list.innerHTML = ""; list.append(frag);
     this.treeRows = order;
     const cur = list.querySelector(".se-row.cur") as HTMLElement | null; if (cur && cur.scrollIntoView) cur.scrollIntoView({ block: "nearest" });
+  }
+  /**
+   * A click on a tree row selects it in place, without rebuilding the tree: the row under the pointer has to stay
+   * in the page for the double-click that may follow (Firefox sends no dblclick to a row a click handler removed,
+   * so rebuilding here left a double-clicked symbol unopened).
+   */
+  private selectTreeRow(sel: { lib: string; name?: string; unit?: number }): void {
+    this.treeSel = sel;
+    const list = this.el.list; if (!list) return;
+    const key = sel.name === undefined ? null : sel.unit === undefined ? `${sel.lib}:${sel.name}` : `${sel.lib}:${sel.name}:${sel.unit}`;
+    let hit: HTMLElement | null = null;
+    for (const r of Array.from(list.querySelectorAll<HTMLElement>(".se-row"))) {
+      const d = r.dataset;
+      const on = key === null ? d.lib === sel.lib : sel.unit === undefined ? d.sym === key : d.unit === key;
+      r.classList.toggle("cur", on); if (on) hit = r;
+    }
+    if (hit && hit.scrollIntoView) hit.scrollIntoView({ block: "nearest" });
   }
   /** The hover preview of a tree row: the symbol's first unit, flattened, as the chooser draws it. */
   private async drawTreePreview(canvas: HTMLCanvasElement, key: string): Promise<boolean> {
