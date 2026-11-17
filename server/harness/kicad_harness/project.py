@@ -308,6 +308,8 @@ class _Doc:
         for v in r.get("violations", []):
             d = kinds if v["severity"] == "error" else wkinds
             d[v["code"]] = d.get(v["code"], 0) + 1
+        if r.get("by_kind") is not None:      # counted over every row (the list itself stops at 200)
+            kinds, wkinds = dict(r["by_kind"]), dict(r.get("warnings_by_kind") or {})
         rows = [v for v in r.get("violations", []) if (v["code"] == kind if kind else v["severity"] == "error" or warnings)]
         rows.sort(key=lambda v: v["severity"] != "error")
         first = [f"{v['severity']} {v['code']}: {v['message']}" + (f" [{', '.join(v['refs'])}]" if v.get("refs") else "") + f" at ({v['x']}, {v['y']})" for v in rows[:limit]]
@@ -341,6 +343,7 @@ class _Doc:
         return False
 
     def remove(self, *refs: str) -> None:
+        """Delete parts by reference, or single items (a track segment, a via) by the id whats_at() or get_items gives."""
         for ref in refs:
             self._edit({"op": "remove", "ref": ref} if not re.fullmatch(r"[0-9a-f-]{36}", ref) else {"op": "remove", "id": ref}, "item:" + ref)
 
@@ -361,9 +364,11 @@ class _Doc:
             e["italic"] = True
         self._edit(e)
 
-    def svg(self, path: str | None = None, box=None) -> str:
-        """The sheet or the board as an SVG drawing, the way the editor shows it (local projects).  Written to `path` when given."""
-        r = self._call("render", **({"box": list(box)} if box else {}))
+    def svg(self, path: str | None = None, box=None, zones: bool = True, hide=None, copper_only: bool = False) -> str:
+        """The sheet or the board as an SVG drawing, the way the editor shows it (local projects).  Written to `path` when given.
+        zones=False leaves the pours out (to see a fan-out under a ground fill); hide=["B.Cu", "In1.Cu"] leaves those layers out
+        copper_only=True leaves silkscreen, fab and courtyard drawings out, to read a fine-pitch fan-out."""
+        r = self._call("render", **({"copper_only": True} if copper_only else {}), **({"box": list(box)} if box else {}), **({"zones": False} if not zones else {}), **({"hide": list(hide)} if hide else {}))
         if path:
             with open(path, "w", encoding="utf-8") as f:
                 f.write(r["svg"])
@@ -1903,6 +1908,7 @@ class Board(_Doc):
         rules = r.get("design_rules") or {}
         return {"size_mm": r.get("size_mm"), "copper_layers": r.get("copper_layers"), "footprints": (r.get("statistics") or {}).get("footprints", {}).get("total"),
                 "nets": r.get("nets"), "unrouted_connections": r.get("unrouted_connections"), "ratsnest_mm": lay.get("ratsnest_mm"), "vias": lay.get("vias"),
+                "ground_vias": lay.get("ground_vias"), "signal_and_supply_vias": lay.get("other_vias"),
                 "track_length_mm": lay.get("track_length_mm"), "clearance": rules.get("clearance"), "min_track_width": rules.get("min_track_width")}
 
     def models(self) -> dict:
@@ -2026,8 +2032,12 @@ class Board(_Doc):
         if o:
             self.outline(o[0], o[1], o[2], o[3], radius=radius)
 
-    def rules(self, **rules) -> None:
-        """Set design rules in mm: clearance, track_width, via_diameter, via_drill, min_track_width, min_clearance, edge_clearance, hole_clearance (copper to a hole of something else), min_text_height (the smallest silkscreen text the rules check accepts, 0.8 unless set), net_class."""
+    def rules(self, **rules):
+        """With no arguments: the rules as they stand (clearance, edge_clearance, net_classes with track and via sizes).
+        Otherwise set design rules in mm: clearance, track_width, via_diameter, via_drill, min_track_width, min_clearance, edge_clearance, hole_clearance (copper to a hole of something else), min_text_height (the smallest silkscreen text the rules check accepts, 0.8 unless set), net_class."""
+        if not rules:
+            self.flush()
+            return self.project.transport.call("get_board_info", {}).get("design_rules") or {}
         self._edit(dict({"op": "set_rules"}, **rules))
         self.flush()
 
@@ -2240,7 +2250,9 @@ class Board(_Doc):
 
     # ---- copper
     def track(self, net: str, points, layer: str = "F.Cu", width: float | None = None) -> None:
-        """A track through points; a point may be a pad written "REF.pad"."""
+        """A track of `net` through points on `layer`; a point may be a pad written "REF.pad".  width defaults to the net
+        class.  Change layer with board.via() at the point where two tracks meet.  board.whats_at((x, y)) shows what
+        copper is near a point before you draw."""
         pts = []
         for p in points:
             if isinstance(p, str):
@@ -2254,12 +2266,52 @@ class Board(_Doc):
         self._edit(e)
 
     def via(self, net: str, at, size: float | None = None, drill: float | None = None) -> None:
+        """A via of `net` at (x, y); size and drill default to the net class (a smaller one fits a tight spot when the rules
+        allow it: size=0.4, drill=0.2).  board.whats_at((x, y)) tells what copper stands in the way first."""
         e = {"op": "add_via", "net": net, "x": _r(at[0]), "y": _r(at[1])}
         if size:
             e["size"] = size
         if drill:
             e["drill"] = drill
         self._edit(e)
+
+    def whats_at(self, at, radius: float = 0.8) -> list:
+        """The copper within `radius` mm of a point, nearest first: [{"kind", "net", "layer", "gap_mm", "id"}], gap_mm
+        from the point to the item's copper edge (pads by their bounding box).  Use it before a hand-placed via or
+        track: a 0.45 mm via needs gap_mm of at least half its size plus the clearance to every other net's item."""
+        self.flush()
+        x, y = float(at[0]), float(at[1])
+        out = []
+        names = {}
+        with contextlib.suppress(OSError):
+            folder = getattr(self.project, "folder", None)
+            if folder:
+                with open(os.path.join(folder, self.path)) as fh:
+                    names = dict(re.findall(r'\(net (\d+) "((?:[^"\\]|\\.)*)"\)', fh.read()))
+        for it in self._call("get_items", kinds=["segment", "arc", "via", "footprint"], near={"x": x, "y": y, "radius": radius}).get("items", []):
+            sx = it.get("sexpr", "")
+            if it.get("kind") == "footprint":
+                for q in (self._part(it.get("ref") or "").get("pads") if it.get("ref") else []) or []:
+                    d = math.hypot(q[1] - x, q[2] - y)
+                    if d <= radius + 0.5:
+                        out.append({"kind": "pad", "net": q[3], "layer": "", "gap_mm": round(max(0.0, d - 0.3), 3), "id": f"{it.get('ref')}.{q[0]}"})
+                continue
+            nm = re.search(r'\(net (?:"((?:[^"\\]|\\.)*)"|(\d+))\)', sx); net = (nm.group(1) or names.get(nm.group(2), nm.group(2))) if nm else ""
+            lay = re.search(r'\(layers? "([^"]+)"', sx); layer = lay.group(1) if lay else ""
+            a = re.search(r"\(start ([\d.\-]+) ([\d.\-]+)\)\s*\(end ([\d.\-]+) ([\d.\-]+)\)", sx)
+            if it.get("kind") in ("segment", "arc") and a:
+                x0, y0, x1, y1 = map(float, a.groups()); w = float((re.search(r"\(width ([\d.]+)\)", sx) or [0, 0.2])[1])
+                dx, dy = x1 - x0, y1 - y0; t = max(0.0, min(1.0, ((x - x0) * dx + (y - y0) * dy) / ((dx * dx + dy * dy) or 1)))
+                gap = math.hypot(x - (x0 + t * dx), y - (y0 + t * dy)) - w / 2
+            else:
+                v = re.search(r"\(at ([\d.\-]+) ([\d.\-]+)\)", sx); z = re.search(r"\(size ([\d.]+)", sx)
+                if not v:
+                    continue
+                gap = math.hypot(x - float(v.group(1)), y - float(v.group(2))) - (float(z.group(1)) / 2 if z else 0.25)
+                layer = "via"
+            if gap <= radius:
+                out.append({"kind": it.get("kind"), "net": net, "layer": layer, "gap_mm": round(max(0.0, gap), 3), "id": it["id"]})
+        return sorted(out, key=lambda r: r["gap_mm"])
 
     def clear(self, keep: tuple = (), outline: bool = True) -> int:
         """Take everything off the board for a rebuild from nothing: footprints, tracks, vias, zones, drawings.  The board
@@ -2522,8 +2574,11 @@ class Board(_Doc):
         explain=True adds `explain` to the result: the nets laid first, the clusters with their parts, every connection
         that changed layer (with its length against the straight line) and the longest detours, for checking the
         engine's thinking.
+        nets: only these nets' missing connections are routed, and the result's `left_of_asked` says which of them
+        are still open.  fill=False skips the zone fill and the clean-up passes after it: a try that takes seconds,
+        not minutes (fill and check once at the end).
         time_s: the engine's budget; left out it grows with the board (30 s plus 1.5 s per open connection, 300 at most).
-        via_cost: how many millimetres of extra track a via is worth (12 by default: the engine goes round on the pad's
+        via_cost: how many millimetres of extra track a via is worth (the engine goes round on the pad's
         own layer before it changes layer); lower it only for a board that cannot route otherwise.
 
         Signal domains.  The engine tells analog nets (ADC, VREF, crystal, sense, feedback), RF nets (ANT, RF),
@@ -2626,7 +2681,12 @@ class Board(_Doc):
                         break
                     # what the real fill left open is laid with tracks: the engine must not count on the pour again
                     again["zones"] = False
-                    again["nets"] = sorted(f.get("unconnected_by_net") or {}) or again.get("nets")
+                    open_now = sorted(f.get("unconnected_by_net") or {})
+                    if e.get("nets"):      # a call for some nets repairs only those, never the whole board
+                        open_now = [n for n in open_now if n in e["nets"]]
+                        if not open_now:
+                            break
+                    again["nets"] = open_now or again.get("nets")
                     if not again["nets"]:
                         again.pop("nets")
                     more = self._autoroute(again)
@@ -2645,6 +2705,9 @@ class Board(_Doc):
                 out["left"] = f.get("unconnected_by_net") or {}
         if "left" not in out:
             out["left"] = self.unrouted()
+        if nets:
+            asked = set(e.get("nets") or [])
+            out["left_of_asked"] = {k: v for k, v in (out["left"] or {}).items() if k in asked}
         if house:
             out["rules_changed"] = house
         self.project.note(f"board: routed {out['routed']} of {out['connections']} connections, {out['vias']} vias, {out['length_mm']} mm" + (f", {len(out['unrouted'])} left" if out["unrouted"] else ""))
