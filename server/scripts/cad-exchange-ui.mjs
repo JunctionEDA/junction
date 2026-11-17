@@ -77,7 +77,7 @@ async function exportFile(page, setup, label) {
 }
 
 try {
-  const aliceId = user('cad-x-alice', 990101), bobId = user('cad-x-bob', 990102);
+  const aliceId = user('cad-x-alice', 990701), bobId = user('cad-x-bob', 990702);
   const alice = await open(aliceId, 'cad-x-alice');
   const project = await alice.evaluate(async () => {
     const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'CAD exchange test' }) });

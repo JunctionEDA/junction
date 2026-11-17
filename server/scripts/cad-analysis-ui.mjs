@@ -6,9 +6,9 @@
 // two parts; and the assembly's interference check and bill of materials on an assembly of two part instances.
 //
 // Setup as cad-ui.mjs: a local server with KC_DEV_LOGIN=1 on a throwaway database, Playwright, and psql on the
-// PATH.  The server compiles the part studio's bundles into its binary (src/pages.rs include_str!), so a server
-// built before these changes would serve old ones: by default this script builds mechanical.js, assembly.js,
-// cad-worker.js and ui.css from web/ itself and hands them to the browser (E2E_SERVER_BUNDLES=1 uses the server's).
+// PATH.  It tests the bundles the server serves (compiled into its binary, src/pages.rs include_str!: build the
+// server after `npm run build`).  E2E_LOCAL_BUNDLES=1 instead builds mechanical.js, assembly.js, cad-worker.js
+// and ui.css from web/ and hands those to the browser, for a server that was built before a change.
 //
 //   E2E_PG_URL=postgres://… E2E_JWT_SECRET=dev E2E_BASE=http://127.0.0.1:8108 [SHOTS=/some/dir] node scripts/cad-analysis-ui.mjs
 import crypto from 'node:crypto';
@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
+const { tool, toolTitles, openPanel } = await import(new URL('./cad-chrome.mjs', import.meta.url));
 const server = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 const BASE = (process.env.E2E_BASE || 'http://127.0.0.1:8099').replace(/\/$/, '');
@@ -36,12 +37,12 @@ const near = (a, b, eps = 1e-6) => Math.abs(a - b) <= eps * Math.max(1, Math.abs
 
 // ---------------------------------------------------------------- the bundles under test
 const bundles = {};
-if (!process.env.E2E_SERVER_BUNDLES) {
+if (process.env.E2E_LOCAL_BUNDLES) {
   execFileSync(process.execPath, [path.join(server, 'scripts', 'gen-cad-registry.mjs')]);
   const esbuild = require(path.join(server, 'node_modules', 'esbuild'));
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'cad-analysis-'));
   const common = { bundle: true, format: 'iife', minify: true, jsx: 'automatic', define: { 'process.env.NODE_ENV': '"production"' }, logLevel: 'error', legalComments: 'none' };
-  esbuild.buildSync({ ...common, entryPoints: [path.join(server, 'web/domains/mechanical/index.tsx')], target: 'es2020', outfile: path.join(out, 'mechanical.js') });
+  esbuild.buildSync({ ...common, entryPoints: [path.join(server, 'web/domains/mechanical/index.tsx')], target: 'es2020', external: ['node:*'], define: { ...common.define, 'import.meta.url': '""' }, outfile: path.join(out, 'mechanical.js') });
   esbuild.buildSync({ ...common, entryPoints: [path.join(server, 'web/domains/assembly/index.tsx')], target: 'es2020', outfile: path.join(out, 'assembly.js') });
   esbuild.buildSync({ ...common, entryPoints: [path.join(server, 'web/domains/mechanical/kernel/worker.ts')], target: 'es2022', external: ['node:*'], define: { 'import.meta.url': '""' }, outfile: path.join(out, 'cad-worker.js') });
   // and the chrome's stylesheet, which Tailwind builds from the classes the .tsx files use
@@ -154,7 +155,7 @@ const rows = (page) => page.$$eval('.cad-measure tr[data-key]', (els) => Object.
 const measured = (page) => page.waitForFunction(() => { const el = document.querySelector('.cad-measure'); return el && el.dataset.measure === 'ready' && el.querySelectorAll('tr[data-key]').length > 0; }, null, { timeout: 30000 });
 
 try {
-  const uid = user('cad-analysis', 990101);
+  const uid = user('cad-analysis', 990401);
   const page = await open(uid, 'cad-analysis');
   const made = await S(page, async (text) => {
     const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'CAD analysis test' }) });
@@ -177,6 +178,8 @@ try {
   check('the toolbar has Measure and Section in the inspect group and Display, Perspective in the view group',
     await page.isVisible('[data-group=inspect] [data-tool=Measure]') && await page.isVisible('[data-group=inspect] [data-tool=Section]') && await page.isVisible('[data-group=view] [data-tool=Display]') && await page.isVisible('[data-group=view] [data-tool=Perspective]'));
   check('the right dock has the Appearance and Mass properties panels', await page.isVisible('[data-panel=appearance]') && await page.isVisible('[data-panel=mass-properties]'));
+  // both start folded (the dock has more panels than fit open at once): unfold them, as a person would
+  await openPanel(page, 'appearance'); await openPanel(page, 'mass-properties');
 
   // ---------------------------------------------------------------- measure
   const top = await spot(page, 'face', 'Plate', 'Plate:end:ra');
@@ -435,16 +438,22 @@ try {
   await page.goto(`${BASE}/p/${made.pid}/edit?doc=${asm.docId}`);
   await page.waitForSelector('.cad-root[data-doc-kind=assembly]', { timeout: 30000 });
   await page.waitForFunction(() => window.JunctionAssembly && window.JunctionAssembly.getState().loaded && window.JunctionAssembly.getState().instances.length === 5, null, { timeout: 30000 });
-  check('the assembly toolbar has Interference and Bill of materials', await page.isVisible('.cad-toolbar button:has-text("Interference")') && await page.isVisible('.cad-toolbar button:has-text("Bill of materials")'));
-  await page.click('.cad-toolbar button:has-text("Interference")');
+  check('the assembly toolbar has Interference and Bill of materials', await page.isVisible('.cad-toolbar [data-tool="Interference"]') && await page.isVisible('.cad-toolbar [data-tool="Bill of materials"]'));
+  await page.click('.cad-toolbar [data-tool="Interference"]');
   await page.waitForSelector('.asm-interference[data-state=done]', { timeout: 120000 });
   const clash = await page.$$eval('.asm-interference [data-clash]', (els) => els.map((e) => ({ pair: e.dataset.clash, volume: Number(e.dataset.volume) })));
   // the second bracket starts at x = 50: its plate overlaps the first plate's last 10 mm
   const overlap = 10 * 40 * 10;   // x 50 … 60 of the plates; the first boss only touches the second plate's top, and the holes are outside
-  check('interference: one clash, between the two brackets', clash.length === 1 && clash[0].pair === 'i1|i2', JSON.stringify(clash));
-  check('interference: its exact volume', clash.length === 1 && near(clash[0].volume, overlap, 1e-6), `${clash[0] && clash[0].volume} vs ${overlap}`);
+  // boards are solids in an assembly too: the two controllers were placed in the same spot, and that is found
+  const brackets = clash.find((c) => c.pair === 'i1|i2'), boards = clash.find((c) => c.pair === 'i4|i5');
+  check('interference: two clashes, the two brackets and the two boards standing in one place', clash.length === 2 && !!brackets && !!boards, JSON.stringify(clash));
+  check('interference: the brackets\' exact volume', !!brackets && near(brackets.volume, overlap, 1e-6), `${brackets && brackets.volume} vs ${overlap}`);
+  check('interference: the boards overlap by a whole board', !!boards && boards.volume > 100, `${boards && boards.volume} mm³`);
   const clashMeshes = await S(page, () => { let n = 0; window.JunctionAssembly.viewport.scene.traverse((o) => { if (o.name === 'clash') n++; }); return n; });
-  check('the clash is highlighted in the viewport', clashMeshes === 1);
+  check('the clashes are highlighted in the viewport', clashMeshes === 2);
+  const pictures = await S(page, () => ({ boards: window.JunctionAssembly.boards.stats, marked: [...window.JunctionAssembly.scene.marked].sort().join() }));
+  check('the boards are drawn as they look, and the instances that clash are marked where they stand', pictures.boards.drawn === 2 && pictures.marked === 'i1,i2,i4,i5', JSON.stringify(pictures));
+  check('the check ran in the editor\'s own workers: no part studio was opened or built a second time', (await S(page, () => window.JunctionAssembly.sources.kernels.workers)) === 2, 'one worker for the part studio, one for the board');
   await shot(page, '14-interference');
   // clearance between the bracket and the block
   await page.selectOption('.asm-interference select[aria-label="First instance"]', 'i1');
@@ -453,9 +462,9 @@ try {
   await page.waitForSelector('.asm-interference [data-clearance]', { timeout: 60000 });
   const gap = Number(await page.getAttribute('.asm-interference [data-clearance]', 'data-clearance'));
   check('clearance: the block, moved to x −70 … −50, is 50 mm from the bracket', near(gap, 50, 1e-9), String(gap));
-  await page.click('.asm-interference button[aria-label=Close]');
+  await page.click('[data-panel=interference] button[aria-label="Close Interference"]');
   // the bill of materials
-  await page.click('.cad-toolbar button:has-text("Bill of materials")');
+  await page.click('.cad-toolbar [data-tool="Bill of materials"]');
   await page.waitForSelector('.asm-bom[data-state=done]', { timeout: 60000 });
   const bom = await page.$$eval('.asm-bom tbody tr', (els) => els.map((e) => [...e.querySelectorAll('td')].map((t) => t.textContent.trim())));
   const row = (item) => (bom.find((r) => r[0] === item) || []).slice(0, 5).join('|');

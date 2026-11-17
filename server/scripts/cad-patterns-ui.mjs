@@ -19,6 +19,7 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
+const { tool, toolTitles, openPanel } = await import(new URL('./cad-chrome.mjs', import.meta.url));
 
 const BASE = (process.env.E2E_BASE || 'http://127.0.0.1:8103').replace(/\/$/, '');
 const SECRET = process.env.E2E_JWT_SECRET, PG_URL = process.env.E2E_PG_URL;
@@ -136,7 +137,7 @@ try {
   await page.click('text=New part studio');
   await page.waitForFunction(() => window.JunctionPartStudio && window.JunctionPartStudio.getState().loaded, null, { timeout: 30000 });
   check('a part studio opens', true);
-  const toolbar = await page.$$eval('[data-group=feature] [data-tool]', (els) => els.map((e) => e.getAttribute('data-tool')));
+  const toolbar = await toolTitles(page, 'feature');
   check('the toolbar has the new features', ['Plane', 'Axis', 'Point', 'Mirror', 'Linear pattern', 'Circular pattern', 'Sweep', 'Loft', 'Helix'].every((t) => toolbar.includes(t)), toolbar.join(', '));
 
   // ---------------------------------------------------------------- the plate
@@ -194,7 +195,7 @@ try {
   check('the hole is cut through the plate', st.bodies.length === 1 && st.bodies[0].faces.some((n) => n.startsWith(`${cutId}:side:`)), st.bodies[0].faces.join(' '));
 
   // ---------------------------------------------------------------- Linear pattern, two directions
-  await page.click("[data-tool='Linear pattern']");
+  await tool(page, 'Linear pattern');
   await page.waitForSelector('.cad-dialog[data-feature=linear-pattern]');
   await page.click(`.cad-dialog [data-feature-option='${cutId}']`);
   await arm(page, 'direction');
@@ -272,7 +273,7 @@ try {
   const ribId = st.features[6].id;
   check('a rib is added to the plate', st.bodies.length === 1 && Math.abs(st.bodies[0].bbox[5] - 15) < 1e-6, JSON.stringify(st.bodies[0].bbox));
 
-  await page.click('[data-tool=Plane]');
+  await tool(page, 'Plane');
   await page.waitForSelector('.cad-dialog[data-feature=plane]');
   await page.selectOption('.cad-dialog select[data-param=method]', 'midplane');
   await arm(page, 'faces');
@@ -295,7 +296,7 @@ try {
   await S(page, () => { const vp = window.JunctionPartStudio.viewport; vp.setView('iso', false); vp.fit(); });
   await shot(page, '03-midplane');
 
-  await page.click('[data-tool=Mirror]');
+  await tool(page, 'Mirror');
   await page.waitForSelector('.cad-dialog[data-feature=mirror]');
   await page.click(`.cad-dialog [data-feature-option='${ribId}']`);
   await arm(page, 'plane');
@@ -314,7 +315,7 @@ try {
   await shot(page, '04-mirrored-ribs');
 
   // ---------------------------------------------------------------- a swept handle
-  await page.click('[data-tool=Plane]');
+  await tool(page, 'Plane');
   await page.waitForSelector('.cad-dialog[data-feature=plane]');
   await page.click('.cad-dialog [data-plane=front]');
   await page.fill('.cad-dialog input[data-param=distance]', '10');
@@ -341,7 +342,7 @@ try {
   await finishSketch();
   await settled(page, 11);
 
-  await page.click('[data-tool=Plane]');
+  await tool(page, 'Plane');
   await page.waitForSelector('.cad-dialog[data-feature=plane]');
   await page.selectOption('.cad-dialog select[data-param=method]', 'normal');
   await arm(page, 'curve');
@@ -369,7 +370,7 @@ try {
   await settled(page, 13);
   const profileId = (await state(page)).features[12].id;
 
-  await page.click('[data-tool=Sweep]');
+  await tool(page, 'Sweep');
   await page.waitForSelector('.cad-dialog[data-feature=sweep]');
   await page.selectOption('.cad-dialog select[data-param=profile]', profileId);
   await arm(page, 'path');

@@ -32,8 +32,8 @@ function user(login, githubId) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const adaId = user('cad-mcp-ada', 990011), token = jwt(adaId, 'cad-mcp-ada');
-const eveId = user('cad-mcp-eve', 990012), eveToken = jwt(eveId, 'cad-mcp-eve');
+const adaId = user('cad-mcp-ada', 990601), token = jwt(adaId, 'cad-mcp-ada');
+const eveId = user('cad-mcp-eve', 990602), eveToken = jwt(eveId, 'cad-mcp-eve');
 
 let rpcId = 0;
 async function rpc(method, params, tok = token) {
