@@ -1,6 +1,6 @@
 // PartStudioView.tsx — the part studio's frame: the generated toolbar, the docked panels (panels/*.tsx), the
 // viewport with the feature dialog over it, and what the worker is doing.
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 import { PANELS } from "../generated/page";
 import { FeatureDialog } from "./FeatureDialog";
 import { useStudio } from "./hooks";
@@ -50,6 +50,7 @@ export function PartStudioView({ studio, canvasHost }: { studio: PartStudio; can
         <div ref={stage} className="cad-stage relative flex-1 min-w-0 min-h-0 overflow-hidden">
           <FeatureDialog studio={studio} />
           <KernelNote studio={studio} />
+          {PANELS.filter((p) => p.side === "overlay").map((p) => <Fragment key={p.id}>{p.render(studio)}</Fragment>)}
         </div>
         {dock("right")}
       </div>

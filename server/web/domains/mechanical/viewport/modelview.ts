@@ -49,6 +49,10 @@ export class ModelView {
   onPick: (pick: Pick | null, ev: PointerEvent) => void = () => {};
   /** While set, left-button pointer events go here instead of picking (a sketch tool is drawing). */
   pointerTool: { down?(ev: PointerEvent): void; move?(ev: PointerEvent): void; up?(ev: PointerEvent): void } | null = null;
+  /** Called after `setBodies` changed what is drawn (appearance and section views re-dress the new meshes). */
+  onBodies: (() => void)[] = [];
+  /** While set, a face, edge or vertex hit at a point it rejects is not picked (the part a section view cuts away). */
+  pickClip: ((point: Vec3) => boolean) | null = null;
   private downAt: { x: number; y: number } | null = null;
 
   constructor(readonly viewport: Viewport3D) {
@@ -135,6 +139,12 @@ export class ModelView {
     for (const [id, b] of Array.from(this.bodies)) if (!seen.has(id)) { this.removeBody(b); this.bodies.delete(id); }
     this.drawHighlight();
     this.viewport.invalidate();
+    for (const fn of this.onBodies) fn();
+  }
+  /** The three.js objects that draw a body (its triangles, edge lines and vertex points), for display options. */
+  bodyObjects(id: string): { group: THREE.Group; mesh: THREE.Mesh; edges: THREE.LineSegments; points: THREE.Points; result: BodyResult } | undefined {
+    const b = this.bodies.get(id);
+    return b ? { group: b.group, mesh: b.mesh, edges: b.edges, points: b.points, result: b.result } : undefined;
   }
   private removeBody(b: BodyObjects): void {
     this.root.remove(b.group);
@@ -269,11 +279,12 @@ export class ModelView {
     const at = (v: THREE.Vector3): Vec3 => [v.x, v.y, v.z];
     let best: { pick: Pick; d: number } | null = null;
     const offer = (pick: Pick, d: number, bias: number) => { if (!best || d - bias < best.d) best = { pick, d: d - bias }; };
+    const kept = (h: THREE.Intersection) => !this.pickClip || this.pickClip(at(h.point));
 
     let faceD = Infinity;
     for (const [id, b] of this.bodies) {
       const mesh = b.result.mesh; if (!mesh) continue;
-      const hit = rc.intersectObject(b.mesh, false)[0];
+      const hit = rc.intersectObject(b.mesh, false).find(kept);
       if (hit && hit.faceIndex != null) {
         faceD = Math.min(faceD, hit.distance);
         const i = rangeOf(mesh.faces.start, mesh.faces.count, hit.faceIndex * 3);
@@ -286,7 +297,7 @@ export class ModelView {
       const mesh = b.result.mesh; if (!mesh) continue;
       if (want("edge")) {
         rc.params.Line = { threshold: 5 * px };
-        const hit = rc.intersectObject(b.edges, false).sort((p, q) => (p.distanceToRay ?? 0) - (q.distanceToRay ?? 0))[0];
+        const hit = rc.intersectObject(b.edges, false).filter(kept).sort((p, q) => (p.distanceToRay ?? 0) - (q.distanceToRay ?? 0))[0];
         if (hit && hit.index != null && hit.distance <= faceD + slack) {
           const i = rangeOf(mesh.edges.start, mesh.edges.count, hit.index);
           if (i >= 0) offer({ kind: "edge", body: id, name: mesh.edges.names[i], point: at(hit.point) }, hit.distance, 1e4);
@@ -294,7 +305,7 @@ export class ModelView {
       }
       if (want("vertex")) {
         rc.params.Points = { threshold: 6 * px };
-        const hit = rc.intersectObject(b.points, false).sort((p, q) => (p.distanceToRay ?? 0) - (q.distanceToRay ?? 0))[0];
+        const hit = rc.intersectObject(b.points, false).filter(kept).sort((p, q) => (p.distanceToRay ?? 0) - (q.distanceToRay ?? 0))[0];
         if (hit && hit.index != null && hit.distance <= faceD + slack) offer({ kind: "vertex", body: id, name: mesh.vertices.names[hit.index], point: at(hit.point) }, hit.distance, 2e4);
       }
     }

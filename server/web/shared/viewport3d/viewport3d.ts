@@ -36,9 +36,18 @@ export interface ViewportOptions {
   viewButtons?: boolean;
 }
 
+export type Projection = "orthographic" | "perspective";
+
+/** Where the camera is: what a named view stores (`cameraState()` / `setCameraState()`). */
+export interface CameraState { quaternion: [number, number, number, number]; target: [number, number, number]; zoom: number; projection: Projection }
+
 export class Viewport3D {
   readonly scene = new THREE.Scene();
+  /** The camera navigation drives.  In perspective it still holds the view (turn, target, zoom); frames are drawn with `activeCamera`. */
   readonly camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1e5, 1e5);
+  /** Follows `camera` in perspective: same direction, and the same height of view at the target. */
+  readonly perspectiveCamera = new THREE.PerspectiveCamera(30, 1, 1, 1e6);
+  private persp = false;
   readonly renderer: THREE.WebGLRenderer;
   readonly canvas: HTMLCanvasElement;
   /** the point the camera orbits */
@@ -64,7 +73,8 @@ export class Viewport3D {
     this.canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block;outline:none;touch-action:none";
     this.canvas.tabIndex = 0;
     host.appendChild(this.canvas);
-    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: false });
+    // a stencil buffer for capped section views (the mechanical domain's section tool)
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: false, stencil: true });
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
     this.renderer.autoClear = false;
     this.scene.add(new THREE.AmbientLight(0xffffff, 1.1));
@@ -151,6 +161,36 @@ export class Viewport3D {
     const back = new THREE.Vector3(0, 0, 1).applyQuaternion(this.camera.quaternion);
     this.camera.position.copy(this.target).addScaledVector(back, 2e4);
     this.camera.updateMatrixWorld();
+    if (this.persp) {
+      // as far back as makes the view at the target as tall as the orthographic one: zoom and fit keep working
+      const pc = this.perspectiveCamera, h = (this.camera.top - this.camera.bottom) / this.camera.zoom;
+      const d = h / 2 / Math.tan((pc.fov * Math.PI) / 360);
+      pc.quaternion.copy(this.camera.quaternion);
+      pc.position.copy(this.target).addScaledVector(back, d);
+      pc.aspect = this.width / this.height; pc.near = d / 50; pc.far = d + 200 * h + 1e3;
+      pc.updateProjectionMatrix(); pc.updateMatrixWorld();
+    }
+  }
+
+  /** The camera frames are drawn with: `camera`, or in perspective `perspectiveCamera`. */
+  get activeCamera(): THREE.Camera { return this.persp ? this.perspectiveCamera : this.camera; }
+  get projection(): Projection { return this.persp ? "perspective" : "orthographic"; }
+  setProjection(p: Projection): void { this.persp = p === "perspective"; this.place(); this.invalidate(); }
+
+  /** Where the camera is, to come back to later (a named view). */
+  cameraState(): CameraState {
+    const q = this.camera.quaternion;
+    return { quaternion: [q.x, q.y, q.z, q.w], target: [this.target.x, this.target.y, this.target.z], zoom: this.camera.zoom, projection: this.projection };
+  }
+  /** Go back to a `cameraState()`: turned, centred and zoomed as it was. */
+  setCameraState(s: CameraState, animate = true): void {
+    const q = new THREE.Quaternion(...s.quaternion).normalize();
+    this.target.set(...s.target);
+    this.camera.zoom = Math.max(0.02, Math.min(4000, s.zoom || 1)); this.camera.updateProjectionMatrix();
+    this.persp = s.projection === "perspective";
+    if (animate && !this.disposed && matchMedia("(prefers-reduced-motion: no-preference)").matches) this.anim = { from: this.camera.quaternion.clone(), to: q, t0: performance.now(), ms: 220 };
+    else { this.anim = null; this.camera.quaternion.copy(q); }
+    this.invalidate();
   }
 
   private render(): void {
@@ -168,7 +208,7 @@ export class Viewport3D {
     const w = this.width, h = this.height;
     this.renderer.setViewport(0, 0, w, h); this.renderer.setScissorTest(false);
     this.renderer.clear();
-    this.renderer.render(this.scene, this.camera);
+    this.renderer.render(this.scene, this.activeCamera);
     // the axis triad, bottom left
     const s = 64;
     this.triadCam.quaternion.copy(this.camera.quaternion);
@@ -219,14 +259,14 @@ export class Viewport3D {
     const ndc = new THREE.Vector2(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
     this.place();
     const rc = new THREE.Raycaster();
-    rc.setFromCamera(ndc, this.camera);
+    rc.setFromCamera(ndc, this.activeCamera);
     return rc.ray;
   }
 
   /** A model-space point in CSS pixels relative to the canvas. */
   project(p: THREE.Vector3): { x: number; y: number } {
     this.place();
-    const v = p.clone().project(this.camera);
+    const v = p.clone().project(this.activeCamera);
     return { x: ((v.x + 1) / 2) * this.width, y: ((1 - v.y) / 2) * this.height };
   }
 
@@ -260,15 +300,22 @@ export class Viewport3D {
   };
   private onWheel = (ev: WheelEvent): void => {
     ev.preventDefault();
-    const before = this.ray(ev).origin.clone();
+    const before = this.anchor(ev);
     const k = Math.exp(-ev.deltaY * (ev.deltaMode === 1 ? 0.05 : 0.0015));
     this.camera.zoom = Math.max(0.02, Math.min(4000, this.camera.zoom * k));
     this.camera.updateProjectionMatrix();
     // keep what was under the pointer under the pointer
-    const after = this.ray(ev).origin;
+    const after = this.anchor(ev);
     this.target.add(before.sub(after));
     this.invalidate();
   };
+  /** Where the pointer's ray crosses the plane through the target square to the view (zooming keeps it put). */
+  private anchor(ev: { clientX: number; clientY: number }): THREE.Vector3 {
+    const r = this.ray(ev), n = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const den = r.direction.dot(n);
+    const t = Math.abs(den) < 1e-12 ? 0 : this.target.clone().sub(r.origin).dot(n) / den;
+    return r.origin.clone().addScaledVector(r.direction, t);
+  }
   /** True while a navigation drag is in progress (the domain's pointer handlers stand down). */
   get navigating(): boolean { return !!this.drag; }
 }
