@@ -11,6 +11,27 @@ import type { Pick } from "../viewport/modelview";
 import { ensureDriver } from "./driver";
 import { DRIVE_TITLES, addDrive, addLink, drivesOf, linksOf, removeDrive, removeLink, setDrive, setLink, type BoardLinkItem, type Drive, type DriveKind, type DriveSource, type SolvedKeepout } from "./format";
 import { leaveHint, takeHint } from "./hint";
+import { ShownBoards } from "../board/ShownBoards";
+import { featuresOf, nextName, orderAt, type FeatureItem } from "../document/format";
+import { addedChange } from "../../../shared/itemdoc/itemdoc";
+import { featureDef } from "../ui/studio";
+
+const BOARD_FEATURE = "board-reference";
+
+/**
+ * A Board feature that puts the board exactly where a link has it: on the link's plane, raised by its lift,
+ * the link's sheet anchor at the plane's origin, turned the other way (the link turns the sheet, the feature
+ * the board).  The link is then placed by the feature (format.ts `feature`), so there is one placement.
+ */
+function showBoardChanges(studio: PartStudio, link: BoardLinkItem): ItemChange[] {
+  const doc = studio.doc, def = featureDef(BOARD_FEATURE); if (!doc || !def) return [];
+  const features = featuresOf(doc);
+  const feature: FeatureItem = {
+    id: newId(), type: "feature", featureType: BOARD_FEATURE, name: nextName(features, def.title), order: orderAt(features, features.length),
+    params: { ...def.defaults(), board: link.board, plane: link.plane as unknown as JsonObject, x: 0, y: 0, z: link.lift, angle: -link.rotation || 0, flip: false, origin: [link.anchor[0], link.anchor[1]] },
+  };
+  return [addedChange(feature), ...setLink(doc, link.id, { feature: feature.id })];
+}
 
 const BOARD_DOC_TYPE = "kicad_pcb";
 const baseName = (path: string) => (path.split("/").pop() || path).replace(/\.[^.]+$/, "");
@@ -143,7 +164,10 @@ export function BoardLinkPanel({ studio }: { studio: PartStudio }) {
   }, [loaded, studio]);
 
   if (!loaded) return null;
-  if (!boards.length) return <p className="note px-2 py-1 m-0">This project has no board to drive.</p>;
+  if (!boards.length) return <p className="note px-2 py-1 m-0">This project has no board.</p>;
+  // the Board feature that shows this board in the model, and the one the link is placed by
+  const shown = studio.getState().features.filter((f) => f.featureType === BOARD_FEATURE && f.params.board === boardId);
+  const placedBy = link && link.feature ? shown.find((f) => f.id === link.feature) || null : null;
   const commit = (changes: ItemChange[]) => { if (changes.length) studio.commit(changes); };
   const source = sourceFromSelection(studio);
   const plane = planeFromSelection(studio);
@@ -155,6 +179,8 @@ export function BoardLinkPanel({ studio }: { studio: PartStudio }) {
 
   return (
     <div className="flex flex-col text-sm" data-boardlink={link ? link.id : ""} data-solving={driverStatus.solving || undefined} data-writes={driverStatus.writes}>
+      <ShownBoards studio={studio} />
+      <div className="px-2 pt-1.5 text-2xs uppercase tracking-wide text-ink-3 mono border-t border-line">Driven by this model</div>
       <div className="flex items-center gap-1.5 px-2 py-1.5">
         {boards.length > 1
           ? <select className="input flex-1 min-w-0" value={boardId} aria-label="Board" onChange={(ev) => setBoardId(ev.target.value)}>{boards.map((b) => <option key={b.docId} value={b.docId}>{baseName(b.path)}</option>)}</select>
@@ -169,23 +195,39 @@ export function BoardLinkPanel({ studio }: { studio: PartStudio }) {
       ) : null}
       {!link ? (
         <div className="flex flex-col gap-1.5 px-2 pb-2">
-          <p className="note m-0">Not driven by this part studio. Linking places the board on a plane of the model; the selection is used when it names one.</p>
-          {canEdit ? <button type="button" className="btn sm primary self-start" data-act="link" onClick={() => commit(addLink(newId(), boardId, plane || { kind: "plane", plane: "top" }))}>Link this board</button> : null}
+          {shown.length
+            ? <p className="note m-0">Not driven by this part studio. Linking lets the model drive the board’s outline, holes and keep-outs; the board stays where {shown[0].name} puts it.</p>
+            : <p className="note m-0">Not driven by this part studio. Linking places the board on a plane of the model; the selection is used when it names one.</p>}
+          {canEdit ? <button type="button" className="btn sm primary self-start" data-act="link" onClick={() => commit(shown.length ? addLink(newId(), boardId, shown[0].params.plane as unknown as PlaneRef, shown[0].id) : addLink(newId(), boardId, plane || { kind: "plane", plane: "top" }))}>Link this board</button> : null}
         </div>
       ) : (
         <>
-          <div className="flex flex-col gap-1 px-2 pb-1.5" data-section="placement">
-            <label className="flex items-center gap-1.5 min-h-6">
-              <span className="flex-1 text-ink-2 truncate" title="Where the back of the board lies">Board lies on</span>
-              <span className="truncate" data-field="plane">{planeText}</span>
-              {canEdit ? <button type="button" className="btn sm" data-act="plane" disabled={!plane} title={plane ? "Lay the board on the selected plane or face" : "Select a plane or a flat face first"} onClick={() => plane && commit(setLink(studio.doc!, link.id, { plane }))}>Set</button> : null}
-            </label>
-            <Num name="lift" label="Raised by" value={link.lift} onCommit={(v) => commit(setLink(studio.doc!, link.id, { lift: v }))} />
-            <Num name="anchor-x" label="Origin on the sheet, X" value={link.anchor[0]} onCommit={(v) => commit(setLink(studio.doc!, link.id, { anchor: [v, link.anchor[1]] }))} />
-            <Num name="anchor-y" label="Origin on the sheet, Y" value={link.anchor[1]} onCommit={(v) => commit(setLink(studio.doc!, link.id, { anchor: [link.anchor[0], v] }))} />
-            <Num name="rotation" label="Turned" unit="°" value={link.rotation} onCommit={(v) => commit(setLink(studio.doc!, link.id, { rotation: v }))} />
+          {placedBy ? (
+            <div className="flex flex-col gap-1 px-2 pb-1.5" data-section="placement" data-placed-by={placedBy.id}>
+              <label className="flex items-center gap-1.5 min-h-6">
+                <span className="flex-1 text-ink-2 truncate" title="The board is shown in the model by this feature, and lies where it puts it">Placed by</span>
+                <span className="truncate" data-field="plane">{placedBy.name}</span>
+                {canEdit ? <button type="button" className="btn sm" data-act="edit-placement" title="Change where the board lies" onClick={() => studio.editFeature(placedBy.id)}>Edit</button> : null}
+              </label>
+              {link.solved.errors.plane ? <p className="callout warn m-0" role="status">{link.solved.errors.plane} The board keeps what it had.</p> : null}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1 px-2 pb-1.5" data-section="placement">
+              <label className="flex items-center gap-1.5 min-h-6">
+                <span className="flex-1 text-ink-2 truncate" title="Where the back of the board lies">Board lies on</span>
+                <span className="truncate" data-field="plane">{planeText}</span>
+                {canEdit ? <button type="button" className="btn sm" data-act="plane" disabled={!plane} title={plane ? "Lay the board on the selected plane or face" : "Select a plane or a flat face first"} onClick={() => plane && commit(setLink(studio.doc!, link.id, { plane }))}>Set</button> : null}
+              </label>
+              <Num name="lift" label="Raised by" value={link.lift} onCommit={(v) => commit(setLink(studio.doc!, link.id, { lift: v }))} />
+              <Num name="anchor-x" label="Origin on the sheet, X" value={link.anchor[0]} onCommit={(v) => commit(setLink(studio.doc!, link.id, { anchor: [v, link.anchor[1]] }))} />
+              <Num name="anchor-y" label="Origin on the sheet, Y" value={link.anchor[1]} onCommit={(v) => commit(setLink(studio.doc!, link.id, { anchor: [link.anchor[0], v] }))} />
+              <Num name="rotation" label="Turned" unit="°" value={link.rotation} onCommit={(v) => commit(setLink(studio.doc!, link.id, { rotation: v }))} />
+              {canEdit ? (shown.length
+              ? <button type="button" className="btn sm self-start" data-act="place-by" title={`The board lies where ${shown[0].name} shows it: one placement for both`} onClick={() => commit(setLink(studio.doc!, link.id, { feature: shown[0].id }))}>Place it where {shown[0].name} is</button>
+              : <button type="button" className="btn sm self-start" data-act="show-board" title="Show the board in the model, where this link places it" onClick={() => commit(showBoardChanges(studio, link))}>Show the board in the model</button>) : null}
             {link.solved.errors.plane ? <p className="callout warn m-0" role="status">{link.solved.errors.plane} The board keeps what it had.</p> : null}
-          </div>
+            </div>
+          )}
           {drivesOf(link).map((d) => <DriveRow key={d.id} studio={studio} link={link} drive={d} canEdit={canEdit} />)}
           {canEdit ? (
             <div className="flex flex-col gap-1 px-2 py-1.5 border-t border-line" data-section="add">

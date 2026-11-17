@@ -8,6 +8,7 @@ import type { ServiceContext } from "../kernel/service";
 import type { Body, Shape } from "../kernel/types";
 import { pointOf } from "../sketch/format";
 import { readLink, type BoardLinkItem, type Curve, type Drive, type DriveSource, type Solved, type SolvedDrive } from "./format";
+import { builtFrames } from "../board/placement";
 import { liftFrame, mmToNm, modelToBoard, type Placement } from "./transform";
 import type { Item } from "../../../shared/itemdoc/itemdoc";
 
@@ -225,16 +226,28 @@ function solveDrive(ctx: ServiceContext, drive: Drive, pl: Placement): SolvedDri
 }
 
 /** Solve one link against the model. */
-export function solveLink(ctx: ServiceContext, link: BoardLinkItem): Solved {
+export function solveLink(ctx: ServiceContext, link: BoardLinkItem, origins: { [featureId: string]: unknown } = {}): Solved {
   const prev = link.solved;
   const out: Solved = { v: 1, frame: prev.frame, drives: {}, errors: {} };
   const message = (e: unknown) => (e instanceof Lost ? e.message : `The kernel could not work this out (${ctx.k.describe(e)}).`);
   let frame: Frame | null = null;
-  try { frame = liftFrame(planeFrame(ctx, link.plane), link.lift); } catch (e) { out.errors.plane = message(e); }
+  let anchor = link.anchor, rotation = link.rotation;
+  if (typeof link.feature === "string" && link.feature) {
+    // One placement: the board lies where its Board feature put it.  That feature's frame is the board's own
+    // (x right and y up on the sheet, the normal from back to front), with the feature's `origin` at its origin,
+    // so the sheet position of a model point needs no further turn.
+    const built = builtFrames.get(link.feature), o = origins[link.feature];
+    const alive = ctx.state.bodies.some((b) => b.createdBy === link.feature);
+    if (!built || !alive || !Array.isArray(o) || typeof o[0] !== "number" || typeof o[1] !== "number") out.errors.plane = "The Board feature that places this board is missing, suppressed or has not been built.";
+    else { frame = built.frame; anchor = [o[0], o[1]]; rotation = 0; out.anchor = anchor; out.rotation = 0; }
+    if (!frame && Array.isArray(prev.anchor)) { out.anchor = prev.anchor; out.rotation = prev.rotation; }
+  } else {
+    try { frame = liftFrame(planeFrame(ctx, link.plane), link.lift); } catch (e) { out.errors.plane = message(e); }
+  }
   if (frame) out.frame = { origin: frame.origin.map(round9) as Vec3, x: frame.x.map(round9) as Vec3, y: frame.y.map(round9) as Vec3, normal: frame.normal.map(round9) as Vec3 };
   for (const [id, drive] of Object.entries(link.drives)) {
     if (!out.frame || out.errors.plane) { if (prev.drives[id]) out.drives[id] = prev.drives[id]; continue; }
-    try { out.drives[id] = solveDrive(ctx, drive, { frame: out.frame, anchor: link.anchor, rotation: link.rotation }); }
+    try { out.drives[id] = solveDrive(ctx, drive, { frame: out.frame, anchor, rotation }); }
     catch (e) { out.errors[id] = message(e); if (prev.drives[id]) out.drives[id] = prev.drives[id]; }
   }
   return out;
@@ -244,7 +257,8 @@ const round9 = (v: number): number => { const r = Math.round(v * 1e9) / 1e9; ret
 /** The service: `{ links: <board-link items> }` → `{ <link id>: Solved }`. */
 export function solveLinks(ctx: ServiceContext, args: unknown): { [linkId: string]: Solved } {
   const out: { [linkId: string]: Solved } = {};
-  const items = (args as { links?: Item[] } | null)?.links;
-  for (const item of Array.isArray(items) ? items : []) { const link = readLink(item); if (link) out[link.id] = solveLink(ctx, link); }
+  const a = args as { links?: Item[]; origins?: { [featureId: string]: unknown } } | null;
+  const items = a?.links, origins = (a && typeof a.origins === "object" && a.origins) || {};
+  for (const item of Array.isArray(items) ? items : []) { const link = readLink(item); if (link) out[link.id] = solveLink(ctx, link, origins); }
   return out;
 }

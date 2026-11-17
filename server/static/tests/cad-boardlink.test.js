@@ -104,6 +104,13 @@ test("a link is an item of the part studio; its edits are item changes that touc
   const after = F.linksOf(doc)[0];
   assert.ok(!after.drives.h && !after.solved.drives.h && after.solved.drives.o);
   assert.deepEqual(F.placementOf(after), { frame: TOP, anchor: [100, 100], rotation: 0 });
+  // a link placed by a Board feature: the answer carries where that feature's origin is on the sheet, and
+  // that is what the board editor reads, whatever the link's own anchor and turn say
+  const placed = { ...after, feature: "bf", anchor: [1, 2], rotation: 30, solved: { ...after.solved, anchor: [134, 84], rotation: 0 } };
+  assert.deepEqual(F.placementOf(placed), { frame: TOP, anchor: [134, 84], rotation: 0 });
+  const made = F.addLink("L9", "board-doc", { kind: "plane", plane: "top" }, "bf")[0].item;
+  assert.equal(made.feature, "bf"); assert.equal(F.readLink(made).feature, "bf");
+  assert.equal(F.addLink("L8", "board-doc", { kind: "plane", plane: "top" })[0].item.feature, undefined);
 
   // unknown keys survive, a foreign item is not a link, and a half-written link reads with defaults
   assert.equal(F.readLink({ id: "x", type: "feature" }), null);

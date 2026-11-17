@@ -6,6 +6,8 @@
 //   { id, type: "board-link", board: <document id of the .kicad_pcb>,
 //     plane: PlaneRef, lift: mm,            where the board's back face lies: a plane or planar face, raised by `lift`
 //     anchor: [x, y] mm, rotation: deg,      where that plane's origin lands on the KiCad sheet (transform.ts)
+//     feature: <id of a Board feature>,      optional: the board is placed by that feature (it is shown in the model
+//                                            there), and plane, lift, anchor and rotation above are not used
 //     drives: { <id>: Drive },               what the studio drives on the board; a map, so two people can edit two drives
 //     solved: Solved }                       the drives as board geometry, in nanometres: written by a part studio
 //                                            page after every rebuild (driver.ts), read by the board editor
@@ -64,6 +66,12 @@ export interface Solved extends JsonObject {
   /** the board's back face in model space, `lift` applied; null until the plane has been resolved once */
   frame: SolvedFrame | null;
   drives: { [id: string]: SolvedDrive };
+  /**
+   * Where the frame's origin lands on the sheet and how the board is turned, when a Board feature places the
+   * board (the link's `feature`): they are that feature's, solved with the frame.  Absent otherwise.
+   */
+  anchor?: [number, number];
+  rotation?: number;
   /** drives (or "plane") that could not be solved from the model as it is; their geometry above is the last good one */
   errors: { [id: string]: string };
 }
@@ -75,6 +83,11 @@ export interface BoardLinkItem extends Item {
   lift: number;
   anchor: [number, number];
   rotation: number;
+  /**
+   * The Board feature (features/board-reference.ts) that shows this board in the model.  When it is set the
+   * board has ONE placement, that feature's: the link's own plane, lift, anchor and rotation are ignored.
+   */
+  feature?: string | null;
   drives: { [id: string]: Drive };
   solved: Solved;
 }
@@ -113,7 +126,10 @@ export function drivesOf(link: BoardLinkItem): (Drive & { id: string })[] {
 
 /** Where the board lies, once the plane has been resolved (transform.ts); null before. */
 export function placementOf(link: BoardLinkItem): Placement | null {
-  return link.solved.frame ? { frame: link.solved.frame, anchor: link.anchor, rotation: link.rotation } : null;
+  const s = link.solved;
+  if (!s.frame) return null;
+  const a = s.anchor;
+  return { frame: s.frame, anchor: Array.isArray(a) && a.length === 2 ? [num(a[0], link.anchor[0]), num(a[1], link.anchor[1])] : link.anchor, rotation: typeof s.rotation === "number" ? s.rotation : link.rotation };
 }
 
 /** The tallest component a solved keep-out allows on a board of this thickness, mm; 0 when none may stand there. */
@@ -133,8 +149,8 @@ export function defaultDrive(kind: DriveKind, source: DriveSource, name: string,
 
 // ---------------------------------------------------------------- edits (they return changes and apply nothing)
 
-export function addLink(id: string, board: string, plane: PlaneRef): ItemChange[] {
-  const item: BoardLinkItem = { id, type: BOARD_LINK_TYPE, board, plane, lift: 0, anchor: [100, 100], rotation: 0, drives: {}, solved: emptySolved() };
+export function addLink(id: string, board: string, plane: PlaneRef, feature?: string): ItemChange[] {
+  const item: BoardLinkItem = { id, type: BOARD_LINK_TYPE, board, plane, lift: 0, anchor: [100, 100], rotation: 0, ...(feature ? { feature } : {}), drives: {}, solved: emptySolved() };
   return [addedChange(item)];
 }
 
@@ -147,8 +163,8 @@ function modify(doc: ItemDoc, linkId: string, edit: (link: JsonObject) => void):
   return c ? [c] : [];
 }
 
-export function setLink(doc: ItemDoc, linkId: string, patch: Partial<Pick<BoardLinkItem, "plane" | "lift" | "anchor" | "rotation" | "board">>): ItemChange[] {
-  return modify(doc, linkId, (l) => { Object.assign(l, clone(patch as JsonObject)); });
+export function setLink(doc: ItemDoc, linkId: string, patch: Partial<Pick<BoardLinkItem, "plane" | "lift" | "anchor" | "rotation" | "board" | "feature">>): ItemChange[] {
+  return modify(doc, linkId, (l) => { Object.assign(l, clone(patch as JsonObject)); if (l.feature === null) delete l.feature; });
 }
 
 export function removeLink(doc: ItemDoc, linkId: string): ItemChange[] {
