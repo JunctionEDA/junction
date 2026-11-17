@@ -8,6 +8,7 @@ import * as edits from "../document/edits";
 import type { FeatureItem } from "../document/format";
 import { Glyph } from "./Glyph";
 import { useStudio } from "./hooks";
+import { FEATURE_ROW_SLOTS } from "./slots";
 import { featureDef, type PartStudio } from "./studio";
 
 interface Menu { x: number; y: number; id: string }
@@ -84,6 +85,7 @@ export function FeatureList({ studio }: { studio: PartStudio }) {
               onKeyDown={(ev) => { if (ev.key === "Enter") (ev.target as HTMLInputElement).blur(); if (ev.key === "Escape") setRenaming(null); ev.stopPropagation(); }} />
           : <span className={cx("flex-1 truncate", f.suppressed && "line-through")}>{f.name}</span>}
         {state === "error" ? <span className="pill err" title={rep?.message}>error</span> : state === "warning" ? <span className="pill warn" title={rep?.message}>note</span> : state === "suppressed" ? <span className="text-xs">off</span> : null}
+        {isDraft ? null : FEATURE_ROW_SLOTS.map((Slot, i) => <Slot key={i} studio={studio} featureId={f.id} />)}
       </div>,
     );
     if (!isDraft) gap++;

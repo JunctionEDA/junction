@@ -66,6 +66,7 @@ export class PartStudio {
   private state: StudioState;
   private listeners = new Set<() => void>();
   private regenTimer = 0;
+  private regenWhenShown: (() => void) | null = null;
   private fitted = false;
   private closed = false;
   /** A sketch tool that is drawing gets the keys first; it returns true for the ones it used. */
@@ -111,6 +112,7 @@ export class PartStudio {
   close(): void {
     this.closed = true;
     clearTimeout(this.regenTimer);
+    if (this.regenWhenShown) document.removeEventListener("visibilitychange", this.regenWhenShown);
     this.viewport.canvas.removeEventListener("keydown", this.onKey);
     this.session.close(); this.kernel.dispose(); this.view.dispose(); this.viewport.dispose();
     this.listeners.clear();
@@ -153,6 +155,15 @@ export class PartStudio {
 
   scheduleRegen(): void {
     clearTimeout(this.regenTimer);
+    // A window nobody is looking at does not rebuild for every edit somebody else makes: it rebuilds once,
+    // from the document as it is by then, when it is looked at again.
+    if (document.visibilityState === "hidden") {
+      if (!this.regenWhenShown) {
+        this.regenWhenShown = () => { if (document.visibilityState === "hidden") return; document.removeEventListener("visibilitychange", this.regenWhenShown!); this.regenWhenShown = null; this.scheduleRegen(); };
+        document.addEventListener("visibilitychange", this.regenWhenShown);
+      }
+      return;
+    }
     this.regenTimer = window.setTimeout(() => void this.regen(), 20);
   }
   private async regen(): Promise<void> {
