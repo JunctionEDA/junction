@@ -9759,26 +9759,26 @@ var require_pcb_tools = __commonJS({
         if (typeof dd.keep_text_aligned === "boolean") DIM_DEFAULTS.keepAligned = dd.keep_text_aligned;
         if (typeof dd.arrow_length === "number" && dd.arrow_length > 0) DIM_DEFAULTS.arrowLength = dd.arrow_length / 1e6;
         if (typeof dd.extension_offset === "number" && dd.extension_offset >= 0) DIM_DEFAULTS.extOffset = dd.extension_offset / 1e6;
-        for (const [cls, stem2] of [["silk", "silk"], ["copper", "copper"], ["edges", "board_outline"], ["courtyard", "courtyard"], ["fab", "fab"], ["others", "other"]]) {
-          const w = d[stem2 + "_line_width"];
+        for (const [cls, stem3] of [["silk", "silk"], ["copper", "copper"], ["edges", "board_outline"], ["courtyard", "courtyard"], ["fab", "fab"], ["others", "other"]]) {
+          const w = d[stem3 + "_line_width"];
           if (typeof w === "number" && w > 0) LINE_W[cls] = w;
-          const sz = d[stem2 + "_text_size_h"], th = d[stem2 + "_text_thickness"];
+          const sz = d[stem3 + "_text_size_h"], th = d[stem3 + "_text_thickness"];
           if (typeof sz === "number" && sz > 0) TEXT_STYLE[cls] = [sz, typeof th === "number" && th > 0 ? th : TEXT_STYLE[cls][1]];
         }
       }
       function layerStyle(layer4) {
         const cls = layerClass(layer4);
-        const stem2 = { silk: "silk", copper: "copper", edges: "board_outline", courtyard: "courtyard", fab: "fab", others: "other" }[cls];
+        const stem3 = { silk: "silk", copper: "copper", edges: "board_outline", courtyard: "courtyard", fab: "fab", others: "other" }[cls];
         const d = rawDefaults;
         const [size2, thick] = TEXT_STYLE[cls];
-        const v = d[stem2 + "_text_size_v"];
+        const v = d[stem3 + "_text_size_v"];
         return {
           line: LINE_W[cls],
           w: size2,
           h: typeof v === "number" && v > 0 ? v : size2,
           thick,
-          italic: d[stem2 + "_text_italic"] === true,
-          upright: typeof d[stem2 + "_text_upright"] === "boolean" ? d[stem2 + "_text_upright"] : true
+          italic: d[stem3 + "_text_italic"] === true,
+          upright: typeof d[stem3 + "_text_upright"] === "boolean" ? d[stem3 + "_text_upright"] : true
         };
       }
       var textStyle = (layer4) => {
@@ -69490,10 +69490,10 @@ function projectModel(path2) {
   }
   const m = /^\$[{(]KIPRJMOD[})][\/\\](.+)\.(?:step|stp|wrl|wrz)$/i.exec(path2);
   if (!m) return null;
-  const stem2 = m[1].replace(/\\/g, "/").replace(/^\.\//, "");
-  if (stem2.replace(/^(?:\.\.\/)+/, "").split("/").includes("..")) return null;
+  const stem3 = m[1].replace(/\\/g, "/").replace(/^\.\//, "");
+  if (stem3.replace(/^(?:\.\.\/)+/, "").split("/").includes("..")) return null;
   try {
-    return typeof fn === "function" ? fn(stem2) || null : null;
+    return typeof fn === "function" ? fn(stem3) || null : null;
   } catch {
     return null;
   }
@@ -72768,12 +72768,12 @@ function compute() {
     }
     return files.get(out2.join("/")) || files.get(file) || Array.from(files.values()).find((f2) => f2.file.split("/").pop() === file.split("/").pop()) || null;
   };
-  const stem2 = rootFile.file.split("/").pop().replace(/\.kicad_sch$/, "");
+  const stem3 = rootFile.file.split("/").pop().replace(/\.kicad_sch$/, "");
   const pro = projectDocs2().find((d) => d.docType === "kicad_pro");
-  const project3 = pro ? pro.path.split("/").pop().replace(/\.kicad_pro$/, "") : stem2;
+  const project3 = pro ? pro.path.split("/").pop().replace(/\.kicad_pro$/, "") : stem3;
   const nl = NL().buildNetlist(rootFile, resolve2, { symbolPins: h3.symbolPins, isPower: (d, it) => h3.isPowerSymbol(d, String((KiCadCanvas.kid(it.node, "lib_id") || [])[1])) }, project3);
   const map = nl.netMap || /* @__PURE__ */ new Map(), instances = nl.instances || [];
-  computed = { map, instances, index: SN().nameIndex(map), rootName: stem2, docs, key: key3 };
+  computed = { map, instances, index: SN().nameIndex(map), rootName: stem3, docs, key: key3 };
   return computed;
 }
 function netMap() {
@@ -74168,10 +74168,10 @@ var init_host = __esm({
 // web/domains/registry.ts
 function partStudioImporting(file, featureId) {
   const sorted = (v) => Array.isArray(v) ? "[" + v.map(sorted).join(",") + "]" : v && typeof v === "object" ? "{" + Object.keys(v).sort().map((k) => JSON.stringify(k) + ":" + sorted(v[k])).join(",") + "}" : JSON.stringify(v);
-  const stem2 = file.name.replace(/\.[^.]+$/, "");
+  const stem3 = file.name.replace(/\.[^.]+$/, "");
   const format = /\.(brep|brp)$/i.test(file.path) ? "brep" : "step";
   const items = [
-    { featureType: "import", id: featureId, name: stem2, order: "V", params: { file: { ...file, format }, split: "solids" }, type: "feature" },
+    { featureType: "import", id: featureId, name: stem3, order: "V", params: { file: { ...file, format }, split: "solids" }, type: "feature" },
     { id: "studio", rollback: null, type: "studio", units: "mm" }
   ].sort((a, b) => a.id < b.id ? -1 : 1);
   return '{"junction":"part-studio","version":1,"items":[\n' + items.map(sorted).join(",\n") + "\n]}\n";
@@ -74651,6 +74651,32 @@ var init_title = __esm({
   }
 });
 
+// web/platform/doctabs/roomapi.ts
+function parseDocsNotice(msg) {
+  const m = msg;
+  if (!m || m.type !== "docs" || typeof m.n !== "string" || typeof m.projectId !== "string" || !m.doc || typeof m.doc.path !== "string") return null;
+  if (m.change !== "added" && m.change !== "renamed" && m.change !== "deleted") return null;
+  const name = m.change === "renamed" && typeof m.from === "string" ? `${stem2(m.from)} to ${stem2(m.doc.path)}` : stem2(m.doc.path);
+  const login = m.by && typeof m.by.login === "string" ? m.by.login : "";
+  return { n: m.n, projectId: m.projectId, note: { what: m.change, name: name.slice(0, 120) }, by: { userId: m.by && typeof m.by.userId === "number" ? m.by.userId : 0, login, name: m.by && typeof m.by.name === "string" && m.by.name || login || "Someone" } };
+}
+function tellDocsChanged(msg) {
+  const notice = parseDocsNotice(msg);
+  if (!notice || told.includes(notice.n) || typeof window === "undefined") return;
+  told.push(notice.n);
+  if (told.length > 50) told.shift();
+  window.dispatchEvent(new CustomEvent(DOCS_EVENT, { detail: notice }));
+}
+var DOCS_EVENT, stem2, told;
+var init_roomapi = __esm({
+  "web/platform/doctabs/roomapi.ts"() {
+    "use strict";
+    DOCS_EVENT = "junction-project-docs";
+    stem2 = (path2) => (path2.split("/").pop() || path2).replace(/\.[^.]+$/, "");
+    told = [];
+  }
+});
+
 // web/domains/pcb/editor/net.ts
 function setConn(cls, text3) {
   store.slice("connection", { status: cls === "live" ? "live" : cls === "err" ? "error" : "offline", text: text3 || (cls === "live" ? "live" : "offline") });
@@ -74825,6 +74851,7 @@ async function connect() {
     if (msg.type === "comment") noteCommentMsg(msg);
     if (msg.type === "proposal") noteProposalMsg(msg);
     if (msg.type === "versions") onVersionsNotice(msg);
+    if (msg.type === "docs") tellDocsChanged(msg);
     if (msg.type === "saved") window.dispatchEvent(new CustomEvent("kc-doc-saved", { detail: msg }));
     if (historyActive() && (msg.type === "snapshot" || msg.type === "op" || msg.type === "ops" || msg.type === "reset")) {
       if (msg.type === "op") {
@@ -75026,6 +75053,7 @@ var init_net = __esm({
     init_versions();
     init_view();
     init_title();
+    init_roomapi();
     editsTimer = 0;
   }
 });
@@ -80800,8 +80828,8 @@ function projectModelFile(path2, files) {
   const low = path2.toLowerCase();
   const hit5 = files.find((f2) => f2.toLowerCase() === low);
   if (hit5) return hit5;
-  const stem2 = low.replace(/\.(wrl|step|stp)$/i, "");
-  return files.find((f2) => /\.(step|stp)$/i.test(f2) && f2.toLowerCase().replace(/\.(step|stp)$/i, "") === stem2) || null;
+  const stem3 = low.replace(/\.(wrl|step|stp)$/i, "");
+  return files.find((f2) => /\.(step|stp)$/i.test(f2) && f2.toLowerCase().replace(/\.(step|stp)$/i, "") === stem3) || null;
 }
 function modelProblem(path2, env) {
   if (!path2) return { icon: "warning", text: "No filename entered" };
@@ -86104,8 +86132,8 @@ function editorDocs(docs) {
 function rootSchematicOf(shown2, all2) {
   const sch = shown2.filter((d) => d.docType === "kicad_sch");
   const pro = all2.find((d) => d.docType === "kicad_pro");
-  const stem2 = pro && pro.path.split("/").pop().replace(/\.kicad_pro$/, "");
-  return sch.find((d) => d.path.split("/").pop() === stem2 + ".kicad_sch") || sch.sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
+  const stem3 = pro && pro.path.split("/").pop().replace(/\.kicad_pro$/, "");
+  return sch.find((d) => d.path.split("/").pop() === stem3 + ".kicad_sch") || sch.sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
 }
 function firstDoc(shown2, all2, wanted2) {
   return shown2.find((d) => d.docId === wanted2) || rootSchematicOf(shown2, all2) || shown2.find((d) => d.docType === "kicad_pcb") || null;
@@ -89210,17 +89238,17 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
   };
   const defaultsPage = (el4) => {
     const val = (k) => numOr3(defaults[k], Number(DEFAULTS_DEFAULTS[k]));
-    const rows3 = LAYER_CLASSES.map(([stem2, label]) => {
-      const text3 = `${stem2}_text_size_h` in DEFAULTS_DEFAULTS;
+    const rows3 = LAYER_CLASSES.map(([stem3, label]) => {
+      const text3 = `${stem3}_text_size_h` in DEFAULTS_DEFAULTS;
       return {
-        stem: stem2,
+        stem: stem3,
         label,
-        line: val(`${stem2}_line_width`),
-        w: text3 ? val(`${stem2}_text_size_h`) : NaN,
-        ht: text3 ? val(`${stem2}_text_size_v`) : NaN,
-        th: text3 ? val(`${stem2}_text_thickness`) : NaN,
-        italic: text3 ? boolOr2(defaults[`${stem2}_text_italic`], false) : false,
-        upright: text3 ? boolOr2(defaults[`${stem2}_text_upright`], false) : false,
+        line: val(`${stem3}_line_width`),
+        w: text3 ? val(`${stem3}_text_size_h`) : NaN,
+        ht: text3 ? val(`${stem3}_text_size_v`) : NaN,
+        th: text3 ? val(`${stem3}_text_thickness`) : NaN,
+        italic: text3 ? boolOr2(defaults[`${stem3}_text_italic`], false) : false,
+        upright: text3 ? boolOr2(defaults[`${stem3}_text_upright`], false) : false,
         text: text3
       };
     });
@@ -89259,11 +89287,11 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
     register("Defaults", { edits: () => {
       const out2 = [], P = [...DS3, "defaults"];
       for (const r of g2.rows()) {
-        const stem2 = String(r.stem);
-        if (isFinite(Number(r.line))) out2.push({ path: [...P, `${stem2}_line_width`], value: Number(r.line) });
+        const stem3 = String(r.stem);
+        if (isFinite(Number(r.line))) out2.push({ path: [...P, `${stem3}_line_width`], value: Number(r.line) });
         if (!r.text) continue;
-        for (const [k, key3] of [["w", "text_size_h"], ["ht", "text_size_v"], ["th", "text_thickness"]]) if (isFinite(Number(r[k]))) out2.push({ path: [...P, `${stem2}_${key3}`], value: Number(r[k]) });
-        out2.push({ path: [...P, `${stem2}_text_italic`], value: !!r.italic }, { path: [...P, `${stem2}_text_upright`], value: !!r.upright });
+        for (const [k, key3] of [["w", "text_size_h"], ["ht", "text_size_v"], ["th", "text_thickness"]]) if (isFinite(Number(r[k]))) out2.push({ path: [...P, `${stem3}_${key3}`], value: Number(r[k]) });
+        out2.push({ path: [...P, `${stem3}_text_italic`], value: !!r.italic }, { path: [...P, `${stem3}_text_upright`], value: !!r.upright });
       }
       out2.push(
         { path: [...P, "dimension_units"], value: dUnits.get(), ints: true },
@@ -90811,14 +90839,14 @@ function unfoldPopup(entries, bus, at4, title) {
   };
   const out2 = title ? [{ label: "Unfold from Bus", disabled: true }] : [];
   const diff = /* @__PURE__ */ new Map();
-  const stem2 = (n2) => /[+\-PN]$/.test(n2) ? n2.slice(0, -1) : null;
+  const stem3 = (n2) => /[+\-PN]$/.test(n2) ? n2.slice(0, -1) : null;
   for (const e of entries) {
     if (!e.bus) {
       out2.push({ label: U.printBusForUI(e.name), run: run(e.name) });
       continue;
     }
     let sub2;
-    const st = stem2(e.name);
+    const st = stem3(e.name);
     if (st !== null && e.members.length) {
       const had = diff.get(st);
       if (had) sub2 = had;
@@ -90832,7 +90860,7 @@ function unfoldPopup(entries, bus, at4, title) {
       out2.push(sub2);
     }
     for (const n2 of e.members) {
-      const s2 = stem2(n2);
+      const s2 = stem3(n2);
       if (s2 !== null) {
         let d = diff.get(s2);
         if (!d) {
@@ -92183,9 +92211,9 @@ function rootSchematicOf2(docs) {
   const sch = docs.filter((d) => d.docType === "kicad_sch");
   if (!sch.length) return null;
   const pro = docs.find((d) => d.docType === "kicad_pro");
-  const stem2 = (p) => p.replace(/\.[^./]+$/, "");
+  const stem3 = (p) => p.replace(/\.[^./]+$/, "");
   const board3 = docs.find((d) => d.docId === state.docId);
-  return pro && sch.find((d) => stem2(d.path) === stem2(pro.path)) || board3 && sch.find((d) => stem2(d.path) === stem2(board3.path)) || sch.slice().sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
+  return pro && sch.find((d) => stem3(d.path) === stem3(pro.path)) || board3 && sch.find((d) => stem3(d.path) === stem3(board3.path)) || sch.slice().sort((a, b) => a.path.split("/").length - b.path.split("/").length || a.path.length - b.path.length)[0];
 }
 async function projectNetlist() {
   const docs = projectDocs2(), root5 = rootSchematicOf2(docs);
@@ -112048,8 +112076,8 @@ ${body}
       if (d) return d;
     }
     if (ctx.docPath) return { path: ctx.docPath };
-    const pro = (ctx.docs || []).find((d) => d && d.docType === "kicad_pro"), stem2 = pro ? baseName3(pro.path).replace(/\.kicad_pro$/, "") : null;
-    return stem2 && docs.find((d) => baseName3(d.path) === stem2 + SHEET_EXT) || docs.slice().sort((x, y) => x.path.split("/").length - y.path.split("/").length || x.path.length - y.path.length)[0] || null;
+    const pro = (ctx.docs || []).find((d) => d && d.docType === "kicad_pro"), stem3 = pro ? baseName3(pro.path).replace(/\.kicad_pro$/, "") : null;
+    return stem3 && docs.find((d) => baseName3(d.path) === stem3 + SHEET_EXT) || docs.slice().sort((x, y) => x.path.split("/").length - y.path.split("/").length || x.path.length - y.path.length)[0] || null;
   }
   function normSheetFile(file) {
     file = str9(file).trim().replace(/\\/g, "/").replace(/^\/+/, "");
@@ -140209,14 +140237,14 @@ function reviewCraft(doc2, P, k, settings3, add2) {
     for (const v of vias) if (v.net) count2.set(v.net, (count2.get(v.net) || 0) + 1);
     const routed = new Set(tracks.map((t) => t.net));
     const items = [];
-    for (const [stem2, g2] of groups) {
+    for (const [stem3, g2] of groups) {
       const r = g2.filter((n2) => routed.has(n2));
       if (r.length < 4) continue;
       const c = r.map((n2) => count2.get(n2) || 0);
       const lo = Math.min(...c), hi = Math.max(...c);
       if (lo === hi) continue;
       const odd = r.filter((n2) => (count2.get(n2) || 0) !== lo).sort();
-      items.push(`${stem2}: most lines have ${lo} via${lo === 1 ? "" : "s"}; ${few2(odd.map((n2) => `${bare2(n2)} ${count2.get(n2)}`), 6).join(", ")}`);
+      items.push(`${stem3}: most lines have ${lo} via${lo === 1 ? "" : "s"}; ${few2(odd.map((n2) => `${bare2(n2)} ${count2.get(n2)}`), 6).join(", ")}`);
     }
     if (items.length) add2("bus.transitions", "warning", "The lines of one bus should take the same route through the board: the same layers and the same number of vias. A via's delay is hard to know, so lines that differ in vias cannot be matched by track length alone, and each via is one more step for the edge to reflect from. Route the whole group on one layer where it fits (board.route(max_vias=0, nets=[...]) for the group after board.unroute), or give every line the same layer change.", items);
   }
