@@ -425,13 +425,78 @@ export function topLevelSheetsChanged(): void {
 export function multiTopLevel(): boolean { return topLevelSchematics().length > 1; }
 
 
-export function enterSheet(file: string) {
-  const base = file.split("/").pop();
-  const cur = state.doc ? state.doc.path.split("/").slice(0, -1).join("/") : "";
-  const rel = cur ? `${cur}/${file}` : file;
-  const doc = state.docs!.find((d) => d.docType === "kicad_sch" && (d.path === rel || d.path === file))
+/** The project's schematic a sheet's Sheetfile names, seen from the folder of `parentPath` (else by file name). */
+export function findSheetDoc(file: string, parentPath: string): DocEntry | undefined {
+  file = file.replace(/\\/g, "/");
+  const base = file.split("/").pop(), dir = parentPath.split("/").slice(0, -1).join("/");
+  const rel = normPath(dir ? `${dir}/${file}` : file);
+  return state.docs!.find((d) => d.docType === "kicad_sch" && (d.path === rel || d.path === file))
     || state.docs!.find((d) => d.docType === "kicad_sch" && d.path.split("/").pop() === base);
-  if (doc) openDoc(doc); else toast("That sheet isn't in the shared project yet");
+}
+function normPath(p: string): string { const out: string[] = []; for (const x of p.split("/")) { if (!x || x === ".") continue; if (x === "..") out.pop(); else out.push(x); } return out.join("/"); }
+
+let docsFetch: Promise<boolean> | null = null;
+/**
+ * Read the project's file list again: a sheet somebody else drew made a new file after this page loaded (the
+ * server's "docs" notice, or a sheet that names a file this page has not heard of).  True when files were added.
+ */
+export function refreshDocs(): Promise<boolean> {
+  if (!state.project) return Promise.resolve(false);
+  if (docsFetch) return docsFetch;
+  const pid = state.project.projectId;
+  docsFetch = (async () => {
+    try {
+      const info = await api(`/api/projects/${pid}/info`) as ProjectInfo | null;
+      if (!info || !Array.isArray(info.docs) || !state.project || state.project.projectId !== pid) return false;
+      const known = new Set(state.project.docs.map((d) => d.docId));
+      const added = info.docs.filter((d) => !known.has(d.docId));
+      if (!added.length) return false;
+      // new arrays: what is worked out from the lists (the top-level sheets) is kept by their identity
+      state.project.docs = state.project.docs.concat(added); store.set({ project: Object.assign({}, state.project) });
+      state.docs = editorDocs(state.docs!.concat(editorDocs(added).filter((d) => !state.docs!.some((x) => x.docId === d.docId))));
+      publishDocs();
+      return true;
+    } catch (e) { return false; }
+    finally { docsFetch = null; }
+  })();
+  return docsFetch;
+}
+
+/** An empty schematic file (SCH_SCREEN of a new sheet whose file does not exist yet). */
+function emptySchematic(): string {
+  const uuid = KiCadCanvas.newUuid();
+  return `(kicad_sch (version 20250114) (generator "kicad-collab-web") (generator_version "9.0") (uuid "${uuid}") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))\n`;
+}
+
+/**
+ * A sheet whose file is in no one's copy of the project (added by a tool or an older app that did not upload it):
+ * like eeschema, which gives a sheet with a missing file a new empty screen, make the file and enter it.
+ */
+async function createSheetFile(file: string, parentPath: string): Promise<DocEntry | undefined> {
+  if (!state.project) return undefined;
+  const dir = parentPath.split("/").slice(0, -1).join("/"), path = normPath(dir ? `${dir}/${file}` : file);
+  if (!/\.kicad_sch$/i.test(path)) return undefined;
+  const res = await api(`/api/projects/${state.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path, docType: "kicad_sch" }) }) as { docId?: string; path?: string; existing?: boolean } | null;
+  if (!res || !res.docId) return undefined;
+  if (!res.existing) await api(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: emptySchematic() });
+  await refreshDocs();
+  return state.docs!.find((d) => d.docId === res.docId);
+}
+
+/**
+ * SCH_NAVIGATE_TOOL::EnterSheet: open the sheet file a sheet symbol names.  `parentPath` is the file that holds
+ * the sheet symbol (the open one by default).  A file this page has not heard of is looked up again first.
+ */
+export async function enterSheet(file: string, parentPath?: string): Promise<void> {
+  const parent = parentPath !== undefined ? parentPath : state.doc ? state.doc.path : "";
+  let doc = findSheetDoc(file, parent);
+  if (!doc && await refreshDocs()) doc = findSheetDoc(file, parent);
+  if (!doc && !E.viewOnly) {
+    try { doc = await createSheetFile(file, parent); }
+    catch (e) { toast(`Could not create the sheet file '${file}': ${(e as Error).message || e}`, 5000); return; }
+  }
+  if (doc) { await openDoc(doc); return; }
+  toast(`The sheet file '${file}' is not in this project`, 4000);
 }
 
 

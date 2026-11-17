@@ -69530,9 +69530,14 @@ function footprintModels(node, guess = true, boardFiles2 = null) {
       out2.push({ name: path2.replace(/^\$[{(]KIPRJMOD[})][\/\\]/i, ""), offset: xyzOf(c, "offset", 0), scale: xyzOf(c, "scale", 1), rotate: xyzOf(c, "rotate", 0), source: "project", url: own });
       continue;
     }
-    const m = /([^\/\\${}]+)\.3dshapes[\/\\]([^\/\\]+)\.(?:step|stp|wrl)$/i.exec(path2);
+    const m = /([^\/\\${}]+)\.3dshapes[\/\\]([^\/\\]+)\.(?:step|stp|wrl|wrz)$/i.exec(path2);
+    const ref = { name: m ? `${m[1]}/${m[2]}` : path2.replace(/^.*[\/\\]/, ""), offset: xyzOf(c, "offset", 0), scale: xyzOf(c, "scale", 1), rotate: xyzOf(c, "rotate", 0) };
+    const foreign = foreignModel(node, path2, ref);
+    if (foreign) {
+      if (!out2.some((o) => o.url === foreign.url)) out2.push(foreign);
+      continue;
+    }
     if (!m) continue;
-    const ref = { name: `${m[1]}/${m[2]}`, offset: xyzOf(c, "offset", 0), scale: xyzOf(c, "scale", 1), rotate: xyzOf(c, "rotate", 0) };
     if (/KICAD_COLLAB_3DMODELS/.test(path2)) {
       const hit5 = VENDOR_FIELDS.map(([f2, v]) => [v, fieldOf2(node, f2)]).find(([, id]) => id);
       if (!hit5) continue;
@@ -69544,6 +69549,36 @@ function footprintModels(node, guess = true, boardFiles2 = null) {
     if (g2) out2.push(g2);
   }
   return out2;
+}
+function lcscOf(node) {
+  for (const f2 of LCSC_FIELDS2) {
+    const v = fieldOf2(node, f2);
+    if (/^C\d{1,9}$/i.test(v)) return v.toUpperCase();
+  }
+  return "";
+}
+function foreignModel(node, path2, ref) {
+  const v = /^\$[{(]([A-Za-z0-9_]+)[})][\/\\](.+)$/.exec(path2);
+  if (!v) return null;
+  if (/^(KICAD\d*_3DMODEL_DIR|KISYS3DMOD|KICAD_COLLAB_3DMODELS|KIPRJMOD)$/.test(v[1])) return null;
+  const tail = v[2].replace(/\\/g, "/").replace(/^\.\//, "");
+  const stem2 = tail.replace(/\.(?:step|stp|wrl|wrz)$/i, "");
+  if (stem2 !== tail && !stem2.split("/").includes("..")) {
+    const fn = globalThis.KiCadProjectModel;
+    let own = null;
+    try {
+      own = typeof fn === "function" ? fn(stem2) || (stem2.includes("/") ? fn("/" + stem2) : null) || null : null;
+    } catch {
+      own = null;
+    }
+    if (own) return { ...ref, name: tail, source: "project", url: own };
+  }
+  const lcsc = lcscOf(node);
+  if (!lcsc) return null;
+  const url = `/api/parts/model.step?vendor=lcsc&id=${encodeURIComponent(lcsc)}`;
+  const moved = ref.offset.some((n2) => n2 !== 0) || ref.rotate.some((n2) => n2 !== 0);
+  if (/\.(?:step|stp)$/i.test(path2) && moved) return { ...ref, source: "vendor", url };
+  return { ...ref, offset: [0, 0, 0], rotate: [0, 0, 0], source: "vendor", url: url + "&placed=1" };
 }
 function guessedModel(node) {
   const m = /^([^:\/\\${}]+):([^:\/\\]+)$/.exec(String(node[1] ?? ""));
@@ -69659,7 +69694,7 @@ function flattenOcct(result) {
   }
   return { pos, nrm, col, idx };
 }
-var VENDOR_FIELDS, num7, kid4, embedUrls, kicadModelUrl;
+var VENDOR_FIELDS, num7, kid4, embedUrls, kicadModelUrl, LCSC_FIELDS2;
 var init_models = __esm({
   "web/domains/pcb/viewer3d/models.ts"() {
     "use strict";
@@ -69675,6 +69710,7 @@ var init_models = __esm({
     };
     embedUrls = /* @__PURE__ */ new Map();
     kicadModelUrl = (lib, name) => `/api/kicad-lib/model?lib=${encodeURIComponent(lib)}&name=${encodeURIComponent(name)}&fallback=1`;
+    LCSC_FIELDS2 = ["LCSC", "LCSC Part", "LCSC Part #", "LCSC PN", "LCSC P/N", "LCSC Part No.", "LCSC Part Number", "LCSC#", "JLCPCB Part #", "JLCPCB Part", "JLCPCB PN", "JLCPCB P/N", "JLC", "JLCPCB"];
   }
 });
 
@@ -73946,8 +73982,2087 @@ var init_project = __esm({
   }
 });
 
+// web/domains/pcb/tools/root.ts
+var init_root = __esm({
+  "web/domains/pcb/tools/root.ts"() {
+    "use strict";
+  }
+});
+
+// web/domains/pcb/tools/kicad-dialogs/sexpr.ts
+var init_sexpr2 = __esm({
+  "web/domains/pcb/tools/kicad-dialogs/sexpr.ts"() {
+    "use strict";
+    init_root();
+  }
+});
+
+// web/domains/pcb/tools/kicad-dialogs/widgets.ts
+var init_widgets = __esm({
+  "web/domains/pcb/tools/kicad-dialogs/widgets.ts"() {
+    "use strict";
+    init_sexpr2();
+    init_shell();
+    init_kicon_dom();
+    init_dom2();
+    init_kselect();
+  }
+});
+
+// web/domains/pcb/tools/kicad-dialogs/shell.ts
+function tabStops(root5) {
+  return Array.from(root5.querySelectorAll(FOCUSABLE)).filter((e) => {
+    if (e.disabled || e.hasAttribute("disabled") || e.getAttribute("tabindex") === "-1" || e.closest("[inert], [hidden]")) return false;
+    if (e.parentElement && e.parentElement.closest("k-select")) return false;
+    if (typeof e.getClientRects === "function" && !e.getClientRects().length) return false;
+    return true;
+  });
+}
+function wrapTab(stops, from, back) {
+  if (!stops.length) return null;
+  const i = from ? stops.indexOf(from) : -1;
+  if (i < 0) return back ? stops[stops.length - 1] : stops[0];
+  if (!back && i === stops.length - 1) return stops[0];
+  if (back && i === 0) return stops[stops.length - 1];
+  return null;
+}
+function trapTab2(ev, dlg) {
+  if (ev.key !== "Tab" || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+  const stops = tabStops(dlg), a = document.activeElement;
+  const inner = a && a.closest ? a.closest("k-select") || a : a;
+  const to = wrapTab(stops, inner && dlg.contains(inner) ? inner : null, ev.shiftKey);
+  if (!to) {
+    if (!stops.length) ev.preventDefault();
+    return;
+  }
+  ev.preventDefault();
+  to.focus();
+  if (to instanceof HTMLInputElement && to.type === "text") to.select();
+}
+var stack, top, FOCUSABLE;
+var init_shell = __esm({
+  "web/domains/pcb/tools/kicad-dialogs/shell.ts"() {
+    "use strict";
+    init_sexpr2();
+    init_widgets();
+    init_kicon_dom();
+    stack = [];
+    top = () => stack.length ? stack[stack.length - 1] : null;
+    FOCUSABLE = "input, k-select, textarea, button, select, a[href], [tabindex]";
+    if (typeof document !== "undefined") document.addEventListener("keydown", (ev) => {
+      const cur2 = top();
+      if (!cur2 || ev.key !== "Escape" || ev.defaultPrevented) return;
+      const t = ev.target;
+      if (t && t.closest && t.closest(".kd-overlay, .kd-font-pop, #ctxMenu, [role='menu'], [data-popup-open]")) return;
+      if (document.querySelector(".kd-pop")) return;
+      ev.preventDefault();
+      ev.stopPropagation();
+      cur2.finish(false);
+    }, true);
+  }
+});
+
+// web/domains/pcb/dialogs/dom.ts
+var dom_exports = {};
+__export(dom_exports, {
+  KD: () => KD,
+  checkbox: () => checkbox,
+  confirmBox: () => confirmBox,
+  download: () => download,
+  esc: () => esc4,
+  form: () => form,
+  h: () => h,
+  popupMenu: () => popupMenu,
+  promptFields: () => promptFields,
+  promptText: () => promptText,
+  select: () => select,
+  textInput: () => textInput,
+  unsavedChangesBox: () => unsavedChangesBox
+});
+function KD() {
+  return window.KDialogs;
+}
+function h(tag, attrs, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (v === void 0 || v === null || v === false) continue;
+    if (typeof v === "function") e.addEventListener(k.replace(/^on/, ""), v);
+    else if (k === "class") e.className = String(v);
+    else if (k === "style") e.setAttribute("style", String(v));
+    else if (k === "value") e.value = String(v);
+    else if (k === "checked" || k === "disabled" || k === "selected") e[k] = !!v;
+    else e.setAttribute(k, v === true ? "" : String(v));
+  }
+  for (const c of children) if (c !== null && c !== void 0 && c !== false) e.append(c);
+  return e;
+}
+function checkbox(label, checked, onchange, opts2) {
+  const cb = h("input", { type: "checkbox", checked, disabled: opts2?.disabled, id: opts2?.id });
+  if (onchange) cb.addEventListener("change", () => onchange(cb.checked));
+  return h("label", { class: "kd-chk", title: opts2?.title }, cb, label);
+}
+function select(options, value, onchange, opts2) {
+  const s2 = h("k-select", { disabled: opts2?.disabled, id: opts2?.id, style: opts2?.style });
+  for (const o of options) {
+    const v = Array.isArray(o) ? o[0] : o;
+    s2.append(h("option", { value: v, "data-icon": opts2?.icons?.[v] }, Array.isArray(o) ? o[1] : o));
+  }
+  s2.value = value;
+  if (onchange) s2.addEventListener("change", () => onchange(s2.value));
+  return s2;
+}
+function textInput(value, onchange, opts2) {
+  const i = h("input", { type: opts2?.type || "text", value, disabled: opts2?.disabled, id: opts2?.id, style: opts2?.style, placeholder: opts2?.placeholder, step: opts2?.step, min: opts2?.min, max: opts2?.max });
+  if (onchange) {
+    i.addEventListener("change", () => onchange(i.value));
+    if ((opts2?.type || "text") === "text") i.addEventListener("input", () => onchange(i.value));
+  }
+  return i;
+}
+function form(rows3, cols = 2) {
+  const f2 = h("div", { class: "kv", style: cols === 3 ? "grid-template-columns:max-content 1fr max-content" : "" });
+  for (const r of rows3) {
+    if (!r) continue;
+    f2.append(h("label", null, r[0]), r[1]);
+    if (cols === 3) f2.append(h("span", { class: "ro" }, r[2] || ""));
+  }
+  return f2;
+}
+function promptText(title, label, initial = "", validate) {
+  return new Promise((resolve2) => {
+    const input = h("input", { type: "text", value: initial, id: "kd-prompt-input" });
+    let busy = false;
+    const done = (v) => {
+      if (v === null || !validate) {
+        ov.remove();
+        resolve2(v);
+        return;
+      }
+      if (busy) return;
+      busy = true;
+      void Promise.resolve(validate(v)).then((good) => {
+        busy = false;
+        if (good) {
+          ov.remove();
+          resolve2(v);
+        } else {
+          input.focus();
+        }
+      });
+    };
+    const ok2 = h("button", { class: "btn primary", onclick: () => done(input.value) }, "OK"), cancel = h("button", { class: "btn", onclick: () => done(null) }, "Cancel");
+    const dlg = h("div", { class: "kd-dialog", style: "width:380px;min-width:0" }, h("div", { class: "kd-title" }, h("span", null, title)), h("div", { class: "kd-body" }, h("div", { class: "kv" }, h("label", null, label), input)), h("div", { class: "kd-foot" }, cancel, ok2));
+    const ov = h("div", { class: "kd-overlay kd-prompt", style: "z-index:70" }, dlg);
+    ov.addEventListener("keydown", (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Tab") trapTab2(ev, ov);
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        done(input.value);
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        done(null);
+      }
+    });
+    document.body.append(ov);
+    input.focus();
+    input.select();
+  });
+}
+function promptFields(title, fields, width = 360) {
+  return new Promise((resolve2) => {
+    const inputs = fields.map((f2) => {
+      const el4 = f2.multiline ? h("textarea", { "data-k": f2.key, style: "width:100%;min-height:60px;box-sizing:border-box" }) : h("input", { type: "text", "data-k": f2.key, style: "width:100%;box-sizing:border-box" });
+      el4.value = f2.initial || "";
+      return { f: f2, el: el4 };
+    });
+    const done = (ok3) => {
+      ov.remove();
+      if (!ok3) {
+        resolve2(null);
+        return;
+      }
+      const out2 = {};
+      for (const i of inputs) out2[i.f.key] = i.el.value;
+      resolve2(out2);
+    };
+    const ok2 = h("button", { class: "btn primary", onclick: () => done(true) }, "OK"), cancel = h("button", { class: "btn", onclick: () => done(false) }, "Cancel");
+    const body = h("div", { class: "kd-body" });
+    inputs.forEach((i, k) => body.append(h("label", { class: "pd-lbl", style: k ? "display:block;margin-top:8px" : "display:block" }, i.f.label), i.el));
+    const dlg = h("div", { class: "kd-dialog", style: `width:${width}px;min-width:0` }, h("div", { class: "kd-title" }, h("span", null, title)), body, h("div", { class: "kd-foot" }, cancel, ok2));
+    const ov = h("div", { class: "kd-overlay kd-prompt", style: "z-index:70" }, dlg);
+    ov.addEventListener("keydown", (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Tab") trapTab2(ev, ov);
+      if (ev.key === "Enter" && !(ev.target instanceof HTMLTextAreaElement)) {
+        ev.preventDefault();
+        done(true);
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        done(false);
+      }
+    });
+    document.body.append(ov);
+    if (inputs[0]) inputs[0].el.focus();
+  });
+}
+function unsavedChangesBox(message) {
+  return new Promise((resolve2) => {
+    const done = (v) => {
+      ov.remove();
+      resolve2(v);
+    };
+    const save2 = h("button", { class: "btn primary", id: "kd-unsaved-save", onclick: () => done("save") }, "Save"), discard = h("button", { class: "btn", id: "kd-unsaved-discard", onclick: () => done("discard") }, "Discard Changes"), cancel = h("button", { class: "btn", onclick: () => done("cancel") }, "Cancel");
+    const dlg = h(
+      "div",
+      { class: "kd-dialog", style: "width:440px;min-width:0" },
+      h("div", { class: "kd-title" }, h("span", null, "Save Changes?")),
+      h("div", { class: "kd-body" }, h("p", { style: "margin:4px 0;font-weight:600" }, message), h("p", { style: "margin:4px 0" }, "If you don't save, all your changes will be permanently lost.")),
+      h("div", { class: "kd-foot" }, discard, h("span", { class: "spacer" }), cancel, save2)
+    );
+    const ov = h("div", { class: "kd-overlay kd-prompt", style: "z-index:70" }, dlg);
+    ov.addEventListener("keydown", (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Tab") trapTab2(ev, ov);
+      if (ev.key === "Escape") {
+        ev.preventDefault();
+        done("cancel");
+      }
+    });
+    document.body.append(ov);
+    save2.focus();
+  });
+}
+function confirmBox(title, message, okLabel = "OK") {
+  return new Promise((resolve2) => {
+    const done = (v) => {
+      ov.remove();
+      resolve2(v);
+    };
+    const ok2 = h("button", { class: "btn primary", onclick: () => done(true) }, okLabel), cancel = h("button", { class: "btn", onclick: () => done(false) }, "Cancel");
+    const dlg = h("div", { class: "kd-dialog", style: "width:420px;min-width:0" }, h("div", { class: "kd-title" }, h("span", null, title)), h("div", { class: "kd-body" }, h("p", { style: "margin:4px 0;white-space:pre-wrap" }, message)), h("div", { class: "kd-foot" }, cancel, ok2));
+    const ov = h("div", { class: "kd-overlay kd-prompt", style: "z-index:70" }, dlg);
+    ov.addEventListener("keydown", (ev) => {
+      ev.stopPropagation();
+      if (ev.key === "Tab") trapTab2(ev, ov);
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        done(true);
+      } else if (ev.key === "Escape") {
+        ev.preventDefault();
+        done(false);
+      }
+    });
+    document.body.append(ov);
+    ok2.focus();
+  });
+}
+function popupMenu(x, y, items) {
+  for (const old of Array.from(document.querySelectorAll(".kd-pop"))) old.remove();
+  const build4 = (list, px, py, depth) => {
+    const m = h("div", { class: "kd-pop", role: "menu", "data-depth": depth, style: `position:fixed;left:${px}px;top:${py}px;z-index:${80 + depth};min-width:160px;background:var(--panel);border:1px solid var(--line);border-radius:4px;box-shadow:0 6px 18px rgba(0,0,0,.25);padding:3px 0;font-size:12px;color:var(--ink)` });
+    for (const it of list) {
+      if (it.sep) {
+        m.append(h("div", { style: "height:1px;background:var(--line);margin:3px 0" }));
+        continue;
+      }
+      const row3 = h(
+        "div",
+        { class: "kd-pop-row", role: "menuitem", "aria-disabled": it.disabled ? "true" : void 0, style: `display:flex;gap:6px;align-items:center;padding:3px 12px 3px 6px;cursor:default;white-space:nowrap;${it.disabled ? "opacity:.45;" : ""}` },
+        h("span", { style: `${it.icon && it.iconW ? "" : "width:16px;"}display:inline-flex;flex:none;justify-content:center` }, it.check ? menuCheck(!!it.checked) : it.icon ? kicadIcon(it.icon, it.iconW || 16, it.iconH || it.iconW || 16) : ""),
+        h("span", { style: "flex:1" }, it.label || ""),
+        it.key ? h("span", { class: "kd-pop-key", style: "margin-left:24px;opacity:.7" }, menuKey(it.key)) : null,
+        it.sub ? menuArrow() : null
+      );
+      if (it.title) row3.title = it.title;
+      row3.addEventListener("pointerenter", () => {
+        row3.style.background = "var(--accent)";
+        row3.style.color = "var(--on-accent)";
+        for (const o of Array.from(document.querySelectorAll(".kd-pop"))) if (Number(o.dataset.depth) > depth) o.remove();
+        if (it.sub && !it.disabled) {
+          const r = row3.getBoundingClientRect(), sub2 = build4(it.sub, r.right - 2, r.top - 3, depth + 1);
+          document.body.append(sub2);
+          fitMenu(sub2, { row: r, parent: m.getBoundingClientRect(), overlap: 2 });
+        }
+      });
+      row3.addEventListener("pointerleave", () => {
+        row3.style.background = "";
+        row3.style.color = "";
+      });
+      row3.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (it.disabled || it.sub) return;
+        closeAll();
+        if (it.run) it.run();
+      });
+      m.append(row3);
+    }
+    return m;
+  };
+  const closeAll = () => {
+    for (const o of Array.from(document.querySelectorAll(".kd-pop"))) o.remove();
+    document.removeEventListener("pointerdown", away, true);
+    document.removeEventListener("keydown", esc9, true);
+  };
+  const away = (ev) => {
+    const t = ev.target;
+    if (t && t.closest && t.closest(".kd-pop")) return;
+    closeAll();
+  };
+  const esc9 = (ev) => {
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      ev.stopPropagation();
+      closeAll();
+    }
+  };
+  const root5 = build4(items, x, y, 0);
+  document.body.append(root5);
+  fitMenu(root5, { at: { x, y } });
+  setTimeout(() => {
+    document.addEventListener("pointerdown", away, true);
+    document.addEventListener("keydown", esc9, true);
+  }, 0);
+  return root5;
+}
+function download(name, text3, type = "text/csv;charset=utf-8") {
+  const a = h("a", { href: URL.createObjectURL(new Blob([text3], { type })), download: name });
+  document.body.append(a);
+  a.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(a.href);
+    a.remove();
+  }, 1e3);
+}
+var esc4;
+var init_dom2 = __esm({
+  "web/domains/pcb/dialogs/dom.ts"() {
+    "use strict";
+    init_shell();
+    init_kselect();
+    init_menufit();
+    init_kicon_dom();
+    init_keys();
+    esc4 = (s2) => String(s2 ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+});
+
+// web/shared/components/kdate.ts
+var init_kdate = __esm({
+  "web/shared/components/kdate.ts"() {
+    "use strict";
+    init_menufit();
+  }
+});
+
+// web/shared/units.ts
+function unitsAppFor(docType) {
+  return docType === "kicad_sch" ? "eeschema" : docType === "footprint" ? "footprint_editor" : "pcbnew";
+}
+function loadUnits(app4) {
+  const def = { units: app4 === "eeschema" || app4 === "symbol_editor" ? "mil" : "mm", lastImperial: "mil" };
+  try {
+    const raw2 = JSON.parse(localStorage.getItem(unitsKey(app4)) || "null");
+    if (!raw2 || typeof raw2 !== "object") return def;
+    const u = raw2.units, li = raw2.last_imperial_units;
+    return { units: u === "mm" || u === "mil" || u === "in" ? u : def.units, lastImperial: li === "in" || li === "mil" ? li : u === "in" ? "in" : "mil" };
+  } catch (e) {
+    return def;
+  }
+}
+function saveUnits(app4, s2) {
+  try {
+    localStorage.setItem(unitsKey(app4), JSON.stringify({ units: s2.units, last_imperial_units: s2.lastImperial === "in" ? "in" : "mil" }));
+  } catch (e) {
+  }
+}
+var unitsKey;
+var init_units = __esm({
+  "web/shared/units.ts"() {
+    "use strict";
+    unitsKey = (app4) => "kui.units." + app4;
+  }
+});
+
+// web/domains/pcb/dialogs/logic.ts
+var IN, PAPER_FORMATS, F, BOM_PRESETS, MIL3, SCH_GRID_OVERRIDES, PCB_DEFAULT_GRIDS, PCB_DEFAULT_GRID_IDX, PCB_GRID_OVERRIDES;
+var init_logic = __esm({
+  "web/domains/pcb/dialogs/logic.ts"() {
+    "use strict";
+    init_units();
+    IN = 25.4;
+    PAPER_FORMATS = [
+      { type: "A5", label: "A5 148 x 210mm", w: 210, h: 148 },
+      { type: "A4", label: "A4 210 x 297mm", w: 297, h: 210 },
+      { type: "A3", label: "A3 297 x 420mm", w: 420, h: 297 },
+      { type: "A2", label: "A2 420 x 594mm", w: 594, h: 420 },
+      { type: "A1", label: "A1 594 x 841mm", w: 841, h: 594 },
+      { type: "A0", label: "A0 841 x 1189mm", w: 1189, h: 841 },
+      { type: "A", label: "A 8.5 x 11in", w: 11 * IN, h: 8.5 * IN },
+      { type: "B", label: "B 11 x 17in", w: 17 * IN, h: 11 * IN },
+      { type: "C", label: "C 17 x 22in", w: 22 * IN, h: 17 * IN },
+      { type: "D", label: "D 22 x 34in", w: 34 * IN, h: 22 * IN },
+      { type: "E", label: "E 34 x 44in", w: 44 * IN, h: 34 * IN },
+      { type: "User", label: "User (Custom)", w: 17 * IN, h: 11 * IN },
+      { type: "USLetter", label: "US Letter 8.5 x 11in", w: 11 * IN, h: 8.5 * IN },
+      { type: "USLegal", label: "US Legal 8.5 x 14in", w: 14 * IN, h: 8.5 * IN },
+      { type: "USLedger", label: "US Ledger 11 x 17in", w: 17 * IN, h: 11 * IN }
+    ];
+    F = (name, label, show6, group_by) => ({ name, label, show: show6, group_by });
+    BOM_PRESETS = [
+      {
+        name: "Default Editing",
+        readOnly: true,
+        sort_field: "Reference",
+        sort_asc: true,
+        filter_string: "",
+        group_symbols: true,
+        exclude_dnp: false,
+        include_excluded_from_bom: true,
+        fields_ordered: [F("Reference", "Reference", true, false), F("${QUANTITY}", "Qty", true, false), F("Value", "Value", true, true), F("${DNP}", "DNP", true, true), F("${EXCLUDE_FROM_BOM}", "Exclude from BOM", true, true), F("${EXCLUDE_FROM_BOARD}", "Exclude from Board", true, true), F("Footprint", "Footprint", true, true), F("Datasheet", "Datasheet", true, false)]
+      },
+      {
+        name: "Grouped By Value",
+        readOnly: true,
+        sort_field: "Reference",
+        sort_asc: true,
+        filter_string: "",
+        group_symbols: true,
+        exclude_dnp: false,
+        include_excluded_from_bom: false,
+        fields_ordered: [F("Reference", "Reference", true, false), F("Value", "Value", true, true), F("Datasheet", "Datasheet", true, false), F("Footprint", "Footprint", true, false), F("${QUANTITY}", "Qty", true, false), F("${DNP}", "DNP", true, true)]
+      },
+      {
+        name: "Grouped By Value and Footprint",
+        readOnly: true,
+        sort_field: "Reference",
+        sort_asc: true,
+        filter_string: "",
+        group_symbols: true,
+        exclude_dnp: false,
+        include_excluded_from_bom: false,
+        fields_ordered: [F("Reference", "Reference", true, false), F("Value", "Value", true, true), F("Datasheet", "Datasheet", true, false), F("Footprint", "Footprint", true, true), F("${QUANTITY}", "Qty", true, false), F("${DNP}", "DNP", true, true)]
+      },
+      {
+        name: "Attributes",
+        readOnly: true,
+        sort_field: "Reference",
+        sort_asc: true,
+        filter_string: "",
+        group_symbols: true,
+        exclude_dnp: false,
+        include_excluded_from_bom: true,
+        fields_ordered: [F("Reference", "Reference", true, false), F("Value", "Value", true, true), F("Datasheet", "Datasheet", false, false), F("Footprint", "Footprint", false, true), F("${DNP}", "Do Not Place", true, false), F("${EXCLUDE_FROM_BOM}", "Exclude from BOM", true, false), F("${EXCLUDE_FROM_BOARD}", "Exclude from Board", true, false), F("${EXCLUDE_FROM_SIM}", "Exclude from Simulation", true, false)]
+      }
+    ];
+    MIL3 = 0.0254;
+    SCH_GRID_OVERRIDES = { enabled: true, connected: true, connectedMm: 50 * MIL3, wires: true, wiresMm: 50 * MIL3, text: true, textMm: 10 * MIL3, graphics: false, graphicsMm: 25 * MIL3, vias: false, viasMm: 100 * MIL3 };
+    PCB_DEFAULT_GRIDS = [1e3, 500, 250, 200, 100, 50, 25, 20, 10, 5, 2, 1].map((mil) => +(mil * MIL3).toFixed(6)).concat([5, 2.5, 1, 0.5, 0.25, 0.2, 0.1, 0.05, 0.025, 0.01]);
+    PCB_DEFAULT_GRID_IDX = 15;
+    PCB_GRID_OVERRIDES = { enabled: true, connected: false, connectedMm: 0.25, wires: false, wiresMm: 0.05, text: false, textMm: 0.1, graphics: false, graphicsMm: 0.5, vias: false, viasMm: 0.1 };
+  }
+});
+
+// web/domains/pcb/editor/userorigin.ts
+var init_userorigin = __esm({
+  "web/domains/pcb/editor/userorigin.ts"() {
+    "use strict";
+    init_appstore();
+    init_state();
+    init_units();
+  }
+});
+
+// web/domains/pcb/tools/props/sexpr.ts
+function str5(v) {
+  return v === void 0 || v === null ? "" : String(v);
+}
+function r64(v) {
+  return +(+v).toFixed(6);
+}
+var init_sexpr3 = __esm({
+  "web/domains/pcb/tools/props/sexpr.ts"() {
+    "use strict";
+    init_root();
+  }
+});
+
+// web/domains/pcb/tools/props/numeric.ts
+function evalExpr(text3, defUnit) {
+  const src = str5(text3).trim().replace(/,/g, ".");
+  if (!src) return NaN;
+  const scale = defUnit ? UNIT_MM[defUnit] || 1 : 1;
+  let i = 0;
+  const ws = () => {
+    while (i < src.length && /\s/.test(src[i])) i++;
+  };
+  function primary() {
+    ws();
+    if (src[i] === "(") {
+      i++;
+      const v2 = sum();
+      ws();
+      if (src[i] !== ")") return NaN;
+      i++;
+      return v2;
+    }
+    if (src[i] === "-") {
+      i++;
+      return -primary();
+    }
+    if (src[i] === "+") {
+      i++;
+      return primary();
+    }
+    const m = /^(\d+\.?\d*(?:e[-+]?\d+)?|\.\d+(?:e[-+]?\d+)?)/i.exec(src.slice(i));
+    if (!m) return NaN;
+    i += m[0].length;
+    let v = parseFloat(m[0]);
+    ws();
+    const u = /^(mm|cm|um|µm|inch|in|"|mils|mil|thou|°|deg)/i.exec(src.slice(i));
+    if (u) {
+      i += u[0].length;
+      const key3 = u[0].toLowerCase();
+      if (key3 === "\xB0" || key3 === "deg") return defUnit ? NaN : v;
+      if (!defUnit) return NaN;
+      return v * UNIT_MM[key3];
+    }
+    return v * scale;
+  }
+  function product() {
+    let v = primary();
+    for (; ; ) {
+      ws();
+      const op = src[i];
+      if (op !== "*" && op !== "/") return v;
+      i++;
+      const r = primary() / scale;
+      v = op === "*" ? v * r : v / r;
+    }
+  }
+  function sum() {
+    let v = product();
+    for (; ; ) {
+      ws();
+      const op = src[i];
+      if (op !== "+" && op !== "-") return v;
+      i++;
+      const r = product();
+      v = op === "+" ? v + r : v - r;
+    }
+  }
+  const out2 = sum();
+  ws();
+  return i < src.length || !isFinite(out2) ? NaN : r64(out2);
+}
+function formatLength(v, unit2) {
+  const u = unit2 === "in" ? [25.4, 6, "in"] : unit2 === "mil" ? [0.0254, 3, "mils"] : [1, 4, "mm"];
+  let t = (v / u[0]).toFixed(u[1]);
+  if (t.includes(".")) t = t.replace(/0+$/, "").replace(/\.$/, "");
+  if (t === "-0") t = "0";
+  return t + " " + u[2];
+}
+var UNIT_MM;
+var init_numeric = __esm({
+  "web/domains/pcb/tools/props/numeric.ts"() {
+    "use strict";
+    init_sexpr3();
+    UNIT_MM = { mm: 1, cm: 10, um: 1e-3, "\xB5m": 1e-3, "in": 25.4, '"': 25.4, inch: 25.4, mil: 0.0254, mils: 0.0254, thou: 0.0254 };
+  }
+});
+
+// web/domains/pcb/editor/pcbdialogs/ui.ts
+function h2(tag, props, ...children) {
+  const el4 = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v === null || v === void 0 || v === false) continue;
+    if (typeof v === "function") el4.addEventListener(k.replace(/^on/, "").toLowerCase(), v);
+    else if (k === "class") el4.className = String(v);
+    else if (k === "style") el4.style.cssText = String(v);
+    else if (k === "checked" || k === "disabled" || k === "selected" || k === "readOnly") el4[k] = !!v;
+    else if (k === "value") el4.value = String(v);
+    else el4.setAttribute(k, v === true ? "" : String(v));
+  }
+  for (const c of children) if (c !== null && c !== void 0 && c !== false) el4.append(c);
+  return el4;
+}
+function ensureCss2() {
+  if (cssDone || typeof document === "undefined") return;
+  cssDone = true;
+  const st = document.createElement("style");
+  st.id = "pcbdialogs-css";
+  st.textContent = CSS3;
+  document.head.appendChild(st);
+}
+function put(el4, ...children) {
+  for (const c of children) if (c !== null && c !== void 0 && c !== false) el4.append(c);
+}
+function openDialog2(spec) {
+  if (typeof KDialogs === "undefined" || !KDialogs) return null;
+  ensureCss2();
+  let out2 = null;
+  KDialogs.open({
+    title: spec.title,
+    width: spec.width,
+    okLabel: spec.okLabel,
+    readOnly: spec.readOnly,
+    extra: spec.extra,
+    ok: spec.ok,
+    cancel: spec.cancel,
+    modeless: spec.modeless,
+    child: spec.child,
+    persist: spec.persist,
+    restored: spec.restored,
+    build(body, a) {
+      const dlg = body.parentElement;
+      if (spec.width) dlg.style.maxWidth = "96vw";
+      if (spec.height) {
+        dlg.style.height = `min(${spec.height}px, 92vh)`;
+        body.style.flex = "1 1 auto";
+        body.style.minHeight = "0";
+        body.style.display = "flex";
+        body.style.flexDirection = "column";
+      }
+      const buttons = Array.from(dlg.querySelectorAll(".kd-foot > button"));
+      const okButton = buttons.length ? buttons[buttons.length - 1] : null, cancelButton = buttons.length > 1 ? buttons[buttons.length - 2] : null;
+      if (cancelButton && spec.cancelLabel) cancelButton.textContent = spec.cancelLabel;
+      if (okButton && spec.noOk) {
+        okButton.style.display = "none";
+        if (cancelButton && !spec.cancelLabel) cancelButton.textContent = "Close";
+      }
+      if (spec.noEnter) body.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter") ev.stopPropagation();
+      });
+      else body.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" && ev.target instanceof Element && ev.target.closest(".pd-grid, .pd-list, .pd-rules")) ev.stopPropagation();
+      });
+      const title = dlg.querySelector(".kd-title span");
+      out2 = { body, close: a.close, dialog: dlg, okButton, cancelButton, setTitle(t) {
+        if (title) title.textContent = t;
+      } };
+      spec.build(body, out2);
+    }
+  });
+  return out2;
+}
+function messageBox(title, message, buttons = [{ label: "OK" }], escape2) {
+  if (typeof document === "undefined") return null;
+  ensureCss2();
+  const ov = h2("div", { class: "kd-overlay", style: "z-index:10050", "data-k": "messagebox" });
+  const dlg = h2("div", { class: "kd-dialog", style: "width:max-content;min-width:440px;max-width:min(640px, calc(100vw - 32px))", tabIndex: -1 });
+  const body = h2("div", { class: "kd-body" }, h2("p", { style: "margin:4px 0 6px;white-space:pre-wrap", "data-k": "message" }, message));
+  const foot = h2("div", { class: "kd-foot" }, h2("span", { class: "spacer" }));
+  const done = (i) => {
+    ov.remove();
+    const b = buttons[i];
+    if (b && b.fn) b.fn();
+  };
+  const btns = buttons.map((b, i) => {
+    const e = h2("button", { class: "btn" + (i === buttons.length - 1 ? " primary" : ""), type: "button", "data-k": "mb-" + b.label.toLowerCase() }, b.label);
+    e.addEventListener("click", () => done(i));
+    return e;
+  });
+  foot.append(...btns);
+  dlg.append(h2("div", { class: "kd-title" }, h2("span", null, title)), body, foot);
+  ov.append(dlg);
+  ov.addEventListener("keydown", (ev) => {
+    ev.stopPropagation();
+    if (ev.key === "Tab") trapTab2(ev, ov);
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      done(escape2 === void 0 ? 0 : escape2);
+    } else if (ev.key === "Enter" && !(ev.target instanceof HTMLButtonElement)) {
+      ev.preventDefault();
+      done(buttons.length - 1);
+    }
+  });
+  document.body.append(ov);
+  const last3 = btns[btns.length - 1];
+  if (last3) last3.focus();
+  else dlg.focus();
+  return ov;
+}
+function subDialog(title, width, build4, ok2, opts2) {
+  if (typeof document === "undefined") return null;
+  ensureCss2();
+  const ov = h2("div", { class: "kd-overlay", style: "z-index:10040", "data-k": opts2 && opts2.key || "subdialog" });
+  const dlg = h2("div", { class: "kd-dialog", style: `width:${width}px;max-width:calc(100vw - 32px)`, tabIndex: -1 });
+  const body = h2("div", { class: "kd-body" });
+  const cancel = h2("button", { class: "btn", type: "button", "data-k": "sub-cancel" }, "Cancel"), okB = h2("button", { class: "btn primary", type: "button", "data-k": "sub-ok" }, "OK");
+  cancel.addEventListener("click", () => ov.remove());
+  okB.addEventListener("click", () => {
+    if (ok2() !== false) ov.remove();
+  });
+  dlg.append(h2("div", { class: "kd-title" }, h2("span", null, title)), body, h2("div", { class: "kd-foot" }, h2("span", { class: "spacer" }), cancel, okB));
+  ov.append(dlg);
+  ov.addEventListener("keydown", (ev) => {
+    ev.stopPropagation();
+    if (ev.key === "Tab") trapTab2(ev, ov);
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      ov.remove();
+    }
+  });
+  build4(body);
+  document.body.append(ov);
+  dlg.focus();
+  return ov;
+}
+function textEntryBox(title, caption, value, multiline, onOk) {
+  if (typeof document === "undefined") return null;
+  ensureCss2();
+  const ov = h2("div", { class: "kd-overlay", style: "z-index:10050", "data-k": "textentry" });
+  const dlg = h2("div", { class: "kd-dialog", style: "width:max-content;min-width:440px;max-width:min(640px, calc(100vw - 32px))", tabIndex: -1 });
+  const field2 = multiline ? h2("textarea", { class: "pd-text", style: "min-height:90px;width:100%", "data-k": "entry" }) : h2("input", { type: "text", style: "width:100%", "data-k": "entry" });
+  field2.value = value;
+  const body = h2("div", { class: "kd-body" }, caption ? h2("p", { style: "margin:4px 0 6px" }, caption) : null, field2);
+  const done = (ok2) => {
+    ov.remove();
+    if (ok2) onOk(field2.value);
+  };
+  const cancel = h2("button", { class: "btn", type: "button", "data-k": "te-cancel" }, "Cancel"), okb = h2("button", { class: "btn primary", type: "button", "data-k": "te-ok" }, "OK");
+  cancel.addEventListener("click", () => done(false));
+  okb.addEventListener("click", () => done(true));
+  dlg.append(h2("div", { class: "kd-title" }, h2("span", null, title)), body, h2("div", { class: "kd-foot" }, h2("span", { class: "spacer" }), cancel, okb));
+  ov.append(dlg);
+  ov.addEventListener("keydown", (ev) => {
+    ev.stopPropagation();
+    if (ev.key === "Tab") trapTab2(ev, ov);
+    if (ev.key === "Escape") {
+      ev.preventDefault();
+      done(false);
+    } else if (ev.key === "Enter" && (!multiline || ev.shiftKey || ev.ctrlKey || ev.metaKey) && !(ev.target instanceof HTMLButtonElement)) {
+      ev.preventDefault();
+      done(true);
+    }
+  });
+  document.body.append(ov);
+  field2.focus();
+  return ov;
+}
+function fmtLen(mm4, units = currentUnits()) {
+  const u = UNIT[units] || UNIT.mm;
+  return trim((mm4 / u.per).toFixed(u.digits)) || "0";
+}
+function fmtLenU(mm4) {
+  return fmtLen(mm4) + " " + unitName();
+}
+function parseLen(text3, units = currentUnits()) {
+  const v = evalExpr(text3.replace(/\b(mils?|thou)\b/gi, "mil").replace(/\binch\b/gi, "in"), units);
+  return isNaN(v) ? NaN : +v.toFixed(6);
+}
+function parseNum(text3) {
+  const v = evalExpr(text3, "");
+  return isNaN(v) ? NaN : v;
+}
+function bindEval(input, evaluate3) {
+  let original = "";
+  input.addEventListener("focus", () => {
+    if (original && original !== input.value) {
+      input.value = original;
+      input.select();
+    }
+  });
+  input.addEventListener("blur", () => {
+    const t = input.value;
+    const out2 = evaluate3(t);
+    if (out2 !== null) {
+      original = isExpr(t) ? t : "";
+      if (out2 !== t) input.value = out2;
+    }
+  });
+}
+function lenField(mm4, opts2) {
+  let cur2 = mm4;
+  const u = opts2 && opts2.units || currentUnits(), fmt4 = (v) => fmtLen(v, u), parse2 = (t) => parseLen(t, u);
+  const input = h2("input", { type: "text", value: opts2 && opts2.allowEmpty && !isFinite(mm4) ? "" : fmt4(mm4), disabled: !!(opts2 && opts2.ro), "data-k": opts2 && opts2.key, "data-units": u });
+  bindEval(input, (t) => {
+    const v = parse2(t);
+    return isNaN(v) ? null : fmt4(opts2 && opts2.min !== void 0 ? Math.max(opts2.min, v) : v);
+  });
+  input.addEventListener("change", () => {
+    const v = parse2(input.value);
+    if (isNaN(v)) {
+      if (opts2 && opts2.allowEmpty && !input.value.trim()) {
+        cur2 = NaN;
+        return;
+      }
+      input.value = isFinite(cur2) ? fmt4(cur2) : "";
+      return;
+    }
+    cur2 = opts2 && opts2.min !== void 0 ? Math.max(opts2.min, v) : v;
+    if (!isExpr(input.value)) input.value = fmt4(cur2);
+    if (opts2 && opts2.onChange) opts2.onChange(cur2);
+  });
+  const warn = warningIcon();
+  return { el: input, input, warn, get: () => {
+    if (isFinite(cur2) && input.value === fmt4(cur2)) return cur2;
+    const v = parse2(input.value);
+    return isNaN(v) ? cur2 : opts2 && opts2.min !== void 0 ? Math.max(opts2.min, v) : v;
+  }, set(v) {
+    cur2 = v;
+    input.value = isFinite(v) ? fmt4(v) : "";
+  } };
+}
+function warningIcon() {
+  const el4 = h2("span", { class: "pd-warnicon", hidden: true, "data-k": "warning" });
+  el4.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 1.5L15 14H1z" style="fill:var(--warn)"/><path d="M8 6v4M8 11.6v.4" style="stroke:var(--paper)" stroke-width="1.6" stroke-linecap="round"/></svg>';
+  return { el: el4, set(m) {
+    el4.hidden = !m;
+    el4.title = m || "";
+  } };
+}
+function numField(v, opts2) {
+  let cur2 = v;
+  const fmt4 = (x) => trim(x.toFixed(opts2 && opts2.digits !== void 0 ? opts2.digits : 6)) || "0";
+  const input = h2("input", { type: "text", value: fmt4(v), disabled: !!(opts2 && opts2.ro), "data-k": opts2 && opts2.key });
+  bindEval(input, (t) => {
+    const x = parseNum(t);
+    return isNaN(x) ? null : fmt4(x);
+  });
+  input.addEventListener("change", () => {
+    const x = parseNum(input.value);
+    if (isNaN(x) || !input.value.trim()) input.value = fmt4(cur2);
+    else {
+      cur2 = x;
+      if (!isExpr(input.value)) input.value = fmt4(x);
+    }
+  });
+  return { el: input, input, get: () => {
+    if (input.value === fmt4(cur2)) return cur2;
+    const x = parseNum(input.value);
+    return isNaN(x) || !input.value.trim() ? cur2 : x;
+  }, set(x) {
+    cur2 = x;
+    input.value = fmt4(x);
+  } };
+}
+function spinField(v, opts2) {
+  const step = opts2.step || 1, digits = opts2.digits || 0;
+  const clamp = (x) => {
+    if (opts2.wrap) {
+      const span = opts2.max - opts2.min + step;
+      while (x > opts2.max) x -= span;
+      while (x < opts2.min) x += span;
+      return x;
+    }
+    return Math.min(opts2.max, Math.max(opts2.min, x));
+  };
+  const fmt4 = (x) => x.toFixed(digits);
+  let cur2 = clamp(v);
+  const input = h2("input", { type: "text", value: fmt4(cur2), disabled: !!opts2.ro, "data-k": opts2.key, inputmode: "decimal" });
+  const arrow2 = (d) => {
+    const t = document.createElement("template");
+    t.innerHTML = `<svg viewBox="0 0 8 5" width="8" height="5" aria-hidden="true"><path d="${d}" fill="currentColor"/></svg>`;
+    return t.content.firstChild;
+  };
+  const set2 = (x, fire) => {
+    const n2 = clamp(Math.round(x / step) * step);
+    const was = cur2;
+    cur2 = +n2.toFixed(Math.max(digits, 6));
+    input.value = fmt4(cur2);
+    if (fire && opts2.onChange && cur2 !== was) opts2.onChange(cur2);
+  };
+  const bump = (dir) => {
+    if (input.disabled) return;
+    set2(cur2 + dir * step, true);
+  };
+  const up = h2("button", { type: "button", tabindex: "-1", "data-k": opts2.key ? opts2.key + "-up" : void 0, "aria-label": "Increment" }, arrow2("M0 5L4 0L8 5Z"));
+  const down = h2("button", { type: "button", tabindex: "-1", "data-k": opts2.key ? opts2.key + "-down" : void 0, "aria-label": "Decrement" }, arrow2("M0 0L8 0L4 5Z"));
+  up.addEventListener("mousedown", (ev) => {
+    ev.preventDefault();
+    bump(1);
+  });
+  down.addEventListener("mousedown", (ev) => {
+    ev.preventDefault();
+    bump(-1);
+  });
+  input.addEventListener("keydown", (ev) => {
+    if (ev.key === "ArrowUp") {
+      ev.preventDefault();
+      bump(1);
+    } else if (ev.key === "ArrowDown") {
+      ev.preventDefault();
+      bump(-1);
+    }
+  });
+  input.addEventListener("change", () => {
+    const x = Number(input.value.replace(",", "."));
+    if (isNaN(x) || !input.value.trim()) input.value = fmt4(cur2);
+    else set2(x, true);
+  });
+  const el4 = h2("span", { class: "pd-spin" + (opts2.ro ? " disabled" : "") }, input, h2("span", { class: "arrows" }, up, down));
+  return {
+    el: el4,
+    input,
+    get: () => {
+      const x = Number(input.value.replace(",", "."));
+      return input.value === fmt4(cur2) || isNaN(x) || !input.value.trim() ? cur2 : clamp(x);
+    },
+    set: (x) => set2(x, false),
+    enable: (on2) => {
+      input.disabled = !on2;
+      el4.classList.toggle("disabled", !on2);
+    }
+  };
+}
+function textField(v, opts2) {
+  const input = h2("input", { type: "text", value: v, disabled: !!(opts2 && opts2.ro), "data-k": opts2 && opts2.key, placeholder: opts2 && opts2.placeholder });
+  return { el: input, input, get: () => input.value, set(x) {
+    input.value = x;
+  } };
+}
+function selectField(v, options, opts2) {
+  const input = h2("k-select", { disabled: !!(opts2 && opts2.ro), "data-k": opts2 && opts2.key });
+  options.forEach(([val, label]) => {
+    const o = h2("option", { value: String(val), "data-icon": opts2 && opts2.icons ? opts2.icons[String(val)] : void 0 }, label);
+    if (String(val) === String(v)) o.selected = true;
+    input.append(o);
+  });
+  if (!options.some(([val]) => String(val) === String(v)) && options.length) input.selectedIndex = 0;
+  const get = () => (options[input.selectedIndex] || options[0])[0];
+  if (opts2 && opts2.onChange) {
+    const cb = opts2.onChange;
+    input.addEventListener("change", () => cb(get()));
+  }
+  return { el: input, input, get, set(x) {
+    const i = options.findIndex(([val]) => String(val) === String(x));
+    if (i >= 0) input.selectedIndex = i;
+  } };
+}
+function checkField(v, label, opts2) {
+  const input = h2("input", { type: "checkbox", checked: v, disabled: !!(opts2 && opts2.ro), "data-k": opts2 && opts2.key });
+  const el4 = h2("label", { class: "pd-check" + (opts2 && opts2.ro ? " disabled" : ""), title: opts2 && opts2.tip }, input, label);
+  if (opts2 && opts2.onChange) {
+    const cb = opts2.onChange;
+    input.addEventListener("change", () => cb(input.checked));
+  }
+  return { el: el4, input, get: () => input.checked, set(x) {
+    input.checked = x;
+  } };
+}
+function box(title, ...children) {
+  return h2("div", { class: "pd-box" }, h2("div", { class: "hd" }, title), ...children);
+}
+function form2(rows3, wide) {
+  const f2 = h2("div", { class: "pd-form" + (wide ? " wide" : "") });
+  for (const r of rows3) {
+    if (Array.isArray(r)) {
+      f2.append(h2("label", r[3] ? { title: r[3] } : null, r[0]), r[1] || h2("span"), r[2] || h2("span"));
+    } else if (r) {
+      const s2 = h2("div", { class: "span" });
+      s2.append(r);
+      f2.append(s2);
+    }
+  }
+  return f2;
+}
+function notebook(pages, opts2) {
+  const bar = h2("div", { class: "pd-tabs" }), host2 = h2("div", opts2 && opts2.fill ? { style: "flex:1 1 auto;min-height:0;display:flex;flex-direction:column" } : null);
+  const el4 = h2("div", opts2 && opts2.fill ? { style: "display:flex;flex-direction:column;flex:1 1 auto;min-height:0" } : null, bar, host2);
+  const built = pages.map(() => null), tabs = [];
+  let cur2 = -1;
+  const show6 = (i) => {
+    if (i === cur2 || !pages[i]) return;
+    cur2 = i;
+    tabs.forEach((t, k) => t.classList.toggle("on", k === i));
+    let p = built[i];
+    if (!p) {
+      p = h2("div", opts2 && opts2.fill ? { style: "flex:1 1 auto;min-height:0;display:flex;flex-direction:column" } : null);
+      built[i] = p;
+      pages[i].build(p);
+    }
+    host2.replaceChildren(p);
+    if (opts2 && opts2.onShow) opts2.onShow(i);
+  };
+  pages.forEach((pg, i) => {
+    const t = h2("button", { class: "pd-tab", type: "button" }, pg.label);
+    t.addEventListener("click", () => show6(i));
+    tabs.push(t);
+    bar.append(t);
+  });
+  show6(opts2 && opts2.start ? opts2.start : 0);
+  return { el: el4, show: show6, setLabel(i, label) {
+    if (tabs[i]) tabs[i].textContent = label;
+  }, current: () => cur2 };
+}
+function treeBook(groups, start, opts2) {
+  const tree = h2("div", { class: "pd-tree" }), page = h2("div", { class: "pd-page" }), el4 = h2("div", { class: "pd-book" }, tree, page);
+  const built = /* @__PURE__ */ new Map(), leaves = /* @__PURE__ */ new Map(), specs = /* @__PURE__ */ new Map();
+  let cur2 = "";
+  const show6 = (label, force) => {
+    const pg = specs.get(label);
+    if (!pg || label === cur2) return;
+    if (cur2 && !force && opts2 && opts2.canLeave && !opts2.canLeave(cur2)) return;
+    const from = cur2;
+    cur2 = label;
+    for (const [l, leaf] of leaves) leaf.classList.toggle("on", l === label);
+    let p = built.get(label);
+    if (!p) {
+      p = h2("div", { "data-page": label });
+      built.set(label, p);
+      pg.build(p);
+    }
+    page.replaceChildren(p);
+    page.scrollTop = 0;
+    if (opts2 && opts2.onShow) opts2.onShow(label, from);
+  };
+  for (const g2 of groups) {
+    tree.append(h2("div", { class: "grp" }, g2.label));
+    for (const pg of g2.pages) {
+      const leaf = h2("div", { class: "leaf" }, pg.label);
+      leaf.addEventListener("click", () => show6(pg.label));
+      leaves.set(pg.label, leaf);
+      specs.set(pg.label, pg);
+      tree.append(leaf);
+    }
+  }
+  show6(start && specs.has(start) ? start : groups[0].pages[0].label);
+  const rebuild = (label) => {
+    if (!built.has(label)) return;
+    built.delete(label);
+    if (label === cur2) {
+      const pg = specs.get(label);
+      const p = h2("div", { "data-page": label });
+      built.set(label, p);
+      pg.build(p);
+      page.replaceChildren(p);
+    }
+  };
+  return { el: el4, show: show6, current: () => cur2, built: (l) => built.has(l), rebuild };
+}
+function infoBar() {
+  const msg = h2("span", { class: "msg", "data-k": "infobar-msg" });
+  const x = h2("button", { class: "x", type: "button", title: "Hide this message." }, closeMark());
+  const el4 = h2("div", { class: "pd-infobar", hidden: true, "data-k": "infobar" }, h2("span", { class: "pd-warnicon" }), msg, x);
+  el4.firstChild.innerHTML = warningIcon().el.innerHTML;
+  let timer3 = 0;
+  const hide = () => {
+    el4.hidden = true;
+    if (timer3) clearTimeout(timer3);
+    timer3 = 0;
+  };
+  x.addEventListener("click", hide);
+  return { el: el4, hide, show(m, ms) {
+    msg.textContent = m;
+    el4.hidden = false;
+    if (timer3) clearTimeout(timer3);
+    timer3 = ms ? window.setTimeout(hide, ms) : 0;
+  } };
+}
+function focusError(ctrl, row3, col) {
+  if (!ctrl) return;
+  let target2 = ctrl;
+  if (ctrl.classList.contains("pd-grid") && row3 !== void 0) {
+    const tr = ctrl.querySelectorAll("tbody tr")[row3];
+    const td = tr ? tr.children[col || 0] : void 0;
+    target2 = td ? td.querySelector("input,textarea,k-select") || td : ctrl;
+    if (td) {
+      td.classList.add("err");
+      setTimeout(() => td.classList.remove("err"), 3e3);
+      td.scrollIntoView({ block: "nearest" });
+    }
+  }
+  setTimeout(() => {
+    if (!target2) return;
+    target2.focus();
+    if (target2 instanceof HTMLInputElement || target2 instanceof HTMLTextAreaElement) target2.select();
+  }, 0);
+}
+function staticBitmap(bitmap, w, hgt = w, style) {
+  const s2 = h2("span", { class: "pd-bitmap", "data-bitmap": bitmap, style: style || null });
+  s2.append(kicadIcon(bitmap, w, hgt));
+  return s2;
+}
+function iconButton(icon2, title, fn, disabled) {
+  return bitmapButton(ICONS[icon2], title, fn, { disabled: !!disabled, cls: "pd-iconbtn" });
+}
+function swatch(css) {
+  const sw = h2("span", { class: "sw" });
+  const i = h2("i");
+  i.style.background = css || "transparent";
+  sw.append(i);
+  return sw;
+}
+function grid(columns, rows3, opts2) {
+  let data = rows3, sel = -1, anchor2 = -1;
+  const more = /* @__PURE__ */ new Set();
+  const table = h2("table"), wrap = h2("div", { class: "pd-grid", style: opts2 && opts2.height ? `max-height:${opts2.height}` : null, "data-k": opts2 && opts2.key }, table);
+  const changed2 = () => {
+    if (opts2 && opts2.onChange) opts2.onChange();
+  };
+  const isSel = (k) => k === sel || more.has(k);
+  const mark = () => {
+    Array.from(table.querySelectorAll("tbody tr")).forEach((tr, k) => tr.classList.toggle("sel", isSel(k)));
+  };
+  const select2 = (i) => {
+    sel = i;
+    anchor2 = i;
+    more.clear();
+    mark();
+    if (opts2 && opts2.onSelect) opts2.onSelect(i);
+  };
+  const selectedRows = () => data.map((_r, k) => k).filter(isSel);
+  const pick = (i, ev) => {
+    if (!(opts2 && opts2.multi) || !ev.shiftKey && !ev.ctrlKey && !ev.metaKey) {
+      if (sel !== i || more.size) select2(i);
+      return;
+    }
+    if (ev.shiftKey && anchor2 >= 0) {
+      more.clear();
+      for (let k = Math.min(anchor2, i); k <= Math.max(anchor2, i); k++) more.add(k);
+      sel = i;
+    } else {
+      if (isSel(i) && selectedRows().length > 1) {
+        more.delete(i);
+        if (sel === i) sel = selectedRows()[0];
+      } else {
+        if (sel >= 0) more.add(sel);
+        sel = i;
+      }
+      anchor2 = i;
+    }
+    mark();
+    if (opts2 && opts2.onSelect) opts2.onSelect(sel);
+  };
+  const shown2 = () => columns.filter((c) => !c.hidden);
+  const cellText2 = (c, v) => c.type === "len" ? typeof v === "number" && isFinite(v) ? fmtLenU(v) : "" : c.type === "num" ? typeof v === "number" && isFinite(v) ? trim(v.toFixed(6)) : "" : c.type === "check" ? v ? "1" : "0" : c.type === "select" ? ((c.options || []).find((o) => String(o[0]) === String(v)) || [0, String(v === void 0 ? "" : v)])[1] : String(v === void 0 ? "" : v);
+  const setCell = (row3, c, text3) => {
+    if (c.type === "len") {
+      const x = parseLen(text3);
+      row3[c.key] = !text3.trim() ? NaN : isNaN(x) ? row3[c.key] : x;
+    } else if (c.type === "num") {
+      const x = parseNum(text3);
+      row3[c.key] = !text3.trim() ? NaN : isNaN(x) ? row3[c.key] : x;
+    } else if (c.type === "check") row3[c.key] = /^(1|true|yes)$/i.test(text3.trim());
+    else if (c.type === "select") {
+      const o = (c.options || []).find((x) => x[1] === text3 || String(x[0]) === text3);
+      if (o) row3[c.key] = o[0];
+    } else row3[c.key] = text3;
+  };
+  const refresh = () => {
+    table.replaceChildren();
+    const head3 = h2("tr");
+    for (const c of shown2()) head3.append(h2("th", { style: c.width ? `width:${c.width}` : null, title: c.tip }, c.label, c.sort ? sortArrow(c.sort === "asc") : null));
+    head3.addEventListener("contextmenu", (ev) => {
+      if (!columns.some((c) => c.hidden !== void 0)) return;
+      ev.preventDefault();
+      popupMenu(ev.clientX, ev.clientY, columns.filter((c, i) => i > 0 && c.label).map((c) => ({ label: c.label, check: true, checked: !c.hidden, run: () => {
+        c.hidden = !c.hidden;
+        refresh();
+      } })));
+    });
+    table.append(h2("thead", null, head3));
+    const body = h2("tbody");
+    data.forEach((row3, i) => {
+      const tr = h2("tr", { class: (isSel(i) ? "sel " : "") + (opts2 && opts2.rowClass ? opts2.rowClass(row3, i) : "") });
+      tr.addEventListener("pointerdown", (ev) => pick(i, ev));
+      shown2().forEach((c, ci) => {
+        const ro = !!(opts2 && opts2.ro) || c.type === "ro" || (c.readOnly ? c.readOnly(row3, i) : false);
+        const v = row3[c.key];
+        if (c.type === "icon") {
+          const ic = c.icon ? c.icon(row3, i) : null;
+          tr.append(h2("td", { class: "ico", title: ic ? ic.title : null }, ic ? kicadIcon(ic.icon, 16) : null));
+        } else if (c.type === "check") {
+          const cb = h2("input", { type: "checkbox", checked: !!v, disabled: ro });
+          cb.addEventListener("change", () => {
+            row3[c.key] = cb.checked;
+            changed2();
+          });
+          tr.append(h2("td", { class: "chk" }, cb));
+        } else if (c.type === "color") {
+          const b = h2("button", { type: "button", class: "pd-swatchbtn", disabled: ro, title: String(v || "") }, swatch(String(v || "")));
+          b.addEventListener("click", () => {
+            if (c.pick) c.pick(String(row3[c.key] || ""), (css) => {
+              row3[c.key] = css;
+              b.replaceChildren(swatch(css));
+              b.title = css;
+              changed2();
+            });
+          });
+          tr.append(h2("td", null, b));
+        } else if (c.type === "select" && !ro) {
+          const s2 = h2("k-select");
+          for (const [val, label] of c.options || []) {
+            const o = h2("option", { value: String(val), "data-icon": c.icons ? c.icons[String(val)] : void 0 }, label);
+            if (String(val) === String(v)) o.selected = true;
+            s2.append(o);
+          }
+          s2.addEventListener("change", () => {
+            const o = (c.options || [])[s2.selectedIndex];
+            if (o) {
+              row3[c.key] = o[0];
+              changed2();
+            }
+          });
+          tr.append(h2("td", null, s2));
+        } else if (ro) {
+          const text3 = c.type === "len" ? typeof v === "number" && isFinite(v) ? fmtLenU(v) : c.blank || "" : cellText2(c, v);
+          const bmp = c.type === "select" && c.icons ? c.icons[String(v)] : void 0;
+          tr.append(h2("td", { class: "ro", title: text3 }, bmp ? h2("span", { style: "display:inline-flex;align-items:center;gap:4px" }, kicadIcon(bmp, 40, 10), text3) : text3));
+        } else {
+          const text3 = cellText2(c, v);
+          const inp = h2("input", { type: "text", value: text3, placeholder: c.blank, "data-col": c.key });
+          inp.addEventListener("change", () => {
+            if (c.type === "len") {
+              const x = parseLen(inp.value);
+              if (!inp.value.trim()) {
+                row3[c.key] = NaN;
+                inp.value = "";
+              } else if (isNaN(x)) inp.value = text3;
+              else {
+                row3[c.key] = x;
+                inp.value = fmtLenU(x);
+              }
+            } else if (c.type === "num") {
+              const x = parseNum(inp.value);
+              if (!inp.value.trim()) row3[c.key] = NaN;
+              else if (isNaN(x)) inp.value = text3;
+              else row3[c.key] = x;
+            } else row3[c.key] = inp.value;
+            changed2();
+          });
+          inp.addEventListener("keydown", (ev) => {
+            if (ev.key === "Enter") {
+              ev.stopPropagation();
+              inp.blur();
+              return;
+            }
+            const mod = ev.ctrlKey || ev.metaKey;
+            const noSel = inp.selectionStart === inp.selectionEnd;
+            if (mod && ev.key.toLowerCase() === "c" && noSel) {
+              ev.preventDefault();
+              void navigator.clipboard?.writeText(shown2().map((x) => cellText2(x, row3[x.key])).join("	"));
+            } else if (mod && ev.key.toLowerCase() === "v" && navigator.clipboard && navigator.clipboard.readText) {
+              ev.preventDefault();
+              void navigator.clipboard.readText().then((clip2) => {
+                const lines = clip2.replace(/\r/g, "").replace(/\n$/, "").split("\n");
+                if (lines.length === 1 && !lines[0].includes("	")) {
+                  const a = inp.selectionStart || 0, b = inp.selectionEnd || 0;
+                  inp.value = inp.value.slice(0, a) + lines[0] + inp.value.slice(b);
+                  inp.dispatchEvent(new Event("change"));
+                  return;
+                }
+                const cols = shown2();
+                lines.forEach((line, k) => {
+                  const r = data[i + k];
+                  if (!r) return;
+                  line.split("	").forEach((cell, m) => {
+                    const col = cols[ci + m];
+                    if (col && col.type !== "ro" && !(col.readOnly && col.readOnly(r, i + k))) setCell(r, col, cell);
+                  });
+                });
+                refresh();
+                changed2();
+              });
+            }
+          });
+          if (c.button) {
+            const bt = c.button;
+            const b = h2("button", { type: "button", class: "pd-cellbtn", title: bt.title, tabindex: "-1" }, kicadIcon(bt.icon, 16));
+            b.addEventListener("click", () => bt.run(row3, i, (val) => {
+              row3[c.key] = val;
+              inp.value = val;
+              changed2();
+            }));
+            tr.append(h2("td", { class: "withbtn" }, h2("div", { class: "pd-cellwrap" }, inp, b)));
+          } else tr.append(h2("td", null, inp));
+        }
+      });
+      body.append(tr);
+    });
+    table.append(body);
+  };
+  refresh();
+  return { el: wrap, rows: () => data, setRows(r) {
+    data = r;
+    sel = -1;
+    anchor2 = -1;
+    more.clear();
+    refresh();
+  }, selected: () => sel, select: select2, refresh, columns, selectedRows };
+}
+function listDialog(title, headers, items, onPick, opts2) {
+  const cols = headers.map((label, i) => ({ key: "c" + i, label, type: "ro" }));
+  const toRows2 = (list) => list.map((r) => {
+    const o = {};
+    r.forEach((v, i) => {
+      o["c" + i] = v;
+    });
+    return o;
+  });
+  let shown2 = items.slice();
+  const g2 = grid(cols, toRows2(shown2), { height: "300px" });
+  const filter = h2("input", { type: "text", placeholder: "Filter", "data-k": "filter", style: "width:100%;margin-bottom:6px" });
+  const wild = (pat) => new RegExp("^" + pat.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
+  filter.addEventListener("input", () => {
+    const re = wild("*" + filter.value.toLowerCase() + "*");
+    shown2 = items.filter((r) => re.test(String(r[0] || "").toLowerCase()));
+    g2.setRows(toRows2(shown2));
+    if (shown2.length) g2.select(0);
+  });
+  const nameIn = opts2 && opts2.name ? h2("input", { type: "text", "data-k": "name", value: opts2.name.value, style: "flex:1" }) : null;
+  if (nameIn && opts2.name.invalidChars) {
+    const bad = opts2.name.invalidChars;
+    nameIn.addEventListener("input", () => {
+      const v = nameIn.value.split("").filter((c) => !bad.includes(c)).join("");
+      if (v !== nameIn.value) nameIn.value = v;
+    });
+  }
+  let api6 = null;
+  let busy = false;
+  const row3 = () => {
+    const i = g2.selected();
+    return i >= 0 ? shown2[i] || null : null;
+  };
+  const pick = () => {
+    const r = row3();
+    const name = nameIn ? nameIn.value.trim() : "";
+    if (!opts2 || !opts2.validate && !opts2.onOk) {
+      if (!r) return false;
+      onPick(r);
+      return true;
+    }
+    if (busy) return false;
+    const v = opts2.validate ? opts2.validate(r, name) : true;
+    const finish = (ok2) => {
+      busy = false;
+      if (!ok2) return;
+      if (opts2.onOk) opts2.onOk(r, name);
+      else if (r) onPick(r);
+      if (api6) api6.close();
+    };
+    if (v instanceof Promise) {
+      busy = true;
+      v.then(finish, () => {
+        busy = false;
+      });
+      return false;
+    }
+    if (!v) return false;
+    if (opts2.onOk) opts2.onOk(r, name);
+    else if (r) onPick(r);
+    return true;
+  };
+  api6 = openDialog2({
+    title,
+    width: opts2 && opts2.width || 400,
+    okLabel: opts2 && opts2.okLabel,
+    extra: opts2 && opts2.extra,
+    child: !!(opts2 && opts2.child),
+    build(body) {
+      if (nameIn) body.append(h2("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:8px" }, h2("span", { class: "pd-lbl" }, opts2.name.label), nameIn));
+      body.append(filter, h2("div", { class: "pd-lbl", style: "margin-bottom:4px" }, opts2 && opts2.listLabel || "Items:"), g2.el);
+      g2.el.addEventListener("dblclick", () => {
+        if (pick() && api6) api6.close();
+      });
+      const at4 = opts2 && opts2.select ? shown2.findIndex((r) => r[0] === opts2.select) : 0;
+      if (shown2.length) g2.select(Math.max(0, at4));
+      setTimeout(() => {
+        if (nameIn) {
+          nameIn.focus();
+          nameIn.select();
+        } else filter.focus();
+      }, 0);
+    },
+    ok() {
+      return pick();
+    }
+  });
+  return api6;
+}
+function gridButtons(g2, make, opts2) {
+  const ro = !!(opts2 && opts2.ro);
+  const bar = h2("div", { class: "pd-gridbar" });
+  bar.append(iconButton("plus", opts2 && opts2.addTip || "Add row", () => {
+    const rows3 = g2.rows();
+    rows3.push(make());
+    g2.refresh();
+    g2.select(rows3.length - 1);
+    const last3 = g2.el.querySelector("tbody tr:last-child input[type=text]");
+    if (last3) {
+      last3.focus();
+      last3.select();
+    }
+    if (opts2 && opts2.onChange) opts2.onChange();
+  }, ro));
+  if (opts2 && opts2.move) {
+    const swap = (d) => {
+      const rows3 = g2.rows(), i = g2.selected(), j = i + d;
+      if (i < 0 || j < 0 || j >= rows3.length) return;
+      [rows3[i], rows3[j]] = [rows3[j], rows3[i]];
+      g2.refresh();
+      g2.select(j);
+      if (opts2.onChange) opts2.onChange();
+    };
+    bar.append(iconButton("up", "Move up", () => swap(-1), ro), iconButton("down", "Move down", () => swap(1), ro));
+  }
+  bar.append(iconButton("trash", opts2 && opts2.delTip || "Delete row", () => {
+    const rows3 = g2.rows(), i = g2.selected();
+    if (i < 0 || i >= rows3.length) return;
+    if (opts2 && opts2.canDelete && !opts2.canDelete(rows3[i], i)) return;
+    rows3.splice(i, 1);
+    g2.refresh();
+    g2.select(Math.min(i, rows3.length - 1));
+    if (opts2 && opts2.onChange) opts2.onChange();
+  }, ro));
+  return bar;
+}
+function reportPanel(height, opts2) {
+  ensureCss2();
+  const list = h2("div", { class: "pd-report", style: `height:${height || "260px"}` });
+  let lines = [];
+  const filters2 = {};
+  const draw2 = () => {
+    list.replaceChildren();
+    for (const l of lines) {
+      const key3 = l.severity === "error" ? "Errors" : l.severity === "warning" ? "Warnings" : l.severity === "action" ? "Actions" : "Infos";
+      if (!filters2.All.get() && !filters2[key3].get()) continue;
+      list.append(h2("div", { class: "ln " + l.severity }, l.text));
+    }
+    if (!list.childElementCount) list.append(h2("div", { class: "ln info" }, lines.length ? "" : opts2 && opts2.empty !== void 0 ? opts2.empty : "No changes to be made."));
+    const count2 = (s2) => lines.filter((l) => l.severity === s2).length;
+    filters2.Errors.el.lastChild.textContent = `Errors (${count2("error")})`;
+    filters2.Warnings.el.lastChild.textContent = `Warnings (${count2("warning")})`;
+    list.scrollTop = list.scrollHeight;
+  };
+  const bar = h2("div", { class: "pd-row", style: "margin-top:6px" }, h2("span", { class: "pd-lbl" }, "Show:"));
+  for (const [name, on2] of [["All", true], ["Errors", true], ["Warnings", true], ["Actions", true], ["Infos", true]]) {
+    const f2 = checkField(on2, name, { onChange: (v) => {
+      if (name === "All") for (const k of Object.keys(filters2)) filters2[k].set(v);
+      else filters2.All.set(["Errors", "Warnings", "Actions", "Infos"].every((k) => filters2[k].get()));
+      draw2();
+    } });
+    filters2[name] = f2;
+    bar.append(f2.el);
+  }
+  if (opts2 && opts2.fileName) {
+    const plain = (l) => (l.severity === "error" ? "Error: " : l.severity === "warning" ? "Warning: " : l.severity === "info" ? "Info: " : "") + l.text + "\n";
+    const name = opts2.fileName;
+    bar.append(h2("span", { style: "flex:1" }), h2("button", { class: "btn sm", "data-k": "saveReport", onclick: () => download2(name, lines.map(plain).join(""), "text/plain;charset=utf-8") }, "Save..."));
+  }
+  const el4 = h2("div", null, list, bar);
+  return { el: el4, set(l) {
+    lines = l;
+    draw2();
+  } };
+}
+function download2(name, text3, type = "text/plain") {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([text3], { type }));
+  a.download = name;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(a.href);
+    a.remove();
+  }, 1e3);
+}
+var CSS3, cssDone, errorMessage, UNIT, currentUnits, unitName, trim, isExpr, unitLabel, note2, ICONS;
+var init_ui = __esm({
+  "web/domains/pcb/editor/pcbdialogs/ui.ts"() {
+    "use strict";
+    init_shell();
+    init_state();
+    init_kselect();
+    init_userorigin();
+    init_numeric();
+    init_dom2();
+    init_kicon_dom();
+    CSS3 = `
+.pd-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); margin: 0 0 10px; flex-wrap: wrap; }
+.pd-tab { padding: 5px 12px; border: 1px solid transparent; border-bottom: none; border-radius: var(--r-3) var(--r-3) 0 0; background: none; color: var(--ink-2); margin-bottom: -1px; white-space: nowrap; }
+.pd-tab:hover { color: var(--ink); }
+.pd-tab.on { background: var(--bench); border-color: var(--line); color: var(--ink); font-weight: 600; }
+.pd-book { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 0 14px; height: 100%; min-height: 0; }
+.pd-tree { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); overflow: auto; padding: 4px 0; user-select: none; }
+.pd-tree .grp { padding: 4px 8px; font-weight: 600; cursor: default; }
+.pd-tree .leaf { padding: 3px 8px 3px 24px; cursor: pointer; white-space: nowrap; }
+.pd-tree .leaf:hover { background: var(--sel-soft); }
+.pd-tree .leaf.on, .pd-tree .leaf.on:hover { background: var(--sel); color: var(--ink); }
+.pd-page { overflow: auto; min-height: 0; padding-right: 4px; }
+.pd-box { margin: 0 0 12px; }
+.pd-box > .hd { font-weight: 600; margin: 0 0 6px; padding-bottom: 3px; border-bottom: 1px solid var(--line); }
+.pd-form { display: grid; grid-template-columns: max-content minmax(90px, 170px) max-content; gap: 6px 8px; align-items: center; }
+.pd-form.wide { grid-template-columns: max-content minmax(140px, 1fr) max-content; }
+.pd-form > label, .pd-lbl { color: var(--ink); white-space: nowrap; }
+.pd-form .unit { color: var(--ink-2); }
+.pd-form .span { grid-column: 1 / -1; }
+.pd-check { display: flex; gap: 6px; align-items: center; color: var(--ink); margin: 2px 0; }
+.pd-check input { width: auto; margin: 0; }
+.pd-check.disabled, .pd-check.dim, .pd-check:has(input:disabled) { color: var(--ink-3, var(--ink-2)); }
+.pd-note { color: var(--ink-2); font-size: 12px; margin: 4px 0 8px; }
+.pd-info { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-2); padding: 6px 10px; margin: 0 0 10px; color: var(--ink); }
+.pd-grid { border: 1px solid var(--line); border-radius: var(--r-2); overflow: auto; background: var(--panel); }
+.pd-grid table { border-collapse: collapse; width: 100%; font-size: 12px; }
+.pd-grid th { position: sticky; top: 0; background: var(--panel-2); text-align: left; font-weight: 600; padding: 4px 6px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); white-space: nowrap; z-index: 1; }
+.pd-grid td { padding: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); height: 24px; }
+.pd-grid td.ro, .pd-grid td.txt { padding: 3px 6px; white-space: nowrap; }
+.pd-grid td.ro { color: var(--ink-2); }
+.pd-grid tr.sel td { background: var(--sel); }
+.pd-grid tr.hd td { background: var(--panel-2); font-weight: 600; padding: 3px 6px; }
+.pd-grid td input[type=text], .pd-grid td k-select { border: none !important; border-radius: 0 !important; background: transparent !important; width: 100%; height: 23px; padding: 2px 6px !important; font-family: inherit !important; }
+.pd-grid td input[type=text]:focus, .pd-grid td k-select:focus-within { outline: 2px solid var(--blue); outline-offset: -2px; }
+.pd-grid td input[type=text] { min-width: 84px; }
+.pd-grid td.chk { text-align: center; }
+.pd-grid td.chk input { width: auto; margin: 0; }
+.pd-grid td.ico { width: 22px; text-align: center; vertical-align: middle; padding: 0 2px; }
+.pd-grid td.ico svg, .pd-grid td.ico img { display: block; margin: auto; }
+.pd-cellwrap { display: flex; align-items: center; }
+.pd-3dwrap { display: flex; flex: 1; min-width: 0; min-height: 0; gap: 4px; }
+.pd-3dprev { position: relative; flex: 1; min-width: 0; min-height: 200px; background: var(--canvas); border: 1px solid var(--line); overflow: hidden; }
+.pd-3dprev-msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); font-size: var(--fs-sm); }
+.pd-3dbtns { display: flex; flex-direction: column; gap: 4px; flex: none; }
+.pd-cellwrap input[type=text] { flex: 1; min-width: 0; }
+.pd-cellbtn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: none; background: transparent; color: var(--ink); cursor: pointer; border-radius: var(--r-1); }
+.pd-cellbtn:hover { background: var(--sel-soft); }
+.pd-gridbar { display: flex; gap: 4px; margin: 4px 0 0; }
+/* the hand-made square buttons (a "..." picker, a colour swatch); icon buttons are components/kicon-dom's .kbmp */
+.pd-iconbtn:not(.kbmp) { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); color: var(--ink); padding: 0; }
+.pd-iconbtn:not(.kbmp):hover { border-color: var(--ink-3, var(--ink-2)); }
+.pd-iconbtn:not(.kbmp):disabled { opacity: .4; cursor: default; }
+.pd-3dbtns .pd-iconbtn.on { background: var(--on); border-color: var(--on-line); }
+.pd-bitmap { display: inline-flex; flex: none; align-items: center; justify-content: center; }
+.pd-bitmap > svg.kicon-dom { display: block; max-width: 100%; height: auto; }
+.pd-bmplabel { display: inline-flex; align-items: center; gap: 6px; }
+.pd-togrow { display: flex; align-items: center; gap: 2px; }
+.pd-togrow .vsep { width: 1px; height: 18px; background: var(--line); margin: 0 5px; }
+.pd-report { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); overflow: auto; font-size: 12px; padding: 4px 8px; min-height: 120px; }
+.pd-report .ln { padding: 1px 0; white-space: pre-wrap; }
+.pd-report .ln.error { color: var(--err); }
+.pd-report .ln.warning { color: var(--warn); }
+.pd-report .ln.action { color: var(--ink); }
+.pd-report .ln.info { color: var(--ink-2); }
+.pd-sev { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; }
+.pd-sev.error { background: var(--err); border-radius: 50%; }
+.pd-sev.warning { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid var(--warn); }
+.pd-sev.exclusion { background: var(--ink-3); }
+.pd-sev.ignore { background: var(--ink-3); border-radius: var(--r-1); }
+.pd-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 6px; }
+.pd-row k-select, .pd-row input[type=text] { width: auto; }
+.pd-cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
+.pd-radiobox { border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px 6px; margin: 0; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.pd-radiobox > legend { padding: 0 4px; color: var(--ink); }
+.pd-radiobox.disabled > legend, .pd-check.disabled { color: var(--ink-3); }
+.pd-cols3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 20px; }
+.pd-list { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); overflow: auto; }
+.pd-list .it { padding: 3px 8px; cursor: pointer; display: flex; gap: 6px; align-items: baseline; }
+.pd-list .it:hover { background: var(--panel-2); }
+.pd-list .it.sel { background: var(--sel); }
+.pd-list .it .sub { color: var(--ink-2); padding-left: 16px; }
+.pd-list .hd { padding: 3px 8px; font-weight: 600; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.pd-swatch { display: inline-block; width: 22px; height: 12px; border: 1px solid var(--line); vertical-align: -1px; }
+.pd-layertable { border-collapse: collapse; margin: 8px 0; }
+.pd-layertable td { padding: 2px 8px 2px 0; }
+.pd-layertable td.chk input { width: auto; margin: 0 4px; }
+.pd-layertable input[type=text] { width: 190px; }
+.pd-layertable k-select { width: 190px; }
+.pd-layertable tr.cu input[type=text] { font-weight: 600; }
+.pd-layertable .desc { color: var(--ink-2); }
+.pd-colhead { font-weight: 600; margin: 0 0 4px; }
+.pd-status { font-size: 12px; } .pd-status.err { color: var(--err); } .pd-status.ok { color: var(--ink-2); }
+.pd-sevtable { border-collapse: collapse; width: 100%; }
+.pd-sevtable td { padding: 2px 10px 2px 0; white-space: nowrap; }
+.pd-sevtable td:first-child { white-space: normal; width: 100%; padding-left: 14px; }
+.pd-sevtable tr.hd td { font-weight: 600; padding: 8px 0 3px; }
+.pd-sevtable input { width: auto; margin: 0; vertical-align: -2px; }
+.pd-scroll { overflow: auto; }
+.pd-inline { display: inline-flex; gap: 14px; align-items: center; }
+.pd-value { font-variant-numeric: tabular-nums; }
+.pd-drclist { height: 300px; }
+.pd-drclist .it { align-items: flex-start; padding: 4px 8px; border-bottom: 1px solid var(--line); }
+.pd-drclist .it .pd-sev { margin-top: 4px; flex: 0 0 auto; }
+.pd-empty { padding: 10px; color: var(--ink-2); }
+.pd-badge { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--line); font-size: 11px; text-align: center; margin-left: -4px; }
+.pd-showrow { margin-top: 8px; }
+.pd-stat { border-collapse: collapse; width: 100%; margin: 0 0 14px; }
+.pd-stat th { text-align: left; font-weight: 600; padding: 3px 8px 3px 0; border-bottom: 1px solid var(--line); }
+.pd-stat td { padding: 3px 8px 3px 0; } .pd-stat td.n, .pd-stat th + th { text-align: right; font-variant-numeric: tabular-nums; }
+.pd-stat tr.total td { border-top: 1px solid var(--line); font-weight: 600; }
+.pd-fieldlist { margin-top: 8px; border: 1px solid var(--line); border-radius: var(--r-2); padding: 6px 8px; background: var(--panel); max-height: 380px; overflow: auto; }
+.pd-report .ln.hd { font-weight: 600; }
+.pd-xy { display: inline-flex; gap: 6px; align-items: center; } .pd-xy input { width: 96px; } .pd-xy label { color: var(--ink); }
+.pd-dim { color: var(--ink-3, var(--ink-2)) !important; opacity: .7; }
+.pd-zone { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 0 16px; }
+textarea.pd-text { width: 100%; min-height: 260px; font-family: var(--mono); font-size: 12px; white-space: pre; }
+.pd-spin { position: relative; display: inline-flex; align-items: stretch; min-width: 0; }
+.pd-spin > input[type=text] { width: 100%; min-width: 0; padding-right: 18px; }
+.pd-spin > .arrows { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 16px; display: flex; flex-direction: column; border-left: 1px solid var(--line); }
+.pd-spin > .arrows > button { flex: 1 1 50%; min-height: 0; padding: 0; border: 0; border-radius: 0; background: var(--panel-2); color: var(--ink-2); display: grid; place-items: center; cursor: default; }
+.pd-spin > .arrows > button:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, var(--panel-2)); }
+.pd-spin > .arrows > button + button { border-top: 1px solid var(--line); }
+.pd-spin.disabled > .arrows { opacity: .5; pointer-events: none; }
+.pd-warnicon { display: inline-flex; align-items: center; margin-left: 4px; cursor: help; vertical-align: middle; }
+.pd-warnicon[hidden] { display: none; }
+.pd-infobar { display: flex; gap: 8px; align-items: center; background: color-mix(in srgb, var(--warn) 18%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 50%, var(--line)); border-radius: var(--r-2); padding: 5px 10px; margin: 0 0 8px; color: var(--ink); }
+.pd-infobar[hidden] { display: none; }
+.pd-form.pd-form4 { grid-template-columns: max-content minmax(90px, 170px) max-content max-content; }
+.pd-form4 > span > input { width: 100%; }
+.pd-bad { color: var(--err) !important; }
+.pd-sep { border: 0; border-top: 1px solid var(--line); margin: 6px 0; }
+.pd-layercell { display: inline-flex; gap: 6px; align-items: center; width: 100%; }
+.pd-layercell .sw { width: 12px; height: 12px; border: 1px solid var(--line); border-radius: 2px; flex: none; }
+.pd-layercell k-select { flex: 1; }
+.pd-report .ln.sel { background: var(--sel-soft); }
+.pd-report .ln[tabindex] { cursor: pointer; }
+.pd-vline { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
+.pd-reann-dirs { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 8px; }
+.pd-reann-dir { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.pd-reann-pic { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); }
+.pd-infobar .msg { flex: 1; white-space: pre-wrap; }
+.pd-infobar .x { border: 0; background: none; color: var(--ink-2); padding: 0 4px; }
+.pd-grid td.cellsel input[type=text], .pd-grid td.cellsel { background: var(--sel-soft); }
+.pd-grid td.err input[type=text] { outline: 2px solid var(--err); outline-offset: -2px; }
+.pd-link { color: var(--blue); text-decoration: underline; cursor: pointer; background: none; border: 0; padding: 0; font: inherit; }
+.pd-small { font-size: var(--fs-xs); font-style: italic; color: var(--ink-2); margin: 2px 0 6px; }
+.pd-swatchbtn { width: 100%; height: 23px; border: 0; padding: 3px 6px; background: none; display: flex; align-items: center; gap: 6px; cursor: pointer; }
+.pd-swatchbtn .sw { width: 28px; height: 14px; border: 1px solid var(--line-2); background-image: linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%), linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%); background-size: 8px 8px; background-position: 0 0, 4px 4px; position: relative; }
+.pd-swatchbtn .sw > i { position: absolute; inset: 0; }
+`;
+    cssDone = false;
+    errorMessage = (message, then) => {
+      messageBox("Error", message, [{ label: "OK", fn: then }]);
+    };
+    UNIT = { mm: { name: "mm", per: 1, digits: 4 }, in: { name: "in", per: 25.4, digits: 5 }, mil: { name: "mils", per: 0.0254, digits: 2 } };
+    currentUnits = () => E.units === "in" || E.units === "mil" ? E.units : "mm";
+    unitName = () => UNIT[currentUnits()].name;
+    trim = (s2) => s2.includes(".") ? s2.replace(/0+$/, "").replace(/\.$/, "") : s2;
+    isExpr = (text3) => /[-+*/()]/.test(text3.trim().replace(/^[-+]/, "").replace(/e[-+]\d/i, ""));
+    unitLabel = (text3) => h2("span", { class: "unit" }, text3 === void 0 ? unitName() : text3);
+    note2 = (text3) => h2("p", { class: "pd-note" }, text3);
+    ICONS = {
+      plus: "small_plus",
+      trash: "small_trash",
+      up: "small_up",
+      down: "small_down",
+      library: "small_library",
+      sort: "small_sort_desc",
+      folder: "small_folder",
+      edit: "small_edit",
+      refresh: "small_refresh",
+      warning: "small_warning",
+      bold: "text_bold",
+      italic: "text_italic",
+      alignLeft: "text_align_left",
+      alignCenter: "text_align_center",
+      alignRight: "text_align_right",
+      valignTop: "text_valign_top",
+      valignCenter: "text_valign_center",
+      valignBottom: "text_valign_bottom",
+      mirror: "text_mirrored",
+      link: "link"
+    };
+  }
+});
+
+// web/domains/pcb/editor/drawingsheet-model.ts
+function drawingSheetName(pro, sch) {
+  if (!pro) return "";
+  try {
+    const j = JSON.parse(pro);
+    const [a, b] = wksKey(sch);
+    const v = j[a] && j[a][b];
+    return typeof v === "string" ? v : "";
+  } catch {
+    return "";
+  }
+}
+function projectWorksheets(docs) {
+  const pro = docs.find((d) => d.docType === "kicad_pro"), dir = pro ? pro.path.split("/").slice(0, -1).join("/") : "";
+  return docs.filter((d) => d.docType === "worksheet").map((d) => ({ docId: d.docId, rel: dir && d.path.startsWith(dir + "/") ? d.path.slice(dir.length + 1) : d.path }));
+}
+function resolveWorksheet(name, sheets2) {
+  const n2 = (name || "").replace(/\\/g, "/").replace(/^\$\{KIPRJMOD\}\//, "").replace(/^\.\//, "").trim();
+  if (!n2) return null;
+  return sheets2.find((s2) => s2.rel === n2) || sheets2.find((s2) => n2.endsWith("/" + s2.rel)) || null;
+}
+var wksKey;
+var init_drawingsheet_model = __esm({
+  "web/domains/pcb/editor/drawingsheet-model.ts"() {
+    "use strict";
+    wksKey = (sch) => sch ? ["schematic", "page_layout_descr_file"] : ["pcbnew", "page_layout_descr_file"];
+  }
+});
+
+// web/domains/pcb/editor/drawingsheet.ts
+function load(docId3) {
+  if (loading.has(docId3)) return;
+  loading.add(docId3);
+  fetch(`/api/docs/${docId3}/content?v=${Date.now()}`, { credentials: "same-origin", cache: "no-store" }).then((r) => r.ok ? r.text() : "").then((t) => {
+    loading.delete(docId3);
+    const was = cache3.get(docId3);
+    if (was && was.text === t) return;
+    let sheet = null;
+    try {
+      sheet = t ? KiCadCanvas.parseDrawingSheet(t) : null;
+    } catch (e) {
+      sheet = null;
+    }
+    cache3.set(docId3, { text: t, sheet });
+    if (E.kdoc) {
+      applyDrawingSheet(E.kdoc);
+      requestRender();
+    }
+    for (const fn of listeners3) fn();
+  }, () => {
+    loading.delete(docId3);
+    if (!cache3.has(docId3)) cache3.set(docId3, { text: "", sheet: null });
+  });
+}
+function sheetOf(docId3) {
+  const c = cache3.get(docId3);
+  if (c) return c.sheet;
+  load(docId3);
+  return null;
+}
+function forgetWorksheet(docId3) {
+  for (const id of docId3 ? [docId3] : [...cache3.keys()]) load(id);
+}
+function applyDrawingSheet(d) {
+  const sch = d.type === "sch";
+  const ws = resolveWorksheet(drawingSheetName(E.proSettings, sch), projectWorksheets2());
+  d.drawingSheet = ws ? sheetOf(ws.docId) : null;
+}
+var projectWorksheets2, cache3, loading, listeners3;
+var init_drawingsheet = __esm({
+  "web/domains/pcb/editor/drawingsheet.ts"() {
+    "use strict";
+    init_state();
+    init_appstore();
+    init_view();
+    init_drawingsheet_model();
+    init_drawingsheet_model();
+    projectWorksheets2 = () => projectWorksheets(state.docs || []);
+    cache3 = /* @__PURE__ */ new Map();
+    loading = /* @__PURE__ */ new Set();
+    listeners3 = /* @__PURE__ */ new Set();
+    if (typeof window !== "undefined") {
+      window.addEventListener("kc-doc-saved", ((ev) => {
+        const id = ev.detail && String(ev.detail.savedDocId || ev.detail.docId || "");
+        if (id && cache3.has(id)) forgetWorksheet(id);
+      }));
+      document.addEventListener("visibilitychange", () => {
+        if (document.visibilityState === "visible" && cache3.size) forgetWorksheet();
+      });
+    }
+  }
+});
+
+// web/domains/pcb/dialogs/page-settings.ts
+var ROWS;
+var init_page_settings = __esm({
+  "web/domains/pcb/dialogs/page-settings.ts"() {
+    "use strict";
+    init_editor();
+    init_dom2();
+    init_kdate();
+    init_logic();
+    init_project();
+    init_kicon_dom();
+    init_ui();
+    init_units();
+    init_drawingsheet();
+    init_view();
+    ROWS = [
+      ["date", "Issue Date:"],
+      ["rev", "Revision:"],
+      ["title", "Title:"],
+      ["company", "Company:"],
+      ...Array.from({ length: 9 }, (_, i) => [`comment${i + 1}`, `Comment${i + 1}:`])
+    ];
+  }
+});
+
+// web/domains/pcb/editor/panels/core.ts
+function esc5(s2) {
+  return s2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function textEntry(title, message, value, opts2) {
+  return new Promise((resolve2) => {
+    const D = window.KDialogs;
+    if (!D) {
+      resolve2(null);
+      return;
+    }
+    let done = false;
+    const finish = (v) => {
+      if (!done) {
+        done = true;
+        resolve2(v);
+      }
+    };
+    D.open({
+      title,
+      width: 360,
+      build(body) {
+        body.innerHTML = `<p style="margin:0 0 8px;white-space:pre-line">${esc5(message)}</p><input id="kd-entry" type="text" value="${esc5(value)}" style="width:100%">`;
+        const inp = body.querySelector("#kd-entry");
+        if (inp && opts2?.alnum) inp.addEventListener("input", () => {
+          const bad = /[^\p{L}\p{N}]/gu;
+          if (!bad.test(inp.value)) return;
+          const at4 = inp.selectionStart ?? inp.value.length, before = inp.value.slice(0, at4).replace(bad, "").length;
+          inp.value = inp.value.replace(bad, "");
+          inp.setSelectionRange(before, before);
+        });
+      },
+      ok() {
+        const inp = document.querySelector("#kd-entry");
+        finish(inp ? inp.value : null);
+      },
+      cancel() {
+        finish(null);
+      }
+    });
+  });
+}
+function listPick(title, label, header, items) {
+  return new Promise((resolve2) => {
+    const D = window.KDialogs;
+    if (!D) {
+      resolve2(null);
+      return;
+    }
+    let done = false;
+    const finish = (v) => {
+      if (!done) {
+        done = true;
+        resolve2(v);
+      }
+    };
+    D.open({
+      title,
+      width: 360,
+      build(body) {
+        body.innerHTML = `<p style="margin:0 0 8px">${esc5(label)}</p><k-select id="kd-list" size="${Math.max(4, Math.min(10, items.length + 1))}" style="width:100%">
+          <optgroup label="${esc5(header)}">${items.map((n2, i) => `<option${i === 0 ? " selected" : ""}>${esc5(n2)}</option>`).join("")}</optgroup></k-select>`;
+      },
+      ok() {
+        const sel = document.querySelector("#kd-list");
+        finish(sel && sel.value ? sel.value : null);
+      },
+      cancel() {
+        finish(null);
+      }
+    });
+  });
+}
+var EMPTY_APPEARANCE, S2, subs, panelStore, projectId, projectName, openDocs, currentDocId, kdoc, isSchDoc, KC;
+var init_core = __esm({
+  "web/domains/pcb/editor/panels/core.ts"() {
+    "use strict";
+    init_appstore();
+    init_state();
+    init_tools();
+    init_kselect();
+    EMPTY_APPEARANCE = {
+      layers: [],
+      active: "",
+      objects: [],
+      nets: [],
+      netClasses: [],
+      inactive: "normal",
+      flip: false,
+      netColorMode: "ratsnest",
+      ratsnestMode: "all",
+      presets: [],
+      builtinPresets: [],
+      preset: null,
+      viewports: [],
+      viewport: null
+    };
+    S2 = { appearance: EMPTY_APPEARANCE, hierarchy: { root: null, version: 0 }, netNav: { root: null, version: 0 }, selVersion: 0 };
+    subs = /* @__PURE__ */ new Set();
+    panelStore = {
+      get: () => S2,
+      set(patch) {
+        S2 = Object.assign({}, S2, patch);
+        for (const fn of Array.from(subs)) {
+          try {
+            fn();
+          } catch (e) {
+            console.warn(e);
+          }
+        }
+      },
+      subscribe(fn) {
+        subs.add(fn);
+        return () => {
+          subs.delete(fn);
+        };
+      }
+    };
+    projectId = () => state.project && state.project.projectId || "";
+    projectName = () => state.project && state.project.name || "";
+    openDocs = () => state.docs || [];
+    currentDocId = () => state.docId || null;
+    kdoc = () => E.kdoc || null;
+    isSchDoc = () => E.DOC_TYPE === "kicad_sch";
+    KC = () => window.KiCadCanvas;
+  }
+});
+
+// web/domains/pcb/editor/panels/hierarchy.ts
+function sheetsOf(doc2) {
+  const out2 = [];
+  for (const m of KC().movableItems(doc2)) if (m.kind === "sheet" && m.file) out2.push({ id: m.id, name: m.name || "", file: m.file, page: String(m.page || "") });
+  return out2;
+}
+function entry(docId3) {
+  if (docId3 === currentDocId()) {
+    const d = kdoc();
+    if (!d || !isSchDoc()) return null;
+    live = { docId: docId3, doc: d };
+    return { doc: d, sheets: sheetsOf(d), page: String(d.pageNumber || "1") };
+  }
+  return cache4.get(docId3) || null;
+}
+function schDocs2() {
+  return openDocs().filter((d) => d.docType === "kicad_sch");
+}
+function loadSheets(stale) {
+  if (cacheProject !== projectId()) {
+    cache4.clear();
+    cacheProject = projectId();
+  }
+  if (stale) {
+    if (live && live.docId === stale && stale !== currentDocId()) cache4.set(stale, { doc: live.doc, sheets: sheetsOf(live.doc), page: String(live.doc.pageNumber || "1") });
+    else cache4.delete(stale);
+  }
+  const want2 = schDocs2().filter((d) => d.docId !== currentDocId() && !cache4.has(d.docId));
+  if (!want2.length) {
+    publishHierarchy();
+    return Promise.resolve();
+  }
+  if (loading2) return loading2;
+  const pid = projectId();
+  loading2 = Promise.all(want2.map(async (d) => {
+    try {
+      const r = await fetch(`/api/docs/${d.docId}/content?v=${Date.now()}`);
+      if (!r.ok) return;
+      const doc2 = KC().parseDoc(await r.text(), "kicad_sch");
+      if (pid === projectId()) cache4.set(d.docId, { doc: doc2, sheets: sheetsOf(doc2), page: String(doc2.pageNumber || "1") });
+    } catch (e) {
+    }
+  })).then(() => {
+    loading2 = null;
+    publishHierarchy();
+  });
+  return loading2;
+}
+function resolveChild(parent, file) {
+  const dir = parent.path.split("/").slice(0, -1).join("/"), rel = dir ? `${dir}/${file}` : file, base2 = file.split("/").pop();
+  const docs = schDocs2();
+  return docs.find((d) => d.path === rel || d.path === file) || docs.find((d) => d.path.split("/").pop() === base2) || null;
+}
+function build2() {
+  const root5 = store.get().project ? rootSchematic() : null;
+  if (!root5) return null;
+  const cur2 = currentDocId();
+  const rootEntry = entry(root5.docId);
+  const stem2 = root5.path.split("/").pop().replace(/\.kicad_sch$/, "");
+  const walk2 = (doc2, path2, depth) => {
+    const e = entry(doc2.docId);
+    if (!e || depth > 8) return [];
+    return e.sheets.map((sh) => {
+      const child2 = resolveChild(doc2, sh.file);
+      const p = path2 + sh.id + "/";
+      return {
+        path: p,
+        name: sh.name || sh.file.replace(/\.kicad_sch$/, ""),
+        page: sh.page,
+        docId: child2 ? child2.docId : null,
+        file: sh.file,
+        parentDocId: doc2.docId,
+        sheetId: sh.id,
+        current: !!child2 && child2.docId === cur2,
+        children: child2 ? walk2(child2, p, depth + 1) : []
+      };
+    });
+  };
+  const tops = topLevelSchematics();
+  if (tops.length > 1) {
+    const children = tops.map((t) => {
+      const d = t.doc, e = entry(d.docId), p = "/" + (t.uuid || d.docId) + "/";
+      return {
+        path: p,
+        name: t.name || d.path.split("/").pop().replace(/\.kicad_sch$/, ""),
+        page: e ? e.page : "",
+        docId: d.docId,
+        file: d.path.split("/").pop() || "",
+        parentDocId: null,
+        sheetId: null,
+        current: d.docId === cur2,
+        children: walk2(d, p, 0),
+        topLevel: true
+      };
+    });
+    return { path: "", name: projectName() || "Schematic", page: "", docId: null, file: "", parentDocId: null, sheetId: null, current: false, children, virtual: true };
+  }
+  const tl = topLevelEntry(root5.path);
+  return {
+    path: "/",
+    name: tl && typeof tl.name === "string" && tl.name || stem2 || projectName() || "Schematic",
+    page: rootEntry ? rootEntry.page : "1",
+    docId: root5.docId,
+    file: root5.path.split("/").pop() || "",
+    parentDocId: null,
+    sheetId: null,
+    current: root5.docId === cur2,
+    children: walk2(root5, "/", 0)
+  };
+}
+function publishHierarchy() {
+  let root5 = null;
+  try {
+    root5 = build2();
+  } catch (e) {
+    console.warn(e);
+  }
+  const h3 = panelStore.get().hierarchy;
+  panelStore.set({ hierarchy: { root: root5, version: h3.version + 1, marked: h3.marked, markColor: h3.markColor } });
+}
+function topLevelEntry(file, pro = projectJson()) {
+  const sch = pro.schematic, list = sch && Array.isArray(sch.top_level_sheets) ? sch.top_level_sheets : [];
+  const base2 = file.split("/").pop();
+  return list.find((e) => e && (e.filename === file || e.filename === base2)) || null;
+}
+var cache4, cacheProject, loading2, live, topSig;
+var init_hierarchy = __esm({
+  "web/domains/pcb/editor/panels/hierarchy.ts"() {
+    "use strict";
+    init_appstore();
+    init_doc();
+    init_state();
+    init_util();
+    init_gestures();
+    init_schnets();
+    init_project();
+    init_dom2();
+    init_page_settings();
+    init_core();
+    cache4 = /* @__PURE__ */ new Map();
+    cacheProject = "";
+    loading2 = null;
+    live = null;
+    topSig = "";
+    onProjectChanged(() => {
+      let sig = "";
+      try {
+        sig = topLevelSchematics().map((t) => t.doc.docId + ":" + t.name + ":" + t.uuid).join(",");
+      } catch (e) {
+        sig = "";
+      }
+      if (sig === topSig) return;
+      topSig = sig;
+      topLevelSheetsChanged();
+      publishHierarchy();
+      void loadSheets();
+    });
+  }
+});
+
 // web/domains/pcb/editor/proposals.ts
-function el(tag, cls, text3) {
+function el2(tag, cls, text3) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (text3 !== void 0) e.textContent = text3;
@@ -73958,7 +76073,7 @@ function panel() {
   if (!p) {
     const host2 = document.getElementById("cmtPanel")?.parentElement;
     if (!host2) return null;
-    p = el("div");
+    p = el2("div");
     p.id = "propPanel";
     host2.appendChild(p);
     for (const type of ["pointerdown", "pointerup", "pointermove", "mousedown", "mouseup", "click", "dblclick", "wheel", "contextmenu", "keydown"]) p.addEventListener(type, (ev) => ev.stopPropagation());
@@ -74004,7 +76119,7 @@ function noteProposalMsg(msg) {
   else if (p.status === "rejected") toast(`${who} rejected "${p.title}"`, 3500);
   else if (p.status === "withdrawn") toast(`"${p.title}" was withdrawn`, 3500);
 }
-async function load(id) {
+async function load2(id) {
   const have = full.get(id);
   if (have) return have;
   try {
@@ -74018,7 +76133,7 @@ async function load(id) {
   }
 }
 async function preview(id, quiet = false) {
-  const r = await load(id);
+  const r = await load2(id);
   if (!r || !rows.some((x) => x.id === id) || r.docId !== docId()) return;
   showPreview(asProposal(r), quiet);
   render2();
@@ -74038,7 +76153,7 @@ async function accept(id) {
     toast("You have view-only access to this project");
     return;
   }
-  const r = await load(id);
+  const r = await load2(id);
   if (!r) return;
   const p = asProposal(r), stale = staleReason(p);
   if (stale) {
@@ -74060,25 +76175,25 @@ async function accept(id) {
   clearPreview();
 }
 function card(r) {
-  const c = el("div", "prop-card" + (previewing() === r.id ? " shown" : ""));
+  const c = el2("div", "prop-card" + (previewing() === r.id ? " shown" : ""));
   c.dataset.proposal = r.id;
-  const meta2 = el("div", "meta");
-  meta2.append(el("b", "", author(r)), el("span", "", ago(r.createdAt)));
-  c.append(meta2, el("div", "prop-title", r.title));
-  if (r.rationale) c.appendChild(el("div", "prop-why", r.rationale));
-  const list = el("ul", "prop-lines"), shown2 = r.lines.slice(0, 8);
+  const meta2 = el2("div", "meta");
+  meta2.append(el2("b", "", author(r)), el2("span", "", ago(r.createdAt)));
+  c.append(meta2, el2("div", "prop-title", r.title));
+  if (r.rationale) c.appendChild(el2("div", "prop-why", r.rationale));
+  const list = el2("ul", "prop-lines"), shown2 = r.lines.slice(0, 8);
   for (const l of shown2) {
-    const li = el("li", l.kind, l.text);
+    const li = el2("li", l.kind, l.text);
     list.appendChild(li);
   }
-  if (r.lines.length > shown2.length) list.appendChild(el("li", "more", `and ${r.lines.length - shown2.length} more`));
+  if (r.lines.length > shown2.length) list.appendChild(el2("li", "more", `and ${r.lines.length - shown2.length} more`));
   c.appendChild(list);
-  if (r.connectivity && r.connectivity.length) c.appendChild(el("div", "prop-warn", `Changes connections: ${r.connectivity.slice(0, 3).join("; ")}${r.connectivity.length > 3 ? ` and ${r.connectivity.length - 3} more` : ""}`));
-  if (r.rules) c.appendChild(el("div", "prop-note", "Also changes the board rules in the project file."));
+  if (r.connectivity && r.connectivity.length) c.appendChild(el2("div", "prop-warn", `Changes connections: ${r.connectivity.slice(0, 3).join("; ")}${r.connectivity.length > 3 ? ` and ${r.connectivity.length - 3} more` : ""}`));
+  if (r.rules) c.appendChild(el2("div", "prop-note", "Also changes the board rules in the project file."));
   const have = full.get(r.id), stale = have ? staleReason(asProposal(have)) : null;
-  if (stale) c.appendChild(el("div", "prop-warn", stale));
-  const row3 = el("div", "row");
-  const show6 = el("button", "btn sm", previewing() === r.id ? "Hide" : "Show");
+  if (stale) c.appendChild(el2("div", "prop-warn", stale));
+  const row3 = el2("div", "row");
+  const show6 = el2("button", "btn sm", previewing() === r.id ? "Hide" : "Show");
   show6.type = "button";
   show6.dataset.act = "show";
   show6.title = "Draw this change over the design without applying it";
@@ -74089,17 +76204,17 @@ function card(r) {
     } else void preview(r.id);
   });
   if (E.viewOnly) {
-    row3.append(show6, el("span", "hint", "Only editors can accept or reject."));
+    row3.append(show6, el2("span", "hint", "Only editors can accept or reject."));
     c.appendChild(row3);
     return c;
   }
   if (rejecting === r.id) {
-    const why2 = el("input");
+    const why2 = el2("input");
     why2.type = "text";
     why2.placeholder = "Why (optional, the assistant reads it)";
     why2.maxLength = 300;
     why2.dataset.act = "why";
-    const send2 = el("button", "btn sm", "Reject"), back = el("button", "btn sm", "Cancel");
+    const send2 = el2("button", "btn sm", "Reject"), back = el2("button", "btn sm", "Cancel");
     send2.type = "button";
     back.type = "button";
     send2.dataset.act = "reject-send";
@@ -74124,7 +76239,7 @@ function card(r) {
     setTimeout(() => why2.focus(), 0);
     return c;
   }
-  const ok2 = el("button", "btn sm primary", "Accept"), no = el("button", "btn sm", stale ? "Dismiss" : "Reject");
+  const ok2 = el2("button", "btn sm primary", "Accept"), no = el2("button", "btn sm", stale ? "Dismiss" : "Reject");
   ok2.type = "button";
   no.type = "button";
   ok2.dataset.act = "accept";
@@ -74144,7 +76259,7 @@ function card(r) {
       render2();
     }
   });
-  row3.append(ok2, no, el("span", "grow"), show6);
+  row3.append(ok2, no, el2("span", "grow"), show6);
   c.appendChild(row3);
   return c;
 }
@@ -74157,7 +76272,7 @@ function render2() {
     return;
   }
   p.classList.add("open");
-  const head3 = el("div", "prop-head"), fold = el("button", "prop-fold");
+  const head3 = el2("div", "prop-head"), fold = el2("button", "prop-fold");
   fold.appendChild(treeExpander(open2));
   fold.type = "button";
   fold.title = open2 ? "Fold" : "Unfold";
@@ -74167,12 +76282,12 @@ function render2() {
     render2();
   };
   fold.addEventListener("click", toggle);
-  const title = el("span", "prop-heading", rows.length === 1 ? "1 proposed change" : `${rows.length} proposed changes`);
+  const title = el2("span", "prop-heading", rows.length === 1 ? "1 proposed change" : `${rows.length} proposed changes`);
   title.addEventListener("click", toggle);
   head3.append(fold, title);
   p.appendChild(head3);
   if (!open2) return;
-  const list = el("div", "prop-list");
+  const list = el2("div", "prop-list");
   for (const r of rows) list.appendChild(card(r));
   p.appendChild(list);
 }
@@ -74289,14 +76404,14 @@ async function loadVersions() {
   const p = app().project;
   if (!p) return;
   const n2 = ++loadN, pid = p.projectId;
-  put({ loading: true });
+  put2({ loading: true });
   try {
     const [tl, br] = await Promise.all([
       call(`/api/projects/${pid}/timeline`),
       app().me ? call(`/api/projects/${pid}/branches`).catch(() => null) : Promise.resolve(null)
     ]);
     if (n2 !== loadN || !app().project || app().project.projectId !== pid) return;
-    put({
+    put2({
       loading: false,
       error: null,
       list: tl.versions,
@@ -74313,13 +76428,13 @@ async function loadVersions() {
       const d = tl.docs.find((x) => x.docId === v.docId);
       if (d && d.head !== v.head) {
         indexes.delete(v.docId);
-        put({ view: { ...v, head: d.head, marks: marksFor(v.docId) } });
+        put2({ view: { ...v, head: d.head, marks: marksFor(v.docId) } });
         void loadIndex(v.docId);
-      } else put({ view: { ...v, marks: marksFor(v.docId), versionId: versionAt(v.docId, v.seq) } });
+      } else put2({ view: { ...v, marks: marksFor(v.docId), versionId: versionAt(v.docId, v.seq) } });
     }
   } catch (e) {
     if (n2 !== loadN) return;
-    put({ loading: false, error: why(e) });
+    put2({ loading: false, error: why(e) });
   }
 }
 function onVersionsNotice(msg) {
@@ -74375,7 +76490,7 @@ async function loadIndex(docId3) {
     const ix = await call(`/api/docs/${docId3}/history`);
     indexes.set(docId3, ix);
     const v = slice().view;
-    if (v && v.docId === docId3) put({ view: { ...v, floor: ix.floor, head: Math.max(v.head, ix.head), ...describe(docId3, v.seq) } });
+    if (v && v.docId === docId3) put2({ view: { ...v, floor: ix.floor, head: Math.max(v.head, ix.head), ...describe(docId3, v.seq) } });
   } catch (e) {
   }
 }
@@ -74385,7 +76500,7 @@ function stopPlay() {
     playTimer = 0;
   }
   const v = slice().view;
-  if (v && v.playing) put({ view: { ...v, playing: false } });
+  if (v && v.playing) put2({ view: { ...v, playing: false } });
 }
 function dropHistoryView() {
   stopPlay();
@@ -74396,7 +76511,7 @@ function dropHistoryView() {
     E.history = null;
     store.set({ viewOnly: E.viewOnly });
   }
-  if (slice().view) put({ view: null });
+  if (slice().view) put2({ view: null });
 }
 function holdViewOnly(v) {
   if (!E.history) return false;
@@ -74413,9 +76528,9 @@ function saveVersionDialog() {
   if (!app().project) return;
   if (!canEdit()) return;
   const v = slice().view;
-  openDialog2(v && v.seq < v.head ? { kind: "save", at: { docId: v.docId, seq: v.seq } } : { kind: "save" });
+  openDialog3(v && v.seq < v.head ? { kind: "save", at: { docId: v.docId, seq: v.seq } } : { kind: "save" });
 }
-var app, slice, put, why, loadN, noticeTimer, editTimer, indexes, shown, want, playTimer, historyActive, openDialog2;
+var app, slice, put2, why, loadN, noticeTimer, editTimer, indexes, shown, want, playTimer, historyActive, openDialog3;
 var init_versions = __esm({
   "web/domains/pcb/editor/versions.ts"() {
     "use strict";
@@ -74427,7 +76542,7 @@ var init_versions = __esm({
     init_util();
     app = () => state;
     slice = () => store.get().versions;
-    put = (patch) => {
+    put2 = (patch) => {
       store.slice("versions", patch);
     };
     why = (e) => e instanceof Error ? e.message : String(e);
@@ -74439,7 +76554,7 @@ var init_versions = __esm({
     want = null;
     playTimer = 0;
     historyActive = () => !!E.history;
-    openDialog2 = (dialog) => put({ dialog });
+    openDialog3 = (dialog) => put2({ dialog });
   }
 });
 
@@ -74663,6 +76778,9 @@ async function connect() {
     if (msg.type === "proposal") noteProposalMsg(msg);
     if (msg.type === "versions") onVersionsNotice(msg);
     if (msg.type === "saved") window.dispatchEvent(new CustomEvent("kc-doc-saved", { detail: msg }));
+    if (msg.type === "docs") void refreshDocs().then((added2) => {
+      if (!added2) void loadSheets(typeof msg.addedDocId === "string" ? msg.addedDocId : null);
+    });
     if (historyActive() && (msg.type === "snapshot" || msg.type === "op" || msg.type === "ops" || msg.type === "reset")) {
       if (msg.type === "op") {
         E.editsSeen++;
@@ -74853,6 +76971,7 @@ var init_net = __esm({
     init_appstore();
     init_comments();
     init_doc();
+    init_hierarchy();
     init_peers();
     init_peercursors();
     init_selection();
@@ -74910,54 +77029,15 @@ var init_theme = __esm({
   }
 });
 
-// web/shared/units.ts
-function unitsAppFor(docType) {
-  return docType === "kicad_sch" ? "eeschema" : docType === "footprint" ? "footprint_editor" : "pcbnew";
-}
-function loadUnits(app4) {
-  const def = { units: app4 === "eeschema" || app4 === "symbol_editor" ? "mil" : "mm", lastImperial: "mil" };
-  try {
-    const raw2 = JSON.parse(localStorage.getItem(unitsKey(app4)) || "null");
-    if (!raw2 || typeof raw2 !== "object") return def;
-    const u = raw2.units, li = raw2.last_imperial_units;
-    return { units: u === "mm" || u === "mil" || u === "in" ? u : def.units, lastImperial: li === "in" || li === "mil" ? li : u === "in" ? "in" : "mil" };
-  } catch (e) {
-    return def;
-  }
-}
-function saveUnits(app4, s2) {
-  try {
-    localStorage.setItem(unitsKey(app4), JSON.stringify({ units: s2.units, last_imperial_units: s2.lastImperial === "in" ? "in" : "mil" }));
-  } catch (e) {
-  }
-}
-var unitsKey;
-var init_units = __esm({
-  "web/shared/units.ts"() {
-    "use strict";
-    unitsKey = (app4) => "kui.units." + app4;
-  }
-});
-
-// web/domains/pcb/editor/userorigin.ts
-var init_userorigin = __esm({
-  "web/domains/pcb/editor/userorigin.ts"() {
-    "use strict";
-    init_appstore();
-    init_state();
-    init_units();
-  }
-});
-
 // web/domains/pcb/editor/hotkey-popup.ts
 function hotkeyCyclePopup(title, items, selection) {
   if (typeof document === "undefined") return;
-  if (!box) {
-    box = document.createElement("div");
-    box.className = "khotkey-cycle";
-    box.style.cssText = "position:fixed;z-index:450;padding:6px 8px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-2);box-shadow:var(--shadow);font:var(--fs-sm)/1.4 var(--font);color:var(--ink);pointer-events:none;min-width:120px";
-    box.setAttribute("role", "status");
-    document.body.appendChild(box);
+  if (!box2) {
+    box2 = document.createElement("div");
+    box2.className = "khotkey-cycle";
+    box2.style.cssText = "position:fixed;z-index:450;padding:6px 8px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-2);box-shadow:var(--shadow);font:var(--fs-sm)/1.4 var(--font);color:var(--ink);pointer-events:none;min-width:120px";
+    box2.setAttribute("role", "status");
+    document.body.appendChild(box2);
   }
   const head3 = document.createElement("div");
   head3.style.cssText = "font-weight:600;margin-bottom:4px";
@@ -74972,108 +77052,29 @@ function hotkeyCyclePopup(title, items, selection) {
     if (on2) row3.setAttribute("aria-current", "true");
     list.appendChild(row3);
   });
-  box.replaceChildren(head3, list);
+  box2.replaceChildren(head3, list);
   const host2 = document.getElementById("stage") || document.getElementById("canvas"), r = host2 ? host2.getBoundingClientRect() : null;
-  box.style.visibility = "hidden";
-  box.style.display = "block";
-  const w = box.offsetWidth, h3 = box.offsetHeight;
+  box2.style.visibility = "hidden";
+  box2.style.display = "block";
+  const w = box2.offsetWidth, h3 = box2.offsetHeight;
   const cx = r ? r.left + r.width / 2 : window.innerWidth / 2, cy = r ? r.top + r.height / 2 : window.innerHeight / 2;
-  box.style.left = Math.round(cx - w / 2) + "px";
-  box.style.top = Math.round(cy - h3 / 2) + "px";
-  box.style.visibility = "visible";
+  box2.style.left = Math.round(cx - w / 2) + "px";
+  box2.style.top = Math.round(cy - h3 / 2) + "px";
+  box2.style.visibility = "visible";
   if (timer) clearTimeout(timer);
   timer = setTimeout(() => {
-    if (box) box.style.display = "none";
+    if (box2) box2.style.display = "none";
     timer = null;
   }, SHOW_TIME_MS);
 }
-var SHOW_TIME_MS, box, timer;
+var SHOW_TIME_MS, box2, timer;
 var init_hotkey_popup = __esm({
   "web/domains/pcb/editor/hotkey-popup.ts"() {
     "use strict";
     SHOW_TIME_MS = 1e3;
-    box = null;
+    box2 = null;
     timer = null;
     if (typeof window !== "undefined") window.kcHotkeyCyclePopup = hotkeyCyclePopup;
-  }
-});
-
-// web/domains/pcb/dialogs/logic.ts
-var IN, PAPER_FORMATS, F, BOM_PRESETS, MIL3, SCH_GRID_OVERRIDES, PCB_DEFAULT_GRIDS, PCB_DEFAULT_GRID_IDX, PCB_GRID_OVERRIDES;
-var init_logic = __esm({
-  "web/domains/pcb/dialogs/logic.ts"() {
-    "use strict";
-    init_units();
-    IN = 25.4;
-    PAPER_FORMATS = [
-      { type: "A5", label: "A5 148 x 210mm", w: 210, h: 148 },
-      { type: "A4", label: "A4 210 x 297mm", w: 297, h: 210 },
-      { type: "A3", label: "A3 297 x 420mm", w: 420, h: 297 },
-      { type: "A2", label: "A2 420 x 594mm", w: 594, h: 420 },
-      { type: "A1", label: "A1 594 x 841mm", w: 841, h: 594 },
-      { type: "A0", label: "A0 841 x 1189mm", w: 1189, h: 841 },
-      { type: "A", label: "A 8.5 x 11in", w: 11 * IN, h: 8.5 * IN },
-      { type: "B", label: "B 11 x 17in", w: 17 * IN, h: 11 * IN },
-      { type: "C", label: "C 17 x 22in", w: 22 * IN, h: 17 * IN },
-      { type: "D", label: "D 22 x 34in", w: 34 * IN, h: 22 * IN },
-      { type: "E", label: "E 34 x 44in", w: 44 * IN, h: 34 * IN },
-      { type: "User", label: "User (Custom)", w: 17 * IN, h: 11 * IN },
-      { type: "USLetter", label: "US Letter 8.5 x 11in", w: 11 * IN, h: 8.5 * IN },
-      { type: "USLegal", label: "US Legal 8.5 x 14in", w: 14 * IN, h: 8.5 * IN },
-      { type: "USLedger", label: "US Ledger 11 x 17in", w: 17 * IN, h: 11 * IN }
-    ];
-    F = (name, label, show6, group_by) => ({ name, label, show: show6, group_by });
-    BOM_PRESETS = [
-      {
-        name: "Default Editing",
-        readOnly: true,
-        sort_field: "Reference",
-        sort_asc: true,
-        filter_string: "",
-        group_symbols: true,
-        exclude_dnp: false,
-        include_excluded_from_bom: true,
-        fields_ordered: [F("Reference", "Reference", true, false), F("${QUANTITY}", "Qty", true, false), F("Value", "Value", true, true), F("${DNP}", "DNP", true, true), F("${EXCLUDE_FROM_BOM}", "Exclude from BOM", true, true), F("${EXCLUDE_FROM_BOARD}", "Exclude from Board", true, true), F("Footprint", "Footprint", true, true), F("Datasheet", "Datasheet", true, false)]
-      },
-      {
-        name: "Grouped By Value",
-        readOnly: true,
-        sort_field: "Reference",
-        sort_asc: true,
-        filter_string: "",
-        group_symbols: true,
-        exclude_dnp: false,
-        include_excluded_from_bom: false,
-        fields_ordered: [F("Reference", "Reference", true, false), F("Value", "Value", true, true), F("Datasheet", "Datasheet", true, false), F("Footprint", "Footprint", true, false), F("${QUANTITY}", "Qty", true, false), F("${DNP}", "DNP", true, true)]
-      },
-      {
-        name: "Grouped By Value and Footprint",
-        readOnly: true,
-        sort_field: "Reference",
-        sort_asc: true,
-        filter_string: "",
-        group_symbols: true,
-        exclude_dnp: false,
-        include_excluded_from_bom: false,
-        fields_ordered: [F("Reference", "Reference", true, false), F("Value", "Value", true, true), F("Datasheet", "Datasheet", true, false), F("Footprint", "Footprint", true, true), F("${QUANTITY}", "Qty", true, false), F("${DNP}", "DNP", true, true)]
-      },
-      {
-        name: "Attributes",
-        readOnly: true,
-        sort_field: "Reference",
-        sort_asc: true,
-        filter_string: "",
-        group_symbols: true,
-        exclude_dnp: false,
-        include_excluded_from_bom: true,
-        fields_ordered: [F("Reference", "Reference", true, false), F("Value", "Value", true, true), F("Datasheet", "Datasheet", false, false), F("Footprint", "Footprint", false, true), F("${DNP}", "Do Not Place", true, false), F("${EXCLUDE_FROM_BOM}", "Exclude from BOM", true, false), F("${EXCLUDE_FROM_BOARD}", "Exclude from Board", true, false), F("${EXCLUDE_FROM_SIM}", "Exclude from Simulation", true, false)]
-      }
-    ];
-    MIL3 = 0.0254;
-    SCH_GRID_OVERRIDES = { enabled: true, connected: true, connectedMm: 50 * MIL3, wires: true, wiresMm: 50 * MIL3, text: true, textMm: 10 * MIL3, graphics: false, graphicsMm: 25 * MIL3, vias: false, viasMm: 100 * MIL3 };
-    PCB_DEFAULT_GRIDS = [1e3, 500, 250, 200, 100, 50, 25, 20, 10, 5, 2, 1].map((mil) => +(mil * MIL3).toFixed(6)).concat([5, 2.5, 1, 0.5, 0.25, 0.2, 0.1, 0.05, 0.025, 0.01]);
-    PCB_DEFAULT_GRID_IDX = 15;
-    PCB_GRID_OVERRIDES = { enabled: true, connected: false, connectedMm: 0.25, wires: false, wiresMm: 0.05, text: false, textMm: 0.1, graphics: false, graphicsMm: 0.5, vias: false, viasMm: 0.1 };
   }
 });
 
@@ -75241,15 +77242,15 @@ function normalize(p) {
   return p;
 }
 function prefs() {
-  if (cache3) return cache3;
+  if (cache5) return cache5;
   let raw2 = null;
   try {
     raw2 = JSON.parse(localStorage.getItem(KEY2) || "null");
   } catch (e) {
     raw2 = null;
   }
-  cache3 = normalize(merge(DEFAULT_PREFS, migrate(raw2)));
-  return cache3;
+  cache5 = normalize(merge(DEFAULT_PREFS, migrate(raw2)));
+  return cache5;
 }
 function editorId() {
   return isSch2() ? "sch" : E2.DOC_TYPE === "footprint" ? "fp" : "pcb";
@@ -75262,7 +77263,7 @@ function rememberCursor(c, ed = editorId()) {
   } catch (e) {
   }
 }
-var MIL4, IS_WIN, PCB_GRID_SIZES, SIM_MOUSE_DEFAULTS, DEFAULT_PREFS, KEY2, cache3, near, LEGACY_PCB_SIZES, OV_KEYS;
+var MIL4, IS_WIN, PCB_GRID_SIZES, SIM_MOUSE_DEFAULTS, DEFAULT_PREFS, KEY2, cache5, near, LEGACY_PCB_SIZES, OV_KEYS;
 var init_prefs = __esm({
   "web/domains/pcb/dialogs/prefs.ts"() {
     "use strict";
@@ -75378,7 +77379,7 @@ var init_prefs = __esm({
       gal: { sch: galDefaults(), pcb: galDefaults(), sym: galDefaults(), fp: galDefaults() }
     };
     KEY2 = "kui.prefs";
-    cache3 = null;
+    cache5 = null;
     near = (a, b) => Math.abs(a - b) < 1e-6;
     LEGACY_PCB_SIZES = [0.25, 0.5, 1, 0.1, 0.05, 1.27, 0.635];
     OV_KEYS = ["connected", "wires", "vias", "text", "graphics"];
@@ -78351,14 +80352,14 @@ var init_gestures = __esm({
 
 // web/domains/pcb/editor/comments.ts
 function boardNetIds(name) {
-  const d = kdoc(), out2 = [];
+  const d = kdoc2(), out2 = [];
   if (!d) return out2;
   const netNameOf3 = KiCadCanvas.netNameOf;
   for (const it of d.items.values()) if ((it.kind === "segment" || it.kind === "arc" || it.kind === "via" || it.kind === "zone") && netNameOf3(d, it.node) === name) out2.push(it.id);
   return out2;
 }
 function netIds(a) {
-  const d = kdoc();
+  const d = kdoc2();
   if (!d) return [];
   if (d.type === "pcb") return boardNetIds(a.id);
   const sch = CollabTools.sch;
@@ -78372,7 +80373,7 @@ function netIds(a) {
   }
 }
 function pinOf(c) {
-  const d = kdoc(), sx = c.x / IU2(), sy = c.y / IU2(), a = c.anchor;
+  const d = kdoc2(), sx = c.x / IU2(), sy = c.y / IU2(), a = c.anchor;
   if (!a || !d) return { x: sx, y: sy, found: true };
   const it = d.items.get(a.kind === "item" ? a.id : a.item || "");
   if (!it || !it.bbox) return { x: sx, y: sy, found: a.kind === "net" ? netIds(a).length > 0 : false };
@@ -78438,7 +80439,7 @@ function svg(tag, attrs) {
 }
 function drawComments() {
   pins.replaceChildren();
-  if (!kdoc() && !comments().length) return;
+  if (!kdoc2() && !comments().length) return;
   const s2 = pxPerMm();
   const list = comments();
   for (const c of list) {
@@ -78479,7 +80480,7 @@ function panelAt(xMm, yMm) {
   panel2.style.left = Math.max(8, Math.min(left, sr.width - pw - 8)) + "px";
   panel2.style.top = Math.max(8, Math.min(py - 14, sr.height - ph - 8)) + "px";
 }
-function el2(tag, cls, text3) {
+function el3(tag, cls, text3) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
   if (text3 !== void 0) e.textContent = text3;
@@ -78487,22 +80488,22 @@ function el2(tag, cls, text3) {
 }
 function chip(a, found, onClick) {
   const label = a ? a.kind === "net" ? `Net ${a.label || a.id}` : a.label || "Item" : "On the sheet";
-  const c = el2(onClick ? "button" : "span", `cmt-anchor ${a ? a.kind : "spot"}${found ? "" : " gone"}`);
+  const c = el3(onClick ? "button" : "span", `cmt-anchor ${a ? a.kind : "spot"}${found ? "" : " gone"}`);
   if (onClick) {
     c.type = "button";
     c.addEventListener("click", onClick);
   }
-  c.appendChild(el2("i"));
+  c.appendChild(el3("i"));
   c.appendChild(document.createTextNode(label));
   c.title = !a ? "Pinned to a place on the sheet" : !found ? `${label} is no longer on this ${E.DOC_TYPE === "kicad_sch" ? "sheet" : "board"}` : a.kind === "net" ? "Highlight this net" : "Select this item";
   c.dataset.anchor = a ? a.kind : "spot";
   return c;
 }
 function head(a, found, stateText, onChip) {
-  const h3 = el2("div", "cmt-head");
+  const h3 = el3("div", "cmt-head");
   h3.appendChild(chip(a, found, onChip));
-  if (stateText) h3.appendChild(el2("span", "cmt-state", stateText));
-  const x = el2("button", "cmt-x");
+  if (stateText) h3.appendChild(el3("span", "cmt-state", stateText));
+  const x = el3("button", "cmt-x");
   x.appendChild(closeMark());
   x.type = "button";
   x.title = "Close";
@@ -78530,7 +80531,7 @@ async function call2(path2, method, body) {
   }
 }
 function focusAnchor(c) {
-  const d = kdoc(), a = c.anchor;
+  const d = kdoc2(), a = c.anchor;
   if (!d || !a) return;
   if (a.kind === "net") {
     const ids = netIds(a);
@@ -78584,28 +80585,28 @@ function showThread(rootId, keepPlace = false) {
   } : void 0));
   if (root5.anchor && !p.found) {
     const what = root5.anchor.kind === "net" ? `Net ${root5.anchor.label || root5.anchor.id}` : root5.anchor.label || "The item";
-    panel2.appendChild(el2("div", "cmt-gone", `${what} is no longer on this ${E.DOC_TYPE === "kicad_sch" ? "sheet" : "board"}. The thread stays where it was.`));
+    panel2.appendChild(el3("div", "cmt-gone", `${what} is no longer on this ${E.DOC_TYPE === "kicad_sch" ? "sheet" : "board"}. The thread stays where it was.`));
   }
-  const listEl = el2("div", "cmt-list");
+  const listEl = el3("div", "cmt-list");
   for (const c of thread) {
-    const item = el2("div", "cmt-item");
+    const item = el3("div", "cmt-item");
     item.dataset.comment = String(c.id);
-    const meta2 = el2("div", "meta");
-    meta2.appendChild(el2("b", "", c.authorLogin));
-    meta2.appendChild(el2("span", "", ago(c.createdAt) + (c.editedAt ? " \xB7 edited" : "")));
-    const body = el2("div", "cbody", c.body);
+    const meta2 = el3("div", "meta");
+    meta2.appendChild(el3("b", "", c.authorLogin));
+    meta2.appendChild(el3("span", "", ago(c.createdAt) + (c.editedAt ? " \xB7 edited" : "")));
+    const body = el3("div", "cbody", c.body);
     if (write && user && (c.authorId === user.id || owner === user.id)) {
-      const acts = el2("span", "acts");
+      const acts = el3("span", "acts");
       if (c.authorId === user.id) {
-        const edit = el2("button", "", "Edit");
+        const edit = el3("button", "", "Edit");
         edit.type = "button";
         edit.dataset.edit = "";
         edit.addEventListener("click", () => {
-          const ta = el2("textarea", "editing");
+          const ta = el3("textarea", "editing");
           ta.value = c.body;
           ta.rows = 3;
           ta.dataset.editText = "";
-          const row3 = el2("div", "row"), save2 = el2("button", "btn sm primary", "Save"), cancel = el2("button", "btn sm", "Cancel");
+          const row3 = el3("div", "row"), save2 = el3("button", "btn sm primary", "Save"), cancel = el3("button", "btn sm", "Cancel");
           save2.type = "button";
           cancel.type = "button";
           save2.dataset.editSave = "";
@@ -78628,7 +80629,7 @@ function showThread(rootId, keepPlace = false) {
         });
         acts.appendChild(edit);
       }
-      const del = el2("button", "del", "Delete");
+      const del = el3("button", "del", "Delete");
       del.type = "button";
       del.addEventListener("click", () => {
         const whole2 = c.id === rootId && thread.length > 1;
@@ -78644,11 +80645,11 @@ function showThread(rootId, keepPlace = false) {
   }
   panel2.appendChild(listEl);
   if (write) {
-    const form3 = el2("div", "cmt-form"), ta = el2("textarea");
+    const form3 = el3("div", "cmt-form"), ta = el3("textarea");
     ta.id = "replyText";
     ta.rows = 2;
     ta.placeholder = "Reply\u2026";
-    const row3 = el2("div", "row"), reply = el2("button", "btn sm primary", "Reply"), resolve2 = el2("button", "btn sm", root5.resolved ? "Reopen" : "Resolve");
+    const row3 = el3("div", "row"), reply = el3("button", "btn sm primary", "Reply"), resolve2 = el3("button", "btn sm", root5.resolved ? "Reopen" : "Resolve");
     reply.type = "button";
     reply.id = "replyBtn";
     resolve2.type = "button";
@@ -78673,8 +80674,8 @@ function showThread(rootId, keepPlace = false) {
     form3.append(ta, row3);
     panel2.appendChild(form3);
   } else if (!user) {
-    const form3 = el2("div", "cmt-form");
-    form3.appendChild(el2("span", "hint", "Sign in to reply."));
+    const form3 = el3("div", "cmt-form");
+    form3.appendChild(el3("span", "hint", "Sign in to reply."));
     panel2.appendChild(form3);
   }
   if (!(keepPlace && was === rootId)) panelAt(p.x, p.y);
@@ -78695,7 +80696,7 @@ function openThreadAction(id) {
   showThread(c.id);
   if (c.anchor && c.anchor.kind === "item") focusAnchor(c);
 }
-var comments, kdoc, IU2, me, docId2, project, canComment, panel2, pins, stageEl, worldEl, request2, draft, ownHighlight, PARTS, projectLoad;
+var comments, kdoc2, IU2, me, docId2, project, canComment, panel2, pins, stageEl, worldEl, request2, draft, ownHighlight, PARTS, projectLoad;
 var init_comments = __esm({
   "web/domains/pcb/editor/comments.ts"() {
     "use strict";
@@ -78711,7 +80712,7 @@ var init_comments = __esm({
     init_view();
     init_kicon_dom();
     comments = () => E.comments;
-    kdoc = () => E.kdoc;
+    kdoc2 = () => E.kdoc;
     IU2 = () => E.IU;
     me = () => state.me;
     docId2 = () => {
@@ -78741,99 +80742,6 @@ var init_history = __esm({
     "use strict";
     init_versions();
     init_appstore();
-  }
-});
-
-// web/domains/pcb/editor/drawingsheet-model.ts
-function drawingSheetName(pro, sch) {
-  if (!pro) return "";
-  try {
-    const j = JSON.parse(pro);
-    const [a, b] = wksKey(sch);
-    const v = j[a] && j[a][b];
-    return typeof v === "string" ? v : "";
-  } catch {
-    return "";
-  }
-}
-function projectWorksheets(docs) {
-  const pro = docs.find((d) => d.docType === "kicad_pro"), dir = pro ? pro.path.split("/").slice(0, -1).join("/") : "";
-  return docs.filter((d) => d.docType === "worksheet").map((d) => ({ docId: d.docId, rel: dir && d.path.startsWith(dir + "/") ? d.path.slice(dir.length + 1) : d.path }));
-}
-function resolveWorksheet(name, sheets2) {
-  const n2 = (name || "").replace(/\\/g, "/").replace(/^\$\{KIPRJMOD\}\//, "").replace(/^\.\//, "").trim();
-  if (!n2) return null;
-  return sheets2.find((s2) => s2.rel === n2) || sheets2.find((s2) => n2.endsWith("/" + s2.rel)) || null;
-}
-var wksKey;
-var init_drawingsheet_model = __esm({
-  "web/domains/pcb/editor/drawingsheet-model.ts"() {
-    "use strict";
-    wksKey = (sch) => sch ? ["schematic", "page_layout_descr_file"] : ["pcbnew", "page_layout_descr_file"];
-  }
-});
-
-// web/domains/pcb/editor/drawingsheet.ts
-function load2(docId3) {
-  if (loading.has(docId3)) return;
-  loading.add(docId3);
-  fetch(`/api/docs/${docId3}/content?v=${Date.now()}`, { credentials: "same-origin", cache: "no-store" }).then((r) => r.ok ? r.text() : "").then((t) => {
-    loading.delete(docId3);
-    const was = cache4.get(docId3);
-    if (was && was.text === t) return;
-    let sheet = null;
-    try {
-      sheet = t ? KiCadCanvas.parseDrawingSheet(t) : null;
-    } catch (e) {
-      sheet = null;
-    }
-    cache4.set(docId3, { text: t, sheet });
-    if (E.kdoc) {
-      applyDrawingSheet(E.kdoc);
-      requestRender();
-    }
-    for (const fn of listeners3) fn();
-  }, () => {
-    loading.delete(docId3);
-    if (!cache4.has(docId3)) cache4.set(docId3, { text: "", sheet: null });
-  });
-}
-function sheetOf(docId3) {
-  const c = cache4.get(docId3);
-  if (c) return c.sheet;
-  load2(docId3);
-  return null;
-}
-function forgetWorksheet(docId3) {
-  for (const id of docId3 ? [docId3] : [...cache4.keys()]) load2(id);
-}
-function applyDrawingSheet(d) {
-  const sch = d.type === "sch";
-  const ws = resolveWorksheet(drawingSheetName(E.proSettings, sch), projectWorksheets2());
-  d.drawingSheet = ws ? sheetOf(ws.docId) : null;
-}
-var projectWorksheets2, cache4, loading, listeners3;
-var init_drawingsheet = __esm({
-  "web/domains/pcb/editor/drawingsheet.ts"() {
-    "use strict";
-    init_state();
-    init_appstore();
-    init_view();
-    init_drawingsheet_model();
-    init_drawingsheet_model();
-    projectWorksheets2 = () => projectWorksheets(state.docs || []);
-    cache4 = /* @__PURE__ */ new Map();
-    loading = /* @__PURE__ */ new Set();
-    listeners3 = /* @__PURE__ */ new Set();
-    if (typeof window !== "undefined") {
-      window.addEventListener("kc-doc-saved", ((ev) => {
-        const id = ev.detail && String(ev.detail.savedDocId || ev.detail.docId || "");
-        if (id && cache4.has(id)) forgetWorksheet(id);
-      }));
-      document.addEventListener("visibilitychange", () => {
-        if (document.visibilityState === "visible" && cache4.size) forgetWorksheet();
-      });
-    }
   }
 });
 
@@ -78957,1553 +80865,6 @@ var init_pinned = __esm({
     "use strict";
     KEY3 = (k) => "kui.libtree.pinned." + k;
     OLD = { symbol: "kui.symedit.pinned", footprint: "kui.fpedit.pinned" };
-  }
-});
-
-// web/domains/pcb/tools/root.ts
-var init_root = __esm({
-  "web/domains/pcb/tools/root.ts"() {
-    "use strict";
-  }
-});
-
-// web/domains/pcb/tools/kicad-dialogs/sexpr.ts
-var init_sexpr2 = __esm({
-  "web/domains/pcb/tools/kicad-dialogs/sexpr.ts"() {
-    "use strict";
-    init_root();
-  }
-});
-
-// web/domains/pcb/tools/kicad-dialogs/widgets.ts
-var init_widgets = __esm({
-  "web/domains/pcb/tools/kicad-dialogs/widgets.ts"() {
-    "use strict";
-    init_sexpr2();
-    init_shell();
-    init_kicon_dom();
-    init_dom2();
-    init_kselect();
-  }
-});
-
-// web/domains/pcb/tools/kicad-dialogs/shell.ts
-function tabStops(root5) {
-  return Array.from(root5.querySelectorAll(FOCUSABLE)).filter((e) => {
-    if (e.disabled || e.hasAttribute("disabled") || e.getAttribute("tabindex") === "-1" || e.closest("[inert], [hidden]")) return false;
-    if (e.parentElement && e.parentElement.closest("k-select")) return false;
-    if (typeof e.getClientRects === "function" && !e.getClientRects().length) return false;
-    return true;
-  });
-}
-function wrapTab(stops, from, back) {
-  if (!stops.length) return null;
-  const i = from ? stops.indexOf(from) : -1;
-  if (i < 0) return back ? stops[stops.length - 1] : stops[0];
-  if (!back && i === stops.length - 1) return stops[0];
-  if (back && i === 0) return stops[stops.length - 1];
-  return null;
-}
-function trapTab2(ev, dlg) {
-  if (ev.key !== "Tab" || ev.ctrlKey || ev.metaKey || ev.altKey) return;
-  const stops = tabStops(dlg), a = document.activeElement;
-  const inner = a && a.closest ? a.closest("k-select") || a : a;
-  const to = wrapTab(stops, inner && dlg.contains(inner) ? inner : null, ev.shiftKey);
-  if (!to) {
-    if (!stops.length) ev.preventDefault();
-    return;
-  }
-  ev.preventDefault();
-  to.focus();
-  if (to instanceof HTMLInputElement && to.type === "text") to.select();
-}
-var stack, top, FOCUSABLE;
-var init_shell = __esm({
-  "web/domains/pcb/tools/kicad-dialogs/shell.ts"() {
-    "use strict";
-    init_sexpr2();
-    init_widgets();
-    init_kicon_dom();
-    stack = [];
-    top = () => stack.length ? stack[stack.length - 1] : null;
-    FOCUSABLE = "input, k-select, textarea, button, select, a[href], [tabindex]";
-    if (typeof document !== "undefined") document.addEventListener("keydown", (ev) => {
-      const cur2 = top();
-      if (!cur2 || ev.key !== "Escape" || ev.defaultPrevented) return;
-      const t = ev.target;
-      if (t && t.closest && t.closest(".kd-overlay, .kd-font-pop, #ctxMenu, [role='menu'], [data-popup-open]")) return;
-      if (document.querySelector(".kd-pop")) return;
-      ev.preventDefault();
-      ev.stopPropagation();
-      cur2.finish(false);
-    }, true);
-  }
-});
-
-// web/domains/pcb/dialogs/dom.ts
-var dom_exports = {};
-__export(dom_exports, {
-  KD: () => KD,
-  checkbox: () => checkbox,
-  confirmBox: () => confirmBox,
-  download: () => download,
-  esc: () => esc5,
-  form: () => form,
-  h: () => h,
-  popupMenu: () => popupMenu,
-  promptFields: () => promptFields,
-  promptText: () => promptText,
-  select: () => select,
-  textInput: () => textInput,
-  unsavedChangesBox: () => unsavedChangesBox
-});
-function KD() {
-  return window.KDialogs;
-}
-function h(tag, attrs, ...children) {
-  const e = document.createElement(tag);
-  for (const [k, v] of Object.entries(attrs || {})) {
-    if (v === void 0 || v === null || v === false) continue;
-    if (typeof v === "function") e.addEventListener(k.replace(/^on/, ""), v);
-    else if (k === "class") e.className = String(v);
-    else if (k === "style") e.setAttribute("style", String(v));
-    else if (k === "value") e.value = String(v);
-    else if (k === "checked" || k === "disabled" || k === "selected") e[k] = !!v;
-    else e.setAttribute(k, v === true ? "" : String(v));
-  }
-  for (const c of children) if (c !== null && c !== void 0 && c !== false) e.append(c);
-  return e;
-}
-function checkbox(label, checked, onchange, opts2) {
-  const cb = h("input", { type: "checkbox", checked, disabled: opts2?.disabled, id: opts2?.id });
-  if (onchange) cb.addEventListener("change", () => onchange(cb.checked));
-  return h("label", { class: "kd-chk", title: opts2?.title }, cb, label);
-}
-function select(options, value, onchange, opts2) {
-  const s2 = h("k-select", { disabled: opts2?.disabled, id: opts2?.id, style: opts2?.style });
-  for (const o of options) {
-    const v = Array.isArray(o) ? o[0] : o;
-    s2.append(h("option", { value: v, "data-icon": opts2?.icons?.[v] }, Array.isArray(o) ? o[1] : o));
-  }
-  s2.value = value;
-  if (onchange) s2.addEventListener("change", () => onchange(s2.value));
-  return s2;
-}
-function textInput(value, onchange, opts2) {
-  const i = h("input", { type: opts2?.type || "text", value, disabled: opts2?.disabled, id: opts2?.id, style: opts2?.style, placeholder: opts2?.placeholder, step: opts2?.step, min: opts2?.min, max: opts2?.max });
-  if (onchange) {
-    i.addEventListener("change", () => onchange(i.value));
-    if ((opts2?.type || "text") === "text") i.addEventListener("input", () => onchange(i.value));
-  }
-  return i;
-}
-function form(rows3, cols = 2) {
-  const f2 = h("div", { class: "kv", style: cols === 3 ? "grid-template-columns:max-content 1fr max-content" : "" });
-  for (const r of rows3) {
-    if (!r) continue;
-    f2.append(h("label", null, r[0]), r[1]);
-    if (cols === 3) f2.append(h("span", { class: "ro" }, r[2] || ""));
-  }
-  return f2;
-}
-function promptText(title, label, initial = "", validate) {
-  return new Promise((resolve2) => {
-    const input = h("input", { type: "text", value: initial, id: "kd-prompt-input" });
-    let busy = false;
-    const done = (v) => {
-      if (v === null || !validate) {
-        ov.remove();
-        resolve2(v);
-        return;
-      }
-      if (busy) return;
-      busy = true;
-      void Promise.resolve(validate(v)).then((good) => {
-        busy = false;
-        if (good) {
-          ov.remove();
-          resolve2(v);
-        } else {
-          input.focus();
-        }
-      });
-    };
-    const ok2 = h("button", { class: "btn primary", onclick: () => done(input.value) }, "OK"), cancel = h("button", { class: "btn", onclick: () => done(null) }, "Cancel");
-    const dlg = h("div", { class: "kd-dialog", style: "width:380px;min-width:0" }, h("div", { class: "kd-title" }, h("span", null, title)), h("div", { class: "kd-body" }, h("div", { class: "kv" }, h("label", null, label), input)), h("div", { class: "kd-foot" }, cancel, ok2));
-    const ov = h("div", { class: "kd-overlay kd-prompt", style: "z-index:70" }, dlg);
-    ov.addEventListener("keydown", (ev) => {
-      ev.stopPropagation();
-      if (ev.key === "Tab") trapTab2(ev, ov);
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        done(input.value);
-      } else if (ev.key === "Escape") {
-        ev.preventDefault();
-        done(null);
-      }
-    });
-    document.body.append(ov);
-    input.focus();
-    input.select();
-  });
-}
-function promptFields(title, fields, width = 360) {
-  return new Promise((resolve2) => {
-    const inputs = fields.map((f2) => {
-      const el4 = f2.multiline ? h("textarea", { "data-k": f2.key, style: "width:100%;min-height:60px;box-sizing:border-box" }) : h("input", { type: "text", "data-k": f2.key, style: "width:100%;box-sizing:border-box" });
-      el4.value = f2.initial || "";
-      return { f: f2, el: el4 };
-    });
-    const done = (ok3) => {
-      ov.remove();
-      if (!ok3) {
-        resolve2(null);
-        return;
-      }
-      const out2 = {};
-      for (const i of inputs) out2[i.f.key] = i.el.value;
-      resolve2(out2);
-    };
-    const ok2 = h("button", { class: "btn primary", onclick: () => done(true) }, "OK"), cancel = h("button", { class: "btn", onclick: () => done(false) }, "Cancel");
-    const body = h("div", { class: "kd-body" });
-    inputs.forEach((i, k) => body.append(h("label", { class: "pd-lbl", style: k ? "display:block;margin-top:8px" : "display:block" }, i.f.label), i.el));
-    const dlg = h("div", { class: "kd-dialog", style: `width:${width}px;min-width:0` }, h("div", { class: "kd-title" }, h("span", null, title)), body, h("div", { class: "kd-foot" }, cancel, ok2));
-    const ov = h("div", { class: "kd-overlay kd-prompt", style: "z-index:70" }, dlg);
-    ov.addEventListener("keydown", (ev) => {
-      ev.stopPropagation();
-      if (ev.key === "Tab") trapTab2(ev, ov);
-      if (ev.key === "Enter" && !(ev.target instanceof HTMLTextAreaElement)) {
-        ev.preventDefault();
-        done(true);
-      } else if (ev.key === "Escape") {
-        ev.preventDefault();
-        done(false);
-      }
-    });
-    document.body.append(ov);
-    if (inputs[0]) inputs[0].el.focus();
-  });
-}
-function unsavedChangesBox(message) {
-  return new Promise((resolve2) => {
-    const done = (v) => {
-      ov.remove();
-      resolve2(v);
-    };
-    const save2 = h("button", { class: "btn primary", id: "kd-unsaved-save", onclick: () => done("save") }, "Save"), discard = h("button", { class: "btn", id: "kd-unsaved-discard", onclick: () => done("discard") }, "Discard Changes"), cancel = h("button", { class: "btn", onclick: () => done("cancel") }, "Cancel");
-    const dlg = h(
-      "div",
-      { class: "kd-dialog", style: "width:440px;min-width:0" },
-      h("div", { class: "kd-title" }, h("span", null, "Save Changes?")),
-      h("div", { class: "kd-body" }, h("p", { style: "margin:4px 0;font-weight:600" }, message), h("p", { style: "margin:4px 0" }, "If you don't save, all your changes will be permanently lost.")),
-      h("div", { class: "kd-foot" }, discard, h("span", { class: "spacer" }), cancel, save2)
-    );
-    const ov = h("div", { class: "kd-overlay kd-prompt", style: "z-index:70" }, dlg);
-    ov.addEventListener("keydown", (ev) => {
-      ev.stopPropagation();
-      if (ev.key === "Tab") trapTab2(ev, ov);
-      if (ev.key === "Escape") {
-        ev.preventDefault();
-        done("cancel");
-      }
-    });
-    document.body.append(ov);
-    save2.focus();
-  });
-}
-function confirmBox(title, message, okLabel = "OK") {
-  return new Promise((resolve2) => {
-    const done = (v) => {
-      ov.remove();
-      resolve2(v);
-    };
-    const ok2 = h("button", { class: "btn primary", onclick: () => done(true) }, okLabel), cancel = h("button", { class: "btn", onclick: () => done(false) }, "Cancel");
-    const dlg = h("div", { class: "kd-dialog", style: "width:420px;min-width:0" }, h("div", { class: "kd-title" }, h("span", null, title)), h("div", { class: "kd-body" }, h("p", { style: "margin:4px 0;white-space:pre-wrap" }, message)), h("div", { class: "kd-foot" }, cancel, ok2));
-    const ov = h("div", { class: "kd-overlay kd-prompt", style: "z-index:70" }, dlg);
-    ov.addEventListener("keydown", (ev) => {
-      ev.stopPropagation();
-      if (ev.key === "Tab") trapTab2(ev, ov);
-      if (ev.key === "Enter") {
-        ev.preventDefault();
-        done(true);
-      } else if (ev.key === "Escape") {
-        ev.preventDefault();
-        done(false);
-      }
-    });
-    document.body.append(ov);
-    ok2.focus();
-  });
-}
-function popupMenu(x, y, items) {
-  for (const old of Array.from(document.querySelectorAll(".kd-pop"))) old.remove();
-  const build4 = (list, px, py, depth) => {
-    const m = h("div", { class: "kd-pop", role: "menu", "data-depth": depth, style: `position:fixed;left:${px}px;top:${py}px;z-index:${80 + depth};min-width:160px;background:var(--panel);border:1px solid var(--line);border-radius:4px;box-shadow:0 6px 18px rgba(0,0,0,.25);padding:3px 0;font-size:12px;color:var(--ink)` });
-    for (const it of list) {
-      if (it.sep) {
-        m.append(h("div", { style: "height:1px;background:var(--line);margin:3px 0" }));
-        continue;
-      }
-      const row3 = h(
-        "div",
-        { class: "kd-pop-row", role: "menuitem", "aria-disabled": it.disabled ? "true" : void 0, style: `display:flex;gap:6px;align-items:center;padding:3px 12px 3px 6px;cursor:default;white-space:nowrap;${it.disabled ? "opacity:.45;" : ""}` },
-        h("span", { style: `${it.icon && it.iconW ? "" : "width:16px;"}display:inline-flex;flex:none;justify-content:center` }, it.check ? menuCheck(!!it.checked) : it.icon ? kicadIcon(it.icon, it.iconW || 16, it.iconH || it.iconW || 16) : ""),
-        h("span", { style: "flex:1" }, it.label || ""),
-        it.key ? h("span", { class: "kd-pop-key", style: "margin-left:24px;opacity:.7" }, menuKey(it.key)) : null,
-        it.sub ? menuArrow() : null
-      );
-      if (it.title) row3.title = it.title;
-      row3.addEventListener("pointerenter", () => {
-        row3.style.background = "var(--accent)";
-        row3.style.color = "var(--on-accent)";
-        for (const o of Array.from(document.querySelectorAll(".kd-pop"))) if (Number(o.dataset.depth) > depth) o.remove();
-        if (it.sub && !it.disabled) {
-          const r = row3.getBoundingClientRect(), sub2 = build4(it.sub, r.right - 2, r.top - 3, depth + 1);
-          document.body.append(sub2);
-          fitMenu(sub2, { row: r, parent: m.getBoundingClientRect(), overlap: 2 });
-        }
-      });
-      row3.addEventListener("pointerleave", () => {
-        row3.style.background = "";
-        row3.style.color = "";
-      });
-      row3.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        if (it.disabled || it.sub) return;
-        closeAll();
-        if (it.run) it.run();
-      });
-      m.append(row3);
-    }
-    return m;
-  };
-  const closeAll = () => {
-    for (const o of Array.from(document.querySelectorAll(".kd-pop"))) o.remove();
-    document.removeEventListener("pointerdown", away, true);
-    document.removeEventListener("keydown", esc9, true);
-  };
-  const away = (ev) => {
-    const t = ev.target;
-    if (t && t.closest && t.closest(".kd-pop")) return;
-    closeAll();
-  };
-  const esc9 = (ev) => {
-    if (ev.key === "Escape") {
-      ev.preventDefault();
-      ev.stopPropagation();
-      closeAll();
-    }
-  };
-  const root5 = build4(items, x, y, 0);
-  document.body.append(root5);
-  fitMenu(root5, { at: { x, y } });
-  setTimeout(() => {
-    document.addEventListener("pointerdown", away, true);
-    document.addEventListener("keydown", esc9, true);
-  }, 0);
-  return root5;
-}
-function download(name, text3, type = "text/csv;charset=utf-8") {
-  const a = h("a", { href: URL.createObjectURL(new Blob([text3], { type })), download: name });
-  document.body.append(a);
-  a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(a.href);
-    a.remove();
-  }, 1e3);
-}
-var esc5;
-var init_dom2 = __esm({
-  "web/domains/pcb/dialogs/dom.ts"() {
-    "use strict";
-    init_shell();
-    init_kselect();
-    init_menufit();
-    init_kicon_dom();
-    init_keys();
-    esc5 = (s2) => String(s2 ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  }
-});
-
-// web/domains/pcb/tools/props/sexpr.ts
-function str5(v) {
-  return v === void 0 || v === null ? "" : String(v);
-}
-function r64(v) {
-  return +(+v).toFixed(6);
-}
-var init_sexpr3 = __esm({
-  "web/domains/pcb/tools/props/sexpr.ts"() {
-    "use strict";
-    init_root();
-  }
-});
-
-// web/domains/pcb/tools/props/numeric.ts
-function evalExpr(text3, defUnit) {
-  const src = str5(text3).trim().replace(/,/g, ".");
-  if (!src) return NaN;
-  const scale = defUnit ? UNIT_MM[defUnit] || 1 : 1;
-  let i = 0;
-  const ws = () => {
-    while (i < src.length && /\s/.test(src[i])) i++;
-  };
-  function primary() {
-    ws();
-    if (src[i] === "(") {
-      i++;
-      const v2 = sum();
-      ws();
-      if (src[i] !== ")") return NaN;
-      i++;
-      return v2;
-    }
-    if (src[i] === "-") {
-      i++;
-      return -primary();
-    }
-    if (src[i] === "+") {
-      i++;
-      return primary();
-    }
-    const m = /^(\d+\.?\d*(?:e[-+]?\d+)?|\.\d+(?:e[-+]?\d+)?)/i.exec(src.slice(i));
-    if (!m) return NaN;
-    i += m[0].length;
-    let v = parseFloat(m[0]);
-    ws();
-    const u = /^(mm|cm|um|µm|inch|in|"|mils|mil|thou|°|deg)/i.exec(src.slice(i));
-    if (u) {
-      i += u[0].length;
-      const key3 = u[0].toLowerCase();
-      if (key3 === "\xB0" || key3 === "deg") return defUnit ? NaN : v;
-      if (!defUnit) return NaN;
-      return v * UNIT_MM[key3];
-    }
-    return v * scale;
-  }
-  function product() {
-    let v = primary();
-    for (; ; ) {
-      ws();
-      const op = src[i];
-      if (op !== "*" && op !== "/") return v;
-      i++;
-      const r = primary() / scale;
-      v = op === "*" ? v * r : v / r;
-    }
-  }
-  function sum() {
-    let v = product();
-    for (; ; ) {
-      ws();
-      const op = src[i];
-      if (op !== "+" && op !== "-") return v;
-      i++;
-      const r = product();
-      v = op === "+" ? v + r : v - r;
-    }
-  }
-  const out2 = sum();
-  ws();
-  return i < src.length || !isFinite(out2) ? NaN : r64(out2);
-}
-function formatLength(v, unit2) {
-  const u = unit2 === "in" ? [25.4, 6, "in"] : unit2 === "mil" ? [0.0254, 3, "mils"] : [1, 4, "mm"];
-  let t = (v / u[0]).toFixed(u[1]);
-  if (t.includes(".")) t = t.replace(/0+$/, "").replace(/\.$/, "");
-  if (t === "-0") t = "0";
-  return t + " " + u[2];
-}
-var UNIT_MM;
-var init_numeric = __esm({
-  "web/domains/pcb/tools/props/numeric.ts"() {
-    "use strict";
-    init_sexpr3();
-    UNIT_MM = { mm: 1, cm: 10, um: 1e-3, "\xB5m": 1e-3, "in": 25.4, '"': 25.4, inch: 25.4, mil: 0.0254, mils: 0.0254, thou: 0.0254 };
-  }
-});
-
-// web/domains/pcb/editor/pcbdialogs/ui.ts
-function h2(tag, props, ...children) {
-  const el4 = document.createElement(tag);
-  for (const [k, v] of Object.entries(props || {})) {
-    if (v === null || v === void 0 || v === false) continue;
-    if (typeof v === "function") el4.addEventListener(k.replace(/^on/, "").toLowerCase(), v);
-    else if (k === "class") el4.className = String(v);
-    else if (k === "style") el4.style.cssText = String(v);
-    else if (k === "checked" || k === "disabled" || k === "selected" || k === "readOnly") el4[k] = !!v;
-    else if (k === "value") el4.value = String(v);
-    else el4.setAttribute(k, v === true ? "" : String(v));
-  }
-  for (const c of children) if (c !== null && c !== void 0 && c !== false) el4.append(c);
-  return el4;
-}
-function ensureCss2() {
-  if (cssDone || typeof document === "undefined") return;
-  cssDone = true;
-  const st = document.createElement("style");
-  st.id = "pcbdialogs-css";
-  st.textContent = CSS3;
-  document.head.appendChild(st);
-}
-function put2(el4, ...children) {
-  for (const c of children) if (c !== null && c !== void 0 && c !== false) el4.append(c);
-}
-function openDialog3(spec) {
-  if (typeof KDialogs === "undefined" || !KDialogs) return null;
-  ensureCss2();
-  let out2 = null;
-  KDialogs.open({
-    title: spec.title,
-    width: spec.width,
-    okLabel: spec.okLabel,
-    readOnly: spec.readOnly,
-    extra: spec.extra,
-    ok: spec.ok,
-    cancel: spec.cancel,
-    modeless: spec.modeless,
-    child: spec.child,
-    persist: spec.persist,
-    restored: spec.restored,
-    build(body, a) {
-      const dlg = body.parentElement;
-      if (spec.width) dlg.style.maxWidth = "96vw";
-      if (spec.height) {
-        dlg.style.height = `min(${spec.height}px, 92vh)`;
-        body.style.flex = "1 1 auto";
-        body.style.minHeight = "0";
-        body.style.display = "flex";
-        body.style.flexDirection = "column";
-      }
-      const buttons = Array.from(dlg.querySelectorAll(".kd-foot > button"));
-      const okButton = buttons.length ? buttons[buttons.length - 1] : null, cancelButton = buttons.length > 1 ? buttons[buttons.length - 2] : null;
-      if (cancelButton && spec.cancelLabel) cancelButton.textContent = spec.cancelLabel;
-      if (okButton && spec.noOk) {
-        okButton.style.display = "none";
-        if (cancelButton && !spec.cancelLabel) cancelButton.textContent = "Close";
-      }
-      if (spec.noEnter) body.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter") ev.stopPropagation();
-      });
-      else body.addEventListener("keydown", (ev) => {
-        if (ev.key === "Enter" && ev.target instanceof Element && ev.target.closest(".pd-grid, .pd-list, .pd-rules")) ev.stopPropagation();
-      });
-      const title = dlg.querySelector(".kd-title span");
-      out2 = { body, close: a.close, dialog: dlg, okButton, cancelButton, setTitle(t) {
-        if (title) title.textContent = t;
-      } };
-      spec.build(body, out2);
-    }
-  });
-  return out2;
-}
-function messageBox(title, message, buttons = [{ label: "OK" }], escape2) {
-  if (typeof document === "undefined") return null;
-  ensureCss2();
-  const ov = h2("div", { class: "kd-overlay", style: "z-index:10050", "data-k": "messagebox" });
-  const dlg = h2("div", { class: "kd-dialog", style: "width:max-content;min-width:440px;max-width:min(640px, calc(100vw - 32px))", tabIndex: -1 });
-  const body = h2("div", { class: "kd-body" }, h2("p", { style: "margin:4px 0 6px;white-space:pre-wrap", "data-k": "message" }, message));
-  const foot = h2("div", { class: "kd-foot" }, h2("span", { class: "spacer" }));
-  const done = (i) => {
-    ov.remove();
-    const b = buttons[i];
-    if (b && b.fn) b.fn();
-  };
-  const btns = buttons.map((b, i) => {
-    const e = h2("button", { class: "btn" + (i === buttons.length - 1 ? " primary" : ""), type: "button", "data-k": "mb-" + b.label.toLowerCase() }, b.label);
-    e.addEventListener("click", () => done(i));
-    return e;
-  });
-  foot.append(...btns);
-  dlg.append(h2("div", { class: "kd-title" }, h2("span", null, title)), body, foot);
-  ov.append(dlg);
-  ov.addEventListener("keydown", (ev) => {
-    ev.stopPropagation();
-    if (ev.key === "Tab") trapTab2(ev, ov);
-    if (ev.key === "Escape") {
-      ev.preventDefault();
-      done(escape2 === void 0 ? 0 : escape2);
-    } else if (ev.key === "Enter" && !(ev.target instanceof HTMLButtonElement)) {
-      ev.preventDefault();
-      done(buttons.length - 1);
-    }
-  });
-  document.body.append(ov);
-  const last3 = btns[btns.length - 1];
-  if (last3) last3.focus();
-  else dlg.focus();
-  return ov;
-}
-function subDialog(title, width, build4, ok2, opts2) {
-  if (typeof document === "undefined") return null;
-  ensureCss2();
-  const ov = h2("div", { class: "kd-overlay", style: "z-index:10040", "data-k": opts2 && opts2.key || "subdialog" });
-  const dlg = h2("div", { class: "kd-dialog", style: `width:${width}px;max-width:calc(100vw - 32px)`, tabIndex: -1 });
-  const body = h2("div", { class: "kd-body" });
-  const cancel = h2("button", { class: "btn", type: "button", "data-k": "sub-cancel" }, "Cancel"), okB = h2("button", { class: "btn primary", type: "button", "data-k": "sub-ok" }, "OK");
-  cancel.addEventListener("click", () => ov.remove());
-  okB.addEventListener("click", () => {
-    if (ok2() !== false) ov.remove();
-  });
-  dlg.append(h2("div", { class: "kd-title" }, h2("span", null, title)), body, h2("div", { class: "kd-foot" }, h2("span", { class: "spacer" }), cancel, okB));
-  ov.append(dlg);
-  ov.addEventListener("keydown", (ev) => {
-    ev.stopPropagation();
-    if (ev.key === "Tab") trapTab2(ev, ov);
-    if (ev.key === "Escape") {
-      ev.preventDefault();
-      ov.remove();
-    }
-  });
-  build4(body);
-  document.body.append(ov);
-  dlg.focus();
-  return ov;
-}
-function textEntryBox(title, caption, value, multiline, onOk) {
-  if (typeof document === "undefined") return null;
-  ensureCss2();
-  const ov = h2("div", { class: "kd-overlay", style: "z-index:10050", "data-k": "textentry" });
-  const dlg = h2("div", { class: "kd-dialog", style: "width:max-content;min-width:440px;max-width:min(640px, calc(100vw - 32px))", tabIndex: -1 });
-  const field2 = multiline ? h2("textarea", { class: "pd-text", style: "min-height:90px;width:100%", "data-k": "entry" }) : h2("input", { type: "text", style: "width:100%", "data-k": "entry" });
-  field2.value = value;
-  const body = h2("div", { class: "kd-body" }, caption ? h2("p", { style: "margin:4px 0 6px" }, caption) : null, field2);
-  const done = (ok2) => {
-    ov.remove();
-    if (ok2) onOk(field2.value);
-  };
-  const cancel = h2("button", { class: "btn", type: "button", "data-k": "te-cancel" }, "Cancel"), okb = h2("button", { class: "btn primary", type: "button", "data-k": "te-ok" }, "OK");
-  cancel.addEventListener("click", () => done(false));
-  okb.addEventListener("click", () => done(true));
-  dlg.append(h2("div", { class: "kd-title" }, h2("span", null, title)), body, h2("div", { class: "kd-foot" }, h2("span", { class: "spacer" }), cancel, okb));
-  ov.append(dlg);
-  ov.addEventListener("keydown", (ev) => {
-    ev.stopPropagation();
-    if (ev.key === "Tab") trapTab2(ev, ov);
-    if (ev.key === "Escape") {
-      ev.preventDefault();
-      done(false);
-    } else if (ev.key === "Enter" && (!multiline || ev.shiftKey || ev.ctrlKey || ev.metaKey) && !(ev.target instanceof HTMLButtonElement)) {
-      ev.preventDefault();
-      done(true);
-    }
-  });
-  document.body.append(ov);
-  field2.focus();
-  return ov;
-}
-function fmtLen(mm4, units = currentUnits()) {
-  const u = UNIT[units] || UNIT.mm;
-  return trim((mm4 / u.per).toFixed(u.digits)) || "0";
-}
-function fmtLenU(mm4) {
-  return fmtLen(mm4) + " " + unitName();
-}
-function parseLen(text3, units = currentUnits()) {
-  const v = evalExpr(text3.replace(/\b(mils?|thou)\b/gi, "mil").replace(/\binch\b/gi, "in"), units);
-  return isNaN(v) ? NaN : +v.toFixed(6);
-}
-function parseNum(text3) {
-  const v = evalExpr(text3, "");
-  return isNaN(v) ? NaN : v;
-}
-function bindEval(input, evaluate3) {
-  let original = "";
-  input.addEventListener("focus", () => {
-    if (original && original !== input.value) {
-      input.value = original;
-      input.select();
-    }
-  });
-  input.addEventListener("blur", () => {
-    const t = input.value;
-    const out2 = evaluate3(t);
-    if (out2 !== null) {
-      original = isExpr(t) ? t : "";
-      if (out2 !== t) input.value = out2;
-    }
-  });
-}
-function lenField(mm4, opts2) {
-  let cur2 = mm4;
-  const u = opts2 && opts2.units || currentUnits(), fmt4 = (v) => fmtLen(v, u), parse2 = (t) => parseLen(t, u);
-  const input = h2("input", { type: "text", value: opts2 && opts2.allowEmpty && !isFinite(mm4) ? "" : fmt4(mm4), disabled: !!(opts2 && opts2.ro), "data-k": opts2 && opts2.key, "data-units": u });
-  bindEval(input, (t) => {
-    const v = parse2(t);
-    return isNaN(v) ? null : fmt4(opts2 && opts2.min !== void 0 ? Math.max(opts2.min, v) : v);
-  });
-  input.addEventListener("change", () => {
-    const v = parse2(input.value);
-    if (isNaN(v)) {
-      if (opts2 && opts2.allowEmpty && !input.value.trim()) {
-        cur2 = NaN;
-        return;
-      }
-      input.value = isFinite(cur2) ? fmt4(cur2) : "";
-      return;
-    }
-    cur2 = opts2 && opts2.min !== void 0 ? Math.max(opts2.min, v) : v;
-    if (!isExpr(input.value)) input.value = fmt4(cur2);
-    if (opts2 && opts2.onChange) opts2.onChange(cur2);
-  });
-  const warn = warningIcon();
-  return { el: input, input, warn, get: () => {
-    if (isFinite(cur2) && input.value === fmt4(cur2)) return cur2;
-    const v = parse2(input.value);
-    return isNaN(v) ? cur2 : opts2 && opts2.min !== void 0 ? Math.max(opts2.min, v) : v;
-  }, set(v) {
-    cur2 = v;
-    input.value = isFinite(v) ? fmt4(v) : "";
-  } };
-}
-function warningIcon() {
-  const el4 = h2("span", { class: "pd-warnicon", hidden: true, "data-k": "warning" });
-  el4.innerHTML = '<svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path d="M8 1.5L15 14H1z" style="fill:var(--warn)"/><path d="M8 6v4M8 11.6v.4" style="stroke:var(--paper)" stroke-width="1.6" stroke-linecap="round"/></svg>';
-  return { el: el4, set(m) {
-    el4.hidden = !m;
-    el4.title = m || "";
-  } };
-}
-function numField(v, opts2) {
-  let cur2 = v;
-  const fmt4 = (x) => trim(x.toFixed(opts2 && opts2.digits !== void 0 ? opts2.digits : 6)) || "0";
-  const input = h2("input", { type: "text", value: fmt4(v), disabled: !!(opts2 && opts2.ro), "data-k": opts2 && opts2.key });
-  bindEval(input, (t) => {
-    const x = parseNum(t);
-    return isNaN(x) ? null : fmt4(x);
-  });
-  input.addEventListener("change", () => {
-    const x = parseNum(input.value);
-    if (isNaN(x) || !input.value.trim()) input.value = fmt4(cur2);
-    else {
-      cur2 = x;
-      if (!isExpr(input.value)) input.value = fmt4(x);
-    }
-  });
-  return { el: input, input, get: () => {
-    if (input.value === fmt4(cur2)) return cur2;
-    const x = parseNum(input.value);
-    return isNaN(x) || !input.value.trim() ? cur2 : x;
-  }, set(x) {
-    cur2 = x;
-    input.value = fmt4(x);
-  } };
-}
-function spinField(v, opts2) {
-  const step = opts2.step || 1, digits = opts2.digits || 0;
-  const clamp = (x) => {
-    if (opts2.wrap) {
-      const span = opts2.max - opts2.min + step;
-      while (x > opts2.max) x -= span;
-      while (x < opts2.min) x += span;
-      return x;
-    }
-    return Math.min(opts2.max, Math.max(opts2.min, x));
-  };
-  const fmt4 = (x) => x.toFixed(digits);
-  let cur2 = clamp(v);
-  const input = h2("input", { type: "text", value: fmt4(cur2), disabled: !!opts2.ro, "data-k": opts2.key, inputmode: "decimal" });
-  const arrow2 = (d) => {
-    const t = document.createElement("template");
-    t.innerHTML = `<svg viewBox="0 0 8 5" width="8" height="5" aria-hidden="true"><path d="${d}" fill="currentColor"/></svg>`;
-    return t.content.firstChild;
-  };
-  const set2 = (x, fire) => {
-    const n2 = clamp(Math.round(x / step) * step);
-    const was = cur2;
-    cur2 = +n2.toFixed(Math.max(digits, 6));
-    input.value = fmt4(cur2);
-    if (fire && opts2.onChange && cur2 !== was) opts2.onChange(cur2);
-  };
-  const bump = (dir) => {
-    if (input.disabled) return;
-    set2(cur2 + dir * step, true);
-  };
-  const up = h2("button", { type: "button", tabindex: "-1", "data-k": opts2.key ? opts2.key + "-up" : void 0, "aria-label": "Increment" }, arrow2("M0 5L4 0L8 5Z"));
-  const down = h2("button", { type: "button", tabindex: "-1", "data-k": opts2.key ? opts2.key + "-down" : void 0, "aria-label": "Decrement" }, arrow2("M0 0L8 0L4 5Z"));
-  up.addEventListener("mousedown", (ev) => {
-    ev.preventDefault();
-    bump(1);
-  });
-  down.addEventListener("mousedown", (ev) => {
-    ev.preventDefault();
-    bump(-1);
-  });
-  input.addEventListener("keydown", (ev) => {
-    if (ev.key === "ArrowUp") {
-      ev.preventDefault();
-      bump(1);
-    } else if (ev.key === "ArrowDown") {
-      ev.preventDefault();
-      bump(-1);
-    }
-  });
-  input.addEventListener("change", () => {
-    const x = Number(input.value.replace(",", "."));
-    if (isNaN(x) || !input.value.trim()) input.value = fmt4(cur2);
-    else set2(x, true);
-  });
-  const el4 = h2("span", { class: "pd-spin" + (opts2.ro ? " disabled" : "") }, input, h2("span", { class: "arrows" }, up, down));
-  return {
-    el: el4,
-    input,
-    get: () => {
-      const x = Number(input.value.replace(",", "."));
-      return input.value === fmt4(cur2) || isNaN(x) || !input.value.trim() ? cur2 : clamp(x);
-    },
-    set: (x) => set2(x, false),
-    enable: (on2) => {
-      input.disabled = !on2;
-      el4.classList.toggle("disabled", !on2);
-    }
-  };
-}
-function textField(v, opts2) {
-  const input = h2("input", { type: "text", value: v, disabled: !!(opts2 && opts2.ro), "data-k": opts2 && opts2.key, placeholder: opts2 && opts2.placeholder });
-  return { el: input, input, get: () => input.value, set(x) {
-    input.value = x;
-  } };
-}
-function selectField(v, options, opts2) {
-  const input = h2("k-select", { disabled: !!(opts2 && opts2.ro), "data-k": opts2 && opts2.key });
-  options.forEach(([val, label]) => {
-    const o = h2("option", { value: String(val), "data-icon": opts2 && opts2.icons ? opts2.icons[String(val)] : void 0 }, label);
-    if (String(val) === String(v)) o.selected = true;
-    input.append(o);
-  });
-  if (!options.some(([val]) => String(val) === String(v)) && options.length) input.selectedIndex = 0;
-  const get = () => (options[input.selectedIndex] || options[0])[0];
-  if (opts2 && opts2.onChange) {
-    const cb = opts2.onChange;
-    input.addEventListener("change", () => cb(get()));
-  }
-  return { el: input, input, get, set(x) {
-    const i = options.findIndex(([val]) => String(val) === String(x));
-    if (i >= 0) input.selectedIndex = i;
-  } };
-}
-function checkField(v, label, opts2) {
-  const input = h2("input", { type: "checkbox", checked: v, disabled: !!(opts2 && opts2.ro), "data-k": opts2 && opts2.key });
-  const el4 = h2("label", { class: "pd-check" + (opts2 && opts2.ro ? " disabled" : ""), title: opts2 && opts2.tip }, input, label);
-  if (opts2 && opts2.onChange) {
-    const cb = opts2.onChange;
-    input.addEventListener("change", () => cb(input.checked));
-  }
-  return { el: el4, input, get: () => input.checked, set(x) {
-    input.checked = x;
-  } };
-}
-function box2(title, ...children) {
-  return h2("div", { class: "pd-box" }, h2("div", { class: "hd" }, title), ...children);
-}
-function form2(rows3, wide) {
-  const f2 = h2("div", { class: "pd-form" + (wide ? " wide" : "") });
-  for (const r of rows3) {
-    if (Array.isArray(r)) {
-      f2.append(h2("label", r[3] ? { title: r[3] } : null, r[0]), r[1] || h2("span"), r[2] || h2("span"));
-    } else if (r) {
-      const s2 = h2("div", { class: "span" });
-      s2.append(r);
-      f2.append(s2);
-    }
-  }
-  return f2;
-}
-function notebook(pages, opts2) {
-  const bar = h2("div", { class: "pd-tabs" }), host2 = h2("div", opts2 && opts2.fill ? { style: "flex:1 1 auto;min-height:0;display:flex;flex-direction:column" } : null);
-  const el4 = h2("div", opts2 && opts2.fill ? { style: "display:flex;flex-direction:column;flex:1 1 auto;min-height:0" } : null, bar, host2);
-  const built = pages.map(() => null), tabs = [];
-  let cur2 = -1;
-  const show6 = (i) => {
-    if (i === cur2 || !pages[i]) return;
-    cur2 = i;
-    tabs.forEach((t, k) => t.classList.toggle("on", k === i));
-    let p = built[i];
-    if (!p) {
-      p = h2("div", opts2 && opts2.fill ? { style: "flex:1 1 auto;min-height:0;display:flex;flex-direction:column" } : null);
-      built[i] = p;
-      pages[i].build(p);
-    }
-    host2.replaceChildren(p);
-    if (opts2 && opts2.onShow) opts2.onShow(i);
-  };
-  pages.forEach((pg, i) => {
-    const t = h2("button", { class: "pd-tab", type: "button" }, pg.label);
-    t.addEventListener("click", () => show6(i));
-    tabs.push(t);
-    bar.append(t);
-  });
-  show6(opts2 && opts2.start ? opts2.start : 0);
-  return { el: el4, show: show6, setLabel(i, label) {
-    if (tabs[i]) tabs[i].textContent = label;
-  }, current: () => cur2 };
-}
-function treeBook(groups, start, opts2) {
-  const tree = h2("div", { class: "pd-tree" }), page = h2("div", { class: "pd-page" }), el4 = h2("div", { class: "pd-book" }, tree, page);
-  const built = /* @__PURE__ */ new Map(), leaves = /* @__PURE__ */ new Map(), specs = /* @__PURE__ */ new Map();
-  let cur2 = "";
-  const show6 = (label, force) => {
-    const pg = specs.get(label);
-    if (!pg || label === cur2) return;
-    if (cur2 && !force && opts2 && opts2.canLeave && !opts2.canLeave(cur2)) return;
-    const from = cur2;
-    cur2 = label;
-    for (const [l, leaf] of leaves) leaf.classList.toggle("on", l === label);
-    let p = built.get(label);
-    if (!p) {
-      p = h2("div", { "data-page": label });
-      built.set(label, p);
-      pg.build(p);
-    }
-    page.replaceChildren(p);
-    page.scrollTop = 0;
-    if (opts2 && opts2.onShow) opts2.onShow(label, from);
-  };
-  for (const g2 of groups) {
-    tree.append(h2("div", { class: "grp" }, g2.label));
-    for (const pg of g2.pages) {
-      const leaf = h2("div", { class: "leaf" }, pg.label);
-      leaf.addEventListener("click", () => show6(pg.label));
-      leaves.set(pg.label, leaf);
-      specs.set(pg.label, pg);
-      tree.append(leaf);
-    }
-  }
-  show6(start && specs.has(start) ? start : groups[0].pages[0].label);
-  const rebuild = (label) => {
-    if (!built.has(label)) return;
-    built.delete(label);
-    if (label === cur2) {
-      const pg = specs.get(label);
-      const p = h2("div", { "data-page": label });
-      built.set(label, p);
-      pg.build(p);
-      page.replaceChildren(p);
-    }
-  };
-  return { el: el4, show: show6, current: () => cur2, built: (l) => built.has(l), rebuild };
-}
-function infoBar() {
-  const msg = h2("span", { class: "msg", "data-k": "infobar-msg" });
-  const x = h2("button", { class: "x", type: "button", title: "Hide this message." }, closeMark());
-  const el4 = h2("div", { class: "pd-infobar", hidden: true, "data-k": "infobar" }, h2("span", { class: "pd-warnicon" }), msg, x);
-  el4.firstChild.innerHTML = warningIcon().el.innerHTML;
-  let timer3 = 0;
-  const hide = () => {
-    el4.hidden = true;
-    if (timer3) clearTimeout(timer3);
-    timer3 = 0;
-  };
-  x.addEventListener("click", hide);
-  return { el: el4, hide, show(m, ms) {
-    msg.textContent = m;
-    el4.hidden = false;
-    if (timer3) clearTimeout(timer3);
-    timer3 = ms ? window.setTimeout(hide, ms) : 0;
-  } };
-}
-function focusError(ctrl, row3, col) {
-  if (!ctrl) return;
-  let target2 = ctrl;
-  if (ctrl.classList.contains("pd-grid") && row3 !== void 0) {
-    const tr = ctrl.querySelectorAll("tbody tr")[row3];
-    const td = tr ? tr.children[col || 0] : void 0;
-    target2 = td ? td.querySelector("input,textarea,k-select") || td : ctrl;
-    if (td) {
-      td.classList.add("err");
-      setTimeout(() => td.classList.remove("err"), 3e3);
-      td.scrollIntoView({ block: "nearest" });
-    }
-  }
-  setTimeout(() => {
-    if (!target2) return;
-    target2.focus();
-    if (target2 instanceof HTMLInputElement || target2 instanceof HTMLTextAreaElement) target2.select();
-  }, 0);
-}
-function staticBitmap(bitmap, w, hgt = w, style) {
-  const s2 = h2("span", { class: "pd-bitmap", "data-bitmap": bitmap, style: style || null });
-  s2.append(kicadIcon(bitmap, w, hgt));
-  return s2;
-}
-function iconButton(icon2, title, fn, disabled) {
-  return bitmapButton(ICONS[icon2], title, fn, { disabled: !!disabled, cls: "pd-iconbtn" });
-}
-function swatch(css) {
-  const sw = h2("span", { class: "sw" });
-  const i = h2("i");
-  i.style.background = css || "transparent";
-  sw.append(i);
-  return sw;
-}
-function grid(columns, rows3, opts2) {
-  let data = rows3, sel = -1, anchor2 = -1;
-  const more = /* @__PURE__ */ new Set();
-  const table = h2("table"), wrap = h2("div", { class: "pd-grid", style: opts2 && opts2.height ? `max-height:${opts2.height}` : null, "data-k": opts2 && opts2.key }, table);
-  const changed2 = () => {
-    if (opts2 && opts2.onChange) opts2.onChange();
-  };
-  const isSel = (k) => k === sel || more.has(k);
-  const mark = () => {
-    Array.from(table.querySelectorAll("tbody tr")).forEach((tr, k) => tr.classList.toggle("sel", isSel(k)));
-  };
-  const select2 = (i) => {
-    sel = i;
-    anchor2 = i;
-    more.clear();
-    mark();
-    if (opts2 && opts2.onSelect) opts2.onSelect(i);
-  };
-  const selectedRows = () => data.map((_r, k) => k).filter(isSel);
-  const pick = (i, ev) => {
-    if (!(opts2 && opts2.multi) || !ev.shiftKey && !ev.ctrlKey && !ev.metaKey) {
-      if (sel !== i || more.size) select2(i);
-      return;
-    }
-    if (ev.shiftKey && anchor2 >= 0) {
-      more.clear();
-      for (let k = Math.min(anchor2, i); k <= Math.max(anchor2, i); k++) more.add(k);
-      sel = i;
-    } else {
-      if (isSel(i) && selectedRows().length > 1) {
-        more.delete(i);
-        if (sel === i) sel = selectedRows()[0];
-      } else {
-        if (sel >= 0) more.add(sel);
-        sel = i;
-      }
-      anchor2 = i;
-    }
-    mark();
-    if (opts2 && opts2.onSelect) opts2.onSelect(sel);
-  };
-  const shown2 = () => columns.filter((c) => !c.hidden);
-  const cellText2 = (c, v) => c.type === "len" ? typeof v === "number" && isFinite(v) ? fmtLenU(v) : "" : c.type === "num" ? typeof v === "number" && isFinite(v) ? trim(v.toFixed(6)) : "" : c.type === "check" ? v ? "1" : "0" : c.type === "select" ? ((c.options || []).find((o) => String(o[0]) === String(v)) || [0, String(v === void 0 ? "" : v)])[1] : String(v === void 0 ? "" : v);
-  const setCell = (row3, c, text3) => {
-    if (c.type === "len") {
-      const x = parseLen(text3);
-      row3[c.key] = !text3.trim() ? NaN : isNaN(x) ? row3[c.key] : x;
-    } else if (c.type === "num") {
-      const x = parseNum(text3);
-      row3[c.key] = !text3.trim() ? NaN : isNaN(x) ? row3[c.key] : x;
-    } else if (c.type === "check") row3[c.key] = /^(1|true|yes)$/i.test(text3.trim());
-    else if (c.type === "select") {
-      const o = (c.options || []).find((x) => x[1] === text3 || String(x[0]) === text3);
-      if (o) row3[c.key] = o[0];
-    } else row3[c.key] = text3;
-  };
-  const refresh = () => {
-    table.replaceChildren();
-    const head3 = h2("tr");
-    for (const c of shown2()) head3.append(h2("th", { style: c.width ? `width:${c.width}` : null, title: c.tip }, c.label, c.sort ? sortArrow(c.sort === "asc") : null));
-    head3.addEventListener("contextmenu", (ev) => {
-      if (!columns.some((c) => c.hidden !== void 0)) return;
-      ev.preventDefault();
-      popupMenu(ev.clientX, ev.clientY, columns.filter((c, i) => i > 0 && c.label).map((c) => ({ label: c.label, check: true, checked: !c.hidden, run: () => {
-        c.hidden = !c.hidden;
-        refresh();
-      } })));
-    });
-    table.append(h2("thead", null, head3));
-    const body = h2("tbody");
-    data.forEach((row3, i) => {
-      const tr = h2("tr", { class: (isSel(i) ? "sel " : "") + (opts2 && opts2.rowClass ? opts2.rowClass(row3, i) : "") });
-      tr.addEventListener("pointerdown", (ev) => pick(i, ev));
-      shown2().forEach((c, ci) => {
-        const ro = !!(opts2 && opts2.ro) || c.type === "ro" || (c.readOnly ? c.readOnly(row3, i) : false);
-        const v = row3[c.key];
-        if (c.type === "icon") {
-          const ic = c.icon ? c.icon(row3, i) : null;
-          tr.append(h2("td", { class: "ico", title: ic ? ic.title : null }, ic ? kicadIcon(ic.icon, 16) : null));
-        } else if (c.type === "check") {
-          const cb = h2("input", { type: "checkbox", checked: !!v, disabled: ro });
-          cb.addEventListener("change", () => {
-            row3[c.key] = cb.checked;
-            changed2();
-          });
-          tr.append(h2("td", { class: "chk" }, cb));
-        } else if (c.type === "color") {
-          const b = h2("button", { type: "button", class: "pd-swatchbtn", disabled: ro, title: String(v || "") }, swatch(String(v || "")));
-          b.addEventListener("click", () => {
-            if (c.pick) c.pick(String(row3[c.key] || ""), (css) => {
-              row3[c.key] = css;
-              b.replaceChildren(swatch(css));
-              b.title = css;
-              changed2();
-            });
-          });
-          tr.append(h2("td", null, b));
-        } else if (c.type === "select" && !ro) {
-          const s2 = h2("k-select");
-          for (const [val, label] of c.options || []) {
-            const o = h2("option", { value: String(val), "data-icon": c.icons ? c.icons[String(val)] : void 0 }, label);
-            if (String(val) === String(v)) o.selected = true;
-            s2.append(o);
-          }
-          s2.addEventListener("change", () => {
-            const o = (c.options || [])[s2.selectedIndex];
-            if (o) {
-              row3[c.key] = o[0];
-              changed2();
-            }
-          });
-          tr.append(h2("td", null, s2));
-        } else if (ro) {
-          const text3 = c.type === "len" ? typeof v === "number" && isFinite(v) ? fmtLenU(v) : c.blank || "" : cellText2(c, v);
-          const bmp = c.type === "select" && c.icons ? c.icons[String(v)] : void 0;
-          tr.append(h2("td", { class: "ro", title: text3 }, bmp ? h2("span", { style: "display:inline-flex;align-items:center;gap:4px" }, kicadIcon(bmp, 40, 10), text3) : text3));
-        } else {
-          const text3 = cellText2(c, v);
-          const inp = h2("input", { type: "text", value: text3, placeholder: c.blank, "data-col": c.key });
-          inp.addEventListener("change", () => {
-            if (c.type === "len") {
-              const x = parseLen(inp.value);
-              if (!inp.value.trim()) {
-                row3[c.key] = NaN;
-                inp.value = "";
-              } else if (isNaN(x)) inp.value = text3;
-              else {
-                row3[c.key] = x;
-                inp.value = fmtLenU(x);
-              }
-            } else if (c.type === "num") {
-              const x = parseNum(inp.value);
-              if (!inp.value.trim()) row3[c.key] = NaN;
-              else if (isNaN(x)) inp.value = text3;
-              else row3[c.key] = x;
-            } else row3[c.key] = inp.value;
-            changed2();
-          });
-          inp.addEventListener("keydown", (ev) => {
-            if (ev.key === "Enter") {
-              ev.stopPropagation();
-              inp.blur();
-              return;
-            }
-            const mod = ev.ctrlKey || ev.metaKey;
-            const noSel = inp.selectionStart === inp.selectionEnd;
-            if (mod && ev.key.toLowerCase() === "c" && noSel) {
-              ev.preventDefault();
-              void navigator.clipboard?.writeText(shown2().map((x) => cellText2(x, row3[x.key])).join("	"));
-            } else if (mod && ev.key.toLowerCase() === "v" && navigator.clipboard && navigator.clipboard.readText) {
-              ev.preventDefault();
-              void navigator.clipboard.readText().then((clip2) => {
-                const lines = clip2.replace(/\r/g, "").replace(/\n$/, "").split("\n");
-                if (lines.length === 1 && !lines[0].includes("	")) {
-                  const a = inp.selectionStart || 0, b = inp.selectionEnd || 0;
-                  inp.value = inp.value.slice(0, a) + lines[0] + inp.value.slice(b);
-                  inp.dispatchEvent(new Event("change"));
-                  return;
-                }
-                const cols = shown2();
-                lines.forEach((line, k) => {
-                  const r = data[i + k];
-                  if (!r) return;
-                  line.split("	").forEach((cell, m) => {
-                    const col = cols[ci + m];
-                    if (col && col.type !== "ro" && !(col.readOnly && col.readOnly(r, i + k))) setCell(r, col, cell);
-                  });
-                });
-                refresh();
-                changed2();
-              });
-            }
-          });
-          if (c.button) {
-            const bt = c.button;
-            const b = h2("button", { type: "button", class: "pd-cellbtn", title: bt.title, tabindex: "-1" }, kicadIcon(bt.icon, 16));
-            b.addEventListener("click", () => bt.run(row3, i, (val) => {
-              row3[c.key] = val;
-              inp.value = val;
-              changed2();
-            }));
-            tr.append(h2("td", { class: "withbtn" }, h2("div", { class: "pd-cellwrap" }, inp, b)));
-          } else tr.append(h2("td", null, inp));
-        }
-      });
-      body.append(tr);
-    });
-    table.append(body);
-  };
-  refresh();
-  return { el: wrap, rows: () => data, setRows(r) {
-    data = r;
-    sel = -1;
-    anchor2 = -1;
-    more.clear();
-    refresh();
-  }, selected: () => sel, select: select2, refresh, columns, selectedRows };
-}
-function listDialog(title, headers, items, onPick, opts2) {
-  const cols = headers.map((label, i) => ({ key: "c" + i, label, type: "ro" }));
-  const toRows2 = (list) => list.map((r) => {
-    const o = {};
-    r.forEach((v, i) => {
-      o["c" + i] = v;
-    });
-    return o;
-  });
-  let shown2 = items.slice();
-  const g2 = grid(cols, toRows2(shown2), { height: "300px" });
-  const filter = h2("input", { type: "text", placeholder: "Filter", "data-k": "filter", style: "width:100%;margin-bottom:6px" });
-  const wild = (pat) => new RegExp("^" + pat.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".") + "$");
-  filter.addEventListener("input", () => {
-    const re = wild("*" + filter.value.toLowerCase() + "*");
-    shown2 = items.filter((r) => re.test(String(r[0] || "").toLowerCase()));
-    g2.setRows(toRows2(shown2));
-    if (shown2.length) g2.select(0);
-  });
-  const nameIn = opts2 && opts2.name ? h2("input", { type: "text", "data-k": "name", value: opts2.name.value, style: "flex:1" }) : null;
-  if (nameIn && opts2.name.invalidChars) {
-    const bad = opts2.name.invalidChars;
-    nameIn.addEventListener("input", () => {
-      const v = nameIn.value.split("").filter((c) => !bad.includes(c)).join("");
-      if (v !== nameIn.value) nameIn.value = v;
-    });
-  }
-  let api6 = null;
-  let busy = false;
-  const row3 = () => {
-    const i = g2.selected();
-    return i >= 0 ? shown2[i] || null : null;
-  };
-  const pick = () => {
-    const r = row3();
-    const name = nameIn ? nameIn.value.trim() : "";
-    if (!opts2 || !opts2.validate && !opts2.onOk) {
-      if (!r) return false;
-      onPick(r);
-      return true;
-    }
-    if (busy) return false;
-    const v = opts2.validate ? opts2.validate(r, name) : true;
-    const finish = (ok2) => {
-      busy = false;
-      if (!ok2) return;
-      if (opts2.onOk) opts2.onOk(r, name);
-      else if (r) onPick(r);
-      if (api6) api6.close();
-    };
-    if (v instanceof Promise) {
-      busy = true;
-      v.then(finish, () => {
-        busy = false;
-      });
-      return false;
-    }
-    if (!v) return false;
-    if (opts2.onOk) opts2.onOk(r, name);
-    else if (r) onPick(r);
-    return true;
-  };
-  api6 = openDialog3({
-    title,
-    width: opts2 && opts2.width || 400,
-    okLabel: opts2 && opts2.okLabel,
-    extra: opts2 && opts2.extra,
-    child: !!(opts2 && opts2.child),
-    build(body) {
-      if (nameIn) body.append(h2("div", { style: "display:flex;align-items:center;gap:6px;margin-bottom:8px" }, h2("span", { class: "pd-lbl" }, opts2.name.label), nameIn));
-      body.append(filter, h2("div", { class: "pd-lbl", style: "margin-bottom:4px" }, opts2 && opts2.listLabel || "Items:"), g2.el);
-      g2.el.addEventListener("dblclick", () => {
-        if (pick() && api6) api6.close();
-      });
-      const at4 = opts2 && opts2.select ? shown2.findIndex((r) => r[0] === opts2.select) : 0;
-      if (shown2.length) g2.select(Math.max(0, at4));
-      setTimeout(() => {
-        if (nameIn) {
-          nameIn.focus();
-          nameIn.select();
-        } else filter.focus();
-      }, 0);
-    },
-    ok() {
-      return pick();
-    }
-  });
-  return api6;
-}
-function gridButtons(g2, make, opts2) {
-  const ro = !!(opts2 && opts2.ro);
-  const bar = h2("div", { class: "pd-gridbar" });
-  bar.append(iconButton("plus", opts2 && opts2.addTip || "Add row", () => {
-    const rows3 = g2.rows();
-    rows3.push(make());
-    g2.refresh();
-    g2.select(rows3.length - 1);
-    const last3 = g2.el.querySelector("tbody tr:last-child input[type=text]");
-    if (last3) {
-      last3.focus();
-      last3.select();
-    }
-    if (opts2 && opts2.onChange) opts2.onChange();
-  }, ro));
-  if (opts2 && opts2.move) {
-    const swap = (d) => {
-      const rows3 = g2.rows(), i = g2.selected(), j = i + d;
-      if (i < 0 || j < 0 || j >= rows3.length) return;
-      [rows3[i], rows3[j]] = [rows3[j], rows3[i]];
-      g2.refresh();
-      g2.select(j);
-      if (opts2.onChange) opts2.onChange();
-    };
-    bar.append(iconButton("up", "Move up", () => swap(-1), ro), iconButton("down", "Move down", () => swap(1), ro));
-  }
-  bar.append(iconButton("trash", opts2 && opts2.delTip || "Delete row", () => {
-    const rows3 = g2.rows(), i = g2.selected();
-    if (i < 0 || i >= rows3.length) return;
-    if (opts2 && opts2.canDelete && !opts2.canDelete(rows3[i], i)) return;
-    rows3.splice(i, 1);
-    g2.refresh();
-    g2.select(Math.min(i, rows3.length - 1));
-    if (opts2 && opts2.onChange) opts2.onChange();
-  }, ro));
-  return bar;
-}
-function reportPanel(height, opts2) {
-  ensureCss2();
-  const list = h2("div", { class: "pd-report", style: `height:${height || "260px"}` });
-  let lines = [];
-  const filters2 = {};
-  const draw2 = () => {
-    list.replaceChildren();
-    for (const l of lines) {
-      const key3 = l.severity === "error" ? "Errors" : l.severity === "warning" ? "Warnings" : l.severity === "action" ? "Actions" : "Infos";
-      if (!filters2.All.get() && !filters2[key3].get()) continue;
-      list.append(h2("div", { class: "ln " + l.severity }, l.text));
-    }
-    if (!list.childElementCount) list.append(h2("div", { class: "ln info" }, lines.length ? "" : opts2 && opts2.empty !== void 0 ? opts2.empty : "No changes to be made."));
-    const count2 = (s2) => lines.filter((l) => l.severity === s2).length;
-    filters2.Errors.el.lastChild.textContent = `Errors (${count2("error")})`;
-    filters2.Warnings.el.lastChild.textContent = `Warnings (${count2("warning")})`;
-    list.scrollTop = list.scrollHeight;
-  };
-  const bar = h2("div", { class: "pd-row", style: "margin-top:6px" }, h2("span", { class: "pd-lbl" }, "Show:"));
-  for (const [name, on2] of [["All", true], ["Errors", true], ["Warnings", true], ["Actions", true], ["Infos", true]]) {
-    const f2 = checkField(on2, name, { onChange: (v) => {
-      if (name === "All") for (const k of Object.keys(filters2)) filters2[k].set(v);
-      else filters2.All.set(["Errors", "Warnings", "Actions", "Infos"].every((k) => filters2[k].get()));
-      draw2();
-    } });
-    filters2[name] = f2;
-    bar.append(f2.el);
-  }
-  if (opts2 && opts2.fileName) {
-    const plain = (l) => (l.severity === "error" ? "Error: " : l.severity === "warning" ? "Warning: " : l.severity === "info" ? "Info: " : "") + l.text + "\n";
-    const name = opts2.fileName;
-    bar.append(h2("span", { style: "flex:1" }), h2("button", { class: "btn sm", "data-k": "saveReport", onclick: () => download2(name, lines.map(plain).join(""), "text/plain;charset=utf-8") }, "Save..."));
-  }
-  const el4 = h2("div", null, list, bar);
-  return { el: el4, set(l) {
-    lines = l;
-    draw2();
-  } };
-}
-function download2(name, text3, type = "text/plain") {
-  const a = document.createElement("a");
-  a.href = URL.createObjectURL(new Blob([text3], { type }));
-  a.download = name;
-  document.body.appendChild(a);
-  a.click();
-  setTimeout(() => {
-    URL.revokeObjectURL(a.href);
-    a.remove();
-  }, 1e3);
-}
-var CSS3, cssDone, errorMessage, UNIT, currentUnits, unitName, trim, isExpr, unitLabel, note2, ICONS;
-var init_ui = __esm({
-  "web/domains/pcb/editor/pcbdialogs/ui.ts"() {
-    "use strict";
-    init_shell();
-    init_state();
-    init_kselect();
-    init_userorigin();
-    init_numeric();
-    init_dom2();
-    init_kicon_dom();
-    CSS3 = `
-.pd-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--line); margin: 0 0 10px; flex-wrap: wrap; }
-.pd-tab { padding: 5px 12px; border: 1px solid transparent; border-bottom: none; border-radius: var(--r-3) var(--r-3) 0 0; background: none; color: var(--ink-2); margin-bottom: -1px; white-space: nowrap; }
-.pd-tab:hover { color: var(--ink); }
-.pd-tab.on { background: var(--bench); border-color: var(--line); color: var(--ink); font-weight: 600; }
-.pd-book { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 0 14px; height: 100%; min-height: 0; }
-.pd-tree { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); overflow: auto; padding: 4px 0; user-select: none; }
-.pd-tree .grp { padding: 4px 8px; font-weight: 600; cursor: default; }
-.pd-tree .leaf { padding: 3px 8px 3px 24px; cursor: pointer; white-space: nowrap; }
-.pd-tree .leaf:hover { background: var(--sel-soft); }
-.pd-tree .leaf.on, .pd-tree .leaf.on:hover { background: var(--sel); color: var(--ink); }
-.pd-page { overflow: auto; min-height: 0; padding-right: 4px; }
-.pd-box { margin: 0 0 12px; }
-.pd-box > .hd { font-weight: 600; margin: 0 0 6px; padding-bottom: 3px; border-bottom: 1px solid var(--line); }
-.pd-form { display: grid; grid-template-columns: max-content minmax(90px, 170px) max-content; gap: 6px 8px; align-items: center; }
-.pd-form.wide { grid-template-columns: max-content minmax(140px, 1fr) max-content; }
-.pd-form > label, .pd-lbl { color: var(--ink); white-space: nowrap; }
-.pd-form .unit { color: var(--ink-2); }
-.pd-form .span { grid-column: 1 / -1; }
-.pd-check { display: flex; gap: 6px; align-items: center; color: var(--ink); margin: 2px 0; }
-.pd-check input { width: auto; margin: 0; }
-.pd-check.disabled, .pd-check.dim, .pd-check:has(input:disabled) { color: var(--ink-3, var(--ink-2)); }
-.pd-note { color: var(--ink-2); font-size: 12px; margin: 4px 0 8px; }
-.pd-info { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--r-2); padding: 6px 10px; margin: 0 0 10px; color: var(--ink); }
-.pd-grid { border: 1px solid var(--line); border-radius: var(--r-2); overflow: auto; background: var(--panel); }
-.pd-grid table { border-collapse: collapse; width: 100%; font-size: 12px; }
-.pd-grid th { position: sticky; top: 0; background: var(--panel-2); text-align: left; font-weight: 600; padding: 4px 6px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); white-space: nowrap; z-index: 1; }
-.pd-grid td { padding: 0; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); height: 24px; }
-.pd-grid td.ro, .pd-grid td.txt { padding: 3px 6px; white-space: nowrap; }
-.pd-grid td.ro { color: var(--ink-2); }
-.pd-grid tr.sel td { background: var(--sel); }
-.pd-grid tr.hd td { background: var(--panel-2); font-weight: 600; padding: 3px 6px; }
-.pd-grid td input[type=text], .pd-grid td k-select { border: none !important; border-radius: 0 !important; background: transparent !important; width: 100%; height: 23px; padding: 2px 6px !important; font-family: inherit !important; }
-.pd-grid td input[type=text]:focus, .pd-grid td k-select:focus-within { outline: 2px solid var(--blue); outline-offset: -2px; }
-.pd-grid td input[type=text] { min-width: 84px; }
-.pd-grid td.chk { text-align: center; }
-.pd-grid td.chk input { width: auto; margin: 0; }
-.pd-grid td.ico { width: 22px; text-align: center; vertical-align: middle; padding: 0 2px; }
-.pd-grid td.ico svg, .pd-grid td.ico img { display: block; margin: auto; }
-.pd-cellwrap { display: flex; align-items: center; }
-.pd-3dwrap { display: flex; flex: 1; min-width: 0; min-height: 0; gap: 4px; }
-.pd-3dprev { position: relative; flex: 1; min-width: 0; min-height: 200px; background: var(--canvas); border: 1px solid var(--line); overflow: hidden; }
-.pd-3dprev-msg { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-3); font-size: var(--fs-sm); }
-.pd-3dbtns { display: flex; flex-direction: column; gap: 4px; flex: none; }
-.pd-cellwrap input[type=text] { flex: 1; min-width: 0; }
-.pd-cellbtn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; padding: 0; border: none; background: transparent; color: var(--ink); cursor: pointer; border-radius: var(--r-1); }
-.pd-cellbtn:hover { background: var(--sel-soft); }
-.pd-gridbar { display: flex; gap: 4px; margin: 4px 0 0; }
-/* the hand-made square buttons (a "..." picker, a colour swatch); icon buttons are components/kicon-dom's .kbmp */
-.pd-iconbtn:not(.kbmp) { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); color: var(--ink); padding: 0; }
-.pd-iconbtn:not(.kbmp):hover { border-color: var(--ink-3, var(--ink-2)); }
-.pd-iconbtn:not(.kbmp):disabled { opacity: .4; cursor: default; }
-.pd-3dbtns .pd-iconbtn.on { background: var(--on); border-color: var(--on-line); }
-.pd-bitmap { display: inline-flex; flex: none; align-items: center; justify-content: center; }
-.pd-bitmap > svg.kicon-dom { display: block; max-width: 100%; height: auto; }
-.pd-bmplabel { display: inline-flex; align-items: center; gap: 6px; }
-.pd-togrow { display: flex; align-items: center; gap: 2px; }
-.pd-togrow .vsep { width: 1px; height: 18px; background: var(--line); margin: 0 5px; }
-.pd-report { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); overflow: auto; font-size: 12px; padding: 4px 8px; min-height: 120px; }
-.pd-report .ln { padding: 1px 0; white-space: pre-wrap; }
-.pd-report .ln.error { color: var(--err); }
-.pd-report .ln.warning { color: var(--warn); }
-.pd-report .ln.action { color: var(--ink); }
-.pd-report .ln.info { color: var(--ink-2); }
-.pd-sev { display: inline-block; width: 10px; height: 10px; margin-right: 6px; vertical-align: -1px; }
-.pd-sev.error { background: var(--err); border-radius: 50%; }
-.pd-sev.warning { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-bottom: 10px solid var(--warn); }
-.pd-sev.exclusion { background: var(--ink-3); }
-.pd-sev.ignore { background: var(--ink-3); border-radius: var(--r-1); }
-.pd-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 6px; }
-.pd-row k-select, .pd-row input[type=text] { width: auto; }
-.pd-cols2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 24px; }
-.pd-radiobox { border: 1px solid var(--line); border-radius: 4px; padding: 2px 8px 6px; margin: 0; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-.pd-radiobox > legend { padding: 0 4px; color: var(--ink); }
-.pd-radiobox.disabled > legend, .pd-check.disabled { color: var(--ink-3); }
-.pd-cols3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0 20px; }
-.pd-list { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); overflow: auto; }
-.pd-list .it { padding: 3px 8px; cursor: pointer; display: flex; gap: 6px; align-items: baseline; }
-.pd-list .it:hover { background: var(--panel-2); }
-.pd-list .it.sel { background: var(--sel); }
-.pd-list .it .sub { color: var(--ink-2); padding-left: 16px; }
-.pd-list .hd { padding: 3px 8px; font-weight: 600; background: var(--panel-2); border-bottom: 1px solid var(--line); }
-.pd-swatch { display: inline-block; width: 22px; height: 12px; border: 1px solid var(--line); vertical-align: -1px; }
-.pd-layertable { border-collapse: collapse; margin: 8px 0; }
-.pd-layertable td { padding: 2px 8px 2px 0; }
-.pd-layertable td.chk input { width: auto; margin: 0 4px; }
-.pd-layertable input[type=text] { width: 190px; }
-.pd-layertable k-select { width: 190px; }
-.pd-layertable tr.cu input[type=text] { font-weight: 600; }
-.pd-layertable .desc { color: var(--ink-2); }
-.pd-colhead { font-weight: 600; margin: 0 0 4px; }
-.pd-status { font-size: 12px; } .pd-status.err { color: var(--err); } .pd-status.ok { color: var(--ink-2); }
-.pd-sevtable { border-collapse: collapse; width: 100%; }
-.pd-sevtable td { padding: 2px 10px 2px 0; white-space: nowrap; }
-.pd-sevtable td:first-child { white-space: normal; width: 100%; padding-left: 14px; }
-.pd-sevtable tr.hd td { font-weight: 600; padding: 8px 0 3px; }
-.pd-sevtable input { width: auto; margin: 0; vertical-align: -2px; }
-.pd-scroll { overflow: auto; }
-.pd-inline { display: inline-flex; gap: 14px; align-items: center; }
-.pd-value { font-variant-numeric: tabular-nums; }
-.pd-drclist { height: 300px; }
-.pd-drclist .it { align-items: flex-start; padding: 4px 8px; border-bottom: 1px solid var(--line); }
-.pd-drclist .it .pd-sev { margin-top: 4px; flex: 0 0 auto; }
-.pd-empty { padding: 10px; color: var(--ink-2); }
-.pd-badge { display: inline-block; min-width: 20px; padding: 0 6px; border-radius: 9px; background: var(--panel-2); border: 1px solid var(--line); font-size: 11px; text-align: center; margin-left: -4px; }
-.pd-showrow { margin-top: 8px; }
-.pd-stat { border-collapse: collapse; width: 100%; margin: 0 0 14px; }
-.pd-stat th { text-align: left; font-weight: 600; padding: 3px 8px 3px 0; border-bottom: 1px solid var(--line); }
-.pd-stat td { padding: 3px 8px 3px 0; } .pd-stat td.n, .pd-stat th + th { text-align: right; font-variant-numeric: tabular-nums; }
-.pd-stat tr.total td { border-top: 1px solid var(--line); font-weight: 600; }
-.pd-fieldlist { margin-top: 8px; border: 1px solid var(--line); border-radius: var(--r-2); padding: 6px 8px; background: var(--panel); max-height: 380px; overflow: auto; }
-.pd-report .ln.hd { font-weight: 600; }
-.pd-xy { display: inline-flex; gap: 6px; align-items: center; } .pd-xy input { width: 96px; } .pd-xy label { color: var(--ink); }
-.pd-dim { color: var(--ink-3, var(--ink-2)) !important; opacity: .7; }
-.pd-zone { display: grid; grid-template-columns: 170px minmax(0, 1fr); gap: 0 16px; }
-textarea.pd-text { width: 100%; min-height: 260px; font-family: var(--mono); font-size: 12px; white-space: pre; }
-.pd-spin { position: relative; display: inline-flex; align-items: stretch; min-width: 0; }
-.pd-spin > input[type=text] { width: 100%; min-width: 0; padding-right: 18px; }
-.pd-spin > .arrows { position: absolute; right: 1px; top: 1px; bottom: 1px; width: 16px; display: flex; flex-direction: column; border-left: 1px solid var(--line); }
-.pd-spin > .arrows > button { flex: 1 1 50%; min-height: 0; padding: 0; border: 0; border-radius: 0; background: var(--panel-2); color: var(--ink-2); display: grid; place-items: center; cursor: default; }
-.pd-spin > .arrows > button:hover { color: var(--ink); background: color-mix(in srgb, var(--ink) 8%, var(--panel-2)); }
-.pd-spin > .arrows > button + button { border-top: 1px solid var(--line); }
-.pd-spin.disabled > .arrows { opacity: .5; pointer-events: none; }
-.pd-warnicon { display: inline-flex; align-items: center; margin-left: 4px; cursor: help; vertical-align: middle; }
-.pd-warnicon[hidden] { display: none; }
-.pd-infobar { display: flex; gap: 8px; align-items: center; background: color-mix(in srgb, var(--warn) 18%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 50%, var(--line)); border-radius: var(--r-2); padding: 5px 10px; margin: 0 0 8px; color: var(--ink); }
-.pd-infobar[hidden] { display: none; }
-.pd-form.pd-form4 { grid-template-columns: max-content minmax(90px, 170px) max-content max-content; }
-.pd-form4 > span > input { width: 100%; }
-.pd-bad { color: var(--err) !important; }
-.pd-sep { border: 0; border-top: 1px solid var(--line); margin: 6px 0; }
-.pd-layercell { display: inline-flex; gap: 6px; align-items: center; width: 100%; }
-.pd-layercell .sw { width: 12px; height: 12px; border: 1px solid var(--line); border-radius: 2px; flex: none; }
-.pd-layercell k-select { flex: 1; }
-.pd-report .ln.sel { background: var(--sel-soft); }
-.pd-report .ln[tabindex] { cursor: pointer; }
-.pd-vline { width: 1px; align-self: stretch; background: var(--line); margin: 0 4px; }
-.pd-reann-dirs { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 4px 0 8px; }
-.pd-reann-dir { display: flex; align-items: center; gap: 4px; cursor: pointer; }
-.pd-reann-pic { border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); }
-.pd-infobar .msg { flex: 1; white-space: pre-wrap; }
-.pd-infobar .x { border: 0; background: none; color: var(--ink-2); padding: 0 4px; }
-.pd-grid td.cellsel input[type=text], .pd-grid td.cellsel { background: var(--sel-soft); }
-.pd-grid td.err input[type=text] { outline: 2px solid var(--err); outline-offset: -2px; }
-.pd-link { color: var(--blue); text-decoration: underline; cursor: pointer; background: none; border: 0; padding: 0; font: inherit; }
-.pd-small { font-size: var(--fs-xs); font-style: italic; color: var(--ink-2); margin: 2px 0 6px; }
-.pd-swatchbtn { width: 100%; height: 23px; border: 0; padding: 3px 6px; background: none; display: flex; align-items: center; gap: 6px; cursor: pointer; }
-.pd-swatchbtn .sw { width: 28px; height: 14px; border: 1px solid var(--line-2); background-image: linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%), linear-gradient(45deg, var(--line) 25%, transparent 25%, transparent 75%, var(--line) 75%); background-size: 8px 8px; background-position: 0 0, 4px 4px; position: relative; }
-.pd-swatchbtn .sw > i { position: absolute; inset: 0; }
-`;
-    cssDone = false;
-    errorMessage = (message, then) => {
-      messageBox("Error", message, [{ label: "OK", fn: then }]);
-    };
-    UNIT = { mm: { name: "mm", per: 1, digits: 4 }, in: { name: "in", per: 25.4, digits: 5 }, mil: { name: "mils", per: 0.0254, digits: 2 } };
-    currentUnits = () => E.units === "in" || E.units === "mil" ? E.units : "mm";
-    unitName = () => UNIT[currentUnits()].name;
-    trim = (s2) => s2.includes(".") ? s2.replace(/0+$/, "").replace(/\.$/, "") : s2;
-    isExpr = (text3) => /[-+*/()]/.test(text3.trim().replace(/^[-+]/, "").replace(/e[-+]\d/i, ""));
-    unitLabel = (text3) => h2("span", { class: "unit" }, text3 === void 0 ? unitName() : text3);
-    note2 = (text3) => h2("p", { class: "pd-note" }, text3);
-    ICONS = {
-      plus: "small_plus",
-      trash: "small_trash",
-      up: "small_up",
-      down: "small_down",
-      library: "small_library",
-      sort: "small_sort_desc",
-      folder: "small_folder",
-      edit: "small_edit",
-      refresh: "small_refresh",
-      warning: "small_warning",
-      bold: "text_bold",
-      italic: "text_italic",
-      alignLeft: "text_align_left",
-      alignCenter: "text_align_center",
-      alignRight: "text_align_right",
-      valignTop: "text_valign_top",
-      valignCenter: "text_valign_center",
-      valignBottom: "text_valign_bottom",
-      mirror: "text_mirrored",
-      link: "link"
-    };
   }
 });
 
@@ -81762,7 +82123,7 @@ function footprintInfo(footprint) {
   return { name: parseLibId(text(n2[1])).name, description: d ? text(d[1]) : "", keywords: t ? text(t[1]) : "", pads: numbers.size };
 }
 var K6, isList8, head2, text, mm2, MANDATORY_FIELDS, isMeta, propertyText, FP_UUID_BEFORE_EFFECTS, FP_OWNED;
-var init_core = __esm({
+var init_core2 = __esm({
   "web/domains/pcb/library/core.ts"() {
     "use strict";
     init_sym_props_logic();
@@ -82144,7 +82505,7 @@ var K7, seg, tables, indexes2, fetched, docTexts, registered, sourceListeners, R
 var init_sources = __esm({
   "web/domains/pcb/library/sources.ts"() {
     "use strict";
-    init_core();
+    init_core2();
     K7 = () => window.KiCadCanvas;
     seg = (kind) => kind === "symbol" ? "symbols" : "footprints";
     tables = /* @__PURE__ */ new Map();
@@ -82491,7 +82852,7 @@ async function openLibTables(opts2) {
       select2(have);
       return;
     }
-    const d = path2 !== null ? projectDocs3().find((x) => x.path === path2) : void 0;
+    const d = path2 !== null ? projectDocs4().find((x) => x.path === path2) : void 0;
     if (!d) {
       await okBox("Message", "Unable to load library table.");
       return;
@@ -82953,7 +83314,7 @@ async function manageLibraries(kind, frame) {
     }
   });
 }
-var blankRow, rowsKey, projectDocs3, projectPaths, okBox, isOK, CSS4, cssDone2;
+var blankRow, rowsKey, projectDocs4, projectPaths, okBox, isOK, CSS4, cssDone2;
 var init_lib_tables = __esm({
   "web/domains/pcb/dialogs/lib-tables.ts"() {
     "use strict";
@@ -82967,8 +83328,8 @@ var init_lib_tables = __esm({
     init_editor();
     blankRow = () => ({ enabled: true, visible: true, nickname: "", uri: "", type: "KiCad", options: "", descr: "" });
     rowsKey = (rows3) => JSON.stringify(rows3.map((r) => [r.enabled, r.visible, r.nickname, r.uri, r.type, r.options, r.descr]));
-    projectDocs3 = () => appState2.project ? appState2.project.docs : [];
-    projectPaths = () => projectDocs3().map((d) => d.path);
+    projectDocs4 = () => appState2.project ? appState2.project.docs : [];
+    projectPaths = () => projectDocs4().map((d) => d.path);
     okBox = (title, message) => choiceBox(title, message, ["OK"]);
     isOK = async (message) => (await choiceBox("Confirmation", message, ["Cancel", "OK"])).index === 1;
     CSS4 = `
@@ -83003,7 +83364,7 @@ function configurePaths(onOk) {
     h2("p", null, h2("b", null, "To ensure environment variable names are valid on all platforms, the name field will only accept upper case letters, digits, and the underscore characters.")),
     ...PREDEFINED_ENV_VARS.map((v) => h2("p", null, h2("b", null, v), ENV_VAR_HELP[v] ? ": " + ENV_VAR_HELP[v] : ""))
   );
-  openDialog3({
+  openDialog2({
     title: "Configure Paths",
     width: 640,
     child: true,
@@ -83011,7 +83372,7 @@ function configurePaths(onOk) {
       help.style.display = help.style.display === "none" ? "" : "none";
     } }],
     build(body) {
-      body.append(box2("Environment Variables", g2.el, bar), help);
+      body.append(box("Environment Variables", g2.el, bar), help);
     },
     ok() {
       if (onOk) onOk();
@@ -83118,7 +83479,7 @@ function modelPreview(opts2 = {}) {
     }, "prev-reload");
     const settings3 = btn("options_3drender", "", () => {
       const f2 = lenField(thickness, { key: "boardThickness", min: 0 });
-      openDialog3({
+      openDialog2({
         title: "3D Preview Options",
         width: 300,
         child: true,
@@ -83376,7 +83737,7 @@ Check the file name and try again.` : "Select a file.", [{ label: "OK" }]);
       return true;
     };
     let api6 = null;
-    api6 = openDialog3({
+    api6 = openDialog2({
       title: "Select 3D Model",
       width: 1e3,
       child: true,
@@ -83507,7 +83868,7 @@ function models3dPanel(o) {
     const unitSpan = (k) => unitLabel(k === "deg" ? "" : k);
     const units = () => currentUnits();
     const spin = (k) => stepper(mf[k], k[0] === "s" ? stepScale : k[0] === "r" ? stepRotation : (v, sg, fine) => stepOffset(v, sg, fine, units()), updatePreview);
-    const xyz = (label, a, b, c, unit2) => box2(label, form2([["X:", spin(a), unitSpan(unit2)], ["Y:", spin(b), unitSpan(unit2)], ["Z:", spin(c), unitSpan(unit2)]]));
+    const xyz = (label, a, b, c, unit2) => box(label, form2([["X:", spin(a), unitSpan(unit2)], ["Y:", spin(b), unitSpan(unit2)], ["Z:", spin(c), unitSpan(unit2)]]));
     const browse = () => {
       void pick3DModel({ start: pathChoice.get(), projectFiles: host2.projectModels ? host2.projectModels() : [], embedded: fpEmbedded() }).then((p) => {
         if (!p) return;
@@ -83592,7 +83953,7 @@ function models3dPanel(o) {
     });
     for (const c of [exShow.input, exHeight.input, exStandoff.input, exLayer.input, exMaterial.input]) c.addEventListener("change", updatePreview);
     exSync();
-    const extrusionBox = box2(
+    const extrusionBox = box(
       "Extruded 3D Body",
       h2("div", { class: "pd-row" }, exEnable.el, exShow.el),
       h2(
@@ -83612,7 +83973,7 @@ function models3dPanel(o) {
       h2(
         "div",
         { style: "display:flex;gap:8px;min-height:340px" },
-        h2("div", { style: "flex:none;width:220px;display:flex;flex-direction:column" }, xyz("Scale", "sx", "sy", "sz", ""), xyz("Rotation", "rx", "ry", "rz", "deg"), xyz("Offset", "ox", "oy", "oz", unitName()), box2("Opacity", opacity)),
+        h2("div", { style: "flex:none;width:220px;display:flex;flex-direction:column" }, xyz("Scale", "sx", "sy", "sz", ""), xyz("Rotation", "rx", "ry", "rz", "deg"), xyz("Offset", "ox", "oy", "oz", unitName()), box("Opacity", opacity)),
         h2("div", { style: "flex:1;min-width:0;display:flex;flex-direction:column" }, h2("div", { class: "pd-lbl", style: "padding:4px 0" }, "Preview"), h2("div", { style: "flex:1;min-height:300px;display:flex" }, preview3.el))
       )
     );
@@ -83766,12 +84127,12 @@ function footprintPropertiesDialog(ctx, host2 = {}) {
         } }
       );
       el4.append(
-        box2("Fields", fg.el, bar),
+        box("Fields", fg.el, bar),
         h2(
           "div",
           { class: "pd-cols2" },
-          box2("Metadata", form2([["Footprint name:", name.el], ["Description:", descr.el], ["Keywords:", tags.el], ["Height:", height.el, unitLabel(), "Optional overall height specification for the footprint, independent from any 3D models."]])),
-          box2("Fabrication Attributes", form2([["Component type:", type.el]], true), exSim.el, boardOnly.el, dnp.el, exBom.el, exPos.el)
+          box("Metadata", form2([["Footprint name:", name.el], ["Description:", descr.el], ["Keywords:", tags.el], ["Height:", height.el, unitLabel(), "Optional overall height specification for the footprint, independent from any 3D models."]])),
+          box("Fabrication Attributes", form2([["Component type:", type.el]], true), exSim.el, boardOnly.el, dnp.el, exBom.el, exPos.el)
         )
       );
     } },
@@ -83779,14 +84140,14 @@ function footprintPropertiesDialog(ctx, host2 = {}) {
       el4.append(h2(
         "div",
         { class: "pd-cols2" },
-        box2("Custom Layers", custom.el, form2([["Copper layers", cuCount.el]]), box2("User Layers", userGrid.el, gridButtons(userGrid, () => ({ layer: userLayers().find((l) => !userGrid.rows().some((r) => r.layer === l)) || "User.1" }), { ro }))),
-        box2("Private Layers", privGrid.el, gridButtons(privGrid, () => ({ layer: privateLayerChoices().find((l) => !privGrid.rows().some((r) => r.layer === l)) || "Dwgs.User" }), { ro }))
+        box("Custom Layers", custom.el, form2([["Copper layers", cuCount.el]]), box("User Layers", userGrid.el, gridButtons(userGrid, () => ({ layer: userLayers().find((l) => !userGrid.rows().some((r) => r.layer === l)) || "User.1" }), { ro }))),
+        box("Private Layers", privGrid.el, gridButtons(privGrid, () => ({ layer: privateLayerChoices().find((l) => !privGrid.rows().some((r) => r.layer === l)) || "Dwgs.User" }), { ro }))
       ));
       enableCustom();
     } },
     { label: "Clearance Overrides", build(el4) {
       el4.append(
-        box2(
+        box(
           "Clearances",
           note2("Leave values blank to use netclass values."),
           form2([
@@ -83797,14 +84158,14 @@ function footprintPropertiesDialog(ctx, host2 = {}) {
           form2([["Solder paste clearance:", pasteT.el, unitLabel(""), "Local solder paste clearance for this footprint.\nEnter an absolute value (e.g., -0.1mm), a percentage (e.g., -5%), or both (e.g., -0.1mm - 5%).\nIf blank, the global value is used."]]),
           note2("Note: solder mask and paste values are used only for pads on copper layers.")
         ),
-        box2("Courtyards", noCrt.el)
+        box("Courtyards", noCrt.el)
       );
     } },
     { label: "Pad Connections", build(el4) {
       el4.append(
-        box2("Connection to Copper Zones", form2([["Pad connection to zones:", zone.el]], true)),
-        box2("Net Ties", ntGrid.el, gridButtons(ntGrid, () => ({ g: "" }), { ro })),
-        box2("Jumpers", dupJ.el, jgGrid.el, gridButtons(jgGrid, () => ({ g: "" }), { ro }))
+        box("Connection to Copper Zones", form2([["Pad connection to zones:", zone.el]], true)),
+        box("Net Ties", ntGrid.el, gridButtons(ntGrid, () => ({ g: "" }), { ro })),
+        box("Jumpers", dupJ.el, jgGrid.el, gridButtons(jgGrid, () => ({ g: "" }), { ro }))
       );
     } },
     { label: "3D Models", build: (el4) => models3d.build(el4) },
@@ -83856,7 +84217,7 @@ function footprintPropertiesDialog(ctx, host2 = {}) {
     if (ch.length) ctx.commit(ch, "Edit Footprint Properties");
     api6 && api6.close();
   };
-  api6 = openDialog3({
+  api6 = openDialog2({
     title: "Footprint Properties",
     width: 900,
     readOnly: ro,
@@ -83961,7 +84322,7 @@ var K8, PREVIEW_LAYERS;
 var init_preview = __esm({
   "web/domains/pcb/library/preview.ts"() {
     "use strict";
-    init_core();
+    init_core2();
     K8 = () => window.KiCadCanvas;
     PREVIEW_LAYERS = `(layers (0 "F.Cu" signal) (2 "B.Cu" signal) (9 "F.Adhes" user) (11 "B.Adhes" user) (13 "F.Paste" user) (15 "B.Paste" user) (5 "F.SilkS" user) (7 "B.SilkS" user)
   (1 "F.Mask" user) (3 "B.Mask" user) (17 "Dwgs.User" user) (19 "Cmts.User" user) (25 "Edge.Cuts" user) (27 "Margin" user) (31 "F.CrtYd" user) (29 "B.CrtYd" user) (35 "F.Fab" user) (33 "B.Fab" user))`;
@@ -84275,7 +84636,7 @@ function selectWizard(list, current) {
       }
     };
     const rows3 = [];
-    const api6 = openDialog3({
+    const api6 = openDialog2({
       title: "Footprint Wizards",
       width: 620,
       build(body, a) {
@@ -84526,7 +84887,7 @@ The footprint could not be drawn: ${e.message || e}`;
       sep(),
       exportBtn
     );
-    dlg = openDialog3({
+    dlg = openDialog2({
       title: title(),
       width: 1040,
       height: 680,
@@ -86037,18 +86398,18 @@ var init_pcbtools_loader = __esm({
 
 // web/domains/pcb/dialogs/font-picker.ts
 function setFontProject(id) {
-  if (id !== projectId) {
-    projectId = id;
+  if (id !== projectId2) {
+    projectId2 = id;
     projectReq = null;
   }
 }
-var projectId, projectReq;
+var projectId2, projectReq;
 var init_font_picker = __esm({
   "web/domains/pcb/dialogs/font-picker.ts"() {
     "use strict";
     init_dom2();
     init_kicon_dom();
-    projectId = null;
+    projectId2 = null;
     projectReq = null;
   }
 });
@@ -86110,6 +86471,7 @@ __export(doc_exports, {
   bumpDoc: () => bumpDoc,
   docNav: () => docNav,
   enterSheet: () => enterSheet,
+  findSheetDoc: () => findSheetDoc,
   flushRemoteChanges: () => flushRemoteChanges,
   fpName: () => fpName,
   gridIndex: () => gridIndex,
@@ -86128,6 +86490,7 @@ __export(doc_exports, {
   openEditor: () => openEditor,
   projectTextVars: () => projectTextVars,
   publishDocs: () => publishDocs,
+  refreshDocs: () => refreshDocs,
   renderLayers: () => renderLayers,
   renderLayersFromDoc: () => renderLayersFromDoc,
   renderObjects: () => renderObjects,
@@ -86614,13 +86977,77 @@ function topLevelSheetsChanged() {
 function multiTopLevel() {
   return topLevelSchematics().length > 1;
 }
-function enterSheet(file) {
-  const base2 = file.split("/").pop();
-  const cur2 = state.doc ? state.doc.path.split("/").slice(0, -1).join("/") : "";
-  const rel = cur2 ? `${cur2}/${file}` : file;
-  const doc2 = state.docs.find((d) => d.docType === "kicad_sch" && (d.path === rel || d.path === file)) || state.docs.find((d) => d.docType === "kicad_sch" && d.path.split("/").pop() === base2);
-  if (doc2) openDoc(doc2);
-  else toast("That sheet isn't in the shared project yet");
+function findSheetDoc(file, parentPath) {
+  file = file.replace(/\\/g, "/");
+  const base2 = file.split("/").pop(), dir = parentPath.split("/").slice(0, -1).join("/");
+  const rel = normPath(dir ? `${dir}/${file}` : file);
+  return state.docs.find((d) => d.docType === "kicad_sch" && (d.path === rel || d.path === file)) || state.docs.find((d) => d.docType === "kicad_sch" && d.path.split("/").pop() === base2);
+}
+function normPath(p) {
+  const out2 = [];
+  for (const x of p.split("/")) {
+    if (!x || x === ".") continue;
+    if (x === "..") out2.pop();
+    else out2.push(x);
+  }
+  return out2.join("/");
+}
+function refreshDocs() {
+  if (!state.project) return Promise.resolve(false);
+  if (docsFetch) return docsFetch;
+  const pid = state.project.projectId;
+  docsFetch = (async () => {
+    try {
+      const info = await api4(`/api/projects/${pid}/info`);
+      if (!info || !Array.isArray(info.docs) || !state.project || state.project.projectId !== pid) return false;
+      const known = new Set(state.project.docs.map((d) => d.docId));
+      const added2 = info.docs.filter((d) => !known.has(d.docId));
+      if (!added2.length) return false;
+      state.project.docs = state.project.docs.concat(added2);
+      store.set({ project: Object.assign({}, state.project) });
+      state.docs = editorDocs(state.docs.concat(editorDocs(added2).filter((d) => !state.docs.some((x) => x.docId === d.docId))));
+      publishDocs();
+      return true;
+    } catch (e) {
+      return false;
+    } finally {
+      docsFetch = null;
+    }
+  })();
+  return docsFetch;
+}
+function emptySchematic() {
+  const uuid = KiCadCanvas.newUuid();
+  return `(kicad_sch (version 20250114) (generator "kicad-collab-web") (generator_version "9.0") (uuid "${uuid}") (paper "A4") (lib_symbols) (sheet_instances (path "/" (page "1"))))
+`;
+}
+async function createSheetFile(file, parentPath) {
+  if (!state.project) return void 0;
+  const dir = parentPath.split("/").slice(0, -1).join("/"), path2 = normPath(dir ? `${dir}/${file}` : file);
+  if (!/\.kicad_sch$/i.test(path2)) return void 0;
+  const res = await api4(`/api/projects/${state.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path: path2, docType: "kicad_sch" }) });
+  if (!res || !res.docId) return void 0;
+  if (!res.existing) await api4(`/api/docs/${res.docId}/snapshots?seq=0`, { method: "POST", headers: { "content-type": "text/plain" }, body: emptySchematic() });
+  await refreshDocs();
+  return state.docs.find((d) => d.docId === res.docId);
+}
+async function enterSheet(file, parentPath) {
+  const parent = parentPath !== void 0 ? parentPath : state.doc ? state.doc.path : "";
+  let doc2 = findSheetDoc(file, parent);
+  if (!doc2 && await refreshDocs()) doc2 = findSheetDoc(file, parent);
+  if (!doc2 && !E.viewOnly) {
+    try {
+      doc2 = await createSheetFile(file, parent);
+    } catch (e) {
+      toast(`Could not create the sheet file '${file}': ${e.message || e}`, 5e3);
+      return;
+    }
+  }
+  if (doc2) {
+    await openDoc(doc2);
+    return;
+  }
+  toast(`The sheet file '${file}' is not in this project`, 4e3);
 }
 function publishDocs() {
   const root5 = state.project ? rootSchematic() : null;
@@ -86891,7 +87318,7 @@ function switchEditor() {
   if (target2) openDoc(target2);
   else toast(isSch() ? "This project has no board yet" : "This project has no schematic yet");
 }
-var docNav, GRID_CHOICES, sheetNames, sheetPages, ROOT_SHEET_NAME, hierarchyLearned, sheetHumanPaths, layerRow, remote, topsMemo;
+var docNav, GRID_CHOICES, sheetNames, sheetPages, ROOT_SHEET_NAME, hierarchyLearned, sheetHumanPaths, layerRow, remote, topsMemo, docsFetch;
 var init_doc = __esm({
   "web/domains/pcb/editor/doc.ts"() {
     "use strict";
@@ -86933,6 +87360,7 @@ var init_doc = __esm({
       if (!isSch()) setStatusBar({ constraint: String(ev.detail?.msg || "") });
     });
     topsMemo = null;
+    docsFetch = null;
   }
 });
 
@@ -87593,7 +88021,7 @@ function drillChartPage(ctx) {
     const size2 = lenField(p.size, { ro: ctx.roBoard, key: "symbolSize" }), width = lenField(p.width, { ro: ctx.roBoard, key: "symbolWidth" });
     const freeze = checkField(p.freeze, "Keep existing symbol assignments when holes change", { ro: ctx.roBoard, key: "freeze" });
     const edit = h2("button", { type: "button", class: "btn", disabled: true, title: "The drill groups are edited in the desktop application." }, "Close and Edit Drill Groups...");
-    put2(el4, box2("Symbols", form2([
+    put(el4, box("Symbols", form2([
       ["Group holes by:", h2("div", { class: "pd-list", style: "padding:4px 8px" }, ...checks.map((c) => c.f.el))],
       ["Default marks:", marks.el],
       ["Symbol size:", size2.el, unitLabel()],
@@ -87622,7 +88050,7 @@ function microviaStackDialog(ctx, p, done) {
     pitch.input.disabled = type.get() !== 1;
   };
   type.input.addEventListener("change", sync);
-  openDialog3({
+  openDialog2({
     title: "Microvia Stack",
     width: 420,
     build(body) {
@@ -87721,7 +88149,7 @@ function viaStacksPage(ctx) {
       presets.splice(i, 1);
       refresh();
     };
-    put2(el4, g2.el, h2(
+    put(el4, g2.el, h2(
       "div",
       { class: "pd-gridbar" },
       h2("button", { type: "button", class: "btn", disabled: ctx.roPro, onclick: add2 }, "Add..."),
@@ -87763,7 +88191,7 @@ function zonesPage(ctx) {
     };
     const ro = ctx.roPro;
     const panel3 = zoneSettingsPanel(v, ro);
-    put2(el4, box2("Default Properties for New Zones", panel3.el));
+    put(el4, box("Default Properties for New Zones", panel3.el));
     ctx.register("Zones", () => {
       const n2 = panel3.get(), P = [...DS, "defaults", "zones"];
       const m = [
@@ -87894,7 +88322,7 @@ function tuningPatternsPage(ctx) {
         single: checkField(boolOr(s2.single_sided, false), "Single-sided", { ro, key: key3 + "-single" })
       };
       sets.push({ key: key3, title, f: f2 });
-      return box2(title, h2("div", { style: "display:flex;gap:16px;align-items:flex-start" }, staticBitmap(legend, 250, legendH, "flex:none;margin:0 15px"), form2([
+      return box(title, h2("div", { style: "display:flex;gap:16px;align-items:flex-start" }, staticBitmap(legend, 250, legendH, "flex:none;margin:0 15px"), form2([
         ["Minimum amplitude (A):", f2.min.el, unitLabel()],
         ["Maximum amplitude (A):", f2.max.el, unitLabel()],
         ["Spacing (s):", f2.spacing.el, unitLabel(), "Minimum spacing between adjacent tuning segments. The resulting spacing may be greater based on design rules."],
@@ -87903,7 +88331,7 @@ function tuningPatternsPage(ctx) {
         f2.single.el
       ])));
     };
-    put2(el4, h2(
+    put(el4, h2(
       "div",
       null,
       one2("single_track_defaults", "Default Properties for Single Track Tuning", { min: 0.1, max: 1, spacing: 0.6 }, "tune_single_track_length_legend", 156),
@@ -87960,9 +88388,9 @@ function tuningProfilesPage(ctx) {
         form2([["Name:", name.el], ["Type:", type.el], ["Target impedance:", imp.el, unitLabel("ohms")], ["Frequency:", h2("span", { class: "pd-inline" }, freq.el, freqU.el)]]),
         td.el,
         mask.el,
-        box2("Net Chain Bridge Propagation", form2([["Global unit delay:", bridge.el, unitLabel("ps/cm")]])),
-        box2("Track Propagation", gl.el, gridButtons(gl, () => ({ signal: cu()[0] || "F.Cu", top: "", bottom: "", width: NaN, gap: NaN, delay: NaN }), { ro })),
-        box2("Via Propagation", form2([["Global unit delay:", via.el, unitTxt]]), h2("div", { class: "pd-lbl" }, "Via delay overrides:"), gv.el, gridButtons(gv, () => ({ sf: "", st: "", vf: "", vt: "", delay: NaN }), { ro }))
+        box("Net Chain Bridge Propagation", form2([["Global unit delay:", bridge.el, unitLabel("ps/cm")]])),
+        box("Track Propagation", gl.el, gridButtons(gl, () => ({ signal: cu()[0] || "F.Cu", top: "", bottom: "", width: NaN, gap: NaN, delay: NaN }), { ro })),
+        box("Via Propagation", form2([["Global unit delay:", via.el, unitTxt]]), h2("div", { class: "pd-lbl" }, "Via delay overrides:"), gv.el, gridButtons(gv, () => ({ sf: "", st: "", vf: "", vt: "", delay: NaN }), { ro }))
       );
       name.input.addEventListener("change", () => {
         bar.children[i].textContent = name.get() || "(unnamed)";
@@ -88005,7 +88433,7 @@ function tuningProfilesPage(ctx) {
     };
     tabs();
     showProfile(profiles.length ? 0 : -1);
-    put2(el4, bar, host2, h2("div", { class: "pd-gridbar" }, iconButton("plus", "Add tuning profile", addP, ro), h2("span", { style: "flex:1" }), iconButton("trash", "Remove tuning profile", delP, ro)));
+    put(el4, bar, host2, h2("div", { class: "pd-gridbar" }, iconButton("plus", "Add tuning profile", addP, ro), h2("span", { style: "flex:1" }), iconButton("trash", "Remove tuning profile", delP, ro)));
     ctx.register("Tuning Profiles", () => {
       for (const c of commits) c();
       return [{ path: ["tuning_profiles", "tuning_profiles_impedance_geometric"], value: profiles }];
@@ -88147,7 +88575,7 @@ function componentClassesPage(ctx) {
       });
     };
     draw2();
-    put2(el4, sheet.el, h2("div", { class: "pd-row", style: "margin-top:8px" }, h2("label", null, "Custom Assignments:"), h2("span", { style: "flex:1" }), h2("button", { type: "button", class: "btn", disabled: ro, onclick: () => {
+    put(el4, sheet.el, h2("div", { class: "pd-row", style: "margin-top:8px" }, h2("label", null, "Custom Assignments:"), h2("span", { style: "flex:1" }), h2("button", { type: "button", class: "btn", disabled: ro, onclick: () => {
       assigns.push({ cls: "", op: "ALL", conds: [] });
       draw2();
     } }, "Add Custom Assignment")), list);
@@ -88240,7 +88668,7 @@ function embeddedFilesPage(ctx) {
     };
     const add2 = bitmapButton("small_folder", "Add embedded file", () => void 0, { disabled: true, cls: "pd-iconbtn" }), del = iconButton("trash", "Remove embedded file", () => void 0, true);
     const exp = h2("button", { type: "button", class: "btn", "data-k": "efExport", disabled: !files.length, onclick: exportFiles }, "Export...");
-    put2(el4, g2.el, h2("div", { class: "pd-gridbar" }, add2, del, h2("span", { style: "flex:1" }), embed.el, exp), note2("Files are embedded in the board file; adding and removing them is done in the desktop application."));
+    put(el4, g2.el, h2("div", { class: "pd-gridbar" }, add2, del, h2("span", { style: "flex:1" }), embed.el, exp), note2("Files are embedded in the board file; adding and removing them is done in the desktop application."));
     void E;
   };
 }
@@ -88301,7 +88729,7 @@ function highlightRules(text3) {
     if (c === "#") {
       const j = text3.indexOf("\n", i);
       const e = j < 0 ? text3.length : j;
-      out2 += `<span class="c">${esc6(text3.slice(i, e))}</span>`;
+      out2 += `<span class="c">${esc7(text3.slice(i, e))}</span>`;
       i = e;
       continue;
     }
@@ -88312,7 +88740,7 @@ function highlightRules(text3) {
         j++;
       }
       j = Math.min(text3.length, j + 1);
-      out2 += `<span class="s">${esc6(text3.slice(i, j))}</span>`;
+      out2 += `<span class="s">${esc7(text3.slice(i, j))}</span>`;
       i = j;
       continue;
     }
@@ -88323,17 +88751,17 @@ function highlightRules(text3) {
     }
     const m = /^[A-Za-z_][\w.]*/.exec(text3.slice(i, i + 64));
     if (m) {
-      out2 += KEYWORDS.has(m[0]) && text3[i - 1] === "(" ? `<span class="k">${m[0]}</span>` : esc6(m[0]);
+      out2 += KEYWORDS.has(m[0]) && text3[i - 1] === "(" ? `<span class="k">${m[0]}</span>` : esc7(m[0]);
       i += m[0].length;
       continue;
     }
     const n2 = /^-?\d+(\.\d+)?(mm|mil|mils|in|um|deg)?/.exec(text3.slice(i, i + 32));
     if (n2 && !/[\w.]/.test(text3[i - 1] || "")) {
-      out2 += `<span class="n">${esc6(n2[0])}</span>`;
+      out2 += `<span class="n">${esc7(n2[0])}</span>`;
       i += n2[0].length;
       continue;
     }
-    out2 += esc6(c);
+    out2 += esc7(c);
     i++;
   }
   return out2 + "\n";
@@ -88537,14 +88965,14 @@ function ruleAtLine(text3, line) {
   }
   return start >= 0 && start <= line ? name : null;
 }
-var KEYWORDS, esc6, CSS5, cssDone3;
+var KEYWORDS, esc7, CSS5, cssDone3;
 var init_rules_editor = __esm({
   "web/domains/pcb/editor/pcbdialogs/rules-editor.ts"() {
     "use strict";
     init_dom2();
     init_ui();
     KEYWORDS = /* @__PURE__ */ new Set(["version", "rule", "constraint", "condition", "layer", "severity", "min", "opt", "max", "within_diff_pairs"]);
-    esc6 = (s2) => s2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    esc7 = (s2) => s2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
     CSS5 = `
 .pd-rules { position: relative; flex: 1 1 auto; min-height: 160px; border: 1px solid var(--line); border-radius: var(--r-2); background: var(--panel); overflow: hidden; }
 .pd-rules > pre, .pd-rules > textarea { position: absolute; inset: 0; margin: 0; padding: 6px 8px; font-family: var(--mono); font-size: var(--rules-fs, 12px); line-height: 1.4; white-space: pre; overflow: auto; tab-size: 4; border: 0; }
@@ -88783,7 +89211,7 @@ async function openBoardSetup(ctx, startPage) {
         } else type = h2("span", { class: "desc" }, r.description);
         table.append(h2("tr", { class: r.copper ? "cu" : "" }, h2("td", { class: "chk" }, cb), h2("td", null, name), h2("td", null, type)));
       }
-      put2(host2, table);
+      put(host2, table);
     };
     refreshLayers = draw2;
     draw2();
@@ -88801,7 +89229,7 @@ async function openBoardSetup(ctx, startPage) {
       layersTouched = true;
       draw2();
     });
-    put2(el4, h2("div", { class: "pd-row" }, add2), host2, roBoard ? null : note2(BOARD_NOTE));
+    put(el4, h2("div", { class: "pd-row" }, add2), host2, roBoard ? null : note2(BOARD_NOTE));
     validate("Board Editor Layers", () => {
       const used = /* @__PURE__ */ new Map();
       if (E.kdoc) for (const it of E.kdoc.items.values()) {
@@ -89021,7 +89449,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
 `);
     };
     const addBtn = h2("button", { type: "button", class: "btn", disabled: roBoard, onclick: addDiel }, "Add Dielectric Layer..."), removeBtn = h2("button", { type: "button", class: "btn", disabled: roBoard, onclick: removeDiel }, "Remove Dielectric Layer...");
-    put2(
+    put(
       el4,
       h2("div", { class: "pd-row" }, h2("label", null, "Copper layers:"), count2.el, impedance.el, h2("span", { style: "flex:1" }), addBtn, removeBtn),
       host2,
@@ -89044,7 +89472,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
     const finish = selectField(f2.copperFinish, (BS().COPPER_FINISHES.includes(f2.copperFinish) ? BS().COPPER_FINISHES : [f2.copperFinish, ...BS().COPPER_FINISHES]).map((x) => [x, x]), { ro: roBoard, key: "copperFinish" });
     const edge = selectField(f2.edgeConnector, [["no", "None"], ["yes", "Yes"], ["bevelled", "Yes, bevelled"]], { ro: roBoard, key: "edgeConnector" });
     edge.input.title = "Options for edge card connectors.";
-    put2(el4, plated.el, form2([["Copper finish:", finish.el], ["Edge card connectors:", edge.el]]), roBoard ? null : note2(BOARD_NOTE));
+    put(el4, plated.el, form2([["Copper finish:", finish.el], ["Edge card connectors:", edge.el]]), roBoard ? null : note2(BOARD_NOTE));
     finishNow = () => ({ copperFinish: finish.get(), edgeConnector: edge.get(), edgePlating: plated.get(), hasStackup: f2.hasStackup });
     validate("Board Finish", () => {
       const now = finishNow();
@@ -89063,12 +89491,12 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
     toCu.input.title = MASK_TIPS.toCu;
     paste.input.title = MASK_TIPS.paste;
     ratio.input.title = MASK_TIPS.ratio;
-    put2(
+    put(
       el4,
       note2("Consult your PCB manufacturer's specifications for solder mask expansion, web width, and clearance settings."),
       note2("If no specifications are provided, setting these values to zero is recommended."),
-      box2("Solder Mask Settings", form2([["Solder mask expansion:", exp.el, unitLabel(), MASK_TIPS.exp], ["Solder mask minimum web width:", web.el, unitLabel(), MASK_TIPS.web], ["Solder mask to copper clearance:", toCu.el, unitLabel(), MASK_TIPS.toCu], bridges.el])),
-      box2("Solder Paste Settings", form2([["Solder paste clearance:", paste.el, unitLabel(), MASK_TIPS.paste], ["Solder paste relative clearance:", ratio.el, unitLabel("%"), MASK_TIPS.ratio]])),
+      box("Solder Mask Settings", form2([["Solder mask expansion:", exp.el, unitLabel(), MASK_TIPS.exp], ["Solder mask minimum web width:", web.el, unitLabel(), MASK_TIPS.web], ["Solder mask to copper clearance:", toCu.el, unitLabel(), MASK_TIPS.toCu], bridges.el])),
+      box("Solder Paste Settings", form2([["Solder paste clearance:", paste.el, unitLabel(), MASK_TIPS.paste], ["Solder paste relative clearance:", ratio.el, unitLabel("%"), MASK_TIPS.ratio]])),
       roBoard ? null : note2("The solder mask to copper clearance is stored in the project file. The other values: " + BOARD_NOTE.replace("Stored", "stored"))
     );
     validate("Solder Mask/Paste", () => {
@@ -89118,10 +89546,10 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
     const dArrow = lenField(numOr3(dim.arrow_length, Number(dd.arrow_length)) / 1e6, { ro: roPro, key: "dimensionArrowLength" });
     const dZeroes = checkField(boolOr2(dim.suppress_zeroes, !!dd.suppress_zeroes), "Suppress trailing zeroes", { ro: roPro, key: "dimensionSuppressZeroes" });
     const dExt = lenField(numOr3(dim.extension_offset, Number(dd.extension_offset)) / 1e6, { ro: roPro, key: "dimensionExtensionOffset" });
-    put2(
+    put(
       el4,
-      box2("Default Properties for New Graphics and Text", g2.el),
-      box2("Default Properties for New Dimension Objects", h2(
+      box("Default Properties for New Graphics and Text", g2.el),
+      box("Default Properties for New Dimension Objects", h2(
         "div",
         { class: "pd-cols3" },
         form2([["Units:", dUnits.el], ["Text position:", dPos.el, null, "Where to position the dimension text relative to the dimension line"]]),
@@ -89174,10 +89602,10 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
       ["apply_defaults_to_fp_barcodes", "Apply board defaults to footprint barcodes"]
     ];
     const checks = FP2.map(([k, label]) => ({ k, f: checkField(boolOr2(defaults[k], false), label, { ro: roPro, key: k }) }));
-    put2(
+    put(
       el4,
-      box2("Dashed Lines", form2([["Dash length:", dash.el], ["Gap length:", gap.el]]), note2("Dash and dot lengths are ratios of the line width.")),
-      box2("When Adding Footprints to Board", ...checks.map((c) => c.f.el))
+      box("Dashed Lines", form2([["Dash length:", dash.el], ["Gap length:", gap.el]]), note2("Dash and dot lengths are ratios of the line width.")),
+      box("When Adding Footprints to Board", ...checks.map((c) => c.f.el))
     );
     validate("Formatting", () => {
       const now = { dash: dash.get(), gap: gap.get() };
@@ -89190,7 +89618,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
     const vars = obj4(pro.text_variables);
     const rows3 = Object.keys(vars).map((k) => ({ name: k, value: String(vars[k] ?? "") }));
     const g2 = grid([{ label: "Variable Name", key: "name", width: "40%" }, { label: "Text Substitution", key: "value" }], rows3, { ro: roPro, height: "380px", key: "textVars" });
-    put2(el4, g2.el, gridButtons(g2, () => ({ name: "", value: "" }), { ro: roPro }));
+    put(el4, g2.el, gridButtons(g2, () => ({ name: "", value: "" }), { ro: roPro }));
     register("Text Variables", { edits: () => {
       const out2 = {};
       for (const r of g2.rows()) {
@@ -89231,13 +89659,13 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
     spokes.el.style.width = "64px";
     const R2 = "If set, this can only be reduced by custom rules.";
     const slow = h2("div", { class: "pd-small" }, `Note: zone filling can be slow when < ${fmtLenU(5e-3)}.`);
-    put2(el4, h2(
+    put(el4, h2(
       "div",
       { class: "pd-cols2" },
       h2(
         "div",
         null,
-        box2("Copper", form2([
+        box("Copper", form2([
           len("min_clearance", "Minimum clearance:", "The minimum clearance between copper items which do not belong to the same net. " + R2, "ps_diff_pair_gap"),
           len("min_track_width", "Minimum track width:", "The minimum track width. " + R2, "width_track"),
           len("min_connection", "Minimum connection width:", "The minimum copper width of connected copper items.", "width_conn"),
@@ -89247,11 +89675,11 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
           len("min_copper_edge_clearance", "Copper to edge clearance:", "The minimum clearance between the board edge and any copper item. " + R2, "edge_to_copper_clearance"),
           len("min_groove_width", "Minimum groove for creepage:", "The minimum slot width from DRC creepage checks")
         ])),
-        box2("Holes", form2([
+        box("Holes", form2([
           len("min_through_hole_diameter", "Minimum drill size:", "The minimum drill size. " + R2, "via_hole_diameter"),
           len("min_hole_to_hole", "Hole to hole clearance:", "The minimum clearance between two drilled holes. " + R2 + " (Note: does not apply to milled holes.)", "hole_to_hole_clearance")
         ])),
-        box2("uVias", form2([
+        box("uVias", form2([
           len("min_microvia_diameter", "Minimum uVia diameter:", "The minimum diameter for micro-vias. " + R2, "via_diameter"),
           len("min_microvia_drill", "Minimum uVia hole:", "The minimum micro-via hole size. " + R2, "via_hole_diameter")
         ]))
@@ -89259,19 +89687,19 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
       h2(
         "div",
         null,
-        box2("Silk", form2([
+        box("Silk", form2([
           len("min_silk_clearance", "Minimum item clearance:", "Minimum clearance between two items on the same silkscreen layer. If set this can improve legibility.  (Note: does not apply to multiple shapes within a single footprint.)"),
           len("min_text_height", "Minimum text height:", ""),
           len("min_text_thickness", "Minimum text thickness:", "")
         ])),
-        box2("Arc/Circle Approximations", form2([len("max_error", "Maximum allowed deviation:", "The maximum allowed deviation between a true arc or circle and segments used to approximate it.  Smaller values produce smoother graphics at the expense of performance."), slow])),
+        box("Arc/Circle Approximations", form2([len("max_error", "Maximum allowed deviation:", "The maximum allowed deviation between a true arc or circle and segments used to approximate it.  Smaller values produce smoother graphics at the expense of performance."), slow])),
         // m_filletBitmap (zone_fillet) beside the fillets option, m_spokeBitmap (thermal_spokes) beside the spoke count
-        box2(
+        box(
           "Zone Fill Strategy",
           h2("div", { class: "pd-row", style: "align-items:center" }, staticBitmap("zone_fillet", 24), chk("zones_allow_external_fillets", "Allow fillets/chamfers outside zone outline", "", "top")),
           form2([[label("Minimum thermal relief spoke count:", "thermal_spokes"), spokes.el]])
         ),
-        box2("Length Tuning", chk("use_height_for_length_calcs", "Include stackup height in track length calculations", "When enabled, the distance between copper layers will be included in track length calculations for tracks with vias.  When disabled, via stackup height is ignored.", "rules"))
+        box("Length Tuning", chk("use_height_for_length_calcs", "Include stackup height in track length calculations", "When enabled, the distance between copper layers will be included in track length calculations for tracks with vias.  When disabled, via stackup height is ignored.", "rules"))
       )
     ));
     const values = () => {
@@ -89323,7 +89751,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
       b.insertBefore(iconButton("sort", "Sort by increasing value", sorter(g2, keys), roPro), b.lastChild);
       return b;
     };
-    put2(el4, h2(
+    put(el4, h2(
       "div",
       { class: "pd-cols3" },
       h2("div", { "data-list": "tracks" }, h2("div", { class: "pd-colhead" }, "Tracks"), gt.el, bar2(gt, () => ({ width: NaN }), ["width"])),
@@ -89383,7 +89811,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
         td_on_pad_in_zone: !zone.get(),
         td_enabled: p.td_enabled === void 0 ? true : p.td_enabled
       }) });
-      return box2(title, h2("div", { style: "display:flex;gap:16px;align-items:flex-start" }, staticBitmap(bitmap, 275, 130, "flex:none;margin:0 5px"), form2([
+      return box(title, h2("div", { style: "display:flex;gap:16px;align-items:flex-start" }, staticBitmap(bitmap, 275, 130, "flex:none;margin:0 5px"), form2([
         ["Best length (L):", bestL.el, ratio],
         ["Maximum length (L):", maxL.el, unitLabel()],
         ["Best width (W):", bestW.el, unitLabel(`%( ${d} )`)],
@@ -89396,7 +89824,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
     };
     const tdTip = (pad2) => `Max ${pad2 ? "pad/via size to track width" : "track width"} ratio to create a teardrop.
 100 always creates a teardrop.`;
-    put2(el4, h2(
+    put(el4, h2(
       "div",
       null,
       one2("Default Properties for Round Shapes", "td_round_shape", "Allow teardrop to span two track segments", tdTip(true), "d", "teardrop_sizes"),
@@ -89513,9 +89941,9 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
       const opts2 = classOpts();
       gp.columns[1].options = opts2;
     });
-    put2(
+    put(
       el4,
-      box2("Netclasses", g2.el, h2("div", { class: "pd-gridbar" }, ...Array.from(gridButtons(
+      box("Netclasses", g2.el, h2("div", { class: "pd-gridbar" }, ...Array.from(gridButtons(
         g2,
         () => ({ name: "", orig: -1, clearance: NaN, track_width: NaN, via_diameter: NaN, via_drill: NaN, microvia_diameter: NaN, microvia_drill: NaN, diff_pair_width: NaN, diff_pair_gap: NaN, tuning_profile: "", pcb_color: "rgba(0, 0, 0, 0.000)", schematic_color: "rgba(0, 0, 0, 0.000)", wire_width: NaN, bus_width: NaN, line_style: -1 }),
         { ro: roPro, move: true, canDelete: (r) => {
@@ -89526,7 +89954,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
           return true;
         } }
       ).children), h2("span", { class: "pd-small", style: "flex:1;margin:0 8px" }, "Set color to transparent to use layer default color."), importColors)),
-      box2("Netclass Assignments", h2("div", { class: "pd-cols2", style: "grid-template-columns:3fr 2fr" }, h2("div", null, gp.el, gridButtons(gp, () => ({ pattern: "", netclass: "Default" }), { ro: roPro, onChange: () => {
+      box("Netclass Assignments", h2("div", { class: "pd-cols2", style: "grid-template-columns:3fr 2fr" }, h2("div", null, gp.el, gridButtons(gp, () => ({ pattern: "", netclass: "Default" }), { ro: roPro, onChange: () => {
         gp.columns[1].options = classOpts();
         gp.refresh();
       } })), matching))
@@ -89638,7 +90066,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
     report3.style.flex = "1 1 auto";
     report3.style.minWidth = "0";
     el4.style.cssText = "display:flex;flex-direction:column;height:100%;min-height:420px";
-    put2(
+    put(
       el4,
       h2("div", { class: "pd-row" }, h2("span", { class: "pd-lbl", style: "font-weight:600" }, "DRC Rules"), h2("span", { style: "flex:1" }), help),
       rulesEd.el,
@@ -89665,7 +90093,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
       }
       table.append(tr);
     }
-    put2(el4, h2("div", { class: "pd-scroll" }, table));
+    put(el4, h2("div", { class: "pd-scroll" }, table));
     register("Violation Severity", { edits: () => Array.from(pick, ([code, v]) => ({ path: [...DS3, "rule_severities", code], value: v })) });
   };
   let drillEdit = null;
@@ -89767,7 +90195,7 @@ Board thickness: ${fmtLenU(BS().stackupLayersThickness(stack2 || []))}
     const labels = sel.flatMap((k) => map[k] || []);
     if (book) for (const l of labels) book.rebuild(l);
   });
-  dlg = openDialog3({
+  dlg = openDialog2({
     title: "Board Setup",
     width: 980,
     height: 620,
@@ -89863,7 +90291,7 @@ function importSettingsDialog(onImport) {
     from.replaceChildren(h2("option", { value: "" }, boards.length ? "" : "No other boards"), ...boards.map(([v, l]) => h2("option", { value: v }, l)));
     sync();
   })();
-  const api0 = openDialog3({
+  const api0 = openDialog2({
     title: "Import Settings",
     width: 520,
     okLabel: "Import Settings",
@@ -91138,134 +91566,6 @@ var init_contextmenu = __esm({
   }
 });
 
-// web/domains/pcb/editor/panels/core.ts
-function esc7(s2) {
-  return s2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-function textEntry(title, message, value, opts2) {
-  return new Promise((resolve2) => {
-    const D = window.KDialogs;
-    if (!D) {
-      resolve2(null);
-      return;
-    }
-    let done = false;
-    const finish = (v) => {
-      if (!done) {
-        done = true;
-        resolve2(v);
-      }
-    };
-    D.open({
-      title,
-      width: 360,
-      build(body) {
-        body.innerHTML = `<p style="margin:0 0 8px;white-space:pre-line">${esc7(message)}</p><input id="kd-entry" type="text" value="${esc7(value)}" style="width:100%">`;
-        const inp = body.querySelector("#kd-entry");
-        if (inp && opts2?.alnum) inp.addEventListener("input", () => {
-          const bad = /[^\p{L}\p{N}]/gu;
-          if (!bad.test(inp.value)) return;
-          const at4 = inp.selectionStart ?? inp.value.length, before = inp.value.slice(0, at4).replace(bad, "").length;
-          inp.value = inp.value.replace(bad, "");
-          inp.setSelectionRange(before, before);
-        });
-      },
-      ok() {
-        const inp = document.querySelector("#kd-entry");
-        finish(inp ? inp.value : null);
-      },
-      cancel() {
-        finish(null);
-      }
-    });
-  });
-}
-function listPick(title, label, header, items) {
-  return new Promise((resolve2) => {
-    const D = window.KDialogs;
-    if (!D) {
-      resolve2(null);
-      return;
-    }
-    let done = false;
-    const finish = (v) => {
-      if (!done) {
-        done = true;
-        resolve2(v);
-      }
-    };
-    D.open({
-      title,
-      width: 360,
-      build(body) {
-        body.innerHTML = `<p style="margin:0 0 8px">${esc7(label)}</p><k-select id="kd-list" size="${Math.max(4, Math.min(10, items.length + 1))}" style="width:100%">
-          <optgroup label="${esc7(header)}">${items.map((n2, i) => `<option${i === 0 ? " selected" : ""}>${esc7(n2)}</option>`).join("")}</optgroup></k-select>`;
-      },
-      ok() {
-        const sel = document.querySelector("#kd-list");
-        finish(sel && sel.value ? sel.value : null);
-      },
-      cancel() {
-        finish(null);
-      }
-    });
-  });
-}
-var EMPTY_APPEARANCE, S2, subs, panelStore, projectId2, projectName, openDocs, currentDocId, kdoc2, isSchDoc, KC;
-var init_core2 = __esm({
-  "web/domains/pcb/editor/panels/core.ts"() {
-    "use strict";
-    init_appstore();
-    init_state();
-    init_tools();
-    init_kselect();
-    EMPTY_APPEARANCE = {
-      layers: [],
-      active: "",
-      objects: [],
-      nets: [],
-      netClasses: [],
-      inactive: "normal",
-      flip: false,
-      netColorMode: "ratsnest",
-      ratsnestMode: "all",
-      presets: [],
-      builtinPresets: [],
-      preset: null,
-      viewports: [],
-      viewport: null
-    };
-    S2 = { appearance: EMPTY_APPEARANCE, hierarchy: { root: null, version: 0 }, netNav: { root: null, version: 0 }, selVersion: 0 };
-    subs = /* @__PURE__ */ new Set();
-    panelStore = {
-      get: () => S2,
-      set(patch) {
-        S2 = Object.assign({}, S2, patch);
-        for (const fn of Array.from(subs)) {
-          try {
-            fn();
-          } catch (e) {
-            console.warn(e);
-          }
-        }
-      },
-      subscribe(fn) {
-        subs.add(fn);
-        return () => {
-          subs.delete(fn);
-        };
-      }
-    };
-    projectId2 = () => state.project && state.project.projectId || "";
-    projectName = () => state.project && state.project.name || "";
-    openDocs = () => state.docs || [];
-    currentDocId = () => state.docId || null;
-    kdoc2 = () => E.kdoc || null;
-    isSchDoc = () => E.DOC_TYPE === "kicad_sch";
-    KC = () => window.KiCadCanvas;
-  }
-});
-
 // web/domains/pcb/dialogs/sch-hierarchy.ts
 async function sheetList() {
   const S3 = appState2;
@@ -91460,7 +91760,7 @@ function validateNewVariantName(name, exclude = "") {
 }
 function nameDescDialog(title, withName, desc0, onOk) {
   let nameIn = null, descIn = null;
-  openDialog3({
+  openDialog2({
     title,
     width: 360,
     build(body) {
@@ -91608,7 +91908,7 @@ var init_variant_ops = __esm({
     init_doc();
     init_net();
     init_util();
-    init_core2();
+    init_core();
     init_ui();
     init_project();
     init_sch_hierarchy();
@@ -91675,8 +91975,8 @@ function loadFab() {
 function loadFabScript() {
   const ready = fabGlobal();
   if (ready && typeof ready.buildPackage === "function") return Promise.resolve(ready);
-  if (loading2) return loading2;
-  loading2 = new Promise((resolve2, reject) => {
+  if (loading3) return loading3;
+  loading3 = new Promise((resolve2, reject) => {
     const own = document.querySelector('script[src*="/static/dist/editor.js"]');
     const query = own ? (own.getAttribute("src") || "").split("?")[1] : "";
     const s2 = document.createElement("script");
@@ -91689,10 +91989,10 @@ function loadFabScript() {
     s2.onerror = () => reject(new Error("could not load fab.js"));
     document.head.appendChild(s2);
   });
-  loading2.catch(() => {
-    loading2 = null;
+  loading3.catch(() => {
+    loading3 = null;
   });
-  return loading2;
+  return loading3;
 }
 function boardDoc() {
   const d = E.kdoc;
@@ -91944,7 +92244,7 @@ function show(fab, ctx, focus) {
       drawLayer(cv, fab, pkg, f2.layer, colors.get(f2.layer) || getComputedStyle(view).color);
     } else view.append(h2("pre", null, typeof f2.data === "string" ? f2.data : ""));
   }
-  openDialog3({
+  openDialog2({
     title: "Fabrication Outputs",
     width: 1e3,
     height: 680,
@@ -91956,10 +92256,10 @@ function show(fab, ctx, focus) {
       const side = h2(
         "div",
         { class: "fab-side" },
-        box2("Manufacturer", presetField.el, blurb, order),
-        box2("Gerber options", opt.aux.el, opt.silk.el, opt.tent.el, opt.ref.el, opt.val.el),
-        box2("Drill, placement and BOM", opt.merge.el, opt.place.el, opt.bom.el, opt.dnp.el),
-        box2("Layers", layerBox)
+        box("Manufacturer", presetField.el, blurb, order),
+        box("Gerber options", opt.aux.el, opt.silk.el, opt.tent.el, opt.ref.el, opt.val.el),
+        box("Drill, placement and BOM", opt.merge.el, opt.place.el, opt.bom.el, opt.dnp.el),
+        box("Layers", layerBox)
       );
       const main = h2("div", { class: "fab-main" }, files, view, summary, report3.el);
       body.append(h2("div", { class: "fab-cols" }, side, main));
@@ -91976,7 +92276,7 @@ function show(fab, ctx, focus) {
     }
   });
 }
-var app2, loading2, PRESET_KEY, KIND_LABEL, size, blobOf, CSS6, cssDone4;
+var app2, loading3, PRESET_KEY, KIND_LABEL, size, blobOf, CSS6, cssDone4;
 var init_fab_outputs = __esm({
   "web/domains/pcb/editor/fab-outputs.ts"() {
     "use strict";
@@ -91987,7 +92287,7 @@ var init_fab_outputs = __esm({
     init_board_setup();
     init_ui();
     app2 = store;
-    loading2 = null;
+    loading3 = null;
     PRESET_KEY = "kicad.fab.preset";
     KIND_LABEL = { gerber: "Gerber", drill: "Drill", placement: "Placement", bom: "BOM", archive: "Archive" };
     size = (d) => {
@@ -92245,7 +92545,7 @@ function progressDialog(title, phases) {
   const draw2 = () => {
     bar.style.width = `${Math.min(100, (phase - 1 + frac) / phases * 100).toFixed(1)}%`;
   };
-  api6 = openDialog3({
+  api6 = openDialog2({
     title,
     width: 420,
     noOk: true,
@@ -92532,199 +92832,6 @@ var init_kcombo = __esm({
   }
 });
 
-// web/shared/components/kdate.ts
-var init_kdate = __esm({
-  "web/shared/components/kdate.ts"() {
-    "use strict";
-    init_menufit();
-  }
-});
-
-// web/domains/pcb/dialogs/page-settings.ts
-var ROWS;
-var init_page_settings = __esm({
-  "web/domains/pcb/dialogs/page-settings.ts"() {
-    "use strict";
-    init_editor();
-    init_dom2();
-    init_kdate();
-    init_logic();
-    init_project();
-    init_kicon_dom();
-    init_ui();
-    init_units();
-    init_drawingsheet();
-    init_view();
-    ROWS = [
-      ["date", "Issue Date:"],
-      ["rev", "Revision:"],
-      ["title", "Title:"],
-      ["company", "Company:"],
-      ...Array.from({ length: 9 }, (_, i) => [`comment${i + 1}`, `Comment${i + 1}:`])
-    ];
-  }
-});
-
-// web/domains/pcb/editor/panels/hierarchy.ts
-function sheetsOf(doc2) {
-  const out2 = [];
-  for (const m of KC().movableItems(doc2)) if (m.kind === "sheet" && m.file) out2.push({ id: m.id, name: m.name || "", file: m.file, page: String(m.page || "") });
-  return out2;
-}
-function entry(docId3) {
-  if (docId3 === currentDocId()) {
-    const d = kdoc2();
-    if (!d || !isSchDoc()) return null;
-    live = { docId: docId3, doc: d };
-    return { doc: d, sheets: sheetsOf(d), page: String(d.pageNumber || "1") };
-  }
-  return cache5.get(docId3) || null;
-}
-function schDocs2() {
-  return openDocs().filter((d) => d.docType === "kicad_sch");
-}
-function loadSheets(stale) {
-  if (cacheProject !== projectId2()) {
-    cache5.clear();
-    cacheProject = projectId2();
-  }
-  if (stale) {
-    if (live && live.docId === stale && stale !== currentDocId()) cache5.set(stale, { doc: live.doc, sheets: sheetsOf(live.doc), page: String(live.doc.pageNumber || "1") });
-    else cache5.delete(stale);
-  }
-  const want2 = schDocs2().filter((d) => d.docId !== currentDocId() && !cache5.has(d.docId));
-  if (!want2.length) {
-    publishHierarchy();
-    return Promise.resolve();
-  }
-  if (loading3) return loading3;
-  const pid = projectId2();
-  loading3 = Promise.all(want2.map(async (d) => {
-    try {
-      const r = await fetch(`/api/docs/${d.docId}/content?v=${Date.now()}`);
-      if (!r.ok) return;
-      const doc2 = KC().parseDoc(await r.text(), "kicad_sch");
-      if (pid === projectId2()) cache5.set(d.docId, { doc: doc2, sheets: sheetsOf(doc2), page: String(doc2.pageNumber || "1") });
-    } catch (e) {
-    }
-  })).then(() => {
-    loading3 = null;
-    publishHierarchy();
-  });
-  return loading3;
-}
-function resolveChild(parent, file) {
-  const dir = parent.path.split("/").slice(0, -1).join("/"), rel = dir ? `${dir}/${file}` : file, base2 = file.split("/").pop();
-  const docs = schDocs2();
-  return docs.find((d) => d.path === rel || d.path === file) || docs.find((d) => d.path.split("/").pop() === base2) || null;
-}
-function build2() {
-  const root5 = store.get().project ? rootSchematic() : null;
-  if (!root5) return null;
-  const cur2 = currentDocId();
-  const rootEntry = entry(root5.docId);
-  const stem2 = root5.path.split("/").pop().replace(/\.kicad_sch$/, "");
-  const walk2 = (doc2, path2, depth) => {
-    const e = entry(doc2.docId);
-    if (!e || depth > 8) return [];
-    return e.sheets.map((sh) => {
-      const child2 = resolveChild(doc2, sh.file);
-      const p = path2 + sh.id + "/";
-      return {
-        path: p,
-        name: sh.name || sh.file.replace(/\.kicad_sch$/, ""),
-        page: sh.page,
-        docId: child2 ? child2.docId : null,
-        file: sh.file,
-        parentDocId: doc2.docId,
-        sheetId: sh.id,
-        current: !!child2 && child2.docId === cur2,
-        children: child2 ? walk2(child2, p, depth + 1) : []
-      };
-    });
-  };
-  const tops = topLevelSchematics();
-  if (tops.length > 1) {
-    const children = tops.map((t) => {
-      const d = t.doc, e = entry(d.docId), p = "/" + (t.uuid || d.docId) + "/";
-      return {
-        path: p,
-        name: t.name || d.path.split("/").pop().replace(/\.kicad_sch$/, ""),
-        page: e ? e.page : "",
-        docId: d.docId,
-        file: d.path.split("/").pop() || "",
-        parentDocId: null,
-        sheetId: null,
-        current: d.docId === cur2,
-        children: walk2(d, p, 0),
-        topLevel: true
-      };
-    });
-    return { path: "", name: projectName() || "Schematic", page: "", docId: null, file: "", parentDocId: null, sheetId: null, current: false, children, virtual: true };
-  }
-  const tl = topLevelEntry(root5.path);
-  return {
-    path: "/",
-    name: tl && typeof tl.name === "string" && tl.name || stem2 || projectName() || "Schematic",
-    page: rootEntry ? rootEntry.page : "1",
-    docId: root5.docId,
-    file: root5.path.split("/").pop() || "",
-    parentDocId: null,
-    sheetId: null,
-    current: root5.docId === cur2,
-    children: walk2(root5, "/", 0)
-  };
-}
-function publishHierarchy() {
-  let root5 = null;
-  try {
-    root5 = build2();
-  } catch (e) {
-    console.warn(e);
-  }
-  const h3 = panelStore.get().hierarchy;
-  panelStore.set({ hierarchy: { root: root5, version: h3.version + 1, marked: h3.marked, markColor: h3.markColor } });
-}
-function topLevelEntry(file, pro = projectJson()) {
-  const sch = pro.schematic, list = sch && Array.isArray(sch.top_level_sheets) ? sch.top_level_sheets : [];
-  const base2 = file.split("/").pop();
-  return list.find((e) => e && (e.filename === file || e.filename === base2)) || null;
-}
-var cache5, cacheProject, loading3, live, topSig;
-var init_hierarchy = __esm({
-  "web/domains/pcb/editor/panels/hierarchy.ts"() {
-    "use strict";
-    init_appstore();
-    init_doc();
-    init_state();
-    init_util();
-    init_gestures();
-    init_schnets();
-    init_project();
-    init_dom2();
-    init_page_settings();
-    init_core2();
-    cache5 = /* @__PURE__ */ new Map();
-    cacheProject = "";
-    loading3 = null;
-    live = null;
-    topSig = "";
-    onProjectChanged(() => {
-      let sig = "";
-      try {
-        sig = topLevelSchematics().map((t) => t.doc.docId + ":" + t.name + ":" + t.uuid).join(",");
-      } catch (e) {
-        sig = "";
-      }
-      if (sig === topSig) return;
-      topSig = sig;
-      topLevelSheetsChanged();
-      publishHierarchy();
-      void loadSheets();
-    });
-  }
-});
-
 // web/domains/pcb/dialogs/sync-units.ts
 var init_sync_units = __esm({
   "web/domains/pcb/dialogs/sync-units.ts"() {
@@ -92764,7 +92871,7 @@ var init_change_symbols = __esm({
     init_dom2();
     init_project();
     init_change_symbols_logic();
-    init_core();
+    init_core2();
     init_sources();
   }
 });
@@ -92950,7 +93057,7 @@ var init_frame = __esm({
     init_keys();
     init_project();
     init_sources();
-    init_core();
+    init_core2();
     init_kselect();
     init_logic2();
   }
@@ -92961,7 +93068,7 @@ var ROW_H, CSS7;
 var init_chooser = __esm({
   "web/domains/pcb/library/chooser.ts"() {
     "use strict";
-    init_core();
+    init_core2();
     init_preview();
     init_sources();
     init_fpchoice();
@@ -93045,7 +93152,7 @@ var init_library2 = __esm({
     init_util();
     init_view();
     init_chooser();
-    init_core();
+    init_core2();
     init_sources();
   }
 });
@@ -93530,7 +93637,7 @@ function openDrc(ctx) {
     select2(r.m, r.row);
   };
   reExclude();
-  openDialog3({
+  openDialog2({
     title: "Design Rules Checker",
     width: 760,
     okLabel: "Run DRC",
@@ -93904,7 +94011,7 @@ function show2(fab, ctx, p, stored2, version3) {
         h2(
           "div",
           { style: "display:grid;grid-template-columns:1fr 1fr;gap:0 16px" },
-          box2(
+          box(
             "Format",
             h2("label", { class: "pd-check" }, rbExcellon, "Excellon"),
             h2("div", { style: "padding-left:22px" }, mirror.el, minimal.el, merge2.el, altOval.el),
@@ -93912,7 +94019,7 @@ function show2(fab, ctx, p, stored2, version3) {
             h2("div", { style: "padding-left:22px" }, tenting.el),
             h2("div", { class: "pd-row", style: "margin-top:8px" }, genMap.el, mapFmt.el)
           ),
-          box2(
+          box(
             "Options",
             h2(
               "div",
@@ -93928,7 +94035,7 @@ function show2(fab, ctx, p, stored2, version3) {
             )
           )
         ),
-        box2("Messages", messages)
+        box("Messages", messages)
       );
       update();
     }
@@ -94145,12 +94252,12 @@ function show3(fab, ctx, p, stored2, version3, user, maskAlert, opts2, variants,
   const row3 = (...c) => h2("div", { class: "pd-row" }, ...c);
   const lbl2 = (t) => h2("span", { class: "pd-lbl" }, t);
   const boxes = {
-    1: box2("Gerber Options", h2("div", { class: "pl-cols2" }, h2("div", null, protel.el, jobFile.el, row3(lbl2("Coordinate format:"), coordFmt.el)), h2("div", null, x2.el, netAttrs.el, noMacros.el))),
-    2: box2("Postscript Options", h2("div", { class: "pl-grid3" }, lbl2("X scale factor:"), fineX.el, h2("span"), lbl2("Y scale factor:"), fineY.el, h2("span"), lbl2("Track width correction:"), widthAdj.el, h2("span", { class: "unit" }, "mm")), a4.el),
-    3: box2("DXF Options", h2("div", { class: "pl-cols2" }, h2("div", null, dxfContours.el, row3(lbl2("Export units:"), dxfUnits.el)), h2("div", null, dxfFont.el, dxfSingle.el))),
-    5: box2("SVG Options", h2("div", { class: "pd-row" }, lbl2("Precision:"), svgPrec.el, lbl2("Output mode:"), svgMode.el, svgFit.el)),
-    4: box2("PDF Options", h2("div", { class: "pl-cols2" }, h2("div", null, row3(lbl2("Output mode:"), pdfMode.el), frontPop.el, backPop.el), h2("div", null, pdfMeta.el, pdfSingle.el, row3(bgLabel, bgSwatch.el)))),
-    6: box2("PNG Options", h2("div", { class: "pd-row" }, lbl2("DPI:"), pngDpi.el, pngAa.el))
+    1: box("Gerber Options", h2("div", { class: "pl-cols2" }, h2("div", null, protel.el, jobFile.el, row3(lbl2("Coordinate format:"), coordFmt.el)), h2("div", null, x2.el, netAttrs.el, noMacros.el))),
+    2: box("Postscript Options", h2("div", { class: "pl-grid3" }, lbl2("X scale factor:"), fineX.el, h2("span"), lbl2("Y scale factor:"), fineY.el, h2("span"), lbl2("Track width correction:"), widthAdj.el, h2("span", { class: "unit" }, "mm")), a4.el),
+    3: box("DXF Options", h2("div", { class: "pl-cols2" }, h2("div", null, dxfContours.el, row3(lbl2("Export units:"), dxfUnits.el)), h2("div", null, dxfFont.el, dxfSingle.el))),
+    5: box("SVG Options", h2("div", { class: "pd-row" }, lbl2("Precision:"), svgPrec.el, lbl2("Output mode:"), svgMode.el, svgFit.el)),
+    4: box("PDF Options", h2("div", { class: "pl-cols2" }, h2("div", null, row3(lbl2("Output mode:"), pdfMode.el), frontPop.el, backPop.el), h2("div", null, pdfMeta.el, pdfSingle.el, row3(bgLabel, bgSwatch.el)))),
+    6: box("PNG Options", h2("div", { class: "pd-row" }, lbl2("DPI:"), pngDpi.el, pngAa.el))
   };
   const boardSetupLink = h2("a", { href: "#", title: "File > Board Setup...", "data-k": "boardSetup" }, "Board setup");
   const alert = h2(
@@ -94402,9 +94509,9 @@ function show3(fab, ctx, p, stored2, version3, user, maskAlert, opts2, variants,
         h2(
           "div",
           { class: "pl-mid" },
-          box2("Include Layers", layerList2),
-          box2("Plot on All Layers", allList, h2("div", { class: "pd-row" }, upBtn, downBtn)),
-          box2(
+          box("Include Layers", layerList2),
+          box("Plot on All Layers", allList, h2("div", { class: "pd-row" }, upBtn, downBtn)),
+          box(
             "General Options",
             sheetRef.el,
             subtract3.el,
@@ -94967,7 +95074,7 @@ ${e instanceof Error ? e.message : String(e)}` }]);
     report3.set(lines);
   }
   const lbl2 = (t, tip) => h2("span", { class: "pd-lbl", title: tip || "" }, t);
-  openDialog3({
+  openDialog2({
     title: "Export IPC-2581",
     width: 720,
     okLabel: "Export",
@@ -96205,7 +96312,7 @@ function show5(fab, variants) {
   const openAfter = checkField(pref.openAfter, "Open file after plot", { key: "openAfter", tip: "Open output file with associated application after successful plot" });
   const report3 = reportPanel("130px");
   report3.set(lastReport2);
-  const pngBox = box2("PNG Options", h2("div", { class: "pd-row" }, h2("span", { class: "pd-lbl" }, "DPI:"), dpi.el, aa.el));
+  const pngBox = box("PNG Options", h2("div", { class: "pd-row" }, h2("span", { class: "pd-lbl" }, "DPI:"), dpi.el, aa.el));
   const en = (f2, on2) => {
     f2.input.disabled = !on2;
     f2.el.classList.toggle("disabled", !on2);
@@ -96335,11 +96442,11 @@ function show5(fab, variants) {
         h2(
           "div",
           { style: "display:grid;grid-template-columns:max-content 1fr;gap:0 16px" },
-          box2("Output Format", ...fmtRadios.map((r) => r.el)),
+          box("Output Format", ...fmtRadios.map((r) => r.el)),
           h2(
             "div",
             null,
-            box2("Options", h2(
+            box("Options", h2(
               "div",
               { style: "display:grid;grid-template-columns:max-content 1fr max-content;gap:6px 8px;align-items:center" },
               lbl2("Page size:"),
@@ -96357,10 +96464,10 @@ function show5(fab, variants) {
               minWidth.el,
               h2("span", { class: "unit" }, "mm")
             )),
-            box2("PDF Options", popups.el, links.el, metadata.el),
-            box2("DXF Options", h2("div", { class: "pd-row" }, dxfLabel, dxfUnits.el)),
+            box("PDF Options", popups.el, links.el, metadata.el),
+            box("DXF Options", h2("div", { class: "pd-row" }, dxfLabel, dxfUnits.el)),
             pngBox,
-            box2("Other Options", openAfter.el)
+            box("Other Options", openAfter.el)
           )
         ),
         report3.el

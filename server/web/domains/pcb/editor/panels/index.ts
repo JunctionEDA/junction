@@ -60,6 +60,7 @@ function follow(s: { document: { docId: string | null; hasDoc: boolean; version:
   if (!d.hasDoc) return;
   if (changed || pro || markers) { applyAppearance(); last.markers = E.renderOpts.markers; }
   if (changed || hidden || toggles || active || pro) publishAppearance();
+  if (docs) void loadSheets();   // a file joined the project (somebody drew a sheet): read it, then the tree is rebuilt
   if (changed || docs) { publishHierarchy(); publishNetNav(); }
 }
 
