@@ -99766,6 +99766,21 @@ function build3(input) {
           const s2 = P.designSettings(ed.proSettings || null);
           const size2 = e.size === void 0 ? s2.viaDiameter : num12(e.size, "size"), drill2 = e.drill === void 0 ? s2.viaDrill : num12(e.drill, "drill");
           if (!(drill2 > 0 && size2 > drill2)) throw new ToolError("a via's size must be larger than its drill");
+          {
+            const k2 = K4(), vx = num12(e.x, "x"), vy = num12(e.y, "y");
+            let same = null;
+            for (const it of doc2.items.values()) {
+              if (it.kind !== "via" || touched.has(it.id)) continue;
+              const at5 = k2.kid(it.node, "at");
+              if (!at5 || Math.abs(k2.num(at5[1]) - vx) > 1e-3 || Math.abs(k2.num(at5[2]) - vy) > 1e-3) continue;
+              same = it;
+              break;
+            }
+            if (same) {
+              lines.push({ kind: "add", text: `A via already stands at (${fmt3(e.x)}, ${fmt3(e.y)}): none added`, ids: [same.id] });
+              break;
+            }
+          }
           const c = added(doc2, P.viaNode(doc2, num12(e.x, "x"), num12(e.y, "y"), size2, drill2, net));
           changes.push(c);
           lines.push({ kind: "add", text: `Add via ${fmt3(size2)}/${fmt3(drill2)} mm on net ${net.name} at (${fmt3(e.x)}, ${fmt3(e.y)})`, ids: [c.id] });
