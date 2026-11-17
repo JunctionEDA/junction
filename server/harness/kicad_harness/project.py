@@ -8,9 +8,12 @@ went wrong, never file contents.
 from __future__ import annotations
 
 import contextlib
+import json
 import math
+import os
 import random
 import re
+import shutil
 import uuid as _uuid
 
 from .transport import HarnessError, Transport
@@ -2450,6 +2453,17 @@ class Board(_Doc):
     def _autoroute(self, e: dict) -> dict:
         """One autoroute edit.  Nothing to route, or nothing that could be routed, is a result and not an error."""
         self.flush()
+        dump = os.environ.get("KC_ROUTER_DUMP")      # a folder: keep the board as the router gets it, for router work
+        if dump and hasattr(self.project.transport, "save"):
+            for f in self.project.transport.save():
+                if f.endswith(".kicad_pcb") and hasattr(self.project, "folder"):
+                    os.makedirs(dump, exist_ok=True)
+                    shutil.copy(os.path.join(self.project.folder, f), os.path.join(dump, os.path.basename(f)))
+                    pro = os.path.join(self.project.folder, f[: -len(".kicad_pcb")] + ".kicad_pro")
+                    if os.path.exists(pro):
+                        shutil.copy(pro, dump)
+                    with open(os.path.join(dump, "autoroute.json"), "w") as fh:
+                        json.dump(e, fh)
         self._edit(dict(e))
         try:
             res = self.flush() or {}

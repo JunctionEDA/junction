@@ -117868,7 +117868,7 @@ function viaFits(G5, vmaps, gi) {
 
 // web/domains/pcb/router/probe.ts
 var work = { steps: 0 };
-var costOf = (f2, W12) => f2.length * W12.length + f2.vias * W12.via + f2.b45 * W12.bend45 + f2.b90 * W12.bend90 + f2.wrong * W12.wrongDir;
+var costOf = (f2, W12) => (f2.length + (f2.plane || 0)) * W12.length + f2.vias * W12.via + f2.b45 * W12.bend45 + f2.b90 * W12.bend90 + f2.wrong * W12.wrongDir;
 function featuresOf(G5, nodes, pref) {
   const f2 = { length: 0, vias: 0, b45: 0, b90: 0, wrong: 0 };
   let prev = -1;
@@ -117886,6 +117886,8 @@ function featuresOf(G5, nodes, pref) {
     const dir = dirOf(dx, dy);
     f2.length += len;
     const p = pref[a.l] || 0;
+    const lc = G5.layerCost ? G5.layerCost[a.l] || 1 : 1;
+    if (lc !== 1) f2.plane = (f2.plane || 0) + len * (lc - 1);
     f2.wrong += diag ? len * Math.abs(p) / 2 : dy === 0 ? len * Math.max(0, -p) : len * Math.max(0, p);
     if (prev >= 0 && dir !== prev) {
       let d = Math.abs(dir - prev);
@@ -118294,6 +118296,7 @@ var STEPS_PER_MS = 12e3;
 var BUNDLE_COST = 0.3;
 var FLAT_DETOUR = 1.6;
 var FLAT_SLACK_MM = 5;
+var PLANE_COST = 1;
 var PLANE_COVER = 0.5;
 var PLANE_HOP_MM = 1.5;
 var FAN_ROWS_MM = [0.8, 1.5, 2.2];
@@ -118852,6 +118855,25 @@ var Router = class _Router {
           this.planeLayers.push(copper[l]);
         }
       }
+    }
+    if (L > 2 && (this.opts.planeCost ?? PLANE_COST) > 1) {
+      const area4 = (pts) => {
+        let t = 0;
+        for (let i = 0; i < pts.length; i++) {
+          const p = pts[i], q4 = pts[(i + 1) % pts.length];
+          t += p[0] * q4[1] - q4[0] * p[1];
+        }
+        return Math.abs(t) / 2;
+      };
+      const whole2 = outline ? area4(outline) : (bounds[2] - bounds[0]) * (bounds[3] - bounds[1]);
+      const k = this.opts.planeCost ?? PLANE_COST;
+      const lc = copper.map(() => 1);
+      for (let l = 1; l < L - 1; l++) {
+        let a = 0;
+        for (const z2 of zones) if (z2.net && z2.layers.includes(l) && z2.polys.length) a += area4(z2.polys[0]);
+        if (whole2 > 0 && a >= PLANE_COVER * whole2) lc[l] = k;
+      }
+      if (lc.some((c) => c !== 1)) G5.layerCost = lc;
     }
     if (hv.every(([h3, v]) => h3 + v <= 20) && routable.filter(Boolean).length > 1) {
       let k = 0;
@@ -120515,18 +120537,19 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     conn.zoneEnd = !!res.zoneEnd;
     const A = flip ? conn.b : conn.a, B = flip ? conn.a : conn.b;
     const first = nodes[0], last3 = nodes[nodes.length - 1];
-    const piece = (from, to, l) => {
+    const piece = (from, to, l, sw = w) => {
       if (Math.hypot(to[0] - from[0], to[1] - from[1]) > 1e-4) {
         conn.stubs.push([from, to, l]);
-        conn.shapes.push({ net: conn.net, layers: [l], shape: { t: "seg", a: from, b: to, r: w / 2 }, clr });
+        conn.shapes.push({ net: conn.net, layers: [l], shape: { t: "seg", a: from, b: to, r: sw / 2 }, clr });
       }
     };
     const stub = (anchor2, n2, esc10) => {
       const p = this.mm(n2);
+      const sw = anchor2.narrow ? Math.min(w, anchor2.narrow) : w;
       if (esc10) {
-        piece(anchor2.p, esc10, n2.l);
-        piece(esc10, p, n2.l);
-      } else piece(anchor2.p, p, n2.l);
+        piece(anchor2.p, esc10, n2.l, sw);
+        piece(esc10, p, n2.l, sw);
+      } else piece(anchor2.p, p, n2.l, sw);
     };
     const esc9 = found.esc || [];
     stub(A, first, esc9[0]);
@@ -121309,6 +121332,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
             if (e.bb[0] > bb[2] + need || e.bb[2] < bb[0] - need || e.bb[1] > bb[3] + need || e.bb[3] < bb[1] - need) continue;
             const gap = P.shapeGap(e.o.shape, o.shape);
             if (gap < need) {
+              if (globalThis.KC_PS_DEBUG) console.error("drop", c.net, this.padName(c.a.p), this.padName(c.b.p), "vs", e.o.net, gap.toFixed(3), need.toFixed(3), JSON.stringify(o.shape), JSON.stringify(e.o.shape).slice(0, 240));
               bad.add(c.id);
               c.why = "rule";
               this.ruleHit.set(c.id, e.o.net);
