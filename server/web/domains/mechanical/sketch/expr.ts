@@ -22,7 +22,7 @@ interface Val { v: number; dim: 0 | 1 }
 
 class Parser {
   private i = 0;
-  constructor(private readonly s: string, private readonly units: { [unit: string]: number }) {}
+  constructor(private readonly s: string, private readonly units: { [unit: string]: number }, private readonly factor = 1) {}
 
   parse(): Val {
     const v = this.sum();
@@ -39,8 +39,9 @@ class Parser {
       const plus = this.eat("+"), minus = !plus && this.eat("-");
       if (!plus && !minus) return a;
       const b = this.product();
-      // "10 + 5 mm": a bare number beside a quantity takes its unit
-      a = { v: plus ? a.v + b.v : a.v - b.v, dim: a.dim || b.dim ? 1 : 0 };
+      // "10 + 5 mm": a bare number beside a quantity is in the unit of the place it was typed (`factor`)
+      const av = a.dim || !b.dim ? a.v : a.v * this.factor, bv = b.dim || !a.dim ? b.v : b.v * this.factor;
+      a = { v: plus ? av + bv : av - bv, dim: a.dim || b.dim ? 1 : 0 };
     }
   }
   private product(): Val {
@@ -103,16 +104,21 @@ class Parser {
   }
 }
 
-/** Evaluate what was typed, in millimetres (length) or degrees (angle).  Throws an Error a person can read. */
-export function evaluate(text: string, quantity: Quantity): Parsed {
+/**
+ * Evaluate what was typed, in millimetres (length) or degrees (angle).  Throws an Error a person can read.
+ * `factor` is what a bare number is worth: 1 (millimetres, degrees) unless the document is worked in another
+ * unit (25.4 for inches; document/units.ts).
+ */
+export function evaluate(text: string, quantity: Quantity, factor = 1): Parsed {
   const s = text.trim().replace(/,/g, ".").replace(/×/g, "*").replace(/÷/g, "/");
   if (!s) throw new Error("Type a value");
-  const r = new Parser(s, quantity === "length" ? LENGTH : ANGLE).parse();
+  const r = new Parser(s, quantity === "length" ? LENGTH : ANGLE, factor).parse();
+  if (!r.dim) r.v *= factor;
   if (!Number.isFinite(r.v)) throw new Error("That does not come to a number");
   return { value: Math.round(r.v * 1e9) / 1e9, isExpression: !/^[+-]?(\d+\.?\d*|\.\d+)$/.test(s) };
 }
 
 /** `evaluate`, or null instead of an error. */
-export function tryEvaluate(text: string, quantity: Quantity): Parsed | null {
-  try { return evaluate(text, quantity); } catch { return null; }
+export function tryEvaluate(text: string, quantity: Quantity, factor = 1): Parsed | null {
+  try { return evaluate(text, quantity, factor); } catch { return null; }
 }
