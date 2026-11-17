@@ -324,7 +324,11 @@ export async function runChecks(input: { doc?: string }): Promise<unknown> {
     try { const R = W.PcbAutoRouter; if (R && R.boardSquareCorners) for (const c of R.boardSquareCorners(doc, PCB())) rows.push({ severity: "error", code: "track_right_angle", message: `Track of net '${c.net}' turns ${c.angle}° on ${c.layer}: use 45° corners (antenna and RF nets are exempt)`, x: r3(c.x), y: r3(c.y), refs: [] }); } catch { /* router not loaded */ }
   }
   const errors = rows.filter((m) => m.severity === "error").length; const cap = 200;
-  return { document: path, check: doc.type === "sch" ? "ERC" : "DRC", errors, warnings: rows.length - errors, violations: rows.slice(0, cap), truncated: rows.length > cap ? `showing ${cap} of ${rows.length}` : undefined,
+  // counts by kind over every row, so a capped list never hides a kind
+  const byKind: Record<string, number> = {}, warnKind: Record<string, number> = {};
+  for (const m of rows) { const d = m.severity === "error" ? byKind : warnKind; d[m.code] = (d[m.code] || 0) + 1; }
+  rows.sort((a, b) => (a.severity === "error" ? 0 : 1) - (b.severity === "error" ? 0 : 1));
+  return { document: path, check: doc.type === "sch" ? "ERC" : "DRC", errors, warnings: rows.length - errors, by_kind: byKind, warnings_by_kind: warnKind, violations: rows.slice(0, cap), truncated: rows.length > cap ? `showing ${cap} of ${rows.length}` : undefined,
     note: doc.type === "sch" ? "This ERC covers the one sheet; nets that leave it through hierarchical or global labels are treated as driven elsewhere. The tests across sheets (symbol units, footprints and values of a multi-unit symbol, label names) look at every sheet of the hierarchy." : "This DRC is the editor's subset: clearance, edge clearance, unconnected items, shorts, dangling tracks, annular width, courtyards, plus Junction's own track_right_angle (no square corners outside antenna and RF nets)." };
 }
 
@@ -339,7 +343,8 @@ export async function boardInfo(): Promise<unknown> {
     if (it.kind === "via") { const sz = k.kid(it.node, "size"), dr = k.kid(it.node, "drill"); const key = `${sz ? r3(k.num(sz[1])) : "?"}/${dr ? r3(k.num(dr[1])) : "?"}`; vias.set(key, (vias.get(key) || 0) + 1); }
   }
   let unrouted = 0; for (const n of nl.nets.values()) unrouted += n.unconnected || 0;
-  let layout: unknown; try { const R = W.PcbAutoRouter; if (R && R.evaluate) { const ev = R.evaluate(K(), P, doc, s, {}); layout = { ratsnest_mm: r3(ev.ratsnest), unrouted: ev.unrouted, vias: ev.vias, track_length_mm: r3(ev.trackLength), routed_nets: ev.routedNets, worst_detours: (ev.worstDetours || []).slice(0, 10) }; } } catch { /* engine not loaded */ }
+  let layout: unknown; try { const R = W.PcbAutoRouter; if (R && R.evaluate) { const ev = R.evaluate(K(), P, doc, s, {}); const GND = /^\/?(.*\/)?([ADP]?GND\w*|VSS\w*)$/i; let gv = 0; for (const [name, n] of nl.nets as Map<string, any>) if (GND.test(String((n.netObj && n.netObj.name) || name)) && n.vias) gv += n.vias.length;
+      layout = { ratsnest_mm: r3(ev.ratsnest), unrouted: ev.unrouted, vias: ev.vias, ground_vias: gv, other_vias: Math.max(0, (ev.vias || 0) - gv), track_length_mm: r3(ev.trackLength), routed_nets: ev.routedNets, worst_detours: (ev.worstDetours || []).slice(0, 10) }; } } catch { /* engine not loaded */ }
   let outlined = false; for (const it of doc.items.values()) if (it.edge) { outlined = true; break; }
   return { document: path, size_mm: outlined ? { width: st.width, height: st.height, area_mm2: st.area } : null, outline: outlined ? undefined : "No board outline is drawn on Edge.Cuts yet, so the board has no size.", copper_layers: doc.copper.slice(), statistics: st, layout,
     track_widths_in_use_mm: Object.fromEntries(Array.from(widths.entries()).sort((a, b) => a[0] - b[0]).map(([w, n]) => [String(w), n])),

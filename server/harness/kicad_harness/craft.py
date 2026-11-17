@@ -12,6 +12,7 @@ get, and hands back one short result, so a model does not carry the rules or nin
 from __future__ import annotations
 
 import math
+import re
 
 from .transport import HarnessError
 
@@ -47,8 +48,9 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     """Lay the whole board out in one call and say how it came out.
 
     keep_rules=True never touches the design rules (no house via either), for a person who said not to change them;
-    otherwise any change is listed under "rules_changed".  layers=["F.Cu", "B.Cu", ...] keeps the tracks on those
-    layers (an inner ground plane left whole); a number is how many copper layers the board should have.
+    otherwise any change is listed under "rules_changed".  layers=["F.Cu", "B.Cu", ...] names the routing layers (an
+    inner ground plane left whole costs open connections on a dense board: measured 9 to 12 on Cyberboard, 13 to 29
+    on Ember); a number is how many copper layers the board should have.
 
     explain=True adds "reasoning": a list of plain lines saying where every part stands and why (its cluster, the
     pin it serves, how far from it), which parts belong to no cluster, the order the nets were routed in and why,
@@ -111,8 +113,9 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     plan = step("plan", lambda: self.plan(edge=edge)) or {"place": {"near": {}, "edges": {}}, "route": {}, "notes": []}
     out["notes"] = [n.split(". ")[0] for n in plan.get("notes", [])][:6]
     rec = dict((plan.get("stackup") or {}).get("recommended") or {})
+    all_layers = layers == "all"
     route_layers = list(layers) if isinstance(layers, (list, tuple)) else None
-    if route_layers:
+    if route_layers or all_layers:
         layers = None
     if layers:
         rec["layers"] = layers
@@ -187,6 +190,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                     fo = step(f"fanout {part['ref']}", lambda ref=part["ref"]: self.fanout(ref, nets=fanout.get(ref) if isinstance(fanout, dict) else None))
                     if fo and fo.get("vias"):
                         out.setdefault("fanout", {})[part["ref"]] = {"vias": fo["vias"], "skipped": len(fo.get("skipped") or {})}
+        auto_layers = False
         got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules))
         if got and got.get("rules_changed"):
             out["rules_changed"] = got["rules_changed"]
@@ -203,7 +207,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                 out["routed"]["why_open"] = [u[:160] for u in got["unrouted"][:8]]
             left = got.get("left") or {}
             if left:      # one more pass at only what is open, as a person goes back over the last few
-                more = step("route again", lambda: self.route(nets=list(left), widths=r["widths"], kinds=r["kinds"], time_s=(time_s or 60) / 2, max_vias=max_vias, layers=route_layers, keep_rules=True))
+                more = step("route again", lambda: self.route(nets=list(left), widths=r["widths"], kinds=r["kinds"], time_s=(time_s or 60) / 2, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True))
                 if more:
                     out["routed"]["vias"] = (out["routed"]["vias"] or 0) + (more.get("vias") or 0)
                     left = more.get("left") or {}
@@ -218,10 +222,10 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         if still:
             if any(n.split("/")[-1].upper().endswith("GND") for n in still):
                 step("ground pads", self.ground_pads)
-            step("route last", lambda: self.route(nets=list(still), widths=r["widths"], kinds=r["kinds"], time_s=30, max_vias=max_vias, layers=route_layers, keep_rules=True))
+            step("route last", lambda: self.route(nets=list(still), widths=r["widths"], kinds=r["kinds"], time_s=30, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True))
             out["routed"]["left"] = step("unrouted", self.unrouted) or {}
         if (out.get("routed") or {}).get("left") and free_pins:     # pins boxed in by earlier tracks: free each and lay it first, never worse
-            fp = step("free pins", lambda: self.free_pins(passes=1, keep_rules=True, layers=route_layers, time_s=min(60, max(20, (time_s or 60) / 3)), budget_s=max(120, 2 * (time_s or 60))))
+            fp = step("free pins", lambda: self.free_pins(passes=1, keep_rules=True, layers=None if auto_layers else route_layers, time_s=min(60, max(20, (time_s or 60) / 3)), budget_s=max(120, 2 * (time_s or 60))))
             if fp:
                 out["routed"]["freed"] = f"open {fp['before']} -> {fp['after']}"
                 if fp["after"] < fp["before"]:
@@ -376,7 +380,7 @@ def _segs_dist(a, b, c, d) -> float:
 
 
 def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len: float | None = None, apply: bool = True,
-            rows: int | None = None, first: float | None = None) -> dict:
+            rows: int | None = None, first: float | None = None, style: str = "ring") -> dict:
     """Escape a fine-pitch chip (QFN or QFP, 0.5 mm pitch or finer) the way it is done by hand, before anything else is
     routed: every pin whose net goes far (another pad more than `far` mm away) gets a short stub straight out of its pad
     and a via in a staggered ring of two rows just outside the pin row, the vias in the order of the pins so no two stubs
@@ -399,6 +403,8 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
     nc = (r.get("net_classes") or {}).get("Default") or {}
     clr = float(nc.get("clearance") or r.get("clearance") or 0.15); vd = float(nc.get("via_diameter") or 0.5); tw = min(0.2, float(nc.get("track_width") or 0.2))
     vr = vd / 2
+    if style == "radial":
+        tw = min(tw, 0.15)      # a stub passes a neighbour's via 0.4 mm away on a 0.4 mm pitch
     sides = {}
     for q in pads:
         dx, dy = q[1] - cx, q[2] - cy
@@ -476,6 +482,20 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
                 skipped[want[i - 1][0]] = "no via site"; i -= 1
         while i > 0:
             skipped[want[i - 1][0]] = "no via site"; i -= 1
+        if style == "radial":
+            # the person's Cyberboard escape: each via straight out from its own pin (no sideways jog), the rows
+            # 1.3 mm and further out, a pin next to another diving pin going one row further so the vias stagger
+            pairs = []; last = []   # (tangent, row) of the pins placed so far on this side
+            rowgap = vd + clr
+            for q in want:
+                si = s_of(q[1], q[2])
+                busy = {k for (t, k) in last if abs(t - si) < vd + clr + 0.05}
+                k = next((k for k in range(nrows) if k not in busy), None)
+                if k is None:
+                    skipped[q[0]] = "no via site"
+                    continue
+                last.append((si, k))
+                pairs.append((q, (si, max(d1, 1.3) + k * rowgap)))
         for q, (s, d) in sorted(pairs, key=lambda pq: pq[1][1]):   # inner row first
             si = s_of(q[1], q[2]); dev = s - si
             base = (q[1] - cx) * n[0] + (q[2] - cy) * n[1]
@@ -508,10 +528,30 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
             for a, b in segs:
                 placed_s.append((a, b, q[3]))
             plan.append((q, path, v))
-    if apply:
+    if apply and plan:
+        # on a board that already has copper a stub or via can land on another net's track: each pin's escape is laid,
+        # the rules checked, and any escape a new error sits on is taken out again, so fanout never adds a DRC error
+        before = {(v["code"], round(v["x"], 2), round(v["y"], 2)) for v in self._call("run_checks").get("violations", []) if v.get("severity") == "error"}
+        laid = []
         for q, path, v in plan:
             self.track(q[3], [[round(x, 4), round(y, 4)] for x, y in path], layer="F.Cu" if part.get("side", "front") == "front" else "B.Cu", width=tw)
             self.via(q[3], [round(v[0], 4), round(v[1], 4)])
+            res = self.flush() or {}
+            laid.append((q, path, list(res.get("added") or [])))
+        bad = set()
+        for e in self._call("run_checks").get("violations", []):
+            if e.get("severity") != "error" or e.get("code") in ("unconnected_items", "track_right_angle") or (e["code"], round(e["x"], 2), round(e["y"], 2)) in before:
+                continue
+            for i, (q, path, _) in enumerate(laid):
+                if any(_seg_dist((e["x"], e["y"]), a, b) < 0.6 for a, b in zip(path, path[1:])):
+                    bad.add(i)
+        for i in bad:
+            for item in laid[i][2]:
+                self._edit({"op": "remove", "id": item})
+            skipped[laid[i][0][0]] = "taken back: it broke a rule against copper already there"
+        if bad:
+            self.flush()
+        plan = [p for i, p in enumerate(plan) if i not in bad]
         if plan:
             self.project.note(f"board: fanned out {ref}: {len(plan)} pins to a staggered via ring")
     return {"vias": len(plan), "pins": sorted((q[0] for q, _, _ in plan), key=lambda x: (len(x), x)), "skipped": skipped}
