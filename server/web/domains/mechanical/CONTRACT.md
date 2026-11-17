@@ -1042,8 +1042,9 @@ studio applies them through `studioInputs` (see "Building a part studio outside 
 with the project into real bodies; faces are named `<feature>:s<solid>:f<face>` by their place in the file.
 What was read is kept in the browser as BREP (`kernel/ops/exchange-cache.ts`, IndexedDB, keyed by the file's
 document id, size and path; the newest six): the next evaluation in that browser reads the BREP back and does
-not download the file. Measured on the 4.4 MB demo STEP in Chromium: the figures are in
-`scripts/cad-exchange-ui.mjs`' output.
+not download the file. Measured on the 4.4 MB, 22-part demo STEP in Chromium (software WebGL, a busy machine;
+`scripts/cad-exchange-ui.mjs` prints it): the Import feature 7.6 s reading the file, 0.5 s from the kept B-rep;
+from page load to the model on screen 14.4 s and 7.0 s.
 
 ## Limits, in one place
 
@@ -1065,7 +1066,9 @@ not download the file. Measured on the 4.4 MB demo STEP in Chromium: the figures
 - **Kernel memory** is released per cached feature; a very long session on a very large model has not been profiled.
 - **Import.** The cache is per browser: every collaborator's browser reads a file once. A file replaced under
   the same document id and size would be served from the cache; uploads never do that. Reading a large STEP for
-  the first time is still slow (the 24 MB module of the demos: about a minute and a half to first draw).
+  the first time is as slow as it was (the 24 MB module of the demos took about a minute and a half to first
+  draw before the cache existed; with it only the first read in a browser pays that, and that file has not been
+  timed again).
 - **Boards.** See the READMEs. Here: a board is not part of a version (an earlier version shows the board as it
   is now); outside the studio's own page part envelopes come from the footprints, not the 3D models, so a tall
   connector's box may differ slightly between an assembly and the studio (names do not); a board lying parts
