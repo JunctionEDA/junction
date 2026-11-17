@@ -137574,9 +137574,11 @@ function solveC(s2, res, withDielectric) {
 function solveField(s2, res, withDielectric) {
   const coarse = res < 0.03 ? solveField(s2, res * 2, withDielectric).f : null;
   const depth = s2.dielectrics.slice(0, s2.reference + 1).reduce((a, d) => a + d.th, 0);
-  const side = s2.gap > 0 ? s2.w / 2 + s2.gap + Math.max(0.6, 1.2 * depth) : s2.w / 2 + Math.max(1.5, 5 * depth);
-  const half = Math.max(side, s2.voidHalf + Math.max(0.5, depth));
-  const air = Math.max(0.8, 2 * s2.w);
+  const up = s2.above && s2.above.length ? s2.above.slice(0, (s2.referenceAbove ?? 0) + 1) : null;
+  const depthUp = up ? s2.t + up.reduce((a, d) => a + d.th, 0) : 0, deep = Math.max(depth, depthUp);
+  const side = s2.gap > 0 ? s2.w / 2 + s2.gap + Math.max(0.6, 1.2 * deep) : s2.w / 2 + Math.max(1.5, 5 * deep);
+  const half = Math.max(side, s2.voidHalf + Math.max(0.5, deep));
+  const air = up ? depthUp + res : Math.max(0.8, 2 * s2.w);
   const nx = Math.round(2 * half / res) + 1, ny = Math.round((air + depth + res) / res) + 1;
   const V = new Float64Array(nx * ny), eps = new Float64Array(nx * ny).fill(1), fixed2 = new Uint8Array(nx * ny);
   const X2 = (i) => -half + i * res, Y = (j) => -air + j * res;
@@ -137593,6 +137595,14 @@ function solveField(s2, res, withDielectric) {
     acc += s2.dielectrics[k].th;
     planes.push(acc);
   }
+  const planesUp = [];
+  if (up) {
+    let a = -s2.t;
+    for (const d of up) {
+      a -= d.th;
+      planesUp.push(a);
+    }
+  }
   for (let j = 0; j < ny; j++) {
     const y = Y(j);
     let er = 1;
@@ -137605,6 +137615,14 @@ function solveField(s2, res, withDielectric) {
           break;
         }
         a += d.th;
+      }
+    } else if (withDielectric && up) {
+      let a = -s2.t;
+      er = up[0].er;
+      if (y < a) for (const d of up) {
+        er = d.er;
+        if (y >= a - d.th) break;
+        a -= d.th;
       }
     }
     for (let i = 0; i < nx; i++) {
@@ -137635,6 +137653,17 @@ function solveField(s2, res, withDielectric) {
       if (y > planes[planes.length - 1]) {
         fixed2[id] = 1;
         V[id] = 0;
+      }
+      if (up && !fixed2[id]) {
+        for (let k = 0; k < planesUp.length; k++) if (Math.abs(y - planesUp[k]) < res / 2 && (k === planesUp.length - 1 || Math.abs(x) >= s2.voidHalf)) {
+          fixed2[id] = 1;
+          V[id] = 0;
+          break;
+        }
+        if (y < planesUp[planesUp.length - 1]) {
+          fixed2[id] = 1;
+          V[id] = 0;
+        }
       }
     }
   }
@@ -139257,25 +139286,29 @@ function rfFeedPlan(S2, doc2, P, k, settings3, plan) {
     const i = L.findIndex((l) => l.copper && l.name === layer4);
     const coppers = L.filter((l) => l.copper);
     const outer = layer4 === coppers[0].name || layer4 === coppers[coppers.length - 1].name;
-    if (i < 0 || !outer) {
-      out2.push({ net: bare(net), layer: layer4, note: "the feed runs on an inner layer (stripline); route it on an outer layer, or size it by hand" });
+    if (i < 0) {
+      out2.push({ net: bare(net), layer: layer4, note: "the feed's layer is not in the stackup" });
       continue;
     }
-    const dir = layer4 === coppers[0].name ? 1 : -1;
-    const diel = [];
-    const planes = [];
-    let th = 0, ers = 0;
-    for (let j = i + dir; j >= 0 && j < L.length; j += dir) {
-      if (L[j].copper) {
-        diel.push({ th, er: th ? ers / th : 4.5 });
-        planes.push(L[j].name);
-        th = 0;
-        ers = 0;
-        continue;
+    const walk2 = (dir) => {
+      const diel2 = [];
+      const planes2 = [];
+      let th = 0, ers = 0;
+      for (let j = i + dir; j >= 0 && j < L.length; j += dir) {
+        if (L[j].copper) {
+          diel2.push({ th, er: th ? ers / th : 4.5 });
+          planes2.push(L[j].name);
+          th = 0;
+          ers = 0;
+          continue;
+        }
+        th += L[j].thickness;
+        ers += L[j].thickness * L[j].er;
       }
-      th += L[j].thickness;
-      ers += L[j].thickness * L[j].er;
-    }
+      return { diel: diel2, planes: planes2 };
+    };
+    const down = walk2(layer4 === coppers[coppers.length - 1].name ? -1 : 1), upw = outer ? null : walk2(-1);
+    const diel = down.diel, planes = down.planes;
     const mid2 = (() => {
       const tk = segs.slice().sort((a, b) => b.length - a.length)[0];
       const pts = tk.shape.t === "seg" ? [tk.shape.a, tk.shape.b] : tk.shape.pts;
@@ -139335,19 +139368,29 @@ function rfFeedPlan(S2, doc2, P, k, settings3, plan) {
     const t = L[i].thickness || 0.035;
     const tries = [];
     let pick = null;
-    for (let r = 0; r < planes.length && !pick; r++) {
-      if (!zoneAt(planes[r]).some((z2) => z2.gnd) && r < planes.length - 1) {
-        tries.push({ reference: planes[r], note: "not a ground plane under the feed" });
+    const levels2 = Math.max(planes.length, upw ? upw.planes.length : 0);
+    for (let r = 0; r < levels2 && !pick; r++) {
+      const rd = Math.min(r, planes.length - 1), ru = upw ? Math.min(r, upw.planes.length - 1) : -1;
+      const last3 = r === levels2 - 1;
+      const refs = [planes[rd], ...upw ? [upw.planes[ru]] : []];
+      const name = refs.join(" and ");
+      if (!refs.every((pl) => zoneAt(pl).some((z2) => z2.gnd)) && !last3) {
+        tries.push({ reference: name, note: "not ground planes over and under the feed" });
         continue;
       }
-      const d = feedDesign({ t, gap, dielectrics: diel, reference: r }, target2, r === 0 ? null : 0.6);
+      const voided = [...planes.slice(0, rd), ...upw ? upw.planes.slice(0, ru) : []];
+      const d = feedDesign({ t, gap, dielectrics: diel, reference: rd, ...upw ? { above: upw.diel, referenceAbove: ru } : {} }, target2, voided.length ? 0.6 : null);
       if (!d) {
-        tries.push({ reference: planes[r], note: "no width between 0.08 and 3 mm reaches it" });
+        tries.push({ reference: name, note: "no width between 0.08 and 3 mm reaches it" });
         continue;
       }
-      const row3 = { reference: planes[r], voided: planes.slice(0, r), width: r35(d.w), void_half: r35(d.voidHalf), impedance: Math.round(d.z * 10) / 10 };
+      const row3 = { reference: name, voided, width: r35(d.w), void_half: r35(d.voidHalf), impedance: Math.round(d.z * 10) / 10 };
       tries.push(row3);
-      if (d.w >= minW || r === planes.length - 1) pick = row3;
+      if (d.w >= minW || last3) pick = row3;
+    }
+    if (!pick) {
+      const ok2 = tries.filter((t2) => t2.width).sort((x, y) => y.width - x.width)[0];
+      if (ok2) pick = { ...ok2, note: `no reference gives ${minW} mm or wider here; ${ok2.width} mm holds ${target2} ohm` };
     }
     const polys = pick && pick.voided.length ? segs.map((tk) => {
       const pts = tk.shape.t === "seg" ? [tk.shape.a, tk.shape.b] : tk.shape.pts;
@@ -139356,7 +139399,7 @@ function rfFeedPlan(S2, doc2, P, k, settings3, plan) {
       const ux = (b[0] - a[0]) / Lg, uy = (b[1] - a[1]) / Lg, h3 = pick.void_half;
       return [[a[0] - ux * h3 - uy * h3, a[1] - uy * h3 + ux * h3], [b[0] + ux * h3 - uy * h3, b[1] + uy * h3 + ux * h3], [b[0] + ux * h3 + uy * h3, b[1] + uy * h3 - ux * h3], [a[0] - ux * h3 + uy * h3, a[1] - uy * h3 - ux * h3]].map((q4) => [r35(q4[0]), r35(q4[1])]);
     }) : [];
-    out2.push({ net: bare(net), full_net: net, layer: layer4, gap: r35(gap), target: target2, model: gap > 0 ? "grounded coplanar" : "microstrip", stackup_assumed: stack2.assumed, tries, ...pick || {}, void_polygons: polys });
+    out2.push({ net: bare(net), full_net: net, layer: layer4, gap: r35(gap), target: target2, model: upw ? gap > 0 ? "coplanar stripline" : "stripline" : gap > 0 ? "grounded coplanar" : "microstrip", stackup_assumed: stack2.assumed, tries, ...pick || {}, void_polygons: polys });
   }
   return { what: "rf_feed", feeds: out2 };
 }

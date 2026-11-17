@@ -910,9 +910,13 @@ function rfFeedPlan(S: Survey, doc: any, P: any, k: any, settings: any, plan: an
     const segs = S.tracksOf.get(net) || []; const byLayer = new Map<string, number>(); for (const t of segs) for (const l of t.layers as Set<string>) byLayer.set(l, (byLayer.get(l) || 0) + t.length);
     const layer = Array.from(byLayer.entries()).sort((a, b) => b[1] - a[1])[0][0]; const i = L.findIndex((l) => l.copper && l.name === layer);
     const coppers = L.filter((l) => l.copper); const outer = layer === coppers[0].name || layer === coppers[coppers.length - 1].name;
-    if (i < 0 || !outer) { out.push({ net: bare(net), layer, note: "the feed runs on an inner layer (stripline); route it on an outer layer, or size it by hand" }); continue; }
-    const dir = layer === coppers[0].name ? 1 : -1; const diel: { th: number; er: number }[] = []; const planes: string[] = []; let th = 0, ers = 0;
-    for (let j = i + dir; j >= 0 && j < L.length; j += dir) { if (L[j].copper) { diel.push({ th, er: th ? ers / th : 4.5 }); planes.push(L[j].name); th = 0; ers = 0; continue; } th += L[j].thickness; ers += L[j].thickness * L[j].er; }
+    if (i < 0) { out.push({ net: bare(net), layer, note: "the feed's layer is not in the stackup" }); continue; }
+    // the dielectrics and planes from the feed's layer outwards: one way on an outer layer (microstrip), both ways on an inner one (stripline)
+    const walk = (dir: number) => { const diel: { th: number; er: number }[] = []; const planes: string[] = []; let th = 0, ers = 0;
+      for (let j = i + dir; j >= 0 && j < L.length; j += dir) { if (L[j].copper) { diel.push({ th, er: th ? ers / th : 4.5 }); planes.push(L[j].name); th = 0; ers = 0; continue; } th += L[j].thickness; ers += L[j].thickness * L[j].er; }
+      return { diel, planes }; };
+    const down = walk(layer === coppers[coppers.length - 1].name ? -1 : 1), upw = outer ? null : walk(-1);
+    const diel = down.diel, planes = down.planes;
     // the gap to the ground beside it: the clearance of the ground pour on its layer (0 when there is no pour there: microstrip)
     // the pour that actually lies beside the feed: the ground zone on its layer whose outline holds the feed's middle
     const mid = (() => { const tk = segs.slice().sort((a, b) => b.length - a.length)[0]; const pts: Pt[] = tk.shape.t === "seg" ? [tk.shape.a, tk.shape.b] : tk.shape.pts; return [(pts[0][0] + pts[pts.length - 1][0]) / 2, (pts[0][1] + pts[pts.length - 1][1]) / 2] as Pt; })();
@@ -931,15 +935,21 @@ function rfFeedPlan(S: Survey, doc: any, P: any, k: any, settings: any, plan: an
     const radio = radioGHz(S.fps, S.padsOf.keys()); const length = segs.reduce((a, tk) => a + tk.length, 0); const lambda = 300 / (radio.ghz || 2.4) / Math.sqrt(3.2);
     if (length < lambda / 20 && !want) { out.push({ net: bare(net), layer, length: r3(length), note: `${r3(length)} mm is under a twentieth of the wavelength (${r3(lambda)} mm at ${radio.ghz || 2.4} GHz): kept as it is` }); continue; }
     const t = L[i].thickness || 0.035; const tries: any[] = []; let pick: any = null;
-    for (let r = 0; r < planes.length && !pick; r++) {
+    const levels = Math.max(planes.length, upw ? upw.planes.length : 0);
+    for (let r = 0; r < levels && !pick; r++) {
       // the return current runs in the reference: it has to be ground there, so a supply plane is cut away with the rest
-      if (!zoneAt(planes[r]).some((z) => z.gnd) && r < planes.length - 1) { tries.push({ reference: planes[r], note: "not a ground plane under the feed" }); continue; }
-      const d = feedDesign({ t, gap, dielectrics: diel, reference: r }, target, r === 0 ? null : 0.6); if (!d) { tries.push({ reference: planes[r], note: "no width between 0.08 and 3 mm reaches it" }); continue; }
-      const row = { reference: planes[r], voided: planes.slice(0, r), width: r3(d.w), void_half: r3(d.voidHalf), impedance: Math.round(d.z * 10) / 10 }; tries.push(row);
-      if (d.w >= minW || r === planes.length - 1) pick = row;
+      const rd = Math.min(r, planes.length - 1), ru = upw ? Math.min(r, upw.planes.length - 1) : -1; const last = r === levels - 1;
+      const refs = [planes[rd], ...(upw ? [upw.planes[ru]] : [])]; const name = refs.join(" and ");
+      if (!refs.every((pl) => zoneAt(pl).some((z) => z.gnd)) && !last) { tries.push({ reference: name, note: "not ground planes over and under the feed" }); continue; }
+      const voided = [...planes.slice(0, rd), ...(upw ? upw.planes.slice(0, ru) : [])];
+      const d = feedDesign({ t, gap, dielectrics: diel, reference: rd, ...(upw ? { above: upw.diel, referenceAbove: ru } : {}) }, target, voided.length ? 0.6 : null); if (!d) { tries.push({ reference: name, note: "no width between 0.08 and 3 mm reaches it" }); continue; }
+      const row = { reference: name, voided, width: r3(d.w), void_half: r3(d.voidHalf), impedance: Math.round(d.z * 10) / 10 }; tries.push(row);
+      if (d.w >= minW || last) pick = row;
     }
+    // nothing reaches the narrowest width wanted: the widest that holds the impedance, with a note why
+    if (!pick) { const ok = tries.filter((t: any) => t.width).sort((x: any, y: any) => y.width - x.width)[0]; if (ok) pick = { ...ok, note: `no reference gives ${minW} mm or wider here; ${ok.width} mm holds ${target} ohm` }; }
     const polys = pick && pick.voided.length ? segs.map((tk) => { const pts: Pt[] = tk.shape.t === "seg" ? [tk.shape.a, tk.shape.b] : tk.shape.pts; const a = pts[0], b = pts[pts.length - 1]; const Lg = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; const ux = (b[0] - a[0]) / Lg, uy = (b[1] - a[1]) / Lg, h = pick.void_half; return [[a[0] - ux * h - uy * h, a[1] - uy * h + ux * h], [b[0] + ux * h - uy * h, b[1] + uy * h + ux * h], [b[0] + ux * h + uy * h, b[1] + uy * h - ux * h], [a[0] - ux * h + uy * h, a[1] - uy * h - ux * h]].map((q) => [r3(q[0]), r3(q[1])]); }) : [];
-    out.push({ net: bare(net), full_net: net, layer, gap: r3(gap), target, model: gap > 0 ? "grounded coplanar" : "microstrip", stackup_assumed: stack.assumed, tries, ...(pick || {}), void_polygons: polys });
+    out.push({ net: bare(net), full_net: net, layer, gap: r3(gap), target, model: upw ? (gap > 0 ? "coplanar stripline" : "stripline") : gap > 0 ? "grounded coplanar" : "microstrip", stackup_assumed: stack.assumed, tries, ...(pick || {}), void_polygons: polys });
   }
   return { what: "rf_feed", feeds: out };
 }
