@@ -63,6 +63,8 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
 
     fanout=True escapes every fine-pitch chip (20 pins or more, 0.65 mm pitch or finer) to a staggered ring of vias
     before routing (board.fanout): for a dense QFN whose pins are left open because neighbouring tracks box them in.
+    fanout={"U4": [nets]} drops only those pins to a via straight out (radial, rows staggered), the way the person's
+    boards do it: name the pins whose other end lies behind the chip or across the other escapes.
 
     reroute=True lays only the copper again on a board somebody placed: every track and via comes up, and the parts,
     the outline, the zones, the rules, the stackup and the silkscreen stay exactly as they are (no sync from the
@@ -187,7 +189,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         if fanout:      # fine-pitch chips escaped to a via ring first, the way they are by hand
             for part in self.geometry()["parts"]:
                 if (part["ref"] in fanout) if isinstance(fanout, dict) else len([q for q in part["pads"] if q[0]]) >= 20:
-                    fo = step(f"fanout {part['ref']}", lambda ref=part["ref"]: self.fanout(ref, nets=fanout.get(ref) if isinstance(fanout, dict) else None))
+                    fo = step(f"fanout {part['ref']}", lambda ref=part["ref"]: self.fanout(ref, nets=fanout.get(ref), style="radial") if isinstance(fanout, dict) else self.fanout(ref))
                     if fo and fo.get("vias"):
                         out.setdefault("fanout", {})[part["ref"]] = {"vias": fo["vias"], "skipped": len(fo.get("skipped") or {})}
         auto_layers = False

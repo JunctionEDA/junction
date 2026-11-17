@@ -71290,7 +71290,7 @@ async function getItems(input) {
       if (own !== input.net && !pad2) continue;
     }
     total2++;
-    if (rows3.length >= 150 || budget <= 0) continue;
+    if (total2 <= (input.offset || 0) || rows3.length >= 150 || budget <= 0) continue;
     const big = it.kind === "footprint" || it.kind === "symbol" || it.kind === "zone";
     const row3 = { id: it.id, kind: it.kind };
     if (it.ref) row3.ref = it.ref;
@@ -71300,7 +71300,7 @@ async function getItems(input) {
     budget -= row3.sexpr.length;
     rows3.push(row3);
   }
-  return { document: path2, count: total2, items: rows3, truncated: total2 > rows3.length ? `showing ${rows3.length} of ${total2}; filter more narrowly` : void 0 };
+  return { document: path2, count: total2, items: rows3, truncated: total2 > rows3.length + (input.offset || 0) ? `showing ${rows3.length} of ${total2} from ${input.offset || 0}; filter more narrowly or pass offset` : void 0 };
 }
 async function findDatasheets(input) {
   const { doc: doc2, path: path2 } = await resolveDoc(input.doc);
@@ -118420,7 +118420,8 @@ var Router = class _Router {
       if (c.kind === "zone") continue;
       const layers = Array.from(c.layers).map((l) => copper.indexOf(l)).filter((i) => i >= 0);
       if (!layers.length) continue;
-      push({ net: c.net || "", layers, shape: c.shape, clr: P.netClearance(s2, c.net), pad: c.kind === "pad", thru: L > 1 && layers.length === L && (c.kind === "pad" || c.kind === "via") ? [c.anchors[0][0], c.anchors[0][1]] : void 0 });
+      const hole = c.kind === "via" && s2.holeClearance && c.size && c.drill ? s2.holeClearance + HOLE_SLACK - (c.size - c.drill) / 2 : 0;
+      push({ net: c.net || "", layers, shape: c.shape, clr: Math.max(P.netClearance(s2, c.net), hole), pad: c.kind === "pad", thru: L > 1 && layers.length === L && (c.kind === "pad" || c.kind === "via") ? [c.anchors[0][0], c.anchors[0][1]] : void 0 });
     }
     for (const it of doc2.items.values()) if (it.kind === "footprint") {
       for (const p of P.padsOf(it)) if (p.type === "np_thru_hole") {
