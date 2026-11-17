@@ -53,7 +53,7 @@ export interface ElementKind { type: string; title: string; newName: string; ico
 export const PCB_ELEMENT: ElementKind = {
   type: "pcb", title: "PCB", newName: "PCB", tint: "wire",
   icon: '<rect x="4" y="5" width="16" height="14" rx="1.5"/><circle cx="8.5" cy="9.5" r="1.2"/><circle cx="15.5" cy="14.5" r="1.2"/><path d="M9.5 10.5l5 3"/>',
-  summary: "A schematic and the board made from it, with its bill of materials.",
+  summary: "A schematic, its board and its bill of materials.",
 };
 /** What a new part studio or assembly is for, in a sentence (the Home tab of an empty project says it). */
 export const KIND_SUMMARY: Record<string, string> = {

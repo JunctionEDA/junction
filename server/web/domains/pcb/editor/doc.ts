@@ -822,9 +822,10 @@ export function setProjectDocs(docs: DocEntry[], open?: string) {
   if (open) { openDocId(open); return; }
   if (!id || cur || id === HOME_TAB || id.startsWith("board:") || id.startsWith("lib:")) return;
   if (id.startsWith("bom:") && projectPcbs().some((p) => "bom:" + p.key === id)) return;
-  // what was open is gone (somebody deleted it): the PCB's first document if the PCB is still there, else Home
+  // what was open is gone (somebody deleted it).  A sheet or board gives way to its PCB's first document; in a
+  // project whose PCB is at the root, so does anything else, as it always did; otherwise Home.
   const b = boundPcb();
-  const next = b && state.view === "editor" ? firstDoc(state.docs!, state.project.docs, null) : null;
+  const next = b && (state.view === "editor" || !b.dir) ? firstDoc(state.docs!, state.project.docs, null) : null;
   void openDoc(next || homeDoc());
 }
 
