@@ -155,6 +155,13 @@ You plan and judge; the engine draws. Route the whole board in one `autoroute` e
 - Keepouts hold copper out of places it must not be: under a chip antenna or an antenna's clearance area (all layers, pours included), under an inductor, across an isolation gap. Harness: `board.keepout([x0, y0, x1, y1], layers=None, tracks=True, vias=True, copper=True)` adds a KiCad rule area the router, the filler and the DRC all honour. For one run only, `keepouts: [{box, layers}]` on the `autoroute` edit, or `net_options.<net>.avoid: [box]` to keep a single net out of an area (a clock away from the analog section).
 - Decoupling capacitors sit at their pins before anything else is routed, the crystal and its two capacitors sit against the chip with nothing routed between them, and a converter's feedback track leaves from the output capacitor, away from the inductor.
 
+**Pins a fine-pitch chip leaves open.** On a dense QFN (0.4 mm pitch, often turned 45 degrees) the router can box a pin in with its neighbours' escapes (`no-room` in `why_open`; the blockers are the pins one or two along and the supply track). Work on it yourself, one side of the chip at a time, and count `board.info()["unrouted_connections"]` after every step, taking a step back when the count does not fall:
+- `board.free_pins(radius=1.5, passes=2, time_s=30)` frees each open pin (copper within the radius comes up, the open net goes first, a try that does not help is taken back). A second call with `radius=3` reaches pins the first could not.
+- A run of open pins on one side: `board.unroute(near="U4.20", radius=2.5)`, then `board.route(order=[that side's nets in pin order], time_s=60)`, so the escapes leave as one orderly bus.
+- Some pins must change layer, as on the person's boards (about half of a QFN's signal pins drop to a via 1.3 to 2.6 mm out, staggered): a pin whose other end lies behind the chip or across the other escapes. `board.fanout("U4", nets=[...], style="radial")` lays a short stub and a via straight out of each named pin, rows staggered; name only the pins that need it.
+- Supply pins next to each other join on the top layer before they drop to their plane.
+Pass `keep_rules=True` to `route` and `free_pins` when the person said not to change the rules.
+
 **The layout checklist.** `review_design` on the board (`board.review()`) checks these, and the board is not done until it is clean:
 - Small bypass capacitors right next to the supply and ground pins of their IC, closer than anything else.
 - Power lines as wide as there is room for (`widths` on the route, or a net class), and through a larger drill or two or three vias where they change layer.

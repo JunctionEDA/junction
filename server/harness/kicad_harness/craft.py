@@ -380,7 +380,7 @@ def _segs_dist(a, b, c, d) -> float:
 
 
 def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len: float | None = None, apply: bool = True,
-            rows: int | None = None, first: float | None = None) -> dict:
+            rows: int | None = None, first: float | None = None, style: str = "ring") -> dict:
     """Escape a fine-pitch chip (QFN or QFP, 0.5 mm pitch or finer) the way it is done by hand, before anything else is
     routed: every pin whose net goes far (another pad more than `far` mm away) gets a short stub straight out of its pad
     and a via in a staggered ring of two rows just outside the pin row, the vias in the order of the pins so no two stubs
@@ -403,6 +403,8 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
     nc = (r.get("net_classes") or {}).get("Default") or {}
     clr = float(nc.get("clearance") or r.get("clearance") or 0.15); vd = float(nc.get("via_diameter") or 0.5); tw = min(0.2, float(nc.get("track_width") or 0.2))
     vr = vd / 2
+    if style == "radial":
+        tw = min(tw, 0.15)      # a stub passes a neighbour's via 0.4 mm away on a 0.4 mm pitch
     sides = {}
     for q in pads:
         dx, dy = q[1] - cx, q[2] - cy
@@ -480,6 +482,20 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
                 skipped[want[i - 1][0]] = "no via site"; i -= 1
         while i > 0:
             skipped[want[i - 1][0]] = "no via site"; i -= 1
+        if style == "radial":
+            # the person's Cyberboard escape: each via straight out from its own pin (no sideways jog), the rows
+            # 1.3 mm and further out, a pin next to another diving pin going one row further so the vias stagger
+            pairs = []; last = []   # (tangent, row) of the pins placed so far on this side
+            rowgap = vd + clr
+            for q in want:
+                si = s_of(q[1], q[2])
+                busy = {k for (t, k) in last if abs(t - si) < vd + clr + 0.05}
+                k = next((k for k in range(nrows) if k not in busy), None)
+                if k is None:
+                    skipped[q[0]] = "no via site"
+                    continue
+                last.append((si, k))
+                pairs.append((q, (si, max(d1, 1.3) + k * rowgap)))
         for q, (s, d) in sorted(pairs, key=lambda pq: pq[1][1]):   # inner row first
             si = s_of(q[1], q[2]); dev = s - si
             base = (q[1] - cx) * n[0] + (q[2] - cy) * n[1]
