@@ -2620,13 +2620,19 @@ class Board(_Doc):
                     self.add_item(snap[i])
                 self.flush()
 
-    def optimize(self, nets: list | None = None, time_s: float = 10, stretch: float = 1.6, keep_rules: bool = True) -> dict:
+    def optimize(self, nets: list | None = None, time_s: float = 10, stretch: float = 1.6, keep_rules: bool = True, budget_s: float | None = 600,
+                 progress: bool = True) -> dict:
         """Take out layer changes a finished route does not need, net by net: each signal net with vias (or \`nets\`) is
         taken up and laid again on its own several ways (front only with no via, front and back, every layer, front
         with each inner layer), and the best is kept only when the net is whole, it has fewer vias (or the same and is
         shorter), it is no more than \`stretch\` times as long plus 4 mm, nothing else opened and the DRC has no more
         errors.  Supply and ground nets are left alone.  Returns {"before", "after" (signal vias), "kept": [...]}.
-        About time_s seconds per try; run it last, on a board with every connection made."""
+        About time_s seconds per try, five or six tries a net (each try also checks the board, which on a big board takes
+        longer than the route); it stops starting new nets after \`budget_s\` seconds (None: no limit) and lists the nets
+        it did not reach under "not_tried", most vias first, so a second call with nets= picks up there.  progress=True
+        prints a line per net as it goes.  Run it last, on a board with every connection made."""
+        import time as _t
+        t_start = _t.time()
         supply = re.compile(r"^(GND|AGND|DGND|PGND|VSS|VBUS|VIN|VCC|VDD|VBAT)|^\\+|^-|3V3|5V|1V8|LDO", re.I)
         def st(n):
             t = self.trace(n)
@@ -2639,8 +2645,13 @@ class Board(_Doc):
         before = sum(s[0] for s, _ in cands)
         options = [dict(layers=["F.Cu"], allow_vias=False), dict(layers=["F.Cu", "B.Cu"], via_cost=8), dict(via_cost=8), dict(via_cost=20)]
         options += [dict(layers=["F.Cu", l], via_cost=8) for l in (self.info().get("copper_layers") or [])[1:-1] if isinstance(l, str)]
-        kept, after = [], before
-        for (v0, l0, _), net in cands:
+        kept, after, not_tried = [], before, []
+        for i, ((v0, l0, _), net) in enumerate(cands):
+            if budget_s is not None and _t.time() - t_start > budget_s:
+                not_tried = [n for _, n in cands[i:]]
+                break
+            if progress:
+                print(f"optimize: {net} ({i + 1}/{len(cands)}, {v0} vias, {l0:.1f} mm, {_t.time() - t_start:.0f} s)", flush=True)
             best = None
             for k, opt in enumerate(options):
                 with self.trial():
@@ -2665,7 +2676,7 @@ class Board(_Doc):
         if kept:
             self.fill()
         self.project.note(f"board: optimized {len(kept)} nets, signal vias {before} -> {after}")
-        return {"before": before, "after": after, "kept": kept}
+        return {"before": before, "after": after, "kept": kept, **({"not_tried": not_tried} if not_tried else {})}
 
     def _all_items(self, kinds, **filt) -> list:
         """Every item of these kinds, page by page (get_items returns at most 150 at a time)."""
