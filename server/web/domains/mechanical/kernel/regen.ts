@@ -110,12 +110,13 @@ export class RegenEngine {
     k.scope = owned;
     const ctx: EvalContext = {
       oc: k.oc, k, feature: { id: f.id, type: f.type, name: f.name },
-      bodies: () => state.bodies,
+      bodies: () => (state.bodies.some((b) => b.reference) ? state.bodies.filter((b) => !b.reference) : state.bodies),
+      allBodies: () => state.bodies,
       body: (id) => state.bodies.find((b) => b.id === id),
       addBody: (shape, names, o = {}) => {
         let id = o.suffix ? `${f.id}:${o.suffix}` : f.id;
         for (let n = 2; state.bodies.some((b) => b.id === id); n++) id = `${f.id}:${o.suffix ? o.suffix + "." : ""}${n}`;
-        const body = made({ id, name: o.name || `Part ${state.bodies.length + 1}`, rev: nextRev++, shape, topo: buildTopo(k, shape, names, f.id), createdBy: f.id });
+        const body = made({ id, name: o.name || `Part ${state.bodies.length + 1}`, rev: nextRev++, shape, topo: buildTopo(k, shape, names, f.id), createdBy: f.id, ...(o.reference ? { reference: true } : {}) });
         state.bodies.push(body);
         return body;
       },

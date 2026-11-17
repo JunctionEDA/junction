@@ -21,7 +21,7 @@ import * as edits from "../document/edits";
 import { PART_STUDIO_KIND, featureInputs, featuresOf, nextName, orderAt, rollbackIndex, type FeatureItem } from "../document/format";
 import { FEATURES, TOOLS } from "../generated/page";
 import { KernelClient, type KernelState } from "../kernel/client";
-import type { BodyResult, DatumView, FeatureReport, SketchView } from "../kernel/protocol";
+import type { BodyResult, DatumView, FeatureInput, FeatureReport, RegenResult, SketchView } from "../kernel/protocol";
 import { resolveInputs, variableValues, variablesOf } from "../document/variables";
 import { pickKindsOf, sameTarget, targetOf, targetsIn, type RefTarget } from "../features/_refs";
 import { ModelView, pickKey, type Pick, type PickKind } from "../viewport/modelview";
@@ -66,6 +66,15 @@ export interface StudioState {
 
 export const featureDef = (type: string): FeatureDefinition | undefined => FEATURES.find((f) => f.type === type);
 
+/**
+ * Something that lives as long as a part studio is open and is not a tool, a panel or a feature: a link to
+ * another document, a presence layer.  It is called with each studio as it opens and may return what to do when
+ * the studio closes.  Register at module load (`studioExtensions.push(...)`) from a file the page bundle imports
+ * (a panel, a tool).
+ */
+export type StudioExtension = (studio: PartStudio) => (() => void) | void;
+export const studioExtensions: StudioExtension[] = [];
+
 export class PartStudio {
   readonly session: ItemDocSession;
   readonly kernel: KernelClient;
@@ -81,6 +90,15 @@ export class PartStudio {
   private pastDoc: ItemDoc | null = null;
   /** A sketch tool that is drawing gets the keys first; it returns true for the ones it used. */
   keyHandler: ((ev: KeyboardEvent) => boolean) | null = null;
+  /**
+   * Called on the worker's input just before every regeneration, in order: each may return a changed copy.  For
+   * data a feature needs that is not in this document (the Board feature's board, read live from another
+   * document): what a filter adds is never stored.
+   */
+  readonly inputFilters: ((inputs: FeatureInput[]) => FeatureInput[])[] = [];
+  /** Called after every regeneration whose result was shown. */
+  readonly onRegen: ((result: RegenResult) => void)[] = [];
+  private extensionClosers: (() => void)[] = [];
 
   constructor(readonly host: DocumentHostContext, canvasHost: HTMLElement) {
     this.state = {
@@ -105,6 +123,7 @@ export class PartStudio {
       onNotice: (text) => host.toast(text, 4000),
     });
     this.session.start();
+    for (const ext of studioExtensions) { const stop = ext(this); if (stop) this.extensionClosers.push(stop); }
   }
 
   // ---------------------------------------------------------------- state
@@ -137,6 +156,7 @@ export class PartStudio {
   tools() { return TOOLS; }
 
   close(): void {
+    for (const stop of this.extensionClosers.splice(0)) { try { stop(); } catch (e) { console.warn(e); } }
     this.closed = true;
     clearTimeout(this.regenTimer);
     if (this.regenWhenShown) document.removeEventListener("visibilitychange", this.regenWhenShown);
@@ -200,7 +220,8 @@ export class PartStudio {
     if (this.closed || !this.state.loaded) return;
     const { features, rollback } = this.effective();
     // numbers typed as expressions follow the variables (document/variables.ts)
-    const inputs = this.doc ? resolveInputs(featureInputs(features), variableValues(variablesOf(this.doc)).values) : featureInputs(features);
+    let inputs = this.doc ? resolveInputs(featureInputs(features), variableValues(variablesOf(this.doc)).values) : featureInputs(features);
+    for (const filter of this.inputFilters) inputs = filter(inputs);
     const result = await this.kernel.regenerate(inputs, rollback);
     if (!result || this.closed) return;
     const reports: StudioState["reports"] = {};
@@ -211,6 +232,7 @@ export class PartStudio {
     this.refreshSketches();
     // frame the model when there first is one (a sketch being drawn is left where the person put it)
     if (!this.fitted && result.bodies.length && !this.state.sketch) { this.fitted = true; this.viewport.fit(); }
+    for (const fn of this.onRegen) fn(result);
   }
 
   /** A sketch is shown while it is open, selected, being used by the dialog, or not yet used by a later feature. */

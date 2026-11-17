@@ -60,6 +60,7 @@ import { fontCommitObserver, initFonts } from "./fonts";
 import { installViewSwitcher } from "./view-switcher";
 import "../mech";   // the board link: outline, holes and keep-outs driven by a part studio (web/domains/pcb/mech)
 import "./title";
+import "./cad-usage";   // on a board: the way to the part studios and assemblies that use it
 window.CollabApp = { getState: store.get, subscribe: store.subscribe, dispatch: (a) => dispatchAction(a), renderProps: (el) => renderPropsInto(el), selectionCount };
 
 

@@ -26,6 +26,12 @@ export interface Body {
   topo: BodyTopo;
   /** the feature that made the body */
   createdBy: string;
+  /**
+   * Reference geometry (a board from the electronics editor, an imported envelope): it can be picked, measured
+   * and named in a feature's parameters, but `ctx.bodies()` leaves it out, so a feature that acts on "every
+   * body" does not fuse with it or cut it.
+   */
+  reference?: boolean;
 }
 
 /** A sketch as later features see it: where it lies and the closed regions it encloses, as kernel faces. */
@@ -74,14 +80,16 @@ export interface EvalContext {
   readonly k: Kernel;
   readonly feature: { id: string; type: string; name: string };
 
-  /** The bodies as they are now, in creation order. */
+  /** The bodies as they are now, in creation order, without reference bodies (see Body.reference). */
   bodies(): readonly Body[];
+  /** Every body, reference bodies included. */
+  allBodies(): readonly Body[];
   body(id: string): Body | undefined;
   /**
    * Add a body.  `names` gives every face its stable name (a face it returns null for gets a fallback name);
    * edge and vertex names follow from the faces.  `suffix` tells apart several bodies made by one feature.
    */
-  addBody(shape: Shape, names: FaceNamer, o?: { suffix?: string; name?: string }): Body;
+  addBody(shape: Shape, names: FaceNamer, o?: { suffix?: string; name?: string; reference?: boolean }): Body;
   /** Replace a body's shape (after a boolean, a fillet, …), keeping its id and name. */
   replaceBody(body: Body, shape: Shape, names: FaceNamer): Body;
   removeBody(body: Body): void;
