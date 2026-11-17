@@ -541,7 +541,7 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
           }
           const byGroup = new Map<string, string[]>(); for (const pl of res.placements) { const g = pl.group || "ungrouped"; if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g)!.push(pl.ref); }
           lines.push({ kind: "modify", text: `Place ${res.placements.length} footprint${res.placements.length === 1 ? "" : "s"} in ${byGroup.size} group${byGroup.size === 1 ? "" : "s"} inside (${res.outline.map(fmt).join(", ")})`, ids: cs.map((c) => c.id) });
-          details.push({ auto_place: { outline: res.outline.map(r4), outline_from_board: res.outlineFromBoard, score: res.score, groups: res.groups, unknown_refs: res.unknown, turned: res.turned,
+          details.push({ auto_place: { outline: res.outline.map(r4), outline_from_board: res.outlineFromBoard, score: res.score, groups: res.groups, unknown_refs: res.unknown, turned: res.turned, motion_sensors: res.motion_sensors,
             placements: res.placements.map((pl: any) => ({ ref: pl.ref, x: r4(pl.x), y: r4(pl.y), rotation: pl.rot, side: pl.side })),
             note: "overlaps, courtyardClashes and outside should be 0; ratsnest is the total length of the connections still to route, lower is better. Adjust groups, anchors, edges or the outline and propose again if the score or the picture is poor." } });
           break;

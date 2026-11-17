@@ -98794,6 +98794,7 @@ function build2(input) {
             groups: res.groups,
             unknown_refs: res.unknown,
             turned: res.turned,
+            motion_sensors: res.motion_sensors,
             placements: res.placements.map((pl) => ({ ref: pl.ref, x: r44(pl.x), y: r44(pl.y), rotation: pl.rot, side: pl.side })),
             note: "overlaps, courtyardClashes and outside should be 0; ratsnest is the total length of the connections still to route, lower is better. Adjust groups, anchors, edges or the outline and propose again if the score or the picture is poor."
           } });
@@ -122244,6 +122245,13 @@ function turnBox(b, deg) {
 var shift = (b, x, y) => [b[0] + x, b[1] + y, b[2] + x, b[3] + y];
 var hit = (a, b, gap) => a[0] < b[2] + gap - 1e-6 && a[2] > b[0] - gap + 1e-6 && a[1] < b[3] + gap - 1e-6 && a[3] > b[1] - gap + 1e-6;
 var GLOBAL_NAME = /^\/?(GND|AGND|DGND|PGND|VSS|VCC|VDD|VBUS|VIN|VBAT|\+?\d+V\d*|\+?\d+\.\d+V|\+\d*V\d*[A-Z]*)$/i;
+var MOTION = /\b(IMU|accelerometer|accel|gyro\w*|magnetometer|compass|inertial|6-?axis|9-?axis)\b|^(ICM-?\d|MPU-?\d|BMI\d|BMX\d|BNO\d|BMM\d|BMA\d|LSM\d|LIS\d|ASM330|ISM330|IIS\d|IAM-?\d|ADXL\d|ADXRS|MMA\d|FXOS|FXAS|KX\w?\d|MMC\d|QMC\d|HMC\d|AK09|SCH16|MC34X)/i;
+function isMotionSensor(K11, node) {
+  const ref = refOf(K11, node);
+  if (/^(C|R|L|D|J|P|TP|SW|Y|X|FB|F)\d/i.test(ref)) return false;
+  const props = K11.kids(node, "property").filter((q4) => /^(Value|Description|MPN|Part ?Number|Manufacturer_Part_Number|LCSC)$/i.test(K11.str(q4[1]))).map((q4) => K11.str(q4[2]));
+  return props.some((v) => MOTION.test(v.trim()));
+}
 function partOf(K11, P, doc2, it, spec) {
   let node = it.node;
   const cur2 = K11.atOf(it.node);
@@ -122325,9 +122333,15 @@ function place(K11, P, doc2, settings3, opts2 = {}) {
   for (const s2 of opts2.footprints || []) if (s2 && s2.ref) specs.set(s2.ref, s2);
   const all2 = [];
   const byRef2 = /* @__PURE__ */ new Map();
+  const motion = [];
   for (const it of doc2.items.values()) if (it.kind === "footprint") {
     const ref = refOf(K11, it.node);
-    const p = partOf(K11, P, doc2, it, specs.get(ref) || null);
+    let sp = specs.get(ref) || null;
+    if (isMotionSensor(K11, it.node)) {
+      motion.push(ref);
+      if (!sp || sp.rot === void 0 && !(typeof sp.fixed === "object" && sp.fixed && sp.fixed.rot !== void 0)) sp = { ...sp || {}, ref, rot: 0 };
+    }
+    const p = partOf(K11, P, doc2, it, sp);
     all2.push(p);
     if (ref && !byRef2.has(ref)) byRef2.set(ref, p);
   }
@@ -122784,7 +122798,8 @@ function place(K11, P, doc2, settings3, opts2 = {}) {
         return true;
       }
       let rots = [0, 90, 180, 270];
-      if (spec && spec.rot !== void 0) rots = [norm2(spec.rot - ap.rot)];
+      const held = spec && spec.rot !== void 0 ? ap : b.parts.find((q4) => q4.spec && q4.spec.rot !== void 0 && !b.edge) || null;
+      if (held) rots = [norm2(held.spec.rot - held.rot)];
       else if (b.edge) {
         const pc = ap.pads.length ? ap.pads.reduce((s2, d) => [s2[0] + d.x / ap.pads.length, s2[1] + d.y / ap.pads.length], [0, 0]) : [0, 0];
         const bc2 = [(ap.box[0] + ap.box[2]) / 2, (ap.box[1] + ap.box[3]) / 2];
@@ -123015,7 +123030,11 @@ function place(K11, P, doc2, settings3, opts2 = {}) {
   }
   const { placements: placements2, score, groups } = res;
   const O = res.O;
-  return { placements: placements2, score, outline: O.map(r3), outlineFromBoard: fromBoard, groups, unknown, turned: turnedChips.length ? turnedChips : void 0 };
+  const oriented = motion.length ? motion.map((ref) => {
+    const pl = placements2.find((q4) => q4.ref === ref);
+    return { ref, rot: pl ? pl.rot : null, axes: pl && norm2(pl.rot) % 90 === 0 ? "sensor X points " + ["right", "up", "left", "down"][norm2(pl.rot) / 90] + " and Y " + ["up", "left", "down", "right"][norm2(pl.rot) / 90] + " on the board seen from the top (pin 1 top left at 0\xB0, as in most datasheets' top view)" + (pl.side === "back" ? "; on the back, so X is mirrored and Z points down" : "") : "not square to the board" };
+  }) : void 0;
+  return { placements: placements2, score, outline: O.map(r3), outlineFromBoard: fromBoard, groups, unknown, turned: turnedChips.length ? turnedChips : void 0, motion_sensors: oriented };
 }
 function mstTotal(pads) {
   const by = /* @__PURE__ */ new Map();

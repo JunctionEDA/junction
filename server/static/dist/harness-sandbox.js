@@ -2331,6 +2331,8 @@ class Board(_Doc):
         out = {"placed": len(d.get("placements", [])), "score": d.get("score"), "outline": d.get("outline"), "unknown_refs": d.get("unknown_refs") or []}
         if d.get("turned"):      # square chips the engine stood at 45 degrees because their cluster came out smaller
             out["turned_45"] = d["turned"]
+        if d.get("motion_sensors"):      # accelerometers, gyros, IMUs: square to the board, and which way their axes point
+            out["motion_sensors"] = d["motion_sensors"]
         self.project.note(f"board: placed {out['placed']} footprints, score {out['score']}")
         # the small parts, in the order a person seats them: the matching network at the radio pin, the bypass capacitors
         # at their supply pins, then the crystal at its oscillator pins and the parts that serve one pin (a pull-down in
@@ -6708,6 +6710,8 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         if placed:
             sc = placed.get("score") or {}
             out["placed"] = {"parts": placed.get("placed"), "clashes": len(sc.get("clashes") or []), "outside": sc.get("outside", 0)}
+            if placed.get("motion_sensors"):      # IMUs square to the board, their axes said so the firmware can map them
+                out["placed"]["motion_sensors"] = placed["motion_sensors"]
             if isinstance(placed.get("bypass"), dict):
                 out["placed"]["bypass"] = placed["bypass"]
             if isinstance(out["placed"].get("bypass"), dict):      # only the capacitors that still stand in a pin's way
@@ -6972,7 +6976,7 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
     nc = (r.get("net_classes") or {}).get("Default") or {}
     clr = float(nc.get("clearance") or r.get("clearance") or 0.15); vd = float(nc.get("via_diameter") or 0.5); tw = min(0.2, float(nc.get("track_width") or 0.2))
     vr = vd / 2
-    if style == "radial":
+    if style in ("radial", "bus"):
         tw = min(tw, 0.15)      # a stub passes a neighbour's via 0.4 mm away on a 0.4 mm pitch
     sides = {}
     for q in pads:
@@ -7008,6 +7012,20 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
                 continue
             want.append(q)
         if not want:
+            continue
+        if style == "bus":
+            # the person's Ember escape: every far-going pin leaves straight out on the chip's own layer, side by side
+            # at the pin pitch, to \`first\` mm past the pad row, with no via near the chip; the router carries the
+            # bus on from the stub ends, where there is room to turn and to change layer
+            for q in want:
+                si = s_of(q[1], q[2]); base = (q[1] - cx) * n[0] + (q[2] - cy) * n[1]
+                end = (cx + n[0] * (proj + half + (first or 1.2)) + tng[0] * si, cy + n[1] * (proj + half + (first or 1.2)) + tng[1] * si)
+                a, b = (q[1], q[2]), end
+                if any(_seg_dist((o[1], o[2]), a, b) < pitch / 4 + tw / 2 + clr - 1e-6 for o in pads if o[0] != q[0] and o[0]):
+                    skipped[q[0]] = "too close: stub by a pin"; continue
+                if any(_segs_dist(a, b, c, d) < tw + clr - 1e-6 for c, d, _ in placed_s):
+                    skipped[q[0]] = "too close: stub by a stub"; continue
+                placed_s.append((a, b, q[3])); plan.append((q, [a, b], None))
             continue
         span = max(abs(s_of(q[1], q[2])) for q in row) + 0.3
         # rows of via sites, each row in the gaps of the one inside it; as many rows as the pin pitch needs (a 0.4 mm
@@ -7104,7 +7122,8 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
         laid = []
         for q, path, v in plan:
             self.track(q[3], [[round(x, 4), round(y, 4)] for x, y in path], layer="F.Cu" if part.get("side", "front") == "front" else "B.Cu", width=tw)
-            self.via(q[3], [round(v[0], 4), round(v[1], 4)])
+            if v is not None:
+                self.via(q[3], [round(v[0], 4), round(v[1], 4)])
             res = self.flush() or {}
             laid.append((q, path, list(res.get("added") or [])))
         bad = set()
@@ -7122,8 +7141,8 @@ def _fanout(self, ref: str, nets: list | None = None, far: float = 4.0, pad_len:
             self.flush()
         plan = [p for i, p in enumerate(plan) if i not in bad]
         if plan:
-            self.project.note(f"board: fanned out {ref}: {len(plan)} pins to a staggered via ring")
-    return {"vias": len(plan), "pins": sorted((q[0] for q, _, _ in plan), key=lambda x: (len(x), x)), "skipped": skipped}
+            self.project.note(f"board: fanned out {ref}: {len(plan)} pins " + ("as a bus of stubs" if style == "bus" else "to a staggered via ring"))
+    return {"vias": sum(1 for p in plan if p[2] is not None), "stubs": len(plan), "pins": sorted((q[0] for q, _, _ in plan), key=lambda x: (len(x), x)), "skipped": skipped}
 
 
 def install(Board) -> None:
@@ -9496,6 +9515,6 @@ def __kc_run(code, dry=False):
     if project is not None and project.log:
         out["notes"] = project.log[-60:]
     return json.dumps(out)
-`;async function J(){let e=JSON.parse(T()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:A}=require(s+"pyodide.js"),o=await A({indexURL:s,jsglobals:{},stdout:p,stderr:p});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),T())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of Q)o.FS.writeFile("/kh/"+r,l);o.runPython(Y);let j=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(j(String(e.code||""),e.dry===!0)))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
+`;async function J(){let e=JSON.parse(T()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:j}=require(s+"pyodide.js"),o=await j({indexURL:s,jsglobals:{},stdout:p,stderr:p});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),T())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of Q)o.FS.writeFile("/kh/"+r,l);o.runPython(Y);let A=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(A(String(e.code||""),e.dry===!0)))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
 `).filter(Boolean).slice(-1)[0]||"The script failed."}}a.done=!0,a.output=n.join(`
 `),d(a),process.exit(0)}J().catch(e=>{try{d({done:!0,ok:!1,error:"The Python runtime could not be started: "+String(e&&e.message||e),output:""})}finally{process.exit(1)}});
