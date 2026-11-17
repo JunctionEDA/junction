@@ -2275,6 +2275,48 @@ class Board(_Doc):
             e["drill"] = drill
         self._edit(e)
 
+    def fits(self, net: str, via=None, track=None, layer: str = "F.Cu", width: float | None = None, size: float | None = None,
+             drill: float | None = None) -> dict:
+        """Would a via at `via`=(x, y) or a track through `track`=[(x, y), ...] on `layer` keep every rule against the
+        copper already there?  Checks the copper clearance (real pad shapes, turned pads included), the hole clearance
+        both ways, by net class.  Returns {"fits", "blocked_by": [{"id", "kind", "ref", "net", "layer", "rule",
+        "slack_mm"}], "nearest": [...]}; a negative slack_mm is how far it falls short.  Nothing is drawn."""
+        self.flush()
+        args = {"net": self._net(net)}
+        if via is not None:
+            args["via"] = {"x": float(via[0]), "y": float(via[1]), **({"size": size} if size else {}), **({"drill": drill} if drill else {})}
+        if track is not None:
+            pts = [(lambda q: [q["x"], q["y"]])(self.pad(p)) if isinstance(p, str) else [float(p[0]), float(p[1])] for p in track]
+            args["track"] = {"pts": pts, "layer": layer, **({"width": width} if width else {})}
+        return self._call("fits", **args)
+
+    def move_via(self, via_id: str, to) -> None:
+        """Move a via to `to`=(x, y) and drag the ends of the tracks that met it along, on every layer (check the new
+        spot with board.fits(net, via=to) first).  The tracks keep their other ends, so a long run may need a new bend."""
+        self.flush()
+        got = self._call("get_items", ids=[via_id]).get("items", [])
+        if not got:
+            raise HarnessError(f"There is no via {via_id} on the board.")
+        sx = got[0]["sexpr"]
+        m = re.search(r"\(at ([\d.\-]+) ([\d.\-]+)\)", sx)
+        x0, y0 = float(m.group(1)), float(m.group(2)); x1, y1 = float(to[0]), float(to[1])
+        moved = []
+        for it in self._call("get_items", kinds=["segment"], near={"x": x0, "y": y0, "radius": 0.05}).get("items", []):
+            t = it["sexpr"]
+            for end in ("start", "end"):
+                e = re.search(r"\(" + end + r" ([\d.\-]+) ([\d.\-]+)\)", t)
+                if e and abs(float(e.group(1)) - x0) < 0.002 and abs(float(e.group(2)) - y0) < 0.002:
+                    t = t[:e.start()] + f"({end} {_r(x1)} {_r(y1)})" + t[e.end():]
+            if t != it["sexpr"]:
+                moved.append((it["id"], t))
+        fresh = lambda t: re.sub(r'\s*\(uuid "[^"]*"\)', "", t)
+        self._edit({"op": "remove", "id": via_id})
+        self.add_item(fresh(sx[:m.start()] + f"(at {_r(x1)} {_r(y1)})" + sx[m.end():]))
+        for i, t in moved:
+            self._edit({"op": "remove", "id": i})
+            self.add_item(fresh(t))
+        self.flush()
+
     def whats_at(self, at, radius: float = 0.8) -> list:
         """The copper within `radius` mm of a point, nearest first: [{"kind", "net", "layer", "gap_mm", "id", and "start",
         "end", "width" for a track or "at", "size" for a via or pad}], gap_mm from the point to the item's copper edge

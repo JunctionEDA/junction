@@ -172,6 +172,7 @@ export class Workspace {
       case "highlight": return { document: this.find(args.document).path, highlighted: [], note: "These are files on disk: nobody has them open, so there is nobody to show a highlight to." };
       case "get_board_info": { const b = this.docs.find((d) => d.docType === "kicad_pcb"); if (!b) throw new ToolError("This project has no board."); this.open(b); return design.boardInfo(); }
       case "get_items": return on(() => design.getItems(rest()));
+      case "fits": return on(() => design.fitsCheck(rest()));
       case "find_datasheets": return on(() => design.findDatasheets(rest()));
       case "find_parts": return library.findParts(rest());
       case "get_library_part": return library.getLibraryPart(rest());

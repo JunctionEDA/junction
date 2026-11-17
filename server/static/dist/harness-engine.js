@@ -71265,6 +71265,71 @@ async function boardModels(doc2) {
     note: unchecked ? "KiCad's 3D library could not be listed from here, so those parts were not checked." : replaced.length ? "Replaced parts are shown with the closest model KiCad's 3D library has; the assign_models edit writes that model into the footprint so every viewer shows it. Parts without a model are drawn as a plain stand-in shape." : missing.length ? "Parts without a model are drawn as a plain stand-in shape in the 3D view." : void 0
   };
 }
+async function fitsCheck(input) {
+  const { doc: doc2, path: path2 } = await resolveDoc(input.doc);
+  const P = PCB3();
+  if (!P || doc2.type !== "pcb") throw new ToolError("fits works on a board.");
+  const s2 = P.designSettings(ED().proSettings || null);
+  const nc = P.netclassOf ? P.netclassOf(s2, input.net) : {};
+  const NT = P.netTable(doc2);
+  const want2 = NT.key(input.net) ?? input.net;
+  const copper = doc2.copper.length ? doc2.copper : ["F.Cu", "B.Cu"];
+  const own = [];
+  if (input.via) {
+    const size2 = input.via.size || nc.via_diameter || s2.viaDiameter || 0.6, drill2 = input.via.drill || nc.via_drill || s2.viaDrill || 0.3;
+    own.push({ shape: { t: "circle", x: input.via.x, y: input.via.y, r: size2 / 2 }, layers: copper, hole: { t: "circle", x: input.via.x, y: input.via.y, r: drill2 / 2 } });
+  }
+  if (input.track) {
+    const w = input.track.width || nc.track_width || s2.trackWidth || 0.2;
+    const pts = input.track.pts.map((q4) => [Number(q4[0]), Number(q4[1])]);
+    for (let i = 1; i < pts.length; i++) own.push({ shape: { t: "seg", a: pts[i - 1], b: pts[i], r: w / 2 }, layers: [input.track.layer || "F.Cu"] });
+  }
+  if (!own.length) throw new ToolError("Give via {x, y} or track {pts, layer}.");
+  const clr = P.netClearance(s2, input.net), hc = s2.holeClearance || 0, rows3 = [];
+  const k = K4();
+  const padHole = (p) => {
+    const d = k.kid(p.node, "drill");
+    const nums = d ? d.slice(1).filter((v) => typeof v === "number") : [];
+    return nums.length ? { t: "circle", x: p.x, y: p.y, r: Math.min(...nums) / 2 } : null;
+  };
+  for (const c of P.conductors(doc2)) {
+    if (c.kind === "zone" || c.net === want2) continue;
+    const need = Math.max(clr, P.netClearance(s2, c.net));
+    const theirHole = c.kind === "via" ? { t: "circle", x: c.anchors[0][0], y: c.anchors[0][1], r: (c.drill || 0) / 2 } : c.kind === "pad" && c.pad && c.pad.type === "thru_hole" ? padHole(c.pad) : null;
+    for (const o of own) {
+      const layers = o.layers.filter((l) => c.layers.has(l));
+      let gap = Infinity, kind = "";
+      if (layers.length) {
+        const g2 = P.shapeGap(o.shape, c.shape) - need;
+        if (g2 < gap) {
+          gap = g2;
+          kind = "clearance";
+        }
+      }
+      if (o.hole && hc) {
+        const g2 = P.shapeGap(o.hole, c.shape) - hc;
+        if (g2 < gap) {
+          gap = g2;
+          kind = "hole_clearance";
+        }
+      }
+      if (theirHole && theirHole.r > 0 && hc) {
+        const g2 = P.shapeGap(o.shape, theirHole) - hc;
+        if (g2 < gap) {
+          gap = g2;
+          kind = "hole_clearance";
+        }
+      }
+      if (gap > 1) continue;
+      rows3.push({ id: c.id, kind: c.kind, ref: c.kind === "pad" ? `${c.item.ref || "?"}.${c.pad.number || ""}` : void 0, net: c.netObj && c.netObj.name || NT.name?.(c.net) || c.net, layer: layers.join(" ") || "hole", rule: kind, slack_mm: r33(gap) });
+    }
+  }
+  rows3.sort((a, b) => a.slack_mm - b.slack_mm);
+  const seen = /* @__PURE__ */ new Set();
+  const near2 = rows3.filter((r) => seen.has(r.id) ? false : (seen.add(r.id), true)).slice(0, 12);
+  const bad = near2.filter((r) => r.slack_mm < -5e-4);
+  return { document: path2, fits: !bad.length, blocked_by: bad, nearest: near2.filter((r) => r.slack_mm >= -5e-4).slice(0, 5) };
+}
 async function getItems(input) {
   const { doc: doc2, path: path2 } = await resolveDoc(input.doc);
   const k = K4();
@@ -141077,6 +141142,8 @@ var Workspace = class {
       }
       case "get_items":
         return on2(() => getItems(rest()));
+      case "fits":
+        return on2(() => fitsCheck(rest()));
       case "find_datasheets":
         return on2(() => findDatasheets(rest()));
       case "find_parts":
