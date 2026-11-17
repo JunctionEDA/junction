@@ -100,7 +100,7 @@ function moveItem(doc: any, it: any, x: number, y: number, rot: number | undefin
     const dx = x - pts[0][0], dy = y - pts[0][1]; k.setPts(node, pts.map((p: number[]) => [p[0] + dx, p[1] + dy]));
     return modified(doc, it, node);
   }
-  if (!k.kid(node, "at")) throw new ToolError(`a ${it.kind} has no single position; remove it and add it again where it should go`);
+  if (!k.kid(node, "at") && !k.kid(node, "transform")) throw new ToolError(`a ${it.kind} has no single position; remove it and add it again where it should go`);
   const [ox, oy, orot] = k.atOf(node); const dx = x - ox, dy = y - oy;
   if (doc.type === "pcb" && it.kind === "footprint") {
     const P = PCB();
@@ -512,6 +512,11 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
           pcbOnly(e.op); const P = PCB(); const net = boardNet(doc, text(e.net, "net")); const s = P.designSettings(ed.proSettings || null);
           const size = e.size === undefined ? s.viaDiameter : num(e.size, "size"), drill = e.drill === undefined ? s.viaDrill : num(e.drill, "drill");
           if (!(drill > 0 && size > drill)) throw new ToolError("a via's size must be larger than its drill");
+          {   // a via of the same net already standing on the spot: a second one on top adds nothing (stitching run twice stacked hundreds)
+            const k = K(), vx = num(e.x, "x"), vy = num(e.y, "y"); let same: any = null;
+            for (const it of doc.items.values() as Iterable<any>) { if (it.kind !== "via" || touched.has(it.id)) continue; const at = k.kid(it.node, "at"); if (!at || Math.abs(k.num(at[1]) - vx) > 1e-3 || Math.abs(k.num(at[2]) - vy) > 1e-3) continue; same = it; break; }
+            if (same) { lines.push({ kind: "add", text: `A via already stands at (${fmt(e.x)}, ${fmt(e.y)}): none added`, ids: [same.id] }); break; }
+          }
           const c = added(doc, P.viaNode(doc, num(e.x, "x"), num(e.y, "y"), size, drill, net)); changes.push(c);
           lines.push({ kind: "add", text: `Add via ${fmt(size)}/${fmt(drill)} mm on net ${net.name} at (${fmt(e.x)}, ${fmt(e.y)})`, ids: [c.id] });
           break;
@@ -541,7 +546,7 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
           }
           const byGroup = new Map<string, string[]>(); for (const pl of res.placements) { const g = pl.group || "ungrouped"; if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g)!.push(pl.ref); }
           lines.push({ kind: "modify", text: `Place ${res.placements.length} footprint${res.placements.length === 1 ? "" : "s"} in ${byGroup.size} group${byGroup.size === 1 ? "" : "s"} inside (${res.outline.map(fmt).join(", ")})`, ids: cs.map((c) => c.id) });
-          details.push({ auto_place: { outline: res.outline.map(r4), outline_from_board: res.outlineFromBoard, score: res.score, groups: res.groups, unknown_refs: res.unknown, turned: res.turned,
+          details.push({ auto_place: { outline: res.outline.map(r4), outline_from_board: res.outlineFromBoard, score: res.score, groups: res.groups, unknown_refs: res.unknown, turned: res.turned, motion_sensors: res.motion_sensors,
             placements: res.placements.map((pl: any) => ({ ref: pl.ref, x: r4(pl.x), y: r4(pl.y), rotation: pl.rot, side: pl.side })),
             note: "overlaps, courtyardClashes and outside should be 0; ratsnest is the total length of the connections still to route, lower is better. Adjust groups, anchors, edges or the outline and propose again if the score or the picture is poor." } });
           break;
@@ -580,7 +585,7 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
           const groups: Record<string, string[]> | undefined = e.groups && typeof e.groups === "object" && !Array.isArray(e.groups) ? Object.fromEntries(Object.entries(e.groups as Record<string, unknown>).filter(([, v]) => Array.isArray(v)).map(([n, v]) => [n, (v as unknown[]).map(String)])) : undefined;
           const separate = e.separate === false ? false : e.separate && typeof e.separate === "object" ? { quiet: num(e.separate.quiet), noisy: num(e.separate.noisy) } : undefined;
           const fence = e.fence === false ? false : e.fence && typeof e.fence === "object" ? { spacing: num(e.fence.spacing), nets: Array.isArray(e.fence.nets) ? e.fence.nets.map((n: unknown) => boardNet(doc, text(n, "net")).name) : undefined, returnVias: e.fence.return_vias === false ? false : undefined } : undefined;
-          const res = R.route(k, P, doc, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : undefined, timeMs: Math.round(1000 * Math.min(900, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : undefined, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : undefined, planes: e.planes === true ? true : undefined, criticalFirst: e.critical_first === false ? false : undefined, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : undefined, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : undefined });
+          const res = R.route(k, P, doc, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : undefined, timeMs: Math.round(1000 * Math.min(900, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : undefined, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : undefined, planes: e.planes === true ? true : undefined, criticalFirst: e.critical_first === false ? false : undefined, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : undefined, escapes: e.escapes === true || e.escapes === false ? e.escapes : typeof e.escapes === "number" && e.escapes >= 0 ? e.escapes : e.escapes && typeof e.escapes === "object" ? { depth: num(e.escapes.depth), spread: num(e.escapes.spread) } : undefined, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : undefined });
           const failed = (res.failed || []).map((f: any) => ({ net: f.net, from: f.a.map(r4), to: f.b.map(r4) }));
           if (!res.total) throw new ToolError(`nothing to route: every connection ${nets ? "of " + nets.join(", ") : "on the board"} is already made`);
           if (!res.items.length) throw new ToolError(`the autorouter could not make any of the ${res.total} missing connection${res.total === 1 ? "" : "s"} within the design rules: ${JSON.stringify(failed.slice(0, 12))}`);
@@ -590,6 +595,7 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
           details.push({ autoroute: { connections: res.total, routed: res.routed, segments: res.segments, vias: res.vias, length_mm: r4(res.length),
             unrouted: conns.length ? conns.filter((c) => !c.routed).slice(0, 40).map((c) => ({ net: c.net, from: c.from && c.from.pad, to: c.to && c.to.pad, reason: c.reason, detail: c.detail, blocked_by_nets: c.blockedBy && c.blockedBy.nets })) : failed.slice(0, 40),
             longest_detours: conns.filter((c) => c.routed && c.detourRatio > 1.6).sort((a, b) => b.detourRatio - a.detourRatio).slice(0, 12).map((c) => ({ net: c.net, from: c.from && c.from.pad, to: c.to && c.to.pad, length_mm: r4(c.length), detour_ratio: r4(c.detourRatio), vias: c.vias, layers: c.layers })),
+            fanout: res.fanout && res.fanout.escapes + res.fanout.boxed.length ? { escapes: res.fanout.escapes, ring: res.fanout.ring, via: res.fanout.via, used: res.fanout.used, boxed: res.fanout.boxed.slice(0, 20).map((b: any) => ({ pad: b.pad, net: b.net, reason: b.reason, blocked_by: b.blockedBy })) } : undefined,
             groups: res.groups && res.groups.inside ? { clusters: res.groups.clusters, inside: res.groups.inside, routed: res.groups.insideRouted, vias: res.groups.insideVias } : undefined,
             // explain: true asks for the reasoning behind the run: which nets went first, which parts formed which cluster, and every connection that changed layer or wandered
             explain: e.explain === true ? { critical_first: res.groups ? res.groups.critical : [], clusters: res.groups ? res.groups.members : {},

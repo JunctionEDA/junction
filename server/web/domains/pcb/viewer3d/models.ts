@@ -25,12 +25,31 @@ export interface ModelRef {
   url: string;
   /** "kicad" for KiCad's 3D library, "vendor" for a vendor part's model, "project" for a model file kept in the project,
    *  "embedded" for a file embedded in the footprint */
-  source: "kicad" | "vendor" | "project" | "embedded";
+  source: "kicad" | "vendor" | "project" | "embedded" | "generated";
   /** Library/Name as the footprint wrote it, for messages */
   name: string;
   offset: V3; scale: V3; rotate: V3;
   /** the footprint names no model: this one is looked up under the footprint's own library name */
   guess?: boolean;
+  /** a generated model: the footprint (as s-expression text) the server draws it from (POST /api/models/generate) */
+  footprint?: string;
+}
+
+// The parts of a footprint the model generator reads (server/src/modelgen/footprint.rs): pads, outlines, fields.
+const GEN_KEEP = new Set(["layer", "at", "attr", "property", "fp_text", "descr", "tags", "pad", "fp_line", "fp_rect", "fp_circle", "fp_arc", "fp_poly"]);
+const GEN_LAYERS = /^[FB]\.(Fab|CrtYd|SilkS)$/;
+function genText(n: unknown): string { return Array.isArray(n) ? "(" + n.map(genText).join(" ") + ")" : JSON.stringify(String(n)); }
+function fnv(s: string): string { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(36); }
+
+/**
+ * The model drawn for a footprint that has none anywhere (server/src/modelgen): from its pads, outline, name and
+ * datasheet, the last stop before the plain stand-in shape.  Null for a footprint with no pads.
+ */
+export function generatedModel(node: SNode): ModelRef | null {
+  if (!node.some((c) => Array.isArray(c) && c[0] === "pad")) return null;
+  const keep = node.filter((c, i) => i < 2 || (Array.isArray(c) && GEN_KEEP.has(String(c[0])) && (!/^fp_/.test(String(c[0])) || (() => { const l = (c as SNode).find((k) => Array.isArray(k) && k[0] === "layer") as SNode | undefined; return !!l && GEN_LAYERS.test(String(l[1])); })())));
+  const text = genText(keep);
+  return { url: `/api/models/generate#${fnv(text)}${text.length}`, source: "generated", name: "generated", offset: [0, 0, 0], scale: [1, 1, 1], rotate: [0, 0, 0], footprint: text };
 }
 
 /** A tessellated model in its own frame: millimetres, Z up, per-vertex normals and colours (linear 0..1 RGB as in the file). */
@@ -104,15 +123,56 @@ export function footprintModels(node: SNode, guess = true, boardFiles: SNode | n
     if (emb) { out.push({ name: path.slice("kicad-embed://".length), offset: xyzOf(c as SNode, "offset", 0), scale: xyzOf(c as SNode, "scale", 1), rotate: xyzOf(c as SNode, "rotate", 0), source: "embedded", url: emb }); continue; }
     const own = projectModel(path);
     if (own) { out.push({ name: path.replace(/^\$[{(]KIPRJMOD[})][\/\\]/i, ""), offset: xyzOf(c as SNode, "offset", 0), scale: xyzOf(c as SNode, "scale", 1), rotate: xyzOf(c as SNode, "rotate", 0), source: "project", url: own }); continue; }
-    const m = /([^\/\\${}]+)\.3dshapes[\/\\]([^\/\\]+)\.(?:step|stp|wrl)$/i.exec(path); if (!m) continue;
-    const ref = { name: `${m[1]}/${m[2]}`, offset: xyzOf(c as SNode, "offset", 0), scale: xyzOf(c as SNode, "scale", 1), rotate: xyzOf(c as SNode, "rotate", 0) };
+    const m = /([^\/\\${}]+)\.3dshapes[\/\\]([^\/\\]+)\.(?:step|stp|wrl|wrz)$/i.exec(path);
+    const ref = { name: m ? `${m[1]}/${m[2]}` : path.replace(/^.*[\/\\]/, ""), offset: xyzOf(c as SNode, "offset", 0), scale: xyzOf(c as SNode, "scale", 1), rotate: xyzOf(c as SNode, "rotate", 0) };
+    const foreign = foreignModel(node, path, ref);
+    if (foreign) { if (!out.some((o) => o.url === foreign.url)) out.push(foreign); continue; }
+    if (!m) continue;
     if (/KICAD_COLLAB_3DMODELS/.test(path)) {
       const hit = VENDOR_FIELDS.map(([f, v]) => [v, fieldOf(node, f)]).find(([, id]) => id); if (!hit) continue;
-      out.push({ ...ref, source: "vendor", url: `/api/parts/model.step?vendor=${hit[0]}&id=${encodeURIComponent(hit[1])}` });
+      // the server lines the vendor's file up for the entry Junction wrote (parts/step_fit.rs), so the entry is read
+      // as KiCad reads it, here as on the desktop and in a downloaded library
+      out.push({ ...ref, source: "vendor", url: `/api/parts/model.step?vendor=${hit[0]}&id=${encodeURIComponent(hit[1])}&fit=4` });
     } else out.push({ ...ref, source: "kicad", url: kicadModelUrl(m[1], m[2]) });
   }
   if (!named && guess) { const g = guessedModel(node); if (g) out.push(g); }
   return out;
+}
+
+/** Fields a footprint keeps its LCSC part number in (easyeda2kicad writes "LCSC Part", JLC's tools "LCSC Part #" or "JLCPCB Part #"). */
+const LCSC_FIELDS = ["LCSC", "LCSC Part", "LCSC Part #", "LCSC PN", "LCSC P/N", "LCSC Part No.", "LCSC Part Number", "LCSC#", "JLCPCB Part #", "JLCPCB Part", "JLCPCB PN", "JLCPCB P/N", "JLC", "JLCPCB"];
+function lcscOf(node: SNode): string {
+  for (const f of LCSC_FIELDS) { const v = fieldOf(node, f); if (/^C\d{1,9}$/i.test(v)) return v.toUpperCase(); }
+  return "";
+}
+
+/**
+ * A model under a path variable that is not KiCad's own library (${EASYEDA2KICAD}/easyeda2kicad.3dshapes/…, a
+ * personal ${MY_3D}/…): the file sits on the machine of whoever made the board, so the server never has it.
+ * The project may keep a copy (the same folder and file name anywhere in it); else, for a part with an LCSC number,
+ * the vendor's own STEP model of that part is drawn.  easyeda2kicad bakes the part's offset into the .wrl it writes
+ * and leaves the .step at (offset 0 0 0) in the vendor's frame, so for a .wrl, or a .step nobody moved, the
+ * vendor's own placement on its footprint is used (the footprint has the vendor's origin); a .step someone lined up
+ * by hand keeps their offset and rotation.  Null for KiCad's library paths and paths without a variable.
+ */
+function foreignModel(node: SNode, path: string, ref: Omit<ModelRef, "url" | "source">): ModelRef | null {
+  const v = /^\$[{(]([A-Za-z0-9_]+)[})][\/\\](.+)$/.exec(path); if (!v) return null;
+  if (/^(KICAD\d*_3DMODEL_DIR|KISYS3DMOD|KICAD_COLLAB_3DMODELS|KIPRJMOD)$/.test(v[1])) return null;
+  const tail = v[2].replace(/\\/g, "/").replace(/^\.\//, "");
+  const stem = tail.replace(/\.(?:step|stp|wrl|wrz)$/i, "");
+  if (stem !== tail && !stem.split("/").includes("..")) {
+    const fn = (globalThis as { KiCadProjectModel?: (stem: string) => string | null }).KiCadProjectModel;
+    let own: string | null = null;
+    try { own = typeof fn === "function" ? fn(stem) || (stem.includes("/") ? fn("/" + stem) : null) || null : null; } catch { own = null; }
+    if (own) return { ...ref, name: tail, source: "project", url: own };
+  }
+  const lcsc = lcscOf(node); if (!lcsc) return null;
+  const url = `/api/parts/model.step?vendor=lcsc&id=${encodeURIComponent(lcsc)}`;
+  // easyeda2kicad's .step is the vendor's file as it is, placed by the entry's own numbers (KiCad does the same with
+  // the author's copy, and the desktop app with the server's: /api/parts/model-file?as=raw)
+  if (/\.(?:step|stp)$/i.test(path)) return { ...ref, source: "vendor", url };
+  // the file lined up for the vendor's entry (fit=4) and that entry's offset and turn applied by the store (placed=1)
+  return { ...ref, offset: [0, 0, 0], rotate: [0, 0, 0], source: "vendor", url: url + "&fit=4&placed=1" };
 }
 
 /** The model to try for a footprint that names none: its own "Library:Name" in KiCad's 3D library (or the closest to it). */
@@ -220,6 +280,27 @@ export function flattenOcct(result: { success?: boolean; meshes?: any[] }): Mode
   return { pos, nrm, col, idx };
 }
 
+/** "x,y,z" as the server's X-Model-Offset / X-Model-Rotate headers write it. */
+function headerXyz(v: string | null): V3 | null {
+  const n = String(v ?? "").split(",").map(Number);
+  return n.length === 3 && n.every(isFinite) ? [n[0], n[1], n[2]] : null;
+}
+
+/**
+ * A vendor model the server lined up for its footprint entry (/api/parts/model.step?fit=4, parts/step_fit.rs) with
+ * that entry's offset and turn (X-Model-Offset / X-Model-Rotate) applied, for a footprint whose own entry has none
+ * (models.ts foreignModel).  Without the headers the model is left as it is.
+ */
+export function vendorPlaced(mesh: ModelMesh, headers: { get(name: string): string | null }): ModelMesh {
+  const offset = headerXyz(headers.get("x-model-offset")), rotate = headerXyz(headers.get("x-model-rotate"));
+  if (!offset || !rotate) return mesh;
+  const pos = new Float32Array(mesh.pos.length), nrm = new Float32Array(mesh.nrm.length);
+  placeMesh(mesh, { url: "", source: "vendor", name: "", offset, rotate, scale: [1, 1, 1] }, { x: 0, y: 0, z: 0, rot: 0, back: false }, (x, y, z, nx, ny, nz, i) => {
+    pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z; nrm[i * 3] = nx; nrm[i * 3 + 1] = ny; nrm[i * 3 + 2] = nz;
+  });
+  return { pos, nrm, col: mesh.col, idx: mesh.idx };
+}
+
 // ---------------------------------------------------------------- the browser half
 
 const RUNTIME = "/static/pyodide/";
@@ -240,6 +321,8 @@ export type ModelState = ModelMesh | "missing";
 export class ModelStore {
   private have = new Map<string, ModelState>();
   private swapped = new Map<string, string>();
+  private generated = new Map<string, string>();
+  private bodies = new Map<string, string>();
   private asked = new Map<string, Promise<void>>();
   private worker: Worker | null = null;
   private waiting = new Map<number, (r: { result?: any; error?: string }) => void>();
@@ -256,9 +339,15 @@ export class ModelStore {
   /** "Library/Name" of the model the server gave in place of the one asked for, when it had to. */
   replacement(url: string): string | undefined { return this.swapped.get(url); }
 
+  /** The package family of a model drawn by the generator (server/src/modelgen), for messages. */
+  generatedFamily(url: string): string | undefined { return this.generated.get(url); }
+
   /** Ask for these models; those not seen before are fetched in the background. */
   want(refs: ModelRef[]): void {
-    for (const r of refs) if (!this.have.has(r.url) && !this.asked.has(r.url)) this.asked.set(r.url, this.load(r.url));
+    for (const r of refs) {
+      if (r.footprint) this.bodies.set(r.url, r.footprint);
+      if (!this.have.has(r.url) && !this.asked.has(r.url)) this.asked.set(r.url, this.load(r.url));
+    }
   }
 
   /** Resolves when everything asked for so far has arrived or failed. */
@@ -267,11 +356,14 @@ export class ModelStore {
   private async load(url: string): Promise<void> {
     let state: ModelState = "missing";
     try {
-      const resp = await fetch(url, { credentials: "same-origin" });
+      const body = this.bodies.get(url);
+      const resp = body !== undefined
+        ? await fetch("/api/models/generate", { method: "POST", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ footprint: body }) })
+        : await fetch(url, { credentials: "same-origin" });
       if (resp.ok) {
         const bytes = await resp.arrayBuffer();
         const mesh = flattenOcct(await this.tessellate(bytes));
-        if (mesh) { state = mesh; const rep = resp.headers.get("x-model-replacement"); if (rep) this.swapped.set(url, rep); }
+        if (mesh) { state = /[?&]placed=1(?:&|$)/.test(url) ? vendorPlaced(mesh, resp.headers) : mesh; const rep = resp.headers.get("x-model-replacement"); if (rep) this.swapped.set(url, rep); const gen = resp.headers.get("x-model-generated"); if (gen) this.generated.set(url, gen); }
       }
     } catch { /* stays missing: the stand-in solid is drawn */ }
     this.have.set(url, state); this.asked.delete(url);

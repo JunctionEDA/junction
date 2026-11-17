@@ -5,6 +5,8 @@ import { state } from "./appstore";
 import { gotoPageOf } from "./hypertext";
 import { E } from "./state";
 import { toast } from "./util";
+import { sheetOfPage } from "./panels/hierarchy";
+import { preferInstance } from "./schnets";
 
 /** SCH_NAVIGATE_TOOL::HypertextCommand. */
 export function followHypertext(href: string, at: { clientX: number; clientY: number }): void {
@@ -15,6 +17,9 @@ export function followHypertext(href: string, at: { clientX: number; clientY: nu
     const root = rootSchematic();
     const rootPage = root && state.doc === root && E.kdoc && E.kdoc.pageNumber ? String(E.kdoc.pageNumber) : "1";
     if (root && dest === rootPage) { if (state.doc !== root) openDoc(root); return; }
+    // every sheet of the hierarchy by its page, the top-level sheets of a schematic with several included
+    const sh = sheetOfPage(dest);
+    if (sh) { const d = state.docs && state.docs.find((x) => x.docId === sh.docId); if (d) { preferInstance(sh.human); if (state.doc !== d) openDoc(d); return; } }
     for (const [path, page] of sheetPages) {
       if (page !== dest) continue;
       const d = state.docs && state.docs.find((x) => x.docType === "kicad_sch" && x.path === path);

@@ -153,9 +153,22 @@ const menu = async (page, name, ...subs) => {
   await page.locator(`#kmenus [data-menu="${name}"] [data-uiact="${last}"]`).first().click();
 };
 const closeMenus = async (page) => { for (let i = 0; i < 3 && (await page.locator('#kmenus .menu.open').count()); i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(120); } };
+// The example plugins (server/plugins/examples) are no longer listed in the catalog; a copy installed while they were
+// ("catalog" source) still works and can be recommended, which is what this installs.
+const EXAMPLES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../plugins/examples');
+const exampleOf = (id) => {
+  for (const dir of fs.readdirSync(EXAMPLES)) {
+    const manifest = JSON.parse(fs.readFileSync(path.join(EXAMPLES, dir, 'plugin.json'), 'utf8'));
+    if (manifest.identifier !== id) continue;
+    const files = {};
+    for (const f of fs.readdirSync(path.join(EXAMPLES, dir))) if (f !== 'plugin.json') files[f] = fs.readFileSync(path.join(EXAMPLES, dir, f), 'utf8');
+    return { manifest, files };
+  }
+  throw new Error(`no example plugin ${id}`);
+};
 const install = async (page, id) => {
-  await page.click('#pluginManager [data-tab="catalog"]');
-  await page.click(`#pluginCatalog [data-install="${id}"]`);
+  const { manifest, files } = exampleOf(id);
+  await page.evaluate(([m, f]) => window.KcPlugins.requestInstall(m, f, 'catalog'), [manifest, files]);
   await page.waitForSelector('#pluginConsent');
 };
 const installLocal = async (page, files, id) => {
@@ -175,13 +188,13 @@ await editorReady(a);
 // ---- the manager and the catalog
 check('page forbids frames from navigating', (await (await fetch(`${BASE}/p/${projectId}/edit`)).headers.get('content-security-policy')) === "frame-src 'none'");
 check('no plugin runs before one is installed', (await frames(a)) === 0);
-await menu(a, 'tools', 'External Plugins', 'pluginManager');
+await a.evaluate(() => window.KcPlugins.openManager('installed'));
 await a.waitForSelector('#pluginManager');
-check('manager opens from Tools → External Plugins', await a.locator('#pluginManager').isVisible());
+check('the Plugin Manager opens', await a.locator('#pluginManager').isVisible());
 check('nothing installed yet', (await a.locator('#pluginManager .plg-empty').count()) === 1);
 await a.click('#pluginManager [data-tab="catalog"]');
-await a.waitForSelector('#pluginCatalog .plg-card');
-check('catalog lists the built-in plugins', (await a.locator('#pluginCatalog .plg-card[data-source="builtin"]').count()) === 5);
+await a.waitForSelector('#pluginCatalog .plg-source-note');
+check('the catalog has no Built in section (the examples live in the repository)', (await a.locator('#pluginCatalog [data-source-filter="builtin"]').count()) === 0 && (await a.locator('#pluginCatalog .plg-card[data-source="builtin"]').count()) === 0);
 await shot(a, '01-catalog');
 
 // ---- consent, install, the toolbar button and an export
@@ -212,7 +225,7 @@ await shot(a, '04-menu-and-toolbar');
 await closeMenus(a);
 
 // ---- a docked panel that follows the document and the selection
-await menu(a, 'tools', 'External Plugins', 'pluginManager'); await a.waitForSelector('#pluginManager');
+await a.evaluate(() => window.KcPlugins.openManager('installed')); await a.waitForSelector('#pluginManager');
 await install(a, ID('design-stats')); await accept(a, ID('design-stats')); await closeManager(a);
 await a.keyboard.press('Control+Shift+I');
 await a.waitForSelector('#dockPlugins:not(.closed)');
@@ -242,7 +255,7 @@ await a.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
 const b = await open('plug-lee', lee, `/p/${projectId}/edit?doc=${docs['ecc83-pp.kicad_sch']}`);
 await editorReady(b);
 check("the second person runs none of the first person's plugins", (await frames(b)) === 0 && (await plug(b)).installed.length === 0);
-await menu(a, 'tools', 'External Plugins', 'pluginManager'); await a.waitForSelector('#pluginManager');
+await a.evaluate(() => window.KcPlugins.openManager('installed')); await a.waitForSelector('#pluginManager');
 await install(a, ID('snap-to-grid'));
 check('consent marks the write permission', /Change your designs/.test(await a.locator('#pluginConsent').innerText()) && (await a.locator('#pluginConsent [data-perm="design:write"].high').count()) === 1);
 await accept(a, ID('snap-to-grid')); await closeManager(a);
@@ -284,7 +297,7 @@ await settled(a, before); await settled(b, before);
 check('one undo reverts it for both people', JSON.stringify(await places(a)) === JSON.stringify(before) && JSON.stringify(await places(b)) === JSON.stringify(before), `a: ${diff(before, await places(a))} | b: ${diff(before, await places(b))}`);
 
 // ---- the raw commit API: create, update, remove; malformed input; a write loop
-await menu(a, 'tools', 'External Plugins', 'pluginManager'); await a.waitForSelector('#pluginManager');
+await a.evaluate(() => window.KcPlugins.openManager('installed')); await a.waitForSelector('#pluginManager');
 await installLocal(a, writerFiles, WRITER); await running(a, WRITER); await closeManager(a);
 const act = (page, id, action) => page.evaluate(([i, x]) => window.KcPlugins.runUi(`plugin:${i}:${x}`), [id, action]);
 const allItems = async () => +(await panel.locator('#counts b').last().innerText());
@@ -310,7 +323,7 @@ await a.waitForTimeout(600);
 check('every plugin edit was undoable', !(await hasText(a, 'FLOOD')) && !(await hasText(b, 'FLOOD')));
 
 // ---- the sandbox: a plugin with read access only
-await menu(a, 'tools', 'External Plugins', 'pluginManager'); await a.waitForSelector('#pluginManager');
+await a.evaluate(() => window.KcPlugins.openManager('installed')); await a.waitForSelector('#pluginManager');
 await installLocal(a, probeFiles, PROBE); await running(a, PROBE); await closeManager(a);
 const net = []; a.on('request', (rq) => { if (/example\.com/.test(rq.url())) net.push(rq.url()); });
 const countP = await a.evaluate(() => window.CollabEditor.kdoc.items.size);
@@ -330,14 +343,14 @@ check('the page is still alive after the probe', (await a.evaluate(() => window.
 // ---- a viewer's plugins cannot write
 const v = await open('plug-vic', vic, `/p/${projectId}/edit?doc=${docs['ecc83-pp.kicad_sch']}`);
 await editorReady(v);
-await menu(v, 'tools', 'External Plugins', 'pluginManager'); await v.waitForSelector('#pluginManager');
+await v.evaluate(() => window.KcPlugins.openManager('installed')); await v.waitForSelector('#pluginManager');
 await installLocal(v, writerFiles, WRITER); await running(v, WRITER); await closeManager(v);
 await act(v, WRITER, 'create'); await v.waitForTimeout(1200);
 check('a viewer with a write plugin still cannot write', !(await hasText(v, 'PLUGIN-NOTE')) && !(await hasText(a, 'PLUGIN-NOTE')) && (await logOf(v, WRITER)).some((l) => /view-only/.test(l)));
 await v.close();
 
 // ---- check markers, and a tool for the assistant
-await menu(a, 'tools', 'External Plugins', 'pluginManager'); await a.waitForSelector('#pluginManager');
+await a.evaluate(() => window.KcPlugins.openManager('installed')); await a.waitForSelector('#pluginManager');
 await install(a, ID('field-lint'));
 check('consent lists the assistant tool', /Assistant tool: check_component_fields/.test(await a.locator('#pluginConsent').innerText()));
 await accept(a, ID('field-lint')); await closeManager(a);
@@ -349,7 +362,7 @@ check('the check places markers on the canvas', markers.length > 0 && markers.ev
 await shot(a, '10-markers');
 
 // ---- the board: export positions, edit them, import them back
-await menu(a, 'tools', 'External Plugins', 'pluginManager'); await a.waitForSelector('#pluginManager');
+await a.evaluate(() => window.KcPlugins.openManager('installed')); await a.waitForSelector('#pluginManager');
 await install(a, ID('placement')); await accept(a, ID('placement')); await closeManager(a);
 await a.goto(`${BASE}/p/${projectId}/edit?doc=${docs['ecc83-pp.kicad_pcb']}`); await editorReady(a);
 await b.goto(`${BASE}/p/${projectId}/edit?doc=${docs['ecc83-pp.kicad_pcb']}`); await editorReady(b);
@@ -380,7 +393,7 @@ check('undo puts the footprint back for both', JSON.stringify(await places(a)) =
 
 // ---- the server keeps the saved board as it was: plugin edits are ops, nothing else
 // ---- disable, uninstall, and the store's own rules
-await menu(a, 'tools', 'External Plugins', 'pluginManager'); await a.waitForSelector('#pluginManager');
+await a.evaluate(() => window.KcPlugins.openManager('installed')); await a.waitForSelector('#pluginManager');
 await a.click(`#pluginList [data-plugin="${ID('bom-export')}"]`);
 check('the manager shows the plugin log', /Ready/.test(await a.locator('#pluginLog').innerText()));
 await shot(a, '14-manager-detail');
@@ -419,7 +432,7 @@ const call = (method, url, h, body) => fetch(`${BASE}${url}`, { method, headers:
 const stored = (page) => page.evaluate(() => { const s = window.KcPlugins.store.get(); return { project: s.project, registry: s.registry, published: s.published, sources: Object.fromEntries(s.installed.map((p) => [p.identifier, p.source])) }; });
 await a.goto(`${BASE}/p/${projectId}/edit?doc=${docs['ecc83-pp.kicad_sch']}`); await editorReady(a); await running(a, WRITER);
 check('a project recommends nothing to start with', (await stored(a)).project.plugins.length === 0 && (await a.locator('#pluginRecommended').count()) === 0);
-await menu(a, 'tools', 'External Plugins', 'pluginManager'); await a.waitForSelector('#pluginManager');
+await a.evaluate(() => window.KcPlugins.openManager('installed')); await a.waitForSelector('#pluginManager');
 await a.click(`#pluginList [data-plugin="${WRITER}"]`); await a.waitForSelector('#pluginShare #pluginPublish');
 check('a private plugin cannot be recommended until it is published', await a.locator('#pluginRecommend').isDisabled());
 a.once('dialog', (d) => d.accept()); await a.click('#pluginPublish'); await a.waitForSelector('#pluginUnpublish');
@@ -441,7 +454,7 @@ check('the recommender is not nagged about plugins they have', (await a.locator(
 
 const wm = { identifier: WRITER, name: 'Writer', description: 'x', version: '0.9.0', runtime: { type: 'web', entrypoint: 'main.js' } };
 check('an identifier belongs to whoever published it first', (await call('PUT', `/api/plugins/registry/${WRITER}`, as(lee, 'plug-lee'), { manifest: wm, files: { 'main.js': '' } })).status === 409 && (await call('DELETE', `/api/plugins/registry/${WRITER}`, as(lee, 'plug-lee'))).status === 404);
-check('the built-in catalog cannot be published over', (await call('PUT', `/api/plugins/registry/${ID('fake')}`, as(lee, 'plug-lee'), { manifest: { ...wm, identifier: ID('fake') }, files: { 'main.js': '' } })).status === 400);
+check('the example plugins' identifiers cannot be published over', (await call('PUT', `/api/plugins/registry/${ID('fake')}`, as(lee, 'plug-lee'), { manifest: { ...wm, identifier: ID('fake') }, files: { 'main.js': '' } })).status === 400);
 check('publishing needs a version and a sign-in', (await call('PUT', '/api/plugins/registry/test.nover', as(lee, 'plug-lee'), { manifest: { ...wm, identifier: 'test.nover', version: undefined }, files: { 'main.js': '' } })).status === 400 && (await call('PUT', '/api/plugins/registry/test.anon', { 'Content-Type': 'application/json' }, { manifest: { ...wm, identifier: 'test.anon' }, files: { 'main.js': '' } })).status === 401);
 check('only editors change what a project recommends', (await call('PUT', `/api/projects/${projectId}/plugins/${ID('bom-export')}`, as(vic, 'plug-vic'), { origin: 'catalog' })).status === 403 && (await call('DELETE', `/api/projects/${projectId}/plugins/${WRITER}`, as(vic, 'plug-vic'))).status === 403);
 check('a private plugin cannot be recommended', (await call('PUT', `/api/projects/${projectId}/plugins/${PROBE}`, as(dana, 'plug-dana'), { origin: 'registry' })).status === 400 && (await call('PUT', `/api/projects/${projectId}/plugins/${PROBE}`, as(dana, 'plug-dana'), { origin: 'catalog' })).status === 400);
@@ -514,7 +527,7 @@ check('the withdrawn copy no longer runs', (await frames(c)) === 0 && !(await pl
 await c.evaluate(() => window.KcPlugins.openManager('installed')); await c.waitForSelector('#pluginWithdrawn');
 check('its owner is told what happened and why', /does not describe/.test(await c.locator('#pluginWithdrawn').innerText()) && !(await c.locator('#pluginEnabled').isChecked()));
 await shot(c, '23-withdrawn'); await closeManager(c);
-await menu(a, 'tools', 'External Plugins', 'pluginManager'); await a.waitForSelector('#pluginManager');
+await a.evaluate(() => window.KcPlugins.openManager('installed')); await a.waitForSelector('#pluginManager');
 await a.click('#pluginManager [data-tab="installed"]'); await a.click(`#pluginList [data-plugin="${WRITER}"]`); await a.waitForSelector('#pluginModerated');
 check('the publisher is told too, and cannot publish over it', /hid your listing: Changes designs/.test(await a.locator('#pluginModerated').innerText()) && (await a.locator('#pluginPublish').count()) === 0 && (await a.locator('#pluginRecommend').isDisabled()));
 await closeManager(a);
@@ -529,7 +542,7 @@ check('removing is for good: files dropped, identifier kept from reuse', (await 
 await d.close();
 
 // unpublish: the registry and the recommendation go, installed copies stay
-await menu(a, 'tools', 'External Plugins', 'pluginManager'); await a.waitForSelector('#pluginManager');
+await a.evaluate(() => window.KcPlugins.openManager('installed')); await a.waitForSelector('#pluginManager');
 await a.click('#pluginManager [data-tab="installed"]'); await a.click(`#pluginList [data-plugin="${WRITER}"]`); await a.waitForSelector('#pluginUnpublish');
 check('the publisher is offered to publish their newer or older copy', (await a.locator('#pluginPublish').count()) === 1);
 a.once('dialog', (d) => d.accept()); await a.click('#pluginUnpublish'); await a.waitForSelector('#pluginShare #pluginPublish:has-text("Publish…")');

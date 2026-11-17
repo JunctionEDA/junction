@@ -48,7 +48,8 @@ export const E: any = {
   peerState: {},
   comments: [],
   openThread: null,
-  pendingThread: null,   // a thread to open once its document has loaded (comments.ts)
+  pendingThread: null,
+  chatSay: null,   // what this person is saying at their cursor (chat.ts cursor chat), sent with presence as `say`   // a thread to open once its document has loaded (comments.ts)
   layers: {},
   renderTimer: 0,
   renderDirtySince: 0,

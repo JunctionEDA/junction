@@ -163,6 +163,7 @@ function modelStatus(st: BoardStats, pick?: (ref: string) => void): Node[] {
     if (refs.length > 8) out.push(document.createTextNode(` and ${refs.length - 8} more`));
   };
   list("closest library model used for", st.replacedModels || [], "its own model is not in the library");
+  list("drawn from the footprint for", st.generatedModels || [], "no model exists, so one was drawn from its pads, name and datasheet");
   list("plain shape for", st.missingModels, "no model could be found");
   return out;
 }

@@ -353,7 +353,7 @@ wxString FILEEXT::EasyEdaArchiveWildcard()
 
 wxString FILEEXT::EasyEdaProFileWildcard()
 {
-    return _( "EasyEDA (JLCEDA) Pro files" ) + AddFileExtListToFilter( { "epro", "epro2", "zip" } );
+    return _( "EasyEDA (JLCEDA) Pro files" ) + AddFileExtListToFilter( { "epro", "epro2", "eprj", "zip" } );
 }
 
 

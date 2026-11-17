@@ -1,6 +1,8 @@
 // editor — GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/domains/pcb/editor/index.ts — edit these modules, not the bundle).
+import { leaveSheet } from "./schnets";
 import { setGroupCurrent, setToggle, setToggles, state, store } from "./appstore";
 import { commentOnAction, openThreadAction, openThreadOnDoc } from "./comments";
+import { chatAction, openChat, startCursorChat } from "./chat";
 import { saveVersionDialog, versionsCommand } from "./versions";
 import { enterSheet, navigateDocs, openDoc, openDocId, rootSchematic, setProjectDocs, selectItemAction, setActiveLayer, setGridPitch, setLayerVisible, switchEditor, updateGridStatus } from "./doc";
 import { loadHistory, restoreCheckpoint } from "./history";
@@ -25,6 +27,7 @@ import { openIpc2581 } from "./pcbdialogs/ipc2581";
 import { openDrcRuleEditor } from "./pcbdialogs/drc-rule-editor";
 import { openPlotSchematic } from "../dialogs/plot-schematic";
 import { printDialog } from "./print";
+import { importNonKicad } from "./import-nonkicad";
 import { openCalculator } from "../calculator";
 import type { AppAction } from "../../../shared/store";
 import type { ActionAnchor, ActionHandler } from "./types";
@@ -89,7 +92,7 @@ export const HANDLERS: Record<string, ActionHandler> = {
   save: (a) => runAction("checkpoint", a), refreshHistory: () => loadHistory(),
   undo: () => undoLast(), redo: () => redoLast(), find: () => undefined, doDelete: () => deleteAction(),
   zoomRedraw: () => requestRender(), zoomInCenter: () => zoomStep(true), zoomOutCenter: () => zoomStep(false), zoomFitScreen: () => fitView(), zoomFitObjects: () => fitObjects(),
-  navigateBack: () => navigateDocs(-1), navigateForward: () => navigateDocs(1), navigateUp: () => { const r = rootSchematic(); if (r && state.doc !== r) openDoc(r); else toast("Already at the root sheet"); },
+  navigateBack: () => navigateDocs(-1), navigateForward: () => navigateDocs(1), navigateUp: () => leaveSheet(),
   rotateCCW: () => orientSelected("ccw"), rotateCW: () => orientSelected("cw"), rotateCcw: () => orientSelected("ccw"), rotateCw: () => orientSelected("cw"),
   mirrorV: () => orientSelected("mv"), mirrorH: () => orientSelected("mh"),
   showPcbNew: () => switchEditor(), showEeschema: () => switchEditor(),
@@ -140,6 +143,8 @@ export const HANDLERS: Record<string, ActionHandler> = {
   // design review (web/platform/review): KiCad's File > Compare … entries open the Compare window
   compareSchematicWithHistory: () => openCompare(), compareBoardWithHistory: () => openCompare(), collabCompare: () => openCompare(),
   compareSchematicWithFile: () => openCompare({ pickFile: true }), compareBoardWithFile: () => openCompare({ pickFile: true }),
+  // File > Import > Non-KiCad Board File... / Non-KiCad Schematic...: EasyEDA files become a new online project
+  openNonKicadBoard: () => importNonKicad("board"), importNonKicadSchematic: () => importNonKicad("schematic"),
   // File's collaboration block (this fork's SCH_ACTIONS / PCB_ACTIONS::collab*): Start Collaboration Session opens the
   // share dialog, Join Shared Project the home's join box, Vendor Parts the parts window (web/domains/pcb/parts)
   collabStartSession: (a) => runAction("share", a), collabJoinSession: () => runAction("joinLink"), collabGithub: (a) => runAction("github", a),
@@ -161,6 +166,8 @@ export const HANDLERS: Record<string, ActionHandler> = {
   share: (a) => runAction("share", a), checkpoint: (a) => runAction("checkpoint", a), kicad: (a) => runAction("kicad", a),
   zoomin: () => zoomStep(true), zoomout: () => zoomStep(false), fit: () => fitView(), grid: () => runAction("grid"), snap: () => runAction("snap"), linemode: () => runAction("linemode"),
   "tab-appearance": () => showPane("appearance", true), "tab-props": () => showPane("props", true), "tab-peers": () => showPane("peers", true), "tab-comments": () => showPane("comments", true), "tab-history": () => showPane("history", true),
+  // the project chat (chat.ts): the menu bar's Chat button toggles its pane; Alt+M speaks at the pointer
+  showChat: () => showPane("chat"), "tab-chat": () => openChat(), cursorChat: () => { startCursorChat(); },
 };
 
 
@@ -196,6 +203,7 @@ export function dispatchAction(a: AppAction) {
       case "follow": followAction(a.cid); return;
       case "openThread": if (a.docId) openThreadOnDoc(a.docId, a.id); else openThreadAction(a.id); return;
       case "commentOn": commentOnAction(a); return;
+      case "chat": chatAction(a); return;
       case "compare": openCompare({ a: a.a, b: a.b, docId: a.docId }); return;
       case "selectItem": selectItemAction(a.id); return;
       case "restore": restoreCheckpoint(a.name); return;

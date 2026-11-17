@@ -67,29 +67,8 @@ PCB_IO_EASYEDAPRO::~PCB_IO_EASYEDAPRO()
 
 bool PCB_IO_EASYEDAPRO::CanReadBoard( const wxString& aFileName ) const
 {
-    if( aFileName.Lower().EndsWith( wxS( ".epro" ) ) )
-    {
+    if( EASYEDAPRO::IsProjectArchive( aFileName ) )
         return true;
-    }
-    else if( aFileName.Lower().EndsWith( wxS( ".zip" ) ) )
-    {
-        std::shared_ptr<wxZipEntry> entry;
-        wxFFileInputStream          in( aFileName );
-        wxZipInputStream            zip( in );
-
-        if( !zip.IsOk() )
-            return false;
-
-        while( entry.reset( zip.GetNextEntry() ), entry.get() != NULL )
-        {
-            wxString name = entry->GetName();
-
-            if( name == wxS( "project.json" ) )
-                return true;
-        }
-
-        return false;
-    }
 
     return false;
 }
@@ -155,7 +134,7 @@ void PCB_IO_EASYEDAPRO::loadBoard( const wxString& aFileName, BOARD& aBoard, boo
     wxFileName fname( aFileName );
     wxString   fpLibName = EASYEDAPRO::ShortenLibName( fname.GetName() );
 
-    if( fname.GetExt() == wxS( "epro" ) || fname.GetExt() == wxS( "zip" ) )
+    if( fname.GetExt() == wxS( "epro" ) || fname.GetExt() == wxS( "eprj" ) || fname.GetExt() == wxS( "zip" ) )
     {
         nlohmann::json project = EASYEDAPRO::ReadProjectOrDeviceFile( aFileName );
 
@@ -325,7 +304,7 @@ void PCB_IO_EASYEDAPRO::FootprintEnumerate( wxArrayString&  aFootprintNames,
             }
         }
     }
-    else if( fname.GetExt() == wxS( "elibz" ) || fname.GetExt() == wxS( "epro" )
+    else if( fname.GetExt() == wxS( "elibz" ) || fname.GetExt() == wxS( "epro" ) || fname.GetExt() == wxS( "eprj" )
              || fname.GetExt() == wxS( "zip" ) )
     {
         nlohmann::json project = EASYEDAPRO::ReadProjectOrDeviceFile( aLibraryPath );
@@ -459,7 +438,7 @@ std::unique_ptr<FOOTPRINT> PCB_IO_EASYEDAPRO::FootprintLoad( const wxString& aLi
         footprint->Value().SetVisible( true );
         footprint->AutoPositionFields();
     }
-    else if( libFname.GetExt() == wxS( "elibz" ) || libFname.GetExt() == wxS( "epro" )
+    else if( libFname.GetExt() == wxS( "elibz" ) || libFname.GetExt() == wxS( "epro" ) || libFname.GetExt() == wxS( "eprj" )
              || libFname.GetExt() == wxS( "zip" ) )
     {
         nlohmann::json project = EASYEDAPRO::ReadProjectOrDeviceFile( aLibraryPath );

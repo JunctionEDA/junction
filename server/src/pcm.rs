@@ -286,13 +286,11 @@ fn manifest_of(pkg: &Value, version: &Value) -> Value {
     })
 }
 
-/// `GET /api/plugins/pcm` — KiCad's official plugins, with how each fares in the web editor.
-pub async fn list() -> AppResult<Json<Value>> {
-    let idx = index().await?;
-    let have = icons();
-    let alone = icon_base().is_some();
-    let mut out = Vec::with_capacity(idx.packages.len());
-    for pkg in idx.packages.iter() {
+/// The catalog entries for a repository's plugin packages, in name order.  `icon` says whether a package's icon is known
+/// to exist (true), is worth asking for (null) or is missing (false); `compat` is KiCad's own repository's test labels.
+fn entries_of(packages: &[Value], icon: impl Fn(&str) -> Value, compat: bool) -> Vec<Value> {
+    let mut out = Vec::with_capacity(packages.len());
+    for pkg in packages.iter() {
         let Some(version) = pick_version(pkg) else { continue };
         let identifier = pkg.get("identifier").and_then(Value::as_str).unwrap_or("");
         if identifier.is_empty() {
@@ -303,15 +301,23 @@ pub async fn list() -> AppResult<Json<Value>> {
             "manifest": manifest_of(pkg, version),
             "details": clip(pkg.get("description_full").and_then(Value::as_str).unwrap_or(""), 1500),
             "size": version.get("download_size").and_then(Value::as_u64).unwrap_or(0),
-            "compat": compat_of(identifier),
-            // true: known to have one; null: worth asking for (it is fetched on its own); false: none
-            "icon": if have.contains_key(identifier) { json!(true) } else if alone { Value::Null } else { json!(false) },
+            "compat": if compat { compat_of(identifier) } else { Value::Null },
+            "icon": icon(identifier),
         }));
     }
     out.sort_by(|a, b| {
         let name = |v: &Value| v.pointer("/manifest/name").and_then(Value::as_str).unwrap_or("").to_lowercase();
         name(a).cmp(&name(b))
     });
+    out
+}
+
+/// `GET /api/plugins/pcm` — KiCad's official plugins, with how each fares in the web editor.
+pub async fn list() -> AppResult<Json<Value>> {
+    let idx = index().await?;
+    let have = icons();
+    let alone = icon_base().is_some();
+    let out = entries_of(&idx.packages, |id| if have.contains_key(id) { json!(true) } else if alone { Value::Null } else { json!(false) }, true);
     // "iconsPending": the icons are still being downloaded; the list is worth asking for again shortly
     Ok(Json(json!({ "plugins": out, "iconsPending": ICONS_LOADING.load(std::sync::atomic::Ordering::SeqCst) })))
 }
@@ -447,27 +453,31 @@ fn unpack(zip_bytes: Vec<u8>) -> AppResult<Map<String, Value>> {
 /// Download and unpack one official package: its repository entry, the version picked, its files.
 async fn load(identifier: &str) -> AppResult<(Value, Value, Map<String, Value>)> {
     let idx = index().await?;
-    let pkg = idx.packages.iter().find(|p| p.get("identifier").and_then(Value::as_str) == Some(identifier)).ok_or(AppError::NotFound)?;
+    load_from(&idx.packages, identifier, false).await
+}
+
+/// Download and unpack one package of a repository's list.  `public`: the repository is one a person added, so every
+/// address it names is checked to be on the public internet (`fetch_public`).
+async fn load_from(packages: &[Value], identifier: &str, public: bool) -> AppResult<(Value, Value, Map<String, Value>)> {
+    let pkg = packages.iter().find(|p| p.get("identifier").and_then(Value::as_str) == Some(identifier)).ok_or(AppError::NotFound)?;
     let version = pick_version(pkg).ok_or_else(|| bad("that plugin has no downloadable version"))?;
     let url = version.get("download_url").and_then(Value::as_str).unwrap_or("");
-    let zip_bytes = fetch(url, MAX_ZIP_BYTES).await?;
+    let zip_bytes = if public { fetch_public(url, MAX_ZIP_BYTES).await? } else { fetch(url, MAX_ZIP_BYTES).await? };
     if let Some(want) = version.get("download_sha256").and_then(Value::as_str) {
         if !want.eq_ignore_ascii_case(&hex(&Sha256::digest(&zip_bytes))) {
-            return Err(bad("the download does not match the checksum KiCad's repository lists for it"));
+            return Err(bad("the download does not match the checksum its repository lists for it"));
         }
     }
     let files = tokio::task::spawn_blocking(move || unpack(zip_bytes)).await.map_err(|_| bad("the package could not be unpacked"))??;
     Ok((pkg.clone(), version.clone(), files))
 }
 
-/// `GET /api/plugins/pcm/{identifier}` — download one official plugin and hand its manifest and files to the browser.
-pub async fn get(AuthUser(_user): AuthUser, Path(identifier): Path<String>) -> AppResult<Json<Value>> {
-    let (pkg, version, files) = load(&identifier).await?;
-    let ver = version.get("version").and_then(Value::as_str).unwrap_or("");
-    let mut manifest = manifest_of(&pkg, &version);
-    // A plugin that talks to web services may ask for "network": requests to the addresses its own code names.
-    let hosts = remember_hosts(&identifier, &files);
-    if net_mode() != NetMode::Off && !hosts.is_empty() && uses_network(&files) {
+/// The manifest a downloaded package is installed with.  A plugin that talks to web services may ask for "network":
+/// requests to the addresses its own code names (remembered under `key`, read back by `net_fetch`).
+fn install_manifest(key: &str, pkg: &Value, version: &Value, files: &Map<String, Value>) -> Value {
+    let mut manifest = manifest_of(pkg, version);
+    let hosts = remember_hosts(key, files);
+    if net_mode() != NetMode::Off && !hosts.is_empty() && uses_network(files) {
         let mut list: Vec<&String> = hosts.iter().collect();
         list.sort();
         if let Some(perms) = manifest.get_mut("permissions").and_then(Value::as_array_mut) {
@@ -475,6 +485,14 @@ pub async fn get(AuthUser(_user): AuthUser, Path(identifier): Path<String>) -> A
         }
         manifest["network"] = json!({ "hosts": list });
     }
+    manifest
+}
+
+/// `GET /api/plugins/pcm/{identifier}` — download one official plugin and hand its manifest and files to the browser.
+pub async fn get(AuthUser(_user): AuthUser, Path(identifier): Path<String>) -> AppResult<Json<Value>> {
+    let (pkg, version, files) = load(&identifier).await?;
+    let ver = version.get("version").and_then(Value::as_str).unwrap_or("");
+    let manifest = install_manifest(&identifier, &pkg, &version, &files);
     Ok(Json(json!({ "manifest": manifest, "files": files, "source": format!("kicad:{ver}"), "compat": compat_of(&identifier) })))
 }
 
@@ -560,8 +578,20 @@ fn remember_hosts(identifier: &str, files: &Map<String, Value>) -> Arc<HashSet<S
     hosts
 }
 
-/// Where this official plugin may send requests: read from its package in KiCad's repository, not from the client.
-async fn allowed_hosts(identifier: &str) -> AppResult<Arc<HashSet<String>>> {
+/// Where this plugin may send requests: read from its package in the repository it was installed from (KiCad's, or
+/// one the person added), never from the client.
+async fn allowed_hosts(state: &AppState, user_id: i64, identifier: &str) -> AppResult<Arc<HashSet<String>>> {
+    let source: Option<String> = sqlx::query_scalar("SELECT source FROM plugins WHERE user_id = $1 AND identifier = $2").bind(user_id).bind(identifier).fetch_optional(&state.pool).await?;
+    if let Some(repo) = source.as_deref().and_then(repo_of_source) {
+        let key = format!("repo:{repo}/{identifier}");
+        if let Some(h) = host_table().lock().ok().and_then(|t| t.get(&key).cloned()) {
+            return Ok(h);
+        }
+        let url = repo_url(state, user_id, repo).await?;
+        let r = custom_index(&url, false).await?;
+        let (_, _, files) = load_from(&r.packages, identifier, true).await?;
+        return Ok(remember_hosts(&key, &files));
+    }
     if let Some(h) = host_table().lock().ok().and_then(|t| t.get(identifier).cloned()) {
         return Ok(h);
     }
@@ -730,7 +760,7 @@ pub async fn net_fetch(State(state): State<AppState>, AuthUser(user): AuthUser, 
     if mode != NetMode::Test && url.port().is_some_and(|p| p != 443) {
         return Err(refuse("plugins can only reach the standard https port"));
     }
-    let allowed = allowed_hosts(&identifier).await?;
+    let allowed = allowed_hosts(&state, user.id, &identifier).await?;
     if !allowed.contains(&base_domain(&host)) {
         let approved: Option<i32> = sqlx::query_scalar("SELECT 1 FROM plugin_net_hosts WHERE user_id = $1 AND identifier = $2 AND host = $3")
             .bind(user.id)
@@ -796,6 +826,248 @@ pub async fn net_fetch(State(state): State<AppState>, AuthUser(user): AuthUser, 
         "body": base64::engine::general_purpose::STANDARD.encode(&data),
         "url": url.as_str(),
     })))
+}
+
+// ---------------------------------------------------------------- repositories a person added
+
+// KiCad's Plugin and Content Manager lets a person add other repositories (Manage Repositories: the address of a
+// repository.json).  The web Plugin Manager does the same.  The server reads those repositories for the person, so
+// the address does come from a request here: every download for them goes through `fetch_public`, which reaches only
+// https addresses on the public internet (checked again after each redirect), with the same size limits as KiCad's.
+
+const MAX_REPOSITORIES: i64 = 20;
+const MAX_CUSTOM_RESOURCES_BYTES: usize = 32 * 1024 * 1024;
+
+/// A repository a person added: its name and plugin packages as last read, and its icons once downloaded.
+pub struct CustomRepo {
+    name: String,
+    maintainer: String,
+    packages: Vec<Value>,
+    icons: std::sync::RwLock<Icons>,
+    icons_loading: std::sync::atomic::AtomicBool,
+}
+
+/// Download from an address a person typed (or one their repository names): https only, the standard port, public
+/// addresses only, the name resolved here and connected to exactly, redirects followed by hand and checked again.
+async fn fetch_public(url: &str, limit: usize) -> AppResult<Vec<u8>> {
+    Ok(fetch_public_at(url, limit).await?.0)
+}
+
+/// `fetch_public`, and the address the download came from in the end (after redirects), which relative addresses in it
+/// are read against.
+async fn fetch_public_at(url: &str, limit: usize) -> AppResult<(Vec<u8>, reqwest::Url)> {
+    let test = net_mode() == NetMode::Test;
+    let mut url = reqwest::Url::parse(url.trim()).map_err(|_| bad("that is not a web address"))?;
+    for _ in 0..6 {
+        let host = url.host_str().unwrap_or("").trim_start_matches('[').trim_end_matches(']').to_ascii_lowercase();
+        if host.is_empty() || !(url.scheme() == "https" || (test && url.scheme() == "http")) || !url.username().is_empty() || url.password().is_some() {
+            return Err(bad("plugin repositories are read over https only"));
+        }
+        if !test && url.port().is_some_and(|p| p != 443) {
+            return Err(bad("plugin repositories are read on the standard https port only"));
+        }
+        let port = url.port_or_known_default().unwrap_or(443);
+        let addrs: Vec<std::net::SocketAddr> = tokio::net::lookup_host((host.as_str(), port)).await.map_err(|_| bad(format!("{host} could not be found")))?.collect();
+        let addr = addrs.into_iter().find(|a| test || is_public(a.ip())).ok_or_else(|| bad(format!("{host} is not an address on the public internet")))?;
+        let mut builder = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none()).timeout(Duration::from_secs(120)).user_agent("kicad-collab-server (plugin repository)");
+        if host.parse::<IpAddr>().is_err() {
+            builder = builder.resolve(&host, addr);
+        }
+        let client = builder.build().map_err(|_| bad("the request could not be prepared"))?;
+        let mut resp = client.get(url.clone()).send().await.map_err(|e| bad(format!("could not reach {host}{}", if e.is_timeout() { " in time" } else { "" })))?;
+        if resp.status().is_redirection() {
+            let next = resp.headers().get(header::LOCATION).and_then(|v| v.to_str().ok()).ok_or_else(|| bad(format!("{host} redirected nowhere")))?;
+            url = url.join(next).map_err(|_| bad(format!("{host} redirected to something that is not a web address")))?;
+            continue;
+        }
+        if !resp.status().is_success() {
+            return Err(bad(format!("{host} answered {}", resp.status().as_u16())));
+        }
+        let mut data: Vec<u8> = Vec::new();
+        while let Some(chunk) = resp.chunk().await.map_err(|_| bad(format!("the download from {host} was cut off")))? {
+            if data.len() + chunk.len() > limit {
+                return Err(bad("that download is larger than the web editor accepts"));
+            }
+            data.extend_from_slice(&chunk);
+        }
+        return Ok((data, url));
+    }
+    Err(bad("that address redirects too many times"))
+}
+
+/// Where a repository keeps its icons (its resources archive) and that archive's checksum.
+type Resources = Option<(String, Option<String>)>;
+
+/// Read a repository.json and its package list (KiCad's PCM format), keeping its plugins.
+async fn load_custom(repo_url: &str) -> AppResult<(CustomRepo, Resources)> {
+    let (raw, base) = fetch_public_at(repo_url, MAX_INDEX_BYTES).await?;
+    let repo: Value = serde_json::from_slice(&raw).map_err(|_| bad("that address does not hold a repository.json: it is not JSON"))?;
+    let packages_url = repo.pointer("/packages/url").and_then(Value::as_str).ok_or_else(|| bad("that is not a KiCad plugin repository: its repository.json names no package list (packages.url)"))?;
+    let packages_url = base.join(packages_url).map_err(|_| bad("the repository's package list is not a web address"))?;
+    let raw = fetch_public(packages_url.as_str(), MAX_INDEX_BYTES).await?;
+    if let Some(want) = repo.pointer("/packages/sha256").and_then(Value::as_str) {
+        if !want.eq_ignore_ascii_case(&hex(&Sha256::digest(&raw))) {
+            return Err(bad("the repository's package list does not match its checksum"));
+        }
+    }
+    let list: Value = serde_json::from_slice(&raw).map_err(|_| bad("the repository's package list is not JSON"))?;
+    let packages: Vec<Value> = list.get("packages").and_then(Value::as_array).cloned().unwrap_or_default();
+    let packages = packages.into_iter().filter(|p| p.get("type").and_then(Value::as_str) == Some("plugin")).collect();
+    let name = clip(repo.get("name").and_then(Value::as_str).unwrap_or("").trim(), 120);
+    let maintainer = clip(repo.pointer("/maintainer/name").and_then(Value::as_str).unwrap_or("").trim(), 120);
+    let resources = repo.pointer("/resources/url").and_then(Value::as_str).and_then(|u| base.join(u).ok()).map(|u| (u.to_string(), repo.pointer("/resources/sha256").and_then(Value::as_str).map(str::to_string)));
+    let name = if name.is_empty() { host_of(base.as_str()).to_string() } else { name };
+    Ok((CustomRepo { name, maintainer, packages, icons: Default::default(), icons_loading: Default::default() }, resources))
+}
+
+fn custom_cache() -> &'static Mutex<HashMap<String, (Instant, Arc<CustomRepo>)>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, (Instant, Arc<CustomRepo>)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// A repository a person added, cached for an hour (`fresh`: read it again now).  A repository that cannot be read when
+/// its hour is up keeps its last list.
+async fn custom_index(url: &str, fresh: bool) -> AppResult<Arc<CustomRepo>> {
+    let cached = custom_cache().lock().ok().and_then(|c| c.get(url).cloned());
+    if let Some((at, r)) = &cached {
+        if !fresh && at.elapsed() < INDEX_TTL {
+            return Ok(r.clone());
+        }
+    }
+    let loaded = tokio::time::timeout(Duration::from_secs(60), load_custom(url)).await.map_err(|_| bad("the repository did not answer in time"));
+    let (repo, resources) = match (loaded, cached) {
+        (Ok(Ok((r, res))), _) => (Arc::new(r), res),
+        (Ok(Err(_)) | Err(_), Some((_, old))) if !fresh => return Ok(old),
+        (Ok(Err(e)), _) | (Err(e), _) => return Err(e),
+    };
+    if let Ok(mut c) = custom_cache().lock() {
+        if c.len() > 2000 {
+            c.retain(|_, (at, _)| at.elapsed() < INDEX_TTL);
+        }
+        c.insert(url.to_string(), (Instant::now(), repo.clone()));
+    }
+    if let Some((res_url, want)) = resources {
+        load_custom_icons(repo.clone(), res_url, want);
+    }
+    Ok(repo)
+}
+
+fn load_custom_icons(repo: Arc<CustomRepo>, url: String, want: Option<String>) {
+    use std::sync::atomic::Ordering;
+    if repo.icons_loading.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    tokio::spawn(async move {
+        if let Ok(Ok(raw)) = tokio::time::timeout(Duration::from_secs(300), fetch_public(&url, MAX_CUSTOM_RESOURCES_BYTES)).await {
+            if want.map_or(true, |w| w.eq_ignore_ascii_case(&hex(&Sha256::digest(&raw)))) {
+                if let Ok(found) = tokio::task::spawn_blocking(move || icons_in(raw)).await {
+                    if let Ok(mut slot) = repo.icons.write() {
+                        *slot = Arc::new(found);
+                    }
+                }
+            }
+        }
+        repo.icons_loading.store(false, Ordering::SeqCst);
+    });
+}
+
+/// The repository an installed plugin came from: its source is `repo:<id>:<version>`.
+fn repo_of_source(source: &str) -> Option<i64> {
+    source.strip_prefix("repo:")?.split(':').next()?.parse().ok()
+}
+
+/// The address of one of this person's repositories.
+async fn repo_url(state: &AppState, user_id: i64, id: i64) -> AppResult<String> {
+    sqlx::query_scalar("SELECT url FROM plugin_repositories WHERE id = $1 AND user_id = $2").bind(id).bind(user_id).fetch_optional(&state.pool).await?.ok_or(AppError::NotFound)
+}
+
+/// `GET /api/plugins/repositories` — the repositories this person added, oldest first.
+pub async fn repositories(State(state): State<AppState>, AuthUser(user): AuthUser) -> AppResult<Json<Value>> {
+    let rows = sqlx::query_as::<_, (i64, String, String, String)>("SELECT id, url, name, maintainer FROM plugin_repositories WHERE user_id = $1 ORDER BY added_at, id")
+        .bind(user.id)
+        .fetch_all(&state.pool)
+        .await?;
+    Ok(Json(json!({ "repositories": rows.iter().map(|(id, url, name, maintainer)| json!({ "id": id, "url": url, "name": name, "maintainer": maintainer })).collect::<Vec<_>>() })))
+}
+
+#[derive(serde::Deserialize)]
+pub struct AddRepository {
+    url: String,
+}
+
+/// `POST /api/plugins/repositories` — add a repository: the address of its repository.json.  It is read before it is
+/// kept, so an address that is not a KiCad plugin repository is refused with the reason.
+pub async fn add_repository(State(state): State<AppState>, AuthUser(user): AuthUser, Json(req): Json<AddRepository>) -> AppResult<Json<Value>> {
+    let url = req.url.trim().to_string();
+    if url.len() > 2000 {
+        return Err(bad("that address is too long"));
+    }
+    // a GitHub page of the file stands for the file itself, as "Install from an address" reads it
+    let url = match url.strip_prefix("https://github.com/").and_then(|rest| {
+        let mut p = rest.splitn(4, '/');
+        let (owner, repo, kind, path) = (p.next()?, p.next()?, p.next()?, p.next()?);
+        (kind == "blob" || kind == "raw").then(|| format!("https://raw.githubusercontent.com/{owner}/{repo}/{path}"))
+    }) {
+        Some(raw) => raw,
+        None => url,
+    };
+    let parsed = reqwest::Url::parse(&url).map_err(|_| bad("give the https address of the repository's repository.json"))?;
+    let url = parsed.to_string();
+    if url == DEFAULT_REPOSITORY {
+        return Err(bad("KiCad's official repository is always listed"));
+    }
+    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM plugin_repositories WHERE user_id = $1").bind(user.id).fetch_one(&state.pool).await?;
+    if count >= MAX_REPOSITORIES {
+        return Err(bad("you have as many repositories as the Plugin Manager keeps; remove one first"));
+    }
+    let repo = custom_index(&url, true).await?;
+    let id: i64 = sqlx::query_scalar(
+        "INSERT INTO plugin_repositories (user_id, url, name, maintainer) VALUES ($1, $2, $3, $4)
+         ON CONFLICT (user_id, url) DO UPDATE SET name = EXCLUDED.name, maintainer = EXCLUDED.maintainer RETURNING id",
+    )
+    .bind(user.id)
+    .bind(&url)
+    .bind(&repo.name)
+    .bind(&repo.maintainer)
+    .fetch_one(&state.pool)
+    .await?;
+    Ok(Json(json!({ "id": id, "url": url, "name": repo.name, "maintainer": repo.maintainer, "plugins": repo.packages.len() })))
+}
+
+/// `DELETE /api/plugins/repositories/{id}` — take a repository out of the catalog.  Plugins installed from it stay.
+pub async fn remove_repository(State(state): State<AppState>, AuthUser(user): AuthUser, Path(id): Path<i64>) -> AppResult<Json<Value>> {
+    let gone = sqlx::query("DELETE FROM plugin_repositories WHERE id = $1 AND user_id = $2").bind(id).bind(user.id).execute(&state.pool).await?.rows_affected();
+    Ok(Json(json!({ "removed": gone > 0 })))
+}
+
+/// `GET /api/plugins/repositories/{id}/plugins` — the plugins of one of this person's repositories.
+pub async fn repository_plugins(State(state): State<AppState>, AuthUser(user): AuthUser, Path(id): Path<i64>) -> AppResult<Json<Value>> {
+    let url = repo_url(&state, user.id, id).await?;
+    let repo = custom_index(&url, false).await?;
+    let have = repo.icons.read().map(|g| g.clone()).unwrap_or_default();
+    let out = entries_of(&repo.packages, |ident| json!(have.contains_key(ident)), false);
+    Ok(Json(json!({ "plugins": out, "name": repo.name, "iconsPending": repo.icons_loading.load(std::sync::atomic::Ordering::SeqCst) })))
+}
+
+/// `GET /api/plugins/repositories/{id}/plugins/{identifier}` — download one plugin of that repository for the consent sheet.
+pub async fn repository_plugin(State(state): State<AppState>, AuthUser(user): AuthUser, Path((id, identifier)): Path<(i64, String)>) -> AppResult<Json<Value>> {
+    let url = repo_url(&state, user.id, id).await?;
+    let repo = custom_index(&url, false).await?;
+    let (pkg, version, files) = load_from(&repo.packages, &identifier, true).await?;
+    let ver = version.get("version").and_then(Value::as_str).unwrap_or("");
+    let manifest = install_manifest(&format!("repo:{id}/{identifier}"), &pkg, &version, &files);
+    Ok(Json(json!({ "manifest": manifest, "files": files, "source": format!("repo:{id}:{ver}"), "repository": repo.name })))
+}
+
+/// `GET /api/plugins/repositories/{id}/plugins/{identifier}/icon` — that plugin's icon from its repository, a PNG.
+pub async fn repository_icon(State(state): State<AppState>, AuthUser(user): AuthUser, Path((id, identifier)): Path<(i64, String)>) -> Response {
+    let Ok(url) = repo_url(&state, user.id, id).await else { return StatusCode::NOT_FOUND.into_response() };
+    let Some(repo) = custom_cache().lock().ok().and_then(|c| c.get(&url).map(|(_, r)| r.clone())) else { return StatusCode::NOT_FOUND.into_response() };
+    let found = repo.icons.read().ok().and_then(|g| g.get(&identifier).cloned());
+    match found {
+        Some(bytes) => ([(header::CONTENT_TYPE, "image/png"), (header::CACHE_CONTROL, "private, max-age=3600"), (header::X_CONTENT_TYPE_OPTIONS, "nosniff")], bytes.as_ref().clone()).into_response(),
+        None => StatusCode::NOT_FOUND.into_response(),
+    }
 }
 
 // ---------------------------------------------------------------- the Python runtime's files

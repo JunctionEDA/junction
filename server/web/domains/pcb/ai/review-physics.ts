@@ -20,6 +20,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { netKind, pairName } from "../router/route";
 import { stackupOf, traceOn, widthFor, z0 } from "../router/impedance";
+import { feedDesign } from "../router/fieldsolve";
 import { boardSquareCorners } from "../router/corners";
 
 type Level = "error" | "warning" | "note";
@@ -211,7 +212,7 @@ interface Stitch { x: number; y: number }
 function survey(doc: any, P: any, k: any) {
   const copper: string[] = doc.copper && doc.copper.length ? doc.copper.slice() : ["F.Cu", "B.Cu"];
   const conds: any[] = P.conductors(doc); const NT = P.netTable(doc);
-  const fps: Fp[] = []; const byId = new Map<string, Fp>(); const noCourtyard = new Set<Fp>(); const keepouts: { box: Box; layers: string[]; copper: boolean; name: string }[] = []; const zoneOutlines: { net: string; layers: string[]; pts: Pt[]; hatched?: boolean }[] = [];
+  const fps: Fp[] = []; const byId = new Map<string, Fp>(); const noCourtyard = new Set<Fp>(); const keepouts: { box: Box; layers: string[]; copper: boolean; vias: boolean; name: string }[] = []; const zoneOutlines: { net: string; layers: string[]; pts: Pt[]; hatched?: boolean }[] = [];
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity; let zones = 0;
   const expand = (ls: string[]) => ls.flatMap((l) => (l === "F&B.Cu" ? ["F.Cu", "B.Cu"] : l === "*.Cu" ? copper : [l]));
   for (const it of doc.items.values() as Iterable<any>) {
@@ -224,7 +225,7 @@ function survey(doc: any, P: any, k: any) {
       const n = it.node; const ls = k.kid(n, "layers") || k.kid(n, "layer"); const layers = expand(ls ? ls.slice(1).map((x: any) => k.str(x)) : []);
       const poly = k.kid(n, "polygon"); const pts: Pt[] = poly ? k.ptsOf(poly) : []; if (!pts.length) continue;
       const ko = k.kid(n, "keepout");
-      if (ko) { let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; for (const q of pts) { a = Math.min(a, q[0]); b = Math.min(b, q[1]); c = Math.max(c, q[0]); d = Math.max(d, q[1]); } const cp = k.kid(ko, "copperpour"); const nm = k.kid(n, "name"); keepouts.push({ box: [a, b, c, d], layers, copper: !!cp && k.str(cp[1]) === "not_allowed", name: nm ? k.str(nm[1]) : "" }); }
+      if (ko) { let a = Infinity, b = Infinity, c = -Infinity, d = -Infinity; for (const q of pts) { a = Math.min(a, q[0]); b = Math.min(b, q[1]); c = Math.max(c, q[0]); d = Math.max(d, q[1]); } const cp = k.kid(ko, "copperpour"); const kv = k.kid(ko, "vias"); const nm = k.kid(n, "name"); keepouts.push({ box: [a, b, c, d], layers, copper: !!cp && k.str(cp[1]) === "not_allowed", vias: !kv || k.str(kv[1]) === "not_allowed", name: nm ? k.str(nm[1]) : "" }); }
       else { zones++; const nn = k.kid(n, "net_name"); const net = NT.key(P.netOf(n)) || (nn ? k.str(nn[1]) : ""); const fl = k.kid(n, "fill"); const md = fl ? k.kid(fl, "mode") : null; zoneOutlines.push({ net, layers, pts, hatched: !!md && k.str(md[1]) === "hatch" }); }
     }
   }
@@ -803,7 +804,7 @@ export function reviewPhysics(doc: any, P: any, k: any, settings: any, add: Add)
 /** Is a via of this size allowed at a point: on the board, clear of parts and of every other net's copper. */
 function viaFits(S: Survey, P: any, x: number, y: number, r: number, clr: number, net: string, pads: boolean): boolean {
   const o = S.outline; if (o && (x < o[0] + r + 0.3 || x > o[2] - r - 0.3 || y < o[1] + r + 0.3 || y > o[3] - r - 0.3)) return false;
-  for (const kz of S.keepouts) if (inBox(grow(kz.box, r), x, y)) return false;
+  for (const kz of S.keepouts) if (kz.vias && inBox(grow(kz.box, r), x, y)) return false;      // a keep-out that lets vias through (a plane cut away under an RF feed) does not stop one
   const b: Box = [x - r - clr, y - r - clr, x + r + clr, y + r + clr]; const sh = { t: "circle", x, y, r };
   for (const c of S.conds) {
     if (c.kind === "zone" || !hit(c.bbox, b)) continue;
@@ -888,8 +889,69 @@ export function physicsPlan(doc: any, P: any, k: any, settings: any, plan: any):
       flex: st.rows.some((r) => !r.copper && FLEX_MATERIAL.test(r.material)), bend_areas: S.keepouts.filter((q) => BEND_NAME.test(q.name)).map((q) => q.box.map(r2)),
       outer: outer ? { kind: outer.kind, height: r2(outer.h), epsilon_r: r2(outer.er), reference: outer.reference, width_50_ohm: w50 ? r2(w50) : null } : null };
   }
+  if (plan.what === "rf_feed") return rfFeedPlan(S, doc, P, k, settings, plan);
   if (plan.what === "interfaces") return { what: "interfaces", interfaces: INTERFACES };
   return { error: `Unknown plan "${plan.what}": antenna, fence, thermal, layout, stackup or interfaces.` };
+}
+
+/** How each RF feed has to be built, from the board's own stackup: the width for the target impedance as grounded
+ *  coplanar (the ground pour beside it on its layer, at the pour's clearance) over the nearest plane, solved with a 2D
+ *  field solver.  When that width is narrower than `min_width` (a thin feed is lossy, steps hard into the pads and is
+ *  sensitive to etching), the planes under the feed are cut away down to a deeper reference, a band `void_half` either
+ *  side of the centre line, and the width solved again: the owner's boards do this (In1 and In2 voided under the feed).
+ *  Returns per feed: layer, width, gap, reference, voided layers, the void polygons and the impedance reached. */
+function rfFeedPlan(S: Survey, doc: any, P: any, k: any, settings: any, plan: any): any {
+  const r3 = (v: number) => Math.round(v * 1000) / 1000;
+  const want = plan.net ? String(plan.net) : ""; const target = plan.impedance > 0 ? plan.impedance : 50; const minW = plan.min_width > 0 ? plan.min_width : 0.3;
+  const nets = Array.from(S.tracksOf.keys()).filter((n) => (want ? n === want || bare(n) === bare(want) : netKind(n) === "rf" || /ANT/i.test(n)));
+  if (!nets.length) return { error: want ? `No routed net named ${want}.` : "No routed RF or antenna net on the board." };
+  const stack = stackupOf(k, doc); const L = stack.layers; const out: any[] = [];
+  for (const net of nets) {
+    const segs = S.tracksOf.get(net) || []; const byLayer = new Map<string, number>(); for (const t of segs) for (const l of t.layers as Set<string>) byLayer.set(l, (byLayer.get(l) || 0) + t.length);
+    const layer = Array.from(byLayer.entries()).sort((a, b) => b[1] - a[1])[0][0]; const i = L.findIndex((l) => l.copper && l.name === layer);
+    const coppers = L.filter((l) => l.copper); const outer = layer === coppers[0].name || layer === coppers[coppers.length - 1].name;
+    if (i < 0) { out.push({ net: bare(net), layer, note: "the feed's layer is not in the stackup" }); continue; }
+    // the dielectrics and planes from the feed's layer outwards: one way on an outer layer (microstrip), both ways on an inner one (stripline)
+    const walk = (dir: number) => { const diel: { th: number; er: number }[] = []; const planes: string[] = []; let th = 0, ers = 0;
+      for (let j = i + dir; j >= 0 && j < L.length; j += dir) { if (L[j].copper) { diel.push({ th, er: th ? ers / th : 4.5 }); planes.push(L[j].name); th = 0; ers = 0; continue; } th += L[j].thickness; ers += L[j].thickness * L[j].er; }
+      return { diel, planes }; };
+    const down = walk(layer === coppers[coppers.length - 1].name ? -1 : 1), upw = outer ? null : walk(-1);
+    const diel = down.diel, planes = down.planes;
+    // the gap to the ground beside it: the clearance of the ground pour on its layer (0 when there is no pour there: microstrip)
+    // the pour that actually lies beside the feed: the ground zone on its layer whose outline holds the feed's middle
+    const mid = (() => { const tk = segs.slice().sort((a, b) => b.length - a.length)[0]; const pts: Pt[] = tk.shape.t === "seg" ? [tk.shape.a, tk.shape.b] : tk.shape.pts; return [(pts[0][0] + pts[pts.length - 1][0]) / 2, (pts[0][1] + pts[pts.length - 1][1]) / 2] as Pt; })();
+    const inside = (pts: Pt[], x: number, y: number) => { let c = false; for (let a = 0, b = pts.length - 1; a < pts.length; b = a++) if ((pts[a][1] > y) !== (pts[b][1] > y) && x < (pts[b][0] - pts[a][0]) * (y - pts[a][1]) / (pts[b][1] - pts[a][1]) + pts[a][0]) c = !c; return c; };
+    const zoneAt = (lay: string): { gnd: boolean; clr: number }[] => { const got: { gnd: boolean; clr: number }[] = []; for (const it of doc.items.values()) {
+      if (it.kind !== "zone" || k.kid(it.node, "keepout")) continue; const n = it.node; const zl: string[] = []; const one = k.kid(n, "layer"), many = k.kid(n, "layers"); if (one) zl.push(k.str(one[1])); if (many) for (const v of many.slice(1)) zl.push(k.str(v)); if (!zl.includes(lay)) continue;
+      const poly = k.kid(n, "polygon"); const pts: Pt[] = poly ? k.ptsOf(poly) : []; if (pts.length < 3 || !inside(pts, mid[0], mid[1])) continue; const cp = k.kid(n, "connect_pads"); const cl = cp ? k.kid(cp, "clearance") : null; got.push({ gnd: isGnd(P.netTable(doc).key(P.netOf(n)) || ""), clr: cl ? k.num(cl[1], 0.2) : 0.2 }); } return got; };
+    let gap = 0, best = Infinity;
+    for (const it of doc.items.values()) {
+      if (it.kind !== "zone" || k.kid(it.node, "keepout")) continue; const n = it.node; const zl: string[] = []; const one = k.kid(n, "layer"), many = k.kid(n, "layers"); if (one) zl.push(k.str(one[1])); if (many) for (const v of many.slice(1)) zl.push(k.str(v)); if (!zl.includes(layer)) continue;
+      const zn = P.netTable(doc).key(P.netOf(n)) || ""; if (!isGnd(zn)) continue; const poly = k.kid(n, "polygon"); const pts: Pt[] = poly ? k.ptsOf(poly) : []; if (pts.length < 3 || !inside(pts, mid[0], mid[1])) continue;
+      const cp = k.kid(n, "connect_pads"); const cl = cp ? k.kid(cp, "clearance") : null; const c = cl ? k.num(cl[1], 0.2) : 0.2; if (c < best) best = c;
+    }
+    if (best < Infinity) gap = Math.max(best, P.netClearance(settings, net));
+    // a feed far shorter than the wavelength does not need its impedance held (a twentieth of it, on this board)
+    const radio = radioGHz(S.fps, S.padsOf.keys()); const length = segs.reduce((a, tk) => a + tk.length, 0); const lambda = 300 / (radio.ghz || 2.4) / Math.sqrt(3.2);
+    if (length < lambda / 20 && !want) { out.push({ net: bare(net), layer, length: r3(length), note: `${r3(length)} mm is under a twentieth of the wavelength (${r3(lambda)} mm at ${radio.ghz || 2.4} GHz): kept as it is` }); continue; }
+    const t = L[i].thickness || 0.035; const tries: any[] = []; let pick: any = null;
+    const levels = Math.max(planes.length, upw ? upw.planes.length : 0);
+    for (let r = 0; r < levels && !pick; r++) {
+      // the return current runs in the reference: it has to be ground there, so a supply plane is cut away with the rest
+      const rd = Math.min(r, planes.length - 1), ru = upw ? Math.min(r, upw.planes.length - 1) : -1; const last = r === levels - 1;
+      const refs = [planes[rd], ...(upw ? [upw.planes[ru]] : [])]; const name = refs.join(" and ");
+      if (!refs.every((pl) => zoneAt(pl).some((z) => z.gnd)) && !last) { tries.push({ reference: name, note: "not ground planes over and under the feed" }); continue; }
+      const voided = [...planes.slice(0, rd), ...(upw ? upw.planes.slice(0, ru) : [])];
+      const d = feedDesign({ t, gap, dielectrics: diel, reference: rd, ...(upw ? { above: upw.diel, referenceAbove: ru } : {}) }, target, voided.length ? 0.6 : null); if (!d) { tries.push({ reference: name, note: "no width between 0.08 and 3 mm reaches it" }); continue; }
+      const row = { reference: name, voided, width: r3(d.w), void_half: r3(d.voidHalf), impedance: Math.round(d.z * 10) / 10 }; tries.push(row);
+      if (d.w >= minW || last) pick = row;
+    }
+    // nothing reaches the narrowest width wanted: the widest that holds the impedance, with a note why
+    if (!pick) { const ok = tries.filter((t: any) => t.width).sort((x: any, y: any) => y.width - x.width)[0]; if (ok) pick = { ...ok, note: `no reference gives ${minW} mm or wider here; ${ok.width} mm holds ${target} ohm` }; }
+    const polys = pick && pick.voided.length ? segs.map((tk) => { const pts: Pt[] = tk.shape.t === "seg" ? [tk.shape.a, tk.shape.b] : tk.shape.pts; const a = pts[0], b = pts[pts.length - 1]; const Lg = Math.hypot(b[0] - a[0], b[1] - a[1]) || 1; const ux = (b[0] - a[0]) / Lg, uy = (b[1] - a[1]) / Lg, h = pick.void_half; return [[a[0] - ux * h - uy * h, a[1] - uy * h + ux * h], [b[0] + ux * h - uy * h, b[1] + uy * h + ux * h], [b[0] + ux * h + uy * h, b[1] + uy * h - ux * h], [a[0] - ux * h + uy * h, a[1] - uy * h - ux * h]].map((q) => [r3(q[0]), r3(q[1])]); }) : [];
+    out.push({ net: bare(net), full_net: net, layer, gap: r3(gap), target, model: upw ? (gap > 0 ? "coplanar stripline" : "stripline") : gap > 0 ? "grounded coplanar" : "microstrip", stackup_assumed: stack.assumed, tries, ...(pick || {}), void_polygons: polys });
+  }
+  return { what: "rf_feed", feeds: out };
 }
 
 /** The layout worked out from the netlist, before a part is placed or a track laid: which parts belong beside which

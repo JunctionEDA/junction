@@ -108,7 +108,7 @@ export function renderPicture(doc: any, opts: any): string {
     if (ids && !ids.has(it.id)) continue;
     if (opts.zones === false && it.kind === "zone") continue;
     const b = it.bbox; if (b && (b[2] < x0 || b[0] > x1 || b[3] < y0 || b[1] > y1)) continue;
-    for (const g of it.geom) { if (hidden.has(g.layer) || (opts.padNumbers === false && g.padNum) || (opts.copperOnly && g.layer && !/Cu$|Edge/.test(g.layer))) continue; take(g); }
+    for (const g of it.geom) { if (hidden.has(g.layer) || (opts.padNumbers === false && g.padNum) || (opts.copperOnly && g.layer && /Silk|Fab|CrtYd|Courtyard|Paste|Mask|User|Cmts|Dwgs|Eco|Margin/i.test(g.layer))) continue; take(g); }
   }
   for (const z of Array.from(buckets.keys()).sort((a, b) => a - b)) for (const g of buckets.get(z)!) {
     const s = one(g); if (!s) continue;

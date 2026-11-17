@@ -126,6 +126,7 @@ set( KICOMMON_SRCS
     git/git_backend.cpp
     git/kigit_orphan_registry.cpp
     git/kigit_failure.cpp
+    git/kigit_ignore.cpp
     git/kigit_known_hosts.cpp
     git/kigit_ssh_keys.cpp
     git/kigit_transport.cpp
@@ -475,6 +476,7 @@ target_link_libraries( kicommon
     glad
     thread-pool
     ${ZSTD_LIBRARY}
+    ${KICAD_SQLITE3_TARGET}
     ${wxWidgets_LIBRARIES}
     ${LIBGIT2_LIBRARIES}
     ${SPNAV_LIBRARIES}
@@ -723,8 +725,6 @@ set( COMMON_DLG_SRCS
     dialogs/panel_toolbar_customization.cpp
     dialogs/panel_toolbar_customization_base.cpp
 
-    dialogs/rule_editor_dialog_base.cpp
-
     libraries/lib_table_grid_data_model.cpp
     )
 
@@ -869,6 +869,7 @@ set( COMMON_IO_SRCS
     # EasyEDA pro
     io/easyedapro/easyedapro_parser.cpp
     io/easyedapro/easyedapro_import_utils.cpp
+    io/easyedapro/easyedapro_eprj.cpp
     io/easyedapro/easyedapro_v3_parser.cpp
 
     # DipTrace

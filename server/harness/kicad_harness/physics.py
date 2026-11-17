@@ -458,4 +458,159 @@ def install(Project, Schematic, Board) -> None:      # noqa: ARG001
     Board.finish = _finish
     Board.antenna = _antenna
     Board.fence_net = _fence_net
+    Board.rf_feeds = _rf_feeds
     Board.thermal_vias = _thermal_vias
+
+
+# ---------------------------------------------------------------- RF feeds built to their impedance
+
+def _chain(segs):
+    """Order a net's track pieces into runs from end to end: [[(x, y), ...], ...]."""
+    key = lambda p: (round(p[0], 3), round(p[1], 3))   # noqa: E731
+    left = [list(s) for s in segs]; runs = []
+    while left:
+        a, b = left.pop(0); run = [a, b]
+        grew = True
+        while grew:
+            grew = False
+            for i, (c, d) in enumerate(left):
+                if key(c) == key(run[-1]): run.append(d)
+                elif key(d) == key(run[-1]): run.append(c)
+                elif key(d) == key(run[0]): run.insert(0, c)
+                elif key(c) == key(run[0]): run.insert(0, d)
+                else: continue
+                left.pop(i); grew = True; break
+        out = [run[0]]
+        for p in run[1:]:
+            if math.hypot(p[0] - out[-1][0], p[1] - out[-1][1]) > 1e-4:
+                out.append(p)
+        # drop points on a straight line
+        pts = [out[0]]
+        for i in range(1, len(out) - 1):
+            ax, ay = out[i][0] - pts[-1][0], out[i][1] - pts[-1][1]; bx, by = out[i + 1][0] - out[i][0], out[i + 1][1] - out[i][1]
+            if abs(ax * by - ay * bx) > 1e-6 * (math.hypot(ax, ay) * math.hypot(bx, by) + 1e-12):
+                pts.append(out[i])
+        pts.append(out[-1]); runs.append(pts)
+    return runs
+
+
+def _rounded(pts, w):
+    """A run with every bend turned into an arc of radius about three track widths (less where the run is short):
+    [("seg", a, b) | ("arc", a, mid, b)].  Stubs shorter than the width (the router's short leg into a pad centre) are
+    folded into the leg next to them first, so they do not become slivers and tiny arcs."""
+    pts = list(pts)
+    while len(pts) > 2:
+        legs = [math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]) for i in range(len(pts) - 1)]
+        k = min(range(len(legs)), key=legs.__getitem__)
+        if legs[k] >= w:
+            break
+        # a stub at an end runs from the pad centre to a point still on the pad: end the track there instead, so
+        # the long leg stays straight; a stub inside the run loses its inner corner
+        del pts[0 if k == 0 else (len(pts) - 1 if k == len(legs) - 1 else k)]
+    out, cur = [], pts[0]
+    for i in range(1, len(pts) - 1):
+        p0, p1, p2 = pts[i - 1], pts[i], pts[i + 1]
+        u = (p0[0] - p1[0], p0[1] - p1[1]); v = (p2[0] - p1[0], p2[1] - p1[1]); lu, lv = math.hypot(*u), math.hypot(*v)
+        cosang = max(-1.0, min(1.0, (u[0] * v[0] + u[1] * v[1]) / (lu * lv)))
+        theta = math.acos(cosang)                 # the angle inside the corner
+        turn = math.pi - theta
+        if turn < math.radians(3):
+            continue
+        want = 3 * w
+        d = want / math.tan(theta / 2)            # how far the arc starts from the corner
+        d = min(d, (lu if i == 1 else lu / 2) * 0.95, (lv if i == len(pts) - 2 else lv / 2) * 0.95)
+        r = d * math.tan(theta / 2)
+        a = (p1[0] + u[0] / lu * d, p1[1] + u[1] / lu * d); b = (p1[0] + v[0] / lv * d, p1[1] + v[1] / lv * d)
+        bis = (u[0] / lu + v[0] / lv, u[1] / lu + v[1] / lv); lb = math.hypot(*bis)
+        c = (p1[0] + bis[0] / lb * r / math.sin(theta / 2), p1[1] + bis[1] / lb * r / math.sin(theta / 2))
+        m = (c[0] - bis[0] / lb * r, c[1] - bis[1] / lb * r)
+        if math.hypot(a[0] - cur[0], a[1] - cur[1]) > 1e-4:
+            out.append(("seg", cur, a))
+        out.append(("arc", a, m, b)); cur = b
+    out.append(("seg", cur, pts[-1]))
+    return out
+
+
+def _seg_dist(p, a, b):
+    ax, ay = b[0] - a[0], b[1] - a[1]; L = ax * ax + ay * ay
+    t = 0 if L == 0 else max(0.0, min(1.0, ((p[0] - a[0]) * ax + (p[1] - a[1]) * ay) / L))
+    return math.hypot(p[0] - a[0] - t * ax, p[1] - a[1] - t * ay)
+
+
+def _clear_stitching(self, segs, reach):
+    """Take out the free-standing ground vias (stitching, no track ending on them) within `reach` of the feed, so
+    the fence can stand at its own pitch instead of in the gaps an earlier stitch grid left.  Returns how many."""
+    gnd = self._net("GND")
+    ends = set()
+    for it in self._all_items(["segment", "arc"], net=gnd):
+        for m in re.finditer(r"\((?:start|end) ([\d.\-]+) ([\d.\-]+)\)", it["sexpr"]):
+            ends.add((round(float(m.group(1)), 3), round(float(m.group(2)), 3)))
+    n = 0
+    for v in self._all_items(["via"], net=gnd):
+        m = re.search(r"\(at ([\d.\-]+) ([\d.\-]+)\)", v["sexpr"])
+        if not m:
+            continue
+        c = (float(m.group(1)), float(m.group(2)))
+        if (round(c[0], 3), round(c[1], 3)) in ends or not any(_seg_dist(c, a, b) < reach for a, b in segs):
+            continue
+        self._edit({"op": "remove", "id": v["id"]}); n += 1
+    self.flush()
+    return n
+
+
+def _rf_feeds(self, net: str | None = None, impedance: float = 50, min_width: float = 0.3, fence: bool = True,
+              spacing: float = 0.75, round_bends: bool = True) -> dict:
+    """Build every RF / antenna feed (or `net`) to its impedance from the board's own stackup, the way the owner's
+    boards do: the width is solved with a 2D field solver as grounded coplanar (the ground pour beside it, at the
+    pour's clearance) over the nearest plane; when that is narrower than `min_width`, the planes under the feed are cut
+    away (keep-outs on those layers) down to a deeper reference and the width solved again.  The feed is then laid at
+    that width with its bends as arcs, and fenced with ground vias down both sides every `spacing` mm.
+    Run it after routing, before the final fill.  Returns per feed the width, impedance, reference, voided layers and
+    the fence."""
+    self.flush()
+    try:
+        plan = _plan(self, what="rf_feed", net=net, impedance=impedance, min_width=min_width)
+    except HarnessError as err:
+        if net is None and "No routed RF" in str(err):
+            return {"feeds": []}
+        raise
+    out = []
+    for f in plan.get("feeds", []):
+        if "width" not in f:
+            out.append(f); continue
+        full = f.get("full_net") or f["net"]; w = f["width"]; layer = f["layer"]
+        for poly in f.get("void_polygons") or []:
+            self.keepout([tuple(p) for p in poly], layers=f["voided"], tracks=True, vias=False, copper=True, name=f"RF feed {f['net']}")
+        self.flush()
+        items = [it for it in self._all_items(["segment", "arc"], net=full)]
+        segs = []
+        for it in items:
+            m = re.search(r"\(start ([\d.\-]+) ([\d.\-]+)\).*?\(end ([\d.\-]+) ([\d.\-]+)\)", it["sexpr"], re.S)
+            lay = re.search(r'\(layer "([^"]+)"\)', it["sexpr"])
+            if m and lay and lay.group(1) == layer:
+                x0, y0, x1, y1 = map(float, m.groups()); segs.append(((x0, y0), (x1, y1)))
+                self._edit({"op": "remove", "id": it["id"]})
+        nm = self._net(full)
+        for run in _chain(segs):
+            parts = _rounded(run, w) if round_bends else [("seg", run[i], run[i + 1]) for i in range(len(run) - 1)]
+            for p in parts:
+                if p[0] == "seg":
+                    self.add_item(f'(segment (start {_r(p[1][0])} {_r(p[1][1])}) (end {_r(p[2][0])} {_r(p[2][1])}) (width {_r(w)}) (layer "{layer}") (net "{nm}"))')
+                else:
+                    self.add_item(f'(arc (start {_r(p[1][0])} {_r(p[1][1])}) (mid {_r(p[2][0])} {_r(p[2][1])}) (end {_r(p[3][0])} {_r(p[3][1])}) (width {_r(w)}) (layer "{layer}") (net "{nm}"))')
+        self.flush()
+        row = {k: f[k] for k in ("net", "layer", "width", "gap", "impedance", "model", "reference", "voided", "note") if k in f}
+        if fence:
+            try:
+                rl = self.rules(); dc = (rl.get("net_classes") or {}).get("Default", {})
+                vd, dr = dc.get("via_diameter") or 0.45, dc.get("via_drill") or 0.2
+                hc = rl.get("hole_clearance") or 0.25          # copper to the via's hole, KiCad's default when unset
+                off = w / 2 + max(max(f.get("gap") or 0.1, 0.1) + vd / 2, hc + dr / 2) + 0.05
+                row["cleared"] = _clear_stitching(self, segs, off + vd / 2 + hc + dr / 2)
+                row["fence"] = self.fence_net(full, spacing=spacing, offset=off, size=vd)
+            except HarnessError as err:
+                row["fence"] = {"error": str(err)}
+        out.append(row)
+    self.fill()
+    self.project.note("board: RF feeds " + "; ".join(f"{r['net']} {r.get('width')} mm, {r.get('impedance')} ohm" for r in out if r.get("width")))
+    return {"feeds": out}

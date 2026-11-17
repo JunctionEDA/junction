@@ -347,6 +347,12 @@ def _stackup(self, fab: str | None = None, layers: int | None = None, thickness:
     applied = None
     if rules and fabkey:
         applied = rules_for(fabkey, st["material"], want, copper_oz)
+        try:      # the fab's copper-to-edge is a floor: a board its owner set wider keeps it (0.3 stays 0.3; KiCad's stock 0.5 does not)
+            cur = (self.rules() or {}).get("edge_clearance")
+        except HarnessError:
+            cur = None
+        if isinstance(cur, (int, float)) and abs(cur - 0.5) > 1e-6 and cur > applied.get("edge_clearance", 0):
+            applied["edge_clearance"] = cur
         self.rules(**applied)
     now = _physics._plan(self, what="stackup")
     notes += st["notes"]

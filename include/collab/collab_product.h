@@ -31,7 +31,7 @@
  * Keep KICAD_COLLAB_PRODUCT_VERSION in sync with packaging/VERSION.
  */
 #define KICAD_COLLAB_PRODUCT_NAME     wxS( "Junction" )
-#define KICAD_COLLAB_PRODUCT_VERSION  wxS( "2.2.0" )
+#define KICAD_COLLAB_PRODUCT_VERSION  wxS( "2.2.1" )
 
 /**
  * The KiCad release this fork is based on, as shown to people (About dialog).

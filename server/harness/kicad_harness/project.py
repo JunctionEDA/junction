@@ -447,7 +447,7 @@ class Schematic(_Doc):
 
     def nets(self, filter: str | None = None) -> dict:
         """The nets of the sheet: name -> ["REF.pin", ...]."""
-        r = self._call("list_nets", **({"filter": filter} if filter else {}))
+        r = self._call("list_nets", limit=1000000, **({"filter": filter} if filter else {}))
         return {n["name"]: [re.sub(r"\(.*\)$", "", p) for p in n["pins"]] for n in r.get("nets", [])}
 
     def net_of(self, spec: str) -> str:
@@ -1676,7 +1676,8 @@ class Board(_Doc):
     def pads(self, ref: str) -> list:
         for p in self.geometry()["parts"]:
             if p["ref"].lower() == ref.lower():
-                return [{"ref": p["ref"], "number": q[0], "x": q[1], "y": q[2], "net": q[3]} for q in p["pads"]]
+                # size: the pad's width and height in its own frame, rot: its turn on the board (degrees)
+                return [{"ref": p["ref"], "number": q[0], "x": q[1], "y": q[2], "net": q[3], **({"size": [q[4], q[5]], "rot": q[6]} if len(q) > 6 else {})} for q in p["pads"]]
         raise HarnessError(f"There is no footprint {ref} on the board.")
 
     def courtyards(self, refs=None) -> dict:
@@ -1893,7 +1894,7 @@ class Board(_Doc):
 
     def nets(self, filter: str | None = None) -> dict:
         """name -> {"pads": [...], "unrouted": n, "length_mm": x}"""
-        r = self._call("list_nets", **({"filter": filter} if filter else {}))
+        r = self._call("list_nets", limit=1000000, **({"filter": filter} if filter else {}))
         return {n["name"]: {"pads": n["pads"], "unrouted": n["unrouted_connections"], "length_mm": n["routed_length_mm"]} for n in r.get("nets", [])}
 
     def unrouted(self) -> dict:
@@ -2062,15 +2063,18 @@ class Board(_Doc):
                       f'(fill (thermal_gap 0.3) (thermal_bridge_width 0.4)) (polygon (pts {pts})))')
 
     def keepout(self, box, layers=None, tracks: bool = True, vias: bool = True, copper: bool = True, footprints: bool = False, name: str = "") -> None:
-        """A rule area (KiCad keepout) over a rectangle [x0, y0, x1, y1]: nothing of the kinds named may enter it.
+        """A rule area (KiCad keepout) over a rectangle [x0, y0, x1, y1] (or a polygon [(x, y), ...]): nothing of the kinds named may enter it.
 
         Use it under an antenna (no copper on any layer), for the gap between an analog and a digital section, or to
         hold tracks off a switching converter's inductor.  layers: copper layers it applies to (default all of
         them).  tracks / vias / copper (pours) / footprints: True keeps that out.  The autorouter, the zone filler
         and the design rule check all honour it."""
         ls = list(layers) if layers else list(self.info().get("copper_layers") or ["F.Cu", "B.Cu"])
-        x0, y0, x1, y1 = (min(box[0], box[2]), min(box[1], box[3]), max(box[0], box[2]), max(box[1], box[3]))
-        pts = " ".join(f"(xy {_r(x)} {_r(y)})" for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)))
+        if box and isinstance(box[0], (list, tuple)):       # a polygon [(x, y), ...]
+            pts = " ".join(f"(xy {_r(x)} {_r(y)})" for x, y in box)
+        else:
+            x0, y0, x1, y1 = (min(box[0], box[2]), min(box[1], box[3]), max(box[0], box[2]), max(box[1], box[3]))
+            pts = " ".join(f"(xy {_r(x)} {_r(y)})" for x, y in ((x0, y0), (x1, y0), (x1, y1), (x0, y1)))
         ok = lambda keep: "not_allowed" if keep else "allowed"
         lay = f'(layer "{ls[0]}")' if len(ls) == 1 else "(layers " + " ".join(f'"{l}"' for l in ls) + ")"
         self.add_item(f'(zone (net 0) (net_name "") {lay} (uuid "{_uuid.uuid4()}")' + (f' (name "{name}")' if name else "") + ' (hatch edge 0.5) (connect_pads (clearance 0)) (min_thickness 0.25) '
@@ -2223,6 +2227,8 @@ class Board(_Doc):
         out = {"placed": len(d.get("placements", [])), "score": d.get("score"), "outline": d.get("outline"), "unknown_refs": d.get("unknown_refs") or []}
         if d.get("turned"):      # square chips the engine stood at 45 degrees because their cluster came out smaller
             out["turned_45"] = d["turned"]
+        if d.get("motion_sensors"):      # accelerometers, gyros, IMUs: square to the board, and which way their axes point
+            out["motion_sensors"] = d["motion_sensors"]
         self.project.note(f"board: placed {out['placed']} footprints, score {out['score']}")
         # the small parts, in the order a person seats them: the matching network at the radio pin, the bypass capacitors
         # at their supply pins, then the crystal at its oscillator pins and the parts that serve one pin (a pull-down in
@@ -2320,7 +2326,7 @@ class Board(_Doc):
     def whats_at(self, at, radius: float = 0.8) -> list:
         """The copper within `radius` mm of a point, nearest first: [{"kind", "net", "layer", "gap_mm", "id", and "start",
         "end", "width" for a track or "at", "size" for a via or pad}], gap_mm from the point to the item's copper edge
-        (a pad's is rough: centre distance less 0.3 mm).  Use it before a hand-placed via or
+        (a pad's is rough: centre distance less half its narrow side).  Every item in reach is listed, however many.  Use it before a hand-placed via or
         track: a 0.45 mm via needs gap_mm of at least half its size plus the clearance to every other net's item."""
         self.flush()
         x, y = float(at[0]), float(at[1])
@@ -2331,13 +2337,14 @@ class Board(_Doc):
             if folder:
                 with open(os.path.join(folder, self.path)) as fh:
                     names = dict(re.findall(r'\(net (\d+) "((?:[^"\\]|\\.)*)"\)', fh.read()))
-        for it in self._call("get_items", kinds=["segment", "arc", "via", "footprint"], near={"x": x, "y": y, "radius": radius}).get("items", []):
+        for it in self._all_items(["segment", "arc", "via", "footprint"], near={"x": x, "y": y, "radius": radius}):   # every page, never cut short
             sx = it.get("sexpr", "")
             if it.get("kind") == "footprint":
                 for q in (self._part(it.get("ref") or "").get("pads") if it.get("ref") else []) or []:
                     d = math.hypot(q[1] - x, q[2] - y)
                     if d <= radius + 0.5:
-                        out.append({"kind": "pad", "net": q[3], "layer": "", "gap_mm": round(max(0.0, d - 0.3), 3), "id": f"{it.get('ref')}.{q[0]}", "at": [q[1], q[2]]})
+                        half = min(q[4], q[5]) / 2 if len(q) > 5 and q[4] else 0.3
+                        out.append({"kind": "pad", "net": q[3], "layer": "", "gap_mm": round(max(0.0, d - half), 3), "id": f"{it.get('ref')}.{q[0]}", "at": [q[1], q[2]], **({"size": [q[4], q[5]], "rot": q[6]} if len(q) > 6 else {})})
                 continue
             nm = re.search(r'\(net (?:"((?:[^"\\]|\\.)*)"|(\d+))\)', sx); net = (nm.group(1) or names.get(nm.group(2), nm.group(2))) if nm else ""
             lay = re.search(r'\(layers? "([^"]+)"', sx); layer = lay.group(1) if lay else ""
@@ -2352,7 +2359,9 @@ class Board(_Doc):
                 if not v:
                     continue
                 gap = math.hypot(x - float(v.group(1)), y - float(v.group(2))) - (float(z.group(1)) / 2 if z else 0.25)
-                layer = "via"; where = {"at": [float(v.group(1)), float(v.group(2))], "size": float(z.group(1)) if z else None}
+                ls = re.search(r'\(layers ((?:"[^"]+"\s*)+)\)', sx)
+                layer = "via"; where = {"at": [float(v.group(1)), float(v.group(2))], "size": float(z.group(1)) if z else None,
+                                        "layers": re.findall(r'"([^"]+)"', ls.group(1)) if ls else ["F.Cu", "B.Cu"]}
             if gap <= radius:
                 out.append({"kind": it.get("kind"), "net": net, "layer": layer, "gap_mm": round(max(0.0, gap), 3), "id": it["id"], **where})
         return sorted(out, key=lambda r: r["gap_mm"])
@@ -2366,7 +2375,7 @@ class Board(_Doc):
     def _kept(self, it: dict) -> bool:
         return getattr(self, "_keep_outline", True) and str(it.get("kind", "")).startswith("gr_") and "Edge.Cuts" in it.get("sexpr", "")
 
-    def unroute(self, *nets: str, keep: tuple = ("GND",), near=None, radius: float | None = None) -> int:
+    def unroute(self, *nets: str, keep: tuple = ("GND",), near=None, radius: float | None = None, attached: bool = False) -> int:
         """Take the tracks and vias of these nets off the board (of every net but `keep` when none is named), so that
         a crowded area can be laid again together.  Returns how many were removed.
 
@@ -2375,7 +2384,13 @@ class Board(_Doc):
         round it (1.5 mm by default) and lay the open net first, then the nets that were taken up, in one call:
             board.unroute(near="U1.8"); board.route(order=["/LED_SW_V"], time_s=60)
         A part's radius defaults to its pad ring plus 2.5 mm: that takes up most of a chip's fan-out, so use it only
-        when many of its pins are open."""
+        when many of its pins are open.  attached=True (with near= a part or pin) takes up only the nets of that part's
+        pins, leaving the tracks that merely pass through the area (a USB pair round the chip) where they are."""
+        if near is not None and attached and not nets and isinstance(near, str):
+            ref = near.split(".")[0]
+            nets = tuple(sorted({q["net"] for q in self.pads(ref) if q["net"] and q["net"] not in keep and self._net(q["net"]) not in keep}))
+            if not nets:
+                return 0
         if near is not None:
             return self._unroute_near(near, radius, [self._net(n) for n in nets], keep)
         names = [self._net(n) for n in nets] if nets else [n for n in self.nets() if n not in keep]
@@ -2593,10 +2608,10 @@ class Board(_Doc):
                     continue
                 nm = re.search(r'\(net (?:"((?:[^"\\]|\\.)*)"|(\d+))\)', s)      # a name, or a net number in older files
                 segs.append((it["id"], far, float(re.search(r"\(width ([\d.]+)\)", s).group(1)), re.search(r'\(layer "([^"]+)"\)', s).group(1),
-                             (m.group(1) if m else None) or (nm.group(1) or nm.group(2) if nm else "")))
+                             (m.group(1) if m else None) or (nm.group(1) or nm.group(2) if nm else ""), re.sub(r'\s*\(uuid "[^"]*"\)', "", s)))
             if len(segs) != 2 or segs[0][3] != segs[1][3] or segs[0][4] != segs[1][4]:
                 continue
-            (i1, f1, w1, layer, net), (i2, f2, w2, _, _) = segs
+            (i1, f1, w1, layer, net, sx1), (i2, f2, w2, _, _, sx2) = segs
             u, w = (f1[0] - x, f1[1] - y), (f2[0] - x, f2[1] - y)
             back = (u[0] * w[0] + u[1] * w[1]) / ((math.hypot(*u) * math.hypot(*w)) or 1) > 0.985   # the track doubles back on itself
             self._edit({"op": "remove", "id": i1}); self._edit({"op": "remove", "id": i2})
@@ -2611,6 +2626,15 @@ class Board(_Doc):
             else:
                 pts = [[f1[0], f1[1]], [x, y], [f2[0], f2[1]]]
             if math.hypot(f1[0] - f2[0], f1[1] - f2[1]) > 1e-4:      # out and back to the same point is a dead spur: nothing is laid
+                # the new path must keep every rule; when it does not (a straightened zigzag through a pad), the two
+                # segments go back as they were and the corner is left for a person
+                self.flush()
+                ok = True
+                with contextlib.suppress(Exception):
+                    ok = bool(self.fits(net, track=[tuple(q) for q in pts], layer=layer, width=min(w1, w2)).get("fits", True))
+                if not ok:
+                    self.add_item(sx1); self.add_item(sx2); self.flush()
+                    continue
                 self._edit({"op": "add_track", "net": net, "layer": layer, "points": pts, "width": min(w1, w2)})
             done += 1
         if done:
@@ -2703,7 +2727,7 @@ class Board(_Doc):
               net_options: dict | None = None, keepouts: list | None = None, allow_vias: bool = True, time_s: float | None = None,
               fill: bool = True, max_vias: int | None = None, kinds: dict | None = None, separate=None, fence=None,
               ground_vias: bool = True, fanout_lanes=None, via_cost: float | None = None, groups=None, explain: bool = False,
-              keep_rules: bool = False) -> dict:
+              keep_rules: bool = False, escapes=None) -> dict:
         """Autoroute the missing connections (every unrouted net by default) and report what was done.
 
         order: the few nets to lay first (USB pair, crystal); widths: {net: mm} for supply nets; net_options and
@@ -2744,6 +2768,12 @@ class Board(_Doc):
         fanout_lanes: each pin of a fine-pitch chip keeps a straight lane this long (mm, 0.25 by default) out from its
         pad that only its own net may use, so neighbours cannot box a pin in; raise it (0.8 to 1.2) when a QFN's pins
         are left "blocked", False turns it off.
+        escapes=True lays the escapes of every fine-pitch chip (QFN/QFP, 0.65 mm pitch and finer) before anything is
+        routed: a fan that spreads each row's pins to 1.5 times their pitch, else a straight stub out of the pin or a
+        45-degree leg where the stub is blocked, and a via for a pin that must change layer, none closing another
+        pin's way out; the pin's connections are then routed from the escape's end.  A number is how far past the pad
+        the first ring lies (mm); {"depth": mm, "spread": 1.5} sets both (spread 0: no spreading fan).  The result's
+        `fanout` counts them and names the pins that got none (`boxed`) with what blocks them.  Off by default.
         
         A board still on KiCad's stock via (0.6 on 0.3 mm) gets the house via (0.5 on 0.2 mm) first, and the result says
         so under "rules_changed"; keep_rules=True leaves the rules exactly as they are (the person said not to touch them).
@@ -2800,6 +2830,8 @@ class Board(_Doc):
             e["separate"] = separate
         if fanout_lanes is not None:
             e["fanout_lanes"] = fanout_lanes
+        if escapes is not None:
+            e["escapes"] = escapes
         if via_cost is not None:
             e["via_cost"] = via_cost
         if fence is not None:
@@ -2885,7 +2917,7 @@ class Board(_Doc):
             out["more_unrouted"] = len(un) - 25
         if d.get("explain"):
             out["explain"] = dict(d["explain"], longest_detours=d.get("longest_detours") or [])
-        for k in ("domains", "ground_vias", "groups"):
+        for k in ("domains", "ground_vias", "groups", "fanout"):
             if d.get(k):
                 out[k] = d[k]
         return out

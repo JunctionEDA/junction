@@ -5,10 +5,13 @@ mod datasheet;
 mod demo;
 mod downloads;
 mod kicadlib;
+mod modelgen;
 mod auth;
+mod chat;
 mod compact;
 mod doc_actor;
 mod dockind;
+mod nonkicad_import;
 mod error;
 mod fonts;
 mod github;
@@ -359,6 +362,9 @@ async fn main() -> anyhow::Result<()> {
             get(http::list_comments).post(http::create_comment),
         )
         .route("/api/projects/{id}/comments", get(http::list_project_comments))
+        .route("/api/projects/{id}/chat", get(chat::list_messages).post(chat::post_message))
+        .route("/api/projects/{id}/chat/read", post(chat::mark_messages_read))
+        .route("/api/chat/{id}", axum::routing::patch(chat::edit_message).delete(chat::delete_message))
         .route(
             "/api/comments/{id}",
             axum::routing::patch(http::update_comment).delete(http::delete_comment),
@@ -437,6 +443,9 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/kicad-lib/search", get(kicadlib::search))
         .route("/api/kicad-lib/model", get(kicadlib::model))
         .route("/api/kicad-lib/model-match", get(kicadlib::model_match))
+        // 3D models drawn from footprints when a part has none (src/modelgen)
+        .route("/api/models/generate", post(modelgen::service::generate))
+        .route("/api/footprints/generate", post(modelgen::service::generate_footprint))
         // vendor parts and saved part libraries (src/parts)
         .route("/static/dist/parts.js", get(pages::parts_js))
         .route("/static/dist/parts.js.map", get(pages::parts_js_map))
@@ -447,17 +456,22 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/parts/cad", axum::routing::put(parts::link_cad))
         .route("/api/parts/model.step", get(parts::get_model))
         .route("/api/parts/image", get(parts::get_image))
+        .route("/api/parts/model-file", get(parts::get_model_file))
         .route("/api/libraries", get(parts::list_libraries).post(parts::create_library))
         .route("/api/libraries/{id}", get(parts::get_library).patch(parts::update_library).delete(parts::delete_library))
         .route("/api/libraries/{id}/items", post(parts::add_item))
         .route("/api/libraries/{id}/items/{item}", axum::routing::patch(parts::update_item).delete(parts::remove_item))
         .route("/api/libraries/{id}/refresh", post(parts::refresh_library))
         .route("/api/libraries/{id}/export.zip", get(parts::export_library))
-        // web editor plugins (the per-account store and the built-in catalog)
+        // web editor plugins (the per-account store, KiCad's repository and repositories a person added)
         .route("/api/plugins", get(plugins::list))
-        .route("/api/plugins/catalog", get(plugins::catalog))
         .route("/api/plugins/action-order", get(plugins::action_order).put(plugins::save_action_order))
         .route("/api/plugins/pcm", get(pcm::list))
+        .route("/api/plugins/repositories", get(pcm::repositories).post(pcm::add_repository))
+        .route("/api/plugins/repositories/{id}", axum::routing::delete(pcm::remove_repository))
+        .route("/api/plugins/repositories/{id}/plugins", get(pcm::repository_plugins))
+        .route("/api/plugins/repositories/{id}/plugins/{identifier}", get(pcm::repository_plugin))
+        .route("/api/plugins/repositories/{id}/plugins/{identifier}/icon", get(pcm::repository_icon))
         .route("/api/plugins/pcm/{identifier}", get(pcm::get))
         .route("/api/plugins/pcm/{identifier}/fetch", post(pcm::net_fetch))
         .route("/api/plugins/pcm/{identifier}/hosts", get(pcm::list_hosts).post(pcm::approve_host))

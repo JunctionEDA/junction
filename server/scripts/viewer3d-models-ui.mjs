@@ -1,6 +1,6 @@
 // The web 3D viewer's models (web/domains/pcb/viewer3d/models.ts, src/kicadlib.rs): a part's own model from KiCad's 3D library,
-// the closest library model when its own is not there, one found for a footprint that names none, and the plain
-// stand-in shape when nothing comes close.  Needs the server to reach KiCad's libraries (or a mirror).
+// the closest library model when its own is not there, one found for a footprint that names none, and a model
+// drawn from the footprint itself (src/modelgen) when nothing comes close.  Needs the server to reach KiCad's libraries (or a mirror).
 //
 //   E2E_PG_URL=… E2E_JWT_SECRET=… [SHOTS=/some/dir] node viewer3d-models-ui.mjs
 //
@@ -76,11 +76,12 @@ try {
   await page.waitForFunction(() => window.KiCadViewer3D && window.KiCadViewer3D.current && window.KiCadViewer3D.current.viewer && window.KiCadViewer3D.current.viewer.stats, null, { timeout: 60000 });
   await page.evaluate(() => window.KiCadViewer3D.current.viewer.modelsSettled());
   await page.waitForTimeout(800);
-  const st = await page.evaluate(() => { const s = window.KiCadViewer3D.current.viewer.stats; return { bodies: s.bodies, models: s.models, missing: s.missingModels, replaced: s.replacedModels, status: (document.querySelector('.v3d-status') || {}).textContent || '' }; });
+  const st = await page.evaluate(() => { const s = window.KiCadViewer3D.current.viewer.stats; return { bodies: s.bodies, models: s.models, missing: s.missingModels, replaced: s.replacedModels, generated: s.generatedModels || [], status: (document.querySelector('.v3d-status') || {}).textContent || '' }; });
   check('four parts are on the board', st.bodies === 4, JSON.stringify(st));
-  check('three show a real model: its own, the closest for a missing one, one found for a footprint that names none', st.models === 3, JSON.stringify(st));
+  check('all four show a model: its own, the closest for a missing one, one found for a footprint that names none, one drawn from its footprint', st.models === 4, JSON.stringify(st));
   check('the replaced one is named as such', JSON.stringify(st.replaced.slice().sort()) === JSON.stringify(['R2']), JSON.stringify(st));
-  check('a part nothing comes close to keeps the plain shape', JSON.stringify(st.missing) === JSON.stringify(['U1']), JSON.stringify(st));
+  check('a part nothing comes close to gets a model drawn from its footprint', JSON.stringify(st.generated) === JSON.stringify(['U1']), JSON.stringify(st));
+  check('the status line says which part was drawn from its footprint', /drawn from the footprint for\s*U1/.test(st.status), st.status);
   if (SHOTS) await page.screenshot({ path: path.join(SHOTS, 'viewer3d-models.png') });
   // the references in the status line are links that select the part on the board
   const links = await page.locator('.v3d-status a.v3d-ref').allTextContents();

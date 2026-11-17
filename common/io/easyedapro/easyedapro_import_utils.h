@@ -23,6 +23,7 @@
 
 #include <functional>
 #include <map>
+#include <memory>
 #include <set>
 #include <vector>
 #include <wx/stream.h>
@@ -51,6 +52,18 @@ LIB_ID ToKiCadLibID( const wxString& aLibName, const wxString& aLibReference );
  */
 std::vector<IMPORT_PROJECT_DESC> ProjectToSelectorDialog( const nlohmann::json& aProject, bool aPcbOnly = false,
                                                           bool                  aSchOnly = false );
+
+/// The entries of an EasyEDA Pro project database (.eprj) as the equivalent .epro would hold them.
+using EPRJ_FILES = std::vector<std::pair<wxString, std::string>>;
+
+/// True for an EasyEDA Pro 2.x local project database (.eprj, SQLite).
+bool IsEprjFile( const wxString& aFileName );
+
+/// project.json and the document files an .epro of the same project would hold, rebuilt from an .eprj.
+std::shared_ptr<const EPRJ_FILES> ReadEprjFiles( const wxString& aFileName );
+
+/// True for a file the .epro importers read: .epro, a .zip holding project.json, or an .eprj database.
+bool IsProjectArchive( const wxString& aFileName );
 
 nlohmann::json FindJsonFile( const wxString& aZipFileName, const std::set<wxString>& aFileNames );
 
