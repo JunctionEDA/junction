@@ -437,7 +437,7 @@ test("a fine-pitch pin boxed in by its neighbours gets the row laid again in pin
   apply(doc, res); assert.deepEqual(errors(doc, settings), []); assert.equal(P.ratsnest(doc).length, 0);
 });
 
-test("escapes: a 0.4 mm QFN turned 45 degrees is fanned out before routing and every pin is routed from its escape", () => {
+test("escapes: a 0.4 mm QFN turned 45 degrees is boxed in when routed plainly, so its rows are fanned out and every pin is routed from its escape", () => {
   // forty pins on four sides, each to a pad on a ring round the chip (every seventh on the back: it must change layer)
   const pads = [], far = []; let k = 0;
   for (let side = 0; side < 4; side++) for (let i = 0; i < 10; i++) {
@@ -450,10 +450,52 @@ test("escapes: a 0.4 mm QFN turned 45 degrees is fanned out before routing and e
   const doc = K.parseDoc(HEAD.replace("(start 90 40) (end 130 70)", "(start 90 35) (end 130 75)") + `\n(footprint "T:QFN" (layer "F.Cu") (uuid "fp-qfn") (at 110 55 45)\n ${pads.join("\n ")})\n` + far.join("\n") + "\n)", "kicad_pcb");
   const settings = P.designSettings({ net_settings: { classes: [{ name: "Default", clearance: 0.15, track_width: 0.2, via_diameter: 0.45, via_drill: 0.2 }] } });
   const res = R.route(K, P, doc, settings, { escapes: true, timeMs: 20000 });
+  // routed first without escapes, pins are left open on all four rows; the run with Copper's fan-out of them is kept
+  assert.equal(res.fanout.rows, 4); assert.equal(res.fanout.kept, true); assert.ok(res.fanout.open[0] > 0 && res.fanout.open[1] === 0, JSON.stringify(res.fanout.open));
   assert.equal(res.fanout.escapes, 40); assert.deepEqual(res.fanout.boxed, []);
   assert.equal(res.routed, 40, JSON.stringify(res.connections.filter((c) => !c.routed).map((c) => [c.net, c.reason, c.detail])));
   assert.equal(res.fanout.used, 40, "each escape is laid with the route that starts from it");
   apply(doc, res); assert.deepEqual(errors(doc, settings), []); assert.equal(P.ratsnest(doc).length, 0);
+});
+
+test("escapes: a fine-pitch chip that routes cleanly without escapes comes out exactly as with them off (keep-best)", () => {
+  // a 0.5 mm two-row part, each pin to a pad straight out in front of it: nothing is boxed in
+  const pads = [], far = [];
+  for (const side of [-1, 1]) for (let i = 0; i < 8; i++) {
+    const x = (i - 3.5) * 0.5, net = "T" + (pads.length + 1);
+    pads.push(`(pad "${pads.length + 1}" smd rect (at ${x.toFixed(3)} ${side * 2}) (size 0.25 1) (layers "F.Cu" "F.Mask") (net "${net}") (uuid "so${pads.length}"))`);
+    far.push(`(footprint "T:P" (layer "F.Cu") (uuid "fp-${++n}") (at ${+(110 + x).toFixed(3)} ${55 + side * 6}) (pad "1" smd rect (at 0 0) (size 0.3 0.6) (layers "F.Cu" "F.Mask") (net "${net}") (uuid "pad-${n}")))`);
+  }
+  const doc = K.parseDoc(HEAD + `\n(footprint "T:SO" (layer "F.Cu") (uuid "fp-so") (at 110 55)\n ${pads.join("\n ")})\n` + far.join("\n") + "\n)", "kicad_pcb");
+  const settings = P.designSettings({ net_settings: { classes: [{ name: "Default", clearance: 0.15, track_width: 0.2, via_diameter: 0.45, via_drill: 0.2 }] } });
+  assert.equal(new R.Router(K, P, doc, settings, { escapes: false }).rows.size, 2, "both rows are fine pitch (Copper's needs_fanout)");
+  const geo = (res) => res.items.map((i) => i.kind === "via" ? JSON.stringify(K.kid(i.node, "at")) : JSON.stringify([K.kid(i.node, "start"), K.kid(i.node, "end"), K.kid(i.node, "width"), K.kid(i.node, "layer")]));
+  const off = R.route(K, P, doc, settings, { escapes: false, timeMs: 10000 }), on = R.route(K, P, doc, settings, { escapes: true, timeMs: 10000 });
+  assert.equal(off.routed, 16); assert.deepEqual(geo(on), geo(off)); assert.equal(on.fanout, undefined, "no row was boxed in, so nothing was escaped");
+});
+
+test("escapes: only the rows a plain route leaves boxed in are fanned out, and the result is kept only when it is better", () => {
+  // a 0.4 mm QFN: the pins of the top row go to a column of pads off to the left, every other pin of the bottom row to
+  // a pad straight out in front of it; the side rows are not connected
+  const pads = [], far = []; let k = 0;
+  for (let side = 0; side < 4; side++) for (let i = 0; i < 10; i++) {
+    const u = (i - 4.5) * 0.4; const [x, y, pr] = side === 0 ? [u, -2.4, 0] : side === 1 ? [2.4, u, 90] : side === 2 ? [-u, 2.4, 0] : [-2.4, -u, 90];
+    const net = side === 0 || (side === 2 && i % 2) ? "S" + (k + 1) : ""; k++;
+    pads.push(`(pad "${k}" smd rect (at ${x.toFixed(3)} ${y.toFixed(3)} ${pr}) (size 0.2 0.8) (layers "F.Cu" "F.Mask")${net ? ` (net "${net}")` : ""} (uuid "q${k}"))`);
+    if (!net) continue;
+    const [px, py] = side === 0 ? [98, 46 + i * 0.9] : [110 + x, 55 + y + 6];
+    far.push(`(footprint "T:P" (layer "F.Cu") (uuid "fp-${++n}") (at ${+px.toFixed(3)} ${+py.toFixed(3)}) (pad "1" smd rect (at 0 0) (size 0.5 0.5) (layers "F.Cu" "F.Mask") (net "${net}") (uuid "pad-${n}")))`);
+  }
+  const doc = K.parseDoc(HEAD.replace("(start 90 40) (end 130 70)", "(start 90 35) (end 130 75)") + `\n(footprint "T:QFN" (layer "F.Cu") (uuid "fp-qfn") (at 110 55)\n ${pads.join("\n ")})\n` + far.join("\n") + "\n)", "kicad_pcb");
+  const settings = P.designSettings({ net_settings: { classes: [{ name: "Default", clearance: 0.15, track_width: 0.2, via_diameter: 0.45, via_drill: 0.2 }] } });
+  const runs = []; const it = R.routeRuns(K, P, doc, settings, { escapes: true, timeMs: 10000 }, (r) => runs.push(r)); let s = it.next(); while (!s.done) s = it.next();
+  const on = s.value.result, plain = runs[0].result(), boxed = runs[0].boxedRows();
+  assert.ok(plain.failed.length > 0, "the plain route leaves pins of the top row open");
+  assert.deepEqual(boxed.map((b) => b.split("@")[1]), ["108.200,52.600"], "the top row only (its first pad is at 108.2, 52.6)");
+  assert.equal(runs.length, 2); assert.equal(on.fanout.rows, 1, "only the boxed row gets escapes"); assert.equal(on.fanout.open[0], plain.failed.length);
+  if (on.fanout.kept) { assert.equal(s.value.router, runs[1]); assert.ok(on.failed.length < plain.failed.length || (on.failed.length === plain.failed.length && on.vias < plain.vias), "kept only when better"); }
+  else { assert.equal(s.value.router, runs[0]); assert.equal(on.failed.length, plain.failed.length); assert.equal(on.items.length, plain.items.length); assert.equal(on.fanout.used, 0, "a run not kept lays no escape"); }
+  apply(doc, on); assert.deepEqual(errors(doc, settings).filter((m) => m.code !== "unconnected_items"), []);
 });
 
 test("plan: the global plan sends the connection with the cheaper detour round a wall, so the other keeps the one-track gap", () => {

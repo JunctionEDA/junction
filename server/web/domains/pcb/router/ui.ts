@@ -1,7 +1,7 @@
 // Autorouter — the editor side: the Route ▸ Autoroute… command, its dialog, the progress window with a live
 // preview, and the commit.  The router only ever runs when someone asks for it, and what it lays down goes through
 // the editor's ordinary commit: one undo step, sent to everyone in the session as normal edits.
-import { Router, RouteOptions, RouteResult } from "./route";
+import { Router, RouteOptions, RouteResult, routeRuns } from "./route";
 import { PROVENANCE } from "./weights";
 import "../../../shared/components/kselect";   // <k-select>, the themed drop-down these use in place of <select>
 
@@ -37,15 +37,16 @@ export async function autoroute(ctx: any, opts: RouteOptions = {}, ui?: { progre
   const K = ctx.K || root.KiCadCanvas, P = root.PcbTools; const doc = ctx.doc;
   const empty: AutorouteSummary = { total: 0, routed: 0, failed: [], segments: 0, vias: 0, length: 0, ms: 0, zoneEnds: 0, zoneCovered: 0, dropped: 0, cancelled: false, ids: [] };
   if (!doc || ctx.viewOnly || running) return empty;
-  const stamp = docStamp(doc); const router = new Router(K, P, doc, settingsOf(ctx), opts); const me: Running = running = { router, cancelled: false, done: false };
-  let res: RouteResult;
+  const stamp = docStamp(doc); const me: Running = running = { router: null as unknown as Router, cancelled: false, done: false };
+  let res: RouteResult, router: Router;
   try {
-    const it = router.run(); let step = it.next(); let last = Date.now();
+    // with escapes, a second run follows a first that left pins boxed in (not one that was stopped)
+    const it = routeRuns(K, P, doc, settingsOf(ctx), opts, (r) => { me.router = r; }); let step = it.next(); let last = Date.now();
     while (!step.done) {
       if (Date.now() - last > 40) { if (ui) ui.progress(step.value); if (ctx.requestRender) ctx.requestRender(); await new Promise((r) => setTimeout(r, 0)); last = Date.now(); }
       step = it.next();
     }
-    res = step.value;
+    res = step.value.result; router = step.value.router;
   } finally { me.done = true; if (running === me) running = null; }
   if (me.cancelled) { if (ctx.requestRender) ctx.requestRender(); return Object.assign(empty, { cancelled: true, total: res.total }); }
   let dropped = 0;

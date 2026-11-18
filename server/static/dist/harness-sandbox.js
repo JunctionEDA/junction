@@ -2918,12 +2918,17 @@ class Board(_Doc):
         fanout_lanes: each pin of a fine-pitch chip keeps a straight lane this long (mm, 0.25 by default) out from its
         pad that only its own net may use, so neighbours cannot box a pin in; raise it (0.8 to 1.2) when a QFN's pins
         are left "blocked", False turns it off.
-        escapes=True lays the escapes of every fine-pitch chip (QFN/QFP, 0.65 mm pitch and finer) before anything is
-        routed: a fan that spreads each row's pins to 1.5 times their pitch, else a straight stub out of the pin or a
-        45-degree leg where the stub is blocked, and a via for a pin that must change layer, none closing another
-        pin's way out; the pin's connections are then routed from the escape's end.  A number is how far past the pad
-        the first ring lies (mm); {"depth": mm, "spread": 1.5} sets both (spread 0: no spreading fan).  The result's
-        \`fanout\` counts them and names the pins that got none (\`boxed\`) with what blocks them.  Off by default.
+        escapes=True escapes the fine-pitch rows that a plain route leaves boxed in, the way Copper's engine runs its
+        fan-out: the board is routed once without escapes; where that leaves a connection of a fine-pitch row open
+        (a part with a row too tight for two tracks between pins, or 16 pads or more), those rows get a straight stub
+        out of each pin, or a 45-degree leg where the stub is blocked, or a via for a pin that must change layer, none
+        closing another pin's way out, and the board is routed again from the escapes' ends.  The second result is
+        kept only when it leaves fewer connections open (then fewer vias, then less track); a board that routes
+        cleanly without escapes comes out unchanged.  A number is how far past the pad the first ring lies (mm);
+        {"depth": mm, "spread": 1.5} also tries a fan spreading each row to 1.5 times its pitch first.  The result's
+        \`fanout\` gives the rows escaped, whether that run was kept, the open connections without / with escapes
+        (\`open\`), and the pins that got no escape (\`boxed\`) with what blocks them.  On by default (a second routing
+        run only where pins were left open); escapes=False routes once without.
         plan=True plans every connection on a coarse tile graph first (a global router after Copper's): congestion is
         negotiated over tiles of 0.5 or 1 mm (by the finest pad pitch; PathFinder) whose border capacities come from the
         real free gaps along each border, forced crossings are found, and a layer is assigned along each coarse path.
@@ -5215,6 +5220,20 @@ def _stitch(self, spacing: float = 2.0, net: str = "GND", margin: float = 1.5, s
             for vid, at in ids.items():
                 if abs(v["x"] - at[0]) < 1.0 and abs(v["y"] - at[1]) < 1.0:
                     bad.add(vid)
+        # a rules marker can sit more than a millimetre from the via it is about (KiCad marks the track side), so each
+        # new via is also measured against the copper round it
+        try:
+            clr = float((self.rules() or {}).get("clearance") or 0.2)
+        except (HarnessError, TypeError, ValueError):
+            clr = 0.2
+        for vid, at in ids.items():
+            if vid in bad:
+                continue
+            near = self.whats_at(at, 1.2)
+            own = next((q for q in near if q.get("id") == vid), None)
+            r = float((own or {}).get("size") or size or 0.5) / 2
+            if any(q.get("net") != name and q.get("id") != vid and q.get("gap_mm") is not None and q["gap_mm"] - r < clr - 1e-3 for q in near):
+                bad.add(vid)
         for vid in bad:
             self._edit({"op": "remove", "id": vid})
             removed += 1
@@ -5388,6 +5407,20 @@ def _power_stitch(self, pitch: float = 1.0, most: int = 24, size: float | None =
             for vid, (at, _) in ids.items():
                 if abs(v["x"] - at[0]) < 0.6 and abs(v["y"] - at[1]) < 0.6:
                     bad.add(vid)
+        # a rules marker can sit more than a millimetre from the via it is about (KiCad marks the track side), so each
+        # new via is also measured against the copper round it
+        try:
+            clr = float((self.rules() or {}).get("clearance") or 0.2)
+        except (HarnessError, TypeError, ValueError):
+            clr = 0.2
+        for vid, at in ids.items():
+            if vid in bad:
+                continue
+            near = self.whats_at(at, 1.2)
+            own = next((q for q in near if q.get("id") == vid), None)
+            r = float((own or {}).get("size") or size or 0.5) / 2
+            if any(q.get("net") != name and q.get("id") != vid and q.get("gap_mm") is not None and q["gap_mm"] - r < clr - 1e-3 for q in near):
+                bad.add(vid)
         for vid in bad:
             self._edit({"op": "remove", "id": vid})
         self.flush()
@@ -5640,6 +5673,20 @@ def _vias_checked(self, name: str, pts: list, size, drill) -> dict:
             for vid, at in ids.items():
                 if abs(v["x"] - at[0]) < 0.6 and abs(v["y"] - at[1]) < 0.6:
                     bad.add(vid)
+        # a rules marker can sit more than a millimetre from the via it is about (KiCad marks the track side), so each
+        # new via is also measured against the copper round it
+        try:
+            clr = float((self.rules() or {}).get("clearance") or 0.2)
+        except (HarnessError, TypeError, ValueError):
+            clr = 0.2
+        for vid, at in ids.items():
+            if vid in bad:
+                continue
+            near = self.whats_at(at, 1.2)
+            own = next((q for q in near if q.get("id") == vid), None)
+            r = float((own or {}).get("size") or size or 0.5) / 2
+            if any(q.get("net") != name and q.get("id") != vid and q.get("gap_mm") is not None and q["gap_mm"] - r < clr - 1e-3 for q in near):
+                bad.add(vid)
         for vid in bad:
             self._edit({"op": "remove", "id": vid})
             removed += 1
@@ -6750,11 +6797,11 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     fanout={"U4": [nets]} drops only those pins to a via straight out (radial, rows staggered), the way the person's
     boards do it: name the pins whose other end lies behind the chip or across the other escapes.
 
-    escapes=True lays the analytic escapes of every fine-pitch chip before each routing pass (board.route(escapes=...)):
-    each connected pin leaves on its own layer as a stub (or a 45-degree leg, or a via where its net must change
-    layer) that closes no other pin's way out, and is routed from there.  For a dense QFN whose pins are left open
-    (Ember's 0.4 mm U9 turned 45 degrees: 22 -> 17 open); off by default, since on a board whose chips escape anyway
-    the stubs take room other routes need (Ledify: 0 -> 5 open).
+    escapes (on by default, board.route(escapes=...)): each routing pass is routed once without escapes; where that
+    leaves pins of a fine-pitch row open, those rows get Copper's analytic escapes (each connected pin leaves on its
+    own layer as a stub, a 45-degree leg or a via where its net must change layer, closing no other pin's way out)
+    and the pass is routed again from them, kept only when fewer connections are left open (Cyberboard 11 -> 9 open;
+    Ledify, whose chips escape anyway, comes out unchanged).  escapes=False routes once without.
 
     plan=True plans every connection on a coarse tile graph before each routing pass (board.route(plan=...)): congestion
     negotiated over the tiles, forced crossings found, layers assigned along each coarse path; the connections it fought
@@ -9771,9 +9818,9 @@ def symbol(name: str, pins: list, reference: str = "U", footprint: str = "", dat
 def library(symbols: list) -> str:
     """A .kicad_sym file holding the given symbol texts."""
     return '(kicad_symbol_lib\\n\\t(version 20241209)\\n\\t(generator "kicad_harness")\\n\\t(generator_version "9.0")\\n' + "".join(symbols) + ")\\n"
-`;var f=require("node:fs"),K=globalThis,W=f.constants;process.binding=e=>{if(e==="constants")return{fs:W};throw new Error("not available")};for(let e of["WebSocket","fetch","XMLHttpRequest","EventSource","navigator"])try{delete K[e]}catch{}var Q=new(require("node:string_decoder")).StringDecoder("utf8"),E=new Int32Array(new SharedArrayBuffer(4)),i="";function S(){let e=Buffer.alloc(65536);for(;;){let s=i.indexOf(`
-`);if(s>=0){let t=i.slice(0,s);return i=i.slice(s+1),t}let n=0;try{n=f.readSync(0,e,0,e.length,null)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(E,0,0,4);continue}if(t&&t.code==="EOF")n=0;else throw t}n||process.exit(0),i+=Q.write(e.subarray(0,n))}}function d(e){let s=Buffer.from(JSON.stringify(e)+`
-`,"utf8"),n=0;for(;n<s.length;)try{n+=f.writeSync(1,s,n,s.length-n)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(E,0,0,4);continue}throw t}}var X=[["kicad_harness/__init__.py",h],["kicad_harness/project.py",c],["kicad_harness/transport.py",u],["kicad_harness/sheet.py",m],["kicad_harness/rules.py",g],["kicad_harness/physics.py",b],["kicad_harness/stackups.py",y],["kicad_harness/craft.py",_],["kicad_harness/seat.py",w],["kicad_harness/twins.py",x],["kicad_harness/parts/__init__.py",k],["kicad_harness/parts/datasheet.py",v],["kicad_harness/parts/footprint.py",N],["kicad_harness/parts/search.py",q],["kicad_harness/parts/symbol.py",T]],Y=`
+`;var f=require("node:fs"),K=globalThis,W=f.constants;process.binding=e=>{if(e==="constants")return{fs:W};throw new Error("not available")};for(let e of["WebSocket","fetch","XMLHttpRequest","EventSource","navigator"])try{delete K[e]}catch{}var X=new(require("node:string_decoder")).StringDecoder("utf8"),E=new Int32Array(new SharedArrayBuffer(4)),i="";function S(){let e=Buffer.alloc(65536);for(;;){let s=i.indexOf(`
+`);if(s>=0){let t=i.slice(0,s);return i=i.slice(s+1),t}let n=0;try{n=f.readSync(0,e,0,e.length,null)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(E,0,0,4);continue}if(t&&t.code==="EOF")n=0;else throw t}n||process.exit(0),i+=X.write(e.subarray(0,n))}}function d(e){let s=Buffer.from(JSON.stringify(e)+`
+`,"utf8"),n=0;for(;n<s.length;)try{n+=f.writeSync(1,s,n,s.length-n)}catch(t){if(t&&t.code==="EAGAIN"){Atomics.wait(E,0,0,4);continue}throw t}}var Q=[["kicad_harness/__init__.py",h],["kicad_harness/project.py",c],["kicad_harness/transport.py",u],["kicad_harness/sheet.py",m],["kicad_harness/rules.py",g],["kicad_harness/physics.py",b],["kicad_harness/stackups.py",y],["kicad_harness/craft.py",_],["kicad_harness/seat.py",w],["kicad_harness/twins.py",x],["kicad_harness/parts/__init__.py",k],["kicad_harness/parts/datasheet.py",v],["kicad_harness/parts/footprint.py",N],["kicad_harness/parts/search.py",q],["kicad_harness/parts/symbol.py",T]],Y=`
 import json, sys, traceback
 sys.path.insert(0, "/kh")
 import kicad_harness as kh
@@ -9809,6 +9856,6 @@ def __kc_run(code, dry=False):
     if project is not None and project.log:
         out["notes"] = project.log[-60:]
     return json.dumps(out)
-`;async function J(){let e=JSON.parse(S()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:j}=require(s+"pyodide.js"),o=await j({indexURL:s,jsglobals:{},stdout:p,stderr:p});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),S())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of X)o.FS.writeFile("/kh/"+r,l);o.runPython(Y);let A=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(A(String(e.code||""),e.dry===!0)))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
+`;async function J(){let e=JSON.parse(S()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:j}=require(s+"pyodide.js"),o=await j({indexURL:s,jsglobals:{},stdout:p,stderr:p});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),S())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of Q)o.FS.writeFile("/kh/"+r,l);o.runPython(Y);let A=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(A(String(e.code||""),e.dry===!0)))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
 `).filter(Boolean).slice(-1)[0]||"The script failed."}}a.done=!0,a.output=n.join(`
 `),d(a),process.exit(0)}J().catch(e=>{try{d({done:!0,ok:!1,error:"The Python runtime could not be started: "+String(e&&e.message||e),output:""})}finally{process.exit(1)}});

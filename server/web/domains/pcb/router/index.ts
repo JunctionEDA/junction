@@ -1,5 +1,5 @@
 // The board autorouter (bundled into static/dist/autoroute.js; registers PcbAutoRouter on the global).
-import { route, Router, isSupply, pairName, netKind } from "./route";
+import { route, routeRuns, Router, isSupply, pairName, netKind } from "./route";
 import { stackupOf, traceOn, z0, zdiff, widthFor, usualImpedance } from "./impedance";
 import { probe, featuresOf, costOf } from "./probe";
 import { DEFAULT_WEIGHTS, PROVENANCE, TRAINED } from "./weights";
@@ -9,7 +9,7 @@ import { evaluate } from "./evaluate";
 import { boardSquareCorners, findSquareCorners } from "./corners";
 import { autoplace, openPlace, placeSummaryText } from "./placeui";
 
-const api = { route, boardSquareCorners, findSquareCorners, Router, isSupply, pairName, netKind, impedance: { stackupOf, traceOn, z0, zdiff, widthFor, usualImpedance }, place, placementChanges, evaluate, autoplace, openPlace, placeSummaryText, autoroute, open, summaryText, probe, featuresOf, costOf, DEFAULT_WEIGHTS, TRAINED, PROVENANCE };
+const api = { route, routeRuns, boardSquareCorners, findSquareCorners, Router, isSupply, pairName, netKind, impedance: { stackupOf, traceOn, z0, zdiff, widthFor, usualImpedance }, place, placementChanges, evaluate, autoplace, openPlace, placeSummaryText, autoroute, open, summaryText, probe, featuresOf, costOf, DEFAULT_WEIGHTS, TRAINED, PROVENANCE };
 (globalThis as unknown as { PcbAutoRouter: typeof api }).PcbAutoRouter = api;
 install();
 export default api;

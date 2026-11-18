@@ -76,11 +76,11 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     fanout={"U4": [nets]} drops only those pins to a via straight out (radial, rows staggered), the way the person's
     boards do it: name the pins whose other end lies behind the chip or across the other escapes.
 
-    escapes=True lays the analytic escapes of every fine-pitch chip before each routing pass (board.route(escapes=...)):
-    each connected pin leaves on its own layer as a stub (or a 45-degree leg, or a via where its net must change
-    layer) that closes no other pin's way out, and is routed from there.  For a dense QFN whose pins are left open
-    (Ember's 0.4 mm U9 turned 45 degrees: 22 -> 17 open); off by default, since on a board whose chips escape anyway
-    the stubs take room other routes need (Ledify: 0 -> 5 open).
+    escapes (on by default, board.route(escapes=...)): each routing pass is routed once without escapes; where that
+    leaves pins of a fine-pitch row open, those rows get Copper's analytic escapes (each connected pin leaves on its
+    own layer as a stub, a 45-degree leg or a via where its net must change layer, closing no other pin's way out)
+    and the pass is routed again from them, kept only when fewer connections are left open (Cyberboard 11 -> 9 open;
+    Ledify, whose chips escape anyway, comes out unchanged).  escapes=False routes once without.
 
     plan=True plans every connection on a coarse tile graph before each routing pass (board.route(plan=...)): congestion
     negotiated over the tiles, forced crossings found, layers assigned along each coarse path; the connections it fought

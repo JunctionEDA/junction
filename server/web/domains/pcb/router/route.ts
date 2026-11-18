@@ -11,7 +11,7 @@ const STEPS_PER_MS = 12000;
 const BUNDLE_COST = 0.3;
 import { TRAINED, Weights } from "./weights";
 import { cornerAngle, SQUARE_MAX } from "./corners";
-import { fanout, padRows, type Boxed, type Escape, type FanJob } from "./fanout";
+import { fanout, padRows, type Boxed, type Escape, type FanJob, type FanRow } from "./fanout";
 import { plan as globalPlan, type Corridor, type PlanResult } from "./globalplan";
 import { stackupOf, traceOn, usualImpedance, RF_CONTROL, widthFor, z0, zdiff } from "./impedance";
 /** Hole clearance is kept with this much to spare: a diagonal track on the grid can come a few microns closer to a
@@ -30,10 +30,16 @@ const PLANE_COST = 1;   // 1.3 and 3 tried 2026-11-17: Ember +1.3, Cyberboard +0
 // far pad of the net.
 const PLANE_COVER = 0.5, PLANE_HOP_MM = 1.5;
 const FAN_ROWS_MM = [0.8, 1.5, 2.2], FAN_FAR_MM = 4;
-// Fine-pitch escapes laid before routing (fanout.ts).  Off unless a run asks: measured 2026-11-17 from bare copper,
-// Ember 22 -> 17 open (with the spreading fan; 20 to 21 without it) and the Cyberboard bench 75.0 -> 75.0, but the
-// Ledify bench 94.9 -> 74.0 (4 to 5 open; also without the spreading fan, and with supply pins left alone)
-const ESCAPES: Escapes = false, SPREAD = 1.5;   // the spreading fan ends its slots 1.5 pitches apart (0.6 mm off a 0.4 mm row)
+// Fine-pitch escapes (fanout.ts), the way Copper's engine runs its fan-out: the board is routed first without
+// any, and only the fine-pitch rows (Copper's needs_fanout) where that leaves a pin's connection open are escaped and
+// the board routed again; the second result is kept only when it is strictly better (fewer open connections, then
+// fewer vias, then shorter), as Copper keeps a second opinion.  A board that routes cleanly without escapes comes
+// out identical.  On by default: measured 2026-11-18 with board-bench.py (score, open connections, vias, seconds),
+// off -> on: Ledify 97.5 / 0 / 224 / 491 s -> the same board (its one boxed row came out worse, 1 -> 2 open, and was
+// not kept) / 898 s; Cyberboard 75.0 / 11 / 130 / 486 s -> 75.0 / 9 / 133 / 860 s; Ember 75.0 / 11 / 478 / 2126 s ->
+// 75.0 / 11 / 478 / 3700 s.  The second run costs the time (+75 to 85 %).  Before, with every fine-pitch row escaped
+// up front and the spreading fan, Ledify fell 94.9 -> 74.0 (0 -> 5 open).
+const ESCAPES: Escapes = true, SPREAD = 0;   // the spreading fan (ours, not Copper's) is off unless a run asks: { spread: 1.5 }
 export type Escapes = boolean | number | { depth?: number; spread?: number };
 // Global planning before routing (globalplan.ts, after Copper): coarse paths on a tile graph with negotiated
 // congestion and layers assigned along them.  The connections the negotiation fought over are laid first in their
@@ -152,7 +158,8 @@ export interface RouteOptions {
   splitPairs?: boolean;          // route a differential pair's two lines separately when no coupled run fits (default false: they stay unrouted and the report says why)
   fanoutVias?: boolean;          // true: a longer lane with room for a via at fine-pitch pins whose net goes far
   plan?: Plan;                    // plan every connection on a coarse tile graph first (negotiated congestion, layers per tile), lay the connections it fought over first, take them up first, and steer the ones it moved off their direct path by their corridor (globalplan.ts); see Plan
-  escapes?: Escapes;              // lay the escapes of fine-pitch chips (0.65 mm pitch and finer) before routing: a stub out of each pin (a spreading fan, a ring, a leg or a via) and route from its end (fanout.ts); a number sets how far past the pad the first ring lies (mm), { depth, spread } both (spread 0: no spreading fan)
+  escapes?: Escapes;              // escapes for fine-pitch chip rows that a plain route leaves boxed in: route once without, then again with a stub (a ring, a leg or a via) out of each pin of those rows, routed from its end (fanout.ts), keeping the better result (see routeRuns); a number sets how far past the pad the first ring lies (mm), { depth, spread } both (spread > 1: our spreading fan first, off by default)
+  escapeRows?: string[];          // internal (routeRuns): escape only these rows (Router.fineRows keys) and route once
   fanoutLanes?: boolean | number; // keep a lane (mm, default 0.25) out from each fine-pitch chip pin for its own net only; false turns it off
   matchLengths?: boolean;        // lengthen the shorter members of a matched group with serpentines; default true
   match?: { nets: string[]; tolerance?: number; length?: number }[];   // nets to bring to one length (the longest, or the length given), within the tolerance in mm (default 0.25)
@@ -217,7 +224,7 @@ export interface RouteResult {
   grid: { pitch: number; w: number; h: number; layers: string[] }; nets: number;
   connections: ConnReport[]; domains?: DomainReport; fences?: FenceReport[];
   groups?: { clusters: number; inside: number; insideRouted: number; insideVias: number; critical: string[]; members: Record<string, string[]> };   // connections that lie inside one cluster, and how they came out
-  fanout?: { escapes: number; ring: number; via: number; used: number; boxed: Boxed[] };   // the escapes laid before routing, and the pins that got none
+  fanout?: { escapes: number; ring: number; via: number; used: number; boxed: Boxed[]; rows?: number; kept?: boolean; open?: [number, number] };   // the escapes laid before routing, and the pins that got none; with routeRuns: the rows escaped, whether that run was kept, and the open connections without / with escapes
   plan?: { tile: number; tiles: [number, number]; conns: number; iterations: number; overflowFirst: number; overflow: number; crossings: number; relayered: number; moved: number; contested: number; viaConns: number; ms: number; inside: number; outside: number };   // the global plan: overflow (mm) before and after negotiation, how many connections it moved off their direct path (only those are steered) and had to fight for (they go first), and how many steered searches found their route inside the corridor
 }
 export interface Progress { done: number; total: number; routed: number; pass: number; net: string }
@@ -561,26 +568,50 @@ export class Router {
       }
       this.nets.push(info);
     }
-    if ((this.opts.escapes ?? ESCAPES) !== false) this.fanout(nl);
+    this.rows = this.fineRows(nl);
+    if ((this.opts.escapes ?? ESCAPES) !== false) this.fanout();
   }
 
   // ------------------------------------------------------------------ fan-out before routing (fanout.ts)
-  escapeObs: Obstacle[] = []; private laid: { e: Escape; anchors: Anchor[]; obs: Obstacle[] }[] = []; private fanReport: RouteResult["fanout"];
-  /** Escape every connected pin of a fine-pitch chip row before anything is routed, and move the ends of its
-   *  connections to the escapes.  The pins whose net goes elsewhere keep their lane even when they get no escape. */
-  private fanout(nl: any): void {
+  escapeObs: Obstacle[] = []; private laid: { e: Escape; anchors: Anchor[]; obs: Obstacle[] }[] = []; fanReport: RouteResult["fanout"]; fanNote?: Partial<NonNullable<RouteResult["fanout"]>>;   // set by routeRuns
+  /** The fine-pitch rows of the board, by key: Copper's needs_fanout (fanout.py) picks the parts, those with a row
+   *  where two tracks do not fit between neighbouring pads (pitch < 2 (w + clr) + pad width, at the board's own
+   *  track and clearance) or with 16 pads or more; every SMD row of such a part counts. */
+  rows = new Map<string, FanRow>();
+  private fineRows(nl: any): Map<string, FanRow> {
+    const G = this.G, s = this.s; const key = (p: Pt) => p[0].toFixed(3) + "," + p[1].toFixed(3); const out = new Map<string, FanRow>();
+    const w = s.trackWidth || 0.25, clr = Math.max(s.clearance || 0.2, s.minClearance || 0);
+    const byPart = new Map<any, any[]>(); for (const c of nl.conductors) if (c.kind === "pad" && c.pad && c.pad.type === "smd" && c.item && c.layers.size === 1) { let l = byPart.get(c.item); if (!l) byPart.set(c.item, l = []); l.push(c); }
+    for (const cs of byPart.values()) {
+      if (cs.length < 3) continue; const cx = cs.reduce((s, c) => s + c.pad.x, 0) / cs.length, cy = cs.reduce((s, c) => s + c.pad.y, 0) / cs.length;
+      // pads longer than wide: their long axis is the way out of the part
+      const pads = cs.filter((c) => Math.max(c.pad.w, c.pad.h) >= 1.2 * Math.min(c.pad.w, c.pad.h)).map((c) => ({ name: this.padNames.get(key([c.pad.x, c.pad.y])) || key([c.pad.x, c.pad.y]), p: [c.pad.x, c.pad.y] as Pt, len: Math.max(c.pad.w, c.pad.h), across: Math.min(c.pad.w, c.pad.h), axis: padAxis(c.pad), layer: G.layers.indexOf(Array.from(c.layers as Set<string>)[0]) }));
+      const rows = padRows(pads.filter((q) => q.layer >= 0 && G.routable[q.layer]), [cx, cy]); if (!rows.length) continue;
+      const dense = (r: FanRow) => { let pitch = Infinity; for (let i = 1; i < r.pads.length; i++) pitch = Math.min(pitch, Math.hypot(r.pads[i].p[0] - r.pads[i - 1].p[0], r.pads[i].p[1] - r.pads[i - 1].p[1])); return pitch < 2 * (w + clr) + Math.max(...r.pads.map((p) => p.across)) - 1e-9; };
+      if (cs.length < 16 && !rows.some(dense)) continue;
+      for (const r of rows) out.set(`${r.pads[0].name}~${r.pads[r.pads.length - 1].name}@${key(r.pads[0].p)}`, r);
+    }
+    return out;
+  }
+  /** The rows (keys of `rows`) with a pin that ends a connection this run left open: the pins a plain route left boxed in. */
+  boxedRows(): string[] {
+    const key = (p: Pt) => p[0].toFixed(3) + "," + p[1].toFixed(3); const at = new Map<string, string>();
+    for (const [k, r] of this.rows) for (const p of r.pads) at.set(key(p.p), k);
+    const out = new Set<string>();
+    for (const c of this.conns) if (!c.nodes && !c.moot) for (const a of [c.a, c.b, ...(c.ends || [])]) { const k = at.get(key(a.p)); if (k) out.add(k); }
+    return Array.from(out).sort();
+  }
+  /** Escape every connected pin of the fine-pitch rows (those of `escapeRows` when given) before anything is routed,
+   *  and move the ends of its connections to the escapes.  The pins whose net goes elsewhere keep their lane even when
+   *  they get no escape. */
+  private fanout(): void {
     const G = this.G; const all = G.layers.map((_, i) => i); const key = (p: Pt) => p[0].toFixed(3) + "," + p[1].toFixed(3);
     const ends = new Map<string, { anchors: Set<Anchor>; conns: Conn[]; other: Anchor[] }>();
     for (const net of this.nets) for (const c of net.conns) for (const [a, b] of [[c.a, c.b], [c.b, c.a]] as [Anchor, Anchor][]) {
       if (!a.axis || !a.narrow || a.plane) continue; let e = ends.get(key(a.p)); if (!e) ends.set(key(a.p), e = { anchors: new Set(), conns: [], other: [] }); e.anchors.add(a); e.conns.push(c); e.other.push(b);
     }
-    // the rows of every fine-pitch part
-    const byPart = new Map<any, any[]>(); for (const c of nl.conductors) if (c.kind === "pad" && c.pad && c.pad.type === "smd" && c.item && c.layers.size === 1) { let l = byPart.get(c.item); if (!l) byPart.set(c.item, l = []); l.push(c); }
-    const rows = []; for (const cs of byPart.values()) {
-      if (cs.length < 8) continue; const cx = cs.reduce((s, c) => s + c.pad.x, 0) / cs.length, cy = cs.reduce((s, c) => s + c.pad.y, 0) / cs.length;
-      const pads = cs.filter((c) => Math.max(c.pad.w, c.pad.h) >= 1.2 * Math.min(c.pad.w, c.pad.h) && Math.min(c.pad.w, c.pad.h) <= 0.4).map((c) => ({ name: this.padNames.get(key([c.pad.x, c.pad.y])) || key([c.pad.x, c.pad.y]), p: [c.pad.x, c.pad.y] as Pt, len: Math.max(c.pad.w, c.pad.h), across: Math.min(c.pad.w, c.pad.h), axis: padAxis(c.pad), layer: G.layers.indexOf(Array.from(c.layers as Set<string>)[0]) }));
-      for (const r of padRows(pads.filter((q) => q.layer >= 0 && G.routable[q.layer]), [cx, cy])) { let pitch = Infinity; for (let i = 1; i < r.pads.length; i++) pitch = Math.min(pitch, Math.hypot(r.pads[i].p[0] - r.pads[i - 1].p[0], r.pads[i].p[1] - r.pads[i - 1].p[1])); if (pitch <= 0.65 + 1e-6) rows.push(r); }
-    }
+    const only = this.opts.escapeRows ? new Set(this.opts.escapeRows) : null;
+    const rows = Array.from(this.rows).filter(([k]) => !only || only.has(k)).map(([, r]) => r);
     if (!rows.length) return;
     // a job for every pin that ends a connection; pins of a differential pair, an RF feed, or with copper of their
     // net already on them only keep their lane (near = 0: no escape of their own)
@@ -636,7 +667,7 @@ export class Router {
       add(o); this.escapeObs.push(o); for (const c of G.classes.values()) stampClass(G, c, o, 1, true); this.oidx = null;
     }
     this.oidx = null;
-    this.fanReport = { escapes: escapes.length, ring: escapes.filter((e) => e.kind === "ring").length, via: escapes.filter((e) => e.kind === "via").length, used: 0, boxed };
+    this.fanReport = { escapes: escapes.length, ring: escapes.filter((e) => e.kind === "ring").length, via: escapes.filter((e) => e.kind === "via").length, used: 0, boxed, rows: rows.length };
   }
 
   private xtalNets = new Set<string>(); private feedNets = new Set<string>();
@@ -2079,7 +2110,7 @@ export class Router {
     for (const v of this.fenceVias) { items.push({ kind: "via", node: P.viaNode(doc, v.p[0], v.p[1], v.cls.viaD, v.cls.viaDrill, v.obj, span), net: v.obj, netName: v.net, conn: -1 }); vias++; }
     const total = this.conns.filter((c) => c.nodes || !c.moot).length;
     return { items, total, routed: total - failed.length, failed, segments, vias, length, ms, passes, zoneEnds, zoneCovered: this.zoneCovered,
-      grid: { pitch: G.g, w: G.W, h: G.H, layers: G.layers.filter((_, i) => G.routable[i]) }, nets: this.nets.length, connections, pairs: Array.from(this.pairReports.values()), impedance: this.zReports, matched: this.matchReports, domains: this.domainReport(), fences: this.fenceReports, groups: this.groupReport(), fanout: this.fanReport, plan: this.planReport() };
+      grid: { pitch: G.g, w: G.W, h: G.H, layers: G.layers.filter((_, i) => G.routable[i]) }, nets: this.nets.length, connections, pairs: Array.from(this.pairReports.values()), impedance: this.zReports, matched: this.matchReports, domains: this.domainReport(), fences: this.fenceReports, groups: this.groupReport(), fanout: (this.fanReport ? Object.assign({}, this.fanReport, this.fanNote) : this.fanNote) as RouteResult["fanout"], plan: this.planReport() };
   }
 }
 
@@ -2111,7 +2142,28 @@ export function simplify(nodes: Node[]): Node[] {
 }
 export { DX, DY };
 
-/** Route a board in one go (the editor drives Router.run() in slices instead, to stay responsive). */
+/** Route a board, with escapes the way Copper's engine gates a stage (engine.py: keep-best): first without any, then,
+ *  when that leaves pins of fine-pitch rows open and escapes are asked for, again with Copper's fan-out (fanout.py) of
+ *  only those rows.  The second run is kept only when it is strictly better: fewer open connections, then fewer vias,
+ *  then less track (Copper's second opinion and via-frugal ladder compare the same way); otherwise the first stands,
+ *  so a board that routes cleanly without escapes comes out exactly as it would with them off.  `onRouter` hears of
+ *  each Router as it starts (the editor stops the one running). */
+export function* routeRuns(K: any, P: any, doc: any, settings: any, opts: RouteOptions = {}, onRouter?: (r: Router) => void): Generator<Progress, { router: Router; result: RouteResult }> {
+  const run = function* (o: RouteOptions) { const r = new Router(K, P, doc, settings, o); if (onRouter) onRouter(r); const result: RouteResult = yield* r.run(); return { router: r, result }; };
+  const want = opts.escapes ?? ESCAPES;
+  if (want === false || opts.escapeRows) return yield* run(opts);
+  const first = yield* run(Object.assign({}, opts, { escapes: false }));
+  const rows = first.router.boxedRows(); if (!rows.length || first.router.stopped) return first;
+  const second = yield* run(Object.assign({}, opts, { escapes: want, escapeRows: rows }));
+  const key = (r: RouteResult) => [r.failed.length, r.vias, Math.round(r.length * 1000)];
+  const a = key(first.result), b = key(second.result); const better = b[0] !== a[0] ? b[0] < a[0] : b[1] !== a[1] ? b[1] < a[1] : b[2] < a[2];
+  const kept = better ? second : first; const note = { kept: better, open: [a[0], b[0]] as [number, number] };
+  // the first run laid no escape: it reports the second's, as tried and not kept
+  kept.router.fanNote = better ? note : Object.assign({}, second.result.fanout, { used: 0 }, note); kept.result.fanout = (kept.router.fanReport ? Object.assign({}, kept.router.fanReport, kept.router.fanNote) : kept.router.fanNote) as RouteResult["fanout"];
+  return kept;
+}
+
+/** Route a board in one go (the editor drives routeRuns() in slices instead, to stay responsive). */
 export function route(K: any, P: any, doc: any, settings: any, opts?: RouteOptions): RouteResult {
-  const r = new Router(K, P, doc, settings, opts); const it = r.run(); let s = it.next(); while (!s.done) s = it.next(); return s.value;
+  const it = routeRuns(K, P, doc, settings, opts); let s = it.next(); while (!s.done) s = it.next(); return s.value.result;
 }
