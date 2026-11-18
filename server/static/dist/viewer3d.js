@@ -4237,9 +4237,9 @@ void main() {
 .kic{flex:none;vertical-align:middle}
 .kic .dk{display:none}
 :root[data-theme="dark"] .kic .lt{display:none} :root[data-theme="dark"] .kic .dk{display:inline}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .kic .lt{display:none} :root:not([data-theme="light"]) .kic .dk{display:inline}}
+@media (prefers-color-scheme: dark){:root[data-theme="system"] .kic .lt{display:none} :root[data-theme="system"] .kic .dk{display:inline}}
 :root[data-theme="dark"]{--kic-lt:none;--kic-dk:inline}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--kic-lt:none;--kic-dk:inline}}
+@media (prefers-color-scheme: dark){:root[data-theme="system"]{--kic-lt:none;--kic-dk:inline}}
 .kbmp{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:24px;padding:0;border:1px solid var(--line);border-radius:var(--r-2,3px);background:var(--panel);color:var(--ink);cursor:pointer}
 .kbmp>.kic{display:block}
 .kbmp:hover:not(:disabled){border-color:var(--line-2);background:var(--paper)}
@@ -4313,7 +4313,7 @@ void main() {
 .v3d-ic .dk{display:none}
 :root[data-theme="dark"] .v3d-ic .lt{display:none}
 :root[data-theme="dark"] .v3d-ic .dk{display:inline}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .v3d-ic .lt{display:none}:root:not([data-theme="light"]) .v3d-ic .dk{display:inline}}
+@media (prefers-color-scheme: dark){:root[data-theme="system"] .v3d-ic .lt{display:none}:root[data-theme="system"] .v3d-ic .dk{display:inline}}
 .v3d-toolbar{display:flex;align-items:center;gap:1px;padding:2px 4px;background:var(--bench);border-bottom:1px solid var(--line);flex:none;flex-wrap:wrap}
 .v3d-toolbar button{all:unset;width:28px;height:28px;display:grid;place-items:center;border-radius:var(--r-2);cursor:pointer}
 .v3d-toolbar button:hover{background:var(--line)}
