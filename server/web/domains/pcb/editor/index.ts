@@ -1,5 +1,6 @@
 // editor — GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/domains/pcb/editor/index.ts — edit these modules, not the bundle).
 import { installDialogs } from "../dialogs/index";
+import { registerBomView } from "../parts/bomview";
 import { installSchNets } from "./schnets";
 import "./dom";
 import "./appstore";
@@ -61,6 +62,8 @@ import { fontCommitObserver, initFonts } from "./fonts";
 import { installViewSwitcher } from "./view-switcher";
 import "../mech";   // the board link: outline, holes and keep-outs driven by a part studio (web/domains/pcb/mech)
 import "./title";
+
+registerBomView();   // a PCB's bill of materials as a view of its tab (the shell opens it like a document)
 import "./cad-usage";   // on a board: the way to the part studios and assemblies that use it
 window.CollabApp = { getState: store.get, subscribe: store.subscribe, dispatch: (a) => dispatchAction(a), renderProps: (el) => renderPropsInto(el), selectionCount };
 

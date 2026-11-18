@@ -1,6 +1,7 @@
 // dims.ts — how a dimension is drawn: its witness lines, its dimension line or arc, its arrows and where its
 // text sits, all in sketch coordinates.  Pure, so the painter, the picking and the tests agree.
 import type { Vec2 } from "../core/geometry";
+import { DEFAULT_UNITS, angleFactor, angleSuffix, lengthFactor, num, type Units } from "../document/units";
 import type { SketchConstraint, SketchData } from "./format";
 import { angleFrame, dist, measure, mid, resolve, type Resolved } from "./refs";
 
@@ -13,6 +14,20 @@ export interface DimensionDrawing {
   text: string;
 }
 
+// The units the open sketch is shown in.  The sketch editor sets them from the document when a sketch is opened
+// and when the document's units change; everything that writes a sketch number for a person reads them here.
+let shown: Units = DEFAULT_UNITS;
+export function setSketchUnits(u: Units): void { shown = u; }
+export const sketchUnits = (): Units => shown;
+/** A length of the sketch (mm) as a number in the document's unit. */
+export const lenNum = (v: number): string => num(v / lengthFactor(shown.length), shown.places);
+/** An angle of the sketch (degrees) as a number in the document's unit. */
+export const angNum = (v: number): string => num(v / angleFactor(shown.angle), shown.angle === "deg" ? Math.min(shown.places, 3) : Math.max(shown.places, 3));
+export const lenText = (v: number): string => `${lenNum(v)} ${shown.length}`;
+export const angText = (v: number): string => `${angNum(v)}${angleSuffix(shown.angle)}`;
+/** What a bare number typed into the sketch is worth, in millimetres or degrees. */
+export const typedFactor = (angle: boolean): number => (angle ? angleFactor(shown.angle) : lengthFactor(shown.length));
+
 export const fmt = (v: number): string => { const r = Math.round(v * 1000) / 1000; return (Object.is(r, -0) ? 0 : r).toString(); };
 
 /** The text of a dimension: its value as the sketch has it now, in brackets when it is a reference dimension. */
@@ -20,7 +35,7 @@ export function dimensionText(data: SketchData, c: SketchConstraint): string {
   const driven = c.driving === false;
   const v = driven || typeof c.value !== "number" ? measure(data, c) : c.value;
   if (v === null) return "?";
-  const body = c.type === "radius" ? `R ${fmt(v)}` : c.type === "diameter" ? `Ø ${fmt(v)}` : c.type === "angle" ? `${fmt(v)}°` : fmt(v);
+  const body = c.type === "radius" ? `R ${lenNum(v)}` : c.type === "diameter" ? `Ø ${lenNum(v)}` : c.type === "angle" ? angText(v) : lenNum(v);
   return driven ? `(${body})` : body;
 }
 

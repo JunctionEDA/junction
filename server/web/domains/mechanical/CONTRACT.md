@@ -32,7 +32,7 @@ page                                             worker (static/dist/cad-worker.
      ├─ KernelClient    ⇄ postMessage ⇄             ├─ features/*.ts  evaluate()
      ├─ ModelView on Viewport3D (three.js)          └─ services/*.ts  run()
      ├─ SketchEditor (sketch/editor.ts, PlaneGCS)
-     └─ React: toolbar, docks, feature dialog
+     └─ React: toolbar (by mode), docks, the feature's or sketch's dialog, view cube, status bar
 ```
 
 A part studio is a list of features. The page holds the document and sends the feature list to the worker; the
@@ -55,19 +55,19 @@ part studio, board, assembly ──read live──▶ instances of an assembly  
 | `shared/itemdoc/sync.ts` | `ItemDocSession`: a live document over the collaboration socket, with undo. |
 | `shared/viewport3d/viewport3d.ts` | `Viewport3D`: canvas, camera, orbit/pan/zoom, standard views, theme colours. |
 | `platform/documents/host.ts` | How the shell hands a document to a domain's editor. |
-| `platform/doctabs/` | The document tabs; `room.ts` is who is on which tab. |
+| `platform/doctabs/`, `platform/projecthome/` | The project shell: the tab bar, the Home tab, what a PCB is (`pcbs.ts`); `room.ts` is who is on which tab. See "Document tabs and the shell". |
 | `platform/history/`, `platform/review/renderers.ts`, `platform/mcp/host.ts` | Version history, Compare, the assistant's tools: what a domain plugs into. |
 | `domains/registry.ts` | Which document kinds exist, which bundle opens them, what a new one contains. |
 | `domains/mechanical/core/` | Contracts: `feature.ts`, `tool.ts`, `geometry.ts`. |
-| `domains/mechanical/document/` | The `.jpart` format (`format.ts`), every edit as item changes (`edits.ts`), variables, materials, appearance, and **`inputs.ts`: a document as the worker's input**. |
+| `domains/mechanical/document/` | The `.jpart` format (`format.ts`), every edit as item changes (`edits.ts`), the document's units (`units.ts`), variables, materials, appearance, and **`inputs.ts`: a document as the worker's input**. |
 | `domains/mechanical/sketch/` | The sketcher: format, the solver (PlaneGCS), tools, dimensions, painting, regions. |
 | `domains/mechanical/kernel/` | Worker side: OpenCascade helpers (`occ.ts`, `ops/`), regeneration, tessellation, protocol, the page's client. |
 | `domains/mechanical/features/` | **One file per feature type.** |
 | `domains/mechanical/tools/` | **One file per toolbar tool.** |
 | `domains/mechanical/panels/` | **One file per docked panel.** |
 | `domains/mechanical/services/` | **One file per worker service.** |
-| `domains/mechanical/viewport/` | Bodies, planes, sketches, reference geometry, highlighting and picking. |
-| `domains/mechanical/ui/` | The part studio controller (`studio.ts`), its React frame, the toolbar, the docks (`panels.ts`). |
+| `domains/mechanical/viewport/` | Bodies, the default planes and their name labels (`planes.ts`), sketches, reference geometry, highlighting, picking and box selection. |
+| `domains/mechanical/ui/` | The part studio controller (`studio.ts`) and its React frame: the toolbar and everything that can be started (`commands.ts`), the dialogs (`DialogShell`, `FeatureDialog`, `SketchDialog`; `fields.ts` is what a click means to a field), the feature list, the view cube, the status bar, the tool search and menus (`Overlays.tsx`), the docks (`panels.ts`), a person's preferences (`prefs.ts`). |
 | `domains/mechanical/collab/` | Presence, Follow, two people in one feature, comments pinned to geometry. |
 | `domains/mechanical/inspect/` | Measure, section view, mass properties, appearance and display modes. |
 | `domains/mechanical/board/` | A board in a part studio: reading it live, its picture, its solids, `BoardFeed`. |
@@ -118,8 +118,8 @@ field, a new method) and say so in your pull request.
 - `platform/documents/host.ts`, `platform/doctabs/*`, `domains/registry.ts`
 - `mechanical/core/*`, `mechanical/kernel/{types,protocol,regen,occ,tessellate,worker,client,load,wasm}.ts`
 - `mechanical/document/{format,edits,inputs}.ts`, `mechanical/sketch/{format,profiles,planar}.ts`
-- `mechanical/ui/{studio.ts,PartStudioView.tsx,Toolbar.tsx,panels.ts,FeatureDialog.tsx,FeatureList.tsx}`,
-  `mechanical/viewport/modelview.ts`, `mechanical/api.ts`
+- `mechanical/ui/{studio.ts,PartStudioView.tsx,Toolbar.tsx,commands.ts,fields.ts,DialogShell.tsx,panels.ts,FeatureDialog.tsx,FeatureList.tsx}`,
+  `mechanical/viewport/{modelview,planes}.ts`, `mechanical/document/units.ts`, `mechanical/api.ts`
 - `assembly/core/*`, `assembly/document/format.ts`, `assembly/sources/types.ts`, `assembly/ui/assembly.ts`
 - `scripts/gen-cad-registry.mjs`, `server/package.json` (the `build:cad` and `test` entries), `static/app.html`
 - `web/domains/pcb/editor/{dochost,doc,home}.ts` (the shell's side of the tabs)
@@ -272,15 +272,15 @@ new JSON item document kind is one line there and gets history, branches, mergin
 // one step of the history tree
 { id, type: "feature", featureType: "extrude", name: "Extrude 1", order: "V", suppressed?: true, params: {…} }
 // one item, id "studio"
-{ id: "studio", type: "studio", units: "mm", rollback: <feature id> | null }
+{ id: "studio", type: "studio", units: "mm", angleUnits?: "deg", precision?: 3, rollback: <feature id> | null }
 ```
 
 - The tree is the feature items sorted by `order`.
 - `featureType` names a registered feature; `params` is that feature's own data, described by its schema.
 - `rollback` is the first feature that is **not** built (the bar sits above it); `null` is the end. It is in the
   document, so it is shared and stored. A bar on a feature that no longer exists reads as the end.
-- Lengths are millimetres and angles degrees, whatever `units` says; `units` only chooses how lengths are shown
-  (nothing reads it yet).
+- Lengths are millimetres and angles degrees, whatever the units say. `units` (mm, cm, m, in, ft), `angleUnits`
+  (deg, rad) and `precision` (decimal places) say how the document is read and written: see "Units".
 - Feature ids are UUIDs. A body's id is the id of the feature that made it (with a suffix when one feature
   made several), so body ids survive rebuilds.
 
@@ -339,10 +339,22 @@ click on a sketch takes all of it; clicks inside its regions then choose among t
 just that region, further clicks add and take away, "All" puts every region back).
 
 **The sketcher** (`sketch/editor.ts`, one `SketchEditor` per studio, `window.JunctionSketch` while a sketch is
-open) owns the pointer and the keys while a sketch is open, draws the sketch itself on a 2D canvas over the
-viewport, and shows its tools in a palette in the viewport (the `sketch` tools have no toolbar button; the
-toolbar shows Finish sketch). The Sketch panel in the right dock lists the dimensions and constraints. Esc
-puts a tool down and clears the selection; it never leaves the sketch (Finish sketch does).
+open) owns the pointer and the keys while a sketch is open and draws the sketch itself on a 2D canvas over the
+viewport. Its tools are the toolbar while a sketch is open (see "The toolbar"); the sketch has a dialog of its
+own (`ui/SketchDialog.tsx`: the plane, which can be changed; ✓ and ✗); the Sketch panel in the right dock lists
+the dimensions and constraints; the status bar says how the sketch stands. Esc and a right click put a tool
+down, Esc again clears the selection; neither ever leaves the sketch. ✓ (Finish sketch) keeps it; ✗ (Cancel
+sketch) puts it back as it was when it was opened, and takes a sketch made by that visit away again, as one
+undoable step (`studio.cancelSketch`).
+
+- **Starting one.** Sketch with a plane or a flat face selected starts drawing at once. With nothing selected
+  the dialog asks for the plane, and a click on one (in the model, on its row in the feature list, or on Top /
+  Front / Right in the dialog) starts drawing; ✓ takes the plane shown (Top).
+- **The view.** Opening a sketch turns the view to face its plane when the person likes it so (a preference,
+  `ui/prefs.ts sketchNormal`, in the sketch's dialog; N does it at any time), and finishing turns it back to
+  where it was.
+- **Features from inside a sketch.** Extrude and Revolve are in the sketch toolbar, and Shift+E / Shift+W work in
+  a sketch: the feature takes that sketch (`studio.startFeature` finishes the sketch and uses it as the profile).
 
 - Drawing tools (`sketch/shapes.ts`, engine `sketch/draw.ts`): line, rectangle, centre rectangle, circle, three
   kinds of arc, slot, point; inference while drawing (`sketch/infer.ts`); a measure typed while drawing becomes
@@ -381,18 +393,37 @@ export interface FeatureDefinition<P> {
 
 | `kind` | Stores | Dialog |
 |---|---|---|
-| `number` (`unit`, `min`, `max`, `step`) | a number | a number field |
+| `number` (`unit`, `min`, `max`, `step`) | a number (mm, degrees) | a number field showing the document's unit; takes a unit typed with the number, expressions and variables; ↑ ↓ and dragging the label step it |
 | `boolean` | a boolean | a checkbox |
 | `text` | a string | a text field |
 | `enum` (`options`) | a string | a segmented control, or a select above four options |
 | `profile` | `{ sketch: <feature id>, regions: null \| string[] }` | a list of earlier sketches; click one in the viewport, then its regions to choose among them |
-| `plane` | a `PlaneRef` | Top / Front / Right, or click a planar face or a reference plane |
-| `refs` (`of: GeomKind[]`, `single?`, `datums?`, `planes?`, `sketch?`) | `GeomRef[]` (or one); a `RefTarget` (`features/_refs.ts`) for a default plane, reference geometry or a sketch curve | click faces, edges or vertices in the viewport; with the options, reference geometry, the default planes (also buttons) and sketch curves |
+| `plane` | a `PlaneRef` | Top / Front / Right (buttons, their rows in the feature list, or the planes in the model), or click a planar face or a reference plane |
+| `refs` (`of: GeomKind[]`, `single?`, `datums?`, `planes?`, `sketch?`) | `GeomRef[]` (or one); a `RefTarget` (`features/_refs.ts`) for a default plane, reference geometry or a sketch curve | a list that listens: click faces, edges or vertices in the viewport to add, again to take out; with the options, reference geometry, the default planes (also buttons) and sketch curves |
 | `features` (`types?`, `exclude?`) | `string[]` of earlier feature ids, in the order picked | a list of the earlier features |
 | `bodies` | `string[]` of body ids; empty means every body | click a body |
 | `document` (`docTypes`) | another document's id | a list of the project's documents of those types |
 
-A number field accepts an expression (see "Variables").
+A number field accepts an expression (see "Variables") and units (see "Units").
+
+**How a field that takes geometry behaves** (`ui/fields.ts`, pure and tested by `cad-fields.test.js`;
+`studio.ts` applies it). While a field listens (it is outlined; `editing.field`), the viewport's filter is the
+kinds it takes, the pre-highlight is exactly what a click will take, and
+- a click adds; a click on something the field holds takes it out; a click on nothing changes nothing;
+- a selection box adds only; × takes one thing out, Clear all;
+- a field that holds one thing is replaced by the click, and the next empty field then listens;
+- what was selected before the tool was started fills the first fields that take it, each pick once;
+- Tab goes round the fields that take geometry; Esc puts the listening field down, then cancels; Enter accepts;
+- a click in the model while no field listens goes to the first field that takes it (never to a selection the
+  dialog cannot use).
+
+What the fields hold stays highlighted while the dialog is open (`view.setMarks`): the listening field's as a
+selection, the others' quieter. A feature consumes what it is given (a filleted edge is not an edge of the
+preview), so the page asks the worker what such a pick looked like before the feature (the `ref-geometry`
+service) and keeps drawing it; a click on it takes it out. The dialog's frame is `ui/DialogShell.tsx`: it is
+dragged by its title, folds to it, and the next dialog opens where the last was left; ✓ and ✗ are at the right
+of the title for every dialog. Editing a feature that is not the last, **Final** shows the model with the later
+features built (`studio.setFinal`).
 
 A feature file is bundled into both the page and the worker. **It must not touch the DOM, three.js or React at
 module level**, and `evaluate` must use only its context.
@@ -647,9 +678,13 @@ export default defineService({
 `ctx.state` is the model the page is showing (after the last regeneration). The result is JSON, and may hold
 typed arrays (an exported file): they are transferred (`kernel/ops/exchange-export.ts transferables`).
 
+`ctx.before(featureId)` is the model just before a feature was built (null when it is not built; present only
+in the page's own worker).
+
 Services today: `mass-properties`, `measure-entities`, `measure-clearance`, `interference` and `clearance`
 (shapes sent as BRep text, for the assembly), `body-brep`, `export-step`, `export-mesh`, `export-outline`,
-`export-convert`, `sketch-project`, `compare-versions`, `board-placement`, `boardlink-solve`.
+`export-convert`, `sketch-project`, `compare-versions`, `board-placement`, `boardlink-solve`, `ref-geometry`
+(what named faces, edges and vertices looked like before a feature consumed them).
 
 ### The kernel
 
@@ -668,13 +703,25 @@ offset, thick solid, draft, loft, pipe, STEP read and write, `GProp`, `BRepExtre
 
 ## The toolbar and panels
 
-### The toolbar (`ui/Toolbar.tsx`)
-
-Drawn from the registries; nothing is listed by hand.
+### The frame (`ui/PartStudioView.tsx`)
 
 ```
-undo redo delete │ Sketch │ Extrude Revolve Sweep▾ Fillet▾ Shell Hole Boolean▾ │ Pattern▾ │ Reference▾ │ Board▾ │ Measure Section Comment │ Planes Display Perspective │ History Import Export
-     edit          sketch                     solid                              pattern    reference    board            inspect                    view                    file
+the toolbar            the tools of the mode the studio is in
+left dock │ viewport │ right dock      over the viewport: the dialog of the feature or sketch being edited (top left,
+                                       movable), the view cube (top right), the measure readout (bottom right)
+the status bar         kernel and hints · how the open sketch stands · what a click picks · the units · ?
+```
+
+### The toolbar (`ui/Toolbar.tsx`, `ui/commands.ts`)
+
+Drawn from the registries; nothing is listed by hand. It shows the tools of the **mode** and nothing else
+(`data-mode` on `.cad-toolbar`):
+
+```
+model    undo redo delete │ Sketch │ Extrude Revolve Sweep▾ Fillet▾ Shell Hole Boolean▾ │ Pattern▾ │ Reference▾ │ Board▾ │ Measure Section Comment │ Planes Display Perspective │ History Import Export
+sketch   undo redo │ Line Rectangle▾ Circle Arc▾ Slot Point Construction │ Sketch fillet Trim Extend Offset Mirror Use edge │ Dimension │ the twelve constraints │ Extrude Revolve │          ✓ Finish sketch  ✗
+dialog   <icon> <name>  <what the listening field wants> │ Planes Display Perspective │                                   ✓  ✗
+view     (no edit rights) Measure Section Comment │ Planes Display Perspective │ History Import Export
 ```
 
 - A **feature** says which section it is in (`toolbarSection`, "solid" when absent) and, when it is one of a
@@ -683,12 +730,20 @@ undo redo delete │ Sketch │ Extrude Revolve Sweep▾ Fillet▾ Shell Hole Bo
   Mirror; Reference ▾ Plane, Axis, Point and Helix; Board ▾ Board, Opening and Standoffs. A family of one is a
   plain button. Order inside a section is `toolbarOrder`.
 - A **tool** (`core/tool.ts`) names its group (`edit`, `sketch`, `feature`, `inspect`, `view`, `file`) and may
-  name a `menu` the same way. Tools in `sketch` show only while a sketch is open, and the feature sections are
-  hidden meanwhile.
+  name a `menu` the same way. Tools in `sketch` are the sketch toolbar, in the parts their `order` puts them in
+  (draw below 100, modify below 200, constraints below 300, dimension from 300); Rectangle ▾ and Arc ▾ are
+  families. A tool with `button: false` has no button (Select, Hide, Isolate) but is in the tool search.
+- A **family is a split button**: its face runs the variant used last (kept in the browser, `ui/prefs.ts`), its
+  caret opens the list. In the DOM the face is `[data-tool][data-variant]`, the caret `[data-menu][data-items]`.
+- **Every button has a tooltip** with its name, its key and one line on what it does (`ui/Tip.tsx`; a tool's
+  `hint`, a feature's line in `commands.ts FEATURE_HINTS`). Buttons carry no `title`.
+- **The tool search** (`ui/Overlays.tsx CommandPalette`): S opens it at the pointer, Ctrl/Cmd+K in the middle;
+  it lists everything `commands.ts allCommands` returns for the mode. **?** opens the sheet of keys, read from
+  the same registries.
 - **The bar does not scroll sideways** in a window of ordinary width. When the buttons do not fit, the tools
-  lose their labels (`data-density="1"`), then the features (`"2"`: about 1000 px of icons); every button keeps
-  its tooltip, with its key. In a script, click a button with `scripts/cad-chrome.mjs` `tool(page, "Chamfer")`,
-  which opens the drop-down when the button is in one.
+  lose their labels (`data-density="1"`), then the features (`"2"`); in a sketch the constraints fold into one
+  drop-down. In a script, click a button with `scripts/cad-chrome.mjs` `tool(page, "Chamfer")`, which opens the
+  drop-down when the button is in one.
 
 ```ts
 export default defineTool({
@@ -700,21 +755,26 @@ export default defineTool({
 });
 ```
 
-**Keys.** `key` runs the tool while the viewport has the keyboard. While a sketch is open the sketcher gets
-every key first and looks only among the `sketch` tools, so a letter may mean one thing in a sketch and another
-outside it. Taken today:
+**Keys.** `key` runs the tool wherever the keyboard is in the part studio except in a field being typed into
+(`studio.ts onKey`, `onKeyElsewhere`). While a sketch is open the sketcher gets every key first and looks only
+among the `sketch` tools, so a letter may mean one thing in a sketch and another outside it. Taken today:
 
 | | Outside a sketch | In a sketch |
 |---|---|---|
 | M | Measure | Mirror |
 | X | Section view | Extend |
 | H / I | Hide / Isolate the selected parts | Horizontal / Coincident |
-| W, P | Display mode, Perspective | the same |
-| L R C A, Q, F T O U, V B E D | — | Line, Rectangle, Circle, Arc; Construction; Fillet, Trim, Offset, Use edge; Vertical, Parallel, Equal, Dimension |
-| Del, Esc, Enter, Ctrl+Z / Y | delete; cancel or clear; accept the dialog; undo / redo | delete; put the tool down; accept a typed value; undo / redo |
+| F / Z | Zoom to fit / to the selection | Sketch fillet / — |
+| W, P, N, S, ? | Display mode, planes on and off, view normal to, tool search, the sheet of keys | the same |
+| Shift+1 … 7 | Front, back, left, right, top, bottom, isometric | the same |
+| ← ↑ → ↓ | Turn the view 15° (Shift: 90°) | — |
+| Shift+S E W F C H P | Sketch, Extrude, Revolve, Fillet, Chamfer, Hole, Plane (`studio.ts FEATURE_KEYS`) | the same, but Sketch; Extrude and Revolve take the open sketch |
+| L R C A, Q, T O U, V B E D | — | Line, Rectangle, Circle, Arc; Construction; Trim, Offset, Use edge; Vertical, Parallel, Equal, Dimension |
+| Del, Esc, Enter, Tab, F2, Ctrl+Z / Y, Ctrl+K | delete the selected features; step back (field → dialog → selection); accept the dialog; the next field; rename; undo / redo; tool search | delete; put the tool down, then clear the selection; accept a typed value; —; —; undo / redo; tool search |
 
 Do not give a tool outside the `sketch` group a letter another such tool has (`static/tests/mechanical-doc.test.js`
-checks it). The assembly's keys are its own (I Insert, F Fix, E Explode).
+checks it), nor one of the letters `studio.ts` takes itself (F, Z, N, S). The assembly's keys are its own
+(I Insert, F Fix, E Explode).
 
 A tool that takes over the pointer sets `studio.view.pointerTool = { down, move, up }` and `studio.keyHandler`,
 and draws its rubber band with `studio.view.setOverlay(segments, dots)`.
@@ -725,6 +785,7 @@ and draws its rubber band with `studio.view.setOverlay(segments, dots)`.
 export default definePanel({
   id: "mass-properties", title: "Mass properties", side: "right", order: 20,
   open: false,                                       // or (studio) => boolean; open when absent
+  count: (studio) => 3,                              // a number beside the title (null: none)
   visible: (studio) => true,                         // in its dock only while this holds
   render: (studio) => <MassProperties studio={studio} />,
 });
@@ -737,10 +798,20 @@ A panel is a React component that reads the studio with `useStudio(studio, (s) =
   browser. A panel the person has not touched follows `open`: the Board panel unfolds when the part studio has a
   Board feature or a link. `showPanel(id)` (`ui/panels.ts`) unfolds a panel from a tool (Comment does).
 - **A folded panel stays mounted**: some panels keep a part of the studio alive (the Collaborators panel the
-  collaboration layer, the Sketch panel the sketch palette). A panel whose content costs something to keep
+  collaboration layer, the Sketch panel the sketch editor). A panel whose content costs something to keep
   current asks `usePanelOpen(studio, id)` and does nothing while folded (mass properties does).
 - Left dock: Features, Parts. Right dock: Sketch (while a sketch is open), Variables, Mass properties (folded),
   Appearance (folded), Board (unfolds itself), Collaborators, Comments (folded).
+- **The feature list** (`ui/FeatureList.tsx`) starts with the **default geometry** (Origin, Top, Front, Right:
+  rows that select and hide like any other, and that a listening plane field takes a click on), then the
+  features. A box filters by name; Ctrl and Shift select several; F2 or a second slow click renames; the eye
+  hides and shows a plane, a sketch or reference geometry (`studio.setVisible`: this person's view, kept in the
+  browser per document, never in the document); the pointer over a row lights up what the feature made and the
+  pointer over the model marks the row that made the face; the rollback bar is always there to drag and says
+  how many features are below it; the menu has Edit, Rename, Suppress, Roll back to here, Roll to end, Hide,
+  Zoom to, what it uses and what uses it, Delete (several at once); a failed feature's mark shows its message
+  and a click looks at it. **Parts** (`panels/parts.tsx`): click selects the part, the eye hides it, the menu
+  isolates, zooms, opens Appearance, deletes.
 - In a script, `scripts/cad-chrome.mjs` `openPanel(page, id)` unfolds one.
 
 ### `PartStudio` (`ui/studio.ts`)
@@ -749,17 +820,23 @@ What tools, panels and dialogs are handed:
 
 ```ts
 studio.getState()              // StudioState: features, rollback, reports, bodies, sketches, selection, hover,
-                               //   editing, sketch, kernel, peers, canEdit, canUndo, canRedo, …
+                               //   editing, sketch, kernel, peers, canEdit, canUndo, canRedo, units, visibility,
+                               //   selectedFeature(s), hoverFeature, …
 studio.subscribe(fn)
 studio.doc                     // the ItemDoc (read only; change it with commit)
 studio.commit(changes)         // see "How a change is committed"
 studio.undo(), studio.redo()
 studio.kernel.call(name, args)
-studio.view                    // ModelView: pick(ev), planePoint(ev, frame), setOverlay, setFilter, sketchFrame, pointerTool
-studio.viewport                // Viewport3D: fit(), setView(), lookAlong(), ray(ev), project(p), pixelSize(), scene
-studio.select(picks), studio.selectFeature(id)
+studio.view                    // ModelView: pick(ev), planePoint(ev, frame), setOverlay, setFilter, sketchFrame, pointerTool,
+                               //   setMarks, boxOf(picks), normalOf(pick), picksOfFeature(id), planeLayer
+studio.viewport                // Viewport3D: fit(), setView(), lookAlong(), rotateBy(), ray(ev), project(p), pixelSize(), scene
+studio.select(picks), studio.selectFeature(id, add?), studio.selectFeatures(ids), studio.pickFromList(pick)
 studio.startFeature(type), studio.editFeature(id), studio.setDraft(patch), studio.acceptFeature(), studio.cancelFeature()
-studio.openSketch(id), studio.finishSketch(), studio.setSketchTool(id)
+studio.setField(key), studio.fillField(key, pick), studio.clearField(key, index?), studio.setFinal(on), studio.pickFilter()
+studio.openSketch(id), studio.finishSketch(), studio.cancelSketch(), studio.setSketchTool(id), studio.setSketchPlane(ref)
+studio.isVisible(id), studio.setVisible(ids, on), studio.setPlanesVisible(on)   // "origin", "top", "front", "right", feature ids
+studio.setUnits({ length?, angle?, places? })
+studio.fit(), studio.zoomToSelection(), studio.zoomToFeature(id), studio.normalTo()
 studio.host                    // DocumentHostContext: project, doc, docs, toast(), openDoc()
 studio.inputFilters            // what is added to the worker's input before every regeneration (never stored)
 studio.onRegen                 // called after every regeneration whose result was shown
@@ -786,10 +863,23 @@ A vertex wins over an edge wins over a face when the pointer is within a few pix
 wins over a plane. A body that is drawn in another way (`view.bodyStyle` returns `faces: false`: a Board
 feature's solids under the board's picture) is still found by the pointer; anything that sets a body's
 visibility (display modes do) must ask `bodyStyle` first. Hover and selection are highlighted from the same picks. Turn a pick into a stored reference
-with `{ kind, body, name }`.
+with `{ kind, body, name }`. A plane or reference geometry a person has hidden is neither drawn nor picked.
 
-Viewport navigation: right-drag orbits, middle-drag or Shift + right-drag pans, the wheel zooms about the
-pointer, the buttons at the top right give Top / Front / Right / Iso / Fit. Model space is millimetres, Z up.
+- **A drag with the left button on nothing draws a box** (`view.onBox`): from left to right it takes the faces
+  and edges wholly inside it, from right to left (dashed) whatever it touches, of the kinds the filter allows;
+  what is behind other geometry counts too. Shift or Ctrl adds to the selection; into a listening field it
+  adds only.
+- **A right click that did not turn the view** (`view.onContext`) opens the menu for what is under it
+  (`ui/Overlays.tsx ContextMenu`); in a sketch it first puts the tool down.
+- **The default planes** (`viewport/planes.ts`) are translucent rectangles that reach a little past the model
+  on their two axes and grow with it, each with its name as page text inside a corner (upright, the corner
+  that is in view, fading as the plane turns edge-on). Reference planes are labelled with their feature's name.
+
+Viewport navigation: right-drag turns, middle-drag or Shift / Ctrl + right-drag slides, the wheel zooms about
+the pointer, a double click with the middle button or F fits. The **view cube** (`ui/ViewCube.tsx`, top right;
+the element is also `.v3-views`, and its faces and the two buttons under it carry `data-view`) turns the view
+from a face, an edge or a corner, by 15° with its arrows, and its menu has the projection, the display modes,
+the section view, the planes, zoom and the named views. Model space is millimetres, Z up.
 Colours come from the theme tokens (`tokenColor("--mark")`); do not write colour literals.
 
 ## Collaboration (`mechanical/collab/`, `platform/doctabs/room.ts`)
@@ -840,7 +930,9 @@ runs several sessions against a sequencing server in every delivery order and ch
 **The project room** (`platform/doctabs/room.ts`, started by the tabs; `projectRoom()` in `roomapi.ts` for a
 bundle) is who is in the project and on which tab. Presence on the server is per document, so every page opens
 one more socket, joins the project's first four part studios and assemblies (by id) with it, and says there
-which tab the person is on. A project with no part studio or assembly has no room: nobody is shown on its tabs.
+which tab the person is on (a document id, `home`, or `bom:<PCB key>`). The room joins the project's own document
+first (`project.jproj`, see "Document tabs and the shell"), so every project that has one has a room; an older
+project with neither that document, a part studio nor an assembly has none, and nobody is shown on its tabs.
 That the project's documents changed is not the room's business: the server says so (the `docs` notice, under
 "How a change is committed and synced").
 
@@ -857,15 +949,93 @@ still drawn; the presence of a person on a schematic or board tab is their tab o
 
 ## Document tabs and the shell
 
-- `domains/registry.ts` lists the document kinds: `docType`, `ext`, `title`, `icon`, and for kinds a domain's
-  own editor draws, `bundle`, `newName` and `newText`. A new kind of document is an entry there, two lines in
-  `server/src/http.rs` (`doc_type_for`, `allowed_file`) and one in `itemdoc.rs` (`is_item_doc`).
-- The tabs (`platform/doctabs`) show the root schematic, each board, and every document whose kind has
-  `newName`. "+" offers the kinds with `newText`. Rename and delete are offered for those kinds only: a
-  project's schematic and board stay put.
-- Opening a tab dispatches `openDoc`. For a kind with a `bundle`, the shell (`pcb/editor/dochost.ts`) leaves the
-  KiCad document, shows the `cad` view, loads the bundle once, and calls the `DocumentEditorFactory` it
-  registered (`platform/documents/host.ts`):
+A project is a set of **elements**, each one tab: any number of PCBs, part studios and assemblies, after a first
+tab, **Home**, that is always there. Everything else in the project is a file: a library, a 3D model, a STEP
+file, the sheets of a PCB. The shell is `platform/doctabs` (the tab bar and what both it and Home do),
+`platform/projecthome` (Home) and, on the electronics editor's side, `pcb/editor/{dochost,doc,pcbscope}.ts`.
+
+| File | What |
+|---|---|
+| `platform/doctabs/pcbs.ts` | **Which PCBs a project holds and what each one's editor may see.** Pure. Read it first. |
+| `platform/doctabs/elements.ts` | Elements, their order, folders, the rows of Home's tree. Pure. |
+| `platform/doctabs/actions.ts` | Create, rename, duplicate, move, delete (with a few seconds to undo), import: the same ones for the bar and for Home. |
+| `platform/doctabs/api.ts`, `server/src/shell.rs` | The requests, and the routes that answer them. |
+| `platform/doctabs/shell.ts`, `useshell.ts` | The project's own document, live; the project as the React parts read it (`useProjectShell()`). |
+| `platform/doctabs/DocTabs.tsx`, `platform/projecthome/ProjectHome.tsx` | The bar (with the tab manager and "+"); Home. |
+| `pcb/editor/pcbscope.ts` | The PCB the schematic and board editor is on, and what keeps it inside that PCB. |
+| `pcb/parts/bomview.ts` | A PCB's bill of materials as a view. |
+
+### Elements, and what a PCB is
+
+- `domains/registry.ts` lists the document kinds: `docType`, `ext`, `title`, `icon`, `tint`, and for kinds a
+  domain's own editor draws, `bundle`, `newName` and `newText`. A new kind of document is an entry there, two
+  lines in `server/src/http.rs` (`doc_type_for`, `allowed_file`) and one in `itemdoc.rs` (`is_item_doc`). It then
+  has a tab, a row on Home, a place in "+" and in Home's create buttons, with nothing else to write.
+  `PCB_ELEMENT` in the same file describes the one kind of element that is more than one document.
+- **A PCB is a KiCad project in a folder of its own**: `<name>/<name>.kicad_pro`, `.kicad_sch`, `.kicad_pcb`, its
+  other sheets, its `fp-lib-table`, its libraries. Its name is the folder's. The folder is a valid KiCad project
+  on disk and in a GitHub repository. `POST /api/projects/{id}/pcbs` makes one; renaming, moving, copying and
+  deleting a PCB are folder operations (`/folders/move`, `/duplicate`, `/folders/delete`), and a rename or a
+  copy gives the PCB's own three files the new name (`shell.rs` `restem`), so a board is always called what its
+  PCB is called wherever boards are listed by file name (the assembly's Insert, a part studio's Board feature
+  and board link).
+- **A project from before** (KiCad's files at the project's root) is one PCB whose folder is the root. Nothing
+  about it changes and nothing is added to it: its editor gets the very document list it always got, it opens on
+  its root schematic, and the shell does not offer to rename, move or delete it. More PCBs can be added beside it.
+- Which document belongs to which PCB (`pcbsOf`): the PCB whose folder is the longest that contains it. A
+  schematic or board outside every PCB folder rides with the project's only PCB, or, when there are several,
+  makes a PCB at the root. A part studio, a model or a library outside every PCB folder belongs to none.
+- A PCB's `key` is the id of its project file: it survives a rename, and is what the tab order and
+  `bom:<key>` are keyed by.
+
+### One PCB at a time: how the editor is kept inside it
+
+The schematic and board editor finds "the" project file, root sheet, board, rules and library tables by
+looking through the project's documents, in more than a hundred places, and remembers a good deal per project.
+Pairing a schematic with another PCB's board would be silent and serious, so the rule is structural:
+
+- `state.project.docs` (and `state.docs`, and `store.project.docs`) is the **scoped view**: the documents of the
+  bound PCB and of no other, with paths relative to its folder, plus what belongs to no PCB at `../…`
+  (`scopedDocs`). Inside it, `fp-lib-table` is the PCB's own and `${KIPRJMOD}` is the PCB's folder.
+  `state.project.allDocs` is the whole project with real paths: **shell code and other domains read `allDocs`**
+  (`DocumentHostContext.docs` is `allDocs`). Document ids are the same in both.
+- The editor names files it makes as it sees them. `installPathScope` wraps `fetch` for exactly two requests
+  (`POST /api/projects/{id}/docs`, `PATCH /api/docs/{id}`) and puts the folder in front of `path` on the way out
+  and takes it off the answer. Shell code sends real paths through `rawFetch()` (`platform/documents/rawfetch.ts`).
+  A new project-level request that carries a path needs the same treatment there.
+- **One PCB per page.** Opening a document of another PCB than the one this page has bound loads the page again
+  at that document (`bindPcb` answers `"reload"`), and so does the bound PCB being renamed under the page.
+  Moving between the views of one PCB, or between a PCB and a part studio, an assembly or Home, stays in the
+  page. This costs a second when switching PCBs and removes a class of stale-cache bugs; lifting it means
+  auditing every per-project cache of the editor.
+- The assistant's electronics tools are narrowed the same way (`pcb/mcp/host.ts` `scopeToPcb`): a call names its
+  PCB in `document` (`"Motor driver/board"`, or a path as `get_project` lists it); one that names none works on
+  the PCB used last and says so in its result (`pcb`, `pcbs`). The other domains' tools see the whole project.
+- Server routes that pick a board or schematic for a whole project (`preview.svg`, `first-doc`) only choose a
+  picture or a first guess the editor checks; `board-items` takes `?doc=`.
+
+### Tabs
+
+- The bar shows Home, then one tab per element in the project's order. A PCB's tab holds its views:
+  **Schematic** (any sheet of it; a caret lists the sheets when there are several), **Board** (one per board),
+  **BOM**, and, on the board, **3D** and **Outputs** (the 3D viewer and the fabrication outputs, which are the
+  board editor's own dialogs). The views show on the open PCB's tab, and always in a project with one PCB.
+- A tab id is what `openDoc` takes, what the address carries (`/p/<project>/edit?doc=<id>`) and what the room
+  says: a document id, `home`, or `bom:<PCB key>`. A link to a sheet or board opens its PCB on that view. With
+  no `doc`, a project with a PCB at its root opens on that PCB's root schematic and any other project on Home.
+- Home and the BOM are opened like documents: `dochost.ts` gives the `cad` view to the editor registered for
+  `@home` (`ProjectHome.tsx`) or `@bom` (`bomview.ts`). A view of the shell's own is a `registerDocumentEditor`
+  with a doc type that starts with `@` and no bundle.
+- Each sheet and board remembers where it was being looked at (`doc.ts` `viewMemo`), for the page's life.
+- **The project's own document**, `project.jproj` (type `project_shell`, a JSON item document like a part studio),
+  holds what is shared about the shell: `{ id: "tab:<key>", type: "tab", order }` for each tab somebody placed,
+  and `{ id: "folder:<uuid>", type: "folder", path }` for a folder that is still empty. A blank project is made
+  with it; an older project gets it the first time somebody reorders a tab or makes a folder (`POST …/shell`).
+  It is also what the project room joins first, so every project that has it shows who is on which tab.
+- Folders are paths. A part studio in `Enclosure/` is `Enclosure/Lid.jpart`; tabs of one folder stand together
+  in the bar behind the folder's name. A PCB's own folder is not a folder to put things in.
+- Opening a hosted kind: the shell leaves the KiCad document, shows the `cad` view, loads the bundle once, and
+  calls the `DocumentEditorFactory` it registered (`platform/documents/host.ts`):
 
 ```ts
 registerDocumentEditor({
@@ -876,9 +1046,31 @@ registerDocumentEditor({
 });
 ```
 
-- The address is `/p/<project>/edit?doc=<document id>` for every kind.
 - The menu bar shows the project name and role in the `cad` view and no KiCad menus. A domain that needs menus
   should get them through an interface on the menu bar, not by importing into `shared/` (see the roadmap).
+
+### Testing the shell
+
+`node static/tests/project-shell.test.js` covers the model: PCBs and the scoped view (including "no PCB's editor
+sees another's files"), paths both ways, binding, tab order, Home's tree, what dropped files become.
+`cargo test shell` covers the folder routes' planning. `scripts/shell-ui.mjs` is two people in the browser: a
+blank project, two PCBs, a part studio and an assembly, an imported KiCad folder, the views of a PCB, **Update PCB
+from Schematic in one PCB leaving the other's board alone**, reorder, rename, duplicate, folders, the tab manager,
+delete and undo, deep links, and a project from before. Its header says how to start the server for it
+(`KC_LIBS_FOOTPRINTS_URL=$PWD/scripts/fixtures/shell-ui/footprints`). `scripts/shell-mcp.mjs` calls the
+assistant's tools over `/mcp` in a project with two PCBs: each reads and edits the PCB it names and no other.
+
+### Not done
+
+- Opening another PCB reloads the page (above). Deleting is undone within six seconds or not at all: the server
+  deletes a document with its history.
+- A PCB at the project's root cannot be renamed, moved, duplicated or deleted from the shell.
+- Home's rows are dragged onto folders; tab order is changed in the tab bar, not on Home.
+- A project from before has no room (nobody is shown on its tabs) until it has the project's own document, a
+  part studio or an assembly.
+- The desktop app sees a multi-PCB project as folders of KiCad projects; it has not been taught to pick one.
+- GitHub sync carries the folders as they are (paths are paths to it); it has not been run against a project
+  with several PCBs.
 
 ## Boards (`board/`, `boardlink/`, `../pcb/mech/`)
 
@@ -950,6 +1142,7 @@ Tests, each runnable alone with `node static/tests/<name>.test.js`:
 |---|---|
 | `itemdoc`, `doctabs` | file format, change rules, order keys, the session against a scripted socket; the tabs |
 | `mechanical-doc` | the `.jpart` format, every edit, sketch helpers, region finding, the toolbar's keys |
+| `cad-units`, `cad-fields` | the document's units: formatting, what is typed into a field, expressions that keep their unit; what a click means to a listening dialog field |
 | `mechanical-kernel` | **the real kernel in node**: sketch → extrude, booleans, names across rebuilds, cache, rollback, errors |
 | `mechanical-features`, `mechanical-patterns` | every solid feature; reference geometry, patterns, sweep, loft, variables |
 | `mechanical-collab` | presence, the draft's rebase, comment anchors, the project room, the `docs` notice, sessions under concurrent edits |
@@ -982,6 +1175,7 @@ E2E_PG_URL=postgres://user:pass@127.0.0.1:5432/db E2E_JWT_SECRET=dev E2E_BASE=ht
 |---|---|
 | **`cad-e2e`** | **the whole story, two people, one project**: a constrained tray, shell, fillet, patterned bosses, the board in the tray, the tray driving the board, an opening following a connector, an assembly with a hinged lid and the board, interference, the bill of materials, measure, versions compared, STEP. Run it after any change that crosses folders. |
 | `cad-ui` | tabs, sketch, extrude, picking, two people editing, rollback, the stored file |
+| `cad-ux-ui` | **how it feels**: planes labelled and hidden, the toolbar following the mode, the tool search, units and typed conversions, a fillet's field that keeps adding, dialogs that stay put, the feature list, the view cube, box selection, the menus (with `SHOTS`: light and dark, 1500 and 1100 px) |
 | `cad-sketch-ui` | the sketcher: every tool, constraints, dimensions, conflicts |
 | `cad-features-ui`, `cad-patterns-ui` | the solid features; reference geometry, patterns, sweep, variables |
 | `cad-collab-ui` | presence, Follow, two people in one dialog, the live tab list, comments (`ONLY=tabs,comments`) |
@@ -989,8 +1183,10 @@ E2E_PG_URL=postgres://user:pass@127.0.0.1:5432/db E2E_JWT_SECRET=dev E2E_BASE=ht
 | `cad-assembly-ui`, `cad-analysis-ui`, `cad-exchange-ui` | assemblies and mates; inspection, interference, the bill of materials; import and export |
 | `cad-history-ui`, `cad-history-mcp`, `cad-history-github` | history, compare, branches; the assistant's tools over `/mcp`; GitHub sync against `scripts/fake-github.mjs` |
 
-`scripts/cad-chrome.mjs` is what they share about the chrome (`tool`, `toolTitles`, `openPanel`). Each script
-makes its own users (distinct `github_id`s: give a new script its own range).
+`scripts/cad-chrome.mjs` is what they share about the chrome (`tool`, `toolTitles`, `toolbarMode`, `openPanel`,
+`viewFrom`, `sketchOn`); `scripts/cad-ux-lib.mjs` has signing in, a new part studio, and where a named face or
+edge is on screen. Each script makes its own users (distinct `github_id`s: give a new script its own range; two
+scripts with one id see each other's user and fail in ways that look like presence bugs).
 
 The server embeds the browser bundles when it is compiled, so a change under `server/web` does not show in a
 server that is already built: `npm run build`, then `cargo build`. While working, `scripts/cad-static-proxy.mjs`
@@ -1030,6 +1226,19 @@ cut and one fuse per body. A seed that made a body has the body copied. A copy's
 direction, m-th along the second, the seed is `i1.1`; a circular pattern uses `i<n>.1`), `m` for a mirror.
 Exact for features whose effect does not depend on where they are; a copy of, say, a fillet keeps the seed's
 shape. **Sweep** and **Loft** name faces `<id>:start…`, `<id>:end…`, `<id>:side:<sketch entity>`.
+
+**Units** (`document/units.ts`; `studio.getState().units`; the control at the right of the status bar). The
+studio item's `units`, `angleUnits` and `precision` say how the document is read and written, for everybody
+working on it; the model stays millimetres and degrees, and changing them moves nothing. Everything that writes
+a number for a person formats through `units.ts` (`formatLength`, `formatAngle`, `formatArea`, `formatVolume`):
+dialogs, sketch dimensions (`sketch/dims.ts setSketchUnits`), the measure readout and what it copies, mass
+properties (`inspect/measure-format.ts setMeasureUnits`). Everything typed goes through `parseField`: a bare
+number is in the document's unit, a unit typed with it wins ("1 in", "25.4 mm", "3/8 in + 2 mm": a unit follows
+a whole product), and expressions and variables work as below. The expression reader knows whether a value
+carries a unit, so a variable `width = 40 mm` is 40 mm in a document in inches while `n = 4` is a plain number
+that takes the unit of the field it is used in. A stored expression records the unit its bare numbers were
+typed in, `params.$unit = { <key>: "in" }` (absent: mm, degrees), so changing the document's units never
+changes a size; a sketch dimension's `expr` and a variable's are read in the document's units as they are now.
 
 **Variables** are items `{ id, type: "variable", name, expr, order }` (`document/variables.ts`, the Variables
 panel). A number field accepts an expression; the feature keeps the number and the text under
@@ -1079,7 +1288,8 @@ from page load to the model on screen 14.4 s and 7.0 s.
 - **Collaboration.** Edits merge per path, last writer wins; two direct commits to one parameter: the later one
   wins, silently. No lock on a feature someone else has open, by design. Not done: a thread on a sketch entity
   or an assembly instance; mentions; a pin hidden behind the model is still drawn. Who is on which tab is only
-  shown in projects that have a part studio or an assembly.
+  shown in projects that have the project's own document (every project made blank, and any project once a tab
+  was reordered or a folder made), a part studio or an assembly.
 - **Merging** keeps the journal's rule that a delete beats a modify: a conflict "removed here, changed there"
   resolved for the changed side keeps the item only on the side that still has it. Arrays merge as one value.
 - **The assistant's picture** (`cad_render_view`) is a software render: flat shading, no sketches or planes.
@@ -1087,3 +1297,11 @@ from page load to the model on screen 14.4 s and 7.0 s.
   with `viewer3d.js` and `ui.js` is not done.
 - **Windows narrower than about 1000 px:** the toolbar scrolls sideways; the docks fold by hand, not by
   themselves; nothing is laid out for phones.
+- **The part studio's interface, not done:** folders in the feature list; renaming a part (its name is the
+  kernel's); lists of surfaces and curves (there are no surface bodies); undo and redo do not bring back the
+  selection or an open dialog; the mouse buttons cannot be remapped; the kernel's download shows a spinner, not
+  how far it is; a plane's name is drawn over the model when its corner is behind it; inference lines cannot be
+  turned off (constraint marks can); a sketch dimension's expression with bare numbers, and a variable's, follow
+  the document's units when those change (a feature's number field does not: it records its unit); the section
+  view's offset field is in millimetres whatever the units; the highlight of what a dialog's fields hold cannot
+  be had for a feature that is suppressed or failed before it was built.

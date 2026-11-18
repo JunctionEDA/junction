@@ -3,7 +3,7 @@
 import type { GeomRef, Vec2 } from "../core/geometry";
 import type { PartStudio } from "../ui/studio";
 import type { Pick } from "../viewport/modelview";
-import { fmt } from "./dims";
+import { lenText, typedFactor } from "./dims";
 import { sketchEditor, type SketchEditor } from "./editor";
 import { tryEvaluate } from "./expr";
 import { curvePoints, type SketchData } from "./format";
@@ -31,7 +31,7 @@ function numberEntry(ed: SketchEditor, hint: (typing: string) => string, done: (
     key(ev: KeyboardEvent): boolean {
       if (ev.ctrlKey || ev.metaKey || ev.altKey) return false;
       if (ev.key === "Enter" && buffer) {
-        const v = tryEvaluate(buffer, "length");
+        const v = tryEvaluate(buffer, "length", typedFactor(false));
         if (!v || !(v.value > 0)) { ed.studio.host.toast("Type a length, like 5 or 0.25 in.", 2500); return true; }
         buffer = ""; done(v.value); show(); return true;
       }
@@ -68,7 +68,7 @@ export function runExtend(studio: PartStudio, toolId: string): void {
 let filletRadius = 5;
 export function runFillet(studio: PartStudio, toolId: string): void {
   const ed = sketchEditor(studio);
-  const entry = numberEntry(ed, (typing) => `Click a corner to round it. Radius ${typing ? typing + "▏" : fmt(filletRadius) + " mm"} (type a number and press Enter to change it).`, (v) => { filletRadius = v; });
+  const entry = numberEntry(ed, (typing) => `Click a corner to round it. Radius ${typing ? typing + "▏" : lenText(filletRadius)} (type a number and press Enter to change it).`, (v) => { filletRadius = v; });
   // a corner that was selected before the tool was taken is rounded at once
   const pre = ed.getState().selection.filter((id) => ed.getState().data.entities[id]?.type === "point");
   ed.select([]);
@@ -89,7 +89,7 @@ export function runOffset(studio: PartStudio, toolId: string): void {
   let ids = curvesOf(ed.getState().selection);
   let typed: number | null = null;
   ed.select(ids);
-  const entry = numberEntry(ed, (typing) => (ids.length ? `Move to the side to offset to and click. Distance ${typing ? typing + "▏" : typed !== null ? fmt(typed) + " mm" : "follows the pointer"} (or type it and press Enter).` : "Click a curve to offset; curves joined to it come along."), (v) => { typed = v; preview(ed.lastPointer); });
+  const entry = numberEntry(ed, (typing) => (ids.length ? `Move to the side to offset to and click. Distance ${typing ? typing + "▏" : typed !== null ? lenText(typed) : "follows the pointer"} (or type it and press Enter).` : "Click a curve to offset; curves joined to it come along."), (v) => { typed = v; preview(ed.lastPointer); });
   /** The distance from the pointer to the nearest of the curves being offset, tidied. */
   const reach = (p: Vec2): number => {
     let best = Infinity;

@@ -443,7 +443,7 @@ function parseAll(text3) {
   while (i < n2) {
     while (i < n2 && /\s/.test(text3[i])) i++;
     if (i >= n2 || text3[i] !== "(") break;
-    let depth = 0, j = i, inStr = false;
+    let depth2 = 0, j = i, inStr = false;
     for (; j < n2; j++) {
       const c = text3[j];
       if (inStr) {
@@ -452,10 +452,10 @@ function parseAll(text3) {
         continue;
       }
       if (c === '"') inStr = true;
-      else if (c === "(") depth++;
+      else if (c === "(") depth2++;
       else if (c === ")") {
-        depth--;
-        if (depth === 0) {
+        depth2--;
+        if (depth2 === 0) {
           j++;
           break;
         }
@@ -820,13 +820,13 @@ function parseStrokeMarkup(s2) {
     return root5;
   }
   const closeOf = (open4) => {
-    let depth = 0;
+    let depth2 = 0;
     for (let i = open4; i < s2.length; i++) {
       const c = s2[i];
-      if (c === "{" && i > 0 && (s2[i - 1] === "~" || s2[i - 1] === "_" || s2[i - 1] === "^" || i === open4)) depth++;
+      if (c === "{" && i > 0 && (s2[i - 1] === "~" || s2[i - 1] === "_" || s2[i - 1] === "^" || i === open4)) depth2++;
       else if (c === "}") {
-        depth--;
-        if (depth === 0) return i;
+        depth2--;
+        if (depth2 === 0) return i;
       }
     }
     return -1;
@@ -1288,13 +1288,13 @@ function indexFromAlphabetic(s2, alphabet) {
 }
 function alphabeticFromIndex(n2, alphabet) {
   const alpha = alphabet || ALPHABET, radix = alpha.length;
-  let out2 = "", first = true;
+  let out2 = "", first2 = true;
   do {
     let mod = n2 % radix;
-    if (!first) mod--;
+    if (!first2) mod--;
     out2 = alpha[mod] + out2;
     n2 = Math.floor(n2 / radix);
-    first = false;
+    first2 = false;
   } while (n2);
   return out2;
 }
@@ -1342,10 +1342,10 @@ function incrementLabel(base2, delta) {
   const s2 = incrementString(base2, delta);
   return s2 === null ? base2 : s2;
 }
-function expandTextVars(text3, resolve2, depth) {
+function expandTextVars(text3, resolve2, depth2) {
   const src = str(text3);
   if (src.indexOf("${") < 0) return src;
-  const d = depth || 0;
+  const d = depth2 || 0;
   let out2 = "";
   for (let i = 0; i < src.length; i++) {
     if (src[i] === "$" && src[i + 1] === "{") {
@@ -1680,7 +1680,7 @@ function parseCellAddress(addr) {
   if (!(row3 >= 0)) return null;
   return { row: row3, col };
 }
-function tableCellShownText(doc2, table, index, isPcb, depth) {
+function tableCellShownText(doc2, table, index, isPcb, depth2) {
   const pcb = isPcb === void 0 ? !!(doc2 && doc2.type === "pcb") : isPcb;
   const cols = Math.max(1, Math.round(num((kid(table, "column_count") || [])[1], 1)) || 1);
   const cellsN = kid(table, "cells");
@@ -1689,7 +1689,7 @@ function tableCellShownText(doc2, table, index, isPcb, depth) {
   const cell = cellNodes[index];
   const text3 = cell ? str(cell[1]) : "";
   if (text3.indexOf("${") < 0) return text3;
-  const row3 = Math.floor(index / cols), col = index % cols, d = depth || 0;
+  const row3 = Math.floor(index / cols), col = index % cols, d = depth2 || 0;
   const lc = pcb ? layerOf(table, "Dwgs.User") : "";
   const ll = pcb && doc2 ? doc2.layers : null;
   const lu = ll && typeof ll.get === "function" ? ll.get(lc) : null;
@@ -1763,21 +1763,21 @@ function buildTableGeom(doc2, item, n2) {
     const cs = sp ? num(sp[1], 1) : 1, rs = sp ? num(sp[2], 1) : 1;
     return { node: c, box: b, cs, rs };
   });
-  const first = cells2.find((c) => c);
+  const first2 = cells2.find((c) => c);
   item.movable = true;
   item.rot = 0;
   if (isPcb) item.layer = layer4;
-  if (!first) {
+  if (!first2) {
     const [x, y] = atOf(n2);
     item.x = x;
     item.y = y;
     bboxAdd(item, x, y, 1);
     return;
   }
-  const a0 = kid(first.node, "at") || kid(first.node, "start");
+  const a0 = kid(first2.node, "at") || kid(first2.node, "start");
   item.x = num(a0[1]);
   item.y = num(a0[2]);
-  const drawAngle = first.box.rot;
+  const drawAngle = first2.box.rot;
   for (let ci = 0; ci < cells2.length; ci++) {
     const c = cells2[ci];
     if (!c) continue;
@@ -2106,10 +2106,10 @@ function shortenPoly(pts, start, end, lineW) {
   const s2 = shortenDepth(start, lineW), t = shortenDepth(end, lineW);
   if (s2 + t <= 0) return pts;
   const out2 = pts.map((p) => [p[0], p[1]]);
-  const first = pts[0], second = pts[1], last3 = pts[pts.length - 1], pen = pts[pts.length - 2];
-  const sLen = Math.hypot(second[0] - first[0], second[1] - first[1]), eLen = Math.hypot(last3[0] - pen[0], last3[1] - pen[1]);
+  const first2 = pts[0], second = pts[1], last3 = pts[pts.length - 1], pen = pts[pts.length - 2];
+  const sLen = Math.hypot(second[0] - first2[0], second[1] - first2[1]), eLen = Math.hypot(last3[0] - pen[0], last3[1] - pen[1]);
   if (pts.length === 2 && sLen <= s2 + t) return null;
-  if (s2 > 0) out2[0] = sLen > s2 ? [first[0] + (second[0] - first[0]) * (s2 / sLen), first[1] + (second[1] - first[1]) * (s2 / sLen)] : [second[0], second[1]];
+  if (s2 > 0) out2[0] = sLen > s2 ? [first2[0] + (second[0] - first2[0]) * (s2 / sLen), first2[1] + (second[1] - first2[1]) * (s2 / sLen)] : [second[0], second[1]];
   if (t > 0) out2[out2.length - 1] = eLen > t ? [last3[0] - (last3[0] - pen[0]) * (t / eLen), last3[1] - (last3[1] - pen[1]) * (t / eLen)] : [pen[0], pen[1]];
   return out2;
 }
@@ -2234,12 +2234,12 @@ function symbolTransform(rot3, mirror) {
   if (mirror === "x") T = [T[0], T[1], -T[2], -T[3]];
   return T.map((v) => v + 0);
 }
-function resolveLib(doc2, name, depth) {
+function resolveLib(doc2, name, depth2) {
   const s2 = doc2.lib.get(name);
   if (!s2) return null;
   const ext = kid(s2, "extends");
-  if (ext && (depth || 0) < 4) {
-    const parent = resolveLib(doc2, name.split(":")[0] + ":" + str(ext[1]), (depth || 0) + 1) || resolveLib(doc2, str(ext[1]), (depth || 0) + 1);
+  if (ext && (depth2 || 0) < 4) {
+    const parent = resolveLib(doc2, name.split(":")[0] + ":" + str(ext[1]), (depth2 || 0) + 1) || resolveLib(doc2, str(ext[1]), (depth2 || 0) + 1);
     if (parent) {
       const merged = s2.slice();
       for (const c of parent.slice(1)) if (isList(c) && (c[0] === "symbol" || c[0] === "pin_names" && !kid(s2, "pin_names") || c[0] === "pin_numbers" && !kid(s2, "pin_numbers") || c[0] === "power" && !kid(s2, "power"))) merged.push(c);
@@ -4203,8 +4203,8 @@ function pcbTextGeom(item, n2, x, y, text3, rot3, layer4, extra) {
   const knockout = ln && has(ln, "knockout") || yesNo(n2, "knockout");
   const ex = Object.assign({ z: z2, w: thick, mirror: ef.mirror, pcb: true, italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX }, knockout ? { knockout: true, layoutW: attrW } : null, extra || {});
   if (!ef.face) {
-    const stale = kid(n2, "render_cache");
-    if (stale) n2.splice(n2.indexOf(stale), 1);
+    const stale2 = kid(n2, "render_cache");
+    if (stale2) n2.splice(n2.indexOf(stale2), 1);
   }
   const rc = ef.face ? trackedRenderCache(n2, x, y, JSON.stringify([text3, rot3 || 0, ef.size, ef.sizeX, ef.just, ef.bold, ef.italic, ef.face, layer4])) : null;
   if (ef.hide) {
@@ -4219,9 +4219,9 @@ function pcbTextGeom(item, n2, x, y, text3, rot3, layer4, extra) {
     ex.block = { x, y, rot: rot3 || 0, text: text3, upright: !!ex.upright };
     Object.defineProperty(ex.block, "node", { value: n2, enumerable: false });
   }
-  const first = textLines(item, x, y, text3, ef.size, color2, rot3, ef.just, layer4, ex);
-  if (first && ef.face) first.outlineFirst = true;
-  return first;
+  const first2 = textLines(item, x, y, text3, ef.size, color2, rot3, ef.just, layer4, ex);
+  if (first2 && ef.face) first2.outlineFirst = true;
+  return first2;
 }
 function buildPcbGeom(doc2, item) {
   boardVersion = doc2 && doc2.version || 0;
@@ -4472,13 +4472,13 @@ function barcodeGeom(item, n2, tf2, frot) {
   }
 }
 function graphicGeom(item, g2, shape3, tf2, layer4, z2) {
-  const first = item.geom ? item.geom.length : 0;
+  const first2 = item.geom ? item.geom.length : 0;
   graphicShapeGeom(item, g2, shape3, tf2, layer4, z2);
   const ls = kid(g2, "layers");
   const mask = ls && ls.slice(1).map(str).find((l) => /\.Mask$/.test(l));
   if (!mask || !item.geom) return;
   const mm4 = kid(g2, "solder_mask_margin");
-  for (let i = first; i < item.geom.length; i++) {
+  for (let i = first2; i < item.geom.length; i++) {
     item.geom[i].maskLayer = mask;
     if (mm4) item.geom[i].maskMargin = num(mm4[1]);
   }
@@ -4731,8 +4731,8 @@ function buildFootprintGeom(doc2, item) {
     const unlocked = has(at5, "unlocked") || yesNo(p, "unlocked");
     const field2 = p[0] === "property" ? str(p[1]) : p[0] === "fp_text" ? str(p[1]) === "reference" ? "Reference" : str(p[1]) === "value" ? "Value" : null : null;
     const dxfText = { bold: !!effectsOf(p).bold };
-    const first = pcbTextGeom(item, p, x, y, expand(text3), pr, layer4, field2 ? { upright: !unlocked, field: field2, dxfText } : { upright: !unlocked, dxfText });
-    if (first) first.textPos = [x, y];
+    const first2 = pcbTextGeom(item, p, x, y, expand(text3), pr, layer4, field2 ? { upright: !unlocked, field: field2, dxfText } : { upright: !unlocked, dxfText });
+    if (first2) first2.textPos = [x, y];
   };
   for (const p of kids(n2, "property")) textAt(p, str(p[2]));
   let padIndex = 0;
@@ -10105,8 +10105,8 @@ var require_pcb_tools = __commonJS({
         }
         if (k === "table") {
           const cells2 = K11.kid(node, "cells");
-          const first = cells2 && K11.kids(cells2, "table_cell")[0];
-          const s2 = first && K11.kid(first, "start");
+          const first2 = cells2 && K11.kids(cells2, "table_cell")[0];
+          const s2 = first2 && K11.kid(first2, "start");
           if (!s2) return node;
           const [ax, ay] = [K11.num(s2[1]), K11.num(s2[2])];
           const [nx, ny] = fn(ax, ay);
@@ -16312,19 +16312,19 @@ var require_pcb_tools = __commonJS({
             if (index < 0 || index >= size2) {
               return void 0;
             }
-            var first = string.charCodeAt(index);
+            var first2 = string.charCodeAt(index);
             var second;
             if (
               // check if it’s the start of a surrogate pair
-              first >= 55296 && first <= 56319 && // high surrogate
+              first2 >= 55296 && first2 <= 56319 && // high surrogate
               size2 > index + 1
             ) {
               second = string.charCodeAt(index + 1);
               if (second >= 56320 && second <= 57343) {
-                return (first - 55296) * 1024 + second - 56320 + 65536;
+                return (first2 - 55296) * 1024 + second - 56320 + 65536;
               }
             }
-            return first;
+            return first2;
           };
           if (defineProperty) {
             defineProperty(String.prototype, "codePointAt", {
@@ -16382,7 +16382,7 @@ var require_pcb_tools = __commonJS({
       ]);
       var code_tree = new Tree();
       var lengths = new Uint8Array(288 + 32);
-      function tinf_build_bits_base(bits22, base2, delta, first) {
+      function tinf_build_bits_base(bits22, base2, delta, first2) {
         var i, sum;
         for (i = 0; i < delta; ++i) {
           bits22[i] = 0;
@@ -16390,7 +16390,7 @@ var require_pcb_tools = __commonJS({
         for (i = 0; i < 30 - delta; ++i) {
           bits22[i + delta] = i / delta | 0;
         }
-        for (sum = first, i = 0; i < 30; ++i) {
+        for (sum = first2, i = 0; i < 30; ++i) {
           base2[i] = sum;
           sum += 1 << bits22[i];
         }
@@ -20236,9 +20236,9 @@ var require_pcb_tools = __commonJS({
           var nRanges = parser.parseCard8();
           code = 1;
           for (var i$1 = 0; i$1 < nRanges; i$1 += 1) {
-            var first = parser.parseCard8();
+            var first2 = parser.parseCard8();
             var nLeft = parser.parseCard8();
-            for (var j = first; j <= first + nLeft; j += 1) {
+            for (var j = first2; j <= first2 + nLeft; j += 1) {
               enc2[j] = code;
               code += 1;
             }
@@ -20644,9 +20644,9 @@ var require_pcb_tools = __commonJS({
           }
         } else if (format === 3) {
           var nRanges = parser.parseCard16();
-          var first = parser.parseCard16();
-          if (first !== 0) {
-            throw new Error("CFF Table CID Font FDSelect format 3 range has bad initial GID " + first);
+          var first2 = parser.parseCard16();
+          if (first2 !== 0) {
+            throw new Error("CFF Table CID Font FDSelect format 3 range has bad initial GID " + first2);
           }
           var next;
           for (var iRange = 0; iRange < nRanges; iRange++) {
@@ -20658,10 +20658,10 @@ var require_pcb_tools = __commonJS({
             if (next > nGlyphs) {
               throw new Error("CFF Table CID Font FDSelect format 3 range has bad GID " + next);
             }
-            for (; first < next; first++) {
+            for (; first2 < next; first2++) {
               fdSelect.push(fdIndex);
             }
-            first = next;
+            first2 = next;
           }
           if (next !== nGlyphs) {
             throw new Error("CFF Table CID Font FDSelect format 3 range has bad final GID " + next);
@@ -27743,12 +27743,12 @@ var require_pcb_tools = __commonJS({
         return x;
       };
       Font.prototype.getPath = function(text3, x, y, fontSize, options) {
-        var fullPath = new Path();
+        var fullPath2 = new Path();
         this.forEachGlyph(text3, x, y, fontSize, options, function(glyph, gX, gY, gFontSize) {
           var glyphPath = glyph.getPath(gX, gY, gFontSize, options, this);
-          fullPath.extend(glyphPath);
+          fullPath2.extend(glyphPath);
         });
-        return fullPath;
+        return fullPath2;
       };
       Font.prototype.getPaths = function(text3, x, y, fontSize, options) {
         var glyphPaths = [];
@@ -28745,12 +28745,12 @@ var require_pcb_tools = __commonJS({
           for (let i = 0; i < s2.length; i++) {
             const c = s2[i];
             if ((c === "^" || c === "_" || c === "~") && s2[i + 1] === "{") {
-              let depth = 1, j = i + 2;
-              for (; j < s2.length && depth; j++) {
-                if (s2[j] === "{") depth++;
-                else if (s2[j] === "}") depth--;
+              let depth2 = 1, j = i + 2;
+              for (; j < s2.length && depth2; j++) {
+                if (s2[j] === "{") depth2++;
+                else if (s2[j] === "}") depth2--;
               }
-              if (!depth) {
+              if (!depth2) {
                 flush();
                 walk2(s2.slice(i + 2, j - 1), sup || c === "^", sub3 || c === "_", over || c === "~");
                 i = j - 1;
@@ -29856,21 +29856,21 @@ var require_pcb_tools = __commonJS({
               }
             }
           }
-          let padCount = 0, viaCount = 0, first = null;
+          let padCount = 0, viaCount = 0, first2 = null;
           for (const it of doc2.items.values()) {
             if (it.kind === "footprint") {
               for (const p of K11.kids(it.node, "pad")) if (NT.key(netOf3(p)) === name) padCount++;
             } else if ((it.kind === "via" || it.kind === "segment" || it.kind === "arc") && NT.key(netOf3(it.node)) === name) {
               if (it.kind === "via") viaCount++;
-              else if (!first) first = it;
+              else if (!first2) first2 = it;
             }
           }
           add22("Net Name", unescapeName(name));
           add22("Net Code", code);
           add22("Pads", padCount);
           add22("Vias", viaCount);
-          if (first) {
-            const L = routedLength(doc2, first.id);
+          if (first2) {
+            const L = routedLength(doc2, first2.id);
             add22("Net Length", V(L));
             add22("On Board", V(L));
             add22("In Package", V(0));
@@ -30274,11 +30274,11 @@ var require_pcb_tools = __commonJS({
       function walkTo(O, start, goal, r, diagFirst, lastDir, deadline, legFn) {
         deadline = deadline || now() + 40;
         const legPts2 = legFn || legPts45;
-        const first = legPts2(start, goal, diagFirst);
-        if (pathClear(O, first, r)) return first;
+        const first2 = legPts2(start, goal, diagFirst);
+        if (pathClear(O, first2, r)) return first2;
         const second = legPts2(start, goal, !diagFirst);
         if (pathClear(O, second, r)) return second;
-        const active = new Set(pathHits(O, first, r).concat(pathHits(O, second, r)));
+        const active = new Set(pathHits(O, first2, r).concat(pathHits(O, second, r)));
         const legMemo = /* @__PURE__ */ new Map();
         for (let round = 0; round < 8 && active.size; round++) {
           const nodes = [start, goal];
@@ -31942,13 +31942,13 @@ var require_pcb_tools = __commonJS({
           const a = pt4(it.node, "start"), b = pt4(it.node, "end");
           const q4 = closestOnSeg(at5, a, b);
           if (samePt(q4, a) || samePt(q4, b)) return [];
-          const first = clone5(it.node);
-          setXY(first, "end", q4);
+          const first2 = clone5(it.node);
+          setXY(first2, "end", q4);
           const second = clone5(it.node);
           setXY(second, "start", q4);
           const u = K11.kid(second, "uuid");
           if (u) u[1] = K11.newUuid ? K11.newUuid() : u[1] + "-1";
-          return [replacedChange(it, first), addedChange(doc2, second)];
+          return [replacedChange(it, first2), addedChange(doc2, second)];
         }
         return [];
       }
@@ -34333,8 +34333,8 @@ var require_pcb_tools = __commonJS({
             const b = shapeBBox(sh);
             return pointInPoly4(ol.outline, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2);
           };
-          const first = inside3(e.shapes[0]);
-          if (e.shapes.every((sh) => inside3(sh) === first)) continue;
+          const first2 = inside3(e.shapes[0]);
+          if (e.shapes.every((sh) => inside3(sh) === first2)) continue;
           const cx = (e.bbox[0] + e.bbox[2]) / 2, cy = (e.bbox[1] + e.bbox[3]) / 2;
           let best = ol.outline[0], bd = Infinity, bi = -1;
           for (let i = 0; i < ol.outline.length; i++) {
@@ -36824,14 +36824,14 @@ var require_pcb_tools = __commonJS({
       }
       function groupDeepMembers(doc2, id) {
         const out2 = /* @__PURE__ */ new Set();
-        const walk2 = (gid, depth) => {
+        const walk2 = (gid, depth2) => {
           const g2 = doc2.items.get(gid);
-          if (!g2 || depth > 32) return;
+          if (!g2 || depth2 > 32) return;
           for (const m of groupMembers(g2.node)) {
             if (out2.has(m)) continue;
             out2.add(m);
             const it = doc2.items.get(m);
-            if (it && (it.kind === "group" || it.kind === "generated")) walk2(m, depth + 1);
+            if (it && (it.kind === "group" || it.kind === "generated")) walk2(m, depth2 + 1);
           }
         };
         walk2(id, 0);
@@ -37425,31 +37425,31 @@ var require_pcb_tools = __commonJS({
         }
         if (ips.length < 2) return path2.map((p) => p.slice());
         ips.sort((a, b) => a.i - b.i || a.t - b.t);
-        const first = ips[0], last3 = ips[ips.length - 1];
+        const first2 = ips[0], last3 = ips[ips.length - 1];
         let enters = false;
         for (let k = 0; k + 1 < ips.length && !enters; k++) {
           const a = ips[k], b = ips[k + 1];
           const pa = a.p, pb = b.p;
           if (insideConvex(H, [(pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2])) enters = true;
         }
-        for (let i = first.i + 1; i <= last3.i && !enters; i++) if (insideConvex(H, path2[i])) enters = true;
+        for (let i = first2.i + 1; i <= last3.i && !enters; i++) if (insideConvex(H, path2[i])) enters = true;
         if (!enters) return path2.map((p) => p.slice());
         const n2 = H.length;
-        const out2 = path2.slice(0, first.i + 1).map((p) => p.slice());
-        out2.push(first.p);
+        const out2 = path2.slice(0, first2.i + 1).map((p) => p.slice());
+        out2.push(first2.p);
         if (dir > 0) {
-          if (first.j === last3.j && last3.u >= first.u) {
+          if (first2.j === last3.j && last3.u >= first2.u) {
           } else {
-            let k = (first.j + 1) % n2;
+            let k = (first2.j + 1) % n2;
             for (let g2 = 0; g2 <= n2; g2++) {
               out2.push(H[k].slice());
               if (k === last3.j) break;
               k = (k + 1) % n2;
             }
           }
-        } else if (first.j === last3.j && last3.u <= first.u) {
+        } else if (first2.j === last3.j && last3.u <= first2.u) {
         } else {
-          let k = first.j;
+          let k = first2.j;
           for (let g2 = 0; g2 <= n2; g2++) {
             out2.push(H[k].slice());
             if (k === (last3.j + 1) % n2) break;
@@ -38142,7 +38142,7 @@ var require_pcb_tools = __commonJS({
       }
       function dragTo(ctx, d, p) {
         d.cursor = p.slice();
-        const first = d.first;
+        const first2 = d.first;
         d.first = false;
         const raw2 = dragSolution(d, p);
         const mode2 = S3.rs.mode;
@@ -38172,7 +38172,7 @@ var require_pcb_tools = __commonJS({
             d.lastValid = p.slice();
             return true;
           }
-          if (first) {
+          if (first2) {
             d.forceMark = true;
             d.sol = raw2;
             d.shove = null;
@@ -38195,7 +38195,7 @@ var require_pcb_tools = __commonJS({
           d.lastValid = p.slice();
           return true;
         }
-        if (first) {
+        if (first2) {
           d.forceMark = true;
           d.sol = raw2;
           d.hits = solutionHits(ctx, d, raw2);
@@ -39421,9 +39421,9 @@ var require_pcb_tools = __commonJS({
             const ln = assembleLine(doc2, sg);
             if (!ln) continue;
             ln.ids.forEach((id) => seen.add(id));
-            const first = ln.pts[0], last3 = ln.pts[ln.pts.length - 1];
-            const atFirst = Math.hypot(first[0] - q4[0], first[1] - q4[1]) <= Math.hypot(last3[0] - q4[0], last3[1] - q4[1]);
-            if (padAtEnd(first, l) && padAtEnd(last3, l)) {
+            const first2 = ln.pts[0], last3 = ln.pts[ln.pts.length - 1];
+            const atFirst = Math.hypot(first2[0] - q4[0], first2[1] - q4[1]) <= Math.hypot(last3[0] - q4[0], last3[1] - q4[1]);
+            if (padAtEnd(first2, l) && padAtEnd(last3, l)) {
               for (const id of ln.ids) {
                 if (!m.ids.includes(id)) m.ids.push(id);
                 if (!m.orig.has(id)) m.orig.set(id, clone5(doc2.items.get(id).node));
@@ -40207,13 +40207,13 @@ var require_pcb_tools = __commonJS({
           }
           const dimStatic = moving.size > 0 || hlNets.size > 0;
           const lightBg = brightness2(K11.PCB_BG) >= 0.5;
-          const baseOf = (net) => S3.ratsnestColors && S3.ratsnestColors.get(net) || S3.ratsnestBase || RATSNEST;
+          const baseOf2 = (net) => S3.ratsnestColors && S3.ratsnestColors.get(net) || S3.ratsnestBase || RATSNEST;
           const byColor = /* @__PURE__ */ new Map();
           for (const l of lines) {
             if (S3.hiddenNets.has(l.net)) continue;
             if (sel && !l.ids.some((id) => sel.has(id))) continue;
             if (moving.size && l.ids.some((id) => moving.has(id))) continue;
-            let col = baseOf(l.net), a = alphaOf(col);
+            let col = baseOf2(l.net), a = alphaOf(col);
             if (dimStatic) {
               a = a / 2;
               col = adjustColor(col, 0, a, lightBg);
@@ -40233,7 +40233,7 @@ var require_pcb_tools = __commonJS({
             const dyn = /* @__PURE__ */ new Map();
             for (const l of dynamicRatsnest(doc2, moving)) {
               if (S3.hiddenNets.has(l.net)) continue;
-              const b = baseOf(l.net);
+              const b = baseOf2(l.net);
               const col = adjustColor(b, 0.5, alphaOf(b) + 0.3, lightBg);
               let arr4 = dyn.get(col);
               if (!arr4) dyn.set(col, arr4 = []);
@@ -40554,14 +40554,14 @@ var require_pcb_tools = __commonJS({
         if (!best) return { error: DP_MSG_START };
         return { pair: refKey2 === keyP ? { P: ref, N: best } : { P: best, N: ref }, nets, keys: { P: keyP, N: keyN } };
       }
-      function offsetPts(pts, off, inDir) {
+      function offsetPts(pts, off, inDir2) {
         const nrm = (u) => [-u[1], u[0]];
         const out2 = [];
         const dirs = [];
         for (let i = 0; i + 1 < pts.length; i++) dirs.push(vunit(vsub(pts[i + 1], pts[i])));
-        if (!dirs.length) return pts.length ? [vadd(pts[0], vmul(nrm(inDir || [1, 0]), off))] : [];
+        if (!dirs.length) return pts.length ? [vadd(pts[0], vmul(nrm(inDir2 || [1, 0]), off))] : [];
         for (let k = 0; k < pts.length; k++) {
-          const u0 = k === 0 ? inDir || dirs[0] : dirs[k - 1], u1 = k < dirs.length ? dirs[k] : dirs[dirs.length - 1];
+          const u0 = k === 0 ? inDir2 || dirs[0] : dirs[k - 1], u1 = k < dirs.length ? dirs[k] : dirs[dirs.length - 1];
           const n0 = nrm(u0), n1 = nrm(u1);
           const den = 1 + n0[0] * n1[0] + n0[1] * n1[1];
           const m = den < 1e-6 ? n1 : vmul(vadd(n0, n1), 1 / den);
@@ -40633,10 +40633,10 @@ var require_pcb_tools = __commonJS({
         const run22 = (from) => {
           const a = legPts(from, goal, false), b = legPts(from, goal, true);
           const score = (p) => p.length > 1 ? dirAngle(gw.dIdx, dir8(p[0], p[1])) : 0;
-          let first = rt.diagFirst ? b : a;
-          if (score(first === a ? b : a) < score(first)) first = first === a ? b : a;
-          if (mode2 === RM_MARK || !O) return { pts: first, reached: true };
-          return walkHead(O, from, goal, R2, first === b, gw.dIdx);
+          let first2 = rt.diagFirst ? b : a;
+          if (score(first2 === a ? b : a) < score(first2)) first2 = first2 === a ? b : a;
+          if (mode2 === RM_MARK || !O) return { pts: first2, reached: true };
+          return walkHead(O, from, goal, R2, first2 === b, gw.dIdx);
         };
         let r = run22(gw.mid);
         const turn = r.pts.length > 1 ? dirAngle(gw.dIdx, dir8(r.pts[0], r.pts[1])) : 0;
@@ -42512,10 +42512,10 @@ var require_pcb_tools = __commonJS({
         const dx = b[0] - a[0], dy = b[1] - a[1];
         const d = Math.min(Math.abs(dx), Math.abs(dy));
         const diag = [Math.sign(dx) * d, Math.sign(dy) * d], orth = [dx - diag[0], dy - diag[1]];
-        const first = diagFirst ? diag : orth, second = diagFirst ? orth : diag;
-        const c = [a[0] + first[0], a[1] + first[1]];
+        const first2 = diagFirst ? diag : orth, second = diagFirst ? orth : diag;
+        const c = [a[0] + first2[0], a[1] + first2[1]];
         const out2 = [];
-        if (Math.hypot(first[0], first[1]) > 1e-6) out2.push([a.slice(), c]);
+        if (Math.hypot(first2[0], first2[1]) > 1e-6) out2.push([a.slice(), c]);
         if (Math.hypot(second[0], second[1]) > 1e-6) out2.push([c.slice(), b.slice()]);
         return out2;
       }
@@ -42968,16 +42968,16 @@ var require_pcb_tools = __commonJS({
       function zoneCutoutChanges(doc2, zone, cut) {
         const parts = subtractOutline(zoneChains(zone.node), cut);
         const changes = [];
-        let first = null;
+        let first2 = null;
         for (const p of parts) {
           const n2 = withOutline(zone.node, p.outline, p.holes);
           freshUuid(n2);
           const c = addedChange(doc2, n2, netOf3(n2));
           changes.push(c);
-          if (!first) first = c.id;
+          if (!first2) first2 = c.id;
         }
         changes.push(removedChange(zone));
-        return { changes, first };
+        return { changes, first: first2 };
       }
       function drawClick(ctx, hv, t, ev) {
         if (S3.draw && S3.draw.shape !== "garc") {
@@ -43135,7 +43135,7 @@ var require_pcb_tools = __commonJS({
           if (n2) net = n2;
         }
         if (!net.name) {
-          const first = Array.from(selectionIds2(ctx))[0], it = first && doc2.items.get(first);
+          const first2 = Array.from(selectionIds2(ctx))[0], it = first2 && doc2.items.get(first2);
           if (it && it.kind !== "footprint" && K11.kid(it.node, "net")) net = netOf3(it.node);
         }
         const node = zoneNode(doc2, [], layer4, net);
@@ -43172,11 +43172,11 @@ var require_pcb_tools = __commonJS({
             return;
           }
           applySelection(ctx, []);
-          const { changes, first } = zoneCutoutChanges(ctx.doc, src, d.pts);
+          const { changes, first: first2 } = zoneCutoutChanges(ctx.doc, src, d.pts);
           ctx.commit(changes, "Add Zone Cutout");
-          if (first) {
-            S3.zoneMode = { mode: "cutout", src: first };
-            applySelection(ctx, [first]);
+          if (first2) {
+            S3.zoneMode = { mode: "cutout", src: first2 };
+            applySelection(ctx, [first2]);
           } else {
             S3.zoneMode = null;
             ctx.setTool("select");
@@ -44446,9 +44446,9 @@ var require_pcb_tools = __commonJS({
       var perp3 = (v) => [-v[1], v[0]];
       function nearestEnd(a, b, p, tol) {
         const da = Math.hypot(a[0] - p[0], a[1] - p[1]), db = Math.hypot(b[0] - p[0], b[1] - p[1]);
-        const first = da <= db;
-        if (tol !== void 0 && (first ? da : db) > tol) return null;
-        return first ? a : b;
+        const first2 = da <= db;
+        if (tol !== void 0 && (first2 ? da : db) > tol) return null;
+        return first2 ? a : b;
       }
       function tangentAtEndpoint(sh, p) {
         const atStart = p[0] === sh.start[0] && p[1] === sh.start[1];
@@ -44629,8 +44629,8 @@ var require_pcb_tools = __commonJS({
           applySelection(ctx, []);
           d.started = true;
         }
-        const first = !d.chainSeeded && !d.clickSeeded && g2.getStep() === 0;
-        if (first && g2.mode === ARC_TANGENT) {
+        const first2 = !d.chainSeeded && !d.clickSeeded && g2.getStep() === 0;
+        if (first2 && g2.mode === ARC_TANGENT) {
           const seed = findTangentSeed(ctx, pos);
           if (seed) {
             g2.setTangentSeed(seed.start, seed.dir, seed.axis);
@@ -45991,9 +45991,9 @@ var require_pcb_tools = __commonJS({
             }
             return got;
           }
-          edge(first) {
+          edge(first2) {
             const os3 = this.options;
-            return first ? this.step(-1, 1) : this.step(os3.length, -1);
+            return first2 ? this.step(-1, 1) : this.step(os3.length, -1);
           }
           typeAhead(ch, from) {
             const now2 = Date.now();
@@ -46482,9 +46482,9 @@ var require_pcb_tools = __commonJS({
           out2.changes.push(...transformChanges(doc2, members, fn));
         };
         if (o.arrange) {
-          const first = roots[0];
-          if (!first) return out2;
-          const p0 = anchorOf(first);
+          const first2 = roots[0];
+          if (!first2) return out2;
+          const p0 = anchorOf(first2);
           roots.slice(0, N22).forEach((it, i) => {
             const pos = anchorOf(it), t = arrayTransform(o, i, p0), d = [p0[0] - pos[0], p0[1] - pos[1]];
             if (!t.offset[0] && !t.offset[1] && !t.rot && !d[0] && !d[1]) return;
@@ -46584,13 +46584,13 @@ var require_pcb_tools = __commonJS({
         const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * (b[0] - a[0]) + (p[1] - a[1]) * (b[1] - a[1])) / L2));
         if (t < 1e-4 || t > 1 - 1e-4) return [];
         const m = [r66(a[0] + t * (b[0] - a[0])), r66(a[1] + t * (b[1] - a[1]))];
-        const first = clone5(seg2.node);
-        K11.kid(first, "end").splice(1, 2, m[0], m[1]);
+        const first2 = clone5(seg2.node);
+        K11.kid(first2, "end").splice(1, 2, m[0], m[1]);
         const second = clone5(seg2.node);
         K11.kid(second, "start").splice(1, 2, m[0], m[1]);
         const u = K11.kid(second, "uuid");
         if (u) second.splice(second.indexOf(u), 1);
-        return [replacedChange(seg2, first), addedChange(doc2, second)];
+        return [replacedChange(seg2, first2), addedChange(doc2, second)];
       }
       function cleanupPlan(doc2, opts2) {
         opts2 = Object.assign({ shorts: true, vias: true, merge: true, dangling: true, danglingVias: true, inPads: true }, opts2 || {});
@@ -46719,7 +46719,7 @@ var require_pcb_tools = __commonJS({
       function unusedPadLayerChanges(doc2, ids, o) {
         const copper = doc2.copper.length ? doc2.copper : ["F.Cu", "B.Cu"];
         const pick = ids ? new Set(ids) : null;
-        const depth = (a, b) => Math.abs(copper.indexOf(a) - copper.indexOf(b));
+        const depth2 = (a, b) => Math.abs(copper.indexOf(a) - copper.indexOf(b));
         const setFlags = (n2, keepTag, pad2) => {
           const before = JSON.stringify(n2);
           for (const k of ["remove_unused_layers", "keep_end_layers", "start_end_only"]) {
@@ -46740,7 +46740,7 @@ var require_pcb_tools = __commonJS({
             const ls = K11.kid(it.node, "layers");
             const a = ls ? K11.str(ls[1]) : "F.Cu", b = ls ? K11.str(ls[2]) : "B.Cu";
             const through = !it.node.includes("blind") && !it.node.includes("micro") && !it.node.includes("buried");
-            if (through ? copper.length <= 2 : depth(a, b) <= 1) continue;
+            if (through ? copper.length <= 2 : depth2(a, b) <= 1) continue;
             const n2 = clone5(it.node);
             if (setFlags(n2, "keep_end_layers", false)) out2.push(replacedChange(it, n2));
           } else if (it.kind === "footprint" && o.pads) {
@@ -48894,14 +48894,14 @@ Press <esc> to cancel all; double-click to finish`;
         if (a === b) return 0;
         const ia = items.findIndex((it) => it.layer === a), ib = items.findIndex((it) => it.layer === b);
         if (ia < 0 || ib < 0) return 0;
-        const [first, second] = ia < ib ? [a, b] : [b, a];
+        const [first2, second] = ia < ib ? [a, b] : [b, a];
         const outer = (l) => l === "F.Cu" || l === "B.Cu";
         let total2 = 0, start = false;
         for (const it of items) {
           let half = false;
-          if (!start && it.layer === first) {
+          if (!start && it.layer === first2) {
             start = true;
-            if (!outer(first)) half = true;
+            if (!outer(first2)) half = true;
           } else if (!start) continue;
           if (it.layer === second && !outer(second)) half = true;
           for (const t of it.th) total2 += half ? t / 2 : t;
@@ -49453,12 +49453,12 @@ Press <esc> to cancel all; double-click to finish`;
         else if (cur2) n2.splice(n2.indexOf(cur2), 1);
         else if (src) insertFpKid(n2, K11.cloneNode(src));
       }
-      function canon(n2, depth = 0) {
+      function canon(n2, depth2 = 0) {
         if (!isList10(n2)) return JSON.stringify(n2);
         const l = n2;
-        if (l[0] === "at" && l.length === 4 && K11.num(l[3]) === 0) return canon(l.slice(0, 3), depth);
-        if (depth > 0) return K11.serialize(l);
-        const atoms = l.filter((c) => !isList10(c)).map((c) => canon(c)), lists = l.filter((c) => isList10(c)).map((c) => canon(c, depth + 1)).sort();
+        if (l[0] === "at" && l.length === 4 && K11.num(l[3]) === 0) return canon(l.slice(0, 3), depth2);
+        if (depth2 > 0) return K11.serialize(l);
+        const atoms = l.filter((c) => !isList10(c)).map((c) => canon(c)), lists = l.filter((c) => isList10(c)).map((c) => canon(c, depth2 + 1)).sort();
         return "(" + atoms.concat(lists).join(" ") + ")";
       }
       function canonical2(n2) {
@@ -50193,8 +50193,8 @@ Press <esc> to cancel all; double-click to finish`;
             const node = K11.parse(extrudedText({ ...e0, ...extruded, uuid: e0 && e0.uuid || extruded.uuid, offset: e0 && e0.offset || extruded.offset, scale: e0 && e0.scale || extruded.scale, rotate: e0 && e0.rotate || extruded.rotate }));
             if (i > 0) fp[i] = node;
             else {
-              const first = fp.findIndex(isFileModel);
-              fp.splice(first > 0 ? first : fp.length, 0, node);
+              const first2 = fp.findIndex(isFileModel);
+              fp.splice(first2 > 0 ? first2 : fp.length, 0, node);
             }
           }
           did = true;
@@ -51090,8 +51090,8 @@ Please remove the objects that use these layers first.`, page: 1 };
         return table2.map((r) => r.map((c) => /[",\n\r]/.test(c) ? '"' + c.replace(/"/g, '""') + '"' : c).join(",")).join("\n") + "\n";
       }
       function parseCsv(text3) {
-        const first = text3.split(/\r?\n/)[0] || "";
-        const delim = (first.match(/\t/g) || []).length > (first.match(/,/g) || []).length ? "	" : (first.match(/;/g) || []).length > (first.match(/,/g) || []).length ? ";" : ",";
+        const first2 = text3.split(/\r?\n/)[0] || "";
+        const delim = (first2.match(/\t/g) || []).length > (first2.match(/,/g) || []).length ? "	" : (first2.match(/;/g) || []).length > (first2.match(/,/g) || []).length ? ";" : ",";
         const rows3 = [];
         let row3 = [], cell = "", q4 = false;
         for (let i = 0; i < text3.length; i++) {
@@ -51497,17 +51497,17 @@ Press <esc> to cancel all; double-click to finish`;
             const e = K11.kid(s2, "extends");
             return e ? byName2.get(str11(e[1])) || null : null;
           };
-          const effFootprint = (s2, depth = 0) => {
+          const effFootprint = (s2, depth2 = 0) => {
             const t = prop22(s2, "Footprint");
-            if (t || depth > 16) return t;
+            if (t || depth2 > 16) return t;
             const p = parentOf2(s2);
-            return p ? effFootprint(p, depth + 1) : "";
+            return p ? effFootprint(p, depth2 + 1) : "";
           };
-          const effAssoc = (s2, depth = 0) => {
+          const effAssoc = (s2, depth2 = 0) => {
             const a = K11.kid(s2, "associated_footprints");
             if (a) return K11.kids(a, "footprint");
-            const p = depth < 16 ? parentOf2(s2) : null;
-            return p ? effAssoc(p, depth + 1) : [];
+            const p = depth2 < 16 ? parentOf2(s2) : null;
+            return p ? effAssoc(p, depth2 + 1) : [];
           };
           for (const s2 of syms) {
             const m = { lib: lib.nickname, symbol: str11(s2[1]), pins: 0, derived: !!K11.kid(s2, "extends"), filter: "", field: false, pinMaps: [] };
@@ -51819,8 +51819,8 @@ Press <esc> to cancel all; double-click to finish`;
               while (d > 180) d -= 360;
               return d;
             };
-            const dirOf2 = (x, y) => n180(Math.atan2(y, x) * 180 / Math.PI);
-            const angle = Math.abs(n180(dirOf2(-ux, -uy) - dirOf2(-vx, -vy))) * Math.PI / 180;
+            const dirOf3 = (x, y) => n180(Math.atan2(y, x) * 180 / Math.PI);
+            const angle = Math.abs(n180(dirOf3(-ux, -uy) - dirOf3(-vx, -vy))) * Math.PI / 180;
             const segsCross3 = () => {
               const o = (p, q4, r) => Math.sign((q4[0] - p[0]) * (r[1] - p[1]) - (q4[1] - p[1]) * (r[0] - p[0]));
               return o(pa[0], pa[1], pb[0]) * o(pa[0], pa[1], pb[1]) <= 0 && o(pb[0], pb[1], pa[0]) * o(pb[0], pb[1], pa[1]) <= 0;
@@ -52694,7 +52694,7 @@ Press <esc> to cancel all; double-click to finish`;
         ["dnp", "Do not populate"]
       ];
       function padLines(a, b) {
-        const out2 = [], D = `Pad ${padNum(a)}`, first = (n2) => str13((K11.kid(n2, "layers") || [])[1]) || "F.Cu";
+        const out2 = [], D = `Pad ${padNum(a)}`, first2 = (n2) => str13((K11.kid(n2, "layers") || [])[1]) || "F.Cu";
         const pa = padAt22(a), pb = padAt22(b);
         if (!near22(pa[0], pb[0]) || !near22(pa[1], pb[1])) out2.push(`${D} position differs.`);
         if (padNum(a) !== padNum(b)) out2.push(`${D} has different numbers.`);
@@ -52703,7 +52703,7 @@ Press <esc> to cancel all; double-click to finish`;
         if (str13(a[2]) !== str13(b[2])) out2.push(`${D} pad type differs.`);
         if (kidText2(a, "property") !== kidText2(b, "property")) out2.push(`${D} fabrication property differs.`);
         if (!near22(pa[2], pb[2])) out2.push(`${D} orientation differs.`);
-        const layer4 = first(a);
+        const layer4 = first2(a);
         if (str13(a[3]) !== str13(b[3])) out2.push(`${D} pad shape type differs on layer ${layer4}.`);
         if (!sameNums(nums(K11.kid(a, "size")), nums(K11.kid(b, "size")))) out2.push(`${D} size differs on layer ${layer4}.`);
         if (kidText2(a, "rect_delta") !== kidText2(b, "rect_delta")) out2.push(`${D} trapezoid delta differs on layer ${layer4}.`);
@@ -56333,9 +56333,9 @@ function defineKSelect() {
       }
       return got;
     }
-    edge(first) {
+    edge(first2) {
       const os2 = this.options;
-      return first ? this.step(-1, 1) : this.step(os2.length, -1);
+      return first2 ? this.step(-1, 1) : this.step(os2.length, -1);
     }
     typeAhead(ch, from) {
       const now = Date.now();
@@ -56499,19 +56499,19 @@ var require_opentype = __commonJS({
             if (index < 0 || index >= size2) {
               return void 0;
             }
-            var first = string.charCodeAt(index);
+            var first2 = string.charCodeAt(index);
             var second;
             if (
               // check if it’s the start of a surrogate pair
-              first >= 55296 && first <= 56319 && // high surrogate
+              first2 >= 55296 && first2 <= 56319 && // high surrogate
               size2 > index + 1
             ) {
               second = string.charCodeAt(index + 1);
               if (second >= 56320 && second <= 57343) {
-                return (first - 55296) * 1024 + second - 56320 + 65536;
+                return (first2 - 55296) * 1024 + second - 56320 + 65536;
               }
             }
-            return first;
+            return first2;
           };
           if (defineProperty) {
             defineProperty(String.prototype, "codePointAt", {
@@ -56569,7 +56569,7 @@ var require_opentype = __commonJS({
       ]);
       var code_tree = new Tree();
       var lengths = new Uint8Array(288 + 32);
-      function tinf_build_bits_base(bits2, base2, delta, first) {
+      function tinf_build_bits_base(bits2, base2, delta, first2) {
         var i, sum;
         for (i = 0; i < delta; ++i) {
           bits2[i] = 0;
@@ -56577,7 +56577,7 @@ var require_opentype = __commonJS({
         for (i = 0; i < 30 - delta; ++i) {
           bits2[i + delta] = i / delta | 0;
         }
-        for (sum = first, i = 0; i < 30; ++i) {
+        for (sum = first2, i = 0; i < 30; ++i) {
           base2[i] = sum;
           sum += 1 << bits2[i];
         }
@@ -60423,9 +60423,9 @@ var require_opentype = __commonJS({
           var nRanges = parser.parseCard8();
           code = 1;
           for (var i$1 = 0; i$1 < nRanges; i$1 += 1) {
-            var first = parser.parseCard8();
+            var first2 = parser.parseCard8();
             var nLeft = parser.parseCard8();
-            for (var j = first; j <= first + nLeft; j += 1) {
+            for (var j = first2; j <= first2 + nLeft; j += 1) {
               enc2[j] = code;
               code += 1;
             }
@@ -60831,9 +60831,9 @@ var require_opentype = __commonJS({
           }
         } else if (format === 3) {
           var nRanges = parser.parseCard16();
-          var first = parser.parseCard16();
-          if (first !== 0) {
-            throw new Error("CFF Table CID Font FDSelect format 3 range has bad initial GID " + first);
+          var first2 = parser.parseCard16();
+          if (first2 !== 0) {
+            throw new Error("CFF Table CID Font FDSelect format 3 range has bad initial GID " + first2);
           }
           var next;
           for (var iRange = 0; iRange < nRanges; iRange++) {
@@ -60845,10 +60845,10 @@ var require_opentype = __commonJS({
             if (next > nGlyphs) {
               throw new Error("CFF Table CID Font FDSelect format 3 range has bad GID " + next);
             }
-            for (; first < next; first++) {
+            for (; first2 < next; first2++) {
               fdSelect.push(fdIndex);
             }
-            first = next;
+            first2 = next;
           }
           if (next !== nGlyphs) {
             throw new Error("CFF Table CID Font FDSelect format 3 range has bad final GID " + next);
@@ -67930,12 +67930,12 @@ var require_opentype = __commonJS({
         return x;
       };
       Font.prototype.getPath = function(text3, x, y, fontSize, options) {
-        var fullPath = new Path();
+        var fullPath2 = new Path();
         this.forEachGlyph(text3, x, y, fontSize, options, function(glyph, gX, gY, gFontSize) {
           var glyphPath = glyph.getPath(gX, gY, gFontSize, options, this);
-          fullPath.extend(glyphPath);
+          fullPath2.extend(glyphPath);
         });
-        return fullPath;
+        return fullPath2;
       };
       Font.prototype.getPaths = function(text3, x, y, fontSize, options) {
         var glyphPaths = [];
@@ -69352,8 +69352,8 @@ function zstdCompress(data) {
       }
     };
     for (const r of rep) tryAt(i - r);
-    let cand = head3[hash(i)], depth = 0;
-    while (cand >= 0 && depth++ < MAX_CHAIN && i - cand <= WINDOW && i + best < to) {
+    let cand = head3[hash(i)], depth2 = 0;
+    while (cand >= 0 && depth2++ < MAX_CHAIN && i - cand <= WINDOW && i + best < to) {
       tryAt(cand);
       cand = chain[cand];
     }
@@ -69902,7 +69902,7 @@ async function modelMatch(lib, name) {
     return void 0;
   }
 }
-async function rawSymbol(lib, name, depth = 0) {
+async function rawSymbol(lib, name, depth2 = 0) {
   const k = K4();
   const it = await libItem("symbol", lib, name);
   const root5 = k.parse(it.sexpr);
@@ -69910,9 +69910,9 @@ async function rawSymbol(lib, name, depth = 0) {
   if (!node) throw new ToolError(`symbol ${lib}:${name}: the library file could not be read.`);
   const ext = k.kid(node, "extends");
   if (!ext) return node;
-  if (depth > 4) throw new ToolError(`symbol ${lib}:${name}: its chain of parent symbols is too long.`);
+  if (depth2 > 4) throw new ToolError(`symbol ${lib}:${name}: its chain of parent symbols is too long.`);
   const parentName = k.str(ext[1]);
-  const parent = k.cloneNode(await rawSymbol(lib, parentName, depth + 1));
+  const parent = k.cloneNode(await rawSymbol(lib, parentName, depth2 + 1));
   parent[1] = name;
   for (const c of parent) if (Array.isArray(c) && c[0] === "symbol" && typeof c[1] === "string" && c[1].startsWith(parentName + "_")) c[1] = name + c[1].slice(parentName.length);
   for (const p of k.kids(node, "property")) {
@@ -70933,9 +70933,9 @@ function schNets2(doc2) {
     if (!pins2.length && !labels.size) continue;
     pins2.sort((a, b) => byRef(a, b) || a.number.localeCompare(b.number, void 0, { numeric: true }));
     const auto = pins2.map((p) => p.name && p.name !== p.number ? `Net-(${p.ref}-${p.name})` : `Net-(${p.ref}-Pad${p.number})`).sort((a, b) => Number(a.includes("-Pad")) - Number(b.includes("-Pad")) || (a < b ? -1 : a > b ? 1 : 0))[0];
-    const first = pins2[0];
+    const first2 = pins2[0];
     const name = best || auto || "(unnamed)";
-    const alone = !best && pins2.length === 1 ? `unconnected-(${first.ref}-${first.name && first.name !== first.number ? first.name.replace(/\//g, "{slash}") + "-" : ""}Pad${first.number})` : "";
+    const alone = !best && pins2.length === 1 ? `unconnected-(${first2.ref}-${first2.name && first2.name !== first2.number ? first2.name.replace(/\//g, "{slash}") + "-" : ""}Pad${first2.number})` : "";
     out2.push({ name, board: best && rank < 3 ? "/" + best : alone || name, named: !!best, pins: pins2, labels: Array.from(labels), ids: Array.from(n2.ids) });
   }
   return out2.sort((a, b) => Number(b.named) - Number(a.named) || a.name.localeCompare(b.name));
@@ -71216,13 +71216,13 @@ async function hierarchyDocs(doc2, path2) {
     }
   }
   if (!loaded.has(path2)) loaded.set(path2, doc2);
-  const dirOf2 = (p) => p.split("/").slice(0, -1).join("/");
+  const dirOf3 = (p) => p.split("/").slice(0, -1).join("/");
   const children = (p) => {
     const d = loaded.get(p), out2 = [];
     if (!d) return out2;
     for (const it of d.items.values()) {
       if (it.kind !== "sheet" || !it.file) continue;
-      const rel = dirOf2(p) ? `${dirOf2(p)}/${it.file}` : String(it.file), base2 = String(it.file).split("/").pop();
+      const rel = dirOf3(p) ? `${dirOf3(p)}/${it.file}` : String(it.file), base2 = String(it.file).split("/").pop();
       const hit5 = loaded.has(rel) ? rel : Array.from(loaded.keys()).find((k) => k.split("/").pop() === base2);
       if (hit5) out2.push(hit5);
     }
@@ -73858,7 +73858,7 @@ function sendPresence(mmPos, ghostSegs) {
       });
     }
   }
-  const doc2 = (state.docs || []).find((d) => d.docId === state.docId);
+  const doc2 = (state.project && state.project.allDocs || state.docs || []).find((d) => d.docId === state.docId);
   if (doc2 && doc2.path) st.sheetFile = doc2.path;
   E.ws.send(JSON.stringify({ type: "presence", docId: state.docId, state: fitPresence(st) }));
 }
@@ -74734,8 +74734,8 @@ function confirmBox(title, message, okLabel = "OK") {
 }
 function popupMenu(x, y, items) {
   for (const old of Array.from(document.querySelectorAll(".kd-pop"))) old.remove();
-  const build4 = (list, px, py, depth) => {
-    const m = h("div", { class: "kd-pop", role: "menu", "data-depth": depth, style: `position:fixed;left:${px}px;top:${py}px;z-index:${80 + depth};min-width:160px;background:var(--panel);border:1px solid var(--line);border-radius:4px;box-shadow:0 6px 18px rgba(0,0,0,.25);padding:3px 0;font-size:12px;color:var(--ink)` });
+  const build4 = (list, px, py, depth2) => {
+    const m = h("div", { class: "kd-pop", role: "menu", "data-depth": depth2, style: `position:fixed;left:${px}px;top:${py}px;z-index:${80 + depth2};min-width:160px;background:var(--panel);border:1px solid var(--line);border-radius:4px;box-shadow:0 6px 18px rgba(0,0,0,.25);padding:3px 0;font-size:12px;color:var(--ink)` });
     for (const it of list) {
       if (it.sep) {
         m.append(h("div", { style: "height:1px;background:var(--line);margin:3px 0" }));
@@ -74753,9 +74753,9 @@ function popupMenu(x, y, items) {
       row3.addEventListener("pointerenter", () => {
         row3.style.background = "var(--accent)";
         row3.style.color = "var(--on-accent)";
-        for (const o of Array.from(document.querySelectorAll(".kd-pop"))) if (Number(o.dataset.depth) > depth) o.remove();
+        for (const o of Array.from(document.querySelectorAll(".kd-pop"))) if (Number(o.dataset.depth) > depth2) o.remove();
         if (it.sub && !it.disabled) {
-          const r = row3.getBoundingClientRect(), sub2 = build4(it.sub, r.right - 2, r.top - 3, depth + 1);
+          const r = row3.getBoundingClientRect(), sub2 = build4(it.sub, r.right - 2, r.top - 3, depth2 + 1);
           document.body.append(sub2);
           fitMenu(sub2, { row: r, parent: m.getBoundingClientRect(), overlap: 2 });
         }
@@ -76465,14 +76465,14 @@ function entry(docId3) {
 function schDocs2() {
   return openDocs().filter((d) => d.docType === "kicad_sch");
 }
-function loadSheets(stale) {
+function loadSheets(stale2) {
   if (cacheProject !== projectId2()) {
     cache4.clear();
     cacheProject = projectId2();
   }
-  if (stale) {
-    if (live && live.docId === stale && stale !== currentDocId()) cache4.set(stale, { doc: live.doc, sheets: sheetsOf(live.doc), page: String(live.doc.pageNumber || "1") });
-    else cache4.delete(stale);
+  if (stale2) {
+    if (live && live.docId === stale2 && stale2 !== currentDocId()) cache4.set(stale2, { doc: live.doc, sheets: sheetsOf(live.doc), page: String(live.doc.pageNumber || "1") });
+    else cache4.delete(stale2);
   }
   const want2 = schDocs2().filter((d) => d.docId !== currentDocId() && !cache4.has(d.docId));
   if (!want2.length) {
@@ -76520,9 +76520,9 @@ function build2() {
   const cur2 = currentDocId();
   const rootEntry = entry(root5.docId);
   const stem3 = root5.path.split("/").pop().replace(/\.kicad_sch$/, "");
-  const walk2 = (doc2, path2, depth) => {
+  const walk2 = (doc2, path2, depth2) => {
     const e = entry(doc2.docId);
-    if (!e || depth > 8) return [];
+    if (!e || depth2 > 8) return [];
     return e.sheets.map((sh) => {
       const child2 = resolveChild(doc2, sh.file);
       const p = path2 + sh.id + "/";
@@ -76535,7 +76535,7 @@ function build2() {
         parentDocId: doc2.docId,
         sheetId: sh.id,
         current: !!child2 && child2.docId === cur2,
-        children: child2 ? walk2(child2, p, depth + 1) : []
+        children: child2 ? walk2(child2, p, depth2 + 1) : []
       };
     });
   };
@@ -76730,9 +76730,9 @@ async function accept(id) {
   }
   const r = await load2(id);
   if (!r) return;
-  const p = asProposal(r), stale = staleReason(p);
-  if (stale) {
-    toast(stale + " Ask the assistant to propose it again.", 5e3);
+  const p = asProposal(r), stale2 = staleReason(p);
+  if (stale2) {
+    toast(stale2 + " Ask the assistant to propose it again.", 5e3);
     render2();
     return;
   }
@@ -76765,8 +76765,8 @@ function card(r) {
   c.appendChild(list);
   if (r.connectivity && r.connectivity.length) c.appendChild(el2("div", "prop-warn", `Changes connections: ${r.connectivity.slice(0, 3).join("; ")}${r.connectivity.length > 3 ? ` and ${r.connectivity.length - 3} more` : ""}`));
   if (r.rules) c.appendChild(el2("div", "prop-note", "Also changes the board rules in the project file."));
-  const have = full.get(r.id), stale = have ? staleReason(asProposal(have)) : null;
-  if (stale) c.appendChild(el2("div", "prop-warn", stale));
+  const have = full.get(r.id), stale2 = have ? staleReason(asProposal(have)) : null;
+  if (stale2) c.appendChild(el2("div", "prop-warn", stale2));
   const row3 = el2("div", "row");
   const show6 = el2("button", "btn sm", previewing() === r.id ? "Hide" : "Show");
   show6.type = "button";
@@ -76814,12 +76814,12 @@ function card(r) {
     setTimeout(() => why2.focus(), 0);
     return c;
   }
-  const ok2 = el2("button", "btn sm primary", "Accept"), no = el2("button", "btn sm", stale ? "Dismiss" : "Reject");
+  const ok2 = el2("button", "btn sm primary", "Accept"), no = el2("button", "btn sm", stale2 ? "Dismiss" : "Reject");
   ok2.type = "button";
   no.type = "button";
   ok2.dataset.act = "accept";
   no.dataset.act = "reject";
-  ok2.disabled = !!stale;
+  ok2.disabled = !!stale2;
   ok2.title = "Apply this change to the design as one undo step";
   ok2.addEventListener("click", () => {
     ok2.disabled = true;
@@ -76828,7 +76828,7 @@ function card(r) {
     });
   });
   no.addEventListener("click", () => {
-    if (stale) void settle(r.id, "stale", stale);
+    if (stale2) void settle(r.id, "stale", stale2);
     else {
       rejecting = r.id;
       render2();
@@ -76959,6 +76959,7 @@ var init_registry = __esm({
             title: "Part Studio",
             bundle: "/static/dist/mechanical.js",
             newName: "Part Studio",
+            tint: "teal",
             icon: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5"/><path d="M12 12v9"/>',
             // the same text as web/domains/mechanical/document/format.ts newPartStudioText() (a test compares them)
             newText: '{"junction":"part-studio","version":1,"items":[\n{"id":"studio","rollback":null,"type":"studio","units":"mm"}\n]}\n',
@@ -76981,6 +76982,7 @@ var init_registry = __esm({
             title: "Assembly",
             bundle: "/static/dist/assembly.js",
             newName: "Assembly",
+            tint: "copper",
             icon: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/><path d="M11 7.5h5.5V13"/>',
             // the same text as web/domains/assembly/document/format.ts newAssemblyText() (a test compares them)
             newText: '{"junction":"assembly","version":1,"items":[\n{"id":"assembly","type":"assembly","units":"mm"}\n]}\n'
@@ -77026,8 +77028,12 @@ var init_registry = __esm({
 
 // web/domains/pcb/editor/dochost.ts
 function isHostedDoc(doc2) {
+  if (doc2 && isShellView(doc2.docType)) return true;
   const kind = doc2 ? documentKind(doc2.docType) : void 0;
   return !!kind && !!kind.bundle;
+}
+function isShellView(docType) {
+  return docType.startsWith("@");
 }
 function loadBundle(src) {
   let p = loading3.get(src);
@@ -77064,6 +77070,7 @@ function closeHostedDoc() {
 async function openHostedDoc(doc2, showCad, openDocId2) {
   closeHostedDoc();
   const kind = documentKind(doc2.docType);
+  const what = kind ? kind.title.toLowerCase() : doc2.docType === "@bom" ? "bill of materials" : "page";
   const mine = { docId: doc2.docId, editor: null };
   open3 = mine;
   showCad();
@@ -77072,15 +77079,16 @@ async function openHostedDoc(doc2, showCad, openDocId2) {
   if (!el4) return;
   el4.replaceChildren();
   try {
-    await loadBundle(kind.bundle);
+    if (kind && kind.bundle) await loadBundle(kind.bundle);
+    for (let i = 0; i < 400 && isShellView(doc2.docType) && !documentEditorFor(doc2.docType) && open3 === mine; i++) await new Promise((r) => setTimeout(r, 25));
     if (open3 !== mine) return;
     const factory = documentEditorFor(doc2.docType);
-    if (!factory) throw new Error(`${kind.bundle} did not register an editor for ${doc2.docType}`);
+    if (!factory) throw new Error(`${kind ? kind.bundle : "the page"} did not register an editor for ${doc2.docType}`);
     const ctx = {
       el: el4,
       project: { projectId: state.project.projectId, name: state.project.name },
       doc: { docId: doc2.docId, path: doc2.path, docType: doc2.docType },
-      docs: state.project.docs.map((d) => ({ docId: d.docId, path: d.path, docType: d.docType })),
+      docs: (state.project.allDocs || state.project.docs).map((d) => ({ docId: d.docId, path: d.path, docType: d.docType })),
       signedIn: !!state.me,
       userId: state.me ? state.me.id : null,
       setConnection: (s2, text3) => {
@@ -77102,7 +77110,7 @@ async function openHostedDoc(doc2, showCad, openDocId2) {
     const p = document.createElement("p");
     p.className = "empty";
     p.style.margin = "48px auto";
-    p.textContent = `This ${kind.title.toLowerCase()} could not be opened. Reload the page to try again.`;
+    p.textContent = `This ${what} could not be opened. Reload the page to try again.`;
     el4.replaceChildren(p);
   }
 }
@@ -79812,9 +79820,9 @@ function ticksAlongLine(ops, view, origin, line, minorLen, units, shadow) {
   const cx = (vp[0] + vp[2]) / 2, cy = (vp[1] + vp[3]) / 2, hw = (vp[2] - vp[0]) / 2 + inf, hh = (vp[3] - vp[1]) / 2 + inf;
   const cp2 = (cx - origin[0]) * ux + (cy - origin[1]) * uy, hp = Math.abs(hw * ux) + Math.abs(hh * uy);
   if (!isFinite(cp2 - hp) || !isFinite(cp2 + hp)) return;
-  const first = Math.max(0, Math.floor((cp2 - hp) / space) - 1), last3 = Math.min(lastRulerTick, Math.ceil((cp2 + hp) / space) + 1);
+  const first2 = Math.max(0, Math.floor((cp2 - hp) / space) - 1), last3 = Math.min(lastRulerTick, Math.ceil((cp2 + hp) / space) + 1);
   const dir = [tickLine[0] / rulerLen, tickLine[1] / rulerLen];
-  for (let i = first; i <= last3; i++) {
+  for (let i = first2; i <= last3; i++) {
     const pos = [origin[0] + ux * space * i, origin[1] + uy * space * i];
     let len = minorLen, label = false;
     if (i % format.majorStep === 0) {
@@ -82003,7 +82011,7 @@ function stripModels(fpText) {
       continue;
     }
     out2 += fpText.slice(i, at5);
-    let depth = 0, j = at5, inStr = false;
+    let depth2 = 0, j = at5, inStr = false;
     for (; j < fpText.length; j++) {
       const c = fpText[j];
       if (inStr) {
@@ -82012,10 +82020,10 @@ function stripModels(fpText) {
         continue;
       }
       if (c === '"') inStr = true;
-      else if (c === "(") depth++;
+      else if (c === "(") depth2++;
       else if (c === ")") {
-        depth--;
-        if (depth === 0) {
+        depth2--;
+        if (depth2 === 0) {
           j++;
           break;
         }
@@ -82638,7 +82646,7 @@ function projectLibraryExists(kind, row3, paths) {
 function projectCandidates(kind, entry2, paths) {
   const io = plugins(kind).find((x) => x.type === entry2.type);
   const out2 = /* @__PURE__ */ new Set();
-  const dirOf2 = (p) => p.split("/").slice(0, -1).join("/");
+  const dirOf3 = (p) => p.split("/").slice(0, -1).join("/");
   for (const p of paths) {
     const ext = extOf(p).toLowerCase();
     const name = p.split("/").pop() || "";
@@ -82648,11 +82656,11 @@ function projectCandidates(kind, entry2, paths) {
     }
     if (!io) continue;
     if (kind === "symbol" && entry2.folder) {
-      if (ext === "kicad_sym" && p.includes("/")) out2.add(dirOf2(p));
+      if (ext === "kicad_sym" && p.includes("/")) out2.add(dirOf3(p));
       continue;
     }
     if (io.folder) {
-      if ((io.inDir || []).some((e) => e.toLowerCase() === ext) && p.includes("/")) out2.add(dirOf2(p));
+      if ((io.inDir || []).some((e) => e.toLowerCase() === ext) && p.includes("/")) out2.add(dirOf3(p));
       continue;
     }
     if (io.exts.some((e) => e.toLowerCase() === ext)) out2.add(p);
@@ -82729,7 +82737,7 @@ var init_libtable = __esm({
 // web/domains/pcb/symedit/model.ts
 function prettify2(src, libTable = false) {
   const xyLimit = 99, wrapAt = 72;
-  let out2 = "", depth = 0, last3 = "", inQuote = false, spaced = false, multi = false, inXY = false, column = 0, bs = 0;
+  let out2 = "", depth2 = 0, last3 = "", inQuote = false, spaced = false, multi = false, inXY = false, column = 0, bs = 0;
   let inLib = false, libDepth = 0;
   const isLib = (i) => {
     let j = i + 1, tok = "";
@@ -82745,7 +82753,7 @@ function prettify2(src, libTable = false) {
   const isXY = (i) => src[i + 1] === "x" && src[i + 2] === "y" && src[i + 3] === " ";
   for (let i = 0; i < n2; i++) {
     const c = src[i];
-    if (depth === 0 && c === "#" && (out2 === "" || out2[out2.length - 1] === "\n")) {
+    if (depth2 === 0 && c === "#" && (out2 === "" || out2[out2.length - 1] === "\n")) {
       let e = src.indexOf("\n", i);
       if (e < 0) e = n2;
       out2 += src.slice(i, e) + "\n";
@@ -82754,14 +82762,14 @@ function prettify2(src, libTable = false) {
     }
     const next = nextNonWs(i);
     if (ws(c) && !inQuote) {
-      if (!spaced && depth > 0 && last3 !== "(" && next !== ")" && next !== "(") {
+      if (!spaced && depth2 > 0 && last3 !== "(" && next !== ")" && next !== "(") {
         if (inXY || column < wrapAt) {
           out2 += " ";
           column++;
         } else if (inLib) out2 += " ";
         else {
-          out2 += "\n" + "	".repeat(depth);
-          column = depth;
+          out2 += "\n" + "	".repeat(depth2);
+          column = depth2;
           multi = true;
         }
         spaced = true;
@@ -82782,23 +82790,23 @@ function prettify2(src, libTable = false) {
         out2 += " (";
         column += 2;
       } else {
-        out2 += "\n" + "	".repeat(depth) + "(";
-        column = depth + 1;
+        out2 += "\n" + "	".repeat(depth2) + "(";
+        column = depth2 + 1;
       }
       inXY = curXY;
       if (curLib && !inLib) {
         inLib = true;
-        libDepth = depth;
+        libDepth = depth2;
       }
-      depth++;
+      depth2++;
     } else if (c === ")" && !inQuote) {
-      if (depth > 0) depth--;
-      if (inLib && depth === libDepth) {
+      if (depth2 > 0) depth2--;
+      if (inLib && depth2 === libDepth) {
         out2 += ")";
         inLib = false;
       } else if (last3 === ")" || multi) {
-        out2 += "\n" + "	".repeat(depth) + ")";
-        column = depth + 1;
+        out2 += "\n" + "	".repeat(depth2) + ")";
+        column = depth2 + 1;
         multi = false;
       } else {
         out2 += ")";
@@ -83253,8 +83261,8 @@ async function projectIndex(kind, lib) {
     const byName2 = new Map(all2.map((s2) => [String(s2[1]), s2]));
     for (const s2 of all2) {
       const info = symbolInfo(s2);
-      let root5 = s2, depth = 0;
-      for (let e = K7().kid(root5, "extends"); e && depth < 16; e = K7().kid(root5, "extends"), depth++) {
+      let root5 = s2, depth2 = 0;
+      for (let e = K7().kid(root5, "extends"); e && depth2 < 16; e = K7().kid(root5, "extends"), depth2++) {
         const p = byName2.get(String(e[1]));
         if (!p) break;
         root5 = p;
@@ -84002,11 +84010,11 @@ The web editor cannot read ${r.type} libraries; migrate this one in KiCad.`);
   const showMenu2 = (p, ev) => {
     const g2 = p.grid;
     const sel = g2.selectedRows();
-    const first = p.rows[sel[0]];
-    if (!first) return;
+    const first2 = p.rows[sel[0]];
+    if (!first2) return;
     const items = [];
-    if (first.type === TABLE_TYPE) items.push({ label: "Open Library Table", run: () => {
-      void openNested(first, p);
+    if (first2.type === TABLE_TYPE) items.push({ label: "Open Library Table", run: () => {
+      void openNested(first2, p);
     } }, { sep: true });
     const anyOn = sel.some((i) => p.rows[i].enabled), anyOff = sel.some((i) => !p.rows[i].enabled);
     const anyVis = sel.some((i) => p.rows[i].visible), anyHid = sel.some((i) => !p.rows[i].visible);
@@ -84034,9 +84042,9 @@ The web editor cannot read ${r.type} libraries; migrate this one in KiCad.`);
         items.push({ label: "Unset Visible Flag", run: setAll("visible", false) });
         block = true;
       }
-      if (sel.length === 1 && first.type !== TABLE_TYPE) {
+      if (sel.length === 1 && first2.type !== TABLE_TYPE) {
         items.push({ label: "Edit Options...", title: "Edit options for this library entry", run: () => {
-          void editOptions(first, p);
+          void editOptions(first2, p);
         } });
         block = true;
       }
@@ -87273,6 +87281,187 @@ var init_bootpick = __esm({
   }
 });
 
+// web/platform/doctabs/pcbs.ts
+function pcbsOf(docs, projectName2 = "") {
+  const pros = docs.filter((d) => d.docType === "kicad_pro");
+  const dirs = Array.from(new Set(pros.map((d) => dirOf2(d.path))));
+  const owner = (d) => {
+    let best = null;
+    for (const dir of dirs) if (inDir(d.path, dir) && (best === null || dir.length > best.length)) best = dir;
+    return best;
+  };
+  const strays = docs.filter((d) => (d.docType === "kicad_sch" || d.docType === "kicad_pcb") && owner(d) === null);
+  const adopt = strays.length > 0 && dirs.length === 1;
+  if (strays.length && !adopt) dirs.push("");
+  const out2 = [];
+  for (const dir of dirs) {
+    const mine = docs.filter((d) => owner(d) === dir || adopt && strays.includes(d));
+    const pro = pros.filter((d) => dirOf2(d.path) === dir).sort(byPath)[0] || null;
+    const stem3 = pro ? stemOf2(pro.path) : null;
+    const sch = mine.filter((d) => d.docType === "kicad_sch");
+    const root5 = stem3 !== null && sch.find((d) => baseOf(d.path) === stem3 + ".kicad_sch") || sch.slice().sort((a, b) => depth(a.path) - depth(b.path) || a.path.length - b.path.length)[0] || null;
+    const boards = mine.filter((d) => d.docType === "kicad_pcb").sort((a, b) => Number(stemOf2(b.path) === stem3) - Number(stemOf2(a.path) === stem3) || byPath(a, b));
+    if (!pro && !root5 && !boards.length) continue;
+    out2.push({
+      key: (pro || root5 || boards[0]).docId,
+      dir,
+      name: dir ? baseOf(dir) : stem3 || projectName2 || "PCB",
+      pro,
+      schematic: root5,
+      boards,
+      sheets: root5 ? [root5, ...sch.filter((d) => d !== root5).sort(byPath)] : [],
+      docs: mine
+    });
+  }
+  return out2.sort((a, b) => a.dir.localeCompare(b.dir, void 0, { numeric: true }));
+}
+function pcbOfDoc(pcbs, docId3) {
+  return pcbs.find((p) => p.docs.some((d) => d.docId === docId3));
+}
+function relativePath(dir, path2) {
+  if (!dir) return path2;
+  if (inDir(path2, dir)) return path2.slice(dir.length + 1);
+  const from = dir.split("/"), to = path2.split("/");
+  let same = 0;
+  while (same < from.length && same < to.length - 1 && from[same] === to[same]) same++;
+  return "../".repeat(from.length - same) + to.slice(same).join("/");
+}
+function fullPath(dir, rel) {
+  const out2 = dir ? dir.split("/") : [];
+  for (const part of rel.replace(/\\/g, "/").split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      if (!out2.length) return null;
+      out2.pop();
+    } else out2.push(part);
+  }
+  return out2.length ? out2.join("/") : null;
+}
+function scopedDocs(docs, pcbs, pcb) {
+  if (pcb && !pcb.dir && pcbs.length === 1) return docs.slice();
+  const owned = /* @__PURE__ */ new Set();
+  for (const p of pcbs) if (p !== pcb) for (const d of p.docs) owned.add(d.docId);
+  const dir = pcb ? pcb.dir : "";
+  const out2 = [];
+  for (const d of docs) {
+    if (owned.has(d.docId) || d.docType === "project_shell") continue;
+    if (KICAD_DESIGN(d.docType) && !(pcb && pcb.docs.includes(d))) continue;
+    const path2 = relativePath(dir, d.path);
+    out2.push(path2 === d.path ? d : { ...d, path: path2 });
+  }
+  return out2;
+}
+var KICAD_DESIGN, dirOf2, baseOf, stemOf2, inDir, depth, byPath, HOME_TAB;
+var init_pcbs = __esm({
+  "web/platform/doctabs/pcbs.ts"() {
+    "use strict";
+    KICAD_DESIGN = (t) => t === "kicad_sch" || t === "kicad_pcb" || t === "kicad_pro";
+    dirOf2 = (path2) => path2.includes("/") ? path2.slice(0, path2.lastIndexOf("/")) : "";
+    baseOf = (path2) => path2.slice(path2.lastIndexOf("/") + 1);
+    stemOf2 = (path2) => baseOf(path2).replace(/\.[^.]+$/, "");
+    inDir = (path2, dir) => dir === "" || path2.startsWith(dir + "/");
+    depth = (path2) => path2.split("/").length;
+    byPath = (a, b) => a.path.localeCompare(b.path, void 0, { numeric: true });
+    HOME_TAB = "home";
+  }
+});
+
+// web/platform/documents/rawfetch.ts
+var init_rawfetch = __esm({
+  "web/platform/documents/rawfetch.ts"() {
+    "use strict";
+  }
+});
+
+// web/domains/pcb/editor/pcbscope.ts
+function boundPcb() {
+  return bound;
+}
+function unbindPcb() {
+  bound = null;
+}
+function bindPcb(projectId4, pcb) {
+  if (stale.has(projectId4)) return "reload";
+  if (bound && bound.projectId === projectId4 && bound.key === pcb.key) {
+    bound.dir = pcb.dir;
+    bound.name = pcb.name;
+    return "same";
+  }
+  const was = first.get(projectId4);
+  if (was && was !== pcb.key) return "reload";
+  first.set(projectId4, pcb.key);
+  bound = { projectId: projectId4, key: pcb.key, dir: pcb.dir, name: pcb.name };
+  return "bound";
+}
+function viewOf(all2, projectId4, projectName2) {
+  const pcbs = pcbsOf(all2, projectName2);
+  const pcb = bound && bound.projectId === projectId4 && pcbs.find((p) => p.key === bound.key) || null;
+  if (pcb && bound) {
+    if (bound.dir !== pcb.dir) stale.add(projectId4);
+    bound.dir = pcb.dir;
+    bound.name = pcb.name;
+  }
+  if (pcb && !pcb.dir && pcbs.length === 1) return { docs: all2, pcbs, pcb };
+  return { docs: scopedDocs(all2, pcbs, pcb), pcbs, pcb };
+}
+function outgoingPath(dir, path2) {
+  return dir ? fullPath(dir, path2) : path2;
+}
+function incomingPath(dir, path2) {
+  return relativePath(dir, path2);
+}
+function installPathScope() {
+  if (typeof window === "undefined" || window.__junctionRawFetch) return;
+  const raw2 = window.fetch.bind(window);
+  window.__junctionRawFetch = raw2;
+  window.fetch = (async (input, init) => {
+    const b = bound;
+    if (!b || !b.dir || !init || typeof init.body !== "string") return raw2(input, init);
+    const method = (init.method || "GET").toUpperCase();
+    if (method !== "POST" && method !== "PATCH") return raw2(input, init);
+    let pathname = "";
+    try {
+      pathname = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, location.href).pathname;
+    } catch (e) {
+      return raw2(input, init);
+    }
+    const creates = method === "POST" && pathname.replace(/\/$/, "") === `/api/projects/${b.projectId}/docs`;
+    const moves = method === "PATCH" && /^\/api\/docs\/[0-9a-f-]{36}$/i.test(pathname);
+    if (!creates && !moves) return raw2(input, init);
+    let body;
+    try {
+      body = JSON.parse(init.body);
+    } catch (e) {
+      return raw2(input, init);
+    }
+    if (!body || typeof body.path !== "string") return raw2(input, init);
+    const full3 = outgoingPath(b.dir, body.path);
+    if (full3 === null) return new Response("that path is outside the project", { status: 400, headers: { "content-type": "text/plain" } });
+    const r = await raw2(input, { ...init, body: JSON.stringify({ ...body, path: full3 }) });
+    if (!r.ok || !(r.headers.get("content-type") || "").includes("json")) return r;
+    let answer;
+    try {
+      answer = await r.clone().json();
+    } catch (e) {
+      return r;
+    }
+    if (!answer || typeof answer !== "object" || typeof answer.path !== "string") return r;
+    const seen = { ...answer, path: incomingPath(b.dir, answer.path) };
+    return new Response(JSON.stringify(seen), { status: r.status, statusText: r.statusText, headers: { "content-type": "application/json" } });
+  });
+}
+var bound, first, stale;
+var init_pcbscope = __esm({
+  "web/domains/pcb/editor/pcbscope.ts"() {
+    "use strict";
+    init_pcbs();
+    init_rawfetch();
+    bound = null;
+    first = /* @__PURE__ */ new Map();
+    stale = /* @__PURE__ */ new Set();
+  }
+});
+
 // web/domains/pcb/editor/pcbtools-loader.ts
 function load3() {
   const boot = window.__kcBoot;
@@ -87397,6 +87586,7 @@ var doc_exports = {};
 __export(doc_exports, {
   GRID_CHOICES: () => GRID_CHOICES,
   ROOT_SHEET_NAME: () => ROOT_SHEET_NAME,
+  allDocs: () => allDocs,
   applyChanges: () => applyChanges,
   applyRemoteChanges: () => applyRemoteChanges,
   applySheetContext: () => applySheetContext,
@@ -87421,6 +87611,8 @@ __export(doc_exports, {
   openDoc: () => openDoc,
   openDocId: () => openDocId,
   openEditor: () => openEditor,
+  projectPathOf: () => projectPathOf,
+  projectPcbs: () => projectPcbs,
   projectTextVars: () => projectTextVars,
   publishDocs: () => publishDocs,
   refreshDocs: () => refreshDocs,
@@ -87796,6 +87988,42 @@ function takeBoot(key3, projectId4) {
   delete boot[key3];
   return v;
 }
+function allDocs() {
+  return state.project ? state.project.allDocs || state.project.docs : [];
+}
+function projectPcbs() {
+  return state.project ? pcbsOf(allDocs(), state.project.name) : [];
+}
+function projectPathOf(docId3) {
+  const d = allDocs().find((x) => x.docId === docId3);
+  return d ? d.path : "";
+}
+function applyProjectDocs(all2) {
+  if (!state.project) return;
+  const was = boundPcb() ? boundPcb().dir : null;
+  const v = viewOf(all2, state.project.projectId, state.project.name);
+  const b = boundPcb();
+  if (b && was !== null && was !== b.dir && state.view === "editor" && state.docId && all2.some((d) => d.docId === state.docId)) {
+    location.assign(`/p/${state.project.projectId}/edit?doc=${encodeURIComponent(state.docId)}`);
+  }
+  state.project = { ...state.project, allDocs: all2, docs: v.docs, pcb: v.pcb && b ? { key: b.key, dir: b.dir, name: b.name } : null };
+  state.docs = editorDocs(v.docs);
+  store.set({ project: state.project });
+}
+function enterPcb(pcb, docId3) {
+  const pid = state.project.projectId;
+  const how = bindPcb(pid, pcb);
+  if (how === "reload") {
+    location.assign(`/p/${pid}/edit?doc=${encodeURIComponent(docId3)}`);
+    return false;
+  }
+  if (how === "bound") {
+    E.proSettings = null;
+    E.druText = null;
+    applyProjectDocs(allDocs());
+  }
+  return true;
+}
 async function openEditor(id) {
   if (state.project && state.project.projectId === id && (state.view === "editor" || state.view === "cad")) return;
   leaveEditor();
@@ -87813,6 +88041,8 @@ async function openEditor(id) {
     navigate("/", true);
     return;
   }
+  unbindPcb();
+  installPathScope();
   state.project = info;
   fontsForProject(info.projectId);
   state.role = info.role;
@@ -87822,8 +88052,11 @@ async function openEditor(id) {
   E.canJoin = true;
   E.viewOnly = !state.me || !can.edit;
   E.canComment = !!state.me && !!can.comment;
-  state.docs = editorDocs(info.docs);
-  store.set({ project: info, role: info.role || null, canJoin: E.canJoin, viewOnly: E.viewOnly, canComment: E.canComment, guest: !state.me, can });
+  const pcbs = pcbsOf(info.docs, info.name);
+  const rootPcb = pcbs.find((p) => !p.dir);
+  if (pcbs.length === 1 && rootPcb) bindPcb(info.projectId, rootPcb);
+  applyProjectDocs(info.docs);
+  store.set({ role: info.role || null, canJoin: E.canJoin, viewOnly: E.viewOnly, canComment: E.canComment, guest: !state.me, can });
   publishDocs();
   loadHistory();
   const fp = fpParam();
@@ -87835,20 +88068,40 @@ async function openEditor(id) {
     }
   }
   const wanted2 = new URLSearchParams(location.search).get("doc");
-  rootSchematic();
-  const hosted = info.docs.find((d) => d.docId === wanted2 && isHostedDoc(d)) || (state.docs.length ? void 0 : info.docs.find((d) => isHostedDoc(d)));
+  if (boundPcb()) rootSchematic();
+  if (wanted2 === HOME_TAB) {
+    await openDoc(homeDoc());
+    return;
+  }
+  if (wanted2 && wanted2.startsWith("bom:") && pcbs.some((p) => p.key === wanted2.slice(4))) {
+    await openDoc(bomDoc(wanted2.slice(4)));
+    return;
+  }
+  const hosted = info.docs.find((d) => d.docId === wanted2 && isHostedDoc(d));
   if (hosted) {
     await openDoc(hosted);
     return;
   }
-  const doc2 = firstDoc(state.docs, info.docs, wanted2);
-  if (!doc2) {
-    base.replaceChildren();
-    setDocNotice("This project has no board or schematic yet. Open it in the desktop app.");
-    setConn("err", "nothing to show");
-    return;
+  const named = wanted2 ? info.docs.find((d) => d.docId === wanted2 && (d.docType === "kicad_sch" || d.docType === "kicad_pcb")) : void 0;
+  if (named) {
+    const pcb = pcbOfDoc(pcbs, named.docId);
+    if (pcb && !enterPcb(pcb, named.docId)) return;
+    const doc2 = state.docs.find((d) => d.docId === named.docId);
+    if (doc2) {
+      rootSchematic();
+      await openDoc(doc2);
+      return;
+    }
   }
-  await openDoc(doc2);
+  if (rootPcb && enterPcb(rootPcb, (rootPcb.schematic || rootPcb.boards[0] || rootPcb.pro).docId)) {
+    rootSchematic();
+    const doc2 = firstDoc(state.docs, state.project.docs, null);
+    if (doc2) {
+      await openDoc(doc2);
+      return;
+    }
+  }
+  await openDoc(homeDoc());
 }
 function rootSchematic() {
   const pro = state.project.docs.find((d) => d.docType === "kicad_pro");
@@ -87940,12 +88193,10 @@ function refreshDocs() {
     try {
       const info = await api4(`/api/projects/${pid}/info`);
       if (!info || !Array.isArray(info.docs) || !state.project || state.project.projectId !== pid) return false;
-      const known = new Set(state.project.docs.map((d) => d.docId));
+      const known = new Set(allDocs().map((d) => d.docId));
       const added2 = info.docs.filter((d) => !known.has(d.docId));
       if (!added2.length) return false;
-      state.project.docs = state.project.docs.concat(added2);
-      store.set({ project: Object.assign({}, state.project) });
-      state.docs = editorDocs(state.docs.concat(editorDocs(added2).filter((d) => !state.docs.some((x) => x.docId === d.docId))));
+      applyProjectDocs(allDocs().concat(added2));
       publishDocs();
       return true;
     } catch (e) {
@@ -87997,6 +88248,8 @@ function setDocNotice(text3) {
   store.slice("document", { notice: text3 || null, layers: [], copperLayers: [], hasDoc: false });
 }
 function leaveDoc() {
+  if (state.docId && E.kdoc && E.viewTouched) viewMemo.set(state.docId, { zoom: E.zoom, panX: E.panX, panY: E.panY, w: stage.clientWidth, h: stage.clientHeight });
+  else if (state.docId && E.kdoc) viewMemo.delete(state.docId);
   dropHistoryView();
   resetInteraction();
   E.connectGen++;
@@ -88058,7 +88311,9 @@ async function openDoc(doc2) {
     state.docId = doc2.docId;
     const url2 = `/p/${state.project.projectId}/edit?doc=${doc2.docId}`;
     if (location.pathname + location.search !== url2) history.replaceState(null, "", url2);
-    document.title = `${doc2.path.split("/").pop().replace(/\.[^.]+$/, "")} \u2014 ${state.project.name} \u2014 Junction`;
+    const bomOf = doc2.docType === "@bom" ? projectPcbs().find((p) => "bom:" + p.key === doc2.docId) : void 0;
+    const tabName = doc2.docType === "@home" ? "" : bomOf ? `${bomOf.name} BOM` : doc2.path.split("/").pop().replace(/\.[^.]+$/, "");
+    document.title = `${tabName ? tabName + " \u2014 " : ""}${state.project.name} \u2014 Junction`;
     await openHostedDoc(doc2, () => {
       showView("cad");
       document.body.dataset.editor = "cad";
@@ -88084,7 +88339,8 @@ async function openDoc(doc2) {
   }
   setupEditorChrome();
   publishDocs();
-  const url = `/p/${state.project.projectId}/edit` + (doc2.docType === "footprint" ? `?fp=${encodeURIComponent(doc2.docId)}` : state.docs.length > 1 ? `?doc=${doc2.docId}` : "");
+  const several = state.docs.length > 1 || !!(boundPcb() && boundPcb().dir) || allDocs().some((d) => isHostedDoc(d));
+  const url = `/p/${state.project.projectId}/edit` + (doc2.docType === "footprint" ? `?fp=${encodeURIComponent(doc2.docId)}` : several ? `?doc=${doc2.docId}` : "");
   if (location.pathname + location.search !== url) history.replaceState(null, "", url);
   setStatusBar({ message: "" });
   world.style.width = stage.clientWidth + "px";
@@ -88171,13 +88427,24 @@ async function openDoc(doc2) {
       setDocNotice(`Nothing to show yet for this ${isSch() ? "sheet" : "board"} \u2014 it appears once a desktop editor has the project open in a live session.`);
     }
   }
-  setTimeout(fitView, 0);
+  const seen = ok2 ? viewMemo.get(docId3) : void 0;
+  setTimeout(() => {
+    if (state.docId !== docId3) return;
+    if (seen) {
+      E.zoom = seen.zoom;
+      E.panX = seen.panX + (stage.clientWidth - seen.w) / 2;
+      E.panY = seen.panY + (stage.clientHeight - seen.h) / 2;
+      E.viewTouched = true;
+      applyView();
+      requestRender();
+    } else fitView();
+  }, 0);
   if (isFpPrivate()) setConn("", "private copy of a board footprint");
   else if (isFpReadOnlyLib()) setConn("", "read-only library footprint");
   else if (E.canJoin) connect().catch(() => setConn("err", "connection failed"));
   else setConn("", "sign in to collaborate");
 }
-async function loadBase(first) {
+async function loadBase(first2) {
   let text3;
   try {
     const r = await fetch(`/api/docs/${state.docId}/preview.svg?fit=false&v=${Date.now()}`);
@@ -88207,7 +88474,7 @@ async function loadBase(first) {
   base.replaceChildren(...Array.from(src.childNodes).map((n2) => document.importNode(n2, true)));
   tagLayers(hidden);
   E.baseVersion++;
-  if (!first) {
+  if (!first2) {
     drawSelection();
     drawComments();
   }
@@ -88255,25 +88522,44 @@ function selectItemAction(id) {
   centerOn(fp.x / E.IU, fp.y / E.IU);
 }
 function openDocId(id) {
-  const d = state.docs.find((x) => x.docId === id) || (state.project ? state.project.docs.find((x) => x.docId === id && isHostedDoc(x)) : void 0);
-  if (d) openDoc(d);
+  if (!state.project) return;
+  if (id === HOME_TAB) {
+    void openDoc(homeDoc());
+    return;
+  }
+  if (id.startsWith("bom:")) {
+    if (projectPcbs().some((p) => p.key === id.slice(4))) void openDoc(bomDoc(id.slice(4)));
+    return;
+  }
+  const whole2 = allDocs().find((x) => x.docId === id);
+  if (whole2 && isHostedDoc(whole2)) {
+    void openDoc(whole2);
+    return;
+  }
+  if (whole2 && (whole2.docType === "kicad_sch" || whole2.docType === "kicad_pcb")) {
+    const pcb = pcbOfDoc(projectPcbs(), id);
+    if (pcb && !enterPcb(pcb, id)) return;
+    rootSchematic();
+  }
+  const d = state.docs.find((x) => x.docId === id);
+  if (d) void openDoc(d);
 }
 function setProjectDocs(docs, open4) {
   if (!state.project) return;
-  state.project = { ...state.project, docs };
-  state.docs = editorDocs(docs);
-  store.set({ project: state.project });
-  const cur2 = state.docId ? docs.find((d) => d.docId === state.docId) : void 0;
+  applyProjectDocs(docs);
+  const id = state.docId;
+  const cur2 = id ? state.docs.find((d) => d.docId === id) || docs.find((d) => d.docId === id) : void 0;
   if (cur2 && state.doc && cur2.path !== state.doc.path) state.doc = cur2;
   publishDocs();
   if (open4) {
     openDocId(open4);
     return;
   }
-  if (state.docId && !cur2 && !state.docId.startsWith("board:") && !state.docId.startsWith("lib:")) {
-    const next = firstDoc(state.docs, docs, null) || docs.find((d) => isHostedDoc(d));
-    if (next) openDoc(next);
-  }
+  if (!id || cur2 || id === HOME_TAB || id.startsWith("board:") || id.startsWith("lib:")) return;
+  if (id.startsWith("bom:") && projectPcbs().some((p) => "bom:" + p.key === id)) return;
+  const b = boundPcb();
+  const next = b && (state.view === "editor" || !b.dir) ? firstDoc(state.docs, state.project.docs, null) : null;
+  void openDoc(next || homeDoc());
 }
 function navigateDocs(dir) {
   const i = docNav.idx + dir;
@@ -88294,7 +88580,7 @@ function switchEditor() {
   if (target2) openDoc(target2);
   else toast(isSch() ? "This project has no board yet" : "This project has no schematic yet");
 }
-var docNav, GRID_CHOICES, sheetNames, sheetPages, ROOT_SHEET_NAME, hierarchyLearned, sheetHumanPaths, layerRow, remote, topsMemo, docsFetch;
+var docNav, GRID_CHOICES, sheetNames, sheetPages, ROOT_SHEET_NAME, hierarchyLearned, sheetHumanPaths, layerRow, remote, homeDoc, bomDoc, topsMemo, docsFetch, viewMemo;
 var init_doc = __esm({
   "web/domains/pcb/editor/doc.ts"() {
     "use strict";
@@ -88322,6 +88608,8 @@ var init_doc = __esm({
     init_fpedit();
     init_bootpick();
     init_dochost();
+    init_pcbscope();
+    init_pcbs();
     init_pcbtools_loader();
     init_view();
     init_fonts();
@@ -88337,8 +88625,11 @@ var init_doc = __esm({
     if (typeof window !== "undefined") window.addEventListener("kc:constraint-msg", (ev) => {
       if (!isSch()) setStatusBar({ constraint: String(ev.detail?.msg || "") });
     });
+    homeDoc = () => ({ docId: HOME_TAB, path: "", docType: "@home" });
+    bomDoc = (key3) => ({ docId: "bom:" + key3, path: "", docType: "@bom" });
     topsMemo = null;
     docsFetch = null;
+    viewMemo = /* @__PURE__ */ new Map();
   }
 });
 
@@ -89594,7 +89885,7 @@ function boardEmbeddedFiles(text3) {
   }).filter((f2) => f2.name);
 }
 function sexprEnd(s2, i) {
-  let depth = 0;
+  let depth2 = 0;
   for (let j = i; j < s2.length; j++) {
     const c = s2[j];
     if (c === '"') {
@@ -89605,8 +89896,8 @@ function sexprEnd(s2, i) {
       }
       continue;
     }
-    if (c === "(") depth++;
-    else if (c === ")" && --depth === 0) return j + 1;
+    if (c === "(") depth2++;
+    else if (c === ")" && --depth2 === 0) return j + 1;
   }
   return s2.length;
 }
@@ -89856,7 +90147,7 @@ function rulesEditor(text3, opts2) {
   };
 }
 function ruleErrors(text3, compile) {
-  let depth = 0, line = 1, col = 0, inStr = false, any = false;
+  let depth2 = 0, line = 1, col = 0, inStr = false, any = false;
   for (let i = 0; i < text3.length; i++) {
     const c = text3[i];
     col++;
@@ -89876,15 +90167,15 @@ function ruleErrors(text3, compile) {
     }
     if (c === '"') inStr = true;
     else if (c === "(") {
-      depth++;
+      depth2++;
       any = true;
     } else if (c === ")") {
-      depth--;
-      if (depth < 0) return [{ line, col, message: "Unexpected ')'." }];
+      depth2--;
+      if (depth2 < 0) return [{ line, col, message: "Unexpected ')'." }];
     }
   }
   if (inStr) return [{ line, col, message: "Unterminated string." }];
-  if (depth) return [{ line, col, message: `Expecting ')'.` }];
+  if (depth2) return [{ line, col, message: `Expecting ')'.` }];
   if (any && !/^\s*(#[^\n]*\n\s*)*\(version\s+\d+\)/.test(text3)) return [{ line: 1, col: 1, message: "Missing '(version <number>)' header." }];
   const res = compile ? compile(text3) : null;
   const out2 = [];
@@ -89903,7 +90194,7 @@ function ruleErrors(text3, compile) {
   return out2;
 }
 function ruleAtLine(text3, line) {
-  let depth = 0, ln = 1, inStr = false, start = -1, name = "";
+  let depth2 = 0, ln = 1, inStr = false, start = -1, name = "";
   for (let i = 0; i < text3.length; i++) {
     const c = text3[i];
     if (c === "\n") {
@@ -89925,17 +90216,17 @@ function ruleAtLine(text3, line) {
       continue;
     }
     if (c === "(") {
-      if (depth === 0) {
+      if (depth2 === 0) {
         const m = /^\(rule\s+("([^"]*)"|[^\s()]+)/.exec(text3.slice(i, i + 300));
         if (m) {
           start = ln;
           name = m[2] !== void 0 ? m[2] : m[1];
         } else start = -1;
       }
-      depth++;
+      depth2++;
     } else if (c === ")") {
-      depth--;
-      if (depth === 0) {
+      depth2--;
+      if (depth2 === 0) {
         if (start >= 0 && start <= line && ln >= line) return name;
         start = -1;
       }
@@ -91717,11 +92008,11 @@ var init_ctxmenus = __esm({
     schMultipleSymbols = and(moreThan(1), onlyTypes(set("symbol")));
     schOrient = (c) => !c.drawingLine && c.kinds.some((k) => SCH_ROTATABLE.has(k));
     schProperties = (c) => {
-      const first = c.kinds[0];
-      if (!first) return !!c.overDrawingSheet;
-      if (first === "table_cell") return c.kinds.every((k) => k === "table_cell");
-      if (SCH_PROPS_SINGLE.has(first)) return c.kinds.length === 1;
-      if (first === "gline" || first === "wire" || first === "bus" || first === "bus_entry" || first === "junction") {
+      const first2 = c.kinds[0];
+      if (!first2) return !!c.overDrawingSheet;
+      if (first2 === "table_cell") return c.kinds.every((k) => k === "table_cell");
+      if (SCH_PROPS_SINGLE.has(first2)) return c.kinds.length === 1;
+      if (first2 === "gline" || first2 === "wire" || first2 === "bus" || first2 === "bus_entry" || first2 === "junction") {
         if (c.kinds.every((k) => k === "gline")) return true;
         if (c.kinds.every((k) => k === "junction")) return true;
         return c.kinds.every((k) => k === "wire" || k === "bus" || k === "bus_entry" || k === "gline" || k === "junction");
@@ -91819,8 +92110,8 @@ function openSelectionProperties() {
     }
   }
   const modSel = isSch() ? CollabTools.sch && CollabTools.sch.state && CollabTools.sch.state.sel : CollabTools.pcb && CollabTools.pcb.state && CollabTools.pcb.state.sel;
-  const first = (s2) => (s2 && typeof s2 === "object" && typeof s2[Symbol.iterator] === "function" ? s2.values().next().value : s2) || null;
-  const id = E.selected ? E.selected.id : first(modSel) || first(E.selection);
+  const first2 = (s2) => (s2 && typeof s2 === "object" && typeof s2[Symbol.iterator] === "function" ? s2.values().next().value : s2) || null;
+  const id = E.selected ? E.selected.id : first2(modSel) || first2(E.selection);
   if (!isSch() && KDialogs.pcbSelectionDialog) {
     const ids = /* @__PURE__ */ new Set([...E.selected ? [E.selected.id] : [], ...modSel && typeof modSel === "object" ? Array.from(modSel) : [], ...E.selection ? Array.from(E.selection) : []]);
     const items = Array.from(ids).map((i) => E.kdoc.items.get(i)).filter((x) => !!x);
@@ -92561,8 +92852,8 @@ async function sheetList() {
     return doc2;
   };
   const out2 = [];
-  const walk2 = async (d, name, sheetPath, page, uuidPath, sheetItemId, parentDocId, depth) => {
-    if (depth > 32) return;
+  const walk2 = async (d, name, sheetPath, page, uuidPath, sheetItemId, parentDocId, depth2) => {
+    if (depth2 > 32) return;
     let doc2;
     try {
       doc2 = await load4(d);
@@ -92570,7 +92861,7 @@ async function sheetList() {
       return;
     }
     out2.push({ docId: d.docId, path: d.path, name, sheetPath, page, doc: doc2, uuidPath, sheetItemId, parentDocId });
-    pageKeys.push({ uuids: [topUuid || String(doc2.uuid || "")].concat(uuidPath), page: depth === 0 && !pageFromFile ? "" : page, virt: virt++ });
+    pageKeys.push({ uuids: [topUuid || String(doc2.uuid || "")].concat(uuidPath), page: depth2 === 0 && !pageFromFile ? "" : page, virt: virt++ });
     const dir = d.path.split("/").slice(0, -1).join("/");
     for (const m of KiCadCanvas.movableItems(doc2)) {
       if (m.kind !== "sheet" || !m.file) continue;
@@ -92578,7 +92869,7 @@ async function sheetList() {
       const child2 = S3.docs.find((x) => x.docType === "kicad_sch" && x.path === rel) || S3.docs.find((x) => x.docType === "kicad_sch" && x.path.split("/").pop() === m.file.split("/").pop());
       if (!child2) continue;
       const nm4 = m.name || m.file.replace(/\.kicad_sch$/, "");
-      await walk2(child2, nm4, sheetPath + nm4 + "/", m.page || "", uuidPath.concat(m.id), m.id, d.docId, depth + 1);
+      await walk2(child2, nm4, sheetPath + nm4 + "/", m.page || "", uuidPath.concat(m.id), m.id, d.docId, depth2 + 1);
     }
   };
   const pageKeys = [];
@@ -93186,8 +93477,8 @@ function show(fab, ctx, focus) {
     if (mine !== run2) return;
     pkg = made;
     if (!pkg.files.some((f2) => f2.name === selected)) {
-      const first = pkg.files.find((f2) => f2.kind === focus) || pkg.files[0];
-      selected = first ? first.name : "";
+      const first2 = pkg.files.find((f2) => f2.kind === focus) || pkg.files[0];
+      selected = first2 ? first2.name : "";
     }
     drawFiles();
     drawView();
@@ -95806,9 +96097,9 @@ async function openOdbpp() {
     ctx.toast("The ODB++ writer could not be loaded");
     return;
   }
-  const first = await fabContext();
-  if (!first) return;
-  const board3 = first.projectName || "board";
+  const first2 = await fabContext();
+  if (!first2) return;
+  const board3 = first2.projectName || "board";
   const pref = loadPrefs(KEY7, DEFAULTS4);
   const out2 = textField(`${board3}-odb${EXT2[pref.compress] || ""}`, { key: "outputFile" });
   const withExt = (c) => {
@@ -95925,13 +96216,13 @@ async function openIpc2581() {
     ctx.toast("The IPC-2581 writer could not be loaded");
     return;
   }
-  const first = await fabContext();
-  if (!first) return;
+  const first2 = await fabContext();
+  if (!first2) return;
   const S3 = fab.ipc2581Sections;
-  const board3 = first.projectName || "board";
+  const board3 = first2.projectName || "board";
   const pref = loadPrefs(KEY8, DEFAULTS5);
   const fieldNames2 = [];
-  for (const it of first.doc.items.values()) if (it.kind === "footprint") {
+  for (const it of first2.doc.items.values()) if (it.kind === "footprint") {
     for (const c of it.node) if (Array.isArray(c) && c[0] === "property" && typeof c[1] === "string" && !["Reference", "Value", "Footprint", "Datasheet", "Description"].includes(c[1]) && !fieldNames2.includes(c[1])) fieldNames2.push(c[1]);
   }
   fieldNames2.sort((a, b) => a.localeCompare(b));
@@ -95960,7 +96251,7 @@ async function openIpc2581() {
   const includes = h2("div", { class: "pd-lbl", "data-k": "includes", style: "white-space:pre-line" });
   const bomBtn = h2("button", { type: "button", class: "btn", "data-k": "bomFields" }, "BOM Fields...");
   const custBtn = h2("button", { type: "button", class: "btn", "data-k": "customize" }, "Customize...");
-  const bomFields = { id: pref.id, mpn: pref.mpn, mfg: pref.mfg, distPn: pref.distPn, dist: pref.dist, bomRev: pref.bomRev || first.doc.titleBlock && first.doc.titleBlock.rev || "" };
+  const bomFields = { id: pref.id, mpn: pref.mpn, mfg: pref.mfg, distPn: pref.distPn, dist: pref.dist, bomRev: pref.bomRev || first2.doc.titleBlock && first2.doc.titleBlock.rev || "" };
   const report3 = reportPanel("150px", { empty: "", fileName: `${board3}-ipc2581-report.txt` });
   const mode = () => dataSet.get();
   const requested = () => sections !== null ? new Set(sections) : S3.recommended(mode());
@@ -96186,7 +96477,7 @@ function parseCondition(expr) {
   const s2 = expr.trim();
   if (!s2) return [{ op: "&&", obj: "A", kind: "any", value: "" }];
   const parts = [];
-  let depth = 0, q4 = "", start = 0, op = "&&";
+  let depth2 = 0, q4 = "", start = 0, op = "&&";
   for (let i = 0; i < s2.length; i++) {
     const c = s2[i];
     if (q4) {
@@ -96197,9 +96488,9 @@ function parseCondition(expr) {
       q4 = c;
       continue;
     }
-    if (c === "(") depth++;
-    else if (c === ")") depth--;
-    else if (depth === 0 && (s2.startsWith("&&", i) || s2.startsWith("||", i))) {
+    if (c === "(") depth2++;
+    else if (c === ")") depth2--;
+    else if (depth2 === 0 && (s2.startsWith("&&", i) || s2.startsWith("||", i))) {
       parts.push({ op, e: s2.slice(start, i).trim() });
       op = s2[i] === "&" ? "&&" : "||";
       i += 2;
@@ -96321,7 +96612,7 @@ function loadRules(text3) {
   const raws = [];
   let pending = [];
   {
-    let depth = 0, q4 = false, st = -1;
+    let depth2 = 0, q4 = false, st = -1;
     for (let i = 0; i < text3.length; i++) {
       const c = text3[i];
       if (q4) {
@@ -96331,17 +96622,17 @@ function loadRules(text3) {
       }
       if (c === "#" && isCommentAt(text3, i)) {
         const j = text3.indexOf("\n", i), line = text3.slice(i, j < 0 ? text3.length : j).replace(/\r$/, "");
-        if (depth === 0) pending.push(line);
+        if (depth2 === 0) pending.push(line);
         i = j < 0 ? text3.length : j;
         continue;
       }
       if (c === '"') q4 = true;
       else if (c === "(") {
-        if (depth === 0) st = i;
-        depth++;
+        if (depth2 === 0) st = i;
+        depth2++;
       } else if (c === ")") {
-        depth--;
-        if (depth === 0 && st >= 0) {
+        depth2--;
+        if (depth2 === 0 && st >= 0) {
           const t = text3.slice(st, i + 1);
           if (/^\(\s*rule\b/.test(t)) {
             raws.push({ text: t, lead: pending.join("\n") });
@@ -96371,7 +96662,7 @@ function loadRules(text3) {
       else if (c[0] === "layer") rule2.layer = S3(c[1]);
       else if (c[0] === "severity") rule2.severity = S3(c[1]);
     }
-    const bound = (c, k) => {
+    const bound2 = (c, k) => {
       if (!c) return null;
       const b = c.find((x) => Array.isArray(x) && x[0] === k);
       if (!b) return null;
@@ -96388,14 +96679,14 @@ function loadRules(text3) {
     };
     if (codes === "hole_size,via_diameter") {
       const d = by("via_diameter"), hh = by("hole_size");
-      set2("VIA_STYLE", { dmin: bound(d, "min"), dopt: bound(d, "opt"), dmax: bound(d, "max"), hmin: bound(hh, "min"), hopt: bound(hh, "opt"), hmax: bound(hh, "max") });
-    } else if (codes === "text_height,text_thickness") set2("MINIMUM_TEXT_HEIGHT_AND_THICKNESS", { height: bound(by("text_height"), "min"), thickness: bound(by("text_thickness"), "min") });
+      set2("VIA_STYLE", { dmin: bound2(d, "min"), dopt: bound2(d, "opt"), dmax: bound2(d, "max"), hmin: bound2(hh, "min"), hopt: bound2(hh, "opt"), hmax: bound2(hh, "max") });
+    } else if (codes === "text_height,text_thickness") set2("MINIMUM_TEXT_HEIGHT_AND_THICKNESS", { height: bound2(by("text_height"), "min"), thickness: bound2(by("text_thickness"), "min") });
     else if (codes === "diff_pair_gap,diff_pair_uncoupled,track_width") {
       const w = by("track_width"), g2 = by("diff_pair_gap");
-      set2("ROUTING_DIFF_PAIR", { wmin: bound(w, "min"), wopt: bound(w, "opt"), wmax: bound(w, "max"), gmin: bound(g2, "min"), gopt: bound(g2, "opt"), gmax: bound(g2, "max"), uncoupled: bound(by("diff_pair_uncoupled"), "max") });
+      set2("ROUTING_DIFF_PAIR", { wmin: bound2(w, "min"), wopt: bound2(w, "opt"), wmax: bound2(w, "max"), gmin: bound2(g2, "min"), gopt: bound2(g2, "opt"), gmax: bound2(g2, "max"), uncoupled: bound2(by("diff_pair_uncoupled"), "max") });
     } else if (codes === "length,skew") {
       const l = by("length"), sk = by("skew");
-      set2("MATCHED_LENGTH_DIFF_PAIR", { min: bound(l, "min"), opt: bound(l, "opt"), max: bound(l, "max"), skew: bound(sk, "max"), within: !!sk && sk.some((x) => Array.isArray(x) && x[0] === "within_diff_pairs") });
+      set2("MATCHED_LENGTH_DIFF_PAIR", { min: bound2(l, "min"), opt: bound2(l, "opt"), max: bound2(l, "max"), skew: bound2(sk, "max"), within: !!sk && sk.some((x) => Array.isArray(x) && x[0] === "within_diff_pairs") });
     } else if (cons.length === 1) {
       const c = cons[0], code = S3(c[1]);
       if (code === "assertion" && /A\.Layer == /.test(S3(c[2]))) set2("PERMITTED_LAYERS", { top: /'F\.Cu'/.test(S3(c[2])), bottom: /'B\.Cu'/.test(S3(c[2])) });
@@ -96407,13 +96698,13 @@ function loadRules(text3) {
         const items = c.slice(2).map(S3);
         const all2 = items.includes("via");
         set2("VIAS_UNDER_SMD", { through: all2 || items.includes("through_via"), micro: all2 || items.includes("micro_via"), blind: all2 || items.includes("blind_via"), buried: all2 || items.includes("buried_via") });
-      } else if (code === "track_width") set2("ROUTING_WIDTH", { min: bound(c, "min"), opt: bound(c, "opt"), max: bound(c, "max") });
-      else if (code === "length") set2("ABSOLUTE_LENGTH", { min: bound(c, "min"), max: bound(c, "max") });
+      } else if (code === "track_width") set2("ROUTING_WIDTH", { min: bound2(c, "min"), opt: bound2(c, "opt"), max: bound2(c, "max") });
+      else if (code === "length") set2("ABSOLUTE_LENGTH", { min: bound2(c, "min"), max: bound2(c, "max") });
       else if (code === "min_resolved_spokes") set2("MINIMUM_THERMAL_RELIEF_SPOKE_COUNT", { value: +S3(c[2]) || 0 });
-      else if (code === "via_count" || code === "microvia_stack_depth" || code === "hole_aspect_ratio") set2(RULE_TYPES.find((t) => t.code === code).id, { value: bound(c, "max") });
+      else if (code === "via_count" || code === "microvia_stack_depth" || code === "hole_aspect_ratio") set2(RULE_TYPES.find((t) => t.code === code).id, { value: bound2(c, "max") });
       else {
         const t = RULE_TYPES.find((x) => x.panel === "num" && x.code === code);
-        if (t && bound(c, "min") !== null && c.length === 3) set2(t.id, { value: bound(c, "min") });
+        if (t && bound2(c, "min") !== null && c.length === 3) set2(t.id, { value: bound2(c, "min") });
       }
     }
     if (rule2.type !== "CUSTOM_RULE") {
@@ -96546,7 +96837,7 @@ async function openDrcRuleEditor(ctx) {
   const buildTree = () => {
     const q4 = filter.value.trim().toLowerCase();
     const nodes = [];
-    const node = (label, depth, cls, isSel, onClick, key3, kids7) => {
+    const node = (label, depth2, cls, isSel, onClick, key3, kids7) => {
       const tw = treeExpander(!(key3 && collapsed.has(key3)), !!kids7);
       tw.classList.add("tw");
       if (kids7 && key3) tw.addEventListener("click", (ev) => {
@@ -96555,7 +96846,7 @@ async function openDrcRuleEditor(ctx) {
         else collapsed.add(key3);
         buildTree();
       });
-      const n2 = h2("div", { class: `n ${cls}${isSel ? " sel" : ""}`, style: `padding-left:${6 + depth * 14}px`, "data-label": label }, tw, label);
+      const n2 = h2("div", { class: `n ${cls}${isSel ? " sel" : ""}`, style: `padding-left:${6 + depth2 * 14}px`, "data-label": label }, tw, label);
       n2.addEventListener("click", onClick);
       n2.addEventListener("contextmenu", (ev) => {
         ev.preventDefault();
@@ -96576,22 +96867,22 @@ async function openDrcRuleEditor(ctx) {
         if (!cats.includes(p)) cats.push(p);
       }
     }
-    const emitCat = (path2, depth) => {
+    const emitCat = (path2, depth2) => {
       if (![...RULE_TYPES].some((t) => t.cat.join("/").startsWith(path2) && visible(t))) return;
-      node(path2.split("/").pop(), depth, "cat", sel.kind === "cat" && sel.path === path2, () => {
+      node(path2.split("/").pop(), depth2, "cat", sel.kind === "cat" && sel.path === path2, () => {
         sel = { kind: "cat", path: path2 };
         refresh();
       }, path2, true);
       if (collapsed.has(path2)) return;
-      for (const sub2 of cats.filter((c) => c.startsWith(path2 + "/") && c.split("/").length === path2.split("/").length + 1)) emitCat(sub2, depth + 1);
+      for (const sub2 of cats.filter((c) => c.startsWith(path2 + "/") && c.split("/").length === path2.split("/").length + 1)) emitCat(sub2, depth2 + 1);
       for (const t of RULE_TYPES.filter((x) => x.cat.join("/") === path2 && visible(x))) {
         const mine = rules.map((r, i) => ({ r, i })).filter(({ r }) => r.type === t.id && (!q4 || t.label.toLowerCase().includes(q4) || r.name.toLowerCase().includes(q4)));
-        node(t.label, depth + 1, "type", sel.kind === "type" && sel.id === t.id, () => {
+        node(t.label, depth2 + 1, "type", sel.kind === "type" && sel.id === t.id, () => {
           sel = { kind: "type", id: t.id };
           refresh();
         }, "t:" + t.id, mine.length > 0);
         if (collapsed.has("t:" + t.id)) continue;
-        for (const { r, i } of mine) node(r.name || "(unnamed)", depth + 2, "rule" + (dirty(r, i) ? " dirty" : ""), sel.kind === "rule" && sel.i === i, () => {
+        for (const { r, i } of mine) node(r.name || "(unnamed)", depth2 + 2, "rule" + (dirty(r, i) ? " dirty" : ""), sel.kind === "rule" && sel.i === i, () => {
           sel = { kind: "rule", i };
           refresh();
         });
@@ -101400,16 +101691,16 @@ function skipValue(t, i) {
   const c = t[i];
   if (c === '"') return skipString(t, i);
   if (c === "{" || c === "[") {
-    let depth = 0;
+    let depth2 = 0;
     for (; i < t.length; i++) {
       if (t[i] === '"') {
         i = skipString(t, i) - 1;
         continue;
       }
-      if (t[i] === "{" || t[i] === "[") depth++;
+      if (t[i] === "{" || t[i] === "[") depth2++;
       else if (t[i] === "}" || t[i] === "]") {
-        depth--;
-        if (!depth) return i + 1;
+        depth2--;
+        if (!depth2) return i + 1;
       }
     }
     return t.length;
@@ -101961,7 +102252,7 @@ function childSpans(text3) {
     if (i >= n2 || text3[i] === ")") break;
     const st = i;
     if (text3[i] === "(") {
-      let depth = 0, inStr = false;
+      let depth2 = 0, inStr = false;
       for (; i < n2; i++) {
         const c = text3[i];
         if (inStr) {
@@ -101970,10 +102261,10 @@ function childSpans(text3) {
           continue;
         }
         if (c === '"') inStr = true;
-        else if (c === "(") depth++;
+        else if (c === "(") depth2++;
         else if (c === ")") {
-          depth--;
-          if (depth === 0) {
+          depth2--;
+          if (depth2 === 0) {
             i++;
             break;
           }
@@ -103170,8 +103461,8 @@ var PCB_TYPE_NAMES = {
   property: "PCB_FIELD"
 };
 function typeNameOf(item) {
-  const first = item.docType === "pcb" ? PCB_TYPE_NAMES : SCH_TYPE_NAMES, second = first === SCH_TYPE_NAMES ? PCB_TYPE_NAMES : SCH_TYPE_NAMES;
-  return first[item.kind] || second[item.kind] || item.kind.toUpperCase();
+  const first2 = item.docType === "pcb" ? PCB_TYPE_NAMES : SCH_TYPE_NAMES, second = first2 === SCH_TYPE_NAMES ? PCB_TYPE_NAMES : SCH_TYPE_NAMES;
+  return first2[item.kind] || second[item.kind] || item.kind.toUpperCase();
 }
 function pinPoints(doc2, item) {
   const out2 = [];
@@ -103774,7 +104065,7 @@ function boardHeader(text3) {
       let j = i + 1;
       while (j < n2 && /[A-Za-z_0-9]/.test(text3[j])) j++;
       const key3 = text3.slice(i + 1, j);
-      let depth = 0, k = i;
+      let depth2 = 0, k = i;
       for (; k < n2; k++) {
         const ch = text3[k];
         if (ch === '"') {
@@ -103783,10 +104074,10 @@ function boardHeader(text3) {
             if (text3[k] === "\\") k++;
             k++;
           }
-        } else if (ch === "(") depth++;
+        } else if (ch === "(") depth2++;
         else if (ch === ")") {
-          depth--;
-          if (!depth) break;
+          depth2--;
+          if (!depth2) break;
         }
       }
       if (HEADER_KEYS.has(key3)) {
@@ -103905,8 +104196,8 @@ function setCopperCount(rows3, count2) {
   const n2 = Math.max(2, Math.min(32, count2)), stack2 = copperNames(n2);
   const old = new Map(rows3.filter((r) => r.copper).map((r) => [r.name, r]));
   const cu = stack2.map((name) => old.get(name) || { name, id: copperLayerId(name), type: "signal", userName: "", enabled: true, copper: true, mandatory: true, description: "", userDefined: false });
-  const first = rows3.findIndex((r) => r.copper), rest = rows3.filter((r) => !r.copper);
-  return [...rest.slice(0, first), ...cu, ...rest.slice(first)];
+  const first2 = rows3.findIndex((r) => r.copper), rest = rows3.filter((r) => !r.copper);
+  return [...rest.slice(0, first2), ...cu, ...rest.slice(first2)];
 }
 function stackupRows(setup, userNames) {
   const st = setup ? kid(setup, "stackup") : null;
@@ -105504,10 +105795,10 @@ function planUpdate(doc2, netlist, o = {}) {
     }
     return [code, name];
   };
-  const byPath = /* @__PURE__ */ new Map(), byRef2 = /* @__PURE__ */ new Map();
+  const byPath2 = /* @__PURE__ */ new Map(), byRef2 = /* @__PURE__ */ new Map();
   for (const fp of fps) {
     const path2 = kidStr2(fp.node, "path");
-    if (path2 && !byPath.has(path2)) byPath.set(path2, fp);
+    if (path2 && !byPath2.has(path2)) byPath2.set(path2, fp);
     const ref = fpRef(fp.node);
     const l = byRef2.get(ref);
     if (l) l.push(fp);
@@ -105517,7 +105808,7 @@ function planUpdate(doc2, netlist, o = {}) {
   const fpOf = /* @__PURE__ */ new Map();
   const comps = netlist.components.slice().sort((a, b) => a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0);
   if (!o.relinkByRef) for (const c of comps) for (const p of c.paths) {
-    const fp = byPath.get(p);
+    const fp = byPath2.get(p);
     if (fp && !claimed.has(fp.id)) {
       claimed.set(fp.id, c);
       fpOf.set(c, fp);
@@ -105978,10 +106269,10 @@ function schematicParity(doc2, netlist) {
     const p = fp ? at5(fp) : [0, 0];
     out2.push({ code, severity: "warning", x: p[0], y: p[1], text: text3, ids: fp ? [fp.id] : [] });
   };
-  const byPath = /* @__PURE__ */ new Map(), byRef2 = /* @__PURE__ */ new Map();
+  const byPath2 = /* @__PURE__ */ new Map(), byRef2 = /* @__PURE__ */ new Map();
   for (const fp of fps) {
     const path2 = kidStr2(fp.node, "path");
-    if (path2 && !byPath.has(path2)) byPath.set(path2, fp);
+    if (path2 && !byPath2.has(path2)) byPath2.set(path2, fp);
     const ref = fpRef(fp.node);
     const l = byRef2.get(ref);
     if (l) l.push(fp);
@@ -105994,7 +106285,7 @@ function schematicParity(doc2, netlist) {
   for (const c of netlist.components) {
     let fp;
     for (const p of c.paths) {
-      fp = byPath.get(p);
+      fp = byPath2.get(p);
       if (fp) break;
     }
     if (!fp) fp = (byRef2.get(c.ref) || []).find((f2) => !matched.has(f2.id));
@@ -110317,9 +110608,9 @@ root.KiCadCanvas = api;
         }
         return got;
       }
-      edge(first) {
+      edge(first2) {
         const os2 = this.options;
-        return first ? this.step(-1, 1) : this.step(os2.length, -1);
+        return first2 ? this.step(-1, 1) : this.step(os2.length, -1);
       }
       typeAhead(ch, from) {
         const now = Date.now();
@@ -113814,9 +114105,9 @@ Link '${target2}' to this file?`)) return null;
   var perp = (v) => [-v[1], v[0]];
   function nearestEnd(a, b, p, tol) {
     const da = Math.hypot(a[0] - p[0], a[1] - p[1]), db = Math.hypot(b[0] - p[0], b[1] - p[1]);
-    const first = da <= db;
-    if (tol !== void 0 && (first ? da : db) > tol) return null;
-    return first ? a : b;
+    const first2 = da <= db;
+    if (tol !== void 0 && (first2 ? da : db) > tol) return null;
+    return first2 ? a : b;
   }
   function tangentAtEndpoint(sh, p) {
     const atStart = p[0] === sh.start[0] && p[1] === sh.start[1];
@@ -114232,8 +114523,8 @@ Link '${target2}' to this file?`)) return null;
       ctx.setSelected(null);
       d.started = true;
     }
-    const first = !d.chainSeeded && !d.clickSeeded && g2.getStep() === 0;
-    if (first && g2.mode === ARC_TANGENT) {
+    const first2 = !d.chainSeeded && !d.clickSeeded && g2.getStep() === 0;
+    if (first2 && g2.mode === ARC_TANGENT) {
       const seed = findSchTangentSeed(ctx, pos);
       if (seed) {
         g2.setTangentSeed(seed.start, seed.dir, seed.axis);
@@ -115133,7 +115424,7 @@ Link '${target2}' to this file?`)) return null;
     const jd = ss && typeof ss.junctionDiameter === "number" ? Math.max(ss.junctionDiameter, IU4) : 0.9144;
     const jr = Math.max(jd * 1.5, MIN_R);
     for (const p of junctions) {
-      let first, diff = false, movedNet = false;
+      let first2, diff = false, movedNet = false;
       for (const it of doc2.items.values()) {
         const pts = connPoints(doc2, it);
         if (!pts.length) continue;
@@ -115142,8 +115433,8 @@ Link '${target2}' to this file?`)) return null;
         if (i < 0) continue;
         const net = nc.nets.get(keyOf(it.id, i));
         if (net === void 0) continue;
-        if (first !== void 0 && first !== net) diff = true;
-        first = net;
+        if (first2 !== void 0 && first2 !== net) diff = true;
+        first2 = net;
         movedNet = movedNet || nc.moved.has(it.id);
       }
       if (movedNet && diff) out2.junctions.push({ p, r: jr });
@@ -120046,7 +120337,7 @@ function minCostFlow(n2, edges, s2, t, want2) {
   }
   return edges.map(([, , c], i) => c - cap[2 * i]);
 }
-function fanout(rows3, jobs, ctx, depth = 0, spread = 0) {
+function fanout(rows3, jobs, ctx, depth2 = 0, spread = 0) {
   const book = /* @__PURE__ */ new Map();
   const boxed = [];
   for (const row3 of rows3) {
@@ -120059,7 +120350,7 @@ function fanout(rows3, jobs, ctx, depth = 0, spread = 0) {
     }
     const rs = Array.from(count2).sort((a, b) => b[1] - a[1] || a[0] - b[0])[0][0];
     const hl = Math.max(...row3.pads.map((p) => p.len / 2));
-    const r1 = hl + Math.max(rs, depth);
+    const r1 = hl + Math.max(rs, depth2);
     const geo = { n: row3.n, t: row3.t, rs, R: Array.from({ length: RINGS }, (_, k) => r62(r1 + k * rs)) };
     const tc = (p) => dot(p.p, geo.t);
     const lanes = (skip) => {
@@ -120234,7 +120525,7 @@ function viaEscape(js, row3, geo, jobs, book, ctx, put4) {
   for (const j of js) {
     const list = [];
     const vr = j.viaD / 2, lv = j.viaD + j.clr, dl = j.w + j.clr;
-    let first = null;
+    let first2 = null;
     for (const [name, d] of [["out", geo.n], ["in", [-geo.n[0], -geo.n[1]]]]) {
       const base2 = j.pad.len / 2 + j.clr + vr;
       for (let k = 0; k < VIA_DEPTHS; k++) for (const m of [0, -1, 1]) {
@@ -120242,13 +120533,13 @@ function viaEscape(js, row3, geo, jobs, book, ctx, put4) {
         const v = at(j.pad.p, d, dist, geo.t, m * dl);
         const segs = m === 0 ? [[j.pad.p, v]] : [[j.pad.p, at(j.pad.p, d, dist - dl)], [at(j.pad.p, d, dist - dl), v]];
         if (name === "out" && hard.some(([t, w, c]) => closes(dot(v, geo.t), vr, j.clr, t, w, c))) {
-          first = first || "a via would close a neighbour's lane";
+          first2 = first2 || "a via would close a neighbour's lane";
           continue;
         }
         const o = { pad: j.pad, net: j.net, kind: "via", segs, w: j.w, via: v, end: v, n: d, lane: null, cost: segs.reduce((s2, [p, q4]) => s2 + Math.hypot(q4[0] - p[0], q4[1] - p[1]), 0) + dl * crowd(v, 2 * lv), a: 0, b: 0, d: m, seq: seq++ };
         const h3 = viaCheck(j, o, ctx);
         if (h3 !== null) {
-          first = first || h3;
+          first2 = first2 || h3;
           continue;
         }
         const g2 = gaps.find((x) => x.a !== j.pad && x.b !== j.pad && segs.some(([p, q4]) => cross(p, q4, x.a.p, x.b.p)));
@@ -120260,7 +120551,7 @@ function viaEscape(js, row3, geo, jobs, book, ctx, put4) {
         list.push(o);
       }
     }
-    if (!list.length) j.blocker = j.blocker || first || "no via site";
+    if (!list.length) j.blocker = j.blocker || first2 || "no via site";
     opts2.set(j.pad.name, list);
   }
   const used = /* @__PURE__ */ new Set();
@@ -120700,7 +120991,7 @@ function plan(inp, conns) {
   const maxIters = Math.max(1, inp.iters || MAX_ITERS), maxMs = inp.maxMs || 8e3;
   for (const c of conns) route3(c, 0);
   let ov = overflow();
-  const first = ov.tot;
+  const first2 = ov.tot;
   let best = { tot: ov.tot, wire: wire(), paths: new Map(paths) };
   let its = 1;
   for (let it = 0; ov.tot > 1e-6 && its < maxIters && Date.now() - t0 < maxMs; it++) {
@@ -120884,7 +121175,7 @@ function plan(inp, conns) {
     for (let r = 0; r < GT; r++) if (layer4[r] === -2) layer4[r] = -1;
     corridors.set(c.id, { tiles, layer: layer4, vias, overflow: (overOf.get(c.id) || 0) + overAt(q4), path: q4 });
   }
-  return { k, T, nx, ny, corridors, iterations: its, overflowFirst: first, overflow: ov.tot, crossings: ov.xruns.length, relayered, ms: Date.now() - t0 };
+  return { k, T, nx, ny, corridors, iterations: its, overflowFirst: first2, overflow: ov.tot, crossings: ov.xruns.length, relayered, ms: Date.now() - t0 };
 }
 
 // web/domains/pcb/router/impedance.ts
@@ -121162,8 +121453,8 @@ var Router = class _Router {
           const a = [p.x + sg * ax[0] * half, p.y + sg * ax[1] * half], b = [a[0] + sg * ax[0] * lane, a[1] + sg * ax[1] * lane];
           if (fan && pitch <= 0.65 && !isSupply(c.net) && !zoned.has(c.net) && (padsOf.get(c.net) || []).some((q4) => Math.hypot(q4[0] - p.x, q4[1] - p.y) > FAN_FAR_MM)) {
             const k = Math.round((-(p.x - cx) * ax[1] + (p.y - cy) * ax[0]) / pitch);
-            const depth = FAN_ROWS_MM[(k % 3 + 3) % 3];
-            const e = [a[0] + sg * ax[0] * depth, a[1] + sg * ax[1] * depth];
+            const depth2 = FAN_ROWS_MM[(k % 3 + 3) % 3];
+            const e = [a[0] + sg * ax[0] * depth2, a[1] + sg * ax[1] * depth2];
             const dx = e[0] - a[0], dy = e[1] - a[1], dd = dx * dx + dy * dy;
             const hit5 = allPads.some((q4) => {
               if (q4.net === c.net || q4.item === c.item) return false;
@@ -122224,23 +122515,23 @@ var Router = class _Router {
       if (!target2) continue;
       const clr = Math.max(P.netClearance(s2, e[0].key), P.netClearance(s2, e[1].key), s2.minClearance || 0);
       const cw = this.classFor(e[0].key).width;
-      let pick = null, first = null;
+      let pick = null, first2 = null;
       for (const g2 of [Math.max(clr, this.opts.pairGap || 0), clr * 1.5, clr * 2, clr * 3]) {
         const w = widthFor(tr, target2, g2);
-        if (w !== null && first === null) first = w;
+        if (w !== null && first2 === null) first2 = w;
         if (w !== null && w >= minW && w <= Math.max(0.6, cw * 3)) {
           pick = { w: r26(w), g: r26(g2) };
           break;
         }
       }
-      const rep = { nets: e.map((n2) => n2.key), target: target2, differential: true, layer: tr.layer, model, width: pick ? pick.w : first !== null ? r26(first) : null, gap: pick ? pick.g : r26(clr), applied: !!pick };
+      const rep = { nets: e.map((n2) => n2.key), target: target2, differential: true, layer: tr.layer, model, width: pick ? pick.w : first2 !== null ? r26(first2) : null, gap: pick ? pick.g : r26(clr), applied: !!pick };
       if (pick) {
         for (const n2 of e) {
           this.zWidth.set(n2.key, pick.w);
           this.zGap.set(n2.key, pick.g);
         }
         rep.achieved = Math.round(zdiff(tr, pick.w, pick.g));
-      } else rep.note = first !== null ? `${target2} \u03A9 needs ${r26(first)} mm tracks on this stackup, more than the board can carry: routed at the class width (${Math.round(zdiff(tr, cw, clr))} \u03A9). A thinner dielectric under the layer (a 4-layer build) brings the width down.` : `no track width gives ${target2} \u03A9 on this stackup`;
+      } else rep.note = first2 !== null ? `${target2} \u03A9 needs ${r26(first2)} mm tracks on this stackup, more than the board can carry: routed at the class width (${Math.round(zdiff(tr, cw, clr))} \u03A9). A thinner dielectric under the layer (a 4-layer build) brings the width down.` : `no track width gives ${target2} \u03A9 on this stackup`;
       this.zReports.push(rep);
     }
     for (const net of single) {
@@ -123477,7 +123768,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     conn.feat = featuresOf(G5, nodes, this.pref);
     conn.zoneEnd = !!res.zoneEnd;
     const A = flip ? conn.b : conn.a, B = flip ? conn.a : conn.b;
-    const first = nodes[0], last3 = nodes[nodes.length - 1];
+    const first2 = nodes[0], last3 = nodes[nodes.length - 1];
     const piece = (from, to, l, sw = w) => {
       if (Math.hypot(to[0] - from[0], to[1] - from[1]) > 1e-4) {
         conn.stubs.push([from, to, l]);
@@ -123493,7 +123784,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       } else piece(anchor2.p, p, n2.l, sw);
     };
     const esc9 = found.esc || [];
-    stub(A, first, esc9[0]);
+    stub(A, first2, esc9[0]);
     if (!res.onTerm) stub(B, last3, esc9[1]);
     conn.landed = -1;
     if (res.onTerm) {
@@ -123663,8 +123954,8 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       const g2 = this.opts.groupsFirst === false ? "" : this.groupFor(c);
       if (g2 && c.len <= GROUP_REACH * 2) inGroup.set(c.id, g2);
     }
-    const first = /* @__PURE__ */ new Set();
-    for (const c of conns) if (critical(c) || gOf.get(c.net).rank < Infinity) first.add(c.id);
+    const first2 = /* @__PURE__ */ new Set();
+    for (const c of conns) if (critical(c) || gOf.get(c.net).rank < Infinity) first2.add(c.id);
     const tier = (c) => this.opts.criticalFirst !== false ? critical(c) ? -3 : inGroup.has(c.id) ? -2 : isSupply(c.net) && !this.netOf(c.net).zoneCells ? -1 : c.len < 3 ? 0 : Math.min(c.a.narrow || Infinity, c.b.narrow || Infinity) <= 0.35 ? 1 : isSupply(c.net) ? 2 : 3 : inGroup.has(c.id) ? -3 : critical(c) ? -2 : isSupply(c.net) && !this.netOf(c.net).zoneCells ? -1 : c.len < 3 ? 0 : Math.min(c.a.narrow || Infinity, c.b.narrow || Infinity) <= 0.35 ? 1 : isSupply(c.net) ? 2 : 3;
     const order = conns.slice().sort((a, b) => cmp2(gOf.get(a.net).rank, gOf.get(b.net).rank) || gOf.get(b.net).priority - gOf.get(a.net).priority || tier(a) - tier(b) || (inGroup.has(a.id) && tier(a) === tier(b) && inGroup.has(b.id) ? inGroup.get(a.id) < inGroup.get(b.id) ? -1 : inGroup.get(a.id) > inGroup.get(b.id) ? 1 : 0 : 0) || (tier(a) === 1 ? b.len - a.len : a.len - b.len) || (a.net < b.net ? -1 : a.net > b.net ? 1 : a.id - b.id));
     let best = null;
@@ -123685,7 +123976,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       for (const c of conns) if (c.nodes) this.rip(c);
       for (const c of conns) c.rips = 0;
       this.layPairs();
-      const queue3 = pass === 0 ? order.slice() : order.filter((c) => first.has(c.id)).concat(order.filter((c) => !first.has(c.id) && failedLast.has(c.id)), order.filter((c) => !first.has(c.id) && !failedLast.has(c.id)));
+      const queue3 = pass === 0 ? order.slice() : order.filter((c) => first2.has(c.id)).concat(order.filter((c) => !first2.has(c.id) && failedLast.has(c.id)), order.filter((c) => !first2.has(c.id) && !failedLast.has(c.id)));
       const failed = /* @__PURE__ */ new Set();
       let done = 0;
       while (queue3.length) {
@@ -123714,8 +124005,8 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
             if (!soft) this.stat.noSoft++;
             if (soft) {
               const bl = this.blockers(c, soft.res);
-              this.stat[!bl.length ? "noBlockers" : bl.length > 14 ? "tooMany" : bl.every((b) => b.rips < RB && !first.has(b.id)) ? "ripped" : "ripLimit"]++;
-              if (bl.length && bl.length <= 14 && bl.every((b) => b.rips < RB && !first.has(b.id))) {
+              this.stat[!bl.length ? "noBlockers" : bl.length > 14 ? "tooMany" : bl.every((b) => b.rips < RB && !first2.has(b.id)) ? "ripped" : "ripLimit"]++;
+              if (bl.length && bl.length <= 14 && bl.every((b) => b.rips < RB && !first2.has(b.id))) {
                 const ripped = [];
                 for (const b of bl) {
                   b.rips++;
@@ -123739,7 +124030,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
             }
           }
           if (found && flat && found.res.feat.length > FLAT_DETOUR * c.len + FLAT_SLACK_MM) found = null;
-          if (!found && flat && first.has(c.id)) {
+          if (!found && flat && first2.has(c.id)) {
             this.viaCap = Infinity;
             found = this.find(c, false);
           }
@@ -123824,13 +124115,13 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       if (f2) this.commit(c, f2);
       return !!f2;
     };
-    const force = (c, depth, keep) => {
+    const force = (c, depth2, keep) => {
       if (c.pairOnly && this.opts.splitPairs !== true) return false;
       if (lay(c)) {
         keep.add(c);
         return true;
       }
-      if (depth <= 0 || timeUp()) return false;
+      if (depth2 <= 0 || timeUp()) return false;
       const soft = this.find(c, true);
       if (!soft) return false;
       const bl = this.blockers(c, soft.res);
@@ -123842,17 +124133,17 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       else if (!lay(c)) return false;
       keep.add(c);
       ripped.sort((a, b) => a.len - b.len);
-      for (const r of ripped) if (!r.nodes && !force(r, depth - 1, keep)) return false;
+      for (const r of ripped) if (!r.nodes && !force(r, depth2 - 1, keep)) return false;
       return true;
     };
     const tabu = /* @__PURE__ */ new Set();
-    const cutForce = (c, depth, keep) => {
+    const cutForce = (c, depth2, keep) => {
       if (c.pairOnly && this.opts.splitPairs !== true) return false;
       if (lay(c)) {
         keep.add(c);
         return true;
       }
-      if (depth <= 0 || timeUp()) return false;
+      if (depth2 <= 0 || timeUp()) return false;
       const hard = /* @__PURE__ */ new Set();
       for (let attempt = 0; attempt < CUT_TRIES && !timeUp(); attempt++) {
         const cut = this.cutFor(c, (o) => keep.has(o) || !!o.pair || hard.has(o.id));
@@ -123875,7 +124166,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
         if (ok2) {
           keep.add(c);
           ripped.sort((a, b) => a.len - b.len || a.id - b.id);
-          for (const r of ripped) if (!r.nodes && !cutForce(r, depth - 1, keep)) {
+          for (const r of ripped) if (!r.nodes && !cutForce(r, depth2 - 1, keep)) {
             ok2 = false;
             blamed = [r];
             break;
@@ -123893,15 +124184,15 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       return false;
     };
     const mincut = (this.opts.ripup ?? RIPUP) === "mincut";
-    const forceAny = (c, depth, keep) => {
-      if (!mincut) return force(c, depth, keep);
+    const forceAny = (c, depth2, keep) => {
+      if (!mincut) return force(c, depth2, keep);
       if (CUT_ORDER === "near-first") {
         const s2 = snapOf();
-        if (force(c, depth, keep)) return true;
+        if (force(c, depth2, keep)) return true;
         back(s2);
-        return !timeUp() && cutForce(c, Math.min(depth, CUT_DEPTH), /* @__PURE__ */ new Set());
+        return !timeUp() && cutForce(c, Math.min(depth2, CUT_DEPTH), /* @__PURE__ */ new Set());
       }
-      return cutForce(c, Math.min(depth, CUT_DEPTH), keep) || CUT_ORDER === "cut-first" && !timeUp() && force(c, depth, /* @__PURE__ */ new Set());
+      return cutForce(c, Math.min(depth2, CUT_DEPTH), keep) || CUT_ORDER === "cut-first" && !timeUp() && force(c, depth2, /* @__PURE__ */ new Set());
     };
     for (let round = 0; round < 3; round++) {
       const open4 = conns.filter((c) => !c.nodes && c.why !== "budget");
@@ -124206,8 +124497,8 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
     const owner = /* @__PURE__ */ new Map();
     for (const c of routed) {
       const me3 = node.get(c);
-      const first = this.mm(c.nodes[0]), last3 = this.mm(c.nodes[c.nodes.length - 1]);
-      for (const e of c.ends || [c.a, c.b]) if (c.stubs.some((st) => st[0] === e.p) || [first, last3].some((q4) => Math.hypot(q4[0] - e.p[0], q4[1] - e.p[1]) < 1e-3)) join(me3, e.grp || 0);
+      const first2 = this.mm(c.nodes[0]), last3 = this.mm(c.nodes[c.nodes.length - 1]);
+      for (const e of c.ends || [c.a, c.b]) if (c.stubs.some((st) => st[0] === e.p) || [first2, last3].some((q4) => Math.hypot(q4[0] - e.p[0], q4[1] - e.p[1]) < 1e-3)) join(me3, e.grp || 0);
       if (c.landed >= 0 && node.has(this.conns[c.landed])) join(me3, node.get(this.conns[c.landed]));
       const cells3 = [];
       this.cellsOf(c, cells3, owner);
@@ -126257,18 +126548,18 @@ var ATTR_TEXT = {
 };
 function boardHoles(m) {
   const out2 = [];
-  const first = m.copper[0], last3 = m.copper[m.copper.length - 1];
+  const first2 = m.copper[0], last3 = m.copper[m.copper.length - 1];
   for (const fp of m.footprints) for (const p of fp.pads) {
     if (!p.drill || p.type !== "thru_hole" && p.type !== "np_thru_hole") continue;
     const plated = p.type === "thru_hole";
     const attr = !plated ? ATTR.mechanical : p.property === "pad_prop_castellated" ? ATTR.padCastellated : p.property === "pad_prop_pressfit" ? ATTR.padPressfit : ATTR.pad;
     const slot = p.drill.oval ? { w: p.drill.w, h: p.drill.h, rot: p.rot } : null;
-    out2.push({ x: p.x, y: p.y, d: Math.min(p.drill.w, p.drill.h), slot, plated, attr, from: first, to: last3 });
+    out2.push({ x: p.x, y: p.y, d: Math.min(p.drill.w, p.drill.h), slot, plated, attr, from: first2, to: last3 });
   }
   for (const v of m.vias) {
     if (!(v.drill > 0)) continue;
     const through = v.type === "through";
-    out2.push({ x: v.x, y: v.y, d: v.drill, slot: null, plated: true, attr: through ? ATTR.viaThrough : ATTR.viaBuried, from: through ? first : v.layers[0], to: through ? last3 : v.layers[v.layers.length - 1], via: v });
+    out2.push({ x: v.x, y: v.y, d: v.drill, slot: null, plated: true, attr: through ? ATTR.viaThrough : ATTR.viaBuried, from: through ? first2 : v.layers[0], to: through ? last3 : v.layers[v.layers.length - 1], via: v });
   }
   return out2;
 }
@@ -126359,15 +126650,15 @@ function writeExcellon(holes, fileFunction3, opt) {
 var pairName2 = (l) => l === "F.Cu" ? "front" : l === "B.Cu" ? "back" : "in" + (/^In(\d+)\.Cu$/.exec(l) || ["", "?"])[1];
 function drillFiles(m, baseName3, opt, ext = "drl") {
   const holes = boardHoles(m);
-  const first = m.copper[0], last3 = m.copper[m.copper.length - 1];
+  const first2 = m.copper[0], last3 = m.copper[m.copper.length - 1];
   const idx = (l) => m.copper.indexOf(l) + 1;
-  const through = holes.filter((h3) => h3.from === first && h3.to === last3);
+  const through = holes.filter((h3) => h3.from === first2 && h3.to === last3);
   const out2 = [];
   const add2 = (name, hs, fn) => {
     const w = writeExcellon(hs, fn, opt);
     out2.push({ name, text: w.text, holes: hs.length, tools: w.tools });
   };
-  const span = `${idx(first)},${idx(last3)}`;
+  const span = `${idx(first2)},${idx(last3)}`;
   if (opt.merge) add2(`${baseName3}.${ext}`, through, `MixedPlating,${span}`);
   else {
     add2(`${baseName3}-PTH.${ext}`, through.filter((h3) => h3.plated), `Plated,${span},PTH`);
@@ -126375,7 +126666,7 @@ function drillFiles(m, baseName3, opt, ext = "drl") {
   }
   const pairs = /* @__PURE__ */ new Map();
   for (const h3 of holes) {
-    if (h3.from === first && h3.to === last3) continue;
+    if (h3.from === first2 && h3.to === last3) continue;
     const k = h3.from + "|" + h3.to;
     const l = pairs.get(k);
     if (l) l.push(h3);
@@ -130897,8 +131188,8 @@ function writeGerber(prims, attrs, opt) {
   };
   const freePoly = (pts) => {
     const body2 = pts.map((p) => mm(p[0]) + "," + mm(-p[1])).join(",\n");
-    const first = pts[0];
-    const key3 = "4,1," + pts.length + ",\n" + body2 + ",\n" + mm(first[0]) + "," + mm(-first[1]) + ",\n$1*%";
+    const first2 = pts[0];
+    const key3 = "4,1," + pts.length + ",\n" + body2 + ",\n" + mm(first2[0]) + "," + mm(-first2[1]) + ",\n$1*%";
     let name = macros.get(key3);
     if (!name) {
       name = "FreePoly" + macros.size;
@@ -131852,12 +132143,12 @@ function runs(line) {
     for (let i = 0; i < s2.length; i++) {
       const c = s2[i];
       if ((c === "^" || c === "_" || c === "~") && s2[i + 1] === "{") {
-        let depth = 1, j = i + 2;
-        for (; j < s2.length && depth; j++) {
-          if (s2[j] === "{") depth++;
-          else if (s2[j] === "}") depth--;
+        let depth2 = 1, j = i + 2;
+        for (; j < s2.length && depth2; j++) {
+          if (s2[j] === "{") depth2++;
+          else if (s2[j] === "}") depth2--;
         }
-        if (!depth) {
+        if (!depth2) {
           flush();
           walk2(s2.slice(i + 2, j - 1), sup || c === "^", sub2 || c === "_", over || c === "~");
           i = j - 1;
@@ -132423,9 +132714,9 @@ var Connections = class {
     return false;
   }
 };
-function flashed(removeUnused, keepEnds, zoneLayers, layer4, first, last3, x, y, r, conn) {
+function flashed(removeUnused, keepEnds, zoneLayers, layer4, first2, last3, x, y, r, conn) {
   if (!removeUnused) return true;
-  if (keepEnds && (layer4 === first || layer4 === last3)) return true;
+  if (keepEnds && (layer4 === first2 || layer4 === last3)) return true;
   if (zoneLayers.has(layer4)) return true;
   return conn.near(layer4, x, y, r);
 }
@@ -132597,7 +132888,7 @@ function plotLayer(m, layer4, opt, log, conn) {
     for (let i = at5; i < out2.length; i++) if (!out2[i].meta) out2[i].meta = meta2;
     for (let i = k0; i < knock.length; i++) if (!knock[i].meta) knock[i].meta = meta2;
   };
-  const first = m.copper[0], last3 = m.copper[m.copper.length - 1];
+  const first2 = m.copper[0], last3 = m.copper[m.copper.length - 1];
   const connections = conn || new Connections(m);
   const growOf = (g2) => g2.layer !== layer4 && g2.maskLayer === layer4 ? typeof g2.maskMargin === "number" ? g2.maskMargin : m.settings.maskExpansion : 0;
   const useGeom = (g2) => {
@@ -132641,7 +132932,7 @@ function plotLayer(m, layer4, opt, log, conn) {
         if (shape3.shape === "circle" && !pad2.drill.oval && pad2.drill.w >= shape3.w - 1e-9) continue;
         if (shape3.shape === "oval" && pad2.drill.w >= shape3.w - 1e-9 && pad2.drill.h >= shape3.h - 1e-9) continue;
       }
-      if (pad2.type === "thru_hole" && !flashed(pad2.removeUnused, pad2.keepEnds, pad2.zoneLayers, layer4, first, last3, pad2.x, pad2.y, Math.max(shape3.w, shape3.h) / 2, connections)) continue;
+      if (pad2.type === "thru_hole" && !flashed(pad2.removeUnused, pad2.keepEnds, pad2.zoneLayers, layer4, first2, last3, pad2.x, pad2.y, Math.max(shape3.w, shape3.h) / 2, connections)) continue;
     }
     const at5 = out2.length;
     padPrims(pad2, layer4, m, out2, cu ? opt.widthAdj || 0 : 0);
@@ -133914,10 +134205,10 @@ var PROLOG = [
 ];
 function writePs(doc2, o = {}) {
   const sx = o.scaleX || 1, sy = o.scaleY || 1;
-  const first = doc2.pages[0] || { w: 297, h: 210 };
+  const first2 = doc2.pages[0] || { w: 297, h: 210 };
   const out2 = [];
-  const wPt = Math.round(first.w * PT2), hPt = Math.round(first.h * PT2);
-  const landscape = first.w > first.h;
+  const wPt = Math.round(first2.w * PT2), hPt = Math.round(first2.h * PT2);
+  const landscape = first2.w > first2.h;
   out2.push(
     "%!PS-Adobe-3.0",
     `%%Creator: ${doc2.creator}`,
@@ -134386,16 +134677,16 @@ var MAP_EXT = { 2: "ps", 1: "gbr", 3: "dxf", 5: "svg", 4: "pdf" };
 var version = (ctx) => String(ctx.doc.kicadVersion || "10.99") + VERSION_SUFFIX;
 function spans(m, base2, merge2, gerber) {
   const holes = boardHoles(m);
-  const first = m.copper[0], last3 = m.copper[m.copper.length - 1];
-  const through = holes.filter((h3) => h3.from === first && h3.to === last3);
+  const first2 = m.copper[0], last3 = m.copper[m.copper.length - 1];
+  const through = holes.filter((h3) => h3.from === first2 && h3.to === last3);
   const suffix = gerber ? "-drl.gbr" : ".drl";
   const pairName3 = (l) => l === "F.Cu" ? "front" : l === "B.Cu" ? "back" : "in" + (/^In(\d+)\.Cu$/.exec(l) || ["", "?"])[1];
   const out2 = [];
-  if (merge2 && !gerber) out2.push({ name: base2 + suffix, holes: through, npth: false, mixed: true, from: first, to: last3 });
-  else out2.push({ name: `${base2}-PTH${suffix}`, holes: through.filter((h3) => h3.plated), npth: false, mixed: false, from: first, to: last3 });
+  if (merge2 && !gerber) out2.push({ name: base2 + suffix, holes: through, npth: false, mixed: true, from: first2, to: last3 });
+  else out2.push({ name: `${base2}-PTH${suffix}`, holes: through.filter((h3) => h3.plated), npth: false, mixed: false, from: first2, to: last3 });
   const pairs = /* @__PURE__ */ new Map();
   for (const h3 of holes) {
-    if (h3.from === first && h3.to === last3) continue;
+    if (h3.from === first2 && h3.to === last3) continue;
     const k = h3.from + "|" + h3.to;
     const l = pairs.get(k);
     if (l) l.push(h3);
@@ -134405,7 +134696,7 @@ function spans(m, base2, merge2, gerber) {
     const [a, b] = k.split("|");
     out2.push({ name: `${base2}-${pairName3(a)}-${pairName3(b)}${suffix}`, holes: hs, npth: false, mixed: false, from: a, to: b });
   }
-  if (!(merge2 && !gerber)) out2.push({ name: `${base2}-NPTH${suffix}`, holes: through.filter((h3) => !h3.plated), npth: true, mixed: false, from: first, to: last3 });
+  if (!(merge2 && !gerber)) out2.push({ name: `${base2}-NPTH${suffix}`, holes: through.filter((h3) => !h3.plated), npth: true, mixed: false, from: first2, to: last3 });
   return out2;
 }
 function toolsOf(holes) {
@@ -135555,7 +135846,7 @@ var ZoneFiller = class {
   }
   /** The first pass of Fill(): which conditionally flashed pads and vias a zone will reach. */
   conditionalFlashing() {
-    const first = this.m.copper[0], last3 = this.m.copper[this.m.copper.length - 1];
+    const first2 = this.m.copper[0], last3 = this.m.copper[this.m.copper.length - 1];
     const keepoutAt = (layer4, x, y) => this.zones.some((z2) => z2.ruleArea && z2.noFills && z2.layers.includes(layer4) && contains(z2.outline, x, y));
     const best = (layer4, net, test) => {
       let sameNet2 = null, any = null;
@@ -135594,7 +135885,7 @@ var ZoneFiller = class {
       const map = /* @__PURE__ */ new Map();
       for (const l of pad2.layers) {
         if (!isCopper(l)) continue;
-        if (pad2.keepEnds && (l === first || l === last3)) continue;
+        if (pad2.keepEnds && (l === first2 || l === last3)) continue;
         if (pad2.zoneLayers.has(l)) continue;
         if (trackAt(l, pad2.x, pad2.y, Math.max(pad2.base.w, pad2.base.h) / 2)) continue;
         if (keepoutAt(l, pad2.x, pad2.y)) {
@@ -136544,20 +136835,20 @@ function chainLoops(paths, tol = 0.01) {
 }
 function nestLoops(loops) {
   const L = loops.filter((l) => l.length >= 3 && Math.abs(polyArea3(l)) > 1e-6).sort((a, b) => Math.abs(polyArea3(b)) - Math.abs(polyArea3(a)));
-  const parent = [], depth = [];
+  const parent = [], depth2 = [];
   for (let i = 0; i < L.length; i++) {
     parent[i] = -1;
-    depth[i] = 0;
+    depth2[i] = 0;
     for (let j = i - 1; j >= 0; j--) if (pointInPolygon2(L[j], L[i][0][0], L[i][0][1])) {
       parent[i] = j;
-      depth[i] = depth[j] + 1;
+      depth2[i] = depth2[j] + 1;
       break;
     }
   }
   const out2 = [];
   const index = /* @__PURE__ */ new Map();
   for (let i = 0; i < L.length; i++) {
-    if (depth[i] % 2 === 0) {
+    if (depth2[i] % 2 === 0) {
       const o = { contour: L[i], cutouts: [] };
       index.set(i, o);
       out2.push(o);
@@ -138314,7 +138605,7 @@ function writeOdb(m, setup, o) {
   const put4 = (path2, text3) => {
     files.push({ path: path2, text: text3 });
   };
-  const first = m.copper[0], last3 = m.copper[m.copper.length - 1];
+  const first2 = m.copper[0], last3 = m.copper[m.copper.length - 1];
   const enabled = new Set(o.layers.length ? o.layers : [...m.copper, "F.SilkS", "B.SilkS", "F.Mask", "B.Mask", "F.Paste", "B.Paste"]);
   for (const l of m.copper) enabled.add(l);
   const contour = (ptsIn, hole, tag) => {
@@ -138465,16 +138756,16 @@ F ${this.recs.length}
   const hits2 = [];
   for (const fp of m.footprints) for (const p of fp.pads) {
     if (!p.drill || p.type !== "thru_hole" && p.type !== "np_thru_hole") continue;
-    hits2.push({ x: p.x, y: p.y, d: Math.min(p.drill.w, p.drill.h), slot: p.drill.oval ? { w: p.drill.w, h: p.drill.h, rot: p.rot } : null, plated: p.type === "thru_hole", from: first, to: last3, pad: p });
+    hits2.push({ x: p.x, y: p.y, d: Math.min(p.drill.w, p.drill.h), slot: p.drill.oval ? { w: p.drill.w, h: p.drill.h, rot: p.rot } : null, plated: p.type === "thru_hole", from: first2, to: last3, pad: p });
   }
   for (const v of m.vias) {
     if (!(v.drill > 0)) continue;
     const through = v.type === "through";
-    hits2.push({ x: v.x, y: v.y, d: v.drill, slot: null, plated: true, from: through ? first : v.layers[0], to: through ? last3 : v.layers[v.layers.length - 1], via: v });
+    hits2.push({ x: v.x, y: v.y, d: v.drill, slot: null, plated: true, from: through ? first2 : v.layers[0], to: through ? last3 : v.layers[v.layers.length - 1], via: v });
   }
   const viaFlag = (v, own, dflt) => own !== null ? own : dflt;
   const S3 = m.settings;
-  const viaTop = (v) => v.layers[0] === first, viaBottom = (v) => v.layers[v.layers.length - 1] === last3;
+  const viaTop = (v) => v.layers[0] === first2, viaBottom = (v) => v.layers[v.layers.length - 1] === last3;
   const protection = (v) => ({
     filled: viaFlag(v, v.filled, S3.fillVias),
     capped: viaFlag(v, v.capped, S3.capVias),
@@ -138529,12 +138820,12 @@ F ${this.recs.length}
   }
   const drillKey = (h3) => `${h3.plated ? "p" : "n"}|${h3.from}|${h3.to}`;
   const drillSpans = /* @__PURE__ */ new Map();
-  if (hits2.some((h3) => !h3.plated)) drillSpans.set(drillKey({ plated: false, from: first, to: last3 }), { plated: false, from: first, to: last3 });
-  if (hits2.some((h3) => h3.plated)) drillSpans.set(drillKey({ plated: true, from: first, to: last3 }), { plated: true, from: first, to: last3 });
+  if (hits2.some((h3) => !h3.plated)) drillSpans.set(drillKey({ plated: false, from: first2, to: last3 }), { plated: false, from: first2, to: last3 });
+  if (hits2.some((h3) => h3.plated)) drillSpans.set(drillKey({ plated: true, from: first2, to: last3 }), { plated: true, from: first2, to: last3 });
   for (const h3 of hits2) if (!drillSpans.has(drillKey(h3))) drillSpans.set(drillKey(h3), { plated: h3.plated, from: h3.from, to: h3.to });
   for (const d2 of drillSpans.values())
     rows3.push({ name: legalEntityName(`drill_${d2.plated ? "plated" : "non-plated"}_${o.nameOf(d2.from)}-${o.nameOf(d2.to)}`), type: "DRILL", context: "BOARD", polarity: "POSITIVE", uid: 0, role: "drill", drill: d2, spanLayers: [d2.from, d2.to] });
-  rows3.push({ name: "rout", type: "ROUT", context: "BOARD", polarity: "POSITIVE", uid: 0, role: "rout", spanLayers: [first, last3] });
+  rows3.push({ name: "rout", type: "ROUT", context: "BOARD", polarity: "POSITIVE", uid: 0, role: "rout", spanLayers: [first2, last3] });
   for (const l of o.layers) {
     if (added2.has(l)) continue;
     const r = boardRow(l);
@@ -138567,7 +138858,7 @@ F ${this.recs.length}
   }
   const auxVias = /* @__PURE__ */ new Map();
   for (const e of [...auxItems.values()].sort((a, b) => ["tenting", "covering", "plugging", "filling", "capping"].indexOf(a.kind) - ["tenting", "covering", "plugging", "filling", "capping"].indexOf(b.kind))) {
-    const name = e.to ? `${e.kind}_${o.nameOf(e.layer)}-${o.nameOf(e.to)}` : `${e.kind}_${e.layer === first ? "front" : "back"}`;
+    const name = e.to ? `${e.kind}_${o.nameOf(e.layer)}-${o.nameOf(e.to)}` : `${e.kind}_${e.layer === first2 ? "front" : "back"}`;
     const r = { name: legalEntityName(name), type: "DOCUMENT", context: "BOARD", polarity: "POSITIVE", uid: 0, role: "aux", aux: { kind: e.kind, layer: e.layer, to: e.to }, spanLayers: e.to ? [e.layer, e.to] : void 0 };
     rows3.push(r);
     auxVias.set(r, e.vias);
@@ -138817,7 +139108,7 @@ CMP ${pkg.index} ${X2(fp.x)} ${Y(fp.y)} ${fp.rot ? fix(norm360(360 - fp.rot)) : 
             const v = src;
             if (cu) fid(trackSub.get(v), "C", r.name, i);
             A.sys(rec, "pad_usage", "1");
-            A.text(rec, "geometry", geometry2(v, cu ? layer4 : /^B\./.test(layer4) ? last3 : first));
+            A.text(rec, "geometry", geometry2(v, cu ? layer4 : /^B\./.test(layer4) ? last3 : first2));
           } else if (src && trackSet.has(src)) {
             if (cu) fid(trackSub.get(src), "C", r.name, i);
           } else if (src && fillSet.has(src)) {
@@ -138968,8 +139259,8 @@ USER_PARAMS=
   });
   put4("matrix/matrix", matrix);
   const esc9 = (s2) => s2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-  const el4 = (name, attrs, kids7 = [], depth = 0) => {
-    const pad3 = "  ".repeat(depth), a = attrs.map(([k, v]) => ` ${k}="${esc9(v)}"`).join("");
+  const el4 = (name, attrs, kids7 = [], depth2 = 0) => {
+    const pad3 = "  ".repeat(depth2), a = attrs.map(([k, v]) => ` ${k}="${esc9(v)}"`).join("");
     return kids7.length ? `${pad3}<${name}${a}>
 ${kids7.join("")}${pad3}</${name}>
 ` : `${pad3}<${name}${a}/>
@@ -139491,14 +139782,14 @@ var X = class _X {
     if (i < 0) this.kids.push(x);
     else this.kids.splice(i, 0, x);
   }
-  write(depth, out2) {
-    const pad2 = "  ".repeat(depth), at5 = this.attrs.map(([k, v]) => ` ${k}="${esc2(v)}"`).join("");
+  write(depth2, out2) {
+    const pad2 = "  ".repeat(depth2), at5 = this.attrs.map(([k, v]) => ` ${k}="${esc2(v)}"`).join("");
     if (!this.kids.length) {
       out2.push(`${pad2}<${this.name}${at5}/>`);
       return;
     }
     out2.push(`${pad2}<${this.name}${at5}>`);
-    for (const k of this.kids) k.write(depth + 1, out2);
+    for (const k of this.kids) k.write(depth2 + 1, out2);
     out2.push(`${pad2}</${this.name}>`);
   }
 };
@@ -139603,10 +139894,10 @@ function writeIpc2581(m, setup, o) {
     added2.add(l);
     attrsFor(cad.add("Layer").a("name", layerName3(l)), l);
   }
-  const first = m.copper[0], last3 = m.copper[m.copper.length - 1];
+  const first2 = m.copper[0], last3 = m.copper[m.copper.length - 1];
   const holes = [];
-  for (const fp of m.footprints) for (const p of fp.pads) if (p.drill && p.drill.w > 0) holes.push({ x: p.x, y: p.y, d: Math.min(p.drill.w, p.drill.h), plated: p.type === "thru_hole" ? "PLATED" : "NONPLATED", net: p.net, from: first, to: last3, pad: p, slot: p.drill.oval && p.drill.w !== p.drill.h ? { w: p.drill.w, h: p.drill.h, rot: p.rot } : void 0 });
-  for (const v of m.vias) holes.push({ x: v.x, y: v.y, d: v.drill, plated: "VIA", net: v.net, from: v.type === "through" ? first : v.layers[0], to: v.type === "through" ? last3 : v.layers[v.layers.length - 1], via: v });
+  for (const fp of m.footprints) for (const p of fp.pads) if (p.drill && p.drill.w > 0) holes.push({ x: p.x, y: p.y, d: Math.min(p.drill.w, p.drill.h), plated: p.type === "thru_hole" ? "PLATED" : "NONPLATED", net: p.net, from: first2, to: last3, pad: p, slot: p.drill.oval && p.drill.w !== p.drill.h ? { w: p.drill.w, h: p.drill.h, rot: p.rot } : void 0 });
+  for (const v of m.vias) holes.push({ x: v.x, y: v.y, d: v.drill, plated: "VIA", net: v.net, from: v.type === "through" ? first2 : v.layers[0], to: v.type === "through" ? last3 : v.layers[v.layers.length - 1], via: v });
   const spanKey = (h3) => `${h3.from}|${h3.to}`;
   const drillSpans = /* @__PURE__ */ new Map(), slotSpans = /* @__PURE__ */ new Map();
   for (const h3 of holes) {
@@ -140602,13 +140893,13 @@ function solveC(s2, res, withDielectric) {
 }
 function solveField(s2, res, withDielectric) {
   const coarse = res < 0.03 ? solveField(s2, res * 2, withDielectric).f : null;
-  const depth = s2.dielectrics.slice(0, s2.reference + 1).reduce((a, d) => a + d.th, 0);
+  const depth2 = s2.dielectrics.slice(0, s2.reference + 1).reduce((a, d) => a + d.th, 0);
   const up = s2.above && s2.above.length ? s2.above.slice(0, (s2.referenceAbove ?? 0) + 1) : null;
-  const depthUp = up ? s2.t + up.reduce((a, d) => a + d.th, 0) : 0, deep = Math.max(depth, depthUp);
+  const depthUp = up ? s2.t + up.reduce((a, d) => a + d.th, 0) : 0, deep = Math.max(depth2, depthUp);
   const side = s2.gap > 0 ? s2.w / 2 + s2.gap + Math.max(0.6, 1.2 * deep) : s2.w / 2 + Math.max(1.5, 5 * deep);
   const half = Math.max(side, s2.voidHalf + Math.max(0.5, deep));
   const air = up ? depthUp + res : Math.max(0.8, 2 * s2.w);
-  const nx = Math.round(2 * half / res) + 1, ny = Math.round((air + depth + res) / res) + 1;
+  const nx = Math.round(2 * half / res) + 1, ny = Math.round((air + depth2 + res) / res) + 1;
   const V = new Float64Array(nx * ny), eps = new Float64Array(nx * ny).fill(1), fixed2 = new Uint8Array(nx * ny);
   const X2 = (i) => -half + i * res, Y = (j) => -air + j * res;
   if (coarse) for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
@@ -140757,12 +141048,12 @@ function feedWidth(base2, target2, margin, lo = 0.08, hi = 3, res = 0.02) {
   return { w, z: r.z, voidHalf: r.voidHalf };
 }
 function feedDesign(base2, target2, margin) {
-  const first = feedWidth(base2, target2, margin);
-  if (!first) return null;
-  const fine = feedImpedance({ ...base2, w: first.w, voidHalf: first.voidHalf }, 0.01).z;
-  const shifted = target2 - (fine - first.z);
-  const second = feedWidth(base2, shifted, margin, Math.max(0.08, first.w * 0.6), first.w * 1.6);
-  if (!second) return { ...first, z: fine };
+  const first2 = feedWidth(base2, target2, margin);
+  if (!first2) return null;
+  const fine = feedImpedance({ ...base2, w: first2.w, voidHalf: first2.voidHalf }, 0.01).z;
+  const shifted = target2 - (fine - first2.z);
+  const second = feedWidth(base2, shifted, margin, Math.max(0.08, first2.w * 0.6), first2.w * 1.6);
+  if (!second) return { ...first2, z: fine };
   return { w: second.w, voidHalf: second.voidHalf, z: feedImpedance({ ...base2, w: second.w, voidHalf: second.voidHalf }, 0.01).z };
 }
 
@@ -141418,7 +141709,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       }
       if (sharp) items.push(`${sharp} sharp corner${sharp > 1 ? "s" : ""}: bend an RF track at 135 degrees or in an arc`);
       let n2 = 0, noRef = 0, noFence = 0;
-      let first = null;
+      let first2 = null;
       for (const t of segs) {
         const refs = S3.refLayers(Array.from(t.layers)[0]);
         S3.walk(t, 0.5, (x, y) => {
@@ -141426,13 +141717,13 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
           if (antRegions.some((b) => inBox(b, x, y))) return;
           if (refs.length && !refs.some((l) => S3.pourAt(x, y, l) === "gnd")) {
             noRef++;
-            if (!first) first = [x, y];
+            if (!first2) first2 = [x, y];
           }
           if (S3.nearestStitch(x, y) > Math.max(pitch, 2.5)) noFence++;
         });
       }
-      if (gz && noRef * 0.5 > 0.5 && first) {
-        items.push(`${r22(noRef * 0.5)} mm of its ${r22(L)} mm has no ground under it on the next layer, first near ${at2(first[0], first[1])}`);
+      if (gz && noRef * 0.5 > 0.5 && first2) {
+        items.push(`${r22(noRef * 0.5)} mm of its ${r22(L)} mm has no ground under it on the next layer, first near ${at2(first2[0], first2[1])}`);
         level = "error";
       }
       if (twoGround && L > 3 && noFence > n2 * 0.3) items.push(`no ground via within ${Math.max(pitch, 2.5)} mm along ${Math.round(100 * noFence / n2)} % of it: fence it (board.fence_net("${name}"))`);
@@ -141461,7 +141752,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
       const segs = tracksOf.get(net) || [];
       if (!segs.length) continue;
       let n2 = 0, bad = 0, pl = 0;
-      let first = null;
+      let first2 = null;
       const own = viasOf.get(net) || [];
       for (const t of segs) {
         const refs = S3.refLayers(Array.from(t.layers)[0]);
@@ -141474,7 +141765,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
           if (what.includes("plane")) pl++;
           else {
             bad++;
-            if (!first) first = [x, y];
+            if (!first2) first2 = [x, y];
           }
         });
       }
@@ -141483,7 +141774,7 @@ function reviewPhysics(doc2, P, k, settings3, add2) {
         noPlane++;
         continue;
       }
-      if (bad * 0.5 > Math.max(1, n2 * 0.05) && first) cut.push(`${bare(net)}: ${r22(bad * 0.5)} mm of ${r22(n2 * 0.5)} mm has no plane under it, first near ${at2(first[0], first[1])}`);
+      if (bad * 0.5 > Math.max(1, n2 * 0.05) && first2) cut.push(`${bare(net)}: ${r22(bad * 0.5)} mm of ${r22(n2 * 0.5)} mm has no plane under it, first near ${at2(first2[0], first2[1])}`);
       else if (pl > n2 * 0.5) power.push(bare(net));
     }
     if (noPlane) add2("return.path", "warning", `${noPlane} fast net${noPlane > 1 ? "s run" : " runs"} on a board with no ground plane. A signal's return current flows in the plane directly under its track; with no plane it finds its own way round, and the loop it makes radiates and picks up noise. Pour ground on the layer next to the signals.`);

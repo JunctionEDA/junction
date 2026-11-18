@@ -18,9 +18,17 @@ const loading = new Map<string, Promise<void>>();
 
 /** True for a document that has a tab and an editor of its own (not the schematic or board editor). */
 export function isHostedDoc(doc: { docType: string } | null | undefined): boolean {
+  if (doc && isShellView(doc.docType)) return true;
   const kind = doc ? documentKind(doc.docType) : undefined;
   return !!kind && !!kind.bundle;
 }
+
+/**
+ * A view of the shell's own that is opened like a document: the project's Home tab ("@home", drawn by
+ * web/platform/projecthome) and a PCB's bill of materials ("@bom", web/domains/pcb/parts/bomview.ts).  Their
+ * editors are registered by scripts the page already has, so there is no bundle to load.
+ */
+export function isShellView(docType: string): boolean { return docType.startsWith("@"); }
 
 function loadBundle(src: string): Promise<void> {
   let p = loading.get(src);
@@ -53,7 +61,8 @@ export function closeHostedDoc(): void {
  */
 export async function openHostedDoc(doc: DocEntry, showCad: () => void, openDocId: (id: string) => void): Promise<void> {
   closeHostedDoc();
-  const kind = documentKind(doc.docType)!;
+  const kind = documentKind(doc.docType);
+  const what = kind ? kind.title.toLowerCase() : doc.docType === "@bom" ? "bill of materials" : "page";
   const mine: Hosted = { docId: doc.docId, editor: null };
   open = mine;
   showCad();
@@ -62,13 +71,16 @@ export async function openHostedDoc(doc: DocEntry, showCad: () => void, openDocI
   if (!el) return;
   el.replaceChildren();
   try {
-    await loadBundle(kind.bundle!);
+    if (kind && kind.bundle) await loadBundle(kind.bundle);
+    // a view of the shell's own is drawn by a script of the page itself, which may still be starting when a
+    // link opens straight on it (the Home tab is the chrome's, and this runs in the editor's script)
+    for (let i = 0; i < 400 && isShellView(doc.docType) && !documentEditorFor(doc.docType) && open === mine; i++) await new Promise((r) => setTimeout(r, 25));
     if (open !== mine) return;   // another tab was opened meanwhile
     const factory = documentEditorFor(doc.docType);
-    if (!factory) throw new Error(`${kind.bundle} did not register an editor for ${doc.docType}`);
+    if (!factory) throw new Error(`${kind ? kind.bundle : "the page"} did not register an editor for ${doc.docType}`);
     const ctx: DocumentHostContext = {
       el, project: { projectId: state.project!.projectId, name: state.project!.name }, doc: { docId: doc.docId, path: doc.path, docType: doc.docType },
-      docs: state.project!.docs.map((d) => ({ docId: d.docId, path: d.path, docType: d.docType })),
+      docs: (state.project!.allDocs || state.project!.docs).map((d) => ({ docId: d.docId, path: d.path, docType: d.docType })),
       signedIn: !!state.me, userId: state.me ? state.me.id : null,
       setConnection: (s, text) => { if (open === mine) store.slice("connection", { status: s, text }); },
       toast: (text, ms) => toast(text, ms),
@@ -83,7 +95,7 @@ export async function openHostedDoc(doc: DocEntry, showCad: () => void, openDocI
     store.slice("connection", { status: "error", text: "could not open" });
     const p = document.createElement("p");
     p.className = "empty"; p.style.margin = "48px auto";
-    p.textContent = `This ${kind.title.toLowerCase()} could not be opened. Reload the page to try again.`;
+    p.textContent = `This ${what} could not be opened. Reload the page to try again.`;
     el.replaceChildren(p);
   }
 }

@@ -21,6 +21,7 @@ import { HistoryBar, VersionDialogs } from "./shared/components/VersionHistory";
 import { CompareWindow } from "./platform/review/Compare";
 import { installReview } from "./platform/review/store";
 import { DocTabs } from "./platform/doctabs/DocTabs";
+import { registerProjectHome } from "./platform/projecthome/ProjectHome";
 import { installToolbarTooltips } from "./shared/tooltip";
 import { SPEC } from "./domains/pcb/spec";
 import { loadIconPack, packIcon } from "./domains/pcb/iconpack";
@@ -53,5 +54,6 @@ mount("ui-doctabs", <DocTabs />);
 mount("ui-statusbar", <StatusBar />);
 mount("ui-home", <><Home /><Toasts /></>);
 mount("ui-overlays", <><Toast /><Popover /><SignInOverlay /><ContextMenu /><PluginDialogs /><HistoryBar /><VersionDialogs /><CompareWindow /><Guide /></>);
+registerProjectHome();   // the Home tab of an open project (the shell opens it like a document)
 installReview();
 installToolbarTooltips();

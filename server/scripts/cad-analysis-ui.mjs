@@ -158,7 +158,7 @@ try {
   const uid = user('cad-analysis', 990401);
   const page = await open(uid, 'cad-analysis');
   const made = await S(page, async (text) => {
-    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'CAD analysis test' }) });
+    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'CAD analysis test', template: 'pcb' }) });
     const pid = (await r.json()).projectId;
     const d = await (await fetch(`/api/projects/${pid}/docs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: 'Bracket.jpart' }) })).json();
     const up = await fetch(`/api/docs/${d.docId}/snapshots?seq=0`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: text });
@@ -373,13 +373,13 @@ try {
   }
   // perspective
   await page.focus('.cad-stage canvas');
-  await page.keyboard.press('p');
-  check('P switches to perspective', (await S(page, () => window.JunctionPartStudio.viewport.projection)) === 'perspective' && (await page.getAttribute('[data-tool=Perspective]', 'aria-pressed')) === 'true');
+  await page.click('.cad-toolbar [data-tool=Perspective]');   // P is the planes now, as in Onshape; the projection is a button and in the view cube's menu
+  check('the Perspective button switches to perspective', (await S(page, () => window.JunctionPartStudio.viewport.projection)) === 'perspective' && (await page.getAttribute('[data-tool=Perspective]', 'aria-pressed')) === 'true');
   const persHit = await spot(page, 'face', 'Block', 'Block:end:ka');
   check('picking works in perspective', !!persHit);
   await page.waitForTimeout(200);
   await shot(page, '11-perspective');
-  await page.keyboard.press('p');
+  await page.click('.cad-toolbar [data-tool=Perspective]');
   // hide, isolate, show all
   await clickAt(page, await spot(page, 'face', 'Block', 'Block:end:ka'));
   await page.keyboard.press('h');
