@@ -2307,6 +2307,7 @@ class Board(_Doc):
         at its connector pin with its ground end out, a crystal turned to its oscillator pins, a matching network in
         line at the radio pin.  bypass=False / seat=False leave those out.
         """
+        self.flush()      # moves queued before it go in first: the engine re-places those parts in a batch of its own
         specs: dict = {}
         allg = dict(self._groups)
         for name, refs in (groups or {}).items():
@@ -2533,10 +2534,14 @@ class Board(_Doc):
         copper within \`radius\` mm of its pin on the busiest part (the fine-pitch chip) comes up, and the open net is laid
         first, then the nets that were taken up.  An attempt that does not lower the count of open connections is taken
         back exactly, so the board never gets worse.  A second pass tries what is still open with twice the radius.
-        Returns {"before": n, "after": n, "tried": [...]}.  Costs about time_s per open pin; budget_s stops it starting
+        layers= limits the re-laid copper to those layers; by default the inner planes of a six-layer-and-up board are
+        left out, as design() does.  Returns {"before": n, "after": n, "tried": [...]}.  Costs about time_s per open pin; budget_s stops it starting
         another pin once that many seconds have gone (what is left is listed under "not_tried")."""
         import time as _t
         t0 = _t.time(); skipped = []
+        if layers is None:      # the same plane rule as design(): on six layers and up signals stay off the inner planes
+            from .craft import signal_layers
+            layers = signal_layers(self)[0]
         before = self.info()["unrouted_connections"]
         tried = []
         parts = {p["ref"]: p for p in self.geometry()["parts"]}
@@ -6298,12 +6303,13 @@ def _rf_feeds(self, net: str | None = None, impedance: float = 50, min_width: fl
         if "width" not in f:
             out.append(f); continue
         full = f.get("full_net") or f["net"]; w = f["width"]; layer = f["layer"]
-        # never wider than the widest pad it lands on: a wide feed on a fine-pitch module pad runs into the pads beside it
+        # never wider than the narrowest pad it lands on: a wide feed on a small pad (a filter part, a fine-pitch module
+        # pad) runs into the pads beside it; a big through-hole antenna pin at the other end does not make room
         with contextlib.suppress(HarnessError, KeyError, IndexError, TypeError):
             sizes = [min(q[4], q[5]) for p_ in self.geometry()["parts"] for q in p_["pads"] if q[3] == full and len(q) > 5 and q[4] and q[5]]
-            if sizes and w > max(sizes) + 1e-6:
-                f["note"] = (f.get("note", "") + f" width {w:.3f} mm capped to the {max(sizes):.3f} mm pad it lands on").strip()
-                w = f["width"] = round(max(sizes), 3)
+            if sizes and w > min(sizes) + 1e-6:
+                f["note"] = (f.get("note", "") + f" width {w:.3f} mm capped to the {min(sizes):.3f} mm pad it lands on").strip()
+                w = f["width"] = round(min(sizes), 3)
         for poly in f.get("void_polygons") or []:
             self.keepout([tuple(p) for p in poly], layers=f["voided"], tracks=True, vias=False, copper=True, name=f"RF feed {f['net']}")
         self.flush()
@@ -6971,16 +6977,9 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                         out.setdefault("fanout", {})[part["ref"]] = {"vias": fo["vias"], "skipped": len(fo.get("skipped") or {})}
         auto_layers = False
         if route_layers is None and not all_layers:      # six layers and up: the inner planes stay whole, signals keep to the other layers
-            with contextlib.suppress(HarnessError):
-                names = [c if isinstance(c, str) else c.get("name") for c in (self.info().get("copper_layers") or [])]
-                ob = self.geometry().get("outline")
-                if len(names) > 4 and ob:
-                    area = abs((ob[2] - ob[0]) * (ob[3] - ob[1])) or 1
-                    planes = {l for z in self.zones() if not z.get("keepout") and z.get("box") and (z["box"][2] - z["box"][0]) * (z["box"][3] - z["box"][1]) > 0.6 * area
-                              for l in z["layers"] if l.startswith("In") and len(z["layers"]) == 1}
-                    if planes and len(names) - len(planes) >= 2:
-                        route_layers = [l for l in names if l not in planes]
-                        out.setdefault("notes", []).append(f"routed on {', '.join(route_layers)}: {', '.join(sorted(planes))} kept whole as planes (layers= to route on them)")
+            route_layers, planes = signal_layers(self)
+            if route_layers:
+                out.setdefault("notes", []).append(f"routed on {', '.join(route_layers)}: {', '.join(sorted(planes))} kept whole as planes (layers= to route on them)")
         got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts, escapes=escapes, plan=global_plan, ripup=ripup))
         if got and got.get("rules_changed"):
             out["rules_changed"] = got["rules_changed"]
@@ -7160,6 +7159,21 @@ def _reasoning(self, plan: dict, clusters: dict, got: dict) -> list:
     for u in got.get("unrouted") or []:
         lines.append(f"Open: {u}")
     return lines
+
+
+def signal_layers(self) -> tuple:
+    """On six copper layers and up: the layers signals may use, and the inner layers kept whole as planes (an inner
+    layer with a single-layer pour over 60% of the outline).  (None, set()) when every layer may carry signals."""
+    with contextlib.suppress(HarnessError):
+        names = [c if isinstance(c, str) else c.get("name") for c in (self.info().get("copper_layers") or [])]
+        ob = self.geometry().get("outline")
+        if len(names) > 4 and ob:
+            area = abs((ob[2] - ob[0]) * (ob[3] - ob[1])) or 1
+            planes = {l for z in self.zones() if not z.get("keepout") and z.get("box") and (z["box"][2] - z["box"][0]) * (z["box"][3] - z["box"][1]) > 0.6 * area
+                      for l in z["layers"] if l.startswith("In") and len(z["layers"]) == 1}
+            if planes and len(names) - len(planes) >= 2:
+                return [l for l in names if l not in planes], planes
+    return None, set()
 
 
 def _drop_bad_stitches(self) -> int:
@@ -7688,7 +7702,7 @@ def _free(S: _Survey, box, taken, margin: float = 0.3) -> bool:
     return not any(min(box[2], t[2]) - max(box[0], t[0]) > 1e-6 and min(box[3], t[3]) - max(box[1], t[1]) > 1e-6 for t in taken)
 
 
-def _seat(self, refs=None, reach: float = 3.5, apply: bool = True, skip=(), giveway=()) -> dict:
+def _seat(self, refs=None, reach: float | None = None, apply: bool = True, skip=(), giveway=()) -> dict:
     """Put every two-pad part that serves one pin directly in front of that pin, and turn every crystal to its
     oscillator pins.  The part's pad on the pin's net faces the pin, straight out from it; its other end points to where
     its other net goes (a pull-down's ground end to the connector's own ground pins, a pull-up's supply end to the
@@ -7697,7 +7711,9 @@ def _seat(self, refs=None, reach: float = 3.5, apply: bool = True, skip=(), give
     in \`skip\` or parts whose net already has tracks.  \`refs\` limits it to those parts; apply=False only reports.
 
     Returns {ref: {"pin": "J1.A5", "at": (x, y), "rotation": deg, "mm": pad to pin}} and, for a part that found no
-    place within \`reach\` mm, {ref: {"pin", "left": why}}."""
+    place within \`reach\` mm (by default the 3 mm seating() accepts), {ref: {"pin", "left": why}}."""
+    if reach is None:      # the distance seating() and design()'s gate accept, so a spot seat() reports is one they pass
+        reach = LIMITS["serve"]
     self.flush(); self._geom = None
     S = _Survey(self); out: dict = {}
     want = {str(r).lower() for r in ([refs] if isinstance(refs, str) else refs)} if refs else None
@@ -9856,6 +9872,6 @@ def __kc_run(code, dry=False):
     if project is not None and project.log:
         out["notes"] = project.log[-60:]
     return json.dumps(out)
-`;async function J(){let e=JSON.parse(S()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:j}=require(s+"pyodide.js"),o=await j({indexURL:s,jsglobals:{},stdout:p,stderr:p});o.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),S())}),o.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of Q)o.FS.writeFile("/kh/"+r,l);o.runPython(Y);let A=o.globals.get("__kc_run"),a;try{a=JSON.parse(String(A(String(e.code||""),e.dry===!0)))}catch(r){a={ok:!1,error:String(r&&r.message||r).split(`
-`).filter(Boolean).slice(-1)[0]||"The script failed."}}a.done=!0,a.output=n.join(`
-`),d(a),process.exit(0)}J().catch(e=>{try{d({done:!0,ok:!1,error:"The Python runtime could not be started: "+String(e&&e.message||e),output:""})}finally{process.exit(1)}});
+`;async function J(){let e=JSON.parse(S()),s=String(process.argv[2]||""),n=[],t=0,p=r=>{t<2e5&&(n.push(r),t+=r.length+1)},{loadPyodide:j}=require(s+"pyodide.js"),a=await j({indexURL:s,jsglobals:{},stdout:p,stderr:p});a.registerJsModule("_kc_host",{call:(r,l)=>(d({call:String(r),args:JSON.parse(String(l||"{}"))}),S())}),a.FS.mkdirTree("/kh/kicad_harness/parts");for(let[r,l]of Q)a.FS.writeFile("/kh/"+r,l);a.runPython(Y);let A=a.globals.get("__kc_run"),o;try{o=JSON.parse(String(A(String(e.code||""),e.dry===!0)))}catch(r){o={ok:!1,error:String(r&&r.message||r).split(`
+`).filter(Boolean).slice(-1)[0]||"The script failed."}}o.done=!0,o.output=n.join(`
+`),d(o),process.exit(0)}J().catch(e=>{try{d({done:!0,ok:!1,error:"The Python runtime could not be started: "+String(e&&e.message||e),output:""})}finally{process.exit(1)}});

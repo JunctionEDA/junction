@@ -196,7 +196,7 @@ def _free(S: _Survey, box, taken, margin: float = 0.3) -> bool:
     return not any(min(box[2], t[2]) - max(box[0], t[0]) > 1e-6 and min(box[3], t[3]) - max(box[1], t[1]) > 1e-6 for t in taken)
 
 
-def _seat(self, refs=None, reach: float = 3.5, apply: bool = True, skip=(), giveway=()) -> dict:
+def _seat(self, refs=None, reach: float | None = None, apply: bool = True, skip=(), giveway=()) -> dict:
     """Put every two-pad part that serves one pin directly in front of that pin, and turn every crystal to its
     oscillator pins.  The part's pad on the pin's net faces the pin, straight out from it; its other end points to where
     its other net goes (a pull-down's ground end to the connector's own ground pins, a pull-up's supply end to the
@@ -205,7 +205,9 @@ def _seat(self, refs=None, reach: float = 3.5, apply: bool = True, skip=(), give
     in `skip` or parts whose net already has tracks.  `refs` limits it to those parts; apply=False only reports.
 
     Returns {ref: {"pin": "J1.A5", "at": (x, y), "rotation": deg, "mm": pad to pin}} and, for a part that found no
-    place within `reach` mm, {ref: {"pin", "left": why}}."""
+    place within `reach` mm (by default the 3 mm seating() accepts), {ref: {"pin", "left": why}}."""
+    if reach is None:      # the distance seating() and design()'s gate accept, so a spot seat() reports is one they pass
+        reach = LIMITS["serve"]
     self.flush(); self._geom = None
     S = _Survey(self); out: dict = {}
     want = {str(r).lower() for r in ([refs] if isinstance(refs, str) else refs)} if refs else None
