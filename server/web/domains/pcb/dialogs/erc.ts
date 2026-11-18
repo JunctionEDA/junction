@@ -23,7 +23,8 @@ import { messageBox, textEntryBox } from "../editor/pcbdialogs/ui";
 import type { Units } from "../../../shared/store";
 import { ercTextReport, sevOf, shownBy } from "./erc-report";
 import { sheetList, type SheetInstance } from "./sch-hierarchy";
-import { allMarkers, distribute, ercProjectOpts, forgetHierErc, onOpenSheet, onSheetOpened, runHierErc, runSheetList, type HierMarker } from "./erc-hier";
+import { lastFallback } from "../editor/kicad-check";
+import { allMarkers, distribute, ercProjectOpts, ercSource, forgetHierErc, onOpenSheet, onSheetOpened, runHierErc, runSheetList, type HierMarker } from "./erc-hier";
 import { findSearchesAllSheets } from "./find";
 export { ercTextReport, sevOf, shownBy };
 
@@ -224,8 +225,8 @@ export function openErc(): void {
       const sev = isExcluded(m) ? "--ink-3" : m.severity === "error" ? "--err" : "--warn";
       const row = h("div", { "data-erc-row": String(i), "data-excluded": isExcluded(m) ? "1" : undefined, style: `padding:3px 6px;cursor:default;border-bottom:1px solid var(--line);${sel ? "background:var(--blue);color:var(--panel)" : isExcluded(m) ? "color:var(--ink-3)" : ""}`,
         onclick: () => pick(m), oncontextmenu: (ev: Event) => { const me = ev as MouseEvent; me.preventDefault(); pick(m); rowMenu(m, me.clientX, me.clientY); } },
-        h("div", { style: "display:flex;gap:6px;align-items:center" }, h("span", { style: `display:inline-block;width:8px;height:8px;border-radius:50%;background:var(${sev})` }), h("b", null, ruleTitle(m))),
-        h("div", { style: "padding-left:14px;font-family:var(--mono);font-size:12px" }, itemLine(m)),
+        h("div", { style: "display:flex;gap:6px;align-items:center" }, h("span", { style: `display:inline-block;width:8px;height:8px;border-radius:50%;background:var(${sev})` }), h("b", null, (m as { kiids?: string[] }).kiids ? unescape(m.text) : ruleTitle(m))),
+        ...(m.items && m.items.length && (m as { kiids?: string[] }).kiids ? m.items.map((it) => ({ x: it.x, y: it.y, text: it.desc })) : [m]).map((v) => h("div", { style: "padding-left:14px;font-family:var(--mono);font-size:12px" }, itemLine(v))),
         isExcluded(m) && m.comment ? h("div", { style: "padding-left:14px;font-size:12px;font-style:italic", "data-erc-comment": "1" }, m.comment) : null);
       list.append(row);
     }
@@ -307,7 +308,8 @@ export function openErc(): void {
       else {
         onSheetOpened();   // the canvas: this sheet's own markers (the others stay with their sheets)
         const all = markers(), e = all.filter((m) => m.severity === "error").length, w = all.filter((m) => m.severity === "warning").length;
-        toast(all.length ? `ERC: ${e} error${e === 1 ? "" : "s"}, ${w} warning${w === 1 ? "" : "s"}` : "ERC: no problems found");
+        const by = ercSource === "kicad" ? "" : ` (checked in the browser: ${lastFallback || "KiCad unavailable"})`;
+        toast((all.length ? `ERC: ${e} error${e === 1 ? "" : "s"}, ${w} warning${w === 1 ? "" : "s"}` : "ERC: no problems found") + by);
       }
     } finally { if (runBtn) runBtn.disabled = false; }
     current = null; refresh();

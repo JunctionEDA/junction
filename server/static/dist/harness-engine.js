@@ -19478,25 +19478,25 @@ var require_pcb_tools = __commonJS({
         var charName = this.encoding[code];
         return this.charset.indexOf(charName);
       };
-      function GlyphNames(post2) {
-        switch (post2.version) {
+      function GlyphNames(post22) {
+        switch (post22.version) {
           case 1:
             this.names = standardNames.slice();
             break;
           case 2:
-            this.names = new Array(post2.numberOfGlyphs);
-            for (var i = 0; i < post2.numberOfGlyphs; i++) {
-              if (post2.glyphNameIndex[i] < standardNames.length) {
-                this.names[i] = standardNames[post2.glyphNameIndex[i]];
+            this.names = new Array(post22.numberOfGlyphs);
+            for (var i = 0; i < post22.numberOfGlyphs; i++) {
+              if (post22.glyphNameIndex[i] < standardNames.length) {
+                this.names[i] = standardNames[post22.glyphNameIndex[i]];
               } else {
-                this.names[i] = post2.names[post2.glyphNameIndex[i] - standardNames.length];
+                this.names[i] = post22.names[post22.glyphNameIndex[i] - standardNames.length];
               }
             }
             break;
           case 2.5:
-            this.names = new Array(post2.numberOfGlyphs);
-            for (var i$1 = 0; i$1 < post2.numberOfGlyphs; i$1++) {
-              this.names[i$1] = standardNames[i$1 + post2.glyphNameIndex[i$1]];
+            this.names = new Array(post22.numberOfGlyphs);
+            for (var i$1 = 0; i$1 < post22.numberOfGlyphs; i$1++) {
+              this.names[i$1] = standardNames[i$1 + post22.glyphNameIndex[i$1]];
             }
             break;
           case 3:
@@ -22440,44 +22440,44 @@ var require_pcb_tools = __commonJS({
       }
       var os2 = { parse: parseOS2Table, make: makeOS2Table, unicodeRanges, getUnicodeRange };
       function parsePostTable(data, start) {
-        var post2 = {};
+        var post22 = {};
         var p = new parse2.Parser(data, start);
-        post2.version = p.parseVersion();
-        post2.italicAngle = p.parseFixed();
-        post2.underlinePosition = p.parseShort();
-        post2.underlineThickness = p.parseShort();
-        post2.isFixedPitch = p.parseULong();
-        post2.minMemType42 = p.parseULong();
-        post2.maxMemType42 = p.parseULong();
-        post2.minMemType1 = p.parseULong();
-        post2.maxMemType1 = p.parseULong();
-        switch (post2.version) {
+        post22.version = p.parseVersion();
+        post22.italicAngle = p.parseFixed();
+        post22.underlinePosition = p.parseShort();
+        post22.underlineThickness = p.parseShort();
+        post22.isFixedPitch = p.parseULong();
+        post22.minMemType42 = p.parseULong();
+        post22.maxMemType42 = p.parseULong();
+        post22.minMemType1 = p.parseULong();
+        post22.maxMemType1 = p.parseULong();
+        switch (post22.version) {
           case 1:
-            post2.names = standardNames.slice();
+            post22.names = standardNames.slice();
             break;
           case 2:
-            post2.numberOfGlyphs = p.parseUShort();
-            post2.glyphNameIndex = new Array(post2.numberOfGlyphs);
-            for (var i = 0; i < post2.numberOfGlyphs; i++) {
-              post2.glyphNameIndex[i] = p.parseUShort();
+            post22.numberOfGlyphs = p.parseUShort();
+            post22.glyphNameIndex = new Array(post22.numberOfGlyphs);
+            for (var i = 0; i < post22.numberOfGlyphs; i++) {
+              post22.glyphNameIndex[i] = p.parseUShort();
             }
-            post2.names = [];
-            for (var i$1 = 0; i$1 < post2.numberOfGlyphs; i$1++) {
-              if (post2.glyphNameIndex[i$1] >= standardNames.length) {
+            post22.names = [];
+            for (var i$1 = 0; i$1 < post22.numberOfGlyphs; i$1++) {
+              if (post22.glyphNameIndex[i$1] >= standardNames.length) {
                 var nameLength = p.parseChar();
-                post2.names.push(p.parseString(nameLength));
+                post22.names.push(p.parseString(nameLength));
               }
             }
             break;
           case 2.5:
-            post2.numberOfGlyphs = p.parseUShort();
-            post2.offset = new Array(post2.numberOfGlyphs);
-            for (var i$2 = 0; i$2 < post2.numberOfGlyphs; i$2++) {
-              post2.offset[i$2] = p.parseChar();
+            post22.numberOfGlyphs = p.parseUShort();
+            post22.offset = new Array(post22.numberOfGlyphs);
+            for (var i$2 = 0; i$2 < post22.numberOfGlyphs; i$2++) {
+              post22.offset[i$2] = p.parseChar();
             }
             break;
         }
-        return post2;
+        return post22;
       }
       function makePostTable() {
         return new table.Table("post", [
@@ -22492,7 +22492,7 @@ var require_pcb_tools = __commonJS({
           { name: "maxMemType1", type: "ULONG", value: 0 }
         ]);
       }
-      var post = { parse: parsePostTable, make: makePostTable };
+      var post2 = { parse: parsePostTable, make: makePostTable };
       var subtableParsers = new Array(9);
       subtableParsers[1] = function parseLookup1() {
         var start = this.offset + this.relativeOffset;
@@ -23037,7 +23037,7 @@ var require_pcb_tools = __commonJS({
         var languageTags = [];
         var nameTable = _name.make(names2, languageTags);
         var ltagTable = languageTags.length > 0 ? ltag.make(languageTags) : void 0;
-        var postTable = post.make();
+        var postTable = post2.make();
         var cffTable = cff.make(font3.glyphs, {
           version: font3.getEnglishName("version"),
           fullName: englishFullName,
@@ -28403,7 +28403,7 @@ var require_pcb_tools = __commonJS({
               break;
             case "post":
               table2 = uncompressTable(data, tableEntry);
-              font3.tables.post = post.parse(table2.data, table2.offset);
+              font3.tables.post = post2.parse(table2.data, table2.offset);
               font3.glyphNames = new GlyphNames(font3.tables.post);
               break;
             case "prep":
@@ -32594,9 +32594,9 @@ var require_pcb_tools = __commonJS({
         const mid2 = [{ p: na.q.slice() }];
         for (let i = na.i + 1; i <= nb.i; i++) chAppend(mid2, P4[i]);
         chAppend(mid2, nb.q);
-        const post2 = [{ p: nb.q.slice() }];
-        for (let i = nb.i + 1; i < P4.length; i++) chAppend(post2, P4[i]);
-        return { pre, mid: mid2, post: post2, start: na.q, end: nb.q };
+        const post22 = [{ p: nb.q.slice() }];
+        for (let i = nb.i + 1; i < P4.length; i++) chAppend(post22, P4[i]);
+        return { pre, mid: mid2, post: post22, start: na.q, end: nb.q };
       }
       function meanderMove(P4) {
         const st = P4.st;
@@ -53911,7 +53911,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         if (x !== "0") pos.x_nm = x;
         if (y !== "0") pos.y_nm = y;
         if (pos.x_nm || pos.y_nm) marker2.position = pos;
-        const items = m.ids.map((id) => kiidOf(doc2, id)).filter((v) => v && v !== "00000000-0000-0000-0000-000000000000");
+        const items = (m.kiids && m.kiids.length ? m.kiids : m.ids.map((id) => kiidOf(doc2, id))).filter((v) => v && v !== "00000000-0000-0000-0000-000000000000");
         if (items.length) marker2.items = items.map((value) => ({ value }));
         if (LAYER_STORED.has(m.code)) marker2.layer = boardLayerEnum(m.layer || "F.Cu");
         marker2.marker_type = "MT_DRC";
@@ -59665,25 +59665,25 @@ var require_opentype = __commonJS({
         var charName = this.encoding[code];
         return this.charset.indexOf(charName);
       };
-      function GlyphNames(post2) {
-        switch (post2.version) {
+      function GlyphNames(post3) {
+        switch (post3.version) {
           case 1:
             this.names = standardNames.slice();
             break;
           case 2:
-            this.names = new Array(post2.numberOfGlyphs);
-            for (var i = 0; i < post2.numberOfGlyphs; i++) {
-              if (post2.glyphNameIndex[i] < standardNames.length) {
-                this.names[i] = standardNames[post2.glyphNameIndex[i]];
+            this.names = new Array(post3.numberOfGlyphs);
+            for (var i = 0; i < post3.numberOfGlyphs; i++) {
+              if (post3.glyphNameIndex[i] < standardNames.length) {
+                this.names[i] = standardNames[post3.glyphNameIndex[i]];
               } else {
-                this.names[i] = post2.names[post2.glyphNameIndex[i] - standardNames.length];
+                this.names[i] = post3.names[post3.glyphNameIndex[i] - standardNames.length];
               }
             }
             break;
           case 2.5:
-            this.names = new Array(post2.numberOfGlyphs);
-            for (var i$1 = 0; i$1 < post2.numberOfGlyphs; i$1++) {
-              this.names[i$1] = standardNames[i$1 + post2.glyphNameIndex[i$1]];
+            this.names = new Array(post3.numberOfGlyphs);
+            for (var i$1 = 0; i$1 < post3.numberOfGlyphs; i$1++) {
+              this.names[i$1] = standardNames[i$1 + post3.glyphNameIndex[i$1]];
             }
             break;
           case 3:
@@ -62627,44 +62627,44 @@ var require_opentype = __commonJS({
       }
       var os2 = { parse: parseOS2Table, make: makeOS2Table, unicodeRanges, getUnicodeRange };
       function parsePostTable(data, start) {
-        var post2 = {};
+        var post3 = {};
         var p = new parse2.Parser(data, start);
-        post2.version = p.parseVersion();
-        post2.italicAngle = p.parseFixed();
-        post2.underlinePosition = p.parseShort();
-        post2.underlineThickness = p.parseShort();
-        post2.isFixedPitch = p.parseULong();
-        post2.minMemType42 = p.parseULong();
-        post2.maxMemType42 = p.parseULong();
-        post2.minMemType1 = p.parseULong();
-        post2.maxMemType1 = p.parseULong();
-        switch (post2.version) {
+        post3.version = p.parseVersion();
+        post3.italicAngle = p.parseFixed();
+        post3.underlinePosition = p.parseShort();
+        post3.underlineThickness = p.parseShort();
+        post3.isFixedPitch = p.parseULong();
+        post3.minMemType42 = p.parseULong();
+        post3.maxMemType42 = p.parseULong();
+        post3.minMemType1 = p.parseULong();
+        post3.maxMemType1 = p.parseULong();
+        switch (post3.version) {
           case 1:
-            post2.names = standardNames.slice();
+            post3.names = standardNames.slice();
             break;
           case 2:
-            post2.numberOfGlyphs = p.parseUShort();
-            post2.glyphNameIndex = new Array(post2.numberOfGlyphs);
-            for (var i = 0; i < post2.numberOfGlyphs; i++) {
-              post2.glyphNameIndex[i] = p.parseUShort();
+            post3.numberOfGlyphs = p.parseUShort();
+            post3.glyphNameIndex = new Array(post3.numberOfGlyphs);
+            for (var i = 0; i < post3.numberOfGlyphs; i++) {
+              post3.glyphNameIndex[i] = p.parseUShort();
             }
-            post2.names = [];
-            for (var i$1 = 0; i$1 < post2.numberOfGlyphs; i$1++) {
-              if (post2.glyphNameIndex[i$1] >= standardNames.length) {
+            post3.names = [];
+            for (var i$1 = 0; i$1 < post3.numberOfGlyphs; i$1++) {
+              if (post3.glyphNameIndex[i$1] >= standardNames.length) {
                 var nameLength = p.parseChar();
-                post2.names.push(p.parseString(nameLength));
+                post3.names.push(p.parseString(nameLength));
               }
             }
             break;
           case 2.5:
-            post2.numberOfGlyphs = p.parseUShort();
-            post2.offset = new Array(post2.numberOfGlyphs);
-            for (var i$2 = 0; i$2 < post2.numberOfGlyphs; i$2++) {
-              post2.offset[i$2] = p.parseChar();
+            post3.numberOfGlyphs = p.parseUShort();
+            post3.offset = new Array(post3.numberOfGlyphs);
+            for (var i$2 = 0; i$2 < post3.numberOfGlyphs; i$2++) {
+              post3.offset[i$2] = p.parseChar();
             }
             break;
         }
-        return post2;
+        return post3;
       }
       function makePostTable() {
         return new table.Table("post", [
@@ -62679,7 +62679,7 @@ var require_opentype = __commonJS({
           { name: "maxMemType1", type: "ULONG", value: 0 }
         ]);
       }
-      var post = { parse: parsePostTable, make: makePostTable };
+      var post2 = { parse: parsePostTable, make: makePostTable };
       var subtableParsers = new Array(9);
       subtableParsers[1] = function parseLookup1() {
         var start = this.offset + this.relativeOffset;
@@ -63224,7 +63224,7 @@ var require_opentype = __commonJS({
         var languageTags = [];
         var nameTable = _name.make(names2, languageTags);
         var ltagTable = languageTags.length > 0 ? ltag.make(languageTags) : void 0;
-        var postTable = post.make();
+        var postTable = post2.make();
         var cffTable = cff.make(font.glyphs, {
           version: font.getEnglishName("version"),
           fullName: englishFullName,
@@ -68590,7 +68590,7 @@ var require_opentype = __commonJS({
               break;
             case "post":
               table2 = uncompressTable(data, tableEntry);
-              font.tables.post = post.parse(table2.data, table2.offset);
+              font.tables.post = post2.parse(table2.data, table2.offset);
               font.glyphNames = new GlyphNames(font.tables.post);
               break;
             case "prep":
@@ -94562,6 +94562,68 @@ var init_hotkeys = __esm({
   }
 });
 
+// web/domains/pcb/editor/kicad-check.ts
+async function post(path2, body) {
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    lastFallback = "offline";
+    return null;
+  }
+  try {
+    const r = await api4(path2, { method: "POST", body: JSON.stringify(body) });
+    lastFallback = "";
+    return r && r.report ? r.report : null;
+  } catch (e) {
+    const msg = String(e.message || e);
+    lastFallback = /^501\b/.test(msg) ? "no kicad-cli on this server" : msg.replace(/^\d+\s*/, "").slice(0, 200);
+    return null;
+  }
+}
+function serverDrc(docId3, o) {
+  return post(`/api/docs/${encodeURIComponent(docId3)}/drc`, { parity: o.parity, refill: o.refill, allTrackErrors: !!o.allTrackErrors });
+}
+function uuidIndex(doc2) {
+  const out2 = /* @__PURE__ */ new Map();
+  const walk2 = (n2, owner) => {
+    if (!Array.isArray(n2)) return;
+    if ((n2[0] === "uuid" || n2[0] === "tstamp") && typeof n2[1] === "string") {
+      if (!out2.has(n2[1])) out2.set(n2[1], owner);
+      return;
+    }
+    for (const c of n2) if (Array.isArray(c)) walk2(c, owner);
+  };
+  for (const [id, it] of doc2.items) {
+    out2.set(id, id);
+    walk2(it.node, id);
+  }
+  return out2;
+}
+function toMarker(v, ids) {
+  const items = v.items || [];
+  const at5 = v.pos || items[0] && items[0].pos || { x: 0, y: 0 };
+  const found = items.map((i) => i.uuid ? ids.get(i.uuid) || "" : "").filter((x) => x);
+  return {
+    code: v.type,
+    severity: v.severity === "error" ? "error" : v.severity === "warning" ? "warning" : v.severity,
+    x: at5.x,
+    y: at5.y,
+    text: v.description,
+    ...v.layer ? { layer: v.layer } : {},
+    ids: Array.from(new Set(found)),
+    kiids: items.map((i) => i.uuid || "").filter((u) => u),
+    descs: items.map((i) => i.description),
+    items: items.map((i) => ({ x: i.pos ? i.pos.x : at5.x, y: i.pos ? i.pos.y : at5.y, desc: i.description })),
+    ...v.excluded ? { excluded: true, comment: v.comment || "" } : {}
+  };
+}
+var lastFallback;
+var init_kicad_check = __esm({
+  "web/domains/pcb/editor/kicad-check.ts"() {
+    "use strict";
+    init_util();
+    lastFallback = "";
+  }
+});
+
 // web/domains/pcb/editor/pcbdialogs/inspect.ts
 function describeItem(doc2, id) {
   const it = doc2.items.get(id);
@@ -94695,7 +94757,7 @@ function openDrc(ctx) {
         "div",
         null,
         h2("div", null, m.text),
-        ...m.ids.map((id) => h2("div", { class: "sub" }, describeItem(doc2, id))),
+        ...(m.descs || m.ids.map((id) => describeItem(doc2, id))).map((d) => h2("div", { class: "sub" }, d)),
         m.excluded && m.comment ? h2("div", { class: "sub", "data-k": "comment" }, m.comment) : null
       ));
       row3.addEventListener("click", () => select2(m, row3));
@@ -94843,9 +94905,21 @@ function openDrc(ctx) {
         await runZoneFill(ctx, { ids: [...doc2.items.values()].filter((it) => it.kind === "zone").map((it) => it.id), status, label: "Fill Zone(s)", all: true });
       }
       gauge.value = 40;
-      status.textContent = "Elapsed: 0 s";
+      status.textContent = "Running KiCad's design rules checker...";
       await new Promise((r) => setTimeout(r, 0));
-      let markers = (await collectMarkers(doc2, prefs2.parity)).markers;
+      let markers = null, how = "";
+      const docId3 = state.docId;
+      if (docId3) {
+        const rep = await serverDrc(docId3, { parity: prefs2.parity, refill: prefs2.refill, allTrackErrors: opts.reportAllTrackErrors });
+        if (rep) {
+          const ix = uuidIndex(doc2);
+          markers = [...rep.violations || [], ...rep.unconnected_items || [], ...rep.schematic_parity || []].map((v) => toMarker(v, ix));
+        }
+      }
+      if (!markers) {
+        markers = (await collectMarkers(doc2, prefs2.parity)).markers;
+        how = ` (checked in the browser: ${lastFallback || "no saved document"})`;
+      }
       for (const m of markers) {
         const sv = sevOverride[m.code];
         if (sv === "error" || sv === "warning") m.severity = sv;
@@ -94856,7 +94930,7 @@ function openDrc(ctx) {
       last2.elapsed = (Date.now() - t0) / 1e3;
       selected = null;
       gauge.value = 100;
-      status.textContent = `Completed in ${formatElapsed(Date.now() - t0)}`;
+      status.textContent = `Completed in ${formatElapsed(Date.now() - t0)}${how}`;
     } finally {
       clearInterval(tick);
       setTimeout(() => {
@@ -94873,7 +94947,7 @@ function openDrc(ctx) {
       lines.push(`** Found ${list.length} ${title} **`);
       for (const m of list) {
         lines.push(`[${m.code}]: ${m.text}`, `    @(${m.x.toFixed(4)} mm, ${m.y.toFixed(4)} mm): ${m.excluded ? "Excluded" : m.severity}`);
-        for (const id of m.ids) lines.push("    " + describeItem(doc2, id));
+        for (const d of m.descs || m.ids.map((id) => describeItem(doc2, id))) lines.push("    " + d);
         if (m.excluded && m.comment) lines.push("    " + m.comment);
       }
       lines.push("");
@@ -95026,6 +95100,8 @@ var init_inspect = __esm({
     init_board_setup();
     init_library2();
     init_hotkeys();
+    init_appstore();
+    init_kicad_check();
     PT6 = () => window.PcbTools;
     settings2 = () => PT6().designSettings(E.proSettings || null);
     board2 = () => E.kdoc && E.kdoc.type === "pcb" ? E.kdoc : null;
