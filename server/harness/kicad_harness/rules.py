@@ -690,6 +690,20 @@ def _stitch(self, spacing: float = 2.0, net: str = "GND", margin: float = 1.5, s
             for vid, at in ids.items():
                 if abs(v["x"] - at[0]) < 1.0 and abs(v["y"] - at[1]) < 1.0:
                     bad.add(vid)
+        # a rules marker can sit more than a millimetre from the via it is about (KiCad marks the track side), so each
+        # new via is also measured against the copper round it
+        try:
+            clr = float((self.rules() or {}).get("clearance") or 0.2)
+        except (HarnessError, TypeError, ValueError):
+            clr = 0.2
+        for vid, at in ids.items():
+            if vid in bad:
+                continue
+            near = self.whats_at(at, 1.2)
+            own = next((q for q in near if q.get("id") == vid), None)
+            r = float((own or {}).get("size") or size or 0.5) / 2
+            if any(q.get("net") != name and q.get("id") != vid and q.get("gap_mm") is not None and q["gap_mm"] - r < clr - 1e-3 for q in near):
+                bad.add(vid)
         for vid in bad:
             self._edit({"op": "remove", "id": vid})
             removed += 1
@@ -863,6 +877,20 @@ def _power_stitch(self, pitch: float = 1.0, most: int = 24, size: float | None =
             for vid, (at, _) in ids.items():
                 if abs(v["x"] - at[0]) < 0.6 and abs(v["y"] - at[1]) < 0.6:
                     bad.add(vid)
+        # a rules marker can sit more than a millimetre from the via it is about (KiCad marks the track side), so each
+        # new via is also measured against the copper round it
+        try:
+            clr = float((self.rules() or {}).get("clearance") or 0.2)
+        except (HarnessError, TypeError, ValueError):
+            clr = 0.2
+        for vid, at in ids.items():
+            if vid in bad:
+                continue
+            near = self.whats_at(at, 1.2)
+            own = next((q for q in near if q.get("id") == vid), None)
+            r = float((own or {}).get("size") or size or 0.5) / 2
+            if any(q.get("net") != name and q.get("id") != vid and q.get("gap_mm") is not None and q["gap_mm"] - r < clr - 1e-3 for q in near):
+                bad.add(vid)
         for vid in bad:
             self._edit({"op": "remove", "id": vid})
         self.flush()
@@ -1115,6 +1143,20 @@ def _vias_checked(self, name: str, pts: list, size, drill) -> dict:
             for vid, at in ids.items():
                 if abs(v["x"] - at[0]) < 0.6 and abs(v["y"] - at[1]) < 0.6:
                     bad.add(vid)
+        # a rules marker can sit more than a millimetre from the via it is about (KiCad marks the track side), so each
+        # new via is also measured against the copper round it
+        try:
+            clr = float((self.rules() or {}).get("clearance") or 0.2)
+        except (HarnessError, TypeError, ValueError):
+            clr = 0.2
+        for vid, at in ids.items():
+            if vid in bad:
+                continue
+            near = self.whats_at(at, 1.2)
+            own = next((q for q in near if q.get("id") == vid), None)
+            r = float((own or {}).get("size") or size or 0.5) / 2
+            if any(q.get("net") != name and q.get("id") != vid and q.get("gap_mm") is not None and q["gap_mm"] - r < clr - 1e-3 for q in near):
+                bad.add(vid)
         for vid in bad:
             self._edit({"op": "remove", "id": vid})
             removed += 1
