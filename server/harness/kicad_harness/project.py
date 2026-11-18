@@ -2508,12 +2508,14 @@ class Board(_Doc):
         finally:
             self.flush()
             if not t.keep:
-                now = {it["id"] for it in self._all_items(["segment", "arc", "via"])}
-                for i in now - set(snap):
+                now = {it["id"]: it.get("sexpr", "") for it in self._all_items(["segment", "arc", "via"])}
+                changed = {i for i in set(now) & set(snap) if now[i] != snap[i] and "more characters" not in now[i]}
+                for i in (set(now) - set(snap)) | changed:      # added, or changed in place (a moved via, a widened track)
                     self._edit({"op": "remove", "id": i})
-                for i in set(snap) - now:
+                for i in (set(snap) - set(now)) | changed:
                     self.add_item(snap[i])
                 self.flush()
+                self._geom = None
 
     def optimize(self, nets: list | None = None, time_s: float = 10, stretch: float = 1.6, keep_rules: bool = True, budget_s: float | None = 600,
                  progress: bool = True, max_added_mm: float | None = 5.0) -> dict:

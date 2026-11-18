@@ -45,8 +45,12 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             order: list | None = None, widths: dict | None = None, kinds: dict | None = None, time_s: float | None = None, max_vias: int = 2,
             stitch: float | None = 2.0, name: str | bool | None = None, rev: str | None = None, silk: bool = True, place: bool = True, route: bool = True,
             accept: list | None = None, reroute: bool = False, explain: bool = False, fanout: bool = False,
-            free_pins: bool = True, keep_rules: bool = False, keepouts: list | None = None, escapes=None, plan=None, ripup: str | None = None) -> dict:
+            free_pins: bool = True, keep_rules: bool = False, gate: bool = True, keepouts: list | None = None, escapes=None, plan=None, ripup: str | None = None) -> dict:
     """Lay the whole board out in one call and say how it came out.
+
+    gate=True (the default): every repair stage after the routing (clean-up, ground pads, last route, finish again,
+    stitch removal, corners) is kept only if it leaves no more connections open and no more rules errors; a stage taken
+    back is listed under "gated".
 
     keep_rules=True never touches the design rules (no house via either), for a person who said not to change them;
     otherwise any change is listed under "rules_changed".  layers=["F.Cu", "B.Cu", ...] names the routing layers (an
@@ -120,6 +124,28 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             return None
         finally:
             secs[what] = round(secs.get(what, 0) + _time.time() - t0, 1)
+
+    def standing():
+        """(open connections, rules errors other than open ones) with the pours filled: what a stage is judged by."""
+        with contextlib.suppress(HarnessError):
+            self.fill()
+        by = (self.check(limit=0, refill=False) or {}).get("by_kind") or {}
+        return (int(self.info().get("unrouted_connections") or 0), sum(v for k, v in by.items() if k != "unconnected_items"))
+
+    def gated(what, fn):
+        """Keep-best (as Copper's engine gates every stage): the stage's copper stays only when it leaves no more
+        connections open and, at the same count, no more rules errors; otherwise every track and via goes back."""
+        if not gate:
+            return step(what, fn)
+        before = standing()
+        with self.trial() as t:
+            res = step(what, fn)
+            after = standing()
+            t.keep = after[0] < before[0] or (after[0] == before[0] and after[1] <= before[1])
+        if not t.keep:
+            out.setdefault("gated", {})[what] = f"taken back: open {before[0]} -> {after[0]}, errors {before[1]} -> {after[1]}"
+            return None
+        return res
 
     if reroute:
         place, silk, outline = False, False, None
@@ -264,28 +290,28 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
         fin = step("finish", lambda: self.finish(stitch=stitch))
         if fin:
             out["added"] = {k: (sum(v.values()) if isinstance(v, dict) and all(isinstance(x, (int, float)) for x in v.values()) else v) for k, v in fin.items() if v not in (None, {}, 0)}
-        step("cleanup", self.cleanup)
+        gated("cleanup", self.cleanup)
         # what the real fill and the clean-up still leave open gets one last pass: a ground pad cut off from its pour
         # takes a via, anything else is routed again on its own
         still = step("unrouted", self.unrouted) or {}
         if still:
             if any(n.split("/")[-1].upper().endswith("GND") for n in still):
-                step("ground pads", self.ground_pads)
-            step("route last", lambda: self.route(nets=list(still), widths=r["widths"], kinds=r["kinds"], time_s=30, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes, plan=global_plan, ripup=ripup))
+                gated("ground pads", self.ground_pads)
+            gated("route last", lambda: self.route(nets=list(still), widths=r["widths"], kinds=r["kinds"], time_s=30, max_vias=max_vias, layers=None if auto_layers else route_layers, keep_rules=True, escapes=escapes, plan=global_plan, ripup=ripup))
             out["routed"]["left"] = step("unrouted", self.unrouted) or {}
         if (out.get("routed") or {}).get("left") and free_pins:     # pins boxed in by earlier tracks: free each and lay it first, never worse
             fp = step("free pins", lambda: self.free_pins(passes=1, keep_rules=True, layers=None if auto_layers else route_layers, time_s=min(60, max(20, (time_s or 60) / 3)), budget_s=max(120, 2 * (time_s or 60))))
             if fp:
                 out["routed"]["freed"] = f"open {fp['before']} -> {fp['after']}"
                 if fp["after"] < fp["before"]:
-                    step("finish again", self.finish)
+                    gated("finish again", self.finish)
                 out["routed"]["left"] = step("unrouted", self.unrouted) or {}
         if silk:
             s = step("silkscreen", lambda: self.silkscreen(name=name, rev=rev))
             if s and s.get("hidden"):
                 out["silk_hidden"] = s["hidden"]
     if route:
-        dropped = step("bad stitches", lambda: _drop_bad_stitches(self))      # a stitching or fence via the later passes routed against
+        dropped = gated("bad stitches", lambda: _drop_bad_stitches(self))      # a stitching or fence via the later passes routed against
         if dropped:
             out.setdefault("added", {})["stitches_dropped"] = dropped
     step("thermals", self.fix_thermals)      # a relief the last tracks left with too few spokes joins its pour solidly
@@ -293,7 +319,7 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     if fit and (fit.get("turned") or fit.get("misaligned")):
         out["models_3d"] = {k: fit[k] for k in ("turned", "misaligned") if fit.get(k)}
     if route:
-        cut = step("corners", self.fix_corners)      # a square corner the router or a repair left: two 45-degree bends
+        cut = gated("corners", self.fix_corners)      # a square corner the router or a repair left: two 45-degree bends
         if cut:
             out.setdefault("added", {})["corners_cut"] = cut
     info = self.info()
