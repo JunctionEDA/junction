@@ -101426,7 +101426,7 @@ function build3(input) {
           const groups = e.groups && typeof e.groups === "object" && !Array.isArray(e.groups) ? Object.fromEntries(Object.entries(e.groups).filter(([, v]) => Array.isArray(v)).map(([n2, v]) => [n2, v.map(String)])) : void 0;
           const separate = e.separate === false ? false : e.separate && typeof e.separate === "object" ? { quiet: num13(e.separate.quiet), noisy: num13(e.separate.noisy) } : void 0;
           const fence = e.fence === false ? false : e.fence && typeof e.fence === "object" ? { spacing: num13(e.fence.spacing), nets: Array.isArray(e.fence.nets) ? e.fence.nets.map((n2) => boardNet2(doc2, text2(n2, "net")).name) : void 0, returnVias: e.fence.return_vias === false ? false : void 0 } : void 0;
-          const res = R2.route(k, P, doc2, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : void 0, timeMs: Math.round(1e3 * Math.min(900, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : void 0, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : void 0, planes: e.planes === true ? true : void 0, criticalFirst: e.critical_first === false ? false : void 0, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : void 0, escapes: e.escapes === true || e.escapes === false ? e.escapes : typeof e.escapes === "number" && e.escapes >= 0 ? e.escapes : e.escapes && typeof e.escapes === "object" ? { depth: num13(e.escapes.depth), spread: num13(e.escapes.spread) } : void 0, plan: e.plan === true || e.plan === false ? e.plan : e.plan && typeof e.plan === "object" ? { tile: num13(e.plan.tile), iters: num13(e.plan.iters), layerCost: num13(e.plan.layer_cost), outside: num13(e.plan.outside), mask: e.plan.mask === true ? true : void 0, vias: e.plan.vias === true ? true : void 0, open: num13(e.plan.open), steer: e.plan.steer === "all" || e.plan.steer === "none" || e.plan.steer === "moved" ? e.plan.steer : void 0, order: e.plan.order === false ? false : void 0, rip: e.plan.rip === false ? false : void 0 } : void 0, ripup: e.ripup === "mincut" || e.ripup === "near" ? e.ripup : void 0, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : void 0 });
+          const res = R2.route(k, P, doc2, P.designSettings(ed.proSettings || null), { separate, fence, nets, layers: Array.isArray(e.layers) && e.layers.length ? e.layers : null, allowVias: e.allow_vias !== false, zones: e.zones === false ? false : void 0, timeMs: Math.round(1e3 * Math.min(900, Math.max(5, typeof e.time_s === "number" ? e.time_s : 20))), order, netOpts, keepouts, groups, groupsFirst: e.groups === false ? false : void 0, maxViasPerConnection: typeof e.max_vias === "number" && e.max_vias >= 0 ? Math.floor(e.max_vias) : void 0, planes: e.planes === true ? true : void 0, criticalFirst: e.critical_first === false ? false : void 0, fanoutLanes: e.fanout_lanes === false ? false : typeof e.fanout_lanes === "number" ? e.fanout_lanes : void 0, escapes: e.escapes === true || e.escapes === false ? e.escapes : typeof e.escapes === "number" && e.escapes >= 0 ? e.escapes : e.escapes && typeof e.escapes === "object" ? { depth: num13(e.escapes.depth), spread: num13(e.escapes.spread) } : void 0, plan: e.plan === true || e.plan === false ? e.plan : e.plan && typeof e.plan === "object" ? { tile: num13(e.plan.tile), iters: num13(e.plan.iters), layerCost: num13(e.plan.layer_cost), outside: num13(e.plan.outside), mask: e.plan.mask === true ? true : void 0, vias: e.plan.vias === true ? true : void 0, open: num13(e.plan.open), steer: e.plan.steer === "all" || e.plan.steer === "none" || e.plan.steer === "moved" ? e.plan.steer : void 0, order: e.plan.order === false ? false : void 0, rip: e.plan.rip === false ? false : void 0 } : void 0, ripup: e.ripup === "mincut" || e.ripup === "near" || e.ripup === "ladder" ? e.ripup : void 0, weights: typeof e.via_cost === "number" && e.via_cost >= 0 ? { via: e.via_cost } : void 0 });
           const failed = (res.failed || []).map((f2) => ({ net: f2.net, from: f2.a.map(r44), to: f2.b.map(r44) }));
           if (!res.total) throw new ToolError(`nothing to route: every connection ${nets ? "of " + nets.join(", ") : "on the board"} is already made`);
           if (!res.items.length) throw new ToolError(`the autorouter could not make any of the ${res.total} missing connection${res.total === 1 ? "" : "s"} within the design rules: ${JSON.stringify(failed.slice(0, 12))}`);
@@ -101452,6 +101452,7 @@ function build3(input) {
             longest_detours: conns.filter((c) => c.routed && c.detourRatio > 1.6).sort((a, b) => b.detourRatio - a.detourRatio).slice(0, 12).map((c) => ({ net: c.net, from: c.from && c.from.pad, to: c.to && c.to.pad, length_mm: r44(c.length), detour_ratio: r44(c.detourRatio), vias: c.vias, layers: c.layers })),
             fanout: res.fanout && res.fanout.escapes + res.fanout.boxed.length ? { escapes: res.fanout.escapes, ring: res.fanout.ring, via: res.fanout.via, used: res.fanout.used, rows: res.fanout.rows, kept: res.fanout.kept, open: res.fanout.open, boxed: res.fanout.boxed.slice(0, 20).map((b) => ({ pad: b.pad, net: b.net, reason: b.reason, blocked_by: b.blockedBy })) } : void 0,
             plan: res.plan ? { tile_mm: res.plan.tile, tiles: res.plan.tiles, connections: res.plan.conns, iterations: res.plan.iterations, overflow_first_mm: res.plan.overflowFirst, overflow_mm: res.plan.overflow, crossings_left: res.plan.crossings, relayered: res.plan.relayered, moved: res.plan.moved, contested: res.plan.contested, via_connections: res.plan.viaConns, ms: res.plan.ms, inside: res.plan.inside, outside: res.plan.outside } : void 0,
+            ladder: res.ladder ? { rescued: res.ladder.rescued, rescue_rungs: res.ladder.rungs, mincut: res.ladder.mincut, permuted: res.ladder.permuted, orders: res.ladder.orders, feedback: res.ladder.feedback, tried: res.ladder.tried, rolled_back: res.ladder.rolledBack } : void 0,
             groups: res.groups && res.groups.inside ? { clusters: res.groups.clusters, inside: res.groups.inside, routed: res.groups.insideRouted, vias: res.groups.insideVias } : void 0,
             // explain: true asks for the reasoning behind the run: which nets went first, which parts formed which cluster, and every connection that changed layer or wandered
             explain: e.explain === true ? {
@@ -121568,6 +121569,11 @@ function plan(inp, conns) {
     }
     (side ? capN : capE)[s2] = n2 * p + (n2 > 0 ? slack : 0);
   }
+  for (const [l, tx, ty, side, mm4] of inp.book || []) {
+    if (l < 0 || l >= L || tx < 0 || ty < 0 || tx >= nx || ty >= ny) continue;
+    const s2 = l * GT + ty * nx + tx, cap = side ? capN : capE;
+    cap[s2] = Math.max(0, cap[s2] - mm4);
+  }
   const per = Math.max(1, inp.viaPitch * inp.viaPitch / (g2 * g2));
   for (let ty = 0; ty < ny; ty++) for (let tx = 0; tx < nx; tx++) {
     let n2 = 0;
@@ -121579,7 +121585,8 @@ function plan(inp, conns) {
   }
   const freeOf = /* @__PURE__ */ new Map();
   const nd = inp.need ?? p / 2, cx = (x) => (x - G5.ox) / g2 + 0.5, cy = (y) => (y - G5.oy) / g2 + 0.5;
-  for (const c of conns) {
+  const fixed2 = inp.fixed || [];
+  for (const c of conns.concat(fixed2.map((f2) => f2.conn))) {
     const set2 = /* @__PURE__ */ new Set();
     for (const e of [c.a, c.b]) {
       if (!e.box) continue;
@@ -121595,7 +121602,7 @@ function plan(inp, conns) {
   const hT = new Float64Array(N2), vT = new Float64Array(N2);
   const shared2 = /* @__PURE__ */ new Map();
   const paths = /* @__PURE__ */ new Map();
-  const byId = new Map(conns.map((c) => [c.id, c]));
+  const byId = new Map(conns.concat(fixed2.map((f2) => f2.conn)).map((c) => [c.id, c]));
   let anyX = false, pres = 0, margin = BOX_MARGIN;
   const tileOf = (q4) => {
     const tx = Math.min(nx - 1, Math.max(0, Math.floor((q4[0] - G5.ox) / g2 / k))), ty = Math.min(ny - 1, Math.max(0, Math.floor((q4[1] - G5.oy) / g2 / k)));
@@ -121765,8 +121772,8 @@ function plan(inp, conns) {
   };
   const crossings = (only) => {
     const occ = /* @__PURE__ */ new Map();
-    const mine = only !== void 0 ? new Set(paths.get(only) || []) : null;
-    for (const [id, q4] of paths) for (const n2 of q4) if (!mine || mine.has(n2)) {
+    const mine2 = only !== void 0 ? new Set(paths.get(only) || []) : null;
+    for (const [id, q4] of paths) for (const n2 of q4) if (!mine2 || mine2.has(n2)) {
       let l = occ.get(n2);
       if (!l) occ.set(n2, l = []);
       if (l[l.length - 1] !== id) l.push(id);
@@ -121881,6 +121888,11 @@ function plan(inp, conns) {
     return out2;
   };
   const maxIters = Math.max(1, inp.iters || MAX_ITERS), maxMs = inp.maxMs || 8e3;
+  const mine = new Set(conns.map((c) => c.id));
+  for (const f2 of fixed2) if (!mine.has(f2.conn.id) && f2.path.length) {
+    paths.set(f2.conn.id, f2.path);
+    apply3(f2.conn, f2.path, 1);
+  }
   for (const c of conns) route3(c, 0);
   const direct = new Map(paths);
   const contest = /* @__PURE__ */ new Map();
@@ -121933,7 +121945,7 @@ function plan(inp, conns) {
   }
   if (best.paths !== paths) {
     for (const c of conns) rip(c);
-    for (const [id, q4] of best.paths) {
+    for (const [id, q4] of best.paths) if (mine.has(id)) {
       paths.set(id, q4);
       apply3(byId.get(id), q4, 1);
     }
@@ -122086,6 +122098,191 @@ function plan(inp, conns) {
   return { k, T, nx, ny, corridors, iterations: its, overflowFirst: first2, overflow: ov.tot, crossings: ov.xruns.length, relayered, moved: nMoved, contested: nContested, ms: Date.now() - t0 };
 }
 
+// web/domains/pcb/router/ladder.ts
+var CLUSTER_BOX_MM = 12;
+var CLUSTER_MAX = 5;
+var PERM_MAX = 120;
+var FEEDBACK_LOOPS = 2;
+var FEEDBACK_MAX_CONNS = 12;
+var RESCUE_RUNGS = ["via", "half", "neck", "escape"];
+var emptyLadder = () => ({ rescued: 0, mincut: 0, permuted: 0, orders: 0, feedback: 0, rungs: { via: 0, half: 0, neck: 0, escape: 0 }, tried: 0, rolledBack: 0 });
+var Ladder = class {
+  /** The host may change between calls (the router's repair makes a new one each time); the tabu list and the
+   *  feedback loops stay with the ladder, one per board. */
+  constructor(h3) {
+    this.h = h3;
+    this.rep = emptyLadder();
+    this.tabu = /* @__PURE__ */ new Set();
+    this.loops = 0;
+  }
+  /** Run every rung over every open connection; returns how many connections it laid. */
+  run() {
+    const h3 = this.h;
+    const start = h3.open().length;
+    const rungs = [(id) => this.rescue(id), (id) => this.mincut(id), (id) => this.permute(id)];
+    for (const rung of rungs) {
+      for (const id of h3.open()) {
+        if (h3.timeUp()) return start - h3.open().length;
+        if (!h3.routed(id)) rung(id);
+      }
+    }
+    while (h3.replan && this.loops < FEEDBACK_LOOPS && !h3.timeUp()) {
+      const open4 = h3.open();
+      if (!open4.length || !this.feedback(open4)) break;
+    }
+    return start - h3.open().length;
+  }
+  /** Keep what was done since `s` when fewer are open and nobody laid before is open now (`swap`: members of `own`
+   *  may trade places while the count drops); else put everything back.  */
+  settle(s2, before, own = null) {
+    const h3 = this.h;
+    const open4 = h3.open();
+    let lost = 0;
+    for (const id of open4) if (!before.has(id)) {
+      if (!own || !own.has(id)) {
+        lost = Infinity;
+        break;
+      }
+      lost++;
+    }
+    if (open4.length < before.size && lost !== Infinity) return true;
+    h3.back(s2);
+    this.rep.rolledBack++;
+    return false;
+  }
+  rescue(id) {
+    const h3 = this.h;
+    for (const rung of RESCUE_RUNGS) {
+      if (h3.timeUp()) return false;
+      this.rep.tried++;
+      const before = new Set(h3.open()), s2 = h3.snap();
+      if (h3.rescue(id, rung) && h3.routed(id)) {
+        if (this.settle(s2, before)) {
+          this.rep.rescued++;
+          this.rep.rungs[rung]++;
+          return true;
+        }
+      } else h3.back(s2);
+    }
+    return false;
+  }
+  mincut(id) {
+    const h3 = this.h;
+    this.rep.tried++;
+    const before = new Set(h3.open()), s2 = h3.snap();
+    if (h3.mincut(id)) {
+      if (this.settle(s2, before)) {
+        this.rep.mincut++;
+        return true;
+      }
+    } else {
+      h3.back(s2);
+      this.rep.rolledBack++;
+    }
+    return false;
+  }
+  /** Copper's permute_cluster: the cluster comes up and is laid in every order. */
+  permute(id) {
+    const h3 = this.h;
+    const members = [id, ...h3.contesting(id).filter((x) => x !== id)].slice(0, CLUSTER_MAX);
+    if (members.length < 2) return false;
+    const key3 = members.slice().sort((a, b) => a - b).join(",");
+    if (this.tabu.has(key3)) return false;
+    this.tabu.add(key3);
+    this.rep.tried++;
+    const before = new Set(h3.open()), s0 = h3.snap();
+    const base2 = members.filter((m) => !h3.routed(m)).length;
+    const ripped = h3.rip(members.filter((m) => h3.routed(m)));
+    const order = members.slice();
+    const tail = ripped.filter((x) => !members.includes(x)).sort((a, b) => a - b);
+    let stuck = 0;
+    for (const m of members) {
+      if (before.has(m) && !h3.timeUp()) {
+        const t = h3.snap();
+        if (!h3.lay(m)) stuck++;
+        h3.back(t);
+      }
+    }
+    if (stuck >= base2) {
+      h3.back(s0);
+      this.rep.rolledBack++;
+      return false;
+    }
+    const best = { fails: base2, order: null };
+    let orders = 0, found = false;
+    const laid = (ids) => {
+      let f2 = 0;
+      for (const x of ids) if (!h3.lay(x)) {
+        f2++;
+        if (f2 >= best.fails) break;
+      }
+      return f2;
+    };
+    const dfs = (rest, prefix, fails) => {
+      if (!rest.length) {
+        orders++;
+        const t = h3.snap();
+        const f2 = fails + laid(tail);
+        if (f2 < best.fails) {
+          best.fails = f2;
+          best.order = prefix.slice();
+        }
+        if (f2 === 0) {
+          found = true;
+          return;
+        }
+        h3.back(t);
+        return;
+      }
+      for (const m of rest) {
+        if (found || orders >= PERM_MAX || h3.timeUp()) return;
+        const t = h3.snap();
+        const f2 = fails + (h3.lay(m) ? 0 : 1);
+        if (f2 < best.fails) dfs(rest.filter((x) => x !== m), prefix.concat(m), f2);
+        else orders++;
+        if (found) return;
+        h3.back(t);
+      }
+    };
+    dfs(order, [], 0);
+    this.rep.orders += orders;
+    if (!found && best.order) {
+      for (const m of best.order) h3.lay(m);
+      for (const x of tail) h3.lay(x);
+    }
+    if ((found || best.order) && this.settle(s0, before, new Set(members.concat(tail)))) {
+      this.rep.permuted++;
+      return true;
+    }
+    if (!found && !best.order) {
+      h3.back(s0);
+      this.rep.rolledBack++;
+    }
+    return false;
+  }
+  /** Copper's _feedback: one loop.  True when it was kept. */
+  feedback(open4) {
+    const h3 = this.h;
+    if (!h3.replan || !h3.replanned) return false;
+    const before = new Set(open4), s2 = h3.snap();
+    const todo = h3.replan(open4);
+    if (!todo) return false;
+    this.loops++;
+    this.rep.tried++;
+    for (const id of todo) {
+      if (h3.timeUp()) break;
+      if (!h3.routed(id)) h3.lay(id);
+    }
+    if (this.settle(s2, before)) {
+      h3.replanned(true);
+      this.rep.feedback += before.size - h3.open().length;
+      return true;
+    }
+    h3.replanned(false);
+    return false;
+  }
+};
+
 // web/domains/pcb/router/impedance.ts
 var num3 = (K11, n2, key3, d) => {
   const c = n2 && K11.kid(n2, key3);
@@ -122193,6 +122390,8 @@ var CUT_TRIES = 3;
 var CUT_DEPTH = 2;
 var RIPUP = "near";
 var CUT_ORDER = "cut-first";
+var CLUSTER_HALF = CLUSTER_BOX_MM / 2;
+var FINE_CELLS = 25e5;
 var isCritical = (net, kind) => kind === "rf" || usualImpedance(net, true) === 90 || /(^|[\/_\-.(])(XTAL|XIN|XOUT|XI|XO|XC\d?|XL\d?|OSC(_?32K?)?_?(IN|OUT|I|O)|OSCI|OSCO|XTAL_?[PN]|X(32K?)_?[PN])\d*([_\-.)]|$)/i.test(net);
 var isSupply = (net) => /^\/?(.*\/)?(A|D|P)?(GND|VSS|VEE)\w*$|^\/?(.*\/)?[+-]?\d+(V\d*|\.\d+V)\w*$|^\/?(.*\/)?(VCC|VDD|VBUS|VBAT|VIN|VSYS|VPP|VAA|VREF|VOUT|V\d+V\d*|PWR|\+BATT|-BATT)\w*$/i.test(net) && !/(_|\b)(EN|SENSE|SNS|FB|PG|OK|DET|MON|ADC)\w*$/i.test(net);
 function netKind(net, paired = /(\+|-|_P|_N)\)?$/.test(net)) {
@@ -122268,11 +122467,16 @@ var Router = class _Router {
     // ------------------------------------------------------------------ length matching
     this.matchReports = [];
     this.viaCap = Infinity;
+    /** The repair ladder's rescue (ladder.ts): vias allowed above a connection's limit, and no steering by the plan. */
+    this.extraVias = 0;
+    this.noSteer = false;
+    this.ladderRep = null;
     this.cur = null;
     this.curSoft = false;
     this.oidx = null;
     // ------------------------------------------------------------------ global plan (globalplan.ts)
     this.gplan = null;
+    this.planRef = null;
     this.planBlk = null;
     this.planStat = { inside: 0, outside: 0 };
     /** What taking a laid route up and laying it again costs, in mm of detour (Copper's rip price): 4 mm, times its
@@ -122281,6 +122485,10 @@ var Router = class _Router {
      *  first. */
     this.ripHist = /* @__PURE__ */ new Map();
     this.wmin = 0;
+    // ------------------------------------------------------------------ the repair ladder (ladder.ts, after Copper's repair.py)
+    this.ladderRun = null;
+    this.booked = [];
+    this.replanUndo = null;
     this.fenceVias = [];
     this.fenceReports = [];
     this.fenceShapes = [];
@@ -123118,6 +123326,7 @@ var Router = class _Router {
       for (const c of G5.classes.values()) for (const o2 of obs) stampClass(G5, c, o2, 1, true);
       const j = jobs.get(e.pad.name);
       const anchors = Array.from(ends.get(at5.get(e.pad.name)).anchors);
+      const orig = anchors.map((a) => ({ p: a.p, layers: a.layers, shape: a.shape, narrow: a.narrow, axis: a.axis }));
       for (const a of anchors) {
         a.p = e.end;
         a.layers = e.via ? all2.filter((l) => G5.routable[l]) : [e.pad.layer];
@@ -123126,7 +123335,7 @@ var Router = class _Router {
         a.axis = e.via ? void 0 : e.n;
       }
       this.padNames.set(key3(e.end), e.pad.name);
-      this.laid.push({ e, anchors, obs });
+      this.laid.push({ e, anchors, obs, orig });
     }
     const lane = this.opts.fanoutLanes === false ? 0 : typeof this.opts.fanoutLanes === "number" ? this.opts.fanoutLanes : 0.25;
     if (lane > 0) {
@@ -124389,7 +124598,8 @@ var Router = class _Router {
       let used = 0;
       for (const c of net.conns) if (c.nodes && c !== conn && c.feat) used += c.feat.vias;
       const perConn = this.opts.maxViasPerConnection;
-      const maxVias = Math.min(gd.maxVias - used, this.viaCap, perConn === void 0 || perConn === null ? Infinity : Math.max(0, +perConn));
+      let maxVias = Math.min(gd.maxVias - used, this.viaCap, perConn === void 0 || perConn === null ? Infinity : Math.max(0, +perConn));
+      if (this.extraVias && maxVias >= 1 && maxVias < Infinity) maxVias += this.extraVias;
       const src = this.access(A, maps, rt), tgt = this.access(B, maps, rt);
       if (!src) return null;
       let term = tb;
@@ -124422,7 +124632,7 @@ var Router = class _Router {
         }
         return { res, owner, flip, esc: [src.esc, tgt ? tgt.esc : void 0] };
       };
-      const cor0 = this.gplan && !collect && !net.zoneCells ? this.gplan.corridors.get(conn.id) : void 0, steerAs = cor0 ? this.planOpts().steer : "none", cor = cor0 && (steerAs === "all" || steerAs === "moved" && cor0.moved) ? cor0 : void 0;
+      const cor0 = this.gplan && !collect && !net.zoneCells && !this.noSteer ? this.gplan.corridors.get(conn.id) : void 0, steerAs = cor0 ? this.planOpts().steer : "none", cor = cor0 && (steerAs === "all" || steerAs === "moved" && cor0.moved) ? cor0 : void 0;
       let steer = extra;
       if (cor && !(cor.vias > 0 && maxVias <= 0)) {
         const pl = this.gplan, kk = pl.k, po = this.planOpts();
@@ -124524,6 +124734,7 @@ var Router = class _Router {
     let ref = conns[0].cls;
     for (const [cls, n2] of count2) if (n2 > count2.get(ref)) ref = cls;
     const end = (a) => ({ p: a.p, layers: a.layers, box: a.shape && !a.plane ? bboxOf2(a.shape) : void 0 });
+    this.planRef = ref;
     this.gplan = plan(
       { G: G5, maps: ref.fixed, vmaps: ref.vfixed, pitch: ref.width + ref.clr, viaPitch: ref.viaD + ref.clr, need: ref.clr + ref.width / 2, pref: this.pref, viaMm: this.W.via / Math.max(1e-6, this.W.length), minPitch: this.minPadPitch(), tile: po.tile || void 0, iters: po.iters },
       conns.map((c) => ({ id: c.id, net: c.net, a: end(c.a), b: end(c.b), demand: c.cls.width + c.cls.clr }))
@@ -125152,7 +125363,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       }
       return false;
     };
-    const mincut = (this.opts.ripup ?? RIPUP) === "mincut";
+    const mincut = (this.opts.ripup ?? RIPUP) !== "near";
     const forceAny = (c, depth2, keep) => {
       if (!mincut) return force(c, depth2, keep);
       if (CUT_ORDER === "near-first") {
@@ -125163,7 +125374,10 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       }
       return cutForce(c, Math.min(depth2, CUT_DEPTH), keep) || CUT_ORDER === "cut-first" && !timeUp() && force(c, depth2, /* @__PURE__ */ new Set());
     };
-    for (let round = 0; round < 3; round++) {
+    if ((this.opts.ripup ?? RIPUP) === "ladder") {
+      if (!conns.some((c) => !c.nodes && c.why !== "budget")) return;
+      for (let round = 0; round < 2 && !timeUp(); round++) if (!this.ladder(timeUp, snapOf, back, lay, (c) => forceAny(c, 3, /* @__PURE__ */ new Set()))) break;
+    } else for (let round = 0; round < 3; round++) {
       const open4 = conns.filter((c) => !c.nodes && c.why !== "budget");
       if (!open4.length) return;
       let gained = false;
@@ -125254,6 +125468,448 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
         back(snap2);
       }
     }
+  }
+  /** One run of the ladder over what is open; true when it laid something.  The transactions are repair()'s
+   *  snapshots; `cut` is the min-cut rip as ripup "mincut" does it. */
+  ladder(timeUp, snapOf, back, lay, cut) {
+    const conns = this.conns;
+    const alone = (c) => !!c.pair || !!c.pairOnly && this.opts.splitPairs !== true;
+    const open4 = () => conns.filter((c) => !c.nodes && !c.moot).sort((a, b) => a.len - b.len || a.id - b.id).map((c) => c.id);
+    const host2 = {
+      open: open4,
+      routed: (id) => !!conns[id].nodes,
+      timeUp,
+      snap: snapOf,
+      back,
+      rescue: (id, rung) => {
+        const c = conns[id];
+        return !alone(c) && c.why !== "budget" && this.rescueOne(c, rung, lay);
+      },
+      mincut: (id) => {
+        const c = conns[id];
+        return !alone(c) && c.why !== "budget" && cut(c);
+      },
+      contesting: (id) => {
+        const c = conns[id];
+        return alone(c) || c.why === "budget" ? [] : this.contesting(c);
+      },
+      rip: (ids) => {
+        const out2 = [];
+        for (const id of ids) if (conns[id].nodes) this.rip(conns[id], out2);
+        return out2.map((c) => c.id);
+      },
+      lay: (id) => !alone(conns[id]) && lay(conns[id]),
+      replan: this.gplan ? (ids) => this.replan(ids.map((id) => conns[id]).filter((c) => !alone(c) && c.why !== "budget")) : void 0,
+      replanned: (keep) => this.replanned(keep)
+    };
+    if (!this.ladderRun) this.ladderRun = new Ladder(host2);
+    else this.ladderRun.h = host2;
+    const n2 = this.ladderRun.run();
+    this.ladderRep = this.ladderRun.rep;
+    return n2 > 0;
+  }
+  /** Copper's rescue(): one rung for one open connection, which disturbs nobody.  True when it was laid. */
+  rescueOne(c, rung, lay) {
+    if (c.nodes) return true;
+    const loose = (f2, extra) => {
+      this.noSteer = true;
+      this.extraVias = extra;
+      try {
+        return f2();
+      } finally {
+        this.noSteer = false;
+        this.extraVias = 0;
+      }
+    };
+    if (rung === "via") return loose(() => lay(c), 1);
+    if (rung === "half") return loose(() => this.fineLay(c), 0);
+    if (rung === "neck") {
+      const wide = c.cls, floor = Math.max(this.s.minTrackWidth || 0, 0.1);
+      if (wide.width <= floor + 1e-9) return false;
+      const thin = this.classFor(c.net, Math.min(floor, wide.width), 0, this.opts.smallVias !== false);
+      if (thin === wide) return false;
+      c.cls = thin;
+      const ok2 = loose(() => lay(c) || this.fineLay(c), 1);
+      if (!ok2) c.cls = wide;
+      else this.stat.necked = (this.stat.necked || 0) + 1;
+      return ok2;
+    }
+    return this.unescape(c, () => loose(() => lay(c), 1));
+  }
+  /** Copper's "other fan-out side" (fanout.re_escape): an end of the connection that starts from an escape laid
+   *  before routing gives it up and leaves its pad by itself (access() tries both ways along the pad), when nothing
+   *  else is routed from that escape.  Undone when the connection still cannot be laid. */
+  unescape(c, layIt) {
+    const G5 = this.G;
+    for (const end of [c.a, c.b]) {
+      const i = this.laid.findIndex((x) => x.anchors.includes(end));
+      if (i < 0) continue;
+      const L = this.laid[i];
+      if (this.conns.some((o) => o !== c && o.nodes && [o.a, o.b, ...o.ends || []].some((a) => L.anchors.includes(a)))) continue;
+      const cur2 = L.anchors.map((a) => ({ p: a.p, layers: a.layers, shape: a.shape, narrow: a.narrow, axis: a.axis }));
+      const swap = (sign2) => {
+        const list = G5.obstacles.get(L.e.net) || [];
+        G5.obstacles.set(L.e.net, sign2 < 0 ? list.filter((o) => !L.obs.includes(o)) : list.concat(L.obs));
+        for (const cl of G5.classes.values()) for (const o of L.obs) stampClass(G5, cl, o, sign2, true);
+        this.escapeObs = sign2 < 0 ? this.escapeObs.filter((o) => !L.obs.includes(o)) : this.escapeObs.concat(L.obs);
+        L.anchors.forEach((a, k) => Object.assign(a, sign2 < 0 ? L.orig[k] : cur2[k]));
+        if (sign2 < 0) this.laid.splice(i, 1);
+        else this.laid.splice(i, 0, L);
+        this.oidx = null;
+      };
+      swap(-1);
+      if (layIt()) {
+        this.stat.unescaped = (this.stat.unescaped || 0) + 1;
+        return true;
+      }
+      swap(1);
+    }
+    return false;
+  }
+  /** Where the connection fails: the middle of the stretch of its soft route (through this run's routes) that runs
+   *  into other routes (Copper's fail record 'where'), and the routes it runs into.  The middle of its ends when it
+   *  has no soft route. */
+  whereOf(c) {
+    const mid2 = [(c.a.p[0] + c.b.p[0]) / 2, (c.a.p[1] + c.b.p[1]) / 2];
+    const soft = this.find(c, true);
+    if (!soft) return { p: mid2, blockers: [] };
+    const bl = this.blockers(c, soft.res).filter((o) => !o.pair);
+    if (!bl.length) return { p: mid2, blockers: [] };
+    const P = this.P, nodes = soft.res.nodes, r = c.cls.width / 2;
+    let sx = 0, sy = 0, n2 = 0;
+    for (let i = 0; i + 1 < nodes.length; i++) {
+      const a = nodes[i], b = nodes[i + 1];
+      if (a.l !== b.l) continue;
+      const pa = this.mm(a), pb = this.mm(b);
+      const k = Math.max(1, Math.ceil(Math.hypot(pb[0] - pa[0], pb[1] - pa[1]) / 0.25));
+      for (let j = 0; j <= k; j++) {
+        const p = [pa[0] + (pb[0] - pa[0]) * j / k, pa[1] + (pb[1] - pa[1]) * j / k];
+        const dot2 = { t: "circle", x: p[0], y: p[1], r };
+        if (bl.some((o) => o.shapes.some((sh) => sh.layers.includes(a.l) && P.shapeGap(sh.shape, dot2) < Math.max(c.cls.clr, o.cls.clr)))) {
+          sx += p[0];
+          sy += p[1];
+          n2++;
+        }
+      }
+    }
+    return { p: n2 ? [sx / n2, sy / n2] : mid2, blockers: bl };
+  }
+  /** Copper's _cluster(): the connections that fight for the channel where `c` fails, inside a 12 x 12 mm box round
+   *  it, nearest first in three ranks: other open connections; the routes in its way (its soft route's blockers and
+   *  its minimum cut); routes taken up twice already.  Pairs and critical nets stay out of it. */
+  contesting(c) {
+    const { p, blockers } = this.whereOf(c);
+    const half = CLUSTER_HALF;
+    const named = new Set(blockers.map((o) => o.id));
+    const cut = this.cutFor(c, (o) => !!o.pair);
+    if (cut) for (const o of cut) named.add(o.id);
+    const inBox3 = (q4) => Math.abs(q4[0] - p[0]) <= half && Math.abs(q4[1] - p[1]) <= half;
+    const cands = [];
+    for (const o of this.conns) {
+      if (o === c || o.moot || o.pair || o.partner || o.pairOnly || o.why === "budget") continue;
+      let prio, pts;
+      if (!o.nodes) {
+        prio = 0;
+        pts = [o.a.p, o.b.p];
+      } else {
+        if (isCritical(o.net, this.kindOf(o.net)) || this.netOf(o.net).guide.rank < Infinity) continue;
+        if (named.has(o.id)) prio = 1;
+        else if (o.rips >= 2 || (this.ripHist.get(o.id) || 0) > 0) prio = 2;
+        else continue;
+        pts = [];
+        for (const sh of o.shapes) {
+          const s2 = sh.shape;
+          if (s2.t !== "seg") {
+            if (s2.t === "circle") pts.push([s2.x, s2.y]);
+            continue;
+          }
+          const dx = s2.b[0] - s2.a[0], dy = s2.b[1] - s2.a[1], L2 = dx * dx + dy * dy;
+          const t = L2 ? Math.max(0, Math.min(1, ((p[0] - s2.a[0]) * dx + (p[1] - s2.a[1]) * dy) / L2)) : 0;
+          pts.push([s2.a[0] + t * dx, s2.a[1] + t * dy]);
+        }
+      }
+      let d = Infinity;
+      for (const q4 of pts) if (inBox3(q4)) d = Math.min(d, Math.hypot(q4[0] - p[0], q4[1] - p[1]));
+      if (d < Infinity) cands.push([prio, Math.round(d * 1e6) / 1e6, o.id]);
+    }
+    cands.sort((x, y) => x[0] - y[0] || x[1] - y[1] || x[2] - y[2]);
+    return cands.slice(0, CLUSTER_MAX - 1).map((x) => x[2]);
+  }
+  planConnOf(c) {
+    const end = (a) => ({ p: a.p, layers: a.layers, box: a.shape && !a.plane ? bboxOf2(a.shape) : void 0 });
+    return { id: c.id, net: c.net, a: end(c.a), b: end(c.b), demand: c.cls.width + c.cls.clr };
+  }
+  /** Copper's _feedback(): book away the capacity of the tile borders where the open connections fail (on the
+   *  layers their corridors put there), plan again for them and the routed connections whose corridors cross those
+   *  borders (at most FEEDBACK_MAX_CONNS), steer all of them by their new corridors, and take the routed ones up.
+   *  Returns what to lay again, or null. */
+  replan(failed) {
+    const pl = this.gplan, ref = this.planRef;
+    if (!pl || !ref) return null;
+    const G5 = this.G, k = pl.k, nx = pl.nx, ny = pl.ny;
+    const book = [];
+    const pairs = [];
+    const affected = [];
+    for (const c of failed) {
+      const cor = pl.corridors.get(c.id);
+      if (!cor) continue;
+      const { p } = this.whereOf(c);
+      const tx = Math.min(nx - 1, Math.max(0, Math.floor((p[0] - G5.ox) / G5.g / k))), ty = Math.min(ny - 1, Math.max(0, Math.floor((p[1] - G5.oy) / G5.g / k))), t = ty * nx + tx;
+      const layers = cor.layer[t] >= 0 ? [cor.layer[t]] : G5.routable.map((r, l) => r ? l : -1).filter((l) => l >= 0);
+      let any = false;
+      for (const [ex, ey, side, bx, by] of [[tx, ty, 0, tx + 1, ty], [tx - 1, ty, 0, tx - 1, ty], [tx, ty, 1, tx, ty + 1], [tx, ty - 1, 1, tx, ty - 1]]) {
+        if (bx < 0 || by < 0 || bx >= nx || by >= ny || ex < 0 || ey < 0 || !cor.tiles[by * nx + bx]) continue;
+        for (const l of layers) book.push([l, ex, ey, side, c.cls.width + c.cls.clr]);
+        pairs.push([t, by * nx + bx]);
+        any = true;
+      }
+      if (any) affected.push(c);
+    }
+    this.stat.replans = (this.stat.replans || 0) + 1;
+    if (!book.length) return null;
+    this.stat.replanBooked = (this.stat.replanBooked || 0) + book.length;
+    const have = new Set(affected.map((c) => c.id));
+    for (const o of this.conns.slice().sort((a, b) => a.len - b.len || a.id - b.id)) {
+      if (affected.length >= FEEDBACK_MAX_CONNS) break;
+      if (have.has(o.id) || !o.nodes || o.moot || o.pair || o.partner || o.pairOnly || isCritical(o.net, this.kindOf(o.net)) || this.netOf(o.net).guide.rank < Infinity) continue;
+      const cor = pl.corridors.get(o.id);
+      if (cor && pairs.some(([a, b]) => cor.tiles[a] && cor.tiles[b])) {
+        affected.push(o);
+        have.add(o.id);
+      }
+    }
+    const fixed2 = [];
+    for (const [id, cor] of pl.corridors) if (!have.has(id) && this.conns[id]) fixed2.push({ conn: this.planConnOf(this.conns[id]), path: cor.path });
+    const po = this.planOpts();
+    const res = plan(
+      { G: G5, maps: ref.fixed, vmaps: ref.vfixed, pitch: ref.width + ref.clr, viaPitch: ref.viaD + ref.clr, need: ref.clr + ref.width / 2, pref: this.pref, viaMm: this.W.via / Math.max(1e-6, this.W.length), tile: pl.T, iters: po.iters, book: this.booked.concat(book), fixed: fixed2 },
+      affected.map((c) => this.planConnOf(c))
+    );
+    if (res.k !== pl.k || res.nx !== nx || res.ny !== ny) return null;
+    this.stat.replanConns = (this.stat.replanConns || 0) + affected.length;
+    const cors = /* @__PURE__ */ new Map();
+    for (const c of affected) cors.set(c.id, pl.corridors.get(c.id));
+    for (const [id, cor] of res.corridors) pl.corridors.set(id, Object.assign({}, cor, { moved: true }));
+    this.replanUndo = { cors, book };
+    const out2 = [];
+    for (const c of affected) if (c.nodes) this.rip(c, out2);
+    const ids = new Set(affected.map((c) => c.id));
+    for (const c of out2) ids.add(c.id);
+    return Array.from(ids).map((id) => this.conns[id]).sort((a, b) => a.len - b.len || a.id - b.id).map((c) => c.id);
+  }
+  replanned(keep) {
+    const u = this.replanUndo, pl = this.gplan;
+    this.replanUndo = null;
+    if (!u || !pl) return;
+    if (keep) {
+      this.booked.push(...u.book);
+      return;
+    }
+    for (const [id, cor] of u.cors) if (cor) pl.corridors.set(id, cor);
+    else pl.corridors.delete(id);
+  }
+  /** Copper's rescue at half the window pitch: the connection alone, searched on a lattice of half the grid's pitch
+   *  over a window round its ends, where the board's copper and this run's routes are rasterised again; every piece
+   *  of the result is then checked exactly against the copper round it.  Vias only on cells of the main grid (so the
+   *  rest of the router can name them), and the route's grid nodes are its nodes rounded onto the main grid (used for
+   *  tees and lengths; the copper itself is exact). */
+  fineLay(conn) {
+    const G5 = this.G, net = this.netOf(conn.net), cls = conn.cls, gd = net.guide, h3 = G5.g / 2;
+    if (conn.planeOnly !== void 0) return false;
+    const comp = this.components(net);
+    if (comp[conn.a.cluster] === comp[conn.b.cluster]) return false;
+    const span = Math.max(Math.abs(conn.a.p[0] - conn.b.p[0]), Math.abs(conn.a.p[1] - conn.b.p[1])), m = Math.max(2, 0.3 * span);
+    const ix0 = Math.max(0, Math.floor((Math.min(conn.a.p[0], conn.b.p[0]) - m - G5.ox) / G5.g)), ix1 = Math.min(G5.W - 1, Math.ceil((Math.max(conn.a.p[0], conn.b.p[0]) + m - G5.ox) / G5.g));
+    const iy0 = Math.max(0, Math.floor((Math.min(conn.a.p[1], conn.b.p[1]) - m - G5.oy) / G5.g)), iy1 = Math.min(G5.H - 1, Math.ceil((Math.max(conn.a.p[1], conn.b.p[1]) + m - G5.oy) / G5.g));
+    const W22 = 2 * (ix1 - ix0) + 1, H2 = 2 * (iy1 - iy0) + 1, n2 = W22 * H2;
+    if (W22 < 3 || H2 < 3 || n2 > FINE_CELLS) return false;
+    const ox = G5.ox + ix0 * G5.g, oy = G5.oy + iy0 * G5.g;
+    const sample2 = (src2, any = true) => {
+      if (!src2) return null;
+      const out2 = new Uint8Array(n2);
+      for (let fy = 0; fy < H2; fy++) {
+        const ya = iy0 + (fy >> 1), yb = iy0 + (fy + 1 >> 1);
+        for (let fx = 0; fx < W22; fx++) {
+          const xa = ix0 + (fx >> 1), xb = ix0 + (fx + 1 >> 1);
+          const v = [src2[ya * G5.W + xa], src2[ya * G5.W + xb], src2[yb * G5.W + xa], src2[yb * G5.W + xb]];
+          out2[fy * W22 + fx] = (any ? v.some((x) => x) : v.every((x) => x)) ? 1 : 0;
+        }
+      }
+      return out2;
+    };
+    const noVia = new Uint16Array(n2);
+    const nv = sample2(G5.noVia);
+    for (let fy = 0; fy < H2; fy++) for (let fx = 0; fx < W22; fx++) {
+      const i = fy * W22 + fx;
+      noVia[i] = nv[i] || fx & 1 || fy & 1 ? 1 : 0;
+    }
+    for (const b of gd.viaAvoid) for (let fy = Math.max(0, 2 * (b[1] - iy0)); fy <= Math.min(H2 - 1, 2 * (b[3] - iy0)); fy++) for (let fx = Math.max(0, 2 * (b[0] - ix0)); fx <= Math.min(W22 - 1, 2 * (b[2] - ix0)); fx++) noVia[fy * W22 + fx] = 1;
+    const reach = cls.clr + cls.viaD + 2, wx0 = ox - reach, wy0 = oy - reach, wx1 = ox + (W22 - 1) * h3 + reach, wy1 = oy + (H2 - 1) * h3 + reach;
+    const obs = /* @__PURE__ */ new Map();
+    const put4 = (o) => {
+      const bb = bboxOf2(o.shape);
+      if (bb[0] > wx1 || bb[2] < wx0 || bb[1] > wy1 || bb[3] < wy0) return;
+      let l = obs.get(o.net);
+      if (!l) obs.set(o.net, l = []);
+      l.push(o);
+    };
+    for (const [k, list] of G5.obstacles) if (k !== conn.net) for (const o of list) put4(o);
+    for (const o of this.conns) if (o.nodes && o.net !== conn.net) for (const sh of o.shapes) put4(sh);
+    const rmin = this.s.clearance + this.s.trackWidth / 2;
+    const G22 = {
+      g: h3,
+      ox,
+      oy,
+      W: W22,
+      H: H2,
+      layers: G5.layers,
+      routable: G5.routable,
+      noVia,
+      thru: new Uint8Array(n2),
+      outside: sample2(G5.outside),
+      keep: G5.keep.map((k) => sample2(k)),
+      quiet: sample2(G5.quiet) || void 0,
+      clear: sample2(G5.clear) || void 0,
+      edgeClr: G5.edgeClr,
+      holeClr: G5.holeClr,
+      margin: h3 * h3 / (4 * Math.max(rmin, 0.05)) + 2e-3,
+      obstacles: obs,
+      classes: /* @__PURE__ */ new Map(),
+      weights: G5.weights,
+      kinds: G5.kinds,
+      sep: G5.sep,
+      nearPad: sample2(G5.nearPad, false) || void 0,
+      layerCost: G5.layerCost
+    };
+    const holes = /* @__PURE__ */ new Set();
+    for (const o of G5.obstacles.get(conn.net) || []) if (o.thru) {
+      const fx = Math.round((o.thru[0] - ox) / h3), fy = Math.round((o.thru[1] - oy) / h3);
+      if (fx >= 0 && fy >= 0 && fx < W22 && fy < H2) {
+        G22.thru[fy * W22 + fx] = 1;
+        holes.add(fy * W22 + fx);
+      }
+    }
+    const c2 = buildClass(G22, cls.key, cls.width, cls.clr, cls.viaD, cls.viaDrill, cls.kind, cls.open !== false, !!cls.feed);
+    for (const b of gd.avoid) for (const maps2 of [c2.full, c2.fixed, c2.vfull, c2.vfixed]) for (const mp of maps2) for (let fy = Math.max(0, 2 * (b[1] - iy0)); fy <= Math.min(H2 - 1, 2 * (b[3] - iy0)); fy++) for (let fx = Math.max(0, 2 * (b[0] - ix0)); fx <= Math.min(W22 - 1, 2 * (b[2] - ix0)); fx++) mp[fy * W22 + fx]++;
+    const maps = c2.full;
+    let rt = G5.routable.slice();
+    if (gd.allowed) {
+      const want2 = gd.allowed.map((v, l) => v && G5.routable[l]);
+      if (want2.some(Boolean)) {
+        rt = want2.slice();
+        for (const e of [conn.a, conn.b]) if (!e.layers.some((l) => want2[l])) {
+          for (const l of e.layers) if (G5.routable[l]) rt[l] = true;
+        }
+      }
+    }
+    const owner = /* @__PURE__ */ new Map();
+    const tree = (cluster) => {
+      const out2 = [];
+      for (const o of net.conns) if (o.nodes && o !== conn && comp[o.a.cluster] === comp[cluster]) {
+        const cs = [];
+        this.cellsOf(o, cs, /* @__PURE__ */ new Map());
+        for (const nd of cs) {
+          const fx = 2 * (nd.ix - ix0), fy = 2 * (nd.iy - iy0);
+          if (fx < 0 || fy < 0 || fx >= W22 || fy >= H2) continue;
+          out2.push({ ix: fx, iy: fy, l: nd.l });
+          owner.set(nd.l * n2 + fy * W22 + fx, o.id);
+        }
+      }
+      return out2;
+    };
+    let ta = tree(conn.a.cluster), tb = tree(conn.b.cluster);
+    const zoneAt = (cluster) => !!net.zoneCells && comp[cluster] === comp[net.zoneCluster];
+    const flip = ta.length > tb.length || zoneAt(conn.a.cluster) && !zoneAt(conn.b.cluster);
+    if (flip) {
+      const t = ta;
+      ta = tb;
+      tb = t;
+    }
+    const A = flip ? conn.b : conn.a, B = flip ? conn.a : conn.b;
+    const access = (a) => {
+      const cx = (a.p[0] - ox) / h3, cy = (a.p[1] - oy) / h3;
+      const ls = a.layers.filter((l) => rt[l]);
+      if (!ls.length) return null;
+      const R2 = a.shape ? Math.min(12, Math.ceil(1 / h3)) : 0;
+      let best = null, bd = Infinity;
+      for (let iy = Math.round(cy) - R2; iy <= Math.round(cy) + R2; iy++) for (let ix = Math.round(cx) - R2; ix <= Math.round(cx) + R2; ix++) {
+        if (ix < 0 || iy < 0 || ix >= W22 || iy >= H2) continue;
+        const d = Math.hypot(ix - cx, iy - cy);
+        if (d >= bd) continue;
+        if (R2 && d > 0.71 && pointGap(a.shape, ox + ix * h3, oy + iy * h3) > 0) continue;
+        const free = ls.filter((l) => !maps[l][iy * W22 + ix]);
+        if (!free.length) continue;
+        bd = d;
+        best = { ix, iy, layers: free };
+      }
+      return best;
+    };
+    const src = access(A), tgt = access(B);
+    if (!src) return false;
+    const term = tb.slice();
+    const zoneSet = /* @__PURE__ */ new Set();
+    if (zoneAt(B.cluster)) for (const z2 of net.zoneCells) {
+      const fx = 2 * (z2.ix - ix0), fy = 2 * (z2.iy - iy0);
+      if (fx < 0 || fy < 0 || fx >= W22 || fy >= H2 || maps[z2.l][fy * W22 + fx]) continue;
+      if (!rt[z2.l]) {
+        rt = rt.slice();
+        rt[z2.l] = true;
+      }
+      term.push({ ix: fx, iy: fy, l: z2.l });
+      zoneSet.add(z2.l * n2 + fy * W22 + fx);
+    }
+    if (!tgt && !term.length) return false;
+    let used = 0;
+    for (const o of net.conns) if (o.nodes && o !== conn && o.feat) used += o.feat.vias;
+    const perConn = this.opts.maxViasPerConnection;
+    let maxVias = Math.min(gd.maxVias - used, this.viaCap, perConn === void 0 || perConn === null ? Infinity : Math.max(0, +perConn));
+    if (this.extraVias && maxVias >= 1 && maxVias < Infinity) maxVias += this.extraVias;
+    const res = probe({ G: G22, maps, vmaps: c2.vfull, src, tgt, term, win: { x0: 0, y0: 0, x1: W22 - 1, y1: H2 - 1 }, pref: this.pref, W: this.W, allowVias: gd.allowVias && maxVias > 0, maxSteps: 8e6, routable: rt, maxVias: maxVias === Infinity ? void 0 : maxVias });
+    if (!res) return false;
+    const nodes = simplify(res.nodes);
+    const mm4 = (n3) => [r63(ox + n3.ix * h3), r63(oy + n3.iy * h3)];
+    const w = cls.width, clr = cls.clr, all2 = G5.layers.map((_, i) => i);
+    const shapes2 = [], viaCells = [], stubs = [];
+    const vclr = Math.max(clr, (G5.holeClr || 0) + HOLE_SLACK - (cls.viaD - cls.viaDrill) / 2);
+    for (let i = 0; i + 1 < nodes.length; i++) {
+      const a = nodes[i], b = nodes[i + 1];
+      if (a.l !== b.l) {
+        const fi = a.iy * W22 + a.ix;
+        if (holes.has(fi)) continue;
+        if (a.ix & 1 || a.iy & 1) return false;
+        const gi = (iy0 + a.iy / 2) * G5.W + ix0 + a.ix / 2;
+        if (viaCells.includes(gi)) continue;
+        viaCells.push(gi);
+        const p = mm4(a);
+        shapes2.push({ net: conn.net, layers: all2, shape: { t: "circle", x: p[0], y: p[1], r: cls.viaD / 2 }, clr: vclr });
+      } else shapes2.push({ net: conn.net, layers: [a.l], shape: { t: "seg", a: mm4(a), b: mm4(b), r: w / 2 }, clr });
+    }
+    const piece = (from, to, l, sw) => {
+      if (Math.hypot(to[0] - from[0], to[1] - from[1]) > 1e-4) {
+        stubs.push([from, to, l]);
+        shapes2.push({ net: conn.net, layers: [l], shape: { t: "seg", a: from, b: to, r: sw / 2 }, clr });
+      }
+    };
+    const first2 = nodes[0], last3 = nodes[nodes.length - 1];
+    piece(A.p, mm4(first2), first2.l, A.narrow ? Math.min(w, A.narrow) : w);
+    if (!res.onTerm) piece(B.p, mm4(last3), last3.l, B.narrow ? Math.min(w, B.narrow) : w);
+    this.cur = conn;
+    this.curSoft = false;
+    for (const o of shapes2) for (const l of o.layers) if (!this.clearOf(o.shape, l, conn.net, o.clr)) return false;
+    const key3 = last3.l * n2 + last3.iy * W22 + last3.ix;
+    let main = nodes.map((n3) => ({ ix: ix0 + (n3.ix >> 1), iy: iy0 + (n3.iy >> 1), l: n3.l }));
+    main = simplify(main);
+    if (main.length < 2) main = [main[0], main[0]];
+    conn.nodes = main;
+    conn.shapes = shapes2;
+    conn.viaCells = viaCells;
+    conn.stubs = stubs;
+    conn.feat = featuresOf(G22, nodes, this.pref);
+    conn.zoneEnd = res.onTerm && zoneSet.has(key3) && !owner.has(key3);
+    conn.landed = res.onTerm ? owner.get(key3) ?? -1 : -1;
+    this.place(conn, 1);
+    this.stat.fine = (this.stat.fine || 0) + 1;
+    return true;
   }
   /** Once everything is laid there is often room that was not there (or not known to be free) when a route chose to
    *  change layers.  Each route with vias is tried again on the finished board with none, then with fewer; it is
@@ -126027,7 +126683,8 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       fences: this.fenceReports,
       groups: this.groupReport(),
       fanout: this.fanReport ? Object.assign({}, this.fanReport, this.fanNote) : this.fanNote,
-      plan: this.planReport()
+      plan: this.planReport(),
+      ladder: this.ladderRep || ((this.opts.ripup ?? RIPUP) === "ladder" ? emptyLadder() : void 0)
     };
   }
 };
