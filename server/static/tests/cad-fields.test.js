@@ -1,6 +1,7 @@
 // Node test for what a click means while a dialog field listens (web/domains/mechanical/ui/fields.ts): clicks add,
 // a click on something held takes it out, single fields are replaced and hand on to the next empty one, a
-// selection made beforehand fills the first fields that take it, Tab goes round, Esc steps back.
+// selection made beforehand fills the first fields that take it, Tab goes round, Esc steps back.  Also how the
+// tool search finds a tool, by its name or by another word for it (ui/search.ts).
 // Run: node server/static/tests/cad-fields.test.js
 "use strict";
 const test = require("node:test");
@@ -161,4 +162,45 @@ test("empty fields", () => {
   assert.ok(F.isEmpty(EDGES, []) && F.isEmpty(EDGES, undefined) && !F.isEmpty(EDGES, [edge("e1")]));
   assert.ok(F.isEmpty(PROFILE, null) && !F.isEmpty(PROFILE, { sketch: "sk1", regions: null }));
   assert.ok(F.takesPicks(EDGES) && F.takesPicks(PLANE) && F.takesPicks(PROFILE) && F.takesPicks(BODIES) && !F.takesPicks(RADIUS));
+});
+
+// ---------------------------------------------------------------- the tool search (ui/search.ts)
+const Q = load("domains/mechanical/ui/search.ts");
+
+test("the tool search: a name's start, a word of it, another word for it, its initials", () => {
+  assert.equal(Q.matchScore("Extrude", ""), 0, "nothing typed finds everything");
+  assert.equal(Q.matchScore("Extrude", "ext"), 0);
+  assert.equal(Q.matchScore("Centre rectangle", "rect"), 2, "the start of its second word");
+  assert.equal(Q.matchScore("Extrude: remove", "rem"), 2, "a preset's choice is a word of its name");
+  assert.equal(Q.matchScore("Fillet", "round", "round blend radius edge"), 5, "another word for it");
+  assert.equal(Q.matchScore("Opening", "cut", "pcb cutout connector hole"), 7, "the start of another word for it");
+  assert.equal(Q.matchScore("Centre rectangle", "cr"), 50, "the first letters of its words");
+  assert.equal(Q.matchScore("Circular pattern", "cut"), -1, "letters scattered through a name find nothing");
+  assert.equal(Q.matchScore("Fillet", "cut", "round blend radius edge"), -1);
+});
+
+test("the tool search: best first, in the list's own order among equals, with the word that found it", () => {
+  const all = [
+    { title: "Extrude", keywords: Q.KEYWORDS["f:extrude"] }, { title: "Extrude: add", keywords: Q.RESULT_WORDS.add }, { title: "Extrude: remove", keywords: Q.RESULT_WORDS.remove },
+    { title: "Fillet", keywords: Q.KEYWORDS["f:fillet"] }, { title: "Chamfer", keywords: Q.KEYWORDS["f:chamfer"] }, { title: "Shell", keywords: Q.KEYWORDS["f:shell"] }, { title: "Hole", keywords: Q.KEYWORDS["f:hole"] },
+    { title: "Boolean", keywords: Q.KEYWORDS["f:boolean"] }, { title: "Circular pattern", keywords: Q.KEYWORDS["f:circular-pattern"] }, { title: "Display", keywords: Q.KEYWORDS["appearance-view-mode"] },
+    { title: "Keyboard shortcuts" },
+  ];
+  const first = (q) => Q.searchCommands(all, q)[0]?.entry.title;
+  assert.deepEqual(Q.searchCommands(all, "cut").map((x) => x.entry.title), ["Extrude: remove", "Boolean"]);
+  assert.equal(Q.searchCommands(all, "cut")[0].by, "cut", "it says which word found it");
+  assert.equal(Q.searchCommands(all, "ext")[0].by, null, "a name needs no explaining");
+  assert.equal(first("pocket"), "Extrude: remove");
+  assert.equal(first("boss"), "Extrude");
+  assert.equal(first("round"), "Fillet");
+  assert.equal(first("bevel"), "Chamfer");
+  assert.equal(first("hollow"), "Shell");
+  assert.equal(first("drill"), "Hole");
+  assert.equal(first("wireframe"), "Display");
+  assert.equal(first("zzz"), undefined);
+  assert.equal(first("ortcu"), "Keyboard shortcuts", "letters in the middle of a name find it when nothing better does");
+  assert.ok(!Q.searchCommands(all, "cut").some((x) => x.entry.title === "Keyboard shortcuts"), "… and not when something better does");
+  assert.equal(Q.searchCommands(all, "").length, all.length, "nothing typed lists everything, in order");
+  // every tool and feature that has other words has them under the id the registries give it
+  for (const id of Object.keys(Q.KEYWORDS)) assert.ok(/^(f:)?[a-z0-9-]+$/.test(id) && Q.KEYWORDS[id].trim().length > 0, id);
 });

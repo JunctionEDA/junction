@@ -24,10 +24,10 @@ import { DialogShell } from "./DialogShell";
 import { describeKinds, heldItems, nextEmptyField, pickKindsFor, type HeldItem } from "./fields";
 import { Glyph } from "./Glyph";
 import { useStudio } from "./hooks";
-import { featureDef, type PartStudio } from "./studio";
+import { awaitsPlane, featureDef, type PartStudio } from "./studio";
 import { tipHandlers } from "./Tip";
 
-const row = "grid grid-cols-[104px_minmax(0,1fr)] items-start gap-x-2 gap-y-1 min-h-7";
+const row = "grid grid-cols-[108px_minmax(0,1fr)] items-start gap-x-2.5 gap-y-1 min-h-7";
 const labelCls = "text-ink-2 truncate leading-7";
 
 /** The step ↑, ↓ and scrubbing move a number by, in the unit the field shows. */
@@ -89,7 +89,7 @@ function NumberField({ studio, field, params }: { studio: PartStudio; field: Ext
           title={typed && typed.isExpression && !bad ? `= ${fieldText(typed.value, q, u)}${unit ? " " + unit : ""}` : bad ? "This does not come to a number the field can take." : undefined}
           onChange={(ev) => commit(ev.target.value)}
           onKeyDown={(ev) => { if (ev.key === "ArrowUp" || ev.key === "ArrowDown") { ev.preventDefault(); nudge((ev.key === "ArrowUp" ? 1 : -1) * (ev.shiftKey ? 10 : 1)); } }} />
-        {unit ? <span className="flex-none w-6 text-ink-3 font-mono text-xs" data-unit={unit}>{unit}</span> : null}
+        {unit ? <span className="flex-none w-7 text-ink-2 font-mono text-sm" data-unit={unit}>{unit}</span> : null}
       </span>
     </div>
   );
@@ -102,20 +102,20 @@ function PickList({ studio, param, armed, items, empty, onArm, onClear, onRemove
   const light = (item: HeldItem | null) => studio.view.setFeatureHover(item && item.pick ? [{ ...item.pick, point: [0, 0, 0] } as Pick] : null);
   useEffect(() => () => studio.view.setFeatureHover(null), [studio]);
   return (
-    <div className={cx("flex flex-col rounded-sm border bg-panel cursor-pointer", armed ? "border-blue outline outline-1 outline-blue" : "border-line")} data-param={param} data-armed={armed || undefined} data-count={items.length}
+    <div className={cx("flex flex-col rounded-sm border bg-panel cursor-pointer", armed ? "border-blue outline outline-1 outline-blue" : "border-line-2")} data-param={param} data-armed={armed || undefined} data-count={items.length}
       onClick={onArm} {...tipHandlers({ title: armed ? "Listening" : "Click to choose", hint: armed ? "Click in the model to add; click a chosen one to take it out. Esc or a click here stops." : "Then click in the model." })}>
       {items.length ? (
         <div className="flex flex-col max-h-28 overflow-y-auto py-0.5" role="list">
           {items.map((item, i) => (
-            <div key={item.key} role="listitem" className="group flex items-center gap-1 h-5.5 pl-1.5 pr-0.5 hover:bg-sel-soft" data-held={item.key} onPointerEnter={() => light(item)} onPointerLeave={() => light(null)}>
+            <div key={item.key} role="listitem" className="group flex items-center gap-1 h-6.5 pl-2 pr-0.5 hover:bg-sel-soft" data-held={item.key} onPointerEnter={() => light(item)} onPointerLeave={() => light(null)}>
               <span className="flex-1 truncate">{item.label}</span>
               {onRemove ? <button type="button" className="btn sm ghost p-0 w-5 h-5 min-h-0 justify-center text-ink-3 opacity-60 group-hover:opacity-100" aria-label={`Remove ${item.label}`} data-held-remove onClick={(ev) => { ev.stopPropagation(); light(null); onRemove(i); }}>×</button> : null}
             </div>
           ))}
         </div>
-      ) : <span className={cx("px-1.5 leading-6", armed ? "text-ink-2" : "text-ink-3")}>{empty}</span>}
+      ) : <span className={cx("px-2 leading-7", armed ? "text-ink-2" : "text-ink-3")}>{empty}</span>}
       {!single && items.length > 1 && onClear ? (
-        <div className="flex items-center gap-1 px-1.5 h-5.5 border-t border-line text-xs text-ink-3">
+        <div className="flex items-center gap-1 px-2 h-6 border-t border-line text-sm text-ink-2">
           <span className="flex-1" data-held-count>{items.length} chosen</span>
           <button type="button" className="btn sm ghost h-5 min-h-0 px-1 text-xs" data-held-clear onClick={(ev) => { ev.stopPropagation(); onClear(); }}>Clear</button>
         </div>
@@ -174,11 +174,11 @@ function Field({ studio, field, params }: { studio: PartStudio; field: ParamFiel
       break;
     }
     case "plane": {
-      const items = heldItems(field, value ?? ({ kind: "plane", plane: "top" } as unknown as JsonObject), names);
+      const items = heldItems(field, value, names);
       const now = items[0]?.key;
       control = (
         <span className="flex flex-col gap-1">
-          <PickList studio={studio} param={field.key} armed={armed} items={items} empty="Click a plane or a flat face" onArm={arm} single />
+          <PickList studio={studio} param={field.key} armed={armed} items={items} empty="Select a plane or planar face" onArm={arm} single />
           <span className="seg">{(Object.keys(DEFAULT_PLANES) as DefaultPlaneId[]).map((id) => <button key={id} type="button" data-plane={id} className={cx(now === `plane:${id}` && "on")} onClick={() => studio.fillField(field.key, { kind: "plane", plane: id, point: [0, 0, 0] })}>{DEFAULT_PLANES[id].title}</button>)}</span>
         </span>
       );
@@ -252,21 +252,20 @@ export function FeatureDialog({ studio }: { studio: PartStudio }) {
   const report = useStudio(studio, (s) => (s.editing ? s.reports[s.editing.draft.id] : undefined));
   const later = useStudio(studio, (s) => (s.editing && !s.editing.isNew ? s.features.findIndex((f) => f.id === s.editing!.draft.id) < s.rollback - 1 : false));
   const body = useRef<HTMLDivElement>(null);
-  if (!editing) return null;
+  // a new sketch that waits for its plane has the sketch's own dialog (SketchDialog.tsx)
+  if (!editing || awaitsPlane({ editing })) return null;
   const def = featureDef(editing.draft.featureType);
   const params = editing.draft.params;
   const fields = def ? def.schema.filter((f) => !f.visible || f.visible(params)) : [];
   const failed = report && report.status === "error";
   // a new feature that has not been given its geometry yet is not in error: it is waiting, and says for what
   const waiting = !!failed && editing.isNew && !!def && nextEmptyField(def.schema, params) !== null;
-  // a new sketch asks only where it goes: a click on a plane and drawing starts
-  const sketchPlane = editing.isNew && editing.draft.featureType === "sketch";
   return (
     <DialogShell className="cad-dialog" icon={def?.icon} name={editing.draft.name} onName={(name) => studio.setDraft({ name })} attrs={{ "data-feature": editing.draft.featureType }}
       onAccept={() => studio.acceptFeature()} onCancel={() => studio.cancelFeature()} acceptAttrs={{ "data-accept": true }} cancelAttrs={{ "data-cancel": true }}
-      acceptTip={{ title: sketchPlane ? "Start sketching" : "Accept", shortcut: "Enter", hint: sketchPlane ? "Draw on the plane shown." : "Keep the feature as it is previewed." }} cancelTip={{ title: "Cancel", shortcut: "Esc", hint: "Close and change nothing." }}
+      acceptTip={{ title: "Accept", shortcut: "Enter", hint: "Keep the feature as it is previewed." }} cancelTip={{ title: "Cancel", shortcut: "Esc", hint: "Close and change nothing." }}
       onKeyDown={(ev) => {
-        if (ev.key === "Escape") { ev.stopPropagation(); if (editing.field && !sketchPlane) studio.setField(null); else studio.cancelFeature(); }
+        if (ev.key === "Escape") { ev.stopPropagation(); if (editing.field) studio.setField(null); else studio.cancelFeature(); }
         // Tab from the last control goes round to the first: the keyboard stays in the dialog
         if (ev.key === "Tab" && body.current) {
           const stops = Array.from(body.current.querySelectorAll<HTMLElement>("input,select,button")).filter((e) => !e.hasAttribute("disabled") && e.offsetParent !== null);
@@ -278,7 +277,6 @@ export function FeatureDialog({ studio }: { studio: PartStudio }) {
         <button type="button" className={cx("btn sm ghost flex-none h-6 min-h-0 px-1.5 text-xs", editing.final && "on")} aria-pressed={!!editing.final} data-final {...tipHandlers({ title: "Final", hint: "Show the finished model, with every later feature built, instead of the model as far as this feature." })} onClick={() => studio.setFinal(!editing.final)}>Final</button>
       ) : null}>
       <div ref={body} className="contents">
-        {sketchPlane ? <p className="note m-0">Click a plane or a flat face to draw on.</p> : null}
         {def ? fields.map((f) => <Field key={f.key} studio={studio} field={f} params={params} />) : <p className="note">This Junction does not know the feature type “{editing.draft.featureType}”.</p>}
         {report && report.message ? (
           <div className={cx("callout m-0 flex items-start gap-2", waiting ? "" : failed ? "err" : "warn")} role="status" data-waiting={waiting || undefined}>

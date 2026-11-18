@@ -140,7 +140,7 @@ export class PartStudio {
     this.viewport.canvas.addEventListener("pointermove", this.onPointerSeen);
     this.viewport.canvas.addEventListener("mousedown", this.onMiddle);
     window.addEventListener("keydown", this.onKeyElsewhere);
-    this.viewport.fit(new THREE.Box3(new THREE.Vector3(-40, -40, -40), new THREE.Vector3(40, 40, 40)));
+    this.fit();   // nothing is built yet: the default planes fill the view
     this.kernel = new KernelClient({
       onState: (s, message) => { if (!this.closed) this.set({ kernel: { state: s, message: message || "", working: s === "working" || s === "loading" } }); },
     });
@@ -231,7 +231,9 @@ export class PartStudio {
     let features = s.features, rollback = s.rollback;
     if (s.editing) {
       const d = s.editing.draft;
-      if (s.editing.isNew) { features = features.slice(); features.splice(rollback, 0, d); rollback += 1; }
+      // a new sketch that has no plane yet is nothing the worker could build
+      if (s.editing.isNew && awaitsPlane(s)) { /* the model as it is */ }
+      else if (s.editing.isNew) { features = features.slice(); features.splice(rollback, 0, d); rollback += 1; }
       else { const i = features.findIndex((f) => f.id === d.id); if (i >= 0) { features = features.slice(); features[i] = d; rollback = s.editing.final ? Math.max(rollback, i + 1) : i + 1; } }
     } else if (s.sketch) {
       // while a sketch is open the model is shown as it was when the sketch was made
@@ -383,6 +385,9 @@ export class PartStudio {
     const params = def.defaults() as JsonObject;
     const picked = fillFromSelection(def.schema, params, s.selection);
     Object.assign(params, picked);
+    // a new sketch is never put on a plane the person did not choose: its plane field starts empty
+    const sketchPlaneKey = def.type === "sketch" ? def.schema.find((f) => f.kind === "plane")?.key : undefined;
+    if (sketchPlaneKey && picked[sketchPlaneKey] === undefined) params[sketchPlaneKey] = null;
     for (const field of def.schema) {
       if (field.kind !== "profile" || params[field.key]) continue;
       // the sketch just left, or else the newest sketch that nothing uses yet, is what an extrude is usually for
@@ -391,10 +396,11 @@ export class PartStudio {
     }
     const draft: FeatureItem = { id: crypto.randomUUID(), type: "feature", featureType: def.type, name: nextName(s.features, def.title), order: orderAt(s.features, s.rollback), params };
     this.select([]);
-    // A sketch needs nothing but its plane: with one selected, drawing starts at once; without, the dialog asks
-    // for it and drawing starts when it is chosen (acceptFeature opens the sketch).
+    // A sketch needs nothing but its plane: with one selected, drawing starts at once; without, the sketch's
+    // dialog opens with its plane field empty and listening, and drawing starts when a plane, a flat face or a
+    // plane's row in the feature list is clicked (fillField accepts, acceptFeature opens the sketch).
     if (def.type === "sketch") {
-      const planeKey = def.schema.find((f) => f.kind === "plane")?.key || null;
+      const planeKey = sketchPlaneKey || null;
       this.set({ editing: { draft, isNew: true, field: planeKey } });
       if (planeKey && picked[planeKey] !== undefined) { this.acceptFeature(); return; }
       this.applyFieldFilter(); this.refreshMarks(); this.scheduleRegen();
@@ -480,6 +486,7 @@ export class PartStudio {
   }
   private firstEmptyField(def: FeatureDefinition, params: JsonObject): string | null {
     for (const f of def.schema) {
+      if (f.visible && !f.visible(params)) continue;   // a field the dialog does not show cannot listen
       if (f.kind === "profile" && !params[f.key]) return f.key;
       if (f.kind === "refs" && (!params[f.key] || (Array.isArray(params[f.key]) && !(params[f.key] as unknown[]).length))) return f.key;
     }
@@ -518,6 +525,7 @@ export class PartStudio {
   acceptFeature(): void {
     const e = this.state.editing; if (!e || !this.doc) return;
     const d = e.draft;
+    if (awaitsPlane(this.state)) { this.host.toast("Select a plane or a planar face for the sketch first.", 2500); return; }
     const changes: ItemChange[] = e.isNew
       ? [{ id: d.id, kind: "ADDED", typeName: "feature", item: { ...d, order: orderAt(featuresOf(this.doc), rollbackIndex(this.doc)) } }]
       : [...edits.setParams(this.doc, d.id, d.params), ...edits.renameFeature(this.doc, d.id, d.name)];
@@ -608,11 +616,12 @@ export class PartStudio {
   private planeTaker: ((p: Pick) => void) | null = null;
   /**
    * Choose another plane for the open sketch: the next click on a plane, a flat face or a reference plane (in the
-   * model or in the feature list) moves the sketch there.  Esc, or `false`, stops listening.
+   * model or in the feature list) moves the sketch there.  Esc, or `false`, stops listening.  `cleared`: the
+   * field was emptied with its × (it shows nothing until a plane is clicked; the sketch stays where it is until then).
    */
-  pickSketchPlane(on = true): void {
+  pickSketchPlane(on = true, cleared = false): void {
     const s = this.state.sketch;
-    if (!on || !s) { this.planeTaker = null; this.pointerOverride = null; this.view.setFilter(s ? ["sketch"] : null); this.setUi({ pickingPlane: false }); return; }
+    if (!on || !s) { this.planeTaker = null; this.pointerOverride = null; this.view.setFilter(s ? ["sketch"] : null); this.setUi({ pickingPlane: false, planeCleared: false }); return; }
     this.view.setFilter(["plane", "face", "datum"]);
     const take = (p: Pick) => {
       const ref = valueAfterPick({ key: "plane", label: "", kind: "plane" }, undefined, p);
@@ -622,7 +631,7 @@ export class PartStudio {
     };
     this.planeTaker = take;
     this.pointerOverride = { move: (ev) => this.view.hoverAt(ev), up: (ev) => { const p = this.view.pick(ev); if (p) take(p); } };
-    this.setUi({ pickingPlane: true });
+    this.setUi({ pickingPlane: true, planeCleared: cleared });
   }
   /** Move the open sketch to another plane. */
   setSketchPlane(ref: PlaneRef): void {
@@ -676,7 +685,12 @@ export class PartStudio {
 
   // ---------------------------------------------------------------- the view
   /** Zoom so that everything is in view (F, a double click with the middle button). */
-  fit(): void { this.viewport.fit(); }
+  fit(): void {
+    // with no part to frame, the default planes are what there is to look at, with room around them to draw in
+    const box = this.viewport.contentBox();
+    if (box.isEmpty()) { const h = (Math.max(...(["top", "front", "right"] as const).flatMap((id) => this.view.planeLayer.halfOf(id))) * 4) / 3; box.set(new THREE.Vector3(-h, -h, -h), new THREE.Vector3(h, h, h)); }
+    this.viewport.fit(box);
+  }
   /** Zoom to what is selected (or to everything when nothing is). */
   zoomToSelection(): void {
     const s = this.state;
@@ -792,6 +806,9 @@ export class PartStudio {
     }
   };
 }
+
+/** True while a new sketch's dialog is open and waiting for its plane: nothing is in the document yet. */
+export const awaitsPlane = (s: { editing: StudioState["editing"] }): boolean => !!s.editing && s.editing.isNew && s.editing.draft.featureType === "sketch" && !s.editing.draft.params.plane;
 
 /** Shift + letter starts these features, in a sketch too (where the feature takes that sketch). */
 export const FEATURE_KEYS: { readonly [key: string]: string } = { s: "sketch", e: "extrude", w: "revolve", f: "fillet", c: "chamfer", h: "hole", p: "plane" };

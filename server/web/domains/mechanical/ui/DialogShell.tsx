@@ -23,7 +23,7 @@ export interface ShellProps {
   onName?(name: string): void;
   onAccept(): void;
   onCancel(): void;
-  acceptTip: { title: string; shortcut?: string; hint?: string };
+  acceptTip: { title: string; shortcut?: string; hint?: string; /** why ✓ cannot be pressed yet */ why?: string | null };
   cancelTip: { title: string; shortcut?: string; hint?: string };
   /** buttons between the name and ✓ (a preview toggle) */
   extra?: ReactNode;
@@ -66,26 +66,26 @@ export function DialogShell(p: ShellProps) {
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up);
   };
   const icon = (title: string, svg: string, primary: boolean, attrs: ShellProps["acceptAttrs"], tip: ShellProps["acceptTip"], submit: boolean, run?: () => void) => (
-    <button type={submit ? "submit" : "button"} className={cx("btn sm flex-none p-0 w-6 h-6 min-h-0 justify-center", primary ? "primary" : "ghost")} aria-label={title} {...attrs} {...tipHandlers(tip)} onClick={run}>
-      <Glyph svg={svg} size={15} />
+    <button type={submit ? "submit" : "button"} className={cx("btn sm flex-none p-0 w-7 h-7 min-h-0 justify-center", primary ? "primary" : "ghost text-ink", (tip as ShellProps["acceptTip"]).why && "opacity-40")} aria-label={title} aria-disabled={(tip as ShellProps["acceptTip"]).why ? true : undefined} {...attrs} {...tipHandlers(tip)} onClick={run}>
+      <Glyph svg={svg} size={18} />
     </button>
   );
   return (
-    <form ref={form} className={cx(p.className, "absolute z-[4] w-[300px] max-h-[calc(100%-16px)] flex flex-col rounded-md border border-line bg-bench shadow-panel text-sm")} style={{ left: at.x, top: at.y }} {...p.attrs} data-folded={shut || undefined}
-      onSubmit={(ev) => { ev.preventDefault(); p.onAccept(); }} onKeyDown={p.onKeyDown}>
-      <header className={cx("flex items-center gap-1 h-8 pl-1 pr-1.5 bg-paper rounded-t-md cursor-move", shut ? "rounded-b-md" : "border-b border-line")} onPointerDown={drag} data-dialog-title>
+    <form ref={form} className={cx(p.className, "absolute z-[4] w-[320px] max-h-[calc(100%-16px)] flex flex-col rounded-md border border-line-2 bg-panel shadow-panel text-base text-ink")} style={{ left: at.x, top: at.y }} {...p.attrs} data-folded={shut || undefined}
+      onSubmit={(ev) => { ev.preventDefault(); if (!p.acceptTip.why) p.onAccept(); }} onKeyDown={p.onKeyDown}>
+      <header className={cx("flex flex-none items-center gap-1.5 h-9 pl-1 pr-1.5 bg-bench rounded-t-md cursor-move", shut ? "rounded-b-md" : "border-b border-line")} onPointerDown={drag} data-dialog-title>
         <button type="button" className="btn sm ghost flex-none p-0 w-5 h-6 min-h-0 justify-center text-ink-3" aria-expanded={!shut} aria-label={shut ? "Unfold the dialog" : "Fold the dialog to its title"} data-dialog-fold {...tipHandlers({ title: shut ? "Unfold" : "Fold to the title", hint: "Drag the title to move the dialog." })} onClick={() => setShut(!shut)}>
           <span className={cx("transition-transform", !shut && "rotate-90")}><Glyph svg='<path d="M9 6l6 6-6 6"/>' size={12} /></span>
         </button>
-        {p.icon ? <span className="flex-none text-ink-2"><Glyph svg={p.icon} size={15} /></span> : null}
+        {p.icon ? <span className="flex-none text-ink"><Glyph svg={p.icon} size={20} /></span> : null}
         {p.onName
-          ? <input className="flex-1 min-w-0 bg-transparent border-0 outline-none font-semibold text-ink text-base cursor-text" value={p.name} aria-label="Feature name" onChange={(ev) => p.onName!(ev.target.value)} />
-          : <span className="flex-1 min-w-0 truncate font-semibold text-ink text-base">{p.name}</span>}
+          ? <input className="flex-1 min-w-0 bg-transparent border-0 outline-none font-semibold text-ink text-md cursor-text" value={p.name} aria-label="Feature name" onChange={(ev) => p.onName!(ev.target.value)} />
+          : <span className="flex-1 min-w-0 truncate font-semibold text-ink text-md">{p.name}</span>}
         {p.extra}
         {icon(p.acceptTip.title, CHECK, true, p.acceptAttrs, p.acceptTip, true)}
         {icon(p.cancelTip.title, CROSS, false, p.cancelAttrs, p.cancelTip, false, p.onCancel)}
       </header>
-      <div className={cx("flex flex-col gap-1.5 p-2 overflow-y-auto", shut && "hidden")}>{p.children}</div>
+      <div className={cx("flex flex-col gap-2 p-3 overflow-y-auto", shut && "hidden")}>{p.children}</div>
     </form>
   );
 }
