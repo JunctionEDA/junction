@@ -1902,9 +1902,9 @@ class Board(_Doc):
         return out
 
     def nets(self, filter: str | None = None) -> dict:
-        """name -> {"pads": [...], "unrouted": n, "length_mm": x}"""
+        """name -> {"pads": [...], "unrouted": n, "length_mm": x, "vias": n}"""
         r = self._call("list_nets", limit=1000000, **({"filter": filter} if filter else {}))
-        return {n["name"]: {"pads": n["pads"], "unrouted": n["unrouted_connections"], "length_mm": n["routed_length_mm"]} for n in r.get("nets", [])}
+        return {n["name"]: {"pads": n["pads"], "unrouted": n["unrouted_connections"], "length_mm": n["routed_length_mm"], "vias": n.get("vias", 0)} for n in r.get("nets", [])}
 
     def unrouted(self) -> dict:
         """Nets that still have missing connections: name -> how many."""
@@ -2516,7 +2516,7 @@ class Board(_Doc):
                 self.flush()
 
     def optimize(self, nets: list | None = None, time_s: float = 10, stretch: float = 1.6, keep_rules: bool = True, budget_s: float | None = 600,
-                 progress: bool = True) -> dict:
+                 progress: bool = True, max_added_mm: float | None = 5.0) -> dict:
         """Take out layer changes a finished route does not need, net by net: each signal net with vias (or `nets`) is
         taken up and laid again on its own several ways (front only with no via, front and back, every layer, front
         with each inner layer), and the best is kept only when the net is whole, it has fewer vias (or the same and is
@@ -2525,7 +2525,9 @@ class Board(_Doc):
         About time_s seconds per try, five or six tries a net (each try also checks the board, which on a big board takes
         longer than the route); it stops starting new nets after `budget_s` seconds (None: no limit) and lists the nets
         it did not reach under "not_tried", most vias first, so a second call with nets= picks up there.  progress=True
-        prints a line per net as it goes.  Run it last, on a board with every connection made."""
+        prints a line per net as it goes.  max_added_mm caps how much longer a net may get to lose a via (None: only
+        `stretch`).  After the last refill anything that opened (a pour split by a re-laid neighbour) is routed again
+        and reported under "reopened".  Run it last, on a board with every connection made."""
         import time as _t
         t_start = _t.time()
         supply = re.compile(r"^(GND|AGND|DGND|PGND|VSS|VBUS|VIN|VCC|VDD|VBAT)|^\+|^-|3V3|5V|1V8|LDO", re.I)
@@ -2556,7 +2558,7 @@ class Board(_Doc):
                     except HarnessError:
                         continue
                     v, l, o = st(net)
-                    if o == 0 and self.info()["unrouted_connections"] <= open0 and (v < v0 or (v == v0 and l < l0 - 0.5)) and l <= l0 * stretch + 4:
+                    if o == 0 and self.info()["unrouted_connections"] <= open0 and (v < v0 or (v == v0 and l < l0 - 0.5)) and l <= l0 * stretch + 4 and (max_added_mm is None or l <= l0 + max_added_mm):
                         if best is None or (v, l) < best[0]:
                             best = ((v, l), k)
             if best is None:
@@ -2568,10 +2570,16 @@ class Board(_Doc):
                 if o == 0 and self.info()["unrouted_connections"] <= open0 and (v, l) < (v0, l0) and errs() <= e0:
                     t.keep = True; after -= v0 - v
                     kept.append(f"{net}: {v0} -> {v} vias, {l0:.1f} -> {l:.1f} mm")
+        reopened = {}
         if kept:
             self.fill()
+            now = self.unrouted()
+            if sum(now.values()) > open0:      # the refill split a pour a re-laid net now crosses: lay what opened again
+                with contextlib.suppress(HarnessError):
+                    self.route(nets=list(now), fill=True, time_s=30, keep_rules=keep_rules)
+                reopened = self.unrouted()
         self.project.note(f"board: optimized {len(kept)} nets, signal vias {before} -> {after}")
-        return {"before": before, "after": after, "kept": kept, **({"not_tried": not_tried} if not_tried else {})}
+        return {"before": before, "after": after, "kept": kept, **({"not_tried": not_tried} if not_tried else {}), **({"reopened": reopened} if reopened else {})}
 
     def _all_items(self, kinds, **filt) -> list:
         """Every item of these kinds, page by page (get_items returns at most 150 at a time)."""
