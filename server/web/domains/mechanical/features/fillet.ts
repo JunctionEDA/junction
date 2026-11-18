@@ -16,9 +16,8 @@ export interface FilletParams { [key: string]: any; edges: GeomRef[]; radius: nu
 export default defineFeature<FilletParams>({
   type: "fillet",
   title: "Fillet",
-  icon: '<path d="M5 19V12a7 7 0 0 1 7-7h7"/><path d="M5 5h3M19 19v-3" stroke-dasharray="1.5 2"/>',
-  toolbarOrder: 30,
-  toolbarSection: "solid", toolbarMenu: "Fillet",
+  icon: '<path class="f" d="M4 20v-8a8 8 0 0 1 8-8h8v16z"/><path d="M4 20v-8a8 8 0 0 1 8-8h8M4 20h16V4"/><path class="d t" d="M4 11V4h7"/>',
+  toolbarOrder: 30, toolbarSection: "modify", toolbarKeep: 94,
   defaults: () => ({ edges: [], radius: 1 }),
   schema: [
     { key: "edges", label: "Edges or faces", kind: "refs", of: ["edge", "face"], hint: "A face rounds every edge around it." },

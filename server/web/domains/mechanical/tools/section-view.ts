@@ -4,8 +4,8 @@ import { toggleSection } from "../inspect/section-pick";
 import { sectionOf } from "../inspect/section-view";
 
 export default defineTool({
-  id: "section-view", title: "Section", hint: "Cut the view by a plane: the selected flat face, or Front (X)", group: "inspect", order: 20, key: "x",
-  icon: '<path d="M4 8l8-4 8 4v8l-8 4-8-4z"/><path d="M4 12h16" stroke-dasharray="2 2"/><path d="M12 12v8"/>',
+  id: "section-view", title: "Section", hint: "Cut the view by a plane: the selected flat face, or Front (X)", group: "inspect", order: 20, keep: 56, key: "x",
+  icon: '<path class="f" d="M12 3.5a8.5 8.5 0 0 0 0 17z"/><path d="M12 3.5a8.5 8.5 0 0 0 0 17"/><path class="d t" d="M12 3.5a8.5 8.5 0 0 1 0 17"/><path d="M12 1.5v21"/>',
   disabled: (studio) => (studio.getState().sketch ? "Finish the sketch first" : !studio.getState().bodies.length ? "Nothing to cut" : null),
   active: (studio) => sectionOf(studio).getState().on,
   run: (studio) => { void toggleSection(studio); },

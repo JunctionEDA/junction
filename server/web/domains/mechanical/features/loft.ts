@@ -14,9 +14,8 @@ export interface LoftParams { [key: string]: any; profiles: string[]; ruled: boo
 export default defineFeature<LoftParams>({
   type: "loft",
   title: "Loft",
-  icon: '<rect x="4" y="16" width="16" height="4"/><ellipse cx="12" cy="5" rx="4" ry="1.8"/><path d="M4 16L8 5M20 16L16 5"/>',
-  toolbarOrder: 25,
-  toolbarSection: "solid", toolbarMenu: "Sweep",
+  icon: '<path class="f" d="M3 17.5L8.5 6h7L21 17.5c0 1.7-4 3-9 3s-9-1.3-9-3z"/><path d="M3 17.5L8.5 6M21 17.5L15.5 6"/><ellipse cx="12" cy="17.5" rx="9" ry="3"/><ellipse cx="12" cy="6" rx="3.5" ry="1.6"/>',
+  toolbarOrder: 25, toolbarSection: "solid", toolbarKeep: 78,
   defaults: () => ({ profiles: [], ruled: false, operation: "new", targets: [] }),
   schema: [
     { key: "profiles", label: "Profiles", kind: "features", types: ["sketch"], hint: "Two or more sketches, in the order the loft passes through them." },

@@ -24,9 +24,8 @@ export interface ChamferParams {
 export default defineFeature<ChamferParams>({
   type: "chamfer",
   title: "Chamfer",
-  icon: '<path d="M5 19v-8l6-6h8"/><path d="M5 5h3M19 19v-3" stroke-dasharray="1.5 2"/>',
-  toolbarOrder: 31,
-  toolbarSection: "solid", toolbarMenu: "Fillet",
+  icon: '<path class="f" d="M4 20v-8l8-8h8v16z"/><path d="M4 20v-8l8-8h8M4 20h16V4"/><path class="d t" d="M4 11V4h7"/>',
+  toolbarOrder: 31, toolbarSection: "modify", toolbarKeep: 90,
   defaults: () => ({ edges: [], chamferType: "equal", distance: 1, distance2: 2, angle: 45, flip: false }),
   schema: [
     { key: "edges", label: "Edges or faces", kind: "refs", of: ["edge", "face"], hint: "A face bevels every edge around it." },

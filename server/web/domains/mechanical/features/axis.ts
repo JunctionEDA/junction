@@ -18,9 +18,8 @@ const is = (...m: string[]) => (p: { [k: string]: unknown }) => m.includes(p.met
 export default defineFeature<AxisParams>({
   type: "axis",
   title: "Axis",
-  icon: '<path d="M12 2v20" stroke-dasharray="3 2"/><path d="M8 7a6 3 0 1 0 8 0"/>',
-  toolbarOrder: 61,
-  toolbarSection: "reference", toolbarMenu: "Reference",
+  icon: '<path class="d" d="M3 21L21 3"/><ellipse class="f" cx="12" cy="12" rx="6" ry="2.6" transform="rotate(45 12 12)"/><ellipse cx="12" cy="12" rx="6" ry="2.6" transform="rotate(45 12 12)"/>',
+  toolbarOrder: 61, toolbarSection: "reference", toolbarMenu: "Reference", toolbarKeep: 82,
   defaults: () => ({ method: "reference", ref: null, points: [], planes: [], flip: false }),
   schema: [
     { key: "method", label: "Placed", kind: "enum", options: [{ value: "reference", label: "Along" }, { value: "points", label: "Two points" }, { value: "planes", label: "Two planes" }] },

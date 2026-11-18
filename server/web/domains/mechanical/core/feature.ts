@@ -38,7 +38,7 @@ export interface FeatureDefinition<P extends JsonObject = JsonObject> {
   type: string;
   /** The name people see, and the stem of a new feature's name ("Extrude 1"). */
   title: string;
-  /** inline SVG markup for a 24×24 stroke glyph (currentColor), for the toolbar and the feature list */
+  /** inline SVG markup for a 24×24 glyph, for the toolbar and the feature list (ui/Glyph.tsx says how it is drawn) */
   icon?: string;
   /** Parameters of a new feature.  Called once per new feature; return a fresh object. */
   defaults(): P;
@@ -53,18 +53,28 @@ export interface FeatureDefinition<P extends JsonObject = JsonObject> {
   toolbar?: boolean;
   /** where the toolbar button goes; lower first.  Features without one follow in title order. */
   toolbarOrder?: number;
-  /** which part of the toolbar the button is in ("solid" when not given) */
+  /**
+   * which part of the toolbar the button is in ("solid" when not given): sketch │ solid (what makes material
+   * from a profile) │ modify (what changes edges and faces) │ combine (what works on whole parts) │ pattern │
+   * reference │ board
+   */
   toolbarSection?: FeatureSection;
   /**
    * Features of one section that name the same menu share one drop-down button with that title (Fillet,
    * Chamfer and Draft under "Fillet").  A feature without one has a button of its own.
    */
   toolbarMenu?: string;
+  /**
+   * How long the button keeps its place on the bar when the window is too narrow for every button: the ones
+   * with the lowest number go under More first.  0 is always under More.  50 when not given; the features a
+   * part is mostly made of have more.
+   */
+  toolbarKeep?: number;
 }
 
 /** The feature parts of the toolbar, in the order they are drawn. */
-export type FeatureSection = "sketch" | "solid" | "pattern" | "reference" | "board";
-export const FEATURE_SECTIONS: readonly FeatureSection[] = ["sketch", "solid", "pattern", "reference", "board"];
+export type FeatureSection = "sketch" | "solid" | "modify" | "combine" | "pattern" | "reference" | "board";
+export const FEATURE_SECTIONS: readonly FeatureSection[] = ["sketch", "solid", "modify", "combine", "pattern", "reference", "board"];
 
 /** Typed helper: `export default defineFeature<MyParams>({ ... })`. */
 export function defineFeature<P extends JsonObject>(def: FeatureDefinition<P>): FeatureDefinition<JsonObject> {

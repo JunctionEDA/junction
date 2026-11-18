@@ -36,8 +36,8 @@ export interface RevolveParams {
 export default defineFeature<RevolveParams>({
   type: "revolve",
   title: "Revolve",
-  icon: '<ellipse cx="12" cy="7" rx="7" ry="2.5"/><path d="M5 7v10c0 1.4 3.1 2.5 7 2.5s7-1.1 7-2.5V7"/><path d="M12 3v18" stroke-dasharray="2 2"/>',
-  toolbarOrder: 22,
+  icon: '<path class="f" d="M4 8.5c0-1.7 3.6-3 8-3s8 1.3 8 3v8c0 1.7-3.6 3-8 3s-8-1.3-8-3z"/><ellipse cx="12" cy="8.5" rx="8" ry="3"/><path d="M4 8.5v8c0 1.7 3.6 3 8 3s8-1.3 8-3v-8"/><path class="d" d="M12 1.5v21"/>',
+  toolbarOrder: 22, toolbarSection: "solid", toolbarKeep: 95,
   defaults: () => ({ profile: null, operation: "new", axisType: "line", axisEdge: null, endType: "full", angle: 180, flip: false, targets: [] }),
   schema: [
     { key: "profile", label: "Sketch to revolve", kind: "profile" },

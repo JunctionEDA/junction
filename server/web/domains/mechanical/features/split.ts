@@ -18,9 +18,8 @@ export interface SplitParams { [key: string]: any; plane: PlaneRef; bodies: stri
 export default defineFeature<SplitParams>({
   type: "split",
   title: "Split",
-  icon: '<path d="M4 9l8-4 8 4v8l-8 4-8-4z"/><path d="M3 13h18" stroke-dasharray="2 2"/>',
-  toolbarOrder: 43,
-  toolbarSection: "solid", toolbarMenu: "Boolean",
+  icon: '<path class="f" d="M3.5 6h9.2L8.3 18H3.5zM15.8 6h4.7v12h-9.1z"/><path d="M3.5 6h9.2L8.3 18H3.5zM15.8 6h4.7v12h-9.1z"/><path class="d t" d="M15.7 2.5l-7.4 19"/>',
+  toolbarOrder: 43, toolbarSection: "combine", toolbarKeep: 68,
   defaults: () => ({ plane: { kind: "plane", plane: "front" }, bodies: [], keep: "both" }),
   schema: [
     { key: "plane", label: "Split with", kind: "plane" },

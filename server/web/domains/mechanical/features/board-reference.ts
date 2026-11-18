@@ -42,9 +42,8 @@ export const BOARD_FEATURE = "board-reference";
 export default defineFeature<BoardReferenceParams>({
   type: BOARD_FEATURE,
   title: "Board",
-  icon: '<rect x="4" y="6" width="16" height="12" rx="1.5"/><rect x="7" y="9" width="5" height="4"/><circle cx="16.5" cy="9.5" r="1"/><circle cx="16.5" cy="14.5" r="1"/><path d="M9 13v2.5h4"/>',
-  toolbarOrder: 15,
-  toolbarSection: "board", toolbarMenu: "Board",
+  icon: '<rect class="f" x="2.5" y="5" width="19" height="14" rx="1.5"/><rect x="2.5" y="5" width="19" height="14" rx="1.5"/><path class="t" d="M6.5 15.5v-4l3-2.5h3.5"/><circle class="s" cx="6.5" cy="15.5" r="1.4"/><rect class="s" x="13" y="11.5" width="5.5" height="4.5" rx="0.5"/><circle class="s" cx="13.5" cy="9" r="1.2"/>',
+  toolbarOrder: 15, toolbarSection: "board", toolbarMenu: "Board", toolbarKeep: 60,
   defaults: () => ({ board: null, plane: { kind: "plane", plane: "top" }, x: 0, y: 0, z: 0, angle: 0, flip: false, origin: null, minHole: 1.5, minHeight: 1.5 }),
   schema: [
     { key: "board", label: "Board", kind: "document", docTypes: ["kicad_pcb"], hint: "A board of this project. The part studio follows it as it is edited." },

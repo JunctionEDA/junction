@@ -15,8 +15,8 @@ export interface ShellParams { [key: string]: any; faces: GeomRef[]; thickness: 
 export default defineFeature<ShellParams>({
   type: "shell",
   title: "Shell",
-  icon: '<path d="M4 9l8-4 8 4v8l-8 4-8-4z"/><path d="M7 10.5l5-2.5 5 2.5v5l-5 2.5-5-2.5z"/>',
-  toolbarOrder: 33,
+  icon: '<path class="f" d="M3.5 4.5h4v12h9v-12h4v16h-17z"/><path d="M3.5 4.5h4v12h9v-12h4v16h-17z"/>',
+  toolbarOrder: 33, toolbarSection: "modify", toolbarKeep: 86,
   defaults: () => ({ faces: [], thickness: 2, outward: false, bodies: [] }),
   schema: [
     { key: "faces", label: "Faces to remove", kind: "refs", of: ["face"], hint: "The openings. Leave empty and pick a body for a closed hollow body." },
