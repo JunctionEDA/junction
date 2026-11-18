@@ -21,6 +21,18 @@ const SCH = (): any => (W.CollabTools && W.CollabTools.sch) || null;
 const PCB = (): any => W.PcbTools || null;
 
 export interface Edit { op: string; [k: string]: any }
+/** A straight track's identity: layer and both ends (either way round), to tell a track laid twice. */
+function segKey(node: any): string | null {
+  const k = K(); if (!Array.isArray(node) || node[0] !== "segment") return null;
+  const a = k.kid(node, "start"), b = k.kid(node, "end"), l = k.kid(node, "layer"); if (!a || !b || !l) return null;
+  const p = (n: any) => `${Math.round(k.num(n[1]) * 1e4)},${Math.round(k.num(n[2]) * 1e4)}`; const [x, y] = [p(a), p(b)].sort();
+  return `${k.str(l[1])}|${x}|${y}`;
+}
+function segKeys(doc: any): Set<string> {
+  const out = new Set<string>(); for (const it of doc.items.values() as Iterable<any>) if (it.kind === "segment") { const key = segKey(it.node); if (key) out.add(key); }
+  return out;
+}
+
 export interface EditLine { kind: "add" | "modify" | "remove"; text: string; ids: string[] }
 export interface Proposal {
   id: string; title: string; rationale: string; docId: string; docPath: string;
@@ -504,7 +516,8 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
               pts.splice(j, 1, [r6(v[0] + (a[0] - v[0]) / la * d), r6(v[1] + (a[1] - v[1]) / la * d)], [r6(v[0] + (b[0] - v[0]) / lb * d), r6(v[1] + (b[1] - v[1]) / lb * d)]);
             }
           }
-          for (let j = 1; j < pts.length; j++) { const c = added(doc, P.segmentNode(doc, pts[j - 1], pts[j], width, layer, net)); changes.push(c); ids.push(c.id); }
+          const have = segKeys(doc);
+          for (let j = 1; j < pts.length; j++) { const node = P.segmentNode(doc, pts[j - 1], pts[j], width, layer, net); const key = segKey(node); if (key && have.has(key)) continue; if (key) have.add(key); const c = added(doc, node); changes.push(c); ids.push(c.id); }
           lines.push({ kind: "add", text: `Add ${fmt(width)} mm track on ${layer}, net ${net.name}, ${pts.length - 1} segment${pts.length > 2 ? "s" : ""}`, ids });
           break;
         }
@@ -590,7 +603,8 @@ function build(input: { title?: string; rationale?: string; edits?: Edit[] }): P
           if (!res.total) throw new ToolError(`nothing to route: every connection ${nets ? "of " + nets.join(", ") : "on the board"} is already made`);
           if (!res.items.length) throw new ToolError(`the autorouter could not make any of the ${res.total} missing connection${res.total === 1 ? "" : "s"} within the design rules: ${JSON.stringify(failed.slice(0, 12))}`);
           const ids: string[] = [];
-          for (const it of res.items) { const c = added(doc, it.node); if (!c.netName && it.netName) c.netName = it.netName; changes.push(c); ids.push(c.id); }   // not P.addedChange: that one inserts into the live board
+          const have = segKeys(doc);      // a track the router lays over copper already there (a re-route of a half-routed net) is not laid twice
+          for (const it of res.items) { const key = segKey(it.node); if (key && have.has(key)) continue; if (key) have.add(key); const c = added(doc, it.node); if (!c.netName && it.netName) c.netName = it.netName; changes.push(c); ids.push(c.id); }   // not P.addedChange: that one inserts into the live board
           const conns: any[] = Array.isArray(res.connections) ? res.connections : [];
           details.push({ autoroute: { connections: res.total, routed: res.routed, segments: res.segments, vias: res.vias, length_mm: r4(res.length),
             unrouted: conns.length ? conns.filter((c) => !c.routed).slice(0, 40).map((c) => ({ net: c.net, from: c.from && c.from.pad, to: c.to && c.to.pad, reason: c.reason, detail: c.detail, blocked_by_nets: c.blockedBy && c.blockedBy.nets })) : failed.slice(0, 40),
