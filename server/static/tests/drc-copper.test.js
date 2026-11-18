@@ -133,6 +133,28 @@ async function refilled(name) {
   s.severities.connection_width = "error";
   return P.drc(doc, s, { unconnected: false, rules: read(name, ".kicad_dru") }).filter((m) => m.severity === "error");
 }
+
+// KiCad 10.99 parity against `kicad-cli pcb drc` on the QA boards
+const drcOf = (name, rules) => { const doc = K.parseDoc(read(name, ".kicad_pcb"), "kicad_pcb"); const pro = read(name, ".kicad_pro"); return P.drc(doc, P.designSettings(pro ? JSON.parse(pro) : null), { unconnected: false, footprintOwn: true, rules: rules === undefined ? read(name, ".kicad_dru") : rules }); };
+test("pads of one net-tie group may touch; custom pads are their merged primitives (embedded_table_rotated_legacy_v10: none)", () => {
+  assert.equal(drcOf("embedded_table_rotated_legacy_v10").filter((m) => m.code === "clearance" || m.code === "shorting_items").length, 0);
+  const sh = P.padShape({ shape: "custom", x: 0, y: 0, w: 0.254, h: 0.3302, rot: 0, node: K.parse('(pad "7" smd custom (size 0.254 0.3302) (options (clearance outline) (anchor rect)) (primitives (gr_poly (pts (xy -0.127 0.1651) (xy -0.127 -3) (xy 1.1 -3) (xy 1.1 0.1651)) (width 0) (fill yes))))') });
+  assert.equal(sh.t, "poly"); assert.ok(sh.solid); assert.ok(P.shapeGap(sh, { t: "circle", x: 1, y: -1, r: 0.05 }) === 0);
+});
+test("chamfered pads cut their corners: a disc in the cut corner clears", () => {
+  const node = K.parse('(pad "1" thru_hole roundrect (size 2 2) (roundrect_rratio 0) (chamfer_ratio 0.25) (chamfer top_left top_right bottom_left bottom_right))');
+  const sh = P.padShape({ shape: "roundrect", x: 0, y: 0, w: 2, h: 2, rot: 0, node });
+  assert.equal(sh.t, "poly"); assert.ok(P.shapeGap(sh, { t: "circle", x: 0.95, y: 0.95, r: 0.01 }) > 0.2); assert.equal(P.shapeGap(sh, { t: "circle", x: 0.95, y: 0, r: 0.01 }), 0);
+});
+test("netless zones report their islands, one marker per zone and layer (bad_triangulation_case: 58)", () => {
+  assert.equal(drcOf("bad_triangulation_case").filter((m) => m.code === "isolated_copper").length, 58);
+});
+test("a zone has no Layer property in custom rules: B.Layer == A.Layer never holds for a zone (notched_zones)", () => {
+  const rule = (c) => `(version 1)\n(rule "t" (condition "${c}") (constraint clearance (min 1mm)))`;
+  const zoneHits = (c) => drcOf("notched_zones", rule(c)).filter((m) => m.code === "clearance" && /rule 't'/.test(m.text)).length;
+  assert.ok(zoneHits("A.NetName == '+5V'") > 0);
+  assert.equal(zoneHits("(A.NetName == '+5V')&&(B.Type == 'Zone')&&(B.Layer == A.Layer)"), 0);
+});
 const asyncTests = [];
 if (read("issue9870", ".kicad_pcb")) asyncTests.push(["connection_width after a refill: issue9870 12, connection_width_rules 3, issue12831 / issue14130 0 (test_drc_copper_conn.cpp)", async () => {
   for (const [name, n] of [["issue9870", 12], ["connection_width_rules", 3], ["issue12831", 0], ["issue14130", 0]]) assert.equal((await refilled(name)).length, n, name);

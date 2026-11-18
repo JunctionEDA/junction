@@ -6,6 +6,7 @@ import { netOf } from "./nets";
 import { zoneLayers } from "./nodes";
 import { padsOf } from "./route-geom";
 import { K } from "./state";
+import { pointInPoly } from "./hit";
 import { EPS } from "./transforms";
 import { layerOf, pt, r6, widthOf } from "./util";
 
@@ -48,6 +49,15 @@ export function conductors(doc: BoardDoc) {
   return out;
 }
 /** Union-find over touching copper on a shared layer; nets must agree, but net-less copper joins whatever it touches (KiCad's propagation). */
+/** CN_VISITOR::checkZoneZoneConnection: two fills of one net connect when a corner of one lies in the other. */
+function zonesTouch(a: Conductor, b: Conductor): boolean {
+  if ((a.net || "") !== (b.net || "") || a.item === b.item) return false;   // one zone's outlines never touch each other
+  const P = (a.shape as PolyShape).pts, Q = (b.shape as PolyShape).pts; const ba = a.bbox, bb = b.bbox;
+  const inBox = (p: Pt, bx: number[]) => p[0] >= bx[0] - EPS && p[0] <= bx[2] + EPS && p[1] >= bx[1] - EPS && p[1] <= bx[3] + EPS;
+  for (const p of P) if (inBox(p, bb) && pointInPoly(Q, p[0], p[1])) return true;
+  for (const q of Q) if (inBox(q, ba) && pointInPoly(P, q[0], q[1])) return true;
+  return false;
+}
 export function clusterRoots(conds: Conductor[]) {
   const parent = conds.map((_, i: number) => i); const find = (i: number) => { while (parent[i] !== i) { parent[i] = parent[parent[i]]; i = parent[i]; } return i; };
   const order = conds.map((_, i: number) => i).sort((i: number, j: number) => conds[i].bbox[0] - conds[j].bbox[0]);
@@ -58,7 +68,7 @@ export function clusterRoots(conds: Conductor[]) {
       if (a.net && b.net && a.net !== b.net) continue;
       if (b.bbox[1] > a.bbox[3] + EPS || b.bbox[3] < a.bbox[1] - EPS || !shareLayer(a.layers, b.layers)) continue;
       if (find(i) === find(j)) continue;
-      if (shapeGap(a.shape, b.shape) <= EPS) parent[find(i)] = find(j);
+      if (a.kind === "zone" && b.kind === "zone" ? zonesTouch(a, b) : shapeGap(a.shape, b.shape) <= EPS) parent[find(i)] = find(j);
     }
   }
   return conds.map((_, i: number) => find(i));

@@ -14,7 +14,7 @@ import { arcPoints as primArcPoints } from "../../fab/prims";
 import { boardSettings } from "../../fab/model";
 import { DRC_ITEMS } from "../../canvas/drc-items";
 import { coreDist, padShape, polyPolyDist, shapeBBox, shapeOffset } from "./distances";
-import { boardOutline, edgeShapes, marker, mm4 } from "./drc";
+import { boardOutline, edgeShapes, marker, mm4, withKiids } from "./drc";
 import type { DruRule, RuleItem } from "./dru";
 import { evalRuleConstraint } from "./dru";
 import { netName } from "./dru-eval";
@@ -281,7 +281,7 @@ export function silkClearanceMarkers(doc: KDoc, s: DesignSettings, rules: DruRul
         const gap = elementGap(a, b); if (!collides(gap, min)) continue;
         reported.add(key);
         const [x, y] = centre(a.bbox, b.bbox); const title = code === "silk_overlap" ? "Silkscreen clearance" : "Silkscreen clipped by solder mask";
-        out.push(marker(code, defaultSeverity(code), x, y, title + detail(name, min, gap), Array.from(new Set([a.id, b.id]))));
+        out.push(withKiids(marker(code, defaultSeverity(code), x, y, title + detail(name, min, gap), Array.from(new Set([a.id, b.id]))), [elKiid(a), elKiid(b)]));
       }
     }
   }
@@ -304,7 +304,7 @@ export function silkEdgeMarkers(doc: KDoc, s: DesignSettings, rules: DruRule[], 
       const clr = Math.max(0, c.min - EPS); if (!touch(e.bbox, eb[i], clr)) continue;
       const gap = elementGap(e, edge); if (!collides(gap, clr)) continue;
       const [x, y] = centre(e.bbox, eb[i]);
-      out.push(marker("silk_edge_clearance", sev, x, y, "Silkscreen clipped by board edge" + detail(c.name, c.min, gap), Array.from(new Set([edge.id, e.id])))); crosses = true; break;
+      out.push(withKiids(marker("silk_edge_clearance", sev, x, y, "Silkscreen clipped by board edge" + detail(c.name, c.min, gap), Array.from(new Set([edge.id, e.id]))), [edge.id, elKiid(e)])); crosses = true; break;
     }
     if (crosses || !ol.outline || e.shapes.length < 2) continue;
     // resolveSilkDisposition: the item's pieces lie on both sides of the outline
@@ -319,7 +319,7 @@ export function silkEdgeMarkers(doc: KDoc, s: DesignSettings, rules: DruRule[], 
     for (let i = 0; i < edges.shapes.length; i++) if (rawGap(edges.shapes[i], { t: "circle", x: best[0], y: best[1], r: 0 }) <= 0.01) { bi = i; break; }
     if (bi < 0) continue;
     const c = silkConstraint(rules, doc, s, edgeEl(bi), e, null); if (!c || c.min < 0) continue;
-    out.push(marker("silk_edge_clearance", sev, best[0], best[1], "Silkscreen clipped by board edge" + detail(c.name, c.min, 0), Array.from(new Set([edges.ids[bi], e.id]))));
+    out.push(withKiids(marker("silk_edge_clearance", sev, best[0], best[1], "Silkscreen clipped by board edge" + detail(c.name, c.min, 0), Array.from(new Set([edges.ids[bi], e.id]))), [edges.ids[bi], elKiid(e)]));
   }
   return out;
 }
@@ -349,7 +349,7 @@ export function silkToMaskMarkers(doc: KDoc, s: DesignSettings, rules: DruRule[]
       }
       if (hit < 0) continue;
       const [x, y] = centre(e.bbox, near[hit].bbox);
-      out.push(marker("silk_over_copper", defaultSeverity("silk_over_copper"), x, y, "Silkscreen clipped by solder mask" + detail(name, clearance, actual), [e.id]));
+      out.push(withKiids(marker("silk_over_copper", defaultSeverity("silk_over_copper"), x, y, "Silkscreen clipped by solder mask" + detail(name, clearance, actual), [e.id]), [elKiid(e)]));
     }
   }
   return out;
@@ -369,6 +369,8 @@ function netTieNets(e: DrcElement, els: DrcElement[]): Set<string> | null {
   for (const o of els) if (o.fp === e.fp && o.pad && o.net && (g === undefined || groups.get(o.pad.number) === g)) out.add(o.net);
   return out;
 }
+/** An element's KIID as KiCad reports it: the pad's or drawing's own uuid, a zone's (not per layer), a board item's. */
+const elKiid = (e: DrcElement | null): string => (!e ? "" : e.kind === "zone" || e.kind === "via" || !/^[0-9a-f-]{36}$/i.test(e.uuid) ? K.uuidOf(e.pad ? e.pad.node : e.node) || e.id : e.uuid);
 const isMaskAperture = (e: DrcElement) => e.mask.size > 0 && e.copper.size === 0;
 const sameLogicalPad = (a: DrcElement, b: DrcElement) => !!a.pad && !!b.pad && a.fp === b.fp && a.pad.number !== "" && a.pad.number === b.pad.number;
 const sharesNetTie = (a: DrcElement, b: DrcElement) => { if (!a.pad || !b.pad || a.fp !== b.fp) return false; const g = netTieGroups(a.fp); const x = g.get(a.pad.number), y = g.get(b.pad.number); return x !== undefined && x === y; };
@@ -475,6 +477,8 @@ export function maskBridgeMarkers(doc: KDoc, s: DesignSettings, rules: DruRule[]
     const ids = [b.a.id, b.b ? b.b.id : b.zoneId || "", b.c ? b.c.id : ""].filter(Boolean);
     const key = [b.layer, b.a.uuid, b.b ? b.b.uuid : b.zoneId, b.c ? b.c.uuid : ""].join("|"); if (keys.has(key)) continue; keys.add(key);
     const m = marker("solder_mask_bridge", defaultSeverity("solder_mask_bridge"), b.pos[0], b.pos[1], /^F\./.test(b.layer) ? front : back, Array.from(new Set(ids)));
+    const kid = elKiid;
+    m.kiids = Array.from(new Set([kid(b.a), b.b ? kid(b.b) : b.zoneId ? K.uuidOf((doc.items.get(b.zoneId) || { node: [] as unknown as SNode }).node) || b.zoneId : "", kid(b.c)].filter(Boolean)));
     (m as DrcMarker & { message?: boolean }).message = true;   // SetErrorMessage: the text replaces the title
     out.push(m);
   }

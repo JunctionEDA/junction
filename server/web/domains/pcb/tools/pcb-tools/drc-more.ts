@@ -8,8 +8,9 @@ import type { BoardDoc, CopperShape, DesignSettings, DrcMarker, PadInfo, Pt } fr
 import { pointInPoly } from "./hit";
 import { DRC_ITEMS } from "../../canvas/drc-items";
 import { arcPoints, boxesTouch, coreDist, padShape, shapeBBox, shapeGap, shapeOffset } from "./distances";
-import { chainLoops, marker, mm4, netClearance } from "./drc";
+import { chainLoops, marker, mm4, netClearance, withKiids } from "./drc";
 import { conductors } from "./netlist";
+import { unflashedLayers } from "./drc-flash";
 import type { DruRule, RuleHit } from "./dru";
 import { evalRuleConstraint } from "./dru";
 import { zoneLayers } from "./nodes";
@@ -62,6 +63,9 @@ function boardHoles(doc: BoardDoc) {
   return out;
 }
 
+/** KIIDs as KiCad reports them: a pad's own uuid, a via's or track's. */
+const holeKiid = (doc: BoardDoc, h: Hole) => (h.kind === "pad" ? h.uuid : K.uuidOf((doc.items.get(h.id) as KItem).node) || h.id);
+const condKiid = (c: ReturnType<typeof conductors>[number]) => (c.kind === "pad" ? K.uuidOf(c.pad.node) || c.id : K.uuidOf(c.item.node) || c.id);
 type RuleOf = (type: string, A: { kind: string; node: SNode; layer?: string }, B: { kind: string; node: SNode; layer?: string } | null) => RuleHit | null;
 
 /** DRC_TEST_PROVIDER_HOLE_TO_HOLE: co-located holes, then holes closer than the hole to hole constraint. */
@@ -72,11 +76,11 @@ export function holeToHoleMarkers(doc: BoardDoc, s: DesignSettings, ruleOf: Rule
   const test = (a: Hole, b: Hole) => {
     if (a.kind === "via" && b.kind === "via") { const sa = viaSpan(doc, a), sb = viaSpan(doc, b); if (![...sa].some((l) => sb.has(l))) return; }
     const ca = holeCentre(a), cb = holeCentre(b); const [p, q] = a.uuid > b.uuid ? [b, a] : [a, b];
-    if (Math.hypot(ca[0] - cb[0], ca[1] - cb[1]) < DRC_EPS) { out.push(marker("holes_co_located", defaultSeverity("holes_co_located"), ca[0], ca[1], "Drilled holes co-located", [p.id, q.id])); return; }
+    if (Math.hypot(ca[0] - cb[0], ca[1] - cb[1]) < DRC_EPS) { out.push(withKiids(marker("holes_co_located", defaultSeverity("holes_co_located"), ca[0], ca[1], "Drilled holes co-located", [p.id, q.id]), [holeKiid(doc, p), holeKiid(doc, q)])); return; }
     const actual = Math.max(0, coreDist(holeShape(a), holeShape(b)) - a.w / 2 - b.w / 2);
     const hit = ruleOf("hole_to_hole", ri(a), ri(b)); if (hit && hit.severity === "ignore") return;
     const min = hit && hit.min != null ? hit.min : min0, name = hit ? hit.name : "board setup constraints";
-    if (min >= 0 && actual < Math.max(0, min - DRC_EPS)) out.push(marker("hole_to_hole", defaultSeverity("hole_to_hole"), ca[0], ca[1], `Drilled hole too close to other hole (${name} min ${mm4(min)}; actual ${mm4(actual)})`, [p.id, q.id]));
+    if (min >= 0 && actual < Math.max(0, min - DRC_EPS)) out.push(withKiids(marker("hole_to_hole", defaultSeverity("hole_to_hole"), ca[0], ca[1], `Drilled hole too close to other hole (${name} min ${mm4(min)}; actual ${mm4(actual)})`, [p.id, q.id]), [holeKiid(doc, p), holeKiid(doc, q)]));
   };
   const reach = Math.max(min0, worstRule, 0.01); const boxes = holes.map(box);   // QueryWorstConstraint( HOLE_TO_HOLE_CONSTRAINT )
   // the via pass (microvias are laser-drilled and only collided with), then the pad pass; one test per pair
@@ -104,6 +108,7 @@ export function holeToHoleMarkers(doc: BoardDoc, s: DesignSettings, ruleOf: Rule
 export function holeClearanceMarkers(doc: BoardDoc, s: DesignSettings, ruleOf: RuleOf, worstRule = 0): DrcMarker[] {
   const out: DrcMarker[] = []; const min0 = typeof s.holeClearance === "number" ? s.holeClearance : MORE_DEFAULTS.minHoleClearance;
   const conds = conductors(doc).filter((c) => c.kind !== "zone"); if (!conds.length) return out;
+  const unfl = unflashedLayers(conds, doc.copper && doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"]);
   const holes = boardHoles(doc); const reach = Math.max(min0, worstRule, 0.01);
   // a 2 mm bucket grid of the copper (the R-tree's job in KiCad)
   const G = 2, grid = new Map<string, number[]>(); const cell = (v: number) => Math.floor(v / G);
@@ -127,12 +132,14 @@ export function holeClearanceMarkers(doc: BoardDoc, s: DesignSettings, ruleOf: R
       if (c.kind === "pad" && !(clr > 0)) continue;
       const gap = shapeGap(c.shape, shape); if (gap >= clr - DRC_EPS && !(clr === 0 && gap === 0 && coreDist(c.shape, shape) < shapeOffset(c.shape) + shapeOffset(shape) - DRC_EPS)) continue;
       // the copper clearance already reported this pair
-      {
-        if (own && own.net !== c.net && shapeGap(own.shape, c.shape) < Math.max(netClearance(s, own.net), netClearance(s, c.net), s.minClearance || 0) - DRC_EPS) continue;
+      // (on a layer where the via or pad has its ring: unflashed it is only the hole, which this test covers)
+      if (own && own.net !== c.net) {
+        const ul = unfl.get(own); const flashed = [...c.layers].some((l) => own.layers.has(l) && !(ul && ul.has(l)));
+        if (flashed && shapeGap(own.shape, c.shape) < Math.max(netClearance(s, own.net), netClearance(s, c.net), s.minClearance || 0) - DRC_EPS) continue;
       }
-      const ids = [c.id, h.id]; const key = ids.join("|") + "|" + h.uuid; if (seen.has(key)) continue; seen.add(key);
+      const ids = [c.id, h.id]; const key = condKiid(c) + "|" + (c.kind === "pad" ? c.index : "") + "|" + h.uuid; if (seen.has(key)) continue; seen.add(key);
       const [cx, cy] = holeCentre(h);
-      out.push(marker("hole_clearance", defaultSeverity("hole_clearance"), cx, cy, clr ? `Hole clearance violation (${name} clearance ${mm4(clr)}; actual ${mm4(gap)})` : `Hole clearance violation (${name} clearance ${mm4(clr)}; actual < 0)`, ids));
+      out.push(withKiids(marker("hole_clearance", defaultSeverity("hole_clearance"), cx, cy, clr ? `Hole clearance violation (${name} clearance ${mm4(clr)}; actual ${mm4(gap)})` : `Hole clearance violation (${name} clearance ${mm4(clr)}; actual < 0)`, ids), [condKiid(c), holeKiid(doc, h)]));
     }
   }
   return out;

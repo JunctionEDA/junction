@@ -145,6 +145,15 @@ export function segCross(p1: Pt, p2: Pt, p3: Pt, p4: Pt): Pt | null {
   return [p1[0] + t * d1[0], p1[1] + t * d1[1]];
 }
 export const marker = (code: string, severity: string, x: number, y: number, text: string, ids: string[]): DrcMarker => ({ code, severity, x: r6(x), y: r6(y), text, ids });
+/** The markers' items as KiCad identifies them (RC_ITEM KIIDs): a pad by its own uuid, not its footprint's. */
+export const withKiids = (m: DrcMarker, kiids: string[]): DrcMarker => { m.kiids = Array.from(new Set(kiids.filter(Boolean))); return m; };
+const tieCache = new WeakMap<object, Map<string, number>>();
+/** FOOTPRINT::MapPadNumbersToNetTieGroups: whether two pad numbers share a net-tie group. */
+function tiedPads(fp: { node: SNode }, a: string, b: string): boolean {
+  let m = tieCache.get(fp);
+  if (!m) { m = new Map(); const g = K.kid(fp.node, "net_tie_pad_groups"); if (g) g.slice(1).forEach((grp, i) => { for (const n of K.str(grp as SNode).split(/[\s,]+/).filter(Boolean)) m!.set(n, i); }); tieCache.set(fp, m); }
+  const x = m.get(a); return x !== undefined && x === m.get(b);
+}
 export const boxCenter = (a: Box, b: Box) => [(Math.max(a[0], b[0]) + Math.min(a[2], b[2])) / 2, (Math.max(a[1], b[1]) + Math.min(a[3], b[3])) / 2];
 /**
  * The DRC subset: copper clearance (pads, tracks, arcs, vias against different nets on a shared layer), copper to
@@ -194,7 +203,7 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
   const TRACKISH = new Set(["segment", "arc", "via"]); const trackDone = new Set<string>();
   const trackOf = (a: Conductor, b: Conductor): Conductor | null => (TRACKISH.has(a.kind) && TRACKISH.has(b.kind) ? (a.id < b.id ? a : b) : TRACKISH.has(a.kind) ? a : TRACKISH.has(b.kind) ? b : null);
   const allTrackErrors = !!opts.allTrackErrors;
-  const uid = (c: Conductor): string => (c.kind === "pad" ? K.uuidOf(c.pad.node) || c.id : c.id);
+  const uid = (c: Conductor): string => (c.kind === "pad" ? K.uuidOf(c.pad.node) || c.id : K.uuidOf(c.item.node) || c.id);
   const firstOf = (a: Conductor, b: Conductor): [Conductor, Conductor] => {
     const ta = TRACKISH.has(a.kind), tb = TRACKISH.has(b.kind);
     if (ta !== tb) return ta ? [a, b] : [b, a];
@@ -213,9 +222,11 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
         // PAD::SameLogicalPadAs: pads of one footprint with one (non-empty) number are one pad; only different real nets short
         if (a.kind === "pad" && b.kind === "pad" && a.item === b.item && a.pad.number && a.pad.number === b.pad.number) {
           // testPadAgainstItem: the one logical pad with two real nets shorts them (two "unconnected-(" nets do not)
-          if (a.net && b.net && a.net !== b.net && !(a.net.startsWith("unconnected-(") && b.net.startsWith("unconnected-("))) out.push(marker("shorting_items", "error", b.pad.x, b.pad.y, `Items shorting two nets (nets ${a.net} and ${b.net})`, [a.id, b.id]));
+          if (a.net && b.net && a.net !== b.net && !(a.net.startsWith("unconnected-(") && b.net.startsWith("unconnected-("))) out.push(withKiids(marker("shorting_items", "error", b.pad.x, b.pad.y, `Items shorting two nets (nets ${a.net} and ${b.net})`, [a.id, b.id]), [uid(a), uid(b)]));
           continue;
         }
+        // testPadAgainstItem: two pads of one net-tie group in the same footprint may touch
+        if (a.kind === "pad" && b.kind === "pad" && a.item === b.item && tiedPads(a.item, a.pad.number, b.pad.number)) continue;
         const tr = allTrackErrors ? null : trackOf(a, b), trKey = tr ? tr.id + "|" + layer : "";
         if (tr && trackDone.has(trKey)) continue;
         let need = Math.max(pairClr(a, b), pairClr(b, a), s.minClearance || 0), by = "";   // Board Setup > Constraints: the board minimum is a floor
@@ -237,7 +248,7 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
           const pad = a.kind === "pad" || b.kind === "pad"; const [p, q] = a.id <= b.id ? [a, b] : [b, a];
           if (pad ? !!(a.net && b.net) : !!q.net) {
             const [x, y] = boxCenter(a.bbox, b.bbox);
-            out.push(marker("shorting_items", "error", x, y, `Items shorting two nets (nets ${p.net || "<no net>"} and ${q.net || "<no net>"})`, Array.from(new Set([a.id, b.id])))); continue;
+            out.push(withKiids(marker("shorting_items", "error", x, y, `Items shorting two nets (nets ${p.net || "<no net>"} and ${q.net || "<no net>"})`, Array.from(new Set([a.id, b.id]))), [uid(a), uid(b)])); continue;
           }
         }
         // EvalRules(item, other): the tested item's class names the rule unless the other's is strictly larger (a track tests
@@ -245,7 +256,7 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
         const [A, B] = firstOf(a, b);
         const ca = pairClr(A, B), cb = pairClr(B, A); const cls = cb > ca ? netclassName(s, B.net) + (cb < clr(B) ? "' diff pair" : "'") : netclassName(s, A.net) + (ca < clr(A) ? "' diff pair" : "'");
         const [x, y] = boxCenter(a.bbox, b.bbox);
-        out.push(marker("clearance", "error", x, y, `Clearance violation (${by || `netclass '${cls}`} clearance ${mm4(need)}; actual ${mm4(gap)})`, Array.from(new Set([a.id, b.id]))));
+        out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${by || `netclass '${cls}`} clearance ${mm4(need)}; actual ${mm4(gap)})`, Array.from(new Set([a.id, b.id]))), [uid(a), uid(b)]));
       }
     }
   }
@@ -273,7 +284,7 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
         if (!prev || gap < prev.gap) seen.set(key, { gap: Math.max(0, gap), need, name, c, z });
       }
     }
-    for (const v of seen.values()) { const [x, y] = boxCenter(v.c.bbox, v.z.bbox); out.push(marker("clearance", "error", x, y, `Clearance violation (${v.name} clearance ${mm4(v.need)}; actual ${mm4(v.gap)})`, [v.c.id, v.z.id])); }
+    for (const v of seen.values()) { const [x, y] = boxCenter(v.c.bbox, v.z.bbox); out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${v.name} clearance ${mm4(v.need)}; actual ${mm4(v.gap)})`, [v.c.id, v.z.id]), [uid(v.c), uid(v.z)])); }
   }
   // copper to board edge (DRC_TEST_PROVIDER_EDGE_CLEARANCE): every copper item (zone fills one layer at a time) against the
   // Edge.Cuts lines (their width taken as zero) and the Margin lines; EvalRules(edge, item) gives the clearance (a custom
@@ -335,7 +346,27 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
     if (c.kind === "segment" || c.kind === "arc") {
       const [a, b] = c.anchors; const layer = c.layers.values().next().value!;
       if (c.length! < EPS) continue;   // KiCad reports nothing for a zero-length track
-      const loose = [a, b].find((p) => !touches(p, layer, c)); if (loose) out.push(marker("track_dangling", "warning", loose[0], loose[1], "Track has unconnected end", [c.id]));   // one marker per track, like DRCE_DANGLING_TRACK
+      // CONNECTIVITY_DATA::TestTrackEndpointDangling over the items connectivity joins to the track (an anchor of one
+      // touching it; a zone by the track's ends in its fill)
+      const acc = (c.width || 0) / 2, P0 = { t: "circle" as const, x: a[0], y: a[1], r: 0 }, P1 = { t: "circle" as const, x: b[0], y: b[1], r: 0 };
+      const inside = (o: Conductor, p: Pt): boolean => (o.kind === "zone" ? pointInPoly((o.shape as PolyShape).pts, p[0], p[1]) : shapeGap(shapeOn(o, layer), { t: "circle", x: p[0], y: p[1], r: 0 }) <= EPS);
+      let sc = 0, ec = 0, joined = false;
+      const visit = (o: Conductor): boolean => {
+        if (o === c || !o.layers.has(layer)) return false;   // CN_ITEM::CanChangeNet: a track joins items of any net
+        if (o.kind === "zone" ? !c.anchors.some((p) => inside(o, p)) : shapeGap(shapeOn(o, layer), c.shape) > EPS) return false;   // CN_VISITOR: shapes touching; a zone by the track's anchors
+        let hs: boolean, he: boolean;
+        if (o.kind === "zone") { hs = shapeGap({ t: "circle", x: a[0], y: a[1], r: acc }, o.shape) <= 0; he = shapeGap({ t: "circle", x: b[0], y: b[1], r: acc }, o.shape) <= 0; }
+        else { const sh = shapeOn(o, layer); hs = shapeGap(sh, P0) <= acc + EPS; he = shapeGap(sh, P1) <= acc + EPS; }
+        if (hs && he) {
+          if (o.kind === "zone" || o.kind === "pad" || o.kind === "via") return true;   // both ends in a zone, pad or via: not dangling
+          const md = (p: Pt): number => Math.min(...o.anchors.map((q) => Math.hypot(q[0] - p[0], q[1] - p[1])));
+          if (md(a) < md(b)) sc++; else ec++;
+        } else if (hs) sc++; else if (he) ec++;
+        return sc > 0 && ec > 0;
+      };
+      for (const o of condGrid.query(c.bbox, EPS)) if (visit(o)) { joined = true; break; }
+      if (!joined) for (const o of zoneGrid.query(c.bbox, EPS)) if (visit(o)) { joined = true; break; }
+      if (!joined) { const p = sc === 0 ? a : b; out.push(marker("track_dangling", "warning", p[0], p[1], "Track has unconnected end", [c.id])); }   // one marker per track, like DRCE_DANGLING_TRACK
     } else if (c.kind === "via") {
       // CONNECTIVITY_DATA::TestTrackEndpointDangling: a via with nothing connected (and a net), or whose connections all
       // start on one copper layer (CN_ITEM::Layer), dangles
@@ -343,13 +374,12 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
       const startOf = (ls: Set<string>): string => { for (const l of stack) if (ls.has(l)) return l; return ls.values().next().value || ""; };
       const starts = new Set<string>();
       for (const o of condGrid.query(c.bbox, EPS)) {
-        if (o === c || o.id === c.id || (o.net || "") !== (c.net || "") && o.net && c.net) continue;
+        if (o === c || o.id === c.id) continue;   // a via joins items of any net (CanChangeNet)
         let hit = false; for (const l of c.layers) if (o.layers.has(l) && shapeGap(o.shape, shapeOn(c, l)) <= EPS) { hit = true; break; }
         if (hit) starts.add(startOf(o.layers));
       }
       for (const o of zoneGrid.query(c.bbox, EPS)) {
-        if ((o.net || "") !== (c.net || "") && o.net && c.net) continue;
-        const l = o.layers.values().next().value!; if (c.layers.has(l) && shapeGap(o.shape, shapeOn(c, l)) <= EPS) starts.add(l);
+                const l = o.layers.values().next().value!; if (c.layers.has(l) && shapeGap(o.shape, shapeOn(c, l)) <= EPS) starts.add(l);
       }
       if (starts.size === 0 ? !!c.net : starts.size === 1) out.push(marker("via_dangling", "warning", a[0], a[1], "Via is not connected or connected on only one layer", [c.id]));
     }

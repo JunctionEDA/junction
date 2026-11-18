@@ -68,7 +68,7 @@ test("drc() reports it", () => {
   assert.equal(P.drc(doc, null, { unconnected: false }).filter((m) => m.code === "starved_thermal").length, 1);
 });
 
-test("isolated copper: a fill island no item of the net touches (thieving and netless zones are not reported)", () => {
+test("isolated copper: a fill island no item of the net touches; thieving is not reported, a netless zone's islands are (one per zone and layer)", () => {
   const island = "(xy 2 2) (xy 4 2) (xy 4 4) (xy 2 4)";
   const doc = K.parseDoc(board({ fills: [right, left, island] }), "kicad_pcb");
   const m = P.isolatedCopperMarkers(doc); assert.equal(m.length, 1);
@@ -77,6 +77,8 @@ test("isolated copper: a fill island no item of the net touches (thieving and ne
   const thief = board({ fills: [right, island] }).replace("(fill yes (thermal_gap 0.5)", "(fill yes (mode thieving) (thermal_gap 0.5)");
   assert.equal(P.isolatedCopperMarkers(K.parseDoc(thief, "kicad_pcb")).length, 0);
   assert.ok(P.drc(doc, null, { unconnected: false }).some((x) => x.code === "isolated_copper"));
+  const netless = board({ fills: [island, "(xy 12 2) (xy 14 2) (xy 14 4) (xy 12 4)"] }).replace('(zone (net 1) (net_name "GND")', '(zone (net 0) (net_name "")');
+  const nm = P.isolatedCopperMarkers(K.parseDoc(netless, "kicad_pcb")); assert.equal(nm.length, 1); assert.deepEqual([nm[0].x, nm[0].y], [2, 2]);
 });
 
 console.log(`${passed} passed, ${failed} failed`);

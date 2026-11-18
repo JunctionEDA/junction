@@ -296,7 +296,7 @@ function chamferedRect(w: number, h: number, radius: number, ratio: number, corn
 }
 
 /** A custom pad's anchor and primitives as polygons in the pad frame (PAD::MergePrimitivesAsPolygon, before the union). */
-function customPolys(shape: PadShape): Pt[][] {
+export function customPolys(shape: PadShape): Pt[][] {
   const polys: Pt[][] = [];
   if (shape.anchor === "circle") polys.push(circlePoints(0, 0, shape.w / 2, MAX_ERROR));
   else polys.push([[-shape.w / 2, -shape.h / 2], [shape.w / 2, -shape.h / 2], [shape.w / 2, shape.h / 2], [-shape.w / 2, shape.h / 2]]);
