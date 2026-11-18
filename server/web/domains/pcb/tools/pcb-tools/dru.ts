@@ -166,7 +166,7 @@ export function parseDru(text: string): { rules: DruRule[]; errors: string[] } {
       else if (c[0] === "layer") rule.layer = K.str(c[1]);
       else if (c[0] === "severity") rule.severity = K.str(c[1]);
       else if (c[0] === "constraint") {
-        const k: DruConstraint = { type: K.str(c[1]), min: null, opt: null, max: null };
+        const k: DruConstraint = { type: K.str(c[1]) === "text_thickness" ? "line_width" : K.str(c[1]), min: null, opt: null, max: null };   // drc_rule_parser: text_thickness is line_width's old name
         for (const v of c.slice(2)) {
           if (Array.isArray(v) && (v[0] === "min" || v[0] === "opt" || v[0] === "max")) k[v[0] as "min" | "opt" | "max"] = druValue(K.str(v[1]));
           else if (Array.isArray(v) && v.length === 1) (k.options = k.options || []).push(K.str(v[0]));   // (within_diff_pairs)

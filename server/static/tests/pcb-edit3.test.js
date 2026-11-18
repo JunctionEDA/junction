@@ -130,7 +130,8 @@ test("DRC text dimensions and mirroring: silk minimums from Board Setup, custom 
     (gr_text "hidden" (at 10 60) (layer "F.SilkS") (uuid "t6") (hide yes) (effects (font (size 0.2 0.2) (thickness 0.01))))`);
   const m = P.drc(doc, null, { unconnected: false });
   assert.deepEqual(codes(m, "text_height").map((x) => [x.ids[0], x.text]), [["t1", "Text height out of range (board setup constraints silk text height min height 0.8000 mm; actual 0.5000 mm)"]]);
-  assert.deepEqual(codes(m, "text_thickness").map((x) => [x.ids[0], x.text]), [["t1", "Text thickness out of range (board setup constraints silk text thickness min thickness 0.0800 mm; actual 0.0500 mm)"]]);
+  // KiCad 10.99: the text stroke is checked by DRCE_LINE_WIDTH against the silk line width minimum
+  assert.deepEqual(codes(m, "line_width").map((x) => [x.ids[0], x.text]), [["t1", "Line width out of range (board setup constraints silk line width min thickness 0.0800 mm; actual 0.0500 mm)"]]);
   assert.deepEqual(codes(m, "mirrored_text_on_front_layer").map((x) => x.ids[0]), ["t4"]); assert.deepEqual(codes(m, "nonmirrored_text_on_back_layer").map((x) => x.ids[0]), ["t5"]);
   const r = P.drc(doc, null, { unconnected: false, rules: `(version 1) (rule fab (layer "F.Fab") (constraint text_height (min 0.6mm) (max 2mm)))` });
   assert.ok(codes(r, "text_height").some((x) => x.ids[0] === "t2" && /rule 'fab' min height 0\.6000 mm; actual 0\.5000 mm/.test(x.text)));

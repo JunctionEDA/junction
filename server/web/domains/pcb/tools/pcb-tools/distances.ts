@@ -86,7 +86,10 @@ export function arcPoints(arc: Arc3, start: Pt, end: Pt) {
 }
 export function arcLength(arc: Pick<Arc3, "a0" | "a1" | "r" | "anticlockwise">) { let sweep = arc.anticlockwise ? arc.a0 - arc.a1 : arc.a1 - arc.a0; sweep = ((sweep % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI); return arc.r * sweep; }
 /** The copper outline of a pad from padsOf: a disc, a stadium, or a (rounded) rectangle — trapezoids, chamfers and custom pads take their bounding rectangle. */
-export function padShape(p: Pick<PadInfo, "shape" | "x" | "y" | "w" | "h" | "rot"> & { node?: SNode }): CopperShape {
+export function padShape(p0: Pick<PadInfo, "shape" | "x" | "y" | "w" | "h" | "rot"> & { node?: SNode; off?: number[] }): CopperShape {
+  // PAD::ShapePos: the copper sits at the anchor (the hole) plus the drill offset turned with the pad
+  let p = p0;
+  if (p0.off && (p0.off[0] || p0.off[1])) { const d = rotator(p0.rot)(p0.off[0], p0.off[1]); p = Object.assign({}, p0, { x: p0.x + d[0], y: p0.y + d[1] }); }
   if (p.shape === "circle") return { t: "circle", x: p.x, y: p.y, r: Math.min(p.w, p.h) / 2 };
   if (p.shape === "oval") {
     const long = Math.max(p.w, p.h), short = Math.min(p.w, p.h); const half = (long - short) / 2; const d = rotator(p.rot)(p.w >= p.h ? half : 0, p.w >= p.h ? 0 : half);

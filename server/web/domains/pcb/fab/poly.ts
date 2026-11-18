@@ -146,6 +146,39 @@ export function stadium(x1: number, y1: number, x2: number, y2: number, w: numbe
   return arcPoints(x1, y1, r, a + Math.PI / 2, a + 3 * Math.PI / 2, false, MAX_ERROR).concat(arcPoints(x2, y2, r, a - Math.PI / 2, a + Math.PI / 2, false, MAX_ERROR));
 }
 
+/** TransformOvalToPolygon(…, ERROR_OUTSIDE): a round-ended segment whose caps never come inside the true outline. */
+export function stadiumOutside(x1: number, y1: number, x2: number, y2: number, w: number, maxErr = MAX_ERROR): Pt[] {
+  const r = w / 2; if (!(r > 0)) return [];
+  const rel = Math.max(1e-6, maxErr) / r; const inc = Math.min(Math.PI / 4, Math.acos(Math.max(-1, 1 - rel)) * 2);
+  const n = Math.max(2, Math.ceil(Math.PI / inc)), d = Math.PI / n, R = r / Math.cos(d / 2);
+  const len = Math.hypot(x2 - x1, y2 - y1), a = len < 1e-9 ? 0 : Math.atan2(y2 - y1, x2 - x1);
+  const cap = (cx: number, cy: number, a0: number, out: Pt[]): void => {
+    out.push([cx + r * Math.cos(a0), cy + r * Math.sin(a0)]);
+    for (let i = 0; i < n; i++) { const t = a0 + (i + 0.5) * d; out.push([cx + R * Math.cos(t), cy + R * Math.sin(t)]); }
+    out.push([cx + r * Math.cos(a0 + Math.PI), cy + r * Math.sin(a0 + Math.PI)]);
+  };
+  const pts: Pt[] = []; cap(x1, y1, a + Math.PI / 2, pts); cap(x2, y2, a - Math.PI / 2, pts);
+  return pts;
+}
+
+/** TransformRoundChamferedRectToPolygon(…, ERROR_OUTSIDE): w × h with corners of radius r drawn outside the arcs, about
+ *  the origin, turned by `deg`, moved to (x, y). */
+export function roundRectOutside(x: number, y: number, w: number, h: number, r: number, deg: number, maxErr = MAX_ERROR): Pt[] {
+  r = Math.min(r, w / 2, h / 2); const hx = w / 2 - r, hy = h / 2 - r; const pts: Pt[] = [];
+  if (r <= 1e-9) pts.push([-w / 2, -h / 2], [w / 2, -h / 2], [w / 2, h / 2], [-w / 2, h / 2]);
+  else {
+    const rel = Math.max(1e-6, maxErr) / r; const inc = Math.min(Math.PI / 4, Math.acos(Math.max(-1, 1 - rel)) * 2);
+    const n = Math.max(1, Math.ceil((Math.PI / 2) / inc)), d = Math.PI / 2 / n, R = r / Math.cos(d / 2);
+    const corner = (cx: number, cy: number, a0: number): void => {
+      pts.push([cx + r * Math.cos(a0), cy + r * Math.sin(a0)]);
+      for (let i = 0; i < n; i++) { const t = a0 + (i + 0.5) * d; pts.push([cx + R * Math.cos(t), cy + R * Math.sin(t)]); }
+      pts.push([cx + r * Math.cos(a0 + Math.PI / 2), cy + r * Math.sin(a0 + Math.PI / 2)]);
+    };
+    corner(hx, hy, 0); corner(-hx, hy, Math.PI / 2); corner(-hx, -hy, Math.PI); corner(hx, -hy, 3 * Math.PI / 2);
+  }
+  return pts.map((p) => { const q = rot(p[0], p[1], deg); return [x + q[0], y + q[1]] as Pt; });
+}
+
 /** A rectangle w × h with corners of radius r about the origin, turned by `deg`, moved to (x, y). */
 export function roundRectPoints(x: number, y: number, w: number, h: number, r: number, deg: number): Pt[] {
   const hx = w / 2 - r, hy = h / 2 - r; const pts: Pt[] = [];

@@ -18,8 +18,8 @@ import { ClipType, EndType, FillRule, JoinType, booleanOpD, inflatePathsD, type 
 import { has, kid, kids, num, polyPtsOf, str } from "../canvas/sexpr";
 import { type BoardModel, type Footprint, type Node, type Pad, type Track, type Via, expandLayers, isCopper, padShapeOn } from "./model";
 import { PlotLog, footprintGeoms, geomPrims, padPrims, textKnockout } from "./plot";
-import { fracture, primPolys, stadium } from "./poly";
-import { type Prim, type Pt, arcPoints, circlePoints, rot } from "./prims";
+import { fracture, primPolys, roundRectOutside, stadium, stadiumOutside } from "./poly";
+import { type Prim, type Pt, arcPoints, circlePoints, circlePointsOutside, rot } from "./prims";
 
 /** pcbnew's internal unit: 1 nm. */
 const PREC = 6;
@@ -365,10 +365,24 @@ export class ZoneFiller {
   }
   /** PAD::TransformShapeToPolygon(layer, clearance). */
   private padShape(pad: Pad, layer: string, gap: number): Poly {
+    // the simple shapes grown by the gap as KiCad draws them (ERROR_OUTSIDE: never inside the clearance)
+    const sh = padShapeOn(pad, layer, this.m.copper);
+    if (gap > 0 && (sh.shape === "circle" || sh.shape === "oval" || sh.shape === "rect" || sh.shape === "roundrect") && sh.w > 0 && sh.h > 0) {
+      const [ox, oy] = rot(sh.offset[0], sh.offset[1], pad.rot); const x = pad.x + ox, y = pad.y + oy;
+      if (sh.shape === "circle" || (sh.shape === "oval" && Math.abs(sh.w - sh.h) < 1e-9)) return [shape(circlePointsOutside(x, y, sh.w / 2 + gap, this.maxError))];
+      if (sh.shape === "oval") {
+        const long = Math.max(sh.w, sh.h), short = Math.min(sh.w, sh.h), half = (long - short) / 2; const [ax, ay] = sh.w > sh.h ? rot(half, 0, pad.rot) : rot(0, half, pad.rot);
+        return [shape(stadiumOutside(x - ax, y - ay, x + ax, y + ay, short + 2 * gap, this.maxError))];
+      }
+      const r0 = sh.shape === "roundrect" ? Math.min(sh.rratio * Math.min(sh.w, sh.h), Math.min(sh.w, sh.h) / 2) : 0;
+      return [shape(roundRectOutside(x, y, sh.w + 2 * gap, sh.h + 2 * gap, r0 + gap, pad.rot, this.maxError))];
+    }
     const out: Prim[] = []; padPrims(pad, layer, this.m, out);
     const polys: Pt[][] = []; for (const p of out) for (const q of primPolys(p)) polys.push(q);
     const base = union(shapes(polys));
-    return gap > 0 ? inflate(base, gap, true, this.maxError) : base;
+    // ERROR_OUTSIDE: Clipper puts its round-join vertices on the arc, so the corners are drawn finer than maxError to stay
+    // outside the clearance (EXTRA_MARGIN covers what is left)
+    return gap > 0 ? inflate(base, gap, true, this.maxError / 20) : base;
   }
   /** PAD::TransformHoleToPolygon. */
   private holeShape(pad: Pad, gap: number): Poly {
@@ -378,10 +392,11 @@ export class ZoneFiller {
     const [ax, ay] = d.w > d.h ? rot(-half, 0, pad.rot) : rot(0, -half, pad.rot);
     return [shape(stadium(pad.x + ax, pad.y + ay, pad.x - ax, pad.y - ay, short + 2 * gap))];
   }
-  private viaShape(v: Via, layer: string, gap: number): Poly { const d = v.sizes ? v.sizes.get(layer) ?? v.size : v.size; return [shape(circlePoints(v.x, v.y, d / 2 + gap, this.maxError))]; }
+  private viaShape(v: Via, layer: string, gap: number): Poly { const d = v.sizes ? v.sizes.get(layer) ?? v.size : v.size; return [shape(circlePointsOutside(v.x, v.y, d / 2 + gap, this.maxError))]; }
   private trackShape(t: Track, gap: number): Poly {
     const w = t.w + 2 * gap; if (!(w > 0)) return [];
-    const prims: Prim[] = t.arc && Math.hypot(t.x2 - t.x1, t.y2 - t.y1) > 1e-5 ? [{ k: "arc", cx: t.arc.cx, cy: t.arc.cy, r: t.arc.r, a0: t.arc.a0, a1: t.arc.a1, acw: t.arc.acw, w }] : [{ k: "seg", x1: t.x1, y1: t.y1, x2: t.x2, y2: t.y2, w }];
+    if (!(t.arc && Math.hypot(t.x2 - t.x1, t.y2 - t.y1) > 1e-5)) return [shape(stadiumOutside(t.x1, t.y1, t.x2, t.y2, w, this.maxError))];   // ERROR_OUTSIDE
+    const prims: Prim[] = [{ k: "arc", cx: t.arc.cx, cy: t.arc.cy, r: t.arc.r, a0: t.arc.a0, a1: t.arc.a1, acw: t.arc.acw, w }];
     const polys: Pt[][] = []; for (const p of prims) for (const q of primPolys(p)) polys.push(q);
     return shapes(polys);
   }
@@ -671,7 +686,7 @@ export class ZoneFiller {
         if (this.viaFlashes(v, layer) && gap > 0) out.push(this.viaShape(v, layer, gap + extra));
         let holeGap = -1; if (!sameNet) holeGap = Math.max(holeGap, this.rules.holeClearance || 0);
         gap = Math.max(gap, holeGap);
-        if (gap >= 0) out.push([shape(circlePoints(v.x, v.y, v.drill / 2 + gap + extra, this.maxError))]);
+        if (gap >= 0) out.push([shape(circlePointsOutside(v.x, v.y, v.drill / 2 + gap + extra, this.maxError))]);
       } else if (it.track) {
         const t = it.track; const key = [t.x1, t.y1, t.x2, t.y2, t.w].map((x) => x.toFixed(6)).join("|"); if (seenT.has(key)) continue; seenT.add(key);
         let sameNet = it.net === z.net; if (!z.teardrop && z.net === "") sameNet = false;
