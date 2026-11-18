@@ -99770,6 +99770,23 @@ var init_model_fit = __esm({
 });
 
 // web/domains/pcb/ai/proposals.ts
+function segKey(node) {
+  const k = K4();
+  if (!Array.isArray(node) || node[0] !== "segment") return null;
+  const a = k.kid(node, "start"), b = k.kid(node, "end"), l = k.kid(node, "layer");
+  if (!a || !b || !l) return null;
+  const p = (n2) => `${Math.round(k.num(n2[1]) * 1e4)},${Math.round(k.num(n2[2]) * 1e4)}`;
+  const [x, y] = [p(a), p(b)].sort();
+  return `${k.str(l[1])}|${x}|${y}`;
+}
+function segKeys(doc2) {
+  const out2 = /* @__PURE__ */ new Set();
+  for (const it of doc2.items.values()) if (it.kind === "segment") {
+    const key3 = segKey(it.node);
+    if (key3) out2.add(key3);
+  }
+  return out2;
+}
 function target(doc2, e) {
   if (typeof e.id === "string" && e.id) {
     const it = doc2.items.get(e.id);
@@ -100453,8 +100470,13 @@ function build3(input) {
               pts.splice(j, 1, [r66(v[0] + (a[0] - v[0]) / la * d), r66(v[1] + (a[1] - v[1]) / la * d)], [r66(v[0] + (b[0] - v[0]) / lb * d), r66(v[1] + (b[1] - v[1]) / lb * d)]);
             }
           }
+          const have = segKeys(doc2);
           for (let j = 1; j < pts.length; j++) {
-            const c = added(doc2, P.segmentNode(doc2, pts[j - 1], pts[j], width, layer4, net));
+            const node = P.segmentNode(doc2, pts[j - 1], pts[j], width, layer4, net);
+            const key3 = segKey(node);
+            if (key3 && have.has(key3)) continue;
+            if (key3) have.add(key3);
+            const c = added(doc2, node);
             changes.push(c);
             ids.push(c.id);
           }
@@ -100635,7 +100657,11 @@ function build3(input) {
           if (!res.total) throw new ToolError(`nothing to route: every connection ${nets ? "of " + nets.join(", ") : "on the board"} is already made`);
           if (!res.items.length) throw new ToolError(`the autorouter could not make any of the ${res.total} missing connection${res.total === 1 ? "" : "s"} within the design rules: ${JSON.stringify(failed.slice(0, 12))}`);
           const ids = [];
+          const have = segKeys(doc2);
           for (const it of res.items) {
+            const key3 = segKey(it.node);
+            if (key3 && have.has(key3)) continue;
+            if (key3) have.add(key3);
             const c = added(doc2, it.node);
             if (!c.netName && it.netName) c.netName = it.netName;
             changes.push(c);
