@@ -210,7 +210,7 @@ export interface NetclassRules { clearance: number; track_width: number; via_dia
 /** BOARD_DESIGN_SETTINGS / NETCLASS: what the DRC and the router check against (designSettings). */
 export interface DesignSettings {
   clearance: number; edgeClearance: number; trackWidth: number; viaDiameter: number; viaDrill: number; minTrackWidth: number; minViaDiameter: number; minThroughDrill: number;
-  minClearance?: number; minConn?: number; minViaAnnular?: number; minMicroViaDiameter?: number; minMicroViaDrill?: number; holeClearance?: number; minHoleToHole?: number; minTextHeight?: number; minTextThickness?: number;
+  minClearance?: number; minConn?: number; minViaAnnular?: number; minMicroViaDiameter?: number; minMicroViaDrill?: number; holeClearance?: number; minHoleToHole?: number; minTextHeight?: number; minTextThickness?: number; minSilkLineWidth?: number;
   netclasses: Record<string, NetclassRules>; netclassOf: Record<string, string>; patterns: { re: RegExp; netclass: string }[]; severities: Record<string, string>;
   [k: string]: unknown;
 }

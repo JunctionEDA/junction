@@ -955,7 +955,7 @@ test("DRC: clearance, board edge, missing connections, dangling and zero-length 
   const by = (code) => m.filter((x) => x.code === code);
   const clr = by("clearance"); assert.equal(clr.length, 1); assert.equal(clr[0].text, "Clearance violation (netclass 'Default' clearance 0.2000 mm; actual 0.1000 mm)");
   assert.deepEqual(clr[0].ids.sort(), ["s-1", "s-2"]); assert.equal(clr[0].severity, "error"); assert.ok(clr[0].x > 110 && clr[0].x < 115 && near(clr[0].y, 50.175, 1e-3));
-  const edge = by("copper_edge_clearance"); assert.equal(edge.length, 1); assert.deepEqual(edge[0].ids, ["s-3"]); assert.ok(/edge clearance 0\.5000 mm; actual 0\.1500 mm/.test(edge[0].text));
+  const edge = by("copper_edge_clearance"); assert.equal(edge.length, 1); assert.deepEqual(edge[0].ids, ["edge", "s-3"], "SetItems( edge, item )"); assert.ok(/edge clearance 0\.5000 mm; actual 0\.1750 mm/.test(edge[0].text), "Edge.Cuts lines are measured at zero width");
   assert.equal(by("unconnected_items").length, P.ratsnest(doc).length); assert.ok(by("unconnected_items").every((x) => x.severity === "error" && /Missing connection/.test(x.text)));
   assert.equal(by("zero_length").length, 0, "KiCad has no zero-length track check");
   const dang = by("track_dangling"); assert.deepEqual(dang.map((x) => x.ids[0]).sort(), ["s-1", "s-2", "s-3"], "one marker per loose track"); assert.ok(dang.every((x) => x.severity === "warning"));

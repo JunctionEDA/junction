@@ -81,6 +81,16 @@ export function circlePoints(cx: number, cy: number, r: number, maxErr = 0.005):
   return out;
 }
 
+/** TransformCircleToPolygon(…, ERROR_OUTSIDE): a multiple of 8 vertices from half a step, every chord's middle on or
+ *  outside the circle (knockouts never come closer than their clearance). */
+export function circlePointsOutside(cx: number, cy: number, r: number, maxErr = 0.005): Pt[] {
+  const rel = Math.max(1e-6, maxErr) / Math.max(1e-6, r); const inc = Math.min(360 / 8, (180 / Math.PI) * Math.acos(Math.max(-1, 1 - rel)) * 2);
+  let n = Math.max(2, Math.round(360 / inc)); n = Math.ceil(n / 8) * 8;
+  const R = r / Math.cos(Math.PI / n), out: Pt[] = [];
+  for (let i = 0; i < n; i++) { const a = (2 * Math.PI * (i + 0.5)) / n; out.push([cx + R * Math.cos(a), cy + R * Math.sin(a)]); }
+  return out;
+}
+
 /** Signed area (positive when the points run clockwise on screen, Y down). */
 export function area(pts: Pt[]): number {
   let a = 0;

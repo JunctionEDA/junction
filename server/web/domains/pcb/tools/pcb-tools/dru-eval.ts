@@ -215,7 +215,8 @@ function groupOfMap(doc: BoardDoc, ver: unknown) {
   for (const it of doc.items.values()) if (it.kind === "group") { const m = K.kid(it.node, "members"); if (m) for (const id of m.slice(1)) map.set(K.str(id as SAtom), it.node); }
   GROUPS.set(doc, { ver, map }); return map;
 }
-const uuidOf = (n: SNode) => kidStr(n, "uuid");
+// KIID: (uuid …), (tstamp …) in older files, (id …) on an older group
+const uuidOf = (n: SNode) => kidStr(n, "uuid") || kidStr(n, "tstamp") || kidStr(n, "id");
 
 /** The context a function sees: the doc, settings, A / B and the constraint being resolved (isCoupledDiffPair asks). */
 export interface FnCtx { doc: BoardDoc; s: DesignSettings; A: RuleItem | null; B: RuleItem | null; constraint: string | null; ver: unknown }

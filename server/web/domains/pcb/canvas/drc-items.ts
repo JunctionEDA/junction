@@ -61,7 +61,7 @@ export const DRC_ITEMS: [string, string, string][] = [
   ["Silkscreen clipped by solder mask", "silk_over_copper", "warning"],
   ["Silkscreen clipped by board edge", "silk_edge_clearance", "warning"],
   ["Text height out of range", "text_height", "warning"],
-  ["Text thickness out of range", "text_thickness", "warning"],
+  ["Line width out of range", "line_width", "warning"],
   ["Mirrored text on front layer", "mirrored_text_on_front_layer", "warning"],
   ["Non-Mirrored text on back layer", "nonmirrored_text_on_back_layer", "warning"],
   ["Miscellaneous", "", ""],

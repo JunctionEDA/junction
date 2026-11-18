@@ -19,7 +19,7 @@ import { DRC_EPS } from "./transforms";
 import { isList, layerOf, pt, rotator } from "./util";
 
 /** BOARD_DESIGN_SETTINGS' constructor: m_HoleToHoleMin, m_HoleClearance, m_MinSilkTextHeight, m_MinSilkTextThickness. */
-export const MORE_DEFAULTS = { minHoleToHole: 0.25, minHoleClearance: 0.25, minTextHeight: 0.8, minTextThickness: 0.08 };
+export const MORE_DEFAULTS = { minHoleToHole: 0.25, minHoleClearance: 0.25, minTextHeight: 0.8, minTextThickness: 0.08, minSilkLineWidth: 0.08 };
 const defaultSeverity = (code: string) => (DRC_ITEMS.find((i) => i[1] === code) || ["", "", "error"])[2];
 
 type Tf = (x: number, y: number) => Pt;
@@ -170,18 +170,20 @@ export function effectivePenWidth(n: SNode, boardVersion: number) {
 /** DRC_TEST_PROVIDER_TEXT_DIMS: visible texts against the silk text height / thickness minimums and text rules. */
 export function textDimsMarkers(doc: BoardDoc, s: DesignSettings, ruleOf: RuleOf): DrcMarker[] {
   const out: DrcMarker[] = [];
-  const minH = typeof s.minTextHeight === "number" ? s.minTextHeight : MORE_DEFAULTS.minTextHeight, minT = typeof s.minTextThickness === "number" ? s.minTextThickness : MORE_DEFAULTS.minTextThickness;
+  const minH = typeof s.minTextHeight === "number" ? s.minTextHeight : MORE_DEFAULTS.minTextHeight, minT = typeof s.minSilkLineWidth === "number" ? s.minSilkLineWidth : typeof s.minTextThickness === "number" ? s.minTextThickness : MORE_DEFAULTS.minSilkLineWidth;
   for (const t of boardTexts(doc)) {
     const ef = K.effectsOf(t.node); if (ef.hide) continue;
     const silk = t.layer === "F.SilkS" || t.layer === "B.SilkS"; const A = { kind: t.kind, node: t.node, layer: t.layer };
-    const check = (type: "text_height" | "text_thickness", implicit: number, implicitName: string, actual: number, what: string) => {
+    // text thickness is the line_width rule since KiCad 10.99 (DRCE_LINE_WIDTH, "board setup constraints silk line width")
+    const check = (type: "text_height" | "line_width", implicit: number, implicitName: string, actual: number, what: string) => {
       const hit = ruleOf(type, A, null); if (hit && hit.severity === "ignore") return;
       const min = hit ? hit.min : silk ? implicit : null, max = hit ? hit.max : null, name = hit ? hit.name : implicitName;
-      if (min != null && min > 0 && actual < min - 1e-9) out.push(marker(type, defaultSeverity(type), t.pos[0], t.pos[1], `${type === "text_height" ? "Text height out of range" : "Text thickness out of range"} (${name} min ${what} ${mm4(min)}; actual ${mm4(actual)})`, [t.id]));
-      if (max != null && actual > max + 1e-9) out.push(marker(type, defaultSeverity(type), t.pos[0], t.pos[1], `${type === "text_height" ? "Text height out of range" : "Text thickness out of range"} (${name} max ${what} ${mm4(max)}; actual ${mm4(actual)})`, [t.id]));
+      const title = type === "text_height" ? "Text height out of range" : "Line width out of range";
+      if (min != null && min > 0 && actual < min - 1e-9) out.push(marker(type, defaultSeverity(type), t.pos[0], t.pos[1], `${title} (${name} min ${what} ${mm4(min)}; actual ${mm4(actual)})`, [t.id]));
+      if (max != null && actual > max + 1e-9) out.push(marker(type, defaultSeverity(type), t.pos[0], t.pos[1], `${title} (${name} max ${what} ${mm4(max)}; actual ${mm4(actual)})`, [t.id]));
     };
     // an outline (TrueType) font's stroke weight is the glyphs' business; its thickness is not checked here
-    if (!ef.face) check("text_thickness", minT, "board setup constraints silk text thickness", effectivePenWidth(t.node, (doc as { version?: number }).version || 0), "thickness");
+    if (!ef.face) check("line_width", minT, "board setup constraints silk line width", effectivePenWidth(t.node, (doc as { version?: number }).version || 0), "thickness");
     check("text_height", minH, "board setup constraints silk text height", Math.abs(ef.size), "height");
   }
   return out;
@@ -332,9 +334,42 @@ export function disabledLayerMarkers(doc: BoardDoc): DrcMarker[] {
   return out;
 }
 
+/** DRC_TEST_PROVIDER_LINE_WIDTH: the stroke of graphic shapes (not solidly filled ones) and text box borders against
+ *  line_width rules; on the silkscreen the board setup's minimum silk line width is the implicit rule. */
+export function lineWidthMarkers(doc: BoardDoc, s: DesignSettings, ruleOf: RuleOf): DrcMarker[] {
+  const out: DrcMarker[] = [];
+  const minW = typeof s.minSilkLineWidth === "number" ? s.minSilkLineWidth : typeof s.minTextThickness === "number" ? s.minTextThickness : MORE_DEFAULTS.minSilkLineWidth;
+  const SHAPE = /^(gr|fp)_(line|rect|circle|arc|poly|curve|ellipse|ellipse_arc|text_box)$/;
+  const take = (g: SNode, id: string, tf: (x: number, y: number) => Pt) => {
+    const kind = String(g[0]); const box = /_text_box$/.test(kind);
+    if (box) { const b = K.kid(g, "border"); if (!b || !/^(yes|true)$/.test(K.str(b[1]))) return; }
+    else { const f = K.kid(g, "fill"); const fv = f ? K.str(f[1]) : ""; if (fv === "solid" || fv === "yes" || fv === "true") return; }
+    const layer = layerOf(g, ""); if (!layer) return;
+    const st = K.kid(g, "stroke"); const w = st ? K.num((K.kid(st, "width") || [0, 0])[1]) : K.num((K.kid(g, "width") || [0, 0])[1]);
+    const A = { kind: kind.replace(/^fp_/, "gr_"), node: g, layer };
+    const hit = ruleOf("line_width", A, null); if (hit && hit.severity === "ignore") return;
+    const silk = layer === "F.SilkS" || layer === "B.SilkS";
+    const min = hit ? hit.min : silk ? minW : null, max = hit ? hit.max : null, name = hit ? hit.name : "board setup constraints silk line width";
+    // PCB_SHAPE::GetPosition: an arc's centre, a polygon's first corner, else its start (a circle's centre)
+    let p0: Pt | null = null;
+    if (/_arc$/.test(kind)) { const a = pt(g, "start"), m = pt(g, "mid"), e = pt(g, "end"); const c = a && m && e ? K.arcFrom3(a, m, e) : null; p0 = c ? [c.x, c.y] as Pt : a; }
+    else if (/_(poly|curve)$/.test(kind)) { const q = K.ptsOf(g); p0 = q.length ? q[0] : null; }
+    else p0 = pt(g, "start") || pt(g, "center") || (K.ptsOf(g)[0] || null);
+    const P = p0 ? tf(p0[0], p0[1]) : [0, 0];
+    if (min != null && min > 0 && w < min - 1e-9) out.push(marker("line_width", defaultSeverity("line_width"), P[0], P[1], `Line width out of range (${name} min width ${mm4(min)}; actual ${mm4(w)})`, [id]));
+    if (max != null && w > max + 1e-9) out.push(marker("line_width", defaultSeverity("line_width"), P[0], P[1], `Line width out of range (${name} max width ${mm4(max)}; actual ${mm4(w)})`, [id]));
+  };
+  const id = (x: number, y: number): Pt => [x, y];
+  for (const it of doc.items.values()) {
+    if (SHAPE.test(it.kind)) take(it.node, it.id, id);
+    else if (it.kind === "footprint") { const [fx, fy, frot] = K.atOf(it.node); const R = rotator(frot); const tf = (x: number, y: number): Pt => { const [dx, dy] = R(x, y); return [fx + dx, fy + dy]; }; for (const g of it.node) if (isList(g) && SHAPE.test(String(g[0]))) take(g as SNode, it.id, tf); }
+  }
+  return out;
+}
+
 /** The providers above as one pass, with the project's severities applied (ignored rules drop out). */
 export function moreDrcMarkers(doc: BoardDoc, s: DesignSettings, rules: DruRule[]): DrcMarker[] {
   const ruleOf: RuleOf = (type, A, B) => (rules.length ? evalRuleConstraint(rules, type, doc, s, A as never, B as never) : null);
-  const all = [...disabledLayerMarkers(doc), ...courtyardMarkers(doc), ...holeToHoleMarkers(doc, s, ruleOf, Math.max(0, ...rules.flatMap((r) => r.constraints.filter((c) => c.type === "hole_to_hole").map((c) => c.min || 0)))), ...holeClearanceMarkers(doc, s, ruleOf, Math.max(0, ...rules.flatMap((r) => r.constraints.filter((c) => c.type === "hole_clearance").map((c) => c.min || 0)))), ...textOnEdgeCutsMarkers(doc), ...keepoutMarkers(doc), ...textDimsMarkers(doc, s, ruleOf), ...textMirroringMarkers(doc)];
+  const all = [...disabledLayerMarkers(doc), ...courtyardMarkers(doc), ...holeToHoleMarkers(doc, s, ruleOf, Math.max(0, ...rules.flatMap((r) => r.constraints.filter((c) => c.type === "hole_to_hole").map((c) => c.min || 0)))), ...holeClearanceMarkers(doc, s, ruleOf, Math.max(0, ...rules.flatMap((r) => r.constraints.filter((c) => c.type === "hole_clearance").map((c) => c.min || 0)))), ...textOnEdgeCutsMarkers(doc), ...keepoutMarkers(doc), ...textDimsMarkers(doc, s, ruleOf), ...lineWidthMarkers(doc, s, ruleOf), ...textMirroringMarkers(doc)];
   return all.filter((m) => (s.severities[m.code] || m.severity) !== "ignore");
 }

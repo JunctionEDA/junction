@@ -144,7 +144,7 @@ test("DRC: disallow and assertion rules, segment length and angle, tracks crossi
   for (const x of ang) assert.match(x.text, /^Track angle \(rule 'angle' min angle 175\.0°; actual 174\.3°\)$/);
   const cross = by("tracks_crossing"); assert.ok(cross.some((x) => x.ids.includes("tx") && x.ids.includes("t1") && Math.abs(x.x - 15) < 1e-6 && Math.abs(x.y - 30) < 1e-6 && x.text === "Tracks crossing"));
   assert.ok(!by("clearance").some((x) => x.ids.includes("tx") && x.ids.includes("t1")), "a crossing is not also a clearance violation");
-  const e = by("copper_edge_clearance"); assert.ok(e.some((x) => x.ids[0] === "v1" && /^Board edge clearance violation \(rule 'edge' clearance 30\.0000 mm; actual/.test(x.text)));
+  const e = by("copper_edge_clearance"); assert.ok(e.some((x) => x.ids[1] === "v1" && /^Board edge clearance violation \(rule 'edge' clearance 30\.0000 mm; actual/.test(x.text)));
 });
 console.log(`pcb-rules: ${passed} passed, ${failed} failed`);
 if (failed) process.exit(1);
