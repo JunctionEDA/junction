@@ -133,8 +133,8 @@ try {
 
   // ---------------------------------------------------------------- the box: a 60 × 40 rectangle, 25 tall
   await page.click('[data-tool=Sketch]');
-  await page.waitForSelector('.cad-dialog[data-feature=sketch]');
-  await page.click('.cad-dialog [data-accept]');
+  await page.waitForSelector('.cad-dialog[data-feature=sketch] [data-sketch-plane][data-armed]');
+  await page.click('.cad-features [data-default-geometry=top]');
   await page.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.features.length === 1 && s.kernel.state === 'ready'; }, null, { timeout: 90000 });
   await page.waitForTimeout(700);
   const entities = (n) => page.waitForFunction((n) => { const s = window.JunctionPartStudio.getState(); const f = s.features.find((x) => x.id === s.sketch.featureId); return Object.keys(f.params.sketch.entities).length === n; }, n, { timeout: 10000 });
@@ -320,9 +320,9 @@ try {
   await page.click('text=New part studio');
   await page.waitForFunction(() => { const s = window.JunctionPartStudio && window.JunctionPartStudio.getState(); return s && s.loaded && s.features.length === 0; }, null, { timeout: 30000 });
   await page.click('[data-tool=Sketch]');
-  await page.waitForSelector('.cad-dialog[data-feature=sketch]');
+  await page.waitForSelector('.cad-dialog[data-feature=sketch] [data-sketch-plane][data-armed]');
   // a click on a plane is all a new sketch needs: drawing starts on it
-  await page.click('.cad-dialog [data-plane=front]');
+  await page.click('.cad-features [data-default-geometry=front]');
   await page.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.features.length === 1 && s.kernel.state === 'ready'; }, null, { timeout: 90000 });
   await page.waitForTimeout(700);
   await page.click('[data-tool=Rectangle]');

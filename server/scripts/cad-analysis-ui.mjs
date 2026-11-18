@@ -175,8 +175,9 @@ try {
   const statuses = await S(page, () => Object.values(window.JunctionPartStudio.getState().reports).map((r) => r.status));
   check('every feature built', statuses.every((s) => s === 'ok'), statuses.join(','));
   await shot(page, '01-part');
-  check('the toolbar has Measure and Section in the inspect group and Display, Perspective in the view group',
-    await page.isVisible('[data-group=inspect] [data-tool=Measure]') && await page.isVisible('[data-group=inspect] [data-tool=Section]') && await page.isVisible('[data-group=view] [data-tool=Display]') && await page.isVisible('[data-group=view] [data-tool=Perspective]'));
+  const viewTools = await toolTitles(page, 'view');
+  check('the toolbar has Measure and Section in the inspect group and Display, Perspective in the view group, under More',
+    await page.isVisible('[data-group=inspect] [data-tool=Measure]') && await page.isVisible('[data-group=inspect] [data-tool=Section]') && viewTools.includes('Display') && viewTools.includes('Perspective') && await page.isVisible('.cad-toolbar [data-menu=More]'), viewTools.join());
   check('the right dock has the Appearance and Mass properties panels', await page.isVisible('[data-panel=appearance]') && await page.isVisible('[data-panel=mass-properties]'));
   // both start folded (the dock has more panels than fit open at once): unfold them, as a person would
   await openPanel(page, 'appearance'); await openPanel(page, 'mass-properties');
@@ -373,13 +374,15 @@ try {
   }
   // perspective
   await page.focus('.cad-stage canvas');
-  await page.click('.cad-toolbar [data-tool=Perspective]');   // P is the planes now, as in Onshape; the projection is a button and in the view cube's menu
-  check('the Perspective button switches to perspective', (await S(page, () => window.JunctionPartStudio.viewport.projection)) === 'perspective' && (await page.getAttribute('[data-tool=Perspective]', 'aria-pressed')) === 'true');
+  await tool(page, 'Perspective');   // P is the planes now, as in Onshape; the projection is under More and in the view cube's menu
+  await page.click('.cad-toolbar [data-menu=More]');
+  check('Perspective, under More, switches to perspective and is shown checked there', (await S(page, () => window.JunctionPartStudio.viewport.projection)) === 'perspective' && (await page.getAttribute('.cad-tb-menu [data-tool=Perspective]', 'aria-checked')) === 'true');
+  await page.keyboard.press('Escape');
   const persHit = await spot(page, 'face', 'Block', 'Block:end:ka');
   check('picking works in perspective', !!persHit);
   await page.waitForTimeout(200);
   await shot(page, '11-perspective');
-  await page.click('.cad-toolbar [data-tool=Perspective]');
+  await tool(page, 'Perspective');
   // hide, isolate, show all
   await clickAt(page, await spot(page, 'face', 'Block', 'Block:end:ka'));
   await page.keyboard.press('h');

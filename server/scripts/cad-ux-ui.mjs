@@ -1,13 +1,16 @@
 // Browser test of how the part studio feels in a person's hands: the things an Onshape user expects to be where
 // they are.  One person builds a bracket and, on the way:
 //
-//   planes       the default geometry is in the feature list, each plane is labelled in the model, hides and
-//                shows on its own (and all at once with P), grows with the model; a reference plane carries
-//                its feature's name
+//   theme        light unless a person chose dark, whatever the system says
+//   planes       the default geometry is in the feature list, each plane carries its name lying flat in it
+//                (never mirrored, fading edge-on), hides and shows on its own (and all at once with P), grows
+//                with the model; a reference plane carries its feature's name
 //   toolbar      a sketch replaces the feature tools by the sketch tools and a ✓ / ✗ pair; a dialog by what it
-//                is waiting for; drop-downs remember the variant used last; tooltips; the tool search (S)
-//   sketch       Esc and right-click put the tool down and never leave the sketch; ✗ takes a new sketch away
-//                again; the plane can be changed; Shift+E from inside a sketch extrudes that sketch
+//                is waiting for; drop-downs remember the variant used last; tooltips; it fits a 1100 px window
+//                without scrolling, the rest under More; the tool search (its field, S), by name and synonym
+//   sketch       a new sketch waits for its plane; Esc and right-click put the tool down and never leave the
+//                sketch; ✗ takes a new sketch away again; the plane can be cleared and changed; Shift+E from
+//                inside a sketch extrudes that sketch
 //   units        the control in the status bar; a bare number is in the document's unit, a typed unit converts
 //                ("1 in"), expressions too; the readouts follow; ↑ ↓ step a number
 //   selection    a listening field keeps adding: a click adds, a click on a chosen edge removes it, a click on
@@ -24,7 +27,7 @@
 // With SHOTS it also saves screenshots, light and dark, 1500 and 1100 pixels wide.
 import fs from 'node:fs';
 import { openPanel, sketchOn, tool, toolTitles, toolbarMode } from './cad-chrome.mjs';
-import { S, click, edgeOnScreen, faceOnScreen, focusViewport, launch, newPartStudio, previewed, screenOf, settled, signedIn, sketchPoint, state, user, viewDir, viewStill } from './cad-ux-lib.mjs';
+import { S, click, edgeOnScreen, faceOnScreen, focusViewport, jwt, launch, newPartStudio, previewed, screenOf, settled, signedIn, sketchPoint, state, user, viewDir, viewStill } from './cad-ux-lib.mjs';
 
 const SHOTS = process.env.SHOTS || '';
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
@@ -37,7 +40,29 @@ const uid = user('cad-ux-alice', 990901);
 const page = await signedIn(browser, uid, 'cad-ux-alice');
 const shot = async (name, p = page) => { if (SHOTS) { await p.waitForTimeout(350); await p.screenshot({ path: `${SHOTS}/${name}.png` }); } };
 const st = () => state(page);
-const labels = () => page.$$eval('.cad-plane-label', (els) => els.filter((e) => e.style.display !== 'none' && Number(e.style.opacity || 1) > 0.05).map((e) => e.textContent));
+// the names of the planes are text lying in the planes, in the scene: the plane layer says how each is drawn
+const labelInfo = (p = page) => S(p, () => window.JunctionPartStudio.view.planeLayer.labelInfo());
+const labels = async () => (await labelInfo()).filter((l) => l.shown && l.opacity > 0.05).map((l) => l.text);
+const dot = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const PLANE_NORMAL = { 'plane:top': [0, 0, 1], 'plane:front': [0, -1, 0], 'plane:right': [1, 0, 0] };
+/** How the names lie for the view as it is: in their planes, the right way round, the right way up. */
+const labelsLie = async () => {
+  const dir = await viewDir(page), toCam = dir.map((x) => -x);
+  const up = await S(page, () => { const st = window.JunctionPartStudio, v = st.viewport.target.clone().set(0, 1, 0).applyQuaternion(st.viewport.camera.quaternion); return [v.x, v.y, v.z]; });
+  return (await labelInfo()).filter((l) => l.shown).map((l) => ({
+    key: l.key, opacity: l.opacity, height: l.height,
+    inPlane: Math.abs(Math.abs(dot(l.normal, PLANE_NORMAL[l.key] || l.normal)) - 1) < 1e-6 && Math.abs(dot(l.right, PLANE_NORMAL[l.key] || [0, 0, 0])) < 1e-6,
+    notMirrored: dot(cross(l.right, l.up), toCam) > 0,
+    upright: dot(l.up, up) > -1e-6,
+  }));
+};
+/** The toolbar as it is laid out: does it scroll, is every button inside it, what is under More. */
+const barFit = () => S(page, () => {
+  const t = document.querySelector('.cad-toolbar'), r = t.getBoundingClientRect();
+  const buttons = [...t.querySelectorAll('button')].filter((b) => !b.closest('.cad-tb-menu')).map((b) => b.getBoundingClientRect());
+  return { width: Math.round(r.width), scrolls: t.scrollWidth > t.clientWidth + 1, overflow: getComputedStyle(t).overflowX, inside: buttons.every((b) => b.width > 0 && b.left >= r.left - 0.5 && b.right <= r.right + 0.5), overlap: buttons.some((b, i) => buttons.some((c, j) => j > i && c.left < b.right - 0.5 && b.left < c.right - 0.5 && c.top < b.bottom - 0.5 && b.top < c.bottom - 0.5)), more: (t.querySelector('[data-menu=More]')?.getAttribute('data-items') || '').split('|').filter(Boolean), search: !!t.querySelector('[data-tool-search]') && t.querySelector('[data-tool-search]').getBoundingClientRect().width > 100, moved: Number(t.getAttribute('data-moved')) };
+});
 const key = async (k) => { await focusViewport(page); await page.keyboard.press(k); await page.waitForTimeout(80); };
 const rows = () => page.$$eval('.cad-features [data-feature-row]', (els) => els.map((e) => e.querySelector('[data-row-name]')?.textContent || ''));
 
@@ -48,13 +73,53 @@ try {
   check('the feature list and the status bar are there before the modelling kernel is', early.rows === 4 && early.status.length > 0, `kernel ${early.kernel}; ${early.rows} default rows`);
   await page.waitForFunction(() => window.JunctionPartStudio.getState().kernel.state === 'ready', null, { timeout: 90000 });
 
+  // ================================================================ 0. light unless a person chose dark
+  const themeOf = (p) => p.evaluate(() => { const rgb = getComputedStyle(document.querySelector('.cad-toolbar')).backgroundColor.match(/\d+/g).slice(0, 3).map(Number); return { attr: document.documentElement.dataset.theme || '', stored: localStorage.getItem('kui.theme'), lum: (rgb[0] + rgb[1] + rgb[2]) / 3 }; });
+  const lightNow = await themeOf(page);
+  check('the part studio is light by default', lightNow.stored === null && lightNow.attr !== 'dark' && lightNow.lum > 200, JSON.stringify(lightNow));
+  {
+    // a system in dark mode, and nothing chosen: still light; dark once chosen, and remembered
+    const ctx = await browser.newContext({ viewport: { width: 1200, height: 800 }, colorScheme: 'dark' });
+    const p = await ctx.newPage();
+    await p.goto(`${process.env.E2E_BASE || 'http://127.0.0.1:8099'}/auth/dev?jwt=${jwt(uid, 'cad-ux-alice')}&next=/p/${pid}/edit`);
+    await p.waitForSelector('#doctabs [role=tab]', { timeout: 30000 });
+    await p.click('#doctabs [role=tab]:has-text("Part Studio")');
+    await p.waitForSelector('.cad-toolbar', { timeout: 30000 });
+    const sys = await themeOf(p);
+    check('… also where the system is in dark mode', sys.attr !== 'dark' && sys.lum > 200 && (await p.evaluate(() => getComputedStyle(document.body).colorScheme)) !== 'dark', JSON.stringify(sys));
+    await p.evaluate(() => localStorage.setItem('kui.theme', 'dark'));
+    await p.reload();
+    await p.waitForSelector('.cad-toolbar', { timeout: 30000 });
+    const chosen = await themeOf(p);
+    check('… and dark once a person chose dark, also after a reload', chosen.attr === 'dark' && chosen.lum < 60, JSON.stringify(chosen));
+    await ctx.close();
+  }
+
   // ================================================================ 1. planes as features
   check('the feature list starts with the default geometry: Origin, Top, Front, Right', (await page.$$eval('.cad-features [data-default-geometry]', (els) => els.map((e) => e.textContent.trim()))).join() === 'Origin,Top,Front,Right');
   check('each plane carries its name in the model', (await labels()).sort().join() === 'Front,Right,Top', (await labels()).join());
+  // the names lie flat in their planes, as text in the scene, not as page text floating at a corner
+  const lying = await labelsLie();
+  check('a plane\'s name lies in its plane: the text\'s normal is the plane\'s', lying.length === 3 && lying.every((l) => l.inPlane) && await page.locator('.cad-plane-label').count() === 0, JSON.stringify(lying));
+  check("… the right way round and the right way up", lying.every((l) => l.notMirrored && l.upright), JSON.stringify(lying));
+  const half = await S(page, () => window.JunctionPartStudio.view.planeLayer.halfOf('top'));
+  check('… and as tall as suits its plane', lying.every((l) => l.height / (2 * Math.min(half[0], half[1])) > 0.03 && l.height / (2 * Math.min(half[0], half[1])) < 0.08), `${lying[0].height} of ${2 * half[0]}`);
+  await page.mouse.move(280, 620);
   await shot('01-empty-studio-planes');
+  // from behind and from below the names are turned over, never mirrored
+  for (const view of ['back', 'left', 'bottom']) {
+    await S(page, (view) => window.JunctionPartStudio.viewport.setView(view), view); await viewStill(page);
+    const seen = (await labelsLie()).filter((l) => l.opacity > 0.5);
+    check(`seen from the ${view}, the name is in its plane and not mirrored`, seen.length === 1 && seen[0].inPlane && seen[0].notMirrored && seen[0].upright, JSON.stringify(seen));
+  }
+  // a little off straight above: Top's name is plain, the two planes seen edge-on have none
+  await S(page, () => window.JunctionPartStudio.viewport.setView('top')); await viewStill(page);
+  const above = await labelInfo();
+  check('a plane seen edge-on carries no name: it fades away', above.find((l) => l.key === 'plane:top').opacity > 0.8 && above.filter((l) => l.key !== 'plane:top').every((l) => !l.shown || l.opacity === 0), JSON.stringify(above.map((l) => [l.key, l.opacity])));
+  await S(page, () => window.JunctionPartStudio.viewport.setView('iso')); await viewStill(page);
   // the pointer over a plane's row lights the plane up, and its name
   await page.hover('.cad-features [data-default-geometry=front]');
-  check('the pointer over a plane\'s row marks its name in the model', await page.$eval('.cad-plane-label[data-plane-label="plane:front"]', (e) => e.hasAttribute('data-on')));
+  check('the pointer over a plane\'s row marks its name in the model', (await labelInfo()).find((l) => l.key === 'plane:front').marked && !(await labelInfo()).find((l) => l.key === 'plane:top').marked);
   // the eye hides one plane, for this person, and it stays hidden over a reload
   await page.click('.cad-features [data-default-geometry=front] [data-eye]');
   await page.waitForTimeout(120);   // the names are placed with the next frame
@@ -77,6 +142,89 @@ try {
 
   // ================================================================ 2. the toolbar follows the mode
   check('modelling: the feature tools, no sketch tools', (await toolbarMode(page)) === 'model' && (await toolTitles(page)).includes('Extrude') && !(await toolTitles(page)).includes('Line'));
+  // the order an Onshape user's hands know, most used first; a family is one button and a caret
+  const modelBar = await toolTitles(page, '', true);
+  const inOrder = ['Undo', 'Redo', 'Sketch', 'Extrude', 'Revolve', 'Sweep', 'Loft', 'Fillet', 'Chamfer', 'Draft', 'Shell', 'Hole', 'Boolean', 'Split', 'Transform', 'Linear pattern', 'Mirror', 'Plane', 'Measure'];
+  check('the part studio toolbar: sketch, then what makes solids, what changes them, what combines, patterns, planes', inOrder.every((t) => modelBar.includes(t)) && inOrder.every((t, i) => i === 0 || modelBar.indexOf(inOrder[i - 1]) < modelBar.indexOf(t)), modelBar.join(' '));
+  check('… a tool with variants is one button and a caret', await page.locator('.cad-toolbar [data-split]').count() >= 3 && await page.locator('.cad-toolbar [data-split] [data-menu=Pattern]').count() === 1 && (await page.getAttribute('.cad-toolbar [data-menu=Reference]', 'data-items')) === 'Plane|Axis|Point|Helix');
+  const wide = await barFit();
+  check('… what is used less is under More, and the tool search is at the right end', !wide.scrolls && wide.inside && wide.search && ['Display', 'Planes', 'Perspective', 'Import', 'Export', 'Comment', 'Delete'].every((t) => wide.more.includes(t)) && modelBar.includes('History'), JSON.stringify(wide));
+  // every icon is drawn: none is the placeholder square, and no two are alike
+  const icons = await page.$$eval('.cad-toolbar [data-group] [data-tool] svg', (els) => els.map((e) => e.innerHTML));
+  check('every button has an icon of its own', icons.length > 15 && new Set(icons).size === icons.length && icons.every((i) => i.length > 30));
+  // in a window 1100 px wide the bar still does not scroll: the buttons that keep their place least are under More
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await page.waitForTimeout(250);
+  const narrow = await barFit();
+  const narrowAll = await toolTitles(page), narrowBar = await toolTitles(page, '', true);
+  check('at 1100 px the toolbar fits without scrolling or cramming', narrow.width <= 1100 && !narrow.scrolls && narrow.overflow !== 'auto' && narrow.overflow !== 'scroll' && narrow.inside && !narrow.overlap && narrow.search, JSON.stringify({ ...narrow, more: narrow.more.length }));
+  check('… the most used tools stay on the bar', ['Undo', 'Redo', 'Sketch', 'Extrude', 'Revolve', 'Fillet', 'Chamfer', 'Shell', 'Hole', 'Boolean', 'Plane'].every((t) => narrowBar.includes(t)), narrowBar.join(' '));
+  check('… and everything is still reachable, the rest under More', [...inOrder, 'Circular pattern', 'Axis', 'Helix', 'Delete body', 'Section', 'Board', 'Display', 'History', 'Export'].every((t) => narrowAll.includes(t)), narrowAll.join(' '));
+  await shot('01b-toolbar-1100');
+  await tool(page, 'Display');   // through More
+  check('a tool under More runs from there', await S(page, () => !!document.querySelector('.cad-toolbar')) && !(await page.locator('.cad-tb-menu').count()));
+  await key('w'); await key('w'); await key('w');   // round to shaded with edges again
+  await page.setViewportSize({ width: 1500, height: 900 });
+  await page.waitForTimeout(250);
+  check('wide again, the buttons are back on the bar', (await barFit()).moved === 0 && (await toolTitles(page, '', true)).includes('Section'));
+
+  // the tool search: a field at the right of the bar; it finds a tool by its name or by another word for it
+  check('the toolbar has a search field that shows its key', (await page.textContent('.cad-toolbar [data-tool-search]')).includes('Search tools') && (await page.textContent('.cad-toolbar [data-tool-search] .kbd')) === 'S');
+  await page.click('.cad-toolbar [data-tool-search]');
+  await page.waitForSelector('.cad-palette [data-palette-input]');
+  const field = await page.$eval('.cad-toolbar [data-tool-search]', (e) => { const r = e.getBoundingClientRect(); return { top: r.top, right: r.right }; });
+  const pal = await page.$eval('.cad-palette', (e) => { const r = e.getBoundingClientRect(); return { top: r.top, right: r.right }; });
+  check('the search opens in the place of its field', Math.abs(pal.top - field.top) < 6 && Math.abs(pal.right - field.right) < 6, JSON.stringify({ field, pal }));
+  await page.keyboard.type('cut');
+  const cut = await page.$$eval('.cad-palette [data-command]', (els) => els.map((e) => e.getAttribute('data-command')));
+  check('“cut” finds Extrude: remove first, and only tools that cut', cut[0] === 'Extrude: remove' && cut.includes('Boolean') && cut.includes('Split') && !cut.includes('Fillet') && !cut.includes('Circular pattern'), cut.join(' | '));
+  await shot('01c-tool-search-cut');
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowUp');
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('.cad-dialog[data-feature=extrude]');
+  check('Enter runs it: an extrude that removes', (await st()).editing.type === 'extrude' && (await st()).editing.params.operation === 'remove' && !(await page.locator('.cad-palette').count()));
+  await page.click('.cad-dialog [data-cancel]');
+  const firstFor = async (q) => { await key('Control+k'); await page.waitForSelector('.cad-palette [data-palette-input]'); await page.keyboard.type(q); const t = await page.$eval('.cad-palette [role=option][aria-selected=true]', (e) => e.getAttribute('data-command')).catch(() => null); await page.keyboard.press('Escape'); return t; };
+  const found = { round: await firstFor('round'), pocket: await firstFor('pocket'), boss: await firstFor('boss'), bevel: await firstFor('bevel'), hollow: await firstFor('hollow'), drill: await firstFor('drill'), ext: await firstFor('ext'), wireframe: await firstFor('wireframe') };
+  check('other words find their tools: round, pocket, boss, bevel, hollow, drill', found.round === 'Fillet' && found.pocket === 'Extrude: remove' && found.boss === 'Extrude' && found.bevel === 'Chamfer' && found.hollow === 'Shell' && found.drill === 'Hole' && found.ext === 'Extrude' && found.wireframe === 'Display', JSON.stringify(found));
+  check('the feature list has its own box, for the features already made', await page.isVisible('.cad-features [data-feature-filter]') && (await page.getAttribute('.cad-features [data-feature-filter]', 'placeholder')).startsWith('Filter features'));
+
+  // ================================================================ 2b. a new sketch waits for its plane
+  await tool(page, 'Sketch');
+  await page.waitForSelector('.cad-sketch-dialog[data-sketch-waiting]');
+  const waiting = await S(page, () => { const s = window.JunctionPartStudio.getState(), f = document.querySelector('.cad-sketch-dialog [data-sketch-plane]'); return { features: s.features.length, sketch: !!s.sketch, plane: s.editing && s.editing.draft.params.plane, field: s.editing && s.editing.field, kind: f.getAttribute('data-sketch-plane'), armed: f.hasAttribute('data-armed'), text: f.textContent.trim(), clear: !!f.querySelector('[data-sketch-plane-clear]') }; });
+  check('Sketch with nothing selected opens the sketch dialog with an empty, listening plane field', waiting.kind === '' && waiting.armed && waiting.text === 'Select a plane or planar face' && !waiting.clear && waiting.field === 'plane', JSON.stringify(waiting));
+  check('… and no plane is chosen for you: nothing is in the document and no sketch is open', waiting.plane === null && waiting.features === 0 && !waiting.sketch, JSON.stringify(waiting));
+  const lineOff = await page.getAttribute('.cad-toolbar [data-tool=Line]', 'aria-disabled');
+  check('… the sketch tools are there but wait for the plane', (await toolbarMode(page)) === 'sketch' && lineOff === 'true' && (await page.getAttribute('.cad-toolbar [data-tool="Finish sketch"]', 'aria-disabled')) === 'true' && (await page.getAttribute('[data-pick-filter]', 'data-pick-filter')).includes('plane'));
+  await shot('01d-sketch-waits-for-plane');
+  await page.click('.cad-toolbar [data-tool=Line]', { force: true });
+  await key('Enter');
+  check('… Enter and a click on a tool do not start it on a plane nobody chose', (await st()).sketch === null && (await st()).features.length === 0 && await page.locator('.cad-sketch-dialog[data-sketch-waiting]').count() === 1);
+  // a click on a plane in the model fills the field, and then there are sketch tools
+  const onFront = await screenOf(page, [-22, 0, 22]);
+  await click(page, onFront);
+  await page.waitForFunction(() => window.JunctionSketch && window.JunctionSketch.getState().ready, null, { timeout: 30000 });
+  await viewStill(page);
+  const started = await S(page, () => { const s = window.JunctionPartStudio.getState(); const f = s.features.find((x) => x.id === s.sketch.featureId); return { plane: f.params.plane, field: document.querySelector('.cad-sketch-dialog [data-sketch-plane]').textContent.trim(), clear: !!document.querySelector('.cad-sketch-dialog [data-sketch-plane-clear]'), line: document.querySelector('.cad-toolbar [data-tool=Line]').getAttribute('aria-disabled') }; });
+  check('a click on a plane in the model fills the field, and the sketch tools become available', started.plane.kind === 'plane' && started.plane.plane === 'front' && started.field === 'Front plane' && started.clear && started.line !== 'true', JSON.stringify(started));
+  await page.click('.cad-toolbar [data-tool="Cancel sketch"]');
+  await settled(page, 0);
+  // Esc on the waiting dialog makes no sketch
+  await tool(page, 'Sketch');
+  await page.waitForSelector('.cad-sketch-dialog[data-sketch-waiting]');
+  await key('Escape');
+  check('Esc closes the waiting dialog and makes nothing', (await st()).editing === null && (await st()).features.length === 0 && (await toolbarMode(page)) === 'model' && !(await page.locator('.cad-sketch-dialog').count()));
+  // a plane selected beforehand is used at once
+  await page.click('.cad-features [data-default-geometry=right]');
+  await tool(page, 'Sketch');
+  await page.waitForFunction(() => window.JunctionSketch && window.JunctionSketch.getState().ready && window.JunctionPartStudio.getState().sketch, null, { timeout: 30000 });
+  check('with a plane selected beforehand, Sketch draws on it at once', await S(page, () => { const s = window.JunctionPartStudio.getState(); return s.features.find((x) => x.id === s.sketch.featureId).params.plane.plane === 'right'; }) && !(await page.locator('.cad-sketch-dialog[data-sketch-waiting]').count()));
+  await viewStill(page);
+  await page.click('.cad-toolbar [data-tool="Cancel sketch"]');
+  await settled(page, 0);
+  await viewStill(page);
+
   await sketchOn(page, 'top');
   await viewStill(page);
   const sketchTools = await toolTitles(page);
@@ -116,10 +264,29 @@ try {
   await page.mouse.click(rc.x, rc.y, { button: 'right' });
   check('a right click puts the tool down', await S(page, () => window.JunctionSketch.getState().tool === 'select') && (await st()).sketch !== null);
   check('the status bar says how the sketch stands', (await page.getAttribute('.cad-sketch-status', 'data-standing')) === 'free' && (await page.textContent('.cad-sketch-status')).includes('Under-constrained'));
-  // the plane can be changed from the sketch's dialog, and back
-  await page.click('.cad-sketch-dialog [data-plane=front]');
+  // in a sketch the search finds the sketch tools first
+  await page.click('.cad-toolbar [data-tool-search]');
+  await page.waitForSelector('.cad-palette[data-palette-mode=sketch] [data-palette-input]');
+  await page.keyboard.type('cut');
+  check('in a sketch, “cut” finds Trim', (await page.$eval('.cad-palette [role=option][aria-selected=true]', (e) => e.getAttribute('data-command'))) === 'Trim');
+  await page.keyboard.press('Enter');
+  check('… and Enter takes the tool', await S(page, () => window.JunctionSketch.getState().tool === 'sketch-trim'));
+  await key('Escape');
+  // the sketch toolbar at 1100 px: no scrolling, the constraints used least under More
+  await page.setViewportSize({ width: 1100, height: 900 });
+  await page.waitForTimeout(250);
+  const skNarrow = await barFit(), skBar = await toolTitles(page, '', true), skAll = await toolTitles(page);
+  check('at 1100 px the sketch toolbar fits without scrolling', !skNarrow.scrolls && skNarrow.inside && !skNarrow.overlap && skNarrow.search && ['Line', 'Rectangle', 'Circle', 'Arc', 'Construction', 'Trim', 'Dimension', 'Coincident'].every((t) => skBar.includes(t)) && sketchTools.every((t) => skAll.includes(t)), JSON.stringify({ ...skNarrow, bar: skBar.join(' ') }));
+  await page.setViewportSize({ width: 1500, height: 900 });
+  await page.waitForTimeout(250);
+  // the plane field: × empties it and it waits; the sketch stays where it is until another plane is clicked
+  await page.click('.cad-sketch-dialog [data-sketch-plane-clear]');
+  const emptied = await S(page, () => { const s = window.JunctionPartStudio.getState(); const f = document.querySelector('.cad-sketch-dialog [data-sketch-plane]'); return { text: f.textContent.trim(), armed: f.hasAttribute('data-armed'), plane: s.features.find((x) => x.id === s.sketch.featureId).params.plane.plane }; });
+  check('× empties the plane field, which then waits for a plane', emptied.text === 'Select a plane or planar face' && emptied.armed && emptied.plane === 'top', JSON.stringify(emptied));
+  await page.click('.cad-features [data-default-geometry=front]');
   await page.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); const f = s.features.find((x) => x.id === s.sketch.featureId); return f.params.plane.plane === 'front'; });
-  await page.click('.cad-sketch-dialog [data-sketch-plane]');
+  check('… and the plane clicked next is the sketch\'s plane', (await page.textContent('.cad-sketch-dialog [data-sketch-plane]')).trim() === 'Front plane' && !(await page.locator('.cad-sketch-dialog [data-sketch-plane][data-armed]').count()));
+  await page.click('.cad-sketch-dialog [data-sketch-plane-name]');
   check('the plane field of the sketch listens for a click', await page.locator('.cad-sketch-dialog [data-sketch-plane][data-armed]').count() === 1 && (await page.getAttribute('[data-pick-filter]', 'data-pick-filter')).includes('plane'));
   await page.click('.cad-features [data-default-geometry=top]');
   await page.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); const f = s.features.find((x) => x.id === s.sketch.featureId); return f.params.plane.plane === 'top'; });
