@@ -276,6 +276,7 @@ export function silkClearanceMarkers(doc: KDoc, s: DesignSettings, rules: DruRul
         // graphics are often compound shapes: two drawings of one footprint (or both of the board) are not tested
         const isShape = (e: DrcElement) => /^(fp|gr)_(line|rect|circle|arc|poly|curve|ellipse|ellipse_arc)$/.test(e.kind);
         if (isShape(ref) && isShape(test) && ref.fp === test.fp) continue;
+        if (ref.uuid === test.uuid && ref.node === test.node) continue;   // an item against itself (a pad on silk and mask)
         let [a, b] = [ref, test]; if (target === silkLayer && a.uuid > b.uuid) [a, b] = [b, a];
         const key = code + "|" + a.uuid + "|" + b.uuid + "|" + target; if (reported.has(key)) continue;
         const gap = elementGap(a, b); if (!collides(gap, min)) continue;
@@ -292,12 +293,16 @@ export function silkClearanceMarkers(doc: KDoc, s: DesignSettings, rules: DruRul
 /** DRC_TEST_PROVIDER_EDGE_CLEARANCE for silk: silk within the silk clearance of an Edge.Cuts / Margin drawing, or a compound silk item that crosses the outline. */
 export function silkEdgeMarkers(doc: KDoc, s: DesignSettings, rules: DruRule[], ms = maskSetup(doc, s), pool?: DrcElement[] | null): DrcMarker[] {
   const out: DrcMarker[] = []; const sev = defaultSeverity("silk_edge_clearance");
-  const edges = edgeShapes(doc as never); if (!edges.shapes.length) return out;
+  // GetEffectiveShape( Edge_Cuts ): an outline drawing is its centre line; a Margin drawing keeps its width
+  const cut = edgeShapes(doc as never, { zeroWidth: true }), mar = edgeShapes(doc as never, { layer: "Margin" });
+  const edges = { shapes: cut.shapes.concat(mar.shapes), ids: cut.ids.concat(mar.ids) }; if (!edges.shapes.length) return out;
   const silk = elementsOn(doc, s, new Set(SILK), ms, pool); if (!silk.length) return out;
   const eb = edges.shapes.map((e) => shapeBBox(e));
   const edgeEl = (i: number): DrcElement => ({ id: edges.ids[i], uuid: edges.ids[i], kind: "gr_line", node: (doc.items.get(edges.ids[i]) || { node: ["gr_line", ["layer", "Edge.Cuts"]] }).node as SNode, fp: null, layer: "Edge.Cuts", shapes: [edges.shapes[i]], grow: 0, bbox: eb[i], net: null, copper: new Set(), mask: new Set() });
   const ol = boardOutline(doc as never);
   for (const e of silk) {
+    // a pad on a silk layer is tested with its copper shape, and the copper pass already reported that (item, edge, point)
+    if (e.kind === "pad" && e.copper.size) continue;
     let crosses = false;
     for (let i = 0; i < edges.shapes.length; i++) {
       const edge = edgeEl(i); const c = silkConstraint(rules, doc, s, edge, e, null); if (!c || c.min < 0) continue;
@@ -316,7 +321,7 @@ export function silkEdgeMarkers(doc: KDoc, s: DesignSettings, rules: DruRule[], 
       const t = l2 ? Math.max(0, Math.min(1, ((cx - p[0]) * dx + (cy - p[1]) * dy) / l2)) : 0; const n: Pt = [p[0] + t * dx, p[1] + t * dy]; const d = Math.hypot(n[0] - cx, n[1] - cy);
       if (d < bd) { bd = d; best = n; }
     }
-    for (let i = 0; i < edges.shapes.length; i++) if (rawGap(edges.shapes[i], { t: "circle", x: best[0], y: best[1], r: 0 }) <= 0.01) { bi = i; break; }
+    for (let i = 0; i < cut.shapes.length; i++) if (rawGap(cut.shapes[i], { t: "circle", x: best[0], y: best[1], r: 0 }) <= 0.01) { bi = i; break; }
     if (bi < 0) continue;
     const c = silkConstraint(rules, doc, s, edgeEl(bi), e, null); if (!c || c.min < 0) continue;
     out.push(withKiids(marker("silk_edge_clearance", sev, best[0], best[1], "Silkscreen clipped by board edge" + detail(c.name, c.min, 0), Array.from(new Set([edges.ids[bi], e.id]))), [edges.ids[bi], elKiid(e)]));

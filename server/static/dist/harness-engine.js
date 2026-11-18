@@ -34388,6 +34388,7 @@ var require_pcb_tools = __commonJS({
               if (min < 0) continue;
               const isShape = (e) => /^(fp|gr)_(line|rect|circle|arc|poly|curve|ellipse|ellipse_arc)$/.test(e.kind);
               if (isShape(ref) && isShape(test) && ref.fp === test.fp) continue;
+              if (ref.uuid === test.uuid && ref.node === test.node) continue;
               let [a, b] = [ref, test];
               if (target2 === silkLayer && a.uuid > b.uuid) [a, b] = [b, a];
               const key3 = code + "|" + a.uuid + "|" + b.uuid + "|" + target2;
@@ -34406,7 +34407,8 @@ var require_pcb_tools = __commonJS({
       function silkEdgeMarkers(doc2, s2, rules, ms = maskSetup(doc2, s2), pool) {
         const out2 = [];
         const sev3 = defaultSeverity2("silk_edge_clearance");
-        const edges = edgeShapes(doc2);
+        const cut = edgeShapes(doc2, { zeroWidth: true }), mar = edgeShapes(doc2, { layer: "Margin" });
+        const edges = { shapes: cut.shapes.concat(mar.shapes), ids: cut.ids.concat(mar.ids) };
         if (!edges.shapes.length) return out2;
         const silk = elementsOn(doc2, s2, new Set(SILK2), ms, pool);
         if (!silk.length) return out2;
@@ -34414,6 +34416,7 @@ var require_pcb_tools = __commonJS({
         const edgeEl = (i) => ({ id: edges.ids[i], uuid: edges.ids[i], kind: "gr_line", node: (doc2.items.get(edges.ids[i]) || { node: ["gr_line", ["layer", "Edge.Cuts"]] }).node, fp: null, layer: "Edge.Cuts", shapes: [edges.shapes[i]], grow: 0, bbox: eb[i], net: null, copper: /* @__PURE__ */ new Set(), mask: /* @__PURE__ */ new Set() });
         const ol = boardOutline(doc2);
         for (const e of silk) {
+          if (e.kind === "pad" && e.copper.size) continue;
           let crosses22 = false;
           for (let i = 0; i < edges.shapes.length; i++) {
             const edge = edgeEl(i);
@@ -34448,7 +34451,7 @@ var require_pcb_tools = __commonJS({
               best = n2;
             }
           }
-          for (let i = 0; i < edges.shapes.length; i++) if (rawGap(edges.shapes[i], { t: "circle", x: best[0], y: best[1], r: 0 }) <= 0.01) {
+          for (let i = 0; i < cut.shapes.length; i++) if (rawGap(cut.shapes[i], { t: "circle", x: best[0], y: best[1], r: 0 }) <= 0.01) {
             bi = i;
             break;
           }
@@ -36843,6 +36846,33 @@ var require_pcb_tools = __commonJS({
         }
         return { outline: best, dangling, hasEdges: true, area: bestA };
       }
+      function deflatePoly(P4, d) {
+        const n2 = P4.length;
+        if (n2 < 3) return P4;
+        let a2 = 0;
+        for (let i = 0; i < n2; i++) {
+          const p = P4[i], q4 = P4[(i + 1) % n2];
+          a2 += p[0] * q4[1] - q4[0] * p[1];
+        }
+        const sg = a2 > 0 ? 1 : -1;
+        const out2 = [];
+        const nrm = (i) => {
+          const p = P4[i], q4 = P4[(i + 1) % n2];
+          const dx = q4[0] - p[0], dy = q4[1] - p[1], l = Math.hypot(dx, dy) || 1;
+          return [-dy / l * sg, dx / l * sg];
+        };
+        for (let i = 0; i < n2; i++) {
+          const n0 = nrm((i + n2 - 1) % n2), n1 = nrm(i);
+          const bx = n0[0] + n1[0], by = n0[1] + n1[1];
+          const c = 1 + n0[0] * n1[0] + n0[1] * n1[1];
+          if (c < 1e-6) {
+            out2.push([P4[i][0] + n1[0] * d, P4[i][1] + n1[1] * d]);
+            continue;
+          }
+          out2.push([P4[i][0] + bx * d / c, P4[i][1] + by * d / c]);
+        }
+        return out2;
+      }
       function courtyards(fp) {
         const n2 = fp.node;
         const [fx, fy, frot] = K11.atOf(n2);
@@ -36890,7 +36920,7 @@ var require_pcb_tools = __commonJS({
           }
         }
         const res = {};
-        for (const layer4 of Object.keys(out2)) res[layer4] = out2[layer4].length ? chainLoops2(out2[layer4]).loops : [];
+        for (const layer4 of Object.keys(out2)) res[layer4] = out2[layer4].length ? chainLoops2(out2[layer4], 0.02).loops.map((l) => deflatePoly(l, 5e-3)) : [];
         return res;
       }
       function segCross(p1, p2, p3, p4) {
@@ -37146,6 +37176,122 @@ var require_pcb_tools = __commonJS({
             out2.push(m);
           }
         }
+        {
+          const copperSet = new Set(doc2.copper && doc2.copper.length ? doc2.copper : ["F.Cu", "B.Cu"]);
+          const SKIP = /* @__PURE__ */ new Set(["pad", "via", "segment", "arc", "zone", "dimension", "table", "barcode"]);
+          const graphics = boardElements(doc2, s2, copperSet).filter((e) => !SKIP.has(e.kind) && copperSet.has(e.layer));
+          if (graphics.length) {
+            const isText2 = (e) => /text|property/.test(e.kind);
+            const knockout2 = (e) => isText2(e) && !/box/.test(e.kind) && (K11.kid(e.node, "layer") || []).slice(2).includes("knockout");
+            const gNet = (e) => e.fp || isText2(e) ? null : e.net || "";
+            const solid = (sh) => sh.t === "poly" ? { t: "poly", pts: sh.pts, solid: true } : sh;
+            const gkiid = (e) => K11.uuidOf(e.node) || e.uuid;
+            const shapesOf = /* @__PURE__ */ new Map();
+            const shp = (e) => {
+              let v = shapesOf.get(e);
+              if (!v) shapesOf.set(e, v = e.shapes.map(solid));
+              return v;
+            };
+            const gapTo = (e, o) => {
+              let g2 = Infinity;
+              for (const sh of shp(e)) g2 = Math.min(g2, shapeGap(sh, o));
+              return g2;
+            };
+            const gNeed = (na, nb, c) => {
+              const ca = netClearance(s2, na), cb = c ? clr(c) : netClearance(s2, nb);
+              const need = Math.max(ca, cb, s2.minClearance || 0);
+              return { need, name: `netclass '${cb >= ca ? c ? netclassName(s2, c.net) : netclassName(s2, nb) : netclassName(s2, na)}'` };
+            };
+            const tiePads = (fp) => fp && K11.kid(fp.node, "net_tie_pad_groups") ? nl.conductors.filter((c) => c.kind === "pad" && c.item === fp && tiedPads(fp, c.pad.number, c.pad.number)) : [];
+            const tieExcluded = (e, net, layer4) => !!net && tiePads(e.fp).some((p) => p.net === net && p.layers.has(layer4) && gapTo(e, shapeOn(p, layer4)) <= DRC_EPS);
+            const padNo = (c) => c.kind === "pad" ? c.pad.number : "";
+            const seenG = /* @__PURE__ */ new Set();
+            const report3 = (aId, aKiid, aNet, aBox, bId, bKiid, bNet, bBox, gap, need, name, layer4, zone = false) => {
+              const key3 = [aKiid, bKiid].sort().join("|") + "|" + layer4;
+              if (seenG.has(key3)) return;
+              seenG.add(key3);
+              const [x, y] = boxCenter(aBox, bBox);
+              const later = aKiid > bKiid ? aNet : bNet;
+              if (!zone && gap <= 0 && later !== null) {
+                const first2 = aKiid > bKiid ? bNet : aNet;
+                out2.push(withKiids(marker("shorting_items", "error", x, y, `Items shorting two nets (nets ${first2 || "<no net>"} and ${later || "<no net>"})`, Array.from(/* @__PURE__ */ new Set([aId, bId]))), [aKiid, bKiid]));
+                return;
+              }
+              const [tn, tg] = mmPair(need, Math.max(0, gap));
+              out2.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${name} clearance ${tn}; actual ${tg})`, Array.from(/* @__PURE__ */ new Set([aId, bId]))), [aKiid, bKiid]));
+            };
+            const cg = boxGrid(conds, (c) => c.bbox);
+            const zones = nl.conductors.filter((c) => c.kind === "zone");
+            const zg = boxGrid(zones, (c) => c.bbox);
+            for (const e of graphics) {
+              const layer4 = e.layer;
+              const eNet = gNet(e);
+              const text3 = isText2(e);
+              for (const c of cg.query(e.bbox, maxClr)) {
+                if (!c.layers.has(layer4)) continue;
+                const cNet = c.net || "";
+                if (eNet === cNet) continue;
+                const { need, name } = gNeed(eNet, cNet, c);
+                if (!boxesTouch(e.bbox, c.bbox, need)) continue;
+                const cs = shapeOn(c, layer4);
+                const gap = gapTo(e, cs);
+                if (!(gap < need - DRC_EPS)) continue;
+                if (tieExcluded(e, cNet, layer4)) continue;
+                if (c.kind === "pad" && e.fp && e.fp === c.item && !text3 && tiedPads(c.item, c.pad.number, c.pad.number)) continue;
+                report3(e.id, gkiid(e), eNet, e.bbox, c.id, uid(c), cNet, c.bbox, gap, need, name, layer4);
+              }
+              if (!text3) {
+                for (const o of graphics) {
+                  if (o === e || o.layer !== layer4) continue;
+                  const oText = isText2(o);
+                  if (!oText && o.fp && o.fp === e.fp) continue;
+                  if (!oText && gkiid(o) < gkiid(e)) continue;
+                  const oNet = gNet(o);
+                  if (eNet === oNet) continue;
+                  const { need, name } = gNeed(eNet, oNet, null);
+                  if (!boxesTouch(e.bbox, o.bbox, need)) continue;
+                  let gap = Infinity;
+                  for (const sh of shp(o)) gap = Math.min(gap, gapTo(e, sh));
+                  if (!(gap < need - DRC_EPS)) continue;
+                  report3(e.id, gkiid(e), eNet, e.bbox, o.id, gkiid(o), oNet, o.bbox, gap, need, name, layer4);
+                }
+              }
+              const near3 = zg.query(e.bbox, maxClr).filter((z2) => z2.layers.has(layer4));
+              if (!near3.length) continue;
+              const byZone = /* @__PURE__ */ new Map();
+              for (const z2 of near3) {
+                const l = byZone.get(z2.item);
+                if (l) l.push(z2);
+                else byZone.set(z2.item, [z2]);
+              }
+              const ko = knockout2(e);
+              let inherited;
+              for (const [zi, fills] of byZone) {
+                const zNet = fills[0].net || "";
+                let gap = Infinity;
+                for (const z2 of fills) gap = Math.min(gap, gapTo(e, z2.shape));
+                if (ko) {
+                  if (inherited === void 0 && gap <= 0) inherited = zNet;
+                  if (inherited === zNet) continue;
+                  const { need: need2, name: name2 } = gNeed(null, zNet, fills[0]);
+                  if (!(gap < need2 - DRC_EPS)) continue;
+                  if (gap <= 0 && inherited !== void 0) {
+                    const [x, y] = boxCenter(e.bbox, fills[0].bbox);
+                    out2.push(withKiids(marker("shorting_items", "error", x, y, `Items shorting two nets (nets ${inherited || "<no net>"} and ${zNet || "<no net>"})`, [e.id, zi.id]), [gkiid(e), uid(fills[0])]));
+                    continue;
+                  }
+                  report3(e.id, gkiid(e), null, e.bbox, zi.id, uid(fills[0]), zNet, fills[0].bbox, gap, need2, name2, layer4, true);
+                  continue;
+                }
+                if (zNet && eNet === zNet) continue;
+                if (e.fp && zNet && tiePads(e.fp).some((p) => p.layers.has(layer4) && (p.net === zNet || tiePads(e.fp).some((q4) => q4.net === zNet && tiedPads(e.fp, padNo(p), padNo(q4)))) && gapTo(e, shapeOn(p, layer4)) <= DRC_EPS)) continue;
+                const { need, name } = gNeed(eNet, zNet, fills[0]);
+                if (!(need > 0) || !(gap < need - DRC_EPS)) continue;
+                report3(e.id, gkiid(e), eNet, e.bbox, zi.id, uid(fills[0]), zNet, fills[0].bbox, gap, need, name, layer4, true);
+              }
+            }
+          }
+        }
         const edges = (() => {
           const cut = edgeShapes(doc2, { zeroWidth: true }), mar = edgeShapes(doc2, { layer: "Margin" });
           return { shapes: cut.shapes.concat(mar.shapes), ids: cut.ids.concat(mar.ids), nodes: cut.nodes.concat(mar.nodes), layer: cut.shapes.map(() => "Edge.Cuts").concat(mar.shapes.map(() => "Margin")) };
@@ -37304,7 +37450,15 @@ var require_pcb_tools = __commonJS({
           }
         }
         const ol = boardOutline(doc2);
-        if (ol.hasEdges && !ol.outline) {
+        if (!ol.hasEdges && opts2.outline !== false) {
+          let b = null;
+          for (const it of doc2.items.values()) {
+            const q4 = it.bbox;
+            if (!q4 || !isFinite(q4[0])) continue;
+            b = b ? [Math.min(b[0], q4[0]), Math.min(b[1], q4[1]), Math.max(b[2], q4[2]), Math.max(b[3], q4[3])] : [q4[0], q4[1], q4[2], q4[3]];
+          }
+          out2.push(marker("invalid_outline", "error", b ? (b[0] + b[2]) / 2 : 0, b ? (b[1] + b[3]) / 2 : 0, "Board has malformed outline (no edges found on Edge.Cuts layer)", []));
+        } else if (ol.hasEdges && !ol.outline) {
           const e = edges.shapes[0];
           const p = e.a || e.pts[0];
           out2.push(marker("invalid_outline", "error", p[0], p[1], "Board has malformed outline (Edge.Cuts does not close)", []));
@@ -55864,6 +56018,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
         segsIntersect: segsIntersect22,
         polyPolyDist,
         firstEdgeConflict,
+        deflatePoly,
         padShape,
         padCopperLayers,
         viaLayers,
@@ -103648,6 +103803,7 @@ function parseDoc(text3, docType) {
   for (let j = 1; j < tree.length; j++) {
     const node = tree[j];
     if (!isList(node)) continue;
+    if (type === "pcb" && node[0] === "module") node[0] = "footprint";
     const k = node[0];
     if (k === "paper") {
       doc2.page = paperSize(node);

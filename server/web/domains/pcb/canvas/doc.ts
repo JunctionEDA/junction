@@ -79,6 +79,7 @@ export function parseDoc(text: string, docType?: string): Doc {
   if (type === "sch") { const ls = kid(tree, "lib_symbols"); if (ls) for (const s of kids(ls, "symbol")) doc.lib.set(str(s[1]), s); }
   for (let j = 1; j < tree.length; j++) {
     const node = tree[j]; if (!isList(node)) continue;
+    if (type === "pcb" && node[0] === "module") node[0] = "footprint";   // KiCad 5 boards: PCB_PARSER reads (module) as a footprint
     const k = node[0];
     if (k === "paper") { doc.page = paperSize(node); doc.paper = str(node[1]) || "A4"; doc.portrait = doc.page[1] > doc.page[0]; }
     else if (k === "title_block") { doc.titleBlock = titleBlockOf(node); continue; }

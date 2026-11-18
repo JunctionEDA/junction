@@ -6,6 +6,7 @@ import { arcPoints, boxGrid, boxesTouch, firstEdgeConflict, polysOverlap, shapeB
 import { pointInPoly } from "./hit";
 import { netlist, ratsnest } from "./netlist";
 import { K } from "./state";
+import { boardElements } from "./drc-silk";
 import { DRC_EPS, EPS } from "./transforms";
 import { isList, layerDefaults, layerOf, pt, r6, rotator, widthOf } from "./util";
 import { evalRuleConstraint, parseDru, ruleClearance } from "./dru";
@@ -125,6 +126,20 @@ export function boardOutline(doc: BoardDoc) {
   for (const l of loops) { const a = Math.abs(polyArea(l)); if (a > bestA) { bestA = a; best = l; } }
   return { outline: best, dangling, hasEdges: true, area: bestA };
 }
+/** A simple polygon moved inward by `d` (mitred corners; CHAMFER_ACUTE_CORNERS differs only at sharp spikes). */
+export function deflatePoly(P: Pt[], d: number): Pt[] {
+  const n = P.length; if (n < 3) return P;
+  let a2 = 0; for (let i = 0; i < n; i++) { const p = P[i], q = P[(i + 1) % n]; a2 += p[0] * q[1] - q[0] * p[1]; }
+  const sg = a2 > 0 ? 1 : -1; const out: Pt[] = [];
+  // each edge's inward normal; a vertex moves to where its two shifted edges meet
+  const nrm = (i: number): Pt => { const p = P[i], q = P[(i + 1) % n]; const dx = q[0] - p[0], dy = q[1] - p[1], l = Math.hypot(dx, dy) || 1; return [-dy / l * sg, dx / l * sg]; };
+  for (let i = 0; i < n; i++) {
+    const n0 = nrm((i + n - 1) % n), n1 = nrm(i); const bx = n0[0] + n1[0], by = n0[1] + n1[1]; const c = 1 + n0[0] * n1[0] + n0[1] * n1[1];
+    if (c < 1e-6) { out.push([P[i][0] + n1[0] * d, P[i][1] + n1[1] * d]); continue; }
+    out.push([P[i][0] + bx * d / c, P[i][1] + by * d / c]);
+  }
+  return out;
+}
 /** A footprint's courtyard polygons per side, chained from its F.CrtYd / B.CrtYd drawings in board coordinates. */
 export function courtyards(fp: KItem) {
   const n = fp.node; const [fx, fy, frot] = K.atOf(n); const R = rotator(frot); const tf = (x: number, y: number) => { const [dx, dy] = R(x, y); return [fx + dx, fy + dy]; };
@@ -138,7 +153,9 @@ export function courtyards(fp: KItem) {
     else if (kind === "arc") { const a = P("start"), m = P("mid"), b = P("end"); if (a && m && b) { const arc = K.arcFrom3(a, m, b); out[layer].push(arc ? arcPoints(arc, a, b) : [a, b]); } }
     else if (kind === "poly") { const pts = K.ptsOf(g).map(([x, y]) => tf(x, y)); if (pts.length > 2) out[layer].push(pts.concat([pts[0]])); }
   }
-  const res: Record<string, Pt[][]> = {}; for (const layer of Object.keys(out)) res[layer] = out[layer].length ? chainLoops(out[layer]).loops : [];
+  // BuildCourtyardCaches chains ends up to 0.02 mm apart, then deflates the outline by maxError (5 um) so touching
+  // courtyards stay legal
+  const res: Record<string, Pt[][]> = {}; for (const layer of Object.keys(out)) res[layer] = out[layer].length ? chainLoops(out[layer], 0.02).loops.map((l) => deflatePoly(l, 0.005)) : [];
   return res;
 }
 /** SEG::Intersect: where two track centre lines cross (touching ends included), or null. */
@@ -321,6 +338,104 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
       m.layer = v.layer; out.push(m);
     }
   }
+  // copper graphics and text (testGraphicClearances, plus the track and pad passes' tests against them).  KiCad's nets:
+  // a board shape on copper is connected (its net, or no net), a footprint's shapes and every text are not; two items
+  // of one net (or two unconnected items) are never tested.  A shape is tested against pads, tracks, vias, texts and
+  // other shapes (not another shape of its own footprint), a text against pads, tracks and vias, and every drawing
+  // against the zones (clearance only; knockout text inherits the first zone it sits in and shorts any other).
+  // Touching is a short when the item with the later uuid is connected, else a clearance violation.
+  {
+    const copperSet = new Set(doc.copper && doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"]);
+    const SKIP = new Set(["pad", "via", "segment", "arc", "zone", "dimension", "table", "barcode"]);
+    const graphics = boardElements(doc as never, s, copperSet).filter((e) => !SKIP.has(e.kind) && copperSet.has(e.layer));
+    if (graphics.length) {
+      type G = (typeof graphics)[number];
+      const isText = (e: G) => /text|property/.test(e.kind);
+      const knockout = (e: G) => isText(e) && !/box/.test(e.kind) && ((K.kid(e.node, "layer") || []) as unknown[]).slice(2).includes("knockout");
+      const gNet = (e: G): string | null => (e.fp || isText(e) ? null : e.net || "");
+      const solid = (sh: CopperShape): CopperShape => (sh.t === "poly" ? { t: "poly", pts: sh.pts, solid: true } : sh);
+      const gkiid = (e: G) => K.uuidOf(e.node) || e.uuid;
+      const shapesOf = new Map<G, CopperShape[]>(); const shp = (e: G) => { let v = shapesOf.get(e); if (!v) shapesOf.set(e, v = e.shapes.map(solid)); return v; };
+      const gapTo = (e: G, o: CopperShape) => { let g = Infinity; for (const sh of shp(e)) g = Math.min(g, shapeGap(sh, o)); return g; };
+      const gNeed = (na: string | null, nb: string | null, c: Conductor | null) => {
+        const ca = netClearance(s, na), cb = c ? clr(c) : netClearance(s, nb); const need = Math.max(ca, cb, s.minClearance || 0);
+        return { need, name: `netclass '${cb >= ca ? (c ? netclassName(s, c.net) : netclassName(s, nb)) : netclassName(s, na)}'` };
+      };
+      // DRC_ENGINE::IsNetTieExclusion: a drawing of a net-tie footprint meeting copper of a net one of its tied pads carries
+      const tiePads = (fp: KItem | null | undefined): Conductor[] => (fp && K.kid(fp.node, "net_tie_pad_groups") ? nl.conductors.filter((c) => c.kind === "pad" && c.item === fp && tiedPads(fp, c.pad.number, c.pad.number)) : []);
+      const tieExcluded = (e: G, net: string | null, layer: string) => !!net && tiePads(e.fp).some((p) => p.net === net && p.layers.has(layer) && gapTo(e, shapeOn(p, layer)) <= DRC_EPS);
+      const padNo = (c: Conductor) => (c.kind === "pad" ? c.pad.number : "");
+      const seenG = new Set<string>();
+      const report = (aId: string, aKiid: string, aNet: string | null, aBox: Box, bId: string, bKiid: string, bNet: string | null, bBox: Box, gap: number, need: number, name: string, layer: string, zone = false) => {
+        const key = [aKiid, bKiid].sort().join("|") + "|" + layer; if (seenG.has(key)) return; seenG.add(key);
+        const [x, y] = boxCenter(aBox, bBox);
+        // the pair in uuid order: the second item's net decides a short
+        const later = aKiid > bKiid ? aNet : bNet;
+        if (!zone && gap <= 0 && later !== null) {
+          const first = aKiid > bKiid ? bNet : aNet;
+          out.push(withKiids(marker("shorting_items", "error", x, y, `Items shorting two nets (nets ${first || "<no net>"} and ${later || "<no net>"})`, Array.from(new Set([aId, bId]))), [aKiid, bKiid])); return;
+        }
+        const [tn, tg] = mmPair(need, Math.max(0, gap));
+        out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${name} clearance ${tn}; actual ${tg})`, Array.from(new Set([aId, bId]))), [aKiid, bKiid]));
+      };
+      const cg = boxGrid(conds, (c) => c.bbox);
+      const zones = nl.conductors.filter((c) => c.kind === "zone"); const zg = boxGrid(zones, (c) => c.bbox);
+      for (const e of graphics) {
+        const layer = e.layer; const eNet = gNet(e); const text = isText(e);
+        // against pads, tracks and vias
+        for (const c of cg.query(e.bbox, maxClr)) {
+          if (!c.layers.has(layer)) continue;
+          const cNet = c.net || "";
+          if (eNet === cNet) continue;
+          const { need, name } = gNeed(eNet, cNet, c);
+          if (!boxesTouch(e.bbox, c.bbox, need)) continue;
+          const cs = shapeOn(c, layer); const gap = gapTo(e, cs);
+          if (!(gap < need - DRC_EPS)) continue;
+          // copper of a net the footprint ties is waived where it meets the tie (issue14008: KiCad lets every such via through)
+          if (tieExcluded(e, cNet, layer)) continue;
+          if (c.kind === "pad" && e.fp && e.fp === c.item && !text && tiedPads(c.item, c.pad.number, c.pad.number)) continue;
+          report(e.id, gkiid(e), eNet, e.bbox, c.id, uid(c), cNet, c.bbox, gap, need, name, layer);
+        }
+        // a shape against texts and other shapes (once per pair; not two shapes of one footprint)
+        if (!text) {
+          for (const o of graphics) {
+            if (o === e || o.layer !== layer) continue;
+            const oText = isText(o);
+            if (!oText && o.fp && o.fp === e.fp) continue;
+            if (!oText && gkiid(o) < gkiid(e)) continue;
+            const oNet = gNet(o); if (eNet === oNet) continue;
+            const { need, name } = gNeed(eNet, oNet, null);
+            if (!boxesTouch(e.bbox, o.bbox, need)) continue;
+            let gap = Infinity; for (const sh of shp(o)) gap = Math.min(gap, gapTo(e, sh));
+            if (!(gap < need - DRC_EPS)) continue;
+            report(e.id, gkiid(e), eNet, e.bbox, o.id, gkiid(o), oNet, o.bbox, gap, need, name, layer);
+          }
+        }
+        // against the zones (testItemAgainstZone / testKnockoutTextAgainstZone)
+        const near = zg.query(e.bbox, maxClr).filter((z) => z.layers.has(layer));
+        if (!near.length) continue;
+        const byZone = new Map<KItem, Conductor[]>(); for (const z of near) { const l = byZone.get(z.item); if (l) l.push(z); else byZone.set(z.item, [z]); }
+        const ko = knockout(e); let inherited: string | null | undefined;
+        for (const [zi, fills] of byZone) {
+          const zNet = fills[0].net || "";
+          let gap = Infinity; for (const z of fills) gap = Math.min(gap, gapTo(e, z.shape));
+          if (ko) {
+            if (inherited === undefined && gap <= 0) inherited = zNet;
+            if (inherited === zNet) continue;
+            const { need, name } = gNeed(null, zNet, fills[0]);
+            if (!(gap < need - DRC_EPS)) continue;
+            if (gap <= 0 && inherited !== undefined) { const [x, y] = boxCenter(e.bbox, fills[0].bbox); out.push(withKiids(marker("shorting_items", "error", x, y, `Items shorting two nets (nets ${inherited || "<no net>"} and ${zNet || "<no net>"})`, [e.id, zi.id]), [gkiid(e), uid(fills[0])])); continue; }
+            report(e.id, gkiid(e), null, e.bbox, zi.id, uid(fills[0]), zNet, fills[0].bbox, gap, need, name, layer, true); continue;
+          }
+          if (zNet && eNet === zNet) continue;
+          if (e.fp && zNet && tiePads(e.fp).some((p) => p.layers.has(layer) && (p.net === zNet || tiePads(e.fp).some((q) => q.net === zNet && tiedPads(e.fp!, padNo(p), padNo(q)))) && gapTo(e, shapeOn(p, layer)) <= DRC_EPS)) continue;
+          const { need, name } = gNeed(eNet, zNet, fills[0]);
+          if (!(need > 0) || !(gap < need - DRC_EPS)) continue;
+          report(e.id, gkiid(e), eNet, e.bbox, zi.id, uid(fills[0]), zNet, fills[0].bbox, gap, need, name, layer, true);
+        }
+      }
+    }
+  }
   // copper to board edge (DRC_TEST_PROVIDER_EDGE_CLEARANCE): every copper item (zone fills one layer at a time) against the
   // Edge.Cuts lines (their width taken as zero) and the Margin lines; EvalRules(edge, item) gives the clearance (a custom
   // edge_clearance rule, else the board setup value).  An item reports its first offending edge only; castellated and
@@ -436,7 +551,12 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
   }
   // outline
   const ol = boardOutline(doc);
-  if (ol.hasEdges && !ol.outline) { const e = edges.shapes[0] as { a?: Pt; pts: Pt[] }; const p = e.a || e.pts[0]; out.push(marker("invalid_outline", "error", p[0], p[1], "Board has malformed outline (Edge.Cuts does not close)", [])); }
+  if (!ol.hasEdges && opts.outline !== false) {
+    // testOutline: no Edge.Cuts drawing at all, marked at the centre of BOARD::GetBoundingBox (every item)
+    let b: Box | null = null; for (const it of doc.items.values()) { const q = it.bbox; if (!q || !isFinite(q[0])) continue; b = b ? [Math.min(b[0], q[0]), Math.min(b[1], q[1]), Math.max(b[2], q[2]), Math.max(b[3], q[3])] : [q[0], q[1], q[2], q[3]]; }
+    out.push(marker("invalid_outline", "error", b ? (b[0] + b[2]) / 2 : 0, b ? (b[1] + b[3]) / 2 : 0, "Board has malformed outline (no edges found on Edge.Cuts layer)", []));
+  }
+  else if (ol.hasEdges && !ol.outline) { const e = edges.shapes[0] as { a?: Pt; pts: Pt[] }; const p = e.a || e.pts[0]; out.push(marker("invalid_outline", "error", p[0], p[1], "Board has malformed outline (Edge.Cuts does not close)", [])); }
   else if (ol.outline && opts.outline !== false) {
     // DRC_TEST_PROVIDER_EDGE_CLEARANCE::testCopperOutsideBoard: copper that does not touch the board at all
     const seen = new Set<string>(); const board = { t: "poly" as const, pts: ol.outline };
