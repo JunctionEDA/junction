@@ -1,14 +1,20 @@
 // Global routing before the detailed search: the board is cut into square tiles, every connection gets a coarse path
-// over the tile graph with negotiated congestion, its layers are assigned along that path, and the detailed router is
-// then steered by the result: the path's tiles and a ring round them are its corridor, and each tile has the layer the
-// plan put it on.
+// over the tile graph with negotiated congestion, its layers are assigned along that path, and the detailed router
+// takes three things from the result: the order to lay connections in (the ones the negotiation had to fight for
+// first), which routes to take up when one is blocked (those same contested ones first), and, only for a connection
+// the negotiation moved off its direct path, a corridor (the path's tiles and a ring round them) with the layer the
+// plan put each tile on.  A connection whose plan is its direct path is left to the detailed router alone.
 //
 // Ported from Copper's router v2 (src/copper_kicad/pcb/v2/globalroute.py and tiles.py; MIT licence,
 // github.com/claynicholson/copper-kicad-mcp):
-// - tile graph: a node is (layer, tile); neighbouring tiles of a layer share a border whose capacity is the number of
-//   reference tracks (width + clearance) its free stretches carry, and a column's via capacity is how many vias fit in
-//   the tile.  Copper measures the borders on exact geometry; here they are read off the detailed router's own
-//   occupancy maps for the most common rule class, so the two see the same obstacles;
+// - tile graph: a node is (layer, tile); the tile is 0.5 mm on a board with a pad pitch of 0.5 mm or finer and 1 mm
+//   otherwise, doubled until the graph has at most 60 000 nodes.  Neighbouring tiles of a layer share a border whose
+//   capacity is the number of reference tracks (width + clearance) its free stretches carry, plus the largest
+//   remainder; a free stretch cut by a tile corner is counted together with its continuation in the next border; and
+//   the borders a connection's own pads touch are free for that connection (it is leaving its own pad there).  A
+//   column's via capacity is how many vias fit in the tile.  Copper measures the borders on exact geometry; here they
+//   are read off the detailed router's own occupancy maps for the most common rule class, so the two see the same
+//   obstacles;
 // - negotiated congestion (PathFinder): every connection is laid on the tile graph, then for a few rounds the ones on
 //   an overflowing border, via column or forced crossing are laid again with a present-congestion factor that grows
 //   1.5 times a round and a history cost that stays on what overflowed; the round with the least overflow is kept;
@@ -21,47 +27,120 @@
 // Not ported: waypoints, buses, tees onto another connection's path, regions and the calibration of capacities.
 import { viaFits, type Grid, type Pt } from "./grid";
 
-export interface PlanConn { id: number; net: string; a: { p: Pt; layers: number[] }; b: { p: Pt; layers: number[] }; demand: number }
+/** An end of a connection: where it is, its layers, and the box of its pad's copper (mm) when it ends on a pad. */
+export interface PlanEnd { p: Pt; layers: number[]; box?: number[] }
+export interface PlanConn { id: number; net: string; a: PlanEnd; b: PlanEnd; demand: number }
 export interface PlanInput {
   G: Grid; maps: Uint16Array[]; vmaps: Uint16Array[];   // the reference class's occupancy maps (what was on the board before the run)
   pitch: number; viaPitch: number;                      // reference track width + clearance; via diameter + clearance (mm)
+  need?: number;                                        // how far a reference track's centre keeps from a pad (clearance + half width, mm)
   pref: number[];                                       // per layer: +1 runs horizontally, -1 vertically (route.ts)
   viaMm: number;                                        // what a via costs, in mm of track
+  minPitch?: number;                                    // the finest pad pitch on the board (mm): sets the tile size
   tile?: number; iters?: number; maxMs?: number;
 }
-/** A connection's corridor: per tile 1 when the detailed route may run there, and the layer the plan put it on (-1: any). */
-export interface Corridor { tiles: Uint8Array; layer: Int8Array; vias: number; overflow: number; path: number[] }
+/** A connection's corridor: per tile 1 when the detailed route may run there, and the layer the plan put it on (-1: any).
+ *  moved: the negotiation took it off its direct path (only then is it steered); contest: how many rounds of the
+ *  negotiation laid it again because it sat on an overflowing border, via column or forced crossing. */
+export interface Corridor { tiles: Uint8Array; layer: Int8Array; vias: number; overflow: number; path: number[]; moved: boolean; contest: number }
 export interface PlanResult {
   k: number; T: number; nx: number; ny: number; corridors: Map<number, Corridor>;
-  iterations: number; overflowFirst: number; overflow: number; crossings: number; relayered: number; ms: number;
+  iterations: number; overflowFirst: number; overflow: number; crossings: number; relayered: number; moved: number; contested: number; ms: number;
 }
 
 const WALL = 8, WALL_VIA = 2;      // extra cost factor of a border without capacity / a column without a via site (soft)
 const DIR_BIAS = 0.3;              // a step against its layer's direction costs this much more (times |pref|)
 const MAX_ITERS = 16, BOX_MARGIN = 8;
 const MAX_DP_VIAS = 6, TURN_AT_TRAFFIC = 1;
+const MAX_NODES = 60000;           // tiles x layers (Copper's choose_tile_mm)
+const MOVED_MM = 1;                // a connection counts as moved when its path leaves its direct path by more than this
 const INF = Infinity;
 
+/** Copper's tile size: 0.5 mm on a board with a pad pitch of 0.5 mm or finer, 1 mm otherwise, doubled until the
+ *  graph fits in MAX_NODES. */
+export function tileFor(minPitch: number, w: number, h: number, layers: number): number {
+  let t = minPitch <= 0.5 + 1e-6 ? 0.5 : 1;
+  while (Math.max(1, Math.ceil(w / t - 1e-9)) * Math.max(1, Math.ceil(h / t - 1e-9)) * layers > MAX_NODES) t *= 2;
+  return t;
+}
+
 export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
-  const t0 = Date.now(); const { G } = inp; const g = G.g;
-  const k = Math.max(4, Math.round((inp.tile || 2.5) / g)), T = k * g;
-  const nx = Math.max(1, Math.ceil(G.W / k)), ny = Math.max(1, Math.ceil(G.H / k)), GT = nx * ny, L = G.layers.length, N = GT * L;
+  const t0 = Date.now(); const { G } = inp; const g = G.g; const L = G.layers.length;
+  const tmm = inp.tile || tileFor(inp.minPitch ?? Infinity, G.W * g, G.H * g, G.routable.filter(Boolean).length || L);
+  const k = Math.max(2, Math.round(tmm / g)), T = k * g;
+  const nx = Math.max(1, Math.ceil(G.W / k)), ny = Math.max(1, Math.ceil(G.H / k)), GT = nx * ny, N = GT * L;
   const p = inp.pitch, rt = G.routable;
-  // ---- capacities (mm of reference pitch) from the free stretches of each border
+  const layersOf = (ls: number[]) => { const out = ls.filter((l) => l >= 0 && l < L && rt[l]); return out.length ? out : rt.map((r, l) => r ? l : -1).filter((l) => l >= 0); };
+  // ---- capacities (mm), as Copper's tiles.py counts them.  A border's free stretches are the runs of cells where a
+  // reference track may cross it (free on both sides of the line); a stretch whose centre line is c mm long carries
+  // floor(c / p) + 1 tracks, and the border's capacity is that many pitches plus the largest remainder (the slack: a
+  // track wider than the reference still fits where it physically does).  A stretch cut by a tile corner goes on in
+  // the next border of the same grid line: the two pieces together carry what their joint length does, the larger
+  // piece (one that spans its whole border always counts as the larger) keeps its own count and the smaller gets the
+  // rest.  Without that a gap that happens to straddle a corner would count as closed.
   const capE = new Float64Array(N), capN = new Float64Array(N), capV = new Int32Array(GT);
-  const tracks = (run: number) => run > 0 ? (Math.floor(((run - 1) * g) / p + 1e-9) + 1) * p : 0;
+  const tracksOf = (n: number) => n > 0 ? Math.floor(((n - 1) * g) / p + 1e-9) + 1 : 0;
+  const runs: (Int32Array | null)[] = new Array(2 * N).fill(null);   // per border code (s * 2 + side): its free runs as [start, cells], start from the border's low corner
+  const spanOf = (code: number) => { const r = (code >> 1) % GT, i = code & 1 ? r % nx : (r / nx) | 0; return Math.min(code & 1 ? G.W : G.H, (i + 1) * k) - i * k; };
   for (let l = 0; l < L; l++) {
     if (!rt[l]) continue; const m = inp.maps[l];
     for (let ty = 0; ty < ny; ty++) for (let tx = 0; tx < nx; tx++) {
       const s = l * GT + ty * nx + tx;
-      if (tx + 1 < nx) { const ix = (tx + 1) * k; let cap = 0, run = 0; if (ix < G.W) for (let iy = ty * k; iy < Math.min(G.H, (ty + 1) * k); iy++) { if (!m[iy * G.W + ix]) run++; else { cap += tracks(run); run = 0; } } capE[s] = cap + tracks(run); }
-      if (ty + 1 < ny) { const iy = (ty + 1) * k; let cap = 0, run = 0; if (iy < G.H) for (let ix = tx * k; ix < Math.min(G.W, (tx + 1) * k); ix++) { if (!m[iy * G.W + ix]) run++; else { cap += tracks(run); run = 0; } } capN[s] = cap + tracks(run); }
+      for (let side = 0; side < 2; side++) {   // 0: the east border (a vertical grid line), 1: the north one (+y)
+        if (side === 0 ? tx + 1 >= nx : ty + 1 >= ny) continue;
+        const line = (side === 0 ? tx + 1 : ty + 1) * k; if (line >= (side === 0 ? G.W : G.H)) continue;
+        const a0 = (side === 0 ? ty : tx) * k, a1 = Math.min(side === 0 ? G.H : G.W, a0 + k);
+        const out: number[] = []; let st = -1;
+        for (let i = a0; i <= a1; i++) {
+          const free = i < a1 && (side === 0 ? !m[i * G.W + line] && !m[i * G.W + line - 1] : !m[line * G.W + i] && !m[(line - 1) * G.W + i]);
+          if (free) { if (st < 0) st = i; } else if (st >= 0) { out.push(st - a0, i - st); st = -1; }
+        }
+        if (out.length) runs[s * 2 + side] = Int32Array.from(out);
+      }
     }
   }
+  // the run of border `code` that touches its low (end 0) / high (end 1) corner: [cells, spans the whole border], or null
+  const piece = (code: number, end: number): [number, boolean] | null => {
+    const f = runs[code]; if (!f) return null; const span = spanOf(code);
+    const i = end ? f.length - 2 : 0, a = f[i], n = f[i + 1];
+    if (end ? a + n < span : a > 0) return null;
+    return [n, a === 0 && a + n >= span];
+  };
+  for (let code = 0; code < 2 * N; code++) {
+    const f = runs[code]; if (!f) continue;
+    const s = code >> 1, side = code & 1, r = s % GT, tx = r % nx, ty = (r / nx) | 0, span = spanOf(code);
+    const step = (side ? 1 : nx) * 2, first = side ? tx === 0 : ty === 0, last = side ? tx === nx - 1 : ty === ny - 1;   // the next border along the same grid line
+    let n = 0, slack = 0;
+    for (let i = 0; i < f.length; i += 2) {
+      const a = f[i], ln = f[i + 1]; let own = tracksOf(ln), rem = own > 0 ? (ln - 1) * g - (own - 1) * p : 0;
+      const atLo = a === 0, atHi = a + ln >= span;
+      if (atLo !== atHi) {   // cut by exactly one corner
+        let other: [number, boolean] | null = null, later = false;
+        if (atLo && !first) { other = piece(code - step, 1); later = true; } else if (atHi && !last) other = piece(code + step, 0);
+        if (other) { const [oln, whole] = other; if (whole || oln > ln || (oln === ln && later)) { own = Math.max(0, tracksOf(ln + oln) - tracksOf(oln)); rem = 0; } }
+      }
+      n += own; if (own > 0 && rem > slack) slack = rem;
+    }
+    (side ? capN : capE)[s] = n * p + (n > 0 ? slack : 0);
+  }
+  // via sites: how many vias fit in the tile, at least one where any cell takes one
   const per = Math.max(1, (inp.viaPitch * inp.viaPitch) / (g * g));
   for (let ty = 0; ty < ny; ty++) for (let tx = 0; tx < nx; tx++) {
     let n = 0; for (let iy = ty * k; iy < Math.min(G.H, (ty + 1) * k); iy++) for (let ix = tx * k; ix < Math.min(G.W, (tx + 1) * k); ix++) { const gi = iy * G.W + ix; if (!(G.outside && G.outside[gi]) && viaFits(G, inp.vmaps, gi)) n++; }
-    capV[ty * nx + tx] = Math.floor(n / per);
+    capV[ty * nx + tx] = n > 0 ? Math.max(1, Math.floor(n / per)) : 0;
+  }
+  // a connection's own pads: the borders their copper, grown by what a reference track keeps from it, touches are free
+  // for that connection (no capacity used, none missing): it is leaving its own pad there
+  const freeOf = new Map<number, Set<number>>();
+  const nd = inp.need ?? p / 2, cx = (x: number) => (x - G.ox) / g + 0.5, cy = (y: number) => (y - G.oy) / g + 0.5;   // in cells from the low edge of cell 0
+  for (const c of conns) {
+    const set = new Set<number>();
+    for (const e of [c.a, c.b]) {
+      if (!e.box) continue; const x0 = cx(e.box[0] - nd), y0 = cy(e.box[1] - nd), x1 = cx(e.box[2] + nd), y1 = cy(e.box[3] + nd); const ls = layersOf(e.layers);
+      for (let K = Math.max(1, Math.ceil(x0 / k)); K <= Math.min(nx - 1, Math.floor(x1 / k)); K++) for (let j = Math.max(0, Math.floor(y0 / k)); j <= Math.min(ny - 1, Math.floor(y1 / k)); j++) for (const l of ls) set.add((l * GT + j * nx + K - 1) * 2);
+      for (let K = Math.max(1, Math.ceil(y0 / k)); K <= Math.min(ny - 1, Math.floor(y1 / k)); K++) for (let i = Math.max(0, Math.floor(x0 / k)); i <= Math.min(nx - 1, Math.floor(x1 / k)); i++) for (const l of ls) set.add((l * GT + (K - 1) * nx + i) * 2 + 1);
+    }
+    if (set.size) freeOf.set(c.id, set);
   }
   // ---- negotiation state
   const useE = new Float64Array(N), useN = new Float64Array(N), useV = new Int32Array(GT);
@@ -71,15 +150,15 @@ export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
   const paths = new Map<number, number[]>(); const byId = new Map(conns.map((c) => [c.id, c]));
   let anyX = false, pres = 0, margin = BOX_MARGIN;
   const tileOf = (q: Pt): number => { const tx = Math.min(nx - 1, Math.max(0, Math.floor((q[0] - G.ox) / g / k))), ty = Math.min(ny - 1, Math.max(0, Math.floor((q[1] - G.oy) / g / k))); return ty * nx + tx; };
-  const layersOf = (ls: number[]) => { const out = ls.filter((l) => l >= 0 && l < L && rt[l]); return out.length ? out : rt.map((r, l) => r ? l : -1).filter((l) => l >= 0); };
   const netOn = (code: number, net: string) => { const m = shared.get(code); return !!m && (m.get(net)?.n || 0) > 0; };
   const apply = (c: PlanConn, path: number[], sign: number) => {
-    let pd = 0;
+    let pd = 0; const fr = freeOf.get(c.id);
     for (let i = 0; i + 1 < path.length; i++) {
       const a = path[i], b = path[i + 1]; let st = b - a; const lo = Math.min(a, b), df = Math.abs(st);
       if (df >= GT) { useV[lo % GT] += sign; st = 0; }
       else {
         const vert = df === nx && ((a % GT) % nx) === ((b % GT) % nx); const code = lo * 2 + (vert ? 1 : 0);
+        if (fr && fr.has(code)) { if (st === pd) (vert ? vT : hT)[a] += sign * c.demand; pd = st; continue; }   // its own pad's border: no capacity used
         let m = shared.get(code); if (!m) shared.set(code, m = new Map()); const e = m.get(c.net) || { n: 0, d: c.demand };
         if (sign > 0) { if (!e.n) { e.d = c.demand; (vert ? useN : useE)[lo] += e.d; } e.n++; m.set(c.net, e); }
         else { e.n--; if (!e.n) { (vert ? useN : useE)[lo] -= e.d; m.delete(c.net); } }
@@ -91,9 +170,10 @@ export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
   // ---- one step's price
   const ecost = (l: number, ra: number, rb: number, c: PlanConn, pr: number): number => {
     const lo = ra < rb ? ra : rb, vert = Math.abs(rb - ra) === nx && (ra % nx) === (rb % nx), s = l * GT + lo, code = s * 2 + (vert ? 1 : 0);
-    const cap = vert ? capN[s] : capE[s], use = vert ? useN[s] : useE[s], hist = vert ? histN[s] : histE[s];
+    const own = freeOf.get(c.id)?.has(code) || false;   // its own pad's border: never short for it (Copper's _patch)
+    const cap = (vert ? capN[s] : capE[s]) + (own ? c.demand : 0), use = vert ? useN[s] : useE[s], hist = vert ? histN[s] : histE[s];
     const pf = inp.pref[l] || 0; const against = vert ? Math.max(0, pf) : Math.max(0, -pf);
-    let cost = T * (1 + DIR_BIAS * against) * (1 + hist + (cap <= 0 ? WALL : 0));
+    let cost = T * (1 + DIR_BIAS * against) * (1 + hist + (cap <= 0 && !own ? WALL : 0));
     const o = netOn(code, c.net) ? use - cap : use + c.demand - cap;
     if (pr && o > 0) cost *= 1 + pr * o / p;
     const sa = l * GT + ra, sb = l * GT + rb;
@@ -181,6 +261,8 @@ export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
   // ---- negotiation
   const maxIters = Math.max(1, inp.iters || MAX_ITERS), maxMs = inp.maxMs || 8000;
   for (const c of conns) route(c, 0);
+  const direct = new Map(paths);   // each connection's path before any negotiation: its direct path
+  const contest = new Map<number, number>();
   let ov = overflow(); const first = ov.tot;
   let best = { tot: ov.tot, wire: wire(), paths: new Map(paths) }; let its = 1;
   for (let it = 0; ov.tot > 1e-6 && its < maxIters && Date.now() - t0 < maxMs; it++) {
@@ -189,8 +271,9 @@ export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
     for (const [o, code] of ov.edges) { hot.add(code); const s = code >> 1; if (code & 1) histN[s] += o / p; else histE[s] += o / p; }
     for (const [o, r] of ov.cols) { histV[r] += o; hot.add(-1 - r); }
     const hotx = new Set<number>(); for (const [o, run, a, b] of ov.xruns) { for (const n of run) histX[n] += o / p; hotx.add(a); hotx.add(b); anyX = true; }
-    const redo = conns.filter((c) => { const q = paths.get(c.id); if (!q) return true; return hotx.has(c.id) || codesOf(q).some((x) => hot.has(x)); });
+    const redo = conns.filter((c) => { const q = paths.get(c.id); if (!q) return true; const fr = freeOf.get(c.id); return hotx.has(c.id) || codesOf(q).some((x) => hot.has(x) && !(fr && fr.has(x))); });
     if (!redo.length) break;
+    for (const c of redo) contest.set(c.id, (contest.get(c.id) || 0) + 1);
     for (const c of redo) { const old = paths.get(c.id); rip(c); if (!route(c, pres) && old) { paths.set(c.id, old); apply(c, old, 1); } if (Date.now() - t0 > maxMs) break; }
     its++; ov = overflow(); const w = wire();
     if (ov.tot < best.tot - 1e-9 || (Math.abs(ov.tot - best.tot) <= 1e-9 && w < best.wire)) best = { tot: ov.tot, wire: w, paths: new Map(paths) };
@@ -233,20 +316,28 @@ export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
     apply(c, q, -1); apply(c, nq, 1); paths.set(c.id, nq);
     if (overAt(q, nq) + crossOf(c.id) > before + 1e-9) { apply(c, nq, -1); apply(c, q, 1); paths.set(c.id, q); } else relayered++;
   }
-  // ---- corridors: the path's tiles and a ring round them; the layer each tile is left on (any where it changes layer)
+  // ---- corridors: the path's tiles and a ring round them (at least 1 mm); the layer each tile is left on (any where
+  // it changes layer); whether the negotiation moved it off its direct path, and how often it had to fight for it
   ov = overflow(); const overOf = new Map<number, number>(); for (const [o, , a, b] of ov.xruns) { overOf.set(a, (overOf.get(a) || 0) + o); overOf.set(b, (overOf.get(b) || 0) + o); }
-  const corridors = new Map<number, Corridor>();
+  const corridors = new Map<number, Corridor>(); let nMoved = 0, nContested = 0;
+  const R = Math.max(1, Math.ceil(MOVED_MM / T - 1e-9)), near = new Uint8Array(GT);
   for (const c of conns) {
     const q = paths.get(c.id); if (!q) continue;
+    // moved: some tile of the plan lies farther than R tiles from every tile of the direct path
+    const d = direct.get(c.id) || q; near.fill(0);
+    for (const n of d) { const r = n % GT, tx = r % nx, ty = (r / nx) | 0; for (let y = Math.max(0, ty - R); y <= Math.min(ny - 1, ty + R); y++) near.fill(1, y * nx + Math.max(0, tx - R), y * nx + Math.min(nx - 1, tx + R) + 1); }
+    const moved = q.some((n) => !near[n % GT]);
     const tiles = new Uint8Array(GT), layer = new Int8Array(GT).fill(-2); let vias = 0;
     for (let i = 0; i < q.length; i++) {
       const r = q[i] % GT, l = (q[i] / GT) | 0; const tx = r % nx, ty = (r / nx) | 0;
-      for (let y = Math.max(0, ty - 1); y <= Math.min(ny - 1, ty + 1); y++) for (let x = Math.max(0, tx - 1); x <= Math.min(nx - 1, tx + 1); x++) tiles[y * nx + x] = 1;
+      for (let y = Math.max(0, ty - R); y <= Math.min(ny - 1, ty + R); y++) tiles.fill(1, y * nx + Math.max(0, tx - R), y * nx + Math.min(nx - 1, tx + R) + 1);
       if (i > 0 && q[i - 1] % GT === r) vias++;
       layer[r] = layer[r] === -2 || layer[r] === l ? l : -1;
     }
     for (let r = 0; r < GT; r++) if (layer[r] === -2) layer[r] = -1;
-    corridors.set(c.id, { tiles, layer, vias, overflow: (overOf.get(c.id) || 0) + overAt(q), path: q });
+    const over = (overOf.get(c.id) || 0) + overAt(q), fought = (contest.get(c.id) || 0) + (over > 1e-6 ? 1 : 0);
+    if (moved) nMoved++; if (fought) nContested++;
+    corridors.set(c.id, { tiles, layer, vias, overflow: over, path: q, moved, contest: fought });
   }
-  return { k, T, nx, ny, corridors, iterations: its, overflowFirst: first, overflow: ov.tot, crossings: ov.xruns.length, relayered, ms: Date.now() - t0 };
+  return { k, T, nx, ny, corridors, iterations: its, overflowFirst: first, overflow: ov.tot, crossings: ov.xruns.length, relayered, moved: nMoved, contested: nContested, ms: Date.now() - t0 };
 }
