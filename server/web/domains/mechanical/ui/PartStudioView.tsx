@@ -34,9 +34,9 @@ function Dock({ studio, where }: { studio: PartStudio; where: "left" | "right" }
   const shown = panels.filter((p) => !p.visible || p.visible(studio));
   const firstOpen = shown.find((p) => panelOpen(studio, p));
   return (
-    <aside className={cx("cad-dock flex min-h-0 bg-bench", edge, folded ? "w-6 flex-col items-center" : "w-60 flex-col")} data-side={where} data-folded={folded || undefined}>
+    <aside className={cx("cad-dock flex min-h-0 bg-bench", edge, folded ? "w-7 flex-col items-center" : "w-60 flex-col")} data-side={where} data-folded={folded || undefined}>
       {folded ? (
-        <button type="button" className="btn sm ghost p-0 w-5 h-6 mt-0.5 min-h-0" title={`Show the ${shown.map((p) => p.title).join(", ")} panels`} aria-label="Show the panels" data-dock-unfold={where} onClick={() => setDockFolded(where, false)}>
+        <button type="button" className="btn sm ghost p-0 w-6 h-7 mt-0.5 min-h-0 text-ink" title={`Show the ${shown.map((p) => p.title).join(", ")} panels`} aria-label="Show the panels" data-dock-unfold={where} onClick={() => setDockFolded(where, false)}>
           <Glyph svg={where === "left" ? CHEVRON : '<path d="M15 6l-6 6 6 6"/>'} size={14} />
         </button>
       ) : null}
@@ -47,15 +47,15 @@ function Dock({ studio, where }: { studio: PartStudio; where: "left" | "right" }
         const visible = shown.includes(p), open = visible && panelOpen(studio, p);
         return (
           <section key={p.id} className={cx("flex flex-col min-h-0", (folded || !visible) && "hidden", open ? (where === "left" && p === firstOpen ? "flex-[1_1_0]" : "flex-[0_1_auto] min-h-16") : "flex-none", "border-b border-line last:border-b-0")} data-panel={p.id} data-open={open || undefined}>
-            <header className="flex flex-none items-center h-5.5 text-sm text-ink bg-[linear-gradient(var(--color-paper),var(--color-bench))] border-b border-line select-none">
-              <button type="button" className={cx(BARE, "flex flex-1 min-w-0 items-center gap-1 h-full px-1 text-left font-semibold")} aria-expanded={open} data-panel-toggle={p.id} title={open ? `Fold ${p.title}` : `Unfold ${p.title}`} onClick={() => setPanelOpen(p.id, !open)}>
-                <span className={cx("flex-none text-ink-3 transition-transform", open && "rotate-90")}><Glyph svg={CHEVRON} size={12} /></span>
+            <header className="flex flex-none items-center h-8 text-base text-ink bg-[linear-gradient(var(--color-paper),var(--color-bench))] border-b border-line select-none">
+              <button type="button" className={cx(BARE, "flex flex-1 min-w-0 items-center gap-1.5 h-full pl-1.5 pr-1 text-left font-semibold")} aria-expanded={open} data-panel-toggle={p.id} title={open ? `Fold ${p.title}` : `Unfold ${p.title}`} onClick={() => setPanelOpen(p.id, !open)}>
+                <span className={cx("flex-none text-ink-2 transition-transform", open && "rotate-90")}><Glyph svg={CHEVRON} size={14} /></span>
                 <span className="truncate">{p.title}</span>
-                {p.count && p.count(studio) !== null ? <span className="mono text-xs font-normal text-ink-3" data-panel-count={p.count(studio)}>{p.count(studio)}</span> : null}
+                {p.count && p.count(studio) !== null ? <span className="mono text-sm font-normal text-ink-2" data-panel-count={p.count(studio)}>{p.count(studio)}</span> : null}
               </button>
               {p === shown[0] ? (
-                <button type="button" className={cx(BARE, "flex flex-none items-center h-full px-1 text-ink-3 hover:text-ink")} title="Fold these panels away" aria-label="Fold these panels away" data-dock-fold={where} onClick={() => setDockFolded(where, true)}>
-                  <Glyph svg={where === "left" ? '<path d="M15 6l-6 6 6 6"/>' : CHEVRON} size={12} />
+                <button type="button" className={cx(BARE, "flex flex-none items-center h-full px-1.5 text-ink-2 hover:text-ink")} title="Fold these panels away" aria-label="Fold these panels away" data-dock-fold={where} onClick={() => setDockFolded(where, true)}>
+                  <Glyph svg={where === "left" ? '<path d="M15 6l-6 6 6 6"/>' : CHEVRON} size={14} />
                 </button>
               ) : null}
             </header>

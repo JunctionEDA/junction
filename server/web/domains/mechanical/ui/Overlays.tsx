@@ -1,7 +1,8 @@
 // Overlays.tsx — what opens over the part studio for a moment and goes again:
 //
-//   CommandPalette   the tool search: S opens it at the pointer, Ctrl/Cmd+K in the middle.  Type a few letters
-//                    of any tool or feature, Enter runs the first; ↑ ↓ choose.
+//   CommandPalette   the tool search: the field at the right of the toolbar opens it in its own place, S at the
+//                    pointer, Ctrl/Cmd+K in the middle.  Type a few letters of any tool or feature, or another
+//                    word for it ("cut", "round"); Enter runs the first; ↑ ↓ choose.
 //   ContextMenu      a right click in the viewport that did not turn the view: what can be done with what is
 //                    under the pointer (studio.ts onContext puts it in `ui.menu`).
 //   Shortcuts        the sheet of every key (?), read from the same registries as the toolbar.
@@ -11,28 +12,19 @@ import { displayOf, selectedBodies } from "../inspect/appearance-display";
 import { sketchEditor } from "../sketch/editor";
 import type { Pick } from "../viewport/modelview";
 import { allCommands, type Entry } from "./commands";
+import { searchCommands } from "./search";
 import { Glyph } from "./Glyph";
 import { useStudio } from "./hooks";
 import { FEATURE_KEYS, featureDef, type PartStudio } from "./studio";
+import { SEARCH } from "./Toolbar";
 
 const BARE = "appearance-none bg-transparent border-0 m-0 text-inherit [font-family:inherit] [font-size:inherit]";
 
-/** How well `q` matches a title: lower is better; -1 is no match.  Starts of words count most. */
-export function matchScore(title: string, q: string): number {
-  const t = title.toLowerCase(), s = q.trim().toLowerCase();
-  if (!s) return 0;
-  if (t.startsWith(s)) return 0;
-  const word = t.split(/[\s-]+/).findIndex((w) => w.startsWith(s));
-  if (word >= 0) return 1 + word;
-  const at = t.indexOf(s);
-  if (at >= 0) return 10 + at;
-  // the letters in order: "cr" finds Centre rectangle
-  let i = 0; for (const ch of t) if (ch === s[i]) i++;
-  return i === s.length ? 50 : -1;
-}
+interface PaletteAt { x: number | null; y: number | null; /** opened from the toolbar's search field: drawn in its place */ under?: { left: number; top: number; width: number; right: number } }
 
 export function CommandPalette({ studio }: { studio: PartStudio }) {
-  const at = useStudio(studio, (s) => (s.ui?.palette as { x: number | null; y: number | null } | undefined) || null);
+  const at = useStudio(studio, (s) => (s.ui?.palette as PaletteAt | undefined) || null);
+  const sketch = useStudio(studio, (s) => !!s.sketch);
   const [q, setQ] = useState("");
   const [index, setIndex] = useState(0);
   const input = useRef<HTMLInputElement>(null);
@@ -40,32 +32,37 @@ export function CommandPalette({ studio }: { studio: PartStudio }) {
   useEffect(() => { if (at) { setQ(""); setIndex(0); input.current?.focus(); } }, [at]);
   const all = useMemo(() => (at ? allCommands(studio) : []), [at, studio]);
   if (!at) return null;
-  const found = all.map((e) => ({ e, score: matchScore(e.title, q) })).filter((x) => x.score >= 0).sort((a, b) => a.score - b.score).map((x) => x.e).slice(0, q ? 12 : 60);
+  const found = searchCommands(all, q);
   const run = (e: Entry | undefined) => { if (!e || e.why) return; close(); e.run(); };
-  const w = 320, h = 360;
-  const left = at.x === null ? Math.round(window.innerWidth / 2 - w / 2) : Math.max(8, Math.min(at.x - 20, window.innerWidth - w - 8));
-  const top = at.y === null ? Math.round(window.innerHeight * 0.2) : Math.max(8, Math.min(at.y - 18, window.innerHeight - h - 8));
+  const w = at.under ? Math.max(340, at.under.width) : 340, h = 420;
+  const left = at.under ? Math.max(8, Math.min(at.under.right - w, window.innerWidth - w - 8)) : at.x === null ? Math.round(window.innerWidth / 2 - w / 2) : Math.max(8, Math.min(at.x - 20, window.innerWidth - w - 8));
+  const top = at.under ? at.under.top - 1 : at.y === null ? Math.round(window.innerHeight * 0.2) : Math.max(8, Math.min(at.y - 18, window.innerHeight - h - 8));
   return (
     <div className="fixed inset-0 z-[60]" onPointerDown={close} data-palette-scrim>
-      <div className="cad-palette absolute flex flex-col rounded-md border border-line bg-panel shadow-panel text-base text-ink overflow-hidden" style={{ left, top, width: w, maxHeight: h }} role="dialog" aria-label="Find a tool" onPointerDown={(ev) => ev.stopPropagation()}>
-        <input ref={input} autoFocus className="input m-1.5 flex-none" type="search" placeholder="Find a tool or a feature…" aria-label="Find a tool" value={q} data-palette-input
-          onChange={(ev) => { setQ(ev.target.value); setIndex(0); }}
-          onKeyDown={(ev) => {
-            ev.stopPropagation();
-            if (ev.key === "Escape") { ev.preventDefault(); close(); }
-            else if (ev.key === "Enter") { ev.preventDefault(); run(found[index]); }
-            else if (ev.key === "ArrowDown") { ev.preventDefault(); setIndex(Math.min(found.length - 1, index + 1)); }
-            else if (ev.key === "ArrowUp") { ev.preventDefault(); setIndex(Math.max(0, index - 1)); }
-          }} />
-        <div className="overflow-y-auto pb-1" role="listbox">
-          {found.length ? found.map((e, i) => (
-            <button key={e.id} type="button" role="option" aria-selected={i === index} aria-disabled={e.why ? true : undefined} data-command={e.title} ref={i === index ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
-              className={cx(BARE, "flex w-full items-center gap-2 px-2.5 h-7 text-left cursor-pointer", i === index ? "bg-sel" : "hover:bg-sel-soft", e.why && "opacity-45")} title={e.why || e.hint}
+      <div className="cad-palette absolute flex flex-col rounded-md border border-line-2 bg-panel shadow-panel text-base text-ink overflow-hidden" style={{ left, top, width: w, maxHeight: h }} role="dialog" aria-label="Search tools" data-palette-mode={sketch ? "sketch" : "model"} onPointerDown={(ev) => ev.stopPropagation()}>
+        <label className="flex flex-none items-center gap-2 h-9 pl-2.5 pr-2 border-b border-line text-ink-2">
+          <Glyph svg={SEARCH} size={16} />
+          <input ref={input} autoFocus className="appearance-none flex-1 min-w-0 h-full bg-transparent border-0 outline-none p-0 text-base text-ink [font-family:inherit] placeholder:text-ink-3" type="text" role="combobox" aria-expanded="true" aria-controls="cad-palette-list" placeholder={sketch ? "Search sketch tools…" : "Search tools…"} aria-label="Search tools" value={q} data-palette-input
+            onChange={(ev) => { setQ(ev.target.value); setIndex(0); }}
+            onKeyDown={(ev) => {
+              ev.stopPropagation();
+              if (ev.key === "Escape") { ev.preventDefault(); close(); }
+              else if (ev.key === "Enter") { ev.preventDefault(); run(found[index]?.entry); }
+              else if (ev.key === "ArrowDown") { ev.preventDefault(); setIndex(Math.min(found.length - 1, index + 1)); }
+              else if (ev.key === "ArrowUp") { ev.preventDefault(); setIndex(Math.max(0, index - 1)); }
+            }} />
+          <span className="kbd flex-none">Esc</span>
+        </label>
+        <div id="cad-palette-list" className="overflow-y-auto py-1" role="listbox">
+          {found.length ? found.map(({ entry: e, by }, i) => (
+            <button key={e.id} type="button" role="option" aria-selected={i === index} aria-disabled={e.why ? true : undefined} data-command={e.title} data-command-id={e.id} ref={i === index ? (el) => el?.scrollIntoView({ block: "nearest" }) : undefined}
+              className={cx("appearance-none border-0 m-0 text-inherit [font-family:inherit] [font-size:inherit] flex w-full items-center gap-2.5 px-3 h-8 text-left cursor-pointer", i === index ? "bg-sel font-medium" : "bg-transparent hover:bg-sel-soft", e.why && "opacity-40")} title={e.why || e.hint}
               onPointerMove={() => { if (i !== index) setIndex(i); }} onClick={() => run(e)}>
-              <Glyph svg={e.icon} size={16} /><span className="flex-1 truncate">{e.title}</span>{e.shortcut ? <span className="kbd">{e.shortcut}</span> : null}
+              <Glyph svg={e.icon} size={20} /><span className="flex-1 truncate">{e.title}{by ? <span className="text-ink-3" data-command-by={by}> · {by}</span> : null}</span>{e.shortcut ? <span className="kbd">{e.shortcut}</span> : null}
             </button>
-          )) : <p className="note px-2.5 py-1 m-0">Nothing is called that.</p>}
+          )) : <p className="note px-3 py-1 m-0">Nothing is called that.</p>}
         </div>
+        <div className="flex flex-none items-center gap-3 h-7 px-3 border-t border-line text-xs text-ink-3"><span><span className="kbd">↑</span> <span className="kbd">↓</span> choose</span><span><span className="kbd">Enter</span> run</span><span className="flex-1" /><span>{sketch ? "Sketch tools first" : "Tools and features"}</span></div>
       </div>
     </div>
   );
@@ -118,7 +115,7 @@ export function ContextMenu({ studio }: { studio: PartStudio }) {
     if (display.getState().hidden.length || display.getState().isolated) add("Show all parts", () => display.showAll());
     items.push(null);
     if (s.selection.length) add("Clear the selection", () => studio.select([]), "Esc");
-    add("Find a tool…", () => studio.setUi({ palette: { x: at.x, y: at.y } }), "S");
+    add("Search tools…", () => studio.setUi({ palette: { x: at.x, y: at.y } }), "S");
   }
   const shown = items.filter((x, i) => x || (i > 0 && items[i - 1] && i < items.length - 1));
   return (
@@ -154,7 +151,7 @@ export function Shortcuts({ studio }: { studio: PartStudio }) {
   const groups: { title: string; rows: [string, string][] }[] = [
     { title: "Mouse", rows: MOUSE },
     { title: "View", rows: [["F", "Zoom to fit"], ["Z", "Zoom to selection"], ["N", "View normal to the selected face, plane or sketch"], ["Shift+1 … 6", "Front, back, left, right, top, bottom"], ["Shift+7", "Isometric"], ["← ↑ → ↓", "Turn 15° (Shift: 90°)"], ...tools.filter((t) => t.group === "view").map((t): [string, string] => [k(t.key!), t.title])] },
-    { title: "Part studio", rows: [["S", "Find a tool, at the pointer"], ["Ctrl+K", "Find a tool"], ...Object.keys(FEATURE_KEYS).filter((key) => featureDef(FEATURE_KEYS[key])).map((key): [string, string] => [`Shift+${key.toUpperCase()}`, featureDef(FEATURE_KEYS[key])!.title]), ...tools.filter((t) => t.group === "inspect" || t.group === "edit").map((t): [string, string] => [k(t.key!), t.title]), ["F2", "Rename the selected feature"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["?", "This sheet"]] },
+    { title: "Part studio", rows: [["S", "Search tools, at the pointer"], ["Ctrl+K", "Search tools"], ...Object.keys(FEATURE_KEYS).filter((key) => featureDef(FEATURE_KEYS[key])).map((key): [string, string] => [`Shift+${key.toUpperCase()}`, featureDef(FEATURE_KEYS[key])!.title]), ...tools.filter((t) => t.group === "inspect" || t.group === "edit").map((t): [string, string] => [k(t.key!), t.title]), ["F2", "Rename the selected feature"], ["Ctrl+Z / Ctrl+Y", "Undo / redo"], ["?", "This sheet"]] },
     { title: "In a dialog", rows: [["Click", "Add to the field that is listening; click again to take out"], ["Tab", "The next field that takes geometry"], ["Esc", "Stop the field listening; again: cancel"], ["Enter", "Accept"], ["↑ ↓ in a number", "One step (Shift: ten)"]] },
     { title: "In a sketch", rows: [...tools.filter((t) => t.group === "sketch").map((t): [string, string] => [k(t.key!), t.title]), ["Esc", "Put the tool down, then clear the selection"], ["Del", "Delete what is selected"], ["Double click a dimension", "Type its value"]] },
   ];

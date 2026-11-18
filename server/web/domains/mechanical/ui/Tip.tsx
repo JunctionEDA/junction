@@ -17,8 +17,9 @@ const tell = () => { for (const fn of Array.from(listeners)) fn(); };
 
 function show(tip: TipContent, el: Element): void {
   clearTimeout(timer);
-  // moving along a toolbar, the next tooltip comes at once; the first one waits a moment
-  const wait = performance.now() - lastHidden < 300 || shown ? 0 : 450;
+  // moving along a toolbar, the next tooltip comes at once; the first one waits only long enough not to flash
+  // at a pointer that is passing through
+  const wait = performance.now() - lastHidden < 400 || shown ? 0 : 180;
   timer = window.setTimeout(() => { if (!el.isConnected) return; shown = { tip, at: el.getBoundingClientRect() }; tell(); }, wait);
 }
 export function hideTip(): void {
@@ -46,12 +47,12 @@ export function TipHost() {
   // under the element, or above it when there is no room below
   const style = below + 70 < window.innerHeight ? { left, top: below } : { left, bottom: window.innerHeight - s.at.top + 6 };
   return createPortal(
-    <div className="cad-tip fixed z-[70] w-max max-w-62 px-2 py-1.5 rounded-md border border-line bg-panel shadow-panel text-sm text-ink pointer-events-none" role="tooltip" style={style}>
-      <div className="flex items-center gap-2">
+    <div className="cad-tip fixed z-[70] w-max max-w-64 px-2.5 py-2 rounded-md border border-line-2 bg-panel shadow-panel text-base text-ink pointer-events-none" role="tooltip" style={style}>
+      <div className="flex items-center gap-3">
         <span className="font-semibold">{s.tip.title}</span>
         {s.tip.shortcut ? <span className="kbd ml-auto">{s.tip.shortcut}</span> : null}
       </div>
-      {s.tip.why ? <div className="text-xs text-warn mt-0.5">{s.tip.why}</div> : s.tip.hint ? <div className="text-xs text-ink-2 mt-0.5 leading-snug">{s.tip.hint}</div> : null}
+      {s.tip.why ? <div className="text-sm text-warn mt-1 leading-snug">{s.tip.why}</div> : s.tip.hint ? <div className="text-sm text-ink-2 mt-1 leading-snug">{s.tip.hint}</div> : null}
     </div>,
     document.body,
   );
