@@ -69,6 +69,7 @@ export function parseDoc(text: string, docType?: string): Doc {
     // a library footprint (.kicad_mod) opened in the Footprint Editor: its children are the items (footprint-doc.ts)
     if (tree[0] !== "footprint" && tree[0] !== "module") throw new Error("not a footprint");   // (module …): KiCad 5 and older
     const doc = newDoc("pcb"); doc.page = [0, 0];
+    upgradeLegacyArcs(tree);
     loadFootprintDoc(doc, tree, text, addItem);
     computeBBox(doc);
     return doc;
@@ -99,10 +100,27 @@ export function parseDoc(text: string, docType?: string): Doc {
     }   // a KiCad 6 schematic's symbol_instances: each symbol's reference, unit, value and footprint by its path
     else if (k === "lib_symbols" || k === "generator" || k === "generator_version" || k === "general" || k === "setup" || k === "symbol_instances" || k === "embedded_fonts" || k === "embedded_files" || k === "uuid") continue;
     else if (type === "pcb" && PCB_KINDS.has(k) && doc.items.has(uuidOf(node))) (doc.dupItems || (doc.dupItems = [])).push({ id: uuidOf(node), node });   // a second item with an id: kept for Repair Board
-    else addItem(doc, node);
+    else { if (type === "pcb") upgradeLegacyArcs(node); addItem(doc, node); }
   }
   computeBBox(doc);
   return doc;
+}
+
+/**
+ * KiCad 5 / early 6 arcs, (gr_arc|fp_arc (start centre) (end arc-start) (angle deg)), rewritten as the parser does
+ * on load: (start) (mid) (end) on the circle, the sweep clockwise on screen for a positive angle.
+ */
+export function upgradeLegacyArcs(node: SNode): void {
+  const k = node[0];
+  if (k === "footprint" || k === "module") { for (const c of node) if (isList(c) && (c[0] === "fp_arc" || c[0] === "gr_arc")) upgradeLegacyArcs(c); return; }
+  if (k !== "gr_arc" && k !== "fp_arc") return;
+  const ang = kid(node, "angle"), s = kid(node, "start"), e = kid(node, "end");
+  if (!ang || !s || !e || kid(node, "mid")) return;
+  const cx = num(s[1]), cy = num(s[2]), sx = num(e[1]), sy = num(e[2]); const sweep = num(ang[1]) * Math.PI / 180;
+  const at = (t: number): [number, number] => { const c = Math.cos(t), si = Math.sin(t), dx = sx - cx, dy = sy - cy; return [Math.round((cx + dx * c - dy * si) * 1e6) / 1e6, Math.round((cy + dx * si + dy * c) * 1e6) / 1e6]; };
+  const m = at(sweep / 2), q = at(sweep);
+  s[1] = sx; s[2] = sy; e[1] = q[0]; e[2] = q[1];
+  node.splice(node.indexOf(ang), 1, ["mid", m[0], m[1]] as SNode);
 }
 
 

@@ -19136,6 +19136,45 @@
   function segSegDist(a, b, c, d) {
     return segsIntersect2(a, b, c, d) ? 0 : Math.min(dPS(a, c, d), dPS(b, c, d), dPS(c, a, b), dPS(d, a, b));
   }
+  function firstEdgeConflict(P4, Q, clr) {
+    const segs = [];
+    for (const q of Q) for (let j = 0; j < q.length; j++) segs.push([q[j], q[(j + 1) % q.length]]);
+    const cell = Math.max(clr * 2, 0.5), grid = /* @__PURE__ */ new Map(), big = [];
+    segs.forEach(([c, e], j) => {
+      const x0 = Math.floor((Math.min(c[0], e[0]) - clr) / cell), x1 = Math.floor((Math.max(c[0], e[0]) + clr) / cell), y0 = Math.floor((Math.min(c[1], e[1]) - clr) / cell), y1 = Math.floor((Math.max(c[1], e[1]) + clr) / cell);
+      if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4096) {
+        big.push(j);
+        return;
+      }
+      for (let gx = x0; gx <= x1; gx++) for (let gy = y0; gy <= y1; gy++) {
+        const k = gx + "," + gy;
+        const l = grid.get(k);
+        if (l) l.push(j);
+        else grid.set(k, [j]);
+      }
+    });
+    for (const poly of P4) for (let i = 0; i < poly.length; i++) {
+      const a = poly[i], b = poly[(i + 1) % poly.length];
+      const cand = new Set(big);
+      const x0 = Math.floor(Math.min(a[0], b[0]) / cell), x1 = Math.floor(Math.max(a[0], b[0]) / cell), y0 = Math.floor(Math.min(a[1], b[1]) / cell), y1 = Math.floor(Math.max(a[1], b[1]) / cell);
+      if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4096) segs.forEach((_, j) => cand.add(j));
+      else for (let gx = x0; gx <= x1; gx++) for (let gy = y0; gy <= y1; gy++) for (const j of grid.get(gx + "," + gy) || []) cand.add(j);
+      for (const j of [...cand].sort((x, y) => x - y)) {
+        const [c, e] = segs[j];
+        const d = segSegDist(a, b, c, e);
+        if (!(Math.round(d * 1e6) < Math.round(clr * 1e6))) continue;
+        const near3 = (p2) => {
+          const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy;
+          const t = l2 ? Math.max(0, Math.min(1, ((p2[0] - a[0]) * dx + (p2[1] - a[1]) * dy) / l2)) : 0;
+          return [a[0] + t * dx, a[1] + t * dy];
+        };
+        const pc = near3(c), pe = near3(e);
+        const p = Math.hypot(pc[0] - c[0], pc[1] - c[1]) <= Math.hypot(pe[0] - e[0], pe[1] - e[1]) ? pc : pe;
+        return { gap: d, p };
+      }
+    }
+    return null;
+  }
   function polyPolyDist(P4, Q) {
     if (P4.some(([x, y]) => pointInPoly(Q, x, y)) || Q.some(([x, y]) => pointInPoly(P4, x, y))) return 0;
     let d = Infinity;
@@ -26555,8 +26594,9 @@
     const out = [];
     const take = (z, id, tf, fp) => {
       const ko = K.kid(z, "keepout");
-      if (!ko) return;
+      if (!ko && !K.kid(z, "placement")) return;
       const no = (k) => {
+        if (!ko) return k !== "footprints" && k !== "copperpour";
         const c = K.kid(ko, k);
         return !!c && K.str(c[1]) === "not_allowed";
       };
@@ -26610,7 +26650,6 @@
       const core = coreDist({ t: "poly", pts: kos[i].pts }, shape);
       return core === 0 && pointInPolyShape(shape, kos[i].pts) || core < shapeOffset(shape) - DRC_EPS;
     };
-    const firstInside = (shape, pts, P4) => pts.find((p) => pointInPoly(P4, p[0], p[1])) || (shape.t === "seg" ? shape.a : pts[0]);
     for (const it of doc.items.values()) {
       const n = it.node;
       if (it.kind === "segment" || it.kind === "arc") {
@@ -26627,8 +26666,8 @@
         const shape = { t: "path", pts, r: w / 2 };
         kos.forEach((k, i) => {
           if (k.tracks && k.layers.has(layer) && hits(shape, i)) {
-            const p = firstInside(shape, pts, k.pts);
-            out.push(marker("items_not_allowed", sev3, p[0], p[1], `Items not allowed (${keepoutRuleName(k)})`, [it.id]));
+            const p = it.kind === "arc" ? pt(n, "mid") || a : [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2];
+            out.push(marker("items_not_allowed", sev3, p[0], p[1], "Items not allowed", [it.id]));
           }
         });
       } else if (it.kind === "via") {
@@ -27111,6 +27150,12 @@
     return nc && nc.clearance !== void 0 ? nc.clearance : s.clearance;
   };
   var mm4 = (v) => v.toFixed(4) + " mm";
+  var mmPair = (need, actual) => {
+    const a = mm4(need), b = mm4(actual);
+    if (a !== b) return [a, b];
+    const fine = (v) => v.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") + " mm";
+    return [fine(need), fine(actual)];
+  };
   function edgeShapes(doc, o) {
     const shapes = [], chains = [], nodes = [];
     const want = o && o.layer || "Edge.Cuts";
@@ -27441,7 +27486,8 @@
           const ca = pairClr2(A, B), cb = pairClr2(B, A);
           const cls = cb > ca ? netclassName(s, B.net) + (cb < clr(B) ? "' diff pair" : "'") : netclassName(s, A.net) + (ca < clr(A) ? "' diff pair" : "'");
           const [x, y] = boxCenter(a.bbox, b.bbox);
-          out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${by || `netclass '${cls}`} clearance ${mm4(need)}; actual ${mm4(gap)})`, Array.from(/* @__PURE__ */ new Set([a.id, b.id]))), [uid(a), uid(b)]));
+          const [tn, tg] = mmPair(need, gap);
+          out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${by || `netclass '${cls}`} clearance ${tn}; actual ${tg})`, Array.from(/* @__PURE__ */ new Set([a.id, b.id]))), [uid(a), uid(b)]));
         }
       }
     }
@@ -27494,7 +27540,61 @@
       }
       for (const v of seen.values()) {
         const [x, y] = boxCenter(v.c.bbox, v.z.bbox);
-        out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${v.name} clearance ${mm4(v.need)}; actual ${mm4(v.gap)})`, [v.c.id, v.z.id]), [uid(v.c), uid(v.z)]));
+        const [tn, tg] = mmPair(v.need, v.gap);
+        out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${v.name} clearance ${tn}; actual ${tg})`, [v.c.id, v.z.id]), [uid(v.c), uid(v.z)]));
+      }
+      const zItems = [];
+      const zIdx = /* @__PURE__ */ new Map();
+      for (const z of zones) {
+        let k = zIdx.get(z.item);
+        if (k === void 0) {
+          zIdx.set(z.item, k = zItems.length);
+          zItems.push({ item: z.item, conds: [] });
+        }
+        zItems[k].conds.push(z);
+      }
+      const zz = /* @__PURE__ */ new Map();
+      const layersAll = /* @__PURE__ */ new Set();
+      for (const z of zones) for (const l of z.layers) layersAll.add(l);
+      for (const layer of layersAll) {
+        const L = zItems.map((zi) => zi.conds.filter((c) => c.layers.has(layer))).filter((cs) => cs.length);
+        for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
+          const a = L[i][0], b = L[j][0];
+          if ((a.net || "") === (b.net || "")) continue;
+          const ba = L[i].reduce((m, c) => [Math.min(m[0], c.bbox[0]), Math.min(m[1], c.bbox[1]), Math.max(m[2], c.bbox[2]), Math.max(m[3], c.bbox[3])], [Infinity, Infinity, -Infinity, -Infinity]);
+          const bb = L[j].reduce((m, c) => [Math.min(m[0], c.bbox[0]), Math.min(m[1], c.bbox[1]), Math.max(m[2], c.bbox[2]), Math.max(m[3], c.bbox[3])], [Infinity, Infinity, -Infinity, -Infinity]);
+          if (!boxesTouch(ba, bb, maxClr + 1)) continue;
+          let need = Math.max(clr(a), clr(b)), name = `netclass '${clr(a) >= clr(b) ? netclassName(s, a.net) : netclassName(s, b.net)}'`, hit = null;
+          if (clrRules.length) {
+            hit = ruleClearance(clrRules, doc, s, ruleItem2(a, layer), ruleItem2(b, layer));
+            if (hit) {
+              if (!(hit.min > 0)) continue;
+              need = hit.min;
+              name = hit.name;
+            }
+          }
+          if (!hit) {
+            const loc = Math.max(zoneLocal(a), zoneLocal(b));
+            if (loc > need) {
+              need = loc;
+              name = "zone";
+            }
+            if ((s.minClearance || 0) > need) {
+              need = s.minClearance || 0;
+              name = "board minimum";
+            }
+          }
+          if (!(need > 0) || !boxesTouch(ba, bb, need)) continue;
+          const r = firstEdgeConflict(L[i].map((c) => c.shape.pts), L[j].map((c) => c.shape.pts), need);
+          if (!r) continue;
+          zz.set(a.item.id + "|" + b.item.id + "|" + layer, { gap: r.gap, need, name, a, b, p: r.p, layer });
+        }
+      }
+      for (const v of zz.values()) {
+        const [tn, tg] = mmPair(v.need, v.gap);
+        const m = withKiids(marker("clearance", "error", v.p[0], v.p[1], `Clearance violation (${v.name} clearance ${tn}; actual ${tg})`, [v.a.id, v.b.id]), [uid(v.a), uid(v.b)]);
+        m.layer = v.layer;
+        out.push(m);
       }
     }
     const edges = (() => {
@@ -27663,11 +27763,12 @@
       const seen = /* @__PURE__ */ new Set();
       const board = { t: "poly", pts: ol.outline };
       for (const c of nl.conductors) {
-        if (seen.has(c.id) || c.kind === "zone") continue;
+        const key = c.kind === "pad" ? c.id + ":" + c.index : c.id;
+        if (seen.has(key) || c.kind === "zone") continue;
         if (boxesTouch(c.bbox, shapeBBox(board), 0) && shapeGap(c.shape, board) <= EPS) continue;
-        seen.add(c.id);
+        seen.add(key);
         const p = c.kind === "pad" ? [c.pad.x, c.pad.y] : c.anchors[0];
-        out.push(marker("copper_outside_board", "warning", p[0], p[1], "Copper outside board outline", [c.id]));
+        out.push(withKiids(marker("copper_outside_board", "warning", p[0], p[1], "Copper outside board outline", [c.id]), [uid(c)]));
       }
     }
     out.push(...moreDrcMarkers(doc, s, rules));
@@ -46365,6 +46466,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
     coreDist,
     segsIntersect: segsIntersect2,
     polyPolyDist,
+    firstEdgeConflict,
     padShape,
     padCopperLayers,
     viaLayers,
@@ -46409,6 +46511,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
     netclassName,
     netclassOf,
     netClearance,
+    mmPair,
     DEFAULT_SETTINGS,
     edgeShapes,
     chainLoops,

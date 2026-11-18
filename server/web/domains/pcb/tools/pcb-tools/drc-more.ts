@@ -274,7 +274,10 @@ interface Keepout { id: string; name: string; layers: Set<string>; pts: Pt[]; fp
 function keepouts(doc: BoardDoc): Keepout[] {
   const copper = doc.copper.length ? doc.copper : ["F.Cu", "B.Cu"]; const out: Keepout[] = [];
   const take = (z: SNode, id: string, tf: Tf, fp: KItem | null) => {
-    const ko = K.kid(z, "keepout"); if (!ko) return; const no = (k: string) => { const c = K.kid(ko, k); return !!c && K.str(c[1]) === "not_allowed"; };
+    // a rule area: a (keepout …) block, or a placement area alone, whose flags keep ZONE's defaults (tracks, vias and
+    // pads not allowed)
+    const ko = K.kid(z, "keepout"); if (!ko && !K.kid(z, "placement")) return;
+    const no = (k: string) => { if (!ko) return k !== "footprints" && k !== "copperpour"; const c = K.kid(ko, k); return !!c && K.str(c[1]) === "not_allowed"; };
     const poly = K.kid(z, "polygon"); const pts = poly ? K.ptsOf(poly).map(([x, y]) => tf(x, y)) : []; if (pts.length < 3) return;
     const layers = new Set<string>(); for (const l of zoneLayers(z)) { if (l === "*.Cu" || l === "F&B.Cu") copper.forEach((c) => layers.add(c)); else layers.add(l); }
     const nm = K.kid(z, "name"); out.push({ id, name: nm ? K.str(nm[1]) : "", layers, pts, fp, tracks: no("tracks"), vias: no("vias"), pads: no("pads") });
@@ -303,14 +306,14 @@ export function keepoutMarkers(doc: BoardDoc): DrcMarker[] {
   const boxes = kos.map((k) => shapeBBox({ t: "poly", pts: k.pts }));
   // a shape that only touches the area's edge stays outside (the router keeps tracks exactly there)
   const hits = (shape: CopperShape, i: number) => { if (!boxesTouch(shapeBBox(shape), boxes[i], 0)) return false; const core = coreDist({ t: "poly", pts: kos[i].pts }, shape); return core === 0 && pointInPolyShape(shape, kos[i].pts) || core < shapeOffset(shape) - DRC_EPS; };
-  const firstInside = (shape: CopperShape, pts: Pt[], P: Pt[]) => pts.find((p) => pointInPoly(P, p[0], p[1])) || (shape.t === "seg" ? shape.a : pts[0]);
   for (const it of doc.items.values()) {
     const n = it.node;
     if (it.kind === "segment" || it.kind === "arc") {
       const a = pt(n, "start"), b = pt(n, "end"); if (!a || !b) continue; const layer = layerOf(n); const w = K.num((K.kid(n, "width") || [0, 0.25])[1], 0.25);
       let pts: Pt[] = [a, b]; if (it.kind === "arc") { const m = pt(n, "mid"); const arc = m && K.arcFrom3(a, m, b); if (arc) pts = arcPoints(arc, a, b); }
       const shape: CopperShape = { t: "path", pts, r: w / 2 };
-      kos.forEach((k, i) => { if (k.tracks && k.layers.has(layer) && hits(shape, i)) { const p = firstInside(shape, pts, k.pts); out.push(marker("items_not_allowed", sev, p[0], p[1], `Items not allowed (${keepoutRuleName(k)})`, [it.id])); } });
+      // a track's marker names no area and sits at the track's middle (KiCad 10.99)
+      kos.forEach((k, i) => { if (k.tracks && k.layers.has(layer) && hits(shape, i)) { const p = it.kind === "arc" ? (pt(n, "mid") || a) : [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2]; out.push(marker("items_not_allowed", sev, p[0], p[1], "Items not allowed", [it.id])); } });
     } else if (it.kind === "via") {
       const a = pt(n, "at"); if (!a) continue; const size = K.num((K.kid(n, "size") || [0, 0.6])[1], 0.6); const span = viaSpan(doc, viaHole(it) || { layers: null } as Hole);
       const shape: CopperShape = { t: "circle", x: a[0], y: a[1], r: size / 2 };

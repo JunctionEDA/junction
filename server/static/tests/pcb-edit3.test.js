@@ -175,7 +175,13 @@ test("DRC disallow and misc: text on Edge.Cuts, tracks / vias in keepout areas, 
     (segment (start 50 50) (end 55 50) (width 0.2) (layer "In1.Cu") (net 1) (uuid "s4"))`);
   const m = P.drc(doc, null, { unconnected: false });
   assert.deepEqual(codes(m, "text_on_edge_cuts").map((x) => x.ids[0]), ["te"]);
-  const ko = codes(m, "items_not_allowed"); assert.deepEqual(ko.map((x) => x.ids[0]).sort(), ["s1", "s2", "v1"], "s3 only touches the edge"); assert.ok(ko.every((x) => x.text === "Items not allowed (keepout area 'keep')"));
+  const ko = codes(m, "items_not_allowed"); assert.deepEqual(ko.map((x) => x.ids[0]).sort(), ["s1", "s2", "v1"], "s3 only touches the edge"); assert.ok(ko.every((x) => x.text === (x.ids[0] === "v1" ? "Items not allowed (keepout area 'keep')" : "Items not allowed")), "KiCad 10.99 names no area for a track");
+  assert.deepEqual([ko.find((x) => x.ids[0] === "s1").x, ko.find((x) => x.ids[0] === "s1").y], [25, 25], "a track's marker sits at its middle");
+  // a placement rule area without a (keepout …) block keeps ZONE's defaults: tracks, vias and pads not allowed
+  const pl = K.parseDoc(`(kicad_pcb (version 20260206) (generator "pcbnew") (layers (0 "F.Cu" signal) (2 "B.Cu" signal)) (net 0 "") (net 1 "A")
+    (zone (net 0) (net_name "") (layers "F.Cu" "B.Cu") (uuid "pa") (name "pl") (placement (enabled yes) (sheetname "/x/")) (polygon (pts (xy 20 20) (xy 30 20) (xy 30 30) (xy 20 30))))
+    (segment (start 15 25) (end 35 25) (width 0.2) (layer "F.Cu") (net 1) (uuid "s1")) (via (at 25 22) (size 0.6) (drill 0.3) (layers "F.Cu" "B.Cu") (net 1) (uuid "v1")))`, "kicad_pcb");
+  assert.deepEqual(codes(P.drc(pl, null, { unconnected: false }), "items_not_allowed").map((x) => x.ids[0]).sort(), ["s1", "v1"]);
   const dl = codes(m, "item_on_disabled_layer"); assert.deepEqual(dl.map((x) => [x.ids[0], x.text]), [["s4", "Item on a disabled copper layer (layer In1.Cu)"]]);
   const s = P.designSettings({ board: { design_settings: { rule_severities: { items_not_allowed: "ignore", text_on_edge_cuts: "warning" } } } });
   const m2 = P.drc(doc, s, { unconnected: false }); assert.equal(codes(m2, "items_not_allowed").length, 0); assert.equal(codes(m2, "text_on_edge_cuts")[0].severity, "warning");
