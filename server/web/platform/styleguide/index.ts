@@ -5,13 +5,13 @@
 type Mode = "system" | "light" | "dark";
 
 function stored(): Mode {
-  try { const t = localStorage.getItem("kui.theme"); return t === "dark" || t === "light" ? t : "system"; } catch (e) { return "system"; }
+  try { const t = localStorage.getItem("kui.theme"); return t === "dark" || t === "system" ? t : "light"; } catch (e) { return "light"; }
 }
 
 function apply(mode: Mode): void {
   const root = document.documentElement;
-  if (mode === "system") delete root.dataset.theme; else root.dataset.theme = mode;
-  try { if (mode === "system") localStorage.removeItem("kui.theme"); else localStorage.setItem("kui.theme", mode); } catch (e) { /* no storage */ }
+  root.dataset.theme = mode;
+  try { if (mode === "light") localStorage.removeItem("kui.theme"); else localStorage.setItem("kui.theme", mode); } catch (e) { /* no storage */ }
   document.querySelectorAll<HTMLButtonElement>("[data-mode]").forEach((b) => {
     const on = b.dataset.mode === mode; b.classList.toggle("on", on); b.setAttribute("aria-pressed", String(on));
   });
