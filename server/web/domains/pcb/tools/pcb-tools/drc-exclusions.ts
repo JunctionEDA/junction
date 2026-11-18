@@ -11,7 +11,7 @@ export const DRCET: Record<string, string> = { unconnected_items: "UNCONNECTED_I
 /** PCB_MARKER::ToProto stores the layer only for these (it is part of their identity). */
 const LAYER_STORED = new Set(["copper_sliver", "generic_warning", "generic_error", "unconnected_items", "starved_thermal"]);
 const LEGACY_LAYER_FIELD = new Set(["copper_sliver", "generic_warning", "generic_error"]);
-export interface ExMarker { code: string; x: number; y: number; ids: string[]; layer?: string; excluded?: boolean; comment?: string; severity?: string }
+export interface ExMarker { code: string; x: number; y: number; ids: string[]; kiids?: string[]; layer?: string; excluded?: boolean; comment?: string; severity?: string }
 export interface DrcExclusionJson { marker: { error_type: string; position?: { x_nm?: string; y_nm?: string }; items?: { value: string }[]; layer?: string; marker_type?: string }; comment?: string }
 
 /** BoardLayer enum name of a layer (BL_F_Cu, BL_In1_Cu, BL_B_Cu …). */
@@ -28,7 +28,7 @@ export function exclusionOf(doc: BoardDoc | null, m: ExMarker, comment?: string)
   const x = nm(m.x), y = nm(m.y); const pos: { x_nm?: string; y_nm?: string } = {};
   if (x !== "0") pos.x_nm = x; if (y !== "0") pos.y_nm = y;   // proto3 JSON leaves zero fields out
   if (pos.x_nm || pos.y_nm) marker.position = pos;
-  const items = m.ids.map((id) => kiidOf(doc, id)).filter((v) => v && v !== "00000000-0000-0000-0000-000000000000");
+  const items = (m.kiids && m.kiids.length ? m.kiids : m.ids.map((id) => kiidOf(doc, id))).filter((v) => v && v !== "00000000-0000-0000-0000-000000000000");
   if (items.length) marker.items = items.map((value) => ({ value }));
   if (LAYER_STORED.has(m.code)) marker.layer = boardLayerEnum(m.layer || "F.Cu");
   marker.marker_type = "MT_DRC";

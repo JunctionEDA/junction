@@ -12,6 +12,7 @@ mod compact;
 mod doc_actor;
 mod dockind;
 mod nonkicad_import;
+mod kicad_check;
 mod error;
 mod fonts;
 mod github;
@@ -409,6 +410,7 @@ async fn main() -> anyhow::Result<()> {
         // Version history and branches (versions.rs); the checkpoint routes are the old names
         .merge(versions::routes())
         .merge(exports::routes())
+        .merge(kicad_check::routes())
         .merge(proposals::routes())
         // GitHub repository sync (github.rs)
         .route("/auth/github/connect", get(auth::github_connect))

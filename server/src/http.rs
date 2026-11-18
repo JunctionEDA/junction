@@ -756,7 +756,7 @@ pub async fn project_info(
 
 /// The root sheet of a project: the schematic whose file name matches the
 /// project, else the shortest path (a top-level sheet beats a nested one).
-fn root_schematic(docs: &[persist::Document]) -> Option<&persist::Document> {
+pub(crate) fn root_schematic(docs: &[persist::Document]) -> Option<&persist::Document> {
     let pro_stem = docs
         .iter()
         .find(|d| d.doc_type == "kicad_pro")
@@ -1560,7 +1560,7 @@ pub async fn get_project(
 
 /// The folders an archived project sits in when it reaches `up` levels above itself:
 /// the last `up` folders of its place in the repository, else its own name.
-fn archive_home(subdir: &str, project: &str, up: usize) -> Vec<String> {
+pub(crate) fn archive_home(subdir: &str, project: &str, up: usize) -> Vec<String> {
     let clean = |s: &str| -> String {
         let t: String = s.chars().map(|c| if c.is_alphanumeric() || "-_. ".contains(c) { c } else { '_' }).collect();
         let t = t.trim().trim_matches('.').to_string();
@@ -1577,7 +1577,7 @@ fn archive_home(subdir: &str, project: &str, up: usize) -> Vec<String> {
 }
 
 /// Where a project path lands in an archive whose project folder is `home`.
-fn archive_place(home: &[String], path: &str) -> String {
+pub(crate) fn archive_place(home: &[String], path: &str) -> String {
     let mut at: Vec<&str> = home.iter().map(String::as_str).collect();
     for seg in path.split('/') {
         match seg {

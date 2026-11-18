@@ -9,6 +9,7 @@ import { applySeverities } from "./erc-rules";
 import { sheetList, type SheetInstance } from "./sch-hierarchy";
 import { currentSheetPath } from "../editor/variant";
 import { onNetsChanged } from "../editor/schnets";
+import { serverErc, toMarker, uuidIndex } from "../editor/kicad-check";
 
 export interface HierMarker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; docId?: string; sheetPath?: string; sheetKey?: string; selected?: boolean; [k: string]: unknown }
 interface SchErc { ercCheck(doc: KDoc, opts: Record<string, unknown>): HierMarker[]; ercHierarchy?(docs: { doc: KDoc; key: string }[]): HierMarker[][]; state: { markers?: unknown[]; markersDoc?: KDoc | null } }
@@ -24,6 +25,8 @@ export function ercProjectOpts(): Record<string, unknown> {
 }
 /** The markers of the last hierarchical run, by sheet instance (root first, then by page number). */
 let sheets: { docId: string; sheetPath: string; key: string; markers: HierMarker[] }[] = [], runPid: string | null = null;
+/** Who checked the last run: KiCad on the server, or the browser's own checks. */
+export let ercSource: "kicad" | "browser" = "browser";
 const pidNow = (): string | null => { const p = (appState as unknown as { project: { projectId: string } | null }).project; return p ? p.projectId : null; };
 /** The last run's sheets, when it was made in this project. */
 const runSheets = (): typeof sheets => (runPid === pidNow() ? sheets : []);
@@ -57,6 +60,24 @@ export async function runHierErc(opts: { showAllErrors?: boolean }, resolve: (l:
   if (!list.length || !list.some((x) => x.docId === here)) return null;   // a sheet outside the hierarchy: the caller checks it alone
   const erc = obj(projectJson().erc), sev = obj(erc.rule_severities) as Record<string, unknown>, base = ercProjectOpts();
   const out: typeof sheets = [], docs: { doc: KDoc; key: string }[] = [], raw: HierMarker[][] = [];
+  // KiCad's own ERC on the server (editor/kicad-check.ts): each sheet instance takes the report's sheet with its uuid path
+  // ("/<root>/<sheet>/…"; the run keys leave the root out).  The browser's checks below when it cannot run.
+  const rep = here ? await serverErc(here) : null;
+  if (rep && Array.isArray(rep.sheets)) {
+    for (const inst of list) {
+      const key = inst.uuidPath.join("/");
+      const ks = rep.sheets.find((x) => { const segs = String(x.uuid_path || "").split("/").filter(Boolean); return segs.length === inst.uuidPath.length + 1 && segs.slice(1).join("/") === key; });
+      const doc = inst.docId === here && E.kdoc ? E.kdoc : inst.doc, ix = uuidIndex(doc);
+      const all = (ks ? ks.violations || [] : []).map((v) => toMarker(v, ix) as unknown as HierMarker);
+      const ms = resolve(all);
+      for (const m of ms) { m.docId = inst.docId; m.sheetPath = inst.sheetPath; m.sheetKey = key; }
+      out.push({ docId: inst.docId, sheetPath: inst.sheetPath, key, markers: ms });
+    }
+    sheets = out; runPid = pidNow(); ercSource = "kicad";
+    const mine = hereSheet(out);
+    return mine ? mine.markers : [];
+  }
+  ercSource = "browser";
   for (const inst of list) {
     // the sub-sheets this instance's sheet symbols name, and the pins of the sheet symbol that names it
     const subDocs = new Map<string, KDoc>();

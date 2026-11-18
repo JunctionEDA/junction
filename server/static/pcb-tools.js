@@ -44510,7 +44510,7 @@ You may wish to run DRC with 'Test for parity between PCB and schematic' checked
     if (x !== "0") pos.x_nm = x;
     if (y !== "0") pos.y_nm = y;
     if (pos.x_nm || pos.y_nm) marker2.position = pos;
-    const items = m.ids.map((id) => kiidOf(doc, id)).filter((v) => v && v !== "00000000-0000-0000-0000-000000000000");
+    const items = (m.kiids && m.kiids.length ? m.kiids : m.ids.map((id) => kiidOf(doc, id))).filter((v) => v && v !== "00000000-0000-0000-0000-000000000000");
     if (items.length) marker2.items = items.map((value) => ({ value }));
     if (LAYER_STORED.has(m.code)) marker2.layer = boardLayerEnum(m.layer || "F.Cu");
     marker2.marker_type = "MT_DRC";

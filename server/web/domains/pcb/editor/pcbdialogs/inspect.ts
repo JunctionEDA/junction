@@ -15,8 +15,10 @@ import { editProject, type Plain, type ProjectEdit } from "../../canvas/project-
 import { loadBoardHeader, openBoardSetup } from "./board-setup";
 import { loadLibraryFootprint } from "../library";
 import { kicadActionAvailable, runKicadAction } from "../hotkeys";
+import { state as appStore } from "../appstore";
+import { lastFallback, serverDrc, toMarker, uuidIndex } from "../kicad-check";
 
-export interface Marker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; excluded?: boolean; comment?: string; selected?: boolean }
+export interface Marker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; kiids?: string[]; descs?: string[]; layer?: string; excluded?: boolean; comment?: string; selected?: boolean }
 interface Settings { severities: Record<string, string>; netclasses: Record<string, { clearance?: number }>; clearance: number; edgeClearance: number; minTrackWidth: number; minThroughDrill: number; boardSetup?: unknown }
 interface NetRow { name: string; code: number; padCount: number; viaCount: number; trackLength: number; zoneCount: number; unconnected: number }
 interface Stats { footprints: { total: number; front: number; back: number; smd: number; tht: number; other: number }; pads: { total: number; smd: number; tht: number; npth: number; connect: number };
@@ -178,7 +180,7 @@ export function openDrc(ctx: ToolCtx): void {
     last.markers.forEach((m, i) => {
       const t = tabOf(m); if (!shown(m)) return; counts[t]++;
       const row = h("div", { class: "it" + (m === keep ? " sel" : ""), "data-code": m.code, "data-i": String(i) }, h("span", { class: "pd-sev " + (m.excluded ? "exclusion" : m.severity) }), h("div", null, h("div", null, m.text),
-        ...m.ids.map((id) => h("div", { class: "sub" }, describeItem(doc, id))), m.excluded && m.comment ? h("div", { class: "sub", "data-k": "comment" }, m.comment) : null));
+        ...(m.descs || m.ids.map((id) => describeItem(doc, id))).map((d) => h("div", { class: "sub" }, d)), m.excluded && m.comment ? h("div", { class: "sub", "data-k": "comment" }, m.comment) : null));
       row.addEventListener("click", () => select(m, row));
       row.addEventListener("contextmenu", (ev) => { ev.preventDefault(); select(m, row); rowMenu(m, ev.clientX, ev.clientY); });
       lists[t].append(row);
@@ -270,14 +272,21 @@ export function openDrc(ctx: ToolCtx): void {
         status.textContent = "Refilling all zones...";
         await runZoneFill(ctx, { ids: [...doc.items.values()].filter((it) => it.kind === "zone").map((it) => it.id), status, label: "Fill Zone(s)", all: true });
       }
-      gauge.value = 40; status.textContent = "Elapsed: 0 s";
+      gauge.value = 40; status.textContent = "Running KiCad's design rules checker...";
       await new Promise((r) => setTimeout(r, 0));
-      let markers = (await collectMarkers(doc, prefs.parity)).markers;
+      // KiCad's own DRC on the server (kicad-check.ts); the browser's checks when it cannot run
+      let markers: Marker[] | null = null, how = "";
+      const docId = appStore.docId as string | null;
+      if (docId) {
+        const rep = await serverDrc(docId, { parity: prefs.parity, refill: prefs.refill, allTrackErrors: opts.reportAllTrackErrors });
+        if (rep) { const ix = uuidIndex(doc); markers = [...(rep.violations || []), ...(rep.unconnected_items || []), ...(rep.schematic_parity || [])].map((v) => toMarker(v, ix)); }
+      }
+      if (!markers) { markers = (await collectMarkers(doc, prefs.parity)).markers; how = ` (checked in the browser: ${lastFallback || "no saved document"})`; }
       for (const m of markers) { const sv = sevOverride[m.code]; if (sv === "error" || sv === "warning") m.severity = sv; }
       markers = markers.filter((m) => sevOverride[m.code] !== "ignore");
       last.markers = XA().applyExclusions(doc, markers, exclusions()); last.ran = true; last.elapsed = (Date.now() - t0) / 1000; selected = null;
       gauge.value = 100;
-      status.textContent = `Completed in ${formatElapsed(Date.now() - t0)}`;
+      status.textContent = `Completed in ${formatElapsed(Date.now() - t0)}${how}`;
     } finally { clearInterval(tick); setTimeout(() => { gauge.style.display = "none"; }, 300); }
     ctx.setHighlight(null); refresh();
   };
@@ -286,7 +295,7 @@ export function openDrc(ctx: ToolCtx): void {
     const sect = (title: string, tab: number): void => {
       const list = last.markers.filter((m) => tabOf(m) === tab && shown(m));
       lines.push(`** Found ${list.length} ${title} **`);
-      for (const m of list) { lines.push(`[${m.code}]: ${m.text}`, `    @(${m.x.toFixed(4)} mm, ${m.y.toFixed(4)} mm): ${m.excluded ? "Excluded" : m.severity}`); for (const id of m.ids) lines.push("    " + describeItem(doc, id)); if (m.excluded && m.comment) lines.push("    " + m.comment); }
+      for (const m of list) { lines.push(`[${m.code}]: ${m.text}`, `    @(${m.x.toFixed(4)} mm, ${m.y.toFixed(4)} mm): ${m.excluded ? "Excluded" : m.severity}`); for (const d of m.descs || m.ids.map((id) => describeItem(doc, id))) lines.push("    " + d); if (m.excluded && m.comment) lines.push("    " + m.comment); }
       lines.push("");
     };
     sect("DRC violations", 0); sect("unconnected pads", 1); sect("Footprint errors", 2);
