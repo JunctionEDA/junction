@@ -444,6 +444,7 @@ def main() -> int:
     ap.add_argument("--out", default=None, help="where the numbers, routed boards and pictures go (default: <work>/out)")
     ap.add_argument("--work", default=None, help="scratch folder for the copies (default: a temporary folder)")
     ap.add_argument("--cache", default=os.path.join(os.path.expanduser("~"), ".cache", "junction-board-bench"), help="where the boards are cloned")
+    ap.add_argument("--design", default=None, help="JSON of extra board.design() options, e.g. '{\"plan\": true, \"ripup\": \"mincut\"}'")
     ap.add_argument("--time", type=float, default=None, help="seconds the router may take per pass")
     ap.add_argument("--record", action="store_true", help="store the scores in board-bench.scores.json (board-bench.ai-scores.json with --score)")
     ap.add_argument("--strip", default=None, help="only write a copy of each board with its copper taken off into <dir>/<board>, for an AI to route")
@@ -463,6 +464,8 @@ def main() -> int:
             pcb, name, design = n, os.path.splitext(os.path.basename(n))[0], {}
         else:
             pcb, name, design = fetch(n, args.cache), n, dict(manifest[n].get("design") or {})
+        if args.design:
+            design.update(json.loads(args.design))
         if args.strip:
             print(f"{name}: stripped copy in {strip(name, pcb, os.path.join(args.strip, name))}")
             continue

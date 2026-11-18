@@ -2202,6 +2202,7 @@ class Board(_Doc):
         at its connector pin with its ground end out, a crystal turned to its oscillator pins, a matching network in
         line at the radio pin.  bypass=False / seat=False leave those out.
         """
+        self.flush()      # moves queued before it go in first: the engine re-places those parts in a batch of its own
         specs: dict = {}
         allg = dict(self._groups)
         for name, refs in (groups or {}).items():
@@ -2428,10 +2429,14 @@ class Board(_Doc):
         copper within `radius` mm of its pin on the busiest part (the fine-pitch chip) comes up, and the open net is laid
         first, then the nets that were taken up.  An attempt that does not lower the count of open connections is taken
         back exactly, so the board never gets worse.  A second pass tries what is still open with twice the radius.
-        Returns {"before": n, "after": n, "tried": [...]}.  Costs about time_s per open pin; budget_s stops it starting
+        layers= limits the re-laid copper to those layers; by default the inner planes of a six-layer-and-up board are
+        left out, as design() does.  Returns {"before": n, "after": n, "tried": [...]}.  Costs about time_s per open pin; budget_s stops it starting
         another pin once that many seconds have gone (what is left is listed under "not_tried")."""
         import time as _t
         t0 = _t.time(); skipped = []
+        if layers is None:      # the same plane rule as design(): on six layers and up signals stay off the inner planes
+            from .craft import signal_layers
+            layers = signal_layers(self)[0]
         before = self.info()["unrouted_connections"]
         tried = []
         parts = {p["ref"]: p for p in self.geometry()["parts"]}
