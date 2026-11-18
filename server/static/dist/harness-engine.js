@@ -36920,7 +36920,7 @@ var require_pcb_tools = __commonJS({
           }
         }
         const res = {};
-        for (const layer4 of Object.keys(out2)) res[layer4] = out2[layer4].length ? chainLoops2(out2[layer4], 0.02).loops.map((l) => deflatePoly(l, 5e-3)) : [];
+        for (const layer4 of Object.keys(out2)) res[layer4] = out2[layer4].length ? chainLoops2(out2[layer4], 0.02).loops : [];
         return res;
       }
       function segCross(p1, p2, p3, p4) {
@@ -37437,7 +37437,11 @@ var require_pcb_tools = __commonJS({
           out2.push(...disallowMarkers(doc2, s2, rules, items), ...assertionMarkers(doc2, s2, rules, items));
         }
         const fps = Array.from(doc2.items.values()).filter((it) => it.kind === "footprint");
-        const cy = fps.map((fp) => courtyards(fp));
+        const cy = fps.map((fp) => {
+          const c = courtyards(fp);
+          for (const l of Object.keys(c)) c[l] = c[l].map((p) => deflatePoly(p, 5e-3));
+          return c;
+        });
         for (let i = 0; i < fps.length; i++) for (let j = i + 1; j < fps.length; j++) {
           if (!fps[i].bbox || !fps[j].bbox || !boxesTouch(fps[i].bbox, fps[j].bbox, 0)) continue;
           for (const layer4 of ["F.CrtYd", "B.CrtYd"]) {
