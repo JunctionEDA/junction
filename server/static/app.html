@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Junction</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<script>/* the stored UI theme before the first paint (web/shared/theme.ts owns it; keep the two in step) */try{var t=localStorage.getItem("kui.theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<script>/* the stored UI theme before the first paint (web/shared/theme.ts owns it; keep the two in step) */try{var t=localStorage.getItem("kui.theme");document.documentElement.setAttribute("data-theme",t==="dark"||t==="system"?t:"light")}catch(e){}</script>
 <!-- who is signed in, the project and its first document are asked for at once, beside the script downloads (web/domains/pcb/editor/boot.ts) -->
 <script>/*BOOT*/</script>
 <link rel="stylesheet" href="/static/theme.css">

@@ -17,8 +17,8 @@ file, is at `/styleguide`.
    means "go".
 4. **Colour comes from tokens.** No colour literal outside `theme.css`. Canvas drawing uses
    KiCad's own layer and schematic colours (`web/domains/pcb/canvas/colors.ts`) and is the one exception.
-5. **Light and dark are the same design.** Every surface works in both. `data-theme` on `<html>`
-   (stored as `kui.theme`) overrides the system setting.
+5. **Light and dark are the same design.** Every surface works in both. Light is the default for
+   everyone; `data-theme` on `<html>` (stored as `kui.theme`: `dark`, or `system` to follow the system) changes it.
 6. **Plain words.** Use KiCad's own label where KiCad has one. Sentence case, no exclamation
    marks, and an error says what to do next.
 
