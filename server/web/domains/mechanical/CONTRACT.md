@@ -66,8 +66,8 @@ part studio, board, assembly ──read live──▶ instances of an assembly  
 | `domains/mechanical/tools/` | **One file per toolbar tool.** |
 | `domains/mechanical/panels/` | **One file per docked panel.** |
 | `domains/mechanical/services/` | **One file per worker service.** |
-| `domains/mechanical/viewport/` | Bodies, the default planes and their name labels (`planes.ts`), sketches, reference geometry, highlighting, picking and box selection. |
-| `domains/mechanical/ui/` | The part studio controller (`studio.ts`) and its React frame: the toolbar and everything that can be started (`commands.ts`), the dialogs (`DialogShell`, `FeatureDialog`, `SketchDialog`; `fields.ts` is what a click means to a field), the feature list, the view cube, the status bar, the tool search and menus (`Overlays.tsx`), the docks (`panels.ts`), a person's preferences (`prefs.ts`). |
+| `domains/mechanical/viewport/` | Bodies, the default planes and the names lying on every plane (`planes.ts`), sketches, reference geometry, highlighting, picking and box selection. |
+| `domains/mechanical/ui/` | The part studio controller (`studio.ts`) and its React frame: the toolbar and everything that can be started (`commands.ts`), the dialogs (`DialogShell`, `FeatureDialog`, `SketchDialog`; `fields.ts` is what a click means to a field), the feature list, the view cube, the status bar, the tool search and menus (`Overlays.tsx`; `search.ts` is how a tool is found), the docks (`panels.ts`), a person's preferences (`prefs.ts`), how an icon is drawn (`Glyph.tsx`). |
 | `domains/mechanical/collab/` | Presence, Follow, two people in one feature, comments pinned to geometry. |
 | `domains/mechanical/inspect/` | Measure, section view, mass properties, appearance and display modes. |
 | `domains/mechanical/board/` | A board in a part studio: reading it live, its picture, its solids, `BoardFeed`. |
@@ -101,7 +101,7 @@ tests run it first. So:
 | Work | Put new files in | Registers through |
 |---|---|---|
 | A sketch tool, a constraint, a new entity kind | `mechanical/sketch/`, `mechanical/tools/sketch-*.ts` | tools (group `sketch`); the sketch format below |
-| A feature | `mechanical/features/<type>.ts`; shared kernel code in `mechanical/kernel/ops/` | features (`toolbarSection`, `toolbarMenu`) |
+| A feature | `mechanical/features/<type>.ts`; shared kernel code in `mechanical/kernel/ops/` | features (`toolbarSection`, `toolbarOrder`, `toolbarMenu`, `toolbarKeep`) |
 | Something that lives as long as a studio is open (a link to another document, a presence layer) | a file a panel or tool imports, pushing onto `studioExtensions` (`ui/studio.ts`) | studio extensions |
 | Data a feature needs that is not in the document | an input filter (`studio.inputFilters`), and the same data outside the page (see "Building a part studio outside its page") | `document/inputs.ts` |
 | A measurement, a check, an export | `mechanical/services/`, `mechanical/tools/`, `mechanical/panels/` | services, tools, panels |
@@ -348,8 +348,14 @@ sketch) puts it back as it was when it was opened, and takes a sketch made by th
 undoable step (`studio.cancelSketch`).
 
 - **Starting one.** Sketch with a plane or a flat face selected starts drawing at once. With nothing selected
-  the dialog asks for the plane, and a click on one (in the model, on its row in the feature list, or on Top /
-  Front / Right in the dialog) starts drawing; ✓ takes the plane shown (Top).
+  **no plane is chosen for the person**: the sketch's dialog opens with its plane field empty and listening
+  ("Select a plane or planar face") and waits. Nothing is in the document yet (`studio.getState().editing` holds
+  the draft with `params.plane: null`; `awaitsPlane(state)` in `ui/studio.ts` says so), the toolbar shows the
+  sketch tools greyed, and ✓ and Enter do nothing. A click on a plane or a flat face in the model, or on a
+  plane's row in the feature list, fills the field and drawing starts; Esc or ✗ makes no sketch.
+- **The plane field** (`ui/SketchDialog.tsx`) shows the plane with a × beside it. A click on it makes it listen
+  for another plane; × empties it and it waits (the sketch stays where it is until a plane is clicked; Esc
+  leaves it there).
 - **The view.** Opening a sketch turns the view to face its plane when the person likes it so (a preference,
   `ui/prefs.ts sketchNormal`, in the sketch's dialog; N does it at any time), and finishing turns it back to
   where it was.
@@ -378,14 +384,15 @@ undoable step (`studio.cancelSketch`).
 export interface FeatureDefinition<P> {
   type: string;                 // stable id, stored as featureType: never rename
   title: string;                // "Extrude"; new features are named "Extrude 1", …
-  icon?: string;                // inline SVG markup, 24×24 stroke glyph, currentColor
+  icon?: string;                // inline SVG markup in a 24×24 box, currentColor (see "Icons" below)
   defaults(): P;                // parameters of a new feature (a fresh object each call)
   schema: ParamField[];         // the dialog's fields, in order
   evaluate(ctx: EvalContext, params: P): void | Promise<void>;   // runs in the worker
   toolbar?: boolean;            // false: no toolbar button
   toolbarOrder?: number;
-  toolbarSection?: "sketch" | "solid" | "pattern" | "reference" | "board";   // which part of the toolbar ("solid")
-  toolbarMenu?: string;         // features of one section with the same menu share a drop-down ("Fillet")
+  toolbarSection?: "sketch" | "solid" | "modify" | "combine" | "pattern" | "reference" | "board";   // which part of the toolbar ("solid")
+  toolbarMenu?: string;         // variants of one thing share one button and its caret ("Pattern")
+  toolbarKeep?: number;         // how long it stays on the bar in a narrow window (50; 0: always under More)
 }
 ```
 
@@ -480,8 +487,8 @@ export interface FilletParams { [key: string]: any; edges: GeomRef[]; radius: nu
 export default defineFeature<FilletParams>({
   type: "fillet",
   title: "Fillet",
-  icon: '<path d="M5 19V11a6 6 0 0 1 6-6h8"/>',
-  toolbarOrder: 30,
+  icon: '<path class="f" d="M4 20v-8a8 8 0 0 1 8-8h8v16z"/><path d="M4 20v-8a8 8 0 0 1 8-8h8M4 20h16V4"/>',
+  toolbarOrder: 30, toolbarSection: "modify", toolbarKeep: 94,
   defaults: () => ({ edges: [], radius: 1 }),
   schema: [
     { key: "edges", label: "Edges", kind: "refs", of: ["edge"] },
@@ -715,35 +722,60 @@ the status bar         kernel and hints · how the open sketch stands · what a 
 ### The toolbar (`ui/Toolbar.tsx`, `ui/commands.ts`)
 
 Drawn from the registries; nothing is listed by hand. It shows the tools of the **mode** and nothing else
-(`data-mode` on `.cad-toolbar`):
+(`data-mode` on `.cad-toolbar`), in the order an Onshape user's hands know, the most used first:
 
 ```
-model    undo redo delete │ Sketch │ Extrude Revolve Sweep▾ Fillet▾ Shell Hole Boolean▾ │ Pattern▾ │ Reference▾ │ Board▾ │ Measure Section Comment │ Planes Display Perspective │ History Import Export
-sketch   undo redo │ Line Rectangle▾ Circle Arc▾ Slot Point Construction │ Sketch fillet Trim Extend Offset Mirror Use edge │ Dimension │ the twelve constraints │ Extrude Revolve │          ✓ Finish sketch  ✗
-dialog   <icon> <name>  <what the listening field wants> │ Planes Display Perspective │                                   ✓  ✗
-view     (no edit rights) Measure Section Comment │ Planes Display Perspective │ History Import Export
+model    undo redo │ Sketch │ Extrude Revolve Sweep Loft │ Fillet Chamfer Draft Shell Hole │ Boolean Split Transform▾ │ Pattern▾ Mirror │ Plane▾ │ Board▾ │ Measure Section │ History │ More▾   [Search tools… S]
+sketch   undo redo │ Line Rectangle▾ Circle Arc▾ Slot Point Construction │ Sketch fillet Offset Use edge Mirror Trim Extend │ the twelve constraints │ Dimension │ Extrude Revolve │ More▾   [Search tools… S]  ✓ Finish sketch  ✗
+dialog   <icon> <name>  <what the listening field wants> │ More▾                                              [Search tools… S]  ✓  ✗
+view     (no edit rights) Measure Section │ History │ More▾                                                    [Search tools… S]
 ```
 
-- A **feature** says which section it is in (`toolbarSection`, "solid" when absent) and, when it is one of a
-  family, which drop-down it shares (`toolbarMenu`): Sweep ▾ holds Sweep and Loft; Fillet ▾ Fillet, Chamfer and
-  Draft; Boolean ▾ Boolean, Split, Delete body and Transform; Pattern ▾ Linear pattern, Circular pattern and
-  Mirror; Reference ▾ Plane, Axis, Point and Helix; Board ▾ Board, Opening and Standoffs. A family of one is a
-  plain button. Order inside a section is `toolbarOrder`.
-- A **tool** (`core/tool.ts`) names its group (`edit`, `sketch`, `feature`, `inspect`, `view`, `file`) and may
-  name a `menu` the same way. Tools in `sketch` are the sketch toolbar, in the parts their `order` puts them in
-  (draw below 100, modify below 200, constraints below 300, dimension from 300); Rectangle ▾ and Arc ▾ are
-  families. A tool with `button: false` has no button (Select, Hide, Isolate) but is in the tool search.
-- A **family is a split button**: its face runs the variant used last (kept in the browser, `ui/prefs.ts`), its
-  caret opens the list. In the DOM the face is `[data-tool][data-variant]`, the caret `[data-menu][data-items]`.
+- **One button is one tool, drawn as its icon** (22 px; only Sketch carries its name). A **feature** says which
+  section it is in (`toolbarSection`: sketch │ solid │ modify │ combine │ pattern │ reference │ board; "solid"
+  when absent) and where in it (`toolbarOrder`).
+- **A tool with variants is one button and a caret** (`toolbarMenu`, a tool's `menu`): Transform ▾ holds
+  Transform and Delete body; Pattern ▾ Linear and Circular pattern; Reference ▾ Plane, Axis, Point and Helix;
+  Board ▾ Board, Opening and Standoffs; in a sketch Rectangle ▾ and Arc ▾. The face runs the variant used last
+  (kept in the browser, `ui/prefs.ts`), the caret opens the list. A family of one is a plain button. Things
+  that are not variants of each other (Fillet, Chamfer, Draft; Sweep, Loft; Boolean, Split) have a button each.
+  In the DOM the face is `[data-tool][data-variant]`, the caret `[data-menu][data-items]`, the open list
+  `.cad-tb-menu[data-menu-of]`.
+- A **tool** (`core/tool.ts`) names its group (`edit`, `sketch`, `feature`, `inspect`, `view`, `file`). Tools in
+  `sketch` are the sketch toolbar, in the parts their `order` puts them in (draw below 100, modify below 200,
+  constraints below 300, dimension from 300). A tool with `button: false` has no button (Select, Hide, Isolate)
+  but is in the tool search.
+- **The bar never scrolls and never crams; what does not fit is under "More ▾"** at the end of the tools
+  (`[data-menu=More]`, with `data-items` and, beside it, each item's group in `data-item-groups`). Every button
+  says how long it keeps its place (`toolbarKeep` on a feature, `keep` on a tool; 50 when absent, 100 never
+  leaves): when the window is too narrow, the buttons with the lowest number go under More first, and come
+  back when there is room. `keep: 0` is always under More: the `view` group (Planes, Display, Perspective —
+  the view cube's menu has them too), the `file` group unless a tool gives itself a `keep` (History does: its
+  button shows that its drawer is open; Import and Export do not), Comment and Delete. At
+  1100 px the part studio keeps everything up to Plane ▾ on the bar; a sketch keeps the draw and modify tools,
+  Coincident, Horizontal, Vertical and Dimension. More lists what it holds under the sections' names.
+- **The tool search** is a field at the right end of the bar (`[data-tool-search]`, showing its key): a click
+  opens the search in the field's place; **S** opens it at the pointer, **Ctrl/Cmd+K** in the middle
+  (`ui/Overlays.tsx CommandPalette`). It lists everything `commands.ts allCommands` returns for the mode — in a
+  sketch the sketch tools first — and finds a tool by its name, by a word of its name, by its initials, or by
+  **another word for it** (`ui/search.ts KEYWORDS`: "round" finds Fillet, "bevel" Chamfer, "hollow" Shell).
+  A feature whose `operation` field offers results is also listed once per result ("Extrude: remove"), found
+  by what people call it ("cut", "pocket", "boss": `RESULT_WORDS`). ↑ ↓ choose, Enter runs. Add the words for a
+  new tool or feature to `KEYWORDS` under its id (`f:<type>` for a feature). The feature list has a box of its
+  own, which filters the features already made. **?** opens the sheet of keys, read from the same registries.
 - **Every button has a tooltip** with its name, its key and one line on what it does (`ui/Tip.tsx`; a tool's
-  `hint`, a feature's line in `commands.ts FEATURE_HINTS`). Buttons carry no `title`.
-- **The tool search** (`ui/Overlays.tsx CommandPalette`): S opens it at the pointer, Ctrl/Cmd+K in the middle;
-  it lists everything `commands.ts allCommands` returns for the mode. **?** opens the sheet of keys, read from
-  the same registries.
-- **The bar does not scroll sideways** in a window of ordinary width. When the buttons do not fit, the tools
-  lose their labels (`data-density="1"`), then the features (`"2"`); in a sketch the constraints fold into one
-  drop-down. In a script, click a button with `scripts/cad-chrome.mjs` `tool(page, "Chamfer")`, which opens the
-  drop-down when the button is in one.
+  `hint`, a feature's line in `commands.ts FEATURE_HINTS`); it opens after a fifth of a second, and at once
+  when moving along the bar. Buttons carry no `title`.
+- In a script, click a button with `scripts/cad-chrome.mjs` `tool(page, "Chamfer")`, which opens the drop-down
+  or More when the button is in one; `toolTitles(page)` lists everything the bar offers.
+
+**Icons** (`ui/Glyph.tsx`). A feature's or tool's `icon` is SVG markup in a 24×24 box, drawn in the colour of
+the text around it, so it is right in both themes. They are Junction's own drawings, made to be told apart at
+20 to 24 px: outlines 1.75 wide with round ends; a shape with class `f` is filled with a tint of the same
+colour (the body of a solid, the face a tool acts on), `s` is solid (a point, the thing a tool adds), `d` is
+dashed (what was there before, an axis, construction), `t` is a thin outline (the second thing in an icon).
+The feature list shows the same icon as the toolbar. A new icon needs a silhouette no other has; look at it at
+22 px in both themes beside its neighbours before committing it.
 
 ```ts
 export default defineTool({
@@ -804,7 +836,7 @@ A panel is a React component that reads the studio with `useStudio(studio, (s) =
   Appearance (folded), Board (unfolds itself), Collaborators, Comments (folded).
 - **The feature list** (`ui/FeatureList.tsx`) starts with the **default geometry** (Origin, Top, Front, Right:
   rows that select and hide like any other, and that a listening plane field takes a click on), then the
-  features. A box filters by name; Ctrl and Shift select several; F2 or a second slow click renames; the eye
+  features. The box at its top ("Filter features…") filters them by name; Ctrl and Shift select several; F2 or a second slow click renames; the eye
   hides and shows a plane, a sketch or reference geometry (`studio.setVisible`: this person's view, kept in the
   browser per document, never in the document); the pointer over a row lights up what the feature made and the
   pointer over the model marks the row that made the face; the rollback bar is always there to drag and says
@@ -828,12 +860,12 @@ studio.commit(changes)         // see "How a change is committed"
 studio.undo(), studio.redo()
 studio.kernel.call(name, args)
 studio.view                    // ModelView: pick(ev), planePoint(ev, frame), setOverlay, setFilter, sketchFrame, pointerTool,
-                               //   setMarks, boxOf(picks), normalOf(pick), picksOfFeature(id), planeLayer
+                               //   setMarks, boxOf(picks), normalOf(pick), picksOfFeature(id), planeLayer (halfOf(id), labelInfo())
 studio.viewport                // Viewport3D: fit(), setView(), lookAlong(), rotateBy(), ray(ev), project(p), pixelSize(), scene
 studio.select(picks), studio.selectFeature(id, add?), studio.selectFeatures(ids), studio.pickFromList(pick)
 studio.startFeature(type), studio.editFeature(id), studio.setDraft(patch), studio.acceptFeature(), studio.cancelFeature()
 studio.setField(key), studio.fillField(key, pick), studio.clearField(key, index?), studio.setFinal(on), studio.pickFilter()
-studio.openSketch(id), studio.finishSketch(), studio.cancelSketch(), studio.setSketchTool(id), studio.setSketchPlane(ref)
+studio.openSketch(id), studio.finishSketch(), studio.cancelSketch(), studio.setSketchTool(id), studio.setSketchPlane(ref), studio.pickSketchPlane(on, cleared?)
 studio.isVisible(id), studio.setVisible(ids, on), studio.setPlanesVisible(on)   // "origin", "top", "front", "right", feature ids
 studio.setUnits({ length?, angle?, places? })
 studio.fit(), studio.zoomToSelection(), studio.zoomToFeature(id), studio.normalTo()
@@ -871,9 +903,19 @@ with `{ kind, body, name }`. A plane or reference geometry a person has hidden i
   adds only.
 - **A right click that did not turn the view** (`view.onContext`) opens the menu for what is under it
   (`ui/Overlays.tsx ContextMenu`); in a sketch it first puts the tool down.
-- **The default planes** (`viewport/planes.ts`) are translucent rectangles that reach a little past the model
-  on their two axes and grow with it, each with its name as page text inside a corner (upright, the corner
-  that is in view, fading as the plane turns edge-on). Reference planes are labelled with their feature's name.
+- **The default planes** (`viewport/planes.ts`) are translucent sheets with a border that reach a little past
+  the model on their two axes and grow with it. Each is drawn as its four quarters, so the three, which cut
+  each other along the axes, blend from the back to the front and read as layered sheets; the side that faces
+  the camera is tinted a little more than the back; each has a tint of its own within one family (the theme's
+  reference colour taken towards its secondary ink: `ModelView.readColors`). The plane under the pointer and
+  the selected ones have a heavier border, a deeper tint and their name in ink.
+- **A plane's name lies in the plane**: text drawn on its surface inside a corner, in the scene, so it turns
+  and foreshortens with the plane (there is no page text over the viewport). It is never mirrored and never
+  upside down — seen from behind or from below it is turned over and moves to the corner then at the top left —
+  its height follows the plane's size, and it fades out as the plane turns edge-on. Reference planes carry
+  their feature's name the same way (`planeLayer.setLabel`). `planeLayer.labelInfo()` says how each name is
+  drawn in the current view (its axes in the model, its opacity), for tests.
+- **A view with nothing built** frames the default planes (`studio.fit()`).
 
 Viewport navigation: right-drag turns, middle-drag or Shift / Ctrl + right-drag slides, the wheel zooms about
 the pointer, a double click with the middle button or F fits. The **view cube** (`ui/ViewCube.tsx`, top right;
@@ -1142,7 +1184,7 @@ Tests, each runnable alone with `node static/tests/<name>.test.js`:
 |---|---|
 | `itemdoc`, `doctabs` | file format, change rules, order keys, the session against a scripted socket; the tabs |
 | `mechanical-doc` | the `.jpart` format, every edit, sketch helpers, region finding, the toolbar's keys |
-| `cad-units`, `cad-fields` | the document's units: formatting, what is typed into a field, expressions that keep their unit; what a click means to a listening dialog field |
+| `cad-units`, `cad-fields` | the document's units: formatting, what is typed into a field, expressions that keep their unit; what a click means to a listening dialog field; how the tool search finds a tool by name and by synonym |
 | `mechanical-kernel` | **the real kernel in node**: sketch → extrude, booleans, names across rebuilds, cache, rollback, errors |
 | `mechanical-features`, `mechanical-patterns` | every solid feature; reference geometry, patterns, sweep, loft, variables |
 | `mechanical-collab` | presence, the draft's rebase, comment anchors, the project room, the `docs` notice, sessions under concurrent edits |
@@ -1175,7 +1217,7 @@ E2E_PG_URL=postgres://user:pass@127.0.0.1:5432/db E2E_JWT_SECRET=dev E2E_BASE=ht
 |---|---|
 | **`cad-e2e`** | **the whole story, two people, one project**: a constrained tray, shell, fillet, patterned bosses, the board in the tray, the tray driving the board, an opening following a connector, an assembly with a hinged lid and the board, interference, the bill of materials, measure, versions compared, STEP. Run it after any change that crosses folders. |
 | `cad-ui` | tabs, sketch, extrude, picking, two people editing, rollback, the stored file |
-| `cad-ux-ui` | **how it feels**: planes labelled and hidden, the toolbar following the mode, the tool search, units and typed conversions, a fillet's field that keeps adding, dialogs that stay put, the feature list, the view cube, box selection, the menus (with `SHOTS`: light and dark, 1500 and 1100 px) |
+| `cad-ux-ui` | **how it feels**: light by default, planes with their names lying in them and hidden, a new sketch waiting for its plane, the toolbar following the mode and fitting 1100 px, the tool search by name and synonym, units and typed conversions, a fillet's field that keeps adding, dialogs that stay put, the feature list, the view cube, box selection, the menus (with `SHOTS`: light and dark, 1500 and 1100 px) |
 | `cad-sketch-ui` | the sketcher: every tool, constraints, dimensions, conflicts |
 | `cad-features-ui`, `cad-patterns-ui` | the solid features; reference geometry, patterns, sweep, variables |
 | `cad-collab-ui` | presence, Follow, two people in one dialog, the live tab list, comments (`ONLY=tabs,comments`) |
@@ -1247,7 +1289,7 @@ panel). A number field accepts an expression; the feature keeps the number and t
 change. A reader of a `.jpart` that does not know variables sees plain numbers. Everything else that builds a part
 studio applies them through `studioInputs` (see "Building a part studio outside its page").
 
-**Import** (`features/import-file.ts`, the Import tool, "+" › Open STEP file…) reads a STEP or BREP file stored
+**Import** (`features/import-file.ts`, the Import tool, "+" › Import files…) reads a STEP or BREP file stored
 with the project into real bodies; faces are named `<feature>:s<solid>:f<face>` by their place in the file.
 What was read is kept in the browser as BREP (`kernel/ops/exchange-cache.ts`, IndexedDB, keyed by the file's
 document id, size and path; the newest six): the next evaluation in that browser reads the BREP back and does

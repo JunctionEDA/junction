@@ -20,6 +20,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { tool } from './cad-chrome.mjs';   // Comment is under More
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -496,7 +497,7 @@ try {
       st.select([{ kind: 'face', body: b.id, name, point: [-20, 0, mesh.bbox[5]] }]);
       return { body: b.id, name, top: mesh.bbox[5] };
     }, ids.e1);
-    await alice.click('[data-tool=Comment]');
+    await tool(alice, 'Comment');
     await alice.waitForSelector('[data-compose] textarea');
     await alice.fill('[data-compose] textarea', 'Is this face flat enough for the gasket?');
     await shot(alice, '10-writing-a-comment');
@@ -538,7 +539,7 @@ try {
     for (const p of [alice, bob]) if (await p.$('[data-thread-open] .cmt-x')) await p.click('[data-thread-open] .cmt-x');
     await until(alice, () => document.querySelectorAll('.cad-pins [data-pin]').length === 1);
     await bob.evaluate(() => { window.JunctionPartStudio.select([]); window.JunctionPartStudio.selectFeature(null); });
-    await bob.click('[data-tool=Comment]');
+    await tool(bob, 'Comment');
     check('with nothing selected the Comment tool asks for a click', await until(bob, () => !!document.querySelector('[data-comment-picking]')));
     await click(bob, bc.x + 130, bc.y + 60);
     await bob.waitForSelector('[data-compose] textarea');

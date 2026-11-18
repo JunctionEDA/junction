@@ -145,10 +145,10 @@ try {
   const finishSketch = async () => { await page.click("[data-tool='Finish sketch']"); };
   const openNewSketch = async (plane) => {
     await page.click('[data-tool=Sketch]');
-    // with a plane or a flat face selected the sketch starts at once; otherwise the dialog asks for the plane:
-    // a click on one starts the sketch on it, ✓ takes the plane the dialog shows (Top)
-    await page.waitForSelector('.cad-dialog[data-feature=sketch], .cad-sketch-dialog');
-    if (await page.locator('.cad-dialog[data-feature=sketch]').count()) { if (plane) await page.click(`.cad-dialog [data-plane=${plane}]`); else await page.click('.cad-dialog [data-accept]'); }
+    // with a plane or a flat face selected the sketch starts at once; otherwise the dialog waits for the plane,
+    // and a click on one (here its row in the feature list) starts the sketch on it
+    await page.waitForSelector('.cad-sketch-dialog');
+    if (await page.locator('.cad-sketch-dialog[data-sketch-waiting]').count()) await page.click(`.cad-features [data-default-geometry=${plane || 'top'}]`);
     await page.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.kernel.state === 'ready'; }, null, { timeout: 60000 });
     await page.waitForTimeout(700);
   };
