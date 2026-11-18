@@ -101446,7 +101446,7 @@ function build3(input) {
             length_mm: r44(res.length),
             unrouted: conns.length ? conns.filter((c) => !c.routed).slice(0, 40).map((c) => ({ net: c.net, from: c.from && c.from.pad, to: c.to && c.to.pad, reason: c.reason, detail: c.detail, blocked_by_nets: c.blockedBy && c.blockedBy.nets })) : failed.slice(0, 40),
             longest_detours: conns.filter((c) => c.routed && c.detourRatio > 1.6).sort((a, b) => b.detourRatio - a.detourRatio).slice(0, 12).map((c) => ({ net: c.net, from: c.from && c.from.pad, to: c.to && c.to.pad, length_mm: r44(c.length), detour_ratio: r44(c.detourRatio), vias: c.vias, layers: c.layers })),
-            fanout: res.fanout && res.fanout.escapes + res.fanout.boxed.length ? { escapes: res.fanout.escapes, ring: res.fanout.ring, via: res.fanout.via, used: res.fanout.used, boxed: res.fanout.boxed.slice(0, 20).map((b) => ({ pad: b.pad, net: b.net, reason: b.reason, blocked_by: b.blockedBy })) } : void 0,
+            fanout: res.fanout && res.fanout.escapes + res.fanout.boxed.length ? { escapes: res.fanout.escapes, ring: res.fanout.ring, via: res.fanout.via, used: res.fanout.used, rows: res.fanout.rows, kept: res.fanout.kept, open: res.fanout.open, boxed: res.fanout.boxed.slice(0, 20).map((b) => ({ pad: b.pad, net: b.net, reason: b.reason, blocked_by: b.blockedBy })) } : void 0,
             plan: res.plan ? { tile_mm: res.plan.tile, tiles: res.plan.tiles, connections: res.plan.conns, iterations: res.plan.iterations, overflow_first_mm: res.plan.overflowFirst, overflow_mm: res.plan.overflow, crossings_left: res.plan.crossings, relayered: res.plan.relayered, moved: res.plan.moved, contested: res.plan.contested, via_connections: res.plan.viaConns, ms: res.plan.ms, inside: res.plan.inside, outside: res.plan.outside } : void 0,
             groups: res.groups && res.groups.inside ? { clusters: res.groups.clusters, inside: res.groups.inside, routed: res.groups.insideRouted, vias: res.groups.insideVias } : void 0,
             // explain: true asks for the reasoning behind the run: which nets went first, which parts formed which cluster, and every connection that changed layer or wandered
@@ -122176,8 +122176,8 @@ var PLANE_COVER = 0.5;
 var PLANE_HOP_MM = 1.5;
 var FAN_ROWS_MM = [0.8, 1.5, 2.2];
 var FAN_FAR_MM = 4;
-var ESCAPES = false;
-var SPREAD = 1.5;
+var ESCAPES = true;
+var SPREAD = 0;
 var PLAN = false;
 var PLAN_RIP = 0.5;
 var PLAN_RIPS = 1;
@@ -122238,6 +122238,11 @@ var Router = class _Router {
     // ------------------------------------------------------------------ fan-out before routing (fanout.ts)
     this.escapeObs = [];
     this.laid = [];
+    // set by routeRuns
+    /** The fine-pitch rows of the board, by key: Copper's needs_fanout (fanout.py) picks the parts, those with a row
+     *  where two tracks do not fit between neighbouring pads (pitch < 2 (w + clr) + pad width, at the board's own
+     *  track and clearance) or with 16 pads or more; every SMD row of such a part counts. */
+    this.rows = /* @__PURE__ */ new Map();
     this.xtalNets = /* @__PURE__ */ new Set();
     this.feedNets = /* @__PURE__ */ new Set();
     this.planeLayers = [];
@@ -122969,11 +122974,52 @@ var Router = class _Router {
       }
       this.nets.push(info);
     }
-    if ((this.opts.escapes ?? ESCAPES) !== false) this.fanout(nl);
+    this.rows = this.fineRows(nl);
+    if ((this.opts.escapes ?? ESCAPES) !== false) this.fanout();
   }
-  /** Escape every connected pin of a fine-pitch chip row before anything is routed, and move the ends of its
-   *  connections to the escapes.  The pins whose net goes elsewhere keep their lane even when they get no escape. */
-  fanout(nl) {
+  fineRows(nl) {
+    const G5 = this.G, s2 = this.s;
+    const key3 = (p) => p[0].toFixed(3) + "," + p[1].toFixed(3);
+    const out2 = /* @__PURE__ */ new Map();
+    const w = s2.trackWidth || 0.25, clr = Math.max(s2.clearance || 0.2, s2.minClearance || 0);
+    const byPart = /* @__PURE__ */ new Map();
+    for (const c of nl.conductors) if (c.kind === "pad" && c.pad && c.pad.type === "smd" && c.item && c.layers.size === 1) {
+      let l = byPart.get(c.item);
+      if (!l) byPart.set(c.item, l = []);
+      l.push(c);
+    }
+    for (const cs of byPart.values()) {
+      if (cs.length < 3) continue;
+      const cx = cs.reduce((s3, c) => s3 + c.pad.x, 0) / cs.length, cy = cs.reduce((s3, c) => s3 + c.pad.y, 0) / cs.length;
+      const pads = cs.filter((c) => Math.max(c.pad.w, c.pad.h) >= 1.2 * Math.min(c.pad.w, c.pad.h)).map((c) => ({ name: this.padNames.get(key3([c.pad.x, c.pad.y])) || key3([c.pad.x, c.pad.y]), p: [c.pad.x, c.pad.y], len: Math.max(c.pad.w, c.pad.h), across: Math.min(c.pad.w, c.pad.h), axis: padAxis(c.pad), layer: G5.layers.indexOf(Array.from(c.layers)[0]) }));
+      const rows3 = padRows(pads.filter((q4) => q4.layer >= 0 && G5.routable[q4.layer]), [cx, cy]);
+      if (!rows3.length) continue;
+      const dense = (r) => {
+        let pitch = Infinity;
+        for (let i = 1; i < r.pads.length; i++) pitch = Math.min(pitch, Math.hypot(r.pads[i].p[0] - r.pads[i - 1].p[0], r.pads[i].p[1] - r.pads[i - 1].p[1]));
+        return pitch < 2 * (w + clr) + Math.max(...r.pads.map((p) => p.across)) - 1e-9;
+      };
+      if (cs.length < 16 && !rows3.some(dense)) continue;
+      for (const r of rows3) out2.set(`${r.pads[0].name}~${r.pads[r.pads.length - 1].name}@${key3(r.pads[0].p)}`, r);
+    }
+    return out2;
+  }
+  /** The rows (keys of `rows`) with a pin that ends a connection this run left open: the pins a plain route left boxed in. */
+  boxedRows() {
+    const key3 = (p) => p[0].toFixed(3) + "," + p[1].toFixed(3);
+    const at5 = /* @__PURE__ */ new Map();
+    for (const [k, r] of this.rows) for (const p of r.pads) at5.set(key3(p.p), k);
+    const out2 = /* @__PURE__ */ new Set();
+    for (const c of this.conns) if (!c.nodes && !c.moot) for (const a of [c.a, c.b, ...c.ends || []]) {
+      const k = at5.get(key3(a.p));
+      if (k) out2.add(k);
+    }
+    return Array.from(out2).sort();
+  }
+  /** Escape every connected pin of the fine-pitch rows (those of `escapeRows` when given) before anything is routed,
+   *  and move the ends of its connections to the escapes.  The pins whose net goes elsewhere keep their lane even when
+   *  they get no escape. */
+  fanout() {
     const G5 = this.G;
     const all2 = G5.layers.map((_, i) => i);
     const key3 = (p) => p[0].toFixed(3) + "," + p[1].toFixed(3);
@@ -122986,23 +123032,8 @@ var Router = class _Router {
       e.conns.push(c);
       e.other.push(b);
     }
-    const byPart = /* @__PURE__ */ new Map();
-    for (const c of nl.conductors) if (c.kind === "pad" && c.pad && c.pad.type === "smd" && c.item && c.layers.size === 1) {
-      let l = byPart.get(c.item);
-      if (!l) byPart.set(c.item, l = []);
-      l.push(c);
-    }
-    const rows3 = [];
-    for (const cs of byPart.values()) {
-      if (cs.length < 8) continue;
-      const cx = cs.reduce((s2, c) => s2 + c.pad.x, 0) / cs.length, cy = cs.reduce((s2, c) => s2 + c.pad.y, 0) / cs.length;
-      const pads = cs.filter((c) => Math.max(c.pad.w, c.pad.h) >= 1.2 * Math.min(c.pad.w, c.pad.h) && Math.min(c.pad.w, c.pad.h) <= 0.4).map((c) => ({ name: this.padNames.get(key3([c.pad.x, c.pad.y])) || key3([c.pad.x, c.pad.y]), p: [c.pad.x, c.pad.y], len: Math.max(c.pad.w, c.pad.h), across: Math.min(c.pad.w, c.pad.h), axis: padAxis(c.pad), layer: G5.layers.indexOf(Array.from(c.layers)[0]) }));
-      for (const r of padRows(pads.filter((q4) => q4.layer >= 0 && G5.routable[q4.layer]), [cx, cy])) {
-        let pitch = Infinity;
-        for (let i = 1; i < r.pads.length; i++) pitch = Math.min(pitch, Math.hypot(r.pads[i].p[0] - r.pads[i - 1].p[0], r.pads[i].p[1] - r.pads[i - 1].p[1]));
-        if (pitch <= 0.65 + 1e-6) rows3.push(r);
-      }
-    }
+    const only = this.opts.escapeRows ? new Set(this.opts.escapeRows) : null;
+    const rows3 = Array.from(this.rows).filter(([k]) => !only || only.has(k)).map(([, r]) => r);
     if (!rows3.length) return;
     const jobs = /* @__PURE__ */ new Map();
     const at5 = /* @__PURE__ */ new Map();
@@ -123107,7 +123138,7 @@ var Router = class _Router {
       }
     }
     this.oidx = null;
-    this.fanReport = { escapes: escapes.length, ring: escapes.filter((e) => e.kind === "ring").length, via: escapes.filter((e) => e.kind === "via").length, used: 0, boxed };
+    this.fanReport = { escapes: escapes.length, ring: escapes.filter((e) => e.kind === "ring").length, via: escapes.filter((e) => e.kind === "via").length, used: 0, boxed, rows: rows3.length };
   }
   /** The rule class a net routes with (its netclass's track width, clearance and via), built on first use. */
   classFor(netKey, cap = Infinity, want2 = 0, smallVia = false) {
@@ -125991,7 +126022,7 @@ ${p[0].toFixed(3)},${p[1].toFixed(3)}`;
       domains: this.domainReport(),
       fences: this.fenceReports,
       groups: this.groupReport(),
-      fanout: this.fanReport,
+      fanout: this.fanReport ? Object.assign({}, this.fanReport, this.fanNote) : this.fanNote,
       plan: this.planReport()
     };
   }
@@ -126029,12 +126060,33 @@ function simplify(nodes) {
   }
   return out2;
 }
+function* routeRuns(K11, P, doc2, settings3, opts2 = {}, onRouter) {
+  const run2 = function* (o) {
+    const r = new Router(K11, P, doc2, settings3, o);
+    if (onRouter) onRouter(r);
+    const result = yield* r.run();
+    return { router: r, result };
+  };
+  const want2 = opts2.escapes ?? ESCAPES;
+  if (want2 === false || opts2.escapeRows) return yield* run2(opts2);
+  const first2 = yield* run2(Object.assign({}, opts2, { escapes: false }));
+  const rows3 = first2.router.boxedRows();
+  if (!rows3.length || first2.router.stopped) return first2;
+  const second = yield* run2(Object.assign({}, opts2, { escapes: want2, escapeRows: rows3 }));
+  const key3 = (r) => [r.failed.length, r.vias, Math.round(r.length * 1e3)];
+  const a = key3(first2.result), b = key3(second.result);
+  const better = b[0] !== a[0] ? b[0] < a[0] : b[1] !== a[1] ? b[1] < a[1] : b[2] < a[2];
+  const kept = better ? second : first2;
+  const note3 = { kept: better, open: [a[0], b[0]] };
+  kept.router.fanNote = better ? note3 : Object.assign({}, second.result.fanout, { used: 0 }, note3);
+  kept.result.fanout = kept.router.fanReport ? Object.assign({}, kept.router.fanReport, kept.router.fanNote) : kept.router.fanNote;
+  return kept;
+}
 function route(K11, P, doc2, settings3, opts2) {
-  const r = new Router(K11, P, doc2, settings3, opts2);
-  const it = r.run();
+  const it = routeRuns(K11, P, doc2, settings3, opts2);
   let s2 = it.next();
   while (!s2.done) s2 = it.next();
-  return s2.value;
+  return s2.value.result;
 }
 
 // web/domains/pcb/router/ui.ts
@@ -126079,11 +126131,12 @@ async function autoroute(ctx, opts2 = {}, ui) {
   const empty2 = { total: 0, routed: 0, failed: [], segments: 0, vias: 0, length: 0, ms: 0, zoneEnds: 0, zoneCovered: 0, dropped: 0, cancelled: false, ids: [] };
   if (!doc2 || ctx.viewOnly || running) return empty2;
   const stamp2 = docStamp(doc2);
-  const router = new Router(K11, P, doc2, settingsOf(ctx), opts2);
-  const me3 = running = { router, cancelled: false, done: false };
-  let res;
+  const me3 = running = { router: null, cancelled: false, done: false };
+  let res, router;
   try {
-    const it = router.run();
+    const it = routeRuns(K11, P, doc2, settingsOf(ctx), opts2, (r) => {
+      me3.router = r;
+    });
     let step = it.next();
     let last3 = Date.now();
     while (!step.done) {
@@ -126095,7 +126148,8 @@ async function autoroute(ctx, opts2 = {}, ui) {
       }
       step = it.next();
     }
-    res = step.value;
+    res = step.value.result;
+    router = step.value.router;
   } finally {
     me3.done = true;
     if (running === me3) running = null;
@@ -127425,7 +127479,7 @@ function openPlace(ctx) {
 }
 
 // web/domains/pcb/router/index.ts
-var api2 = { route, boardSquareCorners, findSquareCorners, Router, isSupply, pairName, netKind, impedance: { stackupOf, traceOn, z0, zdiff, widthFor, usualImpedance }, place, placementChanges, evaluate, autoplace, openPlace, placeSummaryText, autoroute, open, summaryText, probe, featuresOf, costOf, DEFAULT_WEIGHTS, TRAINED, PROVENANCE };
+var api2 = { route, routeRuns, boardSquareCorners, findSquareCorners, Router, isSupply, pairName, netKind, impedance: { stackupOf, traceOn, z0, zdiff, widthFor, usualImpedance }, place, placementChanges, evaluate, autoplace, openPlace, placeSummaryText, autoroute, open, summaryText, probe, featuresOf, costOf, DEFAULT_WEIGHTS, TRAINED, PROVENANCE };
 globalThis.PcbAutoRouter = api2;
 install();
 

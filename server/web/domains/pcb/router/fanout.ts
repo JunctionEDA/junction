@@ -1,5 +1,7 @@
-// Fine-pitch fan-out before routing: every connected pin of a QFN/QFP row gets its escape laid analytically, off the
-// grid, before any track is searched for, and its connections start from the escape's end.
+// Fine-pitch fan-out before routing: every connected pin of a fine-pitch row gets its escape laid analytically, off
+// the grid, before any track is searched for, and its connections start from the escape's end.  Which rows, and
+// whether the escapes stay, is route.ts's (routeRuns, after Copper's engine): only the rows of Copper's needs_fanout
+// parts where a plain route left a pin open, and only when the board then comes out better.
 //
 // Ported from Copper's router v2 (src/copper_kicad/pcb/v2/fanout.py and flow.py; MIT licence,
 // github.com/claynicholson/copper-kicad-mcp):
@@ -106,9 +108,9 @@ interface Geo { n: Pt; t: Pt; rs: number; R: number[] }
 interface Option extends Escape { a: number; b: number; d: number; bin?: string; cut?: string; seq: number }
 
 /** Escape the jobs' pads of each row.  `depth` is how far past the pad's end the first ring lies (at least one
- *  track pitch).  `spread` > 1 first tries a spreading fan: the slots of the row end `spread` times the pad pitch
- *  apart (each pin straight out, then a 45-degree leg away from the middle of the row, the outer pins turning first
- *  so the legs nest).  Returns the escapes laid (already handed to ctx.place) and the pads that got none. */
+ *  track pitch).  `spread` > 1 (ours, not Copper's; route.ts leaves it off) first tries a spreading fan: the slots of
+ *  the row end `spread` times the pad pitch apart (each pin straight out, then a 45-degree leg away from the middle of
+ *  the row, the outer pins turning first so the legs nest).  Returns the escapes laid (already handed to ctx.place) and the pads that got none. */
 export function fanout(rows: FanRow[], jobs: Map<string, FanJob>, ctx: FanCtx, depth = 0, spread = 0): { escapes: Escape[]; boxed: Boxed[] } {
   const book = new Map<string, Escape>(); const boxed: Boxed[] = [];
   for (const row of rows) {
