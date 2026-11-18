@@ -46126,9 +46126,9 @@ var require_pcb_tools = __commonJS({
 .kic{flex:none;vertical-align:middle}
 .kic .dk{display:none}
 :root[data-theme="dark"] .kic .lt{display:none} :root[data-theme="dark"] .kic .dk{display:inline}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .kic .lt{display:none} :root:not([data-theme="light"]) .kic .dk{display:inline}}
+@media (prefers-color-scheme: dark){:root[data-theme="system"] .kic .lt{display:none} :root[data-theme="system"] .kic .dk{display:inline}}
 :root[data-theme="dark"]{--kic-lt:none;--kic-dk:inline}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--kic-lt:none;--kic-dk:inline}}
+@media (prefers-color-scheme: dark){:root[data-theme="system"]{--kic-lt:none;--kic-dk:inline}}
 .kbmp{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:24px;padding:0;border:1px solid var(--line);border-radius:var(--r-2,3px);background:var(--panel);color:var(--ink);cursor:pointer}
 .kbmp>.kic{display:block}
 .kbmp:hover:not(:disabled){border-color:var(--line-2);background:var(--paper)}
@@ -56529,9 +56529,9 @@ var init_kicon_dom = __esm({
 .kic{flex:none;vertical-align:middle}
 .kic .dk{display:none}
 :root[data-theme="dark"] .kic .lt{display:none} :root[data-theme="dark"] .kic .dk{display:inline}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .kic .lt{display:none} :root:not([data-theme="light"]) .kic .dk{display:inline}}
+@media (prefers-color-scheme: dark){:root[data-theme="system"] .kic .lt{display:none} :root[data-theme="system"] .kic .dk{display:inline}}
 :root[data-theme="dark"]{--kic-lt:none;--kic-dk:inline}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--kic-lt:none;--kic-dk:inline}}
+@media (prefers-color-scheme: dark){:root[data-theme="system"]{--kic-lt:none;--kic-dk:inline}}
 .kbmp{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:24px;padding:0;border:1px solid var(--line);border-radius:var(--r-2,3px);background:var(--panel);color:var(--ink);cursor:pointer}
 .kbmp>.kic{display:block}
 .kbmp:hover:not(:disabled){border-color:var(--line-2);background:var(--paper)}
@@ -78531,11 +78531,11 @@ function stored() {
     v = localStorage.getItem(KEY);
   } catch (e) {
   }
-  return v === "light" || v === "dark" ? v : "system";
+  return v === "dark" || v === "system" ? v : "light";
 }
 function getThemeMode() {
   const t = document.documentElement.dataset.theme;
-  return t === "light" || t === "dark" ? t : stored();
+  return t === "light" || t === "dark" || t === "system" ? t : stored();
 }
 function effectiveTheme() {
   const m = getThemeMode();
@@ -78543,13 +78543,11 @@ function effectiveTheme() {
   return typeof matchMedia === "function" && matchMedia(DARK_QUERY).matches ? "dark" : "light";
 }
 function apply2(mode) {
-  const root5 = document.documentElement;
-  if (mode === "system") delete root5.dataset.theme;
-  else root5.dataset.theme = mode;
+  document.documentElement.dataset.theme = mode;
 }
 function setThemeMode(mode) {
   try {
-    if (mode === "system") localStorage.removeItem(KEY);
+    if (mode === "light") localStorage.removeItem(KEY);
     else localStorage.setItem(KEY, mode);
   } catch (e) {
   }
@@ -110876,9 +110874,9 @@ root.KiCadCanvas = api;
 .kic{flex:none;vertical-align:middle}
 .kic .dk{display:none}
 :root[data-theme="dark"] .kic .lt{display:none} :root[data-theme="dark"] .kic .dk{display:inline}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]) .kic .lt{display:none} :root:not([data-theme="light"]) .kic .dk{display:inline}}
+@media (prefers-color-scheme: dark){:root[data-theme="system"] .kic .lt{display:none} :root[data-theme="system"] .kic .dk{display:inline}}
 :root[data-theme="dark"]{--kic-lt:none;--kic-dk:inline}
-@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--kic-lt:none;--kic-dk:inline}}
+@media (prefers-color-scheme: dark){:root[data-theme="system"]{--kic-lt:none;--kic-dk:inline}}
 .kbmp{display:inline-flex;align-items:center;justify-content:center;flex:none;width:26px;height:24px;padding:0;border:1px solid var(--line);border-radius:var(--r-2,3px);background:var(--panel);color:var(--ink);cursor:pointer}
 .kbmp>.kic{display:block}
 .kbmp:hover:not(:disabled){border-color:var(--line-2);background:var(--paper)}
