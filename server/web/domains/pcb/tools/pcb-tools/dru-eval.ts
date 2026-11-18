@@ -101,7 +101,7 @@ export function propOf(doc: BoardDoc, s: DesignSettings, it: RuleItem | null, na
   case "net": case "netname": return str(net());
   case "netcode": return numv(netOf(n).code || 0);
   case "netclass": return str(netclassName(s, net()));
-  case "layer": return str(it.layer || layerOf(n) || "");
+  case "layer": return isZone ? U : str(it.layer || layerOf(n) || "");   // ZONE masks the Layer property (it has Layers)
   case "locked": return bool(yes(n, "locked") || n.slice(1).some((c) => !isList(c) && K.str(c as SAtom) === "locked"));
   case "parent": { const fp = fpOf(it); return fp && !isFp ? str(fieldOf(fp.node, "Reference") || "") : U; }
   case "positionx": case "positiony": { const p = pt(n, "at") || pt(n, "start") || pt(n, "center"); if (!p) return U; if (isPad && it.parent) { const q = padsOf(it.parent).find((x) => x.node === n); if (q) return numv(key === "positionx" ? q.x : q.y); } return numv(key === "positionx" ? p[0] : p[1]); }

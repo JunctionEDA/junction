@@ -175,7 +175,7 @@ export type CopperShape =
   | { t: "seg"; a: Pt; b: Pt; r: number }
   | { t: "path"; pts: Pt[]; r: number }
   | { t: "rect"; x: number; y: number; w: number; h: number; rot: number; rr: number }
-  | { t: "poly"; pts: Pt[] };
+  | { t: "poly"; pts: Pt[]; solid?: boolean };   // solid: an item's outline (a chamfered pad), measured against other polygons too
 /** A rectangle shape's fields (padShape, rectCore). */
 export type RectShape = Extract<CopperShape, { t: "rect" }>;
 /** A segment shape (a track) and a disc (a via, a round pad). */
@@ -221,7 +221,7 @@ export interface DesignSource {
   net_settings?: { classes?: unknown; netclass_assignments?: Record<string, string>; netclass_patterns?: unknown };
 }
 /** A DRC finding (drc): where, how bad, the message, the items, the rule. */
-export interface DrcMarker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; layer?: string; rule?: string }
+export interface DrcMarker { code: string; severity: string; x: number; y: number; text: string; ids: string[]; kiids?: string[]; layer?: string; rule?: string }
 
 /** A routing obstacle that is not copper: an NPTH hole, a rule area keeping tracks out, a board edge. */
 export interface WorldItem { id: string | null; kind: string; shape: CopperShape; bbox: Box; layers?: Set<string>; pad?: PadInfo }

@@ -161,11 +161,15 @@ export function isolatedCopperMarkers(doc: KDoc, conds?: Conductor[]): DrcMarker
   // CN_CONNECTIVITY_ALGO::FillIsolatedIslandsMap: an island is isolated when its connectivity cluster is orphaned
   // (CN_CLUSTER::IsOrphaned, no pad of the net) — whatever tracks, vias or other fills it reaches
   const roots = clusterRoots(all); const padded = new Set<string>();
-  all.forEach((c, i) => { if (c.kind === "pad" && c.net) padded.add(roots[i] + "\u0000" + c.net); });
+  // a netless zone is a net of its own (net code 0): only a netless pad gives its cluster an origin
+  all.forEach((c, i) => { if (c.kind === "pad" && c.pad.type !== "np_thru_hole") padded.add(roots[i] + "\u0000" + (c.net || "")); });
+  const done = new Set<string>();
   all.forEach((c, i) => {
-    if (c.kind !== "zone" || !c.net || zoneFillMode(c.item.node) === "thieving" || isTeardrop(c.item.node)) return;
-    if (padded.has(roots[i] + "\u0000" + c.net)) return;
+    if (c.kind !== "zone" || zoneFillMode(c.item.node) === "thieving" || isTeardrop(c.item.node)) return;
+    if (padded.has(roots[i] + "\u0000" + (c.net || ""))) return;
     const layer = [...c.layers][0]; const poly = c.shape as { t: "poly"; pts: Pt[] };
+    // one report per zone and layer (the first isolated outline)
+    const key = c.id + "|" + (K.uuidOf(c.item.node) || "") + "|" + layer; if (done.has(key)) return; done.add(key);
     const m = marker("isolated_copper", sev, poly.pts[0][0], poly.pts[0][1], "Isolated copper fill", [c.id]) as DrcMarker & { layer?: string };
     m.layer = layer; out.push(m);
   });

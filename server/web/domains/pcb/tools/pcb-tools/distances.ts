@@ -3,6 +3,9 @@ import type { Arc3, Box, CopperShape, PadInfo, PolyShape, Pt, RectShape } from "
 import { distSeg, pointInPoly } from "./hit";
 import { K } from "./state";
 import { rotator } from "./util";
+import { readShape } from "../../fab/model";
+import { customPolys } from "../../fab/plot";
+import { union as unionPolys } from "../../fab/poly";
 
 // ---------------------------------------------------------------- shapes and distances (copper geometry)
 // A copper shape is a core (point, segment, polyline, axis-turned rectangle or polygon) plus an outward
@@ -66,6 +69,7 @@ export function coreDist(s1: CopperShape, s2: CopperShape): number {
     const P = b === "rect" ? rectCore(s2) : (s2 as PolyShape).pts; let d = Infinity; for (const [p, q] of segs) { d = Math.min(d, polySegDist(P, p, q)); if (d === 0) return 0; } return d;
   }
   if (a === "rect") return polyPolyDist(rectCore(s1), b === "rect" ? rectCore(s2) : (s2 as PolyShape).pts);
+  if ((s1 as PolyShape).solid || (s2 as PolyShape).solid) return polyPolyDist((s1 as PolyShape).pts, (s2 as PolyShape).pts);
   return Infinity;   // zone against zone: the filler's business
 }
 export const shapeGap = (s1: CopperShape, s2: CopperShape) => Math.max(0, coreDist(s1, s2) - shapeOffset(s1) - shapeOffset(s2));
@@ -96,6 +100,39 @@ export function padShape(p0: Pick<PadInfo, "shape" | "x" | "y" | "w" | "h" | "ro
     return half > 1e-9 ? { t: "seg", a: [p.x - d[0], p.y - d[1]], b: [p.x + d[0], p.y + d[1]], r: short / 2 } : { t: "circle", x: p.x, y: p.y, r: short / 2 };
   }
   let rr = 0; if (p.shape === "roundrect") { const n = p.node && K.kid(p.node, "roundrect_rratio"); rr = (n ? K.num(n[1]) : 0.25) * Math.min(p.w, p.h); }
+  // the parser makes a roundrect with chamfered corners a CHAMFERED_RECT: cut corners, the others keep their rounding
+  const ch = p.node && (p.shape === "roundrect" || p.shape === "rect") ? K.kid(p.node, "chamfer") : null;
+  const cr = p.node && K.kid(p.node, "chamfer_ratio"); const cs = ch && cr ? K.num(cr[1], 0) * Math.min(p.w, p.h) : 0;
+  if (ch && cs > 1e-9) {
+    const cut = new Set(ch.slice(1).map((x) => K.str(x as SNode)));
+    const hw = p.w / 2, hh = p.h / 2, R = rotator(p.rot), pts: Pt[] = [];
+    const corners: [string, number, number, number][] = [["top_left", -hw, -hh, 180], ["top_right", hw, -hh, 270], ["bottom_right", hw, hh, 0], ["bottom_left", -hw, hh, 90]];
+    for (const [name, cx, cy, a0] of corners) {
+      const sx = Math.sign(cx), sy = Math.sign(cy);
+      if (cut.has(name)) {
+        // walk clockwise (y down): the point before the corner, then the one after
+        const before: Pt = a0 === 180 ? [cx, cy + cs] : a0 === 270 ? [cx - cs, cy] : a0 === 0 ? [cx, cy - cs] : [cx + cs, cy];
+        const after: Pt = a0 === 180 ? [cx + cs, cy] : a0 === 270 ? [cx, cy + cs] : a0 === 0 ? [cx - cs, cy] : [cx, cy - cs];
+        pts.push(before, after);
+      } else if (rr > 1e-9) {
+        const r = Math.min(rr, hw, hh), ox = cx - sx * r, oy = cy - sy * r;
+        for (let i = 0; i <= 8; i++) { const t = (a0 + 90 * i / 8) * Math.PI / 180; pts.push([ox + r * Math.cos(t), oy + r * Math.sin(t)]); }
+      } else pts.push([cx, cy]);
+    }
+    return { t: "poly", solid: true, pts: pts.map(([x, y]) => { const [dx, dy] = R(x, y); return [p.x + dx, p.y + dy] as Pt; }) };
+  }
+  // custom pads (the anchor and its primitives merged) and trapezoids: their outline, turned and moved onto the board
+  if (p.node && (p.shape === "custom" || p.shape === "trapezoid")) {
+    const sh = readShape(p.node as never, p.shape, null); let local: Pt[] | null = null;
+    if (sh.shape === "trapezoid") {
+      const hx = sh.w / 2, hy = sh.h / 2, dx = sh.delta[0] / 2, dy = sh.delta[1] / 2;
+      local = [[-hx - dy, hy + dx], [hx + dy, hy - dx], [hx - dy, -hy + dx], [-hx + dy, -hy - dx]];
+    } else if (sh.shape === "custom") {
+      let best = 0;
+      for (const q of unionPolys(customPolys(sh)) as Pt[][]) { let a = 0; for (let i = 0; i < q.length; i++) { const u = q[i], v = q[(i + 1) % q.length]; a += u[0] * v[1] - v[0] * u[1]; } if (Math.abs(a) > best) { best = Math.abs(a); local = q; } }
+    }
+    if (local && local.length >= 3) { const R = rotator(p.rot); return { t: "poly", solid: true, pts: local.map(([x, y]) => { const [dx, dy] = R(x, y); return [p.x + dx, p.y + dy] as Pt; }) }; }
+  }
   return { t: "rect", x: p.x, y: p.y, w: p.w, h: p.h, rot: p.rot, rr };
 }
 export function padCopperLayers(p: Pick<PadInfo, "layers">, copper: string[]) { const out = new Set<string>(); for (const l of p.layers) { if (l === "*.Cu" || l === "F&B.Cu") for (const c of copper) out.add(c); else if (/\.Cu$/.test(l)) out.add(l); } return out; }

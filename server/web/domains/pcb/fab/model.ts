@@ -113,7 +113,7 @@ export interface Footprint {
 
 const optNum = (n: Node | null, key: string): number | null => { const k = K(n, key); return k ? num(k[1], 0) : null; };
 
-function readShape(n: Node, shape: string, inherit: PadShape | null): PadShape {
+export function readShape(n: Node, shape: string, inherit: PadShape | null): PadShape {
   const sz = K(n, "size"); const dr = K(n, "drill"); const off = K(n, "offset") || (dr ? K(dr, "offset") : null);
   const rr = K(n, "roundrect_rratio"); const cr = K(n, "chamfer_ratio"); const ch = K(n, "chamfer"); const rd = K(n, "rect_delta");
   const opts = K(n, "options"); const an = opts ? K(opts, "anchor") : null;
