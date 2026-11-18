@@ -135,7 +135,7 @@ async function refilled(name) {
 }
 
 // KiCad 10.99 parity against `kicad-cli pcb drc` on the QA boards
-const drcOf = (name, rules) => { const doc = K.parseDoc(read(name, ".kicad_pcb"), "kicad_pcb"); const pro = read(name, ".kicad_pro"); return P.drc(doc, P.designSettings(pro ? JSON.parse(pro) : null), { unconnected: false, footprintOwn: true, rules: rules === undefined ? read(name, ".kicad_dru") : rules }); };
+const drcOf = (name, rules) => { const text = read(name, ".kicad_pcb"); const doc = K.parseDoc(text, "kicad_pcb"); const pro = read(name, ".kicad_pro"); const s = P.designSettings(pro ? JSON.parse(pro) : null); s.boardSetup = K.kid(K.parse(text), "setup"); return P.drc(doc, s, { unconnected: false, footprintOwn: true, rules: rules === undefined ? read(name, ".kicad_dru") : rules }); };
 test("pads of one net-tie group may touch; custom pads are their merged primitives (embedded_table_rotated_legacy_v10: none)", () => {
   assert.equal(drcOf("embedded_table_rotated_legacy_v10").filter((m) => m.code === "clearance" || m.code === "shorting_items").length, 0);
   const sh = P.padShape({ shape: "custom", x: 0, y: 0, w: 0.254, h: 0.3302, rot: 0, node: K.parse('(pad "7" smd custom (size 0.254 0.3302) (options (clearance outline) (anchor rect)) (primitives (gr_poly (pts (xy -0.127 0.1651) (xy -0.127 -3) (xy 1.1 -3) (xy 1.1 0.1651)) (width 0) (fill yes))))') });
@@ -154,6 +154,19 @@ test("a zone has no Layer property in custom rules: B.Layer == A.Layer never hol
   const zoneHits = (c) => drcOf("notched_zones", rule(c)).filter((m) => m.code === "clearance" && /rule 't'/.test(m.text)).length;
   assert.ok(zoneHits("A.NetName == '+5V'") > 0);
   assert.equal(zoneHits("(A.NetName == '+5V')&&(B.Type == 'Zone')&&(B.Layer == A.Layer)"), 0);
+});
+test("KiCad 5 arcs (start centre) (end arc-start) (angle) read as start / mid / end, clockwise on screen", () => {
+  const doc = K.parseDoc('(kicad_pcb (version 20210807) (generator pcbnew) (layers (0 "F.Cu" signal) (44 "Edge.Cuts" user)) (gr_arc (start 10 10) (end 15 10) (angle 90) (layer "Edge.Cuts") (width 0.1) (tstamp a1)))', "kicad_pcb");
+  const n = [...doc.items.values()][0].node; const p = (k) => { const c = K.kid(n, k); return [K.num(c[1]), K.num(c[2])]; };
+  assert.deepEqual(p("start"), [15, 10]); assert.deepEqual(p("end"), [10, 15]); const m = p("mid"); assert.ok(Math.abs(m[0] - (10 + 5 / Math.SQRT2)) < 1e-6 && Math.abs(m[1] - (10 + 5 / Math.SQRT2)) < 1e-6);
+  assert.equal(K.kid(n, "angle"), null);
+});
+test("zone fills of two nets nearer than their clearance, one marker per pair and layer (intersectingzones, issue6039 to the nanometre)", () => {
+  const z = drcOf("intersectingzones").filter((m) => m.code === "clearance" && /zone clearance/.test(m.text));
+  assert.equal(z.length, 1); assert.equal(z[0].text, "Clearance violation (zone clearance 0.5000 mm; actual 0.4347 mm)");
+  const t = drcOf("issue6039").filter((m) => m.code === "clearance").map((m) => m.text);
+  assert.ok(t.includes("Clearance violation (netclass 'Default' clearance 0.2000 mm; actual 0.1989 mm)"), "the first edge pair nearer than the clearance, A's edges outside");
+  assert.deepEqual(P.mmPair(0.2, 0.199999), ["0.2 mm", "0.199999 mm"], "equal at 4 places: both written in full"); assert.deepEqual(P.mmPair(0.2, 0.1989), ["0.2000 mm", "0.1989 mm"]);
 });
 const asyncTests = [];
 if (read("issue9870", ".kicad_pcb")) asyncTests.push(["connection_width after a refill: issue9870 12, connection_width_rules 3, issue12831 / issue14130 0 (test_drc_copper_conn.cpp)", async () => {

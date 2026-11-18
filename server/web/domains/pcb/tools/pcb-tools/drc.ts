@@ -2,7 +2,7 @@
 import { copperCtx, sliverMarkers } from "./drc-sliver";
 import { connectionWidthMarkers } from "./drc-connwidth";
 import type { Box, Conductor, CopperShape, DesignSettings, DesignSource, DrcMarker, NetclassRules, BoardDoc, PolyShape, Pt } from "./types";
-import { arcPoints, boxGrid, boxesTouch, polysOverlap, shapeBBox, shapeGap, shareLayer } from "./distances";
+import { arcPoints, boxGrid, boxesTouch, firstEdgeConflict, polysOverlap, shapeBBox, shapeGap, shareLayer } from "./distances";
 import { pointInPoly } from "./hit";
 import { netlist, ratsnest } from "./netlist";
 import { K } from "./state";
@@ -67,6 +67,11 @@ export function netclassName(s: DesignSettings, net: string | null | undefined) 
 export function netclassOf(s: DesignSettings, net: string | null | undefined): Partial<NetclassRules> { return s.netclasses[netclassName(s, net)] || s.netclasses.Default || { clearance: s.clearance, track_width: s.trackWidth, via_diameter: s.viaDiameter, via_drill: s.viaDrill }; }
 export const netClearance = (s: DesignSettings, net: string | null | undefined): number => { const nc = netclassOf(s, net); return nc && nc.clearance !== undefined ? nc.clearance : s.clearance; };
 export const mm4 = (v: number) => v.toFixed(4) + " mm";
+/** DRC_TEST_PROVIDER::formatMsg: when the two read the same at 4 places, both are written to the nanometre. */
+export const mmPair = (need: number, actual: number): [string, string] => {
+  const a = mm4(need), b = mm4(actual); if (a !== b) return [a, b];
+  const fine = (v: number) => v.toFixed(6).replace(/0+$/, "").replace(/\.$/, "") + " mm"; return [fine(need), fine(actual)];
+};
 /** Edge.Cuts geometry as shapes (lines with their half width) and the polylines they form, board items and footprint drawings alike. */
 export function edgeShapes(doc: BoardDoc, o?: { layer?: string; zeroWidth?: boolean }) {
   const shapes: CopperShape[] = [], chains: Pt[][] = [], nodes: SNode[] = []; const want = (o && o.layer) || "Edge.Cuts";
@@ -256,7 +261,8 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
         const [A, B] = firstOf(a, b);
         const ca = pairClr(A, B), cb = pairClr(B, A); const cls = cb > ca ? netclassName(s, B.net) + (cb < clr(B) ? "' diff pair" : "'") : netclassName(s, A.net) + (ca < clr(A) ? "' diff pair" : "'");
         const [x, y] = boxCenter(a.bbox, b.bbox);
-        out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${by || `netclass '${cls}`} clearance ${mm4(need)}; actual ${mm4(gap)})`, Array.from(new Set([a.id, b.id]))), [uid(a), uid(b)]));
+        const [tn, tg] = mmPair(need, gap);
+        out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${by || `netclass '${cls}`} clearance ${tn}; actual ${tg})`, Array.from(new Set([a.id, b.id]))), [uid(a), uid(b)]));
       }
     }
   }
@@ -284,7 +290,36 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
         if (!prev || gap < prev.gap) seen.set(key, { gap: Math.max(0, gap), need, name, c, z });
       }
     }
-    for (const v of seen.values()) { const [x, y] = boxCenter(v.c.bbox, v.z.bbox); out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${v.name} clearance ${mm4(v.need)}; actual ${mm4(v.gap)})`, [v.c.id, v.z.id]), [uid(v.c), uid(v.z)])); }
+    for (const v of seen.values()) { const [x, y] = boxCenter(v.c.bbox, v.z.bbox); const [tn, tg] = mmPair(v.need, v.gap); out.push(withKiids(marker("clearance", "error", x, y, `Clearance violation (${v.name} clearance ${tn}; actual ${tg})`, [v.c.id, v.z.id]), [uid(v.c), uid(v.z)])); }
+    // testZonesToZones: the fills of two zones of different nets on one layer, nearer than their clearance (the rules',
+    // else the netclasses' raised to the zones' own clearance and the board minimum); one marker per pair and layer
+    // zones in board order (m_DRCCopperZones), each with its fill outlines on the layer in file order
+    const zItems: { item: Conductor["item"]; conds: Conductor[] }[] = []; const zIdx = new Map<object, number>();
+    for (const z of zones) { let k = zIdx.get(z.item); if (k === undefined) { zIdx.set(z.item, k = zItems.length); zItems.push({ item: z.item, conds: [] }); } zItems[k].conds.push(z); }
+    const zz = new Map<string, { gap: number; need: number; name: string; a: Conductor; b: Conductor; p: Pt; layer: string }>();
+    const layersAll = new Set<string>(); for (const z of zones) for (const l of z.layers) layersAll.add(l);
+    for (const layer of layersAll) {
+      const L = zItems.map((zi) => zi.conds.filter((c) => c.layers.has(layer))).filter((cs) => cs.length);
+      for (let i = 0; i < L.length; i++) for (let j = i + 1; j < L.length; j++) {
+        const a = L[i][0], b = L[j][0]; if ((a.net || "") === (b.net || "")) continue;
+        const ba = L[i].reduce((m, c) => [Math.min(m[0], c.bbox[0]), Math.min(m[1], c.bbox[1]), Math.max(m[2], c.bbox[2]), Math.max(m[3], c.bbox[3])], [Infinity, Infinity, -Infinity, -Infinity]);
+        const bb = L[j].reduce((m, c) => [Math.min(m[0], c.bbox[0]), Math.min(m[1], c.bbox[1]), Math.max(m[2], c.bbox[2]), Math.max(m[3], c.bbox[3])], [Infinity, Infinity, -Infinity, -Infinity]);
+        if (!boxesTouch(ba as Box, bb as Box, maxClr + 1)) continue;
+        let need = Math.max(clr(a), clr(b)), name = `netclass '${clr(a) >= clr(b) ? netclassName(s, a.net) : netclassName(s, b.net)}'`, hit: { min: number; name: string } | null = null;
+        if (clrRules.length) { hit = ruleClearance(clrRules, doc, s, ruleItem(a, layer), ruleItem(b, layer)); if (hit) { if (!(hit.min > 0)) continue; need = hit.min; name = hit.name; } }
+        if (!hit) {
+          const loc = Math.max(zoneLocal(a), zoneLocal(b)); if (loc > need) { need = loc; name = "zone"; }
+          if ((s.minClearance || 0) > need) { need = s.minClearance || 0; name = "board minimum"; }
+        }
+        if (!(need > 0) || !boxesTouch(ba as Box, bb as Box, need)) continue;
+        const r = firstEdgeConflict(L[i].map((c) => (c.shape as PolyShape).pts), L[j].map((c) => (c.shape as PolyShape).pts), need); if (!r) continue;
+        zz.set(a.item.id + "|" + b.item.id + "|" + layer, { gap: r.gap, need, name, a, b, p: r.p, layer });
+      }
+    }
+    for (const v of zz.values()) {
+      const [tn, tg] = mmPair(v.need, v.gap); const m = withKiids(marker("clearance", "error", v.p[0], v.p[1], `Clearance violation (${v.name} clearance ${tn}; actual ${tg})`, [v.a.id, v.b.id]), [uid(v.a), uid(v.b)]);
+      m.layer = v.layer; out.push(m);
+    }
   }
   // copper to board edge (DRC_TEST_PROVIDER_EDGE_CLEARANCE): every copper item (zone fills one layer at a time) against the
   // Edge.Cuts lines (their width taken as zero) and the Margin lines; EvalRules(edge, item) gives the clearance (a custom
@@ -406,10 +441,11 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
     // DRC_TEST_PROVIDER_EDGE_CLEARANCE::testCopperOutsideBoard: copper that does not touch the board at all
     const seen = new Set<string>(); const board = { t: "poly" as const, pts: ol.outline };
     for (const c of nl.conductors) {
-      if (seen.has(c.id) || c.kind === "zone") continue;
+      const key = c.kind === "pad" ? c.id + ":" + c.index : c.id;   // one marker per pad, not per footprint
+      if (seen.has(key) || c.kind === "zone") continue;
       if (boxesTouch(c.bbox, shapeBBox(board), 0) && shapeGap(c.shape, board) <= EPS) continue;
-      seen.add(c.id); const p = c.kind === "pad" ? [c.pad!.x, c.pad!.y] : c.anchors[0];
-      out.push(marker("copper_outside_board", "warning", p[0], p[1], "Copper outside board outline", [c.id]));
+      seen.add(key); const p = c.kind === "pad" ? [c.pad!.x, c.pad!.y] : c.anchors[0];
+      out.push(withKiids(marker("copper_outside_board", "warning", p[0], p[1], "Copper outside board outline", [c.id]), [uid(c)]));
     }
   }
   // hole to hole, text dimensions and mirroring, courtyard definitions and holes in courtyards, Edge.Cuts text,

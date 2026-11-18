@@ -20,6 +20,35 @@ export function segsIntersect(p1: Pt, p2: Pt, p3: Pt, p4: Pt) {
 }
 export const dPS = (p: Pt, a: Pt, b: Pt) => distSeg(p[0], p[1], a[0], a[1], b[0], b[1]);
 export function segSegDist(a: Pt, b: Pt, c: Pt, d: Pt) { return segsIntersect(a, b, c, d) ? 0 : Math.min(dPS(a, c, d), dPS(b, c, d), dPS(c, a, b), dPS(d, a, b)); }
+/**
+ * DRC_TEST_PROVIDER_COPPER_CLEARANCE::testZonesToZones' collision: walking P's outline edges in order, and for each
+ * Q's in order, the first pair nearer than `clr` (its distance and the point on P's edge nearest Q's), else null.
+ * Several outlines walk one after the other.
+ */
+export function firstEdgeConflict(P: Pt[][], Q: Pt[][], clr: number): { gap: number; p: Pt } | null {
+  const segs: [Pt, Pt][] = []; for (const q of Q) for (let j = 0; j < q.length; j++) segs.push([q[j], q[(j + 1) % q.length]]);
+  const cell = Math.max(clr * 2, 0.5), grid = new Map<string, number[]>(), big: number[] = [];
+  segs.forEach(([c, e], j) => {
+    const x0 = Math.floor((Math.min(c[0], e[0]) - clr) / cell), x1 = Math.floor((Math.max(c[0], e[0]) + clr) / cell), y0 = Math.floor((Math.min(c[1], e[1]) - clr) / cell), y1 = Math.floor((Math.max(c[1], e[1]) + clr) / cell);
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4096) { big.push(j); return; }
+    for (let gx = x0; gx <= x1; gx++) for (let gy = y0; gy <= y1; gy++) { const k = gx + "," + gy; const l = grid.get(k); if (l) l.push(j); else grid.set(k, [j]); }
+  });
+  for (const poly of P) for (let i = 0; i < poly.length; i++) {
+    const a = poly[i], b = poly[(i + 1) % poly.length]; const cand = new Set<number>(big);
+    const x0 = Math.floor(Math.min(a[0], b[0]) / cell), x1 = Math.floor(Math.max(a[0], b[0]) / cell), y0 = Math.floor(Math.min(a[1], b[1]) / cell), y1 = Math.floor(Math.max(a[1], b[1]) / cell);
+    if ((x1 - x0 + 1) * (y1 - y0 + 1) > 4096) segs.forEach((_, j) => cand.add(j));
+    else for (let gx = x0; gx <= x1; gx++) for (let gy = y0; gy <= y1; gy++) for (const j of grid.get(gx + "," + gy) || []) cand.add(j);
+    for (const j of [...cand].sort((x, y) => x - y)) {
+      // in whole nanometres, as KiCad measures
+      const [c, e] = segs[j]; const d = segSegDist(a, b, c, e); if (!(Math.round(d * 1e6) < Math.round(clr * 1e6))) continue;
+      // the point of P's edge nearest Q's edge
+      const near = (p: Pt): Pt => { const dx = b[0] - a[0], dy = b[1] - a[1], l2 = dx * dx + dy * dy; const t = l2 ? Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / l2)) : 0; return [a[0] + t * dx, a[1] + t * dy]; };
+      const pc = near(c), pe = near(e); const p = Math.hypot(pc[0] - c[0], pc[1] - c[1]) <= Math.hypot(pe[0] - e[0], pe[1] - e[1]) ? pc : pe;
+      return { gap: d, p };
+    }
+  }
+  return null;
+}
 /** Closed polygons (arrays of points): 0 when they touch or one holds the other, else the least vertex-to-edge gap. */
 export function polyPolyDist(P: Pt[], Q: Pt[]) {
   if (P.some(([x, y]) => pointInPoly(Q, x, y)) || Q.some(([x, y]) => pointInPoly(P, x, y))) return 0;
