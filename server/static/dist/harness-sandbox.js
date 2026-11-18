@@ -6812,14 +6812,14 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     plan=True plans every connection on a coarse tile graph before each routing pass (board.route(plan=...)): congestion
     negotiated over the tiles, forced crossings found, layers assigned along each coarse path; the connections it fought
     over are laid and taken up first, and those it moved off their direct path are steered into their corridors and
-    onto the planned layers.  Off by default (see board.route).
+    onto the planned layers.  On by default in design() (plan=False turns it off); board.route() leaves it off.
 
     ripup="mincut" takes up only the cheapest set of routes in an open connection's way when the router repairs what
     its passes left open (a minimum cut, after Copper), and keeps the result only when fewer are open (board.route).
     ripup="ladder" runs Copper's whole repair ladder on what is left open: rescue (one extra via, half pitch, neck
     width, the other escape side; it moves nothing else), the min-cut rip, permutation of the routes fighting for the
     channel, and, with plan=True, feedback into the plan; each rung kept only when fewer are open and nothing routed
-    is lost (board.route).  The result's routed.ladder counts what each rung laid.
+    is lost (board.route).  The result's routed.ladder counts what each rung laid.  design() uses the ladder by default.
     With gate=True (the default) and plan or ripup given, the board is routed both plainly and with them and the
     better of the two stays (fewer open, then fewer errors): out["variants"] says which won.  It costs a second route.
 
@@ -6892,6 +6892,10 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     if outline:
         self.outline(*outline, radius=0 if place else 1.0)      # square while the placement may still pull it in; rounded after
     global_plan = plan      # the router's global plan option; \`plan\` below is the board's layout plan
+    if gate and global_plan is None:      # on by default: with the gate the board is also routed without it and the better run stays
+        global_plan = True
+    if gate and ripup is None:
+        ripup = "ladder"
     plan = step("plan", lambda: self.plan(edge=edge)) or {"place": {"near": {}, "edges": {}}, "route": {}, "notes": []}
     out["notes"] = [n.split(". ")[0] for n in plan.get("notes", [])][:6]
     rec = dict((plan.get("stackup") or {}).get("recommended") or {})
