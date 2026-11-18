@@ -57,7 +57,7 @@ export function importNames(bytes: Uint8Array | null, read: ReadResult, perRoot:
 export default defineFeature<ImportParams>({
   type: "import",
   title: "Import",
-  icon: '<path d="M12 3v11"/><path d="M8 10l4 4 4-4"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
+  icon: '<path class="f" d="M5 3h9l5 5v13H5z"/><path d="M5 3h9l5 5v13H5zM14 3v5h5"/><path d="M12 11v6M9.5 14.5L12 17l2.5-2.5"/>',
   toolbar: false,
   defaults: () => ({ file: null, split: "solids" }),
   schema: [

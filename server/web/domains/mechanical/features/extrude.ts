@@ -58,8 +58,8 @@ const END_OPTIONS = [
 export default defineFeature<ExtrudeParams>({
   type: "extrude",
   title: "Extrude",
-  icon: '<path d="M5 14l7 4 7-4"/><path d="M5 14V9l7-4 7 4v5"/><path d="M5 9l7 4 7-4"/><path d="M12 13v5"/>',
-  toolbarOrder: 20,
+  icon: '<path class="f" d="M3.5 12h10.5v9.5H3.5z"/><path d="M3.5 12h10.5v9.5H3.5zM3.5 12l4.5-4h10.5L14 12M18.5 8v9.5l-4.5 4"/><path d="M11 9.5V2M8.2 4.8L11 2l2.8 2.8"/>',
+  toolbarOrder: 20, toolbarSection: "solid", toolbarKeep: 100,
   defaults: () => ({
     profile: null, operation: "new", endType: "blind", depth: 10, face: null, flip: false,
     second: false, secondType: "blind", secondDepth: 10, draft: false, draftAngle: 3, thin: false, thickness: 1, thinSide: "inside", targets: [],

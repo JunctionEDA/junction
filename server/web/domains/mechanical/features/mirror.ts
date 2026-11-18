@@ -15,9 +15,8 @@ export interface MirrorParams extends CopyParams { [key: string]: any; plane: Re
 export default defineFeature<MirrorParams>({
   type: "mirror",
   title: "Mirror",
-  icon: '<path d="M12 3v18" stroke-dasharray="2 2"/><path d="M9 6L4 18h5z"/><path d="M15 6l5 12h-5z"/>',
-  toolbarOrder: 72,
-  toolbarSection: "pattern", toolbarMenu: "Pattern",
+  icon: '<path class="f" d="M9.5 4.5v15h-7z"/><path d="M9.5 4.5v15h-7z"/><path class="t" d="M14.5 4.5v15h7z"/><path class="d" d="M12 2v20"/>',
+  toolbarOrder: 72, toolbarSection: "pattern", toolbarKeep: 74,
   defaults: () => ({ ...copyDefaults(), plane: null }),
   schema: [
     ...copyFields("Mirror"),

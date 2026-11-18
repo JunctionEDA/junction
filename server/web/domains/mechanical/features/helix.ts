@@ -13,9 +13,8 @@ export interface HelixParams { [key: string]: any; axis: RefTarget | null; radiu
 export default defineFeature<HelixParams>({
   type: "helix",
   title: "Helix",
-  icon: '<path d="M6 4c12 0 12 4 0 4s-0 4 12 4-0 4-12 4 0 4 12 4"/>',
-  toolbarOrder: 63,
-  toolbarSection: "reference", toolbarMenu: "Reference",
+  icon: '<path d="M6 4.5c0-2 12-2 12 0s-12 2.3-12 4.6 12 2.3 12 4.6-12 2.3-12 4.6 12 2.7 12 .7"/>',
+  toolbarOrder: 63, toolbarSection: "reference", toolbarMenu: "Reference", toolbarKeep: 82,
   defaults: () => ({ axis: null, radius: 10, pitch: 5, turns: 4, start: 0, left: false }),
   schema: [
     { key: "axis", label: "Axis", kind: "refs", of: ["edge", "face"], single: true, planes: true, datums: ["axis", "plane"], sketch: true, hint: "An axis, a round edge or cylindrical face, or a plane (along its normal)." },

@@ -117,7 +117,7 @@ export default defineTool({
   id: "export",
   title: "Export",
   hint: "Download the parts as STEP, STL, 3MF, OBJ, glTF or BREP, or a sketch or flat face as DXF or SVG",
-  icon: '<path d="M12 15V4"/><path d="M8 8l4-4 4 4"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
+  icon: '<path d="M12 15V3.5M7.5 8L12 3.5 16.5 8"/><path d="M3.5 15v4a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5v-4"/>',
   group: "file",
   order: 20,
   // never greyed out: the toolbar is not redrawn when the parts change, and the dialog says what is missing

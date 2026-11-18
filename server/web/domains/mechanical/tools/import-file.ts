@@ -69,7 +69,7 @@ export default defineTool({
   id: "import",
   title: "Import",
   hint: "Add a STEP or BREP file as a feature (or drop the file on the model)",
-  icon: '<path d="M12 4v11"/><path d="M8 11l4 4 4-4"/><path d="M4 15v4a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-4"/>',
+  icon: '<path d="M12 3v11.5M7.5 10L12 14.5 16.5 10"/><path d="M3.5 15v4a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5v-4"/>',
   group: "file",
   order: 10,
   disabled: (studio) => (studio.getState().canEdit ? null : "View-only access"),

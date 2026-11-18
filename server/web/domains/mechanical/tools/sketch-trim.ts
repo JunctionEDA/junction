@@ -3,8 +3,8 @@ import { defineTool } from "../core/tool";
 import { runTrim } from "../sketch/modify";
 
 export default defineTool({
-  id: "sketch-trim", title: "Trim", hint: "Click the part of a curve to cut away.", group: "sketch", order: 110, key: "t",
-  icon: '<path d="M4 6l16 12" stroke-dasharray="3 3"/><path d="M4 18L12 12"/><path d="M12 12l8-6" opacity=".35"/><circle cx="12" cy="12" r="1.4"/>',
+  id: "sketch-trim", title: "Trim", hint: "Click the part of a curve to cut away.", group: "sketch", order: 140, keep: 89, key: "t",
+  icon: '<circle cx="6" cy="6.5" r="3"/><circle cx="6" cy="17.5" r="3"/><path d="M8.5 8.3L21 18M8.5 15.7L21 6"/>',
   active: (studio) => studio.getState().sketch?.tool === "sketch-trim",
   run: (studio) => runTrim(studio, "sketch-trim"),
 });
