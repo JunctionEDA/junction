@@ -21,6 +21,7 @@ The methods are attached to Board when the package is imported.
 """
 from __future__ import annotations
 
+import contextlib
 import math
 import re
 
@@ -579,6 +580,12 @@ def _rf_feeds(self, net: str | None = None, impedance: float = 50, min_width: fl
         if "width" not in f:
             out.append(f); continue
         full = f.get("full_net") or f["net"]; w = f["width"]; layer = f["layer"]
+        # never wider than the widest pad it lands on: a wide feed on a fine-pitch module pad runs into the pads beside it
+        with contextlib.suppress(HarnessError, KeyError, IndexError, TypeError):
+            sizes = [min(q[4], q[5]) for p_ in self.geometry()["parts"] for q in p_["pads"] if q[3] == full and len(q) > 5 and q[4] and q[5]]
+            if sizes and w > max(sizes) + 1e-6:
+                f["note"] = (f.get("note", "") + f" width {w:.3f} mm capped to the {max(sizes):.3f} mm pad it lands on").strip()
+                w = f["width"] = round(max(sizes), 3)
         for poly in f.get("void_polygons") or []:
             self.keepout([tuple(p) for p in poly], layers=f["voided"], tracks=True, vias=False, copper=True, name=f"RF feed {f['net']}")
         self.flush()

@@ -222,6 +222,17 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                     if fo and fo.get("vias"):
                         out.setdefault("fanout", {})[part["ref"]] = {"vias": fo["vias"], "skipped": len(fo.get("skipped") or {})}
         auto_layers = False
+        if route_layers is None and not all_layers:      # six layers and up: the inner planes stay whole, signals keep to the other layers
+            with contextlib.suppress(HarnessError):
+                names = [c if isinstance(c, str) else c.get("name") for c in (self.info().get("copper_layers") or [])]
+                ob = self.geometry().get("outline")
+                if len(names) > 4 and ob:
+                    area = abs((ob[2] - ob[0]) * (ob[3] - ob[1])) or 1
+                    planes = {l for z in self.zones() if not z.get("keepout") and z.get("box") and (z["box"][2] - z["box"][0]) * (z["box"][3] - z["box"][1]) > 0.6 * area
+                              for l in z["layers"] if l.startswith("In") and len(z["layers"]) == 1}
+                    if planes and len(names) - len(planes) >= 2:
+                        route_layers = [l for l in names if l not in planes]
+                        out.setdefault("notes", []).append(f"routed on {', '.join(route_layers)}: {', '.join(sorted(planes))} kept whole as planes (layers= to route on them)")
         got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts, escapes=escapes, plan=global_plan, ripup=ripup))
         if got and got.get("rules_changed"):
             out["rules_changed"] = got["rules_changed"]

@@ -2676,7 +2676,7 @@ class Board(_Doc):
         return done
 
     def zones(self) -> list:
-        """The copper pours, planes and keep-out areas already on the board, one dict each: {"net", "layers", "name",
+        """The copper pours, planes and keep-out areas already on the board, one dict each: {"net", "layers", "name", "id" (board.remove(id) takes it off),
         "priority", "box": [x0, y0, x1, y1], "keepout": {what: "allowed"|"not_allowed"} (rule areas only)}.  Read it
         before routing a board somebody else set up: an inner layer that is all one net is a plane, so that net's pins
         drop into it with a via and other signals stay off it."""
@@ -2687,7 +2687,7 @@ class Board(_Doc):
             net = g(r'\(net_name "((?:[^"\\]|\\.)*)"\)') or g(r'\(net "((?:[^"\\]|\\.)*)"\)') or ""
             lay = re.search(r'\(layers? ((?:"[^"]*"\s*)+)\)', s)
             z = {"net": net, "layers": re.findall(r'"([^"]*)"', lay.group(1)) if lay else [], "name": g(r'\(name "((?:[^"\\]|\\.)*)"\)') or "",
-                 "priority": int(g(r"\(priority (\d+)\)") or 0)}
+                 "priority": int(g(r"\(priority (\d+)\)") or 0), "id": it.get("id")}
             bb = it.get("bbox")
             try:
                 bb = json.loads(bb) if isinstance(bb, str) else bb

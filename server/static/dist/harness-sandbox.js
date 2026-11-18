@@ -2781,7 +2781,7 @@ class Board(_Doc):
         return done
 
     def zones(self) -> list:
-        """The copper pours, planes and keep-out areas already on the board, one dict each: {"net", "layers", "name",
+        """The copper pours, planes and keep-out areas already on the board, one dict each: {"net", "layers", "name", "id" (board.remove(id) takes it off),
         "priority", "box": [x0, y0, x1, y1], "keepout": {what: "allowed"|"not_allowed"} (rule areas only)}.  Read it
         before routing a board somebody else set up: an inner layer that is all one net is a plane, so that net's pins
         drop into it with a via and other signals stay off it."""
@@ -2792,7 +2792,7 @@ class Board(_Doc):
             net = g(r'\\(net_name "((?:[^"\\\\]|\\\\.)*)"\\)') or g(r'\\(net "((?:[^"\\\\]|\\\\.)*)"\\)') or ""
             lay = re.search(r'\\(layers? ((?:"[^"]*"\\s*)+)\\)', s)
             z = {"net": net, "layers": re.findall(r'"([^"]*)"', lay.group(1)) if lay else [], "name": g(r'\\(name "((?:[^"\\\\]|\\\\.)*)"\\)') or "",
-                 "priority": int(g(r"\\(priority (\\d+)\\)") or 0)}
+                 "priority": int(g(r"\\(priority (\\d+)\\)") or 0), "id": it.get("id")}
             bb = it.get("bbox")
             try:
                 bb = json.loads(bb) if isinstance(bb, str) else bb
@@ -5686,6 +5686,7 @@ The methods are attached to Board when the package is imported.
 """
 from __future__ import annotations
 
+import contextlib
 import math
 import re
 
@@ -6244,6 +6245,12 @@ def _rf_feeds(self, net: str | None = None, impedance: float = 50, min_width: fl
         if "width" not in f:
             out.append(f); continue
         full = f.get("full_net") or f["net"]; w = f["width"]; layer = f["layer"]
+        # never wider than the widest pad it lands on: a wide feed on a fine-pitch module pad runs into the pads beside it
+        with contextlib.suppress(HarnessError, KeyError, IndexError, TypeError):
+            sizes = [min(q[4], q[5]) for p_ in self.geometry()["parts"] for q in p_["pads"] if q[3] == full and len(q) > 5 and q[4] and q[5]]
+            if sizes and w > max(sizes) + 1e-6:
+                f["note"] = (f.get("note", "") + f" width {w:.3f} mm capped to the {max(sizes):.3f} mm pad it lands on").strip()
+                w = f["width"] = round(max(sizes), 3)
         for poly in f.get("void_polygons") or []:
             self.keepout([tuple(p) for p in poly], layers=f["voided"], tracks=True, vias=False, copper=True, name=f"RF feed {f['net']}")
         self.flush()
@@ -6883,6 +6890,17 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                     if fo and fo.get("vias"):
                         out.setdefault("fanout", {})[part["ref"]] = {"vias": fo["vias"], "skipped": len(fo.get("skipped") or {})}
         auto_layers = False
+        if route_layers is None and not all_layers:      # six layers and up: the inner planes stay whole, signals keep to the other layers
+            with contextlib.suppress(HarnessError):
+                names = [c if isinstance(c, str) else c.get("name") for c in (self.info().get("copper_layers") or [])]
+                ob = self.geometry().get("outline")
+                if len(names) > 4 and ob:
+                    area = abs((ob[2] - ob[0]) * (ob[3] - ob[1])) or 1
+                    planes = {l for z in self.zones() if not z.get("keepout") and z.get("box") and (z["box"][2] - z["box"][0]) * (z["box"][3] - z["box"][1]) > 0.6 * area
+                              for l in z["layers"] if l.startswith("In") and len(z["layers"]) == 1}
+                    if planes and len(names) - len(planes) >= 2:
+                        route_layers = [l for l in names if l not in planes]
+                        out.setdefault("notes", []).append(f"routed on {', '.join(route_layers)}: {', '.join(sorted(planes))} kept whole as planes (layers= to route on them)")
         got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts, escapes=escapes, plan=global_plan, ripup=ripup))
         if got and got.get("rules_changed"):
             out["rules_changed"] = got["rules_changed"]
