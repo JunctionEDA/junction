@@ -392,7 +392,7 @@ def bench(name: str, pcb: str, work: str, out: str, time_s: float | None, design
     result = {"board": name, "score": v["score"], "worst": v["worst"], "parts": v["parts"], "seconds": secs,
               "hand": {k: x for k, x in hand.items() if k != "nets"}, "routed": {k: x for k, x in auto.items() if k != "nets"},
               "differences": differences(hand, auto), "rules_as_routed": relaxed,
-              "design": {k: res.get(k) for k in ("routed", "added", "skipped", "refused", "notes") if res.get(k)}}
+              "design": {k: res.get(k) for k in ("routed", "added", "skipped", "refused", "notes", "variants", "gated") if res.get(k)}}
     os.makedirs(out, exist_ok=True)
     with open(os.path.join(out, f"{name}.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)

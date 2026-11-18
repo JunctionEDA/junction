@@ -539,3 +539,26 @@ test("ripup mincut: the repair takes up the route that is cheap to lay again, no
   assert.ok(of(cut, "Y").vias >= 2 && of(cut, "C").vias === 0, "Y changes layer to get past the wall, C takes the lower gap");
   apply(doc, cut); assert.deepEqual(errors(doc, null), []); assert.equal(P.ratsnest(doc).length, 0);
 });
+
+test("ripup ladder: the rescue rung lays a connection with one via over the limit, and the ladder loses nothing the min cut makes", () => {
+  // a wall on F.Cu from edge to edge between the two pads of A: the only way across is down to B.Cu and back up, two
+  // vias, and the limit is one.  Neither the passes nor the min-cut rip can lay it (there is nothing to take up); the
+  // ladder's first rescue rung allows one via above the limit and lays it, touching nothing else.
+  const wall = [{ layers: ["F.Cu"], box: [108, 39, 112, 71] }];
+  const make = () => board(smd(100, 55, "A"), smd(120, 55, "A"), smd(100, 45, "B"), smd(104, 45, "B"));
+  const opts = { keepouts: wall, maxViasPerConnection: 1 };
+  const cut = R.route(K, P, make(), null, { ...opts, ripup: "mincut" });
+  const doc = make(); const lad = R.route(K, P, doc, null, { ...opts, ripup: "ladder" });
+  const of = (res, net) => res.connections.find((c) => c.net === net);
+  assert.equal(cut.routed, 1); assert.equal(of(cut, "A").routed, false); assert.equal(cut.ladder, undefined);
+  assert.equal(lad.routed, 2, JSON.stringify(lad.connections.map((c) => [c.net, c.routed, c.vias])));
+  assert.equal(of(lad, "A").vias, 2); assert.ok(Math.abs(of(lad, "B").length - 4) < 0.3, "B is left as it was");
+  assert.equal(lad.ladder.rescued, 1); assert.equal(lad.ladder.rungs.via, 1, JSON.stringify(lad.ladder));
+  apply(doc, lad); assert.deepEqual(errors(doc, null), []); assert.equal(P.ratsnest(doc).length, 0);
+  // on the min-cut board above the ladder makes every connection too (its min-cut rung is the same cut)
+  const w2 = [{ layers: ["F.Cu"], box: [108, 40, 112, 49.8] }, { layers: ["F.Cu"], box: [108, 50.2, 112, 63.8] }, { layers: ["F.Cu"], box: [108, 64.2, 112, 70] }];
+  const make2 = () => board(smd(100, 50, "X"), smd(120, 50, "X"), smd(100, 64, "Y"), smd(120, 64, "Y"), smd(95, 51, "C"), smd(125, 51, "C"));
+  const doc2 = make2(); const lad2 = R.route(K, P, doc2, null, { order: ["X"], keepouts: w2, netOpts: { X: { allowVias: false }, C: { allowVias: false } }, ripup: "ladder" });
+  assert.equal(lad2.routed, 3, JSON.stringify(lad2.connections.map((c) => [c.net, c.routed, c.length, c.vias])));
+  apply(doc2, lad2); assert.deepEqual(errors(doc2, null), []); assert.equal(P.ratsnest(doc2).length, 0);
+});

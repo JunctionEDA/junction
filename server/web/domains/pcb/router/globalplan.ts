@@ -38,6 +38,11 @@ export interface PlanInput {
   viaMm: number;                                        // what a via costs, in mm of track
   minPitch?: number;                                    // the finest pad pitch on the board (mm): sets the tile size
   tile?: number; iters?: number; maxMs?: number;
+  /** The repair ladder's feedback (Copper's repair.py, _feedback): capacity booked away on tile borders where a
+   *  connection failed, as [layer, tx, ty, side (0: the tile's east border, 1: its north one), mm]. */
+  book?: [number, number, number, number, number][];
+  /** Coarse paths of connections that are not planned again: they hold their capacity and are never moved. */
+  fixed?: { conn: PlanConn; path: number[] }[];
 }
 /** A connection's corridor: per tile 1 when the detailed route may run there, and the layer the plan put it on (-1: any).
  *  moved: the negotiation took it off its direct path (only then is it steered); contest: how many rounds of the
@@ -123,6 +128,10 @@ export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
     }
     (side ? capN : capE)[s] = n * p + (n > 0 ? slack : 0);
   }
+  for (const [l, tx, ty, side, mm] of inp.book || []) {
+    if (l < 0 || l >= L || tx < 0 || ty < 0 || tx >= nx || ty >= ny) continue; const s = l * GT + ty * nx + tx, cap = side ? capN : capE;
+    cap[s] = Math.max(0, cap[s] - mm);
+  }
   // via sites: how many vias fit in the tile, at least one where any cell takes one
   const per = Math.max(1, (inp.viaPitch * inp.viaPitch) / (g * g));
   for (let ty = 0; ty < ny; ty++) for (let tx = 0; tx < nx; tx++) {
@@ -133,7 +142,8 @@ export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
   // for that connection (no capacity used, none missing): it is leaving its own pad there
   const freeOf = new Map<number, Set<number>>();
   const nd = inp.need ?? p / 2, cx = (x: number) => (x - G.ox) / g + 0.5, cy = (y: number) => (y - G.oy) / g + 0.5;   // in cells from the low edge of cell 0
-  for (const c of conns) {
+  const fixed = inp.fixed || [];
+  for (const c of conns.concat(fixed.map((f) => f.conn))) {
     const set = new Set<number>();
     for (const e of [c.a, c.b]) {
       if (!e.box) continue; const x0 = cx(e.box[0] - nd), y0 = cy(e.box[1] - nd), x1 = cx(e.box[2] + nd), y1 = cy(e.box[3] + nd); const ls = layersOf(e.layers);
@@ -147,7 +157,7 @@ export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
   const histE = new Float64Array(N), histN = new Float64Array(N), histV = new Float64Array(GT), histX = new Float64Array(N);
   const hT = new Float64Array(N), vT = new Float64Array(N);   // straight-through traffic per node, east-west / north-south (mm)
   const shared = new Map<number, Map<string, { n: number; d: number }>>();   // border -> net -> how many of its paths cross it (a net pays once)
-  const paths = new Map<number, number[]>(); const byId = new Map(conns.map((c) => [c.id, c]));
+  const paths = new Map<number, number[]>(); const byId = new Map(conns.concat(fixed.map((f) => f.conn)).map((c) => [c.id, c]));
   let anyX = false, pres = 0, margin = BOX_MARGIN;
   const tileOf = (q: Pt): number => { const tx = Math.min(nx - 1, Math.max(0, Math.floor((q[0] - G.ox) / g / k))), ty = Math.min(ny - 1, Math.max(0, Math.floor((q[1] - G.oy) / g / k))); return ty * nx + tx; };
   const netOn = (code: number, net: string) => { const m = shared.get(code); return !!m && (m.get(net)?.n || 0) > 0; };
@@ -260,6 +270,8 @@ export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
   const codesOf = (q: number[]) => { const out: number[] = []; for (let i = 0; i + 1 < q.length; i++) { const a = q[i], b = q[i + 1], lo = Math.min(a, b), df = Math.abs(b - a); if (df >= GT) out.push(-1 - (lo % GT)); else out.push(lo * 2 + (df === nx && (a % nx) === (b % nx) ? 1 : 0)); } return out; };
   // ---- negotiation
   const maxIters = Math.max(1, inp.iters || MAX_ITERS), maxMs = inp.maxMs || 8000;
+  const mine = new Set(conns.map((c) => c.id));
+  for (const f of fixed) if (!mine.has(f.conn.id) && f.path.length) { paths.set(f.conn.id, f.path); apply(f.conn, f.path, 1); }
   for (const c of conns) route(c, 0);
   const direct = new Map(paths);   // each connection's path before any negotiation: its direct path
   const contest = new Map<number, number>();
@@ -278,7 +290,7 @@ export function plan(inp: PlanInput, conns: PlanConn[]): PlanResult {
     its++; ov = overflow(); const w = wire();
     if (ov.tot < best.tot - 1e-9 || (Math.abs(ov.tot - best.tot) <= 1e-9 && w < best.wire)) best = { tot: ov.tot, wire: w, paths: new Map(paths) };
   }
-  if (best.paths !== paths) { for (const c of conns) rip(c); for (const [id, q] of best.paths) { paths.set(id, q); apply(byId.get(id)!, q, 1); } }
+  if (best.paths !== paths) { for (const c of conns) rip(c); for (const [id, q] of best.paths) if (mine.has(id)) { paths.set(id, q); apply(byId.get(id)!, q, 1); } }
   // ---- layer assignment: Viterbi over each coarse path (state: layer, vias so far) against the final congestion
   const assign = (c: PlanConn, cols: number[], start: number[], end: number[]): number[] | null => {
     const n = cols.length, VM = MAX_DP_VIAS, S = L * (VM + 1); const lays = rt.map((r, l) => r ? l : -1).filter((l) => l >= 0);

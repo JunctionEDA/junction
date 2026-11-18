@@ -89,6 +89,12 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
 
     ripup="mincut" takes up only the cheapest set of routes in an open connection's way when the router repairs what
     its passes left open (a minimum cut, after Copper), and keeps the result only when fewer are open (board.route).
+    ripup="ladder" runs Copper's whole repair ladder on what is left open: rescue (one extra via, half pitch, neck
+    width, the other escape side; it moves nothing else), the min-cut rip, permutation of the routes fighting for the
+    channel, and, with plan=True, feedback into the plan; each rung kept only when fewer are open and nothing routed
+    is lost (board.route).  The result's routed.ladder counts what each rung laid.
+    With gate=True (the default) and plan or ripup given, the board is routed both plainly and with them and the
+    better of the two stays (fewer open, then fewer errors): out["variants"] says which won.  It costs a second route.
 
     reroute=True lays only the copper again on a board somebody placed: every track and via comes up, and the parts,
     the outline, the zones, the rules, the stackup and the silkscreen stay exactly as they are (no sync from the
@@ -253,7 +259,32 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             route_layers, planes = signal_layers(self)
             if route_layers:
                 out.setdefault("notes", []).append(f"routed on {', '.join(route_layers)}: {', '.join(sorted(planes))} kept whole as planes (layers= to route on them)")
-        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts, escapes=escapes, plan=global_plan, ripup=ripup))
+        def lay(**over):
+            kw = dict(time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts, escapes=escapes, plan=global_plan, ripup=ripup)
+            kw.update(over)
+            return self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, **kw)
+        if gate and (global_plan or ripup):
+            # keep-best between variants (as Copper's engine keeps the better of two opinions): the board is routed with
+            # the plan / repair ladder asked for, then again the plain way, and the one leaving fewer connections open
+            # (then fewer rules errors) stays; a tie goes to the plain way.  A board those options make worse comes out as without them.
+            ids0 = {it["id"] for it in self._all_items(["segment", "arc", "via"])}
+            alt = step("route with options", lambda: lay())
+            opts_st = standing()
+            with self.trial() as t:      # the plain way second, on the same bare board, so a plain win is that run as it came
+                for it in self._all_items(["segment", "arc", "via"]):
+                    if it["id"] not in ids0:
+                        self._edit({"op": "remove", "id": it["id"]})
+                self.flush()
+                got = step("route", lambda: lay(plan=None, ripup=None))
+                plain = standing()
+                t.keep = not (opts_st[0] < plain[0] or (opts_st[0] == plain[0] and opts_st[1] < plain[1]))
+            out["variants"] = {"plain": {"open": plain[0], "errors": plain[1]}, "options": {"open": opts_st[0], "errors": opts_st[1]}, "kept": "plain" if t.keep else "options"}
+            if t.keep:      # the later route calls go the way that won
+                global_plan = ripup = None
+            else:
+                got = alt
+        else:
+            got = step("route", lambda: lay())
         if got and got.get("rules_changed"):
             out["rules_changed"] = got["rules_changed"]
         if got:
@@ -264,6 +295,8 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                 out["routed"]["fanout"] = got["fanout"]
             if got.get("plan"):
                 out["routed"]["plan"] = got["plan"]
+            if got.get("ladder"):
+                out["routed"]["ladder"] = got["ladder"]
             if explain:
                 try:
                     out["reasoning"] = _reasoning(self, plan, clusters, got)
@@ -453,7 +486,7 @@ def _drop_bad_stitches(self) -> int:
     """Ground vias with no track of their own (stitching, fences) that a rules error now sits on: taken out, since the
     router's later passes may have laid tracks past them and a stitch is worth less than a clean board."""
     gone = 0
-    for v in self._call("run_checks").get("violations", []):
+    for v in self._fresh_checks().get("violations", []):
         if v.get("severity") != "error" or v.get("code") not in ("clearance", "shorting_items", "hole_clearance", "copper_edge_clearance", "tracks_crossing", "hole_to_hole"):
             continue
         items = self.whats_at((v["x"], v["y"]), radius=0.5)

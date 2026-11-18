@@ -12,7 +12,8 @@ const BUNDLE_COST = 0.3;
 import { TRAINED, Weights } from "./weights";
 import { cornerAngle, SQUARE_MAX } from "./corners";
 import { fanout, padRows, type Boxed, type Escape, type FanJob, type FanRow } from "./fanout";
-import { plan as globalPlan, type Corridor, type PlanResult } from "./globalplan";
+import { plan as globalPlan, type Corridor, type PlanConn, type PlanResult } from "./globalplan";
+import { CLUSTER_BOX_MM, CLUSTER_MAX, emptyLadder, FEEDBACK_MAX_CONNS, Ladder, type LadderReport, type RescueRung } from "./ladder";
 import { stackupOf, traceOn, usualImpedance, RF_CONTROL, widthFor, z0, zdiff } from "./impedance";
 /** Hole clearance is kept with this much to spare: a diagonal track on the grid can come a few microns closer to a
  *  via's hole than its grown cell says (Cyberboard: 0.2419 mm against a 0.25 mm rule). */
@@ -91,8 +92,18 @@ const CUT_RIP_MM = 4, CUT_HISTORY_MM = 0.3, CUT_TRIES = 3, CUT_DEPTH = 2;
 //   the old rule first, then the cut:                93.7 (1 open)               75.0 (10 open)
 // Inside route() the cut leaves no more open than the old rule on Ledify (1 either way, a different one); the board
 // loses its point in the steps of design() after it.  So "near" stays the default.
-const RIPUP: "near" | "mincut" = "near";
+// "ladder" (ladder.ts, Copper's repair ladder), measured 2026-11-18 with board-bench.py on 8c3015fe (score, open
+// connections, signal vias; defaults: Ledify 78.9 with 4 open and 34 vias, Cyberboard 75.0 with 11 open and 42 vias):
+//   ladder:                Ledify 77.6 (4 open, 44 vias)   Cyberboard 74.2 (8 open, 37 vias)
+//   ladder with plan:             90.0 (2 open, 38 vias)              74.8 (6 open, 45 vias)
+//   mincut with plan:             79.8 (4 open, 40 vias)              75.0 (8 open, 48 vias)
+// The ladder leaves fewer open everywhere, but alone it costs Ledify a little score, and with the plan Cyberboard
+// a hair; so the default stays "near" (and the plan off) until a board says otherwise.
+const RIPUP: "near" | "mincut" | "ladder" = "near";
 const CUT_ORDER = "cut-first" as "near-first" | "cut-first" | "cut-only";
+// the repair ladder (ripup "ladder", ladder.ts): half Copper's cluster box, and the most cells (all layers share them)
+// the half-pitch rescue rasterises round a connection
+const CLUSTER_HALF = CLUSTER_BOX_MM / 2, FINE_CELLS = 2.5e6;
 /** Nets a person routes before anything else: RF feeds, crystal lines and USB data. */
 export const isCritical = (net: string, kind: NetKind): boolean => kind === "rf" || usualImpedance(net, true) === 90
   || /(^|[\/_\-.(])(XTAL|XIN|XOUT|XI|XO|XC\d?|XL\d?|OSC(_?32K?)?_?(IN|OUT|I|O)|OSCI|OSCO|XTAL_?[PN]|X(32K?)_?[PN])\d*([_\-.)]|$)/i.test(net);
@@ -147,8 +158,13 @@ export interface RouteOptions {
    *  through runs into (and so on, a few levels deep).  "mincut": the cheapest set of routes whose removal opens a
    *  way, each priced by what laying it again costs (ripcut.ts, after Copper); only those come up, are laid again,
    *  and the result is kept only when fewer connections are open; where no cut pays, the "near" rule is tried after
-   *  it.  Default "near" (see RIPUP for what the benchmark boards said). */
-  ripup?: "near" | "mincut";
+   *  it.  "ladder": Copper's repair ladder (ladder.ts), one rung at a time over every open connection: rescue (laid
+   *  alone with one extra via and without the plan's steering, then on a lattice of half the pitch, then at the
+   *  board's minimum width, then from the other side of its escape), the min-cut rip (as "mincut"), permutation of
+   *  the cluster fighting for its channel, and, with a plan, feedback into the plan; each rung kept only when fewer
+   *  connections are open and none laid before is open now.  Counts in `result.ladder`.  Default "near" (see RIPUP
+   *  for what the benchmark boards said). */
+  ripup?: "near" | "mincut" | "ladder";
   passes?: number;               // whole-board attempts with a different order; default 3
   pitch?: number;                // force the grid pitch, mm
   weights?: Partial<Weights>;
@@ -225,6 +241,7 @@ export interface RouteResult {
   connections: ConnReport[]; domains?: DomainReport; fences?: FenceReport[];
   groups?: { clusters: number; inside: number; insideRouted: number; insideVias: number; critical: string[]; members: Record<string, string[]> };   // connections that lie inside one cluster, and how they came out
   fanout?: { escapes: number; ring: number; via: number; used: number; boxed: Boxed[]; rows?: number; kept?: boolean; open?: [number, number] };   // the escapes laid before routing, and the pins that got none; with routeRuns: the rows escaped, whether that run was kept, and the open connections without / with escapes
+  ladder?: LadderReport;   // ripup "ladder": connections each rung laid (rescued, by rescue rung in rungs; mincut; permuted, and the orders tried; feedback), transactions tried and rolled back
   plan?: { tile: number; tiles: [number, number]; conns: number; iterations: number; overflowFirst: number; overflow: number; crossings: number; relayered: number; moved: number; contested: number; viaConns: number; ms: number; inside: number; outside: number };   // the global plan: overflow (mm) before and after negotiation, how many connections it moved off their direct path (only those are steered) and had to fight for (they go first), and how many steered searches found their route inside the corridor
 }
 export interface Progress { done: number; total: number; routed: number; pass: number; net: string }
@@ -573,7 +590,7 @@ export class Router {
   }
 
   // ------------------------------------------------------------------ fan-out before routing (fanout.ts)
-  escapeObs: Obstacle[] = []; private laid: { e: Escape; anchors: Anchor[]; obs: Obstacle[] }[] = []; fanReport: RouteResult["fanout"]; fanNote?: Partial<NonNullable<RouteResult["fanout"]>>;   // set by routeRuns
+  escapeObs: Obstacle[] = []; private laid: { e: Escape; anchors: Anchor[]; obs: Obstacle[]; orig: Pick<Anchor, "p" | "layers" | "shape" | "narrow" | "axis">[] }[] = []; fanReport: RouteResult["fanout"]; fanNote?: Partial<NonNullable<RouteResult["fanout"]>>;   // set by routeRuns
   /** The fine-pitch rows of the board, by key: Copper's needs_fanout (fanout.py) picks the parts, those with a row
    *  where two tracks do not fit between neighbouring pads (pitch < 2 (w + clr) + pad width, at the board's own
    *  track and clearance) or with 16 pads or more; every SMD row of such a part counts. */
@@ -654,9 +671,9 @@ export class Router {
     // the escapes are board copper of their nets from here on, and their ends are where the connections start
     for (const e of escapes) {
       const obs = live.get(e)!; this.escapeObs.push(...obs); for (const c of G.classes.values()) for (const o of obs) stampClass(G, c, o, 1, true);
-      const j = jobs.get(e.pad.name)!; const anchors = Array.from(ends.get(at.get(e.pad.name)!)!.anchors);
+      const j = jobs.get(e.pad.name)!; const anchors = Array.from(ends.get(at.get(e.pad.name)!)!.anchors); const orig = anchors.map((a) => ({ p: a.p, layers: a.layers, shape: a.shape, narrow: a.narrow, axis: a.axis }));
       for (const a of anchors) { a.p = e.end; a.layers = e.via ? all.filter((l) => G.routable[l]) : [e.pad.layer]; a.shape = { t: "circle", x: e.end[0], y: e.end[1], r: e.via ? j.viaD / 2 : e.w / 2 }; a.narrow = e.w; a.axis = e.via ? undefined : e.n; }
-      this.padNames.set(key(e.end), e.pad.name); this.laid.push({ e, anchors, obs });
+      this.padNames.set(key(e.end), e.pad.name); this.laid.push({ e, anchors, obs, orig });
     }
     // the lane kept goes on past each stub's end, as fanoutLanes keeps it past a pad's: only the pin's own net may
     // use it, so a neighbour's route cannot turn across in front of a stub and box it in
@@ -1211,6 +1228,8 @@ export class Router {
     this.oidx = null;
   }
   private viaCap = Infinity;
+  /** The repair ladder's rescue (ladder.ts): vias allowed above a connection's limit, and no steering by the plan. */
+  private extraVias = 0; private noSteer = false; private ladderRep: LadderReport | null = null;
   private cur: Conn | null = null; private curSoft = false; private oidx: Map<string, { o: Obstacle; bb: number[] }[]> | null = null;
   /** Exact: does a piece of track keep its clearance to the board's copper, holes and edges, and to this run's routes? */
   private clearOf(shape: Shape, layer: number, net: string, clr: number, why?: { net: string; gap: number; need: number }): boolean {
@@ -1296,7 +1315,8 @@ export class Router {
         extra = (nodes) => { let lone = 0; for (let i = 0; i + 1 < nodes.length; i++) { const a = nodes[i], b = nodes[i + 1]; if (a.l !== b.l) continue; const n = Math.max(Math.abs(b.ix - a.ix), Math.abs(b.iy - a.iy)), sx = Math.sign(b.ix - a.ix), sy = Math.sign(b.iy - a.iy); const step = Math.hypot(sx, sy) * G.g; for (let k = 0; k < n; k++) if (!near(a.ix + sx * k, a.iy + sy * k, a.l)) lone += step; } return lone * 3 * this.W.length + (before ? before(nodes) : 0); };
       }
       let used = 0; for (const c of net.conns) if (c.nodes && c !== conn && c.feat) used += c.feat.vias;
-      const perConn = this.opts.maxViasPerConnection; const maxVias = Math.min(gd.maxVias - used, this.viaCap, perConn === undefined || perConn === null ? Infinity : Math.max(0, +perConn));
+      const perConn = this.opts.maxViasPerConnection; let maxVias = Math.min(gd.maxVias - used, this.viaCap, perConn === undefined || perConn === null ? Infinity : Math.max(0, +perConn));
+      if (this.extraVias && maxVias >= 1 && maxVias < Infinity) maxVias += this.extraVias;   // the ladder's rescue: one via above the limit (a limit of none stays none)
       const src = this.access(A, maps, rt), tgt = this.access(B, maps, rt); if (!src) return null;
       let term = tb; let zoneSet: Set<number> | null = null;
       if (zoneAt(B.cluster)) { zoneSet = new Set(); term = tb.slice(); let own = false; for (const z of net.zoneCells!) if ((conn.planeOnly === undefined || z.l === conn.planeOnly) && !maps[z.l][z.iy * G.W + z.ix]) { if (!rt[z.l]) { if (!own) { rt = rt.slice(); own = true; } rt[z.l] = true; }   // a plane layer takes no tracks, but a via may drop into the net's own pour on it
@@ -1314,7 +1334,7 @@ export class Router {
       // on costs extra (`outside`, `layerCost`).  With `mask` the search first looks inside the corridor only, and at
       // the whole board when nothing is found there.  Not a net with a pour (it may end anywhere in it), and not a
       // one-layer try of a connection the plan sends through a via.
-      const cor0 = this.gplan && !collect && !net.zoneCells ? this.gplan.corridors.get(conn.id) : undefined, steerAs = cor0 ? this.planOpts().steer : "none", cor = cor0 && (steerAs === "all" || (steerAs === "moved" && cor0.moved)) ? cor0 : undefined;
+      const cor0 = this.gplan && !collect && !net.zoneCells && !this.noSteer ? this.gplan.corridors.get(conn.id) : undefined, steerAs = cor0 ? this.planOpts().steer : "none", cor = cor0 && (steerAs === "all" || (steerAs === "moved" && cor0.moved)) ? cor0 : undefined;
       let steer = extra;
       if (cor && !(cor.vias > 0 && maxVias <= 0)) {
         const pl = this.gplan!, kk = pl.k, po = this.planOpts(); const lc = G.routable.filter(Boolean).length > 1 ? po.layerCost : 0, oc = po.outside, lay = cor.layer, tl = cor.tiles, before = extra;
@@ -1340,7 +1360,7 @@ export class Router {
     } finally { this.lift(net, -1, conn.cls); }
   }
   // ------------------------------------------------------------------ global plan (globalplan.ts)
-  private gplan: PlanResult | null = null; private planBlk: Uint8Array | null = null; private planStat = { inside: 0, outside: 0 };
+  private gplan: PlanResult | null = null; private planRef: RuleClass | null = null; private planBlk: Uint8Array | null = null; private planStat = { inside: 0, outside: 0 };
   private planOpts(): { tile: number; iters: number; layerCost: number; outside: number; mask: boolean; vias: boolean; open: number; steer: "moved" | "all" | "none"; order: boolean; rip: boolean } {
     const o = this.opts.plan ?? PLAN; const q = typeof o === "object" ? o : {};
     return { tile: q.tile || 0, iters: q.iters || 16, layerCost: q.layerCost ?? 0.5, outside: q.outside ?? 0.5, mask: !!q.mask, vias: !!q.vias, open: q.open ?? 1, steer: q.steer || "moved", order: q.order !== false, rip: q.rip !== false };
@@ -1364,7 +1384,7 @@ export class Router {
     if (!conns.length) return;
     const count = new Map<RuleClass, number>(); for (const c of conns) count.set(c.cls, (count.get(c.cls) || 0) + 1);
     let ref = conns[0].cls; for (const [cls, n] of count) if (n > count.get(ref)!) ref = cls;
-    const end = (a: Anchor) => ({ p: a.p, layers: a.layers, box: a.shape && !a.plane ? bboxOf(a.shape) : undefined });
+    const end = (a: Anchor) => ({ p: a.p, layers: a.layers, box: a.shape && !a.plane ? bboxOf(a.shape) : undefined }); this.planRef = ref;
     this.gplan = globalPlan({ G, maps: ref.fixed, vmaps: ref.vfixed, pitch: ref.width + ref.clr, viaPitch: ref.viaD + ref.clr, need: ref.clr + ref.width / 2, pref: this.pref, viaMm: this.W.via / Math.max(1e-6, this.W.length), minPitch: this.minPadPitch(), tile: po.tile || undefined, iters: po.iters },
       conns.map((c) => ({ id: c.id, net: c.net, a: end(c.a), b: end(c.b), demand: c.cls.width + c.cls.clr })));
   }
@@ -1733,13 +1753,16 @@ export class Router {
       }
       return false;
     };
-    const mincut = (this.opts.ripup ?? RIPUP) === "mincut";
+    const mincut = (this.opts.ripup ?? RIPUP) !== "near";   // the ladder's min-cut rung is this one
     const forceAny = (c: Conn, depth: number, keep: Set<Conn>): boolean => {
       if (!mincut) return force(c, depth, keep);
       if (CUT_ORDER === "near-first") { const s = snapOf(); if (force(c, depth, keep)) return true; back(s); return !timeUp() && cutForce(c, Math.min(depth, CUT_DEPTH), new Set()); }
       return cutForce(c, Math.min(depth, CUT_DEPTH), keep) || (CUT_ORDER === "cut-first" && !timeUp() && force(c, depth, new Set()));
     };
-    for (let round = 0; round < 3; round++) {
+    if ((this.opts.ripup ?? RIPUP) === "ladder") {
+      if (!conns.some((c) => !c.nodes && c.why !== "budget")) return;
+      for (let round = 0; round < 2 && !timeUp(); round++) if (!this.ladder(timeUp, snapOf, back, lay, (c) => forceAny(c, 3, new Set()))) break;
+    } else for (let round = 0; round < 3; round++) {
       const open = conns.filter((c) => !c.nodes && c.why !== "budget"); if (!open.length) return; let gained = false;
       for (const c of open) {
         if (timeUp()) return; if (c.nodes) continue; const snap = snapOf(); const n0 = snap.filter((x) => x.nodes).length;
@@ -1785,6 +1808,236 @@ export class Router {
         c.cls = wide; back(snap);
       }
     }
+  }
+  // ------------------------------------------------------------------ the repair ladder (ladder.ts, after Copper's repair.py)
+  private ladderRun: Ladder<unknown> | null = null; private booked: [number, number, number, number, number][] = [];
+  private replanUndo: { cors: Map<number, Corridor | undefined>; book: [number, number, number, number, number][] } | null = null;
+  /** One run of the ladder over what is open; true when it laid something.  The transactions are repair()'s
+   *  snapshots; `cut` is the min-cut rip as ripup "mincut" does it. */
+  private ladder<S>(timeUp: () => boolean, snapOf: () => S, back: (s: S) => void, lay: (c: Conn) => boolean, cut: (c: Conn) => boolean): boolean {
+    const conns = this.conns; const alone = (c: Conn) => !!c.pair || (!!c.pairOnly && this.opts.splitPairs !== true);
+    const open = () => conns.filter((c) => !c.nodes && !c.moot).sort((a, b) => a.len - b.len || a.id - b.id).map((c) => c.id);
+    const host = {
+      open, routed: (id: number) => !!conns[id].nodes, timeUp, snap: snapOf as () => unknown, back: back as (s: unknown) => void,
+      rescue: (id: number, rung: RescueRung) => { const c = conns[id]; return !alone(c) && c.why !== "budget" && this.rescueOne(c, rung, lay); },
+      mincut: (id: number) => { const c = conns[id]; return !alone(c) && c.why !== "budget" && cut(c); },
+      contesting: (id: number) => { const c = conns[id]; return alone(c) || c.why === "budget" ? [] : this.contesting(c); },
+      rip: (ids: number[]) => { const out: Conn[] = []; for (const id of ids) if (conns[id].nodes) this.rip(conns[id], out); return out.map((c) => c.id); },
+      lay: (id: number) => !alone(conns[id]) && lay(conns[id]),
+      replan: this.gplan ? (ids: number[]) => this.replan(ids.map((id) => conns[id]).filter((c) => !alone(c) && c.why !== "budget")) : undefined,
+      replanned: (keep: boolean) => this.replanned(keep),
+    };
+    if (!this.ladderRun) this.ladderRun = new Ladder<unknown>(host); else this.ladderRun.h = host;
+    const n = this.ladderRun.run(); this.ladderRep = this.ladderRun.rep; return n > 0;
+  }
+  /** Copper's rescue(): one rung for one open connection, which disturbs nobody.  True when it was laid. */
+  private rescueOne(c: Conn, rung: RescueRung, lay: (c: Conn) => boolean): boolean {
+    if (c.nodes) return true;
+    const loose = (f: () => boolean, extra: number): boolean => { this.noSteer = true; this.extraVias = extra; try { return f(); } finally { this.noSteer = false; this.extraVias = 0; } };
+    if (rung === "via") return loose(() => lay(c), 1);
+    if (rung === "half") return loose(() => this.fineLay(c), 0);
+    if (rung === "neck") {
+      const wide = c.cls, floor = Math.max(this.s.minTrackWidth || 0, 0.1); if (wide.width <= floor + 1e-9) return false;
+      const thin = this.classFor(c.net, Math.min(floor, wide.width), 0, this.opts.smallVias !== false); if (thin === wide) return false;
+      c.cls = thin; const ok = loose(() => lay(c) || this.fineLay(c), 1); if (!ok) c.cls = wide; else this.stat.necked = (this.stat.necked || 0) + 1;
+      return ok;
+    }
+    return this.unescape(c, () => loose(() => lay(c), 1));
+  }
+  /** Copper's "other fan-out side" (fanout.re_escape): an end of the connection that starts from an escape laid
+   *  before routing gives it up and leaves its pad by itself (access() tries both ways along the pad), when nothing
+   *  else is routed from that escape.  Undone when the connection still cannot be laid. */
+  private unescape(c: Conn, layIt: () => boolean): boolean {
+    const G = this.G;
+    for (const end of [c.a, c.b]) {
+      const i = this.laid.findIndex((x) => x.anchors.includes(end)); if (i < 0) continue; const L = this.laid[i];
+      if (this.conns.some((o) => o !== c && o.nodes && [o.a, o.b, ...(o.ends || [])].some((a) => L.anchors.includes(a)))) continue;
+      const cur = L.anchors.map((a) => ({ p: a.p, layers: a.layers, shape: a.shape, narrow: a.narrow, axis: a.axis }));
+      const swap = (sign: number) => {
+        const list = G.obstacles.get(L.e.net) || []; G.obstacles.set(L.e.net, sign < 0 ? list.filter((o) => !L.obs.includes(o)) : list.concat(L.obs));
+        for (const cl of G.classes.values()) for (const o of L.obs) stampClass(G, cl, o, sign, true);
+        this.escapeObs = sign < 0 ? this.escapeObs.filter((o) => !L.obs.includes(o)) : this.escapeObs.concat(L.obs);
+        L.anchors.forEach((a, k) => Object.assign(a, sign < 0 ? L.orig[k] : cur[k]));
+        if (sign < 0) this.laid.splice(i, 1); else this.laid.splice(i, 0, L); this.oidx = null;
+      };
+      swap(-1);
+      if (layIt()) { this.stat.unescaped = (this.stat.unescaped || 0) + 1; return true; }
+      swap(1);
+    }
+    return false;
+  }
+  /** Where the connection fails: the middle of the stretch of its soft route (through this run's routes) that runs
+   *  into other routes (Copper's fail record 'where'), and the routes it runs into.  The middle of its ends when it
+   *  has no soft route. */
+  private whereOf(c: Conn): { p: Pt; blockers: Conn[] } {
+    const mid: Pt = [(c.a.p[0] + c.b.p[0]) / 2, (c.a.p[1] + c.b.p[1]) / 2];
+    const soft = this.find(c, true); if (!soft) return { p: mid, blockers: [] };
+    const bl = this.blockers(c, soft.res).filter((o) => !o.pair); if (!bl.length) return { p: mid, blockers: [] };
+    const P = this.P, nodes = soft.res.nodes, r = c.cls.width / 2; let sx = 0, sy = 0, n = 0;
+    for (let i = 0; i + 1 < nodes.length; i++) {
+      const a = nodes[i], b = nodes[i + 1]; if (a.l !== b.l) continue; const pa = this.mm(a), pb = this.mm(b); const k = Math.max(1, Math.ceil(Math.hypot(pb[0] - pa[0], pb[1] - pa[1]) / 0.25));
+      for (let j = 0; j <= k; j++) {
+        const p: Pt = [pa[0] + (pb[0] - pa[0]) * j / k, pa[1] + (pb[1] - pa[1]) * j / k]; const dot = { t: "circle", x: p[0], y: p[1], r };
+        if (bl.some((o) => o.shapes.some((sh) => sh.layers.includes(a.l) && P.shapeGap(sh.shape, dot) < Math.max(c.cls.clr, o.cls.clr)))) { sx += p[0]; sy += p[1]; n++; }
+      }
+    }
+    return { p: n ? [sx / n, sy / n] : mid, blockers: bl };
+  }
+  /** Copper's _cluster(): the connections that fight for the channel where `c` fails, inside a 12 x 12 mm box round
+   *  it, nearest first in three ranks: other open connections; the routes in its way (its soft route's blockers and
+   *  its minimum cut); routes taken up twice already.  Pairs and critical nets stay out of it. */
+  private contesting(c: Conn): number[] {
+    const { p, blockers } = this.whereOf(c); const half = CLUSTER_HALF;
+    const named = new Set(blockers.map((o) => o.id)); const cut = this.cutFor(c, (o) => !!o.pair); if (cut) for (const o of cut) named.add(o.id);
+    const inBox = (q: Pt) => Math.abs(q[0] - p[0]) <= half && Math.abs(q[1] - p[1]) <= half;
+    const cands: [number, number, number][] = [];
+    for (const o of this.conns) {
+      if (o === c || o.moot || o.pair || o.partner || o.pairOnly || o.why === "budget") continue;
+      let prio: number, pts: Pt[];
+      if (!o.nodes) { prio = 0; pts = [o.a.p, o.b.p]; }
+      else {
+        if (isCritical(o.net, this.kindOf(o.net)) || this.netOf(o.net).guide.rank < Infinity) continue;
+        if (named.has(o.id)) prio = 1; else if (o.rips >= 2 || (this.ripHist.get(o.id) || 0) > 0) prio = 2; else continue;
+        pts = []; for (const sh of o.shapes) { const s = sh.shape as any; if (s.t !== "seg") { if (s.t === "circle") pts.push([s.x, s.y]); continue; } const dx = s.b[0] - s.a[0], dy = s.b[1] - s.a[1], L2 = dx * dx + dy * dy; const t = L2 ? Math.max(0, Math.min(1, ((p[0] - s.a[0]) * dx + (p[1] - s.a[1]) * dy) / L2)) : 0; pts.push([s.a[0] + t * dx, s.a[1] + t * dy]); }
+      }
+      let d = Infinity; for (const q of pts) if (inBox(q)) d = Math.min(d, Math.hypot(q[0] - p[0], q[1] - p[1]));
+      if (d < Infinity) cands.push([prio, Math.round(d * 1e6) / 1e6, o.id]);
+    }
+    cands.sort((x, y) => x[0] - y[0] || x[1] - y[1] || x[2] - y[2]);
+    return cands.slice(0, CLUSTER_MAX - 1).map((x) => x[2]);
+  }
+  private planConnOf(c: Conn): PlanConn {
+    const end = (a: Anchor) => ({ p: a.p, layers: a.layers, box: a.shape && !a.plane ? bboxOf(a.shape) : undefined });
+    return { id: c.id, net: c.net, a: end(c.a), b: end(c.b), demand: c.cls.width + c.cls.clr };
+  }
+  /** Copper's _feedback(): book away the capacity of the tile borders where the open connections fail (on the
+   *  layers their corridors put there), plan again for them and the routed connections whose corridors cross those
+   *  borders (at most FEEDBACK_MAX_CONNS), steer all of them by their new corridors, and take the routed ones up.
+   *  Returns what to lay again, or null. */
+  private replan(failed: Conn[]): number[] | null {
+    const pl = this.gplan, ref = this.planRef; if (!pl || !ref) return null; const G = this.G, k = pl.k, nx = pl.nx, ny = pl.ny;
+    const book: [number, number, number, number, number][] = []; const pairs: [number, number][] = []; const affected: Conn[] = [];
+    for (const c of failed) {
+      const cor = pl.corridors.get(c.id); if (!cor) continue; const { p } = this.whereOf(c);
+      const tx = Math.min(nx - 1, Math.max(0, Math.floor((p[0] - G.ox) / G.g / k))), ty = Math.min(ny - 1, Math.max(0, Math.floor((p[1] - G.oy) / G.g / k))), t = ty * nx + tx;
+      const layers = cor.layer[t] >= 0 ? [cor.layer[t]] : G.routable.map((r, l) => r ? l : -1).filter((l) => l >= 0); let any = false;
+      for (const [ex, ey, side, bx, by] of [[tx, ty, 0, tx + 1, ty], [tx - 1, ty, 0, tx - 1, ty], [tx, ty, 1, tx, ty + 1], [tx, ty - 1, 1, tx, ty - 1]]) {
+        if (bx < 0 || by < 0 || bx >= nx || by >= ny || ex < 0 || ey < 0 || !cor.tiles[by * nx + bx]) continue;
+        for (const l of layers) book.push([l, ex, ey, side, c.cls.width + c.cls.clr]); pairs.push([t, by * nx + bx]); any = true;
+      }
+      if (any) affected.push(c);
+    }
+    this.stat.replans = (this.stat.replans || 0) + 1; if (!book.length) return null;
+    this.stat.replanBooked = (this.stat.replanBooked || 0) + book.length;
+    const have = new Set(affected.map((c) => c.id));
+    for (const o of this.conns.slice().sort((a, b) => a.len - b.len || a.id - b.id)) {
+      if (affected.length >= FEEDBACK_MAX_CONNS) break;
+      if (have.has(o.id) || !o.nodes || o.moot || o.pair || o.partner || o.pairOnly || isCritical(o.net, this.kindOf(o.net)) || this.netOf(o.net).guide.rank < Infinity) continue;
+      const cor = pl.corridors.get(o.id); if (cor && pairs.some(([a, b]) => cor.tiles[a] && cor.tiles[b])) { affected.push(o); have.add(o.id); }
+    }
+    const fixed: { conn: PlanConn; path: number[] }[] = []; for (const [id, cor] of pl.corridors) if (!have.has(id) && this.conns[id]) fixed.push({ conn: this.planConnOf(this.conns[id]), path: cor.path });
+    const po = this.planOpts();
+    const res = globalPlan({ G, maps: ref.fixed, vmaps: ref.vfixed, pitch: ref.width + ref.clr, viaPitch: ref.viaD + ref.clr, need: ref.clr + ref.width / 2, pref: this.pref, viaMm: this.W.via / Math.max(1e-6, this.W.length), tile: pl.T, iters: po.iters, book: this.booked.concat(book), fixed },
+      affected.map((c) => this.planConnOf(c)));
+    if (res.k !== pl.k || res.nx !== nx || res.ny !== ny) return null;
+    this.stat.replanConns = (this.stat.replanConns || 0) + affected.length;
+    const cors = new Map<number, Corridor | undefined>(); for (const c of affected) cors.set(c.id, pl.corridors.get(c.id));
+    for (const [id, cor] of res.corridors) pl.corridors.set(id, Object.assign({}, cor, { moved: true }));   // steered by its new corridor
+    this.replanUndo = { cors, book };
+    const out: Conn[] = []; for (const c of affected) if (c.nodes) this.rip(c, out);
+    const ids = new Set(affected.map((c) => c.id)); for (const c of out) ids.add(c.id);
+    return Array.from(ids).map((id) => this.conns[id]).sort((a, b) => a.len - b.len || a.id - b.id).map((c) => c.id);
+  }
+  private replanned(keep: boolean): void {
+    const u = this.replanUndo, pl = this.gplan; this.replanUndo = null; if (!u || !pl) return;
+    if (keep) { this.booked.push(...u.book); return; }
+    for (const [id, cor] of u.cors) if (cor) pl.corridors.set(id, cor); else pl.corridors.delete(id);
+  }
+  /** Copper's rescue at half the window pitch: the connection alone, searched on a lattice of half the grid's pitch
+   *  over a window round its ends, where the board's copper and this run's routes are rasterised again; every piece
+   *  of the result is then checked exactly against the copper round it.  Vias only on cells of the main grid (so the
+   *  rest of the router can name them), and the route's grid nodes are its nodes rounded onto the main grid (used for
+   *  tees and lengths; the copper itself is exact). */
+  private fineLay(conn: Conn): boolean {
+    const G = this.G, net = this.netOf(conn.net), cls = conn.cls, gd = net.guide, h = G.g / 2; if (conn.planeOnly !== undefined) return false;
+    const comp = this.components(net); if (comp[conn.a.cluster] === comp[conn.b.cluster]) return false;
+    const span = Math.max(Math.abs(conn.a.p[0] - conn.b.p[0]), Math.abs(conn.a.p[1] - conn.b.p[1])), m = Math.max(2, 0.3 * span);
+    const ix0 = Math.max(0, Math.floor((Math.min(conn.a.p[0], conn.b.p[0]) - m - G.ox) / G.g)), ix1 = Math.min(G.W - 1, Math.ceil((Math.max(conn.a.p[0], conn.b.p[0]) + m - G.ox) / G.g));
+    const iy0 = Math.max(0, Math.floor((Math.min(conn.a.p[1], conn.b.p[1]) - m - G.oy) / G.g)), iy1 = Math.min(G.H - 1, Math.ceil((Math.max(conn.a.p[1], conn.b.p[1]) + m - G.oy) / G.g));
+    const W2 = 2 * (ix1 - ix0) + 1, H2 = 2 * (iy1 - iy0) + 1, n2 = W2 * H2; if (W2 < 3 || H2 < 3 || n2 > FINE_CELLS) return false;
+    const ox = G.ox + ix0 * G.g, oy = G.oy + iy0 * G.g;
+    // a mask of the main grid seen from the fine one: a fine cell between main cells takes all of them (`any`: any of
+    // them set, else every one of them), so what the main grid keeps out stays out
+    const sample = (src: ArrayLike<number> | null | undefined, any = true): Uint8Array | null => {
+      if (!src) return null; const out = new Uint8Array(n2);
+      for (let fy = 0; fy < H2; fy++) { const ya = iy0 + (fy >> 1), yb = iy0 + ((fy + 1) >> 1); for (let fx = 0; fx < W2; fx++) { const xa = ix0 + (fx >> 1), xb = ix0 + ((fx + 1) >> 1);
+        const v = [src[ya * G.W + xa], src[ya * G.W + xb], src[yb * G.W + xa], src[yb * G.W + xb]]; out[fy * W2 + fx] = (any ? v.some((x) => x) : v.every((x) => x)) ? 1 : 0; } }
+      return out;
+    };
+    const noVia = new Uint16Array(n2); const nv = sample(G.noVia)!; for (let fy = 0; fy < H2; fy++) for (let fx = 0; fx < W2; fx++) { const i = fy * W2 + fx; noVia[i] = nv[i] || (fx & 1) || (fy & 1) ? 1 : 0; }
+    for (const b of gd.viaAvoid) for (let fy = Math.max(0, 2 * (b[1] - iy0)); fy <= Math.min(H2 - 1, 2 * (b[3] - iy0)); fy++) for (let fx = Math.max(0, 2 * (b[0] - ix0)); fx <= Math.min(W2 - 1, 2 * (b[2] - ix0)); fx++) noVia[fy * W2 + fx] = 1;
+    // the copper of every other net near the window: the board's, the escapes and this run's routes
+    const reach = cls.clr + cls.viaD + 2, wx0 = ox - reach, wy0 = oy - reach, wx1 = ox + (W2 - 1) * h + reach, wy1 = oy + (H2 - 1) * h + reach;
+    const obs = new Map<string, Obstacle[]>(); const put = (o: Obstacle) => { const bb = bboxOf(o.shape); if (bb[0] > wx1 || bb[2] < wx0 || bb[1] > wy1 || bb[3] < wy0) return; let l = obs.get(o.net); if (!l) obs.set(o.net, l = []); l.push(o); };
+    for (const [k, list] of G.obstacles) if (k !== conn.net) for (const o of list) put(o);
+    for (const o of this.conns) if (o.nodes && o.net !== conn.net) for (const sh of o.shapes) put(sh);
+    const rmin = this.s.clearance + this.s.trackWidth / 2;
+    const G2: Grid = { g: h, ox, oy, W: W2, H: H2, layers: G.layers, routable: G.routable, noVia, thru: new Uint8Array(n2), outside: sample(G.outside), keep: G.keep.map((k) => sample(k)),
+      quiet: sample(G.quiet) || undefined, clear: sample(G.clear) || undefined, edgeClr: G.edgeClr, holeClr: G.holeClr, margin: h * h / (4 * Math.max(rmin, 0.05)) + 0.002, obstacles: obs, classes: new Map(), weights: G.weights,
+      kinds: G.kinds, sep: G.sep, nearPad: sample(G.nearPad, false) || undefined, layerCost: G.layerCost };
+    const holes = new Set<number>();   // the net's own plated holes: changing layer there is free and lays no via
+    for (const o of G.obstacles.get(conn.net) || []) if (o.thru) { const fx = Math.round((o.thru[0] - ox) / h), fy = Math.round((o.thru[1] - oy) / h); if (fx >= 0 && fy >= 0 && fx < W2 && fy < H2) { G2.thru[fy * W2 + fx] = 1; holes.add(fy * W2 + fx); } }
+    const c2 = buildClass(G2, cls.key, cls.width, cls.clr, cls.viaD, cls.viaDrill, cls.kind, cls.open !== false, !!cls.feed);
+    for (const b of gd.avoid) for (const maps of [c2.full, c2.fixed, c2.vfull, c2.vfixed]) for (const mp of maps) for (let fy = Math.max(0, 2 * (b[1] - iy0)); fy <= Math.min(H2 - 1, 2 * (b[3] - iy0)); fy++) for (let fx = Math.max(0, 2 * (b[0] - ix0)); fx <= Math.min(W2 - 1, 2 * (b[2] - ix0)); fx++) mp[fy * W2 + fx]++;
+    const maps = c2.full;
+    let rt = G.routable.slice();
+    if (gd.allowed) { const want = gd.allowed.map((v, l) => v && G.routable[l]); if (want.some(Boolean)) { rt = want.slice(); for (const e of [conn.a, conn.b]) if (!e.layers.some((l) => want[l])) for (const l of e.layers) if (G.routable[l]) rt[l] = true; } }
+    // the net's trees on each side (a route may end on one, a tee), and its pour
+    const owner = new Map<number, number>();
+    const tree = (cluster: number): Node[] => { const out: Node[] = []; for (const o of net.conns) if (o.nodes && o !== conn && comp[o.a.cluster] === comp[cluster]) { const cs: Node[] = []; this.cellsOf(o, cs, new Map()); for (const nd of cs) { const fx = 2 * (nd.ix - ix0), fy = 2 * (nd.iy - iy0); if (fx < 0 || fy < 0 || fx >= W2 || fy >= H2) continue; out.push({ ix: fx, iy: fy, l: nd.l }); owner.set(nd.l * n2 + fy * W2 + fx, o.id); } } return out; };
+    let ta = tree(conn.a.cluster), tb = tree(conn.b.cluster);
+    const zoneAt = (cluster: number) => !!net.zoneCells && comp[cluster] === comp[net.zoneCluster];
+    const flip = ta.length > tb.length || (zoneAt(conn.a.cluster) && !zoneAt(conn.b.cluster)); if (flip) { const t = ta; ta = tb; tb = t; }
+    const A = flip ? conn.b : conn.a, B = flip ? conn.a : conn.b;
+    const access = (a: Anchor): Terminal | null => {
+      const cx = (a.p[0] - ox) / h, cy = (a.p[1] - oy) / h; const ls = a.layers.filter((l) => rt[l]); if (!ls.length) return null; const R = a.shape ? Math.min(12, Math.ceil(1 / h)) : 0;
+      let best: Terminal | null = null, bd = Infinity;
+      for (let iy = Math.round(cy) - R; iy <= Math.round(cy) + R; iy++) for (let ix = Math.round(cx) - R; ix <= Math.round(cx) + R; ix++) {
+        if (ix < 0 || iy < 0 || ix >= W2 || iy >= H2) continue; const d = Math.hypot(ix - cx, iy - cy); if (d >= bd) continue;
+        if (R && d > 0.71 && pointGap(a.shape, ox + ix * h, oy + iy * h) > 0) continue;
+        const free = ls.filter((l) => !maps[l][iy * W2 + ix]); if (!free.length) continue; bd = d; best = { ix, iy, layers: free };
+      }
+      return best;
+    };
+    const src = access(A), tgt = access(B); if (!src) return false;
+    const term = tb.slice(); const zoneSet = new Set<number>();
+    if (zoneAt(B.cluster)) for (const z of net.zoneCells!) { const fx = 2 * (z.ix - ix0), fy = 2 * (z.iy - iy0); if (fx < 0 || fy < 0 || fx >= W2 || fy >= H2 || maps[z.l][fy * W2 + fx]) continue; if (!rt[z.l]) { rt = rt.slice(); rt[z.l] = true; } term.push({ ix: fx, iy: fy, l: z.l }); zoneSet.add(z.l * n2 + fy * W2 + fx); }
+    if (!tgt && !term.length) return false;
+    let used = 0; for (const o of net.conns) if (o.nodes && o !== conn && o.feat) used += o.feat.vias;
+    const perConn = this.opts.maxViasPerConnection; let maxVias = Math.min(gd.maxVias - used, this.viaCap, perConn === undefined || perConn === null ? Infinity : Math.max(0, +perConn));
+    if (this.extraVias && maxVias >= 1 && maxVias < Infinity) maxVias += this.extraVias;
+    const res = probe({ G: G2, maps, vmaps: c2.vfull, src, tgt, term, win: { x0: 0, y0: 0, x1: W2 - 1, y1: H2 - 1 }, pref: this.pref, W: this.W, allowVias: gd.allowVias && maxVias > 0, maxSteps: 8e6, routable: rt, maxVias: maxVias === Infinity ? undefined : maxVias });
+    if (!res) return false;
+    const nodes = simplify(res.nodes); const mm = (n: Node): Pt => [r6(ox + n.ix * h), r6(oy + n.iy * h)];
+    const w = cls.width, clr = cls.clr, all = G.layers.map((_, i) => i); const shapes: Obstacle[] = [], viaCells: number[] = [], stubs: [Pt, Pt, number][] = [];
+    const vclr = Math.max(clr, (G.holeClr || 0) + HOLE_SLACK - (cls.viaD - cls.viaDrill) / 2);
+    for (let i = 0; i + 1 < nodes.length; i++) {
+      const a = nodes[i], b = nodes[i + 1];
+      if (a.l !== b.l) { const fi = a.iy * W2 + a.ix; if (holes.has(fi)) continue; if ((a.ix & 1) || (a.iy & 1)) return false; const gi = (iy0 + a.iy / 2) * G.W + ix0 + a.ix / 2; if (viaCells.includes(gi)) continue; viaCells.push(gi); const p = mm(a); shapes.push({ net: conn.net, layers: all, shape: { t: "circle", x: p[0], y: p[1], r: cls.viaD / 2 }, clr: vclr }); }
+      else shapes.push({ net: conn.net, layers: [a.l], shape: { t: "seg", a: mm(a), b: mm(b), r: w / 2 }, clr });
+    }
+    const piece = (from: Pt, to: Pt, l: number, sw: number) => { if (Math.hypot(to[0] - from[0], to[1] - from[1]) > 1e-4) { stubs.push([from, to, l]); shapes.push({ net: conn.net, layers: [l], shape: { t: "seg", a: from, b: to, r: sw / 2 }, clr }); } };
+    const first = nodes[0], last = nodes[nodes.length - 1];
+    piece(A.p, mm(first), first.l, A.narrow ? Math.min(w, A.narrow) : w); if (!res.onTerm) piece(B.p, mm(last), last.l, B.narrow ? Math.min(w, B.narrow) : w);
+    // every piece exactly against everything round it (the fine maps are a raster too)
+    this.cur = conn; this.curSoft = false;
+    for (const o of shapes) for (const l of o.layers) if (!this.clearOf(o.shape, l, conn.net, o.clr)) return false;
+    const key = last.l * n2 + last.iy * W2 + last.ix;
+    let main = nodes.map((n) => ({ ix: ix0 + (n.ix >> 1), iy: iy0 + (n.iy >> 1), l: n.l })); main = simplify(main); if (main.length < 2) main = [main[0], main[0]];
+    conn.nodes = main; conn.shapes = shapes; conn.viaCells = viaCells; conn.stubs = stubs; conn.feat = featuresOf(G2, nodes, this.pref);
+    conn.zoneEnd = res.onTerm && zoneSet.has(key) && !owner.has(key); conn.landed = res.onTerm ? owner.get(key) ?? -1 : -1;
+    this.place(conn, 1); this.stat.fine = (this.stat.fine || 0) + 1;
+    return true;
   }
   /** Once everything is laid there is often room that was not there (or not known to be free) when a route chose to
    *  change layers.  Each route with vias is tried again on the finished board with none, then with fewer; it is
@@ -2110,7 +2363,7 @@ export class Router {
     for (const v of this.fenceVias) { items.push({ kind: "via", node: P.viaNode(doc, v.p[0], v.p[1], v.cls.viaD, v.cls.viaDrill, v.obj, span), net: v.obj, netName: v.net, conn: -1 }); vias++; }
     const total = this.conns.filter((c) => c.nodes || !c.moot).length;
     return { items, total, routed: total - failed.length, failed, segments, vias, length, ms, passes, zoneEnds, zoneCovered: this.zoneCovered,
-      grid: { pitch: G.g, w: G.W, h: G.H, layers: G.layers.filter((_, i) => G.routable[i]) }, nets: this.nets.length, connections, pairs: Array.from(this.pairReports.values()), impedance: this.zReports, matched: this.matchReports, domains: this.domainReport(), fences: this.fenceReports, groups: this.groupReport(), fanout: (this.fanReport ? Object.assign({}, this.fanReport, this.fanNote) : this.fanNote) as RouteResult["fanout"], plan: this.planReport() };
+      grid: { pitch: G.g, w: G.W, h: G.H, layers: G.layers.filter((_, i) => G.routable[i]) }, nets: this.nets.length, connections, pairs: Array.from(this.pairReports.values()), impedance: this.zReports, matched: this.matchReports, domains: this.domainReport(), fences: this.fenceReports, groups: this.groupReport(), fanout: (this.fanReport ? Object.assign({}, this.fanReport, this.fanNote) : this.fanNote) as RouteResult["fanout"], plan: this.planReport(), ladder: this.ladderRep || ((this.opts.ripup ?? RIPUP) === "ladder" ? emptyLadder() : undefined) };
   }
 }
 

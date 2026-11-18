@@ -2199,6 +2199,14 @@ class Board(_Doc):
         self.add_item(f'(zone (net 0) (net_name "") {lay} (uuid "{_uuid.uuid4()}")' + (f' (name "{name}")' if name else "") + ' (hatch edge 0.5) (connect_pads (clearance 0)) (min_thickness 0.25) '
                       f'(keepout (tracks {ok(tracks)}) (vias {ok(vias)}) (pads allowed) (copperpour {ok(copper)}) (footprints {ok(footprints)})) (fill (thermal_gap 0.5) (thermal_bridge_width 0.5)) (polygon (pts {pts})))')
 
+    def _fresh_checks(self) -> dict:
+        """The rules check on freshly filled pours, as KiCad's DRC refills first: on the stored fills every via or track
+        laid since the last fill sits in another net's old pour (zone clearance 0).  For the steps that judge new copper
+        by the check; a plain _call("run_checks") keeps the stored fills, which the router's later passes expect."""
+        with contextlib.suppress(HarnessError):
+            self.fill()
+        return self._call("run_checks")
+
     def fill(self) -> dict:
         """Fill every copper zone (KiCad's Fill All Zones) and report the connections still open.
 
@@ -2953,6 +2961,14 @@ class Board(_Doc):
         only when fewer connections are open; a cut that did not pay is not tried again, and where no cut pays the
         old rule is tried after it.  ripup="near" (the default) is the old rule alone.  Off by default: Cyberboard
         went from 12 to 10 open, but Ledify lost a little (94.9 -> 94.5, one connection left open).
+        ripup="ladder" is Copper's whole repair ladder, one rung at a time over every connection still open: rescue
+        (the connection alone, with one via above max_vias and without the plan's steering, then on a lattice of half
+        the grid pitch, then at the board's minimum track width, then from the other side of its escape; it moves
+        nothing else), the min-cut rip above, permutation (the connection and up to four routes fighting for its
+        channel, within 12 x 12 mm, come up and are laid in every order, at most 120), and, with plan=True, feedback
+        (the tile borders where it failed are booked full and the plan is made again for the connections crossing
+        them, at most 12, twice a board).  Each rung is kept only when fewer connections are open and none that was
+        routed is open now; otherwise the board goes back exactly.  The result's \`ladder\` counts what each rung laid.
         
         A board still on KiCad's stock via (0.6 on 0.3 mm) gets the house via (0.5 on 0.2 mm) first, and the result says
         so under "rules_changed"; keep_rules=True leaves the rules exactly as they are (the person said not to touch them).
@@ -3100,7 +3116,7 @@ class Board(_Doc):
             out["more_unrouted"] = len(un) - 25
         if d.get("explain"):
             out["explain"] = dict(d["explain"], longest_detours=d.get("longest_detours") or [])
-        for k in ("domains", "ground_vias", "groups", "fanout", "plan"):
+        for k in ("domains", "ground_vias", "groups", "fanout", "plan", "ladder"):
             if d.get(k):
                 out[k] = d[k]
         return out
@@ -5217,7 +5233,7 @@ def _stitch(self, spacing: float = 2.0, net: str = "GND", margin: float = 1.5, s
             ids[new] = at
     removed = 0
     if ids:
-        r = self._call("run_checks")
+        r = self._fresh_checks()
         bad = set()
         for v in r.get("violations", []):
             if v.get("severity") != "error" or v.get("code") in ("unconnected_items",):
@@ -5227,18 +5243,7 @@ def _stitch(self, spacing: float = 2.0, net: str = "GND", margin: float = 1.5, s
                     bad.add(vid)
         # a rules marker can sit more than a millimetre from the via it is about (KiCad marks the track side), so each
         # new via is also measured against the copper round it
-        try:
-            clr = float((self.rules() or {}).get("clearance") or 0.2)
-        except (HarnessError, TypeError, ValueError):
-            clr = 0.2
-        for vid, at in ids.items():
-            if vid in bad:
-                continue
-            near = self.whats_at(at, 1.2)
-            own = next((q for q in near if q.get("id") == vid), None)
-            r = float((own or {}).get("size") or size or 0.5) / 2
-            if any(q.get("net") != name and q.get("id") != vid and q.get("gap_mm") is not None and q["gap_mm"] - r < clr - 1e-3 for q in near):
-                bad.add(vid)
+        bad |= _too_close(self, ids, name, size)
         for vid in bad:
             self._edit({"op": "remove", "id": vid})
             removed += 1
@@ -5405,7 +5410,7 @@ def _power_stitch(self, pitch: float = 1.0, most: int = 24, size: float | None =
                     ids[new] = (at, a["net"])
     bad = set()
     if ids:
-        r = self._call("run_checks")
+        r = self._fresh_checks()
         for v in r.get("violations", []):
             if v.get("severity") != "error" or v.get("code") in ("unconnected_items",):
                 continue
@@ -5414,18 +5419,7 @@ def _power_stitch(self, pitch: float = 1.0, most: int = 24, size: float | None =
                     bad.add(vid)
         # a rules marker can sit more than a millimetre from the via it is about (KiCad marks the track side), so each
         # new via is also measured against the copper round it
-        try:
-            clr = float((self.rules() or {}).get("clearance") or 0.2)
-        except (HarnessError, TypeError, ValueError):
-            clr = 0.2
-        for vid, at in ids.items():
-            if vid in bad:
-                continue
-            near = self.whats_at(at, 1.2)
-            own = next((q for q in near if q.get("id") == vid), None)
-            r = float((own or {}).get("size") or size or 0.5) / 2
-            if any(q.get("net") != name and q.get("id") != vid and q.get("gap_mm") is not None and q["gap_mm"] - r < clr - 1e-3 for q in near):
-                bad.add(vid)
+        bad |= _too_close(self, ids, "", size)
         for vid in bad:
             self._edit({"op": "remove", "id": vid})
         self.flush()
@@ -5538,7 +5532,7 @@ def _ground_pads(self, net: str = "GND", size: float | None = None, drill: float
         if not tried:
             break
         bad = set()
-        for v in self._call("run_checks").get("violations", []):
+        for v in self._fresh_checks().get("violations", []):
             if v.get("severity") != "error" or v.get("code") in ("unconnected_items", "track_right_angle"):
                 continue
             for spec, (at, pad, _ids) in tried.items():
@@ -5659,6 +5653,23 @@ def _seg_dist(p, a, b) -> float:
     return math.hypot(p[0] - (ax + t * (bx - ax)), p[1] - (ay + t * (by - ay)))
 
 
+def _too_close(self, ids: dict, name: str, size) -> set:
+    """The new vias ({id: (x, y)} or {id: ((x, y), net)}) that stand nearer another net's copper than the clearance."""
+    try:
+        clr = float((self.rules() or {}).get("clearance") or 0.2)
+    except (HarnessError, TypeError, ValueError):
+        clr = 0.2
+    out = set()
+    for vid, v in ids.items():
+        at, net = (v[0], v[1]) if isinstance(v[0], (tuple, list)) else (v, name)
+        near = self.whats_at(at, 1.2)
+        own = next((q for q in near if q.get("id") == vid), None)
+        r = float((own or {}).get("size") or size or 0.5) / 2
+        if any(q.get("net") != net and q.get("id") != vid and q.get("gap_mm") is not None and q["gap_mm"] - r < clr - 1e-3 for q in near):
+            out.add(vid)
+    return out
+
+
 def _vias_checked(self, name: str, pts: list, size, drill) -> dict:
     """Place a via at each point, then take out those the rules check finds at fault."""
     ids = {}
@@ -5670,7 +5681,7 @@ def _vias_checked(self, name: str, pts: list, size, drill) -> dict:
             ids[new] = at
     removed = 0
     if ids:
-        r = self._call("run_checks")
+        r = self._fresh_checks()
         bad = set()
         for v in r.get("violations", []):
             if v.get("severity") != "error" or v.get("code") in ("unconnected_items",):
@@ -5680,18 +5691,7 @@ def _vias_checked(self, name: str, pts: list, size, drill) -> dict:
                     bad.add(vid)
         # a rules marker can sit more than a millimetre from the via it is about (KiCad marks the track side), so each
         # new via is also measured against the copper round it
-        try:
-            clr = float((self.rules() or {}).get("clearance") or 0.2)
-        except (HarnessError, TypeError, ValueError):
-            clr = 0.2
-        for vid, at in ids.items():
-            if vid in bad:
-                continue
-            near = self.whats_at(at, 1.2)
-            own = next((q for q in near if q.get("id") == vid), None)
-            r = float((own or {}).get("size") or size or 0.5) / 2
-            if any(q.get("net") != name and q.get("id") != vid and q.get("gap_mm") is not None and q["gap_mm"] - r < clr - 1e-3 for q in near):
-                bad.add(vid)
+        bad |= _too_close(self, ids, name, size)
         for vid in bad:
             self._edit({"op": "remove", "id": vid})
             removed += 1
@@ -6816,6 +6816,12 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
 
     ripup="mincut" takes up only the cheapest set of routes in an open connection's way when the router repairs what
     its passes left open (a minimum cut, after Copper), and keeps the result only when fewer are open (board.route).
+    ripup="ladder" runs Copper's whole repair ladder on what is left open: rescue (one extra via, half pitch, neck
+    width, the other escape side; it moves nothing else), the min-cut rip, permutation of the routes fighting for the
+    channel, and, with plan=True, feedback into the plan; each rung kept only when fewer are open and nothing routed
+    is lost (board.route).  The result's routed.ladder counts what each rung laid.
+    With gate=True (the default) and plan or ripup given, the board is routed both plainly and with them and the
+    better of the two stays (fewer open, then fewer errors): out["variants"] says which won.  It costs a second route.
 
     reroute=True lays only the copper again on a board somebody placed: every track and via comes up, and the parts,
     the outline, the zones, the rules, the stackup and the silkscreen stay exactly as they are (no sync from the
@@ -6980,7 +6986,32 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
             route_layers, planes = signal_layers(self)
             if route_layers:
                 out.setdefault("notes", []).append(f"routed on {', '.join(route_layers)}: {', '.join(sorted(planes))} kept whole as planes (layers= to route on them)")
-        got = step("route", lambda: self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts, escapes=escapes, plan=global_plan, ripup=ripup))
+        def lay(**over):
+            kw = dict(time_s=time_s, max_vias=max_vias, groups=clusters or None, explain=explain, layers=route_layers, keep_rules=keep_rules, keepouts=keepouts, escapes=escapes, plan=global_plan, ripup=ripup)
+            kw.update(over)
+            return self.route(**{k: v for k, v in r.items() if k in ("order", "widths", "kinds") and v}, **kw)
+        if gate and (global_plan or ripup):
+            # keep-best between variants (as Copper's engine keeps the better of two opinions): the board is routed with
+            # the plan / repair ladder asked for, then again the plain way, and the one leaving fewer connections open
+            # (then fewer rules errors) stays; a tie goes to the plain way.  A board those options make worse comes out as without them.
+            ids0 = {it["id"] for it in self._all_items(["segment", "arc", "via"])}
+            alt = step("route with options", lambda: lay())
+            opts_st = standing()
+            with self.trial() as t:      # the plain way second, on the same bare board, so a plain win is that run as it came
+                for it in self._all_items(["segment", "arc", "via"]):
+                    if it["id"] not in ids0:
+                        self._edit({"op": "remove", "id": it["id"]})
+                self.flush()
+                got = step("route", lambda: lay(plan=None, ripup=None))
+                plain = standing()
+                t.keep = not (opts_st[0] < plain[0] or (opts_st[0] == plain[0] and opts_st[1] < plain[1]))
+            out["variants"] = {"plain": {"open": plain[0], "errors": plain[1]}, "options": {"open": opts_st[0], "errors": opts_st[1]}, "kept": "plain" if t.keep else "options"}
+            if t.keep:      # the later route calls go the way that won
+                global_plan = ripup = None
+            else:
+                got = alt
+        else:
+            got = step("route", lambda: lay())
         if got and got.get("rules_changed"):
             out["rules_changed"] = got["rules_changed"]
         if got:
@@ -6991,6 +7022,8 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
                 out["routed"]["fanout"] = got["fanout"]
             if got.get("plan"):
                 out["routed"]["plan"] = got["plan"]
+            if got.get("ladder"):
+                out["routed"]["ladder"] = got["ladder"]
             if explain:
                 try:
                     out["reasoning"] = _reasoning(self, plan, clusters, got)
@@ -7180,7 +7213,7 @@ def _drop_bad_stitches(self) -> int:
     """Ground vias with no track of their own (stitching, fences) that a rules error now sits on: taken out, since the
     router's later passes may have laid tracks past them and a stitch is worth less than a clean board."""
     gone = 0
-    for v in self._call("run_checks").get("violations", []):
+    for v in self._fresh_checks().get("violations", []):
         if v.get("severity") != "error" or v.get("code") not in ("clearance", "shorting_items", "hole_clearance", "copper_edge_clearance", "tracks_crossing", "hole_to_hole"):
             continue
         items = self.whats_at((v["x"], v["y"]), radius=0.5)

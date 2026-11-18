@@ -2094,6 +2094,14 @@ class Board(_Doc):
         self.add_item(f'(zone (net 0) (net_name "") {lay} (uuid "{_uuid.uuid4()}")' + (f' (name "{name}")' if name else "") + ' (hatch edge 0.5) (connect_pads (clearance 0)) (min_thickness 0.25) '
                       f'(keepout (tracks {ok(tracks)}) (vias {ok(vias)}) (pads allowed) (copperpour {ok(copper)}) (footprints {ok(footprints)})) (fill (thermal_gap 0.5) (thermal_bridge_width 0.5)) (polygon (pts {pts})))')
 
+    def _fresh_checks(self) -> dict:
+        """The rules check on freshly filled pours, as KiCad's DRC refills first: on the stored fills every via or track
+        laid since the last fill sits in another net's old pour (zone clearance 0).  For the steps that judge new copper
+        by the check; a plain _call("run_checks") keeps the stored fills, which the router's later passes expect."""
+        with contextlib.suppress(HarnessError):
+            self.fill()
+        return self._call("run_checks")
+
     def fill(self) -> dict:
         """Fill every copper zone (KiCad's Fill All Zones) and report the connections still open.
 
@@ -2848,6 +2856,14 @@ class Board(_Doc):
         only when fewer connections are open; a cut that did not pay is not tried again, and where no cut pays the
         old rule is tried after it.  ripup="near" (the default) is the old rule alone.  Off by default: Cyberboard
         went from 12 to 10 open, but Ledify lost a little (94.9 -> 94.5, one connection left open).
+        ripup="ladder" is Copper's whole repair ladder, one rung at a time over every connection still open: rescue
+        (the connection alone, with one via above max_vias and without the plan's steering, then on a lattice of half
+        the grid pitch, then at the board's minimum track width, then from the other side of its escape; it moves
+        nothing else), the min-cut rip above, permutation (the connection and up to four routes fighting for its
+        channel, within 12 x 12 mm, come up and are laid in every order, at most 120), and, with plan=True, feedback
+        (the tile borders where it failed are booked full and the plan is made again for the connections crossing
+        them, at most 12, twice a board).  Each rung is kept only when fewer connections are open and none that was
+        routed is open now; otherwise the board goes back exactly.  The result's `ladder` counts what each rung laid.
         
         A board still on KiCad's stock via (0.6 on 0.3 mm) gets the house via (0.5 on 0.2 mm) first, and the result says
         so under "rules_changed"; keep_rules=True leaves the rules exactly as they are (the person said not to touch them).
@@ -2995,7 +3011,7 @@ class Board(_Doc):
             out["more_unrouted"] = len(un) - 25
         if d.get("explain"):
             out["explain"] = dict(d["explain"], longest_detours=d.get("longest_detours") or [])
-        for k in ("domains", "ground_vias", "groups", "fanout", "plan"):
+        for k in ("domains", "ground_vias", "groups", "fanout", "plan", "ladder"):
             if d.get(k):
                 out[k] = d[k]
         return out
