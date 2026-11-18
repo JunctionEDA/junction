@@ -203,6 +203,37 @@ test("splitCollinearOutlines: a fractured bridge with no copper either side is c
   assert.equal(P.splitCollinearOutlines([u]).length, 1);
 });
 
+test("copper drawings: net-tie footprints let their tied nets through (net_tie_drc, issue12609, issue14008); knockout text shorts a second zone (test_copper_graphics)", () => {
+  for (const f of ["net_tie_drc", "issue12609"]) assert.equal(drcOf(f).filter((m) => (m.code === "clearance" || m.code === "shorting_items") && /no net/.test(m.text)).length, 0, f);
+  assert.equal(drcOf("issue14008").filter((m) => m.code === "clearance" || m.code === "shorting_items").length, 0);
+  const g = drcOf("test_copper_graphics").filter((m) => m.code === "shorting_items").map((m) => m.text);
+  assert.equal(g.filter((t) => t === "Items shorting two nets (nets Test2 and Test3)").length, 2, JSON.stringify(g));
+});
+test("copper drawings: a netless footprint polygon over its own netless pad shorts (<no net> and <no net>)", () => {
+  const brd = '(kicad_pcb (version 20241229) (layers (0 "F.Cu" signal) (2 "B.Cu" signal) (25 "Edge.Cuts" user)) (setup)'
+    + ' (gr_rect (start 0 0) (end 20 20) (stroke (width 0.1) (type default)) (fill no) (layer "Edge.Cuts") (uuid "e0000000-0000-0000-0000-000000000001"))'
+    + ' (footprint "POLY" (layer "F.Cu") (uuid "f0000000-0000-0000-0000-000000000001") (at 10 10)'
+    + '  (fp_poly (pts (xy -3 -1) (xy 3 -1) (xy 3 1) (xy -3 1)) (stroke (width 0) (type solid)) (fill yes) (layer "F.Cu") (uuid "a0000000-0000-0000-0000-000000000001"))'
+    + '  (pad "1" smd rect (at 3 0) (size 0.6 0.6) (layers "F.Cu") (uuid "b0000000-0000-0000-0000-000000000001")))'
+    + ')';
+  const doc = K.parseDoc(brd, "kicad_pcb"); const m = P.drc(doc, P.designSettings(null), { unconnected: false, footprintOwn: true }).filter((x) => x.code === "shorting_items");
+  assert.equal(m.length, 1); assert.equal(m[0].text, "Items shorting two nets (nets <no net> and <no net>)");
+  assert.deepEqual(m[0].kiids.slice().sort(), ["a0000000-0000-0000-0000-000000000001", "b0000000-0000-0000-0000-000000000001"]);
+});
+test("KiCad 5 boards: (module) loads as a footprint (issue4257 silk over its pads); no Edge.Cuts is an invalid outline", () => {
+  const doc = K.parseDoc(read("issue4257", ".kicad_pcb"), "kicad_pcb");
+  assert.equal([...doc.items.values()].filter((it) => it.kind === "footprint").length, 1);
+  const m = drcOf("issue4257");
+  assert.equal(m.filter((x) => x.code === "invalid_outline" && x.text === "Board has malformed outline (no edges found on Edge.Cuts layer)").length, 1);
+  assert.ok(m.filter((x) => x.code === "silk_over_copper").length >= 4);
+});
+test("courtyards: ends 0.01 mm apart still close, and a 6 um overlap is legal after the 5 um deflate (issue25101)", () => {
+  const ov = drcOf("issue25101").filter((m) => m.code === "courtyards_overlap").map((m) => m.text);
+  assert.ok(ov.some((t) => /\bC13\b/.test(t) && /\bCG1\b/.test(t)), JSON.stringify(ov));
+  const sq = [[0, 0], [2, 0], [2, 2], [0, 2]]; const d = P.deflatePoly(sq, 0.005);
+  assert.deepEqual(d.map((p) => p.map((v) => Math.round(v * 1000) / 1000)), [[0.005, 0.005], [1.995, 0.005], [1.995, 1.995], [0.005, 1.995]]);
+});
+
 (async () => {
   for (const [name, fn] of asyncTests) { try { await fn(); passed++; console.log("  ok   " + name); } catch (e) { failed++; console.log("  FAIL " + name + "\n       " + (e.stack || String(e)).split("\n").slice(0, 6).join("\n       ")); } }
   console.log(`${passed} passed, ${failed} failed`);
