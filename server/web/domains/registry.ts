@@ -37,7 +37,29 @@ export interface DocumentKind {
    * after the file, starts as `text(file)`.
    */
   fromFile?: { title: string; accept: string[]; folder: string; text(file: StoredFile): string };
+  /** The theme token its tabs and rows are tinted with ("teal" is var(--teal)).  Absent: ink. */
+  tint?: ElementTint;
 }
+
+/** The theme tokens a kind of element may be tinted with (static/theme.css). */
+export type ElementTint = "wire" | "teal" | "copper" | "warn";
+
+/**
+ * A kind of element a project holds that is more than one document.  A PCB is a KiCad project in a folder of
+ * its own (schematic, board, libraries): one tab, with the schematic, the board and the bill of materials as
+ * views inside it (web/platform/doctabs/pcbs.ts).
+ */
+export interface ElementKind { type: string; title: string; newName: string; icon: string; tint?: ElementTint; summary: string }
+export const PCB_ELEMENT: ElementKind = {
+  type: "pcb", title: "PCB", newName: "PCB", tint: "wire",
+  icon: '<rect x="4" y="5" width="16" height="14" rx="1.5"/><circle cx="8.5" cy="9.5" r="1.2"/><circle cx="15.5" cy="14.5" r="1.2"/><path d="M9.5 10.5l5 3"/>',
+  summary: "A schematic, its board and its bill of materials.",
+};
+/** What a new part studio or assembly is for, in a sentence (the Home tab of an empty project says it). */
+export const KIND_SUMMARY: Record<string, string> = {
+  part_studio: "Sketches and features that make solid parts.",
+  assembly: "Parts and boards put together with mates.",
+};
 
 /** A file stored in a project, as a document made from it refers to it. */
 export interface StoredFile { docId: string; path: string; name: string; bytes: number }
@@ -94,7 +116,7 @@ export const DOMAINS: readonly DomainDescriptor[] = [
     reads: [],
     documents: [
       {
-        docType: "part_studio", ext: ".jpart", title: "Part Studio", bundle: "/static/dist/mechanical.js", newName: "Part Studio",
+        docType: "part_studio", ext: ".jpart", title: "Part Studio", bundle: "/static/dist/mechanical.js", newName: "Part Studio", tint: "teal",
         icon: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5"/><path d="M12 12v9"/>',
         // the same text as web/domains/mechanical/document/format.ts newPartStudioText() (a test compares them)
         newText: '{"junction":"part-studio","version":1,"items":[\n{"id":"studio","rollback":null,"type":"studio","units":"mm"}\n]}\n',
@@ -112,7 +134,7 @@ export const DOMAINS: readonly DomainDescriptor[] = [
     reads: ["mechanical", "pcb"],
     documents: [
       {
-        docType: "assembly", ext: ".jasm", title: "Assembly", bundle: "/static/dist/assembly.js", newName: "Assembly",
+        docType: "assembly", ext: ".jasm", title: "Assembly", bundle: "/static/dist/assembly.js", newName: "Assembly", tint: "copper",
         icon: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/><path d="M11 7.5h5.5V13"/>',
         // the same text as web/domains/assembly/document/format.ts newAssemblyText() (a test compares them)
         newText: '{"junction":"assembly","version":1,"items":[\n{"id":"assembly","type":"assembly","units":"mm"}\n]}\n',

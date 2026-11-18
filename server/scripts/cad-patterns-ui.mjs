@@ -130,7 +130,7 @@ try {
   page.on('response', (r) => { if (r.status() >= 400) missing.push(`${r.status()} ${new URL(r.url()).pathname}`); });
   await page.goto(`${BASE}/auth/dev?jwt=${jwt(uid, 'cad-patterns-ui')}&next=/`);
   await page.waitForLoadState('networkidle');
-  const project = await page.evaluate(async () => (await (await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Patterns UI test' }) })).json()));
+  const project = await page.evaluate(async () => (await (await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Patterns UI test', template: 'pcb' }) })).json()));
   await page.goto(`${BASE}/p/${project.projectId}/edit`);
   await page.waitForSelector('#doctabs [role=tab]', { timeout: 30000 });
   await page.click('[data-doc-add]');
@@ -145,9 +145,10 @@ try {
   const finishSketch = async () => { await page.click("[data-tool='Finish sketch']"); };
   const openNewSketch = async (plane) => {
     await page.click('[data-tool=Sketch]');
-    await page.waitForSelector('.cad-dialog[data-feature=sketch]');
-    if (plane) await page.click(`.cad-dialog [data-plane=${plane}]`);
-    await page.click('.cad-dialog [data-accept]');
+    // with a plane or a flat face selected the sketch starts at once; otherwise the dialog asks for the plane:
+    // a click on one starts the sketch on it, ✓ takes the plane the dialog shows (Top)
+    await page.waitForSelector('.cad-dialog[data-feature=sketch], .cad-sketch-dialog');
+    if (await page.locator('.cad-dialog[data-feature=sketch]').count()) { if (plane) await page.click(`.cad-dialog [data-plane=${plane}]`); else await page.click('.cad-dialog [data-accept]'); }
     await page.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.kernel.state === 'ready'; }, null, { timeout: 60000 });
     await page.waitForTimeout(700);
   };

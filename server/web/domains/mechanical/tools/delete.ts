@@ -16,6 +16,8 @@ export default defineTool({
   run: (studio) => {
     const s = studio.getState();
     if (s.sketch) { if (!sketchEditor(studio).deleteSelection()) studio.host.toast("Select something in the sketch to delete.", 2500); return; }
-    if (s.selectedFeature && !s.editing && studio.doc) studio.commit(deleteFeature(studio.doc, s.selectedFeature));
+    // every row selected in the feature list goes, as one step
+    const ids = s.selectedFeatures.length ? s.selectedFeatures : s.selectedFeature ? [s.selectedFeature] : [];
+    if (ids.length && !s.editing && studio.doc) studio.commit(ids.flatMap((id) => deleteFeature(studio.doc!, id)));
   },
 });

@@ -43,6 +43,8 @@ export interface Scene {
   box: { x0: number; y0: number; x1: number; y1: number } | null;
   /** the dimension whose value is being typed: its text is not drawn under the input */
   editing: string | null;
+  /** false: the constraint glyphs are not drawn (a person turned them off; the ones in conflict still are) */
+  glyphs?: boolean;
 }
 
 /** Something drawn that is not geometry and can be clicked: a constraint glyph or a dimension's text. */
@@ -159,6 +161,7 @@ export class SketchPainter {
     const stacks = new Map<string, number>();
     for (const [id, k] of Object.entries(s.data.constraints)) {
       if (isDimension(k)) continue;
+      if (s.glyphs === false && !s.conflicting.has(id) && !s.selection.has(id) && s.hover !== id) continue;
       const anchor = glyphAnchor(s.data, k); if (!anchor) continue;
       // zoomed far out, a glyph would be bigger than the line it sits on: leave it out until there is room
       if (anchor.room < 26 * px && !s.selection.has(id) && s.hover !== id && !s.conflicting.has(id)) continue;

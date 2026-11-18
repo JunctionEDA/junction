@@ -19,6 +19,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
+import { tool as chromeTool } from './cad-chrome.mjs';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
@@ -75,7 +76,8 @@ const click = async (x, y, o = {}) => { const p = await at(x, y); await page.mou
 const drag = async (x0, y0, x1, y1) => { const a = await at(x0, y0), b = await at(x1, y1); await page.mouse.move(a.x, a.y, { steps: 2 }); await page.mouse.down(); await page.mouse.move((a.x + b.x) / 2, (a.y + b.y) / 2, { steps: 6 }); await page.mouse.move(b.x, b.y, { steps: 6 }); await page.mouse.up(); await page.waitForTimeout(60); };
 const key = async (k) => { await page.keyboard.press(k); await page.waitForTimeout(30); };
 const type = async (text) => { await page.keyboard.type(text); await page.waitForTimeout(30); };
-const tool = async (title) => { await page.click(`.cad-sketch-palette [data-tool="${title}"]`); await page.waitForTimeout(40); };
+// the sketch tools are the toolbar while a sketch is open; a family (Rectangle ▾, Arc ▾) is a drop-down
+const tool = async (title) => { await chromeTool(page, title); await page.waitForTimeout(40); };
 /** Wait until the sketch has settled after an edit: solved, and the settled entities worked out. */
 const settledSketch = () => page.waitForFunction(() => { const e = window.JunctionSketch; if (!e) return false; const s = e.getState(); return s.ready && (s.health !== 'ok' || s.dof === 0 || s.defined !== null); }, null, { timeout: 15000 });
 /** The id of the one entity of a type that matches. */
@@ -99,7 +101,7 @@ const newSketch = async (n) => {
 try {
   await page.goto(`${BASE}/auth/dev?jwt=${jwt(uid, 'sketch-ui')}&next=/`);
   await page.waitForLoadState('networkidle');
-  const project = await page.evaluate(async () => { const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Sketch UI test' }) }); return r.json(); });
+  const project = await page.evaluate(async () => { const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Sketch UI test', template: 'pcb' }) }); return r.json(); });
   await page.goto(`${BASE}/p/${project.projectId}/edit`);
   await page.waitForSelector('#doctabs [role=tab]', { timeout: 30000 });
   await page.click('[data-doc-add]');
@@ -108,7 +110,9 @@ try {
 
   // ================================================================ a plate with two holes, fully constrained
   await newSketch(1);
-  check('opening a sketch starts the solver and shows the sketch tools', (await sk()).ready && await page.isVisible('.cad-sketch-palette [data-tool=Line]') && await page.isVisible("[data-tool='Finish sketch']"));
+  // the sketch's dialog folds to its title, out of the drawing's way (it stays folded for the sketches that follow)
+  await page.click('.cad-sketch-dialog [data-dialog-fold]');
+  check('opening a sketch starts the solver and shows the sketch tools', (await sk()).ready && await page.isVisible('.cad-toolbar[data-mode=sketch] [data-group=sketch] [data-tool=Line]') && await page.isVisible("[data-tool='Finish sketch']"));
   await shot('01-empty-sketch');
 
   await key('r');
@@ -368,14 +372,14 @@ try {
   const xs = (await points()).filter((c) => near(c[1], 40) && c[0] < -60 && !near(c[0], -86)).map((c) => c[0]);
   check('and a new value moves the geometry', near(Math.max(...xs) - Math.min(...xs), 32) && (await sk()).health === 'ok', JSON.stringify(xs));
   // the top of the box is as long as the bottom already: a dimension on it can only be a reference
-  await key('d'); await click(-90, 40); await click(-90, 47);
+  await key('d'); await click(-90, 40); await click(-90, 56);   // the text well clear of the constraint marks on that edge
   await page.waitForTimeout(200);
   d = await data();
   let ref = Object.keys(d.constraints).find((k) => d.constraints[k].driving === false);
   check('a dimension the sketch already settles is added as a reference dimension', !!ref && near(d.constraints[ref].value, 32) && !(await page.$('.cad-dim-input')), JSON.stringify(ref && d.constraints[ref]));
   await key('Escape');
   await shot('19-reference-dimension');
-  await dblclickAt(-90, 47);
+  await dblclickAt(-90, 56);
   await page.waitForSelector('.cad-dim-input'); await page.fill('.cad-dim-input', '40'); await page.keyboard.press('Enter'); await page.waitForSelector('.cad-dim-input', { state: 'detached' });
   await page.waitForFunction(() => window.JunctionSketch.getState().health === 'conflict', null, { timeout: 10000 }).catch(() => {});
   s = await sk();

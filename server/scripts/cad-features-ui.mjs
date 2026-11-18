@@ -119,7 +119,7 @@ try {
   const uid = user('cad-features-ui', 990201);
   const page = await open(uid, 'cad-features-ui');
   const project = await page.evaluate(async () => {
-    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Enclosure test' }) });
+    const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Enclosure test', template: 'pcb' }) });
     return { status: r.status, body: await r.json().catch(() => null) };
   });
   const pid = project.body.projectId;
@@ -155,7 +155,7 @@ try {
   // the end conditions show their own fields
   await page.selectOption('.cad-dialog select[data-param=endType]', 'upToFace');
   check('Up to face asks for the face', await page.isVisible('.cad-dialog [data-param=face]') && !(await page.isVisible('.cad-dialog input[data-param=depth]')));
-  await previewed(page);
+  await page.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.kernel.state === 'ready' && s.reports[s.editing.draft.id]?.status === 'error'; }, null, { timeout: 30000 }).catch(() => {});
   const why = await S(page, () => { const s = window.JunctionPartStudio.getState(); return s.reports[s.editing.draft.id]; });
   check('without a face the dialog says what to do', why.status === 'error' && /Pick the face/.test(why.message) && /Pick the face/.test(await page.textContent('.cad-dialog [role=status]')), JSON.stringify(why));
   await shot(page, '01-extrude-up-to-face-empty');
@@ -226,9 +226,9 @@ try {
   // ---------------------------------------------------------------- four bosses on the floor
   const floor = await S(page, () => window.JunctionPartStudio.getState().bodies[0].mesh.faces.names.find((n) => /:from\(.*:start:/.test(n)));
   await S(page, (name) => { const st = window.JunctionPartStudio, b = st.getState().bodies[0]; st.select([{ kind: 'face', body: b.id, name, point: [0, 0, 0] }]); }, floor);
+  // a flat face is selected: Sketch asks nothing and drawing starts on it
   await page.click('[data-tool=Sketch]');
-  await page.waitForSelector('.cad-dialog[data-feature=sketch]');
-  await page.click('.cad-dialog [data-accept]');
+  await page.waitForSelector('.cad-sketch-dialog');
   await page.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.sketches.some((v) => v.featureId === s.sketch.featureId) && s.kernel.state === 'ready'; }, null, { timeout: 30000 });
   await page.waitForTimeout(900);
   const frameNow = () => S(page, () => { const s = window.JunctionPartStudio.getState(); return s.sketches.find((v) => v.featureId === s.sketch.featureId).frame; });
@@ -260,9 +260,9 @@ try {
   // ---------------------------------------------------------------- holes: a sketch on a boss top, a circle on each boss
   const bossTop = await S(page, () => { const s = window.JunctionPartStudio.getState(), f = s.features[5]; return s.bodies[0].mesh.faces.names.find((n) => n.startsWith(`${f.id}:end:`)); });
   await S(page, (name) => { const st = window.JunctionPartStudio, b = st.getState().bodies[0]; st.select([{ kind: 'face', body: b.id, name, point: [0, 0, 0] }]); }, bossTop);
+  // a flat face is selected: Sketch asks nothing and drawing starts on it
   await page.click('[data-tool=Sketch]');
-  await page.waitForSelector('.cad-dialog[data-feature=sketch]');
-  await page.click('.cad-dialog [data-accept]');
+  await page.waitForSelector('.cad-sketch-dialog');
   await page.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.sketches.some((v) => v.featureId === s.sketch.featureId) && s.kernel.state === 'ready'; }, null, { timeout: 30000 });
   await page.waitForTimeout(900);
   fr = await frameNow();
@@ -321,8 +321,8 @@ try {
   await page.waitForFunction(() => { const s = window.JunctionPartStudio && window.JunctionPartStudio.getState(); return s && s.loaded && s.features.length === 0; }, null, { timeout: 30000 });
   await page.click('[data-tool=Sketch]');
   await page.waitForSelector('.cad-dialog[data-feature=sketch]');
+  // a click on a plane is all a new sketch needs: drawing starts on it
   await page.click('.cad-dialog [data-plane=front]');
-  await page.click('.cad-dialog [data-accept]');
   await page.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.features.length === 1 && s.kernel.state === 'ready'; }, null, { timeout: 90000 });
   await page.waitForTimeout(700);
   await page.click('[data-tool=Rectangle]');

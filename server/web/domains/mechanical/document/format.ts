@@ -31,7 +31,8 @@ export interface FeatureItem extends Item {
 
 export interface StudioItem extends Item {
   type: "studio";
-  units: "mm" | "in";
+  /** the length unit the document is worked in; document/units.ts reads it with `angleUnits` and `precision` */
+  units: "mm" | "cm" | "m" | "in" | "ft";
   rollback: string | null;
 }
 

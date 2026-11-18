@@ -11,9 +11,11 @@
 // The part studio (ui/studio.ts) knows none of this.  It says which sketch is open and which tool id is in
 // hand; the editor follows by subscribing, and reaches the document only through `studio.commit`.
 import { DEFAULT_PLANES, type Frame, type PlaneRef, type Vec2 } from "../core/geometry";
+import { getPrefs, subscribePrefs } from "../ui/prefs";
 import type { PartStudio } from "../ui/studio";
 import { evaluate } from "./expr";
-import { dimensionText, drawDimension } from "./dims";
+import { dimensionText, drawDimension, lenNum, angNum, setSketchUnits, sketchUnits, typedFactor } from "./dims";
+import { angleSuffix } from "../document/units";
 import type { SketchData } from "./format";
 import { nearestOn } from "./infer";
 import { Draft, normalise, sketchChange } from "./model";
@@ -104,6 +106,7 @@ export class SketchEditor {
     this.unsubscribe = studio.subscribe(() => this.sync());
     studio.viewport.onFrame.push(() => this.paint());
     studio.viewport.onTheme.push(() => { this.painter?.readColors(); this.invalidate(); });
+    subscribePrefs(() => this.invalidate());
     this.sync();
   }
 
@@ -134,6 +137,7 @@ export class SketchEditor {
     this.syncing = true;
     try {
       const s = this.studio.getState();
+      if (s.units !== sketchUnits()) { setSketchUnits(s.units); this.invalidate(); }
       if (!s.sketch) { if (this.state.open) this.close(); return; }
       const f = s.features.find((x) => x.id === s.sketch!.featureId);
       if (!f) return;
@@ -293,15 +297,17 @@ export class SketchEditor {
     if (this.studio.keyHandler !== this.onKey) this.studio.keyHandler = this.onKey;
   }
   private pointer = {
-    down: (ev: PointerEvent) => { this.lastPointer = ev; this.handlers.down?.(ev, this); },
-    move: (ev: PointerEvent) => { this.lastPointer = ev; this.handlers.move?.(ev, this); },
-    up: (ev: PointerEvent) => { this.lastPointer = ev; this.handlers.up?.(ev, this); },
+    // the part studio may take the pointer for a moment (choosing another plane for the sketch)
+    down: (ev: PointerEvent) => { this.lastPointer = ev; if (this.studio.pointerOverride) return; this.handlers.down?.(ev, this); },
+    move: (ev: PointerEvent) => { this.lastPointer = ev; const o = this.studio.pointerOverride; if (o) { o.move?.(ev); return; } this.handlers.move?.(ev, this); },
+    up: (ev: PointerEvent) => { this.lastPointer = ev; const o = this.studio.pointerOverride; if (o) { o.up?.(ev); return; } this.handlers.up?.(ev, this); },
   };
   private onKey = (ev: KeyboardEvent): boolean => {
     if (!this.state.open) return false;
     if (this.handlers.key && this.handlers.key(ev, this)) return true;
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return false;
     if (ev.key === "Escape") {
+      if (this.studio.pointerOverride) return false;   // the part studio's Esc stops what took the pointer
       if (this.state.tool !== "select") { this.useSelect(); return true; }
       if (this.state.selection.length) this.select([]);
       return true;   // Esc never leaves the sketch: one press too many would throw the person out of it
@@ -400,13 +406,16 @@ export class SketchEditor {
     input.setAttribute("aria-label", "Dimension value");
     input.style.cssText = `position:absolute;z-index:4;left:${Math.round(at.x - 44)}px;top:${Math.round(at.y - 12)}px;width:88px;height:24px;text-align:center;padding:0 4px`;
     const shownValue = typeof c.value === "number" ? c.value : measure(this.state.data, c) ?? 0;
-    input.value = typeof c.expr === "string" && c.expr ? c.expr : String(Math.round(shownValue * 1e6) / 1e6);
+    // the value as the document's units have it, with the unit written out; typing a bare number means that unit
+    const angle = c.type === "angle", u = sketchUnits();
+    input.value = typeof c.expr === "string" && c.expr ? c.expr : angle ? `${angNum(shownValue)}${angleSuffix(u.angle).trim() === "°" ? "°" : " rad"}` : `${lenNum(shownValue)} ${u.length}`;
+    input.title = `In ${angle ? (u.angle === "deg" ? "degrees" : "radians") : u.length}. Type another unit to convert: 1 in, 25.4 mm, 3/8 in + 2 mm.`;
     let closed = false;
     const finish = (apply: boolean) => {
       if (closed) return;
       if (apply) {
         let parsed;
-        try { parsed = evaluate(input.value, c.type === "angle" ? "angle" : "length"); }
+        try { parsed = evaluate(input.value, angle ? "angle" : "length", typedFactor(angle)); }
         catch (err) { input.classList.add("bad"); input.title = (err as Error).message; this.studio.host.toast((err as Error).message, 3000); return; }
         if ((c.type !== "angle" && !(parsed.value > 0) && !(c.type === "distance" && parsed.value === 0)) || parsed.value < 0) { input.classList.add("bad"); this.studio.host.toast("A dimension must be more than zero.", 3000); return; }
         const text = input.value.trim();
@@ -428,7 +437,7 @@ export class SketchEditor {
       else if (ev.key === "Escape") { ev.preventDefault(); finish(false); }
       else input.classList.remove("bad");
     });
-    input.addEventListener("blur", () => { if (!closed) finish(!!tryValue(input.value, c.type === "angle")); if (!closed) finish(false); });
+    input.addEventListener("blur", () => { if (!closed) finish(!!tryValue(input.value, angle)); if (!closed) finish(false); });
     for (const t of ["pointerdown", "pointerup", "dblclick", "wheel"]) input.addEventListener(t, (ev) => ev.stopPropagation());
     this.studio.viewport.host.appendChild(input);
     this.input = input; this.editingId = id;
@@ -460,7 +469,7 @@ export class SketchEditor {
       data, frame,
       state: (id) => (inConflict.has(id) ? "conflict" : s.health !== "ok" ? "under" : s.dof === 0 || (settled && settled.has(id)) ? "defined" : "under"),
       selection: new Set(s.selection), hover: s.hover, related, conflicting, redundant,
-      regions: this.regions, preview: this.preview, box: this.box, editing: this.editingId,
+      regions: this.regions, preview: this.preview, box: this.box, editing: this.editingId, glyphs: getPrefs().showConstraints,
     });
   }
 
@@ -468,7 +477,7 @@ export class SketchEditor {
   textOf(id: string): string { const c = this.state.data.constraints[id]; return c ? dimensionText(this.state.data, c) : ""; }
 }
 
-function tryValue(text: string, angle: boolean): boolean { try { evaluate(text, angle ? "angle" : "length"); return true; } catch { return false; } }
+function tryValue(text: string, angle: boolean): boolean { try { evaluate(text, angle ? "angle" : "length", typedFactor(angle)); return true; } catch { return false; } }
 
 // ---------------------------------------------------------------- the tool when no tool is in hand
 /**

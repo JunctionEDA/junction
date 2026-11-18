@@ -24,8 +24,10 @@ export function Avatars({ collab }: { collab: Collab }) {
   const more = people.length - shown.length + away.length - shownAway.length;
   const pick = (key: string) => { collab.follow(follow === key ? null : key); collab.host.viewport.canvas.focus(); };
   const base = "grid place-items-center w-6 h-6 rounded-full text-2xs font-semibold border border-paper cursor-pointer";
+  // under the viewport's own view buttons (an assembly), or beside the part studio's view cube, which stands in their corner
+  const ownButtons = !!collab.host.viewport.host.querySelector(".v3-views");
   return (
-    <div className="cad-avatars absolute right-2 top-10 z-[3] flex items-center gap-1" role="group" aria-label="People in this project">
+    <div className={cx("cad-avatars absolute z-[3] flex items-center gap-1", ownButtons ? "right-2 top-10" : "right-[136px] top-2")} role="group" aria-label="People in this project">
       {shown.map((p) => (
         <button key={p.cid} type="button" data-avatar={p.login} aria-pressed={follow === p.key}
           className={cx(base, follow === p.key && "outline outline-2 outline-offset-1 outline-ink")}
