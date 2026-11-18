@@ -73,7 +73,7 @@ export function pointInPoly(pts: Pt[], x: number, y: number): boolean {
   }
   return inside;
 }
-function bboxOf(s: Shape): [number, number, number, number] {
+export function bboxOf(s: Shape): [number, number, number, number] {
   let pts: Pt[]; let o = 0;
   if (s.t === "circle") { pts = [[s.x, s.y]]; o = s.r; } else if (s.t === "seg") { pts = [s.a, s.b]; o = s.r; } else if (s.t === "path") { pts = s.pts; o = s.r || 0; } else if (s.t === "poly") pts = s.pts;
   else { const h = Math.hypot(s.w, s.h) / 2; return [s.x - h, s.y - h, s.x + h, s.y + h]; }

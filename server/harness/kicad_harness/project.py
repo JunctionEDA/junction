@@ -2820,13 +2820,17 @@ class Board(_Doc):
         the first ring lies (mm); {"depth": mm, "spread": 1.5} sets both (spread 0: no spreading fan).  The result's
         `fanout` counts them and names the pins that got none (`boxed`) with what blocks them.  Off by default.
         plan=True plans every connection on a coarse tile graph first (a global router after Copper's): congestion is
-        negotiated over 2.5 mm tiles (PathFinder), forced crossings are found, a layer is assigned along each coarse
-        path, and each connection's search then pays for every mm outside its corridor (its tiles and a ring round
-        them) and off the planned layer.  {"mask": True} searches inside the corridor only first, falling back to the
-        whole board; {"tile": mm, "iters": n, "outside": cost per mm outside, "layer_cost": cost per mm off the
-        planned layer, "vias": True lets a connection the plan sends through a via change layer at once, "open": mm}
-        tune it.  The result's `plan` gives the overflow before and after negotiation and how many routes stayed
-        inside their corridors.  Off by default: it made no board of the benchmark better (Ledify lost connections).
+        negotiated over tiles of 0.5 or 1 mm (by the finest pad pitch; PathFinder) whose border capacities come from the
+        real free gaps along each border, forced crossings are found, and a layer is assigned along each coarse path.
+        The connections the negotiation fought over are laid first and taken up first when a route is blocked, and only
+        those it moved off their direct path are steered: their search pays for every mm outside the corridor (its tiles
+        and a ring round them) and off the planned layer.  {"mask": True} searches inside the corridor only first,
+        falling back to the whole board; {"tile": mm, "iters": n, "outside": cost per mm outside, "layer_cost": cost
+        per mm off the planned layer, "vias": True lets a connection the plan sends through a via change layer at once,
+        "open": mm, "steer": "moved" | "all" | "none", "order": False, "rip": False} tune it.  The result's `plan` gives
+        the overflow before and after negotiation, how many connections it moved and fought over, and how many steered
+        routes stayed inside their corridors.  Off by default: it made no board of the benchmark better (Ledify lost
+        connections).
         ripup="mincut" changes what the repair after the routing passes takes up to lay a connection left open: the
         cheapest set of routes whose removal opens a way (a minimum cut, after Copper's repair stage), each route priced
         by what laying it again costs (4 mm, more for a wide or critical one), instead of everything the cheapest way

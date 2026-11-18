@@ -460,16 +460,22 @@ test("plan: the global plan sends the connection with the cheaper detour round a
   // a wall (a keep-out from the left edge to x = 124) with a gap at x = 118 that takes one track; the board is open
   // beyond x = 124.  Shortest first, A takes the gap and B must go all the way round.  Negotiated over the tiles, the
   // gap goes to B, whose detour is twice A's, and A searched inside its corridor goes round.
-  const make = () => board(smd(115, 48, "A"), smd(121, 62, "A"), smd(105, 44, "B"), smd(105, 66, "B"));
+  const make = () => board(smd(115, 48, "A"), smd(121, 62, "A"), smd(105, 44, "B"), smd(105, 66, "B"), smd(95, 63, "C"), smd(100, 63, "C"));
   const keepouts = [{ box: [89, 52, 117.8, 58] }, { box: [118.2, 52, 124, 58] }];
   const len = (res, net) => res.connections.filter((c) => c.net === net).reduce((s, c) => s + c.length, 0);
   const off = R.route(K, P, make(), null, { layers: ["F.Cu"], keepouts, plan: false });
   const doc = make(); const on = R.route(K, P, doc, null, { layers: ["F.Cu"], keepouts, plan: { mask: true } });
-  assert.equal(off.routed, 2); assert.equal(on.routed, 2); assert.equal(off.plan, undefined);
+  assert.equal(off.routed, 3); assert.equal(on.routed, 3); assert.equal(off.plan, undefined);
   assert.ok(len(off, "B") > 50 && len(off, "A") < 20, "without the plan A takes the gap: " + JSON.stringify(off.connections.map((c) => [c.net, c.length])));
   assert.ok(len(on, "B") < 45 && len(on, "A") > 20, "with it B takes the gap: " + JSON.stringify(on.connections.map((c) => [c.net, c.length])));
   assert.ok(on.length < off.length - 5, `${on.length} mm against ${off.length} mm`);
   assert.ok(on.plan.overflowFirst > 0 && on.plan.overflow === 0 && on.plan.iterations >= 2, JSON.stringify(on.plan));
+  // no part has three pads or more: 1 mm tiles (Copper's size for a board without fine pitch); the negotiation fought
+  // over A and B and moved both off the path they took first (B's went through the wall), so both are steered; C, a
+  // short hop nobody contests, is neither fought over nor moved, and is left to the search alone
+  assert.ok(Math.abs(on.plan.tile - 1) < 0.05, JSON.stringify(on.plan));
+  assert.equal(on.plan.conns, 3); assert.equal(on.plan.contested, 2, JSON.stringify(on.plan)); assert.equal(on.plan.moved, 2, JSON.stringify(on.plan));
+  assert.ok(Math.abs(len(on, "C") - 5) < 0.5, JSON.stringify(on.connections.map((c) => [c.net, c.length])));
   apply(doc, on); assert.deepEqual(errors(doc, null), []); assert.equal(P.ratsnest(doc).length, 0);
 });
 

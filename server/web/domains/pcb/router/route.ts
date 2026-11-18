@@ -1,7 +1,7 @@
 // Autorouter — the run: what to connect, in which order, with rip-up and retry, and the tracks and vias that
 // come out.  Pure: reads a parsed board and the design rules, returns item nodes; nothing is written to the board
 // here (the caller commits them as ordinary edits).
-import { buildClass, domainGap, DX, DY, fillPoly, Grid, growFor, growVia, Obstacle, pickGrid, pointGap, Pt, RuleClass, Shape, stamp, stampClass, viaFits } from "./grid";
+import { bboxOf, buildClass, domainGap, DX, DY, fillPoly, Grid, growFor, growVia, Obstacle, pickGrid, pointGap, Pt, RuleClass, Shape, stamp, stampClass, viaFits } from "./grid";
 import { minCut } from "./ripcut";
 import { costOf, dirOf, Features, featuresOf, Node, probe, ProbeResult, Terminal, Win, work } from "./probe";
 
@@ -36,19 +36,41 @@ const FAN_ROWS_MM = [0.8, 1.5, 2.2], FAN_FAR_MM = 4;
 const ESCAPES: Escapes = false, SPREAD = 1.5;   // the spreading fan ends its slots 1.5 pitches apart (0.6 mm off a 0.4 mm row)
 export type Escapes = boolean | number | { depth?: number; spread?: number };
 // Global planning before routing (globalplan.ts, after Copper): coarse paths on a tile graph with negotiated
-// congestion, layers assigned along them, and each connection steered by its corridor.  Off unless a run asks:
-// measured 2026-11-17 with board-bench.py (Ledify / Cyberboard score, open connections; off: 94.9 with 0 open /
-// 75.0 with 12 open), Cyberboard gained a little every way but Ledify lost connections every way:
+// congestion and layers assigned along them.  The connections the negotiation fought over are laid first in their
+// tier and taken up first when a route is blocked, and only those it moved off their direct path are steered by their
+// corridor.  Off unless a run asks.  Measured with board-bench.py (score, open connections):
+// 2026-11-17, 2.5 mm tiles with capacity from one map column, every connection steered (off: Ledify 94.9 with 0 open,
+// Cyberboard 75.0 with 12 open):
 //   corridor as a mask, searched first:           Ledify 69.4 (8 open)  Cyberboard 75.0 (10 open)
 //   the same, pour nets and one-layer tries left alone:  78.2 (4 open)             75.0 (11 open)
 //   corridor and layer as a cost (0.5 per mm):          90.0 (2 open)             75.0 (10 open)
+// 2026-11-18, Copper's capacities (free gaps on both sides of each border, gaps across tile corners joined, own pads'
+// borders free) on 0.5 mm tiles (both boards have 0.5 mm pitch parts; the plan takes 2.6 s on Ledify, 5 s on
+// Cyberboard), corridor as a cost (off: Ledify 97.5 with 0 open, Cyberboard 75.0 with 11 open):
+//   all three (order, rip, steer the moved ones):       Ledify 79.8 (4 open)  Cyberboard 75.0 (13 open)
+//   steer the moved ones only (order: false, rip: false):      92.5 (2 open)             75.0 (12 open)
+//   order and rip, no steering (steer: "none"):                87.5 (3 open)
+//   order only (steer: "none", rip: false):                    72.5 (8 open)
+//   rip only (steer: "none", order: false):                    77.5 (5 open)
+//   rip and steer (order: false):                              77.5 (5 open)
+// Laying the fought-over connections first undoes the shortest-first order the rest of the router is tuned to (the
+// first round overflows by 98 mm on Ledify and 207 mm on Cyberboard, so many are), and the extra rip-ups cost
+// connections too; steering
+// only the moved ones is the least harm but still worse than no plan.  So it stays off.
 const PLAN: Plan = false;
-/** tile: tile size in mm (default 2.5); iters: negotiation rounds (16); layerCost: what a mm off the planned layer
- *  costs, in mm of track (0.5); outside: what a mm outside the corridor costs (0.5); mask: search inside the corridor
- *  only first, the whole board only when that finds nothing (default false: the corridor is a cost, not a wall); vias:
- *  a connection the plan routes through a via may change layer at once instead of being tried on one layer first
- *  (default false); open: with mask, mm round each end the corridor never closes (1). */
-export type Plan = boolean | { tile?: number; iters?: number; layerCost?: number; outside?: number; mask?: boolean; vias?: boolean; open?: number };
+// What the plan does besides: a route it had to fight for costs this much of its usual rip price (ripPrice, used by
+// ripup "mincut") and may be taken up this many times more than the others in a pass
+const PLAN_RIP = 0.5, PLAN_RIPS = 1;
+/** tile: tile size in mm (default: 0.5 mm when the finest pad pitch is 0.5 mm or less, else 1 mm, doubled until the
+ *  graph has 60 000 nodes or fewer, as in Copper); iters: negotiation rounds (16); layerCost: what a mm off the planned
+ *  layer costs, in mm of track (0.5); outside: what a mm outside the corridor costs (0.5); mask: search inside the
+ *  corridor only first, the whole board only when that finds nothing (default false: the corridor is a cost, not a
+ *  wall); vias: a connection the plan routes through a via may change layer at once instead of being tried on one
+ *  layer first (default false); open: with mask, mm round each end the corridor never closes (1); steer: which
+ *  connections the corridor steers ("moved": those the negotiation moved off their direct path, the default; "all";
+ *  "none"); order: false keeps the usual order instead of laying the fought-over connections first in their tier;
+ *  rip: false takes routes up as without a plan instead of the fought-over ones first. */
+export type Plan = boolean | { tile?: number; iters?: number; layerCost?: number; outside?: number; mask?: boolean; vias?: boolean; open?: number; steer?: "moved" | "all" | "none"; order?: boolean; rip?: boolean };
 /** How far (mm, pad to pad on a shared net) a small part may stand from a chip and still count as part of its cluster. */
 const GROUP_REACH = 5;
 /** A via costs this many times what the reference boards' routing says it does (4.66 mm of track): people asked for
@@ -129,7 +151,7 @@ export interface RouteOptions {
   impedance?: boolean;           // size tracks for the impedance their nets call for (a plan's impedance, else by name: USB 90 Ω, HDMI/Ethernet 100 Ω, antenna feeds 50 Ω); default true
   splitPairs?: boolean;          // route a differential pair's two lines separately when no coupled run fits (default false: they stay unrouted and the report says why)
   fanoutVias?: boolean;          // true: a longer lane with room for a via at fine-pitch pins whose net goes far
-  plan?: Plan;                    // plan every connection on a coarse tile graph first (negotiated congestion, layers per tile) and search each inside its corridor first (globalplan.ts); see Plan
+  plan?: Plan;                    // plan every connection on a coarse tile graph first (negotiated congestion, layers per tile), lay the connections it fought over first, take them up first, and steer the ones it moved off their direct path by their corridor (globalplan.ts); see Plan
   escapes?: Escapes;              // lay the escapes of fine-pitch chips (0.65 mm pitch and finer) before routing: a stub out of each pin (a spreading fan, a ring, a leg or a via) and route from its end (fanout.ts); a number sets how far past the pad the first ring lies (mm), { depth, spread } both (spread 0: no spreading fan)
   fanoutLanes?: boolean | number; // keep a lane (mm, default 0.25) out from each fine-pitch chip pin for its own net only; false turns it off
   matchLengths?: boolean;        // lengthen the shorter members of a matched group with serpentines; default true
@@ -196,7 +218,7 @@ export interface RouteResult {
   connections: ConnReport[]; domains?: DomainReport; fences?: FenceReport[];
   groups?: { clusters: number; inside: number; insideRouted: number; insideVias: number; critical: string[]; members: Record<string, string[]> };   // connections that lie inside one cluster, and how they came out
   fanout?: { escapes: number; ring: number; via: number; used: number; boxed: Boxed[] };   // the escapes laid before routing, and the pins that got none
-  plan?: { tile: number; tiles: [number, number]; conns: number; iterations: number; overflowFirst: number; overflow: number; crossings: number; relayered: number; viaConns: number; ms: number; inside: number; outside: number };   // the global plan: overflow (mm) before and after negotiation, and how many searches found their route inside the corridor
+  plan?: { tile: number; tiles: [number, number]; conns: number; iterations: number; overflowFirst: number; overflow: number; crossings: number; relayered: number; moved: number; contested: number; viaConns: number; ms: number; inside: number; outside: number };   // the global plan: overflow (mm) before and after negotiation, how many connections it moved off their direct path (only those are steered) and had to fight for (they go first), and how many steered searches found their route inside the corridor
 }
 export interface Progress { done: number; total: number; routed: number; pass: number; net: string }
 
@@ -1256,11 +1278,12 @@ export class Router {
         if (res.onTerm) { const e = res.nodes[res.nodes.length - 1]; const k = e.l * G.W * G.H + e.iy * G.W + e.ix; if (zoneSet && zoneSet.has(k) && !owner.has(k)) (res as any).zoneEnd = true; }
         return { res, owner, flip, esc: [src.esc, tgt ? tgt.esc : undefined] };
       };
-      // A global plan steers the search: every mm outside the connection's corridor and every mm off the layer the plan
-      // put a tile on costs extra (`outside`, `layerCost`).  With `mask` the search first looks inside the corridor
-      // only, and at the whole board when nothing is found there.  Not a net with a pour (it may end anywhere in it),
-      // and not a one-layer try of a connection the plan sends through a via.
-      const cor = this.gplan && !collect && !net.zoneCells ? this.gplan.corridors.get(conn.id) : undefined;
+      // A global plan steers the search of a connection its negotiation moved off the direct path (the rest are left
+      // to the search alone): every mm outside the connection's corridor and every mm off the layer the plan put a tile
+      // on costs extra (`outside`, `layerCost`).  With `mask` the search first looks inside the corridor only, and at
+      // the whole board when nothing is found there.  Not a net with a pour (it may end anywhere in it), and not a
+      // one-layer try of a connection the plan sends through a via.
+      const cor0 = this.gplan && !collect && !net.zoneCells ? this.gplan.corridors.get(conn.id) : undefined, steerAs = cor0 ? this.planOpts().steer : "none", cor = cor0 && (steerAs === "all" || (steerAs === "moved" && cor0.moved)) ? cor0 : undefined;
       let steer = extra;
       if (cor && !(cor.vias > 0 && maxVias <= 0)) {
         const pl = this.gplan!, kk = pl.k, po = this.planOpts(); const lc = G.routable.filter(Boolean).length > 1 ? po.layerCost : 0, oc = po.outside, lay = cor.layer, tl = cor.tiles, before = extra;
@@ -1287,23 +1310,37 @@ export class Router {
   }
   // ------------------------------------------------------------------ global plan (globalplan.ts)
   private gplan: PlanResult | null = null; private planBlk: Uint8Array | null = null; private planStat = { inside: 0, outside: 0 };
-  private planOpts(): { tile: number; iters: number; layerCost: number; outside: number; mask: boolean; vias: boolean; open: number } {
+  private planOpts(): { tile: number; iters: number; layerCost: number; outside: number; mask: boolean; vias: boolean; open: number; steer: "moved" | "all" | "none"; order: boolean; rip: boolean } {
     const o = this.opts.plan ?? PLAN; const q = typeof o === "object" ? o : {};
-    return { tile: q.tile || 2.5, iters: q.iters || 16, layerCost: q.layerCost ?? 0.5, outside: q.outside ?? 0.5, mask: !!q.mask, vias: !!q.vias, open: q.open ?? 1 };
+    return { tile: q.tile || 0, iters: q.iters || 16, layerCost: q.layerCost ?? 0.5, outside: q.outside ?? 0.5, mask: !!q.mask, vias: !!q.vias, open: q.open ?? 1, steer: q.steer || "moved", order: q.order !== false, rip: q.rip !== false };
   }
-  /** Plan every connection still to be laid on the tile graph; their corridors steer find(). */
+  /** How many rounds of the plan's negotiation fought over the connection (0: the plan never had to move it). */
+  private contested(c: Conn): number { const cor = this.gplan && this.gplan.corridors.get(c.id); return cor && this.planOpts().rip ? cor.contest : 0; }
+  /** The smallest centre distance between two pads of one part with three pads or more (Infinity when there is none). */
+  private minPadPitch(): number {
+    let best = Infinity;
+    for (const it of this.doc.items.values()) if (it.kind === "footprint") {
+      const ps: { x: number; y: number }[] = this.P.padsOf(it); if (ps.length < 3) continue;
+      const pts = ps.map((q) => [q.x, q.y]).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+      for (let i = 0; i < pts.length; i++) for (let j = i + 1; j < pts.length; j++) { const dx = pts[j][0] - pts[i][0]; if (dx >= best) break; const d = Math.hypot(dx, pts[j][1] - pts[i][1]); if (d > 1e-6 && d < best) best = d; }
+    }
+    return best;
+  }
+  /** Plan every connection still to be laid on the tile graph: the plan sets the order and the routes taken up first,
+   *  and the corridors of the connections it moved steer find(). */
   private planGlobal(): void {
     const G = this.G, po = this.planOpts(); const conns = this.conns.filter((c) => !c.nodes && !c.moot && c.planeOnly === undefined && !c.pairOnly);
     if (!conns.length) return;
     const count = new Map<RuleClass, number>(); for (const c of conns) count.set(c.cls, (count.get(c.cls) || 0) + 1);
     let ref = conns[0].cls; for (const [cls, n] of count) if (n > count.get(ref)!) ref = cls;
-    this.gplan = globalPlan({ G, maps: ref.fixed, vmaps: ref.vfixed, pitch: ref.width + ref.clr, viaPitch: ref.viaD + ref.clr, pref: this.pref, viaMm: this.W.via / Math.max(1e-6, this.W.length), tile: po.tile, iters: po.iters },
-      conns.map((c) => ({ id: c.id, net: c.net, a: { p: c.a.p, layers: c.a.layers }, b: { p: c.b.p, layers: c.b.layers }, demand: c.cls.width + c.cls.clr })));
+    const end = (a: Anchor) => ({ p: a.p, layers: a.layers, box: a.shape && !a.plane ? bboxOf(a.shape) : undefined });
+    this.gplan = globalPlan({ G, maps: ref.fixed, vmaps: ref.vfixed, pitch: ref.width + ref.clr, viaPitch: ref.viaD + ref.clr, need: ref.clr + ref.width / 2, pref: this.pref, viaMm: this.W.via / Math.max(1e-6, this.W.length), minPitch: this.minPadPitch(), tile: po.tile || undefined, iters: po.iters },
+      conns.map((c) => ({ id: c.id, net: c.net, a: end(c.a), b: end(c.b), demand: c.cls.width + c.cls.clr })));
   }
   private planReport(): RouteResult["plan"] {
     const pl = this.gplan; if (!pl) return undefined; const r3 = (v: number) => +v.toFixed(3);
     let viaConns = 0; for (const c of pl.corridors.values()) if (c.vias > 0) viaConns++;
-    return { tile: r3(pl.T), tiles: [pl.nx, pl.ny], conns: pl.corridors.size, iterations: pl.iterations, overflowFirst: r3(pl.overflowFirst), overflow: r3(pl.overflow), crossings: pl.crossings, relayered: pl.relayered, viaConns, ms: pl.ms, inside: this.planStat.inside, outside: this.planStat.outside };
+    return { tile: r3(pl.T), tiles: [pl.nx, pl.ny], conns: pl.corridors.size, iterations: pl.iterations, overflowFirst: r3(pl.overflowFirst), overflow: r3(pl.overflow), crossings: pl.crossings, relayered: pl.relayered, moved: pl.moved, contested: pl.contested, viaConns, ms: pl.ms, inside: this.planStat.inside, outside: this.planStat.outside };
   }
   /** The grid cells a search inside the corridor may not enter, outside its tiles except near the ends (a shared
    *  buffer, written only inside the search window: the search reads nothing beyond it). */
@@ -1441,13 +1478,14 @@ export class Router {
   }
   /** What taking a laid route up and laying it again costs, in mm of detour (Copper's rip price): 4 mm, times its
    *  width over the narrowest, eight times for a critical net, less for a route that already wanders, and more each
-   *  time taking it up did not pay. */
+   *  time taking it up did not pay.  A route the global plan had to fight for costs PLAN_RIP of that: it is taken up
+   *  first. */
   private ripHist = new Map<number, number>(); private wmin = 0;
   private ripPrice(o: Conn): number {
     if (!this.wmin) { let w = Infinity; for (const c of this.conns) w = Math.min(w, c.cls.width); this.wmin = Math.max(0.05, isFinite(w) ? w : 0.2); }
     const crit = isCritical(o.net, this.kindOf(o.net)) || this.netOf(o.net).guide.rank < Infinity;
     const wander = Math.max(1, (o.feat ? o.feat.length : o.len) / Math.max(o.len, 0.1));
-    return CUT_RIP_MM * Math.max(1, o.cls.width / this.wmin) * (crit ? 8 : 1) / wander + (this.ripHist.get(o.id) || 0);
+    return CUT_RIP_MM * Math.max(1, o.cls.width / this.wmin) * (crit ? 8 : 1) * (this.contested(o) ? PLAN_RIP : 1) / wander + (this.ripHist.get(o.id) || 0);
   }
   /** The routes of other nets to take up so that `conn` gets through: the minimum cut (ripcut.ts).  `wall`: routes
    *  that may not come up.  null when there is no way even through every route that may. */
@@ -1518,7 +1556,11 @@ export class Router {
     const inGroup = new Map<number, string>(); for (const c of conns) { const g = this.opts.groupsFirst === false ? "" : this.groupFor(c); if (g && c.len <= GROUP_REACH * 2) inGroup.set(c.id, g); }
     const first = new Set<number>(); for (const c of conns) if (critical(c) || gOf.get(c.net)!.rank < Infinity) first.add(c.id);
     const tier = (c: Conn) => this.opts.criticalFirst !== false ? (critical(c) ? -3 : inGroup.has(c.id) ? -2 : isSupply(c.net) && !this.netOf(c.net).zoneCells ? -1 : c.len < 3 ? 0 : Math.min(c.a.narrow || Infinity, c.b.narrow || Infinity) <= 0.35 ? 1 : isSupply(c.net) ? 2 : 3) : inGroup.has(c.id) ? -3 : critical(c) ? -2 : isSupply(c.net) && !this.netOf(c.net).zoneCells ? -1 : c.len < 3 ? 0 : Math.min(c.a.narrow || Infinity, c.b.narrow || Infinity) <= 0.35 ? 1 : isSupply(c.net) ? 2 : 3;
-    const order = conns.slice().sort((a, b) => cmp(gOf.get(a.net)!.rank, gOf.get(b.net)!.rank) || gOf.get(b.net)!.priority - gOf.get(a.net)!.priority || tier(a) - tier(b) || (inGroup.has(a.id) && tier(a) === tier(b) && inGroup.has(b.id) ? (inGroup.get(a.id)! < inGroup.get(b.id)! ? -1 : inGroup.get(a.id)! > inGroup.get(b.id)! ? 1 : 0) : 0) || (tier(a) === 1 ? b.len - a.len : a.len - b.len) || (a.net < b.net ? -1 : a.net > b.net ? 1 : a.id - b.id));
+    // A global plan (globalplan.ts) orders each tier further: the connections its negotiation had to fight for go
+    // before the ones it never had to move, the most fought over first (Copper: the most constrained corridor first).
+    const planned = (this.opts.plan ?? PLAN) !== false; if (planned) this.planGlobal();
+    const byPlan = planned && this.planOpts().order, fought = (c: Conn) => { const cor = byPlan && this.gplan ? this.gplan.corridors.get(c.id) : undefined; return cor ? cor.contest : 0; };
+    const order = conns.slice().sort((a, b) => cmp(gOf.get(a.net)!.rank, gOf.get(b.net)!.rank) || gOf.get(b.net)!.priority - gOf.get(a.net)!.priority || tier(a) - tier(b) || (inGroup.has(a.id) && tier(a) === tier(b) && inGroup.has(b.id) ? (inGroup.get(a.id)! < inGroup.get(b.id)! ? -1 : inGroup.get(a.id)! > inGroup.get(b.id)! ? 1 : 0) : 0) || fought(b) - fought(a) || (tier(a) === 1 ? b.len - a.len : a.len - b.len) || (a.net < b.net ? -1 : a.net > b.net ? 1 : a.id - b.id));
     let best: { score: number; snap: (Pick<Conn, "cls" | "pair" | "nodes" | "shapes" | "viaCells" | "landed" | "feat" | "stubs" | "zoneEnd">)[] } | null = null; let failedLast = new Set<number>(); let pass = 0;
     const RC = (this.opts as any).connRips || 4, RB = (this.opts as any).blockerRips || 3;
     // The budget is work done (search steps), not the clock: the same board then routes the same way on a fast machine,
@@ -1527,7 +1569,7 @@ export class Router {
     const w0 = work.steps; const budget = this.opts.timeMs ? this.opts.timeMs * STEPS_PER_MS : 0;
     const timeUp = () => this.stopped || (!!budget && (work.steps - w0 > budget || Date.now() - t0 > 4 * this.opts.timeMs!));
     const later = new Set<number>();   // connections found to need a layer change: in the next pass they go first and may take it at once
-    if ((this.opts.plan ?? PLAN) !== false) { this.planGlobal(); if (this.gplan && this.planOpts().vias) for (const [id, cor] of this.gplan.corridors) if (cor.vias > 0) later.add(id); }
+    if (planned && this.gplan && this.planOpts().vias) for (const [id, cor] of this.gplan.corridors) if (cor.vias > 0) later.add(id);
     for (; pass < passes; pass++) {
       for (const c of conns) if (c.nodes) this.rip(c);
       for (const c of conns) c.rips = 0;
@@ -1553,8 +1595,10 @@ export class Router {
           if (!soft) this.stat.noSoft++;
           if (soft) {
             const bl = this.blockers(c, soft.res);
-            this.stat[!bl.length ? "noBlockers" : bl.length > 14 ? "tooMany" : bl.every((b) => b.rips < RB && !first.has(b.id)) ? "ripped" : "ripLimit"]++;
-            if (bl.length && bl.length <= 14 && bl.every((b) => b.rips < RB && !first.has(b.id))) {   // a critical net keeps the path it was given: nothing laid later takes it up
+            // a route the global plan had to fight for may be taken up once more than the others (PLAN_RIPS)
+            const mayRip = (b: Conn) => b.rips < RB + (this.contested(b) ? PLAN_RIPS : 0) && !first.has(b.id);
+            this.stat[!bl.length ? "noBlockers" : bl.length > 14 ? "tooMany" : bl.every(mayRip) ? "ripped" : "ripLimit"]++;
+            if (bl.length && bl.length <= 14 && bl.every(mayRip)) {   // a critical net keeps the path it was given: nothing laid later takes it up
               const ripped: Conn[] = []; for (const b of bl) { b.rips++; this.rip(b, ripped); }
               c.rips++;
               if (this.fits(c, soft.res)) { found = soft; for (const r of ripped) { failed.delete(r.id); queue.unshift(r); } }
@@ -1627,7 +1671,7 @@ export class Router {
       const soft = this.find(c, true); if (!soft) return false; const bl = this.blockers(c, soft.res); if (!bl.length || bl.length > 12 || bl.some((b) => keep.has(b) || b.pair)) return false;
       const ripped: Conn[] = []; for (const b of bl) this.rip(b, ripped); if (ripped.some((r) => keep.has(r))) return false;
       if (this.fits(c, soft.res)) this.commit(c, soft); else if (!lay(c)) return false; keep.add(c);
-      ripped.sort((a, b) => a.len - b.len); for (const r of ripped) if (!r.nodes && !force(r, depth - 1, keep)) return false;
+      ripped.sort((a, b) => this.contested(b) - this.contested(a) || a.len - b.len); for (const r of ripped) if (!r.nodes && !force(r, depth - 1, keep)) return false;
       return true;
     };
     // The min-cut variant (ripcut.ts, after Copper's repair): take up only the cheapest set of routes in the way,

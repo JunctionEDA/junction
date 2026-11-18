@@ -83,8 +83,9 @@ def _design(self, outline=None, fab: str = "jlcpcb", layers: int | None = None, 
     the stubs take room other routes need (Ledify: 0 -> 5 open).
 
     plan=True plans every connection on a coarse tile graph before each routing pass (board.route(plan=...)): congestion
-    negotiated over the tiles, forced crossings found, layers assigned along each coarse path, and every connection
-    steered into its corridor and onto the planned layers.  Off by default (see board.route).
+    negotiated over the tiles, forced crossings found, layers assigned along each coarse path; the connections it fought
+    over are laid and taken up first, and those it moved off their direct path are steered into their corridors and
+    onto the planned layers.  Off by default (see board.route).
 
     ripup="mincut" takes up only the cheapest set of routes in an open connection's way when the router repairs what
     its passes left open (a minimum cut, after Copper), and keeps the result only when fewer are open (board.route).
