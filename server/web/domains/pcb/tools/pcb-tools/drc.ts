@@ -153,9 +153,8 @@ export function courtyards(fp: KItem) {
     else if (kind === "arc") { const a = P("start"), m = P("mid"), b = P("end"); if (a && m && b) { const arc = K.arcFrom3(a, m, b); out[layer].push(arc ? arcPoints(arc, a, b) : [a, b]); } }
     else if (kind === "poly") { const pts = K.ptsOf(g).map(([x, y]) => tf(x, y)); if (pts.length > 2) out[layer].push(pts.concat([pts[0]])); }
   }
-  // BuildCourtyardCaches chains ends up to 0.02 mm apart, then deflates the outline by maxError (5 um) so touching
-  // courtyards stay legal
-  const res: Record<string, Pt[][]> = {}; for (const layer of Object.keys(out)) res[layer] = out[layer].length ? chainLoops(out[layer], 0.02).loops.map((l) => deflatePoly(l, 0.005)) : [];
+  // BuildCourtyardCaches chains ends up to 0.02 mm apart
+  const res: Record<string, Pt[][]> = {}; for (const layer of Object.keys(out)) res[layer] = out[layer].length ? chainLoops(out[layer], 0.02).loops : [];
   return res;
 }
 /** SEG::Intersect: where two track centre lines cross (touching ends included), or null. */
@@ -544,7 +543,8 @@ export function drc(doc: BoardDoc, settings: DesignSettings | DesignSource | str
   out.push(...sizeMarkers(doc, s, rules, conds), ...trackAngleMarkers(doc, s, rules, conds));
   if (rules.length) { const items = ruleItems(doc); out.push(...disallowMarkers(doc, s, rules, items), ...assertionMarkers(doc, s, rules, items)); }
   // courtyards
-  const fps = Array.from(doc.items.values()).filter((it) => it.kind === "footprint"); const cy = fps.map((fp) => courtyards(fp));
+  // the courtyard cache is deflated by maxError (5 um) so touching courtyards stay legal
+  const fps = Array.from(doc.items.values()).filter((it) => it.kind === "footprint"); const cy = fps.map((fp) => { const c = courtyards(fp); for (const l of Object.keys(c)) c[l] = c[l].map((p) => deflatePoly(p, 0.005)); return c; });
   for (let i = 0; i < fps.length; i++) for (let j = i + 1; j < fps.length; j++) {
     if (!fps[i].bbox || !fps[j].bbox || !boxesTouch(fps[i].bbox!, fps[j].bbox!, 0)) continue;
     for (const layer of ["F.CrtYd", "B.CrtYd"]) { let hit = false; for (const P of cy[i][layer]) for (const Q of cy[j][layer]) if (polysOverlap(P, Q)) hit = true; if (hit) { const [x, y] = boxCenter(fps[i].bbox!, fps[j].bbox!); out.push(marker("courtyards_overlap", "error", x, y, `Courtyards overlap (${fps[i].ref || "footprint"} and ${fps[j].ref || "footprint"} on ${layer})`, [fps[i].id, fps[j].id])); } }
