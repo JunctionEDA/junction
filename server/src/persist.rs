@@ -57,6 +57,18 @@ pub async fn get_user(pool: &PgPool, id: i64) -> DbResult<Option<User>> {
     .await
 }
 
+/// Whether a person has turned Mechanical CAD on (migration 0251; off by default).  A setting of the interface and
+/// of the MCP tool list only: no document is refused or hidden because of it.
+pub async fn cad_enabled(pool: &PgPool, user_id: i64) -> DbResult<bool> {
+    let on: Option<bool> = sqlx::query_scalar("SELECT cad_enabled FROM users WHERE id = $1").bind(user_id).fetch_optional(pool).await?;
+    Ok(on.unwrap_or(false))
+}
+
+/// Turn Mechanical CAD on or off for a person; returns the setting as stored.
+pub async fn set_cad_enabled(pool: &PgPool, user_id: i64, on: bool) -> DbResult<bool> {
+    sqlx::query_scalar("UPDATE users SET cad_enabled = $2 WHERE id = $1 RETURNING cad_enabled").bind(user_id).bind(on).fetch_one(pool).await
+}
+
 pub async fn upsert_user(
     pool: &PgPool,
     github_id: i64,
