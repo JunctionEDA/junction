@@ -21,6 +21,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { setCad } from './cad-setting.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -114,6 +115,7 @@ async function open(uid, login, size = { width: 1500, height: 900 }) {
   await page.addInitScript(() => { window.appState = () => (window.CollabApp ? window.CollabApp.getState() : { view: '', project: { pcb: null, docs: [], allDocs: [] }, document: { docId: null, doc: null, hasDoc: false, items: [] }, viewport: {} }); });
   page.on('pageerror', (e) => errors.push(`${login}: ${e.message}`));
   page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(`${login} (console): ${m.text().slice(0, 300)}`); });
+  await setCad(BASE, jwt(uid, login));   // Mechanical CAD is off for a new account
   await page.goto(`${BASE}/auth/dev?jwt=${jwt(uid, login)}&next=/`);
   await page.waitForLoadState('networkidle');
   return page;

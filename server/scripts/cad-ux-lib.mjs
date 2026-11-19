@@ -6,6 +6,7 @@
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { setCad } from './cad-setting.mjs';
 
 const require = createRequire(import.meta.url);
 export const { chromium } = require('playwright');
@@ -34,6 +35,7 @@ export async function signedIn(browser, uid, login, o = {}) {
   const page = await ctx.newPage();
   page.errors = [];
   page.on('pageerror', (e) => page.errors.push(`${login}: ${e.message}`));
+  await setCad(BASE, jwt(uid, login));   // Mechanical CAD is off for a new account
   await page.goto(`${BASE}/auth/dev?jwt=${jwt(uid, login)}&next=/`);
   await page.waitForLoadState('networkidle');
   if (o.dark) await page.evaluate(() => { try { localStorage.setItem('kui.theme', 'dark'); } catch (e) { /* no storage */ } });

@@ -21,6 +21,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { setCad } from './cad-setting.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -82,6 +83,7 @@ execFileSync('zip', ['-qr', 'p.zip', 'gadget.kicad_pro', 'gadget.kicad_pcb'], { 
 
 const aliceId = user('boardlink-alice', 990501);
 const token = jwt(aliceId, 'boardlink-alice');
+await setCad(BASE, token);   // Mechanical CAD is off for a new account
 const form = new FormData(); form.append('name', 'Board link test'); form.append('archive', new Blob([fs.readFileSync(path.join(dir, 'p.zip'))]), 'p.zip');
 const created = await (await fetch(`${BASE}/api/projects`, { method: 'POST', headers: { Authorization: `Bearer ${token}` }, body: form })).json();
 const pcbDoc = created.docs && created.docs.find((d) => d.path === 'gadget.kicad_pcb');

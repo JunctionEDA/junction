@@ -20,6 +20,7 @@ import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 
 import { tool as chromeTool } from './cad-chrome.mjs';
+import { setCad } from './cad-setting.mjs';
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
 
@@ -99,6 +100,7 @@ const newSketch = async (n) => {
 };
 
 try {
+  await setCad(BASE, jwt(uid, 'sketch-ui'));   // Mechanical CAD is off for a new account
   await page.goto(`${BASE}/auth/dev?jwt=${jwt(uid, 'sketch-ui')}&next=/`);
   await page.waitForLoadState('networkidle');
   const project = await page.evaluate(async () => { const r = await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Sketch UI test', template: 'pcb' }) }); return r.json(); });

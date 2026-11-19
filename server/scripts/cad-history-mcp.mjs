@@ -10,6 +10,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { setCad } from './cad-setting.mjs';
 
 const BASE = (process.env.E2E_BASE || 'http://127.0.0.1:8099').replace(/\/$/, '');
 const SECRET = process.env.E2E_JWT_SECRET, PG_URL = process.env.E2E_PG_URL;
@@ -34,6 +35,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const adaId = user('cad-mcp-ada', 990601), token = jwt(adaId, 'cad-mcp-ada');
 const eveId = user('cad-mcp-eve', 990602), eveToken = jwt(eveId, 'cad-mcp-eve');
+await setCad(BASE, token); await setCad(BASE, eveToken);   // Mechanical CAD is off for a new account: the cad_ tools are listed once it is on
 
 let rpcId = 0;
 async function rpc(method, params, tok = token) {
