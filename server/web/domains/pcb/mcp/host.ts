@@ -15,6 +15,7 @@
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { foldOps } from "./compact";
+import { repairDemoGround } from "./repair-demo-ground";
 import "./env";
 import "../canvas/index";
 import "../../../../static/sch-tools.js";
@@ -971,6 +972,7 @@ const TOOLS: Record<string, (req: Request) => Promise<Reply>> = {
   create_project: createProject,
   // not a person's tool: the server folds a document's journal into a new stored file with it (src/compact.rs)
   fold_ops: async (req) => ({ result: foldOps(K(), String(req.args.docType), String(req.args.file), Array.isArray(req.args.ops) ? req.args.ops : []) }),
+  repair_demo_ground: async (req) => ({ result: await repairDemoGround(K(), W.CollabTools.sch._, W.PcbTools, req.args.board, req.args.schematic, req.args.projectFile) }),
 };
 
 async function handle(req: Request): Promise<any> {
