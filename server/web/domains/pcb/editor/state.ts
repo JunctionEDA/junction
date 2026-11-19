@@ -45,6 +45,7 @@ export const E: any = {
   lastLiveMove: 0,
   followPeer: null,
   followCursor: false,
+  followPresentation: false,
   presenting: false,
   suppressBreakout: false,
   peerState: {},

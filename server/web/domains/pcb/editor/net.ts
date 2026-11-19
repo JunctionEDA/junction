@@ -134,12 +134,17 @@ export async function connect() {
         if (e === null) { if (old) { delete E.peerState[cid]; full = roster = true; } continue; }
         if (!old || peerName(old) !== peerName(e) || (old.user && old.user.color) !== (e.user && e.user.color)) roster = full = true;
         else if (!onlyPointerMoved(old.state as Record<string, unknown> | null, e.state as Record<string, unknown> | null)) full = true;
-        if (old?.state?.presenting !== e.state?.presenting) {
-          roster = true;
-          if (e.state?.presenting === true && !E.presenting && !E.followPeer)
-            toast(`${peerName(e)} is presenting`, 6000, { text: "Follow", run: () => followAction(cid) });
-        }
         E.peerState[cid] = e;
+        const presenting = e.state?.presenting === true;
+        if ((old?.state?.presenting === true) !== presenting) {
+          roster = true;
+          if (presenting && !E.presenting) {
+            followAction(cid, false, true);
+            toast(`Following ${peerName(e)}. Pan or zoom to stop.`, 5000);
+          } else if (!presenting && E.followPeer === cid && E.followPresentation) {
+            followAction(null);
+          }
+        }
       }
       if (full) drawPeers(E.peerState); else movePeerCursors(E.peerState);
       if (E.followPeer) applyFollowWeb(E.peerState);

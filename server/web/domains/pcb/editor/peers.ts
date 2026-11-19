@@ -50,16 +50,17 @@ export function renderPeers() {
   store.set({ peers: { list: Object.keys(E.peerState).map((cid) => { const p = E.peerState[cid]; return { cid, name: peerName(p), color: (p.user && p.user.color) || "#4477ee", presenting: p.state?.presenting === true }; }), follow: E.followPeer, followCursor: E.followCursor, presenting: E.presenting } });
 }
 
-export function followAction(cid: string | null, cursor = false) {
+export function followAction(cid: string | null, cursor = false, presentation = false) {
   E.followPeer = cid && E.peerState[cid] ? cid : null;
   E.followCursor = !!E.followPeer && cursor;
+  E.followPresentation = !!E.followPeer && presentation;
   if (E.followPeer && E.presenting) togglePresenting();
   applyFollowWeb(E.peerState); renderPeers();
 }
 export function togglePresenting() {
   if (!state.me || !state.docId) return;
   E.presenting = !E.presenting;
-  if (E.presenting) { E.followPeer = null; E.followCursor = false; }
+  if (E.presenting) { E.followPeer = null; E.followCursor = false; E.followPresentation = false; }
   sendPresence(null);
   renderPeers();
 }

@@ -203,6 +203,7 @@ export function applyView() {
   // next presence message).
   drawComments(); drawSelection(); drawPeers(E.peerState); refreshCrosshair(); refreshPreview();
   requestRepaint();
+  if (E.presenting) sendPresence(null);
 }
 
 /**
