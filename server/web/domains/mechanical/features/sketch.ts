@@ -19,9 +19,8 @@ export interface SketchParams { [key: string]: any; plane: PlaneRef; sketch: Ske
 export default defineFeature<SketchParams>({
   type: "sketch",
   title: "Sketch",
-  icon: '<path d="M4 20l1-4L16 5l3 3L8 19z"/><path d="M14 7l3 3"/>',
-  toolbarOrder: 10,
-  toolbarSection: "sketch",
+  icon: '<path class="f" d="M5 19l1.2-4.7L16.4 4.1a1.6 1.6 0 0 1 2.3 0l1.2 1.2a1.6 1.6 0 0 1 0 2.3L9.7 17.8z"/><path d="M5 19l1.2-4.7L16.4 4.1a1.6 1.6 0 0 1 2.3 0l1.2 1.2a1.6 1.6 0 0 1 0 2.3L9.7 17.8zM14.3 6.2l3.5 3.5"/><path d="M3 21.5h9"/>',
+  toolbarOrder: 10, toolbarSection: "sketch", toolbarKeep: 100,
   defaults: () => ({ plane: { kind: "plane", plane: "top" }, sketch: emptySketch() }),
   schema: [{ key: "plane", label: "Sketch plane", kind: "plane" }],
 

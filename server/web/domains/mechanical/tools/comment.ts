@@ -6,8 +6,8 @@ import { defineTool } from "../core/tool";
 import { showPanel } from "../ui/panels";
 
 export default defineTool({
-  id: "comment", title: "Comment", hint: "Pin a comment to a face, an edge, a vertex or a feature", group: "inspect", order: 90,
-  icon: '<path d="M5 5h14v10H10l-5 4z"/>',
+  id: "comment", title: "Comment", hint: "Pin a comment to a face, an edge, a vertex or a feature", group: "inspect", order: 90, keep: 0,
+  icon: '<path class="f" d="M3.5 4.5h17v11.5H11l-4.5 4v-4h-3z"/><path d="M3.5 4.5h17v11.5H11l-4.5 4v-4h-3z"/>',
   disabled: (studio) => {
     const s = studio.getState();
     if (!studio.host.signedIn) return "Sign in to comment";

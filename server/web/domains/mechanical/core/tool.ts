@@ -19,7 +19,7 @@ export interface ToolDefinition {
   title: string;
   /** shown in the tooltip after the title */
   hint?: string;
-  /** inline SVG markup for a 24×24 stroke glyph (currentColor) */
+  /** inline SVG markup for a 24×24 glyph (ui/Glyph.tsx says how it is drawn) */
   icon?: string;
   group: ToolGroup;
   /** lower first inside the group; ties in title order */
@@ -30,6 +30,11 @@ export interface ToolDefinition {
   menu?: string;
   /** false hides the button (a tool reached only by its key or from a menu) */
   button?: boolean;
+  /**
+   * How long the button keeps its place on the bar when the window is too narrow for every button: the ones
+   * with the lowest number go under More first.  0 is always under More.  50 when not given.
+   */
+  keep?: number;
   /** Greyed out, with this as the reason, when it returns a string.  Called on every toolbar draw: keep it cheap. */
   disabled?(studio: PartStudio): string | null;
   /** Drawn pressed when true (a mode that is on, the active sketch tool). */

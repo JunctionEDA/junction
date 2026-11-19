@@ -34,9 +34,8 @@ const is = (...m: string[]) => (p: { [k: string]: unknown }) => m.includes(p.met
 export default defineFeature<PlaneParams>({
   type: "plane",
   title: "Plane",
-  icon: '<path d="M3 15l5-8h13l-5 8z"/><path d="M12 11v9"/><path d="M10 18l2 2 2-2"/>',
-  toolbarOrder: 60,
-  toolbarSection: "reference", toolbarMenu: "Reference",
+  icon: '<path class="d t" d="M2.5 20l4.5-7h14.5l-4.5 7z"/><path class="f" d="M2.5 12l4.5-7h14.5l-4.5 7z"/><path d="M2.5 12l4.5-7h14.5l-4.5 7z"/>',
+  toolbarOrder: 60, toolbarSection: "reference", toolbarMenu: "Reference", toolbarKeep: 82,
   defaults: () => ({ method: "offset", ref: null, distance: 10, flip: false, points: [], faces: [], axis: null, angle: 45, curve: null, position: 0, cylinder: null }),
   schema: [
     { key: "method", label: "Placed", kind: "enum", options: [

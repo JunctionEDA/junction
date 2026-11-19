@@ -22,9 +22,8 @@ export interface TransformParams {
 export default defineFeature<TransformParams>({
   type: "transform",
   title: "Transform",
-  icon: '<path d="M12 3v18M3 12h18"/><path d="M9 6l3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/>',
-  toolbarOrder: 44,
-  toolbarSection: "solid", toolbarMenu: "Boolean",
+  icon: '<path d="M12 2.5v19M2.5 12h19M9.2 5.3L12 2.5l2.8 2.8M9.2 18.7L12 21.5l2.8-2.8M5.3 9.2L2.5 12l2.8 2.8M18.7 9.2L21.5 12l-2.8 2.8"/><rect class="s" x="9.8" y="9.8" width="4.4" height="4.4" rx="0.6"/>',
+  toolbarOrder: 44, toolbarSection: "combine", toolbarMenu: "Transform", toolbarKeep: 72,
   defaults: () => ({ bodies: [], dx: 0, dy: 0, dz: 0, axis: "z", axisEdge: null, angle: 0, copy: false }),
   schema: [
     { key: "bodies", label: "Bodies", kind: "bodies", hint: "Click the bodies to move." },

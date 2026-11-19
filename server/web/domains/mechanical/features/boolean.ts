@@ -13,9 +13,8 @@ export interface BooleanParams { [key: string]: any; operation: "union" | "subtr
 export default defineFeature<BooleanParams>({
   type: "boolean",
   title: "Boolean",
-  icon: '<circle cx="9" cy="12" r="5"/><circle cx="15" cy="12" r="5"/>',
-  toolbarOrder: 40,
-  toolbarSection: "solid", toolbarMenu: "Boolean",
+  icon: '<path class="f" d="M12 6.8a6 6 0 0 1 0 10.4a6 6 0 0 1 0-10.4z"/><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/>',
+  toolbarOrder: 40, toolbarSection: "combine", toolbarKeep: 84,
   defaults: () => ({ operation: "union", targets: [], tools: [], keepTools: false }),
   schema: [
     { key: "operation", label: "Operation", kind: "enum", options: [{ value: "union", label: "Union" }, { value: "subtract", label: "Subtract" }, { value: "intersect", label: "Intersect" }] },

@@ -18,22 +18,23 @@ import { useStudio } from "./hooks";
 import { FEATURE_ROW_SLOTS } from "./slots";
 import { featureDef, type PartStudio } from "./studio";
 import { tipHandlers } from "./Tip";
+import { SEARCH } from "./Toolbar";
 
 interface Menu { x: number; y: number; id: string }
 
 export const EYE = '<path d="M2.5 12s3.5-6.5 9.5-6.5 9.5 6.5 9.5 6.5-3.5 6.5-9.5 6.5S2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/>';
-export const EYE_OFF = '<path d="M4 4l16 16"/><path d="M10 5.700a9 9 0 0 1 2-.2c6 0 9.500 6.500 9.500 6.500a17 17 0 0 1-2.800 3.600M6.400 7.500A16.600 16.600 0 0 0 2.500 12s3.500 6.500 9.500 6.500c1.200 0 2.300-.25 3.300-.65"/>';
-const PLANE_ICON = '<path d="M3 15l6-8h12l-6 8z"/>';
-const ORIGIN_ICON = '<circle cx="12" cy="12" r="2"/><path d="M12 4v5M12 15v5M4 12h5M15 12h5"/>';
+export const EYE_OFF = '<path d="M4 4l16 16"/><path d="M10 5.7a9 9 0 0 1 2-.2c6 0 9.5 6.5 9.5 6.5a17 17 0 0 1-2.8 3.6M6.4 7.5A16.6 16.6 0 0 0 2.5 12s3.5 6.5 9.5 6.5c1.2 0 2.3-.25 3.3-.65"/>';
+const PLANE_ICON = '<path class="f" d="M2.5 16l4.5-8h14.5l-4.5 8z"/><path d="M2.5 16l4.5-8h14.5l-4.5 8z"/>';
+const ORIGIN_ICON = '<circle cx="12" cy="12" r="3"/><path d="M12 3v6M12 15v6M3 12h6M15 12h6"/>';
 /** feature types whose result is reference geometry or a sketch: things that are looked at, so can be hidden */
 const HIDEABLE = new Set(["sketch", "plane", "axis", "point", "helix"]);
 
 /** The eye at the right of a row: shown while the pointer is over the row, and always while the thing is hidden. */
 export function Eye({ shown, label, onToggle }: { shown: boolean; label: string; onToggle(): void }) {
   return (
-    <button type="button" className={cx("btn sm ghost flex-none p-0 w-5 h-5 min-h-0 justify-center", shown ? "text-ink-3 opacity-0 group-hover:opacity-100 focus-visible:opacity-100" : "text-ink-3")} aria-pressed={shown} aria-label={`${shown ? "Hide" : "Show"} ${label}`} data-eye={shown ? "shown" : "hidden"}
+    <button type="button" className={cx("btn sm ghost flex-none p-0 w-6 h-6 min-h-0 justify-center", shown ? "text-ink-2 opacity-0 group-hover:opacity-100 focus-visible:opacity-100" : "text-ink-3")} aria-pressed={shown} aria-label={`${shown ? "Hide" : "Show"} ${label}`} data-eye={shown ? "shown" : "hidden"}
       {...tipHandlers({ title: shown ? "Hide" : "Show", hint: "Only in your view: nobody else's changes." })} onClick={(ev) => { ev.stopPropagation(); onToggle(); }} onDoubleClick={(ev) => ev.stopPropagation()}>
-      <Glyph svg={shown ? EYE : EYE_OFF} size={14} />
+      <Glyph svg={shown ? EYE : EYE_OFF} size={16} />
     </button>
   );
 }
@@ -120,11 +121,11 @@ export function FeatureList({ studio }: { studio: PartStudio }) {
     const pick: Pick | null = g.id === "origin" ? null : { kind: "plane", plane: g.id, point: [0, 0, 0] };
     const on = !!pick && selection.some((p) => p.kind === "plane" && p.plane === g.id);
     return (
-      <div key={g.id} role="option" aria-selected={on} data-default-geometry={g.id} data-visible={shown} className={cx("group flex items-center gap-1.5 h-6.5 pl-5 pr-1.5 cursor-default select-none", on ? "bg-sel" : hoverKey === g.id ? "bg-sel-soft" : "hover:bg-sel-soft", !shown && "text-ink-3", armedPlane && pick && "cursor-pointer")}
+      <div key={g.id} role="option" aria-selected={on} data-default-geometry={g.id} data-visible={shown} className={cx("group flex items-center gap-2 h-7 pl-7 pr-1.5 cursor-default select-none", on ? "bg-sel font-medium" : hoverKey === g.id ? "bg-sel-soft" : "hover:bg-sel-soft", !shown && "text-ink-3", armedPlane && pick && "cursor-pointer")}
         onClick={(ev) => { if (pick) studio.pickFromList(pick, ev); }}
         onPointerEnter={() => studio.view.setFeatureHover(pick && shown ? [pick] : null)} onPointerLeave={() => studio.view.setFeatureHover(null)}
         onContextMenu={(ev) => { ev.preventDefault(); studio.toggleVisible(g.id); }}>
-        <Glyph svg={g.id === "origin" ? ORIGIN_ICON : PLANE_ICON} size={16} />
+        <Glyph svg={g.id === "origin" ? ORIGIN_ICON : PLANE_ICON} size={18} />
         <span className="flex-1 truncate">{g.title}</span>
         <Eye shown={shown} label={g.title} onToggle={() => studio.toggleVisible(g.id as DefaultGeometryId)} />
       </div>
@@ -162,14 +163,14 @@ export function FeatureList({ studio }: { studio: PartStudio }) {
     rowsOut.push(
       <div key={f.id} data-feature-row={isDraft ? undefined : f.id} data-feature-type={f.featureType} data-state={state} data-message={rep && rep.message ? rep.message : undefined} data-made-hover={made === f.id || undefined} role="option" aria-selected={selected.includes(f.id)}
         draggable={canEdit && !isDraft && renaming !== f.id && !q}
-        className={cx("group flex items-center gap-1.5 h-6.5 pl-2 pr-1.5 cursor-default select-none", on ? "bg-sel" : made === f.id ? "bg-sel-soft" : "hover:bg-sel-soft", (below || f.suppressed) && "text-ink-3", isDraft && "italic")}
+        className={cx("group flex items-center gap-2 h-7 pl-2.5 pr-1.5 cursor-default select-none", on ? "bg-sel font-medium" : made === f.id ? "bg-sel-soft" : "hover:bg-sel-soft", (below || f.suppressed) && "text-ink-3", isDraft && "italic")}
         onClick={(ev) => { if (!isDraft) clickRow(f, ev); }}
         onDoubleClick={() => { clearTimeout(slow.current.timer); if (!isDraft) studio.editFeature(f.id); }}
         onPointerEnter={() => { if (!isDraft) studio.setHoverFeature(f.id); }} onPointerLeave={() => studio.setHoverFeature(null)}
         onContextMenu={(ev) => { ev.preventDefault(); if (!isDraft) { if (!selected.includes(f.id)) studio.selectFeature(f.id); setMenu({ x: ev.clientX, y: ev.clientY, id: f.id }); } }}
         onDragStart={(ev) => { dragId.current = f.id; ev.dataTransfer.effectAllowed = "move"; ev.dataTransfer.setData("text/plain", f.id); }}
         onDragEnd={() => { dragId.current = null; setDrop(null); }}>
-        <Glyph svg={def?.icon} size={16} />
+        <Glyph svg={def?.icon} size={18} />
         {renaming === f.id
           ? <input autoFocus className="input flex-1 min-w-0 h-5" defaultValue={f.name} aria-label="Feature name" onFocus={(ev) => ev.target.select()} onClick={(ev) => ev.stopPropagation()} onDoubleClick={(ev) => ev.stopPropagation()}
               onBlur={(ev) => { studio.commit(edits.renameFeature(doc(), f.id, ev.target.value)); setRenaming(null); }}
@@ -200,7 +201,7 @@ export function FeatureList({ studio }: { studio: PartStudio }) {
   const many = targets.length > 1;
   const commitAll = (make: (id: string) => ReturnType<typeof edits.deleteFeature>) => { const changes = targets.flatMap((id) => make(id)); if (changes.length) studio.commit(changes); };
   return (
-    <div ref={list} className="cad-features flex flex-col text-sm min-h-full" role="listbox" aria-label="Features" aria-multiselectable="true"
+    <div ref={list} className="cad-features flex flex-col text-base min-h-full" role="listbox" aria-label="Features" aria-multiselectable="true"
       onKeyDown={(ev) => { if (ev.key === "Escape" && deps) setDeps(null); }}
       onDragOver={(ev) => { if (dragId.current) { ev.preventDefault(); setDrop(gapAt(ev.clientY)); } }}
       onDrop={(ev) => {
@@ -210,21 +211,25 @@ export function FeatureList({ studio }: { studio: PartStudio }) {
         const from = features.findIndex((x) => x.id === id);
         studio.commit(edits.moveFeature(doc(), id, g > from ? g - 1 : g));
       }}>
-      <div className="flex flex-none items-center gap-1 px-1.5 py-1 border-b border-line bg-paper sticky top-0 z-[1]">
-        <input className="input sm flex-1 min-w-0 h-5.5" type="search" placeholder="Filter by name" aria-label="Filter the features by name" value={filter} data-feature-filter onChange={(ev) => setFilter(ev.target.value)} onKeyDown={(ev) => { if (ev.key === "Escape") { setFilter(""); ev.stopPropagation(); } }} />
-        <span className="flex-none mono text-xs text-ink-3" data-feature-count {...tipHandlers({ title: `${features.length} feature${features.length === 1 ? "" : "s"}`, hint: hiddenBelow > 0 ? `${hiddenBelow} below the rollback bar.` : undefined })}>{q ? `${shownRows}/${features.length}` : features.length}</span>
+      {/* the box that finds a feature already in the list (the tool search, in the toolbar, finds tools) */}
+      <div className="flex flex-none items-center gap-2 px-2 py-1.5 border-b border-line bg-paper sticky top-0 z-[1]">
+        <label className="flex flex-1 min-w-0 items-center gap-1.5 h-7 pl-2 pr-1 rounded-sm border border-line-2 bg-panel text-ink-3 focus-within:border-blue focus-within:outline focus-within:outline-1 focus-within:outline-blue" data-feature-filter-box>
+          <Glyph svg={SEARCH} size={14} />
+          <input className="appearance-none flex-1 min-w-0 h-full p-0 bg-transparent border-0 outline-none text-base text-ink [font-family:inherit] placeholder:text-ink-3" type="search" placeholder="Filter features…" aria-label="Filter the features by name" value={filter} data-feature-filter onChange={(ev) => setFilter(ev.target.value)} onKeyDown={(ev) => { if (ev.key === "Escape") { setFilter(""); ev.stopPropagation(); } }} />
+        </label>
+        <span className="flex-none mono text-sm text-ink-2" data-feature-count {...tipHandlers({ title: `${features.length} feature${features.length === 1 ? "" : "s"}`, hint: hiddenBelow > 0 ? `${hiddenBelow} below the rollback bar.` : undefined })}>{q ? `${shownRows}/${features.length}` : features.length}</span>
       </div>
       {geometry.length ? (
         <div data-default-group>
-          <button type="button" className="appearance-none bg-transparent border-0 m-0 p-0 text-inherit [font-family:inherit] [font-size:inherit] flex w-full items-center gap-1 h-6 px-1.5 text-left text-ink-2 hover:bg-sel-soft cursor-pointer" aria-expanded={geometryOpen} data-default-toggle onClick={() => setGeometryOpen(!geometryOpen)}>
-            <span className={cx("flex-none text-ink-3 transition-transform", geometryOpen && "rotate-90")}><Glyph svg='<path d="M9 6l6 6-6 6"/>' size={12} /></span>
+          <button type="button" className="appearance-none bg-transparent border-0 m-0 p-0 text-inherit [font-family:inherit] [font-size:inherit] flex w-full items-center gap-1.5 h-7 px-2 text-left text-ink font-medium hover:bg-sel-soft cursor-pointer" aria-expanded={geometryOpen} data-default-toggle onClick={() => setGeometryOpen(!geometryOpen)}>
+            <span className={cx("flex-none text-ink-2 transition-transform", geometryOpen && "rotate-90")}><Glyph svg='<path d="M9 6l6 6-6 6"/>' size={14} /></span>
             <span className="flex-1 truncate">Default geometry</span>
           </button>
           {geometryOpen || q ? geometry : null}
         </div>
       ) : null}
       <div className="flex flex-col pb-1">{rowsOut}</div>
-      {loaded && !all.length ? <p className="note px-2 m-0" data-empty>No features yet. Choose <b>Sketch</b>, click a plane, and draw a profile; then <b>Extrude</b> it.</p> : null}
+      {loaded && !all.length ? <p className="note px-3 py-1 m-0 leading-snug" data-empty>No features yet. Choose <b>Sketch</b>, click a plane, and draw a profile; then <b>Extrude</b> it.</p> : null}
       {loaded && all.length > 0 && q && !shownRows && !geometry.length ? <p className="note px-2 m-0">Nothing is called “{filter.trim()}”.</p> : null}
       {!loaded ? <p className="note px-2 m-0">Loading…</p> : null}
       {deps ? (

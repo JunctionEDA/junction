@@ -27,9 +27,8 @@ export interface BoardStandoffsParams {
 export default defineFeature<BoardStandoffsParams>({
   type: "board-standoffs",
   title: "Standoffs",
-  icon: '<path d="M3 7h18"/><path d="M7 7v10h3V7"/><path d="M14 7v10h3V7"/><path d="M4 17h16"/>',
-  toolbarOrder: 17,
-  toolbarSection: "board", toolbarMenu: "Board",
+  icon: '<rect class="f" x="5" y="11" width="4" height="9"/><rect class="f" x="15" y="11" width="4" height="9"/><path d="M5 11v9M9 11v9M15 11v9M19 11v9M2.5 20.5h19"/><rect class="s" x="2" y="6.5" width="20" height="3.5" rx="0.8"/>',
+  toolbarOrder: 17, toolbarSection: "board", toolbarMenu: "Board", toolbarKeep: 60,
   defaults: () => ({ holes: [], height: 5, diameter: 6, bore: 2.5, operation: "new" }),
   schema: [
     { key: "holes", label: "Holes", kind: "refs", of: ["face"], hint: "The walls of the board's mounting holes." },

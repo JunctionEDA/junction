@@ -70,7 +70,7 @@ export class DatumLayer {
       const drawn: Drawn = { view: d, group: sub };
       if (d.kind === "plane" && d.frame) {
         const g = new THREE.BufferGeometry().setFromPoints(corners(d)); g.setIndex([0, 1, 2, 0, 2, 3]);
-        const quad = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.08, side: THREE.DoubleSide, depthWrite: false }));
+        const quad = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.11, side: THREE.DoubleSide, depthWrite: false }));
         quad.userData.datum = d.featureId;
         sub.add(quad);
         drawn.quad = quad;
@@ -84,7 +84,7 @@ export class DatumLayer {
       if (seg.length >= 6) {
         drawn.segments = seg;
         const g = new LineSegmentsGeometry(); g.setPositions(seg);
-        const line = new LineSegments2(g, this.fat(color, d.kind === "plane" ? 1 : 1.5, { dashed: d.kind === "axis", depthTest: d.kind === "plane" }));
+        const line = new LineSegments2(g, this.fat(color, 1.5, { dashed: d.kind === "axis", depthTest: d.kind === "plane" }));
         line.computeLineDistances();
         line.renderOrder = 4;
         sub.add(line);

@@ -1,5 +1,5 @@
 // Browser test of the part studio's import and export in the real app: a STEP assembly opened from the document
-// tabs ("+" › Open STEP file…) becomes a part studio with named parts; the Export dialog downloads STEP, STL, 3MF
+// tabs ("+" › Import files…) becomes a part studio with named parts; the Export dialog downloads STEP, STL, 3MF
 // and GLB files (checked byte by byte); a sketch and a flat face come out as DXF and SVG; the Import tool brings
 // the exported STEP back as a feature beside an extrusion; a second person, and a reload, see the imported parts.
 //
@@ -15,6 +15,7 @@ import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
+import { tool } from './cad-chrome.mjs';   // Import and Export are under More
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -64,7 +65,7 @@ async function open(uid, login) {
 
 /** Open the Export dialog, set it up with `setup`, press Export, and return the downloaded file. */
 async function exportFile(page, setup, label) {
-  await page.click('[data-tool=Export]');
+  await tool(page, 'Export');
   await page.waitForSelector('[data-export-dialog]');
   await setup();
   await page.waitForTimeout(100);
@@ -91,14 +92,14 @@ try {
   // ---------------------------------------------------------------- a STEP file opened as a document
   await alice.click('[data-doc-add]');
   await shot(alice, '01-plus-menu');
-  const [chooser] = await Promise.all([alice.waitForEvent('filechooser'), alice.click('text=Open STEP file…')]);
+  const [chooser] = await Promise.all([alice.waitForEvent('filechooser'), alice.click('text=Import files…')]);
   const t0 = Date.now();
   await chooser.setFiles(ASSEMBLY);
   await alice.waitForSelector('.cad-root[data-doc-kind=part-studio]', { timeout: 60000 });
   await settled(alice, 1, 180000);
   const opened = await studio(alice, () => { const s = window.JunctionPartStudio.getState(); return { status: s.reports[s.features[0].id].status, ms: s.reports[s.features[0].id].ms, type: s.features[0].featureType, name: s.features[0].name, bodies: s.bodies.map((b) => b.name), meshed: s.bodies.every((b) => b.mesh && b.mesh.indices.length) }; });
   const tabs = await alice.$$eval('#doctabs [role=tab]', (els) => els.map((e) => `${e.textContent.trim()}:${e.getAttribute('aria-selected')}`));
-  check('"+" › Open STEP file… makes a part studio named after the file and opens it', tabs.includes('USB3stacked:true'), tabs.join(' | '));
+  check('"+" › Import files… makes a part studio named after the file and opens it', tabs.includes('USB3stacked:true'), tabs.join(' | '));
   check('it holds one Import feature that built every solid of the assembly', opened.type === 'import' && opened.status === 'ok' && opened.bodies.length === 22 && opened.meshed, JSON.stringify({ ...opened, bodies: opened.bodies.length }));
   check('the parts are named after the assembly\'s products', opened.bodies.includes('USB30-DOUBLE-SHELL.stp.STEP') && opened.bodies.includes('USB30-DOUBLE-HOUSING.stp.STEP'), opened.bodies.slice(0, 4).join(', '));
   console.log(`      (4.4 MB STEP: upload + open + read + tessellate ${((Date.now() - t0) / 1000).toFixed(1)} s, of which the import feature ${(opened.ms / 1000).toFixed(1)} s)`);
@@ -148,8 +149,8 @@ try {
   await alice.click('text=New part studio');
   await alice.waitForFunction(() => window.JunctionPartStudio && window.JunctionPartStudio.getState().loaded && window.JunctionPartStudio.getState().features.length === 0, null, { timeout: 30000 });
   await alice.click('[data-tool=Sketch]');
-  await alice.waitForSelector('.cad-dialog[data-feature=sketch]');
-  await alice.click('.cad-dialog [data-accept]');
+  await alice.waitForSelector('.cad-dialog[data-feature=sketch] [data-sketch-plane][data-armed]');
+  await alice.click('.cad-features [data-default-geometry=top]');
   await alice.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.features.length === 1 && s.kernel.state === 'ready'; }, null, { timeout: 90000 });
   await alice.waitForTimeout(700);
   const canvas = await alice.$eval('.cad-stage canvas', (c) => { const r = c.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
@@ -191,7 +192,7 @@ try {
   // ---------------------------------------------------------------- Import: the exported STEP back, as a base for a cut
   await studio(alice, () => window.JunctionPartStudio.select([]));
   const before = await studio(alice, () => window.JunctionPartStudio.getState().bodies.length);
-  const [chooser2] = await Promise.all([alice.waitForEvent('filechooser'), alice.click('[data-tool=Import]')]);
+  const [chooser2] = await Promise.all([alice.waitForEvent('filechooser'), tool(alice, 'Import')]);
   await chooser2.setFiles(step.file);
   await settled(alice, 3, 180000);
   const imported = await studio(alice, () => { const s = window.JunctionPartStudio.getState(), f = s.features[2]; return { type: f.featureType, name: f.name, status: s.reports[f.id].status, message: s.reports[f.id].message || '', bodies: s.bodies.length, file: f.params.file }; });

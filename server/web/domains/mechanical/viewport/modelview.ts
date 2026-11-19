@@ -83,7 +83,7 @@ export class ModelView {
   private readonly datums = new DatumLayer((c, w, o) => this.fatMaterial(c, w, o));
 
   constructor(readonly viewport: Viewport3D) {
-    this.planeLayer = new PlaneLayer(viewport);
+    this.planeLayer = new PlaneLayer(viewport, (c, w, o) => this.fatMaterial(c, w, o));
     viewport.scene.add(this.root, this.planeLayer.group, this.highlight, this.overlay, this.datums.group);
     viewport.onTheme.push(() => this.readColors());
     viewport.onFrame.push(() => { for (const m of this.fat) m.resolution.set(viewport.width, viewport.height); });
@@ -115,11 +115,13 @@ export class ModelView {
     // what a dialog holds in a field that is not listening: still the selection colour, but quieter
     this.colors.held.copy(this.colors.select).lerp(this.colors.body, 0.3);
     this.colors.sketch.copy(tokenColor("--ink-2"));
-    this.colors.plane.copy(tokenColor("--ink-3"));
+    // Planes and reference geometry: one family of colour, the theme's colour for references (teal) taken half
+    // of the way to its secondary ink — a slate that is plainly not a part, a sketch or a selection.
+    this.colors.plane.copy(tokenColor("--ink-2")).lerp(tokenColor("--teal"), 0.55);
     this.colors.dim.copy(ink).lerp(paper, 0.6);
     this.bodyMaterial.color.copy(this.colors.body);
     this.edgeMaterial.color.copy(this.colors.edge);
-    this.planeLayer.setColor(this.colors.plane);
+    this.planeLayer.setColors({ tint: this.colors.plane, label: this.colors.plane.clone().lerp(ink, 0.25), select: this.colors.select, ink });
     for (const s of this.sketches.values()) this.styleSketch(s);
     this.datums.group.traverse((o) => { const m = (o as THREE.Mesh).material as THREE.Material & { color?: THREE.Color }; if (m && m.color) m.color.copy(this.colors.plane); });
     this.drawHighlight();
@@ -404,12 +406,12 @@ export class ModelView {
     if (this.hover && !selected.has(pickKey(this.hover))) draw(this.hover, this.colors.hover, false);
     // the pointer over something the dialog holds: it is what a click would take out
     else if (this.hover && this.held.has(pickKey(this.hover))) draw(this.hover, this.colors.hover, true, true);
-    // the names of the planes that are under the pointer or chosen stand out
-    const labels = new Set<string>();
-    for (const p of [...this.selection, ...this.marks.active, ...this.marks.other, ...this.featureHover, ...(this.hover ? [this.hover] : [])]) {
-      if (p.kind === "plane") labels.add("plane:" + p.plane); else if (p.kind === "datum") labels.add("datum:" + p.featureId);
-    }
-    this.planeLayer.setMarked(labels);
+    // the planes that are chosen, and the one under the pointer, stand out: border, tint and name
+    const keyOf = (p: Pick): string | null => (p.kind === "plane" ? "plane:" + p.plane : p.kind === "datum" ? "datum:" + p.featureId : null);
+    const strong = new Set<string>(), soft = new Set<string>();
+    for (const p of [...this.selection, ...this.marks.active, ...this.marks.other]) { const k = keyOf(p); if (k) strong.add(k); }
+    for (const p of [...this.featureHover, ...(this.hover ? [this.hover] : [])]) { const k = keyOf(p); if (k && !strong.has(k)) soft.add(k); }
+    this.planeLayer.setMarked(strong, soft);
     this.viewport.invalidate();
   }
   private addFat(segments: number[], color: THREE.Color, width: number): void {

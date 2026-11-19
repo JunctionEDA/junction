@@ -18,9 +18,8 @@ export interface CircularPatternParams extends CopyParams {
 export default defineFeature<CircularPatternParams>({
   type: "circular-pattern",
   title: "Circular pattern",
-  icon: '<circle cx="12" cy="12" r="1.5"/><circle cx="12" cy="4.5" r="2"/><circle cx="19" cy="15" r="2" stroke-dasharray="2 1.5"/><circle cx="5" cy="15" r="2" stroke-dasharray="2 1.5"/>',
-  toolbarOrder: 71,
-  toolbarSection: "pattern", toolbarMenu: "Pattern",
+  icon: '<circle class="d t" cx="12" cy="12.5" r="7.5"/><circle class="s" cx="12" cy="12.5" r="1.3"/><circle class="f" cx="12" cy="5" r="3"/><circle cx="12" cy="5" r="3"/><circle class="t" cx="5.5" cy="16.2" r="3" fill="var(--color-bench, #fff)"/><circle class="t" cx="18.5" cy="16.2" r="3" fill="var(--color-bench, #fff)"/>',
+  toolbarOrder: 71, toolbarSection: "pattern", toolbarMenu: "Pattern", toolbarKeep: 76,
   defaults: () => ({ ...copyDefaults(), axis: null, count: 4, angle: 360, equal: true, flip: false, skip: "" }),
   schema: [
     ...copyFields("Copy"),

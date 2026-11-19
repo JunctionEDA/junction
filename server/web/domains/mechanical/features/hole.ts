@@ -42,8 +42,8 @@ const custom = (p: { [k: string]: any }) => !p.standard || p.standard === "custo
 export default defineFeature<HoleParams>({
   type: "hole",
   title: "Hole",
-  icon: '<ellipse cx="12" cy="6" rx="6" ry="2"/><path d="M6 6v4l3 2v7M18 6v4l-3 2v7"/><path d="M9 19c0 .8 1.3 1.5 3 1.5s3-.7 3-1.5"/>',
-  toolbarOrder: 36,
+  icon: '<path class="f" d="M2.5 9.5l5-4.5h14l-5 4.5zM2.5 9.5h14v9h-14zM21.5 5v9l-5 4.5v-9z"/><path d="M2.5 9.5l5-4.5h14l-5 4.5zM2.5 9.5v9h14v-9M21.5 5v9l-5 4.5"/><ellipse class="s" cx="12" cy="7.2" rx="3.4" ry="1.3"/>',
+  toolbarOrder: 36, toolbarSection: "modify", toolbarKeep: 88,
   defaults: () => ({
     points: null, holeType: "simple", standard: "M3", fit: "normal", diameter: 3.4, cboreDiameter: 6.5, cboreDepth: 3.3, csinkDiameter: 6.9, csinkAngle: 90,
     endType: "through", depth: 10, tipAngle: 118, flip: false, targets: [],

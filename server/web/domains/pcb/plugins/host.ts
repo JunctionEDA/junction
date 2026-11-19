@@ -420,7 +420,7 @@ function themeNow() {
   const cs = getComputedStyle(document.documentElement); const vars: Record<string, string> = {};
   for (const v of THEME_VARS) { const val = cs.getPropertyValue(v).trim(); if (val) vars[v] = val; }
   const dt = document.documentElement.dataset.theme;
-  return { dark: dt === "dark" || (dt !== "light" && matchMedia("(prefers-color-scheme: dark)").matches), vars };
+  return { dark: dt === "dark" || (dt === "system" && matchMedia("(prefers-color-scheme: dark)").matches), vars };
 }
 
 /** The dock gives the host the element the frames live in; they stay mounted there, shown or not. */

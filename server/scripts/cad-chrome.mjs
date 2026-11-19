@@ -1,7 +1,8 @@
 // What the cad-*-ui.mjs scripts share about the part studio's chrome.  The toolbar shows the tools of the mode
 // the studio is in (modelling, a sketch, a dialog); a family of tools is a split button whose face runs the
-// variant used last and whose caret opens the list (Fillet ▾ holds Fillet, Chamfer and Draft); in a narrow
-// window a whole section may fold into one drop-down (the sketch constraints); a docked panel may be folded.
+// variant used last and whose caret opens the list (Rectangle ▾ holds Rectangle and Centre rectangle); what is
+// used less, and in a narrow window whatever has no room, is under "More ▾" at the end of the tools; a docked
+// panel may be folded.
 //
 //   await tool(page, 'Chamfer')          click the button, opening its drop-down first when it is in one
 //   await toolTitles(page)               every feature and tool the toolbar offers, drop-downs included
@@ -19,15 +20,26 @@ export async function tool(page, title) {
   }, title);
   if (!menu) throw new Error(`The toolbar has no "${title}".`);
   await page.click(`.cad-toolbar [data-menu="${menu}"]`);
-  await page.click(`.cad-tb-menu [data-tool="${title}"]`);
+  await page.click(`.cad-tb-menu[data-menu-of="${menu}"] [data-tool="${title}"]`);
 }
 
-/** The titles of everything in the toolbar (in one group when given), with what the drop-downs hold. */
-export async function toolTitles(page, group = '') {
-  return page.evaluate((group) => {
+/**
+ * The titles of everything the toolbar offers (in one group when given), with what the drop-downs hold and what
+ * is under More; `onBar` leaves out what is under More.
+ */
+export async function toolTitles(page, group = '', onBar = false) {
+  return page.evaluate(([group, onBar]) => {
     const out = [];
     for (const g of Array.from(document.querySelectorAll('.cad-toolbar [data-group]'))) {
-      if (group && g.getAttribute('data-group') !== group) continue;
+      const of = g.getAttribute('data-group');
+      if (of === 'more') {
+        // More says which group each of its tools belongs to
+        const m = g.querySelector('[data-menu]');
+        const items = (m.getAttribute('data-items') || '').split('|'), groups = (m.getAttribute('data-item-groups') || '').split('|');
+        if (!onBar) items.forEach((t, i) => { if (t && (!group || groups[i] === group)) out.push(t); });
+        continue;
+      }
+      if (group && of !== group) continue;
       // the face of a split button repeats one of its drop-down's items: the drop-down lists them all
       for (const b of Array.from(g.querySelectorAll('[data-tool]:not([data-variant]), [data-menu]'))) {
         if (b.hasAttribute('data-menu')) out.push(...(b.getAttribute('data-items') || '').split('|'));
@@ -35,7 +47,7 @@ export async function toolTitles(page, group = '') {
       }
     }
     return out;
-  }, group);
+  }, [group, onBar]);
 }
 
 /** The mode the toolbar is in: "model", "sketch", "dialog" or "view" (no edit rights). */
@@ -57,10 +69,13 @@ export async function viewFrom(page, view) {
   await page.evaluate((view) => window.JunctionPartStudio.viewport.setView(view), view);
 }
 
-/** Start a sketch on a default plane ('top', 'front', 'right'): the Sketch button, then the plane's row in the feature list. */
+/**
+ * Start a sketch on a default plane ('top', 'front', 'right'): the Sketch button, which opens the sketch's dialog
+ * with its plane field empty and listening, then the plane's row in the feature list.
+ */
 export async function sketchOn(page, plane = 'top') {
   await tool(page, 'Sketch');
-  await page.waitForSelector('.cad-dialog[data-feature=sketch]');
+  await page.waitForSelector('.cad-sketch-dialog[data-sketch-waiting] [data-sketch-plane][data-armed]');
   await page.click(`.cad-features [data-default-geometry=${plane}]`);
   await page.waitForFunction(() => window.JunctionSketch && window.JunctionSketch.getState().ready, null, { timeout: 30000 });
 }

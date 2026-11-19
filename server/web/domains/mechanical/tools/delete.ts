@@ -5,8 +5,8 @@ import { deleteFeature } from "../document/edits";
 import { sketchEditor } from "../sketch/editor";
 
 export default defineTool({
-  id: "delete", title: "Delete", group: "edit", order: 30, key: "Delete",
-  icon: '<path d="M5 7h14"/><path d="M9 7V5h6v2"/><path d="M7 7l1 12h8l1-12"/>',
+  id: "delete", title: "Delete", group: "edit", order: 30, keep: 0, key: "Delete",
+  icon: '<path class="f" d="M6 7.5h12l-1 12.5H7z"/><path d="M4 7.5h16M9.5 4h5M6 7.5L7 20h10l1-12.5M10 11.5v5M14 11.5v5"/>',
   disabled: (studio) => {
     const s = studio.getState();
     if (!s.canEdit) return "View-only access";
