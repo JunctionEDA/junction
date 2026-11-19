@@ -41,7 +41,7 @@ function build(opts = {}) {
   const sub = `(kicad_sch (version 20250114) (generator "eeschema") (uuid "${U_SUB}") (paper "A4") ${opts.localPower ? LIB.replace('(symbol "power:GND" (power)', '(symbol "power:GND" (power local)') : LIB} ${subSyms} ${subGnd}
     (hierarchical_label "IN" (shape input) (at ${r1[1][0]} ${r1[1][1]} 180) (effects (font (size 1.27 1.27))) (uuid "h1"))
     (label "${opts.sameName ? "GND" : "LOCAL"}" (at ${r1[2][0]} ${r1[2][1]} 0) (effects (font (size 1.27 1.27))) (uuid "l2")))`;
-  const file = (text, uuid, name) => ({ doc: K.parseDoc(text, "kicad_sch"), uuid, file: name });
+  const file = (text, uuid, name) => ({ doc: K.parseDoc(opts.rail ? text.replaceAll("GND", opts.rail) : text, "kicad_sch"), uuid, file: name });
   const files = { "demo.kicad_sch": file(root, U_ROOT, "demo.kicad_sch"), "sub.kicad_sch": file(sub, U_SUB, "sub.kicad_sch") };
   return { files, nl: N.buildNetlist(files["demo.kicad_sch"], (f) => files[f] || null, helpers, "demo") };
 }
@@ -70,6 +70,38 @@ test("a local GND label joins a global power symbol of that name on its own shee
   assert.ok(!netMap.has("/GND"));
   assert.strictEqual(components.find((c) => c.ref === "R1").pins.get("1").net, "GND");
   assert.strictEqual(components.find((c) => c.ref === "R3").pins.get("2").net, "/sub/GND");
+});
+test("other named ground and power nets use the same sheet-local and global rules", () => {
+  for (const rail of ["AGND", "DGND", "+3.3V"]) {
+    const { netMap, components } = build({ sameName: true, rail }).nl;
+    assert.ok(!netMap.has("/" + rail));
+    assert.strictEqual(components.find(c => c.ref === "R1").pins.get("1").net, rail);
+    assert.strictEqual(components.find(c => c.ref === "R3").pins.get("2").net, "/sub/" + rail);
+  }
+});
+test("a stacked schematic pin assigns each physical pad and retains its one highlight target", () => {
+  const number = "[B2,F6,F15,A1-A3]", padNumbers = ["B2", "F6", "F15", "A1", "A2", "A3"];
+  const symbol = '(symbol "Test:P" (symbol "P_1_1" (pin power_in line (at 0 0 0) (length 2.54) (name "VSS") (number "' + number + '"))))';
+  const doc = K.parseDoc('(kicad_sch (uuid "root") (lib_symbols ' + symbol + ') (symbol (lib_id "Test:P") (at 20 20 0) (unit 1) (uuid "u") (property "Reference" "U1")) (global_label "AGND" (at 20 20 0) (uuid "label")))');
+  const nl = N.buildNetlist({doc, file: "test.kicad_sch", uuid: "root"}, () => null, helpers, "test");
+  const pins = nl.components[0].pins;
+  assert.deepStrictEqual([...pins.keys()], padNumbers);
+  assert.deepStrictEqual(nl.nets.get("AGND").map(m => m.pin), padNumbers);
+  for (const p of padNumbers) assert.deepStrictEqual(pins.get(p), {net: "AGND", name: "VSS_" + p, type: "power_in"});
+  assert.ok(SN.collectKeys(nl.netMap, "AGND", 0).has("u#pin:" + number));
+});
+test("clicking a bus segment and the visible text of a sheet pin picks their nets", () => {
+  const root = files["demo.kicad_sch"].doc;
+  const text = root.items.get(U_SHEET).geom.find(g => g.pinNo === "IN" && g.t === "text");
+  const near = [text.x - 0.5, text.y];
+  const hit = sch._.pickNet({ doc: root, pxPerMm: 25 }, near);
+  assert.equal(hit?.item.id, U_SHEET); assert.equal(hit.pin, "IN");
+  const contents = '(bus (pts (xy 10 10) (xy 40 10)) (uuid "bus")) (label "{USB}" (at 10 10 0) (uuid "label"))';
+  const doc = K.parseDoc('(kicad_sch (version 20251024) (uuid "root") (lib_symbols) ' + contents + ')');
+  const {netMap} = N.buildNetlist({doc, uuid: "root", file: "bus.kicad_sch"}, () => null, helpers, "bus");
+  assert.equal(sch._.pickNet({ doc, pxPerMm: 25 }, [25, 10]).item.id, "bus");
+  const index = SN.nameIndex(netMap);
+  assert.ok(index.get("0|bus")); assert.equal(index.get("0|bus"), index.get("0|label"));
 });
 test("net map: a net crossing a sheet pin holds the items of both sheets", () => {
   const e = map.get("/sub/IN"), on = (i) => e.members.filter((m) => m.inst === i).map((m) => m.kind + ":" + m.id + (m.pin ? "#" + m.pin : "")).sort();

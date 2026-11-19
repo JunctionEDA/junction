@@ -465,12 +465,12 @@ async fn handle_socket(
                 // The actor may have reaped itself between get_or_spawn and
                 // send; a rejected send hands the message back, so respawn and
                 // retry once rather than registering a dead sender.
-                let (mut tx, mut lane) = state.registry.get_or_spawn(&state.pool, &doc);
+                let (mut tx, mut lane) = state.registry.get_or_spawn(&state, &doc);
 
                 let tx = match tx.send(join).await {
                     Ok( () ) => tx,
                     Err( e ) => {
-                        (tx, lane) = state.registry.get_or_spawn(&state.pool, &doc);
+                        (tx, lane) = state.registry.get_or_spawn(&state, &doc);
                         let _ = tx.send(e.0).await;
                         tx
                     }

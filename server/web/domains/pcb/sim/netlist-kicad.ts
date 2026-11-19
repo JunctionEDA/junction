@@ -7,6 +7,7 @@
 // Both walk the sheet instances in hierarchy order and, on each sheet, its symbols by reference (StrNumCmp, no case),
 // the unit with the lowest uuid standing for its package (findNextSymbol); "#" references and symbols excluded from
 // the board are left out.  Nets come from the hierarchy's net map (canvas/pcb-netlist buildNetlist().netMap).
+import { expandStacked } from "../canvas/stacked-pins";
 import type { Netlist, NetEntry, SheetInstance } from "../canvas/pcb-netlist";
 import { prettify } from "../canvas/prettify";
 import { strNumCmp as strNumCmpCase } from "../canvas/variant-model";
@@ -41,20 +42,8 @@ export function unescapeString(s: string): string {
 /** ExpandStackedPinNotation: "[1-3,5]" → 1, 2, 3, 5 (a prefix may lead the numbers: "[A1-A4]"); `valid` false when
  *  the brackets or a range are malformed (the text is then kept whole). */
 export function expandStackedPins(pin: string): { nums: string[]; valid: boolean } {
-  const open = pin.includes("["), close = pin.includes("]");
-  if (open || close) { if (!pin.startsWith("[") || !pin.endsWith("]")) return { nums: [pin], valid: false }; }
-  if (!pin.startsWith("[") || !pin.endsWith("]")) return { nums: [pin], valid: true };
-  const out: string[] = [];
-  for (let part of pin.slice(1, -1).split(",")) {
-    part = part.trim(); if (!part) continue;
-    const dash = part.indexOf("-");
-    if (dash >= 0) {
-      const a = /^(.*?)(\d+)$/.exec(part.slice(0, dash).trim()), b = /^(.*?)(\d+)$/.exec(part.slice(dash + 1).trim());
-      if (!a || !b || a[1] !== b[1] || +a[2] > +b[2]) return { nums: [pin], valid: false };
-      for (let v = +a[2]; v <= +b[2]; v++) out.push(a[1] + v);
-    } else out.push(part);
-  }
-  return { nums: out, valid: true };
+  const { pins, valid } = expandStacked(pin);
+  return { nums: pins, valid };
 }
 
 // ---------------------------------------------------------------- the library symbol as the exporters read it

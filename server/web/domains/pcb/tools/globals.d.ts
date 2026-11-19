@@ -5,6 +5,7 @@
 
 /** kicad-canvas.js as the tool scripts use it: the chrome's contract plus the helpers it does not name. */
 interface ToolsCanvasApi extends KiCadCanvasApi {
+  geomHit(g: KGeom, x: number, y: number, tol: number): boolean;
   /** Deep copy of a node that keeps the reader's record of which atoms were quoted (JSON would drop it). */
   cloneNode<T>(node: T): T;
   /** KiCad's symbol transform [x1, y1, x2, y2] for (at … rot) + (mirror …) (web/domains/pcb/canvas/geom-sch.ts) */

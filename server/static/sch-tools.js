@@ -1640,9 +1640,10 @@
     if (g.t === "rect") return boxDist([g.x, g.y, g.x + g.w, g.y + g.h], x, y);
     return Infinity;
   }
-  function hitNonSymbol(doc, x, y, tol) {
+  function hitNonSymbol(doc, x, y, tol, kinds) {
     let best = null, bd = Infinity;
     for (const it of doc.items.values()) {
+      if (kinds && !kinds.has(it.kind)) continue;
       let d;
       if (LINE_KINDS.has(it.kind)) {
         d = Infinity;
@@ -1676,7 +1677,7 @@
     const allowed = root.CollabEditor && root.CollabEditor.pickAllowed;
     if (allowed && !allowed(hit)) return null;
     const pinExact = root.CollabEditor && root.CollabEditor.pinExactAt;
-    if (hit.kind !== "junction" && pinExact && pinExact([mm[0], mm[1]])) return null;
+    if (hit.kind !== "junction" && hit.kind !== "no_connect" && pinExact && pinExact([mm[0], mm[1]])) return null;
     const symId = K.hitTest(ctx.doc, mm[0], mm[1], 0.5);
     if (symId && !LINE_KINDS.has(hit.kind)) {
       const sym = ctx.doc.items.get(symId);
@@ -4548,13 +4549,16 @@ ${body}
   }
   function pickNet(ctx, mm) {
     const doc = ctx.doc, tol = Math.max(0.3, 5 * mmPerPx(ctx)), pinTol = Math.max(tol, 0.6);
-    const hit = hitNonSymbol(doc, mm[0], mm[1], tol);
-    if (hit && NET_PICK.has(hit.kind)) return { item: hit, at: mm };
+    const hit = hitNonSymbol(doc, mm[0], mm[1], tol, NET_PICK);
+    if (hit) return { item: hit, at: mm };
     const pins = pinsAt(doc, mm[0], mm[1], pinTol);
     if (pins.length) return { item: pins[0].item, at: [pins[0].x, pins[0].y] };
-    for (const it of doc.items.values()) if (it.kind === "sheet") for (const pin of kids(it.node, "pin")) {
-      const [x, y] = atOf(pin);
-      if (Math.hypot(x - mm[0], y - mm[1]) <= pinTol) return { item: it, at: [x, y] };
+    for (const it of doc.items.values()) if (it.kind === "sheet") {
+      const label = it.geom.find((g) => g.pinNo && K.geomHit(g, mm[0], mm[1], tol));
+      for (const pin of kids(it.node, "pin")) {
+        const name = str(pin[1]), [x, y] = atOf(pin);
+        if (label ? label.pinNo === name : Math.hypot(x - mm[0], y - mm[1]) <= pinTol) return { item: it, at: [x, y], pin: name };
+      }
     }
     const symId = K.hitTest(doc, mm[0], mm[1], tol), sym = symId ? doc.items.get(symId) : null;
     if (sym && sym.kind === "symbol" && isPowerSymbol(doc, str((kid(sym.node, "lib_id") || [])[1]))) {
@@ -5323,7 +5327,20 @@ ${body}
     s.pop();
     return s.join("/");
   };
-  var joinPath = (dir, file) => dir ? dir + "/" + file : file;
+  function joinPath(dir, file) {
+    const parts = [];
+    for (const p of (dir + "/" + file).split("/")) {
+      if (p === "..") parts.pop();
+      else if (p && p !== ".") parts.push(p);
+    }
+    return parts.join("/");
+  }
+  function existingSheet(ctx, target, file) {
+    const docs = schDocs(ctx), exact = docs.find((d) => d.path === target) || docs.find((d) => d.path === file);
+    if (exact || file.includes("/")) return exact;
+    const matches = docs.filter((d) => baseName(d.path) === file);
+    return matches.length === 1 ? matches[0] : void 0;
+  }
   function relPath(dir, path) {
     const a = dir ? dir.split("/") : [], b = path.split("/");
     let i = 0;
@@ -5360,7 +5377,7 @@ ${body}
     file = normSheetFile(file);
     if (!file) throw new Error("no sheet file name");
     const cur = currentDoc(ctx), dir = cur ? dirName(cur.path) : "", target = joinPath(dir, file);
-    const found = schDocs(ctx).find((d) => d.path === target || d.path === file) || schDocs(ctx).find((d) => baseName(d.path) === baseName(file));
+    const found = existingSheet(ctx, target, file);
     if (found) return { file: relPath(dir, found.path), docId: found.docId, created: false };
     if (typeof ctx.api !== "function" || !ctx.project || !ctx.project.projectId) throw new Error("this session cannot create sheet files");
     const res = await ctx.api(`/api/projects/${ctx.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path: target, docType: "kicad_sch" }) });
@@ -5448,7 +5465,7 @@ ${body}
       try {
         file = normSheetFile(file);
         const cur = currentDoc(ctx), dir = cur ? dirName(cur.path) : "", target = joinPath(dir, file);
-        const exists = schDocs(ctx).find((x) => x.path === target || x.path === file);
+        const exists = existingSheet(ctx, target, file);
         if (exists && root.KDialogs && root.KDialogs.confirm && !await root.KDialogs.confirm("Confirmation", `'${baseName(file)}' already exists.
 
 Link '${target}' to this file?`)) return null;
@@ -8586,8 +8603,13 @@ Link '${target}' to this file?`)) return null;
       case "M": {
         setDragMode(ctx, lower2 === "m" ? "move" : "drag");
         if (S.drag) return true;
-        const it = S.sel ? ctx.doc.items.get(S.sel) : null;
-        if (!it || !S.cursor) return false;
+        if (!S.cursor) return false;
+        let it = S.sel ? ctx.doc.items.get(S.sel) : null;
+        if (!it && !ctx.selected && !ctx.selection?.size) {
+          const hovered = pickNonSymbol(ctx, S.cursor);
+          if (hovered?.kind === "no_connect") it = hovered;
+        }
+        if (!it) return false;
         return !!beginDrag(ctx, it, S.cursor, false);
       }
       case " ":
@@ -9597,7 +9619,7 @@ Link '${target}' to this file?`)) return null;
     for (const kd of lineKindsFor(item)) for (const e of lineEndsAt(doc, p[0], p[1], kd)) if (!moving.has(e.item.id) && ptsOf(e.item.node).length > 1) ends.push(e);
     if (fixedJunction) a.stub = { from: a.p, kind: item.kind === "bus" || ends.some((e) => e.item.kind === "bus") ? "bus" : "wire" };
     else for (const e of ends) a.ends.push({ item: e.item, index: e.index, orig: ptsOf(e.item.node).map((q) => q.slice()) });
-    if (!a.stub && item.kind !== "no_connect") {
+    if (!a.stub) {
       const fixed = pinsAt(doc, p[0], p[1]).some((q) => !moving.has(q.item.id)) || labelsAt(doc, a.p, item).some((l) => !moving.has(l.id)) || sheetPinsAt(doc, a.p, item).some((s) => !moving.has(s.id)) || item.kind !== "bus_entry" && busEntriesAt(doc, a.p, item).some((b) => !moving.has(b.id));
       if (fixed) a.stub = { from: a.p, kind: item.kind === "bus" ? "bus" : "wire" };
       else if (LABEL_KINDS.has(item.kind)) {

@@ -78,10 +78,16 @@ export function netWalk(doc: KDoc, item: KItem, near: Pt | null | undefined, phy
 // What the highlight tool picks under the cursor: a net item, a symbol pin, or a sheet pin.
 export function pickNet(ctx: SchCtx, mm: Pt): { item: KItem; at: Pt; pin?: string } | null {
   const doc = ctx.doc, tol = Math.max(0.3, 5 * mmPerPx(ctx)), pinTol = Math.max(tol, 0.6);
-  const hit = hitNonSymbol(doc, mm[0], mm[1], tol);
-  if (hit && NET_PICK.has(hit.kind)) return { item: hit, at: mm };
+  const hit = hitNonSymbol(doc, mm[0], mm[1], tol, NET_PICK);
+  if (hit) return { item: hit, at: mm };
   const pins = pinsAt(doc, mm[0], mm[1], pinTol); if (pins.length) return { item: pins[0].item, at: [pins[0].x, pins[0].y] };
-  for (const it of doc.items.values()) if (it.kind === "sheet") for (const pin of kids(it.node, "pin")) { const [x, y] = atOf(pin); if (Math.hypot(x - mm[0], y - mm[1]) <= pinTol) return { item: it, at: [x, y] }; }
+  for (const it of doc.items.values()) if (it.kind === "sheet") {
+    const label = it.geom.find((g) => g.pinNo && K.geomHit(g, mm[0], mm[1], tol));
+    for (const pin of kids(it.node, "pin")) {
+      const name = str(pin[1]), [x, y] = atOf(pin);
+      if (label ? label.pinNo === name : Math.hypot(x - mm[0], y - mm[1]) <= pinTol) return { item: it, at: [x, y], pin: name };
+    }
+  }
   // a power symbol (its body or one of its fields) stands for the net of its single pin (highlightNet: pins.size() == 1)
   const symId = K.hitTest(doc, mm[0], mm[1], tol), sym = symId ? doc.items.get(symId) : null;
   if (sym && sym.kind === "symbol" && isPowerSymbol(doc, str((kid(sym.node, "lib_id") || [])[1]))) {

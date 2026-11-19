@@ -552,6 +552,17 @@ function dragItem(c, item, from, to) { assert.ok(_.beginDrag(c, item, from, true
 const ofType = (c, t) => c.changes.filter((x) => x.typeName === t);
 const linesOf = (c, kind) => ofType(c, "SCH_LINE").filter((x) => x.kind === kind).map((x) => ptsOf(fragItem(x)));
 
+test("dragging a no-connect from a pin leaves a wire to the pin", () => {
+  const { d, c } = fresh(), from = [25.4, 104.14], to = [30.48, 104.14];
+  const flag = K.createItem(d, K.parse('(no_connect (at 25.4 104.14) (uuid "nc-drag"))'));
+  sch.state.cursor = from;
+  assert.ok(sch.onKey("g", {}, c));
+  _.moveDrag(c, to); _.endDrag(c, true);
+  const edit = lastCommit(c);
+  assert.deepStrictEqual(linesOf(edit, "ADDED"), [[from, to]]);
+  assert.deepStrictEqual(atOf(d.items.get(flag.id).node).slice(0, 2), to);
+});
+
 test("bendPath: 90° keeps the wire on its axis and adds the perpendicular bend; free stretches", () => {
   assert.deepStrictEqual(_.bendPath([0, 0], [10, 0], [10, 5], "90"), [[0, 0], [10, 0], [10, 5]]);
   assert.deepStrictEqual(_.bendPath([0, 0], [10, 0], [15, 5], "90"), [[0, 0], [15, 0], [15, 5]]);

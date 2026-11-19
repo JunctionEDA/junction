@@ -50,7 +50,8 @@ const SCH = `(kicad_sch (version 20250114) (generator "eeschema") (generator_ver
 const dir = fs.mkdtempSync('/tmp/sheets-peer-');
 fs.writeFileSync(path.join(dir, 'hub.kicad_pro'), JSON.stringify({ meta: { filename: 'hub.kicad_pro', version: 3 } }));
 fs.writeFileSync(path.join(dir, 'hub.kicad_sch'), SCH);
-execSync(`cd "${dir}" && zip -qr p.zip hub.kicad_pro hub.kicad_sch`);
+fs.writeFileSync(path.join(dir, 'observer.kicad_sch'), '(kicad_sch (version 20250114) (uuid "7a1c1d6e-0000-4000-8000-000000000003") (paper "A4") (lib_symbols))');
+execSync(`cd "${dir}" && zip -qr p.zip hub.kicad_pro hub.kicad_sch observer.kicad_sch`);
 const form = new FormData(); form.append('name', 'usb hub'); form.append('archive', new Blob([fs.readFileSync(path.join(dir, 'p.zip'))]), 'p.zip');
 const created = await api(alice, '/api/projects', { method: 'POST', body: form });
 const pid = created.j.projectId;
@@ -60,7 +61,7 @@ await api(bob, `/api/join/${link.j.token}`, { method: 'POST' });
 const vlink = await api(alice, `/api/projects/${pid}/links`, { json: { role: 'viewer' } });
 await api(carol, `/api/join/${vlink.j.token}`, { method: 'POST' });
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH });
 async function open(tok) {
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 900 } });
   const page = await ctx.newPage();
@@ -81,6 +82,12 @@ const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: pa
 
 const pa = await open(alice), pb = await open(bob);
 check('both open the root sheet', (await docPath(pa)) === 'hub.kicad_sch' && (await docPath(pb)) === 'hub.kicad_sch');
+const observer = await open(carol);
+await observer.evaluate(() => {
+  const api = window.CollabEditor.api;
+  return api.openDoc(api.store.get().document.docs.find((d) => d.path === 'observer.kicad_sch'));
+});
+await observer.waitForFunction(() => window.CollabEditor.api.store.get().document.doc.path === 'observer.kicad_sch');
 
 // ---- Alice draws a new sheet (S, two clicks, Sheet Properties OK) while Bob's page is already open
 const p0 = await clientOf(pa, [110, 60]), p1 = await clientOf(pa, [170, 100]);
@@ -96,6 +103,11 @@ await pb.waitForFunction(() => [...window.CollabEditor.kdoc.items.values()].filt
 await pb.waitForTimeout(2500);
 const rowsB = await hierRows(pb);
 check("Bob's hierarchy lists the new sheet as openable without a reload", rowsB.some((r) => /Untitled Sheet/.test(r.text) && r.doc), JSON.stringify(rowsB));
+const childRow = observer.locator('[data-path][data-doc]', { hasText: 'Untitled Sheet' }).first();
+await childRow.waitFor({ timeout: 15000 });
+await childRow.dblclick();
+await observer.waitForFunction(() => window.CollabEditor.api.store.get().document.doc.path === 'untitled.kicad_sch');
+check('a viewer on another sheet sees and opens the new child without reloading', true);
 await shot(pa, '01-alice-drew-sheet.png'); await shot(pb, '02-bob-sees-it-live.png');
 
 // ---- Bob double-clicks it and is inside

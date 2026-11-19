@@ -6,6 +6,8 @@
 // shows the report and commits the staged nodes.  Exposed for the node tests as KiCadCanvas.pcbNetlist.
 import { atOf, kid, kids, num, parse, ptsOf, str } from "./sexpr";
 import { resolveLib } from "./geom-sch";
+import { expandStacked } from "./stacked-pins";
+import { isBusLabel } from "./busname";
 import { footprintVariant, footprintVariantNode, setFootprintVariant, symbolFlags, symbolFlagsForVariant, symbolInstance, symbolVariant, type FpFlags } from "./variant-model";
 
 type Pt = [number, number];
@@ -103,7 +105,6 @@ export function busVector(text: string): string[] | null {
   for (let i = a; step > 0 ? i <= b : i >= b; i += step) { out.push(m[1] + i + m[4]); if (out.length > 4096) break; }
   return out;
 }
-const isBusText = (t: string): boolean => /\[\d+\.\.\d+\]/.test(t) || /\{[^}]*\s[^}]*\}/.test(t);
 
 // ---------------------------------------------------------------- the schematic's nets
 // CONNECTION_SUBGRAPH::PRIORITY
@@ -168,14 +169,15 @@ function defaultPinNet(p: PinRef, forceNoConnect: boolean): string {
   const nc = forceNoConnect || p.pin.type === "no_connect";
   let name = nc ? "unconnected-(" : "Net-(";
   const shownName = p.pin.name === "~" ? "" : p.pin.name, number = p.pin.number;
+  const padNumber = number.startsWith("[") ? expandStacked(number).pins[0] : number;
   const multiple = p.pins.some((q) => (q.name === "~" ? "" : q.name) === shownName && q.number !== number && nc === (q.type === "no_connect"));
-  if (p.ref.endsWith("?")) return name + p.uuid + "-Pad" + number + ")";
+  if (p.ref.endsWith("?")) return name + p.uuid + "-Pad" + padNumber + ")";
   if (shownName && shownName !== number) {
     name += p.unitRef + "-" + escapeNetName(shownName);
-    if (nc || multiple) name += "-Pad" + escapeNetName(number);
+    if (nc || multiple) name += "-Pad" + escapeNetName(padNumber);
     return name + ")";
   }
-  return name + p.ref + "-Pad" + escapeNetName(number) + ")";
+  return name + p.ref + "-Pad" + escapeNetName(padNumber) + ")";
 }
 
 /**
@@ -297,7 +299,7 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
     for (const it of doc.items.values()) {
       const n = it.node, k = it.kind;
       if (k === "label" || k === "global_label" || k === "hierarchical_label") {
-        const text = str(n[1]), p = (atOf(n) as number[]).slice(0, 2) as Pt, bus = isBusText(text);
+        const text = str(n[1]), p = (atOf(n) as number[]).slice(0, 2) as Pt, bus = isBusLabel(text);
         const t = terminal(p, bus);
         addMem(t, { inst: I, id: it.id, kind: k, text });
         if (bus) {
@@ -314,7 +316,7 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
       } else if (k === "sheet") {
         const child = childOf.get(I + "|" + it.id);
         for (const pin of kids(n, "pin") as SNode[]) {
-          const text = str(pin[1]), p = (atOf(pin) as number[]).slice(0, 2) as Pt, bus = isBusText(text);
+          const text = str(pin[1]), p = (atOf(pin) as number[]).slice(0, 2) as Pt, bus = isBusLabel(text);
           const t = terminal(p, bus);
           addMem(t, { inst: I, id: it.id, kind: "sheet_pin", pin: text, text: propVal(n, "Sheetname") || propVal(n, "Sheet name") });
           if (bus) {
@@ -437,8 +439,14 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
       // netlist_exporter_xml.cpp: pinfunction is "<name>_<number>", the type gains "+no_connect" on a flagged lone pin
       const shown = p.pin.name === "~" ? "" : p.pin.name;
       const type = p.pin.type + (g.nc && netPins.length === 1 ? "+no_connect" : "");
-      if (!comp.pins.has(p.pin.number)) comp.pins.set(p.pin.number, { net: name, name: shown ? shown + "_" + p.pin.number : "", type });
-      const l = nets.get(name); if (l) l.push({ ref: comp.ref, pin: p.pin.number }); else nets.set(name, [{ ref: comp.ref, pin: p.pin.number }]);
+      const pads = expandStacked(p.pin.number).pins;
+      let members = nets.get(name);
+      if (!members) { members = []; nets.set(name, members); }
+      for (const pad of pads) {
+        const pinFunction = shown ? shown + "_" + pad : pads.length > 1 ? pad : "";
+        if (!comp.pins.has(pad)) comp.pins.set(pad, { net: name, name: pinFunction, type });
+        members.push({ ref: comp.ref, pin: pad });
+      }
     }
   }
   // ---- the net map: every named net and bus with its items (a net with no name, a lone wire, is left out as KiCad does)
