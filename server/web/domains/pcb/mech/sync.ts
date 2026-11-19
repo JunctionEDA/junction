@@ -11,7 +11,13 @@
 // When.  Live while the board is open (a link changes, or somebody edits a driven item on the board), and
 // once on open for whatever changed in the model while no browser had the board open.  Every editor of the
 // board runs this; the items and their ids are a function of the link, so whoever is second finds nothing to do.
+//
+// Only for somebody who has Mechanical CAD on (web/shared/cad.ts).  With it off nothing here runs: the part
+// studios are not watched, nothing is written, and the badge, the panel and the enclosure (which follow this
+// state) are not shown.  The board keeps its driven items exactly as they are stored, locked and grouped under
+// the part studio's name; they are released only by somebody with CAD on, when a link is really gone.
 import { store, state } from "../editor/appstore";
+import { cadEnabled } from "../../../shared/cad";
 import { applyChanges } from "../editor/doc";
 import { sendOp } from "../editor/net";
 import { E } from "../editor/state";
@@ -84,13 +90,21 @@ class MechSync {
   private onStore(): void {
     const st = store.get();
     const doc = this.board();
-    const boardId = doc && st.view === "editor" && state.docId && !/^(board|lib):/.test(state.docId) ? state.docId : "";
+    const boardId = doc && st.view === "editor" && state.docId && !/^(board|lib):/.test(state.docId) && cadEnabled(st) ? state.docId : "";
     const docs = (state.project && state.project.docs) || [];
     const stamp = [boardId, docs.map((d) => d.docId).join(","), st.document.version, st.connection.edits, st.undo.undo, st.undo.redo, st.viewOnly].join("|");
     if (stamp === this.lastStamp) return;
     const boardChanged = boardId !== this.s.boardId;
     this.lastStamp = stamp;
-    if (!boardId) { if (this.s.active || this.links.boardId) { this.links.stop(); this.settled.clear(); this.set({ active: false, boardId: "", sources: [], driven: {}, orphans: [], areas: [], clashes: [], checked: false, complete: false }); } return; }
+    if (!boardId) {
+      if (this.s.active || this.links.boardId) {
+        clearTimeout(this.timer); clearTimeout(this.checkTimer); this.checkGen++;
+        this.links.stop(); this.settled.clear();
+        if (this.s.clashes.length && doc) this.setMarkers([]);   // Mechanical CAD was turned off on this board: its markers go with the panel
+        this.set({ active: false, boardId: "", sources: [], driven: {}, orphans: [], areas: [], clashes: [], checked: false, complete: false });
+      }
+      return;
+    }
     if (boardChanged) { this.settled.clear(); this.set({ boardId, active: false, sources: [], driven: {}, orphans: [], areas: [], clashes: [], checked: false }); }
     this.links.start(boardId, docs, !!state.me);
     this.refresh();

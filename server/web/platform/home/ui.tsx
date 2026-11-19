@@ -38,6 +38,7 @@ const PATHS: Record<string, string> = {
   chart: '<path d="M4.5 4.5v15h15"/><path d="M8.5 15.5v-4M12.5 15.5v-7M16.5 15.5v-5"/>',
   clock: '<circle cx="12" cy="12" r="8.5"/><path d="M12 7v5.2l3.4 2"/>',
   signout: '<path d="M10 4.5H5.5v15H10M15 8l4 4-4 4M19 12H9.5"/>',
+  cube: '<path d="M12 3.5l7.5 4.2v8.6L12 20.5l-7.5-4.2V7.7z"/><path d="M4.5 7.7L12 12l7.5-4.3M12 12v8.5"/>',
 };
 export function Ic({ name, size = 16 }: { name: keyof typeof PATHS | string; size?: number }) {
   return <svg className="hp-ic" width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" dangerouslySetInnerHTML={{ __html: PATHS[name] || "" }} />;
@@ -219,7 +220,13 @@ export function Confirm({ title, body, action, danger, onConfirm, onClose }: {
 }
 
 // ---------------------------------------------------------------- menu
-export interface MenuItem { id: string; label: string; icon?: string; danger?: boolean; disabled?: boolean; hint?: string; run: () => void }
+export interface MenuItem {
+  id: string; label: string; icon?: string; danger?: boolean; disabled?: boolean; hint?: string; run: () => void;
+  /** a setting that is on or off: drawn with a switch (.switch) and read out as a checkbox */
+  checked?: boolean;
+  /** a second line under the label, saying what the entry does */
+  note?: string;
+}
 export type MenuEntry = MenuItem | "-";
 /** A context menu: anchored to a point or an element's rect on a desktop, a bottom sheet on a phone. */
 /** Where a menu opens: a point, or under a button (`right` = its right edge, `top` = its top edge, so the menu can open above it instead). */
@@ -274,10 +281,13 @@ export function Menu({ items, at, title, onClose }: { items: MenuEntry[]; at: Me
       <div className="hp-menu" role="menu" ref={ref} style={phone ? undefined : pos}>
         {phone && title ? <div className="hp-menu-title">{title}</div> : null}
         {items.map((it, i) => it === "-" ? <div className="hp-menu-sep" key={"s" + i} /> : (
-          <button type="button" role="menuitem" key={it.id} className={it.danger ? "danger" : undefined} disabled={it.disabled} title={it.hint}
+          <button type="button" role={it.checked === undefined ? "menuitem" : "menuitemcheckbox"} aria-checked={it.checked} key={it.id} data-menu-id={it.id}
+            className={it.danger ? "danger" : undefined} disabled={it.disabled} title={it.hint}
             onMouseEnter={phone ? undefined : (ev) => ev.currentTarget.focus({ preventScroll: true })}
             onClick={() => { onClose(); it.run(); }}>
-            <Ic name={it.icon || ""} /><span>{it.label}</span>
+            <Ic name={it.icon || ""} />
+            {it.note ? <span className="hp-menu-text"><span>{it.label}</span><small>{it.note}</small></span> : <span>{it.label}</span>}
+            {it.checked !== undefined ? <span className={"switch" + (it.checked ? " on" : "")} aria-hidden="true" /> : null}
           </button>
         ))}
       </div>

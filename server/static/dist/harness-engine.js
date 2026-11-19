@@ -78888,6 +78888,7 @@ var init_registry = __esm({
             bundle: "/static/dist/mechanical.js",
             newName: "Part Studio",
             tint: "teal",
+            cad: true,
             icon: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5"/><path d="M12 12v9"/>',
             // the same text as web/domains/mechanical/document/format.ts newPartStudioText() (a test compares them)
             newText: '{"junction":"part-studio","version":1,"items":[\n{"id":"studio","rollback":null,"type":"studio","units":"mm"}\n]}\n',
@@ -78911,6 +78912,7 @@ var init_registry = __esm({
             bundle: "/static/dist/assembly.js",
             newName: "Assembly",
             tint: "copper",
+            cad: true,
             icon: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/><path d="M11 7.5h5.5V13"/>',
             // the same text as web/domains/assembly/document/format.ts newAssemblyText() (a test compares them)
             newText: '{"junction":"assembly","version":1,"items":[\n{"id":"assembly","type":"assembly","units":"mm"}\n]}\n'
@@ -78954,6 +78956,22 @@ var init_registry = __esm({
   }
 });
 
+// web/shared/cad.ts
+function cadEnabled(state2) {
+  const s2 = state2 === void 0 && typeof window !== "undefined" && window.CollabApp ? window.CollabApp.getState() : state2;
+  return !!(s2 && s2.me && s2.me.cad);
+}
+function setCadEnabled(enabled) {
+  if (typeof window !== "undefined" && window.CollabApp) window.CollabApp.dispatch({ type: "setCad", on: enabled });
+}
+var CAD_OFF_NOTE;
+var init_cad = __esm({
+  "web/shared/cad.ts"() {
+    "use strict";
+    CAD_OFF_NOTE = "Turn on Mechanical CAD in your settings to open";
+  }
+});
+
 // web/domains/pcb/editor/dochost.ts
 function isHostedDoc(doc2) {
   if (doc2 && isShellView(doc2.docType)) return true;
@@ -78982,6 +79000,43 @@ function loadBundle(src) {
   }
   return p;
 }
+function cadOffNote(doc2, kind) {
+  const box3 = document.createElement("div");
+  box3.dataset.cadOff = doc2.docId;
+  box3.style.cssText = "max-width:460px;margin:72px auto;padding:0 16px;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;color:var(--ink)";
+  const icon2 = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon2.setAttribute("viewBox", "0 0 24 24");
+  icon2.setAttribute("width", "32");
+  icon2.setAttribute("height", "32");
+  icon2.setAttribute("aria-hidden", "true");
+  icon2.setAttribute("fill", "none");
+  icon2.setAttribute("stroke", "currentColor");
+  icon2.setAttribute("stroke-width", "1.5");
+  icon2.setAttribute("stroke-linecap", "round");
+  icon2.setAttribute("stroke-linejoin", "round");
+  icon2.style.color = kind.tint ? `var(--${kind.tint})` : "var(--ink-2)";
+  icon2.innerHTML = kind.icon;
+  const title = document.createElement("h2");
+  title.style.cssText = "margin:0;font-size:var(--fs-lg);font-weight:600";
+  title.textContent = `${(doc2.path.split("/").pop() || doc2.path).replace(/\.[^.]+$/, "")} is ${/^[aeiou]/i.test(kind.title) ? "an" : "a"} ${kind.title.toLowerCase()}`;
+  const text3 = document.createElement("p");
+  text3.style.cssText = "margin:0;color:var(--ink-2)";
+  text3.textContent = `${CAD_OFF_NOTE} it. Part studios and assemblies are part of Mechanical CAD, which is off for you; the project keeps them as they are.`;
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = "btn primary";
+  button.dataset.cadTurnOn = "";
+  button.textContent = "Turn on Mechanical CAD and open";
+  button.addEventListener("click", () => {
+    button.disabled = true;
+    setCadEnabled(true);
+  });
+  const note3 = document.createElement("p");
+  note3.style.cssText = "margin:0;color:var(--ink-3);font-size:var(--fs-sm)";
+  note3.textContent = "It can be turned off again in the account menu or the Junction menu.";
+  box3.append(icon2, title, text3, button, note3);
+  return box3;
+}
 function closeHostedDoc() {
   const was = open3;
   open3 = null;
@@ -79006,6 +79061,11 @@ async function openHostedDoc(doc2, showCad, openDocId2) {
   const el4 = document.getElementById("cadHost");
   if (!el4) return;
   el4.replaceChildren();
+  if (kind && kind.cad && !cadEnabled(store.get())) {
+    store.slice("connection", { status: "idle", text: "Mechanical CAD is off" });
+    el4.replaceChildren(cadOffNote(doc2, kind));
+    return;
+  }
   try {
     if (kind && kind.bundle) await loadBundle(kind.bundle);
     for (let i = 0; i < 400 && isShellView(doc2.docType) && !documentEditorFor(doc2.docType) && open3 === mine; i++) await new Promise((r) => setTimeout(r, 25));
@@ -79048,6 +79108,7 @@ var init_dochost = __esm({
     "use strict";
     init_host();
     init_registry();
+    init_cad();
     init_appstore();
     init_util();
     open3 = null;
@@ -101464,6 +101525,17 @@ var init_calculator = __esm({
   }
 });
 
+// web/domains/pcb/editor/cad-setting.ts
+var init_cad_setting = __esm({
+  "web/domains/pcb/editor/cad-setting.ts"() {
+    "use strict";
+    init_registry();
+    init_appstore();
+    init_doc();
+    init_util();
+  }
+});
+
 // web/domains/pcb/editor/actions.ts
 async function runAction(act, el4) {
   const id = state.project && state.project.projectId;
@@ -101643,6 +101715,7 @@ var init_actions = __esm({
     init_print();
     init_import_nonkicad();
     init_calculator();
+    init_cad_setting();
     HANDLERS = {
       selectSetRect: () => {
         E.selMode = "rect";

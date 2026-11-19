@@ -5,6 +5,7 @@ import { Select } from "../../shared/components/Select";
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent as RKeyboardEvent, type CSSProperties, type MouseEvent as RMouseEvent } from "react";
 import { flushSync } from "react-dom";
 import { useApp, type User } from "../../shared/store";
+import { CAD_SETTING_LABEL, CAD_SETTING_NOTE, setCadEnabled } from "../../shared/cad";
 import * as API from "./api";
 import type { Project } from "./api";
 import { ShareDialog, type ShareTarget } from "./ShareDialog";
@@ -885,6 +886,8 @@ export function Home() {
           { id: "mcp", label: "Connect AI", icon: "link", run: () => { location.href = "/connect"; } },
           "-" as const,
         ] as MenuEntry[] : []),
+        { id: "cad", label: CAD_SETTING_LABEL, note: CAD_SETTING_NOTE, icon: "cube", checked: !!me.cad, run: () => setCadEnabled(!me.cad) },
+        "-",
         { id: "waka", label: "WakaTime settings", icon: "clock", run: () => { go("/time"); setTimeout(() => document.getElementById("wakatime")?.scrollIntoView({ block: "start" }), 300); } },
         { id: "gh", label: "GitHub profile", icon: "open", run: () => { window.open(`https://github.com/${me.login}`, "_blank", "noopener"); } },
         { id: "app", label: "Get the desktop app", icon: "desktop", run: () => { window.open(RELEASES, "_blank", "noopener"); } },

@@ -288,6 +288,14 @@ textarea.hp-input { resize: vertical; min-height: 72px; }
 .hp-menu-scrim:not(.sheet) .hp-menu button.danger:focus, .hp-menu button.danger:focus-visible { background: var(--err); color: var(--on-accent); }
 .hp-menu button:disabled { opacity: .45; }
 .hp-menu-sep { height: 1px; background: var(--line); margin: 4px 2px; }
+.hp-menu-text { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.hp-menu-text small { max-width: 250px; color: var(--ink-3); font-size: var(--fs-xs); line-height: 1.35; }
+.hp-menu button .switch { margin-left: auto; }
+.hp-menu-scrim:not(.sheet) .hp-menu button:focus .hp-menu-text small, .hp-menu button:focus-visible .hp-menu-text small { color: inherit; opacity: .8; }
+.hp-menu-scrim:not(.sheet) .hp-menu button:focus .switch, .hp-menu button:focus-visible .switch { border-color: var(--on-accent); background: transparent; }
+.hp-menu-scrim:not(.sheet) .hp-menu button:focus .switch::after, .hp-menu button:focus-visible .switch::after { background: var(--on-accent); }
+.hp-menu-scrim:not(.sheet) .hp-menu button:focus .switch.on, .hp-menu button:focus-visible .switch.on { background: var(--on-accent); }
+.hp-menu-scrim:not(.sheet) .hp-menu button:focus .switch.on::after, .hp-menu button:focus-visible .switch.on::after { background: var(--accent); }
 .hp-menu-title { display: none; }
 
 /* ---- toasts ---- */

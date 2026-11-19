@@ -39,6 +39,11 @@ export interface DocumentKind {
   fromFile?: { title: string; accept: string[]; folder: string; text(file: StoredFile): string };
   /** The theme token its tabs and rows are tinted with ("teal" is var(--teal)).  Absent: ink. */
   tint?: ElementTint;
+  /**
+   * A Mechanical CAD kind: offered, given a tab and opened only for a person who has CAD turned on
+   * (web/shared/cad.ts).  For anybody else its documents are still listed on Home, with a way to turn CAD on.
+   */
+  cad?: boolean;
 }
 
 /** The theme tokens a kind of element may be tinted with (static/theme.css). */
@@ -116,7 +121,7 @@ export const DOMAINS: readonly DomainDescriptor[] = [
     reads: [],
     documents: [
       {
-        docType: "part_studio", ext: ".jpart", title: "Part Studio", bundle: "/static/dist/mechanical.js", newName: "Part Studio", tint: "teal",
+        docType: "part_studio", ext: ".jpart", title: "Part Studio", bundle: "/static/dist/mechanical.js", newName: "Part Studio", tint: "teal", cad: true,
         icon: '<path d="M12 3l8 4.5v9L12 21l-8-4.5v-9z"/><path d="M4 7.5l8 4.5 8-4.5"/><path d="M12 12v9"/>',
         // the same text as web/domains/mechanical/document/format.ts newPartStudioText() (a test compares them)
         newText: '{"junction":"part-studio","version":1,"items":[\n{"id":"studio","rollback":null,"type":"studio","units":"mm"}\n]}\n',
@@ -134,7 +139,7 @@ export const DOMAINS: readonly DomainDescriptor[] = [
     reads: ["mechanical", "pcb"],
     documents: [
       {
-        docType: "assembly", ext: ".jasm", title: "Assembly", bundle: "/static/dist/assembly.js", newName: "Assembly", tint: "copper",
+        docType: "assembly", ext: ".jasm", title: "Assembly", bundle: "/static/dist/assembly.js", newName: "Assembly", tint: "copper", cad: true,
         icon: '<rect x="4" y="4" width="7" height="7" rx="1"/><rect x="13" y="13" width="7" height="7" rx="1"/><path d="M11 7.5h5.5V13"/>',
         // the same text as web/domains/assembly/document/format.ts newAssemblyText() (a test compares them)
         newText: '{"junction":"assembly","version":1,"items":[\n{"id":"assembly","type":"assembly","units":"mm"}\n]}\n',
@@ -187,4 +192,14 @@ export const DOCUMENT_KINDS: readonly DocumentKind[] = DOMAINS.flatMap((d) => d.
 /** The tab kind of a server document type, or undefined for a file that has no tab (a library, a 3D model). */
 export function documentKind(docType: string): DocumentKind | undefined {
   return DOCUMENT_KINDS.find((k) => k.docType === docType);
+}
+
+/** True for a Mechanical CAD document (a part studio, an assembly): one that needs CAD turned on to open. */
+export function isCadDocType(docType: string): boolean {
+  return !!documentKind(docType)?.cad;
+}
+
+/** Whether a kind is there for a person: every kind when CAD is on, the kinds that are not CAD otherwise. */
+export function kindAvailable(kind: DocumentKind, cad: boolean): boolean {
+  return cad || !kind.cad;
 }

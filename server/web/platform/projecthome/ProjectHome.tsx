@@ -13,7 +13,8 @@
 // (web/platform/documents/host.ts) and reads the project from the app's store, so it follows the list live.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { KIND_SUMMARY, PCB_ELEMENT, documentKind, type ElementTint } from "../../domains/registry";
+import { KIND_SUMMARY, PCB_ELEMENT, documentKind, isCadDocType, type ElementTint } from "../../domains/registry";
+import { CAD_OFF_NOTE, cadEnabled } from "../../shared/cad";
 import { askConfirm } from "../../shared/components/msgbox";
 import { dispatch, useApp, type DocEntry } from "../../shared/store";
 import { cx } from "../../shared/util";
@@ -54,6 +55,7 @@ export function ProjectHome() {
   const shell = useProjectShell();
   const { projectId, name, docs, elements, room, canEdit, ctx, tick } = shell;
   const me = useApp((s) => s.me);
+  const cad = useApp(cadEnabled);
   const [q, setQ] = useState("");
   const [sort, setSort] = useState<Sort>("name");
   const [desc, setDesc] = useState(false);
@@ -94,8 +96,11 @@ export function ProjectHome() {
 
   if (!projectId || !ctx) return null;
   const run = async (what: () => Promise<unknown>) => { setBusy(true); try { await what(); } finally { setBusy(false); } };
-  const kinds = creatables(KIND_SUMMARY);
+  const kinds = creatables(KIND_SUMMARY, cad);
   const empty = elements.length === 0;
+  // what has a tab for this person: a part studio or an assembly only with Mechanical CAD on (they are listed below either way)
+  const tabCount = cad ? elements.length : elements.filter((e) => !isCadDocType(e.type)).length;
+  const cadOff = (e: El | undefined): boolean => !cad && !!e && isCadDocType(e.type);
   const fileCount = docs.filter((d) => d.docType !== "project_shell").length;
 
   // ---- what a row is, and what can be done with it
@@ -220,7 +225,7 @@ export function ProjectHome() {
       <div className="min-w-0 flex-1">
         <h1 className="m-0 font-semibold text-ink truncate" style={{ fontSize: "var(--fs-xl)" }} data-home-title>{name}</h1>
         <p className="m-0 mt-0.5 text-ink-2" data-home-summary>
-          {empty ? "This project is empty. Start with one of these." : `${elements.length} ${elements.length === 1 ? "tab" : "tabs"} · ${fileCount} ${fileCount === 1 ? "file" : "files"}`}
+          {empty ? "This project is empty. Start with one of these." : `${tabCount} ${tabCount === 1 ? "tab" : "tabs"} · ${fileCount} ${fileCount === 1 ? "file" : "files"}`}
         </p>
       </div>
       <div className="flex flex-none items-center gap-2 min-h-7" data-home-people aria-label="People in this project">
@@ -258,7 +263,7 @@ export function ProjectHome() {
         </button>
       )) : null}
       {canEdit ? <button type="button" className="btn" data-home-newfolder onClick={() => void makeFolder("")}><Glyph svg={FOLDER_ICON} />New folder</button> : null}
-      {canEdit ? <button type="button" className="btn" data-home-import title="A STEP file, KiCad files, libraries, 3D models" onClick={() => void pickFiles("", true).then((l) => bringIn(l, null))}><Glyph svg='<path d="M12 15.5V4.5M7.5 9L12 4.5 16.5 9M5 19.5h14"/>' />Import files</button> : null}
+      {canEdit ? <button type="button" className="btn" data-home-import title={cad ? "A STEP file, KiCad files, libraries, 3D models" : "KiCad files, libraries, 3D models"} onClick={() => void pickFiles("", true).then((l) => bringIn(l, null))}><Glyph svg='<path d="M12 15.5V4.5M7.5 9L12 4.5 16.5 9M5 19.5h14"/>' />Import files</button> : null}
       {canEdit ? <button type="button" className="btn" data-home-import-folder title="A KiCad project folder becomes a PCB, with its sheets and libraries where they were" onClick={() => void pickFiles("", true, true).then((l) => bringIn(l, null))}><Glyph svg={FOLDER_ICON} />Import folder</button> : null}
       <span className="flex-1" />
       <input className="input" style={{ width: 220 }} type="search" placeholder="Search this project" aria-label="Search this project" value={q} onChange={(ev) => setQ(ev.target.value)} data-home-search />
@@ -316,6 +321,7 @@ export function ProjectHome() {
                 onKeyDown={(ev) => { ev.stopPropagation(); if (ev.key === "Enter") (ev.target as HTMLInputElement).blur(); if (ev.key === "Escape") setRenaming(null); }} />
             : <span className={cx("truncate", (e || r.kind === "folder") && "font-medium text-ink", r.kind === "file" && "text-ink")} data-row-label title={r.kind === "folder" ? r.path : d ? d.path : e && e.pcb ? e.pcb.dir : ""}>{r.name}</span>}
           {r.count !== undefined && r.kind !== "file" ? <span className="flex-none text-xs text-ink-3">{r.count} {r.count === 1 ? "file" : "files"}</span> : null}
+          {cadOff(e) ? <span className="flex-none truncate text-xs text-ink-3" data-cad-off-note>{CAD_OFF_NOTE}</span> : null}
           <TabPeople people={people} />
         </div>
         <div role="gridcell" className="truncate text-ink-2">{kind.title}</div>
@@ -354,7 +360,8 @@ export function ProjectHome() {
         {!rows.length ? (
           <div className="px-6 py-10 text-center text-ink-2" data-home-empty>
             {q.trim() ? <>Nothing in this project is called “{q.trim()}”.</>
-              : canEdit ? <>Nothing here yet. Make a PCB, a part studio or an assembly above, or drop files anywhere on this page:<br />a STEP file opens as a part studio, KiCad files become a PCB.</>
+              : canEdit && cad ? <>Nothing here yet. Make a PCB, a part studio or an assembly above, or drop files anywhere on this page:<br />a STEP file opens as a part studio, KiCad files become a PCB.</>
+              : canEdit ? <>Nothing here yet. Make a PCB above, or drop files anywhere on this page: KiCad files become a PCB.</>
               : <>This project is empty.</>}
           </div>
         ) : canEdit && !q.trim() ? <div className="px-6 py-4 text-ink-3 text-sm">Drop files anywhere to import them. Drag a row onto a folder to move it there.</div> : null}

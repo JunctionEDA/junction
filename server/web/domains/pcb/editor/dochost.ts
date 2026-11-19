@@ -8,7 +8,8 @@
 import type { DocumentEditor, DocumentHostContext } from "../../../platform/documents/host";
 import { documentEditorFor } from "../../../platform/documents/host";
 import type { DocEntry } from "../../../shared/store";
-import { documentKind } from "../../registry";
+import { documentKind, type DocumentKind } from "../../registry";
+import { CAD_OFF_NOTE, cadEnabled, setCadEnabled } from "../../../shared/cad";
 import { state, store } from "./appstore";
 import { toast } from "./util";
 
@@ -47,6 +48,34 @@ function loadBundle(src: string): Promise<void> {
   return p;
 }
 
+/** What a CAD document shows somebody who has Mechanical CAD turned off (web/shared/cad.ts). */
+function cadOffNote(doc: DocEntry, kind: DocumentKind): HTMLElement {
+  const box = document.createElement("div");
+  box.dataset.cadOff = doc.docId;
+  box.style.cssText = "max-width:460px;margin:72px auto;padding:0 16px;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;color:var(--ink)";
+  const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  icon.setAttribute("viewBox", "0 0 24 24"); icon.setAttribute("width", "32"); icon.setAttribute("height", "32"); icon.setAttribute("aria-hidden", "true");
+  icon.setAttribute("fill", "none"); icon.setAttribute("stroke", "currentColor"); icon.setAttribute("stroke-width", "1.5");
+  icon.setAttribute("stroke-linecap", "round"); icon.setAttribute("stroke-linejoin", "round");
+  icon.style.color = kind.tint ? `var(--${kind.tint})` : "var(--ink-2)";
+  icon.innerHTML = kind.icon;
+  const title = document.createElement("h2");
+  title.style.cssText = "margin:0;font-size:var(--fs-lg);font-weight:600";
+  title.textContent = `${(doc.path.split("/").pop() || doc.path).replace(/\.[^.]+$/, "")} is ${/^[aeiou]/i.test(kind.title) ? "an" : "a"} ${kind.title.toLowerCase()}`;
+  const text = document.createElement("p");
+  text.style.cssText = "margin:0;color:var(--ink-2)";
+  text.textContent = `${CAD_OFF_NOTE} it. Part studios and assemblies are part of Mechanical CAD, which is off for you; the project keeps them as they are.`;
+  const button = document.createElement("button");
+  button.type = "button"; button.className = "btn primary"; button.dataset.cadTurnOn = "";
+  button.textContent = "Turn on Mechanical CAD and open";
+  button.addEventListener("click", () => { button.disabled = true; setCadEnabled(true); });
+  const note = document.createElement("p");
+  note.style.cssText = "margin:0;color:var(--ink-3);font-size:var(--fs-sm)";
+  note.textContent = "It can be turned off again in the account menu or the Junction menu.";
+  box.append(icon, title, text, button, note);
+  return box;
+}
+
 /** Close the hosted editor, if one is open. */
 export function closeHostedDoc(): void {
   const was = open; open = null;
@@ -70,6 +99,13 @@ export async function openHostedDoc(doc: DocEntry, showCad: () => void, openDocI
   const el = document.getElementById("cadHost");
   if (!el) return;
   el.replaceChildren();
+  // A part studio or an assembly for somebody who has Mechanical CAD off: a note with the way to turn it on, and
+  // nothing of CAD is loaded (no bundle, no worker, no kernel).  Turning it on opens the document (cad-setting.ts).
+  if (kind && kind.cad && !cadEnabled(store.get())) {
+    store.slice("connection", { status: "idle", text: "Mechanical CAD is off" });
+    el.replaceChildren(cadOffNote(doc, kind));
+    return;
+  }
   try {
     if (kind && kind.bundle) await loadBundle(kind.bundle);
     // a view of the shell's own is drawn by a script of the page itself, which may still be starting when a
