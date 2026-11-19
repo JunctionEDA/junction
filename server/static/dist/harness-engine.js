@@ -74356,6 +74356,7 @@ var init_state = __esm({
       lastLiveMove: 0,
       followPeer: null,
       followCursor: false,
+      followPresentation: false,
       presenting: false,
       suppressBreakout: false,
       peerState: {},
@@ -75684,9 +75685,10 @@ function renderPeers() {
     return { cid, name: peerName(p), color: p.user && p.user.color || "#4477ee", presenting: p.state?.presenting === true };
   }), follow: E.followPeer, followCursor: E.followCursor, presenting: E.presenting } });
 }
-function followAction(cid, cursor = false) {
+function followAction(cid, cursor = false, presentation = false) {
   E.followPeer = cid && E.peerState[cid] ? cid : null;
   E.followCursor = !!E.followPeer && cursor;
+  E.followPresentation = !!E.followPeer && presentation;
   if (E.followPeer && E.presenting) togglePresenting();
   applyFollowWeb(E.peerState);
   renderPeers();
@@ -75697,6 +75699,7 @@ function togglePresenting() {
   if (E.presenting) {
     E.followPeer = null;
     E.followCursor = false;
+    E.followPresentation = false;
   }
   sendPresence(null);
   renderPeers();
@@ -79222,12 +79225,17 @@ async function connect() {
         }
         if (!old || peerName(old) !== peerName(e) || (old.user && old.user.color) !== (e.user && e.user.color)) roster = full3 = true;
         else if (!onlyPointerMoved(old.state, e.state)) full3 = true;
-        if (old?.state?.presenting !== e.state?.presenting) {
-          roster = true;
-          if (e.state?.presenting === true && !E.presenting && !E.followPeer)
-            toast(`${peerName(e)} is presenting`, 6e3, { text: "Follow", run: () => followAction(cid) });
-        }
         E.peerState[cid] = e;
+        const presenting = e.state?.presenting === true;
+        if (old?.state?.presenting === true !== presenting) {
+          roster = true;
+          if (presenting && !E.presenting) {
+            followAction(cid, false, true);
+            toast(`Following ${peerName(e)}. Pan or zoom to stop.`, 5e3);
+          } else if (!presenting && E.followPeer === cid && E.followPresentation) {
+            followAction(null);
+          }
+        }
       }
       if (full3) drawPeers(E.peerState);
       else movePeerCursors(E.peerState);
@@ -81997,6 +82005,7 @@ function applyView() {
   refreshCrosshair();
   refreshPreview();
   requestRepaint();
+  if (E.presenting) sendPresence(null);
 }
 function footprintExtentsMm(d) {
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -89860,6 +89869,7 @@ function leaveDoc() {
   E.comments = [];
   E.followPeer = null;
   E.followCursor = false;
+  E.followPresentation = false;
   E.presenting = false;
   E.layers = {};
   cancelRemoteFlush();
