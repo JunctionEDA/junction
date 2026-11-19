@@ -237,7 +237,7 @@ async fn main() -> anyhow::Result<()> {
     let state = AppState {
         pool: pool.clone(),
         cfg: Arc::new(cfg),
-        registry: Arc::new(registry::Registry::new(relay.clone())),
+        registry: Arc::new(registry::Registry::new()),
         color_counter: Arc::new(AtomicUsize::new(0)),
         access_epoch: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         relay: relay.clone(),

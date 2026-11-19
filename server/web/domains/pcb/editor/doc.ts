@@ -168,6 +168,20 @@ async function editsSince(docId: string, seq: number): Promise<{ changes: WireCh
   } catch (e) { return null; }
 }
 
+/** A background schematic must include edits made since its last saved snapshot. */
+export async function readSavedSchematic(docId: string): Promise<KDoc | null> {
+  const r = await fetch(`/api/docs/${docId}/content?v=${Date.now()}`);
+  if (!r.ok) return null;
+  const doc = KiCadCanvas.parseDoc(await r.text(), "kicad_sch");
+  const seq = Number(r.headers.get("x-snapshot-seq")) || 0;
+  if (Number(r.headers.get("x-head-seq")) > seq) {
+    const tail = await editsSince(docId, seq);
+    if (!tail) return null;
+    for (const change of tail.changes) KiCadCanvas.applyChange(doc, change, 10000);
+  }
+  return doc;
+}
+
 /**
  * Show the document `text` holds.  `then` are edits made after that text was stored (the join's thenOps, or
  * the ones openDoc fetched): they go into the document before anything is derived from it or drawn, all in
@@ -539,8 +553,11 @@ export function findSheetDoc(file: string, parentPath: string): DocEntry | undef
   file = file.replace(/\\/g, "/");
   const base = file.split("/").pop(), dir = parentPath.split("/").slice(0, -1).join("/");
   const rel = normPath(dir ? `${dir}/${file}` : file);
-  return state.docs!.find((d) => d.docType === "kicad_sch" && (d.path === rel || d.path === file))
-    || state.docs!.find((d) => d.docType === "kicad_sch" && d.path.split("/").pop() === base);
+  const docs = (state.docs || []).filter((d) => d.docType === "kicad_sch");
+  const exact = docs.find((d) => d.path === rel) || docs.find((d) => d.path === file);
+  if (exact || file.includes("/")) return exact;
+  const matches = docs.filter((d) => d.path.split("/").pop() === base);
+  return matches.length === 1 ? matches[0] : undefined;
 }
 function normPath(p: string): string { const out: string[] = []; for (const x of p.split("/")) { if (!x || x === ".") continue; if (x === "..") out.pop(); else out.push(x); } return out.join("/"); }
 

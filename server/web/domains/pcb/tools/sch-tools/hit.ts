@@ -37,9 +37,10 @@ export function geomDist(g: SchGeom, x: number, y: number) {
   if (g.t === "rect") return boxDist([g.x, g.y, g.x + g.w, g.y + g.h], x, y);
   return Infinity;
 }
-export function hitNonSymbol(doc: KDoc, x: number, y: number, tol: number) {
+export function hitNonSymbol(doc: KDoc, x: number, y: number, tol: number, kinds?: ReadonlySet<string>) {
   let best: KItem | null = null, bd = Infinity;
   for (const it of doc.items.values()) {
+    if (kinds && !kinds.has(it.kind)) continue;
     let d: number;
     if (LINE_KINDS.has(it.kind)) { d = Infinity; for (const [a, b] of segs(it)) d = Math.min(d, segDist([x, y], a, b)); d += 0.01; }   // small things on a line win ties
     else if (SHAPE_KINDS.has(it.kind) || it.kind === "bezier" || it.kind === "rule_area") { d = Infinity; for (const g of it.geom as SchGeom[]) if (!g.noStroke) d = Math.min(d, geomDist(g, x, y)); d += 0.01; }
@@ -56,9 +57,9 @@ export function hitNonSymbol(doc: KDoc, x: number, y: number, tol: number) {
 export function pickNonSymbol(ctx: SchCtx, mm: Pt) {
   const hit = hitNonSymbol(ctx.doc, mm[0], mm[1], Math.max(0.3, 5 * mmPerPx(ctx))); if (!hit) return null;
   const allowed = root.CollabEditor && root.CollabEditor.pickAllowed; if (allowed && !allowed(hit)) return null;   // the Selection Filter pane
-  // GuessSelectionCandidates: an exact pin hit wins over everything but a junction (the pin is the editor's to select)
+  // A junction or no-connect marker at a pin can be dragged independently.
   const pinExact = root.CollabEditor && root.CollabEditor.pinExactAt;
-  if (hit.kind !== "junction" && pinExact && pinExact([mm[0], mm[1]])) return null;
+  if (hit.kind !== "junction" && hit.kind !== "no_connect" && pinExact && pinExact([mm[0], mm[1]])) return null;
   const symId = K.hitTest(ctx.doc, mm[0], mm[1], 0.5);
   if (symId && !LINE_KINDS.has(hit.kind)) { const sym = ctx.doc.items.get(symId); if (sym && area(sym.bbox) < area(rectOf(hit))) return null; }
   return hit;

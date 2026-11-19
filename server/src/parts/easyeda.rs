@@ -14,7 +14,7 @@ use serde_json::Value;
 
 /// Bumped whenever the conversion changes, so cached drawings are rebuilt from the
 /// stored vendor response instead of being served stale.
-pub const CONVERTER_VERSION: i32 = 3;
+pub const CONVERTER_VERSION: i32 = 4;
 
 /// EasyEDA length unit (10 mil) in millimetres.
 const U: f64 = 0.254;
@@ -67,6 +67,7 @@ pub struct Model3d {
     pub title: String,
     pub offset: [f64; 3],
     pub rotate: [f64; 3],
+    pub outline_center: Option<[f64; 2]>,
 }
 
 // ------------------------------------------------------------------ small helpers
@@ -832,6 +833,38 @@ impl FpCtx {
     }
 }
 
+/// EasyEDA stores the rotation pivot separately from the projected body. Use a complete,
+/// untransformed plan outline whose bounds agree with the declared model dimensions.
+fn model_outline_center(node: &Value, cx: &FpCtx, rot: [f64; 3]) -> Option<[f64; 2]> {
+    let attrs = node.get("attrs")?;
+    if rot[0] != 0.0 || rot[1] != 0.0 || rot[2] % 90.0 != 0.0
+        || !matches!(vstr(attrs, "transform").replace(' ', "").as_str(), "" | "scale(1)translate(0,0)") {
+        return None;
+    }
+    let mut bounds = BBox::empty();
+    for child in node.get("childNodes")?.as_array()? {
+        let a = child.get("attrs")?;
+        if !matches!(vstr(child, "nodeName"), "polyline" | "polygon") || !vstr(a, "transform").is_empty() {
+            return None;
+        }
+        let points = vstr(a, "points").split(|c: char| c == ',' || c.is_whitespace()).filter(|s| !s.is_empty());
+        let mut coords = points.map(str::parse::<f64>);
+        while let Some(x) = coords.next() {
+            let (x, y) = (x.ok()?, coords.next()?.ok()?);
+            if !x.is_finite() || !y.is_finite() { return None; }
+            bounds.add(x, y);
+        }
+    }
+    let width = vnum(attrs.get("c_width"));
+    let height = vnum(attrs.get("c_height"));
+    if bounds.is_empty() || width <= 0.0 || height <= 0.0 { return None; }
+    let (w, h) = (bounds.x1 - bounds.x0, bounds.y1 - bounds.y0);
+    let matches = |a: f64, b: f64| (a - b).abs() < 0.02;
+    if !(matches(w, width) && matches(h, height) || matches(w, height) && matches(h, width)) { return None; }
+    let (x, y) = cx.pt((bounds.x0 + bounds.x1) / 2.0, (bounds.y0 + bounds.y1) / 2.0);
+    Some([x, -y])
+}
+
 fn fp_stroke(w: f64) -> String {
     format!("(stroke (width {}) (type solid))", fnum(w.max(0.01)))
 }
@@ -1198,6 +1231,7 @@ fn convert_footprint(name: &str, data: &Value) -> Option<FootprintOut> {
                     // KiCad's model offset has Y up
                     offset: [(mx * 1000.0).round() / 1000.0, (-my * 1000.0).round() / 1000.0, (-z * 1000.0).round() / 1000.0],
                     rotate: [r(0), r(1), r(2)],
+                    outline_center: model_outline_center(&node, &cx, [r(0), r(1), r(2)]),
                 });
             }
             _ => {}
@@ -1416,6 +1450,18 @@ mod tests {
         assert_eq!(fnum(10.0), "10");
         assert_eq!(lib_name("LQFP-48(7x7) / A:B"), "LQFP-48(7x7)_A_B");
         assert_eq!(q("a\"b"), "\"a\\\"b\"");
+    }
+
+    #[test]
+    fn ch634x_model_center_is_independent_of_its_rotation_pivot() {
+        let ctx = FpCtx { ox: 4000.0, oy: 3000.0, bbox: BBox::empty() };
+        let mut outline = serde_json::json!({
+            "attrs": { "transform": "scale(1) translate(0, 0)", "c_width": "31.496", "c_height": "31.496", "c_origin": "3998.9492,2996.3996" },
+            "childNodes": [{ "nodeName": "polyline", "attrs": { "points": "3984.252 3015.748 4015.748 3015.748 4015.748 2984.252 3984.252 2984.252" } }]
+        });
+        assert_eq!(model_outline_center(&outline, &ctx, [0.0, 0.0, 270.0]), Some([0.0, 0.0]));
+        outline["attrs"]["c_width"] = "15".into();
+        assert_eq!(model_outline_center(&outline, &ctx, [0.0; 3]), None);
     }
 
     #[test]

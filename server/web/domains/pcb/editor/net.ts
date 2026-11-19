@@ -3,6 +3,7 @@ import { state, store } from "./appstore";
 import { noteCommentMsg } from "./comments";
 import { noteChatMsg } from "./chat";
 import { applyChanges, applyRemoteChanges, refreshDocs, renderObjects, setDocFromText } from "./doc";
+import { loadSheets as loadNetSheets } from "./schnets";
 import { loadSheets as loadHierarchySheets } from "./panels/hierarchy";
 import { applyFollowWeb, followAction, peerName, renderPeers, startPresenceKeepalive } from "./peers";
 import { clearPeerCursors, noteRtt, onlyPointerMoved } from "./peercursors";
@@ -176,6 +177,10 @@ export async function connect() {
     if (msg.type === "saved") window.dispatchEvent(new CustomEvent("kc-doc-saved", { detail: msg }));
     // a file joined the project (a sheet somebody drew), or its first content arrived: read the file list and the sheets again
     if (msg.type === "docs") void refreshDocs().then((added) => { if (!added) void loadHierarchySheets(typeof msg.addedDocId === "string" ? msg.addedDocId : null); });
+    if (msg.type === "hierarchy" && typeof msg.parentDocId === "string") {
+      const parent = msg.parentDocId;
+      void refreshDocs().then(() => Promise.all([loadHierarchySheets(parent, true), loadNetSheets(true)]));
+    }
     // An earlier version is on screen (editor/versions.ts): the live stream is not laid over it.  Leaving the
     // timeline asks for the document again, so nothing that arrives meanwhile is lost.
     if (historyActive() && (msg.type === "snapshot" || msg.type === "op" || msg.type === "ops" || msg.type === "reset")) {

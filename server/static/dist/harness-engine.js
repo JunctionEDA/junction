@@ -365,6 +365,61 @@ var init_colors = __esm({
   }
 });
 
+// web/domains/pcb/canvas/stacked-pins.ts
+function stackedItems(number) {
+  if (!number.startsWith("[") || !number.endsWith("]")) return null;
+  const parts = [], inner = number.slice(1, -1);
+  let part = "";
+  for (let i = 0; i < inner.length; i++) {
+    if (escapedAt(inner, i)) part += inner[i] + inner[++i];
+    else if (inner[i] === ",") {
+      parts.push(part.trim());
+      part = "";
+    } else part += inner[i];
+  }
+  parts.push(part.trim());
+  return parts;
+}
+function expandStacked(pad2) {
+  const parts = stackedItems(pad2);
+  if (!parts) return { pins: [pad2], valid: !pad2.includes("[") && !pad2.includes("]") };
+  const alnum = (s2) => {
+    const m = /^(.*?)(\d+)$/.exec(s2);
+    return m ? [m[1], Number(m[2])] : [s2, -1];
+  };
+  const out2 = [];
+  for (const part of parts) {
+    if (!part) continue;
+    let dash = -1;
+    for (let i = 0; i < part.length; i++) {
+      if (escapedAt(part, i)) {
+        i++;
+        continue;
+      }
+      if (part[i] === "-") {
+        dash = i;
+        break;
+      }
+    }
+    if (dash >= 0) {
+      const [sp, sv] = alnum(unescapePin(part.slice(0, dash)).trim()), [ep, ev] = alnum(unescapePin(part.slice(dash + 1)).trim());
+      if (sp !== ep || sv === -1 || ev === -1 || sv > ev || !Number.isSafeInteger(ev) || ev - sv + out2.length >= MAX_EXPANDED_PADS) return { pins: [pad2], valid: false };
+      for (let v = sv; v <= ev; v++) out2.push(sp + v);
+    } else out2.push(unescapePin(part));
+  }
+  return out2.length ? { pins: out2, valid: true } : { pins: [pad2], valid: false };
+}
+var MAX_EXPANDED_PADS, special, escapedAt, unescapePin;
+var init_stacked_pins = __esm({
+  "web/domains/pcb/canvas/stacked-pins.ts"() {
+    "use strict";
+    MAX_EXPANDED_PADS = 65536;
+    special = "[],-\\";
+    escapedAt = (s2, i) => s2[i] === "\\" && i + 1 < s2.length && special.includes(s2[i + 1]);
+    unescapePin = (s2) => s2.replace(/\\([\[\],\\-])/g, "$1");
+  }
+});
+
 // web/domains/pcb/canvas/sexpr.ts
 function quotedMask(node) {
   return QUOTED.get(node) | 0;
@@ -1000,23 +1055,23 @@ function linebreakText(text3, colWidth, sizeX, thickness, italic) {
   const space = strokeGlyph(32).adv * sizeX;
   const out2 = [];
   for (const src of text3.split("\n")) {
-    let cur2 = "", width = 0, pending = 0;
+    let cur2 = "", width = 0, pending2 = 0;
     for (const tok of src.split(/( )/)) {
       if (tok === "") continue;
       if (tok === " ") {
-        pending++;
+        pending2++;
         continue;
       }
       const w = (strokeLine(tok, italic).width + INTER_CHAR) * sizeX;
-      if (pending > 0 && width + pending * space + w > colWidth - thickness) {
+      if (pending2 > 0 && width + pending2 * space + w > colWidth - thickness) {
         out2.push(cur2);
         cur2 = tok;
         width = w;
       } else {
-        cur2 += " ".repeat(pending) + tok;
-        width += pending * space + w;
+        cur2 += " ".repeat(pending2) + tok;
+        width += pending2 * space + w;
       }
-      pending = 0;
+      pending2 = 0;
     }
     out2.push(cur2);
   }
@@ -2748,7 +2803,7 @@ function buildSymbolGeom(doc2, item) {
           const ef = effectsOf(g2);
           if (!ef.hide) {
             const [px, py] = tf2(tx, ty);
-            transformedText(item, Ti, px, py, str(g2[1]), ef.size, col(ef.color || SCH.outline), tr, ef.just, bodyLayer, { z: SCH_Z.device, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, alpha, olKind: "field", olKeepH: true });
+            transformedText(item, Ti, px, py, str(g2[1]), ef.size, col(ef.color || SCH.outline), tr / 10, ef.just, bodyLayer, { z: SCH_Z.device, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, alpha, olKind: "field", olKeepH: true });
             take("body");
           }
         } else if (gk === "text_box") {
@@ -2910,6 +2965,13 @@ function buildPinGeom(item, g2, tf2, sym2) {
     for (let i = g0; i < item.geom.length; i++) item.geom[i].pinNo = tag;
   }
 }
+function pinNumberLines(number, length, size2) {
+  const items = stackedItems(number);
+  if (!items) return [number];
+  const parts = items.map(unescapePin);
+  const inline = "[" + parts.join(",") + "]";
+  return parts.length > 1 && textWidth(inline, size2, size2 / 8) > Math.max(length, 50 * MIL) ? parts : [inline];
+}
 function buildPinGeomInner(item, g2, tf2, sym2, type, shape3, px, py, pr, len) {
   const dir = (Math.round(pr) % 360 + 360) % 360;
   const d = dir === 0 ? [1, 0] : dir === 90 ? [0, 1] : dir === 180 ? [-1, 0] : [0, -1];
@@ -2982,9 +3044,33 @@ function buildPinGeomInner(item, g2, tf2, sym2, type, shape3, px, py, pr, len) {
   const alongX = orient === "L" ? pos[0] - halfLen : pos[0] + halfLen, alongY = orient === "D" ? pos[1] + halfLen : pos[1] - halfLen;
   const nameColor = sym2.col(SCH.pinName), numColor = sym2.col(SCH.pinNum);
   if (showNum) {
-    const perp = clearance + numEf.size / 2 + numThick;
-    if (vertical) textGeom(item, both ? pos[0] + perp : pos[0] - perp, alongY, pinNum, numEf.size, numColor, 90, ["center", "middle"], "Pin numbers", { z: SCH_Z.pinNum, w: numThick });
-    else textGeom(item, alongX, both ? pos[1] + perp : pos[1] - perp, pinNum, numEf.size, numColor, 0, ["center", "middle"], "Pin numbers", { z: SCH_Z.pinNum, w: numThick });
+    const size2 = numEf.size, lines = pinNumberLines(pinNum, len, size2), stacked = lines.length > 1;
+    const pitch = 1.3 * size2, height = stacked ? lines.length * pitch : size2;
+    const side = d[0] ? tf2(px, py + 1) : tf2(px - 1, py);
+    const positive = both || stacked && (vertical ? side[0] > pos[0] : side[1] > pos[1]);
+    const perp = (positive ? 1 : -1) * (clearance + height / 2 + numThick);
+    const center = (vertical ? pos[0] : pos[1]) + perp;
+    const halfSpan = (lines.length - 1) * pitch / 2;
+    const point = (across, row3) => vertical ? [center + row3, alongY + across] : [alongX + across, center + row3];
+    for (const [i, label] of lines.entries()) {
+      const [x, y] = point(0, i * pitch - halfSpan);
+      textGeom(item, x, y, label, size2, numColor, vertical ? 90 : 0, ["center", "middle"], "Pin numbers", { z: SCH_Z.pinNum, w: numThick });
+    }
+    if (stacked) {
+      const brace = size2 / 3, top2 = -halfSpan - 2 * brace, bottom = halfSpan;
+      const gap = lines.reduce((max, s2) => Math.max(max, textWidth(s2, size2, numThick)), 0) / 2 + brace;
+      for (const sign2 of [-1, 1]) {
+        const edge = sign2 * gap, tip2 = sign2 * brace;
+        const pts = [
+          point(edge, top2),
+          point(edge + tip2 / 2, top2),
+          point(edge + tip2, (top2 + bottom) / 2),
+          point(edge + tip2 / 2, bottom),
+          point(edge, bottom)
+        ];
+        G(item, { t: "poly", pts, close: false, w: numThick, color: numColor, layer: "Pin numbers", z: SCH_Z.pinNum });
+      }
+    }
   }
   if (showName && sym2.altIcons && kids(g2, "alternate").length) {
     const icon2 = Math.min(nameEf.size, 1.5), nw = textWidth(pinName, nameEf.size, nameThick);
@@ -3011,6 +3097,7 @@ var init_geom_sch = __esm({
   "web/domains/pcb/canvas/geom-sch.ts"() {
     "use strict";
     init_colors();
+    init_stacked_pins();
     init_geom();
     init_sexpr();
     init_tables_images();
@@ -40391,9 +40478,9 @@ var require_pcb_tools = __commonJS({
         const newLinks = J.links.filter(isNew);
         if (!newLinks.length) return [];
         const reachesAnchor = (start, includeNew, skipTarget) => {
-          const pending = [start], seen = /* @__PURE__ */ new Set();
-          while (pending.length) {
-            const q4 = pending.pop();
+          const pending2 = [start], seen = /* @__PURE__ */ new Set();
+          while (pending2.length) {
+            const q4 = pending2.pop();
             const k = ptKey(q4);
             if (samePt(q4, ant.p) || seen.has(k)) continue;
             seen.add(k);
@@ -40401,7 +40488,7 @@ var require_pcb_tools = __commonJS({
             if (j.solid) return true;
             for (const o of j.links) {
               if (!includeNew && isNew(o) || skipTarget && isTarget(o)) continue;
-              for (const e of trackEnds(o)) if (!samePt(e, q4)) pending.push(e);
+              for (const e of trackEnds(o)) if (!samePt(e, q4)) pending2.push(e);
             }
           }
           return false;
@@ -71545,7 +71632,7 @@ function footprintModels(node, guess = true, boardFiles2 = null) {
     if (/KICAD_COLLAB_3DMODELS/.test(path2)) {
       const hit5 = VENDOR_FIELDS.map(([f2, v]) => [v, fieldOf2(node, f2)]).find(([, id]) => id);
       if (!hit5) continue;
-      out2.push({ ...ref, source: "vendor", url: `/api/parts/model.step?vendor=${hit5[0]}&id=${encodeURIComponent(hit5[1])}&fit=4` });
+      out2.push({ ...ref, source: "vendor", url: `/api/parts/model.step?vendor=${hit5[0]}&id=${encodeURIComponent(hit5[1])}&fit=5` });
     } else out2.push({ ...ref, source: "kicad", url: kicadModelUrl(m[1], m[2]) });
   }
   if (!named && guess) {
@@ -71581,7 +71668,7 @@ function foreignModel(node, path2, ref) {
   if (!lcsc) return null;
   const url = `/api/parts/model.step?vendor=lcsc&id=${encodeURIComponent(lcsc)}`;
   if (/\.(?:step|stp)$/i.test(path2)) return { ...ref, source: "vendor", url };
-  return { ...ref, offset: [0, 0, 0], rotate: [0, 0, 0], source: "vendor", url: url + "&fit=4&placed=1" };
+  return { ...ref, offset: [0, 0, 0], rotate: [0, 0, 0], source: "vendor", url: url + "&fit=5&placed=1" };
 }
 function guessedModel(node) {
   const m = /^([^:\/\\${}]+):([^:\/\\]+)$/.exec(String(node[1] ?? ""));
@@ -74782,6 +74869,50 @@ var init_projectfile = __esm({
 });
 
 // web/domains/pcb/editor/schnets.ts
+async function readSheet(d) {
+  let text3 = null, ops = [];
+  if (state.me) {
+    try {
+      const live3 = await liveDocument(d.docId);
+      text3 = live3.file;
+      ops = live3.ops;
+    } catch (e) {
+      text3 = null;
+    }
+  }
+  const doc2 = text3 === null ? await readSavedSchematic(d.docId) : KiCadCanvas.parseDoc(text3, "kicad_sch");
+  if (!doc2) return null;
+  for (const op of ops) for (const c of op.changes || []) {
+    try {
+      KiCadCanvas.applyChange(doc2, c, SCH_IU);
+    } catch (e) {
+    }
+  }
+  return { doc: doc2, uuid: String(doc2.uuid || ""), file: d.path };
+}
+function loadSheets(force = false) {
+  if (sheetsProject !== projectKey()) {
+    sheets.clear();
+    sheetsProject = projectKey();
+  }
+  const now = Date.now(), cur2 = state.docId;
+  const want2 = schDocs().filter((d) => d.docId !== cur2 && (force || !sheets.has(d.docId) || now - sheets.get(d.docId).at > STALE_MS));
+  if (!want2.length) return Promise.resolve();
+  if (loading) return force ? loading.then(() => loadSheets(true)) : loading;
+  const pid = projectKey();
+  loading = Promise.all(want2.map(async (d) => {
+    const f2 = await readSheet(d);
+    if (f2 && pid === projectKey()) sheets.set(d.docId, { file: f2, at: Date.now() });
+  })).then(() => {
+    loading = null;
+    loadedVer++;
+    computed = null;
+    changed();
+  }, () => {
+    loading = null;
+  });
+  return loading;
+}
 function compute() {
   const h3 = helpers();
   const cur2 = curEntry(), doc2 = E.kdoc;
@@ -74804,14 +74935,8 @@ function compute() {
   const root5 = state.project ? rootSchematic() : null;
   const rootFile = root5 && files.get(root5.path) || files.get(cur2.path);
   const resolve2 = (file, parent) => {
-    const dir = parent.file.split("/").slice(0, -1);
-    const parts = [...dir, ...file.split("/")].filter((p) => p && p !== ".");
-    const out2 = [];
-    for (const p of parts) {
-      if (p === "..") out2.pop();
-      else out2.push(p);
-    }
-    return files.get(out2.join("/")) || files.get(file) || Array.from(files.values()).find((f2) => f2.file.split("/").pop() === file.split("/").pop()) || null;
+    const entry2 = findSheetDoc(file, parent.file);
+    return entry2 ? files.get(entry2.path) || null : null;
   };
   const stem3 = rootFile.file.split("/").pop().replace(/\.kicad_sch$/, "");
   const pro = projectDocs2().find((d) => d.docType === "kicad_pro");
@@ -74881,6 +75006,8 @@ function nameOfPick(pick) {
         }
       }
     }
+  } else if (it.kind === "sheet" && pick.pin !== void 0) {
+    pin = pick.pin;
   } else if (it.kind === "sheet") {
     const at5 = pick.at || [0, 0];
     let bd = Infinity;
@@ -74925,7 +75052,7 @@ function leaveSheet() {
   const r = rootSchematic();
   if (r) void openDoc(r);
 }
-var SN, schMod, helpers, HL, preferHuman, sheets, loadedVer, projectKey, schDocs, curEntry, computed, docGen, listeners;
+var SN, SCH_IU, schMod, helpers, HL, preferHuman, sheets, sheetsProject, loading, loadedVer, STALE_MS, projectKey, schDocs, curEntry, computed, docGen, listeners;
 var init_schnets = __esm({
   "web/domains/pcb/editor/schnets.ts"() {
     "use strict";
@@ -74938,6 +75065,7 @@ var init_schnets = __esm({
     init_state();
     init_tools();
     SN = () => KiCadCanvas.schNets;
+    SCH_IU = 1e4;
     schMod = () => CollabTools.sch;
     helpers = () => {
       const m = schMod();
@@ -74946,7 +75074,10 @@ var init_schnets = __esm({
     HL = { name: null, busMembers: false, nav: null };
     preferHuman = null;
     sheets = /* @__PURE__ */ new Map();
+    sheetsProject = "";
+    loading = null;
     loadedVer = 0;
+    STALE_MS = 3e4;
     projectKey = () => {
       const p = state.project;
       return p && p.projectId || "";
@@ -78217,10 +78348,10 @@ var init_drawingsheet_model = __esm({
 
 // web/domains/pcb/editor/drawingsheet.ts
 function load(docId3) {
-  if (loading.has(docId3)) return;
-  loading.add(docId3);
+  if (loading2.has(docId3)) return;
+  loading2.add(docId3);
   fetch(`/api/docs/${docId3}/content?v=${Date.now()}`, { credentials: "same-origin", cache: "no-store" }).then((r) => r.ok ? r.text() : "").then((t) => {
-    loading.delete(docId3);
+    loading2.delete(docId3);
     const was = cache3.get(docId3);
     if (was && was.text === t) return;
     let sheet = null;
@@ -78236,7 +78367,7 @@ function load(docId3) {
     }
     for (const fn of listeners3) fn();
   }, () => {
-    loading.delete(docId3);
+    loading2.delete(docId3);
     if (!cache3.has(docId3)) cache3.set(docId3, { text: "", sheet: null });
   });
 }
@@ -78254,7 +78385,7 @@ function applyDrawingSheet(d) {
   const ws = resolveWorksheet(drawingSheetName(E.proSettings, sch), projectWorksheets2());
   d.drawingSheet = ws ? sheetOf(ws.docId) : null;
 }
-var projectWorksheets2, cache3, loading, listeners3;
+var projectWorksheets2, cache3, loading2, listeners3;
 var init_drawingsheet = __esm({
   "web/domains/pcb/editor/drawingsheet.ts"() {
     "use strict";
@@ -78265,7 +78396,7 @@ var init_drawingsheet = __esm({
     init_drawingsheet_model();
     projectWorksheets2 = () => projectWorksheets(state.docs || []);
     cache3 = /* @__PURE__ */ new Map();
-    loading = /* @__PURE__ */ new Set();
+    loading2 = /* @__PURE__ */ new Set();
     listeners3 = /* @__PURE__ */ new Set();
     if (typeof window !== "undefined") {
       window.addEventListener("kc-doc-saved", ((ev) => {
@@ -78320,6 +78451,7 @@ var cmp;
 var init_netlist_kicad = __esm({
   "web/domains/pcb/sim/netlist-kicad.ts"() {
     "use strict";
+    init_stacked_pins();
     init_prettify();
     init_variant_model();
     init_variant_model();
@@ -78393,40 +78525,37 @@ function entry(docId3) {
 function schDocs2() {
   return openDocs().filter((d) => d.docType === "kicad_sch");
 }
-function loadSheets(stale2) {
+async function loadSheets2(stale2, remote2 = false) {
   if (cacheProject !== projectId()) {
     cache4.clear();
+    pending.clear();
     cacheProject = projectId();
   }
   if (stale2) {
-    if (live && live.docId === stale2 && stale2 !== currentDocId()) cache4.set(stale2, { doc: live.doc, sheets: sheetsOf(live.doc), page: String(live.doc.pageNumber || "1") });
+    pending.delete(stale2);
+    if (!remote2 && live && live.docId === stale2 && stale2 !== currentDocId()) cache4.set(stale2, { doc: live.doc, sheets: sheetsOf(live.doc), page: String(live.doc.pageNumber || "1") });
     else cache4.delete(stale2);
   }
-  const want2 = schDocs2().filter((d) => d.docId !== currentDocId() && !cache4.has(d.docId));
-  if (!want2.length) {
-    publishHierarchy();
-    return Promise.resolve();
-  }
-  if (loading2) return loading2;
   const pid = projectId();
-  loading2 = Promise.all(want2.map(async (d) => {
-    try {
-      const r = await fetch(`/api/docs/${d.docId}/content?v=${Date.now()}`);
-      if (!r.ok) return;
-      const doc2 = KC().parseDoc(await r.text(), "kicad_sch");
-      if (pid === projectId()) cache4.set(d.docId, { doc: doc2, sheets: sheetsOf(doc2), page: String(doc2.pageNumber || "1") });
-    } catch (e) {
-    }
-  })).then(() => {
-    loading2 = null;
-    publishHierarchy();
-  });
-  return loading2;
+  const want2 = schDocs2().filter((d) => d.docId !== currentDocId() && !cache4.has(d.docId));
+  await Promise.all(want2.map(({ docId: docId3 }) => {
+    const inFlight = pending.get(docId3);
+    if (inFlight) return inFlight;
+    const request4 = readSavedSchematic(docId3).then((doc2) => {
+      if (doc2 && pid === projectId() && pending.get(docId3) === request4) {
+        cache4.set(docId3, { doc: doc2, sheets: sheetsOf(doc2), page: String(doc2.pageNumber || "1") });
+      }
+    }).catch(() => {
+    }).finally(() => {
+      if (pending.get(docId3) === request4) pending.delete(docId3);
+    });
+    pending.set(docId3, request4);
+    return request4;
+  }));
+  publishHierarchy();
 }
 function resolveChild(parent, file) {
-  const dir = parent.path.split("/").slice(0, -1).join("/"), rel = dir ? `${dir}/${file}` : file, base2 = file.split("/").pop();
-  const docs = schDocs2();
-  return docs.find((d) => d.path === rel || d.path === file) || docs.find((d) => d.path.split("/").pop() === base2) || null;
+  return findSheetDoc(file, parent.path) || null;
 }
 function repairPages(tree, topUuid) {
   const nodes = [], list = [];
@@ -78523,7 +78652,7 @@ function topLevelEntry(file, pro = projectJson()) {
   const base2 = file.split("/").pop();
   return list.find((e) => e && (e.filename === file || e.filename === base2)) || null;
 }
-var cache4, cacheProject, loading2, live, fileUuid, topSig;
+var cache4, cacheProject, pending, live, fileUuid, topSig;
 var init_hierarchy = __esm({
   "web/domains/pcb/editor/panels/hierarchy.ts"() {
     "use strict";
@@ -78541,7 +78670,7 @@ var init_hierarchy = __esm({
     init_core();
     cache4 = /* @__PURE__ */ new Map();
     cacheProject = "";
-    loading2 = null;
+    pending = /* @__PURE__ */ new Map();
     live = null;
     fileUuid = (docId3) => {
       const e = docId3 ? entry(docId3) : null;
@@ -78559,7 +78688,7 @@ var init_hierarchy = __esm({
       topSig = sig;
       topLevelSheetsChanged();
       publishHierarchy();
-      void loadSheets();
+      void loadSheets2();
     });
   }
 });
@@ -79616,8 +79745,12 @@ async function connect() {
     if (msg.type === "docs") tellDocsChanged(msg);
     if (msg.type === "saved") window.dispatchEvent(new CustomEvent("kc-doc-saved", { detail: msg }));
     if (msg.type === "docs") void refreshDocs().then((added2) => {
-      if (!added2) void loadSheets(typeof msg.addedDocId === "string" ? msg.addedDocId : null);
+      if (!added2) void loadSheets2(typeof msg.addedDocId === "string" ? msg.addedDocId : null);
     });
+    if (msg.type === "hierarchy" && typeof msg.parentDocId === "string") {
+      const parent = msg.parentDocId;
+      void refreshDocs().then(() => Promise.all([loadSheets2(parent, true), loadSheets(true)]));
+    }
     if (historyActive() && (msg.type === "snapshot" || msg.type === "op" || msg.type === "ops" || msg.type === "reset")) {
       if (msg.type === "op") {
         E.editsSeen++;
@@ -79809,6 +79942,7 @@ var init_net = __esm({
     init_comments();
     init_chat();
     init_doc();
+    init_schnets();
     init_hierarchy();
     init_peers();
     init_peercursors();
@@ -84918,6 +85052,7 @@ var init_model = __esm({
     "use strict";
     init_sexpr();
     init_export();
+    init_stacked_pins();
     MIL5 = 0.0254;
     DEFAULTS = { pinLength: 100 * MIL5, pinNameSize: 50 * MIL5, pinNumSize: 50 * MIL5, pinStep: 100 * MIL5, labelDelta: 1, lineWidth: 0, textSize: 50 * MIL5, gridMils: 50 };
     DEFAULT_PIN_NAME_OFFSET = 20 * MIL5;
@@ -86441,10 +86576,10 @@ function modelPreview(opts2 = {}) {
   const host2 = h2("div", { class: "pd-3dprev", "data-k": opts2.key || "preview3d", style: `height:${opts2.height || "100%"}` });
   const status = h2("div", { class: "pd-3dprev-msg" }, "Loading 3D viewer...");
   host2.append(status);
-  let viewer = null, pending = null, gone = false, fit = true, thickness = opts2.thickness && opts2.thickness > 0 ? opts2.thickness : 1.6, bodyShown = opts2.board !== false;
+  let viewer = null, pending2 = null, gone = false, fit = true, thickness = opts2.thickness && opts2.thickness > 0 ? opts2.thickness : 1.6, bodyShown = opts2.board !== false;
   const draw2 = (text3) => {
     if (!viewer) {
-      pending = text3;
+      pending2 = text3;
       return;
     }
     const doc2 = parseDoc2(text3);
@@ -86461,9 +86596,9 @@ function modelPreview(opts2 = {}) {
     status.remove();
     viewer = g2.embed(host2, { wheel: true });
     viewer.useModels(true);
-    if (pending !== null) {
-      const t = pending;
-      pending = null;
+    if (pending2 !== null) {
+      const t = pending2;
+      pending2 = null;
       draw2(t);
     }
   }).catch(() => {
@@ -89740,6 +89875,7 @@ __export(doc_exports, {
   projectPcbs: () => projectPcbs,
   projectTextVars: () => projectTextVars,
   publishDocs: () => publishDocs,
+  readSavedSchematic: () => readSavedSchematic,
   refreshDocs: () => refreshDocs,
   renderLayers: () => renderLayers,
   renderLayersFromDoc: () => renderLayersFromDoc,
@@ -89866,6 +90002,18 @@ async function editsSince(docId3, seq) {
   } catch (e) {
     return null;
   }
+}
+async function readSavedSchematic(docId3) {
+  const r = await fetch(`/api/docs/${docId3}/content?v=${Date.now()}`);
+  if (!r.ok) return null;
+  const doc2 = KiCadCanvas.parseDoc(await r.text(), "kicad_sch");
+  const seq = Number(r.headers.get("x-snapshot-seq")) || 0;
+  if (Number(r.headers.get("x-head-seq")) > seq) {
+    const tail = await editsSince(docId3, seq);
+    if (!tail) return null;
+    for (const change of tail.changes) KiCadCanvas.applyChange(doc2, change, 1e4);
+  }
+  return doc2;
 }
 function setDocFromText(text3, then) {
   let d;
@@ -90344,7 +90492,11 @@ function findSheetDoc(file, parentPath) {
   file = file.replace(/\\/g, "/");
   const base2 = file.split("/").pop(), dir = parentPath.split("/").slice(0, -1).join("/");
   const rel = normPath(dir ? `${dir}/${file}` : file);
-  return state.docs.find((d) => d.docType === "kicad_sch" && (d.path === rel || d.path === file)) || state.docs.find((d) => d.docType === "kicad_sch" && d.path.split("/").pop() === base2);
+  const docs = (state.docs || []).filter((d) => d.docType === "kicad_sch");
+  const exact2 = docs.find((d) => d.path === rel) || docs.find((d) => d.path === file);
+  if (exact2 || file.includes("/")) return exact2;
+  const matches2 = docs.filter((d) => d.path.split("/").pop() === base2);
+  return matches2.length === 1 ? matches2[0] : void 0;
 }
 function normPath(p) {
   const out2 = [];
@@ -94678,9 +94830,9 @@ function resolve(act, c) {
     ta();
     selectionChanged();
   } };
-  const special = SPECIAL[act];
-  if (special) {
-    const r = special(c);
+  const special2 = SPECIAL[act];
+  if (special2) {
+    const r = special2(c);
     return typeof r === "string" ? { why: r } : { run: r };
   }
   const mid2 = ALIAS[ed][sid] || sid, ma = m && m.actions ? m.actions[mid2] : void 0;
@@ -96133,7 +96285,7 @@ async function projectNetlist() {
       const doc2 = KiCadCanvas.parseDoc(live3.file, "kicad_sch");
       for (const op of live3.ops) for (const c of op.changes || []) {
         try {
-          KiCadCanvas.applyChange(doc2, c, SCH_IU);
+          KiCadCanvas.applyChange(doc2, c, SCH_IU2);
         } catch (e) {
         }
       }
@@ -96166,7 +96318,7 @@ async function projectNetlist() {
   const netlist = NL().buildNetlist(tops.length > 1 ? tops : rootFile, resolve2, { symbolPins: helpers2.symbolPins, isPower: (d, it) => helpers2.isPowerSymbol(d, String((KiCadCanvas.kid(it.node, "lib_id") || [])[1])) }, root5.path.split("/").pop().replace(/\.kicad_sch$/, ""));
   return { netlist, root: tops.length > 1 ? tops[0].path : root5.path, files };
 }
-var SCH_IU;
+var SCH_IU2;
 var init_update_pcb = __esm({
   "web/domains/pcb/editor/pcbdialogs/update-pcb.ts"() {
     "use strict";
@@ -96176,7 +96328,7 @@ var init_update_pcb = __esm({
     init_canvas();
     init_bootpick();
     init_ui();
-    SCH_IU = 1e4;
+    SCH_IU2 = 1e4;
   }
 });
 
@@ -99105,7 +99257,7 @@ function loadRules(text3) {
   }
   if (!root5) return out2;
   const raws = [];
-  let pending = [];
+  let pending2 = [];
   {
     let depth2 = 0, q4 = false, st = -1;
     for (let i = 0; i < text3.length; i++) {
@@ -99117,7 +99269,7 @@ function loadRules(text3) {
       }
       if (c === "#" && isCommentAt(text3, i)) {
         const j = text3.indexOf("\n", i), line = text3.slice(i, j < 0 ? text3.length : j).replace(/\r$/, "");
-        if (depth2 === 0) pending.push(line);
+        if (depth2 === 0) pending2.push(line);
         i = j < 0 ? text3.length : j;
         continue;
       }
@@ -99130,15 +99282,15 @@ function loadRules(text3) {
         if (depth2 === 0 && st >= 0) {
           const t = text3.slice(st, i + 1);
           if (/^\(\s*rule\b/.test(t)) {
-            raws.push({ text: t, lead: pending.join("\n") });
-            pending = [];
+            raws.push({ text: t, lead: pending2.join("\n") });
+            pending2 = [];
           }
           st = -1;
         }
       }
     }
   }
-  if (pending.length) out2.trail = pending.join("\n");
+  if (pending2.length) out2.trail = pending2.join("\n");
   let ri = 0;
   for (const r of root5.slice(1)) {
     if (!Array.isArray(r) || r[0] !== "rule") continue;
@@ -106597,6 +106749,8 @@ init_drc_items();
 // web/domains/pcb/canvas/pcb-netlist.ts
 init_sexpr();
 init_geom_sch();
+init_stacked_pins();
+init_busname();
 init_variant_model();
 var isList4 = Array.isArray;
 var r4 = (v) => +(+v).toFixed(4);
@@ -106671,7 +106825,6 @@ function busVector(text3) {
   }
   return out2;
 }
-var isBusText = (t) => /\[\d+\.\.\d+\]/.test(t) || /\{[^}]*\s[^}]*\}/.test(t);
 function libIsLocalPower(doc2, n2) {
   const l = resolveLib(doc2, str((kid(n2, "lib_name") || kid(n2, "lib_id") || [])[1]));
   const p = l && kid(l, "power");
@@ -106763,14 +106916,15 @@ function defaultPinNet(p, forceNoConnect) {
   const nc = forceNoConnect || p.pin.type === "no_connect";
   let name = nc ? "unconnected-(" : "Net-(";
   const shownName = p.pin.name === "~" ? "" : p.pin.name, number = p.pin.number;
+  const padNumber3 = number.startsWith("[") ? expandStacked(number).pins[0] : number;
   const multiple = p.pins.some((q4) => (q4.name === "~" ? "" : q4.name) === shownName && q4.number !== number && nc === (q4.type === "no_connect"));
-  if (p.ref.endsWith("?")) return name + p.uuid + "-Pad" + number + ")";
+  if (p.ref.endsWith("?")) return name + p.uuid + "-Pad" + padNumber3 + ")";
   if (shownName && shownName !== number) {
     name += p.unitRef + "-" + escapeNetName(shownName);
-    if (nc || multiple) name += "-Pad" + escapeNetName(number);
+    if (nc || multiple) name += "-Pad" + escapeNetName(padNumber3);
     return name + ")";
   }
-  return name + p.ref + "-Pad" + escapeNetName(number) + ")";
+  return name + p.ref + "-Pad" + escapeNetName(padNumber3) + ")";
 }
 var lowerCmp = (a, b) => {
   const x = a.toLowerCase(), y = b.toLowerCase();
@@ -106916,7 +107070,7 @@ function buildNetlist(root5, loadSheet, h3, project3) {
     for (const it of doc2.items.values()) {
       const n2 = it.node, k = it.kind;
       if (k === "label" || k === "global_label" || k === "hierarchical_label") {
-        const text3 = str(n2[1]), p = atOf(n2).slice(0, 2), bus = isBusText(text3);
+        const text3 = str(n2[1]), p = atOf(n2).slice(0, 2), bus = isBusLabel(text3);
         const t = terminal(p, bus);
         addMem(t, { inst: I, id: it.id, kind: k, text: text3 });
         if (bus) {
@@ -106938,7 +107092,7 @@ function buildNetlist(root5, loadSheet, h3, project3) {
       } else if (k === "sheet") {
         const child2 = childOf.get(I + "|" + it.id);
         for (const pin of kids(n2, "pin")) {
-          const text3 = str(pin[1]), p = atOf(pin).slice(0, 2), bus = isBusText(text3);
+          const text3 = str(pin[1]), p = atOf(pin).slice(0, 2), bus = isBusLabel(text3);
           const t = terminal(p, bus);
           addMem(t, { inst: I, id: it.id, kind: "sheet_pin", pin: text3, text: propVal(n2, "Sheetname") || propVal(n2, "Sheet name") });
           if (bus) {
@@ -107109,10 +107263,17 @@ function buildNetlist(root5, loadSheet, h3, project3) {
       if (!p.pin.number) continue;
       const shown2 = p.pin.name === "~" ? "" : p.pin.name;
       const type = p.pin.type + (g2.nc && netPins.length === 1 ? "+no_connect" : "");
-      if (!comp.pins.has(p.pin.number)) comp.pins.set(p.pin.number, { net: name, name: shown2 ? shown2 + "_" + p.pin.number : "", type });
-      const l = nets.get(name);
-      if (l) l.push({ ref: comp.ref, pin: p.pin.number });
-      else nets.set(name, [{ ref: comp.ref, pin: p.pin.number }]);
+      const pads = expandStacked(p.pin.number).pins;
+      let members = nets.get(name);
+      if (!members) {
+        members = [];
+        nets.set(name, members);
+      }
+      for (const pad2 of pads) {
+        const pinFunction = shown2 ? shown2 + "_" + pad2 : pads.length > 1 ? pad2 : "";
+        if (!comp.pins.has(pad2)) comp.pins.set(pad2, { net: name, name: pinFunction, type });
+        members.push({ ref: comp.ref, pin: pad2 });
+      }
     }
   }
   const netMap2 = /* @__PURE__ */ new Map();
@@ -111306,9 +111467,10 @@ root.KiCadCanvas = api;
     if (g2.t === "rect") return boxDist([g2.x, g2.y, g2.x + g2.w, g2.y + g2.h], x, y);
     return Infinity;
   }
-  function hitNonSymbol(doc2, x, y, tol) {
+  function hitNonSymbol(doc2, x, y, tol, kinds) {
     let best = null, bd = Infinity;
     for (const it of doc2.items.values()) {
+      if (kinds && !kinds.has(it.kind)) continue;
       let d;
       if (LINE_KINDS.has(it.kind)) {
         d = Infinity;
@@ -111342,7 +111504,7 @@ root.KiCadCanvas = api;
     const allowed = root5.CollabEditor && root5.CollabEditor.pickAllowed;
     if (allowed && !allowed(hit5)) return null;
     const pinExact = root5.CollabEditor && root5.CollabEditor.pinExactAt;
-    if (hit5.kind !== "junction" && pinExact && pinExact([mm4[0], mm4[1]])) return null;
+    if (hit5.kind !== "junction" && hit5.kind !== "no_connect" && pinExact && pinExact([mm4[0], mm4[1]])) return null;
     const symId = K11.hitTest(ctx.doc, mm4[0], mm4[1], 0.5);
     if (symId && !LINE_KINDS.has(hit5.kind)) {
       const sym2 = ctx.doc.items.get(symId);
@@ -114186,13 +114348,16 @@ ${body}
   }
   function pickNet(ctx, mm4) {
     const doc2 = ctx.doc, tol = Math.max(0.3, 5 * mmPerPx(ctx)), pinTol = Math.max(tol, 0.6);
-    const hit5 = hitNonSymbol(doc2, mm4[0], mm4[1], tol);
-    if (hit5 && NET_PICK.has(hit5.kind)) return { item: hit5, at: mm4 };
+    const hit5 = hitNonSymbol(doc2, mm4[0], mm4[1], tol, NET_PICK);
+    if (hit5) return { item: hit5, at: mm4 };
     const pins2 = pinsAt(doc2, mm4[0], mm4[1], pinTol);
     if (pins2.length) return { item: pins2[0].item, at: [pins2[0].x, pins2[0].y] };
-    for (const it of doc2.items.values()) if (it.kind === "sheet") for (const pin of kids7(it.node, "pin")) {
-      const [x, y] = atOf4(pin);
-      if (Math.hypot(x - mm4[0], y - mm4[1]) <= pinTol) return { item: it, at: [x, y] };
+    for (const it of doc2.items.values()) if (it.kind === "sheet") {
+      const label = it.geom.find((g2) => g2.pinNo && K11.geomHit(g2, mm4[0], mm4[1], tol));
+      for (const pin of kids7(it.node, "pin")) {
+        const name = str9(pin[1]), [x, y] = atOf4(pin);
+        if (label ? label.pinNo === name : Math.hypot(x - mm4[0], y - mm4[1]) <= pinTol) return { item: it, at: [x, y], pin: name };
+      }
     }
     const symId = K11.hitTest(doc2, mm4[0], mm4[1], tol), sym2 = symId ? doc2.items.get(symId) : null;
     if (sym2 && sym2.kind === "symbol" && isPowerSymbol(doc2, str9((kid8(sym2.node, "lib_id") || [])[1]))) {
@@ -114955,7 +115120,20 @@ ${body}
     s2.pop();
     return s2.join("/");
   };
-  var joinPath2 = (dir, file) => dir ? dir + "/" + file : file;
+  function joinPath2(dir, file) {
+    const parts = [];
+    for (const p of (dir + "/" + file).split("/")) {
+      if (p === "..") parts.pop();
+      else if (p && p !== ".") parts.push(p);
+    }
+    return parts.join("/");
+  }
+  function existingSheet(ctx, target2, file) {
+    const docs = schDocs3(ctx), exact2 = docs.find((d) => d.path === target2) || docs.find((d) => d.path === file);
+    if (exact2 || file.includes("/")) return exact2;
+    const matches2 = docs.filter((d) => baseName3(d.path) === file);
+    return matches2.length === 1 ? matches2[0] : void 0;
+  }
   function relPath(dir, path2) {
     const a = dir ? dir.split("/") : [], b = path2.split("/");
     let i = 0;
@@ -114992,7 +115170,7 @@ ${body}
     file = normSheetFile(file);
     if (!file) throw new Error("no sheet file name");
     const cur2 = currentDoc2(ctx), dir = cur2 ? dirName(cur2.path) : "", target2 = joinPath2(dir, file);
-    const found = schDocs3(ctx).find((d) => d.path === target2 || d.path === file) || schDocs3(ctx).find((d) => baseName3(d.path) === baseName3(file));
+    const found = existingSheet(ctx, target2, file);
     if (found) return { file: relPath(dir, found.path), docId: found.docId, created: false };
     if (typeof ctx.api !== "function" || !ctx.project || !ctx.project.projectId) throw new Error("this session cannot create sheet files");
     const res = await ctx.api(`/api/projects/${ctx.project.projectId}/docs`, { method: "POST", body: JSON.stringify({ path: target2, docType: "kicad_sch" }) });
@@ -115080,7 +115258,7 @@ ${body}
       try {
         file = normSheetFile(file);
         const cur2 = currentDoc2(ctx), dir = cur2 ? dirName(cur2.path) : "", target2 = joinPath2(dir, file);
-        const exists = schDocs3(ctx).find((x) => x.path === target2 || x.path === file);
+        const exists = existingSheet(ctx, target2, file);
         if (exists && root5.KDialogs && root5.KDialogs.confirm && !await root5.KDialogs.confirm("Confirmation", `'${baseName3(file)}' already exists.
 
 Link '${target2}' to this file?`)) return null;
@@ -118194,8 +118372,13 @@ Link '${target2}' to this file?`)) return null;
       case "M": {
         setDragMode(ctx, lower22 === "m" ? "move" : "drag");
         if (S3.drag) return true;
-        const it = S3.sel ? ctx.doc.items.get(S3.sel) : null;
-        if (!it || !S3.cursor) return false;
+        if (!S3.cursor) return false;
+        let it = S3.sel ? ctx.doc.items.get(S3.sel) : null;
+        if (!it && !ctx.selected && !ctx.selection?.size) {
+          const hovered = pickNonSymbol(ctx, S3.cursor);
+          if (hovered?.kind === "no_connect") it = hovered;
+        }
+        if (!it) return false;
         return !!beginDrag(ctx, it, S3.cursor, false);
       }
       case " ":
@@ -119199,7 +119382,7 @@ Link '${target2}' to this file?`)) return null;
     for (const kd of lineKindsFor(item)) for (const e of lineEndsAt(doc2, p[0], p[1], kd)) if (!moving.has(e.item.id) && ptsOf4(e.item.node).length > 1) ends.push(e);
     if (fixedJunction) a.stub = { from: a.p, kind: item.kind === "bus" || ends.some((e) => e.item.kind === "bus") ? "bus" : "wire" };
     else for (const e of ends) a.ends.push({ item: e.item, index: e.index, orig: ptsOf4(e.item.node).map((q4) => q4.slice()) });
-    if (!a.stub && item.kind !== "no_connect") {
+    if (!a.stub) {
       const fixed2 = pinsAt(doc2, p[0], p[1]).some((q4) => !moving.has(q4.item.id)) || labelsAt(doc2, a.p, item).some((l) => !moving.has(l.id)) || sheetPinsAt(doc2, a.p, item).some((s2) => !moving.has(s2.id)) || item.kind !== "bus_entry" && busEntriesAt(doc2, a.p, item).some((b) => !moving.has(b.id));
       if (fixed2) a.stub = { from: a.p, kind: item.kind === "bus" ? "bus" : "wire" };
       else if (LABEL_KINDS2.has(item.kind)) {

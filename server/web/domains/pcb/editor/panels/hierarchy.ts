@@ -6,7 +6,7 @@
 import type { HierNode, PanelAction } from "../../panels-api";
 import { store } from "../appstore";
 import { requestRender } from "../view";
-import { enterSheet, openDoc, publishDocs, rootSchematic, topLevelSchematics, topLevelSheetsChanged } from "../doc";
+import { enterSheet, findSheetDoc, readSavedSchematic, openDoc, publishDocs, rootSchematic, topLevelSchematics, topLevelSheetsChanged } from "../doc";
 import { E } from "../state";
 import { api, toast } from "../util";
 import { selectionIds } from "../gestures";
@@ -22,7 +22,7 @@ interface SheetDoc { doc: KDoc; sheets: SheetRef[]; page: string }
 
 const cache = new Map<string, SheetDoc>();   // docId -> parsed sheet (not the open one: that is always read live)
 let cacheProject = "";
-let loading: Promise<void> | null = null;
+const pending = new Map<string, Promise<void>>();
 let live: { docId: string; doc: KDoc } | null = null;   // the sheet on screen, as last read: kept when another sheet opens
 
 function sheetsOf(doc: KDoc): SheetRef[] {
@@ -39,30 +39,33 @@ export function sheetDoc(docId: string): KDoc | null { const e = entry(docId); r
 export function schDocs(): DocEntryLite[] { return openDocs().filter((d) => d.docType === "kicad_sch"); }
 
 /** Read the sheets that are not open (again after `stale`), then rebuild the tree. */
-export function loadSheets(stale?: string | null): Promise<void> {
-  if (cacheProject !== projectId()) { cache.clear(); cacheProject = projectId(); }
-  if (stale) {   // the sheet that was just left: what was on screen is newer than what the server would send back right now
-    if (live && live.docId === stale && stale !== currentDocId()) cache.set(stale, { doc: live.doc, sheets: sheetsOf(live.doc), page: String((live.doc as unknown as { pageNumber?: string }).pageNumber || "1") });
+export async function loadSheets(stale?: string | null, remote = false): Promise<void> {
+  if (cacheProject !== projectId()) { cache.clear(); pending.clear(); cacheProject = projectId(); }
+  if (stale) {
+    pending.delete(stale);
+    if (!remote && live && live.docId === stale && stale !== currentDocId()) cache.set(stale, { doc: live.doc, sheets: sheetsOf(live.doc), page: String((live.doc as unknown as { pageNumber?: string }).pageNumber || "1") });
     else cache.delete(stale);
   }
-  const want = schDocs().filter((d) => d.docId !== currentDocId() && !cache.has(d.docId));
-  if (!want.length) { publishHierarchy(); return Promise.resolve(); }
-  if (loading) return loading;
   const pid = projectId();
-  loading = Promise.all(want.map(async (d) => {
-    try {
-      const r = await fetch(`/api/docs/${d.docId}/content?v=${Date.now()}`); if (!r.ok) return;
-      const doc = KC().parseDoc(await r.text(), "kicad_sch");
-      if (pid === projectId()) cache.set(d.docId, { doc, sheets: sheetsOf(doc), page: String((doc as unknown as { pageNumber?: string }).pageNumber || "1") });
-    } catch (e) { /* unreadable sheet: it shows without children */ }
-  })).then(() => { loading = null; publishHierarchy(); });
-  return loading;
+  const want = schDocs().filter((d) => d.docId !== currentDocId() && !cache.has(d.docId));
+  await Promise.all(want.map(({ docId }) => {
+    const inFlight = pending.get(docId);
+    if (inFlight) return inFlight;
+    const request = readSavedSchematic(docId).then((doc) => {
+      if (doc && pid === projectId() && pending.get(docId) === request) {
+        cache.set(docId, { doc, sheets: sheetsOf(doc), page: String((doc as KDoc & { pageNumber?: string }).pageNumber || "1") });
+      }
+    }).catch(() => { /* unreadable sheet: it shows without children */ }).finally(() => {
+      if (pending.get(docId) === request) pending.delete(docId);
+    });
+    pending.set(docId, request);
+    return request;
+  }));
+  publishHierarchy();
 }
 
 function resolveChild(parent: DocEntryLite, file: string): DocEntryLite | null {
-  const dir = parent.path.split("/").slice(0, -1).join("/"), rel = dir ? `${dir}/${file}` : file, base = file.split("/").pop();
-  const docs = schDocs();
-  return docs.find((d) => d.path === rel || d.path === file) || docs.find((d) => d.path.split("/").pop() === base) || null;
+  return findSheetDoc(file, parent.path) || null;
 }
 
 /** The pages eeschema shows once the schematic is loaded (RepairPageNumbers: a page stored twice, like the "#" every
