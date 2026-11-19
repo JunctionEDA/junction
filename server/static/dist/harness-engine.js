@@ -106243,6 +106243,11 @@ function buildNetlist(root5, loadSheet, h3, project3) {
       junctions.push({ id: it.id, p });
     }
     const points2 = /* @__PURE__ */ new Map();
+    const connectGlobal = (n2, name, prio) => {
+      uf.union(n2, keyNode(`${I}|local:${name}`));
+      uf.union(n2, keyNode("global:" + name));
+      addDriver(n2, { prio, name: escapeNetName(name), depth: inst.depth });
+    };
     const terminal = (p, bus) => {
       const n2 = uf.add();
       for (const ln of linesAt(p, bus)) uf.union(n2, ln);
@@ -106268,10 +106273,8 @@ function buildNetlist(root5, loadSheet, h3, project3) {
         } else if (k === "label") {
           uf.union(t, keyNode(`${I}|local:${text3}`));
           addDriver(t, { prio: P_LOCAL, name: inst.human + escapeNetName(text3), depth: inst.depth });
-        } else if (k === "global_label") {
-          uf.union(t, keyNode("global:" + text3));
-          addDriver(t, { prio: P_GLOBAL, name: escapeNetName(text3), depth: inst.depth });
-        } else {
+        } else if (k === "global_label") connectGlobal(t, text3, P_GLOBAL);
+        else {
           uf.union(t, keyNode(`${I}|hier:${text3}`));
           uf.union(t, keyNode(`${I}|local:${text3}`));
           addDriver(t, { prio: P_HIER, name: inst.human + escapeNetName(text3), depth: inst.depth });
@@ -106347,15 +106350,11 @@ function buildNetlist(root5, loadSheet, h3, project3) {
             continue;
           }
           if (power && value && pin.type === "power_in") {
-            uf.union(t, keyNode("global:" + value));
-            addDriver(t, { prio: P_POWER, name: escapeNetName(value), depth: inst.depth });
+            connectGlobal(t, value, P_POWER);
             continue;
           }
           if (power) continue;
-          if (pin.hidden && pin.type === "power_in") {
-            uf.union(t, keyNode("global:" + pin.name));
-            addDriver(t, { prio: P_POWER, name: escapeNetName(pin.name), depth: inst.depth });
-          }
+          if (pin.hidden && pin.type === "power_in") connectGlobal(t, pin.name, P_POWER);
           if (pin.type === "no_connect") ncNodes.add(t);
           const pr = { comp: comp ? ref : null, ref, unitRef, pin, pins: pins2, uuid: it.id, power, inNetlist };
           const l = pinsAt.get(t);
