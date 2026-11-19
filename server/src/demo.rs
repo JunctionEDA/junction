@@ -166,6 +166,75 @@ pub async fn open(
     Ok(axum::Json(serde_json::json!({ "projectId": id, "name": NAME })))
 }
 
+/// Reconnect affected demo copies on the server. Existing snapshots and history stay available.
+pub async fn repair_split_ground(state: &AppState) -> anyhow::Result<()> {
+    let candidates: Vec<(Uuid, Uuid, i64)> = sqlx::query_as(
+        "SELECT d.id, p.id, p.owner_id FROM projects p JOIN documents d ON d.project_id = p.id
+         JOIN LATERAL (SELECT seq, content FROM snapshots WHERE doc_id = d.id ORDER BY seq DESC LIMIT 1) s ON true
+         WHERE p.name = $1 AND p.deleted_at IS NULL AND d.path = 'Devboard_Demo.kicad_pcb'
+           AND d.doc_type = 'kicad_pcb'
+           AND (position(convert_to($2, 'UTF8') in s.content) > 0 OR EXISTS (
+               SELECT 1 FROM ops o WHERE o.doc_id = d.id AND o.seq > s.seq AND o.changes::text LIKE '%/GND%'
+           ))",
+    )
+    .bind(NAME)
+    .bind("\"/GND\"")
+    .fetch_all(&state.pool)
+    .await?;
+
+    let count = candidates.len();
+    let mut repaired = 0;
+    let mut failed = 0;
+    for (board, project, owner) in candidates {
+        match repair_board(state, board, project, owner).await {
+            Ok(true) => repaired += 1,
+            Ok(false) => {}
+            Err(error) => {
+                failed += 1;
+                tracing::warn!("Devboard Demo ground repair skipped a board: {error}");
+            }
+        }
+    }
+    tracing::info!(count, repaired, failed, "Devboard Demo ground scan complete");
+    Ok(())
+}
+
+async fn repair_board(state: &AppState, board: Uuid, project: Uuid, owner: i64) -> anyhow::Result<bool> {
+    use crate::{compact, persist, versions};
+    let pool = &state.pool;
+    let docs = persist::project_documents(pool, project).await?;
+    let Some(pcb) = docs.iter().find(|doc| doc.id == board) else { return Ok(false) };
+    let mut sheets = docs.iter().filter(|doc| doc.doc_type == "kicad_sch");
+    let Some(sch) = sheets.next().filter(|doc| doc.path == "Devboard_Demo.kicad_sch") else { return Ok(false) };
+    if sheets.next().is_some() { return Ok(false) }
+    for doc in [pcb, sch] {
+        compact::fold(pool, doc).await.map_err(anyhow::Error::msg)?;
+    }
+    let Some((board_seq, board_bytes)) = persist::latest_snapshot(pool, board).await? else { return Ok(false) };
+    let Some((sch_seq, sch_bytes)) = persist::latest_snapshot(pool, sch.id).await? else { return Ok(false) };
+    if persist::head_seq(pool, sch.id).await? != sch_seq || persist::head_seq(pool, board).await? != board_seq {
+        anyhow::bail!("A document changed during the scan");
+    }
+    let project_file = if let Some(pro) = docs.iter().find(|doc| doc.path == "Devboard_Demo.kicad_pro") {
+        persist::latest_snapshot(pool, pro.id).await?.map(|(_, bytes)| String::from_utf8(bytes)).transpose()?.unwrap_or_default()
+    } else { String::new() };
+    let req = serde_json::json!({
+        "base": "", "token": "", "agent": "", "canWrite": false,
+        "user": { "id": 0, "login": "", "name": "" }, "project": null, "tool": "repair_demo_ground",
+        "args": { "board": String::from_utf8(board_bytes)?, "schematic": String::from_utf8(sch_bytes)?, "projectFile": project_file },
+    });
+    let reply = crate::mcp::hosts().call(i64::MIN + 1, req, std::time::Duration::from_secs(60)).await
+        .map_err(anyhow::Error::msg)?;
+    if reply["ok"] != true { anyhow::bail!("Could not verify the corrected copper") }
+    let Some(content) = reply["result"]["text"].as_str() else { return Ok(false) };
+    if persist::head_seq(pool, sch.id).await? != sch_seq { anyhow::bail!("The schematic changed during the repair") }
+    if !versions::reset_to_content_if_unchanged(state, owner, board, content.as_bytes(), board_seq).await
+        .map_err(|_| anyhow::anyhow!("Could not save the approved board repair"))? {
+        anyhow::bail!("The board changed during the repair");
+    }
+    Ok(true)
+}
+
 /// `ensure`, with a failure logged instead of returned: a missing demo must never stop a sign-in or a list.
 pub async fn ensure_quietly(state: &AppState, user_id: i64) {
     if let Err(e) = ensure(state, user_id).await {

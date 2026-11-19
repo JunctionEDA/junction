@@ -240,6 +240,15 @@ async fn main() -> anyhow::Result<()> {
     };
     relay::start(relay, relay_outbox, pool.clone(), state.registry.clone(), state.access_epoch.clone());
 
+    {
+        let state = state.clone();
+        tokio::spawn(async move {
+            if let Err(error) = demo::repair_split_ground(&state).await {
+                tracing::error!("Devboard Demo ground scan failed: {error}");
+            }
+        });
+    }
+
     fonts::spawn_refresh();
 
     // Stored schematics written before 2026-11-15 can carry a quoted `private` keyword KiCad refuses.
