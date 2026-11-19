@@ -30,6 +30,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { setCad } from './cad-setting.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -112,6 +113,7 @@ async function open(uid, login) {
   const page = await ctx.newPage(); page.setDefaultTimeout(45000);
   page.on('pageerror', (e) => errors.push(`${login}: ${e.message}`));
   page.on('console', (m) => { if (m.type() === 'error' && !/favicon|Failed to load resource/.test(m.text())) errors.push(`${login} console: ${m.text()}`); });
+  await setCad(BASE, jwt(uid, login));   // Mechanical CAD is off for a new account
   await page.goto(`${BASE}/auth/dev?jwt=${jwt(uid, login)}&next=/`);
   await page.waitForLoadState('networkidle');
   return page;

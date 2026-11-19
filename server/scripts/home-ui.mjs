@@ -333,7 +333,9 @@ await step('blank project', async () => {
   const id = a.url().match(/\/p\/([0-9a-f-]+)/)[1];
   const info = (await api(ids.ta, `/api/projects/${id}`)).body;
   check('a blank project is empty: no schematic and no board, only the project\'s own document', info.name === 'Fresh idea' && info.docs.length === 1 && info.docs[0].docType === 'project_shell', info.docs.map((d) => d.path).join(', '));
-  check('…and it opens on its Home tab, which offers a PCB, a part studio and an assembly', await a.locator('[data-project-home] [data-home-create=cards] [data-create]').count() === 3 && /doc=home/.test(a.url()), a.url());
+  // Mechanical CAD is off for a new account (web/shared/cad.ts): a PCB only (cad-setting-ui.mjs has CAD on)
+  check('…and it opens on its Home tab, which offers a PCB', await a.locator('[data-project-home] [data-home-create=cards] [data-create]').count() === 1
+    && await a.locator('[data-project-home] [data-home-create=cards] [data-create=pcb]').count() === 1 && /doc=home/.test(a.url()), a.url());
   await a.screenshot({ path: `${out}/17b-blank-editor.png` });
   check('…and it opens in the editor without errors', errors.length === 0, errors.join(' | '));
   await a.goBack(); await a.waitForSelector('.hp-item-name:has-text("Fresh idea")'); check('…and is in the list on the way back', true);

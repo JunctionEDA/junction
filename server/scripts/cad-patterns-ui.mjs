@@ -16,6 +16,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { setCad } from './cad-setting.mjs';
 
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright');
@@ -128,6 +129,7 @@ try {
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => { if (m.type() === 'error' && !/Failed to load resource/.test(m.text())) errors.push(`console: ${m.text()}`); });
   page.on('response', (r) => { if (r.status() >= 400) missing.push(`${r.status()} ${new URL(r.url()).pathname}`); });
+  await setCad(BASE, jwt(uid, 'cad-patterns-ui'));   // Mechanical CAD is off for a new account
   await page.goto(`${BASE}/auth/dev?jwt=${jwt(uid, 'cad-patterns-ui')}&next=/`);
   await page.waitForLoadState('networkidle');
   const project = await page.evaluate(async () => (await (await fetch('/api/projects/blank', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Patterns UI test', template: 'pcb' }) })).json()));

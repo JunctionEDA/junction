@@ -9,6 +9,7 @@
 //   E2E_PG_URL=… E2E_JWT_SECRET=testsecret [E2E_BASE=…] [E2E_FAKE_GH=http://127.0.0.1:8098] node scripts/cad-history-github.mjs
 import crypto from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { setCad } from './cad-setting.mjs';
 
 const BASE = (process.env.E2E_BASE || 'http://127.0.0.1:8099').replace(/\/$/, '');
 const GH = (process.env.E2E_FAKE_GH || 'http://127.0.0.1:8098').replace(/\/$/, '');
@@ -82,6 +83,7 @@ try {
   sql(`DELETE FROM github_tokens WHERE user_id = ${adaId}`);
   sql(`DELETE FROM projects WHERE owner_id = ${adaId}`);
   const ada = jwt(adaId, 'cad-gh-ada');
+  await setCad(BASE, ada);   // Mechanical CAD is off for a new account
   await ctl('user', { login: 'cad-gh-ada', id: 990031 });
   await ctl('repo', { fullName: 'cad-gh-ada/bracket', isPrivate: true, files: { 'bracket.kicad_pro': '{}', 'bracket.kicad_pcb': PCB, 'Bracket.jpart': PART, 'README.md': '# bracket\n' } });
   await ctl('browser', { login: 'cad-gh-ada' });
