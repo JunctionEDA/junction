@@ -2347,6 +2347,16 @@ pub async fn notify_docs_added(state: &AppState, project_id: Uuid, doc_id: Uuid)
     }
 }
 
+/// A parent sheet's links changed. Editors on that document already receive the committed op.
+pub async fn notify_sheet_changed(state: &AppState, project_id: Uuid, parent: Uuid) {
+    if let Ok(docs) = persist::project_documents(&state.pool, project_id).await {
+        for d in docs.iter().filter(|d| d.id != parent && d.doc_type == "kicad_sch") {
+            let payload = json!({ "type": "hierarchy", "docId": d.id, "parentDocId": parent });
+            state.doc_event(d.id, crate::doc_actor::DocMsg::Notice { payload }).await;
+        }
+    }
+}
+
 /// The document types a client may delete or move: library files (a footprint, a symbol library, a library table,
 /// a 3D model, a drawing sheet), other loose files, and the part studios and assemblies the document tabs create,
 /// rename and delete.  A project's own schematic, board and project file stay put.

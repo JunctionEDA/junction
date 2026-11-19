@@ -1,5 +1,6 @@
 // kicad-canvas — GENERATED SOURCE MODULE (split from the former static/kicad-canvas.js; static/kicad-canvas.js is now the esbuild output of web/domains/pcb/canvas/index.ts — edit these modules, not the bundle).
 import { SCH, SCH_Z, dimColor, parseColor } from "./colors";
+import { stackedItems, unescapePin } from "./stacked-pins";
 import { G, bboxAdd, boxUnion, textGeom, textLines, transformedText } from "./geom";
 import { arcFrom3, atOf, bezierPts, colorOf, dashOf, effectsOf, faceOf, ellipsePts, fillOf, has, isList, justOf, kid, kids, num, ptsOf, rotPt, str, strokeColorOf, widthOf, yesNo } from "./sexpr";
 import { buildImageGeom, buildTableGeom } from "./tables-images";
@@ -455,7 +456,7 @@ export function buildSymbolGeom(doc: Doc, item: Item): void {
         } else if (gk === "text") {
           const [tx, ty, tr] = atOf(g); const ef = effectsOf(g);
           // SCH_PAINTER::draw( SCH_TEXT ) on LAYER_DEVICE: placed on its box like a field, each line keeping its H justification
-          if (!ef.hide) { const [px, py] = tf(tx, ty); transformedText(item, Ti, px, py, str(g[1]), ef.size, col(ef.color || SCH.outline), tr, ef.just, bodyLayer, { z: SCH_Z.device, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, alpha, olKind: "field", olKeepH: true }); take("body"); }
+          if (!ef.hide) { const [px, py] = tf(tx, ty); transformedText(item, Ti, px, py, str(g[1]), ef.size, col(ef.color || SCH.outline), tr / 10, ef.just, bodyLayer, { z: SCH_Z.device, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, alpha, olKind: "field", olKeepH: true }); take("body"); }
         } else if (gk === "text_box") {
           const [tx, ty, tr] = atOf(g); const ef = effectsOf(g); const sz = kid(g, "size"); const [px, py] = tf(tx, ty);
           if (!ef.hide) { transformedText(item, Ti, px, py, str(g[1]), ef.size, col(ef.color || SCH.outline), tr, ef.just, bodyLayer, { z: SCH_Z.device, w: textPen(ef, ef.size), italic: ef.italic, ...faceOf(ef), sizeX: ef.sizeX, alpha, defH: "left", defV: "top" }); take("body"); }
@@ -593,6 +594,15 @@ export function buildPinGeom(item: GeomSink, g: SNode, tf: Tf, sym: PinSym): voi
   const g0 = item.geom.length, numTag = kid(g, "number"); const tag = numTag ? str(numTag[1]) : "";
   try { buildPinGeomInner(item, g, tf, sym, type, shape, px, py, pr, len); } finally { for (let i = g0; i < item.geom.length; i++) item.geom[i].pinNo = tag; }
 }
+/** FormatStackedPinForDisplay keeps the author's order and range notation. Only the display is split. */
+function pinNumberLines(number: string, length: number, size: number): string[] {
+  const items = stackedItems(number);
+  if (!items) return [number];
+  const parts = items.map(unescapePin);
+  const inline = "[" + parts.join(",") + "]";
+  return parts.length > 1 && textWidth(inline, size, size / 8) > Math.max(length, 50 * MIL) ? parts : [inline];
+}
+
 function buildPinGeomInner(item: GeomSink, g: SNode, tf: Tf, sym: PinSym, type: string, shape: string, px: number, py: number, pr: number, len: number): void {
   const dir = ((Math.round(pr) % 360) + 360) % 360;
   const d = dir === 0 ? [1, 0] : dir === 90 ? [0, 1] : dir === 180 ? [-1, 0] : [0, -1];   // file angle points into the body
@@ -652,9 +662,29 @@ function buildPinGeomInner(item: GeomSink, g: SNode, tf: Tf, sym: PinSym, type: 
   const alongX = orient === "L" ? pos[0] - halfLen : pos[0] + halfLen, alongY = orient === "D" ? pos[1] + halfLen : pos[1] - halfLen;
   const nameColor = sym.col(SCH.pinName), numColor = sym.col(SCH.pinNum);
   if (showNum) {
-    const perp = clearance + numEf.size / 2 + numThick;
-    if (vertical) textGeom(item, both ? pos[0] + perp : pos[0] - perp, alongY, pinNum, numEf.size, numColor, 90, ["center", "middle"], "Pin numbers", { z: SCH_Z.pinNum, w: numThick });
-    else textGeom(item, alongX, both ? pos[1] + perp : pos[1] - perp, pinNum, numEf.size, numColor, 0, ["center", "middle"], "Pin numbers", { z: SCH_Z.pinNum, w: numThick });
+    const size = numEf.size, lines = pinNumberLines(pinNum, len, size), stacked = lines.length > 1;
+    const pitch = 1.3 * size, height = stacked ? lines.length * pitch : size;
+    // Long number blocks follow the symbol transform so a flip keeps them in the space the author reserved.
+    const side = d[0] ? tf(px, py + 1) : tf(px - 1, py);
+    const positive = both || (stacked && (vertical ? side[0] > pos[0] : side[1] > pos[1]));
+    const perp = (positive ? 1 : -1) * (clearance + height / 2 + numThick);
+    const center = (vertical ? pos[0] : pos[1]) + perp;
+    const halfSpan = (lines.length - 1) * pitch / 2;
+    const point = (across: number, row: number): Pt => vertical ? [center + row, alongY + across] : [alongX + across, center + row];
+    for (const [i, label] of lines.entries()) {
+      const [x, y] = point(0, i * pitch - halfSpan);
+      textGeom(item, x, y, label, size, numColor, vertical ? 90 : 0, ["center", "middle"], "Pin numbers", { z: SCH_Z.pinNum, w: numThick });
+    }
+    if (stacked) {
+      const brace = size / 3, top = -halfSpan - 2 * brace, bottom = halfSpan;
+      const gap = lines.reduce((max, s) => Math.max(max, textWidth(s, size, numThick)), 0) / 2 + brace;
+      for (const sign of [-1, 1]) {
+        const edge = sign * gap, tip = sign * brace;
+        const pts = [point(edge, top), point(edge + tip / 2, top), point(edge + tip, (top + bottom) / 2),
+          point(edge + tip / 2, bottom), point(edge, bottom)];
+        G(item, { t: "poly", pts, close: false, w: numThick, color: numColor, layer: "Pin numbers", z: SCH_Z.pinNum });
+      }
+    }
   }
   if (showName && sym.altIcons && kids(g, "alternate").length) {
     // PIN_LAYOUT_CACHE::getUntransformedAltIconBox + drawAltPinModesIcon: beyond an inside name, before an outside one

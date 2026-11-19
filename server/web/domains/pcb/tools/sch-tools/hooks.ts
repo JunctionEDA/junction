@@ -6,7 +6,7 @@ import { dropCarry, placeCarry, singleClickPlace, startCarry } from "./carry";
 import { closePicker, closePrompt, curTool, installDom, openPicker, openPowerPicker, promptClassLabel, promptFor } from "./dom";
 import { announceModes, beginDrag, cycleLineMode, endDrag, setDragMode } from "./drag";
 import { clearHighlight, highlightClick, highlightNetNow, pickNet, setHighlight } from "./highlight";
-import { pickAny } from "./hit";
+import { pickAny, pickNonSymbol } from "./hit";
 import { openImagePicker } from "./images";
 import { finishWire } from "./junction";
 import { busEntryNode, junctionNode, noConnectNode } from "./nodes";
@@ -222,7 +222,13 @@ export function onKey(key: string, ev: Mods | null | undefined, ctx: SchCtx) {
   case "g": case "G": case "m": case "M": {
     setDragMode(ctx, lower === "m" ? "move" : "drag");
     if (S.drag) return true;                                // switched mid-drag: the preview re-resolved
-    const it = S.sel ? ctx.doc.items.get(S.sel) : null; if (!it || !S.cursor) return false;   // a symbol / multi-selection is the editor's (startMove)
+    if (!S.cursor) return false;
+    let it = S.sel ? ctx.doc.items.get(S.sel) : null;
+    if (!it && !ctx.selected && !ctx.selection?.size) {
+      const hovered = pickNonSymbol(ctx, S.cursor);
+      if (hovered?.kind === "no_connect") it = hovered;
+    }
+    if (!it) return false;
     return !!beginDrag(ctx, it, S.cursor, false);
   }
   case " ": if (ev && ev.shiftKey) { cycleLineMode(ctx); return true; } return false;

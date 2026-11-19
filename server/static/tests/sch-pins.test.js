@@ -39,6 +39,39 @@ function makeCtx(doc) {
 }
 const added = (ctx) => ctx.log[ctx.log.length - 1].changes.map((c) => ctx.doc.items.get(c.id));
 
+test("SAMA7D65-4HB VDDCORE uses KiCad's rows and follows the symbol transform", () => {
+  const number = "[B2,F6,F15,H3,J9,J13,J16,N13,N16,T15,U16,U17,U19,V19]";
+  const pin = '(pin power_in line (at -25.4 35.56 0) (length 7.62) (name "VDDCORE" (effects (font (size 1.27 1.27)))) (number "' + number + '" (effects (font (size 1.27 1.27)))))';
+  const lib = '(symbol "Test:SAMA" (symbol "SAMA_1_0" ' + pin + '))';
+  for (const [angle, mirror] of [[0, ""], [0, "(mirror x)"], [90, ""], [270, "(mirror y)"]]) {
+    const doc = K.parseDoc('(kicad_sch (version 20251024) (lib_symbols ' + lib + ') (symbol (lib_id "Test:SAMA") (at 0 0 ' + angle + ') ' + mirror + ' (unit 1) (uuid "u")))');
+    const geom = doc.items.get("u").geom.filter(g => g.pinNo === number && g.layer === "Pin numbers");
+    const text = geom.filter(g => g.t === "text");
+    assert.deepStrictEqual(text.map(g => g.text), number.slice(1, -1).split(","));
+    assert.equal(geom.filter(g => g.t === "poly").length, 2);
+    const T = K.symbolTransform(angle, mirror ? mirror[8] : "");
+    const axis = angle % 180 ? "x" : "y";
+    const mid = (text[0][axis] + text[text.length - 1][axis]) / 2;
+    assert.ok((mid - (axis === "x" ? T[0] * -25.4 + T[1] * 35.56 : T[2] * -25.4 + T[3] * 35.56)) * (axis === "x" ? T[1] : T[3]) > 0);
+    assert.ok(Math.abs(text[1][axis] - text[0][axis] - 1.651) < 0.0001);
+    if (!angle && !mirror) {
+      assert.equal(text[0].x, -21.59);
+      assert.ok(Math.abs(text[0].y + 58.2041) < 0.0001);
+    }
+  }
+});
+
+test("a library graphic's tenths-of-a-degree angle survives placement and rotation", () => {
+  const lib = '(symbol "Test:T" (symbol "T_0_1" (text "VERT" (at 0 0 900) (effects (font (size 1.27 1.27))))))';
+  const preview = K.parseLibSymbol(K.parse(lib), { unit: 1 });
+  const graphic = doc => [...doc.items.values()].flatMap(it => it.geom).find(g => g.text === "VERT");
+  assert.equal(graphic(preview).rot, 90);
+  for (const [angle, expected] of [[0, 90], [90, 0], [180, 90], [270, 0]]) {
+    const doc = K.parseDoc('(kicad_sch (lib_symbols ' + lib + ') (symbol (lib_id "Test:T") (at 0 0 ' + angle + ') (unit 1) (uuid "u")))');
+    assert.equal(graphic(doc).rot, expected);
+  }
+});
+
 test("pinAt: the pin's line from its end to the body; the body itself and hidden pins are not pins", () => {
   const doc = K.parseDoc(SHEET);
   const h = _.pinAt(doc, [43.18, 48.26], 0.2); assert.ok(h); assert.strictEqual(h.pin.number, "1"); assert.strictEqual(h.item.id, "u1");

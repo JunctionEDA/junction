@@ -50,7 +50,7 @@ part studio, board, assembly ──read live──▶ instances of an assembly  
 ## Mechanical CAD is a setting
 
 CAD is something each person turns on for themselves. It is a setting of the account (`users.cad_enabled`,
-`migrations/0251_user_cad.sql`), **off by default**: `GET /api/me` says `cad`, `PUT /api/me/cad { enabled }`
+`migrations/0252_user_cad.sql`), **off by default**: `GET /api/me` says `cad`, `PUT /api/me/cad { enabled }`
 changes it. The switch, "Mechanical CAD (part studios and assemblies)", is in the account menu on the projects
 page (`platform/home/Home.tsx`) and in the editor's Junction menu (`shared/components/MenuBar.tsx`); it takes
 effect at once, without a reload.

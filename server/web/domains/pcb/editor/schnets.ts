@@ -13,7 +13,7 @@ import type { NetEntry, SheetFile, SheetInstance } from "../canvas/pcb-netlist";
 import type { schNets } from "../canvas/sch-nets";
 import { setStatusBar, state } from "./appstore";
 import { centerOn } from "./comments";
-import { openDoc, rootSchematic, topLevelSchematics } from "./doc";
+import { findSheetDoc, openDoc, readSavedSchematic, rootSchematic, topLevelSchematics } from "./doc";
 import { toast } from "./util";
 import { NL } from "./pcbdialogs/canvas";
 import { liveDocument, projectDocs, type ProjectDocInfo } from "./projectfile";
@@ -49,8 +49,8 @@ const curEntry = (): ProjectDocInfo | null => ((state as { doc?: ProjectDocInfo 
 async function readSheet(d: ProjectDocInfo): Promise<SheetFile | null> {
   let text: string | null = null, ops: { changes?: KChange[] }[] = [];
   if ((state as { me?: unknown }).me) { try { const live = await liveDocument(d.docId); text = live.file; ops = live.ops; } catch (e) { text = null; } }
-  if (text === null) { try { const r = await fetch(`/api/docs/${d.docId}/content?v=${Date.now()}`); if (!r.ok) return null; text = await r.text(); } catch (e) { return null; } }
-  const doc = KiCadCanvas.parseDoc(text, "kicad_sch");
+  const doc = text === null ? await readSavedSchematic(d.docId) : KiCadCanvas.parseDoc(text, "kicad_sch");
+  if (!doc) return null;
   for (const op of ops) for (const c of op.changes || []) { try { KiCadCanvas.applyChange(doc, c, SCH_IU); } catch (e) { /* an op this reader cannot take */ } }
   return { doc, uuid: String((doc as KDoc & { uuid?: string }).uuid || ""), file: d.path };
 }
@@ -60,7 +60,7 @@ export function loadSheets(force = false): Promise<void> {
   const now = Date.now(), cur = state.docId as string | null;
   const want = schDocs().filter((d) => d.docId !== cur && (force || !sheets.has(d.docId) || now - (sheets.get(d.docId) as Cached).at > STALE_MS));
   if (!want.length) return Promise.resolve();
-  if (loading) return loading;
+  if (loading) return force ? loading.then(() => loadSheets(true)) : loading;
   const pid = projectKey();
   loading = Promise.all(want.map(async (d) => { const f = await readSheet(d); if (f && pid === projectKey()) sheets.set(d.docId, { file: f, at: Date.now() }); }))
     .then(() => { loading = null; loadedVer++; computed = null; changed(); }, () => { loading = null; });
@@ -86,10 +86,8 @@ function compute(): Computed | null {
   const root = (state.project ? rootSchematic() : null) as ProjectDocInfo | null;
   const rootFile = (root && files.get(root.path)) || files.get(cur.path) as SheetFile;
   const resolve = (file: string, parent: SheetFile): SheetFile | null => {
-    const dir = parent.file.split("/").slice(0, -1);
-    const parts = [...dir, ...file.split("/")].filter((p) => p && p !== ".");
-    const out: string[] = []; for (const p of parts) { if (p === "..") out.pop(); else out.push(p); }
-    return files.get(out.join("/")) || files.get(file) || Array.from(files.values()).find((f) => f.file.split("/").pop() === file.split("/").pop()) || null;
+    const entry = findSheetDoc(file, parent.file);
+    return entry ? files.get(entry.path) || null : null;
   };
   const stem = rootFile.file.split("/").pop()!.replace(/\.kicad_sch$/, "");
   const pro = projectDocs().find((d) => d.docType === "kicad_pro");
@@ -140,6 +138,8 @@ export function nameOfPick(pick: Pick | null): { name: string | null; inst: numb
   if (it.kind === "symbol") {
     pin = pick.pin;
     if (!pin) { const h = helpers(); const pins = h ? h.symbolPins(E.kdoc as KDoc, it) : []; let bd = Infinity; const at = pick.at || [0, 0]; for (const p of pins) { const d = Math.hypot(p.x - at[0], p.y - at[1]); if (d < bd) { bd = d; pin = p.number; } } }
+  } else if (it.kind === "sheet" && pick.pin !== undefined) {
+    pin = pick.pin;
   } else if (it.kind === "sheet") {
     const at = pick.at || [0, 0]; let bd = Infinity;
     for (const p of K.kids(it.node, "pin") as SNode[]) { const a = K.atOf(p) as number[]; const d = Math.hypot(a[0] - at[0], a[1] - at[1]); if (d < bd) { bd = d; pin = K.str(p[1]); } }

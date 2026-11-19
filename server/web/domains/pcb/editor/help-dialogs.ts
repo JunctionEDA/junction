@@ -103,7 +103,9 @@ export function creditsHtml(list: Credit[]): string {
 }
 function creditPages(): Record<string, string> {
   const C = CREDITS as Record<string, Credit[]>;
-  return { Developers: creditsHtml(C.developers), "Doc Writers": creditsHtml(C.docWriters), Librarians: creditsHtml(C.librarians), Artists: creditsHtml(C.artists), Translators: creditsHtml(C.translators), Packagers: creditsHtml(C.packagers) };
+  const developers = `<h3 style="text-transform:none">JunctionEDA</h3><ul><li>Nathan Alspaugh (<a href="https://github.com/notaroomba" target="_blank" rel="noreferrer">@notaroomba</a>)</li></ul>
+    <h3 style="text-transform:none">KiCad credits</h3>${creditsHtml(C.developers)}`;
+  return { Developers: developers, "Doc Writers": creditsHtml(C.docWriters), Librarians: creditsHtml(C.librarians), Artists: creditsHtml(C.artists), Translators: creditsHtml(C.translators), Packagers: creditsHtml(C.packagers) };
 }
 export function openAbout(): void {
   const D = dialogs(); if (!D) return;
@@ -129,7 +131,7 @@ export function openAbout(): void {
       const page = body.querySelector<HTMLElement>("#abPage")!;
       // DIALOG_ABOUT's notebook images
       body.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => { const ic = ABOUT_TABS.find(([t]) => t === b.dataset.tab)?.[1]; if (ic) b.prepend(kicadIcon(ic, 16)); });
-      const show = (t: string) => { page.innerHTML = pages[t] || ""; body.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => { const on = b.dataset.tab === t; b.classList.toggle("on", on); b.style.background = on ? "var(--panel)" : "transparent"; b.style.fontWeight = on ? "600" : "400"; }); };
+      const show = (t: string) => { page.innerHTML = pages[t] || ""; page.scrollTop = 0; body.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => { const on = b.dataset.tab === t; b.classList.toggle("on", on); b.style.background = on ? "var(--panel)" : "transparent"; b.style.fontWeight = on ? "600" : "400"; }); };
       body.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => b.addEventListener("click", () => show(b.dataset.tab || "About")));
       body.querySelector("#abCopy")!.addEventListener("click", (ev) => {
         const btn = ev.currentTarget as HTMLElement;

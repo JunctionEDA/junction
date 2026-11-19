@@ -702,13 +702,14 @@ async fn remember_model(state: &AppState, d: &Drawings) {
     let name = easyeda::lib_name(if m.title.is_empty() { &f.name } else { &m.title });
     let xyz = |v: [f64; 3]| v.iter().map(|n| format!("{n}")).collect::<Vec<_>>().join(",");
     let _ = sqlx::query(
-        "INSERT INTO part_model_names (name, uuid, model_offset, model_rotate) VALUES ($1, $2, $3, $4)
-         ON CONFLICT (name) DO UPDATE SET uuid = EXCLUDED.uuid, model_offset = EXCLUDED.model_offset, model_rotate = EXCLUDED.model_rotate",
+        "INSERT INTO part_model_names (name, uuid, model_offset, model_rotate, outline_center) VALUES ($1, $2, $3, $4, $5)
+         ON CONFLICT (name) DO UPDATE SET uuid = EXCLUDED.uuid, model_offset = EXCLUDED.model_offset, model_rotate = EXCLUDED.model_rotate, outline_center = EXCLUDED.outline_center",
     )
     .bind(&name)
     .bind(&m.uuid)
     .bind(xyz(m.offset))
     .bind(xyz(m.rotate))
+    .bind(m.outline_center.map(|c| c.to_vec()))
     .execute(&state.pool)
     .await;
 }
@@ -731,7 +732,7 @@ pub async fn get_model_file(State(state): State<AppState>, AuthUser(_user): Auth
     if name.is_empty() || name.len() > 200 {
         return Err(AppError::NotFound);
     }
-    let row = sqlx::query_as::<_, (String, String, String)>("SELECT uuid, model_offset, model_rotate FROM part_model_names WHERE name = $1")
+    let row = sqlx::query_as::<_, (String, String, String, Option<Vec<f64>>)>("SELECT uuid, model_offset, model_rotate, outline_center FROM part_model_names WHERE name = $1")
         .bind(name)
         .fetch_optional(&state.pool)
         .await?
@@ -740,11 +741,12 @@ pub async fn get_model_file(State(state): State<AppState>, AuthUser(_user): Auth
         let n: Vec<f64> = s.split(',').filter_map(|v| v.trim().parse().ok()).collect();
         if n.len() == 3 { [n[0], n[1], n[2]] } else { [0.0; 3] }
     };
+    let center = row.3.and_then(|v| v.try_into().ok());
     let bytes = model_bytes(&state, &row.0).await?;
     let bytes = match q.form.as_deref() {
         Some("raw") => bytes,
-        Some("placed") => step_fit::placed(&bytes, xyz(&row.1), xyz(&row.2)),
-        _ => step_fit::fitted(&bytes, xyz(&row.1), xyz(&row.2)),
+        Some("placed") => step_fit::placed(&bytes, xyz(&row.1), xyz(&row.2), center),
+        _ => step_fit::fitted(&bytes, xyz(&row.1), xyz(&row.2), center),
     };
     Ok((
         [
@@ -891,7 +893,7 @@ pub async fn get_model(State(state): State<AppState>, AuthUser(user): AuthUser, 
     let model = d.conv.footprint.as_ref().and_then(|f| f.model.clone()).ok_or(AppError::NotFound)?;
     let bytes = model_bytes(&state, &model.uuid).await?;
     // fit=<n>: the number only changes the address, so a browser does not keep a file lined up the old way
-    let bytes = if q.fit.as_deref().is_some_and(|v| !v.is_empty() && v != "0") { step_fit::fitted(&bytes, model.offset, model.rotate) } else { bytes };
+    let bytes = if q.fit.as_deref().is_some_and(|v| !v.is_empty() && v != "0") { step_fit::fitted(&bytes, model.offset, model.rotate, model.outline_center) } else { bytes };
     let name = easyeda::lib_name(if model.title.is_empty() { &id } else { &model.title });
     let xyz = |v: [f64; 3]| v.iter().map(|n| format!("{n}")).collect::<Vec<_>>().join(",");
     Ok((
@@ -1267,7 +1269,7 @@ pub async fn export_library(State(state): State<AppState>, AuthUser(user): AuthU
                     if !models.iter().any(|(n, _)| n == &name) {
                         match model_bytes(&state, &m.uuid).await {
                             // lined up for the footprint's (model …) entry, as KiCad reads it (step_fit)
-                            Ok(bytes) => models.push((name, step_fit::fitted(&bytes, m.offset, m.rotate))),
+                            Ok(bytes) => models.push((name, step_fit::fitted(&bytes, m.offset, m.rotate, m.outline_center))),
                             Err(_) => notes.push(format!("{label} ({}): its 3D model could not be fetched.", info.mpn)),
                         }
                     }

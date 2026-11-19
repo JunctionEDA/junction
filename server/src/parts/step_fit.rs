@@ -13,6 +13,8 @@
 //! which makes KiCad's R · (p + T) + offset equal EasyEDA's R · (p - box + (x, y, z)), in every viewer and exporter
 //! that reads the file: the web viewer, the desktop app and stock KiCad with a downloaded library alike.
 //!
+//! When the vendor also supplies the projected outline, its XY centre replaces the rotated pivot target.
+//!
 //! Moving every CARTESIAN_POINT by the same T moves the whole model by T, also through an assembly's placements
 //! (each ITEM_DEFINED_TRANSFORMATION maps one placement onto another, both moved by T, so the move passes through it
 //! once).  A shape representation's own frame (an AXIS2_PLACEMENT_3D among its items that no transformation uses)
@@ -133,7 +135,7 @@ fn turn(v: [f64; 3], rot: [f64; 3], inverse: bool) -> [f64; 3] {
 }
 
 /// The move T (millimetres) for a model with these points, offset and rotate; None when the file has no 3D point.
-pub fn fit_move(text: &str, offset: [f64; 3], rotate: [f64; 3]) -> Option<[f64; 3]> {
+fn fit_move(text: &str, offset: [f64; 3], rotate: [f64; 3], outline_center: Option<[f64; 2]>) -> Option<[f64; 3]> {
     let k = unit_mm(text);
     let pts = corners(text);
     if pts.is_empty() {
@@ -147,7 +149,11 @@ pub fn fit_move(text: &str, offset: [f64; 3], rotate: [f64; 3]) -> Option<[f64; 
         }
     }
     let back = turn(offset, rotate, true);
-    let target = [offset[0], offset[1], -offset[2]];
+    let mut target = [offset[0], offset[1], -offset[2]];
+    if let Some([x, y]) = outline_center {
+        let world = turn(target, rotate, false);
+        target = turn([x, y, world[2]], rotate, true);
+    }
     let box_at = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, lo[2]];
     Some([0, 1, 2].map(|a| target[a] - box_at[a] - back[a]))
 }
@@ -310,9 +316,9 @@ fn unlatin1(text: &str) -> Vec<u8> {
 
 /// The vendor's file placed as EasyEDA places it on its footprint, for an entry with no offset or turn of its own
 /// (easyeda2kicad's .wrl, whose own copy has the move built in): the lined-up file with the vendor's turn and offset.
-pub fn placed(bytes: &[u8], offset: [f64; 3], rotate: [f64; 3]) -> Vec<u8> {
+pub fn placed(bytes: &[u8], offset: [f64; 3], rotate: [f64; 3], center: Option<[f64; 2]>) -> Vec<u8> {
     let text = &latin1(bytes);
-    let Some(t) = fit_move(text, offset, rotate) else { return bytes.to_vec() };
+    let Some(t) = fit_move(text, offset, rotate, center) else { return bytes.to_vec() };
     unlatin1(&transformed(&moved(text, t), rotate, offset))
 }
 
@@ -324,9 +330,9 @@ fn real(v: f64) -> String {
 }
 
 /// The vendor's STEP file lined up for its (model …) entry; the file as it is when it cannot be read as text.
-pub fn fitted(bytes: &[u8], offset: [f64; 3], rotate: [f64; 3]) -> Vec<u8> {
+pub fn fitted(bytes: &[u8], offset: [f64; 3], rotate: [f64; 3], center: Option<[f64; 2]>) -> Vec<u8> {
     let text = &latin1(bytes);
-    match fit_move(text, offset, rotate) {
+    match fit_move(text, offset, rotate, center) {
         Some(t) => unlatin1(&moved(text, t)),
         None => bytes.to_vec(),
     }
@@ -345,7 +351,7 @@ mod tests {
     #[test]
     fn usb_a_leads_land_on_their_pads() {
         // LCSC C456018: EasyEDA's offset 0,-4.9,3.8; KiCad then adds the same offset
-        let out = String::from_utf8(fitted(BOX.as_bytes(), [0.0, -4.9, 3.8], [0.0; 3])).unwrap();
+        let out = String::from_utf8(fitted(BOX.as_bytes(), [0.0, -4.9, 3.8], [0.0; 3], None)).unwrap();
         let p = pts(&out);
         assert_eq!(p.len(), 4, "the 2D point is left alone");
         let lead = [p[2][0], p[2][1] - 4.9, p[2][2] + 3.8];
@@ -364,7 +370,7 @@ mod tests {
             "ENDSEC;",
             "#10=ADVANCED_BREP_SHAPE_REPRESENTATION('a;b',(#9,#11),#1);\n#11=AXIS2_PLACEMENT_3D('',#12,#13,#14);\n#12=CARTESIAN_POINT('',(0.,0.,0.));\n#13=DIRECTION('',(0.,0.,1.));\n#14=DIRECTION('',(1.,0.,0.));\nENDSEC;",
         );
-        for out in [fitted(file.as_bytes(), [0.0, -4.9, 3.8], [0.0; 3]), placed(file.as_bytes(), [0.0, -4.9, 3.8], [0.0, 0.0, 90.0])] {
+        for out in [fitted(file.as_bytes(), [0.0, -4.9, 3.8], [0.0; 3], None), placed(file.as_bytes(), [0.0, -4.9, 3.8], [0.0, 0.0, 90.0], None)] {
             let out = String::from_utf8(out).unwrap();
             assert!(out.contains("#12=CARTESIAN_POINT('',(0.,0.,0.))"), "{out}");
             assert!(out.contains("#14=DIRECTION('',(1.,0.,0.))"), "{out}");
@@ -373,8 +379,19 @@ mod tests {
     }
 
     #[test]
+    fn projected_outline_places_a_turned_model_off_its_pivot() {
+        let offset = [-0.267, 0.915, 0.0];
+        let rotate = [0.0, 0.0, 270.0];
+        let out = placed(BOX.as_bytes(), offset, rotate, Some([2.0, -1.0]));
+        let p = pts(&latin1(&out));
+        assert!(((p[0][0] + p[1][0]) / 2.0 - 2.0).abs() < 1e-6);
+        assert!(((p[0][1] + p[1][1]) / 2.0 + 1.0).abs() < 1e-6);
+        assert!(p[0][2].abs() < 1e-6);
+    }
+
+    #[test]
     fn turned_model() {
-        let out = String::from_utf8(fitted(BOX.as_bytes(), [0.0, -4.9, 3.8], [0.0, 0.0, 90.0])).unwrap();
+        let out = String::from_utf8(fitted(BOX.as_bytes(), [0.0, -4.9, 3.8], [0.0, 0.0, 90.0], None)).unwrap();
         let p = pts(&out)[2];
         // KiCad: rotateZ(-90°) then the offset
         let r = turn(p, [0.0, 0.0, 90.0], false);
@@ -389,7 +406,7 @@ mod tests {
     #[test]
     fn placed_for_an_entry_without_offset() {
         let text = format!("{BOX}#6=DIRECTION('',(1.,0.,0.));\n");
-        let out = String::from_utf8(placed(text.as_bytes(), [0.0, -4.9, 3.8], [0.0, 0.0, 90.0])).unwrap();
+        let out = String::from_utf8(placed(text.as_bytes(), [0.0, -4.9, 3.8], [0.0, 0.0, 90.0], None)).unwrap();
         let p = pts(&out)[2];
         let want = turn([3.5, 1.35, -3.8], [0.0, 0.0, 90.0], false);
         for a in 0..3 {
@@ -402,7 +419,7 @@ mod tests {
     #[test]
     fn inch_files_move_in_inches() {
         let inch = BOX.replace("#1=SI_UNIT(.MILLI.,.METRE.);", "#1=CONVERSION_BASED_UNIT('INCH',#9);");
-        let t = fit_move(&inch, [0.0; 3], [0.0; 3]).unwrap();
+        let t = fit_move(&inch, [0.0; 3], [0.0; 3], None).unwrap();
         assert!((t[2] - 3.87 * 25.4).abs() < 1e-6);
         let p = pts(&moved(&inch, t))[0];
         assert!((p[2] * 25.4).abs() < 1e-4, "the box stands on 0: {p:?}");
@@ -413,7 +430,7 @@ mod tests {
         let mut bytes = BOX.replace("'it''s'", "'\u{1}'").into_bytes();
         let at = bytes.iter().position(|&b| b == 1).unwrap();
         bytes[at] = 0xC4; // a GBK lead byte: not UTF-8 on its own
-        let out = fitted(&bytes, [0.0, -4.9, 3.8], [0.0; 3]);
+        let out = fitted(&bytes, [0.0, -4.9, 3.8], [0.0; 3], None);
         assert_ne!(out, bytes, "the file is moved");
         assert!(out.windows(2).any(|w| w == [b'\'', 0xC4]), "the name's byte is kept");
     }

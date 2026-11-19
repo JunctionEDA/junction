@@ -154,11 +154,12 @@ export function setFilter(key: string, on?: unknown) {
 }
 
 // ---- multi-selection: box / lasso, group move, group delete ----
-export function hitAny(mm: [number, number]): { id: string; kind: string; fp?: ItemSummary | SheetEntry; item?: KItem } | null {
-  const fp = nearestFootprint(mm[0], mm[1], 5 / Math.max(1, E.zoom * 0.6)); if (fp) return { id: fp.id, kind: isSch() ? "symbol" : "footprint", fp };
+export function hitAny(mm: [number, number], preferNoConnect = false): { id: string; kind: string; fp?: ItemSummary | SheetEntry; item?: KItem } | null {
+  const fp = nearestFootprint(mm[0], mm[1], 5 / Math.max(1, E.zoom * 0.6));
+  if (fp && !preferNoConnect) return { id: fp.id, kind: isSch() ? "symbol" : "footprint", fp };
   const m = activeModule(); const pick = m && m._ && (m._.pickNonSymbol as ((ctx: ToolCtx, mm: [number, number]) => KItem | null) | undefined);
-  if (pick) { try { const it = pick(toolCtx(), mm); if (it && filterAllows(it.kind, it)) return { id: it.id, kind: it.kind, item: it }; } catch (e) { /* module without pick */ } }
-  return null;
+  if (pick) { try { const it = pick(toolCtx(), mm); if (it && (!fp || it.kind === "no_connect") && filterAllows(it.kind, it)) return { id: it.id, kind: it.kind, item: it }; } catch (e) { /* module without pick */ } }
+  return fp ? { id: fp.id, kind: isSch() ? "symbol" : "footprint", fp } : null;
 }
 
 export function itemBoxCentre(it: KItem) { const b = it.bbox; return b ? [(b[0] + b[2]) / 2, (b[1] + b[3]) / 2] : null; }
