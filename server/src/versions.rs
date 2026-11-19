@@ -512,6 +512,7 @@ async fn reset_doc(
     dst: Uuid,
     content: &[u8],
     replay: Option<(Uuid, i64, i64)>,
+    expected_head: Option<i64>,
 ) -> AppResult<i64> {
     let mut attempt = 0;
     loop {
@@ -524,6 +525,9 @@ async fn reset_doc(
         .bind(dst)
         .fetch_one(&mut *tx)
         .await?;
+        if expected_head.is_some_and(|expected| expected != head) {
+            return Err(AppError::Api(StatusCode::CONFLICT, "document_changed", "The document changed while checking GitHub.".into()));
+        }
         let at = head + 1;
         let written: Result<i64, sqlx::Error> = async {
             sqlx::query("INSERT INTO snapshots (doc_id, seq, content, uploader_id) VALUES ($1, $2, $3, $4)")
@@ -583,7 +587,16 @@ async fn reset_doc(
 
 /// Replace a document with a file that came from outside its own history (a GitHub pull).
 pub async fn reset_to_content(state: &AppState, user_id: i64, doc_id: Uuid, content: &[u8]) -> AppResult<i64> {
-    reset_doc(state, user_id, doc_id, content, None).await
+    reset_doc(state, user_id, doc_id, content, None, None).await
+}
+
+/// A background pull must not replace edits accepted after it read the document.
+pub async fn reset_to_content_if_unchanged(state: &AppState, user_id: i64, doc_id: Uuid, content: &[u8], expected_head: i64) -> AppResult<bool> {
+    match reset_doc(state, user_id, doc_id, content, None, Some(expected_head)).await {
+        Ok(_) => Ok(true),
+        Err(AppError::Api(StatusCode::CONFLICT, "document_changed", _)) => Ok(false),
+        Err(e) => Err(e),
+    }
 }
 
 /// Whether the document was replaced (restored, merged over, pulled) after `since`.
@@ -604,7 +617,7 @@ async fn restore_point(state: &AppState, user_id: i64, dst: Uuid, src: &Point) -
     let content = persist::snapshot_at(&state.pool, src.doc_id, src.snap_seq)
         .await?
         .ok_or_else(|| gone("The file behind that version is no longer kept."))?;
-    reset_doc(state, user_id, dst, &content, Some((src.doc_id, src.snap_seq, src.seq))).await
+    reset_doc(state, user_id, dst, &content, Some((src.doc_id, src.snap_seq, src.seq)), None).await
 }
 
 /// Whether the document already reads as `p` (nothing happened since).

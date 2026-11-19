@@ -594,6 +594,7 @@ struct LocalFile {
     doc: Document,
     sha: String,
     size: usize,
+    snapshot_seq: i64,
     /// Ops applied after that snapshot — edits the file does not contain yet.
     unsaved_ops: i64,
 }
@@ -607,7 +608,7 @@ async fn local_files(state: &AppState, project_id: Uuid) -> AppResult<BTreeMap<S
         let head = persist::head_seq(&state.pool, doc.id).await?;
         out.insert(
             doc.path.clone(),
-            LocalFile { sha: blob_sha(&content), size: content.len(), unsaved_ops: head - seq, doc },
+            LocalFile { sha: blob_sha(&content), size: content.len(), snapshot_seq: seq, unsaved_ops: head - seq, doc },
         );
     }
     Ok(out)
@@ -2558,6 +2559,9 @@ async fn push_as(state: &AppState, user: &User, id: Uuid, req: PushRequest) -> A
 
 #[derive(Deserialize, Default)]
 pub struct PullRequest {
+    /// Editor background pulls leave files changed on both sides for the sync page.
+    #[serde(default)]
+    pub automatic: bool,
     /// Only these project paths; everything pullable when absent.
     pub paths: Option<Vec<String>>,
     /// What to do with a file changed on both sides: `merge` (default where the
@@ -2579,7 +2583,11 @@ pub async fn pull(
 ) -> AppResult<Response> {
     let a = access(&state, &user, id).await?;
     require_editor(&a)?;
-    let link = load_link(&state, id).await?.ok_or_else(|| AppError::BadRequest("This project is not linked to a repository.".into()))?;
+    let link = match load_link(&state, id).await? {
+        Some(link) => link,
+        None if req.automatic => return Ok(Json(json!({ "updated": [], "skipped": [], "linked": false })).into_response()),
+        None => return Err(AppError::BadRequest("This project is not linked to a repository.".into())),
+    };
     let gh = Gh::for_user(&state, &user).await?;
 
     freshen(&state, id).await?;
@@ -2613,6 +2621,10 @@ pub async fn pull(
         }
         let lf = local.get(e.local_path());
         let mut skip = |why: &str| skipped.push(json!({ "path": e.path, "reason": why }));
+        if req.automatic && e.change == Change::Conflict {
+            skip("changed on both sides; review the changes on the GitHub sync page");
+            continue;
+        }
         let wanted = req.resolve.get(&e.path).map(String::as_str);
 
         // ---- a file one side deleted
@@ -2623,12 +2635,25 @@ pub async fn pull(
                     let choice = if e.change == Change::Pull { Some("github") } else { wanted };
                     match choice {
                         Some("github") => {
-                            if lf.unsaved_ops > 0 && !req.force {
+                            if lf.unsaved_ops > 0 && (!req.force || req.automatic) {
                                 skip("has live edits that are not saved yet; save in the desktop app, or pull anyway");
                                 continue;
                             }
                             keep_removed(&state, id, user.id, &lf.doc).await?;
-                            persist::delete_document(&state.pool, lf.doc.id).await?;
+                            if req.automatic {
+                                let (mut tx, ops_head) = persist::lock_sequence(&state.pool, lf.doc.id).await?;
+                                let snapshot_head: i64 = sqlx::query_scalar("SELECT COALESCE(MAX(seq), 0) FROM snapshots WHERE doc_id = $1")
+                                    .bind(lf.doc.id).fetch_one(&mut *tx).await?;
+                                let head = ops_head.max(snapshot_head);
+                                if head != lf.snapshot_seq {
+                                    skip("changed online while checking GitHub; retry after saving");
+                                    continue;
+                                }
+                                sqlx::query("DELETE FROM documents WHERE id = $1").bind(lf.doc.id).execute(&mut *tx).await?;
+                                tx.commit().await?;
+                            } else {
+                                persist::delete_document(&state.pool, lf.doc.id).await?;
+                            }
                             forget.push(e.path.clone());
                             updated.push(json!({ "path": e.path, "action": "removed" }));
                         }
@@ -2699,7 +2724,7 @@ pub async fn pull(
         }
 
         if let Some(lf) = lf {
-            if lf.unsaved_ops > 0 && !req.force {
+            if lf.unsaved_ops > 0 && (!req.force || req.automatic) {
                 skip("has live edits that are not saved yet; save in the desktop app, or pull anyway");
                 continue;
             }
@@ -2782,7 +2807,14 @@ pub async fn pull(
                     // Keep what is being replaced as a version: restorable from History
                     // and never pruned.
                     crate::versions::keep_doc(&state.pool, id, user.id, &stamp, &lf.doc).await?;
-                    crate::versions::reset_to_content(&state, user.id, lf.doc.id, &content).await?;
+                    if req.automatic {
+                        if !crate::versions::reset_to_content_if_unchanged(&state, user.id, lf.doc.id, &content, lf.snapshot_seq).await? {
+                            skip("changed online while checking GitHub; retry after saving");
+                            continue;
+                        }
+                    } else {
+                        crate::versions::reset_to_content(&state, user.id, lf.doc.id, &content).await?;
+                    }
                 }
                 agreed.push((record_as, remote_sha, Some(lf.doc.id)));
             }
