@@ -774,8 +774,8 @@ export function Home() {
     linked.current = true;
     q.delete("start");
     history.replaceState(history.state, "", location.pathname + (q.toString() ? "?" + q : "") + location.hash);
-    if (start === "mini" || start === "guided") startGuided(start === "mini" && miniBoard() ? "mini" : "home");
-    else if (start === "demo") openDemo();
+    if (start === "mini" || start === "demo") openDemo();
+    else if (start === "guided") startGuided("home");
   }, [view, me]);   // eslint-disable-line
   const signOut = async () => { try { await API.api("/auth/logout", { method: "POST" }); } catch { /* the reload decides */ } cache.mine = null; location.href = "/"; };
   acts.current = { newProject: () => startUpload(), signOut };
