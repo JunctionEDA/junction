@@ -281,6 +281,12 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
     }
     // point terminals: a node each, joined to the line under them and to one another
     const points = new Map<string, number[]>();
+    // KiCad merges same-named drivers on this sheet before connecting global drivers across sheets.
+    const connectGlobal = (n: number, name: string, prio: number): void => {
+      uf.union(n, keyNode(`${I}|local:${name}`));
+      uf.union(n, keyNode("global:" + name));
+      addDriver(n, { prio, name: escapeNetName(name), depth: inst.depth });
+    };
     const terminal = (p: Pt, bus: boolean): number => {
       const n = uf.add();
       for (const ln of linesAt(p, bus)) uf.union(n, ln);
@@ -299,7 +305,7 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
           l.push({ text, prio: k === "label" ? P_LOCAL : k === "global_label" ? P_GLOBAL : P_HIER, inst });
           uf.union(t, keyNode(k === "global_label" ? "gbus:" + text : k === "label" ? `${I}|lbus:${text}` : `${I}|hbus:${text}`));
         } else if (k === "label") { uf.union(t, keyNode(`${I}|local:${text}`)); addDriver(t, { prio: P_LOCAL, name: inst.human + escapeNetName(text), depth: inst.depth }); }
-        else if (k === "global_label") { uf.union(t, keyNode("global:" + text)); addDriver(t, { prio: P_GLOBAL, name: escapeNetName(text), depth: inst.depth }); }
+        else if (k === "global_label") connectGlobal(t, text, P_GLOBAL);
         // a hierarchical label also names the net on its own sheet: it joins the local labels of that name
         else { uf.union(t, keyNode(`${I}|hier:${text}`)); uf.union(t, keyNode(`${I}|local:${text}`)); addDriver(t, { prio: P_HIER, name: inst.human + escapeNetName(text), depth: inst.depth }); }
       } else if (k === "netclass_flag" || k === "directive_label") {
@@ -345,9 +351,9 @@ export function buildNetlist(root: SheetFile | TopSheetFile[], loadSheet: (file:
           addMem(t, { inst: I, id: it.id, kind: "pin", pin: pin.number, pinName: pin.name, ref: unitRef, power });
           // CONNECTION_GRAPH: a local power pin joins the sheet's local label cache (sheet, name), not the global one
           if (localPower && value && pin.type === "power_in") { uf.union(t, keyNode(`${I}|local:${value}`)); addDriver(t, { prio: P_LOCAL_POWER, name: inst.human + escapeNetName(value), depth: inst.depth }); continue; }
-          if (power && value && pin.type === "power_in") { uf.union(t, keyNode("global:" + value)); addDriver(t, { prio: P_POWER, name: escapeNetName(value), depth: inst.depth }); continue; }
+          if (power && value && pin.type === "power_in") { connectGlobal(t, value, P_POWER); continue; }
           if (power) continue;                                   // a PWR_FLAG's pin drives nothing by name
-          if (pin.hidden && pin.type === "power_in") { uf.union(t, keyNode("global:" + pin.name)); addDriver(t, { prio: P_POWER, name: escapeNetName(pin.name), depth: inst.depth }); }
+          if (pin.hidden && pin.type === "power_in") connectGlobal(t, pin.name, P_POWER);
           if (pin.type === "no_connect") ncNodes.add(t);
           const pr: PinRef = { comp: comp ? ref : null, ref, unitRef, pin, pins, uuid: it.id, power, inNetlist };
           const l = pinsAt.get(t); if (l) l.push(pr); else pinsAt.set(t, [pr]);
