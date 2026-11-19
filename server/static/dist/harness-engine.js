@@ -103228,7 +103228,7 @@ var footprintDocApi = {
 init_sexpr();
 
 // web/domains/pcb/canvas/version.ts
-var KICAD_BASE_VERSION = "10.99.0-8071-g267eb507cc-dirty";
+var KICAD_BASE_VERSION = "10.99.0-3743-gb1ba9d6975-dirty";
 
 // web/domains/pcb/canvas/doc.ts
 function newDoc(type) {
