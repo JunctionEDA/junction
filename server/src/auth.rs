@@ -845,13 +845,48 @@ pub async fn ws_ticket(
     Json(json!({ "token": mint_jwt(&state, user.id, &user.login) }))
 }
 
-pub async fn me(AuthUser(user): AuthUser) -> Json<serde_json::Value> {
-    Json(json!({
+/// GET /api/me.  `cad`: whether this person has turned Mechanical CAD on (`PUT /api/me/cad`).
+pub async fn me(State(state): State<AppState>, AuthUser(user): AuthUser) -> AppResult<Json<serde_json::Value>> {
+    let cad = persist::cad_enabled(&state.pool, user.id).await?;
+    Ok(Json(me_json(&user, cad)))
+}
+
+fn me_json(user: &User, cad: bool) -> serde_json::Value {
+    json!({
         "id": user.id,
         "login": user.login,
         "name": user.name,
         "email": user.email,
         "avatarUrl": user.avatar_url,
         "admin": crate::plugins::is_admin(&user.login),
-    }))
+        "cad": cad,
+    })
+}
+
+#[derive(Deserialize)]
+pub struct CadBody {
+    enabled: bool,
+}
+
+/// PUT /api/me/cad `{ "enabled": bool }`: turn Mechanical CAD (part studios, assemblies, the board link and the
+/// `cad_*` MCP tools) on or off for the signed-in person.  Answers as GET /api/me does, with the new setting.
+pub async fn put_cad(State(state): State<AppState>, AuthUser(user): AuthUser, Json(body): Json<CadBody>) -> AppResult<Json<serde_json::Value>> {
+    let cad = persist::set_cad_enabled(&state.pool, user.id, body.enabled).await?;
+    Ok(Json(me_json(&user, cad)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn me_says_whether_cad_is_on() {
+        let user = User { id: 7, github_id: 70, login: "ada".into(), name: Some("Ada".into()), email: None, avatar_url: None };
+        assert_eq!(me_json(&user, false)["cad"], json!(false));
+        assert_eq!(me_json(&user, true)["cad"], json!(true));
+        assert_eq!(me_json(&user, true)["login"], json!("ada"));
+        let body: CadBody = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert!(body.enabled);
+        assert!(serde_json::from_str::<CadBody>("{}").is_err(), "the setting is said, not assumed");
+    }
 }

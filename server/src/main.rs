@@ -334,6 +334,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/auth/desktop/token", post(auth::desktop_token))
         .route("/auth/desktop/confirm", post(auth::desktop_confirm))
         .route("/api/me", get(auth::me))
+        .route("/api/me/cad", axum::routing::put(auth::put_cad))
         .route("/api/me/wakatime", get(timetrack::get_settings).put(timetrack::put_settings).delete(timetrack::delete_settings))
         .route("/api/me/wakatime/test", post(timetrack::test_settings))
         .route("/api/me/time", get(timetrack::my_time))
