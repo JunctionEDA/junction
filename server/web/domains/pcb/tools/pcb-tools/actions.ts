@@ -85,7 +85,7 @@ export const canEdit = (ctx: PcbCtx) => { if (ctx.viewOnly) { ctx.toast("View-on
 export const needSel = (ctx: PcbCtx, what?: string) => { const ids = selectionIds(ctx); if (!ids.size) { ctx.toast(what || "Select something first"); return null; } return ids; };
 export const commitSel = (ctx: PcbCtx, changes: KChange[], label: string, keep?: boolean) => { if (!changes.length) { ctx.toast(`${label}: nothing to change`); return true; } ctx.commit(changes, label); if (keep !== false) ctx.requestRender(); return true; };
 export const plural = (n: number, w: string) => `${n} ${w}${n === 1 ? "" : "s"}`;
-export function highlightIds(ctx: PcbCtx, ids: Set<string> | null) { if (ctx.setHighlight) ctx.setHighlight(ids && ids.size ? new Set(ids) : null); }
+export function highlightIds(ctx: PcbCtx, ids: Set<string> | null, nets?: Iterable<string>) { if (ctx.setHighlight) ctx.setHighlight(ids && ids.size ? new Set(ids) : null, nets); }
 // Line Modes (BOARD_EDITOR_CONTROL::ChangeLineMode) and lineModeNext (Shift+Space)
 act("lineModeFree", "Line Modes", "", (ctx: PcbCtx) => { setAngleSnap(ctx, "free"); return true; });
 act("lineMode90", "Line Modes", "", (ctx: PcbCtx) => { setAngleSnap(ctx, "90"); return true; });
@@ -661,7 +661,7 @@ export function highlightNetAt(ctx: PcbCtx, at?: Pt | null) {
   if (!keys.size) { const p = at || cursorPoint(ctx); const k = nl.table.key(netUnder(ctx.doc, p[0], p[1], null)); if (k) keys = new Set([k]); }
   if (!keys.size) { highlightIds(ctx, null); S.highlightNet = null; return true; }
   const key = keys.values().next().value; if (S.highlightNet === key) { S.highlightNet = null; highlightIds(ctx, null); return true; }
-  S.highlightNet = key!; const ids = new Set<string>(); for (const k of keys) for (const id of netHighlightIds(ctx.doc, k, nl)) ids.add(id); highlightIds(ctx, ids); return true;   // no infobar: the net shows in the message panel
+  S.highlightNet = key!; const ids = new Set<string>(); for (const k of keys) for (const id of netHighlightIds(ctx.doc, k, nl)) ids.add(id); highlightIds(ctx, ids, keys); return true;   // no infobar: the net shows in the message panel
 }
 act("highlightNet", "Highlight Net", "`", (ctx: PcbCtx) => highlightNetAt(ctx));
 act("clearHighlight", "Clear Net Highlighting", "~", (ctx: PcbCtx) => { S.highlightNet = null; highlightIds(ctx, null); return true; });

@@ -13,6 +13,9 @@ export interface PresenceState {
   /** in-flight wire segments: x1, y1, x2, y2, width */
   ghost?: number[][];
   selection?: string[];
+  selectionParts?: string[];
+  highlight?: string[];
+  highlightNets?: string[];
   /** BOX2I(origin, size) per selected id */
   boxes?: number[][];
   /** each selected item's anchor, paired with `selection` */

@@ -2,6 +2,7 @@
 // small helpers the models share: local storage, the KiCad-style text-entry / list dialogs and the
 // pieces of editor state they read.  See web/domains/pcb/panels-api.ts for the contract with the React panes.
 import type { AppearanceState, PanelsState } from "../../panels-api";
+import type { Netlist } from "../../tools/pcb-tools/types";
 import { state } from "../appstore";
 import { E } from "../state";
 import { toolCtx } from "../tools";
@@ -44,6 +45,8 @@ export interface PcbToolsLite {
   state: { sel: Set<string>; showRatsnest: boolean; hiddenNets: Set<string>; ratsnestColors?: Map<string, string> | null; ratsnestBase?: string | null; netColorMode?: string; showCourtyardConflicts?: boolean; hiddenSeverities?: Set<string> | null; highlightNet?: string | null };
   boardNets(doc: KDoc): { name: string; code: number }[];
   netItemIds(doc: KDoc, key: string): Set<string>;
+  netlist(doc: KDoc): Netlist;
+  netHighlightIds(doc: KDoc, key: string, netlist?: Netlist): Set<string>;
   isLocked(node: SNode): boolean;
   setLocked(node: SNode, on: boolean): SNode;
   /** the one tuning pattern a selection is (its generator with only its own members beside it) */
@@ -104,5 +107,5 @@ export function listPick(title: string, label: string, header: string, items: st
 }
 
 // ---------------------------------------------------------------- the tools' context (commit, selection, highlight)
-export interface ToolCtxLite { commit(changes: unknown[], label: string): void; setHighlight(ids: Set<string> | null): void; setSelection(ids: Iterable<string>): void }
+export interface ToolCtxLite { commit(changes: unknown[], label: string): void; setHighlight(ids: Set<string> | null, nets?: Iterable<string>): void; setSelection(ids: Iterable<string>): void }
 export const tctx = (): ToolCtxLite => (toolCtx as unknown as (extra?: unknown) => ToolCtxLite)();

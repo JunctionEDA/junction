@@ -49043,8 +49043,8 @@ Press <esc> to cancel all; double-click to finish`;
         return true;
       };
       var plural3 = (n2, w) => `${n2} ${w}${n2 === 1 ? "" : "s"}`;
-      function highlightIds(ctx, ids) {
-        if (ctx.setHighlight) ctx.setHighlight(ids && ids.size ? new Set(ids) : null);
+      function highlightIds(ctx, ids, nets) {
+        if (ctx.setHighlight) ctx.setHighlight(ids && ids.size ? new Set(ids) : null, nets);
       }
       act("lineModeFree", "Line Modes", "", (ctx) => {
         setAngleSnap(ctx, "free");
@@ -50150,7 +50150,7 @@ Press <esc> to cancel all; double-click to finish`;
         S3.highlightNet = key3;
         const ids = /* @__PURE__ */ new Set();
         for (const k of keys) for (const id of netHighlightIds(ctx.doc, k, nl)) ids.add(id);
-        highlightIds(ctx, ids);
+        highlightIds(ctx, ids, keys);
         return true;
       }
       act("highlightNet", "Highlight Net", "`", (ctx) => highlightNetAt(ctx));
@@ -74394,6 +74394,7 @@ var init_state = __esm({
       selMode: "rect",
       boxSel: null,
       highlightIds: null,
+      sharedNetHighlight: null,
       escClearsHighlight: true,
       // PCBNEW_SETTINGS m_ESCClearsNetHighlight (Preferences > PCB Editor > Editing Options)
       ctrlClickHighlight: false,
@@ -75309,6 +75310,137 @@ var init_msgpanel = __esm({
   }
 });
 
+// web/domains/pcb/editor/panels/core.ts
+function pcbTools() {
+  return window.PcbTools || null;
+}
+function esc3(s2) {
+  return s2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+function textEntry(title, message, value, opts2) {
+  return new Promise((resolve2) => {
+    const D = window.KDialogs;
+    if (!D) {
+      resolve2(null);
+      return;
+    }
+    let done = false;
+    const finish = (v) => {
+      if (!done) {
+        done = true;
+        resolve2(v);
+      }
+    };
+    D.open({
+      title,
+      width: 360,
+      build(body) {
+        body.innerHTML = `<p style="margin:0 0 8px;white-space:pre-line">${esc3(message)}</p><input id="kd-entry" type="text" value="${esc3(value)}" style="width:100%">`;
+        const inp = body.querySelector("#kd-entry");
+        if (inp && opts2?.alnum) inp.addEventListener("input", () => {
+          const bad = /[^\p{L}\p{N}]/gu;
+          if (!bad.test(inp.value)) return;
+          const at5 = inp.selectionStart ?? inp.value.length, before = inp.value.slice(0, at5).replace(bad, "").length;
+          inp.value = inp.value.replace(bad, "");
+          inp.setSelectionRange(before, before);
+        });
+      },
+      ok() {
+        const inp = document.querySelector("#kd-entry");
+        finish(inp ? inp.value : null);
+      },
+      cancel() {
+        finish(null);
+      }
+    });
+  });
+}
+function listPick(title, label, header, items) {
+  return new Promise((resolve2) => {
+    const D = window.KDialogs;
+    if (!D) {
+      resolve2(null);
+      return;
+    }
+    let done = false;
+    const finish = (v) => {
+      if (!done) {
+        done = true;
+        resolve2(v);
+      }
+    };
+    D.open({
+      title,
+      width: 360,
+      build(body) {
+        body.innerHTML = `<p style="margin:0 0 8px">${esc3(label)}</p><k-select id="kd-list" size="${Math.max(4, Math.min(10, items.length + 1))}" style="width:100%">
+          <optgroup label="${esc3(header)}">${items.map((n2, i) => `<option${i === 0 ? " selected" : ""}>${esc3(n2)}</option>`).join("")}</optgroup></k-select>`;
+      },
+      ok() {
+        const sel = document.querySelector("#kd-list");
+        finish(sel && sel.value ? sel.value : null);
+      },
+      cancel() {
+        finish(null);
+      }
+    });
+  });
+}
+var EMPTY_APPEARANCE, S2, subs, panelStore, projectId, projectName, openDocs, currentDocId, kdoc, isSchDoc, KC;
+var init_core = __esm({
+  "web/domains/pcb/editor/panels/core.ts"() {
+    "use strict";
+    init_appstore();
+    init_state();
+    init_tools();
+    init_kselect();
+    EMPTY_APPEARANCE = {
+      layers: [],
+      active: "",
+      objects: [],
+      nets: [],
+      netClasses: [],
+      inactive: "normal",
+      flip: false,
+      netColorMode: "ratsnest",
+      ratsnestMode: "all",
+      presets: [],
+      builtinPresets: [],
+      preset: null,
+      viewports: [],
+      viewport: null
+    };
+    S2 = { appearance: EMPTY_APPEARANCE, hierarchy: { root: null, version: 0 }, netNav: { root: null, version: 0 }, selVersion: 0 };
+    subs = /* @__PURE__ */ new Set();
+    panelStore = {
+      get: () => S2,
+      set(patch) {
+        S2 = Object.assign({}, S2, patch);
+        for (const fn of Array.from(subs)) {
+          try {
+            fn();
+          } catch (e) {
+            console.warn(e);
+          }
+        }
+      },
+      subscribe(fn) {
+        subs.add(fn);
+        return () => {
+          subs.delete(fn);
+        };
+      }
+    };
+    projectId = () => state.project && state.project.projectId || "";
+    projectName = () => state.project && state.project.name || "";
+    openDocs = () => state.docs || [];
+    currentDocId = () => state.docId || null;
+    kdoc = () => E.kdoc || null;
+    isSchDoc = () => E.DOC_TYPE === "kicad_sch";
+    KC = () => window.KiCadCanvas;
+  }
+});
+
 // web/domains/pcb/editor/peercursors.ts
 function noteRtt(ms) {
   if (!(ms > 0 && ms < 2e3)) return;
@@ -75747,17 +75879,12 @@ function sendPresence(mmPos, ghostSegs) {
   if (E.presenting) st.presenting = true;
   if (ghostSegs) st.ghost = ghostSegs;
   if (E.chatSay) st.say = E.chatSay;
-  const picked = new Set(E.selection || []);
-  if (E.selected && E.selected.id) picked.add(E.selected.id);
-  const T = typeof CollabTools !== "undefined" ? CollabTools : null;
-  if (E.DOC_TYPE === "kicad_sch") {
-    const schSel = T && T.sch && T.sch.state ? T.sch.state.sel : null;
-    if (typeof schSel === "string" && schSel) picked.add(schSel);
-  } else {
-    const modSel = E.kdoc && T && T.pcb && T.pcb.state && T.pcb.state.sel;
-    if (modSel) for (const id of modSel) picked.add(id);
+  const picked = E.kdoc ? canvasSelection() : null;
+  if (picked) {
+    const parts = [...picked].filter((id) => id.includes("#")).slice(0, MAX_PRESENCE_ITEMS);
+    if (parts.length) st.selectionParts = parts;
   }
-  const sel = picked.size ? cachedSelection(picked) : null;
+  const sel = picked?.size ? cachedSelection(picked) : null;
   if (sel) {
     st.selection = sel.selection;
     if (sel.boxes) {
@@ -75766,6 +75893,18 @@ function sendPresence(mmPos, ghostSegs) {
         const it = E.kdoc.items.get(id), a = it && anchorMm(it);
         return a ? [Math.round(a[0] * E.IU), Math.round(a[1] * E.IU)] : null;
       });
+    }
+  }
+  const highlight = E.highlightIds;
+  if (highlight?.size) {
+    const shared2 = E.sharedNetHighlight;
+    if (shared2?.ids === highlight) st.highlightNets = shared2.nets;
+    else {
+      st.highlight = [];
+      for (const id of highlight) {
+        st.highlight.push(id);
+        if (st.highlight.length >= 100) break;
+      }
     }
   }
   const doc2 = (state.docs || []).find((d) => d.docId === state.docId);
@@ -75781,12 +75920,13 @@ function cachedSelection(picked) {
   return sel;
 }
 function fitPresence(st) {
-  let s2 = JSON.stringify(st);
-  if (s2.length <= PRESENCE_LIMIT) return st;
+  const sizeOf = (state2) => new TextEncoder().encode(JSON.stringify(state2)).length;
+  let size2 = sizeOf(st);
+  if (size2 <= PRESENCE_LIMIT) return st;
   const out2 = { ...st };
   let n2 = out2.selection ? out2.selection.length : 0;
-  while (n2 > 0 && s2.length > PRESENCE_LIMIT) {
-    n2 = Math.floor(n2 * Math.min(0.9, PRESENCE_LIMIT / s2.length));
+  while (n2 > 0 && size2 > PRESENCE_LIMIT) {
+    n2 = Math.floor(n2 * Math.min(0.9, PRESENCE_LIMIT / size2));
     out2.selection = st.selection.slice(0, n2);
     if (st.boxes) out2.boxes = st.boxes.slice(0, n2);
     if (st.at) out2.at = st.at.slice(0, n2);
@@ -75795,16 +75935,22 @@ function fitPresence(st) {
       delete out2.boxes;
       delete out2.at;
     }
-    s2 = JSON.stringify(out2);
+    size2 = sizeOf(out2);
   }
-  if (s2.length > PRESENCE_LIMIT && out2.dragLines) {
+  if (size2 > PRESENCE_LIMIT && out2.dragLines) {
     delete out2.dragLines;
     delete out2.dragAdded;
-    s2 = JSON.stringify(out2);
+    size2 = sizeOf(out2);
   }
-  if (s2.length > PRESENCE_LIMIT && out2.ghost) {
+  if (size2 > PRESENCE_LIMIT && out2.ghost) {
     delete out2.ghost;
-    s2 = JSON.stringify(out2);
+    size2 = sizeOf(out2);
+  }
+  for (const key3 of ["selectionParts", "highlight", "highlightNets"]) {
+    while (size2 > PRESENCE_LIMIT && out2[key3]?.length) {
+      out2[key3] = out2[key3].slice(0, Math.floor(out2[key3].length / 2));
+      size2 = sizeOf(out2);
+    }
   }
   return out2;
 }
@@ -75878,7 +76024,7 @@ var init_peers = __esm({
 // web/domains/pcb/editor/chat.ts
 async function loadChat(force = false) {
   hookOnce();
-  const pid = projectId();
+  const pid = projectId2();
   if (!pid) {
     store.set({ chat: EMPTY });
     return;
@@ -75891,7 +76037,7 @@ async function loadChat(force = false) {
   store.set({ chat: Object.assign({}, EMPTY, { projectId: pid, loading: true }) });
   try {
     const j = await request(`/api/projects/${pid}/chat?limit=100`);
-    if (n2 !== loadN || projectId() !== pid) return;
+    if (n2 !== loadN || projectId2() !== pid) return;
     setChat({ messages: j.messages || [], more: !!j.more, lastReadId: j.lastReadId || 0, unread: j.unread || 0, canWrite: !!j.canWrite, loading: false });
   } catch (e) {
     if (n2 !== loadN) return;
@@ -76151,7 +76297,7 @@ function leaveCursorChat() {
   }
   E.chatSay = null;
 }
-var request, EMPTY, me, projectId, chat, setChat, attach, pendingId, loadN, chatOpen, watching, readTimer, wasOpen, hooked, IU, docPath, refOf2, nm3, bubble, sayClear;
+var request, EMPTY, me, projectId2, chat, setChat, attach, pendingId, loadN, chatOpen, watching, readTimer, wasOpen, hooked, IU, docPath, refOf2, nm3, bubble, sayClear;
 var init_chat = __esm({
   "web/domains/pcb/editor/chat.ts"() {
     "use strict";
@@ -76166,7 +76312,7 @@ var init_chat = __esm({
     request = api4;
     EMPTY = { projectId: null, messages: [], loading: false, more: false, error: null, lastReadId: 0, unread: 0, canWrite: false, link: null };
     me = () => state.me;
-    projectId = () => state.project ? state.project.projectId : null;
+    projectId2 = () => state.project ? state.project.projectId : null;
     chat = () => store.get().chat || EMPTY;
     setChat = (patch) => store.set({ chat: Object.assign({}, chat(), patch) });
     attach = false;
@@ -76454,7 +76600,7 @@ __export(dom_exports, {
   checkbox: () => checkbox,
   confirmBox: () => confirmBox,
   download: () => download,
-  esc: () => esc4,
+  esc: () => esc5,
   form: () => form,
   h: () => h,
   popupMenu: () => popupMenu,
@@ -76719,7 +76865,7 @@ function download(name, text3, type = "text/csv;charset=utf-8") {
     a.remove();
   }, 1e3);
 }
-var esc4;
+var esc5;
 var init_dom2 = __esm({
   "web/domains/pcb/dialogs/dom.ts"() {
     "use strict";
@@ -76728,7 +76874,7 @@ var init_dom2 = __esm({
     init_menufit();
     init_kicon_dom();
     init_keys();
-    esc4 = (s2) => String(s2 ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    esc5 = (s2) => String(s2 ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
   }
 });
 
@@ -78229,134 +78375,6 @@ var init_sheet_pages = __esm({
   }
 });
 
-// web/domains/pcb/editor/panels/core.ts
-function esc5(s2) {
-  return s2.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-}
-function textEntry(title, message, value, opts2) {
-  return new Promise((resolve2) => {
-    const D = window.KDialogs;
-    if (!D) {
-      resolve2(null);
-      return;
-    }
-    let done = false;
-    const finish = (v) => {
-      if (!done) {
-        done = true;
-        resolve2(v);
-      }
-    };
-    D.open({
-      title,
-      width: 360,
-      build(body) {
-        body.innerHTML = `<p style="margin:0 0 8px;white-space:pre-line">${esc5(message)}</p><input id="kd-entry" type="text" value="${esc5(value)}" style="width:100%">`;
-        const inp = body.querySelector("#kd-entry");
-        if (inp && opts2?.alnum) inp.addEventListener("input", () => {
-          const bad = /[^\p{L}\p{N}]/gu;
-          if (!bad.test(inp.value)) return;
-          const at5 = inp.selectionStart ?? inp.value.length, before = inp.value.slice(0, at5).replace(bad, "").length;
-          inp.value = inp.value.replace(bad, "");
-          inp.setSelectionRange(before, before);
-        });
-      },
-      ok() {
-        const inp = document.querySelector("#kd-entry");
-        finish(inp ? inp.value : null);
-      },
-      cancel() {
-        finish(null);
-      }
-    });
-  });
-}
-function listPick(title, label, header, items) {
-  return new Promise((resolve2) => {
-    const D = window.KDialogs;
-    if (!D) {
-      resolve2(null);
-      return;
-    }
-    let done = false;
-    const finish = (v) => {
-      if (!done) {
-        done = true;
-        resolve2(v);
-      }
-    };
-    D.open({
-      title,
-      width: 360,
-      build(body) {
-        body.innerHTML = `<p style="margin:0 0 8px">${esc5(label)}</p><k-select id="kd-list" size="${Math.max(4, Math.min(10, items.length + 1))}" style="width:100%">
-          <optgroup label="${esc5(header)}">${items.map((n2, i) => `<option${i === 0 ? " selected" : ""}>${esc5(n2)}</option>`).join("")}</optgroup></k-select>`;
-      },
-      ok() {
-        const sel = document.querySelector("#kd-list");
-        finish(sel && sel.value ? sel.value : null);
-      },
-      cancel() {
-        finish(null);
-      }
-    });
-  });
-}
-var EMPTY_APPEARANCE, S2, subs, panelStore, projectId2, projectName, openDocs, currentDocId, kdoc, isSchDoc, KC;
-var init_core = __esm({
-  "web/domains/pcb/editor/panels/core.ts"() {
-    "use strict";
-    init_appstore();
-    init_state();
-    init_tools();
-    init_kselect();
-    EMPTY_APPEARANCE = {
-      layers: [],
-      active: "",
-      objects: [],
-      nets: [],
-      netClasses: [],
-      inactive: "normal",
-      flip: false,
-      netColorMode: "ratsnest",
-      ratsnestMode: "all",
-      presets: [],
-      builtinPresets: [],
-      preset: null,
-      viewports: [],
-      viewport: null
-    };
-    S2 = { appearance: EMPTY_APPEARANCE, hierarchy: { root: null, version: 0 }, netNav: { root: null, version: 0 }, selVersion: 0 };
-    subs = /* @__PURE__ */ new Set();
-    panelStore = {
-      get: () => S2,
-      set(patch) {
-        S2 = Object.assign({}, S2, patch);
-        for (const fn of Array.from(subs)) {
-          try {
-            fn();
-          } catch (e) {
-            console.warn(e);
-          }
-        }
-      },
-      subscribe(fn) {
-        subs.add(fn);
-        return () => {
-          subs.delete(fn);
-        };
-      }
-    };
-    projectId2 = () => state.project && state.project.projectId || "";
-    projectName = () => state.project && state.project.name || "";
-    openDocs = () => state.docs || [];
-    currentDocId = () => state.docId || null;
-    kdoc = () => E.kdoc || null;
-    isSchDoc = () => E.DOC_TYPE === "kicad_sch";
-    KC = () => window.KiCadCanvas;
-  }
-});
-
 // web/domains/pcb/editor/panels/hierarchy.ts
 function sheetsOf(doc2) {
   const out2 = [];
@@ -78376,9 +78394,9 @@ function schDocs2() {
   return openDocs().filter((d) => d.docType === "kicad_sch");
 }
 function loadSheets(stale) {
-  if (cacheProject !== projectId2()) {
+  if (cacheProject !== projectId()) {
     cache4.clear();
-    cacheProject = projectId2();
+    cacheProject = projectId();
   }
   if (stale) {
     if (live && live.docId === stale && stale !== currentDocId()) cache4.set(stale, { doc: live.doc, sheets: sheetsOf(live.doc), page: String(live.doc.pageNumber || "1") });
@@ -78390,13 +78408,13 @@ function loadSheets(stale) {
     return Promise.resolve();
   }
   if (loading2) return loading2;
-  const pid = projectId2();
+  const pid = projectId();
   loading2 = Promise.all(want2.map(async (d) => {
     try {
       const r = await fetch(`/api/docs/${d.docId}/content?v=${Date.now()}`);
       if (!r.ok) return;
       const doc2 = KC().parseDoc(await r.text(), "kicad_sch");
-      if (pid === projectId2()) cache4.set(d.docId, { doc: doc2, sheets: sheetsOf(doc2), page: String(doc2.pageNumber || "1") });
+      if (pid === projectId()) cache4.set(d.docId, { doc: doc2, sheets: sheetsOf(doc2), page: String(doc2.pageNumber || "1") });
     } catch (e) {
     }
   })).then(() => {
@@ -81820,7 +81838,7 @@ function sizeCanvas() {
     canvas2.height = h3;
   }
 }
-function boardSelected() {
+function canvasSelection() {
   const base2 = selectedSet();
   const pcb = CollabTools.pcb && CollabTools.pcb.state;
   if (isSch()) {
@@ -81912,8 +81930,11 @@ function drawCanvas() {
   E.renderFull = false;
   if (force && E.comments && E.comments.length) drawComments();
   updateMsgPanel();
-  const selected = boardSelected();
-  paintDocument(variantView(E.kdoc), cctx, view, Object.assign({ hidden: E.hiddenLayers, grid: E.gridOn ? E.gridPitch : 0, selected, highlight: E.highlightIds, brightened: boardBrightened(), enteredGroup: boardEnteredGroup(), skip: skip || void 0, rollover: E.hyperHover ? E.hyperHover.id : void 0, rolloverGeom: E.hyperHover && E.hyperHover.geom || null, rolloverRun: E.hyperHover && E.hyperHover.run || null }, schPaintState(selected), E.renderOpts), force, E.zoomAnim ? { to: E.zoomAnim.to, cx: E.zoomAnim.cx, cy: E.zoomAnim.cy } : null, requestRestRender);
+  const localSelection = canvasSelection();
+  const peers = peerPaintIds(E.kdoc);
+  const selected = peers.selected.size ? /* @__PURE__ */ new Set([...localSelection || [], ...peers.selected]) : localSelection;
+  const highlight = E.highlightIds || (peers.highlight.size ? peers.highlight : null);
+  paintDocument(variantView(E.kdoc), cctx, view, Object.assign({ hidden: E.hiddenLayers, grid: E.gridOn ? E.gridPitch : 0, selected, highlight, brightened: boardBrightened(), enteredGroup: boardEnteredGroup(), skip: skip || void 0, rollover: E.hyperHover ? E.hyperHover.id : void 0, rolloverGeom: E.hyperHover && E.hyperHover.geom || null, rolloverRun: E.hyperHover && E.hyperHover.run || null }, schPaintState(selected), E.renderOpts), force, E.zoomAnim ? { to: E.zoomAnim.to, cx: E.zoomAnim.cx, cy: E.zoomAnim.cy } : null, requestRestRender);
   if (ghosts.length) {
     const off = E.ghostCanvas || (E.ghostCanvas = document.createElement("canvas"));
     if (off.width !== canvas2.width || off.height !== canvas2.height) {
@@ -81930,7 +81951,7 @@ function drawCanvas() {
         E.kdoc,
         octx,
         Object.assign({}, view, { panX: view.panX + g2.dx * sc, panY: view.panY + g2.dy * sc }),
-        Object.assign({}, E.renderOpts, { hidden: E.hiddenLayers, grid: 0, frame: false, background: false, ids: g2.ids, markers: null, ratsnest: null, highlight: null, selected: null })
+        Object.assign({}, E.renderOpts, { hidden: E.hiddenLayers, grid: 0, frame: false, background: false, ids: g2.ids, markers: null, ratsnest: null, highlight: null, selected: g2.ids })
       );
       cctx.setTransform(1, 0, 0, 1, 0, 0);
       cctx.globalAlpha = 0.6;
@@ -82151,15 +82172,40 @@ function svgText(x, y, size2, color2, text3) {
   t.textContent = text3;
   return t;
 }
-function peerBoxesOf(ids) {
-  const out2 = [], board3 = !isSch();
-  for (const id of ids) {
-    const it = E.kdoc.items.get(id);
-    if (!it) continue;
-    const b = it.bbox, box3 = board3 ? KiCadCanvas.boardItemBox(it, E.IU) : b ? [b[0] * E.IU, b[1] * E.IU, (b[2] - b[0]) * E.IU, (b[3] - b[1]) * E.IU] : null;
-    if (box3) out2.push(box3);
+function peerPaintIds(doc2) {
+  const selected = /* @__PURE__ */ new Set(), highlight = /* @__PURE__ */ new Set(), nets = /* @__PURE__ */ new Set();
+  const add2 = (keys, into, omit) => {
+    if (!Array.isArray(keys)) return;
+    for (const key3 of keys) {
+      if (typeof key3 !== "string") continue;
+      const owner = key3.split("#", 1)[0];
+      if (!omit?.has(owner) && doc2.items.has(owner)) into.add(key3);
+    }
+  };
+  for (const peer of Object.values(E.peerState)) {
+    const st = peer.state;
+    if (!st) continue;
+    const dragAdded = new Set(Array.isArray(st.dragAdded) ? st.dragAdded : []);
+    add2(st.selection, st.ai ? highlight : selected, dragAdded);
+    add2(st.selectionParts, selected, dragAdded);
+    add2(st.highlight, highlight);
+    if (doc2.type === "pcb" && Array.isArray(st.highlightNets)) {
+      for (const name of st.highlightNets) if (typeof name === "string") nets.add(name);
+    }
   }
-  return out2;
+  const P = nets.size ? pcbTools() : null;
+  if (P) {
+    const names2 = JSON.stringify([...nets].sort()), version3 = doc2.version;
+    if (peerNetCache?.doc !== doc2 || peerNetCache.version !== version3 || peerNetCache.names !== names2) {
+      const ids = /* @__PURE__ */ new Set(), list = P.netlist(doc2);
+      for (const net of nets) for (const key3 of P.netHighlightIds(doc2, net, list)) ids.add(key3);
+      peerNetCache = { doc: doc2, version: version3, names: names2, ids };
+    }
+    for (const key3 of peerNetCache.ids) highlight.add(key3);
+  } else {
+    peerNetCache = null;
+  }
+  return { selected, highlight };
 }
 function peerCursorSpec(cid, p) {
   const st = p.state || {};
@@ -82186,7 +82232,7 @@ function drawPeers(peers) {
     drawPeers(E.peerState);
   });
   for (const [cid, p] of Object.entries(peers)) {
-    const st = p.state || {}, color2 = p.user && p.user.color || "#4477ee", name = peerName(p);
+    const st = p.state || {}, color2 = p.user && p.user.color || "#4477ee";
     if (E.kdoc && Array.isArray(st.at) && Array.isArray(st.selection)) {
       const byOff = /* @__PURE__ */ new Map();
       for (let i = 0; i < st.selection.length && i < st.at.length; i++) {
@@ -82229,48 +82275,6 @@ function drawPeers(peers) {
       line.setAttribute("stroke-linecap", "round");
       peersG.appendChild(line);
     }
-    const dragAdded = new Set(st.dragAdded || []), sel = st.selection || [];
-    let own = (st.boxes || []).filter((b, i) => !(dragAdded.size && dragAdded.has(sel[i])));
-    if (!st.boxes && sel.length && E.kdoc) own = peerBoxesOf(sel);
-    const ai = st.ai && typeof st.ai === "object" ? st.ai : null;
-    if (ai && own.length) {
-      for (const b of own.slice(0, 80)) {
-        const rect = document.createElementNS(NS2, "rect");
-        const g2 = 3 / s2 * E.IU;
-        rect.setAttribute("x", mm4(b[0] - g2));
-        rect.setAttribute("y", mm4(b[1] - g2));
-        rect.setAttribute("width", mm4(b[2] + 2 * g2));
-        rect.setAttribute("height", mm4(b[3] + 2 * g2));
-        rect.setAttribute("rx", 2 / s2);
-        rect.setAttribute("fill", color2);
-        rect.setAttribute("fill-opacity", "0.14");
-        rect.setAttribute("stroke", color2);
-        rect.setAttribute("stroke-opacity", "0.95");
-        rect.setAttribute("stroke-width", 2 / s2);
-        rect.setAttribute("class", "ai-mark");
-        peersG.appendChild(rect);
-      }
-      own = [];
-    }
-    if (own.length) {
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const b of own) {
-        x0 = Math.min(x0, b[0]);
-        y0 = Math.min(y0, b[1]);
-        x1 = Math.max(x1, b[0] + b[2]);
-        y1 = Math.max(y1, b[1] + b[3]);
-      }
-      const rect = document.createElementNS(NS2, "rect");
-      rect.setAttribute("x", mm4(x0));
-      rect.setAttribute("y", mm4(y0));
-      rect.setAttribute("width", mm4(x1 - x0));
-      rect.setAttribute("height", mm4(y1 - y0));
-      rect.setAttribute("fill", "none");
-      rect.setAttribute("stroke", color2);
-      rect.setAttribute("stroke-opacity", "0.9");
-      rect.setAttribute("stroke-width", 1.5 / s2);
-      peersG.appendChild(rect);
-    }
     const spec = peerCursorSpec(cid, p);
     if (spec) cursorSpecs.push(spec);
   }
@@ -82278,6 +82282,7 @@ function drawPeers(peers) {
   const had = (E.peerGhosts || []).length;
   E.peerGhosts = ghosts;
   if (had || ghosts.length) requestRender();
+  else requestRepaint();
 }
 function scheduleRenderRefresh() {
   E.renderDirtySince = Date.now();
@@ -82291,7 +82296,7 @@ function scheduleRenderRefresh() {
     await loadBase(false);
   }, 8e3);
 }
-var stage, world, base, overlay, peersG, selG, dragG, cmtG, cmtPanel, mmW, mmH, mmX0, mmY0, isSch, canvas2, cctx;
+var stage, world, base, overlay, peersG, selG, dragG, cmtG, cmtPanel, mmW, mmH, mmX0, mmY0, isSch, canvas2, cctx, peerNetCache;
 var init_view = __esm({
   "web/domains/pcb/editor/view.ts"() {
     "use strict";
@@ -82303,6 +82308,7 @@ var init_view = __esm({
     init_doc();
     init_dom();
     init_gestures();
+    init_core();
     init_peers();
     init_selection();
     init_state();
@@ -82332,6 +82338,7 @@ var init_view = __esm({
     E.paintConfig = paintConfig;
     E.requestRepaint = requestRepaint;
     E.drawCanvasSettled = drawCanvasSettled;
+    peerNetCache = null;
   }
 });
 
@@ -89886,6 +89893,7 @@ function leaveDoc() {
     cancelAnimationFrame(E.renderReq);
     E.renderReq = 0;
   }
+  E.sharedNetHighlight = null;
   releaseLayers();
   peersG.replaceChildren();
   clearPeerCursors();
@@ -90297,9 +90305,11 @@ function toolCtx(extra) {
     project: state.project,
     api: api4,
     docId: state.docId,
-    setHighlight(ids) {
-      E.highlightIds = ids && ids.size ? new Set(ids) : null;
+    setHighlight(ids, nets) {
+      E.highlightIds = ids?.size ? new Set(ids) : null;
+      E.sharedNetHighlight = E.highlightIds && nets ? { ids: E.highlightIds, nets: [...nets] } : null;
       requestRender();
+      sendPresence(null);
     },
     cursor: E.lastCursorMm,
     clipboard: appClipboard,

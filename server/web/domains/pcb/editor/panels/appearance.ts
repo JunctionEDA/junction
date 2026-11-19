@@ -430,7 +430,17 @@ export function netIds(names: string[], kinds?: string[]): Set<string> {
 }
 export function netCommand(cmd: NetCmd, names: string[], label: string): void {
   const ctx = tctx();
-  if (cmd === "highlight") { const ids = netIds(names); ctx.setHighlight(ids.size ? ids : null); const s = pcbState(); if (s) s.highlightNet = names[0] || null; if (!ids.size) toast(`Nothing on ${label}`); return; }
+  if (cmd === "highlight") {
+    const doc = kdoc(), P = pcbTools(), ids = new Set<string>();
+    if (doc && P && names.length) {
+      const list = P.netlist(doc);
+      for (const name of names) for (const id of P.netHighlightIds(doc, name, list)) ids.add(id);
+    }
+    ctx.setHighlight(ids.size ? ids : null, names);
+    const s = pcbState(); if (s) s.highlightNet = names[0] || null;
+    if (!ids.size) toast(`Nothing on ${label}`);
+    return;
+  }
   if (cmd === "select" || cmd === "unselect") {
     const ids = netIds(names, ["segment", "arc", "via"]);
     const cur = new Set<string>(E.selection as Set<string>); const s = pcbState(); if (s) for (const id of s.sel) cur.add(id);

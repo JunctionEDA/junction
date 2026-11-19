@@ -4,7 +4,7 @@ import { E } from "./state";
 import { toast } from "./util";
 import type { PeerEntry, PresenceState } from "./types";
 import { myRtt } from "./peercursors";
-import { applyView, mmH, mmW, mmX0, mmY0, stage, visibleRectNm, world } from "./view";
+import { applyView, canvasSelection, mmH, mmW, mmX0, mmY0, stage, visibleRectNm, world } from "./view";
 export function cycleFollow() {
   const ids = Object.keys(E.peerState);
   if (!ids.length) { toast("No one else is here to follow"); return; }
@@ -104,20 +104,13 @@ export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | nu
   if (E.presenting) st.presenting = true;
   if (ghostSegs) st.ghost = ghostSegs;
   if (E.chatSay) st.say = E.chatSay as string;   // cursor chat (chat.ts)
-  // What the peer has selected (desktop rebuildOverlay pairs selection[i] with boxes[i] and at[i]; boxes are
-  // BOX2I(origin, size) in IU).  Everything this client has picked: the multi-selection, the single symbol /
-  // footprint (E.selected), and the schematic or board module's own pick (wires, labels, tracks, vias, graphics).
-  const picked = new Set<string>(E.selection || []);
-  if (E.selected && E.selected.id) picked.add(E.selected.id);
-  const T = typeof CollabTools !== "undefined" ? CollabTools : null;
-  if (E.DOC_TYPE === "kicad_sch") {
-    const schSel = T && T.sch && T.sch.state ? T.sch.state.sel : null;
-    if (typeof schSel === "string" && schSel) picked.add(schSel);
-  } else {
-    const modSel = E.kdoc && T && T.pcb && T.pcb.state && T.pcb.state.sel;
-    if (modSel) for (const id of modSel) picked.add(id);
+  // Keep sub-items separate from the UUIDs that desktop clients pair with boxes and anchors.
+  const picked = E.kdoc ? canvasSelection() : null;
+  if (picked) {
+    const parts = [...picked].filter((id) => id.includes("#")).slice(0, MAX_PRESENCE_ITEMS);
+    if (parts.length) st.selectionParts = parts;
   }
-  const sel = picked.size ? cachedSelection(picked) : null;
+  const sel = picked?.size ? cachedSelection(picked) : null;
   if (sel) {
     st.selection = sel.selection;
     if (sel.boxes) {
@@ -125,6 +118,15 @@ export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | nu
       // The item's anchor (its GetPosition on the desktop): a receiver that holds the item ghosts it displaced by
       // `at - its own anchor`, which is exact, where a bounding-box difference never is (fonts, text layers).
       st.at = sel.selection.map((id) => { const it = E.kdoc.items.get(id), a = it && anchorMm(it); return a ? [Math.round(a[0] * E.IU), Math.round(a[1] * E.IU)] : null; });
+    }
+  }
+  const highlight = E.highlightIds as Set<string> | null;
+  if (highlight?.size) {
+    const shared = E.sharedNetHighlight;
+    if (shared?.ids === highlight) st.highlightNets = shared.nets;
+    else {
+      st.highlight = [];
+      for (const id of highlight) { st.highlight.push(id); if (st.highlight.length >= 100) break; }
     }
   }
   // The desktop only draws a peer that says which sheet it is on: SCH_COLLAB_TOOL::rebuildOverlay
@@ -154,20 +156,27 @@ function cachedSelection(picked: Set<string>) {
  *  parallel selection / boxes / at lists are shortened together, so a peer still sees the first items move with it. */
 const PRESENCE_LIMIT = 7600;
 export function fitPresence(st: PresenceState): PresenceState {
-  let s = JSON.stringify(st);
-  if (s.length <= PRESENCE_LIMIT) return st;
+  const sizeOf = (state: PresenceState) => new TextEncoder().encode(JSON.stringify(state)).length;
+  let size = sizeOf(st);
+  if (size <= PRESENCE_LIMIT) return st;
   const out: PresenceState = { ...st };
   let n = out.selection ? out.selection.length : 0;
-  while (n > 0 && s.length > PRESENCE_LIMIT) {
-    n = Math.floor(n * Math.min(0.9, PRESENCE_LIMIT / s.length));
+  while (n > 0 && size > PRESENCE_LIMIT) {
+    n = Math.floor(n * Math.min(0.9, PRESENCE_LIMIT / size));
     out.selection = st.selection!.slice(0, n);
     if (st.boxes) out.boxes = st.boxes.slice(0, n);
     if (st.at) out.at = st.at.slice(0, n);
     if (!n) { delete out.selection; delete out.boxes; delete out.at; }
-    s = JSON.stringify(out);
+    size = sizeOf(out);
   }
-  if (s.length > PRESENCE_LIMIT && out.dragLines) { delete out.dragLines; delete out.dragAdded; s = JSON.stringify(out); }
-  if (s.length > PRESENCE_LIMIT && out.ghost) { delete out.ghost; s = JSON.stringify(out); }
+  if (size > PRESENCE_LIMIT && out.dragLines) { delete out.dragLines; delete out.dragAdded; size = sizeOf(out); }
+  if (size > PRESENCE_LIMIT && out.ghost) { delete out.ghost; size = sizeOf(out); }
+  for (const key of ["selectionParts", "highlight", "highlightNets"] as const) {
+    while (size > PRESENCE_LIMIT && out[key]?.length) {
+      out[key] = out[key]!.slice(0, Math.floor(out[key]!.length / 2));
+      size = sizeOf(out);
+    }
+  }
   return out;
 }
 

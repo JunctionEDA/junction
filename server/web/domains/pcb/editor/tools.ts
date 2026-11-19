@@ -6,7 +6,7 @@ import { refreshCursor } from "./cursors";
 import { applyChanges, enterSheet, publishDocs, renderObjects, snapMm } from "./doc";
 import { selectionIds, toolChanging } from "./gestures";
 import { sendOp } from "./net";
-import { cycleFollow } from "./peers";
+import { cycleFollow, sendPresence } from "./peers";
 import { clearSelection, drawSelection, filterAllows, groupExpand, renderProps, scopeToEnteredGroup, selFilter } from "./selection";
 import { E } from "./state";
 import { subSheetDocs } from "./subsheets";
@@ -33,7 +33,11 @@ export function toolCtx(extra?: Record<string, unknown>) {
   return Object.assign({
     K: KiCadCanvas, doc: E.kdoc, IU: E.IU, isSch: isSch(), fpEditor: !!(E.kdoc && E.kdoc.fpEditor), zoom: E.zoom, pxPerMm: pxPerMm(), gridPitch: E.gridPitch, snapOn: E.snapOn, snap: snapMm, tool: E.tool, selFilter: selFilter(), activeLayer: E.activeLayer,
     selected: E.selected, items: E.items, sheets: E.sheets, viewOnly: E.viewOnly, live: !!(E.ws && E.ws.readyState === 1), stage, worldMm, selection: E.selection, docs: state.docs!, project: state.project, api, docId: state.docId,
-    setHighlight(ids: Set<string> | null) { E.highlightIds = ids && ids.size ? new Set(ids) : null; requestRender(); },
+    setHighlight(ids: Set<string> | null, nets?: Iterable<string>) {
+      E.highlightIds = ids?.size ? new Set(ids) : null;
+      E.sharedNetHighlight = E.highlightIds && nets ? { ids: E.highlightIds, nets: [...nets] } : null;
+      requestRender(); sendPresence(null);
+    },
     cursor: E.lastCursorMm, clipboard: appClipboard, designSettings: E.proSettings, customRules: E.druText,
     setSelection(ids: Iterable<string> | null) { E.selection = new Set([...(ids || [])].filter((id) => E.kdoc && E.kdoc.items.has(id))); E.selected = null; E.selField = null; E.selPins = []; for (const id of E.selection) { const f = E.items.find((x: ItemSummary) => x.id === id); if (f) { E.selected = f; break; } } store.slice("selection", { ids: [...E.selection], primary: E.selected ? E.selected.id : null, version: (state.selection ? state.selection.version || 0 : 0) + 1 }); drawSelection(); renderProps(); renderObjects(); requestRender(); },
     setMarkers(list: unknown) { E.markers = Array.isArray(list) ? list : []; E.renderOpts.markers = E.markers.length ? E.markers : undefined; store.slice("viewport", { renderOpts: Object.assign({}, E.renderOpts) }); requestRender(); if (E.markers.length) toast(`${E.markers.length} marker${E.markers.length === 1 ? "" : "s"}`); },
