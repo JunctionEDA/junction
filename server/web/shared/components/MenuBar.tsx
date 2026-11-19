@@ -284,9 +284,6 @@ export function MenuBar() {
   const guest = useApp((s) => s.guest);
   const undo = useApp((s) => s.undo);
   const inEditor = view === "editor" && !!editor;
-  // a project is open, in KiCad's frame or in a domain's own editor ("cad": a part studio, an assembly), which
-  // brings its own toolbar and has no KiCad menus
-  const inProject = inEditor || view === "cad";
   const fpEdit = useApp((s) => s.document.docType === "footprint");
   const withPlugins = usePluginMenus(inEditor && editor ? (fpEdit ? FPEDIT_MENUS : MENUS[editor]) : HOME_MENUS, inEditor && editor ? editor : null);   // plugin actions, importers and exporters join KiCad's menus
   // the Footprint Editor's menus are KiCad's exactly: the board module's own commands do not join them
@@ -459,7 +456,7 @@ export function MenuBar() {
           );
         })}
       </div>
-      {inProject && project ? (
+      {inEditor && project ? (
         <>
           <span className="name ml-3.5 font-semibold min-w-0 truncate max-[700px]:hidden" id="projName" title={project.name}>{project.name}</span>
           <span className={cx("pill", role, "ml-1.5 flex-none max-[700px]:hidden")} id="roleChip">{role || "guest"}</span>
@@ -469,7 +466,7 @@ export function MenuBar() {
       ) : null}
       <div className="spacer flex-1" />
       {inEditor && project ? <ChatButton /> : null}
-      {inProject ? (
+      {inEditor ? (
         <a id="aiConnect" className="ai-connect" href="/connect" target="_blank" rel="noopener" title="Design with AI: connect any AI model or service that speaks MCP (Claude, ChatGPT, Gemini, Copilot, Cursor, your own) to this project. It edits here live, with its own cursor.">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z" /><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8z" /></svg>
           AI
@@ -480,7 +477,7 @@ export function MenuBar() {
           <>
             {me.avatarUrl ? <img className="w-5 h-5 rounded-full" src={me.avatarUrl} alt="" /> : null}
             <span className="max-[800px]:hidden">{me.name || me.login}</span>
-            {!inProject ? <button type="button" className="btn sm" id="logoutBtn" onClick={() => window.CollabHome?.signOut()}>Log out</button> : null}
+            {!inEditor ? <button type="button" className="btn sm" id="logoutBtn" onClick={() => window.CollabHome?.signOut()}>Log out</button> : null}
           </>
         ) : <a className="btn sm" id="signinBtn" href={`/auth/github/login?next=${next}`}>Sign in with GitHub</a>}
       </div>

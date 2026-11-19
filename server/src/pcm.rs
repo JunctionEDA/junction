@@ -1092,9 +1092,7 @@ fn runtime_kind(file: &str) -> Option<&'static str> {
     Some(match file {
         // occt-import-js: the STEP reader behind the 3D viewer's real part models (web/domains/pcb/viewer3d/models.ts)
         "pyodide.js" | "pyodide.asm.mjs" | "ngspice.mjs" | "occt-import-js.js" => "application/javascript; charset=utf-8",
-        // occ-kernel.wasm: the OpenCascade modelling kernel of the mechanical domain (web/domains/mechanical/kernel,
-        // npm replicad-opencascadejs, LGPL-2.1), copied here by scripts/build-python.mjs and fetched by the CAD worker
-        "pyodide.asm.wasm" | "occt-import-js.wasm" | "occ-kernel.wasm" => "application/wasm",
+        "pyodide.asm.wasm" | "occt-import-js.wasm" => "application/wasm",
         "python_stdlib.zip" => "application/zip",
         "pyodide-lock.json" | "kicad-python.json" => "application/json; charset=utf-8",
         // a package a plugin imports (numpy, requests, …): a wheel or archive the build put beside the interpreter

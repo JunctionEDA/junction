@@ -4,7 +4,7 @@ import { setGroupCurrent, setToggle, setToggles, state, store } from "./appstore
 import { commentOnAction, openThreadAction, openThreadOnDoc } from "./comments";
 import { chatAction, openChat, startCursorChat } from "./chat";
 import { saveVersionDialog, versionsCommand } from "./versions";
-import { enterSheet, navigateDocs, openDoc, openDocId, rootSchematic, setProjectDocs, selectItemAction, setActiveLayer, setGridPitch, setLayerVisible, switchEditor, updateGridStatus } from "./doc";
+import { enterSheet, navigateDocs, openDoc, openDocId, rootSchematic, selectItemAction, setActiveLayer, setGridPitch, setLayerVisible, switchEditor, updateGridStatus } from "./doc";
 import { loadHistory, restoreCheckpoint } from "./history";
 import { navigate } from "./home";
 import { chooseTrackWidth, chooseViaSize, chooseViaStack } from "./pcbrouting";
@@ -188,7 +188,6 @@ export function dispatchAction(a: AppAction) {
       case "setGroupCurrent": setGroupCurrent(a.group, a.id); return;
       case "showPane": showPane(a.pane, a.show); return;
       case "openDoc": openDocId(a.docId); return;
-      case "projectDocs": setProjectDocs(a.docs, a.open); return;
       case "enterSheet": enterSheet(a.file); return;
       case "setLayerVisible": setLayerVisible(a.key, a.visible); return;
       case "setActiveLayer": setActiveLayer(a.layer); return;
