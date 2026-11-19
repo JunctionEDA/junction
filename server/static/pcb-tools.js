@@ -38488,8 +38488,8 @@ Press <esc> to cancel all; double-click to finish`;
     return true;
   };
   var plural = (n, w) => `${n} ${w}${n === 1 ? "" : "s"}`;
-  function highlightIds(ctx, ids) {
-    if (ctx.setHighlight) ctx.setHighlight(ids && ids.size ? new Set(ids) : null);
+  function highlightIds(ctx, ids, nets) {
+    if (ctx.setHighlight) ctx.setHighlight(ids && ids.size ? new Set(ids) : null, nets);
   }
   act("lineModeFree", "Line Modes", "", (ctx) => {
     setAngleSnap(ctx, "free");
@@ -39595,7 +39595,7 @@ Press <esc> to cancel all; double-click to finish`;
     S.highlightNet = key;
     const ids = /* @__PURE__ */ new Set();
     for (const k of keys) for (const id of netHighlightIds(ctx.doc, k, nl)) ids.add(id);
-    highlightIds(ctx, ids);
+    highlightIds(ctx, ids, keys);
     return true;
   }
   act("highlightNet", "Highlight Net", "`", (ctx) => highlightNetAt(ctx));

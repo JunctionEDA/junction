@@ -7,6 +7,7 @@ import { refreshPreview } from "../ai/proposals";
 import { loadBase } from "./doc";
 import { $, NS } from "./dom";
 import { drawHover } from "./gestures";
+import { pcbTools } from "./panels/core";
 import { anchorMm, breakFollow, followAction, peerName, sendPresence } from "./peers";
 import { drawSelection, selectedSet } from "./selection";
 import { E } from "./state";
@@ -72,7 +73,7 @@ export function sizeCanvas() {
 }
 
 /** The app's selection plus the board module's own picks (tracks, vias, graphics, zones): all repainted brightened. */
-function boardSelected(): Set<string> | null {
+export function canvasSelection(): Set<string> | null {
   const base = selectedSet(); const pcb = CollabTools.pcb && (CollabTools.pcb.state as unknown as { sel?: Set<string>; padSel?: string | null });
   if (isSch()) {
     // the schematic module's own selection (wires, labels, junctions …) and what it is dragging get the same
@@ -147,8 +148,11 @@ export function drawCanvas() {
   // updates the item's box only when it lands, after the document version was bumped)
   if (force && E.comments && E.comments.length) drawComments();
   updateMsgPanel();
-  const selected = boardSelected();
-  paintDocument(variantView(E.kdoc) as KDoc, cctx, view, Object.assign({ hidden: E.hiddenLayers, grid: E.gridOn ? E.gridPitch : 0, selected, highlight: E.highlightIds, brightened: boardBrightened(), enteredGroup: boardEnteredGroup(), skip: skip || undefined, rollover: E.hyperHover ? E.hyperHover.id : undefined, rolloverGeom: E.hyperHover && E.hyperHover.geom || null, rolloverRun: E.hyperHover && E.hyperHover.run || null }, schPaintState(selected), E.renderOpts), force, E.zoomAnim ? { to: E.zoomAnim.to, cx: E.zoomAnim.cx, cy: E.zoomAnim.cy } : null, requestRestRender);
+  const localSelection = canvasSelection();
+  const peers = peerPaintIds(E.kdoc);
+  const selected = peers.selected.size ? new Set([...(localSelection || []), ...peers.selected]) : localSelection;
+  const highlight = E.highlightIds || (peers.highlight.size ? peers.highlight : null);
+  paintDocument(variantView(E.kdoc) as KDoc, cctx, view, Object.assign({ hidden: E.hiddenLayers, grid: E.gridOn ? E.gridPitch : 0, selected, highlight, brightened: boardBrightened(), enteredGroup: boardEnteredGroup(), skip: skip || undefined, rollover: E.hyperHover ? E.hyperHover.id : undefined, rolloverGeom: E.hyperHover && E.hyperHover.geom || null, rolloverRun: E.hyperHover && E.hyperHover.run || null }, schPaintState(selected), E.renderOpts), force, E.zoomAnim ? { to: E.zoomAnim.to, cx: E.zoomAnim.cx, cy: E.zoomAnim.cy } : null, requestRestRender);
   // A peer's items mid-drag: drawn where the peer has them (presence `at`), translucent, over everything else.
   if (ghosts.length) {
     const off: HTMLCanvasElement = E.ghostCanvas || (E.ghostCanvas = document.createElement("canvas"));
@@ -158,7 +162,7 @@ export function drawCanvas() {
       if (g.hideOnly) continue;   // a wire whose stretched shape the overlay draws instead
       octx.setTransform(1, 0, 0, 1, 0, 0); octx.clearRect(0, 0, off.width, off.height);
       KiCadCanvas.render(E.kdoc, octx, Object.assign({}, view, { panX: view.panX + g.dx * sc, panY: view.panY + g.dy * sc }),
-        Object.assign({}, E.renderOpts, { hidden: E.hiddenLayers, grid: 0, frame: false, background: false, ids: g.ids, markers: null, ratsnest: null, highlight: null, selected: null }));
+        Object.assign({}, E.renderOpts, { hidden: E.hiddenLayers, grid: 0, frame: false, background: false, ids: g.ids, markers: null, ratsnest: null, highlight: null, selected: g.ids }));
       cctx.setTransform(1, 0, 0, 1, 0, 0); cctx.globalAlpha = 0.6; cctx.drawImage(off, 0, 0); cctx.globalAlpha = 1;
     }
   }
@@ -182,7 +186,7 @@ export function drawCanvas() {
     const of = (CollabTools.sch._ as unknown as { pinOf?: (d: KDoc, r: unknown) => { pin: { x: number; y: number; root: [number, number] } } | null }).pinOf;
     const found = E.selPins.map((p: unknown) => (of ? of(E.kdoc, p) : null));
     if (found.some((h: unknown) => !h)) E.selPins = E.selPins.filter((_p: unknown, i: number) => !!found[i]);
-    // their selection shadow is drawn by the canvas pass (boardSelected adds "id#pin:N")
+    // their selection shadow is drawn by the canvas pass (canvasSelection adds "id#pin:N")
   }
   if (E.selField) { const it = E.kdoc.items.get(E.selField.id); if (!it) E.selField = null; }   // its shadow and anchor come from the canvas pass
   drawCursorLayer();   // GAL draws the cursor last, over everything (its own layer: crosshair.ts)
@@ -325,15 +329,42 @@ export function svgText(x: number, y: number, size: number, color: string, text:
   return t;
 }
 
-/** Our own boxes [x, y, w, h] (internal units) of the items a peer selected by id. */
-function peerBoxesOf(ids: Iterable<string>) {
-  const out: number[][] = [], board = !isSch();
-  for (const id of ids) {
-    const it = E.kdoc.items.get(id); if (!it) continue;
-    const b = it.bbox, box = board ? KiCadCanvas.boardItemBox(it, E.IU) : b ? [b[0] * E.IU, b[1] * E.IU, (b[2] - b[0]) * E.IU, (b[3] - b[1]) * E.IU] : null;
-    if (box) out.push(box);
+/** Resolve peers' picks against this copy so the normal painter can draw their geometry. */
+let peerNetCache: { doc: KDoc; version: number; names: string; ids: Set<string> } | null = null;
+function peerPaintIds(doc: KDoc) {
+  const selected = new Set<string>(), highlight = new Set<string>(), nets = new Set<string>();
+  const add = (keys: unknown, into: Set<string>, omit?: Set<string>) => {
+    if (!Array.isArray(keys)) return;
+    for (const key of keys) {
+      if (typeof key !== "string") continue;
+      const owner = key.split("#", 1)[0];
+      if (!omit?.has(owner) && doc.items.has(owner)) into.add(key);
+    }
+  };
+  for (const peer of Object.values(E.peerState) as PeerEntry[]) {
+    const st = peer.state;
+    if (!st) continue;
+    const dragAdded = new Set(Array.isArray(st.dragAdded) ? st.dragAdded : []);
+    add(st.selection, st.ai ? highlight : selected, dragAdded);
+    add(st.selectionParts, selected, dragAdded);
+    add(st.highlight, highlight);
+    if (doc.type === "pcb" && Array.isArray(st.highlightNets)) {
+      for (const name of st.highlightNets) if (typeof name === "string") nets.add(name);
+    }
   }
-  return out;
+  const P = nets.size ? pcbTools() : null;
+  if (P) {
+    const names = JSON.stringify([...nets].sort()), version = (doc as KDoc & { version: number }).version;
+    if (peerNetCache?.doc !== doc || peerNetCache.version !== version || peerNetCache.names !== names) {
+      const ids = new Set<string>(), list = P.netlist(doc);
+      for (const net of nets) for (const key of P.netHighlightIds(doc, net, list)) ids.add(key);
+      peerNetCache = { doc, version, names, ids };
+    }
+    for (const key of peerNetCache.ids) highlight.add(key);
+  } else {
+    peerNetCache = null;
+  }
+  return { selected, highlight };
 }
 
 /** A peer's pointer as the pointer layer draws it, or null when the peer has not said where it is. */
@@ -359,7 +390,7 @@ export function drawPeers(peers: Record<string, PeerEntry>) {
   const ghosts: PeerGhost[] = [], cursorSpecs: PeerCursorSpec[] = [];
   initPeerCursors(peersG, pxPerMm, (cid) => { followAction(E.followPeer === cid && E.followCursor ? null : cid, true); drawPeers(E.peerState); });
   for (const [cid, p] of Object.entries(peers)) {
-    const st = p.state || {}, color = (p.user && p.user.color) || "#4477ee", name = peerName(p);
+    const st = p.state || {}, color = (p.user && p.user.color) || "#4477ee";
     // Items the peer is dragging: `at[i]` is where they hold selection[i]; a displacement from our copy's own
     // anchor is a live drag, drawn by drawCanvas as a ghost (one render per distinct offset).
     if (E.kdoc && Array.isArray(st.at) && Array.isArray(st.selection)) {
@@ -390,39 +421,12 @@ export function drawPeers(peers: Record<string, PeerEntry>) {
       line.setAttribute("stroke-width", Math.max(mm(g[4] || 0), 2 / s)); line.setAttribute("stroke-linecap", "round");
       peersG.appendChild(line);
     }
-    // Same rules as the desktop's COLLAB_CURSOR_ITEM: an outline in the peer colour and no
-    // fill, one union box for a multi-selection, and nothing around the items a drag pulled
-    // along (attached wires, riders -- listed in `dragAdded`), only what the peer picked.
-    const dragAdded = new Set(st.dragAdded || []), sel = st.selection || [];
-    let own = (st.boxes || []).filter((b, i: number) => !(dragAdded.size && dragAdded.has(sel[i])));
-    // a peer that names what it selected without boxes (the web at rest): outline our own copy of those items
-    if (!st.boxes && sel.length && E.kdoc) own = peerBoxesOf(sel);
-    // An assistant pointing at things (the MCP highlight tool, state.ai): each item gets its own outline with a
-    // light wash of the peer colour, since "these three capacitors" is not the box around all of them.
-    const ai = st.ai && typeof st.ai === "object" ? st.ai : null;
-    if (ai && own.length) {
-      for (const b of own.slice(0, 80)) {
-        const rect = document.createElementNS(NS, "rect"); const g = 3 / s * E.IU;
-        rect.setAttribute("x", mm(b[0] - g)); rect.setAttribute("y", mm(b[1] - g)); rect.setAttribute("width", mm(b[2] + 2 * g)); rect.setAttribute("height", mm(b[3] + 2 * g)); rect.setAttribute("rx", 2 / s);
-        rect.setAttribute("fill", color); rect.setAttribute("fill-opacity", "0.14"); rect.setAttribute("stroke", color); rect.setAttribute("stroke-opacity", "0.95"); rect.setAttribute("stroke-width", 2 / s);
-        rect.setAttribute("class", "ai-mark");
-        peersG.appendChild(rect);
-      }
-      own = [];
-    }
-    if (own.length) {
-      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-      for (const b of own) { x0 = Math.min(x0, b[0]); y0 = Math.min(y0, b[1]); x1 = Math.max(x1, b[0] + b[2]); y1 = Math.max(y1, b[1] + b[3]); }
-      const rect = document.createElementNS(NS, "rect");
-      rect.setAttribute("x", mm(x0)); rect.setAttribute("y", mm(y0)); rect.setAttribute("width", mm(x1 - x0)); rect.setAttribute("height", mm(y1 - y0));
-      rect.setAttribute("fill", "none"); rect.setAttribute("stroke", color); rect.setAttribute("stroke-opacity", "0.9"); rect.setAttribute("stroke-width", 1.5 / s);
-      peersG.appendChild(rect);
-    }
     const spec = peerCursorSpec(cid, p); if (spec) cursorSpecs.push(spec);
   }
   syncPeerCursors(cursorSpecs);
   const had = (E.peerGhosts || []).length; E.peerGhosts = ghosts;
   if (had || ghosts.length) requestRender();
+  else requestRepaint();
 }
 
 export function scheduleRenderRefresh() {

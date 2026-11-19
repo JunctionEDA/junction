@@ -31,7 +31,7 @@ import { renderObjects, snapMm, syncItemsFromDoc, updateGridStatus, applyChanges
 import { $ } from "./dom";
 import { IS_MAC } from "../../../shared/keys";
 import { cancelLongPress, candidatesAt, moveLongPress, openClarifyMenu, openContextMenu, startLongPress } from "./contextmenu";
-import { DRAG_THRESHOLD_PX, cancelInteraction, clearAllSelection, markerUnder, rotateFieldMove, startFieldMove, copperUnderBeatsFootprint, installGestures, pinForClick, registerPointerUp, selectionChanged, selectionIds, startMove, applyPickMode, selectedAnywhere, mergeBoardSelection, splitBoardSelection } from "./gestures";
+import { DRAG_THRESHOLD_PX, cancelInteraction, clearAllSelection, markerUnder, rotateFieldMove, startFieldMove, copperUnderBeatsFootprint, installGestures, pinForClick, registerPointerUp, selectionChanged, selectionHooks, selectionIds, startMove, applyPickMode, selectedAnywhere, mergeBoardSelection, splitBoardSelection } from "./gestures";
 import { loadMe, navigate, route } from "./home";
 import { sendOp } from "./net";
 import { applyTheme, syncSchModes } from "./panes";
@@ -113,6 +113,7 @@ function liveGhost(mod: GhostModule | null | undefined) {
 // Installed before every other stage listener so it sees each event first.
 installGestures(openContextMenu);
 installCrossProbe();
+selectionHooks.push(() => sendPresence(null));
 installViewSwitcher();   // Ctrl+Tab / Shift+Tab: the board's Preset and Viewport switcher (editor/view-switcher.ts)
 installTableCells();   // table cells as selectable items and the table edit tool (editor/tablecells.ts)
 

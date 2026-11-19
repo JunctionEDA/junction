@@ -179,7 +179,7 @@ interface ToolCtx {
   selected: { id: string; x: number; y: number; rot?: number } | null; items: unknown[]; sheets: unknown[]; viewOnly: boolean; live: boolean;
   stage: HTMLElement; worldMm(ev: { clientX: number; clientY: number }): [number, number]; selection: Set<string>;
   docs: unknown[]; project: unknown; api(path: string, opts?: RequestInit): Promise<unknown>; docId: string | null;
-  setHighlight(ids: Set<string> | null): void;
+  setHighlight(ids: Set<string> | null, nets?: Iterable<string>): void;
   setSelected(fp: { id: string } | null): void;
   commit(changes: KChange[], label?: string, opts?: { amend?: boolean }): void;
   undo?(): void;

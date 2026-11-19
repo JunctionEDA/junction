@@ -10,7 +10,7 @@ import { centerOn } from "../comments";
 import { openDoc } from "../doc";
 import { E } from "../state";
 import { fitBox } from "../view";
-import { layerDisplayName, netClassOf } from "./appearance";
+import { layerDisplayName, netClassOf, netCommand } from "./appearance";
 import { KC, currentDocId, isSchDoc, kdoc, pcbTools, tctx } from "./core";
 import { pageOfDoc, schDocs, sheetDoc } from "./hierarchy";
 import { drillCells, drillLines, groupLeafIds, groupName, itemFields, searchTexts, sortRows } from "./search-model";
@@ -161,9 +161,8 @@ export function searchDispatch(a: PanelAction): boolean {
   if (rows.some((r) => r.key.startsWith("net:"))) {
     // NETS_SEARCH_HANDLER::SelectItems highlights every selected net; ActivateItem opens Board Setup at Net Classes
     if (a.t === "searchActivate") { void openBoardSetup(tctx() as never, "netclasses"); return true; }
-    const doc = kdoc(), P = pcbTools(); if (!doc || !P) return true;
-    const ids = new Set<string>(); for (const r of rows) for (const id of P.netItemIds(doc, r.key.slice(4))) ids.add(id);
-    tctx().setHighlight(ids.size ? ids : null); P.state.highlightNet = rows.length ? rows[0].key.slice(4) : null;
+    const names = rows.filter((r) => r.key.startsWith("net:")).map((r) => r.key.slice(4));
+    netCommand("highlight", names, names[0]);
     return true;
   }
   // a schematic row on another sheet opens that sheet first (KiCad selects the hits of the current sheet path)
