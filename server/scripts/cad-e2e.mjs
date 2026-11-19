@@ -180,10 +180,10 @@ const skSettled = (page) => page.waitForFunction(() => { const e = window.Juncti
 const enter = async (page, text) => { await page.waitForSelector('.cad-dim-input'); await page.fill('.cad-dim-input', text); await page.keyboard.press('Enter'); await page.waitForSelector('.cad-dim-input', { state: 'detached' }); await skSettled(page); };
 const dimension = async (page, pick, label, value) => { await page.keyboard.press('d'); await skClick(page, ...pick); await skClick(page, ...label); await enter(page, String(value)); };
 async function newSketch(page, count) {
-  // with a plane or a flat face selected the sketch starts at once; otherwise the dialog asks, and ✓ takes Top
+  // with a plane or a flat face selected the sketch starts at once; otherwise the dialog waits for its plane: Top's row
   await tool(page, 'Sketch');
-  await page.waitForSelector('.cad-dialog[data-feature=sketch], .cad-sketch-dialog');
-  if (await page.locator('.cad-dialog[data-feature=sketch]').count()) await page.click('.cad-dialog [data-accept]');
+  await page.waitForSelector('.cad-sketch-dialog');
+  if (await page.locator('.cad-sketch-dialog[data-sketch-waiting]').count()) await page.click('.cad-features [data-default-geometry=top]');
   await page.waitForFunction((count) => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.features.length === count && window.JunctionSketch && window.JunctionSketch.getState().ready && window.JunctionSketch.frame; }, count, { timeout: 120000 });
   await page.waitForTimeout(800);   // the camera turns to face the plane
 }
@@ -259,8 +259,8 @@ try {
   await alice.waitForFunction(() => window.JunctionPartStudio && window.JunctionPartStudio.getState().loaded, null, { timeout: 60000 });
   const studioUrl = alice.url();
   const studioDoc = await S(alice, () => window.JunctionPartStudio.host.doc.docId);
-  const bar = await S(alice, () => { const t = document.querySelector('.cad-toolbar'); return { scrolls: t.scrollWidth > t.clientWidth + 1, sections: [...t.querySelectorAll('[data-section]')].map((e) => e.dataset.section).join(' ') }; });
-  check('"+" makes a part studio; its toolbar is grouped and fits the window', !bar.scrolls && bar.sections === 'edit sketch solid pattern reference board inspect view file', JSON.stringify(bar));
+  const bar = await S(alice, () => { const t = document.querySelector('.cad-toolbar'); return { scrolls: t.scrollWidth > t.clientWidth + 1, sections: [...t.querySelectorAll('[data-section]')].map((e) => e.dataset.section).join(' '), more: t.querySelector('[data-menu=More]')?.getAttribute('data-items') || '', search: !!t.querySelector('[data-tool-search]') }; });
+  check('"+" makes a part studio; its toolbar is grouped, fits the window, and ends with More and the tool search', !bar.scrolls && bar.sections === 'edit sketch solid modify combine pattern reference board inspect file' && ['Display', 'Planes', 'Import', 'Export'].every((t) => bar.more.split('|').includes(t)) && bar.search, JSON.stringify(bar));
   await newSketch(alice, 1);
   await alice.keyboard.press('r');
   await skClick(alice, 0, 0);

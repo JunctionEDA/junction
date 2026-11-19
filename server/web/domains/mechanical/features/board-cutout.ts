@@ -30,9 +30,8 @@ export interface BoardCutoutParams {
 export default defineFeature<BoardCutoutParams>({
   type: "board-cutout",
   title: "Opening",
-  icon: '<path d="M4 5h16v14H4z"/><rect x="9" y="10" width="6" height="4" rx="0.5"/>',
-  toolbarOrder: 16,
-  toolbarSection: "board", toolbarMenu: "Board",
+  icon: '<path class="f" fill-rule="evenodd" d="M2.5 4.5h19v15h-19zM7 10v4.5h10V10z"/><rect x="2.5" y="4.5" width="19" height="15" rx="1"/><rect x="7" y="10" width="10" height="4.5" rx="1"/>',
+  toolbarOrder: 16, toolbarSection: "board", toolbarMenu: "Board", toolbarKeep: 60,
   defaults: () => ({ face: null, clearance: 0.5, depth: 10, back: 1, targets: [] }),
   schema: [
     { key: "face", label: "In front of", kind: "refs", of: ["face"], single: true, hint: "A flat face: the side of a connector that looks at the wall." },

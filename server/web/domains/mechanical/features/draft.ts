@@ -15,9 +15,8 @@ export interface DraftParams { [key: string]: any; faces: GeomRef[]; neutral: Pl
 export default defineFeature<DraftParams>({
   type: "draft",
   title: "Draft",
-  icon: '<path d="M6 20l3-15h6l3 15z"/><path d="M3 20h18"/>',
-  toolbarOrder: 32,
-  toolbarSection: "solid", toolbarMenu: "Fillet",
+  icon: '<path class="f" d="M4 20L8 5h8l4 15z"/><path d="M4 20L8 5h8l4 15z"/><path class="d t" d="M8 5v15M16 5v15"/>',
+  toolbarOrder: 32, toolbarSection: "modify", toolbarKeep: 70,
   defaults: () => ({ faces: [], neutral: { kind: "plane", plane: "top" }, angle: 3, flip: false }),
   schema: [
     { key: "faces", label: "Faces to draft", kind: "refs", of: ["face"] },

@@ -4,8 +4,8 @@ import { startDrawTool } from "../sketch/draw";
 import { slot } from "../sketch/shapes";
 
 export default defineTool({
-  id: "sketch-slot", title: "Slot", hint: "Click the centre of each end, then set the width.", group: "sketch", order: 50,
-  icon: '<path d="M8 8h8a4 4 0 0 1 0 8H8a4 4 0 0 1 0-8z"/><path d="M8 12h8" stroke-dasharray="2 2"/>',
+  id: "sketch-slot", title: "Slot", hint: "Click the centre of each end, then set the width.", group: "sketch", order: 50, keep: 72,
+  icon: '<rect class="f" x="2.5" y="7" width="19" height="10" rx="5"/><rect x="2.5" y="7" width="19" height="10" rx="5"/><circle class="s" cx="7.5" cy="12" r="1.7"/><circle class="s" cx="16.5" cy="12" r="1.7"/>',
   active: (studio) => studio.getState().sketch?.tool === "sketch-slot",
   run: (studio) => startDrawTool(studio, slot),
 });

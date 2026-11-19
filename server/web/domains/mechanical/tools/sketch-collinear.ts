@@ -3,8 +3,8 @@ import { defineTool } from "../core/tool";
 import { runConstraintTool } from "../sketch/constrain";
 
 export default defineTool({
-  id: "sketch-collinear", title: "Collinear", hint: "Two lines along the same line.", group: "sketch", order: 290,
-  icon: '<path d="M3 12h7M14 12h7"/><circle cx="3.5" cy="12" r="1.2"/><circle cx="20.5" cy="12" r="1.2"/>',
+  id: "sketch-collinear", title: "Collinear", hint: "Two lines along the same line.", group: "sketch", order: 290, keep: 40,
+  icon: '<path class="d t" d="M2 22L22 2"/><path d="M3.5 20.5l5-5M15.5 8.5l5-5" stroke-width="2.6"/>',
   active: (studio) => studio.getState().sketch?.tool === "sketch-collinear",
   run: (studio) => runConstraintTool(studio, "collinear", "sketch-collinear"),
 });

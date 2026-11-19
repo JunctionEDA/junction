@@ -90,11 +90,12 @@ try {
 
   // ---------------------------------------------------------------- sketch, extrude
   await alice.click('[data-tool=Sketch]');
-  await alice.waitForSelector('.cad-dialog[data-feature=sketch]');
-  await alice.click('.cad-dialog [data-accept]');
+  await alice.waitForSelector('.cad-dialog[data-feature=sketch] [data-sketch-plane][data-armed]');
+  check('a new sketch is not put on a plane: its plane field is empty and nothing is in the document', (await alice.getAttribute('.cad-sketch-dialog [data-sketch-plane]', 'data-sketch-plane')) === '' && await alice.evaluate(() => window.JunctionPartStudio.getState().features.length === 0));
+  await alice.click('.cad-features [data-default-geometry=top]');
   await alice.waitForFunction(() => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.features.length === 1 && s.kernel.state === 'ready'; }, null, { timeout: 90000 });
   await alice.waitForTimeout(700);   // the camera turns to face the plane
-  check('accepting the Sketch dialog opens the sketch with its tools', await alice.isVisible('[data-group=sketch] [data-tool=Rectangle]'));
+  check('choosing the plane opens the sketch with its tools', await alice.isVisible('[data-group=sketch] [data-tool=Rectangle]'));
   const canvas = await alice.$eval('.cad-stage canvas', (c) => { const r = c.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
   await alice.click('[data-tool=Rectangle]');
   await click(alice, canvas.x - 150, canvas.y + 80);

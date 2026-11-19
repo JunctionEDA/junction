@@ -20,7 +20,7 @@
        is the pane caption (paper to bench), as KiCad's docked panes have. */
 
 :root {
-  color-scheme: light dark;
+  color-scheme: light;
 
   /* ---- surfaces ---- */
   --bench: #F4F4F5;      /* chrome: toolbars, sidebars, title bars */
@@ -107,7 +107,7 @@
   --hot: var(--warn); --ok: var(--wire); --danger: var(--err);
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root[data-theme="system"] {
     --bench: #111113; --paper: #18181B; --panel: #0B0B0C; --line: #27272A; --line-2: #3F3F46;
     --ink: #FAFAFA; --ink-2: #A1A1AA; --ink-3: #85858E;
     --accent: #FAFAFA; --accent-2: #D4D4D8; --on-accent: #0B0B0C; --blue: #D4D4D8;
@@ -131,13 +131,13 @@
   --tb-press: color-mix(in srgb, var(--accent) 20%, #000000);
 }
 /* the mark (static/icon.svg) follows the system scheme on its own; these make an inlined copy follow
-   an explicit theme choice too */
-:root[data-theme="light"] .jn-t { fill: #111113; } :root[data-theme="light"] .jn-e { stroke: #fff; stroke-opacity: .18; }
-:root[data-theme="light"] .jn-w { stroke: #FAFAFA; } :root[data-theme="light"] .jn-d { fill: #FAFAFA; }
+   the page's theme instead: light unless dark was chosen, the system's only when "system" was */
+:root:not([data-theme="dark"], [data-theme="system"]) .jn-t { fill: #111113; } :root:not([data-theme="dark"], [data-theme="system"]) .jn-e { stroke: #fff; stroke-opacity: .18; }
+:root:not([data-theme="dark"], [data-theme="system"]) .jn-w { stroke: #FAFAFA; } :root:not([data-theme="dark"], [data-theme="system"]) .jn-d { fill: #FAFAFA; }
 :root[data-theme="dark"] .jn-t { fill: #FAFAFA; } :root[data-theme="dark"] .jn-e { stroke: #000; stroke-opacity: .12; }
 :root[data-theme="dark"] .jn-w { stroke: #111113; } :root[data-theme="dark"] .jn-d { fill: #111113; }
 :root[data-theme="dark"] { color-scheme: dark; }
-:root[data-theme="light"] { color-scheme: light; }
+:root[data-theme="system"] { color-scheme: light dark; }
 
 /* ==== components ==== */
 

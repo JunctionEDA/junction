@@ -3,8 +3,8 @@ import { defineTool } from "../core/tool";
 import { runConstraintTool } from "../sketch/constrain";
 
 export default defineTool({
-  id: "sketch-midpoint", title: "Midpoint", hint: "A point onto the middle of a line.", group: "sketch", order: 270,
-  icon: '<path d="M4 17h16"/><circle cx="12" cy="17" r="2"/><path d="M12 6v7"/>',
+  id: "sketch-midpoint", title: "Midpoint", hint: "A point onto the middle of a line.", group: "sketch", order: 270, keep: 48,
+  icon: '<path d="M3 12h18M3 8v8M21 8v8"/><circle class="s" cx="12" cy="12" r="2.8"/>',
   active: (studio) => studio.getState().sketch?.tool === "sketch-midpoint",
   run: (studio) => runConstraintTool(studio, "midpoint", "sketch-midpoint"),
 });

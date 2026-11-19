@@ -12,7 +12,7 @@ import { ANGLE_UNITS, LENGTH_UNITS, MAX_PLACES } from "../document/units";
 import { sketchEditor, type EditorState } from "../sketch/editor";
 import { describeKinds } from "./fields";
 import { useStudio } from "./hooks";
-import type { PartStudio } from "./studio";
+import { awaitsPlane, type PartStudio } from "./studio";
 import { tipHandlers } from "./Tip";
 
 /** How the sketch stands, in a few words, and the tone that says it. */
@@ -58,9 +58,9 @@ function UnitsControl({ studio }: { studio: PartStudio }) {
   const example = (1).toFixed(u.places);
   return (
     <div className="relative flex-none" onPointerDown={(ev) => ev.stopPropagation()}>
-      <button type="button" className={cx("btn sm ghost h-5 min-h-0 px-1.5 gap-1.5 mono text-xs", open && "on")} aria-haspopup="dialog" aria-expanded={open} aria-label={`Units: ${u.length}, ${u.angle}, ${u.places} decimal places. Change`} data-units={`${u.length} ${u.angle} ${u.places}`}
+      <button type="button" className={cx("btn sm ghost h-6 min-h-0 px-2 gap-1.5 mono text-sm", open && "on")} aria-haspopup="dialog" aria-expanded={open} aria-label={`Units: ${u.length}, ${u.angle}, ${u.places} decimal places. Change`} data-units={`${u.length} ${u.angle} ${u.places}`}
         {...tipHandlers({ title: "Units", hint: "The length unit, the angle unit and the decimal places this document is worked in. Any field also takes a unit typed with the number: 1 in, 25.4 mm." })} onClick={() => setOpen(!open)}>
-        <span className="font-semibold text-ink" data-units-length>{u.length}</span><span className="text-ink-3">·</span><span data-units-angle>{u.angle}</span><span className="text-ink-3">·</span><span data-units-places>{example}</span>
+        <span className="font-semibold text-ink" data-units-length>{u.length}</span><span className="text-ink-3">·</span><span className="text-ink" data-units-angle>{u.angle}</span><span className="text-ink-3">·</span><span className="text-ink" data-units-places>{example}</span>
       </button>
       {open ? (
         <div className="cad-units absolute right-0 bottom-full mb-1 z-[50] w-72 p-2.5 flex flex-col gap-2 rounded-md border border-line bg-panel shadow-panel text-sm text-ink" role="dialog" aria-label="Units of this document">
@@ -93,16 +93,18 @@ export function StatusBar({ studio }: { studio: PartStudio }) {
   const picking = useStudio(studio, (s) => !!s.ui?.pickingPlane);
   const selected = useStudio(studio, (s) => s.selection.length);
   const past = useStudio(studio, (s) => s.past?.label);
+  const waiting = useStudio(studio, (s) => awaitsPlane(s));
   let text = "", busy = false;
   if (!loaded) { text = status.state === "error" ? status.text : "Opening the part studio…"; busy = status.state !== "error"; }
   else if (kernel.state === "loading") { text = "Starting the modelling kernel (once per visit). You can look around and read the feature list meanwhile."; busy = true; }
   else if (kernel.state === "failed") text = kernel.message || "The modelling kernel stopped.";
   else if (kernel.state === "working") { text = "Rebuilding…"; busy = true; }
   else if (past !== undefined) text = "An earlier version: nothing can be edited.";
+  else if (waiting) text = "Select a plane or a planar face for the new sketch.";
   else if (empty) text = "Choose Sketch to start a part.";
   const kinds = field ? studio.pickFilter() : picking ? ["plane", "face", "datum"] : null;
   return (
-    <footer className="cad-status flex items-center gap-3 h-6 px-2 bg-bench border-t border-line text-xs text-ink-2 select-none min-w-0" aria-label="Part studio status">
+    <footer className="cad-status flex items-center gap-3 h-7 px-2.5 bg-bench border-t border-line text-sm text-ink-2 select-none min-w-0" aria-label="Part studio status">
       {text ? (
         <span className={cx("cad-note flex items-center gap-1.5 min-w-0", kernel.state === "failed" && "text-err")} role="status" data-kernel={kernel.state}>
           {busy ? <span className="spinner flex-none" style={{ width: 10, height: 10 }} aria-hidden="true" /> : null}<span className="truncate">{text}</span>
@@ -113,7 +115,7 @@ export function StatusBar({ studio }: { studio: PartStudio }) {
       <span className="flex-1" />
       {!sketch && selected ? <span className="whitespace-nowrap mono" data-selected-count={selected}>{selected} selected</span> : null}
       <UnitsControl studio={studio} />
-      <button type="button" className="btn sm ghost h-5 min-h-0 w-5 p-0 justify-center mono text-xs flex-none" aria-label="Keyboard shortcuts" data-shortcuts-open {...tipHandlers({ title: "Keyboard shortcuts", shortcut: "?" })} onClick={() => studio.setUi({ help: true })}>?</button>
+      <button type="button" className="btn sm ghost h-6 min-h-0 w-6 p-0 justify-center mono text-sm text-ink flex-none" aria-label="Keyboard shortcuts" data-shortcuts-open {...tipHandlers({ title: "Keyboard shortcuts", shortcut: "?" })} onClick={() => studio.setUi({ help: true })}>?</button>
     </footer>
   );
 }

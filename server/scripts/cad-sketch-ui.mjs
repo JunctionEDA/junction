@@ -92,8 +92,8 @@ const featuresSettled = (n) => page.waitForFunction((n) => { const s = window.Ju
 const volume = () => studio(async () => { const st = window.JunctionPartStudio; const m = await st.kernel.call('mass-properties', { body: st.getState().bodies[0].id }); return m.volume; });
 const newSketch = async (n) => {
   await page.click('[data-tool=Sketch]');
-  await page.waitForSelector('.cad-dialog[data-feature=sketch]');
-  await page.click('.cad-dialog [data-accept]');
+  await page.waitForSelector('.cad-dialog[data-feature=sketch] [data-sketch-plane][data-armed]');
+  await page.click('.cad-features [data-default-geometry=top]');
   await page.waitForFunction((n) => { const s = window.JunctionPartStudio.getState(); return s.sketch && s.features.length === n && window.JunctionSketch && window.JunctionSketch.getState().ready && window.JunctionSketch.frame; }, n, { timeout: 90000 });
   await page.waitForTimeout(700);   // the camera turns to face the plane
 };
