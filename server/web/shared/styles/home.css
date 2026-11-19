@@ -391,7 +391,7 @@ textarea.hp-input { resize: vertical; min-height: 72px; }
   /* the owner's name is what gives way; the time, the people count and the globe always show */
   .hp-item-owner { flex: 0 1 auto; min-width: 0; }
   .hp-item.list .hp-item-meta { gap: 4px; }
-  .hp-item.list .hp-item-meta .hp-avatar { display: none; }
+  .hp-item.list:not(.pub) .hp-item-meta .hp-avatar { display: none; }
   .hp-item.list .hp-item-tags .pill { padding-left: 4px; padding-right: 4px; }
   .hp-item.list.pub .hp-item-link { padding-right: 10px; }
   .hp-item-when { flex: none; }

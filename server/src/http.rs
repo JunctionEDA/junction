@@ -550,7 +550,7 @@ pub async fn gallery(State(state): State<AppState>) -> AppResult<Response> {
         .into_iter()
         .map(|e| {
             json!({ "projectId": e.id, "name": e.name, "description": e.description,
-                    "ownerLogin": e.owner_login, "docCount": e.doc_count,
+                    "ownerLogin": e.owner_login, "ownerAvatarUrl": e.owner_avatar_url, "docCount": e.doc_count,
                     "updatedAt": e.updated_at.to_rfc3339() })
         })
         .collect();

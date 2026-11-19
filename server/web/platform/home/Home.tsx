@@ -615,7 +615,7 @@ function Explore({ me, tick }: { me: User | null; tick: number }) {
                 <div className="hp-item-body">
                   <div className="hp-item-name" title={p.name}>{p.name}</div>
                   {p.description ? <div className="hp-item-desc">{p.description}</div> : null}
-                  <div className="hp-item-meta"><Avatar login={p.ownerLogin} size={16} /><span className="hp-item-owner">{p.ownerLogin}</span><span aria-hidden="true">·</span><span className="hp-item-when">{ago(p.updatedAt)}</span></div>
+                  <div className="hp-item-meta"><Avatar login={p.ownerLogin} url={p.ownerAvatarUrl} size={16} /><span className="hp-item-owner">{p.ownerLogin}</span><span aria-hidden="true">·</span><span className="hp-item-when">{ago(p.updatedAt)}</span></div>
                 </div>
               </a>
               <div className="hp-item-acts"><button type="button" className="btn sm" disabled={busy === p.projectId} onClick={() => copy(p)}><Ic name="copy" size={14} />{busy === p.projectId ? "Copying…" : "Make a copy"}</button></div>
