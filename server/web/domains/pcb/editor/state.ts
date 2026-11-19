@@ -44,6 +44,8 @@ export const E: any = {
   applyFailed: false,
   lastLiveMove: 0,
   followPeer: null,
+  followCursor: false,
+  presenting: false,
   suppressBreakout: false,
   peerState: {},
   comments: [],

@@ -70,7 +70,7 @@ export const MENUS: Record<Editor, [string, MenuEntry[]][]> = {
       "selectAll", "unselectAll", "-",
       "find", "findAndReplace", "-", "deleteTool", "editTextAndGraphics", "changeSymbols", "editPageNumber",
       ["Attributes", ["setExcludeFromSim", "setExcludeFromBOM", "setExcludeFromBoard", "setExcludeFromPosFiles", "setDNP"]]]],
-    ["&View", [["Panels", ["showProperties", "showGitCommitPane", "showSearch", "showHierarchy", "showNetNavigator", "showDesignBlockPanel|Design Blocks", "showRemoteSymbolPanel|Remote Symbols"]],
+    ["&View", [["Panels", ["showProperties", "showGitCommitPane", "showSearch", "showHierarchy", "showNetNavigator", "showDesignBlockPanel|Design Blocks", "showRemoteSymbolPanel|Remote Symbols", "-", "showPeers", "showComments"]],
       "-", "showSymbolBrowser", "-", "zoomInCenter", "zoomOutCenter", "zoomFitScreen", "zoomFitObjects", "zoomFitSelection", "zoomTool", "zoomRedraw",
       "-", "navigateBack", "navigateUp", "navigateForward", "navigatePrevious", "navigateNext",
       "-", "toggleHiddenPins", "toggleHiddenFields", "toggleDirectiveLabels", "toggleERCErrors", "toggleERCWarnings", "toggleERCExclusions", "markSimExclusions", "toggleOPVoltages", "toggleOPCurrents", "togglePinAltIcons"]],
@@ -97,7 +97,7 @@ export const MENUS: Record<Editor, [string, MenuEntry[]][]> = {
     ["&Edit", ["undo", "redo", "-", "cut", "copy", "paste", "pasteSpecial", "doDelete", "-", ["&Select", ["selectAll", "unselectAll"]],
       "-", "find", "findByProperties", "-", "extendGraphic", "trimGraphic", "editTracksAndVias", "editTextAndGraphics", "mirrorInteractive", "editTeardrops", "changeFootprints", "swapLayers", "gridOrigin",
       "-", "zoneFillAll", "zoneUnfillAll", "regenerateAllTuning", "-", "deleteTool", "globalDeletions"]],
-    ["&View", [["Panels", ["showProperties", "showSearch", "showLayersManager", "showNetInspector", "showConstraintsPanel", "showGitCommitPane"]],
+    ["&View", [["Panels", ["showProperties", "showSearch", "showLayersManager", "showNetInspector", "showConstraintsPanel", "showGitCommitPane", "-", "showPeers", "showComments"]],
       "-", "showFootprintBrowser", "show3DViewer", "-", "zoomInCenter", "zoomOutCenter", "zoomFitScreen", "zoomFitObjects", "zoomFitSelection", "zoomTool", "zoomRedraw", "-",
       ["&Drawing Mode", ["zoneDisplayFilled", "zoneDisplayOutline", "-", "padDisplayMode", "viaDisplayMode", "trackDisplayMode", "-", "graphicsOutlines", "textOutlines"]],
       ["&Contrast Mode", ["highContrastMode", "layerAlphaDec", "layerAlphaInc"]],
@@ -249,7 +249,7 @@ export const READ_ONLY_OK = new Set(["compareSchematicWithFile", "compareSchemat
   "openInKicad", "print", "plot", "home", "copy", "copyAsText", "selectAll", "unselectAll", "selectConnection", "selectNode", "nextNetItem", "previousNetItem", "find", "showDatasheet",
   "selectNet", "deselectNet", "selectSameSheet", "module:selectAllOnLayer", "selectUnconnected", "filterSelection", "runERC", "runDRC", "clearMarkers", "boardStatistics", "measureTool", "inspectClearance", "inspectConstraints", "showFootprintAssociations", "diffFootprint",
   "highlightNetTool", "highlightNet", "clearHighlight", "toggleNetHighlight", "localRatsnestTool", "hideNetInRatsnest", "showNetInRatsnest", "showPcbNew", "showEeschema", "theme", "themeLight", "themeDark", "themeSystem", "languageEnglish",
-  "layerTop", "layerBottom", "layerNext", "layerPrev", "showNetInspector", "showBusSyntaxHelp", "findNetInInspector"]);
+  "layerTop", "layerBottom", "layerNext", "layerPrev", "showNetInspector", "showBusSyntaxHelp", "findNetInInspector", "showPeers", "showComments"]);
 /**
  * Keys a tool module binds to something other than KiCad's default, taken before the module sees them
  * (editor/hotkeys.ts preemptKey): "spec" runs KiCad's action for the key — and swallows the key when the web has
@@ -289,7 +289,7 @@ export const HOME_MENUS: [string, MenuEntry[]][] = [];
 
 /** Labels for entries that are ours rather than KiCad TOOL_ACTIONs. */
 export const LOCAL_LABELS: Record<string, string> = {
-  github: "GitHub Sync...", fabPackage: "Fabrication Package (JLCPCB, PCBWay)...", drillResetOrigin: "Reset Drill Origin", gridResetOrigin: "Reset Grid Origin",
+  github: "GitHub Sync...", fabPackage: "Fabrication Package...", drillResetOrigin: "Reset Drill Origin", gridResetOrigin: "Reset Grid Origin",
   collabCopyLink: "Copy Share Link", collabComments: "Comments...", collabFollow: "Follow Next Peer", collabHistory: "History",
   collabLeave: "Leave Session", close: "Close", archive: "Download Project (.zip)", clone: "Clone to My Account", openInKicad: "Open in Junction...", home: "Back to Projects",
   showSelectionFilter: "Selection Filter", showHistory: "History", showPeers: "Collaborators", showComments: "Comments", showAppearance: "Appearance",

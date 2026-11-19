@@ -15,7 +15,6 @@
 // same place again), the walk just finishes.  Nothing is drawn ahead of what has arrived.
 import { NS } from "./dom";
 import { E } from "./state";
-import { toast } from "./util";
 
 // A peer's pointer and name tag, in screen pixels (the desktop's COLLAB_CURSOR_ITEM uses the same sizes).
 const PEER_CURSOR_PX = 24, PEER_TAG_TEXT_PX = 16, PEER_TAG_PAD_PX = 5;
@@ -260,12 +259,6 @@ export function onlyPointerMoved(a: Record<string, unknown> | null | undefined, 
     if (typeof x !== "object" || typeof y !== "object" || JSON.stringify(x) !== JSON.stringify(y)) return false;
   }
   return true;
-}
-
-export function toggleFollowToast(cid: string, name: string, render: () => void) {
-  E.followPeer = E.followPeer === cid ? null : cid;
-  toast(E.followPeer ? `Following ${name}` : "Stopped following");
-  render();
 }
 
 // for scripts/cursor-lag.mjs (DEBUG=1): each walk's state

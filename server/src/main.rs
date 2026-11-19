@@ -13,6 +13,7 @@ mod doc_actor;
 mod nonkicad_import;
 mod kicad_check;
 mod error;
+mod fab_quote;
 mod fonts;
 mod github;
 mod github_app;
@@ -342,6 +343,7 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/projects/{id}/star", axum::routing::put(http::star_project).delete(http::unstar_project))
         .route("/api/projects/{id}/transfer", post(http::transfer_project))
         .route("/api/gallery", get(http::gallery))
+        .route("/api/fabrication/pcbway/quote", post(fab_quote::pcbway).layer(DefaultBodyLimit::max(fab_quote::MAX_ARCHIVE_BYTES)))
         .route("/api/projects/{id}/preview.svg", get(http::preview_svg))
         .route("/api/projects/{id}/board-items", get(http::board_items))
         .route("/api/docs/{id}/preview", post(http::upload_preview))

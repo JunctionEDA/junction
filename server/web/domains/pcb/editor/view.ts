@@ -7,7 +7,7 @@ import { refreshPreview } from "../ai/proposals";
 import { loadBase } from "./doc";
 import { $, NS } from "./dom";
 import { drawHover } from "./gestures";
-import { anchorMm, breakFollow, peerName, renderPeers, sendPresence } from "./peers";
+import { anchorMm, breakFollow, followAction, peerName, sendPresence } from "./peers";
 import { drawSelection, selectedSet } from "./selection";
 import { E } from "./state";
 import { paintConfig, paintDocument, settledFrame, stats as paintStats } from "./paint";
@@ -17,7 +17,7 @@ import { drawAppOverlays } from "./overlays";
 import { toast } from "./util";
 import { ZOOM_LIST, fitMargin, nextZoomPreset } from "./zoomlist";
 import type { PeerEntry, PeerGhost } from "./types";
-import { initPeerCursors, syncPeerCursors, toggleFollowToast, type PeerCursorSpec } from "./peercursors";
+import { initPeerCursors, syncPeerCursors, type PeerCursorSpec } from "./peercursors";
 // ================================================================ EDITOR
 export const stage = $("#stage"), world = $("#world"), base = $("#base"), overlay = $("#overlay");
 
@@ -356,7 +356,7 @@ export function drawPeers(peers: Record<string, PeerEntry>) {
   peersG.replaceChildren();
   const s = pxPerMm(), mm = (nm: number) => nm / E.IU;
   const ghosts: PeerGhost[] = [], cursorSpecs: PeerCursorSpec[] = [];
-  initPeerCursors(peersG, pxPerMm, (cid, name) => toggleFollowToast(cid, name, () => { renderPeers(); drawPeers(E.peerState); }));
+  initPeerCursors(peersG, pxPerMm, (cid) => { followAction(E.followPeer === cid && E.followCursor ? null : cid, true); drawPeers(E.peerState); });
   for (const [cid, p] of Object.entries(peers)) {
     const st = p.state || {}, color = (p.user && p.user.color) || "#4477ee", name = peerName(p);
     // Items the peer is dragging: `at[i]` is where they hold selection[i]; a displacement from our copy's own

@@ -630,8 +630,8 @@ fn is_public(ip: IpAddr) -> bool {
     }
 }
 
-/// No more than NET_PER_MINUTE requests a minute for one person.
-fn within_rate(user: &str) -> bool {
+/// Bound requests per minute for a caller and feature.
+pub(crate) fn within_rate(user: &str, limit: usize) -> bool {
     static SEEN: OnceLock<Mutex<HashMap<String, (Instant, usize)>>> = OnceLock::new();
     let Ok(mut seen) = SEEN.get_or_init(|| Mutex::new(HashMap::new())).lock() else { return true };
     let now = Instant::now();
@@ -643,7 +643,7 @@ fn within_rate(user: &str) -> bool {
         *e = (now, 0);
     }
     e.1 += 1;
-    e.1 <= NET_PER_MINUTE
+    e.1 <= limit
 }
 
 #[derive(serde::Deserialize)]
@@ -748,7 +748,7 @@ pub async fn net_fetch(State(state): State<AppState>, AuthUser(user): AuthUser, 
     if mode == NetMode::Off {
         return Err(refuse("network access for plugins is turned off on this server"));
     }
-    if !within_rate(&user.id.to_string()) {
+    if !within_rate(&user.id.to_string(), NET_PER_MINUTE) {
         return Err(AppError::Api(StatusCode::TOO_MANY_REQUESTS, "plugin_network_busy", "this plugin is sending requests faster than the server carries them; try again in a minute".into()));
     }
     let url = reqwest::Url::parse(&req.url).map_err(|_| bad("that is not a web address"))?;

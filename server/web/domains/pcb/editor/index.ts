@@ -10,7 +10,7 @@ import "./tools";
 import "./selection";
 import "./doc";
 import "./peers";
-import "./crossprobe";
+import { installCrossProbe } from "./crossprobe";
 import "./pointer";
 import "./comments";
 import "./history";
@@ -112,6 +112,7 @@ function liveGhost(mod: GhostModule | null | undefined) {
 // wheel, middle / right button, hover and lost-release recovery: KiCad's mouse model (gestures.ts).
 // Installed before every other stage listener so it sees each event first.
 installGestures(openContextMenu);
+installCrossProbe();
 installViewSwitcher();   // Ctrl+Tab / Shift+Tab: the board's Preset and Viewport switcher (editor/view-switcher.ts)
 installTableCells();   // table cells as selectable items and the table edit tool (editor/tablecells.ts)
 

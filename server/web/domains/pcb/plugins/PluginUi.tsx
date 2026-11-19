@@ -66,8 +66,8 @@ export function usePluginBarEntries(): { key: string; node: ReactNode; menu?: { 
   return [{ key: "plugin-sep", node: <span className="plg-tb-sep" />, menu: null }, ...acts.map((a) => {
     const run = s.running[a.plugin]; const working = !!run && run.busy === a.name; const icon = a.action.icon ? safeSvg(a.action.icon) : "";
     return { key: a.uiId, menu: { id: a.uiId, label: a.name, glyph: icon || undefined }, node: (
-      <button type="button" className={cx("plg-tb-btn", working && "busy")} data-uiact={a.uiId} title={`${a.name}${a.action.key ? `  (${keyName(a.action.key)})` : ""}\n${a.description}\n— plugin: ${a.pluginName}`} onClick={() => runPluginUi(a.uiId)}>
-        {a.action.iconUrl ? <img src={a.action.iconUrl} alt="" draggable={false} /> : icon ? <svg viewBox="0 0 24 24" aria-hidden="true" dangerouslySetInnerHTML={{ __html: icon }} /> : PUZZLE}
+      <button type="button" className={cx("plg-tb-btn", working && "busy")} data-uiact={a.uiId} aria-busy={working} aria-label={working ? `${run.ready ? "Running" : "Opening"} ${a.name}` : a.name} disabled={!!run?.busy} title={`${a.name}${a.action.key ? `  (${keyName(a.action.key)})` : ""}\n${a.description}\n— plugin: ${a.pluginName}`} onClick={() => runPluginUi(a.uiId)}>
+        {working ? <span className="plg-spin" aria-hidden="true" /> : a.action.iconUrl ? <img src={a.action.iconUrl} alt="" draggable={false} /> : icon ? <svg viewBox="0 0 24 24" aria-hidden="true" dangerouslySetInnerHTML={{ __html: icon }} /> : PUZZLE}
       </button>
     ) };
   })];

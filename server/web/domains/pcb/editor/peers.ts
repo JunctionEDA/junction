@@ -9,10 +9,9 @@ export function cycleFollow() {
   const ids = Object.keys(E.peerState);
   if (!ids.length) { toast("No one else is here to follow"); return; }
   const i = ids.indexOf(E.followPeer);
-  E.followPeer = ids[(i + 1) % ids.length] || null;
-  const p = E.peerState[E.followPeer];
-  toast(`Following ${peerName(p)} — zoom or pan to stop`);
-  applyFollowWeb(E.peerState); renderPeers();
+  const cid = ids[(i + 1) % ids.length];
+  followAction(cid);
+  toast(`Following ${peerName(E.peerState[cid])}. Zoom or pan to stop.`);
 }
 
 export function peerName(p: PeerEntry | null | undefined) { return (p && p.user && (p.user.name || p.user.login)) || "peer"; }
@@ -22,10 +21,19 @@ export function peerName(p: PeerEntry | null | undefined) { return (p && p.user 
 export function applyFollowWeb(peers: Record<string, PeerEntry>) {
   if (!E.followPeer) return;
   const entry = peers[E.followPeer];
-  if (!entry) { E.followPeer = null; toast("Stopped following (they left)"); renderPeers(); return; }
-  const vp = (entry.state || {}).viewport;
-  if (!vp || vp.length < 4 || vp[2] <= 0) return;
+  if (!entry) { followAction(null); toast("Stopped following (they left)"); return; }
+  const cursor = entry.state?.cursor;
   const w = world.clientWidth || stage.clientWidth;
+  if (E.followCursor) {
+    if (!cursor || cursor.length < 2 || !cursor.every(Number.isFinite)) return;
+    const scale = w * E.zoom / mmW();
+    E.panX = stage.clientWidth / 2 - (cursor[0] / E.IU - mmX0()) * scale;
+    E.panY = stage.clientHeight / 2 - (cursor[1] / E.IU - mmY0()) * scale;
+    E.suppressBreakout = true; applyView(); E.suppressBreakout = false;
+    return;
+  }
+  const vp = entry.state?.viewport;
+  if (!vp || vp.length < 4 || !vp.every(Number.isFinite) || vp[2] <= 0) return;
   const xMm = vp[0] / E.IU, yMm = vp[1] / E.IU, wMm = vp[2] / E.IU;
   E.zoom = Math.min(40, Math.max(0.2, (stage.clientWidth / w) * (mmW() / wMm)));
   E.panX = -((xMm - mmX0()) / mmW()) * w * E.zoom;
@@ -35,14 +43,26 @@ export function applyFollowWeb(peers: Record<string, PeerEntry>) {
 
 export function breakFollow() {
   if (!E.followPeer || E.suppressBreakout) return;
-  E.followPeer = null; toast("Stopped following"); renderPeers();
+  followAction(null); toast("Stopped following");
 }
 
 export function renderPeers() {
-  store.set({ peers: { list: Object.keys(E.peerState).map((cid) => { const p = E.peerState[cid]; return { cid, name: peerName(p), color: (p.user && p.user.color) || "#4477ee" }; }), follow: E.followPeer } });
+  store.set({ peers: { list: Object.keys(E.peerState).map((cid) => { const p = E.peerState[cid]; return { cid, name: peerName(p), color: (p.user && p.user.color) || "#4477ee", presenting: p.state?.presenting === true }; }), follow: E.followPeer, followCursor: E.followCursor, presenting: E.presenting } });
 }
 
-export function followAction(cid: string | null) { E.followPeer = cid && E.peerState[cid] ? cid : null; applyFollowWeb(E.peerState); renderPeers(); }
+export function followAction(cid: string | null, cursor = false) {
+  E.followPeer = cid && E.peerState[cid] ? cid : null;
+  E.followCursor = !!E.followPeer && cursor;
+  if (E.followPeer && E.presenting) togglePresenting();
+  applyFollowWeb(E.peerState); renderPeers();
+}
+export function togglePresenting() {
+  if (!state.me || !state.docId) return;
+  E.presenting = !E.presenting;
+  if (E.presenting) { E.followPeer = null; E.followCursor = false; }
+  sendPresence(null);
+  renderPeers();
+}
 
 /** The last cursor position we told anyone about, so the keepalive can re-send it. */
 /** The shortest time between two presence messages, ms: every display frame at 60 Hz (the server forwards each one
@@ -80,6 +100,7 @@ export function sendPresence(mmPos: number[] | null, ghostSegs?: number[][] | nu
   const rtt = myRtt(); if (rtt > 0) st.rtt = Math.round(rtt);
   st.ts = Math.round(performance.now() * 10) / 10;
   const vp = visibleRectNm(); if (vp) st.viewport = vp;
+  if (E.presenting) st.presenting = true;
   if (ghostSegs) st.ghost = ghostSegs;
   if (E.chatSay) st.say = E.chatSay as string;   // cursor chat (chat.ts)
   // What the peer has selected (desktop rebuildOverlay pairs selection[i] with boxes[i] and at[i]; boxes are

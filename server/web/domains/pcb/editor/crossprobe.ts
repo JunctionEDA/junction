@@ -6,11 +6,12 @@
 // the other way round.  The windows are tabs of one browser, so the message goes over a BroadcastChannel named
 // for the project; it carries the references, never the other side's ids.  What the receiving side does follows
 // its Preferences: the schematic's Cross-probing (select, center, zoom) and the board's (on selection, center on
-// items, zoom to fit).  "Select on PCB" / "Select on Schematic" in the context menus send the selection even
+// items, zoom to fit). Switching editors in the same tab carries the selection directly. "Select on PCB" /
+// "Select on Schematic" in the context menus send the selection even
 // when sending on selection is off, as KiCad's actions do.
 import { E } from "./state";
 import { state } from "./appstore";
-import { clearAllSelection, selectionChanged, selectionHooks, selectionItems } from "./gestures";
+import { clearAllSelection, selectedAnywhere, selectionChanged, selectionHooks } from "./gestures";
 import { fitBox, isSch, pxPerMm, stage } from "./view";
 import { prefs } from "../dialogs/prefs";
 
@@ -31,18 +32,34 @@ function bus(): BroadcastChannel | null {
   if (channel && channelFor === id) return channel;
   if (channel) channel.close();
   channel = new BroadcastChannel("kc-crossprobe:" + id); channelFor = id;
-  channel.onmessage = (ev: MessageEvent<Probe>) => { if (ev.data && ev.data.window !== WINDOW) receive(ev.data); };
+  channel.onmessage = (ev: MessageEvent<Probe>) => { if (ev.data && ev.data.window !== WINDOW) receiveProbe(ev.data); };
   return channel;
 }
 
-/** The references of what is selected: symbols on a schematic, footprints on a board. */
-function selectedRefs(): string[] {
+function selectedComponents(): KItem[] {
+  if (!E.kdoc) return [];
   const want = isSch() ? "symbol" : "footprint";
-  const refs = new Set<string>();
-  for (const it of selectionItems()) if (it && it.kind === want && it.ref && !it.ref.startsWith("#")) refs.add(it.ref);
-  return [...refs].sort();
+  const doc = E.kdoc as KDoc;
+  const ids = new Set([...selectedAnywhere()].map((id) => isSch() ? id : id.split("#")[0]));
+  if (!isSch() && E.selField) ids.add(E.selField.id);
+  return [...ids].map((id) => doc.items.get(id))
+    .filter((it): it is KItem => !!it && it.kind === want && !!it.ref && !it.ref.startsWith("#"));
 }
+const selectedRefs = (): string[] => [...new Set(selectedComponents().map((it) => it.ref!))].sort();
 const sendOnSelection = (): boolean => (isSch() ? prefs().schDisplay.crossProbeSelect !== false : (prefs().pcbDisplay.crossProbing || { onSelection: true }).onSelection !== false);
+
+export function probeForSwitch(nextType: string): Probe | null {
+  if (!E.kdoc || !state.doc || E.DOC_TYPE === nextType || !sendOnSelection()) return null;
+  if (E.DOC_TYPE !== "kicad_sch" && E.DOC_TYPE !== "kicad_pcb" || nextType !== "kicad_sch" && nextType !== "kicad_pcb") return null;
+  const refs = selectedRefs();
+  return refs.length ? { from: isSch() ? "sch" : "pcb", refs, window: WINDOW } : null;
+}
+
+export function selectedSchematicFile(): string | null {
+  if (!E.kdoc || E.DOC_TYPE !== "kicad_pcb" || !sendOnSelection() || prefs().schDisplay.crossProbeSelect === false) return null;
+  const files = new Set(selectedComponents().map((it) => KiCadCanvas.str(KiCadCanvas.kid(it.node, "sheetfile")?.[1])));
+  return files.size === 1 ? [...files][0] || null : null;
+}
 
 /** Tell the other editor of this project what is selected here (force: the Select on PCB / Schematic actions). */
 export function sendSelection(force = false): void {
@@ -54,7 +71,7 @@ export function sendSelection(force = false): void {
   const b = bus(); if (b) b.postMessage({ from: isSch() ? "sch" : "pcb", refs, window: WINDOW } as Probe);
 }
 
-function receive(p: Probe): void {
+export function receiveProbe(p: Probe): void {
   if (!E.kdoc || (p.from === "sch") === isSch()) return;
   const sch = isSch(), want = sch ? "symbol" : "footprint", refs = new Set(p.refs);
   const opts = sch ? { select: prefs().schDisplay.crossProbeSelect !== false, center: prefs().schDisplay.crossProbeCenter !== false, zoom: prefs().schDisplay.crossProbeZoom !== false }
@@ -78,10 +95,10 @@ function receive(p: Probe): void {
   } finally { applying = false; }
 }
 
-// a selection made with the mouse or keys settles after the event; selectionChanged() covers the rest
-selectionHooks.push(() => sendSelection());
-const later = (): void => { setTimeout(() => sendSelection(), 0); };
-if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+export function installCrossProbe(): void {
+  // A selection made with the mouse or keys settles after the event; selectionChanged() covers the rest.
+  selectionHooks.push(() => sendSelection());
+  const later = (): void => { setTimeout(() => sendSelection(), 0); };
   window.addEventListener("pointerup", later, true); window.addEventListener("keyup", later, true);
   // listen from the start: a window that has selected nothing yet still has to take the other's selection
   const listen = window.setInterval(() => { if (E.kdoc && bus()) window.clearInterval(listen); }, 500);
