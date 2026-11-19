@@ -24,6 +24,7 @@ import { usePluginMenus } from "../../domains/pcb/plugins/PluginUi";
 import { PRODUCT_VERSION } from "../../domains/pcb/generated/product-version";
 import { ComboArrow, KIcon, MenuArrow, MenuCheck } from "./Icon";
 import { ICON_URL } from "../brand";
+import { CAD_SETTING_LABEL, CAD_SETTING_NOTE, setCadEnabled } from "../cad";
 import { behindTab, frontTabs, subscribeFront } from "../../domains/pcb/editor/pane-tabs";
 
 // ---------------------------------------------------------------- the menu tree
@@ -84,7 +85,15 @@ const isCheckable = (id: string) => MENU_CHECKS.has(id);
 /* The "Junction" title opens the application menu, like the application menu of a desktop program:
    the places outside the current editor (projects, public projects, the part libraries, plugins, GitHub, AI assistants)
    and the account.  Each entry is an editor action (web/domains/pcb/editor/actions.ts HANDLERS). */
-interface AppEntry { id: string; label: string; icon: string; key?: string; why?: string | null }
+/** The Mechanical CAD switch (web/shared/cad.ts): the person's own setting, toggled here rather than run as an action. */
+const CAD_ENTRY = "cadSetting";
+interface AppEntry {
+  id: string; label: string; icon: string; key?: string; why?: string | null;
+  /** a setting of the person's, on or off: drawn with a switch (.switch), toggled in place rather than dispatched */
+  checked?: boolean;
+  /** a line under the label saying what the entry does */
+  note?: string;
+}
 /** Who may copy the open project: the owner's setting (server/src/access.rs), which the server enforces too. */
 interface CopyRights { canCopy: boolean; guest: boolean }
 function appEntries(me: AppState["me"], project: AppState["project"], inEditor: boolean, r: CopyRights): (AppEntry | "-")[] {
@@ -112,6 +121,7 @@ function appEntries(me: AppState["me"], project: AppState["project"], inEditor: 
     { id: "github", label: inEditor && project ? "GitHub Sync for This Project..." : "GitHub Sync...", icon: "import" },
     { id: "connectAI", label: "Connect an AI Assistant...", icon: "special_tools" },
     "-",
+    ...(me ? [{ id: CAD_ENTRY, label: CAD_SETTING_LABEL, note: CAD_SETTING_NOTE, icon: "", checked: !!me.cad }, "-" as const] : []),
     { id: "about", label: "About Junction", icon: "about" });
   if (me) out.push({ id: "signOut", label: "Log Out", icon: "" });
   return out;
@@ -142,6 +152,7 @@ function AppMenu({ inEditor }: { inEditor: boolean }) {
   const close = useCallback((refocus?: boolean) => { setOpen(false); setSel(-1); if (refocus && btn.current) btn.current.focus(); }, []);
   const run = useCallback((e: AppEntry) => {
     close();
+    if (e.id === CAD_ENTRY) { setCadEnabled(!e.checked); return; }
     const app = window.CollabApp;
     if (app) app.dispatch({ type: "action", id: e.id, anchor: btn.current ? btn.current.getBoundingClientRect() : null });
   }, [close]);
@@ -178,11 +189,16 @@ function AppMenu({ inEditor }: { inEditor: boolean }) {
           {entries.map((e, i) => e === "-"
             ? <div key={"sep" + i} className="h-px bg-line my-1 mx-1" role="separator" />
             : (
-              <button type="button" key={e.id} role="menuitem" data-appmenu={e.id} aria-disabled={e.why ? "true" : undefined} title={e.why || undefined}
+              <button type="button" key={e.id} role={e.checked === undefined ? "menuitem" : "menuitemcheckbox"} aria-checked={e.checked} data-appmenu={e.id}
+                aria-disabled={e.why ? "true" : undefined} title={e.why || undefined}
                 className={cx(ROW, e.why ? "bg-transparent text-ink-3" : sel === i ? "bg-accent text-on-accent" : "bg-transparent")}
                 onMouseMove={() => setSel(e.why ? -1 : i)} onClick={() => { if (!e.why) run(e); }}>
                 <span className="w-5 h-4 mr-1.5 shrink-0 flex items-center justify-center">{e.icon ? <KIcon name={e.icon} size={16} /> : null}</span>
-                <span className="flex-1">{e.label}</span>
+                {e.note
+                  ? <span className="flex-1 flex flex-col min-w-0"><span>{e.label}</span>
+                      <span className={cx("text-xs whitespace-normal max-w-[250px] leading-snug", sel === i ? "text-on-accent opacity-80" : "text-ink-3")}>{e.note}</span></span>
+                  : <span className="flex-1">{e.label}</span>}
+                {e.checked !== undefined ? <span className={cx("switch ml-4", e.checked && "on", sel === i && "inv")} aria-hidden="true" /> : null}
               </button>
             ))}
         </div>

@@ -29,6 +29,7 @@ import { openPlotSchematic } from "../dialogs/plot-schematic";
 import { printDialog } from "./print";
 import { importNonKicad } from "./import-nonkicad";
 import { openCalculator } from "../calculator";
+import { setCad } from "./cad-setting";
 import type { AppAction } from "../../../shared/store";
 import type { ActionAnchor, ActionHandler } from "./types";
 // ---- actions (the home menu's entries and the collab items of the editor menus) ----
@@ -210,6 +211,7 @@ export function dispatchAction(a: AppAction) {
       case "restore": restoreCheckpoint(a.name); return;
       case "versions": versionsCommand(a); return;
       case "popover": store.set({ popover: a.popover || null }); return;
+      case "setCad": void setCad(!!a.on); return;
       case "contextMenu": contextMenuAction(a); return;
       case "toastDone": return;
       default: console.warn("unknown chrome action", a);

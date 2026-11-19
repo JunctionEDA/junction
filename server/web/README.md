@@ -48,6 +48,10 @@ Rules of thumb:
 - A project is a Home tab and any number of elements, one tab each: PCBs, part studios, assemblies
   (`platform/doctabs`, `platform/projecthome`). `domains/registry.ts` says which document kinds exist and which
   bundle draws each; a domain's editor registers itself through `platform/documents/host.ts`.
+- Mechanical CAD (part studios, assemblies, the board link) is a setting each person turns on (off by default).
+  Ask `shared/cad.ts` (`cadEnabled()`, `useApp(cadEnabled)`) before offering or loading anything of CAD; a kind
+  with `cad: true` in `domains/registry.ts` follows it. The project shell is everybody's. See "Mechanical CAD is a
+  setting" in `domains/mechanical/CONTRACT.md`.
 - A PCB is a KiCad project in a folder of its own, and the schematic and board editor sees one PCB at a time:
   `project.docs` is that PCB's documents with paths relative to its folder, `project.allDocs` is the whole
   project. Code outside the electronics editor reads `allDocs`. `platform/doctabs/pcbs.ts` has the rules; the

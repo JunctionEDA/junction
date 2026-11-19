@@ -19,7 +19,8 @@
 // The bar also keeps the two live things of an open project: the project's own document (shell.ts) and the
 // project room (room.ts): a dot on a tab for each person who is on it.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { KIND_SUMMARY, PCB_ELEMENT, type ElementTint } from "../../domains/registry";
+import { KIND_SUMMARY, PCB_ELEMENT, isCadDocType, type ElementTint } from "../../domains/registry";
+import { cadEnabled } from "../../shared/cad";
 import { askConfirm } from "../../shared/components/msgbox";
 import { dispatch, useApp, type DocEntry } from "../../shared/store";
 import { cx } from "../../shared/util";
@@ -73,7 +74,11 @@ export function DocTabs() {
   const openDocType = useApp((s) => s.document.doc?.docType || null);
   const hasDoc = useApp((s) => s.document.hasDoc);
   const shell = useProjectShell();
-  const { projectId, docs, elements, current, canEdit, room, ctx } = shell;
+  const { projectId, docs, elements: allElements, current, canEdit, room, ctx } = shell;
+  // a part studio or an assembly has a tab only for somebody who has Mechanical CAD on (web/shared/cad.ts); the
+  // project keeps it all the same (its place in the tab order too), and Home lists it
+  const cad = useApp(cadEnabled);
+  const elements = useMemo(() => (cad ? allElements : allElements.filter((e) => !isCadDocType(e.type))), [allElements, cad]);
   const [menu, setMenu] = useState<{ at: MenuAt; items: MenuEntry[]; title?: string } | null>(null);
   const [adding, setAdding] = useState<{ x: number; y: number } | null>(null);
   const [manager, setManager] = useState(false);
@@ -141,7 +146,8 @@ export function DocTabs() {
   }, [projectId, view === "home", myId]);
 
   // ---- which tab is the open one
-  const activeEl = elementOfTab(elements, current);
+  // from every element: a part studio open with CAD off (its note) is not taken for the PCB beside it
+  const activeEl = elementOfTab(allElements, current);
   const onHome = current === HOME_TAB;
   const pcbCount = elements.filter((e) => e.pcb).length;
   const peopleOn = (ids: (string | null)[]): RoomMember[] => room.members.filter((m) => ids.includes(m.tab));
@@ -220,8 +226,8 @@ export function DocTabs() {
   if (!open || !ctx) return <div id="doctabs" hidden />;
 
   const run = async (what: () => Promise<unknown>) => { setBusy(true); try { await what(); } finally { setBusy(false); } };
-  const folders = foldersOf(docs, elements, shell.emptyFolders);
-  const kinds = creatables(KIND_SUMMARY);
+  const folders = foldersOf(docs, allElements, shell.emptyFolders);
+  const kinds = creatables(KIND_SUMMARY, cad);
 
   const startRename = (e: El) => { if (canEdit && e.managed) setRenaming(e.key); };
   const rename = (e: El, name: string) => { setRenaming(null); if (name.trim() && name.trim() !== e.name) void run(() => renameElement(ctx, e, name)); };
@@ -276,7 +282,7 @@ export function DocTabs() {
       setDrag(null);
       if (!moved || m.type === "pointercancel") return;
       suppressClick.current = true; window.setTimeout(() => { suppressClick.current = false; }, 0);
-      const changes = moveTabChanges(elements, shell.items, e.key, where(m.clientX));
+      const changes = moveTabChanges(allElements, shell.items, e.key, where(m.clientX));
       if (changes.length && ctx.shell) ctx.shell.commit(changes);
     };
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", up); window.addEventListener("pointercancel", up);

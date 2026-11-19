@@ -4,7 +4,8 @@
 //
 // Deleting waits a few seconds before it reaches the server: the thing is hidden at once and a toast offers
 // Undo.  (The server deletes a document with its history, for good; there is nothing to undo afterwards.)
-import { DOCUMENT_KINDS, PCB_ELEMENT, documentKind, type DocumentKind } from "../../domains/registry";
+import { DOCUMENT_KINDS, PCB_ELEMENT, documentKind, kindAvailable, type DocumentKind } from "../../domains/registry";
+import { cadEnabled } from "../../shared/cad";
 import { newId, type ItemChange } from "../../shared/itemdoc/itemdoc";
 import type { DocEntry } from "../../shared/store";
 import { toast } from "../home/ui";
@@ -64,12 +65,14 @@ function deleteLater(ctx: ShellContext, id: string, label: string, run: (keepali
 
 // ---------------------------------------------------------------- elements
 
-/** The kinds "+" offers: a PCB, then every kind of document the registry says can be made. */
+/** The kinds "+" offers: a PCB, then every kind of document the registry says can be made (`cad`: the person has
+ *  Mechanical CAD on, web/shared/cad.ts; otherwise part studios and assemblies are not offered). */
 export interface Creatable { type: string; title: string; icon: string; tint?: string; summary: string; kind?: DocumentKind }
-export function creatables(summaries: Record<string, string>): Creatable[] {
+export function creatables(summaries: Record<string, string>, cad: boolean): Creatable[] {
   return [
     { type: PCB_ELEMENT.type, title: PCB_ELEMENT.title, icon: PCB_ELEMENT.icon, tint: PCB_ELEMENT.tint, summary: PCB_ELEMENT.summary },
-    ...DOCUMENT_KINDS.filter((k) => k.newName && k.newText !== undefined).map((k) => ({ type: k.docType, title: k.title, icon: k.icon, tint: k.tint, summary: summaries[k.docType] || "", kind: k })),
+    ...DOCUMENT_KINDS.filter((k) => k.newName && k.newText !== undefined && kindAvailable(k, cad))
+      .map((k) => ({ type: k.docType, title: k.title, icon: k.icon, tint: k.tint, summary: summaries[k.docType] || "", kind: k })),
   ];
 }
 
@@ -334,7 +337,8 @@ export async function importFiles(ctx: ShellContext, files: readonly IncomingFil
   const plan = planImport(files, into, intoPcb);
   const total = plan.models.length + plan.loose.length + plan.pcbs.reduce((n, p) => n + p.files.length, 0);
   if (!total) { toast(plan.refused.length ? `Junction cannot keep ${plan.refused.slice(0, 3).join(", ")}${plan.refused.length > 3 ? "…" : ""} in a project.` : "There was nothing to import.", { kind: "err" }); return false; }
-  let sent = 0, open: string | undefined;
+  let sent = 0, open: string | undefined, kept = 0;
+  const cad = cadEnabled();
   const step = (name: string) => onProgress?.(`Uploading ${name} (${++sent} of ${total})…`);
   const ok = await attempt(async () => {
     for (const p of plan.pcbs) {
@@ -350,15 +354,17 @@ export async function importFiles(ctx: ShellContext, files: readonly IncomingFil
     }
     for (const f of plan.loose) { step(f.name); await uploadFile(ctx.projectId, f.folder, f.name, f.file); }
     for (const f of plan.models) {
+      // with Mechanical CAD off a STEP file is kept as the 3D model file it is, as before part studios existed
       const kind = kindForFile(f.file.name);
-      if (!kind) { await uploadFile(ctx.projectId, into || "models", baseOf(f.path), f.file); continue; }
+      if (!kind || !kindAvailable(kind, cad)) { step(baseOf(f.path)); await uploadFile(ctx.projectId, into || "models", baseOf(f.path), f.file); if (kind) kept++; continue; }
       step(baseOf(f.path));
       open = await documentFromFile(ctx.projectId, kind, f.file);
     }
   });
   onProgress?.(null);
   await ctx.refresh(ok && open && total <= 40 ? open : undefined).catch(() => {});
-  if (ok) toast(`Imported ${total === 1 ? "one file" : total + " files"}${plan.refused.length ? `; ${plan.refused.length} left out (not files a project holds)` : ""}`);
+  if (ok) toast(`Imported ${total === 1 ? "one file" : total + " files"}${plan.refused.length ? `; ${plan.refused.length} left out (not files a project holds)` : ""}`
+    + (kept ? `. ${kept === 1 ? "The STEP file is" : "The STEP files are"} kept as ${kept === 1 ? "a 3D model" : "3D models"}: turn on Mechanical CAD in your settings to open STEP files as part studios.` : ""));
   return ok;
 }
 

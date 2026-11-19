@@ -4,6 +4,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { addProjectFile, createBlank, DEFAULT_LIMITS, NONKICAD_ACCEPT, getLimits, isNonKicadFile, isLocalState, isProjectFile, uploadProject, type MissingFile, type UploadFile, type UploadResult } from "./api";
 import { Ic, Modal, PHONE, useMedia } from "./ui";
+import { cadEnabled } from "../../shared/cad";
+import { useApp } from "../../shared/store";
 
 export type NewMode = "upload" | "import" | "blank";
 
@@ -64,6 +66,7 @@ export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy 
   // Dropped files that hold no KiCad design but another tool's open on the import.
   const easyOnly = (list: UploadFile[]) => list.length > 0 && !list.some((f) => /\.kicad_(pro|sch|pcb)$/i.test(f.path)) && list.some((f) => /\.(epro|epro2|eprj|elibz|elibz2|esch|epcb|pcbdoc|schdoc|cmpcbdoc|cspcbdoc|swpcbdoc|cmschdoc|csschdoc|prjpcb|brd|mdd|dsn|sch|cpa|csa|dip|dch|lay6|lay|t3001|fab|pcb|prj|asc|cvg)$/i.test(f.path));
   const [mode, setMode] = useState<NewMode>(initial && initial.length ? (easyOnly(initial) ? "import" : "upload") : start || "upload");
+  const cad = useApp(cadEnabled);
   // A phone has no drag and drop, and iOS cannot pick a folder: one "choose files" button, worded for that.
   const touch = useMedia(PHONE) || !("webkitdirectory" in HTMLInputElement.prototype);
   const [blankName, setBlankName] = useState("");
@@ -200,7 +203,7 @@ export function UploadDialog({ initial, start, onClose, onDone, onBlank, onBusy 
           <label className="hp-field"><span>Project name</span>
             <input className="hp-input" autoFocus value={blankName} maxLength={120} placeholder="My project" disabled={creating} onChange={(ev) => setBlankName(ev.target.value)}
               onKeyDown={(ev) => { if (ev.key === "Enter") createEmpty(); }} /></label>
-          <p className="hp-note">Starts an empty project and opens its Home tab. From there you add what it needs, as many as you like: PCBs (each a schematic and a board), part studios and assemblies. You can share it straight away.</p>
+          <p className="hp-note">Starts an empty project and opens its Home tab. From there you add what it needs, as many as you like: PCBs (each a schematic and a board){cad ? ", part studios and assemblies" : ""}. You can share it straight away.</p>
         </>
       ) : (<>
       <div className={"hp-drop" + (over ? " over" : "") + (files.length ? " has" : "")}

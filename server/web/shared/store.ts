@@ -14,7 +14,11 @@ export type DocType = "kicad_pcb" | "kicad_sch" | "footprint";
 export type Units = "mm" | "in" | "mil";
 export type ConnStatus = "offline" | "connecting" | "live" | "error" | "idle";
 
-export interface User { id: number; login: string; name?: string | null; avatarUrl?: string | null; admin?: boolean }
+export interface User {
+  id: number; login: string; name?: string | null; avatarUrl?: string | null; admin?: boolean;
+  /** Mechanical CAD (part studios, assemblies, the board link) is turned on for this person; read it with cadEnabled() (shared/cad.ts) */
+  cad?: boolean;
+}
 
 export interface DocEntry { docId: string; path: string; docType: string; hasPreview?: boolean }
 
@@ -317,6 +321,8 @@ export type AppAction =
   | { type: "restore"; name: string }
   | ({ type: "versions" } & VersionsCmd)
   | { type: "popover"; popover: PopoverState | null }
+  /** turn Mechanical CAD on or off for the signed-in person (PUT /api/me/cad); the store's `me` follows (shared/cad.ts) */
+  | { type: "setCad"; on: boolean }
   /** the right-click menu: run a row (then it closes), brighten a row's item, or just close */
   | { type: "contextMenu"; run?: number; hover?: string | null }
   | { type: "toastDone"; id: number }

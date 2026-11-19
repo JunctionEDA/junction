@@ -47,6 +47,43 @@ part studio ──link item, solved──▶ the board's outline, holes, keep-ou
 part studio, board, assembly ──read live──▶ instances of an assembly   assembly/sources/
 ```
 
+## Mechanical CAD is a setting
+
+CAD is something each person turns on for themselves. It is a setting of the account (`users.cad_enabled`,
+`migrations/0251_user_cad.sql`), **off by default**: `GET /api/me` says `cad`, `PUT /api/me/cad { enabled }`
+changes it. The switch, "Mechanical CAD (part studios and assemblies)", is in the account menu on the projects
+page (`platform/home/Home.tsx`) and in the editor's Junction menu (`shared/components/MenuBar.tsx`); it takes
+effect at once, without a reload.
+
+Every caller asks `shared/cad.ts`: `cadEnabled()` (or `useApp(cadEnabled)` in a component), `setCadEnabled(on)`
+(which dispatches `setCad`; `pcb/editor/cad-setting.ts` sends the request, updates the store's `me` and draws an
+open CAD tab again). Which kinds are CAD is the registry's `cad: true` (`isCadDocType`, `kindAvailable`). A new
+CAD kind is marked there and nothing else changes.
+
+| With CAD off | Where |
+|---|---|
+| no part studio or assembly in "+", Home's create buttons or the tab bar and tab manager | `doctabs/actions.ts creatables(…, cad)`, `DocTabs.tsx`, `ProjectHome.tsx` |
+| a dropped STEP file is stored as the 3D model it is (in `models/`), and the toast says how to open it as a part studio | `doctabs/actions.ts importFiles` |
+| Home still lists the project's CAD documents, with "Turn on Mechanical CAD in your settings to open" | `ProjectHome.tsx` |
+| opening one, from Home or by a link (`/p/<project>/edit?doc=<id>`), shows that note and a button that turns CAD on and opens it; no bundle is loaded | `pcb/editor/dochost.ts` |
+| Compare of a part studio says the same instead of loading its renderer | `review/renderers.ts` |
+| on a board: no "Used in" button, no board-link badge or panel, no reconciler, no height check, no enclosure in the 3D viewer, and no part studio is read | `pcb/editor/cad-usage.ts`, `pcb/mech/sync.ts` (the badge, panel and enclosure follow its state) |
+| the MCP endpoint lists no `cad_*` tool and refuses one called by name | `server/src/mcp.rs` (`listed`, `cad_on`) |
+
+What does not change: **the project shell is everybody's** (Home, several PCBs, their views, the BOM), and no
+document is hidden or refused. The server takes CAD documents from anybody (a collaborator with CAD on adds them
+to a shared project), and the tab order keeps their places. A board driven by somebody's part studio keeps its
+driven items exactly as they are stored for a person with CAD off: locked and grouped under the part studio's
+name; their page writes nothing to them and releases nothing (a link is released only by a page with CAD on,
+when it is really gone). They can still unlock a driven item by hand as any locked item; the next page with CAD
+on puts it back.
+
+A signed-out visitor has no account and so no CAD: a public project's part studios show the note.
+
+Browser scripts that work with part studios turn CAD on for their users first: `scripts/cad-setting.mjs`
+`setCad(BASE, jwt(uid, login))`, through the same request the switch sends. `scripts/cad-setting-ui.mjs` is the
+setting itself.
+
 ## Where things are
 
 | Path (under `server/web/`) | What |
@@ -115,7 +152,7 @@ field, a new method) and say so in your pull request.
 
 - `shared/itemdoc/itemdoc.ts`, `shared/itemdoc/sync.ts` and their mirror `server/src/itemdoc.rs`
 - `shared/viewport3d/viewport3d.ts`
-- `platform/documents/host.ts`, `platform/doctabs/*`, `domains/registry.ts`
+- `platform/documents/host.ts`, `platform/doctabs/*`, `domains/registry.ts`, `shared/cad.ts`
 - `mechanical/core/*`, `mechanical/kernel/{types,protocol,regen,occ,tessellate,worker,client,load,wasm}.ts`
 - `mechanical/document/{format,edits,inputs}.ts`, `mechanical/sketch/{format,profiles,planar}.ts`
 - `mechanical/ui/{studio.ts,PartStudioView.tsx,Toolbar.tsx,commands.ts,fields.ts,DialogShell.tsx,panels.ts,FeatureDialog.tsx,FeatureList.tsx}`,
@@ -262,7 +299,8 @@ new JSON item document kind is one line there and gets history, branches, mergin
   studio's are `cad_feature_types` (from the feature registry), `cad_get_features`, `cad_get_bodies`,
   `cad_edit_features`, `cad_render_view`, `cad_create_part_studio`; edits are planned and validated in
   `mcp/model.ts` against each feature's `schema`, so a new feature type is editable by an assistant with no
-  further work as long as its parameters are described by its schema.
+  further work as long as its parameters are described by its schema. They are listed only to a person who has
+  Mechanical CAD on (see "Mechanical CAD is a setting").
 - **Interface state of a tool or panel**: `studio.setUi({ myKey: value })` keeps it in `getState().ui` and
   redraws the toolbar, so a tool's `active` can read it (the History button does).
 
@@ -1224,10 +1262,12 @@ E2E_PG_URL=postgres://user:pass@127.0.0.1:5432/db E2E_JWT_SECRET=dev E2E_BASE=ht
 | `cad-board-ui`, `cad-boardlink-ui` | a board in a part studio following the board editor; a part studio driving a board |
 | `cad-assembly-ui`, `cad-analysis-ui`, `cad-exchange-ui` | assemblies and mates; inspection, interference, the bill of materials; import and export |
 | `cad-history-ui`, `cad-history-mcp`, `cad-history-github` | history, compare, branches; the assistant's tools over `/mcp`; GitHub sync against `scripts/fake-github.mjs` |
+| `cad-setting-ui` | the setting: a person with CAD off sees no CAD entries, tabs or requests, a note on a CAD link and on Home's rows, a driven board left as it is; on and off again from the account menu and the app menu without a reload; the MCP list following it |
 
 `scripts/cad-chrome.mjs` is what they share about the chrome (`tool`, `toolTitles`, `toolbarMode`, `openPanel`,
 `viewFrom`, `sketchOn`); `scripts/cad-ux-lib.mjs` has signing in, a new part studio, and where a named face or
-edge is on screen. Each script makes its own users (distinct `github_id`s: give a new script its own range; two
+edge is on screen; `scripts/cad-setting.mjs` turns Mechanical CAD on for a script's user (it is off for a new
+account). Each script makes its own users (distinct `github_id`s: give a new script its own range; two
 scripts with one id see each other's user and fail in ways that look like presence bugs).
 
 The server embeds the browser bundles when it is compiled, so a change under `server/web` does not show in a

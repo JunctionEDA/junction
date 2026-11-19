@@ -7,9 +7,13 @@
 //
 // Which documents use the board is read from the documents themselves: every part studio and assembly of the
 // project as it stands now (the stored file and the edits since), looked through for this board's id.
+//
+// Only for somebody who has Mechanical CAD on (web/shared/cad.ts): with it off the button is not shown and the
+// part studios are not read.
 import { applyChanges, parseItemDoc, serializeItemDoc, type ItemChange } from "../../../shared/itemdoc/itemdoc";
 import type { DocEntry } from "../../../shared/store";
 import { documentKind } from "../../registry";
+import { cadEnabled } from "../../../shared/cad";
 import { state, store } from "./appstore";
 import { openDocId } from "./doc";
 
@@ -47,7 +51,7 @@ function host(): HTMLElement | null { return document.getElementById("stage"); }
 function render(): void {
   const stage = host(); if (!stage) return;
   let el = document.getElementById("cadUsage");
-  const onBoard = state.view === "editor" && !!state.doc && state.doc.docType === "kicad_pcb";
+  const onBoard = state.view === "editor" && !!state.doc && state.doc.docType === "kicad_pcb" && cadEnabled(store.get());
   if (!onBoard || !users.length) { if (el) el.remove(); menuOpen = false; return; }
   if (!el) {
     el = document.createElement("div");
@@ -96,7 +100,7 @@ function render(): void {
 
 function refresh(force = false): void {
   const doc = state.doc, docs = state.project ? state.project.docs : [];
-  const onBoard = state.view === "editor" && !!doc && doc.docType === "kicad_pcb";
+  const onBoard = state.view === "editor" && !!doc && doc.docType === "kicad_pcb" && cadEnabled(store.get());
   if (!onBoard) { if (shownFor) { shownFor = ""; users = []; render(); } return; }
   const cad = docs.filter((d) => CAD_TYPES.includes(d.docType));
   const key = `${doc!.docId}|${cad.map((d) => d.docId + d.path).join(",")}`;

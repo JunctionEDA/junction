@@ -300,3 +300,20 @@ test("dropped files: a STEP file is a part studio, a KiCad project is a PCB, loo
   plan = X.planImport([f("mine.kicad_sym")], "Enclosure", false);
   assert.deepEqual([plan.pcbs.length, plan.loose.map((x) => `${x.folder}/${x.name}`)], [0, ["Enclosure/mine.kicad_sym"]]);
 });
+
+test("Mechanical CAD is offered only to somebody who has it on", () => {
+  const X = load("platform/doctabs/actions.ts"), R = load("domains/registry.ts"), C = load("shared/cad.ts");
+  const kinds = (cad) => X.creatables(R.KIND_SUMMARY, cad).map((k) => k.type);
+  assert.deepEqual(kinds(false), ["pcb"]);
+  assert.deepEqual(kinds(true), ["pcb", "part_studio", "assembly"]);
+  assert.ok(R.isCadDocType("part_studio") && R.isCadDocType("assembly"));
+  assert.ok(!R.isCadDocType("kicad_pcb") && !R.isCadDocType("kicad_sch") && !R.isCadDocType("project_shell") && !R.isCadDocType("model3d"));
+  // what the store's `me` says, and nothing when signed out (the default is off)
+  const st = (me) => ({ me });
+  assert.equal(C.cadEnabled(st(null)), false);
+  assert.equal(C.cadEnabled(st({ id: 1, login: "ada" })), false);
+  assert.equal(C.cadEnabled(st({ id: 1, login: "ada", cad: true })), true);
+  // the elements are the project's whatever the setting: only the tab bar leaves CAD's out
+  const docs = [doc("Board/Board.kicad_pro"), doc("Board/Board.kicad_sch"), doc("Board/Board.kicad_pcb"), doc("Lid.jpart"), doc("Box.jasm")];
+  assert.deepEqual(E.elementsOf(docs, "P").map((e) => e.type), ["pcb", "part_studio", "assembly"]);
+});

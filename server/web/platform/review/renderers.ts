@@ -6,6 +6,7 @@
 // here as it loads, exactly as it registers its document editor (web/platform/documents/host.ts).  The renderer
 // is given an empty element and the two files as text; what a difference is, and how to draw it, is its own.
 import { documentKind } from "../../domains/registry";
+import { CAD_OFF_NOTE, cadEnabled } from "../../shared/cad";
 
 export interface CompareSide {
   /** what the version is called in the window ("Version 3", "Current") */
@@ -63,6 +64,8 @@ export async function loadCompareRenderer(docType: string): Promise<CompareRende
   if (have) return have;
   const kind = documentKind(docType);
   if (!kind || !kind.bundle) throw new Error("This kind of document cannot be compared yet.");
+  // a part studio's renderer is Mechanical CAD's: not loaded for somebody who has it off (web/shared/cad.ts)
+  if (kind.cad && !cadEnabled()) throw new Error(`${CAD_OFF_NOTE} or compare ${kind.title.toLowerCase()}s.`);
   const src = kind.bundle;
   let p = loading.get(src);
   if (!p) {

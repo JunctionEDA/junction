@@ -94,6 +94,7 @@ values, coordinates, paths, counts, keys). Weights 400, 500 for controls, 600 fo
 | Key | `.kbd` | |
 | Callout | `.callout`, with `.ok`, `.warn`, `.err` | A message in the flow of a page |
 | Segmented control | `.seg` with `button.on` | A row of exclusive choices |
+| Switch | `.switch`, with `.on`, `.inv` | A setting that is on or off, inside the row or button that toggles it (`role="menuitemcheckbox"`, `aria-checked`). `.inv` on an `--accent` fill |
 | Box | `.box` with `h2` and `.in` | A titled group on a page |
 | Dialog | `.kd-overlay`, `.kd-dialog`, `.kd-title`, `.kd-body`, `.kd-foot` | Title bar on `--paper`, body on `--bench`, buttons right-aligned |
 | Spinner | `.spinner` | |
