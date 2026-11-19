@@ -29,7 +29,7 @@ declare global {
 }
 const go = (path: string) => { if (window.CollabNav) window.CollabNav.navigate(path); else location.href = path; };
 const editUrl = (id: string) => `/p/${id}/edit`;
-/** A project just made from KiCad files opens on its schematic, where a KiCad design starts; a blank one has none and opens on its Home tab. */
+/** A project just made opens on its schematic, where a KiCad design starts (the editor would pick the board). */
 const newProjectUrl = (r: { projectId: string; docs?: unknown[] }) => {
   const sch = ((r.docs || []) as { docId?: string; path?: string; docType?: string }[])
     .filter((d) => d && d.docType === "kicad_sch" && d.docId && d.path)
@@ -287,7 +287,7 @@ function DetailsDialog({ p, onClose, onSaved }: { p: Project; onClose: () => voi
         <button type="button" className="btn primary" onClick={save} disabled={busy || !name.trim()}>{busy ? "Saving…" : "Save"}</button></>}>
       <label className="hp-field"><span>Name</span><input className="hp-input" data-autofocus value={name} maxLength={120} onChange={(ev) => setName(ev.target.value)} onKeyDown={(ev) => { if (ev.key === "Enter") save(); }} /></label>
       <label className="hp-field"><span>Description <small>{description.length}/2000</small></span>
-        <textarea className="hp-input" rows={4} maxLength={2000} value={description} placeholder="What is this project? Shown in the list and in Explore." onChange={(ev) => setDescription(ev.target.value)} /></label>
+        <textarea className="hp-input" rows={4} maxLength={2000} value={description} placeholder="What is this board? Shown in the list and in Explore." onChange={(ev) => setDescription(ev.target.value)} /></label>
       <p className="hp-note">Renaming here changes the name online only. Files and folders on anyone's computer keep their names.</p>
     </Modal>
   );

@@ -238,91 +238,6 @@ function boxOf(out: MeshData, m: MeshData, from: number): void {
     out.pos.push(ax, ay, z0, bx, by, z0, ax, ay, z1, bx, by, z1, ax, ay, z0, ax, ay, z1); }
 }
 
-/**
- * The laminate as triangles: the two faces (with texture coordinates from `uvOf`), the edge with the walls of
- * cut-outs and unplated holes, and the plated barrels.  Front face at z = 0, back at −thickness.
- */
-function slabInto(out: { top: MeshData; bottom: MeshData; edge: MeshData; barrels: MeshData }, shape: BoardShape, perOutline: Hole[][], thickness: number, toModel: (p: Pt) => Pt, uvOf: (p: Pt) => [number, number]): { cutouts: number; drilled: number } {
-  let cutouts = 0, drilled = 0;
-  shape.outlines.forEach((o, i) => {
-    const contour = o.contour.map(toModel); const cuts = o.cutouts.map((c) => c.map(toModel)); cutouts += cuts.length;
-    const drills = perOutline[i]; drilled += drills.length;
-    const holeLoops = cuts.concat(drills.map((h) => h.pts.map(toModel)));
-    const faces = triangulate(contour, holeLoops);   // the costly step on a board with thousands of holes: once for both faces
-    cap(out.top, contour, holeLoops, 0, true, undefined, uvOf, faces);
-    cap(out.bottom, contour, holeLoops, -thickness, false, undefined, uvOf, faces);
-    wall(out.edge, contour, 0, -thickness, layerColor("board"), false);
-    for (const c of cuts) wall(out.edge, c, 0, -thickness, layerColor("board"), true);
-    for (const h of drills) {
-      const loop = h.pts.map(toModel); const centre = toModel([h.x, h.y]);
-      if (h.plated) wall(out.barrels, loop, 0, -thickness, layerColor("copper"), true, centre);
-      else wall(out.edge, loop, 0, -thickness, layerColor("board"), true, centre);
-    }
-  });
-  return { cutouts, drilled };
-}
-
-/** The laminate of a board as four geometries (null when empty), for a caller that draws the board itself (exports/board3d.ts). */
-export function slabGeometries(shape: BoardShape, perOutline: Hole[][], thickness: number, toModel: (p: Pt) => Pt, uvOf: (p: Pt) => [number, number]): { top: THREE.BufferGeometry | null; bottom: THREE.BufferGeometry | null; edge: THREE.BufferGeometry | null; barrels: THREE.BufferGeometry | null } {
-  const d = { top: new MeshData(), bottom: new MeshData(), edge: new MeshData(), barrels: new MeshData() };
-  slabInto(d, shape, perOutline, thickness, toModel, uvOf);
-  const g = (m: MeshData) => (m.empty ? null : m.geometry());
-  return { top: g(d.top), bottom: g(d.bottom), edge: g(d.edge), barrels: g(d.barrels) };
-}
-
-/** A footprint's loaded models, placed as KiCad's viewer places them, added to `m`; false when none has loaded. */
-function addBodyModels(m: MeshData, body: Body, models: ModelStore | null, toModel: (p: Pt) => Pt, thickness: number, lift: number): boolean {
-  if (!models) return false;
-  let drawn = false; const [px, py] = toModel([body.x, body.y]);
-  const at = { x: px, y: py, z: body.back ? -thickness - lift : lift, rot: body.rot, back: body.back };
-  for (const ref of body.models) {
-    const mesh = models.get(ref.url); if (!mesh || mesh === "missing") continue;
-    const base = m.pos.length / 3; const c: RGBA = [0, 0, 0, 1];
-    placeMesh(mesh, ref, at, (x, y, z, nx, ny, nz, i) => { c[0] = mesh.col[i * 3]; c[1] = mesh.col[i * 3 + 1]; c[2] = mesh.col[i * 3 + 2]; m.vertex(x, y, z, nx, ny, nz, c); });
-    // a mirror in the model's scale turns its triangles inside out
-    const flip = ref.scale[0] * ref.scale[1] * ref.scale[2] < 0;
-    for (let i = 0; i < mesh.idx.length; i += 3) m.idx.push(base + mesh.idx[i], base + mesh.idx[i + (flip ? 2 : 1)], base + mesh.idx[i + (flip ? 1 : 2)]);
-    drawn = true;
-  }
-  return drawn;
-}
-
-/** A footprint's stand-in solids (parts.ts), or the plain prism over its outline, added to `m`. */
-function addBodySolids(m: MeshData, body: Body, toModel: (p: Pt) => Pt, thickness: number, lift: number): void {
-  if (body.solids && body.solids.length) {
-    // heights are from the face the part sits on: up from the front, down from the back
-    const sgn = body.back ? -1 : 1, zOf = (h: number) => (body.back ? -thickness - lift - h : lift + h);
-    for (const so of body.solids) {
-      if (so.k === "prism") prismSolid(m, so.pts.map(toModel), zOf(so.z0), zOf(so.z1), sgn, so.color, !!so.round, so.bevel || 0);
-      else if (so.k === "sweep") { const sec = (loop: Pt[]): Pt[] => loop.map((p) => [p[0], zOf(p[1])] as Pt); sweepSolid(m, toModel(so.a), toModel(so.b), sec(so.outer), so.inner ? sec(so.inner) : null, so.color, !!so.smooth, !!so.capA, !!so.capB); }
-      else cylinderSolid(m, toModel(so.a), toModel(so.b), so.r, zOf(so.z), so.color);
-    }
-    return;
-  }
-  const pts = body.pts.map(toModel);
-  const z0 = body.back ? -thickness - lift : lift, z1 = body.back ? -thickness - lift - body.height : lift + body.height;
-  const round = pts.length > 8; let centre: Pt | undefined;
-  if (round) { let sx = 0, sy = 0; for (const p of pts) { sx += p[0]; sy += p[1]; } centre = [sx / pts.length, sy / pts.length]; }
-  wall(m, pts, z0, z1, body.color, false, centre);
-  cap(m, pts, [], z1, !body.back, body.color);
-  cap(m, pts, [], z0, body.back, body.color);
-}
-
-/** The triangles of one part, on its own: what the merged class meshes of a BoardScene are made of. */
-export interface PartTriangles { positions: Float32Array; normals: Float32Array; colors: Float32Array; indices: Uint32Array; /** drawn from the part's real 3D model, not a stand-in */ real: boolean }
-
-/**
- * One part as triangles in the scene's model space (front face of the board at z = 0, back at −thickness, parts
- * `lift` above the laminate): its loaded 3D model when `models` has one, the stand-in solids otherwise.  For a
- * caller that keeps a mesh per footprint instead of BoardScene's merged ones (exports/board3d.ts).
- */
-export function partTriangles(body: Body, thickness: number, models: ModelStore | null, toModel: (p: Pt) => Pt = (p) => p, lift = 0.04): PartTriangles {
-  const m = new MeshData();
-  const real = addBodyModels(m, body, models, toModel, thickness, lift);
-  if (!real) addBodySolids(m, body, toModel, thickness, lift);
-  return { positions: new Float32Array(m.pos), normals: new Float32Array(m.nrm), colors: new Float32Array(m.col), indices: new Uint32Array(m.idx), real };
-}
-
 export class BoardScene {
   readonly group = new THREE.Group();
   readonly stats: BoardStats;
@@ -344,8 +259,6 @@ export class BoardScene {
   private bodyList: Body[] = [];
   private toModel: (p: Pt) => Pt = (p) => p;
   private thickness = 1.6;
-  /** Where the board file's origin (0, 0) is in this scene: what places solids given in board coordinates (Viewer.setExtras). */
-  origin(): Pt { return this.toModel([0, 0]); }
   private models: ModelStore | null = null;
   private vis: Visibility;
   /** true when this scene took its board meshes from the one it replaced (tests) */
@@ -374,7 +287,21 @@ export class BoardScene {
     const top = new MeshData(), bottom = new MeshData(), edge = new MeshData(), barrels = new MeshData();
     let cutouts = 0, drilled = 0;
     if (reuse) { cutouts = prev ? prev.stats.cutouts : 0; drilled = prev ? prev.stats.holes : 0; }
-    else { const n = slabInto({ top, bottom, edge, barrels }, shape, perOutline, thickness, toModel, uvOf); cutouts = n.cutouts; drilled = n.drilled; }
+    else shape.outlines.forEach((o, i) => {
+      const contour = o.contour.map(toModel); const cuts = o.cutouts.map((c) => c.map(toModel)); cutouts += cuts.length;
+      const drills = perOutline[i]; drilled += drills.length;
+      const holeLoops = cuts.concat(drills.map((h) => h.pts.map(toModel)));
+      const faces = triangulate(contour, holeLoops);   // the costly step on a board with thousands of holes: once for both faces
+      cap(top, contour, holeLoops, 0, true, undefined, uvOf, faces);
+      cap(bottom, contour, holeLoops, -thickness, false, undefined, uvOf, faces);
+      wall(edge, contour, 0, -thickness, layerColor("board"), false);
+      for (const c of cuts) wall(edge, c, 0, -thickness, layerColor("board"), true);
+      for (const h of drills) {
+        const loop = h.pts.map(toModel); const centre = toModel([h.x, h.y]);
+        if (h.plated) wall(barrels, loop, 0, -thickness, layerColor("copper"), true, centre);
+        else wall(edge, loop, 0, -thickness, layerColor("board"), true, centre);
+      }
+    });
 
     for (const side of ["F", "B"] as Side[]) {
       const data = side === "F" ? top : bottom; const geometry = reuse ? reuse[side] : data.empty ? null : data.geometry(); if (!geometry) continue;
@@ -456,7 +383,21 @@ export class BoardScene {
   }
 
   /** The footprint's loaded models, placed as KiCad's viewer places them; false when none has loaded. */
-  private addModels(m: MeshData, body: Body, lift: number): boolean { return addBodyModels(m, body, this.models, this.toModel, this.thickness, lift); }
+  private addModels(m: MeshData, body: Body, lift: number): boolean {
+    if (!this.models) return false;
+    let drawn = false; const [px, py] = this.toModel([body.x, body.y]);
+    const at = { x: px, y: py, z: body.back ? -this.thickness - lift : lift, rot: body.rot, back: body.back };
+    for (const ref of body.models) {
+      const mesh = this.models.get(ref.url); if (!mesh || mesh === "missing") continue;
+      const base = m.pos.length / 3; const c: RGBA = [0, 0, 0, 1];
+      placeMesh(mesh, ref, at, (x, y, z, nx, ny, nz, i) => { c[0] = mesh.col[i * 3]; c[1] = mesh.col[i * 3 + 1]; c[2] = mesh.col[i * 3 + 2]; m.vertex(x, y, z, nx, ny, nz, c); });
+      // a mirror in the model's scale turns its triangles inside out
+      const flip = ref.scale[0] * ref.scale[1] * ref.scale[2] < 0;
+      for (let i = 0; i < mesh.idx.length; i += 3) m.idx.push(base + mesh.idx[i], base + mesh.idx[i + (flip ? 2 : 1)], base + mesh.idx[i + (flip ? 1 : 2)]);
+      drawn = true;
+    }
+    return drawn;
+  }
 
   /** Hand the board's geometries to the scene that replaces this one; dispose() then leaves them alone. */
   private releaseGeometry(): { F: THREE.BufferGeometry | null; B: THREE.BufferGeometry | null; edge: THREE.BufferGeometry | null; barrels: THREE.BufferGeometry | null } {
@@ -465,7 +406,25 @@ export class BoardScene {
     return { F: g(this.faces.F), B: g(this.faces.B), edge: g(this.edge), barrels: g(this.barrels) };
   }
 
-  private addBody(m: MeshData, body: Body, toModel: (p: Pt) => Pt, thickness: number, lift: number): void { addBodySolids(m, body, toModel, thickness, lift); }
+  private addBody(m: MeshData, body: Body, toModel: (p: Pt) => Pt, thickness: number, lift: number): void {
+    if (body.solids && body.solids.length) {
+      // heights are from the face the part sits on: up from the front, down from the back
+      const sgn = body.back ? -1 : 1, zOf = (h: number) => (body.back ? -thickness - lift - h : lift + h);
+      for (const so of body.solids) {
+        if (so.k === "prism") prismSolid(m, so.pts.map(toModel), zOf(so.z0), zOf(so.z1), sgn, so.color, !!so.round, so.bevel || 0);
+        else if (so.k === "sweep") { const sec = (loop: Pt[]): Pt[] => loop.map((p) => [p[0], zOf(p[1])] as Pt); sweepSolid(m, toModel(so.a), toModel(so.b), sec(so.outer), so.inner ? sec(so.inner) : null, so.color, !!so.smooth, !!so.capA, !!so.capB); }
+        else cylinderSolid(m, toModel(so.a), toModel(so.b), so.r, zOf(so.z), so.color);
+      }
+      return;
+    }
+    const pts = body.pts.map(toModel);
+    const z0 = body.back ? -thickness - lift : lift, z1 = body.back ? -thickness - lift - body.height : lift + body.height;
+    const round = pts.length > 8; let centre: Pt | undefined;
+    if (round) { let sx = 0, sy = 0; for (const p of pts) { sx += p[0]; sy += p[1]; } centre = [sx / pts.length, sy / pts.length]; }
+    wall(m, pts, z0, z1, body.color, false, centre);
+    cap(m, pts, [], z1, !body.back, body.color);
+    cap(m, pts, [], z0, body.back, body.color);
+  }
 
   private faceLayers(side: Side, v: Visibility): FaceLayers {
     return side === "F" ? { body: v.board, copper: v.copperTop, mask: v.maskTop, silk: v.silkTop, paste: v.paste, extra: v.extra }

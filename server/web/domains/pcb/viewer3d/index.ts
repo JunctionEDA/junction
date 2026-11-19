@@ -30,8 +30,6 @@ export const api = {
   open(opts: OpenOptions): ViewerWindow {
     if (current && !current.closed) { current.focus(); return current; }
     current = new ViewerWindow(opts);
-    // whoever draws more than the board in this window (mech/enclosure.ts) hears of it
-    for (const hook of ((globalThis as unknown as { KiCadViewer3DOpened?: ((win: ViewerWindow) => void)[] }).KiCadViewer3DOpened || [])) { try { hook(current); } catch (e) { console.warn(e); } }
     return current;
   },
   close(): void { if (current) current.close(); current = null; },

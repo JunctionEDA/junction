@@ -447,7 +447,7 @@ const pcbWatch = await watch(pcbDocId, adaJwt);
 
 {
   // a view-only project: Bob shares one of his with Ada as a viewer
-  const made = await (await fetch(`${BASE}/api/projects/blank`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${bobJwt}` }, body: JSON.stringify({ name: 'mcp-e2e-bobs', template: 'pcb' }) })).json();
+  const made = await (await fetch(`${BASE}/api/projects/blank`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${bobJwt}` }, body: JSON.stringify({ name: 'mcp-e2e-bobs' }) })).json();
   await db.query(`INSERT INTO permissions (project_id, user_id, role, created_by) VALUES ($1, $2, 'viewer', $3)`, [made.projectId, ada, bob]);
   const list = await call(T(), 'list_projects', {});
   check('a project shared with the person is listed with their role', list.data.projects.some((p) => p.name === 'mcp-e2e-bobs' && p.role === 'viewer' && p.owner === 'mcp-bob'), list.text.slice(0, 300));

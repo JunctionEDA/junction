@@ -42,7 +42,7 @@ use crate::doc_actor::DocMsg;
 use crate::error::{AppError, AppResult};
 use crate::http::{doc_type_for, MAX_FILES, MAX_FILE_BYTES, MAX_TOTAL_BYTES};
 use crate::lenient_json::LenientJson;
-use crate::merge::Prefer;
+use crate::merge::{self, Prefer};
 use crate::persist::{self, Document, User};
 use crate::AppState;
 
@@ -601,16 +601,6 @@ struct LocalFile {
 async fn local_files(state: &AppState, project_id: Uuid) -> AppResult<BTreeMap<String, LocalFile>> {
     let mut out = BTreeMap::new();
     for doc in persist::project_documents(&state.pool, project_id).await? {
-        // A document whose journal this server folds itself (a part studio, an assembly) is read
-        // as it is now: its stored file is brought up to its last edit first, so it never shows
-        // as having edits that some editor still has to save.
-        if crate::dockind::of(&doc.doc_type).fold == crate::dockind::Fold::Server
-            && persist::latest_snapshot_seq(&state.pool, doc.id).await? < persist::head_seq(&state.pool, doc.id).await?
-        {
-            if let Err(why) = crate::compact::fold(&state.pool, &doc).await {
-                tracing::warn!(doc = %doc.id, "journal not folded: {why}");
-            }
-        }
         let Some((seq, content)) = persist::latest_snapshot(&state.pool, doc.id).await? else {
             continue;
         };
@@ -1754,7 +1744,7 @@ pub async fn project_status(
                 "docType": l.map(|f| f.doc.doc_type.clone()).unwrap_or_else(|| doc_type_for(&e.path).to_string()),
                 "size": l.map(|f| f.size as u64).unwrap_or(e.remote_size),
                 "unsavedOps": l.map(|f| f.unsaved_ops).unwrap_or(0),
-                "mergeable": crate::dockind::of(doc_type_for(&e.path)).file_mergeable(),
+                "mergeable": merge::mergeable(doc_type_for(&e.path)),
             });
             if e.op == Op::Delete {
                 f["deleted"] = json!(if e.local.is_none() { "online" } else { "github" });
@@ -1932,7 +1922,7 @@ fn changes_json(old: Option<&[u8]>, new: Option<&[u8]>) -> Value {
         return json!({ "changes": [], "total": 0 });
     }
     let items = match (std::str::from_utf8(old), std::str::from_utf8(new)) {
-        (Ok(o), Ok(n)) => crate::dockind::diff_text(o, n),
+        (Ok(o), Ok(n)) => merge::diff(o, n),
         _ => None,
     };
     match items {
@@ -2685,7 +2675,7 @@ pub async fn pull(
             Change::Pull => "github",
             _ => match wanted {
                 Some(c @ ("merge" | "github" | "online")) => c,
-                _ if crate::dockind::of(doc_type_for(&e.path)).file_mergeable() => "merge",
+                _ if merge::mergeable(doc_type_for(&e.path)) => "merge",
                 _ => {
                     skip("changed on both sides; choose which version to keep");
                     continue;
@@ -2754,7 +2744,7 @@ pub async fn pull(
                 _ => None,
             };
             let merged = match (std::str::from_utf8(&ours), std::str::from_utf8(&theirs)) {
-                (Ok(o), Ok(t)) => crate::dockind::merge3_text(
+                (Ok(o), Ok(t)) => merge::merge3(
                     base_bytes.as_deref().and_then(|b| std::str::from_utf8(b).ok()),
                     o,
                     t,

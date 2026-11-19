@@ -1,7 +1,6 @@
 // editor — GENERATED SOURCE MODULE (split from the former static/app.js; static/dist/editor.js is the esbuild output of web/domains/pcb/editor/index.ts — edit these modules, not the bundle).
 import { state, store } from "./appstore";
 import { leaveEditor, openEditor, takeBoot } from "./doc";
-import { closeHostedDoc } from "./dochost";
 import { $$ } from "./dom";
 import { api } from "./util";
 // ---------- routing ----------
@@ -26,10 +25,9 @@ export async function loadMe() {
 
 
 // ================================================================ HOME
-export function showView(name: "home" | "editor" | "cad"): void {
+export function showView(name: "home" | "editor"): void {
   state.view = name;
   $$(".view").forEach((v) => v.classList.toggle("active", v.id === name));
-  if (name !== "cad") closeHostedDoc();   // a part studio or an assembly was open (dochost.ts)
   if (name === "home") {
     leaveEditor(); delete document.body.dataset.editor;
     store.slice("document", { editor: null, docType: null, docId: null, doc: null });

@@ -102,7 +102,7 @@ function verify(label, dir) {
 
 // ---------------------------------------------------------------- blank project and templates
 {
-  const blank = await json('/api/projects/blank', { method: 'POST', json: { name: 'load blank', template: 'pcb' } });
+  const blank = await json('/api/projects/blank', { method: 'POST', json: { name: 'load blank' } });
   if (check('a blank project is made', blank.status === 200 && !!blank.body.projectId, JSON.stringify(blank.body))) verify('blank project', await download(blank.body.projectId, 'blank'));
   const list = await json('/api/templates');
   const templates = Array.isArray(list.body) ? list.body : (list.body && list.body.templates) || [];

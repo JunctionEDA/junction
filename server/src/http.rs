@@ -64,9 +64,6 @@ pub(crate) fn allowed_file(name: &str) -> bool {
             | "equ"
             // the simulator's workbook (SIMULATOR_FRAME_UI::SaveWorkbook, <project>.wbk)
             | "wbk"
-            // Junction's own documents: a part studio, an assembly and the project's own document (JSON item
-            // documents, itemdoc.rs; shell.rs)
-            | "jpart" | "jasm" | "jproj"
     )
 }
 
@@ -85,9 +82,6 @@ pub(crate) fn doc_type_for(path: &str) -> &'static str {
         "kicad_mod" => "footprint",
         "kicad_wks" => "worksheet",
         "kicad_dru" => "design_rules",
-        "jpart" => "part_studio",
-        "jasm" => "assembly",
-        "jproj" => "project_shell",
         "step" | "stp" | "wrl" | "wrz" => "model3d",
         "lib" | "sub" | "cir" | "mod" | "model" | "sp" | "spice" | "ibs" => "spice_model",
         _ => "other",
@@ -628,9 +622,7 @@ pub async fn preview_svg(
         // pushes a picture of an empty board), shows its root sheet.
         let fit = q.fit.unwrap_or(true);
         let mut svg = None;
-        // A project of mechanical parts alone shows its first part studio or assembly (dockind.rs).
-        let others = docs.iter().filter(|d| !d.doc_type.starts_with("kicad_") && crate::dockind::of(&d.doc_type).thumbnail);
-        for doc in docs.iter().find(|d| d.doc_type == "kicad_pcb").into_iter().chain(root_schematic(&docs)).chain(others) {
+        for doc in docs.iter().find(|d| d.doc_type == "kicad_pcb").into_iter().chain(root_schematic(&docs)) {
             if let Some((_seq, found)) = persist::get_preview(&state.pool, doc.id, fit).await? {
                 svg = Some(found);
                 break;
@@ -937,17 +929,10 @@ pub async fn doc_items(
     Ok(Json(json!({ "seq": seq, "symbols": symbols, "sheets": sheets })).into_response())
 }
 
-/// `?doc=`: which board, in a project that has several PCBs.  Without it, the project's first board.
-#[derive(Deserialize)]
-pub struct BoardItemsQuery {
-    pub doc: Option<Uuid>,
-}
-
 pub async fn board_items(
     State(state): State<AppState>,
     jar: axum_extra::extract::CookieJar,
     Path(id): Path<Uuid>,
-    Query(q): Query<BoardItemsQuery>,
 ) -> AppResult<Response> {
     access::resolve(&state.pool, &Viewer::from_jar(&state, &jar).await, id)
         .await?
@@ -956,7 +941,7 @@ pub async fn board_items(
     let docs = persist::project_documents(&state.pool, id).await?;
     let doc = docs
         .iter()
-        .find(|d| d.doc_type == "kicad_pcb" && q.doc.is_none_or(|want| d.id == want))
+        .find(|d| d.doc_type == "kicad_pcb")
         .ok_or_else(|| AppError::BadRequest("project has no board".into()))?;
 
     let (seq, content) =
@@ -1448,9 +1433,6 @@ pub async fn transfer_project(
 #[derive(Deserialize)]
 pub struct BlankProjectRequest {
     pub name: String,
-    /// "pcb": start with a KiCad project at the root.  Absent: an empty project.
-    #[serde(default)]
-    pub template: Option<String>,
 }
 
 /// A name that is safe as the stem of the project's files.
@@ -1463,10 +1445,21 @@ pub(crate) fn file_stem_for(name: &str) -> String {
     if stem.is_empty() { "untitled".into() } else { stem.chars().take(64).collect() }
 }
 
-/// The three files of a new, empty KiCad project named `stem`, as KiCad's project manager writes them for
-/// File > New Project (KICAD_MANAGER_FRAME::CreateNewProject), in the KiCad 9 file format so every client can open
-/// them; an editor upgrades the format only when content needs it.  The names have no folder.
-pub(crate) fn pcb_stub_files(stem: &str) -> Vec<(String, Vec<u8>)> {
+/// POST /api/projects/blank: start an empty project online — the same three
+/// stub files KiCad's project manager writes for File > New Project (see
+/// KICAD_MANAGER_FRAME::CreateNewProject), in the KiCad 9 file format so every
+/// client can open them; an editor upgrades the format only when content needs it.
+pub async fn create_blank_project(
+    State(state): State<AppState>,
+    AuthUser(user): AuthUser,
+    LenientJson(req): LenientJson<BlankProjectRequest>,
+) -> AppResult<Response> {
+    let name = req.name.trim();
+    if name.is_empty() {
+        return Err(AppError::BadRequest("give the project a name".into()));
+    }
+    checked_name(name)?;
+    let stem = file_stem_for(name);
     let pro = serde_json::to_vec_pretty(&json!({
         // vias 0.4 / 0.25 mm by default (the person's choice), with the board minimums that let them pass
         "board": { "design_settings": { "defaults": {}, "diff_pair_dimensions": [], "drc_exclusions": [],
@@ -1500,36 +1493,13 @@ pub(crate) fn pcb_stub_files(stem: &str) -> Vec<(String, Vec<u8>)> {
         "\t(embedded_fonts no)\n)\n"
     );
 
-    vec![
+    let project = persist::create_project(&state.pool, user.id, name).await?;
+    let mut docs = Vec::new();
+    for (path, content) in [
         (format!("{stem}.kicad_pro"), pro),
         (format!("{stem}.kicad_sch"), sch.into_bytes()),
         (format!("{stem}.kicad_pcb"), pcb.as_bytes().to_vec()),
-    ]
-}
-
-/// POST /api/projects/blank {name, template?}: start a project online.  It is empty: it opens on its Home tab,
-/// where a PCB, a part studio or an assembly is one click (web/platform/projecthome).  Its one document is the
-/// project's own (`project.jproj`, shell.rs): the order of the tabs, the folders, and the room everybody in the
-/// project meets in.  `template: "pcb"` gives what this route used to: a KiCad project at the root (a project
-/// file, a schematic and a board), which is what an assistant's `create_project` asks for.
-pub async fn create_blank_project(
-    State(state): State<AppState>,
-    AuthUser(user): AuthUser,
-    LenientJson(req): LenientJson<BlankProjectRequest>,
-) -> AppResult<Response> {
-    let name = req.name.trim();
-    if name.is_empty() {
-        return Err(AppError::BadRequest("give the project a name".into()));
-    }
-    checked_name(name)?;
-    let files = match req.template.as_deref() {
-        None | Some("") | Some("empty") => vec![(crate::shell::SHELL_PATH.to_string(), crate::shell::SHELL_TEXT.as_bytes().to_vec())],
-        Some("pcb") => pcb_stub_files(&file_stem_for(name)),
-        Some(other) => return Err(AppError::BadRequest(format!("unknown template: {other}"))),
-    };
-    let project = persist::create_project(&state.pool, user.id, name).await?;
-    let mut docs = Vec::new();
-    for (path, content) in files {
+    ] {
         let doc = persist::create_document(&state.pool, project.id, &path, doc_type_for(&path)).await?;
         persist::insert_snapshot(&state.pool, doc.id, 0, &content, None, Some(user.id)).await?;
         docs.push(json!({ "docId": doc.id, "path": doc.path, "docType": doc.doc_type }));
@@ -2305,34 +2275,11 @@ pub async fn create_doc(
 
     let doc_type = req.doc_type.unwrap_or_else(|| doc_type_for(&path).to_string());
     let doc = persist::create_document(&state.pool, id, &path, &doc_type).await?;
-    notify_docs(&state, id, &user, "added", doc.id, &doc.path, &doc.doc_type, None).await;
+    notify_docs_added(&state, id, doc.id).await;
 
     Ok(Json(json!({ "docId": doc.id, "path": doc.path, "docType": doc.doc_type,
                     "existing": false }))
         .into_response())
-}
-
-/// Tell everyone who has the project open that its list of documents changed (a document was added, renamed
-/// or deleted), so their tabs follow without asking.  Each socket has joined documents, not the project, so the
-/// notice goes to every open document of the project (`also`: one that is no longer in the list).
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn notify_docs(state: &AppState, project_id: Uuid, user: &persist::User, change: &str, doc_id: Uuid, path: &str,
-                     doc_type: &str, from: Option<&str>) {
-    let Ok(docs) = persist::project_documents(&state.pool, project_id).await else { return };
-    let n = Uuid::new_v4();
-    let mut ids: Vec<Uuid> = docs.iter().map(|d| d.id).collect();
-    if !ids.contains(&doc_id) {
-        ids.push(doc_id);
-    }
-    for id in ids {
-        // `addedDocId`: what the schematic editor reads to open a new sheet (as notify_docs_added sends it)
-        let added = (change == "added").then_some(doc_id);
-        let payload = json!({ "type": "docs", "docId": id, "projectId": project_id, "n": n, "change": change, "from": from,
-                              "addedDocId": added,
-                              "doc": { "docId": doc_id, "path": path, "docType": doc_type },
-                              "by": { "userId": user.id, "login": user.login, "name": user.name } });
-        state.doc_event(id, crate::doc_actor::DocMsg::Notice { payload }).await;
-    }
 }
 
 /// Tell every open document of a project that a file joined it (a sheet drawn by somebody else): the web
@@ -2348,12 +2295,9 @@ pub async fn notify_docs_added(state: &AppState, project_id: Uuid, doc_id: Uuid)
 }
 
 /// The document types a client may delete or move: library files (a footprint, a symbol library, a library table,
-/// a 3D model, a drawing sheet), other loose files, and the part studios and assemblies the document tabs create,
-/// rename and delete.  A project's own schematic, board and project file stay put.
+/// a 3D model, a drawing sheet) and other loose files.  A project's own schematic, board and project file stay put.
 fn doc_is_movable(doc_type: &str) -> bool {
-    // the project's own document (shell.rs) stays where it is
     matches!(doc_type, "footprint" | "symbol_lib" | "lib_table" | "model3d" | "worksheet" | "spice_model" | "other")
-        || (crate::itemdoc::is_item_doc(doc_type) && doc_type != "project_shell")
 }
 
 /// DELETE /api/docs/{id}: the Footprint Editor's Delete Footprint (and the same for other library files).
@@ -2373,9 +2317,6 @@ pub async fn delete_doc(
         return Err(AppError::BadRequest(format!("a {} cannot be deleted here", doc.doc_type)));
     }
     let deleted = persist::delete_document(&state.pool, doc_id).await?;
-    if deleted {
-        notify_docs(&state, doc.project_id, &user, "deleted", doc_id, &doc.path, &doc.doc_type, None).await;
-    }
     Ok(Json(json!({ "ok": deleted, "docId": doc_id })).into_response())
 }
 
@@ -2416,7 +2357,6 @@ pub async fn move_doc(
         }
     }
     let moved = persist::rename_document(&state.pool, doc_id, &path).await?.ok_or(AppError::NotFound)?;
-    notify_docs(&state, doc.project_id, &user, "renamed", moved.id, &moved.path, &moved.doc_type, Some(&doc.path)).await;
     Ok(Json(json!({ "ok": true, "docId": moved.id, "path": moved.path, "docType": moved.doc_type })).into_response())
 }
 
@@ -2624,10 +2564,6 @@ mod tests {
         assert_eq!(doc_type_for("sim/test.CIR"), "spice_model");
         assert!(allowed_file("2n2222.model") && allowed_file("Simulation_SPICE.sp") && allowed_file("state-3bit-count.in"));
         assert_eq!(doc_type_for("2n2222.model"), "spice_model");
-        assert_eq!(doc_type_for("Enclosure.jpart"), "part_studio");
-        assert_eq!(doc_type_for("cad/Product.JASM"), "assembly");
-        assert!(allowed_file("Enclosure.jpart") && allowed_file("Product.jasm"));
-        assert!(doc_is_movable("part_studio") && doc_is_movable("assembly") && !doc_is_movable("kicad_pcb"));
     }
 
     /// The extraction loop must bound the decoder, not trust the header's

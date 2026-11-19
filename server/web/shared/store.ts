@@ -22,15 +22,7 @@ export interface DocEntry { docId: string; path: string; docType: string; hasPre
 export interface ProjectCan { edit: boolean; comment: boolean; copy: boolean; share: boolean; manage: boolean; join?: string | null }
 export interface ProjectInfo {
   projectId: string; name: string; ownerLogin: string; ownerId?: number;
-  /**
-   * `docs` is what the schematic and board editor may see: the documents of the PCB it works on, with paths
-   * relative to that PCB's folder (web/platform/doctabs/pcbs.ts).  `allDocs` is every document of the project
-   * with its real path: what the tabs, the Home tab and the other domains' editors read.  In a project that is
-   * one PCB at its root they are the same list.
-   */
-  role?: string | null; docs: DocEntry[]; allDocs?: DocEntry[]; isPublic?: boolean;
-  /** the PCB the schematic and board editor is working on, if any */
-  pcb?: { key: string; dir: string; name: string } | null;
+  role?: string | null; docs: DocEntry[]; isPublic?: boolean;
   can?: ProjectCan; isOwner?: boolean; isMember?: boolean;
 }
 
@@ -203,8 +195,7 @@ export interface FpLibRow {
   pinned?: boolean;
 }
 export interface AppState {
-  /** "editor" is KiCad's frame (schematic, board); "cad" is a document a domain's own editor draws (web/platform/documents/host.ts) */
-  view: "home" | "editor" | "cad";
+  view: "home" | "editor";
   /** which page of the home view is showing, and a counter bumped on every visit (web/platform/home) */
   homeTab?: "projects" | "explore" | "trash" | "time";
   homeTick?: number;
@@ -286,8 +277,6 @@ export type AppAction =
   | { type: "setGroupCurrent"; group: string; id: string }
   | { type: "showPane"; pane: string; show?: boolean }
   | { type: "openDoc"; docId: string }
-  /** the project's documents changed (a tab was added, renamed or deleted): the new list, and the one to open, if any */
-  | { type: "projectDocs"; docs: DocEntry[]; open?: string }
   | { type: "enterSheet"; file: string }
   | { type: "setLayerVisible"; key: string; visible: boolean }
   | { type: "setActiveLayer"; layer: string }
