@@ -23,6 +23,9 @@ import { releaseLayers } from "./paint";
 import { applyVariantToDoc, refreshVariantNames } from "./variant";
 import { fpEntryFor, fpParam, isFpPrivate, isFpReadOnlyLib, onFootprintOpened, privateText } from "./fpedit";
 import { editorDocs, firstDoc, rootSchematicOf, topLevelSheetsOf, type TopLevelSheet } from "./bootpick";
+import { closeHostedDoc, isHostedDoc, openHostedDoc } from "./dochost";
+import { bindPcb, boundPcb, installPathScope, unbindPcb, viewOf } from "./pcbscope";
+import { HOME_TAB, pcbOfDoc, pcbsOf, type Pcb } from "../../../platform/doctabs/pcbs";
 import { ensurePcbTools, noteBoardOpened, preloadPcbToolsWhenIdle } from "./pcbtools-loader";
 import type { Boot } from "./boot";
 import type { DocEntry, ProjectInfo } from "../../../shared/store";
@@ -331,6 +334,7 @@ export function snapMm(mm: number[]): number[] {
 
 export function leaveEditor() {
   stopGithubWatch?.(); stopGithubWatch = null;
+  closeHostedDoc();
   leaveDoc();
   state.doc = null; state.docId = null;
   setConn("offline", "");
@@ -345,8 +349,54 @@ export function takeBoot<K extends "me" | "info" | "content">(key: K, projectId?
   return v;
 }
 
+/** The whole project's documents (the editor's own list, `state.project.docs`, is one PCB's: pcbscope.ts). */
+export function allDocs(): DocEntry[] { return state.project ? state.project.allDocs || state.project.docs : []; }
+/** The project's PCBs. */
+export function projectPcbs(): Pcb<DocEntry>[] { return state.project ? pcbsOf(allDocs(), state.project.name) : []; }
+/** A document's path in the whole project (the editor's own entry has it relative to the PCB's folder). */
+export function projectPathOf(docId: string): string { const d = allDocs().find((x) => x.docId === docId); return d ? d.path : ""; }
+
+/**
+ * Take the project's documents as the server has them: the whole list for the shell, and for the editor the
+ * view of the PCB it is bound to (pcbscope.ts).  Everything worked out from the lists follows.
+ */
+function applyProjectDocs(all: DocEntry[]): void {
+  if (!state.project) return;
+  const was = boundPcb() ? boundPcb()!.dir : null;
+  const v = viewOf(all, state.project.projectId, state.project.name);
+  const b = boundPcb();
+  // the PCB on screen was renamed or moved (by this person on another tab of theirs, or by somebody else): load
+  // the page again at the same document rather than go on with paths that are no longer there
+  if (b && was !== null && was !== b.dir && state.view === "editor" && state.docId && all.some((d) => d.docId === state.docId)) {
+    location.assign(`/p/${state.project.projectId}/edit?doc=${encodeURIComponent(state.docId)}`);
+  }
+  state.project = { ...state.project, allDocs: all, docs: v.docs, pcb: v.pcb && b ? { key: b.key, dir: b.dir, name: b.name } : null };
+  state.docs = editorDocs(v.docs);
+  store.set({ project: state.project });
+}
+
+/** The pseudo-documents the shell opens like any tab: the project's Home, and a PCB's bill of materials. */
+const homeDoc = (): DocEntry => ({ docId: HOME_TAB, path: "", docType: "@home" });
+const bomDoc = (key: string): DocEntry => ({ docId: "bom:" + key, path: "", docType: "@bom" });
+
+/**
+ * Make `pcb` the PCB the editor works on.  False when the page has to load again for it (it has worked on
+ * another PCB of this project: pcbscope.ts), which is under way when this returns.
+ */
+function enterPcb(pcb: Pcb<DocEntry>, docId: string): boolean {
+  const pid = state.project!.projectId;
+  const how = bindPcb(pid, pcb);
+  if (how === "reload") { location.assign(`/p/${pid}/edit?doc=${encodeURIComponent(docId)}`); return false; }
+  if (how === "bound") {
+    // nothing of a project file or of custom rules has been read for this PCB yet
+    E.proSettings = null; E.druText = null;
+    applyProjectDocs(allDocs());
+  }
+  return true;
+}
+
 export async function openEditor(id: string) {
-  if (state.project && state.project.projectId === id && state.view === "editor") return;
+  if (state.project && state.project.projectId === id && (state.view === "editor" || state.view === "cad")) return;
   leaveEditor();
   showView("editor");
   let info: ProjectInfo;
@@ -358,6 +408,7 @@ export async function openEditor(id: string) {
     if (!state.me) { location.href = "/auth/github/login?next=" + encodeURIComponent(location.pathname + location.search); return; }
     toast("Project not found or private", 3500); navigate("/", true); return;
   }
+  unbindPcb(); installPathScope();
   state.project = info; fontsForProject(info.projectId);
   state.role = info.role;
   document.title = `${info.name} — Junction`;
@@ -368,8 +419,13 @@ export async function openEditor(id: string) {
   E.canJoin = true;
   E.viewOnly = !state.me || !can.edit;
   E.canComment = !!state.me && !!can.comment;
-  state.docs = editorDocs(info.docs);
-  store.set({ project: info, role: info.role || null, canJoin: E.canJoin, viewOnly: E.viewOnly, canComment: E.canComment, guest: !state.me, can });
+  // A project that is one PCB at its root (every project made before there could be several) is bound to it at
+  // once and reads exactly as it always did.  Otherwise a PCB is bound when one of its documents is opened.
+  const pcbs = pcbsOf(info.docs, info.name);
+  const rootPcb = pcbs.find((p) => !p.dir);
+  if (pcbs.length === 1 && rootPcb) bindPcb(info.projectId, rootPcb);
+  applyProjectDocs(info.docs);
+  store.set({ role: info.role || null, canJoin: E.canJoin, viewOnly: E.viewOnly, canComment: E.canComment, guest: !state.me, can });
   if (state.me && can.edit) {
     try {
       const pulled = await pullGithubChanges(id);
@@ -377,8 +433,7 @@ export async function openEditor(id: string) {
       if (pulled.updated.length) {
         takeBoot("content", id);
         info = await api(`/api/projects/${id}/info`);
-        state.project = info; state.docs = editorDocs(info.docs);
-        store.set({ project: info });
+        state.project = { ...state.project!, ...info }; applyProjectDocs(info.docs);
       }
       if (pulled.skipped.length) githubPullNotice(id, "Some GitHub changes need review before they can be pulled.");
     } catch {
@@ -399,27 +454,41 @@ export async function openEditor(id: string) {
   // A project opens on its root schematic, where a design starts and where KiCad's own project
   // manager leads first; the board is one click away (and ?doc= still opens exactly what a link names).
   // Only a project with no schematic at all opens on the board.
-  rootSchematic();   // also starts reading the project file and the custom rules
-  const doc = firstDoc(state.docs!, info.docs, wanted);
-  if (!doc) {
-    base.replaceChildren(); setDocNotice("This project has no board or schematic yet. Open it in the desktop app.");
-    setConn("err", "nothing to show"); return;
+  if (boundPcb()) rootSchematic();   // also starts reading the project file and the custom rules
+  // a link names a tab: Home, a part studio, an assembly, a PCB's bill of materials, or a sheet or board of a PCB
+  if (wanted === HOME_TAB) { await openDoc(homeDoc()); return; }
+  if (wanted && wanted.startsWith("bom:") && pcbs.some((p) => p.key === wanted.slice(4))) { await openDoc(bomDoc(wanted.slice(4))); return; }
+  const hosted = info.docs.find((d) => d.docId === wanted && isHostedDoc(d));
+  if (hosted) { await openDoc(hosted); return; }
+  const named = wanted ? info.docs.find((d) => d.docId === wanted && (d.docType === "kicad_sch" || d.docType === "kicad_pcb")) : undefined;
+  if (named) {
+    const pcb = pcbOfDoc(pcbs, named.docId);
+    if (pcb && !enterPcb(pcb, named.docId)) return;
+    const doc = state.docs!.find((d) => d.docId === named.docId);
+    if (doc) { rootSchematic(); await openDoc(doc); return; }
   }
-  await openDoc(doc);
+  // No tab named.  A project with a PCB at its root opens on that PCB's root schematic, where a design starts and
+  // where it always opened; any other project (a new one, one of several PCBs, parts alone) opens on its Home tab.
+  if (rootPcb && enterPcb(rootPcb, (rootPcb.schematic || rootPcb.boards[0] || rootPcb.pro!).docId)) {
+    rootSchematic();
+    const doc = firstDoc(state.docs!, state.project!.docs, null);
+    if (doc) { await openDoc(doc); return; }
+  }
+  await openDoc(homeDoc());
 }
 
 async function refreshFromGithub(result: GithubPullResult): Promise<void> {
   const pid = state.project!.projectId;
   const info = await api(`/api/projects/${pid}/info`) as ProjectInfo;
   if (state.project?.projectId !== pid || state.view !== "editor") return;
-  state.project = info; state.docs = editorDocs(info.docs);
-  store.set({ project: info }); publishDocs();
+  // through the PCB scope, as at open: the editor sees only the bound PCB's files (applyProjectDocs)
+  state.project = { ...state.project!, ...info }; applyProjectDocs(info.docs); publishDocs();
   E.proSettings = null; E.druText = null; hierarchyLearned = null;
   rootSchematic();
-  const current = state.docId && state.docs.find((d) => d.docId === state.docId);
+  const current = state.docId && (state.docs || []).find((d) => d.docId === state.docId);
   if (current) { state.doc = current; }
   else {
-    const next = firstDoc(state.docs, info.docs, null);
+    const next = firstDoc(state.docs || [], state.project!.docs, null);
     if (next) await openDoc(next);
     else { leaveDoc(); state.doc = null; state.docId = null; setDocNotice("This project has no board or schematic."); }
   }
@@ -488,12 +557,11 @@ export function refreshDocs(): Promise<boolean> {
     try {
       const info = await api(`/api/projects/${pid}/info`) as ProjectInfo | null;
       if (!info || !Array.isArray(info.docs) || !state.project || state.project.projectId !== pid) return false;
-      const known = new Set(state.project.docs.map((d) => d.docId));
+      const known = new Set(allDocs().map((d) => d.docId));
       const added = info.docs.filter((d) => !known.has(d.docId));
       if (!added.length) return false;
       // new arrays: what is worked out from the lists (the top-level sheets) is kept by their identity
-      state.project.docs = state.project.docs.concat(added); store.set({ project: Object.assign({}, state.project) });
-      state.docs = editorDocs(state.docs!.concat(editorDocs(added).filter((d) => !state.docs!.some((x) => x.docId === d.docId))));
+      applyProjectDocs(allDocs().concat(added));
       publishDocs();
       return true;
     } catch (e) { return false; }
@@ -550,7 +618,15 @@ export function publishDocs() {
 export function setDocNotice(text: string | null) { store.slice("document", { notice: text || null, layers: [], copperLayers: [], hasDoc: false }); }
 
 
+/**
+ * Where each sheet and board was being looked at when it was left, so that coming back to it (the views of a
+ * PCB's tab, a sheet of the hierarchy) shows the same place.  For this page's life; a reload fits the document.
+ */
+const viewMemo = new Map<string, { zoom: number; panX: number; panY: number; w: number; h: number }>();
+
 export function leaveDoc() {
+  if (state.docId && E.kdoc && E.viewTouched) viewMemo.set(state.docId, { zoom: E.zoom, panX: E.panX, panY: E.panY, w: stage.clientWidth, h: stage.clientHeight });
+  else if (state.docId && E.kdoc) viewMemo.delete(state.docId);
   dropHistoryView();    // the timeline belongs to the document being left
   resetInteraction();   // no drag, menu, hover or tool survives into the next document
   E.connectGen++;   // any connect() still waiting for its ticket must give up
@@ -574,6 +650,22 @@ export function leaveDoc() {
 export async function openDoc(doc: DocEntry) {
   const probe = probeForSwitch(doc.docType);
   leaveDoc();
+  // A part studio, an assembly: the domain's own editor draws it in the "cad" view (dochost.ts).  The tabs, the
+  // menu bar and the status bar stay; nothing of the schematic or board editor runs meanwhile.
+  if (isHostedDoc(doc)) {
+    state.doc = doc; state.docId = doc.docId;
+    const url = `/p/${state.project!.projectId}/edit?doc=${doc.docId}`;
+    if (location.pathname + location.search !== url) history.replaceState(null, "", url);
+    const bomOf = doc.docType === "@bom" ? projectPcbs().find((p) => "bom:" + p.key === doc.docId) : undefined;
+    const tabName = doc.docType === "@home" ? "" : bomOf ? `${bomOf.name} BOM` : doc.path.split("/").pop()!.replace(/\.[^.]+$/, "");
+    document.title = `${tabName ? tabName + " — " : ""}${state.project!.name} — Junction`;
+    await openHostedDoc(doc, () => {
+      showView("cad"); document.body.dataset.editor = "cad";   // the chrome's project layout (menu bar, status bar), none of KiCad's panes
+      store.slice("document", { editor: null, docType: null, docId: doc.docId, doc, hasDoc: false, notice: null });
+    }, openDocId);
+    return;
+  }
+  if (state.view === "cad") { showView("editor"); document.title = `${state.project!.name} — Junction`; }
   state.doc = doc; state.docId = doc.docId; bindUndoDoc(doc.docId);
   E.DOC_TYPE = doc.docType;
   E.IU = isSch() ? 1e4 : 1e6;
@@ -582,7 +674,9 @@ export async function openDoc(doc: DocEntry) {
   setStatusBar({ mode: "", constraint: isSch() ? "" : boardConstraintMsg() });
   if (!docNav.lock) { docNav.list.length = docNav.idx + 1; docNav.list.push(doc.docId); docNav.idx = docNav.list.length - 1; }
   setupEditorChrome(); publishDocs();
-  const url = `/p/${state.project!.projectId}/edit` + (doc.docType === "footprint" ? `?fp=${encodeURIComponent(doc.docId)}` : state.docs!.length > 1 ? `?doc=${doc.docId}` : "");
+  // the address names the document whenever the project has more than one thing to open
+  const several = state.docs!.length > 1 || !!(boundPcb() && boundPcb()!.dir) || allDocs().some((d) => isHostedDoc(d));
+  const url = `/p/${state.project!.projectId}/edit` + (doc.docType === "footprint" ? `?fp=${encodeURIComponent(doc.docId)}` : several ? `?doc=${doc.docId}` : "");
   if (location.pathname + location.search !== url) history.replaceState(null, "", url);
   setStatusBar({ message: "" });   // KiCad leaves the message field empty until something reports there
   world.style.width = stage.clientWidth + "px";
@@ -651,9 +745,13 @@ export async function openDoc(doc: DocEntry) {
       setDocNotice(`Nothing to show yet for this ${isSch() ? "sheet" : "board"} — it appears once a desktop editor has the project open in a live session.`);
     }
   }
+  // back where this document was left (the same thing in the middle of the stage, at the same zoom, whatever
+  // the panes around it have done to its size since); a document not seen before is shown whole
+  const seen = ok ? viewMemo.get(docId) : undefined;
   setTimeout(() => {   // not rAF: a background tab would defer it indefinitely
     if (state.docId !== docId) return;
-    fitView();
+    if (seen) { E.zoom = seen.zoom; E.panX = seen.panX + (stage.clientWidth - seen.w) / 2; E.panY = seen.panY + (stage.clientHeight - seen.h) / 2; E.viewTouched = true; applyView(); requestRender(); }
+    else fitView();
     if (ok && probe) receiveProbe(probe);
   }, 0);
   if (isFpPrivate()) setConn("", "private copy of a board footprint");   // nothing goes over the socket until Save
@@ -732,7 +830,45 @@ export function selectItemAction(id: string) {
   E.selected = fp; drawSelection(); renderProps(); centerOn(fp.x / E.IU, fp.y / E.IU);
 }
 
-export function openDocId(id: string) { const d = state.docs!.find((x) => x.docId === id); if (d) openDoc(d); }
+/** Open a tab by its id: a document of the project, "home", or a PCB's bill of materials ("bom:<PCB key>"). */
+export function openDocId(id: string) {
+  if (!state.project) return;
+  if (id === HOME_TAB) { void openDoc(homeDoc()); return; }
+  if (id.startsWith("bom:")) { if (projectPcbs().some((p) => p.key === id.slice(4))) void openDoc(bomDoc(id.slice(4))); return; }
+  const whole = allDocs().find((x) => x.docId === id);
+  if (whole && isHostedDoc(whole)) { void openDoc(whole); return; }
+  // a sheet or a board: of the PCB the editor is on, or of another, which is entered first
+  if (whole && (whole.docType === "kicad_sch" || whole.docType === "kicad_pcb")) {
+    const pcb = pcbOfDoc(projectPcbs(), id);
+    if (pcb && !enterPcb(pcb, id)) return;
+    rootSchematic();
+  }
+  const d = state.docs!.find((x) => x.docId === id);
+  if (d) void openDoc(d);
+}
+
+/**
+ * The project's documents changed under the open project (the document tabs added, renamed or deleted one):
+ * take the new list, and open `open` when it names one.  A document that was open and is gone gives way to the
+ * project's first document.
+ */
+export function setProjectDocs(docs: DocEntry[], open?: string) {
+  if (!state.project) return;
+  applyProjectDocs(docs);
+  const id = state.docId;
+  // the open document as the editor has it now: a sheet or board by its place in its PCB, anything else by its place in the project
+  const cur = id ? state.docs!.find((d) => d.docId === id) || docs.find((d) => d.docId === id) : undefined;
+  if (cur && state.doc && cur.path !== state.doc.path) state.doc = cur;
+  publishDocs();
+  if (open) { openDocId(open); return; }
+  if (!id || cur || id === HOME_TAB || id.startsWith("board:") || id.startsWith("lib:")) return;
+  if (id.startsWith("bom:") && projectPcbs().some((p) => "bom:" + p.key === id)) return;
+  // what was open is gone (somebody deleted it).  A sheet or board gives way to its PCB's first document; in a
+  // project whose PCB is at the root, so does anything else, as it always did; otherwise Home.
+  const b = boundPcb();
+  const next = b && (state.view === "editor" || !b.dir) ? firstDoc(state.docs!, state.project.docs, null) : null;
+  void openDoc(next || homeDoc());
+}
 
 export function navigateDocs(dir: number) {
   const i = docNav.idx + dir; if (i < 0 || i >= docNav.list.length) { toast(dir < 0 ? "No previous sheet" : "No next sheet"); return; }

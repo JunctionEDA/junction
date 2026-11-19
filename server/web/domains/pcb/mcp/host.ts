@@ -16,6 +16,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { foldOps } from "./compact";
 import { repairDemoGround } from "./repair-demo-ground";
+import { fullPath, pcbOfDoc, pcbsOf, relativePath, scopedDocs, type Pcb } from "../../../platform/doctabs/pcbs";
 import "./env";
 import "../canvas/index";
 import "../../../../static/sch-tools.js";
@@ -43,6 +44,8 @@ import { renderPicture, type Emphasis } from "./picture";
 import { findPerson, highlight, people, resolveTargets, settle, traceNet } from "./teammate";
 import { topLevelSheetsOf } from "../editor/bootpick";
 import { DocSession, editProjectFile, readTextDocument, type Conn, type DocEntry, type UndoRecord } from "./session";
+import { McpToolError } from "../../../platform/mcp/host";
+import { DOMAIN_TOOLS } from "../../mcp-tools";
 
 declare const process: any;
 declare function require(name: string): any;
@@ -64,10 +67,33 @@ const realFetch = W.fetch.bind(W);
 W.fetch = (input: any, init?: any) => {
   if (typeof input === "string" && input.startsWith("/")) {
     const headers = new W.Headers((init && init.headers) || {}); headers.set("authorization", `Bearer ${conn.token}`);
-    return realFetch(conn.base + input, Object.assign({}, init, { headers, credentials: undefined }));
+    return scopedFetch(conn.base + input, input, Object.assign({}, init, { headers, credentials: undefined }));
   }
   return realFetch(input, init);
 };
+
+/**
+ * The folder of the PCB the running tool call works on ("" at the project's root, or none), and the project
+ * (scopeToPcb).  The shared modules name the files they make as the PCB's own editor sees them; as in the browser
+ * (editor/pcbscope.ts), the two requests that carry such a path get the folder put in front on the way out and
+ * taken off the answer.
+ */
+let scope: { projectId: string; dir: string } | null = null;
+async function scopedFetch(url: string, path: string, init: any): Promise<any> {
+  const sc = scope, method = String((init && init.method) || "GET").toUpperCase();
+  const at = path.split("?")[0].replace(/\/$/, "");
+  const names = !!sc && !!sc.dir && typeof init.body === "string" && ((method === "POST" && at === `/api/projects/${sc.projectId}/docs`) || (method === "PATCH" && /^\/api\/docs\/[0-9a-f-]{36}$/i.test(at)));
+  if (!names) return realFetch(url, init);
+  let body: any; try { body = JSON.parse(init.body); } catch { return realFetch(url, init); }
+  if (!body || typeof body.path !== "string") return realFetch(url, init);
+  const full = fullPath(sc!.dir, body.path);
+  if (full === null) return new W.Response("that path is outside the project", { status: 400 });
+  const r = await realFetch(url, Object.assign({}, init, { body: JSON.stringify(Object.assign({}, body, { path: full })) }));
+  if (!r.ok) return r;
+  let answer: any; try { answer = await r.clone().json(); } catch { return r; }
+  if (!answer || typeof answer.path !== "string") return r;
+  return new W.Response(JSON.stringify(Object.assign({}, answer, { path: relativePath(sc!.dir, answer.path) })), { status: r.status, headers: { "content-type": "application/json" } });
+}
 
 async function api(path: string, init?: any): Promise<any> {
   let r: any;
@@ -457,7 +483,10 @@ async function simulate(req: Request): Promise<Reply> {
 
 async function undoChanges(req: Request): Promise<Reply> {
   const p = needProject(req); needWrite(req, p);
-  const rec = req.args.__record as { docId: string; title: string; undo: UndoRecord & { rules?: any } };
+  const rec = req.args.__record as { docId: string; title: string; undo: UndoRecord & { rules?: any; domain?: string } };
+  // a change one of the other domains' tools made is that domain's to take back
+  const owner = rec.undo && rec.undo.domain ? DOMAIN_TOOLS.find((d) => d.domain === rec.undo.domain && d.undo) : undefined;
+  if (owner) return owner.undo!(req);
   const entry = p.docs.find((d) => d.docId === rec.docId); if (!entry) throw new ToolError("The document of that change is no longer in the project.");
   return withDocument(req, entry.path, async (sess, doc) => {
     const k = K(); const blocked: string[] = [];
@@ -918,7 +947,8 @@ async function createCheckpoint(req: Request): Promise<Reply> {
 async function createProject(req: Request): Promise<Reply> {
   if (!req.canWrite) throw new ToolError("This connection was allowed to read only.");
   if (typeof req.args.name !== "string" || !req.args.name.trim()) throw new ToolError("name is required.");
-  const r = await post("/api/projects/blank", { name: req.args.name.trim() });
+  // a project with a KiCad project at its root: one schematic sheet and one board (the route's default is an empty project)
+  const r = await post("/api/projects/blank", { name: req.args.name.trim(), template: "pcb" });
   return { result: { project_id: r.projectId, name: r.name || req.args.name.trim(), documents: (r.docs || []).map((d: any) => d.path), url: `${req.args.__site || conn.base}/p/${r.projectId}/edit`,
     note: "An empty project: one schematic sheet and one board. Design it with run_python (sch.build for the schematic, then board.sync, autoplace and route), or edit by edit with apply_changes." } };
 }
@@ -975,15 +1005,68 @@ const TOOLS: Record<string, (req: Request) => Promise<Reply>> = {
   repair_demo_ground: async (req) => ({ result: await repairDemoGround(K(), W.CollabTools.sch._, W.PcbTools, req.args.board, req.args.schematic, req.args.projectFile) }),
 };
 
+/** The PCB of each project the electronics tools last worked on, for calls that do not say which. */
+const lastPcb = new Map<string, string>();
+
+/**
+ * A project may hold several PCBs, each a KiCad project in a folder of its own (web/platform/doctabs/pcbs.ts).
+ * The electronics tools work on one at a time, exactly as the browser's editor does: before a tool runs, the
+ * request's project is narrowed to the documents of ONE PCB, with paths relative to its folder, so "the board",
+ * "the root sheet", the project file and the library tables it finds are that PCB's and no other's.
+ *
+ * Which PCB: the one `document` names (a path as get_project lists it, "Motor driver/Motor driver.kicad_sch"; or
+ * the PCB's name in front of what a document may be called, "Motor driver/board"); a call that names none works on
+ * the PCB this connection used last, else the first.  A project that is one PCB at its root is left as it is.
+ * Returns what to tell the assistant when there was a choice.
+ */
+export function scopeToPcb(req: Request): { pcb: string; note: string } | null {
+  const p = req.project; if (!p) return null;
+  const pcbs = pcbsOf(p.docs, p.name);
+  if (!pcbs.length || (pcbs.length === 1 && !pcbs[0].dir)) return null;
+  const said = req.args && typeof req.args.document === "string" ? req.args.document.trim().replace(/\\/g, "/") : "";
+  const lower = said.toLowerCase();
+  let pcb: Pcb<DocEntry> | undefined, within: string | undefined;
+  if (said) {
+    const whole = p.docs.find((d) => d.docId === said || d.path.toLowerCase() === lower);
+    if (whole) { pcb = pcbOfDoc(pcbs, whole.docId); if (pcb) within = relativePath(pcb.dir, whole.path); }
+    if (!pcb) {
+      // "<PCB folder or name>/<what>", the longest that fits
+      const fits = (x: Pcb<DocEntry>): string | null => [x.dir, x.name].filter(Boolean).map((n) => n.toLowerCase()).find((n) => lower === n || lower.startsWith(n + "/")) || null;
+      pcb = pcbs.filter((x) => fits(x) !== null).sort((a, b) => fits(b)!.length - fits(a)!.length)[0];
+      if (pcb) within = said.slice(fits(pcb)!.length).replace(/^\/+/, "");
+    }
+  }
+  const named = !!pcb;
+  if (!pcb) pcb = pcbs.find((x) => x.key === lastPcb.get(p.projectId)) || pcbs[0];
+  lastPcb.set(p.projectId, pcb.key);
+  if (named) { if (within) req.args.document = within; else delete req.args.document; }
+  req.project = { ...p, docs: scopedDocs(p.docs, pcbs, pcb) };
+  scope = { projectId: p.projectId, dir: pcb.dir };
+  if (pcbs.length < 2) return { pcb: pcb.name, note: "" };
+  return { pcb: pcb.name, note: `This project has ${pcbs.length} PCBs: ${pcbs.map((x) => `"${x.name}"`).join(", ")}. This call worked on "${pcb.name}"${named ? "" : " (none was named: the one used last, else the first)"}. Documents are named inside their PCB; to work on another, pass document as "<PCB name>/board", "<PCB name>/schematic" or "<PCB name>/<sheet>.kicad_sch".` };
+}
+
 async function handle(req: Request): Promise<any> {
   useFontProject(req.project ? req.project.projectId : "");
   conn = { base: req.base, token: req.token, agent: req.agent || "" };
-  const tool = TOOLS[req.tool];
+  // the electronics tools are this file's; every other domain brings its own table (web/domains/mcp-tools.ts)
+  const tool = TOOLS[req.tool] || DOMAIN_TOOLS.map((d) => d.tools[req.tool]).find(Boolean);
   if (!tool) return { id: req.id, ok: false, error: `Unknown tool ${req.tool}.` };
-  try { const r = await tool(req); return Object.assign({ id: req.id, ok: true }, r); }
+  try {
+    // the electronics tools see one PCB of the project; the other domains' tools see the whole project
+    scope = null;
+    const chosen = TOOLS[req.tool] ? scopeToPcb(req) : null;
+    const r = await tool(req);
+    if (chosen && r && r.result && typeof r.result === "object" && !Array.isArray(r.result)) {
+      (r.result as Record<string, unknown>).pcb = chosen.pcb;
+      if (chosen.note) (r.result as Record<string, unknown>).pcbs = chosen.note;
+    }
+    return Object.assign({ id: req.id, ok: true }, r);
+  }
   catch (e) {
-    if (!(e instanceof ToolError)) console.error("mcp host: tool failed", req.tool, e);
-    return { id: req.id, ok: false, error: e instanceof ToolError ? plain(e.message) : `The tool failed: ${e instanceof Error ? e.message : String(e)}` };
+    const told = e instanceof ToolError || e instanceof McpToolError;
+    if (!told) console.error("mcp host: tool failed", req.tool, e);
+    return { id: req.id, ok: false, error: told ? plain((e as Error).message) : `The tool failed: ${e instanceof Error ? e.message : String(e)}` };
   }
 }
 
@@ -1002,6 +1085,7 @@ rl.on("close", () => process.exit(0));
 const sweep = setInterval(() => {
   const now = Date.now();
   for (const [id, s] of sessions) if (now - s.lastUsed > SESSION_IDLE_MS) { s.close(); sessions.delete(id); }
+  for (const d of DOMAIN_TOOLS) if (d.sweep) d.sweep(SESSION_IDLE_MS);
   if (!busy && now - lastCall > PROCESS_IDLE_MS) process.exit(0);
 }, 30000);
 if (typeof (sweep as any).unref === "function") (sweep as any).unref();

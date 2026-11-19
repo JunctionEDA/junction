@@ -36,6 +36,10 @@ use crate::{persist, AppState};
 const ASSISTANT_TOOLS: &str = include_str!("../web/domains/pcb/ai/tools.json");
 const MCP_TOOLS: &str = include_str!("../web/domains/pcb/mcp/tools.json");
 const GUIDE: &str = include_str!("../web/domains/pcb/mcp/guide.md");
+/// The tools of the other domains, each from its own folder (web/domains/<id>/mcp/tools.json, the same
+/// shape as the electronics list).  They all run in the headless editor, which has the same folders'
+/// code (web/domains/pcb/mcp/host.ts takes each domain's tool table).
+const DOMAIN_TOOLS: &[(&str, &str)] = &[("mechanical", include_str!("../web/domains/mechanical/mcp/tools.json"))];
 
 const PROTOCOL_VERSIONS: [&str; 4] = ["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 const DEFAULT_PROTOCOL: &str = "2025-06-18";
@@ -49,7 +53,8 @@ Start with list_projects, then get_design_overview for the project. Every design
 Read the design with the tools instead of guessing: coordinates are millimetres with Y down, schematic items sit on a 1.27 mm grid, and pins connect only when a wire end or label lands exactly on the pin's connection point. \
 render_view shows a sheet or the board as a picture; scope it (area, refs, nets, layers, view_of a person) to keep it small. \
 The people in the project see you as a collaborator: when you talk about a place in the design, call highlight so it is outlined on their canvas with a short note, and when they say \"this\" or \"here\", call get_selection to see what they have selected and where they are looking. When the person wants to review a change first, or you offer something they did not ask for, pass propose: true to apply_changes: they see it drawn over the design and Accept or Reject it (list_proposals gives the outcome; propose_fixes offers fixes for rule violations the same way). apply_changes edits the design at once and everyone in the project sees it live, so change only what the person asked for, use dry_run when unsure, check the result with run_checks and render_view, and take a wrong change back with undo_changes. \
-Before drawing or rearranging a schematic, laying out or routing a board, or reviewing a design, read get_design_guide once (topic \"quick\" when the job is to lay out or route a whole board: one harness call, board.design(), does it and holds the rules); its schematic drawing rules are the owner's and are not optional. Plan first, draw once: try a run_python script with dry_run: true until its result is clean, then run it once for real; never clear a sheet or board to start again, and never type coordinates for small parts.";
+Before drawing or rearranging a schematic, laying out or routing a board, or reviewing a design, read get_design_guide once (topic \"quick\" when the job is to lay out or route a whole board: one harness call, board.design(), does it and holds the rules); its schematic drawing rules are the owner's and are not optional. Plan first, draw once: try a run_python script with dry_run: true until its result is clean, then run it once for real; never clear a sheet or board to start again, and never type coordinates for small parts. \
+A project can also hold mechanical parts: a part studio (a .jpart document, listed by get_project) is a list of features (sketches, extrudes, and so on) that the modelling kernel builds in order into solid bodies. Read one with cad_get_features, learn the feature types and their parameters with cad_feature_types, change it with cad_edit_features (which rebuilds and reports each feature's errors), measure with cad_get_bodies and look at it with cad_render_view. Lengths are millimetres, Z is up.";
 
 // ------------------------------------------------------------------ the catalog
 
@@ -89,7 +94,7 @@ fn project_prop() -> Value {
 }
 
 fn document_prop() -> Value {
-    json!({ "type": "string", "description": "Which document: its path as listed by get_project or get_design_overview (for example \"power.kicad_sch\"), or \"board\" for the board." })
+    json!({ "type": "string", "description": "Which document: its path as listed by get_project or get_design_overview (for example \"power.kicad_sch\"), or \"board\" for the board. In a project with several PCBs (each a folder, as get_project lists them) say which PCB: \"Motor driver/board\", \"Motor driver/schematic\" or the full path \"Motor driver/power.kicad_sch\"; a call that names none works on the PCB used last." })
 }
 
 fn annotations(title: &str, write: bool, destructive: bool) -> Value {
@@ -190,6 +195,23 @@ fn build_catalog() -> Vec<Tool> {
             host,
             project,
         });
+    }
+
+    for (domain, list) in DOMAIN_TOOLS {
+        let tools: Vec<Value> = serde_json::from_str(list).unwrap_or_else(|e| panic!("web/domains/{domain}/mcp/tools.json is not valid JSON: {e}"));
+        for t in tools {
+            let name = t["name"].as_str().expect("tool name").to_string();
+            let title = t["title"].as_str().unwrap_or(&name).to_string();
+            let write = t["write"].as_bool().unwrap_or(false);
+            let project = t["input_schema"]["properties"].get("project").is_some();
+            out.push(Tool {
+                def: json!({ "name": name, "title": title, "description": t["description"], "inputSchema": t["input_schema"],
+                             "annotations": annotations(&title, write, t["destructive"].as_bool().unwrap_or(false)) }),
+                write,
+                host: true,
+                project,
+            });
+        }
     }
 
     // The order a model reads them in: find the project, read, look, change, then the rest.
@@ -558,18 +580,13 @@ async fn list_projects(state: &AppState, caller: &Caller, site: &str, args: &Val
 
 async fn get_project(state: &AppState, site: &str, p: &ProjectCtx) -> Result<Value, String> {
     let members = persist::list_members(&state.pool, p.id).await.map_err(internal)?;
-    let kind = |t: &str| match t {
-        "kicad_sch" => "schematic",
-        "kicad_pcb" => "board",
-        "kicad_pro" => "project file",
-        _ => "other",
-    };
+    let kind = |t: &str| crate::dockind::of(t).name;
     Ok(json!({
         "id": p.id, "name": p.name, "your_role": p.role, "url": format!("{site}/p/{}/edit", p.id),
         "documents": p.docs.iter().map(|d| json!({ "path": d.path, "type": kind(&d.doc_type) })).collect::<Vec<_>>(),
         "members": members.iter().map(|m| json!({ "login": m.login, "role": m.role })).collect::<Vec<_>>(),
         "scripts": script_list(state, p).await,
-        "note": "Schematic sheets and the board are what the document parameter of the other tools takes.",
+        "note": "Schematic sheets and the board are what the document parameter of the electronics tools takes; a part studio is what the cad_ tools take.",
     }))
 }
 
@@ -620,6 +637,11 @@ fn find_doc<'a>(p: &'a ProjectCtx, name: &str) -> Result<&'a persist::Document, 
         .find(|d| d.path.to_lowercase() == q)
         .or_else(|| p.docs.iter().find(|d| base(&d.path) == q))
         .or_else(|| if matches!(q.as_str(), "board" | "pcb") { p.docs.iter().find(|d| d.doc_type == "kicad_pcb") } else { None })
+        // "<PCB folder>/board": the board of that PCB, in a project that has several
+        .or_else(|| {
+            let folder = q.strip_suffix("/board").or_else(|| q.strip_suffix("/pcb"))?;
+            p.docs.iter().find(|d| d.doc_type == "kicad_pcb" && d.path.to_lowercase().starts_with(&format!("{folder}/")))
+        })
         .ok_or_else(|| format!("There is no document \"{name}\" in {}.", p.name))
 }
 
@@ -875,6 +897,10 @@ async fn call_tool(state: &AppState, caller: &Caller, site: &str, tool: &Tool, n
         }
         content.push(text_content(&result));
         return Ok(Value::Array(content));
+    }
+    // a picture the tool drew itself (a shaded view of a part)
+    if let Some(png) = reply["png"].as_str() {
+        return Ok(json!([{ "type": "image", "data": png, "mimeType": "image/png" }, text_content(&result)]));
     }
     if let Some(svg) = reply["svg"].as_str() {
         let svg = svg.to_string();

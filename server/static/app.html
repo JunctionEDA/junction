@@ -20,7 +20,15 @@
   svg.glyph { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7;
               stroke-linecap: round; stroke-linejoin: round; flex: none; }
 
-  #app { display: grid; grid-template-rows: 32px 1fr 24px; grid-template-columns: minmax(0, 1fr); height: 100%; }
+  /* rows: the menu bar, the view, the document tabs of an open project (empty on the home view), the status bar */
+  #app { display: grid; grid-template-rows: 32px minmax(0, 1fr) auto 24px; grid-template-columns: minmax(0, 1fr); height: 100%; }
+  #ui-doctabs { display: contents; }
+  #doctabs { grid-row: 3; } #doctabs[hidden] { display: none; }
+  #ui-statusbar > * { grid-row: 4; }
+  /* ---- cad: a document a domain's own editor draws (a part studio, an assembly); the editor fills #cadHost
+       (web/platform/documents/host.ts, web/domains/pcb/editor/dochost.ts) ---- */
+  #cad.active { display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); min-width: 0; }
+  #cadHost { min-width: 0; min-height: 0; background: var(--paper); }
 
   /* ---- views ---- */
   .view { display: none; min-height: 0; }
@@ -98,6 +106,11 @@
     </div>
     <div id="ui-msgpanel"></div>
   </section>
+
+  <!-- ===== A document a domain's own editor draws: a part studio, an assembly (web/domains/mechanical, …) ===== -->
+  <section id="cad" class="view"><div id="cadHost"></div></section>
+
+  <div id="ui-doctabs"></div>
 
   <div id="ui-statusbar"></div>
 </div>

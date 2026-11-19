@@ -77,6 +77,11 @@ Apply rules (client side, in seq order): MODIFIED sets each named property
 unconditionally; ADDED with an existing UUID is an upsert-replace; REMOVED or
 MODIFIED for an unknown UUID is a no-op (delete beats a concurrent modify).
 
+Documents that are not KiCad's (a part studio `.jpart`, an assembly `.jasm`) are JSON item documents
+(`src/itemdoc.rs`) on the same ops: `ADDED` carries `item`, `MODIFIED` carries
+`props: [{ path: [...], value } | { path, del: true }]`, last writer wins per path. The server can apply these
+itself, so it folds their journal into a snapshot with no editor present (`src/compact.rs`).
+
 ## Auth
 
 The server brokers GitHub OAuth so no client secret ships in KiCad.
@@ -105,7 +110,11 @@ The server brokers GitHub OAuth so no client secret ships in KiCad.
 | GET | `/api/users/search?q=` | share-dialog typeahead: server accounts + GitHub user search |
 | GET/POST | `/api/projects` | list my projects (owned + member, with description, member count, owner avatar, `starred`) · upload a project (multipart: a zip as `archive`, or loose `file` parts named by project-relative path; non-KiCad files are skipped and reported, a wrapping folder is stripped) |
 | GET/PATCH/DELETE | `/api/projects/{id}` | project info · rename / describe / make public (owner) · move to the Trash (owner; `?permanent=true` destroys it at once, the Trash is purged after 30 days) |
-| POST | `/api/projects/blank` | create an empty project (`name`): a `.kicad_pro`, a root schematic and a board, as KiCad's File → New Project writes them |
+| POST | `/api/projects/blank` | create an empty project (`name`): it holds only its own document (`project.jproj`: tab order, folders) and opens on its Home tab. `template: "pcb"` starts it with a `.kicad_pro`, a root schematic and a board at the root, as KiCad's File → New Project writes them |
+| POST | `/api/projects/{id}/pcbs` | add a PCB (`name`): a KiCad project in a folder of its own (`<name>/<name>.kicad_pro`, `.kicad_sch`, `.kicad_pcb`). A project holds any number |
+| POST | `/api/projects/{id}/folders/move` · `/folders/delete` · `/duplicate` | rename or move a folder with everything in it (`from`, `to`; `stems` renames a PCB's own three files with it) · delete a folder (`path`) · copy a document (`docId`, `path`) or a folder (`folder`, `to`) with the edits not yet stored |
+| GET | `/api/projects/{id}/files` | every document with its size, and when and by whom it last changed (the Home tab's list) |
+| POST | `/api/projects/{id}/shell` | the project's own document, made if the project has none |
 | GET | `/api/trash` | the caller's trashed projects, with `deletedAt` and `purgeAt` |
 | POST | `/api/projects/{id}/undelete` | take a project back out of the Trash (owner) |
 | PUT/DELETE | `/api/projects/{id}/star` | star · unstar a project for the caller only |
