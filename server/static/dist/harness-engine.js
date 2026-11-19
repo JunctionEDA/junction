@@ -87835,6 +87835,59 @@ var init_fonts = __esm({
   }
 });
 
+// web/domains/pcb/editor/github-pull.ts
+function pullGithubChanges(projectId4) {
+  return api4(`/api/projects/${projectId4}/github/pull`, { method: "POST", body: JSON.stringify({ automatic: true }) });
+}
+function githubPullNotice(projectId4, message) {
+  toast(message, 8e3, { text: "GitHub sync", run: () => {
+    location.href = `/p/${projectId4}/github`;
+  } });
+}
+function watchGithubChanges(projectId4, update) {
+  let stopped = false, busy = false, linked = true, lastNotice = "";
+  const check2 = async (focused = false) => {
+    if (stopped || busy || document.hidden || !linked && !focused || state.view !== "editor" || state.project?.projectId !== projectId4 || !state.me || E.viewOnly || E.pendingOps.size || E.drag || E.tool !== "select" || E.history || document.querySelector(".kd-overlay, [role='dialog']")) return;
+    busy = true;
+    try {
+      const result = await pullGithubChanges(projectId4);
+      if (stopped || state.project?.projectId !== projectId4) return;
+      linked = result.linked !== false;
+      if (result.updated.length) await update(result);
+      const notice = result.skipped.map((s2) => `${s2.path}: ${s2.reason}`).join("\n");
+      if (notice && notice !== lastNotice) githubPullNotice(projectId4, "Some GitHub changes need review before they can be pulled.");
+      lastNotice = notice;
+    } catch {
+      if (!stopped && lastNotice !== "error") githubPullNotice(projectId4, "Couldn't check GitHub for changes. You can retry on the sync page.");
+      lastNotice = "error";
+    } finally {
+      busy = false;
+    }
+  };
+  const focus = () => {
+    void check2(true);
+  };
+  const timer3 = setInterval(() => {
+    void check2();
+  }, 6e4);
+  window.addEventListener("focus", focus);
+  document.addEventListener("visibilitychange", focus);
+  return () => {
+    stopped = true;
+    clearInterval(timer3);
+    window.removeEventListener("focus", focus);
+    document.removeEventListener("visibilitychange", focus);
+  };
+}
+var init_github_pull = __esm({
+  "web/domains/pcb/editor/github-pull.ts"() {
+    "use strict";
+    init_appstore();
+    init_state();
+    init_util();
+  }
+});
+
 // web/domains/pcb/editor/doc.ts
 var doc_exports = {};
 __export(doc_exports, {
@@ -88225,6 +88278,8 @@ function snapMm(mm4) {
   return [KiCadCanvas.snap(mm4[0], p), KiCadCanvas.snap(mm4[1], p)];
 }
 function leaveEditor() {
+  stopGithubWatch?.();
+  stopGithubWatch = null;
   leaveDoc();
   state.doc = null;
   state.docId = null;
@@ -88265,6 +88320,24 @@ async function openEditor(id) {
   E.canComment = !!state.me && !!can.comment;
   state.docs = editorDocs(info.docs);
   store.set({ project: info, role: info.role || null, canJoin: E.canJoin, viewOnly: E.viewOnly, canComment: E.canComment, guest: !state.me, can });
+  if (state.me && can.edit) {
+    try {
+      const pulled = await pullGithubChanges(id);
+      if (state.project?.projectId !== id || state.view !== "editor") return;
+      if (pulled.updated.length) {
+        takeBoot("content", id);
+        info = await api4(`/api/projects/${id}/info`);
+        state.project = info;
+        state.docs = editorDocs(info.docs);
+        store.set({ project: info });
+      }
+      if (pulled.skipped.length) githubPullNotice(id, "Some GitHub changes need review before they can be pulled.");
+    } catch {
+      githubPullNotice(id, "Couldn't pull from GitHub. The editor is showing the last online version.");
+    }
+    if (state.project?.projectId !== id || state.view !== "editor") return;
+    stopGithubWatch = watchGithubChanges(id, refreshFromGithub);
+  }
   publishDocs();
   loadHistory();
   const fp = fpParam();
@@ -88285,6 +88358,33 @@ async function openEditor(id) {
     return;
   }
   await openDoc(doc2);
+}
+async function refreshFromGithub(result) {
+  const pid = state.project.projectId;
+  const info = await api4(`/api/projects/${pid}/info`);
+  if (state.project?.projectId !== pid || state.view !== "editor") return;
+  state.project = info;
+  state.docs = editorDocs(info.docs);
+  store.set({ project: info });
+  publishDocs();
+  E.proSettings = null;
+  E.druText = null;
+  hierarchyLearned = null;
+  rootSchematic();
+  const current = state.docId && state.docs.find((d) => d.docId === state.docId);
+  if (current) {
+    state.doc = current;
+  } else {
+    const next = firstDoc(state.docs, info.docs, null);
+    if (next) await openDoc(next);
+    else {
+      leaveDoc();
+      state.doc = null;
+      state.docId = null;
+      setDocNotice("This project has no board or schematic.");
+    }
+  }
+  toast(`Pulled ${result.updated.length} changed file${result.updated.length === 1 ? "" : "s"} from GitHub.`);
 }
 function rootSchematic() {
   const pro = state.project.docs.find((d) => d.docType === "kicad_pro");
@@ -88696,7 +88796,7 @@ function switchEditor() {
   if (target2) openDoc(target2);
   else toast(isSch() ? "This project has no board yet" : "This project has no schematic yet");
 }
-var docNav, GRID_CHOICES, sheetNames, sheetPages, ROOT_SHEET_NAME, hierarchyLearned, sheetHumanPaths, layerRow, remote, topsMemo, docsFetch;
+var docNav, stopGithubWatch, GRID_CHOICES, sheetNames, sheetPages, ROOT_SHEET_NAME, hierarchyLearned, sheetHumanPaths, layerRow, remote, topsMemo, docsFetch;
 var init_doc = __esm({
   "web/domains/pcb/editor/doc.ts"() {
     "use strict";
@@ -88726,7 +88826,9 @@ var init_doc = __esm({
     init_pcbtools_loader();
     init_view();
     init_fonts();
+    init_github_pull();
     docNav = { list: [], idx: -1, lock: false };
+    stopGithubWatch = null;
     GRID_CHOICES = { kicad_sch: [2.54, 1.27, 0.635, 0.254].map((mm4) => ({ mm: mm4, name: "" })), kicad_pcb: [1.27, 0.635, 0.5, 0.25, 0.1].map((mm4) => ({ mm: mm4, name: "" })), footprint: [1.27, 0.635, 0.5, 0.25, 0.1].map((mm4) => ({ mm: mm4, name: "" })) };
     sheetNames = /* @__PURE__ */ new Map();
     sheetPages = /* @__PURE__ */ new Map();
@@ -103126,7 +103228,7 @@ var footprintDocApi = {
 init_sexpr();
 
 // web/domains/pcb/canvas/version.ts
-var KICAD_BASE_VERSION = "10.99.0-8069-gada8da10bd-dirty";
+var KICAD_BASE_VERSION = "10.99.0-8071-g267eb507cc-dirty";
 
 // web/domains/pcb/canvas/doc.ts
 function newDoc(type) {

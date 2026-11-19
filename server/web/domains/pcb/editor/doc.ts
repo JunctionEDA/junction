@@ -29,7 +29,9 @@ import type { GridDef } from "../../../shared/units";
 import type { ItemSummary, SheetEntry, SvgLayer, WireChange } from "./types";
 import { applyView, base, canvas, cmtG, cmtPanel, dragG, fitView, isSch, overlay, peersG, requestRender, selG, stage, world } from "./view";
 import { fontsForProject } from "./fonts";
+import { githubPullNotice, pullGithubChanges, watchGithubChanges, type GithubPullResult } from "./github-pull";
 export const docNav = { list: [] as string[], idx: -1, lock: false };
+let stopGithubWatch: (() => void) | null = null;
 
 
 /** Each editor's grids in KiCad's list order (Preferences > Grids, dialogs/prefs.ts fills them in from the saved settings). */
@@ -327,6 +329,7 @@ export function snapMm(mm: number[]): number[] {
 
 
 export function leaveEditor() {
+  stopGithubWatch?.(); stopGithubWatch = null;
   leaveDoc();
   state.doc = null; state.docId = null;
   setConn("offline", "");
@@ -366,6 +369,23 @@ export async function openEditor(id: string) {
   E.canComment = !!state.me && !!can.comment;
   state.docs = editorDocs(info.docs);
   store.set({ project: info, role: info.role || null, canJoin: E.canJoin, viewOnly: E.viewOnly, canComment: E.canComment, guest: !state.me, can });
+  if (state.me && can.edit) {
+    try {
+      const pulled = await pullGithubChanges(id);
+      if (state.project?.projectId !== id || state.view !== "editor") return;
+      if (pulled.updated.length) {
+        takeBoot("content", id);
+        info = await api(`/api/projects/${id}/info`);
+        state.project = info; state.docs = editorDocs(info.docs);
+        store.set({ project: info });
+      }
+      if (pulled.skipped.length) githubPullNotice(id, "Some GitHub changes need review before they can be pulled.");
+    } catch {
+      githubPullNotice(id, "Couldn't pull from GitHub. The editor is showing the last online version.");
+    }
+    if (state.project?.projectId !== id || state.view !== "editor") return;
+    stopGithubWatch = watchGithubChanges(id, refreshFromGithub);
+  }
   publishDocs();
   loadHistory();
   // ?fp=: the Footprint Editor on a footprint of the project, or on a private copy of a board footprint
@@ -385,6 +405,24 @@ export async function openEditor(id: string) {
     setConn("err", "nothing to show"); return;
   }
   await openDoc(doc);
+}
+
+async function refreshFromGithub(result: GithubPullResult): Promise<void> {
+  const pid = state.project!.projectId;
+  const info = await api(`/api/projects/${pid}/info`) as ProjectInfo;
+  if (state.project?.projectId !== pid || state.view !== "editor") return;
+  state.project = info; state.docs = editorDocs(info.docs);
+  store.set({ project: info }); publishDocs();
+  E.proSettings = null; E.druText = null; hierarchyLearned = null;
+  rootSchematic();
+  const current = state.docId && state.docs.find((d) => d.docId === state.docId);
+  if (current) { state.doc = current; }
+  else {
+    const next = firstDoc(state.docs, info.docs, null);
+    if (next) await openDoc(next);
+    else { leaveDoc(); state.doc = null; state.docId = null; setDocNotice("This project has no board or schematic."); }
+  }
+  toast(`Pulled ${result.updated.length} changed file${result.updated.length === 1 ? "" : "s"} from GitHub.`);
 }
 
 
