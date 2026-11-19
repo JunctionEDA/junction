@@ -241,6 +241,7 @@ pub struct GalleryEntry {
     pub name: String,
     pub description: String,
     pub owner_login: String,
+    pub owner_avatar_url: Option<String>,
     pub doc_count: i64,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -249,7 +250,7 @@ pub struct GalleryEntry {
 /// the newest op or snapshot in any of its docs, like the user listing.
 pub async fn list_public_projects(pool: &PgPool, limit: i64) -> DbResult<Vec<GalleryEntry>> {
     sqlx::query_as::<_, GalleryEntry>(
-        "SELECT p.id, p.name, p.description, u.login AS owner_login,
+        "SELECT p.id, p.name, p.description, u.login AS owner_login, u.avatar_url AS owner_avatar_url,
                 (SELECT COUNT(*) FROM documents d WHERE d.project_id = p.id) AS doc_count,
                 GREATEST(
                     p.created_at,
