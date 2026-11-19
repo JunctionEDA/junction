@@ -33,6 +33,7 @@ import { markdownToHtml } from "../markdown";
 import { RULES_HELP_MD } from "../../generated/rules-help";
 import { keysInText } from "../../../../shared/keys";
 import type { DrillProfile, StackupLayer } from "../../canvas/board-setup";
+import { applyFabStackup, BOARD_TYPES, FAB_STACKUPS, outer50Ohm } from "./fab-stackups";
 
 type Obj = { [key: string]: Plain };
 const isObj = (v: Plain | undefined): v is Obj => !!v && typeof v === "object" && !Array.isArray(v);
@@ -175,13 +176,42 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       setupEdit.copper = layerRows.filter((r) => r.copper).map((r) => r.name);
       setupEdit.boardThickness = header && header.general ? Number((KiCadCanvas.kid(header.general, "thickness") as SNode | null)?.[1]) || 1.6 : 1.6;
       stack = fromHeader(); touched = false;
-      if (refreshLayers) refreshLayers(); draw();
+      if (refreshLayers) refreshLayers(); draw(); showBuilds();
     } });
     count.input.title = "Select the number of copper layers in the stackup";
     const st0 = header && header.setup ? (KiCadCanvas.kid(header.setup, "stackup") as SNode | null) : null;
     impedance = checkField(st0 ? String(((KiCadCanvas.kid(st0, "dielectric_constraints") as SNode | null) || [])[1]) === "yes" : false, "Impedance controlled", { ro: roBoard, key: "impedance", tip: "If Impedance Controlled option is set,\nLoss tangent and EpsilonR will be added to constraints.", onChange: () => { touched = true; } });
     let touched = false, selRow = -1;
     const host = h("div"), total = h("span", { class: "pd-value", "data-k": "stackupThickness" });
+    const vendor = selectField("JLCPCB", [["JLCPCB", "JLCPCB"], ["PCBWay", "PCBWay"]], { key: "stackup-vendor", onChange: showBuilds });
+    const initialType = stack?.some((l) => /coverlay|polyimide/i.test(l.material || "")) ? "flex"
+      : stack?.some((l) => /alumini?um|metal core/i.test(l.material || "")) ? "metal" : "rigid";
+    const type = selectField<string>(initialType, BOARD_TYPES.map(([id, label]) => [id, label]), { key: "stackup-board-type", onChange: showBuilds });
+    const builds = h("div");
+    function showBuilds(): void {
+      const name = vendor.get();
+      const kind = BOARD_TYPES.find(([id]) => id === type.get()) || BOARD_TYPES[0];
+      const choices = FAB_STACKUPS.filter((b) => b.vendor === name && b.type === kind[0] && b.copper.length === cuNow());
+      const source = name === "JLCPCB" ? kind[2] : kind[3];
+      const list = selectField("", [["", "Choose a stackup"], ...choices.map((b): [string, string] => [b.id, `${b.id} · ${b.nominal} mm nominal`])],
+        { key: "stackup-build", ro: !choices.length });
+      const hint = note(choices.length ? "" : source ? `No preset for ${cuNow()} copper layers. Use the vendor’s specifications for a custom stackup.` : `${name} does not list this board type.`);
+      const apply = h("button", { type: "button", class: "btn", disabled: true }, "Apply stackup") as HTMLButtonElement;
+      const selected = () => choices.find((b) => b.id === list.get());
+      list.input.addEventListener("change", () => {
+        const build = selected();
+        apply.disabled = !build || roBoard;
+        const width = build ? outer50Ohm(build) : null;
+        hint.textContent = width === null ? "" : `Estimated 50 Ω outer trace: ${width.toFixed(3)} mm over the adjacent plane, without mask or coverlay. Confirm with the manufacturer.`;
+      });
+      apply.onclick = () => {
+        const build = selected(); if (!build || roBoard) return;
+        stack = applyFabStackup(build, stack || []);
+        selRow = -1; touched = true; draw();
+      };
+      builds.replaceChildren(h("div", { class: "pd-row" }, list.el, apply,
+        source ? h("a", { href: source, target: "_blank", rel: "noopener" }, "Manufacturer specs") : ""), hint);
+    }
     const userName = (n: string): string => { const r = layerRows.find((x) => x.name === n); return (r && r.userName) || n; };
     const MATERIALS: Record<string, [string, number, number][]> = {
       dielectric: [["FR4", 4.5, 0.02], ["FR408-HR", 3.69, 0.0091], ["Polyide", 3.2, 0.004], ["Kapton", 3.2, 0.004], ["Polyimide", 3.2, 0.004], ["Teflon", 2.1, 0.0004], ["PTFE", 2.1, 0.0004], ["Aluminum", 8.7, 0.001]],
@@ -269,7 +299,10 @@ export async function openBoardSetup(ctx: ToolCtx, startPage?: string): Promise<
       void navigator.clipboard?.writeText(lines.join("\n") + `\nBoard thickness: ${fmtLenU(BS().stackupLayersThickness(stack || []))}\n`);
     };
     const addBtn = h("button", { type: "button", class: "btn", disabled: roBoard, onclick: addDiel }, "Add Dielectric Layer..."), removeBtn = h("button", { type: "button", class: "btn", disabled: roBoard, onclick: removeDiel }, "Remove Dielectric Layer...");
-    put(el, h("div", { class: "pd-row" }, h("label", null, "Copper layers:"), count.el, impedance.el, h("span", { style: "flex:1" }), addBtn, removeBtn), host,
+    showBuilds();
+    put(el, box("Manufacturer stackups", h("div", { class: "pd-row" },
+        h("label", null, "Manufacturer"), vendor.el, h("label", null, "Board type"), type.el), builds),
+      h("div", { class: "pd-row" }, h("label", null, "Copper layers:"), count.el, impedance.el, h("span", { style: "flex:1" }), addBtn, removeBtn), host,
       h("div", { class: "pd-row" }, h("label", null, "Board thickness from stackup:"), total, h("span", { style: "flex:1" }), h("button", { type: "button", class: "btn", disabled: roBoard, onclick: adjust }, "Adjust Dielectric Thickness"), h("button", { type: "button", class: "btn", onclick: exportClip }, "Export to Clipboard")),
       roBoard ? null : note(BOARD_NOTE));
     validate("Physical Stackup", () => {

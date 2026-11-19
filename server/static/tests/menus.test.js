@@ -90,8 +90,8 @@ function flatten(entries, trail, out) {
     assert.deepStrictEqual(sub("pcb", "View", "Contrast Mode"), ["highContrastMode", "layerAlphaDec", "layerAlphaInc"]);
     assert.deepStrictEqual(sub("pcb", "Place", "Draw Dimensions"), ["drawOrthogonalDimension", "drawAlignedDimension", "drawCenterDimension", "drawRadialDimension", "drawLeader"]);
     assert.deepStrictEqual(sub("pcb", "Edit", "Select").slice(0, 2), ["selectAll", "unselectAll"]);
-    assert.deepStrictEqual(sub("sch", "View", "Panels"), ["showProperties", "showGitCommitPane", "showSearch", "showHierarchy", "showNetNavigator", "showDesignBlockPanel|Design Blocks", "showRemoteSymbolPanel|Remote Symbols"]);
-    assert.deepStrictEqual(sub("pcb", "View", "Panels"), ["showProperties", "showSearch", "showLayersManager", "showNetInspector", "showConstraintsPanel", "showGitCommitPane"]);
+    assert.deepStrictEqual(sub("sch", "View", "Panels"), ["showProperties", "showGitCommitPane", "showSearch", "showHierarchy", "showNetNavigator", "showDesignBlockPanel|Design Blocks", "showRemoteSymbolPanel|Remote Symbols", "showPeers", "showComments"]);
+    assert.deepStrictEqual(sub("pcb", "View", "Panels"), ["showProperties", "showSearch", "showLayersManager", "showNetInspector", "showConstraintsPanel", "showGitCommitPane", "showPeers", "showComments"]);
   });
 
   test("every module command has its place in a menu, or is declared hotkey / context-menu only (there is no catch-all sub-menu)", () => {

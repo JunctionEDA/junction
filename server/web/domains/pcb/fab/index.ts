@@ -7,7 +7,7 @@
 // with the same stroke font the canvas draws) and a board document parsed by KiCadCanvas.parseDoc.  The
 // (setup …) section of the board — solder mask and paste clearances, via tenting, the drill / place origin —
 // is passed beside the document, because the editor's document keeps items only.
-import { boardHeader, stackupRows, stackupThickness } from "../canvas/board-setup";
+import { boardFinish, boardHeader, stackupRows, stackupThickness } from "../canvas/board-setup";
 import { type DrillFile, type DrillOptions, boardHoles, drillFiles } from "./drill";
 import { type GerberAttrs, projectGuid, writeGerber } from "./gerber";
 import { type BoardModel, type FabDoc, type Node, DEFAULT_VARIANT, boardModel, boardVariantNames, isCopper } from "./model";
@@ -105,6 +105,12 @@ function setupNode(setup: Node | string | null | undefined): Node | null {
 export function setupOf(ctx: FabContext): Node | null { return setupNode(ctx.setup); }
 /** BOARD_STACKUP::BuildBoardThicknessFromStackup of the board's (stackup …); null when it has none (the default stackup) */
 export function boardStackupThickness(ctx: FabContext): number | null { const rows = stackupRows(setupOf(ctx) as unknown as SNode | null); return rows.length ? stackupThickness(rows) : null; }
+function boardSpecs(ctx: FabContext) {
+  const setup = setupOf(ctx) as unknown as SNode | null;
+  const finish = boardFinish(setup).copperFinish;
+  return { thickness: boardStackupThickness(ctx) || ctx.doc.thickness || null, finish: finish === "None" ? null : finish,
+    layers: stackupRows(setup) };
+}
 /** The board model for a context (read afresh: the document may have changed since the last call). */
 export function modelOf(ctx: FabContext): BoardModel { return boardModel(ctx.doc, setupNode(ctx.setup), ctx.variant); }
 function isoDate(d: Date): string {
@@ -228,6 +234,22 @@ export async function packageZip(pkg: FabPackage, when?: Date): Promise<{ name: 
   return { name: `${pkg.name}-${pkg.preset.id === "kicad" ? "fabrication" : pkg.preset.id}.zip`, data: await zip(entries, when) };
 }
 
+/** PCBWay's plugin sends a flat archive with the board files and assembly files. */
+async function pcbwayQuoteZip(ctx: FabContext, pkg: FabPackage): Promise<Uint8Array> {
+  const setup = setupOf(ctx);
+  const specs = boardSpecs(ctx);
+  const date = ctx.date || new Date();
+  const entries: ZipEntry[] = pkg.files.map(({ name, data }) => ({ name, data }));
+  entries.push({ name: `${pkg.name}.d356`, data: reports.d356(ctx, false) });
+  entries.push({ name: `${pkg.name}-job.gbrjob`, data: gerberJobFile({
+    m: modelOf(ctx), setup, files: pkg.files.flatMap(({ name, layer }) => layer ? [{ name, layer }] : []),
+    projectName: pkg.name, guid: projectGuid(pkg.name), rev: ctx.doc.titleBlock?.rev || "", version: kicadVersion(ctx.doc),
+    date: isoDate(date), thickness: specs.thickness ?? undefined, edge: pkg.prims.get("Edge.Cuts"),
+    layerName: (l) => layerDisplayName(ctx.doc, l),
+  }) });
+  return zip(entries, date);
+}
+
 /**
  * ZONE_FILLER::Fill for the zones `ids` (every board zone when null): per zone, the fill outlines and island
  * flags per layer.  Null when the progress reporter cancelled it.
@@ -256,7 +278,7 @@ export const reports = {
 };
 
 export const api = { statAreas: (ctx: FabContext, o: Parameters<typeof statAreas>[1]) => ({ ...statAreas(modelOf(ctx), o), stackupThickness: boardStackupThickness(ctx) }), odb, ipc2581, ipc2581Sections, reports, outlineText, vrmlModels: (ctx: FabContext) => vrmlModels(modelOf(ctx)), writeVrml: (ctx: FabContext, o: VrmlOptions, meshOf: Parameters<typeof writeVrml>[2]) => writeVrml(modelOf(ctx), o, meshOf), meshVrml, plotBoard, pluginPlot, drillJob, drillReport, markerParts, pnpGerber, pnpFileName, DEFAULT_VARIANT, variantNames: (variants: Node | null | undefined): string[] => boardVariantNames(variants || null, refCompare), writeSvg, writePdf, writePs, writeDxf, dxfTextString, writePng, paintPage, gerberJobFile, boardPage, plotFileName, outputPath, fillZones, filledZoneNode, storedFill, polyArea, PRESETS, presetById, plottableLayers, layerDisplayName, layerAttrs, protelExtension, model: modelOf, plotGerbers, drillFiles: drill, positions, bom: billOfMaterials, placementCsv, placementAscii, bomCsv,
-  jlcPlacement, buildPackage, packageZip, zip, tar, gzip, crc32, writeGerber, primPolys };
+  jlcPlacement, buildPackage, packageZip, boardSpecs, pcbwayQuoteZip, zip, tar, gzip, crc32, writeGerber, primPolys };
 export type KiCadFabApi = typeof api & { open?: () => void };
 // the canvas stores a text's outlines with it when it writes the item (canvas/export.ts ensureRenderCaches)
 { const C = (globalThis as unknown as { KiCadCanvas?: { setRenderCacheWriter?(fn: typeof renderCacheFor): void } }).KiCadCanvas; if (C && C.setRenderCacheWriter) C.setRenderCacheWriter(renderCacheFor); }

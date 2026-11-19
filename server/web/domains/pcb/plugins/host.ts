@@ -887,6 +887,7 @@ export function pluginUiKey(id: string): string {
 }
 
 async function busy<T>(id: string, what: string, fn: () => Promise<T>): Promise<T | undefined> {
+  if (S.running[id]?.busy) return;
   setRun(id, { busy: what });
   // An action may wait on a dialog for minutes, so there is no deadline; a plugin that is simply stuck is named once, with the way out.
   const slow = window.setTimeout(() => { if (!S.prompt && !S.window) { log(id, "warn", `${what} has been running for 20 seconds`); toast(`${find(id)?.manifest.name || "A plugin"} is still running “${what}”. Restart it from Manage Plugins if it is stuck.`, 6000); } }, 20000);

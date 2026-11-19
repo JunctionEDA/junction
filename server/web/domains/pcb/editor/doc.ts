@@ -2,6 +2,7 @@
 import { KICAD_LAYERS, SCH_LAYERS, setStatusBar, setToggle, state, store } from "./appstore";
 import { centerOn, closeThread, drawComments, loadComments, renderThreads } from "./comments";
 import { leaveCursorChat, loadChat } from "./chat";
+import { probeForSwitch, receiveProbe, selectedSchematicFile } from "./crossprobe";
 import { loadProposals } from "./proposals";
 import { $ } from "./dom";
 import { pruneSelection, resetInteraction } from "./gestures";
@@ -557,7 +558,7 @@ export function leaveDoc() {
   stopPresenceKeepalive();
   E.joinedDocId = null; E.lastSeq = 0; E.resyncAt = 0; E.lastPresenceMm = null; E.applyFailed = false;
   clearInterval(E.renderTimer); E.renderTimer = 0;
-  E.items = []; E.sheets = []; E.selected = null; E.drag = null; E.boxSel = null; E.measure = null; E.selection = new Set(); E.highlightIds = null; E.peerState = {}; E.comments = []; E.followPeer = null; E.layers = {};
+  E.items = []; E.sheets = []; E.selected = null; E.drag = null; E.boxSel = null; E.measure = null; E.selection = new Set(); E.highlightIds = null; E.peerState = {}; E.comments = []; E.followPeer = null; E.followCursor = false; E.presenting = false; E.layers = {};
   cancelRemoteFlush(); remote.nextAt = 0;
   E.kdoc = null; E.loadedText = null; E.layersSeeded = false; canvas.style.display = "none"; { const cc = document.getElementById("cursorCanvas"); if (cc) cc.style.display = "none"; } if (E.renderReq) { cancelAnimationFrame(E.renderReq); E.renderReq = 0; }
   releaseLayers();   // the cached pass and the zoom levels of the document left
@@ -570,6 +571,7 @@ export function leaveDoc() {
 
 
 export async function openDoc(doc: DocEntry) {
+  const probe = probeForSwitch(doc.docType);
   leaveDoc();
   state.doc = doc; state.docId = doc.docId; bindUndoDoc(doc.docId);
   E.DOC_TYPE = doc.docType;
@@ -648,7 +650,11 @@ export async function openDoc(doc: DocEntry) {
       setDocNotice(`Nothing to show yet for this ${isSch() ? "sheet" : "board"} — it appears once a desktop editor has the project open in a live session.`);
     }
   }
-  setTimeout(fitView, 0);   // not rAF: a background tab would defer it indefinitely
+  setTimeout(() => {   // not rAF: a background tab would defer it indefinitely
+    if (state.docId !== docId) return;
+    fitView();
+    if (ok && probe) receiveProbe(probe);
+  }, 0);
   if (isFpPrivate()) setConn("", "private copy of a board footprint");   // nothing goes over the socket until Save
   else if (isFpReadOnlyLib()) setConn("", "read-only library footprint");   // a global library's footprint: Save As makes a project copy
   else if (E.canJoin) connect().catch(() => setConn("err", "connection failed"));
@@ -733,6 +739,8 @@ export function navigateDocs(dir: number) {
 }
 
 export function switchEditor() {
-  const target = isSch() ? state.docs!.find((d) => d.docType === "kicad_pcb") : rootSchematic();
+  const sheetFile = selectedSchematicFile();
+  const target = isSch() ? state.docs!.find((d) => d.docType === "kicad_pcb")
+    : (sheetFile && findSheetDoc(sheetFile, state.doc?.path || "")) || rootSchematic();
   if (target) openDoc(target); else toast(isSch() ? "This project has no board yet" : "This project has no schematic yet");
 }

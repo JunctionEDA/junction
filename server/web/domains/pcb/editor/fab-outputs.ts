@@ -135,7 +135,12 @@ function show(fab: KiCadFabApi, ctx: FabContext, focus: FabFocus): void {
   let layers = new Set(preset.layers(all, copper));
 
   const presetField = selectField<string>(preset.id, fab.PRESETS.map((p) => [p.id, p.name] as [string, string]), { key: "fab-preset", onChange: (id) => { preset = fab.presetById(id); rememberPreset(id); applyPreset(); schedule(); } });
-  const blurb = note(""), order = h("a", { class: "btn sm", target: "_blank", rel: "noopener" }, "Open the order page") as HTMLAnchorElement;
+  const blurb = note(""), orderStatus = note("");
+  orderStatus.setAttribute("role", "status");
+  const order = h("button", { type: "button", class: "btn", disabled: true, onclick: () => { void startQuote(); } }) as HTMLButtonElement;
+  const uploadLink = h("a", { target: "_blank", rel: "noopener" }, "Open the quote page") as HTMLAnchorElement;
+  const specs = fab.boardSpecs(ctx);
+  let uploading = false;
   const opt = {
     aux: checkField(false, "Use drill/place file origin", { key: "fab-aux", onChange: schedule, tip: "Coordinates are measured from the origin set with Place > Drill/Place File Origin" }),
     silk: checkField(false, "Subtract soldermask from silkscreen", { key: "fab-silk", onChange: schedule, tip: "Legend ink is removed where the solder mask is open, so no ink lands on a pad" }),
@@ -166,15 +171,71 @@ function show(fab: KiCadFabApi, ctx: FabContext, focus: FabFocus): void {
     layers = new Set(preset.layers(all, copper));
     opt.aux.set(preset.useAuxOrigin); opt.silk.set(preset.subtractMaskFromSilk); opt.ref.set(preset.plotReference); opt.val.set(preset.plotValue);
     opt.merge.set(preset.drill.merge); opt.dnp.set(preset.excludeDnp); opt.tent.set(false);
+    opt.place.set(preset.id !== "dkred"); opt.bom.set(preset.id !== "dkred");
     blurb.textContent = preset.blurb;
-    order.style.display = preset.orderUrl ? "" : "none"; if (preset.orderUrl) order.href = preset.orderUrl;
+    order.hidden = !preset.orderUrl;
+    order.textContent = preset.id === "pcbway" ? "Send to PCBWay" : `Start ${preset.name} quote`;
+    orderStatus.replaceChildren();
     drawLayerList();
   }
   function options(): PackageOptions {
     return { preset: preset.id, layers: all.filter((l) => layers.has(l)), useAuxOrigin: opt.aux.get(), subtractMaskFromSilk: opt.silk.get(), plotReference: opt.ref.get(), plotValue: opt.val.get(),
       forceTentVias: opt.tent.get() ? true : undefined, mergeDrill: opt.merge.get(), excludeDnp: opt.dnp.get(), includeBom: opt.bom.get(), includePlacement: opt.place.get() };
   }
-  function schedule(): void { window.clearTimeout(timer); timer = window.setTimeout(() => { void generate(); }, 120); }
+  function schedule(): void {
+    ++run; pkg = null; order.disabled = true;
+    window.clearTimeout(timer); timer = window.setTimeout(() => { void generate(); }, 120);
+  }
+
+  function quoteProblem(p: FabPackage): string {
+    if (!p.prims.get("Edge.Cuts")?.length || p.summary.width <= 0 || p.summary.height <= 0) return "Include a board outline on Edge.Cuts.";
+    if (copper.some((layer) => !p.prims.has(layer))) return "Include every copper layer before starting a quote.";
+    if (p.preset.id === "dkred" && p.summary.copperLayers !== 2) return "DKRed accepts two copper layers.";
+    return "";
+  }
+
+  async function startQuote(): Promise<void> {
+    const p = pkg;
+    if (!p || !p.preset.orderUrl || quoteProblem(p) || uploading) return;
+    const gerbers = p.bundle.find((f) => f.kind === "archive");
+    if (!gerbers) return;
+    const file = `${p.name}-gerbers.zip`;
+    uploadLink.href = p.preset.orderUrl;
+    if (p.preset.id !== "pcbway") {
+      window.open(p.preset.orderUrl, "_blank", "noopener");
+      download(blobOf(gerbers.data, "application/zip"), file);
+      orderStatus.replaceChildren(`Upload ${file} on ${p.preset.name}. `, uploadLink);
+      return;
+    }
+    // Open in the original click so the browser can allow it after the upload.
+    const tab = window.open("about:blank", "_blank");
+    if (tab) {
+      tab.opener = null;
+      tab.document.title = "PCBWay quote";
+      tab.document.body.textContent = "Sending fabrication files to PCBWay…";
+    }
+    uploading = true; order.disabled = true; presetField.input.setAttribute("disabled", "");
+    orderStatus.textContent = "Sending fabrication files to PCBWay…";
+    try {
+      const zip = await fab.pcbwayQuoteZip(ctx, p);
+      const { width, height, copperLayers } = p.summary;
+      const query = new URLSearchParams({ width: String(width), height: String(height), layers: String(copperLayers) });
+      const response = await fetch(`/api/fabrication/pcbway/quote?${query}`, { method: "POST", body: blobOf(zip, "application/zip") });
+      if (!response.ok) throw new Error(response.status === 401 ? "Sign in to Junction to send files to PCBWay." : "PCBWay upload failed.");
+      const { url } = await response.json() as { url: string };
+      if (tab && !tab.closed) tab.location.replace(url);
+      uploadLink.href = url;
+      orderStatus.replaceChildren("Files sent to PCBWay. ", uploadLink);
+    } catch (error) {
+      tab?.close();
+      const save = h("button", { type: "button", class: "btn sm", onclick: () => download(blobOf(gerbers.data, "application/zip"), file) }, "Download Gerbers");
+      orderStatus.replaceChildren(`${error instanceof Error ? error.message : "PCBWay upload failed."} `, save, " ", uploadLink);
+    } finally {
+      uploading = false;
+      presetField.input.removeAttribute("disabled");
+      order.disabled = !pkg || !!quoteProblem(pkg);
+    }
+  }
 
   async function generate(): Promise<void> {
     const mine = ++run;
@@ -185,11 +246,15 @@ function show(fab: KiCadFabApi, ctx: FabContext, focus: FabFocus): void {
     catch (e) { if (mine !== run) return; pkg = null; files.replaceChildren(); view.replaceChildren(h("div", { class: "empty" }, "The files could not be generated")); report.set([{ severity: "error", text: String((e as Error).message || e) }]); console.warn(e); return; }
     if (mine !== run) return;
     pkg = made;
+    const problem = quoteProblem(pkg);
+    order.disabled = !!problem || uploading;
+    order.title = problem || (preset.id === "pcbway" ? "Upload fabrication files to PCBWay for a quote" : "Download the Gerber ZIP and open the quote page");
     if (!pkg.files.some((f) => f.name === selected)) { const first = pkg.files.find((f) => f.kind === focus) || pkg.files[0]; selected = first ? first.name : ""; }
     drawFiles(); drawView();
     const s = pkg.summary;
     summary.textContent = `${s.width.toFixed(2)} × ${s.height.toFixed(2)} mm, ${s.copperLayers} copper layer${s.copperLayers === 1 ? "" : "s"}, ${s.holes} hole${s.holes === 1 ? "" : "s"}${s.slots ? ` (${s.slots} slot${s.slots === 1 ? "" : "s"})` : ""}, ${s.placed} of ${s.parts} part${s.parts === 1 ? "" : "s"} placed, ${s.bomLines} BOM line${s.bomLines === 1 ? "" : "s"}`;
     const lines: ReportLine[] = pkg.warnings.map((text) => ({ severity: "warning", text }));
+    if (preset.orderUrl && problem) lines.push({ severity: "error", text: problem });
     if (!lines.length) lines.push({ severity: "info", text: "No problems found. Check the layers in the list above before ordering, as you would in a Gerber viewer." });
     report.set(lines);
   }
@@ -219,10 +284,14 @@ function show(fab: KiCadFabApi, ctx: FabContext, focus: FabFocus): void {
   }
 
   openDialog({ title: "Fabrication Outputs", width: 1000, height: 680, okLabel: "Download ZIP", cancelLabel: "Close", noEnter: true,
-    build(body) {
+    build(body, dialog) {
       applyPreset();
+      dialog.okButton?.before(order);
+      const details = h("details", null, h("summary", null, "Board stackup"),
+        note([specs.thickness && `${specs.thickness} mm board thickness`, specs.finish].filter(Boolean).join(" · ") || "Board thickness and finish are unspecified."),
+        ...specs.layers.filter((l) => l.thickness !== null).map((l) => note([l.layer, l.material, `${l.thickness} mm`].filter(Boolean).join(" · "))));
       const side = h("div", { class: "fab-side" },
-        box("Manufacturer", presetField.el, blurb, order),
+        box("Manufacturer", presetField.el, blurb, orderStatus, details),
         box("Gerber options", opt.aux.el, opt.silk.el, opt.tent.el, opt.ref.el, opt.val.el),
         box("Drill, placement and BOM", opt.merge.el, opt.place.el, opt.bom.el, opt.dnp.el),
         box("Layers", layerBox));

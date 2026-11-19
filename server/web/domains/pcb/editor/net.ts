@@ -4,7 +4,7 @@ import { noteCommentMsg } from "./comments";
 import { noteChatMsg } from "./chat";
 import { applyChanges, applyRemoteChanges, refreshDocs, renderObjects, setDocFromText } from "./doc";
 import { loadSheets as loadHierarchySheets } from "./panels/hierarchy";
-import { applyFollowWeb, peerName, renderPeers, startPresenceKeepalive } from "./peers";
+import { applyFollowWeb, followAction, peerName, renderPeers, startPresenceKeepalive } from "./peers";
 import { clearPeerCursors, noteRtt, onlyPointerMoved } from "./peercursors";
 import type { PeerEntry } from "./types";
 import { drawSelection, renderProps } from "./selection";
@@ -134,6 +134,11 @@ export async function connect() {
         if (e === null) { if (old) { delete E.peerState[cid]; full = roster = true; } continue; }
         if (!old || peerName(old) !== peerName(e) || (old.user && old.user.color) !== (e.user && e.user.color)) roster = full = true;
         else if (!onlyPointerMoved(old.state as Record<string, unknown> | null, e.state as Record<string, unknown> | null)) full = true;
+        if (old?.state?.presenting !== e.state?.presenting) {
+          roster = true;
+          if (e.state?.presenting === true && !E.presenting && !E.followPeer)
+            toast(`${peerName(e)} is presenting`, 6000, { text: "Follow", run: () => followAction(cid) });
+        }
         E.peerState[cid] = e;
       }
       if (full) drawPeers(E.peerState); else movePeerCursors(E.peerState);

@@ -35,7 +35,7 @@ export interface SheetSummary { id: string; name?: string; file: string; x: numb
 
 export interface LayerRow { key: string; name: string; color: string; count: number }
 
-export interface Peer { cid: string; name: string; color: string }
+export interface Peer { cid: string; name: string; color: string; presenting?: boolean }
 
 /** What a comment thread is pinned to: a part or other item (by uuid) or a net (by name). */
 export interface CommentAnchor { kind: "item" | "net"; id: string; label: string; item?: string | null }
@@ -237,7 +237,7 @@ export interface AppState {
     version: number;
   };
   selection: { ids: string[]; primary: ItemSummary | null; field: { id: string; name: string } | null; version: number };
-  peers: { list: Peer[]; follow: string | null };
+  peers: { list: Peer[]; follow: string | null; followCursor?: boolean; presenting?: boolean };
   comments: Comment[];
   /** the comments on the project's other documents, and the thread whose card is open on the canvas */
   otherComments?: DocComments[];
@@ -287,7 +287,8 @@ export type AppAction =
   /** the aux toolbar's zoom choice: "auto" fits the screen, a number is a KiCad zoom factor (zoom_defines.h) */
   | { type: "setZoom"; zoom: number | "auto" }
   | { type: "setFilter"; key: string; on: boolean }
-  | { type: "follow"; cid: string | null }
+  | { type: "follow"; cid: string | null; cursor?: boolean }
+  | { type: "present" }
   | { type: "openThread"; id: number; docId?: string }
   /** start a comment thread on an item of the open document, or at a place (mm) */
   | { type: "commentOn"; itemId?: string; at?: [number, number]; body?: string }

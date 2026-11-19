@@ -18,6 +18,7 @@ export interface PresenceState {
   /** each selected item's anchor, paired with `selection` */
   at?: (number[] | null)[];
   sheetFile?: string;
+  presenting?: boolean;
   /** a schematic drag's stretched wires: uuid, x1, y1, x2, y2, width, layer */
   dragLines?: [string, number, number, number, number, number?, string?][];
   dragAdded?: string[];

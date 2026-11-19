@@ -10,7 +10,7 @@ import { navigate } from "./home";
 import { chooseTrackWidth, chooseViaSize, chooseViaStack } from "./pcbrouting";
 import { setCrosshair, setTheme, setUnitsAction, showPane, syncSchModes, toggleTheme } from "./panes";
 import { contextMenuAction, openArcEditModeMenu, openGridButtonMenu, openZoneButtonMenu, openRouterModeMenu } from "./contextmenu";
-import { cycleFollow, followAction } from "./peers";
+import { cycleFollow, followAction, togglePresenting } from "./peers";
 import { setFilter } from "./selection";
 import { E } from "./state";
 import { addVariant, copyVariant, editVariantDescription, onVariantSelected, removeVariant, renameVariant } from "./variant-ops";
@@ -199,7 +199,8 @@ export function dispatchAction(a: AppAction) {
       case "setZoom": if (a.zoom === "auto") fitView(); else { const cur = kicadZoom(); if (cur > 0 && Number(a.zoom) > 0) zoomBy(Number(a.zoom) / cur); } return;
       case "setVariant": onVariantSelected(a.name); return;
       case "setFilter": setFilter(a.key, a.on); return;
-      case "follow": followAction(a.cid); return;
+      case "follow": followAction(a.cid, a.cursor); return;
+      case "present": togglePresenting(); return;
       case "openThread": if (a.docId) openThreadOnDoc(a.docId, a.id); else openThreadAction(a.id); return;
       case "commentOn": commentOnAction(a); return;
       case "chat": chatAction(a); return;
