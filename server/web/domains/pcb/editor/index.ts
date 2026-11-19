@@ -714,7 +714,7 @@ function hoverSelect(ev: KeyboardEvent): void {
   const combo = comboOf(ev); if (!HOVER_KEYS.has(combo)) return;
   const S = schToolState();
   if (E.selected || E.selection.size || E.selField || E.selPins.length || (S && (S.sel || S.wire || S.carry || S.drag || S.draw))) return;
-  const hit = hitAny(E.lastCursorMm); if (!hit) return;
+  const hit = hitAny(E.lastCursorMm, combo === "G" || combo === "M"); if (!hit) return;
   if (HOVER_SYMBOL_ONLY.has(combo) && hit.kind !== "symbol") return;
   if (hit.fp || !CollabTools.sch) toolCtx().setSelection([hit.id]);
   else { CollabTools.sch.select(hit.id); requestRender(); }                    // wires, labels and the rest live in the module's own selection

@@ -13,7 +13,20 @@ import { switchTool } from "./junction";
 export const SHEET_EXT = ".kicad_sch";
 export const baseName = (p: SAtom | undefined) => str(p).split("/").pop()!;   // split always yields one part
 export const dirName = (p: SAtom | undefined) => { const s = str(p).split("/"); s.pop(); return s.join("/"); };
-export const joinPath = (dir: string, file: string) => dir ? dir + "/" + file : file;
+export function joinPath(dir: string, file: string): string {
+  const parts: string[] = [];
+  for (const p of (dir + "/" + file).split("/")) {
+    if (p === "..") parts.pop();
+    else if (p && p !== ".") parts.push(p);
+  }
+  return parts.join("/");
+}
+function existingSheet(ctx: SchCtx, target: string, file: string) {
+  const docs = schDocs(ctx), exact = docs.find(d => d.path === target) || docs.find(d => d.path === file);
+  if (exact || file.includes("/")) return exact;
+  const matches = docs.filter(d => baseName(d.path) === file);
+  return matches.length === 1 ? matches[0] : undefined;
+}
 // Relative path from directory `dir` to `path` (both project-relative, "/" separated) — what Sheetfile holds.
 export function relPath(dir: string, path: string) {
   const a = dir ? dir.split("/") : [], b = path.split("/"); let i = 0;
@@ -36,7 +49,7 @@ export function emptySheetDoc() { return `(kicad_sch (version 20250114) (generat
 export async function ensureSheetDoc(ctx: SchCtx, file: string) {
   file = normSheetFile(file); if (!file) throw new Error("no sheet file name");
   const cur = currentDoc(ctx), dir = cur ? dirName(cur.path) : "", target = joinPath(dir, file);
-  const found = schDocs(ctx).find((d) => d.path === target || d.path === file) || schDocs(ctx).find((d) => baseName(d.path) === baseName(file));
+  const found = existingSheet(ctx, target, file);
   if (found) return { file: relPath(dir, found.path), docId: found.docId, created: false };
   if (typeof ctx.api !== "function" || !ctx.project || !ctx.project.projectId) throw new Error("this session cannot create sheet files");
   // the server's reply: the new (or existing) document's id and path
@@ -102,7 +115,7 @@ export function placeSheetNode(ctx: SchCtx, node: SNode, file: string) {
     try {
       file = normSheetFile(file);
       const cur = currentDoc(ctx), dir = cur ? dirName(cur.path) : "", target = joinPath(dir, file);
-      const exists = schDocs(ctx).find((x) => x.path === target || x.path === file);
+      const exists = existingSheet(ctx, target, file);
       if (exists && root.KDialogs && root.KDialogs.confirm && !(await root.KDialogs.confirm("Confirmation", `'${baseName(file)}' already exists.\n\nLink '${target}' to this file?`))) return null;
       const ref = await ensureSheetDoc(ctx, file);
       if (S.sheetJob !== job || ctx.doc !== doc) return null;

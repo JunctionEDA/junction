@@ -11,7 +11,7 @@ use std::sync::Arc;
 
 use crate::persist::{self, Document};
 use crate::presence_lane::PresenceLane;
-use crate::relay::Relay;
+use crate::AppState;
 
 /// The actor's tick: held fast-lane updates go out on it (presence_lane.rs), and so do
 /// leaves and the batch for other replicas.
@@ -156,13 +156,15 @@ struct ClientState {
     can_snapshot: bool,
 }
 
-pub fn spawn(pool: PgPool, doc: Document, relay: Arc<Relay>, lane: Arc<PresenceLane>) -> mpsc::Sender<DocMsg> {
+pub fn spawn(state: AppState, doc: Document, lane: Arc<PresenceLane>) -> mpsc::Sender<DocMsg> {
     let (tx, rx) = mpsc::channel(1024);
-    tokio::spawn(run(pool, doc, relay, lane, rx));
+    tokio::spawn(run(state, doc, lane, rx));
     tx
 }
 
-async fn run(pool: PgPool, doc: Document, relay: Arc<Relay>, lane: Arc<PresenceLane>, mut rx: mpsc::Receiver<DocMsg>) {
+async fn run(state: AppState, doc: Document, lane: Arc<PresenceLane>, mut rx: mpsc::Receiver<DocMsg>) {
+    let pool = state.pool.clone();
+    let relay = state.relay.clone();
     let doc_id = doc.id;
     let mut head_seq = match persist::head_seq(&pool, doc_id).await {
         Ok(s) => s,
@@ -300,6 +302,13 @@ async fn run(pool: PgPool, doc: Document, relay: Arc<Relay>, lane: Arc<PresenceL
                                 }).to_string();
                                 broadcast_except(&mut clients, &mut presence_dirty, doc_id, &client_id, &msg);
                                 relay.publish(json!({ "t": "op", "d": doc_id, "seq": next }));
+                                if doc.doc_type == "kicad_sch" && changes.as_array().is_some_and(|cs| cs.iter().any(|c| c["typeName"] == "SCH_SHEET")) {
+                                    let state = state.clone();
+                                    let project_id = doc.project_id;
+                                    tokio::spawn(async move {
+                                        crate::http::notify_sheet_changed(&state, project_id, doc_id).await;
+                                    });
+                                }
                                 maybe_request_snapshot(&pool, &doc, head_seq, &clients, &folding,
                                                        &mut last_snapshot_request).await;
                             }

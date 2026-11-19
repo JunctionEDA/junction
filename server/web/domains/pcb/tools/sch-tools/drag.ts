@@ -79,7 +79,7 @@ export function makeAnchor(doc: KDoc, item: KItem, p: Pt, moving: Set<string>): 
   // gets the new stub wire and the lines stay put (getConnectedDragItems' ptHasUnselectedJunction).
   if (fixedJunction) a.stub = { from: a.p, kind: item.kind === "bus" || ends.some((e) => e.item.kind === "bus") ? "bus" : "wire" };
   else for (const e of ends) a.ends.push({ item: e.item, index: e.index, orig: ptsOf(e.item.node).map((q) => q.slice()) });
-  if (!a.stub && item.kind !== "no_connect") {
+  if (!a.stub) {
     const fixed = pinsAt(doc, p[0], p[1]).some((q) => !moving.has(q.item.id))
       || labelsAt(doc, a.p, item).some((l) => !moving.has(l.id))
       || sheetPinsAt(doc, a.p, item).some((s) => !moving.has(s.id))
