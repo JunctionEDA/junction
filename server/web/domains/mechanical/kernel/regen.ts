@@ -9,7 +9,7 @@
 import { stableJson } from "../../../shared/itemdoc/itemdoc";
 import type { FeatureDefinition } from "../core/feature";
 import { DEFAULT_PLANES, toWorld, type Frame, type GeomRef, type PlaneRef } from "../core/geometry";
-import { curvePoints, pointOf } from "../sketch/format";
+import { curvePolylines, pointOf } from "../sketch/format";
 import { ShapeIndex, type Kernel } from "./occ";
 import type { BodyResult, DatumView, FeatureInput, FeatureReport, RegenResult, SketchView } from "./protocol";
 import { qualityFor, tessellate, type MeshQuality } from "./tessellate";
@@ -210,11 +210,12 @@ export function sketchView(s: SketchGeometry): SketchView {
   for (const id of Object.keys(s.data.entities).sort()) {
     const e = s.data.entities[id];
     if (e.type === "point") { const p = pointOf(s.data, id); if (p) points.push({ entity: id, position: toWorld(s.frame, p) }); continue; }
-    const pts = curvePoints(s.data, e);
-    if (pts.length < 2) continue;
-    const out = new Float32Array(pts.length * 3);
-    pts.forEach((p, i) => { const w = toWorld(s.frame, p); out[i * 3] = w[0]; out[i * 3 + 1] = w[1]; out[i * 3 + 2] = w[2]; });
-    curves.push({ entity: id, construction: !!e.construction, points: out });
+    for (const pts of curvePolylines(s.data, e)) {   // text: a polyline per stroke
+      if (pts.length < 2) continue;
+      const out = new Float32Array(pts.length * 3);
+      pts.forEach((p, i) => { const w = toWorld(s.frame, p); out[i * 3] = w[0]; out[i * 3 + 1] = w[1]; out[i * 3 + 2] = w[2]; });
+      curves.push({ entity: id, construction: !!e.construction, points: out });
+    }
   }
   const flat = (poly: readonly [number, number][]) => { const a = new Float32Array(poly.length * 2); poly.forEach((p, i) => { a[i * 2] = p[0]; a[i * 2 + 1] = p[1]; }); return a; };
   const regions = s.regions.map((r) => ({ id: r.id, outer: flat(r.region.outer.polygon), holes: r.region.holes.map((h) => flat(h.polygon)) }));

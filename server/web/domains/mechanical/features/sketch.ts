@@ -7,6 +7,8 @@
 import type { TopoDS_Edge } from "replicad-opencascadejs";
 import { defineFeature } from "../core/feature";
 import { toWorld, type PlaneRef } from "../core/geometry";
+import { isFreeform } from "../sketch/curves";
+import { freeformEdges } from "../kernel/ops/sketch-curves";
 import { emptySketch, pointOf, type SketchData } from "../sketch/format";
 import { findRegions, type SpanEdge } from "../sketch/planar";
 import type { Loop } from "../sketch/profiles";
@@ -66,9 +68,11 @@ export default defineFeature<SketchParams>({
     const wireFor = (loop: Loop, edges: { entity: string; edge: TopoDS_Edge }[] | null): any => {
       const mw = ctx.tmp(new oc.BRepBuilderAPI_MakeWire());
       for (const le of loop.edges) {
-        mw.Add(edgeFor(le));
-        if (!mw.IsDone()) throw ctx.fail("A sketch loop could not be closed.");
-        if (edges) edges.push({ entity: le.entity, edge: ctx.own(mw.Edge()) });   // the edge as the wire holds it: what the kernel's history speaks of
+        for (const edge of isFreeform(data.entities[le.entity]) ? freeformEdges(ctx, frame, data, le.entity, le) : [edgeFor(le)]) {
+          mw.Add(edge);
+          if (!mw.IsDone()) throw ctx.fail("A sketch loop could not be closed.");
+          if (edges) edges.push({ entity: le.entity, edge: ctx.own(mw.Edge()) });   // the edge as the wire holds it: what the kernel's history speaks of
+        }
       }
       return ctx.own(mw.Wire());
     };

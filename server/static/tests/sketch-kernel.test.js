@@ -124,3 +124,31 @@ test("sketch-project: the model's edges and corners on a sketch plane", async ()
   assert.equal(a.curves.length, 0);
   assert.match(a.skipped[0].why, /ellipse/); assert.match(a.skipped[1].why, /no longer exists/);
 });
+
+test("free-form curves extrude and revolve: an ellipse, a closed spline, a conic over a line, text", async () => {
+  const k = await boot(), engine = new K.RegenEngine(k, K.FEATURES);
+  const revolve = (id, sk, o = {}) => ({ id, type: "revolve", name: id, suppressed: false, params: { profile: { sketch: sk, regions: null }, operation: "new", axisType: "y", axisEdge: null, endType: "full", angle: 360, flip: false, targets: [], ...o } });
+  const r = await engine.regenerate([
+    sketch("s1", { c: pt(0, 0), m: pt(20, 0), e: { type: "ellipse", center: "c", major: "m", minor: 8 } }),
+    extrude("e1", "s1"),
+    // a partial ellipse closed by its chord, cut by a line across it
+    sketch("s2", { c: pt(100, 0), m: pt(120, 0), s: pt(120, 0), n: pt(80, 0), e: { type: "ellipticalArc", center: "c", major: "m", minor: 10, start: "s", end: "n" }, l: { type: "line", a: "n", b: "s" }, x0: pt(100, -5), x1: pt(100, 20), x: { type: "line", a: "x0", b: "x1" } }),
+    extrude("e2", "s2"),
+    sketch("s3", { a: pt(0, 50), b: pt(30, 50), x: pt(15, 70), l: { type: "line", a: "a", b: "b" }, q: { type: "conic", start: "b", apex: "x", end: "a", rho: 0.5 } }),
+    extrude("e3", "s3"),
+    sketch("s4", { a: pt(0, 100), b: pt(0, 110), t: { type: "text", a: "a", b: "b", text: "Hi8" } }),
+    extrude("e4", "s4", { depth: 2 }),
+    sketch("s5", { a: pt(30, 0), b: pt(40, -5), c: pt(45, 5), d: pt(35, 10), k: { type: "spline", points: ["a", "b", "c", "d"], closed: true } }, { kind: "plane", plane: "front" }),
+    revolve("v5", "s5"),
+  ], 10);
+  assert.deepEqual(r.features.map((f) => f.status), Array(10).fill("ok"), r.features.map((f) => f.message).join());
+  // (exact: the sketch builds one edge per knot span, which OpenCascade's integration needs)
+  const vol = (id) => engine.state.bodies.filter((b) => b.id === id || b.id.startsWith(id + ":") || b.id.startsWith(id + "~")).reduce((s, b) => s + k.volume(b.shape), 0);
+  near(vol("e1"), Math.PI * 20 * 8 * 10, 1e-6);
+  near(vol("e2"), Math.PI * 20 * 10 / 2 * 10, 1e-6);
+  assert.equal(engine.state.bodies.filter((b) => b.id.startsWith("e2")).length, 2, "the line across the half ellipse splits it");
+  near(vol("e3"), (2 / 3) * 30 * 10 * 10, 1e-6);
+  assert.ok(engine.state.bodies.filter((b) => b.id.startsWith("e4")).length >= 3, "a solid per letter");
+  assert.ok(vol("e4") > 2 * 10 * 2, `text has some volume: ${vol("e4")}`);
+  assert.ok(vol("v5") > 1000, `the revolved spline: ${vol("v5")}`);
+});
