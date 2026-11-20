@@ -366,11 +366,13 @@ export function defineKSelect(): void {
   }
   customElements.define(KSELECT_TAG, KSelect);
   // <label for=id> focuses (and does not otherwise act on) the control it names, as it does a native <select>: a
-  // custom element is not labelable, so the browser would do nothing
+  // custom element is not labelable, so the browser would do nothing.  So does a <label> wrapped around one (and no
+  // native control), as `<label>Material <k-select></label>` reads
   document.addEventListener("click", (ev) => {
-    const l = ev.target instanceof Element ? (ev.target.closest("label") as HTMLLabelElement | null) : null; if (!l || !l.htmlFor) return;
-    const t = (l.getRootNode() as Document | ShadowRoot).getElementById?.(l.htmlFor) || document.getElementById(l.htmlFor);
-    if (t && t.tagName === "K-SELECT" && !(t as HTMLSelectElement).disabled) { ev.preventDefault(); (t as HTMLElement).focus(); }
+    const l = ev.target instanceof Element ? (ev.target.closest("label") as HTMLLabelElement | null) : null; if (!l) return;
+    const t = l.htmlFor ? (l.getRootNode() as Document | ShadowRoot).getElementById?.(l.htmlFor) || document.getElementById(l.htmlFor)
+      : !l.control ? l.querySelector(KSELECT_TAG) : null;
+    if (t && t.tagName === "K-SELECT" && !t.contains(ev.target as Node) && !(t as HTMLSelectElement).disabled) { ev.preventDefault(); (t as HTMLElement).focus(); }
   });
 }
 
