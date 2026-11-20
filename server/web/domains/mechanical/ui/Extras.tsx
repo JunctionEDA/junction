@@ -2,11 +2,13 @@
 // (Overlays.tsx): each is a window of its own, shown while its key of `getState().ui` is set.
 import type { PartStudio } from "./studio";
 import { KeymapDialog } from "./KeymapDialog";
+import { MarkingMenu } from "./MarkingMenu";
 
 export function Extras({ studio }: { studio: PartStudio }) {
   return (
     <>
       <KeymapDialog studio={studio} />
+      <MarkingMenu studio={studio} />
     </>
   );
 }

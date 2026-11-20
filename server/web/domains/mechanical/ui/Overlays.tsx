@@ -19,6 +19,8 @@ import { featureDef, type PartStudio } from "./studio";
 import { shortcutOf, useKeyBindings } from "./keymap-store";
 import { SEARCH } from "./Toolbar";
 import { VIEW_KEYS } from "./viewkeys";
+import { markingPlace } from "./marking";
+import { getPrefs, setPrefs, usePref } from "./prefs";
 
 const BARE = "appearance-none bg-transparent border-0 m-0 text-inherit [font-family:inherit] [font-size:inherit]";
 
@@ -75,6 +77,7 @@ interface MenuAt { x: number; y: number; pick: Pick | null }
 export function ContextMenu({ studio }: { studio: PartStudio }) {
   const at = useStudio(studio, (s) => (s.ui?.menu as MenuAt | undefined) || null);
   const close = () => studio.setUi({ menu: null });
+  const marking = usePref("markingMenu");
   useEffect(() => {
     if (!at) return;
     const key = (ev: KeyboardEvent) => { if (ev.key === "Escape") { ev.stopPropagation(); close(); } };
@@ -119,9 +122,15 @@ export function ContextMenu({ studio }: { studio: PartStudio }) {
     if (s.selection.length) add("Clear the selection", () => studio.select([]), "Esc");
     add("Search tools…", () => studio.setUi({ palette: { x: at.x, y: at.y } }), "S");
   }
+  // how the menu itself behaves: a person's preference
+  items.push(null);
+  add(marking ? "Hide the marking menu" : "Show the marking menu", () => setPrefs({ markingMenu: !marking }));
+  add(getPrefs().flick ? "Turn flick gestures off" : "Turn flick gestures on", () => { setPrefs({ flick: !getPrefs().flick }); studio.host.toast(getPrefs().flick ? "Flick: a short quick drag with the right button runs the marking menu's tool in that direction." : "Flick gestures are off.", 3500); });
   const shown = items.filter((x, i) => x || (i > 0 && items[i - 1] && i < items.length - 1));
+  // with the marking menu on, the ring is round the pointer and this list hangs under it (ui/marking.ts)
+  const ring = marking ? markingPlace(at.x, at.y, window.innerWidth, window.innerHeight, shown.length * 28 + 12) : null;
   return (
-    <div className="cad-context-menu fixed z-[55] min-w-52 py-1 rounded-md border border-line bg-panel shadow-panel text-base text-ink" role="menu" style={{ left: Math.min(at.x, window.innerWidth - 230), top: Math.min(at.y, window.innerHeight - shown.length * 28 - 12) }} onPointerDown={(ev) => ev.stopPropagation()} onContextMenu={(ev) => ev.preventDefault()}>
+    <div className="cad-context-menu fixed z-[55] min-w-52 py-1 rounded-md border border-line bg-panel shadow-panel text-base text-ink" role="menu" style={ring ? { left: ring.listLeft, top: ring.listTop } : { left: Math.min(at.x, window.innerWidth - 230), top: Math.min(at.y, window.innerHeight - shown.length * 28 - 12) }} onPointerDown={(ev) => ev.stopPropagation()} onContextMenu={(ev) => ev.preventDefault()}>
       {shown.map((x, i) => x ? (
         <button key={x.label} type="button" role="menuitem" aria-disabled={x.why ? true : undefined} data-menu-item={x.label} className={cx(BARE, "flex w-full items-center px-3 h-7 text-left cursor-pointer hover:bg-sel-soft", x.why && "opacity-45")} title={x.why || undefined}
           onClick={() => { if (x.why) return; close(); x.run(); studio.viewport.canvas.focus(); }}>

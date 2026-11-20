@@ -3,13 +3,26 @@
 //   sketchNormal      opening a sketch turns the view to face its plane (and finishing turns it back)
 //   showConstraints   the constraint glyphs of the open sketch are drawn
 //   toolVariant       the variant each drop-down of the toolbar used last (Rectangle ▾ → Centre rectangle)
+//   markingMenu, flick, timeline, featureList, dualUnit, showFreedom      see the Prefs interface
 //
 // Also here: what a person has hidden or shown in one document (planes, sketches, reference geometry), which is a
 // way of looking and so is theirs alone, like the docks' folds (ui/panels.ts).
 import { useSyncExternalStore } from "react";
 
-export interface Prefs { sketchNormal: boolean; showConstraints: boolean; toolVariant: { [menu: string]: string } }
-const DEFAULTS: Prefs = { sketchNormal: true, showConstraints: true, toolVariant: {} };
+export interface Prefs {
+  sketchNormal: boolean; showConstraints: boolean; toolVariant: { [menu: string]: string };
+  /** a right click opens the ring of eight tools round the pointer, above the menu (ui/MarkingMenu.tsx) */
+  markingMenu: boolean;
+  /** a short quick drag with the right button runs the ring's tool in that direction */
+  flick: boolean;
+  /** the features as a strip along the bottom (ui/Timeline.tsx), and whether the list beside the model is shown with it */
+  timeline: boolean; featureList: boolean;
+  /** a second unit in brackets after every length the part studio writes ("25.4 mm [1 in]"); "" for none */
+  dualUnit: string;
+  /** the open sketch colours what can still move, and says which way (sketch/freedom.ts) */
+  showFreedom: boolean;
+}
+const DEFAULTS: Prefs = { sketchNormal: true, showConstraints: true, toolVariant: {}, markingMenu: true, flick: false, timeline: false, featureList: true, dualUnit: "", showFreedom: false };
 const KEY = "junction.cad.prefs";
 
 function read(): Prefs {
