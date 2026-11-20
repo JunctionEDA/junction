@@ -327,6 +327,8 @@ export class SketchEditor {
   // ---------------------------------------------------------------- the pointer
   /** The pointer in sketch coordinates. */
   planePoint(ev: { clientX: number; clientY: number }): Vec2 | null { const f = this.frame; return f ? this.studio.view.planePoint(ev, f) : null; }
+  /** A sketch point in canvas pixels (as last drawn). */
+  screenOf(p: Vec2): { x: number; y: number } { return this.painter ? this.painter.screen(p) : { x: 0, y: 0 }; }
   /** The pointer in canvas pixels. */
   canvasPoint(ev: { clientX: number; clientY: number }): { x: number; y: number } { const r = this.studio.viewport.canvas.getBoundingClientRect(); return { x: ev.clientX - r.left, y: ev.clientY - r.top }; }
 
@@ -484,6 +486,9 @@ export class SketchEditor {
 
 function tryValue(text: string, angle: boolean): boolean { try { evaluate(text, angle ? "angle" : "length", typedFactor(angle)); return true; } catch { return false; } }
 
+/** What a double click on an entity of a type opens (sketch text's own editor, sketch/insert.ts). */
+export const ENTITY_EDITORS: { [type: string]: (ed: SketchEditor, id: string) => void } = {};
+
 // ---------------------------------------------------------------- the tool when no tool is in hand
 /**
  * Select: click picks (Shift or Ctrl adds), a drag on empty space boxes, a drag on geometry moves it as far as
@@ -549,6 +554,8 @@ function selectTool(ed: SketchEditor): ToolHandlers {
       if (!t) { if (!d.many) ed.select([]); return; }
       const now = performance.now();
       if (t.kind === "dimension" && lastClick.id === t.id && now - lastClick.t < 450) { lastClick = { id: "", t: 0 }; ed.select([t.id]); ed.editDimension(t.id); return; }
+      const opener = t.kind === "curve" ? ENTITY_EDITORS[ed.getState().data.entities[t.id]?.type || ""] : undefined;
+      if (opener && lastClick.id === t.id && now - lastClick.t < 450) { lastClick = { id: "", t: 0 }; ed.select([t.id]); opener(ed, t.id); return; }
       lastClick = { id: t.id, t: now };
       const sel = ed.getState().selection;
       if (d.many) ed.toggle(t.id);

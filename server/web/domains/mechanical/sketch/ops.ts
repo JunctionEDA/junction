@@ -133,6 +133,38 @@ export function trim(d: Draft, id: string, click: Vec2): string | null {
   return null;
 }
 
+// ---------------------------------------------------------------- split
+/**
+ * Split a line or an arc in two where `click` is nearest it: the two halves share a new point there, a line's
+ * halves stay in line and an arc's on one circle (they share its centre).
+ */
+export function split(d: Draft, id: string, click: Vec2): string | null {
+  const k = resolveEntity(d.data, id);
+  if (!k || (k.kind !== "line" && k.kind !== "arc")) return "Click a line or an arc to split it.";
+  const [lo, hi] = extent(k), t = paramOf(k, click);
+  const eps = (hi - lo) * 1e-6;
+  if (!(t > lo + eps && t < hi - eps)) return "Click inside the curve, away from its ends.";
+  const e = d.data.entities[id] as unknown as { [key: string]: string } & SketchEntity;
+  const at = d.point(pointOn(k, t));
+  let other: string;
+  if (k.kind === "line") {
+    const end = e.b as string;
+    d.set(id, { ...e, b: at } as SketchEntity);
+    other = d.line(at, end, !!e.construction);
+    d.constrain("collinear", [id, other]);
+  } else {
+    const end = e.end as string;
+    d.set(id, { ...e, end: at } as SketchEntity);
+    other = d.arc(k.e.center, at, end, !!e.construction);
+  }
+  // what held the far end of the curve now holds the far end of its second half
+  for (const [cid, c] of Object.entries(d.data.constraints)) {
+    if (!(c.refs || []).some((r) => r.entity === id && r.at === "end")) continue;
+    d.data.constraints[cid] = { ...c, refs: c.refs.map((r) => (r.entity === id && r.at === "end" ? { ...r, entity: other } : r)) };
+  }
+  return null;
+}
+
 // ---------------------------------------------------------------- extend
 /** Lengthen the end of a line or arc nearest `click` to the next curve it would meet. */
 export function extend(d: Draft, id: string, click: Vec2): string | null {
