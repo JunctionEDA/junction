@@ -15,6 +15,12 @@ export interface Searchable {
 
 /** The other words people look for a feature or a tool by (the tool search), by its id. */
 export const KEYWORDS: { [id: string]: string } = {
+  parameters: "change parameters table dimensions values variables expressions equations",
+  "press-pull": "push pull offset face drag extrude fillet smart",
+  "keyboard-shortcuts": "hotkeys keybindings rebind customise customize shortcuts keymap",
+  timeline: "history strip bottom rollback marker",
+  "save-copy": "backup download local file offline export jpart",
+  "project-backup": "download zip archive export everything offline",
   "f:sketch": "draw profile 2d",
   "f:extrude": "pull pad boss protrude extend solid",
   "f:revolve": "turn lathe spin rotate",

@@ -3,12 +3,14 @@
 import type { PartStudio } from "./studio";
 import { KeymapDialog } from "./KeymapDialog";
 import { MarkingMenu } from "./MarkingMenu";
+import { ParametersTable } from "./ParametersTable";
 
 export function Extras({ studio }: { studio: PartStudio }) {
   return (
     <>
       <KeymapDialog studio={studio} />
       <MarkingMenu studio={studio} />
+      <ParametersTable studio={studio} />
     </>
   );
 }

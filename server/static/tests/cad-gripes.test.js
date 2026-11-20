@@ -168,6 +168,70 @@ test("timeline: cells in build order, folders as brackets or one cell, the marke
   assert.deepEqual(TL.timelineOf(FO.featureTree([], new Map())), { cells: [], spans: [] });
 });
 
+// ---------------------------------------------------------------- the parameters table
+const PM = load("domains/mechanical/document/parameters.ts");
+test("parameters: one table of variables, feature values and sketch dimensions, changed where they live", () => {
+  const ID2 = load("shared/itemdoc/itemdoc.ts");
+  const schema = [{ key: "depth", label: "Depth", kind: "number", unit: "mm", min: 0.001 }, { key: "angle", label: "Draft", kind: "number", unit: "deg", visible: (p) => !!p.draft }, { key: "flip", label: "Flip", kind: "boolean" }];
+  const schemaOf = (t) => (t === "extrude" ? schema : []);
+  const sketch = { version: 1, entities: { p1: { type: "point", x: 0, y: 0 }, p2: { type: "point", x: 40, y: 0 }, l1: { type: "line", a: "p1", b: "p2" } }, constraints: { d1: { type: "distance", refs: [], value: 40 }, d2: { type: "distance", refs: [], value: 7, driving: false }, k1: { type: "horizontal", refs: [] }, a1: { type: "angle", refs: [], value: 30, expr: "15 * 2" } } };
+  const doc = ID2.newItemDoc("part-studio", [
+    { id: "studio", type: "studio", units: "mm", rollback: null },
+    { id: "v1", type: "variable", name: "wall", expr: "2 mm", order: "A" }, { id: "v2", type: "variable", name: "n", expr: "wall * 2", order: "B" },
+    { id: "s1", type: "feature", featureType: "sketch", name: "Sketch 1", order: "A", params: { sketch } },
+    { id: "e1", type: "feature", featureType: "extrude", name: "Extrude 1", order: "B", params: { depth: 4, angle: 3, $expr: { depth: "wall * 2" } } },
+  ]);
+  const mm = { length: "mm", angle: "deg", places: 3 }, inch = { length: "in", angle: "deg", places: 3 };
+  let rows = PM.parameterRows(doc, schemaOf, mm);
+  assert.deepEqual(rows.map((r) => r.key), ["v:v1", "v:v2", "d:s1:a1", "d:s1:d1", "f:e1:depth"], "a reference dimension, a hidden field and a checkbox are not parameters");
+  assert.deepEqual(rows.map((r) => [r.text, r.value, r.unit]), [["2 mm", 2, "mm"], ["wall * 2", 4, "mm"], ["15 * 2", 30, "°"], ["40", 40, "mm"], ["wall * 2", 4, "mm"]]);
+  assert.equal(PM.parameterRows(doc, schemaOf, inch).find((r) => r.key === "d:s1:d1").text, "1.574803", "a plain number is shown in the document's unit");
+  assert.equal(PM.parameterRows(null, schemaOf).length, 0);
+  const apply = (r) => { assert.ok(r.ok, r.error); ID2.applyChanges(doc, r.changes); };
+  // a feature's value: a number, an expression, a unit typed with it
+  apply(PM.editParameter(doc, "f:e1:depth", "12", schemaOf, mm));
+  assert.deepEqual([doc.items.get("e1").params.depth, doc.items.get("e1").params.$expr], [12, undefined], "a plain number leaves no expression behind");
+  apply(PM.editParameter(doc, "f:e1:depth", "wall + 1 in", schemaOf, mm));
+  assert.deepEqual([doc.items.get("e1").params.depth, doc.items.get("e1").params.$expr], [27.4, { depth: "wall + 1 in" }]);
+  apply(PM.editParameter(doc, "f:e1:depth", "n / 2", schemaOf, inch));
+  assert.deepEqual([doc.items.get("e1").params.depth, doc.items.get("e1").params.$unit], [2, { depth: "in" }], "an expression records the unit its bare numbers were typed in");
+  assert.match(PM.editParameter(doc, "f:e1:depth", "0", schemaOf, mm).error, /at least/);
+  assert.match(PM.editParameter(doc, "f:e1:depth", "wall +", schemaOf, mm).error, /number/);
+  assert.ok(PM.editParameter(doc, "f:gone:depth", "1", schemaOf, mm).error);
+  assert.ok(PM.editParameter(doc, "f:e1:flip", "1", schemaOf, mm).error);
+  assert.ok(PM.editParameter(doc, "f:e1:depth", "  ", schemaOf, mm).error);
+  // a variable: what uses it follows; one that would need itself is refused
+  apply(PM.editParameter(doc, "v:v1", "5 mm", schemaOf, mm));
+  assert.equal(doc.items.get("v1").expr, "5 mm");
+  assert.equal(doc.items.get("e1").params.depth, 5, "n / 2 with n = wall * 2");
+  assert.ok(PM.editParameter(doc, "v:v1", "n + 1", schemaOf, mm).error, "a ring of variables");
+  assert.ok(PM.editParameter(doc, "v:nope", "1", schemaOf, mm).error);
+  // a sketch dimension: handed back to be solved, never stored unsolved
+  const d = PM.editParameter(doc, "d:s1:d1", "wall * 10", schemaOf, mm);
+  assert.ok(d.ok && d.solve && !d.changes);
+  assert.deepEqual([d.solve.data.constraints.d1.value, d.solve.data.constraints.d1.expr], [50, "wall * 10"]);
+  assert.equal(doc.items.get("s1").params.sketch.constraints.d1.value, 40, "the document is untouched until the sketch is solved");
+  assert.equal(PM.editParameter(doc, "d:s1:d1", "55", schemaOf, mm).solve.data.constraints.d1.expr, undefined);
+  assert.match(PM.editParameter(doc, "d:s1:d1", "-3", schemaOf, mm).error, /more than zero/);
+  ID2.applyChanges(doc, PM.storeSolvedSketch(doc, "s1", d.solve.data));
+  assert.equal(doc.items.get("s1").params.sketch.constraints.d1.value, 50);
+  // comments and stars: one item, one path each
+  let c = PM.setParamNote(doc, "d:s1:d1", { comment: " Overall width ", favourite: true });
+  assert.equal(c[0].kind, "ADDED"); ID2.applyChanges(doc, c);
+  c = PM.setParamNote(doc, "f:e1:depth", { comment: "Wall" });
+  assert.deepEqual(c[0].props, [{ path: ["comments", "f:e1:depth"], value: "Wall" }]); ID2.applyChanges(doc, c);
+  assert.deepEqual(PM.setParamNote(doc, "f:e1:depth", { comment: "Wall" }), [], "nothing changed, nothing sent");
+  rows = PM.parameterRows(doc, schemaOf, mm);
+  assert.deepEqual(rows.filter((r) => r.favourite).map((r) => r.key), ["d:s1:d1"]);
+  assert.equal(rows.find((r) => r.key === "d:s1:d1").comment, "Overall width");
+  assert.deepEqual(PM.filterRows(rows, "overall").map((r) => r.key), ["d:s1:d1"]);
+  assert.deepEqual(PM.filterRows(rows, "extrude depth").map((r) => r.key), ["f:e1:depth"]);
+  assert.deepEqual(PM.filterRows(rows, "", true).map((r) => r.key), ["d:s1:d1"]);
+  ID2.applyChanges(doc, PM.setParamNote(doc, "d:s1:d1", { comment: "", favourite: false }));
+  assert.deepEqual([doc.items.get(PM.NOTES_ID).comments, doc.items.get(PM.NOTES_ID).favourites], [{ "f:e1:depth": "Wall" }, {}]);
+  assert.deepEqual(PM.setParamNote(ID2.newItemDoc("part-studio", []), "x", { comment: "" }), [], "no item is made to hold nothing");
+});
+
 // ---------------------------------------------------------------- the history of edits
 const UL = load("domains/mechanical/ui/undo-labels.ts");
 const ID = load("shared/itemdoc/itemdoc.ts");

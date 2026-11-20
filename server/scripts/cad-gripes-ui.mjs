@@ -8,6 +8,9 @@
 //               tool; it can be hidden; a flick runs a tool without the menu
 //   timeline    the features as a strip along the bottom: select, edit, the marker dragged and stepped is the
 //               rollback bar, a folder folds into one cell, List / Both / Timeline
+//   parameters  one table of every variable, feature value and sketch dimension: an expression typed into a
+//               feature's value, a sketch dimension changed (the sketch is solved), a variable changed, a
+//               comment, a star, the search, what cannot be is refused
 //   history     the History of edits panel: every step in words, a click goes back to it and forward again
 //   progress    a rebuild says which feature it is on, of how many
 //   offline     the connection drops: a banner, edits go on and the model follows, they are kept in the browser
@@ -259,6 +262,52 @@ try {
     check('"Timeline" puts the feature list away', (await count('[data-panel=features].hidden')) === 1 && (await attr('[data-timeline]', 'data-view')) === 'timeline');
     await alice.click('[data-history-view=list]');
     check('"List" puts the timeline away and the list back', (await count('[data-timeline]')) === 0 && (await count('[data-panel=features].hidden')) === 0);
+  }
+
+  // ================================================================ the parameters table
+  if (part('parameters')) {
+    const stepsBefore = await S(alice, () => window.JunctionPartStudio.session.history().done.length);
+    await S(alice, () => window.JunctionPartStudio.setUi({ parameters: true }));
+    await alice.waitForSelector('.cad-parameters');
+    const prow = (key) => `.cad-parameters [data-param-row="${key}"]`;
+    const kE2 = `f:${ids.e2}:depth`, kD1 = `d:${ids.s1}:d1`, kV = `v:${ids.v}`;
+    const type = async (sel, text) => { await alice.fill(sel, text); await alice.keyboard.press('Enter'); await alice.waitForTimeout(250); };
+    const item = (id) => S(alice, (id) => { const i = window.JunctionPartStudio.doc.items.get(id); return i ? JSON.parse(JSON.stringify(i)) : null; }, id);
+    check('the table has the variables, the features\' values and the sketch dimensions', (await count(prow(kV))) === 1 && (await count(prow(kE2))) === 1 && (await count(prow(kD1))) === 1 && (await attr(prow(kD1), 'data-param-value')) === '40' && (await attr(prow(kE2), 'data-param-text')) === '10', await attr('.cad-parameters [data-param-counts]', 'data-param-counts'));
+    await type(`${prow(kE2)} [data-param-expr]`, 'depth * 3'); await calm();
+    let e2 = await item(ids.e2);
+    check('an expression typed into a feature\'s value is the feature\'s, as its dialog would store it', e2.params.depth === 24 && e2.params.$expr.depth === 'depth * 3' && /24/.test(await alice.textContent(`${prow(kE2)} [data-param-shown]`)), JSON.stringify(e2.params));
+    await type(`${prow(kV)} [data-param-expr]`, '10 mm'); await calm();
+    e2 = await item(ids.e2);
+    check('a variable changed in the table carries into what uses it', e2.params.depth === 30 && (await attr(prow(kE2), 'data-param-value')) === '30');
+    await type(`${prow(kD1)} [data-param-expr]`, '50'); await calm();
+    let s1 = await item(ids.s1);
+    const len = (s) => Math.abs(s.params.sketch.entities.p2.x - s.params.sketch.entities.p1.x);
+    check('a sketch dimension changed in the table solves the sketch', s1.params.sketch.constraints.d1.value === 50 && Math.abs(len(s1) - 50) < 1e-6, `${s1.params.sketch.constraints.d1.value} ${len(s1)}`);
+    await type(`${prow(kD1)} [data-param-expr]`, 'depth * 4 + 2'); await calm();
+    s1 = await item(ids.s1);
+    check('… and takes an expression', s1.params.sketch.constraints.d1.expr === 'depth * 4 + 2' && Math.abs(len(s1) - 42) < 1e-6);
+    await type(`${prow(kE2)} [data-param-expr]`, 'nonsense +');
+    check('what does not come to a number is refused and says so', (await count(`${prow(kE2)} [data-param-error]`)) === 1 && (await item(ids.e2)).params.depth === 30);
+    await type(`${prow(kE2)} [data-param-expr]`, 'depth * 3');
+    await alice.click(`${prow(kD1)} [data-param-star]`);
+    await type(`${prow(kD1)} [data-param-comment]`, 'Overall width of the block');
+    const notes = await item('parameter-notes');
+    check('a star and a comment are kept in the document', notes && notes.favourites[kD1] === true && notes.comments[kD1] === 'Overall width of the block');
+    await shot('parameters', alice);
+    await alice.click('.cad-parameters [data-param-starred]');
+    check('"Starred" leaves the starred rows', (await attr('.cad-parameters', 'data-shown')) === '1');
+    await alice.click('.cad-parameters [data-param-starred]');
+    await alice.fill('.cad-parameters [data-param-search]', 'overall');
+    check('the search reads comments too', (await attr('.cad-parameters', 'data-shown')) === '1' && (await count(prow(kD1))) === 1);
+    await alice.fill('.cad-parameters [data-param-search]', '');
+    const before = Number(await attr('.cad-parameters', 'data-rows'));
+    await alice.click('.cad-parameters [data-param-add]'); await alice.waitForTimeout(200);
+    check('a variable can be added from the table', Number(await attr('.cad-parameters', 'data-rows')) === before + 1);
+    await alice.click('.cad-parameters [data-sheet-close]');
+    await S(alice, (n) => { const s = window.JunctionPartStudio; while (s.session.history().done.length > n) s.undo(); }, stepsBefore);
+    await calm();
+    check('every change in the table was an undoable edit', (await item(ids.e2)).params.depth === 10 && (await item(ids.s1)).params.sketch.constraints.d1.value === 40 && !(await item('parameter-notes')), JSON.stringify((await item(ids.e2)).params));
   }
 
   // ================================================================ the history of edits
